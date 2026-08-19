@@ -2052,35 +2052,56 @@ static void TestVolcanicEruptionEffectCapture(void) {
    * are about the ring rather than about the emitter's track. */
   SimRenderMetadata_Reset();
   CAPTURE_ERUPTION_FLAT(0xE7A6, 0x0010, 8);
-  CHECK(frame.effects[0].trail_count == 1);
-  CHECK(frame.effects[0].trail[0].world_x == 0x0090);
-  CHECK(frame.effects[0].trail[0].world_y == 0x0010);
+  /* Nothing retained yet. Every fireball launches from the same crater, and a
+   * trail's oldest samples carry its biggest puffs, so eight throws would
+   * bury the mouth in smoke; retention is held back off the launch. The
+   * EFFECT is published from the first build all the same -- only its path
+   * waits, which is why the fireball itself still leaves the crater. */
+  CHECK(frame.effect_count == 1);
+  CHECK(frame.effects[0].trail_count == 0);
   uint32_t flight_generation = frame.effects[0].generation;
+  /* The delay is jittered per throw, so the exact build retention starts on
+   * is not a constant -- but it is bounded, and it is the same for every
+   * build of one throw. Discover it, then hold the ring to it. */
   const unsigned kSpan = kSimEffectTrailSamples * kSimEffectTrailStride;
-  for (unsigned i = 1; i < kSpan + 8u; i++) {
+  unsigned kDelay = 0;
+  for (unsigned i = 1;
+       i < kSimEffectTrailLaunchDelay + kSimEffectTrailLaunchJitter + kSpan +
+           8u;
+       i++) {
     CAPTURE_ERUPTION_FLAT(0xE7A6, (uint16_t)(0x0010 + i * 8), 8);
     CHECK(frame.effects[0].generation == flight_generation);
-    /* One shift every stride builds, capped at the capacity. */
-    unsigned shifts = i / kSimEffectTrailStride;
+    if (!kDelay) {
+      if (!frame.effects[0].trail_count) {
+        /* Never before the base delay, whatever the jitter rolled. */
+        CHECK(i < (unsigned)kSimEffectTrailLaunchDelay +
+                      kSimEffectTrailLaunchJitter);
+        continue;
+      }
+      kDelay = i;
+      CHECK(kDelay >= (unsigned)kSimEffectTrailLaunchDelay);
+      CHECK(kDelay < (unsigned)kSimEffectTrailLaunchDelay +
+                         kSimEffectTrailLaunchJitter);
+    }
+    /* One shift every stride builds once retention starts, capped at the
+     * capacity. */
+    unsigned shifts = (i - kDelay) / kSimEffectTrailStride;
     unsigned expected = 1 + shifts < kSimEffectTrailSamples
         ? 1 + shifts : kSimEffectTrailSamples;
     CHECK(frame.effects[0].trail_count == expected);
     /* Index 0 is ALWAYS this tick, whatever the stride is doing. */
     CHECK(frame.effects[0].trail[0].world_y == (uint16_t)(0x0010 + i * 8));
-    /* And index 1 is the tick the last shift captured, which is a whole
-     * stride behind the most recent shift rather than one build behind now. */
-    if (shifts)
-      CHECK(frame.effects[0].trail[1].world_y ==
-            (uint16_t)(0x0010 + (shifts * kSimEffectTrailStride - 1) * 8));
     for (unsigned n = 0; n < frame.effects[0].trail_count; n++)
       CHECK(frame.effects[0].trail[n].world_x == 0x0090);
   }
   CHECK(frame.effects[0].trail_count == kSimEffectTrailSamples);
   /* The point of the stride: the oldest sample is most of a throw behind the
-   * head, not a couple of dozen builds. */
+   * head, not a couple of dozen builds. The reach is (samples - 2) strides,
+   * not (samples - 1): index 1 holds the most recent shift, so index n is n-1
+   * shifts behind it and the last index reaches back samples-2 of them. */
   CHECK((uint16_t)(frame.effects[0].trail[0].world_y -
                    frame.effects[0].trail[kSimEffectTrailSamples - 1].world_y)
-        >= (kSpan - kSimEffectTrailStride) * 8);
+        >= (kSimEffectTrailSamples - 2) * kSimEffectTrailStride * 8);
 
   /* Landing in the same record slot changes kind, which breaks lifetime
    * continuity: the new ground fire starts its own generation and must not
@@ -2093,21 +2114,27 @@ static void TestVolcanicEruptionEffectCapture(void) {
   /* A capture repeated against the same immutable producer build is not
    * another tick and must not lengthen the path. */
   SimRenderMetadata_Reset();
-  for (unsigned i = 0; i <= kSimEffectTrailStride; i++)
-    CAPTURE_ERUPTION_FLAT(0xE7A6, (uint16_t)(0x0010 + i * 8), 8);
-  CHECK(frame.effects[0].trail_count == 2);
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, false, false, kSimFeature_All, 0, kSimFeature_All);
-  CHECK(frame.effects[0].trail_count == 2);
-  CHECK(frame.effects[0].trail[0].world_y ==
-        (uint16_t)(0x0010 + kSimEffectTrailStride * 8));
+  {
+    unsigned tick = 0;
+    while (frame.effects[0].trail_count < 2 || !tick) {
+      CAPTURE_ERUPTION_FLAT(0xE7A6, (uint16_t)(0x0010 + tick * 8), 8);
+      if (frame.effects[0].trail_count >= 2) break;
+      tick++;
+    }
+    CHECK(frame.effects[0].trail_count == 2);
+    SimRenderMetadata_CaptureFrame(
+        &frame, wram, false, false, kSimFeature_All, 0, kSimFeature_All);
+    CHECK(frame.effects[0].trail_count == 2);
+    CHECK(frame.effects[0].trail[0].world_y == (uint16_t)(0x0010 + tick * 8));
+  }
 
   /* Three simultaneous fireballs keep independent paths, as the capture's
    * three co-live records do. */
   static const uint16_t erupt_records[] = { 0x0FA4, 0x0FCA, 0x0FF0 };
   static const uint16_t erupt_x[] = { 0x00D0, 0x00A0, 0x0110 };
   SimRenderMetadata_Reset();
-  const unsigned kSharedTicks = 2 * kSimEffectTrailStride + 1;
+  const unsigned kSharedTicks = (unsigned)kSimEffectTrailLaunchDelay +
+      kSimEffectTrailLaunchJitter + 2 * kSimEffectTrailStride + 1;
   for (unsigned tick = 0; tick < kSharedTicks; tick++) {
     for (size_t i = 0; i < 3; i++) {
       SimRenderMetadata_BeginRecord(
@@ -2122,10 +2149,13 @@ static void TestVolcanicEruptionEffectCapture(void) {
   CHECK(frame.effect_count == 3);
   for (size_t i = 0; i < 3; i++) {
     CHECK(frame.effects[i].kind == kSimEffect_VolcanoFireball);
-    CHECK(frame.effects[i].trail_count == 3);
+    /* Each throw rolls its own launch delay, so the three counts need not
+     * agree -- what must hold is that each has a path of its own and that no
+     * sample of one ever carries another's column. */
+    CHECK(frame.effects[i].trail_count >= 1);
     CHECK(frame.effects[i].trail[0].world_y ==
           (uint16_t)(0x0040 + (kSharedTicks - 1) * 16));
-    for (unsigned n = 0; n < 3; n++)
+    for (unsigned n = 0; n < frame.effects[i].trail_count; n++)
       CHECK(frame.effects[i].trail[n].world_x == erupt_x[i]);
   }
   CHECK(frame.effects[0].generation != frame.effects[1].generation);
@@ -2274,14 +2304,33 @@ static void TestVolcanicEruptionEffectCapture(void) {
   CHECK(frame.objects[0].offset_x == 0);
   CHECK(frame.objects[0].offset_y == 0);
 
-  /* While kSimEruptionSuppressFireballArt stands, the throw is carried by its
-   * trail alone: the effect is published on the arc and the billboard is
-   * withheld. Everything the billboard needs is still published, so this is
-   * one flag, not a branch -- and asserting it here is what stops the flag
-   * being flipped back by accident. */
-  CHECK(kSimEruptionSuppressFireballArt);
+  /* The ROM's own fireball ROUTINE is replaced, so its billboard is always
+   * withheld -- but its ART is not thrown away: the renderer draws it at the
+   * arc head instead, turned onto the heading the effect publishes. So the
+   * object is hidden and the effect carries the tangent, and BOTH have to
+   * hold or the fountain is either doubled or headless. */
+  CHECK(kSimEruptionWithholdFireballBillboard);
   CHECK(frame.objects[0].hidden);
-  CHECK(frame.objects[0].travel_valid);
+  CHECK(frame.effects[0].travel_valid);
+  /* Pointing somewhere: a zero tangent leaves the art upright, which on a
+   * ballistic arc reads as a sprite being slid around. */
+  CHECK(frame.effects[0].travel_x || frame.effects[0].travel_y ||
+        frame.effects[0].travel_height);
+  /* And the art the renderer reaches for is found by composition, so a record
+   * whose own sprite the window dropped can borrow a sibling's identical
+   * entry from the same frame. */
+  CHECK(Sim3D_VolcanoFireballPhase(0xE7A6) ==
+        kSimEffectPhase_VolcanoFireballB);
+  CHECK(Sim3D_VolcanoFireballPhase(0xE7D0) ==
+        kSimEffectPhase_VolcanoFireballA);
+  CHECK(Sim3D_VolcanoFireballPhase(0xDD9F) == kSimEffectPhase_None);
+  /* And the two frames are not interchangeable. The ROM draws a climbing
+   * fireball pointing up and a falling one pointing down, and swaps between
+   * them on the build the descent starts -- so the art already carries half
+   * the rotation and the renderer's heading constant is per-phase. Pinned
+   * here because getting it wrong is exactly 180 degrees, which looks correct
+   * for whichever half of the arc it happens to suit. */
+  CHECK(kSimEffectPhase_VolcanoFireballA != kSimEffectPhase_VolcanoFireballB);
 
   /* A throw with more time to fill is thrown higher, because that is the only
    * way to fill it: with gravity fixed the apex sets the flight time and the
@@ -2360,13 +2409,17 @@ static void TestVolcanicEruptionEffectCapture(void) {
    * would be authentic map positions and half arc ones. */
   {
     SimRenderMetadata_Reset();
-    const int kBuilds = 3 * kSimEffectTrailStride + 1;
-    for (int n = 0; n < kBuilds; n++)
+    /* Run until the path has four samples rather than assuming which build
+     * that lands on -- the launch delay is rolled per throw. */
+    int n = 0;
+    while (frame.effects[0].trail_count < 4 && n < 512) {
       CAPTURE_ERUPTION_FLIGHT(
           kCraterX, (uint16_t)(kCraterY - n * 16), 0,
           ERUPTION_PLAN(kLandX, kLandY, kThrowFrames - n));
+      n++;
+    }
     CHECK(frame.effects[0].trail_count == 4);
-    CAPTURE_ERUPTION_FLAT(0xE7A6, (uint16_t)(kCraterY - kBuilds * 16), -8);
+    CAPTURE_ERUPTION_FLAT(0xE7A6, (uint16_t)(kCraterY - n * 16), -8);
     CHECK(frame.effects[0].trail_count == 1);
   }
 

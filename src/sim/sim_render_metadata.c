@@ -97,6 +97,24 @@ static void PushEffectTrailSample(SimEffectLifetime *lifetime,
   lifetime->trail[0] = head;
 }
 
+/* Producer builds this kind runs before it starts leaving a path behind it.
+ * Keyed on the kind rather than applied to all of them, because the reason is
+ * the eruption's: a fountain of fireballs all launched from one point buries
+ * that point in its own smoke. */
+static uint16_t EffectTrailStartDelay(SimEffectKind kind,
+                                      uint32_t generation) {
+  if (kind != kSimEffect_VolcanoFireball) return 0;
+  /* Jittered per THROW and never per frame: a delay that moved under a
+   * flight in progress would make the tail crawl forward through its own
+   * smoke. The generation is exactly one throw's identity, and hashing it
+   * keeps this a pure function of state the ROM cannot observe -- no shared
+   * RNG is touched, so the presentation still cannot perturb the game. */
+  uint32_t noise = generation * 2654435761u;
+  noise ^= noise >> 15;
+  return (uint16_t)(kSimEffectTrailLaunchDelay +
+                    noise % (uint32_t)kSimEffectTrailLaunchJitter);
+}
+
 /* Only the kinds that actually move retain a path. A stationary emitter would
  * otherwise publish eight copies of one point for a renderer to smear. */
 static bool EffectKindTravels(SimEffectKind kind) {
@@ -423,7 +441,10 @@ static void UpdateEffectLifetime(SimEffectLifetime *lifetime,
       .last_build_serial = build_serial,
       .ticks_since_visible = visible ? 0 : UINT16_MAX,
     };
-    if (EffectKindTravels(kind))
+    /* A fresh generation is age zero, so a kind with any launch delay leaves
+     * nothing behind on its first build. */
+    if (EffectKindTravels(kind) &&
+        !EffectTrailStartDelay(kind, lifetime->generation))
       PushEffectTrailSample(lifetime, world_x, world_y, height);
     return;
   }
@@ -458,7 +479,11 @@ static void UpdateEffectLifetime(SimEffectLifetime *lifetime,
    * too, which fails the continuity test above and clears the path with the
    * rest of the generation. */
   if (EffectKindTravels(kind)) {
-    PushEffectTrailSample(lifetime, world_x, world_y, height);
+    /* Inside the launch delay nothing is retained and nothing needs
+     * clearing: the effect is still drawn, only its path is withheld. */
+    if (lifetime->age_ticks >=
+        EffectTrailStartDelay(kind, lifetime->generation))
+      PushEffectTrailSample(lifetime, world_x, world_y, height);
   } else {
     /* Clear the points, not just the count: a reader that trusted the array
      * without the count would otherwise see a stale path. Only when there is
@@ -591,6 +616,11 @@ static SimEffectPhase VolcanoGroundFirePhase(uint16_t composition) {
     case 0xDDAB: return kSimEffectPhase_HouseFireC;
   }
   return kSimEffectPhase_None;
+}
+
+SimEffectPhase Sim3D_VolcanoFireballPhase(uint16_t composition) {
+  int16_t unused_center_y;
+  return VolcanoFireballPhase(composition, &unused_center_y);
 }
 
 static bool IsVolcanoFireballComposition(uint16_t composition) {
@@ -1222,6 +1252,8 @@ static void CaptureEffectInstances(SimFrameData *dst) {
      * presentation arc, not by its classification: there is no authentic
      * height to classify, and the authentic strategy deliberately has none. */
     int16_t arc_offset_x = 0, arc_offset_y = 0;
+    int16_t travel_x = 0, travel_y = 0, travel_height = 0;
+    uint8_t travel_valid = 0;
     bool arc_hidden = false;
     if (desc.kind == kSimEffect_VolcanoFireball) {
       /* Advance unconditionally -- this is the one pass that visits every
@@ -1235,6 +1267,10 @@ static void CaptureEffectInstances(SimFrameData *dst) {
         arc_offset_x = g_projectile_arc[arc_index].offset_x;
         arc_offset_y = g_projectile_arc[arc_index].offset_y;
         arc_hidden = g_projectile_arc[arc_index].hidden != 0;
+        travel_x = g_projectile_arc[arc_index].travel_x;
+        travel_y = g_projectile_arc[arc_index].travel_y;
+        travel_height = g_projectile_arc[arc_index].travel_height;
+        travel_valid = g_projectile_arc[arc_index].flying;
       }
     }
     /* A queued fireball has not launched. It emits no light and leaves no
@@ -1264,6 +1300,10 @@ static void CaptureEffectInstances(SimFrameData *dst) {
       .ticks_since_visible = lifetime->ticks_since_visible,
       .geometry = desc.geometry,
       .trail_count = lifetime->trail_count,
+      .travel_x = travel_x,
+      .travel_y = travel_y,
+      .travel_height = travel_height,
+      .travel_valid = travel_valid,
       .source_index = i,
       .kind = desc.kind,
       .phase = desc.phase,
@@ -2001,11 +2041,12 @@ static void ApplyProjectileArc(SimFrameData *dst) {
     object->virtual_height = arc->height;
     object->offset_x = arc->offset_x;
     object->offset_y = arc->offset_y;
-    object->hidden = arc->hidden || kSimEruptionSuppressFireballArt;
-    object->travel_x = arc->travel_x;
-    object->travel_y = arc->travel_y;
-    object->travel_height = arc->travel_height;
-    object->travel_valid = arc->flying;
+    /* Unconditional: the ROM's own placement of this record is replaced
+     * outright, so the billboard never draws where the ROM put it. The art
+     * itself is not discarded -- DrawSimEffectFireballHeads redraws it at the
+     * arc head. `arc->hidden` is deliberately not consulted here; it decides
+     * whether the EFFECT exists at all, which is a different question. */
+    object->hidden = kSimEruptionWithholdFireballBillboard;
   }
 }
 
@@ -2041,8 +2082,11 @@ static void ApplyHeightSlew(SimFrameData *dst) {
      * arc asks for 316 at the top while a four-a-frame ramp has reached 72,
      * so the sprite crawled along the ground while its own trail flew the arc
      * overhead -- the two coming from different sources was the whole
-     * discrepancy. */
-    if (object->travel_valid) {
+     * discrepancy. Keyed on the composition rather than on a published
+     * "is travelling" flag so it survives the fireball's billboard being
+     * withheld, and so un-withholding it cannot quietly reintroduce the
+     * filter. */
+    if (IsVolcanoFireballComposition(object->composition)) {
       slew->height = object->virtual_height;
       slew->active = true;
       slew->last_serial = dst->build_serial;

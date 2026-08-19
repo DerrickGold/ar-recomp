@@ -1519,13 +1519,17 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
   }
   SimRenderMetadata_RecordWord06(cpu_read16(
       cpu, cpu->DB, (uint16)(record + kSimRecord_ActorFlags)));
+  /* An eruption record. Gates two things below: the script walk, and the
+   * vertical sprite window. */
+  const bool eruption_record = world_record &&
+      cpu_read16(cpu, cpu->DB, (uint16)(record + kSimRecord_Type)) == 0x0E01;
+
   /* Resolve the flight an eruption fireball is on, straight out of the script
    * that authors it. Gated on the packed identity so no other class-$01
    * actor's script is walked, and on nothing else: the record's own velocity
    * says which of the ROM's three phases it is in, but the presentation draws
    * none of them, so every phase needs its plan. */
-  if (world_record &&
-      cpu_read16(cpu, cpu->DB, (uint16)(record + kSimRecord_Type)) == 0x0E01) {
+  if (eruption_record) {
     SimRenderMetadata_RecordFlightPlan(SimEruptionScript_ResolveFlight(
         ws_sim_script_fetch, cpu,
         cpu_read16(cpu, cpu->DB, (uint16)(record + kSimRecord_ScriptBase)),
@@ -1637,8 +1641,9 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
          * the unallocated low-table slot without advancing either cursor. */
         cpu_write16(cpu, cpu->DB, (uint16)(0x0380 + oam), 0xE000);
         if (world_record && g_ppu &&
-            ws_biased_in_window(y_biased, extended_top, extended_bottom,
-                                kSimOamBiasedHeight)) {
+            (eruption_record ||
+             ws_biased_in_window(y_biased, extended_top, extended_bottom,
+                                 kSimOamBiasedHeight))) {
           const uint16 raw_attr =
               cpu_read16(cpu, cpu->DB, (uint16)(part + 3));
           const uint16 attr = alternate_attr
@@ -1661,7 +1666,8 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
       if (world_record && g_ppu &&
           ws_biased_in_window(x_biased, extended_left, extended_right,
                               kSimOamBiasedWidth)) {
-        if (ws_biased_in_window(y_biased, extended_top, extended_bottom,
+        if (eruption_record ||
+            ws_biased_in_window(y_biased, extended_top, extended_bottom,
                                 kSimOamBiasedHeight)) {
           const uint16 raw_attr =
               cpu_read16(cpu, cpu->DB, (uint16)(part + 3));
@@ -1694,6 +1700,23 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
     ws_dp16w(cpu, 0x0E, count);
     part_index++;
   } while (count != 0);
+
+  /* Why `eruption_record` bypasses the VERTICAL window above, and only the
+   * vertical one.
+   *
+   * The window asks "will this be visible?", and for the eruption the answer
+   * is not the record's own position: the projected view throws the fireball
+   * along an arc of its own and relocates the art onto it, so a record parked
+   * one row above the map is on screen after all. Without the exemption the
+   * art is emitted for only a third of a flight -- the ROM parks the record
+   * off the top for the whole release countdown -- and the arc head has
+   * nothing to draw for the rest.
+   *
+   * It costs the flat view nothing. The widescreen composite is the authentic
+   * screen's height, so a part above its top edge produces no pixels there;
+   * what it produces is a metadata part, an atlas entry and an object, which
+   * is exactly what the projected view needs. The HORIZONTAL window is a real
+   * question about the widescreen margin and is left alone. */
 
   SimRenderMetadata_EndRecord(oam);
   ws_dp16w(cpu, 0x98, oam);

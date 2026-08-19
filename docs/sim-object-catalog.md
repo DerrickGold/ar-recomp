@@ -229,6 +229,13 @@ need a depth curve or attachment rule:
   turn — climb, staged wait, descent — so this is a state machine, not two populations. Velocity
   says which state a record is in but not where it is going, which is why the arc is keyed on
   the script instead and the field is documented here rather than plumbed through the producer.
+- **The airborne art is reused too, at the head of the enhanced view's own arc.** The ROM's
+  fireball routine is replaced outright in the projected town, so its billboard is withheld — but
+  `$E7A6`/`$E7D0` are still the right frames, so `DrawSimEffectFireballHeads` draws them at the
+  arc head, turned onto the heading. Art from the suppressed object, position from the effect.
+  Because the ROM parks its records off the top of the map for most of a flight, eruption records
+  are exempt from the producer's vertical sprite window, and a record whose art is still missing
+  borrows a sibling's — every fireball wears the same two compositions.
 - **The eruption's ground fire is the burning house's animation, and needs no new art.**
   `$01:A85B` cycles `$DD9F/$DDA5/$DDAB` at four ticks a frame, and those are tiles
   `$086/$088/$08A` in palette 1 — the exact frames `$01:A838` draws a burning building with. The

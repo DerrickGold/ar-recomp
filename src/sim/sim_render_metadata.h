@@ -485,14 +485,6 @@ typedef struct SimRenderObject {
    * nowhere better to put, and always converging back to zero before the
    * record's own logic acts on its position. */
   int16_t offset_x, offset_y;
-  /* Direction this object is travelling, in authentic map pixels plus height,
-   * expressed per unit of flight progress. Published so the renderer can
-   * project it and rotate the billboard onto its own trajectory -- a fireball
-   * drawn upright while flying a ballistic arc reads as a sprite being slid
-   * around rather than something thrown. Zero for everything the ROM places,
-   * which is drawn upright as always. */
-  int16_t travel_x, travel_y, travel_height;
-  uint8_t travel_valid;
   /* Set by a presentation stage for art the ROM emits but the enhanced view
    * must not draw. The eruption's spawn queue is the motivating case: the ROM
    * parks unlaunched fireballs one row above the map, which is off-screen in
@@ -598,6 +590,27 @@ enum {
    * builds of a 130-build flight and the smoke would be a stub rather than
    * the trajectory. */
   kSimEffectTrailStride = 4,
+  /* Producer builds a travelling effect runs before it starts leaving a path.
+   *
+   * Every fireball in the fountain launches from the SAME point -- the
+   * crater mouth -- and a trail's oldest samples carry its biggest, most
+   * spread-out puffs, so eight throws pile eight clouds of smoke on the one
+   * pixel the volcano is meant to be erupting out of. Holding retention back
+   * for the first stretch of a flight starts each path a little way along its
+   * arc and leaves the crater clear.
+   *
+   * A LOOK DIAL, and it only moves the smoke: the fireball itself is drawn
+   * from the effect's live position, so it still leaves the crater. Because
+   * the ring holds 128 builds and no flight is longer, the gap persists for
+   * the whole flight rather than closing up as the path fills.
+   *
+   * The delay is JITTERED per throw over `Jitter` further builds, so the
+   * eight paths do not all begin at the same radius and draw a clean ring
+   * around the mouth. Measured over the captured eruption, the base alone
+   * starts a tail a median 62 authentic pixels up and 19 along; the top of
+   * the range about 97 and 42. */
+  kSimEffectTrailLaunchDelay = 24,
+  kSimEffectTrailLaunchJitter = 24,
 };
 
 /* How the volcanic eruption's fireballs are pathed.
@@ -636,6 +649,14 @@ typedef enum SimEruptionPath {
  * script loop, so a record on its second pass has a readable descent and an
  * unreadable crater. Tying the descent to the crater's success is what made
  * an earlier arc resolve for six fireballs out of a fountain of thirty. */
+/* Which authored eruption fireball frame a composition is, or
+ * kSimEffectPhase_None. Published so the renderer can find the art for one
+ * fireball on another fireball's object: every one of them wears the same two
+ * compositions, the atlas repacks every frame so a rectangle cannot be cached
+ * across frames, and a record whose own art the sprite window dropped can
+ * still borrow an identical entry from a sibling in the same frame. */
+SimEffectPhase Sim3D_VolcanoFireballPhase(uint16_t composition);
+
 SimEruptionFlightPlan SimEruptionScript_ResolveFlight(
     SimEruptionScriptFetch fetch, void *context, uint16_t base,
     uint16_t cursor, int wait_frames);
@@ -730,18 +751,17 @@ enum {
    * the volcano model, never separately. */
   kSimEruptionCraterLift = 28,
   kSimEruptionCraterDrop = 43,
-  /* Withhold the fireball ART entirely and let the throw be carried by its
-   * flame trail alone, with the ground fire the ROM authors at the end of it.
+  /* Never draw the eruption fireball's billboard where the ROM put it.
    *
-   * The billboards were still reading as the ROM's own two phases -- a jet
-   * straight up out of the crater and a vertical drop -- alongside a trail
-   * that was flying the arc correctly, which says the sprite and the trail
-   * are not arriving at the same place on screen. Suppressing the art
-   * isolates the arc so the trail can be judged on its own; the sprite path
-   * comes back once the divergence between the two is found. Everything that
-   * feeds the billboard (height, offset, tangent) is still published, so this
-   * is one flag to flip, not a branch to rebuild. */
-  kSimEruptionSuppressFireballArt = 1,
+   * Not a debugging switch and not a loss of art: the projected view replaces
+   * the ROM's three-phase fireball routine outright, so the record's own
+   * position is the wrong place for a sprite and drawing there puts a second,
+   * contradictory fireball on screen. The ART is reused --
+   * DrawSimEffectFireballHeads redraws the same atlas entry at the arc head,
+   * turned onto the heading -- which is why this withholds a PLACEMENT rather
+   * than suppressing a graphic. Named rather than inlined so the object pass
+   * says why it hides something unconditionally. */
+  kSimEruptionWithholdFireballBillboard = 1,
 };
 
 /* One retained world position from an earlier logic tick, in the same
@@ -792,11 +812,24 @@ typedef struct SimEffectInstance {
   uint16_t ticks_since_visible;
   SimEffectGeometry geometry;
   /* Recent published path, newest first, valid for trail_count entries. Index
-   * 0 is this tick; index n is about n * kSimEffectTrailStride ticks old. Only
+   * 0 is this tick; index n is about n * kSimEffectTrailStride ticks old, and
+   * nothing is retained for the first kSimEffectTrailLaunchDelay ticks. Only
    * kinds whose art actually travels populate it; a stationary emitter leaves
    * trail_count zero rather than publishing a pile of identical points. */
   SimEffectTrailPoint trail[kSimEffectTrailSamples];
   uint8_t trail_count;
+  /* Direction this effect is travelling, in authentic map pixels plus height,
+   * per unit of flight progress. Published so the renderer can project it and
+   * turn art onto the trajectory -- a fireball drawn upright while flying a
+   * ballistic arc reads as a sprite being slid around rather than thrown.
+   *
+   * On the EFFECT rather than on the object because the art that uses it is
+   * drawn from the effect: the eruption's billboard is withheld and its
+   * sprite is placed at the arc head instead, which is also the only place
+   * where the heading and the smoke behind it are guaranteed to agree. Zero
+   * for everything the ROM places, which is drawn upright as always. */
+  int16_t travel_x, travel_y, travel_height;
+  uint8_t travel_valid;
   uint8_t source_index;
   uint8_t kind;
   uint8_t phase;

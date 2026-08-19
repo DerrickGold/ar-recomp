@@ -2486,6 +2486,55 @@ if archaeology is ever needed. The distilled outcomes:
     **When two pieces of code need the same derived point, one of them should
     ask the other**, or they will agree until the day the model is retuned.
 
+69. **A 180-degree error looks correct half the time. 2026-08-19.** The
+    eruption fireball's art is turned onto its trajectory, and which way the
+    authored frame already points was assumed rather than measured — twice,
+    in opposite directions, across three commits.
+
+    What made it hard to see is that the failure is not a random angle. It is
+    exactly 180 degrees, so a fireball drawn head-down looks **right** for the
+    whole descending half of every arc and wrong only while it climbs. The
+    first report said as much: "the tail is facing up on the launch all the
+    way to the apex, and only after that does it correct." That reads like a
+    bug that appears at the apex, and chasing it there is chasing nothing.
+
+    The test that settles it needs no tooling and no guessing. Whatever
+    convention is in force, some heading rotates the art by **exactly zero**,
+    and a screenshot of a fireball on that heading is a picture of the
+    authored frame. Under the `-90` convention that heading was straight down,
+    and a straight-down fireball showed its bright head at the TOP — so the
+    art points up, and the constant was inverted.
+
+    Two lessons. **When a rotation looks wrong, find the zero-rotation case
+    and photograph it** — that turns "which way does the art point?" from an
+    opinion into an observation. And **a symmetric error is worse than an
+    obvious one**: half-correct behaviour reads as a phase-dependent bug and
+    sends you looking at the phase boundary instead of at the constant. The
+    orientation is now a named constant carrying the evidence, so the next
+    person flips it only after redoing the measurement.
+
+    And the constant was still wrong, because there is no single constant to
+    get right: **the ROM has two fireball frames and they point opposite
+    ways.** `$E7D0` is drawn climbing, `$E7A6` falling, and the swap lands on
+    the build the descent starts — traced on `$0FA4`, the composition changes
+    on the same build the arc's height rate goes +568 to -547, every cycle,
+    every record. The art already carries half the rotation.
+
+    Flipping one constant therefore just moved the error to the other half of
+    the arc, which is exactly what the second report described: "your fix did
+    work for the launch and apex, but as they start descending they do flip.
+    They flipped before the fix too, but to the correct orientation, so that
+    wasn't reported." That sentence contains the whole diagnosis — a flip
+    that was always happening, previously landing on the right answer.
+
+    The lesson beyond the first one: **when a symptom is symmetric, the fix
+    that makes half of it better has probably not touched the cause.** Both
+    reports were consistent with one 180-degree constant AND with two
+    opposite frames, and only the second hypothesis explains a DISCRETE flip
+    part-way down. The tell was in the data all along -- two authored
+    compositions for one actor, named A and B in our own catalog, and no
+    reason ever asked for why an actor with one behaviour needs two poses.
+
 Process lessons folded out of statement-then-correction text elsewhere; the docs now state final
 truths, and the journey that earned them lives here.
 
