@@ -883,6 +883,183 @@ static void DrawSimEffectSceneFlash(const FrameSlot *slot, bool lighting,
   EndEffectBlend(&state);
 }
 
+static bool SimApplyAtlasBlendMode(SDL_BlendMode blend);
+
+/* Screen angle the UNROTATED eruption fireball art points at, in degrees and
+ * on atan2's own scale: -90 is up-screen, +90 is down-screen.
+ *
+ * THE TWO AUTHORED FRAMES POINT OPPOSITE WAYS, and that is not an accident --
+ * the ROM drew a climbing fireball pointing up and a falling one pointing
+ * down, and swaps between them at the moment the record starts descending.
+ * Measured on record $0FA4: composition goes $E7D0 -> $E7A6 on the same build
+ * the arc's own height rate goes +568 to -547, and the same holds on every
+ * cycle of every record. So the art already carries half the rotation, and a
+ * single constant for both is wrong for one phase by exactly 180 degrees.
+ *
+ * That 180 is why this was hard to see. It reads as CORRECT for whichever
+ * half of the arc it happens to suit, so the first report was "wrong on the
+ * climb, right after the apex" and, once the constant was flipped, "right on
+ * the climb, wrong after". Neither is a bug at the apex; both are one frame
+ * being drawn with the other frame's assumption.
+ *
+ * Derived from that behaviour rather than from reading pixels off a rotated,
+ * composited, CRT-filtered screenshot: with phase A at -90 the climb is
+ * right, so A points up and B, its opposite, points down. If a fireball ever
+ * looks 180 out again, check WHICH PHASE it is in before touching a number --
+ * and note that the zero-rotation heading is a free measurement, since some
+ * heading always rotates the art by exactly nothing. */
+static double SimFireballArtHeadingDegrees(uint8_t phase) {
+  return phase == kSimEffectPhase_VolcanoFireballB ? 90.0 : -90.0;
+}
+
+/* The ROM's own fireball art, drawn at the head of OUR arc.
+ *
+ * The eruption's billboards are withheld (kSimEruptionWithholdFireballBillboard):
+ * the projected view replaces the ROM's three-phase fireball routine outright,
+ * so drawing the record where the ROM put it puts a second, wrong fireball on
+ * screen. But the ART is the right art, and a flame trail with nothing leading
+ * it reads as smoke from nowhere. So this takes the two apart: the atlas
+ * rectangle and the composition's own local extents come from the suppressed
+ * OBJECT, and the position comes from the EFFECT -- which is the arc head, the
+ * same number the trail's newest sample was taken from.
+ *
+ * That split is the point. Position through the object path would go back
+ * through the virtual-height switch, the terrain shear, the height pop and the
+ * depth bands, each of which can move a billboard somewhere its own trail is
+ * not; through the effect there is one number and the art cannot disagree with
+ * the smoke it is leading.
+ *
+ * Drawn after the particles so a fireball is in front of its own plume. */
+/* One atlas entry placed by its own local rectangle relative to a shared
+ * anchor. Returns whether anything was drawn. */
+static bool DrawSimFireballHeadFragment(
+    const SimRenderObject *object, Scene3DPoint anchor,
+    float scale_x, float scale_y, bool rotate, double degrees) {
+  SDL_FRect atlas = {
+    object->atlas_x, object->atlas_y, object->atlas_w, object->atlas_h,
+  };
+  SDL_FRect destination = {
+    anchor.x + object->local_x0 * scale_x,
+    anchor.y + object->local_y0 * scale_y,
+    (object->local_x1 - object->local_x0) * scale_x,
+    (object->local_y1 - object->local_y0) * scale_y,
+  };
+  if (destination.w <= 0.0f || destination.h <= 0.0f) return false;
+  if (!rotate) {
+    /* Upright is the honest fallback, not a failure: each authored frame is
+     * already drawn pointing the way its own phase travels, so an unturned
+     * fireball is merely one that has not been leaned into its arc. */
+    SDL_RenderTexture(g_renderer, g_sim_obj_atlas_texture, &atlas,
+                      &destination);
+    return true;
+  }
+  /* Every fragment turns about the SHARED anchor. Rotating each about its own
+   * centre pulls a multi-tile composition apart as it turns. */
+  SDL_FPoint centre = { anchor.x - destination.x, anchor.y - destination.y };
+  SDL_RenderTextureRotated(g_renderer, g_sim_obj_atlas_texture, &atlas,
+                           &destination, degrees, &centre, SDL_FLIP_NONE);
+  return true;
+}
+
+static void DrawSimEffectFireballHeads(
+    const FrameSlot *slot, bool billboards, SDL_Rect source, SDL_Rect viewport,
+    const Scene3DCamera *camera, const float matrix[16]) {
+  if (!billboards || !slot->sim.effect_count || !slot->sim.atlas_valid ||
+      !g_sim_obj_atlas_texture)
+    return;
+
+  /* Atlas state is set on the first fireball actually reached, not up front:
+   * most towns have effects and no eruption, and this pass should cost them
+   * nothing but the walk that finds that out. */
+  bool blend_ready = false;
+  for (uint8_t i = 0; i < slot->sim.effect_count; i++) {
+    const SimEffectInstance *effect = &slot->sim.effects[i];
+    if (effect->kind != kSimEffect_VolcanoFireball) continue;
+    if (effect->geometry.kind != kSimEffectGeometry_Point) continue;
+    if (!blend_ready) {
+      if (!SimApplyAtlasBlendMode(SDL_BLENDMODE_BLEND)) return;
+      blend_ready = true;
+    }
+
+    /* The RECORD ORIGIN at the arc's altitude, not the effect's own point:
+     * the classified point is already offset to the middle of the art, and
+     * the atlas rectangles below are placed relative to the origin. Adding
+     * both would double the offset. */
+    SimEffectLocalPoint origin = { 0, 0,
+                                   effect->geometry.data.point.height };
+    Scene3DPoint anchor;
+    float scale_x, scale_y;
+    if (!ProjectSimEffectPoint(slot, effect, &origin, source, viewport,
+                               camera, matrix, &anchor, &scale_x, &scale_y))
+      continue;
+
+    /* Heading, resolved in SCREEN space: the same throw leans differently
+     * under yaw and pitch, so the published map-space tangent is stepped
+     * along, projected through the live camera, and the angle read off the
+     * result rather than off the map. */
+    bool rotate = false;
+    double degrees = 0.0;
+    if (effect->travel_valid) {
+      /* Short enough to still be the tangent rather than a chord across the
+       * apex, long enough to survive the projection's rounding. */
+      const float kStep = 0.05f;
+      SimEffectLocalPoint ahead = origin;
+      ahead.height =
+          (int16_t)(origin.height + effect->travel_height * kStep);
+      Scene3DPoint tip;
+      float ignored_x, ignored_y;
+      if (ProjectSimEffectPointAt(
+              slot, effect,
+              (uint16_t)(effect->world_x + (int16_t)(effect->travel_x * kStep)),
+              (uint16_t)(effect->world_y + (int16_t)(effect->travel_y * kStep)),
+              &ahead, source, viewport, camera, matrix, &tip,
+              &ignored_x, &ignored_y)) {
+        float dx = tip.x - anchor.x, dy = tip.y - anchor.y;
+        if (dx * dx + dy * dy > 0.0001f) {
+          /* Turn the art from where it already points to where it is going.
+           * SDL rotates clockwise, and screen Y is down, so both angles are
+           * measured the same way and the turn is their difference. */
+          degrees = atan2((double)dy, (double)dx) * 57.29577951 -
+              SimFireballArtHeadingDegrees(effect->phase);
+          rotate = true;
+        }
+      }
+    }
+
+    /* Prefer the record's own fragments. Failing that, borrow an identical
+     * entry from a sibling: every fireball in the fountain wears the same two
+     * authored compositions, and the ROM's sprite window drops a record's own
+     * art whenever the record is off the side of the widescreen view while
+     * its arc is still over the town. Measured across the captured eruption,
+     * the record's own art is there for 88% of samples and a sibling's covers
+     * all but 1.3%; the rest draw no head and the trail carries the throw. A
+     * rectangle cannot simply be remembered instead -- the atlas repacks
+     * every frame, so last frame's coordinates point at someone else's art.
+     *
+     * One pass: own fragments draw as they are found, and the first sibling
+     * that could stand in is kept in case none were. */
+    const SimRenderObject *borrow = NULL;
+    bool drew = false;
+    for (uint16_t n = 0; n < slot->sim.object_count; n++) {
+      const SimRenderObject *object = &slot->sim.objects[n];
+      if (!object->atlas_valid) continue;
+      if (object->record_address == effect->record_address) {
+        drew |= DrawSimFireballHeadFragment(object, anchor, scale_x, scale_y,
+                                            rotate, degrees);
+      } else if (!borrow &&
+                 Sim3D_VolcanoFireballPhase(object->composition) ==
+                     effect->phase) {
+        borrow = object;
+      }
+    }
+    /* One entry, not a whole record's worth of fragments: this is a stand-in
+     * for missing art, not another actor's composition. */
+    if (!drew && borrow)
+      DrawSimFireballHeadFragment(borrow, anchor, scale_x, scale_y, rotate,
+                                  degrees);
+  }
+}
+
 static void DrawSimEffectParticles(
     const FrameSlot *slot, bool particles, SDL_Rect source, SDL_Rect viewport,
     const Scene3DCamera *camera, const float matrix[16]) {
@@ -1337,8 +1514,6 @@ typedef struct SimBillboardPass {
 
 /* Defined with the rim-light code below, since the capability it latches belongs
  * to that effect; declared here because the billboard draw is the only caller. */
-static bool SimApplyAtlasBlendMode(SDL_BlendMode blend);
-
 /* Single source of truth for "what blend mode does this draw use", so the
  * caller-side pass setup and the callee-side set cannot disagree. A NULL pass is
  * the ordinary coloured draw. */
@@ -1579,8 +1754,6 @@ static void DrawSimObjectPriorityFiltered(
     float texture_anchor_y = screen_anchor_y;
     float scale_x = flat_scale_x;
     float scale_y = flat_scale_y;
-    /* Hoisted so the trajectory sample below can start from the same altitude
-     * the billboard was placed at. */
     float height_world = 0.0f;
     Scene3DPoint anchor;
     if (project_world && object->tier == kSimRecordTier_World) {
@@ -1647,42 +1820,11 @@ static void DrawSimObjectPriorityFiltered(
     }
     if (destination.w <= 0.0f || destination.h <= 0.0f) continue;
 
-    /* Art that is travelling points along its own trajectory. The direction
-     * has to be resolved in SCREEN space, not map space: the same throw leans
-     * differently under yaw and pitch, so the published travel vector is
-     * projected through the live camera and the angle read off the result. A
-     * fireball drawn upright while flying a ballistic arc reads as a sprite
-     * being slid around rather than something thrown. */
-    if (project_world && object->travel_valid) {
-      Scene3DPoint ahead;
-      float ignored_x, ignored_y;
-      /* A short step along the tangent: near enough that this is the tangent
-       * rather than a chord, far enough to survive the projection's rounding. */
-      const float kStep = 0.25f;
-      float ahead_height = height_world +
-          object->travel_height * kStep / (float)source.h;
-      if (ProjectSimAnchorAndScale(
-              matrix, source, viewport,
-              texture_anchor_x + object->travel_x * kStep,
-              texture_anchor_y + object->travel_y * kStep,
-              ahead_height, Scene3D_AutoFitDistance(camera->fov_y),
-              &ahead, &ignored_x, &ignored_y)) {
-        float dx = ahead.x - anchor.x, dy = ahead.y - anchor.y;
-        if (dx * dx + dy * dy > 0.0001f) {
-          /* The art LEADS with its bright head and trails its flame behind,
-           * and in the authored falling frame the head is the LOWER of the
-           * two tiles -- so the sprite's forward is +Y, not -Y. Mapping +Y
-           * onto the heading is a quarter turn the other way; taking -Y as
-           * forward points every fireball backwards along its own arc. SDL
-           * rotates clockwise about the destination's centre. */
-          double degrees = atan2((double)dy, (double)dx) * 57.29577951 - 90.0;
-          SDL_RenderTextureRotated(g_renderer, g_sim_obj_atlas_texture,
-                                   &atlas, &destination, degrees, NULL,
-                                   SDL_FLIP_NONE);
-          continue;
-        }
-      }
-    }
+    /* Travelling art is NOT rotated here. The one family that flies its own
+     * trajectory -- the eruption fireball -- has its billboard withheld and is
+     * drawn instead at the head of its arc by DrawSimEffectFireballHeads,
+     * which turns it there. Rotating in this pass as well would be a second
+     * implementation of the same angle, reachable by nothing. */
     SDL_RenderTexture(g_renderer, g_sim_obj_atlas_texture,
                       &atlas, &destination);
   }
@@ -3326,6 +3468,8 @@ static void RenderSimProfile(const FrameSlot *slot,
    * fixed-tier menu plane, so neither can tint UI. */
   DrawSimEffectSceneFlash(slot, effect_lighting, viewport);
   DrawSimEffectParticles(slot, particles, source, viewport, &camera, matrix);
+  DrawSimEffectFireballHeads(slot, billboards, source, viewport, &camera,
+                             matrix);
 
   /* Over the objects. The shroud's whole purpose is to cover ground that can
    * never hold an actor, so anything it hides must be hidden completely --
