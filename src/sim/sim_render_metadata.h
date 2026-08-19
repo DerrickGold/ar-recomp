@@ -360,6 +360,49 @@ typedef enum SimMetadataIntegrityFlag {
   kSimMetadataIntegrity_PartContract = 1u << 8,
 } SimMetadataIntegrityFlag;
 
+typedef uint8_t (*SimEruptionScriptFetch)(void *context, uint16_t address);
+
+typedef struct SimEruptionFlightPlan {
+  /* Map pixels of descent left between the record's cursor and the script's
+   * landing command, counted forward one $03 at a time. Authored, and it only
+   * ever decreases. Zero when the walk did not resolve a landing. */
+  int fall_pixels;
+  /* The crater mouth, from the last position command before the cursor that
+   * placed the actor ON the map. Authored per town, so it is exact from the
+   * first frame of the event rather than learned by watching. Best-effort:
+   * the walk that finds it starts at the script base, and a script that has
+   * already looped past a jump cannot be replayed, which is why the arc keeps
+   * a learned fallback for the crater and none for the descent. */
+  int16_t crater_x, crater_y;
+  /* Where this fireball is going, read AHEAD of the record getting there: the
+   * column and the row above the map come from the staging teleport still in
+   * front of the cursor, the landing row from the descent that follows it.
+   * Valid only while that teleport has not executed yet -- which is exactly
+   * the climb, and exactly when the arc needs to already know where it is
+   * throwing. Once the record is descending the walk cannot see the teleport
+   * any more and the arc flies the snapshot it took earlier. */
+  int16_t landing_x, landing_y;
+  /* The row the staging teleport parks the record on, measured at -16 across
+   * every captured run. The descent runs from here to `landing_y`, and that
+   * span is what the second half of the throw is parameterised by. */
+  int16_t entry_y;
+  /* Frames from here to the landing command: the wait currently running, read
+   * live out of +$22, plus one frame for every command still ahead and the
+   * full operand of every wait not yet reached.
+   *
+   * This is the ONLY clock the throw runs on, and it is the one quantity that
+   * spans all three of the ROM's phases. The record's own position cannot:
+   * it freezes for the 76-frame countdown between the climb and the descent,
+   * which is where a position-driven arc has to hide the fireball and then
+   * bring it back. +$22 is what makes that countdown legible -- during a wait
+   * the cursor has already advanced PAST the $09, so walking the script alone
+   * counts the wait as either its whole operand or nothing at all. */
+  int frames_to_land;
+  uint8_t valid;
+  uint8_t crater_valid;
+  uint8_t landing_valid;
+} SimEruptionFlightPlan;
+
 typedef struct SimSourceRecord {
   uint16_t record_address;
   uint16_t composition;
@@ -395,6 +438,10 @@ typedef struct SimSourceRecord {
    * drives BeginRecord without an anchor. */
   int16_t anchor_x, anchor_y;
   uint8_t anchor_valid;
+  /* The flight this record's own script authors, handed over by the producer
+   * that can reach the cart. Zeroed for everything that is not an eruption
+   * fireball. */
+  SimEruptionFlightPlan flight;
   uint8_t clip_reason;
   uint16_t clipped_parts;
   uint16_t synthetic_parts;
@@ -432,6 +479,25 @@ typedef struct SimRenderObject {
   int16_t virtual_height;
   int16_t classified_height;
   uint8_t atlas_valid;
+  /* Signed presentation offset from the record's authentic map position, in
+   * authentic pixels. Zero for everything the ROM places itself; non-zero
+   * only where a presentation stage is deliberately moving art the ROM had
+   * nowhere better to put, and always converging back to zero before the
+   * record's own logic acts on its position. */
+  int16_t offset_x, offset_y;
+  /* Direction this object is travelling, in authentic map pixels plus height,
+   * expressed per unit of flight progress. Published so the renderer can
+   * project it and rotate the billboard onto its own trajectory -- a fireball
+   * drawn upright while flying a ballistic arc reads as a sprite being slid
+   * around rather than something thrown. Zero for everything the ROM places,
+   * which is drawn upright as always. */
+  int16_t travel_x, travel_y, travel_height;
+  uint8_t travel_valid;
+  /* Set by a presentation stage for art the ROM emits but the enhanced view
+   * must not draw. The eruption's spawn queue is the motivating case: the ROM
+   * parks unlaunched fireballs one row above the map, which is off-screen in
+   * the authentic 2D window but hangs in open sky once the town is projected. */
+  uint8_t hidden;
 } SimRenderObject;
 
 typedef enum SimEffectKind {
@@ -442,6 +508,12 @@ typedef enum SimEffectKind {
   kSimEffect_RedDemonFire,
   kSimEffect_GroundFire,
   kSimEffect_HouseFire,
+  /* Volcanic eruption story event, measured in run 20260818-070141. The
+   * airborne fireball and the fire it leaves on the ground are separate kinds
+   * because only the fireball moves; the ground fire deliberately shares the
+   * house fire's phase family and lighting ramp. */
+  kSimEffect_VolcanoFireball,
+  kSimEffect_VolcanoGroundFire,
 } SimEffectKind;
 
 typedef enum SimEffectColorFamily {
@@ -477,6 +549,12 @@ typedef enum SimEffectPhase {
   kSimEffectPhase_HouseFireA,
   kSimEffectPhase_HouseFireB,
   kSimEffectPhase_HouseFireC,
+  /* The two held eruption fireball frames. Named A/B after their authored
+   * order ($01:A853 then $01:A857) rather than rise/fall: the art's vertical
+   * flip and the record's motion disagree, and nothing measured pins which
+   * way the ROM intends the blob to point. */
+  kSimEffectPhase_VolcanoFireballA,
+  kSimEffectPhase_VolcanoFireballB,
 } SimEffectPhase;
 
 typedef enum SimEffectGeometryKind {
@@ -507,6 +585,179 @@ typedef struct SimEffectLocalPoint {
   /* Authentic pixels above the projected ground. Zero is on the map plane. */
   int16_t height;
 } SimEffectLocalPoint;
+
+enum {
+  /* Retained path length. Sized so a whole eruption throw fits: the longest
+   * measured flight is 93 script frames, which is about 130 producer builds,
+   * and 32 samples at a stride of 4 spans 128. Short enough that the renderer
+   * can still afford a puff or two per sample. */
+  kSimEffectTrailSamples = 32,
+  /* Producer builds between retained samples. The head (index 0) is always
+   * this tick's position, so the fireball's flame stays on the fireball; only
+   * the tail behind it is thinned. Without a stride the path would cover 32
+   * builds of a 130-build flight and the smoke would be a stub rather than
+   * the trajectory. */
+  kSimEffectTrailStride = 4,
+};
+
+/* How the volcanic eruption's fireballs are pathed.
+ *
+ * The ROM has no altitude to reproduce: the sim town is a flat top-down map,
+ * and a fireball is a sprite translating across it at a constant 8 pixels a
+ * tick (run 20260818-073455). Which of these applies is decided by the view
+ * and is deliberately NOT a separate setting. A flat path drawn inside a
+ * projected town is faithful to nothing -- it is the 2D motion of a top-down
+ * map shown from an angle that reveals it has no height, which is exactly the
+ * "sliding along the ground" the fountain exists to fix. The authentic
+ * picture is the authentic VIEW, which the player already selects by turning
+ * the enhanced town off. */
+typedef enum SimEruptionPath {
+  /* Exactly the ROM's own map motion: no height, no launch offset, and the
+   * staged spawn queue left wherever the ROM parks it. Every view that
+   * presents the ROM's own framebuffer gets this. */
+  kSimEruptionPath_Authentic = 0,
+  /* A fountain in world space. Fireballs leave the crater, arc over the town
+   * and converge onto their authentic landing cell. Enhanced view only. */
+  kSimEruptionPath_Ballistic,
+  kSimEruptionPath_Count,
+} SimEruptionPath;
+
+/* One byte of a class-$01 actor script, by absolute bank-$0A address. Pure
+ * indirection so the walkers below can be driven from the live cart in the
+ * sprite hook and from captured script bytes in a test. */
+
+/* Resolve the plan above for the record sitting at `cursor`.
+ *
+ * The descent is walked FORWARD from the cursor and always answered; the
+ * crater is walked backward from `base` and answered only when that replay
+ * succeeds. The two are deliberately independent, because they fail for
+ * different reasons: the forward walk is a straight run to the landing
+ * command, while the backward walk cannot cross the jump that makes the
+ * script loop, so a record on its second pass has a readable descent and an
+ * unreadable crater. Tying the descent to the crater's success is what made
+ * an earlier arc resolve for six fireballs out of a fountain of thirty. */
+SimEruptionFlightPlan SimEruptionScript_ResolveFlight(
+    SimEruptionScriptFetch fetch, void *context, uint16_t base,
+    uint16_t cursor, int wait_frames);
+
+/* The eruption fireball's presentation arc, published because it is part of
+ * the effect/object height contract rather than an internal tuning detail:
+ * the enhanced view supplies this altitude outright, since the sim town is a
+ * flat top-down map with no authentic height for the family to carry.
+ *
+ * WHAT THE ARC REPLACES. The ROM runs the eruption in three phases: a
+ * fireball is thrown up out of the crater, it leaves the top of the map and
+ * is parked one row above it, and then it drops straight down the column it
+ * is due to land in. Only the third phase is on screen for most of its life,
+ * and drawn honestly it is a vertical drop out of the sky -- which is the
+ * complaint this exists to answer. The projected view therefore draws NONE of
+ * the three: it draws one throw from the crater to the impact cell and hides
+ * the record until that throw starts.
+ *
+ * WHAT IT HAS TO MATCH. Two things, and only two: how many fireballs land,
+ * and where. Both hold by construction here. Every record that resolves a
+ * descent flies exactly one throw, so the count is the ROM's own; the throw
+ * is parameterised by the descent left and ends at the cell the script lands
+ * on, so the arc reaches zero offset and zero height on the landing frame and
+ * the ground fire can never appear where the fireball was not.
+ *
+ * WHY THE CLOCK IS PIXELS. The descent is measured in map pixels of $03 and
+ * nothing else. An earlier attempt drove the same curve from a frame count
+ * taken over the whole script while sizing it by the descent alone; the two
+ * were different quantities, the progress term pinned at zero for most of the
+ * flight, and the fireball sat at the crater and then snapped. One authored
+ * quantity, used for both ends, is what makes that unrepresentable. */
+enum {
+  /* THE THROW IS SIZED BY ITS FLIGHT TIME, NOT BY ITS DISTANCE.
+   *
+   * The ROM does not throw a fireball and let it fly. It throws one, parks it
+   * above the map for a countdown, and then drops it -- and the countdown is
+   * most of the life cycle: 76 frames of a 93-frame flight on the measured
+   * record. An arc that only covers the two moving phases therefore has to
+   * hide the fireball for two thirds of its life and bring it back at the
+   * apex, which is the disappear-and-reappear it used to show.
+   *
+   * So the whole flight time is given to the arc and the LAUNCH is sized to
+   * fill it. That is what a thrown thing actually does: with gravity fixed,
+   * the time of flight sets the apex and the apex sets the time, so
+   * apex = T^2 / k. A fireball with a long countdown ahead of it is simply
+   * lobbed higher and travels slower, and the countdown is spent climbing
+   * instead of parked. Distance plays no part -- horizontal speed covers
+   * that, exactly as it does in the real thing, which is also why two
+   * fireballs launched together to different cells look like one volley.
+   *
+   * The divisor is the gravity term and is THE DIAL: chosen so the measured
+   * 93-frame flight peaks near 150 map pixels, well clear of the town and
+   * readable from a low camera. */
+  kSimEruptionArcGravityDivisor = 58,
+  /* Floor and ceiling in authentic pixels above the map plane. The floor is
+   * deliberately far below the shortest real throw: an earlier floor of 80
+   * overrode the sizing on sixteen of the captured eruption's 24 throws,
+   * reaching five times the whole ground track on the shortest, which is not
+   * an arc but a rocket -- and that is what read on screen as a jet straight
+   * up out of the crater followed by a fireball dropping straight down. */
+  kSimEruptionArcApexMin = 24,
+  kSimEruptionArcApexMax = 320,
+  /* The crater MOUTH, relative to the cell the script launches from.
+   *
+   * The script's crater is a flat map cell, (144,128) in every eruption
+   * script. The volcano the player sees is the six-cell `kAitosVolcano`
+   * mountain stamp standing on that cell, and its lava blob is up at the
+   * summit -- so a fireball leaving the authored cell leaves the mountain's
+   * foot, not its mouth. Both numbers come from the model rather than from
+   * taste, using the mapping `MountainPlanePoint` uses to place the crater
+   * glow itself:
+   *
+   *   stamp cell_y 8, six cells tall -> baseline source row (8+6)*16 = 224
+   *   crater centre 8*16 + kCraterCentreOffsetY(11)                  = 139
+   *   rise = 224 - 139                                               = 85
+   *   lift = rise * face_height_scale(0.30) * kVolcanoHeightScale(1.12) = 28
+   *   drawn row = 224 - rise * face_depth_scale(0.62)                = 171
+   *   drop = 171 - the script's own crater row (128)                 = 43
+   *
+   * The relief raises the summit and pushes it down-map at the same time, so
+   * both are needed or the launch sits behind the mountain it is coming out
+   * of. Note the drop is measured from the SCRIPT's crater row, not from the
+   * mountain baseline the relief is measured against; taking it from the
+   * baseline put the launch ten pixels below the mouth, which showed up from
+   * the default camera and not from a horizontal one -- pitch is what decides
+   * how much of a map-row error reaches the screen.
+   *
+   * This whole derivation is only the FALLBACK. When the projected view is
+   * running it reports the mouth it actually drew, through
+   * SimRenderMetadata_SetEruptionCraterAnchor, and that is exact including
+   * the camera-facing lean this cannot model. Retune the pair together with
+   * the volcano model, never separately. */
+  kSimEruptionCraterLift = 28,
+  kSimEruptionCraterDrop = 43,
+  /* Withhold the fireball ART entirely and let the throw be carried by its
+   * flame trail alone, with the ground fire the ROM authors at the end of it.
+   *
+   * The billboards were still reading as the ROM's own two phases -- a jet
+   * straight up out of the crater and a vertical drop -- alongside a trail
+   * that was flying the arc correctly, which says the sprite and the trail
+   * are not arriving at the same place on screen. Suppressing the art
+   * isolates the arc so the trail can be judged on its own; the sprite path
+   * comes back once the divergence between the two is found. Everything that
+   * feeds the billboard (height, offset, tangent) is still published, so this
+   * is one flag to flip, not a branch to rebuild. */
+  kSimEruptionSuppressFireballArt = 1,
+};
+
+/* One retained world position from an earlier logic tick, in the same
+ * authentic town pixels as SimEffectInstance::world_x/world_y. Index 0 is the
+ * position this tick and index i is exactly i ticks ago:
+ * samples are pushed once per producer build, never on a repeated capture of
+ * the same immutable build, and the whole path is dropped whenever lifetime
+ * continuity breaks -- so a recycled record slot cannot inherit a stranger's
+ * path and a renderer never has to infer motion from a wall clock. */
+typedef struct SimEffectTrailPoint {
+  uint16_t world_x, world_y;
+  /* Authentic pixels above the map plane at that tick, so a tail left by
+   * something in flight follows the arc through the air instead of being
+   * smeared along the ground under it. */
+  int16_t height;
+} SimEffectTrailPoint;
 
 typedef struct SimEffectGeometry {
   uint8_t kind;
@@ -540,6 +791,12 @@ typedef struct SimEffectInstance {
   uint16_t pulse_ticks;
   uint16_t ticks_since_visible;
   SimEffectGeometry geometry;
+  /* Recent published path, newest first, valid for trail_count entries. Index
+   * 0 is this tick; index n is about n * kSimEffectTrailStride ticks old. Only
+   * kinds whose art actually travels populate it; a stationary emitter leaves
+   * trail_count zero rather than publishing a pile of identical points. */
+  SimEffectTrailPoint trail[kSimEffectTrailSamples];
+  uint8_t trail_count;
   uint8_t source_index;
   uint8_t kind;
   uint8_t phase;
@@ -869,6 +1126,29 @@ bool SimRenderMetadata_BeginRecord(
  * older synthetic producers that do not model polymorphic fields default to
  * zero and therefore fail closed for classifiers that require it. */
 void SimRenderMetadata_RecordWord06(uint16_t value);
+
+
+/* The flight this record's script authors, resolved by the producer that can
+ * reach the cart. Handed over rather than read here so this unit stays free of
+ * the CPU/cart plumbing, exactly as the velocity above is. */
+void SimRenderMetadata_RecordFlightPlan(SimEruptionFlightPlan plan);
+
+/* Where the projected view actually drew the volcano's crater mouth, in
+ * authentic map pixels plus a height above the map plane.
+ *
+ * Handed over by the renderer, which is the only place that knows: the mouth
+ * belongs to a voxel mountain model whose relief raises the summit, pushes it
+ * down-map, and leans it toward the camera. Deriving it here from the stamp's
+ * authored geometry gets close and then drifts the moment any of those is
+ * retuned -- so the arc asks the model instead, and the model answers with the
+ * same point it drew the crater glow and the smoke plume on.
+ *
+ * One frame stale by construction, which is invisible: the mouth only moves
+ * when the camera does. `valid` false restores the derived fallback, so a
+ * town with no volcano, or a detail level that draws no mountains, still
+ * launches from somewhere sensible. */
+void SimRenderMetadata_SetEruptionCraterAnchor(
+    bool valid, int16_t map_x, int16_t map_y, int16_t height);
 /* The emitter's biased composition origin for the record now open. Separate
  * from BeginRecord so the D1 producer contract and its callers are unchanged;
  * a record without this call simply has no cull-lead anchor. */

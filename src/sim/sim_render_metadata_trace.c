@@ -318,7 +318,18 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
       case kSimEffectGeometry_Scene:
         break;
     }
-    fputs("}}", g_sim_d1_trace);
+    fputs("}", g_sim_d1_trace);
+    /* The retained path, newest first, so a trail can be checked against the
+     * record's own motion instead of against what the renderer drew. */
+    if (effect->trail_count) {
+      fputs(",\"trail\":[", g_sim_d1_trace);
+      for (unsigned n = 0; n < effect->trail_count; n++)
+        fprintf(g_sim_d1_trace, "%s[%u,%u]", n ? "," : "",
+                (unsigned)effect->trail[n].world_x,
+                (unsigned)effect->trail[n].world_y);
+      fputc(']', g_sim_d1_trace);
+    }
+    fputs("}", g_sim_d1_trace);
   }
   fputs("]}\n", g_sim_d1_trace);
   fflush(g_sim_d1_trace);

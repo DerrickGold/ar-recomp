@@ -617,16 +617,24 @@ static void AppendCraterGlowRing(
   }
 }
 
+/* The crater mouth of the volcano drawn this frame. See the header: this is
+ * published so the eruption's fireball arcs can launch from the point the
+ * player sees smoking rather than from a constant kept beside the model. */
+static SimBackgroundCraterAnchor g_crater_anchor;
+
+bool SimBackgroundVoxelRenderer_CraterAnchor(SimBackgroundCraterAnchor *out) {
+  if (!out) return false;
+  *out = g_crater_anchor;
+  return g_crater_anchor.valid;
+}
+
 static void AppendVolcanoEffects(
     const SimBackgroundVoxelRenderParams *params,
     const SimBackgroundProjectionAxis *axis,
     const SimBackgroundMountainRelief *relief,
     const SimBackgroundMountainObject *object,
     float origin_x, float origin_y, float baseline, float height_scale) {
-  if (!(object->flags & kSimBackgroundMountainObject_Volcano) ||
-      params->detail < kSimBackgroundVoxelDetail_Balanced ||
-      params->style < kSimBackgroundVoxelStyle_Trim)
-    return;
+  if (!(object->flags & kSimBackgroundMountainObject_Volcano)) return;
 
   /* The glow belongs on the authored blob's centre, not on the crown row's
    * top edge: the old placement pushed it a full three pixels past the peak
@@ -648,6 +656,22 @@ static void AppendVolcanoEffects(
   float radius_y = crater_y - rim_y;
   if (radius_y < 0.5f) radius_y = 0.5f;
   crater_z *= height_scale;
+
+  /* Publish the mouth before anything is drawn from it, and publish it LEANED
+   * -- the same transform LeanedPointToWorld applies to every model vertex,
+   * including the glow ring below. An unleaned anchor sits a few pixels off
+   * the glow at any pitch that leans the models at all, which is every pitch
+   * the player uses. */
+  g_crater_anchor = (SimBackgroundCraterAnchor){
+    .valid = true,
+    .local_x = crater_x + crater_z * axis->x_per_height,
+    .local_y = crater_y + crater_z * axis->y_per_height,
+    .height_pixels = crater_z * axis->height_scale,
+  };
+
+  if (params->detail < kSimBackgroundVoxelDetail_Balanced ||
+      params->style < kSimBackgroundVoxelStyle_Trim)
+    return;
 
   /* The source crater flashes on an eight-frame cadence. Match that cadence
    * with two shallow depth-tested glow rings rather than a screen-space
@@ -1174,6 +1198,9 @@ static int BuildProjectedMountainObjectFaces(
     const SimBackgroundMountainField *field,
     const SimBackgroundMountainObjectList *objects) {
   int count = 0;
+  /* Cleared every frame so a town with no volcano cannot hand the eruption
+   * arcs the last town's crater. */
+  g_crater_anchor.valid = false;
   for (uint8_t at = 0; at < objects->count; at++) {
     const SimBackgroundMountainObject *object = &objects->objects[at];
     /* Only the volcano's extra height varies between objects. */
@@ -1988,6 +2015,7 @@ void SimBackgroundVoxelRenderer_Reset(void) {
   g_renderer_state.allocation_failed = false;
   g_renderer_state.cache_stamp = 0;
   g_renderer_state.biome = kSimBackgroundVoxelBiome_Temperate;
+  g_crater_anchor = (SimBackgroundCraterAnchor){0};
   SimBackgroundVoxelModelCache_Reset();
   g_renderer_state.batch.vertex_count = 0;
   g_renderer_state.batch.index_count = 0;

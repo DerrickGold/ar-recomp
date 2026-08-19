@@ -2121,6 +2121,371 @@ if archaeology is ever needed. The distilled outcomes:
     would have found them then. `AR_WINDMILL_DEBUG=1` prints the record plus
     step slot plus resolved phase per mill and is the first tool for any repeat.
 
+63. **The volcanic eruption's ground fire was already the burning-house
+    animation — the enhanced view just never recognised it. ADDED 2026-08-18.**
+    The brief was "make the eruption's ground fire reuse the building fire
+    rather than new art". Measuring first turned that into a much smaller job:
+    the ROM already reuses it, byte for byte. Crawling the composition table
+    (`tools/sim_object_catalog.py crawl`) shows script `$01:A85B` cycling
+    `$DD9F/$DDA5/$DDAB`, and those decode to tiles `$086/$088/$08A` in palette
+    1 — the exact three frames `$01:A838` draws a burning building with. The
+    only differences are the part anchor (`x = -8` centred, against the house's
+    `x = 0` corner) and the cadence (four ticks a frame against one). So there
+    was no new art to avoid adding; what was missing was that the three
+    compositions fell through `ClassifyEffectSource` entirely and got no
+    lighting at all.
+
+    Worth remembering as a shape: **the same tiles serve three unrelated
+    families here.** `$DD2D/$DD33/$DD39` is the burning house, `$DD9F/$DDA5/
+    $DDAB` is eruption ground fire, and `$E6CA/$E6D0/$E6D6` is the same art in
+    palette 2. A classifier keyed on tile numbers would merge all three; the
+    composition triple is the identity, and the tile is only what it draws.
+
+    `runs/20260818-070141` also settles the family's shape without any
+    inference. All eight live records (`$0F0C`-`$1016`) publish packed identity
+    `$0E01`, exactly parallel to the house fire's `$0A01`, and nothing else in
+    either capture does. Slot continuity across the two frames does the rest:
+    record `$1016` walks `$E7D0`→`$E7A6` and records `$0FA4/$0FCA/$0FF0` walk
+    `$E7A6`→`$DD9F`, each at a **fixed `world_x` with increasing `world_y`**.
+    So `$E7D0` and `$E7A6` are not two actors, they are two frames of one
+    falling fireball, and the ground fire is that same record after it lands.
+    Those captured record bytes are now a fixture in
+    `tests/sim_render_metadata_test.c` rather than a hand-written struct, so
+    the field offsets are asserted against the ROM's layout instead of against
+    the code that reads them (see the "fixtures must use captured bytes"
+    learning below).
+
+    One field was deliberately left un-asserted, and §64 records what it
+    actually turned out to be. Record `+$00` *looked* like a signed height
+    above the ground from two frames — it ran `-63 → -1` on `$1016` over the
+    same interval the fireball descended, and sat at `+2/+4` on records that
+    had landed. It is nothing of the kind. Two frames were simply not enough
+    to tell a countdown from an altitude, and the guess was written down as a
+    guess for exactly that reason.
+
+
+64. **"They just fall out of the volcano instead of spitting out
+    impressively" — the fireballs had no height because the ROM has none to
+    give. FIXED 2026-08-18.** Run `20260818-073455` supplies sixteen frames of
+    the same event, and it settles the two questions two frames could not.
+
+    **`+$00` is the animation frame timer, not an altitude.** It decrements by
+    exactly one per game frame (Δ of -18, -14, -12 across snapshot gaps of 18,
+    14, 12), and on the ground fire it cycles `+1..+4` — precisely the
+    four-tick frames script `$01:A85B` authors. The §63 guess is dead. The
+    independent check kills it too: in `20260818-073137` the one visible
+    eruption sprite draws at `world_y - camera_y` to within a pixel against
+    the live camera `(140,110)`, while any reading that adds `+$00` is four
+    pixels out — and that record is ground fire, which is on the ground by
+    definition and still carries `+$00 = +3`. **There is no authentic altitude
+    anywhere in this family.** The sim town is a flat top-down map.
+
+    **`+$1C` is the per-tick map velocity, and it is the field that matters.**
+    It splits the event into the two populations the ROM actually runs, which
+    the earlier pass had conflated into one:
+
+    | `+$1C` | what it is | composition |
+    |---|---|---|
+    | `-8` | the crater jet at map column 144, climbing up-map | `$E7D0` |
+    | `+8` | a fireball raining back onto the town | `$E7A6` |
+    | `0` | staged offscreen at `y = -16`, running its `+$22` release countdown | `$E7D0` |
+
+    Across every captured frame `$E7A6` carries `+8` and `$E7D0` never does,
+    so the two authored frames are the falling and the not-falling pose rather
+    than two arbitrary animation cells. The jet and the rain are **different
+    records** — a jet retires near the top of the map and a separate record
+    stages for the fall — which is why the flat view reads as two unrelated
+    streams of sparks sliding along the ground instead of one fountain.
+
+    The fix is therefore an enhanced-view presentation arc, and it lives in
+    `ApplyProjectileArc` rather than in `Sim3D_ClassifyObject`: a classified
+    plane is a constant, and this is a per-tick curve. It cannot be anchored
+    on the impact point, because **the ROM does not know it either** — no
+    coordinate in the record holds the landing row (checked directly: the
+    later landing `y` of `$0F0C`, `$0FA4` and `$1016` appears at no offset in
+    their staging records, as a word or a byte), and the observed ranges run
+    160 to 368 map pixels. It is anchored on the record's own velocity phase
+    instead, climbing over the ascending half of a parabola while `+$1C` is
+    negative and falling down the descending half while it is positive. Both
+    halves share one apex, so the hand-off from a retiring jet record to a
+    newly staged falling one reads as a continuous fountain.
+
+    The tuning choice here was initially got **wrong**, and §66 records the
+    correction: the arc used one 144-pixel span justified as "shorter than the
+    shortest measured fall (160)". The shortest measured fall is 80, not 160 —
+    that figure came from eyeballing a partial list of landing rows instead of
+    enumerating them — so four of the thirty-two observed fireballs landed
+    while still displaced toward the crater.
+
+    A lesson that repeated §63's: the captured-byte fixture caught a
+    generalisation the eye had made. "All `$E7D0` in this capture are staged"
+    was wrong — record `$0F7E` is a climbing jet at `-8` — and the assertion
+    failed the moment the real velocities were threaded through the fixture
+    instead of assumed. Two frames make a plausible story; sixteen make a
+    measurement.
+
+
+65. **Fireballs pinned along the top edge of the screen — the enhanced view was
+    drawing the ROM's spawn queue. FIXED 2026-08-18.** Run `20260818-080109`
+    catches it with the camera at the top of the map (`camera_y = 0`), which is
+    the pose that exposes it: three of the eight eruption records sit at world
+    `y = -16` with velocity `0` and their `+$22` release countdowns running
+    (`q` = 47, 13, and later 76). That is the ROM's **unlaunched spawn queue**,
+    and the authentic 2D window never shows it — a 16-pixel sprite at
+    `y = -16` draws entirely above the visible area. A projected town shows
+    that row, and §64's arc then lifted the queue a further 40 pixels into open
+    sky, turning an invisible staging area into motionless glowing dots along
+    the top edge. The `direction == 0 -> apex` rule was simply wrong: it
+    reasoned "if the camera ever reaches it, it belongs in the sky", when what
+    a zero-velocity fireball actually means is "this one has not launched yet".
+
+    Two conclusions. Queued fireballs are now **withheld** through a new
+    `SimRenderObject::hidden`, honoured by the billboard pass, the shadow pass
+    and effect capture — the general statement being that a presentation stage
+    may decline to draw art the ROM emits, which the authentic clipping window
+    was hiding for free. And the fireballs are now **launched from the crater**
+    rather than materialising at the map's top edge: a falling record is drawn
+    at the crater and converges onto its authentic cell over the arc's span,
+    so it visibly leaves the volcano while the ground fire still lands exactly
+    where the ROM put it. That convergence is what makes a real 3D path
+    possible at all without predicting a landing row the ROM never records —
+    the authentic position is the target, and it is known every tick.
+
+    The crater is **learned, not hardcoded**: a jet record re-anchoring is a
+    fireball being born at the crater mouth, so the fountain reads its own
+    launch point out of the event and needs no town-specific constant. Until a
+    jet has been seen, fallers simply stay on their authentic path.
+
+    The two paths were briefly a player setting, and that was wrong. A flat
+    path drawn *inside a projected town* is faithful to nothing: it is the 2D
+    motion of a top-down map shown from an angle that reveals it has no
+    height, which is precisely the "sliding along the ground" the fountain
+    exists to fix. The authentic picture is the authentic **view**, which the
+    player already selects by turning the enhanced town off — so the strategy
+    is derived from the view and the master switch instead, the same pair
+    `ApplyHeightSlew` tests. Removing the setting also fixed a real defect it
+    was hiding: `ApplyProjectileArc` ran unconditionally, so a frame showing
+    the ROM's own framebuffer was still having its spawn queue withheld and
+    its fireballs displaced. **A presentation stage that alters what the flat
+    view shows is a bug, and every such stage needs that predicate.**
+
+    The general lesson: when a new option's "off" value is not a state any
+    real configuration should be in, it is not an option — it is a missing
+    condition on the feature.
+
+    Deriving the strategy from the view then raised the obvious follow-up:
+    what happens if the view changes *mid-eruption*? Three answers, all of
+    them bugs before they were asked about. (a) The arc tracker was only
+    stepped while it was being drawn, so switching the enhanced town off and
+    back on left `last_serial` stale, every in-flight fireball failed the
+    continuity test, and each one re-anchored — snapping back to the crater at
+    full apex half way to the ground, and able to land mid-convergence, which
+    defeats the whole no-pop guarantee. The model is now advanced on every
+    build in town whether or not it is drawn, in the effect pass, because that
+    is the one pass that visits a record even when it produced no billboard;
+    only the *application* is view-dependent. (b) `g_projectile_arc` and the
+    learned crater survived leaving town, so a later eruption elsewhere could
+    resume a record slot's flight or launch out of a volcano the map does not
+    have; both are now dropped on town exit and on a direct town change.
+    (c) The retained trail holds *published* positions, so a change of
+    publishing rule left half the curve on authentic map positions and half on
+    crater-offset ones; it is now invalidated on the change.
+
+    Worth generalising: **any presentation state that persists across frames
+    needs an answer for all three of "the view changed", "the town changed"
+    and "the feature was toggled"** — and "it is not being drawn" is not a
+    reason to stop simulating something that is still happening.
+
+
+66. **The no-pop guarantee was arithmetic on a wrong number. FIXED
+    2026-08-18.** §64 claimed the fireball arc could never pop because its
+    144-pixel span was "shorter than the shortest measured fall (160)". Both
+    halves of that were fine reasoning applied to a figure nobody had actually
+    computed. Enumerating every ground-fire landing row across runs
+    `20260818-070141`, `073137`, `073455` and `080109` gives fourteen distinct
+    rows from 64 to 352, so falls of **80 to 368** map pixels — and four of the
+    thirty-two observations are shorter than the span. Those fireballs landed
+    while still up to 44% of the way back toward the crater, setting fire to a
+    cell they had never been over. The exact failure the span was chosen to
+    prevent.
+
+    The fix is to stop pretending one span can do both jobs. **The ROM never
+    records where a fireball will land**, so with only "distance travelled so
+    far" available, any monotone decay that must reach zero by the shortest
+    possible range must reach zero by 80 pixels — and an 80-pixel arc leaves a
+    368-pixel fall gliding along the ground for 78% of its flight, which is the
+    original complaint again. But position and altitude do not fail the same
+    way. A fireball displaced at impact reads as a teleport; a fireball still
+    airborne at impact reads as an airburst. So the launch offset now converges
+    over 64 pixels — inside the shortest possible fall, therefore always exact
+    — while the height decays over 192, longer than before, so the long-range
+    majority stay arced for more of their flight. A regression drives all
+    fourteen measured landing rows and asserts the offset is zero at impact for
+    every one; restoring the old single span fails it twelve times.
+
+    The lesson is narrow and worth keeping: **a bound that makes a guarantee
+    true has to be computed, not recalled.** "Shortest measured fall" was a
+    number available from the same snapshots that produced everything else in
+    §64, and enumerating it was four lines of Python. It was instead carried
+    forward from an impression formed while reading a partial list — and it
+    then propagated into a code comment, a doc table, a ledger entry and a
+    memory file, each of which restated it as measured fact.
+
+
+67. **"The ROM does not know the landing either" was false, and the answer was
+    in our own notes. 2026-08-18.** §64 and §66 both rest on the claim that the
+    landing row is unrecoverable — that no coordinate holds it, so an arc can
+    only ever approximate. Challenged on it (*"how can the ROM know and we
+    don't?"*), the answer took twenty minutes of static disassembly and no
+    runtime capture at all.
+
+    Stride-`$26` actors run a **byte-code script**, one command a frame.
+    `$01:CFC7` fetches from `+$16` and — the part that had been missed —
+    selects the bank from the class byte: `+$0E & $00FF` zero reads `$7F` RAM,
+    non-zero reads `$0A:0000,X`. The eruption is class `$01`, so **its scripts
+    are static ROM**. I had dumped `+$14/+$16` earlier, read them as `$7F`
+    addresses because that is the path the townspeople take, seen bytes that
+    resembled terrain metatile IDs, and written the pair off as "town cell
+    data, not scripts" in the RAM map. Wrong bank, wrong conclusion, recorded
+    as a measurement.
+
+    Decoded, a fireball is legible end to end: `09 4C 00` waits 76 frames
+    (matching the `+$22 = 76` observed on that very record), `01` x9 is the
+    crater jet climbing, `03` x N is the fall at 16 map pixels a command, and
+    `$0F` lands it. `fall = N x 16` reproduces captured landings exactly —
+    7x16 = 112 against an observed 112, 8x16 = 128 against 128.
+
+    The compounding failure is worth naming. This VM was **already mapped in
+    this project**: `CD6F (18 handlers $CD93..$CEE5, PHA/RTS at $CD6B)` sits in
+    the notes from the townspeople walk-script fix, and there is a live
+    `indirect_dispatch CD6A` directive in `bank01.cfg` because of it. The same
+    VM drives the walking villagers and the volcano fireballs. Having that
+    context and not connecting it, a whole session was spent building crater
+    learning, re-anchor heuristics and a split-span compromise to work around a
+    fact already in hand.
+
+    Two habits fall out. **When a bank is inferred rather than read, say so** —
+    "pointers into `$7F:D1xx`" was an assumption wearing the clothes of an
+    observation, and it survived because it was never restated as one. And
+    **before declaring something unknowable, grep the project's own notes for
+    the address**: the existing "check existing notes before re-debugging"
+    lesson was written for bug-chasing, but it applies just as hard to
+    architecture, where a false constraint does not fail loudly — it quietly
+    shapes everything built on top of it.
+
+68. **Two clocks for one curve, and a whole session lost to it.
+    2026-08-18.** With the landing finally readable (§67), the eruption arc was
+    rebuilt to fly one parabola from the crater to the impact cell. It looked
+    exactly like what it replaced: fireballs dropping vertically, pinning to
+    the top of the screen, and appearing in double.
+
+    Three independent defects, all of the same shape — **a quantity used as if
+    it were another quantity**.
+
+    *The clock.* Progress came from `frames_to_land`, counted over the whole
+    script including the 76-frame release countdown; length came from
+    `fall_pixels / 16`, the descent alone. `elapsed = total - remaining` was
+    therefore deeply negative for most of the flight, clamped to zero, and the
+    fireball sat at the crater until the last handful of frames and then
+    snapped. The fix is not a better conversion: the arc now takes **map pixels
+    of descent for both ends**, so the mismatch is unrepresentable.
+
+    *The height.* `ApplyHeightSlew` low-pass filters an actor between the
+    constant planes its classification hands out. Applied to a trajectory it
+    is a filter on the curve — measured, the arc asked for 316 at apex while
+    the 4-per-build ramp had reached 72, so the sprite crawled along the ground
+    while its own trail flew overhead. A presentation stage that drives height
+    frame by frame must be exempt from the slew, not tuned around it.
+
+    *The double.* The fireball was not marked `Overhead`, so it went through
+    the voxel depth-band split and was drawn once per band it qualified for —
+    banded by a ground position it was nowhere near.
+
+    Then the fix for the double became a fourth defect. Gating the arc on a
+    `descending` flag from the backward script walk collapsed the fountain from
+    thirty arcs to six, because **the script loops**: the walk stops at the
+    jump, so any record on a later pass resolved nothing. The two halves of the
+    walk now fail independently — the descent is forward-only and always
+    answers, the crater is best-effort with a learned fallback.
+
+    Two lessons. **When one curve is driven by two numbers, make them one
+    number.** Every fix attempted while `frames_to_land` and `fall_pixels`
+    coexisted was a tuning change on top of a units bug, and each one made the
+    result differently wrong. And **do not let a derived gate decide whether a
+    thing exists** — `descending` was an inference about which phase a record
+    was in, used to decide whether to draw it at all, so the moment the
+    inference broke the fountain emptied. The arc now decides existence from a
+    fact it reads directly (is the record parked above the map?) and uses
+    inference only for tuning.
+
+    Two process failures compounded it. Every visual claim made from headless
+    runs that session was worthless: `PresentSim3D` is never called headless
+    because `separated_valid` never becomes true, so four probes in
+    `present_sim3d.c` printed nothing while metadata probes printed fine, and
+    "the emitter reaches the screen" was asserted repeatedly from measuring
+    only the effects layer. **Measure the layer you are making claims about.**
+    And the commit that finally read correctly end to end — `ea6030e`, a
+    fountain with a visible sideways lerp — was passed straight through on the
+    way to something better, twice. **A version with one named defect is a
+    baseline; keep it, and fix the named defect.** The rebaseline did exactly
+    that: `ea6030e`'s two-population fountain, with the lerp replaced by a
+    ballistic track that ends on the landing by construction.
+
+    A fifth defect surfaced on the first run of that rebaseline, and it is the
+    cleanest illustration of the whole entry. The new arc opened its throw the
+    moment the record went above the map — `world_y < 0` — on the reasoning
+    that the ROM parks a fireball above its landing column. Every throw in the
+    fountain then resolved to column 144. The reason is one build: the record
+    climbs **up the crater column** and crosses `y = 0` there, and the
+    sideways teleport to the landing column happens afterwards. `world_y < 0`
+    was true for the climber too.
+
+    Naming the phases had been done from `+$1C` velocity and from reading the
+    script; it had never been done by **watching one record through one whole
+    cycle**. Twenty lines of probe output settled it, and the same output
+    handed over the build-level cadence (26 builds climbing, 77 waiting, 20
+    descending) that the final shape rests on: the climb is the first half of
+    the throw, the descent the second, and the wait therefore falls on the
+    apex, which is the one place an actor can be withheld without the eye
+    noticing. **Print the state machine before writing the predicate that
+    reads it.**
+
+    And that apex hole was still wrong. Hiding an actor at the apex is cheap
+    for one frame; the countdown is 76 frames of a 93-frame flight, so the
+    fireball vanished for two thirds of its life and came back — which is
+    exactly what the next round of snapshots showed. The fix came from the
+    user, not from the code: *if we know how long the wait should be, adjust
+    the launch speed and angle so the motion itself acts as the countdown.*
+    That reframes the whole thing. The clock is not the record's position at
+    all — it is **frames to the landing**, which spans the countdown because
+    `+$22` counts it down live, and the throw is sized to fill that time
+    rather than to cover its distance: with gravity fixed `apex = T^2/k`, so a
+    long countdown simply means a higher, slower lob. Nothing is hidden and
+    nothing hangs.
+
+    The lesson is about where the clock came from each time. Position, then
+    descent pixels, then script frames — three attempts, each picked because
+    it was the quantity already in hand, none picked by asking **what is the
+    thing this curve is actually a function of**. It is a function of time to
+    impact, and once that is said out loud the rest follows: `+$22` is the
+    only place the in-progress wait exists, and the apex is whatever fills the
+    remaining time.
+
+    A last one on re-derivation. The launch point was placed by working the
+    volcano's summit out from the stamp's authored geometry — cell row, height
+    in cells, `face_height_scale`, `face_depth_scale`, `kVolcanoHeightScale` —
+    and one term was taken from the wrong origin: the down-map drop was
+    measured from the mountain's baseline instead of from the script's own
+    crater row, putting the launch ten pixels low. It showed from the default
+    camera and not from a horizontal one, because pitch decides how much of a
+    map-row error reaches the screen at all. The user's answer was the right
+    one and it was not "fix the arithmetic": *reference the smoke effect we
+    already have at the crater*. `AppendVolcanoEffects` had computed that
+    point all along, leaned and exact, to place the glow ring — so the arc now
+    asks the model where its mouth is instead of recomputing it alongside.
+    **When two pieces of code need the same derived point, one of them should
+    ask the other**, or they will agree until the day the model is retuned.
+
 Process lessons folded out of statement-then-correction text elsewhere; the docs now state final
 truths, and the journey that earned them lives here.
 
