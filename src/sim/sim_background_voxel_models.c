@@ -706,6 +706,18 @@ enum {
   kWindmillFrameCount = 3,
 };
 
+/* Depth of the rotor plane. Blades occupy `plane .. plane + 0.6` and the hub
+ * cap another 0.4 in front of that, which puts the cap at y = 16.0 -- exactly
+ * the mill's depth bound (pinned by the model test). So the rotor CANNOT be
+ * moved outward to clear the wall detail it was cutting through: there is no
+ * room in front of it. The detail moves back instead, to
+ * kWindmillWallDetailFront. */
+static const float kWindmillBladePlane = 15.0f;
+static const float kWindmillHubCapCover = 1.0f;
+/* Front face of the wall detail the blades sweep past. Behind the rotor plane
+ * by the same 0.4 the hub cap stands proud of it on the other side. */
+static const float kWindmillWallDetailFront = 14.6f;
+
 static void BuildWindmill(const SimBackgroundVoxelObject *object,
                           SimBackgroundVoxelDetail detail,
                           SimBackgroundVoxelModel *model) {
@@ -730,8 +742,8 @@ static void BuildWindmill(const SimBackgroundVoxelObject *object,
                 kSimVoxelMaterial_Roof, kSimVoxelMaterial_WallLight);
   AddStandardBox(model, 13.5f, 14.0f, 2.0f, 18.5f, 15.5f, 9.0f,
                  kSimVoxelMaterial_Dark);
-  AddStandardBox(model, 14.0f, 14.1f, 18.0f, 18.0f, 15.2f, 22.0f,
-                 kSimVoxelMaterial_Wood);
+  AddStandardBox(model, 14.0f, 14.1f, 18.0f, 18.0f,
+                 kWindmillWallDetailFront, 22.0f, kSimVoxelMaterial_Wood);
 
   /* The wheel is four-fold symmetric, so its whole visual period is the 90
    * degrees the authentic art divides into three steps. The per-record offset
@@ -743,11 +755,17 @@ static void BuildWindmill(const SimBackgroundVoxelObject *object,
       quarter_turn * (float)phase / (float)kWindmillFrameCount;
   const float dx = cosf(angle);
   const float dz = sinf(angle);
-  AddBlade(model, 16.0f, 15.0f, 21.0f, dx, dz);
-  AddBlade(model, 16.0f, 15.0f, 21.0f, -dz, dx);
-  AddBlade(model, 16.0f, 15.0f, 21.0f, -dx, -dz);
-  AddBlade(model, 16.0f, 15.0f, 21.0f, dz, -dx);
-  AddStandardBox(model, 14.3f, 14.6f, 19.3f, 17.7f, 16.0f, 22.7f,
+  /* The blades span y = plane .. plane + 0.6. What they were cutting through
+   * is the wall detail that used to reach y = 15.2 -- the hub frame over
+   * x 14-18, z 18-22, wider than the blades' 2.2 inner radius, and the two
+   * upper windows at a radius the blade TIPS sweep. Both are now held back to
+   * kWindmillWallDetailFront so the rotor passes cleanly in front. */
+  AddBlade(model, 16.0f, kWindmillBladePlane, 21.0f, dx, dz);
+  AddBlade(model, 16.0f, kWindmillBladePlane, 21.0f, -dz, dx);
+  AddBlade(model, 16.0f, kWindmillBladePlane, 21.0f, -dx, -dz);
+  AddBlade(model, 16.0f, kWindmillBladePlane, 21.0f, dz, -dx);
+  AddStandardBox(model, 14.3f, 14.6f, 19.3f, 17.7f,
+                 kWindmillBladePlane + kWindmillHubCapCover, 22.7f,
                  kSimVoxelMaterial_Wood);
 
   if (detail >= kSimBackgroundVoxelDetail_Balanced) {
@@ -761,14 +779,14 @@ static void BuildWindmill(const SimBackgroundVoxelObject *object,
                    kSimVoxelMaterial_Trim);
   }
   if (detail >= kSimBackgroundVoxelDetail_High) {
-    AddBladeInlay(model, 16.0f, 15.0f, 21.0f, dx, dz);
-    AddBladeInlay(model, 16.0f, 15.0f, 21.0f, -dz, dx);
-    AddBladeInlay(model, 16.0f, 15.0f, 21.0f, -dx, -dz);
-    AddBladeInlay(model, 16.0f, 15.0f, 21.0f, dz, -dx);
-    AddStandardBox(model, 9.5f, 14.0f, 10.0f, 12.5f, 15.2f, 14.0f,
-                   kSimVoxelMaterial_Dark);
-    AddStandardBox(model, 19.5f, 14.0f, 10.0f, 22.5f, 15.2f, 14.0f,
-                   kSimVoxelMaterial_Dark);
+    AddBladeInlay(model, 16.0f, kWindmillBladePlane, 21.0f, dx, dz);
+    AddBladeInlay(model, 16.0f, kWindmillBladePlane, 21.0f, -dz, dx);
+    AddBladeInlay(model, 16.0f, kWindmillBladePlane, 21.0f, -dx, -dz);
+    AddBladeInlay(model, 16.0f, kWindmillBladePlane, 21.0f, dz, -dx);
+    AddStandardBox(model, 9.5f, 14.0f, 10.0f, 12.5f,
+                   kWindmillWallDetailFront, 14.0f, kSimVoxelMaterial_Dark);
+    AddStandardBox(model, 19.5f, 14.0f, 10.0f, 22.5f,
+                   kWindmillWallDetailFront, 14.0f, kSimVoxelMaterial_Dark);
     AddStandardBox(model, 14.5f, 3.0f, 30.0f, 17.5f, 14.0f, 31.0f,
                    kSimVoxelMaterial_RoofLight);
   }
