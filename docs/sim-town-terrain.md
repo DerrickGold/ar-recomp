@@ -112,10 +112,12 @@ inpainting.
 Terrain topology is static per town, while the rendered town artwork remains
 live. This split is deliberate: the ROM-versus-live audit found 173–335 changed
 cells per town, all gameplay/structure stamps, with no cliff or seam changes.
-`SimTownCanvas` still watches the live 64×64 BG1 tilemap and increments its
-serial whenever the earthquake or another event redraws tiles; the background
-voxel scene rebuilds from that serial. The baked terrain API takes only town
-and position, so the event cannot accidentally regenerate a different mesh.
+`SimTownCanvas` watches the live 64×64 BG1 tilemap, BG1 character data, and
+palette, and increments its serial whenever any of them changes the rendered
+town. The earthquake therefore publishes its new artwork regardless of which
+native source carries the transition; the background voxel ground rebuilds
+from that same serial. The baked terrain API takes only town and position, so
+the event cannot accidentally regenerate a different mesh.
 
 For Marahna, every cell—including one currently covered by water—already has a
 height. The initial still-water area is level at its audited water datum. When
@@ -125,6 +127,16 @@ apply the height map only after reveal, and we do not flatten the whole region
 at the event boundary. The revealed basin/causeway is flat where the water-body
 rule made it flat, then joins surrounding relief through the same welded edges.
 This avoids a terrain pop while preserving the native before/after map change.
+
+There is intentionally no separate "earthquake terrain visible" flag. The
+pre-event water and post-event land are two live images of one immutable
+surface. `sim_town_canvas_test` exercises a complete 16×16 Marahna-style
+water-to-land redraw, including its exact dirty rectangle and serial advance;
+`sim_background_voxels_test` proves that the cleaned enhanced ground retains
+the old water image until that serial advances and then publishes the revealed
+land. The offline terrain audit separately requires every Marahna still-water
+body to remain level, so the hidden state cannot expose relief through the
+water before the native event reveals its artwork.
 
 ## Depth and flight contracts
 

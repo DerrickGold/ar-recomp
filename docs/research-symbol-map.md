@@ -355,7 +355,10 @@ polymorphic fields and temporary direct-page values should remain local.
 | `$7E:035A/$035B` | `CopEventRequest` / `BrkSfxRequest` | Software-interrupt request ports (music/event id, SFX id). |
 | `$7F:6B18` | `RegionCompletionFlags` | Six-region completion bitset checked by the post-Death-Heim return stager. |
 | `$7E:C000-$FFFF` | `WorldMapScratch` | Shared scratch. It is a world-map shadow only during `$19=09` build/presentation; acts clobber rows 0-79 and towns reuse rows 0-7, so handwritten rendering must not treat it as persistent state. |
-| `$7F:2000-$37FF` | `TownTerrainCellMaps` | Six quadrant-paged 32x32 town maps consumed by the developed-world composer. |
+| `$7F:0000-$1FFF` | `TownBg1Tilemap` | Live quadrant-paged 64x64-tile town image. Each 32x32 town cell owns four words at `+$00/+$02/+$40/+$42`; this is the displayed-art authority during staged changes. |
+| `$7E:2100-$28FF` | `TownTerrainMetatileDefinitions` | Loaded terrain atlas, 256 entries of four tilemap words, consumed by `$03:9B5A`. |
+| `$7E:3100-$38FF` | `TownStructureMetatileDefinitions` | Loaded structure atlas, 256 entries of four tilemap words, consumed by `$03:9C43`. |
+| `$7F:2000-$37FF` | `TownTerrainCellMaps` | Six quadrant-paged 32x32 semantic town maps consumed by traversal, reconstruction, and the developed-world composer. They are not the displayed-art authority during staged changes; use the live 2x2 words at `$7F:0000-$1FFF` for that. |
 | `$7F:9101` | `WorldStateFlags` | Bit 0 controls the builder's 8x8 clear at tilemap offset `$0660`. |
 | `$7E:0A00+` | `SimWorldRecords` | 44 stride-38 simulation world records. |
 | `$7E:0AEE/$0AF0` | `SimCameraTargetX/Y` | Town camera-follow target. |
