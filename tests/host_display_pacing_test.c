@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "host_display.h"
 #include "host_display_pacing.h"
 
 static const uint64_t kEmulationFrameIntervalNs = 16639267ull;
@@ -88,6 +89,17 @@ static void TestGamePresentAntiSpinFloor(void) {
             Options(kRefreshMode_Vsync, 60, 60, false),
             kEmulationFrameIntervalNs) ==
         8333333ull);
+}
+
+static void TestEmulatedFramePresentModes(void) {
+  CHECK(HostDisplay_EmulatedFramePresentMode(false, false) ==
+        kHostDisplayPresent_GameTick);
+  CHECK(HostDisplay_EmulatedFramePresentMode(false, true) ==
+        kHostDisplayPresent_GameTick);
+  CHECK(HostDisplay_EmulatedFramePresentMode(true, false) ==
+        kHostDisplayPresent_None);
+  CHECK(HostDisplay_EmulatedFramePresentMode(true, true) ==
+        kHostDisplayPresent_HeadlessVideo);
 }
 
 static void TestSub60LimitsRetainElapsedTime(void) {
@@ -185,6 +197,7 @@ int main(void) {
   TestUnlimitedAndVsyncPolicies();
   TestUiAndPausedIntervals();
   TestGamePresentAntiSpinFloor();
+  TestEmulatedFramePresentModes();
   TestSub60LimitsRetainElapsedTime();
   TestWindowAxisToOutput();
   if (s_failure_count) {

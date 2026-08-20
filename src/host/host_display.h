@@ -5,10 +5,27 @@
 #include <stdint.h>
 
 typedef enum HostDisplayPresentMode {
+  kHostDisplayPresent_None,
   kHostDisplayPresent_GameTick,
+  /* A visual-regression run is still headless for input, timing, and save
+   * policy, but owns a hidden real GPU window. Submit every emulated tick
+   * without the host throttle so automation exercises the compositor as fast
+   * as the platform's swapchain permits. */
+  kHostDisplayPresent_HeadlessVideo,
   kHostDisplayPresent_Paused,
   kHostDisplayPresent_Menu,
 } HostDisplayPresentMode;
+
+/* Resolve whether an emulated tick is discarded, presented interactively, or
+ * sent through the host-unpaced hidden compositor. Keeping this policy explicit
+ * prevents AR_HEADLESS_VIDEO from allocating a renderer that the frame loop
+ * then silently bypasses. */
+static inline HostDisplayPresentMode HostDisplay_EmulatedFramePresentMode(
+    bool headless, bool headless_video) {
+  if (!headless) return kHostDisplayPresent_GameTick;
+  return headless_video ? kHostDisplayPresent_HeadlessVideo
+                        : kHostDisplayPresent_None;
+}
 
 /* Row capacity of every host-side ARGB frame surface. 240 covered the authentic
  * 224 lines plus the 239-line overscan mode; it now also has to cover the
@@ -31,6 +48,7 @@ void HostDisplay_ApplyWindowMode(void);
 void HostDisplay_UpdateProperties(void);
 void HostDisplay_PollProperties(void);
 void HostDisplay_ApplyRefreshVsync(void);
+void HostDisplay_DisableVsync(void);
 bool HostDisplay_WindowPointToOutput(int window_x, int window_y,
                                     int *output_x, int *output_y);
 
