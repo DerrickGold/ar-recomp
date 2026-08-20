@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "constants.h"
 #include "quintet_lzss.h"
 
 enum {

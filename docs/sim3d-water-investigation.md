@@ -104,9 +104,9 @@ them are visible.
 
 | Source | Drawn by | Space | Water identified how |
 |---|---|---|---|
-| Live BG1 capture (`Bg1Low`/`Bg1High`) | `DrawSimGroundPlane`, `src/present_sim3d.c:138` | captured screen | town-space mask, offset by `camera_x/y` |
-| Town canvas, 512² | `DrawSimTownCanvas` → `DrawSimGroundExtension`, `src/present_sim3d.c:2444` | town | §1c, built in `SimTownCanvas_Render` |
-| World-map underlay, 1024² + blurred mip | `DrawSimWorldUnderlay`, `src/present_sim3d.c:2376` | world map | §1d, built in `SimWorldMap_Bake` |
+| Live BG1 capture (`Bg1Low`/`Bg1High`) | `DrawSimGroundPlane`, `src/present_sim3d_project.c` | captured screen | town-space mask, offset by `camera_x/y` |
+| Town canvas, 512² | `DrawSimTownCanvas` → `DrawSimGroundExtension`, `src/present_sim3d.c` | town | §1c, built in `SimTownCanvas_Render` |
+| World-map underlay, 1024² + blurred mip | `DrawSimWorldUnderlay`, `src/present_sim3d.c` | world map | §1d, built in `SimWorldMap_Bake` |
 
 All three are `SDL_RenderGeometry` calls over a projected mesh, so one
 fragment shader covers all three. Everything spatial — the bed, the sheen
@@ -199,7 +199,7 @@ The model:
    pool comes out a pale grey haze — this was measured, not assumed. Note the
    ground plane itself must stay **opaque**: it is the backing that stops the
    world-map underlay showing through (see the comment at
-   `src/present_sim3d.c:2444`). All of the transparency is internal to the
+   `src/present_sim3d.c`). All of the transparency is internal to the
    shader.
 4. **Only the tile's bright pixels return, as glints.** Threshold the ROM art
    on luminance and let the light dashes through as reflections on the glass.
@@ -209,7 +209,7 @@ The model:
    true fresnel term is constant too. Flat is the correct answer here, not a
    shortcut.
 6. **One broad sheen band raking across the sheet**, running along the light
-   azimuth from `SimShadowLight()` (`src/present_sim3d.c:766`) so it agrees
+   azimuth from `SimShadowLight()` (`src/present_sim3d_shadows.c`) so it agrees
    with the shadow direction instead of implying a second sun; elevation sets
    brightness only, never position. Repeating rather than a single lobe, so
    the open ocean beyond the town catches it too. No time term.

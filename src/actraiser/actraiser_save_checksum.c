@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "constants.h"
 #include "cpu_65816_math.h"
 #include "save_system.h"
 

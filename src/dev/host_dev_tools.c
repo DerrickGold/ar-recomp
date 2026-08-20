@@ -2,7 +2,6 @@
 #include "host_dev_tools.h"
 
 #include "dev_tools.h"
-#include "diorama/diorama_planes.h"
 #include "host/host_input.h"
 #include "present.h"
 #include "scene_inspector.h"

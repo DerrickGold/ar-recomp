@@ -6,7 +6,6 @@
 #include <stdlib.h>
 
 #include "action/action_bg_metatile.h"
-#include "constants.h"
 #include "cpu_65816_math.h"
 
 enum {

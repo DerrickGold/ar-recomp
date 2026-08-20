@@ -134,8 +134,9 @@ boundary—without pretending a text search can judge every numeric literal.
 
 This repo already follows that line: `settings.ini`, `diorama-layers.ini`,
 `game-assets/manifest.ini` and the music manifest are all end-user surface, and
-`recomp/symbols.toml` is build-time input that *generates* cfg directives. Both
-kinds earn their file.
+each earns its file. The build-time half of the rule is so far only planned —
+`specs/ar-recomp-mod-support.md` proposes `recomp/symbols.toml` as input that
+*generates* cfg directives; nothing in the repo reads it yet.
 
 The settings **descriptor table** is the instructive counter-example, because it
 looks externalizable and is not. Five of its columns — `field`, `available`,
@@ -271,6 +272,12 @@ changes what old checkpoints render.
    ```bash
    clang -fsyntax-only -std=gnu11 -Isrc -Irecomp -Ithird_party/stb -I/opt/homebrew/include -Werror=implicit-function-declaration -Werror=implicit-int src/<file>.c
    ```
+
+   All 125 hand-written sources pass this as of 2026-08-20, so it is a clean
+   gate rather than a haystack: any failure is new. It has already caught two —
+   one introduced by an include trim in the voxel-renderer split, and one
+   pre-existing call in `actraiser_rtl.c` whose only declaration sat inside a
+   later function.
 
 Add `AR_HEADLESS_VIDEO=1` for anything present-side; without a renderer the shot
 falls back to dumping `g_pixels` and every present-side change compares equal.
