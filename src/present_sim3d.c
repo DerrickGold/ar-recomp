@@ -1376,7 +1376,15 @@ static SDL_Texture *EnsureSimShadowTexture(int w, int h) {
  *
  * Two passes over one axis each, ping-ponging through the scratch target:
  * the shader costs two full-target draws rather than the fallback's 2N. */
-enum { kSimShadowBlurTaps = 7 };
+enum {
+  kSimShadowBlurTaps = 7,
+  /* A pair of full-size ARGB shadow targets costs about 63 MiB at 4K before
+   * backend alignment. Shadows contain only soft silhouettes, so cap their
+   * working resolution at roughly 1440p and let linear sampling restore the
+   * viewport size. This leaves 1080p and 1440p untouched while bounding 4K+
+   * memory and fill cost. */
+  kSimShadowMaxTargetPixels = 4 * 1024 * 1024,
+};
 
 static bool EnsureSimShadowBlurShader(void) {
   if (s_sim_shadow_blur_attempted)
@@ -1533,11 +1541,15 @@ static void DrawSimShadowMask(
   /* An empty mask contributes nothing. Avoid a full-viewport target clear,
    * optional fourteen-draw blur and full-viewport composite on such frames. */
   if (!any_caster && !voxel_caster) return;
-  SDL_Texture *mask = EnsureSimShadowTexture(viewport.w, viewport.h);
+  int shadow_w, shadow_h;
+  Scene3D_CappedTargetSize(
+      viewport.w, viewport.h, kSimShadowMaxTargetPixels,
+      &shadow_w, &shadow_h);
+  SDL_Texture *mask = EnsureSimShadowTexture(shadow_w, shadow_h);
   if (!mask) return;
 
-  SDL_Rect local_viewport = { 0, 0, viewport.w, viewport.h };
-  float unit_x = ((float)viewport.w / (float)viewport.h) / (float)source.w;
+  SDL_Rect local_viewport = { 0, 0, shadow_w, shadow_h };
+  float unit_x = ((float)shadow_w / (float)shadow_h) / (float)source.w;
   float unit_y = 1.0f / (float)source.h;
   float light_x, light_y;
   SimShadowLight(slot, &light_x, &light_y);
@@ -1661,7 +1673,7 @@ static void DrawSimShadowMask(
   }
 
   if (soft_shadows)
-    BlurSimShadowMask(mask, viewport.w, viewport.h,
+    BlurSimShadowMask(mask, shadow_w, shadow_h,
                       slot->sim.shadow_softness_pct);
 
   SDL_SetRenderTarget(g_renderer, CrtPost_BaseTarget());

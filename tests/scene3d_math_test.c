@@ -360,6 +360,27 @@ int main(void) {
   CHECK(isfinite(long_running));
   CHECK(long_running >= 0.0f && long_running < 1.0f);
 
+  /* Working targets stay native through 1440p, halve once at 4K, and keep
+   * halving for unusually large outputs. Odd sizes use ceil division so the
+   * last source row/column is never silently discarded. */
+  int target_width = 0, target_height = 0;
+  Scene3D_CappedTargetSize(
+      2560, 1440, UINT64_C(4) * 1024 * 1024,
+      &target_width, &target_height);
+  CHECK(target_width == 2560 && target_height == 1440);
+  Scene3D_CappedTargetSize(
+      3840, 2160, UINT64_C(4) * 1024 * 1024,
+      &target_width, &target_height);
+  CHECK(target_width == 1920 && target_height == 1080);
+  Scene3D_CappedTargetSize(
+      7680, 4320, UINT64_C(4) * 1024 * 1024,
+      &target_width, &target_height);
+  CHECK(target_width == 1920 && target_height == 1080);
+  Scene3D_CappedTargetSize(
+      5001, 3001, UINT64_C(4) * 1024 * 1024,
+      &target_width, &target_height);
+  CHECK(target_width == 2501 && target_height == 1501);
+
   /* The ground's away-from-camera direction. Anything a tilted camera pushes
    * "back" - the mountain relief stack, the model lean - has to follow this
    * rather than map north, or it fans out sideways as soon as the camera

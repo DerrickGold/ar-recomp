@@ -123,6 +123,20 @@ float Scene3D_AutoFitDistance(float fov_y) {
   return 0.5f / tanf(fov_y * 0.5f);
 }
 
+void Scene3D_CappedTargetSize(int viewport_width, int viewport_height,
+                              uint64_t maximum_pixels,
+                              int *target_width, int *target_height) {
+  int width = viewport_width > 0 ? viewport_width : 1;
+  int height = viewport_height > 0 ? viewport_height : 1;
+  while ((uint64_t)width * (uint64_t)height > maximum_pixels &&
+         width > 1 && height > 1) {
+    width = width / 2 + width % 2;
+    height = height / 2 + height % 2;
+  }
+  if (target_width) *target_width = width;
+  if (target_height) *target_height = height;
+}
+
 float Scene3D_WrappedTextureOffset(uint64_t elapsed_ms,
                                    float units_per_second,
                                    float speed_scale) {
