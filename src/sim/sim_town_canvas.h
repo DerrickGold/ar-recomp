@@ -41,6 +41,17 @@ enum {
 
 void SimTownCanvas_Reset(void);
 
+typedef enum SimTownCanvasChange {
+  kSimTownCanvasChange_None = 0,
+  /* The composed 64x64 tile layout changed. This is the only canvas input
+   * that can change enhanced object classification; character animation,
+   * palette cycling and display fades are pixel-only publications. */
+  kSimTownCanvasChange_Tilemap = 1 << 0,
+  kSimTownCanvasChange_Characters = 1 << 1,
+  kSimTownCanvasChange_Palette = 1 << 2,
+  kSimTownCanvasChange_Display = 1 << 3,
+} SimTownCanvasChange;
+
 /* Game thread, once a frame. Re-renders only when the tilemap, the character
  * data or the palette has actually changed, so a still town costs three
  * memcmps. `brightness` is the PPU's INIDISP level, applied the same way the
@@ -52,6 +63,14 @@ void SimTownCanvas_Render(uint8_t town, const uint8 *wram,
 uint8_t SimTownCanvas_Town(void);
 /* Changes whenever the rendered image does; zero means nothing to draw. */
 uint32_t SimTownCanvas_Serial(void);
+/* Independent source revisions let downstream presentation invalidate only
+ * the work owned by that source. A revision advances even when the changed
+ * source is currently unused and therefore leaves the image serial alone. */
+uint32_t SimTownCanvas_TilemapSerial(void);
+uint32_t SimTownCanvas_CharacterSerial(void);
+uint32_t SimTownCanvas_PaletteSerial(void);
+uint32_t SimTownCanvas_DisplaySerial(void);
+uint32_t SimTownCanvas_LastChangeMask(void);
 
 /* Takes one coalesced tile-row region rewritten since the previous drain, in
  * town pixels. Call until false; a quiet town returns false immediately. */

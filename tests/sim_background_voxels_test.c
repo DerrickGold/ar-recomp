@@ -126,7 +126,7 @@ static void CheckMountainOcclusionReach(void) {
   static uint32_t pixels[kSimTownCanvasPixels * kSimTownCanvasPixels];
   static uint16_t vram[kVramWords];
   SimBackgroundVoxels_Reset();
-  SimBackgroundVoxels_Build(1, wram, pixels, vram, 1, true);
+  SimBackgroundVoxels_Build(1, wram, pixels, vram, 1, 1, true);
 
   CHECK(SimBackgroundVoxels_CellIsMountain(10, 20));
   CHECK(SimBackgroundVoxels_CellIsMountain(10, 21));
@@ -164,7 +164,8 @@ static void CheckMarahnaEarthquakeCanvasRebuild(void) {
 
   SimBackgroundVoxels_Reset();
   SimBackgroundVoxels_Build(
-      kMarahnaTown, wram, pixels, vram, water_canvas_serial, true);
+      kMarahnaTown, wram, pixels, vram,
+      water_canvas_serial, water_canvas_serial, true);
   const size_t centre =
       (size_t)(revealed_y * kSimBackgroundCellPixels +
                kSimBackgroundCellPixels / 2) * kSimTownCanvasPixels +
@@ -176,14 +177,86 @@ static void CheckMarahnaEarthquakeCanvasRebuild(void) {
 
   FillCell(pixels, revealed_x, revealed_y, land);
   SimBackgroundVoxels_Build(
-      kMarahnaTown, wram, pixels, vram, water_canvas_serial, true);
+      kMarahnaTown, wram, pixels, vram,
+      water_canvas_serial, water_canvas_serial, true);
   CHECK(SimBackgroundVoxels_Serial() == water_serial);
   CHECK(SimBackgroundVoxels_GroundPixels()[centre] == water);
 
   SimBackgroundVoxels_Build(
-      kMarahnaTown, wram, pixels, vram, land_canvas_serial, true);
+      kMarahnaTown, wram, pixels, vram,
+      land_canvas_serial, land_canvas_serial, true);
   CHECK(SimBackgroundVoxels_Serial() != water_serial);
   CHECK(SimBackgroundVoxels_GroundPixels()[centre] == land);
+}
+
+static void CheckIndependentSceneAndPixelPublications(void) {
+  static uint8_t wram[kWramBytes];
+  static uint16_t vram[kVramWords];
+  static uint32_t pixels[kSimTownCanvasPixels * kSimTownCanvasPixels];
+  memset(wram, 0, sizeof(wram));
+  memset(vram, 0, sizeof(vram));
+  for (size_t at = 0;
+       at < (size_t)kSimTownCanvasPixels * kSimTownCanvasPixels; at++)
+    pixels[at] = 0xFF647814;
+
+  SimBackgroundVoxels_Reset();
+  SimBackgroundVoxels_ResetBuildStats();
+  SimBackgroundVoxels_Build(1, wram, pixels, vram, 1, 1, true);
+  SimBackgroundVoxelBuildStats stats = SimBackgroundVoxels_BuildStats();
+  CHECK(stats.build_calls == 1);
+  CHECK(stats.scene_rebuilds == 1);
+  CHECK(stats.pixel_refreshes == 1);
+  uint32_t scene_serial = SimBackgroundVoxels_SceneSerial();
+  uint32_t ground_serial = SimBackgroundVoxels_GroundSerial();
+  uint32_t atlas_serial = SimBackgroundVoxels_AtlasSerial();
+  int x, y, width, height;
+  CHECK(SimBackgroundVoxels_TakeGroundDirtyRect(
+      &x, &y, &width, &height));
+  CHECK(x == 0 && y == 0 && width == kSimTownCanvasPixels &&
+        height == kSimTownCanvasPixels);
+  CHECK(!SimBackgroundVoxels_TakeGroundDirtyRect(
+      &x, &y, &width, &height));
+
+  /* A live pixel update keeps the classified scene and mountain atlas, and
+   * publishes only the enhanced-ground pixel that actually changed. */
+  pixels[0] = 0xFF102030;
+  SimBackgroundVoxels_Build(1, wram, pixels, vram, 2, 1, true);
+  stats = SimBackgroundVoxels_BuildStats();
+  CHECK(stats.build_calls == 2);
+  CHECK(stats.scene_rebuilds == 1);
+  CHECK(stats.pixel_refreshes == 2);
+  CHECK(SimBackgroundVoxels_SceneSerial() == scene_serial);
+  CHECK(SimBackgroundVoxels_GroundSerial() != ground_serial);
+  CHECK(SimBackgroundVoxels_AtlasSerial() == atlas_serial);
+  CHECK(SimBackgroundVoxels_TakeGroundDirtyRect(
+      &x, &y, &width, &height));
+  CHECK(x == 0 && y == 0 && width == 1 && height == 1);
+  CHECK(!SimBackgroundVoxels_TakeGroundDirtyRect(
+      &x, &y, &width, &height));
+
+  /* A quiet call does no publication work. */
+  SimBackgroundVoxels_Build(1, wram, pixels, vram, 2, 1, true);
+  stats = SimBackgroundVoxels_BuildStats();
+  CHECK(stats.build_calls == 3);
+  CHECK(stats.scene_rebuilds == 1);
+  CHECK(stats.pixel_refreshes == 2);
+
+  /* Record +3 is a live action byte, not a classification input. */
+  wram[kRecords + 3] = 1;
+  SimBackgroundVoxels_Build(1, wram, pixels, vram, 2, 1, true);
+  stats = SimBackgroundVoxels_BuildStats();
+  CHECK(stats.build_calls == 4);
+  CHECK(stats.scene_rebuilds == 1);
+  CHECK(stats.pixel_refreshes == 2);
+
+  /* Structure records are an independent topology source. Detect them even
+   * before the live tilemap/image serial advances. */
+  wram[kRecords + 2] = 0x80;
+  SimBackgroundVoxels_Build(1, wram, pixels, vram, 2, 1, true);
+  stats = SimBackgroundVoxels_BuildStats();
+  CHECK(stats.scene_rebuilds == 2);
+  CHECK(stats.pixel_refreshes == 3);
+  CHECK(SimBackgroundVoxels_SceneSerial() != scene_serial);
 }
 
 /* A windmill's state comes from the frame its plot is drawing, not from the
@@ -396,7 +469,7 @@ static void CheckStoneBridgeClassificationAndInpaint(void) {
             ? 0xFFB0A080 : 0xFF204878;
       }
   SimBackgroundVoxels_Reset();
-  SimBackgroundVoxels_Build(1, wram, pixels, vram, 91, true);
+  SimBackgroundVoxels_Build(1, wram, pixels, vram, 91, 91, true);
   const uint32_t *ground = SimBackgroundVoxels_GroundPixels();
   const uint32_t *atlas = SimBackgroundVoxels_AtlasPixels();
   size_t deck = (size_t)(10 * 16 + 8) * kSimTownCanvasPixels + 10 * 16 + 8;
@@ -537,7 +610,7 @@ int main(void) {
   CHECK(shrubs == 2);
   CHECK(shrub_beside_wood == 1);
 
-  SimBackgroundVoxels_Build(1, wram, pixels, vram, 1, true);
+  SimBackgroundVoxels_Build(1, wram, pixels, vram, 1, 1, true);
   const uint32_t *atlas = SimBackgroundVoxels_AtlasPixels();
   const uint32_t *ground = SimBackgroundVoxels_GroundPixels();
   size_t house_corner = (size_t)(5 * 16) * kSimTownCanvasPixels + 4 * 16;
@@ -564,7 +637,7 @@ int main(void) {
   uint32_t first_serial = SimBackgroundVoxels_Serial();
   SimBackgroundVoxels_Reset();
   CHECK(SimBackgroundVoxels_Serial() == 0);
-  SimBackgroundVoxels_Build(1, wram, pixels, vram, 1, true);
+  SimBackgroundVoxels_Build(1, wram, pixels, vram, 1, 1, true);
   CHECK(SimBackgroundVoxels_Serial() != 0);
   CHECK(SimBackgroundVoxels_Serial() != first_serial);
 
@@ -685,7 +758,7 @@ int main(void) {
   wram[TownCellIndex(5, 15, 14)] = 0xC3;
   wram[TownCellIndex(5, 14, 15)] = 0xCA;
   wram[TownCellIndex(5, 15, 15)] = 0xCB;
-  SimBackgroundVoxels_Build(6, wram, pixels, vram, 2, true);
+  SimBackgroundVoxels_Build(6, wram, pixels, vram, 2, 2, true);
   ground = SimBackgroundVoxels_GroundPixels();
   CHECK(ground[tree_center] == 0xFFFFFFFF);
   CHECK(ground[house_center] == 0xFFFFFFFF);
@@ -705,7 +778,7 @@ int main(void) {
   FillCell(pixels, 6, 6, 0xFFFFFFFF);
   SetSolidColourOneTile(vram, 1);
   SetCanvasTile(wram, 13, 13, 1);
-  SimBackgroundVoxels_Build(6, wram, pixels, vram, 3, true);
+  SimBackgroundVoxels_Build(6, wram, pixels, vram, 3, 3, true);
   atlas = SimBackgroundVoxels_AtlasPixels();
   size_t north_mountain_opaque =
       (size_t)(6 * 16 + 3) * kSimTownCanvasPixels + 6 * 16 + 12;
@@ -715,6 +788,7 @@ int main(void) {
   CheckWindmillFrames();
   CheckMountainOcclusionReach();
   CheckMarahnaEarthquakeCanvasRebuild();
+  CheckIndependentSceneAndPixelPublications();
   CheckStoneBridgeClassificationAndInpaint();
 
   if (failures) {

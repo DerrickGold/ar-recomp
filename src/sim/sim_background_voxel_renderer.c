@@ -106,6 +106,10 @@ static const SimBackgroundProjectionAxis kUprightProjectionAxis = {
 static struct {
   SDL_Texture *ground;
   uint32_t uploaded_serial;
+  uint32_t uploaded_ground_serial;
+  uint32_t uploaded_atlas_serial;
+  uint32_t uploaded_scene_serial;
+  bool mountain_atlas_ready;
   bool allocation_failed;
   uint32_t cache_stamp;
   SimBackgroundVoxelBiome biome;
@@ -145,9 +149,12 @@ void SimBackgroundVoxelRenderer_Upload(SDL_Renderer *renderer) {
   if (!renderer || !serial || serial == g_renderer_state.uploaded_serial ||
       g_renderer_state.allocation_failed)
     return;
-  if (!g_renderer_state.ground)
+  bool created_ground = false;
+  if (!g_renderer_state.ground) {
     g_renderer_state.ground = CreateCanvasTexture(
         renderer, SDL_SCALEMODE_LINEAR);
+    created_ground = g_renderer_state.ground != NULL;
+  }
   if (!g_renderer_state.ground) {
     g_renderer_state.allocation_failed = true;
     fprintf(stderr, "[sim-bg-voxels] texture allocation failed: %s\n",
@@ -155,29 +162,75 @@ void SimBackgroundVoxelRenderer_Upload(SDL_Renderer *renderer) {
     return;
   }
   int pitch = kSimTownCanvasPixels * (int)sizeof(uint32_t);
-  if (!SDL_UpdateTexture(g_renderer_state.ground, NULL,
-                         SimBackgroundVoxels_GroundPixels(), pitch)) {
-    fprintf(stderr, "[sim-bg-voxels] texture upload failed: %s\n",
-            SDL_GetError());
-    return;
+  uint32_t ground_serial = SimBackgroundVoxels_GroundSerial();
+  if (created_ground ||
+      ground_serial != g_renderer_state.uploaded_ground_serial) {
+    const uint32_t *ground = SimBackgroundVoxels_GroundPixels();
+    bool upload_ok = true;
+    bool uploaded_region = false;
+    if (!created_ground && g_renderer_state.uploaded_ground_serial) {
+      int x, y, width, height;
+      while (SimBackgroundVoxels_TakeGroundDirtyRect(
+                 &x, &y, &width, &height)) {
+        uploaded_region = true;
+        SDL_Rect dirty = {x, y, width, height};
+        if (!SDL_UpdateTexture(
+                g_renderer_state.ground, &dirty,
+                ground + (size_t)y * kSimTownCanvasPixels + x, pitch)) {
+          upload_ok = false;
+          break;
+        }
+      }
+    }
+    /* A new texture is undefined everywhere. A serial mismatch with no dirty
+     * region means a previous partial attempt failed after consuming its
+     * cursor; recover with one complete publication. */
+    if (created_ground || !g_renderer_state.uploaded_ground_serial ||
+        !uploaded_region) {
+      upload_ok = SDL_UpdateTexture(
+          g_renderer_state.ground, NULL, ground, pitch);
+      if (upload_ok) {
+        int x, y, width, height;
+        while (SimBackgroundVoxels_TakeGroundDirtyRect(
+                   &x, &y, &width, &height)) {}
+      }
+    }
+    if (!upload_ok) {
+      g_renderer_state.uploaded_ground_serial = 0;
+      fprintf(stderr, "[sim-bg-voxels] texture upload failed: %s\n",
+              SDL_GetError());
+      return;
+    }
+    g_renderer_state.uploaded_ground_serial = ground_serial;
   }
 
   const SimBackgroundVoxelScene *scene = SimBackgroundVoxels_Scene();
   bool mountains_required = scene->mountains.cell_count != 0;
-  if (mountains_required && !Sim3DDepthPass_UploadMountainAtlas(
-          renderer, SimBackgroundVoxels_AtlasPixels(),
-          kSimTownCanvasPixels, kSimTownCanvasPixels, pitch)) {
-    fprintf(stderr, "[sim-bg-voxels] GPU mountain atlas upload failed: %s\n",
-            SDL_GetError());
-    g_renderer_state.allocation_failed = true;
-    return;
+  uint32_t atlas_serial = SimBackgroundVoxels_AtlasSerial();
+  if (mountains_required &&
+      (!g_renderer_state.mountain_atlas_ready ||
+       atlas_serial != g_renderer_state.uploaded_atlas_serial)) {
+    if (!Sim3DDepthPass_UploadMountainAtlas(
+            renderer, SimBackgroundVoxels_AtlasPixels(),
+            kSimTownCanvasPixels, kSimTownCanvasPixels, pitch)) {
+      fprintf(stderr, "[sim-bg-voxels] GPU mountain atlas upload failed: %s\n",
+              SDL_GetError());
+      g_renderer_state.allocation_failed = true;
+      return;
+    }
+    g_renderer_state.uploaded_atlas_serial = atlas_serial;
+    g_renderer_state.mountain_atlas_ready = true;
   }
 
-  g_renderer_state.biome = SimBackgroundVoxelBiome_ForTown(scene->town);
-  for (uint16_t i = 0; i < scene->object_count; i++)
-    SimBackgroundVoxelPalette_Build(
-        &scene->objects[i], g_renderer_state.biome,
-        &g_renderer_state.palettes[i]);
+  uint32_t scene_serial = SimBackgroundVoxels_SceneSerial();
+  if (scene_serial != g_renderer_state.uploaded_scene_serial) {
+    g_renderer_state.biome = SimBackgroundVoxelBiome_ForTown(scene->town);
+    for (uint16_t i = 0; i < scene->object_count; i++)
+      SimBackgroundVoxelPalette_Build(
+          &scene->objects[i], g_renderer_state.biome,
+          &g_renderer_state.palettes[i]);
+    g_renderer_state.uploaded_scene_serial = scene_serial;
+  }
   g_renderer_state.uploaded_serial = serial;
 }
 
@@ -572,6 +625,16 @@ static struct {
   SimTerrainProjectedQuad quads[kMaxTerrainDepthQuads];
 } s_terrain_projection_cache;
 
+/* Actor-band clipping asks only for the extrema of the same immutable terrain
+ * projection. Keep that tiny result separately because the interleaved path
+ * requests it before the main depth pass has necessarily populated the quad
+ * cache (for example when terrain shadows are disabled). */
+static struct {
+  bool valid;
+  float minimum, maximum;
+  SimTerrainProjectionKey key;
+} s_terrain_depth_range_cache;
+
 static SimTerrainDepthCell *TerrainDepthCell(int x, int y) {
   return &s_terrain_depth_cache.cell[
       y * kSimTownTerrainCells + x];
@@ -598,10 +661,10 @@ static float TerrainUnitsToPixels(
       height_units, (float)params->landscape_height_pct);
 }
 
-static bool TerrainProjectionKeyMatches(
+static bool TerrainProjectionKeyEquals(
+    const SimTerrainProjectionKey *key,
     const SimBackgroundVoxelRenderParams *params) {
-  const SimTerrainProjectionKey *key = &s_terrain_projection_cache.key;
-  return s_terrain_projection_cache.valid &&
+  return key && params &&
       key->town == params->town &&
       key->render_scale == params->render_scale &&
       key->landscape_height_pct == params->landscape_height_pct &&
@@ -619,12 +682,16 @@ static bool TerrainProjectionKeyMatches(
       memcmp(key->matrix, params->matrix, sizeof(key->matrix)) == 0;
 }
 
-static void BeginTerrainProjectionCache(
+static bool TerrainProjectionKeyMatches(
     const SimBackgroundVoxelRenderParams *params) {
-  s_terrain_projection_cache.valid = false;
-  s_terrain_projection_cache.overflow = false;
-  s_terrain_projection_cache.count = 0;
-  s_terrain_projection_cache.key = (SimTerrainProjectionKey){
+  return s_terrain_projection_cache.valid &&
+      TerrainProjectionKeyEquals(&s_terrain_projection_cache.key, params);
+}
+
+static void SetTerrainProjectionKey(
+    SimTerrainProjectionKey *key,
+    const SimBackgroundVoxelRenderParams *params) {
+  *key = (SimTerrainProjectionKey){
     .town = params->town,
     .render_scale = params->render_scale,
     .landscape_height_pct = params->landscape_height_pct,
@@ -634,8 +701,15 @@ static void BeginTerrainProjectionCache(
     .source = params->source,
     .viewport = params->viewport,
   };
-  memcpy(s_terrain_projection_cache.key.matrix, params->matrix,
-         sizeof(s_terrain_projection_cache.key.matrix));
+  memcpy(key->matrix, params->matrix, sizeof(key->matrix));
+}
+
+static void BeginTerrainProjectionCache(
+    const SimBackgroundVoxelRenderParams *params) {
+  s_terrain_projection_cache.valid = false;
+  s_terrain_projection_cache.overflow = false;
+  s_terrain_projection_cache.count = 0;
+  SetTerrainProjectionKey(&s_terrain_projection_cache.key, params);
 }
 
 static void EmitTerrainDepthQuad(
@@ -2466,6 +2540,13 @@ static void GroundDepthRange(
   *minimum = FLT_MAX;
   *maximum = -FLT_MAX;
 #if AR_SIM3D_TERRAIN_ELEVATION
+  if (s_terrain_depth_range_cache.valid &&
+      TerrainProjectionKeyEquals(
+          &s_terrain_depth_range_cache.key, params)) {
+    *minimum = s_terrain_depth_range_cache.minimum;
+    *maximum = s_terrain_depth_range_cache.maximum;
+    return;
+  }
   for (int cell_y = 0; cell_y <= kSimTownTerrainCells; cell_y++)
     for (int cell_x = 0; cell_x <= kSimTownTerrainCells; cell_x++) {
       const float map_x = cell_x * kSimTownTerrainCellPixels;
@@ -2483,6 +2564,10 @@ static void GroundDepthRange(
       if (depth < *minimum) *minimum = depth;
       if (depth > *maximum) *maximum = depth;
     }
+  SetTerrainProjectionKey(&s_terrain_depth_range_cache.key, params);
+  s_terrain_depth_range_cache.minimum = *minimum;
+  s_terrain_depth_range_cache.maximum = *maximum;
+  s_terrain_depth_range_cache.valid = true;
 #else
   const float x[2] = {(float)params->source.x,
                       (float)(params->source.x + params->source.w)};
@@ -2814,6 +2899,10 @@ void SimBackgroundVoxelRenderer_Reset(void) {
   Sim3DDepthPass_Reset();
   g_renderer_state.ground = NULL;
   g_renderer_state.uploaded_serial = 0;
+  g_renderer_state.uploaded_ground_serial = 0;
+  g_renderer_state.uploaded_atlas_serial = 0;
+  g_renderer_state.uploaded_scene_serial = 0;
+  g_renderer_state.mountain_atlas_ready = false;
   g_renderer_state.allocation_failed = false;
   g_renderer_state.cache_stamp = 0;
   g_renderer_state.biome = kSimBackgroundVoxelBiome_Temperate;
@@ -2824,5 +2913,6 @@ void SimBackgroundVoxelRenderer_Reset(void) {
 #if AR_SIM3D_TERRAIN_ELEVATION
   s_terrain_projection_cache.valid = false;
   s_terrain_projection_cache.count = 0;
+  s_terrain_depth_range_cache.valid = false;
 #endif
 }
