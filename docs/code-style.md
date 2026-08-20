@@ -259,6 +259,18 @@ changes what old checkpoints render.
    checkpoints diverged from a week-old run, building the pre-change binary
    showed it reproduced the divergence exactly — pre-existing drift, not the
    change under test.
+4. **A clean build does not mean the prototypes are there.** The build carries
+   `-w -Wno-implicit-function-declaration`, so a call with no visible
+   declaration compiles silently and C invents `int f()` for it — which is the
+   wrong return type for every float-returning helper in the render path. A
+   too-eager include trim during the `present_sim3d.c` split left three
+   `SimBackgroundVoxels_*` calls in exactly that state and still built with
+   zero errors. When moving code between translation units, re-check each one
+   with implicit declarations promoted to errors:
+
+   ```bash
+   clang -fsyntax-only -std=gnu11 -Isrc -Irecomp -Ithird_party/stb -I/opt/homebrew/include -Werror=implicit-function-declaration -Werror=implicit-int src/<file>.c
+   ```
 
 Add `AR_HEADLESS_VIDEO=1` for anything present-side; without a renderer the shot
 falls back to dumping `g_pixels` and every present-side change compares equal.
@@ -272,7 +284,6 @@ the budgets above when touching one of these units.
 | File / symbol | Why it remains debt |
 |---|---|
 | `src/settings_overlay.c` | Largest coupled logic unit. Useful seams include text/glyph measurement and the tab/section/row navigation model, but the remaining work is a long tail of helpers rather than one clean subsystem split. |
-| `src/present_sim3d.c` | The world-map renderer has been extracted; effects, clouds, shadows, ground, billboards, and culling remain potential stage boundaries. |
 | `src/actraiser/actraiser_rtl.c` | `ActRaiserDrawPpuFrame` and `ActRaiser_ApplyWidescreenPolicy` sit on the HLE seam against ROM behaviour, where mistakes are subtle and the oracles are weakest. Further decomposition is high risk and moderate reward. |
 | `src/main.c` / `AppLoop_PumpEvents` | Boot and loop phases are named, but event dispatch remains one large flat switch. Its independent arms make it easier to review than its raw size suggests. |
 | `src/diorama/diorama.c` | Near the file budget; watch for a new independent presentation stage before adding more responsibility. |
