@@ -1962,6 +1962,85 @@
       },
       "max_differing_pixels": 270000,
       "expect_picker_unchanged": true
+    },
+    "D7-voxel-town": {
+      "description": "D7 background voxel town: Aitos renders authored models, mountain relief, the volcano and audited terrain through the real GPU depth path. The composite must differ from AR_SIM3D_VOXEL_PRESET=Off, must be identical across two identical passes, must match this host's recorded reference, and must leave the authentic framebuffer untouched",
+      "replay": "saves/aitos-eruption.rec",
+      "sram_base64": "tests/fixtures/sim3d/aitos-voxel-seed.srm.b64",
+      "sram_sha256": "26ec2474882a69dff576f518f614a094f58f1428c807faf83230d72fe4c13568",
+      "settings": "tests/fixtures/sim3d/aitos-voxel-settings.ini",
+      "quit_frames": 20000,
+      "timeout_seconds": 300,
+      "voxel_visual": true,
+      "composite_shot_interval": 100,
+      "composite_shot_from": 900,
+      "composite_shot_to": 1700,
+      "env": {
+        "AR_SIM3D": "1",
+        "AR_SIM3D_CAMERA_MODE": "0",
+        "AR_SIM3D_PITCH": "-350",
+        "AR_SIM3D_YAW": "0",
+        "AR_SIM3D_DISTANCE": "0",
+        "AR_SIM3D_SHADOW_OPACITY": "45",
+        "AR_SIM3D_SHADOW_SOFTNESS": "50",
+        "AR_SIM3D_LIGHT_AZIMUTH": "0",
+        "AR_SIM3D_LIGHT_ELEVATION": "85",
+        "AR_SIM3D_SEPARATED": "on",
+        "AR_SIM3D_GROUND": "on",
+        "AR_SIM3D_BILLBOARDS": "on",
+        "AR_SIM3D_HEIGHT": "on",
+        "AR_SIM3D_SHADOWS": "on",
+        "AR_SIM3D_SOFT_SHADOWS": "on",
+        "AR_SIM3D_RIM_LIGHT": "off",
+        "AR_SIM3D_WORLD_UNDERLAY": "on",
+        "AR_SIM3D_CLOUDS": "off",
+        "AR_SIM3D_CULL_HAZE_STAGE": "off",
+        "AR_SIM3D_BACKDROP": "off",
+        "AR_SIM3D_PICKER_EASE": "off",
+        "AR_SIM3D_EFFECT_LIGHTING": "off",
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_VOXEL_PRESET": "Quality",
+        "AR_SIM3D_VOXEL_DETAIL": "High",
+        "AR_SIM3D_VOXEL_LOD": "Adaptive",
+        "AR_SIM3D_VOXEL_SHADING": "Materials + AO",
+        "AR_SIM3D_VOXEL_STYLE": "Varied",
+        "AR_SIM3D_VOXEL_FACING": "Per-model lean",
+        "AR_SIM3D_VOXEL_RENDER_SCALE": "Pixel-clean",
+        "AR_SIM3D_LANDSCAPE_HEIGHT": "100"
+      },
+      "baseline_env": {
+        "AR_SIM3D_SEPARATED": "on",
+        "AR_SIM3D_GROUND": "on",
+        "AR_SIM3D_BILLBOARDS": "on",
+        "AR_SIM3D_HEIGHT": "on",
+        "AR_SIM3D_SHADOWS": "on",
+        "AR_SIM3D_SOFT_SHADOWS": "on",
+        "AR_SIM3D_RIM_LIGHT": "off",
+        "AR_SIM3D_WORLD_UNDERLAY": "on",
+        "AR_SIM3D_CLOUDS": "off",
+        "AR_SIM3D_CULL_HAZE_STAGE": "off",
+        "AR_SIM3D_BACKDROP": "off",
+        "AR_SIM3D_PICKER_EASE": "off",
+        "AR_SIM3D_EFFECT_LIGHTING": "off",
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_VOXEL_PRESET": "Off",
+        "AR_SIM3D_VOXEL_DETAIL": "High",
+        "AR_SIM3D_VOXEL_LOD": "Adaptive",
+        "AR_SIM3D_VOXEL_SHADING": "Materials + AO",
+        "AR_SIM3D_VOXEL_STYLE": "Varied",
+        "AR_SIM3D_VOXEL_FACING": "Per-model lean",
+        "AR_SIM3D_VOXEL_RENDER_SCALE": "Pixel-clean",
+        "AR_SIM3D_LANDSCAPE_HEIGHT": "100"
+      },
+      "expect": {
+        "towns": [
+          4
+        ],
+        "voxel_visual": {
+          "composite_frames_minimum": 6,
+          "changed_frames_minimum": 6
+        }
+      }
     }
   }
 }

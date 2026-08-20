@@ -259,6 +259,19 @@ derived by the terrain generator and committed beside the corner payload, so
 queries are immutable constant-time reads rather than lazy mutable cache
 initialization.
 
+The render path is four translation units rather than one.
+`sim_background_voxel_project` owns the camera transform every background
+surface shares; `sim_background_mountain_render` owns projected relief,
+silhouette skirts and the volcano's crater anchor;
+`sim_background_voxel_terrain_depth` owns the D32 terrain surface and its
+projection caches; and `sim_background_voxel_renderer` retains texture
+ownership, object anchoring, foundations, model drawing and the shadow mask.
+The two audited-height converters stay `static inline` in the projection
+header because they are one-expression conversions called per vertex and per
+terrain corner; the split should not put a call in that path. `D7-voxel-town`
+renders the town through the real GPU depth path and is the checkpoint that
+covers this code.
+
 The stock SIM geography contract (six towns, 32×32 cells, 16 source pixels per
 cell) is owned by `sim_world_map.h`. World-map composition, terrain sampling,
 and voxel classification expose subsystem aliases derived from that contract

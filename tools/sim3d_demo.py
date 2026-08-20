@@ -11,6 +11,7 @@ import itertools
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import struct
 import subprocess
@@ -54,6 +55,23 @@ SIM3D_STAGE_ENV = (
     "AR_SIM3D_PICKER_EASE", "AR_SIM3D_EFFECT_LIGHTING",
     "AR_SIM3D_PARTICLES",
 )
+# The background voxel town is configured by settings rather than by stage
+# toggles, so it needs its own all-or-nothing pinning rule. A voxel checkpoint
+# that names only the preset inherits the shipped default for detail, LOD,
+# shading, style, facing, render scale and landscape height -- and the preset
+# itself rewrites several of them, so an unpinned block does not describe the
+# scene it renders.
+SIM3D_VOXEL_ENV = (
+    "AR_SIM3D_VOXEL_PRESET", "AR_SIM3D_VOXEL_DETAIL", "AR_SIM3D_VOXEL_LOD",
+    "AR_SIM3D_VOXEL_SHADING", "AR_SIM3D_VOXEL_STYLE",
+    "AR_SIM3D_VOXEL_FACING", "AR_SIM3D_VOXEL_RENDER_SCALE",
+    "AR_SIM3D_LANDSCAPE_HEIGHT",
+)
+# Where a machine records what the voxel town looked like last time. NOT
+# committed: the composite comes off the real GPU, so its pixels are a property
+# of this host's driver rather than of the source. See validate_voxel_visual.
+VOXEL_REFERENCE_ROOT = ROOT / "runs" / "sim3d-voxel-reference"
+
 # Only these D3c presentation classes may lift a billboard off the ground.
 LIFTED_HEIGHT_CLASSES = ("flying", "flying_projectile", "semi_grounded")
 # ROM-positioned contact classes must land exactly, never ease into place.
@@ -1195,6 +1213,126 @@ def validate_d2_artifacts(prefix: Path) -> tuple[dict, list[str]]:
     }, errors
 
 
+def read_composite_series(run_dir: Path) -> list[tuple[int, str]]:
+    """One run's composited screenshots, as (game_frame, sha256) pairs."""
+    series = []
+    for path in sorted(run_dir.glob("shot_*.ppm"),
+                       key=lambda item: int(item.stem.split("_")[1])):
+        series.append((int(path.stem.split("_")[1]),
+                       hashlib.sha256(path.read_bytes()).hexdigest()))
+    return series
+
+
+def host_render_key() -> str:
+    """Identifies the host whose GPU produced a composite reference.
+
+    The screenshots read back the real swapchain, so their pixels belong to
+    this machine's driver as much as to the source. Keying the reference means
+    a second machine records its own instead of failing against someone
+    else's.
+    """
+    return f"{platform.system()}-{platform.machine()}"
+
+
+def validate_voxel_visual(output: Path, expected: dict,
+                          reference_root: Path) -> tuple[dict, list[str]]:
+    """Gate the background voxel town, which no other checkpoint renders.
+
+    Four independent properties, because each catches a different failure and
+    only two of them are portable:
+
+    1. PRESENTATION-ONLY. The authentic framebuffer hashes must match the
+       voxel-off pass frame for frame. The voxel renderer reads copies and
+       holds no write path to the bus; this is what keeps that true.
+    2. LIVENESS. The composited screenshots must DIFFER from the voxel-off
+       pass. Without this the checkpoint passes just as happily when the
+       renderer silently falls back to flat ground, which is the failure it
+       exists to catch.
+    3. DETERMINISM. A second identical pass must produce identical
+       composites. The dynamic camera and the cloud drift both run on wall
+       time, so a checkpoint that leaves either on compares noise -- and an
+       A/B read against a non-deterministic capture reports a regression that
+       is not there.
+    4. REFERENCE. The composites must match what this host recorded last
+       time. This is the only gate that catches a change which was supposed
+       to be a no-op (ledger 74), and the only one that is not portable, so a
+       host with no reference RECORDS one and says so rather than failing.
+    """
+    errors: list[str] = []
+    run_dirs = sorted((path for path in (output / "runs").glob("*")
+                       if path.is_dir() and path.name != "latest"),
+                      key=lambda item: item.name)
+    if len(run_dirs) != 3:
+        return {"run_dirs": [str(path) for path in run_dirs]}, [
+            "voxel checkpoint expected three replay passes "
+            f"(voxel, voxel-off, repeat), found {len(run_dirs)}"]
+    voxel, voxel_off, repeat = (read_composite_series(path)
+                                for path in run_dirs)
+
+    minimum = int(expected.get("composite_frames_minimum", 4))
+    if len(voxel) < minimum:
+        errors.append(f"voxel pass captured {len(voxel)} composited frames, "
+                      f"expected at least {minimum}")
+
+    if [frame for frame, _ in voxel] != [frame for frame, _ in voxel_off]:
+        errors.append("voxel and voxel-off passes captured different frames; "
+                      "the two runs are not comparable")
+    else:
+        changed = sum(1 for (_, a), (_, b) in zip(voxel, voxel_off) if a != b)
+        changed_minimum = int(expected.get("changed_frames_minimum", 1))
+        if changed < changed_minimum:
+            errors.append(
+                f"voxel town changed {changed} of {len(voxel)} composited "
+                f"frames against AR_SIM3D_VOXEL_PRESET=Off, expected at least "
+                f"{changed_minimum}; the renderer is not reaching the screen")
+
+    if voxel != repeat:
+        first = next((index for index, pair in enumerate(zip(voxel, repeat))
+                      if pair[0] != pair[1]), None)
+        errors.append(
+            "voxel composite is not deterministic across two identical "
+            f"passes; first difference at frame "
+            f"{voxel[first][0] if first is not None else 'unknown'}")
+
+    key = host_render_key()
+    reference_path = reference_root / f"{key}.json"
+    reference_state = "compared"
+    if not reference_path.is_file():
+        reference_path.parent.mkdir(parents=True, exist_ok=True)
+        reference_path.write_text(json.dumps({
+            "schema": "actraiser-sim3d-voxel-reference-v1",
+            "host_render_key": key,
+            "composite": [{"game_frame": frame, "sha256": digest}
+                          for frame, digest in voxel],
+        }, indent=2) + "\n", encoding="utf-8")
+        reference_state = "recorded"
+        print(f"[voxel] no reference for {key}; recorded "
+              f"{len(voxel)} frames -> {reference_path}")
+    else:
+        stored = json.loads(reference_path.read_text(encoding="utf-8"))
+        want = [(int(item["game_frame"]), str(item["sha256"]))
+                for item in stored["composite"]]
+        if want != voxel:
+            mismatched = [frame for (frame, a), (_, b)
+                          in zip(want, voxel) if a != b]
+            errors.append(
+                f"voxel composite differs from the {key} reference on "
+                f"{len(mismatched) or 'a different set of'} frame(s) "
+                f"{mismatched[:6]}; if the change was intended, delete "
+                f"{reference_path} and re-run to re-record it")
+
+    return {
+        "run_dirs": [str(path) for path in run_dirs],
+        "composite_frame_count": len(voxel),
+        "changed_against_voxel_off": sum(
+            1 for (_, a), (_, b) in zip(voxel, voxel_off) if a != b),
+        "deterministic": voxel == repeat,
+        "host_render_key": key,
+        "reference_path": str(reference_path),
+        "reference_state": reference_state,
+    }, errors
+
+
 def validate_d3_artifact(output: Path, label: str, picker_topdown: bool,
                          max_differing_pixels: int | None = None,
                          expect_picker_unchanged: bool = False
@@ -1353,6 +1491,16 @@ def check_stage_pinning(name: str, checkpoint: dict) -> None:
                 f"{len(pinned)} of {len(SIM3D_STAGE_ENV)} SIM 3D stages; "
                 f"unpinned stages inherit the shipped default and will change "
                 f"under this checkpoint when a stage lands. Missing: "
+                f"{', '.join(missing)}")
+
+        voxel_pinned = [key for key in SIM3D_VOXEL_ENV if key in block]
+        if voxel_pinned and len(voxel_pinned) != len(SIM3D_VOXEL_ENV):
+            missing = [key for key in SIM3D_VOXEL_ENV if key not in block]
+            raise ValueError(
+                f"checkpoint {name} {block_name} pins "
+                f"{len(voxel_pinned)} of {len(SIM3D_VOXEL_ENV)} voxel town "
+                f"settings; the preset rewrites the rest, so an unpinned "
+                f"block does not describe the scene it renders. Missing: "
                 f"{', '.join(missing)}")
 
         camera_pose = ("AR_SIM3D_PITCH", "AR_SIM3D_YAW",
@@ -1537,9 +1685,13 @@ def main() -> int:
                 else "D4a" if checkpoint.get("d4a_visual")
                 else "D3c" if checkpoint.get("d3c_visual")
                 else "D3b" if checkpoint.get("d3b_visual") else "D3a")
+    voxel_visual = bool(checkpoint.get("voxel_visual"))
+    # The voxel gate needs the authentic framebuffer hashes to prove the town
+    # renderer changed nothing the game computes, and needs the comparison
+    # pass that `baseline_env` configures. Both ride the metadata plumbing.
     metadata_checkpoint = bool(
         checkpoint.get("d1_metadata") or checkpoint.get("d2_flat") or
-        d3_visual)
+        d3_visual or voxel_visual)
     # A manifest that declares metadata expectations without enabling the
     # metadata pass would silently validate nothing and report PASS.
     if checkpoint.get("expect", {}).get("d1_metadata") and \
@@ -1569,7 +1721,7 @@ def main() -> int:
                       for key, value in checkpoint.get("env", {}).items()})
     if metadata_checkpoint:
         state_env["AR_SIM3D_D1_TRACE"] = str(d1_trace.resolve())
-    if checkpoint.get("d2_flat") or d3_visual or \
+    if checkpoint.get("d2_flat") or d3_visual or voxel_visual or \
             checkpoint.get("headless_video"):
         # Visual checkpoints exercise the same mandatory GPU/D32 path as a
         # normal run. Do not substitute SDL's dummy/software renderer: that
@@ -1583,6 +1735,16 @@ def main() -> int:
             "AR_SIM3D_D2_DUMP_AT_GF": str(
                 int(checkpoint.get("d2_dump_game_frame", 0))),
         })
+    if voxel_visual:
+        # A series rather than one frame: the town scrolls, so successive
+        # frames cover different terrain, different mountain stacks and a
+        # different set of models than any single capture would.
+        state_env["AR_SHOT_EVERY"] = str(
+            int(checkpoint.get("composite_shot_interval", 100)))
+        state_env["AR_SHOT_FROM"] = str(
+            int(checkpoint.get("composite_shot_from", 900)))
+        state_env["AR_SHOT_TO"] = str(
+            int(checkpoint.get("composite_shot_to", 2000)))
     if d3_visual:
         state_env["AR_SHOT_AT_GF"] = str(
             int(checkpoint.get("d3a_shot_game_frame", 700)))
@@ -1651,11 +1813,11 @@ def main() -> int:
         authentic_env.pop("AR_SIM3D_TRACE", None)
         authentic_env.pop("AR_SIMCAT", None)
         authentic_env.update({
-            "AR_SIM3D": "1" if d3_visual else "0",
+            "AR_SIM3D": "1" if (d3_visual or voxel_visual) else "0",
             "AR_SIM3D_D1_TRACE": str(d1_authentic_trace.resolve()),
             "AR_SAVE_NATIVE_PATH": str(d1_authentic_sram.resolve()),
         })
-        if d3_visual:
+        if d3_visual or voxel_visual:
             # The visual gate compares the checkpoint's profile against the
             # stage below it, rendered by a second run of the same replay with
             # that stage switched off by name. There is no in-frame A/B view:
@@ -1679,6 +1841,35 @@ def main() -> int:
             raise RuntimeError(
                 "D1 authentic comparison produced no metadata trace; see "
                 f"{d1_authentic_console}")
+
+    if voxel_visual:
+        # A third pass with the SAME configuration. Determinism is not a
+        # nicety here: the reference gate below compares this host's pixels
+        # against its own recorded pixels, and a capture that varies run to
+        # run would report a regression on every invocation.
+        repeat_sram = output / "repeat-seed.srm"
+        repeat_sram.write_bytes(sram_bytes)
+        repeat_env = state_env.copy()
+        # Redirected, NOT removed. Arming the metadata trace makes the frame
+        # spend a full-surface hash it otherwise skips, so a repeat pass with
+        # tracing off is not the same run -- and a determinism gate that
+        # varies anything is measuring the variation.
+        repeat_env["AR_SIM3D_TRACE"] = str((output / "repeat-state.jsonl").resolve())
+        repeat_env["AR_SIM3D_D1_TRACE"] = str(
+            (output / "repeat-d1-metadata.jsonl").resolve())
+        repeat_env["AR_SAVE_NATIVE_PATH"] = str(repeat_sram.resolve())
+        repeat_result = subprocess.run(
+            command, cwd=output, env=repeat_env, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            timeout=int(checkpoint.get("timeout_seconds", 60)), check=False)
+        (output / "voxel-repeat-console.log").write_text(
+            repeat_result.stdout, encoding="utf-8")
+        if repeat_result.returncode != 0:
+            print(repeat_result.stdout, file=sys.stderr)
+            raise RuntimeError(
+                "voxel repeat pass exited "
+                f"{repeat_result.returncode}; see "
+                f"{output / 'voxel-repeat-console.log'}")
 
     expected_operations = checkpoint.get("expect", {}).get(
         "picker_operations", [])
@@ -1707,8 +1898,14 @@ def main() -> int:
         d1_expected = checkpoint.get("expect", {}).get("d1_metadata", {})
         d1_summary, d1_errors = read_d1_metadata(
             d1_trace, d1_expected.get("allowed_unpacked_atlas_objects"))
-        errors.extend(d1_errors)
-        errors.extend(validate_d1_summary(d1_summary, d1_expected))
+        # A voxel checkpoint borrows the metadata pass for its framebuffer
+        # hashes and its comparison run. It does not adopt D1's own contracts
+        # about effect anchors, object planes and pickers -- those belong to
+        # the checkpoints that assert them, and reporting them here would bury
+        # the one result this checkpoint is about.
+        if not voxel_visual or checkpoint.get("d1_metadata"):
+            errors.extend(d1_errors)
+            errors.extend(validate_d1_summary(d1_summary, d1_expected))
         hash_compare = compare_d1_framebuffer_hashes(
             d1_trace, d1_authentic_trace)
         if hash_compare["mismatch_count"]:
@@ -1717,11 +1914,27 @@ def main() -> int:
                 f"{hash_compare['mismatch_count']} mismatch(es); first="
                 f"{hash_compare['first_mismatch']!r}")
         d1_summary["authentic_hash_compare"] = hash_compare
-        summary["d1_metadata"] = d1_summary
+        if voxel_visual and not checkpoint.get("d1_metadata"):
+            # Report only what this checkpoint asserts. Carrying D1's full
+            # summary here puts thousands of unasserted accounting errors in
+            # a PASSING report, which reads as a failure nobody acted on.
+            summary["d1_metadata"] = {
+                "authentic_hash_compare": hash_compare,
+                "note": "borrowed for framebuffer hashes only; D1's own "
+                        "contracts belong to the D1 checkpoints",
+            }
+        else:
+            summary["d1_metadata"] = d1_summary
     if checkpoint.get("d2_flat"):
         d2_artifacts, d2_errors = validate_d2_artifacts(d2_artifact_prefix)
         errors.extend(d2_errors)
         summary["d2_flat"] = d2_artifacts
+    if voxel_visual:
+        voxel_artifact, voxel_errors = validate_voxel_visual(
+            output, checkpoint.get("expect", {}).get("voxel_visual", {}),
+            VOXEL_REFERENCE_ROOT)
+        errors.extend(voxel_errors)
+        summary["voxel_visual"] = voxel_artifact
     if d3_visual:
         picker_topdown = bool((d1_summary or {}).get("picker_topdown_build",
                                                      True))

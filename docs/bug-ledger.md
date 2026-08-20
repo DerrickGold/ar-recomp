@@ -2670,6 +2670,37 @@ if archaeology is ever needed. The distilled outcomes:
     It keeps the Bloodpool one-pixel bank keys, and the exact Marahna rectangle
     and its >0.3-unit envelope difference are regression-tested.
 
+74. **Two ways a composite A/B lies to you. 2026-08-20.** Splitting the
+    2,918-line SIM background voxel renderer into projection, mountain-render
+    and terrain-depth units needed a pixel A/B to confirm, because no test
+    covers that renderer: 69 unit tests and both build configurations pass
+    whether or not the town still draws correctly.
+
+    The first comparison reported a regression that was not there. *The
+    dynamic camera and the cloud drift both advance on wall time by design*,
+    so two runs of the SAME binary differ, and anything read against that
+    capture is noise. Pin `AR_SIM3D_CAMERA_MODE=0` and `AR_SIM3D_CLOUDS=off`,
+    and **always run the same-binary control twice before reading an A/B as a
+    regression** -- `sim3d-phase0.md` already carried this warning for D5a's
+    pixel count, and it was rediscovered the slow way.
+
+    The determinism control then lied in the other direction, because it
+    varied something itself: *arming the metadata trace changes what a frame
+    renders*. `SimRenderMetadata_TraceArmed` gates a full-surface hash the
+    frame otherwise skips, so a repeat pass with tracing switched off is not
+    the same run. Redirect the trace, never disable it, or the control is
+    measuring its own variable.
+
+    `D7-voxel-town` holds both rules and is the first checkpoint of any kind
+    to render the background voxel town. It gates the composite four ways:
+    unchanged authentic framebuffer (presentation-only), changed against
+    `AR_SIM3D_VOXEL_PRESET=Off` (so a silent fallback to flat ground fails
+    rather than passes), identical across two identical passes, and identical
+    to what this host recorded last time. Only the first three are portable --
+    the screenshots read back the real swapchain -- so the reference lives
+    outside the repo and a new host records one instead of failing.
+
+
 Process lessons folded out of statement-then-correction text elsewhere; the docs now state final
 truths, and the journey that earned them lives here.
 
