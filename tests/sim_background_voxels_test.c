@@ -10,6 +10,7 @@ enum {
   kRecords = 0x16BE7,
   kRecordsPerTown = 0x200,
   kVramWords = 0x8000,
+  kMarahnaTown = 5,
 };
 
 static int failures;
@@ -140,6 +141,49 @@ static void CheckMountainOcclusionReach(void) {
   CHECK(!SimBackgroundVoxels_MountainInFrontOf(10, 31));
   /* A different column is unaffected. */
   CHECK(!SimBackgroundVoxels_MountainInFrontOf(11, 19));
+}
+
+/* SimTownCanvas owns detection of Marahna's earthquake redraw. Once that
+ * serial changes, the enhanced ground copy must publish the revealed pixels
+ * too; otherwise the ordinary town canvas would show land while object
+ * cutouts and replacements kept sampling the old water image. */
+static void CheckMarahnaEarthquakeCanvasRebuild(void) {
+  static uint8_t wram[kWramBytes];
+  static uint16_t vram[kVramWords];
+  static uint32_t pixels[kSimTownCanvasPixels * kSimTownCanvasPixels];
+  const int revealed_x = 15, revealed_y = 17;
+  const uint32_t water = 0xFF204878;
+  const uint32_t land = 0xFF647814;
+  const uint32_t water_canvas_serial = 1;
+  const uint32_t land_canvas_serial = water_canvas_serial + 1;
+  memset(wram, 0, sizeof(wram));
+  memset(vram, 0, sizeof(vram));
+  for (size_t at = 0;
+       at < (size_t)kSimTownCanvasPixels * kSimTownCanvasPixels; at++)
+    pixels[at] = water;
+
+  SimBackgroundVoxels_Reset();
+  SimBackgroundVoxels_Build(
+      kMarahnaTown, wram, pixels, vram, water_canvas_serial, true);
+  const size_t centre =
+      (size_t)(revealed_y * kSimBackgroundCellPixels +
+               kSimBackgroundCellPixels / 2) * kSimTownCanvasPixels +
+      revealed_x * kSimBackgroundCellPixels +
+      kSimBackgroundCellPixels / 2;
+  const uint32_t water_serial = SimBackgroundVoxels_Serial();
+  CHECK(water_serial != 0);
+  CHECK(SimBackgroundVoxels_GroundPixels()[centre] == water);
+
+  FillCell(pixels, revealed_x, revealed_y, land);
+  SimBackgroundVoxels_Build(
+      kMarahnaTown, wram, pixels, vram, water_canvas_serial, true);
+  CHECK(SimBackgroundVoxels_Serial() == water_serial);
+  CHECK(SimBackgroundVoxels_GroundPixels()[centre] == water);
+
+  SimBackgroundVoxels_Build(
+      kMarahnaTown, wram, pixels, vram, land_canvas_serial, true);
+  CHECK(SimBackgroundVoxels_Serial() != water_serial);
+  CHECK(SimBackgroundVoxels_GroundPixels()[centre] == land);
 }
 
 /* A windmill's state comes from the frame its plot is drawing, not from the
@@ -670,6 +714,7 @@ int main(void) {
 
   CheckWindmillFrames();
   CheckMountainOcclusionReach();
+  CheckMarahnaEarthquakeCanvasRebuild();
   CheckStoneBridgeClassificationAndInpaint();
 
   if (failures) {
