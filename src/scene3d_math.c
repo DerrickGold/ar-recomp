@@ -67,6 +67,33 @@ bool Scene3D_ProjectWorldPoint(const float matrix[16],
   return true;
 }
 
+bool Scene3D_ProjectWorldPointWithDepth(
+    const float matrix[16], float x, float y, float z,
+    int output_width, int output_height,
+    Scene3DPoint *out_point, float *out_depth) {
+  if (!out_point || !out_depth) return false;
+  const float clip_x =
+      matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12];
+  const float clip_y =
+      matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13];
+  const float clip_z =
+      matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14];
+  const float clip_w =
+      matrix[3] * x + matrix[7] * y + matrix[11] * z + matrix[15];
+  if (clip_w <= kMinimumProjectionDepth) return false;
+  const float inverse_w = 1.0f / clip_w;
+  const Scene3DPoint projected = {
+    (clip_x * inverse_w * 0.5f + 0.5f) * output_width,
+    (1.0f - (clip_y * inverse_w * 0.5f + 0.5f)) * output_height,
+  };
+  const float depth = clip_z * inverse_w * 0.5f + 0.5f;
+  if (!isfinite(projected.x) || !isfinite(projected.y) || !isfinite(depth))
+    return false;
+  *out_point = projected;
+  *out_depth = depth;
+  return true;
+}
+
 float Scene3D_ProjectBillboardScale(const float matrix[16],
                                     float x, float y, float z,
                                     float reference_depth) {

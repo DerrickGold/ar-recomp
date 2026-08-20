@@ -6,7 +6,20 @@
 #include "sim_background_voxel_biome.h"
 #include "sim_background_voxel_models.h"
 
-enum { kSimBackgroundVoxelPaletteRampLevels = 4 };
+enum {
+  kSimBackgroundVoxelPaletteRampLevels = 4,
+  kSimBackgroundVoxelPaletteBaseLevel = 2,
+  kSimBackgroundVoxelPaletteLevel1Brightness = 128,
+  kSimBackgroundVoxelPaletteLevel2Brightness = 178,
+  kSimBackgroundVoxelPaletteLevel3Brightness = 224,
+};
+
+static inline int SimBackgroundVoxelPalette_LevelForBrightness(
+    uint8_t brightness) {
+  return brightness < kSimBackgroundVoxelPaletteLevel1Brightness ? 0
+      : brightness < kSimBackgroundVoxelPaletteLevel2Brightness ? 1
+      : brightness < kSimBackgroundVoxelPaletteLevel3Brightness ? 2 : 3;
+}
 
 typedef struct SimBackgroundVoxelPalette {
   uint32_t material[kSimVoxelMaterial_Count]

@@ -78,7 +78,8 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
           "\"separated_mismatch_pixels\":%u,"
           "\"separated_hash\":\"%016llx\","
           "\"projection_camera\":[%d,%d,%u],"
-          "\"height_scale_x100\":%u,\"shadow_opacity_pct\":%u,"
+          "\"landscape_height_pct\":%u,\"height_scale_x100\":%u,"
+          "\"shadow_opacity_pct\":%u,"
           "\"shadow_softness_pct\":%u,\"light\":[%u,%u],"
           "\"world_effects\":[%u,%u,%u,%u],"
           "\"picker_topdown\":%s,"
@@ -167,6 +168,7 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
           (int)frame->projection_pitch_mrad,
           (int)frame->projection_yaw_mrad,
           (unsigned)frame->projection_distance_x100,
+          (unsigned)frame->landscape_height_pct,
           (unsigned)frame->height_scale_x100,
           (unsigned)frame->shadow_opacity_pct,
           (unsigned)frame->shadow_softness_pct,

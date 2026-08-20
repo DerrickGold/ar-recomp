@@ -99,10 +99,10 @@ static SDL_Texture *RomSkyboxTexture(SDL_Renderer *renderer, int source) {
  * Deck and Windows got no GPU effects at all.
  *
  * They are now authored ONCE as GLSL in src/shaders/ and cross-compiled by
- * tools/build_shaders.py into committed headers carrying both SPIR-V (Vulkan)
- * and MSL (Metal). Nothing compiles shaders at build time — the hermetic
- * build (`snesbuild build --hermetic`) has a pinned `zig cc` and nothing
- * else, so a build-time shader toolchain would break the one-download bundle.
+ * tools/build_shaders.py into committed headers carrying SPIR-V (Vulkan),
+ * DXIL (D3D12), and MSL (Metal). Nothing compiles shaders at build time — the
+ * hermetic build (`snesbuild build --hermetic`) has a pinned `zig cc` and
+ * nothing else, so a build-time shader toolchain would break the one-download bundle.
  * Regenerate with tools/build_shaders.py after editing any .frag.glsl; the
  * generator refuses to emit a blob whose bindings drifted.
  *
@@ -128,13 +128,16 @@ static SDL_GPUDevice *g_diorama_shader_device;
 #include "shaders/rim_frag.h"
 
 static const GpuShaderBlobs kBlurBlobs = {
-  kBlurFragMSL, kBlurFragMSLSize, kBlurFragSPV, kBlurFragSPVSize
+  kBlurFragMSL, kBlurFragMSLSize, kBlurFragSPV, kBlurFragSPVSize,
+  kBlurFragDXIL, kBlurFragDXILSize
 };
 static const GpuShaderBlobs kDofEdgeBlobs = {
-  kDofEdgeFragMSL, kDofEdgeFragMSLSize, kDofEdgeFragSPV, kDofEdgeFragSPVSize
+  kDofEdgeFragMSL, kDofEdgeFragMSLSize, kDofEdgeFragSPV, kDofEdgeFragSPVSize,
+  kDofEdgeFragDXIL, kDofEdgeFragDXILSize
 };
 static const GpuShaderBlobs kRimLightBlobs = {
-  kRimFragMSL, kRimFragMSLSize, kRimFragSPV, kRimFragSPVSize
+  kRimFragMSL, kRimFragMSLSize, kRimFragSPV, kRimFragSPVSize,
+  kRimFragDXIL, kRimFragDXILSize
 };
 
 

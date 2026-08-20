@@ -13,7 +13,9 @@ typedef struct SimBackgroundVoxelRenderParams {
   uint8_t style;
   uint8_t facing;
   uint8_t render_scale;
+  uint8_t town;
   uint16_t game_frame;
+  uint16_t landscape_height_pct;
   uint16_t camera_x, camera_y;
   uint16_t town_screen_x0;
   uint16_t light_azimuth_deg;
@@ -21,6 +23,11 @@ typedef struct SimBackgroundVoxelRenderParams {
   SDL_Rect source;
   SDL_Rect viewport;
   const float *matrix;
+  /* Optional screen-space shadow mask. In an elevated town the renderer
+   * samples this only on depth-visible terrain tops, so a projected shadow
+   * cannot paint a cliff face or ground hidden behind one. */
+  SDL_Texture *shadow_mask;
+  uint8_t shadow_opacity_pct;
 } SimBackgroundVoxelRenderParams;
 
 /* Which actors the caller should draw at this point in the composite.
@@ -51,6 +58,11 @@ bool SimBackgroundVoxelRenderer_Ready(uint32_t serial);
 SDL_Texture *SimBackgroundVoxelRenderer_GroundTexture(uint32_t serial);
 void SimBackgroundVoxelRenderer_Draw(
     SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params);
+/* Depth-clips the accumulated D4 mask to visible terrain tops and composites
+ * it at the caller's current ground rank. Kept separate from Draw/Interleaved
+ * so the shadow cannot darken actor ranks between ground and buildings. */
+void SimBackgroundVoxelRenderer_DrawTerrainShadow(
+    SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params);
 /* Invokes the caller for ground actors, draws the depth-tested background
  * composite over them, then invokes it again for mountain-standing and
  * overhead actors. */
@@ -65,7 +77,10 @@ void SimBackgroundVoxelRenderer_DrawShadowMask(
 /* Where the volcano's crater mouth was drawn on the frame just rendered, in
  * the mountain models' own local space: the exact point the crater glow ring
  * and the smoke plume are placed on, already leaned by the camera-facing
- * transform the models use.
+ * transform the models use. `height_pixels` is authored mountain height above
+ * the local terrain; the effect renderer supplies the terrain base at the
+ * published map point so landscape magnitude and object-height tuning remain
+ * independent.
  *
  * Published so a presentation stage that wants to emit from the crater --
  * the volcanic eruption's fireball arcs -- can ask the model where its mouth

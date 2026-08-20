@@ -21,6 +21,7 @@
 #include "snes/ppu.h"
 #include "actraiser_game.h"
 #include "sim3d.h"
+#include "sim_town_terrain.h"
 #include "sim_render_atlas.h"
 #include "sim_render_metadata.h"
 #include "sim_world_navigation_capture.h"
@@ -1097,7 +1098,20 @@ static void TestSim3DRawObjCaptureFallbackContract(void) {
                       kActRaiserAuthenticWidth * (int)sizeof(uint32_t), 1);
   SimFrameData fallback_frame = {0};
   Sim3DTuning fallback_tuning = {0};
+  fallback_tuning.landscape_height_pct = 55;
+  fallback_tuning.height_scale_x100 = 130;
   Sim3D_AnnotateFrame(&fallback_frame, &fallback_tuning);
+  CHECK(fallback_frame.landscape_height_pct == 55);
+  CHECK(fallback_frame.height_scale_x100 == 130);
+  fallback_tuning.landscape_height_pct = -1;
+  Sim3D_AnnotateFrame(&fallback_frame, &fallback_tuning);
+  CHECK(fallback_frame.landscape_height_pct ==
+        kSimTownTerrainLandscapeHeightMinimumPct);
+  fallback_tuning.landscape_height_pct =
+      kSimTownTerrainLandscapeHeightMaximumPct + 1;
+  Sim3D_AnnotateFrame(&fallback_frame, &fallback_tuning);
+  CHECK(fallback_frame.landscape_height_pct ==
+        kSimTownTerrainLandscapeHeightMaximumPct);
   CHECK(fallback_frame.separated_valid);
   CHECK(fallback_frame.separated_status == kSim3DCapture_AtlasInvalid);
   CHECK(fallback_frame.separated_plane_mask ==

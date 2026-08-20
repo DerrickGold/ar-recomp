@@ -3,9 +3,13 @@
 
 #include <stdint.h>
 
+#include "sim_world_map.h"
+
 enum {
-  kSimBackgroundCellPixels = 16,
-  kSimBackgroundTownCells = 32,
+  kSimBackgroundCellPixels = kSimTownCellPixels,
+  kSimBackgroundTownCells = kSimTownCells,
+  kSimBackgroundTownCount = kSimTownCount,
+  kSimBackgroundVoxelNoRecordSlot = UINT8_MAX,
   /* 128 structure records, one cathedral, and at most one tree object per
    * cell. Spare entries make overflow an invariant violation rather than an
    * ordinary developed-town condition. */
@@ -30,11 +34,21 @@ typedef enum SimBackgroundVoxelKind {
   kSimBackgroundVoxel_BloodpoolCastle,
   kSimBackgroundVoxel_MarahnaTemple,
   kSimBackgroundVoxel_Pyramid,
+  /* A live $E1/$E2 cell-map bridge. Geometry spans to the first solid bank in
+   * each direction and uses stone from the native structure graphic. */
+  kSimBackgroundVoxel_Bridge,
 } SimBackgroundVoxelKind;
 
 enum {
-  kSimBackgroundVoxelKindCount = kSimBackgroundVoxel_Pyramid + 1,
+  kSimBackgroundVoxelKindCount = kSimBackgroundVoxel_Bridge + 1,
 };
+
+typedef enum SimBackgroundBridgeAxis {
+  kSimBackgroundBridgeAxis_None,
+  kSimBackgroundBridgeAxis_EastWest,
+  kSimBackgroundBridgeAxis_NorthSouth,
+  kSimBackgroundBridgeAxis_Count,
+} SimBackgroundBridgeAxis;
 
 typedef enum SimBackgroundVoxelFlags {
   /* Genuinely unfinished art. This is NOT the structure record's `$40` flag:
@@ -71,6 +85,11 @@ typedef struct SimBackgroundVoxelObject {
    * height does not grow with a component's bounding box. */
   uint8_t tree_edges;
   uint8_t record_slot;
+  /* Bridge-only semantic anchors. A is west/north and B is east/south. They
+   * are solid bank cells, not the water cell carrying the bridge graphic. */
+  uint8_t bridge_axis;
+  uint8_t bridge_bank_a_x, bridge_bank_a_y;
+  uint8_t bridge_bank_b_x, bridge_bank_b_y;
   /* Which authored animation frame this structure is currently showing, as an
    * index into its family's frame cycle. Windmills are the only animated
    * family today: their visual step program ($03:D573 rebuild / $03:D6F4

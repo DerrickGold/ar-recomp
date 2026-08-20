@@ -1,6 +1,7 @@
 #include "sim3d_depth_pass.h"
 
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,6 +9,13 @@
 #include "gpu_shader_blob.h"
 #include "shaders/sim3d_depth_frag.h"
 #include "shaders/sim3d_depth_vert.h"
+
+enum {
+  kSim3DDepthRgbaBytesPerPixel = 4,
+  kSim3DDepthVerticesPerQuad = 6,
+  kSim3DDepthInitialCpuVertexCapacity = 4096,
+  kSim3DDepthInitialGpuVertexCapacity = 8192,
+};
 
 typedef struct Sim3DGpuVertex {
   float position[4];
@@ -27,6 +35,7 @@ static struct {
   SDL_GPUShader *vertex_shader;
   SDL_GPUShader *fragment_shader;
   SDL_GPUGraphicsPipeline *pipeline;
+  SDL_GPUGraphicsPipeline *depth_occluder_pipeline;
   SDL_GPUGraphicsPipeline *effect_pipeline;
   SDL_GPUSampler *nearest_sampler;
   SDL_GPUBuffer *vertex_buffer;
@@ -35,9 +44,13 @@ static struct {
   SDL_GPUTexture *color_target;
   SDL_GPUTexture *depth_target;
   SDL_GPUTexture *mountain_atlas;
+  SDL_GPUTransferBuffer *mountain_atlas_transfer;
+  Uint32 mountain_atlas_transfer_size;
+  int mountain_atlas_width, mountain_atlas_height;
   SDL_GPUTexture *white_texture;
   SDL_Texture *output_texture;
   int width, height;
+  float clip_x_scale, clip_y_scale;
   bool collecting;
   bool geometry_failed;
   bool failed;
@@ -47,14 +60,25 @@ static struct {
 static const GpuShaderBlobs kVertexBlobs = {
   kSim3dDepthVertMSL, kSim3dDepthVertMSLSize,
   kSim3dDepthVertSPV, kSim3dDepthVertSPVSize,
+  kSim3dDepthVertDXIL, kSim3dDepthVertDXILSize,
 };
 static const GpuShaderBlobs kFragmentBlobs = {
   kSim3dDepthFragMSL, kSim3dDepthFragMSLSize,
   kSim3dDepthFragSPV, kSim3dDepthFragSPVSize,
+  kSim3dDepthFragDXIL, kSim3dDepthFragDXILSize,
 };
 
 static SDL_GPUTexture *GpuTexture(SDL_Texture *texture) {
   if (!texture) return NULL;
+  /* SDL_GPU resources are device-owned. Binding a texture created by a
+   * different renderer can hand one backend a handle owned by another
+   * device, which is an API contract violation rather than a recoverable
+   * draw error. All current callers use this renderer, but keep the boundary
+   * explicit so future material layers fail closed. */
+  if (SDL_GetRendererFromTexture(texture) != g_depth_pass.renderer) {
+    SDL_SetError("SIM3D depth texture belongs to another renderer");
+    return NULL;
+  }
   SDL_PropertiesID props = SDL_GetTextureProperties(texture);
   return props ? SDL_GetPointerProperty(
       props, SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER, NULL) : NULL;
@@ -99,8 +123,19 @@ static bool CreateTargets(SDL_Renderer *renderer, int width, int height,
   SDL_GPUTextureCreateInfo depth_info = color_info;
   depth_info.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
   depth_info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+  /* D3D12 records an optimized clear value when the resource is created.
+   * SDL still produces the correct result if this differs from the render
+   * pass, but the mismatch triggers the D3D12 validation layer and can force
+   * a slower clear. Other backends ignore this documented property. */
+  SDL_PropertiesID depth_props = SDL_CreateProperties();
+  if (depth_props) {
+    SDL_SetFloatProperty(depth_props,
+        SDL_PROP_GPU_TEXTURE_CREATE_D3D12_CLEAR_DEPTH_FLOAT, 1.0f);
+    depth_info.props = depth_props;
+  }
   g_depth_pass.depth_target = SDL_CreateGPUTexture(
       g_depth_pass.device, &depth_info);
+  if (depth_props) SDL_DestroyProperties(depth_props);
   if (!g_depth_pass.color_target || !g_depth_pass.depth_target) {
     fprintf(stderr, "[sim3d-depth] render target creation failed: %s\n",
             SDL_GetError());
@@ -202,6 +237,19 @@ static bool CreatePipeline(void) {
             SDL_GetError());
     return false;
   }
+  /* The town ground is already rendered with its native texture through
+   * SDL_RenderGeometry.  This pipeline contributes the identical surface to
+   * D32 without touching the transparent composite's color target. */
+  color_target.blend_state.color_write_mask = 0;
+  color_target.blend_state.enable_color_write_mask = true;
+  g_depth_pass.depth_occluder_pipeline = SDL_CreateGPUGraphicsPipeline(
+      g_depth_pass.device, &info);
+  if (!g_depth_pass.depth_occluder_pipeline) {
+    fprintf(stderr, "[sim3d-depth] depth-only pipeline creation failed: %s\n",
+            SDL_GetError());
+    return false;
+  }
+  color_target.blend_state.enable_color_write_mask = false;
   info.depth_stencil_state.enable_depth_write = false;
   g_depth_pass.effect_pipeline = SDL_CreateGPUGraphicsPipeline(
       g_depth_pass.device, &info);
@@ -244,7 +292,7 @@ static bool CreateWhiteTexture(SDL_Renderer *renderer) {
       g_depth_pass.device, &texture_info);
   SDL_GPUTransferBufferCreateInfo transfer_info = {
     .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-    .size = 4,
+    .size = kSim3DDepthRgbaBytesPerPixel,
   };
   SDL_GPUTransferBuffer *transfer = texture ? SDL_CreateGPUTransferBuffer(
       g_depth_pass.device, &transfer_info) : NULL;
@@ -256,7 +304,7 @@ static bool CreateWhiteTexture(SDL_Renderer *renderer) {
     if (texture) SDL_ReleaseGPUTexture(g_depth_pass.device, texture);
     return false;
   }
-  memset(mapped, 0xFF, 4);
+  memset(mapped, 0xFF, kSim3DDepthRgbaBytesPerPixel);
   SDL_UnmapGPUTransferBuffer(g_depth_pass.device, transfer);
   if (!SDL_FlushRenderer(renderer)) {
     SDL_ReleaseGPUTransferBuffer(g_depth_pass.device, transfer);
@@ -339,104 +387,125 @@ const char *Sim3DDepthPass_LastError(void) {
 bool Sim3DDepthPass_UploadMountainAtlas(SDL_Renderer *renderer,
                                         const uint32_t *argb_pixels,
                                         int width, int height, int pitch) {
-  if (!renderer || !argb_pixels || width <= 0 || height <= 0 ||
-      pitch < width * (int)sizeof(uint32_t) ||
+  if (!renderer || !argb_pixels || width <= 0 || height <= 0 || pitch <= 0)
+    return false;
+  if ((size_t)width > SIZE_MAX / sizeof(uint32_t)) return false;
+  const size_t row_bytes = (size_t)width * sizeof(uint32_t);
+  if ((size_t)pitch < row_bytes ||
+      row_bytes > UINT32_MAX ||
+      (size_t)height > UINT32_MAX / row_bytes ||
+      (size_t)height > SIZE_MAX / (size_t)pitch ||
       !EnsureInitialized(renderer))
     return false;
+  const Uint32 upload_size = (Uint32)(row_bytes * (size_t)height);
 
-  SDL_GPUTextureCreateInfo texture_info;
-  SDL_zero(texture_info);
-  texture_info.type = SDL_GPU_TEXTURETYPE_2D;
-  texture_info.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-  texture_info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
-  texture_info.width = (Uint32)width;
-  texture_info.height = (Uint32)height;
-  texture_info.layer_count_or_depth = 1;
-  texture_info.num_levels = 1;
-  texture_info.sample_count = SDL_GPU_SAMPLECOUNT_1;
-  SDL_GPUTexture *texture = SDL_CreateGPUTexture(
-      g_depth_pass.device, &texture_info);
-  if (!texture) {
-    fprintf(stderr, "[sim3d-depth] mountain texture creation failed: %s\n",
-            SDL_GetError());
-    return false;
+  const bool resources_match = g_depth_pass.mountain_atlas &&
+      g_depth_pass.mountain_atlas_transfer &&
+      g_depth_pass.mountain_atlas_width == width &&
+      g_depth_pass.mountain_atlas_height == height &&
+      g_depth_pass.mountain_atlas_transfer_size >= upload_size;
+  if (!resources_match) {
+    SDL_GPUTextureCreateInfo texture_info;
+    SDL_zero(texture_info);
+    texture_info.type = SDL_GPU_TEXTURETYPE_2D;
+    texture_info.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    texture_info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    texture_info.width = (Uint32)width;
+    texture_info.height = (Uint32)height;
+    texture_info.layer_count_or_depth = 1;
+    texture_info.num_levels = 1;
+    texture_info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    SDL_GPUTexture *texture = SDL_CreateGPUTexture(
+        g_depth_pass.device, &texture_info);
+    SDL_GPUTransferBufferCreateInfo transfer_info = {
+      .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+      .size = upload_size,
+    };
+    SDL_GPUTransferBuffer *transfer = texture ? SDL_CreateGPUTransferBuffer(
+        g_depth_pass.device, &transfer_info) : NULL;
+    if (!texture || !transfer) {
+      fprintf(stderr, "[sim3d-depth] mountain upload resource creation "
+                      "failed: %s\n", SDL_GetError());
+      if (transfer)
+        SDL_ReleaseGPUTransferBuffer(g_depth_pass.device, transfer);
+      if (texture)
+        SDL_ReleaseGPUTexture(g_depth_pass.device, texture);
+      return false;
+    }
+    if (g_depth_pass.mountain_atlas_transfer)
+      SDL_ReleaseGPUTransferBuffer(
+          g_depth_pass.device, g_depth_pass.mountain_atlas_transfer);
+    if (g_depth_pass.mountain_atlas)
+      SDL_ReleaseGPUTexture(g_depth_pass.device, g_depth_pass.mountain_atlas);
+    g_depth_pass.mountain_atlas = texture;
+    g_depth_pass.mountain_atlas_transfer = transfer;
+    g_depth_pass.mountain_atlas_transfer_size = upload_size;
+    g_depth_pass.mountain_atlas_width = width;
+    g_depth_pass.mountain_atlas_height = height;
   }
 
-  Uint32 upload_size = (Uint32)width * (Uint32)height *
-      (Uint32)sizeof(uint32_t);
-  SDL_GPUTransferBufferCreateInfo transfer_info = {
-    .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-    .size = upload_size,
-  };
-  SDL_GPUTransferBuffer *transfer = SDL_CreateGPUTransferBuffer(
-      g_depth_pass.device, &transfer_info);
-  uint8_t *mapped = transfer ? SDL_MapGPUTransferBuffer(
-      g_depth_pass.device, transfer, false) : NULL;
+  uint8_t *mapped = SDL_MapGPUTransferBuffer(
+      g_depth_pass.device, g_depth_pass.mountain_atlas_transfer, true);
   if (!mapped) {
     fprintf(stderr, "[sim3d-depth] mountain upload allocation failed: %s\n",
             SDL_GetError());
-    if (transfer)
-      SDL_ReleaseGPUTransferBuffer(g_depth_pass.device, transfer);
-    SDL_ReleaseGPUTexture(g_depth_pass.device, texture);
     return false;
   }
   /* Convert numeric ARGB words to an explicit byte format. Besides avoiding
    * backend-specific channel layouts, this keeps the upload correct on either
    * host byte order; it runs only when the immutable town atlas changes. */
   for (int y = 0; y < height; y++) {
-    const uint32_t *source = (const uint32_t *)(
-        (const uint8_t *)argb_pixels + (size_t)y * (size_t)pitch);
-    uint8_t *destination = mapped +
-        (size_t)y * (size_t)width * sizeof(uint32_t);
+    const uint8_t *source =
+        (const uint8_t *)argb_pixels + (size_t)y * (size_t)pitch;
+    uint8_t *destination = mapped + (size_t)y * row_bytes;
     for (int x = 0; x < width; x++) {
-      uint32_t argb = source[x];
-      destination[x * 4 + 0] = (uint8_t)(argb >> 16);
-      destination[x * 4 + 1] = (uint8_t)(argb >> 8);
-      destination[x * 4 + 2] = (uint8_t)argb;
-      destination[x * 4 + 3] = (uint8_t)(argb >> 24);
+      /* A caller-provided pitch is not required to preserve uint32_t
+       * alignment on every row. memcpy gives the numeric ARGB word without
+       * an unaligned typed dereference (undefined on strict-alignment ARM). */
+      uint32_t argb;
+      memcpy(&argb, source + (size_t)x * sizeof(argb), sizeof(argb));
+      destination[x * kSim3DDepthRgbaBytesPerPixel + 0] =
+          (uint8_t)(argb >> 16);
+      destination[x * kSim3DDepthRgbaBytesPerPixel + 1] =
+          (uint8_t)(argb >> 8);
+      destination[x * kSim3DDepthRgbaBytesPerPixel + 2] = (uint8_t)argb;
+      destination[x * kSim3DDepthRgbaBytesPerPixel + 3] =
+          (uint8_t)(argb >> 24);
     }
   }
-  SDL_UnmapGPUTransferBuffer(g_depth_pass.device, transfer);
+  SDL_UnmapGPUTransferBuffer(
+      g_depth_pass.device, g_depth_pass.mountain_atlas_transfer);
 
-  if (!SDL_FlushRenderer(renderer)) {
-    SDL_ReleaseGPUTransferBuffer(g_depth_pass.device, transfer);
-    SDL_ReleaseGPUTexture(g_depth_pass.device, texture);
-    return false;
-  }
+  if (!SDL_FlushRenderer(renderer)) return false;
   SDL_GPUCommandBuffer *commands = SDL_AcquireGPUCommandBuffer(
       g_depth_pass.device);
   SDL_GPUCopyPass *copy = commands ? SDL_BeginGPUCopyPass(commands) : NULL;
   if (!copy) {
     if (commands) SDL_CancelGPUCommandBuffer(commands);
-    SDL_ReleaseGPUTransferBuffer(g_depth_pass.device, transfer);
-    SDL_ReleaseGPUTexture(g_depth_pass.device, texture);
     return false;
   }
   SDL_GPUTextureTransferInfo source_info = {
-    .transfer_buffer = transfer,
+    .transfer_buffer = g_depth_pass.mountain_atlas_transfer,
     .offset = 0,
     .pixels_per_row = (Uint32)width,
     .rows_per_layer = (Uint32)height,
   };
   SDL_GPUTextureRegion destination = {
-    .texture = texture,
+    .texture = g_depth_pass.mountain_atlas,
     .w = (Uint32)width,
     .h = (Uint32)height,
     .d = 1,
   };
-  SDL_UploadToGPUTexture(copy, &source_info, &destination, false);
+  /* Both resources persist across animated canvas revisions. Cycling keeps a
+   * new upload from waiting on the previous frame while avoiding per-frame
+   * GPU allocation and deferred destruction. */
+  SDL_UploadToGPUTexture(copy, &source_info, &destination, true);
   SDL_EndGPUCopyPass(copy);
   if (!SDL_SubmitGPUCommandBuffer(commands)) {
     fprintf(stderr, "[sim3d-depth] mountain upload submission failed: %s\n",
             SDL_GetError());
-    SDL_ReleaseGPUTransferBuffer(g_depth_pass.device, transfer);
-    SDL_ReleaseGPUTexture(g_depth_pass.device, texture);
     return false;
   }
-  SDL_ReleaseGPUTransferBuffer(g_depth_pass.device, transfer);
-  if (g_depth_pass.mountain_atlas)
-    SDL_ReleaseGPUTexture(g_depth_pass.device, g_depth_pass.mountain_atlas);
-  g_depth_pass.mountain_atlas = texture;
   return true;
 }
 
@@ -444,7 +513,8 @@ static bool ReserveList(Sim3DDepthList *list, Uint32 additional) {
   if (additional > UINT32_MAX - list->count) return false;
   Uint32 required = list->count + additional;
   if (required <= list->capacity) return true;
-  Uint32 capacity = list->capacity ? list->capacity : 4096;
+  Uint32 capacity = list->capacity ? list->capacity
+      : kSim3DDepthInitialCpuVertexCapacity;
   while (capacity < required) {
     if (capacity > UINT32_MAX / 2) {
       capacity = required;
@@ -452,6 +522,7 @@ static bool ReserveList(Sim3DDepthList *list, Uint32 additional) {
     }
     capacity *= 2;
   }
+  if ((size_t)capacity > SIZE_MAX / sizeof(*list->vertices)) return false;
   Sim3DGpuVertex *vertices = realloc(
       list->vertices, (size_t)capacity * sizeof(*vertices));
   if (!vertices) return false;
@@ -470,6 +541,8 @@ bool Sim3DDepthPass_Begin(SDL_Renderer *renderer, int width, int height,
     g_depth_pass.lists[i].count = 0;
   g_depth_pass.geometry_failed = false;
   g_depth_pass.collecting = true;
+  g_depth_pass.clip_x_scale = 2.0f / (float)width;
+  g_depth_pass.clip_y_scale = 2.0f / (float)height;
   return true;
 }
 
@@ -479,16 +552,20 @@ bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer,
       layer >= kSim3DDepthPassLayerCount)
     return false;
   Sim3DDepthList *list = &g_depth_pass.lists[layer];
-  if (!ReserveList(list, 6)) {
+  if (!ReserveList(list, kSim3DDepthVerticesPerQuad)) {
     g_depth_pass.geometry_failed = true;
     return false;
   }
-  static const Uint8 order[6] = {0, 1, 2, 0, 2, 3};
-  for (int i = 0; i < 6; i++) {
+  static const Uint8 order[kSim3DDepthVerticesPerQuad] = {
+    0, 1, 2, 0, 2, 3,
+  };
+  for (int i = 0; i < kSim3DDepthVerticesPerQuad; i++) {
     const Sim3DDepthVertex *source = &vertices[order[i]];
     Sim3DGpuVertex *destination = &list->vertices[list->count++];
-    destination->position[0] = source->x / g_depth_pass.width * 2.0f - 1.0f;
-    destination->position[1] = 1.0f - source->y / g_depth_pass.height * 2.0f;
+    destination->position[0] =
+        source->x * g_depth_pass.clip_x_scale - 1.0f;
+    destination->position[1] =
+        1.0f - source->y * g_depth_pass.clip_y_scale;
     destination->position[2] = source->depth;
     destination->position[3] = 1.0f;
     destination->color[0] = source->color.r;
@@ -510,7 +587,8 @@ static bool EnsureGpuBuffer(Uint32 vertex_count) {
     return false;
   }
   Uint32 capacity = g_depth_pass.gpu_vertex_capacity
-      ? g_depth_pass.gpu_vertex_capacity : 8192;
+      ? g_depth_pass.gpu_vertex_capacity
+      : kSim3DDepthInitialGpuVertexCapacity;
   while (capacity < vertex_count) {
     if (capacity > maximum_vertices / 2) {
       capacity = vertex_count;
@@ -551,17 +629,20 @@ static bool EnsureGpuBuffer(Uint32 vertex_count) {
 }
 
 static SDL_GPUTexture *TextureForLayer(
-    Sim3DDepthPassLayer layer, SDL_Texture *billboard_texture) {
+    Sim3DDepthPassLayer layer, SDL_Texture *shadow_texture) {
   switch (layer) {
     case kSim3DDepthPass_Mountain:
       return g_depth_pass.mountain_atlas;
-    case kSim3DDepthPass_Billboard:
-      return GpuTexture(billboard_texture);
+    case kSim3DDepthPass_ShadowReceiver:
+      return GpuTexture(shadow_texture);
     case kSim3DDepthPass_Effect:
+    case kSim3DDepthPass_DepthOccluder:
     case kSim3DDepthPass_Solid:
-    default:
       return g_depth_pass.white_texture;
+    case kSim3DDepthPassLayerCount:
+      break;
   }
+  return NULL;
 }
 
 /* Opaque geometry writes depth; transparent effects only test against it.
@@ -569,12 +650,23 @@ static SDL_GPUTexture *TextureForLayer(
  * keeps that a property of the layer instead of a property of where the layer
  * happens to sit in the enum. */
 static SDL_GPUGraphicsPipeline *PipelineForLayer(Sim3DDepthPassLayer layer) {
-  return layer == kSim3DDepthPass_Effect
-      ? g_depth_pass.effect_pipeline : g_depth_pass.pipeline;
+  switch (layer) {
+    case kSim3DDepthPass_DepthOccluder:
+      return g_depth_pass.depth_occluder_pipeline;
+    case kSim3DDepthPass_Effect:
+    case kSim3DDepthPass_ShadowReceiver:
+      return g_depth_pass.effect_pipeline;
+    case kSim3DDepthPass_Solid:
+    case kSim3DDepthPass_Mountain:
+      return g_depth_pass.pipeline;
+    case kSim3DDepthPassLayerCount:
+      break;
+  }
+  return NULL;
 }
 
 SDL_Texture *Sim3DDepthPass_Submit(SDL_Renderer *renderer,
-                                   SDL_Texture *billboard_texture) {
+                                   SDL_Texture *shadow_texture) {
   if (!g_depth_pass.collecting || renderer != g_depth_pass.renderer)
     return NULL;
   g_depth_pass.collecting = false;
@@ -593,7 +685,7 @@ SDL_Texture *Sim3DDepthPass_Submit(SDL_Renderer *renderer,
   if (!total || !EnsureGpuBuffer(total)) return NULL;
   for (int i = 0; i < kSim3DDepthPassLayerCount; i++) {
     if (!g_depth_pass.lists[i].count) continue;
-    if (!TextureForLayer((Sim3DDepthPassLayer)i, billboard_texture)) {
+    if (!TextureForLayer((Sim3DDepthPassLayer)i, shadow_texture)) {
       fprintf(stderr, "[sim3d-depth] material layer %d has no GPU texture\n",
               i);
       return NULL;
@@ -679,7 +771,7 @@ SDL_Texture *Sim3DDepthPass_Submit(SDL_Renderer *renderer,
       bound = pipeline;
     }
     SDL_GPUTexture *texture = TextureForLayer(
-        (Sim3DDepthPassLayer)i, billboard_texture);
+        (Sim3DDepthPassLayer)i, shadow_texture);
     SDL_GPUTextureSamplerBinding texture_binding = {
       .texture = texture,
       .sampler = g_depth_pass.nearest_sampler,
@@ -707,6 +799,9 @@ void Sim3DDepthPass_Reset(void) {
   if (g_depth_pass.pipeline)
     SDL_ReleaseGPUGraphicsPipeline(
         g_depth_pass.device, g_depth_pass.pipeline);
+  if (g_depth_pass.depth_occluder_pipeline)
+    SDL_ReleaseGPUGraphicsPipeline(
+        g_depth_pass.device, g_depth_pass.depth_occluder_pipeline);
   if (g_depth_pass.effect_pipeline)
     SDL_ReleaseGPUGraphicsPipeline(
         g_depth_pass.device, g_depth_pass.effect_pipeline);
@@ -723,6 +818,9 @@ void Sim3DDepthPass_Reset(void) {
         g_depth_pass.device, g_depth_pass.transfer_buffer);
   if (g_depth_pass.mountain_atlas)
     SDL_ReleaseGPUTexture(g_depth_pass.device, g_depth_pass.mountain_atlas);
+  if (g_depth_pass.mountain_atlas_transfer)
+    SDL_ReleaseGPUTransferBuffer(
+        g_depth_pass.device, g_depth_pass.mountain_atlas_transfer);
   if (g_depth_pass.white_texture)
     SDL_ReleaseGPUTexture(g_depth_pass.device, g_depth_pass.white_texture);
   for (int i = 0; i < kSim3DDepthPassLayerCount; i++) {

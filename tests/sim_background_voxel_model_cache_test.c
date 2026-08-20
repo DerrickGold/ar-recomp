@@ -62,6 +62,34 @@ int main(void) {
   stats = SimBackgroundVoxelModelCache_Stats();
   CHECK(stats.misses == 5 && stats.hits == 1);
 
+  /* A bridge's banks define its compiled span. The live marker may remain in
+   * the same cell while a wider water run is exposed, so endpoint identity
+   * belongs in the key rather than only in the renderer transform. */
+  SimBackgroundVoxelModelCache_Reset();
+  SimBackgroundVoxelObject bridge = {
+    .kind = kSimBackgroundVoxel_Bridge,
+    .cell_x = 10,
+    .cell_y = 10,
+    .source_cells_w = 1,
+    .source_cells_h = 1,
+    .bridge_axis = kSimBackgroundBridgeAxis_EastWest,
+    .bridge_bank_a_x = 8,
+    .bridge_bank_b_x = 12,
+  };
+  const SimBackgroundVoxelModel *short_bridge =
+      SimBackgroundVoxelModelCache_Get(
+          &bridge, kSimBackgroundVoxelDetail_High,
+          kSimBackgroundVoxelStyle_Basic, 7, NULL, NULL);
+  CHECK(short_bridge && short_bridge->max_x == 50.0f);
+  bridge.bridge_bank_b_x = 14;
+  const SimBackgroundVoxelModel *long_bridge =
+      SimBackgroundVoxelModelCache_Get(
+          &bridge, kSimBackgroundVoxelDetail_High,
+          kSimBackgroundVoxelStyle_Basic, 8, NULL, NULL);
+  CHECK(long_bridge && long_bridge->max_x == 82.0f);
+  stats = SimBackgroundVoxelModelCache_Stats();
+  CHECK(stats.misses == 2 && stats.hits == 0);
+
   /* A developed-town pass should retain hundreds of independently seeded
    * objects and hit them on the following frame instead of linearly scanning
    * and evicting the next entry before it can be reused. */

@@ -4,6 +4,7 @@
 #include <math.h>
 #include <string.h>
 
+#include "sim_background_bridge.h"
 #include "sim_background_voxel_region.h"
 
 typedef enum ModelBoxFaces {
@@ -109,6 +110,208 @@ static void AddStandardBox(SimBackgroundVoxelModel *model,
                            SimBackgroundVoxelMaterial material) {
   AddBox(model, x0, y0, z0, x1, y1, z1, material,
          kBoxFace_AllVisible);
+}
+
+enum {
+  kStoneBridgeDeckBrightness = 245,
+  kStoneBridgeCourseBrightness = 218,
+  kStoneBridgeFineCourseBrightness = 204,
+  kStoneBridgeFineCourseCount = 2,
+  /* The two outer opening faces differ deliberately so their authored shade
+   * follows the model's directional side-lighting on each bridge axis. */
+  kStoneBridgeEastWestNearOpeningBrightness = 170,
+  kStoneBridgeEastWestFarOpeningBrightness = 190,
+  kStoneBridgeNorthSouthNearOpeningBrightness = 178,
+  kStoneBridgeNorthSouthFarOpeningBrightness = 198,
+};
+
+static void BuildStoneBridge(const SimBackgroundVoxelObject *object,
+                             SimBackgroundVoxelDetail detail,
+                             SimBackgroundVoxelModel *model) {
+  const SimBackgroundBridgeBounds bounds =
+      SimBackgroundBridge_ResolveBounds(object);
+  const float width = bounds.width, depth = bounds.depth;
+  if (width <= 0.0f || depth <= 0.0f) return;
+  const float deck_height = 0.35f;
+  const float slab_bottom = -2.4f;
+  const float parapet_embed = -0.75f;
+  const float parapet_body_width = 1.15f;
+  const float parapet_cap_width = 1.42f;
+  const float post_width = 1.75f;
+  const float underside_offset = 0.02f;
+  const float underside_bottom = -1.9f;
+  const float underside_top = -0.7f;
+  const float coarse_course_half_width = 0.18f;
+  const float coarse_course_lift = 0.025f;
+  const float fine_course_half_width = 0.14f;
+  const float fine_course_lift = 0.03f;
+  /* Low slab, visible masonry sides, separate paving cap. There is no bottom
+   * face: the dark inset below reads as the shallow opening seen in the native
+   * graphic without inventing timber supports or free-standing piers. */
+  AddBox(model, 0.0f, 0.0f, slab_bottom, width, depth, deck_height,
+         kSimVoxelMaterial_Wall,
+         kBoxFace_AllVisible & ~kBoxFace_Top);
+  AddFace(model, kSimVoxelMaterial_Paving, kStoneBridgeDeckBrightness,
+          Point(0.0f, 0.0f, deck_height),
+          Point(width, 0.0f, deck_height),
+          Point(width, depth, deck_height),
+          Point(0.0f, depth, deck_height));
+
+  /* The approved native-stone silhouette has real parapets, not painted curb
+   * lines.  A grey-green masonry body carries a narrow pale cap, while the
+   * balanced tier adds compact terminal posts at the banks. */
+  /* Keep enough height for the approved railing silhouette. The detached
+   * pale bar seen in Marahna was residual native ground art, not this model's
+   * far parapet; flattening the real parapet would only turn the bridge back
+   * into the block the authored model was meant to replace. */
+  const float parapet_body_height = 2.65f;
+  const float parapet_cap_height = 3.25f;
+  const float post_height = SimBackgroundBridge_AuthoredHeight();
+  if (object->bridge_axis == kSimBackgroundBridgeAxis_EastWest) {
+    AddStandardBox(model, 0.0f, 0.0f, parapet_embed,
+                   width, parapet_body_width, parapet_body_height,
+                   kSimVoxelMaterial_WallLight);
+    AddStandardBox(model, 0.0f, depth - parapet_body_width, parapet_embed,
+                   width, depth, parapet_body_height,
+                   kSimVoxelMaterial_WallLight);
+    AddStandardBox(model, 0.0f, 0.0f, parapet_body_height,
+                   width, parapet_cap_width, parapet_cap_height,
+                   kSimVoxelMaterial_Trim);
+    AddStandardBox(model, 0.0f, depth - parapet_cap_width,
+                   parapet_body_height,
+                   width, depth, parapet_cap_height,
+                   kSimVoxelMaterial_Trim);
+    AddFace(model, kSimVoxelMaterial_Dark,
+            kStoneBridgeEastWestNearOpeningBrightness,
+            Point(width, -underside_offset, underside_bottom),
+            Point(0.0f, -underside_offset, underside_bottom),
+            Point(0.0f, -underside_offset, underside_top),
+            Point(width, -underside_offset, underside_top));
+    AddFace(model, kSimVoxelMaterial_Dark,
+            kStoneBridgeEastWestFarOpeningBrightness,
+            Point(0.0f, depth + underside_offset, underside_bottom),
+            Point(width, depth + underside_offset, underside_bottom),
+            Point(width, depth + underside_offset, underside_top),
+            Point(0.0f, depth + underside_offset, underside_top));
+    if (detail >= kSimBackgroundVoxelDetail_Balanced) {
+      AddStandardBox(model, 0.0f, 0.0f, parapet_embed,
+                     post_width, post_width, post_height,
+                     kSimVoxelMaterial_Trim);
+      AddStandardBox(model, 0.0f, depth - post_width, parapet_embed,
+                     post_width, depth, post_height, kSimVoxelMaterial_Trim);
+      AddStandardBox(model, width - post_width, 0.0f, parapet_embed,
+                     width, post_width, post_height, kSimVoxelMaterial_Trim);
+      AddStandardBox(model, width - post_width, depth - post_width,
+                     parapet_embed,
+                     width, depth, post_height, kSimVoxelMaterial_Trim);
+    }
+  } else {
+    AddStandardBox(model, 0.0f, 0.0f, parapet_embed,
+                   parapet_body_width, depth, parapet_body_height,
+                   kSimVoxelMaterial_WallLight);
+    AddStandardBox(model, width - parapet_body_width, 0.0f, parapet_embed,
+                   width, depth, parapet_body_height,
+                   kSimVoxelMaterial_WallLight);
+    AddStandardBox(model, 0.0f, 0.0f, parapet_body_height,
+                   parapet_cap_width, depth, parapet_cap_height,
+                   kSimVoxelMaterial_Trim);
+    AddStandardBox(model, width - parapet_cap_width, 0.0f,
+                   parapet_body_height,
+                   width, depth, parapet_cap_height,
+                   kSimVoxelMaterial_Trim);
+    AddFace(model, kSimVoxelMaterial_Dark,
+            kStoneBridgeNorthSouthNearOpeningBrightness,
+            Point(-underside_offset, 0.0f, underside_bottom),
+            Point(-underside_offset, depth, underside_bottom),
+            Point(-underside_offset, depth, underside_top),
+            Point(-underside_offset, 0.0f, underside_top));
+    AddFace(model, kSimVoxelMaterial_Dark,
+            kStoneBridgeNorthSouthFarOpeningBrightness,
+            Point(width + underside_offset, depth, underside_bottom),
+            Point(width + underside_offset, 0.0f, underside_bottom),
+            Point(width + underside_offset, 0.0f, underside_top),
+            Point(width + underside_offset, depth, underside_top));
+    if (detail >= kSimBackgroundVoxelDetail_Balanced) {
+      AddStandardBox(model, 0.0f, 0.0f, parapet_embed,
+                     post_width, post_width, post_height,
+                     kSimVoxelMaterial_Trim);
+      AddStandardBox(model, width - post_width, 0.0f, parapet_embed,
+                     width, post_width, post_height, kSimVoxelMaterial_Trim);
+      AddStandardBox(model, 0.0f, depth - post_width, parapet_embed,
+                     post_width, depth, post_height, kSimVoxelMaterial_Trim);
+      AddStandardBox(model, width - post_width, depth - post_width,
+                     parapet_embed,
+                     width, depth, post_height, kSimVoxelMaterial_Trim);
+    }
+  }
+  /* Higher density resolves restrained transverse masonry courses on the
+   * paving. They are stone-on-stone, never timber slats, and each tier adds a
+   * visible feature so the global quality control remains truthful. */
+  if (detail >= kSimBackgroundVoxelDetail_High) {
+    if (object->bridge_axis == kSimBackgroundBridgeAxis_EastWest) {
+      float x = width * 0.5f;
+      AddFace(model, kSimVoxelMaterial_WallLight,
+              kStoneBridgeCourseBrightness,
+              Point(x - coarse_course_half_width, parapet_body_width,
+                    deck_height + coarse_course_lift),
+              Point(x + coarse_course_half_width, parapet_body_width,
+                    deck_height + coarse_course_lift),
+              Point(x + coarse_course_half_width,
+                    depth - parapet_body_width,
+                    deck_height + coarse_course_lift),
+              Point(x - coarse_course_half_width,
+                    depth - parapet_body_width,
+                    deck_height + coarse_course_lift));
+    } else {
+      float y = depth * 0.5f;
+      AddFace(model, kSimVoxelMaterial_WallLight,
+              kStoneBridgeCourseBrightness,
+              Point(parapet_body_width, y - coarse_course_half_width,
+                    deck_height + coarse_course_lift),
+              Point(width - parapet_body_width,
+                    y - coarse_course_half_width,
+                    deck_height + coarse_course_lift),
+              Point(width - parapet_body_width,
+                    y + coarse_course_half_width,
+                    deck_height + coarse_course_lift),
+              Point(parapet_body_width, y + coarse_course_half_width,
+                    deck_height + coarse_course_lift));
+    }
+  }
+  if (detail == kSimBackgroundVoxelDetail_Ultra) {
+    for (int course = 1; course <= kStoneBridgeFineCourseCount; course++) {
+      float t = course / (float)(kStoneBridgeFineCourseCount + 1);
+      if (object->bridge_axis == kSimBackgroundBridgeAxis_EastWest) {
+        float x = width * t;
+        AddFace(model, kSimVoxelMaterial_WallLight,
+                kStoneBridgeFineCourseBrightness,
+                Point(x - fine_course_half_width, parapet_body_width,
+                      deck_height + fine_course_lift),
+                Point(x + fine_course_half_width, parapet_body_width,
+                      deck_height + fine_course_lift),
+                Point(x + fine_course_half_width,
+                      depth - parapet_body_width,
+                      deck_height + fine_course_lift),
+                Point(x - fine_course_half_width,
+                      depth - parapet_body_width,
+                      deck_height + fine_course_lift));
+      } else {
+        float y = depth * t;
+        AddFace(model, kSimVoxelMaterial_WallLight,
+                kStoneBridgeFineCourseBrightness,
+                Point(parapet_body_width, y - fine_course_half_width,
+                      deck_height + fine_course_lift),
+                Point(width - parapet_body_width,
+                      y - fine_course_half_width,
+                      deck_height + fine_course_lift),
+                Point(width - parapet_body_width,
+                      y + fine_course_half_width,
+                      deck_height + fine_course_lift),
+                Point(parapet_body_width, y + fine_course_half_width,
+                      deck_height + fine_course_lift));
+      }
+    }
+  }
 }
 
 static void AddOctagonalFrustum(
@@ -683,12 +886,26 @@ static void AddBlade(SimBackgroundVoxelModel *model,
           back[1], back[2], front[2], front[1]);
 }
 
+/* The sail's spar, laid along the blade it decorates.
+ *
+ * It is drawn in the BLADE material at the blade's own back-face shade, not in
+ * Wood, and that is the whole point of it. The strip is 0.56 model units wide;
+ * across the entire size band in which it is authored to appear it measures
+ * 0.4 to 0.9 SCREEN pixels, against a blade 1.7 to 3.5 pixels wide (High
+ * enters at a projected model height of 24px, Ultra at 42px -- see
+ * SimBackgroundVoxelLod_Resolve). A sub-pixel quad does not thin out; it
+ * claims every whole pixel whose centre it crosses. In Wood it claimed those
+ * pixels in the mill's own dark brown, so a run of them read as the frame
+ * showing THROUGH the blade -- the rotor looked severed wherever it crossed
+ * the gable or the hub. Kept in the blade's own ramp, the same lost pixels
+ * are a shading line: the silhouette stays continuous at every size, and the
+ * spar still reads as a spar once the camera is close enough to resolve it. */
 static void AddBladeInlay(SimBackgroundVoxelModel *model,
                           float cx, float cy, float cz,
                           float dx, float dz) {
   const float inner = 3.2f, outer = 9.2f, half_width = 0.28f;
   const float px = -dz, pz = dx;
-  AddFace(model, kSimVoxelMaterial_Wood, 255,
+  AddFace(model, kSimVoxelMaterial_Blade, 190,
           Point(cx + dx * inner + px * half_width, cy + 0.64f,
                 cz + dz * inner + pz * half_width),
           Point(cx + dx * outer + px * half_width, cy + 0.64f,
@@ -1636,7 +1853,7 @@ static void RemoveBuriedAndDuplicateFaces(SimBackgroundVoxelModel *model) {
 static void ComputeCornerOcclusion(SimBackgroundVoxelModel *model) {
   const float normal_step = 0.02f;
   const float tangent_step = 0.04f;
-  static const uint8_t visibility[] = {255, 226, 204, 178};
+  static const uint8_t visibility[] = {255, 236, 220, 204};
   for (uint16_t face_index = 0; face_index < model->face_count; face_index++) {
     SimBackgroundVoxelModelFace *face = &model->faces[face_index];
     AxisFace axis_face;
@@ -1927,6 +2144,9 @@ static void BuildSilhouetteTrim(
     case kSimBackgroundVoxel_Pyramid:
       /* Landmark silhouettes carry their own authored trim. */
       break;
+    case kSimBackgroundVoxel_Bridge:
+      /* Native masonry already has its complete silhouette. */
+      break;
   }
 }
 
@@ -2143,6 +2363,8 @@ static void BuildDeterministicVariation(
     case kSimBackgroundVoxel_Pyramid:
       /* Unique town landmarks do not need random silhouettes. */
       break;
+    case kSimBackgroundVoxel_Bridge:
+      break;
   }
 }
 
@@ -2217,13 +2439,19 @@ void SimBackgroundVoxelModel_BuildStyled(
     case kSimBackgroundVoxel_Pyramid:
       BuildPyramid(detail, out);
       break;
+    case kSimBackgroundVoxel_Bridge:
+      BuildStoneBridge(object, detail, out);
+      break;
   }
-  if (style >= kSimBackgroundVoxelStyle_Trim)
+  if (object->kind != kSimBackgroundVoxel_Bridge &&
+      style >= kSimBackgroundVoxelStyle_Trim)
     BuildSilhouetteTrim(object, detail, out);
-  if (style >= kSimBackgroundVoxelStyle_Architectural)
+  if (object->kind != kSimBackgroundVoxel_Bridge &&
+      style >= kSimBackgroundVoxelStyle_Architectural)
     BuildFactoryCourtyardDetails(object, detail, out);
   if (style >= kSimBackgroundVoxelStyle_Varied &&
-      object->kind != kSimBackgroundVoxel_House)
+      object->kind != kSimBackgroundVoxel_House &&
+      object->kind != kSimBackgroundVoxel_Bridge)
     BuildDeterministicVariation(object, detail, out);
   FinalizeModelSurface(out);
 }

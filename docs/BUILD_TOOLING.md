@@ -141,7 +141,7 @@ so both build paths compile only C.
 | Path | What it is |
 |---|---|
 | `src/shaders/*.{vert,frag}.glsl` | The authored source — the one place a shader is written |
-| `src/shaders/*_{vert,frag}.h` | Generated **and committed**: byte arrays holding SPIR-V + MSL |
+| `src/shaders/*_{vert,frag}.h` | Generated **and committed**: byte arrays holding SPIR-V + MSL + DXIL |
 | `tools/build_shaders.py` | Developer-only generator |
 | `tests/shader_blob_test.c` | Asserts every blob compiles on the live backend |
 
@@ -151,7 +151,10 @@ tools/build_shaders.py            # regenerate after editing shader GLSL
 
 `--check` verifies the committed headers match their sources without writing,
 which is what CI should run. Regenerating needs `glslc` (Homebrew `shaderc`,
-Debian `glslc`) and `spirv-cross`; **building the game needs neither.**
+Debian `glslc`), `spirv-cross`, and Microsoft's `dxc`; **building the game
+needs none of them.** If DXC is not on `PATH`, point the generator at it with
+`DXC=/path/to/dxc`. The variable accepts a command prefix such as
+`DXC='wine /path/to/dxc.exe'` for non-Windows developer machines.
 
 Because `src/` is installed wholesale into bundles, `src/shaders/` ships to all
 platforms with no packaging or leak-gate change.
@@ -165,13 +168,16 @@ Two constraints worth knowing before touching a shader:
   generator refuses to emit a blob whose Metal bindings drifted off those slots.
 - Uniform blocks must mirror their C struct field-for-field. Packing two floats
   into a `vec2` where the C side has separate scalars shifts every later member.
+- The generator translates the same readable SPIR-V module to HLSL, verifies
+  SDL's `space2` sampler / `space3` uniform convention and `TEXCOORD` stage
+  semantics, compiles Shader Model 6.0 DXIL, then asks DXC to parse the final
+  container before committing it as bytes.
 
-`main.c` requests the `gpu` renderer **with properties**, declaring SPIR-V and
-MSL and deliberately not DXIL, so SDL picks a backend this build can actually
-feed. Renderer creation, D32 support, and depth-pipeline creation are validated
-at startup; there is no software renderer or painter-order fallback. DXIL is a
-deliberate deferral for Windows machines with no Vulkan driver; the committed
-SPIR-V is valid `SDL_shadercross` input, so adding it later is additive.
+`main.c` requests the `gpu` renderer **with properties**, declaring SPIR-V,
+MSL, and DXIL, so SDL can select Vulkan, Metal, or D3D12 while always receiving
+a native shader format. Renderer creation, D32 support, and depth-pipeline
+creation are validated at startup; there is no software renderer or
+painter-order fallback.
 
 ## Self-contained distribution bundles
 

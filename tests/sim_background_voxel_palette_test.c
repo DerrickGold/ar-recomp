@@ -39,6 +39,8 @@ int main(void) {
   CHECK(base == 0xFF834100u);
   CHECK(SimBackgroundVoxelPalette_Base(
             &palette, kSimVoxelMaterial_Wall) == 0xFFB48B4Au);
+  CHECK(SimBackgroundVoxelPalette_Base(
+            &palette, kSimVoxelMaterial_Foundation) == 0xFF687462u);
   CHECK((SimBackgroundVoxelPalette_Base(
       &palette, kSimVoxelMaterial_Contact) >> 24) < 0x80u);
   CHECK(SimBackgroundVoxelPalette_Ramp(
@@ -50,7 +52,7 @@ int main(void) {
     .kind = kSimBackgroundVoxel_Tree,
     .cell_x = 1,
     .cell_y = 1,
-    .record_slot = 0xFF,
+    .record_slot = kSimBackgroundVoxelNoRecordSlot,
   };
   SimBackgroundVoxelObject tree_b = tree_a;
   tree_b.cell_y = 2;
@@ -69,6 +71,8 @@ int main(void) {
       &house, kSimBackgroundVoxelBiome_Desert, &desert);
   SimBackgroundVoxelPalette_Build(
       &house, kSimBackgroundVoxelBiome_Snow, &northwall);
+  CHECK(SimBackgroundVoxelPalette_Base(
+            &desert, kSimVoxelMaterial_Foundation) == 0xFF7E6C4Eu);
   /* A biome change does not overwrite the house's authentic regional ramp. */
   CHECK(SimBackgroundVoxelPalette_Base(
             &desert, kSimVoxelMaterial_Wall) ==
@@ -183,7 +187,7 @@ int main(void) {
     .town = 1,
     .cell_x = 1,
     .cell_y = 1,
-    .record_slot = 0xFF,
+    .record_slot = kSimBackgroundVoxelNoRecordSlot,
   };
   SimBackgroundVoxelPalette pyramid_palette, shrub_palette;
   SimBackgroundVoxelPalette_Build(
@@ -211,6 +215,22 @@ int main(void) {
   CHECK(shrub_leaves != broad_leaves);
   CHECK(broad_leaves != fir_leaves);
   CHECK(shrub_leaves != fir_leaves);
+
+  SimBackgroundVoxelObject bridge = {
+    .kind = kSimBackgroundVoxel_Bridge,
+    .town = 1,
+  };
+  SimBackgroundVoxelPalette bridge_palette;
+  SimBackgroundVoxelPalette_Build(
+      &bridge, kSimBackgroundVoxelBiome_Temperate, &bridge_palette);
+  CHECK(SimBackgroundVoxelPalette_Base(
+            &bridge_palette, kSimVoxelMaterial_Wall) == 0xFF687462u);
+  CHECK(SimBackgroundVoxelPalette_Base(
+            &bridge_palette, kSimVoxelMaterial_Paving) == 0xFF707B68u);
+  CHECK(SimBackgroundVoxelPalette_Base(
+            &bridge_palette, kSimVoxelMaterial_Trim) == 0xFFB8B499u);
+  CHECK(SimBackgroundVoxelPalette_Base(
+            &bridge_palette, kSimVoxelMaterial_Dark) == 0xFF262D27u);
 
   if (failures) return 1;
   puts("sim background voxel palette checks passed");

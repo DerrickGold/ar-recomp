@@ -5,9 +5,16 @@
 #include <stdbool.h>
 
 typedef enum Sim3DDepthPassLayer {
+  /* Invisible terrain geometry is submitted first and writes only depth.  The
+   * textured town ground remains in the SDL color pass, while this layer lets
+   * the same hills and cliff skirts reject solid models hidden behind them. */
+  kSim3DDepthPass_DepthOccluder,
   kSim3DDepthPass_Solid,
   kSim3DDepthPass_Mountain,
-  kSim3DDepthPass_Billboard,
+  /* Samples the accumulated screen-space shadow mask on the exact terrain
+   * top mesh. It tests against opaque depth without writing it, which clips
+   * shadows at ridges, cliff lips, buildings and bridge geometry. */
+  kSim3DDepthPass_ShadowReceiver,
   /* Transparent world effects are submitted after all opaque geometry. They
    * still test against the shared depth target, but use a no-depth-write
    * pipeline so smoke/glow cannot punch transparent holes through mountains. */
@@ -41,8 +48,10 @@ bool Sim3DDepthPass_UploadMountainAtlas(SDL_Renderer *renderer,
                                         int width, int height, int pitch);
 bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer,
                                const Sim3DDepthVertex vertices[4]);
+/* Submits all collected layers. shadow_texture is required only when a
+ * ShadowReceiver quad was appended; pass NULL for the ordinary solid pass. */
 SDL_Texture *Sim3DDepthPass_Submit(SDL_Renderer *renderer,
-                                   SDL_Texture *billboard_texture);
+                                   SDL_Texture *shadow_texture);
 bool Sim3DDepthPass_IsCollecting(void);
 const char *Sim3DDepthPass_LastError(void);
 void Sim3DDepthPass_Reset(void);

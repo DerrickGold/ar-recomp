@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "sim_background_bridge.h"
+
 /* Transcription of the eight house visual families selected by the game's
  * $03:A085 lookup through the 6x3 table at $03:DCC6. The ROM values are even
  * byte offsets 0..14; dividing by two produces these family identifiers.
@@ -15,7 +17,8 @@
  * Marahna      brown yurt                 stilt hut            log cabin
  * Northwall    tent                       timber               developed stone
  */
-static const uint8_t kHouseStyleByTownAndLevel[6][3] = {
+static const uint8_t kHouseStyleByTownAndLevel[kSimBackgroundTownCount]
+    [kSimBackgroundDevelopmentLevelCount] = {
   {kSimBackgroundHouseStyle_Tent,
    kSimBackgroundHouseStyle_Timber,
    kSimBackgroundHouseStyle_Fillmore},
@@ -41,15 +44,16 @@ SimBackgroundVoxelHouseStyle SimBackgroundVoxelRegion_HouseStyle(
   /* Hand-authored test fixtures created before regional identity existed are
    * treated as the established Fillmore model. Classified game objects always
    * carry a valid 1-based town. */
-  if (town < 1 || town > 6)
+  if (town < 1 || town > kSimBackgroundTownCount)
     return kSimBackgroundHouseStyle_Fillmore;
-  if (development_level > 2) development_level = 2;
+  if (development_level >= kSimBackgroundDevelopmentLevelCount)
+    development_level = kSimBackgroundDevelopmentLevelCount - 1;
   return (SimBackgroundVoxelHouseStyle)
       kHouseStyleByTownAndLevel[town - 1][development_level];
 }
 
 SimBackgroundVoxelTreeStyle SimBackgroundVoxelRegion_TreeStyle(uint8_t town) {
-  static const uint8_t styles[6] = {
+  static const uint8_t styles[kSimBackgroundTownCount] = {
     kSimBackgroundTreeStyle_Temperate,
     kSimBackgroundTreeStyle_Wetland,
     kSimBackgroundTreeStyle_Dryland,
@@ -57,7 +61,7 @@ SimBackgroundVoxelTreeStyle SimBackgroundVoxelRegion_TreeStyle(uint8_t town) {
     kSimBackgroundTreeStyle_Tropical,
     kSimBackgroundTreeStyle_SnowFir,
   };
-  return town >= 1 && town <= 6
+  return town >= 1 && town <= kSimBackgroundTownCount
       ? (SimBackgroundVoxelTreeStyle)styles[town - 1]
       : kSimBackgroundTreeStyle_Temperate;
 }
@@ -135,6 +139,8 @@ float SimBackgroundVoxelRegion_AuthoredHeight(
     case kSimBackgroundVoxel_BloodpoolCastle: return 32.0f;
     case kSimBackgroundVoxel_MarahnaTemple: return 24.0f;
     case kSimBackgroundVoxel_Pyramid: return 28.0f;
+    case kSimBackgroundVoxel_Bridge:
+      return SimBackgroundBridge_AuthoredHeight();
   }
   return 16.0f;
 }

@@ -26,6 +26,14 @@ bool Scene3D_ProjectWorldPoint(const float matrix[16],
                                float x, float y, float z,
                                int output_width, int output_height,
                                Scene3DPoint *out_point);
+/* Projects one point and returns the matching normalized GPU depth from the
+ * same clip-space transform. Depth-rendered geometry needs both values; using
+ * this combined path avoids multiplying the same vertex by the matrix twice.
+ */
+bool Scene3D_ProjectWorldPointWithDepth(
+    const float matrix[16], float x, float y, float z,
+    int output_width, int output_height,
+    Scene3DPoint *out_point, float *out_depth);
 /* Perspective scale relative to a point at `reference_depth`. A screen-facing
  * billboard multiplies its unprojected pixel size by this value while keeping
  * its anchor at Scene3D_ProjectWorldPoint(...). */

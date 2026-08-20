@@ -1,4 +1,5 @@
 #include "sim/sim_background_voxel_region.h"
+#include "sim/sim_background_bridge.h"
 
 #include <stdio.h>
 
@@ -11,7 +12,9 @@ static int failures;
 } while (0)
 
 int main(void) {
-  static const SimBackgroundVoxelHouseStyle expected[6][3] = {
+  static const SimBackgroundVoxelHouseStyle
+      expected[kSimBackgroundTownCount]
+              [kSimBackgroundDevelopmentLevelCount] = {
     {kSimBackgroundHouseStyle_Tent, kSimBackgroundHouseStyle_Timber,
      kSimBackgroundHouseStyle_Fillmore},
     {kSimBackgroundHouseStyle_Tent, kSimBackgroundHouseStyle_Timber,
@@ -27,8 +30,9 @@ int main(void) {
     {kSimBackgroundHouseStyle_Tent, kSimBackgroundHouseStyle_Timber,
      kSimBackgroundHouseStyle_Stone},
   };
-  for (uint8_t town = 1; town <= 6; town++)
-    for (uint8_t level = 0; level < 3; level++)
+  for (uint8_t town = 1; town <= kSimBackgroundTownCount; town++)
+    for (uint8_t level = 0;
+         level < kSimBackgroundDevelopmentLevelCount; level++)
       CHECK(SimBackgroundVoxelRegion_HouseStyle(town, level) ==
             expected[town - 1][level]);
 
@@ -70,6 +74,11 @@ int main(void) {
   CHECK(SimBackgroundVoxelRegion_AuthoredHeight(&story_tree) == 30.0f);
   CHECK(SimBackgroundVoxelRegion_AuthoredHeight(&castle) == 32.0f);
   CHECK(SimBackgroundVoxelRegion_AuthoredHeight(&temple) == 24.0f);
+  SimBackgroundVoxelObject bridge = {
+    .kind = kSimBackgroundVoxel_Bridge,
+  };
+  CHECK(SimBackgroundVoxelRegion_AuthoredHeight(&bridge) ==
+        SimBackgroundBridge_AuthoredHeight());
 
   SimBackgroundVoxelObject pyramid = {
     .kind = kSimBackgroundVoxel_Pyramid,

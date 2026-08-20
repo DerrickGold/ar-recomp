@@ -32,6 +32,7 @@ typedef enum SimBackgroundVoxelMaterial {
   kSimVoxelMaterial_LeavesLight,
   kSimVoxelMaterial_LeavesDark,
   kSimVoxelMaterial_Paving,
+  kSimVoxelMaterial_Foundation,
   kSimVoxelMaterial_Gold,
   kSimVoxelMaterial_Glass,
   kSimVoxelMaterial_Snow,

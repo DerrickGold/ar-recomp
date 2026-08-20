@@ -2535,6 +2535,141 @@ if archaeology is ever needed. The distilled outcomes:
     compositions for one actor, named A and B in our own catalog, and no
     reason ever asked for why an actor with one behaviour needs two poses.
 
+70. **The blade was not being clipped by anything; it was eating itself.
+    FIXED 2026-08-19.** Aitos's 3D windmill showed its rotor broken into
+    disconnected chunks, with the mill's own brown showing through the gaps.
+    That reads as the frame on the front of the mill clipping through the
+    blades, and it was fixed as that twice -- `6fd0533` stood the rotor proud
+    of the frame, `6e731c1` held the frame back off the rotor -- with no
+    effect the player could see.
+
+    Rasterising the shipped model through the renderer's exact vertex
+    transform settles what actually wins each blade pixel. Before EITHER of
+    those commits, the mill's frame took **one pixel** off the rotor. The
+    surface taking the other ~17% was the rotor's own spar, `AddBladeInlay`,
+    drawn in `kSimVoxelMaterial_Wood` -- the same dark brown as the mill.
+
+    **A sub-pixel quad does not thin out; it claims every whole pixel whose
+    centre it crosses.** The spar is 0.56 model units wide. `High` detail
+    enters at a projected model height of 24px and `Ultra` at 42px
+    (`SimBackgroundVoxelLod_Resolve`), which puts the spar at 0.4-0.9 SCREEN
+    pixels across the entire band in which it is authored to appear, on a
+    blade 1.7-3.5 pixels wide. It could never render as a stripe. It could
+    only take a ragged quarter of the blade's pixels and repaint them in the
+    building's own colour, which is indistinguishable from a hole.
+
+    The fix is one material: the spar is drawn in the BLADE ramp at the
+    blade's back-face shade. The same pixels are still lost to it, and now
+    they are a shading line instead of a gap -- the silhouette is continuous
+    at every size, and the spar still reads once the camera can resolve it.
+    Blade pixels lost to non-blade surfaces: 16.8% -> 1.7%, the remainder
+    being the hub cap, which is meant to cover the blade roots.
+
+    **Two lessons.** First, *"X is clipping through Y" is a hypothesis about
+    which surface wins, and it is cheap to measure* -- the model builder has
+    no SDL dependency, so a hundred lines of offline z-buffer over
+    `SimBackgroundVoxelModel_Build` plus `scene3d_math.c` names the winning
+    material per pixel. Both earlier commits reasoned about the geometry in
+    model space and neither ever asked. Second, *depth in this renderer is not
+    y*. The camera-facing lean (`CameraFacingLean`, blend 0.50 for the mill)
+    spends height as depth: 1 unit of model z is worth ~0.57 units of model y.
+    A 0.2 nudge in y is worth about a third of a z unit, so nudges of that
+    size cannot settle a contest against anything meaningfully taller -- which
+    is why the geometry moves felt like they should have worked and didn't.
+
+    Guarded by `sim_background_voxel_models_test`: between the hub cap radius
+    and the blade tips, no non-blade face may reach the rotor's front plane.
+    The guard fails on every model revision before this fix.
+
+71. **A height difference is not a cliff, and the high side does not own cliff
+    art. FIXED 2026-08-20.** Marahna showed a diagonal grass wedge cutting
+    across a grey plateau face. Both terrain passes had reconstructed their
+    own "hard" edges from any Q8 corner mismatch, even though the research
+    classifier distinguishes authored faces from ordinary grades. That made
+    a smooth cell-to-cell discrepancy eligible for a vertical skirt; at a
+    real face boundary the higher ordinary cell then donated its grass texel
+    to the wall.
+
+    The generator now bakes the face map and symmetric hard-edge mask beside
+    the corner field. A disjoint-set weld gives every non-hard shared vertex
+    one exact Q8 value, while both visible and D32 terrain passes accept skirts
+    only from the baked mask. Exposed walls always sample the face side. Tests
+    assert mask symmetry, face ownership on every internal hard edge, and
+    bit-exact equality on every smooth edge across all six towns.
+
+    The same exact-contact lesson applied to the bridge: a parapet merely
+    touching paving at coplanar z=0 can rasterize as a detached strip at an
+    oblique pitch. The stone rail bodies and posts are now embedded into the
+    slab, the paving overlaps it, and the cross-path terminal bars are gone.
+
+72. **A second bridge can be hiding in the ground texture. FIXED
+    2026-08-20.** Marahna's modeled span still appeared to have a railing
+    floating well above its deck. The line was not a detached model face: the
+    cleaner removed only `$E2` rows 4–13, while the native bridge's pale rail
+    extends outside that nominal roadway. Worse, the replacement for the deck
+    borrowed row 2 from the same bridge cell, reproducing the rail as if it
+    were water. Bridge cells now restore their original `$3A`/`$41` river
+    metatile through the current town palette, and the modeled stone parapets
+    remain the only bridge silhouette.
+
+    The same footprint audit found Bloodpool's perpendicular bridges meeting
+    inside a bank cell because every model ran from bank centre to bank centre.
+    A span now owns only the water opening plus a one-pixel masonry key at each
+    end. Actual Bloodpool crossing coordinates are regression-tested for zero
+    footprint overlap.
+
+    Two other flat-map assumptions surfaced in the same pass. Bloodpool's
+    `$72` cave is valid cliff-face topology, but its centre texel is the black
+    aperture; using it as generic wall material stretched the opening into
+    horizontal seams. It is now a baked face subtype whose closure skirts use
+    a stone jamb texel. And Landscape height was multiplying mountain relief
+    even though it should only translate the mountain's base. Mountain and
+    volcano relief now retain their authored scales while terrain, foundations,
+    bridges, occlusion, shadows, and the stable flight datum follow Landscape
+    height.
+
+    Finally, the terrain-datum audit covered map-plane corners, grounded and
+    flying actors, effects, clouds, mountain-standing actors, and the Aitos
+    crater/fireball handoff. The crater remains a model-published height above
+    its local terrain instead of a second hardcoded summit calculation. This
+    is the general rule: **an authored object's height and the ground under it
+    are two terms, with two owners; never resize one to move the other.**
+
+73. **A hard cliff edge can change which side is higher, and a level bridge
+    needs more than two midpoint anchors. FIXED 2026-08-20.** The next Aitos
+    capture exposed long triangular grass seams at several cliff ends. The
+    baked mask and face-material ownership were correct, but both terrain
+    passes still submitted one four-corner skirt whenever either endpoint was
+    higher. At 11 unique Aitos boundaries the height difference changes sign
+    between endpoints. Both cells therefore emitted the same self-crossing
+    bow-tie with opposite ownership, and its fixed triangulation escaped
+    sideways across the terrain cap.
+
+    `SimTownTerrain_ClipHigherEdge` now finds the equal-height point. Each cell
+    emits only the interval on which it is actually higher, so two ordinary
+    triangular wall segments meet without crossing. The visible textured mesh
+    and D32 occluder call the same clipping contract. Tests enumerate the
+    baked maps, require at least the 10 captured Aitos reversals, and prove the
+    two intervals cover `[0,1]` exactly without overlap.
+
+    The Marahna bridge in `runs/20260820-070303` was a separate depth variant
+    of the same incomplete-sampling mistake. Offline reconstruction of its
+    captured WRAM/VRAM/CGRAM proves the `$E2` cell is fully replaced: 193/256
+    live pixels differ from `$3A` before cleaning, while 0/256 differ after.
+    The remaining upper bar was therefore the model's real far parapet. Its
+    two bank midpoints resolve to elevation 1.867, but the sloped rigid
+    footprint (`x=63..81`, `y=420..430`) reaches 2.235 at its far corner. D32
+    erased the rear paving while the taller rail survived, making one bridge
+    read as two.
+
+    `SimTownTerrain_MaximumUnitsInRect` now evaluates every overlapped
+    bilinear cell corner while retaining hard-edge ownership. A bridge uses
+    that footprint maximum as a conservative depth envelope. Its visible
+    placement follows the higher path-centre bank approach, so it remains
+    horizontal and seated while the D32 pass still cannot erase its paving.
+    It keeps the Bloodpool one-pixel bank keys, and the exact Marahna rectangle
+    and its >0.3-unit envelope difference are regression-tested.
+
 Process lessons folded out of statement-then-correction text elsewhere; the docs now state final
 truths, and the journey that earned them lives here.
 

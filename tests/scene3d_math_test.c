@@ -36,6 +36,36 @@ static Scene3DPoint ProjectShadowPoint(const float matrix[16],
   return point;
 }
 
+static void CheckClipDepthPreservesPainterOrder(
+    const float matrix[16], const float points[][3], int point_count) {
+  for (int a = 0; a < point_count; a++) {
+    float normalized_a = 0.0f;
+    float clip_a = Scene3D_ClipDepth(
+        matrix, points[a][0], points[a][1], points[a][2]);
+    CHECK(Scene3D_NormalizedDepth(
+        matrix, points[a][0], points[a][1], points[a][2], &normalized_a));
+    for (int b = a + 1; b < point_count; b++) {
+      float normalized_b = 0.0f;
+      float clip_b = Scene3D_ClipDepth(
+          matrix, points[b][0], points[b][1], points[b][2]);
+      CHECK(Scene3D_NormalizedDepth(
+          matrix, points[b][0], points[b][1], points[b][2], &normalized_b));
+      if (fabsf(clip_a - clip_b) < 0.00001f) continue;
+      CHECK((clip_a < clip_b) == (normalized_a < normalized_b));
+
+      /* A camera/map pan translates every terrain cell equally. Clip W is
+       * affine, so the common term cannot change a pair's painter order. */
+      const float translated_a = Scene3D_ClipDepth(
+          matrix, points[a][0] + 0.37f, points[a][1] - 0.24f,
+          points[a][2] + 0.11f);
+      const float translated_b = Scene3D_ClipDepth(
+          matrix, points[b][0] + 0.37f, points[b][1] - 0.24f,
+          points[b][2] + 0.11f);
+      CHECK((clip_a < clip_b) == (translated_a < translated_b));
+    }
+  }
+}
+
 int main(void) {
   const int width = 256, height = 224;
   const float aspect = (float)width / (float)height;
@@ -187,6 +217,47 @@ int main(void) {
   CHECK(Scene3D_NormalizedDepth(
       matrix, 0.0f, 0.0f, 0.0f, &normalized_depth));
   CHECK(normalized_depth >= 0.0f && normalized_depth <= 1.0f);
+  Scene3DPoint separate_projection = ProjectWorldPoint(
+      matrix, 0.17f, -0.23f, 0.11f, width, height);
+  float separate_depth = 0.0f;
+  CHECK(Scene3D_NormalizedDepth(
+      matrix, 0.17f, -0.23f, 0.11f, &separate_depth));
+  Scene3DPoint combined_projection = {0};
+  float combined_depth = 0.0f;
+  CHECK(Scene3D_ProjectWorldPointWithDepth(
+      matrix, 0.17f, -0.23f, 0.11f, width, height,
+      &combined_projection, &combined_depth));
+  CHECK(Near(combined_projection.x, separate_projection.x));
+  CHECK(Near(combined_projection.y, separate_projection.y));
+  CHECK(Near(combined_depth, separate_depth));
+
+  /* The terrain painter cache sorts by homogeneous clip W instead of GPU
+   * normalized depth. With this perspective projection those keys are
+   * strictly monotonic, which removes one divide per cell without changing
+   * overlap. Exercise the complete settable pitch range, both yaw directions,
+   * and non-flat terrain samples so that contract cannot regress silently. */
+  const float painter_points[][3] = {
+    {-0.60f, -0.45f, 0.00f}, {-0.25f, -0.20f, 0.08f},
+    { 0.00f,  0.00f, 0.18f}, { 0.30f,  0.22f, 0.04f},
+    { 0.58f,  0.47f, 0.13f}, {-0.50f,  0.36f, 0.24f},
+    { 0.48f, -0.38f, 0.20f},
+  };
+  const float painter_yaws[] = {-0.60f, 0.0f, 0.60f};
+  for (int mrad = kSim3DCameraPitchMinimumMrad;
+       mrad <= kSim3DCameraPitchMaximumMrad; mrad += 25) {
+    camera.tilt_x = (float)mrad / 1000.0f;
+    for (size_t yaw = 0;
+         yaw < sizeof(painter_yaws) / sizeof(painter_yaws[0]); yaw++) {
+      camera.tilt_y = painter_yaws[yaw];
+      Scene3D_BuildViewProjection(&camera, width, height, matrix);
+      CheckClipDepthPreservesPainterOrder(
+          matrix, painter_points,
+          (int)(sizeof(painter_points) / sizeof(painter_points[0])));
+    }
+  }
+  camera.tilt_x = -0.35f;
+  camera.tilt_y = 0.0f;
+  Scene3D_BuildViewProjection(&camera, width, height, matrix);
   float boundary = 0.0f;
   bool increasing = false;
   CHECK(Scene3D_GroundDepthBoundaryY(matrix, 0.0f, 0.35f, &boundary,

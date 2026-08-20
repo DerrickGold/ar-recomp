@@ -7,6 +7,7 @@
 #include "settings.h"
 #include "randomizer.h"
 #include "settings_overlay.h"
+#include "sim/sim_town_terrain.h"
 
 #include <SDL3/SDL.h>
 #include <stdbool.h>
@@ -801,6 +802,18 @@ int main(void) {
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(g_settings.sim3d_voxel_preset ==
         kSimBackgroundVoxelPreset_Custom);
+#if AR_SIM3D_TERRAIN_ELEVATION
+  RowToKey("sim3d_landscape_height_pct");
+  CHECK(g_settings.sim3d_landscape_height_pct ==
+        kSimTownTerrainLandscapeHeightDefaultPct);
+  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, true, false));
+  CHECK(g_settings.sim3d_landscape_height_pct ==
+        kSimTownTerrainLandscapeHeightDefaultPct -
+            kSimTownTerrainLandscapeHeightStepPct);
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(g_settings.sim3d_landscape_height_pct ==
+        kSimTownTerrainLandscapeHeightDefaultPct);
+#endif
   RowToKey("sim3d_voxel_detail");
   CHECK(g_settings.sim3d_voxel_detail == kSimBackgroundVoxelDetail_High);
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
@@ -1147,6 +1160,13 @@ int main(void) {
       Settings_Find("sim3d_world_navigation_clouds")));
   CHECK(Settings_IsMenuVisible(Settings_Find("sim3d_shadows")));
   CHECK(Settings_IsMenuVisible(Settings_Find("sim3d_camera_mode")));
+#if AR_SIM3D_TERRAIN_ELEVATION
+  CHECK(Settings_IsMenuVisible(
+      Settings_Find("sim3d_landscape_height_pct")));
+#else
+  CHECK(!Settings_IsMenuVisible(
+      Settings_Find("sim3d_landscape_height_pct")));
+#endif
   CHECK(Settings_IsMenuVisible(Settings_Find("diorama_skybox")));
   /* System drops the all-debug Inspector tab, leaving Tools and Game. */
   {

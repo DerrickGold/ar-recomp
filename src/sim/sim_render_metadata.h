@@ -229,13 +229,14 @@ enum {
       kSimFeature_EffectLighting | kSimFeature_Particles,
 };
 
-/* Default D4a shadow darkness, percent of full black. */
-enum { kSimShadowOpacityDefaultPct = 60 };
+/* Default D4a shadow darkness, percent of full black. The landscape pass has
+ * broad overlapping casters, so a softer value preserves terrain colour. */
+enum { kSimShadowOpacityDefaultPct = 45 };
 /* Default light: near-overhead, thrown slightly to screen right. */
 enum {
   kSimLightAzimuthDefaultDeg = 90,
   kSimLightElevationDefaultDeg = 90,
-  kSimShadowSoftnessDefaultPct = 35,
+  kSimShadowSoftnessDefaultPct = 50,
   kSimRimStrengthDefaultPct = 10,
 };
 /* How far the world underlay reads as "distant": percent of the way from the
@@ -1006,6 +1007,8 @@ typedef struct SimFrameData {
    * zero and consumes world_navigation_scene's forced top-down affine map. */
   int16_t projection_pitch_mrad, projection_yaw_mrad;
   uint16_t projection_distance_x100;
+  /* Audited town relief magnitude, independent of actor/model height. */
+  uint16_t landscape_height_pct;
   /* Resolved presentation tuning: percent of each classified virtual height.
    * Copied here so one frame cannot mix old and new tuning values. */
   uint16_t height_scale_x100;
