@@ -62,7 +62,9 @@ static bool FindPlot(uint8_t town, const uint8_t *wram, uint8_t metatile,
 size_t SimBackgroundVoxelLandmarks_Classify(
     uint8_t town, const uint8_t *wram,
     SimBackgroundVoxelObject *objects, size_t capacity) {
-  if (!wram || !objects || !capacity || town < 1 || town > 6) return 0;
+  if (!wram || !objects || !capacity || town < 1 ||
+      town > kSimBackgroundTownCount)
+    return 0;
   size_t count = 0;
   for (size_t at = 0; at < sizeof(kLandmarks) / sizeof(kLandmarks[0]); at++) {
     const SimBackgroundLandmarkDefinition *landmark = &kLandmarks[at];
@@ -79,7 +81,7 @@ size_t SimBackgroundVoxelLandmarks_Classify(
       .source_cells_h = kLandmarkCells,
       .footprint_cells_w = kLandmarkCells,
       .footprint_cells_d = kLandmarkCells,
-      .record_slot = 0xFF,
+      .record_slot = kSimBackgroundVoxelNoRecordSlot,
     };
     if (count == capacity) break;
   }

@@ -272,6 +272,102 @@ static void CheckWindmillFrames(void) {
   CHECK(factory && !(factory->flags & kSimBackgroundVoxel_UnderConstruction));
 }
 
+static void CheckStoneBridgeClassificationAndInpaint(void) {
+  static uint8_t wram[kWramBytes];
+  static uint16_t vram[kVramWords];
+  static uint16_t cgram[256];
+  static uint32_t pixels[kSimTownCanvasPixels * kSimTownCanvasPixels];
+  memset(wram, 0, sizeof(wram));
+  memset(vram, 0, sizeof(vram));
+  memset(cgram, 0, sizeof(cgram));
+  for (int y = 0; y < kSimTownCanvasPixels; y++)
+    for (int x = 0; x < kSimTownCanvasPixels; x++)
+      pixels[(size_t)y * kSimTownCanvasPixels + x] = 0xFF647814;
+
+  /* A two-marker east-west crossing through a four-cell channel. */
+  wram[CellIndex(9, 10)] = 0x25;
+  wram[CellIndex(10, 10)] = 0xE2;
+  wram[CellIndex(11, 10)] = 0xE2;
+  wram[CellIndex(12, 10)] = 0x25;
+  /* One north-south crossing, proving the native ids are not transposed. */
+  wram[CellIndex(20, 5)] = 0x25;
+  wram[CellIndex(20, 6)] = 0xE1;
+  wram[CellIndex(20, 7)] = 0x25;
+
+  SimBackgroundVoxelScene scene;
+  SimBackgroundVoxels_Classify(1, wram, true, &scene);
+  int bridge_count = 0;
+  const SimBackgroundVoxelObject *east_west = NULL;
+  const SimBackgroundVoxelObject *north_south = NULL;
+  for (uint16_t i = 0; i < scene.object_count; i++) {
+    const SimBackgroundVoxelObject *bridge = &scene.objects[i];
+    if (bridge->kind != kSimBackgroundVoxel_Bridge) continue;
+    bridge_count++;
+    if (bridge->bridge_axis == kSimBackgroundBridgeAxis_EastWest)
+      east_west = bridge;
+    if (bridge->bridge_axis == kSimBackgroundBridgeAxis_NorthSouth)
+      north_south = bridge;
+  }
+  CHECK(bridge_count == 2);
+  CHECK(east_west && east_west->source_cells_w == 2 &&
+        east_west->source_cells_h == 1);
+  CHECK(east_west && east_west->bridge_bank_a_x == 8 &&
+        east_west->bridge_bank_b_x == 13);
+  CHECK(north_south && north_south->source_cells_w == 1 &&
+        north_south->source_cells_h == 1);
+  CHECK(north_south && north_south->bridge_bank_a_y == 4 &&
+        north_south->bridge_bank_b_y == 8);
+
+  /* Pale native rail pixels extend outside the nominal rows 4-13 deck band.
+   * The whole bridge metatile must therefore be replaced by the original $3A
+   * east-west river tile; sampling row 2 of the bridge itself reproduces the
+   * detached rail. Give that raw terrain definition a unique blue palette so
+   * this proves the exact metatile renderer won over nearby-cell copying. */
+  SetSolidColourOneTile(vram, 1);
+  SetSolidColourOneTile(vram, 2);
+  SetTerrainDefinition(wram, 0x3A, 1, 1, 1, 1);
+  const uint16_t north_south_entry = 2 | (1u << 10);
+  SetTerrainDefinition(wram, 0x41,
+                       north_south_entry, north_south_entry,
+                       north_south_entry, north_south_entry);
+  cgram[1] = 0x7C00;
+  cgram[17] = 0x03E0;
+  SimTownCanvas_Reset();
+  SimTownCanvas_Render(1, wram, vram, cgram, 15, 0xFF000000);
+  uint32_t original_river[16 * 16];
+  uint32_t original_river_ns[16 * 16];
+  CHECK(SimTownCanvas_RenderTerrainMetatile(
+      wram, 0x3A, original_river));
+  CHECK(SimTownCanvas_RenderTerrainMetatile(
+      wram, 0x41, original_river_ns));
+  FillCell(pixels, 9, 10, 0xFF204878);
+  FillCell(pixels, 12, 10, 0xFF204878);
+  for (int cell_x = 10; cell_x <= 11; cell_x++)
+    for (int local_y = 0; local_y < 16; local_y++)
+      for (int local_x = 0; local_x < 16; local_x++) {
+        size_t at = (size_t)(10 * 16 + local_y) * kSimTownCanvasPixels +
+            cell_x * 16 + local_x;
+        pixels[at] = local_y == 2 ||
+            (local_y >= 4 && local_y < 14)
+            ? 0xFFB0A080 : 0xFF204878;
+      }
+  SimBackgroundVoxels_Reset();
+  SimBackgroundVoxels_Build(1, wram, pixels, vram, 91, true);
+  const uint32_t *ground = SimBackgroundVoxels_GroundPixels();
+  const uint32_t *atlas = SimBackgroundVoxels_AtlasPixels();
+  size_t deck = (size_t)(10 * 16 + 8) * kSimTownCanvasPixels + 10 * 16 + 8;
+  size_t water = (size_t)(10 * 16 + 2) * kSimTownCanvasPixels + 10 * 16 + 8;
+  size_t north_south_deck =
+      (size_t)(6 * 16 + 8) * kSimTownCanvasPixels + 20 * 16 + 8;
+  CHECK(ground[deck] == original_river[8 * 16 + 8]);
+  CHECK(ground[water] == original_river[2 * 16 + 8]);
+  CHECK(ground[north_south_deck] == original_river_ns[8 * 16 + 8]);
+  CHECK(ground[north_south_deck] != ground[deck]);
+  CHECK(ground[deck] != 0xFF204878);
+  CHECK((atlas[deck] >> 24) == 0xFF);
+  CHECK((atlas[water] >> 24) == 0xFF);
+}
+
 int main(void) {
   static uint8_t wram[kWramBytes];
   static uint16_t vram[kVramWords];
@@ -574,6 +670,7 @@ int main(void) {
 
   CheckWindmillFrames();
   CheckMountainOcclusionReach();
+  CheckStoneBridgeClassificationAndInpaint();
 
   if (failures) {
     fprintf(stderr, "%d sim background voxel checks failed\n", failures);

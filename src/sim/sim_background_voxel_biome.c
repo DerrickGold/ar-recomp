@@ -31,6 +31,7 @@ static bool MaterialCollectsSnow(SimBackgroundVoxelMaterial material) {
     case kSimVoxelMaterial_Blade:
     case kSimVoxelMaterial_Trunk:
     case kSimVoxelMaterial_Paving:
+    case kSimVoxelMaterial_Foundation:
     case kSimVoxelMaterial_Gold:
     case kSimVoxelMaterial_Glass:
     case kSimVoxelMaterial_Snow:

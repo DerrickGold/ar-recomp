@@ -8,8 +8,8 @@
 #include "sim_world_map.h"
 
 enum {
-  kSimWorldMapTownCount = 6,
-  kSimWorldMapTownCells = 32 * 32,
+  kSimWorldMapTownCount = kSimTownCount,
+  kSimWorldMapTownCells = kSimTownCells * kSimTownCells,
   kSimWorldMapOrdinaryTranslationCount = 256,
   kSimWorldMapSpecialTranslationCount = 13,
   kSimWorldMapSpecialTilesPerCell = 4,

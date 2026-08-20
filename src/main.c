@@ -1059,8 +1059,9 @@ static int AppBoot_CreateVideo(AppBoot *app) {
      * GPU renderer is a baseline requirement rather than an optional shader
      * effects switch. Hidden capture windows use the same backend: a software
      * renderer would produce screenshots from a different visibility model.
-     * SPIR-V feeds Vulkan and MSL feeds Metal; unsupported machines fail at
-     * launch instead of silently returning to painter sorting. */
+     * SPIR-V feeds Vulkan, DXIL feeds D3D12, and MSL feeds Metal; unsupported
+     * machines fail at launch instead of silently returning to painter
+     * sorting. */
     g_gpu_shaders_requested = true;
     g_settings.gpu_shaders_enabled = true;  /* legacy config/UI mirror */
     SDL_PropertiesID renderer_props = SDL_CreateProperties();
@@ -1071,6 +1072,8 @@ static int AppBoot_CreateVideo(AppBoot *app) {
           SDL_PROP_RENDERER_CREATE_WINDOW_POINTER, g_window);
       SDL_SetBooleanProperty(renderer_props,
           SDL_PROP_RENDERER_CREATE_GPU_SHADERS_SPIRV_BOOLEAN, true);
+      SDL_SetBooleanProperty(renderer_props,
+          SDL_PROP_RENDERER_CREATE_GPU_SHADERS_DXIL_BOOLEAN, true);
       SDL_SetBooleanProperty(renderer_props,
           SDL_PROP_RENDERER_CREATE_GPU_SHADERS_MSL_BOOLEAN, true);
       g_renderer = SDL_CreateRendererWithProperties(renderer_props);

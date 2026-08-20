@@ -6,13 +6,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "constants.h"
 #include "scene3d_math.h"
 #include "sim3d_depth_pass.h"
+#include "sim_background_bridge.h"
 #include "sim_background_mountain_objects.h"
 #include "sim_background_mountain_relief.h"
 #include "sim_background_mountain_silhouette.h"
 #include "sim_background_voxel_biome.h"
-#include "sim_background_voxel_lighting.h"
 #include "sim_background_voxel_lod.h"
 #include "sim_background_voxel_model_cache.h"
 #include "sim_background_voxel_models.h"
@@ -20,6 +21,11 @@
 #include "sim_background_voxel_proportions.h"
 #include "sim_background_voxel_region.h"
 #include "sim_background_voxels.h"
+#include "sim_town_terrain.h"
+
+#ifndef AR_SIM3D_TERRAIN_ELEVATION
+#define AR_SIM3D_TERRAIN_ELEVATION 0
+#endif
 
 enum {
   /* Staging for the shadow mask, the one path that still batches through
@@ -40,12 +46,20 @@ enum {
   kMaxMountainReliefFaces = kMaxMountainReliefCells *
       (kSimBackgroundMountainReliefMaxStackLayers +
        kMountainSkirtFacesPerCell),
+  /* Smooth 2x is intended for roughly 1080p-class output. At 1440p or 4K its
+   * RGBA+D32 target would consume about 118/265 MiB and quadruple fill cost
+   * before the final downsample, so large viewports remain native. */
+  kMaxSupersampledPixels = 10 * 1024 * 1024,
 };
 
 /* Contact shading is a ground decal. It is lifted by a fraction of a source
  * pixel so it wins the depth test against the ground plane it sits on without
  * being separable from it at any supported zoom. */
 static const float kContactLiftPixels = 0.06f;
+static const float kGroundProjectionEpsilonPixels = 0.000001f;
+static const float kMinimumProjectedTwiceArea = 0.05f;
+static const float kMountainLodReferenceHeightPixels = 24.0f;
+static const float kObjectCullMarginPixels = 24.0f;
 
 /* Fully lit / fully opaque, for the relief faces that want neither shaped. */
 static const uint8_t kMountainFullIntensity[4] = {255, 255, 255, 255};
@@ -188,6 +202,23 @@ static void TexturePointToWorld(
   *world_z = height_pixels / params->source.h;
 }
 
+static float TerrainLiftPixels(
+    const SimBackgroundVoxelRenderParams *params,
+    float town_pixel_x, float town_pixel_y) {
+#if AR_SIM3D_TERRAIN_ELEVATION
+  if (!params || params->town < 1 ||
+      params->town > kSimTownTerrainTownCount)
+    return 0.0f;
+  return SimTownTerrain_ScaledHeightPixels(
+      SimTownTerrain_HeightUnitsAt(
+          params->town, town_pixel_x, town_pixel_y),
+      (float)params->landscape_height_pct);
+#else
+  (void)params; (void)town_pixel_x; (void)town_pixel_y;
+  return 0.0f;
+#endif
+}
+
 static SimBackgroundModelLean CameraFacingLean(
     const SimBackgroundVoxelRenderParams *params,
     float billboard_blend) {
@@ -219,6 +250,10 @@ static SimBackgroundModelLean CameraFacingLean(
 static SimBackgroundModelLean CameraFacingModelLean(
     const SimBackgroundVoxelRenderParams *params,
     SimBackgroundVoxelKind kind) {
+  /* The approved bridge is an actual horizontal span, not facade art. Any
+   * billboard correction would curl its deck as the camera moved. */
+  if (kind == kSimBackgroundVoxel_Bridge)
+    return (SimBackgroundModelLean){0.0f, 0.0f};
   float billboard_blend = 0.35f;
   if (params->facing == kSimBackgroundVoxelFacing_PerModel) {
     /* Tall narrow facades need more correction than broad roofs and foliage.
@@ -309,6 +344,26 @@ static bool ProjectWorldToScreen(
   return true;
 }
 
+static bool ProjectWorldToScreenWithDepth(
+    const SimBackgroundVoxelRenderParams *params,
+    float world_x, float world_y, float world_z,
+    Scene3DPoint *out, float *gpu_depth) {
+  Scene3DPoint projected;
+  if (!Scene3D_ProjectWorldPointWithDepth(
+          params->matrix, world_x, world_y, world_z,
+          params->viewport.w, params->viewport.h,
+          &projected, gpu_depth))
+    return false;
+  projected.x += params->viewport.x;
+  projected.y += params->viewport.y;
+  if (params->render_scale == kSimBackgroundVoxelRenderScale_PixelClean) {
+    projected.x = floorf(projected.x) + 0.5f;
+    projected.y = floorf(projected.y) + 0.5f;
+  }
+  *out = projected;
+  return true;
+}
+
 static bool ProjectPoint(const SimBackgroundVoxelRenderParams *params,
                          const SimBackgroundProjectionAxis *axis,
                          float texture_x, float texture_y, float height_pixels,
@@ -324,21 +379,80 @@ static bool ProjectPoint(const SimBackgroundVoxelRenderParams *params,
   return true;
 }
 
-/* Screen position and GPU depth for one submitted vertex. Every face vertex
- * needs both; computing them from two entry points repeated the lean, the
- * world mapping and the clip-W row of the matrix for every vertex of every
- * face in the town. */
-static bool ProjectVertex(const SimBackgroundVoxelRenderParams *params,
-                          const SimBackgroundProjectionAxis *axis,
-                          float texture_x, float texture_y,
-                          float height_pixels,
-                          Scene3DPoint *out, float *gpu_depth) {
+/* Terrain altitude is a world translation; only the object's authored height
+ * follows its camera-facing presentation axis. Feeding their sum through
+ * ProjectVertex would lean the ground contact itself and reopen a seam between
+ * the model and the terrain mesh. */
+static bool ProjectGroundedVertexWithDepthGround(
+    const SimBackgroundVoxelRenderParams *params,
+    const SimBackgroundProjectionAxis *axis,
+    float texture_x, float texture_y,
+    float height_pixels, float visual_ground_pixels,
+    float depth_ground_pixels,
+    Scene3DPoint *out, float *gpu_depth) {
   float world_x, world_y, world_z;
-  LeanedPointToWorld(params, axis, texture_x, texture_y, height_pixels,
-                     &world_x, &world_y, &world_z);
-  return ProjectWorldToScreen(params, world_x, world_y, world_z, out) &&
-      Scene3D_NormalizedDepth(
-          params->matrix, world_x, world_y, world_z, gpu_depth);
+  TexturePointToWorld(
+      params,
+      texture_x + height_pixels * axis->x_per_height,
+      texture_y + height_pixels * axis->y_per_height,
+      visual_ground_pixels + height_pixels * axis->height_scale,
+      &world_x, &world_y, &world_z);
+  float visual_depth;
+  if (!ProjectWorldToScreenWithDepth(
+          params, world_x, world_y, world_z, out, &visual_depth))
+    return false;
+  if (fabsf(depth_ground_pixels - visual_ground_pixels) <
+      kGroundProjectionEpsilonPixels) {
+    *gpu_depth = visual_depth;
+    return true;
+  }
+  TexturePointToWorld(
+      params,
+      texture_x + height_pixels * axis->x_per_height,
+      texture_y + height_pixels * axis->y_per_height,
+      depth_ground_pixels + height_pixels * axis->height_scale,
+      &world_x, &world_y, &world_z);
+  float safety_depth;
+  if (!Scene3D_NormalizedDepth(
+          params->matrix, world_x, world_y, world_z, &safety_depth))
+    return false;
+  /* Orbit controls can reverse which world-Z point is nearer. A safety
+   * envelope may only pull the bridge toward the camera in depth; it must
+   * never make an otherwise visible bridge easier for terrain to reject. */
+  *gpu_depth = fminf(visual_depth, safety_depth);
+  return true;
+}
+
+static bool ProjectGroundedVertex(
+    const SimBackgroundVoxelRenderParams *params,
+    const SimBackgroundProjectionAxis *axis,
+    float texture_x, float texture_y,
+    float height_pixels, float ground_pixels,
+    Scene3DPoint *out, float *gpu_depth) {
+  return ProjectGroundedVertexWithDepthGround(
+      params, axis, texture_x, texture_y, height_pixels,
+      ground_pixels, ground_pixels, out, gpu_depth);
+}
+
+static bool ProjectGroundedPoint(
+    const SimBackgroundVoxelRenderParams *params,
+    const SimBackgroundProjectionAxis *axis,
+    float texture_x, float texture_y,
+    float height_pixels, float ground_pixels,
+    Scene3DPoint *out, float *clip_depth) {
+  float world_x, world_y, world_z;
+  TexturePointToWorld(
+      params,
+      texture_x + height_pixels * axis->x_per_height,
+      texture_y + height_pixels * axis->y_per_height,
+      ground_pixels + height_pixels * axis->height_scale,
+      &world_x, &world_y, &world_z);
+  if (!ProjectWorldToScreen(params, world_x, world_y, world_z, out))
+    return false;
+  if (clip_depth)
+    *clip_depth = Scene3D_ClipDepth(
+        params->matrix, world_x, world_y, world_z);
+  return true;
 }
 
 static SDL_FColor VertexColour(uint32_t argb, uint8_t brightness) {
@@ -370,15 +484,17 @@ static void AppendProjectedFace(
     const ProjectedModelFace *face,
     const SimBackgroundVoxelPalette *palette,
     SimBackgroundVoxelShading shading) {
-  if (!Sim3DDepthPass_IsCollecting()) return;
   Sim3DDepthVertex vertices[4];
+  const SimBackgroundVoxelMaterial material =
+      (SimBackgroundVoxelMaterial)face->material;
+  const bool valid_material = palette && material >= 0 &&
+      material < kSimVoxelMaterial_Count;
   for (int i = 0; i < 4; i++) {
-    SimBackgroundVoxelMaterial material =
-        (SimBackgroundVoxelMaterial)face->material;
-    uint32_t argb = shading == kSimBackgroundVoxelShading_MaterialAware
-        ? SimBackgroundVoxelPalette_Ramp(
-              palette, material, face->brightness[i])
-        : SimBackgroundVoxelPalette_Base(palette, material);
+    int level = shading == kSimBackgroundVoxelShading_MaterialAware
+        ? SimBackgroundVoxelPalette_LevelForBrightness(face->brightness[i])
+        : kSimBackgroundVoxelPaletteBaseLevel;
+    uint32_t argb = valid_material
+        ? palette->material[material][level] : 0xFFFF00FFu;
     uint8_t brightness =
         shading == kSimBackgroundVoxelShading_MaterialAware
             ? 255 : face->brightness[i];
@@ -400,8 +516,183 @@ static bool IsDegenerate(const Scene3DPoint points[4]) {
     const Scene3DPoint *b = &points[(i + 1) & 3];
     twice_area += a->x * b->y - b->x * a->y;
   }
-  return twice_area > -0.05f && twice_area < 0.05f;
+  return twice_area > -kMinimumProjectedTwiceArea &&
+      twice_area < kMinimumProjectedTwiceArea;
 }
+
+#if AR_SIM3D_TERRAIN_ELEVATION
+typedef struct SimTerrainDepthCell {
+  float height[kSimTownTerrainCornerCount];
+  uint8_t hard_edges;
+} SimTerrainDepthCell;
+
+static struct {
+  bool valid;
+  uint8_t town;
+  SimTerrainDepthCell cell[
+      kSimTownTerrainCells * kSimTownTerrainCells];
+} s_terrain_depth_cache;
+
+static SimTerrainDepthCell *TerrainDepthCell(int x, int y) {
+  return &s_terrain_depth_cache.cell[
+      y * kSimTownTerrainCells + x];
+}
+
+static void PrepareTerrainDepthCache(uint8_t town) {
+  if (s_terrain_depth_cache.valid && s_terrain_depth_cache.town == town)
+    return;
+  for (int y = 0; y < kSimTownTerrainCells; y++)
+    for (int x = 0; x < kSimTownTerrainCells; x++) {
+      SimTerrainDepthCell *cell = TerrainDepthCell(x, y);
+      cell->hard_edges = SimTownTerrain_HardEdges(town, x, y);
+      for (int corner = 0; corner < kSimTownTerrainCornerCount; corner++)
+        cell->height[corner] = SimTownTerrain_CornerUnits(
+            town, x, y, corner);
+    }
+  s_terrain_depth_cache.town = town;
+  s_terrain_depth_cache.valid = true;
+}
+
+static float TerrainUnitsToPixels(
+    const SimBackgroundVoxelRenderParams *params, float height_units) {
+  return SimTownTerrain_ScaledHeightPixels(
+      height_units, (float)params->landscape_height_pct);
+}
+
+static void AppendTerrainDepthQuad(
+    const SimBackgroundVoxelRenderParams *params,
+    float origin_x, float origin_y,
+    const float local_x[4], const float local_y[4],
+    const float height_units[4], bool receives_shadow) {
+  Scene3DPoint points[4];
+  Sim3DDepthVertex vertices[4];
+  for (int point = 0; point < 4; point++) {
+    float depth;
+    if (!ProjectGroundedVertex(
+            params, &kUprightProjectionAxis,
+            origin_x + local_x[point], origin_y + local_y[point],
+            0.0f, TerrainUnitsToPixels(params, height_units[point]),
+            &points[point], &depth))
+      return;
+    vertices[point] = (Sim3DDepthVertex){
+      .x = points[point].x,
+      .y = points[point].y,
+      .depth = depth,
+      /* The shared fragment shader discards zero alpha before depth can be
+       * written. Color writes are disabled by the occluder pipeline, so an
+       * opaque white fragment is invisible while still reaching D32. */
+      .color = {1.0f, 1.0f, 1.0f, 1.0f},
+      .uv = {0.0f, 0.0f},
+    };
+  }
+  if (IsDegenerate(points)) return;
+  Sim3DDepthPass_AppendQuad(kSim3DDepthPass_DepthOccluder, vertices);
+  if (!receives_shadow || !params->shadow_mask ||
+      !params->shadow_opacity_pct)
+    return;
+  const float alpha =
+      params->shadow_opacity_pct / (float)kPercentScale;
+  for (int point = 0; point < 4; point++) {
+    vertices[point].color = (SDL_FColor){1.0f, 1.0f, 1.0f, alpha};
+    vertices[point].uv = (SDL_FPoint){
+      points[point].x / params->viewport.w,
+      points[point].y / params->viewport.h,
+    };
+  }
+  Sim3DDepthPass_AppendQuad(kSim3DDepthPass_ShadowReceiver, vertices);
+}
+
+static void AppendTerrainDepthSkirt(
+    const SimBackgroundVoxelRenderParams *params,
+    float origin_x, float origin_y,
+    float x0, float y0, float x1, float y1,
+    float current_0, float current_1,
+    float neighbour_0, float neighbour_1) {
+  float t0, t1;
+  if (!SimTownTerrain_ClipVisibleHigherEdge(
+          current_0, current_1, neighbour_0, neighbour_1,
+          &t0, &t1))
+    return;
+  const float t[2] = {t0, t1};
+  float xx[4], yy[4], hh[4];
+  for (int endpoint = 0; endpoint < 2; endpoint++) {
+    const float at = t[endpoint];
+    const float x = x0 + (x1 - x0) * at;
+    const float y = y0 + (y1 - y0) * at;
+    xx[endpoint] = xx[3 - endpoint] = x;
+    yy[endpoint] = yy[3 - endpoint] = y;
+    hh[endpoint] = current_0 + (current_1 - current_0) * at;
+    hh[3 - endpoint] =
+        neighbour_0 + (neighbour_1 - neighbour_0) * at;
+  }
+  AppendTerrainDepthQuad(
+      params, origin_x, origin_y, xx, yy, hh, false);
+}
+
+/* The visible terrain mesh is textured in present_sim3d.c.  Re-submit its
+ * exact top surface and exposed cliff skirts here as depth-only geometry, so
+ * a nearer ridge can reject a house or landmark on the far side without
+ * covering the already-rendered town texture or the billboard actor bands. */
+static void AppendTerrainDepthGeometry(
+    const SimBackgroundVoxelRenderParams *params) {
+  if (!params || params->town < 1 ||
+      params->town > kSimTownTerrainTownCount)
+    return;
+  PrepareTerrainDepthCache(params->town);
+  const float origin_x = (float)params->town_screen_x0 - params->camera_x;
+  const float origin_y = -(float)params->camera_y;
+  for (int y = 0; y < kSimTownTerrainCells; y++) {
+    for (int x = 0; x < kSimTownTerrainCells; x++) {
+      const float x0 = x * (float)kSimTownTerrainCellPixels;
+      const float y0 = y * (float)kSimTownTerrainCellPixels;
+      const float x1 = x0 + kSimTownTerrainCellPixels;
+      const float y1 = y0 + kSimTownTerrainCellPixels;
+      const SimTerrainDepthCell *cell = TerrainDepthCell(x, y);
+      const float *h = cell->height;
+      const uint8_t hard_edges = cell->hard_edges;
+
+      if (y > 0 && (hard_edges & kSimTownTerrainEdgeNorth)) {
+        const float *n = TerrainDepthCell(x, y - 1)->height;
+        float n0 = n[kSimTownTerrainCornerSW];
+        float n1 = n[kSimTownTerrainCornerSE];
+        AppendTerrainDepthSkirt(
+            params, origin_x, origin_y, x1, y0, x0, y0,
+            h[1], h[0], n1, n0);
+      }
+      if (x > 0 && (hard_edges & kSimTownTerrainEdgeWest)) {
+        const float *n = TerrainDepthCell(x - 1, y)->height;
+        float n0 = n[kSimTownTerrainCornerNE];
+        float n1 = n[kSimTownTerrainCornerSE];
+        AppendTerrainDepthSkirt(
+            params, origin_x, origin_y, x0, y0, x0, y1,
+            h[0], h[3], n0, n1);
+      }
+      if (y + 1 < kSimTownTerrainCells &&
+          (hard_edges & kSimTownTerrainEdgeSouth)) {
+        const float *n = TerrainDepthCell(x, y + 1)->height;
+        float n0 = n[kSimTownTerrainCornerNW];
+        float n1 = n[kSimTownTerrainCornerNE];
+        AppendTerrainDepthSkirt(
+            params, origin_x, origin_y, x0, y1, x1, y1,
+            h[3], h[2], n0, n1);
+      }
+      if (x + 1 < kSimTownTerrainCells &&
+          (hard_edges & kSimTownTerrainEdgeEast)) {
+        const float *n = TerrainDepthCell(x + 1, y)->height;
+        float n0 = n[kSimTownTerrainCornerNW];
+        float n1 = n[kSimTownTerrainCornerSW];
+        AppendTerrainDepthSkirt(
+            params, origin_x, origin_y, x1, y0, x1, y1,
+            h[1], h[2], n0, n1);
+      }
+      const float xx[4] = {x0, x1, x1, x0};
+      const float yy[4] = {y0, y0, y1, y1};
+      AppendTerrainDepthQuad(
+          params, origin_x, origin_y, xx, yy, h, true);
+    }
+  }
+}
+#endif
 
 static SimBackgroundVoxelDetail EffectiveMountainDetail(
     const SimBackgroundVoxelRenderParams *params) {
@@ -417,7 +708,7 @@ static SimBackgroundVoxelDetail EffectiveMountainDetail(
                     0.0f, &bottom, NULL) ||
       !ProjectPoint(params, &kUprightProjectionAxis,
                     origin_x + center, origin_y + center,
-                    24.0f, &top, NULL))
+                    kMountainLodReferenceHeightPixels, &top, NULL))
     return requested;
   float dx = top.x - bottom.x, dy = top.y - bottom.y;
   float projected_height = sqrtf(dx * dx + dy * dy);
@@ -438,10 +729,13 @@ static void AddProjectedMountainReliefFace(
   if (*count >= kMaxMountainReliefFaces) return;
   ProjectedMountainReliefFace face;
   for (int point = 0; point < 4; point++) {
-    if (!ProjectVertex(params, axis,
-                       origin_x + local_x[point],
-                       origin_y + local_y[point], local_z[point],
-                       &face.points[point], &face.gpu_depth[point]))
+    const float terrain_lift = TerrainLiftPixels(
+        params, local_x[point], local_y[point]);
+    if (!ProjectGroundedVertex(
+            params, axis,
+            origin_x + local_x[point], origin_y + local_y[point],
+            local_z[point], terrain_lift,
+            &face.points[point], &face.gpu_depth[point]))
       return;
     face.uv[point] = uv[point];
     face.brightness[point] = brightness[point];
@@ -465,10 +759,12 @@ static void AppendProjectedSolidEffectFace(
   };
   for (int point = 0; point < 4; point++) {
     float depth;
-    if (!ProjectVertex(params, axis,
-                       origin_x + local_x[point],
-                       origin_y + local_y[point], local_z[point],
-                       &points[point], &depth))
+    float terrain_lift = TerrainLiftPixels(
+        params, local_x[point], local_y[point]);
+    if (!ProjectGroundedVertex(
+            params, axis,
+            origin_x + local_x[point], origin_y + local_y[point],
+            local_z[point], terrain_lift, &points[point], &depth))
       return;
     vertices[point] = (Sim3DDepthVertex){
       .x = points[point].x,
@@ -1149,10 +1445,11 @@ static void AddMountainSkirtTile(
   MountainPlanePoint(south_x, y1, baseline, context->relief,
                      south_offset_x, south_offset_y,
                      &south_wall_x, &south_y, &south_z);
-  north_z = north_z * context->height_scale + kMountainSkirtOverlapPixels;
-  south_z = south_z * context->height_scale + kMountainSkirtOverlapPixels;
+  const float overlap = kMountainSkirtOverlapPixels * context->height_scale;
+  north_z = north_z * context->height_scale + overlap;
+  south_z = south_z * context->height_scale + overlap;
   /* Art already sitting on the ground has no wedge to close. */
-  if (north_z <= kMountainSkirtOverlapPixels) return;
+  if (north_z <= overlap) return;
 
   float local_x[4] = {
     north_wall_x, south_wall_x, south_wall_x, north_wall_x,
@@ -1205,7 +1502,7 @@ static int BuildProjectedMountainObjectFaces(
     const SimBackgroundMountainObject *object = &objects->objects[at];
     /* Only the volcano's extra height varies between objects. */
     MountainTileContext context = *shared;
-    context.height_scale =
+    context.height_scale *=
         object->flags & kSimBackgroundMountainObject_Volcano
             ? kVolcanoHeightScale : 1.0f;
     float baseline =
@@ -1319,6 +1616,10 @@ static int BuildProjectedMountainReliefFaces(
     .axis = &mountain_axis,
     .relief = &relief,
     .stack_direction = MountainStackDirection(params),
+    /* Landscape magnitude translates the mountain's BASE through
+     * TerrainLiftPixels at every vertex. It must not resize the mountain's
+     * separately authored relief; a 50% landscape remains a full mountain on
+     * gentler ground rather than turning the mountain itself into a hill. */
     .height_scale = 1.0f,
     .origin_x = origin_x,
     .origin_y = origin_y,
@@ -1412,9 +1713,119 @@ static void AppendProjectedMountainReliefFace(
   Sim3DDepthPass_AppendQuad(kSim3DDepthPass_Mountain, vertices);
 }
 
+static float ObjectOriginX(const SimBackgroundVoxelObject *object) {
+  if (object->kind == kSimBackgroundVoxel_Bridge) {
+    return SimBackgroundBridge_ResolveBounds(object).origin_x;
+  }
+  return object->cell_x * kSimBackgroundCellPixels;
+}
+
 static float ObjectOriginY(const SimBackgroundVoxelObject *object) {
+  if (object->kind == kSimBackgroundVoxel_Bridge) {
+    return SimBackgroundBridge_ResolveBounds(object).origin_y;
+  }
   return (object->cell_y + object->source_cells_h -
           object->footprint_cells_d) * kSimBackgroundCellPixels;
+}
+
+static float ObjectFootprintWidth(const SimBackgroundVoxelObject *object) {
+  if (object->kind == kSimBackgroundVoxel_Bridge) {
+    return SimBackgroundBridge_ResolveBounds(object).width;
+  }
+  return object->footprint_cells_w * (float)kSimBackgroundCellPixels;
+}
+
+static float ObjectFootprintDepth(const SimBackgroundVoxelObject *object) {
+  if (object->kind == kSimBackgroundVoxel_Bridge) {
+    return SimBackgroundBridge_ResolveBounds(object).depth;
+  }
+  return object->footprint_cells_d * (float)kSimBackgroundCellPixels;
+}
+
+static float BridgeApproachLiftPixels(
+    const SimBackgroundVoxelObject *object,
+    const SimBackgroundVoxelRenderParams *params) {
+#if AR_SIM3D_TERRAIN_ELEVATION
+  float height_units;
+  int resolved = 0;
+  if (object->bridge_axis == kSimBackgroundBridgeAxis_EastWest) {
+    resolved = SimTownTerrain_LevelPairUnits(
+        params->town,
+        object->bridge_bank_a_x, object->bridge_bank_a_y, 1.0f, 0.5f,
+        object->bridge_bank_b_x, object->bridge_bank_b_y, 0.0f, 0.5f,
+        &height_units);
+  } else if (object->bridge_axis ==
+             kSimBackgroundBridgeAxis_NorthSouth) {
+    resolved = SimTownTerrain_LevelPairUnits(
+        params->town,
+        object->bridge_bank_a_x, object->bridge_bank_a_y, 0.5f, 1.0f,
+        object->bridge_bank_b_x, object->bridge_bank_b_y, 0.5f, 0.0f,
+        &height_units);
+  }
+  if (!resolved) return 0.0f;
+  return TerrainUnitsToPixels(params, height_units);
+#else
+  (void)object;
+  (void)params;
+  return 0.0f;
+#endif
+}
+
+static float BridgeDepthLiftPixels(
+    const SimBackgroundVoxelObject *object,
+    const SimBackgroundVoxelRenderParams *params) {
+#if AR_SIM3D_TERRAIN_ELEVATION
+  /* Keep projection at the path-centre datum, but depth-test the rigid model
+   * against the highest terrain point touched by its footprint. Marahna's
+   * transverse grade makes those differ by about 2.35 pixels at the captured
+   * 40% landscape setting. Using the maximum for projection left the bridge
+   * visibly perched above the path; using the approach for depth let the far
+   * terrain corner erase its paving. Two datums give the bridge a buried bank
+   * joint without reopening the water/terrain punch-through. */
+  const SimBackgroundBridgeBounds bounds =
+      SimBackgroundBridge_ResolveBounds(object);
+  float height_units;
+  if (!SimTownTerrain_MaximumUnitsInRect(
+          params->town, bounds.origin_x, bounds.origin_y,
+          bounds.origin_x + bounds.width,
+          bounds.origin_y + bounds.depth, &height_units))
+    return 0.0f;
+  return TerrainUnitsToPixels(params, height_units);
+#else
+  (void)object;
+  (void)params;
+  return 0.0f;
+#endif
+}
+
+static float ObjectTerrainLiftPixels(
+    const SimBackgroundVoxelObject *object,
+    const SimBackgroundVoxelRenderParams *params,
+    float local_x, float local_y) {
+  if (object->kind == kSimBackgroundVoxel_Bridge) {
+    (void)local_x;
+    (void)local_y;
+    return BridgeApproachLiftPixels(object, params);
+  }
+  return TerrainLiftPixels(
+      params,
+      ObjectOriginX(object) + local_x,
+      ObjectOriginY(object) + local_y);
+}
+
+static float ObjectModelLiftPixels(
+    const SimBackgroundVoxelObject *object,
+    const SimBackgroundVoxelRenderParams *params,
+    float local_x, float local_y) {
+  if (object->kind == kSimBackgroundVoxel_Bridge)
+    return ObjectTerrainLiftPixels(object, params, local_x, local_y);
+  /* A rigid model belongs at the natural height of its plot anchor. Sampling
+   * the highest footprint corner lifted whole houses into conspicuous towers;
+   * the buried foundation below closes only the downhill gap instead. */
+  return ObjectTerrainLiftPixels(
+      object, params,
+      ObjectFootprintWidth(object) * 0.5f,
+      ObjectFootprintDepth(object) * 0.5f);
 }
 
 typedef struct SimBackgroundContactBounds {
@@ -1422,6 +1833,22 @@ typedef struct SimBackgroundContactBounds {
 } SimBackgroundContactBounds;
 
 enum { kSimBackgroundMaxContactQuads = 3 };
+
+#if AR_SIM3D_TERRAIN_ELEVATION
+enum {
+  kFoundationGapSamplesPerEdge = 5,
+  kFoundationMaximumSegmentsPerEdge = 12,
+  kFoundationTopBrightness = 214,
+  kFoundationBrightnessVariation = 5,
+};
+
+static const float kFoundationPrepassVisibleGapPixels = 0.14f;
+static const float kFoundationApronPixels = 0.40f;
+static const float kFoundationTopInsetPixels = 0.05f;
+static const float kFoundationSegmentPixels = 3.5f;
+static const float kFoundationFaceVisibleGapPixels = 0.12f;
+static const uint8_t kFoundationEdgeBrightness[4] = {178, 194, 210, 186};
+#endif
 
 static int ContactBounds(const SimBackgroundVoxelObject *object,
                          SimBackgroundContactBounds *out) {
@@ -1460,8 +1887,24 @@ static int ContactBounds(const SimBackgroundVoxelObject *object,
     case kSimBackgroundVoxel_Pyramid:
       out[0] = (SimBackgroundContactBounds){0.5f, 1.5f, 31.5f, 31.5f};
       return 1;
+    case kSimBackgroundVoxel_Bridge:
+      return 0;
   }
   return 0;
+}
+
+static SimBackgroundContactBounds ScaledContactBounds(
+    SimBackgroundContactBounds bounds,
+    const SimBackgroundVoxelObject *object,
+    const SimBackgroundVoxelProportions *proportions) {
+  float center_x = ObjectFootprintWidth(object) * 0.5f;
+  float center_y = ObjectFootprintDepth(object) * 0.5f;
+  return (SimBackgroundContactBounds){
+    center_x + (bounds.x0 - center_x) * proportions->footprint_scale,
+    center_y + (bounds.y0 - center_y) * proportions->footprint_scale,
+    center_x + (bounds.x1 - center_x) * proportions->footprint_scale,
+    center_y + (bounds.y1 - center_y) * proportions->footprint_scale,
+  };
 }
 
 static void AppendGroundContact(
@@ -1474,19 +1917,11 @@ static void AppendGroundContact(
     return;
   SimBackgroundContactBounds bounds[kSimBackgroundMaxContactQuads];
   int count = ContactBounds(object, bounds);
-  float center_x = object->footprint_cells_w *
-      kSimBackgroundCellPixels * 0.5f;
-  float center_y = object->footprint_cells_d *
-      kSimBackgroundCellPixels * 0.5f;
   for (int at = 0; at < count; at++) {
-    float x0 = center_x + (bounds[at].x0 - center_x) *
-        proportions->footprint_scale;
-    float x1 = center_x + (bounds[at].x1 - center_x) *
-        proportions->footprint_scale;
-    float y0 = center_y + (bounds[at].y0 - center_y) *
-        proportions->footprint_scale;
-    float y1 = center_y + (bounds[at].y1 - center_y) *
-        proportions->footprint_scale;
+    SimBackgroundContactBounds scaled = ScaledContactBounds(
+        bounds[at], object, proportions);
+    float x0 = scaled.x0, x1 = scaled.x1;
+    float y0 = scaled.y0, y1 = scaled.y1;
     const float local_x[4] = {x0, x1, x1, x0};
     const float local_y[4] = {y0, y0, y1, y1};
     ProjectedModelFace face = {
@@ -1495,10 +1930,13 @@ static void AppendGroundContact(
     };
     bool valid = true;
     for (int point = 0; point < 4; point++) {
-      if (!ProjectVertex(params, &kUprightProjectionAxis,
-                         origin_x + local_x[point],
-                         origin_y + local_y[point], kContactLiftPixels,
-                         &face.points[point], &face.gpu_depth[point])) {
+      float terrain_lift = ObjectTerrainLiftPixels(
+          object, params, local_x[point], local_y[point]);
+      if (!ProjectGroundedVertex(
+              params, &kUprightProjectionAxis,
+              origin_x + local_x[point], origin_y + local_y[point],
+              kContactLiftPixels, terrain_lift,
+              &face.points[point], &face.gpu_depth[point])) {
         valid = false;
         break;
       }
@@ -1509,6 +1947,176 @@ static void AppendGroundContact(
   }
 }
 
+#if AR_SIM3D_TERRAIN_ELEVATION
+static bool ObjectUsesBuriedFoundation(
+    const SimBackgroundVoxelObject *object) {
+  if (!object) return false;
+  switch ((SimBackgroundVoxelKind)object->kind) {
+    case kSimBackgroundVoxel_House:
+    case kSimBackgroundVoxel_Cathedral:
+    case kSimBackgroundVoxel_Windmill:
+    case kSimBackgroundVoxel_Factory:
+    case kSimBackgroundVoxel_BloodpoolCastle:
+    case kSimBackgroundVoxel_MarahnaTemple:
+    case kSimBackgroundVoxel_Pyramid:
+      return true;
+    case kSimBackgroundVoxel_Tree:
+    case kSimBackgroundVoxel_BroadTree:
+    case kSimBackgroundVoxel_Palm:
+    case kSimBackgroundVoxel_Shrub:
+    case kSimBackgroundVoxel_StoryTree:
+    case kSimBackgroundVoxel_Bridge:
+      return false;
+  }
+  return false;
+}
+
+static void AppendFoundationFace(
+    const SimBackgroundVoxelRenderParams *params,
+    const SimBackgroundVoxelPalette *palette,
+    float origin_x, float origin_y,
+    const float local_x[4], const float local_y[4],
+    const float absolute_z[4], SimBackgroundVoxelMaterial material,
+    uint8_t brightness) {
+  ProjectedModelFace face = {
+    .material = (uint8_t)material,
+    .brightness = {brightness, brightness, brightness, brightness},
+  };
+  for (int point = 0; point < 4; point++)
+    if (!ProjectGroundedVertex(
+            params, &kUprightProjectionAxis,
+            origin_x + local_x[point], origin_y + local_y[point],
+            0.0f, absolute_z[point],
+            &face.points[point], &face.gpu_depth[point]))
+      return;
+  if (!IsDegenerate(face.points))
+    AppendProjectedFace(
+        &face, palette, (SimBackgroundVoxelShading)params->shading);
+}
+
+static bool FoundationHasExposedGap(
+    const SimBackgroundVoxelObject *object,
+    const SimBackgroundVoxelRenderParams *params,
+    SimBackgroundContactBounds bounds, float foundation_top) {
+  for (int edge = 0; edge < 4; edge++)
+    for (int sample = 0; sample < kFoundationGapSamplesPerEdge; sample++) {
+      float t = sample / (float)(kFoundationGapSamplesPerEdge - 1);
+      float x, y;
+      if (edge == 0 || edge == 2) {
+        x = bounds.x0 + (bounds.x1 - bounds.x0) * t;
+        y = edge == 0 ? bounds.y0 : bounds.y1;
+      } else {
+        x = edge == 1 ? bounds.x1 : bounds.x0;
+        y = bounds.y0 + (bounds.y1 - bounds.y0) * t;
+      }
+      if (foundation_top - ObjectTerrainLiftPixels(
+              object, params, x, y) >
+          kFoundationPrepassVisibleGapPixels)
+        return true;
+    }
+  return false;
+}
+
+static void AppendBuildingFoundation(
+    const SimBackgroundVoxelObject *object,
+    const SimBackgroundVoxelPalette *palette,
+    const SimBackgroundVoxelRenderParams *params,
+    float origin_x, float origin_y,
+    const SimBackgroundVoxelProportions *proportions,
+    float anchor_lift) {
+  if (!ObjectUsesBuriedFoundation(object)) return;
+
+  /* The top sits fractionally inside the model base. The depth-tested terrain
+   * buries its uphill portion; only exposed downhill infill survives. */
+  const float foundation_top = anchor_lift - kFoundationTopInsetPixels;
+  SimBackgroundContactBounds authored[kSimBackgroundMaxContactQuads];
+  int count = ContactBounds(object, authored);
+  for (int part = 0; part < count; part++) {
+    SimBackgroundContactBounds bounds = ScaledContactBounds(
+        authored[part], object, proportions);
+    float apron = kFoundationApronPixels * proportions->footprint_scale;
+    bounds.x0 = fmaxf(0.0f, bounds.x0 - apron);
+    bounds.y0 = fmaxf(0.0f, bounds.y0 - apron);
+    bounds.x1 = fminf(ObjectFootprintWidth(object), bounds.x1 + apron);
+    bounds.y1 = fminf(ObjectFootprintDepth(object), bounds.y1 + apron);
+    if (!FoundationHasExposedGap(
+            object, params, bounds, foundation_top))
+      continue;
+
+    const float top_x[4] = {bounds.x0, bounds.x1, bounds.x1, bounds.x0};
+    const float top_y[4] = {bounds.y0, bounds.y0, bounds.y1, bounds.y1};
+    const float top_z[4] = {
+      foundation_top, foundation_top, foundation_top, foundation_top,
+    };
+    AppendFoundationFace(
+        params, palette, origin_x, origin_y,
+        top_x, top_y, top_z, kSimVoxelMaterial_Foundation,
+        kFoundationTopBrightness);
+
+    for (int edge = 0; edge < 4; edge++) {
+      float edge_length = edge == 0 || edge == 2
+          ? bounds.x1 - bounds.x0 : bounds.y1 - bounds.y0;
+      int segment_count = (int)ceilf(edge_length /
+          kFoundationSegmentPixels);
+      if (segment_count < 1) segment_count = 1;
+      if (segment_count > kFoundationMaximumSegmentsPerEdge)
+        segment_count = kFoundationMaximumSegmentsPerEdge;
+      for (int segment = 0; segment < segment_count; segment++) {
+        float a = segment / (float)segment_count;
+        float b = (segment + 1) / (float)segment_count;
+        float x0, y0, x1, y1;
+        switch (edge) {
+          case 0:
+            x0 = bounds.x0 + (bounds.x1 - bounds.x0) * a;
+            x1 = bounds.x0 + (bounds.x1 - bounds.x0) * b;
+            y0 = y1 = bounds.y0;
+            break;
+          case 1:
+            x0 = x1 = bounds.x1;
+            y0 = bounds.y0 + (bounds.y1 - bounds.y0) * a;
+            y1 = bounds.y0 + (bounds.y1 - bounds.y0) * b;
+            break;
+          case 2:
+            x0 = bounds.x1 - (bounds.x1 - bounds.x0) * a;
+            x1 = bounds.x1 - (bounds.x1 - bounds.x0) * b;
+            y0 = y1 = bounds.y1;
+            break;
+          default:
+            x0 = x1 = bounds.x0;
+            y0 = bounds.y1 - (bounds.y1 - bounds.y0) * a;
+            y1 = bounds.y1 - (bounds.y1 - bounds.y0) * b;
+            break;
+        }
+        float ground0 = ObjectTerrainLiftPixels(object, params, x0, y0);
+        float ground1 = ObjectTerrainLiftPixels(object, params, x1, y1);
+        /* An uphill endpoint is embedded in the terrain, never extruded upward
+         * as an inverted wall. A single exposed endpoint naturally becomes a
+         * triangular wedge along the hillside. */
+        if (ground0 > foundation_top) ground0 = foundation_top;
+        if (ground1 > foundation_top) ground1 = foundation_top;
+        if (foundation_top - ground0 < kFoundationFaceVisibleGapPixels &&
+            foundation_top - ground1 < kFoundationFaceVisibleGapPixels)
+          continue;
+        const float side_x[4] = {x0, x1, x1, x0};
+        const float side_y[4] = {y0, y1, y1, y0};
+        const float side_z[4] = {
+          foundation_top, foundation_top, ground1, ground0,
+        };
+        int variation = ((segment + part + object->record_slot) & 1)
+            ? kFoundationBrightnessVariation
+            : -kFoundationBrightnessVariation;
+        uint8_t brightness = (uint8_t)(
+            kFoundationEdgeBrightness[edge] + variation);
+        AppendFoundationFace(
+            params, palette, origin_x, origin_y,
+            side_x, side_y, side_z, kSimVoxelMaterial_Foundation,
+            brightness);
+      }
+    }
+  }
+}
+#endif
+
 static float ModelAuthoredHeight(const SimBackgroundVoxelObject *object) {
   return SimBackgroundVoxelRegion_AuthoredHeight(object);
 }
@@ -1516,17 +2124,16 @@ static float ModelAuthoredHeight(const SimBackgroundVoxelObject *object) {
 static bool ObjectMayBeVisible(
     const SimBackgroundVoxelObject *object,
     const SimBackgroundVoxelRenderParams *params,
-    const SimBackgroundProjectionAxis *axis) {
+    const SimBackgroundProjectionAxis *axis,
+    float model_lift) {
   const SimBackgroundVoxelProportions *proportions =
       SimBackgroundVoxelProportions_Get(
           (SimBackgroundVoxelKind)object->kind);
   float origin_x = (float)params->town_screen_x0 - params->camera_x +
-      object->cell_x * kSimBackgroundCellPixels;
+      ObjectOriginX(object);
   float origin_y = -(float)params->camera_y + ObjectOriginY(object);
-  float center_x = object->footprint_cells_w *
-      kSimBackgroundCellPixels * 0.5f;
-  float center_y = object->footprint_cells_d *
-      kSimBackgroundCellPixels * 0.5f;
+  float center_x = ObjectFootprintWidth(object) * 0.5f;
+  float center_y = ObjectFootprintDepth(object) * 0.5f;
   float half_x = center_x * proportions->footprint_scale;
   float half_y = center_y * proportions->footprint_scale;
   float x[2] = {origin_x + center_x - half_x,
@@ -1541,8 +2148,9 @@ static bool ObjectMayBeVisible(
     for (int yi = 0; yi < 2; yi++)
       for (int xi = 0; xi < 2; xi++) {
         Scene3DPoint point;
-        if (!ProjectPoint(params, axis, x[xi], y[yi], z[zi],
-                          &point, NULL))
+        if (!ProjectGroundedPoint(
+                params, axis, x[xi], y[yi], z[zi], model_lift,
+                &point, NULL))
           continue;
         if (!any) {
           min_x = max_x = point.x;
@@ -1558,9 +2166,9 @@ static bool ObjectMayBeVisible(
   if (!any) return false;
   /* Output-space padding covers projecting edges whose corners straddle the
    * near plane, while remaining independent of source zoom and aspect. */
-  const float margin =
-      params->render_scale == kSimBackgroundVoxelRenderScale_2x
-      ? 48.0f : 24.0f;
+  const float margin = kObjectCullMarginPixels *
+      (params->render_scale == kSimBackgroundVoxelRenderScale_2x
+          ? 2.0f : 1.0f);
   return max_x >= params->viewport.x - margin &&
       min_x <= params->viewport.x + params->viewport.w + margin &&
       max_y >= params->viewport.y - margin &&
@@ -1573,16 +2181,18 @@ static SimBackgroundVoxelDetail EffectiveDetail(
     const SimBackgroundProjectionAxis *axis,
     float origin_x, float origin_y,
     const SimBackgroundVoxelProportions *proportions,
-    float center_x, float center_y) {
+    float center_x, float center_y, float model_lift) {
   SimBackgroundVoxelDetail requested =
       (SimBackgroundVoxelDetail)params->detail;
   if (params->lod != kSimBackgroundVoxelLod_Adaptive) return requested;
   Scene3DPoint bottom, top;
   float height = ModelAuthoredHeight(object) * proportions->height_scale;
-  if (!ProjectPoint(params, axis, origin_x + center_x, origin_y + center_y,
-                    0.0f, &bottom, NULL) ||
-      !ProjectPoint(params, axis, origin_x + center_x, origin_y + center_y,
-                    height, &top, NULL))
+  if (!ProjectGroundedPoint(
+          params, axis, origin_x + center_x, origin_y + center_y,
+          0.0f, model_lift, &bottom, NULL) ||
+      !ProjectGroundedPoint(
+          params, axis, origin_x + center_x, origin_y + center_y,
+          height, model_lift, &top, NULL))
     return requested;
   float dx = top.x - bottom.x;
   float dy = top.y - bottom.y;
@@ -1599,20 +2209,18 @@ static void DrawModel(
     const SimBackgroundVoxelPalette *palette,
     const SimBackgroundVoxelRenderParams *params,
     const SimBackgroundProjectionAxis *axis,
-    const SimBackgroundVoxelLightDirection *light) {
+    float anchor_lift, float depth_lift) {
   float origin_x = (float)params->town_screen_x0 - params->camera_x +
-      object->cell_x * kSimBackgroundCellPixels;
+      ObjectOriginX(object);
   float origin_y = -(float)params->camera_y + ObjectOriginY(object);
   const SimBackgroundVoxelProportions *proportions =
       SimBackgroundVoxelProportions_Get(
           (SimBackgroundVoxelKind)object->kind);
-  float center_x = object->footprint_cells_w *
-      kSimBackgroundCellPixels * 0.5f;
-  float center_y = object->footprint_cells_d *
-      kSimBackgroundCellPixels * 0.5f;
+  float center_x = ObjectFootprintWidth(object) * 0.5f;
+  float center_y = ObjectFootprintDepth(object) * 0.5f;
   SimBackgroundVoxelDetail detail = EffectiveDetail(
       object, params, axis, origin_x, origin_y, proportions,
-      center_x, center_y);
+      center_x, center_y, anchor_lift);
   /* Shading rides along with the geometry: none of its inputs move with the
    * camera, so the cache resolves it once per model per lighting state. */
   const SimBackgroundVoxelModelShadingKey shading_key = {
@@ -1626,6 +2234,11 @@ static void DrawModel(
       object, detail, (SimBackgroundVoxelStyle)params->style,
       g_renderer_state.cache_stamp, &shading_key, &shading);
   if (!model || !model->face_count || model->overflow || !shading) return;
+#if AR_SIM3D_TERRAIN_ELEVATION
+  AppendBuildingFoundation(
+      object, palette, params, origin_x, origin_y,
+      proportions, anchor_lift);
+#endif
   AppendGroundContact(object, palette, params, origin_x, origin_y,
                       proportions);
   /* Faces are submitted as they are projected. The depth pass resolves
@@ -1647,9 +2260,22 @@ static void DrawModel(
               proportions->footprint_scale;
       float local_z = source->points[point].z *
           proportions->height_scale;
-      if (!ProjectVertex(params, axis,
-                         origin_x + local_x, origin_y + local_y, local_z,
-                         &face.points[point], &face.gpu_depth[point])) {
+      bool projected;
+      if (object->kind == kSimBackgroundVoxel_Bridge) {
+        projected = ProjectGroundedVertexWithDepthGround(
+            params, axis,
+            origin_x + local_x, origin_y + local_y,
+            local_z, anchor_lift,
+            depth_lift,
+            &face.points[point], &face.gpu_depth[point]);
+      } else {
+        projected = ProjectGroundedVertex(
+            params, axis,
+            origin_x + local_x, origin_y + local_y,
+            local_z, anchor_lift,
+            &face.points[point], &face.gpu_depth[point]);
+      }
+      if (!projected) {
         valid = false;
         break;
       }
@@ -1663,6 +2289,8 @@ static void DrawModel(
 typedef struct SimBackgroundVisibleModel {
   uint16_t index;
   SimBackgroundProjectionAxis axis;
+  float anchor_lift;
+  float depth_lift;
 } SimBackgroundVisibleModel;
 
 typedef struct SimBackgroundVisibleModelList {
@@ -1694,7 +2322,15 @@ static void BuildVisibleModelList(
       .index = i,
       .axis = axes[object->kind],
     };
-    if (!ObjectMayBeVisible(object, params, &entry.axis)) continue;
+    const float center_x = ObjectFootprintWidth(object) * 0.5f;
+    const float center_y = ObjectFootprintDepth(object) * 0.5f;
+    entry.anchor_lift = ObjectModelLiftPixels(
+        object, params, center_x, center_y);
+    entry.depth_lift = object->kind == kSimBackgroundVoxel_Bridge
+        ? BridgeDepthLiftPixels(object, params) : entry.anchor_lift;
+    if (!ObjectMayBeVisible(
+            object, params, &entry.axis, entry.anchor_lift))
+      continue;
     list->entries[list->count++] = entry;
   }
 }
@@ -1702,12 +2338,14 @@ static void BuildVisibleModelList(
 static void CollectDepthGeometry(
     const SimBackgroundVoxelRenderParams *params,
     const SimBackgroundVisibleModelList *list,
-    int mountain_relief_count,
-    const SimBackgroundVoxelLightDirection *light) {
+    int mountain_relief_count) {
   const SimBackgroundVoxelScene *scene = SimBackgroundVoxels_Scene();
   /* Submission order is intentionally immaterial. One opaque mountain draw
    * and one solid-model draw share the same D32 attachment; the GPU resolves
    * visibility per pixel instead of relying on CPU object/face ordering. */
+#if AR_SIM3D_TERRAIN_ELEVATION
+  AppendTerrainDepthGeometry(params);
+#endif
   for (int at = 0; at < mountain_relief_count; at++)
     AppendProjectedMountainReliefFace(
         &g_renderer_state.mountain_projected[at]);
@@ -1716,7 +2354,8 @@ static void CollectDepthGeometry(
     uint16_t index = entry->index;
     const SimBackgroundVoxelObject *object = &scene->objects[index];
     DrawModel(object, &g_renderer_state.palettes[index],
-              params, &entry->axis, light);
+              params, &entry->axis,
+              entry->anchor_lift, entry->depth_lift);
   }
 }
 
@@ -1725,6 +2364,25 @@ static void GroundDepthRange(
     float *minimum, float *maximum) {
   *minimum = FLT_MAX;
   *maximum = -FLT_MAX;
+#if AR_SIM3D_TERRAIN_ELEVATION
+  for (int cell_y = 0; cell_y <= kSimTownTerrainCells; cell_y++)
+    for (int cell_x = 0; cell_x <= kSimTownTerrainCells; cell_x++) {
+      const float map_x = cell_x * kSimTownTerrainCellPixels;
+      const float map_y = cell_y * kSimTownTerrainCellPixels;
+      const float texture_x = (float)params->town_screen_x0 -
+          params->camera_x + map_x;
+      const float texture_y = -(float)params->camera_y + map_y;
+      float world_x, world_y, world_z;
+      TexturePointToWorld(
+          params, texture_x, texture_y,
+          TerrainLiftPixels(params, map_x, map_y),
+          &world_x, &world_y, &world_z);
+      float depth = Scene3D_ClipDepth(
+          params->matrix, world_x, world_y, world_z);
+      if (depth < *minimum) *minimum = depth;
+      if (depth > *maximum) *maximum = depth;
+    }
+#else
   const float x[2] = {(float)params->source.x,
                       (float)(params->source.x + params->source.w)};
   const float y[2] = {(float)params->source.y,
@@ -1739,21 +2397,26 @@ static void GroundDepthRange(
       if (depth < *minimum) *minimum = depth;
       if (depth > *maximum) *maximum = depth;
     }
+#endif
 }
 
-static void DrawDepthLayers(
+static bool BeginDepthTarget(
     SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params,
-    SimBackgroundVoxelDepthLayerCallback callback, void *userdata,
-    bool interleaved) {
-  if (!RenderParamsValid(renderer, params)) return;
-  SimBackgroundVoxelRenderParams draw_params = *params;
+    SimBackgroundVoxelRenderParams *draw_params) {
+  if (!RenderParamsValid(renderer, params) || !draw_params) return false;
+  *draw_params = *params;
   int output_scale = params->render_scale ==
           kSimBackgroundVoxelRenderScale_2x &&
       params->detail >= kSimBackgroundVoxelDetail_High ? 2 : 1;
+  const uint64_t supersampled_pixels =
+      (uint64_t)params->viewport.w * (uint64_t)params->viewport.h * 4u;
+  if (output_scale == 2 &&
+      supersampled_pixels > kMaxSupersampledPixels)
+    output_scale = 1;
   if (params->viewport.w > INT_MAX / output_scale ||
       params->viewport.h > INT_MAX / output_scale)
-    return;
-  draw_params.viewport = (SDL_Rect){
+    return false;
+  draw_params->viewport = (SDL_Rect){
     0, 0,
     params->viewport.w * output_scale,
     params->viewport.h * output_scale,
@@ -1761,10 +2424,27 @@ static void DrawDepthLayers(
   SDL_ScaleMode scale_mode =
       params->render_scale == kSimBackgroundVoxelRenderScale_PixelClean
           ? SDL_SCALEMODE_NEAREST : SDL_SCALEMODE_LINEAR;
-  if (!Sim3DDepthPass_Begin(
-          renderer, draw_params.viewport.w, draw_params.viewport.h,
-          scale_mode))
-    return;
+  return Sim3DDepthPass_Begin(
+      renderer, draw_params->viewport.w, draw_params->viewport.h, scale_mode);
+}
+
+static void CompositeDepthTarget(
+    SDL_Renderer *renderer, SDL_Texture *texture,
+    const SimBackgroundVoxelRenderParams *params) {
+  if (!texture) return;
+  SDL_FRect destination = {
+    (float)params->viewport.x, (float)params->viewport.y,
+    (float)params->viewport.w, (float)params->viewport.h,
+  };
+  SDL_RenderTexture(renderer, texture, NULL, &destination);
+}
+
+static void DrawDepthLayers(
+    SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params,
+    SimBackgroundVoxelDepthLayerCallback callback, void *userdata,
+    bool interleaved) {
+  SimBackgroundVoxelRenderParams draw_params;
+  if (!BeginDepthTarget(renderer, params, &draw_params)) return;
 
   g_renderer_state.cache_stamp++;
   if (!g_renderer_state.cache_stamp) g_renderer_state.cache_stamp = 1;
@@ -1772,13 +2452,10 @@ static void DrawDepthLayers(
   BuildVisibleModelList(&draw_params, &list);
   int mountain_relief_count =
       BuildProjectedMountainReliefFaces(&draw_params);
-  float visible_minimum, visible_maximum;
-  GroundDepthRange(&draw_params, &visible_minimum, &visible_maximum);
-  SimBackgroundVoxelLightDirection light;
-  SimBackgroundVoxelLighting_ResolveDirection(
-      params->light_azimuth_deg, params->light_elevation_deg, &light);
-  CollectDepthGeometry(
-      &draw_params, &list, mountain_relief_count, &light);
+  float visible_minimum = 0.0f, visible_maximum = 0.0f;
+  if (callback && interleaved)
+    GroundDepthRange(&draw_params, &visible_minimum, &visible_maximum);
+  CollectDepthGeometry(&draw_params, &list, mountain_relief_count);
   SDL_Texture *depth_composite = Sim3DDepthPass_Submit(renderer, NULL);
   /* Actors standing on ordinary ground go UNDER the composite, so the town's
    * own geometry hides them: a villager behind a peak or behind a house is
@@ -1791,19 +2468,32 @@ static void DrawDepthLayers(
   if (callback && interleaved)
     callback(userdata, params, visible_minimum, visible_maximum,
              kSimBackgroundVoxelActorBand_Ground);
-  if (depth_composite) {
-    SDL_FRect destination = {
-      (float)params->viewport.x, (float)params->viewport.y,
-      (float)params->viewport.w, (float)params->viewport.h,
-    };
-    SDL_RenderTexture(renderer, depth_composite, NULL, &destination);
-  }
+  CompositeDepthTarget(renderer, depth_composite, params);
   if (callback && interleaved) {
     callback(userdata, params, visible_minimum, visible_maximum,
              kSimBackgroundVoxelActorBand_Mountain);
     callback(userdata, params, 0.0f, 0.0f,
              kSimBackgroundVoxelActorBand_Overhead);
   }
+}
+
+void SimBackgroundVoxelRenderer_DrawTerrainShadow(
+    SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params) {
+#if AR_SIM3D_TERRAIN_ELEVATION
+  if (!params || !params->shadow_mask || !params->shadow_opacity_pct) return;
+  SimBackgroundVoxelRenderParams draw_params;
+  if (!BeginDepthTarget(renderer, params, &draw_params)) return;
+  /* This pass deliberately contains no model geometry. It runs at BG1Low so
+   * the clipped mask darkens only the ground; later actor/model ranks retain
+   * the authentic painter relationship and cover it normally. */
+  AppendTerrainDepthGeometry(&draw_params);
+  SDL_Texture *shadow_composite = Sim3DDepthPass_Submit(
+      renderer, draw_params.shadow_mask);
+  CompositeDepthTarget(renderer, shadow_composite, params);
+#else
+  (void)renderer;
+  (void)params;
+#endif
 }
 
 void SimBackgroundVoxelRenderer_Draw(
@@ -1904,6 +2594,10 @@ static int ShadowBounds(const SimBackgroundVoxelObject *object,
         0.5f, 1.5f, 31.5f, 31.5f,
         SimBackgroundVoxelRegion_AuthoredHeight(object)};
       return 1;
+    case kSimBackgroundVoxel_Bridge:
+      /* Its shallow dark underside is self-shading; a large directional mask
+       * would paint an implausible opaque stripe across the river. */
+      return 0;
   }
   return 0;
 }
@@ -1920,10 +2614,8 @@ static void AppendShadowVolume(
   const SimBackgroundVoxelProportions *proportions =
       SimBackgroundVoxelProportions_Get(
           (SimBackgroundVoxelKind)object->kind);
-  float center_x = object->footprint_cells_w *
-      kSimBackgroundCellPixels * 0.5f;
-  float center_y = object->footprint_cells_d *
-      kSimBackgroundCellPixels * 0.5f;
+  float center_x = ObjectFootprintWidth(object) * 0.5f;
+  float center_y = ObjectFootprintDepth(object) * 0.5f;
   float local_x[2] = {
     center_x + (bounds.x0 - center_x) *
         proportions->footprint_scale,
@@ -1937,24 +2629,29 @@ static void AppendShadowVolume(
         proportions->footprint_scale,
   };
   float origin_x = (float)params->town_screen_x0 - params->camera_x +
-      object->cell_x * kSimBackgroundCellPixels;
+      ObjectOriginX(object);
   float origin_y = -(float)params->camera_y + ObjectOriginY(object);
   float height_world = bounds.height * proportions->height_scale *
       axis_z_scale / params->source.h;
   Scene3DPoint base[4], offset[4];
   for (int corner = 0; corner < 4; corner++) {
+    const float corner_x = local_x[corner == 1 || corner == 2];
+    const float corner_y = local_y[corner >= 2];
+    const float terrain_lift = ObjectTerrainLiftPixels(
+        object, params, corner_x, corner_y);
     float world_x, world_y, world_z;
     TexturePointToWorld(
-        params, origin_x + local_x[corner == 1 || corner == 2],
-        origin_y + local_y[corner >= 2], 0.0f,
+        params, origin_x + corner_x,
+        origin_y + corner_y, terrain_lift,
         &world_x, &world_y, &world_z);
     if (!Scene3D_ProjectWorldPoint(
-            params->matrix, world_x, world_y, 0.0f,
+            params->matrix, world_x, world_y, world_z,
             params->viewport.w, params->viewport.h, &base[corner]) ||
-        !Scene3D_ProjectShadowPoint(
-            params->matrix, world_x, world_y, height_world,
-            light_x, light_y, params->viewport.w, params->viewport.h,
-            &offset[corner]))
+        !Scene3D_ProjectWorldPoint(
+            params->matrix,
+            world_x + height_world * light_x,
+            world_y + height_world * light_y, world_z,
+            params->viewport.w, params->viewport.h, &offset[corner]))
       return;
     base[corner].x += params->viewport.x;
     base[corner].y += params->viewport.y;
@@ -1986,7 +2683,11 @@ void SimBackgroundVoxelRenderer_DrawShadowMask(
     const SimBackgroundVoxelObject *object = &scene->objects[i];
     if (object->kind >= kSimBackgroundVoxelKindCount) continue;
     const SimBackgroundProjectionAxis *axis = &axes[object->kind];
-    if (!ObjectMayBeVisible(object, params, axis)) continue;
+    const float center_x = ObjectFootprintWidth(object) * 0.5f;
+    const float center_y = ObjectFootprintDepth(object) * 0.5f;
+    const float model_lift = ObjectModelLiftPixels(
+        object, params, center_x, center_y);
+    if (!ObjectMayBeVisible(object, params, axis, model_lift)) continue;
     SimBackgroundShadowBounds bounds[kSimBackgroundMaxShadowVolumes];
     int volume_count = ShadowBounds(object, bounds);
     /* Flush ahead of the caster that would not fit. AppendSolidQuad drops

@@ -7,21 +7,22 @@ is that a bundle user has a pinned Zig, SDL3 and a ROM, and nothing else. The
 generated headers are committed to the repo and both build paths simply compile
 C, exactly as they already do for every other source file.
 
-Pipeline (both tools are dev-machine only, installable from Homebrew/apt):
+Pipeline (all tools are developer-only and never ship with the game):
 
-    rim.frag.glsl --glslc--> SPIR-V  ------------------> Vulkan  (Linux, Deck, Win)
-                         \\--> SPIR-V --spirv-cross--> MSL --> Metal  (macOS)
+    GLSL --glslc--> SPIR-V -----------------------------> Vulkan
+                      |--spirv-cross--> MSL ------------> Metal
+                      `--spirv-cross--> HLSL --dxc------> D3D12
 
-Why GLSL rather than HLSL + SDL_shadercross: shadercross has no tagged releases
-or prebuilt binaries, so pinning it means pinning a git SHA and building a
-heavyweight C++ project against DXC — which fights this project's pinned,
-sha256-verified toolchain story (internal/toolchain). glslc and spirv-cross
-ship versioned, packaged releases that pin the same way Zig and SDL3 already do.
+Why GLSL rather than a runtime SDL_shadercross dependency: the build and game
+would otherwise need another native library plus its compiler dependencies.
+glslc, spirv-cross, and Microsoft's DXC are offline developer tools with
+versioned packages; only their deterministic output is committed and shipped.
 
-The one format this pipeline cannot emit is DXIL, needed only by Windows
-machines with no Vulkan driver. That is a deliberate deferral, not a dead end:
-the SPIR-V emitted here is valid SDL_shadercross *input*, so adding DXIL later
-is additive and costs none of this work.
+DXC is Microsoft's DirectX Shader Compiler. Set the ``DXC`` environment
+variable when it is not on PATH. It accepts a command prefix, which is useful
+when regenerating on a non-Windows host, for example:
+
+    DXC='wine /path/to/dxc.exe' tools/build_shaders.py
 
 Binding convention (SDL_gpu.h, "Shader Resources") — the authored GLSL must
 match it or the shader will compile and then silently misbehave:
@@ -35,8 +36,10 @@ Usage:
 """
 
 import argparse
+import os
 import pathlib
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -48,7 +51,10 @@ SHADER_DIR = REPO_ROOT / "src" / "shaders"
 REQUIRED_TOOLS = {
     "glslc": "brew install shaderc   (Debian/Ubuntu: apt install glslc)",
     "spirv-cross": "brew install spirv-cross   (Debian/Ubuntu: apt install spirv-cross)",
+    "dxc": "install Microsoft DirectX Shader Compiler and set DXC=/path/to/dxc",
 }
+
+TOOL_COMMANDS = {}
 
 
 def die(message):
@@ -56,17 +62,20 @@ def die(message):
 
 
 def check_tools():
-    missing = [
-        f"  {tool} — {hint}"
-        for tool, hint in REQUIRED_TOOLS.items()
-        if shutil.which(tool) is None
-    ]
+    missing = []
+    for tool, hint in REQUIRED_TOOLS.items():
+        override = os.environ.get(tool.upper().replace("-", "_"))
+        command = shlex.split(override) if override else [tool]
+        if not command or shutil.which(command[0]) is None:
+            missing.append(f"  {tool} — {hint}")
+        else:
+            TOOL_COMMANDS[tool] = command
     if missing:
         die(
             "missing required tools:\n"
             + "\n".join(missing)
             + "\n\nThese are needed only to REGENERATE shaders. Building the game\n"
-            "(CMake or hermetic) uses the committed headers and needs neither."
+            "(CMake or hermetic) uses the committed headers and needs none."
         )
 
 
@@ -78,6 +87,19 @@ def run(command, **kwargs):
             % (" ".join(str(c) for c in command), result.stdout, result.stderr)
         )
     return result.stdout
+
+
+def run_tool(tool, arguments, **kwargs):
+    return run(TOOL_COMMANDS[tool] + list(arguments), **kwargs)
+
+
+def dxc_path(path):
+    """Translate host paths when DXC is being run through Wine."""
+    command = pathlib.Path(TOOL_COMMANDS["dxc"][0]).name.lower()
+    text = str(path)
+    if command.startswith("wine") and pathlib.Path(text).is_absolute():
+        return "Z:" + text.replace("/", "\\")
+    return text
 
 
 def base_name(source_path):
@@ -109,22 +131,37 @@ def byte_array(data, indent="    "):
 
 
 def compile_shader(source_path, temp_dir):
-    """Return (spirv_bytes, msl_text) for one shader source."""
+    """Return (spirv_bytes, msl_text, dxil_bytes) for one shader source."""
     stage = shader_stage(source_path)
     optimized_spv = temp_dir / (source_path.stem + ".opt.spv")
     readable_spv = temp_dir / (source_path.stem + ".spv")
+    hlsl_path = temp_dir / (source_path.stem + ".hlsl")
+    dxil_path = temp_dir / (source_path.stem + ".dxil")
 
     # Shipped SPIR-V is optimized: Vulkan consumes these bytes directly.
-    run(["glslc", f"-fshader-stage={stage}", "-O", str(source_path), "-o", str(optimized_spv)])
+    run_tool("glslc", [f"-fshader-stage={stage}", "-O", str(source_path),
+                       "-o", str(optimized_spv)])
     # MSL is generated from UNoptimized SPIR-V purely so the emitted Metal
     # keeps the authored identifiers. Metal's own compiler optimizes the source
     # at load time, so this costs nothing at runtime and makes the generated
     # shader debuggable when something goes wrong on a real device.
-    run(["glslc", f"-fshader-stage={stage}", str(source_path), "-o", str(readable_spv)])
+    run_tool("glslc", [f"-fshader-stage={stage}", str(source_path),
+                       "-o", str(readable_spv)])
 
-    msl = run(["spirv-cross", "--msl", str(readable_spv)])
+    msl = run_tool("spirv-cross", ["--msl", str(readable_spv)])
     verify_msl_bindings(source_path, msl)
-    return optimized_spv.read_bytes(), msl
+    hlsl = run_tool("spirv-cross", ["--hlsl", "--shader-model", "60",
+                                    str(readable_spv)])
+    verify_hlsl_bindings(source_path, hlsl)
+    hlsl_path.write_text(hlsl)
+    profile = {"frag": "ps_6_0", "vert": "vs_6_0"}[stage]
+    run_tool("dxc", ["-T", profile, "-E", "main", "-O3", "-Fo",
+                     dxc_path(dxil_path), dxc_path(hlsl_path)])
+    # DXC's dump mode parses and validates the finished container. Keep this
+    # offline check beside compilation so corrupt or unsigned DXIL can never
+    # become a byte array that only fails later on a Windows machine.
+    run_tool("dxc", ["-dumpbin", dxc_path(dxil_path)])
+    return optimized_spv.read_bytes(), msl, dxil_path.read_bytes()
 
 
 def verify_msl_bindings(source_path, msl):
@@ -160,7 +197,24 @@ def verify_msl_bindings(source_path, msl):
         )
 
 
-def render_header(source_path, spirv, msl):
+def verify_hlsl_bindings(source_path, hlsl):
+    """Pin SDL_GPU's D3D12 register-space and semantic conventions."""
+    source = source_path.read_text()
+    expected = ["TEXCOORD0"]
+    if "sampler" in source:
+        expected.extend(["register(t0, space2)", "register(s0, space2)"])
+    if re.search(r"\buniform\s+(?!sampler)", source):
+        expected.append("register(b0, space3)")
+    missing = [token for token in expected if token not in hlsl]
+    if missing:
+        die(
+            "%s: generated HLSL is missing %s.\nspirv-cross may have changed "
+            "its D3D12 register or semantic mapping; inspect the output "
+            "before shipping it." % (source_path.name, ", ".join(missing))
+        )
+
+
+def render_header(source_path, spirv, msl, dxil):
     base = base_name(source_path)
     stage = shader_stage(source_path)
     name = c_identifier(base, stage)
@@ -177,9 +231,10 @@ def render_header(source_path, spirv, msl):
  * compiles with a pinned `zig cc` and nothing else, so no shader toolchain may
  * be required at build time. See tools/build_shaders.py for the full rationale.
  *
- * MSL is NUL-terminated source text (Metal compiles it at load); SPIR-V is a
- * binary module consumed directly by Vulkan. Pass the matching *Size constant
- * to SDL_GPUShaderCreateInfo.code_size — for MSL that EXCLUDES the terminator.
+ * MSL is NUL-terminated source text (Metal compiles it at load); SPIR-V and
+ * DXIL are binary modules consumed by Vulkan and D3D12. Pass the matching
+ * *Size constant to SDL_GPUShaderCreateInfo.code_size — for MSL that EXCLUDES
+ * the terminator.
  */
 #ifndef %s
 #define %s
@@ -195,6 +250,11 @@ static const unsigned char k%sSPV[] = {
 };
 static const unsigned int k%sSPVSize = %du;
 
+static const unsigned char k%sDXIL[] = {
+%s
+};
+static const unsigned int k%sDXILSize = %du;
+
 #endif /* %s */
 """ % (
         base,
@@ -209,6 +269,10 @@ static const unsigned int k%sSPVSize = %du;
         byte_array(spirv),
         name,
         len(spirv),
+        name,
+        byte_array(dxil),
+        name,
+        len(dxil),
         guard,
     )
 
@@ -240,10 +304,10 @@ def main():
     with tempfile.TemporaryDirectory() as temp:
         temp_dir = pathlib.Path(temp)
         for source in sources:
-            spirv, msl = compile_shader(source, temp_dir)
+            spirv, msl, dxil = compile_shader(source, temp_dir)
             header_path = SHADER_DIR / (
                 base_name(source) + "_" + shader_stage(source) + ".h")
-            contents = render_header(source, spirv, msl)
+            contents = render_header(source, spirv, msl, dxil)
 
             if args.check:
                 current = header_path.read_text() if header_path.exists() else ""
@@ -254,8 +318,9 @@ def main():
             else:
                 header_path.write_text(contents)
                 print(
-                    "%-24s %6d B MSL  %6d B SPIR-V"
-                    % (header_path.name, len(msl.encode("utf-8")), len(spirv))
+                    "%-24s %6d B MSL  %6d B SPIR-V  %6d B DXIL"
+                    % (header_path.name, len(msl.encode("utf-8")), len(spirv),
+                       len(dxil))
                 )
 
     if args.check and stale:

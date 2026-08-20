@@ -3,9 +3,9 @@
  * The GPU effects were hand-written MSL, so they compiled on Metal and were
  * silently dead everywhere else. They are now authored once as GLSL in
  * src/shaders/ and compiled by tools/build_shaders.py into COMMITTED headers
- * carrying both SPIR-V (Vulkan: Linux, Steam Deck, Windows) and MSL (Metal:
- * macOS). Nothing compiles shaders at build time — the hermetic build has a
- * pinned `zig cc` and nothing else.
+ * carrying SPIR-V (Vulkan), DXIL (D3D12), and MSL (Metal). Nothing compiles
+ * shaders at build time — the hermetic build has a pinned `zig cc` and
+ * nothing else.
  *
  * That arrangement has two failure modes a compile cannot catch, and this test
  * pins both:
@@ -13,11 +13,11 @@
  *   1. The blob must actually be accepted by the live backend's shader
  *      compiler. A byte array is valid C no matter how corrupt its contents.
  *
- *   2. The entrypoint name differs by format and is not cosmetic: glslc leaves
- *      the SPIR-V entry point named `main`, while spirv-cross renames it to
- *      `main0` when emitting Metal. Swapping them fails shader creation — so
- *      this test asserts the wrong name is REJECTED, which is what proves the
- *      right name is load-bearing rather than coincidental.
+ *   2. The selectable entrypoint name differs for SPIR-V and MSL: glslc leaves
+ *      SPIR-V at `main`, while spirv-cross emits Metal `main0`. Swapping them
+ *      must fail. DXIL is already a single compiled stage container and D3D12
+ *      implementations may ignore this field, so only its positive case is
+ *      meaningful.
  *
  * Needs a real GPU device, so it is skipped (exit 0) wherever one cannot be
  * created — CI containers, headless boxes without Vulkan. It does NOT need a
@@ -34,6 +34,8 @@ typedef struct {
   unsigned int msl_size;
   const unsigned char *spv;
   unsigned int spv_size;
+  const unsigned char *dxil;
+  unsigned int dxil_size;
 } GpuShaderBlobs;
 
 #include "shaders/blur_frag.h"
@@ -42,6 +44,7 @@ typedef struct {
 #include "shaders/rim_frag.h"
 #include "shaders/sim3d_depth_frag.h"
 #include "shaders/sim3d_depth_vert.h"
+#include "shaders/sim_shadow_blur_frag.h"
 
 static int s_failures;
 #define CHECK(expr) do { \
@@ -61,25 +64,36 @@ static const struct {
   Uint32 uniforms;
 } kShaders[] = {
   { "blur",        { kBlurFragMSL, kBlurFragMSLSize,
-                     kBlurFragSPV, kBlurFragSPVSize },
+                     kBlurFragSPV, kBlurFragSPVSize,
+                     kBlurFragDXIL, kBlurFragDXILSize },
                      SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1 },
   { "crt",         { kCrtFragMSL, kCrtFragMSLSize,
-                     kCrtFragSPV, kCrtFragSPVSize },
+                     kCrtFragSPV, kCrtFragSPVSize,
+                     kCrtFragDXIL, kCrtFragDXILSize },
                      SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1 },
   { "dof_edge",    { kDofEdgeFragMSL, kDofEdgeFragMSLSize,
-                     kDofEdgeFragSPV, kDofEdgeFragSPVSize },
+                     kDofEdgeFragSPV, kDofEdgeFragSPVSize,
+                     kDofEdgeFragDXIL, kDofEdgeFragDXILSize },
                      SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1 },
   { "rim",         { kRimFragMSL, kRimFragMSLSize,
-                     kRimFragSPV, kRimFragSPVSize },
+                     kRimFragSPV, kRimFragSPVSize,
+                     kRimFragDXIL, kRimFragDXILSize },
                      SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1 },
   { "sim3d_depth_fragment",
                     { kSim3dDepthFragMSL, kSim3dDepthFragMSLSize,
-                      kSim3dDepthFragSPV, kSim3dDepthFragSPVSize },
+                      kSim3dDepthFragSPV, kSim3dDepthFragSPVSize,
+                      kSim3dDepthFragDXIL, kSim3dDepthFragDXILSize },
                       SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0 },
   { "sim3d_depth_vertex",
                     { kSim3dDepthVertMSL, kSim3dDepthVertMSLSize,
-                      kSim3dDepthVertSPV, kSim3dDepthVertSPVSize },
+                      kSim3dDepthVertSPV, kSim3dDepthVertSPVSize,
+                      kSim3dDepthVertDXIL, kSim3dDepthVertDXILSize },
                       SDL_GPU_SHADERSTAGE_VERTEX, 0, 0 },
+  { "sim_shadow_blur",
+                    { kSimShadowBlurFragMSL, kSimShadowBlurFragMSLSize,
+                      kSimShadowBlurFragSPV, kSimShadowBlurFragSPVSize,
+                      kSimShadowBlurFragDXIL, kSimShadowBlurFragDXILSize },
+                      SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1 },
 };
 static const int kShaderCount = (int)(sizeof(kShaders) / sizeof(kShaders[0]));
 
@@ -97,6 +111,10 @@ static SDL_GPUShader *CreateFrom(SDL_GPUDevice *device,
     info.code = blobs->spv;
     info.code_size = blobs->spv_size;
     info.format = SDL_GPU_SHADERFORMAT_SPIRV;
+  } else if (formats & SDL_GPU_SHADERFORMAT_DXIL) {
+    info.code = blobs->dxil;
+    info.code_size = blobs->dxil_size;
+    info.format = SDL_GPU_SHADERFORMAT_DXIL;
   } else if (formats & SDL_GPU_SHADERFORMAT_MSL) {
     info.code = blobs->msl;
     info.code_size = blobs->msl_size;
@@ -120,10 +138,13 @@ int main(void) {
   /* Advertising both formats is what lets SDL pick a backend it can actually
    * feed — the same call shape main.c needs at renderer creation. */
   SDL_GPUDevice *device = SDL_CreateGPUDevice(
-      SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_MSL, false, NULL);
+      SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL |
+          SDL_GPU_SHADERFORMAT_MSL,
+      false, NULL);
   if (!device) {
     fprintf(stderr,
-            "shader_blob_test: SKIP — no GPU device supporting SPIR-V or MSL "
+            "shader_blob_test: SKIP — no GPU device supporting SPIR-V, DXIL, "
+            "or MSL "
             "(%s)\n", SDL_GetError());
     SDL_Quit();
     return 0;
@@ -131,12 +152,13 @@ int main(void) {
 
   const SDL_GPUShaderFormat formats = SDL_GetGPUShaderFormats(device);
   const bool spirv = (formats & SDL_GPU_SHADERFORMAT_SPIRV) != 0;
-  const char *good = spirv ? "main" : "main0";
-  const char *bad = spirv ? "main0" : "main";
+  const bool dxil = (formats & SDL_GPU_SHADERFORMAT_DXIL) != 0;
+  const char *good = (spirv || dxil) ? "main" : "main0";
+  const char *bad = (spirv || dxil) ? "main0" : "main";
   printf("shader_blob_test: driver=%s formats=0x%x using=%s entrypoint=%s "
          "shaders=%d\n",
          SDL_GetGPUDeviceDriver(device), (unsigned)formats,
-         spirv ? "SPIR-V" : "MSL", good, kShaderCount);
+         spirv ? "SPIR-V" : (dxil ? "DXIL" : "MSL"), good, kShaderCount);
 
   /* 1. Every committed blob compiles on this backend. */
   for (int i = 0; i < kShaderCount; i++) {
@@ -151,24 +173,26 @@ int main(void) {
       SDL_ReleaseGPUShader(device, shader);
   }
 
-  /* 2. The other format's entrypoint name is rejected, proving the per-format
-   *    name in CreateFragmentShaderFromBlobs is doing real work. One shader is
-   *    enough — the name comes from the format, not the shader. The backend
-   *    logs its own compile error here; that output is EXPECTED. */
-  printf("shader_blob_test: negative case follows; one backend shader-compile "
-         "error below is expected\n");
-  fflush(stdout);
-  SDL_GPUShader *wrong = CreateFrom(
-      device, &kShaders[0].blobs, bad, kShaders[0].stage,
-      kShaders[0].samplers, kShaders[0].uniforms);
-  CHECK(wrong == NULL);
-  if (wrong) {
-    fprintf(stderr,
-            "  entrypoint \"%s\" was ACCEPTED on a %s blob — the per-format "
-            "entrypoint selection may no longer be needed, or is being "
-            "ignored; re-check before trusting it.\n",
-            bad, spirv ? "SPIR-V" : "MSL");
-    SDL_ReleaseGPUShader(device, wrong);
+  if (!dxil) {
+    /* The other source module's entrypoint name must be rejected. One shader
+     * is enough: the name comes from the module format, not the effect. */
+    printf("shader_blob_test: negative case follows; one backend "
+           "shader-compile error below is expected\n");
+    fflush(stdout);
+    SDL_GPUShader *wrong = CreateFrom(
+        device, &kShaders[0].blobs, bad, kShaders[0].stage,
+        kShaders[0].samplers, kShaders[0].uniforms);
+    CHECK(wrong == NULL);
+    if (wrong) {
+      fprintf(stderr,
+              "  entrypoint \"%s\" was ACCEPTED on a %s source module — "
+              "re-check the generated entrypoint contract.\n",
+              bad, spirv ? "SPIR-V" : "MSL");
+      SDL_ReleaseGPUShader(device, wrong);
+    }
+  } else {
+    printf("shader_blob_test: DXIL container has no alternate entrypoint "
+           "negative case\n");
   }
 
   SDL_DestroyGPUDevice(device);

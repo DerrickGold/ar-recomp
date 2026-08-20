@@ -1,4 +1,6 @@
 #include "sim/sim_background_voxel_models.h"
+#include "sim/sim_background_bridge.h"
+#include "sim/sim_background_voxel_region.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -30,6 +32,21 @@ static void MaterialXBounds(const SimBackgroundVoxelModel *model,
       float x = model->faces[face].points[point].x;
       if (x < *min_x) *min_x = x;
       if (x > *max_x) *max_x = x;
+    }
+  }
+}
+
+static void MaterialZBounds(const SimBackgroundVoxelModel *model,
+                            SimBackgroundVoxelMaterial material,
+                            float *min_z, float *max_z) {
+  *min_z = 1000000.0f;
+  *max_z = -1000000.0f;
+  for (uint16_t face = 0; face < model->face_count; face++) {
+    if (model->faces[face].material != material) continue;
+    for (int point = 0; point < 4; point++) {
+      float z = model->faces[face].points[point].z;
+      if (z < *min_z) *min_z = z;
+      if (z > *max_z) *max_z = z;
     }
   }
 }
@@ -127,6 +144,11 @@ static SimBackgroundVoxelModel Build(SimBackgroundVoxelKind kind,
     .kind = kind,
     .record_slot = 2,
   };
+  if (kind == kSimBackgroundVoxel_Bridge) {
+    object.bridge_axis = kSimBackgroundBridgeAxis_EastWest;
+    object.bridge_bank_a_x = 0;
+    object.bridge_bank_b_x = 2;
+  }
   SimBackgroundVoxelModel model;
   SimBackgroundVoxelModel_Build(&object, detail, &model);
   CHECK(!model.overflow);
@@ -163,13 +185,15 @@ int main(void) {
   /* The ROM selects eight architectural families through its exact 6x3
    * town/civilization table. Each town's three-stage progression must remain
    * visually distinct even where another town deliberately shares a family. */
-  uint64_t progression_hash[6][3];
-  for (int town = 1; town <= 6; town++)
-    for (int level = 0; level < 3; level++) {
+  uint64_t progression_hash[kSimBackgroundTownCount]
+      [kSimBackgroundDevelopmentLevelCount];
+  for (int town = 1; town <= kSimBackgroundTownCount; town++)
+    for (int level = 0;
+         level < kSimBackgroundDevelopmentLevelCount; level++) {
       SimBackgroundVoxelModel regional = BuildRegionalHouse(town, level);
       progression_hash[town - 1][level] = ModelHash(&regional);
     }
-  for (int town = 0; town < 6; town++) {
+  for (int town = 0; town < kSimBackgroundTownCount; town++) {
     CHECK(progression_hash[town][0] != progression_hash[town][1]);
     CHECK(progression_hash[town][1] != progression_hash[town][2]);
     CHECK(progression_hash[town][0] != progression_hash[town][2]);
@@ -259,6 +283,51 @@ int main(void) {
   CHECK(windmill.max_z <= 32.0f);
   CHECK(MaterialFaces(&windmill, kSimVoxelMaterial_Blade) == 20);
 
+  /* Out where the blades sweep, nothing but the rotor may stand in the rotor's
+   * front face. The hub cap is the one surface meant to cover the blades and
+   * it stays within 3.0 of the hub; between there and the tips, any face at
+   * the blade front can only take pixels away from a blade.
+   *
+   * That is the invariant two earlier rounds of moving the mill's frame back
+   * never tested, because the surface eating the blades was the rotor's OWN
+   * spar, drawn in Wood. At 0.56 model units it measures under one screen
+   * pixel everywhere it is drawn, and a sub-pixel quad claims whole pixels
+   * rather than thinning out -- in the mill's brown it read as the frame
+   * showing through a severed blade. The spar is in the blade's own ramp now,
+   * so it is exempt here by material, exactly as the blade faces are. */
+  const float rotor_x = 16.0f, rotor_z = 21.0f;
+  const float rotor_front = 15.6f;     /* kWindmillBladePlane + blade depth */
+  const float hub_cap_radius = 3.0f;
+  const float tip_radius = 11.2f;      /* outer 10.0 plus the half width */
+  for (int detail = kSimBackgroundVoxelDetail_Low;
+       detail < kSimBackgroundVoxelDetail_Count; detail++) {
+    SimBackgroundVoxelObject spinning = {
+      .kind = kSimBackgroundVoxel_Windmill,
+      .source_cells_w = 2, .source_cells_h = 2,
+      .footprint_cells_w = 2, .footprint_cells_d = 1,
+    };
+    for (int phase = 0; phase < 3; phase++)
+      for (int slot = 0; slot < 2; slot++) {
+        spinning.animation_phase = (uint8_t)phase;
+        spinning.record_slot = (uint8_t)slot;
+        SimBackgroundVoxelModel turning;
+        SimBackgroundVoxelModel_Build(
+            &spinning, (SimBackgroundVoxelDetail)detail, &turning);
+        for (uint16_t face = 0; face < turning.face_count; face++) {
+          if (turning.faces[face].material == kSimVoxelMaterial_Blade) continue;
+          for (int point = 0; point < 4; point++) {
+            const SimBackgroundVoxelModelPoint *at =
+                &turning.faces[face].points[point];
+            float dx = at->x - rotor_x, dz = at->z - rotor_z;
+            float radius_sq = dx * dx + dz * dz;
+            if (radius_sq <= hub_cap_radius * hub_cap_radius) continue;
+            if (radius_sq > tip_radius * tip_radius) continue;
+            CHECK(at->y < rotor_front);
+          }
+        }
+      }
+  }
+
   SimBackgroundVoxelModel factory = Build(
       kSimBackgroundVoxel_Factory, kSimBackgroundVoxelDetail_Balanced);
   CHECK(factory.min_x >= 0.0f && factory.max_x <= 32.0f);
@@ -330,7 +399,7 @@ int main(void) {
   SimBackgroundVoxelObject isolated_object = {
     .kind = kSimBackgroundVoxel_Tree,
     .flags = kSimBackgroundVoxel_IsolatedTree,
-    .record_slot = 0xFF,
+    .record_slot = kSimBackgroundVoxelNoRecordSlot,
   };
   SimBackgroundVoxelModel isolated;
   SimBackgroundVoxelModel_Build(
@@ -344,7 +413,7 @@ int main(void) {
     .tree_edges = kSimBackgroundTreeEdge_North |
         kSimBackgroundTreeEdge_East | kSimBackgroundTreeEdge_South |
         kSimBackgroundTreeEdge_West,
-    .record_slot = 0xFF,
+    .record_slot = kSimBackgroundVoxelNoRecordSlot,
   };
   SimBackgroundVoxelModel interior;
   SimBackgroundVoxelModel_Build(
@@ -374,7 +443,7 @@ int main(void) {
     .cell_x = 4,
     .cell_y = 7,
     .group = 2,
-    .record_slot = 0xFF,
+    .record_slot = kSimBackgroundVoxelNoRecordSlot,
   };
   SimBackgroundVoxelModel palm;
   SimBackgroundVoxelModel_Build(
@@ -391,7 +460,7 @@ int main(void) {
     .flags = kSimBackgroundVoxel_IsolatedTree,
     .cell_x = 5,
     .cell_y = 9,
-    .record_slot = 0xFF,
+    .record_slot = kSimBackgroundVoxelNoRecordSlot,
   };
   SimBackgroundVoxelModel shrub;
   SimBackgroundVoxelModel_Build(
@@ -440,6 +509,76 @@ int main(void) {
   CHECK(TopWidthAt(&pyramid, pyramid.max_z) <
         TopWidthAt(&pyramid, 0.0f) * 0.4f);
   CHECK(ModelHash(&pyramid) != ModelHash(&bloodpool_castle));
+
+  SimBackgroundVoxelObject bridge_object = {
+    .kind = kSimBackgroundVoxel_Bridge,
+    .bridge_axis = kSimBackgroundBridgeAxis_EastWest,
+    .bridge_bank_a_x = 5,
+    .bridge_bank_b_x = 8,
+  };
+  SimBackgroundVoxelModel bridge;
+  SimBackgroundVoxelModel_Build(
+      &bridge_object, kSimBackgroundVoxelDetail_High, &bridge);
+  CHECK(!bridge.overflow);
+  CHECK(bridge.min_x >= -0.1f && bridge.max_x <= 34.1f);
+  CHECK(bridge.min_y >= -0.1f && bridge.max_y <= 10.1f);
+  CHECK(bridge.min_z < 0.0f);
+  CHECK(bridge.max_z >= SimBackgroundBridge_AuthoredHeight() - 0.05f &&
+        bridge.max_z <= SimBackgroundBridge_AuthoredHeight());
+  CHECK(MaterialFaces(&bridge, kSimVoxelMaterial_Paving) > 0);
+  CHECK(MaterialFaces(&bridge, kSimVoxelMaterial_WallLight) > 0);
+  CHECK(MaterialFaces(&bridge, kSimVoxelMaterial_Trim) > 0);
+  CHECK(MaterialFaces(&bridge, kSimVoxelMaterial_Dark) > 0);
+  CHECK(MaterialFaces(&bridge, kSimVoxelMaterial_Wood) == 0);
+  float paving_min_z, paving_max_z, rail_min_z, rail_max_z;
+  MaterialZBounds(&bridge, kSimVoxelMaterial_Paving,
+                  &paving_min_z, &paving_max_z);
+  MaterialZBounds(&bridge, kSimVoxelMaterial_WallLight,
+                  &rail_min_z, &rail_max_z);
+  CHECK(paving_min_z > 0.0f && paving_min_z == paving_max_z);
+  /* Parapets are mortised into the slab below the walking surface.  Merely
+   * sharing a coplanar z=0 edge produced a detached railing at oblique pitch. */
+  CHECK(rail_min_z < paving_min_z);
+  CHECK(rail_max_z > paving_max_z);
+
+  /* Bloodpool has perpendicular crossings which terminate on adjacent sides
+   * of one bank. Water-opening bounds leave both intact but keep their stone
+   * slabs out of the shared land cell; bank-centre spans overlapped here. */
+  SimBackgroundVoxelObject bloodpool_east_west = {
+    .kind = kSimBackgroundVoxel_Bridge,
+    .cell_x = 17, .cell_y = 22,
+    .bridge_axis = kSimBackgroundBridgeAxis_EastWest,
+    .bridge_bank_a_x = 16, .bridge_bank_a_y = 22,
+    .bridge_bank_b_x = 18, .bridge_bank_b_y = 22,
+  };
+  SimBackgroundVoxelObject bloodpool_north_south = {
+    .kind = kSimBackgroundVoxel_Bridge,
+    .cell_x = 18, .cell_y = 21,
+    .bridge_axis = kSimBackgroundBridgeAxis_NorthSouth,
+    .bridge_bank_a_x = 18, .bridge_bank_a_y = 20,
+    .bridge_bank_b_x = 18, .bridge_bank_b_y = 22,
+  };
+  SimBackgroundBridgeBounds ew =
+      SimBackgroundBridge_ResolveBounds(&bloodpool_east_west);
+  SimBackgroundBridgeBounds ns =
+      SimBackgroundBridge_ResolveBounds(&bloodpool_north_south);
+  CHECK(ew.origin_x + ew.width < ns.origin_x);
+  CHECK(ns.origin_y + ns.depth < ew.origin_y);
+
+  /* Invalid bridge metadata fails closed instead of compiling a misleading
+   * north-south fallback with arbitrary dimensions. */
+  SimBackgroundVoxelObject invalid_bridge = {
+    .kind = kSimBackgroundVoxel_Bridge,
+    .bridge_axis = kSimBackgroundBridgeAxis_None,
+  };
+  SimBackgroundVoxelModel invalid_bridge_model;
+  SimBackgroundVoxelModel_Build(
+      &invalid_bridge, kSimBackgroundVoxelDetail_High,
+      &invalid_bridge_model);
+  CHECK(invalid_bridge_model.face_count == 0);
+  SimBackgroundBridgeBounds null_bounds =
+      SimBackgroundBridge_ResolveBounds(NULL);
+  CHECK(null_bounds.width == 0.0f && null_bounds.depth == 0.0f);
 
   SimBackgroundVoxelObject construction_object = {
     .kind = kSimBackgroundVoxel_House,
@@ -510,8 +649,9 @@ int main(void) {
   /* Regional families must honor the same configurable quality boundaries as
    * the original Fillmore model. Exercise all 18 ROM-selected identities at
    * every density/style combination rather than validating only one town. */
-  for (int town = 1; town <= 6; town++)
-    for (int level = 0; level < 3; level++)
+  for (int town = 1; town <= kSimBackgroundTownCount; town++)
+    for (int level = 0;
+         level < kSimBackgroundDevelopmentLevelCount; level++)
       for (int detail = kSimBackgroundVoxelDetail_Low;
            detail < kSimBackgroundVoxelDetail_Count; detail++)
         for (int style = kSimBackgroundVoxelStyle_Basic;
@@ -538,8 +678,9 @@ int main(void) {
    * family that stops gaining geometry short of Ultra is where the quality
    * setting most visibly does nothing. Sixteen of the eighteen identities
    * were flat between High and Ultra. */
-  for (int town = 1; town <= 6; town++)
-    for (int level = 0; level < 3; level++) {
+  for (int town = 1; town <= kSimBackgroundTownCount; town++)
+    for (int level = 0;
+         level < kSimBackgroundDevelopmentLevelCount; level++) {
       SimBackgroundVoxelObject object = {
         .kind = kSimBackgroundVoxel_House,
         .town = (uint8_t)town,

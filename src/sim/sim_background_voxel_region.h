@@ -5,6 +5,8 @@
 
 #include "sim_background_voxel_types.h"
 
+enum { kSimBackgroundDevelopmentLevelCount = 3 };
+
 /* These are architectural families, not quality levels. Several towns share
  * a family where the original game deliberately reuses one, while the ROM's
  * $03:DCC6 town/civilization lookup keeps the distinct regional progressions. */

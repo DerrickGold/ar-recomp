@@ -45,7 +45,7 @@ int main(void) {
   CHECK(object.cell_x == 26 && object.cell_y == 14);
   CHECK(object.source_cells_w == 2 && object.source_cells_h == 2);
   CHECK(object.footprint_cells_w == 2 && object.footprint_cells_d == 2);
-  CHECK(object.record_slot == 0xFF);
+  CHECK(object.record_slot == kSimBackgroundVoxelNoRecordSlot);
   /* A landmark belongs to exactly one town, and its metatile is not a landmark
    * anywhere else. */
   CHECK(SimBackgroundVoxelLandmarks_Classify(5, wram, &object, 1) == 0);

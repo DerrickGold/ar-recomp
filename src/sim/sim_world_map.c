@@ -35,7 +35,7 @@ typedef struct SimWorldTownWindow {
   uint8_t tile_x, tile_y;
 } SimWorldTownWindow;
 
-static const SimWorldTownWindow kTownWindows[6] = {
+static const SimWorldTownWindow kTownWindows[kSimTownCount] = {
   { 80, 48 },   /* 1 Fillmore  */
   { 48, 48 },   /* 2 Bloodpool */
   { 16, 64 },   /* 3 Kasandora */

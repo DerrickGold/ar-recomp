@@ -62,6 +62,11 @@ static const SimBackgroundVoxelProportions kPyramid = {
   .height_scale = 0.84f,
 };
 
+static const SimBackgroundVoxelProportions kBridge = {
+  .footprint_scale = 1.0f,
+  .height_scale = 1.0f,
+};
+
 const SimBackgroundVoxelProportions *SimBackgroundVoxelProportions_Get(
     SimBackgroundVoxelKind kind) {
   switch (kind) {
@@ -77,6 +82,7 @@ const SimBackgroundVoxelProportions *SimBackgroundVoxelProportions_Get(
     case kSimBackgroundVoxel_BloodpoolCastle: return &kBloodpoolCastle;
     case kSimBackgroundVoxel_MarahnaTemple: return &kMarahnaTemple;
     case kSimBackgroundVoxel_Pyramid: return &kPyramid;
+    case kSimBackgroundVoxel_Bridge: return &kBridge;
   }
   return &kHouse;
 }

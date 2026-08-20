@@ -4,50 +4,53 @@
 
 #include "sim_background_voxel_surface.h"
 
-static void MaterialResponse(SimBackgroundVoxelMaterial material,
-                             float *ambient, float *direct) {
-  *ambient = 0.63f;
-  *direct = 0.37f;
+typedef struct SimBackgroundMaterialLightResponse {
+  float ambient, direct;
+} SimBackgroundMaterialLightResponse;
+
+static const SimBackgroundMaterialLightResponse kDefaultMaterialResponse = {
+  0.72f, 0.28f,
+};
+static const float kAuthoredBrightnessFloor = 0.86f;
+static const float kAuthoredBrightnessRange = 0.14f;
+static const float kLightingGeometryEpsilon = 0.05f;
+static const float kGroundContactFloor = 0.84f;
+static const float kGroundContactRange = 0.16f;
+static const float kLowLedgeHeightFraction = 0.68f;
+static const float kLowLedgeLightFactor = 0.95f;
+
+static SimBackgroundMaterialLightResponse MaterialResponse(
+    SimBackgroundVoxelMaterial material) {
   switch (material) {
     case kSimVoxelMaterial_Leaves:
     case kSimVoxelMaterial_LeavesLight:
     case kSimVoxelMaterial_LeavesDark:
-      *ambient = 0.72f;
-      *direct = 0.28f;
-      break;
+      return (SimBackgroundMaterialLightResponse){0.78f, 0.22f};
     case kSimVoxelMaterial_Roof:
     case kSimVoxelMaterial_RoofLight:
-      *ambient = 0.57f;
-      *direct = 0.43f;
-      break;
+      return (SimBackgroundMaterialLightResponse){0.68f, 0.32f};
     case kSimVoxelMaterial_Metal:
     case kSimVoxelMaterial_Blade:
     case kSimVoxelMaterial_Gold:
     case kSimVoxelMaterial_Glass:
-      *ambient = 0.49f;
-      *direct = 0.51f;
-      break;
+      return (SimBackgroundMaterialLightResponse){0.62f, 0.38f};
     case kSimVoxelMaterial_Snow:
-      *ambient = 0.76f;
-      *direct = 0.24f;
-      break;
+      return (SimBackgroundMaterialLightResponse){0.82f, 0.18f};
     case kSimVoxelMaterial_Dark:
     case kSimVoxelMaterial_Wood:
     case kSimVoxelMaterial_Contact:
-      *ambient = 0.69f;
-      *direct = 0.31f;
-      break;
+      return (SimBackgroundMaterialLightResponse){0.76f, 0.24f};
     case kSimVoxelMaterial_Paving:
-      *ambient = 0.60f;
-      *direct = 0.40f;
-      break;
+    case kSimVoxelMaterial_Foundation:
+      return (SimBackgroundMaterialLightResponse){0.74f, 0.26f};
     case kSimVoxelMaterial_Wall:
     case kSimVoxelMaterial_WallLight:
     case kSimVoxelMaterial_Trim:
     case kSimVoxelMaterial_Trunk:
     case kSimVoxelMaterial_Count:
-      break;
+      return kDefaultMaterialResponse;
   }
+  return kDefaultMaterialResponse;
 }
 
 void SimBackgroundVoxelLighting_ResolveDirection(
@@ -81,14 +84,16 @@ uint8_t SimBackgroundVoxelLighting_FaceBrightnessWithDirection(
       normal.z * light->z;
   if (diffuse < 0.0f) diffuse = 0.0f;
   if (diffuse > 1.0f) diffuse = 1.0f;
-  float authored = 0.86f + 0.14f * face->brightness / 255.0f;
-  float ambient = 0.63f, direct = 0.37f;
+  float authored = kAuthoredBrightnessFloor +
+      kAuthoredBrightnessRange * face->brightness / (float)UINT8_MAX;
+  SimBackgroundMaterialLightResponse response = kDefaultMaterialResponse;
   if (shading == kSimBackgroundVoxelShading_MaterialAware)
-    MaterialResponse((SimBackgroundVoxelMaterial)face->material,
-                     &ambient, &direct);
-  float lit = authored * (ambient + direct * diffuse);
+    response = MaterialResponse(
+        (SimBackgroundVoxelMaterial)face->material);
+  float lit = authored *
+      (response.ambient + response.direct * diffuse);
   if (lit > 1.0f) lit = 1.0f;
-  return (uint8_t)(lit * 255.0f + 0.5f);
+  return (uint8_t)(lit * UINT8_MAX + 0.5f);
 }
 
 uint8_t SimBackgroundVoxelLighting_FaceBrightness(
@@ -123,24 +128,26 @@ void SimBackgroundVoxelLighting_VertexBrightnesses(
   }
   for (int point = 0; point < 4; point++) {
     float factor = 1.0f;
-    if (face_max_z - face_min_z > 0.05f) {
+    if (face_max_z - face_min_z > kLightingGeometryEpsilon) {
       float height = face->points[point].z - model->min_z;
       float range = model->max_z - model->min_z;
-      float normalized = range > 0.05f ? height / range : 1.0f;
+      float normalized = range > kLightingGeometryEpsilon
+          ? height / range : 1.0f;
       if (normalized < 0.0f) normalized = 0.0f;
       if (normalized > 1.0f) normalized = 1.0f;
       /* Contact darkening is strongest at the ground and smoothly releases up
        * walls, trunks and courtyard faces. Four vertex values preserve batching
        * and let the renderer interpolate the gradient without extra geometry. */
-      factor = 0.76f + 0.24f * sqrtf(normalized);
-    } else if (face_max_z < model->max_z * 0.68f) {
+      factor = kGroundContactFloor +
+          kGroundContactRange * sqrtf(normalized);
+    } else if (face_max_z < model->max_z * kLowLedgeHeightFraction) {
       /* Low horizontal ledges sit underneath other mass and receive less sky. */
-      factor = 0.91f;
+      factor = kLowLedgeLightFactor;
     }
-    factor *= face->occlusion[point] / 255.0f;
+    factor *= face->occlusion[point] / (float)UINT8_MAX;
     float shaded = directional_brightness * factor;
     if (shaded < 0.0f) shaded = 0.0f;
-    if (shaded > 255.0f) shaded = 255.0f;
+    if (shaded > UINT8_MAX) shaded = UINT8_MAX;
     out[point] = (uint8_t)(shaded + 0.5f);
   }
 }

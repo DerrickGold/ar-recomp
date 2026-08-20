@@ -442,6 +442,7 @@ typedef struct Settings {
   int sim3d_tilt_x_mrad;       /* camera pitch, milliradians */
   int sim3d_tilt_y_mrad;       /* camera yaw, milliradians */
   int sim3d_distance_x100;     /* camera distance, hundredths; 0 = auto */
+  int sim3d_landscape_height_pct; /* audited town relief only; 0 = flat */
   int sim3d_height_scale_x100; /* virtual-height scale, percent of the
                                 * classified plane; 100 = catalogue default */
   int sim3d_shadow_opacity_pct; /* ground shadow darkness, percent; 0 = off */

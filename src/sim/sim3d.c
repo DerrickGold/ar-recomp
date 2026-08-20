@@ -1,6 +1,7 @@
 #include "sim3d.h"
 #include "sim_background_voxels.h"
 #include "sim_background_voxel_preset.h"
+#include "sim_town_terrain.h"
 
 #include "sim_town_canvas.h"
 
@@ -1162,6 +1163,11 @@ void Sim3D_AnnotateFrame(SimFrameData *frame, const Sim3DTuning *tuning) {
   int pitch_mrad = tuning->pitch_mrad;
   int yaw_mrad = tuning->yaw_mrad;
   int distance_x100 = tuning->distance_x100;
+  frame->landscape_height_pct =
+      (uint16_t)ClampTuning(
+          tuning->landscape_height_pct,
+          kSimTownTerrainLandscapeHeightMinimumPct,
+          kSimTownTerrainLandscapeHeightMaximumPct);
   frame->height_scale_x100 =
       (uint16_t)ClampTuning(tuning->height_scale_x100, 0, 0xFFFF);
   SimBackgroundVoxelPresetConfig voxel_config =

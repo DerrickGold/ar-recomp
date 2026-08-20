@@ -28,7 +28,8 @@ typedef struct {
 #include "shaders/crt_frag.h"
 
 static const GpuShaderBlobs kCrtBlobs = {
-  kCrtFragMSL, kCrtFragMSLSize, kCrtFragSPV, kCrtFragSPVSize
+  kCrtFragMSL, kCrtFragMSLSize, kCrtFragSPV, kCrtFragSPVSize,
+  kCrtFragDXIL, kCrtFragDXILSize
 };
 
 /* Control surface: the Video > CRT tab (kSettingCat_Crt). The master toggle is

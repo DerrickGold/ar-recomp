@@ -299,6 +299,12 @@ static void SetCommonPalette(SimBackgroundVoxelPalette *palette) {
   SetRamp(palette, kSimVoxelMaterial_Paving,
           Argb(57, 74, 0), Argb(90, 74, 32),
           Argb(131, 106, 49), Argb(180, 139, 74));
+  /* Foundations are deliberately quieter than regional walls. They are a
+   * small, mostly buried piece of site work, so a neutral native-looking
+   * stone keeps an exposed downhill edge from turning into a coloured tower. */
+  SetRamp(palette, kSimVoxelMaterial_Foundation,
+          Argb(45, 52, 45), Argb(72, 82, 70),
+          Argb(104, 116, 98), Argb(145, 153, 132));
   SetRamp(palette, kSimVoxelMaterial_Gold,
           Argb(115, 106, 57), Argb(164, 148, 82),
           Argb(205, 180, 106), Argb(230, 180, 0));
@@ -315,6 +321,37 @@ static void SetCommonPalette(SimBackgroundVoxelPalette *palette) {
 static void ApplyBiomePalette(SimBackgroundVoxelPalette *palette,
                               const SimBackgroundVoxelObject *object,
                               SimBackgroundVoxelBiome biome) {
+  switch (biome) {
+    case kSimBackgroundVoxelBiome_Temperate:
+      break;
+    case kSimBackgroundVoxelBiome_Wetland:
+      SetRamp(palette, kSimVoxelMaterial_Foundation,
+              Argb(37, 45, 37), Argb(62, 72, 57),
+              Argb(90, 103, 78), Argb(128, 139, 108));
+      break;
+    case kSimBackgroundVoxelBiome_Desert:
+      SetRamp(palette, kSimVoxelMaterial_Foundation,
+              Argb(57, 49, 37), Argb(88, 76, 55),
+              Argb(126, 108, 78), Argb(166, 145, 108));
+      break;
+    case kSimBackgroundVoxelBiome_Volcanic:
+      SetRamp(palette, kSimVoxelMaterial_Foundation,
+              Argb(29, 29, 27), Argb(49, 50, 45),
+              Argb(75, 77, 67), Argb(108, 109, 94));
+      break;
+    case kSimBackgroundVoxelBiome_Tropical:
+      SetRamp(palette, kSimVoxelMaterial_Foundation,
+              Argb(41, 49, 37), Argb(68, 78, 57),
+              Argb(98, 113, 83), Argb(139, 151, 112));
+      break;
+    case kSimBackgroundVoxelBiome_Snow:
+      SetRamp(palette, kSimVoxelMaterial_Foundation,
+              Argb(52, 60, 64), Argb(82, 94, 99),
+              Argb(119, 134, 140), Argb(164, 177, 181));
+      break;
+    case kSimBackgroundVoxelBiome_Count:
+      break;
+  }
   /* Five towns share the same structure and foliage CGRAM ramps. Northwall
    * changes only the forest family to its subdued snow-town greens. Landmarks
    * are sampled from their own art and must keep it. */
@@ -509,12 +546,32 @@ void SimBackgroundVoxelPalette_Build(
               Argb(106, 74, 8), Argb(164, 115, 16),
               Argb(222, 172, 49), Argb(255, 230, 115));
       break;
+    case kSimBackgroundVoxel_Bridge:
+      /* Sampled toward the native bridge's cool grey-green masonry. Pale edge
+       * courses carry the silhouette; the underside stays dark without using
+       * the wooden ramp employed by scaffolds and mills. */
+      SetRamp(palette, kSimVoxelMaterial_Wall,
+              Argb(45, 52, 45), Argb(72, 82, 70),
+              Argb(104, 116, 98), Argb(145, 153, 132));
+      SetRamp(palette, kSimVoxelMaterial_WallLight,
+              Argb(72, 82, 70), Argb(104, 116, 98),
+              Argb(145, 153, 132), Argb(184, 190, 169));
+      SetRamp(palette, kSimVoxelMaterial_Paving,
+              Argb(57, 65, 57), Argb(82, 90, 78),
+              Argb(112, 123, 104), Argb(153, 160, 139));
+      SetRamp(palette, kSimVoxelMaterial_Trim,
+              Argb(90, 90, 78), Argb(132, 132, 112),
+              Argb(184, 180, 153), Argb(222, 216, 184));
+      SetRamp(palette, kSimVoxelMaterial_Dark,
+              Argb(12, 16, 14), Argb(24, 30, 26),
+              Argb(38, 45, 39), Argb(58, 65, 56));
+      break;
   }
   int vary_by_record = object->kind == kSimBackgroundVoxel_House ||
       object->kind == kSimBackgroundVoxel_Windmill ||
       object->kind == kSimBackgroundVoxel_Factory;
   if (vary_by_record &&
-      object->record_slot != 0xFF) {
+      object->record_slot != kSimBackgroundVoxelNoRecordSlot) {
     int variation = ((int)object->record_slot % 3 - 1) * 2;
     static const SimBackgroundVoxelMaterial varied[] = {
       kSimVoxelMaterial_Wall,
@@ -531,7 +588,7 @@ uint32_t SimBackgroundVoxelPalette_Base(
     SimBackgroundVoxelMaterial material) {
   if (!palette || material < 0 || material >= kSimVoxelMaterial_Count)
     return 0xFFFF00FFu;
-  return palette->material[material][2];
+  return palette->material[material][kSimBackgroundVoxelPaletteBaseLevel];
 }
 
 uint32_t SimBackgroundVoxelPalette_Ramp(
@@ -540,7 +597,6 @@ uint32_t SimBackgroundVoxelPalette_Ramp(
     uint8_t brightness) {
   if (!palette || material < 0 || material >= kSimVoxelMaterial_Count)
     return 0xFFFF00FFu;
-  int level = brightness < 128 ? 0 : brightness < 178 ? 1
-      : brightness < 224 ? 2 : 3;
+  int level = SimBackgroundVoxelPalette_LevelForBrightness(brightness);
   return palette->material[material][level];
 }

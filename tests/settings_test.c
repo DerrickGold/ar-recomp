@@ -4,6 +4,7 @@
 #include "render_capabilities.h"
 #include "settings.h"
 #include "sim/sim3d_camera_limits.h"
+#include "sim/sim_town_terrain.h"
 #include "user_data_dir.h"
 
 #include <stdio.h>
@@ -91,10 +92,10 @@ static void TestDefaultsAndMetadata(void) {
    * cycle then added three: the Cheats-tab toggle that arms it, plus its
    * keyboard and gamepad binding rows. The sim synthetic-part work added one
    * measured, gameplay-affecting actor-range row. Background voxel polish then
-   * added five independent performance boundaries, and the Aitos wind event
-   * one Extras row for whether it stills every windmill or only the ones the
-   * ROM stamped. */
-  CHECK(g_setting_desc_count == 267);
+   * added five independent performance boundaries, the audited landscape one
+   * player-facing magnitude row, and the Aitos wind event one Extras row for
+   * whether it stills every windmill or only the ones the ROM stamped. */
+  CHECK(g_setting_desc_count == 268);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -179,6 +180,26 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(g_settings.sim3d_tilt_x_mrad == -575);
   CHECK(g_settings.sim3d_tilt_y_mrad == 0);
   CHECK(g_settings.sim3d_distance_x100 == 300);
+  CHECK(g_settings.sim3d_landscape_height_pct ==
+        kSimTownTerrainLandscapeHeightDefaultPct);
+  const SettingDesc *landscape_height =
+      Settings_Find("sim3d_landscape_height_pct");
+  CHECK(landscape_height &&
+        landscape_height->category == kSettingCat_Simulation);
+  CHECK(landscape_height &&
+        landscape_height->minval ==
+            kSimTownTerrainLandscapeHeightMinimumPct &&
+        landscape_height->maxval ==
+            kSimTownTerrainLandscapeHeightMaximumPct &&
+        landscape_height->step ==
+            kSimTownTerrainLandscapeHeightStepPct &&
+        landscape_height->defval ==
+            kSimTownTerrainLandscapeHeightDefaultPct);
+#if AR_SIM3D_TERRAIN_ELEVATION
+  CHECK(landscape_height && landscape_height->player_visible);
+#else
+  CHECK(landscape_height && !landscape_height->player_visible);
+#endif
   const SettingDesc *sim_pitch = Settings_Find("sim3d_tilt_x_mrad");
   const SettingDesc *dynamic_pitch =
       Settings_Find("sim3d_dyncam_baseline_tilt_x_mrad");
@@ -326,6 +347,13 @@ static void TestDefaultsAndMetadata(void) {
    * switch that reveals them is itself never hidden. */
   CHECK(Settings_IsDebugOnly(Settings_Find("sim3d_tilt_x_mrad")));
   CHECK(Settings_IsDebugOnly(Settings_Find("sim3d_shadow_opacity_pct")));
+#if AR_SIM3D_TERRAIN_ELEVATION
+  CHECK(!Settings_IsDebugOnly(
+      Settings_Find("sim3d_landscape_height_pct")));
+#else
+  CHECK(Settings_IsDebugOnly(
+      Settings_Find("sim3d_landscape_height_pct")));
+#endif
   CHECK(Settings_IsDebugOnly(Settings_Find("sim3d_diagnostic_layers")));
   CHECK(Settings_IsDebugOnly(Settings_Find("sim3d_separated_composite")));
   CHECK(Settings_IsDebugOnly(Settings_Find("diorama_depth_shade")));
@@ -1246,6 +1274,13 @@ static void TestVideoSettingAudit(void) {
   g_settings.sim3d_cloud_shroud = true;
   g_settings.sim3d_cull_haze = true;
   g_settings.sim3d_camera_mode = kSimCam_Dynamic;
+#if AR_SIM3D_TERRAIN_ELEVATION
+  CHECK(Settings_IsAvailable(
+      Settings_Find("sim3d_landscape_height_pct")));
+#else
+  CHECK(!Settings_IsAvailable(
+      Settings_Find("sim3d_landscape_height_pct")));
+#endif
   CHECK(Settings_IsAvailable(Settings_Find("sim3d_reactive_strength")));
   CHECK(!Settings_IsAvailable(Settings_Find("sim3d_tilt_x_mrad")));
   CHECK(Settings_IsAvailable(Settings_Find("sim3d_soft_shadows")));

@@ -47,9 +47,51 @@ enum {
   kStructureClassHouse = 0,
   kStructureClassWindmill = 3,
   kStructureClassFactory = 4,
+  kBridgeTileNorthSouth = 0xE1,
+  kBridgeTileEastWest = 0xE2,
+  /* Stock terrain beneath every audited bridge site. The live structure stamp
+   * replaces these with $E2/$E1 respectively; enhanced presentation restores
+   * the original river metatile before placing the voxel bridge. */
+  kBridgeRiverEastWest = 0x3A,
+  kBridgeRiverNorthSouth = 0x41,
   kCellCount = kSimBackgroundTownCells * kSimBackgroundTownCells,
   kCanvasPixelCount = kSimTownCanvasPixels * kSimTownCanvasPixels,
 };
+
+typedef enum EnhancedReplacementKind {
+  kEnhancedReplacement_None,
+  kEnhancedReplacement_Ground,
+  kEnhancedReplacement_BridgeEastWest,
+  kEnhancedReplacement_BridgeNorthSouth,
+} EnhancedReplacementKind;
+
+static EnhancedReplacementKind BridgeReplacementKind(
+    SimBackgroundBridgeAxis axis) {
+  switch (axis) {
+    case kSimBackgroundBridgeAxis_EastWest:
+      return kEnhancedReplacement_BridgeEastWest;
+    case kSimBackgroundBridgeAxis_NorthSouth:
+      return kEnhancedReplacement_BridgeNorthSouth;
+    case kSimBackgroundBridgeAxis_None:
+    case kSimBackgroundBridgeAxis_Count:
+      return kEnhancedReplacement_Ground;
+  }
+  return kEnhancedReplacement_Ground;
+}
+
+static SimBackgroundBridgeAxis ReplacementBridgeAxis(
+    EnhancedReplacementKind kind) {
+  switch (kind) {
+    case kEnhancedReplacement_BridgeEastWest:
+      return kSimBackgroundBridgeAxis_EastWest;
+    case kEnhancedReplacement_BridgeNorthSouth:
+      return kSimBackgroundBridgeAxis_NorthSouth;
+    case kEnhancedReplacement_None:
+    case kEnhancedReplacement_Ground:
+      return kSimBackgroundBridgeAxis_None;
+  }
+  return kSimBackgroundBridgeAxis_None;
+}
 
 /* The 2x2 sanctuary block is a contiguous metatile run in every town. Five
  * towns share the $C2 family; Marahna's $C0 family is the same plot drawn as
@@ -78,6 +120,10 @@ static struct {
    * stated against, so an actor standing on a mountain can be placed on the
    * same surface the geometry draws. */
   uint8_t mountain_baseline_row[kCellCount];
+  /* Authored structural height indexed by source cell. Runtime sprite
+   * grounding samples this several times per actor, so resolve immutable
+   * object footprints once when the voxel scene is rebuilt. */
+  float structure_height[kCellCount];
 } g_background;
 /* Scene rebuild scratch. Every classified source rectangle, including static
  * terrain, is marked before a replacement tile is selected, so authentic art
@@ -331,6 +377,96 @@ static FoliageClass FoliageClassForTile(uint8_t tile) {
   }
 }
 
+static SimBackgroundBridgeAxis BridgeAxisForTile(uint8_t tile) {
+  switch (tile) {
+    case kBridgeTileEastWest:
+      return kSimBackgroundBridgeAxis_EastWest;
+    case kBridgeTileNorthSouth:
+      return kSimBackgroundBridgeAxis_NorthSouth;
+    default:
+      return kSimBackgroundBridgeAxis_None;
+  }
+}
+
+static bool IsBridgeTile(uint8_t tile) {
+  return BridgeAxisForTile(tile) != kSimBackgroundBridgeAxis_None;
+}
+
+/* Same semantic water family used by the audited height rules. A live bridge
+ * replaces one of these cells, so bank discovery starts at the bridge marker
+ * and walks through water until it reaches actual solid ground. */
+static bool IsWateryTerrain(uint8_t tile) {
+  switch (tile) {
+    case 0x10: case 0x11: case 0x18: case 0x19:
+    case 0x20: case 0x21: case 0x25:
+    case 0x28: case 0x29: case 0x2A: case 0x2B: case 0x2C: case 0x2D:
+    case 0x2F: case 0x30: case 0x31: case 0x32: case 0x33: case 0x34:
+    case 0x35: case 0x36: case 0x37: case 0x38: case 0x39: case 0x3A:
+    case 0x3B: case 0x3C: case 0x40: case 0x41: case 0x42: case 0x43:
+    case 0x44:
+    case 0xB0: case 0xB1: case 0xB2: case 0xB8: case 0xB9: case 0xBA:
+    case 0xF7: case 0xFE:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static bool FindBridgeBank(
+    uint8_t town, const uint8_t *wram, int start_x, int start_y,
+    int dx, int dy, int *bank_x, int *bank_y) {
+  int x = start_x, y = start_y;
+  for (;;) {
+    x += dx;
+    y += dy;
+    if (x < 0 || x >= kSimBackgroundTownCells ||
+        y < 0 || y >= kSimBackgroundTownCells)
+      return false;
+    uint8_t tile = CellMapValue(town, wram, x, y);
+    if (IsBridgeTile(tile) || IsWateryTerrain(tile)) continue;
+    *bank_x = x;
+    *bank_y = y;
+    return true;
+  }
+}
+
+/* Fail-closed fallback when the raw terrain metatile renderer has no cached
+ * town source (principally isolated unit tests). Production restores the exact
+ * original $3A/$41 river tile below; this still avoids ever sampling the
+ * bridge's own pale rail as supposed water. */
+static bool FindBridgeWaterSource(
+    uint8_t town, const uint8_t *wram, int cell_x, int cell_y,
+    SimBackgroundBridgeAxis axis, int *source_x, int *source_y) {
+  if ((axis != kSimBackgroundBridgeAxis_EastWest &&
+       axis != kSimBackgroundBridgeAxis_NorthSouth) ||
+      !source_x || !source_y)
+    return false;
+  static const int east_west_order[4][2] = {
+    {0, -1}, {0, 1}, {-1, 0}, {1, 0},
+  };
+  static const int north_south_order[4][2] = {
+    {-1, 0}, {1, 0}, {0, -1}, {0, 1},
+  };
+  const int (*direction)[2] = axis == kSimBackgroundBridgeAxis_EastWest
+      ? east_west_order : north_south_order;
+  const size_t direction_count =
+      sizeof(east_west_order) / sizeof(east_west_order[0]);
+  for (int distance = 1; distance < kSimBackgroundTownCells; distance++) {
+    for (size_t candidate = 0; candidate < direction_count; candidate++) {
+      int x = cell_x + direction[candidate][0] * distance;
+      int y = cell_y + direction[candidate][1] * distance;
+      if (x < 0 || x >= kSimBackgroundTownCells ||
+          y < 0 || y >= kSimBackgroundTownCells)
+        continue;
+      if (!IsWateryTerrain(CellMapValue(town, wram, x, y))) continue;
+      *source_x = x;
+      *source_y = y;
+      return true;
+    }
+  }
+  return false;
+}
+
 static int CellTreePixelCount(const uint32_t *pixels, int cell_x, int cell_y) {
   int count = 0;
   int x0 = cell_x * kSimBackgroundCellPixels;
@@ -349,7 +485,7 @@ void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
                                   SimBackgroundVoxelScene *out) {
   if (!out) return;
   memset(out, 0, sizeof(*out));
-  if (!town || town > 6 || !wram) return;
+  if (!town || town > kSimBackgroundTownCount || !wram) return;
   out->town = town;
 
   bool occupied[kCellCount] = {false};
@@ -449,7 +585,7 @@ void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
            * structure behind the sanctuary. The upper source row is therefore
            * both real depth and the perspective-compressed second tier. */
           .footprint_cells_d = 2,
-          .record_slot = 0xFF,
+          .record_slot = kSimBackgroundVoxelNoRecordSlot,
         });
         MarkOccupied(occupied, x, y, 2, 2);
         sanctuary_found = true;
@@ -469,6 +605,61 @@ void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
                  landmark->source_cells_w, landmark->source_cells_h);
     if (!AppendObject(out, *landmark)) return;
   }
+
+  /* Bridges are dynamic structure metatiles stored directly in the live cell
+   * map. Group adjacent markers along their travel axis and compile one span
+   * between solid banks, avoiding repeated end caps inside a wide crossing. */
+  bool bridge_visited[kCellCount] = {false};
+  for (int y = 0; y < kSimBackgroundTownCells; y++)
+    for (int x = 0; x < kSimBackgroundTownCells; x++) {
+      size_t cell = CellIndex(x, y);
+      uint8_t tile = CellMapValue(town, wram, x, y);
+      if (!IsBridgeTile(tile) || bridge_visited[cell]) continue;
+      const SimBackgroundBridgeAxis bridge_axis = BridgeAxisForTile(tile);
+      int dx = bridge_axis == kSimBackgroundBridgeAxis_EastWest;
+      int dy = bridge_axis == kSimBackgroundBridgeAxis_NorthSouth;
+      int first_x = x, first_y = y, last_x = x, last_y = y;
+      while (first_x - dx >= 0 && first_y - dy >= 0 &&
+             CellMapValue(town, wram, first_x - dx, first_y - dy) == tile) {
+        first_x -= dx;
+        first_y -= dy;
+      }
+      while (last_x + dx < kSimBackgroundTownCells &&
+             last_y + dy < kSimBackgroundTownCells &&
+             CellMapValue(town, wram, last_x + dx, last_y + dy) == tile) {
+        last_x += dx;
+        last_y += dy;
+      }
+      for (int bx = first_x, by = first_y;; bx += dx, by += dy) {
+        bridge_visited[CellIndex(bx, by)] = true;
+        if (bx == last_x && by == last_y) break;
+      }
+      int bank_a_x, bank_a_y, bank_b_x, bank_b_y;
+      if (!FindBridgeBank(town, wram, first_x, first_y,
+                          -dx, -dy, &bank_a_x, &bank_a_y) ||
+          !FindBridgeBank(town, wram, last_x, last_y,
+                          dx, dy, &bank_b_x, &bank_b_y))
+        continue;
+      SimBackgroundVoxelObject bridge = {
+        .town = town,
+        .kind = kSimBackgroundVoxel_Bridge,
+        .cell_x = (uint8_t)first_x,
+        .cell_y = (uint8_t)first_y,
+        .source_cells_w = (uint8_t)(last_x - first_x + 1),
+        .source_cells_h = (uint8_t)(last_y - first_y + 1),
+        .footprint_cells_w = (uint8_t)(last_x - first_x + 1),
+        .footprint_cells_d = (uint8_t)(last_y - first_y + 1),
+        .record_slot = kSimBackgroundVoxelNoRecordSlot,
+        .bridge_axis = (uint8_t)bridge_axis,
+        .bridge_bank_a_x = (uint8_t)bank_a_x,
+        .bridge_bank_a_y = (uint8_t)bank_a_y,
+        .bridge_bank_b_x = (uint8_t)bank_b_x,
+        .bridge_bank_b_y = (uint8_t)bank_b_y,
+      };
+      MarkOccupied(occupied, first_x, first_y,
+                   bridge.source_cells_w, bridge.source_cells_h);
+      if (!AppendObject(out, bridge)) return;
+    }
 
   bool tree[kCellCount] = {false};
   bool weak_tree[kCellCount] = {false};
@@ -496,7 +687,7 @@ void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
               .source_cells_h = 1,
               .footprint_cells_w = 1,
               .footprint_cells_d = 1,
-              .record_slot = 0xFF,
+              .record_slot = kSimBackgroundVoxelNoRecordSlot,
             }))
           return;
         out->brush_cell_count++;
@@ -598,7 +789,7 @@ void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
               .footprint_cells_w = 1,
               .footprint_cells_d = 1,
               .tree_edges = edges,
-              .record_slot = 0xFF,
+              .record_slot = kSimBackgroundVoxelNoRecordSlot,
             }))
           return;
         out->tree_cell_count++;
@@ -630,7 +821,10 @@ static uint32_t GeneralGroundColour(const uint32_t *pixels) {
   for (int y = 0; y < kSimTownCanvasPixels; y++)
     for (int x = 0; x < kSimTownCanvasPixels; x++) {
       size_t at = (size_t)y * kSimTownCanvasPixels + (size_t)x;
-      if (!g_object_mask[at]) continue;
+      /* Bridge codes 2-5 have their own same-cell water replacement. Letting
+       * their long river borders vote here could select water as the general
+       * eraser beneath an unrelated house or forest. */
+      if (g_object_mask[at] != kEnhancedReplacement_Ground) continue;
       static const int dx[] = {0, 1, 0, -1};
       static const int dy[] = {-1, 0, 1, 0};
       for (int edge = 0; edge < 4; edge++) {
@@ -710,7 +904,7 @@ static bool FindGeneralGroundCell(const uint32_t *pixels, uint8_t town,
    * snow, producing a conspicuous green rectangle under a replaced landmark.
    * Prefer a complete unmasked snow cell and retain the ordinary colour vote
    * as a fallback for fades or unusual captures with no detectable snow. */
-  if (town == 6 && FindSnowGroundCell(
+  if (town == kSimBackgroundTownCount && FindSnowGroundCell(
           pixels, ground_cell_x, ground_cell_y))
     return true;
   uint32_t ground_colour = GeneralGroundColour(pixels);
@@ -828,10 +1022,63 @@ static void BuildMountainBaselines(const SimBackgroundVoxelScene *scene) {
     }
 }
 
+static bool ObjectHasStructuralHeight(const SimBackgroundVoxelObject *object) {
+  switch ((SimBackgroundVoxelKind)object->kind) {
+    case kSimBackgroundVoxel_House:
+    case kSimBackgroundVoxel_Cathedral:
+    case kSimBackgroundVoxel_Windmill:
+    case kSimBackgroundVoxel_Factory:
+    case kSimBackgroundVoxel_BloodpoolCastle:
+    case kSimBackgroundVoxel_MarahnaTemple:
+    case kSimBackgroundVoxel_Pyramid:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static void BuildStructureHeights(const SimBackgroundVoxelScene *scene) {
+  memset(g_background.structure_height, 0,
+         sizeof(g_background.structure_height));
+  /* Preserve the classifier's order as the tie-breaker. This exactly matches
+   * the former first-object result if transitional footprints overlap. */
+  for (uint16_t i = 0; i < scene->object_count; i++) {
+    const SimBackgroundVoxelObject *object = &scene->objects[i];
+    if (!ObjectHasStructuralHeight(object)) continue;
+    const float height = SimBackgroundVoxelRegion_AuthoredHeight(object);
+    int x0 = object->cell_x;
+    int y0 = object->cell_y;
+    int x1 = x0 + object->source_cells_w;
+    int y1 = y0 + object->source_cells_h;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > kSimBackgroundTownCells) x1 = kSimBackgroundTownCells;
+    if (y1 > kSimBackgroundTownCells) y1 = kSimBackgroundTownCells;
+    for (int y = y0; y < y1; y++)
+      for (int x = x0; x < x1; x++) {
+        float *cell_height =
+            &g_background.structure_height[CellIndex(x, y)];
+        if (*cell_height <= 0.0f) *cell_height = height;
+      }
+  }
+}
+
 static void ExtractEnhancedReplacements(
     const uint8_t *wram, const uint16_t *vram,
     const uint32_t *pixels, const SimBackgroundVoxelScene *scene) {
   memset(g_object_mask, 0, sizeof(g_object_mask));
+  uint32_t bridge_river[kSimBackgroundBridgeAxis_Count]
+      [kSimBackgroundCellPixels * kSimBackgroundCellPixels];
+  bool have_bridge_river[kSimBackgroundBridgeAxis_Count] = {
+    [kSimBackgroundBridgeAxis_EastWest] =
+        SimTownCanvas_RenderTerrainMetatile(
+            wram, kBridgeRiverEastWest,
+            bridge_river[kSimBackgroundBridgeAxis_EastWest]),
+    [kSimBackgroundBridgeAxis_NorthSouth] =
+        SimTownCanvas_RenderTerrainMetatile(
+            wram, kBridgeRiverNorthSouth,
+            bridge_river[kSimBackgroundBridgeAxis_NorthSouth]),
+  };
   /* Mountain cells keep the current town's authored colours but take their
    * alpha from a palette-independent semantic silhouette. This preserves
    * Northwall's white snow faces without lifting the opaque snow/grass pixels
@@ -856,7 +1103,7 @@ static void ExtractEnhancedReplacements(
             opaque = SimTownCanvas_SourcePixelOpaque(
                 wram, vram, x0 + x, y0 + y);
           }
-          g_object_mask[at] = 1;
+          g_object_mask[at] = kEnhancedReplacement_Ground;
           g_background.atlas[at] = opaque
               ? pixels[at] | 0xFF000000u
               : 0;
@@ -870,9 +1117,18 @@ static void ExtractEnhancedReplacements(
     int height = object->source_cells_h * kSimBackgroundCellPixels;
     for (int y = 0; y < height; y++)
       for (int x = 0; x < width; x++) {
+        EnhancedReplacementKind replacement_kind =
+            kEnhancedReplacement_Ground;
+        if (object->kind == kSimBackgroundVoxel_Bridge) {
+          /* Mask the entire authored metatile, not only its nominal roadway.
+           * Pale rail pixels live outside that band and otherwise survive as
+           * a second, detached bridge in the projected ground texture. */
+          replacement_kind = BridgeReplacementKind(
+              (SimBackgroundBridgeAxis)object->bridge_axis);
+        }
         size_t at = (size_t)(y0 + y) * kSimTownCanvasPixels +
             (size_t)(x0 + x);
-        g_object_mask[at] = 1;
+        g_object_mask[at] = (uint8_t)replacement_kind;
         /* Retained for diagnostic/catalog consumers. The enhanced renderer
          * uses its authored model and never samples this authentic cutout. */
         g_background.atlas[at] = pixels[at] | 0xFF000000u;
@@ -896,9 +1152,30 @@ static void ExtractEnhancedReplacements(
       if (!g_object_mask[at]) continue;
       int source_x = ground_x0 + x % kSimBackgroundCellPixels;
       int source_y = ground_y0 + y % kSimBackgroundCellPixels;
+      SimBackgroundBridgeAxis bridge_axis = ReplacementBridgeAxis(
+          (EnhancedReplacementKind)g_object_mask[at]);
+      if (bridge_axis != kSimBackgroundBridgeAxis_None) {
+        int water_cell_x, water_cell_y;
+        if (!have_bridge_river[bridge_axis] && FindBridgeWaterSource(
+                scene->town, wram,
+                x / kSimBackgroundCellPixels,
+                y / kSimBackgroundCellPixels,
+                bridge_axis, &water_cell_x, &water_cell_y)) {
+          source_x = water_cell_x * kSimBackgroundCellPixels +
+              x % kSimBackgroundCellPixels;
+          source_y = water_cell_y * kSimBackgroundCellPixels +
+              y % kSimBackgroundCellPixels;
+        }
+      }
       uint32_t replacement =
-          pixels[(size_t)source_y * kSimTownCanvasPixels +
-                 (size_t)source_x];
+          bridge_axis != kSimBackgroundBridgeAxis_None &&
+              have_bridge_river[bridge_axis]
+          ? bridge_river[bridge_axis][
+                (y % kSimBackgroundCellPixels) *
+                    kSimBackgroundCellPixels +
+                x % kSimBackgroundCellPixels]
+          : pixels[(size_t)source_y * kSimTownCanvasPixels +
+                   (size_t)source_x];
       g_background.ground[at] = replacement;
     }
 }
@@ -964,6 +1241,7 @@ void SimBackgroundVoxels_Build(uint8_t town, const uint8_t *wram,
                                &g_background.scene);
   ExtractEnhancedReplacements(wram, vram, canvas_pixels, &g_background.scene);
   BuildMountainBaselines(&g_background.scene);
+  BuildStructureHeights(&g_background.scene);
   LogWindmills(town, wram, &g_background.scene);
   g_background.canvas_serial = canvas_serial;
   g_background.serial = next_serial;
@@ -1037,29 +1315,10 @@ bool SimBackgroundVoxels_MountainSurface(int map_x, int map_y,
 }
 
 static float StructureHeightAtCell(int cell_x, int cell_y) {
-  const SimBackgroundVoxelScene *scene = &g_background.scene;
-  for (uint16_t i = 0; i < scene->object_count; i++) {
-    const SimBackgroundVoxelObject *object = &scene->objects[i];
-    switch ((SimBackgroundVoxelKind)object->kind) {
-      case kSimBackgroundVoxel_House:
-      case kSimBackgroundVoxel_Cathedral:
-      case kSimBackgroundVoxel_Windmill:
-      case kSimBackgroundVoxel_Factory:
-      case kSimBackgroundVoxel_BloodpoolCastle:
-      case kSimBackgroundVoxel_MarahnaTemple:
-      case kSimBackgroundVoxel_Pyramid:
-        break;
-      default:
-        continue;
-    }
-    if (cell_x < object->cell_x ||
-        cell_x >= object->cell_x + object->source_cells_w ||
-        cell_y < object->cell_y ||
-        cell_y >= object->cell_y + object->source_cells_h)
-      continue;
-    return SimBackgroundVoxelRegion_AuthoredHeight(object);
-  }
-  return 0.0f;
+  if (cell_x < 0 || cell_x >= kSimBackgroundTownCells ||
+      cell_y < 0 || cell_y >= kSimBackgroundTownCells)
+    return 0.0f;
+  return g_background.structure_height[CellIndex(cell_x, cell_y)];
 }
 
 float SimBackgroundVoxels_StructureHeight(int map_x, int map_y) {

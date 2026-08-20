@@ -1,9 +1,9 @@
 /* Shared handling for the generated shader blobs.
  *
  * Shaders are authored once as GLSL in src/shaders/ and cross-compiled by
- * tools/build_shaders.py into committed headers carrying both SPIR-V (Vulkan)
- * and MSL (Metal). See docs/BUILD_TOOLING.md "GPU shaders" for why nothing
- * compiles shaders at build time.
+ * tools/build_shaders.py into committed headers carrying SPIR-V (Vulkan),
+ * MSL (Metal), and DXIL (D3D12). See docs/BUILD_TOOLING.md "GPU shaders" for
+ * why nothing compiles shaders at build time.
  *
  * This header exists so the format-selection rule lives in exactly one place:
  * it is used by diorama.c, crt_post.c and tests/shader_blob_test.c, and the
@@ -20,7 +20,19 @@ typedef struct {
   unsigned int msl_size;
   const unsigned char *spv;
   unsigned int spv_size;
+  const unsigned char *dxil;
+  unsigned int dxil_size;
 } GpuShaderBlobs;
+
+static inline const char *GpuShaderBlob_FormatName(
+    SDL_GPUShaderFormat format) {
+  switch (format) {
+    case SDL_GPU_SHADERFORMAT_SPIRV: return "SPIR-V";
+    case SDL_GPU_SHADERFORMAT_DXIL: return "DXIL";
+    case SDL_GPU_SHADERFORMAT_MSL: return "MSL";
+    default: return "unknown";
+  }
+}
 
 /* Pick the blob matching whatever the live GPU backend speaks.
  *
@@ -46,16 +58,19 @@ static inline SDL_GPUShader *GpuShaderBlob_Create(
     info.code_size = blobs->spv_size;
     info.format = SDL_GPU_SHADERFORMAT_SPIRV;
     info.entrypoint = "main";
+  } else if (formats & SDL_GPU_SHADERFORMAT_DXIL) {
+    info.code = blobs->dxil;
+    info.code_size = blobs->dxil_size;
+    info.format = SDL_GPU_SHADERFORMAT_DXIL;
+    info.entrypoint = "main";
   } else if (formats & SDL_GPU_SHADERFORMAT_MSL) {
     info.code = blobs->msl;
     info.code_size = blobs->msl_size;
     info.format = SDL_GPU_SHADERFORMAT_MSL;
     info.entrypoint = "main0";
   } else {
-    /* DXIL-only D3D12, or something new. Adding DXIL later is purely
-     * additive — the committed SPIR-V is valid SDL_shadercross input. */
     fprintf(stderr, "[gpu-fx] no shader format in common with this backend "
-                    "(it offers 0x%x, we ship SPIR-V + MSL) — %s disabled\n",
+                    "(it offers 0x%x, we ship SPIR-V + DXIL + MSL) — %s disabled\n",
             (unsigned)formats, label);
     return NULL;
   }
@@ -66,8 +81,7 @@ static inline SDL_GPUShader *GpuShaderBlob_Create(
   SDL_GPUShader *shader = SDL_CreateGPUShader(device, &info);
   if (!shader)
     fprintf(stderr, "[gpu-fx] %s shader compile failed (%s): %s\n", label,
-            info.format == SDL_GPU_SHADERFORMAT_SPIRV ? "SPIR-V" : "MSL",
-            SDL_GetError());
+            GpuShaderBlob_FormatName(info.format), SDL_GetError());
   return shader;
 }
 

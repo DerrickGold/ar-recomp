@@ -6,11 +6,15 @@
 #include "input_map.h"
 #include "atomic_replace.h"
 #include "sim/sim3d_camera_limits.h"
+#include "sim/sim_town_terrain.h"
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef AR_SIM3D_TERRAIN_ELEVATION
+#define AR_SIM3D_TERRAIN_ELEVATION 0
+#endif
 #ifdef _WIN32
 #include <windows.h>
 #include <io.h>       /* _get_osfhandle/_fileno: Settings_Save durability */
@@ -728,6 +732,14 @@ static bool Sim3DGroundAvailable(void) {
 static bool Sim3DGroundEnabled(void) {
   return Sim3DGroundAvailable() && g_settings.sim3d_ground_projection;
 }
+static bool Sim3DLandscapeHeightAvailable(void) {
+#if AR_SIM3D_TERRAIN_ELEVATION
+  return Sim3DGroundEnabled() &&
+      g_settings.sim3d_voxel_preset != kSimBackgroundVoxelPreset_Off;
+#else
+  return false;
+#endif
+}
 static bool Sim3DVoxelCustomEnabled(void) {
   return Sim3DGroundEnabled() &&
       g_settings.sim3d_voxel_preset == kSimBackgroundVoxelPreset_Custom;
@@ -1177,6 +1189,21 @@ const SettingDesc g_setting_descs[] = {
     false, kSimVoxelPresetLabels, kSimBackgroundVoxelPreset_Count,
     Sim3DGroundEnabled, NULL, NULL, NULL,
     .modern_env = true, .player_visible = true },
+  { "sim3d_landscape_height_pct", "AR_SIM3D_LANDSCAPE_HEIGHT",
+    "Landscape height (%)",
+    "Scale the audited town relief independently from buildings and flying "
+    "objects. 100 keeps the full landscape, 50 gives half-height hills, and "
+    "0 makes the audited surface flat. Flying objects keep their authored "
+    "clearance above the resulting landscape.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim3d_landscape_height_pct,
+    kSimTownTerrainLandscapeHeightDefaultPct,
+    kSimTownTerrainLandscapeHeightMinimumPct,
+    kSimTownTerrainLandscapeHeightMaximumPct,
+    kSimTownTerrainLandscapeHeightStepPct, false,
+    NULL, 0, Sim3DLandscapeHeightAvailable, NULL, NULL, NULL,
+    .modern_env = true,
+    .player_visible = AR_SIM3D_TERRAIN_ELEVATION != 0 },
   { "sim3d_voxel_detail", "AR_SIM3D_VOXEL_DETAIL", "Voxel model detail",
     "Performance target for simulation-town buildings and trees. Low uses "
     "compact silhouettes for dense maps; Balanced is the conservative model; "
@@ -1238,8 +1265,9 @@ const SettingDesc g_setting_descs[] = {
     "Native draws directly into the scene. Pixel-clean locks projected "
     "corners to the output pixel grid for crisp voxel edges. Smooth 2x "
     "renders the background voxel pass at double resolution and downsamples "
-    "it on High or Ultra detail; Low and Balanced remain native to preserve "
-    "their performance targets.",
+    "it on High or Ultra detail; Low and Balanced remain native, and large "
+    "output windows automatically stay native to bound GPU memory and fill "
+    "cost.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Simulation,
     &g_settings.sim3d_voxel_render_scale,
     kSimBackgroundVoxelRenderScale_PixelClean,

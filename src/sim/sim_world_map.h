@@ -30,9 +30,12 @@ enum {
   kSimWorldMapBytes = kSimWorldMapTiles * kSimWorldMapTiles,
   /* A town cell is 16 authentic pixels and a world tile is 8. */
   kSimWorldMapTownScale = 2,
-  /* The town playfield is 32x32 cells = 512x512 authentic pixels, which the
-   * BG1 scroll clamps independently corroborate ($22 in [0,$100] over a 256px
-   * window, $24 in [0,$11F] over 224). */
+  /* Shared stock-SIM geography. The town playfield is 32x32 cells = 512x512
+   * authentic pixels, which the BG1 scroll clamps independently corroborate
+   * ($22 in [0,$100] over a 256px window, $24 in [0,$11F] over 224). Terrain,
+   * voxel classification, and world-map composition all consume this same
+   * six-town coordinate space. */
+  kSimTownCount = 6,
   kSimTownCells = 32,
   kSimTownCellPixels = 16,
 };

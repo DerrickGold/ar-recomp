@@ -192,6 +192,19 @@ else()
     target_compile_definitions(ActRaiserRecomp PRIVATE AR_SIM3D_PICKER_TOPDOWN=0)
 endif()
 
+# Experimental audited height field for the full-town SIM ground and every
+# grounded presentation consumer. Default OFF so ordinary builds remain the
+# strict control for A/B captures while the six-town visual pass is accepted.
+option(AR_SIM3D_TERRAIN_ELEVATION
+    "Render the experimental audited SIM town elevation mesh" OFF)
+if(AR_SIM3D_TERRAIN_ELEVATION)
+    set(AR_SIM3D_TERRAIN_ELEVATION_VALUE 1)
+else()
+    set(AR_SIM3D_TERRAIN_ELEVATION_VALUE 0)
+endif()
+target_compile_definitions(ActRaiserRecomp PRIVATE
+    AR_SIM3D_TERRAIN_ELEVATION=${AR_SIM3D_TERRAIN_ELEVATION_VALUE})
+
 # AddressSanitizer + UndefinedBehaviorSanitizer for memory-corruption hunts.
 # Off by default because the instrumentation has a substantial runtime cost.
 option(AR_SANITIZE "Build with ASan + UBSan (debug corruption bugs)" OFF)
@@ -298,6 +311,19 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_sim_town_canvas
         COMMAND actraiser_sim_town_canvas_test)
+
+    add_executable(actraiser_sim_town_terrain_test
+        tests/sim_town_terrain_test.c
+        src/sim/sim_town_terrain.c
+    )
+    target_include_directories(actraiser_sim_town_terrain_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/sim
+    )
+    target_link_libraries(actraiser_sim_town_terrain_test PRIVATE
+        actraiser_math)
+    add_test(NAME actraiser_sim_town_terrain
+        COMMAND actraiser_sim_town_terrain_test)
 
     add_executable(actraiser_sim_background_voxels_test
         tests/sim_background_voxels_test.c
@@ -718,6 +744,8 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
+    target_compile_definitions(actraiser_settings_test PRIVATE
+        AR_SIM3D_TERRAIN_ELEVATION=${AR_SIM3D_TERRAIN_ELEVATION_VALUE})
     add_test(NAME actraiser_settings COMMAND actraiser_settings_test)
 
     add_executable(actraiser_settings_overlay_test
@@ -751,6 +779,8 @@ if(BUILD_TESTING)
         SDL3::SDL3
         actraiser_math
     )
+    target_compile_definitions(actraiser_settings_overlay_test PRIVATE
+        AR_SIM3D_TERRAIN_ELEVATION=${AR_SIM3D_TERRAIN_ELEVATION_VALUE})
     add_test(NAME actraiser_settings_overlay COMMAND actraiser_settings_overlay_test)
     set_tests_properties(actraiser_settings_overlay PROPERTIES
         ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
