@@ -93,6 +93,10 @@ static unsigned g_action_load_armed_frames;
 static unsigned g_action_load_hold_frames;
 static uint64_t g_action_load_one_shot_token;
 extern volatile int g_ar_in_interrupt;
+/* diagnostic.h declares the 2- and 3-argument variants but not this one;
+ * both callers below need it, and one of them precedes the local extern
+ * that used to be the only declaration. */
+extern int ar_block_history(uint32 *out, int max);
 
 static void ActRaiser_OnInidispWrite(uint8_t value) {
   uint32_t block = 0;
@@ -385,7 +389,6 @@ static void ActRaiser_BrkHook(CpuState *cpu) {
  * by crash diagnostics; consulting it here lets a user-facing sound toggle
  * distinguish the dialogue composer's COP #$07 from unrelated uses of id 07. */
 static uint32 ActRaiser_LastBlockPc(void) {
-  extern int ar_block_history(uint32 *out, int max);
   uint32 pc = 0;
   return ar_block_history(&pc, 1) == 1 ? pc : 0;
 }

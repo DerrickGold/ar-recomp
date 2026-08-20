@@ -72,7 +72,6 @@
  */
 
 #include "actraiser_cell_map.h"
-#include "actraiser_rtl.h"
 #include "actraiser_town_metatile.h"
 #include "actraiser_town_structure_steps.h"
 #include "cpu_state.h"

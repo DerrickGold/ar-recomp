@@ -2692,15 +2692,10 @@ static void DrawTextN(const MenuLayout *layout, int x, int y,
               (unsigned char)text[i], style);
 }
 
-static void DrawText(const MenuLayout *layout, int x, int y,
-                     const char *text, TextStyle style) {
-  DrawTextN(layout, x, y, text, 256, style);
-}
-
 /* ── The game font at output-pixel coordinates ─────────────────────────────
  *
  * For a nested fullscreen mode -- the manual reader -- which is not laid out on
- * the menu's logical grid and so cannot go through DrawText's MenuLayout. Same
+ * the menu's logical grid and so cannot go through DrawTextN's MenuLayout. Same
  * atlas, same glyphs, same colors; only the coordinate space differs. */
 
 int SettingsOverlay_GameTextWidth(const char *text, int scale) {

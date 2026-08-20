@@ -1,6 +1,5 @@
 #include "cpu_state.h"
 #include "funcs.h"
-#include "actraiser_rtl.h"
 #include "actraiser_game.h"
 
 enum {

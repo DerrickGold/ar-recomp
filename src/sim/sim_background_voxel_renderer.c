@@ -12,6 +12,7 @@
 #include "sim_background_bridge.h"
 #include "sim_background_mountain_render.h"
 #include "sim_background_voxel_biome.h"
+#include "sim_background_voxel_lod.h"
 #include "sim_background_voxel_model_cache.h"
 #include "sim_background_voxel_models.h"
 #include "sim_background_voxel_palette.h"

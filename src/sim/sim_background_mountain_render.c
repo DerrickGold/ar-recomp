@@ -3,7 +3,6 @@
 #include <limits.h>
 #include <math.h>
 
-#include "constants.h"
 #include "scene3d_math.h"
 #include "sim3d_depth_pass.h"
 #include "sim_background_mountain_objects.h"

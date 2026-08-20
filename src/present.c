@@ -27,13 +27,9 @@
 #include "hd_replacement_host.h"
 #include "settings_overlay.h"
 #include "dev/scene_inspector.h"
-#include "scene3d_math.h"
 #include "render_capabilities.h"
 #include "sim/sim_render_atlas.h"
 #include "sim/sim_background_voxel_renderer.h"
-#include "sim/sim_town_canvas.h"
-#include "sim/sim_world_map.h"
-#include "sim/sim_world_navigation_capture.h"
 #include "sim/sim3d.h"
 
 /* kPixelAspect_Crt43 and kDioramaCam_Free/kDioramaCam_Dynamic are plain enum
