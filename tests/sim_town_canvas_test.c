@@ -28,6 +28,10 @@ enum {
   kVramWords = 0x8000,
   kBrightness = 15,
   kBackdrop = 0xFF102030,
+  kBgTilePixels = 8,
+  kTerrainMetatileTiles = 2,
+  kTerrainMetatilePixels = kBgTilePixels * kTerrainMetatileTiles,
+  kMarahnaTown = 5,
 };
 
 static uint8_t *g_wram;
@@ -201,6 +205,51 @@ static void TestChangeDetection(void) {
   CHECK(!SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h));
 }
 
+/* Marahna's earthquake does not replace the baked elevation field. The game
+ * changes the live BG1 artwork covering the initially submerged cells, and
+ * the renderer publishes those land pixels on the same water-datum vertices.
+ * Exercise a complete 16x16 cell rather than one 8x8 tile so all four live
+ * metatile entries, the serial handoff, and the dirty upload rectangle stay
+ * tied together. The representative cell lies beyond the vertical 32-tile
+ * page boundary, where an accidental row-major read would update the wrong
+ * part of the town. */
+static void TestMarahnaEarthquakeCanvasPublication(void) {
+  SimTownCanvas_Reset();
+  SetupSources();
+  const int cell_x = 15, cell_y = 17;
+  const int tile_x = cell_x * kTerrainMetatileTiles;
+  const int tile_y = cell_y * kTerrainMetatileTiles;
+  const uint16_t water = (uint16_t)(1 | (2 << 10));
+  const uint16_t land = (uint16_t)(1 | (1 << 10));
+  for (int y = 0; y < kTerrainMetatileTiles; y++)
+    for (int x = 0; x < kTerrainMetatileTiles; x++)
+      SetTile(tile_x + x, tile_y + y, water);
+
+  Render(kMarahnaTown);
+  CHECK(CanvasAt(cell_x * kTerrainMetatilePixels,
+                 cell_y * kTerrainMetatilePixels) == 0xFF0000FF);
+  int x, y, w, h;
+  CHECK(SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h));
+  CHECK(x == 0 && y == 0 && w == kSimTownCanvasPixels &&
+        h == kSimTownCanvasPixels);
+  uint32_t water_serial = SimTownCanvas_Serial();
+
+  for (int local_y = 0; local_y < kTerrainMetatileTiles; local_y++)
+    for (int local_x = 0; local_x < kTerrainMetatileTiles; local_x++)
+      SetTile(tile_x + local_x, tile_y + local_y, land);
+  Render(kMarahnaTown);
+  CHECK(SimTownCanvas_Serial() != water_serial);
+  CHECK(CanvasAt(cell_x * kTerrainMetatilePixels,
+                 cell_y * kTerrainMetatilePixels) == 0xFFFF0000);
+  CHECK(CanvasAt((cell_x + 1) * kTerrainMetatilePixels - 1,
+                 (cell_y + 1) * kTerrainMetatilePixels - 1) == kBackdrop);
+  CHECK(SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h));
+  CHECK(x == cell_x * kTerrainMetatilePixels &&
+        y == cell_y * kTerrainMetatilePixels &&
+        w == kTerrainMetatilePixels && h == kTerrainMetatilePixels);
+  CHECK(!SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h));
+}
+
 static void TestBrightnessAndTownChange(void) {
   SimTownCanvas_Reset();
   SetupSources();
@@ -256,6 +305,7 @@ int main(void) {
   TestQuadrantAddressing();
   TestFlips();
   TestChangeDetection();
+  TestMarahnaEarthquakeCanvasPublication();
   TestBrightnessAndTownChange();
   TestRawTerrainMetatile();
   TestRejectsMissingSources();
