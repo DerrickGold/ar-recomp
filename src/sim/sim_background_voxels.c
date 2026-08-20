@@ -22,6 +22,8 @@ enum {
   kStructureDefinitionsWram = 0x3100,  /* flat $7E:3100 */
   kTerrainDefinitionBytes = 8,
   kTerrainMetatileCount = 256,
+  kMetatileDefinitionBytes =
+      kTerrainMetatileCount * kTerrainDefinitionBytes,
   /* Each of the tilemap's four pages is a 32x32 run of 8x8 entries. */
   kTilemapPageTiles = 32,
   kTilemapPageWords = kTilemapPageTiles * kTilemapPageTiles,
@@ -39,6 +41,11 @@ enum {
   kStructureRecordsPerTownBytes = 0x200,
   kStructureRecordBytes = 4,
   kStructureRecordCount = 128,
+  /* Classification consumes position and flags only. Record +3 is the live
+   * action byte and can tick without changing the presented scene. */
+  kStructureSceneBytesPerRecord = 3,
+  kStructureSceneInputBytes =
+      kStructureRecordCount * kStructureSceneBytesPerRecord,
   kStructureActive = 0x80,
   kStructureConstructionVariant = 0x40,
   kStructureClassMask = 0x0F,
@@ -64,6 +71,15 @@ typedef enum EnhancedReplacementKind {
   kEnhancedReplacement_BridgeEastWest,
   kEnhancedReplacement_BridgeNorthSouth,
 } EnhancedReplacementKind;
+
+enum {
+  kAtlasAlpha_Transparent = 0,
+  /* Semantic silhouette data does not cover every possible ROM metatile.
+   * Resolve those pixels from the live character source during refresh so a
+   * CHR animation remains pixel-only rather than invalidating the mask plan. */
+  kAtlasAlpha_Source = 1,
+  kAtlasAlpha_Opaque = 0xFF,
+};
 
 static EnhancedReplacementKind BridgeReplacementKind(
     SimBackgroundBridgeAxis axis) {
@@ -108,8 +124,13 @@ static const SanctuarySignature kSanctuaries[] = {
 
 static struct {
   uint32_t serial;
+  uint32_t scene_serial;
+  uint32_t ground_serial;
+  uint32_t atlas_serial;
   uint32_t canvas_serial;
+  uint32_t canvas_layout_serial;
   bool wind_stops_all;
+  bool have_scene_inputs;
   SimBackgroundVoxelScene scene;
   uint32_t atlas[kCanvasPixelCount];
   uint32_t ground[kCanvasPixelCount];
@@ -124,14 +145,27 @@ static struct {
    * grounding samples this several times per actor, so resolve immutable
    * object footprints once when the voxel scene is rebuilt. */
   float structure_height[kCellCount];
+  uint8_t cell_map[kTownCellMapBytes];
+  uint8_t structure_records[kStructureSceneInputBytes];
+  uint8_t terrain_definitions[kMetatileDefinitionBytes];
+  uint8_t structure_definitions[kMetatileDefinitionBytes];
+  bool have_general_ground;
+  uint8_t general_ground_cell_x, general_ground_cell_y;
+  /* Half-open dirty span for every output pixel row. */
+  int ground_dirty_x0[kSimTownCanvasPixels];
+  int ground_dirty_x1[kSimTownCanvasPixels];
 } g_background;
 /* Scene rebuild scratch. Every classified source rectangle, including static
  * terrain, is marked before a replacement tile is selected, so authentic art
  * is never considered as the town's general ground. */
 static uint8_t g_object_mask[kCanvasPixelCount];
+/* Precomputed alpha ownership for the cutout atlas. Mountain silhouettes are
+ * semantic; authored models retain their complete authentic source blocks. */
+static uint8_t g_atlas_alpha[kCanvasPixelCount];
 /* Reset clears publish state when leaving a town, but a later town must never
  * reuse a serial whose GPU texture may still exist. */
 static uint32_t g_next_serial;
+static SimBackgroundVoxelBuildStats g_build_stats;
 
 static uint32_t NextSerial(void) {
   g_next_serial++;
@@ -950,32 +984,80 @@ static bool FindMountainScratchCell(
   return false;
 }
 
-static void BuildCleanMountainSources(const uint8_t *wram) {
-  /* These are the clean semantic parts used by every complete mountain stamp.
-   * Rendering them from the town's raw metatile definitions preserves native
-   * region palettes (including Northwall snow) without sampling fused range
-   * cells such as Kasandora's $7D overlap. */
-  static const uint8_t kSourceTiles[] = {
-    0x70, 0x71, 0x81, 0x82, 0x88, 0x89, 0x8A, 0x8B,
-    0x8C, 0x8F, 0x90, 0x91, 0x92, 0x93, 0x94, 0x95,
-    0x96, 0x97, 0x98, 0x99, 0x9A, 0x9B, 0x9C, 0x9D,
-    0x9E, 0x9F,
-  };
+/* Clean semantic parts used by every complete mountain stamp. Keeping this
+ * list beside both plan and refresh code prevents the two stages drifting. */
+static const uint8_t kMountainSourceTiles[] = {
+  0x70, 0x71, 0x81, 0x82, 0x88, 0x89, 0x8A, 0x8B,
+  0x8C, 0x8F, 0x90, 0x91, 0x92, 0x93, 0x94, 0x95,
+  0x96, 0x97, 0x98, 0x99, 0x9A, 0x9B, 0x9C, 0x9D,
+  0x9E, 0x9F,
+};
+
+static void BuildCleanMountainSourcePlan(void) {
+  memset(g_background.mountain_source_cell, 0,
+         sizeof(g_background.mountain_source_cell));
   bool used[kCellCount] = {false};
-  uint32_t metatile_pixels[kSimBackgroundCellPixels *
-                           kSimBackgroundCellPixels];
   for (size_t tile_at = 0;
-       tile_at < sizeof(kSourceTiles) / sizeof(kSourceTiles[0]); tile_at++) {
-    uint8_t tile = kSourceTiles[tile_at];
+       tile_at < sizeof(kMountainSourceTiles) /
+                     sizeof(kMountainSourceTiles[0]); tile_at++) {
+    uint8_t tile = kMountainSourceTiles[tile_at];
     bool test_opaque;
     if (!SimBackgroundMountainSilhouette_Lookup(
-            tile, 0, 0, &test_opaque) ||
-        !SimTownCanvas_RenderTerrainMetatile(
-            wram, tile, metatile_pixels))
+            tile, 0, 0, &test_opaque))
       continue;
     int cell_x, cell_y;
     if (!FindMountainScratchCell(used, &cell_x, &cell_y)) return;
     used[CellIndex(cell_x, cell_y)] = true;
+    g_background.mountain_source_cell[tile] =
+        (uint16_t)(CellIndex(cell_x, cell_y) + 1);
+  }
+}
+
+static void MarkGroundDirtyPixel(int x, int y) {
+  if (g_background.ground_dirty_x1[y] <=
+      g_background.ground_dirty_x0[y]) {
+    g_background.ground_dirty_x0[y] = x;
+    g_background.ground_dirty_x1[y] = x + 1;
+    return;
+  }
+  if (x < g_background.ground_dirty_x0[y])
+    g_background.ground_dirty_x0[y] = x;
+  if (x + 1 > g_background.ground_dirty_x1[y])
+    g_background.ground_dirty_x1[y] = x + 1;
+}
+
+static void SetGroundPixel(size_t at, int x, int y, uint32_t value,
+                           uint64_t *changed_pixels) {
+  if (g_background.ground[at] == value) return;
+  g_background.ground[at] = value;
+  MarkGroundDirtyPixel(x, y);
+  (*changed_pixels)++;
+}
+
+static void SetAtlasPixel(size_t at, uint32_t value,
+                          uint64_t *changed_pixels) {
+  if (g_background.atlas[at] == value) return;
+  g_background.atlas[at] = value;
+  (*changed_pixels)++;
+}
+
+static void RefreshCleanMountainSources(const uint8_t *wram,
+                                        uint64_t *atlas_changed_pixels) {
+  /* Render from raw definitions on every pixel publication. Palette fades and
+   * character animation can recolour these cells without changing topology. */
+  uint32_t metatile_pixels[kSimBackgroundCellPixels *
+                           kSimBackgroundCellPixels];
+  for (size_t tile_at = 0;
+       tile_at < sizeof(kMountainSourceTiles) /
+                     sizeof(kMountainSourceTiles[0]); tile_at++) {
+    uint8_t tile = kMountainSourceTiles[tile_at];
+    uint16_t source_cell = g_background.mountain_source_cell[tile];
+    if (!source_cell || !SimTownCanvas_RenderTerrainMetatile(
+            wram, tile, metatile_pixels))
+      continue;
+    int cell = source_cell - 1;
+    int cell_x = cell % kSimBackgroundTownCells;
+    int cell_y = cell / kSimBackgroundTownCells;
     int x0 = cell_x * kSimBackgroundCellPixels;
     int y0 = cell_y * kSimBackgroundCellPixels;
     for (int y = 0; y < kSimBackgroundCellPixels; y++)
@@ -986,11 +1068,10 @@ static void BuildCleanMountainSources(const uint8_t *wram) {
             (size_t)(y0 + y) * kSimTownCanvasPixels + (size_t)(x0 + x);
         uint32_t source = metatile_pixels[
             y * kSimBackgroundCellPixels + x];
-        g_background.atlas[destination] =
-            opaque ? source | 0xFF000000u : 0;
+        SetAtlasPixel(destination,
+                      opaque ? source | 0xFF000000u : 0,
+                      atlas_changed_pixels);
       }
-    g_background.mountain_source_cell[tile] =
-        (uint16_t)(CellIndex(cell_x, cell_y) + 1);
   }
 }
 
@@ -1063,22 +1144,11 @@ static void BuildStructureHeights(const SimBackgroundVoxelScene *scene) {
   }
 }
 
-static void ExtractEnhancedReplacements(
-    const uint8_t *wram, const uint16_t *vram,
+static void BuildEnhancedReplacementPlan(
+    const uint8_t *wram,
     const uint32_t *pixels, const SimBackgroundVoxelScene *scene) {
   memset(g_object_mask, 0, sizeof(g_object_mask));
-  uint32_t bridge_river[kSimBackgroundBridgeAxis_Count]
-      [kSimBackgroundCellPixels * kSimBackgroundCellPixels];
-  bool have_bridge_river[kSimBackgroundBridgeAxis_Count] = {
-    [kSimBackgroundBridgeAxis_EastWest] =
-        SimTownCanvas_RenderTerrainMetatile(
-            wram, kBridgeRiverEastWest,
-            bridge_river[kSimBackgroundBridgeAxis_EastWest]),
-    [kSimBackgroundBridgeAxis_NorthSouth] =
-        SimTownCanvas_RenderTerrainMetatile(
-            wram, kBridgeRiverNorthSouth,
-            bridge_river[kSimBackgroundBridgeAxis_NorthSouth]),
-  };
+  memset(g_atlas_alpha, 0, sizeof(g_atlas_alpha));
   /* Mountain cells keep the current town's authored colours but take their
    * alpha from a palette-independent semantic silhouette. This preserves
    * Northwall's white snow faces without lifting the opaque snow/grass pixels
@@ -1097,16 +1167,15 @@ static void ExtractEnhancedReplacements(
         for (int x = 0; x < kSimBackgroundCellPixels; x++) {
           size_t at = (size_t)(y0 + y) * kSimTownCanvasPixels +
               (size_t)(x0 + x);
-          bool opaque;
+          bool opaque = false;
           if (!SimBackgroundMountainSilhouette_Lookup(
                   tile, x, y, &opaque)) {
-            opaque = SimTownCanvas_SourcePixelOpaque(
-                wram, vram, x0 + x, y0 + y);
+            g_atlas_alpha[at] = kAtlasAlpha_Source;
+          } else {
+            g_atlas_alpha[at] = opaque
+                ? kAtlasAlpha_Opaque : kAtlasAlpha_Transparent;
           }
           g_object_mask[at] = kEnhancedReplacement_Ground;
-          g_background.atlas[at] = opaque
-              ? pixels[at] | 0xFF000000u
-              : 0;
         }
     }
   for (uint16_t i = 0; i < scene->object_count; i++) {
@@ -1131,30 +1200,58 @@ static void ExtractEnhancedReplacements(
         g_object_mask[at] = (uint8_t)replacement_kind;
         /* Retained for diagnostic/catalog consumers. The enhanced renderer
          * uses its authored model and never samples this authentic cutout. */
-        g_background.atlas[at] = pixels[at] | 0xFF000000u;
+        g_atlas_alpha[at] = kAtlasAlpha_Opaque;
       }
   }
 
-  BuildCleanMountainSources(wram);
-
   int ground_cell_x, ground_cell_y;
-  if (!FindGeneralGroundCell(
-          pixels, scene->town, &ground_cell_x, &ground_cell_y))
-    return;
-  int ground_x0 = ground_cell_x * kSimBackgroundCellPixels;
-  int ground_y0 = ground_cell_y * kSimBackgroundCellPixels;
+  g_background.have_general_ground = FindGeneralGroundCell(
+      pixels, scene->town, &ground_cell_x, &ground_cell_y);
+  if (g_background.have_general_ground) {
+    g_background.general_ground_cell_x = (uint8_t)ground_cell_x;
+    g_background.general_ground_cell_y = (uint8_t)ground_cell_y;
+  }
+  BuildCleanMountainSourcePlan();
+}
+
+static void RefreshEnhancedPixels(
+    const uint8_t *wram, const uint16_t *vram, const uint32_t *pixels,
+    const SimBackgroundVoxelScene *scene) {
+  uint32_t bridge_river[kSimBackgroundBridgeAxis_Count]
+      [kSimBackgroundCellPixels * kSimBackgroundCellPixels];
+  bool have_bridge_river[kSimBackgroundBridgeAxis_Count] = {
+    [kSimBackgroundBridgeAxis_EastWest] =
+        SimTownCanvas_RenderTerrainMetatile(
+            wram, kBridgeRiverEastWest,
+            bridge_river[kSimBackgroundBridgeAxis_EastWest]),
+    [kSimBackgroundBridgeAxis_NorthSouth] =
+        SimTownCanvas_RenderTerrainMetatile(
+            wram, kBridgeRiverNorthSouth,
+            bridge_river[kSimBackgroundBridgeAxis_NorthSouth]),
+  };
+  uint64_t ground_changed_pixels = 0;
+  uint64_t atlas_changed_pixels = 0;
+  int ground_x0 = (int)g_background.general_ground_cell_x *
+      kSimBackgroundCellPixels;
+  int ground_y0 = (int)g_background.general_ground_cell_y *
+      kSimBackgroundCellPixels;
+
   /* The same complete biome tile erases every source cell. Grass towns keep
    * their grass texture, Northwall keeps snow, and no nearest-pixel flood can
    * create streaks around a large forest, cathedral, or lifted mountain. */
   for (int y = 0; y < kSimTownCanvasPixels; y++)
     for (int x = 0; x < kSimTownCanvasPixels; x++) {
       size_t at = (size_t)y * kSimTownCanvasPixels + (size_t)x;
-      if (!g_object_mask[at]) continue;
-      int source_x = ground_x0 + x % kSimBackgroundCellPixels;
-      int source_y = ground_y0 + y % kSimBackgroundCellPixels;
+      uint32_t replacement = pixels[at];
+      int source_x = x, source_y = y;
       SimBackgroundBridgeAxis bridge_axis = ReplacementBridgeAxis(
           (EnhancedReplacementKind)g_object_mask[at]);
-      if (bridge_axis != kSimBackgroundBridgeAxis_None) {
+      if (g_object_mask[at] && g_background.have_general_ground) {
+        source_x = ground_x0 + x % kSimBackgroundCellPixels;
+        source_y = ground_y0 + y % kSimBackgroundCellPixels;
+      }
+      if (g_object_mask[at] &&
+          bridge_axis != kSimBackgroundBridgeAxis_None) {
         int water_cell_x, water_cell_y;
         if (!have_bridge_river[bridge_axis] && FindBridgeWaterSource(
                 scene->town, wram,
@@ -1167,7 +1264,7 @@ static void ExtractEnhancedReplacements(
               y % kSimBackgroundCellPixels;
         }
       }
-      uint32_t replacement =
+      if (g_object_mask[at]) replacement =
           bridge_axis != kSimBackgroundBridgeAxis_None &&
               have_bridge_river[bridge_axis]
           ? bridge_river[bridge_axis][
@@ -1176,8 +1273,20 @@ static void ExtractEnhancedReplacements(
                 x % kSimBackgroundCellPixels]
           : pixels[(size_t)source_y * kSimTownCanvasPixels +
                    (size_t)source_x];
-      g_background.ground[at] = replacement;
+      SetGroundPixel(at, x, y, replacement, &ground_changed_pixels);
+      bool atlas_opaque = g_atlas_alpha[at] == kAtlasAlpha_Opaque ||
+          (g_atlas_alpha[at] == kAtlasAlpha_Source &&
+           SimTownCanvas_SourcePixelOpaque(wram, vram, x, y));
+      SetAtlasPixel(at, atlas_opaque ? pixels[at] | 0xFF000000u : 0,
+                    &atlas_changed_pixels);
     }
+  RefreshCleanMountainSources(wram, &atlas_changed_pixels);
+
+  g_build_stats.pixel_refreshes++;
+  g_build_stats.ground_pixels_changed += ground_changed_pixels;
+  g_build_stats.atlas_pixels_changed += atlas_changed_pixels;
+  if (ground_changed_pixels) g_background.ground_serial = NextSerial();
+  if (atlas_changed_pixels) g_background.atlas_serial = NextSerial();
 }
 
 /* AR_WINDMILL_DEBUG=1: one line per windmill whenever any of their state
@@ -1216,38 +1325,129 @@ static void LogWindmills(uint8_t town, const uint8_t *wram,
   fprintf(stderr, "[windmill] town=%u %s\n", town, line);
 }
 
-void SimBackgroundVoxels_Reset(void) { memset(&g_background, 0, sizeof(g_background)); }
+static const uint8_t *TownCellMapSource(uint8_t town, const uint8_t *wram) {
+  return wram + kTownCellMapsWram +
+      (size_t)(town - 1) * kTownCellMapBytes;
+}
+
+static const uint8_t *TownStructureRecordSource(
+    uint8_t town, const uint8_t *wram) {
+  return wram + kStructureRecordsWram +
+      (size_t)(town - 1) * kStructureRecordsPerTownBytes;
+}
+
+static bool StructureSceneInputsChanged(
+    uint8_t town, const uint8_t *wram) {
+  const uint8_t *records = TownStructureRecordSource(town, wram);
+  for (int slot = 0; slot < kStructureRecordCount; slot++)
+    if (memcmp(g_background.structure_records +
+                   (size_t)slot * kStructureSceneBytesPerRecord,
+               records + (size_t)slot * kStructureRecordBytes,
+               kStructureSceneBytesPerRecord) != 0)
+      return true;
+  return false;
+}
+
+static void SaveStructureSceneInputs(uint8_t town, const uint8_t *wram) {
+  const uint8_t *records = TownStructureRecordSource(town, wram);
+  for (int slot = 0; slot < kStructureRecordCount; slot++)
+    memcpy(g_background.structure_records +
+               (size_t)slot * kStructureSceneBytesPerRecord,
+           records + (size_t)slot * kStructureRecordBytes,
+           kStructureSceneBytesPerRecord);
+}
+
+static bool SceneInputsChanged(uint8_t town, const uint8_t *wram,
+                               uint32_t canvas_layout_serial,
+                               bool wind_stops_all) {
+  return !g_background.have_scene_inputs ||
+      g_background.scene.town != town ||
+      g_background.canvas_layout_serial != canvas_layout_serial ||
+      g_background.wind_stops_all != wind_stops_all ||
+      memcmp(g_background.cell_map, TownCellMapSource(town, wram),
+             sizeof(g_background.cell_map)) != 0 ||
+      StructureSceneInputsChanged(town, wram) ||
+      memcmp(g_background.terrain_definitions,
+             wram + kTerrainDefinitionsWram,
+             sizeof(g_background.terrain_definitions)) != 0 ||
+      memcmp(g_background.structure_definitions,
+             wram + kStructureDefinitionsWram,
+             sizeof(g_background.structure_definitions)) != 0;
+}
+
+static void SaveSceneInputs(uint8_t town, const uint8_t *wram,
+                            uint32_t canvas_layout_serial,
+                            bool wind_stops_all) {
+  memcpy(g_background.cell_map, TownCellMapSource(town, wram),
+         sizeof(g_background.cell_map));
+  SaveStructureSceneInputs(town, wram);
+  memcpy(g_background.terrain_definitions,
+         wram + kTerrainDefinitionsWram,
+         sizeof(g_background.terrain_definitions));
+  memcpy(g_background.structure_definitions,
+         wram + kStructureDefinitionsWram,
+         sizeof(g_background.structure_definitions));
+  g_background.canvas_layout_serial = canvas_layout_serial;
+  g_background.wind_stops_all = wind_stops_all;
+  g_background.have_scene_inputs = true;
+}
+
+void SimBackgroundVoxels_Reset(void) {
+  memset(&g_background, 0, sizeof(g_background));
+  memset(g_object_mask, 0, sizeof(g_object_mask));
+  memset(g_atlas_alpha, 0, sizeof(g_atlas_alpha));
+}
 
 void SimBackgroundVoxels_Build(uint8_t town, const uint8_t *wram,
                                const uint32_t *canvas_pixels,
                                const uint16_t *vram,
                                uint32_t canvas_serial,
+                               uint32_t canvas_layout_serial,
                                bool wind_stops_all) {
-  if (!town || !wram || !canvas_pixels || !vram || !canvas_serial) return;
-  /* The policy takes part in the gate: toggled in a still town, nothing else
-   * would ask for a rebuild and the mills would keep their old behaviour until
-   * something happened to move the canvas. */
-  if (g_background.scene.town == town &&
-      g_background.canvas_serial == canvas_serial &&
-      g_background.wind_stops_all == wind_stops_all)
+  if (!town || town > kSimBackgroundTownCount || !wram || !canvas_pixels ||
+      !vram || !canvas_serial || !canvas_layout_serial)
     return;
-  uint32_t next_serial = NextSerial();
-  memset(g_background.atlas, 0, sizeof(g_background.atlas));
-  memset(g_background.mountain_source_cell, 0,
-         sizeof(g_background.mountain_source_cell));
-  memcpy(g_background.ground, canvas_pixels, sizeof(g_background.ground));
-  g_background.wind_stops_all = wind_stops_all;
-  SimBackgroundVoxels_Classify(town, wram, wind_stops_all,
-                               &g_background.scene);
-  ExtractEnhancedReplacements(wram, vram, canvas_pixels, &g_background.scene);
-  BuildMountainBaselines(&g_background.scene);
-  BuildStructureHeights(&g_background.scene);
-  LogWindmills(town, wram, &g_background.scene);
+  g_build_stats.build_calls++;
+  bool scene_changed = SceneInputsChanged(
+      town, wram, canvas_layout_serial, wind_stops_all);
+  bool pixels_changed = g_background.canvas_serial != canvas_serial;
+  if (!scene_changed && !pixels_changed) {
+    LogWindmills(town, wram, &g_background.scene);
+    return;
+  }
+
+  if (scene_changed) {
+    SimBackgroundVoxels_Classify(town, wram, wind_stops_all,
+                                 &g_background.scene);
+    BuildEnhancedReplacementPlan(
+        wram, canvas_pixels, &g_background.scene);
+    BuildMountainBaselines(&g_background.scene);
+    BuildStructureHeights(&g_background.scene);
+    SaveSceneInputs(town, wram, canvas_layout_serial, wind_stops_all);
+    g_background.scene_serial = NextSerial();
+    g_build_stats.scene_rebuilds++;
+  }
+  uint32_t prior_ground_serial = g_background.ground_serial;
+  uint32_t prior_atlas_serial = g_background.atlas_serial;
+  if (scene_changed || pixels_changed)
+    RefreshEnhancedPixels(wram, vram, canvas_pixels, &g_background.scene);
   g_background.canvas_serial = canvas_serial;
-  g_background.serial = next_serial;
+  LogWindmills(town, wram, &g_background.scene);
+  if (scene_changed || prior_ground_serial != g_background.ground_serial ||
+      prior_atlas_serial != g_background.atlas_serial)
+    g_background.serial = NextSerial();
 }
 
 uint32_t SimBackgroundVoxels_Serial(void) { return g_background.serial; }
+uint32_t SimBackgroundVoxels_SceneSerial(void) {
+  return g_background.scene_serial;
+}
+uint32_t SimBackgroundVoxels_GroundSerial(void) {
+  return g_background.ground_serial;
+}
+uint32_t SimBackgroundVoxels_AtlasSerial(void) {
+  return g_background.atlas_serial;
+}
 const SimBackgroundVoxelScene *SimBackgroundVoxels_Scene(void) {
   return &g_background.scene;
 }
@@ -1256,6 +1456,41 @@ const uint32_t *SimBackgroundVoxels_AtlasPixels(void) {
 }
 const uint32_t *SimBackgroundVoxels_GroundPixels(void) {
   return g_background.ground;
+}
+
+bool SimBackgroundVoxels_TakeGroundDirtyRect(
+    int *x, int *y, int *width, int *height) {
+  int first_row = 0;
+  while (first_row < kSimTownCanvasPixels &&
+         g_background.ground_dirty_x1[first_row] <=
+             g_background.ground_dirty_x0[first_row])
+    first_row++;
+  if (first_row == kSimTownCanvasPixels) return false;
+
+  int dirty_x0 = g_background.ground_dirty_x0[first_row];
+  int dirty_x1 = g_background.ground_dirty_x1[first_row];
+  int end_row = first_row;
+  do {
+    g_background.ground_dirty_x0[end_row] = kSimTownCanvasPixels;
+    g_background.ground_dirty_x1[end_row] = 0;
+    end_row++;
+  } while (end_row < kSimTownCanvasPixels &&
+           g_background.ground_dirty_x0[end_row] == dirty_x0 &&
+           g_background.ground_dirty_x1[end_row] == dirty_x1);
+
+  if (x) *x = dirty_x0;
+  if (y) *y = first_row;
+  if (width) *width = dirty_x1 - dirty_x0;
+  if (height) *height = end_row - first_row;
+  return true;
+}
+
+SimBackgroundVoxelBuildStats SimBackgroundVoxels_BuildStats(void) {
+  return g_build_stats;
+}
+
+void SimBackgroundVoxels_ResetBuildStats(void) {
+  memset(&g_build_stats, 0, sizeof(g_build_stats));
 }
 
 bool SimBackgroundVoxels_CellIsMountain(int cell_x, int cell_y) {

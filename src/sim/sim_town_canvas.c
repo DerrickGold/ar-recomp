@@ -30,6 +30,11 @@ enum {
 static struct {
   uint8_t town;
   uint32_t serial;
+  uint32_t tilemap_serial;
+  uint32_t character_serial;
+  uint32_t palette_serial;
+  uint32_t display_serial;
+  uint32_t last_change_mask;
   bool have_source;
   uint32_t backdrop;
   int brightness;
@@ -45,7 +50,26 @@ void SimTownCanvas_Reset(void) { memset(&g_canvas, 0, sizeof(g_canvas)); }
 
 uint8_t SimTownCanvas_Town(void) { return g_canvas.town; }
 uint32_t SimTownCanvas_Serial(void) { return g_canvas.serial; }
+uint32_t SimTownCanvas_TilemapSerial(void) {
+  return g_canvas.tilemap_serial;
+}
+uint32_t SimTownCanvas_CharacterSerial(void) {
+  return g_canvas.character_serial;
+}
+uint32_t SimTownCanvas_PaletteSerial(void) {
+  return g_canvas.palette_serial;
+}
+uint32_t SimTownCanvas_DisplaySerial(void) {
+  return g_canvas.display_serial;
+}
+uint32_t SimTownCanvas_LastChangeMask(void) {
+  return g_canvas.last_change_mask;
+}
 const uint32_t *SimTownCanvas_Pixels(void) { return g_canvas.pixels; }
+
+static void AdvanceSerial(uint32_t *serial) {
+  if (++*serial == 0) *serial = 1;
+}
 
 bool SimTownCanvas_TakeDirtyRect(int *x, int *y, int *width, int *height) {
   int first_row = 0;
@@ -175,6 +199,7 @@ bool SimTownCanvas_RenderTerrainMetatile(
 void SimTownCanvas_Render(uint8_t town, const uint8 *wram,
                           const uint16_t *vram, const uint16_t *cgram,
                           int brightness, uint32_t backdrop_argb) {
+  g_canvas.last_change_mask = kSimTownCanvasChange_None;
   if (!town || !wram || !vram || !cgram) return;
   if (town != g_canvas.town) {
     SimTownCanvas_Reset();
@@ -220,14 +245,17 @@ void SimTownCanvas_Render(uint8_t town, const uint8 *wram,
     palette[i] = PaletteArgb(cgram[i], brightness);
   uint32_t opaque_backdrop = backdrop_argb | 0xFF000000u;
   bool pixels_changed = false;
+  bool tilemap_visual_changed = source_changed;
 
   for (int tile_y = 0; tile_y < kSimTownCanvasTiles; tile_y++) {
     for (int tile_x = 0; tile_x < kSimTownCanvasTiles; tile_x++) {
       uint16_t entry = TilemapEntry(live_map, tile_x, tile_y);
       bool redraw = full_repaint;
-      if (!redraw && tilemap_changed) {
+      if (tilemap_changed && !source_changed) {
         uint16_t prior = TilemapEntry(g_canvas.tilemap, tile_x, tile_y);
-        redraw = ((prior ^ entry) & kTilemapVisualMask) != 0;
+        bool entry_changed = ((prior ^ entry) & kTilemapVisualMask) != 0;
+        if (entry_changed) tilemap_visual_changed = true;
+        if (!redraw) redraw = entry_changed;
       }
       if (!redraw && chars_changed) redraw = changed_chars[entry & 0x3FF];
       if (!redraw && palette_changed)
@@ -245,6 +273,22 @@ void SimTownCanvas_Render(uint8_t town, const uint8 *wram,
   g_canvas.brightness = brightness;
   g_canvas.backdrop = backdrop_argb;
   g_canvas.have_source = true;
+  if (tilemap_visual_changed) {
+    g_canvas.last_change_mask |= kSimTownCanvasChange_Tilemap;
+    AdvanceSerial(&g_canvas.tilemap_serial);
+  }
+  if (chars_changed) {
+    g_canvas.last_change_mask |= kSimTownCanvasChange_Characters;
+    AdvanceSerial(&g_canvas.character_serial);
+  }
+  if (palette_changed) {
+    g_canvas.last_change_mask |= kSimTownCanvasChange_Palette;
+    AdvanceSerial(&g_canvas.palette_serial);
+  }
+  if (full_repaint) {
+    g_canvas.last_change_mask |= kSimTownCanvasChange_Display;
+    AdvanceSerial(&g_canvas.display_serial);
+  }
   if (!pixels_changed) return;
   if (full_repaint) {
     for (int row = 0; row < kSimTownCanvasTiles; row++) {
@@ -252,5 +296,5 @@ void SimTownCanvas_Render(uint8_t town, const uint8 *wram,
       g_canvas.dirty_x1[row] = kSimTownCanvasPixels;
     }
   }
-  if (++g_canvas.serial == 0) g_canvas.serial = 1;
+  AdvanceSerial(&g_canvas.serial);
 }

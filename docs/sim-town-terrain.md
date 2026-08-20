@@ -115,9 +115,12 @@ cells per town, all gameplay/structure stamps, with no cliff or seam changes.
 `SimTownCanvas` watches the live 64×64 BG1 tilemap, BG1 character data, and
 palette, and increments its serial whenever any of them changes the rendered
 town. The earthquake therefore publishes its new artwork regardless of which
-native source carries the transition; the background voxel ground rebuilds
-from that same serial. The baked terrain API takes only town and position, so
-the event cannot accidentally regenerate a different mesh.
+native source carries the transition; the background voxel ground refreshes
+from that same image serial. Its scene classifier follows the independent
+tile-layout revision plus semantic cell/record inputs, so a water animation or
+fade no longer rebuilds structures, bridges, foliage, or mountains. The baked
+terrain API takes only town and position, so the event cannot accidentally
+regenerate a different mesh.
 
 For Marahna, every cell—including one currently covered by water—already has a
 height. The initial still-water area is level at its audited water datum. When

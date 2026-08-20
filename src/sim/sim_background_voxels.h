@@ -37,19 +37,41 @@ void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
                                   SimBackgroundVoxelScene *out);
 
 void SimBackgroundVoxels_Reset(void);
-/* Rebuilds only when the authentic town canvas changes. The original canvas
- * is never modified: this owns a cutout atlas plus an inpainted ground copy
- * used only by enhanced SIM presentation. */
+/* Publishes scene topology and pixels independently. `canvas_layout_serial`
+ * advances only for displayed tilemap changes; character animation, palette
+ * cycling and fades can therefore refresh enhanced pixels without rescanning
+ * structure records, mountains, bridges and foliage. The original canvas is
+ * never modified: this owns a cutout atlas plus an inpainted ground copy used
+ * only by enhanced SIM presentation. */
 void SimBackgroundVoxels_Build(uint8_t town, const uint8_t *wram,
                                const uint32_t *canvas_pixels,
                                const uint16_t *vram,
                                uint32_t canvas_serial,
+                               uint32_t canvas_layout_serial,
                                bool wind_stops_all);
 
 uint32_t SimBackgroundVoxels_Serial(void);
+uint32_t SimBackgroundVoxels_SceneSerial(void);
+uint32_t SimBackgroundVoxels_GroundSerial(void);
+uint32_t SimBackgroundVoxels_AtlasSerial(void);
 const SimBackgroundVoxelScene *SimBackgroundVoxels_Scene(void);
 const uint32_t *SimBackgroundVoxels_AtlasPixels(void);
 const uint32_t *SimBackgroundVoxels_GroundPixels(void);
+/* Render-thread upload cursor for the enhanced ground. Regions accumulate
+ * until drained, independently of SimTownCanvas's authentic-canvas cursor. */
+bool SimBackgroundVoxels_TakeGroundDirtyRect(
+    int *x, int *y, int *width, int *height);
+
+typedef struct SimBackgroundVoxelBuildStats {
+  uint64_t build_calls;
+  uint64_t scene_rebuilds;
+  uint64_t pixel_refreshes;
+  uint64_t ground_pixels_changed;
+  uint64_t atlas_pixels_changed;
+} SimBackgroundVoxelBuildStats;
+
+SimBackgroundVoxelBuildStats SimBackgroundVoxels_BuildStats(void);
+void SimBackgroundVoxels_ResetBuildStats(void);
 
 /* Is this town cell mountain terrain in the published scene?
  *

@@ -205,6 +205,68 @@ static void TestChangeDetection(void) {
   CHECK(!SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h));
 }
 
+static void TestIndependentSourceRevisions(void) {
+  SimTownCanvas_Reset();
+  SetupSources();
+  SetTile(1, 1, (uint16_t)(1 | (1 << 10)));
+  Render(1);
+  CHECK(SimTownCanvas_TilemapSerial() != 0);
+  CHECK(SimTownCanvas_CharacterSerial() != 0);
+  CHECK(SimTownCanvas_PaletteSerial() != 0);
+  CHECK(SimTownCanvas_DisplaySerial() != 0);
+  CHECK(SimTownCanvas_LastChangeMask() ==
+        (kSimTownCanvasChange_Tilemap |
+         kSimTownCanvasChange_Characters |
+         kSimTownCanvasChange_Palette |
+         kSimTownCanvasChange_Display));
+
+  uint32_t image = SimTownCanvas_Serial();
+  uint32_t tilemap = SimTownCanvas_TilemapSerial();
+  uint32_t characters = SimTownCanvas_CharacterSerial();
+  uint32_t palette = SimTownCanvas_PaletteSerial();
+  uint32_t display = SimTownCanvas_DisplaySerial();
+  Render(1);
+  CHECK(SimTownCanvas_LastChangeMask() == kSimTownCanvasChange_None);
+
+  /* Unused art is still snapshotted and publishes its own source revision,
+   * but it cannot force an image upload or a scene-layout rebuild. */
+  g_vram[2 * 16] = 0x0080;
+  Render(1);
+  CHECK(SimTownCanvas_Serial() == image);
+  CHECK(SimTownCanvas_TilemapSerial() == tilemap);
+  CHECK(SimTownCanvas_CharacterSerial() != characters);
+  CHECK(SimTownCanvas_PaletteSerial() == palette);
+  CHECK(SimTownCanvas_DisplaySerial() == display);
+  CHECK(SimTownCanvas_LastChangeMask() ==
+        kSimTownCanvasChange_Characters);
+  characters = SimTownCanvas_CharacterSerial();
+
+  /* Priority changes PPU painter order but not the opaque town-space layout
+   * consumed by enhanced classification. */
+  SetTile(1, 1, (uint16_t)(1 | (1 << 10) | 0x2000));
+  Render(1);
+  CHECK(SimTownCanvas_Serial() == image);
+  CHECK(SimTownCanvas_TilemapSerial() == tilemap);
+  CHECK(SimTownCanvas_CharacterSerial() == characters);
+  CHECK(SimTownCanvas_LastChangeMask() == kSimTownCanvasChange_None);
+
+  g_cgram[3 * 16 + 1] = 0x7C00;  /* unused bank */
+  Render(1);
+  CHECK(SimTownCanvas_Serial() == image);
+  CHECK(SimTownCanvas_PaletteSerial() != palette);
+  CHECK(SimTownCanvas_LastChangeMask() == kSimTownCanvasChange_Palette);
+  palette = SimTownCanvas_PaletteSerial();
+
+  SimTownCanvas_Render(1, g_wram, g_vram, g_cgram,
+                       kBrightness - 1, kBackdrop);
+  CHECK(SimTownCanvas_Serial() != image);
+  CHECK(SimTownCanvas_TilemapSerial() == tilemap);
+  CHECK(SimTownCanvas_CharacterSerial() == characters);
+  CHECK(SimTownCanvas_PaletteSerial() == palette);
+  CHECK(SimTownCanvas_DisplaySerial() != display);
+  CHECK(SimTownCanvas_LastChangeMask() == kSimTownCanvasChange_Display);
+}
+
 /* Marahna's earthquake does not replace the baked elevation field. The game
  * changes the live BG1 artwork covering the initially submerged cells, and
  * the renderer publishes those land pixels on the same water-datum vertices.
@@ -305,6 +367,7 @@ int main(void) {
   TestQuadrantAddressing();
   TestFlips();
   TestChangeDetection();
+  TestIndependentSourceRevisions();
   TestMarahnaEarthquakeCanvasPublication();
   TestBrightnessAndTownChange();
   TestRawTerrainMetatile();
