@@ -12,7 +12,8 @@
 
 enum {
   kSim3DDepthRgbaBytesPerPixel = 4,
-  kSim3DDepthVerticesPerQuad = 6,
+  kSim3DDepthVerticesPerQuad = 4,
+  kSim3DDepthIndicesPerQuad = 6,
   kSim3DDepthInitialCpuVertexCapacity = 4096,
   kSim3DDepthInitialGpuVertexCapacity = 8192,
 };
@@ -38,9 +39,14 @@ static struct {
   SDL_GPUGraphicsPipeline *depth_occluder_pipeline;
   SDL_GPUGraphicsPipeline *effect_pipeline;
   SDL_GPUSampler *nearest_sampler;
+  SDL_GPUSampler *linear_sampler;
   SDL_GPUBuffer *vertex_buffer;
   SDL_GPUTransferBuffer *transfer_buffer;
+  SDL_GPUBuffer *index_buffer;
+  SDL_GPUTransferBuffer *index_transfer_buffer;
   Uint32 gpu_vertex_capacity;
+  Uint32 gpu_index_capacity;
+  bool index_upload_required;
   SDL_GPUTexture *color_target;
   SDL_GPUTexture *depth_target;
   SDL_GPUTexture *mountain_atlas;
@@ -270,7 +276,16 @@ static bool CreatePipeline(void) {
   g_depth_pass.nearest_sampler = SDL_CreateGPUSampler(
       g_depth_pass.device, &sampler);
   if (!g_depth_pass.nearest_sampler) {
-    fprintf(stderr, "[sim3d-depth] sampler creation failed: %s\n",
+    fprintf(stderr, "[sim3d-depth] nearest sampler creation failed: %s\n",
+            SDL_GetError());
+    return false;
+  }
+  sampler.min_filter = SDL_GPU_FILTER_LINEAR;
+  sampler.mag_filter = SDL_GPU_FILTER_LINEAR;
+  g_depth_pass.linear_sampler = SDL_CreateGPUSampler(
+      g_depth_pass.device, &sampler);
+  if (!g_depth_pass.linear_sampler) {
+    fprintf(stderr, "[sim3d-depth] linear sampler creation failed: %s\n",
             SDL_GetError());
     return false;
   }
@@ -556,11 +571,8 @@ bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer,
     g_depth_pass.geometry_failed = true;
     return false;
   }
-  static const Uint8 order[kSim3DDepthVerticesPerQuad] = {
-    0, 1, 2, 0, 2, 3,
-  };
   for (int i = 0; i < kSim3DDepthVerticesPerQuad; i++) {
-    const Sim3DDepthVertex *source = &vertices[order[i]];
+    const Sim3DDepthVertex *source = &vertices[i];
     Sim3DGpuVertex *destination = &list->vertices[list->count++];
     destination->position[0] =
         source->x * g_depth_pass.clip_x_scale - 1.0f;
@@ -578,7 +590,7 @@ bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer,
   return true;
 }
 
-static bool EnsureGpuBuffer(Uint32 vertex_count) {
+static bool EnsureGpuBuffers(Uint32 vertex_count) {
   if (vertex_count <= g_depth_pass.gpu_vertex_capacity) return true;
   const Uint32 maximum_vertices =
       UINT32_MAX / (Uint32)sizeof(Sim3DGpuVertex);
@@ -608,23 +620,77 @@ static bool EnsureGpuBuffer(Uint32 vertex_count) {
       g_depth_pass.device, &buffer_info);
   SDL_GPUTransferBuffer *transfer_buffer = SDL_CreateGPUTransferBuffer(
       g_depth_pass.device, &transfer_info);
-  if (!vertex_buffer || !transfer_buffer) {
+  const Uint32 index_capacity =
+      capacity / kSim3DDepthVerticesPerQuad * kSim3DDepthIndicesPerQuad;
+  SDL_GPUBufferCreateInfo index_buffer_info = {
+    .usage = SDL_GPU_BUFFERUSAGE_INDEX,
+    .size = index_capacity * (Uint32)sizeof(Uint32),
+  };
+  SDL_GPUTransferBufferCreateInfo index_transfer_info = {
+    .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+    .size = index_buffer_info.size,
+  };
+  SDL_GPUBuffer *index_buffer = SDL_CreateGPUBuffer(
+      g_depth_pass.device, &index_buffer_info);
+  SDL_GPUTransferBuffer *index_transfer_buffer =
+      SDL_CreateGPUTransferBuffer(
+          g_depth_pass.device, &index_transfer_info);
+  if (!vertex_buffer || !transfer_buffer || !index_buffer ||
+      !index_transfer_buffer) {
     fprintf(stderr, "[sim3d-depth] geometry buffer creation failed: %s\n",
             SDL_GetError());
     if (vertex_buffer)
       SDL_ReleaseGPUBuffer(g_depth_pass.device, vertex_buffer);
     if (transfer_buffer)
       SDL_ReleaseGPUTransferBuffer(g_depth_pass.device, transfer_buffer);
+    if (index_buffer)
+      SDL_ReleaseGPUBuffer(g_depth_pass.device, index_buffer);
+    if (index_transfer_buffer)
+      SDL_ReleaseGPUTransferBuffer(
+          g_depth_pass.device, index_transfer_buffer);
     return false;
   }
+  Uint32 *indices = SDL_MapGPUTransferBuffer(
+      g_depth_pass.device, index_transfer_buffer, false);
+  if (!indices) {
+    fprintf(stderr, "[sim3d-depth] index staging map failed: %s\n",
+            SDL_GetError());
+    SDL_ReleaseGPUBuffer(g_depth_pass.device, vertex_buffer);
+    SDL_ReleaseGPUTransferBuffer(g_depth_pass.device, transfer_buffer);
+    SDL_ReleaseGPUBuffer(g_depth_pass.device, index_buffer);
+    SDL_ReleaseGPUTransferBuffer(
+        g_depth_pass.device, index_transfer_buffer);
+    return false;
+  }
+  static const Uint32 order[kSim3DDepthIndicesPerQuad] = {
+    0, 1, 2, 0, 2, 3,
+  };
+  for (Uint32 quad = 0;
+       quad < capacity / kSim3DDepthVerticesPerQuad; quad++) {
+    const Uint32 base = quad * kSim3DDepthVerticesPerQuad;
+    for (int i = 0; i < kSim3DDepthIndicesPerQuad; i++)
+      indices[quad * kSim3DDepthIndicesPerQuad + (Uint32)i] =
+          base + order[i];
+  }
+  SDL_UnmapGPUTransferBuffer(
+      g_depth_pass.device, index_transfer_buffer);
   if (g_depth_pass.vertex_buffer)
     SDL_ReleaseGPUBuffer(g_depth_pass.device, g_depth_pass.vertex_buffer);
   if (g_depth_pass.transfer_buffer)
     SDL_ReleaseGPUTransferBuffer(
         g_depth_pass.device, g_depth_pass.transfer_buffer);
+  if (g_depth_pass.index_buffer)
+    SDL_ReleaseGPUBuffer(g_depth_pass.device, g_depth_pass.index_buffer);
+  if (g_depth_pass.index_transfer_buffer)
+    SDL_ReleaseGPUTransferBuffer(
+        g_depth_pass.device, g_depth_pass.index_transfer_buffer);
   g_depth_pass.vertex_buffer = vertex_buffer;
   g_depth_pass.transfer_buffer = transfer_buffer;
+  g_depth_pass.index_buffer = index_buffer;
+  g_depth_pass.index_transfer_buffer = index_transfer_buffer;
   g_depth_pass.gpu_vertex_capacity = capacity;
+  g_depth_pass.gpu_index_capacity = index_capacity;
+  g_depth_pass.index_upload_required = true;
   return true;
 }
 
@@ -665,6 +731,14 @@ static SDL_GPUGraphicsPipeline *PipelineForLayer(Sim3DDepthPassLayer layer) {
   return NULL;
 }
 
+static SDL_GPUSampler *SamplerForLayer(Sim3DDepthPassLayer layer) {
+  /* Pixel-art mountain cutouts remain nearest-neighbour. The shadow receiver
+   * is a filtered screen-space mask and may intentionally use a smaller
+   * working target, so linear sampling is part of that layer's contract. */
+  return layer == kSim3DDepthPass_ShadowReceiver
+      ? g_depth_pass.linear_sampler : g_depth_pass.nearest_sampler;
+}
+
 SDL_Texture *Sim3DDepthPass_Submit(SDL_Renderer *renderer,
                                    SDL_Texture *shadow_texture) {
   if (!g_depth_pass.collecting || renderer != g_depth_pass.renderer)
@@ -682,7 +756,9 @@ SDL_Texture *Sim3DDepthPass_Submit(SDL_Renderer *renderer,
     }
     total += g_depth_pass.lists[i].count;
   }
-  if (!total || !EnsureGpuBuffer(total)) return NULL;
+  if (!total || total % kSim3DDepthVerticesPerQuad != 0 ||
+      !EnsureGpuBuffers(total))
+    return NULL;
   for (int i = 0; i < kSim3DDepthPassLayerCount; i++) {
     if (!g_depth_pass.lists[i].count) continue;
     if (!TextureForLayer((Sim3DDepthPassLayer)i, shadow_texture)) {
@@ -732,6 +808,19 @@ SDL_Texture *Sim3DDepthPass_Submit(SDL_Renderer *renderer,
     .size = total * (Uint32)sizeof(Sim3DGpuVertex),
   };
   SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+  if (g_depth_pass.index_upload_required) {
+    SDL_GPUTransferBufferLocation index_source = {
+      .transfer_buffer = g_depth_pass.index_transfer_buffer,
+      .offset = 0,
+    };
+    SDL_GPUBufferRegion index_destination = {
+      .buffer = g_depth_pass.index_buffer,
+      .offset = 0,
+      .size = g_depth_pass.gpu_index_capacity * (Uint32)sizeof(Uint32),
+    };
+    SDL_UploadToGPUBuffer(
+        copy, &index_source, &index_destination, false);
+  }
   SDL_EndGPUCopyPass(copy);
 
   SDL_GPUColorTargetInfo color;
@@ -760,10 +849,17 @@ SDL_Texture *Sim3DDepthPass_Submit(SDL_Renderer *renderer,
     .buffer = g_depth_pass.vertex_buffer,
     .offset = 0,
   };
-  SDL_BindGPUVertexBuffers(pass, 0, &vertex_binding, 1);
+  SDL_GPUBufferBinding index_binding = {
+    .buffer = g_depth_pass.index_buffer,
+    .offset = 0,
+  };
+  SDL_BindGPUIndexBuffer(
+      pass, &index_binding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
   SDL_GPUGraphicsPipeline *bound = NULL;
   for (int i = 0; i < kSim3DDepthPassLayerCount; i++) {
     if (!g_depth_pass.lists[i].count) continue;
+    vertex_binding.offset = first[i] * (Uint32)sizeof(Sim3DGpuVertex);
+    SDL_BindGPUVertexBuffers(pass, 0, &vertex_binding, 1);
     SDL_GPUGraphicsPipeline *pipeline =
         PipelineForLayer((Sim3DDepthPassLayer)i);
     if (pipeline != bound) {
@@ -774,11 +870,14 @@ SDL_Texture *Sim3DDepthPass_Submit(SDL_Renderer *renderer,
         (Sim3DDepthPassLayer)i, shadow_texture);
     SDL_GPUTextureSamplerBinding texture_binding = {
       .texture = texture,
-      .sampler = g_depth_pass.nearest_sampler,
+      .sampler = SamplerForLayer((Sim3DDepthPassLayer)i),
     };
     SDL_BindGPUFragmentSamplers(pass, 0, &texture_binding, 1);
-    SDL_DrawGPUPrimitives(pass, g_depth_pass.lists[i].count, 1,
-                          first[i], 0);
+    SDL_DrawGPUIndexedPrimitives(
+        pass,
+        g_depth_pass.lists[i].count / kSim3DDepthVerticesPerQuad *
+            kSim3DDepthIndicesPerQuad,
+        1, 0, 0, 0);
   }
   SDL_EndGPURenderPass(pass);
   if (!SDL_SubmitGPUCommandBuffer(commands)) {
@@ -786,6 +885,7 @@ SDL_Texture *Sim3DDepthPass_Submit(SDL_Renderer *renderer,
             SDL_GetError());
     return NULL;
   }
+  g_depth_pass.index_upload_required = false;
   return g_depth_pass.output_texture;
 }
 
@@ -811,11 +911,18 @@ void Sim3DDepthPass_Reset(void) {
     SDL_ReleaseGPUShader(g_depth_pass.device, g_depth_pass.fragment_shader);
   if (g_depth_pass.nearest_sampler)
     SDL_ReleaseGPUSampler(g_depth_pass.device, g_depth_pass.nearest_sampler);
+  if (g_depth_pass.linear_sampler)
+    SDL_ReleaseGPUSampler(g_depth_pass.device, g_depth_pass.linear_sampler);
   if (g_depth_pass.vertex_buffer)
     SDL_ReleaseGPUBuffer(g_depth_pass.device, g_depth_pass.vertex_buffer);
   if (g_depth_pass.transfer_buffer)
     SDL_ReleaseGPUTransferBuffer(
         g_depth_pass.device, g_depth_pass.transfer_buffer);
+  if (g_depth_pass.index_buffer)
+    SDL_ReleaseGPUBuffer(g_depth_pass.device, g_depth_pass.index_buffer);
+  if (g_depth_pass.index_transfer_buffer)
+    SDL_ReleaseGPUTransferBuffer(
+        g_depth_pass.device, g_depth_pass.index_transfer_buffer);
   if (g_depth_pass.mountain_atlas)
     SDL_ReleaseGPUTexture(g_depth_pass.device, g_depth_pass.mountain_atlas);
   if (g_depth_pass.mountain_atlas_transfer)

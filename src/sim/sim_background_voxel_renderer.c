@@ -5,6 +5,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "constants.h"
 #include "scene3d_math.h"
@@ -526,12 +527,50 @@ typedef struct SimTerrainDepthCell {
   uint8_t hard_edges;
 } SimTerrainDepthCell;
 
+enum {
+  /* Every terrain cell contributes one top and at most one skirt per edge.
+   * The projection cache is deliberately bounded by that geometric maximum,
+   * so caching can never turn malformed terrain metadata into an allocation
+   * or an incomplete draw. */
+  kMaxTerrainDepthQuads = kSimTownTerrainCells *
+      kSimTownTerrainCells * 5,
+};
+
+typedef struct SimTerrainProjectedQuad {
+  Scene3DPoint points[4];
+  float depth[4];
+  bool receives_shadow;
+} SimTerrainProjectedQuad;
+
+typedef struct SimTerrainProjectionKey {
+  uint8_t town;
+  uint8_t render_scale;
+  uint16_t landscape_height_pct;
+  uint16_t camera_x, camera_y;
+  uint16_t town_screen_x0;
+  SDL_Rect source;
+  SDL_Rect viewport;
+  float matrix[16];
+} SimTerrainProjectionKey;
+
 static struct {
   bool valid;
   uint8_t town;
   SimTerrainDepthCell cell[
       kSimTownTerrainCells * kSimTownTerrainCells];
 } s_terrain_depth_cache;
+
+/* The shadow receiver and the main depth composite use the same camera and
+ * terrain mesh, and a still camera reuses it again on following frames. Keep
+ * the projected result so those passes only restage vertices; models remain
+ * dynamic and continue to project normally. */
+static struct {
+  bool valid;
+  bool overflow;
+  int count;
+  SimTerrainProjectionKey key;
+  SimTerrainProjectedQuad quads[kMaxTerrainDepthQuads];
+} s_terrain_projection_cache;
 
 static SimTerrainDepthCell *TerrainDepthCell(int x, int y) {
   return &s_terrain_depth_cache.cell[
@@ -559,25 +598,55 @@ static float TerrainUnitsToPixels(
       height_units, (float)params->landscape_height_pct);
 }
 
-static void AppendTerrainDepthQuad(
+static bool TerrainProjectionKeyMatches(
+    const SimBackgroundVoxelRenderParams *params) {
+  const SimTerrainProjectionKey *key = &s_terrain_projection_cache.key;
+  return s_terrain_projection_cache.valid &&
+      key->town == params->town &&
+      key->render_scale == params->render_scale &&
+      key->landscape_height_pct == params->landscape_height_pct &&
+      key->camera_x == params->camera_x &&
+      key->camera_y == params->camera_y &&
+      key->town_screen_x0 == params->town_screen_x0 &&
+      key->source.x == params->source.x &&
+      key->source.y == params->source.y &&
+      key->source.w == params->source.w &&
+      key->source.h == params->source.h &&
+      key->viewport.x == params->viewport.x &&
+      key->viewport.y == params->viewport.y &&
+      key->viewport.w == params->viewport.w &&
+      key->viewport.h == params->viewport.h &&
+      memcmp(key->matrix, params->matrix, sizeof(key->matrix)) == 0;
+}
+
+static void BeginTerrainProjectionCache(
+    const SimBackgroundVoxelRenderParams *params) {
+  s_terrain_projection_cache.valid = false;
+  s_terrain_projection_cache.overflow = false;
+  s_terrain_projection_cache.count = 0;
+  s_terrain_projection_cache.key = (SimTerrainProjectionKey){
+    .town = params->town,
+    .render_scale = params->render_scale,
+    .landscape_height_pct = params->landscape_height_pct,
+    .camera_x = params->camera_x,
+    .camera_y = params->camera_y,
+    .town_screen_x0 = params->town_screen_x0,
+    .source = params->source,
+    .viewport = params->viewport,
+  };
+  memcpy(s_terrain_projection_cache.key.matrix, params->matrix,
+         sizeof(s_terrain_projection_cache.key.matrix));
+}
+
+static void EmitTerrainDepthQuad(
     const SimBackgroundVoxelRenderParams *params,
-    float origin_x, float origin_y,
-    const float local_x[4], const float local_y[4],
-    const float height_units[4], bool receives_shadow) {
-  Scene3DPoint points[4];
+    const SimTerrainProjectedQuad *quad) {
   Sim3DDepthVertex vertices[4];
   for (int point = 0; point < 4; point++) {
-    float depth;
-    if (!ProjectGroundedVertex(
-            params, &kUprightProjectionAxis,
-            origin_x + local_x[point], origin_y + local_y[point],
-            0.0f, TerrainUnitsToPixels(params, height_units[point]),
-            &points[point], &depth))
-      return;
     vertices[point] = (Sim3DDepthVertex){
-      .x = points[point].x,
-      .y = points[point].y,
-      .depth = depth,
+      .x = quad->points[point].x,
+      .y = quad->points[point].y,
+      .depth = quad->depth[point],
       /* The shared fragment shader discards zero alpha before depth can be
        * written. Color writes are disabled by the occluder pipeline, so an
        * opaque white fragment is invisible while still reaching D32. */
@@ -585,9 +654,8 @@ static void AppendTerrainDepthQuad(
       .uv = {0.0f, 0.0f},
     };
   }
-  if (IsDegenerate(points)) return;
   Sim3DDepthPass_AppendQuad(kSim3DDepthPass_DepthOccluder, vertices);
-  if (!receives_shadow || !params->shadow_mask ||
+  if (!quad->receives_shadow || !params->shadow_mask ||
       !params->shadow_opacity_pct)
     return;
   const float alpha =
@@ -595,11 +663,35 @@ static void AppendTerrainDepthQuad(
   for (int point = 0; point < 4; point++) {
     vertices[point].color = (SDL_FColor){1.0f, 1.0f, 1.0f, alpha};
     vertices[point].uv = (SDL_FPoint){
-      points[point].x / params->viewport.w,
-      points[point].y / params->viewport.h,
+      quad->points[point].x / params->viewport.w,
+      quad->points[point].y / params->viewport.h,
     };
   }
   Sim3DDepthPass_AppendQuad(kSim3DDepthPass_ShadowReceiver, vertices);
+}
+
+static void AppendTerrainDepthQuad(
+    const SimBackgroundVoxelRenderParams *params,
+    float origin_x, float origin_y,
+    const float local_x[4], const float local_y[4],
+    const float height_units[4], bool receives_shadow) {
+  SimTerrainProjectedQuad quad = {.receives_shadow = receives_shadow};
+  for (int point = 0; point < 4; point++) {
+    if (!ProjectGroundedVertex(
+            params, &kUprightProjectionAxis,
+            origin_x + local_x[point], origin_y + local_y[point],
+            0.0f, TerrainUnitsToPixels(params, height_units[point]),
+            &quad.points[point], &quad.depth[point]))
+      return;
+  }
+  if (IsDegenerate(quad.points)) return;
+  if (s_terrain_projection_cache.count < kMaxTerrainDepthQuads) {
+    s_terrain_projection_cache.quads[
+        s_terrain_projection_cache.count++] = quad;
+  } else {
+    s_terrain_projection_cache.overflow = true;
+  }
+  EmitTerrainDepthQuad(params, &quad);
 }
 
 static void AppendTerrainDepthSkirt(
@@ -638,6 +730,13 @@ static void AppendTerrainDepthGeometry(
   if (!params || params->town < 1 ||
       params->town > kSimTownTerrainTownCount)
     return;
+  if (TerrainProjectionKeyMatches(params)) {
+    for (int i = 0; i < s_terrain_projection_cache.count; i++)
+      EmitTerrainDepthQuad(
+          params, &s_terrain_projection_cache.quads[i]);
+    return;
+  }
+  BeginTerrainProjectionCache(params);
   PrepareTerrainDepthCache(params->town);
   const float origin_x = (float)params->town_screen_x0 - params->camera_x;
   const float origin_y = -(float)params->camera_y;
@@ -691,6 +790,8 @@ static void AppendTerrainDepthGeometry(
           params, origin_x, origin_y, xx, yy, h, true);
     }
   }
+  s_terrain_projection_cache.valid =
+      !s_terrain_projection_cache.overflow;
 }
 #endif
 
@@ -2720,4 +2821,8 @@ void SimBackgroundVoxelRenderer_Reset(void) {
   SimBackgroundVoxelModelCache_Reset();
   g_renderer_state.batch.vertex_count = 0;
   g_renderer_state.batch.index_count = 0;
+#if AR_SIM3D_TERRAIN_ELEVATION
+  s_terrain_projection_cache.valid = false;
+  s_terrain_projection_cache.count = 0;
+#endif
 }

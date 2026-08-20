@@ -203,7 +203,10 @@ former duplicate validation and `floorf` work. Visible voxel entries similarly
 resolve their terrain anchor and bridge depth envelope once per depth draw, and
 the non-interleaved renderer does not calculate the unused 33x33 actor-band
 depth range. Depth-pass buffers remain persistent and grow geometrically, so a
-stable scene performs no per-frame geometry allocation.
+stable scene performs no per-frame geometry allocation. Quads stage their four
+unique vertices and reuse a persistent 32-bit index pattern, avoiding the old
+six-vertex expansion and reducing geometry conversion and upload volume by one
+third.
 
 Depth geometry asks one clip-space transform for both screen position and D32
 depth instead of multiplying each vertex by the camera matrix twice. Clip-space
@@ -221,6 +224,14 @@ D3D12, while retaining the fourteen-draw custom-blend implementation as the
 backend-independent fallback. Smooth 2x automatically stays native when the
 fourfold target would exceed 10 Mi pixels, avoiding the unbounded D32+RGBA
 memory and fill-rate jump at 1440p and 4K.
+
+Projected terrain depth quads are cached by camera, viewport, landscape scale,
+and town. The early terrain-shadow pass and later object-depth composite reuse
+the same projection instead of transforming every terrain corner twice, and a
+still camera retains that projection across frames. Shadow masks are capped at
+roughly 1440p working resolution: linear upsampling and a proportionally scaled
+blur preserve their apparent size, while the two-target 4K footprint falls
+from about 63 MiB to about 16 MiB.
 
 ## Maintenance contract
 

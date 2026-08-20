@@ -56,6 +56,14 @@ bool Scene3D_ProjectShadowPoint(const float matrix[16],
 float Scene3D_ShadowFootprintScale(float z, float shrink);
 float Scene3D_AutoFitDistance(float fov_y);
 
+/* Halves both dimensions until an offscreen target fits `maximum_pixels`.
+ * Ceil division keeps odd-size aspect ratios stable and a minimum of one
+ * pixel per axis. Used for effects whose normalized sampling permits a lower
+ * working resolution than the final viewport. */
+void Scene3D_CappedTargetSize(int viewport_width, int viewport_height,
+                              uint64_t maximum_pixels,
+                              int *target_width, int *target_height);
+
 /* Repeating texture offset for wall-clock animation. Reducing the completed
  * motion rather than the clock itself makes the wrap land on an equivalent
  * texture coordinate, so long-running animation never jumps at an arbitrary
