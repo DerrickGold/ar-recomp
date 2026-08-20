@@ -363,10 +363,12 @@ static void RunOneEmulatedTick(bool *stop_running) {
  * "did at least one tick actually run" (headless: always; non-headless:
  * produced_frame).
  *
- * alpha (R17/C4): the sub-tick phase, forwarded to the present. Headless passes
- * kInterpPhaseNone — it never presents to a display and its cadence is
- * deliberately one-tick-per-iteration (§3.6). */
-static void DrawAndPresentFrame(bool headless, float alpha) {
+ * alpha (R17/C4): the sub-tick phase, forwarded to the present. Both headless
+ * modes pass kInterpPhaseNone and retain one-tick-per-iteration cadence (§3.6):
+ * pure headless skips submission, while headless-video submits that tick to
+ * its unpaced hidden compositor. */
+static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
+                                float alpha) {
   extern uint8 g_ram[];
   static int perf_on = -1;
   if (perf_on < 0) perf_on = getenv("AR_PERF") ? 1 : 0;
@@ -500,14 +502,14 @@ static void DrawAndPresentFrame(bool headless, float alpha) {
     }
   }
 
-  if (!headless) {
-  /* FrameSlot_Capture inside this call copies the sim annotated above
+  if (present_mode != kHostDisplayPresent_None) {
+    /* FrameSlot_Capture inside this call copies the sim annotated above
      * instead of recomputing it (identical inputs, same thread, nothing
      * mutates them in between). Cleared immediately after: the screenshot
      * and paused/menu-redraw captures run outside this window and must
      * self-annotate. */
     FrameSlot_SetPendingAnnotatedSim(&sim);
-    (void)HostDisplay_SubmitFrame(kHostDisplayPresent_GameTick, alpha);
+    (void)HostDisplay_SubmitFrame(present_mode, alpha);
     FrameSlot_SetPendingAnnotatedSim(NULL);
   }
 }
@@ -1083,10 +1085,13 @@ static int AppBoot_CreateVideo(AppBoot *app) {
     if (!Sim3DDepthPass_Require(g_renderer))
       Die(Sim3DDepthPass_LastError());
     g_gpu_shaders_active = true;
-    /* Apply the selected refresh policy after renderer creation. Disabling
-     * vsync stops SDL_RenderPresent from blocking until the next refresh; the
-     * pacing path supplies the selected unlimited/limited cadence. */
-    if (!app->headless_video)
+    /* Apply the selected refresh policy after renderer creation. Hidden-video
+     * automation requests vsync off and uses no host throttle; a platform
+     * swapchain may still serialize SDL_RenderPresent at its own cadence.
+     * Interactive unlimited/limited modes use the host pacing path. */
+    if (app->headless_video)
+      HostDisplay_DisableVsync();
+    else
       HostDisplay_ApplyRefreshVsync();
 
     /* Exclusive fullscreen needs its video mode set after creation; borderless
@@ -1751,6 +1756,9 @@ static void AppRunMainLoop(AppBoot *app) {
   static const int kMaxCatchupFrames = 3;     /* spiral-of-death cap, §3.1 */
   uint64_t accumulator = 0;
   uint64_t last_time_ns = SDL_GetTicksNS();
+  const HostDisplayPresentMode emulated_frame_present_mode =
+      HostDisplay_EmulatedFramePresentMode(
+          app->headless, app->headless_video);
 
   while (running) {
     AppLoop_PumpEvents(app, &running);
@@ -1820,7 +1828,7 @@ static void AppRunMainLoop(AppBoot *app) {
        * the CPU allows. */
       RunOneEmulatedTick(&running);
       RunOuterIterationHousekeeping();
-      DrawAndPresentFrame(true, kInterpPhaseNone);
+      DrawAndPresentFrame(emulated_frame_present_mode, kInterpPhaseNone);
 
       if (DevTools_ShouldAutoQuit()) running = false;
       /* AR_PACE=1: throttle headless to ~60fps so the emulated SPC (advanced
@@ -1908,7 +1916,7 @@ static void AppRunMainLoop(AppBoot *app) {
       bool presented = false;
       if (!g_window_hidden) {
         if (produced_frame) {
-          DrawAndPresentFrame(false, alpha);
+          DrawAndPresentFrame(emulated_frame_present_mode, alpha);
           presented = true;
         } else if (HostDisplay_TryRepresentFrame(
                        alpha,

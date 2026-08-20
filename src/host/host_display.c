@@ -160,6 +160,9 @@ static void ThrottlePresent(uint64_t interval_ns) {
 static uint64_t PresentIntervalNs(HostDisplayPresentMode mode) {
   const HostDisplayPacingOptions options = CurrentPacingOptions();
   switch (mode) {
+    case kHostDisplayPresent_None:
+    case kHostDisplayPresent_HeadlessVideo:
+      return 0;
     case kHostDisplayPresent_Menu:
       return HostDisplayPacing_UiIntervalNs(
           options, kHostDisplayEmulationFrameIntervalNs);
@@ -341,10 +344,8 @@ void HostDisplay_PollProperties(void) {
   UpdateRefreshRate();
 }
 
-void HostDisplay_ApplyRefreshVsync(void) {
+static void SetRenderVsync(int requested) {
   if (!g_renderer) return;
-  const int requested =
-      g_settings.refresh_mode == kRefreshMode_Vsync ? 1 : 0;
   if (!SDL_SetRenderVSync(g_renderer, requested)) {
     fprintf(stderr, "[display] SDL_SetRenderVSync(%d) rejected: %s\n",
             requested, SDL_GetError());
@@ -352,6 +353,14 @@ void HostDisplay_ApplyRefreshVsync(void) {
   int actual = 0;
   Settings_SetHostVsyncActive(
       SDL_GetRenderVSync(g_renderer, &actual) && actual != 0);
+}
+
+void HostDisplay_ApplyRefreshVsync(void) {
+  SetRenderVsync(g_settings.refresh_mode == kRefreshMode_Vsync ? 1 : 0);
+}
+
+void HostDisplay_DisableVsync(void) {
+  SetRenderVsync(0);
 }
 
 uint64_t HostDisplay_CatchupCapNs(int maximum_catchup_frames) {
@@ -404,7 +413,8 @@ static void ReportPresentPerformance(uint32_t render_start_ms,
 }
 
 bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha) {
-  if (!g_renderer || !g_texture) return false;
+  if (mode == kHostDisplayPresent_None || !g_renderer || !g_texture)
+    return false;
 
   static bool performance_initialized;
   static bool performance_enabled;
@@ -413,7 +423,8 @@ bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha) {
     performance_enabled = getenv("AR_PERF") != NULL;
   }
 
-  const bool game_tick = mode == kHostDisplayPresent_GameTick;
+  const bool game_tick = mode == kHostDisplayPresent_GameTick ||
+                         mode == kHostDisplayPresent_HeadlessVideo;
   FrameSlot slot;
   FrameSlot_Capture(&slot);
   const uint32_t render_start_ms =
