@@ -2,6 +2,13 @@
 
 **Status: EXECUTED.** Applied on a machine with a ROM and a linkable game
 target. `present.c` is 4,551 -> 1,262 lines; the renderer is `src/present_sim3d.c`
+
+> **Since:** the renderer that this spec created was itself split again on
+> 2026-08-20. `present_sim3d.c` keeps the composite, object/billboard drawing,
+> the rim light, the canvas/underlay/extension, the backdrop and the camera;
+> the effect, shadow, cloud and terrain stages are their own translation units
+> over a shared `present_sim3d_project` geometry unit. The world-map renderer
+> (`present_world_nav.c`) came out earlier and is unchanged.
 with `src/present_internal.h` as the boundary, and the world-map half was
 subsequently split again into `src/present_world_nav.c`
 (`src/present_sim3d_internal.h`). What the execution found that this spec did not
