@@ -104,6 +104,43 @@ Run `python3 tools/sim3d_demo.py --all` for the current suite result; it writes
 one `coverage.json` linking every individual report. Pinning a specific past
 run here goes stale on every added checkpoint, so the command is the reference.
 
+## D7: the background voxel town
+
+`D7-voxel-town` is the first checkpoint of any kind that renders the background
+voxel town. Before it, roughly 2,500 lines of shipped render code — authored
+models, mountain relief, the volcano, the audited terrain mesh and its D32
+occluder — were covered by nothing: no stage toggle in `SIM3D_STAGE_ENV`
+reaches them, and no other replay puts them on screen.
+
+It replays Aitos, the town that exercises the most of that path at once, and
+captures nine composited frames through the real GPU depth path. Four
+independent gates, because each catches a different failure:
+
+| Gate | What it proves |
+|---|---|
+| Presentation-only | The authentic framebuffer hashes match the voxel-off pass frame for frame, so the renderer moved nothing the game computes |
+| Liveness | The composite differs from `AR_SIM3D_VOXEL_PRESET=Off`, so a silent fallback to flat ground fails instead of passing |
+| Determinism | A third identical pass produces identical composites |
+| Reference | The composites match what this host recorded last time |
+
+Only the first three are portable. The screenshots read back the real
+swapchain, so their pixels belong to the host's driver as much as to the
+source; the reference lives under `runs/sim3d-voxel-reference/<host>.json`, is
+not committed, and a host with no reference **records** one and says so rather
+than failing. When a visual change is intended, delete that file and re-run.
+
+Two rules are baked into its env and are worth reusing in any composite A/B.
+The dynamic camera and the cloud drift both advance on wall time — the warning
+above — so the checkpoint pins `AR_SIM3D_CAMERA_MODE=0` and
+`AR_SIM3D_CLOUDS=off`. And **arming the metadata trace changes what a frame
+renders**: `SimRenderMetadata_TraceArmed` gates a full-surface hash the frame
+otherwise skips, so the determinism pass redirects the trace rather than
+switching it off. A control that varies anything is measuring the variation.
+
+`SIM3D_VOXEL_ENV` extends the existing all-or-nothing stage-pinning rule to the
+eight voxel settings. The preset rewrites detail, LOD, shading and the rest, so
+a block naming only the preset does not describe the scene it renders.
+
 ## Coverage model and remaining gap
 
 Town commands, pickers, camera behavior, layer machinery, and miracle systems
