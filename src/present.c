@@ -40,6 +40,7 @@
 #include "settings.h"
 #include "present_internal.h"
 #include "presentation_geometry.h"
+#include "presentation_upload_mirror.h"
 
 
 extern SDL_Renderer *g_renderer;
@@ -64,130 +65,62 @@ static bool s_action_bg2_blend_supported = true;
 static SDL_Texture *s_action_obj_interpolation_atlas_texture;
 static uint64_t s_action_obj_interpolation_atlas_timestamp;
 
-/* Streaming textures retain their last successfully uploaded pixels. Keep an
- * exact CPU mirror so a static separated plane costs no bus upload and a
- * locally animated plane updates only its changed bounding rectangle. This is
- * intentionally byte comparison rather than content hashing: a hash collision
- * must never become a rendering correctness bug. The mirror is render-thread
- * owned and is read only while the current FrameSlot owns the capture buffers. */
+/* Streaming textures retain their last successfully uploaded pixels. Exact CPU
+ * mirrors let static presentation surfaces cost no bus upload and locally
+ * animated surfaces update only their changed bounding rectangle. Byte-exact
+ * comparison avoids making rendering correctness depend on a hash. */
 enum {
   kSim3DUploadSurface_Flat = kSim3DPlane_Count,
   kSim3DUploadSurface_Atlas,
   kSim3DUploadSurface_Count,
 };
 
-typedef struct Sim3DUploadMirror {
-  uint32_t *pixels;
-  int width, height;
-  bool valid;
-} Sim3DUploadMirror;
+enum {
+  kActionUploadSurface_Frame,
+  kActionUploadSurface_Bg2Mask,
+  kActionUploadSurface_HudBg,
+  kActionUploadSurface_HudObj,
+  kActionUploadSurface_Count,
+};
 
-static Sim3DUploadMirror s_sim3d_upload_mirrors[kSim3DUploadSurface_Count];
+static PresentationUploadMirror
+    s_sim3d_upload_mirrors[kSim3DUploadSurface_Count];
+static PresentationUploadMirror
+    s_action_upload_mirrors[kActionUploadSurface_Count];
 
 static void ResetSim3DUploadMirrors(void) {
-  for (int surface = 0; surface < kSim3DUploadSurface_Count; surface++) {
-    free(s_sim3d_upload_mirrors[surface].pixels);
-    s_sim3d_upload_mirrors[surface] = (Sim3DUploadMirror){0};
-  }
+  for (int surface = 0; surface < kSim3DUploadSurface_Count; surface++)
+    PresentationUploadMirror_Reset(&s_sim3d_upload_mirrors[surface]);
 }
 
-static bool EnsureSim3DUploadMirror(int surface, int width, int height) {
-  if (surface < 0 || surface >= kSim3DUploadSurface_Count ||
-      width <= 0 || height <= 0 ||
-      (size_t)width > SIZE_MAX / (size_t)height ||
-      (size_t)width * (size_t)height >
-          SIZE_MAX / sizeof(uint32_t))
-    return false;
-  Sim3DUploadMirror *mirror = &s_sim3d_upload_mirrors[surface];
-  if (mirror->width != width || mirror->height != height) {
-    free(mirror->pixels);
-    *mirror = (Sim3DUploadMirror){
-      .width = width,
-      .height = height,
-    };
-  }
-  if (!mirror->pixels) {
-    mirror->pixels = malloc(
-        (size_t)width * (size_t)height * sizeof(*mirror->pixels));
-    mirror->valid = false;
-  }
-  return mirror->pixels != NULL;
+static void ResetActionUploadMirrors(void) {
+  for (int surface = 0; surface < kActionUploadSurface_Count; surface++)
+    PresentationUploadMirror_Reset(&s_action_upload_mirrors[surface]);
+}
+
+static bool UploadChangedSurface(
+    SDL_Texture *texture, PresentationUploadMirror *mirror,
+    const uint8_t *pixels, int width, int height, int source_pitch,
+    int destination_x, int destination_y) {
+  PresentationUploadResult result;
+  const bool uploaded = PresentationUploadMirror_UploadArgb8888(
+      mirror, texture, pixels, width, height, source_pitch,
+      destination_x, destination_y, &result);
+  if (uploaded && result.uploaded_bytes)
+    Sim3DPerformance_AddUpload(result.uploaded_bytes);
+  return uploaded;
 }
 
 static bool UploadChangedSim3DSurface(
     SDL_Texture *texture, int surface, const uint32_t *pixels,
     int width, int height, int source_pitch_pixels) {
-  if (!texture || !pixels || width <= 0 || height <= 0 ||
-      source_pitch_pixels < width ||
-      (size_t)source_pitch_pixels > SIZE_MAX / (size_t)height ||
+  if (surface < 0 || surface >= kSim3DUploadSurface_Count ||
       source_pitch_pixels > INT_MAX / (int)sizeof(uint32_t))
     return false;
-
-  const uint32_t *current = pixels;
-  if (!EnsureSim3DUploadMirror(surface, width, height)) {
-    /* The mirror is only an optimization. Allocation pressure must fall back
-     * to the original complete upload, never turn a valid frame into a stale
-     * texture. */
-    SDL_Rect full = {0, 0, width, height};
-    const bool uploaded = SDL_UpdateTexture(
-        texture, &full, current,
-        source_pitch_pixels * (int)sizeof(*current));
-    if (uploaded)
-      Sim3DPerformance_AddUpload(
-          (uint64_t)width * (uint64_t)height * sizeof(*current));
-    return uploaded;
-  }
-  Sim3DUploadMirror *mirror = &s_sim3d_upload_mirrors[surface];
-  SDL_Rect dirty = {0, 0, width, height};
-  if (mirror->valid) {
-    int x0 = width;
-    int y0 = height;
-    int x1 = 0;
-    int y1 = 0;
-    for (int y = 0; y < height; y++) {
-      const uint32_t *current_row =
-          current + (size_t)y * (size_t)source_pitch_pixels;
-      const uint32_t *mirror_row =
-          mirror->pixels + (size_t)y * (size_t)width;
-      if (memcmp(current_row, mirror_row,
-                 (size_t)width * sizeof(*current_row)) == 0)
-        continue;
-      int row_x0 = 0;
-      while (row_x0 < width && current_row[row_x0] == mirror_row[row_x0])
-        row_x0++;
-      int row_x1 = width;
-      while (row_x1 > row_x0 &&
-             current_row[row_x1 - 1] == mirror_row[row_x1 - 1])
-        row_x1--;
-      if (row_x0 < x0) x0 = row_x0;
-      if (row_x1 > x1) x1 = row_x1;
-      if (y < y0) y0 = y;
-      y1 = y + 1;
-    }
-    if (x0 == width) return true;
-    dirty = (SDL_Rect){x0, y0, x1 - x0, y1 - y0};
-  }
-
-  const int pitch = source_pitch_pixels * (int)sizeof(*current);
-  const uint32_t *source =
-      current + (size_t)dirty.y * (size_t)source_pitch_pixels +
-      (size_t)dirty.x;
-  if (!SDL_UpdateTexture(texture, &dirty, source, pitch)) {
-    /* SDL does not promise useful contents after a failed streaming upload.
-     * Force a full refresh next time rather than trusting either side. */
-    mirror->valid = false;
-    return false;
-  }
-  for (int y = dirty.y; y < dirty.y + dirty.h; y++) {
-    memcpy(mirror->pixels + (size_t)y * (size_t)width + (size_t)dirty.x,
-           current + (size_t)y * (size_t)source_pitch_pixels +
-               (size_t)dirty.x,
-           (size_t)dirty.w * sizeof(*current));
-  }
-  mirror->valid = true;
-  Sim3DPerformance_AddUpload(
-      (uint64_t)dirty.w * (uint64_t)dirty.h * sizeof(*current));
-  return true;
+  return UploadChangedSurface(
+      texture, &s_sim3d_upload_mirrors[surface],
+      (const uint8_t *)pixels, width, height,
+      source_pitch_pixels * (int)sizeof(uint32_t), 0, 0);
 }
 
 static SDL_Texture *EnsureActionObjInterpolationAtlas(void) {
@@ -763,14 +696,12 @@ void PresentUpload(const FrameSlot *slot) {
     /* g_pixels is bound apron-wide (it doubles as the diorama backdrop plane),
      * so the authentic frame starts kPpuObjApron columns in. Offset the source
      * and use the real pitch; the upload rect is unchanged. */
-    if (surface_pitch <= INT_MAX &&
-        SDL_UpdateTexture(
-            g_texture, &upload,
-            g_pixels + ActionApron_DisplayOffset(slot->obj_apron),
-            (int)surface_pitch)) {
-      Sim3DPerformance_AddUpload(
-          (uint64_t)upload.w * (uint64_t)upload.h * sizeof(uint32_t));
-    }
+    if (surface_pitch <= INT_MAX)
+      UploadChangedSurface(
+          g_texture,
+          &s_action_upload_mirrors[kActionUploadSurface_Frame],
+          g_pixels + ActionApron_DisplayOffset(slot->obj_apron),
+          upload.w, upload.h, (int)surface_pitch, upload.x, upload.y);
   }
 
   if (!slot->diorama_active && slot->action_bg2_mask_valid) {
@@ -787,13 +718,11 @@ void PresentUpload(const FrameSlot *slot) {
     }
     if (s_action_bg2_mask_texture) {
       const SDL_Rect mask = {0, 0, slot->snes_width, slot->snes_height};
-      if (SDL_UpdateTexture(
-              s_action_bg2_mask_texture, &mask,
-              g_action_bg2_mask_pixels,
-              slot->snes_width * (int)sizeof(uint32_t))) {
-        Sim3DPerformance_AddUpload(
-            (uint64_t)mask.w * (uint64_t)mask.h * sizeof(uint32_t));
-      }
+      UploadChangedSurface(
+          s_action_bg2_mask_texture,
+          &s_action_upload_mirrors[kActionUploadSurface_Bg2Mask],
+          g_action_bg2_mask_pixels, mask.w, mask.h,
+          slot->snes_width * (int)sizeof(uint32_t), mask.x, mask.y);
     }
   }
 
@@ -806,23 +735,21 @@ void PresentUpload(const FrameSlot *slot) {
       int rows = slot->overlay_captures[kFrameSlotOverlay_Bg3].y1;
       if (rows < split_rows) rows = split_rows;
       SDL_Rect hud = { 0, 0, slot->snes_width, rows };
-      if (SDL_UpdateTexture(
-              g_hud_bg_texture, &hud, g_hud_bg_pixels,
-              slot->snes_width * (int)sizeof(uint32_t))) {
-        Sim3DPerformance_AddUpload(
-            (uint64_t)hud.w * (uint64_t)hud.h * sizeof(uint32_t));
-      }
+      UploadChangedSurface(
+          g_hud_bg_texture,
+          &s_action_upload_mirrors[kActionUploadSurface_HudBg],
+          g_hud_bg_pixels, hud.w, hud.h,
+          slot->snes_width * (int)sizeof(uint32_t), hud.x, hud.y);
     }
     if (g_hud_obj_texture) {
       int rows = slot->overlay_captures[kFrameSlotOverlay_Obj].y1;
       if (rows < split_rows) rows = split_rows;
       SDL_Rect hud = { 0, 0, slot->snes_width, rows };
-      if (SDL_UpdateTexture(
-              g_hud_obj_texture, &hud, g_hud_obj_pixels,
-              slot->snes_width * (int)sizeof(uint32_t))) {
-        Sim3DPerformance_AddUpload(
-            (uint64_t)hud.w * (uint64_t)hud.h * sizeof(uint32_t));
-      }
+      UploadChangedSurface(
+          g_hud_obj_texture,
+          &s_action_upload_mirrors[kActionUploadSurface_HudObj],
+          g_hud_obj_pixels, hud.w, hud.h,
+          slot->snes_width * (int)sizeof(uint32_t), hud.x, hud.y);
     }
   }
 
@@ -1585,6 +1512,7 @@ bool Present_SimRimMaskSupported(void) {
  * Vulkan/SDL_GPU (Steam Deck) bug. */
 void PresentRendererResources_Reset(void) {
   ResetSim3DUploadMirrors();
+  ResetActionUploadMirrors();
   if (s_hud_composite_texture)
     SDL_DestroyTexture(s_hud_composite_texture);
   s_hud_composite_texture = NULL;
