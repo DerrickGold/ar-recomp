@@ -14,33 +14,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "present_sim3d_internal.h"
+#include "present_sim3d_project.h"
+#include "present_sim3d_shadows.h"
 #include "sim/sim_town_terrain.h"
 #include "sim/sim3d.h"
-
-/* kPixelAspect_Crt43 and kDioramaCam_Free/kDioramaCam_Dynamic are plain enum
- * constants (not live state) — fine to pull in just for those. */
-#include "present_internal.h"
 
 #ifndef AR_SIM3D_TERRAIN_ELEVATION
 #define AR_SIM3D_TERRAIN_ELEVATION 0
 #endif
 
-
 extern SDL_Renderer *g_renderer;
-extern SDL_Texture *g_texture;
-extern SDL_Texture *g_hud_bg_texture;
-extern SDL_Texture *g_hud_obj_texture;
-extern uint8_t g_pixels[];
-extern uint8_t g_hud_bg_pixels[];
-extern uint8_t g_hud_obj_pixels[];
-extern SDL_Texture *g_diorama_textures[kDioramaPlane_Count];
-extern uint8_t *g_diorama_layer_pixels[kDioramaPlane_Count];
-extern SDL_Texture *g_sim_obj_atlas_texture;
-
-extern SDL_Texture *g_sim3d_layer_textures[kSim3DPlane_Count];
-extern SDL_Texture *g_sim3d_flat_texture;
-
-#include "present_sim3d_project.h"
 
 
 /* Cull proximity at a captured-texture point, 0..1. The conversion back to
@@ -308,9 +292,6 @@ bool ProjectSimAnchorAndScale(
   if (scale_y) *scale_y = (float)viewport.h / source.h * depth_scale;
   return true;
 }
-
-float SimBillboardHeightPop(SDL_Rect source, float height_world,
-                                   unsigned height_pop_pct);
 
 /* The world origin is a parameter rather than a field read, so a caller
  * walking an effect's retained path can project each earlier position without

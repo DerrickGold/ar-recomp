@@ -1529,11 +1529,16 @@ def run_suite(args: argparse.Namespace, checkpoints: dict) -> int:
             sys.executable, str(Path(__file__).resolve()),
             "--manifest", str(args.manifest),
             "--checkpoint", name,
-            "--binary", str(args.binary),
             "--rom", str(args.rom),
-            "--config", str(args.config),
             "--artifact-root", str(suite_root),
         ]
+        # An explicit suite override applies to every checkpoint. Without one,
+        # let an individual checkpoint select the build/configuration its
+        # contract requires (D7 needs the default-off terrain feature enabled).
+        if args.binary is not None:
+            command.extend(("--binary", str(args.binary)))
+        if args.config is not None:
+            command.extend(("--config", str(args.config)))
         if args.dry_run:
             command.append("--dry-run")
         result = subprocess.run(command, cwd=ROOT, check=False)
@@ -1584,10 +1589,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     parser.add_argument("--checkpoint")
-    parser.add_argument("--binary", type=Path,
-                        default=ROOT / "build" / "ActRaiserRecomp")
+    parser.add_argument("--binary", type=Path)
     parser.add_argument("--rom", type=Path, default=ROOT / "ar.sfc")
-    parser.add_argument("--config", type=Path, default=ROOT / "config.ini")
+    parser.add_argument("--config", type=Path)
     parser.add_argument("--artifact-root", type=Path,
                         default=ROOT / "runs" / "sim3d-checkpoints")
     parser.add_argument("--list", action="store_true")
@@ -1612,9 +1616,13 @@ def main() -> int:
 
     checkpoint = checkpoints[args.checkpoint]
     check_stage_pinning(args.checkpoint, checkpoint)
-    binary = args.binary.resolve()
+    binary = (args.binary.resolve() if args.binary is not None else
+              resolve(ROOT, checkpoint.get(
+                  "default_binary", "build/ActRaiserRecomp")).resolve())
     rom = args.rom.resolve()
-    config = args.config.resolve()
+    config = (args.config.resolve() if args.config is not None else
+              resolve(ROOT, checkpoint.get(
+                  "default_config", "config.ini")).resolve())
     replay = resolve(ROOT, checkpoint["replay"]).resolve()
     sram_key = "sram_base64" if checkpoint.get("sram_base64") else "sram"
     sram = resolve(ROOT, checkpoint[sram_key]).resolve()
