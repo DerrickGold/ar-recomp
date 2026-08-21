@@ -28,6 +28,7 @@ enum {
 typedef struct SimTerrainProjectedQuad {
   Scene3DPoint points[4];
   float depth[4];
+  float clip_depth[4];
   bool receives_shadow;
 } SimTerrainProjectedQuad;
 
@@ -57,19 +58,11 @@ static struct {
   bool valid;
   bool overflow;
   int count;
+  float minimum_clip_depth;
+  float maximum_clip_depth;
   SimTerrainProjectionKey key;
   SimTerrainProjectedQuad quads[kMaxTerrainDepthQuads];
 } s_terrain_projection_cache;
-
-/* Actor-band clipping asks only for the extrema of the same immutable terrain
- * projection. Keep that tiny result separately because the interleaved path
- * requests it before the main depth pass has necessarily populated the quad
- * cache (for example when terrain shadows are disabled). */
-static struct {
-  bool valid;
-  float minimum, maximum;
-  SimTerrainProjectionKey key;
-} s_terrain_depth_range_cache;
 
 static SimTerrainDepthCell *TerrainDepthCell(int x, int y) {
   return &s_terrain_depth_cache.cell[
@@ -139,6 +132,8 @@ static void BeginTerrainProjectionCache(
   s_terrain_projection_cache.valid = false;
   s_terrain_projection_cache.overflow = false;
   s_terrain_projection_cache.count = 0;
+  s_terrain_projection_cache.minimum_clip_depth = FLT_MAX;
+  s_terrain_projection_cache.maximum_clip_depth = -FLT_MAX;
   SetTerrainProjectionKey(&s_terrain_projection_cache.key, params);
 }
 
@@ -174,30 +169,47 @@ static void EmitTerrainDepthQuad(
   Sim3DDepthPass_AppendQuad(kSim3DDepthPass_ShadowReceiver, vertices);
 }
 
-static void AppendTerrainDepthQuad(
+static void CacheTerrainDepthQuad(
     const SimBackgroundVoxelRenderParams *params,
     float origin_x, float origin_y,
     const float local_x[4], const float local_y[4],
     const float height_units[4], bool receives_shadow) {
   SimTerrainProjectedQuad quad = {.receives_shadow = receives_shadow};
   for (int point = 0; point < 4; point++) {
+    const float texture_x = origin_x + local_x[point];
+    const float texture_y = origin_y + local_y[point];
+    const float terrain_pixels =
+        SimBackgroundVoxelProject_TerrainUnitsToPixels(
+            params, height_units[point]);
     if (!SimBackgroundVoxelProject_GroundedVertex(
             params, &kSimBackgroundUprightProjectionAxis,
-            origin_x + local_x[point], origin_y + local_y[point],
-            0.0f,
-            SimBackgroundVoxelProject_TerrainUnitsToPixels(
-                params, height_units[point]),
+            texture_x, texture_y, 0.0f, terrain_pixels,
             &quad.points[point], &quad.depth[point]))
       return;
+    float world_x, world_y, world_z;
+    SimBackgroundVoxelProject_TexturePointToWorld(
+        params, texture_x, texture_y, terrain_pixels,
+        &world_x, &world_y, &world_z);
+    quad.clip_depth[point] = Scene3D_ClipDepth(
+        params->matrix, world_x, world_y, world_z);
   }
   if (SimBackgroundVoxelProject_IsDegenerate(quad.points)) return;
   if (s_terrain_projection_cache.count < kMaxTerrainDepthQuads) {
     s_terrain_projection_cache.quads[
         s_terrain_projection_cache.count++] = quad;
+    for (int point = 0; point < 4; point++) {
+      if (quad.clip_depth[point] <
+          s_terrain_projection_cache.minimum_clip_depth)
+        s_terrain_projection_cache.minimum_clip_depth =
+            quad.clip_depth[point];
+      if (quad.clip_depth[point] >
+          s_terrain_projection_cache.maximum_clip_depth)
+        s_terrain_projection_cache.maximum_clip_depth =
+            quad.clip_depth[point];
+    }
   } else {
     s_terrain_projection_cache.overflow = true;
   }
-  EmitTerrainDepthQuad(params, &quad);
 }
 
 static void AppendTerrainDepthSkirt(
@@ -223,25 +235,15 @@ static void AppendTerrainDepthSkirt(
     hh[3 - endpoint] =
         neighbour_0 + (neighbour_1 - neighbour_0) * at;
   }
-  AppendTerrainDepthQuad(
+  CacheTerrainDepthQuad(
       params, origin_x, origin_y, xx, yy, hh, false);
 }
 
-/* The visible terrain mesh is textured in present_sim3d.c.  Re-submit its
- * exact top surface and exposed cliff skirts here as depth-only geometry, so
- * a nearer ridge can reject a house or landmark on the far side without
- * covering the already-rendered town texture or the billboard actor bands. */
-void SimBackgroundVoxelTerrainDepth_Append(
+static void BuildTerrainProjectionCache(
     const SimBackgroundVoxelRenderParams *params) {
   if (!params || params->town < 1 ||
       params->town > kSimTownTerrainTownCount)
     return;
-  if (TerrainProjectionKeyMatches(params)) {
-    for (int i = 0; i < s_terrain_projection_cache.count; i++)
-      EmitTerrainDepthQuad(
-          params, &s_terrain_projection_cache.quads[i]);
-    return;
-  }
   BeginTerrainProjectionCache(params);
   PrepareTerrainDepthCache(params->town);
   const float origin_x = (float)params->town_screen_x0 - params->camera_x;
@@ -292,7 +294,7 @@ void SimBackgroundVoxelTerrainDepth_Append(
       }
       const float xx[4] = {x0, x1, x1, x0};
       const float yy[4] = {y0, y0, y1, y1};
-      AppendTerrainDepthQuad(
+      CacheTerrainDepthQuad(
           params, origin_x, origin_y, xx, yy, h, true);
     }
   }
@@ -300,49 +302,42 @@ void SimBackgroundVoxelTerrainDepth_Append(
       !s_terrain_projection_cache.overflow;
 }
 
-/* The actor-band clip asks only for the extrema of this same immutable
- * projection, and asks for them before the quad cache has necessarily been
- * populated -- terrain shadows can be off. It therefore keeps its own tiny
- * result rather than deriving one from the quads. */
+/* The visible terrain mesh is textured in present_sim3d.c. Re-submit its
+ * exact top surface and exposed cliff skirts here as depth-only geometry, so
+ * a nearer ridge can reject a house or landmark on the far side without
+ * covering the already-rendered town texture or the billboard actor bands. */
+void SimBackgroundVoxelTerrainDepth_Append(
+    const SimBackgroundVoxelRenderParams *params) {
+  if (!params || params->town < 1 ||
+      params->town > kSimTownTerrainTownCount)
+    return;
+  if (!TerrainProjectionKeyMatches(params))
+    BuildTerrainProjectionCache(params);
+  if (!TerrainProjectionKeyMatches(params)) return;
+  for (int i = 0; i < s_terrain_projection_cache.count; i++)
+    EmitTerrainDepthQuad(params, &s_terrain_projection_cache.quads[i]);
+}
+
+/* Actor-band clipping uses the clip-W extrema of the exact projected quads.
+ * When shadows are enabled that projection was already built by the receiver;
+ * otherwise this call builds it once and the following depth composite reuses
+ * it. The old separate 33x33 sampler repeated terrain lookup and matrix work
+ * on every camera move, then the main pass projected the same surface again. */
 void SimBackgroundVoxelTerrainDepth_GroundDepthRange(
     const SimBackgroundVoxelRenderParams *params,
     float *minimum, float *maximum) {
   *minimum = FLT_MAX;
   *maximum = -FLT_MAX;
-  if (s_terrain_depth_range_cache.valid &&
-      TerrainProjectionKeyEquals(
-          &s_terrain_depth_range_cache.key, params)) {
-    *minimum = s_terrain_depth_range_cache.minimum;
-    *maximum = s_terrain_depth_range_cache.maximum;
-    return;
-  }
-  for (int cell_y = 0; cell_y <= kSimTownTerrainCells; cell_y++)
-    for (int cell_x = 0; cell_x <= kSimTownTerrainCells; cell_x++) {
-      const float map_x = cell_x * kSimTownTerrainCellPixels;
-      const float map_y = cell_y * kSimTownTerrainCellPixels;
-      const float texture_x = (float)params->town_screen_x0 -
-          params->camera_x + map_x;
-      const float texture_y = -(float)params->camera_y + map_y;
-      float world_x, world_y, world_z;
-      SimBackgroundVoxelProject_TexturePointToWorld(
-          params, texture_x, texture_y,
-          SimBackgroundVoxelProject_TerrainLiftPixels(params, map_x, map_y),
-          &world_x, &world_y, &world_z);
-      float depth = Scene3D_ClipDepth(
-          params->matrix, world_x, world_y, world_z);
-      if (depth < *minimum) *minimum = depth;
-      if (depth > *maximum) *maximum = depth;
-    }
-  SetTerrainProjectionKey(&s_terrain_depth_range_cache.key, params);
-  s_terrain_depth_range_cache.minimum = *minimum;
-  s_terrain_depth_range_cache.maximum = *maximum;
-  s_terrain_depth_range_cache.valid = true;
+  if (!TerrainProjectionKeyMatches(params))
+    BuildTerrainProjectionCache(params);
+  if (!TerrainProjectionKeyMatches(params)) return;
+  *minimum = s_terrain_projection_cache.minimum_clip_depth;
+  *maximum = s_terrain_projection_cache.maximum_clip_depth;
 }
 
 void SimBackgroundVoxelTerrainDepth_Reset(void) {
   s_terrain_projection_cache.valid = false;
   s_terrain_projection_cache.count = 0;
-  s_terrain_depth_range_cache.valid = false;
   s_terrain_depth_cache.valid = false;
 }
 

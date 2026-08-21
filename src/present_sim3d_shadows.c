@@ -21,6 +21,7 @@
 #include "present_sim3d_shadows.h"
 #include "sim/sim_render_atlas.h"
 #include "sim/sim3d.h"
+#include "sim/sim3d_performance.h"
 #include "shaders/sim_shadow_blur_frag.h"
 
 #ifndef AR_SIM3D_TERRAIN_ELEVATION
@@ -55,6 +56,21 @@ static SDL_GPUDevice *s_sim_shadow_blur_device;
 static SDL_GPUShader *s_sim_shadow_blur_shader;
 static SDL_GPURenderState *s_sim_shadow_blur_state;
 static bool s_sim_shadow_blur_attempted;
+
+enum {
+  kSimShadowVerticesPerCaster = 4,
+  kSimShadowIndicesPerCaster = 6,
+  kSimShadowMaxVertices =
+      kSimMaxRenderObjects * kSimShadowVerticesPerCaster,
+  kSimShadowMaxIndices =
+      kSimMaxRenderObjects * kSimShadowIndicesPerCaster,
+};
+
+/* Every actor silhouette samples the same atlas with the same material state.
+ * Accumulate them into one geometry submission; primitive order remains the
+ * source object order, while the renderer avoids up to 128 tiny API calls. */
+static SDL_Vertex s_sim_shadow_vertices[kSimShadowMaxVertices];
+static int s_sim_shadow_indices[kSimShadowMaxIndices];
 
 /* The directional light, resolved into shear per world unit of height (the
  * light is infinitely far and the ground is always z=0, so only the ratio
@@ -237,7 +253,8 @@ static void BlurSimShadowAxis(SDL_Texture *source, SDL_Texture *destination,
       /* Once submitted, do not run the fallback on an SDL draw error: a
        * backend may already have recorded the draw, and repeating it would
        * double the shadow. The next axis/frame can still continue safely. */
-      SDL_RenderTexture(g_renderer, source, NULL, NULL);
+      if (SDL_RenderTexture(g_renderer, source, NULL, NULL))
+        Sim3DPerformance_AddDraw(0, 0);
       SDL_SetGPURenderState(g_renderer, NULL);
       SDL_SetTextureBlendMode(source, SDL_BLENDMODE_BLEND);
       return;
@@ -252,7 +269,8 @@ static void BlurSimShadowAxis(SDL_Texture *source, SDL_Texture *destination,
      * which reads as a smeared double image rather than a soft edge. Copy the
      * mask through unchanged and leave the shadow hard. */
     SDL_SetTextureBlendMode(source, SDL_BLENDMODE_NONE);
-    SDL_RenderTexture(g_renderer, source, NULL, NULL);
+    if (SDL_RenderTexture(g_renderer, source, NULL, NULL))
+      Sim3DPerformance_AddDraw(0, 0);
     SDL_SetTextureBlendMode(source, SDL_BLENDMODE_BLEND);
     return;
   }
@@ -265,7 +283,8 @@ static void BlurSimShadowAxis(SDL_Texture *source, SDL_Texture *destination,
       (float)w, (float)h,
     };
     SDL_SetTextureAlphaMod(source, (Uint8)(255 / kSimShadowBlurTaps));
-    SDL_RenderTexture(g_renderer, source, NULL, &destination_rect);
+    if (SDL_RenderTexture(g_renderer, source, NULL, &destination_rect))
+      Sim3DPerformance_AddDraw(0, 0);
   }
   SDL_SetTextureAlphaMod(source, 255);
   SDL_SetTextureBlendMode(source, SDL_BLENDMODE_BLEND);
@@ -358,6 +377,8 @@ void DrawSimShadowMask(
   SDL_SetTextureBlendMode(g_sim_obj_atlas_texture, SDL_BLENDMODE_BLEND);
   SDL_SetTextureAlphaMod(g_sim_obj_atlas_texture, 255);
 
+  int vertex_count = 0;
+  int index_count = 0;
   for (size_t i = 0; i < slot->sim.object_count; i++) {
     const SimRenderObject *object = &slot->sim.objects[i];
     if (object->hidden || !Sim3D_ObjectCastsShadow(object)) continue;
@@ -443,15 +464,29 @@ void DrawSimShadowMask(
     float v1 = (object->atlas_y + object->atlas_h) /
         (float)kSimObjAtlasHeight;
     const SDL_FColor black = { 0.0f, 0.0f, 0.0f, 1.0f };
-    SDL_Vertex vertices[] = {
+    SDL_Vertex vertices[kSimShadowVerticesPerCaster] = {
       {{corner[0].x, corner[0].y}, black, {u0, v0}},
       {{corner[1].x, corner[1].y}, black, {u1, v0}},
       {{corner[2].x, corner[2].y}, black, {u0, v1}},
       {{corner[3].x, corner[3].y}, black, {u1, v1}},
     };
-    const int indices[] = { 0, 1, 3, 0, 3, 2 };
-    SDL_RenderGeometry(g_renderer, g_sim_obj_atlas_texture,
-                       vertices, 4, indices, 6);
+    const int base = vertex_count;
+    memcpy(&s_sim_shadow_vertices[vertex_count], vertices, sizeof(vertices));
+    vertex_count += kSimShadowVerticesPerCaster;
+    const int indices[kSimShadowIndicesPerCaster] = {
+      base, base + 1, base + 3, base, base + 3, base + 2,
+    };
+    memcpy(&s_sim_shadow_indices[index_count], indices, sizeof(indices));
+    index_count += kSimShadowIndicesPerCaster;
+  }
+
+  if (index_count) {
+    if (SDL_RenderGeometry(g_renderer, g_sim_obj_atlas_texture,
+                           s_sim_shadow_vertices, vertex_count,
+                           s_sim_shadow_indices, index_count)) {
+      Sim3DPerformance_AddDraw(
+          (uint64_t)vertex_count, (uint64_t)index_count);
+    }
   }
 
   if (voxel_caster) {
@@ -484,7 +519,8 @@ void DrawSimShadowMask(
   SDL_SetTextureAlphaMod(
       mask, (Uint8)(slot->sim.shadow_opacity_pct * 255 / kPercentScale));
   SDL_FRect dst = ToFRect(viewport);
-  SDL_RenderTexture(g_renderer, mask, NULL, &dst);
+  if (SDL_RenderTexture(g_renderer, mask, NULL, &dst))
+    Sim3DPerformance_AddDraw(0, 0);
   SDL_SetTextureAlphaMod(mask, 255);
 }
 

@@ -544,6 +544,7 @@ static const char *const kRefreshModeLabels[] = {
   "Vsync",
   "Unlimited",
   "Limit",
+  "Uncapped",
 };
 
 /* NOTE: these strings are ALSO the settings.ini values (Settings_FormatValue
@@ -1110,10 +1111,10 @@ const SettingDesc g_setting_descs[] = {
   { "refresh_mode", "AR_REFRESH_MODE", "Refresh rate",
     "Vsync locks to your display's refresh; Unlimited disables vsync and "
     "soft-caps presentation at twice a detected host refresh; Limit caps to "
-    "a chosen FPS.",
+    "a chosen FPS; Uncapped removes all presentation throttling for profiling.",
     kSettingType_Enum, kApply_Callback, kSettingCat_Display,
     &g_settings.refresh_mode, kRefreshMode_Vsync,
-    kRefreshMode_Vsync, kRefreshMode_Limit, 1, false,
+    kRefreshMode_Vsync, kRefreshMode_Uncapped, 1, false,
     kRefreshModeLabels, kRefreshMode_Count, NULL, NULL, NULL, NULL, .modern_env = true },
   { "frame_limit_fps", "AR_FRAME_LIMIT_FPS", "Frame limit",
     "Target frames per second when Refresh rate is Limit; independent of the "
@@ -1121,6 +1122,10 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Int, kApply_Callback, kSettingCat_Display,
     &g_settings.frame_limit_fps, 60, 20, 480, 5, false, NULL, 0,
     FrameLimitActive, NULL, NULL, NULL, .modern_env = true },
+  BOOL_SETTING_MODERN(show_fps, "AR_SHOW_FPS", "FPS counter",
+               "Show completed host presents per second in the top-right. Use "
+               "Refresh rate: Uncapped to measure maximum rendering throughput.",
+               kSettingCat_Display, 0, false, NULL, NULL),
   BOOL_SETTING_MODERN(sim3d_mode, "AR_SIM3D", "Simulation town 3D",
                "Tilt the simulation-town map into a projected ground plane. "
                "Map pickers stay in the tilted space too (build with "

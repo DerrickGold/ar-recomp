@@ -38,6 +38,10 @@ typedef struct ActionBgAssets {
   uint8_t metatiles[2][kMetatileBytes];
   uint8_t map[2][kMapMaxBytes];
   size_t map_size[2];
+  /* The map header's own page grid. Read to size the decompression either
+   * way; retained because the byte count alone does not say how a multi-page
+   * level is laid out, and re-deriving that means re-walking the script. */
+  uint8_t map_pages_wide[2], map_pages_high[2];
   bool have_chars[2];
   bool have_extra_chars;
   bool have_palette;
@@ -134,6 +138,8 @@ static bool ApplyCommand(ActionBgAssets *assets,
     if (source > rom_size || rom_size - source < 4) return false;
     const size_t pages = (size_t)rom[source] * rom[source + 1];
     if (!pages || pages > kMapMaxBytes / kMapPageBytes) return false;
+    assets->map_pages_wide[bg] = rom[source];
+    assets->map_pages_high[bg] = rom[source + 1];
     const size_t bytes = pages * kMapPageBytes;
     if (!Decompress(rom, rom_size, source + 2, assets->map[bg], bytes))
       return false;

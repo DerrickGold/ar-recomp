@@ -359,12 +359,15 @@ if(BUILD_TESTING)
         src/sim/sim_background_mountain_relief.c
         src/sim/sim_background_voxel_region.c
         src/sim/sim_town_canvas.c
+        src/sim/sim_town_terrain.c
     )
     target_include_directories(actraiser_sim_background_voxels_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/sim
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
+    target_link_libraries(actraiser_sim_background_voxels_test PRIVATE
+        actraiser_math)
     add_test(NAME actraiser_sim_background_voxels
         COMMAND actraiser_sim_background_voxels_test)
 
@@ -899,6 +902,7 @@ if(BUILD_TESTING)
         src/sim/sim_world_navigation_scene.c
         src/sim/sim_world_navigation_capture.c
         src/sim/sim_town_canvas.c
+        src/sim/sim_town_terrain.c
         src/sim/sim_background_voxels.c
         src/sim/sim_background_voxel_landmarks.c
         src/sim/sim_background_mountains.c

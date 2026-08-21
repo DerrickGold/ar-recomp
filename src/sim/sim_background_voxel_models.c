@@ -539,6 +539,36 @@ static void BuildTentHouse(SimBackgroundVoxelDetail detail,
   }
 }
 
+static void BuildWhiteTentHouse(SimBackgroundVoxelDetail detail,
+                                SimBackgroundVoxelModel *model) {
+  /* Kasandora's middle-stage dwelling is a broad white canvas A-frame, not a
+   * palette swap of the starter tent. A low eave and long uninterrupted roof
+   * planes make that identity survive at the authentic town resolution. */
+  AddStandardBox(model, 1.2f, 2.8f, 0.0f, 14.8f, 15.0f, 0.8f,
+                 kSimVoxelMaterial_Trim);
+  AddRoofedBox(model, 2.2f, 3.6f, 0.8f, 13.8f, 14.7f, 3.2f,
+               kSimVoxelMaterial_Wall);
+  AddGableRoofX(model, 0.8f, 15.2f, 2.0f, 15.2f, 3.2f, 10.0f,
+                kSimVoxelMaterial_Roof, kSimVoxelMaterial_WallLight);
+  /* The dark opening is a split canvas flap climbing into the front gable;
+   * keeping it broad prevents the tent from reading as a house with a door. */
+  AddStandardBox(model, 6.1f, 14.8f, 0.8f, 9.9f, 15.35f, 5.8f,
+                 kSimVoxelMaterial_Dark);
+  if (detail == kSimBackgroundVoxelDetail_Low) return;
+  AddStandardBox(model, 7.65f, 14.75f, 3.0f, 8.35f, 15.5f, 9.6f,
+                 kSimVoxelMaterial_Trim);
+  AddStandardBox(model, 1.0f, 14.7f, 2.8f, 15.0f, 15.45f, 3.4f,
+                 kSimVoxelMaterial_Trim);
+  if (detail >= kSimBackgroundVoxelDetail_High) {
+    /* Two visible tie-downs add authored construction detail while remaining
+     * below the canvas silhouette and inside the one-cell footprint. */
+    AddStandardBox(model, 1.0f, 2.2f, 0.0f, 1.7f, 3.0f, 1.8f,
+                   kSimVoxelMaterial_Wood);
+    AddStandardBox(model, 14.3f, 2.2f, 0.0f, 15.0f, 3.0f, 1.8f,
+                   kSimVoxelMaterial_Wood);
+  }
+}
+
 static void BuildYurtHouse(SimBackgroundVoxelDetail detail,
                            SimBackgroundVoxelModel *model) {
   AddStandardBox(model, 2.0f, 2.0f, 0.0f, 14.0f, 14.0f, 0.8f,
@@ -669,25 +699,48 @@ static void BuildStoneHouse(SimBackgroundVoxelDetail detail,
 
 static void BuildAitosHouse(SimBackgroundVoxelDetail detail,
                             SimBackgroundVoxelModel *model) {
+  /* Aitos' final stone dwelling is a squat, flat-roofed highland house. The
+   * earlier model borrowed a pair of Fillmore-style gables, changing the
+   * source silhouette into a peaked chalet. Keep the roof slab broad and the
+   * parapet low so it reads as the original masonry terrace at town scale. */
   AddStandardBox(model, 1.0f, 2.0f, 0.0f, 15.0f, 15.0f, 1.5f,
                  kSimVoxelMaterial_Trim);
-  AddRoofedBox(model, 1.8f, 3.0f, 1.5f, 14.2f, 14.5f, 8.5f,
+  AddRoofedBox(model, 1.8f, 3.0f, 1.5f, 14.2f, 14.5f, 8.7f,
                kSimVoxelMaterial_Wall);
-  AddGableRoofX(model, 0.8f, 15.2f, 2.0f, 15.0f, 8.5f, 12.5f,
-                kSimVoxelMaterial_Roof, kSimVoxelMaterial_WallLight);
-  AddRoofedBox(model, 9.5f, 5.0f, 8.0f, 13.2f, 13.5f, 12.0f,
-               kSimVoxelMaterial_WallLight);
-  AddGableRoofX(model, 9.0f, 13.7f, 4.5f, 14.0f, 12.0f, 14.0f,
-                kSimVoxelMaterial_RoofLight,
-                kSimVoxelMaterial_WallLight);
+  AddStandardBox(model, 0.8f, 2.0f, 8.7f, 15.2f, 15.0f, 9.5f,
+                 kSimVoxelMaterial_Roof);
+  /* Four independent parapet runs leave the terrace centre visibly flat
+   * instead of disguising another solid upper storey as a roof. */
+  AddStandardBox(model, 0.8f, 2.0f, 9.5f, 15.2f, 3.2f, 10.5f,
+                 kSimVoxelMaterial_RoofLight);
+  AddStandardBox(model, 0.8f, 13.8f, 9.5f, 15.2f, 15.0f, 10.5f,
+                 kSimVoxelMaterial_RoofLight);
+  AddStandardBox(model, 0.8f, 3.2f, 9.5f, 2.0f, 13.8f, 10.5f,
+                 kSimVoxelMaterial_Roof);
+  AddStandardBox(model, 14.0f, 3.2f, 9.5f, 15.2f, 13.8f, 10.5f,
+                 kSimVoxelMaterial_RoofLight);
   AddStandardBox(model, 5.8f, 14.0f, 1.5f, 9.2f, 15.3f, 6.7f,
                  kSimVoxelMaterial_Dark);
   if (detail == kSimBackgroundVoxelDetail_Low) return;
   AddStandardBox(model, 2.8f, 14.0f, 3.8f, 4.8f, 15.2f, 6.2f,
                  kSimVoxelMaterial_Dark);
-  if (detail >= kSimBackgroundVoxelDetail_High)
-    AddStandardBox(model, 10.3f, 13.7f, 9.0f, 12.4f, 14.7f, 10.8f,
-                   kSimVoxelMaterial_Glass);
+  AddStandardBox(model, 11.2f, 14.0f, 3.8f, 13.2f, 15.2f, 6.2f,
+                 kSimVoxelMaterial_Dark);
+  AddStandardBox(model, 1.8f, 14.0f, 7.9f, 14.2f, 15.2f, 8.8f,
+                 kSimVoxelMaterial_Trim);
+  if (detail >= kSimBackgroundVoxelDetail_High) {
+    for (int course = 0; course < 3; course++) {
+      float z = 2.5f + course * 1.8f;
+      AddStandardBox(model, 1.8f, 14.2f, z, 5.0f, 15.1f, z + 0.35f,
+                     kSimVoxelMaterial_WallLight);
+      AddStandardBox(model, 11.0f, 14.2f, z, 14.2f, 15.1f, z + 0.35f,
+                     kSimVoxelMaterial_WallLight);
+    }
+    /* A low square roof hatch adds close-range depth without introducing a
+     * ridge, pitch, or triangular end face. */
+    AddStandardBox(model, 10.4f, 5.0f, 9.5f, 13.0f, 8.0f, 10.3f,
+                   kSimVoxelMaterial_WallLight);
+  }
 }
 
 static void BuildMarahnaStiltHouse(SimBackgroundVoxelDetail detail,
@@ -769,7 +822,7 @@ static void BuildHouse(const SimBackgroundVoxelObject *object,
       BuildYurtHouse(detail, model);
       break;
     case kSimBackgroundHouseStyle_WhiteTent:
-      BuildTentHouse(detail, model);
+      BuildWhiteTentHouse(detail, model);
       break;
     case kSimBackgroundHouseStyle_Adobe:
       BuildAdobeHouse(detail, model);
@@ -923,16 +976,16 @@ enum {
   kWindmillFrameCount = 3,
 };
 
-/* Depth of the rotor plane. Blades occupy `plane .. plane + 0.6` and the hub
- * cap another 0.4 in front of that, which puts the cap at y = 16.0 -- exactly
- * the mill's depth bound (pinned by the model test). So the rotor CANNOT be
- * moved outward to clear the wall detail it was cutting through: there is no
- * room in front of it. The detail moves back instead, to
- * kWindmillWallDetailFront. */
-static const float kWindmillBladePlane = 15.0f;
+/* Depth of the rotor plane. A blade is allowed to overhang the one-cell plot:
+ * forcing its front face inside y=16 left less than half a model pixel between
+ * it and the timber fascia. At native resolution that gap rasterized as the
+ * frame winning isolated blade pixels. The authored overhang is bounded and
+ * culling already carries a projected-object margin, so physical separation
+ * is both cheaper and more stable than a per-material depth bias. */
+static const float kWindmillBladePlane = 15.8f;
 static const float kWindmillHubCapCover = 1.0f;
-/* Front face of the wall detail the blades sweep past. Behind the rotor plane
- * by the same 0.4 the hub cap stands proud of it on the other side. */
+/* Front face of the wall detail the blades sweep past. It is more than one
+ * model unit behind the rotor's back face at every phase. */
 static const float kWindmillWallDetailFront = 14.6f;
 
 static void BuildWindmill(const SimBackgroundVoxelObject *object,
@@ -981,7 +1034,7 @@ static void BuildWindmill(const SimBackgroundVoxelObject *object,
   AddBlade(model, 16.0f, kWindmillBladePlane, 21.0f, -dz, dx);
   AddBlade(model, 16.0f, kWindmillBladePlane, 21.0f, -dx, -dz);
   AddBlade(model, 16.0f, kWindmillBladePlane, 21.0f, dz, -dx);
-  AddStandardBox(model, 14.3f, 14.6f, 19.3f, 17.7f,
+  AddStandardBox(model, 14.1f, kWindmillBladePlane + 0.35f, 19.1f, 17.9f,
                  kWindmillBladePlane + kWindmillHubCapCover, 22.7f,
                  kSimVoxelMaterial_Wood);
 
@@ -1368,6 +1421,73 @@ static void BuildShrub(const SimBackgroundVoxelObject *object,
                   SimBackgroundVoxelRegion_TreeStyle(object->town));
 }
 
+static void AddPalmFrondSegment(
+    SimBackgroundVoxelModel *model,
+    float start_x, float start_y, float start_z, float start_half_width,
+    float end_x, float end_y, float end_z, float end_half_width,
+    SimBackgroundVoxelMaterial material) {
+  float dx = end_x - start_x, dy = end_y - start_y;
+  float length = sqrtf(dx * dx + dy * dy);
+  if (length <= 0.01f) return;
+  float perpendicular_x = -dy / length;
+  float perpendicular_y = dx / length;
+  const float thickness = 0.42f;
+  SimBackgroundVoxelModelPoint start_left = Point(
+      start_x + perpendicular_x * start_half_width,
+      start_y + perpendicular_y * start_half_width, start_z);
+  SimBackgroundVoxelModelPoint start_right = Point(
+      start_x - perpendicular_x * start_half_width,
+      start_y - perpendicular_y * start_half_width, start_z);
+  SimBackgroundVoxelModelPoint end_left = Point(
+      end_x + perpendicular_x * end_half_width,
+      end_y + perpendicular_y * end_half_width, end_z);
+  SimBackgroundVoxelModelPoint end_right = Point(
+      end_x - perpendicular_x * end_half_width,
+      end_y - perpendicular_y * end_half_width, end_z);
+  SimBackgroundVoxelModelPoint start_left_bottom = start_left;
+  SimBackgroundVoxelModelPoint start_right_bottom = start_right;
+  SimBackgroundVoxelModelPoint end_left_bottom = end_left;
+  SimBackgroundVoxelModelPoint end_right_bottom = end_right;
+  start_left_bottom.z -= thickness;
+  start_right_bottom.z -= thickness;
+  end_left_bottom.z -= thickness;
+  end_right_bottom.z -= thickness;
+  AddFace(model, material, 245,
+          start_left, end_left, end_right, start_right);
+  AddFace(model, material, 178,
+          start_right_bottom, end_right_bottom,
+          end_left_bottom, start_left_bottom);
+  AddFace(model, material, 204,
+          start_left_bottom, end_left_bottom, end_left, start_left);
+  AddFace(model, material, 218,
+          start_right, end_right, end_right_bottom, start_right_bottom);
+  AddFace(model, material, 190,
+          end_left_bottom, end_right_bottom, end_right, end_left);
+}
+
+static void AddPalmFrond(
+    SimBackgroundVoxelModel *model,
+    float center_x, float center_y,
+    float direction_x, float direction_y,
+    SimBackgroundVoxelMaterial material) {
+  float middle_x = center_x + direction_x * 3.5f;
+  float middle_y = center_y + direction_y * 3.5f;
+  float end_x = center_x + direction_x * 6.8f;
+  float end_y = center_y + direction_y * 6.8f;
+  AddPalmFrondSegment(model,
+                      center_x + direction_x * 0.35f,
+                      center_y + direction_y * 0.35f,
+                      12.45f, 1.15f,
+                      middle_x, middle_y, 12.7f, 0.85f,
+                      material);
+  AddPalmFrondSegment(model,
+                      middle_x - direction_x * 0.1f,
+                      middle_y - direction_y * 0.1f,
+                      12.72f, 0.9f,
+                      end_x, end_y, 10.05f, 0.32f,
+                      material);
+}
+
 static void BuildPalm(const SimBackgroundVoxelObject *object,
                       SimBackgroundVoxelDetail detail,
                       SimBackgroundVoxelModel *model) {
@@ -1377,64 +1497,41 @@ static void BuildPalm(const SimBackgroundVoxelObject *object,
   float lean_x = (seed & 1u) ? 0.45f : -0.45f;
   float lean_y = (seed & 2u) ? 0.30f : -0.30f;
 
-  /* A stepped, slightly leaning trunk and broad layered fronds preserve the
-   * chunky authored SIM style without turning Marahna's permanent palms into
-   * the pointed evergreen used by the other regions. */
+  /* A stepped, slightly leaning trunk keeps the same broad planar language as
+   * the buildings. Tapered two-segment fronds preserve the source palm fan;
+   * the former cardinal cuboids read as a floating voxel plus sign. */
   AddStandardBox(model, 6.5f, 6.5f, 0.0f, 9.5f, 9.5f, 5.8f,
                  kSimVoxelMaterial_Trunk);
   AddStandardBox(model, 6.8f + lean_x, 6.8f + lean_y, 5.4f,
                  9.2f + lean_x, 9.2f + lean_y, 11.8f,
                  kSimVoxelMaterial_Trunk);
-  AddStandardBox(model, 5.8f + lean_x, 5.8f + lean_y, 11.2f,
-                 10.2f + lean_x, 10.2f + lean_y, 13.2f,
+  float center_x = 8.0f + lean_x;
+  float center_y = 8.0f + lean_y;
+  AddStandardBox(model, center_x - 1.8f, center_y - 1.8f, 11.2f,
+                 center_x + 1.8f, center_y + 1.8f, 13.2f,
                  kSimVoxelMaterial_LeavesLight);
-
-  /* Cardinal fronds use two descending blocks each. Their square stepped
-   * silhouette matches the infrastructure models better than a smooth fan. */
-  AddStandardBox(model, 9.0f + lean_x, 6.8f + lean_y, 11.1f,
-                 13.2f + lean_x, 9.2f + lean_y, 12.6f,
-                 kSimVoxelMaterial_Leaves);
-  AddStandardBox(model, 12.5f + lean_x, 7.0f + lean_y, 9.8f,
-                 15.5f + lean_x, 9.0f + lean_y, 11.4f,
-                 kSimVoxelMaterial_LeavesDark);
-  AddStandardBox(model, 2.8f + lean_x, 6.8f + lean_y, 11.1f,
-                 7.0f + lean_x, 9.2f + lean_y, 12.6f,
-                 kSimVoxelMaterial_Leaves);
-  AddStandardBox(model, 0.5f + lean_x, 7.0f + lean_y, 9.8f,
-                 3.5f + lean_x, 9.0f + lean_y, 11.4f,
-                 kSimVoxelMaterial_LeavesDark);
-  AddStandardBox(model, 6.8f + lean_x, 9.0f + lean_y, 11.0f,
-                 9.2f + lean_x, 13.2f + lean_y, 12.5f,
-                 kSimVoxelMaterial_Leaves);
-  AddStandardBox(model, 7.0f + lean_x, 12.5f + lean_y, 9.7f,
-                 9.0f + lean_x, 15.5f + lean_y, 11.3f,
-                 kSimVoxelMaterial_LeavesDark);
-  AddStandardBox(model, 6.8f + lean_x, 2.8f + lean_y, 11.0f,
-                 9.2f + lean_x, 7.0f + lean_y, 12.5f,
-                 kSimVoxelMaterial_Leaves);
-  AddStandardBox(model, 7.0f + lean_x, 0.5f + lean_y, 9.7f,
-                 9.0f + lean_x, 3.5f + lean_y, 11.3f,
-                 kSimVoxelMaterial_LeavesDark);
+  AddPalmFrond(model, center_x, center_y, 1.0f, 0.0f,
+               kSimVoxelMaterial_Leaves);
+  AddPalmFrond(model, center_x, center_y, -1.0f, 0.0f,
+               kSimVoxelMaterial_LeavesDark);
+  AddPalmFrond(model, center_x, center_y, 0.0f, 1.0f,
+               kSimVoxelMaterial_LeavesLight);
+  AddPalmFrond(model, center_x, center_y, 0.0f, -1.0f,
+               kSimVoxelMaterial_Leaves);
 
   if (detail >= kSimBackgroundVoxelDetail_Balanced) {
-    /* Four compact diagonals turn the low cross into a readable palm canopy
-     * while keeping each cell far below its face budget. */
-    AddStandardBox(model, 9.2f + lean_x, 9.2f + lean_y, 10.7f,
-                   13.0f + lean_x, 11.1f + lean_y, 12.1f,
-                   kSimVoxelMaterial_LeavesLight);
-    AddStandardBox(model, 9.2f + lean_x, 4.9f + lean_y, 10.7f,
-                   13.0f + lean_x, 6.8f + lean_y, 12.1f,
-                   kSimVoxelMaterial_Leaves);
-    AddStandardBox(model, 3.0f + lean_x, 9.2f + lean_y, 10.7f,
-                   6.8f + lean_x, 11.1f + lean_y, 12.1f,
-                   kSimVoxelMaterial_Leaves);
-    AddStandardBox(model, 3.0f + lean_x, 4.9f + lean_y, 10.7f,
-                   6.8f + lean_x, 6.8f + lean_y, 12.1f,
-                   kSimVoxelMaterial_LeavesDark);
+    AddPalmFrond(model, center_x, center_y, 0.7071f, 0.7071f,
+                 kSimVoxelMaterial_LeavesLight);
+    AddPalmFrond(model, center_x, center_y, 0.7071f, -0.7071f,
+                 kSimVoxelMaterial_Leaves);
+    AddPalmFrond(model, center_x, center_y, -0.7071f, 0.7071f,
+                 kSimVoxelMaterial_Leaves);
+    AddPalmFrond(model, center_x, center_y, -0.7071f, -0.7071f,
+                 kSimVoxelMaterial_LeavesDark);
   }
   if (detail >= kSimBackgroundVoxelDetail_High) {
-    AddStandardBox(model, 7.0f + lean_x, 7.0f + lean_y, 12.8f,
-                   9.0f + lean_x, 9.0f + lean_y, 14.7f,
+    AddStandardBox(model, center_x - 1.0f, center_y - 1.0f, 12.8f,
+                   center_x + 1.0f, center_y + 1.0f, 14.7f,
                    kSimVoxelMaterial_LeavesLight);
     AddStandardBox(model, 6.4f + lean_x, 8.8f + lean_y, 10.5f,
                    7.6f + lean_x, 10.0f + lean_y, 12.0f,
@@ -2039,11 +2136,11 @@ static void BuildSilhouetteTrim(
               object->town, object->development_level);
       float eave_z = 9.5f;
       if (house_style == kSimBackgroundHouseStyle_Yurt ||
-          house_style == kSimBackgroundHouseStyle_Adobe)
+          house_style == kSimBackgroundHouseStyle_Adobe ||
+          house_style == kSimBackgroundHouseStyle_Aitos)
         break;
-      if (house_style == kSimBackgroundHouseStyle_Tent ||
-          house_style == kSimBackgroundHouseStyle_WhiteTent)
-        eave_z = 4.8f;
+      if (house_style == kSimBackgroundHouseStyle_Tent) eave_z = 4.8f;
+      if (house_style == kSimBackgroundHouseStyle_WhiteTent) eave_z = 3.2f;
       if (house_style == kSimBackgroundHouseStyle_Timber) eave_z = 7.0f;
       if (house_style == kSimBackgroundHouseStyle_MarahnaStilt)
         eave_z = 7.6f;
@@ -2095,7 +2192,8 @@ static void BuildSilhouetteTrim(
                      kSimVoxelMaterial_Wood);
       AddStandardBox(model, 23.5f, 13.8f, 2.0f, 24.6f, 15.2f, 18.0f,
                      kSimVoxelMaterial_Wood);
-      AddStandardBox(model, 6.4f, 13.0f, 16.8f, 25.6f, 15.8f, 17.5f,
+      AddStandardBox(model, 6.4f, 13.0f, 16.8f, 25.6f,
+                     kWindmillWallDetailFront, 17.5f,
                      kSimVoxelMaterial_Wood);
       AddStandardBox(model, 9.0f, 14.0f, 14.0f, 10.0f, 15.5f, 17.2f,
                      kSimVoxelMaterial_Wood);
@@ -2176,31 +2274,94 @@ static uint32_t ObjectStyleSeed(const SimBackgroundVoxelObject *object) {
       (uint32_t)object->group * 0x27D4EB2Fu;
 }
 
-/* Ultra geometry for the three families with no gable: the yurt, the white
- * tent and the adobe block. Each gets a smoke hood at its own roof height
- * plus a shaded doorway awning, so the level is not a no-op for the towns
- * that use them. */
-static void AddRoundHouseUltraDetail(
+static void AddHouseFacadeVariation(
     const SimBackgroundVoxelObject *object,
-    SimBackgroundVoxelHouseStyle house_style,
-    SimBackgroundVoxelModel *model) {
-  float roof_z = SimBackgroundVoxelRegion_AuthoredHeight(object);
-  AddStandardBox(model, 7.0f, 7.0f, roof_z - 1.0f,
-                 9.0f, 9.0f, roof_z + 1.4f,
-                 kSimVoxelMaterial_Trim);
-  if (house_style == kSimBackgroundHouseStyle_Adobe) {
-    /* A flat roof takes a parapet rather than a canopy. */
-    AddStandardBox(model, 2.6f, 2.6f, roof_z - 0.6f,
-                   13.4f, 13.6f, roof_z + 0.4f,
-                   kSimVoxelMaterial_Trim);
+    SimBackgroundVoxelDetail detail,
+    SimBackgroundVoxelModel *model,
+    uint32_t seed) {
+  SimBackgroundVoxelHouseStyle house_style =
+      SimBackgroundVoxelRegion_HouseStyle(
+          object->town, object->development_level);
+  uint32_t variant_count =
+      detail == kSimBackgroundVoxelDetail_Ultra ? 6u : 4u;
+  uint32_t variant = seed % variant_count;
+
+  /* Varied is deliberately a surface-detail tier. It may change the facade
+   * rhythm, but it must not alter a source building's footprint, eave, ridge,
+   * or authored height. That keeps High/Ultra useful without inventing bays,
+   * dormers, porches, chimneys, and rooftop masses absent from the ROM art. */
+  float front_y0 = 14.55f, front_y1 = 15.2f;
+  SimBackgroundVoxelMaterial accent = kSimVoxelMaterial_Trim;
+  SimBackgroundVoxelMaterial secondary = kSimVoxelMaterial_WallLight;
+  if (house_style == kSimBackgroundHouseStyle_Yurt) {
+    front_y0 = 14.12f;
+    front_y1 = 14.38f;
+    float x0 = 5.4f + (float)(variant % 3u) * 1.6f;
+    AddStandardBox(model, x0, front_y0, 2.4f,
+                   x0 + 1.0f, front_y1, 4.4f, accent);
+    if (detail == kSimBackgroundVoxelDetail_Ultra) {
+      float other_x = 9.6f - (x0 - 5.4f);
+      AddStandardBox(model, other_x, front_y0, 4.8f,
+                     other_x + 0.8f, front_y1, 6.2f, secondary);
+    }
     return;
   }
-  AddStandardBox(model, 5.4f, 14.6f, 6.0f, 10.6f, 16.0f, 6.8f,
-                 kSimVoxelMaterial_RoofLight);
-  AddStandardBox(model, 5.8f, 15.1f, 1.0f, 6.4f, 15.7f, 6.1f,
-                 kSimVoxelMaterial_Wood);
-  AddStandardBox(model, 9.6f, 15.1f, 1.0f, 10.2f, 15.7f, 6.1f,
-                 kSimVoxelMaterial_Wood);
+  if (house_style == kSimBackgroundHouseStyle_Tent ||
+      house_style == kSimBackgroundHouseStyle_WhiteTent) {
+    front_y0 = house_style == kSimBackgroundHouseStyle_WhiteTent
+        ? 15.22f : 15.05f;
+    front_y1 = house_style == kSimBackgroundHouseStyle_WhiteTent
+        ? 15.55f : 15.45f;
+    /* Canvas variants are seams and lashings, never masonry window bays. */
+    float seam_x = 2.8f + (float)variant * 1.55f;
+    AddStandardBox(model, seam_x, front_y0, 3.0f,
+                   seam_x + 0.45f, front_y1, 6.6f, accent);
+    if (detail == kSimBackgroundVoxelDetail_Ultra)
+      AddStandardBox(model, 2.4f, front_y0, 5.1f,
+                     13.6f, front_y1, 5.55f, secondary);
+    return;
+  }
+  if (house_style == kSimBackgroundHouseStyle_Adobe ||
+      house_style == kSimBackgroundHouseStyle_Aitos) {
+    accent = kSimVoxelMaterial_WallLight;
+    secondary = kSimVoxelMaterial_Trim;
+  }
+
+  switch (variant) {
+    case 0:
+      AddStandardBox(model, 2.8f, front_y0, 5.7f,
+                     5.6f, front_y1, 6.25f, accent);
+      break;
+    case 1:
+      AddStandardBox(model, 3.0f, front_y0, 2.7f,
+                     3.55f, front_y1, 6.5f, accent);
+      AddStandardBox(model, 5.05f, front_y0, 2.7f,
+                     5.6f, front_y1, 6.5f, accent);
+      break;
+    case 2:
+      AddStandardBox(model, 10.4f, front_y0, 3.0f,
+                     13.2f, front_y1, 3.55f, accent);
+      break;
+    case 3:
+      AddStandardBox(model, 11.0f, front_y0, 2.2f,
+                     11.6f, front_y1, 6.6f, accent);
+      break;
+    case 4:
+      AddStandardBox(model, 2.8f, front_y0, 4.8f,
+                     5.4f, front_y1, 5.3f, accent);
+      AddStandardBox(model, 10.6f, front_y0, 4.8f,
+                     13.2f, front_y1, 5.3f, accent);
+      break;
+    case 5:
+      AddStandardBox(model, 5.4f, front_y0, 6.2f,
+                     10.6f, front_y1, 6.75f, accent);
+      break;
+  }
+  if (detail == kSimBackgroundVoxelDetail_Ultra) {
+    float x0 = (seed & 4u) ? 10.8f : 3.2f;
+    AddStandardBox(model, x0, front_y0, 6.8f,
+                   x0 + 1.8f, front_y1, 7.25f, secondary);
+  }
 }
 
 static void BuildDeterministicVariation(
@@ -2213,116 +2374,7 @@ static void BuildDeterministicVariation(
   uint32_t seed = ObjectStyleSeed(object);
   switch ((SimBackgroundVoxelKind)object->kind) {
     case kSimBackgroundVoxel_House: {
-      SimBackgroundVoxelHouseStyle house_style =
-          SimBackgroundVoxelRegion_HouseStyle(
-              object->town, object->development_level);
-      if (house_style == kSimBackgroundHouseStyle_Yurt ||
-          house_style == kSimBackgroundHouseStyle_WhiteTent ||
-          house_style == kSimBackgroundHouseStyle_Adobe) {
-        /* These three have no gable to hang a dormer or porch from, so their
-         * Ultra tier is what a round or flat-roofed dwelling actually shows:
-         * a smoke hood over the roof opening and a shaded doorway awning. */
-        if (detail == kSimBackgroundVoxelDetail_Ultra)
-          AddRoundHouseUltraDetail(object, house_style, model);
-        break;
-      }
-      if (house_style != kSimBackgroundHouseStyle_Fillmore) {
-        float eave = SimBackgroundVoxelRegion_AuthoredHeight(object) - 3.0f;
-        if (eave > 8.0f) eave = 8.0f;
-        uint32_t regional_variant = seed % 3u;
-        if (regional_variant == 0u) {
-          AddStandardBox(model, 5.8f, 14.8f, eave - 0.2f,
-                         10.2f, 16.0f, eave + 0.7f,
-                         kSimVoxelMaterial_RoofLight);
-          AddStandardBox(model, 6.2f, 15.0f, 1.0f,
-                         6.8f, 15.8f, eave,
-                         kSimVoxelMaterial_Wood);
-          AddStandardBox(model, 9.2f, 15.0f, 1.0f,
-                         9.8f, 15.8f, eave,
-                         kSimVoxelMaterial_Wood);
-        } else if (regional_variant == 1u) {
-          AddStandardBox(model, 1.3f, 12.5f, 0.4f,
-                         4.2f, 15.5f, 2.2f,
-                         kSimVoxelMaterial_Wood);
-        } else if (house_style != kSimBackgroundHouseStyle_Tent &&
-                   house_style != kSimBackgroundHouseStyle_WhiteTent) {
-          AddStandardBox(model, 11.0f, 13.7f, 2.0f,
-                         14.3f, 15.5f, eave - 0.5f,
-                         kSimVoxelMaterial_WallLight);
-          AddShedRoofX(model, 10.6f, 14.7f, 13.3f, 15.8f,
-                       eave - 0.5f, eave + 0.4f,
-                       kSimVoxelMaterial_RoofLight,
-                       kSimVoxelMaterial_WallLight);
-        }
-        /* Without this the regional families stop gaining geometry at High,
-         * so selecting Ultra changed nothing for the most numerous object in
-         * a developed town. A ridge cap and a flue are the smallest additions
-         * that read at native resolution on every gabled family. */
-        if (detail == kSimBackgroundVoxelDetail_Ultra) {
-          AddStandardBox(model, 4.0f, 4.6f, eave + 0.6f,
-                         12.0f, 11.4f, eave + 1.2f,
-                         kSimVoxelMaterial_RoofLight);
-          float flue_x = (seed & 4u) ? 10.6f : 3.6f;
-          AddStandardBox(model, flue_x, 6.4f, eave + 1.0f,
-                         flue_x + 1.8f, 8.2f, eave + 4.2f,
-                         kSimVoxelMaterial_Trim);
-        }
-        break;
-      }
-      uint32_t variant_count =
-          detail == kSimBackgroundVoxelDetail_Ultra ? 6u : 4u;
-      uint32_t variant = seed % variant_count;
-      if (variant == 0u) {
-        float x = seed & 2u ? 3.0f : 11.0f;
-        AddStandardBox(model, x, 5.0f, 11.5f, x + 1.8f, 7.0f, 15.2f,
-                       kSimVoxelMaterial_Dark);
-        AddStandardBox(model, x - 0.3f, 4.7f, 14.6f,
-                       x + 2.1f, 7.3f, 15.6f,
-                       kSimVoxelMaterial_Trim);
-      } else if (variant == 1u) {
-        /* Broad porch canopy: visible at native resolution, but much calmer
-         * than a scatter of decorative facade cubes. */
-        AddStandardBox(model, 6.3f, 15.0f, 7.3f, 10.7f, 16.0f, 8.1f,
-                       kSimVoxelMaterial_Roof);
-        AddStandardBox(model, 6.6f, 15.1f, 1.2f, 7.2f, 15.8f, 7.4f,
-                       kSimVoxelMaterial_Wood);
-        AddStandardBox(model, 9.8f, 15.1f, 1.2f, 10.4f, 15.8f, 7.4f,
-                       kSimVoxelMaterial_Wood);
-      } else if (variant == 2u) {
-        /* One compact dormer changes the roof silhouette without restoring
-         * the noisy high-frequency roof stepping removed by the compiler. */
-        AddStandardBox(model, 6.2f, 10.8f, 10.2f, 9.8f, 14.5f, 12.2f,
-                       kSimVoxelMaterial_WallLight);
-        AddGableRoofX(model, 5.7f, 10.3f, 10.3f, 14.8f, 12.2f, 13.8f,
-                      kSimVoxelMaterial_RoofLight,
-                      kSimVoxelMaterial_WallLight);
-      } else if (variant == 3u) {
-        /* A broad front bay changes the footprint/facade rhythm while staying
-         * lower than the main eave and within the house's authored cell. */
-        AddStandardBox(model, 1.8f, 13.8f, 1.5f, 5.4f, 15.7f, 6.7f,
-                       kSimVoxelMaterial_WallLight);
-        AddShedRoofX(model, 1.3f, 5.9f, 13.3f, 15.9f, 6.7f, 7.7f,
-                     kSimVoxelMaterial_RoofLight,
-                     kSimVoxelMaterial_WallLight);
-      } else if (variant == 4u) {
-        for (int dormer = 0; dormer < 2; dormer++) {
-          float x0 = dormer ? 9.3f : 3.0f;
-          AddStandardBox(model, x0, 10.8f, 10.1f,
-                         x0 + 3.0f, 14.3f, 11.8f,
-                         kSimVoxelMaterial_WallLight);
-          AddGableRoofX(model, x0 - 0.35f, x0 + 3.35f,
-                        10.4f, 14.7f, 11.8f, 13.1f,
-                        kSimVoxelMaterial_RoofLight,
-                        kSimVoxelMaterial_WallLight);
-        }
-      } else {
-        AddStandardBox(model, 2.8f, 5.0f, 11.5f,
-                       4.6f, 7.0f, 15.0f,
-                       kSimVoxelMaterial_Dark);
-        AddStandardBox(model, 5.8f, 15.0f, 7.2f,
-                       11.2f, 16.0f, 8.1f,
-                       kSimVoxelMaterial_Roof);
-      }
+      AddHouseFacadeVariation(object, detail, model, seed);
       break;
     }
     case kSimBackgroundVoxel_Factory: {

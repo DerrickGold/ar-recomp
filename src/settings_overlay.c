@@ -1062,7 +1062,12 @@ static void DestroyFontTextures(void) {
 }
 
 static uint16_t ReadLe16(const uint8_t *data) {
-  return (uint16_t)data[0] | ((uint16_t)data[1] << 8);
+  return (uint16_t)(
+      (uint16_t)data[0] | ((uint16_t)data[1] << 8));
+}
+
+static int CursorBlinkOffset(void) {
+  return (int)((SDL_GetTicks() / kCursorBlinkHalfPeriodMs) & 1u);
 }
 
 static uint32_t DialogColor(const uint8_t *palette, unsigned index) {
@@ -2706,26 +2711,74 @@ int SettingsOverlay_GameTextWidth(const char *text, int scale) {
 
 void SettingsOverlay_DrawGameText(int x, int y, int scale, uint8_t alpha,
                                   const char *text) {
+  enum {
+    kFontAtlasCellsPerAxis = 16,
+    kGameTextGlyphBatchCapacity = 64,
+    kVerticesPerGlyph = 4,
+    kIndicesPerGlyph = 6,
+  };
   if (!text || scale <= 0 || alpha == 0) return;
   SDL_Texture *texture = s_font_textures[kText_Normal];
   if (!s_renderer || !texture) return;
 
+  static int indices[
+      kGameTextGlyphBatchCapacity * kIndicesPerGlyph];
+  static bool indices_initialized;
+  if (!indices_initialized) {
+    for (int glyph = 0; glyph < kGameTextGlyphBatchCapacity; glyph++) {
+      const int vertex = glyph * kVerticesPerGlyph;
+      const int at = glyph * kIndicesPerGlyph;
+      indices[at + 0] = vertex + 0;
+      indices[at + 1] = vertex + 1;
+      indices[at + 2] = vertex + 2;
+      indices[at + 3] = vertex + 0;
+      indices[at + 4] = vertex + 2;
+      indices[at + 5] = vertex + 3;
+    }
+    indices_initialized = true;
+  }
+
+  SDL_Vertex vertices[
+      kGameTextGlyphBatchCapacity * kVerticesPerGlyph];
+  int glyph_count = 0;
+  const float uv_cell = 1.0f / (float)kFontAtlasCellsPerAxis;
+  const float glyph_pixels = (float)(kGlyphSize * scale);
+  const SDL_FColor white = {1.0f, 1.0f, 1.0f, 1.0f};
   SDL_SetTextureAlphaMod(texture, alpha);
   for (int i = 0; text[i]; i++) {
     unsigned char ch = (unsigned char)text[i];
     if (ch == ' ') continue;
     if (!s_glyph_defined[ch]) ch = '?';
     if (!s_glyph_defined[ch]) continue;
-    const SDL_FRect source = {
-      (float)((ch & 15) * kGlyphSize), (float)((ch >> 4) * kGlyphSize),
-      (float)kGlyphSize, (float)kGlyphSize,
-    };
-    const SDL_FRect destination = {
-      (float)(x + i * kGlyphSize * scale), (float)y,
-      (float)(kGlyphSize * scale), (float)(kGlyphSize * scale),
-    };
-    SDL_RenderTexture(s_renderer, texture, &source, &destination);
+
+    if (glyph_count == kGameTextGlyphBatchCapacity) {
+      SDL_RenderGeometry(
+          s_renderer, texture, vertices,
+          glyph_count * kVerticesPerGlyph, indices,
+          glyph_count * kIndicesPerGlyph);
+      glyph_count = 0;
+    }
+
+    const float x0 = (float)(x + i * kGlyphSize * scale);
+    const float y0 = (float)y;
+    const float x1 = x0 + glyph_pixels;
+    const float y1 = y0 + glyph_pixels;
+    const float u0 = (float)(ch & 15) * uv_cell;
+    const float v0 = (float)(ch >> 4) * uv_cell;
+    const float u1 = u0 + uv_cell;
+    const float v1 = v0 + uv_cell;
+    SDL_Vertex *quad = &vertices[glyph_count * kVerticesPerGlyph];
+    quad[0] = (SDL_Vertex){{x0, y0}, white, {u0, v0}};
+    quad[1] = (SDL_Vertex){{x1, y0}, white, {u1, v0}};
+    quad[2] = (SDL_Vertex){{x1, y1}, white, {u1, v1}};
+    quad[3] = (SDL_Vertex){{x0, y1}, white, {u0, v1}};
+    glyph_count++;
   }
+  if (glyph_count > 0)
+    SDL_RenderGeometry(
+        s_renderer, texture, vertices,
+        glyph_count * kVerticesPerGlyph, indices,
+        glyph_count * kIndicesPerGlyph);
   /* Restored: the atlas is shared with the menu's own drawing, which does not
    * set an alpha of its own and would inherit this one. */
   SDL_SetTextureAlphaMod(texture, 255);
@@ -3294,8 +3347,7 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
         FillLogicalRect(layout, right_x + 9, y - 2, right_width - 18, 11,
                         kHighlight);
         FillLogicalRect(layout, right_x + 9, y - 2, 2, 11, kSelectYellow);
-        DrawGlyph(layout, selector_x +
-                  ((SDL_GetTicks() / kCursorBlinkHalfPeriodMs) & 1), y, '>',
+        DrawGlyph(layout, selector_x + CursorBlinkOffset(), y, '>',
                   kText_Warning);
       }
 
@@ -3351,8 +3403,7 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
       FillLogicalRect(layout, right_x + 9, y - 2, right_width - 18, 11,
                       kHighlight);
       FillLogicalRect(layout, right_x + 9, y - 2, 2, 11, kSelectYellow);
-      DrawGlyph(layout, selector_x +
-                ((SDL_GetTicks() / kCursorBlinkHalfPeriodMs) & 1), y, '>',
+      DrawGlyph(layout, selector_x + CursorBlinkOffset(), y, '>',
                 kText_Warning);
     }
     TextStyle style = available && s_submenu_open
@@ -3434,8 +3485,7 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
         FillLogicalRect(layout, right_x + 9, y - 2, right_width - 18, 11,
                         kHighlight);
         FillLogicalRect(layout, right_x + 9, y - 2, 2, 11, kSelectYellow);
-        DrawGlyph(layout, selector_x +
-                  ((SDL_GetTicks() / kCursorBlinkHalfPeriodMs) & 1), y, '>',
+        DrawGlyph(layout, selector_x + CursorBlinkOffset(), y, '>',
                   kText_Warning);
       }
       char label[64];

@@ -25,6 +25,8 @@
 #include "sim/sim_background_voxels.h"
 #include "sim/sim3d.h"
 #include "sim/sim3d_camera_limits.h"
+#include "sim/sim3d_performance.h"
+#include "sim/sim_world_navigation_scene.h"
 
 /* kPixelAspect_Crt43 and kDioramaCam_Free/kDioramaCam_Dynamic are plain enum
  * constants (not live state) — fine to pull in just for those. */
@@ -421,8 +423,10 @@ static void DrawSimObjectPriorityFiltered(
      * drawn instead at the head of its arc by DrawSimEffectFireballHeads,
      * which turns it there. Rotating in this pass as well would be a second
      * implementation of the same angle, reachable by nothing. */
-    SDL_RenderTexture(g_renderer, g_sim_obj_atlas_texture,
-                      &atlas, &destination);
+    if (SDL_RenderTexture(g_renderer, g_sim_obj_atlas_texture,
+                          &atlas, &destination)) {
+      Sim3DPerformance_AddDraw(0, 0);
+    }
   }
   SDL_SetTextureAlphaMod(g_sim_obj_atlas_texture, 255);
 }
@@ -473,6 +477,8 @@ static void DrawSimVoxelBillboardLayer(
     const SimBackgroundVoxelRenderParams *params,
     float minimum_depth, float maximum_depth,
     SimBackgroundVoxelActorBand band) {
+  Sim3DPerformanceScope performance =
+      Sim3DPerformance_Begin(kSim3DPerformance_Billboard);
   SimVoxelBillboardLayerContext *context = userdata;
   bool overhead = band == kSimBackgroundVoxelActorBand_Overhead;
   /* Overhead art hangs above the row its record sits on and is authored to
@@ -499,6 +505,7 @@ static void DrawSimVoxelBillboardLayer(
     DrawSimRimLight(context->slot, context->priority, context->virtual_height,
                     params->source, params->viewport, context->camera,
                     params->matrix, terrain);
+  Sim3DPerformance_End(performance);
 }
 
 /* Selection art is projected onto the map like any other MapPlane object, but
@@ -716,7 +723,8 @@ static void DrawSimRimLight(
   SDL_SetTextureAlphaMod(
       rim, (Uint8)(slot->sim.rim_strength_pct * 255 / kPercentScale));
   SDL_FRect destination = ToFRect(viewport);
-  SDL_RenderTexture(g_renderer, rim, NULL, &destination);
+  if (SDL_RenderTexture(g_renderer, rim, NULL, &destination))
+    Sim3DPerformance_AddDraw(0, 0);
   SDL_SetTextureAlphaMod(rim, 255);
   SDL_SetTextureBlendMode(rim, SDL_BLENDMODE_BLEND);
 }
@@ -774,6 +782,97 @@ static uint32_t s_sim_underlay_serial;
 static bool s_sim_underlay_alloc_failed;
 static SDL_Texture *s_sim_canvas_texture;
 static bool s_sim_canvas_alloc_failed;
+/* Dirty rectangles are consumed as they are uploaded. If the driver rejects
+ * one, republish the complete CPU canvas on the next presentation so a
+ * transient backend/device failure cannot leave an indefinitely stale hole. */
+static bool s_sim_canvas_force_full_upload;
+
+typedef enum SimGroundMeshCacheKind {
+  kSimGroundMeshCache_UnderlayBlur,
+  kSimGroundMeshCache_UnderlaySharp,
+  kSimGroundMeshCache_Town,
+  kSimGroundMeshCache_Count,
+} SimGroundMeshCacheKind;
+
+/* The extension's topology, UVs, fade colours and projected positions depend
+ * only on the camera/layout inputs below, not on the texture's pixels. Retained
+ * presentations and quiet game ticks therefore reuse the complete CPU mesh;
+ * camera motion still rebuilds it through the exact original path. Separate
+ * slots keep the blurred and sharp underlay passes from evicting one another. */
+typedef struct SimGroundMeshCache {
+  bool valid;
+  float texture_x_at_zero, texture_y_at_zero, span;
+  uint8_t alpha;
+  SDL_Rect source, viewport;
+  float matrix[16];
+  bool has_fade;
+  SimCullFade fade;
+  bool has_exclude;
+  SDL_FRect exclude;
+  int vertex_count, index_count;
+  SDL_Vertex vertices[kSimUnderlayVertexCount];
+  int indices[kSimUnderlayIndexCount];
+} SimGroundMeshCache;
+
+static SimGroundMeshCache s_sim_ground_mesh_cache[kSimGroundMeshCache_Count];
+
+static bool SimCullFadeEquals(const SimCullFade *a, const SimCullFade *b) {
+  return a->lead == b->lead && a->corner == b->corner &&
+      a->lift_inset == b->lift_inset && a->fade == b->fade &&
+      a->dim == b->dim && a->extent_x0 == b->extent_x0 &&
+      a->extent_y0 == b->extent_y0 && a->extent_x1 == b->extent_x1 &&
+      a->extent_y1 == b->extent_y1 &&
+      a->extent_feather == b->extent_feather &&
+      a->margin_left == b->margin_left &&
+      a->margin_right == b->margin_right &&
+      a->margin_top == b->margin_top &&
+      a->margin_bottom == b->margin_bottom &&
+      a->screen_x0 == b->screen_x0;
+}
+
+static bool SimGroundMeshCacheMatches(
+    const SimGroundMeshCache *cache,
+    float texture_x_at_zero, float texture_y_at_zero, float span,
+    uint8_t alpha, SDL_Rect source, SDL_Rect viewport,
+    const float matrix[16], const SimCullFade *fade,
+    const SDL_FRect *exclude) {
+  if (!cache->valid || cache->texture_x_at_zero != texture_x_at_zero ||
+      cache->texture_y_at_zero != texture_y_at_zero ||
+      cache->span != span || cache->alpha != alpha ||
+      cache->source.x != source.x || cache->source.y != source.y ||
+      cache->source.w != source.w || cache->source.h != source.h ||
+      cache->viewport.x != viewport.x || cache->viewport.y != viewport.y ||
+      cache->viewport.w != viewport.w || cache->viewport.h != viewport.h ||
+      memcmp(cache->matrix, matrix, sizeof(cache->matrix)) != 0 ||
+      cache->has_fade != (fade != NULL) ||
+      cache->has_exclude != (exclude != NULL))
+    return false;
+  if (fade && !SimCullFadeEquals(&cache->fade, fade)) return false;
+  return !exclude || (cache->exclude.x == exclude->x &&
+      cache->exclude.y == exclude->y &&
+      cache->exclude.w == exclude->w &&
+      cache->exclude.h == exclude->h);
+}
+
+static void SimGroundMeshCacheSetKey(
+    SimGroundMeshCache *cache,
+    float texture_x_at_zero, float texture_y_at_zero, float span,
+    uint8_t alpha, SDL_Rect source, SDL_Rect viewport,
+    const float matrix[16], const SimCullFade *fade,
+    const SDL_FRect *exclude) {
+  cache->texture_x_at_zero = texture_x_at_zero;
+  cache->texture_y_at_zero = texture_y_at_zero;
+  cache->span = span;
+  cache->alpha = alpha;
+  cache->source = source;
+  cache->viewport = viewport;
+  memcpy(cache->matrix, matrix, sizeof(cache->matrix));
+  cache->has_fade = fade != NULL;
+  if (fade) cache->fade = *fade;
+  cache->has_exclude = exclude != NULL;
+  if (exclude) cache->exclude = *exclude;
+  cache->valid = true;
+}
 
 /* Uploaded at the frame-slot handoff, like every other game-thread pixel
  * buffer, and only over the region written since the last upload — a still
@@ -802,17 +901,43 @@ void UploadSimTownCanvas(void) {
     if (SDL_UpdateTexture(s_sim_canvas_texture, NULL,
                           SimTownCanvas_Pixels(),
                           kSimTownCanvasPixels * (int)sizeof(uint32_t))) {
+      Sim3DPerformance_AddUpload(
+          (uint64_t)kSimTownCanvasPixels * kSimTownCanvasPixels *
+          sizeof(uint32_t));
       int x, y, w, h;
       while (SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h)) {}
+      s_sim_canvas_force_full_upload = false;
+    } else {
+      s_sim_canvas_force_full_upload = true;
     }
+    return;
+  }
+  if (s_sim_canvas_force_full_upload) {
+    if (!SDL_UpdateTexture(s_sim_canvas_texture, NULL,
+                           SimTownCanvas_Pixels(),
+                           kSimTownCanvasPixels * (int)sizeof(uint32_t))) {
+      return;
+    }
+    Sim3DPerformance_AddUpload(
+        (uint64_t)kSimTownCanvasPixels * kSimTownCanvasPixels *
+        sizeof(uint32_t));
+    int x, y, w, h;
+    while (SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h)) {}
+    s_sim_canvas_force_full_upload = false;
     return;
   }
   int x = 0, y = 0, w = 0, h = 0;
   const uint32_t *pixels = SimTownCanvas_Pixels();
   while (SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h)) {
-    SDL_UpdateTexture(s_sim_canvas_texture, &(SDL_Rect){ x, y, w, h },
-                      pixels + (size_t)y * kSimTownCanvasPixels + x,
-                      kSimTownCanvasPixels * (int)sizeof(uint32_t));
+    if (!SDL_UpdateTexture(
+            s_sim_canvas_texture, &(SDL_Rect){ x, y, w, h },
+            pixels + (size_t)y * kSimTownCanvasPixels + (size_t)x,
+            kSimTownCanvasPixels * (int)sizeof(uint32_t))) {
+      s_sim_canvas_force_full_upload = true;
+      break;
+    }
+    Sim3DPerformance_AddUpload(
+        (uint64_t)w * (uint64_t)h * sizeof(uint32_t));
   }
 }
 
@@ -917,8 +1042,23 @@ static void DrawSimGroundExtension(SDL_Texture *texture,
                                    uint8_t alpha, SDL_Rect source,
                                    SDL_Rect viewport, const float matrix[16],
                                    const SimCullFade *fade,
-                                   const SDL_FRect *exclude) {
+                                   const SDL_FRect *exclude,
+                                   SimGroundMeshCacheKind cache_kind) {
   if (!texture || !alpha || source.w <= 0 || source.h <= 0) return;
+  if (cache_kind < 0 || cache_kind >= kSimGroundMeshCache_Count) return;
+  SimGroundMeshCache *cache = &s_sim_ground_mesh_cache[cache_kind];
+  if (SimGroundMeshCacheMatches(
+          cache, texture_x_at_zero, texture_y_at_zero, span, alpha,
+          source, viewport, matrix, fade, exclude)) {
+    if (SDL_RenderGeometry(g_renderer, texture, cache->vertices,
+                           cache->vertex_count, cache->indices,
+                           cache->index_count)) {
+      Sim3DPerformance_AddDraw((uint64_t)cache->vertex_count,
+                               (uint64_t)cache->index_count);
+    }
+    return;
+  }
+  cache->valid = false;
 
   /* Clamp the extension to the world map's own edges so every UV stays inside
    * the texture, then to the requested margin around the visible window. */
@@ -961,11 +1101,8 @@ static void DrawSimGroundExtension(SDL_Texture *texture,
   y1 = source.y + (0.5f - world_y1) * source.h;
 
   float base_alpha = (float)alpha / 255.0f;
-  /* File-scope rather than automatic: at this density the vertex/index pair is
-   * too large for a frame-stack allocation. SDL rendering runs synchronously on
-   * the main thread, so these shared statics are not accessed concurrently. */
-  static SDL_Vertex vertices[kSimUnderlayVertexCount];
-  static int indices[kSimUnderlayIndexCount];
+  SDL_Vertex *vertices = cache->vertices;
+  int *indices = cache->indices;
   int vertex_count = 0, index_count = 0;
   float x_coordinates[kSimUnderlayMaxColumns + 1];
   float y_coordinates[kSimUnderlayMaxRows + 1];
@@ -1043,8 +1180,16 @@ static void DrawSimGroundExtension(SDL_Texture *texture,
       indices[index_count++] = bottom_left;
     }
   }
-  SDL_RenderGeometry(g_renderer, texture, vertices, vertex_count,
-                     indices, index_count);
+  cache->vertex_count = vertex_count;
+  cache->index_count = index_count;
+  SimGroundMeshCacheSetKey(
+      cache, texture_x_at_zero, texture_y_at_zero, span, alpha,
+      source, viewport, matrix, fade, exclude);
+  if (SDL_RenderGeometry(g_renderer, texture, vertices, vertex_count,
+                         indices, index_count)) {
+    Sim3DPerformance_AddDraw(
+        (uint64_t)vertex_count, (uint64_t)index_count);
+  }
 }
 
 
@@ -1319,8 +1464,11 @@ void DrawSimBackdrop(const FrameSlot *slot, SDL_Rect viewport,
     indices[index_count++] = top_left + 3;
     indices[index_count++] = top_left + 2;
   }
-  SDL_RenderGeometry(g_renderer, NULL, vertices, vertex_count, indices,
-                     index_count);
+  if (SDL_RenderGeometry(g_renderer, NULL, vertices, vertex_count, indices,
+                         index_count)) {
+    Sim3DPerformance_AddDraw(
+        (uint64_t)vertex_count, (uint64_t)index_count);
+  }
 }
 
 /* D5a cull-event marker overlay.
@@ -1448,14 +1596,19 @@ static void DrawSimWorldUnderlay(const FrameSlot *slot, SDL_Rect source,
   if (defocus) {
     DrawSimGroundExtension(s_sim_underlay_blur_texture, texture_x_at_zero,
                            texture_y_at_zero, span, hazed, source, viewport,
-                           matrix, &blurred_dim, NULL);
+                           matrix, &blurred_dim, NULL,
+                           kSimGroundMeshCache_UnderlayBlur);
+    /* The sharp and blurred passes have different per-vertex alpha, so each
+     * retains its own mesh even though their projected positions coincide. */
     DrawSimGroundExtension(texture, texture_x_at_zero, texture_y_at_zero,
-                           span, 255, source, viewport, matrix, &focus, NULL);
+                           span, 255, source, viewport, matrix, &focus, NULL,
+                           kSimGroundMeshCache_UnderlaySharp);
     return;
   }
   /* Sharp-only path (defocus off): still dimmed, never faded, same reason. */
   DrawSimGroundExtension(texture, texture_x_at_zero, texture_y_at_zero, span,
-                         hazed, source, viewport, matrix, &blurred_dim, NULL);
+                         hazed, source, viewport, matrix, &blurred_dim, NULL,
+                         kSimGroundMeshCache_UnderlayBlur);
 }
 
 
@@ -1510,7 +1663,7 @@ static void DrawSimTownCanvas(const FrameSlot *slot, SDL_Rect source,
   DrawSimGroundExtension(
       canvas,
       extent_x0, extent_y0, (float)kSimTownCanvasPixels, 255,
-      source, viewport, matrix, &fade, exclude);
+      source, viewport, matrix, &fade, exclude, kSimGroundMeshCache_Town);
 }
 
 /* BG planes carrying menu furniture rather than world. Deferred past every
@@ -1654,14 +1807,21 @@ static void RenderSimProfile(const FrameSlot *slot,
    * than the clear above. The flat fill stays as the base: it costs one
    * rectangle and guarantees no pixel is ever left undefined if the gradient
    * declines to draw. */
-  if (atmospheric_backdrop)
+  if (atmospheric_backdrop) {
+    Sim3DPerformanceScope performance =
+        Sim3DPerformance_Begin(kSim3DPerformance_Backdrop);
     DrawSimBackdrop(slot, viewport, matrix);
+    Sim3DPerformance_End(performance);
+  }
 
   /* Straight after the backdrop clear and before any captured layer: the
    * extension is ground the town is standing on the middle of, so everything
    * the town itself draws belongs on top of it. */
   if (underlay) {
+    Sim3DPerformanceScope performance =
+        Sim3DPerformance_Begin(kSim3DPerformance_Underlay);
     DrawSimWorldUnderlay(slot, source, viewport, matrix, lift_inset);
+    Sim3DPerformance_End(performance);
   }
   if (underlay || background_voxels) {
     /* Keep the canvas as the opaque backing for transparent BG1 priority
@@ -1674,9 +1834,12 @@ static void RenderSimProfile(const FrameSlot *slot,
         ((enabled_planes & (1u << kSim3DPlane_Bg1High)) &&
          g_sim3d_layer_textures[kSim3DPlane_Bg1High]));
     SDL_FRect live_ground = ToFRect(source);
+    Sim3DPerformanceScope performance =
+        Sim3DPerformance_Begin(kSim3DPerformance_Terrain);
     DrawSimTownCanvas(slot, source, viewport, matrix, cull_haze, lift_inset,
                       live_ground_enabled ? &live_ground : NULL,
                       background_voxels);
+    Sim3DPerformance_End(performance);
   }
 
   SDL_FRect src = ToFRect(source), dst = ToFRect(viewport);
@@ -1713,15 +1876,22 @@ static void RenderSimProfile(const FrameSlot *slot,
      * below the highest world-object rank. Keeping this seam explicit avoids
      * the prototype's unconditional over-paint of every actor while retaining
      * the authentic painter order of lower object ranks and BG layers. */
-    if (plane == kSim3DPlane_Obj3)
+    if (plane == kSim3DPlane_Obj3) {
+      Sim3DPerformanceScope performance =
+          Sim3DPerformance_Begin(kSim3DPerformance_Effects);
       DrawSimEffectLocalLighting(slot, effect_lighting, source, viewport,
                                  &camera, matrix);
+      Sim3DPerformance_End(performance);
+    }
     if (plane == kSim3DPlane_Obj2 && background_voxels &&
         (enabled_planes & (1u << plane)) && !voxel_interleave) {
       SimBackgroundVoxelRenderParams voxel_params =
           SimVoxelRenderParams(slot, source, viewport, matrix);
+      Sim3DPerformanceScope performance =
+          Sim3DPerformance_Begin(kSim3DPerformance_DepthVoxel);
       SimBackgroundVoxelRenderer_Draw(
           g_renderer, &voxel_params);
+      Sim3DPerformance_End(performance);
     }
     if (!(enabled_planes & (1u << plane))) continue;
     if (SimPlaneIsMenu(plane)) continue;
@@ -1743,10 +1913,15 @@ static void RenderSimProfile(const FrameSlot *slot,
           };
           SimBackgroundVoxelRenderParams voxel_params =
               SimVoxelRenderParams(slot, source, viewport, matrix);
+          Sim3DPerformanceScope performance =
+              Sim3DPerformance_Begin(kSim3DPerformance_DepthVoxel);
           SimBackgroundVoxelRenderer_DrawInterleaved(
               g_renderer, &voxel_params,
               DrawSimVoxelBillboardLayer, &context);
+          Sim3DPerformance_End(performance);
         } else {
+          Sim3DPerformanceScope performance =
+              Sim3DPerformance_Begin(kSim3DPerformance_Billboard);
           DrawSimObjectPriority(slot, object_priority,
                                 kSimTierFilter_World,
                                 true, virtual_height,
@@ -1755,6 +1930,7 @@ static void RenderSimProfile(const FrameSlot *slot,
             DrawSimRimLight(slot, object_priority, virtual_height, source,
                             viewport, &camera, matrix,
                             kSimObjectTerrain_Any);
+          Sim3DPerformance_End(performance);
         }
         continue;
       }
@@ -1763,19 +1939,27 @@ static void RenderSimProfile(const FrameSlot *slot,
     SDL_Texture *texture = g_sim3d_layer_textures[plane];
     if (!texture) continue;
     if (plane == kSim3DPlane_Bg1Low || plane == kSim3DPlane_Bg1High) {
-      if (!background_voxels)
+      if (!background_voxels) {
+        Sim3DPerformanceScope performance =
+            Sim3DPerformance_Begin(kSim3DPerformance_Terrain);
         DrawSimGroundPlane(texture, source, viewport, matrix,
                            (fade_ground_planes || underlay)
                                ? &ground_fade : NULL);
+        Sim3DPerformance_End(performance);
+      }
       /* Ground first, mask immediately after, everything else on top: the
        * shadow can only ever darken ground pixels. Elevated terrain defers
        * that composite to its depth-tested top-surface receiver. */
-      if (plane == kSim3DPlane_Bg1Low && shadows)
+      if (plane == kSim3DPlane_Bg1Low && shadows) {
+        Sim3DPerformanceScope performance =
+            Sim3DPerformance_Begin(kSim3DPerformance_Shadow);
         DrawSimShadowMask(
             slot, virtual_height, soft_shadows,
             AR_SIM3D_TERRAIN_ELEVATION && background_voxels &&
                 (enabled_planes & (1u << kSim3DPlane_Obj2)),
             source, viewport, matrix);
+        Sim3DPerformance_End(performance);
+      }
     } else
       SDL_RenderTexture(g_renderer, texture, &src, &dst);
   }
@@ -1783,20 +1967,33 @@ static void RenderSimProfile(const FrameSlot *slot,
   /* Scene flash intentionally reaches the completed world; sparks are
    * emissive foreground detail. Both remain below atmospheric cover and every
    * fixed-tier menu plane, so neither can tint UI. */
-  DrawSimEffectSceneFlash(slot, effect_lighting, viewport);
-  DrawSimEffectParticles(slot, particles, source, viewport, &camera, matrix);
-  DrawSimEffectFireballHeads(slot, billboards, source, viewport, &camera,
-                             matrix);
+  {
+    Sim3DPerformanceScope performance =
+        Sim3DPerformance_Begin(kSim3DPerformance_Effects);
+    DrawSimEffectSceneFlash(slot, effect_lighting, viewport);
+    DrawSimEffectParticles(slot, particles, source, viewport, &camera, matrix);
+    DrawSimEffectFireballHeads(slot, billboards, source, viewport, &camera,
+                               matrix);
+    Sim3DPerformance_End(performance);
+  }
 
   /* Over the objects. The shroud's whole purpose is to cover ground that can
    * never hold an actor, so anything it hides must be hidden completely --
    * including a sprite that strays under its edge. */
-  if (clouds)
+  if (clouds) {
+    Sim3DPerformanceScope performance =
+        Sim3DPerformance_Begin(kSim3DPerformance_Cloud);
     DrawSimCloudShroud(slot, source, viewport, matrix);
+    Sim3DPerformance_End(performance);
+  }
 
-  if (billboards)
+  if (billboards) {
+    Sim3DPerformanceScope performance =
+        Sim3DPerformance_Begin(kSim3DPerformance_Billboard);
     DrawSimSelectionOverlays(
         slot, virtual_height, source, viewport, &camera, matrix);
+    Sim3DPerformance_End(performance);
+  }
 
   /* The menu planes last of all, held back from the painter-order loop above.
    * They are the only thing in the profile that is not part of the world:
@@ -1825,10 +2022,14 @@ static void RenderSimProfile(const FrameSlot *slot,
         break;
       }
     if (object_priority >= 0) {
-      if (billboards)
+      if (billboards) {
+        Sim3DPerformanceScope performance =
+            Sim3DPerformance_Begin(kSim3DPerformance_Billboard);
         DrawSimObjectPriority(slot, object_priority, kSimTierFilter_Fixed,
                               true, virtual_height, source, viewport,
                               &camera, matrix, NULL);
+        Sim3DPerformance_End(performance);
+      }
       continue;
     }
     if (!SimPlaneIsMenu(plane)) continue;
@@ -1841,6 +2042,26 @@ static void RenderSimProfile(const FrameSlot *slot,
    * cover exists where a record is being taken away, and a marker hidden by
    * the very cover under test cannot answer it. */
   DrawSimCullMarkers(slot, source, viewport, matrix, lift_inset);
+}
+
+/* Captured SNES planes already contain INIDISP's master brightness, but host
+ * terrain, models, lighting, particles and atmosphere do not all pass through
+ * that PPU stage. Ride the same 0..15 schedule with one final black curtain so
+ * every game-owned pixel disappears together. This overlay is intentionally
+ * additional for authentic pixels during intermediate steps: complete coverage
+ * is more important than leaving bright host effects behind a hardware-exact
+ * curve. NULL fills the complete current render target, including any projected
+ * content outside the authentic 256x224 image and the aspect-ratio margins. */
+static void DrawSimMasterFade(const FrameSlot *slot) {
+  uint8_t alpha = (slot->inidisp & 0x80)
+      ? UINT8_MAX
+      : SimWorldNavigationScene_MasterFadeAlpha(slot->inidisp & 0x0F);
+  if (!alpha) return;
+  SDL_SetRenderClipRect(g_renderer, NULL);
+  SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND);
+  SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, alpha);
+  SDL_RenderFillRect(g_renderer, NULL);
+  SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE);
 }
 
 void PresentSim3D(const FrameSlot *slot) {
@@ -1875,8 +2096,13 @@ void PresentSim3D(const FrameSlot *slot) {
    * owners. sim3d.c republishes their exact buffers and removes those pixels
    * from the SIM profile, so the established anchored compositor remains the
    * single HUD presentation path for both the flat and projected views. */
+  Sim3DPerformanceScope host_ui_performance =
+      Sim3DPerformance_Begin(kSim3DPerformance_HostUi);
   PresentHudOverlayComposited(slot, viewport);
+  DrawSimMasterFade(slot);
+  Sim3DPerformance_End(host_ui_performance);
   ApplyLogicalPresentation(slot);
+  Sim3DPerformance_EndPresentation();
 }
 /* T2a: the sim half of PresentRendererResources_Reset. present.c keeps the
  * HUD-composite and effect-capability half and calls this. Defined after the
@@ -1898,6 +2124,8 @@ void PresentSim3D_ResetResources(void) {
   if (s_sim_canvas_texture) SDL_DestroyTexture(s_sim_canvas_texture);
   s_sim_canvas_texture = NULL;
   s_sim_canvas_alloc_failed = false;
+  s_sim_canvas_force_full_upload = false;
+  memset(s_sim_ground_mesh_cache, 0, sizeof(s_sim_ground_mesh_cache));
   SimBackgroundVoxelRenderer_Reset();
   PresentSim3DClouds_ResetResources();
   PresentWorldNav_ResetResources();

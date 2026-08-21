@@ -46,6 +46,12 @@ int main(void) {
         SimBackgroundVoxelRegion_HouseStyle(5, 0));
   CHECK(SimBackgroundVoxelRegion_HouseStyle(5, 2) !=
         SimBackgroundVoxelRegion_HouseStyle(1, 1));
+  SimBackgroundVoxelObject aitos_stone = {
+    .kind = kSimBackgroundVoxel_House,
+    .town = 4,
+    .development_level = 2,
+  };
+  CHECK(SimBackgroundVoxelRegion_AuthoredHeight(&aitos_stone) == 11.0f);
 
   SimBackgroundVoxelObject tent = {
     .kind = kSimBackgroundVoxel_House,

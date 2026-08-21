@@ -16,6 +16,7 @@
 #include <string.h>
 #include "sim/sim_world_map.h"
 #include "sim/sim3d.h"
+#include "sim/sim3d_performance.h"
 
 #ifndef AR_SIM3D_TERRAIN_ELEVATION
 #define AR_SIM3D_TERRAIN_ELEVATION 0
@@ -145,10 +146,14 @@ static SDL_Texture *EnsureSimCloudTexture(void) {
     return NULL;
   }
   for (int y = 0; y < kSimCloudTexturePixels; y++) {
-    uint32_t *row = (uint32_t *)((uint8_t *)pixels +
-        (size_t)y * (size_t)pitch);
-    for (int x = 0; x < kSimCloudTexturePixels; x++)
-      row[x] = SimCloudTexel(x, y);
+    uint8_t *row = (uint8_t *)pixels + (size_t)y * (size_t)pitch;
+    for (int x = 0; x < kSimCloudTexturePixels; x++) {
+      const uint32_t texel = SimCloudTexel(x, y);
+      /* SDL documents the lock's byte pitch but does not promise uint32_t
+       * alignment for every backend staging pointer. memcpy preserves the
+       * ARGB8888 word without an alignment assumption on ARM or Vulkan. */
+      memcpy(row + (size_t)x * sizeof(texel), &texel, sizeof(texel));
+    }
   }
   SDL_UnlockTexture(s_sim_cloud_texture);
   return s_sim_cloud_texture;
@@ -306,8 +311,11 @@ void DrawSimCloudShroud(const FrameSlot *slot, SDL_Rect source,
       if (!vertex_count) break;
     }
     if (!any_cover || !vertex_count) continue;
-    SDL_RenderGeometry(g_renderer, texture, vertices, vertex_count, indices,
-                       index_count);
+    if (SDL_RenderGeometry(g_renderer, texture, vertices, vertex_count,
+                           indices, index_count)) {
+      Sim3DPerformance_AddDraw(
+          (uint64_t)vertex_count, (uint64_t)index_count);
+    }
   }
   SDL_SetRenderTextureAddressMode(g_renderer, SDL_TEXTURE_ADDRESS_AUTO,
                                   SDL_TEXTURE_ADDRESS_AUTO);

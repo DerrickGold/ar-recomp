@@ -12,6 +12,98 @@ const SimBackgroundProjectionAxis kSimBackgroundUprightProjectionAxis = {
   0.0f, 0.0f, 1.0f,
 };
 
+void SimBackgroundVoxelProject_Prepare(
+    SimBackgroundVoxelRenderParams *params) {
+  if (!params) return;
+  params->texture_to_clip_valid = false;
+  if (!params->matrix || params->source.w <= 0 || params->source.h <= 0 ||
+      params->viewport.w <= 0 || params->viewport.h <= 0)
+    return;
+
+  const float inverse_width = 1.0f / (float)params->source.w;
+  const float inverse_height = 1.0f / (float)params->source.h;
+  const float aspect = (float)params->viewport.w /
+      (float)params->viewport.h;
+  const float world_x_per_texture_x = aspect * inverse_width;
+  const float world_y_per_texture_y = -inverse_height;
+  const float world_z_per_height = inverse_height;
+  const float world_x_constant =
+      (-(float)params->source.x * inverse_width - 0.5f) * aspect;
+  const float world_y_constant =
+      0.5f + (float)params->source.y * inverse_height;
+
+  for (int component = 0; component < 4; component++) {
+    float *row = &params->texture_to_clip[component * 4];
+    row[0] = params->matrix[component] * world_x_per_texture_x;
+    row[1] = params->matrix[4 + component] * world_y_per_texture_y;
+    row[2] = params->matrix[8 + component] * world_z_per_height;
+    row[3] = params->matrix[component] * world_x_constant +
+        params->matrix[4 + component] * world_y_constant +
+        params->matrix[12 + component];
+  }
+  params->texture_to_clip_valid = true;
+}
+
+static float PreparedClipComponent(
+    const SimBackgroundVoxelRenderParams *params, int component,
+    float texture_x, float texture_y, float height_pixels) {
+  const float *row = &params->texture_to_clip[component * 4];
+  return row[0] * texture_x + row[1] * texture_y +
+      row[2] * height_pixels + row[3];
+}
+
+static bool PreparedNormalizedDepth(
+    const SimBackgroundVoxelRenderParams *params,
+    float texture_x, float texture_y, float height_pixels,
+    float *gpu_depth) {
+  if (!params->texture_to_clip_valid || !gpu_depth) return false;
+  const float clip_w = PreparedClipComponent(
+      params, 3, texture_x, texture_y, height_pixels);
+  if (clip_w <= kScene3DMinimumProjectionDepth) return false;
+  const float clip_z = PreparedClipComponent(
+      params, 2, texture_x, texture_y, height_pixels);
+  const float depth = clip_z / clip_w * 0.5f + 0.5f;
+  if (!isfinite(depth)) return false;
+  *gpu_depth = depth;
+  return true;
+}
+
+static bool ProjectPreparedTexturePoint(
+    const SimBackgroundVoxelRenderParams *params,
+    float texture_x, float texture_y, float height_pixels,
+    Scene3DPoint *out, float *gpu_depth, float *clip_depth) {
+  if (!params->texture_to_clip_valid || !out) return false;
+  const float clip_x = PreparedClipComponent(
+      params, 0, texture_x, texture_y, height_pixels);
+  const float clip_y = PreparedClipComponent(
+      params, 1, texture_x, texture_y, height_pixels);
+  const float clip_w = PreparedClipComponent(
+      params, 3, texture_x, texture_y, height_pixels);
+  if (clip_w <= kScene3DMinimumProjectionDepth) return false;
+  const float inverse_w = 1.0f / clip_w;
+  Scene3DPoint projected = {
+    (clip_x * inverse_w * 0.5f + 0.5f) * params->viewport.w +
+        params->viewport.x,
+    (1.0f - (clip_y * inverse_w * 0.5f + 0.5f)) * params->viewport.h +
+        params->viewport.y,
+  };
+  if (params->render_scale == kSimBackgroundVoxelRenderScale_PixelClean) {
+    projected.x = floorf(projected.x) + 0.5f;
+    projected.y = floorf(projected.y) + 0.5f;
+  }
+  if (!isfinite(projected.x) || !isfinite(projected.y)) return false;
+  if (gpu_depth) {
+    const float clip_z = PreparedClipComponent(
+        params, 2, texture_x, texture_y, height_pixels);
+    const float depth = clip_z * inverse_w * 0.5f + 0.5f;
+    if (!isfinite(depth)) return false;
+    *gpu_depth = depth;
+  }
+  if (clip_depth) *clip_depth = clip_w;
+  *out = projected;
+  return true;
+}
+
 void SimBackgroundVoxelProject_TexturePointToWorld(
     const SimBackgroundVoxelRenderParams *params,
     float texture_x, float texture_y, float height_pixels,
@@ -174,6 +266,13 @@ bool SimBackgroundVoxelProject_Point(
     const SimBackgroundProjectionAxis *axis,
     float texture_x, float texture_y, float height_pixels,
     Scene3DPoint *out, float *clip_depth) {
+  const float leaned_x = texture_x + height_pixels * axis->x_per_height;
+  const float leaned_y = texture_y + height_pixels * axis->y_per_height;
+  const float leaned_height = height_pixels * axis->height_scale;
+  if (params->texture_to_clip_valid)
+    return ProjectPreparedTexturePoint(
+        params, leaned_x, leaned_y, leaned_height,
+        out, NULL, clip_depth);
   float world_x, world_y, world_z;
   SimBackgroundVoxelProject_LeanedPointToWorld(
       params, axis, texture_x, texture_y, height_pixels,
@@ -197,6 +296,31 @@ bool SimBackgroundVoxelProject_GroundedVertexWithDepthGround(
     float height_pixels, float visual_ground_pixels,
     float depth_ground_pixels,
     Scene3DPoint *out, float *gpu_depth) {
+  if (!out || !gpu_depth) return false;
+  const float leaned_x = texture_x + height_pixels * axis->x_per_height;
+  const float leaned_y = texture_y + height_pixels * axis->y_per_height;
+  const float leaned_height = height_pixels * axis->height_scale;
+  if (params->texture_to_clip_valid) {
+    float visual_depth;
+    if (!ProjectPreparedTexturePoint(
+            params, leaned_x, leaned_y,
+            visual_ground_pixels + leaned_height,
+            out, &visual_depth, NULL))
+      return false;
+    if (fabsf(depth_ground_pixels - visual_ground_pixels) <
+        kGroundProjectionEpsilonPixels) {
+      *gpu_depth = visual_depth;
+      return true;
+    }
+    float safety_depth;
+    if (!PreparedNormalizedDepth(
+            params, leaned_x, leaned_y,
+            depth_ground_pixels + leaned_height,
+            &safety_depth))
+      return false;
+    *gpu_depth = fminf(visual_depth, safety_depth);
+    return true;
+  }
   float world_x, world_y, world_z;
   SimBackgroundVoxelProject_TexturePointToWorld(
       params,
@@ -247,6 +371,14 @@ bool SimBackgroundVoxelProject_GroundedPoint(
     float texture_x, float texture_y,
     float height_pixels, float ground_pixels,
     Scene3DPoint *out, float *clip_depth) {
+  const float leaned_x = texture_x + height_pixels * axis->x_per_height;
+  const float leaned_y = texture_y + height_pixels * axis->y_per_height;
+  const float leaned_height =
+      ground_pixels + height_pixels * axis->height_scale;
+  if (params->texture_to_clip_valid)
+    return ProjectPreparedTexturePoint(
+        params, leaned_x, leaned_y, leaned_height,
+        out, NULL, clip_depth);
   float world_x, world_y, world_z;
   SimBackgroundVoxelProject_TexturePointToWorld(
       params,

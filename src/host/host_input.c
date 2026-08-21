@@ -93,6 +93,17 @@ void HostInput_RequestPausedRedraw(void) {
   s_paused_redraw_pending = true;
 }
 
+/* Camera pose is presentation-owned and can refresh a retained live frame
+ * without redrawing the emulated scene. Only frozen emulation needs the legacy
+ * redraw request to produce a new retained frame immediately. Marking every
+ * live mouse event as a content redraw suppresses uncapped re-presentation
+ * until the next ~60 Hz tick, which makes the FPS counter collapse while the
+ * camera is moving. */
+static void RequestCameraRedrawIfFrozen(void) {
+  if (s_paused || SettingsOverlay_IsOpen())
+    HostInput_RequestPausedRedraw();
+}
+
 bool HostInput_IsPausedRedrawPending(void) {
   return s_paused_redraw_pending;
 }
@@ -135,12 +146,12 @@ void HostInput_CloseInspectorSelection(void) {
 void HostInput_AdjustSim3DCamera(float yaw_delta, float pitch_delta,
                                  float zoom_delta) {
   Sim3DCamera_Adjust(yaw_delta, pitch_delta, zoom_delta);
-  HostInput_RequestPausedRedraw();
+  RequestCameraRedrawIfFrozen();
 }
 
 void HostInput_ResetSim3DCamera(void) {
   Sim3DCamera_Reset();
-  HostInput_RequestPausedRedraw();
+  RequestCameraRedrawIfFrozen();
 }
 
 void HostInput_ApplyAnalogCamera(void) {
@@ -201,10 +212,10 @@ void HostInput_ApplyAnalogCamera(void) {
       elapsed_seconds, diorama_orbit_held);
   const bool sim_changed = Sim3DCamera_UpdateDynamic(
       elapsed_seconds, sim_orbit_held);
-  if (((diorama || sim3d) && camera_input) ||
-      (diorama && diorama_changed) ||
-      (sim3d && sim_changed))
+  if ((diorama && camera_input) || (diorama && diorama_changed))
     HostInput_RequestPausedRedraw();
+  if (sim3d && sim_changed)
+    RequestCameraRedrawIfFrozen();
 }
 
 static void OnGamepadHostAction(InputAction action) {

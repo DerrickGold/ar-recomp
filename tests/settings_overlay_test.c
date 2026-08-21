@@ -637,6 +637,30 @@ int main(void) {
   SettingsOverlay_SetInspectorInfoProvider(InspectorInfo);
   free(rom_data);
 
+  /* Output-space text is shared by the manual and the FPS counter. Keep a
+   * real software-renderer regression around the batched glyph path so a bad
+   * index/UV layout cannot turn the performance overlay into an invisible
+   * one while the ordinary per-glyph menu continues to pass. */
+  if (renderer && surface) {
+    CHECK(SDL_SetRenderLogicalPresentation(
+        renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED));
+    CHECK(SDL_SetRenderViewport(renderer, NULL));
+    CHECK(SDL_SetRenderClipRect(renderer, NULL));
+    SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
+    CHECK(SDL_RenderClear(renderer));
+    SettingsOverlay_DrawGameText(8, 8, 2, 255, "FPS 123.4");
+    CHECK(SDL_RenderPresent(renderer));
+    int changed_pixels = 0;
+    const int text_width = SettingsOverlay_GameTextWidth("FPS 123.4", 2);
+    for (int y = 8; y < 8 + 2 * kSettingsOverlayGlyphSize; y++)
+      for (int x = 8; x < 8 + text_width; x++) {
+        Uint8 r = 0, g = 0, b = 0, a = 0;
+        CHECK(SDL_ReadSurfacePixel(surface, x, y, &r, &g, &b, &a));
+        if (r != 32 || g != 24 || b != 16) changed_pixels++;
+      }
+    CHECK(changed_pixels > 0);
+  }
+
   /* Headless SDL reports no refresh rate; let a preview inject one so the
    * "Vsync NHz" row can be eyeballed. */
   const char *refresh_hz = getenv("AR_OVERLAY_TEST_REFRESH_HZ");

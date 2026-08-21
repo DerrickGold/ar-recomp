@@ -17,6 +17,7 @@ static const FrameSlot *s_expected_slot;
 static const DioramaScrollSnapshot *s_expected_previous;
 static const ActionObjInterpolationFrame *s_expected_previous_action_obj;
 static float s_expected_alpha;
+static double s_expected_presentation_fps;
 static const SDL_Rect kFallback = { 160, 0, 960, 720 };
 static const SDL_Rect kResolved = { 161, 1, 958, 718 };
 
@@ -28,16 +29,18 @@ static const SDL_Rect kResolved = { 161, 1, 958, 718 };
   } \
 } while (0)
 
-SDL_Rect ComputePresentationViewport(SDL_Renderer *renderer,
-                                     bool ignore_aspect_ratio,
-                                     int pixel_aspect, int visible_width,
-                                     int snes_height) {
+SDL_Rect ComputePresentationViewportWithOutput(
+    SDL_Renderer *renderer, bool ignore_aspect_ratio,
+    int pixel_aspect, int visible_width, int snes_height,
+    SDL_Point *output_size) {
   CHECK(s_stage++ == 0);
   CHECK(renderer == g_renderer);
   CHECK(!ignore_aspect_ratio);
   CHECK(pixel_aspect == 7);
   CHECK(visible_width == 256);
   CHECK(snes_height == 224);
+  CHECK(output_size != NULL);
+  *output_size = (SDL_Point){1280, 720};
   return kFallback;
 }
 
@@ -68,12 +71,16 @@ SDL_Rect CrtPost_End(SDL_Renderer *renderer,
   return kResolved;
 }
 
-void PresentHostUi(const FrameSlot *slot, SDL_Rect viewport) {
+void PresentHostUi(const FrameSlot *slot, SDL_Rect viewport,
+                   SDL_Point output_size,
+                   double presentation_fps) {
   CHECK(s_stage++ == 4);
   CHECK(slot == s_expected_slot);
   /* The UI must receive End's authoritative rectangle, not the fallback that
    * was calculated before SDL resolved its per-target logical presentation. */
   CHECK(SDL_RectsEqual(&viewport, &kResolved));
+  CHECK(output_size.x == 1280 && output_size.y == 720);
+  CHECK(presentation_fps == s_expected_presentation_fps);
 }
 
 int main(void) {
@@ -88,9 +95,11 @@ int main(void) {
   s_expected_previous = &previous;
   s_expected_previous_action_obj = &previous_action_obj;
   s_expected_alpha = 0.375f;
+  s_expected_presentation_fps = 144.25;
 
   SDL_Rect resolved = PresentFrame(
-      &slot, &previous, &previous_action_obj, s_expected_alpha);
+      &slot, &previous, &previous_action_obj, s_expected_alpha,
+      s_expected_presentation_fps);
   CHECK(s_stage == 5);
   CHECK(SDL_RectsEqual(&resolved, &kResolved));
 

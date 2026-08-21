@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <signal.h>
 #include <errno.h>
+#include <limits.h>
 #include <math.h>
 #include <SDL3/SDL.h>
 
@@ -237,7 +238,7 @@ static void RunOneEmulatedTick(bool *stop_running) {
   extern uint8 g_ram[];
   static int perf_on = -1;
   if (perf_on < 0) perf_on = getenv("AR_PERF") ? 1 : 0;
-  uint32 perf_t0 = perf_on ? SDL_GetTicks() : 0;
+  uint64_t perf_t0 = perf_on ? SDL_GetTicks() : 0;
   /* AR_APUPROF=<ms>: per-frame APU-stall attribution. Any game frame whose
    * wall time reaches the threshold (default 8 ms; the flag value overrides
    * when >= 2) prints one [apuprof] line splitting the frame into lock-wait
@@ -332,10 +333,11 @@ static void RunOneEmulatedTick(bool *stop_running) {
   }
   if (perf_on) {
     extern void snes_catchup_stats(uint64_t *calls, uint64_t *cycles);
-    static uint32 win_start, run_ms_sum, run_ms_max; static int win_frames;
+    static uint64_t win_start, run_ms_sum, run_ms_max;
+    static int win_frames;
     static uint64_t last_cu_calls, last_cu_cycles; static unsigned last_gf;
-    uint32 t1 = SDL_GetTicks();
-    uint32 dt = t1 - perf_t0;
+    uint64_t t1 = SDL_GetTicks();
+    uint64_t dt = t1 - perf_t0;
     run_ms_sum += dt; if (dt > run_ms_max) run_ms_max = dt;
     win_frames++;
     if (!win_start) win_start = t1;
@@ -343,9 +345,10 @@ static void RunOneEmulatedTick(bool *stop_running) {
       uint64_t cc, cy; snes_catchup_stats(&cc, &cy);
       const unsigned gf =
           ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
-      fprintf(stderr, "[perf] fps=%d run-ms avg=%.1f max=%u gf+=%u "
+      fprintf(stderr, "[perf] fps=%d run-ms avg=%.1f max=%llu gf+=%u "
               "apu-catchup calls=%llu cyc=%llu $18=%02x\n",
-              win_frames, (double)run_ms_sum / win_frames, run_ms_max,
+              win_frames, (double)run_ms_sum / win_frames,
+              (unsigned long long)run_ms_max,
               (unsigned)(uint16)(gf - last_gf),
               (unsigned long long)(cc - last_cu_calls),
               (unsigned long long)(cy - last_cu_cycles),
@@ -373,7 +376,7 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
   static int perf_on = -1;
   if (perf_on < 0) perf_on = getenv("AR_PERF") ? 1 : 0;
 
-  uint32 perf_draw_t0 = perf_on ? SDL_GetTicks() : 0;
+  uint64_t perf_draw_t0 = perf_on ? SDL_GetTicks() : 0;
   RtlDrawPpuFrame();
   /* Own the developed world tilemap instead of observing $7E:C000, which acts
    * and towns both reuse as unrelated scratch. This runs only on the game
@@ -402,11 +405,14 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
     SceneInspector_SetSimFrameData(&sim);
     /* g_pixels is bound apron-wide; offset past the apron so the trace sees
      * the authentic frame at column 0, as it always has. */
-    SimRenderMetadata_TraceFrame(
-        (uint32)snes_frame_counter, &sim,
-        g_pixels + ActionApron_DisplayOffset(kPpuObjApron),
-        g_snes_width, g_snes_height,
-        ActionApron_SurfacePitch(g_snes_width, kPpuObjApron));
+    const size_t trace_pitch =
+        ActionApron_SurfacePitch(g_snes_width, kPpuObjApron);
+    if (trace_pitch <= INT_MAX) {
+      SimRenderMetadata_TraceFrame(
+          (uint32)snes_frame_counter, &sim,
+          g_pixels + ActionApron_DisplayOffset(kPpuObjApron),
+          g_snes_width, g_snes_height, (int)trace_pitch);
+    }
   }
   /* AR_DIORAMA_DUMP_GF=<gf>[,<gf>...]: arm the Shift+D layer dump from a replay
    * instead of the keyboard, so a diorama frame can be inspected headlessly.
@@ -444,19 +450,21 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
   }
   HostInput_MarkFrameDrawn();
   if (perf_on) {
-    static uint32 draw_win_start, draw_ms_sum, draw_ms_max;
+    static uint64_t draw_win_start, draw_ms_sum, draw_ms_max;
     static int draw_win_frames;
-    uint32 now = SDL_GetTicks();
-    uint32 dt = now - perf_draw_t0;
+    uint64_t now = SDL_GetTicks();
+    uint64_t dt = now - perf_draw_t0;
     draw_ms_sum += dt;
     if (dt > draw_ms_max) draw_ms_max = dt;
     draw_win_frames++;
     if (!draw_win_start) draw_win_start = now;
     if (now - draw_win_start >= kPerformanceReportIntervalMs) {
       fprintf(stderr,
-              "[draw-perf] frames=%d draw-ms avg=%.1f max=%u $18=%02x $19=%02x\n",
+              "[draw-perf] frames=%d draw-ms avg=%.1f max=%llu "
+              "$18=%02x $19=%02x\n",
               draw_win_frames, (double)draw_ms_sum / draw_win_frames,
-              draw_ms_max, g_ram[kActRaiserWram_MapGroup],
+              (unsigned long long)draw_ms_max,
+              g_ram[kActRaiserWram_MapGroup],
               g_ram[kActRaiserWram_CurrentMap]);
       draw_win_start = now;
       draw_ms_sum = 0;
@@ -514,10 +522,12 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
   }
 }
 
-/* Per-outer-iteration host-side housekeeping (§3.5): polls / one-shot
- * triggers that are not coupled to the emulated tick rate. Runs once per
- * outer iteration regardless of how many ticks the accumulator fired. */
-static void RunOuterIterationHousekeeping(void) {
+/* Host-side work that follows one or more completed emulation ticks. Catch-up
+ * still coalesces it to one pass, but retained-frame redraws do not run it:
+ * explicit Uncapped profiling may execute those redraws thousands of times per
+ * second, and multiplying SRAM scans or host/APU policy checks by presentation
+ * throughput both wastes work and contaminates the rendering measurement. */
+static void RunPostTickHousekeeping(void) {
   extern uint8 g_ram[];
   /* Re-read the display mode ~1/s. The mode-changed events are an
    * optimization, not the source of truth: a compositor can change the
@@ -628,6 +638,11 @@ static void RunOuterIterationHousekeeping(void) {
  * decoder before resuming the device, so no callback can advance only one
  * source across the edge. */
 static void ApplyHostAudioPause(bool paused) {
+  static bool initialized;
+  static bool applied_pause;
+  if (initialized && applied_pause == paused) return;
+  initialized = true;
+  applied_pause = paused;
   if (paused) HostAudio_SetHostPaused(true);
   MusicReplacements_SetHostPaused(paused);
   if (!paused) HostAudio_SetHostPaused(false);
@@ -1582,7 +1597,7 @@ static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
               "diorama_layer_backdrop", "diorama_layer_bg2",
               "diorama_layer_bg1", "diorama_layer_obj", "diorama_layer_bg3",
             };
-            int index = event.key.key - SDLK_1;
+            int index = (int)(event.key.key - SDLK_1);
             const SettingDesc *row = Settings_Find(kLayerKeys[index]);
             long value = 0;
             if (row && Settings_GetLong(row, &value)) {
@@ -1592,7 +1607,7 @@ static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
               HostInput_RequestPausedRedraw();
             }
           } else {
-            HostInput_HandleKeyboard(event.key.scancode, true);
+            HostInput_HandleKeyboard((int)event.key.scancode, true);
           }
           break;
         case SDL_EVENT_TEXT_INPUT:
@@ -1719,7 +1734,7 @@ static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
             if (HostInput_MenuKeyboardIsActive())
               (void)SettingsOverlay_HandleKey(event.key.key, false, false);
           } else {
-            HostInput_HandleKeyboard(event.key.scancode, false);
+            HostInput_HandleKeyboard((int)event.key.scancode, false);
           }
           break;
       }
@@ -1747,7 +1762,7 @@ static void AppRunMainLoop(AppBoot *app) {
    * accumulator still owns emulated tick rate; vsync controls presentation. */
 
   bool running = true;
-  uint32 last_tick = SDL_GetTicks();  /* headless-only pacing (§3.6) */
+  uint64_t last_tick = SDL_GetTicks();  /* headless-only pacing (§3.6) */
   const uint32 emulation_frame_interval_ms =
       (uint32)(kHostDisplayEmulationFrameIntervalNs /
                kNanosecondsPerMillisecond);
@@ -1827,7 +1842,7 @@ static void AppRunMainLoop(AppBoot *app) {
        * outer iteration. Oracle/replay tooling depends on it running as fast as
        * the CPU allows. */
       RunOneEmulatedTick(&running);
-      RunOuterIterationHousekeeping();
+      RunPostTickHousekeeping();
       DrawAndPresentFrame(emulated_frame_present_mode, kInterpPhaseNone);
 
       if (DevTools_ShouldAutoQuit()) running = false;
@@ -1839,10 +1854,10 @@ static void AppRunMainLoop(AppBoot *app) {
       if (pace == kUninitializedEnvironmentOption)
         pace = getenv("AR_PACE") ? 1 : 0;
       if (pace) {
-        uint32 now = SDL_GetTicks();
-        uint32 elapsed = now - last_tick;
+        uint64_t now = SDL_GetTicks();
+        uint64_t elapsed = now - last_tick;
         if (elapsed < emulation_frame_interval_ms)
-          SDL_Delay(emulation_frame_interval_ms - elapsed);
+          SDL_Delay((Uint32)(emulation_frame_interval_ms - elapsed));
         last_tick = SDL_GetTicks();
       }
       continue;
@@ -1890,7 +1905,7 @@ static void AppRunMainLoop(AppBoot *app) {
           (float)accumulator /
           (float)kHostDisplayEmulationFrameIntervalNs;
 
-      RunOuterIterationHousekeeping();
+      if (produced_frame) RunPostTickHousekeeping();
 
       /* R17/C5: the render rate is now independent of the tick rate.
        *
@@ -1926,8 +1941,9 @@ static void AppRunMainLoop(AppBoot *app) {
           presented = true;
         }
       }
-      /* INVARIANT: every iteration either presents (which blocks on vsync or on
-       * a guaranteed-nonzero throttle interval) or yields. One unconditional
+      /* INVARIANT: every iteration either presents (normally blocking on vsync
+       * or a guaranteed-nonzero throttle; explicit Uncapped profiling is the
+       * opt-in exception) or yields. One unconditional
        * line, not a property of the branch structure above — four independent
        * reviewers found this exact hole in an earlier draft where the sleep was
        * attached to the hidden-window arm, and "the code happens to fall through

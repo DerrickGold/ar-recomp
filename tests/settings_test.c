@@ -94,8 +94,9 @@ static void TestDefaultsAndMetadata(void) {
    * measured, gameplay-affecting actor-range row. Background voxel polish then
    * added five independent performance boundaries, the audited landscape one
    * player-facing magnitude row, and the Aitos wind event one Extras row for
-   * whether it stills every windmill or only the ones the ROM stamped. */
-  CHECK(g_setting_desc_count == 268);
+   * whether it stills every windmill or only the ones the ROM stamped. The
+   * host FPS overlay adds one Video row. */
+  CHECK(g_setting_desc_count == 269);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -124,6 +125,7 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(g_settings.window_mode == kWindowMode_Windowed &&
         g_settings.new_renderer);
   CHECK(g_settings.refresh_mode == kRefreshMode_Vsync);
+  CHECK(!g_settings.show_fps);
   CHECK(!g_settings.ignore_aspect_ratio);
   CHECK(g_settings.audio_enabled);
   CHECK(g_settings.audio_frequency == kAudioFrequency_Auto);
@@ -1075,6 +1077,8 @@ static void TestFrameLimitInterval(void) {
   CHECK(R2_FrameLimitIntervalNs() == 0);          /* stays truly unlimited */
   g_settings.refresh_mode = kRefreshMode_Vsync;   /* neither branch */
   CHECK(R2_FrameLimitIntervalNs() == 0);
+  g_settings.refresh_mode = kRefreshMode_Uncapped;
+  CHECK(R2_FrameLimitIntervalNs() == 0);
 }
 
 /* R6: a pinned scale percentage is defined in source-pixels-per-OUTPUT-pixel,
@@ -1210,7 +1214,10 @@ static void TestVideoSettingAudit(void) {
   const SettingDesc *hd = Settings_Find("hd_replacements");
   const SettingDesc *stretch = Settings_Find("ignore_aspect_ratio");
   const SettingDesc *uncapped = Settings_Find("uncapped_framerate");
-  CHECK(display && window_scale && hd && stretch && uncapped);
+  const SettingDesc *show_fps = Settings_Find("show_fps");
+  CHECK(display && window_scale && hd && stretch && uncapped && show_fps);
+  CHECK(Settings_IsMenuVisible(show_fps));
+  CHECK(Settings_IsAvailable(show_fps));
 
   CHECK(Settings_IsAvailable(display));
   g_ws_active = false;
@@ -1327,9 +1334,21 @@ static void TestVideoSettingAudit(void) {
   CHECK(g_settings.extended_aspect == kScreenAspect_Stretch);
   CHECK(Settings_IgnoreAspectRatio());
   CHECK(g_settings.refresh_mode == kRefreshMode_Unlimited);
+  g_settings.show_fps = true;
   CHECK(Settings_Save(saved_path));
   CHECK(!FileContains(saved_path, "ignore_aspect_ratio ="));
   CHECK(!FileContains(saved_path, "uncapped_framerate ="));
+  CHECK(FileContains(saved_path, "show_fps = On"));
+  Settings_InitWithFile(saved_path);
+  CHECK(g_settings.show_fps);
+
+  CHECK(WriteTextFile(
+      legacy_path,
+      "refresh_mode = Uncapped\n"
+      "show_fps = On\n"));
+  Settings_InitWithFile(legacy_path);
+  CHECK(g_settings.refresh_mode == kRefreshMode_Uncapped);
+  CHECK(g_settings.show_fps);
 
   remove(legacy_path);
   remove(saved_path);

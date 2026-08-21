@@ -64,6 +64,11 @@ typedef struct SimBackgroundProjectionAxis {
  * says it is. */
 extern const SimBackgroundProjectionAxis kSimBackgroundUprightProjectionAxis;
 
+/* Precompose authored texture coordinates directly into clip space. Must be
+ * called after source/viewport/matrix reach their final values for a pass. */
+void SimBackgroundVoxelProject_Prepare(
+    SimBackgroundVoxelRenderParams *params);
+
 void SimBackgroundVoxelProject_TexturePointToWorld(
     const SimBackgroundVoxelRenderParams *params,
     float texture_x, float texture_y, float height_pixels,

@@ -44,7 +44,9 @@ void PresentCompositeScene(const FrameSlot *slot,
                            const DioramaScrollSnapshot *prev_scroll,
                            const ActionObjInterpolationFrame *prev_action_obj,
                            float alpha);
-void PresentHostUi(const FrameSlot *slot, SDL_Rect viewport);
+void PresentHostUi(const FrameSlot *slot, SDL_Rect viewport,
+                   SDL_Point output_size,
+                   double presentation_fps);
 bool EffectRendererAvailable(void);
 void DisableEffectBlend(const char *operation);
 bool BeginEffectAdd(EffectRenderState *state);

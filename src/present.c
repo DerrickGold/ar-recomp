@@ -9,8 +9,10 @@
  * thread. The isolation rule applies to mutable game state, not these resources. */
 
 #include <SDL3/SDL.h>
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "action/action_bg_tuner.h"
 #include "action/action_effect_projection.h"
@@ -31,6 +33,7 @@
 #include "sim/sim_render_atlas.h"
 #include "sim/sim_background_voxel_renderer.h"
 #include "sim/sim3d.h"
+#include "sim/sim3d_performance.h"
 
 /* kPixelAspect_Crt43 and kDioramaCam_Free/kDioramaCam_Dynamic are plain enum
  * constants (not live state) — fine to pull in just for those. */
@@ -60,6 +63,132 @@ static int s_action_bg2_effect_w, s_action_bg2_effect_h;
 static bool s_action_bg2_blend_supported = true;
 static SDL_Texture *s_action_obj_interpolation_atlas_texture;
 static uint64_t s_action_obj_interpolation_atlas_timestamp;
+
+/* Streaming textures retain their last successfully uploaded pixels. Keep an
+ * exact CPU mirror so a static separated plane costs no bus upload and a
+ * locally animated plane updates only its changed bounding rectangle. This is
+ * intentionally byte comparison rather than content hashing: a hash collision
+ * must never become a rendering correctness bug. The mirror is render-thread
+ * owned and is read only while the current FrameSlot owns the capture buffers. */
+enum {
+  kSim3DUploadSurface_Flat = kSim3DPlane_Count,
+  kSim3DUploadSurface_Atlas,
+  kSim3DUploadSurface_Count,
+};
+
+typedef struct Sim3DUploadMirror {
+  uint32_t *pixels;
+  int width, height;
+  bool valid;
+} Sim3DUploadMirror;
+
+static Sim3DUploadMirror s_sim3d_upload_mirrors[kSim3DUploadSurface_Count];
+
+static void ResetSim3DUploadMirrors(void) {
+  for (int surface = 0; surface < kSim3DUploadSurface_Count; surface++) {
+    free(s_sim3d_upload_mirrors[surface].pixels);
+    s_sim3d_upload_mirrors[surface] = (Sim3DUploadMirror){0};
+  }
+}
+
+static bool EnsureSim3DUploadMirror(int surface, int width, int height) {
+  if (surface < 0 || surface >= kSim3DUploadSurface_Count ||
+      width <= 0 || height <= 0 ||
+      (size_t)width > SIZE_MAX / (size_t)height ||
+      (size_t)width * (size_t)height >
+          SIZE_MAX / sizeof(uint32_t))
+    return false;
+  Sim3DUploadMirror *mirror = &s_sim3d_upload_mirrors[surface];
+  if (mirror->width != width || mirror->height != height) {
+    free(mirror->pixels);
+    *mirror = (Sim3DUploadMirror){
+      .width = width,
+      .height = height,
+    };
+  }
+  if (!mirror->pixels) {
+    mirror->pixels = malloc(
+        (size_t)width * (size_t)height * sizeof(*mirror->pixels));
+    mirror->valid = false;
+  }
+  return mirror->pixels != NULL;
+}
+
+static bool UploadChangedSim3DSurface(
+    SDL_Texture *texture, int surface, const uint32_t *pixels,
+    int width, int height, int source_pitch_pixels) {
+  if (!texture || !pixels || width <= 0 || height <= 0 ||
+      source_pitch_pixels < width ||
+      (size_t)source_pitch_pixels > SIZE_MAX / (size_t)height ||
+      source_pitch_pixels > INT_MAX / (int)sizeof(uint32_t))
+    return false;
+
+  const uint32_t *current = pixels;
+  if (!EnsureSim3DUploadMirror(surface, width, height)) {
+    /* The mirror is only an optimization. Allocation pressure must fall back
+     * to the original complete upload, never turn a valid frame into a stale
+     * texture. */
+    SDL_Rect full = {0, 0, width, height};
+    const bool uploaded = SDL_UpdateTexture(
+        texture, &full, current,
+        source_pitch_pixels * (int)sizeof(*current));
+    if (uploaded)
+      Sim3DPerformance_AddUpload(
+          (uint64_t)width * (uint64_t)height * sizeof(*current));
+    return uploaded;
+  }
+  Sim3DUploadMirror *mirror = &s_sim3d_upload_mirrors[surface];
+  SDL_Rect dirty = {0, 0, width, height};
+  if (mirror->valid) {
+    int x0 = width;
+    int y0 = height;
+    int x1 = 0;
+    int y1 = 0;
+    for (int y = 0; y < height; y++) {
+      const uint32_t *current_row =
+          current + (size_t)y * (size_t)source_pitch_pixels;
+      const uint32_t *mirror_row =
+          mirror->pixels + (size_t)y * (size_t)width;
+      if (memcmp(current_row, mirror_row,
+                 (size_t)width * sizeof(*current_row)) == 0)
+        continue;
+      int row_x0 = 0;
+      while (row_x0 < width && current_row[row_x0] == mirror_row[row_x0])
+        row_x0++;
+      int row_x1 = width;
+      while (row_x1 > row_x0 &&
+             current_row[row_x1 - 1] == mirror_row[row_x1 - 1])
+        row_x1--;
+      if (row_x0 < x0) x0 = row_x0;
+      if (row_x1 > x1) x1 = row_x1;
+      if (y < y0) y0 = y;
+      y1 = y + 1;
+    }
+    if (x0 == width) return true;
+    dirty = (SDL_Rect){x0, y0, x1 - x0, y1 - y0};
+  }
+
+  const int pitch = source_pitch_pixels * (int)sizeof(*current);
+  const uint32_t *source =
+      current + (size_t)dirty.y * (size_t)source_pitch_pixels +
+      (size_t)dirty.x;
+  if (!SDL_UpdateTexture(texture, &dirty, source, pitch)) {
+    /* SDL does not promise useful contents after a failed streaming upload.
+     * Force a full refresh next time rather than trusting either side. */
+    mirror->valid = false;
+    return false;
+  }
+  for (int y = dirty.y; y < dirty.y + dirty.h; y++) {
+    memcpy(mirror->pixels + (size_t)y * (size_t)width + (size_t)dirty.x,
+           current + (size_t)y * (size_t)source_pitch_pixels +
+               (size_t)dirty.x,
+           (size_t)dirty.w * sizeof(*current));
+  }
+  mirror->valid = true;
+  Sim3DPerformance_AddUpload(
+      (uint64_t)dirty.w * (uint64_t)dirty.h * sizeof(*current));
+  return true;
+}
 
 static SDL_Texture *EnsureActionObjInterpolationAtlas(void) {
   if (s_action_obj_interpolation_atlas_texture)
@@ -280,8 +409,18 @@ SDL_Rect ComputePresentationViewport(SDL_Renderer *renderer,
                                      bool ignore_aspect_ratio,
                                      int pixel_aspect, int visible_width,
                                      int snes_height) {
+  return ComputePresentationViewportWithOutput(
+      renderer, ignore_aspect_ratio, pixel_aspect, visible_width,
+      snes_height, NULL);
+}
+
+SDL_Rect ComputePresentationViewportWithOutput(
+    SDL_Renderer *renderer, bool ignore_aspect_ratio,
+    int pixel_aspect, int visible_width, int snes_height,
+    SDL_Point *output_size) {
   int out_w = 0, out_h = 0;
   SDL_GetRenderOutputSize(renderer, &out_w, &out_h);
+  if (output_size) *output_size = (SDL_Point){out_w, out_h};
   return PresentationGeometry_CalculateViewport(
       out_w, out_h, ignore_aspect_ratio,
       pixel_aspect == kPixelAspect_Crt43, visible_width, snes_height);
@@ -598,6 +737,9 @@ static void PresentSceneInspector(const FrameSlot *slot, SDL_Rect viewport) {
 
 void PresentUpload(const FrameSlot *slot) {
   if (!g_renderer || !g_texture) return;
+  Sim3DPerformanceScope performance = {0};
+  if (slot->sim.view == kSimView_Enhanced)
+    performance = Sim3DPerformance_Begin(kSim3DPerformance_Upload);
 
   s_action_obj_interpolation_atlas_timestamp = 0;
 
@@ -616,13 +758,19 @@ void PresentUpload(const FrameSlot *slot) {
   } else {
     s_diorama_uploaded_plane_mask = 0;
     SDL_Rect upload = { 0, 0, slot->snes_width, slot->snes_height };
+    const size_t surface_pitch =
+        ActionApron_SurfacePitch(slot->snes_width, slot->obj_apron);
     /* g_pixels is bound apron-wide (it doubles as the diorama backdrop plane),
      * so the authentic frame starts kPpuObjApron columns in. Offset the source
      * and use the real pitch; the upload rect is unchanged. */
-    SDL_UpdateTexture(
-        g_texture, &upload,
-        g_pixels + ActionApron_DisplayOffset(slot->obj_apron),
-        ActionApron_SurfacePitch(slot->snes_width, slot->obj_apron));
+    if (surface_pitch <= INT_MAX &&
+        SDL_UpdateTexture(
+            g_texture, &upload,
+            g_pixels + ActionApron_DisplayOffset(slot->obj_apron),
+            (int)surface_pitch)) {
+      Sim3DPerformance_AddUpload(
+          (uint64_t)upload.w * (uint64_t)upload.h * sizeof(uint32_t));
+    }
   }
 
   if (!slot->diorama_active && slot->action_bg2_mask_valid) {
@@ -639,8 +787,13 @@ void PresentUpload(const FrameSlot *slot) {
     }
     if (s_action_bg2_mask_texture) {
       const SDL_Rect mask = {0, 0, slot->snes_width, slot->snes_height};
-      SDL_UpdateTexture(s_action_bg2_mask_texture, &mask,
-                        g_action_bg2_mask_pixels, slot->snes_width * 4);
+      if (SDL_UpdateTexture(
+              s_action_bg2_mask_texture, &mask,
+              g_action_bg2_mask_pixels,
+              slot->snes_width * (int)sizeof(uint32_t))) {
+        Sim3DPerformance_AddUpload(
+            (uint64_t)mask.w * (uint64_t)mask.h * sizeof(uint32_t));
+      }
     }
   }
 
@@ -653,15 +806,23 @@ void PresentUpload(const FrameSlot *slot) {
       int rows = slot->overlay_captures[kFrameSlotOverlay_Bg3].y1;
       if (rows < split_rows) rows = split_rows;
       SDL_Rect hud = { 0, 0, slot->snes_width, rows };
-      SDL_UpdateTexture(g_hud_bg_texture, &hud, g_hud_bg_pixels,
-                        slot->snes_width * 4);
+      if (SDL_UpdateTexture(
+              g_hud_bg_texture, &hud, g_hud_bg_pixels,
+              slot->snes_width * (int)sizeof(uint32_t))) {
+        Sim3DPerformance_AddUpload(
+            (uint64_t)hud.w * (uint64_t)hud.h * sizeof(uint32_t));
+      }
     }
     if (g_hud_obj_texture) {
       int rows = slot->overlay_captures[kFrameSlotOverlay_Obj].y1;
       if (rows < split_rows) rows = split_rows;
       SDL_Rect hud = { 0, 0, slot->snes_width, rows };
-      SDL_UpdateTexture(g_hud_obj_texture, &hud, g_hud_obj_pixels,
-                        slot->snes_width * 4);
+      if (SDL_UpdateTexture(
+              g_hud_obj_texture, &hud, g_hud_obj_pixels,
+              slot->snes_width * (int)sizeof(uint32_t))) {
+        Sim3DPerformance_AddUpload(
+            (uint64_t)hud.w * (uint64_t)hud.h * sizeof(uint32_t));
+      }
     }
   }
 
@@ -669,9 +830,13 @@ void PresentUpload(const FrameSlot *slot) {
     SDL_Rect src = { slot->visible_x0 * kHdMode7Scale, 0,
                      slot->visible_width * kHdMode7Scale,
                      slot->snes_height * kHdMode7Scale };
-    SDL_UpdateTexture(g_m7_texture, &src,
-                      g_m7_overlay_pixels + (size_t)src.x * 4,
-                      slot->snes_width * kHdMode7Scale * 4);
+    if (SDL_UpdateTexture(
+            g_m7_texture, &src,
+            g_m7_overlay_pixels + (size_t)src.x * sizeof(uint32_t),
+            slot->snes_width * kHdMode7Scale * (int)sizeof(uint32_t))) {
+      Sim3DPerformance_AddUpload(
+          (uint64_t)src.w * (uint64_t)src.h * sizeof(uint32_t));
+    }
   }
 
   /* D1b: the raw atlas follows the same upload-before-release ownership as
@@ -681,8 +846,10 @@ void PresentUpload(const FrameSlot *slot) {
       slot->sim.atlas_used_width && slot->sim.atlas_used_height) {
     SDL_Rect atlas = { 0, 0, slot->sim.atlas_used_width,
                       slot->sim.atlas_used_height };
-    SDL_UpdateTexture(g_sim_obj_atlas_texture, &atlas,
-                      g_sim_obj_atlas_pixels, kSimObjAtlasPitch);
+    UploadChangedSim3DSurface(
+        g_sim_obj_atlas_texture, kSim3DUploadSurface_Atlas,
+        g_sim_obj_atlas_pixels, atlas.w, atlas.h,
+        kSimObjAtlasWidth);
   }
 
   if (slot->action_obj_interpolation.valid) {
@@ -700,6 +867,10 @@ void PresentUpload(const FrameSlot *slot) {
         uploaded = SDL_UpdateTexture(
             atlas, &rect, g_action_obj_interpolation_atlas_pixels,
             kActionObjInterpolationAtlasWidth * (int)sizeof(uint32_t));
+        if (uploaded) {
+          Sim3DPerformance_AddUpload(
+              (uint64_t)rect.w * (uint64_t)rect.h * sizeof(uint32_t));
+        }
       }
       if (uploaded)
         s_action_obj_interpolation_atlas_timestamp = slot->timestamp_ns;
@@ -714,20 +885,27 @@ void PresentUpload(const FrameSlot *slot) {
             slot->sim.separated_plane_mask);
     for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
       if ((plane_upload_mask & (1u << plane)) &&
-          g_sim3d_layer_textures[plane] && g_sim3d_layer_pixels[plane])
-        SDL_UpdateTexture(g_sim3d_layer_textures[plane], &frame,
-                          g_sim3d_layer_pixels[plane], slot->snes_width * 4);
+          g_sim3d_layer_textures[plane] && g_sim3d_layer_pixels[plane]) {
+        UploadChangedSim3DSurface(
+            g_sim3d_layer_textures[plane], plane,
+            g_sim3d_layer_pixels[plane],
+            frame.w, frame.h, frame.w);
+      }
     }
     /* Ground projection samples the separated planes directly. Upload the
      * CPU flat composite only for the fallback stage that actually draws it. */
     if (g_sim3d_flat_texture &&
-        !(slot->sim.effective_features & kSimFeature_GroundProjection))
-      SDL_UpdateTexture(g_sim3d_flat_texture, &frame, g_sim3d_flat_pixels,
-                        slot->snes_width * 4);
+        !(slot->sim.effective_features & kSimFeature_GroundProjection)) {
+      UploadChangedSim3DSurface(
+          g_sim3d_flat_texture, kSim3DUploadSurface_Flat,
+          g_sim3d_flat_pixels,
+          frame.w, frame.h, frame.w);
+    }
   }
   UploadSimTownCanvas();
   SimBackgroundVoxelRenderer_Upload(g_renderer);
   UploadWorldNavigationComposition(slot);
+  Sim3DPerformance_End(performance);
 }
 
 void FrameSlot_ExtractScrollSnapshot(const FrameSlot *slot,
@@ -1315,10 +1493,63 @@ static void PresentActionBgExtentGuides(const FrameSlot *slot,
   SDL_SetRenderDrawBlendMode(g_renderer, old_blend);
 }
 
+static void PresentFpsCounter(const FrameSlot *slot, SDL_Point output_size,
+                              double presentation_fps) {
+  enum {
+    kFpsTextCapacity = 32,
+    kFpsScale2OutputHeight = 720,
+    kFpsScale3OutputHeight = 1440,
+  };
+  typedef struct FpsOverlayCache {
+    char text[kFpsTextCapacity];
+    double frames_per_second;
+    int output_width;
+    int output_height;
+    int x;
+    int y;
+    int scale;
+    bool initialized;
+  } FpsOverlayCache;
+  static FpsOverlayCache cache;
+  if (!slot || !slot->show_fps) return;
+  if (output_size.x <= 0 || output_size.y <= 0)
+    return;
+
+  const int scale = output_size.y >= kFpsScale3OutputHeight ? 3
+      : output_size.y >= kFpsScale2OutputHeight ? 2
+      : 1;
+  const bool text_changed = !cache.initialized ||
+      cache.frames_per_second != presentation_fps;
+  if (text_changed) {
+    if (presentation_fps > 0.0)
+      SDL_snprintf(
+          cache.text, sizeof(cache.text), "FPS %.1f", presentation_fps);
+    else
+      SDL_snprintf(cache.text, sizeof(cache.text), "FPS --.-");
+    cache.frames_per_second = presentation_fps;
+  }
+  if (!cache.initialized || text_changed ||
+      cache.output_width != output_size.x ||
+      cache.output_height != output_size.y || cache.scale != scale) {
+    const int margin = kSettingsOverlayGlyphSize * scale;
+    cache.output_width = output_size.x;
+    cache.output_height = output_size.y;
+    cache.scale = scale;
+    cache.x = output_size.x - margin -
+        SettingsOverlay_GameTextWidth(cache.text, scale);
+    cache.y = margin;
+    cache.initialized = true;
+  }
+  SettingsOverlay_DrawGameText(
+      cache.x, cache.y, cache.scale, 255, cache.text);
+}
+
 /* Terminal host UI is deliberately outside the CRT scene. One scoped physical
  * output coordinate space covers the inspector marker/panel, cheat disclosure,
  * manual and settings menu, then restores the backbuffer state for callers. */
-void PresentHostUi(const FrameSlot *slot, SDL_Rect viewport) {
+void PresentHostUi(const FrameSlot *slot, SDL_Rect viewport,
+                   SDL_Point output_size,
+                   double presentation_fps) {
   if (!slot || !g_renderer) return;
   PresentationOutputState output_state;
   if (!PresentationGeometry_PushFullOutput(g_renderer, &output_state)) return;
@@ -1326,6 +1557,7 @@ void PresentHostUi(const FrameSlot *slot, SDL_Rect viewport) {
   PresentSceneInspector(slot, viewport);
   PresentCheatBadge(slot, viewport);
   SettingsOverlay_Render(viewport);
+  PresentFpsCounter(slot, output_size, presentation_fps);
   PresentationGeometry_PopFullOutput(g_renderer, &output_state);
 }
 
@@ -1352,6 +1584,7 @@ bool Present_SimRimMaskSupported(void) {
  * does not emit _DEVICE_RESET at all — this is a Windows-D3D and
  * Vulkan/SDL_GPU (Steam Deck) bug. */
 void PresentRendererResources_Reset(void) {
+  ResetSim3DUploadMirrors();
   if (s_hud_composite_texture)
     SDL_DestroyTexture(s_hud_composite_texture);
   s_hud_composite_texture = NULL;
@@ -1644,13 +1877,13 @@ void PresentCompositeScene(const FrameSlot *slot,
     if (!dynamic || mode_changed || g_diorama_render_cam_last_ns == 0) {
       g_diorama_render_cam = target;
     } else {
-      float alpha = 1.0f - expf(-dt / kDioramaDampTau);
+      float damping_alpha = 1.0f - expf(-dt / kDioramaDampTau);
       g_diorama_render_cam.tilt_x +=
-          (target.tilt_x - g_diorama_render_cam.tilt_x) * alpha;
+          (target.tilt_x - g_diorama_render_cam.tilt_x) * damping_alpha;
       g_diorama_render_cam.tilt_y +=
-          (target.tilt_y - g_diorama_render_cam.tilt_y) * alpha;
+          (target.tilt_y - g_diorama_render_cam.tilt_y) * damping_alpha;
       g_diorama_render_cam.distance +=
-          (target.distance - g_diorama_render_cam.distance) * alpha;
+          (target.distance - g_diorama_render_cam.distance) * damping_alpha;
     }
     g_diorama_render_cam_last_ns = now_ns;
 
@@ -1714,12 +1947,15 @@ void PresentCompositeScene(const FrameSlot *slot,
         "target(x=%.4f y=%.4f d=%.3f) render(x=%.4f y=%.4f d=%.3f) "
         "kick(pitch=%.4f zoom=%.4f) evt(hit=%d land=%d boost=%d)\n",
         slot->diorama_camera_mode,
-        (float)slot->diorama_reactive_strength / (float)kPercentScale,
-        slot->diorama_dyncam_lean_yaw, slot->diorama_dyncam_lean_pitch,
-        target.tilt_x, target.tilt_y, target.distance,
-        g_diorama_render_cam.tilt_x, g_diorama_render_cam.tilt_y,
-        g_diorama_render_cam.distance,
-        g_diorama_kick_pitch, g_diorama_kick_zoom,
+        (double)slot->diorama_reactive_strength / (double)kPercentScale,
+        (double)slot->diorama_dyncam_lean_yaw,
+        (double)slot->diorama_dyncam_lean_pitch,
+        (double)target.tilt_x, (double)target.tilt_y,
+        (double)target.distance,
+        (double)g_diorama_render_cam.tilt_x,
+        (double)g_diorama_render_cam.tilt_y,
+        (double)g_diorama_render_cam.distance,
+        (double)g_diorama_kick_pitch, (double)g_diorama_kick_zoom,
         slot->diorama_dyncam_event_hit, slot->diorama_dyncam_event_land,
         slot->diorama_dyncam_event_boost);
     }

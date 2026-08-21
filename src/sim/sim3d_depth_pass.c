@@ -1,4 +1,5 @@
 #include "sim3d_depth_pass.h"
+#include "sim3d_performance.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -377,6 +378,16 @@ static bool EnsureInitialized(SDL_Renderer *renderer) {
           SDL_GPU_TEXTURETYPE_2D,
           SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET)) {
     fprintf(stderr, "[sim3d-depth] D32 depth targets are unsupported\n");
+    g_depth_pass.failed = true;
+    return false;
+  }
+  if (!SDL_GPUTextureSupportsFormat(
+          g_depth_pass.device, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+          SDL_GPU_TEXTURETYPE_2D,
+          SDL_GPU_TEXTUREUSAGE_COLOR_TARGET |
+              SDL_GPU_TEXTUREUSAGE_SAMPLER)) {
+    fprintf(stderr, "[sim3d-depth] RGBA8 sampled color targets are "
+                    "unsupported\n");
     g_depth_pass.failed = true;
     return false;
   }
@@ -884,6 +895,13 @@ SDL_Texture *Sim3DDepthPass_Submit(SDL_Renderer *renderer,
     fprintf(stderr, "[sim3d-depth] command submission failed: %s\n",
             SDL_GetError());
     return NULL;
+  }
+  for (int i = 0; i < kSim3DDepthPassLayerCount; i++) {
+    if (!g_depth_pass.lists[i].count) continue;
+    Sim3DPerformance_AddDraw(
+        g_depth_pass.lists[i].count,
+        g_depth_pass.lists[i].count / kSim3DDepthVerticesPerQuad *
+            kSim3DDepthIndicesPerQuad);
   }
   g_depth_pass.index_upload_required = false;
   return g_depth_pass.output_texture;

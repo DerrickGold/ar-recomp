@@ -23,6 +23,13 @@ typedef struct SimBackgroundVoxelRenderParams {
   SDL_Rect source;
   SDL_Rect viewport;
   const float *matrix;
+  /* Prepared by the render entry point after its final target viewport is
+   * known. Rows are clip X/Y/Z/W; columns are authored texture X/Y/height/1.
+   * Keeping the affine precomposition with the immutable pass parameters
+   * removes per-vertex source divisions without moving camera projection into
+   * backend-specific shader behavior. */
+  float texture_to_clip[16];
+  bool texture_to_clip_valid;
   /* Optional screen-space shadow mask. In an elevated town the renderer
    * samples this only on depth-visible terrain tops, so a projected shadow
    * cannot paint a cliff face or ground hidden behind one. */

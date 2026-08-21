@@ -1,4 +1,5 @@
 #include "sim_background_voxel_renderer.h"
+#include "sim3d_performance.h"
 
 #include <float.h>
 #include <limits.h>
@@ -104,6 +105,8 @@ void SimBackgroundVoxelRenderer_Upload(SDL_Renderer *renderer) {
           upload_ok = false;
           break;
         }
+        Sim3DPerformance_AddUpload(
+            (uint64_t)width * (uint64_t)height * sizeof(uint32_t));
       }
     }
     /* A new texture is undefined everywhere. A serial mismatch with no dirty
@@ -114,6 +117,9 @@ void SimBackgroundVoxelRenderer_Upload(SDL_Renderer *renderer) {
       upload_ok = SDL_UpdateTexture(
           g_renderer_state.ground, NULL, ground, pitch);
       if (upload_ok) {
+        Sim3DPerformance_AddUpload(
+            (uint64_t)kSimTownCanvasPixels * kSimTownCanvasPixels *
+            sizeof(uint32_t));
         int x, y, width, height;
         while (SimBackgroundVoxels_TakeGroundDirtyRect(
                    &x, &y, &width, &height)) {}
@@ -860,6 +866,7 @@ static bool BeginDepthTarget(
     params->viewport.w * output_scale,
     params->viewport.h * output_scale,
   };
+  SimBackgroundVoxelProject_Prepare(draw_params);
   SDL_ScaleMode scale_mode =
       params->render_scale == kSimBackgroundVoxelRenderScale_PixelClean
           ? SDL_SCALEMODE_NEAREST : SDL_SCALEMODE_LINEAR;
@@ -875,7 +882,8 @@ static void CompositeDepthTarget(
     (float)params->viewport.x, (float)params->viewport.y,
     (float)params->viewport.w, (float)params->viewport.h,
   };
-  SDL_RenderTexture(renderer, texture, NULL, &destination);
+  if (SDL_RenderTexture(renderer, texture, NULL, &destination))
+    Sim3DPerformance_AddDraw(0, 0);
 }
 
 static void DrawDepthLayers(
@@ -888,14 +896,26 @@ static void DrawDepthLayers(
   g_renderer_state.cache_stamp++;
   if (!g_renderer_state.cache_stamp) g_renderer_state.cache_stamp = 1;
   SimBackgroundVisibleModelList list;
+  Sim3DPerformanceScope cull_performance =
+      Sim3DPerformance_Begin(kSim3DPerformance_DepthCull);
   BuildVisibleModelList(&draw_params, &list);
+  Sim3DPerformance_End(cull_performance);
+  Sim3DPerformanceScope mountain_performance =
+      Sim3DPerformance_Begin(kSim3DPerformance_DepthMountain);
   int mountain_relief_count =
       SimBackgroundMountainRender_BuildFaces(&draw_params);
+  Sim3DPerformance_End(mountain_performance);
   float visible_minimum = 0.0f, visible_maximum = 0.0f;
   if (callback && interleaved)
     GroundDepthRange(&draw_params, &visible_minimum, &visible_maximum);
+  Sim3DPerformanceScope project_performance =
+      Sim3DPerformance_Begin(kSim3DPerformance_DepthProject);
   CollectDepthGeometry(&draw_params, &list, mountain_relief_count);
+  Sim3DPerformance_End(project_performance);
+  Sim3DPerformanceScope submit_performance =
+      Sim3DPerformance_Begin(kSim3DPerformance_DepthSubmit);
   SDL_Texture *depth_composite = Sim3DDepthPass_Submit(renderer, NULL);
+  Sim3DPerformance_End(submit_performance);
   /* Actors standing on ordinary ground go UNDER the composite, so the town's
    * own geometry hides them: a villager behind a peak or behind a house is
    * covered by it. The overhead camera means anything merely beside a building
@@ -1113,6 +1133,9 @@ void SimBackgroundVoxelRenderer_DrawShadowMask(
     SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params,
     float light_x, float light_y) {
   if (!RenderParamsValid(renderer, params)) return;
+  SimBackgroundVoxelRenderParams prepared_params = *params;
+  SimBackgroundVoxelProject_Prepare(&prepared_params);
+  params = &prepared_params;
   const SimBackgroundVoxelScene *scene = SimBackgroundVoxels_Scene();
   SimBackgroundGeometryBatch *batch = &g_renderer_state.batch;
   batch->vertex_count = 0;
