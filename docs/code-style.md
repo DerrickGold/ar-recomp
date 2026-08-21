@@ -273,11 +273,21 @@ changes what old checkpoints render.
    clang -fsyntax-only -std=gnu11 -Isrc -Irecomp -Ithird_party/stb -I/opt/homebrew/include -Werror=implicit-function-declaration -Werror=implicit-int src/<file>.c
    ```
 
-   All 125 hand-written sources pass this as of 2026-08-20, so it is a clean
-   gate rather than a haystack: any failure is new. It has already caught two —
-   one introduced by an include trim in the voxel-renderer split, and one
-   pre-existing call in `actraiser_rtl.c` whose only declaration sat inside a
-   later function.
+   **This is now enforced by the build.** `-Werror=implicit-function-declaration`
+   is on for the hand-written sources, so the failure mode the rule describes
+   cannot recur silently; the manual invocation above is only needed when
+   checking a file outside the game target. It caught two before it was
+   enforced — one introduced by an include trim in the voxel-renderer split,
+   one pre-existing call in `actraiser_rtl.c` whose only declaration sat inside
+   a later function.
+
+   The blanket `-w` that made this necessary is gone. Warnings are worth having
+   on the code we write and worthless on the code we generate, so the polarity
+   is: `-Wall -Wextra` on the target, `-w` re-applied per file to
+   `src/gen` and the vendored runtime. (It has to be that way round — `-w`
+   beats `-Wall` in clang regardless of order.) A full clean build produces
+   **zero** compiler warnings; treat any new one as a defect rather than as
+   background noise.
 
 Add `AR_HEADLESS_VIDEO=1` for anything present-side; without a renderer the shot
 falls back to dumping `g_pixels` and every present-side change compares equal.

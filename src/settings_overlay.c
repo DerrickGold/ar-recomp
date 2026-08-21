@@ -2436,7 +2436,8 @@ bool SettingsOverlay_HandleGamepadEvent(const SDL_Event *event) {
 static bool MenuKeyMatchesBinding(SDL_Keycode key, InputAction action) {
   uint32 binding = g_settings.input_bind[kInputClass_Keyboard][action];
   if (INPUT_BIND_KIND(binding) != kInputBind_Key) return false;
-  return SDL_GetScancodeFromKey(key, NULL) == INPUT_BIND_CODE(binding);
+  return (int)SDL_GetScancodeFromKey(key, NULL) ==
+      (int)INPUT_BIND_CODE(binding);
 }
 
 /* Maps a keycode to a menu command through the player's OWN keyboard bindings,

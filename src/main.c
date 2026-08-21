@@ -834,7 +834,7 @@ static void AppBoot_ArmDiagnostics(void) {
  * atlas, the D2 SIM capture family, and the diorama planes. Split out of
  * AppBoot_CreateVideo, which otherwise carried SDL init, window creation and
  * renderer configuration in the same 300 lines. */
-static void AppBoot_CreatePresentationTextures(AppBoot *app) {
+static void AppBoot_CreatePresentationTextures(void) {
   g_texture = SDL_CreateTexture(g_renderer,
     SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
     kPpuSurfaceWidth, g_snes_height);
@@ -1106,7 +1106,7 @@ static int AppBoot_CreateVideo(AppBoot *app) {
      * Screen ratio > Stretch opts out of aspect fitting). */
     HostDisplay_RecomputeLogicalPresentation();
 
-    AppBoot_CreatePresentationTextures(app);
+    AppBoot_CreatePresentationTextures();
 
     /* Take keyboard focus on launch. A window created by SDL is ordered in
      * but the process is not necessarily activated — launched from a terminal

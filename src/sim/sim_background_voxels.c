@@ -1145,7 +1145,6 @@ static void BuildStructureHeights(const SimBackgroundVoxelScene *scene) {
 }
 
 static void BuildEnhancedReplacementPlan(
-    const uint8_t *wram,
     const uint32_t *pixels, const SimBackgroundVoxelScene *scene) {
   memset(g_object_mask, 0, sizeof(g_object_mask));
   memset(g_atlas_alpha, 0, sizeof(g_atlas_alpha));
@@ -1419,8 +1418,7 @@ void SimBackgroundVoxels_Build(uint8_t town, const uint8_t *wram,
   if (scene_changed) {
     SimBackgroundVoxels_Classify(town, wram, wind_stops_all,
                                  &g_background.scene);
-    BuildEnhancedReplacementPlan(
-        wram, canvas_pixels, &g_background.scene);
+    BuildEnhancedReplacementPlan(canvas_pixels, &g_background.scene);
     BuildMountainBaselines(&g_background.scene);
     BuildStructureHeights(&g_background.scene);
     SaveSceneInputs(town, wram, canvas_layout_serial, wind_stops_all);
