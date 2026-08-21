@@ -46,6 +46,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* The game runs as a ucontext coroutine so a VBlank wait can yield mid-frame
+ * (see docs/rendering-engine.md). macOS deprecated get/make/swapcontext in
+ * 10.6 and offers no replacement with the same semantics; the functions still
+ * work and the model depends on them, so the deprecation is acknowledged here
+ * rather than repeated at four call sites. */
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
 extern int snes_frame_counter;
 
 enum {

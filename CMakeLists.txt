@@ -172,8 +172,32 @@ target_compile_definitions(ActRaiserRecomp PRIVATE
 )
 
 if(NOT MSVC)
+    # Warnings are worth having on the code we write and worthless on the code
+    # we generate: src/gen is roughly 8,000 warnings of machine-emitted 65816
+    # translation, which would bury the ~10 the hand-written sources produce.
+    # The blanket `-w` that used to sit on the whole target hid both -- and hid
+    # two calls with no prototype in scope, which C silently gives `int f()`
+    # and which therefore had the wrong return type.
+    #
+    # -w wins over -Wall in clang regardless of order, so the polarity has to
+    # be this way round: real warnings on the target, `-w` re-applied to the
+    # generated and vendored-runtime sources per file.
     target_compile_options(ActRaiserRecomp PRIVATE
-        -w -Wno-implicit-function-declaration)
+        -Wall -Wextra
+        # Designated initializers are the house style for the settings
+        # descriptor registry; 219 of the 224 hits are that one table.
+        -Wno-missing-field-initializers
+        # Third-party: the snesrecomp runtime's types.h carries a pragma clang
+        # does not know.
+        -Wno-unknown-pragmas
+        -Wno-unused-parameter
+        # A missing prototype is an error, not a warning. Every hand-written
+        # source passes; see docs/code-style.md "Verifying a change".
+        -Werror=implicit-function-declaration
+        -Werror=implicit-int)
+    set_source_files_properties(
+        ${ACTRAISER_GEN_SOURCES} ${SNESRECOMP_RUNNER_SOURCES}
+        PROPERTIES COMPILE_OPTIONS "-w")
 endif()
 
 # AR_SIM3D_PICKER_TOPDOWN: restore the authentic flat view while a SIM position

@@ -163,7 +163,7 @@ uint32_t audio_trace_copy_snaps(uint64_t first_idx, uint32_t max,
 /* Write a 32 kHz stereo 16-bit WAV of PCM-ring samples
  * [start_idx, start_idx+count). start_idx<0 / count==0 mean "everything
  * still in the ring". Returns 0 on success, writes the actually-dumped
- * range to *out_start/*out_count. */
+ * range to *out_start and *out_count. */
 int audio_trace_dump_wav(const char *path, int64_t start_idx, uint64_t count,
                          uint64_t *out_start, uint64_t *out_count);
 
