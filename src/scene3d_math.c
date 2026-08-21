@@ -2,7 +2,7 @@
 
 #include <math.h>
 
-static const float kMinimumProjectionDepth = 0.0001f;
+const float kScene3DMinimumProjectionDepth = 0.0001f;
 /* Below this the camera is looking straight down and the ground has no depth
  * gradient to take a direction from. */
 static const float kMinimumGroundDepthGradient = 0.0001f;
@@ -56,7 +56,7 @@ bool Scene3D_ProjectWorldPoint(const float matrix[16],
   float clip_x = matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12];
   float clip_y = matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13];
   float clip_w = matrix[3] * x + matrix[7] * y + matrix[11] * z + matrix[15];
-  if (clip_w <= kMinimumProjectionDepth) return false;
+  if (clip_w <= kScene3DMinimumProjectionDepth) return false;
   float inverse_w = 1.0f / clip_w;
   Scene3DPoint projected = {
     (clip_x * inverse_w * 0.5f + 0.5f) * output_width,
@@ -80,7 +80,7 @@ bool Scene3D_ProjectWorldPointWithDepth(
       matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14];
   const float clip_w =
       matrix[3] * x + matrix[7] * y + matrix[11] * z + matrix[15];
-  if (clip_w <= kMinimumProjectionDepth) return false;
+  if (clip_w <= kScene3DMinimumProjectionDepth) return false;
   const float inverse_w = 1.0f / clip_w;
   const Scene3DPoint projected = {
     (clip_x * inverse_w * 0.5f + 0.5f) * output_width,
@@ -99,7 +99,7 @@ float Scene3D_ProjectBillboardScale(const float matrix[16],
                                     float reference_depth) {
   float clip_w = matrix[3] * x + matrix[7] * y +
                  matrix[11] * z + matrix[15];
-  if (clip_w <= kMinimumProjectionDepth || reference_depth <= 0.0f)
+  if (clip_w <= kScene3DMinimumProjectionDepth || reference_depth <= 0.0f)
     return 0.0f;
   return reference_depth / clip_w;
 }
@@ -156,7 +156,7 @@ bool Scene3D_NormalizedDepth(const float matrix[16],
                              float *out_depth) {
   if (!out_depth) return false;
   float clip_w = Scene3D_ClipDepth(matrix, x, y, z);
-  if (clip_w <= kMinimumProjectionDepth) return false;
+  if (clip_w <= kScene3DMinimumProjectionDepth) return false;
   float clip_z = matrix[2] * x + matrix[6] * y +
       matrix[10] * z + matrix[14];
   float depth = clip_z / clip_w * 0.5f + 0.5f;

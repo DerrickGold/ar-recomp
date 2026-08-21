@@ -1,4 +1,5 @@
 #include "sim/sim_background_voxels.h"
+#include "sim/sim_town_terrain.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -67,6 +68,7 @@ enum {
   kTileGrass = 0x08,
   kTileMarsh = 0x3D,
   kTilePalm = 0x09,
+  kTileWater = 0x10,
   kTerrainDefinitions = 0x2100,
 };
 
@@ -187,6 +189,119 @@ static void CheckMarahnaEarthquakeCanvasRebuild(void) {
       land_canvas_serial, land_canvas_serial, true);
   CHECK(SimBackgroundVoxels_Serial() != water_serial);
   CHECK(SimBackgroundVoxels_GroundPixels()[centre] == land);
+}
+
+typedef struct GroundSourceFadeFixture {
+  uint8_t wram[kWramBytes];
+  uint16_t vram[kVramWords];
+  uint32_t pixels[kSimTownCanvasPixels * kSimTownCanvasPixels];
+} GroundSourceFadeFixture;
+
+static GroundSourceFadeFixture s_ground_source_fade;
+static const uint32_t kGroundSourceBlack = 0xFF000000;
+static const uint32_t kGroundSourceWater = 0xFF204878;
+static const uint32_t kGroundSourceLand = 0xFF647814;
+static const uint32_t kGroundSourceObject = 0xFFC06020;
+static const uint32_t kGroundSourceCliff = 0xFF809098;
+
+static void BeginGroundSourceFade(uint8_t town) {
+  memset(&s_ground_source_fade, 0, sizeof(s_ground_source_fade));
+  for (int cell_y = 0; cell_y < kSimBackgroundTownCells; cell_y++)
+    for (int cell_x = 0; cell_x < kSimBackgroundTownCells; cell_x++)
+      s_ground_source_fade.wram[
+          TownCellIndex(town - 1, cell_x, cell_y)] = kTileWater;
+  for (size_t at = 0;
+       at < (size_t)kSimTownCanvasPixels * kSimTownCanvasPixels; at++)
+    s_ground_source_fade.pixels[at] = kGroundSourceBlack;
+}
+
+static void RevealGroundSourcePixels(void) {
+  for (size_t at = 0;
+       at < (size_t)kSimTownCanvasPixels * kSimTownCanvasPixels; at++)
+    s_ground_source_fade.pixels[at] = kGroundSourceWater;
+}
+
+static size_t CellCentre(int cell_x, int cell_y) {
+  return (size_t)(cell_y * kSimBackgroundCellPixels +
+                  kSimBackgroundCellPixels / 2) * kSimTownCanvasPixels +
+      cell_x * kSimBackgroundCellPixels + kSimBackgroundCellPixels / 2;
+}
+
+/* Map entry can publish the scene during a black fade, when an RGB-only source
+ * search cannot distinguish land from Marahna's water. The selected source is
+ * retained across the later pixel-only fade frames, so its terrain identity has
+ * to be valid before colours become visible. */
+static void CheckMarahnaGroundSourceRejectsWaterDuringFade(void) {
+  const int shrub_x = 4, shrub_y = 4;
+  const int land_x = 20, land_y = 20;
+  BeginGroundSourceFade(kMarahnaTown);
+  s_ground_source_fade.wram[
+      TownCellIndex(kMarahnaTown - 1, shrub_x, shrub_y)] = kTileShrub;
+  s_ground_source_fade.wram[
+      TownCellIndex(kMarahnaTown - 1, land_x, land_y)] = kTileGrass;
+
+  SimBackgroundVoxels_Reset();
+  SimBackgroundVoxels_Build(
+      kMarahnaTown, s_ground_source_fade.wram,
+      s_ground_source_fade.pixels, s_ground_source_fade.vram, 1, 1, true);
+  const uint32_t scene_serial = SimBackgroundVoxels_SceneSerial();
+  CHECK(FindKind(SimBackgroundVoxels_Scene(),
+                 kSimBackgroundVoxel_Shrub) != NULL);
+
+  RevealGroundSourcePixels();
+  FillCell(s_ground_source_fade.pixels,
+           land_x, land_y, kGroundSourceLand);
+  FillCell(s_ground_source_fade.pixels,
+           shrub_x, shrub_y, kGroundSourceObject);
+  SimBackgroundVoxels_Build(
+      kMarahnaTown, s_ground_source_fade.wram,
+      s_ground_source_fade.pixels, s_ground_source_fade.vram, 2, 1, true);
+  CHECK(SimBackgroundVoxels_SceneSerial() == scene_serial);
+  CHECK(SimBackgroundVoxels_GroundPixels()[CellCentre(shrub_x, shrub_y)] ==
+        kGroundSourceLand);
+}
+
+/* Marahna's plateau walls are a separate authored topology, not part of the
+ * common mountain tile range. On a black first frame the wall and the later
+ * horizontal candidate tie by colour, so scan order makes this fail if the
+ * face classifier is ever removed from the source policy. */
+static void CheckMarahnaGroundSourceRejectsCliffDuringFade(void) {
+  const int shrub_x = 4, shrub_y = 4;
+  const int cliff_x = 8, cliff_y = 21;
+  const int land_x = 14, land_y = 21;
+  CHECK(SimTownTerrain_FaceKind(kMarahnaTown, cliff_x, cliff_y) ==
+        kSimTownTerrainFace_Cliff);
+  CHECK(!SimTownTerrain_IsFaceCell(kMarahnaTown, land_x, land_y));
+
+  BeginGroundSourceFade(kMarahnaTown);
+  s_ground_source_fade.wram[
+      TownCellIndex(kMarahnaTown - 1, shrub_x, shrub_y)] = kTileShrub;
+  s_ground_source_fade.wram[
+      TownCellIndex(kMarahnaTown - 1, cliff_x, cliff_y)] = kTileGrass;
+  s_ground_source_fade.wram[
+      TownCellIndex(kMarahnaTown - 1, land_x, land_y)] = kTileGrass;
+
+  SimBackgroundVoxels_Reset();
+  SimBackgroundVoxels_Build(
+      kMarahnaTown, s_ground_source_fade.wram,
+      s_ground_source_fade.pixels, s_ground_source_fade.vram, 1, 1, true);
+  const uint32_t scene_serial = SimBackgroundVoxels_SceneSerial();
+  CHECK(FindKind(SimBackgroundVoxels_Scene(),
+                 kSimBackgroundVoxel_Shrub) != NULL);
+
+  RevealGroundSourcePixels();
+  FillCell(s_ground_source_fade.pixels,
+           cliff_x, cliff_y, kGroundSourceCliff);
+  FillCell(s_ground_source_fade.pixels,
+           land_x, land_y, kGroundSourceLand);
+  FillCell(s_ground_source_fade.pixels,
+           shrub_x, shrub_y, kGroundSourceObject);
+  SimBackgroundVoxels_Build(
+      kMarahnaTown, s_ground_source_fade.wram,
+      s_ground_source_fade.pixels, s_ground_source_fade.vram, 2, 1, true);
+  CHECK(SimBackgroundVoxels_SceneSerial() == scene_serial);
+  CHECK(SimBackgroundVoxels_GroundPixels()[CellCentre(shrub_x, shrub_y)] ==
+        kGroundSourceLand);
 }
 
 static void CheckIndependentSceneAndPixelPublications(void) {
@@ -788,6 +903,8 @@ int main(void) {
   CheckWindmillFrames();
   CheckMountainOcclusionReach();
   CheckMarahnaEarthquakeCanvasRebuild();
+  CheckMarahnaGroundSourceRejectsWaterDuringFade();
+  CheckMarahnaGroundSourceRejectsCliffDuringFade();
   CheckIndependentSceneAndPixelPublications();
   CheckStoneBridgeClassificationAndInpaint();
 

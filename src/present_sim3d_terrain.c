@@ -12,11 +12,11 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include "present_sim3d_terrain.h"
 #include "sim/sim_town_canvas.h"
 #include "sim/sim_town_terrain.h"
 #include "sim/sim3d.h"
+#include "sim/sim3d_performance.h"
 
 #ifndef AR_SIM3D_TERRAIN_ELEVATION
 #define AR_SIM3D_TERRAIN_ELEVATION 0
@@ -65,9 +65,9 @@ typedef struct SimTerrainRenderCache {
   uint16_t landscape_height_pct;
   SimTerrainRenderCell cell[kSimTerrainCellCount];
   bool order_valid;
-  int order_source_w, order_source_h;
-  int order_viewport_w, order_viewport_h;
-  float order_matrix[16];
+  float order_depth_x;
+  float order_depth_y;
+  float order_depth_height;
   SimTerrainCellOrder order[kSimTerrainCellCount];
 } SimTerrainRenderCache;
 
@@ -189,45 +189,65 @@ static const SimTerrainCellOrder *PrepareSimTerrainCellOrder(
     const FrameSlot *slot, SDL_Rect source, SDL_Rect viewport,
     const float matrix[16]) {
   SimTerrainRenderCache *cache = &s_sim_terrain_render_cache;
-  if (cache->order_valid && cache->order_source_w == source.w &&
-      cache->order_source_h == source.h &&
-      cache->order_viewport_w == viewport.w &&
-      cache->order_viewport_h == viewport.h &&
-      memcmp(cache->order_matrix, matrix, sizeof(cache->order_matrix)) == 0)
+  const float aspect = (float)viewport.w / (float)viewport.h;
+  const float depth_x = matrix[3] * aspect *
+      (float)kSimTownTerrainCellPixels / (float)source.w;
+  const float depth_y = -matrix[7] *
+      (float)kSimTownTerrainCellPixels / (float)source.h;
+  const float depth_height = matrix[11] *
+      SimTownTerrain_ScaledHeightPixels(
+          1.0f, (float)slot->sim.landscape_height_pct) /
+      (float)source.h;
+  if (cache->order_valid && cache->order_depth_x == depth_x &&
+      cache->order_depth_y == depth_y &&
+      cache->order_depth_height == depth_height)
     return cache->order;
 
   /* Painter order depends on camera-space distance, not on the town's common
-   * screen/camera translation. Sorting clip W rather than normalized Z makes
-   * that invariant explicit and removes a perspective divide per cell. The
-   * result can then survive ordinary map panning and is rebuilt only when the
-   * view orientation, dimensions, town, or landscape magnitude changes. */
-  const float aspect = (float)viewport.w / (float)viewport.h;
-  int count = 0;
-  for (int y = 0; y < kSimTownTerrainCells; y++)
-    for (int x = 0; x < kSimTownTerrainCells; x++) {
-      const float map_x =
-          (x + 0.5f) * (float)kSimTownTerrainCellPixels;
-      const float map_y =
-          (y + 0.5f) * (float)kSimTownTerrainCellPixels;
-      /* Omit the common -0.5/+0.5 origin terms: they add the same clip-W
-       * constant to every cell and therefore cannot change their ordering. */
-      const float world_x = map_x / (float)source.w * aspect;
-      const float world_y = -map_y / (float)source.h;
-      const float world_z = SimTerrainHeightWorld(
-          slot, source, SimTerrainCachedCell(x, y)->centre_height);
-      const float depth = Scene3D_ClipDepth(
-          matrix, world_x, world_y, world_z);
-      cache->order[count++] = (SimTerrainCellOrder){
-        (uint8_t)x, (uint8_t)y, depth,
-      };
+   * screen/camera translation or camera distance. Clip W is linear, so only
+   * its per-cell X/Y/height coefficients can affect order; FOV, output scale,
+   * matrix translation, and viewport placement cannot. This narrower key
+   * preserves the order during zoom and resize-only camera work.
+   *
+   * Orbit motion normally changes the order only near a few crossing pairs.
+   * Refresh depths in the already-sorted list and repair it with insertion
+   * sort, whose cost is linear plus those crossings. The first town frame
+   * still uses qsort so an arbitrary initial camera never hits its quadratic
+   * worst case. */
+  if (!cache->order_valid) {
+    int count = 0;
+    for (int y = 0; y < kSimTownTerrainCells; y++)
+      for (int x = 0; x < kSimTownTerrainCells; x++)
+        cache->order[count++] = (SimTerrainCellOrder){
+          .x = (uint8_t)x,
+          .y = (uint8_t)y,
+        };
+  }
+  for (int at = 0; at < kSimTerrainCellCount; at++) {
+    SimTerrainCellOrder *cell = &cache->order[at];
+    cell->depth = depth_x * (cell->x + 0.5f) +
+        depth_y * (cell->y + 0.5f) +
+        depth_height * SimTerrainCachedCell(
+            cell->x, cell->y)->centre_height;
+  }
+  if (!cache->order_valid) {
+    qsort(cache->order, kSimTerrainCellCount, sizeof(cache->order[0]),
+          CompareSimTerrainCells);
+  } else {
+    for (int at = 1; at < kSimTerrainCellCount; at++) {
+      SimTerrainCellOrder cell = cache->order[at];
+      int before = at - 1;
+      while (before >= 0 &&
+             CompareSimTerrainCells(&cache->order[before], &cell) > 0) {
+        cache->order[before + 1] = cache->order[before];
+        before--;
+      }
+      cache->order[before + 1] = cell;
     }
-  qsort(cache->order, (size_t)count, sizeof(cache->order[0]),
-        CompareSimTerrainCells);
-  cache->order_source_w = source.w;
-  cache->order_source_h = source.h;
-  cache->order_viewport_w = viewport.w;
-  cache->order_viewport_h = viewport.h;
-  memcpy(cache->order_matrix, matrix, sizeof(cache->order_matrix));
+  }
+  cache->order_depth_x = depth_x;
+  cache->order_depth_y = depth_y;
+  cache->order_depth_height = depth_height;
   cache->order_valid = true;
   return cache->order;
 }
@@ -458,8 +478,10 @@ bool DrawSimTownTerrain(
                            top_xy,h,top_uv,light,slot,source,viewport,matrix,fade))
       return false;
   }
-  SDL_RenderGeometry(g_renderer, texture, vertices, vertex_count,
-                     indices, index_count);
+  if (!SDL_RenderGeometry(g_renderer, texture, vertices, vertex_count,
+                          indices, index_count))
+    return false;
+  Sim3DPerformance_AddDraw((uint64_t)vertex_count, (uint64_t)index_count);
   return true;
 }
 

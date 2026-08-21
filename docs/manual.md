@@ -224,8 +224,11 @@ widescreen policy changes apply live.
 *Render scale* is the internal render/upscale multiple of the SNES output
 (1–8, default 3). Higher values render more actual detail in the 3D town and
 Mode 7 paths and downsample into the window. *Refresh rate* is Vsync, Unlimited
-(vsync off, for lower input-to-photon latency), or Limit with a chosen target
-FPS.
+(vsync off with a soft 2× display-refresh cap), Limit with a chosen target FPS,
+or Uncapped (vsync and host presentation throttling off for profiling). The
+optional *FPS counter* reports completed host presents in the top-right; use it
+with Uncapped to measure maximum rendering throughput rather than emulation
+ticks.
 
 `AR_MENU_SCALE=0` (the default, displayed as **Auto**) chooses the largest
 quarter-step content scale that preserves the settings layout in the complete

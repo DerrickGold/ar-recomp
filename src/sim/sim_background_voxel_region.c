@@ -118,7 +118,7 @@ float SimBackgroundVoxelRegion_AuthoredHeight(
         case kSimBackgroundHouseStyle_WhiteTent: return 10.0f;
         case kSimBackgroundHouseStyle_Adobe: return 11.0f;
         case kSimBackgroundHouseStyle_Stone: return 13.5f;
-        case kSimBackgroundHouseStyle_Aitos: return 14.0f;
+        case kSimBackgroundHouseStyle_Aitos: return 11.0f;
         case kSimBackgroundHouseStyle_MarahnaStilt: return 12.5f;
         case kSimBackgroundHouseStyle_MarahnaLogCabin: return 12.0f;
         case kSimBackgroundHouseStyle_Count: return 15.6f;

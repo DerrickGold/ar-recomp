@@ -52,11 +52,14 @@ typedef enum {
 } WindowMode;
 
 /* Present pacing. Vsync locks to the display; Unlimited disables vsync and
- * uses a soft 2x detected-refresh cap; Limit paces to frame_limit_fps. */
+ * uses a soft 2x detected-refresh cap; Limit paces to frame_limit_fps;
+ * Uncapped disables both vsync and host presentation throttling for profiling.
+ * Append new modes so persisted numeric values retain their meaning. */
 typedef enum {
   kRefreshMode_Vsync = 0,
   kRefreshMode_Unlimited,
   kRefreshMode_Limit,
+  kRefreshMode_Uncapped,
   kRefreshMode_Count,
 } RefreshMode;
 
@@ -279,8 +282,9 @@ typedef struct Settings {
   /* Load-only compatibility alias. Runtime code must use
    * Settings_IgnoreAspectRatio(), derived from extended_aspect. */
   bool ignore_aspect_ratio;
-  int refresh_mode;         /* RefreshMode: vsync / unlimited / limit */
+  int refresh_mode;         /* RefreshMode */
   int frame_limit_fps;      /* target FPS when refresh_mode == Limit */
+  bool show_fps;            /* completed host presents, top-right overlay */
 
   /* Audio controls. The SDL callback consumes an atomic mirror of the master
    * value; the game-thread COP hook reads the dialogue toggle directly. */

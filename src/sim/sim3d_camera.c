@@ -46,6 +46,26 @@ bool Sim3DCamera_ControlsAvailable(bool textures_ready) {
   return ProfileUsesGround(Settings_Sim3DRequestedFeatures());
 }
 
+void Sim3DCamera_CapturePresentationState(
+    Sim3DCameraPresentationState *state) {
+  if (!state) return;
+  const bool dynamic = g_settings.sim3d_camera_mode == kSimCam_Dynamic;
+  *state = (Sim3DCameraPresentationState){
+    .mode = g_settings.sim3d_camera_mode,
+    .pitch_mrad = dynamic
+        ? g_settings.sim3d_dyncam_baseline_tilt_x_mrad
+        : g_settings.sim3d_tilt_x_mrad,
+    .yaw_mrad = dynamic
+        ? g_settings.sim3d_dyncam_baseline_tilt_y_mrad
+        : g_settings.sim3d_tilt_y_mrad,
+    .distance_x100 = dynamic
+        ? g_settings.sim3d_dyncam_baseline_distance_x100
+        : g_settings.sim3d_distance_x100,
+    .orbit_yaw = s_dynamic_orbit.yaw,
+    .orbit_pitch = s_dynamic_orbit.pitch,
+  };
+}
+
 static int ClampInt(int value, int minimum, int maximum) {
   if (value < minimum) return minimum;
   if (value > maximum) return maximum;

@@ -56,10 +56,15 @@ uint64_t HostDisplay_CatchupCapNs(int maximum_catchup_frames);
 
 void HostDisplay_InvalidatePresentHistory(void);
 bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha);
+/* Recompose the retained frame between emulation ticks for visual
+ * interpolation, or continuously when Refresh rate is explicitly Uncapped so
+ * the FPS counter can measure renderer throughput. */
 bool HostDisplay_TryRepresentFrame(float alpha,
                                    bool diorama_frame_active,
                                    bool interpolation_enabled,
                                    bool redraw_pending);
+/* Rolling completed SDL_RenderPresent calls per second. */
+double HostDisplay_FramesPerSecond(void);
 
 /* Enforce the render-loop invariant that every iteration presents or yields,
  * while recording any produced frame that somehow did neither. */

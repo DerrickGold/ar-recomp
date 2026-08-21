@@ -115,7 +115,8 @@ SDL_Point DevTools_WriteFramebufferPpm(FILE *file,
     PresentUpload(&frame_slot);
     /* The same scene -> CRT resolve -> host-UI function used by the live
      * window keeps F2 captures visually identical, including an open menu. */
-    PresentFrame(&frame_slot, NULL, NULL, kInterpPhaseNone);
+    PresentFrame(&frame_slot, NULL, NULL, kInterpPhaseNone,
+                 HostDisplay_FramesPerSecond());
     have_composite = true;
   }
   if (have_composite) {
@@ -133,7 +134,8 @@ SDL_Point DevTools_WriteFramebufferPpm(FILE *file,
     fprintf(file, "P6\n%d %d\n255\n", output_width, output_height);
     for (int y = 0; y < output_height; y++) {
       const uint8_t *row =
-          (const uint8_t *)argb->pixels + (size_t)y * argb->pitch;
+          (const uint8_t *)argb->pixels +
+          (size_t)y * (size_t)argb->pitch;
       for (int x = 0; x < output_width; x++) {
         fputc(row[x * kArgbBytesPerPixel + 2], file);
         fputc(row[x * kArgbBytesPerPixel + 1], file);
@@ -149,7 +151,7 @@ SDL_Point DevTools_WriteFramebufferPpm(FILE *file,
   fprintf(file, "P6\n%d %d\n255\n", visible_width, context->snes_height);
   for (int y = 0; y < context->snes_height; y++) {
     const uint8_t *row = context->framebuffer_pixels +
-        (size_t)y * context->framebuffer_pitch +
+        (size_t)y * (size_t)context->framebuffer_pitch +
         (size_t)visible_x * kArgbBytesPerPixel;
     for (int x = 0; x < visible_width; x++) {
       fputc(row[x * kArgbBytesPerPixel + 2], file);
@@ -316,7 +318,8 @@ static bool HudChunkPixelVisible(const DevToolsContext *context,
       source_y < 0 || source_y >= context->snes_height)
     return false;
   return pixels[
-      ((size_t)source_y * context->snes_width + texture_x) *
+      ((size_t)source_y * (size_t)context->snes_width +
+       (size_t)texture_x) *
       kArgbBytesPerPixel + 3] != 0;
 }
 

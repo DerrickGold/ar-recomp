@@ -59,6 +59,27 @@ static void SetPurpleRoofs(SimBackgroundVoxelPalette *palette) {
           Argb(115, 57, 148), Argb(115, 57, 148));
 }
 
+static void SetNorthwallIceBridge(SimBackgroundVoxelPalette *palette) {
+  /* Northwall selects the icy form of the native bridge art. Keep the same
+   * masonry geometry as the other towns, but move every structural ramp into
+   * the blue-grey snow palette so it does not read as imported green stone. */
+  SetRamp(palette, kSimVoxelMaterial_Wall,
+          Argb(41, 57, 65), Argb(74, 98, 115),
+          Argb(115, 148, 164), Argb(172, 197, 205));
+  SetRamp(palette, kSimVoxelMaterial_WallLight,
+          Argb(74, 98, 115), Argb(115, 148, 164),
+          Argb(172, 197, 205), Argb(222, 238, 238));
+  SetRamp(palette, kSimVoxelMaterial_Paving,
+          Argb(32, 49, 57), Argb(65, 82, 98),
+          Argb(106, 131, 148), Argb(164, 189, 197));
+  SetRamp(palette, kSimVoxelMaterial_Trim,
+          Argb(90, 115, 131), Argb(139, 164, 180),
+          Argb(197, 213, 222), Argb(238, 246, 246));
+  SetRamp(palette, kSimVoxelMaterial_Dark,
+          Argb(12, 20, 28), Argb(24, 36, 49),
+          Argb(41, 57, 70), Argb(65, 82, 98));
+}
+
 static void SetBrownRoofs(SimBackgroundVoxelPalette *palette) {
   SetRamp(palette, kSimVoxelMaterial_Roof,
           Argb(90, 41, 0), Argb(90, 41, 0),
@@ -565,6 +586,7 @@ void SimBackgroundVoxelPalette_Build(
       SetRamp(palette, kSimVoxelMaterial_Dark,
               Argb(12, 16, 14), Argb(24, 30, 26),
               Argb(38, 45, 39), Argb(58, 65, 56));
+      if (object->town == 6) SetNorthwallIceBridge(palette);
       break;
   }
   int vary_by_record = object->kind == kSimBackgroundVoxel_House ||

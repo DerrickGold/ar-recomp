@@ -13,6 +13,22 @@ typedef struct HostDisplayPacingOptions {
   bool compositor_managed;
 } HostDisplayPacingOptions;
 
+/* Rolling completed-present rate. Count intervals between present-completion
+ * timestamps rather than emulation ticks, so retained-frame redraws and a
+ * blocking SDL_RenderPresent are both reflected in the number the user sees. */
+typedef struct HostDisplayFpsCounter {
+  uint64_t sample_start_ns;
+  uint32_t completed_intervals;
+  double frames_per_second;
+  bool initialized;
+} HostDisplayFpsCounter;
+
+void HostDisplayPacing_ResetFpsCounter(HostDisplayFpsCounter *counter);
+void HostDisplayPacing_RecordPresent(
+    HostDisplayFpsCounter *counter, uint64_t completed_at_ns);
+double HostDisplayPacing_FramesPerSecond(
+    const HostDisplayFpsCounter *counter);
+
 uint64_t HostDisplayPacing_FrameLimitIntervalNs(
     HostDisplayPacingOptions options);
 uint64_t HostDisplayPacing_UiIntervalNs(
@@ -24,6 +40,15 @@ uint64_t HostDisplayPacing_PausedIntervalNs(
 uint64_t HostDisplayPacing_GameIntervalNs(
     HostDisplayPacingOptions options,
     uint64_t emulation_frame_interval_ns);
+
+/* Between emulation ticks, ordinary redraws are useful only for interpolable
+ * diorama frames. Uncapped is the explicit profiling exception: recomposite a
+ * retained frame even when visually identical so the measured present rate is
+ * actual renderer throughput rather than the emulation's ~60 Hz tick rate. */
+bool HostDisplayPacing_ShouldRepresentFrame(
+    RefreshMode refresh_mode, bool diorama_frame_active,
+    bool interpolation_enabled, bool pair_interpolable,
+    bool redraw_pending);
 
 /* Retain enough accumulated time for the normal spiral-of-death window and
  * for one deliberately slow limited present plus the next emulation tick. */

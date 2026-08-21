@@ -40,7 +40,7 @@ enum {
 
 /* Raw capture buffers are game-thread-written until PresentUpload completes.
  * Each plane is allocated lazily on first demand and never reallocated. */
-extern uint8_t *g_sim3d_layer_pixels[kSim3DPlane_Count];
+extern uint32_t *g_sim3d_layer_pixels[kSim3DPlane_Count];
 extern uint32_t g_sim3d_flat_pixels[kSim3DMaxWidth * kSim3DMaxHeight];
 extern uint32_t g_sim3d_difference_pixels[kSim3DMaxWidth * kSim3DMaxHeight];
 
@@ -78,6 +78,22 @@ SimRenderFeatureMask Sim3D_ImplementedFeatures(void);
  * rather than reaching into main.c. In Dynamic mode, zoom edits the persisted
  * baseline while orbit is a transient offset that decays after release. */
 bool Sim3DCamera_ControlsAvailable(bool textures_ready);
+
+/* Camera fields are host-owned presentation state rather than emulated scene
+ * content. A retained game frame may refresh this small snapshot between ticks
+ * so uncapped presentation follows mouse orbit immediately without recapturing
+ * mutable PPU/WRAM state. */
+typedef struct Sim3DCameraPresentationState {
+  int mode;
+  int pitch_mrad;
+  int yaw_mrad;
+  int distance_x100;
+  float orbit_yaw;
+  float orbit_pitch;
+} Sim3DCameraPresentationState;
+
+void Sim3DCamera_CapturePresentationState(
+    Sim3DCameraPresentationState *state);
 void Sim3DCamera_Adjust(float yaw_delta, float pitch_delta, float zoom_delta);
 bool Sim3DCamera_UpdateDynamic(float elapsed_seconds, bool orbit_held);
 void Sim3DCamera_GetDynamicOrbit(float *yaw, float *pitch);
@@ -152,7 +168,7 @@ void Sim3D_RenderTownCanvas(const SimFrameData *frame, const uint8 *wram,
 void Sim3D_ComposeFlatPixels(
     uint32_t *dst, int width, int height, int pitch,
     uint32_t backdrop_argb, int live_x0, int live_x1,
-    uint8_t *const planes[kSim3DPlane_Count], uint32_t plane_mask,
+    uint32_t *const planes[kSim3DPlane_Count], uint32_t plane_mask,
     int full_width_rows);
 
 /* The colour the authentic renderer shows for any unrendered pixel: cgram[0]

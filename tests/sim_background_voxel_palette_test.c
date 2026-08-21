@@ -232,6 +232,22 @@ int main(void) {
   CHECK(SimBackgroundVoxelPalette_Base(
             &bridge_palette, kSimVoxelMaterial_Dark) == 0xFF262D27u);
 
+  SimBackgroundVoxelObject ice_bridge = bridge;
+  ice_bridge.town = 6;
+  SimBackgroundVoxelPalette ice_bridge_palette;
+  SimBackgroundVoxelPalette_Build(
+      &ice_bridge, kSimBackgroundVoxelBiome_Snow, &ice_bridge_palette);
+  CHECK(SimBackgroundVoxelPalette_Base(
+            &ice_bridge_palette, kSimVoxelMaterial_Wall) == 0xFF7394A4u);
+  CHECK(SimBackgroundVoxelPalette_Base(
+            &ice_bridge_palette, kSimVoxelMaterial_Paving) == 0xFF6A8394u);
+  CHECK(SimBackgroundVoxelPalette_Base(
+            &ice_bridge_palette, kSimVoxelMaterial_Trim) == 0xFFC5D5DEu);
+  CHECK(SimBackgroundVoxelPalette_Base(
+            &ice_bridge_palette, kSimVoxelMaterial_Dark) == 0xFF293946u);
+  CHECK(memcmp(&bridge_palette, &ice_bridge_palette,
+               sizeof(bridge_palette)) != 0);
+
   if (failures) return 1;
   puts("sim background voxel palette checks passed");
   return 0;

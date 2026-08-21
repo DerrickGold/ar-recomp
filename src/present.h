@@ -131,6 +131,7 @@ typedef struct FrameSlot {
    * as it crosses. Screen x = 0 sits at surface column obj_apron + ws_extra. */
   int obj_apron;
   int hud_scale_percent;
+  bool show_fps;
 
   /* Diorama gate (D14 — Diorama_IsActiveThisFrame() result for this frame). */
   bool diorama_active;
@@ -416,6 +417,10 @@ SDL_Rect ComputePresentationViewport(SDL_Renderer *renderer,
                                      bool ignore_aspect_ratio,
                                      int pixel_aspect, int visible_width,
                                      int snes_height);
+SDL_Rect ComputePresentationViewportWithOutput(
+    SDL_Renderer *renderer, bool ignore_aspect_ratio,
+    int pixel_aspect, int visible_width, int snes_height,
+    SDL_Point *output_size);
 
 /* M7: the small subset of a FrameSlot that scroll interpolation needs from
  * the PREVIOUS frame. Deliberately its own tiny type rather than a second
@@ -459,7 +464,7 @@ void PresentUpload(const FrameSlot *slot);
 SDL_Rect PresentFrame(const FrameSlot *slot,
                       const DioramaScrollSnapshot *prev_scroll,
                       const ActionObjInterpolationFrame *prev_action_obj,
-                      float alpha);
+                      float alpha, double presentation_fps);
 
 /* Drops renderer-owned present caches (HUD composite, sim shadow/rim targets,
  * town/world-navigation canvases, underlays and cloud fields) so the next

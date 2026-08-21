@@ -15,6 +15,11 @@ typedef struct Scene3DPoint {
   float x, y;
 } Scene3DPoint;
 
+/* Shared camera-plane guard for all projection implementations. Optimized
+ * prepared transforms must reject exactly the same near-plane region as the
+ * general world-space helpers. */
+extern const float kScene3DMinimumProjectionDepth;
+
 void Scene3D_BuildViewProjection(const Scene3DCamera *camera,
                                  int output_width, int output_height,
                                  float out_matrix[16]);

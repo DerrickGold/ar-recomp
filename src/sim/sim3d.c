@@ -5,6 +5,7 @@
 
 #include "sim_town_canvas.h"
 
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,7 +20,7 @@ _Static_assert(kSim3DMaxWidth == kPpuBufWidth,
 _Static_assert(kSim3DPlane_Count <= 16,
                "SIM produced-plane mask must fit its frame payload");
 
-uint8_t *g_sim3d_layer_pixels[kSim3DPlane_Count];
+uint32_t *g_sim3d_layer_pixels[kSim3DPlane_Count];
 uint32_t g_sim3d_flat_pixels[kSim3DMaxWidth * kSim3DMaxHeight];
 uint32_t g_sim3d_difference_pixels[kSim3DMaxWidth * kSim3DMaxHeight];
 
@@ -189,7 +190,8 @@ static void ClearPriorHudObjMask(void) {
   if (width > 0 && x0 >= 0 && x1 <= width && x1 > x0 &&
       y0 >= 0 && y1 <= kSim3DMaxHeight && y1 > y0) {
     for (int y = y0; y < y1; y++)
-      memset(&g_sim3d_hud_obj_mask[(size_t)y * width + x0], 0,
+      memset(&g_sim3d_hud_obj_mask[
+                 (size_t)y * (size_t)width + (size_t)x0], 0,
              (size_t)(x1 - x0) * sizeof(g_sim3d_hud_obj_mask[0]));
   }
   g_sim3d.hud_obj_mask_x0 = g_sim3d.hud_obj_mask_y0 = 0;
@@ -250,9 +252,11 @@ static bool PrepareHudHandoff(Ppu *ppu, int width) {
     for (int x = 0; x < raster_width; x++) {
       int texture_x = bounds.x0 + x + extra;
       if (texture_x < 0 || texture_x >= width) continue;
-      uint32_t pixel = raster[(size_t)y * raster_width + x];
+      uint32_t pixel = raster[
+          (size_t)y * (size_t)raster_width + (size_t)x];
       if (!pixel) continue;
-      g_sim3d_hud_obj_mask[(size_t)screen_y * width + texture_x] = pixel;
+      g_sim3d_hud_obj_mask[
+          (size_t)screen_y * (size_t)width + (size_t)texture_x] = pixel;
       if (texture_x < mask_x0) mask_x0 = texture_x;
       if (screen_y < mask_y0) mask_y0 = screen_y;
       if (texture_x + 1 > mask_x1) mask_x1 = texture_x + 1;
@@ -422,35 +426,35 @@ bool Sim3D_PrepareCapture(Ppu *ppu, const Sim3DCaptureRequest *request) {
   bool ok = true;
   ok &= PpuBindOverlaySurface(
       ppu, kPpuOverlaySource_Bg1,
-      g_sim3d_layer_pixels[kSim3DPlane_Bg1Low], pitch);
+      (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg1Low], pitch);
   ok &= PpuBindOverlayPrioSurface(
       ppu, kPpuOverlaySource_Bg1, 1,
-      g_sim3d_layer_pixels[kSim3DPlane_Bg1High]);
+      (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg1High]);
   ok &= PpuBindOverlaySurface(
       ppu, kPpuOverlaySource_Bg2,
-      g_sim3d_layer_pixels[kSim3DPlane_Bg2Low], pitch);
+      (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg2Low], pitch);
   ok &= PpuBindOverlayPrioSurface(
       ppu, kPpuOverlaySource_Bg2, 1,
-      g_sim3d_layer_pixels[kSim3DPlane_Bg2High]);
+      (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg2High]);
   ok &= PpuBindOverlaySurface(
       ppu, kPpuOverlaySource_Bg3,
-      g_sim3d_layer_pixels[kSim3DPlane_Bg3Low], pitch);
+      (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg3Low], pitch);
   ok &= PpuBindOverlayPrioSurface(
       ppu, kPpuOverlaySource_Bg3, 1,
-      g_sim3d_layer_pixels[kSim3DPlane_Bg3High]);
+      (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg3High]);
   if (g_sim3d.raw_obj_planes) {
     ok &= PpuBindOverlaySurface(
         ppu, kPpuOverlaySource_Obj,
-        g_sim3d_layer_pixels[kSim3DPlane_Obj0], pitch);
+        (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Obj0], pitch);
     ok &= PpuBindOverlayPrioSurface(
         ppu, kPpuOverlaySource_Obj, 1,
-        g_sim3d_layer_pixels[kSim3DPlane_Obj1]);
+        (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Obj1]);
     ok &= PpuBindOverlayPrioSurface(
         ppu, kPpuOverlaySource_Obj, 2,
-        g_sim3d_layer_pixels[kSim3DPlane_Obj2]);
+        (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Obj2]);
     ok &= PpuBindOverlayPrioSurface(
         ppu, kPpuOverlaySource_Obj, 3,
-        g_sim3d_layer_pixels[kSim3DPlane_Obj3]);
+        (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Obj3]);
   } else {
     /* This also clears the source's capture and priority bindings, so the PPU
      * skips its isolated OBJ scratch setup, four row clears and resolve pass. */
@@ -520,16 +524,21 @@ static uint32_t OpaqueArgb(uint32_t pixel) {
 static void ComposeFlatPixelsPolicy(
     uint32_t *dst, int width, int height, int pitch,
     uint32_t backdrop_argb, int live_x0, int live_x1,
-    uint8_t *const planes[kSim3DPlane_Count], uint32_t plane_mask,
+    uint32_t *const planes[kSim3DPlane_Count], uint32_t plane_mask,
     bool object_half_add, int full_width_rows) {
-  if (!dst || width <= 0 || height <= 0 || pitch < width * 4) return;
+  if (!dst || width <= 0 || height <= 0 ||
+      (size_t)width > INT_MAX / sizeof(*dst) ||
+      pitch < width * (int)sizeof(*dst) ||
+      pitch % (int)sizeof(*dst) != 0)
+    return;
   if (live_x0 < 0) live_x0 = 0;
   if (live_x1 > width) live_x1 = width;
   if (live_x1 < live_x0) live_x1 = live_x0;
   uint32_t enabled = plane_mask ? plane_mask : (1u << kSim3DPlane_Count) - 1;
 
   for (int y = 0; y < height; y++) {
-    uint32_t *out = (uint32_t *)((uint8_t *)dst + (size_t)y * pitch);
+    uint32_t *out = dst +
+        (size_t)y * (size_t)(pitch / (int)sizeof(*dst));
     for (int x = 0; x < width; x++)
       out[x] = x >= live_x0 && x < live_x1 ? backdrop_argb : 0xff000000u;
     /* An OBJ whose X has wrapped negative still rasterizes into the margin
@@ -541,18 +550,16 @@ static void ComposeFlatPixelsPolicy(
     bool clip_to_live = y >= full_width_rows;
     for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
       if (!(enabled & (1u << plane)) || !planes[plane]) continue;
-      const uint32_t *src = (const uint32_t *)(
-          planes[plane] + (size_t)y * width * sizeof(uint32_t));
+      const uint32_t *src = planes[plane] + (size_t)y * (size_t)width;
       for (int x = 0; x < width; x++) {
         if (!(src[x] >> 24)) continue;
         if (clip_to_live && (x < live_x0 || x >= live_x1)) continue;
         if (object_half_add && IsObjPlane(plane) &&
             ObjPixelUsesColorMath(src[x])) {
-          size_t index = (size_t)y * width + x;
-          uint32_t bg1_high = ((uint32_t *)
-              planes[kSim3DPlane_Bg1High])[index];
-          uint32_t bg1_low = ((uint32_t *)
-              planes[kSim3DPlane_Bg1Low])[index];
+          size_t index =
+              (size_t)y * (size_t)width + (size_t)x;
+          uint32_t bg1_high = planes[kSim3DPlane_Bg1High][index];
+          uint32_t bg1_low = planes[kSim3DPlane_Bg1Low][index];
           uint32_t subscreen = bg1_high ? bg1_high : bg1_low;
           out[x] = subscreen
               ? HalfAddRgb(OpaqueArgb(src[x]), subscreen)
@@ -568,7 +575,7 @@ static void ComposeFlatPixelsPolicy(
 void Sim3D_ComposeFlatPixels(
     uint32_t *dst, int width, int height, int pitch,
     uint32_t backdrop_argb, int live_x0, int live_x1,
-    uint8_t *const planes[kSim3DPlane_Count], uint32_t plane_mask,
+    uint32_t *const planes[kSim3DPlane_Count], uint32_t plane_mask,
     int full_width_rows) {
   ComposeFlatPixelsPolicy(dst, width, height, pitch, backdrop_argb,
                           live_x0, live_x1, planes, plane_mask, false,
@@ -581,10 +588,10 @@ static bool WritePpm(const char *path, const uint8_t *pixels,
   if (!file) return false;
   bool ok = fprintf(file, "P6\n%d %d\n255\n", width, height) > 0;
   for (int y = 0; ok && y < height; y++) {
-    const uint32_t *row = (const uint32_t *)(
-        pixels + (size_t)y * pitch);
+    const uint8_t *row = pixels + (size_t)y * (size_t)pitch;
     for (int x = 0; x < width; x++) {
-      uint32_t color = row[x];
+      uint32_t color;
+      memcpy(&color, row + (size_t)x * sizeof(color), sizeof(color));
       ok &= fputc((color >> 16) & 0xff, file) != EOF;
       ok &= fputc((color >> 8) & 0xff, file) != EOF;
       ok &= fputc(color & 0xff, file) != EOF;
@@ -670,7 +677,7 @@ static void MaybeDumpDemoArtifacts(const uint8_t *authentic_pixels,
     char plane_path[kHostPathCapacity];
     snprintf(plane_path, sizeof(plane_path), "%s-plane-%02d-%s.ppm",
              prefix, plane, plane_names[plane]);
-    ok &= WritePpm(plane_path, g_sim3d_layer_pixels[plane],
+    ok &= WritePpm(plane_path, (const uint8_t *)g_sim3d_layer_pixels[plane],
                    g_sim3d.width, g_sim3d.height, g_sim3d.width * 4);
   }
   FILE *metadata = fopen(path_json, "w");
@@ -699,14 +706,17 @@ static uint32_t BuildDifference(const uint8_t *authentic_pixels,
   uint32_t mismatch = 0;
   uint64_t hash = UINT64_C(1469598103934665603);
   for (int y = 0; y < g_sim3d.height; y++) {
-    const uint32_t *authentic = (const uint32_t *)(
-        authentic_pixels + (size_t)y * authentic_pitch);
+    const uint8_t *authentic =
+        authentic_pixels + (size_t)y * (size_t)authentic_pitch;
     const uint32_t *flat =
-        &g_sim3d_flat_pixels[(size_t)y * g_sim3d.width];
+        &g_sim3d_flat_pixels[(size_t)y * (size_t)g_sim3d.width];
     uint32_t *difference = write_image
-        ? &g_sim3d_difference_pixels[(size_t)y * g_sim3d.width] : NULL;
+        ? &g_sim3d_difference_pixels[
+              (size_t)y * (size_t)g_sim3d.width] : NULL;
     for (int x = 0; x < g_sim3d.width; x++) {
-      uint32_t a = authentic[x], b = flat[x];
+      uint32_t a;
+      memcpy(&a, authentic + (size_t)x * sizeof(a), sizeof(a));
+      uint32_t b = flat[x];
       if (out_flat_hash) {
         uint32_t color = b & 0xffffff;
         for (int byte = 0; byte < 3; byte++) {
@@ -749,15 +759,16 @@ static uint32_t ComposeTownPixelWithoutHud(int x, int y,
     /* Same live-area rule the composed side uses: a wrapped-negative OBJ
      * rasterizes into margin columns the hardware leaves black. */
     if (!live && !hud_composite_span) continue;
-    size_t index = (size_t)y * g_sim3d.width + x;
-    uint32_t pixel = ((uint32_t *)g_sim3d_layer_pixels[plane])[index];
+    size_t index =
+        (size_t)y * (size_t)g_sim3d.width + (size_t)x;
+    uint32_t pixel = g_sim3d_layer_pixels[plane][index];
     if (!(pixel >> 24)) continue;
     if (g_sim3d.object_half_add && IsObjPlane(plane) &&
         ObjPixelUsesColorMath(pixel)) {
-      uint32_t bg1_high = ((uint32_t *)
-          g_sim3d_layer_pixels[kSim3DPlane_Bg1High])[index];
-      uint32_t bg1_low = ((uint32_t *)
-          g_sim3d_layer_pixels[kSim3DPlane_Bg1Low])[index];
+      uint32_t bg1_high =
+          g_sim3d_layer_pixels[kSim3DPlane_Bg1High][index];
+      uint32_t bg1_low =
+          g_sim3d_layer_pixels[kSim3DPlane_Bg1Low][index];
       uint32_t subscreen = bg1_high ? bg1_high : bg1_low;
       color = subscreen
           ? HalfAddRgb(OpaqueArgb(pixel), subscreen)
@@ -772,18 +783,21 @@ static uint32_t ComposeTownPixelWithoutHud(int x, int y,
 static void RestoreTownHudPixel(uint8_t *authentic_pixels,
                                 int authentic_pitch, int x, int y,
                                 bool skip_bg3, bool skip_obj) {
-  size_t index = (size_t)y * g_sim3d.width + x;
+  size_t index =
+      (size_t)y * (size_t)g_sim3d.width + (size_t)x;
   uint32_t color = ComposeTownPixelWithoutHud(x, y, skip_bg3, skip_obj);
-  ((uint32_t *)(authentic_pixels + (size_t)y * authentic_pitch))[x] = color;
+  memcpy(authentic_pixels + (size_t)y * (size_t)authentic_pitch +
+             (size_t)x * sizeof(color),
+         &color, sizeof(color));
   g_sim3d_flat_pixels[index] = color | 0xff000000u;
   if (skip_bg3) {
-    ((uint32_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg3Low])[index] = 0;
-    ((uint32_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg3High])[index] = 0;
+    g_sim3d_layer_pixels[kSim3DPlane_Bg3Low][index] = 0;
+    g_sim3d_layer_pixels[kSim3DPlane_Bg3High][index] = 0;
   }
   if (skip_obj) {
     int plane = Sim3D_ObjPlaneForPriority(g_sim3d.hud_obj_priority);
     if (g_sim3d.captured_plane_mask & (1u << plane))
-      ((uint32_t *)g_sim3d_layer_pixels[plane])[index] = 0;
+      g_sim3d_layer_pixels[plane][index] = 0;
   }
 }
 
@@ -800,16 +814,19 @@ static void RestoreTownHudPolicy(uint8_t *authentic_pixels,
     const PpuOverlayCapture *capture =
         &g_sim3d.prior_captures[kPpuOverlaySource_Bg3];
     for (int y = capture->y0; y < capture->y1; y++) {
-      uint32_t *dst = (uint32_t *)(g_sim3d.hud_bg_pixels +
-                                   (size_t)y * g_sim3d.hud_bg_pitch);
+      uint8_t *dst = g_sim3d.hud_bg_pixels +
+          (size_t)y * (size_t)g_sim3d.hud_bg_pitch;
       for (int x = capture->x0; x < capture->x1; x++) {
         int texture_x = x + (g_sim3d.width - kActRaiserAuthenticWidth) / 2;
-        size_t index = (size_t)y * g_sim3d.width + texture_x;
+        size_t index = (size_t)y * (size_t)g_sim3d.width +
+            (size_t)texture_x;
         uint32_t high =
-            ((uint32_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg3High])[index];
+            g_sim3d_layer_pixels[kSim3DPlane_Bg3High][index];
         uint32_t low =
-            ((uint32_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg3Low])[index];
-        dst[texture_x] = high ? high : low;
+            g_sim3d_layer_pixels[kSim3DPlane_Bg3Low][index];
+        const uint32_t color = high ? high : low;
+        memcpy(dst + (size_t)texture_x * sizeof(color),
+               &color, sizeof(color));
       }
     }
   }
@@ -817,9 +834,10 @@ static void RestoreTownHudPolicy(uint8_t *authentic_pixels,
     memset(g_sim3d.hud_obj_pixels, 0,
            (size_t)g_sim3d.hud_obj_pitch * kActRaiserSimulationHudHeight);
     for (int y = 0; y < kActRaiserSimulationHudHeight; y++) {
-      uint32_t *dst = (uint32_t *)(g_sim3d.hud_obj_pixels +
-                                   (size_t)y * g_sim3d.hud_obj_pitch);
-      memcpy(dst, &g_sim3d_hud_obj_mask[(size_t)y * g_sim3d.width],
+      uint8_t *dst = g_sim3d.hud_obj_pixels +
+          (size_t)y * (size_t)g_sim3d.hud_obj_pitch;
+      memcpy(dst, &g_sim3d_hud_obj_mask[
+                      (size_t)y * (size_t)g_sim3d.width],
              (size_t)g_sim3d.width * sizeof(uint32_t));
     }
   }
@@ -848,7 +866,8 @@ static void RestoreTownHudPolicy(uint8_t *authentic_pixels,
     for (int y = bg_y0; y < bg_y1; y++) {
       for (int x = bg_x0; x < bg_x1; x++) {
         bool skip_obj = g_sim3d.hud_obj &&
-            g_sim3d_hud_obj_mask[(size_t)y * g_sim3d.width + x] != 0;
+            g_sim3d_hud_obj_mask[
+                (size_t)y * (size_t)g_sim3d.width + (size_t)x] != 0;
         RestoreTownHudPixel(authentic_pixels, authentic_pitch, x, y,
                             true, skip_obj);
       }
@@ -862,7 +881,8 @@ static void RestoreTownHudPolicy(uint8_t *authentic_pixels,
          y < obj_y1; y++) {
       for (int x = g_sim3d.hud_obj_mask_x0;
            x < g_sim3d.hud_obj_mask_x1; x++) {
-        if (!g_sim3d_hud_obj_mask[(size_t)y * g_sim3d.width + x])
+        if (!g_sim3d_hud_obj_mask[
+                (size_t)y * (size_t)g_sim3d.width + (size_t)x])
           continue;
         if (x >= bg_x0 && x < bg_x1 && y >= bg_y0 && y < bg_y1)
           continue;  /* The BG3 loop patched the union once already. */
@@ -919,7 +939,7 @@ static void ApplyFixedColorAdd(void) {
     g_sim3d.fixed_add_r, g_sim3d.fixed_add_g, g_sim3d.fixed_add_b,
   };
   const int shift[3] = { 16, 8, 0 };  /* ARGB: red, green, blue */
-  size_t count = (size_t)g_sim3d.width * g_sim3d.height;
+  size_t count = (size_t)g_sim3d.width * (size_t)g_sim3d.height;
 
   for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
     if (!(g_sim3d.captured_plane_mask & (1u << plane))) continue;
@@ -927,7 +947,7 @@ static void ApplyFixedColorAdd(void) {
     if (!bit || !(g_sim3d.fixed_add_mask & bit) || !g_sim3d_layer_pixels[plane])
       continue;
     bool obj = IsObjPlane(plane);
-    uint32_t *pixels = (uint32_t *)g_sim3d_layer_pixels[plane];
+    uint32_t *pixels = g_sim3d_layer_pixels[plane];
     for (size_t i = 0; i < count; i++) {
       uint32_t pixel = pixels[i];
       if (!(pixel >> 24)) continue;
@@ -1151,7 +1171,8 @@ SimRenderFeatureMask Sim3D_ImplementedFeatures(void) {
   if (!g_sim3d.separated_valid) return 0;
   SimRenderFeatureMask features = kSim3DShippedFeatures;
   if (!g_sim3d.billboard_renderer_ready)
-    features &= ~kSimFeature_ObjectBillboards;
+    features &= (SimRenderFeatureMask)~(
+        (SimRenderFeatureMask)kSimFeature_ObjectBillboards);
   return features;
 }
 

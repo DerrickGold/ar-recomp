@@ -48,6 +48,8 @@ static void TestUnlimitedAndVsyncPolicies(void) {
             Options(kRefreshMode_Unlimited, 60, 90, true)) == 0);
   CHECK(HostDisplayPacing_FrameLimitIntervalNs(
             Options(kRefreshMode_Vsync, 60, 60, false)) == 0);
+  CHECK(HostDisplayPacing_FrameLimitIntervalNs(
+            Options(kRefreshMode_Uncapped, 60, 60, false)) == 0);
 }
 
 static void TestUiAndPausedIntervals(void) {
@@ -89,6 +91,43 @@ static void TestGamePresentAntiSpinFloor(void) {
             Options(kRefreshMode_Vsync, 60, 60, false),
             kEmulationFrameIntervalNs) ==
         8333333ull);
+  CHECK(HostDisplayPacing_GameIntervalNs(
+            Options(kRefreshMode_Uncapped, 60, 60, false),
+            kEmulationFrameIntervalNs) == 0);
+}
+
+static void TestCompletedPresentRate(void) {
+  HostDisplayFpsCounter counter = {0};
+  const uint64_t start_ns = 1000000000ull;
+  HostDisplayPacing_RecordPresent(&counter, start_ns);
+  CHECK(HostDisplayPacing_FramesPerSecond(&counter) == 0.0);
+  for (int interval = 1; interval <= 125; interval++)
+    HostDisplayPacing_RecordPresent(
+        &counter, start_ns + (uint64_t)interval * 4000000ull);
+  const double fps = HostDisplayPacing_FramesPerSecond(&counter);
+  CHECK(fps > 249.99 && fps < 250.01);
+
+  /* A reset/non-monotonic platform clock restarts the sampling window without
+   * publishing an invalid negative/overflowed rate. */
+  HostDisplayPacing_RecordPresent(&counter, start_ns);
+  CHECK(HostDisplayPacing_FramesPerSecond(&counter) == fps);
+
+  HostDisplayPacing_ResetFpsCounter(&counter);
+  CHECK(HostDisplayPacing_FramesPerSecond(&counter) == 0.0);
+  CHECK(!counter.initialized);
+}
+
+static void TestRepresentPolicy(void) {
+  CHECK(HostDisplayPacing_ShouldRepresentFrame(
+      kRefreshMode_Uncapped, false, false, false, false));
+  CHECK(!HostDisplayPacing_ShouldRepresentFrame(
+      kRefreshMode_Uncapped, false, false, false, true));
+  CHECK(!HostDisplayPacing_ShouldRepresentFrame(
+      kRefreshMode_Unlimited, false, false, false, false));
+  CHECK(HostDisplayPacing_ShouldRepresentFrame(
+      kRefreshMode_Unlimited, true, true, true, false));
+  CHECK(!HostDisplayPacing_ShouldRepresentFrame(
+      kRefreshMode_Unlimited, true, true, false, false));
 }
 
 static void TestEmulatedFramePresentModes(void) {
@@ -197,6 +236,8 @@ int main(void) {
   TestUnlimitedAndVsyncPolicies();
   TestUiAndPausedIntervals();
   TestGamePresentAntiSpinFloor();
+  TestCompletedPresentRate();
+  TestRepresentPolicy();
   TestEmulatedFramePresentModes();
   TestSub60LimitsRetainElapsedTime();
   TestWindowAxisToOutput();

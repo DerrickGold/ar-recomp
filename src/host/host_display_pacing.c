@@ -4,6 +4,37 @@
 
 #include "constants.h"
 
+static const uint64_t kFpsSampleIntervalNs = kNanosecondsPerSecond / 2u;
+
+void HostDisplayPacing_ResetFpsCounter(HostDisplayFpsCounter *counter) {
+  if (counter) *counter = (HostDisplayFpsCounter){0};
+}
+
+void HostDisplayPacing_RecordPresent(
+    HostDisplayFpsCounter *counter, uint64_t completed_at_ns) {
+  if (!counter) return;
+  if (!counter->initialized || completed_at_ns <= counter->sample_start_ns) {
+    counter->sample_start_ns = completed_at_ns;
+    counter->completed_intervals = 0;
+    counter->initialized = true;
+    return;
+  }
+
+  counter->completed_intervals++;
+  const uint64_t elapsed_ns = completed_at_ns - counter->sample_start_ns;
+  if (elapsed_ns < kFpsSampleIntervalNs) return;
+  counter->frames_per_second =
+      (double)counter->completed_intervals * (double)kNanosecondsPerSecond /
+      (double)elapsed_ns;
+  counter->sample_start_ns = completed_at_ns;
+  counter->completed_intervals = 0;
+}
+
+double HostDisplayPacing_FramesPerSecond(
+    const HostDisplayFpsCounter *counter) {
+  return counter ? counter->frames_per_second : 0.0;
+}
+
 uint64_t HostDisplayPacing_FrameLimitIntervalNs(
     HostDisplayPacingOptions options) {
   if (options.refresh_mode == kRefreshMode_Limit) {
@@ -52,6 +83,7 @@ uint64_t HostDisplayPacing_PausedIntervalNs(
 uint64_t HostDisplayPacing_GameIntervalNs(
     HostDisplayPacingOptions options,
     uint64_t emulation_frame_interval_ns) {
+  if (options.refresh_mode == kRefreshMode_Uncapped) return 0;
   const uint64_t limited_interval_ns =
       HostDisplayPacing_FrameLimitIntervalNs(options);
   if (limited_interval_ns) return limited_interval_ns;
@@ -61,6 +93,15 @@ uint64_t HostDisplayPacing_GameIntervalNs(
   return anti_spin_interval_ns
       ? anti_spin_interval_ns
       : emulation_frame_interval_ns / 2u;
+}
+
+bool HostDisplayPacing_ShouldRepresentFrame(
+    RefreshMode refresh_mode, bool diorama_frame_active,
+    bool interpolation_enabled, bool pair_interpolable,
+    bool redraw_pending) {
+  if (redraw_pending) return false;
+  if (refresh_mode == kRefreshMode_Uncapped) return true;
+  return diorama_frame_active && interpolation_enabled && pair_interpolable;
 }
 
 uint64_t HostDisplayPacing_CatchupCapNs(

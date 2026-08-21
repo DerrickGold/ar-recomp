@@ -920,10 +920,10 @@ static void TestSemanticAtlasPacking(void) {
 static void TestSim3DFlatComposition(void) {
   enum { width = 3, height = 2 };
   uint32_t storage[kSim3DPlane_Count][width * height];
-  uint8_t *planes[kSim3DPlane_Count];
+  uint32_t *planes[kSim3DPlane_Count];
   memset(storage, 0, sizeof(storage));
   for (int plane = 0; plane < kSim3DPlane_Count; plane++)
-    planes[plane] = (uint8_t *)storage[plane];
+    planes[plane] = storage[plane];
 
   storage[kSim3DPlane_Bg3Low][1] = 0xffff0000u;
   storage[kSim3DPlane_Obj0][1] = 0xff00ff00u;

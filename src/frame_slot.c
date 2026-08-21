@@ -176,42 +176,23 @@ static uint32_t CaptureDioramaAdditivePlaneMask(void) {
   return mask;
 }
 
-/* The pose the projection is built from this frame.
- *
- * Free Cam's is the player-owned one the right-drag edits and the reset action
- * restores; Dynamic Cam has its own baseline that the reactive lean works
- * around. Resolved in one place because two Sim3DTuning sites read it, and a
- * camera that differed between them would be a genuinely confusing bug. */
-typedef struct SimCameraPose { int pitch_mrad, yaw_mrad, distance_x100; } SimCameraPose;
-
-static SimCameraPose Sim3D_ActivePose(void) {
-  if (g_settings.sim3d_camera_mode == kSimCam_Dynamic)
-    return (SimCameraPose){
-      g_settings.sim3d_dyncam_baseline_tilt_x_mrad,
-      g_settings.sim3d_dyncam_baseline_tilt_y_mrad,
-      g_settings.sim3d_dyncam_baseline_distance_x100,
-    };
-  return (SimCameraPose){
-    g_settings.sim3d_tilt_x_mrad,
-    g_settings.sim3d_tilt_y_mrad,
-    g_settings.sim3d_distance_x100,
-  };
-}
-
 /* #16: the Sim3DTuning snapshot was spelled out identically at both
  * Sim3D_AnnotateFrame sites (FrameSlot_Capture and DrawAndPresentFrame). Build
- * it once here so the two can never drift. Output is byte-identical to the
- * former inline literals (same field list, same sources). */
+ * it once here so the two can never drift. The camera helper also resolves
+ * Free Cam's player-owned pose versus Dynamic Cam's reactive baseline in one
+ * place; a different pose between the two annotation sites would be a
+ * genuinely confusing bug. */
 Sim3DTuning BuildSim3DTuning(void) {
   int sim_margin_left = 0, sim_margin_right = 0;
   int sim_margin_top = 0, sim_margin_bottom = 0;
   ActRaiser_SimSpriteMargins(&sim_margin_left, &sim_margin_right,
                              &sim_margin_top, &sim_margin_bottom);
-  SimCameraPose sim_pose = Sim3D_ActivePose();
+  Sim3DCameraPresentationState sim_camera;
+  Sim3DCamera_CapturePresentationState(&sim_camera);
   return (Sim3DTuning){
-      .pitch_mrad = sim_pose.pitch_mrad,
-      .yaw_mrad = sim_pose.yaw_mrad,
-      .distance_x100 = sim_pose.distance_x100,
+      .pitch_mrad = sim_camera.pitch_mrad,
+      .yaw_mrad = sim_camera.yaw_mrad,
+      .distance_x100 = sim_camera.distance_x100,
       .landscape_height_pct = g_settings.sim3d_landscape_height_pct,
       .height_scale_x100 = g_settings.sim3d_height_scale_x100,
       .voxel_preset = g_settings.sim3d_voxel_preset,
@@ -512,6 +493,7 @@ void FrameSlot_Capture(FrameSlot *dst) {
    * already expressed in PHYSICAL output pixels (0 = auto passes through). */
   dst->hud_scale_percent =
       Settings_ScalePercentToOutput(g_settings.hud_scale_percent);
+  dst->show_fps = g_settings.show_fps;
 
   dst->diorama_active = g_diorama_frame_active;
   dst->diorama_plane_request_mask = 0;
