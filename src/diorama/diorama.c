@@ -11,9 +11,11 @@
 #include "diorama_depth_shapes.h" /* rake/bow/thick/stack/voxel arithmetic */
 #include "diorama_scroll_math.h"   /* R17/C1: DioramaInterpUvWindow */
 #include "scene3d_math.h"
+#include "presentation_upload_mirror.h"
 #include "settings.h"
 #include "snes/ppu.h"
 #include "user_data_dir.h"
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -31,6 +33,8 @@ static size_t g_diorama_rom_size;
 static DioramaRomSkyboxCache g_rom_skybox = {
   .source = -1,
 };
+static PresentationUploadMirror
+    g_diorama_upload_mirrors[kDioramaPlane_Count];
 
 bool Diorama_InitRomBackdrops(const uint8_t *rom_data, size_t rom_size) {
   g_diorama_rom_data = rom_data;
@@ -404,6 +408,7 @@ static int g_diorama_ss_w, g_diorama_ss_h;
 
 static SDL_Texture *EnsureDioramaSupersampleTexture(SDL_Renderer *renderer,
                                                      int w, int h) {
+  if (!renderer || w <= 0 || h <= 0) return NULL;
   if (g_diorama_ss_texture && g_diorama_ss_w == w && g_diorama_ss_h == h)
     return g_diorama_ss_texture;
   SDL_DestroyTexture(g_diorama_ss_texture);
@@ -411,8 +416,13 @@ static SDL_Texture *EnsureDioramaSupersampleTexture(SDL_Renderer *renderer,
       renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET, w, h);
   g_diorama_ss_w = w;
   g_diorama_ss_h = h;
-  if (g_diorama_ss_texture)
-    SDL_SetTextureScaleMode(g_diorama_ss_texture, SDL_SCALEMODE_LINEAR);
+  if (g_diorama_ss_texture &&
+      !SDL_SetTextureScaleMode(g_diorama_ss_texture, SDL_SCALEMODE_LINEAR)) {
+    SDL_DestroyTexture(g_diorama_ss_texture);
+    g_diorama_ss_texture = NULL;
+    g_diorama_ss_w = 0;
+    g_diorama_ss_h = 0;
+  }
   return g_diorama_ss_texture;
 }
 
@@ -438,15 +448,22 @@ static SDL_Texture *EnsureDioramaSupersampleTexture(SDL_Renderer *renderer,
  * into an intermediate sized to that exact active region. */
 static SDL_Texture *BuildDioramaSupersample(SDL_Renderer *renderer,
                                             SDL_Texture *source, int obj_apron,
-                                            int snes_width, int snes_height) {
+                                            int snes_width, int snes_height,
+                                            bool *target_restore_failed) {
+  if (target_restore_failed) *target_restore_failed = false;
+  if (!renderer || !source || obj_apron < 0 || snes_width <= 0 ||
+      snes_height <= 0 || snes_width > INT_MAX / kDioramaSupersample ||
+      snes_height > INT_MAX / kDioramaSupersample)
+    return NULL;
   SDL_Texture *ss = EnsureDioramaSupersampleTexture(
       renderer, snes_width * kDioramaSupersample,
       snes_height * kDioramaSupersample);
   if (!ss) return NULL;
-  SDL_SetRenderTarget(renderer, ss);
-  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
-  SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0);
-  SDL_RenderClear(renderer);
+  if (!SDL_SetRenderTarget(renderer, ss)) return NULL;
+  bool success =
+      SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE) &&
+      SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0) &&
+      SDL_RenderClear(renderer);
   /* Starts at the APRON, not at column 0: the displayed span is the MIDDLE of
    * an apron-wide surface. Blitting from 0 copied the empty left apron in and
    * pushed the content right -- which on the backdrop (the one BLENDMODE_NONE
@@ -457,12 +474,20 @@ static SDL_Texture *BuildDioramaSupersample(SDL_Renderer *renderer,
   SDL_FRect dst = { 0.0f, 0.0f, (float)(snes_width * kDioramaSupersample),
                     (float)(snes_height * kDioramaSupersample) };
   SDL_BlendMode old_blend = SDL_BLENDMODE_BLEND;
-  SDL_GetTextureBlendMode(source, &old_blend);
-  SDL_SetTextureBlendMode(source, SDL_BLENDMODE_NONE);
-  SDL_RenderTexture(renderer, source, &src, &dst);
-  SDL_SetTextureBlendMode(source, old_blend);
-  SDL_SetRenderTarget(renderer, CrtPost_BaseTarget());
-  return ss;
+  bool have_old_blend = false;
+  if (success) {
+    have_old_blend = SDL_GetTextureBlendMode(source, &old_blend);
+    success = have_old_blend &&
+        SDL_SetTextureBlendMode(source, SDL_BLENDMODE_NONE) &&
+        SDL_RenderTexture(renderer, source, &src, &dst);
+  }
+  if (have_old_blend && !SDL_SetTextureBlendMode(source, old_blend))
+    success = false;
+  if (!SDL_SetRenderTarget(renderer, CrtPost_BaseTarget())) {
+    if (target_restore_failed) *target_restore_failed = true;
+    return NULL;
+  }
+  return success ? ss : NULL;
 }
 
 /* ── Camera constants (§5.6) ─────────────────────────────────────────── */
@@ -1309,7 +1334,11 @@ uint32_t Diorama_Upload(SDL_Texture *textures[], uint8_t *pixels[],
    * zeros and the textures were zero-filled at creation, so nothing ever
    * changes there. Skipping them is ~47 MB/s at 60fps -- most of the apron's
    * steady-state cost. */
-  const size_t pitch = (size_t)snes_width * 4;
+  if (!textures || !pixels || snes_width <= 0 || snes_height <= 0 ||
+      obj_apron < 0 || obj_apron > snes_width / 2 ||
+      snes_width > INT_MAX / (int)sizeof(uint32_t))
+    return 0;
+  const int pitch = snes_width * (int)sizeof(uint32_t);
   const int display_width = snes_width - obj_apron * 2;
   SDL_Rect upload_full = { 0, 0, snes_width, snes_height };
   SDL_Rect upload_display = { obj_apron, 0, display_width, snes_height };
@@ -1321,9 +1350,13 @@ uint32_t Diorama_Upload(SDL_Texture *textures[], uint8_t *pixels[],
       continue;
     const bool wide = obj_apron > 0 && DioramaPlaneCanCarryApron(plane);
     const SDL_Rect *rect = wide ? &upload_full : &upload_display;
-    const uint8_t *src =
-        wide ? pixels[plane] : pixels[plane] + (size_t)obj_apron * 4;
-    if (SDL_UpdateTexture(textures[plane], rect, src, pitch))
+    const uint8_t *src = wide
+        ? pixels[plane]
+        : pixels[plane] +
+            (size_t)obj_apron * sizeof(uint32_t);
+    if (PresentationUploadMirror_UploadArgb8888(
+            &g_diorama_upload_mirrors[plane], textures[plane], src,
+            rect->w, rect->h, pitch, rect->x, rect->y, NULL))
       uploaded_mask |= 1u << plane;
   }
   return uploaded_mask;
@@ -2529,8 +2562,18 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     SDL_Texture *draw_texture = texture;
     bool used_ss = false;
     if (!use_shader) {
+      bool target_restore_failed = false;
       SDL_Texture *ss = BuildDioramaSupersample(
-          renderer, texture, obj_apron, snes_width, snes_height);
+          renderer, texture, obj_apron, snes_width, snes_height,
+          &target_restore_failed);
+      if (target_restore_failed) {
+        if (interpolating)
+          SDL_SetRenderTextureAddressMode(renderer, SDL_TEXTURE_ADDRESS_AUTO,
+                                          SDL_TEXTURE_ADDRESS_AUTO);
+        if (!viewport_is_output)
+          SDL_SetRenderViewport(renderer, NULL);
+        return false;
+      }
       if (ss) {
         draw_texture = ss;
         used_ss = true;
@@ -2687,6 +2730,9 @@ static void DioramaReleaseRendererResources(SDL_Renderer *renderer) {
   g_diorama_ss_texture = NULL;
   g_diorama_ss_w = 0;
   g_diorama_ss_h = 0;
+
+  for (int plane = 0; plane < kDioramaPlane_Count; plane++)
+    PresentationUploadMirror_Reset(&g_diorama_upload_mirrors[plane]);
 
   SDL_DestroyTexture(g_rom_skybox.texture);
   g_rom_skybox.texture = NULL;
