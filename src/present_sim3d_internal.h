@@ -30,9 +30,9 @@ extern const SimCloudLayer kSimCloudLayers[];
 extern const int kSimCloudLayerCount;
 uint32_t SimCloudTexel(int x, int y);
 
-/* ---- present_sim3d.c helpers the world-map renderer calls ------------------
- * These stay DEFINED in present_sim3d.c and lost their `static` for this
- * header. */
+/* ---- SIM 3D helpers the world-map renderer calls -------------------------
+ * These are defined by the SIM 3D presentation stage that owns the work and
+ * are exposed only because the world-map renderer deliberately shares it. */
 extern const float kPi;
 extern SDL_Texture *s_sim_underlay_blur_texture;
 

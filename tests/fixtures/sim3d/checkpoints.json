@@ -1965,6 +1965,8 @@
     },
     "D7-voxel-town": {
       "description": "D7 background voxel town: Aitos renders authored models, mountain relief, the volcano and audited terrain through the real GPU depth path. The composite must differ from AR_SIM3D_VOXEL_PRESET=Off, must be identical across two identical passes, must match this host's recorded reference, and must leave the authentic framebuffer untouched",
+      "default_binary": "build-terrain/ActRaiserRecomp",
+      "default_config": "dev-config.ini",
       "replay": "saves/aitos-eruption.rec",
       "sram_base64": "tests/fixtures/sim3d/aitos-voxel-seed.srm.b64",
       "sram_sha256": "26ec2474882a69dff576f518f614a094f58f1428c807faf83230d72fe4c13568",

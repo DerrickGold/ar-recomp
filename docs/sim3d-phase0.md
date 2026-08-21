@@ -123,6 +123,13 @@ independent gates, because each catches a different failure:
 | Determinism | A third identical pass produces identical composites |
 | Reference | The composites match what this host recorded last time |
 
+Because terrain elevation is a default-off build feature, D7 selects
+`build-terrain/ActRaiserRecomp` and `dev-config.ini` when no command-line
+override is supplied. Build that candidate as described in
+`sim-town-terrain.md` before running D7 or the complete suite. Explicit
+`--binary` and `--config` arguments still override those checkpoint defaults,
+including when `--all` is used for an intentional cross-build comparison.
+
 Only the first three are portable. The screenshots read back the real
 swapchain, so their pixels belong to the host's driver as much as to the
 source; the reference lives under `runs/sim3d-voxel-reference/<host>.json`, is
