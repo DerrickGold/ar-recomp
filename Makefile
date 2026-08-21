@@ -25,7 +25,9 @@
 #                     `make clean` or a fresh clone. Override the ROM with
 #                     `make dev ROM=path.sfc`.
 #   For the normal inner loop (after editing src/ or runtime C) just run
-#   `cmake --build --preset play` directly — no regen or reconfigure needed.
+#   `cmake --build --preset play` directly. `make dev` always reapplies the
+#   release preset first, so newly promoted feature defaults cannot remain
+#   stale in an existing CMake cache.
 #
 #   make check-constants  reject high-risk duplicate literals in authored code.
 #   make check-cross  compile AND link the game for the platforms that cannot be
@@ -49,7 +51,7 @@ ROM ?= ar.sfc
 
 # Regenerable artifacts, grouped. Never lists the ROM, saves/*.srm, recordings,
 # or authored source; only the specific generated sidecars inside saves/.
-CLEAN_BUILD_DIRS := build build-release build-asan build-trace $(PACKAGING)/build snesrecomp-go/build
+CLEAN_BUILD_DIRS := build build-release build-control build-terrain build-asan build-trace $(PACKAGING)/build snesrecomp-go/build
 CLEAN_GENERATED  := src/gen recomp/funcs.h saves/gen_meta.json saves/rts_webs.txt saves/rts_webs.prev.txt
 CLEAN_RELEASE    := release
 
@@ -63,7 +65,7 @@ dev:
 	  echo "=== regenerating (src/gen is empty) ==="; \
 	  go -C snesrecomp-go run ./cmd/snesbuild regen --root .. --rom $(ROM) --allow-stubs; \
 	fi
-	@[ -f build-release/CMakeCache.txt ] || cmake --preset play
+	cmake --preset play
 	cmake --build --preset play
 	@echo "Built ./build-release/ActRaiserRecomp — run it with: ./build-release/ActRaiserRecomp $(ROM) --config config.ini"
 
