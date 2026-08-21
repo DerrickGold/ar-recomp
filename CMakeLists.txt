@@ -216,11 +216,12 @@ else()
     target_compile_definitions(ActRaiserRecomp PRIVATE AR_SIM3D_PICKER_TOPDOWN=0)
 endif()
 
-# Experimental audited height field for the full-town SIM ground and every
-# grounded presentation consumer. Default OFF so ordinary builds remain the
-# strict control for A/B captures while the six-town visual pass is accepted.
+# Audited height field for the full-town SIM ground and every grounded
+# presentation consumer. Shipped builds enable it; pass
+# -DAR_SIM3D_TERRAIN_ELEVATION=OFF (or use the control preset) for a strict
+# flat-terrain A/B control.
 option(AR_SIM3D_TERRAIN_ELEVATION
-    "Render the experimental audited SIM town elevation mesh" OFF)
+    "Render the audited SIM town elevation mesh" ON)
 if(AR_SIM3D_TERRAIN_ELEVATION)
     set(AR_SIM3D_TERRAIN_ELEVATION_VALUE 1)
 else()

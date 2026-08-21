@@ -1534,7 +1534,7 @@ def run_suite(args: argparse.Namespace, checkpoints: dict) -> int:
         ]
         # An explicit suite override applies to every checkpoint. Without one,
         # let an individual checkpoint select the build/configuration its
-        # contract requires (D7 needs the default-off terrain feature enabled).
+        # contract requires (D7 validates the player-facing release build).
         if args.binary is not None:
             command.extend(("--binary", str(args.binary)))
         if args.config is not None:

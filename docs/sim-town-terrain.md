@@ -1,30 +1,31 @@
 # SIM town terrain elevation
 
-The experimental SIM 3D terrain path is integrated behind a default-off build
-flag. It uses one audited, deterministic corner-height field for all six stock
-towns and one sampling contract for every grounded presentation consumer.
+The SIM 3D terrain path is enabled in release builds. It uses one audited,
+deterministic corner-height field for all six stock towns and one sampling
+contract for every grounded presentation consumer. The compile-time flag
+remains available only to produce a strict flat-terrain regression control.
 
 ## A/B builds
 
-Control build (the default):
+Player/release build (terrain enabled):
 
 ```sh
-cmake -S . -B build-control
-cmake --build build-control
+cmake --preset play
+cmake --build --preset play
 ```
 
-Elevation candidate:
+Flat-terrain control:
 
 ```sh
-cmake -S . -B build-terrain -DAR_SIM3D_TERRAIN_ELEVATION=ON
-cmake --build build-terrain
+cmake --preset control
+cmake --build --preset control
 ```
 
-The candidate activates only with the cleaned background-voxel town canvas.
+The terrain activates only with the cleaned background-voxel town canvas.
 If that renderer is unavailable, the ordinary flat path remains the fallback.
 
-In an elevation-enabled build, **Town 3D > Scene > Landscape height (%)** is
-a live player-facing control. Its `0..150` range scales the audited terrain,
+In a release build, **Town 3D > Scene > Landscape height (%)** is a live
+player-facing control. Its `0..150` range scales the audited terrain,
 building-foundation grounding, bridge bank grounding, terrain depth occlusion,
 terrain shading, and the stable flight datum as one system. It does **not**
 resize authored mountain/volcano relief or voxel buildings: those are objects

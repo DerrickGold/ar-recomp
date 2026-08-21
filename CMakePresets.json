@@ -7,6 +7,7 @@
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
+        "AR_SIM3D_TERRAIN_ELEVATION": "ON",
         "AR_SANITIZE": "OFF",
         "BUILD_TESTING": "ON"
       }
@@ -17,6 +18,20 @@
       "binaryDir": "${sourceDir}/build-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "AR_SIM3D_TERRAIN_ELEVATION": "ON",
+        "AR_WATCHDOG": "OFF",
+        "AR_SANITIZE": "OFF",
+        "BUILD_TESTING": "OFF"
+      }
+    },
+    {
+      "name": "control",
+      "displayName": "Flat terrain control (RelWithDebInfo, optimized)",
+      "binaryDir": "${sourceDir}/build-control",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "AR_SIM3D_TERRAIN_ELEVATION": "OFF",
+        "AR_WATCHDOG": "OFF",
         "AR_SANITIZE": "OFF",
         "BUILD_TESTING": "OFF"
       }
@@ -27,6 +42,7 @@
       "binaryDir": "${sourceDir}/build-asan",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
+        "AR_SIM3D_TERRAIN_ELEVATION": "ON",
         "AR_SANITIZE": "ON",
         "BUILD_TESTING": "OFF"
       }
@@ -37,6 +53,7 @@
       "binaryDir": "${sourceDir}/build-trace",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
+        "AR_SIM3D_TERRAIN_ELEVATION": "ON",
         "SNESRECOMP_ENABLE_TRACE": "ON",
         "AR_SANITIZE": "OFF",
         "BUILD_TESTING": "OFF"
@@ -46,6 +63,7 @@
   "buildPresets": [
     { "name": "dev", "configurePreset": "dev", "jobs": 8 },
     { "name": "play", "configurePreset": "play", "jobs": 8 },
+    { "name": "control", "configurePreset": "control", "jobs": 8 },
     { "name": "asan", "configurePreset": "asan", "jobs": 8 },
     { "name": "trace", "configurePreset": "trace", "jobs": 8 }
   ],
