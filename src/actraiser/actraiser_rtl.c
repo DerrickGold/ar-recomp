@@ -2494,6 +2494,13 @@ void ActRaiserDrawPpuFrame(void) {
   for (int ch = 0; ch < kDmaChannelCount; ch++)
     SimpleHdma_Init(&hdma_chans[ch], &dma->channel[ch]);
 
+  /* The immutable action-room authority resolves the same persistent raster
+   * state from ROM + camera + frame clock. Its default-off shadow is prepared
+   * once here, then samples the live registers immediately before each visible
+   * line so HDMA timing remains part of the comparison. */
+  ActRaiserActionBg_BeginRoomSceneFrame(
+      g_ram, kActRaiserWramSize, g_ppu, dma);
+
   int trigger = g_snes->vIrqEnabled ? g_snes->vTimer + 1 : -1;
 
   /* Resolve the stable OAM footprint before scanout; the live sprite evaluator
@@ -2501,6 +2508,8 @@ void ActRaiserDrawPpuFrame(void) {
   ActRaiser_DioramaHudObjPrepare();
 
   for (int i = 0; i <= kActRaiserAuthenticHeight; i++) {
+    if (i > 0)
+      ActRaiserActionBg_ObserveRoomSceneFrameLine(g_ppu, (unsigned)(i - 1));
     ppu_runLine(g_ppu, i);
     /* Vertical top margin (diorama). Placed HERE, not before the loop, for two
      * reasons that both have to hold:

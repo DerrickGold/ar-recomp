@@ -18,6 +18,15 @@ enum {
   kActionRoomSceneMaxMapBytes = 16 * 4 * kActionRoomSceneMapPageBytes,
   kActionRoomSceneVideoProfileBytes = 28,
   kActionRoomSceneAnimationWindowBytes = 0x1000,
+  kActionRoomSceneRasterWaveformBytes = 0x0100,
+  /* Compressed character uploads are staged here before VRAM DMA. Raster
+   * builders reuse the same WRAM range and deliberately leave selected HDMA
+   * bytes untouched, so the last upload is part of the stable room image. */
+  kActionRoomSceneRasterWorkspaceBytes = 0x2000,
+  kActionRoomSceneFrameWidth = 256,
+  kActionRoomSceneFrameHeight = 224,
+  kActionRoomSceneFramePixels =
+      kActionRoomSceneFrameWidth * kActionRoomSceneFrameHeight,
   kActionRoomSceneTileWordMask = 0xECFF,
   kActionRoomSceneBg1AttributeByte = 0x10,
   kActionRoomSceneBg2AttributeByte = 0x01,
@@ -55,13 +64,60 @@ typedef struct ActionRoomScene {
   uint8_t palette[kActionRoomScenePaletteBytes];
   ActionRoomSceneBg bg[kActionRoomSceneBgCount];
   uint8_t video_profile[kActionRoomSceneVideoProfileBytes];
+  uint8_t raster_waveform[kActionRoomSceneRasterWaveformBytes];
+  uint8_t raster_workspace[kActionRoomSceneRasterWorkspaceBytes];
   uint8_t video_profile_index;
   ActionRoomRasterPreset raster_preset;
   bool have_character_bank[2];
   bool have_extra_characters;
   bool have_palette;
   bool have_video_profile;
+  bool have_raster_waveform;
+  bool have_raster_workspace;
 } ActionRoomScene;
+
+/* Explicit presentation inputs for a reproducible standalone frame. Camera
+ * coordinates are the native BG1 camera. Negative phase values derive from
+ * game_frame; non-negative values are editor-authored overrides. */
+typedef struct ActionRoomSceneFrameRequest {
+  int32_t camera_x;
+  int32_t camera_y;
+  /* Persistent HDMA is built one game tick before it is scanned. A standalone
+   * static preview leaves this false and reuses camera_x; the live oracle sets
+   * it when the camera moved between table construction and display. */
+  int32_t raster_camera_x;
+  uint32_t game_frame;
+  int animation_phase;
+  int page_phase;
+  bool have_raster_camera_x;
+} ActionRoomSceneFrameRequest;
+
+/* Fully resolved stable-room PPU state. The scanline arrays contain the
+ * register values in effect while each visible output row is rasterized, after
+ * the room's persistent HDMA preset has advanced. Transient gameplay-object
+ * windows are deliberately outside this record. */
+typedef struct ActionRoomSceneFrameState {
+  uint16_t bg_hscroll[kActionRoomSceneBgCount]
+                     [kActionRoomSceneFrameHeight];
+  uint16_t bg_vscroll[kActionRoomSceneBgCount]
+                     [kActionRoomSceneFrameHeight];
+  uint8_t mosaic[kActionRoomSceneFrameHeight];
+  int32_t camera_x;
+  int32_t camera_y;
+  uint32_t game_frame;
+  uint16_t fixed_color;
+  uint8_t screen_enabled[2];
+  uint8_t screen_windowed[2];
+  uint8_t cgwsel;
+  uint8_t cgadsub;
+  uint8_t bgmode;
+  uint8_t bgsc[kActionRoomSceneBgCount];
+  uint8_t brightness;
+  uint8_t animation_phase;
+  uint8_t bg2_page_phase;
+  uint8_t bg2_page_index;
+  ActionRoomRasterPreset raster_preset;
+} ActionRoomSceneFrameState;
 
 /* Replays the cumulative action asset script through the selected room and
  * resolves its command-3 video profile. A legacy/synthetic graphics script
@@ -124,5 +180,23 @@ unsigned ActionRoomScene_ResolveBg2PagePhase(
 unsigned ActionRoomScene_Bg2PageIndex(const ActionRoomScene *scene,
                                       uint32_t game_frame,
                                       int explicit_phase);
+
+/* Resolves the video profile, native camera/parallax, all ten persistent
+ * raster presets (including their authentic inherited HDMA workspace bytes),
+ * character phase, and BG2 page phase without touching PPU/gameplay state. */
+bool ActionRoomScene_BuildFrameState(
+    const ActionRoomScene *scene,
+    const ActionRoomSceneFrameRequest *request,
+    ActionRoomSceneFrameState *state);
+
+/* Reference two-background Mode-1 compositor for the stable-room authoring
+ * baseline. Output pixels are opaque ARGB8888. It implements BG1/BG2 tile
+ * priority, flips, transparency, main/subscreen membership, persistent
+ * raster scroll/mosaic, and the profile's color math. BG3/OBJ and transient
+ * object-driven windows are intentionally absent. */
+bool ActionRoomScene_RenderNativeFrame(
+    const ActionRoomScene *scene,
+    const ActionRoomSceneFrameState *state,
+    uint32_t *argb, size_t pixel_count);
 
 #endif  /* ACTION_ROOM_SCENE_H */
