@@ -90,8 +90,8 @@ The stable two-background scene milestone is implemented:
   This is a guarded HLE rather than an unconditional replacement: the new
   `hle_func_if` generator seam retains the decoded ROM body for title/SIM raw
   loads, BG3 selectors, wrong M/X modes, and any command shape outside the
-  audited 49-room action domain. Video profile, gameplay, audio, and OBJ
-  commands remain in the native `$02:B1F7` VM.
+  audited 49-room action domain. Gameplay, audio, and OBJ commands remain in
+  the native `$02:B1F7` VM.
 - The action-only `$02:B28E` command-7 and `$02:B330` command-6 handlers now
   execute `ActRaiser_LoadActionCharacters` and `ActRaiser_LoadActionPalette`
   by default. The character path covers the audited compressed 8 KiB banks
@@ -103,6 +103,15 @@ The stable two-background scene milestone is implemented:
   known destinations and sizes; command 7 also verifies the compressed asset
   header before redirecting. Title/SIM raw shapes and any unknown operands
   retain the generated handler body.
+- The action-only `$02:B4E8` command-3 handler now executes
+  `ActRaiser_ApplyActionVideoConfig` by default. It reads the live profile
+  operand and the same 28-byte `$02:893E` record, then applies the native
+  BG mode/screens, windows, colour math, common priorities, parallax ratios,
+  fade/page/character-animation state, timer and renderer-nonoperative `$F2`.
+  Its read-only guard requires D/DB=0, native M1X0 action entry, and one of the
+  44 profile IDs present in the 49-room stock script census. Unsupported modes,
+  non-action calls, unknown operands, and `AR_ACTION_ROOM_VIDEO_HLE=0` execute
+  the generated native body. Commands 2/1/0 and the enclosing VM stay native.
 - The live comparator and production provider own separate `ActionBgWorld`
   caches. This is required when the room-scene source and both compare gates
   are enabled together: the observer runs after provider binding but
@@ -584,5 +593,16 @@ Targets are VRAM word addresses and strides are bytes.
   pin the 8 KiB character banks, 4 KiB font variant, palette offsets, PPU-port
   order, shared decompression workspace/scratch, script cursor, registers,
   status, stack/RTS, explicit-off behavior and rejected shapes.
+- Guarded video-profile matrices
+  `runs/action-room-video-native-control-matrix-20260822-v1.json` and
+  `runs/action-room-video-hle-matrix-20260822-v1.json`: the same release binary
+  runs all 12 ordinary entries with command 3 native and redirected. The HLE
+  arm executes 12 profile applications (336 record bytes). All 204 complete
+  framebuffer, WRAM/SRAM, VRAM, CGRAM, OAM, PPU-snapshot, dispatch and
+  final-state artifacts are byte-exact. The 49-room static census contains 49
+  command-3 invocations and 44 profile IDs (`$03-$2E` excluding `$08`). The
+  ROM-free CPU test pins every PPU/direct-page field, both priority paths, the
+  `$C4/$C1` transform, script cursor, registers/status, stack/RTS, explicit-off
+  behavior and guarded fallbacks.
 - Static consumer census: all generated `$02:B4E8` variants write `$F2`; no
   registered/recompiled function reads it.

@@ -664,6 +664,20 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_action_room_graphics_hle
         COMMAND actraiser_action_room_graphics_hle_test)
 
+    # CPU, PPU-port, direct-page and guarded-native-fallback contracts for
+    # the action-only command-3 28-byte video-profile applicator.
+    add_executable(actraiser_action_video_config_hle_test
+        tests/actraiser_action_video_config_hle_test.c
+        src/actraiser/actraiser_action_video_config.c
+    )
+    target_include_directories(actraiser_action_video_config_hle_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/actraiser
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_action_video_config_hle
+        COMMAND actraiser_action_video_config_hle_test)
+
     # CPU contracts for the shared per-town/global lair-bit resolver family,
     # its six operations, stack writes, registers, and final flags.
     add_executable(actraiser_town_lair_bits_hle_test
