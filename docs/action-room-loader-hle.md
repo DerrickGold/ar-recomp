@@ -57,6 +57,14 @@ The stable two-background scene milestone is implemented:
   camera-local BG captures before routing pixels into authored virtual bands;
   the full-room map remains the painting surface.
 - The game registers the same immutable ROM bytes at boot. Setting
+  `AR_ACTION_ROOM_SCENE_HLE=1` promotes the room scene's cumulative-ROM BG1/BG2
+  page maps and metatile definitions to the production finite-world provider.
+  The original bootstrap still stages CHR/CGRAM, the resident VRAM ring,
+  gameplay data, actors and callbacks. The ring remains the authentic-pixel
+  safety oracle, and a scene load or dimension failure falls back to the
+  ordinary live-WRAM source. This is deliberately feature-gated until the
+  natural-transition A/B matrix is accepted.
+- Setting
   `AR_ACTION_ROOM_SCENE_COMPARE=1` compares each newly published live
   `ActionBgWorld` against every tile produced by `ActionRoomScene`. During
   scanout it also compares the immutable frame's scroll, mosaic, TM/TS,
@@ -80,6 +88,14 @@ acceptance work is fixture coverage for the boss/transition-only R1, R4, R7,
 R8, and R10 callbacks, not missing builder logic. BG3 HUD, real OBJ streams,
 fades, and gameplay-object-driven window timelines remain outside this
 standalone background contract by design.
+
+The production handoff is intentionally incremental. The first slice changes
+where the renderer obtains complete finite BG tile words; it does not skip the
+ROM asset VM or write host-decoded assets into emulated WRAM/VRAM. That retains
+the original loader as both gameplay bootstrap and visual oracle while the
+immutable source is exercised in normal scanout. Once transition coverage is
+accepted, the next seam can HLE the background-only asset staging commands
+without absorbing level objects, actor initialization, audio, or gameplay.
 
 ## Scope and parity boundary
 
@@ -467,5 +483,13 @@ Targets are VRAM word addresses and strides are bytes.
   `runs/20260822-130422`, `0601` R6 `runs/20260822-130424`, and `0702` R9
   `runs/20260822-130426` (1,337,865 registers each); all five report zero
   register mismatch.
+- First production-source A/B, 2026-08-22: live-WRAM manifest
+  `runs/bg-hle-matrix-20260822-133427.json` versus immutable-room manifest
+  `runs/bg-hle-matrix-20260822-133346.json`. All 12 ordinary-entry targets
+  sourced 19,522 bound layer-frames with zero room-scene fallback; native-ring
+  preflight compared 18,216,295 tiles with zero mismatch/outside, and all 204
+  framebuffer, WRAM/SRAM, dispatch, final-state and PPU-snapshot artifacts are
+  byte-exact. Natural-transition and boss-only fixtures remain the promotion
+  gate.
 - Static consumer census: all generated `$02:B4E8` variants write `$F2`; no
   registered/recompiled function reads it.

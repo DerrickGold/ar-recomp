@@ -46,9 +46,11 @@ typedef struct ActRaiserActionBgObserver {
   bool room_frame_uses_previous;
   bool room_camera_valid;
   bool reported_room_frame_mismatch;
+  bool reported_room_scene_hle_fallback[kActionBgLayerCount];
   bool forced_blank;
   int enabled;
   int hle_enabled;
+  int room_scene_hle_enabled;
   int room_scene_compare_enabled;
   int room_scene_compare_verbose;
   unsigned room_scene_verbose_reports;
@@ -64,6 +66,7 @@ typedef struct ActRaiserActionBgProvider {
 static ActRaiserActionBgObserver s_observer = {
   .enabled = -1,
   .hle_enabled = -1,
+  .room_scene_hle_enabled = -1,
   .room_scene_compare_enabled = -1,
   .room_scene_compare_verbose = -1,
 };
@@ -382,6 +385,18 @@ static bool RoomSceneCompareEnabled(void) {
   return s_observer.room_scene_compare_enabled != 0;
 }
 
+static bool RoomSceneHleEnabled(void) {
+  if (s_observer.room_scene_hle_enabled < 0) {
+    const char *value = getenv("AR_ACTION_ROOM_SCENE_HLE");
+    s_observer.room_scene_hle_enabled =
+        value && value[0] && value[0] != '0';
+    if (s_observer.room_scene_hle_enabled)
+      fprintf(stderr,
+              "[action-room-scene] ROM-derived world source enabled\n");
+  }
+  return s_observer.room_scene_hle_enabled != 0;
+}
+
 static bool RoomSceneCompareVerbose(void) {
   if (s_observer.room_scene_compare_verbose < 0) {
     const char *value = getenv("AR_ACTION_ROOM_SCENE_COMPARE_VERBOSE");
@@ -401,6 +416,8 @@ bool ActRaiserActionBg_InitRoomScenes(const uint8_t *rom, size_t rom_size) {
   s_observer.room_frame_uses_previous = false;
   s_observer.room_camera_valid = false;
   s_observer.reported_room_frame_mismatch = false;
+  memset(s_observer.reported_room_scene_hle_fallback, 0,
+         sizeof(s_observer.reported_room_scene_hle_fallback));
   s_observer.room_scene_verbose_reports = 0;
   memset(s_observer.room_scene_compared_serial, 0,
          sizeof(s_observer.room_scene_compared_serial));
@@ -424,6 +441,8 @@ static void ResetWorlds(void) {
   s_observer.room_frame_uses_previous = false;
   s_observer.room_camera_valid = false;
   s_observer.reported_room_frame_mismatch = false;
+  memset(s_observer.reported_room_scene_hle_fallback, 0,
+         sizeof(s_observer.reported_room_scene_hle_fallback));
   s_observer.room_scene_verbose_reports = 0;
 }
 
@@ -544,6 +563,33 @@ bool ActRaiserActionBg_CompareRoomSceneLayer(
   }
   *result = built;
   return true;
+}
+
+bool ActRaiserActionBg_UpdateWorldFromRoomScene(
+    ActionBgWorld *world, const ActionRoomScene *scene, uint8_t bg_layer) {
+  if (!world || !scene || bg_layer < 1 ||
+      bg_layer > kActionRoomSceneBgCount ||
+      !scene->have_video_profile ||
+      !ActionRoomScene_HasBackground(scene, bg_layer))
+    return false;
+  const unsigned tile_width = ActionRoomScene_TileWidth(scene, bg_layer);
+  const unsigned tile_height = ActionRoomScene_TileHeight(scene, bg_layer);
+  if (tile_width > UINT16_MAX / 8u || tile_height > UINT16_MAX / 8u)
+    return false;
+  const ActionRoomSceneBg *bg = &scene->bg[bg_layer - 1u];
+  const ActionBgImmutableInput input = {
+    .map = bg->map,
+    .map_size = bg->map_size,
+    .metatiles = bg->metatiles,
+    .metatile_size = sizeof(bg->metatiles),
+    .world_width = (uint16_t)(tile_width * 8u),
+    .world_height = (uint16_t)(tile_height * 8u),
+    .word_mask = kActionRoomSceneTileWordMask,
+    .attributes = (uint8_t)(
+        ActionRoomScene_BgAttributes(scene, bg_layer) >> 8),
+    .metatile_words_big_endian = true,
+  };
+  return ActionBgWorld_UpdateImmutable(world, &input);
 }
 
 static void CompareRoomFrameValue(
@@ -997,15 +1043,40 @@ uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
     ActionBgWorld *world = WorldForLayer(layer, map_group, map_number);
     if (!world) continue;
     const uint32_t before = ActionBgWorld_Serial(world);
-    if (!ActionBgWorld_Update(world, &snapshot.decode)) {
+    bool room_scene_source = false;
+    if (RoomSceneHleEnabled() && EnsureRoomScene(map_group, map_number)) {
+      const uint8_t bg_layer = (uint8_t)(layer + 1u);
+      room_scene_source =
+          ActionRoomScene_TileWidth(s_observer.room_scene, bg_layer) * 8u ==
+              snapshot.decode.world_width &&
+          ActionRoomScene_TileHeight(s_observer.room_scene, bg_layer) * 8u ==
+              snapshot.decode.world_height &&
+          ActRaiserActionBg_UpdateWorldFromRoomScene(
+              world, s_observer.room_scene, bg_layer);
+    }
+    if (RoomSceneHleEnabled() && !room_scene_source) {
+      s_observer.diagnostics.room_scene_hle_fallbacks++;
+      if (!s_observer.reported_room_scene_hle_fallback[layer]) {
+        s_observer.reported_room_scene_hle_fallback[layer] = true;
+        fprintf(stderr,
+                "[action-room-scene] provider fallback map=%02X/%02X "
+                "BG%u; retaining live WRAM source\n",
+                map_group, map_number, layer + 1u);
+      }
+    }
+    if (!room_scene_source &&
+        !ActionBgWorld_Update(world, &snapshot.decode)) {
       RecordProviderFallback(kActRaiserActionBgFallback_InvalidSource, layer,
                              map_group, map_number, &snapshot);
       continue;
     }
+    if (room_scene_source)
+      s_observer.diagnostics.room_scene_hle_layers++;
     if (ActionBgWorld_Serial(world) != before)
       s_observer.diagnostics.layer_activations++;
     const uint32_t serial = ActionBgWorld_Serial(world);
-    CompareRoomSceneWorld(layer, map_group, map_number, world);
+    if (!room_scene_source)
+      CompareRoomSceneWorld(layer, map_group, map_number, world);
     ActRaiserActionBgCompareResult comparison;
     if (!ActRaiserActionBg_CompareLayer(
             world, &snapshot, ppu->vram,
@@ -1234,12 +1305,20 @@ void ActRaiserActionBg_Shutdown(void) {
             s_observer.diagnostics.room_scene_registers_compared,
             s_observer.diagnostics.room_scene_register_mismatches);
   }
+  if (s_observer.room_scene_hle_enabled > 0) {
+    fprintf(stderr,
+            "[action-room-scene] provider-summary layers=%" PRIu64
+            " live-fallbacks=%" PRIu64 "\n",
+            s_observer.diagnostics.room_scene_hle_layers,
+            s_observer.diagnostics.room_scene_hle_fallbacks);
+  }
   for (unsigned layer = 0; layer < kActionBgLayerCount; layer++)
     ActionBgWorld_Destroy(s_observer.world[layer]);
   free(s_observer.room_scene);
   memset(&s_observer, 0, sizeof(s_observer));
   s_observer.enabled = -1;
   s_observer.hle_enabled = -1;
+  s_observer.room_scene_hle_enabled = -1;
   s_observer.room_scene_compare_enabled = -1;
   s_observer.room_scene_compare_verbose = -1;
   memset(s_provider, 0, sizeof(s_provider));

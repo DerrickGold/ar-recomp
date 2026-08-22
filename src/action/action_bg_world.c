@@ -41,6 +41,7 @@ typedef struct ActionBgPublicationKey {
   size_t table_start;
   uint16_t word_mask;
   uint8_t attributes;
+  bool metatile_words_big_endian;
   unsigned tile_width;
   unsigned tile_height;
 } ActionBgPublicationKey;
@@ -154,6 +155,43 @@ static bool ValidateInput(const ActionBgDecodeInput *input,
   return true;
 }
 
+static bool ValidateImmutableInput(const ActionBgImmutableInput *input,
+                                   ActionBgLayout *layout) {
+  if (!input || !layout || !input->map || !input->metatiles ||
+      !input->world_width || !input->world_height ||
+      input->world_width % kActionBgPagePixels != 0 ||
+      input->world_height % kActionBgPagePixels != 0 ||
+      input->metatile_size != kActionBgDefinitionBytes)
+    return false;
+
+  const size_t pages_wide = input->world_width / kActionBgPagePixels;
+  const size_t pages_high = input->world_height / kActionBgPagePixels;
+  if (!pages_wide || pages_high > SIZE_MAX / pages_wide) return false;
+  const size_t page_count = pages_wide * pages_high;
+  if (page_count > kActionBgMaximumPageCount ||
+      page_count > SIZE_MAX / kActionBgPageBytes ||
+      page_count > SIZE_MAX / kActionBgTilesPerPage)
+    return false;
+  const size_t map_size = page_count * kActionBgPageBytes;
+  const size_t tile_count = page_count * kActionBgTilesPerPage;
+  if (input->map_size != map_size ||
+      tile_count > kActionBgMaxExpandedTiles ||
+      map_size > SIZE_MAX - kActionBgDefinitionBytes)
+    return false;
+
+  *layout = (ActionBgLayout) {
+    .map_start = 0,
+    .map_size = map_size,
+    .table_start = map_size,
+    .source_size = map_size + kActionBgDefinitionBytes,
+    .tile_count = tile_count,
+    .pages_wide = (unsigned)pages_wide,
+    .tile_width = input->world_width / kActionBgTilePixels,
+    .tile_height = input->world_height / kActionBgTilePixels,
+  };
+  return true;
+}
+
 static ActionBgPublicationKey MakeKey(const ActionBgDecodeInput *input,
                                       const ActionBgLayout *layout) {
   return (ActionBgPublicationKey) {
@@ -162,6 +200,7 @@ static ActionBgPublicationKey MakeKey(const ActionBgDecodeInput *input,
     .table_start = layout->table_start,
     .word_mask = input->word_mask,
     .attributes = input->attributes,
+    .metatile_words_big_endian = false,
     .tile_width = layout->tile_width,
     .tile_height = layout->tile_height,
   };
@@ -171,21 +210,21 @@ static bool KeysEqual(const ActionBgPublicationKey *a,
                       const ActionBgPublicationKey *b) {
   return a->map_start == b->map_start && a->map_size == b->map_size &&
       a->table_start == b->table_start && a->word_mask == b->word_mask &&
-      a->attributes == b->attributes && a->tile_width == b->tile_width &&
+      a->attributes == b->attributes &&
+      a->metatile_words_big_endian == b->metatile_words_big_endian &&
+      a->tile_width == b->tile_width &&
       a->tile_height == b->tile_height;
 }
 
 static bool SourcesEqual(const ActionBgWorld *world,
-                         const ActionBgDecodeInput *input,
+                         const uint8_t *map, const uint8_t *definitions,
                          const ActionBgLayout *layout,
                          const ActionBgPublicationKey *key) {
   if (!world->has_publication || world->source_size != layout->source_size ||
       !KeysEqual(&world->key, key))
     return false;
-  return memcmp(world->source, input->wram + layout->map_start,
-                layout->map_size) == 0 &&
-      memcmp(world->source + layout->map_size,
-             input->wram + layout->table_start,
+  return memcmp(world->source, map, layout->map_size) == 0 &&
+      memcmp(world->source + layout->map_size, definitions,
              kActionBgDefinitionBytes) == 0;
 }
 
@@ -211,25 +250,32 @@ static bool ReserveScratch(ActionBgWorld *world,
 }
 
 static void SnapshotSources(ActionBgWorld *world,
-                            const ActionBgDecodeInput *input,
+                            const uint8_t *map,
+                            const uint8_t *definitions,
                             const ActionBgLayout *layout) {
-  memcpy(world->scratch_source, input->wram + layout->map_start,
-         layout->map_size);
-  memcpy(world->scratch_source + layout->map_size,
-         input->wram + layout->table_start, kActionBgDefinitionBytes);
+  memcpy(world->scratch_source, map, layout->map_size);
+  memcpy(world->scratch_source + layout->map_size, definitions,
+         kActionBgDefinitionBytes);
 }
 
 static uint16_t ReadWord(const uint8_t *bytes) {
   return (uint16_t)(bytes[0] | ((uint16_t)bytes[1] << 8));
 }
 
+static uint16_t ReadDefinitionWord(const uint8_t *bytes,
+                                   bool big_endian) {
+  return big_endian
+      ? (uint16_t)(((uint16_t)bytes[0] << 8) | bytes[1])
+      : ReadWord(bytes);
+}
+
 static void DecodeSnapshot(ActionBgWorld *world,
-                           const ActionBgDecodeInput *input,
+                           uint16_t word_mask, uint8_t attributes,
+                           bool metatile_words_big_endian,
                            const ActionBgLayout *layout) {
   const uint8_t *map = world->scratch_source;
   const uint8_t *definitions = map + layout->map_size;
-  const uint16_t attributes =
-      (uint16_t)((uint16_t)input->attributes << 8);
+  const uint16_t attribute_word = (uint16_t)((uint16_t)attributes << 8);
 
   for (unsigned tile_y = 0; tile_y < layout->tile_height; tile_y++) {
     const size_t page_row = (size_t)(tile_y >> 5) * layout->pages_wide;
@@ -245,7 +291,8 @@ static void DecodeSnapshot(ActionBgWorld *world,
           definitions + (size_t)id * kActionBgMetatileBytes + quadrant * 2;
       world->scratch_tiles[(size_t)tile_y * layout->tile_width + tile_x] =
           ActionBg_ComposeTilemapWord(
-              ReadWord(definition), input->word_mask, attributes);
+              ReadDefinitionWord(definition, metatile_words_big_endian),
+              word_mask, attribute_word);
     }
   }
 }
@@ -303,7 +350,9 @@ bool ActionBgWorld_Update(ActionBgWorld *world,
     return false;
   }
   const ActionBgPublicationKey key = MakeKey(input, &layout);
-  if (SourcesEqual(world, input, &layout, &key)) {
+  const uint8_t *map = input->wram + layout.map_start;
+  const uint8_t *definitions = input->wram + layout.table_start;
+  if (SourcesEqual(world, map, definitions, &layout, &key)) {
     world->valid = true;
     return true;
   }
@@ -311,8 +360,40 @@ bool ActionBgWorld_Update(ActionBgWorld *world,
     Invalidate(world);
     return false;
   }
-  SnapshotSources(world, input, &layout);
-  DecodeSnapshot(world, input, &layout);
+  SnapshotSources(world, map, definitions, &layout);
+  DecodeSnapshot(world, input->word_mask, input->attributes, false, &layout);
+  Publish(world, &layout, &key);
+  return true;
+}
+
+bool ActionBgWorld_UpdateImmutable(
+    ActionBgWorld *world, const ActionBgImmutableInput *input) {
+  ActionBgLayout layout;
+  if (!world || !ValidateImmutableInput(input, &layout)) {
+    Invalidate(world);
+    return false;
+  }
+  const ActionBgPublicationKey key = {
+    .map_start = layout.map_start,
+    .map_size = layout.map_size,
+    .table_start = layout.table_start,
+    .word_mask = input->word_mask,
+    .attributes = input->attributes,
+    .metatile_words_big_endian = input->metatile_words_big_endian,
+    .tile_width = layout.tile_width,
+    .tile_height = layout.tile_height,
+  };
+  if (SourcesEqual(world, input->map, input->metatiles, &layout, &key)) {
+    world->valid = true;
+    return true;
+  }
+  if (!ReserveScratch(world, &layout)) {
+    Invalidate(world);
+    return false;
+  }
+  SnapshotSources(world, input->map, input->metatiles, &layout);
+  DecodeSnapshot(world, input->word_mask, input->attributes,
+                 input->metatile_words_big_endian, &layout);
   Publish(world, &layout, &key);
   return true;
 }

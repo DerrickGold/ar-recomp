@@ -38,6 +38,25 @@ typedef struct ActionBgDecodeInput {
   uint8_t attributes;
 } ActionBgDecodeInput;
 
+/* Immutable equivalent of ActionBgDecodeInput for ROM/tool-authored room
+ * scenes. The map is the exact page-major byte stream and metatiles contains
+ * all 256 eight-byte definitions. This keeps the production renderer from
+ * needing to manufacture a fake WRAM address space merely to publish the
+ * already-decoded ActionRoomScene assets. */
+typedef struct ActionBgImmutableInput {
+  const uint8_t *map;
+  size_t map_size;
+  const uint8_t *metatiles;
+  size_t metatile_size;
+  uint16_t world_width;
+  uint16_t world_height;
+  uint16_t word_mask;
+  uint8_t attributes;
+  /* ActionRoomScene retains the compressed ROM's high-byte-first metatile
+   * words; live WRAM stores the same definitions low-byte first. */
+  bool metatile_words_big_endian;
+} ActionBgImmutableInput;
+
 /* Validated, read-only view of the native 256-byte BG map pages. This is the
  * one page-addressing contract shared by the full-world decoder and semantic
  * consumers such as presentation-side map-object detection. */
@@ -86,6 +105,12 @@ void ActionBgWorld_Reset(ActionBgWorld *world);
  * complete allocation is retained only so a later valid update can reuse it. */
 bool ActionBgWorld_Update(ActionBgWorld *world,
                           const ActionBgDecodeInput *input);
+
+/* Publishes the same finite-world representation from immutable map and
+ * definition slices. Validation, atomic publication, source caching, lookup,
+ * and metatile semantics are identical to ActionBgWorld_Update. */
+bool ActionBgWorld_UpdateImmutable(
+    ActionBgWorld *world, const ActionBgImmutableInput *input);
 
 ActionBgLookupResult ActionBgWorld_Lookup(const ActionBgWorld *world,
                                            int tile_x, int tile_y,

@@ -320,6 +320,16 @@ static void TestImmutableRoomSceneComparison(void) {
   CHECK(comparison.mismatches == 0);
   CHECK(comparison.first_tile_x == -1 && comparison.first_tile_y == -1);
 
+  ActionBgWorld *scene_world = ActionBgWorld_Create();
+  CHECK(scene_world != NULL);
+  CHECK(ActRaiserActionBg_UpdateWorldFromRoomScene(
+      scene_world, &scene, 1));
+  CHECK(ActRaiserActionBg_CompareRoomSceneLayer(
+      &scene, 1, scene_world, &comparison));
+  CHECK(comparison.compared == 64u * 64u);
+  CHECK(comparison.mismatches == 0);
+  ActionBgWorld_Destroy(scene_world);
+
   bg->map[0] = 1;
   CHECK(ActRaiserActionBg_CompareRoomSceneLayer(
       &scene, 1, world, &comparison));
