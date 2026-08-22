@@ -239,9 +239,18 @@ class BgHleCensusTest(unittest.TestCase):
         self.assertEqual(loader["command5"], 2)
         self.assertEqual(loader["command4"], 2)
         self.assertEqual(loader["bytes"], 8192)
+        graphics_log = (
+            "[action-room-gfx-hle] summary command7=4 command6=3 "
+            "bytes=33152\n")
+        graphics = matrix.parse_room_graphics_hle_summary(graphics_log)
+        self.assertEqual(graphics["command7"], 4)
+        self.assertEqual(graphics["command6"], 3)
+        self.assertEqual(graphics["bytes"], 33152)
 
         default_args = matrix.parse_args([])
         self.assertEqual(default_args.provider_mode, "default")
+        self.assertEqual(default_args.room_graphics_mode, "default")
+        self.assertTrue(matrix.room_graphics_setting_enabled(default_args))
         self.assertTrue(matrix.provider_setting_enabled(default_args))
         self.assertTrue(matrix.provider_binding_expected(default_args))
         off_args = matrix.parse_args(["--disable-provider"])
@@ -252,6 +261,10 @@ class BgHleCensusTest(unittest.TestCase):
         self.assertEqual(on_args.provider_mode, "enabled")
         self.assertTrue(matrix.provider_setting_enabled(on_args))
         self.assertTrue(matrix.provider_binding_expected(on_args))
+        graphics_off_args = matrix.parse_args([
+            "--disable-room-graphics-hle"])
+        self.assertFalse(matrix.room_graphics_setting_enabled(
+            graphics_off_args))
 
         raw_args = matrix.parse_args(["--display-mode", "raw"])
         self.assertTrue(matrix.provider_setting_enabled(raw_args))

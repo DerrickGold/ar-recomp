@@ -34,6 +34,9 @@ Inputs and output contract:
 - the current runner requires the default guarded command-4/5 CPU HLE to report
   nonzero command and byte counts; `AR_ACTION_ROOM_LOAD_HLE=0` remains the
   separate exact native control;
+- it also requires nonzero guarded command-7/6 CHR/CGRAM HLE counts by
+  default; `--disable-room-graphics-hle` sets
+  `AR_ACTION_ROOM_GFX_HLE=0` for the same-binary native control;
 - two full WRAM/VRAM/CGRAM/OAM/PPU snapshots per target;
 - one authentic 256x224 flat framebuffer per target;
 - machine-readable local manifest:
@@ -122,9 +125,38 @@ Manifest `runs/action-room-load-hle-matrix-20260822-v2.json` records:
   hash identical to the native-handler checkpoint
   `runs/action-room-stage-matrix-20260822-v3.json`.
 
-The enclosing `$02:B1F7` interpreter and commands 7, 6, 3, 2, 1, and 0 remain
-native. This checkpoint HLEs background staging, not complete level/gameplay
+The enclosing `$02:B1F7` interpreter and commands 3, 2, 1, and 0 remain native.
+This checkpoint HLEs background staging, not complete level/gameplay
 initialization.
+
+## Guarded command-7/6 CPU handoff — 2026-08-22
+
+The `$02:B28E` guard admits the audited compressed action uploads only: 8 KiB
+character/OBJ banks plus the 4 KiB dialog font, known VRAM destinations, DB=0,
+native mode, 8-bit A/16-bit X/Y, and a source header equal to the requested
+copy size. The HLE preserves `$7E:6000` decompression workspace and scratch,
+then writes the same `$2116/$2118` ports. `$02:B330` admits the three audited
+128-byte action palette destinations and streams the same `$2121/$2122` ports.
+Title/SIM raw shapes, wrong CPU modes, unknown operands, and explicit
+`AR_ACTION_ROOM_GFX_HLE=0` all execute the generated native bodies.
+
+The same-binary manifests
+`runs/action-room-gfx-native-control-matrix-20260822-v1.json` and
+`runs/action-room-gfx-hle-matrix-20260822-v1.json` record:
+
+- the full 49-room static script census contains 89 command-7 and 87 command-6
+  invocations; all reduce to the five and three admitted operand shapes,
+  respectively, and every compressed character header equals its copy size;
+- 12/12 targets passed in both arms;
+- 39 command-7 and 36 command-6 HLE invocations staged 320,000 bytes;
+- the independent command-4/5 oracle still compared 24 layers and 166,496
+  bytes with zero mismatch;
+- all 204 complete artifacts are byte-exact, including final framebuffers and
+  WRAM/SRAM plus both VRAM/CGRAM/OAM/PPU snapshots per target.
+
+Commands 3, 2, 1, and 0 remain native. The graphics redirect advances the
+presentation data plane but does not replace video-profile setup, gameplay,
+audio, actor/object loading, callbacks, or transitions.
 
 ## What this does not prove
 

@@ -314,7 +314,7 @@ live interval and whether each requested axis fit.
 
 | VRAM words | Contents | Writer |
 |---|---|---|
-| `$0000-$1FFF` | BG1+BG2 chars (BG12NBA=$00); Sky Palace capture is byte-identical to the `$4000`-byte ROM bank at `$0D:C000` (file `$06C000`) | `$02:B28E`+`$02:B475` decompressor pair (force-blank port loops) |
+| `$0000-$1FFF` | BG1+BG2 chars (BG12NBA=$00); Sky Palace capture is byte-identical to the `$4000`-byte ROM bank at `$0D:C000` (file `$06C000`) | `$02:B28E` (`ActRaiser_LoadActionCharacters` for guarded action shapes) + `$02:C5C9` decompressor pair |
 | `$2000-$2FFF` | common action OBJ atlas (OBSEL=$01, 8x8/16x16) | `$02:BC9E`: 4096 words from ROM `$07:8000-$07:9FFF` |
 | `$2D40-$2DBF` | reserved OBJ magic/effect overlays inside the common atlas | `$02:BC9E` writes 128 words to `$2D40`; `$00:96C3-$96F5` can arm 128-byte slot-0 upload to `$2D80` |
 | `$3000-$3FFF` | OBJ address space reachable through OBSEL name selection; resident contents/consumers not yet catalogued | `?` |
@@ -1367,9 +1367,9 @@ the source control changes only the input under test without removing the
 oracle.
 
 This is not a whole `$02:B1F7` replacement. Its command dispatcher remains
-active and owns CHR/CGRAM uploads, the native ring, level/gameplay data, actor
-startup, callbacks, audio and transitions. Only its action-room command-5
-metatile and command-4 map staging handlers are now guarded CPU HLEs; rejected
+active and owns the native ring, level/gameplay data, actor startup, callbacks,
+audio and transitions. Its action-room command-7/6 CHR/CGRAM handlers and
+command-5/4 background handlers are guarded CPU HLEs; rejected
 non-action/raw/BG3/unexpected shapes execute the decoded native handler body.
 A missing scene, dimension drift or publication failure falls back to live
 WRAM and is counted in the shutdown provider summary. Promotion followed an
@@ -1398,7 +1398,12 @@ live `$02:B363/$02:B3EB` result. The native checkpoint manifest
 24 command-4 HLEs, produces 166,400 asset bytes, and remains exact across the
 same 166,496-byte oracle, native ring, framebuffer, map, definition, dimension,
 and provider hashes. `AR_ACTION_ROOM_LOAD_HLE=0` restores the native handlers.
-CHR/CGRAM and command-3 profile setup remain native.
+The same-binary graphics A/B manifests
+`runs/action-room-gfx-native-control-matrix-20260822-v1.json` and
+`runs/action-room-gfx-hle-matrix-20260822-v1.json` execute 39 command-7 and 36
+command-6 HLEs (320,000 bytes) and match all 204 complete artifacts exactly.
+`AR_ACTION_ROOM_GFX_HLE=0` restores the native graphics handlers. Command-3
+profile setup remains native.
 
 `ActRaiser_FullSnapshot` also writes `.ppu.json` beside WRAM/VRAM/CGRAM/OAM.
 This pins the BGSC geometry, character bases, enables, scroll, window and color
