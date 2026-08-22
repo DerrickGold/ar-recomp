@@ -4,11 +4,10 @@
 The runner starts from the deterministic replay's transition-capable world-map
 window, stages each verified raw warp target, captures two stable game frames,
 enables the read-only runtime comparator, and validates the resulting snapshots
-with ``bg_hle_census.py``. The BH7 default arm omits `AR_ACTION_BG_HLE` and
-expects the provider. Pass ``--disable-provider`` for the explicit native A/B;
-``--enable-provider`` remains as a compatibility spelling for explicit-on.
-Pass ``--enable-room-scene-hle`` to source the provider from the cumulative
-immutable ROM scene and require a zero-fallback room-scene summary.
+with ``bg_hle_census.py``. The default arm expects both the finite provider and
+its cumulative immutable-ROM room-scene source. Pass ``--disable-provider``
+for the native renderer A/B or ``--disable-room-scene-hle`` for the staged-WRAM
+provider-source control. The explicit enable spellings remain compatible.
 
     python3 tools/bg_hle_matrix.py
     python3 tools/bg_hle_matrix.py --targets 0201,0202 --fail-fast
@@ -264,6 +263,14 @@ def provider_binding_expected(args):
     return provider_setting_enabled(args) and args.display_mode != "raw"
 
 
+def room_scene_setting_enabled(args):
+    return args.room_scene_mode != "disabled"
+
+
+def room_scene_binding_expected(args):
+    return provider_binding_expected(args) and room_scene_setting_enabled(args)
+
+
 def parse_vertical_extend(value):
     try:
         extend = int(value, 0)
@@ -316,8 +323,10 @@ def run_target(args, target, rom_hash):
             environment["AR_ACTION_BG_HLE"] = "1"
         elif args.provider_mode == "disabled":
             environment["AR_ACTION_BG_HLE"] = "0"
-        if args.room_scene_hle:
+        if args.room_scene_mode == "enabled":
             environment["AR_ACTION_ROOM_SCENE_HLE"] = "1"
+        elif args.room_scene_mode == "disabled":
+            environment["AR_ACTION_ROOM_SCENE_HLE"] = "0"
         command = [args.binary, args.rom, "--config", args.config]
         completed = subprocess.run(
             command, cwd=args.cwd, env=environment, stdout=subprocess.PIPE,
@@ -336,7 +345,7 @@ def run_target(args, target, rom_hash):
     try:
         return inspect_run(
             target, run_directory, log, rom_hash, len(args.capture_frames),
-            provider_binding_expected(args), args.room_scene_hle)
+            provider_binding_expected(args), room_scene_binding_expected(args))
     except MatrixError as error:
         if error.run_directory is None:
             error.run_directory = run_directory
@@ -362,7 +371,8 @@ def write_manifest(path, args, rom_hash, results):
         "provider_enabled": provider_setting_enabled(args),
         "provider_binding_expected": provider_binding_expected(args),
         "provider_setting": args.provider_mode,
-        "room_scene_hle": args.room_scene_hle,
+        "room_scene_hle": room_scene_setting_enabled(args),
+        "room_scene_hle_setting": args.room_scene_mode,
         "results": results,
     }
     with open(path, "w", encoding="utf-8") as output:
@@ -406,10 +416,15 @@ def parse_args(argv):
     parser.add_argument("--manifest",
                         help="output JSON (default: runs/bg-hle-matrix-<time>.json)")
     parser.add_argument("--fail-fast", action="store_true")
-    parser.add_argument(
-        "--enable-room-scene-hle", dest="room_scene_hle",
-        action="store_true",
-        help="source finite worlds from ActionRoomScene and require no fallback")
+    room_scene = parser.add_mutually_exclusive_group()
+    room_scene.add_argument(
+        "--enable-room-scene-hle", dest="room_scene_mode",
+        action="store_const", const="enabled",
+        help="explicitly select the default immutable room-scene source")
+    room_scene.add_argument(
+        "--disable-room-scene-hle", dest="room_scene_mode",
+        action="store_const", const="disabled",
+        help="use the staged-WRAM provider-source control")
     provider = parser.add_mutually_exclusive_group()
     provider.add_argument(
         "--enable-provider", dest="provider_mode", action="store_const",
@@ -419,7 +434,7 @@ def parse_args(argv):
         "--disable-provider", dest="provider_mode", action="store_const",
         const="disabled",
         help="disable the provider for the native BH7 A/B")
-    parser.set_defaults(provider_mode="default")
+    parser.set_defaults(provider_mode="default", room_scene_mode="default")
     return parser.parse_args(argv)
 
 

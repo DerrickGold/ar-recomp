@@ -1354,28 +1354,36 @@ also matches all 14 ordinary-compositor artifacts. Debug/release builds and all
 41 tests pass. See `docs/bg-hle-census.md` BH7 for manifests, counters, and the
 remaining historical natural-transition evidence gaps.
 
-The action-room scene authority now has a separate first-stage production
-gate. `AR_ACTION_ROOM_SCENE_HLE=1` makes the finite provider publish from the
-cumulative immutable ROM scene instead of snapshotting the already-staged WRAM
-map and definition table. Both paths use the same `ActionBgWorld` atomic
+The action-room scene authority is the accepted first-stage production source.
+The finite provider publishes from the cumulative immutable ROM scene by
+default; `AR_ACTION_ROOM_SCENE_HLE=0` snapshots the already-staged WRAM map and
+definition table as the exact source control. Both paths use the same
+`ActionBgWorld` atomic
 publication, metatile classifier, virtual-band lookup, and PPU binding. The
 scene adapter explicitly consumes the compressed asset's high-byte-first
 metatile words; the ordinary WRAM decoder retains its low-byte-first contract.
 The live native ring still preflights every authentic tile before ownership, so
-this gate changes the source under test without removing the oracle.
+the source control changes only the input under test without removing the
+oracle.
 
 This is not yet a whole `$02:B1F7` replacement. The recompiled asset VM remains
 active and owns CHR/CGRAM uploads, the native ring, level/gameplay data, actor
 startup, callbacks, audio and transitions. A missing scene, dimension drift or
 publication failure falls back to live WRAM and is counted in the shutdown
-provider summary. The gate stays default-off until natural room-transition
-matrices show zero unexpected fallbacks, finite exits and authentic mismatch.
-The initial 12-target ordinary-entry A/B is exact: immutable-source manifest
+provider summary. Promotion followed an exact 12-target ordinary-entry A/B:
+immutable-source manifest
 `runs/bg-hle-matrix-20260822-133346.json` reports 19,522 sourced/bound
 layer-frames, zero live fallback, and 18,216,295 zero-mismatch/zero-outside
 preflight tiles. Its live-WRAM control
 `runs/bg-hle-matrix-20260822-133427.json` matches all 204 captured artifacts
-byte-for-byte.
+byte-for-byte. Natural run `runs/20260822-134834/` then covered 6,227 action
+frames and four Fillmore room loads with zero live fallback, finite exit, tile
+mismatch, or raster-register mismatch. Post-fix combined-gate run
+`runs/20260822-140544/` proves the provider and diagnostic caches remain
+isolated and stable through scanout. Finally,
+`runs/room-scene-default-matrix-20260822.json` repeats all 12 targets with the
+environment variable absent: all 19,522 provider layers use the room scene,
+with zero fallback and the same 18,216,295 exact preflight tiles.
 
 `ActRaiser_FullSnapshot` also writes `.ppu.json` beside WRAM/VRAM/CGRAM/OAM.
 This pins the BGSC geometry, character bases, enables, scroll, window and color
