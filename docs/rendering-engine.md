@@ -1402,8 +1402,12 @@ The same-binary graphics A/B manifests
 `runs/action-room-gfx-native-control-matrix-20260822-v1.json` and
 `runs/action-room-gfx-hle-matrix-20260822-v1.json` execute 39 command-7 and 36
 command-6 HLEs (320,000 bytes) and match all 204 complete artifacts exactly.
-`AR_ACTION_ROOM_GFX_HLE=0` restores the native graphics handlers. Command-3
-profile setup remains native.
+`AR_ACTION_ROOM_GFX_HLE=0` restores the native graphics handlers. The
+same-binary video-profile manifests
+`runs/action-room-video-native-control-matrix-20260822-v1.json` and
+`runs/action-room-video-hle-matrix-20260822-v1.json` execute 12 command-3 HLEs
+(336 record bytes) and likewise match all 204 complete artifacts exactly.
+`AR_ACTION_ROOM_VIDEO_HLE=0` restores the native profile handler.
 
 `ActRaiser_FullSnapshot` also writes `.ppu.json` beside WRAM/VRAM/CGRAM/OAM.
 This pins the BGSC geometry, character bases, enables, scroll, window and color

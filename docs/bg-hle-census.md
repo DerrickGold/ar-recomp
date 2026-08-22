@@ -125,7 +125,8 @@ Manifest `runs/action-room-load-hle-matrix-20260822-v2.json` records:
   hash identical to the native-handler checkpoint
   `runs/action-room-stage-matrix-20260822-v3.json`.
 
-The enclosing `$02:B1F7` interpreter and commands 3, 2, 1, and 0 remain native.
+The enclosing `$02:B1F7` interpreter and commands 3, 2, 1, and 0 remain native
+at this checkpoint.
 This checkpoint HLEs background staging, not complete level/gameplay
 initialization.
 
@@ -154,9 +155,32 @@ The same-binary manifests
 - all 204 complete artifacts are byte-exact, including final framebuffers and
   WRAM/SRAM plus both VRAM/CGRAM/OAM/PPU snapshots per target.
 
-Commands 3, 2, 1, and 0 remain native. The graphics redirect advances the
-presentation data plane but does not replace video-profile setup, gameplay,
-audio, actor/object loading, callbacks, or transitions.
+## Guarded command-3 video-profile handoff — 2026-08-22
+
+The `$02:B4E8` guard admits native-mode D/DB=0 action calls whose one-byte
+operand names an audited stock action profile (`$03-$2E`, excluding `$08`).
+The HLE applies the same 28-byte `$02:893E` record to BG mode/screens,
+main/subscreen and window masks, colour math, common priority attributes,
+parallax ratios, fade/page state, character animation, timer and `$F2`.
+Non-action calls, wrong CPU modes, unknown profiles, and explicit
+`AR_ACTION_ROOM_VIDEO_HLE=0` execute the generated native body.
+
+The same-binary manifests
+`runs/action-room-video-native-control-matrix-20260822-v1.json` and
+`runs/action-room-video-hle-matrix-20260822-v1.json` record:
+
+- the static 49-room action script census contains 49 command-3 invocations
+  and 44 distinct admitted profile IDs;
+- 12/12 ordinary-entry targets passed in both arms;
+- the HLE arm applied 12 profiles / 336 record bytes;
+- the independent command-4/5 oracle, finite provider, room-scene source and
+  renderer comparator retained zero mismatch/fallback;
+- all 204 complete artifacts are byte-exact, including final framebuffers and
+  WRAM/SRAM plus both VRAM/CGRAM/OAM/PPU snapshots per target.
+
+Commands 2/1/0, gameplay staging, actors, callbacks and the enclosing command
+VM remain native. This is presentation bootstrap HLE, not complete gameplay
+HLE.
 
 ## What this does not prove
 
