@@ -47,6 +47,22 @@ typedef struct ActRaiserActionRoomSceneCompareResult {
   uint16_t first_live;
 } ActRaiserActionRoomSceneCompareResult;
 
+typedef enum ActRaiserActionRoomStageField {
+  kActRaiserActionRoomStageField_Dimensions = 0,
+  kActRaiserActionRoomStageField_Map,
+  kActRaiserActionRoomStageField_MetatileDefinitions,
+  kActRaiserActionRoomStageField_Count,
+} ActRaiserActionRoomStageField;
+
+typedef struct ActRaiserActionRoomStageCompareResult {
+  size_t compared;
+  size_t mismatches;
+  size_t first_offset;
+  ActRaiserActionRoomStageField first_field;
+  uint8_t first_immutable;
+  uint8_t first_live;
+} ActRaiserActionRoomStageCompareResult;
+
 typedef enum ActRaiserActionRoomSceneFrameField {
   kActRaiserActionRoomSceneFrameField_Bg1HScroll = 0,
   kActRaiserActionRoomSceneFrameField_Bg1VScroll,
@@ -108,6 +124,9 @@ typedef struct ActRaiserActionBgDiagnostics {
   uint64_t room_scene_layers_compared;
   uint64_t room_scene_tiles_compared;
   uint64_t room_scene_mismatches;
+  uint64_t room_scene_stage_layers_compared;
+  uint64_t room_scene_stage_bytes_compared;
+  uint64_t room_scene_stage_mismatches;
   uint64_t room_scene_frames_built;
   uint64_t room_scene_raster_hold_frames;
   uint64_t room_scene_scanlines_compared;
@@ -164,11 +183,12 @@ bool ActRaiserActionBg_ApplyPlanExtents(
  * environment decision here prevents related HLE seams from drifting. */
 bool ActRaiserActionBg_HleEnabled(void);
 
-/* Registers immutable cart bytes for the default-off room-scene shadow
- * comparator. AR_ACTION_ROOM_SCENE_COMPARE=1 compares each newly published
- * WRAM world with the shared arbitrary-room loader. Its live publication cache
- * is host-isolated from the production provider, so it never changes provider
- * ownership, PPU state, or gameplay. The ROM storage remains caller-owned. */
+/* Registers immutable cart bytes for the default-off room-scene shadows.
+ * AR_ACTION_ROOM_SCENE_COMPARE=1 compares expanded worlds plus frame state;
+ * AR_ACTION_ROOM_STAGE_COMPARE=1 independently compares exact command-4/5
+ * WRAM outputs. Their live publication cache is host-isolated from the
+ * production provider, so neither changes provider ownership, PPU state, or
+ * gameplay. The ROM storage remains caller-owned. */
 bool ActRaiserActionBg_InitRoomScenes(const uint8_t *rom, size_t rom_size);
 
 /* Pure full-world comparator used by the game-side shadow observer and ROM-free
@@ -177,6 +197,19 @@ bool ActRaiserActionBg_CompareRoomSceneLayer(
     const struct ActionRoomScene *scene, uint8_t bg_layer,
     const ActionBgWorld *world,
     ActRaiserActionRoomSceneCompareResult *result);
+
+/* Exact command-4/5 background asset image. Stage writes only the active map
+ * bytes, its two pixel dimensions, and the selected 2 KiB definition table;
+ * bytes outside those native destinations are preserved. This is the pure
+ * core for the future loader HLE and is not invoked on game state yet.
+ * Compare is its read-only differential oracle against native staging. */
+bool ActRaiserActionBg_StageRoomSceneLayer(
+    uint8_t *wram, size_t wram_size,
+    const struct ActionRoomScene *scene, uint8_t bg_layer);
+bool ActRaiserActionBg_CompareRoomSceneStage(
+    const struct ActionRoomScene *scene, uint8_t bg_layer,
+    const uint8_t *wram, size_t wram_size,
+    ActRaiserActionRoomStageCompareResult *result);
 
 /* Publish one immutable room-scene background through the production finite
  * world representation. This is the pure adapter used by the default

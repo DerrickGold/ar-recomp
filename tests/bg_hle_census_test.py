@@ -225,6 +225,14 @@ class BgHleCensusTest(unittest.TestCase):
         with self.assertRaises(matrix.MatrixError):
             matrix.validate_provider_summary(provider, False)
 
+        room_log = (
+            "[action-room-stage] summary layers=2 bytes=8200 "
+            "mismatches=0\n")
+        room = matrix.parse_room_stage_comparator_summary(room_log)
+        self.assertEqual(room["layers"], 2)
+        self.assertEqual(room["bytes"], 8200)
+        self.assertEqual(room["mismatches"], 0)
+
         default_args = matrix.parse_args([])
         self.assertEqual(default_args.provider_mode, "default")
         self.assertTrue(matrix.provider_setting_enabled(default_args))

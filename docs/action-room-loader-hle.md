@@ -73,6 +73,13 @@ The stable two-background scene milestone is implemented:
   before each visible line, preserving HDMA timing in the oracle. It reports
   the first mismatch and never changes gameplay, provider eligibility, or PPU
   state.
+- `ActRaiserActionBg_StageRoomSceneLayer` now materializes the exact native
+  command-4/5 output image: BG1/BG2 pixel dimensions, only the active
+  page-major map bytes at `$7E:8000/$C000`, and the byte-swapped 2 KiB
+  metatile table at `$7E:2100/$2900`. It deliberately preserves every byte
+  outside those ranges. `AR_ACTION_ROOM_STAGE_COMPARE=1` is an independent,
+  read-only live oracle for that image, so staging acceptance does not also
+  opt into the broader transient frame/raster comparator.
 - The live comparator and production provider own separate `ActionBgWorld`
   caches. This is required when the room-scene source and both compare gates
   are enabled together: the observer runs after provider binding but
@@ -121,8 +128,11 @@ where the renderer obtains complete finite BG tile words; it does not skip the
 ROM asset VM or write host-decoded assets into emulated WRAM/VRAM. That retains
 the original loader as both gameplay bootstrap and visual oracle while the
 immutable source is exercised in normal scanout. The next seam can now HLE the
-background-only asset staging commands
-without absorbing level objects, actor initialization, audio, or gameplay.
+background-only asset staging commands without absorbing level objects, actor
+initialization, audio, or gameplay. The data transform for that seam is now
+implemented and accepted; only the command-VM/CPU handoff remains before it can
+replace `$02:B363/$02:B3EB`. CHR and CGRAM must continue through their native
+commands until separate exact VRAM/CGRAM staging contracts exist.
 
 ## Scope and parity boundary
 
@@ -524,5 +534,12 @@ Targets are VRAM word addresses and strides are bytes.
   `runs/room-scene-default-20260822.json` and
   `runs/room-scene-live-control-20260822.json` is byte-identical at both
   framebuffer and captured WRAM/VRAM/CGRAM/OAM artifacts.
+- Exact command-4/5 staging matrix
+  `runs/action-room-stage-matrix-20260822-v3.json`: all 12 ordinary-entry
+  targets pass; all 24 loaded layers compare 166,496 dimension/map/metatile bytes
+  with zero mismatch. The same runs retain 19,315,975 exact native-ring words,
+  zero finite exits, and zero immutable-provider fallback. The staging oracle
+  runs before PPU layer-enable/provider checks, so dormant BG2 assets in
+  `0201`, `0303`, `0401`, `0504`, `0601`, and `0605` are covered too.
 - Static consumer census: all generated `$02:B4E8` variants write `$F2`; no
   registered/recompiled function reads it.

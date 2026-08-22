@@ -26,6 +26,7 @@ typedef struct ActRaiserActionBgObserver {
   uint32_t comparison_reported_mismatch_serial[kActionBgLayerCount];
   uint32_t comparison_reported_outside_serial[kActionBgLayerCount];
   uint32_t room_scene_compared_serial[kActionBgLayerCount];
+  bool room_scene_stage_compared[kActionBgLayerCount];
   const uint8_t *rom;
   size_t rom_size;
   ActionRoomScene *room_scene;
@@ -55,6 +56,7 @@ typedef struct ActRaiserActionBgObserver {
   int hle_enabled;
   int room_scene_hle_enabled;
   int room_scene_compare_enabled;
+  int room_scene_stage_compare_enabled;
   int room_scene_compare_verbose;
   unsigned room_scene_verbose_reports;
 } ActRaiserActionBgObserver;
@@ -71,6 +73,7 @@ static ActRaiserActionBgObserver s_observer = {
   .hle_enabled = -1,
   .room_scene_hle_enabled = -1,
   .room_scene_compare_enabled = -1,
+  .room_scene_stage_compare_enabled = -1,
   .room_scene_compare_verbose = -1,
 };
 static ActRaiserActionBgProvider s_provider[kActionBgLayerCount];
@@ -82,6 +85,122 @@ _Static_assert(kActRaiserBgLayerStateStride == 4,
 
 static uint16_t ReadWram16(const uint8_t *wram, size_t address) {
   return (uint16_t)(wram[address] | ((uint16_t)wram[address + 1] << 8));
+}
+
+static void WriteWram16(uint8_t *wram, size_t address, uint16_t value) {
+  wram[address] = (uint8_t)value;
+  wram[address + 1] = (uint8_t)(value >> 8);
+}
+
+static bool RoomSceneStageLayout(
+    const ActionRoomScene *scene, uint8_t bg_layer,
+    const ActionRoomSceneBg **bg, size_t *dimension_address,
+    size_t *map_address, size_t *definitions_address) {
+  if (!scene || bg_layer < 1 || bg_layer > kActionRoomSceneBgCount ||
+      !ActionRoomScene_HasBackground(scene, bg_layer))
+    return false;
+  const ActionRoomSceneBg *layer = &scene->bg[bg_layer - 1u];
+  const size_t layer_offset = (size_t)(bg_layer - 1u) *
+      kActRaiserBgLayerStateStride;
+  if (layer->map_size > 0x4000u ||
+      (unsigned)layer->pages_wide * 256u > UINT16_MAX ||
+      (unsigned)layer->pages_high * 256u > UINT16_MAX)
+    return false;
+  if (bg) *bg = layer;
+  if (dimension_address)
+    *dimension_address = kActRaiserWram_Bg1Width + layer_offset;
+  if (map_address)
+    *map_address = bg_layer == 1
+        ? kActRaiserWram_Bg1Map : kActRaiserWram_Bg2Map;
+  if (definitions_address)
+    *definitions_address = bg_layer == 1
+        ? kActRaiserWram_Bg1MetatileDefinitions
+        : kActRaiserWram_Bg2MetatileDefinitions;
+  return true;
+}
+
+bool ActRaiserActionBg_StageRoomSceneLayer(
+    uint8_t *wram, size_t wram_size,
+    const ActionRoomScene *scene, uint8_t bg_layer) {
+  const ActionRoomSceneBg *bg = NULL;
+  size_t dimension_address = 0, map_address = 0, definitions_address = 0;
+  if (!wram ||
+      !RoomSceneStageLayout(scene, bg_layer, &bg, &dimension_address,
+                            &map_address, &definitions_address) ||
+      dimension_address > wram_size || 4u > wram_size - dimension_address ||
+      map_address > wram_size || bg->map_size > wram_size - map_address ||
+      definitions_address > wram_size ||
+      kActionRoomSceneMetatileBytes > wram_size - definitions_address)
+    return false;
+
+  WriteWram16(wram, dimension_address,
+              (uint16_t)((unsigned)bg->pages_wide * 256u));
+  WriteWram16(wram, dimension_address + 2u,
+              (uint16_t)((unsigned)bg->pages_high * 256u));
+  memcpy(wram + map_address, bg->map, bg->map_size);
+  for (size_t offset = 0; offset < kActionRoomSceneMetatileBytes;
+       offset += 2u) {
+    wram[definitions_address + offset] = bg->metatiles[offset + 1u];
+    wram[definitions_address + offset + 1u] = bg->metatiles[offset];
+  }
+  return true;
+}
+
+static void CompareRoomStageByte(
+    ActRaiserActionRoomStageCompareResult *result,
+    ActRaiserActionRoomStageField field, size_t offset,
+    uint8_t immutable, uint8_t live) {
+  result->compared++;
+  if (immutable == live) return;
+  if (!result->mismatches) {
+    result->first_field = field;
+    result->first_offset = offset;
+    result->first_immutable = immutable;
+    result->first_live = live;
+  }
+  result->mismatches++;
+}
+
+bool ActRaiserActionBg_CompareRoomSceneStage(
+    const ActionRoomScene *scene, uint8_t bg_layer,
+    const uint8_t *wram, size_t wram_size,
+    ActRaiserActionRoomStageCompareResult *result) {
+  if (result) {
+    memset(result, 0, sizeof(*result));
+    result->first_field = kActRaiserActionRoomStageField_Count;
+  }
+  const ActionRoomSceneBg *bg = NULL;
+  size_t dimension_address = 0, map_address = 0, definitions_address = 0;
+  if (!result || !wram ||
+      !RoomSceneStageLayout(scene, bg_layer, &bg, &dimension_address,
+                            &map_address, &definitions_address) ||
+      dimension_address > wram_size || 4u > wram_size - dimension_address ||
+      map_address > wram_size || bg->map_size > wram_size - map_address ||
+      definitions_address > wram_size ||
+      kActionRoomSceneMetatileBytes > wram_size - definitions_address)
+    return false;
+
+  const uint16_t width = (uint16_t)((unsigned)bg->pages_wide * 256u);
+  const uint16_t height = (uint16_t)((unsigned)bg->pages_high * 256u);
+  const uint8_t dimensions[4] = {
+    (uint8_t)width, (uint8_t)(width >> 8),
+    (uint8_t)height, (uint8_t)(height >> 8),
+  };
+  for (size_t offset = 0; offset < sizeof(dimensions); offset++)
+    CompareRoomStageByte(result, kActRaiserActionRoomStageField_Dimensions,
+                         offset, dimensions[offset],
+                         wram[dimension_address + offset]);
+  for (size_t offset = 0; offset < bg->map_size; offset++)
+    CompareRoomStageByte(result, kActRaiserActionRoomStageField_Map,
+                         offset, bg->map[offset], wram[map_address + offset]);
+  for (size_t offset = 0; offset < kActionRoomSceneMetatileBytes;
+       offset++) {
+    const uint8_t immutable = bg->metatiles[offset ^ 1u];
+    CompareRoomStageByte(
+        result, kActRaiserActionRoomStageField_MetatileDefinitions,
+        offset, immutable, wram[definitions_address + offset]);
+  }
+  return true;
 }
 
 void ActRaiserActionBg_ResolveVerticalMargins(
@@ -388,6 +507,18 @@ static bool RoomSceneCompareEnabled(void) {
   return s_observer.room_scene_compare_enabled != 0;
 }
 
+static bool RoomSceneStageCompareEnabled(void) {
+  if (s_observer.room_scene_stage_compare_enabled < 0) {
+    const char *value = getenv("AR_ACTION_ROOM_STAGE_COMPARE");
+    s_observer.room_scene_stage_compare_enabled =
+        value && value[0] && value[0] != '0';
+    if (s_observer.room_scene_stage_compare_enabled)
+      fprintf(stderr,
+              "[action-room-stage] native WRAM comparison enabled\n");
+  }
+  return s_observer.room_scene_stage_compare_enabled != 0;
+}
+
 static bool RoomSceneHleEnabled(void) {
   if (s_observer.room_scene_hle_enabled < 0) {
     const char *value = getenv("AR_ACTION_ROOM_SCENE_HLE");
@@ -428,6 +559,8 @@ bool ActRaiserActionBg_InitRoomScenes(const uint8_t *rom, size_t rom_size) {
   s_observer.room_scene_verbose_reports = 0;
   memset(s_observer.room_scene_compared_serial, 0,
          sizeof(s_observer.room_scene_compared_serial));
+  memset(s_observer.room_scene_stage_compared, 0,
+         sizeof(s_observer.room_scene_stage_compared));
   if (!rom || !rom_size) return false;
   if (!s_observer.room_scene)
     s_observer.room_scene = calloc(1, sizeof(*s_observer.room_scene));
@@ -443,6 +576,7 @@ static void ResetWorlds(void) {
     s_observer.comparison_reported_mismatch_serial[layer] = 0;
     s_observer.comparison_reported_outside_serial[layer] = 0;
     s_observer.room_scene_compared_serial[layer] = 0;
+    s_observer.room_scene_stage_compared[layer] = false;
   }
   s_observer.room_scene_valid = false;
   s_observer.room_scene_attempted = false;
@@ -679,6 +813,53 @@ bool ActRaiserActionBg_CompareRoomSceneFrameLine(
   }
   *result = built;
   return true;
+}
+
+static void CompareRoomSceneStageOnce(
+    const uint8_t *wram, size_t wram_size, unsigned layer,
+    uint8_t map_group, uint8_t map_number) {
+  if (!RoomSceneStageCompareEnabled() ||
+      layer >= kActionBgLayerCount ||
+      s_observer.room_scene_stage_compared[layer] ||
+      !EnsureRoomScene(map_group, map_number))
+    return;
+  const uint8_t bg_layer = (uint8_t)(layer + 1u);
+  if (!ActionRoomScene_HasBackground(s_observer.room_scene, bg_layer))
+    return;
+  s_observer.room_scene_stage_compared[layer] = true;
+
+  ActRaiserActionRoomStageCompareResult stage;
+  if (ActRaiserActionBg_CompareRoomSceneStage(
+          s_observer.room_scene, bg_layer, wram, wram_size, &stage)) {
+    static const char *const kStageFields[
+        kActRaiserActionRoomStageField_Count] = {
+      [kActRaiserActionRoomStageField_Dimensions] = "dimensions",
+      [kActRaiserActionRoomStageField_Map] = "map",
+      [kActRaiserActionRoomStageField_MetatileDefinitions] = "metatiles",
+    };
+    s_observer.diagnostics.room_scene_stage_layers_compared++;
+    s_observer.diagnostics.room_scene_stage_bytes_compared += stage.compared;
+    s_observer.diagnostics.room_scene_stage_mismatches += stage.mismatches;
+    if (stage.mismatches) {
+      const char *field = stage.first_field <
+              kActRaiserActionRoomStageField_Count
+          ? kStageFields[stage.first_field] : "unknown";
+      fprintf(stderr,
+              "[action-room-stage] MISMATCH map=%02X/%02X BG%u "
+              "count=%zu/%zu first=%s+$%zX immutable=$%02X live=$%02X\n",
+              map_group, map_number, bg_layer, stage.mismatches,
+              stage.compared, field, stage.first_offset,
+              stage.first_immutable, stage.first_live);
+    } else {
+      fprintf(stderr,
+              "[action-room-stage] match map=%02X/%02X BG%u bytes=%zu\n",
+              map_group, map_number, bg_layer, stage.compared);
+    }
+  } else {
+    fprintf(stderr,
+            "[action-room-stage] comparison failed map=%02X/%02X BG%u\n",
+            map_group, map_number, bg_layer);
+  }
 }
 
 static void CompareRoomSceneWorld(unsigned layer, uint8_t map_group,
@@ -1213,28 +1394,37 @@ static void ObserveLayer(const uint8_t *wram, size_t wram_size,
 
 void ActRaiserActionBg_ObserveFrame(const uint8_t *wram, size_t wram_size,
                                     const struct Ppu *ppu) {
-  if (!CompareEnabled() || !wram || !ppu ||
+  const bool compare_world = CompareEnabled();
+  const bool compare_stage = RoomSceneStageCompareEnabled();
+  if ((!compare_world && !compare_stage) || !wram || !ppu ||
       !SyncFrameIdentity(wram, wram_size))
     return;
   const uint8_t map_group = wram[kActRaiserWram_MapGroup];
   const uint8_t map_number = wram[kActRaiserWram_CurrentMap];
-  s_observer.diagnostics.frames_observed++;
+  if (compare_world) s_observer.diagnostics.frames_observed++;
 
   if (ppu->inidisp & 0x80) {
     if (!s_observer.forced_blank) ResetWorlds();
     s_observer.forced_blank = true;
-    for (unsigned layer = 0; layer < kActionBgLayerCount; layer++)
-      RecordFallback(kActRaiserActionBgFallback_ForcedBlank, layer,
-                     map_group, map_number, NULL);
+    if (compare_world)
+      for (unsigned layer = 0; layer < kActionBgLayerCount; layer++)
+        RecordFallback(kActRaiserActionBgFallback_ForcedBlank, layer,
+                       map_group, map_number, NULL);
     return;
   }
   s_observer.forced_blank = false;
   if ((ppu->bgmode & 7u) != 1u) {
-    for (unsigned layer = 0; layer < kActionBgLayerCount; layer++)
-      RecordFallback(kActRaiserActionBgFallback_WrongMode, layer,
-                     map_group, map_number, NULL);
+    if (compare_world)
+      for (unsigned layer = 0; layer < kActionBgLayerCount; layer++)
+        RecordFallback(kActRaiserActionBgFallback_WrongMode, layer,
+                       map_group, map_number, NULL);
     return;
   }
+
+  for (unsigned layer = 0; layer < kActionBgLayerCount; layer++)
+    CompareRoomSceneStageOnce(
+        wram, wram_size, layer, map_group, map_number);
+  if (!compare_world) return;
 
   /* Keep the compare-only observer on the same topology as the production
    * provider. Otherwise Marahna 0501 would falsely report a finite edge after
@@ -1328,6 +1518,14 @@ void ActRaiserActionBg_Shutdown(void) {
             s_observer.diagnostics.room_scene_registers_compared,
             s_observer.diagnostics.room_scene_register_mismatches);
   }
+  if (s_observer.room_scene_stage_compare_enabled > 0) {
+    fprintf(stderr,
+            "[action-room-stage] summary layers=%" PRIu64
+            " bytes=%" PRIu64 " mismatches=%" PRIu64 "\n",
+            s_observer.diagnostics.room_scene_stage_layers_compared,
+            s_observer.diagnostics.room_scene_stage_bytes_compared,
+            s_observer.diagnostics.room_scene_stage_mismatches);
+  }
   if (s_observer.room_scene_hle_enabled > 0) {
     fprintf(stderr,
             "[action-room-scene] provider-summary layers=%" PRIu64
@@ -1345,6 +1543,7 @@ void ActRaiserActionBg_Shutdown(void) {
   s_observer.hle_enabled = -1;
   s_observer.room_scene_hle_enabled = -1;
   s_observer.room_scene_compare_enabled = -1;
+  s_observer.room_scene_stage_compare_enabled = -1;
   s_observer.room_scene_compare_verbose = -1;
   memset(s_provider, 0, sizeof(s_provider));
 }
