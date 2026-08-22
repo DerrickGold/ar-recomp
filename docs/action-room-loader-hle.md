@@ -60,8 +60,9 @@ The stable two-background scene milestone is implemented:
   cumulative-ROM BG1/BG2 page maps and metatile definitions are now the default
   production finite-world source; `AR_ACTION_ROOM_SCENE_HLE=0` selects the
   exact staged-WRAM source control.
-  The original bootstrap still stages CHR/CGRAM, the resident VRAM ring,
-  gameplay data, actors and callbacks. The ring remains the authentic-pixel
+  The bootstrap still stages CHR/CGRAM, the resident VRAM ring, gameplay data,
+  actors and callbacks. Action CHR/CGRAM now use guarded CPU-facing HLEs; the
+  remaining stages stay native. The ring remains the authentic-pixel
   safety oracle, and a scene load or dimension failure falls back to the
   ordinary live-WRAM source. The default promotion follows the exact 12-target
   matrix and natural Fillmore acceptance route described below.
@@ -89,8 +90,19 @@ The stable two-background scene milestone is implemented:
   This is a guarded HLE rather than an unconditional replacement: the new
   `hle_func_if` generator seam retains the decoded ROM body for title/SIM raw
   loads, BG3 selectors, wrong M/X modes, and any command shape outside the
-  audited 49-room action domain. CHR, CGRAM, video profile, gameplay, audio,
-  and OBJ commands remain in the native `$02:B1F7` VM.
+  audited 49-room action domain. Video profile, gameplay, audio, and OBJ
+  commands remain in the native `$02:B1F7` VM.
+- The action-only `$02:B28E` command-7 and `$02:B330` command-6 handlers now
+  execute `ActRaiser_LoadActionCharacters` and `ActRaiser_LoadActionPalette`
+  by default. The character path covers the audited compressed 8 KiB banks
+  and 4 KiB dialog-font upload, including the native `$7E:6000` workspace,
+  LZSS scratch, VRAM ports and CPU contract. The palette path copies the
+  audited 128-byte slices through the native CGRAM ports. Both consume the
+  live VM cursor, and `AR_ACTION_ROOM_GFX_HLE=0` is their exact native control.
+  Their read-only `hle_func_if` guards require the action domain, DB/M/X mode,
+  known destinations and sizes; command 7 also verifies the compressed asset
+  header before redirecting. Title/SIM raw shapes and any unknown operands
+  retain the generated handler body.
 - The live comparator and production provider own separate `ActionBgWorld`
   caches. This is required when the room-scene source and both compare gates
   are enabled together: the observer runs after provider binding but
@@ -136,11 +148,11 @@ frame.
 The production handoff remains intentionally incremental. The renderer obtains
 complete finite BG tile words from the immutable room scene, while the two
 background asset commands now stage collision/ring-visible WRAM through their
-CPU-facing HLEs. The enclosing `$02:B1F7` VM and its other six command types are
-still native, so this does not absorb level objects, actor initialization,
-audio, gameplay, CHR, CGRAM, or command-3 video setup. The exact native handler
-body remains immediately available whenever either read-only guard rejects an
-invocation.
+CPU-facing HLEs and its graphics commands stage CHR/CGRAM through PPU-port
+HLEs. The enclosing `$02:B1F7` VM and commands 3, 2, 1, and 0 are still native,
+so this does not absorb level objects, actor initialization, audio, gameplay,
+or command-3 video setup. The exact native handler body remains immediately
+available whenever a read-only guard rejects an invocation.
 
 ## Scope and parity boundary
 
@@ -560,5 +572,17 @@ Targets are VRAM word addresses and strides are bytes.
   LoROM pointer conversion, compression scratch, byte swapping, script cursor,
   registers/status, stack/RTS, both destinations, explicit-off behavior, and
   guarded fallback shapes.
+- Guarded graphics-loader matrices
+  `runs/action-room-gfx-native-control-matrix-20260822-v1.json` and
+  `runs/action-room-gfx-hle-matrix-20260822-v1.json`: the same release binary
+  runs all 12 ordinary entries with command 7/6 native and redirected. The HLE
+  arm executes 39 character commands and 36 palette commands, staging 320,000
+  bytes. The separate 49-room script census covers all 89 character and 87
+  palette invocations, with five/three admitted operand shapes and no bad
+  compressed-size header. All 204 framebuffer, WRAM/SRAM, VRAM, CGRAM, OAM, PPU-snapshot,
+  dispatch and final-state artifacts are byte-exact. ROM-free CPU tests also
+  pin the 8 KiB character banks, 4 KiB font variant, palette offsets, PPU-port
+  order, shared decompression workspace/scratch, script cursor, registers,
+  status, stack/RTS, explicit-off behavior and rejected shapes.
 - Static consumer census: all generated `$02:B4E8` variants write `$F2`; no
   registered/recompiled function reads it.

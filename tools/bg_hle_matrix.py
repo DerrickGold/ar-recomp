@@ -89,6 +89,9 @@ ROOM_STAGE_COMPARATOR_RE = re.compile(
 ROOM_LOAD_HLE_RE = re.compile(
     r"\[action-room-load-hle\] summary command5=(?P<command5>\d+) "
     r"command4=(?P<command4>\d+) bytes=(?P<bytes>\d+)")
+ROOM_GRAPHICS_HLE_RE = re.compile(
+    r"\[action-room-gfx-hle\] summary command7=(?P<command7>\d+) "
+    r"command6=(?P<command6>\d+) bytes=(?P<bytes>\d+)")
 
 
 class MatrixError(Exception):
@@ -154,6 +157,13 @@ def parse_room_load_hle_summary(log):
     return {key: int(value) for key, value in matches[-1].groupdict().items()}
 
 
+def parse_room_graphics_hle_summary(log):
+    matches = list(ROOM_GRAPHICS_HLE_RE.finditer(log))
+    if not matches:
+        return None
+    return {key: int(value) for key, value in matches[-1].groupdict().items()}
+
+
 def validate_provider_summary(provider, expected):
     if not expected:
         if provider is not None:
@@ -202,7 +212,8 @@ def inspect_ppm(path):
 
 
 def inspect_run(target, run_directory, log, rom_hash, expected_snapshots,
-                expect_provider=False, expect_room_scene_hle=False):
+                expect_provider=False, expect_room_scene_hle=False,
+                expect_room_graphics_hle=True):
     comparator = parse_comparator_summary(log)
     if comparator is None:
         raise MatrixError("runtime comparator summary missing")
@@ -228,6 +239,15 @@ def inspect_run(target, run_directory, log, rom_hash, expected_snapshots,
     for field in ("command5", "command4", "bytes"):
         if not room_load_hle[field]:
             raise MatrixError("action-room loader HLE %s=0" % field)
+    room_graphics_hle = parse_room_graphics_hle_summary(log)
+    if expect_room_graphics_hle:
+        if room_graphics_hle is None:
+            raise MatrixError("action-room graphics HLE summary missing")
+        for field in ("command7", "command6", "bytes"):
+            if not room_graphics_hle[field]:
+                raise MatrixError("action-room graphics HLE %s=0" % field)
+    elif room_graphics_hle is not None:
+        raise MatrixError("action-room graphics HLE unexpectedly enabled")
     room_scene_provider = parse_room_scene_provider_summary(log)
     if expect_room_scene_hle:
         if room_scene_provider is None:
@@ -284,6 +304,7 @@ def inspect_run(target, run_directory, log, rom_hash, expected_snapshots,
         "comparator": comparator,
         "provider": provider,
         "room_load_hle": room_load_hle,
+        "room_graphics_hle": room_graphics_hle,
         "room_stage_comparator": room_stage_comparator,
         "room_scene_provider": room_scene_provider,
         "census": bg_hle_census.build_summary(records),
@@ -307,6 +328,10 @@ def room_scene_setting_enabled(args):
 
 def room_scene_binding_expected(args):
     return provider_binding_expected(args) and room_scene_setting_enabled(args)
+
+
+def room_graphics_setting_enabled(args):
+    return args.room_graphics_mode != "disabled"
 
 
 def parse_vertical_extend(value):
@@ -359,8 +384,13 @@ def run_target(args, target, rom_hash):
             "AR_QUIT_FRAMES": str(args.quit_frames),
         })
         environment.pop("AR_ACTION_BG_HLE", None)
+        environment.pop("AR_ACTION_ROOM_GFX_HLE", None)
         environment.pop("AR_ACTION_ROOM_LOAD_HLE", None)
         environment.pop("AR_ACTION_ROOM_SCENE_HLE", None)
+        if args.room_graphics_mode == "enabled":
+            environment["AR_ACTION_ROOM_GFX_HLE"] = "1"
+        elif args.room_graphics_mode == "disabled":
+            environment["AR_ACTION_ROOM_GFX_HLE"] = "0"
         if args.provider_mode == "enabled":
             environment["AR_ACTION_BG_HLE"] = "1"
         elif args.provider_mode == "disabled":
@@ -387,7 +417,8 @@ def run_target(args, target, rom_hash):
     try:
         return inspect_run(
             target, run_directory, log, rom_hash, len(args.capture_frames),
-            provider_binding_expected(args), room_scene_binding_expected(args))
+            provider_binding_expected(args), room_scene_binding_expected(args),
+            room_graphics_setting_enabled(args))
     except MatrixError as error:
         if error.run_directory is None:
             error.run_directory = run_directory
@@ -415,6 +446,8 @@ def write_manifest(path, args, rom_hash, results):
         "provider_setting": args.provider_mode,
         "room_scene_hle": room_scene_setting_enabled(args),
         "room_scene_hle_setting": args.room_scene_mode,
+        "room_graphics_hle": room_graphics_setting_enabled(args),
+        "room_graphics_hle_setting": args.room_graphics_mode,
         "results": results,
     }
     with open(path, "w", encoding="utf-8") as output:
@@ -467,6 +500,15 @@ def parse_args(argv):
         "--disable-room-scene-hle", dest="room_scene_mode",
         action="store_const", const="disabled",
         help="use the staged-WRAM provider-source control")
+    room_graphics = parser.add_mutually_exclusive_group()
+    room_graphics.add_argument(
+        "--enable-room-graphics-hle", dest="room_graphics_mode",
+        action="store_const", const="enabled",
+        help="explicitly select the default action CHR/CGRAM HLE")
+    room_graphics.add_argument(
+        "--disable-room-graphics-hle", dest="room_graphics_mode",
+        action="store_const", const="disabled",
+        help="execute the generated native action CHR/CGRAM handlers")
     provider = parser.add_mutually_exclusive_group()
     provider.add_argument(
         "--enable-provider", dest="provider_mode", action="store_const",
@@ -476,7 +518,8 @@ def parse_args(argv):
         "--disable-provider", dest="provider_mode", action="store_const",
         const="disabled",
         help="disable the provider for the native BH7 A/B")
-    parser.set_defaults(provider_mode="default", room_scene_mode="default")
+    parser.set_defaults(provider_mode="default", room_scene_mode="default",
+                        room_graphics_mode="default")
     return parser.parse_args(argv)
 
 
@@ -512,6 +555,7 @@ def main(argv=None):
             provider = result["provider"]
             room_scene_provider = result["room_scene_provider"]
             room_load_hle = result["room_load_hle"]
+            room_graphics_hle = result["room_graphics_hle"]
             room_stage_comparator = result["room_stage_comparator"]
             provider_text = ""
             if provider:
@@ -521,6 +565,9 @@ def main(argv=None):
                     room_scene_provider["layers"])
             provider_text += " stage-bytes=%d loader-bytes=%d" % (
                 room_stage_comparator["bytes"], room_load_hle["bytes"])
+            if room_graphics_hle:
+                provider_text += " graphics-bytes=%d" % (
+                    room_graphics_hle["bytes"])
             print("      PASS tiles=%d mismatches=0 native-fallbacks=%d%s run=%s" % (
                 comparator["tiles"], comparator["native"], provider_text,
                 result["run_directory"]), flush=True)
