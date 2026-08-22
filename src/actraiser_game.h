@@ -80,6 +80,14 @@ enum {
   kActRaiserWram_BgMetatileTable = 0x0052,
   kActRaiserWram_BgWordMask = 0x0054,
   kActRaiserWram_BgAttributes = 0x006B,
+  /* `$02:B363/$02:B3EB` background-asset destinations. Command 5 writes
+   * the two byte-swapped 2 KiB metatile tables; command 4 writes page-major
+   * metatile-id maps into one 16 KiB bank per layer. Gameplay collision and
+   * the native 64x64 ring builder both consume these ranges after loading. */
+  kActRaiserWram_Bg1MetatileDefinitions = 0x2100,
+  kActRaiserWram_Bg2MetatileDefinitions = 0x2900,
+  kActRaiserWram_Bg1Map = 0x8000,
+  kActRaiserWram_Bg2Map = 0xC000,
   kActRaiserWram_GameFrame = kActRaiserRuntimeWram_GameFrame,
   kActRaiserWram_ActionCameraSubject = 0x008A,
   kActRaiserWram_InputHeldHigh = 0x00A0,

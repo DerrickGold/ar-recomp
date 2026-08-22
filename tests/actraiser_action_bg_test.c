@@ -87,6 +87,10 @@ static void Write16(uint8_t *bytes, size_t address, uint16_t value) {
   bytes[address + 1] = (uint8_t)(value >> 8);
 }
 
+static uint16_t Read16(const uint8_t *bytes, size_t address) {
+  return (uint16_t)(bytes[address] | ((uint16_t)bytes[address + 1] << 8));
+}
+
 static void SetLayerState(uint8_t *wram, unsigned layer) {
   const size_t offset = layer * kActRaiserBgLayerStateStride;
   Write16(wram, kActRaiserWram_Bg1CameraX + offset,
@@ -319,6 +323,70 @@ static void TestImmutableRoomSceneComparison(void) {
   CHECK(comparison.compared == 64u * 64u);
   CHECK(comparison.mismatches == 0);
   CHECK(comparison.first_tile_x == -1 && comparison.first_tile_y == -1);
+
+  /* Command-4/5 HLE primitive: stage exactly the active native ranges, keep
+   * every surrounding byte intact, and validate the ROM high-byte-first ->
+   * WRAM little-endian metatile conversion independently of tile expansion. */
+  uint8_t *staged = malloc(kActRaiserWramSize);
+  CHECK(staged != NULL);
+  if (staged) {
+    memset(staged, 0xCD, kActRaiserWramSize);
+    CHECK(ActRaiserActionBg_StageRoomSceneLayer(
+        staged, kActRaiserWramSize, &scene, 1));
+    CHECK(Read16(staged, kActRaiserWram_Bg1Width) == 512);
+    CHECK(Read16(staged, kActRaiserWram_Bg1Height) == 512);
+    CHECK(!memcmp(staged + kActRaiserWram_Bg1Map,
+                  bg->map, bg->map_size));
+    CHECK(staged[kActRaiserWram_Bg1MetatileDefinitions] ==
+          bg->metatiles[1]);
+    CHECK(staged[kActRaiserWram_Bg1MetatileDefinitions + 1] ==
+          bg->metatiles[0]);
+    CHECK(staged[kActRaiserWram_Bg1Map - 1] == 0xCD);
+    CHECK(staged[kActRaiserWram_Bg1Map + bg->map_size] == 0xCD);
+
+    ActRaiserActionRoomStageCompareResult stage_comparison;
+    CHECK(ActRaiserActionBg_CompareRoomSceneStage(
+        &scene, 1, staged, kActRaiserWramSize, &stage_comparison));
+    CHECK(stage_comparison.compared ==
+          4u + bg->map_size + kActionRoomSceneMetatileBytes);
+    CHECK(stage_comparison.mismatches == 0);
+    CHECK(stage_comparison.first_field ==
+          kActRaiserActionRoomStageField_Count);
+
+    staged[kActRaiserWram_Bg1Map + 7] ^= 0x80;
+    CHECK(ActRaiserActionBg_CompareRoomSceneStage(
+        &scene, 1, staged, kActRaiserWramSize, &stage_comparison));
+    CHECK(stage_comparison.mismatches == 1);
+    CHECK(stage_comparison.first_field ==
+          kActRaiserActionRoomStageField_Map);
+    CHECK(stage_comparison.first_offset == 7);
+    staged[kActRaiserWram_Bg1Map + 7] ^= 0x80;
+
+    staged[kActRaiserWram_Bg1MetatileDefinitions + 11] ^= 1;
+    CHECK(ActRaiserActionBg_CompareRoomSceneStage(
+        &scene, 1, staged, kActRaiserWramSize, &stage_comparison));
+    CHECK(stage_comparison.mismatches == 1);
+    CHECK(stage_comparison.first_field ==
+          kActRaiserActionRoomStageField_MetatileDefinitions);
+    CHECK(stage_comparison.first_offset == 11);
+    staged[kActRaiserWram_Bg1MetatileDefinitions + 11] ^= 1;
+
+    staged[kActRaiserWram_Bg1Width + 1] ^= 1;
+    CHECK(ActRaiserActionBg_CompareRoomSceneStage(
+        &scene, 1, staged, kActRaiserWramSize, &stage_comparison));
+    CHECK(stage_comparison.mismatches == 1);
+    CHECK(stage_comparison.first_field ==
+          kActRaiserActionRoomStageField_Dimensions);
+    CHECK(stage_comparison.first_offset == 1);
+
+    CHECK(!ActRaiserActionBg_StageRoomSceneLayer(
+        staged, kActRaiserWram_Bg1Map, &scene, 1));
+    CHECK(!ActRaiserActionBg_StageRoomSceneLayer(
+        staged, kActRaiserWramSize, &scene, 0));
+    CHECK(!ActRaiserActionBg_CompareRoomSceneStage(
+        &scene, 1, staged, kActRaiserWram_Bg1Map, &stage_comparison));
+    free(staged);
+  }
 
   ActionBgWorld *scene_world = ActionBgWorld_Create();
   CHECK(scene_world != NULL);

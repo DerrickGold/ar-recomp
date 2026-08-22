@@ -1385,6 +1385,17 @@ isolated and stable through scanout. Finally,
 environment variable absent: all 19,522 provider layers use the room scene,
 with zero fallback and the same 18,216,295 exact preflight tiles.
 
+The next loader slice has an exact emulated-WRAM image but is not redirected
+yet. `ActRaiserActionBg_StageRoomSceneLayer` writes the active BG dimensions,
+page map and byte-swapped metatile definitions while preserving every other
+byte; `AR_ACTION_ROOM_STAGE_COMPARE=1` compares that proposed image with the
+native `$02:B363/$02:B3EB` result. The 12-target manifest
+`runs/action-room-stage-matrix-20260822-v3.json` covers all 24 loaded layers and
+166,496 bytes with zero mismatch, alongside 19,315,975 exact native-ring words
+and zero room-scene source fallback. Gameplay collision and the native ring
+still read these WRAM ranges, so the eventual HLE must stage them—it cannot
+merely omit the commands. CHR/CGRAM and command-3 profile setup remain native.
+
 `ActRaiser_FullSnapshot` also writes `.ppu.json` beside WRAM/VRAM/CGRAM/OAM.
 This pins the BGSC geometry, character bases, enables, scroll, window and color
 math state that a binary-memory-only snapshot used to leave implicit.

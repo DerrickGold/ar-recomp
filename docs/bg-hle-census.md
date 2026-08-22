@@ -28,6 +28,9 @@ Inputs and output contract:
 - replay: `saves/fillmore-act-2.rec` (used to reach the transition-capable
   world-map window and provide deterministic post-entry input);
 - runtime observer: `AR_ACTION_BG_HLE_COMPARE=1`, rendering still native;
+- the current runner also enables the independent
+  `AR_ACTION_ROOM_STAGE_COMPARE=1` command-4/5 WRAM oracle; historical
+  manifests created before 2026-08-22 naturally do not contain that summary;
 - two full WRAM/VRAM/CGRAM/OAM/PPU snapshots per target;
 - one authentic 256x224 flat framebuffer per target;
 - machine-readable local manifest:
@@ -76,6 +79,27 @@ native/decorative policy, consistent with the existing mirror/repeat path. A
 disabled BG2 sample is not a permanent native-only classification: Kasandora
 act 2 and Marahna act 2 still require later-room/transition captures before the
 scene plan can say the layer never activates.
+
+## Command-4/5 background staging image — 2026-08-22
+
+`ActRaiserActionBg_StageRoomSceneLayer` is the bounded data-plane core for the
+next loader HLE. It reconstructs only the native outputs consumed by collision
+and the resident-ring builder: dimensions `$2E-$35`, active map bytes in
+`$8000-$FFFF`, and byte-swapped definitions in `$2100-$30FF`. It does not clear
+inactive map tails or touch command-3 descriptors, CHR, CGRAM, actors, audio,
+or any gameplay record.
+
+Manifest `runs/action-room-stage-matrix-20260822-v3.json` records:
+
+- 12/12 ordinary-entry targets passed;
+- all 24 loaded BG layers and 166,496 staged bytes, zero mismatch, including
+  the six BG2 assets disabled by their sampled PPU state;
+- 19,315,975 native-ring comparisons, zero mismatch/outside;
+- 19,522 immutable room-scene provider layers, zero live-WRAM fallback.
+
+The gate is deliberately separate from `AR_ACTION_ROOM_SCENE_COMPARE` and runs
+before layer-enable/provider eligibility. A dormant background is still loader
+state and must match even when it contributes no pixels to the sampled frame.
 
 ## What this does not prove
 

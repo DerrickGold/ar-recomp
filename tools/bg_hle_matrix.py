@@ -83,6 +83,9 @@ PROVIDER_RE = re.compile(
 ROOM_SCENE_PROVIDER_RE = re.compile(
     r"\[action-room-scene\] provider-summary "
     r"layers=(?P<layers>\d+) live-fallbacks=(?P<fallbacks>\d+)")
+ROOM_STAGE_COMPARATOR_RE = re.compile(
+    r"\[action-room-stage\] summary layers=(?P<layers>\d+) "
+    r"bytes=(?P<bytes>\d+) mismatches=(?P<mismatches>\d+)")
 
 
 class MatrixError(Exception):
@@ -129,6 +132,13 @@ def parse_provider_summary(log):
 
 def parse_room_scene_provider_summary(log):
     matches = list(ROOM_SCENE_PROVIDER_RE.finditer(log))
+    if not matches:
+        return None
+    return {key: int(value) for key, value in matches[-1].groupdict().items()}
+
+
+def parse_room_stage_comparator_summary(log):
+    matches = list(ROOM_STAGE_COMPARATOR_RE.finditer(log))
     if not matches:
         return None
     return {key: int(value) for key, value in matches[-1].groupdict().items()}
@@ -192,6 +202,16 @@ def inspect_run(target, run_directory, log, rom_hash, expected_snapshots,
             raise MatrixError("comparator %s=%d" % (field, comparator[field]))
     provider = parse_provider_summary(log)
     validate_provider_summary(provider, expect_provider)
+    room_stage_comparator = parse_room_stage_comparator_summary(log)
+    if room_stage_comparator is None:
+        raise MatrixError("room-stage comparator summary missing")
+    if room_stage_comparator["mismatches"]:
+        raise MatrixError(
+            "room-stage comparator mismatches=%d" %
+            room_stage_comparator["mismatches"])
+    for field in ("layers", "bytes"):
+        if not room_stage_comparator[field]:
+            raise MatrixError("room-stage comparator %s=0" % field)
     room_scene_provider = parse_room_scene_provider_summary(log)
     if expect_room_scene_hle:
         if room_scene_provider is None:
@@ -247,6 +267,7 @@ def inspect_run(target, run_directory, log, rom_hash, expected_snapshots,
         "run_directory": run_directory,
         "comparator": comparator,
         "provider": provider,
+        "room_stage_comparator": room_stage_comparator,
         "room_scene_provider": room_scene_provider,
         "census": bg_hle_census.build_summary(records),
         "snapshots": records,
@@ -308,6 +329,9 @@ def run_target(args, target, rom_hash):
             # real widescreen policy instead of being reconciled back to 4:3.
             "AR_WS_HEADLESS": "1",
             "AR_ACTION_BG_HLE_COMPARE": "1",
+            # Exercise the exact command-4/5 WRAM staging image independently
+            # of the broader stable-frame/raster oracle.
+            "AR_ACTION_ROOM_STAGE_COMPARE": "1",
             "AR_INPUT_REPLAY": args.replay,
             "AR_SETTINGS_PATH": settings_path,
             "AR_WARP": target,
@@ -469,12 +493,15 @@ def main(argv=None):
             comparator = result["comparator"]
             provider = result["provider"]
             room_scene_provider = result["room_scene_provider"]
+            room_stage_comparator = result["room_stage_comparator"]
             provider_text = ""
             if provider:
                 provider_text = " provider-layers=%d" % provider["layers"]
             if room_scene_provider:
                 provider_text += " room-scene-layers=%d" % (
                     room_scene_provider["layers"])
+            provider_text += " stage-bytes=%d" % (
+                room_stage_comparator["bytes"])
             print("      PASS tiles=%d mismatches=0 native-fallbacks=%d%s run=%s" % (
                 comparator["tiles"], comparator["native"], provider_text,
                 result["run_directory"]), flush=True)
