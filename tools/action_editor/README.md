@@ -74,6 +74,9 @@ background order:
 
 Virtual classification never changes that order. Band tint and edit outlines
 make authored changes visible without pretending they affect ordinary gameplay.
+The native-frame control selects character animation phases and, for `0402`
+and `0403`, the active BG2 page. **Play native phases** advances that clock at
+60 Hz; pausing or moving the slider produces a deterministic authoring frame.
 
 **Diorama 3D** rasterizes every band to its own full-level surface and uses the
 same independent z and painter-order model as the runtime. Existing z, order,
@@ -98,6 +101,11 @@ OBJ2 geometry/order and is draggable in either view.
 | `R` | - | reset camera |
 | Ctrl/Cmd-Z | undo classification gesture | undo classification gesture |
 
+Character phases from the native-frame slider apply to both views. The active
+`0402`/`0403` BG2 page is cropped in the flat composite; 3D page framing will
+move to the shared scanline compositor. The HUD reports the resolved video
+profile, animation phase, BG2 page, and raster preset in either view.
+
 Brush modes support all metatile instances, one map cell, or rectangles. Reset
 actions delete sparse classification records and are undoable; they do not
 rewrite a fake baseline. Geometry controls can be reset independently to their
@@ -105,12 +113,24 @@ built-in defaults.
 
 ## Rendering data
 
-The ROM exporter reuses `src/diorama/diorama_rom_backdrop.c`, including its
-asset inheritance, tile-word masking, BG attribute merge, palette, and CHR
-decode. This keeps the editor's background pixels aligned with the game decoder
-instead of maintaining a second interpretation of the ROM scripts. Identical
-asset blobs are pooled across rooms to keep the generated HTML compact.
+The ROM exporter links `src/action/action_room_scene.c`, the same immutable
+room loader used by the game. Asset inheritance, video profiles, tile-word
+masking, common priority, BG attribute merge, animation metadata, page cycling,
+raster identity, palette, and CHR decode therefore have one C authority rather
+than a JavaScript or tool-only interpretation. Identical asset blobs are pooled
+across rooms to keep the generated HTML compact.
 
 The 3D preview frames a gameplay-sized window and walks it along long levels;
 rooms can be up to 4096 pixels wide, and presenting the entire room as one thin
 quad would not represent what the player sees.
+
+### Current parity boundary
+
+The shared loader and editor currently agree on assets, map dimensions,
+metatile expansion, character-bank attributes, profile common priority,
+character animation, page-cycle identity, and raster-preset identity. The
+flat view still needs the shared scanline compositor for profile TM/TS,
+windowing, mosaic, colour math, camera/parallax, and the ten raster builders.
+Until that lands, the editor is suitable for virtual-layer authoring and
+priority/phase inspection, but its flat composite is not yet the final
+pixel-exact game oracle.

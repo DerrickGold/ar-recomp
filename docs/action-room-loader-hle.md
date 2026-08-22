@@ -34,6 +34,38 @@ The earlier stateful concerns are resolved:
 Save states and a side-loaded game process remain useful as differential
 oracles. They are no longer loader dependencies.
 
+## Implementation status
+
+The first shared-authority milestone is implemented:
+
+- `src/action/action_room_scene.c` is the pure immutable ROM loader. It owns
+  cumulative asset-script replay, command-3 profile resolution, exact common
+  priority/attribute merge, finite tile lookup and expansion, character-phase
+  reconstruction, the `0402`/`0403` page sequence, and room raster identity.
+- The action editor exporter links that module and emits schema
+  `actraiser-action-bg-v2`; it no longer includes a private Diorama `.c` file
+  or reaches file-static decoder state.
+- The editor consumes profile common priority, previews character phases from
+  a native-frame slider, and selects the active `0402`/`0403` BG2 page in the
+  flat game-composite view. Raster identity and the complete 28-byte profile
+  accompany every room descriptor.
+- The game registers the same immutable ROM bytes at boot. Setting
+  `AR_ACTION_ROOM_SCENE_COMPARE=1` compares each newly published live
+  `ActionBgWorld` against every tile produced by `ActionRoomScene`, reports the
+  first mismatch, and never changes gameplay, provider eligibility, or PPU
+  state.
+- ROM-free tests pin inheritance, profile priority, tile lookup, phase/page
+  resolution, full-world match/mismatch behavior, and failure on dimensional
+  drift. The optional stock-ROM census pins all 49 profile IDs, 30 animated
+  rooms, two page-cycle rooms, 17 raster-bearing rooms, and five forced-BG2
+  priority rooms.
+
+This is not yet the complete editor parity milestone. The next implementation
+slice is the pure raster builders plus a 256x224 scanline compositor consuming
+the exported TM/TS, windows, mosaic, scroll, and colour-math fields. The
+editor's current 3D page-cycle framing and raster-labelled frame clock are not
+evidence of those per-scanline effects until that compositor lands.
+
 ## Scope and parity boundary
 
 The baseline contract is the complete native **background scene**:

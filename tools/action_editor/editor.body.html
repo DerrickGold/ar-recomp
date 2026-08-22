@@ -11,6 +11,13 @@
     <button id="bg2" style="flex:1">BG2</button>
   </div>
 
+  <h2>Native preview frame</h2>
+  <div class="ctl"><label>Frame</label>
+    <input id="nativeFrame" type="range" min="0" max="255" step="1" value="0">
+    <span class="v" id="nativeFramev">0</span></div>
+  <button id="nativePlay" style="width:100%">Play native phases</button>
+  <p class="hint" id="nativePhaseInfo">Static background</p>
+
   <h2>Band</h2>
   <div class="stack">
     <button class="state s-behind" data-state="0">
@@ -226,21 +233,51 @@ function depthLadder() {
  * byte-SWAPPED in the ROM ($02:B3CE swaps it while copying to WRAM), then
  * masked with $ECFF and OR'd with the per-BG attribute byte -- that merge is
  * what maps BG1 definitions to characters $000-$0FF and BG2 to $100-$1FF.
+ * The shared scene descriptor also supplies the profile's common-priority
+ * bits; five rooms force every BG2 tile high through that independent field.
  * Getting any of that wrong renders unrelated art, so it is not re-derived
  * here; it is transcribed. */
 const B64 = s => { const b = atob(s), a = new Uint8Array(b.length);
   for (let i=0;i<b.length;i++) a[i]=b.charCodeAt(i); return a; };
 const BLOBS = DATA.blobs.map(B64);
 const expand5 = v => ((v&31)<<3)|((v&31)>>2);
+let nativeFrame = 0, nativePlayTimer = null;
+
+function animationPhase(r) {
+  if (!r.animation) return 0;
+  return (Math.floor(nativeFrame / r.animation.cadence)) &
+    (r.animation.phases - 1);
+}
+function bg2PagePhase(r) {
+  if (!r.bg2PageCycle) return 0;
+  return Math.floor(nativeFrame / r.bg2PageCycle.cadence) & 3;
+}
+function bg2PageIndex(r) {
+  return r.bg2PageCycle ? r.bg2PageCycle.order[bg2PagePhase(r)] : 0;
+}
+function charactersAtFrame(r) {
+  const source = BLOBS[r.chars];
+  if (!r.animation) return source;
+  const characters = source.slice();
+  const target = r.animation.target * 2;
+  const stride = r.animation.stride;
+  const from = target + animationPhase(r) * stride;
+  characters.set(source.subarray(from, from + stride), target);
+  return characters;
+}
 
 function decodeLayer(room, bg) {
   const layer = room.bg[bg];
   if (!layer) return null;
-  const chars = BLOBS[room.chars];
+  const chars = charactersAtFrame(room);
   const extra = room.extraChars >= 0 ? BLOBS[room.extraChars] : null;
   const praw  = BLOBS[room.palette];
   const mt = BLOBS[layer.metatiles], mp = BLOBS[layer.map];
-  const attrs = (bg === 0 ? DATA.bg1Attributes : DATA.bg2Attributes) << 8;
+  const baseAttrs =
+    (bg === 0 ? DATA.bg1Attributes : DATA.bg2Attributes) << 8;
+  const commonPriority = room.video && room.video.length > 4 &&
+    (room.video[4] & (1 << bg)) ? 0x2000 : 0;
+  const attrs = baseAttrs | commonPriority;
 
   const pal = new Uint32Array(128);
   for (let i=0;i<128;i++){ const c = praw[i*2] | (praw[i*2+1]<<8);
@@ -711,7 +748,8 @@ function compositeNow() {
 let game2dCache = new Map();
 function invalidateGameComposite() { game2dCache.clear(); }
 function gameLayerSurfaces(r, bg) {
-  const key = `${keyOf(r,bg)}:${tint ? 1 : 0}`;
+  const key = `${keyOf(r,bg)}:${tint ? 1 : 0}:${animationPhase(r)}`
+    + `:${bg === 1 ? bg2PagePhase(r) : 0}`;
   if (game2dCache.has(key)) return game2dCache.get(key);
   const layer = decodeLayer(r,bg), state = bucket(r,bg);
   if (!layer) return null;
@@ -729,7 +767,19 @@ function gameLayerSurfaces(r, bg) {
     canvas.getContext('2d').putImageData(image,0,0);
     return canvas;
   });
-  const built = { L:layer, low:canvases[0], high:canvases[1] };
+  let built = { L:layer, low:canvases[0], high:canvases[1] };
+  if (bg === 1 && r.bg2PageCycle) {
+    const page = bg2PageIndex(r), sx = (page & 1) * 256;
+    const sy = (page >> 1) * 256;
+    const cropped = canvases.map(source => {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 256;
+      canvas.getContext('2d').drawImage(
+        source, sx, sy, 256, 256, 0, 0, 256, 256);
+      return canvas;
+    });
+    built = { L:{...layer,w:256,h:256}, low:cropped[0], high:cropped[1] };
+  }
   game2dCache.set(key,built);
   return built;
 }
@@ -1484,7 +1534,15 @@ function hud(cx, cy) {
   const inb = cx>=0 && cy>=0 && cx<L.cellsW && cy<L.cellsH;
   const parts = [
     `<b>${room.group}:${room.map}</b> BG${bgIndex+1} &nbsp; ${L.w}\u00d7${L.h}px`
-      + ` &nbsp; ${L.pw}\u00d7${L.ph} pages`,
+      + ` &nbsp; ${L.pw}\u00d7${L.ph} pages`
+      + ` &nbsp; profile $${Number(room.videoProfile).toString(16).padStart(2,'0')}`
+      + (room.raster ? ` &nbsp; raster R${room.raster}` : '')
+      + (room.animation
+          ? ` &nbsp; anim ${animationPhase(room)+1}/${room.animation.phases}`
+          : '')
+      + (room.bg2PageCycle
+          ? ` &nbsp; BG2 page ${bg2PageIndex(room)+1}/4`
+          : ''),
   ];
   if (inb) {
     const cell = cy*L.cellsW+cx, id = L.cellId[cell];
@@ -1590,6 +1648,44 @@ function drawNow() {
     ? `BG${bg+1} ${e.w}\u00d7${e.h}` + (e.w < L.w ? ' (shorter)' : '')
     : '(none)';
 }
+function refreshNativePhaseControls() {
+  $('#nativeFrame').value = String(nativeFrame);
+  $('#nativeFramev').textContent = String(nativeFrame);
+  const parts = [];
+  if (room.animation)
+    parts.push(`CHR phase ${animationPhase(room)+1}/${room.animation.phases}`
+      + ` at ${room.animation.cadence}f cadence`
+      + (room.animation.continuation ? ' (native continuation)' : ''));
+  if (room.bg2PageCycle)
+    parts.push(`BG2 page ${bg2PageIndex(room)+1}/4 at 5f cadence`);
+  if (room.raster)
+    parts.push(`raster preset R${room.raster} uses this frame clock`);
+  $('#nativePhaseInfo').textContent = parts.length
+    ? parts.join(' · ') : 'Static background';
+}
+function setNativeFrame(value) {
+  nativeFrame = Math.max(0, Math.min(255, Number(value) || 0));
+  L = decodeLayer(room,bgIndex);
+  surfacesDirty = compositeDirty = glDirty = true;
+  composite = null;
+  invalidateOther();
+  invalidateGameComposite();
+  refreshNativePhaseControls();
+  draw();
+}
+$('#nativeFrame').oninput = event => setNativeFrame(event.target.value);
+$('#nativePlay').onclick = () => {
+  if (nativePlayTimer) {
+    clearInterval(nativePlayTimer); nativePlayTimer = null;
+    $('#nativePlay').classList.remove('on');
+    $('#nativePlay').textContent = 'Play native phases';
+    return;
+  }
+  nativePlayTimer = setInterval(
+    () => setNativeFrame((nativeFrame + 1) & 255), 1000/60);
+  $('#nativePlay').classList.add('on');
+  $('#nativePlay').textContent = 'Pause native phases';
+};
 const setBand = i => { band = i;
   document.querySelectorAll('.state').forEach((b,j) => b.classList.toggle('on', j===i)); };
 document.querySelectorAll('.state').forEach(b =>
@@ -1721,7 +1817,8 @@ function setLayer(i) {
   invalidateGameComposite();
   composite = null;
   resetActor();
-  refreshVirtualControls(); fitView(); tally(); draw();
+  refreshVirtualControls(); refreshNativePhaseControls();
+  fitView(); tally(); draw();
 }
 const sel = $('#room');
 DATA.rooms.forEach((r, i) => {
@@ -1729,7 +1826,9 @@ DATA.rooms.forEach((r, i) => {
   const a = r.bg[0], b = r.bg[1];
   o.value = i;
   o.textContent = `${r.group}:${r.map}  \u2014  BG1 ${a?a.pagesWide*256+'\u00d7'+a.pagesHigh*256:'\u2013'}`
-    + `, BG2 ${b?b.pagesWide*256+'\u00d7'+b.pagesHigh*256:'\u2013'}`;
+    + `, BG2 ${b?b.pagesWide*256+'\u00d7'+b.pagesHigh*256:'\u2013'}`
+    + `  [P${Number(r.videoProfile).toString(16).padStart(2,'0')}`
+    + `${r.raster ? `/R${r.raster}` : ''}]`;
   sel.appendChild(o);
 });
 sel.onchange = () => { room = DATA.rooms[Number(sel.value)]; setLayer(0); };

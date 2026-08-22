@@ -10,6 +10,7 @@
 
 struct Ppu;
 struct DioramaRoomOverride;
+struct ActionRoomScene;
 
 /* ActRaiser-specific capture and differential observer for SPEC-bg-hle BH2.
  * The pure world decoder remains game-agnostic; this adapter is the only place
@@ -34,6 +35,15 @@ typedef struct ActRaiserActionBgCompareResult {
   uint16_t first_hle;
   uint16_t first_native;
 } ActRaiserActionBgCompareResult;
+
+typedef struct ActRaiserActionRoomSceneCompareResult {
+  size_t compared;
+  size_t mismatches;
+  int first_tile_x;
+  int first_tile_y;
+  uint16_t first_immutable;
+  uint16_t first_live;
+} ActRaiserActionRoomSceneCompareResult;
 
 typedef enum ActRaiserActionBgFallbackReason {
   kActRaiserActionBgFallback_ForcedBlank = 0,
@@ -65,6 +75,11 @@ typedef struct ActRaiserActionBgDiagnostics {
   uint64_t provider_lookups;
   uint64_t provider_tiles;
   uint64_t provider_outside_world;
+  uint64_t room_scene_loads;
+  uint64_t room_scene_load_failures;
+  uint64_t room_scene_layers_compared;
+  uint64_t room_scene_tiles_compared;
+  uint64_t room_scene_mismatches;
   uint64_t fallbacks[kActRaiserActionBgFallback_Count];
 } ActRaiserActionBgDiagnostics;
 
@@ -113,6 +128,19 @@ bool ActRaiserActionBg_ApplyPlanExtents(
  * Default-on; AR_ACTION_BG_HLE=0 is the exact native control. Keeping the
  * environment decision here prevents related HLE seams from drifting. */
 bool ActRaiserActionBg_HleEnabled(void);
+
+/* Registers immutable cart bytes for the default-off room-scene shadow
+ * comparator. AR_ACTION_ROOM_SCENE_COMPARE=1 compares each newly published
+ * WRAM world with the shared arbitrary-room loader; it never changes provider
+ * eligibility, PPU state, or gameplay. The ROM storage remains caller-owned. */
+bool ActRaiserActionBg_InitRoomScenes(const uint8_t *rom, size_t rom_size);
+
+/* Pure full-world comparator used by the game-side shadow observer and ROM-free
+ * tests. False means either source is incomplete or their dimensions differ. */
+bool ActRaiserActionBg_CompareRoomSceneLayer(
+    const struct ActionRoomScene *scene, uint8_t bg_layer,
+    const ActionBgWorld *world,
+    ActRaiserActionRoomSceneCompareResult *result);
 
 /* Default-on BH7 renderer adapter. Unless `AR_ACTION_BG_HLE=0`, publish and
  * bind every plan layer whose source is a finite world map. A zero-mismatch,

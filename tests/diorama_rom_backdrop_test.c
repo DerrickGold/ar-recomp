@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "action/action_room_scene.h"
 #include "actraiser_game.h"
 
 static int failures;
@@ -98,6 +99,8 @@ static void TestGenericRoomScriptAndInheritance(void) {
     kPalette = 0x9800,
     kPalette2 = 0x9900,
     kPaletteUpper = 0x9A00,
+    kVideoProfiles = 0x1093E,
+    kProfile = 0x17,
   };
   uint8_t *rom = calloc(1, kRomSize);
   uint8_t *zeros = calloc(1, 0x2000);
@@ -142,11 +145,16 @@ static void TestGenericRoomScriptAndInheritance(void) {
   rom[kPalette2 + 5] = 0x03;
   rom[kPaletteUpper + 2] = 0x00;    /* BGR15 blue at palette 4 colour 1 */
   rom[kPaletteUpper + 3] = 0x7C;
+  /* Profile bit 1 forces common priority onto BG2 independently of the
+   * permanent $01 character-bank attribute. */
+  rom[kVideoProfiles + kProfile * kActionRoomSceneVideoProfileBytes + 4] =
+      0x02;
 
   size_t at = kScript;
   rom[at++] = 'S'; rom[at++] = 'Y'; rom[at++] = 0;
   rom[at++] = 0x04; rom[at++] = 0x01;
 #define COMMAND(byte, count) rom[at++] = (byte); size_t ops = at; at += (count)
+  { COMMAND(0x08, 1); rom[ops] = kProfile; }
   { COMMAND(0x40, 6); rom[ops] = 0; rom[ops + 1] = 0x40;
     rom[ops + 2] = 0; Put24(rom + ops + 3, kPalette); }
   { COMMAND(0x40, 6); rom[ops] = 0; rom[ops + 1] = 0x40;
@@ -191,6 +199,20 @@ static void TestGenericRoomScriptAndInheritance(void) {
   CHECK(!DioramaRomBackdrop_LoadActionBg(
       rom, kRomSize, 0x04, 0x01, 3, pixels, pixel_count));
 
+  ActionRoomScene scene;
+  CHECK(ActionRoomScene_Load(&scene, rom, kRomSize, 0x04, 0x02));
+  CHECK(scene.have_video_profile);
+  CHECK(scene.video_profile_index == kProfile);
+  CHECK(scene.video_profile[4] == 0x02);
+  CHECK(ActionRoomScene_TileWidth(&scene, 1) == 32);
+  CHECK(ActionRoomScene_TileHeight(&scene, 2) == 32);
+  uint16_t entry = 0;
+  uint8_t metatile = 0xFF;
+  CHECK(ActionRoomScene_LookupTile(
+      &scene, 2, 0, 0, &entry, &metatile));
+  CHECK(entry == 0x2100);
+  CHECK(metatile == 0);
+
 done:
   free(pixels);
   free(meta2);
@@ -201,7 +223,62 @@ done:
   free(rom);
 }
 
+static void TestScenePhaseResolvers(void) {
+  ActionRoomScene scene;
+  memset(&scene, 0, sizeof(scene));
+  scene.have_character_bank[0] = true;
+  scene.have_character_bank[1] = true;
+  scene.have_video_profile = true;
+  scene.video_profile[23] = 0x24;  /* target 0000, stride 256, four phases */
+  scene.video_profile[24] = 0x88;  /* continuation, eight-frame cadence */
+  for (unsigned phase = 0; phase < 4; phase++)
+    scene.characters[phase * 0x100] = (uint8_t)(0xA0 + phase);
+
+  CHECK(ActionRoomScene_HasCharacterAnimation(&scene));
+  CHECK(ActionRoomScene_CharacterAnimationStride(&scene) == 0x100);
+  CHECK(ActionRoomScene_CharacterAnimationPhaseCount(&scene) == 4);
+  CHECK(ActionRoomScene_CharacterAnimationCadence(&scene) == 8);
+  CHECK(ActionRoomScene_CharacterAnimationTarget(&scene) == 0);
+  CHECK(ActionRoomScene_CharacterAnimationContinues(&scene));
+  CHECK(ActionRoomScene_ResolveCharacterAnimationPhase(&scene, 16, -1) == 2);
+  CHECK(ActionRoomScene_ResolveCharacterAnimationPhase(&scene, 0, 7) == 3);
+  uint8_t *characters = malloc(kActionRoomSceneCharacterBytes);
+  CHECK(characters != NULL);
+  if (characters) {
+    CHECK(ActionRoomScene_BuildCharacters(
+        &scene, 16, -1, characters, kActionRoomSceneCharacterBytes));
+    CHECK(characters[0] == 0xA2);
+    CHECK(ActionRoomScene_BuildCharacters(
+        &scene, 0, 1, characters, kActionRoomSceneCharacterBytes));
+    CHECK(characters[0] == 0xA1);
+    free(characters);
+  }
+
+  scene.group = 0x04;
+  scene.map = 0x02;
+  scene.bg[1].have_map = true;
+  scene.bg[1].pages_wide = 2;
+  scene.bg[1].pages_high = 2;
+  scene.video_profile[19] = 0x0C;
+  CHECK(ActionRoomScene_HasBg2PageCycle(&scene));
+  CHECK(ActionRoomScene_Bg2PageIndex(&scene, 0, 0) == 1);
+  CHECK(ActionRoomScene_Bg2PageIndex(&scene, 0, 1) == 2);
+  CHECK(ActionRoomScene_Bg2PageIndex(&scene, 0, 2) == 3);
+  CHECK(ActionRoomScene_Bg2PageIndex(&scene, 0, 3) == 0);
+  CHECK(ActionRoomScene_ResolveBg2PagePhase(&scene, 10, -1) == 2);
+}
+
 static void TestStockRomCatalogue(const char *path) {
+  static const uint8_t kExpectedProfiles[8][9] = {
+    {0},
+    {0, 0x03, 0x04, 0x05, 0x06},
+    {0, 0x07, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F},
+    {0, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15},
+    {0, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C},
+    {0, 0x1D, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24},
+    {0, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C},
+    {0, 0x2D, 0x06, 0x0F, 0x15, 0x1C, 0x24, 0x2C, 0x2E},
+  };
   FILE *file = fopen(path, "rb");
   CHECK(file != NULL);
   if (!file) return;
@@ -220,9 +297,25 @@ static void TestStockRomCatalogue(const char *path) {
   uint32_t *pixels = malloc(pixel_count * sizeof(*pixels));
   CHECK(pixels != NULL);
   if (!pixels) { free(rom); return; }
-  int decoded = 0;
+  int decoded = 0, scenes = 0, animated = 0, page_cycles = 0, raster = 0;
+  int forced_bg2_priority = 0;
   for (uint8_t group = 1; group <= 7; group++) {
     for (uint8_t map = 1; map <= ActRaiser_ActionMapLast(group); map++) {
+      ActionRoomScene scene;
+      if (!ActionRoomScene_Load(
+              &scene, rom, (size_t)length, group, map)) {
+        printf("FAIL stock room scene %02X/%02X\n", group, map);
+        failures++;
+      } else {
+        scenes++;
+        CHECK(scene.have_video_profile);
+        CHECK(scene.video_profile_index == kExpectedProfiles[group][map]);
+        CHECK((scene.video_profile[4] & 0x04) != 0);
+        if (ActionRoomScene_HasCharacterAnimation(&scene)) animated++;
+        if (ActionRoomScene_HasBg2PageCycle(&scene)) page_cycles++;
+        if (scene.raster_preset != kActionRoomRaster_None) raster++;
+        if (scene.video_profile[4] & 0x02) forced_bg2_priority++;
+      }
       for (uint8_t bg = 1; bg <= 2; bg++) {
         if (!DioramaRomBackdrop_LoadActionBg(
                 rom, (size_t)length, group, map, bg, pixels,
@@ -237,6 +330,11 @@ static void TestStockRomCatalogue(const char *path) {
     }
   }
   CHECK(decoded == (4 + 8 + 6 + 7 + 8 + 8 + 8) * 2);
+  CHECK(scenes == 49);
+  CHECK(animated == 30);
+  CHECK(page_cycles == 2);
+  CHECK(raster == 17);
+  CHECK(forced_bg2_priority == 5);
   free(pixels);
   free(rom);
 }
@@ -245,6 +343,7 @@ int main(int argc, char **argv) {
   TestLiterals();
   TestOverlappingDictionaryCopyAndTruncation();
   TestGenericRoomScriptAndInheritance();
+  TestScenePhaseResolvers();
   /* Optional local census against a legally supplied stock ROM. CTest invokes
    * this binary without one, keeping the suite hermetic and distributable. */
   if (argc > 1) TestStockRomCatalogue(argv[1]);

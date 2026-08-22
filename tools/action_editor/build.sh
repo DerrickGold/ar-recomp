@@ -3,9 +3,8 @@
 #
 #   sh tools/action_editor/build.sh [rom] [out.html] [diorama-layers.ini]
 #
-# Needs only a C compiler and python3. The exporter reuses the SHIPPED ROM
-# decoder (src/diorama/diorama_rom_backdrop.c) rather than re-deriving the
-# asset-script walk, so the editor sees exactly what the game sees.
+# Needs only a C compiler and python3. The exporter links the shared immutable
+# ActionRoomScene decoder used by the game, so it owns no separate ROM logic.
 set -e
 cd "$(dirname "$0")/../.."
 ROM="${1:-ar.sfc}"
@@ -17,7 +16,8 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 cc -O2 -std=gnu11 -w -I src -I recomp \
    -I snesrecomp-go/runtime/src -I snesrecomp-go/runtime/src/snes \
-   tools/action_editor/action_bg_export.c src/quintet_lzss.c \
+   tools/action_editor/action_bg_export.c \
+   src/action/action_room_scene.c src/quintet_lzss.c \
    -o "$TMP/export"
 "$TMP/export" "$ROM" "$TMP/rooms.json"
 

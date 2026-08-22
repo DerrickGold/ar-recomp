@@ -672,8 +672,10 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_action_bg_test
         tests/actraiser_action_bg_test.c
+        src/quintet_lzss.c
         src/action/action_bg_plan.c
         src/action/action_bg_world.c
+        src/action/action_room_scene.c
         src/actraiser/actraiser_action_bg.c
         src/diorama/diorama_layer_order.c
     )
@@ -1253,6 +1255,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_diorama_rom_backdrop_test
         tests/diorama_rom_backdrop_test.c
         src/quintet_lzss.c
+        src/action/action_room_scene.c
         src/diorama/diorama_rom_backdrop.c
     )
     target_include_directories(actraiser_diorama_rom_backdrop_test PRIVATE

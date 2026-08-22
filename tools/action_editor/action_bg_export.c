@@ -2,17 +2,9 @@
  *
  * Feeds tools/action_editor/build.sh, which bakes the result into the
  * standalone tile-classification editor. Read-only: it opens the ROM, walks
- * each room's asset script through the SHIPPED decoder, and writes what that
- * decoder already reconstructed.
- *
- * It includes diorama_rom_backdrop.c rather than linking it, because the
- * asset-script walker and its ActionBgAssets result are file-static there.
- * Re-implementing the walk was the alternative and is exactly the kind of
- * re-derivation that goes subtly wrong: the $ECFF tile-word mask, the per-BG
- * attribute merge that maps BG1 definitions to chars $000-$0FF and BG2 to
- * $100-$1FF, and asset inheritance within an act are all easy to get almost
- * right. Using the shipped decoder means the editor sees exactly what the
- * game sees.
+ * each room's asset script through the shared ActionRoomScene decoder, and
+ * writes what that decoder already reconstructed. This is the same immutable
+ * room authority linked into the game; the exporter owns no ROM interpretation.
  *
  *   cc -I src -I recomp -I snesrecomp-go/runtime/src \
  *      tools/action_editor/action_bg_export.c -o /tmp/action_bg_export
@@ -22,7 +14,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "diorama/diorama_rom_backdrop.c"
+#include "action/action_room_scene.h"
+#include "actraiser_game.h"
 
 /* Assets repeat heavily: rooms in one act inherit the act's character and
  * palette uploads, so the same 16 KiB CHR blob backs many rooms. Emitting one
@@ -83,15 +76,15 @@ int main(int argc, char **argv) {
 
   FILE *out = fopen(argv[2], "wb");
   if (!out) { perror(argv[2]); return 1; }
-  fprintf(out, "{\n\"schema\":\"actraiser-action-bg-v1\",\n\"rooms\":[\n");
+  fprintf(out, "{\n\"schema\":\"actraiser-action-bg-v2\",\n\"rooms\":[\n");
 
   int rooms = 0, failures = 0;
   for (unsigned group = 1; group <= 7; group++) {
     for (unsigned map = 1; map <= 8; map++) {
-      if (!ActRaiser_IsActionMap((uint8)group, (uint8)map)) continue;
-      static ActionBgAssets assets;
-      if (!LoadAssetsForRoom(rom, (size_t)rom_size, (uint8_t)group,
-                             (uint8_t)map, &assets)) {
+      if (!ActRaiser_IsActionMap((uint8_t)group, (uint8_t)map)) continue;
+      static ActionRoomScene scene;
+      if (!ActionRoomScene_Load(&scene, rom, (size_t)rom_size,
+                                (uint8_t)group, (uint8_t)map)) {
         fprintf(stderr, "[export] %u:%u asset script failed\n", group, map);
         failures++;
         continue;
@@ -101,33 +94,67 @@ int main(int argc, char **argv) {
               "{\"group\":%u,\"map\":%u,\"chars\":%d,\"extraChars\":%d,"
               "\"palette\":%d,\"bg\":[",
               group, map,
-              assets.have_chars[0]
-                  ? InternBlob(assets.chars, kChrVramBytes) : -1,
-              assets.have_extra_chars
-                  ? InternBlob(assets.extra_chars, kChrBytes) : -1,
-              assets.have_palette
-                  ? InternBlob(assets.palette, kPaletteBytes) : -1);
+              scene.have_character_bank[0]
+                  ? InternBlob(scene.characters,
+                               kActionRoomSceneCharacterBytes) : -1,
+              scene.have_extra_characters
+                  ? InternBlob(scene.extra_characters,
+                               kActionRoomSceneExtraCharacterBytes) : -1,
+              scene.have_palette
+                  ? InternBlob(scene.palette, kActionRoomScenePaletteBytes) : -1);
       for (unsigned bg = 0; bg < 2; bg++) {
         if (bg) fputc(',', out);
-        if (!assets.have_map[bg] || !assets.have_metatiles[bg]) {
+        const ActionRoomSceneBg *layer = &scene.bg[bg];
+        if (!layer->have_map || !layer->have_metatiles) {
           fprintf(out, "null");
           continue;
         }
         fprintf(out,
                 "{\"metatiles\":%d,\"map\":%d,\"pagesWide\":%u,"
                 "\"pagesHigh\":%u}",
-                InternBlob(assets.metatiles[bg], kMetatileBytes),
-                InternBlob(assets.map[bg], assets.map_size[bg]),
-                assets.map_pages_wide[bg], assets.map_pages_high[bg]);
+                InternBlob(layer->metatiles,
+                           kActionRoomSceneMetatileBytes),
+                InternBlob(layer->map, layer->map_size),
+                layer->pages_wide, layer->pages_high);
       }
-      fprintf(out, "]}");
+      fprintf(out, "],\"videoProfile\":%d,\"video\":[",
+              scene.have_video_profile ? scene.video_profile_index : -1);
+      if (scene.have_video_profile) {
+        for (unsigned i = 0; i < kActionRoomSceneVideoProfileBytes; i++) {
+          if (i) fputc(',', out);
+          fprintf(out, "%u", scene.video_profile[i]);
+        }
+      }
+      fprintf(out, "],\"animation\":");
+      if (ActionRoomScene_HasCharacterAnimation(&scene)) {
+        fprintf(out,
+                "{\"target\":%u,\"stride\":%u,\"phases\":%u,"
+                "\"cadence\":%u,\"continuation\":%s}",
+                ActionRoomScene_CharacterAnimationTarget(&scene),
+                ActionRoomScene_CharacterAnimationStride(&scene),
+                ActionRoomScene_CharacterAnimationPhaseCount(&scene),
+                ActionRoomScene_CharacterAnimationCadence(&scene),
+                ActionRoomScene_CharacterAnimationContinues(&scene)
+                    ? "true" : "false");
+      } else {
+        fprintf(out, "null");
+      }
+      fprintf(out, ",\"bg2PageCycle\":");
+      if (ActionRoomScene_HasBg2PageCycle(&scene))
+        fprintf(out,
+                "{\"phases\":4,\"cadence\":5,\"order\":[1,2,3,0]}");
+      else
+        fprintf(out, "null");
+      fprintf(out, ",\"raster\":%u}", (unsigned)scene.raster_preset);
       rooms++;
     }
   }
 
   fprintf(out, "\n],\n\"tileWordMask\":%u,\"bg1Attributes\":%u,"
                "\"bg2Attributes\":%u,\n\"blobs\":[\n",
-          kActionBgTileWordMask, kActionBg1Attributes, kActionBg2Attributes);
+          kActionRoomSceneTileWordMask,
+          kActionRoomSceneBg1AttributeByte,
+          kActionRoomSceneBg2AttributeByte);
   size_t blob_bytes = 0;
   for (int i = 0; i < g_blob_count; i++) {
     if (i) fprintf(out, ",\n");

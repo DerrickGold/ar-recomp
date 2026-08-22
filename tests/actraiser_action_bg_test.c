@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "action/action_room_scene.h"
 #include "actraiser/actraiser_action_bg.h"
 #include "actraiser_game.h"
 #include "diorama/diorama_layer_order.h"
@@ -277,6 +278,61 @@ static void TestRingAndComparison(void) {
 
   ActionBgWorld_Destroy(world);
   free(vram);
+  free(wram);
+}
+
+static void TestImmutableRoomSceneComparison(void) {
+  uint8_t *wram = BuildWram();
+  ActionBgWorld *world = ActionBgWorld_Create();
+  CHECK(wram != NULL && world != NULL);
+  if (!wram || !world) {
+    ActionBgWorld_Destroy(world);
+    free(wram);
+    return;
+  }
+
+  ActRaiserActionBgLayerSnapshot snapshot;
+  CHECK(ActRaiserActionBg_CaptureLayer(
+      wram, kActRaiserWramSize, 0, 0x63, &snapshot));
+  snapshot.decode.word_mask = kActionRoomSceneTileWordMask;
+  snapshot.decode.attributes = kActionRoomSceneBg1AttributeByte;
+  CHECK(ActionBgWorld_Update(world, &snapshot.decode));
+
+  ActionRoomScene scene;
+  memset(&scene, 0, sizeof(scene));
+  scene.have_video_profile = true;
+  ActionRoomSceneBg *bg = &scene.bg[0];
+  bg->have_map = true;
+  bg->have_metatiles = true;
+  bg->pages_wide = 2;
+  bg->pages_high = 2;
+  bg->map_size = 4 * kActionRoomSceneMapPageBytes;
+  memcpy(bg->map, wram + kMapStart, bg->map_size);
+  for (size_t i = 0; i < kActionRoomSceneMetatileBytes; i += 2) {
+    bg->metatiles[i] = wram[kTableStart + i + 1];
+    bg->metatiles[i + 1] = wram[kTableStart + i];
+  }
+
+  ActRaiserActionRoomSceneCompareResult comparison;
+  CHECK(ActRaiserActionBg_CompareRoomSceneLayer(
+      &scene, 1, world, &comparison));
+  CHECK(comparison.compared == 64u * 64u);
+  CHECK(comparison.mismatches == 0);
+  CHECK(comparison.first_tile_x == -1 && comparison.first_tile_y == -1);
+
+  bg->map[0] = 1;
+  CHECK(ActRaiserActionBg_CompareRoomSceneLayer(
+      &scene, 1, world, &comparison));
+  CHECK(comparison.mismatches == 4);
+  CHECK(comparison.first_tile_x == 0 && comparison.first_tile_y == 0);
+  CHECK(comparison.first_immutable != comparison.first_live);
+
+  bg->pages_wide = 1;
+  CHECK(!ActRaiserActionBg_CompareRoomSceneLayer(
+      &scene, 1, world, &comparison));
+  CHECK(comparison.compared == 0 && comparison.mismatches == 0);
+
+  ActionBgWorld_Destroy(world);
   free(wram);
 }
 
@@ -859,6 +915,7 @@ int main(void) {
   TestCapture();
   TestVerticalMargins();
   TestRingAndComparison();
+  TestImmutableRoomSceneComparison();
   TestFramePlanCapture();
   TestPlanExtentProjection();
   TestFramePlanBinding();

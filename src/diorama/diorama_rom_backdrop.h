@@ -17,13 +17,10 @@ bool DioramaRomBackdrop_DecompressAsset(const uint8_t *packed,
                                         uint8_t *out,
                                         size_t expected_size);
 
-/* Read-only HLE reconstruction of an action room's BG1 or BG2. The loader
- * interprets the stock per-map asset script, including inherited assets within
- * an act, and never mutates emulated WRAM/VRAM/CGRAM. The first 256x256 map
- * page is rendered as opaque ARGB8888 for the residual backdrop plane. BG1's
- * native action tile-word mask and per-layer attribute merge are applied
- * before character lookup; this is what maps BG1 definitions to tiles
- * $000-$0FF and BG2 definitions to tiles $100-$1FF. */
+/* Compatibility rasterizer over the shared ActionRoomScene loader. The first
+ * 256x256 map page is rendered as opaque ARGB8888 for a residual backdrop
+ * plane, including profile-driven common tile priority during lookup. New
+ * arbitrary-room consumers should use action/action_room_scene.h directly. */
 bool DioramaRomBackdrop_LoadActionBg(const uint8_t *rom, size_t rom_size,
                                      uint8_t map_group, uint8_t map_number,
                                      uint8_t bg_layer,
