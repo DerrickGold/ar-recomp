@@ -166,8 +166,9 @@ bool ActRaiserActionBg_HleEnabled(void);
 
 /* Registers immutable cart bytes for the default-off room-scene shadow
  * comparator. AR_ACTION_ROOM_SCENE_COMPARE=1 compares each newly published
- * WRAM world with the shared arbitrary-room loader; it never changes provider
- * eligibility, PPU state, or gameplay. The ROM storage remains caller-owned. */
+ * WRAM world with the shared arbitrary-room loader. Its live publication cache
+ * is host-isolated from the production provider, so it never changes provider
+ * ownership, PPU state, or gameplay. The ROM storage remains caller-owned. */
 bool ActRaiserActionBg_InitRoomScenes(const uint8_t *rom, size_t rom_size);
 
 /* Pure full-world comparator used by the game-side shadow observer and ROM-free
@@ -224,8 +225,8 @@ uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
     const struct DioramaRoomOverride *virtual_room, struct Ppu *ppu);
 
 /* Default-off frame observer. `AR_ACTION_BG_HLE_COMPARE=1` enables it; it only
- * reads WRAM/PPU state and never binds a renderer provider or mutates emulated
- * memory. */
+ * reads WRAM/PPU state and publishes into a private diagnostic world. It never
+ * binds or republishes a renderer provider and never mutates emulated memory. */
 void ActRaiserActionBg_ObserveFrame(const uint8_t *wram, size_t wram_size,
                                     const struct Ppu *ppu);
 void ActRaiserActionBg_Reset(void);
