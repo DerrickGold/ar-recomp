@@ -369,6 +369,8 @@ static bool LayerGetsEdgeAA(int plane) {
     case kPpuOverlaySource_Bg2:
     case kDioramaPlane_Bg1Hi:
     case kDioramaPlane_Bg2Hi:
+    case kDioramaPlane_Bg1Far:
+    case kDioramaPlane_Bg2Far:
       return true;
     default:
       return false;
@@ -679,20 +681,21 @@ typedef struct DioramaLayerDesc {
   bool casts_shadow;  /* see kDioramaLayers comment: false for BG2/BG2Hi */
 } DioramaLayerDesc;
 
-/* Table order IS the draw order (painter's algorithm) and mirrors the SNES
- * Mode-1 priority stack exactly (the z-rank table in ppu.c
+/* Table order IS the draw order (painter's algorithm) and, ignoring the two
+ * normally empty virtual-far slots immediately before their anchors, mirrors
+ * the SNES Mode-1 priority stack exactly (the z-rank table in ppu.c
  * PpuDrawBackgrounds), so occlusion matches hardware: priority-1 tiles cover
  * priority-2 sprites, priority-0/1 sprites hide behind the playfield, and so
- * on. The world z carries only parallax — each priority band shares its
- * parent layer's depth (and all four sprite bands share one depth) so a
- * layer never parallax-splits against itself. BG3 stays one plane: ActRaiser
- * action HUDs ride the $2105 quirk rank in front of everything.
+ * on. The ordinary/high pair stays nearly co-planar; only an explicitly
+ * classified virtual-far surface separates art from its anchor in depth. All
+ * four sprite bands share one depth. BG3 stays one plane: ActRaiser action
+ * HUDs ride the $2105 quirk rank in front of everything.
  *
- * casts_shadow=false for BG2/BG2Hi: BG2 is drawn right after the backdrop
+ * casts_shadow=false for the BG2 family: BG2 is drawn right after the backdrop
  * (nothing but sky/distant scenery behind it), so its shadow would land
  * squarely on the sky — visually nonsensical (confirmed live: a large soft
  * blurred shadow next to the moon in a night scene, M8 GPU shadow-blur
- * testing). BG1/BG1Hi and sprites keep casting shadows onto whatever's
+ * testing). The BG1 family and sprites keep casting shadows onto whatever's
  * behind them (BG2, the ground, each other). */
 static const DioramaLayerDesc kDioramaLayers[] = {
   { kDioramaPlane_Backdrop, 0.00f, { 0.70f, 0.70f, 0.80f, 1.0f },
@@ -701,8 +704,12 @@ static const DioramaLayerDesc kDioramaLayers[] = {
     &g_settings.diorama_layer_obj, true, true },
   { kDioramaPlane_Obj1,     0.51f, { 1.0f,  1.0f,  1.0f,  1.0f },
     &g_settings.diorama_layer_obj, true, true },
+  { kDioramaPlane_Bg2Far,   0.05f, { 0.82f, 0.82f, 0.88f, 1.0f },
+    &g_settings.diorama_layer_bg2, false, false },
   { kPpuOverlaySource_Bg2,  0.20f, { 0.82f, 0.82f, 0.88f, 1.0f },   /* prio 0 */
     &g_settings.diorama_layer_bg2, false, false },
+  { kDioramaPlane_Bg1Far,   0.35f, { 0.92f, 0.92f, 0.95f, 1.0f },
+    &g_settings.diorama_layer_bg1, false, true },
   { kPpuOverlaySource_Bg1,  0.50f, { 0.92f, 0.92f, 0.95f, 1.0f },   /* prio 0 */
     &g_settings.diorama_layer_bg1, false, true },
   { kDioramaPlane_Obj2,     0.51f, { 1.0f,  1.0f,  1.0f,  1.0f },
@@ -918,6 +925,13 @@ static const char kLayerManifestPreamble[] =
     "#   stack:<0..1>  copies:<1..8>  density:<per unit>  dir:<forward|"
     "backward|both>\n"
     "#   voxel:<0..1>  slices:<2..24>\n"
+    "# Action BG virtual depth bands share the same room section. Band 0 is the\n"
+    "# new far plane, band 1 the ordinary BG plane, and band 2 its priority-1\n"
+    "# plane. Cell rectangles override metatile rules; the ROM priority bit is\n"
+    "# the fallback. The virtual plane itself accepts z/order/alpha:\n"
+    "#   bg1-virtual = z:0.35 order:4 alpha:255\n"
+    "#   bg1-virtual = metatile:23 band:0\n"
+    "#   bg1-virtual = cells:4,5-12,5 band:2\n"
     "# Backdrop's source key selects the SKYBOX: captured uses current BG2;\n"
     "# rom-GG-MM-bgN (N=1/2) decodes a stock action BG. Backdrop alpha/z/order\n"
     "# control only the residual plane and do not disable that skybox source.\n"
@@ -2235,7 +2249,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
         map_number >= 2 && map_number <= 3 &&
         layer_section == kDioramaLayerSection_AitosWaterfall &&
         (layer->plane == kPpuOverlaySource_Bg2 ||
-         layer->plane == kDioramaPlane_Bg2Hi);
+         layer->plane == kDioramaPlane_Bg2Hi ||
+         layer->plane == kDioramaPlane_Bg2Far);
     float attached_lower_content_v_max = 0.0f;
     /* AR_AITOS_WATERFALL_LOG=1 draw-side counterpart. Seeded to sentinels so a
      * frame that took an early-out inside the block is distinguishable from one

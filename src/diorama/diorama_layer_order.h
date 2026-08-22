@@ -65,6 +65,14 @@ enum {
    * so authoring a voxel cannot silently raise the budget for ordinary stacks. */
   kDioramaVoxelMax = 24,
   kDioramaVoxelCopiesDefault = 12,
+  /* Sparse presentation-only cell regions for one action BG. The editor
+   * coalesces painted cells into horizontal rectangles, so ordinary brush
+   * work costs one span per affected metatile row rather than one record per
+   * cell. The largest shipped room is 128 metatile rows high; 512 leaves room
+   * for several disjoint passes while keeping DioramaLayerOrderTable a small,
+   * fixed-value object that existing reset/save code can memset safely. */
+  kDioramaVirtualCellSpanMax = 512,
+  kDioramaVirtualBandCount = 3,
 };
 
 /* Optional authored subsection of a room. The base room always resolves first;
@@ -301,12 +309,45 @@ typedef struct DioramaPlaneOverride {
   int voxel_copies;
 } DioramaPlaneOverride;
 
+/* Presentation-only depth classification for one action background.
+ *
+ * This is intentionally kept beside the ordinary room plane overrides: both
+ * are authored in the same [layers:GG:MM] section and must survive the same
+ * comment-preserving merge. It does not change the authentic SNES tile word.
+ * The later renderer consumes the resolved band only while splitting captured
+ * diorama surfaces, which is what keeps flat presentation byte-identical.
+ *
+ * Band 0 is a new far surface, band 1 is the BG's ordinary priority-0 plane,
+ * and band 2 is its existing priority-1 plane. Cell spans override metatile
+ * rules; the tile word's priority bit is the fallback. */
+typedef struct DioramaVirtualCellSpan {
+  uint16_t x0, y0;
+  uint16_t x1, y1;  /* inclusive */
+  uint8_t band;
+} DioramaVirtualCellSpan;
+
+typedef struct DioramaVirtualLayerOverride {
+  bool set_z;
+  float z;
+  bool set_order;
+  int order;
+  bool set_alpha;
+  uint8_t alpha;
+  /* One presence bit per metatile id. A separate bitset lets zero-initialized
+   * rooms mean "no rules" even though band 0 is a valid authored value. */
+  uint8_t metatile_set[32];
+  uint8_t metatile_bands[256];
+  uint16_t cell_span_count;
+  DioramaVirtualCellSpan cell_spans[kDioramaVirtualCellSpanMax];
+} DioramaVirtualLayerOverride;
+
 typedef struct DioramaRoomOverride {
   bool used;
   uint8_t map_group;   /* $18 */
   uint8_t map_number;  /* $19 */
   uint8_t section;     /* DioramaLayerSection; Room is the base override */
   DioramaPlaneOverride planes[kDioramaPlane_Count];
+  DioramaVirtualLayerOverride virtual_layers[2]; /* BG1, BG2 */
 } DioramaRoomOverride;
 
 typedef struct DioramaLayerOrderTable {
@@ -379,12 +420,32 @@ DioramaRoomOverride *DioramaLayerOrder_FindOrAddSection(
     DioramaLayerOrderTable *table, uint8_t map_group, uint8_t map_number,
     uint8_t section);
 
-/* True when the room has at least one authored plane. A room whose every
- * override was reset is NOT active, so it behaves exactly as if it had never
- * been authored — that is what makes "Reset room" a true undo. */
+/* True when the room has an authored plane or virtual action-layer record. A
+ * room whose every override was reset is NOT active, so it behaves exactly as
+ * if it had never been authored. */
 bool DioramaLayerOrder_RoomIsActive(const DioramaRoomOverride *room);
 
-/* Drop every override for a room (the editor's "Reset room"). */
+/* Resolve one action tile's presentation band without changing its SNES
+ * priority. `bg` is 0 for BG1 or 1 for BG2. Cell rules are checked newest
+ * first so a later line in the INI refines an earlier rectangle. Invalid
+ * inputs fall back to the authentic priority bit (band 1 or 2). */
+int DioramaLayerOrder_VirtualBand(const DioramaRoomOverride *room, int bg,
+                                  int cell_x, int cell_y,
+                                  uint8_t metatile, uint16_t tile_word);
+
+/* Whether one BG has authored geometry or classification records. */
+bool DioramaLayerOrder_VirtualLayerIsAuthored(
+    const DioramaVirtualLayerOverride *layer);
+
+/* Drop only the legacy in-game plane editor's overrides. Virtual action-layer
+ * records are authored by the standalone action editor and must survive this
+ * operation. The full reset functions below remain available for callers that
+ * intentionally own the complete section. */
+void DioramaLayerOrder_ResetPlaneOverridesSection(
+    DioramaLayerOrderTable *table, uint8_t map_group, uint8_t map_number,
+    uint8_t section);
+
+/* Drop every override for a room or section. */
 void DioramaLayerOrder_ResetRoom(DioramaLayerOrderTable *table,
                                  uint8_t map_group, uint8_t map_number);
 void DioramaLayerOrder_ResetSection(DioramaLayerOrderTable *table,

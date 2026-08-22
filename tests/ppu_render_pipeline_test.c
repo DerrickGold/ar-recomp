@@ -117,6 +117,17 @@ static bool lookup_virtual_tile(const void *context, int32_t tile_x,
   return true;
 }
 
+static bool lookup_virtual_band(const void *context, int32_t tile_x,
+                                int32_t tile_y, uint16_t entry,
+                                uint8_t *band) {
+  (void)context;
+  (void)tile_y;
+  (void)entry;
+  if (!band || tile_x < 0) return false;
+  *band = (uint8_t)(tile_x % 3);
+  return true;
+}
+
 static uint32_t rgb555(int r5, int g5, int b5) {
   return (uint32_t)expand5(r5) << 16 |
       (uint32_t)expand5(g5) << 8 | expand5(b5);
@@ -459,6 +470,67 @@ static void TestVirtualTilemapAuthenticParity(void) {
   CHECK(memcmp(fb, native_pixels, sizeof(native_pixels)) == 0);
   CHECK(memcmp(ppu->bgBuffers[0].data + kPpuExtraLeftRight,
                native_priority, sizeof(native_priority)) == 0);
+
+  ppu_free(ppu);
+  g_new_ppu = saved_new_ppu;
+}
+
+static void TestVirtualTilemapPresentationBandsPreserveFlatOutput(void) {
+  const int bg1 = kActRaiserPpuLayer_Bg1;
+  const bool saved_new_ppu = g_new_ppu;
+  g_new_ppu = true;
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+  static uint8_t fb[kW * sizeof(uint32_t)];
+  static uint8_t baseline[sizeof(fb)];
+  static uint32_t primary[kW], high[kW], far[kW];
+
+  VirtualTilemapFixture map = {
+    .min_x = 0, .max_x = 63, .min_y = 0, .max_y = 63,
+    .even_entry = (uint16_t)(2 | (2 << 10)),
+    .odd_entry = (uint16_t)(3 | (3 << 10) | 0x2000),
+  };
+  PpuVirtualTilemapBinding binding = {
+    .lookup = lookup_virtual_tile,
+    .context = &map,
+    .camera_x = 8,
+    .camera_y = 0,
+    .hscroll_anchor = 8,
+    .vscroll_anchor = 0,
+    .flags = kPpuVirtualTilemapFlag_IncludeAuthentic,
+  };
+
+  setup_virtual_bg(ppu, 0, fb, sizeof(fb));
+  CHECK(PpuSetVirtualTilemap(ppu, (uint8_t)bg1, &binding));
+  render_first_line(ppu);
+  memcpy(baseline, fb, sizeof(baseline));
+
+  setup_virtual_bg(ppu, 0, fb, sizeof(fb));
+  memset(primary, 0, sizeof(primary));
+  memset(high, 0, sizeof(high));
+  memset(far, 0, sizeof(far));
+  binding.band_lookup = lookup_virtual_band;
+  CHECK(PpuSetVirtualTilemap(ppu, (uint8_t)bg1, &binding));
+  CHECK(PpuBindOverlaySurface(
+      ppu, kPpuOverlaySource_Bg1, (uint8_t *)primary, sizeof(primary)));
+  CHECK(PpuBindOverlayPrioSurface(
+      ppu, kPpuOverlaySource_Bg1, 1, (uint8_t *)high));
+  CHECK(PpuBindOverlayPrioSurface(
+      ppu, kPpuOverlaySource_Bg1, 2, (uint8_t *)far));
+  CHECK(PpuSetOverlayCapture(
+      ppu, kPpuOverlaySource_Bg1, 0, 0, kW, 1, 0));
+  render_first_line(ppu);
+
+  /* World x begins at tile 1: ordinary, high, far, then repeats. Each
+   * captured pixel lands in exactly one presentation surface. */
+  CHECK(primary[0] != 0 && high[0] == 0 && far[0] == 0);
+  CHECK(primary[8] == 0 && high[8] != 0 && far[8] == 0);
+  CHECK(primary[16] == 0 && high[16] == 0 && far[16] != 0);
+  CHECK(PpuOverlaySurfaceHasContent(ppu, kPpuOverlaySource_Bg1, 0));
+  CHECK(PpuOverlaySurfaceHasContent(ppu, kPpuOverlaySource_Bg1, 1));
+  CHECK(PpuOverlaySurfaceHasContent(ppu, kPpuOverlaySource_Bg1, 2));
+  CHECK(memcmp(fb, baseline, sizeof(baseline)) == 0);
 
   ppu_free(ppu);
   g_new_ppu = saved_new_ppu;
@@ -2338,6 +2410,7 @@ int main(void) {
   TestVirtualTilemapMargins();
   TestVirtualTilemapEffects();
   TestVirtualTilemapAuthenticParity();
+  TestVirtualTilemapPresentationBandsPreserveFlatOutput();
   TestVirtualTilemapVerticalMargin();
   SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
   CHECK(SDL_Init(SDL_INIT_VIDEO));

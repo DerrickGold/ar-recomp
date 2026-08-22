@@ -212,6 +212,8 @@ static void TestPlaneEligibilityMatchesDrawableInputs(void) {
   CHECK(!Diorama_PlaneEligible(
       kPpuOverlaySource_Bg2, true, true, true, false, true));
   CHECK(!Diorama_PlaneEligible(
+      kDioramaPlane_Bg2Far, true, true, true, false, true));
+  CHECK(!Diorama_PlaneEligible(
       kPpuOverlaySource_Bg3, true, true, true, true, false));
 
   /* A current actor effect supplies current projection content for its exact

@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "actraiser_game.h"
+#include "diorama/diorama_layer_order.h"
 #include "snes/ppu.h"
 
 enum {
@@ -32,7 +33,9 @@ typedef struct ActRaiserActionBgObserver {
 
 typedef struct ActRaiserActionBgProvider {
   const ActionBgWorld *world;
+  const DioramaRoomOverride *virtual_room;
   bool wrap_world_x;
+  uint8_t layer;
 } ActRaiserActionBgProvider;
 
 static ActRaiserActionBgObserver s_observer = {
@@ -443,6 +446,27 @@ static bool ProviderLookup(const void *context, int32_t tile_x,
   return false;
 }
 
+static bool ProviderBandLookup(const void *context, int32_t tile_x,
+                               int32_t tile_y, uint16_t entry,
+                               uint8_t *band) {
+  const ActRaiserActionBgProvider *provider = context;
+  if (!provider || !provider->world || !provider->virtual_room || !band ||
+      provider->layer >= kActionBgLayerCount ||
+      !DioramaLayerOrder_VirtualLayerIsAuthored(
+          &provider->virtual_room->virtual_layers[provider->layer]))
+    return false;
+  if (provider->wrap_world_x)
+    tile_x = WrapWorldTile(tile_x, ActionBgWorld_TileWidth(provider->world));
+  uint8_t metatile = 0;
+  if (!ActionBgWorld_LookupMetatile(
+          provider->world, tile_x, tile_y, &metatile))
+    return false;
+  *band = (uint8_t)DioramaLayerOrder_VirtualBand(
+      provider->virtual_room, provider->layer, tile_x >> 1, tile_y >> 1,
+      metatile, entry);
+  return *band < kDioramaVirtualBandCount;
+}
+
 static void ReportComparison(
     const uint8_t *wram, unsigned layer, uint8_t map_group,
     uint8_t map_number, const ActRaiserActionBgLayerSnapshot *snapshot,
@@ -480,6 +504,13 @@ static void ReportComparison(
 uint8_t ActRaiserActionBg_BindPlan(
     const uint8_t *wram, size_t wram_size, const ActionBgPlan *plan,
     struct Ppu *ppu) {
+  return ActRaiserActionBg_BindPlanWithVirtualLayers(
+      wram, wram_size, plan, NULL, ppu);
+}
+
+uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
+    const uint8_t *wram, size_t wram_size, const ActionBgPlan *plan,
+    const struct DioramaRoomOverride *virtual_room, struct Ppu *ppu) {
   PpuClearVirtualTilemaps(ppu);
   if (!ActRaiserActionBg_HleEnabled() ||
       !wram || !ppu || !plan || !plan->valid ||
@@ -585,9 +616,12 @@ uint8_t ActRaiserActionBg_BindPlan(
     const bool include_authentic = comparison.mismatches == 0;
     s_observer.diagnostics.provider_eligible_layers++;
     s_provider[layer].world = world;
+    s_provider[layer].virtual_room = virtual_room;
     s_provider[layer].wrap_world_x = layer_plan->wrap_world_x;
+    s_provider[layer].layer = (uint8_t)layer;
     const PpuVirtualTilemapBinding binding = {
       .lookup = ProviderLookup,
+      .band_lookup = ProviderBandLookup,
       .context = &s_provider[layer],
       .camera_x = snapshot.camera_x,
       .camera_y = snapshot.camera_y,

@@ -458,9 +458,9 @@ const char *DioramaLayerEditor_RowHelp(DioramaEditorRowKind kind,
                                        DioramaEditorParam param,
                                        DioramaDepthStrategy strategy) {
   if (kind == kDioramaEditorRow_ResetRoom)
-    return "Clear every override in this room or camera-local section, "
-           "restoring its inherited built-in look. The scope stops being "
-           "written to diorama-layers.ini entirely.";
+    return "Clear the plane overrides authored by this in-game editor, "
+           "restoring their inherited built-in look. Standalone action-editor "
+           "virtual layers are preserved.";
   if (kind == kDioramaEditorRow_Header)
     return "The editor authors the room you are standing in. Walk into a stage "
            "on this level to edit it.";

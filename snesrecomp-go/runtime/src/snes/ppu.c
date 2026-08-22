@@ -202,7 +202,7 @@ bool PpuBindOverlaySurface(Ppu *ppu, PpuOverlaySource source,
 bool PpuBindOverlayPrioSurface(Ppu *ppu, PpuOverlaySource source, int band,
                                uint8_t *pixels) {
   if ((unsigned)source >= kPpuOverlaySource_Count || band < 1 || band > 3 ||
-      (source != kPpuOverlaySource_Obj && band != 1) ||
+      (source != kPpuOverlaySource_Obj && band > 2) ||
       (pixels && !ppu->overlayRenderBuffer[source]))
     return false;
   ppu->overlayRenderBands[source][band - 1] = pixels;
@@ -1027,6 +1027,9 @@ static void PpuDrawVirtualTilemapSpan(
   const int x_delta = PpuVirtualScrollDelta(
       ppu->hScroll[layer], binding->hscroll_anchor);
   const int tile_base = PPU_bgTileAdr(ppu, layer);
+  uint8_t *presentation_bands =
+      layer < 2 && dstbuf == &ppu->overlayBuffers[layer]
+      ? ppu->overlayVirtualBands[layer] : NULL;
 
   int screen_x = x0;
   PpuZbufType *dstz = dstbuf->data + x0 + kPpuExtraLeftRight;
@@ -1052,6 +1055,13 @@ static void PpuDrawVirtualTilemapSpan(
 
     uint16_t tile = 0;
     if (binding->lookup(binding->context, tile_x, tile_y, &tile)) {
+      uint8_t presentation_band = 0xff;
+      if (presentation_bands && binding->band_lookup) {
+        uint8_t classified = 0xff;
+        if (binding->band_lookup(binding->context, tile_x, tile_y, tile,
+                                 &classified) && classified < 3)
+          presentation_band = classified;
+      }
       int tile_row = (tile & 0x8000) ? 7 - fine_y : fine_y;
       const uint16_t *address =
           &ppu->vram[(tile_base + (tile & 0x3ff) * 16 + tile_row) &
@@ -1063,15 +1073,24 @@ static void PpuDrawVirtualTilemapSpan(
                                     (tile & 0x4000) != 0);
         if (pixel) {
           PpuZbufType value = z + ((tile & 0x1c00) >> 6) + pixel;
-          for (int i = 0; i < run; i++)
-            if (z > dstz[i]) dstz[i] = value;
+          for (int i = 0; i < run; i++) {
+            if (z <= dstz[i]) continue;
+            dstz[i] = value;
+            if (presentation_bands)
+              presentation_bands[screen_x + i + kPpuExtraLeftRight] =
+                  presentation_band;
+          }
         }
       } else {
         for (int i = 0; i < run; i++) {
           int pixel = PpuObjTilePixel(plane, fine_x + i,
                                       (tile & 0x4000) != 0);
-          if (pixel && z > dstz[i])
+          if (pixel && z > dstz[i]) {
             dstz[i] = z + ((tile & 0x1c00) >> 6) + pixel;
+            if (presentation_bands)
+              presentation_bands[screen_x + i + kPpuExtraLeftRight] =
+                  presentation_band;
+          }
         }
       }
     }
@@ -1941,6 +1960,35 @@ static bool PpuOverlayPixelPassesWinnerFilter(
   return (filter->math_enabled & (1u << main_layer)) != 0;
 }
 
+static uint32 *PpuOverlayBgBandOutput(
+    const Ppu *ppu, PpuOverlaySource source, int pixel_index,
+    PpuZbufType priority_pixel, uint8_t hi_prio_min,
+    uint32 *primary, uint32 *band_dst[3], int *content_band) {
+  if (content_band) *content_band = 0;
+  if ((unsigned)source < 2u) {
+    const uint8_t virtual_band =
+        ppu->overlayVirtualBands[source][pixel_index];
+    if (virtual_band == 0 && band_dst[1]) {
+      if (content_band) *content_band = 2;
+      return band_dst[1];
+    }
+    if (virtual_band == 1)
+      return primary;
+    if (virtual_band == 2) {
+      if (band_dst[0]) {
+        if (content_band) *content_band = 1;
+        return band_dst[0];
+      }
+      return primary;
+    }
+  }
+  if (band_dst[0] && (priority_pixel >> 8) >= hi_prio_min) {
+    if (content_band) *content_band = 1;
+    return band_dst[0];
+  }
+  return primary;
+}
+
 static void PpuWriteOverlayRenderLineFiltered(
     Ppu *ppu, PpuOverlaySource source, int y,
     const PpuOverlayWinnerFilter *filter) {
@@ -2058,13 +2106,17 @@ static void PpuWriteOverlayRenderLineFiltered(
     } else {
       const uint8_t hi_prio_min = kBgHiPrioMin[source];
       for (int x = x0; x < x1; x++) {
-        PpuZbufType zp = src[x + kPpuExtraLeftRight];
+        const int index = x + kPpuExtraLeftRight;
+        PpuZbufType zp = src[index];
         uint32 color = PpuObjColor(ppu, zp & 0xff);
         if (!color)
           continue;
-        const bool high = band_dst[0] && (zp >> 8) >= hi_prio_min;
-        (high ? band_dst[0] : dst)[x + texture_extra] = color;
-        content_mask |= high ? 2u : 1u;
+        int content_band = 0;
+        uint32 *out = PpuOverlayBgBandOutput(
+            ppu, source, index, zp, hi_prio_min, dst, band_dst,
+            &content_band);
+        out[x + texture_extra] = color;
+        content_mask |= (uint8_t)(1u << content_band);
       }
     }
     ppu->overlayRenderContentMask[source] |= content_mask;
@@ -2087,9 +2139,10 @@ static void PpuWriteOverlayRenderLineFiltered(
         out = band_dst[band - 1];
         content_band = band;
       }
-    } else if (band_dst[0] && (zp >> 8) >= kBgHiPrioMin[source]) {
-      out = band_dst[0];
-      content_band = 1;
+    } else {
+      out = PpuOverlayBgBandOutput(
+          ppu, source, index, zp, kBgHiPrioMin[source], dst, band_dst,
+          &content_band);
     }
     out[x + texture_extra] = color;
     content_mask |= (uint8_t)(1u << content_band);
@@ -2209,6 +2262,9 @@ static PpuPixelPrioBufs *PpuBeginBackgroundOverlay(Ppu *ppu, int y,
     return &ppu->bgBuffers[sub];
   memset(&ppu->overlayBuffers[source], 0,
          sizeof(ppu->overlayBuffers[source]));
+  if (layer < 2)
+    memset(ppu->overlayVirtualBands[layer], 0xff,
+           sizeof(ppu->overlayVirtualBands[layer]));
   return &ppu->overlayBuffers[source];
 }
 

@@ -9,6 +9,7 @@
 #include "action/action_bg_world.h"
 
 struct Ppu;
+struct DioramaRoomOverride;
 
 /* ActRaiser-specific capture and differential observer for SPEC-bg-hle BH2.
  * The pure world decoder remains game-agnostic; this adapter is the only place
@@ -122,6 +123,14 @@ bool ActRaiserActionBg_HleEnabled(void);
 uint8_t ActRaiserActionBg_BindPlan(
     const uint8_t *wram, size_t wram_size, const ActionBgPlan *plan,
     struct Ppu *ppu);
+
+/* Diorama render-only variant. `virtual_room` is the base action-room record
+ * authored by the standalone editor; NULL preserves the authentic priority
+ * split. Classification changes only captured presentation surfaces, never
+ * the native PPU composition. */
+uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
+    const uint8_t *wram, size_t wram_size, const ActionBgPlan *plan,
+    const struct DioramaRoomOverride *virtual_room, struct Ppu *ppu);
 
 /* Default-off frame observer. `AR_ACTION_BG_HLE_COMPARE=1` enables it; it only
  * reads WRAM/PPU state and never binds a renderer provider or mutates emulated

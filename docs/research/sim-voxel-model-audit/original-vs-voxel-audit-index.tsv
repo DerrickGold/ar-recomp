@@ -1,0 +1,68 @@
+number	section	label	voxel_file	original_source	original_detail
+1	Regional houses	Fillmore early house - front	house-1-0-front.bmp	ROM structure metatile MT $02	Fillmore tier 1 front; family $00
+2	Regional houses	Fillmore early house - alternate	house-1-0-alternate.bmp	ROM structure metatile MT $03	Fillmore tier 1 alternate; family $00
+3	Regional houses	Fillmore middle house - front	house-1-1-front.bmp	ROM structure metatile MT $0A	Fillmore tier 2 front; family $02
+4	Regional houses	Fillmore middle house - alternate	house-1-1-alternate.bmp	ROM structure metatile MT $0B	Fillmore tier 2 alternate; family $02
+5	Regional houses	Fillmore developed house - front	house-1-2-front.bmp	ROM structure metatile MT $12	Fillmore tier 3 front; family $04
+6	Regional houses	Fillmore developed house - alternate	house-1-2-alternate.bmp	ROM structure metatile MT $13	Fillmore tier 3 alternate; family $04
+7	Regional houses	Bloodpool early house - front	house-2-0-front.bmp	ROM structure metatile MT $02	Bloodpool tier 1 front; family $00
+8	Regional houses	Bloodpool early house - alternate	house-2-0-alternate.bmp	ROM structure metatile MT $03	Bloodpool tier 1 alternate; family $00
+9	Regional houses	Bloodpool middle house - front	house-2-1-front.bmp	ROM structure metatile MT $0A	Bloodpool tier 2 front; family $02
+10	Regional houses	Bloodpool middle house - alternate	house-2-1-alternate.bmp	ROM structure metatile MT $0B	Bloodpool tier 2 alternate; family $02
+11	Regional houses	Bloodpool developed house - front	house-2-2-front.bmp	ROM structure metatile MT $1A	Bloodpool tier 3 front; family $06
+12	Regional houses	Bloodpool developed house - alternate	house-2-2-alternate.bmp	ROM structure metatile MT $1B	Bloodpool tier 3 alternate; family $06
+13	Regional houses	Kasandora early house - front	house-3-0-front.bmp	ROM structure metatile MT $02	Kasandora tier 1 front; family $00
+14	Regional houses	Kasandora early house - alternate	house-3-0-alternate.bmp	ROM structure metatile MT $03	Kasandora tier 1 alternate; family $00
+15	Regional houses	Kasandora middle house - front	house-3-1-front.bmp	ROM structure metatile MT $22	Kasandora tier 2 front; family $08
+16	Regional houses	Kasandora middle house - alternate	house-3-1-alternate.bmp	ROM structure metatile MT $23	Kasandora tier 2 alternate; family $08
+17	Regional houses	Kasandora developed house - front	house-3-2-front.bmp	ROM structure metatile MT $2A	Kasandora tier 3 front; family $0A
+18	Regional houses	Kasandora developed house - alternate	house-3-2-alternate.bmp	ROM structure metatile MT $2B	Kasandora tier 3 alternate; family $0A
+19	Regional houses	Aitos early house - front	house-4-0-front.bmp	ROM structure metatile MT $02	Aitos tier 1 front; family $00
+20	Regional houses	Aitos early house - alternate	house-4-0-alternate.bmp	ROM structure metatile MT $03	Aitos tier 1 alternate; family $00
+21	Regional houses	Aitos middle house - front	house-4-1-front.bmp	ROM structure metatile MT $0A	Aitos tier 2 front; family $02
+22	Regional houses	Aitos middle house - alternate	house-4-1-alternate.bmp	ROM structure metatile MT $0B	Aitos tier 2 alternate; family $02
+23	Regional houses	Aitos developed house - front	house-4-2-front.bmp	ROM structure metatile MT $32	Aitos tier 3 front; family $0C
+24	Regional houses	Aitos developed house - alternate	house-4-2-alternate.bmp	ROM structure metatile MT $33	Aitos tier 3 alternate; family $0C
+25	Regional houses	Marahna early house - front	house-5-0-front.bmp	ROM structure metatile MT $02	Marahna tier 1 front; family $00
+26	Regional houses	Marahna early house - alternate	house-5-0-alternate.bmp	ROM structure metatile MT $03	Marahna tier 1 alternate; family $00
+27	Regional houses	Marahna middle house - front	house-5-1-front.bmp	ROM structure metatile MT $3A	Marahna tier 2 front; family $0E
+28	Regional houses	Marahna middle house - alternate	house-5-1-alternate.bmp	ROM structure metatile MT $3B	Marahna tier 2 alternate; family $0E
+29	Regional houses	Marahna developed house - front	house-5-2-front.bmp	ROM structure metatile MT $0A	Marahna tier 3 front; family $02
+30	Regional houses	Marahna developed house - alternate	house-5-2-alternate.bmp	ROM structure metatile MT $0B	Marahna tier 3 alternate; family $02
+31	Regional houses	Northwall early house - front	house-6-0-front.bmp	ROM structure metatile MT $02	Northwall tier 1 front; family $00
+32	Regional houses	Northwall early house - alternate	house-6-0-alternate.bmp	ROM structure metatile MT $03	Northwall tier 1 alternate; family $00
+33	Regional houses	Northwall middle house - front	house-6-1-front.bmp	ROM structure metatile MT $0A	Northwall tier 2 front; family $02
+34	Regional houses	Northwall middle house - alternate	house-6-1-alternate.bmp	ROM structure metatile MT $0B	Northwall tier 2 alternate; family $02
+35	Regional houses	Northwall developed house - front	house-6-2-front.bmp	ROM structure metatile MT $2A	Northwall tier 3 front; family $0A
+36	Regional houses	Northwall developed house - alternate	house-6-2-alternate.bmp	ROM structure metatile MT $2B	Northwall tier 3 alternate; family $0A
+37	Landmarks and infrastructure	Cathedral - temperate	cathedral-temperate.bmp	Authentic Fillmore B map crop	cells 13,13-14,14
+38	Landmarks and infrastructure	Cathedral - Northwall snow	cathedral-snow.bmp	Authentic Northwall B map crop	cells 9,21-10,22
+39	Landmarks and infrastructure	Windmill - blade phase 1	windmill-phase-0.bmp	ROM draw list #77 at $03:DBF1	built windmill blade phase 1
+40	Landmarks and infrastructure	Windmill - blade phase 2	windmill-phase-1.bmp	ROM draw list #78 at $03:DBFE	built windmill blade phase 2
+41	Landmarks and infrastructure	Windmill - blade phase 3	windmill-phase-2.bmp	ROM draw list #76 at $03:DBE4	built windmill blade phase 3
+42	Landmarks and infrastructure	Windmill - Northwall snow	windmill-snow.bmp	ROM draw list #77 at $03:DBF1	same built source; Northwall model palette
+43	Landmarks and infrastructure	Factory - temperate	factory-temperate.bmp	ROM draw list #89 at $03:DC45	completed factory
+44	Landmarks and infrastructure	Factory - Northwall snow	factory-snow.bmp	ROM draw list #89 at $03:DC45	same completed source; Northwall model palette
+45	Landmarks and infrastructure	Bloodpool castle	bloodpool-castle.bmp	Authentic Bloodpool A map crop	cells 6,16-7,17
+46	Landmarks and infrastructure	Kasandora pyramid	kasandora-pyramid.bmp	Authentic Kasandora A map crop	cells 20,4-21,5
+47	Landmarks and infrastructure	Marahna temple	marahna-temple.bmp	Authentic Marahna A map crop	cells 6,20-7,21
+48	Vegetation	Fillmore permanent tree	tree-town-1.bmp	Authentic Fillmore B map crop	cells 20,9
+49	Vegetation	Bloodpool permanent tree	tree-town-2.bmp	Authentic Bloodpool B map crop	cells 28,5
+50	Vegetation	Kasandora permanent tree	tree-town-3.bmp	Authentic Kasandora B map crop	cells 29,4
+51	Vegetation	Aitos permanent tree	tree-town-4.bmp	Authentic Aitos B map crop	cells 6,8
+52	Vegetation	Marahna permanent tree	tree-town-5.bmp	ROM terrain metatile MT $0B	shared evergreen source in Marahna palette
+53	Vegetation	Northwall permanent tree	tree-town-6.bmp	ROM terrain metatile MT $0B	shared evergreen silhouette; Northwall model palette
+54	Vegetation	Kasandora broad tree	broad-tree-kasandora.bmp	Authentic Kasandora B map crop	cells 24,29
+55	Vegetation	Marahna broad tree	broad-tree-marahna.bmp	Authentic Marahna B map crop	cells 3,1
+56	Vegetation	Marahna palm	marahna-palm.bmp	ROM terrain metatile MT $09	Marahna clearable-palm source art
+57	Vegetation	Clearable shrub	clearable-shrub.bmp	ROM terrain metatile MT $01	shared clearable-bush source art
+58	Vegetation	Northwall ancient story tree	northwall-story-tree.bmp	Authentic Northwall B map crop	cells 26,14-27,15
+59	Bridges	Temperate bridge - east/west	bridge-temperate-ew.bmp	Authentic Fillmore B map crop	cells 6,10
+60	Bridges	Temperate bridge - north/south	bridge-temperate-ns.bmp	Authentic Fillmore B map crop	cells 8,18
+61	Bridges	Northwall bridge - east/west	bridge-snow-ew.bmp	Authentic Northwall B map crop	cells 16,22
+62	Bridges	Northwall bridge - north/south	bridge-snow-ns.bmp	Authentic Northwall B map crop	cells 9,26
+63	Construction	House construction frame	construction-house.bmp	ROM structure metatile MT $00	first house construction frame
+64	Construction	Windmill construction - phase 1	construction-windmill-0.bmp	ROM draw list #73 at $03:DBBD	construction phase 1
+65	Construction	Windmill construction - phase 2	construction-windmill-1.bmp	ROM draw list #74 at $03:DBCA	construction phase 2
+66	Construction	Windmill construction - phase 3	construction-windmill-2.bmp	ROM draw list #75 at $03:DBD7	construction phase 3
+67	Construction	Factory construction frame	construction-factory.bmp	ROM draw list #88 at $03:DC38	factory construction frame
