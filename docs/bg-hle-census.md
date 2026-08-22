@@ -31,6 +31,9 @@ Inputs and output contract:
 - the current runner also enables the independent
   `AR_ACTION_ROOM_STAGE_COMPARE=1` command-4/5 WRAM oracle; historical
   manifests created before 2026-08-22 naturally do not contain that summary;
+- the current runner requires the default guarded command-4/5 CPU HLE to report
+  nonzero command and byte counts; `AR_ACTION_ROOM_LOAD_HLE=0` remains the
+  separate exact native control;
 - two full WRAM/VRAM/CGRAM/OAM/PPU snapshots per target;
 - one authentic 256x224 flat framebuffer per target;
 - machine-readable local manifest:
@@ -82,8 +85,8 @@ scene plan can say the layer never activates.
 
 ## Command-4/5 background staging image — 2026-08-22
 
-`ActRaiserActionBg_StageRoomSceneLayer` is the bounded data-plane core for the
-next loader HLE. It reconstructs only the native outputs consumed by collision
+`ActRaiserActionBg_StageRoomSceneLayer` is the independent immutable oracle for
+the guarded loader HLE. It reconstructs only the native outputs consumed by collision
 and the resident-ring builder: dimensions `$2E-$35`, active map bytes in
 `$8000-$FFFF`, and byte-swapped definitions in `$2100-$30FF`. It does not clear
 inactive map tails or touch command-3 descriptors, CHR, CGRAM, actors, audio,
@@ -100,6 +103,28 @@ Manifest `runs/action-room-stage-matrix-20260822-v3.json` records:
 The gate is deliberately separate from `AR_ACTION_ROOM_SCENE_COMPARE` and runs
 before layer-enable/provider eligibility. A dormant background is still loader
 state and must match even when it contributes no pixels to the sampled frame.
+
+## Guarded command-4/5 CPU handoff — 2026-08-22
+
+`hle_func_if` preserves a decoded native body behind a read-only `CpuState`
+predicate. The `$02:B363` and `$02:B3EB` guards accept only native-mode,
+16-bit-index action-room commands with the audited compressed BG1/BG2 operand
+shapes. Non-action raw map/definition staging, BG3, explicit
+`AR_ACTION_ROOM_LOAD_HLE=0`, and unexpected shapes remain native.
+
+Manifest `runs/action-room-load-hle-matrix-20260822-v2.json` records:
+
+- 12/12 targets passed with 24 command-5 and 24 command-4 HLE invocations;
+- 166,400 bytes produced by the CPU loaders, plus 96 dimension bytes in the
+  independent 166,496-byte stage oracle, zero mismatch;
+- zero native-ring mismatch/outside and zero immutable room-scene fallback;
+- all 12 framebuffer hashes and every captured BG map/definition/dimension
+  hash identical to the native-handler checkpoint
+  `runs/action-room-stage-matrix-20260822-v3.json`.
+
+The enclosing `$02:B1F7` interpreter and commands 7, 6, 3, 2, 1, and 0 remain
+native. This checkpoint HLEs background staging, not complete level/gameplay
+initialization.
 
 ## What this does not prove
 

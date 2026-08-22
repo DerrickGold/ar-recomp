@@ -80,6 +80,17 @@ The stable two-background scene milestone is implemented:
   outside those ranges. `AR_ACTION_ROOM_STAGE_COMPARE=1` is an independent,
   read-only live oracle for that image, so staging acceptance does not also
   opt into the broader transient frame/raster comparator.
+- The action-only `$02:B363` command-5 and `$02:B3EB` command-4 handlers now
+  execute `ActRaiser_LoadActionMetatiles` and `ActRaiser_LoadActionMap` by
+  default. They consume the live VM operands, advance its `$A2`/Y cursor,
+  preserve the native CPU/status/RTS and decompressor-scratch contract, and
+  stage the same collision/ring-visible WRAM ranges. `AR_ACTION_ROOM_LOAD_HLE=0`
+  is the exact native control.
+  This is a guarded HLE rather than an unconditional replacement: the new
+  `hle_func_if` generator seam retains the decoded ROM body for title/SIM raw
+  loads, BG3 selectors, wrong M/X modes, and any command shape outside the
+  audited 49-room action domain. CHR, CGRAM, video profile, gameplay, audio,
+  and OBJ commands remain in the native `$02:B1F7` VM.
 - The live comparator and production provider own separate `ActionBgWorld`
   caches. This is required when the room-scene source and both compare gates
   are enabled together: the observer runs after provider binding but
@@ -122,17 +133,14 @@ raster registers remained exact with zero fallback. This is the intended
 steady-state cost instead of republishing and re-reporting every layer on every
 frame.
 
-The production handoff remains intentionally incremental. The accepted first
-slice changes
-where the renderer obtains complete finite BG tile words; it does not skip the
-ROM asset VM or write host-decoded assets into emulated WRAM/VRAM. That retains
-the original loader as both gameplay bootstrap and visual oracle while the
-immutable source is exercised in normal scanout. The next seam can now HLE the
-background-only asset staging commands without absorbing level objects, actor
-initialization, audio, or gameplay. The data transform for that seam is now
-implemented and accepted; only the command-VM/CPU handoff remains before it can
-replace `$02:B363/$02:B3EB`. CHR and CGRAM must continue through their native
-commands until separate exact VRAM/CGRAM staging contracts exist.
+The production handoff remains intentionally incremental. The renderer obtains
+complete finite BG tile words from the immutable room scene, while the two
+background asset commands now stage collision/ring-visible WRAM through their
+CPU-facing HLEs. The enclosing `$02:B1F7` VM and its other six command types are
+still native, so this does not absorb level objects, actor initialization,
+audio, gameplay, CHR, CGRAM, or command-3 video setup. The exact native handler
+body remains immediately available whenever either read-only guard rejects an
+invocation.
 
 ## Scope and parity boundary
 
@@ -541,5 +549,16 @@ Targets are VRAM word addresses and strides are bytes.
   zero finite exits, and zero immutable-provider fallback. The staging oracle
   runs before PPU layer-enable/provider checks, so dormant BG2 assets in
   `0201`, `0303`, `0401`, `0504`, `0601`, and `0605` are covered too.
+- Guarded CPU-loader matrix
+  `runs/action-room-load-hle-matrix-20260822-v2.json`: all 12 ordinary-entry
+  targets execute 24 command-5 and 24 command-4 HLE invocations, staging
+  166,400 asset bytes. The independent room-stage oracle compares those assets
+  plus 96 dimension bytes (166,496 total) with zero mismatch. All framebuffer,
+  map, definition, dimension, provider, and native-ring hashes are identical to
+  the pre-redirect native manifest
+  `runs/action-room-stage-matrix-20260822-v3.json`. ROM-free CPU tests also pin
+  LoROM pointer conversion, compression scratch, byte swapping, script cursor,
+  registers/status, stack/RTS, both destinations, explicit-off behavior, and
+  guarded fallback shapes.
 - Static consumer census: all generated `$02:B4E8` variants write `$F2`; no
   registered/recompiled function reads it.

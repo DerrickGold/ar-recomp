@@ -16,6 +16,7 @@ name 018999 NamedTarget
 indirect_dispatch B8C0 26 idx:A tables:B8D0 ret:B8C2 sep:20
 rts_dispatch 9000 9010 9020
 hle_func 8123 HostFoo
+hle_func_if 8234 HostConditional HostConditionalEnabled
 force_variant_at 018155 0 1
 exit_mx_at 018888 1 0
 data_region 01 A000 A100
@@ -40,5 +41,9 @@ exclude_range B000 B100
 	}
 	if len(cfg.RTSDispatch) != 1 || len(cfg.RTSDispatch[0].Targets) != 2 {
 		t.Fatalf("RTS dispatch mismatch: %#v", cfg.RTSDispatch)
+	}
+	conditional := cfg.HLEFunctionsIf[0x8234]
+	if conditional.Function != "HostConditional" || conditional.Predicate != "HostConditionalEnabled" {
+		t.Fatalf("conditional HLE mismatch: %#v", conditional)
 	}
 }

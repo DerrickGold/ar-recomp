@@ -699,7 +699,8 @@ func (repo *repository) emitFunctions(jobs int, only map[byte]struct{}) (map[byt
 			Name: entry.Name, End: entry.End, EntrySOffset: entry.EntrySOffset, Decode: options, Codegen: context,
 			ExcludeRanges: excludes, TailCallPC: entry.TailCallPC, HLESPCUpload: hleSPC,
 			HLEFunction: bank.Config.HLEFunctions[entry.Start], HLEDispatch: bank.Config.HLEDispatch,
-			ExitMX: exit, UnresolvedAllowed: true,
+			HLEFunctionIf: bank.Config.HLEFunctionsIf[entry.Start],
+			ExitMX:        exit, UnresolvedAllowed: true,
 		})
 		lock.Lock()
 		defer lock.Unlock()

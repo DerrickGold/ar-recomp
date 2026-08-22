@@ -147,7 +147,7 @@ target_include_directories(MyGame PRIVATE
 
 The runtime is not a complete frontend. Each project supplies ROM validation
 and loading, video/audio presentation, its `RtlGameInfo`, frame and interrupt
-policy, and any C functions named by `hle_func`/`hle_dispatch`.
+policy, and any C functions named by `hle_func`/`hle_func_if`/`hle_dispatch`.
 See [`docs/PROJECT_INTEGRATION.md`](docs/PROJECT_INTEGRATION.md) for the full
 contract and [`docs/CFG_FORMAT.md`](docs/CFG_FORMAT.md) for bank directives.
 

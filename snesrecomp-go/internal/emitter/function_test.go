@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/DerrickGold/snesrecomp-go/internal/codegen"
+	"github.com/DerrickGold/snesrecomp-go/internal/config"
 	"github.com/DerrickGold/snesrecomp-go/internal/rom"
 )
 
@@ -17,6 +18,25 @@ func emitTestFunction(t *testing.T, data []byte, options FunctionOptions) string
 		t.Fatalf("EmitFunction: %v", err)
 	}
 	return result.Source
+}
+
+func TestConditionalHLEKeepsNativeFallback(t *testing.T) {
+	source := emitTestFunction(t, []byte{0xA9, 0x05, 0x60}, FunctionOptions{
+		Name: "Conditional",
+		HLEFunctionIf: config.HLEFunctionIf{
+			Function: "HostConditional", Predicate: "HostConditionalEnabled",
+		},
+	})
+	for _, fragment := range []string{
+		"if (HostConditionalEnabled(cpu))",
+		"RecompReturn _r = HostConditional(cpu);",
+		"L_8000_M1X1:",
+		"uint8 _v1 = 0x5;",
+	} {
+		if !strings.Contains(source, fragment) {
+			t.Errorf("conditional HLE source is missing %q:\n%s", fragment, source)
+		}
+	}
 }
 
 func TestLinearFunction(t *testing.T) {

@@ -1366,11 +1366,14 @@ The live native ring still preflights every authentic tile before ownership, so
 the source control changes only the input under test without removing the
 oracle.
 
-This is not yet a whole `$02:B1F7` replacement. The recompiled asset VM remains
+This is not a whole `$02:B1F7` replacement. Its command dispatcher remains
 active and owns CHR/CGRAM uploads, the native ring, level/gameplay data, actor
-startup, callbacks, audio and transitions. A missing scene, dimension drift or
-publication failure falls back to live WRAM and is counted in the shutdown
-provider summary. Promotion followed an exact 12-target ordinary-entry A/B:
+startup, callbacks, audio and transitions. Only its action-room command-5
+metatile and command-4 map staging handlers are now guarded CPU HLEs; rejected
+non-action/raw/BG3/unexpected shapes execute the decoded native handler body.
+A missing scene, dimension drift or publication failure falls back to live
+WRAM and is counted in the shutdown provider summary. Promotion followed an
+exact 12-target ordinary-entry A/B:
 immutable-source manifest
 `runs/bg-hle-matrix-20260822-133346.json` reports 19,522 sourced/bound
 layer-frames, zero live fallback, and 18,216,295 zero-mismatch/zero-outside
@@ -1385,16 +1388,17 @@ isolated and stable through scanout. Finally,
 environment variable absent: all 19,522 provider layers use the room scene,
 with zero fallback and the same 18,216,295 exact preflight tiles.
 
-The next loader slice has an exact emulated-WRAM image but is not redirected
-yet. `ActRaiserActionBg_StageRoomSceneLayer` writes the active BG dimensions,
-page map and byte-swapped metatile definitions while preserving every other
-byte; `AR_ACTION_ROOM_STAGE_COMPARE=1` compares that proposed image with the
-native `$02:B363/$02:B3EB` result. The 12-target manifest
+`ActRaiserActionBg_StageRoomSceneLayer` writes the active BG dimensions, page
+map and byte-swapped metatile definitions while preserving every other byte;
+`AR_ACTION_ROOM_STAGE_COMPARE=1` is the independent immutable oracle for the
+live `$02:B363/$02:B3EB` result. The native checkpoint manifest
 `runs/action-room-stage-matrix-20260822-v3.json` covers all 24 loaded layers and
-166,496 bytes with zero mismatch, alongside 19,315,975 exact native-ring words
-and zero room-scene source fallback. Gameplay collision and the native ring
-still read these WRAM ranges, so the eventual HLE must stage them—it cannot
-merely omit the commands. CHR/CGRAM and command-3 profile setup remain native.
+166,496 bytes with zero mismatch. The redirected manifest
+`runs/action-room-load-hle-matrix-20260822-v2.json` executes 24 command-5 plus
+24 command-4 HLEs, produces 166,400 asset bytes, and remains exact across the
+same 166,496-byte oracle, native ring, framebuffer, map, definition, dimension,
+and provider hashes. `AR_ACTION_ROOM_LOAD_HLE=0` restores the native handlers.
+CHR/CGRAM and command-3 profile setup remain native.
 
 `ActRaiser_FullSnapshot` also writes `.ppu.json` beside WRAM/VRAM/CGRAM/OAM.
 This pins the BGSC geometry, character bases, enables, scroll, window and color

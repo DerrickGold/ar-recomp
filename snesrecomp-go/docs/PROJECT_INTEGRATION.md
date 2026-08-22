@@ -149,9 +149,10 @@ does not supply a complete application. A game project owns:
    for the process lifetime.
 5. **Frame/interrupt policy.** Supply `run_frame`, optional `draw_ppu_frame`,
    reset entry, NMI/IRQ invocation, and any coroutine/yield policy.
-6. **HLE hooks.** Every C symbol named by `hle_func` or `hle_dispatch` in a cfg
-   must be implemented by the game project with the generated `CpuState *`
-   ABI.
+6. **HLE hooks.** Every C symbol named by `hle_func`, `hle_func_if`, or
+   `hle_dispatch` in a cfg must be implemented by the game project with the
+   generated `CpuState *` ABI. An `hle_func_if` predicate returns `bool` and
+   must not mutate CPU or emulated state.
 7. **Game-specific hardware workarounds.** Put ROM-address policy in the game
    layer. `RtlGameInfo.read_rdnmi` may override a `$4210` read (return `-1` for
    shared behavior), and `recover_dispatch_miss` may opt verified dispatch

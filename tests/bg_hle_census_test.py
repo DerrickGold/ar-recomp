@@ -232,6 +232,13 @@ class BgHleCensusTest(unittest.TestCase):
         self.assertEqual(room["layers"], 2)
         self.assertEqual(room["bytes"], 8200)
         self.assertEqual(room["mismatches"], 0)
+        loader_log = (
+            "[action-room-load-hle] summary command5=2 command4=2 "
+            "bytes=8192\n")
+        loader = matrix.parse_room_load_hle_summary(loader_log)
+        self.assertEqual(loader["command5"], 2)
+        self.assertEqual(loader["command4"], 2)
+        self.assertEqual(loader["bytes"], 8192)
 
         default_args = matrix.parse_args([])
         self.assertEqual(default_args.provider_mode, "default")

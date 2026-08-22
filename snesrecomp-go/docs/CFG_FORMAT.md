@@ -109,6 +109,13 @@ then verify each shape before adding it.
 
 Replaces the function at a 16-bit PC with a project-provided C function.
 
+### `hle_func_if PC C_FUNCTION C_PREDICATE`
+
+Calls the project-provided C function only when the predicate returns true for
+the live `CpuState`; otherwise the decoded native body executes. The predicate
+must not mutate CPU or emulated state. Use this for deliberately bounded HLE
+domains that still need an exact native fallback.
+
 ### `hle_dispatch PC C_FUNCTION`
 
 Routes a dispatch site to a project-provided C function.

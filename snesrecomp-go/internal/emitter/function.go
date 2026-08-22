@@ -8,6 +8,7 @@ import (
 
 	"github.com/DerrickGold/snesrecomp-go/internal/cfg"
 	"github.com/DerrickGold/snesrecomp-go/internal/codegen"
+	"github.com/DerrickGold/snesrecomp-go/internal/config"
 	"github.com/DerrickGold/snesrecomp-go/internal/cpu65816"
 	"github.com/DerrickGold/snesrecomp-go/internal/decoder"
 	"github.com/DerrickGold/snesrecomp-go/internal/ir"
@@ -26,6 +27,7 @@ type FunctionOptions struct {
 	TailCallTarget    string
 	HLESPCUpload      bool
 	HLEFunction       string
+	HLEFunctionIf     config.HLEFunctionIf
 	HLEDispatch       map[uint16]string
 	ExitMX            *decoder.MX
 	UnresolvedAllowed bool
@@ -404,6 +406,17 @@ func EmitFunction(image rom.Image, bank byte, start uint16, entryM, entryX uint8
 		"  (void)_hrv;",
 		"  if (g_recomp_stack_top >= 1) { g_cpu_entry_s[g_recomp_stack_top - 1] = _entry_s; g_cpu_entry_hrv[g_recomp_stack_top - 1] = _hrv; }",
 	)
+	if options.HLEFunctionIf.Function != "" {
+		source = append(source,
+			fmt.Sprintf("  extern RecompReturn %s(CpuState *cpu);", options.HLEFunctionIf.Function),
+			fmt.Sprintf("  extern bool %s(CpuState *cpu);", options.HLEFunctionIf.Predicate),
+			fmt.Sprintf("  if (%s(cpu)) {", options.HLEFunctionIf.Predicate),
+			fmt.Sprintf("    RecompReturn _r = %s(cpu);", options.HLEFunctionIf.Function),
+			"    RecompStackPop();",
+			"    return _r;",
+			"  }",
+		)
+	}
 	for _, key := range order {
 		source = append(source, "  "+label(key)+":", fmt.Sprintf("    cpu_trace_block(cpu, 0x%06X);", key.PC&0xffffff), "    WatchdogCheck();")
 		for _, line := range blockLines[key] {
