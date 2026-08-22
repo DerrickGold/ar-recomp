@@ -23,6 +23,14 @@ typedef bool (*PpuVirtualTilemapLookup)(const void *context,
                                        int32_t tile_x, int32_t tile_y,
                                        uint16_t *entry);
 
+/* Optional presentation-only classification for a virtual tilemap word.
+ * Bands 0..2 route a captured BG pixel to its far, ordinary, or priority
+ * Diorama surface without changing the word or its native z-buffer rank.
+ * Returning false preserves the hardware priority-bit split. */
+typedef bool (*PpuVirtualTilemapBandLookup)(const void *context,
+                                           int32_t tile_x, int32_t tile_y,
+                                           uint16_t entry, uint8_t *band);
+
 enum {
   /* Default is synthetic margins only. Callers may opt a proven world layer
    * into provider ownership of the authentic 256x224 viewport too. */
@@ -31,6 +39,7 @@ enum {
 
 typedef struct PpuVirtualTilemapBinding {
   PpuVirtualTilemapLookup lookup;
+  PpuVirtualTilemapBandLookup band_lookup;
   const void *context;
   int32_t camera_x;
   int32_t camera_y;
@@ -468,6 +477,10 @@ struct Ppu {
   PpuPixelPrioBufs objBuffer;
   /* Per-source isolated priority pixels for generic host-overlay captures. */
   PpuPixelPrioBufs overlayBuffers[kPpuOverlaySource_Count];
+  /* Per-pixel presentation band emitted by an owning BG virtual tilemap.
+   * 0xff means "use authentic hardware priority". This metadata parallels
+   * the isolated capture only; it never participates in native composition. */
+  uint8_t overlayVirtualBands[2][kPpuBufWidth];
   /* Full-add OBJ resolve with host-relocated slots omitted. The ordinary OBJ
    * overlay still includes those slots so non-additive capture semantics do
    * not change. */
@@ -483,8 +496,9 @@ struct Ppu {
    * bound, scanout routes each captured pixel of the source to the band
    * matching its hardware priority instead of the primary surface: OBJ bands
    * 1..3 receive sprite priorities 1..3 (primary keeps priority 0); BG band 1
-   * receives priority-1 tiles (primary keeps priority 0). Bands share the
-   * primary's pitch and capture rectangle. */
+   * receives priority-1 tiles and BG band 2 receives an optional far virtual
+   * plane (primary keeps ordinary tiles). Bands share the primary's pitch and
+   * capture rectangle. */
   uint8_t *overlayRenderBands[kPpuOverlaySource_Count][3];
   /* Overlay surfaces are cleared lazily: a surface whose capture is inactive
    * and whose flag here is clear is already all-transparent, so its
@@ -717,10 +731,11 @@ bool PpuBindOverlaySurface(Ppu *ppu, PpuOverlaySource source,
 // Bind an additional priority-band surface for a source, splitting the
 // captured layer by hardware priority at scanout. OBJ: band n (1..3)
 // receives sprites of OAM priority n, the primary surface keeps priority 0.
-// BG sources: band 1 receives priority-1 tiles, the primary keeps
-// priority 0. Requires a bound primary surface and shares its pitch and
-// capture rectangle. Rebinding or unbinding the primary drops every band,
-// so bind bands after their primary. NULL unbinds one band.
+// BG sources: band 1 receives priority-1 tiles, band 2 receives virtual-far
+// pixels, and the primary keeps ordinary tiles. Requires a bound primary
+// surface and shares its pitch and capture rectangle. Rebinding or unbinding
+// the primary drops every band, so bind bands after their primary. NULL
+// unbinds one band.
 bool PpuBindOverlayPrioSurface(Ppu *ppu, PpuOverlaySource source, int band,
                                uint8_t *pixels);
 

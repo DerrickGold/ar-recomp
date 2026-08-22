@@ -193,7 +193,7 @@ applies the record at `$02:893E + 28n`:
 | Off | -> | Meaning |
 |---|---|---|
 | +0..+3 | `$212C/E`, `$212D/F`, `$2130`, `$2131` | screen designation + color math |
-| +4 | bit flags -> `$6A/$6E/$72`=$2000, `$8F`=$1000 | per-layer flags + OAM attr bias arm |
+| +4 | bits 0..2 -> `$6A/$6E/$72`=$2000; bit 3 -> `$8F`=$1000 | **common BG1/BG2/BG3 tile priority** + OAM attr-bias arm. The tile expanders OR `$6A/$6E/$72` into every output word. All action profiles set BG3; `0102/0103/0205/0602/0604` also force BG2 high |
 | +5 | `$2107`=$60\|(v&3), `$2108`=$70\|((v>>2)&3) | **BG1SC/BG2SC size bits** (bases fixed $6000/$7000) |
 | +6 | `$2105` | **BGMODE per section** |
 | +7..+12 | nibble-split -> `$3A-$45` | parallax ratios (6 planes) |
@@ -202,7 +202,7 @@ applies the record at `$02:893E + 28n`:
 | +23 | bit7 -> `$DA`=$1000/$0000; bits4-6 -> `$E1`=n<<7; bits0-3 -> `$DF`=n-1 | **tile-anim: char VRAM target, frame stride (bytes), frame count-1** |
 | +24 | `$DE`=n-1 | anim tick period mask |
 | +25-26 | `$E6` | **stage timer init** (decimal, ticked by `$BC82`) |
-| +27 | `$F2` | ? |
+| +27 | `$F2` | Renderer-nonoperative: `$02:B4E8` writes it, but the complete registered/recompiled consumer census finds no direct-page read. Profiles `10`-`15` and `25`-`28` (hex) use value 1; a standalone background loader can ignore it |
 
 Fillmore act 1 arrives with `$DE/$DF=$FF, $E1=0` — tile anim disabled.
 
@@ -278,15 +278,21 @@ live interval and whether each requested axis fit.
 - Action mode: consumed by `$02:AF30` slot 1 -> DMA `[$D9]:$D7` (bank
   default $7F from `$02:BE0A` init) size `$DC` -> VRAM `$DA` ($0000 or
   $1000 = BG char space): **char re-upload animation** (waterfalls etc.).
-  Frame buffers live at `$7F:B800 + n*$E1`; composer = level loader `?`
-  (Fillmore has $E1=0; find it on an animated level via a wram trace on
-  off 0x1B800-0x1BFFF during load).
+  Frame buffers live at `$7F:B800 + n*$E1`. `$02:BAF5`, called during action
+  entry after the asset VM and whole-map rebuild, is the complete producer:
+  when `$E1 != 0` it reads exactly `$1000` bytes of already-loaded character
+  VRAM beginning at word `$DA` into `$7F:B800-$BFFF`. It is a snapshot, not a
+  frame composer. Raw config `+24` bit 7 denotes a continuation room: `$BAF5`
+  clears the bit and skips the redundant capture, retaining the owner's WRAM
+  sheet. An offline cumulative asset-script build can always capture the
+  current room's own reconstructed 4 KiB target window; it is byte-identical
+  to the owner for every continuation family, including `0704`/`0303`.
 - Sim town (`$18=0`, `$19!=0,9`): same WRAM-buffered animation path as action
   mode, consumed by the generic `$02:AF30` full-word descriptor uploader.
-  `$02:BAF5` first captures four VRAM pages into
-  `$7F:B800/$B900/$BA00/$BB00`; later ticks re-upload one captured page to
-  VRAM `$0000`. `$AF86`'s ROM-bank-$0A, high-byte-only dual upload belongs
-  only to the separate `$19=0 or 9` non-town branch.
+  `$02:BAF5` uses the same single contiguous 4 KiB capture; the town profile's
+  `$E1/$DF` divides it into its configured phases. Later ticks re-upload the
+  selected slice to VRAM `$0000`. `$AF86`'s ROM-bank-$0A, high-byte-only dual
+  upload belongs only to the separate `$19=0 or 9` non-town branch.
 - World navigation (`$18=0/$19=9`) uses `$02:AF86` to upload the same 64-byte
   ROM frame into the high bytes of Mode-7 tile `$00` (VMADD `$0000`) and tile
   `$AA` (VMADD `$2A80`). The four frames are `$0A:B000/$B040/$B080/$B0C0`;
@@ -1411,11 +1417,14 @@ available full-canvas extent. The original clamp remains the same-binary
 fidelity/fallback path.
 
 Aitos Act 1 (`$18=04`, raw maps `$19=01-$03`) demonstrates why reflection
-cannot be the only padding policy. Its `$0100`-wide BG2 contains several cloud
-bands observed moving at different apparent rates; whether the native game
-drives them through HDMA/HBlank or another raster path is not yet traced. Reflection
-reverses their slope and apparent motion at each authentic-screen edge, making
-the centered cloud field tear visibly from both margins. For this act,
+cannot be the only padding policy. `0401`'s `$0100`-wide BG2 contains several
+cloud bands moving at different apparent rates. The exact path is now traced:
+callback `$00:CDD9` invokes `$02:93DF` every game frame, builds nine BG2HOFS
+HDMA bands at `$7E:6000` (counts `63,16,8,8,16,8,16,40,80`), and
+`$02:96B6` points channel 2 at `$210F`. `0402/0403` do not use that raster;
+they cycle their four authored BG2SC pages every five frames. Reflection
+reverses slope and apparent motion at each authentic-screen edge, making the
+centered cloud field tear visibly from both margins. For this act,
 `PpuSetWidescreenLayerRepeat` uses the same isolated render but cyclically
 continues each authentic scanline: left `x<0` samples `256+x`, while right
 `x>=256` samples `x-256`. Because the copy happens after that scanline's tile
@@ -2717,23 +2726,20 @@ arithmetic is trivial; the bug is always *which width am I holding*. Use
 
 ## 14. Open questions (all remaining, none blocks the §13 design)
 
-1. `$7F:B800` action-anim frame composer (find on an animated level:
-   wram trace off 0x1B800-0x1BFFF during load; Fillmore act 1 idles).
-2. Map `$02AC` and object `$38` selector values to named magic/effect assets;
+1. Map `$02AC` and object `$38` selector values to named magic/effect assets;
    the slot-0 armer itself is `$00:96C3-$96F5`.
-3. VRAM `$4000-$4FFF` char bank consumer (loaded but unreferenced by the
+2. VRAM `$4000-$4FFF` char bank consumer (loaded but unreferenced by the
    in-game NBA regs; another section's OBSEL/NBA values `?`).
-4. BG2 filler tile id per section (`$17F` seen in act 1, `$18A` earlier
+3. BG2 filler tile id per section (`$17F` seen in act 1, `$18A` earlier
    in another context) — confirm from `$B825`'s filler constant per layer.
-5. Boss-arena window/HDMA effects vs margins (survey doc has the known
+4. Boss-arena window/HDMA effects vs margins (survey doc has the known
    full-width-window fix; iris wipes stay 256-centered — audit per boss).
-6. Map the remaining `$02:AFCB` `$47F0` sim upload. World-navigation
+5. Map the remaining `$02:AFCB` `$47F0` sim upload. World-navigation
    `$02:8384` is now verified as the current-matrix/focus Mode-7 register
    uploader; the town camera writer remains `$01:B4C6`.
-7. Section config +27 -> `$F2` meaning; `$6A/$6E/$72` $2000-flag meaning.
-8. Native camera/world-edge clamp ownership and its presentation-aware wide
+6. Native camera/world-edge clamp ownership and its presentation-aware wide
    bounds. Distinguish changing the gameplay camera limit from merely hiding or
    padding pixels outside finite BG data; verify both axes and parallax layers.
-9. Death Heim/`70X` is complete: the first-boss crash and later soft-lock were
+7. Death Heim/`70X` is complete: the first-boss crash and later soft-lock were
    repaired, and the boss rush, final boss, and return transition were directly
    validated on 2026-07-14.

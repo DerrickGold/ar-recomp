@@ -1,0 +1,1862 @@
+<div class="app">
+<aside class="side">
+  <h1>Action Layer Editor</h1>
+  <p class="sub">Classify background tiles into depth bands for the Diorama 3D
+    presentation.</p>
+
+  <h2>Room</h2>
+  <select id="room" style="width:100%"></select>
+  <div style="display:flex;gap:5px;margin-top:6px">
+    <button id="bg1" class="on" style="flex:1">BG1</button>
+    <button id="bg2" style="flex:1">BG2</button>
+  </div>
+
+  <h2>Band</h2>
+  <div class="stack">
+    <button class="state s-behind" data-state="0">
+      <span class="swatch"></span><span class="n" data-band="0">Far virtual plane</span><span class="k">1</span></button>
+    <button class="state s-plane on" data-state="1">
+      <span class="swatch"></span><span class="n" data-band="1">Plane (default)</span><span class="k">2</span></button>
+    <button class="state s-ahead" data-state="2">
+      <span class="swatch"></span><span class="n" data-band="2">Priority band</span><span class="k">3</span></button>
+  </div>
+  <p class="hint" id="bandHint"></p>
+
+  <h2>Far virtual plane</h2>
+  <div class="ctl"><label>Z</label>
+    <input id="virtualZ" type="range" min="-100" max="200" step="1" value="35">
+    <span class="v" id="virtualZv">0.35</span></div>
+  <div class="ctl"><label>Order</label>
+    <input id="virtualOrder" type="range" min="0" max="51" step="1" value="4">
+    <span class="v" id="virtualOrderv">4</span></div>
+  <div class="ctl"><label>Alpha</label>
+    <input id="virtualAlpha" type="range" min="0" max="255" step="1" value="255">
+    <span class="v" id="virtualAlphav">255</span></div>
+  <button id="virtualReset" style="width:100%">Use default geometry</button>
+  <p class="hint">These values write to <code>bgN-virtual</code> in the room's
+    existing INI section.</p>
+
+  <h2>Brush</h2>
+  <div class="stack">
+    <button id="bClass" class="on">All instances of a metatile</button>
+    <button id="bCell">This map cell only</button>
+    <button id="bRect">Rectangle</button>
+    <button id="bPan">Pan / navigate</button>
+  </div>
+  <p class="hint">Hold <kbd>Alt</kbd> to paint the default band back.</p>
+
+  <h2>Select by</h2>
+  <div class="stack">
+    <button id="selPrio">Tiles with priority set</button>
+    <button id="selPal">Same palette as last click</button>
+    <button id="clearAll">Reset this BG's classifications</button>
+    <button id="clearRoom">Reset room classifications</button>
+    <button id="clearEverything">Reset ALL classifications to ROM</button>
+  </div>
+
+  <h2>Tally</h2>
+  <div class="tally">
+    <div><span class="v s-behind" id="tB">0</span><span class="l">far</span></div>
+    <div><span class="v s-plane" id="tP">0</span><span class="l">plane</span></div>
+    <div><span class="v s-ahead" id="tA">0</span><span class="l">ahead</span></div>
+  </div>
+
+  <h2>Other layer <span id="otherName" style="color:var(--dim)"></span></h2>
+  <div class="ctl"><label>X</label>
+    <input id="offX" type="range" min="-100" max="100" value="0">
+    <span class="v" id="offXv">0</span></div>
+  <div class="ctl"><label>Y</label>
+    <input id="offY" type="range" min="-100" max="100" value="0">
+    <span class="v" id="offYv">0</span></div>
+  <div style="display:flex;gap:5px">
+    <button id="offRepeat" class="on" style="flex:1">Repeat</button>
+    <button id="offZero" style="flex:1">Centre</button>
+  </div>
+  <p class="hint">BG extents differ in 39 of 49 rooms, so there is no single
+    true alignment. Slide it to scan the whole relationship for conflicts.</p>
+
+  <h2>Depth ladder</h2>
+  <div class="ladder" id="ladder"></div>
+  <div class="note" id="clashNote" style="display:none"></div>
+
+  <div class="note" id="engineNote"></div>
+</aside>
+
+<div class="main">
+  <div class="bar">
+    <button id="mode2d" class="on">Game composite</button>
+    <button id="mode3d">Diorama 3D</button>
+    <button id="undoBtn" disabled>Undo</button>
+    <button id="redoBtn" disabled>Redo</button>
+    <button id="navFit" title="Fit the whole layer (f)">Fit</button>
+    <button id="navOut" title="Zoom out">&minus;</button>
+    <button id="navIn"  title="Zoom in">+</button>
+    <button id="navReset" title="Reset the 3D camera (r)">Reset cam</button>
+    <button id="actorBtn" class="on" title="Show a reference sprite at object depth">Actor</button>
+    <button id="bothBtn" class="on" title="Show the other background layer too">Both BGs</button>
+    <span id="iniName" style="color:var(--faint);font-family:var(--mono);font-size:10px"></span>
+    <span class="spacer"></span>
+    <button id="tint">Band tint</button>
+    <label for="importIni" class="file-btn">Load INI</label>
+    <input id="importIni" type="file" accept=".ini,text/plain" hidden>
+    <button id="export">Export INI</button>
+    <button id="docs">Docs</button>
+  </div>
+  <div class="view">
+    <canvas id="map2d"></canvas>
+    <canvas id="gl"></canvas>
+    <div class="hud" id="hud"></div>
+    <div class="legend" id="legend"></div>
+  </div>
+</div>
+</div>
+
+<dialog id="docsDlg"><div class="dlg-h"><h3>How this tool maps onto the engine</h3>
+  <span class="spacer" style="flex:1"></span><button id="docsX">Close</button></div>
+  <div class="dlg-b" id="docsBody"></div></dialog>
+
+<script>
+/* ===========================================================================
+ * Action Layer Editor
+ *
+ * WHAT THIS IS FOR
+ * Some action rooms put every scenery element on one background plane, so the
+ * Diorama 3D presentation has nothing to separate in depth and the room reads
+ * flat. This tool tags each background tile with the depth band it should be
+ * drawn in, and previews the result with an orbit camera.
+ *
+ * THE MODEL, AND WHY IT IS SHAPED THIS WAY
+ * A band is not a new layer. It is ANCHORED to the BG it came from, so it
+ * inherits that layer's camera and its live scroll deltas. Moving a tile to a
+ * different BG instead would break exactly that: BG2 has its own scroll
+ * registers and its own tilemap, and in a room where the engine never updates
+ * BG2 a promoted tile would sit still while the rest of the room moved.
+ *
+ * Three bands per anchor:
+ *   0 far virtual   a new surface whose z/order/alpha are authored here
+ *   1 plane         the anchor's ordinary priority-0 surface (default)
+ *   2 priority      the anchor's authentic priority-1 surface
+ *
+ * THE FILE CONTRACT
+ * The editor owns `bgN-virtual` records in each base [layers:GG:MM] section of
+ * diorama-layers.ini. Geometry is one sparse z/order/alpha record. Metatile
+ * rules classify every instance and cell rectangles refine them; the ROM's
+ * priority bit remains the fallback. Export replaces only those owned records
+ * and preserves all other comments, sections and plane settings verbatim.
+ *
+ * WHY THE PREVIEW IS BUILT THE WAY IT IS
+ * Each band is rasterised into its own full-level surface and drawn as one
+ * textured quad at its own z. That is deliberately the same shape as the
+ * runtime: a plane is a captured surface composited at a depth. The camera
+ * maths below is plain arithmetic with no WebGL-specific tricks. Flat game
+ * order remains authentic and deliberately ignores virtual classification;
+ * the Diorama view uses configured painter order and independent z geometry.
+ * ======================================================================== */
+
+const DATA = window.__ACTION_BG__;
+/* These are diorama.c's real defaults, including its paint slots. INI values
+ * refine them per room. `order` and `z` remain independent because the runtime
+ * is a painter: z changes projection/focus while order decides overlap. */
+const PLANE_DEFAULTS = {
+  backdrop:{z:0.00,order:0,alpha:255}, obj0:{z:0.51,order:1,alpha:255},
+  obj1:{z:0.51,order:2,alpha:255}, bg2:{z:0.20,order:3,alpha:255},
+  bg1:{z:0.50,order:4,alpha:255}, obj2:{z:0.51,order:5,alpha:255},
+  bg2hi:{z:0.21,order:6,alpha:255}, bg1hi:{z:0.51,order:7,alpha:255},
+  obj3:{z:0.52,order:8,alpha:255}, bg3:{z:0.95,order:9,alpha:255},
+};
+/* The new far planes default 0.15 behind their anchors and share the anchor's
+ * paint key, inserted immediately before it. Authoring z/order/alpha on a
+ * bgN-virtual record overrides these defaults. */
+const VIRTUAL_DEFAULTS = [
+  {z:0.35,order:PLANE_DEFAULTS.bg1.order,alpha:255},
+  {z:0.05,order:PLANE_DEFAULTS.bg2.order,alpha:255},
+];
+const BANDS = [
+  { key:'far',   name:'Far virtual plane',css:'--behind' },
+  { key:'plane', name:'Plane (default)',  css:'--plane' },
+  { key:'high',  name:'Priority band',    css:'--ahead' },
+];
+const bandZ = (bg, b) => b === 0 ? resolvedVirtual(bg).z
+  : resolvedPlane(bg === 0 ? (b === 1 ? 'bg1' : 'bg1hi')
+                           : (b === 1 ? 'bg2' : 'bg2hi')).z;
+const bandAlpha = (bg, b) => b === 0 ? resolvedVirtual(bg).alpha
+  : resolvedPlane(bg === 0 ? (b === 1 ? 'bg1' : 'bg1hi')
+                           : (b === 1 ? 'bg2' : 'bg2hi')).alpha;
+const bandPaintOrder = (bg,b) => b === 0 ? resolvedVirtual(bg).order
+  : resolvedPlane(bg === 0 ? (b === 1 ? 'bg1' : 'bg1hi')
+                           : (b === 1 ? 'bg2' : 'bg2hi')).order;
+
+/* Every plane in the scene, sorted, with anything that collides flagged. This
+ * is the answer to "will my BG1 far plane clip through BG2?" -- two
+ * planes closer than this cannot be relied on to order correctly, and at equal
+ * depth the winner is undefined. */
+const kClashEpsilon = 0.02;
+function depthLadder() {
+  const rows = [], clashPairs = [];
+  for (const bg of [0,1]) {
+    if (!room.bg[bg]) continue;
+    for (let b=0; b<3; b++)
+      rows.push({ z: bandZ(bg, b), label: `BG${bg+1} ${BANDS[b].name}`,
+                  order:bandPaintOrder(bg,b), bg, band:b, kind:'band' });
+  }
+  if (actor.show) rows.push({ z: actorZ(), order:resolvedPlane('obj2').order,
+                              label: 'Sprites (OBJ2 reference)', kind:'obj' });
+  rows.sort((a,b) => a.z - b.z);
+  for (let i=0;i<rows.length;i++) for (let j=i+1;j<rows.length;j++) {
+    /* Only BACKGROUND bands can clash with each other. The sprite plane sits
+     * 0.01 in front of BG1's, and that hair of separation is deliberate -- it
+     * is how "priority-1 tiles draw over sprites" survives becoming a 3D
+     * composite. Flagging it would be crying wolf on the one relationship the
+     * shipped table is most careful about. */
+    if (rows[i].kind !== 'band' || rows[j].kind !== 'band') continue;
+    /* The anchor and priority surface of one SNES BG deliberately sit almost
+     * together. That is authentic geometry, not a virtual-layer collision. */
+    if (rows[i].bg === rows[j].bg) continue;
+    if (Math.abs(rows[i].z - rows[j].z) < kClashEpsilon) {
+      rows[i].clash = true; rows[j].clash = true;
+      clashPairs.push(`${rows[i].label} ↔ ${rows[j].label}`);
+    }
+  }
+  rows.clashPairs = clashPairs;
+  return rows;
+}
+
+/* ---- ROM asset decode -------------------------------------------------
+ * Mirrors diorama_rom_backdrop.c exactly. The metatile word is stored
+ * byte-SWAPPED in the ROM ($02:B3CE swaps it while copying to WRAM), then
+ * masked with $ECFF and OR'd with the per-BG attribute byte -- that merge is
+ * what maps BG1 definitions to characters $000-$0FF and BG2 to $100-$1FF.
+ * Getting any of that wrong renders unrelated art, so it is not re-derived
+ * here; it is transcribed. */
+const B64 = s => { const b = atob(s), a = new Uint8Array(b.length);
+  for (let i=0;i<b.length;i++) a[i]=b.charCodeAt(i); return a; };
+const BLOBS = DATA.blobs.map(B64);
+const expand5 = v => ((v&31)<<3)|((v&31)>>2);
+
+function decodeLayer(room, bg) {
+  const layer = room.bg[bg];
+  if (!layer) return null;
+  const chars = BLOBS[room.chars];
+  const extra = room.extraChars >= 0 ? BLOBS[room.extraChars] : null;
+  const praw  = BLOBS[room.palette];
+  const mt = BLOBS[layer.metatiles], mp = BLOBS[layer.map];
+  const attrs = (bg === 0 ? DATA.bg1Attributes : DATA.bg2Attributes) << 8;
+
+  const pal = new Uint32Array(128);
+  for (let i=0;i<128;i++){ const c = praw[i*2] | (praw[i*2+1]<<8);
+    pal[i] = 0xff000000 | (expand5(c>>10)<<16) | (expand5(c>>5)<<8) | expand5(c); }
+
+  const pw = layer.pagesWide, ph = layer.pagesHigh;
+  const cellsW = pw*16, cellsH = ph*16;          /* 16x16-pixel metatiles */
+  const tilesW = cellsW*2, tilesH = cellsH*2;    /* 8x8 tiles            */
+
+  /* Per 8x8 tile: which character, palette, priority, flips. Priority is the
+   * classification the artist already made -- the game uses it to put a tile
+   * in front of sprites -- so it is surfaced as a selector, not overwritten. */
+  const words = new Uint16Array(tilesW*tilesH);
+  const cellId = new Uint8Array(cellsW*cellsH);
+  for (let cy=0; cy<cellsH; cy++) for (let cx=0; cx<cellsW; cx++) {
+    const page = (cy>>4)*pw + (cx>>4);
+    const id = mp[page*256 + (cy&15)*16 + (cx&15)];
+    cellId[cy*cellsW+cx] = id;
+    for (let q=0;q<4;q++){
+      const src = id*8 + q*2;
+      const definition = mt[src+1] | (mt[src]<<8);   /* byte-swapped in ROM */
+      const entry = (definition & DATA.tileWordMask) | attrs;
+      const tx = cx*2 + (q&1), ty = cy*2 + (q>>1);
+      words[ty*tilesW+tx] = entry;
+    }
+  }
+  return { pw, ph, cellsW, cellsH, tilesW, tilesH, w:tilesW*8, h:tilesH*8,
+           words, cellId, pal, chars, extra };
+}
+
+/* One 8x8 character's pixels, 4bpp planar, honouring both flips. */
+function blitTile(L, entry, dst, dw, ox, oy, tintRGB) {
+  const tile = entry & 0x3ff;
+  const pbase = ((entry>>10)&7)*16;
+  const fx = (entry & 0x4000) !== 0, fy = (entry & 0x8000) !== 0;
+  let cd = L.chars, idx = tile;
+  if (tile*32 + 32 > L.chars.length) {
+    if (!L.extra || tile < 0x200 || tile >= 0x300) return;
+    cd = L.extra; idx = tile - 0x200;
+  }
+  const a = idx*32;
+  for (let py=0; py<8; py++) {
+    const sy = fy ? 7-py : py;
+    const p0=cd[a+sy*2], p1=cd[a+sy*2+1], p2=cd[a+16+sy*2], p3=cd[a+16+sy*2+1];
+    let o = ((oy+py)*dw + ox)*4;
+    for (let px=0; px<8; px++, o+=4) {
+      const sx = fx ? 7-px : px, b = 7-sx;
+      const v = ((p0>>b)&1) | (((p1>>b)&1)<<1) | (((p2>>b)&1)<<2) | (((p3>>b)&1)<<3);
+      if (!v) continue;                       /* colour 0 is transparent */
+      const c = L.pal[pbase+v];
+      let r = c & 0xff, g = (c>>8)&0xff, bl = (c>>16)&0xff;
+      if (tintRGB) { r = (r*3 + tintRGB[0])>>2; g = (g*3 + tintRGB[1])>>2;
+                     bl = (bl*3 + tintRGB[2])>>2; }
+      dst[o]=r; dst[o+1]=g; dst[o+2]=bl; dst[o+3]=255;
+    }
+  }
+}
+</script>
+<script>
+/* ---- classification store ---------------------------------------------
+ * Two keyed layers, resolved cell-override-first. The same pair is what a
+ * runtime lookup would consult: it is handed (tile_x, tile_y), from which the
+ * map cell and the metatile id at that cell are both one index away.
+ *
+ * The metatile brush is the high-leverage one. A level map is literally an
+ * array of metatile ids, so reclassifying an id lifts every instance of that
+ * art across the whole room in one click. The cell brush exists because the
+ * same art is often reused both near and far in one room. */
+const store = {};   /* store[`${g}:${m}:${bg}`] = { byId:{}, byCell:{} } */
+const keyOf = (r, bg) => `${r.group}:${r.map}:${bg}`;
+function bucket(r, bg) {
+  const k = keyOf(r, bg);
+  if (!store[k]) store[k] = { byId:{}, byCell:{} };
+  return store[k];
+}
+
+/* ---- diorama-layers.ini -------------------------------------------------
+ * The standalone editor owns authoring. It embeds the current manifest, can
+ * load another one, and emits the complete file with only bgN-virtual records
+ * regenerated. Ordinary plane lines, comments, scoped sections and unrelated
+ * sections pass through untouched. */
+let sourceIniText = window.__DIORAMA_LAYERS__ || '';
+let sourceIniName = window.__DIORAMA_LAYERS_NAME__ || 'diorama-layers.ini';
+let configDirty = false;
+const configRooms = {};
+const kVirtualCellSpanMax = 512;
+const planeTokens = new Set(Object.keys(PLANE_DEFAULTS));
+const roomKey = r => `${r.group}:${r.map}`;
+function emptyVirtual() {
+  return { setZ:false, z:0, setOrder:false, order:0,
+           setAlpha:false, alpha:255 };
+}
+function roomConfig(r) {
+  const key = roomKey(r);
+  if (!configRooms[key])
+    configRooms[key] = { planes:{}, virtual:[emptyVirtual(),emptyVirtual()] };
+  return configRooms[key];
+}
+function resolvedPlane(token) {
+  const base = PLANE_DEFAULTS[token] || {z:0,order:0,alpha:255};
+  const edit = typeof room !== 'undefined' && room
+    ? roomConfig(room).planes[token] || {} : {};
+  return {
+    z: edit.setZ ? edit.z : base.z,
+    order: edit.setOrder ? edit.order : base.order,
+    alpha: edit.setAlpha ? edit.alpha : base.alpha,
+    setOrder: !!edit.setOrder,
+  };
+}
+function resolvedVirtual(bg) {
+  const base = VIRTUAL_DEFAULTS[bg];
+  const edit = typeof room !== 'undefined' && room
+    ? roomConfig(room).virtual[bg] : emptyVirtual();
+  return {
+    z: edit.setZ ? edit.z : base.z,
+    order: edit.setOrder ? edit.order : base.order,
+    alpha: edit.setAlpha ? edit.alpha : base.alpha,
+    setOrder: !!edit.setOrder,
+  };
+}
+const stripIniComment = line => {
+  const semi = line.indexOf(';'), hash = line.indexOf('#');
+  let cut = line.length;
+  if (semi >= 0) cut = Math.min(cut, semi);
+  if (hash >= 0) cut = Math.min(cut, hash);
+  return line.slice(0, cut).trim();
+};
+function iniWords(rhs) {
+  const values = {};
+  for (const word of rhs.trim().split(/\s+/)) {
+    const at = word.indexOf(':');
+    if (at > 0) values[word.slice(0, at)] = word.slice(at + 1);
+  }
+  return values;
+}
+function resetLoadedConfig() {
+  for (const key of Object.keys(store)) delete store[key];
+  for (const key of Object.keys(configRooms)) delete configRooms[key];
+}
+function loadIniText(text, name) {
+  resetLoadedConfig();
+  sourceIniText = String(text || '');
+  sourceIniName = name || 'diorama-layers.ini';
+  let active = null;
+  const warnings = [];
+  for (const raw of sourceIniText.split(/\r?\n/)) {
+    const line = stripIniComment(raw);
+    if (!line) continue;
+    if (line[0] === '[') {
+      const match = line.match(/^\[layers:([0-9a-fA-F]{1,2}):([0-9a-fA-F]{1,2})\]$/);
+      if (!match) { active = null; continue; }
+      const group = parseInt(match[1],16), map = parseInt(match[2],16);
+      active = DATA.rooms.find(r => r.group === group && r.map === map) || null;
+      continue;
+    }
+    if (!active) continue;
+    const eq = line.indexOf('=');
+    if (eq < 0) continue;
+    const token = line.slice(0,eq).trim(), values = iniWords(line.slice(eq+1));
+    if (planeTokens.has(token)) {
+      const p = roomConfig(active).planes[token] || {};
+      if (values.z !== undefined && Number.isFinite(Number(values.z)))
+        { p.setZ = true; p.z = Number(values.z); }
+      if (values.order !== undefined && /^\d+$/.test(values.order))
+        { p.setOrder = true; p.order = Number(values.order); }
+      if (values.alpha !== undefined && /^\d+$/.test(values.alpha))
+        { p.setAlpha = true; p.alpha = Number(values.alpha); }
+      roomConfig(active).planes[token] = p;
+      continue;
+    }
+    const vm = token.match(/^bg([12])-virtual$/);
+    if (!vm) continue;
+    const bg = Number(vm[1]) - 1, v = roomConfig(active).virtual[bg];
+    if (values.z !== undefined && Number.isFinite(Number(values.z)))
+      { v.setZ = true; v.z = Number(values.z); }
+    if (values.order !== undefined && /^\d+$/.test(values.order))
+      { v.setOrder = true; v.order = Number(values.order); }
+    if (values.alpha !== undefined && /^\d+$/.test(values.alpha))
+      { v.setAlpha = true; v.alpha = Number(values.alpha); }
+    const parsedBand = /^\d+$/.test(values.band || '') ? Number(values.band) : -1;
+    if (parsedBand < 0 || parsedBand >= BANDS.length) continue;
+    const target = bucket(active, bg);
+    if (values.metatile !== undefined && /^[0-9a-fA-F]{1,2}$/.test(values.metatile)) {
+      target.byId[parseInt(values.metatile, 16)] = parsedBand;
+    } else if (values.cells !== undefined) {
+      const cm = values.cells.match(/^(\d+),(\d+)-(\d+),(\d+)$/);
+      const layer = active.bg[bg];
+      if (!cm || !layer) continue;
+      const [x0,y0,x1,y1] = cm.slice(1).map(Number);
+      const cellsW = layer.pagesWide * 16, cellsH = layer.pagesHigh * 16;
+      if (x0 > x1 || y0 > y1 || x1 >= cellsW || y1 >= cellsH) {
+        warnings.push(`${active.group}:${active.map} BG${bg+1} cells:${values.cells}`);
+        continue;
+      }
+      for (let y=y0; y<=y1; y++) for (let x=x0; x<=x1; x++)
+        target.byCell[y*cellsW+x] = parsedBand;
+    }
+  }
+  configDirty = false;
+  $('#iniName').textContent = sourceIniName;
+  $('#iniName').title = warnings.length
+    ? `${warnings.length} out-of-bounds virtual cell record(s) skipped` : 'Loaded INI';
+}
+
+function cellRuns(r, bg) {
+  const layer = r.bg[bg], target = bucket(r,bg);
+  if (!layer) return [];
+  const cellsW = layer.pagesWide * 16;
+  const entries = Object.entries(target.byCell)
+    .map(([cell,band]) => ({cell:Number(cell),band:Number(band)}))
+    .sort((a,b) => a.cell-b.cell);
+  const runs = [];
+  for (const e of entries) {
+    const x = e.cell % cellsW, y = Math.floor(e.cell / cellsW);
+    const last = runs[runs.length-1];
+    if (last && last.band === e.band && last.y0 === y && last.y1 === y &&
+        last.x1 + 1 === x) last.x1 = x;
+    else runs.push({x0:x,y0:y,x1:x,y1:y,band:e.band});
+  }
+  if (runs.length > kVirtualCellSpanMax)
+    throw new Error(`${r.group}:${r.map} BG${bg+1} needs ${runs.length} cell spans; maximum is ${kVirtualCellSpanMax}`);
+  return runs;
+}
+function virtualIniLines(r) {
+  const lines = [];
+  for (let bg=0; bg<2; bg++) {
+    if (!r.bg[bg]) continue;
+    const token = `bg${bg+1}-virtual`, v = roomConfig(r).virtual[bg];
+    const geometry = [];
+    if (v.setZ) geometry.push(`z:${Number(v.z).toFixed(4).replace(/0+$/,'').replace(/\.$/,'')}`);
+    if (v.setOrder) geometry.push(`order:${v.order}`);
+    if (v.setAlpha) geometry.push(`alpha:${v.alpha}`);
+    if (geometry.length) lines.push(`${token} = ${geometry.join(' ')}`);
+    const target = bucket(r,bg);
+    for (const [id,b] of Object.entries(target.byId).sort((a,b)=>Number(a[0])-Number(b[0])))
+      lines.push(`${token} = metatile:${Number(id).toString(16).toUpperCase().padStart(2,'0')} band:${b}`);
+    for (const s of cellRuns(r,bg))
+      lines.push(`${token} = cells:${s.x0},${s.y0}-${s.x1},${s.y1} band:${s.band}`);
+  }
+  return lines;
+}
+function mergeVirtualIni() {
+  const hadFinalNewline = /\r?\n$/.test(sourceIniText);
+  const lines = sourceIniText.split(/\r?\n/);
+  if (hadFinalNewline) lines.pop();
+  const out = [];
+  const written = new Set();
+  let i = 0;
+  while (i < lines.length) {
+    if (!/^\s*\[/.test(lines[i])) { out.push(lines[i++]); continue; }
+    const start = i, header = stripIniComment(lines[i++]);
+    while (i < lines.length && !/^\s*\[/.test(lines[i])) i++;
+    const block = lines.slice(start, i);
+    const match = header.match(/^\[layers:([0-9a-fA-F]{1,2}):([0-9a-fA-F]{1,2})\]$/);
+    const r = match && DATA.rooms.find(x => x.group===parseInt(match[1],16) && x.map===parseInt(match[2],16));
+    if (!r) { out.push(...block); continue; }
+    written.add(roomKey(r));
+    const canonical = virtualIniLines(r);
+    const body = block.slice(1);
+    const first = body.findIndex(line => /^\s*bg[12]-virtual\s*=/.test(stripIniComment(line)));
+    const kept = body.filter(line => !/^\s*bg[12]-virtual\s*=/.test(stripIniComment(line)));
+    out.push(block[0]);
+    if (first >= 0) {
+      const beforeCount = body.slice(0,first)
+        .filter(line => !/^\s*bg[12]-virtual\s*=/.test(stripIniComment(line))).length;
+      out.push(...kept.slice(0,beforeCount), ...canonical, ...kept.slice(beforeCount));
+    } else {
+      let at = kept.length;
+      while (at > 0 && !kept[at-1].trim()) at--;
+      out.push(...kept.slice(0,at), ...canonical, ...kept.slice(at));
+    }
+  }
+  for (const r of DATA.rooms) {
+    if (written.has(roomKey(r)) || !virtualIniLines(r).length) continue;
+    if (out.length && out[out.length-1].trim()) out.push('');
+    out.push(`[layers:${r.group.toString(16).toUpperCase().padStart(2,'0')}:${r.map.toString(16).toUpperCase().padStart(2,'0')}]`);
+    out.push(...virtualIniLines(r));
+  }
+  return out.join('\n') + (hadFinalNewline || out.length ? '\n' : '');
+}
+/* The AUTHENTIC band of one 8x8 tile, before any edit.
+ *
+ * A room is not flat to begin with: the priority bit already splits each BG
+ * into two depths, and the game uses it to put a tile in front of sprites.
+ * Defaulting everything to "behind" would misrepresent every priority-1 tile
+ * in the room and make the editor's first render disagree with the game. So
+ * the baseline is the bit the artist already set, and an edit is a DELTA from
+ * authentic -- which is also what makes "reset to default" meaningful. */
+const authenticBand = entry => (entry & 0x2000) ? 2 : 1;
+
+/* The resolved band of one 8x8 tile. Explicit assignment wins, cell before
+ * metatile id; otherwise the tile keeps its authentic band. Both keys are one
+ * index away from what a runtime lookup is handed (tile_x, tile_y), so this
+ * resolution order is expressible there unchanged. */
+function bandAt(st, L, tx, ty) {
+  const cx = tx >> 1, cy = ty >> 1;
+  const cell = cy*L.cellsW + cx;
+  if (st.byCell[cell] !== undefined) return st.byCell[cell];
+  const id = L.cellId[cell];
+  if (st.byId[id] !== undefined) return st.byId[id];
+  return authenticBand(L.words[ty*L.tilesW + tx]);
+}
+/* True when a cell has been moved off what the ROM says. Drives the outline
+ * overlay: the interesting thing to see is the delta, not the baseline. */
+function cellEdited(st, L, cx, cy) {
+  const cell = cy*L.cellsW + cx;
+  return st.byCell[cell] !== undefined || st.byId[L.cellId[cell]] !== undefined;
+}
+
+/* ---- state ------------------------------------------------------------ */
+let room = DATA.rooms[0], bgIndex = 0, L = null, st = null;
+let band = 2, brush = 'class', mode = '2d', tint = false;
+let lastEntry = null;
+let view = { x:0, y:0, scale:1 };           /* 2D pan/zoom */
+/* The camera frames a WINDOW of the level, not the whole thing. A room is up
+ * to 4096px long and the game only ever shows 256 of them, so orbiting a
+ * single 5:1 quad tells you nothing about what the player sees -- the far end
+ * swings out of frame and the parallax is unreadable. focusX walks that window
+ * along the level the way the camera does in play. */
+let orbit = { yaw:0.0, pitch:-0.34, dist:1.25, focusX:0.5, focusY:0.0 };
+
+const $ = s => document.querySelector(s);
+const cvs = $('#map2d'), ctx = cvs.getContext('2d', { alpha:false });
+const glc = $('#gl');
+
+function bandRGB(i) {
+  const css = getComputedStyle(document.documentElement)
+      .getPropertyValue(BANDS[i].css).trim();
+  const n = parseInt(css.slice(1), 16);
+  return [(n>>16)&255, (n>>8)&255, n&255];
+}
+
+/* ---- band surfaces -----------------------------------------------------
+ * One full-level RGBA surface per band -- the same thing the engine builds:
+ * a captured plane per destination, composited at its own depth. Tiles not
+ * in a band are simply absent from its surface, which is the mask the
+ * provider expresses by returning false. */
+function buildSurfaces() {
+  const out = [];
+  const rgb = BANDS.map((_, i) => tint ? bandRGB(i) : null);
+  for (let b=0; b<3; b++) {
+    const img = new ImageData(L.w, L.h);
+    out.push(img);
+  }
+  for (let ty=0; ty<L.tilesH; ty++) for (let tx=0; tx<L.tilesW; tx++) {
+    const b = bandAt(st, L, tx, ty);
+    blitTile(L, L.words[ty*L.tilesW+tx], out[b].data, L.w, tx*8, ty*8, rgb[b]);
+  }
+  return out;
+}
+let surfaces = null, surfacesDirty = true;
+/* Cells whose band changed since the last raster. A brush stroke touches a
+ * handful of them, and repainting the whole level for each one costs ~18ms --
+ * enough to make dragging a brush feel heavy on a long room. Past a threshold
+ * a full rebuild is cheaper than bookkeeping, so this degrades into one. */
+const dirtyCells = new Set();
+const kMaxIncrementalCells = 2048;
+function markCellDirty(cell) {
+  if (surfacesDirty) return;
+  if (dirtyCells.size >= kMaxIncrementalCells) { surfacesDirty = true; dirtyCells.clear(); }
+  else dirtyCells.add(cell);
+}
+/* A tile belongs to exactly one band, so a cell's contribution to the
+ * flattened composite is just its own four tiles -- clear the cell's rect
+ * everywhere, then re-blit it into whichever band now owns it. */
+function repaintCell(cell) {
+  const cx = cell % L.cellsW, cy = (cell / L.cellsW) | 0;
+  const rgb = BANDS.map((_, i) => tint ? bandRGB(i) : null);
+  for (let b = 0; b < 3; b++) {
+    const d = surfaces[b].data;
+    for (let py = 0; py < 16; py++) {
+      let o = ((cy*16 + py) * L.w + cx*16) * 4;
+      for (let px = 0; px < 16; px++, o += 4)
+        { d[o]=0; d[o+1]=0; d[o+2]=0; d[o+3]=0; }
+    }
+  }
+  for (let q = 0; q < 4; q++) {
+    const tx = cx*2 + (q&1), ty = cy*2 + (q>>1);
+    const b = bandAt(st, L, tx, ty);
+    blitTile(L, L.words[ty*L.tilesW+tx], surfaces[b].data, L.w, tx*8, ty*8, rgb[b]);
+  }
+  if (composite) {
+    const cc = composite.getContext('2d');
+    cc.clearRect(cx*16, cy*16, 16, 16);
+    const one = new ImageData(16, 16);
+    for (let b = 0; b < 3; b++) {
+      const src = surfaces[b].data;
+      for (let py = 0; py < 16; py++) {
+        let so = ((cy*16+py)*L.w + cx*16)*4, dof = (py*16)*4;
+        for (let px = 0; px < 16; px++, so += 4, dof += 4) {
+          if (!src[so+3]) continue;
+          one.data[dof]=src[so]; one.data[dof+1]=src[so+1];
+          one.data[dof+2]=src[so+2]; one.data[dof+3]=255;
+        }
+      }
+    }
+    const sc = document.createElement('canvas');
+    sc.width = 16; sc.height = 16;
+    sc.getContext('2d').putImageData(one, 0, 0);
+    cc.drawImage(sc, cx*16, cy*16);
+  }
+}
+const invalidate = () => {
+  surfacesDirty = true; compositeDirty = true; glDirty = true;
+  invalidateOther(); invalidateGameComposite();
+  tally(); draw();
+};
+function surfacesNow() {
+  if (surfacesDirty || !surfaces) {
+    surfaces = buildSurfaces(); surfacesDirty = false;
+    dirtyCells.clear(); compositeDirty = true;
+  } else if (dirtyCells.size) {
+    for (const cell of dirtyCells) repaintCell(cell);
+    dirtyCells.clear();
+  }
+  return surfaces;
+}
+
+/* ---- 2D view ----------------------------------------------------------- */
+/* Returns false when the element has no layout yet. Fitting against a 0x0
+ * rect yields scale 0, which draws nothing and never recovers on its own --
+ * that is a black 2D view for the rest of the session. An initial load can
+ * land here while fonts are still resolving, so the caller re-fits once real
+ * layout arrives. */
+let fitted = false;
+function fitView() {
+  const r = cvs.getBoundingClientRect();
+  if (r.width < 8 || r.height < 8) return false;
+  view.scale = Math.min(r.width / L.w, r.height / L.h);
+  view.x = (r.width  - L.w*view.scale) / 2;
+  view.y = (r.height - L.h*view.scale) / 2;
+  fitted = true;
+  return true;
+}
+function zoomBy(k) {
+  const r = cvs.getBoundingClientRect();
+  const mx = r.width/2, my = r.height/2;
+  const ns = Math.max(0.05, Math.min(8, view.scale * k));
+  view.x = mx - (mx - view.x) * (ns/view.scale);
+  view.y = my - (my - view.y) * (ns/view.scale);
+  view.scale = ns; draw();
+}
+let composite = null, compositeDirty = true;
+/* The three band surfaces flattened into one image. Rebuilding this allocated
+ * three canvases and ran three putImageData EVERY draw, which is what made
+ * panning and painting feel heavy; it only actually changes when a band
+ * assignment changes. */
+function compositeNow() {
+  if (!composite || composite.width !== L.w || composite.height !== L.h) {
+    composite = document.createElement('canvas');
+    composite.width = L.w; composite.height = L.h;
+    compositeDirty = true;
+  }
+  if (!compositeDirty) return composite;
+  const surf = surfacesNow();
+  const cc = composite.getContext('2d');
+  cc.clearRect(0, 0, L.w, L.h);
+  const scratch = document.createElement('canvas');
+  scratch.width = L.w; scratch.height = L.h;
+  const sc = scratch.getContext('2d');
+  for (const b of [0,1,2]) {            /* furthest band first */
+    sc.putImageData(surf[b], 0, 0);
+    cc.drawImage(scratch, 0, 0);
+  }
+  compositeDirty = false;
+  return composite;
+}
+let game2dCache = new Map();
+function invalidateGameComposite() { game2dCache.clear(); }
+function gameLayerSurfaces(r, bg) {
+  const key = `${keyOf(r,bg)}:${tint ? 1 : 0}`;
+  if (game2dCache.has(key)) return game2dCache.get(key);
+  const layer = decodeLayer(r,bg), state = bucket(r,bg);
+  if (!layer) return null;
+  const images = [new ImageData(layer.w,layer.h), new ImageData(layer.w,layer.h)];
+  for (let ty=0; ty<layer.tilesH; ty++) for (let tx=0; tx<layer.tilesW; tx++) {
+    const entry = layer.words[ty*layer.tilesW+tx];
+    const nativeHigh = (entry & 0x2000) ? 1 : 0;
+    const virtualBand = bandAt(state,layer,tx,ty);
+    blitTile(layer,entry,images[nativeHigh].data,layer.w,tx*8,ty*8,
+             tint ? bandRGB(virtualBand) : null);
+  }
+  const canvases = images.map(image => {
+    const canvas = document.createElement('canvas');
+    canvas.width=layer.w; canvas.height=layer.h;
+    canvas.getContext('2d').putImageData(image,0,0);
+    return canvas;
+  });
+  const built = { L:layer, low:canvases[0], high:canvases[1] };
+  game2dCache.set(key,built);
+  return built;
+}
+function layerCopies2d(bg, surface) {
+  if (bg === bgIndex) return [{x:0,y:0}];
+  if (!showBoth) return [];
+  const span = otherOffset.repeat
+    ? Math.ceil((L.w + surface.L.w) / surface.L.w) + 1 : 1;
+  const first = otherOffset.repeat
+    ? Math.floor((-L.w/2 - surface.L.w) / surface.L.w) : 0;
+  const copies = [];
+  for (let i=0;i<span;i++) copies.push({
+    x: otherOffset.x + (first+i)*surface.L.w + (surface.L.w-L.w)/2,
+    y: otherOffset.y + (L.h-surface.L.h)/2,
+  });
+  return copies;
+}
+function drawGameLayer(bg, high) {
+  if (!room.bg[bg] || (bg !== bgIndex && !showBoth)) return;
+  const surface = gameLayerSurfaces(room,bg);
+  const image = high ? surface.high : surface.low;
+  for (const copy of layerCopies2d(bg,surface))
+    ctx.drawImage(image, view.x+copy.x*view.scale, view.y+copy.y*view.scale,
+                  surface.L.w*view.scale, surface.L.h*view.scale);
+}
+function drawActor2d() {
+  if (!actor.show) return;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,86,120,.95)'; ctx.lineWidth = 2;
+  ctx.fillStyle = 'rgba(255,86,120,.78)';
+  const ax = view.x + actor.x*view.scale, ay = view.y + actor.y*view.scale;
+  ctx.fillRect(ax, ay, actor.w*view.scale, actor.h*view.scale);
+  ctx.strokeRect(ax, ay, actor.w*view.scale, actor.h*view.scale);
+  ctx.restore();
+}
+function draw2d() {
+  const r = cvs.getBoundingClientRect();
+  const w = Math.round(r.width * devicePixelRatio);
+  const h = Math.round(r.height * devicePixelRatio);
+  if (cvs.width !== w || cvs.height !== h) { cvs.width = w; cvs.height = h; }
+  ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+  ctx.fillStyle = '#0d0f14'; ctx.fillRect(0,0,r.width,r.height);
+  ctx.imageSmoothingEnabled = false;
+  /* Authentic Mode-1 background ranks. Virtual classification is
+   * presentation-only, so it may tint these pixels but never changes this
+   * flat-game ordering. OBJ2 sits between the low and high BG ranks. */
+  drawGameLayer(1,false);  /* BG2 priority 0, hardware rank 7  */
+  drawGameLayer(0,false);  /* BG1 priority 0, hardware rank 8  */
+  drawActor2d();            /* reference for OBJ priority 2, rank 10 */
+  drawGameLayer(1,true);   /* BG2 priority 1, hardware rank 11 */
+  drawGameLayer(0,true);   /* BG1 priority 1, hardware rank 12 */
+
+  /* Cell outlines for anything moved off the default band. */
+  if (view.scale > 0.28) {
+    ctx.lineWidth = 1;
+    /* Iterate the edits rather than the level. A cell-keyed edit is one entry;
+     * a metatile-keyed one has to find its instances, but only for ids that
+     * were actually touched. */
+    const seen = new Set();
+    const outline = (cx, cy) => {
+      const c = bandRGB(bandAt(st, L, cx*2, cy*2));
+      ctx.strokeStyle = `rgba(${c[0]},${c[1]},${c[2]},.9)`;
+      ctx.strokeRect(view.x + cx*16*view.scale + .5,
+                     view.y + cy*16*view.scale + .5,
+                     16*view.scale - 1, 16*view.scale - 1);
+    };
+    for (const k of Object.keys(st.byCell)) {
+      const cell = Number(k); seen.add(cell);
+      outline(cell % L.cellsW, (cell / L.cellsW) | 0);
+    }
+    const ids = Object.keys(st.byId);
+    if (ids.length) {
+      const want = new Set(ids.map(Number));
+      for (let cell = 0; cell < L.cellId.length; cell++)
+        if (!seen.has(cell) && want.has(L.cellId[cell]))
+          outline(cell % L.cellsW, (cell / L.cellsW) | 0);
+    }
+  }
+}
+</script>
+<script>
+/* ---- undo / redo --------------------------------------------------------
+ * Deltas, not snapshots. An operation records the PREVIOUS value of every key
+ * it is about to touch and, on commit, the resulting value -- so a stroke that
+ * repaints one cell costs one entry, while "all instances of a metatile" costs
+ * as many as it genuinely changed.
+ *
+ * The unit of undo is the GESTURE, not the event. A brush drag fires a paint
+ * per mousemove; without coalescing, undoing one stroke would mean pressing
+ * undo a few hundred times. beginOp/commitOp bracket the gesture.
+ *
+ * `undefined` is a real recorded value: it means the key was absent, so the
+ * tile fell back to its authentic band. Restoring it deletes the key rather
+ * than writing a band, which is why every apply goes through setKey. */
+const undoStack = [], redoStack = [];
+const kMaxUndo = 200;
+let pendingOp = null;
+
+function beginOp(label) {
+  if (pendingOp) commitOp();
+  pendingOp = { label, parts: {} };
+}
+/* An operation is a set of per-layer deltas rather than one layer's, because
+ * "reset everything" is a single gesture that spans all of them and should
+ * undo as one. Ordinary painting simply has one part. */
+function partFor(key) {
+  if (!pendingOp) return null;
+  if (!pendingOp.parts[key]) pendingOp.parts[key] = { before:{ cell:{}, id:{} } };
+  return pendingOp.parts[key];
+}
+function recordCellIn(key, cell) {
+  const part = partFor(key);
+  if (part && !(cell in part.before.cell))
+    part.before.cell[cell] = (store[key] || {byCell:{}}).byCell[cell];
+}
+function recordIdIn(key, id) {
+  const part = partFor(key);
+  if (part && !(id in part.before.id))
+    part.before.id[id] = (store[key] || {byId:{}}).byId[id];
+}
+const recordCell = cell => recordCellIn(keyOf(room, bgIndex), cell);
+const recordId   = id   => recordIdIn(keyOf(room, bgIndex), id);
+function commitOp() {
+  if (!pendingOp) return;
+  const op = pendingOp; pendingOp = null;
+  let changed = false;
+  for (const key in op.parts) {
+    const part = op.parts[key], bucket = store[key] || { byCell:{}, byId:{} };
+    part.after = { cell:{}, id:{} };
+    for (const k in part.before.cell) {
+      part.after.cell[k] = bucket.byCell[k];
+      if (part.after.cell[k] !== part.before.cell[k]) changed = true;
+    }
+    for (const k in part.before.id) {
+      part.after.id[k] = bucket.byId[k];
+      if (part.after.id[k] !== part.before.id[k]) changed = true;
+    }
+  }
+  if (!changed) return;                 /* a gesture that altered nothing */
+  undoStack.push(op);
+  if (undoStack.length > kMaxUndo) undoStack.shift();
+  redoStack.length = 0;
+  refreshHistoryButtons();
+}
+function setKey(target, k, value) {
+  if (value === undefined) delete target[k]; else target[k] = value;
+}
+function applySide(op, which) {
+  const keys = Object.keys(op.parts);
+  const current = keyOf(room, bgIndex);
+  /* A single-layer op that belongs somewhere else switches there: undoing
+   * into a layer you cannot see would look like nothing happened. A
+   * multi-layer op stays put and just refreshes what is on screen. */
+  if (keys.length === 1 && keys[0] !== current) {
+    const [g, m, bg] = keys[0].split(':').map(Number);
+    const idx = DATA.rooms.findIndex(r => r.group===g && r.map===m);
+    if (idx >= 0) { room = DATA.rooms[idx]; $('#room').value = String(idx); setLayer(bg); }
+  }
+  for (const key of keys) {
+    const side = op.parts[key][which];
+    if (!store[key]) store[key] = { byId:{}, byCell:{} };
+    const bucket = store[key];
+    for (const k in side.cell) setKey(bucket.byCell, k, side.cell[k]);
+    for (const k in side.id)   setKey(bucket.byId,   k, side.id[k]);
+    if (key !== keyOf(room, bgIndex)) continue;
+    for (const k in side.cell) markCellDirty(Number(k));
+    for (const k in side.id)   markIdDirty(Number(k));
+  }
+  glDirty = true; invalidateOther(); invalidateGameComposite();
+  configDirty = true; tally(); draw();
+  return true;
+}
+function undo() {
+  if (pendingOp) commitOp();
+  const op = undoStack.pop();
+  if (!op) return;
+  redoStack.push(op);
+  applySide(op, 'before');
+  refreshHistoryButtons();
+}
+function redo() {
+  const op = redoStack.pop();
+  if (!op) return;
+  undoStack.push(op);
+  applySide(op, 'after');
+  refreshHistoryButtons();
+}
+function refreshHistoryButtons() {
+  const u = $('#undoBtn'), r = $('#redoBtn');
+  if (!u || !r) return;
+  u.disabled = !undoStack.length; r.disabled = !redoStack.length;
+  u.title = undoStack.length
+    ? `Undo ${undoStack[undoStack.length-1].label} (${undoStack.length})` : 'Nothing to undo';
+  r.title = redoStack.length
+    ? `Redo ${redoStack[redoStack.length-1].label}` : 'Nothing to redo';
+}
+
+/* ---- painting ---------------------------------------------------------- */
+function paintCell(cx, cy, value) {
+  if (cx<0 || cy<0 || cx>=L.cellsW || cy>=L.cellsH) return;
+  invalidateGameComposite(); configDirty = true;
+  const cell = cy*L.cellsW + cx, id = L.cellId[cell];
+  if (value === null) {                       /* Alt: back to authentic */
+    recordCell(cell); delete st.byCell[cell];
+    if (brush === 'class') { recordId(id); delete st.byId[id]; markIdDirty(id); }
+    markCellDirty(cell);
+    return;
+  }
+  if (brush === 'class') { recordId(id); st.byId[id] = value; markIdDirty(id); }
+  else { recordCell(cell); st.byCell[cell] = value; markCellDirty(cell); }
+}
+/* One metatile id can appear thousands of times; past the incremental cap the
+ * full rebuild takes over, which is exactly the right trade at that size. */
+function markIdDirty(id) {
+  if (surfacesDirty) return;
+  for (let cell = 0; cell < L.cellId.length; cell++) {
+    if (L.cellId[cell] !== id) continue;
+    markCellDirty(cell);
+    if (surfacesDirty) return;
+  }
+}
+function paintRect(x0, y0, x1, y1, value) {
+  invalidateGameComposite(); configDirty = true;
+  for (let cy=Math.min(y0,y1); cy<=Math.max(y0,y1); cy++)
+    for (let cx=Math.min(x0,x1); cx<=Math.max(x0,x1); cx++) {
+      const cell = cy*L.cellsW + cx;
+      recordCell(cell);
+      if (value === null) delete st.byCell[cell]; else st.byCell[cell] = value;
+      markCellDirty(cell);
+    }
+}
+const toCell = ev => {
+  const r = cvs.getBoundingClientRect();
+  return [Math.floor(((ev.clientX-r.left) - view.x) / view.scale / 16),
+          Math.floor(((ev.clientY-r.top ) - view.y) / view.scale / 16)];
+};
+
+let drag = null;
+cvs.addEventListener('mousedown', ev => {
+  /* Middle button, shift, or the explicit Pan tool. Requiring a modifier was
+   * the only way to move around and nothing on screen said so. */
+  if (ev.button === 1 || ev.shiftKey || brush === 'pan') {
+    drag = { pan:true, x:ev.clientX, y:ev.clientY }; return;
+  }
+  const [cx, cy] = toCell(ev);
+  if (actor.show && !ev.altKey) {
+    const px = (ev.clientX - cvs.getBoundingClientRect().left - view.x)/view.scale;
+    const py = (ev.clientY - cvs.getBoundingClientRect().top  - view.y)/view.scale;
+    if (px >= actor.x && px <= actor.x+actor.w && py >= actor.y && py <= actor.y+actor.h) {
+      drag = { actor2d:true, ox:px-actor.x, oy:py-actor.y }; return;
+    }
+  }
+  const value = ev.altKey ? null : band;
+  if (brush === 'rect') { drag = { rect:true, x0:cx, y0:cy, x1:cx, y1:cy, value }; }
+  else {
+    beginOp(ev.altKey ? 'revert' : `paint ${BANDS[band].name.toLowerCase()}`);
+    drag = { paint:true, value }; paintCell(cx, cy, value);
+    glDirty = true; tally(); draw();
+  }
+  if (cx>=0 && cy>=0 && cx<L.cellsW && cy<L.cellsH)
+    lastEntry = L.words[(cy*2)*L.tilesW + cx*2];
+});
+window.addEventListener('mousemove', ev => {
+  if (mode !== '2d') return;            /* the orbit handler owns 3D */
+  const [cx, cy] = toCell(ev);
+  hud(cx, cy);
+  if (!drag) return;
+  if (drag.actor2d) {
+    const r = cvs.getBoundingClientRect();
+    actor.x = Math.round((ev.clientX-r.left-view.x)/view.scale - drag.ox);
+    actor.y = Math.round((ev.clientY-r.top -view.y)/view.scale - drag.oy);
+    draw(); return;
+  }
+  if (drag.pan) { view.x += ev.clientX-drag.x; view.y += ev.clientY-drag.y;
+                  drag.x=ev.clientX; drag.y=ev.clientY; draw(); }
+  else if (drag.paint) {
+    /* Paint on every event so a fast drag cannot skip a cell, but let the
+     * redraw collapse onto the next frame like everything else. */
+    paintCell(cx, cy, drag.value);
+    glDirty = true; tally(); draw();
+  }
+  else if (drag.rect) { drag.x1=cx; drag.y1=cy; draw(); }
+});
+window.addEventListener('mouseup', () => {
+  if (drag && drag.rect) {
+    beginOp('rectangle');
+    paintRect(drag.x0, drag.y0, drag.x1, drag.y1, drag.value);
+  }
+  const wasEdit = drag && (drag.rect || drag.paint);
+  drag = null;
+  if (wasEdit) { commitOp(); glDirty = true; tally(); draw(); }
+});
+cvs.addEventListener('wheel', ev => {
+  ev.preventDefault();
+  const r = cvs.getBoundingClientRect();
+  const mx = ev.clientX-r.left, my = ev.clientY-r.top;
+  const k = Math.exp(-ev.deltaY * 0.0015);
+  const ns = Math.max(0.05, Math.min(8, view.scale * k));
+  view.x = mx - (mx - view.x) * (ns/view.scale);
+  view.y = my - (my - view.y) * (ns/view.scale);
+  view.scale = ns; draw();
+}, { passive:false });
+
+/* ---- select-by --------------------------------------------------------- */
+$('#selPrio').onclick = () => {
+  configDirty = true;
+  beginOp('select by priority');
+  /* Every tile the artist already marked priority-1. In a room that uses the
+   * bit meaningfully this is the split they intended, and it is usually the
+   * best first pass before any hand work. */
+  for (let cy=0; cy<L.cellsH; cy++) for (let cx=0; cx<L.cellsW; cx++) {
+    let any = false;
+    for (let q=0;q<4;q++)
+      if (L.words[(cy*2+(q>>1))*L.tilesW + cx*2+(q&1)] & 0x2000) any = true;
+    if (any) { recordCell(cy*L.cellsW+cx); st.byCell[cy*L.cellsW+cx] = band; }
+  }
+  commitOp(); invalidate();
+};
+$('#selPal').onclick = () => {
+  if (lastEntry === null) return;
+  configDirty = true;
+  beginOp('select by palette');
+  const want = (lastEntry>>10) & 7;
+  for (let cy=0; cy<L.cellsH; cy++) for (let cx=0; cx<L.cellsW; cx++)
+    if ((L.words[(cy*2)*L.tilesW + cx*2] >> 10 & 7) === want) {
+      recordCell(cy*L.cellsW+cx); st.byCell[cy*L.cellsW+cx] = band;
+    }
+  commitOp(); invalidate();
+};
+/* Clearing every edit in a bucket returns those tiles to the band their own
+ * priority bit selects -- which is what "ROM default" means here. The baseline
+ * is never stored, so reverting is deletion, not a rewrite. */
+function clearKeys(keys, label) {
+  const live = keys.filter(k => store[k] &&
+    (Object.keys(store[k].byCell).length || Object.keys(store[k].byId).length));
+  if (!live.length) return 0;
+  configDirty = true;
+  beginOp(label);
+  let n = 0;
+  for (const key of live) {
+    const b = store[key];
+    for (const k of Object.keys(b.byCell)) { recordCellIn(key, Number(k)); delete b.byCell[k]; n++; }
+    for (const k of Object.keys(b.byId))   { recordIdIn(key, Number(k));   delete b.byId[k];   n++; }
+  }
+  commitOp();
+  surfacesDirty = true; invalidate();
+  return n;
+}
+$('#clearAll').onclick = () =>
+  clearKeys([keyOf(room, bgIndex)], 'reset layer');
+$('#clearRoom').onclick = () =>
+  clearKeys([keyOf(room, 0), keyOf(room, 1)], 'reset room');
+$('#clearEverything').onclick = () => {
+  const keys = Object.keys(store);
+  const edited = keys.filter(k => store[k] &&
+    (Object.keys(store[k].byCell).length || Object.keys(store[k].byId).length));
+  if (!edited.length) { alert('Nothing is edited — everything is already at the ROM default.'); return; }
+  const rooms = new Set(edited.map(k => k.split(':').slice(0,2).join(':')));
+  if (!confirm(`Reset every edit back to the ROM's own priority bits?\n\n`
+             + `${edited.length} layer(s) across ${rooms.size} room(s).\n`
+             + `This is undoable with ctrl/cmd-Z.`)) return;
+  clearKeys(edited, 'reset all rooms');
+};
+</script>
+<script>
+/* ---- 3D orbit preview --------------------------------------------------
+ * PORTABILITY IS THE POINT. The engine composites a diorama by drawing each
+ * captured plane as one textured quad at its own depth, so that is exactly
+ * what this does -- one quad per band, sized from its own layer's extent,
+ * placed at the band's z. Nothing here depends on a WebGL-only feature:
+ *
+ *   - the matrix is a plain right-handed perspective * lookAt, column-major,
+ *     the same convention as scene3d_math.c;
+ *   - a quad's world extent comes from its layer's own pixel size, so a
+ *     one-page background is not stretched to the playfield's length;
+ *   - configured painter order decides overlap while z independently controls
+ *     projected geometry, matching diorama.c;
+ *   - the shader is texel * vertex colour, which is the SIM 3D fragment
+ *     stage already, so per-vertex tint carries over unchanged.
+ *
+ * The runtime consumes the same INI values and capture-surface model. */
+const V_SRC = `
+attribute vec2 aPos; attribute vec2 aUV;
+uniform mat4 uMVP; uniform vec3 uOrigin;
+varying vec2 vUV;
+void main(){ vUV = aUV;
+  gl_Position = uMVP * vec4(aPos.x + uOrigin.x, aPos.y + uOrigin.y, uOrigin.z, 1.0); }`;
+const F_SRC = `
+precision mediump float;
+uniform sampler2D uTex; uniform vec4 uTint;
+varying vec2 vUV;
+void main(){ vec4 t = texture2D(uTex, vUV);
+  if (t.a < 0.02) discard;                 /* colour 0 stays transparent */
+  gl_FragColor = vec4(t.rgb * uTint.rgb, t.a * uTint.a); }`;
+
+let gl = null, prog = null, texes = [null,null,null], quadBuf = null;
+/* The layer you are NOT editing, rasterised and cached so both backgrounds can
+ * be in the scene at once. Without it there is no way to see whether a band
+ * you pushed back on BG1 has passed through BG2 -- which is the one thing the
+ * depth ladder cannot show you visually. */
+let otherTex = [null,null,null], otherKey = null, otherL = null;
+function otherLayerTextures() {
+  const bg = bgIndex ^ 1;
+  if (!room.bg[bg]) return null;
+  const key = keyOf(room, bg);
+  if (otherKey === key && otherTex[0]) return { texes:otherTex, L:otherL };
+  const L2 = decodeLayer(room, bg);
+  const st2 = bucket(room, bg);
+  const rgb = BANDS.map((_, i) => tint ? bandRGB(i) : null);
+  const imgs = [0,1,2].map(() => new ImageData(L2.w, L2.h));
+  for (let ty=0; ty<L2.tilesH; ty++) for (let tx=0; tx<L2.tilesW; tx++) {
+    const b = bandAt(st2, L2, tx, ty);
+    blitTile(L2, L2.words[ty*L2.tilesW+tx], imgs[b].data, L2.w, tx*8, ty*8, rgb[b]);
+  }
+  for (let b=0;b<3;b++){
+    if (!otherTex[b]) otherTex[b] = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, otherTex[b]);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE, imgs[b]);
+  }
+  otherKey = key; otherL = L2;
+  return { texes:otherTex, L:otherL };
+}
+const invalidateOther = () => { otherKey = null; };
+let showBoth = true;
+/* Where the other background sits relative to this one, in level pixels.
+ *
+ * The two layers are rarely the same size -- 17 rooms have a BG2 of a single
+ * 256x256 page against a playfield up to 4096 long, and 16 more simply differ
+ * -- and in play BG2 scrolls at its own rate or repeats. So there is no one
+ * true alignment to preview: any part of BG2 can end up behind any part of
+ * BG1. Sliding it is how you scan the whole relationship for conflicts rather
+ * than checking the single arrangement that happens to be at the origin. */
+const otherOffset = { x: 0, y: 0, repeat: true };
+function initGL() {
+  gl = glc.getContext('webgl', { alpha:false, antialias:true, depth:true });
+  if (!gl) return false;
+  const mk = (t, src) => { const s = gl.createShader(t);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+      console.error(gl.getShaderInfoLog(s));
+    return s; };
+  prog = gl.createProgram();
+  gl.attachShader(prog, mk(gl.VERTEX_SHADER, V_SRC));
+  gl.attachShader(prog, mk(gl.FRAGMENT_SHADER, F_SRC));
+  gl.linkProgram(prog); gl.useProgram(prog);
+  quadBuf = gl.createBuffer();
+  for (let i=0;i<3;i++){ texes[i] = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texes[i]);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE); }
+  return true;
+}
+/* Column-major, same layout scene3d_math.c uses. */
+function perspective(fovy, aspect, n, f) {
+  const t = 1/Math.tan(fovy/2);
+  return [t/aspect,0,0,0, 0,t,0,0, 0,0,(f+n)/(n-f),-1, 0,0,2*f*n/(n-f),0];
+}
+function lookAt(ex,ey,ez, cx,cy,cz) {
+  let zx=ex-cx, zy=ey-cy, zz=ez-cz;
+  let l=Math.hypot(zx,zy,zz); zx/=l; zy/=l; zz/=l;
+  let xx=zz, xy=0, xz=-zx; l=Math.hypot(xx,xy,xz)||1; xx/=l; xy/=l; xz/=l;
+  const yx=zy*xz-zz*xy, yy=zz*xx-zx*xz, yz=zx*xy-zy*xx;
+  return [xx,yx,zx,0, xy,yy,zy,0, xz,yz,zz,0,
+          -(xx*ex+xy*ey+xz*ez), -(yx*ex+yy*ey+yz*ez), -(zx*ex+zy*ey+zz*ez), 1];
+}
+const mul = (a,b) => { const o = new Array(16);
+  for (let c=0;c<4;c++) for (let r=0;r<4;r++) { let s=0;
+    for (let k=0;k<4;k++) s += a[k*4+r]*b[c*4+k]; o[c*4+r]=s; }
+  return o; };
+
+/* The MVP of the last 3D draw, kept so a pointer can be put back onto the
+ * actor's plane without recomputing the camera. */
+let lastMVP = null, lastVW = 1, lastVH = 1;
+let glDirty = true;
+function draw3d() {
+  if (!gl && !initGL()) return;
+  const r = glc.getBoundingClientRect();
+  const w = Math.round(r.width*devicePixelRatio);
+  const h = Math.round(r.height*devicePixelRatio);
+  if (glc.width !== w || glc.height !== h) {   /* reallocates the drawing buffer */
+    glc.width = w; glc.height = h;
+  }
+  gl.viewport(0,0,glc.width,glc.height);
+  gl.clearColor(0.05,0.06,0.08,1);
+  /* diorama.c uses SDL's painter with no depth test. Match it: z changes the
+   * projection, while the resolved INI paint order decides overlap. */
+  gl.disable(gl.DEPTH_TEST); gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+  const surf = surfacesNow();
+  if (glDirty) {
+    for (let b=0;b<3;b++){ gl.bindTexture(gl.TEXTURE_2D, texes[b]);
+      gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE, surf[b]); }
+    glDirty = false;
+  }
+  /* World units: one screen-height of playfield = 1.0, so the camera framing
+   * is independent of how long the level is. */
+  const unit = 1 / L.h;
+  const W = L.w*unit, H = 1.0;
+  const cx = Math.cos(orbit.yaw), sx = Math.sin(orbit.yaw);
+  const cp = Math.cos(orbit.pitch), sp = Math.sin(orbit.pitch);
+  /* Pivot at the focused point on the playfield, so yaw rotates around what
+   * is on screen instead of around the middle of a very long level. */
+  const fx = (orbit.focusX - 0.5) * W, fy = orbit.focusY * H;
+  const eye = [fx + sx*cp*orbit.dist, fy - sp*orbit.dist, cx*cp*orbit.dist];
+  const mvp = mul(perspective(0.9, glc.width/glc.height, 0.01, 60),
+                  lookAt(eye[0],eye[1],eye[2], fx,fy,0));
+  gl.uniformMatrix4fv(gl.getUniformLocation(prog,'uMVP'), false, new Float32Array(mvp));
+  lastMVP = mvp; lastVW = glc.clientWidth; lastVH = glc.clientHeight;
+
+  const aPos = gl.getAttribLocation(prog,'aPos'), aUV = gl.getAttribLocation(prog,'aUV');
+  const uOrigin = gl.getUniformLocation(prog,'uOrigin');
+  const uTint = gl.getUniformLocation(prog,'uTint');
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+  gl.enableVertexAttribArray(aPos); gl.enableVertexAttribArray(aUV);
+  gl.vertexAttribPointer(aPos,2,gl.FLOAT,false,16,0);
+  gl.vertexAttribPointer(aUV ,2,gl.FLOAT,false,16,8);
+  const quad = (levelW, levelH, z, tex, alpha, dx = 0, dy = 0) => {
+    /* Each layer keeps its OWN extent -- 17 rooms have a BG2 of one 256x256
+     * page against a playfield up to 4096 long, and stretching it to match
+     * would be a lie about where its art actually is. */
+    const w = levelW * unit, h = levelH * unit;
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+      dx-w/2, dy+h/2, 0,0,   dx+w/2, dy+h/2, 1,0,
+      dx-w/2, dy-h/2, 0,1,   dx+w/2, dy-h/2, 1,1 ]), gl.DYNAMIC_DRAW);
+    gl.uniform3f(uOrigin, 0, 0, z);
+    gl.uniform4f(uTint, 1, 1, 1, alpha);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  };
+  /* Resolve the same independent paint keys as DioramaLayerOrder_Resolve.
+   * Virtual planes share their anchor's default key and are stably inserted
+   * immediately before it. Existing INI `order` values therefore retain their
+   * current meaning when the new planes are introduced. */
+  const other = showBoth ? otherLayerTextures() : null;
+  const bgState = bg => bg === bgIndex
+    ? {texes,L,active:true} : (other ? {texes:other.texes,L:other.L,active:false} : null);
+  const baseSequence = [
+    {bg:1,b:0}, {bg:1,b:1}, {bg:0,b:0}, {bg:0,b:1},
+    {actor:true}, {bg:1,b:2}, {bg:0,b:2},
+  ];
+  const items = baseSequence.map((item,sequence) => ({...item,sequence}))
+    .filter(item => item.actor ? actor.show : !!bgState(item.bg));
+  for (const item of items) item.order = item.actor
+    ? resolvedPlane('obj2').order : bandPaintOrder(item.bg,item.b);
+  items.sort((a,b) => a.order-b.order || a.sequence-b.sequence);
+  for (const item of items) {
+    if (item.actor) { drawActor3d(unit,W,H); continue; }
+    const source = bgState(item.bg);
+    const alpha = bandAlpha(item.bg,item.b) / 255;
+    if (source.active) {
+      quad(source.L.w,source.L.h,bandZ(item.bg,item.b),
+           source.texes[item.b],alpha);
+      continue;
+    }
+    const span = otherOffset.repeat
+      ? Math.ceil((L.w + source.L.w) / source.L.w) + 1 : 1;
+    const first = otherOffset.repeat
+      ? Math.floor((-L.w/2 - source.L.w) / source.L.w) : 0;
+    for (let i=0;i<span;i++) {
+      const ox = otherOffset.x + (first+i)*source.L.w + (source.L.w-L.w)/2;
+      quad(source.L.w,source.L.h,bandZ(item.bg,item.b),source.texes[item.b],alpha,
+           ox*unit,-otherOffset.y*unit);
+    }
+  }
+}
+
+/* One untextured quad at the resolved OBJ2 plane. The runtime compositor is a
+ * painter, so it participates in the same configured paint ordering as every
+ * captured plane; z independently controls its 3D position. */
+let actorTex = null;
+function actorTexture() {
+  if (actorTex) return actorTex;
+  const c = document.createElement('canvas');
+  c.width = 24; c.height = 32;
+  const g = c.getContext('2d');
+  g.fillStyle = 'rgba(255,86,120,0.92)';          /* stands out against art */
+  g.fillRect(5, 0, 14, 10);                        /* head                  */
+  g.fillRect(2, 10, 20, 14);                       /* body                  */
+  g.fillRect(4, 24, 6, 8); g.fillRect(14, 24, 6, 8);
+  g.strokeStyle = 'rgba(255,255,255,0.85)'; g.lineWidth = 1;
+  g.strokeRect(2.5, 0.5, 19, 31);
+  actorTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, actorTex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, c);
+  return actorTex;
+}
+function drawActor3d(unit, W, H) {
+  const aw = actor.w * unit, ah = actor.h * unit;
+  /* Level pixels -> the same world space the band quads use. */
+  const cxw = (actor.x + actor.w/2) * unit - W/2;
+  const cyw = H/2 - (actor.y + actor.h/2) * unit;
+  const verts = new Float32Array([
+    cxw-aw/2, cyw+ah/2, 0,0,  cxw+aw/2, cyw+ah/2, 1,0,
+    cxw-aw/2, cyw-ah/2, 0,1,  cxw+aw/2, cyw-ah/2, 1,1 ]);
+  gl.bufferData(gl.ARRAY_BUFFER, verts, gl.DYNAMIC_DRAW);
+  gl.uniform3f(gl.getUniformLocation(prog,'uOrigin'), 0, 0, actorZ());
+  gl.uniform4f(gl.getUniformLocation(prog,'uTint'), 1,1,1,1);
+  gl.bindTexture(gl.TEXTURE_2D, actorTexture());
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+/* Level-space point under a 3D pointer, on the actor's own plane. */
+function actorPointFromEvent(ev) {
+  if (!lastMVP || !L) return null;
+  const r = glc.getBoundingClientRect();
+  const unit = 1 / L.h, W = L.w*unit, H = 1.0;
+  const hit = unprojectToPlane(lastMVP, ev.clientX-r.left, ev.clientY-r.top,
+                               actorZ(), r.width, r.height);
+  if (!hit) return null;
+  return [ (hit[0] + W/2) / unit, (H/2 - hit[1]) / unit ];
+}
+function actorHit3d(ev) {
+  const p = actorPointFromEvent(ev);
+  if (!p) return false;
+  return p[0] >= actor.x - 6 && p[0] <= actor.x + actor.w + 6 &&
+         p[1] >= actor.y - 6 && p[1] <= actor.y + actor.h + 6;
+}
+glc.addEventListener('mousedown', ev => {
+  /* Capture the pointer so a drag that leaves the canvas keeps tracking
+   * instead of stopping and resuming somewhere else. */
+  if (glc.setPointerCapture && ev.pointerId !== undefined)
+    try { glc.setPointerCapture(ev.pointerId); } catch (_) {}
+  if (actor.show && !ev.shiftKey && actorHit3d(ev)) {
+    const p = actorPointFromEvent(ev);
+    drag = { actor3d:true, ox: p[0]-actor.x, oy: p[1]-actor.y };
+    return;
+  }
+  drag = { orbit:true, pan:ev.shiftKey, x:ev.clientX, y:ev.clientY }; });
+window.addEventListener('mousemove', ev => {
+  if (mode !== '3d' || !drag) return;
+  if (drag.actor3d) {
+    const p = actorPointFromEvent(ev);
+    if (p) { actor.x = Math.round(p[0]-drag.ox); actor.y = Math.round(p[1]-drag.oy); draw(); }
+    return;
+  }
+  if (!drag.orbit) return;
+  if (drag.pan) {          /* shift-drag walks the window along the level */
+    const px = (ev.clientX-drag.x) / Math.max(1, glc.clientWidth);
+    const py = (ev.clientY-drag.y) / Math.max(1, glc.clientHeight);
+    orbit.focusX = Math.max(0, Math.min(1, orbit.focusX - px * orbit.dist));
+    orbit.focusY = Math.max(-1.5, Math.min(1.5, orbit.focusY + py * orbit.dist));
+    drag.x=ev.clientX; drag.y=ev.clientY; draw(); return;
+  }
+  /* Clamp the per-event delta. A pointer that leaves the window and comes
+   * back, or a coalesced burst after a stall, arrives as one enormous jump
+   * and teleports the camera; capping it turns that into a fast sweep. */
+  const clamp = (v, m) => Math.max(-m, Math.min(m, v));
+  orbit.yaw   += clamp(ev.clientX-drag.x, 60) * 0.0035;
+  orbit.pitch += clamp(ev.clientY-drag.y, 60) * 0.0030;
+  orbit.pitch = Math.max(-1.2, Math.min(0.5, orbit.pitch));
+  drag.x=ev.clientX; drag.y=ev.clientY; draw();
+});
+glc.addEventListener('wheel', ev => { ev.preventDefault();
+  orbit.dist = Math.max(0.4, Math.min(9, orbit.dist * Math.exp(ev.deltaY*0.0012)));
+  draw(); }, { passive:false });
+</script>
+<script>
+/* ---- reference actor ----------------------------------------------------
+ * A stand-in at the loaded OBJ2 z/order makes authentic low/high background
+ * priority visible without requiring the room's live sprite stream. The 2D
+ * view inserts it at Mode-1 OBJ priority 2; the Diorama view puts it in the
+ * same painter list as the configured surfaces.
+ *
+ * It is deliberately a silhouette rather than real sprite art. The question it
+ * answers is one of ordering and footprint, and pulling the room's OBJ
+ * characters out of the asset script would be a second reverse-engineering
+ * problem for no extra answer. */
+const actor = { x: 0, y: 0, w: 24, h: 32, show: true };
+const actorZ = () => resolvedPlane('obj2').z;
+
+function resetActor() {
+  actor.x = Math.round(L.w * 0.10);
+  actor.y = Math.round(L.h * 0.60);
+}
+
+/* Inverse of a 4x4, so a screen drag can be put back onto the actor's plane.
+ * Plain arithmetic on the same column-major convention as the rest of the
+ * camera code. */
+function invert(m) {
+  const a=m[0],b=m[1],c=m[2],d=m[3],e=m[4],f=m[5],g=m[6],h=m[7],
+        i=m[8],j=m[9],k=m[10],l=m[11],n=m[12],o=m[13],q=m[14],r=m[15];
+  const s0=a*f-b*e, s1=a*g-c*e, s2=a*h-d*e, s3=b*g-c*f,
+        s4=b*h-d*f, s5=c*h-d*g, c5=k*r-l*q, c4=j*r-l*o, c3=j*q-k*o,
+        c2=i*r-l*n, c1=i*q-k*n, c0=i*o-j*n;
+  const det = s0*c5-s1*c4+s2*c3+s3*c2-s4*c1+s5*c0;
+  if (!det) return null;
+  const t = 1/det;
+  return [ ( f*c5-g*c4+h*c3)*t, (-b*c5+c*c4-d*c3)*t, ( o*s5-q*s4+r*s3)*t, (-j*s5+k*s4-l*s3)*t,
+           (-e*c5+g*c2-h*c1)*t, ( a*c5-c*c2+d*c1)*t, (-n*s5+q*s2-r*s1)*t, ( i*s5-k*s2+l*s1)*t,
+           ( e*c4-f*c2+h*c0)*t, (-a*c4+b*c2-d*c0)*t, ( n*s4-o*s2+r*s0)*t, (-i*s4+j*s2-l*s0)*t,
+           (-e*c3+f*c1-g*c0)*t, ( a*c3-b*c1+c*c0)*t, (-n*s3+o*s1-q*s0)*t, ( i*s3-j*s1+k*s0)*t ];
+}
+/* Screen point -> the point on plane z where the eye ray crosses it. */
+function unprojectToPlane(mvp, sx, sy, planeZ, vw, vh) {
+  const inv = invert(mvp);
+  if (!inv) return null;
+  const ndcX = (sx / vw) * 2 - 1, ndcY = 1 - (sy / vh) * 2;
+  const at = ndc => {
+    const v = [ndcX, ndcY, ndc, 1], o = [0,0,0,0];
+    for (let r=0;r<4;r++){ let acc=0;
+      for (let c=0;c<4;c++) acc += inv[c*4+r]*v[c]; o[r]=acc; }
+    return [o[0]/o[3], o[1]/o[3], o[2]/o[3]];
+  };
+  const n = at(-1), f = at(1);
+  const dz = f[2] - n[2];
+  if (Math.abs(dz) < 1e-9) return null;
+  const t = (planeZ - n[2]) / dz;
+  return [n[0] + (f[0]-n[0])*t, n[1] + (f[1]-n[1])*t];
+}
+
+/* Export the complete INI, not a sidecar dialect. Only virtual records are
+ * regenerated; everything the action editor does not own is preserved. */
+$('#export').onclick = () => {
+  try {
+    const text = mergeVirtualIni();
+    const url = URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'}));
+    const a = document.createElement('a');
+    a.href=url; a.download=sourceIniName || 'diorama-layers.ini';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  } catch (error) {
+    alert(`Cannot export INI:\n\n${error.message}`);
+  }
+};
+$('#importIni').onchange = async event => {
+  const file = event.target.files && event.target.files[0];
+  event.target.value = '';
+  if (!file) return;
+  if (configDirty && !confirm('Loading another INI replaces the unsaved virtual-layer edits in this editor. Continue?'))
+    return;
+  loadIniText(await file.text(),file.name);
+  undoStack.length=0; redoStack.length=0; pendingOp=null;
+  refreshHistoryButtons();
+  surfacesDirty=compositeDirty=glDirty=true; composite=null;
+  invalidateOther(); invalidateGameComposite();
+  setLayer(bgIndex);
+};
+
+/* ---- chrome ------------------------------------------------------------ */
+function hud(cx, cy) {
+  const inb = cx>=0 && cy>=0 && cx<L.cellsW && cy<L.cellsH;
+  const parts = [
+    `<b>${room.group}:${room.map}</b> BG${bgIndex+1} &nbsp; ${L.w}\u00d7${L.h}px`
+      + ` &nbsp; ${L.pw}\u00d7${L.ph} pages`,
+  ];
+  if (inb) {
+    const cell = cy*L.cellsW+cx, id = L.cellId[cell];
+    const e = L.words[(cy*2)*L.tilesW + cx*2];
+    const b = bandAt(st, L, cx*2, cy*2);
+    parts.push(`cell ${cx},${cy} &nbsp; metatile <b>$${id.toString(16)
+      .padStart(2,'0')}</b> &nbsp; char $${(e&0x3ff).toString(16).padStart(3,'0')}`
+      + ` &nbsp; pal ${(e>>10)&7} &nbsp; prio ${(e&0x2000)?1:0}`);
+    parts.push(`band <b style="color:var(${BANDS[b].css})">${BANDS[b].name}</b>`
+      + (cellEdited(st,L,cx,cy) ? ' (edited)' : ' (authentic)'));
+  } else if (mode === '3d') {
+    parts.push(`drag to orbit &nbsp; shift-drag to walk &nbsp; wheel to zoom`
+      + ` &nbsp; <kbd>r</kbd> resets`
+      + ` &nbsp; at ${Math.round(orbit.focusX*L.w)}px of ${L.w}`);
+  } else {
+    parts.push('drag to paint &nbsp; shift-drag to pan &nbsp; wheel to zoom'
+      + ' &nbsp; <kbd>f</kbd> fits');
+  }
+  $('#hud').innerHTML = parts.join('<br>');
+}
+/* Counting every tile is O(level) -- 49,152 of them in Fillmore 1:1 -- so it
+ * runs when the classification changes, never when the camera moves. */
+function tally() {
+  const n = [0,0,0];
+  for (let ty=0; ty<L.tilesH; ty++) for (let tx=0; tx<L.tilesW; tx++)
+    n[bandAt(st, L, tx, ty)]++;
+  $('#tB').textContent = n[0]; $('#tP').textContent = n[1]; $('#tA').textContent = n[2];
+  const note = $('#engineNote');
+  if (n[0] > 0) {
+    note.className = 'note';
+    note.innerHTML = `<b>${n[0]} tiles use the far virtual plane.</b> Its z, `
+      + `paint order and alpha are authored above and export with this room's `
+      + `<code>bg${bgIndex+1}-virtual</code> records.`;
+  } else {
+    note.className = 'note';
+    note.innerHTML = '<b>No tiles are assigned to the far plane.</b> The room '
+      + 'currently resolves through its ordinary and priority BG planes; the '
+      + 'ROM priority bit remains the fallback for every unedited tile.';
+  }
+}
+/* ---- pacing -------------------------------------------------------------
+ * Pointer events arrive far faster than the display refreshes -- a fast drag
+ * can deliver several hundred a second -- so drawing straight from the event
+ * handler renders the same frame many times and the camera appears to jump.
+ * Every redraw is therefore a REQUEST that collapses onto the next animation
+ * frame, which is both the natural cadence and a hard cap of one draw per
+ * refresh no matter how the mouse behaves. */
+let framePending = false;
+function updateLegend() {
+  $('#legend').innerHTML = mode === '2d'
+    ? '<b>drag</b> paint &nbsp; <b>shift-drag / middle</b> pan &nbsp; '
+      + '<b>arrows</b> move<br><b>wheel</b> zoom &nbsp; <b>f</b> fit &nbsp; '
+      + '<b>alt-drag</b> revert &nbsp; <b>ctrl/cmd-Z</b> undo'
+    : '<b>drag</b> orbit &nbsp; <b>shift-drag</b> pan &nbsp; <b>arrows</b> move'
+      + '<br><b>wheel</b> zoom &nbsp; <b>r</b> reset camera';
+}
+/* The ladder is the answer to "will these two layers interpenetrate?" -- it
+ * is arithmetic on the resolved depths, so it is right even where the camera
+ * angle happens to hide the overlap. */
+function renderBandHint() {
+  const clearsSprites = bandPaintOrder(bgIndex,2) >= resolvedPlane('obj2').order;
+  $('#bandHint').innerHTML =
+    `Every band is anchored to BG${bgIndex+1}, so all three inherit its scroll. `
+    + `<b>Plane</b> is the untouched default. The priority plane `
+    + (clearsSprites
+        ? `paints <b>after the OBJ2 reference</b>.`
+        : `paints <b>before the OBJ2 reference</b>.`)
+    + ` Paint order and z are independent, matching the game renderer.`;
+}
+function renderLadder() {
+  const rows = depthLadder();
+  const el = $('#ladder');
+  el.innerHTML = rows.map(r => {
+    const cls = [r.clash ? 'clash' : '', r.kind === 'obj' ? 'obj' : ''].join(' ');
+    const mark = r.kind === 'band' && r.bg === bgIndex ? '\u25b8' : '\u00a0';
+    const col = r.kind === 'band'
+      ? `<span class="swatch" style="width:8px;height:8px;border-radius:2px;background:var(${BANDS[r.band].css})"></span>`
+      : '<span style="width:8px"></span>';
+    return `<div class="${cls}">${col}<span class="z">${r.z>=0?'+':''}${r.z.toFixed(2)}`
+         + `</span><span class="nm">${mark} ${r.label} [order ${r.order}]</span></div>`;
+  }).join('');
+  const note = $('#clashNote');
+  if (rows.clashPairs.length) {
+    note.style.display = '';
+    note.className = 'note warn';
+    note.innerHTML = `<b>Nearly co-planar geometry.</b> `
+      + rows.clashPairs.join('; ')
+      + `. Their z values are within ${kClashEpsilon}; configured paint order `
+      + `still resolves overlap deterministically, but the planes may read as `
+      + `one depth.`;
+  } else note.style.display = 'none';
+}
+function draw() {
+  if (framePending) return;
+  framePending = true;
+  requestAnimationFrame(() => { framePending = false; drawNow(); });
+}
+function drawNow() {
+  if (mode === '2d') draw2d(); else draw3d();
+  updateLegend(); renderLadder(); renderBandHint();
+  const bg = bgIndex ^ 1, lay = room.bg[bg], e = otherExtent();
+  $('#otherName').textContent = lay
+    ? `BG${bg+1} ${e.w}\u00d7${e.h}` + (e.w < L.w ? ' (shorter)' : '')
+    : '(none)';
+}
+const setBand = i => { band = i;
+  document.querySelectorAll('.state').forEach((b,j) => b.classList.toggle('on', j===i)); };
+document.querySelectorAll('.state').forEach(b =>
+  b.onclick = () => setBand(Number(b.dataset.state)));
+const brushBtns = { class:$('#bClass'), cell:$('#bCell'), rect:$('#bRect'),
+                    pan:$('#bPan') };
+Object.entries(brushBtns).forEach(([k, el]) => el.onclick = () => {
+  brush = k; Object.values(brushBtns).forEach(b => b.classList.remove('on'));
+  el.classList.add('on'); });
+$('#bg1').onclick = () => setLayer(0);
+$('#bg2').onclick = () => setLayer(1);
+$('#mode2d').onclick = () => setMode('2d');
+$('#mode3d').onclick = () => setMode('3d');
+$('#tint').onclick = () => { tint = !tint; $('#tint').classList.toggle('on', tint);
+  invalidate(); };
+$('#tint').addEventListener('click', invalidateOther);
+let syncingVirtualControls = false;
+function refreshVirtualControls() {
+  if (!room) return;
+  const authored = roomConfig(room).virtual[bgIndex];
+  const value = resolvedVirtual(bgIndex);
+  syncingVirtualControls = true;
+  $('#virtualZ').value = Math.round(value.z*100);
+  $('#virtualOrder').value = value.order;
+  $('#virtualAlpha').value = value.alpha;
+  $('#virtualZv').textContent = `${value.z.toFixed(2)}${authored.setZ?' *':''}`;
+  $('#virtualOrderv').textContent = `${value.order}${authored.setOrder?' *':''}`;
+  $('#virtualAlphav').textContent = `${value.alpha}${authored.setAlpha?' *':''}`;
+  syncingVirtualControls = false;
+}
+$('#virtualZ').oninput = event => {
+  if (syncingVirtualControls) return;
+  const v=roomConfig(room).virtual[bgIndex]; v.setZ=true; v.z=Number(event.target.value)/100;
+  configDirty=true; glDirty=true; refreshVirtualControls(); draw();
+};
+$('#virtualOrder').oninput = event => {
+  if (syncingVirtualControls) return;
+  const v=roomConfig(room).virtual[bgIndex]; v.setOrder=true; v.order=Number(event.target.value);
+  configDirty=true; glDirty=true; refreshVirtualControls(); draw();
+};
+$('#virtualAlpha').oninput = event => {
+  if (syncingVirtualControls) return;
+  const v=roomConfig(room).virtual[bgIndex]; v.setAlpha=true; v.alpha=Number(event.target.value);
+  configDirty=true; glDirty=true; refreshVirtualControls(); draw();
+};
+$('#virtualReset').onclick = () => {
+  const v=roomConfig(room).virtual[bgIndex];
+  v.setZ=v.setOrder=v.setAlpha=false;
+  configDirty=true; glDirty=true; refreshVirtualControls(); draw();
+};
+$('#undoBtn').onclick = undo;
+$('#redoBtn').onclick = redo;
+$('#navFit').onclick = () => { fitView(); draw(); };
+$('#navOut').onclick = () => zoomBy(1/1.4);
+$('#navIn').onclick  = () => zoomBy(1.4);
+$('#navReset').onclick = () => { resetCamera(); fitView(); draw(); };
+$('#actorBtn').onclick = () => { actor.show = !actor.show;
+  $('#actorBtn').classList.toggle('on', actor.show); draw(); };
+$('#bothBtn').onclick = () => { showBoth = !showBoth;
+  $('#bothBtn').classList.toggle('on', showBoth); draw(); };
+/* Sliders are fractions of the other layer's own width/height, so the same
+ * throw covers a 256px background and a 4096px one. */
+function otherExtent() {
+  const bg = bgIndex ^ 1;
+  const lay = room.bg[bg];
+  return lay ? { w: lay.pagesWide*256, h: lay.pagesHigh*256 } : { w:256, h:256 };
+}
+function applyOffsets() {
+  const e = otherExtent();
+  otherOffset.x = Math.round(($('#offX').value / 100) * e.w);
+  otherOffset.y = Math.round(($('#offY').value / 100) * e.h);
+  $('#offXv').textContent = `${otherOffset.x >= 0 ? '+' : ''}${otherOffset.x}px`;
+  $('#offYv').textContent = `${otherOffset.y >= 0 ? '+' : ''}${otherOffset.y}px`;
+  draw();
+}
+$('#offX').oninput = applyOffsets;
+$('#offY').oninput = applyOffsets;
+$('#offRepeat').onclick = () => { otherOffset.repeat = !otherOffset.repeat;
+  $('#offRepeat').classList.toggle('on', otherOffset.repeat); draw(); };
+$('#offZero').onclick = () => { $('#offX').value = 0; $('#offY').value = 0;
+  applyOffsets(); };
+$('#docs').onclick = () => $('#docsDlg').showModal();
+$('#docsX').onclick = () => $('#docsDlg').close();
+const resetCamera = () => {
+  orbit.yaw = 0; orbit.pitch = -0.34; orbit.dist = 1.25;
+  orbit.focusX = 0.5; orbit.focusY = 0;
+  draw();
+};
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT') return;
+  const accel = e.metaKey || e.ctrlKey;
+  if (accel && (e.key === 'z' || e.key === 'Z')) {
+    e.preventDefault(); e.shiftKey ? redo() : undo(); return;
+  }
+  if (accel && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo(); return; }
+  if (e.key>='1' && e.key<='3') setBand(Number(e.key)-1);
+  if (e.key === 'f') { fitView(); draw(); }
+  /* It is easy to orbit until nothing is on screen, and without this there is
+   * no way back except reloading. */
+  if (e.key === 'r') { resetCamera(); fitView(); draw(); }
+  /* Arrow keys move in whichever view is up, so navigation never depends on
+   * finding the right drag. */
+  const step = e.shiftKey ? 4 : 1;
+  const arrows = { ArrowLeft:[-1,0], ArrowRight:[1,0], ArrowUp:[0,-1], ArrowDown:[0,1] };
+  const a = arrows[e.key];
+  if (!a) return;
+  e.preventDefault();
+  if (mode === '2d') { view.x -= a[0]*48*step; view.y -= a[1]*48*step; }
+  else {
+    orbit.focusX = Math.max(0, Math.min(1, orbit.focusX + a[0]*0.02*step));
+    orbit.focusY = Math.max(-1.5, Math.min(1.5, orbit.focusY - a[1]*0.05*step));
+  }
+  draw();
+});
+function setMode(m) {
+  drag = null;                          /* a drag never crosses a mode change */
+  mode = m; $('#mode2d').classList.toggle('on', m==='2d');
+  $('#mode3d').classList.toggle('on', m==='3d');
+  cvs.style.display = m==='2d' ? 'block' : 'none';
+  glc.style.display = m==='3d' ? 'block' : 'none';
+  glDirty = true; draw();
+}
+function setLayer(i) {
+  if (!room.bg[i]) return;
+  bgIndex = i;
+  $('#bg1').classList.toggle('on', i===0); $('#bg2').classList.toggle('on', i===1);
+  L = decodeLayer(room, i); st = bucket(room, i);
+  surfacesDirty = compositeDirty = glDirty = true; invalidateOther();
+  invalidateGameComposite();
+  composite = null;
+  resetActor();
+  refreshVirtualControls(); fitView(); tally(); draw();
+}
+const sel = $('#room');
+DATA.rooms.forEach((r, i) => {
+  const o = document.createElement('option');
+  const a = r.bg[0], b = r.bg[1];
+  o.value = i;
+  o.textContent = `${r.group}:${r.map}  \u2014  BG1 ${a?a.pagesWide*256+'\u00d7'+a.pagesHigh*256:'\u2013'}`
+    + `, BG2 ${b?b.pagesWide*256+'\u00d7'+b.pagesHigh*256:'\u2013'}`;
+  sel.appendChild(o);
+});
+sel.onchange = () => { room = DATA.rooms[Number(sel.value)]; setLayer(0); };
+new ResizeObserver(() => {
+  if (!L) return;
+  /* First real layout: if the initial fit happened against a zero-size
+   * element, this is what rescues it. */
+  if (!fitted) fitView();
+  draw();
+}).observe($('.view'));
+loadIniText(sourceIniText,sourceIniName);
+setLayer(0);
+setBand(2);
+refreshHistoryButtons();
+</script>
+<script>
+/* ---- the docs panel ----------------------------------------------------
+ * Kept in the tool on purpose. The reasoning behind the band model is the
+ * part that is expensive to rediscover, and it is the part someone will need
+ * when they come to wire the export into the engine. */
+$('#docsBody').innerHTML = `
+<h4>What a band is</h4>
+<p>A band is a presentation surface anchored to the hardware BG it came from,
+so it inherits that BG's tilemap, dimensions, camera, and live scroll deltas.
+It is <b>not another hardware BG</b>: moving a tile to the other one would attach
+it to the wrong scroll registers and make it drift or stop moving.</p>
+<table><tr><th>#</th><th>band</th><th>where it draws</th><th>engine</th></tr>
+<tr><td>0</td><td>Far virtual plane</td><td>dedicated captured surface</td><td>supported</td></tr>
+<tr><td>1</td><td>Plane (default)</td><td>the anchor's priority-0 surface</td><td>supported</td></tr>
+<tr><td>2</td><td>Priority band</td><td>the anchor's priority-1 surface</td><td>supported</td></tr></table>
+
+<h4>Resetting</h4>
+<p>Classification resets have three scopes &mdash; BG, room, and every room &mdash;
+and are all undoable.
+Because a tile's default <i>is</i> its own priority bit and an edit is only an
+entry that overrides it, resetting is deletion rather than a rewrite: a reset
+room is bit-for-bit what the cartridge says.</p>
+
+<h4>The baseline is authentic, not flat</h4>
+<p>A room already has a depth split: the priority bit. Every tile starts in the
+band its own bit selects, so the editor's first render agrees with the game and
+an edit is a <b>delta</b>. That is why the export carries only what you
+changed, and why the outline overlay marks edited cells rather than all of
+them.</p>
+
+<h4>The INI is the source of truth</h4>
+<p>This editor is the authoring surface. It imports the complete
+<code>diorama-layers.ini</code>, previews existing plane overrides, and owns
+only <code>bg1-virtual</code> and <code>bg2-virtual</code> records in base action
+room sections. Export preserves all unrelated comments, sections, and settings.
+The game only consumes and renders the result.</p>
+<pre>[layers:01:01]
+bg1-virtual = z:0.35 order:4 alpha:255
+bg1-virtual = metatile:23 band:0
+bg1-virtual = cells:4,5-12,5 band:2</pre>
+<p>Geometry, metatile rules, and cell rules are separate repeatable records.
+Resolution is cell first, then metatile, then the ROM priority bit. Cell
+coordinates name 16&times;16 metatile cells; rectangle endpoints are inclusive.
+Sparse records keep hand-tuned files reviewable.</p>
+
+<h4>Game composite parity</h4>
+<p>The 2D view always paints the authentic Mode-1 background order: BG2 low,
+BG1 low, the OBJ2 reference, BG2 high, then BG1 high. Virtual classification
+can tint pixels and draw edit outlines, but it never changes this flat order.
+That separation is intentional: the same configuration must leave ordinary
+game presentation unchanged while enriching Diorama 3D.</p>
+
+<h4>Geometry and paint order are independent</h4>
+<p>The shipped defaults put BG2 at z 0.20, BG2 high at 0.21, BG1 at 0.50,
+BG1 high at 0.51, and OBJ2 at 0.51. A new far plane defaults 0.15 behind its
+anchor. Its Z, order, and alpha controls write directly to the room's virtual
+record; existing plane records are loaded from the same INI.</p>
+<p>The renderer is a painter: <b>order</b> decides which surface covers another,
+while <b>z</b> decides its projected location and depth effect. The ladder shows
+both values. It warns only when surfaces from different BGs are nearly
+co-planar; each BG's own low/high pair is intentionally close and is not a
+warning.</p>
+
+<h4>Sliding the other layer</h4>
+<p>The two backgrounds are rarely the same size &mdash; <b>17 rooms</b> have a
+BG2 of a single 256&times;256 page against a playfield up to 4096 long, and 16
+more simply differ &mdash; and in play BG2 scrolls at its own rate or repeats.
+So there is <b>no single true alignment</b> to preview, and checking only the
+arrangement that happens to sit at the origin would miss most of the
+relationship.</p>
+<p>The <b>X</b> and <b>Y</b> controls slide the other layer in level pixels, as
+a fraction of its own extent so the same throw covers a 256px background and a
+4096px one. <b>Repeat</b> tiles it across the active layer, which is what a
+pinned background actually does; it is drawn as copies rather than a wrapped UV
+because these textures are not power-of-two and WebGL1 will not REPEAT them.
+Slide it end to end to scan the whole relationship for conflicts.</p>
+
+<h4>The reference actor</h4>
+<p>Background priority is judged against objects, so without an object in the
+scene there is nothing to compare it with. The <b>Actor</b>
+button puts a stand-in at the depth the engine composites sprites at, and it
+drags in either view.</p>
+<p>The stand-in uses the resolved OBJ2 z and order from the loaded INI. As in
+the game, configured paint order decides whether a background appears before
+or after it; the small z separation controls how that relationship reads when
+the camera tilts.</p>
+<p>It is a silhouette rather than real sprite art on purpose: the question is
+one of ordering and footprint, and lifting the room's OBJ characters out of the
+asset script would be a second reverse-engineering problem for no extra
+answer.</p>
+
+<h4>Why the preview is built this way</h4>
+<p>Each band is rasterised to its own full-level surface and drawn as one
+textured quad at its own z &mdash; deliberately the same shape as the runtime,
+where a plane <i>is</i> a captured surface composited at a depth. The camera is
+a plain right-handed <code>perspective * lookAt</code> in the same column-major
+convention as <code>scene3d_math.c</code>; the fragment stage is
+<code>texel * vertex colour</code>, which the SIM 3D path already uses. Quad
+extents come from each layer's own pixel size, so a one-page background is not
+stretched to the playfield's length.</p>
+
+<h4>Extents differ, and that matters</h4>
+<p>Across the 49 rooms: 10 have equal extents, 16 have a longer playfield, 6
+have a longer or taller background, and <b>17 have a BG2 that is a single
+256×256 page</b> &mdash; pinned or tiled behind everything. That last group is
+what reads as a monolithic room. Nothing here assumes the two layers share a
+grid.</p>
+
+<h4>Export</h4>
+<p><b>Export INI</b> downloads a complete merged configuration, not a sidecar.
+Only virtual records in action-room base sections are regenerated. Cell edits
+are coalesced into horizontal inclusive rectangles, metatile records are sorted,
+and untouched rooms stay untouched. Load the exported file again to continue
+authoring without any conversion step.</p>`;
+</script>

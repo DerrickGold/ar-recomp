@@ -675,6 +675,7 @@ if(BUILD_TESTING)
         src/action/action_bg_plan.c
         src/action/action_bg_world.c
         src/actraiser/actraiser_action_bg.c
+        src/diorama/diorama_layer_order.c
     )
     target_include_directories(actraiser_action_bg_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src

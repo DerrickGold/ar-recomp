@@ -12,6 +12,7 @@ bool Diorama_PlaneEligible(int plane, bool visible, bool has_texture,
   if (skybox_only &&
       (plane == kPpuOverlaySource_Bg2 ||
        plane == kDioramaPlane_Bg2Hi ||
+       plane == kDioramaPlane_Bg2Far ||
        plane == kDioramaPlane_Backdrop))
     return false;
   return true;

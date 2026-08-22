@@ -35,7 +35,9 @@ static const DioramaResolvedLayer kDefaults[] = {
   { kDioramaPlane_Backdrop, 0.00f, 255 },
   { kPpuOverlaySource_Obj,  0.51f, 255 },
   { kDioramaPlane_Obj1,     0.51f, 255 },
+  { kDioramaPlane_Bg2Far,   0.05f, 255 },
   { kPpuOverlaySource_Bg2,  0.20f, 255 },
+  { kDioramaPlane_Bg1Far,   0.35f, 255 },
   { kPpuOverlaySource_Bg1,  0.50f, 255 },
   { kDioramaPlane_Obj2,     0.51f, 255 },
   { kDioramaPlane_Bg2Hi,    0.21f, 255 },
@@ -1496,6 +1498,129 @@ static void TestMergeSizingContract(void) {
   }
 }
 
+static void TestVirtualLayerParseResolveAndRoundTrip(void) {
+  DioramaRoomOverride room;
+  memset(&room, 0, sizeof(room));
+  room.used = true;
+  room.map_group = 0x01;
+  room.map_number = 0x02;
+  const char *error = NULL;
+
+  CHECK(DioramaLayerOrder_ParseLine(
+      &room, "bg1-virtual = z:0.35 order:4 alpha:192", &error));
+  CHECK(DioramaLayerOrder_ParseLine(
+      &room, "bg1-virtual = metatile:23 band:2", &error));
+  CHECK(DioramaLayerOrder_ParseLine(
+      &room, "bg1-virtual = cells:4,5-6,7 band:0", &error));
+  CHECK(DioramaLayerOrder_ParseLine(
+      &room, "bg1-virtual = cells:5,6-5,6 band:1", &error));
+
+  const DioramaVirtualLayerOverride *v = &room.virtual_layers[0];
+  CHECK(DioramaLayerOrder_VirtualLayerIsAuthored(v));
+  CHECK(v->set_z && v->z == 0.35f);
+  CHECK(v->set_order && v->order == 4);
+  CHECK(v->set_alpha && v->alpha == 192);
+  CHECK(v->cell_span_count == 2);
+  CHECK(DioramaLayerOrder_RoomIsActive(&room));
+
+  /* ROM priority is the fallback, metatile is the first override tier, and a
+   * later cell rule wins over both an earlier rectangle and the metatile. */
+  CHECK(DioramaLayerOrder_VirtualBand(&room, 0, 0, 0, 0x10, 0) == 1);
+  CHECK(DioramaLayerOrder_VirtualBand(&room, 0, 0, 0, 0x10, 0x2000) == 2);
+  CHECK(DioramaLayerOrder_VirtualBand(&room, 0, 0, 0, 0x23, 0) == 2);
+  CHECK(DioramaLayerOrder_VirtualBand(&room, 0, 4, 5, 0x23, 0x2000) == 0);
+  CHECK(DioramaLayerOrder_VirtualBand(&room, 0, 5, 6, 0x23, 0x2000) == 1);
+  CHECK(DioramaLayerOrder_VirtualBand(&room, 2, 5, 6, 0x23, 0x2000) == 2);
+
+  char text[4096];
+  size_t need = DioramaLayerOrder_FormatRoom(&room, text, sizeof(text));
+  CHECK(need < sizeof(text));
+  CHECK(strstr(text, "bg1-virtual = z:0.35 order:4 alpha:192") != NULL);
+  CHECK(strstr(text, "bg1-virtual = metatile:23 band:2") != NULL);
+  CHECK(strstr(text, "bg1-virtual = cells:4,5-6,7 band:0") != NULL);
+
+  DioramaRoomOverride reparsed;
+  memset(&reparsed, 0, sizeof(reparsed));
+  reparsed.used = true;
+  char copy[4096];
+  snprintf(copy, sizeof(copy), "%s", text);
+  for (char *line = strtok(copy, "\n"); line; line = strtok(NULL, "\n")) {
+    if (line[0] == '[') continue;
+    CHECK(DioramaLayerOrder_ParseLine(&reparsed, line, &error));
+  }
+  CHECK(DioramaLayerOrder_VirtualBand(
+      &reparsed, 0, 4, 5, 0x23, 0x2000) == 0);
+  CHECK(DioramaLayerOrder_VirtualBand(
+      &reparsed, 0, 5, 6, 0x23, 0x2000) == 1);
+  CHECK(reparsed.virtual_layers[0].z == 0.35f);
+
+  static const char *bad[] = {
+    "bg1-virtual = metatile:100 band:0",
+    "bg1-virtual = metatile:23 band:3",
+    "bg1-virtual = cells:7,5-4,6 band:0",
+    "bg1-virtual = cells:1,2-3,4",
+    "bg1-virtual = band:0",
+    "bg1-virtual = z:0.2 metatile:23 band:0",
+    "bg3-virtual = metatile:23 band:0",
+  };
+  for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+    DioramaRoomOverride rejected;
+    memset(&rejected, 0, sizeof(rejected));
+    if (DioramaLayerOrder_ParseLine(&rejected, bad[i], &error)) {
+      printf("unexpected virtual parse success: %s\n", bad[i]);
+      g_failures++;
+    }
+  }
+}
+
+static void TestInGamePlaneResetPreservesVirtualLayers(void) {
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  DioramaRoomOverride *room =
+      DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
+  CHECK(room != NULL);
+  if (!room) return;
+  room->planes[kPpuOverlaySource_Bg1].set_z = true;
+  room->planes[kPpuOverlaySource_Bg1].z = 0.4f;
+  room->virtual_layers[0].metatile_set[0x23 >> 3] |=
+      (uint8_t)(1u << (0x23 & 7));
+  room->virtual_layers[0].metatile_bands[0x23] = 0;
+  room->virtual_layers[0].set_z = true;
+  room->virtual_layers[0].z = 0.27f;
+  room->virtual_layers[0].set_alpha = true;
+  room->virtual_layers[0].alpha = 128;
+  room->virtual_layers[0].set_order = true;
+  room->virtual_layers[0].order = 1;
+
+  DioramaLayerOrder_ResetPlaneOverridesSection(
+      &table, 0x01, 0x02, kDioramaLayerSection_Room);
+  const DioramaRoomOverride *found =
+      DioramaLayerOrder_Find(&table, 0x01, 0x02);
+  CHECK(found != NULL);
+  if (!found) return;
+  CHECK(!found->planes[kPpuOverlaySource_Bg1].set_z);
+  CHECK(DioramaLayerOrder_VirtualLayerIsAuthored(&found->virtual_layers[0]));
+  CHECK(DioramaLayerOrder_VirtualBand(found, 0, 0, 0, 0x23, 0x2000) == 0);
+
+  DioramaResolvedLayer resolved[16];
+  const int resolved_count = DioramaLayerOrder_Resolve(
+      &table, 0x01, 0x02, kDefaults, kDefaultCount, resolved, 16);
+  const DioramaResolvedLayer *far = NULL;
+  for (int i = 0; i < resolved_count; i++)
+    if (resolved[i].plane == kDioramaPlane_Bg1Far) far = &resolved[i];
+  CHECK(far != NULL);
+  if (far) {
+    CHECK(far->z == 0.27f);
+    CHECK(far->alpha == 128);
+  }
+
+  char text[512];
+  CHECK(DioramaLayerOrder_FormatRoom(found, text, sizeof(text)) < sizeof(text));
+  CHECK(strstr(text, "bg1 =") == NULL);
+  CHECK(strstr(text, "bg1-virtual = z:0.27 order:1 alpha:128") != NULL);
+  CHECK(strstr(text, "bg1-virtual = metatile:23 band:0") != NULL);
+}
+
 int main(void) {
   TestNoOverrideIsIdentity();
   TestOverrideIsScopedToItsRoom();
@@ -1533,6 +1658,8 @@ int main(void) {
   TestMergeIsIdempotentAndRoundTrips();
   TestMergeSizingContract();
   TestMergeDropsStalePlaneLinesAfterAComment();
+  TestVirtualLayerParseResolveAndRoundTrip();
+  TestInGamePlaneResetPreservesVirtualLayers();
   if (g_failures) {
     printf("diorama_layer_order_test: %d failure(s)\n", g_failures);
     return 1;

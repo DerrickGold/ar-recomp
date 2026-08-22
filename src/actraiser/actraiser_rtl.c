@@ -14,6 +14,8 @@
 #include "actraiser_ws_gap.h"
 #include "cpu_65816_math.h"
 #include "diorama/diorama_capture_blend.h"
+#include "diorama/diorama.h"
+#include "diorama/diorama_layer_order.h"
 #include "diorama/diorama_performance.h"
 #include "diorama/diorama_planes.h"
 #include "host/host_display.h"   /* kHostDisplayFramebufferHeight */
@@ -1147,6 +1149,13 @@ static void ActRaiser_ApplyVerticalMarginPolicy(uint8_t map_group,
   }
 }
 
+static const DioramaRoomOverride *ActRaiser_CurrentVirtualLayerRoom(void) {
+  if (!g_settings.diorama_mode) return NULL;
+  return DioramaLayerOrder_Find(
+      Diorama_LayerOverrides(), g_ram[kActRaiserWram_MapGroup],
+      g_ram[kActRaiserWram_CurrentMap]);
+}
+
 static void ActRaiser_ApplyWidescreenPolicy(void) {
   extern bool g_ws_active;
   extern int g_ws_extra;
@@ -1177,8 +1186,9 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
          * as raw/live so a mirror decision cannot imply nonexistent padding. */
         ActRaiser_ProjectBgPresentationPolicy(
             &s_pending_action_bg_plan, 0, 0, 0, false);
-        ActRaiserActionBg_BindPlan(
-            g_ram, kActRaiserWramSize, &plan, g_ppu);
+        ActRaiserActionBg_BindPlanWithVirtualLayers(
+            g_ram, kActRaiserWramSize, &plan,
+            ActRaiser_CurrentVirtualLayerRoom(), g_ppu);
       }
     }
     return;
@@ -1397,8 +1407,9 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
                            0, 0, kActRaiserAuthenticWidth, hud_split_height,
                            kPpuOverlayFlag_RemoveFromGame);
     if (bg_hle_allowed && bg_plan_valid) {
-      bg_hle_bindings = ActRaiserActionBg_BindPlan(
-          g_ram, kActRaiserWramSize, &bg_plan, g_ppu);
+      bg_hle_bindings = ActRaiserActionBg_BindPlanWithVirtualLayers(
+          g_ram, kActRaiserWramSize, &bg_plan,
+          ActRaiser_CurrentVirtualLayerRoom(), g_ppu);
       /* If any planned world layer cannot bind, clamp that layer to its
        * authentic viewport instead of exposing stale/wrapped ring cells in
        * synthetic margins. Wide Raw never reaches this block. */
@@ -2340,11 +2351,24 @@ void ActRaiserDrawPpuFrame(void) {
       kPrioBands[] = {
         { kPpuOverlaySource_Bg1, 1, kDioramaPlane_Bg1Hi },
         { kPpuOverlaySource_Bg2, 1, kDioramaPlane_Bg2Hi },
+        { kPpuOverlaySource_Bg1, 2, kDioramaPlane_Bg1Far },
+        { kPpuOverlaySource_Bg2, 2, kDioramaPlane_Bg2Far },
         { kPpuOverlaySource_Obj, 1, kDioramaPlane_Obj1 },
         { kPpuOverlaySource_Obj, 2, kDioramaPlane_Obj2 },
         { kPpuOverlaySource_Obj, 3, kDioramaPlane_Obj3 },
       };
       for (int i = 0; i < (int)(sizeof(kPrioBands) / sizeof(kPrioBands[0])); i++) {
+        if (kPrioBands[i].plane == kDioramaPlane_Bg1Far ||
+            kPrioBands[i].plane == kDioramaPlane_Bg2Far) {
+          const DioramaRoomOverride *virtual_room =
+              ActRaiser_CurrentVirtualLayerRoom();
+          const int virtual_bg =
+              kPrioBands[i].plane == kDioramaPlane_Bg1Far ? 0 : 1;
+          if (!virtual_room ||
+              !DioramaLayerOrder_VirtualLayerIsAuthored(
+                  &virtual_room->virtual_layers[virtual_bg]))
+            continue;
+        }
         if (!g_diorama_layer_pixels[kPrioBands[i].plane])
           g_diorama_layer_pixels[kPrioBands[i].plane] =
               calloc(1, kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight);

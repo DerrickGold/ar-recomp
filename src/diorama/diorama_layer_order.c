@@ -268,12 +268,45 @@ static bool PlaneOverrideIsAuthored(const DioramaPlaneOverride *o) {
          o->set_voxel_copies;
 }
 
+bool DioramaLayerOrder_VirtualLayerIsAuthored(
+    const DioramaVirtualLayerOverride *layer) {
+  if (!layer) return false;
+  if (layer->set_z || layer->set_order || layer->set_alpha ||
+      layer->cell_span_count)
+    return true;
+  for (size_t i = 0; i < sizeof(layer->metatile_set); i++)
+    if (layer->metatile_set[i]) return true;
+  return false;
+}
+
+int DioramaLayerOrder_VirtualBand(const DioramaRoomOverride *room, int bg,
+                                  int cell_x, int cell_y,
+                                  uint8_t metatile, uint16_t tile_word) {
+  const int authentic = (tile_word & 0x2000u) ? 2 : 1;
+  if (!room || bg < 0 || bg >= 2 || cell_x < 0 || cell_y < 0)
+    return authentic;
+  const DioramaVirtualLayerOverride *layer = &room->virtual_layers[bg];
+  for (int i = (int)layer->cell_span_count - 1; i >= 0; i--) {
+    const DioramaVirtualCellSpan *span = &layer->cell_spans[i];
+    if ((unsigned)cell_x >= span->x0 && (unsigned)cell_x <= span->x1 &&
+        (unsigned)cell_y >= span->y0 && (unsigned)cell_y <= span->y1)
+      return span->band;
+  }
+  if (layer->metatile_set[metatile >> 3] & (1u << (metatile & 7u)))
+    return layer->metatile_bands[metatile];
+  return authentic;
+}
+
 bool DioramaLayerOrder_RoomIsActive(const DioramaRoomOverride *room) {
   if (!room || !room->used) return false;
   for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
     if (PlaneOverrideIsAuthored(&room->planes[plane]))
       return true;
   }
+  for (int bg = 0; bg < 2; bg++)
+    if (DioramaLayerOrder_VirtualLayerIsAuthored(
+            &room->virtual_layers[bg]))
+      return true;
   return false;
 }
 
@@ -281,6 +314,22 @@ void DioramaLayerOrder_ResetRoom(DioramaLayerOrderTable *table,
                                  uint8_t map_group, uint8_t map_number) {
   DioramaLayerOrder_ResetSection(
       table, map_group, map_number, kDioramaLayerSection_Room);
+}
+
+void DioramaLayerOrder_ResetPlaneOverridesSection(
+    DioramaLayerOrderTable *table, uint8_t map_group, uint8_t map_number,
+    uint8_t section) {
+  if (!table) return;
+  for (int i = 0; i < table->count; i++) {
+    DioramaRoomOverride *room = &table->rooms[i];
+    if (!room->used || room->map_group != map_group ||
+        room->map_number != map_number || room->section != section)
+      continue;
+    memset(room->planes, 0, sizeof(room->planes));
+    if (!DioramaLayerOrder_RoomIsActive(room))
+      memset(room, 0, sizeof(*room));
+    return;
+  }
 }
 
 void DioramaLayerOrder_ResetSection(DioramaLayerOrderTable *table,
@@ -296,6 +345,27 @@ void DioramaLayerOrder_ResetSection(DioramaLayerOrderTable *table,
        * later entries must keep their indices. */
       return;
     }
+  }
+}
+
+/* Virtual far planes share their anchor's legacy paint slot. This preserves
+ * every existing authored `order` number while stably inserting the new empty
+ * surface immediately before its anchor. Unknown planes retain input order. */
+static int DefaultPaintKey(int plane, int input_index) {
+  switch (plane) {
+    case kDioramaPlane_Backdrop: return 0;
+    case kPpuOverlaySource_Obj: return 1;
+    case kDioramaPlane_Obj1: return 2;
+    case kDioramaPlane_Bg2Far:
+    case kPpuOverlaySource_Bg2: return 3;
+    case kDioramaPlane_Bg1Far:
+    case kPpuOverlaySource_Bg1: return 4;
+    case kDioramaPlane_Obj2: return 5;
+    case kDioramaPlane_Bg2Hi: return 6;
+    case kDioramaPlane_Bg1Hi: return 7;
+    case kDioramaPlane_Obj3: return 8;
+    case kPpuOverlaySource_Bg3: return 9;
+    default: return input_index;
   }
 }
 
@@ -333,11 +403,22 @@ int DioramaLayerOrder_ResolveSection(const DioramaLayerOrderTable *table,
   for (int i = 0; i < n; i++) {
     out[i] = defaults[i];
     if (out[i].alpha == 0) out[i].alpha = kDioramaLayerAlphaOpaque;
-    keys[i] = i;  /* built-in slot */
+    keys[i] = DefaultPaintKey(out[i].plane, i);
     if (!active) continue;
     for (int scope = 0; scope < 2; scope++) {
       const DioramaRoomOverride *room = rooms[scope];
       if (!DioramaLayerOrder_RoomIsActive(room)) continue;
+      int virtual_bg = -1;
+      if (out[i].plane == kDioramaPlane_Bg1Far) virtual_bg = 0;
+      if (out[i].plane == kDioramaPlane_Bg2Far) virtual_bg = 1;
+      if (virtual_bg >= 0) {
+        const DioramaVirtualLayerOverride *v =
+            &room->virtual_layers[virtual_bg];
+        if (v->set_z) out[i].z = v->z;
+        if (v->set_alpha) out[i].alpha = v->alpha;
+        if (v->set_order) keys[i] = v->order;
+        continue;
+      }
       const DioramaPlaneOverride *o = NULL;
       if (out[i].plane >= 0 && out[i].plane < kDioramaPlane_Count)
         o = &room->planes[out[i].plane];
@@ -487,6 +568,140 @@ bool DioramaLayerOrder_ParseScopedSection(const char *section,
   return true;
 }
 
+static bool ParseVirtualCells(const char *value,
+                              DioramaVirtualCellSpan *span) {
+  unsigned x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+  char tail = 0;
+  if (!value || !span ||
+      sscanf(value, "%u,%u-%u,%u%c", &x0, &y0, &x1, &y1, &tail) != 4 ||
+      x0 > UINT16_MAX || y0 > UINT16_MAX ||
+      x1 > UINT16_MAX || y1 > UINT16_MAX || x0 > x1 || y0 > y1)
+    return false;
+  *span = (DioramaVirtualCellSpan) {
+    .x0 = (uint16_t)x0, .y0 = (uint16_t)y0,
+    .x1 = (uint16_t)x1, .y1 = (uint16_t)y1,
+  };
+  return true;
+}
+
+/* Parse one `bgN-virtual` record. Geometry is a single sparse plane record;
+ * classification records select either one metatile id or one inclusive cell
+ * rectangle and pair it with a band. Keeping every record below 512 bytes is
+ * part of the file-wrapper contract in diorama.c. */
+static bool ParseVirtualLine(DioramaRoomOverride *room, int bg,
+                             const char *values, const char **out_error) {
+  DioramaVirtualLayerOverride edit = room->virtual_layers[bg];
+  bool touched_geometry = false;
+  int selector = 0;  /* 0 none, 1 metatile, 2 cells */
+  int metatile = -1;
+  DioramaVirtualCellSpan cells = {0};
+  int band = -1;
+  const char *p = values;
+  char word[64];
+  while ((p = NextWord(p, word, sizeof(word))) != NULL) {
+    if (!word[0]) break;
+    char *colon = strchr(word, ':');
+    if (!colon) {
+      if (out_error) *out_error = "expected key:value";
+      return false;
+    }
+    *colon = '\0';
+    const char *value = colon + 1;
+    if (!*value) {
+      if (out_error) *out_error = "empty value";
+      return false;
+    }
+    char *end = NULL;
+    if (!strcmp(word, "z")) {
+      if (!ParseBoundedFloat(value, -1.0, 2.0, &edit.z)) {
+        if (out_error) *out_error = "bad virtual z (-1..2)";
+        return false;
+      }
+      edit.set_z = true;
+      touched_geometry = true;
+    } else if (!strcmp(word, "order")) {
+      long slot = strtol(value, &end, 10);
+      if (end == value || (end && *end) || slot < 0 ||
+          slot >= kDioramaPlane_Count * 4) {
+        if (out_error) *out_error = "bad virtual order";
+        return false;
+      }
+      edit.order = (int)slot;
+      edit.set_order = true;
+      touched_geometry = true;
+    } else if (!strcmp(word, "alpha")) {
+      long alpha = strtol(value, &end, 10);
+      if (end == value || (end && *end) || alpha < 0 ||
+          alpha > kDioramaLayerAlphaOpaque) {
+        if (out_error) *out_error = "bad virtual alpha (0-255)";
+        return false;
+      }
+      edit.alpha = (uint8_t)alpha;
+      edit.set_alpha = true;
+      touched_geometry = true;
+    } else if (!strcmp(word, "metatile")) {
+      long id = strtol(value, &end, 16);
+      if (selector || end == value || (end && *end) || id < 0 || id > 0xFF) {
+        if (out_error) *out_error = "bad virtual metatile (00-FF hex)";
+        return false;
+      }
+      selector = 1;
+      metatile = (int)id;
+    } else if (!strcmp(word, "cells")) {
+      if (selector || !ParseVirtualCells(value, &cells)) {
+        if (out_error) *out_error =
+            "bad virtual cells (expected x0,y0-x1,y1)";
+        return false;
+      }
+      selector = 2;
+    } else if (!strcmp(word, "band")) {
+      long parsed = strtol(value, &end, 10);
+      if (band >= 0 || end == value || (end && *end) || parsed < 0 ||
+          parsed >= kDioramaVirtualBandCount) {
+        if (out_error) *out_error = "bad virtual band (0-2)";
+        return false;
+      }
+      band = (int)parsed;
+    } else {
+      if (out_error) *out_error = "unknown virtual key";
+      return false;
+    }
+  }
+
+  if (selector) {
+    if (touched_geometry) {
+      if (out_error) *out_error =
+          "virtual geometry and classification need separate lines";
+      return false;
+    }
+    if (band < 0) {
+      if (out_error) *out_error = "virtual classification needs band:0-2";
+      return false;
+    }
+    if (selector == 1) {
+      edit.metatile_set[metatile >> 3] |=
+          (uint8_t)(1u << (metatile & 7));
+      edit.metatile_bands[metatile] = (uint8_t)band;
+    } else {
+      if (edit.cell_span_count >= kDioramaVirtualCellSpanMax) {
+        if (out_error) *out_error = "too many virtual cell spans";
+        return false;
+      }
+      cells.band = (uint8_t)band;
+      edit.cell_spans[edit.cell_span_count++] = cells;
+    }
+  } else if (band >= 0) {
+    if (out_error) *out_error = "virtual band needs metatile or cells";
+    return false;
+  } else if (!touched_geometry) {
+    if (out_error) *out_error = "no virtual values";
+    return false;
+  }
+
+  room->virtual_layers[bg] = edit;
+  return true;
+}
+
 bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
                                  const char **out_error) {
   if (out_error) *out_error = NULL;
@@ -508,6 +723,10 @@ bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
     if (out_error) *out_error = "missing plane name";
     return false;
   }
+  int virtual_bg = !strcmp(token, "bg1-virtual") ? 0 :
+                   !strcmp(token, "bg2-virtual") ? 1 : -1;
+  if (virtual_bg >= 0)
+    return ParseVirtualLine(room, virtual_bg, equals + 1, out_error);
   int plane = DioramaLayerOrder_PlaneFromToken(token);
   if (plane < 0 || plane >= kDioramaPlane_Count) {
     if (out_error) *out_error = "unknown plane";
@@ -755,6 +974,33 @@ static void DioramaLayerOrder_FormatRoomBody(const DioramaRoomOverride *room,
       APPEND(" dir:%s", DioramaLayerOrder_StackDirectionToken(
                             o->stack_direction));
     APPEND("\n");
+  }
+  /* Virtual classification records follow the ordinary plane list. Geometry
+   * is one line; sparse mappings are one short line each so the loader's
+   * bounded 512-byte input buffer can never split a valid authored record. */
+  for (int bg = 0; bg < 2; bg++) {
+    const DioramaVirtualLayerOverride *v = &room->virtual_layers[bg];
+    if (!DioramaLayerOrder_VirtualLayerIsAuthored(v)) continue;
+    const char *token = bg == 0 ? "bg1-virtual" : "bg2-virtual";
+    if (v->set_z || v->set_order || v->set_alpha) {
+      APPEND("%s =", token);
+      if (v->set_z) APPEND(" z:%.4g", (double)v->z);
+      if (v->set_order) APPEND(" order:%d", v->order);
+      if (v->set_alpha) APPEND(" alpha:%u", (unsigned)v->alpha);
+      APPEND("\n");
+    }
+    for (int id = 0; id < 256; id++) {
+      if (!(v->metatile_set[id >> 3] & (1u << (id & 7)))) continue;
+      APPEND("%s = metatile:%02X band:%u\n", token, id,
+             (unsigned)v->metatile_bands[id]);
+    }
+    for (unsigned i = 0; i < v->cell_span_count; i++) {
+      const DioramaVirtualCellSpan *span = &v->cell_spans[i];
+      APPEND("%s = cells:%u,%u-%u,%u band:%u\n", token,
+             (unsigned)span->x0, (unsigned)span->y0,
+             (unsigned)span->x1, (unsigned)span->y1,
+             (unsigned)span->band);
+    }
   }
 #undef APPEND
   *total_io = total;

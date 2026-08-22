@@ -21,10 +21,11 @@ considered; the third is exact and needs no hardcoded tile tables.
 ### 1a. The town's animated CHR page is the water art
 
 `docs/rendering-engine.md` §7 records that in a sim town (`$18=0`, `$19` in
-1..6) `$02:BAF5` captures four VRAM pages into `$7F:B800/$B900/$BA00/$BB00`
-and later ticks re-upload one captured page to VRAM `$0000` — the town's BG1
-character base. A page is 256 bytes; at 4bpp that is **exactly eight tiles,
-`$000`-`$007`**.
+1..6) `$02:BAF5` captures one contiguous 4 KiB character window into
+`$7F:B800-$BFFF`. The town profile subdivides its first `$400` bytes into four
+`$100`-byte phases at `$B800/$B900/$BA00/$BB00`; later ticks re-upload one
+phase to VRAM `$0000` — the town's BG1 character base. A phase is 256 bytes;
+at 4bpp that is **exactly eight tiles, `$000`-`$007`**.
 
 Measured, not assumed. Headless capture of the D0-fillmore-actions replay,
 snapshotting VRAM every two game frames across the animation cadence:

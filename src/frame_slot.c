@@ -112,10 +112,12 @@ static uint32_t CaptureDioramaPlaneRequestMask(void) {
     mask |= DioramaPlaneBit(kDioramaPlane_Backdrop);
   if (g_settings.diorama_layer_bg1)
     mask |= DioramaPlaneBit(kPpuOverlaySource_Bg1) |
-            DioramaPlaneBit(kDioramaPlane_Bg1Hi);
+            DioramaPlaneBit(kDioramaPlane_Bg1Hi) |
+            DioramaPlaneBit(kDioramaPlane_Bg1Far);
   if (g_settings.diorama_layer_bg2)
     mask |= DioramaPlaneBit(kPpuOverlaySource_Bg2) |
-            DioramaPlaneBit(kDioramaPlane_Bg2Hi);
+            DioramaPlaneBit(kDioramaPlane_Bg2Hi) |
+            DioramaPlaneBit(kDioramaPlane_Bg2Far);
   else if (g_settings.diorama_skybox != kDioramaSky_Off)
     mask |= DioramaPlaneBit(kPpuOverlaySource_Bg2);
   if (g_settings.diorama_layer_obj)
@@ -141,6 +143,8 @@ static uint32_t CaptureDioramaPlaneContentMask(void) {
     { kPpuOverlaySource_Obj, 0, kPpuOverlaySource_Obj },
     { kPpuOverlaySource_Bg1, 1, kDioramaPlane_Bg1Hi },
     { kPpuOverlaySource_Bg2, 1, kDioramaPlane_Bg2Hi },
+    { kPpuOverlaySource_Bg1, 2, kDioramaPlane_Bg1Far },
+    { kPpuOverlaySource_Bg2, 2, kDioramaPlane_Bg2Far },
     { kPpuOverlaySource_Obj, 1, kDioramaPlane_Obj1 },
     { kPpuOverlaySource_Obj, 2, kDioramaPlane_Obj2 },
     { kPpuOverlaySource_Obj, 3, kDioramaPlane_Obj3 },
@@ -158,11 +162,13 @@ static uint32_t CaptureDioramaAdditivePlaneMask(void) {
   if (g_ppu->overlayCaptures[kPpuOverlaySource_Bg1].flags &
       kPpuOverlayFlag_MarkFullAddSubscreen)
     mask |= DioramaPlaneBit(kPpuOverlaySource_Bg1) |
-            DioramaPlaneBit(kDioramaPlane_Bg1Hi);
+            DioramaPlaneBit(kDioramaPlane_Bg1Hi) |
+            DioramaPlaneBit(kDioramaPlane_Bg1Far);
   if (g_ppu->overlayCaptures[kPpuOverlaySource_Bg2].flags &
       kPpuOverlayFlag_MarkFullAddSubscreen)
     mask |= DioramaPlaneBit(kPpuOverlaySource_Bg2) |
-            DioramaPlaneBit(kDioramaPlane_Bg2Hi);
+            DioramaPlaneBit(kDioramaPlane_Bg2Hi) |
+            DioramaPlaneBit(kDioramaPlane_Bg2Far);
   if (g_ppu->overlayCaptures[kPpuOverlaySource_Bg3].flags &
       kPpuOverlayFlag_MarkFullAddSubscreen)
     mask |= DioramaPlaneBit(kPpuOverlaySource_Bg3);

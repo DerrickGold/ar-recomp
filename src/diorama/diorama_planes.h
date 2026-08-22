@@ -9,8 +9,8 @@
  * array. The engine-source primaries keep their PpuOverlaySource index and,
  * once the priority bands are bound, hold only the LOWEST priority rank of
  * their layer (BG1/BG2 = priority-0 tiles, OBJ = priority-0 sprites; BG3
- * stays whole — the HUD). The appended entries are the priority-band splits
- * (PpuBindOverlayPrioSurface) plus the backdrop slot the render wrapper
+ * stays whole — the HUD). The appended entries are priority/virtual-band
+ * splits (PpuBindOverlayPrioSurface) plus the backdrop slot the render wrapper
  * points at g_pixels. SDL-free so actraiser_rtl.c can bind bands by index. */
 enum {
   kDioramaPlane_Backdrop = kPpuOverlaySource_Count,  /* residual main frame */
@@ -19,6 +19,8 @@ enum {
   kDioramaPlane_Obj1,                                /* sprites, priority 1 */
   kDioramaPlane_Obj2,                                /* sprites, priority 2 */
   kDioramaPlane_Obj3,                                /* sprites, priority 3 */
+  kDioramaPlane_Bg1Far,                              /* editor virtual band 0 */
+  kDioramaPlane_Bg2Far,                              /* editor virtual band 0 */
   kDioramaPlane_Count
 };
 

@@ -1300,10 +1300,11 @@ backend hooks**:
 | What | WRAM source | VRAM dest | DMA'd by | Notes |
 |---|---|---|---|---|
 | BG tilemap (32×32 tile-index grid) | `$7F:1000` | VRAM `$6800` | `bank_02_AEBB` | full-map upload, size $800 words; the map's tile *layout* |
-| Animated tile GRAPHICS (bitplanes) | `$7F:BA00` | VRAM `$0000` | `bank_02_AF3D`/`AF42` | column-stride mode-1 DMA (`$2116` dest = `$D3`, src `$D2:$D0`, size `$D5`); the tile *pixels* for animated/scrolled tiles |
+| Animated tile GRAPHICS (bitplanes) | `$7F:B800 + phase*$E1` | VRAM `$0000` (or action-configured `$1000`) | `bank_02_AF30`→`AF3D` | full-word DMA of `$E1` bytes; the tile *pixels* for the selected animation phase |
 
-The `$7F:1000` tilemap buffer is built from town map data; `$7F:BA00` holds
-decompressed/animated tile character data (written by `bank_02_BAF5`). A modern backend can
+The `$7F:1000` tilemap buffer is built from town map data; `$7F:B800-$BFFF` holds one
+contiguous 4 KiB snapshot of already-loaded tile character data (written by
+`bank_02_BAF5`), subdivided by the active profile's stride/count. A modern backend can
 intercept at either the WRAM buffer (replace tile indices / graphics) or the DMA (redirect to
 a hi-res path).
 
@@ -1317,8 +1318,10 @@ this is the layer a replacement-tile HAL must match.
 sets `$2116` and streams: the town **tilemap → VRAM `$6000`** (its `$8100` byte-copy loop, source
 `[DB:$0000]`) and **tile graphics → VRAM `$0000`** via the upload primitive **`bank_02_B28E`→`B6C8`**
 (reads ROM `$05:8000`, byte-extract `& $FF`). **`bank_02_BAF5`** is the inverse — a VRAM→WRAM
-*readback* (save) of `$0000` through the `$2139` read port into `$7F:B800`, later re-DMA'd back;
-this save/restore loop *perpetuates* whatever is in `$0000` frame-to-frame.
+readback of exactly `$1000` bytes beginning at character-VRAM word `$DA` (`$0000/$1000`)
+through `$2139` into `$7F:B800-$BFFF`, later sliced and DMA'd back. The same routine and
+contract serve action rooms; raw cadence bit 7 marks a continuation that retains the prior
+snapshot. Offline cumulative room reconstruction makes every continuation self-contained.
 
 For a sim town (`$18=0`, `$19!=0,9`), NMI schedules animation with `$02:BC56` and consumes its
 `$D7-$DC` descriptor through the generic full-word `$02:AF30` uploader; `$02:AF86` is only the
@@ -1327,8 +1330,8 @@ at `runs/20260717-223857/snapshots/snap_08_gf1567`: scene setup armed four `$100
 the main coroutine remained in `$02:B63B` waiting for the SPC `$F0` acknowledgement. NMI then
 uploaded the still-empty `$7F:B800` phase over freshly loaded VRAM `$0000`; `$BAF5` captured that
 blank phase, making the town water flash black every fourth frame. The `$02:BC56` HLE now defers
-invisible animation ticks while INIDISP force-blank is active, so `$BAF5` completes all four
-captures before animation can overwrite the loader's output. The reference emulator's captured
+invisible animation ticks while INIDISP force-blank is active, so `$BAF5` completes the single
+4 KiB capture before animation can overwrite the loader's output. The reference emulator's captured
 phase 0 matches ROM file offset `$060000`; it is not an intentional blank frame.
 
 World navigation is a separate animation contract. `$02:AF86` copies one

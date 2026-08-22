@@ -91,6 +91,14 @@ ActionBgLookupResult ActionBgWorld_Lookup(const ActionBgWorld *world,
                                            int tile_x, int tile_y,
                                            uint16_t *entry);
 
+/* Returns the 16x16 metatile ID containing an expanded 8x8 tile coordinate.
+ * This uses the same snapshotted map publication as ActionBgWorld_Lookup, so
+ * presentation classification cannot race live WRAM or disagree with the
+ * tile word being rendered. */
+bool ActionBgWorld_LookupMetatile(const ActionBgWorld *world,
+                                  int tile_x, int tile_y,
+                                  uint8_t *metatile);
+
 bool ActionBgWorld_IsValid(const ActionBgWorld *world);
 uint32_t ActionBgWorld_Serial(const ActionBgWorld *world);
 unsigned ActionBgWorld_TileWidth(const ActionBgWorld *world);

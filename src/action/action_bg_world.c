@@ -330,6 +330,26 @@ ActionBgLookupResult ActionBgWorld_Lookup(const ActionBgWorld *world,
   return kActionBgLookup_Tile;
 }
 
+bool ActionBgWorld_LookupMetatile(const ActionBgWorld *world,
+                                  int tile_x, int tile_y,
+                                  uint8_t *metatile) {
+  if (!world || !world->valid || !metatile ||
+      (unsigned)tile_x >= world->key.tile_width ||
+      (unsigned)tile_y >= world->key.tile_height ||
+      world->key.tile_width < 32 || world->source_size < world->key.map_size)
+    return false;
+  const unsigned pages_wide = world->key.tile_width / 32u;
+  if (!pages_wide) return false;
+  const size_t page = (size_t)((unsigned)tile_y >> 5) * pages_wide +
+      ((unsigned)tile_x >> 5);
+  const size_t in_page = (size_t)(((unsigned)tile_y >> 1) & 15u) * 16u +
+      (((unsigned)tile_x >> 1) & 15u);
+  const size_t offset = page * kActionBgPageBytes + in_page;
+  if (offset >= world->key.map_size) return false;
+  *metatile = world->source[offset];
+  return true;
+}
+
 bool ActionBgWorld_IsValid(const ActionBgWorld *world) {
   return world && world->valid;
 }

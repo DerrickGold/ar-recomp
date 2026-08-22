@@ -8,6 +8,7 @@
 
 #include "actraiser/actraiser_action_bg.h"
 #include "actraiser_game.h"
+#include "diorama/diorama_layer_order.h"
 #include "snes/ppu.h"
 
 static int failures;
@@ -210,6 +211,12 @@ static void TestRingAndComparison(void) {
       wram, kActRaiserWramSize, 0, 0x63, &snapshot));
   CHECK(ActRaiserActionBg_WorldRingEligible(&snapshot, kVramWords));
   CHECK(ActionBgWorld_Update(world, &snapshot.decode));
+  uint8_t metatile = 0xff;
+  CHECK(ActionBgWorld_LookupMetatile(world, 0, 0, &metatile));
+  CHECK(metatile == 0);
+  CHECK(ActionBgWorld_LookupMetatile(world, 2, 0, &metatile));
+  CHECK(metatile == 1);
+  CHECK(!ActionBgWorld_LookupMetatile(world, -1, 0, &metatile));
   PopulateNativeRing(world, &snapshot, vram);
 
   ActRaiserActionBgCompareResult result;
@@ -690,6 +697,78 @@ static void TestFramePlanBinding(void) {
   free(wram);
 }
 
+static void TestVirtualLayerClassificationBinding(void) {
+  uint8_t *wram = BuildWram();
+  Ppu *ppu = calloc(1, sizeof(*ppu));
+  CHECK(wram != NULL && ppu != NULL);
+  if (!wram || !ppu) {
+    free(ppu);
+    free(wram);
+    return;
+  }
+  ActRaiserActionBg_Shutdown();
+  CHECK(unsetenv("AR_ACTION_BG_HLE") == 0);
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Fillmore;
+  wram[kActRaiserWram_CurrentMap] = 1;
+  Write16(wram, kActRaiserWram_GameFrame, 200);
+  Write16(wram, kActRaiserWram_Bg2Width, 256);
+  ppu->bgmode = 1;
+  ppu->screenEnabled[0] = kActRaiserBgLayerMask_Bg1;
+  ppu->bgXsc[0] = 0x63;
+  ppu->hScroll[0] = 13;
+  ppu->vScroll[0] = 7;
+
+  ActionBgPlan plan;
+  ActionBgPresentationPolicy policy;
+  CHECK(ActRaiserActionBg_BuildPlan(
+      wram, kActRaiserWramSize, ppu, true, &plan, &policy));
+  ActRaiserActionBgLayerSnapshot snapshot;
+  CHECK(ActRaiserActionBg_CaptureLayer(
+      wram, kActRaiserWramSize, 0, ppu->bgXsc[0], &snapshot));
+  ActionBgWorld *reference = ActionBgWorld_Create();
+  CHECK(reference != NULL);
+  CHECK(ActionBgWorld_Update(reference, &snapshot.decode));
+  PopulateNativeRing(reference, &snapshot, ppu->vram);
+
+  DioramaRoomOverride room;
+  memset(&room, 0, sizeof(room));
+  room.used = true;
+  DioramaVirtualLayerOverride *virtual_bg = &room.virtual_layers[0];
+  uint8_t metatile = 0;
+  CHECK(ActionBgWorld_LookupMetatile(reference, 0, 0, &metatile));
+  virtual_bg->metatile_set[metatile >> 3] |=
+      (uint8_t)(1u << (metatile & 7));
+  virtual_bg->metatile_bands[metatile] = 0;
+  virtual_bg->cell_spans[0] = (DioramaVirtualCellSpan) {
+    .x0 = 1, .y0 = 0, .x1 = 1, .y1 = 0, .band = 2,
+  };
+  virtual_bg->cell_span_count = 1;
+
+  CHECK(ActRaiserActionBg_BindPlanWithVirtualLayers(
+      wram, kActRaiserWramSize, &plan, &room, ppu) ==
+      kActRaiserBgLayerMask_Bg1);
+  const PpuVirtualTilemapBinding *binding = &ppu->virtualTilemap[0];
+  CHECK(binding->lookup != NULL);
+  CHECK(binding->band_lookup != NULL);
+  uint16_t entry = 0;
+  uint8_t band = 0xff;
+  CHECK(binding->lookup(binding->context, 0, 0, &entry));
+  CHECK(binding->band_lookup(
+      binding->context, 0, 0, entry, &band) && band == 0);
+  CHECK(binding->lookup(binding->context, 2, 0, &entry));
+  CHECK(binding->band_lookup(
+      binding->context, 2, 0, entry, &band) && band == 2);
+  CHECK(binding->lookup(binding->context, 4, 0, &entry));
+  CHECK(binding->band_lookup(
+      binding->context, 4, 0, entry, &band) &&
+      band == ((entry & 0x2000) ? 2 : 1));
+
+  ActionBgWorld_Destroy(reference);
+  ActRaiserActionBg_Shutdown();
+  free(ppu);
+  free(wram);
+}
+
 static void TestMarahnaCyclicBackdropBinding(void) {
   uint8_t *wram = BuildWram();
   Ppu *ppu = calloc(1, sizeof(*ppu));
@@ -783,6 +862,7 @@ int main(void) {
   TestFramePlanCapture();
   TestPlanExtentProjection();
   TestFramePlanBinding();
+  TestVirtualLayerClassificationBinding();
   TestMarahnaCyclicBackdropBinding();
   if (failures) {
     fprintf(stderr, "%d failure(s)\n", failures);

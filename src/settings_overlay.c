@@ -1888,10 +1888,10 @@ static bool LayerActivateSelected(void) {
       SetStatus("NO ROOM TO RESET");
       return true;
     }
-    DioramaLayerOrder_ResetSection(
+    DioramaLayerOrder_ResetPlaneOverridesSection(
         table, diorama->map_group, diorama->map_number, diorama->section);
     s_layer_plane = -1;
-    SetStatus("ROOM RESET");
+    SetStatus("PLANE OVERRIDES RESET");
     LayerSaveEdit();
     return true;
   }
