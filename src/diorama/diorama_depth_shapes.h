@@ -37,8 +37,7 @@
  * `z + thickness`, so the layer reads as a block with a near face instead of an
  * infinitely thin sheet. This is the per-vertex arithmetic, extracted pure so the
  * geometry is testable without a renderer -- the mesh assembly and projection stay
- * in diorama.c (precedent: this file's own DioramaInterpUvWindow, and
- * diorama_skybox_uv.c).
+ * in diorama.c (precedent: diorama_skybox_uv.c).
  *
  * `t` is 0 at the fold (the plane's bottom edge) and 1 at the near lip.
  * `z_bottom` is the plane's bottom-edge depth -- z + rake, NOT z, so a room that

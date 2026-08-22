@@ -95,8 +95,9 @@ static void TestDefaultsAndMetadata(void) {
    * added five independent performance boundaries, the audited landscape one
    * player-facing magnitude row, and the Aitos wind event one Extras row for
    * whether it stills every windmill or only the ones the ROM stamped. The
-   * host FPS overlay adds one Video row. */
-  CHECK(g_setting_desc_count == 269);
+   * host FPS overlay adds one Video row, and frame generation adds one explicit
+   * 30-to-60 Hz validation cadence. */
+  CHECK(g_setting_desc_count == 270);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -125,6 +126,18 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(g_settings.window_mode == kWindowMode_Windowed &&
         g_settings.new_renderer);
   CHECK(g_settings.refresh_mode == kRefreshMode_Vsync);
+  CHECK(g_settings.gpu_interp_source_rate == kInterpolationSource_Native);
+  {
+    const SettingDesc *source_rate =
+        Settings_Find("gpu_interp_source_rate");
+    CHECK(source_rate && !Settings_IsAvailable(source_rate));
+    g_settings.diorama_mode = true;
+    CHECK(!Settings_IsAvailable(source_rate));
+    g_settings.gpu_interp_enabled = true;
+    CHECK(Settings_IsAvailable(source_rate));
+    g_settings.gpu_interp_enabled = false;
+    g_settings.diorama_mode = false;
+  }
   CHECK(!g_settings.show_fps);
   CHECK(!g_settings.ignore_aspect_ratio);
   CHECK(g_settings.audio_enabled);
@@ -313,17 +326,15 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(Settings_SetLong(screen_ratio, kScreenAspect_169) ==
         kSettingChange_Applied);
   CHECK(!g_settings.ignore_aspect_ratio);
-  /* The detected refresh Hz is informational and must NOT leak into the saved
-   * value: refresh_mode always formats as its plain enum label so it
-   * round-trips through settings.ini. */
-  Settings_SetHostRefreshHz(144);
-  CHECK(Settings_HostRefreshHz() == 144);
+  /* Transient host-display status is not part of the settings layer:
+   * refresh_mode formats as its plain persisted enum label. */
   const SettingDesc *refresh = Settings_Find("refresh_mode");
   CHECK(refresh && refresh->type == kSettingType_Enum);
+  CHECK(!strcmp(refresh->enum_labels[kRefreshMode_Uncapped], "Uncapped"));
+  CHECK(!strcmp(refresh->enum_labels[kRefreshMode_Unlimited], "Unlimited"));
   char refresh_value[32];
   Settings_FormatValue(refresh, refresh_value, sizeof(refresh_value));
   CHECK(!strcmp(refresh_value, "Vsync"));
-  Settings_SetHostRefreshHz(0);
   CHECK(bridge_limit && bridge_limit->category == kSettingCat_Enhancements);
   CHECK(inspector && inspector->category == kSettingCat_Inspector);
   CHECK(dump_assets && dump_assets->category == kSettingCat_Inspector &&
@@ -1046,41 +1057,6 @@ static void TestInputBindings(void) {
   remove(path);
 }
 
-/* R2: FrameLimitIntervalNs is static in main.c and can't be linked here, so
- * replicate its exact formula over the real g_settings + Settings_HostRefreshHz
- * and assert the three branches: Limit == 1e9/fps (byte-identical to before),
- * Unlimited with hz>0 == 1e9/(2*hz), and hz==0 (headless) == 0. The real-run
- * ~120fps-not-250 acceptance is the Wave-3 on-device gate. */
-static uint64_t R2_FrameLimitIntervalNs(void) {
-  if (g_settings.refresh_mode == kRefreshMode_Limit) {
-    int fps = g_settings.frame_limit_fps;
-    if (fps < 1) fps = 1;
-    return 1000000000ull / (uint64_t)fps;
-  }
-  if (g_settings.refresh_mode == kRefreshMode_Unlimited) {
-    int hz = Settings_HostRefreshHz();
-    if (hz > 0) return 1000000000ull / (uint64_t)(2 * hz);
-  }
-  return 0;
-}
-static void TestFrameLimitInterval(void) {
-  Settings_Init();
-  g_settings.refresh_mode = kRefreshMode_Limit;
-  g_settings.frame_limit_fps = 90;
-  CHECK(R2_FrameLimitIntervalNs() == 1000000000ull / 90);
-  g_settings.frame_limit_fps = 0;                 /* clamps to 1 */
-  CHECK(R2_FrameLimitIntervalNs() == 1000000000ull);
-  g_settings.refresh_mode = kRefreshMode_Unlimited;
-  Settings_SetHostRefreshHz(60);
-  CHECK(R2_FrameLimitIntervalNs() == 1000000000ull / 120);  /* ~2x refresh */
-  Settings_SetHostRefreshHz(0);                   /* headless: unknown refresh */
-  CHECK(R2_FrameLimitIntervalNs() == 0);          /* stays truly unlimited */
-  g_settings.refresh_mode = kRefreshMode_Vsync;   /* neither branch */
-  CHECK(R2_FrameLimitIntervalNs() == 0);
-  g_settings.refresh_mode = kRefreshMode_Uncapped;
-  CHECK(R2_FrameLimitIntervalNs() == 0);
-}
-
 /* R6: a pinned scale percentage is defined in source-pixels-per-OUTPUT-pixel,
  * and SDL_WINDOW_HIGH_PIXEL_DENSITY makes the output PHYSICAL pixels — so the
  * pinned value must be multiplied by the display's pixel density to keep its
@@ -1333,7 +1309,7 @@ static void TestVideoSettingAudit(void) {
   Settings_InitWithFile(legacy_path);
   CHECK(g_settings.extended_aspect == kScreenAspect_Stretch);
   CHECK(Settings_IgnoreAspectRatio());
-  CHECK(g_settings.refresh_mode == kRefreshMode_Unlimited);
+  CHECK(g_settings.refresh_mode == kRefreshMode_Uncapped);
   g_settings.show_fps = true;
   CHECK(Settings_Save(saved_path));
   CHECK(!FileContains(saved_path, "ignore_aspect_ratio ="));
@@ -1349,6 +1325,12 @@ static void TestVideoSettingAudit(void) {
   Settings_InitWithFile(legacy_path);
   CHECK(g_settings.refresh_mode == kRefreshMode_Uncapped);
   CHECK(g_settings.show_fps);
+
+  CHECK(WriteTextFile(
+      legacy_path,
+      "refresh_mode = Unlimited\n"));
+  Settings_InitWithFile(legacy_path);
+  CHECK(g_settings.refresh_mode == kRefreshMode_Unlimited);
 
   remove(legacy_path);
   remove(saved_path);
@@ -1387,7 +1369,6 @@ int main(void) {
   TestRimLightAvailabilityFollowsBlendSupport();
   TestEffectAvailabilityFollowsRendererSupport();
   TestScalePercentToOutput();
-  TestFrameLimitInterval();
   TestDefaultsAndMetadata();
   TestVideoSettingAudit();
   TestSim3DEnvironmentLabels();

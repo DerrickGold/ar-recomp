@@ -542,9 +542,14 @@ static const char *const kWindowModeLabels[] = {
 
 static const char *const kRefreshModeLabels[] = {
   "Vsync",
-  "Unlimited",
-  "Limit",
   "Uncapped",
+  "Limit",
+  "Unlimited",
+};
+
+static const char *const kInterpolationSourceLabels[] = {
+  "Native 60 Hz",
+  "Test 30 -> 60 Hz",
 };
 
 /* NOTE: these strings are ALSO the settings.ini values (Settings_FormatValue
@@ -631,12 +636,12 @@ static void OnLegacyStretchChanged(const SettingDesc *desc) {
   g_settings.ignore_aspect_ratio = Settings_IgnoreAspectRatio();
 }
 
-/* Refresh rate superseded the old uncapped bool. Preserve the useful half of
- * that legacy setting by migrating On to Unlimited; Off leaves an explicitly
+/* Refresh rate superseded the old uncapped bool. Preserve its historical
+ * presentation policy by migrating On to Uncapped; Off leaves an explicitly
  * selected modern refresh mode alone. */
 static void OnLegacyUncappedChanged(const SettingDesc *desc) {
   if (*(const bool *)desc->field)
-    g_settings.refresh_mode = kRefreshMode_Unlimited;
+    g_settings.refresh_mode = kRefreshMode_Uncapped;
 }
 
 static bool WidescreenActive(void) { return g_ws_active; }
@@ -661,6 +666,10 @@ static bool DioramaDynamicCameraAvailable(void) {
 /* The frame-limit FPS row only matters when Refresh rate is Limit. */
 static bool FrameLimitActive(void) {
   return g_settings.refresh_mode == kRefreshMode_Limit;
+}
+
+static bool FrameInterpolationActive(void) {
+  return Diorama_ModeIsOn() && g_settings.gpu_interp_enabled;
 }
 
 /* Sim-town 3D defaults (2026-07-22).
@@ -1109,12 +1118,12 @@ const SettingDesc g_setting_descs[] = {
     &g_settings.ignore_aspect_ratio, 0, 0, 1, 1, false, NULL, 0,
     NULL, OnLegacyStretchChanged, NULL, NULL, .modern_env = true },
   { "refresh_mode", "AR_REFRESH_MODE", "Refresh rate",
-    "Vsync locks to your display's refresh; Unlimited disables vsync and "
-    "soft-caps presentation at twice a detected host refresh; Limit caps to "
-    "a chosen FPS; Uncapped removes all presentation throttling for profiling.",
+    "Vsync delegates presentation timing to the renderer; Uncapped disables "
+    "vsync and soft-caps at twice the display's nominal refresh; Limit uses "
+    "a chosen FPS; Unlimited removes all presentation throttling.",
     kSettingType_Enum, kApply_Callback, kSettingCat_Display,
     &g_settings.refresh_mode, kRefreshMode_Vsync,
-    kRefreshMode_Vsync, kRefreshMode_Uncapped, 1, false,
+    kRefreshMode_Vsync, kRefreshMode_Unlimited, 1, false,
     kRefreshModeLabels, kRefreshMode_Count, NULL, NULL, NULL, NULL, .modern_env = true },
   { "frame_limit_fps", "AR_FRAME_LIMIT_FPS", "Frame limit",
     "Target frames per second when Refresh rate is Limit; independent of the "
@@ -1124,7 +1133,7 @@ const SettingDesc g_setting_descs[] = {
     FrameLimitActive, NULL, NULL, NULL, .modern_env = true },
   BOOL_SETTING_MODERN(show_fps, "AR_SHOW_FPS", "FPS counter",
                "Show completed host presents per second in the top-right. Use "
-               "Refresh rate: Uncapped to measure maximum rendering throughput.",
+               "Refresh rate: Unlimited to measure maximum rendering throughput.",
                kSettingCat_Display, 0, false, NULL, NULL),
   BOOL_SETTING_MODERN(sim3d_mode, "AR_SIM3D", "Simulation town 3D",
                "Tilt the simulation-town map into a projected ground plane. "
@@ -1791,7 +1800,7 @@ const SettingDesc g_setting_descs[] = {
                               "Return all diorama controls to their defaults."),
   /* Load-only migration alias; Refresh rate is the sole live control. */
   BOOL_SETTING(uncapped_framerate, NULL, "Uncapped framerate",
-               "Legacy compatibility alias for Refresh rate > Unlimited.",
+               "Legacy compatibility alias for Refresh rate > Uncapped.",
                kSettingCat_Graphics, 0, false, NULL,
                OnLegacyUncappedChanged),
   BOOL_SETTING(action_effect_lighting, "AR_ACTION_EFFECT_LIGHTING",
@@ -1831,14 +1840,23 @@ const SettingDesc g_setting_descs[] = {
                "bleed onto transparent gaps in the layer behind it (e.g. a "
                "hazy patch over the sky) — off by default until fixed.",
                kSettingCat_Graphics, 0, false, GpuShadersActive, NULL),
-  /* The existing experimental gate now owns both the stable WRAM-camera pair
-   * and action-mode vector OBJ reconstruction. It remains opt-in while the
-   * proof of concept is validated across the complete action-stage census. */
+  /* One existing opt-in owns the replacement frame-generation path. */
   BOOL_SETTING(gpu_interp_enabled, "AR_INTERP_ENABLE",
                "Frame interpolation",
-               "Diorama: smooth camera and action-entity motion between "
-               "emulated frames on high-refresh (>60Hz) displays.",
+               "Diorama: generate intermediate captured-layer frames for "
+               "smoother motion on high-refresh (>60Hz) displays.",
                kSettingCat_Graphics, 0, false, Diorama_ModeIsOn, NULL),
+  { "gpu_interp_source_rate", "AR_INTERP_SOURCE_RATE",
+    "Interpolation source test",
+    "Native preserves authentic 60 Hz gameplay. Test 30 -> 60 Hz deliberately "
+    "runs Diorama gameplay in slow motion at 30 Hz while presentation remains "
+    "at the selected refresh rate, making every generated midpoint visible on "
+    "a 60 Hz Vsync display.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_Graphics,
+    &g_settings.gpu_interp_source_rate, kInterpolationSource_Native,
+    kInterpolationSource_Native, kInterpolationSource_Test30, 1, false,
+    kInterpolationSourceLabels, kInterpolationSource_Count,
+    FrameInterpolationActive, NULL, NULL, NULL, .modern_env = true },
   /* CRT post-process (kSettingCat_Crt). One fullscreen pass at the end of
    * presentation, so unlike the diorama-only gpu_fx_* rows above it covers
    * every render mode at once. Needs the same "gpu" backend, hence the shared
@@ -3331,10 +3349,6 @@ bool Settings_HdReplacementsAvailable(void) {
   return s_hd_replacements_available;
 }
 
-static int s_host_refresh_hz;
-void Settings_SetHostRefreshHz(int hz) { s_host_refresh_hz = hz > 0 ? hz : 0; }
-int Settings_HostRefreshHz(void) { return s_host_refresh_hz; }
-
 /* Backing pixels per window point (SDL_GetWindowPixelDensity), pushed from
  * main.c whenever the window moves display or changes scale. 1.0 on a
  * non-scaled display; 2.0 on Retina; fractional under Wayland fractional
@@ -3348,14 +3362,6 @@ int Settings_HostRefreshHz(void) { return s_host_refresh_hz; }
  * flag was added, and the same saved number meant different things on a Mac
  * (density 2) and on Windows/X11 (density 1). The auto (0) rows derive from the
  * output size and self-correct; only the explicit percentages need this. */
-/* Whether the renderer REALLY has vsync on, read back from SDL after the
- * request (SDL_SetRenderVSync can be rejected — Metal accepts only 0/1). The
- * "Vsync NHz" row labels from this, not from the requested value, so a
- * rejected enable does not leave the menu claiming a vsync we do not have. */
-static bool s_host_vsync_active;
-void Settings_SetHostVsyncActive(bool active) { s_host_vsync_active = active; }
-bool Settings_HostVsyncActive(void) { return s_host_vsync_active; }
-
 static float s_host_pixel_density = 1.0f;
 void Settings_SetHostPixelDensity(float density) {
   s_host_pixel_density = density > 0.0f ? density : 1.0f;

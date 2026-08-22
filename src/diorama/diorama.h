@@ -50,28 +50,21 @@ void Diorama_SetDragging(bool dragging);
  * residual main framebuffer. Planes with a NULL texture or pixels are
  * skipped. `plane_mask` is the caller's immutable request/content
  * intersection (M5 D3 — present-time code must not re-derive live settings
- * state). Returns a bit per successfully synchronized plane. An unchanged
- * plane whose retained texture already matches is synchronized without an SDL
- * upload; a failed upload is omitted so the compositor cannot resurface stale
- * texture contents. */
+ * state). `synchronized_plane_mask` carries every successfully synchronized
+ * plane; `changed_plane_mask` is its subset whose pixels changed and required
+ * an SDL upload. A failed upload is omitted so the compositor cannot resurface
+ * stale texture contents. */
 /* `snes_width` is the FULL surface width including both aprons; `obj_apron` is
  * the per-side apron so planes that cannot hold apron content upload only their
  * display columns (see DioramaPlaneCanCarryApron). */
-uint32_t Diorama_Upload(SDL_Texture *textures[], uint8_t *pixels[],
-                        int snes_width, int snes_height, int obj_apron,
-                        uint32_t plane_mask);
+typedef struct DioramaUploadResult {
+  uint32_t synchronized_plane_mask;
+  uint32_t changed_plane_mask;
+} DioramaUploadResult;
 
-/* M7 (§6): per-BG-layer UV shift for present-time scroll interpolation.
- * Indexed by SNES BG number (0=BG1..3=BG4); Diorama_Composite maps each
- * layer's plane to its BG internally and applies bg_du/bg_dv[that BG] to
- * the layer's mesh UVs. active=false (or a NULL pointer) disables
- * interpolation entirely for that composite call — e.g. first frame, a
- * BG-mode change between captures, or turbo (§6.4 edge cases). */
-typedef struct DioramaScrollDelta {
-  bool active;
-  float bg_du[4];
-  float bg_dv[4];
-} DioramaScrollDelta;
+DioramaUploadResult Diorama_Upload(
+    SDL_Texture *textures[], uint8_t *pixels[],
+    int snes_width, int snes_height, int obj_apron, uint32_t plane_mask);
 
 /* B4-split (followup doc): the camera pose Diorama_Composite renders with,
  * passed in by the caller instead of Composite reading producer-owned
@@ -123,7 +116,7 @@ typedef struct DioramaPlaneProjection {
 
 /* Resolved action-world projection for presentation-only overlays. The
  * compositor publishes the same camera, mesh dimensions, independent
- * interpolated BG1/BG2 UV windows, and per-room BG1/BG2/OBJ plane shapes used
+ * source UV windows and per-room BG1/BG2/OBJ plane shapes used
  * by the captured planes; consumers therefore cannot duplicate auto-fit or
  * guess a parallel depth. */
 typedef struct DioramaProjection {
@@ -147,16 +140,6 @@ typedef struct DioramaProjection {
  * BG-local enhancements part of painter order instead of a late world overlay. */
 typedef void (*DioramaPlaneEffectFn)(void *userdata, int plane,
                                     const DioramaProjection *projection);
-
-/* Optional replacement for one captured plane's complete geometry pass. It is
- * invoked in the plane's authentic painter position with the renderer still
- * in viewport-local coordinates. Returning true skips the captured plane,
- * including its whole-plane shadow/depth treatments; false draws it normally.
- * The action OBJ interpolator uses this to submit independently moving atlas
- * quads without flattening them into an intermediate pixel grid. */
-typedef bool (*DioramaPlaneReplacementFn)(
-    void *userdata, int plane, const DioramaProjection *projection,
-    SDL_FColor shade, bool additive, bool casts_shadow);
 
 /* Pure eligibility contract shared by projection publication and drawing.
  * Resource booleans describe this frame's upload/content intersection. */
@@ -243,8 +226,6 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        int visible_width, SDL_Rect viewport,
                        SDL_Texture *textures[],
                        uint8_t *pixels[],
-                       const DioramaScrollDelta *scroll_delta,
-                       bool obj_vector_interpolation,
                        const DioramaCameraPose *cam_pose,
                        float distance_scale,
                        uint32_t additive_plane_mask,
@@ -252,8 +233,6 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        uint8_t map_group, uint8_t map_number,
                        uint8_t layer_section,
                        const DioramaBgValidSpanPlan *bg2_valid_spans,
-                       DioramaPlaneReplacementFn plane_replacement,
-                       void *plane_replacement_userdata,
                        DioramaPlaneEffectFn plane_effect,
                        void *plane_effect_userdata,
                        DioramaProjection *out_projection);

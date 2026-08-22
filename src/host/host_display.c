@@ -5,10 +5,9 @@
  * when and how to present, while present.c receives only immutable slot data
  * and never reaches back into live game/PPU state.
  *
- * The retained frame and its previous-scroll snapshot are deliberately owned
- * together here. A between-ticks re-present must reuse that exact pair and the
- * shared deadline; capturing again would refresh the timestamp, collapse the
- * interpolation phase, and recreate the inert-render-clock bug R17 fixed. */
+ * A between-ticks re-present reuses the exact captured frame and shared
+ * deadline; capturing again would refresh its timestamp and break pair
+ * continuity. */
 #include "host_display.h"
 
 #include <inttypes.h>
@@ -22,10 +21,13 @@
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
 #include "diorama/diorama.h"
-#include "diorama/diorama_scroll_math.h"
+#include "diorama/diorama_frame_generation.h"
 #include "frame_slot.h"
 #include "host_display_pacing.h"
+#include "host_display_refresh_cache.h"
+#include "host_display_status.h"
 #include "present.h"
+#include "presentation_frame_generation.h"
 #include "presentation_geometry.h"
 #include "present_cadence_metrics.h"
 #include "settings.h"
@@ -56,18 +58,12 @@ enum {
   kDeadlineResyncIntervalCount = 2,
   kPerformanceReportIntervalMs = 1000,
 };
-static const uint64_t kDisplayPropertyPollIntervalNs =
-    kNanosecondsPerSecond;
 
 typedef struct RetainedPresentFrame {
   FrameSlot slot;
-  DioramaScrollSnapshot previous_scroll;
-  ActionObjInterpolationFrame previous_action_obj;
   bool valid;
 } RetainedPresentFrame;
 
-static DioramaScrollSnapshot s_previous_scroll;
-static ActionObjInterpolationFrame s_previous_action_obj;
 static RetainedPresentFrame s_retained_frame;
 static uint64_t s_present_deadline_ns;
 static unsigned long s_tick_present_count;
@@ -82,12 +78,14 @@ static bool s_present_failure_reported;
 static int s_active_aspect_x;
 static int s_active_aspect_y;
 static bool s_widescreen_runtime_allowed;
+static HostDisplayRefreshCache s_display_refresh_cache;
+static SDL_DisplayID s_active_display_id;
 
 /* Refresh only the presentation-owned camera portion of a retained SIM frame.
  * The captured game/PPU snapshot, timestamp, interpolation pair, textures, and
- * object metadata remain untouched. This is what lets an uncapped re-present
- * show current mouse orbit rather than either drawing a stale pose or waiting
- * for the next emulation tick. */
+ * object metadata remain untouched. This lets a retained re-present show the
+ * current mouse orbit rather than either drawing a stale pose or waiting for
+ * the next emulation tick. */
 static void RefreshRetainedSimCamera(FrameSlot *slot) {
   if (!slot || slot->sim.view != kSimView_Enhanced) return;
   Sim3DCameraPresentationState camera;
@@ -173,8 +171,9 @@ static HostDisplayPacingOptions CurrentPacingOptions(void) {
   return (HostDisplayPacingOptions){
       .refresh_mode = (RefreshMode)g_settings.refresh_mode,
       .frame_limit_fps = g_settings.frame_limit_fps,
-      .host_refresh_hz = Settings_HostRefreshHz(),
+      .nominal_refresh_hz = HostDisplayStatus_NominalRefreshHz(),
       .compositor_managed = RunningUnderGamescope(),
+      .vsync_active = HostDisplayStatus_VsyncActive(),
   };
 }
 
@@ -391,16 +390,54 @@ void HostDisplay_ApplyWindowMode(void) {
   }
 }
 
-static void UpdateRefreshRate(void) {
+static int DisplayModeRefreshHz(const SDL_DisplayMode *mode) {
+  if (!mode) return 0;
+  if (mode->refresh_rate_numerator > 0 &&
+      mode->refresh_rate_denominator > 0) {
+    const uint64_t numerator = (uint64_t)mode->refresh_rate_numerator;
+    const uint64_t denominator =
+        (uint64_t)mode->refresh_rate_denominator;
+    return (int)((numerator + denominator / 2u) / denominator);
+  }
+  return mode->refresh_rate > 0.0f
+      ? (int)(mode->refresh_rate + 0.5f)
+      : 0;
+}
+
+static int QueryDisplayRefreshHz(SDL_DisplayID display_id) {
+  if (!display_id) return 0;
+  const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(display_id);
+  int refresh_hz = DisplayModeRefreshHz(mode);
+  if (refresh_hz <= 0)
+    refresh_hz = DisplayModeRefreshHz(
+        SDL_GetDesktopDisplayMode(display_id));
+  return refresh_hz;
+}
+
+/* Select the window's session-stable display ID and publish its last valid
+ * nominal rate. A failed/unspecified query never destroys a cached value.
+ * `force_query` is reserved for boot and actual display-mode events; ordinary
+ * mode transitions reuse the per-display cache. */
+static void UpdateRefreshRate(bool force_query) {
   if (!g_window) {
-    Settings_SetHostRefreshHz(0);
+    s_active_display_id = 0;
+    HostDisplayStatus_SetNominalRefreshHz(0);
     return;
   }
-  const SDL_DisplayID display = SDL_GetDisplayForWindow(g_window);
-  const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(display);
-  if (!mode) mode = SDL_GetDesktopDisplayMode(display);
-  Settings_SetHostRefreshHz(
-      mode ? (int)(mode->refresh_rate + 0.5f) : 0);
+  const SDL_DisplayID display_id = SDL_GetDisplayForWindow(g_window);
+  if (!display_id) return;  /* Transient SDL failure: preserve known state. */
+
+  s_active_display_id = display_id;
+  int refresh_hz = HostDisplayRefreshCache_Get(
+      &s_display_refresh_cache, display_id);
+  if (force_query || refresh_hz <= 0) {
+    const int queried_refresh_hz = QueryDisplayRefreshHz(display_id);
+    HostDisplayRefreshCache_Remember(
+        &s_display_refresh_cache, display_id, queried_refresh_hz);
+  }
+  refresh_hz = HostDisplayRefreshCache_Get(
+      &s_display_refresh_cache, display_id);
+  HostDisplayStatus_SetNominalRefreshHz(refresh_hz);
 }
 
 static void UpdatePixelDensity(void) {
@@ -413,16 +450,41 @@ static void UpdatePixelDensity(void) {
 }
 
 void HostDisplay_UpdateProperties(void) {
-  UpdateRefreshRate();
+  UpdateRefreshRate(true);
   UpdatePixelDensity();
 }
 
-void HostDisplay_PollProperties(void) {
-  static uint64_t next_poll_ns;
-  const uint64_t now_ns = SDL_GetTicksNS();
-  if (now_ns < next_poll_ns) return;
-  next_poll_ns = now_ns + kDisplayPropertyPollIntervalNs;
-  UpdateRefreshRate();
+void HostDisplay_WindowDisplayChanged(void) {
+  UpdateRefreshRate(false);
+  UpdatePixelDensity();
+}
+
+void HostDisplay_WindowDisplayScaleChanged(void) {
+  UpdatePixelDensity();
+}
+
+void HostDisplay_DisplayModeChanged(uint32_t display_id) {
+  const SDL_DisplayID id = (SDL_DisplayID)display_id;
+  const int refresh_hz = QueryDisplayRefreshHz(id);
+  HostDisplayRefreshCache_Remember(&s_display_refresh_cache, id, refresh_hz);
+  if (id == s_active_display_id) {
+    HostDisplayStatus_SetNominalRefreshHz(
+        HostDisplayRefreshCache_Get(&s_display_refresh_cache, id));
+    UpdatePixelDensity();
+  }
+}
+
+void HostDisplay_DisplayRemoved(uint32_t display_id) {
+  const SDL_DisplayID id = (SDL_DisplayID)display_id;
+  HostDisplayRefreshCache_Forget(&s_display_refresh_cache, id);
+  if (id != s_active_display_id) return;
+  s_active_display_id = 0;
+  HostDisplayStatus_SetNominalRefreshHz(0);
+  /* SDL may already have reassigned the window to another connected display.
+   * Select its cached value immediately if so; its window-change event remains
+   * the authoritative follow-up. */
+  UpdateRefreshRate(false);
+  UpdatePixelDensity();
 }
 
 static void SetRenderVsync(int requested) {
@@ -432,7 +494,7 @@ static void SetRenderVsync(int requested) {
             requested, SDL_GetError());
   }
   int actual = 0;
-  Settings_SetHostVsyncActive(
+  HostDisplayStatus_SetVsyncActive(
       SDL_GetRenderVSync(g_renderer, &actual) && actual != 0);
 }
 
@@ -444,17 +506,17 @@ void HostDisplay_DisableVsync(void) {
   SetRenderVsync(0);
 }
 
-uint64_t HostDisplay_CatchupCapNs(int maximum_catchup_frames) {
+uint64_t HostDisplay_CatchupCapNs(uint64_t emulation_frame_interval_ns,
+                                  int maximum_catchup_frames) {
   return HostDisplayPacing_CatchupCapNs(
       CurrentPacingOptions(),
-      kHostDisplayEmulationFrameIntervalNs,
+      emulation_frame_interval_ns,
       maximum_catchup_frames);
 }
 
 void HostDisplay_InvalidatePresentHistory(void) {
-  memset(&s_previous_scroll, 0, sizeof(s_previous_scroll));
-  memset(&s_previous_action_obj, 0, sizeof(s_previous_action_obj));
   s_retained_frame.valid = false;
+  DioramaFrameGeneration_Reset();
 }
 
 static void ReportPresentPerformance(uint64_t render_start_ms,
@@ -493,16 +555,17 @@ static void ReportPresentPerformance(uint64_t render_start_ms,
   window_frame_count = 0;
 }
 
+static bool PresentPerformanceEnabled(void) {
+  static int enabled = -1;
+  if (enabled < 0) enabled = getenv("AR_PERF") ? 1 : 0;
+  return enabled != 0;
+}
+
 bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha) {
   if (mode == kHostDisplayPresent_None || !g_renderer || !g_texture)
     return false;
 
-  static bool performance_initialized;
-  static bool performance_enabled;
-  if (!performance_initialized) {
-    performance_initialized = true;
-    performance_enabled = getenv("AR_PERF") != NULL;
-  }
+  const bool performance_enabled = PresentPerformanceEnabled();
 
   const bool game_tick = mode == kHostDisplayPresent_GameTick ||
                          mode == kHostDisplayPresent_HeadlessVideo;
@@ -512,25 +575,13 @@ bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha) {
       performance_enabled ? SDL_GetTicks() : 0;
   PresentUpload(&slot);
 
-  /* Preserve the previous-tick pairing before extraction advances the live
-   * snapshot. Re-presenting must reuse this retained pair and must never call
-   * FrameSlot_Capture, whose fresh timestamp would collapse interpolation. */
   if (game_tick) {
-    s_retained_frame.previous_scroll = s_previous_scroll;
-    s_retained_frame.previous_action_obj = s_previous_action_obj;
     s_retained_frame.slot = slot;
     s_retained_frame.valid = true;
   }
-  PresentFrame(
-      &slot,
-      game_tick ? &s_previous_scroll : NULL,
-      game_tick ? &s_previous_action_obj : NULL,
-      game_tick ? alpha : kInterpPhaseNone,
-      HostDisplay_FramesPerSecond());
-  if (game_tick) {
-    FrameSlot_ExtractScrollSnapshot(&slot, &s_previous_scroll);
-    s_previous_action_obj = slot.action_obj_interpolation;
-  }
+  PresentFrame(&slot,
+               game_tick ? alpha : kPresentationFrameGenerationPhaseNone,
+               HostDisplay_FramesPerSecond());
 
   const uint64_t vsync_start_ms =
       performance_enabled ? SDL_GetTicks() : 0;
@@ -545,22 +596,15 @@ bool HostDisplay_TryRepresentFrame(float alpha,
                                    bool diorama_frame_active,
                                    bool interpolation_enabled,
                                    bool redraw_pending) {
-  const bool uncapped_profile =
-      g_settings.refresh_mode == kRefreshMode_Uncapped;
-  const bool pair_interpolable = s_retained_frame.valid &&
-      DioramaScrollPairIsInterpolable(
-          &s_retained_frame.slot, &s_retained_frame.previous_scroll);
+  const bool use_interpolation =
+      diorama_frame_active && interpolation_enabled;
   if (!s_retained_frame.valid || !g_renderer || !g_texture ||
       !HostDisplayPacing_ShouldRepresentFrame(
-          (RefreshMode)g_settings.refresh_mode, diorama_frame_active,
-          interpolation_enabled, pair_interpolable, redraw_pending)) {
+          (RefreshMode)g_settings.refresh_mode, redraw_pending)) {
     return false;
   }
 
-  if (!uncapped_profile) {
-    SDL_assert(
-        s_retained_frame.previous_scroll.timestamp_ns <
-        s_retained_frame.slot.timestamp_ns);
+  if (use_interpolation) {
     SDL_assert(s_retained_frame.slot.diorama_active);
     SDL_assert(alpha >= 0.0f && alpha < 1.0f);
   }
@@ -573,19 +617,24 @@ bool HostDisplay_TryRepresentFrame(float alpha,
     return false;
   }
 
+  const bool performance_enabled = PresentPerformanceEnabled();
+  const uint64_t render_start_ms =
+      performance_enabled ? SDL_GetTicks() : 0;
   RefreshRetainedDioramaCamera(&s_retained_frame.slot);
-  if (uncapped_profile) RefreshRetainedSimCamera(&s_retained_frame.slot);
+  RefreshRetainedSimCamera(&s_retained_frame.slot);
 
-  PresentFrame(
-      &s_retained_frame.slot,
-      uncapped_profile ? NULL : &s_retained_frame.previous_scroll,
-      uncapped_profile ? NULL : &s_retained_frame.previous_action_obj,
-      uncapped_profile ? kInterpPhaseNone : alpha,
-      HostDisplay_FramesPerSecond());
+  PresentFrame(&s_retained_frame.slot,
+               use_interpolation
+                   ? alpha : kPresentationFrameGenerationPhaseNone,
+               HostDisplay_FramesPerSecond());
+  const uint64_t vsync_start_ms =
+      performance_enabled ? SDL_GetTicks() : 0;
   if (!CompletePresent(kHostDisplayPresent_GameTick)) return false;
   s_represent_count++;
-  if (!uncapped_profile && alpha > s_maximum_represent_alpha)
+  if (use_interpolation && alpha > s_maximum_represent_alpha)
     s_maximum_represent_alpha = alpha;
+  if (performance_enabled)
+    ReportPresentPerformance(render_start_ms, vsync_start_ms);
   return true;
 }
 

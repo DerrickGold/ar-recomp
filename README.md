@@ -232,7 +232,11 @@ banks that you descend through as the Palace drops toward a town.
 An SDL GPU renderer backend adds per-effect polish to the diorama: **rim
 lighting** on sprite silhouettes, **depth of field** blurring layers by
 distance, and **edge anti-aliasing** on the tilted layer edges. Soft shadow blur
-and scroll interpolation are present but ship off by default with known issues.
+ships off by default with a known transparency-bleed issue. Optional frame
+interpolation now works from consecutive captured image planes, filling
+high-refresh presents without changing the game's 60 Hz logic. An explicit
+30-to-60 Hz slow-motion source mode makes generated midpoints easy to inspect
+on a 60 Hz display without pretending SDL can request fractional Vsync.
 
 ![A diorama scene with GPU effects off on the left and rim lighting plus depth of field on the right](/assets/shader-comparison.png)
 
@@ -280,7 +284,7 @@ live and are written back to `settings.ini` atomically.
 | **Camera on the stick** | Right stick orbits, triggers zoom, R3 recentres — with sensitivity, deadzone, and invert-Y, integrated over real elapsed time so orbit speed is frame-rate independent. |
 | **Save states** | `F5` / `F7`, or bind them to the pad. |
 | **Turbo** | `T` fast-forwards at 8 game frames per rendered frame (2–64, configurable). |
-| **Render scale & refresh** | Internal render scale 1×–8× downsampled to the window; vsync, uncapped, or a chosen FPS cap; windowed, borderless, or exclusive fullscreen. |
+| **Render scale & refresh** | Internal render scale 1×–8× downsampled to the window; renderer-paced VSync, display-relative Uncapped, a chosen FPS limit, or genuinely unthrottled Unlimited presentation; windowed, borderless, or exclusive fullscreen. |
 | **Independent HUD & menu scaling** | Scale the promoted widescreen HUD and the settings menu separately from the game framebuffer, 25–400% and 100–800%. |
 | **Save editor** | Inspect and stage battery-save edits in-game behind an explicit safety switch: town states, unlocks, levels, magic, items, scores. Backs up, checksums, and supports lossless INI import/export. |
 | **Bridge-free structure limit** | Optional fix: completed bridges stop consuming a town's 128-structure population cap, migrating to spare save space while keeping their tiles, crossing, and 32-person support. Retroactive on existing towns. |

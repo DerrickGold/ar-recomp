@@ -9,6 +9,7 @@
 #include "constants.h"
 #include "diorama/diorama_layer_editor.h"
 #include "action/action_bg_tuner.h"
+#include "host/host_display_status.h"
 #include "input_map.h"
 #include "presentation_geometry.h"
 #include "quintet_lzss.h"
@@ -3436,7 +3437,7 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
           mode < (int)(sizeof(short_modes) / sizeof(short_modes[0])))
         snprintf(value, sizeof(value), "%s", short_modes[mode]);
     }
-    /* Vsync locks to the display, so name the display's actual refresh rate
+    /* Vsync delegates to the renderer, so name the display's nominal rate
      * rather than the bare word "Vsync". Purely display-side (the saved value
      * stays the plain enum label). Unknown Hz falls back to "Vsync".
      *
@@ -3446,10 +3447,10 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
      * renderer is tearing would be a lie the player cannot debug. */
     if (desc->field == &g_settings.refresh_mode &&
         g_settings.refresh_mode == kRefreshMode_Vsync) {
-      if (!Settings_HostVsyncActive()) {
+      if (!HostDisplayStatus_VsyncActive()) {
         snprintf(value, sizeof(value), "Vsync (unavailable)");
       } else {
-        int hz = Settings_HostRefreshHz();
+        int hz = HostDisplayStatus_NominalRefreshHz();
         if (hz > 0)
           snprintf(value, sizeof(value), "Vsync %dHz", hz);
       }

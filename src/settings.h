@@ -51,17 +51,29 @@ typedef enum {
   kWindowMode_Count,
 } WindowMode;
 
-/* Present pacing. Vsync locks to the display; Unlimited disables vsync and
- * uses a soft 2x detected-refresh cap; Limit paces to frame_limit_fps;
- * Uncapped disables both vsync and host presentation throttling for profiling.
- * Append new modes so persisted numeric values retain their meaning. */
+/* Present pacing. Vsync delegates cadence to the renderer; Uncapped disables
+ * vsync but uses a soft 2x nominal-refresh presentation cap; Limit paces to
+ * frame_limit_fps; Unlimited disables both vsync and host throttling. The
+ * numeric values preserve the original policies while the two misleading
+ * labels are swapped: persisted numeric values must retain their behavior. */
 typedef enum {
   kRefreshMode_Vsync = 0,
-  kRefreshMode_Unlimited,
-  kRefreshMode_Limit,
   kRefreshMode_Uncapped,
+  kRefreshMode_Limit,
+  kRefreshMode_Unlimited,
   kRefreshMode_Count,
 } RefreshMode;
+
+/* Diagnostic source cadence for captured-plane frame generation. Native keeps
+ * authentic 60 Hz gameplay. Test30 deliberately runs Diorama logic in slow
+ * motion at 30 Hz while presentation remains independently paced, providing a
+ * known midpoint on a 60 Hz display without asking SDL for unsupported
+ * fractional-vsync behavior. */
+typedef enum {
+  kInterpolationSource_Native = 0,
+  kInterpolationSource_Test30,
+  kInterpolationSource_Count,
+} InterpolationSourceRate;
 
 /* Host audio-rate presets. The stored value is the stable menu/config enum;
  * Settings_AudioFrequencyHz translates it for SDL device creation. Auto
@@ -536,21 +548,22 @@ typedef struct Settings {
    * opening. Independent toggle so each can be A/B'd alone. */
   bool diorama_shoebox;
 
-  /* Graphics (kSettingCat_Graphics, M8/M7 GPU shader + interpolation work).
+  /* Graphics (kSettingCat_Graphics, GPU effects + frame generation).
    * gpu_shaders_enabled is retained as a config migration mirror; main.c
    * requires SDL's GPU renderer and forces it true. The per-effect toggles
    * below remain live and independent. gpu_fx_shadow defaults OFF:
    * a known visual bug (shadow blur can bleed onto transparent gaps in a
    * receiving layer) keeps it opt-in until fixed — see diorama.c.
-   * gpu_interp_enabled also defaults OFF. It owns the delayed camera pair and
-   * the action-mode vector OBJ proof of concept; invalid OBJ decompositions
-   * fail closed to the established whole-plane renderer. */
+   * gpu_interp_enabled also defaults OFF. It owns presentation-only frame
+   * generation; invalid or discontinuous pairs fail closed to the ordinary
+   * captured-plane renderer. */
   bool gpu_shaders_enabled;
   bool gpu_fx_rim;
   bool gpu_fx_dof;
   bool gpu_fx_edgeaa;
   bool gpu_fx_shadow;
   bool gpu_interp_enabled;
+  int gpu_interp_source_rate;  /* InterpolationSourceRate */
 
   /* CRT post-process (kSettingCat_Crt, the Video > CRT tab).
    *
@@ -575,7 +588,7 @@ typedef struct Settings {
   int crt_bandwidth_x100;    /* horizontal signal smear, in SOURCE pixels    */
   int crt_vignette_x100;     /* corner falloff                               */
   int crt_brightness_x100;   /* lifts the darkening mask+scanlines cause     */
-  /* Load-only compatibility alias for refresh_mode == Unlimited. */
+  /* Load-only compatibility alias for refresh_mode == Uncapped. */
   bool uncapped_framerate;
 
   /* Input mapping. The dimensions mirror input_map.h's InputClass /
@@ -690,18 +703,6 @@ int Settings_AudioFrequencyHz(void);
  * decoded and uploaded. The host publishes that resource state after load. */
 void Settings_SetHdReplacementsAvailable(bool available);
 bool Settings_HdReplacementsAvailable(void);
-
-/* The host display's detected refresh rate in whole Hz (0 = unknown). main.c
- * pushes it from SDL at boot and whenever the window's display/mode changes;
- * the overlay shows it next to the Vsync refresh option so "Vsync" is not a
- * blind label. Purely informational — it drives no behavior. */
-void Settings_SetHostRefreshHz(int hz);
-int Settings_HostRefreshHz(void);
-
-/* Whether vsync is actually active on the renderer (read back from SDL, not
- * merely requested — SDL_SetRenderVSync can be rejected by a backend). */
-void Settings_SetHostVsyncActive(bool active);
-bool Settings_HostVsyncActive(void);
 
 /* Backing pixels per window point for the window's current display
  * (SDL_GetWindowPixelDensity), pushed from main.c. */

@@ -21,7 +21,6 @@
 #include "action/action_effect_clock.h"
 #include "action/action_effects.h"
 #include "action/action_bg_tuner.h"
-#include "action/action_obj_interpolation.h"
 #include "actraiser_game.h"
 #include "constants.h"
 #include "actraiser_rtl.h"
@@ -314,8 +313,8 @@ void FrameSlot_Capture(FrameSlot *dst) {
     }
     last_emulated_tick = snes_frame_counter;
   }
-  /* R17/C3: publish it. Present-time interpolation needs the TRUE period of
-   * the prev->curr pair, not an assumed single tick: the main loop's drain
+  /* Publish the TRUE period of the image pair, not an assumed single tick:
+   * the main loop's drain
    * runs up to kMaxCatchupFrames ticks in one iteration while the snapshot
    * advances once per present. The delayed phase uses this to start exactly
    * one tick behind curr. Same clamped value the reactive-camera statistics
@@ -505,7 +504,7 @@ void FrameSlot_Capture(FrameSlot *dst) {
     dst->diorama_plane_additive_mask = CaptureDioramaAdditivePlaneMask();
   }
 
-  /* M7/§6.1: scroll snapshot for present-time interpolation. */
+  /* Pair timestamp and feature gates for presentation-time frame generation. */
   dst->timestamp_ns = SDL_GetTicksNS();
   dst->turbo_active = g_turbo != 0;
   dst->interp_setting_enabled = g_settings.gpu_interp_enabled;
@@ -564,11 +563,8 @@ void FrameSlot_Capture(FrameSlot *dst) {
   CaptureSimDynamicCamera(
       dst, ActRaiser_IsSimulationTown(g_ram[kActRaiserWram_MapGroup],
                                       g_ram[kActRaiserWram_CurrentMap]));
-  /* B1b (followup doc): the stable game-authored camera in WRAM, read
-   * BEFORE HDMA touches the PPU scroll registers — see the long comment on
-   * FrameSlot's timestamp_ns field (present.h) for why this replaced
-   * g_ppu->hScroll[]/vScroll[]. g_ram is always valid (no g_ppu dependency,
-   * unlike the PPU-register read this replaces). */
+  /* Stable game-authored camera coordinates used by action effect projection.
+   * Read before HDMA mutates the PPU scroll registers. */
   dst->bg1_camera_x = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraX);
   dst->bg1_camera_y = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY);
   dst->bg2_camera_x = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg2CameraX);
@@ -611,10 +607,8 @@ void FrameSlot_Capture(FrameSlot *dst) {
         (g_ppu->overlayCaptures[kPpuOverlaySource_Bg2].flags &
          kPpuOverlayFlag_MarkMainScreenWinner) != 0 &&
         PpuOverlaySurfaceHasContent(g_ppu, kPpuOverlaySource_Bg2, 0);
-    /* IJ1: this one is load-bearing arithmetic, not just a layout mirror — it
-     * is the denominator that normalizes every U-axis offset into the layer
-     * textures. Dividing by snes_width instead cost 1.75x too much horizontal
-     * interpolation shift. */
+    /* These mirrors are load-bearing allocation contracts shared by capture,
+     * frame generation, and the compositor. */
     _Static_assert(kFrameSlotLayerTextureWidth == kPpuSurfaceWidth,
                    "present.h's mirrored layer texture width must match ppu.h");
     _Static_assert(kFrameSlotLayerTextureHeight == kPpuBufHeight,
@@ -646,27 +640,6 @@ void FrameSlot_Capture(FrameSlot *dst) {
       memcpy(dst->oam, g_ppu->oam, sizeof(dst->oam));
       memcpy(dst->high_oam, g_ppu->highOam, sizeof(dst->high_oam));
       dst->oam_valid = true;
-    }
-
-    if (dst->diorama_active && dst->interp_setting_enabled &&
-        g_ppu->overlayCaptures[kPpuOverlaySource_Obj].oamCount == 128) {
-      const uint8_t *obj_planes[4] = {0};
-      uint8_t obj_content = 0;
-      for (unsigned priority = 0; priority < 4; priority++) {
-        const int plane = DioramaPlaneForObjectPriority(priority);
-        obj_planes[priority] = g_diorama_layer_pixels[plane];
-        if (dst->diorama_plane_content_mask & (1u << (unsigned)plane))
-          obj_content |= (uint8_t)(1u << priority);
-      }
-      const uint8_t excluded_count =
-          dst->diorama_hud_flat ? dst->hud_icon_count : 0;
-      ActionObjInterpolation_BuildFrame(
-          g_ppu, &dst->action_obj_interpolation,
-          obj_planes, obj_content,
-          dst->snes_width + dst->obj_apron * 2,
-          dst->snes_height + dst->ws_extra_top + dst->ws_extra_bottom,
-          dst->ws_extra + dst->obj_apron, dst->ws_extra_top,
-          dst->hud_icon_first, excluded_count, dst->timestamp_ns);
     }
 
     dst->m7_active = (g_ppu->m7Override.rgba != NULL);

@@ -46,19 +46,23 @@ void HostDisplay_ApplyWindowScale(void);
 
 void HostDisplay_ApplyWindowMode(void);
 void HostDisplay_UpdateProperties(void);
-void HostDisplay_PollProperties(void);
+void HostDisplay_WindowDisplayChanged(void);
+void HostDisplay_WindowDisplayScaleChanged(void);
+void HostDisplay_DisplayModeChanged(uint32_t display_id);
+void HostDisplay_DisplayRemoved(uint32_t display_id);
 void HostDisplay_ApplyRefreshVsync(void);
 void HostDisplay_DisableVsync(void);
 bool HostDisplay_WindowPointToOutput(int window_x, int window_y,
                                     int *output_x, int *output_y);
 
-uint64_t HostDisplay_CatchupCapNs(int maximum_catchup_frames);
+uint64_t HostDisplay_CatchupCapNs(uint64_t emulation_frame_interval_ns,
+                                  int maximum_catchup_frames);
 
 void HostDisplay_InvalidatePresentHistory(void);
 bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha);
-/* Recompose the retained frame between emulation ticks for visual
- * interpolation, or continuously when Refresh rate is explicitly Uncapped so
- * the FPS counter can measure renderer throughput. */
+/* Recompose the retained frame between emulation ticks at the selected host
+ * cadence. Visual interpolation is optional: with it disabled, the exact
+ * retained tick is presented while host-owned camera/effect time can advance. */
 bool HostDisplay_TryRepresentFrame(float alpha,
                                    bool diorama_frame_active,
                                    bool interpolation_enabled,

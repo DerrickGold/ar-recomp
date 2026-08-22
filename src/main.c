@@ -32,8 +32,9 @@
 #include "input_map.h"
 #include "dev/scene_inspector.h"
 #include "diorama/diorama.h"
+#include "diorama/diorama_frame_generation.h"
 #include "diorama/diorama_performance.h"
-#include "diorama/diorama_scroll_math.h"  /* kInterpPhaseNone */
+#include "presentation_frame_generation.h"
 #include "forced_input.h"
 #include "save_system.h"
 #include "hd_replacement_host.h"
@@ -55,6 +56,7 @@
 #include "host/host_audio.h"
 #include "dev/host_dev_tools.h"
 #include "host/host_display.h"
+#include "host/host_display_pacing.h"
 #include "host/host_input.h"
 #include "manual/manual_reader.h"
 #include "ini_upgrade_apply.h"
@@ -368,7 +370,8 @@ static void RunOneEmulatedTick(bool *stop_running) {
  * produced_frame).
  *
  * alpha (R17/C4): the sub-tick phase, forwarded to the present. Both headless
- * modes pass kInterpPhaseNone and retain one-tick-per-iteration cadence (§3.6):
+ * modes pass kPresentationFrameGenerationPhaseNone and retain
+ * one-tick-per-iteration cadence (§3.6):
  * pure headless skips submission, while headless-video submits that tick to
  * its unpaced hidden compositor. */
 static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
@@ -530,16 +533,11 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
 
 /* Host-side work that follows one or more completed emulation ticks. Catch-up
  * still coalesces it to one pass, but retained-frame redraws do not run it:
- * explicit Uncapped profiling may execute those redraws thousands of times per
- * second, and multiplying SRAM scans or host/APU policy checks by presentation
- * throughput both wastes work and contaminates the rendering measurement. */
+ * host presentation can outpace emulation (dramatically in Unlimited), and
+ * multiplying SRAM scans or host/APU policy checks by presentation throughput
+ * both wastes work and contaminates the rendering measurement. */
 static void RunPostTickHousekeeping(void) {
   extern uint8 g_ram[];
-  /* Re-read the display mode ~1/s. The mode-changed events are an
-   * optimization, not the source of truth: a compositor can change the
-   * effective refresh without emitting one (gamescope does so deliberately). */
-  HostDisplay_PollProperties();
-
   /* Surface audio-chunk drops the callback counted (R12). Reported here, off
    * the audio thread, and coalesced so a sustained problem cannot spam. */
   {
@@ -1109,7 +1107,8 @@ static int AppBoot_CreateVideo(AppBoot *app) {
     /* Apply the selected refresh policy after renderer creation. Hidden-video
      * automation requests vsync off and uses no host throttle; a platform
      * swapchain may still serialize SDL_RenderPresent at its own cadence.
-     * Interactive unlimited/limited modes use the host pacing path. */
+     * Interactive Limit/Uncapped modes use host deadlines; VSync delegates to
+     * SDL and Unlimited deliberately has no host throttle. */
     if (app->headless_video)
       HostDisplay_DisableVsync();
     else
@@ -1374,12 +1373,21 @@ static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
          * and a 1x monitor), which the pinned HUD/menu scale percentages are
          * corrected by — so refresh both together. */
         case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+          HostDisplay_WindowDisplayChanged();
+          HostInput_RequestPausedRedraw();
+          break;
         case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+          HostDisplay_WindowDisplayScaleChanged();
+          HostInput_RequestPausedRedraw();
+          break;
         case SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED:
         case SDL_EVENT_DISPLAY_DESKTOP_MODE_CHANGED:
         case SDL_EVENT_DISPLAY_ADDED:
+          HostDisplay_DisplayModeChanged(event.display.displayID);
+          HostInput_RequestPausedRedraw();
+          break;
         case SDL_EVENT_DISPLAY_REMOVED:
-          HostDisplay_UpdateProperties();
+          HostDisplay_DisplayRemoved(event.display.displayID);
           HostInput_RequestPausedRedraw();
           break;
         /* The window is the USER's: a drag-resize re-derives the picture inside
@@ -1817,10 +1825,9 @@ static void AppRunMainLoop(AppBoot *app) {
        * edit, a resize); it is not re-rendered per iteration. */
       HostInput_RedrawPausedFrameIfNeeded();
       /* Re-present unconditionally to keep the window alive while paused. The
-       * present is paced by HostDisplay_SubmitFrame's host-UI
-       * interval (menu: panel rate; plain pause: idle keep-alive rate).
-       * game_tick=false (R16): no tick ran, so this must not feed M7's scroll
-       * history or its tick-span average. */
+       * present is paced by HostDisplay_SubmitFrame's selected host cadence.
+       * game_tick=false: no tick ran, so this must not capture a new image
+       * endpoint or advance pair timing. */
       bool presented = false;
       if (!app->headless && !g_window_hidden) {
         const HostDisplayPresentMode present_mode =
@@ -1828,13 +1835,12 @@ static void AppRunMainLoop(AppBoot *app) {
                 ? kHostDisplayPresent_Menu
                 : kHostDisplayPresent_Paused;
         presented = HostDisplay_SubmitFrame(
-            present_mode, kInterpPhaseNone);
+            present_mode, kPresentationFrameGenerationPhaseNone);
       }
-      /* Pacing comes from the present itself (vsync block, or the
-       * display-refresh UI throttle in HostDisplay_SubmitFrame), so this loop
-       * — and with it menu input polling and repaints — runs at the
-       * panel's native rate, whatever it is. The fixed sleep remains only
-       * as the anti-spin fallback when nothing presents (hidden window,
+      /* Pacing comes from the present itself (vsync block or the selected
+       * software throttle in HostDisplay_SubmitFrame), so menu input polling
+       * and repaints follow Refresh rate too. The fixed sleep remains only as
+       * the anti-spin fallback when nothing presents (hidden window,
        * headless). */
       if (!presented) SDL_Delay(emulation_frame_interval_ms);
       last_time_ns = SDL_GetTicksNS();
@@ -1849,7 +1855,8 @@ static void AppRunMainLoop(AppBoot *app) {
        * the CPU allows. */
       RunOneEmulatedTick(&running);
       RunPostTickHousekeeping();
-      DrawAndPresentFrame(emulated_frame_present_mode, kInterpPhaseNone);
+      DrawAndPresentFrame(emulated_frame_present_mode,
+                          kPresentationFrameGenerationPhaseNone);
 
       if (DevTools_ShouldAutoQuit()) running = false;
       /* AR_PACE=1: throttle headless to ~60fps so the emulated SPC (advanced
@@ -1874,6 +1881,12 @@ static void AppRunMainLoop(AppBoot *app) {
      * HostDisplay_SubmitFrame owns the present wait, and this wall-clock
      * accumulator owns the emulated tick rate independently. */
     {
+      const uint64_t emulation_frame_interval_ns =
+          HostDisplayPacing_SourceFrameIntervalNs(
+              kHostDisplayEmulationFrameIntervalNs,
+              Diorama_IsActiveThisFrame(),
+              g_settings.gpu_interp_enabled,
+              (InterpolationSourceRate)g_settings.gpu_interp_source_rate);
       uint64_t now_ns = SDL_GetTicksNS();
       uint64_t dt = now_ns - last_time_ns;
       last_time_ns = now_ns;
@@ -1885,16 +1898,17 @@ static void AppRunMainLoop(AppBoot *app) {
        * slowing the game (~58.3Hz at Limit=25; exactly 60.000Hz at 20 — the
        * audio-drift rate the emulation interval protects). Allow one limit
        * interval + one tick so the intentional sleep always banks; genuine
-       * hitches beyond that still clamp. Vsync/Unlimited intervals are far
-       * below the base cap, so behavior there is unchanged. */
+       * hitches beyond that still clamp. No other presentation mode contributes
+       * headroom to this emulation-side safety bound. */
       const uint64_t catchup_cap_ns =
-          HostDisplay_CatchupCapNs(kMaxCatchupFrames);
+          HostDisplay_CatchupCapNs(
+              emulation_frame_interval_ns, kMaxCatchupFrames);
       if (accumulator > catchup_cap_ns) accumulator = catchup_cap_ns;
 
       bool produced_frame = false;
-      while (accumulator >= kHostDisplayEmulationFrameIntervalNs) {
+      while (accumulator >= emulation_frame_interval_ns) {
         RunOneEmulatedTick(&running);
-        accumulator -= kHostDisplayEmulationFrameIntervalNs;
+        accumulator -= emulation_frame_interval_ns;
         produced_frame = true;
       }
       if (DevTools_ShouldAutoQuit()) running = false;
@@ -1906,10 +1920,10 @@ static void AppRunMainLoop(AppBoot *app) {
        * exact, and it cannot be corrupted by presents because presents do not
        * write the accumulator. The drain loop's own exit condition guarantees
        * the range. */
-      SDL_assert(accumulator < kHostDisplayEmulationFrameIntervalNs);
+      SDL_assert(accumulator < emulation_frame_interval_ns);
       const float alpha =
           (float)accumulator /
-          (float)kHostDisplayEmulationFrameIntervalNs;
+          (float)emulation_frame_interval_ns;
 
       if (produced_frame) RunPostTickHousekeeping();
 
@@ -1923,17 +1937,14 @@ static void AppRunMainLoop(AppBoot *app) {
        * per capture, the phase was always ~0, so the feature could not do
        * anything at all.
        *
-       * Between ticks the game state has not changed, so there is nothing to
-       * re-capture — but the PHASE has advanced, so re-compositing the retained
-       * slot at the new phase is real new output. Pacing still comes solely from
-       * the shared deadline, so the Refresh-rate setting keeps meaning exactly
-       * what it says.
-       *
-       * Gated on the pair being interpolable, using the SAME predicate the math
-       * uses (C4), and on LIVE diorama/setting state rather than the retained
-       * slot's copy — the slot is one tick stale by construction. Without the
-       * gate a re-present would spend a full composite to draw a
-       * byte-identical image. */
+       * Between ticks the emulated state has not changed, so there is nothing
+       * to re-capture. Re-compositing is still required at the selected host
+       * cadence: presentation-owned camera/effect time may have advanced, and
+       * the FPS counter promises completed host presents rather than emulation
+       * updates. Frame interpolation is a separate optional transformation of
+       * that retained tick; disabling it passes
+       * kPresentationFrameGenerationPhaseNone and must never
+       * collapse Vsync/Uncapped/Limit/Unlimited presentation back to ~60 Hz. */
       bool presented = false;
       if (!g_window_hidden) {
         if (produced_frame) {
@@ -1948,8 +1959,8 @@ static void AppRunMainLoop(AppBoot *app) {
         }
       }
       /* INVARIANT: every iteration either presents (normally blocking on vsync
-       * or a guaranteed-nonzero throttle; explicit Uncapped profiling is the
-       * opt-in exception) or yields. One unconditional
+       * or a guaranteed-nonzero throttle; explicit Unlimited presentation is
+       * the opt-in exception) or yields. One unconditional
        * line, not a property of the branch structure above — four independent
        * reviewers found this exact hole in an earlier draft where the sleep was
        * attached to the hidden-window arm, and "the code happens to fall through
@@ -2005,6 +2016,7 @@ static int AppShutdown(AppBoot *app, char **argv) {
   HostAudio_Shutdown();
   HdReplacementHost_Shutdown();
   PresentRendererResources_Reset();
+  DioramaFrameGeneration_Shutdown();
   Diorama_Shutdown(g_renderer);
   DestroyDioramaTextures();
   SDL_DestroyTexture(g_sim_obj_atlas_texture);

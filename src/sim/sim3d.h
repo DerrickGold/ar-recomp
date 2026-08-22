@@ -81,7 +81,7 @@ bool Sim3DCamera_ControlsAvailable(bool textures_ready);
 
 /* Camera fields are host-owned presentation state rather than emulated scene
  * content. A retained game frame may refresh this small snapshot between ticks
- * so uncapped presentation follows mouse orbit immediately without recapturing
+ * so high-rate presentation follows mouse orbit immediately without recapturing
  * mutable PPU/WRAM state. */
 typedef struct Sim3DCameraPresentationState {
   int mode;

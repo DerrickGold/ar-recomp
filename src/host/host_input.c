@@ -96,7 +96,7 @@ void HostInput_RequestPausedRedraw(void) {
 /* Camera pose is presentation-owned and can refresh a retained live frame
  * without redrawing the emulated scene. Only frozen emulation needs the legacy
  * redraw request to produce a new retained frame immediately. Marking every
- * live mouse event as a content redraw suppresses uncapped re-presentation
+ * live mouse event as a content redraw suppresses retained re-presentation
  * until the next ~60 Hz tick, which makes the FPS counter collapse while the
  * camera is moving. */
 static void RequestCameraRedrawIfFrozen(void) {

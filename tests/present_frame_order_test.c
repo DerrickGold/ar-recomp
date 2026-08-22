@@ -14,8 +14,6 @@ SDL_Renderer *g_renderer = (SDL_Renderer *)(uintptr_t)1;
 static int s_failures;
 static int s_stage;
 static const FrameSlot *s_expected_slot;
-static const DioramaScrollSnapshot *s_expected_previous;
-static const ActionObjInterpolationFrame *s_expected_previous_action_obj;
 static float s_expected_alpha;
 static double s_expected_presentation_fps;
 static const SDL_Rect kFallback = { 160, 0, 960, 720 };
@@ -50,14 +48,9 @@ bool CrtPost_Begin(SDL_Renderer *renderer) {
   return true;
 }
 
-void PresentCompositeScene(const FrameSlot *slot,
-                           const DioramaScrollSnapshot *prev_scroll,
-                           const ActionObjInterpolationFrame *prev_action_obj,
-                           float alpha) {
+void PresentCompositeScene(const FrameSlot *slot, float alpha) {
   CHECK(s_stage++ == 2);
   CHECK(slot == s_expected_slot);
-  CHECK(prev_scroll == s_expected_previous);
-  CHECK(prev_action_obj == s_expected_previous_action_obj);
   CHECK(alpha == s_expected_alpha);
 }
 
@@ -89,17 +82,12 @@ int main(void) {
   slot.pixel_aspect = 7;
   slot.visible_width = 256;
   slot.snes_height = 224;
-  DioramaScrollSnapshot previous = {0};
-  ActionObjInterpolationFrame previous_action_obj = {0};
   s_expected_slot = &slot;
-  s_expected_previous = &previous;
-  s_expected_previous_action_obj = &previous_action_obj;
   s_expected_alpha = 0.375f;
   s_expected_presentation_fps = 144.25;
 
   SDL_Rect resolved = PresentFrame(
-      &slot, &previous, &previous_action_obj, s_expected_alpha,
-      s_expected_presentation_fps);
+      &slot, s_expected_alpha, s_expected_presentation_fps);
   CHECK(s_stage == 5);
   CHECK(SDL_RectsEqual(&resolved, &kResolved));
 

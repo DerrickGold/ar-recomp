@@ -25,7 +25,6 @@
 #include "sim_render_atlas.h"
 #include "sim_render_metadata.h"
 #include "sim_world_navigation_capture.h"
-#include "action/action_obj_interpolation.h"
 
 /* main.c owns this global; the PPU line renderer reads it to pick new/old path. */
 bool g_new_ppu = false;
@@ -579,109 +578,6 @@ static void TestObjRangeRaster(void) {
   CHECK(PpuRasterizeObjRange(ppu, 3, 1, 0, &bounds, pixels, 8, 8,
                              8 * sizeof(uint32_t)));
   CHECK(pixels[7 * 8 + 6] == 0xffff0000u && pixels[1] == 0);
-
-  ppu_free(ppu);
-}
-
-static void TestActionObjInterpolationAtlas(void) {
-  enum { kSurfaceWidth = 32, kSurfaceHeight = 32 };
-  Ppu *ppu = ppu_init();
-  CHECK(ppu != NULL);
-  if (!ppu) return;
-  ppu_reset(ppu);
-  ppu->inidisp = 0x0f;
-  ppu->obsel = 0;
-  ppu->cgram[0x81] = bgr555(31, 0, 0);
-  set_solid_4bpp_tile(ppu, 0, 1);
-
-  /* Keep every unrelated slot outside the test surface. */
-  for (int slot = 0; slot < 128; slot++) {
-    ppu->oam[slot * 2] = 128 | (224 << 8);
-    ppu->oam[slot * 2 + 1] = 0;
-  }
-  ppu->oam[0] = 4 | (4 << 8);
-  ppu->oam[1] = 2 << 12;
-  CHECK(PpuSetOverlayCapture(
-      ppu, kPpuOverlaySource_Obj, 0, 0,
-      kSurfaceWidth, kSurfaceHeight, kPpuOverlayFlag_RemoveFromGame));
-
-  PpuObjPart resolved;
-  CHECK(PpuResolveObjSlot(ppu, 0, &resolved));
-  CHECK(resolved.x == 4 && resolved.y == 4 && resolved.size == 8);
-  CHECK(((resolved.tile_attr >> 12) & 3) == 2);
-
-  static uint32_t plane_storage[4][kSurfaceWidth * kSurfaceHeight];
-  memset(plane_storage, 0, sizeof(plane_storage));
-  PpuObjRangeBounds bounds = {4, 4, 12, 12};
-  uint32_t sprite[8 * 8];
-  CHECK(PpuRasterizeParts(
-      ppu, &resolved, 1, &bounds, sprite, 8, 8,
-      8 * sizeof(uint32_t)));
-  for (int y = 0; y < 8; y++)
-    memcpy(&plane_storage[2][(y + 4) * kSurfaceWidth + 4],
-           &sprite[y * 8], 8 * sizeof(uint32_t));
-  const uint8_t *planes[4] = {
-    (const uint8_t *)plane_storage[0],
-    (const uint8_t *)plane_storage[1],
-    (const uint8_t *)plane_storage[2],
-    (const uint8_t *)plane_storage[3],
-  };
-
-  ActionObjInterpolation_BeginFrame(true);
-  ActionObjInterpolation_RecordOamPart(
-      0, 0x1200, 0x3456, 3, 2);
-  ActionObjInterpolationFrame frame;
-  CHECK(ActionObjInterpolation_BuildFrame(
-      ppu, &frame, planes, 1u << 2,
-      kSurfaceWidth, kSurfaceHeight, 0, 0,
-      0, 0, 99));
-  CHECK(frame.valid && frame.timestamp_ns == 99);
-  CHECK(frame.part_count == 1);
-  CHECK(frame.parts[0].object_address == 0x1200);
-  CHECK(frame.parts[0].object_signature == 0x3456);
-  CHECK(frame.parts[0].anchor_x == 3 && frame.parts[0].anchor_y == 2);
-  CHECK(g_action_obj_interpolation_atlas_pixels[
-            (size_t)frame.parts[0].atlas_y *
-                kActionObjInterpolationAtlasWidth +
-            frame.parts[0].atlas_x] == 0xffff0000u);
-
-  /* Both components of one object inherit exactly the same fractional anchor
-   * displacement while retaining their current local spacing/artwork. */
-  ActionObjInterpolationFrame previous = {.valid = true, .part_count = 1};
-  previous.parts[0] = (ActionObjInterpolationPart){
-    .object_address = 0x1200, .object_signature = 0x3456,
-    .anchor_x = 3, .anchor_y = 2,
-  };
-  ActionObjInterpolationPart current = {
-    .x = 20, .y = 12,
-    .object_address = 0x1200, .object_signature = 0x3456,
-    .anchor_x = 13, .anchor_y = 6,
-  };
-  float x = 0.0f, y = 0.0f;
-  ActionObjInterpolation_PartPosition(
-      &previous, &current, 0.5f, 64, &x, &y);
-  CHECK(x == 15.0f && y == 10.0f);
-  current.x = 36;
-  ActionObjInterpolation_PartPosition(
-      &previous, &current, 0.5f, 64, &x, &y);
-  CHECK(x == 31.0f && y == 10.0f);  /* current 16px spacing is rigid */
-  current.object_signature++;
-  ActionObjInterpolation_PartPosition(
-      &previous, &current, 0.5f, 64, &x, &y);
-  CHECK(x == 36.0f && y == 12.0f);  /* reused record snaps */
-  current.object_signature--;
-  current.anchor_x = 100;
-  ActionObjInterpolation_PartPosition(
-      &previous, &current, 0.5f, 64, &x, &y);
-  CHECK(x == 36.0f && y == 12.0f);  /* teleport snaps */
-
-  /* A captured pixel no resolved part can own must fail the frame closed. */
-  plane_storage[2][20 * kSurfaceWidth + 20] = 0xff00ff00u;
-  CHECK(!ActionObjInterpolation_BuildFrame(
-      ppu, &frame, planes, 1u << 2,
-      kSurfaceWidth, kSurfaceHeight, 0, 0,
-      0, 0, 100));
-  CHECK(!frame.valid && frame.part_count == 0);
 
   ppu_free(ppu);
 }
@@ -2421,7 +2317,6 @@ static void TestCapturedPaddingReachesBudget(void) {
 int main(void) {
   TestWorldNavigationPartialBrightnessCapture();
   TestObjRangeRaster();
-  TestActionObjInterpolationAtlas();
   TestObjRangeScanoutCapture();
   TestSemanticAtlasPacking();
   TestSim3DFlatComposition();
