@@ -72,6 +72,14 @@ The stable two-background scene milestone is implemented:
   before each visible line, preserving HDMA timing in the oracle. It reports
   the first mismatch and never changes gameplay, provider eligibility, or PPU
   state.
+- The live comparator and production provider own separate `ActionBgWorld`
+  caches. This is required when `AR_ACTION_ROOM_SCENE_HLE=1` and both compare
+  gates are enabled together: the observer runs after provider binding but
+  before scanout, so sharing a cache would replace the immutable publication
+  with live WRAM, decode both sources every frame, and flood successful
+  full-world reports. A ROM-free regression mutates WRAM after binding and
+  proves that the retained provider snapshot remains unchanged and that stable
+  redraws publish neither cache again.
 - ROM-free tests pin inheritance, profile priority, tile lookup, phase/page
   resolution, every raster preset, native compositor priority/colour-math
   cases, full-world and frame-register match/mismatch behavior, and failure on
@@ -88,6 +96,23 @@ acceptance work is fixture coverage for the boss/transition-only R1, R4, R7,
 R8, and R10 callbacks, not missing builder logic. BG3 HUD, real OBJ streams,
 fades, and gameplay-object-driven window timelines remain outside this
 standalone background contract by design.
+
+A natural Fillmore route in `runs/20260822-134834/` covered 6,227 action frames
+and four room-scene loads with zero load failure, provider fallback, tile
+mismatch, finite-edge failure, or raster-register mismatch. Its combined
+diagnostic gates compared 396,087,296 full-world tiles before exposing the
+shared-cache performance defect described above. Because every immutable/live
+comparison was exact, the route remains parity evidence; the isolated-cache
+regression closes the provider-ownership and performance defect without
+requiring another complete playthrough.
+
+Post-fix bounded acceptance run `runs/20260822-140544/` enabled the immutable
+provider and both comparators for 1,193 frames. It recorded four total world
+publications, exactly two full-world comparisons (one per BG, 81,920 tiles),
+and two success lines; 2,370 provider/observer layer-frames and 1,337,865
+raster registers remained exact with zero fallback. This is the intended
+steady-state cost instead of republishing and re-reporting every layer on every
+frame.
 
 The production handoff is intentionally incremental. The first slice changes
 where the renderer obtains complete finite BG tile words; it does not skip the

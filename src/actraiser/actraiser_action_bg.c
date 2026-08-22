@@ -18,10 +18,13 @@ enum {
 };
 
 typedef struct ActRaiserActionBgObserver {
-  ActionBgWorld *world[kActionBgLayerCount];
+  ActionBgWorld *provider_world[kActionBgLayerCount];
+  ActionBgWorld *comparison_world[kActionBgLayerCount];
   ActRaiserActionBgDiagnostics diagnostics;
-  uint32_t reported_mismatch_serial[kActionBgLayerCount];
-  uint32_t reported_outside_serial[kActionBgLayerCount];
+  uint32_t provider_reported_mismatch_serial[kActionBgLayerCount];
+  uint32_t provider_reported_outside_serial[kActionBgLayerCount];
+  uint32_t comparison_reported_mismatch_serial[kActionBgLayerCount];
+  uint32_t comparison_reported_outside_serial[kActionBgLayerCount];
   uint32_t room_scene_compared_serial[kActionBgLayerCount];
   const uint8_t *rom;
   size_t rom_size;
@@ -429,9 +432,12 @@ bool ActRaiserActionBg_InitRoomScenes(const uint8_t *rom, size_t rom_size) {
 
 static void ResetWorlds(void) {
   for (unsigned layer = 0; layer < kActionBgLayerCount; layer++) {
-    ActionBgWorld_Reset(s_observer.world[layer]);
-    s_observer.reported_mismatch_serial[layer] = 0;
-    s_observer.reported_outside_serial[layer] = 0;
+    ActionBgWorld_Reset(s_observer.provider_world[layer]);
+    ActionBgWorld_Reset(s_observer.comparison_world[layer]);
+    s_observer.provider_reported_mismatch_serial[layer] = 0;
+    s_observer.provider_reported_outside_serial[layer] = 0;
+    s_observer.comparison_reported_mismatch_serial[layer] = 0;
+    s_observer.comparison_reported_outside_serial[layer] = 0;
     s_observer.room_scene_compared_serial[layer] = 0;
   }
   s_observer.room_scene_valid = false;
@@ -488,14 +494,15 @@ static void RecordProviderFallback(
     RecordFallback(reason, layer, map_group, map_number, snapshot);
 }
 
-static ActionBgWorld *WorldForLayer(unsigned layer, uint8_t map_group,
-                                    uint8_t map_number) {
-  if (s_observer.world[layer]) return s_observer.world[layer];
-  s_observer.world[layer] = ActionBgWorld_Create();
-  if (!s_observer.world[layer])
+static ActionBgWorld *WorldForLayer(
+    ActionBgWorld **worlds, unsigned layer,
+    uint8_t map_group, uint8_t map_number) {
+  if (worlds[layer]) return worlds[layer];
+  worlds[layer] = ActionBgWorld_Create();
+  if (!worlds[layer])
     RecordFallback(kActRaiserActionBgFallback_Allocation, layer,
                    map_group, map_number, NULL);
-  return s_observer.world[layer];
+  return worlds[layer];
 }
 
 static bool EnsureRoomScene(uint8_t map_group, uint8_t map_number) {
@@ -937,10 +944,12 @@ static bool ProviderBandLookup(const void *context, int32_t tile_x,
 static void ReportComparison(
     const uint8_t *wram, unsigned layer, uint8_t map_group,
     uint8_t map_number, const ActRaiserActionBgLayerSnapshot *snapshot,
-    uint32_t serial, const ActRaiserActionBgCompareResult *comparison) {
+    uint32_t serial, const ActRaiserActionBgCompareResult *comparison,
+    uint32_t *reported_outside_serial,
+    uint32_t *reported_mismatch_serial) {
   if (comparison->outside_world &&
-      s_observer.reported_outside_serial[layer] != serial) {
-    s_observer.reported_outside_serial[layer] = serial;
+      reported_outside_serial[layer] != serial) {
+    reported_outside_serial[layer] = serial;
     fprintf(stderr,
             "[action-bg-hle] finite-edge gf=%u map=%02X/%02X BG%u "
             "serial=%u count=%zu first=(%d,%d) camera=(%u,%u) "
@@ -954,8 +963,8 @@ static void ReportComparison(
             snapshot->decode.world_width, snapshot->decode.world_height);
   }
   if (comparison->mismatches &&
-      s_observer.reported_mismatch_serial[layer] != serial) {
-    s_observer.reported_mismatch_serial[layer] = serial;
+      reported_mismatch_serial[layer] != serial) {
+    reported_mismatch_serial[layer] = serial;
     fprintf(stderr,
             "[action-bg-hle] MISMATCH gf=%u map=%02X/%02X BG%u "
             "serial=%u count=%zu/%zu first=(%d,%d) "
@@ -1040,7 +1049,8 @@ uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
                              map_group, map_number, &snapshot);
       continue;
     }
-    ActionBgWorld *world = WorldForLayer(layer, map_group, map_number);
+    ActionBgWorld *world = WorldForLayer(
+        s_observer.provider_world, layer, map_group, map_number);
     if (!world) continue;
     const uint32_t before = ActionBgWorld_Serial(world);
     bool room_scene_source = false;
@@ -1092,8 +1102,10 @@ uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
         comparison.mismatches;
     s_observer.diagnostics.provider_preflight_outside_world +=
         comparison.outside_world;
-    ReportComparison(wram, layer, map_group, map_number, &snapshot, serial,
-                     &comparison);
+    ReportComparison(
+        wram, layer, map_group, map_number, &snapshot, serial, &comparison,
+        s_observer.provider_reported_outside_serial,
+        s_observer.provider_reported_mismatch_serial);
     if (comparison.outside_world) {
       RecordProviderFallback(kActRaiserActionBgFallback_AuthenticEdge, layer,
                              map_group, map_number, &snapshot);
@@ -1159,7 +1171,12 @@ static void ObserveLayer(const uint8_t *wram, size_t wram_size,
     return;
   }
 
-  ActionBgWorld *world = WorldForLayer(layer, map_group, map_number);
+  /* The observer must never publish through the provider's world. The PPU
+   * binding retains that object's address until scanout, so sharing it here
+   * would replace an immutable room-scene publication with live WRAM after
+   * preflight and force both sources to decode again on every frame. */
+  ActionBgWorld *world = WorldForLayer(
+      s_observer.comparison_world, layer, map_group, map_number);
   if (!world) return;
   const uint32_t before = ActionBgWorld_Serial(world);
   if (!ActionBgWorld_Update(world, &snapshot.decode)) {
@@ -1184,8 +1201,10 @@ static void ObserveLayer(const uint8_t *wram, size_t wram_size,
   s_observer.diagnostics.tiles_compared += comparison.compared;
   s_observer.diagnostics.mismatches += comparison.mismatches;
   s_observer.diagnostics.outside_world += comparison.outside_world;
-  ReportComparison(wram, layer, map_group, map_number, &snapshot, serial,
-                   &comparison);
+  ReportComparison(
+      wram, layer, map_group, map_number, &snapshot, serial, &comparison,
+      s_observer.comparison_reported_outside_serial,
+      s_observer.comparison_reported_mismatch_serial);
 }
 
 void ActRaiserActionBg_ObserveFrame(const uint8_t *wram, size_t wram_size,
@@ -1312,8 +1331,10 @@ void ActRaiserActionBg_Shutdown(void) {
             s_observer.diagnostics.room_scene_hle_layers,
             s_observer.diagnostics.room_scene_hle_fallbacks);
   }
-  for (unsigned layer = 0; layer < kActionBgLayerCount; layer++)
-    ActionBgWorld_Destroy(s_observer.world[layer]);
+  for (unsigned layer = 0; layer < kActionBgLayerCount; layer++) {
+    ActionBgWorld_Destroy(s_observer.provider_world[layer]);
+    ActionBgWorld_Destroy(s_observer.comparison_world[layer]);
+  }
   free(s_observer.room_scene);
   memset(&s_observer, 0, sizeof(s_observer));
   s_observer.enabled = -1;

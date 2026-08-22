@@ -818,6 +818,96 @@ static void TestFramePlanBinding(void) {
   free(wram);
 }
 
+static void TestObserverDoesNotRepublishProviderWorld(void) {
+  uint8_t *wram = BuildWram();
+  Ppu *ppu = calloc(1, sizeof(*ppu));
+  CHECK(wram != NULL && ppu != NULL);
+  if (!wram || !ppu) {
+    free(ppu);
+    free(wram);
+    return;
+  }
+
+  ActRaiserActionBg_Shutdown();
+  CHECK(unsetenv("AR_ACTION_BG_HLE") == 0);
+  CHECK(setenv("AR_ACTION_BG_HLE_COMPARE", "1", 1) == 0);
+  CHECK(unsetenv("AR_ACTION_ROOM_SCENE_HLE") == 0);
+  CHECK(unsetenv("AR_ACTION_ROOM_SCENE_COMPARE") == 0);
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Fillmore;
+  wram[kActRaiserWram_CurrentMap] = 1;
+  Write16(wram, kActRaiserWram_GameFrame, 300);
+  Write16(wram, kActRaiserWram_Bg2Width, 256);
+  ppu->bgmode = 1;
+  ppu->screenEnabled[0] = kActRaiserBgLayerMask_Bg1;
+  ppu->bgXsc[0] = 0x63;
+  ppu->hScroll[0] = 13;
+  ppu->vScroll[0] = 7;
+
+  ActionBgPlan plan;
+  ActionBgPresentationPolicy policy;
+  CHECK(ActRaiserActionBg_BuildPlan(
+      wram, kActRaiserWramSize, ppu, true, &plan, &policy));
+  ActRaiserActionBgLayerSnapshot snapshot;
+  CHECK(ActRaiserActionBg_CaptureLayer(
+      wram, kActRaiserWramSize, 0, ppu->bgXsc[0], &snapshot));
+  ActionBgWorld *live = ActionBgWorld_Create();
+  CHECK(live != NULL);
+  if (!live) {
+    ActRaiserActionBg_Shutdown();
+    CHECK(unsetenv("AR_ACTION_BG_HLE_COMPARE") == 0);
+    free(ppu);
+    free(wram);
+    return;
+  }
+  CHECK(ActionBgWorld_Update(live, &snapshot.decode));
+  PopulateNativeRing(live, &snapshot, ppu->vram);
+
+  CHECK(ActRaiserActionBg_BindPlan(
+      wram, kActRaiserWramSize, &plan, ppu) ==
+      kActRaiserBgLayerMask_Bg1);
+  const PpuVirtualTilemapBinding *binding = &ppu->virtualTilemap[0];
+  uint16_t provider_before = 0, provider_after = 0, live_after = 0;
+  CHECK(binding->lookup(binding->context, 0, 0, &provider_before));
+  CHECK(ActRaiserActionBg_GetDiagnostics()->layer_activations == 1);
+
+  /* Model the real combined-gate ordering: provider binding happens first,
+   * then the live shadow observes a newer/different publication before PPU
+   * scanout consumes the retained binding. The shadow must not change what
+   * that binding returns. */
+  wram[kTableStart] ^= 1;
+  CHECK(ActionBgWorld_Update(live, &snapshot.decode));
+  CHECK(ActionBgWorld_Lookup(live, 0, 0, &live_after) ==
+        kActionBgLookup_Tile);
+  CHECK(live_after != provider_before);
+  PopulateNativeRing(live, &snapshot, ppu->vram);
+  ActRaiserActionBg_ObserveFrame(wram, kActRaiserWramSize, ppu);
+  CHECK(binding->lookup(binding->context, 0, 0, &provider_after));
+  CHECK(provider_after == provider_before);
+  CHECK(ActRaiserActionBg_GetDiagnostics()->layer_activations == 2);
+
+  /* A stable redraw does not republish either cache. The next provider bind
+   * adopts the changed source once, after which the observer remains stable
+   * instead of toggling that provider back and forth. */
+  ActRaiserActionBg_ObserveFrame(wram, kActRaiserWramSize, ppu);
+  CHECK(ActRaiserActionBg_GetDiagnostics()->layer_activations == 2);
+  Write16(wram, kActRaiserWram_GameFrame, 301);
+  CHECK(ActRaiserActionBg_BindPlan(
+      wram, kActRaiserWramSize, &plan, ppu) ==
+      kActRaiserBgLayerMask_Bg1);
+  binding = &ppu->virtualTilemap[0];
+  CHECK(binding->lookup(binding->context, 0, 0, &provider_after));
+  CHECK(provider_after == live_after);
+  CHECK(ActRaiserActionBg_GetDiagnostics()->layer_activations == 3);
+  ActRaiserActionBg_ObserveFrame(wram, kActRaiserWramSize, ppu);
+  CHECK(ActRaiserActionBg_GetDiagnostics()->layer_activations == 3);
+
+  ActionBgWorld_Destroy(live);
+  ActRaiserActionBg_Shutdown();
+  CHECK(unsetenv("AR_ACTION_BG_HLE_COMPARE") == 0);
+  free(ppu);
+  free(wram);
+}
+
 static void TestVirtualLayerClassificationBinding(void) {
   uint8_t *wram = BuildWram();
   Ppu *ppu = calloc(1, sizeof(*ppu));
@@ -985,6 +1075,7 @@ int main(void) {
   TestFramePlanCapture();
   TestPlanExtentProjection();
   TestFramePlanBinding();
+  TestObserverDoesNotRepublishProviderWorld();
   TestVirtualLayerClassificationBinding();
   TestMarahnaCyclicBackdropBinding();
   if (failures) {
