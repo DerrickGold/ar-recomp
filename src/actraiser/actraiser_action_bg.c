@@ -392,10 +392,14 @@ static bool RoomSceneHleEnabled(void) {
   if (s_observer.room_scene_hle_enabled < 0) {
     const char *value = getenv("AR_ACTION_ROOM_SCENE_HLE");
     s_observer.room_scene_hle_enabled =
-        value && value[0] && value[0] != '0';
+        !value || !value[0] || value[0] != '0';
     if (s_observer.room_scene_hle_enabled)
       fprintf(stderr,
               "[action-room-scene] ROM-derived world source enabled\n");
+    else
+      fprintf(stderr,
+              "[action-room-scene] ROM-derived world source disabled by "
+              "AR_ACTION_ROOM_SCENE_HLE=0\n");
   }
   return s_observer.room_scene_hle_enabled != 0;
 }

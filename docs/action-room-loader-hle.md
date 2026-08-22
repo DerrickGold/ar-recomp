@@ -56,14 +56,15 @@ The stable two-background scene milestone is implemented:
   room's C golden hash when opened. **Diorama 3D** consumes the same exact
   camera-local BG captures before routing pixels into authored virtual bands;
   the full-room map remains the painting surface.
-- The game registers the same immutable ROM bytes at boot. Setting
-  `AR_ACTION_ROOM_SCENE_HLE=1` promotes the room scene's cumulative-ROM BG1/BG2
-  page maps and metatile definitions to the production finite-world provider.
+- The game registers the same immutable ROM bytes at boot. The room scene's
+  cumulative-ROM BG1/BG2 page maps and metatile definitions are now the default
+  production finite-world source; `AR_ACTION_ROOM_SCENE_HLE=0` selects the
+  exact staged-WRAM source control.
   The original bootstrap still stages CHR/CGRAM, the resident VRAM ring,
   gameplay data, actors and callbacks. The ring remains the authentic-pixel
   safety oracle, and a scene load or dimension failure falls back to the
-  ordinary live-WRAM source. This is deliberately feature-gated until the
-  natural-transition A/B matrix is accepted.
+  ordinary live-WRAM source. The default promotion follows the exact 12-target
+  matrix and natural Fillmore acceptance route described below.
 - Setting
   `AR_ACTION_ROOM_SCENE_COMPARE=1` compares each newly published live
   `ActionBgWorld` against every tile produced by `ActionRoomScene`. During
@@ -73,8 +74,8 @@ The stable two-background scene milestone is implemented:
   the first mismatch and never changes gameplay, provider eligibility, or PPU
   state.
 - The live comparator and production provider own separate `ActionBgWorld`
-  caches. This is required when `AR_ACTION_ROOM_SCENE_HLE=1` and both compare
-  gates are enabled together: the observer runs after provider binding but
+  caches. This is required when the room-scene source and both compare gates
+  are enabled together: the observer runs after provider binding but
   before scanout, so sharing a cache would replace the immutable publication
   with live WRAM, decode both sources every frame, and flood successful
   full-world reports. A ROM-free regression mutates WRAM after binding and
@@ -114,12 +115,13 @@ raster registers remained exact with zero fallback. This is the intended
 steady-state cost instead of republishing and re-reporting every layer on every
 frame.
 
-The production handoff is intentionally incremental. The first slice changes
+The production handoff remains intentionally incremental. The accepted first
+slice changes
 where the renderer obtains complete finite BG tile words; it does not skip the
 ROM asset VM or write host-decoded assets into emulated WRAM/VRAM. That retains
 the original loader as both gameplay bootstrap and visual oracle while the
-immutable source is exercised in normal scanout. Once transition coverage is
-accepted, the next seam can HLE the background-only asset staging commands
+immutable source is exercised in normal scanout. The next seam can now HLE the
+background-only asset staging commands
 without absorbing level objects, actor initialization, audio, or gameplay.
 
 ## Scope and parity boundary
@@ -514,7 +516,13 @@ Targets are VRAM word addresses and strides are bytes.
   sourced 19,522 bound layer-frames with zero room-scene fallback; native-ring
   preflight compared 18,216,295 tiles with zero mismatch/outside, and all 204
   framebuffer, WRAM/SRAM, dispatch, final-state and PPU-snapshot artifacts are
-  byte-exact. Natural-transition and boss-only fixtures remain the promotion
-  gate.
+  byte-exact.
+- Promoted-default matrix `runs/room-scene-default-matrix-20260822.json`
+  repeats all 12 targets with the environment gate absent: 19,522 provider and
+  room-scene layer-frames, zero source fallback, and 18,216,295 native-ring
+  preflight tiles with zero mismatch/outside. The focused default/control pair
+  `runs/room-scene-default-20260822.json` and
+  `runs/room-scene-live-control-20260822.json` is byte-identical at both
+  framebuffer and captured WRAM/VRAM/CGRAM/OAM artifacts.
 - Static consumer census: all generated `$02:B4E8` variants write `$F2`; no
   registered/recompiled function reads it.

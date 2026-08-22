@@ -639,6 +639,9 @@ static void TestFramePlanBinding(void) {
   }
   /* BH7 production default: an absent variable must exercise the provider. */
   CHECK(unsetenv("AR_ACTION_BG_HLE") == 0);
+  /* This fixture exercises the staged-WRAM decoder. The production default
+   * room source is covered by the stock-ROM matrix instead. */
+  CHECK(setenv("AR_ACTION_ROOM_SCENE_HLE", "0", 1) == 0);
   wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Fillmore;
   wram[kActRaiserWram_CurrentMap] = 1;
   Write16(wram, kActRaiserWram_GameFrame, 100);
@@ -814,6 +817,7 @@ static void TestFramePlanBinding(void) {
   CHECK(ActRaiserActionBg_GetDiagnostics()->provider_frames == 0);
   ActRaiserActionBg_Shutdown();
   CHECK(unsetenv("AR_ACTION_BG_HLE") == 0);
+  CHECK(unsetenv("AR_ACTION_ROOM_SCENE_HLE") == 0);
   free(ppu);
   free(wram);
 }
@@ -831,7 +835,7 @@ static void TestObserverDoesNotRepublishProviderWorld(void) {
   ActRaiserActionBg_Shutdown();
   CHECK(unsetenv("AR_ACTION_BG_HLE") == 0);
   CHECK(setenv("AR_ACTION_BG_HLE_COMPARE", "1", 1) == 0);
-  CHECK(unsetenv("AR_ACTION_ROOM_SCENE_HLE") == 0);
+  CHECK(setenv("AR_ACTION_ROOM_SCENE_HLE", "0", 1) == 0);
   CHECK(unsetenv("AR_ACTION_ROOM_SCENE_COMPARE") == 0);
   wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Fillmore;
   wram[kActRaiserWram_CurrentMap] = 1;
@@ -855,6 +859,7 @@ static void TestObserverDoesNotRepublishProviderWorld(void) {
   if (!live) {
     ActRaiserActionBg_Shutdown();
     CHECK(unsetenv("AR_ACTION_BG_HLE_COMPARE") == 0);
+    CHECK(unsetenv("AR_ACTION_ROOM_SCENE_HLE") == 0);
     free(ppu);
     free(wram);
     return;
@@ -904,6 +909,7 @@ static void TestObserverDoesNotRepublishProviderWorld(void) {
   ActionBgWorld_Destroy(live);
   ActRaiserActionBg_Shutdown();
   CHECK(unsetenv("AR_ACTION_BG_HLE_COMPARE") == 0);
+  CHECK(unsetenv("AR_ACTION_ROOM_SCENE_HLE") == 0);
   free(ppu);
   free(wram);
 }
@@ -919,6 +925,7 @@ static void TestVirtualLayerClassificationBinding(void) {
   }
   ActRaiserActionBg_Shutdown();
   CHECK(unsetenv("AR_ACTION_BG_HLE") == 0);
+  CHECK(setenv("AR_ACTION_ROOM_SCENE_HLE", "0", 1) == 0);
   wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Fillmore;
   wram[kActRaiserWram_CurrentMap] = 1;
   Write16(wram, kActRaiserWram_GameFrame, 200);
@@ -976,6 +983,7 @@ static void TestVirtualLayerClassificationBinding(void) {
 
   ActionBgWorld_Destroy(reference);
   ActRaiserActionBg_Shutdown();
+  CHECK(unsetenv("AR_ACTION_ROOM_SCENE_HLE") == 0);
   free(ppu);
   free(wram);
 }
@@ -992,6 +1000,7 @@ static void TestMarahnaCyclicBackdropBinding(void) {
 
   ActRaiserActionBg_Shutdown();
   CHECK(unsetenv("AR_ACTION_BG_HLE") == 0);
+  CHECK(setenv("AR_ACTION_ROOM_SCENE_HLE", "0", 1) == 0);
   wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Marahna;
   wram[kActRaiserWram_CurrentMap] = 2;
   Write16(wram, kActRaiserWram_GameFrame, 9728);
@@ -1062,6 +1071,7 @@ static void TestMarahnaCyclicBackdropBinding(void) {
   for (unsigned layer = 0; layer < 2; layer++)
     ActionBgWorld_Destroy(reference[layer]);
   ActRaiserActionBg_Shutdown();
+  CHECK(unsetenv("AR_ACTION_ROOM_SCENE_HLE") == 0);
   free(ppu);
   free(wram);
 }

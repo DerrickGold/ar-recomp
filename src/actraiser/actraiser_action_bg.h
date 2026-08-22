@@ -179,7 +179,7 @@ bool ActRaiserActionBg_CompareRoomSceneLayer(
     ActRaiserActionRoomSceneCompareResult *result);
 
 /* Publish one immutable room-scene background through the production finite
- * world representation. This is the pure adapter used by the feature-gated
+ * world representation. This is the pure adapter used by the default
  * ROM-derived provider source and by ROM-free parity tests. */
 bool ActRaiserActionBg_UpdateWorldFromRoomScene(
     ActionBgWorld *world, const struct ActionRoomScene *scene,
@@ -204,14 +204,14 @@ void ActRaiserActionBg_ObserveRoomSceneFrameLine(
     const struct Ppu *ppu, unsigned output_y);
 
 /* Default-on BH7 renderer adapter. Unless `AR_ACTION_BG_HLE=0`, publish and
- * bind every plan layer whose source is a finite world map. By default the
- * publication snapshots live staged WRAM. `AR_ACTION_ROOM_SCENE_HLE=1`
- * promotes the immutable ROM-derived room scene to that publication source,
- * with automatic live-WRAM fallback. A zero-mismatch, zero-outside comparison
- * against the exact live native viewport is still required before provider
- * ownership includes authentic pixels. Returns the bitmask of bound PPU
- * layers. The function always clears prior bindings first, so a rejected or
- * disabled frame fails closed. */
+ * bind every plan layer whose source is a finite world map. The publication
+ * defaults to the immutable ROM-derived room scene, with automatic live-WRAM
+ * fallback. `AR_ACTION_ROOM_SCENE_HLE=0` is the exact staged-WRAM source
+ * control. A zero-mismatch, zero-outside comparison against the exact live
+ * native viewport is still required before provider ownership includes
+ * authentic pixels. Returns the bitmask of bound PPU layers. The function
+ * always clears prior bindings first, so a rejected or disabled frame fails
+ * closed. */
 uint8_t ActRaiserActionBg_BindPlan(
     const uint8_t *wram, size_t wram_size, const ActionBgPlan *plan,
     struct Ppu *ppu);

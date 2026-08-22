@@ -643,17 +643,18 @@ show the frozen `$0088` against the advancing host frame:
   margin-source-gap PPU prototypes. Whole-layer clamp/mirror/repeat,
   repeat-band, vertical per-layer clip, the native ring, and Sky Palace source
   repair are live and deliberately retained.
-- **`AR_ACTION_ROOM_SCENE_HLE=1`** — promote the immutable, cumulative-ROM
-  `ActionRoomScene` BG1/BG2 maps and definitions to the finite-world provider's
-  production source. The original action bootstrap still runs and owns
+- **`AR_ACTION_ROOM_SCENE_HLE=0`** — use the staged-WRAM finite-world source as
+  an exact A/B control. Unset, empty, or any nonzero value selects the default
+  immutable, cumulative-ROM `ActionRoomScene` BG1/BG2 maps and definitions.
+  The original action bootstrap still runs and owns
   characters, CGRAM, gameplay records, actors, callbacks, transitions, and the
   resident VRAM ring. That live ring remains a per-frame safety oracle: a
   mismatch retains native authentic pixels, an outside-world result rejects
   the binding, and a scene load/shape failure automatically falls back to the
   ordinary live-WRAM world source. Shutdown prints an
   `action-room-scene provider-summary` with sourced layers and live fallbacks.
-  This is the first production bootstrap handoff and is default-off until its
-  natural-transition A/B matrix is accepted.
+  This is the accepted first production bootstrap handoff; the control changes
+  only the provider's tile-word source.
   BH6 adds no separate environment switch: the resolved `ActionBgPlan` is now
   latched after scanout and copied into `FrameSlot` on every run. Normal action
   frames retain exact default edges and bands; 4:3, Wide Raw, `AR_WS_ONLYBG`
