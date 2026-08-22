@@ -17,6 +17,12 @@
     <span class="v" id="nativeFramev">0</span></div>
   <button id="nativePlay" style="width:100%">Play native phases</button>
   <p class="hint" id="nativePhaseInfo">Static background</p>
+  <div class="ctl"><label>Camera X</label>
+    <input id="nativeCameraX" type="range" min="0" max="0" step="1" value="0">
+    <span class="v" id="nativeCameraXv">0</span></div>
+  <div class="ctl"><label>Camera Y</label>
+    <input id="nativeCameraY" type="range" min="0" max="0" step="1" value="0">
+    <span class="v" id="nativeCameraYv">0</span></div>
 
   <h2>Band</h2>
   <div class="stack">
@@ -42,6 +48,50 @@
   <button id="virtualReset" style="width:100%">Use default geometry</button>
   <p class="hint">These values write to <code>bgN-virtual</code> in the room's
     existing INI section.</p>
+
+  <h2>Ordinary BG plane</h2>
+  <select id="planeSelect" style="width:100%">
+    <option value="bg1">BG1 plane</option>
+    <option value="bg1hi">BG1 priority plane</option>
+    <option value="bg2">BG2 plane</option>
+    <option value="bg2hi">BG2 priority plane</option>
+  </select>
+  <div class="ctl" style="margin-top:6px"><label>Z</label>
+    <input id="planeZ" type="range" min="-100" max="200" step="1" value="50">
+    <span class="v" id="planeZv">0.50</span></div>
+  <div class="ctl"><label>Order</label>
+    <input id="planeOrder" type="range" min="0" max="51" step="1" value="4">
+    <span class="v" id="planeOrderv">4</span></div>
+  <div class="ctl"><label>Alpha</label>
+    <input id="planeAlpha" type="range" min="0" max="255" step="1" value="255">
+    <span class="v" id="planeAlphav">255</span></div>
+  <div class="ctl"><label>Shape</label>
+    <select id="planeStrategy" style="flex:1;min-width:0">
+      <option value="flat">Flat</option><option value="rake">Rake</option>
+      <option value="bow">Bow</option><option value="thick">Thickness</option>
+      <option value="stack">Stack</option><option value="voxel">Voxel</option>
+    </select>
+    <span class="v" id="planeStrategyv">flat</span></div>
+  <div class="ctl" id="planeDepthRow"><label>Depth</label>
+    <input id="planeDepth" type="range" min="-100" max="100" step="1" value="29">
+    <span class="v" id="planeDepthv">0.29</span></div>
+  <div class="ctl" id="planeCopiesRow"><label>Copies</label>
+    <input id="planeCopies" type="range" min="2" max="8" step="1" value="3">
+    <span class="v" id="planeCopiesv">3</span></div>
+  <div class="ctl" id="planeDirectionRow"><label>Dir</label>
+    <select id="planeDirection" style="flex:1;min-width:0">
+      <option value="forward">Forward</option>
+      <option value="backward">Backward</option>
+      <option value="both">Both</option>
+    </select></div>
+  <div style="display:flex;gap:5px">
+    <button id="planeResetLayout" style="flex:1">Default layout</button>
+    <button id="planeResetShape" style="flex:1">Flat shape</button>
+  </div>
+  <button id="planeResetAll" style="width:100%;margin-top:5px">Reset plane record</button>
+  <p class="hint" id="planeHint">Ordinary plane changes write the same
+    <code>bg1</code>/<code>bg1hi</code>/<code>bg2</code>/<code>bg2hi</code>
+    records consumed by the game.</p>
 
   <h2>Brush</h2>
   <div class="stack">
@@ -91,7 +141,8 @@
 
 <div class="main">
   <div class="bar">
-    <button id="mode2d" class="on">Game composite</button>
+    <button id="mode2d" class="on">Map editor</button>
+    <button id="modeNative">Native frame</button>
     <button id="mode3d">Diorama 3D</button>
     <button id="undoBtn" disabled>Undo</button>
     <button id="redoBtn" disabled>Redo</button>
@@ -145,19 +196,19 @@
  *   2 priority      the anchor's authentic priority-1 surface
  *
  * THE FILE CONTRACT
- * The editor owns `bgN-virtual` records in each base [layers:GG:MM] section of
- * diorama-layers.ini. Geometry is one sparse z/order/alpha record. Metatile
- * rules classify every instance and cell rectangles refine them; the ROM's
- * priority bit remains the fallback. Export replaces only those owned records
- * and preserves all other comments, sections and plane settings verbatim.
+ * The editor owns bg1/bg1hi/bg2/bg2hi and bgN-virtual records in each base
+ * [layers:GG:MM] section of diorama-layers.ini. Geometry is sparse; metatile
+ * rules classify every instance and cell rectangles refine them, with the ROM
+ * priority bit as fallback. Export replaces those owned records and preserves
+ * all other comments, sections and plane settings verbatim.
  *
  * WHY THE PREVIEW IS BUILT THE WAY IT IS
- * Each band is rasterised into its own full-level surface and drawn as one
- * textured quad at its own z. That is deliberately the same shape as the
- * runtime: a plane is a captured surface composited at a depth. The camera
- * maths below is plain arithmetic with no WebGL-specific tricks. Flat game
- * order remains authentic and deliberately ignores virtual classification;
- * the Diorama view uses configured painter order and independent z geometry.
+ * The map editor keeps full-level surfaces for authoring. Native frame and
+ * Diorama 3D instead sample exact 256x224 camera-local captures through the
+ * shared raster model, then route every source pixel into its configured band.
+ * That is deliberately the runtime shape: captured planes composited at depth.
+ * Flat game order remains authentic and deliberately ignores virtual
+ * classification; Diorama uses configured painter order and independent z.
  * ======================================================================== */
 
 const DATA = window.__ACTION_BG__;
@@ -171,6 +222,12 @@ const PLANE_DEFAULTS = {
   bg2hi:{z:0.21,order:6,alpha:255}, bg1hi:{z:0.51,order:7,alpha:255},
   obj3:{z:0.52,order:8,alpha:255}, bg3:{z:0.95,order:9,alpha:255},
 };
+const PLANE_TOKENS = [
+  'backdrop','bg1','bg1hi','bg2','bg2hi','bg3','obj0','obj1','obj2','obj3',
+];
+const EDITABLE_PLANE_TOKENS = new Set(['bg1','bg1hi','bg2','bg2hi']);
+const STRATEGIES = ['flat','rake','bow','thick','stack','voxel'];
+const STACK_DIRECTIONS = ['forward','backward','both'];
 /* The new far planes default 0.15 behind their anchors and share the anchor's
  * paint key, inserted immediately before it. Authoring z/order/alpha on a
  * bgN-virtual record overrides these defaults. */
@@ -240,8 +297,10 @@ function depthLadder() {
 const B64 = s => { const b = atob(s), a = new Uint8Array(b.length);
   for (let i=0;i<b.length;i++) a[i]=b.charCodeAt(i); return a; };
 const BLOBS = DATA.blobs.map(B64);
+const RASTER_WAVEFORM = BLOBS[DATA.rasterWaveform];
 const expand5 = v => ((v&31)<<3)|((v&31)>>2);
 let nativeFrame = 0, nativePlayTimer = null;
+const nativeCamera = { x:0, y:0 };
 
 function animationPhase(r) {
   if (!r.animation) return 0;
@@ -335,6 +394,254 @@ function blitTile(L, entry, dst, dw, ox, oy, tintRGB) {
     }
   }
 }
+
+/* ---- exact stable-room frame -----------------------------------------
+ * This is the JavaScript transcription of ActionRoomScene_BuildFrameState
+ * and ActionRoomScene_RenderNativeFrame. The exporter supplies normalized
+ * profile bytes and the ROM's $02:96D4 waveform; no gameplay state or save
+ * state participates. C tests pin every preset and the native compositor. */
+const u8 = value => value & 0xff;
+const u16 = value => value & 0xffff;
+const u10 = value => value & 0x3ff;
+const swap16 = value => u16((value << 8) | (value >>> 8));
+const mode2Bytes = (first,second) => u10(u8(first) | (u8(second)<<8));
+function resolveParallax(camera, ratio, extent, viewport) {
+  const numerator = ratio >>> 4, denominator = ratio & 15;
+  let result = denominator ? Math.floor(camera * numerator / denominator) : 0;
+  if (extent >= 0x300 && result + viewport >= extent)
+    result = extent - viewport;
+  return u10(result);
+}
+function rasterWriter(values) {
+  return {
+    values, line:0, held:values[0],
+    write(count,value) {
+      this.held=u10(value);
+      while (count-- > 0 && this.line < DATA.frameHeight)
+        this.values[this.line++]=this.held;
+    },
+    finish() {
+      while (this.line < DATA.frameHeight)
+        this.values[this.line++]=this.held;
+    },
+  };
+}
+function nativeFrameState(r) {
+  const h=[new Uint16Array(DATA.frameHeight),new Uint16Array(DATA.frameHeight)];
+  const v=[new Uint16Array(DATA.frameHeight),new Uint16Array(DATA.frameHeight)];
+  const mosaic=new Uint8Array(DATA.frameHeight);
+  /* Visible frame N scans the persistent raster table built at game tick N-1. */
+  const bg2=r.bg[1], frame=u16(nativeFrame-1), cameraX=u16(nativeCamera.x);
+  const rasterWorkspace=BLOBS[r.rasterWorkspace];
+  const inheritedMode2=(offset,first)=>mode2Bytes(
+    first,rasterWorkspace&&offset<rasterWorkspace.length?rasterWorkspace[offset]:0);
+  const baseH=[u10(nativeCamera.x),resolveParallax(nativeCamera.x,r.video[9],
+    bg2.pagesWide*256,0x100)];
+  const baseV=[u10(nativeCamera.y),resolveParallax(nativeCamera.y,r.video[10],
+    bg2.pagesHigh*256,0xe0)];
+  for(let bg=0;bg<2;bg++){h[bg].fill(baseH[bg]);v[bg].fill(baseV[bg]);}
+  const bg1w=rasterWriter(h[0]),bg2w=rasterWriter(h[1]),bg2vw=rasterWriter(v[1]);
+  switch(r.raster) {
+    case 1: { let phase=u8(frame>>>1);
+      for(let i=0;i<0x6f;i++) bg2w.write(2,inheritedMode2(
+        i*3+2,u8(RASTER_WAVEFORM[phase++]+frame)));
+      bg2w.finish(); break; }
+    case 2: { bg2w.write(0x7f,0); const step=u16((frame+cameraX)<<1); let value=step;
+      for(let i=0;i<96;i++){bg2w.write(1,inheritedMode2(
+        3+i*3+2,value>>>8));value=u16(value+step);}
+      bg2w.finish(); break; }
+    case 3: { bg2vw.write(0x7f,inheritedMode2(2,0)); let value=u8(frame);
+      if ((frame>>>8)&1) value^=0xff; value=(value>>>4)&15;
+      for(let i=0;i<32;i++){bg2vw.write(1,inheritedMode2(
+        3+i*3+2,value));value=u8(value-5);}
+      bg2vw.write(1,inheritedMode2(3+32*3+2,0));bg2vw.finish();break; }
+    case 4: { let phase=u8(frame>>>2),line=0,held=0;
+      for(let i=0;i<0x70;i++){held=((RASTER_WAVEFORM[phase++]<<4)&0x10)|2;
+        for(let n=0;n<2;n++)if(line<DATA.frameHeight)mosaic[line++]=held;}
+      while(line<DATA.frameHeight)mosaic[line++]=held;break; }
+    case 5: { let value=u16((frame<<1)+(cameraX>>>1));
+      bg2w.write(0x3f,value);value>>>=1;bg2w.write(0x10,value);
+      value>>>=1;bg2w.write(8,value);value>>>=1;bg2w.write(8,value);
+      bg2w.write(0x10,0);bg2w.write(8,cameraX>>>4);
+      bg2w.write(0x10,cameraX>>>3);bg2w.write(0x28,cameraX>>>2);
+      bg2w.write(0x50,cameraX>>>1);bg2w.finish();break; }
+    case 6: { let value=u16((frame<<2)+(cameraX>>>1));
+      bg2w.write(0x1e,value);value>>>=1;bg2w.write(0x10,value);
+      value>>>=1;bg2w.write(0x10,value);value>>>=1;bg2w.write(8,value);
+      value>>>=1;bg2w.write(8,value);bg2w.write(0x70,cameraX>>>1);
+      const step=u16((frame+cameraX)<<2);value=step;
+      for(let i=0;i<0x20;i++){bg2w.write(1,swap16(value));value=u16(value+step);value=u16(value+step);}
+      bg2w.finish();break; }
+    case 7: { let phase=u8(frame>>>1),step=1;
+      for(let i=0;i<0x6f;i++){const source=phase;phase=u8(phase+step++);
+        bg2w.write(2,inheritedMode2(0x800+i*3+2,
+          RASTER_WAVEFORM[source]));}bg2w.finish();break; }
+    case 8: { const reverse=u16(-frame);bg2w.write(0x4f,0);bg2w.write(0x40,0);
+      bg2w.write(0x10,reverse>>>2);bg2w.write(0x10,reverse>>>1);
+      bg2w.write(0x10,reverse);bg2w.write(8,u16(reverse<<1));
+      bg2w.write(4,u16((reverse<<1)+reverse));bg2w.write(8,u16(reverse<<2));
+      bg2w.write(4,u16(frame<<1));bg2w.write(8,frame);bg2w.write(0x10,frame>>>1);
+      bg2w.finish();break; }
+    case 9: bg2w.write(0x4f,inheritedMode2(0x1002,0));
+      bg2w.write(0x40,cameraX>>>2);
+      bg2w.write(0x60,cameraX>>>1);bg2w.finish();break;
+    case 10: { let phase=u8(frame>>>1);
+      for(let i=0;i<0x6f;i++){const wave=RASTER_WAVEFORM[phase++];
+        bg2w.write(2,inheritedMode2(i*3+2,u8(wave+frame)));
+        bg1w.write(2,inheritedMode2(0x800+i*3+2,u8(-wave+0x40)));}
+      bg1w.finish();bg2w.finish();break; }
+  }
+  return {h,v,mosaic,tm:r.video[0],ts:r.video[1],cgwsel:r.video[2],
+    cgadsub:r.video[3],bgmode:r.video[6],fixedColor:0,brightness:15,
+    page:bg2PageIndex(r)};
+}
+function nativeTileAt(r,state,layers,bg,pixelX,pixelY) {
+  const layer=layers[bg]; let x=pixelX,y=pixelY;
+  if(bg===1&&r.bg2PageCycle){x=(x&255)+(state.page&1)*256;
+    y=(y&255)+(state.page>>>1)*256;}
+  else{x=((x%layer.w)+layer.w)%layer.w;y=((y%layer.h)+layer.h)%layer.h;}
+  return {entry:layer.words[(y>>>3)*layer.tilesW+(x>>>3)],
+          x:x&7,y:y&7,tx:x>>>3,ty:y>>>3};
+}
+function nativeCharacterPixel(layer,entry,x,y) {
+  let tile=entry&0x3ff,source=layer.chars;
+  if(tile*32+32>source.length){if(!layer.extra||tile<0x200||tile>=0x300)return 0;
+    source=layer.extra;tile-=0x200;}
+  if(entry&0x4000)x=7-x;if(entry&0x8000)y=7-y;
+  const a=tile*32+y*2,b=7-x;
+  return ((source[a]>>>b)&1)|(((source[a+1]>>>b)&1)<<1)|
+    (((source[a+16]>>>b)&1)<<2)|(((source[a+17]>>>b)&1)<<3);
+}
+function nativeLayerPixel(r,state,layers,bg,x,y) {
+  const mosaic=state.mosaic[y],size=(mosaic>>>4)+1;
+  let sx=x,line=y+1;
+  if(size>1&&(mosaic&(1<<bg))){sx-=sx%size;line-=line%size;}
+  const tile=nativeTileAt(r,state,layers,bg,u10(state.h[bg][y]+sx),
+    u10(state.v[bg][y]+line));
+  const pixel=nativeCharacterPixel(layers[bg],tile.entry,tile.x,tile.y);
+  if(!pixel)return 5<<8;
+  const palette=((tile.entry>>>10)&7)*16+pixel;
+  const high=(tile.entry&0x2000)!==0;
+  const rank=bg===0?(high?12:8):(high?11:7);
+  const classified=bandAt(bucket(r,bg),layers[bg],tile.tx,tile.ty);
+  return palette|(bg<<8)|(rank<<12)|(classified<<16);
+}
+function nativeScreenPixel(mask,bg1,bg2){let result=5<<8;
+  if((mask&1)&&((bg1>>>12)&15)>((result>>>12)&15))result=bg1;
+  if((mask&2)&&((bg2>>>12)&15)>((result>>>12)&15))result=bg2;
+  return result;}
+function nativeCompositePixel(r,state,main,sub) {
+  const raw=BLOBS[r.palette],palette=i=>raw[i*2]|(raw[i*2+1]<<8);
+  const clip=(state.cgwsel>>>6)&3,visible=clip===0||clip===2;
+  let color=palette(main&255),red=visible?color&31:0;
+  let green=visible?(color>>>5)&31:0,blue=visible?(color>>>10)&31:0;
+  const prevent=(state.cgwsel>>>4)&3,mathWindow=prevent===0||prevent===2;
+  const layer=(main>>>8)&15,math=mathWindow&&(state.cgadsub&(1<<layer));
+  let half=false;
+  if(math){const useSub=(state.cgwsel&2)!==0,haveSub=useSub&&(sub&255)!==0;
+    const second=haveSub?palette(sub&255):state.fixedColor;
+    const r2=second&31,g2=(second>>>5)&31,b2=(second>>>10)&31;
+    if(state.cgadsub&0x80){red=Math.max(0,red-r2);green=Math.max(0,green-g2);blue=Math.max(0,blue-b2);}
+    else{red+=r2;green+=g2;blue+=b2;}
+    half=(state.cgadsub&0x40)!==0&&(!useSub||haveSub);}
+  const component=value=>{if(half)value>>>=1;value=Math.min(value,31);
+    return Math.floor(expand5(value)*state.brightness/15);};
+  let rr=component(red),gg=component(green),bb=component(blue);
+  if(tint&&layer<2){const c=bandRGB((main>>>16)&3);
+    rr=(rr*3+c[0])>>2;gg=(gg*3+c[1])>>2;bb=(bb*3+c[2])>>2;}
+  return rr|(gg<<8)|(bb<<16);
+}
+let native2dCache=null,nativeBandCache=null;
+let nativeDecodedKey='',nativeDecoded=null;
+function nativeDecodedLayers() {
+  const decodedKey=`${room.group}:${room.map}:${animationPhase(room)}`;
+  if(nativeDecodedKey!==decodedKey){nativeDecodedKey=decodedKey;
+    nativeDecoded=[decodeLayer(room,0),decodeLayer(room,1)];}
+  return {decodedKey,layers:nativeDecoded};
+}
+function nativeFrameCanvas() {
+  const decoded=nativeDecodedLayers(),decodedKey=decoded.decodedKey;
+  const key=`${decodedKey}:${nativeFrame}:${nativeCamera.x}:${nativeCamera.y}:${tint}`;
+  if(native2dCache&&native2dCache.key===key)return native2dCache.canvas;
+  const state=nativeFrameState(room),image=new ImageData(DATA.frameWidth,DATA.frameHeight);
+  for(let y=0;y<DATA.frameHeight;y++)for(let x=0;x<DATA.frameWidth;x++){
+    const bg1=nativeLayerPixel(room,state,decoded.layers,0,x,y);
+    const bg2=nativeLayerPixel(room,state,decoded.layers,1,x,y);
+    const main=nativeScreenPixel(state.tm,bg1,bg2),sub=nativeScreenPixel(state.ts,bg1,bg2);
+    const color=nativeCompositePixel(room,state,main,sub),o=(y*DATA.frameWidth+x)*4;
+    image.data[o]=color&255;image.data[o+1]=(color>>>8)&255;
+    image.data[o+2]=(color>>>16)&255;image.data[o+3]=255;
+  }
+  const canvas=document.createElement('canvas');canvas.width=DATA.frameWidth;
+  canvas.height=DATA.frameHeight;canvas.getContext('2d').putImageData(image,0,0);
+  native2dCache={key,canvas};return canvas;
+}
+
+/* This is the surface contract consumed by Diorama in game: each hardware BG
+ * is sampled with the visible line's live scroll/mosaic state, and every real
+ * pixel is routed to exactly one of its three destination planes. */
+function nativeBandSurfaces() {
+  const decoded=nativeDecodedLayers();
+  const key=`${decoded.decodedKey}:${nativeFrame}:${nativeCamera.x}`
+    +`:${nativeCamera.y}:${tint}`;
+  if(nativeBandCache&&nativeBandCache.key===key)return nativeBandCache;
+  const state=nativeFrameState(room);
+  const images=[0,1].map(()=>[0,1,2].map(
+    ()=>new ImageData(DATA.frameWidth,DATA.frameHeight)));
+  const tintRgb=BANDS.map((_,b)=>tint?bandRGB(b):null);
+  for(let y=0;y<DATA.frameHeight;y++)for(let x=0;x<DATA.frameWidth;x++){
+    const o=(y*DATA.frameWidth+x)*4;
+    for(let bg=0;bg<2;bg++){
+      const pixel=nativeLayerPixel(room,state,decoded.layers,bg,x,y);
+      if(((pixel>>>8)&15)!==bg)continue;
+      const band=(pixel>>>16)&3,color=decoded.layers[bg].pal[pixel&255];
+      let red=color&255,green=(color>>>8)&255,blue=(color>>>16)&255;
+      const c=tintRgb[band];
+      if(c){red=(red*3+c[0])>>2;green=(green*3+c[1])>>2;
+        blue=(blue*3+c[2])>>2;}
+      const data=images[bg][band].data;
+      data[o]=red;data[o+1]=green;data[o+2]=blue;data[o+3]=255;
+    }
+  }
+  nativeBandCache={key,state,images};return nativeBandCache;
+}
+
+/* Every exported room carries one C-rendered golden frame. Verify it through
+ * the JavaScript compositor the first time that room is opened; this catches
+ * transcription drift without requiring the game or a save state. */
+const nativeGoldenStatus=new Map();
+function verifyRoomNativeGolden(r) {
+  const key=`${r.group}:${r.map}`;
+  if(nativeGoldenStatus.has(key))return nativeGoldenStatus.get(key);
+  const golden=r.nativeGolden;
+  if(!golden){nativeGoldenStatus.set(key,false);return false;}
+  const savedFrame=nativeFrame,savedX=nativeCamera.x,savedY=nativeCamera.y;
+  const savedTint=tint;
+  let hash=2166136261>>>0;
+  try {
+    nativeFrame=golden.frame;nativeCamera.x=golden.cameraX;
+    nativeCamera.y=golden.cameraY;tint=false;
+    const layers=[decodeLayer(r,0),decodeLayer(r,1)],state=nativeFrameState(r);
+    for(let y=0;y<DATA.frameHeight;y++)for(let x=0;x<DATA.frameWidth;x++){
+      const bg1=nativeLayerPixel(r,state,layers,0,x,y);
+      const bg2=nativeLayerPixel(r,state,layers,1,x,y);
+      const main=nativeScreenPixel(state.tm,bg1,bg2);
+      const sub=nativeScreenPixel(state.ts,bg1,bg2);
+      const color=nativeCompositePixel(r,state,main,sub);
+      const argb=(0xff000000|((color&255)<<16)|(color&0xff00)|
+                  ((color>>>16)&255))>>>0;
+      hash=Math.imul((hash^argb)>>>0,16777619)>>>0;
+    }
+  } finally {
+    nativeFrame=savedFrame;nativeCamera.x=savedX;nativeCamera.y=savedY;
+    tint=savedTint;
+  }
+  const matches=hash===(golden.hash>>>0);
+  nativeGoldenStatus.set(key,matches);
+  if(!matches)console.error(`Native C/JS parity mismatch for ${key}: `
+    +`${hash.toString(16)} != ${(golden.hash>>>0).toString(16)}`);
+  return matches;
+}
 </script>
 <script>
 /* ---- classification store ---------------------------------------------
@@ -356,9 +663,9 @@ function bucket(r, bg) {
 
 /* ---- diorama-layers.ini -------------------------------------------------
  * The standalone editor owns authoring. It embeds the current manifest, can
- * load another one, and emits the complete file with only bgN-virtual records
- * regenerated. Ordinary plane lines, comments, scoped sections and unrelated
- * sections pass through untouched. */
+ * load another one, and emits the complete file with the four action BG plane
+ * records plus bgN-virtual records regenerated. Other planes, comments, scoped
+ * sections and unrelated sections pass through untouched. */
 let sourceIniText = window.__DIORAMA_LAYERS__ || '';
 let sourceIniName = window.__DIORAMA_LAYERS_NAME__ || 'diorama-layers.ini';
 let configDirty = false;
@@ -366,6 +673,17 @@ const configRooms = {};
 const kVirtualCellSpanMax = 512;
 const planeTokens = new Set(Object.keys(PLANE_DEFAULTS));
 const roomKey = r => `${r.group}:${r.map}`;
+function emptyPlane() {
+  return {
+    setOrder:false,order:0,setZ:false,z:0,setAlpha:false,alpha:255,
+    setSource:false,source:'captured',setRake:false,rake:0,
+    setBow:false,bow:0,setThickness:false,thickness:0,
+    setStack:false,stack:0,setStackCopies:false,stackCopies:0,
+    setStackDensity:false,stackDensity:0,
+    setStackDirection:false,stackDirection:'forward',
+    setVoxel:false,voxel:0,setVoxelCopies:false,voxelCopies:0,
+  };
+}
 function emptyVirtual() {
   return { setZ:false, z:0, setOrder:false, order:0,
            setAlpha:false, alpha:255 };
@@ -380,12 +698,46 @@ function resolvedPlane(token) {
   const base = PLANE_DEFAULTS[token] || {z:0,order:0,alpha:255};
   const edit = typeof room !== 'undefined' && room
     ? roomConfig(room).planes[token] || {} : {};
+  let stack=0,copies=0,solid=false;
+  if (edit.setVoxel && edit.voxel > 0) {
+    stack=edit.voxel;solid=true;
+    copies=edit.setVoxelCopies?edit.voxelCopies:12;
+    copies=Math.max(2,Math.min(24,copies));
+  } else if (edit.setStack && edit.stack > 0) {
+    stack=edit.stack;
+    if(edit.setStackCopies)copies=edit.stackCopies;
+    else if(edit.setStackDensity)
+      copies=Math.max(2,Math.min(8,Math.round(stack*edit.stackDensity)+1));
+    else copies=3;
+    copies=Math.max(1,Math.min(8,copies));
+  }
   return {
     z: edit.setZ ? edit.z : base.z,
     order: edit.setOrder ? edit.order : base.order,
     alpha: edit.setAlpha ? edit.alpha : base.alpha,
     setOrder: !!edit.setOrder,
+    rake:edit.setRake?edit.rake:0,
+    bow:edit.setBow?edit.bow:0,
+    thickness:edit.setThickness?edit.thickness:0,
+    stack,copies,solid,
+    direction:edit.setStackDirection
+      ? Math.max(0,STACK_DIRECTIONS.indexOf(edit.stackDirection)):0,
   };
+}
+function strategyOfPlane(edit) {
+  if(edit&&edit.setVoxel&&edit.voxel>0)return 'voxel';
+  if(edit&&edit.setStack&&edit.stack>0)return 'stack';
+  if(edit&&edit.setThickness&&edit.thickness>0)return 'thick';
+  if(edit&&edit.setBow&&edit.bow!==0)return 'bow';
+  if(edit&&edit.setRake&&edit.rake!==0)return 'rake';
+  return 'flat';
+}
+function clearPlaneShape(edit) {
+  edit.setRake=edit.setBow=edit.setThickness=edit.setStack=false;
+  edit.setStackCopies=edit.setStackDensity=edit.setStackDirection=false;
+  edit.setVoxel=edit.setVoxelCopies=false;
+  edit.rake=edit.bow=edit.thickness=edit.stack=edit.stackDensity=edit.voxel=0;
+  edit.stackCopies=edit.voxelCopies=0;edit.stackDirection='forward';
 }
 function resolvedVirtual(bg) {
   const base = VIRTUAL_DEFAULTS[bg];
@@ -438,13 +790,33 @@ function loadIniText(text, name) {
     if (eq < 0) continue;
     const token = line.slice(0,eq).trim(), values = iniWords(line.slice(eq+1));
     if (planeTokens.has(token)) {
-      const p = roomConfig(active).planes[token] || {};
+      const p = roomConfig(active).planes[token] || emptyPlane();
       if (values.z !== undefined && Number.isFinite(Number(values.z)))
         { p.setZ = true; p.z = Number(values.z); }
       if (values.order !== undefined && /^\d+$/.test(values.order))
         { p.setOrder = true; p.order = Number(values.order); }
       if (values.alpha !== undefined && /^\d+$/.test(values.alpha))
         { p.setAlpha = true; p.alpha = Number(values.alpha); }
+      if (values.source !== undefined)
+        { p.setSource = true; p.source = values.source; }
+      if (values.rake !== undefined && Number.isFinite(Number(values.rake)))
+        { p.setRake = true; p.rake = Number(values.rake); }
+      if (values.bow !== undefined && Number.isFinite(Number(values.bow)))
+        { p.setBow = true; p.bow = Number(values.bow); }
+      if (values.thick !== undefined && Number.isFinite(Number(values.thick)))
+        { p.setThickness = true; p.thickness = Number(values.thick); }
+      if (values.stack !== undefined && Number.isFinite(Number(values.stack)))
+        { p.setStack = true; p.stack = Number(values.stack); }
+      if (values.copies !== undefined && /^\d+$/.test(values.copies))
+        { p.setStackCopies = true; p.stackCopies = Number(values.copies); }
+      if (values.density !== undefined && Number.isFinite(Number(values.density)))
+        { p.setStackDensity = true; p.stackDensity = Number(values.density); }
+      if (values.dir !== undefined && STACK_DIRECTIONS.includes(values.dir))
+        { p.setStackDirection = true; p.stackDirection = values.dir; }
+      if (values.voxel !== undefined && Number.isFinite(Number(values.voxel)))
+        { p.setVoxel = true; p.voxel = Number(values.voxel); }
+      if (values.slices !== undefined && /^\d+$/.test(values.slices))
+        { p.setVoxelCopies = true; p.voxelCopies = Number(values.slices); }
       roomConfig(active).planes[token] = p;
       continue;
     }
@@ -501,6 +873,37 @@ function cellRuns(r, bg) {
     throw new Error(`${r.group}:${r.map} BG${bg+1} needs ${runs.length} cell spans; maximum is ${kVirtualCellSpanMax}`);
   return runs;
 }
+const fmtIniNumber = value => Number(value).toFixed(4)
+  .replace(/0+$/,'').replace(/\.$/,'').replace(/^-0$/,'0');
+function planeIsAuthored(p) {
+  return !!p && (p.setOrder||p.setZ||p.setAlpha||p.setSource||p.setRake||
+    p.setBow||p.setThickness||p.setStack||p.setStackCopies||
+    p.setStackDensity||p.setStackDirection||p.setVoxel||p.setVoxelCopies);
+}
+function planeIniLines(r) {
+  const lines=[];
+  for(const token of PLANE_TOKENS) {
+    if(!EDITABLE_PLANE_TOKENS.has(token))continue;
+    const p=roomConfig(r).planes[token];
+    if(!planeIsAuthored(p))continue;
+    const fields=[];
+    if(p.setOrder)fields.push(`order:${p.order}`);
+    if(p.setZ)fields.push(`z:${fmtIniNumber(p.z)}`);
+    if(p.setAlpha)fields.push(`alpha:${p.alpha}`);
+    if(p.setSource)fields.push(`source:${p.source}`);
+    if(p.setRake)fields.push(`rake:${fmtIniNumber(p.rake)}`);
+    if(p.setBow)fields.push(`bow:${fmtIniNumber(p.bow)}`);
+    if(p.setThickness)fields.push(`thick:${fmtIniNumber(p.thickness)}`);
+    if(p.setStack)fields.push(`stack:${fmtIniNumber(p.stack)}`);
+    if(p.setStackCopies)fields.push(`copies:${p.stackCopies}`);
+    if(p.setVoxel)fields.push(`voxel:${fmtIniNumber(p.voxel)}`);
+    if(p.setVoxelCopies)fields.push(`slices:${p.voxelCopies}`);
+    if(p.setStackDensity)fields.push(`density:${fmtIniNumber(p.stackDensity)}`);
+    if(p.setStackDirection)fields.push(`dir:${p.stackDirection}`);
+    lines.push(`${token} = ${fields.join(' ')}`);
+  }
+  return lines;
+}
 function virtualIniLines(r) {
   const lines = [];
   for (let bg=0; bg<2; bg++) {
@@ -519,7 +922,13 @@ function virtualIniLines(r) {
   }
   return lines;
 }
-function mergeVirtualIni() {
+const roomIniLines = r => [...planeIniLines(r),...virtualIniLines(r)];
+function ownedIniLine(line) {
+  const match=stripIniComment(line).match(/^([^=\s]+)\s*=/);
+  if(!match)return false;
+  return EDITABLE_PLANE_TOKENS.has(match[1])||/^bg[12]-virtual$/.test(match[1]);
+}
+function mergeDioramaIni() {
   const hadFinalNewline = /\r?\n$/.test(sourceIniText);
   const lines = sourceIniText.split(/\r?\n/);
   if (hadFinalNewline) lines.pop();
@@ -535,14 +944,14 @@ function mergeVirtualIni() {
     const r = match && DATA.rooms.find(x => x.group===parseInt(match[1],16) && x.map===parseInt(match[2],16));
     if (!r) { out.push(...block); continue; }
     written.add(roomKey(r));
-    const canonical = virtualIniLines(r);
+    const canonical = roomIniLines(r);
     const body = block.slice(1);
-    const first = body.findIndex(line => /^\s*bg[12]-virtual\s*=/.test(stripIniComment(line)));
-    const kept = body.filter(line => !/^\s*bg[12]-virtual\s*=/.test(stripIniComment(line)));
+    const first = body.findIndex(ownedIniLine);
+    const kept = body.filter(line => !ownedIniLine(line));
     out.push(block[0]);
     if (first >= 0) {
       const beforeCount = body.slice(0,first)
-        .filter(line => !/^\s*bg[12]-virtual\s*=/.test(stripIniComment(line))).length;
+        .filter(line => !ownedIniLine(line)).length;
       out.push(...kept.slice(0,beforeCount), ...canonical, ...kept.slice(beforeCount));
     } else {
       let at = kept.length;
@@ -551,10 +960,10 @@ function mergeVirtualIni() {
     }
   }
   for (const r of DATA.rooms) {
-    if (written.has(roomKey(r)) || !virtualIniLines(r).length) continue;
+    if (written.has(roomKey(r)) || !roomIniLines(r).length) continue;
     if (out.length && out[out.length-1].trim()) out.push('');
     out.push(`[layers:${r.group.toString(16).toUpperCase().padStart(2,'0')}:${r.map.toString(16).toUpperCase().padStart(2,'0')}]`);
-    out.push(...virtualIniLines(r));
+    out.push(...roomIniLines(r));
   }
   return out.join('\n') + (hadFinalNewline || out.length ? '\n' : '');
 }
@@ -590,6 +999,7 @@ function cellEdited(st, L, cx, cy) {
 /* ---- state ------------------------------------------------------------ */
 let room = DATA.rooms[0], bgIndex = 0, L = null, st = null;
 let band = 2, brush = 'class', mode = '2d', tint = false;
+let planeToken = 'bg1';
 let lastEntry = null;
 let view = { x:0, y:0, scale:1 };           /* 2D pan/zoom */
 /* The camera frames a WINDOW of the level, not the whole thing. A room is up
@@ -746,7 +1156,9 @@ function compositeNow() {
   return composite;
 }
 let game2dCache = new Map();
-function invalidateGameComposite() { game2dCache.clear(); }
+function invalidateGameComposite() {
+  game2dCache.clear(); native2dCache=null; nativeBandCache=null;
+}
 function gameLayerSurfaces(r, bg) {
   const key = `${keyOf(r,bg)}:${tint ? 1 : 0}:${animationPhase(r)}`
     + `:${bg === 1 ? bg2PagePhase(r) : 0}`;
@@ -814,6 +1226,28 @@ function drawActor2d() {
   ctx.fillRect(ax, ay, actor.w*view.scale, actor.h*view.scale);
   ctx.strokeRect(ax, ay, actor.w*view.scale, actor.h*view.scale);
   ctx.restore();
+}
+function drawNative2d() {
+  const r=cvs.getBoundingClientRect(),w=Math.round(r.width*devicePixelRatio);
+  const h=Math.round(r.height*devicePixelRatio);
+  if(cvs.width!==w||cvs.height!==h){cvs.width=w;cvs.height=h;}
+  ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+  ctx.fillStyle='#0d0f14';ctx.fillRect(0,0,r.width,r.height);
+  ctx.imageSmoothingEnabled=false;
+  const scale=Math.min(r.width/DATA.frameWidth,r.height/DATA.frameHeight);
+  const x=(r.width-DATA.frameWidth*scale)/2,y=(r.height-DATA.frameHeight*scale)/2;
+  ctx.drawImage(nativeFrameCanvas(),x,y,DATA.frameWidth*scale,DATA.frameHeight*scale);
+  const state=nativeFrameState(room);
+  $('#hud').innerHTML=`<b>${room.group}:${room.map}</b> native 256×224 stable frame`
+    +` &nbsp; camera ${nativeCamera.x},${nativeCamera.y}`
+    +` &nbsp; profile $${Number(room.videoProfile).toString(16).padStart(2,'0')}`
+    +(room.raster?` &nbsp; raster R${room.raster}`:'')
+    +`<br>BG1 ${state.h[0][0]},${state.v[0][0]}`
+    +` &nbsp; BG2 ${state.h[1][0]},${state.v[1][0]}`
+    +` &nbsp; TM $${room.video[0].toString(16).padStart(2,'0')}`
+    +` TS $${room.video[1].toString(16).padStart(2,'0')}`
+    +` CGWSEL $${room.video[2].toString(16).padStart(2,'0')}`
+    +` CGADSUB $${room.video[3].toString(16).padStart(2,'0')}`;
 }
 function draw2d() {
   const r = cvs.getBoundingClientRect();
@@ -1019,6 +1453,7 @@ const toCell = ev => {
 
 let drag = null;
 cvs.addEventListener('mousedown', ev => {
+  if (mode !== '2d') return;
   /* Middle button, shift, or the explicit Pan tool. Requiring a modifier was
    * the only way to move around and nothing on screen said so. */
   if (ev.button === 1 || ev.shiftKey || brush === 'pan') {
@@ -1074,6 +1509,7 @@ window.addEventListener('mouseup', () => {
 });
 cvs.addEventListener('wheel', ev => {
   ev.preventDefault();
+  if (mode !== '2d') return;
   const r = cvs.getBoundingClientRect();
   const mx = ev.clientX-r.left, my = ev.clientY-r.top;
   const k = Math.exp(-ev.deltaY * 0.0015);
@@ -1148,13 +1584,13 @@ $('#clearEverything').onclick = () => {
 /* ---- 3D orbit preview --------------------------------------------------
  * PORTABILITY IS THE POINT. The engine composites a diorama by drawing each
  * captured plane as one textured quad at its own depth, so that is exactly
- * what this does -- one quad per band, sized from its own layer's extent,
- * placed at the band's z. Nothing here depends on a WebGL-only feature:
+ * what this does -- one exact camera-local raster capture per band, placed at
+ * the band's z. Nothing here depends on a WebGL-only feature:
  *
  *   - the matrix is a plain right-handed perspective * lookAt, column-major,
  *     the same convention as scene3d_math.c;
- *   - a quad's world extent comes from its layer's own pixel size, so a
- *     one-page background is not stretched to the playfield's length;
+ *   - every BG is sampled through its own live scroll, mosaic and page-cycle
+ *     state before it becomes a common 256x224 capture surface;
  *   - configured painter order decides overlap while z independently controls
  *     projected geometry, matching diorama.c;
  *   - the shader is texel * vertex colour, which is the SIM 3D fragment
@@ -1162,20 +1598,23 @@ $('#clearEverything').onclick = () => {
  *
  * The runtime consumes the same INI values and capture-surface model. */
 const V_SRC = `
-attribute vec2 aPos; attribute vec2 aUV;
+attribute vec3 aPos; attribute vec2 aUV; attribute float aShade;
 uniform mat4 uMVP; uniform vec3 uOrigin;
-varying vec2 vUV;
-void main(){ vUV = aUV;
-  gl_Position = uMVP * vec4(aPos.x + uOrigin.x, aPos.y + uOrigin.y, uOrigin.z, 1.0); }`;
+varying vec2 vUV; varying float vShade;
+void main(){ vUV = aUV; vShade = aShade;
+  gl_Position = uMVP * vec4(aPos + uOrigin, 1.0); }`;
 const F_SRC = `
 precision mediump float;
 uniform sampler2D uTex; uniform vec4 uTint;
-varying vec2 vUV;
+varying vec2 vUV; varying float vShade;
 void main(){ vec4 t = texture2D(uTex, vUV);
   if (t.a < 0.02) discard;                 /* colour 0 stays transparent */
-  gl_FragColor = vec4(t.rgb * uTint.rgb, t.a * uTint.a); }`;
+  gl_FragColor = vec4(t.rgb * uTint.rgb * vShade, t.a * uTint.a); }`;
 
 let gl = null, prog = null, texes = [null,null,null], quadBuf = null;
+const nativeBandTex = [
+  [null,null,null], [null,null,null],
+];
 /* The layer you are NOT editing, rasterised and cached so both backgrounds can
  * be in the scene at once. Without it there is no way to see whether a band
  * you pushed back on BG1 has passed through BG2 -- which is the one thing the
@@ -1236,6 +1675,14 @@ function initGL() {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE); }
+  for(let bg=0;bg<2;bg++)for(let b=0;b<3;b++){
+    nativeBandTex[bg][b]=gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D,nativeBandTex[bg][b]);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+  }
   return true;
 }
 /* Column-major, same layout scene3d_math.c uses. */
@@ -1276,20 +1723,23 @@ function draw3d() {
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-  const surf = surfacesNow();
+  const captured = nativeBandSurfaces();
   if (glDirty) {
-    for (let b=0;b<3;b++){ gl.bindTexture(gl.TEXTURE_2D, texes[b]);
-      gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE, surf[b]); }
+    for(let bg=0;bg<2;bg++)for(let b=0;b<3;b++){
+      gl.bindTexture(gl.TEXTURE_2D,nativeBandTex[bg][b]);
+      gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,
+                    captured.images[bg][b]);
+    }
     glDirty = false;
   }
-  /* World units: one screen-height of playfield = 1.0, so the camera framing
-   * is independent of how long the level is. */
-  const unit = 1 / L.h;
-  const W = L.w*unit, H = 1.0;
+  /* World units: one authentic screen-height = 1.0, matching the capture
+   * geometry the runtime gives its presentation renderer. */
+  const unit = 1 / DATA.frameHeight;
+  const W = DATA.frameWidth*unit, H = 1.0;
   const cx = Math.cos(orbit.yaw), sx = Math.sin(orbit.yaw);
   const cp = Math.cos(orbit.pitch), sp = Math.sin(orbit.pitch);
-  /* Pivot at the focused point on the playfield, so yaw rotates around what
-   * is on screen instead of around the middle of a very long level. */
+  /* Orbit focus is local to the visible capture. The native camera sliders
+   * select which part of the full room was captured before projection. */
   const fx = (orbit.focusX - 0.5) * W, fy = orbit.focusY * H;
   const eye = [fx + sx*cp*orbit.dist, fy - sp*orbit.dist, cx*cp*orbit.dist];
   const mvp = mul(perspective(0.9, glc.width/glc.height, 0.01, 60),
@@ -1298,32 +1748,69 @@ function draw3d() {
   lastMVP = mvp; lastVW = glc.clientWidth; lastVH = glc.clientHeight;
 
   const aPos = gl.getAttribLocation(prog,'aPos'), aUV = gl.getAttribLocation(prog,'aUV');
+  const aShade = gl.getAttribLocation(prog,'aShade');
   const uOrigin = gl.getUniformLocation(prog,'uOrigin');
   const uTint = gl.getUniformLocation(prog,'uTint');
   gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
   gl.enableVertexAttribArray(aPos); gl.enableVertexAttribArray(aUV);
-  gl.vertexAttribPointer(aPos,2,gl.FLOAT,false,16,0);
-  gl.vertexAttribPointer(aUV ,2,gl.FLOAT,false,16,8);
-  const quad = (levelW, levelH, z, tex, alpha, dx = 0, dy = 0) => {
-    /* Each layer keeps its OWN extent -- 17 rooms have a BG2 of one 256x256
-     * page against a playfield up to 4096 long, and stretching it to match
-     * would be a lie about where its art actually is. */
-    const w = levelW * unit, h = levelH * unit;
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-      dx-w/2, dy+h/2, 0,0,   dx+w/2, dy+h/2, 1,0,
-      dx-w/2, dy-h/2, 0,1,   dx+w/2, dy-h/2, 1,1 ]), gl.DYNAMIC_DRAW);
-    gl.uniform3f(uOrigin, 0, 0, z);
-    gl.uniform4f(uTint, 1, 1, 1, alpha);
+  gl.enableVertexAttribArray(aShade);
+  gl.vertexAttribPointer(aPos,3,gl.FLOAT,false,24,0);
+  gl.vertexAttribPointer(aUV ,2,gl.FLOAT,false,24,12);
+  gl.vertexAttribPointer(aShade,1,gl.FLOAT,false,24,20);
+  const drawMesh = (vertices, z, tex, alpha, shade=1) => {
+    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(vertices),gl.DYNAMIC_DRAW);
+    gl.uniform3f(uOrigin,0,0,z);
+    gl.uniform4f(uTint,shade,shade,shade,alpha);
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.drawArrays(gl.TRIANGLES,0,vertices.length/6);
+  };
+  const gridMesh = point => {
+    const vertices=[];
+    const push=(s,t)=>vertices.push(...point(s,t));
+    for(let row=0;row<6;row++)for(let col=0;col<8;col++){
+      const s0=col/8,s1=(col+1)/8,t0=row/6,t1=(row+1)/6;
+      push(s0,t0);push(s0,t1);push(s1,t0);
+      push(s1,t0);push(s0,t1);push(s1,t1);
+    }
+    return vertices;
+  };
+  const planeMesh = (rake,bow) => gridMesh((s,t)=>[
+    (s-.5)*W,(.5-t)*H,rake*t+bow*t*t,s,t,1]);
+  const skirtMesh = (rake,bow,thickness) => gridMesh((s,t)=>[
+    (s-.5)*W,-.5*H-t*thickness*.5,rake+bow+t*thickness,
+    s,1,1-.45*t]);
+  const flatMesh=planeMesh(0,0);
+  const drawSurface = (item,tex,alpha) => {
+    const token=item.b===0?null:(item.bg===0
+      ?(item.b===1?'bg1':'bg1hi'):(item.b===1?'bg2':'bg2hi'));
+    const shape=token?resolvedPlane(token):{
+      rake:0,bow:0,thickness:0,stack:0,copies:0,direction:0,solid:false};
+    const mesh=shape.rake||shape.bow?planeMesh(shape.rake,shape.bow):flatMesh;
+    if(shape.stack>0&&shape.copies>1){
+      for(let c=shape.copies-1;c>=0;c--){
+        if(shape.direction===2
+            ?(shape.copies%2===1&&c===(shape.copies-1)/2):c===0)continue;
+        const f=c/(shape.copies-1);
+        let z=0,distance=f;
+        if(shape.direction===1)z=-f*shape.stack;
+        else if(shape.direction===2){z=(f-.5)*shape.stack;distance=Math.abs(f-.5)/.5;}
+        else z=f*shape.stack;
+        const shade=shape.solid?.88:1-.5*distance;
+        const copyAlpha=shape.solid?1:1-.65*distance;
+        drawMesh(mesh,bandZ(item.bg,item.b)+z,tex,alpha*copyAlpha,shade);
+      }
+    }
+    if(shape.thickness>0)
+      drawMesh(skirtMesh(shape.rake,shape.bow,shape.thickness),
+               bandZ(item.bg,item.b),tex,alpha);
+    drawMesh(mesh,bandZ(item.bg,item.b),tex,alpha);
   };
   /* Resolve the same independent paint keys as DioramaLayerOrder_Resolve.
    * Virtual planes share their anchor's default key and are stably inserted
    * immediately before it. Existing INI `order` values therefore retain their
    * current meaning when the new planes are introduced. */
-  const other = showBoth ? otherLayerTextures() : null;
-  const bgState = bg => bg === bgIndex
-    ? {texes,L,active:true} : (other ? {texes:other.texes,L:other.L,active:false} : null);
+  const bgState = bg => room.bg[bg] && (showBoth || bg===bgIndex)
+    ? {texes:nativeBandTex[bg]} : null;
   const baseSequence = [
     {bg:1,b:0}, {bg:1,b:1}, {bg:0,b:0}, {bg:0,b:1},
     {actor:true}, {bg:1,b:2}, {bg:0,b:2},
@@ -1337,20 +1824,7 @@ function draw3d() {
     if (item.actor) { drawActor3d(unit,W,H); continue; }
     const source = bgState(item.bg);
     const alpha = bandAlpha(item.bg,item.b) / 255;
-    if (source.active) {
-      quad(source.L.w,source.L.h,bandZ(item.bg,item.b),
-           source.texes[item.b],alpha);
-      continue;
-    }
-    const span = otherOffset.repeat
-      ? Math.ceil((L.w + source.L.w) / source.L.w) + 1 : 1;
-    const first = otherOffset.repeat
-      ? Math.floor((-L.w/2 - source.L.w) / source.L.w) : 0;
-    for (let i=0;i<span;i++) {
-      const ox = otherOffset.x + (first+i)*source.L.w + (source.L.w-L.w)/2;
-      quad(source.L.w,source.L.h,bandZ(item.bg,item.b),source.texes[item.b],alpha,
-           ox*unit,-otherOffset.y*unit);
-    }
+    drawSurface(item,source.texes[item.b],alpha);
   }
 }
 
@@ -1380,27 +1854,30 @@ function actorTexture() {
 }
 function drawActor3d(unit, W, H) {
   const aw = actor.w * unit, ah = actor.h * unit;
-  /* Level pixels -> the same world space the band quads use. */
-  const cxw = (actor.x + actor.w/2) * unit - W/2;
-  const cyw = H/2 - (actor.y + actor.h/2) * unit;
+  /* Level pixels -> camera-local capture space. */
+  const cxw = (actor.x-nativeCamera.x + actor.w/2) * unit - W/2;
+  const cyw = H/2 - (actor.y-nativeCamera.y + actor.h/2) * unit;
   const verts = new Float32Array([
-    cxw-aw/2, cyw+ah/2, 0,0,  cxw+aw/2, cyw+ah/2, 1,0,
-    cxw-aw/2, cyw-ah/2, 0,1,  cxw+aw/2, cyw-ah/2, 1,1 ]);
+    cxw-aw/2,cyw+ah/2,0, 0,0,1,  cxw-aw/2,cyw-ah/2,0, 0,1,1,
+    cxw+aw/2,cyw+ah/2,0, 1,0,1,  cxw+aw/2,cyw+ah/2,0, 1,0,1,
+    cxw-aw/2,cyw-ah/2,0, 0,1,1,  cxw+aw/2,cyw-ah/2,0, 1,1,1 ]);
   gl.bufferData(gl.ARRAY_BUFFER, verts, gl.DYNAMIC_DRAW);
   gl.uniform3f(gl.getUniformLocation(prog,'uOrigin'), 0, 0, actorZ());
   gl.uniform4f(gl.getUniformLocation(prog,'uTint'), 1,1,1,1);
   gl.bindTexture(gl.TEXTURE_2D, actorTexture());
-  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.drawArrays(gl.TRIANGLES,0,6);
 }
 /* Level-space point under a 3D pointer, on the actor's own plane. */
 function actorPointFromEvent(ev) {
   if (!lastMVP || !L) return null;
   const r = glc.getBoundingClientRect();
-  const unit = 1 / L.h, W = L.w*unit, H = 1.0;
+  const unit = 1 / DATA.frameHeight;
+  const W = DATA.frameWidth*unit, H = 1.0;
   const hit = unprojectToPlane(lastMVP, ev.clientX-r.left, ev.clientY-r.top,
                                actorZ(), r.width, r.height);
   if (!hit) return null;
-  return [ (hit[0] + W/2) / unit, (H/2 - hit[1]) / unit ];
+  return [ nativeCamera.x+(hit[0]+W/2)/unit,
+           nativeCamera.y+(H/2-hit[1])/unit ];
 }
 function actorHit3d(ev) {
   const p = actorPointFromEvent(ev);
@@ -1427,11 +1904,10 @@ window.addEventListener('mousemove', ev => {
     return;
   }
   if (!drag.orbit) return;
-  if (drag.pan) {          /* shift-drag walks the window along the level */
-    const px = (ev.clientX-drag.x) / Math.max(1, glc.clientWidth);
-    const py = (ev.clientY-drag.y) / Math.max(1, glc.clientHeight);
-    orbit.focusX = Math.max(0, Math.min(1, orbit.focusX - px * orbit.dist));
-    orbit.focusY = Math.max(-1.5, Math.min(1.5, orbit.focusY + py * orbit.dist));
+  if (drag.pan) {          /* shift-drag moves the authentic room camera */
+    const dx=ev.clientX-drag.x,dy=ev.clientY-drag.y;
+    nativeCamera.x-=Math.round(dx);nativeCamera.y-=Math.round(dy);
+    refreshNativeCameraControls();invalidateGameComposite();glDirty=true;
     drag.x=ev.clientX; drag.y=ev.clientY; draw(); return;
   }
   /* Clamp the per-event delta. A pointer that leaves the window and comes
@@ -1462,8 +1938,8 @@ const actor = { x: 0, y: 0, w: 24, h: 32, show: true };
 const actorZ = () => resolvedPlane('obj2').z;
 
 function resetActor() {
-  actor.x = Math.round(L.w * 0.10);
-  actor.y = Math.round(L.h * 0.60);
+  actor.x = nativeCamera.x + Math.round(DATA.frameWidth * 0.40);
+  actor.y = nativeCamera.y + Math.round(DATA.frameHeight * 0.60);
 }
 
 /* Inverse of a 4x4, so a screen drag can be put back onto the actor's plane.
@@ -1501,11 +1977,12 @@ function unprojectToPlane(mvp, sx, sy, planeZ, vw, vh) {
   return [n[0] + (f[0]-n[0])*t, n[1] + (f[1]-n[1])*t];
 }
 
-/* Export the complete INI, not a sidecar dialect. Only virtual records are
- * regenerated; everything the action editor does not own is preserved. */
+/* Export the complete INI, not a sidecar dialect. The four ordinary BG plane
+ * records and both virtual records are regenerated; every other record stays
+ * byte-for-byte in the surrounding document. */
 $('#export').onclick = () => {
   try {
-    const text = mergeVirtualIni();
+    const text = mergeDioramaIni();
     const url = URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'}));
     const a = document.createElement('a');
     a.href=url; a.download=sourceIniName || 'diorama-layers.ini';
@@ -1519,7 +1996,7 @@ $('#importIni').onchange = async event => {
   const file = event.target.files && event.target.files[0];
   event.target.value = '';
   if (!file) return;
-  if (configDirty && !confirm('Loading another INI replaces the unsaved virtual-layer edits in this editor. Continue?'))
+  if (configDirty && !confirm('Loading another INI replaces the unsaved action-layer edits in this editor. Continue?'))
     return;
   loadIniText(await file.text(),file.name);
   undoStack.length=0; redoStack.length=0; pendingOp=null;
@@ -1554,9 +2031,9 @@ function hud(cx, cy) {
     parts.push(`band <b style="color:var(${BANDS[b].css})">${BANDS[b].name}</b>`
       + (cellEdited(st,L,cx,cy) ? ' (edited)' : ' (authentic)'));
   } else if (mode === '3d') {
-    parts.push(`drag to orbit &nbsp; shift-drag to walk &nbsp; wheel to zoom`
+    parts.push(`drag to orbit &nbsp; shift-drag to move native camera &nbsp; wheel to zoom`
       + ` &nbsp; <kbd>r</kbd> resets`
-      + ` &nbsp; at ${Math.round(orbit.focusX*L.w)}px of ${L.w}`);
+      + ` &nbsp; camera ${nativeCamera.x},${nativeCamera.y}`);
   } else {
     parts.push('drag to paint &nbsp; shift-drag to pan &nbsp; wheel to zoom'
       + ' &nbsp; <kbd>f</kbd> fits');
@@ -1596,8 +2073,11 @@ function updateLegend() {
     ? '<b>drag</b> paint &nbsp; <b>shift-drag / middle</b> pan &nbsp; '
       + '<b>arrows</b> move<br><b>wheel</b> zoom &nbsp; <b>f</b> fit &nbsp; '
       + '<b>alt-drag</b> revert &nbsp; <b>ctrl/cmd-Z</b> undo'
-    : '<b>drag</b> orbit &nbsp; <b>shift-drag</b> pan &nbsp; <b>arrows</b> move'
-      + '<br><b>wheel</b> zoom &nbsp; <b>r</b> reset camera';
+    : mode === 'native'
+      ? '<b>native stable frame</b> &nbsp; camera sliders or arrows move the view'
+        + '<br>frame slider drives CHR, page-cycle, and persistent raster phases'
+    : '<b>drag</b> orbit &nbsp; <b>shift-drag / arrows</b> move native camera'
+      + '<br><b>wheel</b> zoom &nbsp; <b>r</b> reset orbit';
 }
 /* The ladder is the answer to "will these two layers interpenetrate?" -- it
  * is arithmetic on the resolved depths, so it is right even where the camera
@@ -1641,7 +2121,9 @@ function draw() {
   requestAnimationFrame(() => { framePending = false; drawNow(); });
 }
 function drawNow() {
-  if (mode === '2d') draw2d(); else draw3d();
+  if (mode === '2d') draw2d();
+  else if (mode === 'native') drawNative2d();
+  else draw3d();
   updateLegend(); renderLadder(); renderBandHint();
   const bg = bgIndex ^ 1, lay = room.bg[bg], e = otherExtent();
   $('#otherName').textContent = lay
@@ -1660,9 +2142,28 @@ function refreshNativePhaseControls() {
     parts.push(`BG2 page ${bg2PageIndex(room)+1}/4 at 5f cadence`);
   if (room.raster)
     parts.push(`raster preset R${room.raster} uses this frame clock`);
+  const parity=nativeGoldenStatus.get(roomKey(room));
+  if(parity===true)parts.push('C/JS native parity verified');
+  else if(parity===false)parts.push('C/JS PARITY MISMATCH — check console');
   $('#nativePhaseInfo').textContent = parts.length
     ? parts.join(' · ') : 'Static background';
 }
+function refreshNativeCameraControls() {
+  const bg1=room.bg[0],maxX=Math.max(0,bg1.pagesWide*256-DATA.frameWidth);
+  const maxY=Math.max(0,bg1.pagesHigh*256-(DATA.frameHeight+1));
+  nativeCamera.x=Math.max(0,Math.min(maxX,nativeCamera.x));
+  nativeCamera.y=Math.max(0,Math.min(maxY,nativeCamera.y));
+  $('#nativeCameraX').max=String(maxX);$('#nativeCameraX').value=String(nativeCamera.x);
+  $('#nativeCameraY').max=String(maxY);$('#nativeCameraY').value=String(nativeCamera.y);
+  $('#nativeCameraXv').textContent=String(nativeCamera.x);
+  $('#nativeCameraYv').textContent=String(nativeCamera.y);
+}
+function setNativeCamera(axis,value) {
+  nativeCamera[axis]=Number(value)||0;refreshNativeCameraControls();
+  native2dCache=null;nativeBandCache=null;glDirty=true;draw();
+}
+$('#nativeCameraX').oninput=event=>setNativeCamera('x',event.target.value);
+$('#nativeCameraY').oninput=event=>setNativeCamera('y',event.target.value);
 function setNativeFrame(value) {
   nativeFrame = Math.max(0, Math.min(255, Number(value) || 0));
   L = decodeLayer(room,bgIndex);
@@ -1698,6 +2199,7 @@ Object.entries(brushBtns).forEach(([k, el]) => el.onclick = () => {
 $('#bg1').onclick = () => setLayer(0);
 $('#bg2').onclick = () => setLayer(1);
 $('#mode2d').onclick = () => setMode('2d');
+$('#modeNative').onclick = () => setMode('native');
 $('#mode3d').onclick = () => setMode('3d');
 $('#tint').onclick = () => { tint = !tint; $('#tint').classList.toggle('on', tint);
   invalidate(); };
@@ -1736,9 +2238,126 @@ $('#virtualReset').onclick = () => {
   v.setZ=v.setOrder=v.setAlpha=false;
   configDirty=true; glDirty=true; refreshVirtualControls(); draw();
 };
+let syncingPlaneControls=false;
+function selectedPlaneEdit() {
+  const planes=roomConfig(room).planes;
+  if(!planes[planeToken])planes[planeToken]=emptyPlane();
+  return planes[planeToken];
+}
+function setPlaneStrategy(edit,next) {
+  const was=strategyOfPlane(edit);
+  const tilt=was==='rake'?edit.rake:was==='bow'?edit.bow:0;
+  const fill=was==='stack'?edit.stack:was==='voxel'?edit.voxel:0;
+  clearPlaneShape(edit);
+  if(next==='rake'){edit.setRake=true;edit.rake=tilt||0.29;}
+  else if(next==='bow'){edit.setBow=true;edit.bow=tilt||0.29;}
+  else if(next==='thick'){edit.setThickness=true;edit.thickness=0.20;}
+  else if(next==='stack'){
+    edit.setStack=true;edit.stack=fill||0.29;
+    edit.setStackCopies=true;edit.stackCopies=3;
+  } else if(next==='voxel'){
+    edit.setVoxel=true;edit.voxel=fill||0.18;
+    edit.setVoxelCopies=true;edit.voxelCopies=12;
+  }
+}
+function refreshPlaneControls() {
+  if(!room)return;
+  const edit=selectedPlaneEdit(),value=resolvedPlane(planeToken);
+  const strategy=strategyOfPlane(edit);
+  syncingPlaneControls=true;
+  $('#planeSelect').value=planeToken;
+  $('#planeZ').value=Math.round(value.z*100);
+  $('#planeOrder').value=value.order;$('#planeAlpha').value=value.alpha;
+  $('#planeZv').textContent=`${value.z.toFixed(2)}${edit.setZ?' *':''}`;
+  $('#planeOrderv').textContent=`${value.order}${edit.setOrder?' *':''}`;
+  $('#planeAlphav').textContent=`${value.alpha}${edit.setAlpha?' *':''}`;
+  $('#planeStrategy').value=strategy;$('#planeStrategyv').textContent=strategy;
+  const depth=strategy==='rake'?edit.rake:strategy==='bow'?edit.bow:
+    strategy==='thick'?edit.thickness:strategy==='stack'?edit.stack:
+    strategy==='voxel'?edit.voxel:0;
+  const signed=strategy==='rake'||strategy==='bow';
+  $('#planeDepth').min=signed?'-100':'0';$('#planeDepth').max='100';
+  $('#planeDepth').value=Math.round(depth*100);
+  $('#planeDepthv').textContent=Number(depth).toFixed(2);
+  $('#planeDepthRow').style.display=strategy==='flat'?'none':'flex';
+  const repeated=strategy==='stack'||strategy==='voxel';
+  $('#planeCopiesRow').style.display=repeated?'flex':'none';
+  $('#planeDirectionRow').style.display=repeated?'flex':'none';
+  if(repeated){
+    $('#planeCopies').max=strategy==='voxel'?'24':'8';
+    $('#planeCopies').value=value.copies;
+    $('#planeCopiesv').textContent=`${value.copies}`+
+      (strategy==='stack'&&edit.setStackDensity&&!edit.setStackCopies?' density':'');
+    $('#planeDirection').value=STACK_DIRECTIONS[value.direction];
+  }
+  const composed=['setRake','setBow','setThickness','setStack','setVoxel']
+    .filter(key=>edit[key]).length>1;
+  $('#planeHint').innerHTML=`Edits <code>${planeToken}</code> in this room. `+
+    `The 3D view uses the game's rake/bow/skirt/stack formulas immediately.`+
+    (composed?' <b>This imported record composes multiple shape keys.</b> Choosing a new shape makes it exclusive.':'');
+  syncingPlaneControls=false;
+}
+function planeChanged() {
+  configDirty=true;glDirty=true;refreshPlaneControls();draw();
+}
+$('#planeSelect').onchange=event=>{
+  planeToken=event.target.value;
+  const nextBg=planeToken.startsWith('bg2')?1:0;
+  if(nextBg!==bgIndex&&room.bg[nextBg])setLayer(nextBg);
+  else {refreshPlaneControls();draw();}
+};
+$('#planeZ').oninput=event=>{
+  if(syncingPlaneControls)return;const p=selectedPlaneEdit();
+  p.setZ=true;p.z=Number(event.target.value)/100;planeChanged();
+};
+$('#planeOrder').oninput=event=>{
+  if(syncingPlaneControls)return;const p=selectedPlaneEdit();
+  p.setOrder=true;p.order=Number(event.target.value);planeChanged();
+};
+$('#planeAlpha').oninput=event=>{
+  if(syncingPlaneControls)return;const p=selectedPlaneEdit();
+  p.setAlpha=true;p.alpha=Number(event.target.value);planeChanged();
+};
+$('#planeStrategy').onchange=event=>{
+  if(syncingPlaneControls)return;setPlaneStrategy(selectedPlaneEdit(),event.target.value);
+  planeChanged();
+};
+$('#planeDepth').oninput=event=>{
+  if(syncingPlaneControls)return;
+  const p=selectedPlaneEdit(),strategy=strategyOfPlane(p);
+  const value=Number(event.target.value)/100;
+  if(value===0){clearPlaneShape(p);planeChanged();return;}
+  if(strategy==='rake'){p.setRake=true;p.rake=value;}
+  else if(strategy==='bow'){p.setBow=true;p.bow=value;}
+  else if(strategy==='thick'){p.setThickness=true;p.thickness=value;}
+  else if(strategy==='stack'){p.setStack=true;p.stack=value;}
+  else if(strategy==='voxel'){p.setVoxel=true;p.voxel=value;}
+  planeChanged();
+};
+$('#planeCopies').oninput=event=>{
+  if(syncingPlaneControls)return;
+  const p=selectedPlaneEdit(),strategy=strategyOfPlane(p),value=Number(event.target.value);
+  if(strategy==='voxel'){p.setVoxelCopies=true;p.voxelCopies=value;}
+  else if(strategy==='stack'){
+    p.setStackCopies=true;p.stackCopies=value;
+    p.setStackDensity=false;p.stackDensity=0;
+  }
+  planeChanged();
+};
+$('#planeDirection').onchange=event=>{
+  if(syncingPlaneControls)return;const p=selectedPlaneEdit();
+  p.setStackDirection=true;p.stackDirection=event.target.value;planeChanged();
+};
+$('#planeResetLayout').onclick=()=>{
+  const p=selectedPlaneEdit();p.setZ=p.setOrder=p.setAlpha=false;planeChanged();
+};
+$('#planeResetShape').onclick=()=>{clearPlaneShape(selectedPlaneEdit());planeChanged();};
+$('#planeResetAll').onclick=()=>{
+  roomConfig(room).planes[planeToken]=emptyPlane();planeChanged();
+};
 $('#undoBtn').onclick = undo;
 $('#redoBtn').onclick = redo;
-$('#navFit').onclick = () => { fitView(); draw(); };
+$('#navFit').onclick = () => { if(mode==='2d')fitView(); draw(); };
 $('#navOut').onclick = () => zoomBy(1/1.4);
 $('#navIn').onclick  = () => zoomBy(1.4);
 $('#navReset').onclick = () => { resetCamera(); fitView(); draw(); };
@@ -1794,30 +2413,34 @@ window.addEventListener('keydown', e => {
   if (!a) return;
   e.preventDefault();
   if (mode === '2d') { view.x -= a[0]*48*step; view.y -= a[1]*48*step; }
-  else {
-    orbit.focusX = Math.max(0, Math.min(1, orbit.focusX + a[0]*0.02*step));
-    orbit.focusY = Math.max(-1.5, Math.min(1.5, orbit.focusY - a[1]*0.05*step));
+  else if (mode === 'native' || mode === '3d') {
+    setNativeCamera('x',nativeCamera.x+a[0]*8*step);
+    setNativeCamera('y',nativeCamera.y+a[1]*8*step);
   }
   draw();
 });
 function setMode(m) {
   drag = null;                          /* a drag never crosses a mode change */
   mode = m; $('#mode2d').classList.toggle('on', m==='2d');
+  $('#modeNative').classList.toggle('on', m==='native');
   $('#mode3d').classList.toggle('on', m==='3d');
-  cvs.style.display = m==='2d' ? 'block' : 'none';
+  cvs.style.display = m!=='3d' ? 'block' : 'none';
   glc.style.display = m==='3d' ? 'block' : 'none';
   glDirty = true; draw();
 }
 function setLayer(i) {
   if (!room.bg[i]) return;
   bgIndex = i;
+  if(!planeToken.startsWith(`bg${i+1}`))planeToken=`bg${i+1}`;
   $('#bg1').classList.toggle('on', i===0); $('#bg2').classList.toggle('on', i===1);
   L = decodeLayer(room, i); st = bucket(room, i);
   surfacesDirty = compositeDirty = glDirty = true; invalidateOther();
   invalidateGameComposite();
   composite = null;
   resetActor();
-  refreshVirtualControls(); refreshNativePhaseControls();
+  verifyRoomNativeGolden(room);
+  refreshVirtualControls(); refreshPlaneControls(); refreshNativePhaseControls();
+  refreshNativeCameraControls();
   fitView(); tally(); draw();
 }
 const sel = $('#room');
@@ -1831,7 +2454,8 @@ DATA.rooms.forEach((r, i) => {
     + `${r.raster ? `/R${r.raster}` : ''}]`;
   sel.appendChild(o);
 });
-sel.onchange = () => { room = DATA.rooms[Number(sel.value)]; setLayer(0); };
+sel.onchange = () => { room = DATA.rooms[Number(sel.value)];
+  nativeCamera.x=nativeCamera.y=0;nativeDecodedKey='';native2dCache=null;setLayer(0); };
 new ResizeObserver(() => {
   if (!L) return;
   /* First real layout: if the initial fit happened against a zero-size
@@ -1876,11 +2500,13 @@ them.</p>
 
 <h4>The INI is the source of truth</h4>
 <p>This editor is the authoring surface. It imports the complete
-<code>diorama-layers.ini</code>, previews existing plane overrides, and owns
-only <code>bg1-virtual</code> and <code>bg2-virtual</code> records in base action
-room sections. Export preserves all unrelated comments, sections, and settings.
+<code>diorama-layers.ini</code> and owns <code>bg1</code>, <code>bg1hi</code>,
+<code>bg2</code>, <code>bg2hi</code>, <code>bg1-virtual</code>, and
+<code>bg2-virtual</code> records in base action-room sections. Export preserves
+all unrelated planes, comments, scoped sections, and settings.
 The game only consumes and renders the result.</p>
 <pre>[layers:01:01]
+bg1 = z:0.5 voxel:0.08 slices:12 dir:backward
 bg1-virtual = z:0.35 order:4 alpha:255
 bg1-virtual = metatile:23 band:0
 bg1-virtual = cells:4,5-12,5 band:2</pre>
@@ -1900,7 +2526,14 @@ game presentation unchanged while enriching Diorama 3D.</p>
 <p>The shipped defaults put BG2 at z 0.20, BG2 high at 0.21, BG1 at 0.50,
 BG1 high at 0.51, and OBJ2 at 0.51. A new far plane defaults 0.15 behind its
 anchor. Its Z, order, and alpha controls write directly to the room's virtual
-record; existing plane records are loaded from the same INI.</p>
+record. The ordinary BG selector edits the four native low/high plane records:
+Z, paint order, alpha, and the same Flat/Rake/Bow/Thickness/Stack/Voxel shape
+strategies as the runtime.</p>
+<p>Rake and bow use the runtime's six-row depth mesh. Thickness repeats the
+captured bottom row across the shaded skirt. Stack and voxel use the same copy
+limits, forward/backward/both placement, falloff, and redundant-copy rule as
+the game. Imported records may compose multiple shape keys; selecting a new
+strategy deliberately makes the shape exclusive, matching the game editor.</p>
 <p>The renderer is a painter: <b>order</b> decides which surface covers another,
 while <b>z</b> decides its projected location and depth effect. The ladder shows
 both values. It warns only when surfaces from different BGs are nearly
@@ -1911,9 +2544,10 @@ warning.</p>
 <p>The two backgrounds are rarely the same size &mdash; <b>17 rooms</b> have a
 BG2 of a single 256&times;256 page against a playfield up to 4096 long, and 16
 more simply differ &mdash; and in play BG2 scrolls at its own rate or repeats.
-So there is <b>no single true alignment</b> to preview, and checking only the
-arrangement that happens to sit at the origin would miss most of the
-relationship.</p>
+So there is <b>no single full-level alignment</b> to inspect in the map editor,
+and checking only the arrangement that happens to sit at the origin would miss
+most of the relationship. Diorama 3D does not use this approximation: it uses
+the native camera and each BG's exact resolved scroll.</p>
 <p>The <b>X</b> and <b>Y</b> controls slide the other layer in level pixels, as
 a fraction of its own extent so the same throw covers a 256px background and a
 4096px one. <b>Repeat</b> tiles it across the active layer, which is what a
@@ -1936,14 +2570,18 @@ asset script would be a second reverse-engineering problem for no extra
 answer.</p>
 
 <h4>Why the preview is built this way</h4>
-<p>Each band is rasterised to its own full-level surface and drawn as one
-textured quad at its own z &mdash; deliberately the same shape as the runtime,
-where a plane <i>is</i> a captured surface composited at a depth. The camera is
-a plain right-handed <code>perspective * lookAt</code> in the same column-major
-convention as <code>scene3d_math.c</code>; the fragment stage is
-<code>texel * vertex colour</code>, which the SIM 3D path already uses. Quad
-extents come from each layer's own pixel size, so a one-page background is not
-stretched to the playfield's length.</p>
+<p>The map editor keeps a full-level surface because it is an authoring view.
+Native frame and Diorama 3D instead build the exact 256&times;224 capture for the
+selected camera and frame: BG1/BG2 parallax, all ten persistent raster presets,
+mosaic, CHR animation and the BG2 page cycle are resolved before pixels are
+routed into virtual bands. Each band is then drawn as one textured quad at its
+own z &mdash; deliberately the runtime shape, where a plane <i>is</i> a captured
+surface composited at a depth.</p>
+<p>The camera is a plain right-handed <code>perspective * lookAt</code> in the
+same column-major convention as <code>scene3d_math.c</code>; the fragment stage
+is <code>texel * vertex colour</code>, which the SIM 3D path already uses.
+Changing the native camera controls changes the source capture instead of
+sliding a decorative approximation.</p>
 
 <h4>Extents differ, and that matters</h4>
 <p>Across the 49 rooms: 10 have equal extents, 16 have a longer playfield, 6
@@ -1954,8 +2592,8 @@ grid.</p>
 
 <h4>Export</h4>
 <p><b>Export INI</b> downloads a complete merged configuration, not a sidecar.
-Only virtual records in action-room base sections are regenerated. Cell edits
-are coalesced into horizontal inclusive rectangles, metatile records are sorted,
-and untouched rooms stay untouched. Load the exported file again to continue
-authoring without any conversion step.</p>`;
+The four ordinary BG and two virtual records in action-room base sections are
+regenerated. Cell edits are coalesced into horizontal inclusive rectangles,
+metatile records are sorted, and untouched rooms stay untouched. Load the
+exported file again to continue authoring without any conversion step.</p>`;
 </script>

@@ -202,6 +202,9 @@ static void TestGenericRoomScriptAndInheritance(void) {
   ActionRoomScene scene;
   CHECK(ActionRoomScene_Load(&scene, rom, kRomSize, 0x04, 0x02));
   CHECK(scene.have_video_profile);
+  CHECK(scene.have_raster_workspace);
+  CHECK(!memcmp(scene.raster_workspace, chars1,
+                kActionRoomSceneRasterWorkspaceBytes));
   CHECK(scene.video_profile_index == kProfile);
   CHECK(scene.video_profile[4] == 0x02);
   CHECK(ActionRoomScene_TileWidth(&scene, 1) == 32);
@@ -268,6 +271,199 @@ static void TestScenePhaseResolvers(void) {
   CHECK(ActionRoomScene_ResolveBg2PagePhase(&scene, 10, -1) == 2);
 }
 
+static void InitFrameScene(ActionRoomScene *scene) {
+  memset(scene, 0, sizeof(*scene));
+  scene->have_video_profile = true;
+  scene->have_raster_waveform = true;
+  scene->have_raster_workspace = true;
+  scene->video_profile[0] = 3;
+  scene->video_profile[6] = 1;
+  scene->video_profile[9] = 0x12;
+  scene->video_profile[10] = 0x14;
+  for (unsigned i = 0; i < kActionRoomSceneRasterWaveformBytes; i++)
+    scene->raster_waveform[i] = (uint8_t)i;
+  for (unsigned bg = 0; bg < 2; bg++) {
+    scene->bg[bg].have_map = true;
+    scene->bg[bg].have_metatiles = true;
+    scene->bg[bg].pages_wide = 1;
+    scene->bg[bg].pages_high = 1;
+    scene->bg[bg].map_size = kActionRoomSceneMapPageBytes;
+  }
+}
+
+static void TestFrameStateAndRasterPresets(void) {
+  ActionRoomScene scene;
+  InitFrameScene(&scene);
+  const ActionRoomSceneFrameRequest request = {
+    .camera_x = 64,
+    .camera_y = 32,
+    .game_frame = 10,
+    .animation_phase = -1,
+    .page_phase = -1,
+  };
+  ActionRoomSceneFrameState state;
+
+  scene.raster_preset = kActionRoomRaster_None;
+  CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
+  CHECK(state.bg_hscroll[0][0] == 64);
+  CHECK(state.bg_vscroll[0][223] == 32);
+  CHECK(state.bg_hscroll[1][17] == 32);
+  CHECK(state.bg_vscroll[1][17] == 8);
+  CHECK(state.screen_enabled[0] == 3);
+  CHECK(state.bgmode == 1);
+  CHECK(state.brightness == 15);
+
+  scene.raster_preset = kActionRoomRaster_R1;
+  memset(scene.raster_workspace, 0, sizeof(scene.raster_workspace));
+  scene.raster_workspace[2] = 2;
+  scene.raster_workspace[5] = 1;
+  CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
+  CHECK(state.bg_hscroll[1][0] == 0x20D);
+  CHECK(state.bg_hscroll[1][1] == 0x20D);
+  CHECK(state.bg_hscroll[1][2] == 0x10E);
+  CHECK(state.bg_hscroll[1][223] == 123);
+
+  scene.raster_preset = kActionRoomRaster_R2;
+  memset(scene.raster_workspace, 0, sizeof(scene.raster_workspace));
+  scene.raster_workspace[5] = 2;
+  scene.raster_workspace[8] = 1;
+  CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
+  CHECK(state.bg_hscroll[1][126] == 0);
+  CHECK(state.bg_hscroll[1][127] == 0x200);
+  CHECK(state.bg_hscroll[1][128] == 0x101);
+  CHECK(state.bg_hscroll[1][223] == 0x36);
+
+  scene.raster_preset = kActionRoomRaster_R3;
+  memset(scene.raster_workspace, 0, sizeof(scene.raster_workspace));
+  scene.raster_workspace[2] = 1;
+  scene.raster_workspace[5] = 2;
+  scene.raster_workspace[8] = 1;
+  scene.raster_workspace[101] = 3;
+  CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
+  CHECK(state.bg_vscroll[1][126] == 0x100);
+  CHECK(state.bg_vscroll[1][127] == 0x200);
+  CHECK(state.bg_vscroll[1][128] == 0x1FB);
+  CHECK(state.bg_vscroll[1][159] == 0x300);
+  CHECK(state.bg_vscroll[1][223] == 0x300);
+
+  scene.raster_preset = kActionRoomRaster_R4;
+  memset(scene.raster_workspace, 0, sizeof(scene.raster_workspace));
+  CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
+  CHECK(state.mosaic[0] == 0x02);
+  CHECK(state.mosaic[1] == 0x02);
+  CHECK(state.mosaic[2] == 0x12);
+  CHECK(state.mosaic[223] == 0x12);
+
+  scene.raster_preset = kActionRoomRaster_R5;
+  CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
+  CHECK(state.bg_hscroll[1][0] == 50);
+  CHECK(state.bg_hscroll[1][62] == 50);
+  CHECK(state.bg_hscroll[1][63] == 25);
+  CHECK(state.bg_hscroll[1][175] == 32);
+
+  scene.raster_preset = kActionRoomRaster_R6;
+  CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
+  CHECK(state.bg_hscroll[1][0] == 68);
+  CHECK(state.bg_hscroll[1][189] == 32);
+  CHECK(state.bg_hscroll[1][190] == 1);
+  CHECK(state.bg_hscroll[1][191] == 3);
+
+  scene.raster_preset = kActionRoomRaster_R7;
+  memset(scene.raster_workspace, 0, sizeof(scene.raster_workspace));
+  scene.raster_workspace[0x802] = 3;
+  scene.raster_workspace[0x805] = 2;
+  CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
+  CHECK(state.bg_hscroll[1][0] == 0x304);
+  CHECK(state.bg_hscroll[1][1] == 0x304);
+  CHECK(state.bg_hscroll[1][2] == 0x205);
+
+  scene.raster_preset = kActionRoomRaster_R8;
+  CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
+  CHECK(state.bg_hscroll[1][142] == 0);
+  CHECK(state.bg_hscroll[1][143] == 1021);
+
+  scene.raster_preset = kActionRoomRaster_R9;
+  memset(scene.raster_workspace, 0, sizeof(scene.raster_workspace));
+  scene.raster_workspace[0x1002] = 1;
+  CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
+  CHECK(state.bg_hscroll[1][78] == 0x100);
+  CHECK(state.bg_hscroll[1][79] == 16);
+  CHECK(state.bg_hscroll[1][143] == 32);
+
+  scene.raster_preset = kActionRoomRaster_R10;
+  memset(scene.raster_workspace, 0, sizeof(scene.raster_workspace));
+  scene.raster_workspace[2] = 2;
+  scene.raster_workspace[0x802] = 1;
+  CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
+  CHECK(state.bg_hscroll[1][0] == 0x20D);
+  CHECK(state.bg_hscroll[0][0] == 0x13C);
+  CHECK(state.bg_hscroll[1][223] == 123);
+  CHECK(state.bg_hscroll[0][223] == 206);
+}
+
+static void FillSolidCharacter(uint8_t *characters, unsigned tile,
+                               uint8_t color) {
+  uint8_t *target = characters + (size_t)tile * 32;
+  for (unsigned row = 0; row < 8; row++) {
+    if (color & 1) target[row * 2] = 0xff;
+    if (color & 2) target[row * 2 + 1] = 0xff;
+    if (color & 4) target[16 + row * 2] = 0xff;
+    if (color & 8) target[16 + row * 2 + 1] = 0xff;
+  }
+}
+
+static void TestNativeFrameCompositor(void) {
+  ActionRoomScene scene;
+  InitFrameScene(&scene);
+  scene.have_character_bank[0] = true;
+  scene.have_character_bank[1] = true;
+  scene.have_palette = true;
+  scene.video_profile[9] = 0x11;
+  scene.video_profile[10] = 0x11;
+  FillSolidCharacter(scene.characters, 0, 1);
+  FillSolidCharacter(scene.characters, 0x100, 2);
+  /* BG1's permanent palette-4 attribute makes colour 1 index $41. BG2's
+   * permanent tile-$100 attribute selects colour 2 at index $02. */
+  scene.palette[0x41 * 2] = 0x1f;
+  scene.palette[0x02 * 2 + 1] = 0x7c;
+
+  const ActionRoomSceneFrameRequest request = {
+    .animation_phase = -1,
+    .page_phase = -1,
+  };
+  ActionRoomSceneFrameState state;
+  uint32_t *pixels = malloc(
+      kActionRoomSceneFramePixels * sizeof(*pixels));
+  CHECK(pixels != NULL);
+  if (!pixels) return;
+
+  scene.video_profile[0] = 3;
+  scene.video_profile[1] = 0;
+  scene.video_profile[2] = 0;
+  scene.video_profile[3] = 0;
+  scene.video_profile[4] = 0;
+  CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
+  CHECK(ActionRoomScene_RenderNativeFrame(
+      &scene, &state, pixels, kActionRoomSceneFramePixels));
+  CHECK(pixels[0] == 0xffff0000u);  /* BG1 low outranks BG2 low. */
+
+  scene.video_profile[4] = 2;
+  CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
+  CHECK(ActionRoomScene_RenderNativeFrame(
+      &scene, &state, pixels, kActionRoomSceneFramePixels));
+  CHECK(pixels[1234] == 0xff0000ffu);  /* Forced-high BG2 wins. */
+
+  scene.video_profile[0] = 2;
+  scene.video_profile[1] = 1;
+  scene.video_profile[2] = 2;
+  scene.video_profile[3] = 0x42;
+  CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
+  CHECK(ActionRoomScene_RenderNativeFrame(
+      &scene, &state, pixels, kActionRoomSceneFramePixels));
+  CHECK(pixels[kActionRoomSceneFramePixels - 1] == 0xff7b007bu);
+  free(pixels);
+}
+
 static void TestStockRomCatalogue(const char *path) {
   static const uint8_t kExpectedProfiles[8][9] = {
     {0},
@@ -297,7 +493,8 @@ static void TestStockRomCatalogue(const char *path) {
   uint32_t *pixels = malloc(pixel_count * sizeof(*pixels));
   CHECK(pixels != NULL);
   if (!pixels) { free(rom); return; }
-  int decoded = 0, scenes = 0, animated = 0, page_cycles = 0, raster = 0;
+  int decoded = 0, scenes = 0, rendered = 0, animated = 0;
+  int page_cycles = 0, raster = 0;
   int forced_bg2_priority = 0;
   for (uint8_t group = 1; group <= 7; group++) {
     for (uint8_t map = 1; map <= ActRaiser_ActionMapLast(group); map++) {
@@ -309,8 +506,23 @@ static void TestStockRomCatalogue(const char *path) {
       } else {
         scenes++;
         CHECK(scene.have_video_profile);
+        CHECK(scene.have_raster_waveform);
         CHECK(scene.video_profile_index == kExpectedProfiles[group][map]);
         CHECK((scene.video_profile[4] & 0x04) != 0);
+        ActionRoomSceneFrameState state;
+        const ActionRoomSceneFrameRequest request = {
+          .game_frame = 37,
+          .animation_phase = -1,
+          .page_phase = -1,
+        };
+        CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
+        if (ActionRoomScene_RenderNativeFrame(
+                &scene, &state, pixels, kActionRoomSceneFramePixels))
+          rendered++;
+        else {
+          printf("FAIL stock native frame %02X/%02X\n", group, map);
+          failures++;
+        }
         if (ActionRoomScene_HasCharacterAnimation(&scene)) animated++;
         if (ActionRoomScene_HasBg2PageCycle(&scene)) page_cycles++;
         if (scene.raster_preset != kActionRoomRaster_None) raster++;
@@ -331,6 +543,7 @@ static void TestStockRomCatalogue(const char *path) {
   }
   CHECK(decoded == (4 + 8 + 6 + 7 + 8 + 8 + 8) * 2);
   CHECK(scenes == 49);
+  CHECK(rendered == 49);
   CHECK(animated == 30);
   CHECK(page_cycles == 2);
   CHECK(raster == 17);
@@ -344,6 +557,8 @@ int main(int argc, char **argv) {
   TestOverlappingDictionaryCopyAndTruncation();
   TestGenericRoomScriptAndInheritance();
   TestScenePhaseResolvers();
+  TestFrameStateAndRasterPresets();
+  TestNativeFrameCompositor();
   /* Optional local census against a legally supplied stock ROM. CTest invokes
    * this binary without one, keeping the suite hermetic and distributable. */
   if (argc > 1) TestStockRomCatalogue(argv[1]);

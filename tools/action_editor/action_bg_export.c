@@ -76,9 +76,15 @@ int main(int argc, char **argv) {
 
   FILE *out = fopen(argv[2], "wb");
   if (!out) { perror(argv[2]); return 1; }
-  fprintf(out, "{\n\"schema\":\"actraiser-action-bg-v2\",\n\"rooms\":[\n");
+  uint32_t *native_pixels = malloc(
+      kActionRoomSceneFramePixels * sizeof(*native_pixels));
+  if (!native_pixels) {
+    fprintf(stderr, "could not allocate native-frame oracle\n");
+    return 1;
+  }
+  fprintf(out, "{\n\"schema\":\"actraiser-action-bg-v4\",\n\"rooms\":[\n");
 
-  int rooms = 0, failures = 0;
+  int rooms = 0, failures = 0, raster_waveform_blob = -1;
   for (unsigned group = 1; group <= 7; group++) {
     for (unsigned map = 1; map <= 8; map++) {
       if (!ActRaiser_IsActionMap((uint8_t)group, (uint8_t)map)) continue;
@@ -89,10 +95,35 @@ int main(int argc, char **argv) {
         failures++;
         continue;
       }
+      const ActionRoomSceneFrameRequest golden_request = {
+        .camera_x = 0,
+        .camera_y = 0,
+        .game_frame = 37,
+        .animation_phase = -1,
+        .page_phase = -1,
+      };
+      ActionRoomSceneFrameState golden_state;
+      if (!ActionRoomScene_BuildFrameState(
+              &scene, &golden_request, &golden_state) ||
+          !ActionRoomScene_RenderNativeFrame(
+              &scene, &golden_state, native_pixels,
+              kActionRoomSceneFramePixels)) {
+        fprintf(stderr, "[export] %u:%u native oracle failed\n", group, map);
+        failures++;
+        continue;
+      }
+      uint32_t native_hash = UINT32_C(2166136261);
+      for (size_t i = 0; i < kActionRoomSceneFramePixels; i++) {
+        native_hash ^= native_pixels[i];
+        native_hash *= UINT32_C(16777619);
+      }
       if (rooms) fprintf(out, ",\n");
+      if (scene.have_raster_waveform)
+        raster_waveform_blob = InternBlob(
+            scene.raster_waveform, kActionRoomSceneRasterWaveformBytes);
       fprintf(out,
               "{\"group\":%u,\"map\":%u,\"chars\":%d,\"extraChars\":%d,"
-              "\"palette\":%d,\"bg\":[",
+              "\"palette\":%d,\"rasterWorkspace\":%d,\"bg\":[",
               group, map,
               scene.have_character_bank[0]
                   ? InternBlob(scene.characters,
@@ -101,7 +132,10 @@ int main(int argc, char **argv) {
                   ? InternBlob(scene.extra_characters,
                                kActionRoomSceneExtraCharacterBytes) : -1,
               scene.have_palette
-                  ? InternBlob(scene.palette, kActionRoomScenePaletteBytes) : -1);
+                  ? InternBlob(scene.palette, kActionRoomScenePaletteBytes) : -1,
+              scene.have_raster_workspace
+                  ? InternBlob(scene.raster_workspace,
+                               kActionRoomSceneRasterWorkspaceBytes) : -1);
       for (unsigned bg = 0; bg < 2; bg++) {
         if (bg) fputc(',', out);
         const ActionRoomSceneBg *layer = &scene.bg[bg];
@@ -145,16 +179,22 @@ int main(int argc, char **argv) {
                 "{\"phases\":4,\"cadence\":5,\"order\":[1,2,3,0]}");
       else
         fprintf(out, "null");
-      fprintf(out, ",\"raster\":%u}", (unsigned)scene.raster_preset);
+      fprintf(out,
+              ",\"raster\":%u,\"nativeGolden\":{"
+              "\"frame\":37,\"cameraX\":0,\"cameraY\":0,"
+              "\"hash\":%u}}",
+              (unsigned)scene.raster_preset, native_hash);
       rooms++;
     }
   }
 
   fprintf(out, "\n],\n\"tileWordMask\":%u,\"bg1Attributes\":%u,"
-               "\"bg2Attributes\":%u,\n\"blobs\":[\n",
+               "\"bg2Attributes\":%u,\"rasterWaveform\":%d,"
+               "\"frameWidth\":%u,\"frameHeight\":%u,\n\"blobs\":[\n",
           kActionRoomSceneTileWordMask,
           kActionRoomSceneBg1AttributeByte,
-          kActionRoomSceneBg2AttributeByte);
+          kActionRoomSceneBg2AttributeByte, raster_waveform_blob,
+          kActionRoomSceneFrameWidth, kActionRoomSceneFrameHeight);
   size_t blob_bytes = 0;
   for (int i = 0; i < g_blob_count; i++) {
     if (i) fprintf(out, ",\n");
@@ -165,6 +205,7 @@ int main(int argc, char **argv) {
   }
   fprintf(out, "\n]\n}\n");
   fclose(out);
+  free(native_pixels);
   fprintf(stderr,
           "[export] %d rooms, %d failures, %d pooled blobs, %zu KiB raw\n",
           rooms, failures, g_blob_count, blob_bytes / 1024);

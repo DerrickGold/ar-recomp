@@ -36,35 +36,50 @@ oracles. They are no longer loader dependencies.
 
 ## Implementation status
 
-The first shared-authority milestone is implemented:
+The stable two-background scene milestone is implemented:
 
 - `src/action/action_room_scene.c` is the pure immutable ROM loader. It owns
   cumulative asset-script replay, command-3 profile resolution, exact common
   priority/attribute merge, finite tile lookup and expansion, character-phase
   reconstruction, the `0402`/`0403` page sequence, and room raster identity.
+- `ActionRoomScene_BuildFrameState` resolves native camera/parallax, character
+  and page phases, profile registers, and every visible line of R1-R10 scroll
+  or mosaic state. `ActionRoomScene_RenderNativeFrame` is the stable 256x224
+  Mode-1 BG1/BG2 compositor: tile lookup, flips, transparency, priority,
+  TM/TS, stable screen masks, mosaic, brightness, and supported colour math.
 - The action editor exporter links that module and emits schema
-  `actraiser-action-bg-v2`; it no longer includes a private Diorama `.c` file
-  or reaches file-static decoder state.
-- The editor consumes profile common priority, previews character phases from
-  a native-frame slider, and selects the active `0402`/`0403` BG2 page in the
-  flat game-composite view. Raster identity and the complete 28-byte profile
-  accompany every room descriptor.
+  `actraiser-action-bg-v4`, including the normalized waveform, the final 8 KiB
+  character-decompression workspace, and a C-rendered golden frame for every
+  room. It no longer owns a private ROM decoder.
+- The editor exposes a dedicated **Native frame** reference with camera and
+  frame controls. Its JavaScript raster/compositor verifies itself against the
+  room's C golden hash when opened. **Diorama 3D** consumes the same exact
+  camera-local BG captures before routing pixels into authored virtual bands;
+  the full-room map remains the painting surface.
 - The game registers the same immutable ROM bytes at boot. Setting
   `AR_ACTION_ROOM_SCENE_COMPARE=1` compares each newly published live
-  `ActionBgWorld` against every tile produced by `ActionRoomScene`, reports the
-  first mismatch, and never changes gameplay, provider eligibility, or PPU
+  `ActionBgWorld` against every tile produced by `ActionRoomScene`. During
+  scanout it also compares the immutable frame's scroll, mosaic, TM/TS,
+  TMW/TSW, colour-math, mode and BGSC fields with the live PPU immediately
+  before each visible line, preserving HDMA timing in the oracle. It reports
+  the first mismatch and never changes gameplay, provider eligibility, or PPU
   state.
 - ROM-free tests pin inheritance, profile priority, tile lookup, phase/page
-  resolution, full-world match/mismatch behavior, and failure on dimensional
-  drift. The optional stock-ROM census pins all 49 profile IDs, 30 animated
-  rooms, two page-cycle rooms, 17 raster-bearing rooms, and five forced-BG2
-  priority rooms.
+  resolution, every raster preset, native compositor priority/colour-math
+  cases, full-world and frame-register match/mismatch behavior, and failure on
+  dimensional drift. The optional stock-ROM census loads and renders all 49
+  rooms, while retaining the pinned 30 animated rooms, two page-cycle rooms,
+  17 raster-bearing rooms, and five forced-BG2-priority rooms.
 
-This is not yet the complete editor parity milestone. The next implementation
-slice is the pure raster builders plus a 256x224 scanline compositor consuming
-the exported TM/TS, windows, mosaic, scroll, and colour-math fields. The
-editor's current 3D page-cycle framing and raster-labelled frame clock are not
-evidence of those per-scanline effects until that compositor lands.
+The stable live acceptance set is now byte-exact for R2, R3, R5, R6, and R9:
+6,348,367 pre-scanline PPU registers compared with zero mismatches. R2 also
+pins one authentic hit-stop/action-update hold: the game displays the preceding
+persistent table for one additional frame, which the stateful oracle recognizes
+only when that complete prior immutable state matches. The remaining raster
+acceptance work is fixture coverage for the boss/transition-only R1, R4, R7,
+R8, and R10 callbacks, not missing builder logic. BG3 HUD, real OBJ streams,
+fades, and gameplay-object-driven window timelines remain outside this
+standalone background contract by design.
 
 ## Scope and parity boundary
 
@@ -96,7 +111,9 @@ The standalone loader should perform these steps in order:
 1. Validate the room against the 49-room action registry.
 2. Replay the room's cumulative asset-script graphics commands from
    `$05:8000` (commands 7 through 4): two 8 KiB BG character banks, the extra
-   character bank, BG palette, both metatile tables, and both page maps.
+   character bank, BG palette, both metatile tables, and both page maps. Retain
+   the final 8 KiB character-decompression workspace because some raster
+   builders deliberately inherit bytes that the upload left there.
 3. Read the room's command-3 video-profile index and apply its 28-byte record
    from `$02:893E`.
 4. Merge the action tile-word mask `$ECFF` and the profile's common attributes
@@ -234,6 +251,24 @@ are SNES register addresses; `$02:96D4` is the ROM's 256-byte waveform table.
 page cycle above. `0405` is the only other Aitos room with a persistent raster
 callback, and it is a mosaic effect rather than scroll.
 
+The table storage is part of the contract. R1-R6 and R8 use `$7E:6000`, R7
+uses `$7E:6800`, R9 uses `$7E:7000`, and R10 uses `$6000` for BG2 plus `$6800`
+for BG1. The compressed-CHR loader always stages through
+`$7E:6000-$7FFF`. R1, R2, R3, R7, R9's first band, and R10 overwrite only one
+of the two Mode-2 scroll bytes in selected entries, so the untouched byte is
+the corresponding byte from the last decompression. This seemingly stale data
+is visible PPU input and is exported explicitly in schema v4. R4 is Mode 0;
+R5, R6, and R8 write complete 16-bit scroll samples.
+
+Visible presentation frame N normally scans the table built during action tick
+N-1, including that tick's camera X. The callback belongs to the action-update
+path rather than scanout, so hit-stop can retain the whole preceding table for
+another displayed frame. A standalone preview advances deterministically once
+per requested frame. The game-side oracle keeps the previous immutable state
+and accepts a hold only when the live scanline disagrees with the newly built
+state but exactly matches the prior one; it reports these separately as
+`raster-holds` rather than hiding them as approximate tolerance.
+
 The builder should generate register values for each scanline into a small
 immutable raster state. The PPU renderer then consumes that state. Replaying
 the CPU routines per preview frame would add state without improving fidelity.
@@ -274,7 +309,7 @@ reproducible scene.
 
 ## Implementation priority
 
-### P0 — one exact scene authority
+### P0 — one exact scene authority (implemented)
 
 1. Extend the existing ROM exporter/decoder to emit the profile index and all
    rendering-relevant video fields, including the common priority bits.
@@ -286,23 +321,27 @@ reproducible scene.
 5. Feed that same resolved scene into the flat and Diorama previews. Virtual
    classification changes planes; it must not create a second native decoder.
 
-The lowest-drift design is a small pure C scene builder/scanline compositor
-shared by the game tests and compiled to WebAssembly for the self-contained
-editor. If WebAssembly packaging is deferred, the native exporter should emit
-a normalized descriptor and golden scanlines so the JavaScript implementation
-is continuously checked against the C authority.
+The implementation uses the deferred-WebAssembly path: pure C is authoritative
+for tests/export, and the self-contained JavaScript port consumes a normalized
+descriptor plus per-room C golden frame so drift is checked when a room opens.
 
 ### P1 — authoring is editor-owned
 
-1. Load and round-trip the complete `diorama-layers.ini` while owning only
-   `bg1-virtual`/`bg2-virtual` records in base action-room sections.
-2. Expose native strategy/position controls and virtual-band Z, order, alpha,
-   metatile, cell, and rectangle rules with undo.
-3. Make every change update both the native flat reference and the exact
-   Diorama preview immediately.
-4. Export one merged INI. The game only parses and renders it.
+1. **Implemented:** load and round-trip the complete `diorama-layers.ini` while
+   owning the four ordinary BG and two virtual BG records in base action-room
+   sections.
+2. **Implemented:** virtual-band Z/order/alpha and metatile/cell/rectangle
+   rules, plus ordinary BG Z/order/alpha and Flat/Rake/Bow/Thickness/Stack/
+   Voxel strategy controls.
+3. **Implemented:** every classification or geometry change updates Diorama
+   immediately through the same mesh, skirt, stack-direction, falloff and solid
+   voxel formulas as the runtime; native flat rendering remains intentionally
+   configuration-neutral.
+4. **Implemented:** export produces one merged INI and the game only
+   parses/renders it. OBJ, BG3, backdrop and scoped effect records remain
+   preserved because they are outside action-background tile authoring.
 
-### P2 — differential acceptance
+### P2 — differential acceptance (stable set implemented)
 
 For each representative state, compare the standalone result with a native
 room snapshot at the same room, camera, and phases:
@@ -319,6 +358,15 @@ shape/target, both page-cycle rooms, the five forced-BG2-priority rooms, and a
 Marahna colour-math room. Then run all 49 rooms at a stable camera and at every
 available map edge.
 
+The current live set covers one stable room for R2 (`0201`), R3 (`0202`), R5
+(`0401`), R6 (`0601`), and R9 (`0702`). It compares the immutable full-world
+publications and 6,348,367 resolved pre-scanline registers with zero mismatch;
+the exact runs are listed under Evidence below. The other five raster presets
+belong to boss/transition rooms for which raw warp is not a valid initialization
+fixture. They require recorded natural entry/replay fixtures before their live
+acceptance can be claimed, although their ROM builders and C/JavaScript golden
+frames are already pinned.
+
 ## Remaining knowledge gaps
 
 None of these blocks a stable arbitrary-room editor preview:
@@ -332,8 +380,10 @@ None of these blocks a stable arbitrary-room editor preview:
 3. **BG3/OBJ presentation completeness.** Background authoring does not need
    gameplay sprites. A “literal game frame” toggle would need the common HUD
    and a defined static actor fixture, not a room loader change.
-4. **Golden coverage.** The formulas are mapped, but every room still needs
-   automated pixel/hash acceptance before claiming editor parity as shipped.
+4. **Boss-transition differential fixtures.** Every room has C-rendered and
+   JavaScript-checked stable-frame coverage, and the stable live R2/R3/R5/R6/R9
+   set is exact. Natural-entry recordings are still needed for R1/R4/R7/R8/R10;
+   raw map warps do not establish those rooms' boss/transition callback state.
 5. **Transient boss margin/window policy.** This is a widescreen presentation
    audit, not missing room construction.
 
@@ -403,7 +453,7 @@ Targets are VRAM word addresses and strides are bytes.
 
 - ROM static disassembly: `$02:B4E8`, `$02:BAF5`, `$02:BC27-$BC56`,
   `$02:9204-$96D3`, and the callbacks that call those builders.
-- Exporter audit: 49 rooms, 0 failures, 169 pooled blobs, 839 KiB raw.
+- Exporter audit: 49 rooms, 0 failures, 176 pooled blobs, 887 KiB raw.
 - Runtime character traces: `0202` target `$0000`; `0102` target `$1000`;
   both capture exactly 4 KiB into `$7F:B800-$BFFF`.
 - Runtime page-cycle trace: `0402` BG2SC `$74,$78,$7C,$70`, five game frames
@@ -411,5 +461,11 @@ Targets are VRAM word addresses and strides are bytes.
 - Runtime raster census: all 49 direct room loads completed; the persistent
   callbacks match R1-R10 above. `0401`, `0601`, `0605`, `0702`-`0708` were
   additionally inspected at function/table level.
+- Exact stable-room scanline oracle, 2026-08-22: `0201` R2
+  `runs/20260822-130419` (996,907 registers, one exact retained-table frame),
+  `0202` R3 `runs/20260822-130420`, `0401` R5
+  `runs/20260822-130422`, `0601` R6 `runs/20260822-130424`, and `0702` R9
+  `runs/20260822-130426` (1,337,865 registers each); all five report zero
+  register mismatch.
 - Static consumer census: all generated `$02:B4E8` variants write `$F2`; no
   registered/recompiled function reads it.

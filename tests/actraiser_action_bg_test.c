@@ -336,6 +336,61 @@ static void TestImmutableRoomSceneComparison(void) {
   free(wram);
 }
 
+static void TestImmutableRoomSceneFrameComparison(void) {
+  Ppu *ppu = calloc(1, sizeof(*ppu));
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+
+  ActionRoomSceneFrameState state;
+  memset(&state, 0, sizeof(state));
+  const unsigned row = 37;
+  state.bg_hscroll[0][row] = ppu->hScroll[0] = 0x123;
+  state.bg_vscroll[0][row] = ppu->vScroll[0] = 0x234;
+  state.bg_hscroll[1][row] = ppu->hScroll[1] = 0x345;
+  state.bg_vscroll[1][row] = ppu->vScroll[1] = 0x056;
+  state.mosaic[row] = ppu->mosaic = 0x43;
+
+  ActRaiserActionRoomSceneFrameCompareResult comparison;
+  CHECK(ActRaiserActionBg_CompareRoomSceneFrameLine(
+      &state, ppu, row, &comparison));
+  CHECK(comparison.compared == 5);
+  CHECK(comparison.mismatches == 0);
+  CHECK(comparison.first_field ==
+        kActRaiserActionRoomSceneFrameField_Count);
+
+  ppu->hScroll[1]++;
+  CHECK(ActRaiserActionBg_CompareRoomSceneFrameLine(
+      &state, ppu, row, &comparison));
+  CHECK(comparison.mismatches == 1);
+  CHECK(comparison.first_field ==
+        kActRaiserActionRoomSceneFrameField_Bg2HScroll);
+  CHECK(comparison.first_immutable == 0x345);
+  CHECK(comparison.first_live == 0x346);
+
+  memset(ppu, 0, sizeof(*ppu));
+  state.screen_enabled[0] = ppu->screenEnabled[0] = 0x13;
+  state.screen_enabled[1] = ppu->screenEnabled[1] = 0x02;
+  state.screen_windowed[0] = ppu->screenWindowed[0] = 0x13;
+  state.screen_windowed[1] = ppu->screenWindowed[1] = 0x02;
+  state.cgwsel = ppu->cgwsel = 0x02;
+  state.cgadsub = ppu->cgadsub = 0x63;
+  state.bgmode = ppu->bgmode = 1;
+  state.bgsc[0] = ppu->bgXsc[0] = 0x63;
+  state.bgsc[1] = ppu->bgXsc[1] = 0x73;
+  CHECK(ActRaiserActionBg_CompareRoomSceneFrameLine(
+      &state, ppu, 0, &comparison));
+  CHECK(comparison.compared == 14);
+  CHECK(comparison.mismatches == 0);
+
+  ppu->cgadsub ^= 0x20;
+  CHECK(ActRaiserActionBg_CompareRoomSceneFrameLine(
+      &state, ppu, 0, &comparison));
+  CHECK(comparison.mismatches == 1);
+  CHECK(comparison.first_field ==
+        kActRaiserActionRoomSceneFrameField_Cgadsub);
+  free(ppu);
+}
+
 static void TestFramePlanCapture(void) {
   uint8_t *wram = BuildWram();
   Ppu *ppu = calloc(1, sizeof(*ppu));
@@ -916,6 +971,7 @@ int main(void) {
   TestVerticalMargins();
   TestRingAndComparison();
   TestImmutableRoomSceneComparison();
+  TestImmutableRoomSceneFrameComparison();
   TestFramePlanCapture();
   TestPlanExtentProjection();
   TestFramePlanBinding();

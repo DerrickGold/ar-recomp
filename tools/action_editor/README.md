@@ -56,15 +56,16 @@ records. Metatile IDs are hexadecimal. Cell coordinates name 16x16 metatile
 cells and rectangle endpoints are inclusive. Later cell records win when they
 overlap; export writes non-overlapping canonical runs.
 
-The merger owns only `bg1-virtual` and `bg2-virtual` lines in base action-room
-sections. Existing plane overrides, camera-local sections, comments, unknown
-settings, and unrelated rooms are preserved. This means the downloaded file is
-the normal game configuration, not a sidecar or intermediate JSON document.
+The merger owns `bg1`, `bg1hi`, `bg2`, `bg2hi`, `bg1-virtual`, and
+`bg2-virtual` lines in base action-room sections. Other planes, camera-local
+sections, comments, unknown settings, and unrelated rooms are preserved. This
+means the downloaded file is the normal game configuration, not a sidecar or
+intermediate JSON document.
 
 ## Rendering views
 
-**Game composite** reconstructs the ROM tilemaps with the game's Mode-1
-background order:
+**Map editor** reconstructs the complete ROM tilemaps with the game's Mode-1
+background order for room-wide painting:
 
 1. BG2 priority 0
 2. BG1 priority 0
@@ -74,37 +75,40 @@ background order:
 
 Virtual classification never changes that order. Band tint and edit outlines
 make authored changes visible without pretending they affect ordinary gameplay.
-The native-frame control selects character animation phases and, for `0402`
-and `0403`, the active BG2 page. **Play native phases** advances that clock at
-60 Hz; pausing or moving the slider produces a deterministic authoring frame.
+**Native frame** is the exact stable 256x224 BG1/BG2 reference. Camera and
+frame controls resolve native parallax, character animation, the `0402`/`0403`
+BG2 page cycle, all ten persistent raster presets, mosaic, TM/TS priority, and
+colour math. **Play native phases** advances the frame clock at 60 Hz; pausing
+or moving the slider produces a deterministic authoring frame.
 
-**Diorama 3D** rasterizes every band to its own full-level surface and uses the
-same independent z and painter-order model as the runtime. Existing z, order,
-and alpha plane overrides are read from the loaded INI. The depth ladder lists
-resolved values and warns when surfaces from different BGs become nearly
+**Diorama 3D** splits those same camera-local, raster-resolved BG captures into
+authored bands and uses the same independent z and painter-order model as the
+runtime. Ordinary BG planes expose z, order, alpha, and the Flat/Rake/Bow/
+Thickness/Stack/Voxel strategies. The preview uses the runtime's six-row mesh,
+skirt, stack direction, copy falloff, and solid-voxel formulas. The depth ladder
+lists resolved values and warns when surfaces from different BGs become nearly
 co-planar; each hardware BG's intentional low/high pair is excluded.
 
-The other BG can be shifted or repeated because the two layers often have
-different extents and live scroll rates. The reference actor uses resolved
-OBJ2 geometry/order and is draggable in either view.
+The map editor can shift or repeat the other BG while inspecting full-room
+relationships. Diorama 3D uses the exact native scroll instead. The reference
+actor uses resolved OBJ2 geometry/order and is draggable in either view.
 
 ## Controls
 
-| input | Game composite | Diorama 3D |
-|---|---|---|
-| drag | paint | orbit |
-| shift/middle drag | pan | pan |
-| wheel | zoom | dolly |
-| arrows | pan | walk the level window |
-| Alt-drag | restore authentic classification | - |
-| `F` | fit | - |
-| `R` | - | reset camera |
-| Ctrl/Cmd-Z | undo classification gesture | undo classification gesture |
+| input | Map editor | Native frame | Diorama 3D |
+|---|---|---|---|
+| drag | paint | - | orbit |
+| shift/middle drag | pan | - | move native camera |
+| wheel | zoom | - | dolly |
+| arrows | pan | move camera | move camera |
+| Alt-drag | restore authentic classification | - | - |
+| `F` | fit | - | - |
+| `R` | - | - | reset orbit |
+| Ctrl/Cmd-Z | undo classification gesture | undo classification gesture | undo classification gesture |
 
-Character phases from the native-frame slider apply to both views. The active
-`0402`/`0403` BG2 page is cropped in the flat composite; 3D page framing will
-move to the shared scanline compositor. The HUD reports the resolved video
-profile, animation phase, BG2 page, and raster preset in either view.
+Character phases from the native-frame slider apply to every view. The HUD
+reports the resolved video profile, animation phase, BG2 page, raster preset,
+and C/JavaScript golden-frame parity result.
 
 Brush modes support all metatile instances, one map cell, or rectangles. Reset
 actions delete sparse classification records and are undoable; they do not
@@ -116,21 +120,34 @@ built-in defaults.
 The ROM exporter links `src/action/action_room_scene.c`, the same immutable
 room loader used by the game. Asset inheritance, video profiles, tile-word
 masking, common priority, BG attribute merge, animation metadata, page cycling,
-raster identity, palette, and CHR decode therefore have one C authority rather
-than a JavaScript or tool-only interpretation. Identical asset blobs are pooled
-across rooms to keep the generated HTML compact.
+raster identity, palette, CHR decode, and the final 8 KiB decompression
+workspace therefore have one C authority rather than a JavaScript or tool-only
+interpretation. The workspace matters because six ROM raster families leave
+selected Mode-2 HDMA bytes untouched and inherit the bytes last staged there.
+Identical asset blobs are pooled across rooms to keep the generated HTML
+compact.
 
-The 3D preview frames a gameplay-sized window and walks it along long levels;
-rooms can be up to 4096 pixels wide, and presenting the entire room as one thin
-quad would not represent what the player sees.
+The exporter renders a fixed C golden frame for every room. Opening a room in
+the editor hashes the JavaScript compositor at that same camera/frame and
+reports whether it matches, guarding the self-contained port against drift.
+Visible frame N normally uses the persistent table built at action tick N-1;
+the editor advances that clock deterministically. The game may retain an entire
+table during hit-stop, which is action-update cadence rather than a different
+raster formula and does not require gameplay simulation in the editor.
 
 ### Current parity boundary
 
-The shared loader and editor currently agree on assets, map dimensions,
-metatile expansion, character-bank attributes, profile common priority,
-character animation, page-cycle identity, and raster-preset identity. The
-flat view still needs the shared scanline compositor for profile TM/TS,
-windowing, mosaic, colour math, camera/parallax, and the ten raster builders.
-Until that lands, the editor is suitable for virtual-layer authoring and
-priority/phase inspection, but its flat composite is not yet the final
-pixel-exact game oracle.
+The shared C authority and editor cover the stable two-background Mode-1 room:
+assets, camera/parallax, priority/transparency/flips, animation/page cycling,
+R1-R10 raster state, mosaic, TM/TS, stable screen-window masks, and supported
+colour math. BG3 HUD, real OBJ streams, fades, and gameplay-object-driven
+window timelines are deliberately outside the standalone room contract. Use
+the reference actor for ordering work; use the game-side differential observer
+when validating a transient gameplay moment.
+
+Virtual-band records and the ordinary action-background planes (`bg1`,
+`bg1hi`, `bg2`, `bg2hi`) are fully authorable here. OBJ, BG3, and backdrop
+records are loaded for the relationships the preview can represent and remain
+preserved; they are not background-tile authoring targets. The in-game debug
+editor is therefore optional for diagnosis, while this standalone editor owns
+the action-background configuration consumed by the game.

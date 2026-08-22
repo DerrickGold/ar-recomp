@@ -9,8 +9,10 @@
 #include "action/action_bg_world.h"
 
 struct Ppu;
+struct Dma;
 struct DioramaRoomOverride;
 struct ActionRoomScene;
+struct ActionRoomSceneFrameState;
 
 /* ActRaiser-specific capture and differential observer for SPEC-bg-hle BH2.
  * The pure world decoder remains game-agnostic; this adapter is the only place
@@ -44,6 +46,32 @@ typedef struct ActRaiserActionRoomSceneCompareResult {
   uint16_t first_immutable;
   uint16_t first_live;
 } ActRaiserActionRoomSceneCompareResult;
+
+typedef enum ActRaiserActionRoomSceneFrameField {
+  kActRaiserActionRoomSceneFrameField_Bg1HScroll = 0,
+  kActRaiserActionRoomSceneFrameField_Bg1VScroll,
+  kActRaiserActionRoomSceneFrameField_Bg2HScroll,
+  kActRaiserActionRoomSceneFrameField_Bg2VScroll,
+  kActRaiserActionRoomSceneFrameField_Mosaic,
+  kActRaiserActionRoomSceneFrameField_MainScreen,
+  kActRaiserActionRoomSceneFrameField_SubScreen,
+  kActRaiserActionRoomSceneFrameField_MainWindow,
+  kActRaiserActionRoomSceneFrameField_SubWindow,
+  kActRaiserActionRoomSceneFrameField_Cgwsel,
+  kActRaiserActionRoomSceneFrameField_Cgadsub,
+  kActRaiserActionRoomSceneFrameField_Bgmode,
+  kActRaiserActionRoomSceneFrameField_Bg1Sc,
+  kActRaiserActionRoomSceneFrameField_Bg2Sc,
+  kActRaiserActionRoomSceneFrameField_Count,
+} ActRaiserActionRoomSceneFrameField;
+
+typedef struct ActRaiserActionRoomSceneFrameCompareResult {
+  size_t compared;
+  size_t mismatches;
+  ActRaiserActionRoomSceneFrameField first_field;
+  uint16_t first_immutable;
+  uint16_t first_live;
+} ActRaiserActionRoomSceneFrameCompareResult;
 
 typedef enum ActRaiserActionBgFallbackReason {
   kActRaiserActionBgFallback_ForcedBlank = 0,
@@ -80,6 +108,11 @@ typedef struct ActRaiserActionBgDiagnostics {
   uint64_t room_scene_layers_compared;
   uint64_t room_scene_tiles_compared;
   uint64_t room_scene_mismatches;
+  uint64_t room_scene_frames_built;
+  uint64_t room_scene_raster_hold_frames;
+  uint64_t room_scene_scanlines_compared;
+  uint64_t room_scene_registers_compared;
+  uint64_t room_scene_register_mismatches;
   uint64_t fallbacks[kActRaiserActionBgFallback_Count];
 } ActRaiserActionBgDiagnostics;
 
@@ -141,6 +174,24 @@ bool ActRaiserActionBg_CompareRoomSceneLayer(
     const struct ActionRoomScene *scene, uint8_t bg_layer,
     const ActionBgWorld *world,
     ActRaiserActionRoomSceneCompareResult *result);
+
+/* Compare one visible scanline's resolved immutable frame record with the PPU
+ * registers that are about to render it. Row 0 additionally checks the stable
+ * video-profile registers. This is pure and never changes PPU state. */
+bool ActRaiserActionBg_CompareRoomSceneFrameLine(
+    const struct ActionRoomSceneFrameState *state, const struct Ppu *ppu,
+    unsigned output_y,
+    ActRaiserActionRoomSceneFrameCompareResult *result);
+
+/* Optional live shadow for the shared raster/compositor bootstrap. Begin once
+ * after the frame's HDMA channels are initialized, then observe row N just
+ * before ppu_runLine(N + 1). Both calls are inert unless
+ * AR_ACTION_ROOM_SCENE_COMPARE=1. */
+void ActRaiserActionBg_BeginRoomSceneFrame(
+    const uint8_t *wram, size_t wram_size, const struct Ppu *ppu,
+    const struct Dma *dma);
+void ActRaiserActionBg_ObserveRoomSceneFrameLine(
+    const struct Ppu *ppu, unsigned output_y);
 
 /* Default-on BH7 renderer adapter. Unless `AR_ACTION_BG_HLE=0`, publish and
  * bind every plan layer whose source is a finite world map. A zero-mismatch,
