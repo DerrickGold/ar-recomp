@@ -2221,8 +2221,8 @@ table at **`$05:8000`** (cursor in the long pointer `$A2`):
   |---|---|---|
   | 7 | `$02:B28E` — VRAM char/tile upload | 6 |
   | 6 | `$02:B330` — CGRAM/palette load (writes `$2121` then streams `$2122`) | 6 |
-  | 5 | `$02:B363` — **metatile definition table** (selector at operand 3: `$01` → `$7E:2100` BG1, `$02` → `$7E:2900` BG2). 2048 bytes, stored **byte-swapped** | 7 |
-  | 4 | `$02:B3EB` — **generic WRAM data load** (selector at operand 0: `$01` → the BG1 metatile-id map at `$7E:8000`, i.e. the collision layer; `$02` → the BG2 map at `$7E:C000`). Blob header is `[widthChunks][heightChunks][size16]`, and the width/height bytes are what set the level dimensions `$2E`/`$30` | 4 |
+  | 5 | `$02:B363` — **metatile definition table** (selector at operand 3: `$01` → `$7E:2100` BG1, `$02` → `$7E:2900` BG2). 2048 bytes, stored **byte-swapped**. Guarded action-only HLE; raw/non-action/BG3/unexpected shapes retain the decoded native body | 7 |
+  | 4 | `$02:B3EB` — **generic WRAM data load** (selector at operand 0: `$01` → the BG1 metatile-id map at `$7E:8000`, i.e. the collision layer; `$02` → the BG2 map at `$7E:C000`). Blob header is `[widthChunks][heightChunks][size16]`, and the width/height bytes are what set the level dimensions `$2E`/`$30`. Guarded action-only HLE with native fallback | 4 |
   | 3 | `$02:B4E8` | 1 |
   | 2 | `$02:B631` | 3 |
   | 1 | `$02:B63B` — script-driven song change (already documented in the Audio section) | 5 |
@@ -2232,6 +2232,12 @@ table at **`$05:8000`** (cursor in the long pointer `$A2`):
   in place: `bank = L >> 15`, `addr = $8000 | (L & $7FFF)`. Cross-check: the dialog-font command in
   every map's script carries `$0BECFB`, which converts to `$17:ECFB` — exactly the font address
   already documented in the Graphics section from an independent investigation.
+- The action-room command-5/4 CPU handoff is now live without replacing this
+  interpreter. `hle_func_if` calls the HLE only for the exact audited compressed
+  BG1/BG2 action shapes; `AR_ACTION_ROOM_LOAD_HLE=0`, title/SIM raw selectors,
+  BG3, wrong M/X, and unknown shapes take the still-generated ROM body. The
+  12-target redirect matrix stages 166,496 oracle bytes with zero mismatch and
+  matches every pre-redirect framebuffer/map/definition hash.
 - A bit-0 command's operands are `[destFlag, ignored, ignored, srcLo, srcHi, srcBank]`;
   `destFlag == 0` → `$7E:4000` (ordinary objects), nonzero → `$7E:5000` (boss). The blob's own
   first word is the decompressed size, stream starts at +2.

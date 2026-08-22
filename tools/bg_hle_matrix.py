@@ -86,6 +86,9 @@ ROOM_SCENE_PROVIDER_RE = re.compile(
 ROOM_STAGE_COMPARATOR_RE = re.compile(
     r"\[action-room-stage\] summary layers=(?P<layers>\d+) "
     r"bytes=(?P<bytes>\d+) mismatches=(?P<mismatches>\d+)")
+ROOM_LOAD_HLE_RE = re.compile(
+    r"\[action-room-load-hle\] summary command5=(?P<command5>\d+) "
+    r"command4=(?P<command4>\d+) bytes=(?P<bytes>\d+)")
 
 
 class MatrixError(Exception):
@@ -139,6 +142,13 @@ def parse_room_scene_provider_summary(log):
 
 def parse_room_stage_comparator_summary(log):
     matches = list(ROOM_STAGE_COMPARATOR_RE.finditer(log))
+    if not matches:
+        return None
+    return {key: int(value) for key, value in matches[-1].groupdict().items()}
+
+
+def parse_room_load_hle_summary(log):
+    matches = list(ROOM_LOAD_HLE_RE.finditer(log))
     if not matches:
         return None
     return {key: int(value) for key, value in matches[-1].groupdict().items()}
@@ -212,6 +222,12 @@ def inspect_run(target, run_directory, log, rom_hash, expected_snapshots,
     for field in ("layers", "bytes"):
         if not room_stage_comparator[field]:
             raise MatrixError("room-stage comparator %s=0" % field)
+    room_load_hle = parse_room_load_hle_summary(log)
+    if room_load_hle is None:
+        raise MatrixError("action-room loader HLE summary missing")
+    for field in ("command5", "command4", "bytes"):
+        if not room_load_hle[field]:
+            raise MatrixError("action-room loader HLE %s=0" % field)
     room_scene_provider = parse_room_scene_provider_summary(log)
     if expect_room_scene_hle:
         if room_scene_provider is None:
@@ -267,6 +283,7 @@ def inspect_run(target, run_directory, log, rom_hash, expected_snapshots,
         "run_directory": run_directory,
         "comparator": comparator,
         "provider": provider,
+        "room_load_hle": room_load_hle,
         "room_stage_comparator": room_stage_comparator,
         "room_scene_provider": room_scene_provider,
         "census": bg_hle_census.build_summary(records),
@@ -342,6 +359,7 @@ def run_target(args, target, rom_hash):
             "AR_QUIT_FRAMES": str(args.quit_frames),
         })
         environment.pop("AR_ACTION_BG_HLE", None)
+        environment.pop("AR_ACTION_ROOM_LOAD_HLE", None)
         environment.pop("AR_ACTION_ROOM_SCENE_HLE", None)
         if args.provider_mode == "enabled":
             environment["AR_ACTION_BG_HLE"] = "1"
@@ -493,6 +511,7 @@ def main(argv=None):
             comparator = result["comparator"]
             provider = result["provider"]
             room_scene_provider = result["room_scene_provider"]
+            room_load_hle = result["room_load_hle"]
             room_stage_comparator = result["room_stage_comparator"]
             provider_text = ""
             if provider:
@@ -500,8 +519,8 @@ def main(argv=None):
             if room_scene_provider:
                 provider_text += " room-scene-layers=%d" % (
                     room_scene_provider["layers"])
-            provider_text += " stage-bytes=%d" % (
-                room_stage_comparator["bytes"])
+            provider_text += " stage-bytes=%d loader-bytes=%d" % (
+                room_stage_comparator["bytes"], room_load_hle["bytes"])
             print("      PASS tiles=%d mismatches=0 native-fallbacks=%d%s run=%s" % (
                 comparator["tiles"], comparator["native"], provider_text,
                 result["run_directory"]), flush=True)

@@ -17,6 +17,7 @@ type BankOptions struct {
 	ExcludeRanges     [][2]uint16
 	HLESPCUpload      map[uint16]struct{}
 	HLEFunctions      map[uint16]string
+	HLEFunctionsIf    map[uint16]config.HLEFunctionIf
 	HLEDispatch       map[uint16]string
 	ExitMX            map[uint32]decoder.MX
 	UnresolvedAllowed bool
@@ -73,6 +74,7 @@ func EmitBank(image rom.Image, bank byte, entries []config.Entry, options BankOp
 			TailCallTarget:    tailName,
 			HLESPCUpload:      hleSPC,
 			HLEFunction:       options.HLEFunctions[entry.Start],
+			HLEFunctionIf:     options.HLEFunctionsIf[entry.Start],
 			HLEDispatch:       options.HLEDispatch,
 			ExitMX:            exitMX,
 			UnresolvedAllowed: options.UnresolvedAllowed,

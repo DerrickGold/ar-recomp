@@ -631,6 +631,23 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_action_metatile_hle
         COMMAND actraiser_action_metatile_hle_test)
 
+    # CPU and guarded-native-fallback contracts for action-only command-5/4
+    # background staging. Synthetic compressed assets pin script traversal,
+    # LoROM conversion, WRAM outputs, byte order, scratch, registers and RTS.
+    add_executable(actraiser_action_room_loader_hle_test
+        tests/actraiser_action_room_loader_hle_test.c
+        src/quintet_lzss.c
+        src/actraiser/actraiser_lzss.c
+        src/actraiser/actraiser_action_room_loader.c
+    )
+    target_include_directories(actraiser_action_room_loader_hle_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/actraiser
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_action_room_loader_hle
+        COMMAND actraiser_action_room_loader_hle_test)
+
     # CPU contracts for the shared per-town/global lair-bit resolver family,
     # its six operations, stack writes, registers, and final flags.
     add_executable(actraiser_town_lair_bits_hle_test

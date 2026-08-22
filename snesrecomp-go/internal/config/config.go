@@ -60,21 +60,31 @@ type RTSDispatch struct {
 	Targets []uint16 `json:"targets"`
 }
 
+// HLEFunctionIf keeps the decoded function body as a native fallback and
+// enters Function only when Predicate returns true for the live CpuState.
+// This is intentionally distinct from hle_func, whose whole-body replacement
+// has no fallback path.
+type HLEFunctionIf struct {
+	Function  string `json:"function"`
+	Predicate string `json:"predicate"`
+}
+
 type Config struct {
-	Bank             byte               `json:"bank"`
-	Includes         []string           `json:"includes,omitempty"`
-	Entries          []Entry            `json:"entries"`
-	Names            []NameDecl         `json:"names,omitempty"`
-	ExcludeRanges    []Range            `json:"exclude_ranges,omitempty"`
-	DataRegions      []DataRegion       `json:"data_regions,omitempty"`
-	ExitMXAt         []ExitMXAt         `json:"exit_mx_at,omitempty"`
-	AutoVectors      bool               `json:"auto_vectors,omitempty"`
-	IndirectDispatch []IndirectDispatch `json:"indirect_dispatch,omitempty"`
-	RTSDispatch      []RTSDispatch      `json:"rts_dispatch,omitempty"`
-	HLESPCUpload     []uint16           `json:"hle_spc_upload,omitempty"`
-	HLEFunctions     map[uint16]string  `json:"hle_functions,omitempty"`
-	HLEDispatch      map[uint16]string  `json:"hle_dispatch,omitempty"`
-	ForceVariantAt   map[uint32]MX      `json:"force_variant_at,omitempty"`
+	Bank             byte                     `json:"bank"`
+	Includes         []string                 `json:"includes,omitempty"`
+	Entries          []Entry                  `json:"entries"`
+	Names            []NameDecl               `json:"names,omitempty"`
+	ExcludeRanges    []Range                  `json:"exclude_ranges,omitempty"`
+	DataRegions      []DataRegion             `json:"data_regions,omitempty"`
+	ExitMXAt         []ExitMXAt               `json:"exit_mx_at,omitempty"`
+	AutoVectors      bool                     `json:"auto_vectors,omitempty"`
+	IndirectDispatch []IndirectDispatch       `json:"indirect_dispatch,omitempty"`
+	RTSDispatch      []RTSDispatch            `json:"rts_dispatch,omitempty"`
+	HLESPCUpload     []uint16                 `json:"hle_spc_upload,omitempty"`
+	HLEFunctions     map[uint16]string        `json:"hle_functions,omitempty"`
+	HLEFunctionsIf   map[uint16]HLEFunctionIf `json:"hle_functions_if,omitempty"`
+	HLEDispatch      map[uint16]string        `json:"hle_dispatch,omitempty"`
+	ForceVariantAt   map[uint32]MX            `json:"force_variant_at,omitempty"`
 }
 
 func Load(path string) (*Config, error) {
@@ -86,6 +96,7 @@ func Load(path string) (*Config, error) {
 
 	cfg := &Config{
 		HLEFunctions:   make(map[uint16]string),
+		HLEFunctionsIf: make(map[uint16]HLEFunctionIf),
 		HLEDispatch:    make(map[uint16]string),
 		ForceVariantAt: make(map[uint32]MX),
 	}
@@ -149,6 +160,20 @@ func Load(path string) (*Config, error) {
 				cfg.HLEFunctions[uint16(pc)] = fields[2]
 			} else {
 				cfg.HLEDispatch[uint16(pc)] = fields[2]
+			}
+		case "hle_func_if":
+			if len(fields) != 4 {
+				return nil, fail("hle_func_if needs <pc> <c_function_name> <c_predicate_name>")
+			}
+			pc, parseErr := parseHex(fields[1], 16)
+			if parseErr != nil {
+				return nil, fail("hle_func_if bad pc %q: %v", fields[1], parseErr)
+			}
+			if !isCIdentifier(fields[2]) || !isCIdentifier(fields[3]) {
+				return nil, fail("hle_func_if requires valid C identifiers, got %q and %q", fields[2], fields[3])
+			}
+			cfg.HLEFunctionsIf[uint16(pc)] = HLEFunctionIf{
+				Function: fields[2], Predicate: fields[3],
 			}
 		case "force_variant_at":
 			if len(fields) != 4 {
