@@ -318,6 +318,16 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_host_display_refresh_cache
         COMMAND actraiser_host_display_refresh_cache_test)
 
+    add_executable(actraiser_input_replay_test
+        tests/input_replay_test.c
+        src/input_replay.c
+    )
+    target_include_directories(actraiser_input_replay_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_input_replay COMMAND actraiser_input_replay_test)
+
     add_executable(actraiser_scene3d_math_test
         tests/scene3d_math_test.c
         src/scene3d_math.c

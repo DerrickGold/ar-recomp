@@ -13,7 +13,10 @@ typedef struct InputReplayFrameResult {
 void InputReplay_Init(void);
 
 /* Apply replay input for the current logical game frame, record the resolved
- * value, and report whether playback reached its final recorded frame. */
+ * value, and report whether playback reached its final recorded frame.
+ * AR_REPLAY_LIVE_AFTER_END=1 hands later frames back to live input instead of
+ * stopping; when AR_INPUT_RECORD is also set, the output is a complete replay
+ * prefix plus the live continuation. */
 InputReplayFrameResult InputReplay_Resolve(uint32_t live_inputs);
 
 /* Replay runs must never persist SRAM, even if the configured file failed to
