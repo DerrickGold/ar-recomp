@@ -60,9 +60,10 @@ The stable two-background scene milestone is implemented:
   cumulative-ROM BG1/BG2 page maps and metatile definitions are now the default
   production finite-world source; `AR_ACTION_ROOM_SCENE_HLE=0` selects the
   exact staged-WRAM source control.
-  The bootstrap still stages CHR/CGRAM, the resident VRAM ring, gameplay data,
-  actors and callbacks. Action CHR/CGRAM now use guarded CPU-facing HLEs; the
-  remaining stages stay native. The ring remains the authentic-pixel
+  The bootstrap still stages the resident VRAM ring, gameplay data, actors and
+  callbacks. Action CHR/CGRAM, maps/metatiles and video profiles now use
+  guarded CPU-facing HLEs; the non-presentation stages stay native. The ring
+  remains the authentic-pixel
   safety oracle, and a scene load or dimension failure falls back to the
   ordinary live-WRAM source. The default promotion follows the exact 12-target
   matrix and natural Fillmore acceptance route described below.
@@ -158,10 +159,11 @@ The production handoff remains intentionally incremental. The renderer obtains
 complete finite BG tile words from the immutable room scene, while the two
 background asset commands now stage collision/ring-visible WRAM through their
 CPU-facing HLEs and its graphics commands stage CHR/CGRAM through PPU-port
-HLEs. The enclosing `$02:B1F7` VM and commands 3, 2, 1, and 0 are still native,
-so this does not absorb level objects, actor initialization, audio, gameplay,
-or command-3 video setup. The exact native handler body remains immediately
-available whenever a read-only guard rejects an invocation.
+HLEs. Command 3 now applies the video profile through its own guarded HLE. The
+enclosing `$02:B1F7` VM and commands 2/1/0 stay native, so this does not absorb
+level objects, actor initialization, audio, or gameplay. Every redirected
+routine retains its exact native handler body whenever a read-only guard
+rejects an invocation.
 
 ## Scope and parity boundary
 
