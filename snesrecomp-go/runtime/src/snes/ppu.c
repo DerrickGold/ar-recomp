@@ -730,8 +730,16 @@ static void PpuRenderLine(Ppu *ppu, int line) {
   if (ppu->overlayRenderBuffer[kPpuOverlaySource_Obj]) {
     memset(&ppu->overlayBuffers[kPpuOverlaySource_Obj], 0,
            sizeof(ppu->overlayBuffers[kPpuOverlaySource_Obj]));
-    memset(&ppu->overlayObjFullAddBuffer, 0,
-           sizeof(ppu->overlayObjFullAddBuffer));
+    /* The second OBJ winner buffer is consumed only by the full-add capture
+     * path. Clearing it for ordinary Action stages wrote another 1 KiB on
+     * every rendered scanline without any possible reader. A later frame that
+     * enables the flag clears each line before sprite evaluation, so stale
+     * data cannot cross the policy transition. */
+    if (ppu->overlayCaptures[kPpuOverlaySource_Obj].flags &
+        kPpuOverlayFlag_MarkFullAddSubscreen) {
+      memset(&ppu->overlayObjFullAddBuffer, 0,
+             sizeof(ppu->overlayObjFullAddBuffer));
+    }
   }
   /* Margin lines use the frontend's exact signed OBJ sideband; authentic lines
    * retain the ordinary OAM path for slots without one. */
@@ -1973,7 +1981,17 @@ static void PpuWriteOverlayRenderLineFiltered(
       any_bands = true;
     }
   }
-  const bool ordinary = filter == NULL && capture->flags == 0;
+  /* RemoveFromGame controls only the later merge back into the native
+   * framebuffer; it does not change the captured color. Keep those common
+   * Action planes on the direct resolve path unless a flag actually changes
+   * color/alpha or a winner filter is active. */
+  const uint8_t color_flags =
+      kPpuOverlayFlag_MarkObjColorMath |
+      kPpuOverlayFlag_MarkBgHalfAdd |
+      kPpuOverlayFlag_ApplyBgFixedColorSubtract |
+      kPpuOverlayFlag_MarkMainScreenWinner;
+  const bool ordinary =
+      filter == NULL && !(capture->flags & color_flags);
   if (!any_bands) {
     bool has_content = false;
     if (ordinary) {

@@ -23,6 +23,7 @@
 #include "crt_post.h"
 #include "types.h"
 #include "diorama/diorama.h"
+#include "diorama/diorama_performance.h"
 #include "diorama/diorama_skybox_uv.h"
 #include "diorama/diorama_planes.h"
 #include "diorama/diorama_scroll_math.h"
@@ -1717,6 +1718,8 @@ void PresentCompositeScene(const FrameSlot *slot,
     return;
 
   if (slot->diorama_active) {
+    DioramaPerformanceScope presentation_performance =
+        DioramaPerformance_Begin(kDioramaPerformance_Total);
     uint8_t *pixels[kDioramaPlane_Count];
     memcpy(pixels, g_diorama_layer_pixels, sizeof(pixels));
     pixels[kDioramaPlane_Backdrop] = g_pixels;
@@ -1944,9 +1947,15 @@ void PresentCompositeScene(const FrameSlot *slot,
                                ? DrawInterpolatedActionObjPlane : NULL,
                            &obj_interpolation,
                            DrawActionDioramaPlaneEffect, &plane_effect,
-                           &action_projection))
+                           &action_projection)) {
+      DioramaPerformance_End(presentation_performance);
+      DioramaPerformance_PresentCompleted();
       return;
+    }
+    DioramaPerformanceScope callback_performance =
+        DioramaPerformance_Begin(kDioramaPerformance_Callback);
     DrawActionEffects(slot, viewport, &action_projection);
+    DioramaPerformance_End(callback_performance);
     /* Flat HUD mode leaves BG3 in the same RemoveFromGame capture used by flat
      * presentation. Reconstruct its split pieces into one texture before
      * drawing the screen-space overlay; drawing them directly creates seams
@@ -1959,6 +1968,8 @@ void PresentCompositeScene(const FrameSlot *slot,
      * two don't both draw a HUD. */
     if (slot->diorama_hud_flat)
       PresentHudOverlayComposited(slot, viewport);
+    DioramaPerformance_End(presentation_performance);
+    DioramaPerformance_PresentCompleted();
     return;
   }
 

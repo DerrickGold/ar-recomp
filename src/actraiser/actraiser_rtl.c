@@ -14,6 +14,7 @@
 #include "actraiser_ws_gap.h"
 #include "cpu_65816_math.h"
 #include "diorama/diorama_capture_blend.h"
+#include "diorama/diorama_performance.h"
 #include "diorama/diorama_planes.h"
 #include "host/host_display.h"   /* kHostDisplayFramebufferHeight */
 #include "settings.h"
@@ -2049,6 +2050,12 @@ void ActRaiserDrawPpuFrame(void) {
   const uint8_t map_number = g_ram[kActRaiserWram_CurrentMap];
   const bool action = ActRaiser_IsActionMapGroup(map_group);
   const bool sim_town = ActRaiser_IsSimulationTown(map_group, map_number);
+  extern bool Diorama_IsActiveThisFrame(void);
+  const bool profile_diorama = action && Diorama_IsActiveThisFrame();
+  DioramaPerformanceScope producer_setup_performance = {0};
+  if (profile_diorama)
+    producer_setup_performance =
+        DioramaPerformance_Begin(kDioramaPerformance_ProducerSetup);
 
   /* Overlay bindings are host-owned and persistent; capture policy is
    * game-owned and rebuilt every frame so no prior mode can leak a region. */
@@ -2452,6 +2459,12 @@ void ActRaiserDrawPpuFrame(void) {
   SimpleHdma hdma_chans[kDmaChannelCount];
   Dma *dma = g_dma;
 
+  DioramaPerformance_End(producer_setup_performance);
+  DioramaPerformanceScope scanout_performance = {0};
+  if (profile_diorama)
+    scanout_performance =
+        DioramaPerformance_Begin(kDioramaPerformance_Scanout);
+
   dma_startDma(dma, g_snesrecomp_last_hdmaen, true);
 
   for (int ch = 0; ch < kDmaChannelCount; ch++)
@@ -2501,6 +2514,11 @@ void ActRaiserDrawPpuFrame(void) {
    * unambiguous even though the stored OAM Y byte itself wraps at 256. */
   for (int m = 1; m <= g_ppu->extraBottomCur; m++)
     ppu_runMarginLine(g_ppu, kActRaiserAuthenticHeight + m);
+  DioramaPerformance_End(scanout_performance);
+  DioramaPerformanceScope producer_finish_performance = {0};
+  if (profile_diorama)
+    producer_finish_performance =
+        DioramaPerformance_Begin(kDioramaPerformance_ProducerFinish);
   {
     extern uint8_t g_pixels[];
     extern int g_ws_extra;
@@ -2582,6 +2600,7 @@ void ActRaiserDrawPpuFrame(void) {
    * restore can never be stranded — keep it that way if you add control flow
    * above. */
   ActRaiser_WidescreenSkyPalaceRestore();
+  DioramaPerformance_End(producer_finish_performance);
 }
 
 /* Same latch, same reason (see ActRaiser_LiveMargins): the vertical bands the

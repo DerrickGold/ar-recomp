@@ -21,6 +21,7 @@
 
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
+#include "diorama/diorama.h"
 #include "diorama/diorama_scroll_math.h"
 #include "frame_slot.h"
 #include "host_display_pacing.h"
@@ -97,6 +98,20 @@ static void RefreshRetainedSimCamera(FrameSlot *slot) {
   slot->sim_camera_mode = camera.mode;
   slot->sim_manual_orbit_yaw = camera.orbit_yaw;
   slot->sim_manual_orbit_pitch = camera.orbit_pitch;
+}
+
+/* Action's camera is presentation-owned for the same reason as SIM's. Only
+ * these host fields are refreshed: velocity lean, hit/landing impulses, and
+ * every game/PPU field stay paired with the retained tick that captured them. */
+static void RefreshRetainedDioramaCamera(FrameSlot *slot) {
+  if (!slot || !slot->diorama_active) return;
+  DioramaCameraPresentationState camera;
+  Diorama_CaptureCameraPresentationState(&camera);
+  slot->diorama_camera_mode = camera.mode;
+  slot->diorama_free_pose = camera.free_pose;
+  slot->diorama_dyncam_baseline = camera.dynamic_baseline;
+  slot->diorama_manual_orbit_yaw = camera.orbit_yaw;
+  slot->diorama_manual_orbit_pitch = camera.orbit_pitch;
 }
 
 double HostDisplay_FramesPerSecond(void) {
@@ -558,8 +573,8 @@ bool HostDisplay_TryRepresentFrame(float alpha,
     return false;
   }
 
-  if (uncapped_profile)
-    RefreshRetainedSimCamera(&s_retained_frame.slot);
+  RefreshRetainedDioramaCamera(&s_retained_frame.slot);
+  if (uncapped_profile) RefreshRetainedSimCamera(&s_retained_frame.slot);
 
   PresentFrame(
       &s_retained_frame.slot,

@@ -9,6 +9,7 @@
 #include "diorama_skybox_uv.h"
 #include "camera_orbit.h"
 #include "diorama_depth_shapes.h" /* rake/bow/thick/stack/voxel arithmetic */
+#include "diorama_performance.h"
 #include "diorama_scroll_math.h"   /* R17/C1: DioramaInterpUvWindow */
 #include "scene3d_math.h"
 #include "presentation_upload_mirror.h"
@@ -537,6 +538,35 @@ void Diorama_SeedCameraFromSettings(void) {
   g_diorama_cam.fov_y = kDioramaFovY;
 }
 
+void Diorama_CaptureCameraPresentationState(
+    DioramaCameraPresentationState *state) {
+  if (!state) return;
+  *state = (DioramaCameraPresentationState){
+    .mode = g_settings.diorama_camera_mode,
+    .free_pose = {
+      .tilt_x =
+          (float)g_settings.diorama_tilt_x_mrad / (float)kPermilleScale,
+      .tilt_y =
+          (float)g_settings.diorama_tilt_y_mrad / (float)kPermilleScale,
+      .distance =
+          (float)g_settings.diorama_distance_x100 / (float)kPercentScale,
+    },
+    .dynamic_baseline = {
+      .tilt_x =
+          (float)g_settings.diorama_dyncam_baseline_tilt_x_mrad /
+              (float)kPermilleScale,
+      .tilt_y =
+          (float)g_settings.diorama_dyncam_baseline_tilt_y_mrad /
+              (float)kPermilleScale,
+      .distance =
+          (float)g_settings.diorama_dyncam_baseline_distance_x100 /
+              (float)kPercentScale,
+    },
+    .orbit_yaw = s_diorama_dynamic_orbit.yaw,
+    .orbit_pitch = s_diorama_dynamic_orbit.pitch,
+  };
+}
+
 void Diorama_AdjustCamera(float d_yaw, float d_pitch, float d_zoom) {
   if (g_settings.diorama_camera_mode == kDioramaCam_Dynamic) {
     const float baseline_yaw =
@@ -594,11 +624,6 @@ bool Diorama_UpdateDynamicCamera(float elapsed_seconds, bool orbit_held) {
   return CameraOrbit_Update(
       &s_diorama_dynamic_orbit, elapsed_seconds, orbit_held,
       kDioramaOrbitReturnTimeSeconds);
-}
-
-void Diorama_GetDynamicCameraOrbit(float *yaw, float *pitch) {
-  if (yaw) *yaw = s_diorama_dynamic_orbit.yaw;
-  if (pitch) *pitch = s_diorama_dynamic_orbit.pitch;
 }
 
 void Diorama_ResetCamera(void) {
@@ -1091,6 +1116,8 @@ static void BuildLayerMesh(const float mvp[16], float z_world, float z_rake,
                            SDL_FColor color,
                            SDL_Vertex *out_verts, int *out_indices,
                            int *num_verts, int *num_indices) {
+  DioramaPerformanceScope performance =
+      DioramaPerformance_Begin(kDioramaPerformance_Mesh);
   *num_verts = 0;
   *num_indices = 0;
   int vi = 0;
@@ -1104,8 +1131,10 @@ static void BuildLayerMesh(const float mvp[16], float z_world, float z_rake,
        * so an unauthored layer is bit-identical to what it always was. */
       float wz = DioramaTiltedRowDepth(z_world, z_rake, z_bow, t);
       if (!ProjectWorldPoint(mvp, wx, wy, wz, screen_w, screen_h,
-                             &out_verts[vi].position))
+                             &out_verts[vi].position)) {
+        DioramaPerformance_End(performance);
         return;
+      }
       out_verts[vi].tex_coord = (SDL_FPoint){ u0 + s * (u1 - u0),
                                               v0 + t * (v1 - v0) };
       out_verts[vi].color = color;
@@ -1114,6 +1143,7 @@ static void BuildLayerMesh(const float mvp[16], float z_world, float z_rake,
   }
   *num_verts = vi;
   TriangulateGrid(DIORAMA_SUBDIV_X, DIORAMA_SUBDIV_Y, out_indices, num_indices);
+  DioramaPerformance_End(performance);
 }
 
 /* THICKNESS — extrude the plane's BOTTOM edge forward into a skirt, so the layer
@@ -1149,6 +1179,8 @@ static void BuildLayerSkirtMesh(const float mvp[16], float z_world,
                                 SDL_FColor color,
                                 SDL_Vertex *out_verts, int *out_indices,
                                 int *num_verts, int *num_indices) {
+  DioramaPerformanceScope performance =
+      DioramaPerformance_Begin(kDioramaPerformance_Mesh);
   *num_verts = 0;
   *num_indices = 0;
   /* The plane's bottom edge is where the skirt starts, so it inherits the rake's
@@ -1166,8 +1198,10 @@ static void BuildLayerSkirtMesh(const float mvp[16], float z_world,
       float wy = 0.0f, wz = 0.0f, shade_mul = 1.0f;
       DioramaSkirtVertex(t, z_top, y_top, thickness, &wy, &wz, &shade_mul);
       if (!ProjectWorldPoint(mvp, wx, wy, wz, screen_w, screen_h,
-                             &out_verts[vi].position))
+                             &out_verts[vi].position)) {
+        DioramaPerformance_End(performance);
         return;
+      }
       /* Bottom source row, repeated down the whole skirt. */
       out_verts[vi].tex_coord = (SDL_FPoint){ u0 + s * (u1 - u0), v_bottom };
       SDL_FColor c = color;
@@ -1180,6 +1214,7 @@ static void BuildLayerSkirtMesh(const float mvp[16], float z_world,
   }
   *num_verts = vi;
   TriangulateGrid(DIORAMA_SUBDIV_X, DIORAMA_SUBDIV_Y, out_indices, num_indices);
+  DioramaPerformance_End(performance);
 }
 
 /* General world-space quad mesh builder, lerped from a corner + two edge
@@ -1198,6 +1233,8 @@ static void BuildQuadMesh(const float mvp[16],
                           int screen_w, int screen_h, SDL_FColor color,
                           SDL_Vertex *out_verts, int *out_indices,
                           int *num_verts, int *num_indices) {
+  DioramaPerformanceScope performance =
+      DioramaPerformance_Begin(kDioramaPerformance_Mesh);
   *num_verts = 0;
   *num_indices = 0;
   int vi = 0;
@@ -1209,8 +1246,10 @@ static void BuildQuadMesh(const float mvp[16],
       float wy = origin_y + s * edge_u_y + t * edge_v_y;
       float wz = origin_z + s * edge_u_z + t * edge_v_z;
       if (!ProjectWorldPoint(mvp, wx, wy, wz, screen_w, screen_h,
-                             &out_verts[vi].position))
+                             &out_verts[vi].position)) {
+        DioramaPerformance_End(performance);
         return;
+      }
       out_verts[vi].tex_coord = (SDL_FPoint){ u0 + s * (u1 - u0),
                                               v0 + t * (v1 - v0) };
       out_verts[vi].color = color;
@@ -1219,6 +1258,7 @@ static void BuildQuadMesh(const float mvp[16],
   }
   *num_verts = vi;
   TriangulateGrid(subdiv_u, subdiv_v, out_indices, num_indices);
+  DioramaPerformance_End(performance);
 }
 
 /* AR_AITOS_WATERFALL_LOG=1 draw-side twin of action_effects.c's capture line.
@@ -1269,6 +1309,8 @@ static void BuildFoldedOverflowMesh(
     float aspect_x, int screen_w, int screen_h, SDL_FColor color,
     SDL_Vertex *out_verts, int *out_indices,
     int *num_verts, int *num_indices) {
+  DioramaPerformanceScope performance =
+      DioramaPerformance_Begin(kDioramaPerformance_Mesh);
   *num_verts = 0;
   *num_indices = 0;
   int vi = 0;
@@ -1284,8 +1326,10 @@ static void BuildFoldedOverflowMesh(
       const float s = (float)col / DIORAMA_SUBDIV_X;
       const float wx = (s - 0.5f) * aspect_x;
       if (!ProjectWorldPoint(mvp, wx, wy, wz, screen_w, screen_h,
-                             &out_verts[vi].position))
+                             &out_verts[vi].position)) {
+        DioramaPerformance_End(performance);
         return;
+      }
       out_verts[vi].tex_coord = (SDL_FPoint){
         u0 + s * (u1 - u0), v0 + t * (v1 - v0),
       };
@@ -1297,6 +1341,7 @@ static void BuildFoldedOverflowMesh(
   TriangulateGrid(
       DIORAMA_SUBDIV_X, DIORAMA_OVERFLOW_SUBDIV_Y,
       out_indices, num_indices);
+  DioramaPerformance_End(performance);
 }
 
 /* The supersample target contains only the active captured rectangle, while
@@ -1327,6 +1372,8 @@ static void RemapMeshToSupersampleTexture(SDL_Vertex *vertices, int count,
 uint32_t Diorama_Upload(SDL_Texture *textures[], uint8_t *pixels[],
                         int snes_width, int snes_height, int obj_apron,
                         uint32_t plane_mask) {
+  DioramaPerformanceScope performance =
+      DioramaPerformance_Begin(kDioramaPerformance_Upload);
   /* `snes_width` is the FULL surface width (display + both aprons); the pitch
    * is always that, because that is how the buffers are laid out. What varies
    * is the destination RECT: a plane that can never hold apron content gets
@@ -1336,8 +1383,10 @@ uint32_t Diorama_Upload(SDL_Texture *textures[], uint8_t *pixels[],
    * steady-state cost. */
   if (!textures || !pixels || snes_width <= 0 || snes_height <= 0 ||
       obj_apron < 0 || obj_apron > snes_width / 2 ||
-      snes_width > INT_MAX / (int)sizeof(uint32_t))
+      snes_width > INT_MAX / (int)sizeof(uint32_t)) {
+    DioramaPerformance_End(performance);
     return 0;
+  }
   const int pitch = snes_width * (int)sizeof(uint32_t);
   const int display_width = snes_width - obj_apron * 2;
   SDL_Rect upload_full = { 0, 0, snes_width, snes_height };
@@ -1354,12 +1403,32 @@ uint32_t Diorama_Upload(SDL_Texture *textures[], uint8_t *pixels[],
         ? pixels[plane]
         : pixels[plane] +
             (size_t)obj_apron * sizeof(uint32_t);
-    if (PresentationUploadMirror_UploadArgb8888(
-            &g_diorama_upload_mirrors[plane], textures[plane], src,
-            rect->w, rect->h, pitch, rect->x, rect->y, NULL))
+    PresentationUploadResult result = {0};
+    const bool synchronized = PresentationUploadMirror_UploadArgb8888(
+        &g_diorama_upload_mirrors[plane], textures[plane], src,
+        rect->w, rect->h, pitch, rect->x, rect->y, &result);
+    DioramaPerformance_AddPlaneSync(
+        synchronized, synchronized && result.changed, result.uploaded_bytes);
+    if (synchronized)
       uploaded_mask |= 1u << plane;
   }
+  DioramaPerformance_End(performance);
   return uploaded_mask;
+}
+
+static bool RenderDioramaGeometry(SDL_Renderer *renderer,
+                                  SDL_Texture *texture,
+                                  const SDL_Vertex *vertices,
+                                  int num_vertices,
+                                  const int *indices,
+                                  int num_indices) {
+  DioramaPerformanceScope performance =
+      DioramaPerformance_Begin(kDioramaPerformance_Submit);
+  const bool succeeded = SDL_RenderGeometry(
+      renderer, texture, vertices, num_vertices, indices, num_indices);
+  DioramaPerformance_End(performance);
+  DioramaPerformance_AddDraw(succeeded, num_vertices, num_indices);
+  return succeeded;
 }
 
 /* M7 (§6.1)/B1b (followup doc): which base-camera delta (0=BG1, 1=BG2) a
@@ -1558,7 +1627,7 @@ static void DrawDioramaSkybox(SDL_Renderer *renderer,
       { { (float)out_w, draw_y1 }, tint, { u1, v1 } },
       { { 0.0f, draw_y1 },         tint, { u0, v1 } },
     };
-    SDL_RenderGeometry(renderer, skybox_texture, verts, 4, indices, 6);
+    RenderDioramaGeometry(renderer, skybox_texture, verts, 4, indices, 6);
   }
   if (blur) SDL_SetGPURenderState(renderer, NULL);
 }
@@ -1644,14 +1713,14 @@ static void DrawDioramaShoebox(SDL_Renderer *renderer, const float mvp[16],
                0.0f, 0.0f, z_span,
                0.0f, 0.0f, 1.0f, 1.0f, 1, 1, out_w, out_h, kShoeboxColor,
                verts, indices, &nv, &ni);
-  SDL_RenderGeometry(renderer, NULL, verts, nv, indices, ni);
+  RenderDioramaGeometry(renderer, NULL, verts, nv, indices, ni);
 
   BuildQuadMesh(mvp, -hx, half_y, kShoeboxZBack,
                2.0f * hx, 0.0f, 0.0f,
                0.0f, 0.0f, z_span,
                0.0f, 0.0f, 1.0f, 1.0f, 1, 1, out_w, out_h, kShoeboxColor,
                verts, indices, &nv, &ni);
-  SDL_RenderGeometry(renderer, NULL, verts, nv, indices, ni);
+  RenderDioramaGeometry(renderer, NULL, verts, nv, indices, ni);
 
   /* Side walls (x=±hx): SDL_RenderGeometry has no depth test, so a wall on
    * the camera's near side would occlude the view straight into the box —
@@ -1675,7 +1744,7 @@ static void DrawDioramaShoebox(SDL_Renderer *renderer, const float mvp[16],
                  0.0f, 2.0f * half_y, 0.0f,
                  0.0f, 0.0f, 1.0f, 1.0f, 1, 1, out_w, out_h, c,
                  verts, indices, &nv, &ni);
-    SDL_RenderGeometry(renderer, NULL, verts, nv, indices, ni);
+    RenderDioramaGeometry(renderer, NULL, verts, nv, indices, ni);
   }
   if (alpha_pos_x > 0.01f) {
     SDL_FColor c = kShoeboxColor;
@@ -1685,7 +1754,7 @@ static void DrawDioramaShoebox(SDL_Renderer *renderer, const float mvp[16],
                  0.0f, 2.0f * half_y, 0.0f,
                  0.0f, 0.0f, 1.0f, 1.0f, 1, 1, out_w, out_h, c,
                  verts, indices, &nv, &ni);
-    SDL_RenderGeometry(renderer, NULL, verts, nv, indices, ni);
+    RenderDioramaGeometry(renderer, NULL, verts, nv, indices, ni);
   }
 }
 
@@ -2290,14 +2359,23 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
      * painter slot. It consumes the already-published authored projection,
      * so room z/rake/bow and the current camera remain single-sourced while
      * each sprite component retains a fractional presentation position. */
+    bool plane_was_replaced = false;
     if (plane_replacement && out_projection && out_projection->valid &&
-        DioramaPlaneIsObjectPriority(layer->plane) &&
-        plane_replacement(
-            plane_replacement_userdata, layer->plane, out_projection,
-            shade, is_additive, layer->casts_shadow)) {
+        DioramaPlaneIsObjectPriority(layer->plane)) {
+      DioramaPerformanceScope callback_performance =
+          DioramaPerformance_Begin(kDioramaPerformance_Callback);
+      plane_was_replaced = plane_replacement(
+          plane_replacement_userdata, layer->plane, out_projection,
+          shade, is_additive, layer->casts_shadow);
+      DioramaPerformance_End(callback_performance);
+    }
+    if (plane_was_replaced) {
       if (plane_effect) {
         if (!viewport_is_output) SDL_SetRenderViewport(renderer, NULL);
+        DioramaPerformanceScope callback_performance =
+            DioramaPerformance_Begin(kDioramaPerformance_Callback);
         plane_effect(plane_effect_userdata, layer->plane, out_projection);
+        DioramaPerformance_End(callback_performance);
         if (!viewport_is_output) SDL_SetRenderViewport(renderer, &viewport);
       }
       continue;
@@ -2499,8 +2577,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
         if (stack_nv > 0) {
           SDL_SetTextureBlendMode(
               texture, is_additive ? SDL_BLENDMODE_ADD : SDL_BLENDMODE_BLEND);
-          SDL_RenderGeometry(renderer, texture, stack_verts, stack_nv,
-                             stack_indices, stack_ni);
+          RenderDioramaGeometry(renderer, texture, stack_verts, stack_nv,
+                                stack_indices, stack_ni);
         }
       }
     }
@@ -2535,8 +2613,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
       if (skirt_nv > 0) {
         SDL_SetTextureBlendMode(
             texture, is_additive ? SDL_BLENDMODE_ADD : SDL_BLENDMODE_BLEND);
-        SDL_RenderGeometry(renderer, texture, skirt_verts, skirt_nv,
-                           skirt_indices, skirt_ni);
+        RenderDioramaGeometry(renderer, texture, skirt_verts, skirt_nv,
+                              skirt_indices, skirt_ni);
       }
     }
 
@@ -2563,9 +2641,12 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     bool used_ss = false;
     if (!use_shader) {
       bool target_restore_failed = false;
+      DioramaPerformanceScope supersample_performance =
+          DioramaPerformance_Begin(kDioramaPerformance_Supersample);
       SDL_Texture *ss = BuildDioramaSupersample(
           renderer, texture, obj_apron, snes_width, snes_height,
           &target_restore_failed);
+      DioramaPerformance_End(supersample_performance);
       if (target_restore_failed) {
         if (interpolating)
           SDL_SetRenderTextureAddressMode(renderer, SDL_TEXTURE_ADDRESS_AUTO,
@@ -2633,7 +2714,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
         SDL_SetGPURenderStateFragmentUniforms(g_blur_state, 0, &u, sizeof(u));
         SDL_SetGPURenderState(renderer, g_blur_state);
       }
-      SDL_RenderGeometry(renderer, draw_texture, shadow, nv, indices, ni);
+      RenderDioramaGeometry(renderer, draw_texture, shadow, nv, indices, ni);
       if (shadow_blur)
         SDL_SetGPURenderState(renderer, NULL);
     }
@@ -2685,16 +2766,20 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
             host_vertex_base + indices[index];
       extension_nv += nv;
       extension_ni += ni;
-      SDL_RenderGeometry(renderer, draw_texture, extension_verts, extension_nv,
-                         extension_indices, extension_ni);
+      RenderDioramaGeometry(renderer, draw_texture, extension_verts,
+                            extension_nv, extension_indices, extension_ni);
     } else {
-      SDL_RenderGeometry(renderer, draw_texture, draw_verts, nv, indices, ni);
+      RenderDioramaGeometry(renderer, draw_texture, draw_verts, nv, indices,
+                            ni);
     }
     if (rim_light || dof_or_edge)
       SDL_SetGPURenderState(renderer, NULL);
     if (plane_effect && out_projection && out_projection->valid) {
       if (!viewport_is_output) SDL_SetRenderViewport(renderer, NULL);
+      DioramaPerformanceScope callback_performance =
+          DioramaPerformance_Begin(kDioramaPerformance_Callback);
       plane_effect(plane_effect_userdata, layer->plane, out_projection);
+      DioramaPerformance_End(callback_performance);
       if (!viewport_is_output) SDL_SetRenderViewport(renderer, &viewport);
       /* The callback owns its blend/draw state but not the per-layer texture
        * sampling policy. Reassert interpolation clamping before later planes. */

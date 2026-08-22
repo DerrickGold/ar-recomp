@@ -32,6 +32,7 @@
 #include "input_map.h"
 #include "dev/scene_inspector.h"
 #include "diorama/diorama.h"
+#include "diorama/diorama_performance.h"
 #include "diorama/diorama_scroll_math.h"  /* kInterpPhaseNone */
 #include "forced_input.h"
 #include "save_system.h"
@@ -378,6 +379,10 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
 
   uint64_t perf_draw_t0 = perf_on ? SDL_GetTicks() : 0;
   RtlDrawPpuFrame();
+  DioramaPerformanceScope host_post_performance = {0};
+  if (Diorama_IsActiveThisFrame())
+    host_post_performance =
+        DioramaPerformance_Begin(kDioramaPerformance_HostPost);
   /* Own the developed world tilemap instead of observing $7E:C000, which acts
    * and towns both reuse as unrelated scratch. This runs only on the game
    * thread, after an emulated tick reached a stable frame boundary. */
@@ -448,6 +453,7 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
     if (!g_settings.diorama_mode)
       ActRaiser_RebindPpuOutputSurfaces();
   }
+  DioramaPerformance_End(host_post_performance);
   HostInput_MarkFrameDrawn();
   if (perf_on) {
     static uint64_t draw_win_start, draw_ms_sum, draw_ms_max;

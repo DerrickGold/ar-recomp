@@ -119,6 +119,12 @@ bool ActRaiserActionBg_RingAddress(uint16_t tilemap_base, int tile_x,
 
 static int32_t WrapWorldTile(int32_t coordinate, unsigned extent) {
   if (!extent) return coordinate;
+  if ((uint32_t)coordinate < extent) return coordinate;
+  /* Decoded Action worlds are usually power-of-two page grids. Unsigned
+   * masking is defined for negative inputs after conversion and avoids a
+   * signed divide in the provider's per-tile scanout callback. */
+  if ((extent & (extent - 1u)) == 0)
+    return (int32_t)((uint32_t)coordinate & (extent - 1u));
   int64_t wrapped = coordinate % (int64_t)extent;
   if (wrapped < 0) wrapped += extent;
   return (int32_t)wrapped;

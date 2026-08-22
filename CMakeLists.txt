@@ -25,6 +25,19 @@ include(CTest)
 # skips the game target; tests link only the hand-written sources they exercise.
 option(AR_TESTS_ONLY "Configure only the ROM-free test tier (no ROM required)" OFF)
 
+# Audited height field for the full-town SIM ground and every grounded
+# presentation consumer. Shipped builds enable it; pass
+# -DAR_SIM3D_TERRAIN_ELEVATION=OFF (or use the control preset) for a strict
+# flat-terrain A/B control. The numeric value is shared with ROM-free settings
+# tests, so define it outside the game-target-only branch below.
+option(AR_SIM3D_TERRAIN_ELEVATION
+    "Render the audited SIM town elevation mesh" ON)
+if(AR_SIM3D_TERRAIN_ELEVATION)
+    set(AR_SIM3D_TERRAIN_ELEVATION_VALUE 1)
+else()
+    set(AR_SIM3D_TERRAIN_ELEVATION_VALUE 0)
+endif()
+
 set(SNESRECOMP_GO_ROOT ${CMAKE_SOURCE_DIR}/snesrecomp-go)
 include(${SNESRECOMP_GO_ROOT}/runtime/runner.cmake)
 
@@ -216,17 +229,6 @@ else()
     target_compile_definitions(ActRaiserRecomp PRIVATE AR_SIM3D_PICKER_TOPDOWN=0)
 endif()
 
-# Audited height field for the full-town SIM ground and every grounded
-# presentation consumer. Shipped builds enable it; pass
-# -DAR_SIM3D_TERRAIN_ELEVATION=OFF (or use the control preset) for a strict
-# flat-terrain A/B control.
-option(AR_SIM3D_TERRAIN_ELEVATION
-    "Render the audited SIM town elevation mesh" ON)
-if(AR_SIM3D_TERRAIN_ELEVATION)
-    set(AR_SIM3D_TERRAIN_ELEVATION_VALUE 1)
-else()
-    set(AR_SIM3D_TERRAIN_ELEVATION_VALUE 0)
-endif()
 target_compile_definitions(ActRaiserRecomp PRIVATE
     AR_SIM3D_TERRAIN_ELEVATION=${AR_SIM3D_TERRAIN_ELEVATION_VALUE})
 

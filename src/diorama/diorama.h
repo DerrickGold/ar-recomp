@@ -32,7 +32,6 @@ void Diorama_PublishLiveLayerSection(uint8_t map_group, uint8_t map_number,
 void Diorama_SeedCameraFromSettings(void);
 void Diorama_AdjustCamera(float d_yaw, float d_pitch, float d_zoom);
 bool Diorama_UpdateDynamicCamera(float elapsed_seconds, bool orbit_held);
-void Diorama_GetDynamicCameraOrbit(float *yaw, float *pitch);
 void Diorama_ResetCamera(void);
 bool Diorama_IsActiveThisFrame(void);
 void Diorama_OnModeChanged(void);
@@ -87,6 +86,20 @@ typedef struct DioramaCameraPose {
   float tilt_y;
   float distance;
 } DioramaCameraPose;
+
+/* Host-owned camera fields that may change between emulation ticks. Retained
+ * action frames refresh only this snapshot; game/PPU state and reactive camera
+ * inputs remain the immutable values captured with the frame. */
+typedef struct DioramaCameraPresentationState {
+  int mode;
+  DioramaCameraPose free_pose;
+  DioramaCameraPose dynamic_baseline;
+  float orbit_yaw;
+  float orbit_pitch;
+} DioramaCameraPresentationState;
+
+void Diorama_CaptureCameraPresentationState(
+    DioramaCameraPresentationState *state);
 
 enum { kDioramaObjectPriorityCount = 4 };
 

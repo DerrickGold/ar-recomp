@@ -510,27 +510,17 @@ void FrameSlot_Capture(FrameSlot *dst) {
   dst->turbo_active = g_turbo != 0;
   dst->interp_setting_enabled = g_settings.gpu_interp_enabled;
   dst->diorama_hud_flat = g_settings.diorama_hud_flat;
-  /* B4-split (followup doc): both candidate camera poses, scaled the same
-   * way Diorama_SeedCameraFromSettings does (g_diorama_cam and g_settings
-   * are kept in lockstep by Diorama_AdjustCamera's write-back and
-   * OnRuntimeSettingChanged's re-seed on menu edits, so reading straight
-   * from g_settings here is equivalent to reading the live g_diorama_cam). */
-  dst->diorama_camera_mode = g_settings.diorama_camera_mode;
-  dst->diorama_free_pose = (DioramaCameraPose){
-    (float)g_settings.diorama_tilt_x_mrad / (float)kPermilleScale,
-    (float)g_settings.diorama_tilt_y_mrad / (float)kPermilleScale,
-    (float)g_settings.diorama_distance_x100 / (float)kPercentScale,
-  };
-  dst->diorama_dyncam_baseline = (DioramaCameraPose){
-    (float)g_settings.diorama_dyncam_baseline_tilt_x_mrad /
-        (float)kPermilleScale,
-    (float)g_settings.diorama_dyncam_baseline_tilt_y_mrad /
-        (float)kPermilleScale,
-    (float)g_settings.diorama_dyncam_baseline_distance_x100 /
-        (float)kPercentScale,
-  };
-  Diorama_GetDynamicCameraOrbit(&dst->diorama_manual_orbit_yaw,
-                                &dst->diorama_manual_orbit_pitch);
+  /* B4-split (followup doc): both candidate camera poses and the transient
+   * orbit use the same small host-state snapshot as retained re-presentation.
+   * Keeping this conversion single-sourced prevents tick and between-tick
+   * frames from disagreeing about camera units or active mode. */
+  DioramaCameraPresentationState diorama_camera;
+  Diorama_CaptureCameraPresentationState(&diorama_camera);
+  dst->diorama_camera_mode = diorama_camera.mode;
+  dst->diorama_free_pose = diorama_camera.free_pose;
+  dst->diorama_dyncam_baseline = diorama_camera.dynamic_baseline;
+  dst->diorama_manual_orbit_yaw = diorama_camera.orbit_yaw;
+  dst->diorama_manual_orbit_pitch = diorama_camera.orbit_pitch;
   dst->diorama_reactive_strength = g_settings.diorama_reactive_strength;
   /* B4-vellean (followup doc): same ReadWram16+cast pattern already used for
    * PlayerVelocityX/Y elsewhere (actraiser_rtl.c ~346-349). */
