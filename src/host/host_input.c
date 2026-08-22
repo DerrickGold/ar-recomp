@@ -213,7 +213,7 @@ void HostInput_ApplyAnalogCamera(void) {
   const bool sim_changed = Sim3DCamera_UpdateDynamic(
       elapsed_seconds, sim_orbit_held);
   if ((diorama && camera_input) || (diorama && diorama_changed))
-    HostInput_RequestPausedRedraw();
+    RequestCameraRedrawIfFrozen();
   if (sim3d && sim_changed)
     RequestCameraRedrawIfFrozen();
 }

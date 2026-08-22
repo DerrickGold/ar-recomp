@@ -322,8 +322,7 @@ ActionBgLookupResult ActionBgWorld_Lookup(const ActionBgWorld *world,
                                            uint16_t *entry) {
   if (!world || !world->valid || !entry)
     return kActionBgLookup_ProviderFailure;
-  if (tile_x < 0 || tile_y < 0 ||
-      (unsigned)tile_x >= world->key.tile_width ||
+  if ((unsigned)tile_x >= world->key.tile_width ||
       (unsigned)tile_y >= world->key.tile_height)
     return kActionBgLookup_OutsideWorld;
   *entry = world->tiles[(size_t)(unsigned)tile_y * world->key.tile_width +
