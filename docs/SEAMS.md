@@ -1534,7 +1534,7 @@ End-to-end seam map for casting; every stage verified. Decomp target: `magic.c`.
 
 ---
 
-## Frame-rate decoupling — high-refresh presentation WITHOUT changing pacing (forward-looking seam map)
+## Frame-rate decoupling — high-refresh presentation WITHOUT changing pacing
 
 **The hard constraint first.** ActRaiser's entire notion of time is the **60 Hz (NTSC) logic tick**:
 every timer, event trigger, physics step, animation-script advance, and the `$0088` game-frame
@@ -1543,8 +1543,10 @@ tick. The intentional exception is a hardware-faithful load interval with `$4200
 the host still advances display/audio frames while `RunOneFrameOfGame` consumes its calibrated
 hold without running logic or changing `$0088`. You therefore **cannot speed up the logic** to get
 smoothness — that *is* the pacing. The only correct way to a higher refresh rate is the classic
-**fixed-timestep logic + interpolated presentation** split: keep ticking logic at exactly 60 Hz,
-and render *extra, interpolated* frames between ticks at the monitor's rate.
+**fixed-timestep logic + independently paced presentation** split: keep ticking logic at exactly
+60 Hz and present retained frames at the selected host cadence. Interpolation is a separate,
+presentation-only refinement that can make those extra frames show intermediate motion; disabling
+it must repeat the last completed tick without collapsing presentation back to the logic rate.
 
 **The tick boundary (the seam you must preserve).** Outside an explicit NMI-disabled load hold,
 `RunOneFrameOfGame` supplies one atomic 60 Hz logic tick: the host resumes the game coroutine,
@@ -1555,34 +1557,51 @@ channel marks the edges (`vblank` = host frame boundary, `nmi` = logic tick serv
 the 1/N-speed pacing-bug class, DEBUG.md §7.12/§7.13 — would break a naïve accumulator; those must
 be fixed first).
 
-**The presentable-state seams to interpolate** (all live in `g_ppu`, read by `RtlDrawPpuFrame` →
-`g_pixels`; snapshot each at tick N-1 and N, lerp for in-between presents), in order of visible payoff:
+**Implemented presentation architecture.** The earlier OAM/BG-register strategy was removed: it
+could not cover arbitrary raster changes and depended on reconstructing SNES state that the current
+HLE does not own. `DioramaFrameGeneration_Capture` instead retains consecutive completed ARGB plane
+images, estimates bidirectional motion once per 60 Hz pair, and `Prepare` warps the nearer immutable
+endpoint into a renderer-target texture for each host sub-tick phase. Drawing the farther endpoint
+again is intentionally forbidden: on transparent sprite planes it retained old pixels and looked
+like latched input. Coherent BG/residual planes use
+one robust global vector (one generated quad); sparse OBJ priority planes use a 16-pixel block field.
+This works after PPU rasterisation, so sprites, scrolling, HDMA detail, palette changes, and other
+pixel filling share one contract without mutating `g_ppu` or rerunning the rasteriser.
+The raw upload mirror propagates a per-plane changed mask into capture: unchanged planes reuse the
+authoritative raw endpoint and perform no private copy, upload, analysis, or synthesis. Capture
+regions also match upload regions exactly—OBJ priority planes retain their resolve apron, while
+BG/backdrop planes exclude the known-zero apron columns. Source pitches are expressed in pixels at
+the capture boundary and converted to bytes exactly once inside the row copier; treating that value
+as bytes interleaves quarter-rows and corrupts both analysis and generated textures.
 
-| Seam | PPU state | Registers | Payoff | Caveats |
-|---|---|---|---|---|
-| **Sprite positions** | `ppu->oam[]` (rebuilt each tick by `bank_01_ACD9`/`ADAD`, §"per-frame OAM rebuild") | OAM via `$2104` | Biggest — smooth moving characters/enemies/effects | Must match sprites across ticks by slot/id; **snap (don't lerp) on spawn/despawn/teleport** (large Δ) or you smear |
-| **BG scroll** | `ppu->hScroll[layer]` / `ppu->vScroll[layer]` | BGnHOFS/VOFS `$210D-$2114` | Smooth scrolling of the action-stage playfield | Per-layer; parallax layers scroll at different rates — lerp each independently |
-| **Mode 7 matrix** | `ppu->m7matrix[0..7]` (`[6]/[7]`=scroll, `[4]/[5]`=center) | `$211B-$2120` | Smooth act→sim spiral + overworld map rotate/zoom | Interpolate the matrix, not the projected pixels |
-| **Palette fades** | `ppu->cgram[]` | CGDATA `$2122` | Smooth fades (act-entry, INIDISP brightness ramps) | Lower priority; lerp in RGB, watch for wrap |
+**Fail-closed boundaries.** Generation requires matching dimensions, BG mode, map/section, additive
+plane mode, both endpoint planes, a normal non-turbo tick span, no forced blank, mutually consistent
+forward/backward motion with a meaningful improvement over a stationary image, and a sub-50 ms
+capture interval. Missing/failed planes keep their exact current uploaded texture. Disabling the
+existing **Frame interpolation** setting performs no analysis or synthesis.
 
-**Do NOT interpolate** (discrete — interpolating blurs/garbles): VRAM tile graphics, tilemap
-indices, and anything the game *logic* reads. HUD/text layers usually look fine snapped — consider
-interpolating world BG layers + sprites only.
+**Where the hooks live.** The implemented pipeline is:
+1. **Present-rate decouple (implemented):** drive an accumulator so `RunOneFrameOfGame` fires at a
+   fixed 60 Hz while `SDL_RenderPresent` follows Vsync, Unlimited, Limit, or Uncapped independently.
+   With interpolation off, retained ticks are repeated exactly. `AR_PERF` and the
+   `[present-cadence]` diagnostic verify that tick presents remain fixed while re-presents follow
+   host cadence. Vsync has no software sleep in front of it: the renderer/swapchain is its clock.
+   Limit alone contributes presentation-delay headroom to the emulation accumulator. Uncapped is
+   the display-relative policy (2x the cached nominal rate, or 2x native as an unknown/VRR
+   fallback), while Unlimited has no host deadline. Nominal refresh and actual-Vsync status live
+   only in host presentation state. Refresh is cached by session-stable `SDL_DisplayID`, queried at
+   boot and on display-mode events, and a failed/unspecified sample never erases a prior valid
+   value; moving the window selects the destination monitor's cache without periodic polling.
+   The explicit **Test 30 -> 60 Hz** diagnostic is the sole exception: only while interpolated
+   Diorama is active, it doubles the source interval for observable slow-motion midpoint testing;
+   presentation cadence remains independent.
+2. **Captured-plane frame generation (implemented for 3D action/Diorama):** capture/analyse once in
+   `PresentUpload`, synthesize at each retained present, and feed the resolved textures through the
+   ordinary painter/depth/effect compositor.
+3. **Future scope:** add equivalent endpoint ownership for render modes that do not use Diorama
+   planes. Mode 7 and flat menus currently repeat their completed tick at the selected host cadence.
 
-**Where the hooks go.** The present loop is `src/main.c` (`RtlDrawPpuFrame` → `SDL_UpdateTexture`
-→ `SDL_RenderCopy` → `SDL_RenderPresent`, ~line 737-781). The staged plan:
-1. **Present-rate decouple (free, low-risk):** drive an accumulator so `RunOneFrameOfGame` fires at
-   a fixed 60 Hz while `SDL_RenderPresent` runs at monitor Hz (vsync). No interpolation yet — just
-   removes host-frame/logic-frame judder and validates the fixed-timestep loop. `AR_PACE`/`AR_PERF`
-   already prove the 60 Hz cadence is separable from present.
-2. **Sprite (OAM) interpolation** — snapshot OAM each tick, lerp positions, render the interpolated
-   OAM for in-between presents. Biggest win.
-3. **BG scroll interpolation** — the scrolling stages.
-4. **Mode 7 + palette** — the sim overworld and fades.
-
-Each phase re-runs the PPU rasteriser (`RtlDrawPpuFrame`) with the interpolated `g_ppu` fields
-temporarily swapped in, then restores the true tick-N state so logic is never perturbed. The whole
-scheme is **presentation-only**: `$0088`, timers, and logic never see the extra frames.
+The whole scheme is **presentation-only**: `$0088`, timers, and logic never see the extra frames.
 
 ---
 

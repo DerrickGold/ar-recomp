@@ -19,13 +19,14 @@ static int s_failure_count;
 } while (0)
 
 static HostDisplayPacingOptions Options(RefreshMode mode, int limit_fps,
-                                        int host_refresh_hz,
+                                        int nominal_refresh_hz,
                                         bool compositor_managed) {
   return (HostDisplayPacingOptions){
       .refresh_mode = mode,
       .frame_limit_fps = limit_fps,
-      .host_refresh_hz = host_refresh_hz,
+      .nominal_refresh_hz = nominal_refresh_hz,
       .compositor_managed = compositor_managed,
+      .vsync_active = mode == kRefreshMode_Vsync,
   };
 }
 
@@ -38,41 +39,83 @@ static void TestExplicitFrameLimits(void) {
         1000000000ull);
 }
 
-static void TestUnlimitedAndVsyncPolicies(void) {
+static void TestInterpolationSourceCadence(void) {
+  CHECK(HostDisplayPacing_SourceFrameIntervalNs(
+            kEmulationFrameIntervalNs, true, true,
+            kInterpolationSource_Test30) ==
+        kEmulationFrameIntervalNs * 2u);
+  CHECK(HostDisplayPacing_SourceFrameIntervalNs(
+            kEmulationFrameIntervalNs, false, true,
+            kInterpolationSource_Test30) == kEmulationFrameIntervalNs);
+  CHECK(HostDisplayPacing_SourceFrameIntervalNs(
+            kEmulationFrameIntervalNs, true, false,
+            kInterpolationSource_Test30) == kEmulationFrameIntervalNs);
+  CHECK(HostDisplayPacing_SourceFrameIntervalNs(
+            kEmulationFrameIntervalNs, true, true,
+            kInterpolationSource_Native) == kEmulationFrameIntervalNs);
+}
+
+static void TestOnlyExplicitLimitOwnsFrameLimitInterval(void) {
   CHECK(HostDisplayPacing_FrameLimitIntervalNs(
-            Options(kRefreshMode_Unlimited, 60, 60, false)) ==
-        8333333ull);
+            Options(kRefreshMode_Uncapped, 60, 60, false)) == 0);
   CHECK(HostDisplayPacing_FrameLimitIntervalNs(
             Options(kRefreshMode_Unlimited, 60, 0, false)) == 0);
   CHECK(HostDisplayPacing_FrameLimitIntervalNs(
             Options(kRefreshMode_Unlimited, 60, 90, true)) == 0);
   CHECK(HostDisplayPacing_FrameLimitIntervalNs(
             Options(kRefreshMode_Vsync, 60, 60, false)) == 0);
-  CHECK(HostDisplayPacing_FrameLimitIntervalNs(
-            Options(kRefreshMode_Uncapped, 60, 60, false)) == 0);
 }
 
 static void TestUiAndPausedIntervals(void) {
   const HostDisplayPacingOptions vsync_144 =
       Options(kRefreshMode_Vsync, 60, 144, false);
   CHECK(HostDisplayPacing_UiIntervalNs(
-            vsync_144, kEmulationFrameIntervalNs) ==
-        3472222ull);
+            vsync_144, kEmulationFrameIntervalNs) == 0);
   CHECK(HostDisplayPacing_PausedIntervalNs(
-            vsync_144, kEmulationFrameIntervalNs) ==
+            vsync_144, kEmulationFrameIntervalNs) == 0);
+
+  HostDisplayPacingOptions rejected_vsync = vsync_144;
+  rejected_vsync.vsync_active = false;
+  CHECK(HostDisplayPacing_UiIntervalNs(
+            rejected_vsync, kEmulationFrameIntervalNs) ==
         kEmulationFrameIntervalNs);
 
-  const HostDisplayPacingOptions unlimited_30 =
-      Options(kRefreshMode_Unlimited, 60, 30, false);
+  const HostDisplayPacingOptions uncapped_30 =
+      Options(kRefreshMode_Uncapped, 60, 30, false);
   CHECK(HostDisplayPacing_UiIntervalNs(
-            unlimited_30, kEmulationFrameIntervalNs) ==
-        33333333ull);
+            uncapped_30, kEmulationFrameIntervalNs) ==
+        16666666ull);
   CHECK(HostDisplayPacing_PausedIntervalNs(
-            unlimited_30, kEmulationFrameIntervalNs) ==
-        33333333ull);
+            uncapped_30, kEmulationFrameIntervalNs) ==
+        16666666ull);
+
+  const HostDisplayPacingOptions limited_120 =
+      Options(kRefreshMode_Limit, 120, 60, false);
+  CHECK(HostDisplayPacing_UiIntervalNs(
+            limited_120, kEmulationFrameIntervalNs) ==
+        8333333ull);
+  CHECK(HostDisplayPacing_PausedIntervalNs(
+            limited_120, kEmulationFrameIntervalNs) ==
+        8333333ull);
+
+  const HostDisplayPacingOptions unlimited =
+      Options(kRefreshMode_Unlimited, 60, 60, false);
+  CHECK(HostDisplayPacing_UiIntervalNs(
+            unlimited, kEmulationFrameIntervalNs) == 0);
+  CHECK(HostDisplayPacing_PausedIntervalNs(
+            unlimited, kEmulationFrameIntervalNs) == 0);
+
+  const HostDisplayPacingOptions uncapped_unknown =
+      Options(kRefreshMode_Uncapped, 60, 0, false);
+  CHECK(HostDisplayPacing_UiIntervalNs(
+            uncapped_unknown, kEmulationFrameIntervalNs) ==
+        kEmulationFrameIntervalNs / 2u);
+  CHECK(HostDisplayPacing_GameIntervalNs(
+            uncapped_unknown, kEmulationFrameIntervalNs) ==
+        kEmulationFrameIntervalNs / 2u);
 
   const HostDisplayPacingOptions gamescope =
-      Options(kRefreshMode_Unlimited, 60, 90, true);
+      Options(kRefreshMode_Uncapped, 60, 90, true);
   CHECK(HostDisplayPacing_UiIntervalNs(
             gamescope, kEmulationFrameIntervalNs) ==
         kEmulationFrameIntervalNs / 2u);
@@ -84,15 +127,14 @@ static void TestGamePresentAntiSpinFloor(void) {
             kEmulationFrameIntervalNs) ==
         40000000ull);
   CHECK(HostDisplayPacing_GameIntervalNs(
-            Options(kRefreshMode_Unlimited, 60, 60, false),
+            Options(kRefreshMode_Uncapped, 60, 60, false),
             kEmulationFrameIntervalNs) ==
         8333333ull);
   CHECK(HostDisplayPacing_GameIntervalNs(
             Options(kRefreshMode_Vsync, 60, 60, false),
-            kEmulationFrameIntervalNs) ==
-        8333333ull);
+            kEmulationFrameIntervalNs) == 0);
   CHECK(HostDisplayPacing_GameIntervalNs(
-            Options(kRefreshMode_Uncapped, 60, 60, false),
+            Options(kRefreshMode_Unlimited, 60, 60, false),
             kEmulationFrameIntervalNs) == 0);
 }
 
@@ -118,16 +160,17 @@ static void TestCompletedPresentRate(void) {
 }
 
 static void TestRepresentPolicy(void) {
-  CHECK(HostDisplayPacing_ShouldRepresentFrame(
-      kRefreshMode_Uncapped, false, false, false, false));
-  CHECK(!HostDisplayPacing_ShouldRepresentFrame(
-      kRefreshMode_Uncapped, false, false, false, true));
-  CHECK(!HostDisplayPacing_ShouldRepresentFrame(
-      kRefreshMode_Unlimited, false, false, false, false));
-  CHECK(HostDisplayPacing_ShouldRepresentFrame(
-      kRefreshMode_Unlimited, true, true, true, false));
-  CHECK(!HostDisplayPacing_ShouldRepresentFrame(
-      kRefreshMode_Unlimited, true, true, false, false));
+  static const RefreshMode modes[] = {
+    kRefreshMode_Vsync,
+    kRefreshMode_Unlimited,
+    kRefreshMode_Limit,
+    kRefreshMode_Uncapped,
+  };
+  for (size_t index = 0; index < sizeof(modes) / sizeof(modes[0]); index++) {
+    CHECK(HostDisplayPacing_ShouldRepresentFrame(modes[index], false));
+    CHECK(!HostDisplayPacing_ShouldRepresentFrame(modes[index], true));
+  }
+  CHECK(!HostDisplayPacing_ShouldRepresentFrame(kRefreshMode_Count, false));
 }
 
 static void TestEmulatedFramePresentModes(void) {
@@ -160,6 +203,19 @@ static void TestSub60LimitsRetainElapsedTime(void) {
     CHECK(catchup_cap_ns >=
           limited_interval_ns + kEmulationFrameIntervalNs);
   }
+
+  /* Display-relative presentation policy must never enlarge the emulation
+   * accumulator. Even an absurd 1 Hz nominal display stays presentation-only. */
+  const HostDisplayPacingOptions uncapped =
+      Options(kRefreshMode_Uncapped, 60, 1, false);
+  CHECK(HostDisplayPacing_CatchupCapNs(
+            uncapped, kEmulationFrameIntervalNs, kMaximumCatchupFrames) ==
+        ordinary_cap_ns);
+  const HostDisplayPacingOptions unlimited =
+      Options(kRefreshMode_Unlimited, 60, 1, false);
+  CHECK(HostDisplayPacing_CatchupCapNs(
+            unlimited, kEmulationFrameIntervalNs, kMaximumCatchupFrames) ==
+        ordinary_cap_ns);
 }
 
 /* W4-5: window-client coordinate -> renderer-output pixel.
@@ -232,8 +288,9 @@ static void TestWindowAxisToOutput(void) {
 }
 
 int main(void) {
+  TestInterpolationSourceCadence();
   TestExplicitFrameLimits();
-  TestUnlimitedAndVsyncPolicies();
+  TestOnlyExplicitLimitOwnsFrameLimitInterval();
   TestUiAndPausedIntervals();
   TestGamePresentAntiSpinFloor();
   TestCompletedPresentRate();

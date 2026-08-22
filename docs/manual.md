@@ -223,12 +223,23 @@ widescreen policy changes apply live.
 
 *Render scale* is the internal render/upscale multiple of the SNES output
 (1–8, default 3). Higher values render more actual detail in the 3D town and
-Mode 7 paths and downsample into the window. *Refresh rate* is Vsync, Unlimited
-(vsync off with a soft 2× display-refresh cap), Limit with a chosen target FPS,
-or Uncapped (vsync and host presentation throttling off for profiling). The
-optional *FPS counter* reports completed host presents in the top-right; use it
-with Uncapped to measure maximum rendering throughput rather than emulation
-ticks.
+Mode 7 paths and downsample into the window. *Refresh rate* is Vsync (timed by
+the SDL renderer), Uncapped (vsync off with a soft 2× nominal-display-refresh
+cap), Limit with a chosen target FPS, or Unlimited (vsync and host presentation
+throttling off). The optional *FPS counter* reports completed host presents in
+the top-right; use it with Unlimited to measure maximum rendering throughput
+rather than emulation ticks. Presentation cadence is independent of the optional frame-interpolation
+effect, so disabling interpolation does not force Vsync, Uncapped, Limit, or Unlimited
+back to the game's native tick rate. In 3D action mode, interpolation estimates
+motion between consecutive captured layer images and generates intermediate
+pixel frames; it does not alter the game's 60 Hz logic or require reconstructed
+SNES object state. The dependent *Interpolation source test* row normally stays
+at **Native 60 Hz**. **Test 30 -> 60 Hz** is a diagnostic slow-motion mode: in
+3D action stages it deliberately advances game logic at 30 Hz while the host
+continues presenting at the selected refresh rate, making one generated
+midpoint visible between every source pair on a 60 Hz Vsync display. It is not
+a gameplay mode and does not attempt to request an unsupported half-rate Vsync
+from SDL.
 
 `AR_MENU_SCALE=0` (the default, displayed as **Auto**) chooses the largest
 quarter-step content scale that preserves the settings layout in the complete

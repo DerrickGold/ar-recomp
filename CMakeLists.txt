@@ -307,6 +307,17 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_host_display_pacing
         COMMAND actraiser_host_display_pacing_test)
 
+    add_executable(actraiser_host_display_refresh_cache_test
+        tests/host_display_refresh_cache_test.c
+        src/host/host_display_refresh_cache.c
+    )
+    target_include_directories(actraiser_host_display_refresh_cache_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/host
+    )
+    add_test(NAME actraiser_host_display_refresh_cache
+        COMMAND actraiser_host_display_refresh_cache_test)
+
     add_executable(actraiser_scene3d_math_test
         tests/scene3d_math_test.c
         src/scene3d_math.c
@@ -800,6 +811,7 @@ if(BUILD_TESTING)
         src/randomizer.c
         src/settings_overlay.c
         src/settings_overlay_debug_panel.c
+        src/host/host_display_status.c
         src/presentation_geometry.c
         src/input_map.c
         src/user_data_dir.c
@@ -925,7 +937,6 @@ if(BUILD_TESTING)
         src/sim/sim_background_mountain_relief.c
         src/sim/sim_background_voxel_region.c
         src/sim/sim_render_atlas.c
-        src/action/action_obj_interpolation.c
         ${SNESRECOMP_RUNNER_ROOT}/src/snes/ppu.c
         ${SNESRECOMP_RUNNER_ROOT}/src/snes/ppu_old.c
     )
@@ -1098,22 +1109,68 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_town_structure_steps_hle
         COMMAND actraiser_town_structure_steps_hle_test)
 
-    # Golden test for the diorama M7 scroll-interpolation math, extracted from
-    # present.c with the wall-clock injected so t is controllable (Test gap 2).
-    add_executable(actraiser_diorama_scroll_math_test
-        tests/diorama_scroll_math_test.c
-        src/diorama/diorama_scroll_math.c
+    add_executable(actraiser_presentation_frame_generation_test
+        tests/presentation_frame_generation_test.c
+        src/presentation_frame_generation.c
+    )
+    target_include_directories(actraiser_presentation_frame_generation_test
+        PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_presentation_frame_generation_test PRIVATE
+        actraiser_math)
+    add_test(NAME actraiser_presentation_frame_generation
+        COMMAND actraiser_presentation_frame_generation_test)
+
+    add_executable(actraiser_diorama_depth_shapes_test
+        tests/diorama_depth_shapes_test.c
         src/diorama/diorama_depth_shapes.c
     )
-    target_include_directories(actraiser_diorama_scroll_math_test PRIVATE
+    target_include_directories(actraiser_diorama_depth_shapes_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/diorama)
+    target_link_libraries(actraiser_diorama_depth_shapes_test PRIVATE
+        actraiser_math)
+    add_test(NAME actraiser_diorama_depth_shapes
+        COMMAND actraiser_diorama_depth_shapes_test)
+
+    add_executable(actraiser_diorama_frame_generation_test
+        tests/diorama_frame_generation_test.c
+        src/diorama/diorama_frame_generation.c
+        src/presentation_frame_generation.c
+        src/presentation_geometry.c
+    )
+    target_include_directories(actraiser_diorama_frame_generation_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/diorama
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
     )
-    target_link_libraries(actraiser_diorama_scroll_math_test PRIVATE
+    target_link_libraries(actraiser_diorama_frame_generation_test PRIVATE
         SDL3::SDL3 actraiser_math)
-    add_test(NAME actraiser_diorama_scroll_math
-        COMMAND actraiser_diorama_scroll_math_test)
+    add_test(NAME actraiser_diorama_frame_generation
+        COMMAND actraiser_diorama_frame_generation_test)
+    set_tests_properties(actraiser_diorama_frame_generation PROPERTIES
+        ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
+    add_test(NAME actraiser_diorama_frame_generation_gpu
+        COMMAND actraiser_diorama_frame_generation_test)
+    set_tests_properties(actraiser_diorama_frame_generation_gpu PROPERTIES
+        ENVIRONMENT "SDL_AUDIODRIVER=dummy;AR_REQUIRE_GPU_RENDERER=1"
+        SKIP_RETURN_CODE 77)
+
+    # Production renderer/backend contract: compile the shipped vertex and
+    # fragment shaders, build the real D32 pipelines, submit occluded geometry,
+    # and read the cycled SDL_GPU target back through its SDL_Texture wrapper.
+    # A host with no GPU renderer skips; Metal/Vulkan/D3D12 runners exercise
+    # their native shader blob and synchronization path.
+    add_executable(actraiser_sim3d_depth_pass_gpu_test
+        tests/sim3d_depth_pass_gpu_test.c
+        src/sim/sim3d_depth_pass.c
+    )
+    target_include_directories(actraiser_sim3d_depth_pass_gpu_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_sim3d_depth_pass_gpu_test PRIVATE
+        SDL3::SDL3 actraiser_math)
+    add_test(NAME actraiser_sim3d_depth_pass_gpu
+        COMMAND actraiser_sim3d_depth_pass_gpu_test)
+    set_tests_properties(actraiser_sim3d_depth_pass_gpu PROPERTIES
+        ENVIRONMENT "SDL_AUDIODRIVER=dummy"
+        SKIP_RETURN_CODE 77)
 
     # Fix C (SPEC-backdrop-clip.md): geometry of the framebuffer margin-gap
     # fill. Pure, so it needs neither SDL nor the PPU.

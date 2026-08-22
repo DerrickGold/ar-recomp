@@ -11,7 +11,7 @@
 #include "sim/sim_render_metadata.h"
 #include "action/action_effects.h"
 #include "action/action_bg_plan.h"
-#include "action/action_obj_interpolation.h"
+#include "presentation_frame_generation.h"
 
 /* FrameSlot is the sole game-state contract for presentation. FrameSlot_Capture
  * populates it immediately after RtlDrawPpuFrame; presentation consumes the
@@ -19,7 +19,7 @@
  *
  * Pixel buffers (g_pixels, g_hud_bg_pixels, g_hud_obj_pixels,
  * g_m7_overlay_pixels, g_diorama_layer_pixels[], g_sim_obj_atlas_pixels,
- * g_action_obj_interpolation_atlas_pixels) are not copied. Synchronous
+ * presentation atlases) are not copied. Synchronous
  * ordering guarantees Upload consumes them before the next tick overwrites
  * them. The slot carries scalar and derived state to enforce presentation
  * isolation, not as a cross-thread handoff. */
@@ -175,34 +175,12 @@ typedef struct FrameSlot {
   bool magic_cycle_armed;
   uint8_t magic_cycle_selected;   /* 0 = none, else 1..4 */
 
-  /* M7 (§6.1)/B1b (followup doc): per-frame camera snapshot for present-time
-   * interpolation. timestamp_ns is when THIS slot was captured
-   * (FrameSlot_Capture, right after RtlDrawPpuFrame). Mode-7 matrix
-   * interpolation is out of scope: diorama (the only consumer) is
-   * Mode-1-only by the scope banner, and the flat path's Mode-7 overlay is a
-   * single image, not a per-layer mesh to shift.
-   *
-   * B1b replaced the original g_ppu->hScroll[]/vScroll[] snapshot with
-   * these: ActRaiser's BG2 parallax is HDMA-driven (per-scanline register
-   * rewrites), so hScroll[1]/vScroll[1] is whatever the last HDMA line left
-   * behind by the time FrameSlot_Capture runs — not a stable "camera
-   * position" — and interpolating between two such snapshots vibrated the
-   * whole layer with no real camera motion (confirmed live). These are the
-   * game's own STABLE logical camera in WRAM (kActRaiserWram_Bg1/2CameraX/Y,
-   * $0022/$0024/$0026/$0028), read via ActRaiser_ReadWram16 — the
-   * game-authored position BEFORE HDMA touches the PPU registers, so it
-   * doesn't carry the residue. Only BG1/BG2 have a WRAM camera (BG3 is UI,
-   * not world content — see ComputeDioramaScrollDelta, its delta is always
-   * 0). WRAM camera values wrap naturally in ordinary int16 arithmetic
-   * (unlike the 10-bit modular PPU scroll registers this replaces), so no
-   * wrap-correction is needed when differencing them.
-   *
-   * Interpolation also needs the previous frame, so the caller keeps a separate
-   * DioramaScrollSnapshot and passes it to PresentFrame. FrameSlot itself always
-   * describes only the current capture. */
+  /* Pair metadata captured with the completed PPU image. Frame generation
+   * owns its previous endpoint internally; FrameSlot always describes only
+   * this immutable current capture. */
   uint64_t timestamp_ns;
   /* R17/C3: emulated ticks between the previous capture and this one — the
-   * TRUE period of the prev->curr camera pair, clamped to 1..8 by
+   * TRUE period of the previous/current image pair, clamped to 1..8 by
    * FrameSlot_Capture, and 0 while paused (a frozen re-capture is not a pair).
    * The delayed pair phase accounts for this: the main loop can drain several
    * ticks in one iteration while the snapshot advances once per present, so
@@ -211,16 +189,12 @@ typedef struct FrameSlot {
   uint8_t capture_ticks;
   int16_t bg1_camera_x, bg1_camera_y;
   int16_t bg2_camera_x, bg2_camera_y;
-  /* §6.4 turbo edge case: turbo compresses many emulated ticks' worth of
-   * scroll into one FrameSlot submission (still at the normal ~16ms
-   * submission cadence — see the M7 plan note on why this differs from the
-   * doc's literal "multiple rapid submissions" turbo model), so the
-   * prev->curr delta no longer describes a normally paced visual interval.
-   * Skip interpolation outright when either slot was captured under turbo. */
+  /* Turbo compresses many emulated ticks into one image submission, so the
+   * pair no longer describes a normally paced visual interval. */
   bool turbo_active;
   /* kSettingCat_Graphics "Frame interpolation" row, snapshotted here (not
-   * read live from present.c per D6) so PresentFrame knows whether to
-   * even attempt interpolation for this frame. */
+   * read live from present.c per D6) so presentation can reject generation
+   * before doing analysis or GPU work. */
   bool interp_setting_enabled;
   /* A5 (followup doc) "Flat HUD" row, snapshotted here (not read live from
    * present.c per D6): true = diorama's PresentHudOverlayComposited call
@@ -341,11 +315,6 @@ typedef struct FrameSlot {
   uint16_t oam[0x100];
   uint8_t high_oam[0x20];
 
-  /* Action-mode vector OBJ reconstruction. Populated only while the existing
-   * interpolation setting is enabled and the captured priority planes can be
-   * decomposed completely. Invalid keeps the established whole-plane path. */
-  ActionObjInterpolationFrame action_obj_interpolation;
-
   /* Mode-7 override presentation. The src-rect is derived at present time
    * from visible_x0/visible_width/snes_height (already resolved above), so
    * only the active flag needs capturing here. */
@@ -422,36 +391,14 @@ SDL_Rect ComputePresentationViewportWithOutput(
     int pixel_aspect, int visible_width, int snes_height,
     SDL_Point *output_size);
 
-/* M7: the small subset of a FrameSlot that scroll interpolation needs from
- * the PREVIOUS frame. Deliberately its own tiny type rather than a second
- * `const FrameSlot *` — see the long comment on FrameSlot's timestamp_ns
- * field for why reusing a live FrameSlot for "prev" would misread the
- * current frame's data. The caller keeps exactly one of these, updated after
- * each composite via FrameSlot_ExtractScrollSnapshot. */
-typedef struct DioramaScrollSnapshot {
-  uint64_t timestamp_ns;
-  int16_t bg1_camera_x, bg1_camera_y;
-  int16_t bg2_camera_x, bg2_camera_y;
-  uint8_t bg_mode;
-  bool turbo_active;
-  bool diorama_active;
-} DioramaScrollSnapshot;
-
-void FrameSlot_ExtractScrollSnapshot(const FrameSlot *slot,
-                                    DioramaScrollSnapshot *out);
-
 /* Present-time entry points, called synchronously on the render/main thread.
  * Upload remains separate from composite so texture updates stay grouped ahead
  * of the potentially vsync-blocking present. */
 void PresentUpload(const FrameSlot *slot);
-/* prev_scroll: the scroll snapshot from the frame shown immediately before
- * this one (M7 interpolation, diorama mode only). NULL disables
- * interpolation for this call (screenshots, or simply "no previous frame
- * yet").
- *
- * alpha (R17/C4): the sub-tick phase this present sits at — the main loop's
- * accumulator remainder over kFrameNs, in [0,1) — or kInterpPhaseNone
- * (diorama_scroll_math.h) for a present that has no meaningful phase. Passed in
+/* alpha: the sub-tick phase this present sits at — the main loop's
+ * accumulator remainder over kFrameNs, in [0,1) — or
+ * kPresentationFrameGenerationPhaseNone
+ * for a present that has no meaningful phase. Passed in
  * rather than read from a clock here, so present-time code cannot disagree with
  * the loop that owns the tick schedule. It is host timing, not game state, so
  * it is a parameter rather than a FrameSlot field: the slot stays immutable
@@ -461,10 +408,8 @@ void PresentUpload(const FrameSlot *slot);
  * post-process resolve, then full-output host UI. The returned viewport is the
  * exact image rect selected by the resolve (SDL's logical rect where active,
  * otherwise the calculated fallback). SDL_RenderPresent remains caller-owned. */
-SDL_Rect PresentFrame(const FrameSlot *slot,
-                      const DioramaScrollSnapshot *prev_scroll,
-                      const ActionObjInterpolationFrame *prev_action_obj,
-                      float alpha, double presentation_fps);
+SDL_Rect PresentFrame(const FrameSlot *slot, float alpha,
+                      double presentation_fps);
 
 /* Drops renderer-owned present caches (HUD composite, sim shadow/rim targets,
  * town/world-navigation canvases, underlays and cloud fields) so the next

@@ -10,7 +10,6 @@
 #include "camera_orbit.h"
 #include "diorama_depth_shapes.h" /* rake/bow/thick/stack/voxel arithmetic */
 #include "diorama_performance.h"
-#include "diorama_scroll_math.h"   /* R17/C1: DioramaInterpUvWindow */
 #include "scene3d_math.h"
 #include "presentation_upload_mirror.h"
 #include "settings.h"
@@ -1081,18 +1080,6 @@ static void TriangulateGrid(int subdiv_u, int subdiv_v, int *out_indices,
   *num_indices = ii;
 }
 
-/* R17/C1: UV slack reserved inside the captured region while interpolating, so
- * a sub-tick shift has room to move without running off the captured pixels
- * into the texture's never-written sliver. ~1.6% of the 256px base width, and
- * comfortably more than one tick of camera motion at walking speed, so an
- * ordinary shift passes through unsaturated. */
-static const float kInterpUvSlackPx = 4.0f;
-
-/* height_scale (R17/C1): 1.0 normally. While interpolating, the V window is
- * inset by the slack margin, so the mesh's unit height is scaled to match —
- * otherwise the same source rows would be stretched over the full height and
- * reserving the margin would read as a vertical zoom the moment the setting is
- * toggled. aspect_x is compensated by the caller for the same reason. */
 /* `z_rake` tilts the plane in DEPTH: the top edge stays at `z_world`, the bottom
  * edge lands at `z_world + z_rake`. Zero keeps the plane parallel to the screen,
  * which is what every unedited room uses.
@@ -1193,8 +1180,8 @@ static void BuildLayerSkirtMesh(const float mvp[16], float z_world,
       float s = (float)col / DIORAMA_SUBDIV_X;
       float t = (float)row / DIORAMA_SUBDIV_Y;
       float wx = (s - 0.5f) * aspect_x;
-      /* The per-vertex arithmetic lives in diorama_scroll_math.c so it is unit
-       * tested without a renderer; this loop only assembles and projects. */
+      /* Pure depth-shape arithmetic is unit-tested separately; this loop only
+       * assembles and projects it. */
       float wy = 0.0f, wz = 0.0f, shade_mul = 1.0f;
       DioramaSkirtVertex(t, z_top, y_top, thickness, &wy, &wz, &shade_mul);
       if (!ProjectWorldPoint(mvp, wx, wy, wz, screen_w, screen_h,
@@ -1369,9 +1356,10 @@ static void RemapMeshToSupersampleTexture(SDL_Vertex *vertices, int count,
  * and the producer snapshot explicit. The caller supplies the frame-snapshotted
  * request/content intersection; this function neither reads live settings nor
  * rescans producer-owned pixels. */
-uint32_t Diorama_Upload(SDL_Texture *textures[], uint8_t *pixels[],
-                        int snes_width, int snes_height, int obj_apron,
-                        uint32_t plane_mask) {
+DioramaUploadResult Diorama_Upload(
+    SDL_Texture *textures[], uint8_t *pixels[],
+    int snes_width, int snes_height, int obj_apron, uint32_t plane_mask) {
+  DioramaUploadResult upload = {0};
   DioramaPerformanceScope performance =
       DioramaPerformance_Begin(kDioramaPerformance_Upload);
   /* `snes_width` is the FULL surface width (display + both aprons); the pitch
@@ -1385,35 +1373,33 @@ uint32_t Diorama_Upload(SDL_Texture *textures[], uint8_t *pixels[],
       obj_apron < 0 || obj_apron > snes_width / 2 ||
       snes_width > INT_MAX / (int)sizeof(uint32_t)) {
     DioramaPerformance_End(performance);
-    return 0;
+    return upload;
   }
   const int pitch = snes_width * (int)sizeof(uint32_t);
-  const int display_width = snes_width - obj_apron * 2;
-  SDL_Rect upload_full = { 0, 0, snes_width, snes_height };
-  SDL_Rect upload_display = { obj_apron, 0, display_width, snes_height };
-  uint32_t uploaded_mask = 0;
   for (int i = 0; i < kDioramaLayerCount; i++) {
     int plane = kDioramaLayers[i].plane;
     if (!(plane_mask & (1u << plane)) ||
         !textures[plane] || !pixels[plane])
       continue;
-    const bool wide = obj_apron > 0 && DioramaPlaneCanCarryApron(plane);
-    const SDL_Rect *rect = wide ? &upload_full : &upload_display;
-    const uint8_t *src = wide
-        ? pixels[plane]
-        : pixels[plane] +
-            (size_t)obj_apron * sizeof(uint32_t);
-    PresentationUploadResult result = {0};
+    DioramaPlaneCaptureRegion region;
+    if (!DioramaPlaneCaptureRegion_Resolve(
+            plane, snes_width, snes_height, obj_apron, &region))
+      continue;
+    const uint8_t *src = pixels[plane] +
+        (size_t)region.x * sizeof(uint32_t);
+    PresentationUploadResult plane_upload = {0};
     const bool synchronized = PresentationUploadMirror_UploadArgb8888(
         &g_diorama_upload_mirrors[plane], textures[plane], src,
-        rect->w, rect->h, pitch, rect->x, rect->y, &result);
+        region.width, region.height, pitch, region.x, 0, &plane_upload);
     DioramaPerformance_AddPlaneSync(
-        synchronized, synchronized && result.changed, result.uploaded_bytes);
-    if (synchronized)
-      uploaded_mask |= 1u << plane;
+        synchronized, synchronized && plane_upload.changed,
+        plane_upload.uploaded_bytes);
+    if (!synchronized) continue;
+    upload.synchronized_plane_mask |= 1u << plane;
+    if (plane_upload.changed) upload.changed_plane_mask |= 1u << plane;
   }
   DioramaPerformance_End(performance);
-  return uploaded_mask;
+  return upload;
 }
 
 static bool RenderDioramaGeometry(SDL_Renderer *renderer,
@@ -1429,41 +1415,6 @@ static bool RenderDioramaGeometry(SDL_Renderer *renderer,
   DioramaPerformance_End(performance);
   DioramaPerformance_AddDraw(succeeded, num_vertices, num_indices);
   return succeeded;
-}
-
-/* M7 (§6.1)/B1b (followup doc): which base-camera delta (0=BG1, 1=BG2) a
- * diorama plane's content follows, or -1 if it isn't scroll-shiftable (the
- * backdrop's meaning is ambiguous outside a single BG). Priority-band splits
- * (Bg1Hi/Bg2Hi) follow their parent's scroll, same as they share its
- * Z/shade. BG3 has no WRAM camera (index 2 stays zero in DioramaScrollDelta
- * — it's UI, not world content), so it isn't listed here at all; it simply
- * never interpolates.
- *
- * Fallback rule: a captured whole OBJ plane rides the BG1 base-camera delta.
- * §6.4 originally deferred sprite interpolation entirely (returned -1) — left that way,
- * sprites (including the player standing on BG1's platforms) would step at
- * 60fps while the world glides at >60fps, the exact relative-judder artifact
- * B1's rejected "exclude HDMA layers" non-fix was ruled out for, but now on
- * the most eye-tracked object on screen. Sprite screen positions already
- * embed the camera (screen = world − camera), so shifting the OBJ plane by
- * the interpolated BG1 camera delta keeps sprites rigidly attached to the
- * gliding world; their own world-space animation still refreshes at 60fps —
- * the same acceptable residual as HDMA raster detail (see B1's ceiling
- * note). Action-mode vector interpolation bypasses this whole-plane UV shift:
- * it projects each reconstructed OAM component at a fractional position while
- * preserving this function only for invalid/incomplete atlas frames. */
-static int DioramaLayerBgIndex(int plane) {
-  switch (plane) {
-    case kPpuOverlaySource_Bg1:
-    case kDioramaPlane_Bg1Hi: return 0;
-    case kPpuOverlaySource_Bg2:
-    case kDioramaPlane_Bg2Hi: return 1;
-    case kPpuOverlaySource_Obj:
-    case kDioramaPlane_Obj1:
-    case kDioramaPlane_Obj2:
-    case kDioramaPlane_Obj3: return 0;
-    default: return -1;
-  }
 }
 
 /* Edge margin fix (SPEC-backdrop-clip.md; live report 2026-07-21, fixed
@@ -1535,7 +1486,7 @@ static void DrawDioramaSkybox(SDL_Renderer *renderer,
    * for fragments right at u=uv_u1 (this quad's edge, since
    * uv_u1 < 1.0 is the true boundary of what Diorama_Upload ever wrote,
    * kPpuBufWidth vs the widescreen capture's max width — the same class of
-   * bug B1b's UV-window clamp fixed for the tilted layers), the rightward
+   * bug B1b's former UV-window clamp exposed for the tilted layers), the rightward
    * samples reach past uv_u1 into that same uninitialized texture memory.
    * Unlike B1b's interpolation shift (which the tilted layers' own address
    * mode could clamp), the blur shader has no knowledge of uv_u1 to clamp
@@ -1543,10 +1494,7 @@ static void DrawDioramaSkybox(SDL_Renderer *renderer,
    * edge in the first place — inset the mapped UV range by a texel margin
    * comfortably larger than the blur's reach (this also keeps the LEFT
    * edge's leftward samples at u>0, so no explicit CLAMP addressing is
-   * needed here — deliberately not touched, since the caller,
-   * Diorama_Composite, is mid-sequence managing that mode itself for its
-   * own interpolation clamp around the per-layer loop that runs after this
-   * returns). Costs an imperceptible crop of the sky content, not a
+   * needed here). Costs an imperceptible crop of the sky content, not a
    * rendering defect. */
   /* Live report (2026-07-21): {0.30,0.30,0.40} read as jarringly dark for
    * Plane+skybox — the intent is a subtle cue that this is background, not
@@ -1900,8 +1848,6 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        int visible_width, SDL_Rect viewport,
                        SDL_Texture *textures[],
                        uint8_t *pixels[],
-                       const DioramaScrollDelta *scroll_delta,
-                       bool obj_vector_interpolation,
                        const DioramaCameraPose *cam_pose,
                        float distance_scale,
                        uint32_t additive_plane_mask,
@@ -1909,8 +1855,6 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        uint8_t map_group, uint8_t map_number,
                        uint8_t layer_section,
                        const DioramaBgValidSpanPlan *bg2_valid_spans,
-                       DioramaPlaneReplacementFn plane_replacement,
-                       void *plane_replacement_userdata,
                        DioramaPlaneEffectFn plane_effect,
                        void *plane_effect_userdata,
                        DioramaProjection *out_projection) {
@@ -1975,16 +1919,6 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
         defaults, kDioramaLayerCount, resolved, kDioramaLayerCount);
   }
 
-  bool interpolating = scroll_delta && scroll_delta->active;
-  /* §6.4: SDL_RenderGeometry's default SDL_TEXTURE_ADDRESS_AUTO wraps UVs
-   * outside [0,1] for power-of-two textures — shifting UVs to fake sub-frame
-   * scroll would wrap the opposite (possibly opaque) edge into view. Clamp
-   * instead, scoped to just this composite pass (restored below before
-   * returning). */
-  if (interpolating)
-    SDL_SetRenderTextureAddressMode(renderer, SDL_TEXTURE_ADDRESS_CLAMP,
-                                    SDL_TEXTURE_ADDRESS_CLAMP);
-
   if (viewport_is_output) {
     SDL_SetRenderDrawColor(renderer, 20, 20, 30, 255);
     SDL_RenderClear(renderer);
@@ -2027,46 +1961,24 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                         rom_skybox, bg2_valid_spans);
       if (rom_skybox)
         SDL_SetRenderTextureAddressMode(
-            renderer,
-            interpolating ? SDL_TEXTURE_ADDRESS_CLAMP
-                          : SDL_TEXTURE_ADDRESS_AUTO,
-            interpolating ? SDL_TEXTURE_ADDRESS_CLAMP
-                          : SDL_TEXTURE_ADDRESS_AUTO);
+            renderer, SDL_TEXTURE_ADDRESS_AUTO, SDL_TEXTURE_ADDRESS_AUTO);
     }
   }
 
   float tex_h = (float)snes_height;
-  /* R17/C1: reserve a slack margin inside the captured region so an
-   * interpolation shift has somewhere to go. The predecessor code used the
-   * WHOLE captured span as the window and then clamped the shifted window back
-   * into it — which, the span and the window being identical, subtracted the
-   * entire shift and made horizontal sub-tick interpolation a no-op on every
-   * layer on every frame (see DioramaInterpUvWindow).
-   *
-   * The margin is taken only while interpolating: with the setting off the
-   * window is the full span exactly as before, so non-interpolated output is
-   * bit-for-bit unchanged. While interpolating, the visible source region
-   * narrows by 2*slack, so aspect_x and the mesh's unit height are
-   * compensated below — otherwise reserving the margin would read as a slight
-   * zoom the instant the setting is toggled. 4px is ~1.6% of the 256px base
-   * width and comfortably exceeds one tick of camera motion at walking speed
-   * (a few px), so a normal shift never saturates. */
-  const float slack_px = interpolating ? kInterpUvSlackPx : 0.0f;
   /* The UV window is the DISPLAYED span [obj_apron, obj_apron+snes_width), not
    * the whole surface: the apron carries resolve headroom, never extra world to
    * show. Sampling from column 0 dragged both empty apron bands into every
    * plane and widened the picture by 2*apron. */
-  float uv_u0 = ((float)obj_apron + slack_px) / (float)kPpuSurfaceWidth;
+  float uv_u0 = (float)obj_apron / (float)kPpuSurfaceWidth;
   float uv_u1 =
-      ((float)(obj_apron + snes_width) - slack_px) / (float)kPpuSurfaceWidth;
-  float uv_slack = slack_px / (float)kPpuSurfaceWidth;
+      (float)(obj_apron + snes_width) / (float)kPpuSurfaceWidth;
   /* V now divides by the TEXTURE height the way U always divided by the
    * texture width. The old form (`1 - slack/tex_h`) silently assumed the
    * texture was exactly as tall as its content, which stopped being true once
    * the planes were allocated at kPpuBufHeight to hold the vertical margin. */
-  float uv_v0 = slack_px / (float)kPpuBufHeight;
-  float uv_v1 = (tex_h - slack_px) / (float)kPpuBufHeight;
-  float v_slack = slack_px / (float)kPpuBufHeight;
+  float uv_v0 = 0.0f;
+  float uv_v1 = tex_h / (float)kPpuBufHeight;
   /* World height is normalized against the AUTHENTIC 224 lines, not against
    * the captured height -- this is the whole point of the vertical extend.
    * Dividing by tex_h would make the taller capture span the same 1.0 world
@@ -2076,21 +1988,16 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
    * exactly where it was and lets the extra scanlines project past the top
    * edge, into screen space the tilt was previously wasting.
    *
-   * `- 2*slack` is the R17/C1 interpolation crop, unchanged: it matches the
-   * mesh to the narrowed V window so the image crops rather than stretches. */
-  float height_scale =
-      (tex_h - 2.0f * slack_px) / (float)kActRaiserAuthenticHeight;
+   */
+  float height_scale = tex_h / (float)kActRaiserAuthenticHeight;
 
   float par = 1.0f;
   if (active_pixel_aspect == kPixelAspect_Crt43 && !ignore_aspect_ratio)
     par = 7.0f / 6.0f;
-  /* The width expressions keep their exact previous FORM -- only the vertical
-   * reference swaps from the captured height to the authentic one. With no
-   * margin the two are equal and every value here is bit-identical to before,
-   * interpolating or not; with a margin the quad grows only in height, which
-   * is the intended asymmetry. */
-  float aspect_x = ((float)snes_width - 2.0f * slack_px) /
-      ((float)kActRaiserAuthenticHeight - 2.0f * slack_px) * par;
+  /* Width is normalized against the same authentic-height reference used by
+   * every layer and projection consumer. */
+  float aspect_x = (float)snes_width /
+      (float)kActRaiserAuthenticHeight * par;
   float vis_half_w =
       0.5f * (float)visible_width / (float)kActRaiserAuthenticHeight * par;
 
@@ -2151,24 +2058,6 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
         mvp[12 + r] += d * mvp[4 + r];
   }
 
-  /* Action objects follow BG1's stable camera/interpolation delta in this
-   * compositor (DioramaLayerBgIndex maps every OBJ band to index 0). Resolve
-   * both source windows once; publication below pairs each eligible plane's
-   * window with its shape. */
-  float bg1_u0, bg1_v0, bg1_u1, bg1_v1;
-  float bg2_u0, bg2_v0, bg2_u1, bg2_v1;
-  float bg1_du = interpolating ? scroll_delta->bg_du[0] : 0.0f;
-  float bg1_dv = interpolating ? scroll_delta->bg_dv[0] : 0.0f;
-  DioramaInterpUvWindow(uv_u0, uv_u1, bg1_du, uv_slack,
-                        &bg1_u0, &bg1_u1);
-  DioramaInterpUvWindow(uv_v0, uv_v1, bg1_dv, v_slack,
-                        &bg1_v0, &bg1_v1);
-  float bg2_du = interpolating ? scroll_delta->bg_du[1] : 0.0f;
-  float bg2_dv = interpolating ? scroll_delta->bg_dv[1] : 0.0f;
-  DioramaInterpUvWindow(uv_u0, uv_u1, bg2_du, uv_slack,
-                        &bg2_u0, &bg2_u1);
-  DioramaInterpUvWindow(uv_v0, uv_v1, bg2_dv, v_slack,
-                        &bg2_v0, &bg2_v1);
   if (out_projection) {
     memcpy(out_projection->matrix, mvp, sizeof(mvp));
     out_projection->aspect_x = aspect_x;
@@ -2214,15 +2103,12 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
       if (!DioramaLayerIsProjectable(
               layer, textures, pixels, effect_obj_priority_mask))
         continue;
-      const bool bg2 = resolved[i].plane == kPpuOverlaySource_Bg2;
-      const bool vector_obj = obj_vector_interpolation &&
-          DioramaPlaneIsObjectPriority(resolved[i].plane);
       DioramaPlaneProjection plane = {
         .valid = true,
-        .u0 = vector_obj ? uv_u0 : bg2 ? bg2_u0 : bg1_u0,
-        .v0 = vector_obj ? uv_v0 : bg2 ? bg2_v0 : bg1_v0,
-        .u1 = vector_obj ? uv_u1 : bg2 ? bg2_u1 : bg1_u1,
-        .v1 = vector_obj ? uv_v1 : bg2 ? bg2_v1 : bg1_v1,
+        .u0 = uv_u0,
+        .v0 = uv_v0,
+        .u1 = uv_u1,
+        .v1 = uv_v1,
         .z_world = resolved[i].z - 0.5f,
         .rake = resolved[i].rake,
         .bow = resolved[i].bow,
@@ -2230,7 +2116,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
       if (resolved[i].plane == kPpuOverlaySource_Bg1) {
         out_projection->bg1_plane = plane;
       }
-      if (bg2) {
+      if (resolved[i].plane == kPpuOverlaySource_Bg2) {
         out_projection->bg2_plane = plane;
       }
       const int priority = DioramaPlaneObjectPriority(resolved[i].plane);
@@ -2314,72 +2200,10 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     };
 
     float z_world = layer_z - 0.5f;
-    /* M7/§6.2-6.3: shift this layer's UV window by its BG's interpolated
-     * sub-tick scroll delta. Each layer uses its OWN BG's delta (parallax:
-     * BG2 typically scrolls slower than BG1), so the differing per-layer
-     * motion stays visible at >60Hz instead of being flattened to one
-     * whole-frame shift. */
-    float layer_du = 0.0f, layer_dv = 0.0f;
-    if (interpolating) {
-      int bg = DioramaLayerBgIndex(layer->plane);
-      if (bg >= 0) {
-        layer_du = scroll_delta->bg_du[bg];
-        layer_dv = scroll_delta->bg_dv[bg];
-      }
-    }
-    /* B1b (followup doc) follow-up: the diorama capture only ever fills the
-     * captured sub-region of the texture — the sliver beyond it, up to the
-     * texture's true width (kPpuBufWidth=512 vs the diorama capture's maximum
-     * 496 pixels at kWsExtraMax=120 per side — widescreen.h), is genuinely never
-     * written (SDL streaming textures have undefined initial content, not
-     * zeroed). SDL_TEXTURE_ADDRESS_CLAMP (above) only guards against going
-     * outside [0,1] of the TEXTURE — it does nothing for a coordinate that's
-     * inside [0,1] but past the CAPTURED sub-region, so an interpolation
-     * shift that runs off the captured region samples that uninitialized
-     * memory directly: a garbage-colored strip at the tilted plane's edge.
-     *
-     * R17/C1: the shift is bounded by clamping the SHIFT to the slack margin
-     * reserved above, not by clamping the shifted window's POSITION back into
-     * the region. Position-clamping is what the predecessor did, and because
-     * the window was the whole captured span it subtracted the entire shift,
-     * cancelling horizontal interpolation completely on every layer of every
-     * frame while still looking correct in AR_INTERP_LOG. Width is preserved
-     * exactly either way, so there is no visual squish. */
-    float layer_u0, layer_u1;
-    DioramaInterpUvWindow(uv_u0, uv_u1, layer_du, uv_slack,
-                          &layer_u0, &layer_u1);
-    /* V gets the same treatment — the predecessor left dv entirely unclamped,
-     * so a vertical shift ran straight off the captured region into the
-     * CLAMP-mode edge row and smeared the first/last scanline. */
-    float layer_v0, layer_v1;
-    DioramaInterpUvWindow(uv_v0, uv_v1, layer_dv, v_slack,
-                          &layer_v0, &layer_v1);
-
-    /* A vector OBJ replacement owns the whole plane draw in exactly this
-     * painter slot. It consumes the already-published authored projection,
-     * so room z/rake/bow and the current camera remain single-sourced while
-     * each sprite component retains a fractional presentation position. */
-    bool plane_was_replaced = false;
-    if (plane_replacement && out_projection && out_projection->valid &&
-        DioramaPlaneIsObjectPriority(layer->plane)) {
-      DioramaPerformanceScope callback_performance =
-          DioramaPerformance_Begin(kDioramaPerformance_Callback);
-      plane_was_replaced = plane_replacement(
-          plane_replacement_userdata, layer->plane, out_projection,
-          shade, is_additive, layer->casts_shadow);
-      DioramaPerformance_End(callback_performance);
-    }
-    if (plane_was_replaced) {
-      if (plane_effect) {
-        if (!viewport_is_output) SDL_SetRenderViewport(renderer, NULL);
-        DioramaPerformanceScope callback_performance =
-            DioramaPerformance_Begin(kDioramaPerformance_Callback);
-        plane_effect(plane_effect_userdata, layer->plane, out_projection);
-        DioramaPerformance_End(callback_performance);
-        if (!viewport_is_output) SDL_SetRenderViewport(renderer, &viewport);
-      }
-      continue;
-    }
+    const float layer_u0 = uv_u0;
+    const float layer_u1 = uv_u1;
+    const float layer_v0 = uv_v0;
+    const float layer_v1 = uv_v1;
 
     BuildLayerMesh(mvp,
                    z_world, layer_rake, layer_bow, layer_u0, layer_v0,
@@ -2465,13 +2289,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
            * Measured in texture rows against `drawable_y1` — the same row the
            * shader hands ownership over at (attached_lower_content_v_max) —
            * rather than as `(1 - fold_t)` of the host mesh. Those are not the
-           * same edge: `fold_t` and `height_scale` both carry the interpolation
-           * crop, so the host's GEOMETRIC bottom moves by kInterpUvSlackPx
-           * whenever frame-pair interpolability flips, while its CONTENT bottom
-           * does not. Anchoring here made the coplanar band breathe between 20
-           * and 24 rows mid-jump (AR_AITOS_WATERFALL_LOG showed fold_t flipping
-           * 0.9000/0.8889 with drawable_y1 pinned at 280) — visible as a
-           * horizontal seam that changed size with camera motion. Row units are
+           * same edge: the source crop and mesh geometry can otherwise put the
+           * host handoff on different texture rows. Row units are
            * exact for both meshes: each spans 1/224 world units per texture row,
            * so no height_scale factor belongs in this expression at all. */
           float overlap_t =
@@ -2633,9 +2452,10 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     bool dof_or_edge = !rim_light && (dof_radius > 0.0f || want_edge);
     bool use_shader = rim_light || dof_or_edge;
 
-    SDL_SetTextureBlendMode(texture,
-        is_backdrop ? SDL_BLENDMODE_NONE
-                    : is_additive ? SDL_BLENDMODE_ADD : SDL_BLENDMODE_BLEND);
+    const SDL_BlendMode layer_blend = is_backdrop
+        ? SDL_BLENDMODE_NONE
+        : is_additive ? SDL_BLENDMODE_ADD : SDL_BLENDMODE_BLEND;
+    SDL_SetTextureBlendMode(texture, layer_blend);
 
     SDL_Texture *draw_texture = texture;
     bool used_ss = false;
@@ -2648,9 +2468,6 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
           &target_restore_failed);
       DioramaPerformance_End(supersample_performance);
       if (target_restore_failed) {
-        if (interpolating)
-          SDL_SetRenderTextureAddressMode(renderer, SDL_TEXTURE_ADDRESS_AUTO,
-                                          SDL_TEXTURE_ADDRESS_AUTO);
         if (!viewport_is_output)
           SDL_SetRenderViewport(renderer, NULL);
         return false;
@@ -2661,9 +2478,7 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
       }
     }
     if (used_ss) {
-      SDL_SetTextureBlendMode(draw_texture,
-          is_backdrop ? SDL_BLENDMODE_NONE
-                      : is_additive ? SDL_BLENDMODE_ADD : SDL_BLENDMODE_BLEND);
+      SDL_SetTextureBlendMode(draw_texture, layer_blend);
     }
 
     /* Supersample targets contain only the active capture region, unlike the
@@ -2732,13 +2547,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
       SDL_SetGPURenderStateFragmentUniforms(g_rim_light_state, 0, &u, sizeof(u));
       SDL_SetGPURenderState(renderer, g_rim_light_state);
     } else if (dof_or_edge) {
-      /* R17/C1: feed the shader the SAME window the mesh got. These used to be
-       * recomputed as uv_u0 + layer_du / 1.0f + layer_dv — the RAW pre-clamp
-       * values — while the vertices drawn in this very iteration used the
-       * clamped window, so the shader's edge-fade window was offset from the
-       * real UV range and faded the wrong pixels (a transparent strip at one
-       * plane edge once a shift saturated). Use layer_u0/u1/v0/v1 directly so
-       * the two can no longer disagree. */
+      /* Feed the shader the exact source window used by this mesh so edge
+       * fading and geometry cannot disagree. */
       DofEdgeUniforms u = {
         1.0f / (float)kPpuSurfaceWidth, 1.0f / (float)kPpuBufHeight, dof_radius,
         layer_u0, layer_u1,
@@ -2781,17 +2591,8 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
       plane_effect(plane_effect_userdata, layer->plane, out_projection);
       DioramaPerformance_End(callback_performance);
       if (!viewport_is_output) SDL_SetRenderViewport(renderer, &viewport);
-      /* The callback owns its blend/draw state but not the per-layer texture
-       * sampling policy. Reassert interpolation clamping before later planes. */
-      if (interpolating)
-        SDL_SetRenderTextureAddressMode(renderer, SDL_TEXTURE_ADDRESS_CLAMP,
-                                        SDL_TEXTURE_ADDRESS_CLAMP);
     }
   }
-
-  if (interpolating)
-    SDL_SetRenderTextureAddressMode(renderer, SDL_TEXTURE_ADDRESS_AUTO,
-                                    SDL_TEXTURE_ADDRESS_AUTO);
 
   if (!viewport_is_output)
     SDL_SetRenderViewport(renderer, NULL);

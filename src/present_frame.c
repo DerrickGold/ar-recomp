@@ -8,10 +8,8 @@
 
 extern SDL_Renderer *g_renderer;
 
-SDL_Rect PresentFrame(const FrameSlot *slot,
-                      const DioramaScrollSnapshot *prev_scroll,
-                      const ActionObjInterpolationFrame *prev_action_obj,
-                      float alpha, double presentation_fps) {
+SDL_Rect PresentFrame(const FrameSlot *slot, float alpha,
+                      double presentation_fps) {
   SDL_Rect image = {0};
   if (!slot || !g_renderer) return image;
 
@@ -21,7 +19,7 @@ SDL_Rect PresentFrame(const FrameSlot *slot,
       slot->pixel_aspect, slot->visible_width, slot->snes_height,
       &output_size);
   CrtPost_Begin(g_renderer);
-  PresentCompositeScene(slot, prev_scroll, prev_action_obj, alpha);
+  PresentCompositeScene(slot, alpha);
   image = CrtPost_End(
       g_renderer, slot->visible_width, slot->snes_height, image);
   PresentHostUi(slot, image, output_size, presentation_fps);

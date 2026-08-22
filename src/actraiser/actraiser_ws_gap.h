@@ -18,7 +18,7 @@
  * backdrop colour instead makes the plane continuous.
  *
  * Extracted as a pure function so the geometry is unit-testable without a ROM,
- * a PPU, or a renderer (precedent: diorama_scroll_math.c, host_display_pacing.c).
+ * a PPU, or a renderer (precedent: host_display_pacing.c).
  *
  * `rows`   first row of the framebuffer, ARGB8888.
  * `pitch`  bytes per row.

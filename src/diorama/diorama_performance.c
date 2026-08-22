@@ -32,8 +32,9 @@ static DioramaPerformanceData s_data;
 static SDL_SpinLock s_data_lock;
 
 static const char *const kDioramaStageNames[] = {
-  "total", "upload", "producer-setup", "scanout", "producer-finish",
-  "host-post", "mesh", "supersample", "submit", "callback",
+  "total", "upload", "frame-analysis", "producer-setup", "scanout",
+  "producer-finish", "host-post", "frame-synthesis", "mesh",
+  "supersample", "submit", "callback",
 };
 _Static_assert(
     sizeof(kDioramaStageNames) / sizeof(kDioramaStageNames[0]) ==
@@ -107,9 +108,9 @@ static void DioramaPerformanceReport(const DioramaPerformanceData *data,
   const double presentations =
       data->presentations ? (double)data->presentations : 1.0;
   uint64_t child_ns = 0;
-  /* Upload runs before presentation ownership transfers to the compositor, so
-   * it is reported beside total but is not a child of total. */
-  for (int stage = kDioramaPerformance_Mesh;
+  /* Upload and frame analysis run before presentation ownership transfers to
+   * the compositor, so they are reported beside total but are not children. */
+  for (int stage = kDioramaPerformance_FrameSynthesis;
        stage < kDioramaPerformanceStage_Count; stage++)
     child_ns += data->counters[stage].elapsed_ns;
   const uint64_t total_ns =

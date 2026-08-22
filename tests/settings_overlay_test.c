@@ -3,6 +3,7 @@
 #include "diorama_layer_editor.h"
 #include "action/action_bg_tuner.h"
 #include "input_map.h"
+#include "host/host_display_status.h"
 #include "render_capabilities.h"
 #include "settings.h"
 #include "randomizer.h"
@@ -664,7 +665,10 @@ int main(void) {
   /* Headless SDL reports no refresh rate; let a preview inject one so the
    * "Vsync NHz" row can be eyeballed. */
   const char *refresh_hz = getenv("AR_OVERLAY_TEST_REFRESH_HZ");
-  if (refresh_hz && refresh_hz[0]) Settings_SetHostRefreshHz(atoi(refresh_hz));
+  if (refresh_hz && refresh_hz[0]) {
+    HostDisplayStatus_SetNominalRefreshHz(atoi(refresh_hz));
+    HostDisplayStatus_SetVsyncActive(true);
+  }
 
   SettingsOverlay_Open();
   CHECK(SettingsOverlay_IsOpen());

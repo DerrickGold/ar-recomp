@@ -1,8 +1,10 @@
-# Spec — IJ1: diorama scroll-interpolation jitter (resolved)
+# Spec — IJ1: diorama scroll-interpolation jitter (superseded)
 
-**Status:** resolved after audit; the proposed extrapolation-to-lerp change was
-not implemented. A separate IJ2 decision remains deferred pending on-device
-evidence.
+**Status:** historical. The scroll/OAM reconstruction strategy described below
+was removed in August 2026. The current **Frame interpolation** setting uses
+post-raster captured-plane motion estimation and bidirectional image warping;
+see `docs/SEAMS.md` under “Frame-rate decoupling.” The remaining text preserves
+the investigation and is not an implementation instruction.
 
 ## Resolution
 

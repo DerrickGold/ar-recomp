@@ -13,10 +13,10 @@
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
 #include "diorama/diorama.h"
-#include "diorama/diorama_scroll_math.h"
 #include "host/host_display.h"
 #include "music_replacements.h"
 #include "present.h"
+#include "presentation_frame_generation.h"
 #include "run_dir.h"
 #include "scene_asset_dump.h"
 #include "scene_inspector.h"
@@ -115,7 +115,7 @@ SDL_Point DevTools_WriteFramebufferPpm(FILE *file,
     PresentUpload(&frame_slot);
     /* The same scene -> CRT resolve -> host-UI function used by the live
      * window keeps F2 captures visually identical, including an open menu. */
-    PresentFrame(&frame_slot, NULL, NULL, kInterpPhaseNone,
+    PresentFrame(&frame_slot, kPresentationFrameGenerationPhaseNone,
                  HostDisplay_FramesPerSecond());
     have_composite = true;
   }

@@ -9,8 +9,9 @@
 typedef struct HostDisplayPacingOptions {
   RefreshMode refresh_mode;
   int frame_limit_fps;
-  int host_refresh_hz;
+  int nominal_refresh_hz;
   bool compositor_managed;
+  bool vsync_active;
 } HostDisplayPacingOptions;
 
 /* Rolling completed-present rate. Count intervals between present-completion
@@ -23,6 +24,12 @@ typedef struct HostDisplayFpsCounter {
   bool initialized;
 } HostDisplayFpsCounter;
 
+/* Select the emulation/source cadence independently from host presentation.
+ * Test30 is intentionally scoped to an active interpolated Diorama frame. */
+uint64_t HostDisplayPacing_SourceFrameIntervalNs(
+    uint64_t native_interval_ns, bool diorama_active,
+    bool interpolation_enabled, InterpolationSourceRate source_rate);
+
 void HostDisplayPacing_ResetFpsCounter(HostDisplayFpsCounter *counter);
 void HostDisplayPacing_RecordPresent(
     HostDisplayFpsCounter *counter, uint64_t completed_at_ns);
@@ -31,6 +38,9 @@ double HostDisplayPacing_FramesPerSecond(
 
 uint64_t HostDisplayPacing_FrameLimitIntervalNs(
     HostDisplayPacingOptions options);
+/* Software presentation deadline. VSync returns zero when the renderer
+ * accepted it; Uncapped follows nominal display metadata; Limit follows the
+ * user target; Unlimited returns zero deliberately. */
 uint64_t HostDisplayPacing_UiIntervalNs(
     HostDisplayPacingOptions options,
     uint64_t emulation_frame_interval_ns);
@@ -41,17 +51,17 @@ uint64_t HostDisplayPacing_GameIntervalNs(
     HostDisplayPacingOptions options,
     uint64_t emulation_frame_interval_ns);
 
-/* Between emulation ticks, ordinary redraws are useful only for interpolable
- * diorama frames. Uncapped is the explicit profiling exception: recomposite a
- * retained frame even when visually identical so the measured present rate is
- * actual renderer throughput rather than the emulation's ~60 Hz tick rate. */
+/* A valid refresh mode owns host presentation cadence independently of whether
+ * the retained frame can be visually interpolated. The caller separately
+ * decides whether to apply interpolation or present the retained tick exactly.
+ * A pending content redraw is the only ordinary suppression: presenting the
+ * older retained frame then would visibly move backward for one host frame. */
 bool HostDisplayPacing_ShouldRepresentFrame(
-    RefreshMode refresh_mode, bool diorama_frame_active,
-    bool interpolation_enabled, bool pair_interpolable,
-    bool redraw_pending);
+    RefreshMode refresh_mode, bool redraw_pending);
 
 /* Retain enough accumulated time for the normal spiral-of-death window and
- * for one deliberately slow limited present plus the next emulation tick. */
+ * for one deliberately slow explicit-Limit present plus the next emulation
+ * tick. No nominal display property may affect this emulation-side bound. */
 uint64_t HostDisplayPacing_CatchupCapNs(
     HostDisplayPacingOptions options,
     uint64_t emulation_frame_interval_ns,

@@ -19,7 +19,7 @@
  * that is actually valid and let the sky stretch slightly.
  *
  * Pure functions, no SDL and no globals, so the arithmetic is unit-testable
- * without a ROM or a renderer (precedent: diorama_scroll_math.c).
+ * without a ROM or a renderer.
  */
 
 /* Exact row-banded form used by the BH6 frame handoff. Action background edge

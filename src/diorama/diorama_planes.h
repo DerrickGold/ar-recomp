@@ -1,5 +1,8 @@
 #ifndef DIORAMA_PLANES_H
 #define DIORAMA_PLANES_H
+
+#include <stdbool.h>
+
 #include "snes/ppu.h"
 
 /* Diorama plane indexing for g_diorama_layer_pixels[] and the plane texture
@@ -61,6 +64,32 @@ static inline bool DioramaPlaneIsObjectPriority(int plane) {
  * 60fps, which was most of what the apron cost in steady state. */
 static inline bool DioramaPlaneCanCarryApron(int plane) {
   return DioramaPlaneIsObjectPriority(plane);
+}
+
+/* The meaningful rectangle within an apron-wide capture surface. OBJ planes
+ * own the apron; every other plane owns only the displayed middle columns.
+ * `x` is both the first source column and the destination column in the fixed
+ * compositor texture. Keeping this shared prevents upload and frame generation
+ * from acquiring different definitions of known-zero padding. */
+typedef struct DioramaPlaneCaptureRegion {
+  int x;
+  int width;
+  int height;
+} DioramaPlaneCaptureRegion;
+
+static inline bool DioramaPlaneCaptureRegion_Resolve(
+    int plane, int surface_width, int surface_height, int obj_apron,
+    DioramaPlaneCaptureRegion *region) {
+  if (region) *region = (DioramaPlaneCaptureRegion){0};
+  if (!region || plane < 0 || plane >= kDioramaPlane_Count ||
+      surface_width <= 0 || surface_height <= 0 || obj_apron < 0 ||
+      obj_apron > surface_width / 2)
+    return false;
+  const bool wide = obj_apron > 0 && DioramaPlaneCanCarryApron(plane);
+  region->x = wide ? 0 : obj_apron;
+  region->width = wide ? surface_width : surface_width - obj_apron * 2;
+  region->height = surface_height;
+  return region->width > 0;
 }
 
 #endif  /* DIORAMA_PLANES_H */

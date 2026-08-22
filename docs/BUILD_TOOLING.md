@@ -144,6 +144,8 @@ so both build paths compile only C.
 | `src/shaders/*_{vert,frag}.h` | Generated **and committed**: byte arrays holding SPIR-V + MSL + DXIL |
 | `tools/build_shaders.py` | Developer-only generator |
 | `tests/shader_blob_test.c` | Asserts every blob compiles on the live backend |
+| `tests/diorama_frame_generation_test.c` | Exercises frame-generation geometry on both a deterministic headless renderer and the production GPU renderer |
+| `tests/sim3d_depth_pass_gpu_test.c` | Builds the production D32 pipelines, submits occluded geometry, and reads the cycled target through SDL's texture wrapper |
 
 ```bash
 tools/build_shaders.py            # regenerate after editing shader GLSL
@@ -177,7 +179,12 @@ Two constraints worth knowing before touching a shader:
 MSL, and DXIL, so SDL can select Vulkan, Metal, or D3D12 while always receiving
 a native shader format. Renderer creation, D32 support, and depth-pipeline
 creation are validated at startup; there is no software renderer or
-painter-order fallback.
+painter-order fallback. The ROM-free GPU integration test requests this exact
+renderer configuration and skips only when the host has no usable GPU device;
+running it on each platform exercises the backend's shader, resource-cycling,
+depth-compare, command-ordering, and SDL_GPUTexture-to-SDL_Texture interop path.
+The frame-generation test has a separate production-GPU invocation so geometry
+state and blend behavior are also checked by each native renderer backend.
 
 ## Self-contained distribution bundles
 

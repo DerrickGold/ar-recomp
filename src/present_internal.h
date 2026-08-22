@@ -40,10 +40,7 @@ typedef struct EffectBatch {
 SDL_FRect ToFRect(SDL_Rect r);
 void ApplyLogicalPresentation(const FrameSlot *slot);
 void PresentHudOverlayComposited(const FrameSlot *slot, SDL_Rect viewport);
-void PresentCompositeScene(const FrameSlot *slot,
-                           const DioramaScrollSnapshot *prev_scroll,
-                           const ActionObjInterpolationFrame *prev_action_obj,
-                           float alpha);
+void PresentCompositeScene(const FrameSlot *slot, float alpha);
 void PresentHostUi(const FrameSlot *slot, SDL_Rect viewport,
                    SDL_Point output_size,
                    double presentation_fps);

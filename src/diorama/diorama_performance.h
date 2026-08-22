@@ -7,10 +7,12 @@
 typedef enum DioramaPerformanceStage {
   kDioramaPerformance_Total,
   kDioramaPerformance_Upload,
+  kDioramaPerformance_FrameAnalysis,
   kDioramaPerformance_ProducerSetup,
   kDioramaPerformance_Scanout,
   kDioramaPerformance_ProducerFinish,
   kDioramaPerformance_HostPost,
+  kDioramaPerformance_FrameSynthesis,
   kDioramaPerformance_Mesh,
   kDioramaPerformance_Supersample,
   kDioramaPerformance_Submit,

@@ -44,8 +44,8 @@
  *
  * Everything here is pure: no SDL, no globals, no file I/O beyond a caller-
  * supplied line. That keeps the arithmetic and the manifest grammar testable
- * without a ROM or a renderer (precedent: diorama_scroll_math.c,
- * actraiser_ws_gap.c, host_display_pacing.c).
+ * without a ROM or a renderer (precedent: actraiser_ws_gap.c and
+ * host_display_pacing.c).
  */
 
 enum {
