@@ -22,6 +22,8 @@ static uint32_t s_last_replay_game_frame;
 static bool s_has_replay_records;
 static bool s_replay_started;
 static bool s_disable_auto_stop;
+static bool s_live_after_replay;
+static bool s_live_handoff_reported;
 static bool s_save_data_protected;
 static bool s_game_frame_logging_enabled;
 static bool s_action_entry_reported;
@@ -115,6 +117,12 @@ void InputReplay_Init(void) {
     OpenRecordFile(record_path);
 
   s_disable_auto_stop = getenv("AR_REPLAY_NOSTOP") != NULL;
+  s_live_after_replay = getenv("AR_REPLAY_LIVE_AFTER_END") != NULL;
+  if (s_live_after_replay && s_disable_auto_stop) {
+    fprintf(stderr,
+            "[input-replay] AR_REPLAY_LIVE_AFTER_END takes precedence over "
+            "AR_REPLAY_NOSTOP\n");
+  }
   s_game_frame_logging_enabled = getenv("AR_GFLOG") != NULL;
 }
 
@@ -154,15 +162,33 @@ InputReplayFrameResult InputReplay_Resolve(uint32_t live_inputs) {
   const unsigned game_frame = ReadGameFrame();
   uint32_t resolved_inputs = live_inputs;
   bool stop_requested = false;
+  const bool replay_continuation =
+      s_replay_started && game_frame > s_last_replay_game_frame;
+  const bool live_handoff =
+      s_live_after_replay && replay_continuation;
 
-  if (s_replay_inputs && s_has_replay_records &&
+  if (!live_handoff &&
+      !(s_disable_auto_stop && replay_continuation) &&
+      s_replay_inputs && s_has_replay_records &&
       game_frame <= s_maximum_replay_game_frame) {
     resolved_inputs = s_replay_inputs[game_frame];
   }
 
-  if (s_replay_inputs && s_has_replay_records && !s_disable_auto_stop) {
+  if (s_replay_inputs && s_has_replay_records) {
     if (game_frame <= s_last_replay_game_frame)
       s_replay_started = true;
+  }
+
+  if (s_replay_inputs && s_has_replay_records && s_live_after_replay) {
+    if (live_handoff && !s_live_handoff_reported) {
+      fprintf(stderr,
+              "[input-replay] reached end of recording at gf=%u — "
+              "handing control to live input\n",
+              game_frame);
+      s_live_handoff_reported = true;
+    }
+  } else if (s_replay_inputs && s_has_replay_records &&
+             !s_disable_auto_stop) {
     if (s_replay_started && game_frame >= s_last_replay_game_frame) {
       fprintf(stderr,
               "[input-replay] reached end of recording at gf=%u — stopping\n",
@@ -171,7 +197,7 @@ InputReplayFrameResult InputReplay_Resolve(uint32_t live_inputs) {
     }
   }
   if (s_replay_inputs && s_has_replay_records && s_disable_auto_stop &&
-      game_frame > s_maximum_replay_game_frame) {
+      !s_live_after_replay && replay_continuation) {
     resolved_inputs = s_replay_inputs[s_last_replay_game_frame];
   }
 
@@ -192,4 +218,14 @@ void InputReplay_Shutdown(void) {
   free(s_replay_inputs);
   s_record_file = NULL;
   s_replay_inputs = NULL;
+  s_maximum_replay_game_frame = 0;
+  s_last_replay_game_frame = 0;
+  s_has_replay_records = false;
+  s_replay_started = false;
+  s_disable_auto_stop = false;
+  s_live_after_replay = false;
+  s_live_handoff_reported = false;
+  s_save_data_protected = false;
+  s_game_frame_logging_enabled = false;
+  s_action_entry_reported = false;
 }
