@@ -1354,6 +1354,29 @@ also matches all 14 ordinary-compositor artifacts. Debug/release builds and all
 41 tests pass. See `docs/bg-hle-census.md` BH7 for manifests, counters, and the
 remaining historical natural-transition evidence gaps.
 
+The action-room scene authority now has a separate first-stage production
+gate. `AR_ACTION_ROOM_SCENE_HLE=1` makes the finite provider publish from the
+cumulative immutable ROM scene instead of snapshotting the already-staged WRAM
+map and definition table. Both paths use the same `ActionBgWorld` atomic
+publication, metatile classifier, virtual-band lookup, and PPU binding. The
+scene adapter explicitly consumes the compressed asset's high-byte-first
+metatile words; the ordinary WRAM decoder retains its low-byte-first contract.
+The live native ring still preflights every authentic tile before ownership, so
+this gate changes the source under test without removing the oracle.
+
+This is not yet a whole `$02:B1F7` replacement. The recompiled asset VM remains
+active and owns CHR/CGRAM uploads, the native ring, level/gameplay data, actor
+startup, callbacks, audio and transitions. A missing scene, dimension drift or
+publication failure falls back to live WRAM and is counted in the shutdown
+provider summary. The gate stays default-off until natural room-transition
+matrices show zero unexpected fallbacks, finite exits and authentic mismatch.
+The initial 12-target ordinary-entry A/B is exact: immutable-source manifest
+`runs/bg-hle-matrix-20260822-133346.json` reports 19,522 sourced/bound
+layer-frames, zero live fallback, and 18,216,295 zero-mismatch/zero-outside
+preflight tiles. Its live-WRAM control
+`runs/bg-hle-matrix-20260822-133427.json` matches all 204 captured artifacts
+byte-for-byte.
+
 `ActRaiser_FullSnapshot` also writes `.ppu.json` beside WRAM/VRAM/CGRAM/OAM.
 This pins the BGSC geometry, character bases, enables, scroll, window and color
 math state that a binary-memory-only snapshot used to leave implicit.

@@ -7,6 +7,8 @@ enables the read-only runtime comparator, and validates the resulting snapshots
 with ``bg_hle_census.py``. The BH7 default arm omits `AR_ACTION_BG_HLE` and
 expects the provider. Pass ``--disable-provider`` for the explicit native A/B;
 ``--enable-provider`` remains as a compatibility spelling for explicit-on.
+Pass ``--enable-room-scene-hle`` to source the provider from the cumulative
+immutable ROM scene and require a zero-fallback room-scene summary.
 
     python3 tools/bg_hle_matrix.py
     python3 tools/bg_hle_matrix.py --targets 0201,0202 --fail-fast
@@ -79,6 +81,9 @@ PROVIDER_RE = re.compile(
     r"eligible=(?P<eligible>\d+) layers=(?P<layers>\d+) "
     r"lookups=(?P<lookups>\d+) tiles=(?P<tiles>\d+) "
     r"outside=(?P<outside>\d+)")
+ROOM_SCENE_PROVIDER_RE = re.compile(
+    r"\[action-room-scene\] provider-summary "
+    r"layers=(?P<layers>\d+) live-fallbacks=(?P<fallbacks>\d+)")
 
 
 class MatrixError(Exception):
@@ -118,6 +123,13 @@ def parse_comparator_summary(log):
 
 def parse_provider_summary(log):
     matches = list(PROVIDER_RE.finditer(log))
+    if not matches:
+        return None
+    return {key: int(value) for key, value in matches[-1].groupdict().items()}
+
+
+def parse_room_scene_provider_summary(log):
+    matches = list(ROOM_SCENE_PROVIDER_RE.finditer(log))
     if not matches:
         return None
     return {key: int(value) for key, value in matches[-1].groupdict().items()}
@@ -171,7 +183,7 @@ def inspect_ppm(path):
 
 
 def inspect_run(target, run_directory, log, rom_hash, expected_snapshots,
-                expect_provider=False):
+                expect_provider=False, expect_room_scene_hle=False):
     comparator = parse_comparator_summary(log)
     if comparator is None:
         raise MatrixError("runtime comparator summary missing")
@@ -181,6 +193,18 @@ def inspect_run(target, run_directory, log, rom_hash, expected_snapshots,
             raise MatrixError("comparator %s=%d" % (field, comparator[field]))
     provider = parse_provider_summary(log)
     validate_provider_summary(provider, expect_provider)
+    room_scene_provider = parse_room_scene_provider_summary(log)
+    if expect_room_scene_hle:
+        if room_scene_provider is None:
+            raise MatrixError("room-scene provider summary missing")
+        if not room_scene_provider["layers"]:
+            raise MatrixError("room-scene provider sourced no layers")
+        if room_scene_provider["fallbacks"]:
+            raise MatrixError(
+                "room-scene provider live-fallbacks=%d" %
+                room_scene_provider["fallbacks"])
+    elif room_scene_provider is not None:
+        raise MatrixError("room-scene provider unexpectedly enabled")
     snapshot_directory = os.path.join(run_directory, "snapshots")
     try:
         prefixes = bg_hle_census.discover_prefixes([snapshot_directory])
@@ -224,6 +248,7 @@ def inspect_run(target, run_directory, log, rom_hash, expected_snapshots,
         "run_directory": run_directory,
         "comparator": comparator,
         "provider": provider,
+        "room_scene_provider": room_scene_provider,
         "census": bg_hle_census.build_summary(records),
         "snapshots": records,
         "framebuffer": framebuffer,
@@ -286,10 +311,13 @@ def run_target(args, target, rom_hash):
             "AR_QUIT_FRAMES": str(args.quit_frames),
         })
         environment.pop("AR_ACTION_BG_HLE", None)
+        environment.pop("AR_ACTION_ROOM_SCENE_HLE", None)
         if args.provider_mode == "enabled":
             environment["AR_ACTION_BG_HLE"] = "1"
         elif args.provider_mode == "disabled":
             environment["AR_ACTION_BG_HLE"] = "0"
+        if args.room_scene_hle:
+            environment["AR_ACTION_ROOM_SCENE_HLE"] = "1"
         command = [args.binary, args.rom, "--config", args.config]
         completed = subprocess.run(
             command, cwd=args.cwd, env=environment, stdout=subprocess.PIPE,
@@ -308,7 +336,7 @@ def run_target(args, target, rom_hash):
     try:
         return inspect_run(
             target, run_directory, log, rom_hash, len(args.capture_frames),
-            provider_binding_expected(args))
+            provider_binding_expected(args), args.room_scene_hle)
     except MatrixError as error:
         if error.run_directory is None:
             error.run_directory = run_directory
@@ -334,6 +362,7 @@ def write_manifest(path, args, rom_hash, results):
         "provider_enabled": provider_setting_enabled(args),
         "provider_binding_expected": provider_binding_expected(args),
         "provider_setting": args.provider_mode,
+        "room_scene_hle": args.room_scene_hle,
         "results": results,
     }
     with open(path, "w", encoding="utf-8") as output:
@@ -377,6 +406,10 @@ def parse_args(argv):
     parser.add_argument("--manifest",
                         help="output JSON (default: runs/bg-hle-matrix-<time>.json)")
     parser.add_argument("--fail-fast", action="store_true")
+    parser.add_argument(
+        "--enable-room-scene-hle", dest="room_scene_hle",
+        action="store_true",
+        help="source finite worlds from ActionRoomScene and require no fallback")
     provider = parser.add_mutually_exclusive_group()
     provider.add_argument(
         "--enable-provider", dest="provider_mode", action="store_const",
@@ -420,9 +453,13 @@ def main(argv=None):
             results.append(result)
             comparator = result["comparator"]
             provider = result["provider"]
+            room_scene_provider = result["room_scene_provider"]
             provider_text = ""
             if provider:
                 provider_text = " provider-layers=%d" % provider["layers"]
+            if room_scene_provider:
+                provider_text += " room-scene-layers=%d" % (
+                    room_scene_provider["layers"])
             print("      PASS tiles=%d mismatches=0 native-fallbacks=%d%s run=%s" % (
                 comparator["tiles"], comparator["native"], provider_text,
                 result["run_directory"]), flush=True)

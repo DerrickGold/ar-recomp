@@ -113,6 +113,8 @@ typedef struct ActRaiserActionBgDiagnostics {
   uint64_t room_scene_scanlines_compared;
   uint64_t room_scene_registers_compared;
   uint64_t room_scene_register_mismatches;
+  uint64_t room_scene_hle_layers;
+  uint64_t room_scene_hle_fallbacks;
   uint64_t fallbacks[kActRaiserActionBgFallback_Count];
 } ActRaiserActionBgDiagnostics;
 
@@ -175,6 +177,13 @@ bool ActRaiserActionBg_CompareRoomSceneLayer(
     const ActionBgWorld *world,
     ActRaiserActionRoomSceneCompareResult *result);
 
+/* Publish one immutable room-scene background through the production finite
+ * world representation. This is the pure adapter used by the feature-gated
+ * ROM-derived provider source and by ROM-free parity tests. */
+bool ActRaiserActionBg_UpdateWorldFromRoomScene(
+    ActionBgWorld *world, const struct ActionRoomScene *scene,
+    uint8_t bg_layer);
+
 /* Compare one visible scanline's resolved immutable frame record with the PPU
  * registers that are about to render it. Row 0 additionally checks the stable
  * video-profile registers. This is pure and never changes PPU state. */
@@ -194,11 +203,14 @@ void ActRaiserActionBg_ObserveRoomSceneFrameLine(
     const struct Ppu *ppu, unsigned output_y);
 
 /* Default-on BH7 renderer adapter. Unless `AR_ACTION_BG_HLE=0`, publish and
- * bind every plan layer whose source is a finite world map. A zero-mismatch,
- * zero-outside comparison against the exact live native viewport is required
- * before provider ownership includes authentic pixels. Returns the bitmask of
- * bound PPU layers. The function always clears prior bindings first, so a
- * rejected/disabled frame fails closed. */
+ * bind every plan layer whose source is a finite world map. By default the
+ * publication snapshots live staged WRAM. `AR_ACTION_ROOM_SCENE_HLE=1`
+ * promotes the immutable ROM-derived room scene to that publication source,
+ * with automatic live-WRAM fallback. A zero-mismatch, zero-outside comparison
+ * against the exact live native viewport is still required before provider
+ * ownership includes authentic pixels. Returns the bitmask of bound PPU
+ * layers. The function always clears prior bindings first, so a rejected or
+ * disabled frame fails closed. */
 uint8_t ActRaiserActionBg_BindPlan(
     const uint8_t *wram, size_t wram_size, const ActionBgPlan *plan,
     struct Ppu *ppu);

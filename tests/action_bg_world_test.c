@@ -266,6 +266,58 @@ static void TestExactSourceCacheAndInvalidation(void) {
   DestroyFixture(&fixture);
 }
 
+static void TestImmutableSourceParityAndByteOrder(void) {
+  Fixture fixture = MakeFixture();
+  ActionBgWorld *world = ActionBgWorld_Create();
+  CHECK(world != NULL);
+  if (!world || !fixture.wram) {
+    ActionBgWorld_Destroy(world);
+    DestroyFixture(&fixture);
+    return;
+  }
+
+  const size_t map_size = 4u * 256u;
+  ActionBgImmutableInput input = {
+    .map = fixture.wram + kMapStart,
+    .map_size = map_size,
+    .metatiles = fixture.wram + kTableStart,
+    .metatile_size = kDefinitionBytes,
+    .world_width = fixture.input.world_width,
+    .world_height = fixture.input.world_height,
+    .word_mask = fixture.input.word_mask,
+    .attributes = fixture.input.attributes,
+  };
+  CHECK(ActionBgWorld_UpdateImmutable(world, &input));
+  CheckTile(&fixture, world, 0, 0);
+  CheckTile(&fixture, world, 32, 17);
+  CheckTile(&fixture, world, 63, 63);
+  uint32_t serial = ActionBgWorld_Serial(world);
+  CHECK(ActionBgWorld_UpdateImmutable(world, &input));
+  CHECK(ActionBgWorld_Serial(world) == serial);
+
+  uint8_t big_endian[kDefinitionBytes];
+  for (size_t i = 0; i < sizeof(big_endian); i += 2) {
+    big_endian[i] = fixture.wram[kTableStart + i + 1];
+    big_endian[i + 1] = fixture.wram[kTableStart + i];
+  }
+  input.metatiles = big_endian;
+  input.metatile_words_big_endian = true;
+  CHECK(ActionBgWorld_UpdateImmutable(world, &input));
+  CHECK(ActionBgWorld_Serial(world) != serial);
+  CheckTile(&fixture, world, 0, 0);
+  CheckTile(&fixture, world, 32, 17);
+  CheckTile(&fixture, world, 63, 63);
+
+  input.map_size--;
+  CHECK(!ActionBgWorld_UpdateImmutable(world, &input));
+  CHECK(!ActionBgWorld_IsValid(world));
+  CHECK(!ActionBgWorld_UpdateImmutable(NULL, &input));
+  CHECK(!ActionBgWorld_UpdateImmutable(world, NULL));
+
+  ActionBgWorld_Destroy(world);
+  DestroyFixture(&fixture);
+}
+
 static void ExpectRejected(ActionBgWorld *world,
                            const ActionBgDecodeInput *input) {
   uint16_t entry = 0xCAFE;
@@ -371,6 +423,7 @@ int main(void) {
   TestSharedMapViewAddressing();
   TestDecodePagesQuadrantsAndBounds();
   TestExactSourceCacheAndInvalidation();
+  TestImmutableSourceParityAndByteOrder();
   TestMalformedInputFailsClosedAtomically();
   TestMaximumWramBound();
   if (failures) {
