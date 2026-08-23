@@ -57,6 +57,13 @@ struct ActionBgWorld {
   size_t scratch_source_capacity;
   size_t source_size;
   ActionBgPublicationKey key;
+  /* Immutable room-scene assets retain stable addresses for their lifetime.
+   * Remembering those identities avoids comparing the map and 2 KiB
+   * definition table on every rendered frame. Live WRAM publications never
+   * use this shortcut because their bytes can change in place. */
+  const uint8_t *immutable_map_identity;
+  const uint8_t *immutable_metatile_identity;
+  bool immutable_publication;
   uint32_t serial;
   bool has_publication;
   bool valid;
@@ -228,6 +235,22 @@ static bool SourcesEqual(const ActionBgWorld *world,
              kActionBgDefinitionBytes) == 0;
 }
 
+static bool ImmutableSourceIdentitiesEqual(
+    const ActionBgWorld *world, const ActionBgImmutableInput *input,
+    const ActionBgLayout *layout, const ActionBgPublicationKey *key) {
+  return world->has_publication && world->immutable_publication &&
+      world->immutable_map_identity == input->map &&
+      world->immutable_metatile_identity == input->metatiles &&
+      world->source_size == layout->source_size &&
+      KeysEqual(&world->key, key);
+}
+
+static void ClearImmutableSourceIdentities(ActionBgWorld *world) {
+  world->immutable_map_identity = NULL;
+  world->immutable_metatile_identity = NULL;
+  world->immutable_publication = false;
+}
+
 static bool Reserve(void **storage, size_t *capacity, size_t count,
                     size_t element_size) {
   if (count <= *capacity) return true;
@@ -340,6 +363,7 @@ void ActionBgWorld_Reset(ActionBgWorld *world) {
   world->serial = 0;
   world->has_publication = false;
   world->valid = false;
+  ClearImmutableSourceIdentities(world);
 }
 
 bool ActionBgWorld_Update(ActionBgWorld *world,
@@ -353,6 +377,7 @@ bool ActionBgWorld_Update(ActionBgWorld *world,
   const uint8_t *map = input->wram + layout.map_start;
   const uint8_t *definitions = input->wram + layout.table_start;
   if (SourcesEqual(world, map, definitions, &layout, &key)) {
+    ClearImmutableSourceIdentities(world);
     world->valid = true;
     return true;
   }
@@ -363,6 +388,7 @@ bool ActionBgWorld_Update(ActionBgWorld *world,
   SnapshotSources(world, map, definitions, &layout);
   DecodeSnapshot(world, input->word_mask, input->attributes, false, &layout);
   Publish(world, &layout, &key);
+  ClearImmutableSourceIdentities(world);
   return true;
 }
 
@@ -383,7 +409,14 @@ bool ActionBgWorld_UpdateImmutable(
     .tile_width = layout.tile_width,
     .tile_height = layout.tile_height,
   };
+  if (ImmutableSourceIdentitiesEqual(world, input, &layout, &key)) {
+    world->valid = true;
+    return true;
+  }
   if (SourcesEqual(world, input->map, input->metatiles, &layout, &key)) {
+    world->immutable_map_identity = input->map;
+    world->immutable_metatile_identity = input->metatiles;
+    world->immutable_publication = true;
     world->valid = true;
     return true;
   }
@@ -395,6 +428,9 @@ bool ActionBgWorld_UpdateImmutable(
   DecodeSnapshot(world, input->word_mask, input->attributes,
                  input->metatile_words_big_endian, &layout);
   Publish(world, &layout, &key);
+  world->immutable_map_identity = input->map;
+  world->immutable_metatile_identity = input->metatiles;
+  world->immutable_publication = true;
   return true;
 }
 

@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "actraiser_action_room_hle_internal.h"
 #include "actraiser_game.h"
 
 enum {
@@ -32,36 +33,8 @@ typedef struct ActionVideoConfigDiagnostics {
 
 static ActionVideoConfigDiagnostics s_diagnostics;
 
-static uint8_t ReadDp8(CpuState *cpu, uint16_t offset) {
-  return cpu_read8(cpu, kSnesLowWramBank,
-                   (uint16_t)(cpu->D + offset));
-}
-
-static uint16_t ReadDp16(CpuState *cpu, uint16_t offset) {
-  return cpu_read16(cpu, kSnesLowWramBank,
-                    (uint16_t)(cpu->D + offset));
-}
-
-static void WriteDp8(CpuState *cpu, uint16_t offset, uint8_t value) {
-  cpu_write8(cpu, kSnesLowWramBank,
-             (uint16_t)(cpu->D + offset), value);
-}
-
-static void WriteDp16(CpuState *cpu, uint16_t offset, uint16_t value) {
-  cpu_write16(cpu, kSnesLowWramBank,
-              (uint16_t)(cpu->D + offset), value);
-}
-
-static uint8_t ReadLongIndexed(CpuState *cpu, uint16_t pointer,
-                               uint16_t index) {
-  const uint32_t base = (uint32_t)ReadDp16(cpu, pointer) |
-      ((uint32_t)ReadDp8(cpu, (uint16_t)(pointer + 2u)) << 16);
-  const uint32_t address = (base + index) & 0xFFFFFFu;
-  return cpu_read8(cpu, (uint8_t)(address >> 16), (uint16_t)address);
-}
-
 static uint8_t PeekOperand(CpuState *cpu) {
-  return ReadLongIndexed(cpu, kDpScript, cpu->Y);
+  return ActionRoomHle_ReadLongIndexed(cpu, kDpScript, cpu->Y);
 }
 
 static bool ActionVideoConfigEnabled(void) {
@@ -167,18 +140,28 @@ RecompReturn ActRaiser_ApplyActionVideoConfig(CpuState *cpu) {
   /* Clear only the attribute/high bytes, exactly like STZ $6B/$6F/$73/$90.
    * Low bytes are intentionally retained when the corresponding priority bit
    * is clear. A set bit writes the complete common attribute word. */
-  WriteDp8(cpu, 0x6B, 0);
-  WriteDp8(cpu, 0x6F, 0);
-  WriteDp8(cpu, 0x73, 0);
-  WriteDp8(cpu, 0x90, 0);
-  if (profile[4] & 0x01) WriteDp16(cpu, 0x6A, 0x2000);
-  if (profile[4] & 0x02) WriteDp16(cpu, 0x6E, 0x2000);
-  if (profile[4] & 0x04) WriteDp16(cpu, 0x72, 0x2000);
-  if (profile[4] & 0x08) WriteDp16(cpu, 0x8F, 0x1000);
-  WriteDp8(cpu, 0x6B, (uint8_t)(ReadDp8(cpu, 0x6B) | 0x10));
-  WriteDp8(cpu, 0x6F, (uint8_t)(ReadDp8(cpu, 0x6F) | 0x01));
+  ActionRoomHle_WriteDirectPage8(cpu, 0x6B, 0);
+  ActionRoomHle_WriteDirectPage8(cpu, 0x6F, 0);
+  ActionRoomHle_WriteDirectPage8(cpu, 0x73, 0);
+  ActionRoomHle_WriteDirectPage8(cpu, 0x90, 0);
+  if (profile[4] & 0x01)
+    ActionRoomHle_WriteDirectPage16(cpu, 0x6A, 0x2000);
+  if (profile[4] & 0x02)
+    ActionRoomHle_WriteDirectPage16(cpu, 0x6E, 0x2000);
+  if (profile[4] & 0x04)
+    ActionRoomHle_WriteDirectPage16(cpu, 0x72, 0x2000);
+  if (profile[4] & 0x08)
+    ActionRoomHle_WriteDirectPage16(cpu, 0x8F, 0x1000);
+  ActionRoomHle_WriteDirectPage8(
+      cpu, 0x6B,
+      (uint8_t)(ActionRoomHle_ReadDirectPage8(cpu, 0x6B) | 0x10));
+  ActionRoomHle_WriteDirectPage8(
+      cpu, 0x6F,
+      (uint8_t)(ActionRoomHle_ReadDirectPage8(cpu, 0x6F) | 0x01));
   /* $90's OAM attribute-bias arm is unconditional in the native handler. */
-  WriteDp8(cpu, 0x90, (uint8_t)(ReadDp8(cpu, 0x90) | 0x20));
+  ActionRoomHle_WriteDirectPage8(
+      cpu, 0x90,
+      (uint8_t)(ActionRoomHle_ReadDirectPage8(cpu, 0x90) | 0x20));
 
   WritePpu(cpu, kPpuBg1Screen, (uint8_t)(0x60 | (profile[5] & 0x03)));
   WritePpu(cpu, kPpuBg2Screen,
@@ -187,40 +170,49 @@ RecompReturn ActRaiser_ApplyActionVideoConfig(CpuState *cpu) {
 
   for (unsigned plane = 0; plane < 6; plane++) {
     const uint8_t ratio = profile[7 + plane];
-    WriteDp8(cpu, (uint16_t)(0x3A + plane * 2u),
-             (uint8_t)(ratio >> 4));
-    WriteDp8(cpu, (uint16_t)(0x3B + plane * 2u),
-             (uint8_t)(ratio & 0x0F));
+    ActionRoomHle_WriteDirectPage8(
+        cpu, (uint16_t)(0x3A + plane * 2u), (uint8_t)(ratio >> 4));
+    ActionRoomHle_WriteDirectPage8(
+        cpu, (uint16_t)(0x3B + plane * 2u),
+        (uint8_t)(ratio & 0x0F));
   }
 
-  WriteDp8(cpu, 0xBB, profile[13]);
-  WriteDp8(cpu, 0xBA, profile[14]);
-  WriteDp8(cpu, 0xB9, profile[15]);
-  WriteDp8(cpu, 0xBF, profile[16]);
-  WriteDp8(cpu, 0xC1, profile[17]);
-  WriteDp8(cpu, 0xC4, profile[18]);
+  ActionRoomHle_WriteDirectPage8(cpu, 0xBB, profile[13]);
+  ActionRoomHle_WriteDirectPage8(cpu, 0xBA, profile[14]);
+  ActionRoomHle_WriteDirectPage8(cpu, 0xB9, profile[15]);
+  ActionRoomHle_WriteDirectPage8(cpu, 0xBF, profile[16]);
+  ActionRoomHle_WriteDirectPage8(cpu, 0xC1, profile[17]);
+  ActionRoomHle_WriteDirectPage8(cpu, 0xC4, profile[18]);
   if (!(profile[18] & 0x40) && (profile[18] & 0x20))
-    WriteDp8(cpu, 0xC1, (profile[18] & 0x80) ? 0xFF : 0x00);
-  WriteDp8(cpu, 0xC2, 1);
-  WriteDp8(cpu, 0xC3, 0);
-  WriteDp8(cpu, 0xC0, 0);
+    ActionRoomHle_WriteDirectPage8(
+        cpu, 0xC1, (profile[18] & 0x80) ? 0xFF : 0x00);
+  ActionRoomHle_WriteDirectPage8(cpu, 0xC2, 1);
+  ActionRoomHle_WriteDirectPage8(cpu, 0xC3, 0);
+  ActionRoomHle_WriteDirectPage8(cpu, 0xC0, 0);
 
-  WriteDp8(cpu, 0xC5, profile[19]);
-  WriteDp8(cpu, 0xC9, (uint8_t)(profile[20] << 4));
-  WriteDp8(cpu, 0xC6, profile[21]);
-  WriteDp8(cpu, 0xCA, (uint8_t)(profile[22] << 4));
-  WriteDp8(cpu, 0xC7, 0);
-  WriteDp8(cpu, 0xC8, 0);
+  ActionRoomHle_WriteDirectPage8(cpu, 0xC5, profile[19]);
+  ActionRoomHle_WriteDirectPage8(
+      cpu, 0xC9, (uint8_t)(profile[20] << 4));
+  ActionRoomHle_WriteDirectPage8(cpu, 0xC6, profile[21]);
+  ActionRoomHle_WriteDirectPage8(
+      cpu, 0xCA, (uint8_t)(profile[22] << 4));
+  ActionRoomHle_WriteDirectPage8(cpu, 0xC7, 0);
+  ActionRoomHle_WriteDirectPage8(cpu, 0xC8, 0);
 
-  WriteDp16(cpu, 0xDA, (profile[23] & 0x80) ? 0x1000 : 0x0000);
-  WriteDp16(cpu, 0xE1, (uint16_t)((profile[23] & 0x70) << 3));
-  WriteDp8(cpu, 0xDF, (uint8_t)((profile[23] & 0x0F) - 1u));
-  WriteDp8(cpu, 0xDE, (uint8_t)(profile[24] - 1u));
-  WriteDp16(cpu, 0xE6,
-            (uint16_t)(profile[25] | ((uint16_t)profile[26] << 8)));
-  WriteDp8(cpu, 0xE5, 0x3B);
-  WriteDp8(cpu, 0xE8, 0);
-  WriteDp16(cpu, 0xF2, profile[27]);
+  ActionRoomHle_WriteDirectPage16(
+      cpu, 0xDA, (profile[23] & 0x80) ? 0x1000 : 0x0000);
+  ActionRoomHle_WriteDirectPage16(
+      cpu, 0xE1, (uint16_t)((profile[23] & 0x70) << 3));
+  ActionRoomHle_WriteDirectPage8(
+      cpu, 0xDF, (uint8_t)((profile[23] & 0x0F) - 1u));
+  ActionRoomHle_WriteDirectPage8(
+      cpu, 0xDE, (uint8_t)(profile[24] - 1u));
+  ActionRoomHle_WriteDirectPage16(
+      cpu, 0xE6,
+      (uint16_t)(profile[25] | ((uint16_t)profile[26] << 8)));
+  ActionRoomHle_WriteDirectPage8(cpu, 0xE5, 0x3B);
+  ActionRoomHle_WriteDirectPage8(cpu, 0xE8, 0);
+  ActionRoomHle_WriteDirectPage16(cpu, 0xF2, profile[27]);
 
   /* The two native PHY lifetimes leave the advanced script cursor at these
    * four stack bytes; PLB leaves the saved DB at entry_s. Preserve this

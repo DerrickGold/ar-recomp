@@ -1517,6 +1517,7 @@ static void TestVirtualLayerParseResolveAndRoundTrip(void) {
 
   const DioramaVirtualLayerOverride *v = &room.virtual_layers[0];
   CHECK(DioramaLayerOrder_VirtualLayerIsAuthored(v));
+  CHECK(DioramaLayerOrder_VirtualLayerHasClassification(v));
   CHECK(v->set_z && v->z == 0.35f);
   CHECK(v->set_order && v->order == 4);
   CHECK(v->set_alpha && v->alpha == 192);
@@ -1553,6 +1554,12 @@ static void TestVirtualLayerParseResolveAndRoundTrip(void) {
   CHECK(DioramaLayerOrder_VirtualBand(
       &reparsed, 0, 5, 6, 0x23, 0x2000) == 1);
   CHECK(reparsed.virtual_layers[0].z == 0.35f);
+
+  DioramaVirtualLayerOverride geometry_only;
+  memset(&geometry_only, 0, sizeof(geometry_only));
+  geometry_only.set_z = true;
+  CHECK(DioramaLayerOrder_VirtualLayerIsAuthored(&geometry_only));
+  CHECK(!DioramaLayerOrder_VirtualLayerHasClassification(&geometry_only));
 
   static const char *bad[] = {
     "bg1-virtual = metatile:100 band:0",

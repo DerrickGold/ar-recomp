@@ -275,7 +275,7 @@ static void InitFrameScene(ActionRoomScene *scene) {
   memset(scene, 0, sizeof(*scene));
   scene->have_video_profile = true;
   scene->have_raster_waveform = true;
-  scene->have_raster_r4_window = true;
+  scene->have_raster_mosaic_wave_window = true;
   scene->have_raster_workspace = true;
   scene->video_profile[0] = 3;
   scene->video_profile[6] = 1;
@@ -283,8 +283,9 @@ static void InitFrameScene(ActionRoomScene *scene) {
   scene->video_profile[10] = 0x14;
   for (unsigned i = 0; i < kActionRoomSceneRasterWaveformBytes; i++)
     scene->raster_waveform[i] = (uint8_t)i;
-  for (unsigned i = 0; i < kActionRoomSceneRasterR4WindowBytes; i++)
-    scene->raster_r4_window[i] = (uint8_t)(i + 1u);
+  for (unsigned i = 0;
+       i < kActionRoomSceneRasterMosaicWaveWindowBytes; i++)
+    scene->raster_mosaic_wave_window[i] = (uint8_t)(i + 1u);
   for (unsigned bg = 0; bg < 2; bg++) {
     scene->bg[bg].have_map = true;
     scene->bg[bg].have_metatiles = true;
@@ -294,7 +295,7 @@ static void InitFrameScene(ActionRoomScene *scene) {
   }
 }
 
-static void TestFrameStateAndRasterPresets(void) {
+static void TestFrameStateAndRasterEffects(void) {
   ActionRoomScene scene;
   InitFrameScene(&scene);
   const ActionRoomSceneFrameRequest request = {
@@ -306,7 +307,7 @@ static void TestFrameStateAndRasterPresets(void) {
   };
   ActionRoomSceneFrameState state;
 
-  scene.raster_preset = kActionRoomRaster_None;
+  scene.raster_effect = kActionRoomRaster_None;
   CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
   CHECK(state.bg_hscroll[0][0] == 64);
   CHECK(state.bg_vscroll[0][223] == 32);
@@ -337,7 +338,7 @@ static void TestFrameStateAndRasterPresets(void) {
   scene.bg[1].map_size = kActionRoomSceneMapPageBytes;
   scene.video_profile[19] = 0;
 
-  scene.raster_preset = kActionRoomRaster_R1;
+  scene.raster_effect = kActionRoomRaster_Bg2WaveWithFrame;
   memset(scene.raster_workspace, 0, sizeof(scene.raster_workspace));
   scene.raster_workspace[2] = 2;
   scene.raster_workspace[5] = 1;
@@ -347,7 +348,7 @@ static void TestFrameStateAndRasterPresets(void) {
   CHECK(state.bg_hscroll[1][2] == 0x10E);
   CHECK(state.bg_hscroll[1][223] == 123);
 
-  scene.raster_preset = kActionRoomRaster_R2;
+  scene.raster_effect = kActionRoomRaster_Bg2LowerPerspective;
   memset(scene.raster_workspace, 0, sizeof(scene.raster_workspace));
   scene.raster_workspace[5] = 2;
   scene.raster_workspace[8] = 1;
@@ -357,7 +358,7 @@ static void TestFrameStateAndRasterPresets(void) {
   CHECK(state.bg_hscroll[1][128] == 0x101);
   CHECK(state.bg_hscroll[1][223] == 0x36);
 
-  scene.raster_preset = kActionRoomRaster_R3;
+  scene.raster_effect = kActionRoomRaster_Bg2VerticalRipple;
   memset(scene.raster_workspace, 0, sizeof(scene.raster_workspace));
   scene.raster_workspace[2] = 1;
   scene.raster_workspace[5] = 2;
@@ -370,7 +371,7 @@ static void TestFrameStateAndRasterPresets(void) {
   CHECK(state.bg_vscroll[1][159] == 0x300);
   CHECK(state.bg_vscroll[1][223] == 0x300);
 
-  scene.raster_preset = kActionRoomRaster_R4;
+  scene.raster_effect = kActionRoomRaster_Bg2MosaicWave;
   memset(scene.raster_workspace, 0, sizeof(scene.raster_workspace));
   CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
   CHECK(state.mosaic[0] == 0x12);
@@ -379,8 +380,9 @@ static void TestFrameStateAndRasterPresets(void) {
   CHECK(state.mosaic[223] == 0x02);
   ActionRoomSceneFrameRequest r4_high_clock = request;
   r4_high_clock.game_frame = 0x010A;
-  memset(scene.raster_r4_window, 0, sizeof(scene.raster_r4_window));
-  scene.raster_r4_window[2] = 1;
+  memset(scene.raster_mosaic_wave_window, 0,
+         sizeof(scene.raster_mosaic_wave_window));
+  scene.raster_mosaic_wave_window[2] = 1;
   CHECK(ActionRoomScene_BuildFrameState(
       &scene, &r4_high_clock, &state));
   CHECK(state.mosaic[0] == 0x12);
@@ -390,14 +392,14 @@ static void TestFrameStateAndRasterPresets(void) {
   CHECK(state.mosaic[0] == 0x02);
   CHECK(state.mosaic[223] == 0x02);
 
-  scene.raster_preset = kActionRoomRaster_R5;
+  scene.raster_effect = kActionRoomRaster_Bg2LayeredParallax;
   CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
   CHECK(state.bg_hscroll[1][0] == 50);
   CHECK(state.bg_hscroll[1][62] == 50);
   CHECK(state.bg_hscroll[1][63] == 25);
   CHECK(state.bg_hscroll[1][175] == 32);
 
-  scene.raster_preset = kActionRoomRaster_R6;
+  scene.raster_effect = kActionRoomRaster_Bg2ParallaxPerspective;
   CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
   CHECK(state.bg_hscroll[1][0] == 68);
   CHECK(state.bg_hscroll[1][189] == 32);
@@ -412,7 +414,7 @@ static void TestFrameStateAndRasterPresets(void) {
   CHECK(state.bg_hscroll[1][78] == 0xe0);
   scene.have_raster_entry_camera_x = false;
 
-  scene.raster_preset = kActionRoomRaster_R7;
+  scene.raster_effect = kActionRoomRaster_Bg2AcceleratingWave;
   memset(scene.raster_workspace, 0, sizeof(scene.raster_workspace));
   scene.raster_workspace[0x802] = 3;
   scene.raster_workspace[0x805] = 2;
@@ -421,12 +423,12 @@ static void TestFrameStateAndRasterPresets(void) {
   CHECK(state.bg_hscroll[1][1] == 0x304);
   CHECK(state.bg_hscroll[1][2] == 0x205);
 
-  scene.raster_preset = kActionRoomRaster_R8;
+  scene.raster_effect = kActionRoomRaster_Bg2OpposingBandMotion;
   CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
   CHECK(state.bg_hscroll[1][142] == 0);
   CHECK(state.bg_hscroll[1][143] == 1021);
 
-  scene.raster_preset = kActionRoomRaster_R9;
+  scene.raster_effect = kActionRoomRaster_Bg2CameraParallaxBands;
   memset(scene.raster_workspace, 0, sizeof(scene.raster_workspace));
   scene.raster_workspace[0x1002] = 1;
   CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
@@ -451,7 +453,7 @@ static void TestFrameStateAndRasterPresets(void) {
   scene.have_raster_entry_camera_x = false;
   scene.video_profile[5] = 0;
 
-  scene.raster_preset = kActionRoomRaster_R10;
+  scene.raster_effect = kActionRoomRaster_DualBgOpposedWaves;
   memset(scene.raster_workspace, 0, sizeof(scene.raster_workspace));
   scene.raster_workspace[2] = 2;
   scene.raster_workspace[0x802] = 1;
@@ -568,7 +570,7 @@ static void TestStockRomCatalogue(const char *path) {
         scenes++;
         CHECK(scene.have_video_profile);
         CHECK(scene.have_raster_waveform);
-        CHECK(scene.have_raster_r4_window);
+        CHECK(scene.have_raster_mosaic_wave_window);
         CHECK(scene.video_profile_index == kExpectedProfiles[group][map]);
         CHECK((scene.video_profile[4] & 0x04) != 0);
         ActionRoomSceneFrameState state;
@@ -587,7 +589,7 @@ static void TestStockRomCatalogue(const char *path) {
         }
         if (ActionRoomScene_HasCharacterAnimation(&scene)) animated++;
         if (ActionRoomScene_HasBg2PageCycle(&scene)) page_cycles++;
-        if (scene.raster_preset != kActionRoomRaster_None) raster++;
+        if (scene.raster_effect != kActionRoomRaster_None) raster++;
         if (scene.video_profile[4] & 0x02) forced_bg2_priority++;
       }
       for (uint8_t bg = 1; bg <= 2; bg++) {
@@ -619,7 +621,7 @@ int main(int argc, char **argv) {
   TestOverlappingDictionaryCopyAndTruncation();
   TestGenericRoomScriptAndInheritance();
   TestScenePhaseResolvers();
-  TestFrameStateAndRasterPresets();
+  TestFrameStateAndRasterEffects();
   TestNativeFrameCompositor();
   /* Optional local census against a legally supplied stock ROM. CTest invokes
    * this binary without one, keeping the suite hermetic and distributable. */

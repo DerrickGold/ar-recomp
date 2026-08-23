@@ -166,6 +166,67 @@ level objects, actor initialization, audio, or gameplay. Every redirected
 routine retains its exact native handler body whenever a read-only guard
 rejects an invocation.
 
+## Engineering audit (2026-08-22)
+
+The action-room HLE, finite-world provider, virtual-band path, and editor
+exporter were audited together rather than as independent features.
+
+Code ownership and naming:
+
+- The command-7/6, command-5/4, and command-3 HLEs now share one internal set
+  of explicitly named direct-page, long-indexed, and native-stack bus
+  primitives. The helpers still call `cpu_read*`/`cpu_write*`; they do not
+  bypass the emulator's observable CPU, PPU-port, or debug contracts.
+- Production raster identifiers describe their behavior (`Bg2MosaicWave`,
+  `Bg2ParallaxPerspective`, `DualBgOpposedWaves`, and so on). Their explicit
+  values 1-10 preserve the R1-R10 research labels and exporter schema.
+- The standalone editor exporter is strict C11 with warnings enabled. It no
+  longer hides warnings behind `-w`, and the shared runtime's MSVC warning
+  pragmas are guarded so Clang/GCC builds remain warning-clean.
+
+Rendering portability:
+
+- Virtual worlds supply only 16-bit SNES tilemap words and optional band IDs
+  through fixed-width CPU callbacks. The ordinary CPU PPU remains responsible
+  for CHR fetch, palette, priority, windows, mosaic, and color math.
+- Callback pointers, compiled classification caches, and overlay metadata are
+  host-owned frame state outside the serialized PPU register/VRAM/CGRAM
+  ranges. Savestates therefore contain no process pointers or backend data.
+- Virtual bands become the same ARGB CPU overlay surfaces already consumed by
+  the diorama's SDL abstraction. No Metal object, shader branch, byte order,
+  or row-pitch assumption was added. The audit build compiles and links the
+  full game natively on macOS and as `x86_64-windows-gnu`; the committed
+  Metal/MSL, Vulkan/SPIR-V, and D3D12/DXIL shader families are unchanged by
+  this CPU-side feature.
+
+Runtime cost:
+
+- Authored cell rules used to be scanned for every virtual tile sample. A
+  room can contain 512 spans and scanout performs tens of thousands of
+  provider samples per frame, making that representation a latent quadratic
+  cost as authoring expands. Binding now compiles the authentic-priority,
+  metatile, and ordered-cell rules into one byte per finite-world 8x8 tile.
+  Scanout classification is O(1); the cache rebuilds only when the world
+  serial or a classification-field hash changes, including same-address live
+  editor edits. Geometry-only virtual layers skip classification entirely.
+  Diagnostics report cache builds and hits.
+- Immutable room-scene maps and metatile tables have stable addresses by
+  contract. Repeated publication now takes a pointer/key identity fast path
+  instead of comparing the full map plus 2 KiB definitions every frame. Live
+  WRAM publications retain byte comparison because they can mutate in place.
+- The native-ring preflight still compares the authentic 33x28 tile viewport
+  before binding. That bounded work is intentional: it detects streamer lag
+  and gameplay-time tile patches and is the safety condition that permits the
+  finite provider to own authentic pixels. CPU/PPU staging loops run only at
+  room transitions and likewise remain bus-accurate rather than introducing a
+  backend-specific bulk-write shortcut.
+
+Verification for this audit: the strict exporter loaded all 49 rooms with no
+failure; all 79 configured tests passed under the headless driver (the two
+GPU-device tests skipped as designed); the changed world, virtual-layer, and
+room compositor targets passed ASan/UBSan; and the hermetic Windows x86-64
+build compiled and linked all 247 translation units.
+
 ## Scope and parity boundary
 
 The baseline contract is the complete native **background scene**:
