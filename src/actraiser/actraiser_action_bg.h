@@ -120,6 +120,8 @@ typedef struct ActRaiserActionBgDiagnostics {
   uint64_t provider_lookups;
   uint64_t provider_tiles;
   uint64_t provider_outside_world;
+  uint64_t provider_tile_band_cache_builds;
+  uint64_t provider_tile_band_cache_hits;
   uint64_t room_scene_loads;
   uint64_t room_scene_load_failures;
   uint64_t room_scene_layers_compared;

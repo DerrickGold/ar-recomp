@@ -437,6 +437,11 @@ int DioramaLayerOrder_VirtualBand(const DioramaRoomOverride *room, int bg,
 bool DioramaLayerOrder_VirtualLayerIsAuthored(
     const DioramaVirtualLayerOverride *layer);
 
+/* Whether one BG has tile-routing rules. Geometry-only virtual layers do not
+ * need a scanout classification callback until the editor assigns pixels. */
+bool DioramaLayerOrder_VirtualLayerHasClassification(
+    const DioramaVirtualLayerOverride *layer);
+
 /* Drop only the legacy in-game plane editor's overrides. Virtual action-layer
  * records are authored by the standalone action editor and must survive this
  * operation. The full reset functions below remain available for callers that

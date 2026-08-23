@@ -6,6 +6,7 @@
 #include <stdlib.h>
 
 #include "actraiser/actraiser_lzss.h"
+#include "actraiser_action_room_hle_internal.h"
 #include "actraiser_game.h"
 
 enum {
@@ -36,36 +37,9 @@ typedef struct ActionRoomLoadDiagnostics {
 
 static ActionRoomLoadDiagnostics s_diagnostics;
 
-static uint8_t ReadDp8(CpuState *cpu, uint16_t offset) {
-  return cpu_read8(cpu, kSnesLowWramBank,
-                   (uint16_t)(cpu->D + offset));
-}
-
-static uint16_t ReadDp16(CpuState *cpu, uint16_t offset) {
-  return cpu_read16(cpu, kSnesLowWramBank,
-                    (uint16_t)(cpu->D + offset));
-}
-
-static void WriteDp8(CpuState *cpu, uint16_t offset, uint8_t value) {
-  cpu_write8(cpu, kSnesLowWramBank,
-             (uint16_t)(cpu->D + offset), value);
-}
-
-static void WriteDp16(CpuState *cpu, uint16_t offset, uint16_t value) {
-  cpu_write16(cpu, kSnesLowWramBank,
-              (uint16_t)(cpu->D + offset), value);
-}
-
-static uint8_t ReadLongIndexed(CpuState *cpu, uint16_t pointer,
-                               uint16_t index) {
-  const uint32_t base = (uint32_t)ReadDp16(cpu, pointer) |
-      ((uint32_t)ReadDp8(cpu, (uint16_t)(pointer + 2u)) << 16);
-  const uint32_t address = (base + index) & 0xFFFFFFu;
-  return cpu_read8(cpu, (uint8_t)(address >> 16), (uint16_t)address);
-}
-
 static uint8_t PeekOperand(CpuState *cpu, unsigned operand) {
-  return ReadLongIndexed(cpu, 0xA2, (uint16_t)(cpu->Y + operand));
+  return ActionRoomHle_ReadLongIndexed(
+      cpu, 0xA2, (uint16_t)(cpu->Y + operand));
 }
 
 static uint8_t ReadOperand(CpuState *cpu) {
@@ -112,43 +86,33 @@ static void RequireEntryMode(CpuState *cpu, const char *routine) {
   abort();
 }
 
-static void PushWord(CpuState *cpu, uint16_t value) {
-  cpu->S = (uint16_t)(cpu->S - 1u);
-  cpu_write16(cpu, 0x00, cpu->S, value);
-  cpu->S = (uint16_t)(cpu->S - 1u);
-}
-
-static uint16_t PopWord(CpuState *cpu) {
-  cpu->S = (uint16_t)(cpu->S + 1u);
-  const uint16_t value = cpu_read16(cpu, 0x00, cpu->S);
-  cpu->S = (uint16_t)(cpu->S + 1u);
-  return value;
-}
-
 static uint32_t ReadLinearPointer(CpuState *cpu) {
   const uint32_t value = (uint32_t)ReadOperand(cpu) |
       ((uint32_t)ReadOperand(cpu) << 8) |
       ((uint32_t)ReadOperand(cpu) << 16);
   const uint16_t address = (uint16_t)((value & 0x7FFFu) | 0x8000u);
   const uint8_t bank = (uint8_t)(value >> 15);
-  WriteDp16(cpu, kDpSource, address);
-  WriteDp8(cpu, kDpSourceBank, bank);
+  ActionRoomHle_WriteDirectPage16(cpu, kDpSource, address);
+  ActionRoomHle_WriteDirectPage8(cpu, kDpSourceBank, bank);
   return ((uint32_t)bank << 16) | address;
 }
 
 static uint16_t ReadSource16(CpuState *cpu) {
-  return cpu_read16(cpu, ReadDp8(cpu, kDpSourceBank),
-                    ReadDp16(cpu, kDpSource));
+  return cpu_read16(cpu,
+                    ActionRoomHle_ReadDirectPage8(cpu, kDpSourceBank),
+                    ActionRoomHle_ReadDirectPage16(cpu, kDpSource));
 }
 
 static uint8_t ReadSource8(CpuState *cpu) {
-  return cpu_read8(cpu, ReadDp8(cpu, kDpSourceBank),
-                   ReadDp16(cpu, kDpSource));
+  return cpu_read8(cpu,
+                   ActionRoomHle_ReadDirectPage8(cpu, kDpSourceBank),
+                   ActionRoomHle_ReadDirectPage16(cpu, kDpSource));
 }
 
 static void AdvanceSource(CpuState *cpu, uint16_t bytes) {
-  WriteDp16(cpu, kDpSource,
-            (uint16_t)(ReadDp16(cpu, kDpSource) + bytes));
+  ActionRoomHle_WriteDirectPage16(
+      cpu, kDpSource,
+      (uint16_t)(ActionRoomHle_ReadDirectPage16(cpu, kDpSource) + bytes));
 }
 
 static void SetAccumulator16(CpuState *cpu) {
@@ -181,8 +145,9 @@ static RecompReturn CallLzss(CpuState *cpu, uint16_t return_pc) {
 static void CopyMetatileSlice(CpuState *cpu, uint16_t destination,
                               uint16_t source_begin, uint16_t source_end,
                               uint16_t destination_offset) {
-  WriteDp16(cpu, kDpDestination, destination);
-  const uint8_t destination_bank = ReadDp8(cpu, kDpDestinationBank);
+  ActionRoomHle_WriteDirectPage16(cpu, kDpDestination, destination);
+  const uint8_t destination_bank =
+      ActionRoomHle_ReadDirectPage8(cpu, kDpDestinationBank);
   uint16_t source = source_begin;
   uint16_t output = destination_offset;
   while (source != source_end) {
@@ -222,31 +187,34 @@ RecompReturn ActRaiser_LoadActionMetatiles(CpuState *cpu) {
   SetAccumulator16(cpu);
 
   const uint8_t source_begin_operand = ReadOperand(cpu);
-  WriteDp16(cpu, kDpMetatileSourceFlags,
-            (uint16_t)source_begin_operand << CHAR_BIT);
+  ActionRoomHle_WriteDirectPage16(
+      cpu, kDpMetatileSourceFlags,
+      (uint16_t)source_begin_operand << CHAR_BIT);
   const uint16_t source_begin = (uint16_t)(
       ((unsigned)source_begin_operand & 0x7Fu) << 6);
   const uint16_t source_end = (uint16_t)((unsigned)ReadOperand(cpu) << 6);
   const uint16_t destination_offset =
       (uint16_t)((unsigned)ReadOperand(cpu) << 6);
-  WriteDp16(cpu, kDpBgWidth, source_begin);
-  WriteDp16(cpu, kDpBgHeight, source_end);
-  WriteDp16(cpu, kDpLayerSelector, destination_offset);
+  ActionRoomHle_WriteDirectPage16(cpu, kDpBgWidth, source_begin);
+  ActionRoomHle_WriteDirectPage16(cpu, kDpBgHeight, source_end);
+  ActionRoomHle_WriteDirectPage16(cpu, kDpLayerSelector,
+                                  destination_offset);
 
   uint16_t selector = ReadOperand(cpu);
-  PushWord(cpu, selector);
+  ActionRoomHle_PushStackWord(cpu, selector);
   cpu->X = kDpSource;
   (void)ReadLinearPointer(cpu);
 
   const uint16_t output_size = ReadSource16(cpu);
-  WriteDp16(cpu, kDpOutputSize, output_size);
+  ActionRoomHle_WriteDirectPage16(cpu, kDpOutputSize, output_size);
   AdvanceSource(cpu, 2);
   cpu->X = kMetatileWorkspace;
-  WriteDp16(cpu, kDpOutputAddress, kMetatileWorkspace);
+  ActionRoomHle_WriteDirectPage16(
+      cpu, kDpOutputAddress, kMetatileWorkspace);
   const RecompReturn decompressed = CallLzss(cpu, 0xB3B8);
   if (decompressed != RECOMP_RETURN_NORMAL) return decompressed;
 
-  selector = PopWord(cpu);
+  selector = ActionRoomHle_PopStackWord(cpu);
   static const uint16_t kDestinations[] = {
     kBg1Definitions, kBg2Definitions, kBg3Definitions,
   };
@@ -255,12 +223,12 @@ RecompReturn ActRaiser_LoadActionMetatiles(CpuState *cpu) {
     const bool selected = (selector & 1u) != 0;
     selector >>= 1;
     if (!selected) continue;
-    PushWord(cpu, selector);
-    PushWord(cpu, cpu->Y);
+    ActionRoomHle_PushStackWord(cpu, selector);
+    ActionRoomHle_PushStackWord(cpu, cpu->Y);
     CopyMetatileSlice(cpu, kDestinations[layer], source_begin, source_end,
                       destination_offset);
-    cpu->Y = PopWord(cpu);
-    selector = PopWord(cpu);
+    cpu->Y = ActionRoomHle_PopStackWord(cpu);
+    selector = ActionRoomHle_PopStackWord(cpu);
   }
   cpu->A = selector;
   cpu->X = kBg3Definitions;
@@ -283,22 +251,25 @@ RecompReturn ActRaiser_LoadActionMap(CpuState *cpu) {
   SetAccumulator16(cpu);
 
   uint16_t selector = ReadOperand(cpu);
-  WriteDp16(cpu, kDpLayerSelector, selector);
+  ActionRoomHle_WriteDirectPage16(cpu, kDpLayerSelector, selector);
   cpu->X = kDpSource;
   (void)ReadLinearPointer(cpu);
   const uint8_t pages_wide = ReadSource8(cpu);
   AdvanceSource(cpu, 1);
   const uint8_t pages_high = ReadSource8(cpu);
   AdvanceSource(cpu, 1);
-  WriteDp16(cpu, kDpBgWidth, (uint16_t)pages_wide << CHAR_BIT);
-  WriteDp16(cpu, kDpBgHeight, (uint16_t)pages_high << CHAR_BIT);
-  WriteDp16(cpu, kDpOutputSize,
-            (uint16_t)((unsigned)pages_wide * pages_high << CHAR_BIT));
+  ActionRoomHle_WriteDirectPage16(
+      cpu, kDpBgWidth, (uint16_t)pages_wide << CHAR_BIT);
+  ActionRoomHle_WriteDirectPage16(
+      cpu, kDpBgHeight, (uint16_t)pages_high << CHAR_BIT);
+  ActionRoomHle_WriteDirectPage16(
+      cpu, kDpOutputSize,
+      (uint16_t)((unsigned)pages_wide * pages_high << CHAR_BIT));
 
   /* The guarded action domain is compressed, so its asset header supersedes
    * the dimensions-derived raw-copy size exactly as native $B420 does. */
   const uint16_t output_size = ReadSource16(cpu);
-  WriteDp16(cpu, kDpOutputSize, output_size);
+  ActionRoomHle_WriteDirectPage16(cpu, kDpOutputSize, output_size);
   AdvanceSource(cpu, 2);
   selector &= 0x7FFFu;
 
@@ -310,19 +281,21 @@ RecompReturn ActRaiser_LoadActionMap(CpuState *cpu) {
   if (destination_index < 2) {
     selector >>= 1;
     cpu->X = (uint16_t)(destination_index * 4u);
-    PushWord(cpu, selector);
-    PushWord(cpu, cpu->Y);
-    WriteDp16(cpu, (uint16_t)(kActRaiserWram_Bg1Width + cpu->X),
-              ReadDp16(cpu, kDpBgWidth));
-    WriteDp16(cpu, (uint16_t)(kActRaiserWram_Bg1Height + cpu->X),
-              ReadDp16(cpu, kDpBgHeight));
+    ActionRoomHle_PushStackWord(cpu, selector);
+    ActionRoomHle_PushStackWord(cpu, cpu->Y);
+    ActionRoomHle_WriteDirectPage16(
+        cpu, (uint16_t)(kActRaiserWram_Bg1Width + cpu->X),
+        ActionRoomHle_ReadDirectPage16(cpu, kDpBgWidth));
+    ActionRoomHle_WriteDirectPage16(
+        cpu, (uint16_t)(kActRaiserWram_Bg1Height + cpu->X),
+        ActionRoomHle_ReadDirectPage16(cpu, kDpBgHeight));
     const uint16_t destination = cpu_read16(
         cpu, cpu->DB, (uint16_t)(kBgDestinationTable + cpu->X));
-    WriteDp16(cpu, kDpOutputAddress, destination);
+    ActionRoomHle_WriteDirectPage16(cpu, kDpOutputAddress, destination);
     const RecompReturn decompressed = CallLzss(cpu, 0xB470);
     if (decompressed != RECOMP_RETURN_NORMAL) return decompressed;
-    cpu->Y = PopWord(cpu);
-    selector = PopWord(cpu);
+    cpu->Y = ActionRoomHle_PopStackWord(cpu);
+    selector = ActionRoomHle_PopStackWord(cpu);
   }
 
   cpu->A = selector;

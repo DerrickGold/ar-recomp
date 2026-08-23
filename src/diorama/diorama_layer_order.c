@@ -271,9 +271,15 @@ static bool PlaneOverrideIsAuthored(const DioramaPlaneOverride *o) {
 bool DioramaLayerOrder_VirtualLayerIsAuthored(
     const DioramaVirtualLayerOverride *layer) {
   if (!layer) return false;
-  if (layer->set_z || layer->set_order || layer->set_alpha ||
-      layer->cell_span_count)
+  if (layer->set_z || layer->set_order || layer->set_alpha)
     return true;
+  return DioramaLayerOrder_VirtualLayerHasClassification(layer);
+}
+
+bool DioramaLayerOrder_VirtualLayerHasClassification(
+    const DioramaVirtualLayerOverride *layer) {
+  if (!layer) return false;
+  if (layer->cell_span_count) return true;
   for (size_t i = 0; i < sizeof(layer->metatile_set); i++)
     if (layer->metatile_set[i]) return true;
   return false;

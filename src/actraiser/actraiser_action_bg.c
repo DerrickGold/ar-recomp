@@ -68,7 +68,17 @@ typedef struct ActRaiserActionBgObserver {
 typedef struct ActRaiserActionBgProvider {
   const ActionBgWorld *world;
   const DioramaRoomOverride *virtual_room;
+  uint8_t *tile_band_cache;
+  size_t tile_band_capacity;
+  size_t tile_band_count;
+  const ActionBgWorld *tile_band_world;
+  uint64_t tile_band_rules_hash;
+  uint32_t tile_band_world_serial;
+  unsigned tile_band_width;
+  unsigned tile_band_height;
   bool wrap_world_x;
+  bool tile_band_cache_valid;
+  bool reported_tile_band_cache_failure;
   uint8_t layer;
 } ActRaiserActionBgProvider;
 
@@ -582,6 +592,14 @@ static void ResetWorlds(void) {
     s_observer.comparison_reported_outside_serial[layer] = 0;
     s_observer.room_scene_compared_serial[layer] = 0;
     s_observer.room_scene_stage_compared[layer] = false;
+    s_provider[layer].tile_band_count = 0;
+    s_provider[layer].tile_band_world = NULL;
+    s_provider[layer].tile_band_rules_hash = 0;
+    s_provider[layer].tile_band_world_serial = 0;
+    s_provider[layer].tile_band_width = 0;
+    s_provider[layer].tile_band_height = 0;
+    s_provider[layer].tile_band_cache_valid = false;
+    s_provider[layer].reported_tile_band_cache_failure = false;
   }
   s_observer.room_scene_valid = false;
   s_observer.room_scene_attempted = false;
@@ -961,16 +979,25 @@ void ActRaiserActionBg_BeginRoomSceneFrame(
    * another effect still owns channel 2. Match the complete raster DMA
    * contract—not only HDMAEN—before treating the frame as stable. This also
    * pins the non-default R7 `$6800` and R9 `$7000` table bases. */
-  if (s_observer.room_scene->raster_preset != kActionRoomRaster_None) {
+  if (s_observer.room_scene->raster_effect != kActionRoomRaster_None) {
     if (!dma) return;
     uint16_t table = 0x6000;
     uint8_t target = 0x0f;
     uint8_t mode = 2;
-    switch (s_observer.room_scene->raster_preset) {
-      case kActionRoomRaster_R3: target = 0x10; break;
-      case kActionRoomRaster_R4: target = 0x06; mode = 0; break;
-      case kActionRoomRaster_R7: table = 0x6800; break;
-      case kActionRoomRaster_R9: table = 0x7000; break;
+    switch (s_observer.room_scene->raster_effect) {
+      case kActionRoomRaster_Bg2VerticalRipple:
+        target = 0x10;
+        break;
+      case kActionRoomRaster_Bg2MosaicWave:
+        target = 0x06;
+        mode = 0;
+        break;
+      case kActionRoomRaster_Bg2AcceleratingWave:
+        table = 0x6800;
+        break;
+      case kActionRoomRaster_Bg2CameraParallaxBands:
+        table = 0x7000;
+        break;
       default: break;
     }
     const DmaChannel *channel = &dma->channel[2];
@@ -978,7 +1005,8 @@ void ActRaiserActionBg_BeginRoomSceneFrame(
         channel->mode != mode || channel->bAdr != target ||
         channel->aBank != 0x7e || channel->aAdr != table)
       return;
-    if (s_observer.room_scene->raster_preset == kActionRoomRaster_R10) {
+    if (s_observer.room_scene->raster_effect ==
+        kActionRoomRaster_DualBgOpposedWaves) {
       channel = &dma->channel[3];
       if (!channel->hdmaActive || channel->indirect ||
           channel->mode != 2 || channel->bAdr != 0x0d ||
@@ -1147,24 +1175,167 @@ static bool ProviderLookup(const void *context, int32_t tile_x,
   return false;
 }
 
+static uint64_t HashTileBandByte(uint64_t hash, uint8_t value) {
+  return (hash ^ value) * UINT64_C(1099511628211);
+}
+
+static uint64_t HashTileBandWord(uint64_t hash, uint16_t value) {
+  hash = HashTileBandByte(hash, (uint8_t)value);
+  return HashTileBandByte(hash, (uint8_t)(value >> 8));
+}
+
+/* Hash only classification fields. Geometry (z/order/alpha) can change
+ * without rebuilding the tile-indexed band cache. Explicit byte hashing also
+ * avoids depending on host padding or endianness. */
+static bool HashTileBandRules(const DioramaVirtualLayerOverride *layer,
+                              uint64_t *out_hash) {
+  if (!layer || !out_hash ||
+      layer->cell_span_count > kDioramaVirtualCellSpanMax)
+    return false;
+  uint64_t hash = UINT64_C(14695981039346656037);
+  for (size_t i = 0; i < sizeof(layer->metatile_set); i++)
+    hash = HashTileBandByte(hash, layer->metatile_set[i]);
+  for (size_t i = 0; i < sizeof(layer->metatile_bands); i++)
+    hash = HashTileBandByte(hash, layer->metatile_bands[i]);
+  hash = HashTileBandWord(hash, layer->cell_span_count);
+  for (size_t i = 0; i < layer->cell_span_count; i++) {
+    const DioramaVirtualCellSpan *span = &layer->cell_spans[i];
+    hash = HashTileBandWord(hash, span->x0);
+    hash = HashTileBandWord(hash, span->y0);
+    hash = HashTileBandWord(hash, span->x1);
+    hash = HashTileBandWord(hash, span->y1);
+    hash = HashTileBandByte(hash, span->band);
+  }
+  *out_hash = hash;
+  return true;
+}
+
+static bool CompileTileBandCache(ActRaiserActionBgProvider *provider) {
+  if (!provider || !provider->world || !provider->virtual_room ||
+      provider->layer >= kActionBgLayerCount)
+    return false;
+  const DioramaVirtualLayerOverride *layer =
+      &provider->virtual_room->virtual_layers[provider->layer];
+  if (!DioramaLayerOrder_VirtualLayerHasClassification(layer)) return false;
+
+  uint64_t rules_hash = 0;
+  if (!HashTileBandRules(layer, &rules_hash)) return false;
+  const uint32_t world_serial = ActionBgWorld_Serial(provider->world);
+  const unsigned tile_width = ActionBgWorld_TileWidth(provider->world);
+  const unsigned tile_height = ActionBgWorld_TileHeight(provider->world);
+  const size_t tile_count = ActionBgWorld_TileCount(provider->world);
+  if (!world_serial || !tile_width || !tile_height ||
+      tile_count != (size_t)tile_width * tile_height)
+    return false;
+  if (provider->tile_band_cache_valid &&
+      provider->tile_band_world == provider->world &&
+      provider->tile_band_world_serial == world_serial &&
+      provider->tile_band_rules_hash == rules_hash &&
+      provider->tile_band_width == tile_width &&
+      provider->tile_band_height == tile_height &&
+      provider->tile_band_count == tile_count) {
+    s_observer.diagnostics.provider_tile_band_cache_hits++;
+    return true;
+  }
+
+  if (tile_count > provider->tile_band_capacity) {
+    uint8_t *resized = realloc(provider->tile_band_cache, tile_count);
+    if (!resized) {
+      provider->tile_band_cache_valid = false;
+      return false;
+    }
+    provider->tile_band_cache = resized;
+    provider->tile_band_capacity = tile_count;
+  }
+
+  /* Start with the authentic priority split, then apply increasingly specific
+   * authored rules. Forward span application makes the newest (last) record
+   * win exactly as DioramaLayerOrder_VirtualBand does. */
+  for (unsigned tile_y = 0; tile_y < tile_height; tile_y++) {
+    for (unsigned tile_x = 0; tile_x < tile_width; tile_x++) {
+      uint16_t tile_word = 0;
+      if (ActionBgWorld_Lookup(provider->world, (int)tile_x, (int)tile_y,
+                               &tile_word) != kActionBgLookup_Tile) {
+        provider->tile_band_cache_valid = false;
+        return false;
+      }
+      provider->tile_band_cache[(size_t)tile_y * tile_width + tile_x] =
+          (tile_word & 0x2000u) ? 2 : 1;
+    }
+  }
+
+  for (unsigned cell_y = 0; cell_y < tile_height / 2u; cell_y++) {
+    for (unsigned cell_x = 0; cell_x < tile_width / 2u; cell_x++) {
+      uint8_t metatile = 0;
+      if (!ActionBgWorld_LookupMetatile(
+              provider->world, (int)(cell_x * 2u), (int)(cell_y * 2u),
+              &metatile)) {
+        provider->tile_band_cache_valid = false;
+        return false;
+      }
+      if (!(layer->metatile_set[metatile >> 3] &
+            (uint8_t)(1u << (metatile & 7u))))
+        continue;
+      const uint8_t band = layer->metatile_bands[metatile];
+      if (band >= kDioramaVirtualBandCount) {
+        provider->tile_band_cache_valid = false;
+        return false;
+      }
+      const size_t top_left =
+          (size_t)(cell_y * 2u) * tile_width + cell_x * 2u;
+      provider->tile_band_cache[top_left] = band;
+      provider->tile_band_cache[top_left + 1u] = band;
+      provider->tile_band_cache[top_left + tile_width] = band;
+      provider->tile_band_cache[top_left + tile_width + 1u] = band;
+    }
+  }
+
+  for (size_t i = 0; i < layer->cell_span_count; i++) {
+    const DioramaVirtualCellSpan *span = &layer->cell_spans[i];
+    if (span->band >= kDioramaVirtualBandCount || span->x1 < span->x0 ||
+        span->y1 < span->y0) {
+      provider->tile_band_cache_valid = false;
+      return false;
+    }
+    size_t tile_x0 = (size_t)span->x0 * 2u;
+    size_t tile_y0 = (size_t)span->y0 * 2u;
+    size_t tile_x1 = ((size_t)span->x1 + 1u) * 2u;
+    size_t tile_y1 = ((size_t)span->y1 + 1u) * 2u;
+    if (tile_x0 >= tile_width || tile_y0 >= tile_height) continue;
+    if (tile_x1 > tile_width) tile_x1 = tile_width;
+    if (tile_y1 > tile_height) tile_y1 = tile_height;
+    for (size_t tile_y = tile_y0; tile_y < tile_y1; tile_y++)
+      memset(provider->tile_band_cache + tile_y * tile_width + tile_x0,
+             span->band, tile_x1 - tile_x0);
+  }
+
+  provider->tile_band_count = tile_count;
+  provider->tile_band_world = provider->world;
+  provider->tile_band_rules_hash = rules_hash;
+  provider->tile_band_world_serial = world_serial;
+  provider->tile_band_width = tile_width;
+  provider->tile_band_height = tile_height;
+  provider->tile_band_cache_valid = true;
+  provider->reported_tile_band_cache_failure = false;
+  s_observer.diagnostics.provider_tile_band_cache_builds++;
+  return true;
+}
+
 static bool ProviderBandLookup(const void *context, int32_t tile_x,
                                int32_t tile_y, uint16_t entry,
                                uint8_t *band) {
   const ActRaiserActionBgProvider *provider = context;
-  if (!provider || !provider->world || !provider->virtual_room || !band ||
-      provider->layer >= kActionBgLayerCount ||
-      !DioramaLayerOrder_VirtualLayerIsAuthored(
-          &provider->virtual_room->virtual_layers[provider->layer]))
+  (void)entry;
+  if (!provider || !band || !provider->tile_band_cache_valid)
     return false;
   if (provider->wrap_world_x)
-    tile_x = WrapWorldTile(tile_x, ActionBgWorld_TileWidth(provider->world));
-  uint8_t metatile = 0;
-  if (!ActionBgWorld_LookupMetatile(
-          provider->world, tile_x, tile_y, &metatile))
+    tile_x = WrapWorldTile(tile_x, provider->tile_band_width);
+  if ((unsigned)tile_x >= provider->tile_band_width ||
+      (unsigned)tile_y >= provider->tile_band_height)
     return false;
-  *band = (uint8_t)DioramaLayerOrder_VirtualBand(
-      provider->virtual_room, provider->layer, tile_x >> 1, tile_y >> 1,
-      metatile, entry);
+  *band = provider->tile_band_cache[
+      (size_t)(unsigned)tile_y * provider->tile_band_width +
+      (unsigned)tile_x];
   return *band < kDioramaVirtualBandCount;
 }
 
@@ -1351,9 +1522,22 @@ uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
     s_provider[layer].virtual_room = virtual_room;
     s_provider[layer].wrap_world_x = layer_plan->wrap_world_x;
     s_provider[layer].layer = (uint8_t)layer;
+    const bool virtual_layer_classified = virtual_room &&
+        DioramaLayerOrder_VirtualLayerHasClassification(
+            &virtual_room->virtual_layers[layer]);
+    const bool tile_band_cache_ready =
+        virtual_layer_classified && CompileTileBandCache(&s_provider[layer]);
+    if (virtual_layer_classified && !tile_band_cache_ready &&
+        !s_provider[layer].reported_tile_band_cache_failure) {
+      fprintf(stderr,
+              "[action-bg-hle] map=%02X/%02X BG%u virtual-layer band "
+              "cache unavailable; using authentic priority bands\n",
+              map_group, map_number, layer + 1u);
+      s_provider[layer].reported_tile_band_cache_failure = true;
+    }
     const PpuVirtualTilemapBinding binding = {
       .lookup = ProviderLookup,
-      .band_lookup = ProviderBandLookup,
+      .band_lookup = tile_band_cache_ready ? ProviderBandLookup : NULL,
       .context = &s_provider[layer],
       .camera_x = snapshot.camera_x,
       .camera_y = snapshot.camera_y,
@@ -1529,7 +1713,8 @@ void ActRaiserActionBg_Shutdown(void) {
             ",mismatches:%" PRIu64 ",outside:%" PRIu64 "}"
             " eligible=%" PRIu64 " layers=%" PRIu64
             " lookups=%" PRIu64
-            " tiles=%" PRIu64 " outside=%" PRIu64 "\n",
+            " tiles=%" PRIu64 " outside=%" PRIu64
+            " band-cache={builds:%" PRIu64 ",hits:%" PRIu64 "}\n",
             s_observer.diagnostics.provider_frames,
             s_observer.diagnostics.provider_preflight_layers,
             s_observer.diagnostics.provider_preflight_tiles,
@@ -1539,7 +1724,9 @@ void ActRaiserActionBg_Shutdown(void) {
             s_observer.diagnostics.provider_layers,
             s_observer.diagnostics.provider_lookups,
             s_observer.diagnostics.provider_tiles,
-            s_observer.diagnostics.provider_outside_world);
+            s_observer.diagnostics.provider_outside_world,
+            s_observer.diagnostics.provider_tile_band_cache_builds,
+            s_observer.diagnostics.provider_tile_band_cache_hits);
   }
   if (s_observer.room_scene_compare_enabled > 0) {
     fprintf(stderr,
@@ -1615,6 +1802,7 @@ void ActRaiserActionBg_Shutdown(void) {
   for (unsigned layer = 0; layer < kActionBgLayerCount; layer++) {
     ActionBgWorld_Destroy(s_observer.provider_world[layer]);
     ActionBgWorld_Destroy(s_observer.comparison_world[layer]);
+    free(s_provider[layer].tile_band_cache);
   }
   free(s_observer.room_scene);
   memset(&s_observer, 0, sizeof(s_observer));

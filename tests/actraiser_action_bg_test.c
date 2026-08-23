@@ -1030,9 +1030,12 @@ static void TestVirtualLayerClassificationBinding(void) {
       (uint8_t)(1u << (metatile & 7));
   virtual_bg->metatile_bands[metatile] = 0;
   virtual_bg->cell_spans[0] = (DioramaVirtualCellSpan) {
-    .x0 = 1, .y0 = 0, .x1 = 1, .y1 = 0, .band = 2,
+    .x0 = 1, .y0 = 0, .x1 = 2, .y1 = 0, .band = 2,
   };
-  virtual_bg->cell_span_count = 1;
+  virtual_bg->cell_spans[1] = (DioramaVirtualCellSpan) {
+    .x0 = 1, .y0 = 0, .x1 = 1, .y1 = 0, .band = 0,
+  };
+  virtual_bg->cell_span_count = 2;
 
   CHECK(ActRaiserActionBg_BindPlanWithVirtualLayers(
       wram, kActRaiserWramSize, &plan, &room, ppu) ==
@@ -1047,11 +1050,34 @@ static void TestVirtualLayerClassificationBinding(void) {
       binding->context, 0, 0, entry, &band) && band == 0);
   CHECK(binding->lookup(binding->context, 2, 0, &entry));
   CHECK(binding->band_lookup(
-      binding->context, 2, 0, entry, &band) && band == 2);
+      binding->context, 2, 0, entry, &band) && band == 0);
   CHECK(binding->lookup(binding->context, 4, 0, &entry));
   CHECK(binding->band_lookup(
-      binding->context, 4, 0, entry, &band) &&
+      binding->context, 4, 0, entry, &band) && band == 2);
+  CHECK(binding->lookup(binding->context, 6, 0, &entry));
+  CHECK(binding->band_lookup(
+      binding->context, 6, 0, entry, &band) &&
       band == ((entry & 0x2000) ? 2 : 1));
+
+  const ActRaiserActionBgDiagnostics *diagnostics =
+      ActRaiserActionBg_GetDiagnostics();
+  CHECK(diagnostics->provider_tile_band_cache_builds == 1);
+  CHECK(ActRaiserActionBg_BindPlanWithVirtualLayers(
+      wram, kActRaiserWramSize, &plan, &room, ppu) ==
+      kActRaiserBgLayerMask_Bg1);
+  CHECK(diagnostics->provider_tile_band_cache_hits == 1);
+
+  /* Live editor changes can reuse the same room address. The classification
+   * hash must rebuild the cache even when the finite world serial is stable. */
+  virtual_bg->metatile_bands[metatile] = 2;
+  CHECK(ActRaiserActionBg_BindPlanWithVirtualLayers(
+      wram, kActRaiserWramSize, &plan, &room, ppu) ==
+      kActRaiserBgLayerMask_Bg1);
+  binding = &ppu->virtualTilemap[0];
+  CHECK(binding->lookup(binding->context, 0, 0, &entry));
+  CHECK(binding->band_lookup(
+      binding->context, 0, 0, entry, &band) && band == 2);
+  CHECK(diagnostics->provider_tile_band_cache_builds == 2);
 
   ActionBgWorld_Destroy(reference);
   ActRaiserActionBg_Shutdown();

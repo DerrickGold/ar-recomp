@@ -6,6 +6,7 @@
 #include <stdlib.h>
 
 #include "actraiser/actraiser_lzss.h"
+#include "actraiser_action_room_hle_internal.h"
 #include "actraiser_game.h"
 
 enum {
@@ -32,36 +33,9 @@ typedef struct ActionRoomGraphicsDiagnostics {
 
 static ActionRoomGraphicsDiagnostics s_diagnostics;
 
-static uint8_t ReadDp8(CpuState *cpu, uint16_t offset) {
-  return cpu_read8(cpu, kSnesLowWramBank,
-                   (uint16_t)(cpu->D + offset));
-}
-
-static uint16_t ReadDp16(CpuState *cpu, uint16_t offset) {
-  return cpu_read16(cpu, kSnesLowWramBank,
-                    (uint16_t)(cpu->D + offset));
-}
-
-static void WriteDp8(CpuState *cpu, uint16_t offset, uint8_t value) {
-  cpu_write8(cpu, kSnesLowWramBank,
-             (uint16_t)(cpu->D + offset), value);
-}
-
-static void WriteDp16(CpuState *cpu, uint16_t offset, uint16_t value) {
-  cpu_write16(cpu, kSnesLowWramBank,
-              (uint16_t)(cpu->D + offset), value);
-}
-
-static uint8_t ReadLongIndexed(CpuState *cpu, uint16_t pointer,
-                               uint16_t index) {
-  const uint32_t base = (uint32_t)ReadDp16(cpu, pointer) |
-      ((uint32_t)ReadDp8(cpu, (uint16_t)(pointer + 2u)) << 16);
-  const uint32_t address = (base + index) & 0xFFFFFFu;
-  return cpu_read8(cpu, (uint8_t)(address >> 16), (uint16_t)address);
-}
-
 static uint8_t PeekOperand(CpuState *cpu, unsigned operand) {
-  return ReadLongIndexed(cpu, kDpScript, (uint16_t)(cpu->Y + operand));
+  return ActionRoomHle_ReadLongIndexed(
+      cpu, kDpScript, (uint16_t)(cpu->Y + operand));
 }
 
 static uint8_t ReadOperand(CpuState *cpu) {
@@ -139,26 +113,14 @@ static void RequireEntryMode(CpuState *cpu, const char *routine) {
   abort();
 }
 
-static void PushWord(CpuState *cpu, uint16_t value) {
-  cpu->S = (uint16_t)(cpu->S - 1u);
-  cpu_write16(cpu, 0x00, cpu->S, value);
-  cpu->S = (uint16_t)(cpu->S - 1u);
-}
-
-static uint16_t PopWord(CpuState *cpu) {
-  cpu->S = (uint16_t)(cpu->S + 1u);
-  const uint16_t value = cpu_read16(cpu, 0x00, cpu->S);
-  cpu->S = (uint16_t)(cpu->S + 1u);
-  return value;
-}
-
 static uint32_t ReadLinearPointer(CpuState *cpu) {
   const uint32_t linear = (uint32_t)ReadOperand(cpu) |
       ((uint32_t)ReadOperand(cpu) << CHAR_BIT) |
       ((uint32_t)ReadOperand(cpu) << (CHAR_BIT * 2));
   const uint32_t source = LinearToSnes(linear);
-  WriteDp16(cpu, kDpSource, (uint16_t)source);
-  WriteDp8(cpu, kDpSourceBank, (uint8_t)(source >> 16));
+  ActionRoomHle_WriteDirectPage16(cpu, kDpSource, (uint16_t)source);
+  ActionRoomHle_WriteDirectPage8(
+      cpu, kDpSourceBank, (uint8_t)(source >> 16));
   /* $02:B4C0 returns the masked middle linear-address byte in A. This only
    * survives command 6's 8-bit copy as its (zero) accumulator high byte. */
   cpu->A = (uint16_t)((linear >> CHAR_BIT) & 0x7Fu);
@@ -167,8 +129,9 @@ static uint32_t ReadLinearPointer(CpuState *cpu) {
 }
 
 static void AdvanceSource(CpuState *cpu, uint16_t bytes) {
-  WriteDp16(cpu, kDpSource,
-            (uint16_t)(ReadDp16(cpu, kDpSource) + bytes));
+  ActionRoomHle_WriteDirectPage16(
+      cpu, kDpSource,
+      (uint16_t)(ActionRoomHle_ReadDirectPage16(cpu, kDpSource) + bytes));
 }
 
 static void SetAccumulator16(CpuState *cpu) {
@@ -227,11 +190,11 @@ RecompReturn ActRaiser_LoadActionCharacters(CpuState *cpu) {
 
   const uint16_t source_begin = (uint16_t)((unsigned)ReadOperand(cpu) << 8);
   const uint16_t copy_bytes = (uint16_t)((unsigned)ReadOperand(cpu) << 9);
-  WriteDp16(cpu, kDpUploadBegin, source_begin);
-  WriteDp16(cpu, kDpUploadEnd, copy_bytes);
+  ActionRoomHle_WriteDirectPage16(cpu, kDpUploadBegin, source_begin);
+  ActionRoomHle_WriteDirectPage16(cpu, kDpUploadEnd, copy_bytes);
 
   const uint16_t destination = ReadOperand(cpu);
-  PushWord(cpu, destination);
+  ActionRoomHle_PushStackWord(cpu, destination);
   cpu_write16(cpu, cpu->DB, kPpuVramAddress,
               (uint16_t)(destination << 8));
   cpu->X = kDpSource;
@@ -241,15 +204,17 @@ RecompReturn ActRaiser_LoadActionCharacters(CpuState *cpu) {
    * Native reads the decompressed byte count from the asset header, advances
    * the mapped source by two, and expands through the shared WRAM workspace. */
   const uint16_t output_size = cpu_read16(
-      cpu, ReadDp8(cpu, kDpSourceBank), ReadDp16(cpu, kDpSource));
-  WriteDp16(cpu, kDpOutputSize, output_size);
+      cpu, ActionRoomHle_ReadDirectPage8(cpu, kDpSourceBank),
+      ActionRoomHle_ReadDirectPage16(cpu, kDpSource));
+  ActionRoomHle_WriteDirectPage16(cpu, kDpOutputSize, output_size);
   AdvanceSource(cpu, 2);
   cpu->X = kCharacterWorkspace;
-  WriteDp16(cpu, kDpOutputAddress, kCharacterWorkspace);
+  ActionRoomHle_WriteDirectPage16(
+      cpu, kDpOutputAddress, kCharacterWorkspace);
   const RecompReturn decompressed = CallLzss(cpu, 0xB2FE);
   if (decompressed != RECOMP_RETURN_NORMAL) return decompressed;
 
-  (void)PopWord(cpu);
+  (void)ActionRoomHle_PopStackWord(cpu);
   cpu->X = source_begin;
   while (cpu->X != copy_bytes) {
     cpu->A = cpu_read16(
@@ -278,8 +243,8 @@ RecompReturn ActRaiser_LoadActionPalette(CpuState *cpu) {
 
   const uint16_t source_begin = (uint16_t)((unsigned)ReadOperand(cpu) * 2u);
   const uint16_t source_end = (uint16_t)((unsigned)ReadOperand(cpu) * 2u);
-  WriteDp16(cpu, kDpUploadBegin, source_begin);
-  WriteDp16(cpu, kDpUploadEnd, source_end);
+  ActionRoomHle_WriteDirectPage16(cpu, kDpUploadBegin, source_begin);
+  ActionRoomHle_WriteDirectPage16(cpu, kDpUploadEnd, source_end);
   const uint8_t destination = ReadOperand(cpu);
   SetAccumulator8(cpu);
   cpu_write8(cpu, cpu->DB, kPpuCgramAddress, destination);
@@ -287,17 +252,19 @@ RecompReturn ActRaiser_LoadActionPalette(CpuState *cpu) {
   cpu->X = kDpSource;
   (void)ReadLinearPointer(cpu);
   const uint16_t script_y = cpu->Y;
-  PushWord(cpu, script_y); /* PHY */
+  ActionRoomHle_PushStackWord(cpu, script_y); /* PHY */
   cpu->Y = source_begin;
   while (cpu->Y != source_end) {
-    const uint8_t low = ReadLongIndexed(cpu, kDpSource, cpu->Y++);
+    const uint8_t low =
+        ActionRoomHle_ReadLongIndexed(cpu, kDpSource, cpu->Y++);
     cpu->A = (uint16_t)((cpu->A & 0xFF00u) | low);
     cpu_write8(cpu, cpu->DB, kPpuCgramData, low);
-    const uint8_t high = ReadLongIndexed(cpu, kDpSource, cpu->Y++);
+    const uint8_t high =
+        ActionRoomHle_ReadLongIndexed(cpu, kDpSource, cpu->Y++);
     cpu->A = (uint16_t)((cpu->A & 0xFF00u) | high);
     cpu_write8(cpu, cpu->DB, kPpuCgramData, high);
   }
-  cpu->Y = PopWord(cpu); /* PLY */
+  cpu->Y = ActionRoomHle_PopStackWord(cpu); /* PLY */
 
   RestoreStatus(cpu, saved_p);
   cpu->S = (uint16_t)(cpu->S + 1u + k65816RtsStackBytes);

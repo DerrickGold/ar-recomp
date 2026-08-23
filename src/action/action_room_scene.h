@@ -19,10 +19,11 @@ enum {
   kActionRoomSceneVideoProfileBytes = 28,
   kActionRoomSceneAnimationWindowBytes = 0x1000,
   kActionRoomSceneRasterWaveformBytes = 0x0100,
-  /* R4 accidentally forms a 16-bit waveform index after writing only its low
-   * byte. Action mode leaves the inherited high byte at one, so the native
-   * routine samples the following 256-byte ROM window instead. */
-  kActionRoomSceneRasterR4WindowBytes = 0x0100,
+  /* The BG2 mosaic-wave effect (ROM research label R4) accidentally forms a
+   * 16-bit waveform index after writing only its low byte. Action mode leaves
+   * the inherited high byte at one, so the native routine samples the
+   * following 256-byte ROM window instead. */
+  kActionRoomSceneRasterMosaicWaveWindowBytes = 0x0100,
   /* Compressed character uploads are staged here before VRAM DMA. Raster
    * builders reuse the same WRAM range and deliberately leave selected HDMA
    * bytes untouched, so the last upload is part of the stable room image. */
@@ -36,19 +37,21 @@ enum {
   kActionRoomSceneBg2AttributeByte = 0x01,
 };
 
-typedef enum ActionRoomRasterPreset {
+/* Persistent action-room HDMA effects. Explicit numeric values preserve the
+ * exporter schema and the R1-R10 labels used in ROM research documents. */
+typedef enum ActionRoomRasterEffect {
   kActionRoomRaster_None = 0,
-  kActionRoomRaster_R1,
-  kActionRoomRaster_R2,
-  kActionRoomRaster_R3,
-  kActionRoomRaster_R4,
-  kActionRoomRaster_R5,
-  kActionRoomRaster_R6,
-  kActionRoomRaster_R7,
-  kActionRoomRaster_R8,
-  kActionRoomRaster_R9,
-  kActionRoomRaster_R10,
-} ActionRoomRasterPreset;
+  kActionRoomRaster_Bg2WaveWithFrame = 1,        /* R1 */
+  kActionRoomRaster_Bg2LowerPerspective = 2,     /* R2 */
+  kActionRoomRaster_Bg2VerticalRipple = 3,       /* R3 */
+  kActionRoomRaster_Bg2MosaicWave = 4,           /* R4 */
+  kActionRoomRaster_Bg2LayeredParallax = 5,      /* R5 */
+  kActionRoomRaster_Bg2ParallaxPerspective = 6,  /* R6 */
+  kActionRoomRaster_Bg2AcceleratingWave = 7,     /* R7 */
+  kActionRoomRaster_Bg2OpposingBandMotion = 8,   /* R8 */
+  kActionRoomRaster_Bg2CameraParallaxBands = 9,  /* R9 */
+  kActionRoomRaster_DualBgOpposedWaves = 10,     /* R10 */
+} ActionRoomRasterEffect;
 
 typedef struct ActionRoomSceneBg {
   uint8_t metatiles[kActionRoomSceneMetatileBytes];
@@ -69,17 +72,18 @@ typedef struct ActionRoomScene {
   ActionRoomSceneBg bg[kActionRoomSceneBgCount];
   uint8_t video_profile[kActionRoomSceneVideoProfileBytes];
   uint8_t raster_waveform[kActionRoomSceneRasterWaveformBytes];
-  uint8_t raster_r4_window[kActionRoomSceneRasterR4WindowBytes];
+  uint8_t raster_mosaic_wave_window[
+      kActionRoomSceneRasterMosaicWaveWindowBytes];
   uint8_t raster_workspace[kActionRoomSceneRasterWorkspaceBytes];
   uint8_t video_profile_index;
   uint16_t raster_entry_camera_x;
-  ActionRoomRasterPreset raster_preset;
+  ActionRoomRasterEffect raster_effect;
   bool have_character_bank[2];
   bool have_extra_characters;
   bool have_palette;
   bool have_video_profile;
   bool have_raster_waveform;
-  bool have_raster_r4_window;
+  bool have_raster_mosaic_wave_window;
   bool have_raster_workspace;
   /* The level bootstrap can build one visible table before it installs the
    * settled camera. Natural entry fixtures pin that transient input. */
@@ -105,8 +109,8 @@ typedef struct ActionRoomSceneFrameRequest {
    * Heim's post-boss sky-page handoff. Bits select BG1/BG2 respectively. */
   uint8_t bgsc_override_mask;
   uint8_t bgsc_override[kActionRoomSceneBgCount];
-  /* The first visible R4 scanout retains the flat table produced while its
-   * scratch high byte still belongs to the preceding room. */
+  /* The first visible mosaic-wave (R4) scanout retains the flat table produced
+   * while its scratch high byte still belongs to the preceding room. */
   bool raster_entry_frame;
 } ActionRoomSceneFrameRequest;
 
@@ -134,7 +138,7 @@ typedef struct ActionRoomSceneFrameState {
   uint8_t animation_phase;
   uint8_t bg2_page_phase;
   uint8_t bg2_page_index;
-  ActionRoomRasterPreset raster_preset;
+  ActionRoomRasterEffect raster_effect;
 } ActionRoomSceneFrameState;
 
 /* Replays the cumulative action asset script through the selected room and

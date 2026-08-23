@@ -12,7 +12,7 @@ enum {
   kAssetScriptEnd = 0x06 * 0x8000,
   kVideoProfileBase = 0x02 * 0x8000 + 0x093E,
   kRasterWaveformBase = 0x02 * 0x8000 + 0x16D4,
-  kRasterR4WindowBase = kRasterWaveformBase +
+  kRasterMosaicWaveWindowBase = kRasterWaveformBase +
       kActionRoomSceneRasterWaveformBytes,
   kCharacterBankBytes = 0x2000,
   kCharacterVramBytes = kCharacterBankBytes * 2,
@@ -120,21 +120,28 @@ static bool ApplyCommand(ActionRoomScene *scene,
   return true;
 }
 
-static ActionRoomRasterPreset RasterPresetForRoom(uint8_t group,
-                                                   uint8_t map) {
-  if (group == 0x01 && map == 0x04) return kActionRoomRaster_R1;
-  if (group == 0x02 && map == 0x01) return kActionRoomRaster_R2;
+static ActionRoomRasterEffect RasterEffectForRoom(uint8_t group,
+                                                  uint8_t map) {
+  if (group == 0x01 && map == 0x04)
+    return kActionRoomRaster_Bg2WaveWithFrame;
+  if (group == 0x02 && map == 0x01)
+    return kActionRoomRaster_Bg2LowerPerspective;
   if (group == 0x02 && (map == 0x02 || map == 0x03))
-    return kActionRoomRaster_R3;
-  if (group == 0x04 && map == 0x05) return kActionRoomRaster_R4;
-  if (group == 0x04 && map == 0x01) return kActionRoomRaster_R5;
+    return kActionRoomRaster_Bg2VerticalRipple;
+  if (group == 0x04 && map == 0x05)
+    return kActionRoomRaster_Bg2MosaicWave;
+  if (group == 0x04 && map == 0x01)
+    return kActionRoomRaster_Bg2LayeredParallax;
   if (group == 0x06 && (map == 0x01 || map == 0x05))
-    return kActionRoomRaster_R6;
-  if (group == 0x06 && map == 0x08) return kActionRoomRaster_R7;
-  if (group == 0x07 && map == 0x01) return kActionRoomRaster_R8;
+    return kActionRoomRaster_Bg2ParallaxPerspective;
+  if (group == 0x06 && map == 0x08)
+    return kActionRoomRaster_Bg2AcceleratingWave;
+  if (group == 0x07 && map == 0x01)
+    return kActionRoomRaster_Bg2OpposingBandMotion;
   if (group == 0x07 && map >= 0x02 && map <= 0x07)
-    return kActionRoomRaster_R9;
-  if (group == 0x07 && map == 0x08) return kActionRoomRaster_R10;
+    return kActionRoomRaster_Bg2CameraParallaxBands;
+  if (group == 0x07 && map == 0x08)
+    return kActionRoomRaster_DualBgOpposedWaves;
   return kActionRoomRaster_None;
 }
 
@@ -162,7 +169,7 @@ bool ActionRoomScene_Load(ActionRoomScene *scene,
   memset(scene, 0, sizeof(*scene));
   scene->group = group;
   scene->map = map;
-  scene->raster_preset = RasterPresetForRoom(group, map);
+  scene->raster_effect = RasterEffectForRoom(group, map);
   scene->have_raster_entry_camera_x = RasterEntryCameraForRoom(
       group, map, &scene->raster_entry_camera_x);
   if (!rom || !ActRaiser_IsActionMap(group, map) ||
@@ -199,12 +206,14 @@ bool ActionRoomScene_Load(ActionRoomScene *scene,
   memcpy(scene->raster_waveform, rom + kRasterWaveformBase,
          kActionRoomSceneRasterWaveformBytes);
   scene->have_raster_waveform = true;
-  if (kRasterR4WindowBase > rom_size ||
-      kActionRoomSceneRasterR4WindowBytes > rom_size - kRasterR4WindowBase)
+  if (kRasterMosaicWaveWindowBase > rom_size ||
+      kActionRoomSceneRasterMosaicWaveWindowBytes >
+          rom_size - kRasterMosaicWaveWindowBase)
     return false;
-  memcpy(scene->raster_r4_window, rom + kRasterR4WindowBase,
-         kActionRoomSceneRasterR4WindowBytes);
-  scene->have_raster_r4_window = true;
+  memcpy(scene->raster_mosaic_wave_window,
+         rom + kRasterMosaicWaveWindowBase,
+         kActionRoomSceneRasterMosaicWaveWindowBytes);
+  scene->have_raster_mosaic_wave_window = true;
   if (scene->have_video_profile) {
     const size_t offset = kVideoProfileBase +
         (size_t)scene->video_profile_index * kActionRoomSceneVideoProfileBytes;
@@ -478,8 +487,8 @@ static void BuildRasterScroll(const ActionRoomScene *scene,
     .held = state->bg_vscroll[1][0],
   };
 
-  switch (scene->raster_preset) {
-    case kActionRoomRaster_R1: {
+  switch (scene->raster_effect) {
+    case kActionRoomRaster_Bg2WaveWithFrame: {
       uint8_t phase = (uint8_t)(frame >> 1);
       for (unsigned i = 0; i < 0x6f; i++) {
         const uint8_t value = (uint8_t)(
@@ -490,7 +499,7 @@ static void BuildRasterScroll(const ActionRoomScene *scene,
       RasterFinish16(&bg2);
       break;
     }
-    case kActionRoomRaster_R2: {
+    case kActionRoomRaster_Bg2LowerPerspective: {
       RasterWrite16(&bg2, 0x7f, 0);
       const uint16_t step = (uint16_t)((frame + camera_x) << 1);
       uint16_t value = step;
@@ -505,7 +514,7 @@ static void BuildRasterScroll(const ActionRoomScene *scene,
       RasterFinish16(&bg2);
       break;
     }
-    case kActionRoomRaster_R3: {
+    case kActionRoomRaster_Bg2VerticalRipple: {
       RasterWrite16(&bg2v, 0x7f,
                     ResolveInheritedMode2(scene, 2u, 0));
       uint8_t value = (uint8_t)frame;
@@ -521,7 +530,7 @@ static void BuildRasterScroll(const ActionRoomScene *scene,
       RasterFinish16(&bg2v);
       break;
     }
-    case kActionRoomRaster_R4: {
+    case kActionRoomRaster_Bg2MosaicWave: {
       if (request->raster_entry_frame) {
         memset(state->mosaic, 0x02, sizeof(state->mosaic));
         break;
@@ -538,7 +547,8 @@ static void BuildRasterScroll(const ActionRoomScene *scene,
          * action mode, selecting `$02:97D4+phase` rather than the nominal
          * `$02:96D4` waveform page. Preserve that original-ROM quirk in the
          * standalone scene model instead of depending on live scratch WRAM. */
-        held = (uint8_t)((scene->raster_r4_window[phase++] << 4) & 0x10) |
+        held = (uint8_t)(
+            (scene->raster_mosaic_wave_window[phase++] << 4) & 0x10) |
             0x02;
         for (unsigned repeat = 0; repeat < 2; repeat++)
           if (line < kActionRoomSceneFrameHeight)
@@ -548,7 +558,7 @@ static void BuildRasterScroll(const ActionRoomScene *scene,
         state->mosaic[line++] = held;
       break;
     }
-    case kActionRoomRaster_R5: {
+    case kActionRoomRaster_Bg2LayeredParallax: {
       uint16_t value = (uint16_t)((frame << 1) + (camera_x >> 1));
       RasterWrite16(&bg2, 0x3f, value);
       value >>= 1;
@@ -566,7 +576,7 @@ static void BuildRasterScroll(const ActionRoomScene *scene,
       RasterFinish16(&bg2);
       break;
     }
-    case kActionRoomRaster_R6: {
+    case kActionRoomRaster_Bg2ParallaxPerspective: {
       uint16_t value = (uint16_t)((frame << 2) + (camera_x >> 1));
       RasterWrite16(&bg2, 0x1e, value);
       value >>= 1;
@@ -588,7 +598,7 @@ static void BuildRasterScroll(const ActionRoomScene *scene,
       RasterFinish16(&bg2);
       break;
     }
-    case kActionRoomRaster_R7: {
+    case kActionRoomRaster_Bg2AcceleratingWave: {
       uint8_t phase = (uint8_t)(frame >> 1);
       uint8_t step = 1;
       for (unsigned i = 0; i < 0x6f; i++) {
@@ -601,7 +611,7 @@ static void BuildRasterScroll(const ActionRoomScene *scene,
       RasterFinish16(&bg2);
       break;
     }
-    case kActionRoomRaster_R8: {
+    case kActionRoomRaster_Bg2OpposingBandMotion: {
       const uint16_t reverse = (uint16_t)(0u - frame);
       RasterWrite16(&bg2, 0x4f, 0);
       RasterWrite16(&bg2, 0x40, 0);
@@ -618,14 +628,14 @@ static void BuildRasterScroll(const ActionRoomScene *scene,
       RasterFinish16(&bg2);
       break;
     }
-    case kActionRoomRaster_R9:
+    case kActionRoomRaster_Bg2CameraParallaxBands:
       RasterWrite16(&bg2, 0x4f,
                     ResolveInheritedMode2(scene, 0x1002u, 0));
       RasterWrite16(&bg2, 0x40, camera_x >> 2);
       RasterWrite16(&bg2, 0x60, camera_x >> 1);
       RasterFinish16(&bg2);
       break;
-    case kActionRoomRaster_R10: {
+    case kActionRoomRaster_DualBgOpposedWaves: {
       uint8_t phase = (uint8_t)(frame >> 1);
       for (unsigned i = 0; i < 0x6f; i++) {
         const uint8_t wave = scene->raster_waveform[phase++];
@@ -652,8 +662,8 @@ bool ActionRoomScene_BuildFrameState(
     ActionRoomSceneFrameState *state) {
   if (!scene || !request || !state || !scene->have_video_profile ||
       !scene->have_raster_waveform ||
-      (scene->raster_preset == kActionRoomRaster_R4 &&
-       !scene->have_raster_r4_window) || request->camera_x < 0 ||
+      (scene->raster_effect == kActionRoomRaster_Bg2MosaicWave &&
+       !scene->have_raster_mosaic_wave_window) || request->camera_x < 0 ||
       request->camera_y < 0)
     return false;
   memset(state, 0, sizeof(*state));
@@ -673,12 +683,12 @@ bool ActionRoomScene_BuildFrameState(
    * one-page BG2 at $7000, and the final arena likewise collapses its
    * provisional profile-$2E BG2 size after the first setup frame. */
   if (!request->raster_entry_frame &&
-      (scene->raster_preset == kActionRoomRaster_R9 ||
-       scene->raster_preset == kActionRoomRaster_R10))
+      (scene->raster_effect == kActionRoomRaster_Bg2CameraParallaxBands ||
+       scene->raster_effect == kActionRoomRaster_DualBgOpposedWaves))
     state->bgsc[1] = 0x70;
   state->bgmode = scene->video_profile[6];
   state->brightness = 15;
-  state->raster_preset = scene->raster_preset;
+  state->raster_effect = scene->raster_effect;
   state->animation_phase = (uint8_t)
       ActionRoomScene_ResolveCharacterAnimationPhase(
           scene, request->game_frame, request->animation_phase);
