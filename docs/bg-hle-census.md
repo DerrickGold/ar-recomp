@@ -182,6 +182,26 @@ Commands 2/1/0, gameplay staging, actors, callbacks and the enclosing command
 VM remain native. This is presentation bootstrap HLE, not complete gameplay
 HLE.
 
+Natural boss-room acceptance extends that ordinary-entry matrix with R1. The
+recording `saves/fillmore-r1-natural.rec` (SHA-256
+`90a16a09d014c1630ddebc6017ae8857072286061ed24094e831f8b10fd4bbb1`) uses
+the unchanged `saves/save.srm` seed (SHA-256
+`56aa0b7ea4b4e478a6164a592b06b62e4ad03a4c40d19e06ce6d61155f900134`) and
+naturally traverses `0102 -> 0103 -> 0104` through the Fillmore boss defeat.
+Manual capture `runs/20260822-170359/` and headless replay
+`runs/20260822-170748/` have byte-identical final WRAM, SRAM, dispatch and
+complete state. Across the route, the room oracle compares 7,278,663 registers
+with zero mismatch; the 621 R1 frames account for 701,109 of them.
+
+The same-replay default-HLE run `runs/20260822-170853/` and commands-7-through-3
+plus immutable-source-off control `runs/20260822-170914/` capture game frame
+7000 inside `0104`. All 11 comparable artifacts are byte-identical:
+framebuffer; snapshot WRAM, VRAM, CGRAM, OAM, high OAM and PPU registers; and
+final WRAM, SRAM, dispatch and complete state. The control additionally
+compares the complete 2,048-tile profile-$06 BG1 publication with zero
+mismatch. R1 is therefore promoted to the live raster set; natural-entry
+fixtures remain for R4/R7/R8/R10.
+
 ## What this does not prove
 
 This is an entry census, not the complete BH1 gate:
