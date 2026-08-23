@@ -19,6 +19,10 @@ enum {
   kActionRoomSceneVideoProfileBytes = 28,
   kActionRoomSceneAnimationWindowBytes = 0x1000,
   kActionRoomSceneRasterWaveformBytes = 0x0100,
+  /* R4 accidentally forms a 16-bit waveform index after writing only its low
+   * byte. Action mode leaves the inherited high byte at one, so the native
+   * routine samples the following 256-byte ROM window instead. */
+  kActionRoomSceneRasterR4WindowBytes = 0x0100,
   /* Compressed character uploads are staged here before VRAM DMA. Raster
    * builders reuse the same WRAM range and deliberately leave selected HDMA
    * bytes untouched, so the last upload is part of the stable room image. */
@@ -65,6 +69,7 @@ typedef struct ActionRoomScene {
   ActionRoomSceneBg bg[kActionRoomSceneBgCount];
   uint8_t video_profile[kActionRoomSceneVideoProfileBytes];
   uint8_t raster_waveform[kActionRoomSceneRasterWaveformBytes];
+  uint8_t raster_r4_window[kActionRoomSceneRasterR4WindowBytes];
   uint8_t raster_workspace[kActionRoomSceneRasterWorkspaceBytes];
   uint8_t video_profile_index;
   ActionRoomRasterPreset raster_preset;
@@ -73,6 +78,7 @@ typedef struct ActionRoomScene {
   bool have_palette;
   bool have_video_profile;
   bool have_raster_waveform;
+  bool have_raster_r4_window;
   bool have_raster_workspace;
 } ActionRoomScene;
 
@@ -90,6 +96,9 @@ typedef struct ActionRoomSceneFrameRequest {
   int animation_phase;
   int page_phase;
   bool have_raster_camera_x;
+  /* The first visible R4 scanout retains the flat table produced while its
+   * scratch high byte still belongs to the preceding room. */
+  bool raster_entry_frame;
 } ActionRoomSceneFrameRequest;
 
 /* Fully resolved stable-room PPU state. The scanline arrays contain the

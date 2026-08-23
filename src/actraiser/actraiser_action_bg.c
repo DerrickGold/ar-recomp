@@ -49,6 +49,7 @@ typedef struct ActRaiserActionBgObserver {
   bool previous_room_frame_valid;
   bool room_frame_uses_previous;
   bool room_camera_valid;
+  bool room_scene_entry_frame;
   bool reported_room_frame_mismatch;
   bool reported_room_scene_hle_fallback[kActionBgLayerCount];
   bool forced_blank;
@@ -553,6 +554,7 @@ bool ActRaiserActionBg_InitRoomScenes(const uint8_t *rom, size_t rom_size) {
   s_observer.previous_room_frame_valid = false;
   s_observer.room_frame_uses_previous = false;
   s_observer.room_camera_valid = false;
+  s_observer.room_scene_entry_frame = false;
   s_observer.reported_room_frame_mismatch = false;
   memset(s_observer.reported_room_scene_hle_fallback, 0,
          sizeof(s_observer.reported_room_scene_hle_fallback));
@@ -928,6 +930,7 @@ static bool SyncFrameIdentity(const uint8_t *wram, size_t wram_size) {
       s_observer.map_group != map_group ||
       s_observer.map_number != map_number;
   if (new_map || backwards) ResetWorlds();
+  if (new_map) s_observer.room_scene_entry_frame = true;
   s_observer.map_group = map_group;
   s_observer.map_number = map_number;
   s_observer.map_valid = true;
@@ -993,10 +996,12 @@ void ActRaiserActionBg_BeginRoomSceneFrame(
     .animation_phase = -1,
     .page_phase = -1,
     .have_raster_camera_x = true,
+    .raster_entry_frame = s_observer.room_scene_entry_frame,
   };
   if (!ActionRoomScene_BuildFrameState(
           s_observer.room_scene, &request, &s_observer.room_frame))
     return;
+  s_observer.room_scene_entry_frame = false;
   s_observer.room_frame_current_camera_x = camera_x;
   s_observer.room_frame_raster_camera_x = raster_camera_x;
   s_observer.room_frame_prior_camera_x = s_observer.room_camera_valid

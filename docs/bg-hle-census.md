@@ -200,7 +200,27 @@ framebuffer; snapshot WRAM, VRAM, CGRAM, OAM, high OAM and PPU registers; and
 final WRAM, SRAM, dispatch and complete state. The control additionally
 compares the complete 2,048-tile profile-$06 BG1 publication with zero
 mismatch. R1 is therefore promoted to the live raster set; natural-entry
-fixtures remain for R4/R7/R8/R10.
+fixtures remain for R7/R8/R10.
+
+Natural Aitos acceptance promotes R4 as well. Recording
+`saves/aitos-r4-natural.rec` (SHA-256
+`bd1e7b576e0c11529844175173ee16127a3a9781af021105f66b978d6b7509e4`) uses
+boot SRAM SHA-256
+`11dcdfb6c28cbf97f4ccd5f3c8ba1cf831f1864d029d6f8aaf67ad962ab79858`
+and traverses `0404 -> 0405 -> 0406 -> 0407`. Manual capture
+`runs/20260822-171954/` and deterministic replay `runs/20260822-173608/`
+match final WRAM, SRAM, dispatch log, and complete state byte-for-byte. The
+route compares 3,353 action frames / 3,785,537 registers with zero mismatch;
+222 `0405` frames contribute 250,638 exact R4 comparisons. Both arms pin
+`AR_MOONJUMP=1`, `AR_NO_KNOCKBACK=1`, and `AR_RANGED_SWORD=1`, because the
+gameplay-assist profile is part of deterministic fixture provenance. The run
+also exposed and now pins R4's low-byte-only phase, inherited source page, and
+flat first visible MOSAIC table. Default-HLE run `runs/20260822-174151/` and
+commands-7-through-3 plus immutable-source-off control
+`runs/20260822-174203/` capture game frame 2700 inside `0405`; all 11
+framebuffer, PPU snapshot, and final-state artifacts are byte-identical. The
+control additionally compares all seven published route layers / 86,016 tiles
+with zero mismatch.
 
 ## What this does not prove
 
