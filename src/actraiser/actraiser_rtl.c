@@ -67,6 +67,94 @@ enum {
   kRdnmiRepeatedReadWarningThreshold = 4096,
 };
 
+/* Developer-only environment controls are immutable for a game process. Keep
+ * their historical presence-based syntax, but snapshot them before the first
+ * emulated frame so diagnostics do not repeatedly traverse the host
+ * environment from vblank, object, or presentation paths. */
+typedef enum ActRaiserDeveloperFlag {
+  kActRaiserDeveloperFlag_DisableActionLoadPacing,
+  kActRaiserDeveloperFlag_LoadPacingLog,
+  kActRaiserDeveloperFlag_VblankLog,
+  kActRaiserDeveloperFlag_CopLog,
+  kActRaiserDeveloperFlag_YieldLog,
+  kActRaiserDeveloperFlag_FrameLog,
+  kActRaiserDeveloperFlag_ObjectLog,
+  kActRaiserDeveloperFlag_PpuLog,
+  kActRaiserDeveloperFlag_WidescreenLayerLog,
+  kActRaiserDeveloperFlag_VerticalExtensionTileLog,
+  kActRaiserDeveloperFlag_VerticalExtensionLog,
+  kActRaiserDeveloperFlag_HudIconLog,
+  kActRaiserDeveloperFlag_ApronLog,
+  kActRaiserDeveloperFlag_TitleLog,
+  kActRaiserDeveloperFlag_Count,
+} ActRaiserDeveloperFlag;
+
+typedef struct ActRaiserDeveloperEnvironment {
+  bool initialized;
+  bool flags[kActRaiserDeveloperFlag_Count];
+  bool widescreen_only_bg_present;
+  int widescreen_only_bg_layer;
+  bool widescreen_clamp_present;
+  uint8_t widescreen_clamp_mask;
+} ActRaiserDeveloperEnvironment;
+
+static const char *const kActRaiserDeveloperFlagNames[] = {
+  [kActRaiserDeveloperFlag_DisableActionLoadPacing] =
+      "AR_NO_ACTION_LOAD_PACING",
+  [kActRaiserDeveloperFlag_LoadPacingLog] = "AR_LOADPACELOG",
+  [kActRaiserDeveloperFlag_VblankLog] = "AR_VBLOG",
+  [kActRaiserDeveloperFlag_CopLog] = "AR_COPLOG",
+  [kActRaiserDeveloperFlag_YieldLog] = "AR_YIELDLOG",
+  [kActRaiserDeveloperFlag_FrameLog] = "AR_FRAMELOG",
+  [kActRaiserDeveloperFlag_ObjectLog] = "AR_OBJLOG",
+  [kActRaiserDeveloperFlag_PpuLog] = "AR_PPULOG",
+  [kActRaiserDeveloperFlag_WidescreenLayerLog] = "AR_WS_LAYERS",
+  [kActRaiserDeveloperFlag_VerticalExtensionTileLog] = "AR_VEXT_TILES",
+  [kActRaiserDeveloperFlag_VerticalExtensionLog] = "AR_VEXT_LOG",
+  [kActRaiserDeveloperFlag_HudIconLog] = "AR_HUDICON",
+  [kActRaiserDeveloperFlag_ApronLog] = "AR_APRONLOG",
+  [kActRaiserDeveloperFlag_TitleLog] = "AR_TITLELOG",
+};
+
+_Static_assert(
+    sizeof(kActRaiserDeveloperFlagNames) /
+        sizeof(kActRaiserDeveloperFlagNames[0]) ==
+        kActRaiserDeveloperFlag_Count,
+    "developer environment flag table is incomplete");
+
+static ActRaiserDeveloperEnvironment s_developer_environment;
+
+static const ActRaiserDeveloperEnvironment *
+ActRaiser_GetDeveloperEnvironment(void) {
+  if (s_developer_environment.initialized)
+    return &s_developer_environment;
+
+  for (unsigned flag = 0; flag < kActRaiserDeveloperFlag_Count; flag++)
+    s_developer_environment.flags[flag] =
+        getenv(kActRaiserDeveloperFlagNames[flag]) != NULL;
+
+  const char *value = getenv("AR_WS_ONLYBG");
+  s_developer_environment.widescreen_only_bg_present =
+      value && value[0];
+  s_developer_environment.widescreen_only_bg_layer =
+      s_developer_environment.widescreen_only_bg_present
+          ? atoi(value) - 1
+          : -1;
+
+  value = getenv("AR_WS_CLAMP");
+  s_developer_environment.widescreen_clamp_present = value && value[0];
+  s_developer_environment.widescreen_clamp_mask =
+      s_developer_environment.widescreen_clamp_present
+          ? (uint8_t)strtoul(value, NULL, 16)
+          : 0;
+  s_developer_environment.initialized = true;
+  return &s_developer_environment;
+}
+
+static bool ActRaiser_DeveloperFlagEnabled(ActRaiserDeveloperFlag flag) {
+  return ActRaiser_GetDeveloperEnvironment()->flags[flag];
+}
+
 #ifdef _WIN32
 static void *g_host_fiber;   /* ConvertThreadToFiber result (driver thread) */
 static void *g_game_fiber;   /* CreateFiber result (game coroutine) */
@@ -116,7 +204,8 @@ static void ActRaiser_OnInidispWrite(uint8_t value) {
   unsigned frames = ActionLoadPacing_ForceBlankHoldFrames(
       g_ram[kActRaiserWram_MapGroup],
       g_ram[kActRaiserWram_DestinationMapGroup], block, value);
-  if (!frames || getenv("AR_NO_ACTION_LOAD_PACING"))
+  if (!frames || ActRaiser_DeveloperFlagEnabled(
+                     kActRaiserDeveloperFlag_DisableActionLoadPacing))
     return;
 
   g_action_load_armed_frames = frames;
@@ -136,7 +225,8 @@ static void ActRaiser_OnInidispWrite(uint8_t value) {
     g_action_load_armed_frames = 0;
     g_action_load_one_shot_token = 0;
     RtlSetApuCatchupSuppressed(false);
-    if (getenv("AR_LOADPACELOG")) {
+    if (ActRaiser_DeveloperFlagEnabled(
+            kActRaiserDeveloperFlag_LoadPacingLog)) {
       fprintf(stderr,
               "[load-pace] f=%d block=$%06X dest-group=$%02X: HD "
               "one-shot already complete; skipped %u-frame hold\n",
@@ -147,7 +237,8 @@ static void ActRaiser_OnInidispWrite(uint8_t value) {
   }
   g_action_load_one_shot_token = one_shot_token;
   g_action_load_hold_frames = frames - 1;
-  if (getenv("AR_LOADPACELOG")) {
+  if (ActRaiser_DeveloperFlagEnabled(
+          kActRaiserDeveloperFlag_LoadPacingLog)) {
     fprintf(stderr,
             "[load-pace] f=%d block=$%06X dest-group=$%02X: holding "
             "forced blank for %u frames; suppressing collapsed APU catch-up\n",
@@ -174,7 +265,8 @@ static void ActRaiser_OnApuPortPace(uint8_t port, uint8_t value) {
    * the display or game mode moved on between them, reject the now-obviously
    * stale arm instead of turning a later $F0 into a five-second pause. */
   if (decision == kActionLoadPacingTrigger_Discard) {
-    if (getenv("AR_LOADPACELOG")) {
+    if (ActRaiser_DeveloperFlagEnabled(
+            kActRaiserDeveloperFlag_LoadPacingLog)) {
       fprintf(stderr,
               "[load-pace] f=%d mode=$%02X/$%02X inidisp=$%02X: "
               "discarded stale arm before APU halt $F0\n",
@@ -192,7 +284,8 @@ static void ActRaiser_OnApuPortPace(uint8_t port, uint8_t value) {
   g_action_load_armed_frames = 0;
   RtlSetApuCatchupSuppressed(false);
   g_action_load_one_shot_token = 0;
-  if (getenv("AR_LOADPACELOG")) {
+  if (ActRaiser_DeveloperFlagEnabled(
+          kActRaiserDeveloperFlag_LoadPacingLog)) {
     fprintf(stderr,
             "[load-pace] f=%d action mode=$%02X/$%02X: completed %u-frame "
             "forced-blank hold; releasing APU halt $F0\n",
@@ -276,9 +369,8 @@ int ActRaiser_ReadRdnmi(Snes *snes) {
    * that register inside spin loops -- potentially thousands of times a frame,
    * not once. getenv is ~150ns here, so an unlatched read costs up to a few
    * percent of the frame budget at spin-loop rates for a switch that cannot
-   * change mid-run. The other getenv calls in this file are in per-frame or
-   * per-event paths where 150ns is genuinely free and latching would only add
-   * state. */
+   * change mid-run. Recurring developer diagnostics are likewise snapshotted
+   * by ActRaiser_GetDeveloperEnvironment before the first emulated frame. */
   static int no_4210_yield = -1;
   if (no_4210_yield < 0) no_4210_yield = getenv("AR_NO4210YIELD") ? 1 : 0;
   if (snes->forceNmi && !yielding && !no_4210_yield) {
@@ -296,7 +388,8 @@ int ActRaiser_ReadRdnmi(Snes *snes) {
     for (unsigned i = 0; i < sizeof(kSpinBlocks) / sizeof(kSpinBlocks[0]); i++) {
       if (block != kSpinBlocks[i])
         continue;
-      if (getenv("AR_VBLOG")) {
+      if (ActRaiser_DeveloperFlagEnabled(
+              kActRaiserDeveloperFlag_VblankLog)) {
         extern Ppu *g_ppu;
         static int last_frame = -1;
         if (snes_frame_counter != last_frame) {
@@ -387,7 +480,7 @@ static void ActRaiser_BrkHook(CpuState *cpu) {
   /* AR_COPLOG=1: also log BRK (sound-request) posts, for contrast against COP
    * event posts below -- lets a stuck-state capture show whether the game is
    * still alive and posting routine SFX while a specific event id never posts. */
-  if (getenv("AR_COPLOG")) {
+  if (ActRaiser_DeveloperFlagEnabled(kActRaiserDeveloperFlag_CopLog)) {
     extern const char *g_last_recomp_func;
     unsigned game_frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
     fprintf(stderr, "[brk] gf=%u fn=%s id=%02x $18=%02x $19=%02x\n",
@@ -429,7 +522,7 @@ static void ActRaiser_CopHook(CpuState *cpu) {
    * boss-defeat/next-encounter event ever posts at all, vs posting an id whose
    * consumer is unreached (see [[cop-syscall-hook-fix]] -- $C3DA consumer was
    * previously suspected still-unreached for a different event id). */
-  if (getenv("AR_COPLOG")) {
+  if (ActRaiser_DeveloperFlagEnabled(kActRaiserDeveloperFlag_CopLog)) {
     extern const char *g_last_recomp_func;
     unsigned game_frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
     fprintf(stderr, "[cop] gf=%u fn=%s site=%06x id=%02x%s $18=%02x $19=%02x\n",
@@ -565,7 +658,7 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
   /* AR_YIELDLOG=1: dump the recomp call stack + SNES return address at each
    * vblank yield to see what the main thread is doing frame to frame. Read the
    * return frame from the PRE-pop S (sp-2, since we already added 2 above). */
-  if (getenv("AR_YIELDLOG")) {
+  if (ActRaiser_DeveloperFlagEnabled(kActRaiserDeveloperFlag_YieldLog)) {
     extern const char *g_recomp_stack[];
     extern int g_recomp_stack_top;
     int top = g_recomp_stack_top;
@@ -600,7 +693,7 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
    * pause/timer gate is suppressing advancement. Action fields also expose the
    * actual movement result: position delta, velocity, current player handler/
    * flags, and the walking-cycle Crest/Boost counters ($08BC/$08C4). */
-  if (getenv("AR_FRAMELOG")) {
+  if (ActRaiser_DeveloperFlagEnabled(kActRaiserDeveloperFlag_FrameLog)) {
     extern unsigned long g_recomp_push_count;
     extern Snes *g_snes;
     static unsigned long last_push;
@@ -662,7 +755,7 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
    * slots' status word ($06A0 stride $40) + handler ptr ($12). Reveals the
    * exact frame the object table is wiped / timer goes non-BCD (the "sprites
    * vanish + timer '?'" corruption). */
-  if (getenv("AR_OBJLOG")) {
+  if (ActRaiser_DeveloperFlagEnabled(kActRaiserDeveloperFlag_ObjectLog)) {
     if (ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
       enum {
         kObjectLogSampleCount = 24,
@@ -697,7 +790,7 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
    * BG mode, and main/sub screen layer-enable masks. A black screen with the
    * game running (no freeze) is usually forced-blank set, brightness 0, or all
    * main-screen layers disabled. */
-  if (getenv("AR_PPULOG")) {
+  if (ActRaiser_DeveloperFlagEnabled(kActRaiserDeveloperFlag_PpuLog)) {
     extern Ppu *g_ppu;
     static int lf = -1;
     if (snes_frame_counter != lf) {
@@ -988,7 +1081,9 @@ static bool ActRaiser_CalculateCanvasMargins(
 }
 
 static void ActRaiser_LogWidescreenLayers(void) {
-  if (!getenv("AR_WS_LAYERS")) return;
+  if (!ActRaiser_DeveloperFlagEnabled(
+          kActRaiserDeveloperFlag_WidescreenLayerLog))
+    return;
   static int last_frame = -1;
   const unsigned game_frame =
       ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
@@ -1102,7 +1197,9 @@ static void ActRaiser_ApplyVerticalMarginPolicy(uint8_t map_group,
    * first visible row. A filler row is one whose ids do not belong to the
    * surrounding content; merely being uniform is insufficient because a real
    * all-sky row is uniform too (rendering-engine.md §4). */
-  if (getenv("AR_VEXT_TILES") && g_ws_extra_top > 0) {
+  if (ActRaiser_DeveloperFlagEnabled(
+          kActRaiserDeveloperFlag_VerticalExtensionTileLog) &&
+      g_ws_extra_top > 0) {
     int base = PPU_bgTilemapAdr(g_ppu, primary_layer);
     bool wider = PPU_bgTilemapWider(g_ppu, primary_layer);
     bool higher = PPU_bgTilemapHigher(g_ppu, primary_layer);
@@ -1127,7 +1224,9 @@ static void ActRaiser_ApplyVerticalMarginPolicy(uint8_t map_group,
             cam_y & 0xFF, buf);
   }
 
-  if (getenv("AR_VEXT_LOG") && primary_layer >= 0) {
+  if (ActRaiser_DeveloperFlagEnabled(
+          kActRaiserDeveloperFlag_VerticalExtensionLog) &&
+      primary_layer >= 0) {
     static unsigned last;
     unsigned gf = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
     if (gf != last) {
@@ -1304,24 +1403,30 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   }
   /* AR_WS_ONLYBG=N (1..4): isolate one BG layer so a capture identifies which
    * layer carries scene elements such as sky, dialog, or pillars. */
-  { const char *ob = getenv("AR_WS_ONLYBG");
-    if (ob && ob[0]) {
-      int L = atoi(ob) - 1;
+  {
+    const ActRaiserDeveloperEnvironment *developer_environment =
+        ActRaiser_GetDeveloperEnvironment();
+    if (developer_environment->widescreen_only_bg_present) {
+      int L = developer_environment->widescreen_only_bg_layer;
       if (L >= 0 && L < 4) g_ppu->screenEnabled[0] = (uint8)(1u << L);
       wide = 1; clamp = 0; mirror = 0; repeat = 0;  /* raw tilemap data */
       bg_presentation = (ActionBgPresentationPolicy){ 0 };
       bg_hle_allowed = 0;
       project_final_bg_policy = true;
-    } }
+    }
+  }
   /* AR_WS_CLAMP=<hex mask>: override the per-layer clamp for tuning. */
-  { const char *cm = getenv("AR_WS_CLAMP");
-    if (cm && cm[0]) {
-      wide = 1; clamp = (uint8)strtoul(cm, NULL, 16);
+  {
+    const ActRaiserDeveloperEnvironment *developer_environment =
+        ActRaiser_GetDeveloperEnvironment();
+    if (developer_environment->widescreen_clamp_present) {
+      wide = 1; clamp = developer_environment->widescreen_clamp_mask;
       mirror = 0; repeat = 0;
       bg_presentation = (ActionBgPresentationPolicy){ 0 };
       bg_hle_allowed = 0;
       project_final_bg_policy = true;
-    } }
+    }
+  }
   /* Capture presets are final policy overrides, intentionally after the
    * scene-specific rules and diagnostic clamp knob. This makes promotional
    * comparisons deterministic:
@@ -1623,8 +1728,9 @@ static void ActRaiser_WidescreenHudObjPromote(void) {
        * the answer to "why is the magic icon still at centre screen?" — a
        * slot=-1 line names the spell whose OAM shape the scan does not know,
        * which is exactly how the four-small-slots/one-large-slot split was
-       * found. Costs a getenv and three compares per Sky Palace frame. */
-      if (getenv("AR_HUDICON")) {
+       * found. The environment gate is snapshotted before emulation starts. */
+      if (ActRaiser_DeveloperFlagEnabled(
+              kActRaiserDeveloperFlag_HudIconLog)) {
         static int last_spell = -1, last_slot = -2, last_count = -1;
         int spell = g_ram[kActRaiserWram_SelectedMagic];
         if (spell != last_spell || found_slot != last_slot ||
@@ -1954,7 +2060,7 @@ static void ActRaiser_DioramaApronFinish(const ActionApronGeometry *geom) {
   /* AR_APRONLOG=1: the channel's sizing verdict. peak/overflow answer "is
    * kActionApronMaxParts right?" without guessing, which is what the plan asks
    * for instead of assuming a capacity. */
-  if (getenv("AR_APRONLOG"))
+  if (ActRaiser_DeveloperFlagEnabled(kActRaiserDeveloperFlag_ApronLog))
     fprintf(stderr, "[apron] gf=%u parts=%d peak=%d overflow=%d\n",
             ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
             ActionApron_Count(), ActionApron_PeakCount(),
@@ -2458,7 +2564,7 @@ void ActRaiserDrawPpuFrame(void) {
   /* AR_TITLELOG=1: per-frame title-screen PPU probe (map bytes, BG mode,
    * HDMAEN, Mode-7 matrix, INIDISP) for deriving/validating the settled-logo
    * gate above. Diagnostic only. */
-  if (getenv("AR_TITLELOG")) {
+  if (ActRaiser_DeveloperFlagEnabled(kActRaiserDeveloperFlag_TitleLog)) {
     static int last_gf = -1;
     int gf = (int)ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
     if (gf != last_gf) {
@@ -2583,7 +2689,8 @@ void ActRaiserDrawPpuFrame(void) {
   s_live_margin_top = g_ppu->extraTopCur;
   s_live_margin_bottom = g_ppu->extraBottomCur;
 
-  if (getenv("AR_VEXT_LOG")) {
+  if (ActRaiser_DeveloperFlagEnabled(
+          kActRaiserDeveloperFlag_VerticalExtensionLog)) {
     /* Where each destination's content actually LANDED, which is the check that
      * catches the row-origin class of bug: the HUD surfaces are consumed in
      * AUTHENTIC screen space and must not move when the vertical margin
@@ -3148,6 +3255,8 @@ void ActRaiser_DestroyGameCoroutine(void) {
 
 void RunOneFrameOfGame(void) {
   if (!g_game_started) {
+    /* config.ini and process environment layers are final by this point. */
+    (void)ActRaiser_GetDeveloperEnvironment();
     g_game_started = true;
 #if AR_WATCHDOG
     /* Give the runtime watchdog the coroutine yield to escape a stuck frame
@@ -3183,7 +3292,8 @@ void RunOneFrameOfGame(void) {
     if (ActionLoadPacing_ShouldReleaseForOneShot(
             g_action_load_hold_frames, g_action_load_one_shot_token,
             one_shot_token, one_shot_completed)) {
-      if (getenv("AR_LOADPACELOG")) {
+      if (ActRaiser_DeveloperFlagEnabled(
+              kActRaiserDeveloperFlag_LoadPacingLog)) {
         fprintf(stderr,
                 "[load-pace] f=%d HD one-shot complete; released forced "
                 "blank %u frame(s) early\n",

@@ -46,9 +46,9 @@ number	section	label	voxel_file	original_source	original_detail
 45	Landmarks and infrastructure	Bloodpool castle	bloodpool-castle.bmp	Authentic Bloodpool A map crop	cells 6,16-7,17
 46	Landmarks and infrastructure	Kasandora pyramid	kasandora-pyramid.bmp	Authentic Kasandora A map crop	cells 20,4-21,5
 47	Landmarks and infrastructure	Marahna temple	marahna-temple.bmp	Authentic Marahna A map crop	cells 6,20-7,21
-48	Vegetation	Fillmore permanent tree	tree-town-1.bmp	Authentic Fillmore B map crop	cells 20,9
+48	Vegetation	Fillmore permanent tree	tree-town-1.bmp	Authentic Fillmore B map crop	cells 20,12
 49	Vegetation	Bloodpool permanent tree	tree-town-2.bmp	Authentic Bloodpool B map crop	cells 28,5
-50	Vegetation	Kasandora permanent tree	tree-town-3.bmp	Authentic Kasandora B map crop	cells 29,4
+50	Vegetation	Kasandora permanent tree	tree-town-3.bmp	Authentic Kasandora B map crop	cells 26,1
 51	Vegetation	Aitos permanent tree	tree-town-4.bmp	Authentic Aitos B map crop	cells 6,8
 52	Vegetation	Marahna permanent tree	tree-town-5.bmp	ROM terrain metatile MT $0B	shared evergreen source in Marahna palette
 53	Vegetation	Northwall permanent tree	tree-town-6.bmp	ROM terrain metatile MT $0B	shared evergreen silhouette; Northwall model palette
