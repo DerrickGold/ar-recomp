@@ -440,6 +440,8 @@ static void TestImmutableRoomSceneFrameComparison(void) {
   CHECK(ActRaiserActionBg_CompareRoomSceneFrameLine(
       &state, ppu, row, &comparison));
   CHECK(comparison.mismatches == 1);
+  CHECK(comparison.mismatches_by_field[
+      kActRaiserActionRoomSceneFrameField_Bg2HScroll] == 1);
   CHECK(comparison.first_field ==
         kActRaiserActionRoomSceneFrameField_Bg2HScroll);
   CHECK(comparison.first_immutable == 0x345);
@@ -464,6 +466,8 @@ static void TestImmutableRoomSceneFrameComparison(void) {
   CHECK(ActRaiserActionBg_CompareRoomSceneFrameLine(
       &state, ppu, 0, &comparison));
   CHECK(comparison.mismatches == 1);
+  CHECK(comparison.mismatches_by_field[
+      kActRaiserActionRoomSceneFrameField_Cgadsub] == 1);
   CHECK(comparison.first_field ==
         kActRaiserActionRoomSceneFrameField_Cgadsub);
   free(ppu);

@@ -84,6 +84,7 @@ typedef enum ActRaiserActionRoomSceneFrameField {
 typedef struct ActRaiserActionRoomSceneFrameCompareResult {
   size_t compared;
   size_t mismatches;
+  size_t mismatches_by_field[kActRaiserActionRoomSceneFrameField_Count];
   ActRaiserActionRoomSceneFrameField first_field;
   uint16_t first_immutable;
   uint16_t first_live;

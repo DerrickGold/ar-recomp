@@ -128,17 +128,14 @@ The stable two-background scene milestone is implemented:
   rooms, while retaining the pinned 30 animated rooms, two page-cycle rooms,
   17 raster-bearing rooms, and five forced-BG2-priority rooms.
 
-The stable live acceptance set is now byte-exact for R1, R2, R3, R4, R5, R6,
-and R9. The original six-preset matrix compares 7,049,476 pre-scanline PPU
-registers with zero mismatches; the natural Aitos route adds 250,638 exact R4
-registers across 222 `0405` frames. R1 is covered by a natural
-`0102 -> 0103 -> 0104` route through the complete Fillmore
-boss fight; R2 also pins one authentic hit-stop/action-update hold, where the
-game displays the preceding persistent table for one additional frame and the
-stateful oracle accepts it only when that complete prior immutable state
-matches. R4 is covered by a natural `0404 -> 0405 -> 0406 -> 0407` route. The
-remaining raster acceptance work is fixture coverage for the
-boss/transition-only R7, R8, and R10 callbacks, not missing builder logic.
+The live acceptance set is now byte-exact for all R1-R10 raster families. The
+original six-preset matrix compares 7,049,476 pre-scanline PPU registers with
+zero mismatches; natural routes add R1, R4, R7, R8, and R10 coverage through
+the otherwise unreachable boss transitions. R2 pins an authentic one-frame
+hit-stop hold. The complete Death Heim route additionally pins 1,351 frames
+that retain the last R8 table while the ending script continues. Each hold is
+accepted only when every live raster value exactly matches a previously
+accepted immutable table.
 BG3 HUD, real OBJ streams, fades, and gameplay-object-driven window timelines
 remain outside this standalone background contract by design.
 
@@ -361,12 +358,23 @@ while ordinary editor previews use the settled deterministic pattern.
 
 Visible presentation frame N normally scans the table built during action tick
 N-1, including that tick's camera X. The callback belongs to the action-update
-path rather than scanout, so hit-stop can retain the whole preceding table for
-another displayed frame. A standalone preview advances deterministically once
-per requested frame. The game-side oracle keeps the previous immutable state
-and accepts a hold only when the live scanline disagrees with the newly built
-state but exactly matches the prior one; it reports these separately as
-`raster-holds` rather than hiding them as approximate tolerance.
+path rather than scanout, so hit-stop or an ending fade can retain the whole
+last-built table for one or many displayed frames. A standalone preview
+advances deterministically once per requested frame. The game-side oracle
+keeps the last fully accepted raster table and accepts a hold only when every
+live raster value matches it; it reports these separately as `raster-holds`
+rather than hiding them as approximate tolerance.
+
+Natural entry also pins bootstrap inputs that a stable room preview does not
+need. Northwall `0605` builds its first visible R6 table with camera X `$01C0`
+before settling at `$0188`. Death Heim rematches `0702`-`0707` use entry
+cameras `$0010,$0000,$0000,$00D0,$0000,$0090`. Their provisional profile
+BG2SC values settle to one-page `$70`; `0708` likewise changes `$72 -> $70`
+after its first setup frame. After the final boss, `$00:F5F0-$F619` switches
+the hub to BG1SC/BG2SC `$64/$74` and leaves the last R8 HDMA table frozen
+through the ending fade. These transient values are modeled by entry metadata
+and a script-owned page override, while the editor continues to show the
+stable authoring state by default.
 
 The builder should generate register values for each scanline into a small
 immutable raster state. The PPU renderer then consumes that state. Replaying
@@ -457,15 +465,11 @@ shape/target, both page-cycle rooms, the five forced-BG2-priority rooms, and a
 Marahna colour-math room. Then run all 49 rooms at a stable camera and at every
 available map edge.
 
-The current live set covers R1 (`0104`), R2 (`0201`), R3 (`0202`), R4
-(`0405`), R5 (`0401`), R6 (`0601`), and R9 (`0702`). The original six-preset
-matrix compares the immutable full-world publications and 7,049,476 resolved
-pre-scanline registers with zero mismatch; natural Aitos adds 250,638 exact R4
-registers. The exact runs are listed under Evidence below. The other three
-raster presets belong to boss/transition rooms for which raw warp is not a
-valid initialization fixture. They require recorded natural entry/replay
-fixtures before their live acceptance can be claimed, although their ROM
-builders and C/JavaScript golden frames are already pinned.
+The current live set covers every family: R1 (`0104`), R2 (`0201`), R3
+(`0202`), R4 (`0405`), R5 (`0401`), R6 (`0601`/`0605`), R7 (`0608`), R8
+(`0701`), R9 (`0702`-`0707`), and R10 (`0708`). Natural transition recordings
+cover the rooms for which a raw warp is not a valid initialization fixture.
+The exact runs are listed under Evidence below.
 
 ## Remaining knowledge gaps
 
@@ -474,18 +478,15 @@ None of these blocks a stable arbitrary-room editor preview:
 1. **Transient object-driven windows/effects.** Map boss iris/wipe timelines
    only if the editor needs named previews of those moments. Stable room state
    is already deterministic.
-2. **Exact first-visible phase origin.** Authoring uses explicit phase controls.
-   R4's low-byte phase and flat entry frame are now pinned; native-start golden
-   tests may still pin the initial animation/page/raster phase for other
-   families.
+2. **Additional named transient phases.** R4's flat entry table, Northwall's
+   R6 entry camera, every Death Heim rematch entry camera, provisional BG2SC,
+   and the ending page/table hold are pinned. Authoring already has explicit
+   animation/page controls; more named transient previews are only needed if
+   they become useful editor presets.
 3. **BG3/OBJ presentation completeness.** Background authoring does not need
    gameplay sprites. A “literal game frame” toggle would need the common HUD
    and a defined static actor fixture, not a room loader change.
-4. **Boss-transition differential fixtures.** Every room has C-rendered and
-   JavaScript-checked stable-frame coverage, and the live R1/R2/R3/R4/R5/R6/R9
-   set is exact. Natural-entry recordings are still needed for R7/R8/R10;
-   raw map warps do not establish those rooms' boss/transition callback state.
-5. **Transient boss margin/window policy.** This is a widescreen presentation
+4. **Transient boss margin/window policy.** This is a widescreen presentation
    audit, not missing room construction.
 
 The remaining work is therefore bounded engineering plus acceptance evidence,
@@ -506,8 +507,8 @@ complete state. Both build 6,447 compared action frames and 7,278,663 exact
 registers overall; the 621 `0104` frames contribute 701,109 exact R1 register
 comparisons.
 
-`AR_REPLAY_LIVE_AFTER_END=1` remains the fixture-acquisition path for the
-other presets: it replays a deterministic prefix, then returns control to live
+`AR_REPLAY_LIVE_AFTER_END=1` remains the fixture-acquisition path for future
+transients: it replays a deterministic prefix, then returns control to live
 input on the first later game frame. It takes precedence over
 `AR_REPLAY_NOSTOP`, which intentionally holds the final recorded input instead.
 When `AR_INPUT_RECORD` is also set, the recorder writes both the replayed prefix
@@ -525,11 +526,11 @@ AR_ACTION_ROOM_SCENE_COMPARE=1 \
 ./build-release/ActRaiserRecomp ar.sfc --config config.ini
 ```
 
-The same procedure is still required for `0608` (R7), `0701` (R8), and `0708`
-(R10). Keep the boot SRAM and gameplay-affecting settings with
-each fixture; controller input alone is not deterministic without them. The
-comparator remains read-only, and replay sessions protect the normal SRAM and
-settings files even after control is handed back to the player.
+The R7/R8/R10 recordings described below complete that capture set. Keep the
+boot SRAM and gameplay-affecting settings with every new fixture; controller
+input alone is not deterministic without them. The comparator remains
+read-only, and replay sessions protect the normal SRAM and settings files even
+after control is handed back to the player.
 
 `saves/aitos-r4-natural.rec` is the completed R4 fixture (SHA-256
 `bd1e7b576e0c11529844175173ee16127a3a9781af021105f66b978d6b7509e4`). It
@@ -553,6 +554,34 @@ AR_ACTION_ROOM_SCENE_COMPARE=1 \
 AR_INPUT_REPLAY=saves/aitos-r4-natural.rec \
 ./build-release/ActRaiserRecomp ar.sfc --config config.ini
 ```
+
+`saves/northwall-r7-natural.rec` (SHA-256
+`c20d244499e73ff72f27052f5011c8b85ef89320b9ea7006c99e038975353c58`)
+traverses `0605 -> 0606 -> 0607 -> 0608` using the same three gameplay assists.
+Manual capture `runs/20260822-174442/` and deterministic replay
+`runs/20260822-180657/` have byte-identical final state, WRAM, SRAM, and
+dispatch log. The replay compares 3,592 action frames / 4,055,368 registers
+with zero mismatch and pins the `0605` bootstrap camera plus natural R7 entry.
+Default HLE `runs/20260822-180838/` and native presentation-loader/source
+control `runs/20260822-180845/` are byte-identical for all 11 frame-4200 and
+final-state artifacts; the control also compares six published layers / 80,896
+tiles with zero mismatch.
+
+`saves/death-heim-r8-r10-natural.rec` (SHA-256
+`3fba9582f2ff0401c85414510bcf8e555e3c3273df69a6948a42d877dd7a184a`)
+covers the complete hub/rematch route, `0708`, the final boss, and the ending
+handoff with the same assist profile. Manual capture
+`runs/20260822-174637/` and replay `runs/20260822-180704/` end with identical
+complete state and SRAM. The manual settings-menu interaction is absent from
+the controller recording, so ten transient object bytes and diagnostic event
+ordinals are not a replay-equivalence claim. The rendering gate is exact:
+14,637 action frames / 16,525,173 registers, including 1,351 retained-R8-table
+frames, all have zero mismatch in every field. Default HLE
+`runs/20260822-180852/` and native presentation-loader/source control
+`runs/20260822-180913/` are byte-identical for all 18 PPU snapshots at R8,
+R10, and the ending fade, the R10 framebuffer, and final state/WRAM/SRAM. Their
+dispatch events are semantically identical after removing the monotonic
+diagnostic ordinal; native command dispatch changes that ordinal/total by 94.
 
 ## Complete room matrix
 
@@ -654,6 +683,26 @@ Targets are VRAM word addresses and strides are bytes.
   byte-identical at R4 frame 2700 for the framebuffer, WRAM, VRAM, CGRAM,
   OAM/high-OAM and PPU registers, plus all four final-state artifacts. The
   control also matches all seven published room layers / 86,016 tiles.
+- Natural Northwall acceptance, 2026-08-22: manual capture
+  `runs/20260822-174442/` and replay `runs/20260822-180657/` traverse
+  `0605 -> 0606 -> 0607 -> 0608`. All 3,592 action frames / 4,055,368
+  registers are exact, including the first-visible `0605` R6 camera and R7;
+  final state/WRAM/SRAM/dispatch are byte-identical. Default-HLE run
+  `runs/20260822-180838/` and native presentation-loader/source control
+  `runs/20260822-180845/` match all 11 framebuffer, PPU-snapshot, and
+  final-state artifacts byte-for-byte. The control also matches six published
+  layers / 80,896 tiles.
+- Natural Death Heim acceptance, 2026-08-22: manual capture
+  `runs/20260822-174637/` and deterministic replay
+  `runs/20260822-180704/` cover every rematch, R8, R9, R10, the final boss,
+  and ending handoff. All 14,637 action frames / 16,525,173 registers are
+  exact, including six rematch bootstrap cameras, stable one-page BG2SC,
+  post-boss `$64/$74`, and 1,351 frames retaining the final R8 table. Default
+  HLE `runs/20260822-180852/` and native presentation-loader/source control
+  `runs/20260822-180913/` match all visual, PPU, and emulated-state artifacts
+  byte-for-byte at R8, R10, and the ending fade. The raw diagnostic dispatch
+  log differs only in its monotonic ordinal/total, as expected when the native
+  control executes 94 fewer HLE dispatch records.
 - First production-source A/B, 2026-08-22: live-WRAM manifest
   `runs/bg-hle-matrix-20260822-133427.json` versus immutable-room manifest
   `runs/bg-hle-matrix-20260822-133346.json`. All 12 ordinary-entry targets

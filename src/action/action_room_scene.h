@@ -72,6 +72,7 @@ typedef struct ActionRoomScene {
   uint8_t raster_r4_window[kActionRoomSceneRasterR4WindowBytes];
   uint8_t raster_workspace[kActionRoomSceneRasterWorkspaceBytes];
   uint8_t video_profile_index;
+  uint16_t raster_entry_camera_x;
   ActionRoomRasterPreset raster_preset;
   bool have_character_bank[2];
   bool have_extra_characters;
@@ -80,6 +81,9 @@ typedef struct ActionRoomScene {
   bool have_raster_waveform;
   bool have_raster_r4_window;
   bool have_raster_workspace;
+  /* The level bootstrap can build one visible table before it installs the
+   * settled camera. Natural entry fixtures pin that transient input. */
+  bool have_raster_entry_camera_x;
 } ActionRoomScene;
 
 /* Explicit presentation inputs for a reproducible standalone frame. Camera
@@ -96,6 +100,11 @@ typedef struct ActionRoomSceneFrameRequest {
   int animation_phase;
   int page_phase;
   bool have_raster_camera_x;
+  /* Gameplay scripts can replace either stable profile tilemap selection
+   * without changing the room's immutable assets. The known user is Death
+   * Heim's post-boss sky-page handoff. Bits select BG1/BG2 respectively. */
+  uint8_t bgsc_override_mask;
+  uint8_t bgsc_override[kActionRoomSceneBgCount];
   /* The first visible R4 scanout retains the flat table produced while its
    * scratch high byte still belongs to the preceding room. */
   bool raster_entry_frame;

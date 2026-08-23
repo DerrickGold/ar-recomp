@@ -21,6 +21,8 @@ typedef struct ActRaiserActionBgObserver {
   ActionBgWorld *provider_world[kActionBgLayerCount];
   ActionBgWorld *comparison_world[kActionBgLayerCount];
   ActRaiserActionBgDiagnostics diagnostics;
+  uint64_t room_scene_register_mismatches_by_field[
+      kActRaiserActionRoomSceneFrameField_Count];
   uint32_t provider_reported_mismatch_serial[kActionBgLayerCount];
   uint32_t provider_reported_outside_serial[kActionBgLayerCount];
   uint32_t comparison_reported_mismatch_serial[kActionBgLayerCount];
@@ -48,6 +50,7 @@ typedef struct ActRaiserActionBgObserver {
   bool room_frame_valid;
   bool previous_room_frame_valid;
   bool room_frame_uses_previous;
+  bool room_frame_raster_matches_current;
   bool room_camera_valid;
   bool room_scene_entry_frame;
   bool reported_room_frame_mismatch;
@@ -751,6 +754,7 @@ static void CompareRoomFrameValue(
     result->first_live = live;
   }
   result->mismatches++;
+  result->mismatches_by_field[field]++;
 }
 
 bool ActRaiserActionBg_CompareRoomSceneFrameLine(
@@ -942,11 +946,9 @@ static bool SyncFrameIdentity(const uint8_t *wram, size_t wram_size) {
 void ActRaiserActionBg_BeginRoomSceneFrame(
     const uint8_t *wram, size_t wram_size, const Ppu *ppu,
     const Dma *dma) {
-  s_observer.previous_room_frame_valid = s_observer.room_frame_valid;
-  if (s_observer.previous_room_frame_valid)
-    s_observer.previous_room_frame = s_observer.room_frame;
   s_observer.room_frame_valid = false;
   s_observer.room_frame_uses_previous = false;
+  s_observer.room_frame_raster_matches_current = true;
   if (!RoomSceneCompareEnabled() || !wram || !ppu ||
       (ppu->inidisp & 0x80u) || (ppu->bgmode & 7u) != 1u ||
       wram_size <= kActRaiserWram_Bg1CameraY + 1u ||
@@ -988,7 +990,7 @@ void ActRaiserActionBg_BeginRoomSceneFrame(
       ReadWram16(wram, kActRaiserWram_Bg1CameraX);
   const uint16_t raster_camera_x = s_observer.room_camera_valid
       ? s_observer.last_room_camera_x : camera_x;
-  const ActionRoomSceneFrameRequest request = {
+  ActionRoomSceneFrameRequest request = {
     .camera_x = camera_x,
     .camera_y = ReadWram16(wram, kActRaiserWram_Bg1CameraY),
     .raster_camera_x = raster_camera_x,
@@ -998,6 +1000,22 @@ void ActRaiserActionBg_BeginRoomSceneFrame(
     .have_raster_camera_x = true,
     .raster_entry_frame = s_observer.room_scene_entry_frame,
   };
+  /* `$00:F5F0-$F619` replaces the Death Heim hub's BG pages during the
+   * post-final-boss black frame. Progress makes the override eligible; the
+   * live page bases are the script's authoritative phase signal. */
+  if (map_group == kActRaiserMapGroup_DeathHeim &&
+      map_number == kActRaiserDeathHeimMap_Hub &&
+      wram[kActRaiserWram_DeathHeimProgress] >=
+          kActRaiserDeathHeimProgress_FinalBossBeaten) {
+    if ((ppu->bgXsc[0] & 0xfcu) == 0x64u) {
+      request.bgsc_override_mask |= 1u << 0;
+      request.bgsc_override[0] = ppu->bgXsc[0];
+    }
+    if ((ppu->bgXsc[1] & 0xfcu) == 0x74u) {
+      request.bgsc_override_mask |= 1u << 1;
+      request.bgsc_override[1] = ppu->bgXsc[1];
+    }
+  }
   if (!ActionRoomScene_BuildFrameState(
           s_observer.room_scene, &request, &s_observer.room_frame))
     return;
@@ -1023,11 +1041,17 @@ void ActRaiserActionBg_ObserveRoomSceneFrameLine(
   if (!ActRaiserActionBg_CompareRoomSceneFrameLine(
           compared_frame, ppu, output_y, &comparison))
     return;
+  size_t current_raster_mismatches = 0;
+  for (unsigned field = kActRaiserActionRoomSceneFrameField_Bg1HScroll;
+       field <= kActRaiserActionRoomSceneFrameField_Mosaic; field++)
+    current_raster_mismatches += comparison.mismatches_by_field[field];
+  if (current_raster_mismatches)
+    s_observer.room_frame_raster_matches_current = false;
   /* The raster callback is an action-update callback, not a presentation
-   * callback. Hit-stop and similar skipped action updates intentionally leave
-   * the persistent HDMA table untouched for one displayed frame. If the new
-   * deterministic table disagrees but the complete preceding table agrees,
-   * follow that retained table for the rest of this scanout. */
+   * callback. Hit-stop, fades, and other skipped action updates intentionally
+   * leave the persistent HDMA table untouched. If the newly predicted table
+   * disagrees but the last fully accepted table agrees, follow that retained
+   * table for this scanout; it remains eligible for any later skipped frames. */
   if (comparison.mismatches && !s_observer.room_frame_uses_previous &&
       s_observer.previous_room_frame_valid) {
     ActRaiserActionRoomSceneFrameCompareResult held_comparison;
@@ -1051,10 +1075,23 @@ void ActRaiserActionBg_ObserveRoomSceneFrameLine(
       }
     }
   }
+  /* Profile/page registers can legitimately change while the raster callback
+   * still advances. Keep the last table whose five raster fields matched so a
+   * later multi-frame gameplay pause can retain it indefinitely. */
+  if (output_y + 1u == kActionRoomSceneFrameHeight &&
+      s_observer.room_frame_raster_matches_current &&
+      !s_observer.room_frame_uses_previous) {
+    s_observer.previous_room_frame = s_observer.room_frame;
+    s_observer.previous_room_frame_valid = true;
+  }
   s_observer.diagnostics.room_scene_scanlines_compared++;
   s_observer.diagnostics.room_scene_registers_compared += comparison.compared;
   s_observer.diagnostics.room_scene_register_mismatches +=
       comparison.mismatches;
+  for (unsigned field = 0;
+       field < kActRaiserActionRoomSceneFrameField_Count; field++)
+    s_observer.room_scene_register_mismatches_by_field[field] +=
+        comparison.mismatches_by_field[field];
   if (!comparison.mismatches) return;
   const bool verbose = RoomSceneCompareVerbose();
   if ((s_observer.reported_room_frame_mismatch && !verbose) ||
@@ -1522,6 +1559,43 @@ void ActRaiserActionBg_Shutdown(void) {
             s_observer.diagnostics.room_scene_scanlines_compared,
             s_observer.diagnostics.room_scene_registers_compared,
             s_observer.diagnostics.room_scene_register_mismatches);
+    fprintf(stderr,
+            "[action-room-scene] mismatch-fields="
+            "{BG1HOFS:%" PRIu64 ",BG1VOFS:%" PRIu64
+            ",BG2HOFS:%" PRIu64 ",BG2VOFS:%" PRIu64
+            ",MOSAIC:%" PRIu64 ",TM:%" PRIu64 ",TS:%" PRIu64
+            ",TMW:%" PRIu64 ",TSW:%" PRIu64
+            ",CGWSEL:%" PRIu64 ",CGADSUB:%" PRIu64
+            ",BGMODE:%" PRIu64 ",BG1SC:%" PRIu64
+            ",BG2SC:%" PRIu64 "}\n",
+            s_observer.room_scene_register_mismatches_by_field[
+                kActRaiserActionRoomSceneFrameField_Bg1HScroll],
+            s_observer.room_scene_register_mismatches_by_field[
+                kActRaiserActionRoomSceneFrameField_Bg1VScroll],
+            s_observer.room_scene_register_mismatches_by_field[
+                kActRaiserActionRoomSceneFrameField_Bg2HScroll],
+            s_observer.room_scene_register_mismatches_by_field[
+                kActRaiserActionRoomSceneFrameField_Bg2VScroll],
+            s_observer.room_scene_register_mismatches_by_field[
+                kActRaiserActionRoomSceneFrameField_Mosaic],
+            s_observer.room_scene_register_mismatches_by_field[
+                kActRaiserActionRoomSceneFrameField_MainScreen],
+            s_observer.room_scene_register_mismatches_by_field[
+                kActRaiserActionRoomSceneFrameField_SubScreen],
+            s_observer.room_scene_register_mismatches_by_field[
+                kActRaiserActionRoomSceneFrameField_MainWindow],
+            s_observer.room_scene_register_mismatches_by_field[
+                kActRaiserActionRoomSceneFrameField_SubWindow],
+            s_observer.room_scene_register_mismatches_by_field[
+                kActRaiserActionRoomSceneFrameField_Cgwsel],
+            s_observer.room_scene_register_mismatches_by_field[
+                kActRaiserActionRoomSceneFrameField_Cgadsub],
+            s_observer.room_scene_register_mismatches_by_field[
+                kActRaiserActionRoomSceneFrameField_Bgmode],
+            s_observer.room_scene_register_mismatches_by_field[
+                kActRaiserActionRoomSceneFrameField_Bg1Sc],
+            s_observer.room_scene_register_mismatches_by_field[
+                kActRaiserActionRoomSceneFrameField_Bg2Sc]);
   }
   if (s_observer.room_scene_stage_compare_enabled > 0) {
     fprintf(stderr,
