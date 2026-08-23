@@ -298,6 +298,7 @@ const B64 = s => { const b = atob(s), a = new Uint8Array(b.length);
   for (let i=0;i<b.length;i++) a[i]=b.charCodeAt(i); return a; };
 const BLOBS = DATA.blobs.map(B64);
 const RASTER_WAVEFORM = BLOBS[DATA.rasterWaveform];
+const RASTER_R4_WINDOW = BLOBS[DATA.rasterR4Window];
 const expand5 = v => ((v&31)<<3)|((v&31)>>2);
 let nativeFrame = 0, nativePlayTimer = null;
 const nativeCamera = { x:0, y:0 };
@@ -455,8 +456,10 @@ function nativeFrameState(r) {
       for(let i=0;i<32;i++){bg2vw.write(1,inheritedMode2(
         3+i*3+2,value));value=u8(value-5);}
       bg2vw.write(1,inheritedMode2(3+32*3+2,0));bg2vw.finish();break; }
-    case 4: { let phase=u8(frame>>>2),line=0,held=0;
-      for(let i=0;i<0x70;i++){held=((RASTER_WAVEFORM[phase++]<<4)&0x10)|2;
+    case 4: { let phase=u8(frame)>>>2,line=0,held=0;
+      /* Native `$02:9382` leaves the high byte of its 16-bit source index at
+       * one, so R4 samples the ROM window immediately after the waveform. */
+      for(let i=0;i<0x70;i++){held=((RASTER_R4_WINDOW[phase++]<<4)&0x10)|2;
         for(let n=0;n<2;n++)if(line<DATA.frameHeight)mosaic[line++]=held;}
       while(line<DATA.frameHeight)mosaic[line++]=held;break; }
     case 5: { let value=u16((frame<<1)+(cameraX>>>1));

@@ -85,6 +85,7 @@ int main(int argc, char **argv) {
   fprintf(out, "{\n\"schema\":\"actraiser-action-bg-v4\",\n\"rooms\":[\n");
 
   int rooms = 0, failures = 0, raster_waveform_blob = -1;
+  int raster_r4_window_blob = -1;
   for (unsigned group = 1; group <= 7; group++) {
     for (unsigned map = 1; map <= 8; map++) {
       if (!ActRaiser_IsActionMap((uint8_t)group, (uint8_t)map)) continue;
@@ -121,6 +122,9 @@ int main(int argc, char **argv) {
       if (scene.have_raster_waveform)
         raster_waveform_blob = InternBlob(
             scene.raster_waveform, kActionRoomSceneRasterWaveformBytes);
+      if (scene.have_raster_r4_window)
+        raster_r4_window_blob = InternBlob(
+            scene.raster_r4_window, kActionRoomSceneRasterR4WindowBytes);
       fprintf(out,
               "{\"group\":%u,\"map\":%u,\"chars\":%d,\"extraChars\":%d,"
               "\"palette\":%d,\"rasterWorkspace\":%d,\"bg\":[",
@@ -190,10 +194,12 @@ int main(int argc, char **argv) {
 
   fprintf(out, "\n],\n\"tileWordMask\":%u,\"bg1Attributes\":%u,"
                "\"bg2Attributes\":%u,\"rasterWaveform\":%d,"
+               "\"rasterR4Window\":%d,"
                "\"frameWidth\":%u,\"frameHeight\":%u,\n\"blobs\":[\n",
           kActionRoomSceneTileWordMask,
           kActionRoomSceneBg1AttributeByte,
           kActionRoomSceneBg2AttributeByte, raster_waveform_blob,
+          raster_r4_window_blob,
           kActionRoomSceneFrameWidth, kActionRoomSceneFrameHeight);
   size_t blob_bytes = 0;
   for (int i = 0; i < g_blob_count; i++) {

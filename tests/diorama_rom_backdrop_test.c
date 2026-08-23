@@ -275,6 +275,7 @@ static void InitFrameScene(ActionRoomScene *scene) {
   memset(scene, 0, sizeof(*scene));
   scene->have_video_profile = true;
   scene->have_raster_waveform = true;
+  scene->have_raster_r4_window = true;
   scene->have_raster_workspace = true;
   scene->video_profile[0] = 3;
   scene->video_profile[6] = 1;
@@ -282,6 +283,8 @@ static void InitFrameScene(ActionRoomScene *scene) {
   scene->video_profile[10] = 0x14;
   for (unsigned i = 0; i < kActionRoomSceneRasterWaveformBytes; i++)
     scene->raster_waveform[i] = (uint8_t)i;
+  for (unsigned i = 0; i < kActionRoomSceneRasterR4WindowBytes; i++)
+    scene->raster_r4_window[i] = (uint8_t)(i + 1u);
   for (unsigned bg = 0; bg < 2; bg++) {
     scene->bg[bg].have_map = true;
     scene->bg[bg].have_metatiles = true;
@@ -349,10 +352,22 @@ static void TestFrameStateAndRasterPresets(void) {
   scene.raster_preset = kActionRoomRaster_R4;
   memset(scene.raster_workspace, 0, sizeof(scene.raster_workspace));
   CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
+  CHECK(state.mosaic[0] == 0x12);
+  CHECK(state.mosaic[1] == 0x12);
+  CHECK(state.mosaic[2] == 0x02);
+  CHECK(state.mosaic[223] == 0x02);
+  ActionRoomSceneFrameRequest r4_high_clock = request;
+  r4_high_clock.game_frame = 0x010A;
+  memset(scene.raster_r4_window, 0, sizeof(scene.raster_r4_window));
+  scene.raster_r4_window[2] = 1;
+  CHECK(ActionRoomScene_BuildFrameState(
+      &scene, &r4_high_clock, &state));
+  CHECK(state.mosaic[0] == 0x12);
+  r4_high_clock.raster_entry_frame = true;
+  CHECK(ActionRoomScene_BuildFrameState(
+      &scene, &r4_high_clock, &state));
   CHECK(state.mosaic[0] == 0x02);
-  CHECK(state.mosaic[1] == 0x02);
-  CHECK(state.mosaic[2] == 0x12);
-  CHECK(state.mosaic[223] == 0x12);
+  CHECK(state.mosaic[223] == 0x02);
 
   scene.raster_preset = kActionRoomRaster_R5;
   CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
@@ -507,6 +522,7 @@ static void TestStockRomCatalogue(const char *path) {
         scenes++;
         CHECK(scene.have_video_profile);
         CHECK(scene.have_raster_waveform);
+        CHECK(scene.have_raster_r4_window);
         CHECK(scene.video_profile_index == kExpectedProfiles[group][map]);
         CHECK((scene.video_profile[4] & 0x04) != 0);
         ActionRoomSceneFrameState state;

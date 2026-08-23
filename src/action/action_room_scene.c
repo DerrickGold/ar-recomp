@@ -12,6 +12,8 @@ enum {
   kAssetScriptEnd = 0x06 * 0x8000,
   kVideoProfileBase = 0x02 * 0x8000 + 0x093E,
   kRasterWaveformBase = 0x02 * 0x8000 + 0x16D4,
+  kRasterR4WindowBase = kRasterWaveformBase +
+      kActionRoomSceneRasterWaveformBytes,
   kCharacterBankBytes = 0x2000,
   kCharacterVramBytes = kCharacterBankBytes * 2,
   kExtraCharacterUploadDestination = 0x6000,
@@ -178,6 +180,12 @@ bool ActionRoomScene_Load(ActionRoomScene *scene,
   memcpy(scene->raster_waveform, rom + kRasterWaveformBase,
          kActionRoomSceneRasterWaveformBytes);
   scene->have_raster_waveform = true;
+  if (kRasterR4WindowBase > rom_size ||
+      kActionRoomSceneRasterR4WindowBytes > rom_size - kRasterR4WindowBase)
+    return false;
+  memcpy(scene->raster_r4_window, rom + kRasterR4WindowBase,
+         kActionRoomSceneRasterR4WindowBytes);
+  scene->have_raster_r4_window = true;
   if (scene->have_video_profile) {
     const size_t offset = kVideoProfileBase +
         (size_t)scene->video_profile_index * kActionRoomSceneVideoProfileBytes;
@@ -493,11 +501,23 @@ static void BuildRasterScroll(const ActionRoomScene *scene,
       break;
     }
     case kActionRoomRaster_R4: {
-      uint8_t phase = (uint8_t)(frame >> 2);
+      if (request->raster_entry_frame) {
+        memset(state->mosaic, 0x02, sizeof(state->mosaic));
+        break;
+      }
+      /* The native routine loads `$88` with 8-bit A before shifting. The high
+       * byte of the 16-bit game clock therefore never contributes to phase. */
+      uint8_t phase = (uint8_t)frame;
+      phase >>= 2;
       unsigned line = 0;
       uint8_t held = 0;
       for (unsigned i = 0; i < 0x70; i++) {
-        held = (uint8_t)((scene->raster_waveform[phase++] << 4) & 0x10) |
+        /* `$02:9382` stores the phase to DP `$00` in 8-bit A mode, then
+         * reloads it as a 16-bit X index. DP `$01` remains one throughout
+         * action mode, selecting `$02:97D4+phase` rather than the nominal
+         * `$02:96D4` waveform page. Preserve that original-ROM quirk in the
+         * standalone scene model instead of depending on live scratch WRAM. */
+        held = (uint8_t)((scene->raster_r4_window[phase++] << 4) & 0x10) |
             0x02;
         for (unsigned repeat = 0; repeat < 2; repeat++)
           if (line < kActionRoomSceneFrameHeight)
@@ -610,7 +630,9 @@ bool ActionRoomScene_BuildFrameState(
     const ActionRoomSceneFrameRequest *request,
     ActionRoomSceneFrameState *state) {
   if (!scene || !request || !state || !scene->have_video_profile ||
-      !scene->have_raster_waveform || request->camera_x < 0 ||
+      !scene->have_raster_waveform ||
+      (scene->raster_preset == kActionRoomRaster_R4 &&
+       !scene->have_raster_r4_window) || request->camera_x < 0 ||
       request->camera_y < 0)
     return false;
   memset(state, 0, sizeof(*state));

@@ -128,14 +128,17 @@ The stable two-background scene milestone is implemented:
   rooms, while retaining the pinned 30 animated rooms, two page-cycle rooms,
   17 raster-bearing rooms, and five forced-BG2-priority rooms.
 
-The stable live acceptance set is now byte-exact for R1, R2, R3, R5, R6, and
-R9: 7,049,476 pre-scanline PPU registers compared with zero mismatches. R1 is
-covered by a natural `0102 -> 0103 -> 0104` route through the complete Fillmore
+The stable live acceptance set is now byte-exact for R1, R2, R3, R4, R5, R6,
+and R9. The original six-preset matrix compares 7,049,476 pre-scanline PPU
+registers with zero mismatches; the natural Aitos route adds 250,638 exact R4
+registers across 222 `0405` frames. R1 is covered by a natural
+`0102 -> 0103 -> 0104` route through the complete Fillmore
 boss fight; R2 also pins one authentic hit-stop/action-update hold, where the
 game displays the preceding persistent table for one additional frame and the
 stateful oracle accepts it only when that complete prior immutable state
-matches. The remaining raster acceptance work is fixture coverage for the
-boss/transition-only R4, R7, R8, and R10 callbacks, not missing builder logic.
+matches. R4 is covered by a natural `0404 -> 0405 -> 0406 -> 0407` route. The
+remaining raster acceptance work is fixture coverage for the
+boss/transition-only R7, R8, and R10 callbacks, not missing builder logic.
 BG3 HUD, real OBJ streams, fades, and gameplay-object-driven window timelines
 remain outside this standalone background contract by design.
 
@@ -324,7 +327,7 @@ are SNES register addresses; `$02:96D4` is the ROM's 256-byte waveform table.
 | R1 | `0104` | `$02:92D8` | ch2 BG2HOFS `$210F` | 111 two-line samples, waveform phase `frame/2`, plus frame scroll |
 | R2 | `0201` | `$02:9204` | ch2 BG2HOFS `$210F` | 127 static lines then 96 one-line fixed-point perspective samples from `2*(frame+cameraX)` |
 | R3 | `0202`,`0203` | `$02:931A` | ch2 BG2VOFS `$2110` | 127 static lines then a 32-line descending vertical ripple |
-| R4 | `0405` | `$02:9382` | ch2 MOSAIC `$2106` | 112 two-line samples toggling BG2 mosaic from the waveform table |
+| R4 | `0405` | `$02:9382` | ch2 MOSAIC `$2106` | 112 two-line samples; low-byte `frame/4` phase, with the inherited 16-bit source index selecting the ROM window after the waveform |
 | R5 | `0401` | `$02:93DF` | ch2 BG2HOFS `$210F` | nine bands with counts `63,16,8,8,16,8,16,40,80`; upper motion uses frame/camera fractions |
 | R6 | `0601`,`0605` | `$02:945E` | ch2 BG2HOFS `$210F` | six upper bands plus 32 one-line perspective samples; depends on frame and camera X |
 | R7 | `0608` | `$02:94E9` | ch2 BG2HOFS `$210F` | 111 two-line waveform samples with an increasing phase step |
@@ -344,6 +347,17 @@ of the two Mode-2 scroll bytes in selected entries, so the untouched byte is
 the corresponding byte from the last decompression. This seemingly stale data
 is visible PPU input and is exported explicitly in schema v4. R4 is Mode 0;
 R5, R6, and R8 write complete 16-bit scroll samples.
+
+R4 has a separate original-ROM quirk. `$02:9382` reads only the low byte of
+`$88`, shifts it twice, stores that byte to DP `$00`, and then reloads the
+scratch pair as a 16-bit X index. Settled action mode leaves DP `$01 = $01`, so
+the source is `$02:97D4+phase`: the 256-byte ROM window immediately following
+the nominal `$02:96D4` waveform, including adjacent code bytes. The editor
+descriptor exports that window separately. On natural entry to `0405`, the
+first callback still carries the preceding room's scratch high byte and emits
+a flat `$02` MOSAIC table; the first visible R4 scanout retains that table.
+`ActionRoomSceneFrameRequest.raster_entry_frame` names this one-frame state,
+while ordinary editor previews use the settled deterministic pattern.
 
 Visible presentation frame N normally scans the table built during action tick
 N-1, including that tick's camera X. The callback belongs to the action-update
@@ -443,14 +457,15 @@ shape/target, both page-cycle rooms, the five forced-BG2-priority rooms, and a
 Marahna colour-math room. Then run all 49 rooms at a stable camera and at every
 available map edge.
 
-The current live set covers R1 (`0104`), R2 (`0201`), R3 (`0202`), R5
-(`0401`), R6 (`0601`), and R9 (`0702`). It compares the immutable full-world
-publications and 7,049,476 resolved pre-scanline registers with zero mismatch;
-the exact runs are listed under Evidence below. The other four raster presets
-belong to boss/transition rooms for which raw warp is not a valid initialization
-fixture. They require recorded natural entry/replay fixtures before their live
-acceptance can be claimed, although their ROM builders and C/JavaScript golden
-frames are already pinned.
+The current live set covers R1 (`0104`), R2 (`0201`), R3 (`0202`), R4
+(`0405`), R5 (`0401`), R6 (`0601`), and R9 (`0702`). The original six-preset
+matrix compares the immutable full-world publications and 7,049,476 resolved
+pre-scanline registers with zero mismatch; natural Aitos adds 250,638 exact R4
+registers. The exact runs are listed under Evidence below. The other three
+raster presets belong to boss/transition rooms for which raw warp is not a
+valid initialization fixture. They require recorded natural entry/replay
+fixtures before their live acceptance can be claimed, although their ROM
+builders and C/JavaScript golden frames are already pinned.
 
 ## Remaining knowledge gaps
 
@@ -460,14 +475,15 @@ None of these blocks a stable arbitrary-room editor preview:
    only if the editor needs named previews of those moments. Stable room state
    is already deterministic.
 2. **Exact first-visible phase origin.** Authoring uses explicit phase controls.
-   Native-start golden tests may still pin the initial animation/page/raster
-   phase for each family.
+   R4's low-byte phase and flat entry frame are now pinned; native-start golden
+   tests may still pin the initial animation/page/raster phase for other
+   families.
 3. **BG3/OBJ presentation completeness.** Background authoring does not need
    gameplay sprites. A “literal game frame” toggle would need the common HUD
    and a defined static actor fixture, not a room loader change.
 4. **Boss-transition differential fixtures.** Every room has C-rendered and
-   JavaScript-checked stable-frame coverage, and the live R1/R2/R3/R5/R6/R9
-   set is exact. Natural-entry recordings are still needed for R4/R7/R8/R10;
+   JavaScript-checked stable-frame coverage, and the live R1/R2/R3/R4/R5/R6/R9
+   set is exact. Natural-entry recordings are still needed for R7/R8/R10;
    raw map warps do not establish those rooms' boss/transition callback state.
 5. **Transient boss margin/window policy.** This is a widescreen presentation
    audit, not missing room construction.
@@ -502,15 +518,41 @@ power-on:
 AR_INPUT_REPLAY=saves/act1-boss2.bin \
 AR_REPLAY_LIVE_AFTER_END=1 \
 AR_INPUT_RECORD=saves/fillmore-r1-natural.rec \
+AR_MOONJUMP=1 \
+AR_NO_KNOCKBACK=1 \
+AR_RANGED_SWORD=1 \
 AR_ACTION_ROOM_SCENE_COMPARE=1 \
 ./build-release/ActRaiserRecomp ar.sfc --config config.ini
 ```
 
-The same procedure is still required for `0405` (R4), `0608` (R7), `0701`
-(R8), and `0708` (R10). Keep the boot SRAM and gameplay-affecting settings with
+The same procedure is still required for `0608` (R7), `0701` (R8), and `0708`
+(R10). Keep the boot SRAM and gameplay-affecting settings with
 each fixture; controller input alone is not deterministic without them. The
 comparator remains read-only, and replay sessions protect the normal SRAM and
 settings files even after control is handed back to the player.
+
+`saves/aitos-r4-natural.rec` is the completed R4 fixture (SHA-256
+`bd1e7b576e0c11529844175173ee16127a3a9781af021105f66b978d6b7509e4`). It
+uses boot SRAM SHA-256
+`11dcdfb6c28cbf97f4ccd5f3c8ba1cf831f1864d029d6f8aaf67ad962ab79858`
+and traverses `0404 -> 0405 -> 0406 -> 0407`. Manual capture
+`runs/20260822-171954/` and deterministic replay `runs/20260822-173608/`
+have byte-identical final WRAM, SRAM, dispatch log, and complete state. The
+route compares 3,353 action frames / 3,785,537 registers with zero mismatch;
+its 222 R4 frames account for 250,638 registers. Capture and replay pin the
+same gameplay-assist profile explicitly. Default-HLE run
+`runs/20260822-174151/` and commands-7-through-3 plus immutable-source-off
+control `runs/20260822-174203/` are byte-identical for all 11 comparable
+frame-2700 and final-state artifacts:
+
+```sh
+AR_MOONJUMP=1 \
+AR_NO_KNOCKBACK=1 \
+AR_RANGED_SWORD=1 \
+AR_ACTION_ROOM_SCENE_COMPARE=1 \
+AR_INPUT_REPLAY=saves/aitos-r4-natural.rec \
+./build-release/ActRaiserRecomp ar.sfc --config config.ini
+```
 
 ## Complete room matrix
 
@@ -575,7 +617,7 @@ Targets are VRAM word addresses and strides are bytes.
 
 - ROM static disassembly: `$02:B4E8`, `$02:BAF5`, `$02:BC27-$BC56`,
   `$02:9204-$96D3`, and the callbacks that call those builders.
-- Exporter audit: 49 rooms, 0 failures, 176 pooled blobs, 887 KiB raw.
+- Exporter audit: 49 rooms, 0 failures, 177 pooled blobs, 887 KiB raw.
 - Runtime character traces: `0202` target `$0000`; `0102` target `$1000`;
   both capture exactly 4 KiB into `$7F:B800-$BFFF`.
 - Runtime page-cycle trace: `0402` BG2SC `$74,$78,$7C,$70`, five game frames
@@ -599,6 +641,19 @@ Targets are VRAM word addresses and strides are bytes.
   framebuffer, WRAM, VRAM, CGRAM, OAM/high-OAM and PPU registers, plus all
   four final-state artifacts. The native-source arm also matches the complete
   2,048-tile `0104` BG1 world.
+- Natural R4 acceptance, 2026-08-22: manual capture
+  `runs/20260822-171954/` and deterministic replay
+  `runs/20260822-173608/` traverse `0404 -> 0405 -> 0406 -> 0407` and match
+  final WRAM/SRAM/dispatch/state byte-for-byte. Across the route, 3,353 frames
+  compare 3,785,537 registers with zero mismatch; the 222 `0405` frames
+  contribute 250,638 exact R4 registers. The fixture pins moon jump, no
+  knockback, and ranged sword in both capture and replay. It exposed and now
+  pins R4's low-byte-only phase, inherited source-page index, and flat first
+  visible table. Default-HLE run `runs/20260822-174151/` and native
+  presentation-bootstrap/source control `runs/20260822-174203/` are
+  byte-identical at R4 frame 2700 for the framebuffer, WRAM, VRAM, CGRAM,
+  OAM/high-OAM and PPU registers, plus all four final-state artifacts. The
+  control also matches all seven published room layers / 86,016 tiles.
 - First production-source A/B, 2026-08-22: live-WRAM manifest
   `runs/bg-hle-matrix-20260822-133427.json` versus immutable-room manifest
   `runs/bg-hle-matrix-20260822-133346.json`. All 12 ordinary-entry targets

@@ -124,6 +124,12 @@ raster identity, palette, CHR decode, and the final 8 KiB decompression
 workspace therefore have one C authority rather than a JavaScript or tool-only
 interpretation. The workspace matters because six ROM raster families leave
 selected Mode-2 HDMA bytes untouched and inherit the bytes last staged there.
+R4 also exports the 256-byte ROM window immediately after the nominal waveform:
+its native routine shifts only the low frame byte, writes only the low byte of
+a 16-bit scratch index, and inherits a high byte of one in settled action mode.
+The resulting MOSAIC pattern therefore samples adjacent ROM bytes rather than
+the clean waveform page. The shared C and JavaScript builders both preserve
+that quirk; a separate request flag models R4's flat first visible entry table.
 Identical asset blobs are pooled across rooms to keep the generated HTML
 compact.
 
