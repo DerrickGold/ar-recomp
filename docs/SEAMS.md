@@ -2223,7 +2223,7 @@ table at **`$05:8000`** (cursor in the long pointer `$A2`):
   | 6 | `$02:B330` — CGRAM/palette load (writes `$2121` then streams `$2122`). Guarded action-only HLE for audited 128-byte slices, with native fallback | 6 |
   | 5 | `$02:B363` — **metatile definition table** (selector at operand 3: `$01` → `$7E:2100` BG1, `$02` → `$7E:2900` BG2). 2048 bytes, stored **byte-swapped**. Guarded action-only HLE; raw/non-action/BG3/unexpected shapes retain the decoded native body | 7 |
   | 4 | `$02:B3EB` — **generic WRAM data load** (selector at operand 0: `$01` → the BG1 metatile-id map at `$7E:8000`, i.e. the collision layer; `$02` → the BG2 map at `$7E:C000`). Blob header is `[widthChunks][heightChunks][size16]`, and the width/height bytes are what set the level dimensions `$2E`/`$30`. Guarded action-only HLE with native fallback | 4 |
-  | 3 | `$02:B4E8` — applies the 28-byte section video profile: PPU layout/masks/colour math plus priority, parallax, fade/page and character-animation state. Guarded action-only HLE for all 44 audited profile IDs; non-action/unexpected shapes retain native | 1 |
+  | 3 | `$02:B4E8` — applies the 28-byte section video profile: PPU layout/masks/colour math plus priority, parallax, fade/page and character-animation state. Guarded action-only HLE for all 43 audited profile IDs; non-action/unexpected shapes retain native | 1 |
   | 2 | `$02:B631` | 3 |
   | 1 | `$02:B63B` — script-driven song change (already documented in the Audio section) | 5 |
   | 0 | `$02:B69C` — **OBJ animation/composition blob** | 6 |

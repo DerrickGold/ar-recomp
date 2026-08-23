@@ -170,7 +170,7 @@ The same-binary manifests
 `runs/action-room-video-hle-matrix-20260822-v1.json` record:
 
 - the static 49-room action script census contains 49 command-3 invocations
-  and 44 distinct admitted profile IDs;
+  and 43 distinct admitted profile IDs;
 - 12/12 ordinary-entry targets passed in both arms;
 - the HLE arm applied 12 profiles / 336 record bytes;
 - the independent command-4/5 oracle, finite provider, room-scene source and

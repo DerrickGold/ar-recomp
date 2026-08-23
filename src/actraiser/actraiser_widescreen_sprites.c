@@ -158,6 +158,22 @@ static int ws_sprite_debug_enabled(void) {
   return enabled;
 }
 
+static int ws_action_debug_enabled(void) {
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *e = getenv("AR_WS_ACTDBG");
+    enabled = (e && e[0] && e[0] != '0');
+  }
+  return enabled;
+}
+
+static int ws_object_slot_log_enabled(void) {
+  static int enabled = -1;
+  if (enabled < 0)
+    enabled = getenv("AR_OBJSLOTLOG") != NULL;
+  return enabled;
+}
+
 typedef struct WsActivationCandidate {
   uint8 present;
   uint8 definition_bank;
@@ -187,13 +203,8 @@ static int ws_axis_visible(uint16 pos, uint16 leading, uint16 trailing,
  * not the authentic 256px activation window. This deliberately does not call
  * object logic, alter $0400, build OAM, or load graphics. */
 void ActRaiser_WidescreenSpriteActivationProbe(void) {
-  static int enabled = -1;
   static WsActivationCandidate prior[kActivationProbeObjectCount];
-  if (enabled < 0) {
-    const char *e = getenv("AR_WS_ACTDBG");
-    enabled = (e && e[0] && e[0] != '0');
-  }
-  if (!enabled || !g_ppu ||
+  if (!ws_action_debug_enabled() || !g_ppu ||
       !ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]))
     return;
 
@@ -491,8 +502,7 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
   int activation_r = activation_wide ? live_r : 0;
   uint16 activation_camera_x =
       activation_wide ? camera_x : authentic_camera_x;
-  const char *actdbg = getenv("AR_WS_ACTDBG");
-  int activation_debug = actdbg && actdbg[0] && actdbg[0] != '0';
+  int activation_debug = ws_action_debug_enabled();
 
   for (;;) {
     uint16 status = cpu_read16(
@@ -699,7 +709,7 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
   definition_address++;
   ws_dp16w(cpu, kSpriteDp_ComponentCount, component_count);
 
-  if (getenv("AR_OBJSLOTLOG")) {
+  if (ws_object_slot_log_enabled()) {
     /* world= and cam= are what separate a genuinely world-placed object from
      * one the game is driving along a SCREEN path by rewriting its world
      * coordinate every frame. For the first, screen = world - cam and a wider

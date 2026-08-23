@@ -74,7 +74,9 @@ The stable two-background scene milestone is implemented:
   TMW/TSW, colour-math, mode and BGSC fields with the live PPU immediately
   before each visible line, preserving HDMA timing in the oracle. It reports
   the first mismatch and never changes gameplay, provider eligibility, or PPU
-  state.
+  state. `AR_ACTION_ROOM_SCENE_COMPARE_VERBOSE=1` logs accepted raster holds
+  and raises mismatch reporting from the first failure to at most 128 reports;
+  it has no effect unless the main comparison gate is enabled.
 - `ActRaiserActionBg_StageRoomSceneLayer` now materializes the exact native
   command-4/5 output image: BG1/BG2 pixel dimensions, only the active
   page-major map bytes at `$7E:8000/$C000`, and the byte-swapped 2 KiB
@@ -110,7 +112,7 @@ The stable two-background scene milestone is implemented:
   BG mode/screens, windows, colour math, common priorities, parallax ratios,
   fade/page/character-animation state, timer and renderer-nonoperative `$F2`.
   Its read-only guard requires D/DB=0, native M1X0 action entry, and one of the
-  44 profile IDs present in the 49-room stock script census. Unsupported modes,
+  43 profile IDs present in the 49-room stock script census. Unsupported modes,
   non-action calls, unknown operands, and `AR_ACTION_ROOM_VIDEO_HLE=0` execute
   the generated native body. Commands 2/1/0 and the enclosing VM stay native.
 - The live comparator and production provider own separate `ActionBgWorld`
@@ -815,7 +817,7 @@ Targets are VRAM word addresses and strides are bytes.
   arm executes 12 profile applications (336 record bytes). All 204 complete
   framebuffer, WRAM/SRAM, VRAM, CGRAM, OAM, PPU-snapshot, dispatch and
   final-state artifacts are byte-exact. The 49-room static census contains 49
-  command-3 invocations and 44 profile IDs (`$03-$2E` excluding `$08`). The
+  command-3 invocations and 43 profile IDs (`$03-$2E` excluding `$08`). The
   ROM-free CPU test pins every PPU/direct-page field, both priority paths, the
   `$C4/$C1` transform, script cursor, registers/status, stack/RTS, explicit-off
   behavior and guarded fallbacks.

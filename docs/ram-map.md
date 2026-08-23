@@ -178,7 +178,8 @@ than matching artwork alone:
 | $7F:B000-$B6BF | 1728 | HUD/BG3 tilemap compose buffer (rows 0-3 streamed every frame to VRAM $5800; rows 4-26 on $F1) |
 | $7F:0000-$1FFF | 8192 | **Full town BG1 tilemap**, the whole 64x64-tile (512x512 pixel) town, not just the on-screen window. Quadrant-paged: `$03:9B5A/$03:9C43` write each cell's 2x2 tile block at `quadrant*2048 + (cellY & 15)*128 + (cellX & 15)*4`, four words at `+$00/+$02/+$40/+$42`, using terrain/structure definitions respectively. Both HLE wrappers and bridge-side rendering share `ActRaiser_CopyTownMetatile`. Row stride is 32 tiles, quadrant stride 32x32 tiles. A row-major read looks like an unrelated layer — it was mistaken for BG2 twice before `$9C43` was disassembled. This is the authoritative displayed cell artwork across staged construction and Marahna's water-to-land event; the semantic `$7F:2000` value can lead the visible redraw, so presentation observes this range plus live VRAM/CGRAM rather than reconstructing the image from cell ids |
 | $7F:1000-$1FFF | 4096 | (Within the above.) The lower two quadrant pages happen to be the range the graphics orchestrator streams to VRAM; SEAMS' "BG tilemap → VRAM" row describes that upload, not a separate buffer |
-| $7E:2100-$28FF | 2048 | Loaded BG1 metatile definitions, 8 bytes (four tilemap words) per terrain ID. `$03:9B5A` expands these definitions into the live town tilemap through the shared metatile-copy HLE; the build-direction predicate `$03:96EF` tests bit `$0200` in the top-left word as its impassable-terrain marker before consulting the per-cell traversal flag. |
+| $7E:2100-$28FF | 2048 | Mode-dependent BG1 metatile definitions, 8 bytes (four tilemap words) per ID. In towns, `$03:9B5A` expands this terrain atlas into the live tilemap and `$03:96EF` tests top-left bit `$0200` as its impassable marker. In action rooms, command 5 installs the BG1 rendering/collision definitions here. |
+| $7E:2900-$30FF | 2048 | Action BG2 metatile definitions, 8 bytes (four tilemap words) per ID, installed by command 5. Outside action mode this range is shared and must not be treated as persistent BG2 authority. |
 | $7F:2000-$37FF | 6144 | **Six town terrain cell maps**, one 32x32-cell, `$400`-byte block per town. Each block is quadrant-paged as four 16x16 pages at +0/+256/+512/+768. Values are semantic terrain ids or temporary/special structure marks: terrain redraws expand `$7E:2100` through `$03:9B5A`, while structure rebuilds expand `$7E:3100` through `$03:9C43`; structure records' `+0/+1` cell X/Y address the active block. During staged animation this semantic value may change before the displayed 2x2 words at `$7F:0000`, so it is not a presentation oracle. `$03:9710` computes its index through the shared `ActRaiser_CellMarkIndex` HLE; `$03:96EF` consumes the indexed terrain ID through the traversal-predicate HLE; `$02:865C` consumes all six blocks when stamping the authentic developed world map, while the host's pure `SimWorldMap_ComposeDeveloped` reads the same bytes explicitly. |
 | $7E:3100+ | 2048 | Structure metatile table: 8 bytes (four BG1 tilemap words) per metatile index, consumed by the shared `$03:9C43` metatile-copy HLE and bridge-side renderer. Note the cell value is **not** a direct index — expansion is a write path the game runs on change, and cell → 2x2 block is only ~62-77% single-valued when inverted, so read `$7F:0000` rather than trying to rebuild it |
 | $7F:B800-$BFFF | `$1000` | Contiguous 4 KiB character-animation snapshot used by action mode and sim towns (`$18=0`, `$19!=0,9`). During scene entry `$02:BAF5` reads `$1000` bytes of character VRAM beginning at word `$DA` (`$0000` or `$1000`) into this range; `$02:BC56` later selects `$E1`-byte phase `($E0 & $DF)` and `$02:AF30` uploads it back. Raw config cadence bit 7 marks a continuation and makes `$BAF5` retain the prior capture. Only the separate sim `$19=0 or 9` branch uses ROM bank `$0A` directly through `$02:AF86`. |
@@ -194,6 +195,22 @@ than matching artwork alone:
 | $7E:0316 | 2 | Current world-navigation zoom state |
 | $7E:0318 | 2 | Target world-navigation zoom state |
 
+## Action-room bootstrap background staging (mapped 2026-08-22)
+
+These ranges are the exact resident background image produced by asset-script
+commands 5 and 4. The guarded CPU HLE and `ActionRoomScene` staging path both
+preserve bytes outside the active ranges, which matters because several of the
+addresses are shared scratch in other game modes.
+
+| Address | Size | Action-room meaning |
+|---------|------|---------------------|
+| $7E:2100-$28FF | 2048 | BG1 metatile definitions: 256 entries × four little-endian tilemap words. Command 5 decompresses through `$7E:6000`, then byte-swaps the ROM words into this table. This range is mode-dependent and serves the town terrain atlas outside action mode. |
+| $7E:2900-$30FF | 2048 | BG2 metatile definitions in the same four-word layout. Command 5 owns the full range for an action BG2 load. |
+| $7E:6000-$7FFF | 8192 | Shared action graphics workspace. Compressed command-7 character banks and command-5 metatiles expand here before VRAM/definition-table copies. Persistent raster builders later reuse `$6000`, `$6800`, or `$7000`; partially written raster entries intentionally retain bytes from the last decompression. |
+| $7E:8000+ | `widthChunks × heightChunks × 256` | BG1 page-major metatile-id map loaded by command 4. `$46` points here in stock action rooms; `$2E/$30` publish `widthChunks/heightChunks × 256` pixels. This is also the collision map consumed by `$00:91C3`. |
+| $7E:C000+ | `widthChunks × heightChunks × 256` | BG2 page-major metatile-id map loaded by command 4; `$4A` points here and `$32/$34` hold its pixel dimensions. Only the active prefix is action-owned. The enclosing `$C000-$FFFF` range is reused by the world-map and town paths. |
+| $7F:B800-$BFFF | 4096 | Character-animation source snapshot captured by `$02:BAF5` from VRAM word `$DA`; `$02:BC56/$02:AF30` upload phase-sized windows back to the same target. Continuation profiles intentionally retain the prior capture. |
+
 ## Action terrain collision (mapped 2026-08-02 — SEAMS "Content / randomizer seams" §5b)
 | Address | Size | Description |
 |---------|------|-------------|
@@ -204,10 +221,11 @@ than matching artwork alone:
 | $7E:2100 | varies | Metatile definitions, 8 bytes each = four 16-bit BG tilemap words in TL, TR, BL, BR order. LZSS-decompressed at level entry |
 | $7E:8000 | varies | **Metatile-id map**, one byte per 16px tile, stored in 16×16-tile chunks: `index = ((ty>>4)*$2F + (tx>>4))*256 + (ty&15)*16 + (tx&15)`. LZSS-decompressed at level entry. Fillmore act 1 = 256×48 tiles = 16×3 chunks = `$3000` bytes |
 
-## Decompression State ($7E:00A0+)
+## Asset-script and decompression state ($7E:00A0+)
 
 | Address | Size | Description |
 |---------|------|-------------|
+| $7E:00A2 | 3 | Asset-script long pointer. `$02:B1F7` and its command handlers address the current operand as `[$A2],Y`; the guarded action HLEs advance Y exactly as the native handlers do. |
 | $7E:00A5 | 3 | Long pointer to compressed input byte |
 | $7E:00AB | 3 | Long pointer to current music data |
 | $7E:00AE | 1 | Bit weight (0x80, 0x40... 0x01) |
@@ -332,7 +350,7 @@ see [save-format.md](save-format.md) §3.
 |---------|------|-------------|
 | $7E:4000+ | varies | Per-act decompressed ordinary-object animation/composition blob. Loaded by `$02:B69C` only at act-entry maps and inherited by later maps in the same act. Bloodpool scene composition pointers `$45EF/$4610/$46FE/$479D`, Marahna orb pointers `$4504/$4510/$451C/$4528`, snake-shot pointers `$4869/$487C`, split/link pointers `$4597/$4BCD/$4BD9/$45B8/$45C4/$45D0/$45DC/$4AA1/$4B82`, excluded reaper-orb pointers `$47E5/$4806/$4827/$4848`, excluded platform pointer `$4BE5`, and Aitos `$4D21/$4D2D` are addresses inside this mutable WRAM blob, not ROM symbols. Marahna boss-room pointers `$57C2/$5868/$59DE/$5CE0/$5D01/$5D0D/$5D2E` live in its separate `$7E:5000` bank. |
 | $7E:5000+ | varies | Per-map decompressed boss animation/composition blob selected by the same asset-script command with nonzero destination flag. Aitos boss-volley visuals `$20/$21/$23` resolve to mutable WRAM compositions `$56BE/$56D8/$56FE` in run `20260812-000613`; like every loaded pointer, these addresses identify artwork only inside the validated map/source lifecycle. |
-| $7E:6000-$7E:7FFF | 8KB | Graphics metadata |
+| $7E:6000-$7E:7FFF | 8KB | Shared action character/metatile decompression workspace and persistent-raster table storage. R1-R6/R8 use `$6000`, R7/R10 BG1 use `$6800`, R9 uses `$7000`, and R10 BG2 uses `$6000`; untouched bytes can remain presentation-visible. |
 | $7F:2000+ | varies | Arrangement data |
 | $7F:6800+ | varies | Road construction data (one word per 4x4 block) |
 | $7F:B000-$7F:B7FF | 2KB | BG3 tilemap |

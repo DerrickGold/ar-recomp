@@ -941,8 +941,9 @@ changing any editor row only stages a value; neither action fires implicitly.
 
 ## 11. Excluded from the menu
 
-**Debug / diagnostic flags (~45 of the 69 `AR_*`)** — stay on `getenv`, most set
-a global once in the boot init block. Not for end users; at most a hidden
+**Debug / diagnostic flags (~45 of the 69 `AR_*`)** — stay as environment
+controls, with recurring game/render-path options snapshotted before the first
+emulated frame. They are not for end users; at most a hidden
 "Developer" submenu: `AR_TRACE*`, `AR_*LOG`, `AR_MXCHECK/MXHIST/EXITMX/CALLMX`,
 `AR_TRAPFN`, `AR_DUMP*`, `AR_SHOT*`, `AR_VRAMDUMP*`, `AR_WRAM*`, `AR_SRAM_FILL`,
 `AR_FORCE18`, `AR_FORCE_INPUT*`, `AR_INPUT_RECORD/REPLAY`, `AR_REPLAY_NOSTOP`,
