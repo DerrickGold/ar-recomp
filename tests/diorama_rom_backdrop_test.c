@@ -316,6 +316,27 @@ static void TestFrameStateAndRasterPresets(void) {
   CHECK(state.bgmode == 1);
   CHECK(state.brightness == 15);
 
+  scene.group = 0x04;
+  scene.map = 0x02;
+  scene.bg[1].pages_wide = 2;
+  scene.bg[1].pages_high = 2;
+  scene.bg[1].map_size = 4 * kActionRoomSceneMapPageBytes;
+  scene.video_profile[19] = 0x0c;
+  CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
+  CHECK(state.bg2_page_index == 3);
+  CHECK(state.bgsc[1] == 0x7c);
+  ActionRoomSceneFrameRequest page_request = request;
+  page_request.page_phase = 3;
+  CHECK(ActionRoomScene_BuildFrameState(&scene, &page_request, &state));
+  CHECK(state.bg2_page_index == 0);
+  CHECK(state.bgsc[1] == 0x70);
+  scene.group = 0;
+  scene.map = 0;
+  scene.bg[1].pages_wide = 1;
+  scene.bg[1].pages_high = 1;
+  scene.bg[1].map_size = kActionRoomSceneMapPageBytes;
+  scene.video_profile[19] = 0;
+
   scene.raster_preset = kActionRoomRaster_R1;
   memset(scene.raster_workspace, 0, sizeof(scene.raster_workspace));
   scene.raster_workspace[2] = 2;
@@ -382,6 +403,14 @@ static void TestFrameStateAndRasterPresets(void) {
   CHECK(state.bg_hscroll[1][189] == 32);
   CHECK(state.bg_hscroll[1][190] == 1);
   CHECK(state.bg_hscroll[1][191] == 3);
+  ActionRoomSceneFrameRequest entry_request = request;
+  entry_request.raster_entry_frame = true;
+  scene.have_raster_entry_camera_x = true;
+  scene.raster_entry_camera_x = 0x01c0;
+  CHECK(ActionRoomScene_BuildFrameState(&scene, &entry_request, &state));
+  CHECK(state.bg_hscroll[1][77] == 0x10);
+  CHECK(state.bg_hscroll[1][78] == 0xe0);
+  scene.have_raster_entry_camera_x = false;
 
   scene.raster_preset = kActionRoomRaster_R7;
   memset(scene.raster_workspace, 0, sizeof(scene.raster_workspace));
@@ -404,6 +433,23 @@ static void TestFrameStateAndRasterPresets(void) {
   CHECK(state.bg_hscroll[1][78] == 0x100);
   CHECK(state.bg_hscroll[1][79] == 16);
   CHECK(state.bg_hscroll[1][143] == 32);
+  scene.video_profile[5] = 0x0c;
+  CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
+  CHECK(state.bgsc[1] == 0x70);
+  entry_request = request;
+  entry_request.raster_entry_frame = true;
+  scene.have_raster_entry_camera_x = true;
+  scene.raster_entry_camera_x = 0x0010;
+  CHECK(ActionRoomScene_BuildFrameState(&scene, &entry_request, &state));
+  CHECK(state.bgsc[1] == 0x73);
+  CHECK(state.bg_hscroll[1][79] == 4);
+  CHECK(state.bg_hscroll[1][143] == 8);
+  entry_request.bgsc_override_mask = 1u << 1;
+  entry_request.bgsc_override[1] = 0x74;
+  CHECK(ActionRoomScene_BuildFrameState(&scene, &entry_request, &state));
+  CHECK(state.bgsc[1] == 0x74);
+  scene.have_raster_entry_camera_x = false;
+  scene.video_profile[5] = 0;
 
   scene.raster_preset = kActionRoomRaster_R10;
   memset(scene.raster_workspace, 0, sizeof(scene.raster_workspace));

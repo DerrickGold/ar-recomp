@@ -199,8 +199,8 @@ plus immutable-source-off control `runs/20260822-170914/` capture game frame
 framebuffer; snapshot WRAM, VRAM, CGRAM, OAM, high OAM and PPU registers; and
 final WRAM, SRAM, dispatch and complete state. The control additionally
 compares the complete 2,048-tile profile-$06 BG1 publication with zero
-mismatch. R1 is therefore promoted to the live raster set; natural-entry
-fixtures remain for R7/R8/R10.
+mismatch. R1 is therefore promoted to the live raster set; the later natural
+Northwall and Death Heim fixtures below close R7/R8/R10 as well.
 
 Natural Aitos acceptance promotes R4 as well. Recording
 `saves/aitos-r4-natural.rec` (SHA-256
@@ -222,6 +222,21 @@ framebuffer, PPU snapshot, and final-state artifacts are byte-identical. The
 control additionally compares all seven published route layers / 86,016 tiles
 with zero mismatch.
 
+Natural Northwall and Death Heim acceptance complete the raster-family set.
+`saves/northwall-r7-natural.rec` (SHA-256
+`c20d244499e73ff72f27052f5011c8b85ef89320b9ea7006c99e038975353c58`)
+replays the real `0605 -> 0606 -> 0607 -> 0608` transition. Run
+`runs/20260822-180657/` compares 3,592 action frames / 4,055,368 registers
+with zero mismatch; default/native-control runs `180838/180845` match all 11
+frame and final-state artifacts. `saves/death-heim-r8-r10-natural.rec`
+(SHA-256
+`3fba9582f2ff0401c85414510bcf8e555e3c3273df69a6948a42d877dd7a184a`)
+covers every rematch, the final boss, and the ending handoff. Run
+`runs/20260822-180704/` compares 14,637 action frames / 16,525,173 registers
+with zero mismatch, including 1,351 retained-table ending frames;
+default/native-control runs `180852/180913` match the R8, R10, and ending PPU
+snapshots, framebuffer, and final emulated state byte-for-byte.
+
 ## What this does not prove
 
 This is an entry census, not the complete BH1 gate:
@@ -229,11 +244,9 @@ This is an entry census, not the complete BH1 gate:
 - the warp is a real game transition from non-action state, but deterministic
   replay input after entry was recorded for Fillmore; this is visual/source
   evidence, not a gameplay acceptance run for every target;
-- each target samples the early room at two times. Mid-level BGSC handoffs,
-  bosses, narrow mixed-policy scanline bands, and ending transitions remain;
-- the native Death Heim route is now covered through `$0706`, but `$0707`,
-  `$0708`, and the ending handoff still need the same continuous-run evidence;
-  Northwall boss target `0608` still needs a natural act-2 transition;
+- each original matrix target samples the early room at two times. The later
+  natural fixtures cover Northwall's boss and the complete Death Heim ending,
+  but are not gameplay acceptance for every possible object/window timeline;
 - the framebuffers are authentic flat composites, but individual priority-plane
   captures and deliberate visual positive controls remain open;
 - full-level rasterisation from resident WRAM still needs CHR-aware visual
@@ -291,7 +304,9 @@ The observer rebuilt eight layer sources across those replacements and compared
 in `runs/20260809-120758/` independently identify six maps, one exact source
 variant per map/layer, and zero offline mismatch. The borrowed replay ends while
 `0706` is in its post-boss coroutine, so this evidence does not promote the
-uncaptured `0707`/`0708`/ending tail to verified.
+uncaptured `0707`/`0708`/ending tail to verified. The later
+`saves/death-heim-r8-r10-natural.rec` fixture does: it continues through every
+rematch, `0708`, the final boss, and the natural ending transition.
 
 The same run explains its only 364 out-of-world lookups. At GF 5293 in `0705`,
 BG2 declares a finite 256x256 world while its camera is `(104,0)`. A 256px
@@ -494,8 +509,9 @@ layer-frames, and 53,189,472 successful provider lookups with zero provider
 preflight defect. All 65 paired artifacts are exact. The comparator's 377
 finite BG2 exits in `0705` remain the documented decorative-layer observation;
 that layer is deliberately native. Historical human playthrough evidence covers
-every boss and the ending; natural `0608` and automated `0707`/`0708` ending-tail
-captures remain named BH1 archival gaps.
+every boss and the ending. The 2026-08-22 natural Northwall and full Death Heim
+recordings subsequently close the named `0608` and `0707`/`0708` ending-tail
+archival gaps.
 
 Lifecycle evidence includes same-game-frame paused redraw and policy rebind,
 explicit provider reset, fresh-process startup/restart ownership, savestate load
@@ -596,10 +612,11 @@ valid boss-arena baseline: it shows patterned/garbage CHR, then the shortcut
 self-exits to Sky Palace before frame 500. This is direct proof that tile-word
 parity alone does not establish character-data residency or a coherent scene.
 
-The earlier documentation calling `0608` a verified focused-test target was
-too strong. Keep its tile-source evidence, reject its framebuffer, and obtain a
-natural Northwall act-2 boss transition before closing BH1 or any pixel-parity
-gate.
+The earlier documentation calling this shortcut a verified focused-test target
+was too strong. Its framebuffer remains rejected. The later natural Northwall
+recording supersedes it: `runs/20260822-180657/` reaches `0608` through the
+real act-2 transition with 4,055,368 exact route registers, and the
+default/native-control pair `180838/180845` is byte-identical.
 
 ## Per-layer extent-role census — 2026-08-10
 
@@ -786,6 +803,7 @@ with a direct regression assertion.
 
 A pinned `$0347=7` route reaches the real `0701` `$64/$74` page switch but
 remains black, so it is not accepted as a visual shortcut for the natural
-ending. The natural Death Heim ending tail and natural Northwall `0608`
-transition remain useful archival/manual fixture gaps, not untested branches
-of the implemented extent machinery.
+ending. The later natural recordings close both archival gaps: Northwall
+reaches `0608` through act 2, while Death Heim naturally exercises `$64/$74`
+and retains the last R8 table across 1,351 ending frames. These validate the
+transition behavior without changing the implemented extent policy.

@@ -138,6 +138,23 @@ static ActionRoomRasterPreset RasterPresetForRoom(uint8_t group,
   return kActionRoomRaster_None;
 }
 
+static bool RasterEntryCameraForRoom(uint8_t group, uint8_t map,
+                                     uint16_t *camera_x) {
+  if (!camera_x) return false;
+  if (group == 0x06 && map == 0x05) {
+    *camera_x = 0x01c0;
+    return true;
+  }
+  if (group == 0x07 && map >= 0x02 && map <= 0x07) {
+    static const uint16_t kDeathHeimRematchEntryCamera[6] = {
+      0x0010, 0x0000, 0x0000, 0x00d0, 0x0000, 0x0090,
+    };
+    *camera_x = kDeathHeimRematchEntryCamera[map - 0x02];
+    return true;
+  }
+  return false;
+}
+
 bool ActionRoomScene_Load(ActionRoomScene *scene,
                           const uint8_t *rom, size_t rom_size,
                           uint8_t group, uint8_t map) {
@@ -146,6 +163,8 @@ bool ActionRoomScene_Load(ActionRoomScene *scene,
   scene->group = group;
   scene->map = map;
   scene->raster_preset = RasterPresetForRoom(group, map);
+  scene->have_raster_entry_camera_x = RasterEntryCameraForRoom(
+      group, map, &scene->raster_entry_camera_x);
   if (!rom || !ActRaiser_IsActionMap(group, map) ||
       rom_size <= kAssetScriptBase + kAssetScriptHeaderBytes)
     return false;
@@ -442,8 +461,10 @@ static void BuildRasterScroll(const ActionRoomScene *scene,
    * visible frame, but persistent HDMA therefore has this intentional one-tick
    * phase lag. The live pre-scanline oracle pins it. */
   const uint16_t frame = (uint16_t)(request->game_frame - 1u);
-  const uint16_t camera_x = (uint16_t)(request->have_raster_camera_x
+  uint16_t camera_x = (uint16_t)(request->have_raster_camera_x
       ? request->raster_camera_x : request->camera_x);
+  if (request->raster_entry_frame && scene->have_raster_entry_camera_x)
+    camera_x = scene->raster_entry_camera_x;
   RasterWriter16 bg1 = {
     .values = state->bg_hscroll[0],
     .held = state->bg_hscroll[0][0],
@@ -647,6 +668,14 @@ bool ActionRoomScene_BuildFrameState(
   state->cgadsub = scene->video_profile[3];
   state->bgsc[0] = (uint8_t)(0x60 | (scene->video_profile[5] & 3));
   state->bgsc[1] = (uint8_t)(0x70 | ((scene->video_profile[5] >> 2) & 3));
+  /* The video profile is applied before the action background bootstrap has
+   * finalized its resident tilemap topology. Every Death Heim rematch uses a
+   * one-page BG2 at $7000, and the final arena likewise collapses its
+   * provisional profile-$2E BG2 size after the first setup frame. */
+  if (!request->raster_entry_frame &&
+      (scene->raster_preset == kActionRoomRaster_R9 ||
+       scene->raster_preset == kActionRoomRaster_R10))
+    state->bgsc[1] = 0x70;
   state->bgmode = scene->video_profile[6];
   state->brightness = 15;
   state->raster_preset = scene->raster_preset;
@@ -657,6 +686,11 @@ bool ActionRoomScene_BuildFrameState(
       scene, request->game_frame, request->page_phase);
   state->bg2_page_index = (uint8_t)ActionRoomScene_Bg2PageIndex(
       scene, request->game_frame, request->page_phase);
+  if (ActionRoomScene_HasBg2PageCycle(scene))
+    state->bgsc[1] = (uint8_t)(0x70 | (state->bg2_page_index << 2));
+  for (unsigned bg = 0; bg < kActionRoomSceneBgCount; bg++)
+    if (request->bgsc_override_mask & (1u << bg))
+      state->bgsc[bg] = request->bgsc_override[bg];
 
   const uint16_t base_h[kActionRoomSceneBgCount] = {
     (uint16_t)request->camera_x & 0x03ff,

@@ -186,8 +186,13 @@ int main(int argc, char **argv) {
       fprintf(out,
               ",\"raster\":%u,\"nativeGolden\":{"
               "\"frame\":37,\"cameraX\":0,\"cameraY\":0,"
-              "\"hash\":%u}}",
+              "\"hash\":%u},\"rasterEntryCameraX\":",
               (unsigned)scene.raster_preset, native_hash);
+      if (scene.have_raster_entry_camera_x)
+        fprintf(out, "%u", scene.raster_entry_camera_x);
+      else
+        fprintf(out, "null");
+      fputc('}', out);
       rooms++;
     }
   }

@@ -136,6 +136,10 @@ compact.
 The exporter renders a fixed C golden frame for every room. Opening a room in
 the editor hashes the JavaScript compositor at that same camera/frame and
 reports whether it matches, guarding the self-contained port against drift.
+The additive schema-v4 `rasterEntryCameraX` field records the natural bootstrap
+camera used by the first visible R6/R9 table where it differs from the settled
+room camera. The editor deliberately previews the settled authoring state;
+this metadata lets the game-side acceptance oracle reproduce the transient.
 Visible frame N normally uses the persistent table built at action tick N-1;
 the editor advances that clock deterministically. The game may retain an entire
 table during hit-stop, which is action-update cadence rather than a different
