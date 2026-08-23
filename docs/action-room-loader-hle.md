@@ -128,15 +128,16 @@ The stable two-background scene milestone is implemented:
   rooms, while retaining the pinned 30 animated rooms, two page-cycle rooms,
   17 raster-bearing rooms, and five forced-BG2-priority rooms.
 
-The stable live acceptance set is now byte-exact for R2, R3, R5, R6, and R9:
-6,348,367 pre-scanline PPU registers compared with zero mismatches. R2 also
-pins one authentic hit-stop/action-update hold: the game displays the preceding
-persistent table for one additional frame, which the stateful oracle recognizes
-only when that complete prior immutable state matches. The remaining raster
-acceptance work is fixture coverage for the boss/transition-only R1, R4, R7,
-R8, and R10 callbacks, not missing builder logic. BG3 HUD, real OBJ streams,
-fades, and gameplay-object-driven window timelines remain outside this
-standalone background contract by design.
+The stable live acceptance set is now byte-exact for R1, R2, R3, R5, R6, and
+R9: 7,049,476 pre-scanline PPU registers compared with zero mismatches. R1 is
+covered by a natural `0102 -> 0103 -> 0104` route through the complete Fillmore
+boss fight; R2 also pins one authentic hit-stop/action-update hold, where the
+game displays the preceding persistent table for one additional frame and the
+stateful oracle accepts it only when that complete prior immutable state
+matches. The remaining raster acceptance work is fixture coverage for the
+boss/transition-only R4, R7, R8, and R10 callbacks, not missing builder logic.
+BG3 HUD, real OBJ streams, fades, and gameplay-object-driven window timelines
+remain outside this standalone background contract by design.
 
 A natural Fillmore route in `runs/20260822-134834/` covered 6,227 action frames
 and four room-scene loads with zero load failure, provider fallback, tile
@@ -442,10 +443,10 @@ shape/target, both page-cycle rooms, the five forced-BG2-priority rooms, and a
 Marahna colour-math room. Then run all 49 rooms at a stable camera and at every
 available map edge.
 
-The current live set covers one stable room for R2 (`0201`), R3 (`0202`), R5
+The current live set covers R1 (`0104`), R2 (`0201`), R3 (`0202`), R5
 (`0401`), R6 (`0601`), and R9 (`0702`). It compares the immutable full-world
-publications and 6,348,367 resolved pre-scanline registers with zero mismatch;
-the exact runs are listed under Evidence below. The other five raster presets
+publications and 7,049,476 resolved pre-scanline registers with zero mismatch;
+the exact runs are listed under Evidence below. The other four raster presets
 belong to boss/transition rooms for which raw warp is not a valid initialization
 fixture. They require recorded natural entry/replay fixtures before their live
 acceptance can be claimed, although their ROM builders and C/JavaScript golden
@@ -465,8 +466,8 @@ None of these blocks a stable arbitrary-room editor preview:
    gameplay sprites. A “literal game frame” toggle would need the common HUD
    and a defined static actor fixture, not a room loader change.
 4. **Boss-transition differential fixtures.** Every room has C-rendered and
-   JavaScript-checked stable-frame coverage, and the stable live R2/R3/R5/R6/R9
-   set is exact. Natural-entry recordings are still needed for R1/R4/R7/R8/R10;
+   JavaScript-checked stable-frame coverage, and the live R1/R2/R3/R5/R6/R9
+   set is exact. Natural-entry recordings are still needed for R4/R7/R8/R10;
    raw map warps do not establish those rooms' boss/transition callback state.
 5. **Transient boss margin/window policy.** This is a widescreen presentation
    audit, not missing room construction.
@@ -476,15 +477,26 @@ not open-ended ROM archaeology.
 
 ### Natural-entry fixture capture
 
-The existing Fillmore recordings, including the historically named
-`act1-boss2.bin`, `act1-bossfreeze.bin`, and `act1-bosshealth.bin`, currently
-stop in `0102`; none reaches the `0104` R1 transition. They are still useful as
-deterministic prefixes. `AR_REPLAY_LIVE_AFTER_END=1` replays such a prefix,
-then returns control to live input on the first later game frame. It takes
-precedence over `AR_REPLAY_NOSTOP`, which intentionally holds the final
-recorded input instead. When `AR_INPUT_RECORD` is also set, the recorder writes
-both the replayed prefix and live continuation, producing a self-contained
-natural-entry fixture from power-on:
+The older Fillmore recordings, including the historically named
+`act1-boss2.bin`, `act1-bossfreeze.bin`, and `act1-bosshealth.bin`, stop in
+`0102`. `saves/fillmore-r1-natural.rec` now supplies the complete deterministic
+`0102 -> 0103 -> 0104` route and boss defeat. Its SHA-256 is
+`90a16a09d014c1630ddebc6017ae8857072286061ed24094e831f8b10fd4bbb1`; its
+unchanged boot SRAM is `saves/save.srm`, SHA-256
+`56aa0b7ea4b4e478a6164a592b06b62e4ad03a4c40d19e06ce6d61155f900134`.
+Manual capture `runs/20260822-170359/` and headless replay
+`runs/20260822-170748/` have byte-identical final WRAM, SRAM, dispatch log and
+complete state. Both build 6,447 compared action frames and 7,278,663 exact
+registers overall; the 621 `0104` frames contribute 701,109 exact R1 register
+comparisons.
+
+`AR_REPLAY_LIVE_AFTER_END=1` remains the fixture-acquisition path for the
+other presets: it replays a deterministic prefix, then returns control to live
+input on the first later game frame. It takes precedence over
+`AR_REPLAY_NOSTOP`, which intentionally holds the final recorded input instead.
+When `AR_INPUT_RECORD` is also set, the recorder writes both the replayed prefix
+and live continuation, producing a self-contained natural-entry fixture from
+power-on:
 
 ```sh
 AR_INPUT_REPLAY=saves/act1-boss2.bin \
@@ -494,9 +506,9 @@ AR_ACTION_ROOM_SCENE_COMPARE=1 \
 ./build-release/ActRaiserRecomp ar.sfc --config config.ini
 ```
 
-The same procedure is required for `0405` (R4), `0608` (R7), `0701` (R8),
-and `0708` (R10). Keep the boot SRAM and gameplay-affecting settings with each
-fixture; controller input alone is not deterministic without them. The
+The same procedure is still required for `0405` (R4), `0608` (R7), `0701`
+(R8), and `0708` (R10). Keep the boot SRAM and gameplay-affecting settings with
+each fixture; controller input alone is not deterministic without them. The
 comparator remains read-only, and replay sessions protect the normal SRAM and
 settings files even after control is handed back to the player.
 
@@ -577,6 +589,16 @@ Targets are VRAM word addresses and strides are bytes.
   `runs/20260822-130422`, `0601` R6 `runs/20260822-130424`, and `0702` R9
   `runs/20260822-130426` (1,337,865 registers each); all five report zero
   register mismatch.
+- Natural R1 acceptance, 2026-08-22: manual capture
+  `runs/20260822-170359/` and deterministic replay
+  `runs/20260822-170748/` traverse `0102 -> 0103 -> 0104`, end after the boss
+  defeat, and match final WRAM/SRAM/dispatch/state byte-for-byte. The 621 R1
+  frames compare 701,109 registers with zero mismatch. Default-HLE capture
+  `runs/20260822-170853/` and native presentation-bootstrap/source control
+  `runs/20260822-170914/` are byte-identical at boss frame 7000 for the
+  framebuffer, WRAM, VRAM, CGRAM, OAM/high-OAM and PPU registers, plus all
+  four final-state artifacts. The native-source arm also matches the complete
+  2,048-tile `0104` BG1 world.
 - First production-source A/B, 2026-08-22: live-WRAM manifest
   `runs/bg-hle-matrix-20260822-133427.json` versus immutable-room manifest
   `runs/bg-hle-matrix-20260822-133346.json`. All 12 ordinary-entry targets
