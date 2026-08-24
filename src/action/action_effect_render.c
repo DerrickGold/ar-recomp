@@ -185,6 +185,8 @@ static unsigned EffectVisualTicks(const ActionEffectInstance *effect,
   return effect &&
       (effect->kind == kActionEffect_WallTorch ||
        effect->kind == kActionEffect_AitosLavaPit ||
+       effect->kind == kActionEffect_AitosStatueFire ||
+       effect->kind == kActionEffect_AitosLavaReservoir ||
        effect->kind == kActionEffect_AitosWaterSplash)
       ? ticks * 2u : ticks;
 }
@@ -1246,6 +1248,115 @@ static void SceneFireballHeading(const ActionEffectInstance *effect,
   }
 }
 
+/* Centres of the twelve 16x16 fireball parts in the wheel's four measured
+ * full-ring compositions ($5276/$5398/$54BA/$55DC). The compositions rotate
+ * tile art and flip selection, but this symmetric set of authored centres is
+ * invariant. Keeping the literal OAM-local anchors prevents a procedural
+ * circle from drifting away from the authentic square-round silhouette. */
+static const float
+kFlamingWheelFireballAnchors[kActionSceneEffectFlamingWheelFireballs][2] = {
+  {-24.0f, -24.0f}, {-8.0f, -24.0f}, {8.0f, -24.0f}, {24.0f, -24.0f},
+  {-24.0f,  -8.0f}, {24.0f,  -8.0f},
+  {-24.0f,   8.0f}, {24.0f,   8.0f},
+  {-24.0f,  24.0f}, {-8.0f,  24.0f}, {8.0f,  24.0f}, {24.0f,  24.0f},
+};
+
+static bool FlamingWheelHasAuthoredFireballRing(
+    const ActionEffectInstance *effect) {
+  if (!effect || effect->kind != kActionEffect_FlamingWheel) return false;
+  return effect->composition == 0x5276 || effect->composition == 0x5398 ||
+      effect->composition == 0x54BA || effect->composition == 0x55DC;
+}
+
+static bool AppendFlamingWheelFireballLighting(
+    ActionEffectGeometryWriter *writer,
+    const ActionEffectInstance *effect, float pulse,
+    ActionEffectProjectPointFn project_point, void *userdata) {
+  if (!FlamingWheelHasAuthoredFireballRing(effect)) return true;
+  for (unsigned i = 0; i < kActionSceneEffectFlamingWheelFireballs; i++) {
+    const ActionEffectGlowStyle flame = {
+      .radius_x = 10.5f, .radius_y = 12.5f,
+      .ring_scale = {0.20f, 0.60f, 1.0f},
+      .centre = {1.00f, 1.00f, 0.78f, 0.72f},
+      .ring = {{1.00f, 0.70f, 0.16f, 0.42f},
+               {1.00f, 0.22f, 0.01f, 0.15f},
+               {0.72f, 0.04f, 0.00f, 0.00f}},
+      .flare = 0.34f, .rise = 0.38f,
+      .axis_x = 1.0f, .lift_y = -1.0f,
+      .seed = (unsigned)effect->pulse_generation + i * 0x45D9u,
+    };
+    if (!AppendGlow(writer, effect, &flame, pulse,
+                    kFlamingWheelFireballAnchors[i][0],
+                    kFlamingWheelFireballAnchors[i][1],
+                    project_point, userdata))
+      return false;
+  }
+  return true;
+}
+
+static unsigned LavaReservoirGlowSegmentCount(
+    const ActionEffectInstance *effect) {
+  if (!effect || effect->kind != kActionEffect_AitosLavaReservoir ||
+      effect->geometry.kind != kActionEffectGeometry_Rect)
+    return 0;
+  const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
+  const float width = rect->x1 - rect->x0;
+  if (!isfinite(width) || width <= 0.0f) return 0;
+  if (width > (float)(kActionSceneEffectMaxLavaGlowSegments *
+                      kActionSceneEffectLavaGlowSpanPixels))
+    return kActionSceneEffectMaxLavaGlowSegments + 1u;
+  return (unsigned)ceilf(
+      width / (float)kActionSceneEffectLavaGlowSpanPixels);
+}
+
+/* Long Act-2 lakes cannot use one reservoir-wide radial gradient: its outer
+ * ring is intentionally transparent, so the ends look unlit until the camera
+ * approaches the lake centre. Overlapping bounded emitters keep every part of
+ * the lip locally hot and also follow Diorama perspective more faithfully. */
+static bool AppendLavaReservoirLighting(
+    ActionEffectGeometryWriter *writer,
+    const ActionEffectInstance *effect, float pulse,
+    ActionEffectProjectPointFn project_point, void *userdata) {
+  const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
+  const unsigned segments = LavaReservoirGlowSegmentCount(effect);
+  if (!segments || segments > kActionSceneEffectMaxLavaGlowSegments)
+    return false;
+  const float segment_width = (rect->x1 - rect->x0) / (float)segments;
+  for (unsigned i = 0; i < segments; i++) {
+    const float centre_x = rect->x0 + ((float)i + 0.5f) * segment_width;
+    const ActionEffectGlowStyle spill = {
+      .radius_x = fmaxf(38.0f, segment_width * 0.72f + 12.0f),
+      .radius_y = 42.0f,
+      .ring_scale = {0.18f, 0.68f, 1.0f},
+      .centre = {1.00f, 0.43f, 0.04f, 0.13f},
+      .ring = {{1.00f, 0.28f, 0.01f, 0.10f},
+               {0.82f, 0.07f, 0.00f, 0.04f},
+               {0.48f, 0.01f, 0.00f, 0.00f}},
+      .flare = 0.07f, .rise = 0.10f,
+      .axis_x = 1.0f, .lift_y = -1.0f,
+      .seed = (unsigned)effect->generation + i * 0x5BD1u,
+    };
+    const ActionEffectGlowStyle body = {
+      .radius_x = fmaxf(30.0f, segment_width * 0.58f + 7.0f),
+      .radius_y = 9.0f,
+      .ring_scale = {0.15f, 0.78f, 1.0f},
+      .centre = {1.00f, 1.00f, 0.72f, 0.62f},
+      .ring = {{1.00f, 0.68f, 0.10f, 0.36f},
+               {1.00f, 0.20f, 0.01f, 0.13f},
+               {0.72f, 0.04f, 0.00f, 0.00f}},
+      .flare = 0.12f, .rise = 0.18f,
+      .axis_x = 1.0f, .lift_y = -1.0f,
+      .seed = (unsigned)effect->pulse_generation + i * 0x7A4Du,
+    };
+    if (!AppendGlow(writer, effect, &spill, pulse, centre_x, -10.0f,
+                    project_point, userdata) ||
+        !AppendGlow(writer, effect, &body, pulse, centre_x, 0.0f,
+                    project_point, userdata))
+      return false;
+  }
+  return true;
+}
+
 static bool AppendSceneParticle(ActionEffectGeometryWriter *writer,
                                 const ActionEffectInstance *effect,
                                 float x, float y, float previous_x,
@@ -1695,10 +1806,20 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
       hot = (SDL_FColor){1.00f, 0.97f, 0.78f, 0.96f};
       cool = (SDL_FColor){1.00f, 0.10f, 0.00f, 0.00f};
       break;
+    case kActionEffect_AitosStatueFire:
+      count = kActionSceneEffectParticlesPerInstance;
+      hot = (SDL_FColor){1.00f, 0.96f, 0.62f, 0.96f};
+      cool = (SDL_FColor){0.98f, 0.08f, 0.00f, 0.00f};
+      break;
     case kActionEffect_AitosLavaPit:
       count = kActionSceneEffectParticlesPerInstance;
       hot = (SDL_FColor){1.00f, 0.91f, 0.38f, 0.92f};
       cool = (SDL_FColor){0.90f, 0.06f, 0.00f, 0.00f};
+      break;
+    case kActionEffect_AitosLavaReservoir:
+      count = kActionSceneEffectLavaReservoirParticleCount;
+      hot = (SDL_FColor){1.00f, 0.94f, 0.48f, 0.94f};
+      cool = (SDL_FColor){0.94f, 0.08f, 0.00f, 0.00f};
       break;
     case kActionEffect_AitosMoltenRock:
       count = kActionSceneEffectParticlesPerInstance;
@@ -1751,9 +1872,18 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
       cool = (SDL_FColor){1.00f, 0.48f, 0.06f, 0.00f};
       break;
     case kActionEffect_FlamingWheel:
-      count = kActionSceneEffectParticlesPerInstance;
+      /* Transitional boss compositions do not contain the complete rim.
+       * Keep their body light, but do not attach sparks to parts that are not
+       * authored in that frame. */
+      count = FlamingWheelHasAuthoredFireballRing(effect)
+          ? kActionSceneEffectParticlesPerInstance : 0;
       hot = (SDL_FColor){1.00f, 0.96f, 0.58f, 0.96f};
       cool = (SDL_FColor){0.96f, 0.08f, 0.00f, 0.00f};
+      break;
+    case kActionEffect_FlamingWheelProjectile:
+      count = kActionSceneEffectParticlesPerInstance;
+      hot = (SDL_FColor){0.88f, 1.00f, 1.00f, 0.96f};
+      cool = (SDL_FColor){0.02f, 0.58f, 0.86f, 0.00f};
       break;
     case kActionEffect_IceDragonIceBall:
       count = kActionSceneEffectParticlesPerInstance;
@@ -1790,7 +1920,9 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
          effect->kind == kActionEffect_MarahnaBossLightning ||
          effect->kind == kActionEffect_BloodpoolBossLightning)
         ? 11u + ((seed >> 6) & 7u)
-        : 21u + ((seed >> 5) & 15u);
+        : effect->kind == kActionEffect_AitosLavaReservoir
+            ? 31u + ((seed >> 5) & 21u)
+            : 21u + ((seed >> 5) & 15u);
     const unsigned birth_phase = seed % lifetime;
     const unsigned age = (visual_ticks + birth_phase) % lifetime;
     const float t = (float)age / (float)(lifetime - 1u);
@@ -1819,6 +1951,20 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
       previous_y = source_y - 5.0f * previous_t -
           13.0f * previous_t * previous_t;
       width = 0.50f + 0.42f * (1.0f - t);
+    } else if (effect->kind == kActionEffect_AitosLavaReservoir) {
+      const float half_width = (rect->x1 - rect->x0) * 0.5f;
+      const float birth_x = (HashUnit(seed ^ 0x71u) * 2.0f - 1.0f) *
+          fmaxf(1.0f, half_width - 2.0f);
+      const float drift = (HashUnit(seed ^ 0x37u) - 0.5f) * 22.0f;
+      const float source_y = rect->y0 + 1.5f +
+          (HashUnit(seed ^ 0xB5u) - 0.5f) * 2.0f;
+      x = birth_x + drift * t * t;
+      y = source_y - 9.0f * t - 34.0f * t * t;
+      previous_x = birth_x + drift * previous_t * previous_t;
+      previous_y = source_y - 9.0f * previous_t -
+          34.0f * previous_t * previous_t;
+      width = 0.42f + 0.48f * (1.0f - t);
+      reach = 1.8f + 4.2f * t;
     } else if (effect->kind == kActionEffect_AitosMoltenRock) {
       /* Close sparks tumble off a hot solid surface. They do not align into a
        * directional flame wake, which is what distinguishes molten rock from
@@ -1903,6 +2049,29 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
       previous_y = -2.0f - 9.0f * previous_t -
           25.0f * previous_t * previous_t;
       width = 0.45f + 0.35f * (1.0f - t);
+    } else if (effect->kind == kActionEffect_AitosStatueFire) {
+      /* Seed throughout the authored horizontal plume, then let hot flecks
+       * continue a little in the facing direction while buoyancy pulls them
+       * upward. This reads as a sustained breath rather than a projectile
+       * wake, and scales naturally across the $1C-$1F pillar frames. */
+      const float direction =
+          (effect->flags & kActionEffectFlag_FlipHorizontal) ? -1.0f : 1.0f;
+      const float span = fmaxf(8.0f, rect->x1 - rect->x0);
+      const float lane = HashUnit(seed ^ 0x71u);
+      const float birth_x = rect->x0 + span * lane;
+      const float source_y = (rect->y0 + rect->y1) * 0.5f +
+          (HashUnit(seed ^ 0xB5u) - 0.5f) * 10.0f;
+      const float forward = direction *
+          (3.0f + 10.0f * HashUnit(seed ^ 0x53u));
+      const float curl = (HashUnit(seed ^ 0x37u) - 0.5f) * 7.0f;
+      x = birth_x + forward * t + curl * t * t;
+      y = source_y - 5.0f * t - 17.0f * t * t;
+      previous_x = birth_x + forward * previous_t +
+          curl * previous_t * previous_t;
+      previous_y = source_y - 5.0f * previous_t -
+          17.0f * previous_t * previous_t;
+      width = 0.52f + 0.48f * (1.0f - t);
+      reach = 2.0f + 4.0f * t;
     } else if (effect->kind == kActionEffect_EnemyFireball ||
                effect->kind == kActionEffect_MarahnaFireball ||
                effect->kind == kActionEffect_AitosLavaFireball) {
@@ -1920,11 +2089,13 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
       width = 0.80f + 0.60f * (1.0f - t);
       reach = 3.0f + 5.0f * t;
     } else if (effect->kind == kActionEffect_FlamingWheel) {
-      const float span = fmaxf(8.0f, rect->x1 - rect->x0);
-      const float birth_x = rect->x0 + span * HashUnit(seed ^ 0x53u);
-      const float base_y = rect->y0 +
-          (rect->y1 - rect->y0) * HashUnit(seed ^ 0x71u);
-      const float sway = (HashUnit(seed ^ 0x37u) - 0.5f) * 14.0f;
+      const float *anchor = kFlamingWheelFireballAnchors[
+          i % kActionSceneEffectFlamingWheelFireballs];
+      const float birth_x = anchor[0] +
+          (HashUnit(seed ^ 0x53u) - 0.5f) * 3.0f;
+      const float base_y = anchor[1] - 1.0f +
+          (HashUnit(seed ^ 0x71u) - 0.5f) * 2.0f;
+      const float sway = (HashUnit(seed ^ 0x37u) - 0.5f) * 10.0f;
       x = birth_x + sway * t * t;
       y = base_y - 8.0f * t - 24.0f * t * t;
       previous_x = birth_x + sway * previous_t * previous_t;
@@ -1932,6 +2103,17 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
           24.0f * previous_t * previous_t;
       width = 0.65f + 0.50f * (1.0f - t);
       reach = 2.5f + 4.0f * t;
+    } else if (effect->kind == kActionEffect_FlamingWheelProjectile) {
+      const float side = (HashUnit(seed ^ 0x53u) - 0.5f) *
+          (4.0f + 13.0f * t);
+      const float distance = 5.0f + 36.0f * t;
+      const float old_distance = 5.0f + 36.0f * previous_t;
+      x = -heading_x * distance - heading_y * side;
+      y = -heading_y * distance + heading_x * side;
+      previous_x = -heading_x * old_distance - heading_y * side;
+      previous_y = -heading_y * old_distance + heading_x * side;
+      width = 0.48f + 0.46f * (1.0f - t);
+      reach = 2.0f + 3.8f * t;
     } else if (effect->kind == kActionEffect_MinotaurAxe ||
                effect->kind == kActionEffect_IceDragonIceBall ||
                effect->kind == kActionEffect_TanzaraProjectile) {
@@ -2175,6 +2357,10 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
   float spill_x = mid_x, spill_y = mid_y;
   float body_x = mid_x, body_y = mid_y;
 
+  if (effect->kind == kActionEffect_AitosLavaReservoir)
+    return AppendLavaReservoirLighting(
+        writer, effect, pulse, project_point, userdata);
+
   switch (effect->kind) {
     case kActionEffect_WallTorch:
       spill = (ActionEffectGlowStyle){
@@ -2201,6 +2387,36 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
       };
       body_y = -3.0f;
       break;
+    case kActionEffect_AitosStatueFire: {
+      const float half_width = (rect->x1 - rect->x0) * 0.5f;
+      const float half_height = (rect->y1 - rect->y0) * 0.5f;
+      spill = (ActionEffectGlowStyle){
+        .radius_x = fmaxf(28.0f, half_width + 18.0f),
+        .radius_y = fmaxf(21.0f, half_height + 13.0f),
+        .ring_scale = {0.24f, 0.66f, 1.0f},
+        .centre = {1.00f, 0.48f, 0.07f, 0.23f},
+        .ring = {{1.00f, 0.31f, 0.02f, 0.16f},
+                 {0.86f, 0.08f, 0.00f, 0.06f},
+                 {0.48f, 0.01f, 0.00f, 0.00f}},
+        .flare = 0.15f, .rise = 0.18f,
+        .axis_x = 1.0f, .lift_y = -1.0f,
+        .seed = (unsigned)effect->record_address,
+      };
+      body = (ActionEffectGlowStyle){
+        .radius_x = fmaxf(11.0f, half_width + 4.0f),
+        .radius_y = fmaxf(8.0f, half_height + 2.0f),
+        .ring_scale = {0.18f, 0.56f, 1.0f},
+        .centre = {1.00f, 1.00f, 0.76f, 0.84f},
+        .ring = {{1.00f, 0.68f, 0.13f, 0.50f},
+                 {1.00f, 0.22f, 0.01f, 0.20f},
+                 {0.72f, 0.03f, 0.00f, 0.00f}},
+        .flare = 0.28f, .rise = 0.30f,
+        .axis_x = 1.0f, .lift_y = -1.0f,
+        .seed = (unsigned)effect->pulse_generation,
+      };
+      body_y -= 2.0f;
+      break;
+    }
     case kActionEffect_AitosLavaPit: {
       const float half_width = (rect->x1 - rect->x0) * 0.5f;
       const float half_height = (rect->y1 - rect->y0) * 0.5f;
@@ -2379,6 +2595,39 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
         .seed = (unsigned)effect->pulse_generation,
       };
       body_y -= 3.0f;
+      break;
+    }
+    case kActionEffect_FlamingWheelProjectile: {
+      float hx = 1.0f, hy = 0.0f;
+      SceneActorHeading(effect, &hx, &hy);
+      spill = (ActionEffectGlowStyle){
+        .radius_x = 29.0f, .radius_y = 18.0f,
+        .ring_scale = {0.22f, 0.66f, 1.0f},
+        .centre = {0.62f, 0.95f, 1.00f, 0.22f},
+        .ring = {{0.22f, 0.76f, 1.00f, 0.14f},
+                 {0.03f, 0.36f, 0.82f, 0.05f},
+                 {0.01f, 0.12f, 0.36f, 0.00f}},
+        .flare = 0.12f, .rise = 0.08f,
+        .axis_x = hx, .axis_y = hy,
+        .lift_x = -hx, .lift_y = -hy,
+        .seed = (unsigned)effect->record_address,
+      };
+      body = (ActionEffectGlowStyle){
+        .radius_x = 15.0f, .radius_y = 8.0f,
+        .ring_scale = {0.16f, 0.58f, 1.0f},
+        .centre = {0.94f, 1.00f, 1.00f, 0.88f},
+        .ring = {{0.52f, 0.94f, 1.00f, 0.52f},
+                 {0.06f, 0.62f, 0.94f, 0.18f},
+                 {0.01f, 0.18f, 0.48f, 0.00f}},
+        .flare = 0.18f, .rise = 0.12f,
+        .axis_x = hx, .axis_y = hy,
+        .lift_x = -hx, .lift_y = -hy,
+        .seed = (unsigned)effect->pulse_generation,
+      };
+      spill_x = mid_x - hx * 5.0f;
+      spill_y = mid_y - hy * 5.0f;
+      body_x = mid_x - hx * 2.0f;
+      body_y = mid_y - hy * 2.0f;
       break;
     }
     case kActionEffect_MinotaurAxe:
@@ -2694,7 +2943,9 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
   if (!AppendGlow(writer, effect, &body, pulse, body_x, body_y,
                   project_point, userdata))
     return false;
-  return AppendBossLightningRibbon(writer, effect, project_point, userdata) &&
+  return AppendFlamingWheelFireballLighting(
+             writer, effect, pulse, project_point, userdata) &&
+      AppendBossLightningRibbon(writer, effect, project_point, userdata) &&
       AppendMarahnaLightningRibbon(
              writer, effect, project_point, userdata) &&
       AppendMarahnaBossLightningRibbon(
@@ -2718,8 +2969,13 @@ static bool SceneEffectStyleKnown(const ActionEffectInstance *effect) {
            (effect->visual == 0x1Du || effect->visual == 0x1Eu));
     case kActionEffect_AitosLavaPit:
       return effect->phase == kActionEffectPhase_AitosLavaPit;
+    case kActionEffect_AitosLavaReservoir:
+      return effect->phase == kActionEffectPhase_AitosLavaReservoir;
     case kActionEffect_AitosLavaFireball:
       return effect->phase == kActionEffectPhase_AitosLavaFireballFlight;
+    case kActionEffect_AitosStatueFire:
+      return effect->phase == kActionEffectPhase_AitosStatueFireBreath &&
+          effect->visual >= 0x1Cu && effect->visual <= 0x1Fu;
     case kActionEffect_AitosMoltenRock:
       return effect->phase == kActionEffectPhase_AitosMoltenRockFlight &&
           effect->visual == 0x2Bu;
@@ -2762,6 +3018,10 @@ static bool SceneEffectStyleKnown(const ActionEffectInstance *effect) {
           (effect->visual <= 0x07u || effect->visual == 0x10u);
     case kActionEffect_FlamingWheel:
       return effect->phase == kActionEffectPhase_FlamingWheelBody;
+    case kActionEffect_FlamingWheelProjectile:
+      return effect->phase ==
+                 kActionEffectPhase_FlamingWheelProjectileFlight &&
+          effect->visual <= 0x03u;
     case kActionEffect_IceDragonIceBall:
       return effect->phase == kActionEffectPhase_IceDragonIceBallFlight &&
           effect->visual >= 0x12u && effect->visual <= 0x19u;
@@ -2780,7 +3040,7 @@ static bool BuildSceneEffectList(
     ActionSceneEffectRenderBatch *batch) {
   if (!batch) return false;
   /* Submitters consume only [0, count). The scene capacity is deliberately
-   * large, so zeroing its unused tail cost roughly 290 KB per build. */
+   * large, so zeroing its unused tail would touch hundreds of KiB per build. */
   batch->vertex_count = 0;
   batch->index_count = 0;
   if (!effects || effect_count > capacity ||
@@ -2797,6 +3057,9 @@ static bool BuildSceneEffectList(
   unsigned sword_streams = 0;
   unsigned waterfall_veils = 0;
   unsigned waterfall_mists = 0;
+  unsigned lava_reservoirs = 0;
+  unsigned lava_glow_segments = 0;
+  unsigned flaming_wheels = 0;
 
   for (uint8_t i = 0; i < effect_count; i++) {
     const ActionEffectInstance *effect = &effects[i];
@@ -2806,7 +3069,7 @@ static bool BuildSceneEffectList(
         !SceneEffectStyleKnown(effect) ||
         effect->obj_priority >= kActionEffectObjPriorityCount ||
         effect->render_layer != render_layer ||
-        effect->projection_plane > kActionEffectProjectionPlane_Bg2)
+        effect->projection_plane > kActionEffectProjectionPlane_Bg1High)
       continue;
     if (effect->kind == kActionEffect_BloodpoolBossLightning &&
         effect->phase == kActionEffectPhase_BossLightningStrike &&
@@ -2829,6 +3092,19 @@ static bool BuildSceneEffectList(
       return false;
     if (effect->kind == kActionEffect_AitosWaterfallMist &&
         ++waterfall_mists > kActionSceneEffectMaxWaterfallVeils)
+      return false;
+    if (effect->kind == kActionEffect_AitosLavaReservoir) {
+      if (++lava_reservoirs > kActionSceneEffectMaxLavaReservoirs)
+        return false;
+      const unsigned segments = LavaReservoirGlowSegmentCount(effect);
+      if (!segments ||
+          segments > kActionSceneEffectMaxLavaGlowSegments -
+              lava_glow_segments)
+        return false;
+      lava_glow_segments += segments;
+    }
+    if (effect->kind == kActionEffect_FlamingWheel &&
+        ++flaming_wheels > kActionSceneEffectMaxFlamingWheels)
       return false;
 
     if (lighting_enabled &&
@@ -2882,4 +3158,78 @@ bool ActionSceneDecorationRender_Build(
       kActionSceneDecorationMaxInstances, frame->decoration_overflow,
       render_layer, lighting_enabled, particles_enabled, project_point,
       project_userdata, batch);
+}
+
+bool ActionHeatRender_Build(uint16_t game_frame, SDL_Rect output_viewport,
+                            int target_width, int target_height,
+                            int source_width,
+                            ActionHeatRenderMesh *mesh) {
+  if (mesh) {
+    mesh->vertex_count = 0;
+    mesh->index_count = 0;
+  }
+  if (!mesh || output_viewport.x < 0 || output_viewport.y < 0 ||
+      output_viewport.w <= 0 || output_viewport.h <= 0 ||
+      target_width <= 0 || target_height <= 0 || source_width <= 0)
+    return false;
+
+  const float source_pixel_scale =
+      (float)output_viewport.w / (float)source_width;
+  const float target_x_per_output =
+      (float)target_width / (float)output_viewport.w;
+  const float target_y_per_output =
+      (float)target_height / (float)output_viewport.h;
+  /* Scale in authentic pixels before capping in output pixels. The old
+   * 3.25-output-pixel cap reduced a 3420px presentation to less than half an
+   * authentic pixel of displacement, which made the haze appear to switch on
+   * only where high-contrast art happened to reveal it. This remains below
+   * one authentic pixel at ordinary scales and is bounded at 6.5px. */
+  const float amplitude = fminf(6.50f, fmaxf(0.75f,
+      source_pixel_scale * 0.82f));
+  const float phase = (float)game_frame * 0.117f;
+  const SDL_FColor white = {1.0f, 1.0f, 1.0f, 1.0f};
+  for (int row = 0; row <= kActionHeatMeshRows; row++) {
+    const float ny = (float)row / (float)kActionHeatMeshRows;
+    const float y = (float)output_viewport.y +
+        (float)output_viewport.h * ny;
+    /* sin(pi*y) pins top/bottom; weighting toward the floor keeps the HUD-
+     * free upper room readable while the lava half visibly shimmers. */
+    const float edge_y = sinf(ny * 3.141592654f) * (0.28f + 0.72f * ny);
+    for (int column = 0; column <= kActionHeatMeshColumns; column++) {
+      const float nx = (float)column / (float)kActionHeatMeshColumns;
+      const float x = (float)output_viewport.x +
+          (float)output_viewport.w * nx;
+      const float edge_x = sinf(nx * 3.141592654f);
+      const float envelope = edge_x * edge_y;
+      const float wave = sinf(nx * 10.681f + ny * 20.420f + phase) +
+          0.42f * sinf(nx * 23.562f - ny * 11.938f - phase * 1.37f);
+      const float cross_wave =
+          sinf(nx * 16.336f + ny * 8.168f - phase * 0.73f);
+      const float sample_x = (float)target_width * nx +
+          amplitude * target_x_per_output * envelope * wave;
+      const float sample_y = (float)target_height * ny +
+          amplitude * target_y_per_output * 0.24f * envelope * cross_wave;
+      mesh->vertices[mesh->vertex_count++] = (SDL_Vertex){
+        {x, y}, white,
+        {sample_x / (float)target_width,
+         sample_y / (float)target_height},
+      };
+    }
+  }
+  for (int row = 0; row < kActionHeatMeshRows; row++) {
+    for (int column = 0; column < kActionHeatMeshColumns; column++) {
+      const int a = row * (kActionHeatMeshColumns + 1) + column;
+      const int b = a + 1;
+      const int c = a + kActionHeatMeshColumns + 1;
+      const int d = c + 1;
+      mesh->indices[mesh->index_count++] = a;
+      mesh->indices[mesh->index_count++] = c;
+      mesh->indices[mesh->index_count++] = d;
+      mesh->indices[mesh->index_count++] = a;
+      mesh->indices[mesh->index_count++] = d;
+      mesh->indices[mesh->index_count++] = b;
+    }
+  }
+  return mesh->vertex_count == kActionHeatMeshVertices &&
+      mesh->index_count == kActionHeatMeshIndices;
 }

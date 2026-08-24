@@ -95,13 +95,17 @@ static int PpuObjTilePixel(uint32 plane, int px, bool h_flipped) {
          ((bits >> 14) & 4) | ((bits >> 21) & 8);
 }
 
-static uint32 PpuObjColor(Ppu *ppu, int palette_index) {
-  if (!(palette_index & 0xff)) return 0;
+static uint32 PpuCgramColor(const Ppu *ppu, int palette_index) {
   uint32 color = ppu->cgram[palette_index & 0xff];
   return 0xff000000u |
       (uint32)ppu->brightnessMult[color & 0x1f] << 16 |
       (uint32)ppu->brightnessMult[(color >> 5) & 0x1f] << 8 |
       ppu->brightnessMult[(color >> 10) & 0x1f];
+}
+
+static uint32 PpuObjColor(Ppu *ppu, int palette_index) {
+  if (!(palette_index & 0xff)) return 0;
+  return PpuCgramColor(ppu, palette_index);
 }
 
 static inline void PpuResetLayerClamps(Ppu *ppu);
@@ -326,9 +330,38 @@ bool PpuSetOverlayCapture(Ppu *ppu, PpuOverlaySource source,
        kPpuOverlayFlag_MarkFullAddSubscreen |
        kPpuOverlayFlag_MarkMainScreenWinner |
        kPpuOverlayFlag_MarkOwningScreenWinner);
+  /* Geometry and backing are independent pieces of per-frame policy. Do not
+   * clear transparentFill here: callers may configure it before or after the
+   * capture rectangle. PpuClearOverlayCaptures is the single frame reset. */
   capture->oamFirst = 0;
   capture->oamCount = 0;
   return true;
+}
+
+bool PpuSetOverlayTransparentFill(Ppu *ppu, PpuOverlaySource source,
+                                  PpuOverlayTransparentFill mode,
+                                  uint8_t cgram_index) {
+  if (!ppu || (unsigned)source >= kPpuOverlaySource_Count ||
+      (mode != kPpuOverlayTransparentFill_None &&
+       mode != kPpuOverlayTransparentFill_Black &&
+       mode != kPpuOverlayTransparentFill_Cgram))
+    return false;
+  PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
+  capture->transparentFillMode = (uint8_t)mode;
+  capture->transparentFillCgram = cgram_index;
+  capture->transparentFillConfigured = 1;
+  return true;
+}
+
+uint32_t PpuOverlayTransparentFillColor(const Ppu *ppu,
+                                        PpuOverlaySource source) {
+  if (!ppu || (unsigned)source >= kPpuOverlaySource_Count) return 0;
+  const PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
+  if (capture->transparentFillMode == kPpuOverlayTransparentFill_Black)
+    return 0xff000000u;
+  if (capture->transparentFillMode == kPpuOverlayTransparentFill_Cgram)
+    return PpuCgramColor(ppu, capture->transparentFillCgram);
+  return 0;
 }
 
 bool PpuSetOverlayOamRange(Ppu *ppu, uint8_t first, uint8_t count) {
@@ -1892,7 +1925,34 @@ static void PpuClearOverlayRenderLine(Ppu *ppu, int y) {
       for (uint32_t x = 0; x < pitch / sizeof(uint32); x++)
         dst[x] = 0xff000000u;
     } else {
-      memset(pixels + (size_t)row * pitch, 0, pitch);
+      uint8_t *row_pixels = pixels + (size_t)row * pitch;
+      const uint32 fill_color = active
+          ? PpuOverlayTransparentFillColor(ppu, (PpuOverlaySource)source) : 0;
+      if (!fill_color) {
+        memset(row_pixels, 0, pitch);
+      } else {
+        const int width = (int)(pitch / sizeof(uint32));
+        const int texture_extra = IntMax((width - kPpuXPixels) / 2, 0);
+        const int screen_min = -texture_extra;
+        const int screen_max = width - texture_extra;
+        const int x0 = IntMax(capture->x0, screen_min);
+        const int x1 = IntMin(capture->x1, screen_max);
+        if (x1 <= x0) {
+          memset(row_pixels, 0, pitch);
+        } else {
+          const int fill_x0 = x0 + texture_extra;
+          const int fill_x1 = x1 + texture_extra;
+          uint32 *dst = (uint32 *)row_pixels;
+          /* Initialize every byte exactly once: transparent apron outside the
+           * capture, opaque backing inside it. The former whole-row memset plus
+           * fill loop wrote the entire captured span twice every scanline. */
+          memset(dst, 0, (size_t)fill_x0 * sizeof(*dst));
+          for (int x = fill_x0; x < fill_x1; x++)
+            dst[x] = fill_color;
+          memset(dst + fill_x1, 0,
+                 pitch - (size_t)fill_x1 * sizeof(*dst));
+        }
+      }
     }
     for (int band = 0; band < 3; band++) {
       uint8_t *band_pixels = ppu->overlayRenderBands[source][band];
@@ -1994,6 +2054,7 @@ static void PpuWriteOverlayRenderLineFiltered(
   int screen_min = -texture_extra;
   int screen_max = width - texture_extra;
   const PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
+  const uint32 fill_color = PpuOverlayTransparentFillColor(ppu, source);
   int x0 = IntMax(capture->x0, screen_min);
   int x1 = IntMin(capture->x1, screen_max);
   if (x1 <= x0 || x0 + kPpuExtraLeftRight < 0 ||
@@ -2026,17 +2087,17 @@ static void PpuWriteOverlayRenderLineFiltered(
   const bool ordinary =
       filter == NULL && !(capture->flags & color_flags);
   if (!any_bands) {
-    bool has_content = false;
+    bool has_content = fill_color != 0;
     if (ordinary) {
-      /* This span is authored completely, including transparent pixels. The
-       * preceding row clear remains intentional: it also covers pixels outside
-       * a narrowed capture and therefore preserves the no-stale-surface
-       * contract when capture geometry changes between frames. */
+      /* The preceding row initialization already authored transparent pixels
+       * (or the selected backing) across the full capture and cleared pixels
+       * outside a narrowed capture. Only real tile pixels need another write. */
       for (int x = x0; x < x1; x++) {
         uint32 color = PpuObjColor(
             ppu, src[x + kPpuExtraLeftRight] & 0xff);
+        if (!color) continue;
         dst[x + texture_extra] = color;
-        has_content |= color != 0;
+        has_content = true;
       }
       if (has_content)
         ppu->overlayRenderContentMask[source] |= 1u;
@@ -2048,9 +2109,9 @@ static void PpuWriteOverlayRenderLineFiltered(
         continue;
       uint32 color = PpuCapturedOverlayColor(
           ppu, source, capture, src[index]);
+      if (!color) continue;
       dst[x + texture_extra] = color;
-      if (color)
-        has_content = true;
+      has_content = true;
     }
     if (has_content)
       ppu->overlayRenderContentMask[source] |= 1u;
@@ -2071,7 +2132,7 @@ static void PpuWriteOverlayRenderLineFiltered(
     0x00,  /* OBJ routes by the top two bits instead */
   };
   if (ordinary) {
-    uint8_t content_mask = 0;
+    uint8_t content_mask = fill_color ? 1u : 0u;
     if (source == kPpuOverlaySource_Obj) {
       for (int x = x0; x < x1; x++) {
         PpuZbufType zp = src[x + kPpuExtraLeftRight];
@@ -2107,7 +2168,7 @@ static void PpuWriteOverlayRenderLineFiltered(
     ppu->overlayRenderContentMask[source] |= content_mask;
     return;
   }
-  uint8_t content_mask = 0;
+  uint8_t content_mask = fill_color ? 1u : 0u;
   for (int x = x0; x < x1; x++) {
     int index = x + kPpuExtraLeftRight;
     PpuZbufType zp = src[index];

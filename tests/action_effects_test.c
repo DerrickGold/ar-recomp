@@ -1002,6 +1002,57 @@ static void TestMeasuredSceneObjectIdentities(void) {
   CHECK(rejected.effects[0].kind == kActionEffect_LightningTrap);
 }
 
+static void TestBloodpoolAct2SceneScopeAndRoomContinuity(void) {
+  uint8_t wram[kActRaiserWramSize];
+  ActionSceneEffectFrame first, last, rejected;
+  ActionEffectObserver observer = {0};
+  memset(wram, 0, sizeof(wram));
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Bloodpool;
+  wram[kActRaiserWram_CurrentMap] = 2;
+  SeedMeasuredSceneObject(wram, 22, false);
+  SeedMeasuredSceneObject(wram, 32, true);
+
+  /* The ordinary enemy blob is shared throughout Bloodpool Act 2, so both
+   * range endpoints remain valid even though the discovery capture was map 5. */
+  ActionSceneEffects_CaptureFrame(&observer, &first, wram, sizeof(wram), 1);
+  CHECK(first.effect_count == 2);
+  CHECK(first.effects[0].kind == kActionEffect_EnemyFireball);
+  CHECK(first.effects[1].kind == kActionEffect_LightningTrap);
+  const uint32_t first_fireball_generation = first.effects[0].generation;
+  const uint32_t first_lightning_generation = first.effects[1].generation;
+
+  wram[kActRaiserWram_CurrentMap] = 8;
+  ActionSceneEffects_CaptureFrame(&observer, &last, wram, sizeof(wram), 1);
+  CHECK(last.effect_count == 2);
+  CHECK(last.effects[0].generation != first_fireball_generation);
+  CHECK(last.effects[1].generation != first_lightning_generation);
+  CHECK(last.effects[0].age_ticks == 0);
+  CHECK(last.effects[1].age_ticks == 0);
+
+  /* The same polymorphic records are not Bloodpool Act-1 or cross-stage
+   * identities merely because their control flow and current art still match. */
+  wram[kActRaiserWram_CurrentMap] = 1;
+  ActionSceneEffects_CaptureFrame(&observer, &rejected, wram, sizeof(wram), 1);
+  CHECK(rejected.effect_count == 0);
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Aitos;
+  wram[kActRaiserWram_CurrentMap] = 5;
+  ActionSceneEffects_CaptureFrame(&observer, &rejected, wram, sizeof(wram), 1);
+  CHECK(rejected.effect_count == 0);
+
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Bloodpool;
+  wram[kActRaiserWram_CurrentMap] = 5;
+  Write16(wram, 0x0C20 + 0x32, 0xBD75);
+  ActionSceneEffects_CaptureFrame(&observer, &rejected, wram, sizeof(wram), 1);
+  CHECK(rejected.effect_count == 1);
+  CHECK(rejected.effects[0].kind == kActionEffect_LightningTrap);
+
+  Write16(wram, 0x0C20 + 0x32, 0xBD84);
+  Write16(wram, 0x0EA0 + 0x32, 0xBD29);
+  ActionSceneEffects_CaptureFrame(&observer, &rejected, wram, sizeof(wram), 1);
+  CHECK(rejected.effect_count == 1);
+  CHECK(rejected.effects[0].kind == kActionEffect_EnemyFireball);
+}
+
 static void TestBloodpoolBossLightningIdentity(void) {
   uint8_t wram[kActRaiserWramSize];
   ActionSceneEffectFrame frame;
@@ -1390,7 +1441,9 @@ static void TestMarahnaTorchMetatileIdentityAndWindow(void) {
           kActionEffectProjectionPlane_Bg1);
     CHECK(frame.decorations[0].render_layer ==
           kActionEffectRenderLayer_Bg1Plane);
-    CHECK(frame.decorations[0].phase_ticks == 20296 + map - 4);
+    /* A room handoff retires both actor generations and the map-decoration
+     * clock; each room seeds its authored effects from the current game frame. */
+    CHECK(frame.decorations[0].phase_ticks == 20296);
   }
 
   /* Boss map $08 has a separate 512x512 BG1 and ten exact `$43` cells. Pin
@@ -2023,6 +2076,93 @@ static void TestAitosLavaPitIdentityAndWindow(void) {
   CHECK(frame.decoration_count == 0);
 }
 
+static void TestAitosAct2SideLavaReservoirIdentity(void) {
+  uint8_t wram[kActRaiserWramSize] = {0};
+  ActionSceneEffectFrame frame;
+  ActionEffectObserver observer = {0};
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Aitos;
+  wram[kActRaiserWram_CurrentMap] = 5;
+  CHECK(ActionEffects_IsAitosAct2LavaRoom(
+      kActRaiserMapGroup_Aitos, 4));
+  CHECK(ActionEffects_IsAitosAct2LavaRoom(
+      kActRaiserMapGroup_Aitos, 5));
+  CHECK(ActionEffects_IsAitosAct2LavaRoom(
+      kActRaiserMapGroup_Aitos, 6));
+  CHECK(!ActionEffects_IsAitosAct2LavaRoom(
+      kActRaiserMapGroup_Aitos, 3));
+  CHECK(!ActionEffects_IsAitosAct2LavaRoom(3, 5));
+  Write16(wram, kActRaiserWram_GameFrame, 5009);
+  Write16(wram, kActRaiserWram_Bg1Width, 512);
+  Write16(wram, kActRaiserWram_Bg1Height, 256);
+  Write16(wram, kActRaiserWram_BgMapPage, 0x8000);
+
+  /* A maximal six-cell $01 lip, its measured $2C/$32 banks, animated air
+   * cells above, and red $05 body below. This is the side-on Act 2 semantic,
+   * not Act 1's $DC..$E7 isometric pit mouth. */
+  const unsigned x = 48, y = 96, cells = 6;
+  SeedBgMetatile(wram, 512, x - 16, y, 0x2C);
+  SeedBgMetatile(wram, 512, x + cells * 16, y, 0x32);
+  for (unsigned cell = 0; cell < cells; cell++) {
+    SeedBgMetatile(wram, 512, x + cell * 16, y, 0x01);
+    SeedBgMetatile(wram, 512, x + cell * 16, y - 16,
+                   cell & 1u ? 0x00 : 0x02);
+    SeedBgMetatile(wram, 512, x + cell * 16, y + 16, 0x05);
+  }
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.decoration_count == 1);
+  CHECK(frame.decorations[0].kind == kActionEffect_AitosLavaReservoir);
+  CHECK(frame.decorations[0].phase ==
+        kActionEffectPhase_AitosLavaReservoir);
+  CHECK(frame.decorations[0].world_x == 96);
+  CHECK(frame.decorations[0].world_y == 100);
+  CHECK(frame.decorations[0].geometry.data.rect.x0 == -48.0f);
+  CHECK(frame.decorations[0].geometry.data.rect.x1 == 48.0f);
+  CHECK(frame.decorations[0].geometry.data.rect.y0 == -4.0f);
+  CHECK(frame.decorations[0].geometry.data.rect.y1 == 4.0f);
+  CHECK(frame.decorations[0].projection_plane ==
+        kActionEffectProjectionPlane_Bg1High);
+  CHECK(frame.decorations[0].render_layer ==
+        kActionEffectRenderLayer_Bg1HighPlane);
+
+  /* Animation, body, and exact banks are all load-bearing: an isolated $01
+   * floor texture must never turn into a room-wide heat emitter. */
+  for (unsigned cell = 0; cell < cells; cell++)
+    SeedBgMetatile(wram, 512, x + cell * 16, y - 16, 0x00);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.decoration_count == 0);
+  SeedBgMetatile(wram, 512, x, y - 16, 0x02);
+  SeedBgMetatile(wram, 512, x + cells * 16, y, 0x31);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.decoration_count == 0);
+  SeedBgMetatile(wram, 512, x + cells * 16, y, 0x32);
+  wram[kActRaiserWram_CurrentMap] = 7;
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.decoration_count == 0);
+
+  /* Map $06's measured lake is wider than a camera. Its true left bank can
+   * sit beyond the bounded scan window while the visible window begins on a
+   * $01 interior cell; the capture must still recover one maximal emitter. */
+  memset(wram + 0x8000, 0, 0x10000);
+  wram[kActRaiserWram_CurrentMap] = 6;
+  Write16(wram, kActRaiserWram_Bg1Width, 1024);
+  Write16(wram, kActRaiserWram_Bg1CameraX, 500);
+  const unsigned wide_cells = 40;
+  SeedBgMetatile(wram, 1024, x - 16, y, 0x33);
+  SeedBgMetatile(wram, 1024, x + wide_cells * 16, y, 0x34);
+  for (unsigned cell = 0; cell < wide_cells; cell++) {
+    SeedBgMetatile(wram, 1024, x + cell * 16, y, 0x01);
+    SeedBgMetatile(wram, 1024, x + cell * 16, y - 16,
+                   cell % 5u ? 0x00 : 0x77);
+    SeedBgMetatile(wram, 1024, x + cell * 16, y + 16, 0x05);
+  }
+  ActionEffectObserver_Reset(&observer);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.decoration_count == 1);
+  CHECK(frame.decorations[0].world_x == 368);
+  CHECK(frame.decorations[0].geometry.data.rect.x0 == -320.0f);
+  CHECK(frame.decorations[0].geometry.data.rect.x1 == 320.0f);
+}
+
 static void TestAitosMoltenRockIdentity(void) {
   uint8_t wram[kActRaiserWramSize] = {0};
   ActionSceneEffectFrame frame;
@@ -2206,6 +2346,94 @@ static void TestAitosLavaFireballIdentityAndContinuity(void) {
   CHECK(frame.effect_count == 0);
 }
 
+static void SeedAitosStatueFire(uint8_t *wram, unsigned slot,
+                                uint16_t source, uint16_t state,
+                                uint16_t visual, uint16_t composition) {
+  const size_t address = kActRaiserWram_ActionObjectTable +
+      slot * kActRaiserActionObjectStride;
+  const bool flipped = source == 0xD5C0;
+  uint16_t left = 16, right = 16;
+  if (visual == 0x0017) left = right = 4;
+  else if (visual == 0x001D) right = 32;
+  else if (visual == 0x001E || visual == 0x001F) right = 48;
+  if (flipped) {
+    const uint16_t swap = left;
+    left = right;
+    right = swap;
+  }
+  Write16(wram, address + 0x00, 0x0000);
+  Write16(wram, address + 0x02, (uint16_t)(1400 + slot * 8));
+  Write16(wram, address + 0x04, (uint16_t)(480 + slot * 16));
+  Write16(wram, address + 0x0A, left);
+  Write16(wram, address + 0x0C, visual == 0x0017 ? 4 : 8);
+  Write16(wram, address + 0x0E, right);
+  Write16(wram, address + 0x10, visual == 0x0017 ? 4 : 8);
+  Write16(wram, address + 0x12,
+          state == 0x0019 ? 0x8683
+                          : (source == 0xD5C0 ? 0xD5CC : 0xD5BD));
+  Write16(wram, address + 0x16, 0x4000);
+  wram[address + 0x18] = 0x7E;
+  Write16(wram, address + 0x1A, state);
+  Write16(wram, address + 0x1E, state == 0x0019 ? 0xD5EE : 0x0000);
+  Write16(wram, address + 0x20, composition);
+  Write16(wram, address + 0x22, visual);
+  Write16(wram, address + 0x28,
+          flipped ? kActRaiserObjectFlip_Horizontal : 0);
+  Write16(wram, address + 0x30, 0x0030);
+  Write16(wram, address + 0x32, source);
+}
+
+static void TestAitosStatueFireIdentityAndPriority(void) {
+  uint8_t wram[kActRaiserWramSize];
+  ActionSceneEffectFrame frame;
+  ActionEffectObserver observer = {0};
+  memset(wram, 0, sizeof(wram));
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Aitos;
+  wram[kActRaiserWram_CurrentMap] = 6;
+  Write16(wram, kActRaiserWram_SpriteAttributeBias, 0x2000);
+
+  SeedAitosStatueFire(wram, 34, 0xD5B1, 0x0018, 0x001C, 0x4763);
+  /* Exact sustained full-pillar frame measured in
+   * runs/20260824-041410/snapshots/snap_00_gf6670. */
+  SeedAitosStatueFire(wram, 35, 0xD5C0, 0x0019, 0x001E, 0x4790);
+  SeedAitosStatueFire(wram, 36, 0xD5B1, 0x0019, 0x001F, 0x47B1);
+  /* State $1A's held $17 mouth frame is the inactive interval. It remains a
+   * timed actor for activation purposes but must not publish a fire effect. */
+  SeedAitosStatueFire(wram, 37, 0xD5C0, 0x001A, 0x0017, 0x46FD);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 3);
+  CHECK(frame.visible_count == 3);
+  for (unsigned i = 0; i < 3; i++) {
+    CHECK(frame.effects[i].kind == kActionEffect_AitosStatueFire);
+    CHECK(frame.effects[i].phase ==
+          kActionEffectPhase_AitosStatueFireBreath);
+    CHECK(frame.effects[i].obj_priority == 2);
+  }
+  CHECK(frame.effects[0].geometry.data.rect.x0 == -16.0f);
+  CHECK(frame.effects[1].geometry.data.rect.x0 == -48.0f);
+  CHECK((frame.effects[1].flags & kActionEffectFlag_FlipHorizontal) != 0);
+  CHECK(frame.effects[2].visual == 0x001F);
+  CHECK(frame.effects[2].geometry.data.rect.x1 == 48.0f);
+
+  /* Drawing and activation are independent: retain lifecycle identity while
+   * $0400 is set, but do not submit the frozen margin actor as a live effect. */
+  const size_t first_address = kActRaiserWram_ActionObjectTable +
+      34 * kActRaiserActionObjectStride;
+  Write16(wram, first_address + 0x30, 0x0430);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 3);
+  CHECK(frame.visible_count == 2);
+
+  /* Same art outside the exact room/source/graphics tuple must fail closed. */
+  Write16(wram, first_address + 0x30, 0x0030);
+  Write16(wram, first_address + 0x32, 0xD5B0);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 2);
+  wram[kActRaiserWram_CurrentMap] = 5;
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 0);
+}
+
 static size_t BossEffectSlot(unsigned slot) {
   return kActRaiserWram_ActionObjectTable +
       slot * kActRaiserActionObjectStride;
@@ -2324,10 +2552,13 @@ static void TestBossEffectsCarryIntoDeathHeim(void) {
     {kActRaiserMapGroup_DeathHeim, 5, 0xF712},
   };
   for (size_t i = 0; i < sizeof(kWheelRooms) / sizeof(kWheelRooms[0]); i++) {
+    const uint8_t expected_priority = i == 0 ? 2 : 1;
     memset(wram, 0, sizeof(wram));
     ActionEffectObserver_Reset(&observer);
     wram[kActRaiserWram_MapGroup] = kWheelRooms[i].group;
     wram[kActRaiserWram_CurrentMap] = kWheelRooms[i].map;
+    Write16(wram, kActRaiserWram_SpriteAttributeBias,
+            (uint16_t)(expected_priority << 12));
     /* Recorded body frame: the wheel uses both repeat and delay handlers over
      * its lifecycle, so ownership—not a transient handler—is its discriminator. */
     SeedBossFamilyObject(wram, 49, kWheelRooms[i].source, 0x5276,
@@ -2339,13 +2570,36 @@ static void TestBossEffectsCarryIntoDeathHeim(void) {
                                     wram, sizeof(wram), 1);
     CHECK(frame.effect_count == 1);
     CHECK(frame.effects[0].kind == kActionEffect_FlamingWheel);
+    CHECK(frame.effects[0].obj_priority == expected_priority);
+
+    /* snap_05's five cyan shots are exact animation-$5000 children of that
+     * root. Pin one direction/frame tuple in both original and rematch rooms. */
+    SeedBossFamilyObject(wram, 11, kWheelRooms[i].source, 0x51B5,
+                         0x0000, 0x0008, 0xA65D, 0x0020,
+                         (uint16_t)BossEffectSlot(49));
+    Write16(wram, BossEffectSlot(11) + 0x06, 0xFFFF);
+    Write16(wram, BossEffectSlot(11) + 0x08, 0x0001);
+    Write16(wram, BossEffectSlot(11) + 0x38, 0x0008);
+    Write16(wram, BossEffectSlot(11) + 0x28, 0x4000);
+    ActionSceneEffects_CaptureFrame(&observer, &frame,
+                                    wram, sizeof(wram), 1);
+    CHECK(frame.effect_count == 2);
+    CHECK(frame.effects[0].kind == kActionEffect_FlamingWheelProjectile);
+    CHECK(frame.effects[0].phase ==
+          kActionEffectPhase_FlamingWheelProjectileFlight);
+    CHECK(frame.effects[0].obj_priority == expected_priority);
+    CHECK(frame.effects[1].obj_priority == expected_priority);
+    Write16(wram, BossEffectSlot(11) + 0x06, 0xFFFE);
+    ActionSceneEffects_CaptureFrame(&observer, &frame,
+                                    wram, sizeof(wram), 1);
+    CHECK(frame.effect_count == 1);
 
     /* The spawn source is shared by boss-family helpers. A visually plausible
      * child must not become a second full-body flame emitter. */
-    SeedBossFamilyObject(wram, 11, kWheelRooms[i].source, 0x5276,
+    SeedBossFamilyObject(wram, 12, kWheelRooms[i].source, 0x5276,
                          0x0005, 7, 0xD85E, 0x4000,
                          (uint16_t)BossEffectSlot(49));
-    Write16(wram, BossEffectSlot(11) + 0x12, 0x8683);
+    Write16(wram, BossEffectSlot(12) + 0x12, 0x8683);
     ActionSceneEffects_CaptureFrame(&observer, &frame,
                                     wram, sizeof(wram), 1);
     CHECK(frame.effect_count == 1);
@@ -2353,10 +2607,56 @@ static void TestBossEffectsCarryIntoDeathHeim(void) {
     /* Conversely, a body that acquires a child-style backlink is no longer the
      * stable root/room-owned wheel and must fail closed. */
     Write16(wram, BossEffectSlot(49) + 0x3A,
-            (uint16_t)BossEffectSlot(11));
+            (uint16_t)BossEffectSlot(12));
     ActionSceneEffects_CaptureFrame(&observer, &frame,
                                     wram, sizeof(wram), 1);
     CHECK(frame.effect_count == 0);
+
+    /* The reported boss frame contains five simultaneous children. They are
+     * all independently identified by source/animation/parent ancestry and
+     * all inherit the room's live sprite band. This also proves that a Death
+     * Heim priority change cannot silently decorate only one direction. */
+    static const uint16_t kState[] = {8, 9, 10, 11, 12};
+    static const uint16_t kVisual[] = {0, 1, 2, 3, 0};
+    static const uint16_t kComposition[] = {
+      0x51B5, 0x51C1, 0x51CD, 0x51D9, 0x51B5,
+    };
+    static const int16_t kVelocity[][2] = {
+      {-1, 1}, {0, 1}, {1, 1}, {-1, 0}, {1, 0},
+    };
+    for (unsigned shot = 0; shot < 5; shot++)
+      memset(wram + BossEffectSlot(11 + shot), 0,
+             kActRaiserActionObjectStride);
+    SeedBossFamilyObject(wram, 49, kWheelRooms[i].source, 0x5276,
+                         0x0005, 7, 0xD85E, 0x4000,
+                         kWheelRooms[i].group ==
+                                 kActRaiserMapGroup_DeathHeim
+                             ? 0x001C : 0);
+    Write16(wram, BossEffectSlot(49) + 0x12, 0x8683);
+    for (unsigned shot = 0; shot < 5; shot++) {
+      const unsigned slot = 11 + shot;
+      SeedBossFamilyObject(wram, slot, kWheelRooms[i].source,
+                           kComposition[shot], kVisual[shot], kState[shot],
+                           0xA65D, 0x0020,
+                           (uint16_t)BossEffectSlot(49));
+      Write16(wram, BossEffectSlot(slot) + 0x06,
+              (uint16_t)kVelocity[shot][0]);
+      Write16(wram, BossEffectSlot(slot) + 0x08,
+              (uint16_t)kVelocity[shot][1]);
+      Write16(wram, BossEffectSlot(slot) + 0x28, 0x4000);
+      Write16(wram, BossEffectSlot(slot) + 0x38, kState[shot]);
+    }
+    ActionSceneEffects_CaptureFrame(&observer, &frame,
+                                    wram, sizeof(wram), 1);
+    CHECK(frame.effect_count == 6);
+    CHECK(frame.visible_count == 6);
+    for (unsigned shot = 0; shot < 5; shot++) {
+      CHECK(frame.effects[shot].kind ==
+            kActionEffect_FlamingWheelProjectile);
+      CHECK(frame.effects[shot].obj_priority == expected_priority);
+    }
+    CHECK(frame.effects[5].kind == kActionEffect_FlamingWheel);
+    CHECK(frame.effects[5].obj_priority == expected_priority);
   }
 
   /* Ice Dragon balls retain their exact eight-frame artwork in the rematch. */
@@ -2400,7 +2700,8 @@ static void TestSceneCaptureCapacityFailsClosed(void) {
   ActionSceneEffectFrame frame;
   ActionEffectObserver observer = {0};
   memset(wram, 0, sizeof(wram));
-  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Fillmore;
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Bloodpool;
+  wram[kActRaiserWram_CurrentMap] = 2;
   for (unsigned slot = 0; slot < kActionSceneEffectMaxInstances + 1; slot++)
     SeedMeasuredSceneObject(wram, slot, false);
   ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
@@ -2434,8 +2735,13 @@ static void TestSceneCaptureCapacityFailsClosed(void) {
     SeedAitosSplashPlatform(
         wram, 1792, kMeasuredStructures[i][0], kMeasuredStructures[i][1],
         kMeasuredStructures[i][2]);
-  SeedMeasuredSceneObject(wram, 0, false);
-  SeedMeasuredSceneObject(wram, 1, true);
+  SeedSwordBeam(wram, 0x13, false);
+  const size_t first_beam = kActRaiserWram_ActionObjectTable +
+      9 * kActRaiserActionObjectStride;
+  const size_t second_beam = first_beam + kActRaiserActionObjectStride;
+  memcpy(wram + second_beam, wram + first_beam,
+         kActRaiserActionObjectStride);
+  Write16(wram, second_beam + 0x02, 248);
   ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
   CHECK(frame.decoration_overflow == 0);
   CHECK(frame.decoration_count == 16);
@@ -2468,6 +2774,7 @@ int main(void) {
   TestGameplayTickClockTracksCompletedPasses();
   TestMalformedInputsFailClosed();
   TestMeasuredSceneObjectIdentities();
+  TestBloodpoolAct2SceneScopeAndRoomContinuity();
   TestBloodpoolBossLightningIdentity();
   TestSwordBeamIdentityAndAuthoredGeometry();
   TestAitosBossSwordVolleyIdentityAndGeometry();
@@ -2478,9 +2785,11 @@ int main(void) {
   TestMarahnaLightningLinkIdentityAndOrientations();
   TestMarahnaBossLightningIdentityAndStages();
   TestAitosLavaPitIdentityAndWindow();
+  TestAitosAct2SideLavaReservoirIdentity();
   TestAitosMoltenRockIdentity();
   TestAitosWaterfallSplashIdentity();
   TestAitosLavaFireballIdentityAndContinuity();
+  TestAitosStatueFireIdentityAndPriority();
   TestBossEffectsCarryIntoDeathHeim();
   TestSceneCaptureCapacityFailsClosed();
   if (g_failures) {

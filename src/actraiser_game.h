@@ -90,6 +90,10 @@ enum {
   kActRaiserWram_Bg2Map = 0xC000,
   kActRaiserWram_GameFrame = kActRaiserRuntimeWram_GameFrame,
   kActRaiserWram_ActionCameraSubject = 0x008A,
+  /* Global attributes OR'd into every action-object composition part by
+   * $00:8D68. Bits 12-13 are therefore the live OBJ priority for artwork
+   * whose authored part word carries priority zero. */
+  kActRaiserWram_SpriteAttributeBias = 0x008F,
   kActRaiserWram_InputHeldHigh = 0x00A0,
   kActRaiserWram_ActionTimerLow = 0x00E6,
   kActRaiserWram_ActionTimerHigh = 0x00E7,
@@ -281,6 +285,21 @@ static inline int ActRaiser_ShouldUseWideActionActivation(
     int wide_activation_enabled, uint16 player_handler) {
   return wide_activation_enabled &&
          !ActRaiser_PlayerArrivalAnimationActive(player_handler);
+}
+
+/* Aitos Act 2's fire-breathing statue hazards are ordinary action records
+ * whose visible animation comes from the room's $7E:4000 graphics blob. In a
+ * vertically extended Diorama viewport they can be drawn while the authentic
+ * 224-line activation test still leaves $0400 set, freezing a visible flame.
+ * Keep the exception keyed by all three stable scopes: room, retained spawn
+ * source, and loaded animation source. Priority is deliberately absent; it is
+ * render state, not actor identity. */
+static inline int ActRaiser_IsAitosStatueFireActor(
+    uint8 map_group, uint8 map_number, uint16 source_descriptor,
+    uint16 animation_address, uint8 animation_bank) {
+  return map_group == kActRaiserMapGroup_Aitos && map_number == 0x06 &&
+      (source_descriptor == 0xD5B1 || source_descriptor == 0xD5C0) &&
+      animation_address == 0x4000 && animation_bank == 0x7E;
 }
 
 /* $02:B030 derives the authentic horizontal camera directly from the selected

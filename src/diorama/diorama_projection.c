@@ -19,12 +19,18 @@ bool Diorama_PlaneEligible(int plane, bool visible, bool has_texture,
 }
 
 bool Diorama_PlaneProjectable(int plane, bool visible, bool has_texture,
-                              bool has_pixels, bool has_obj_effect,
+                              bool has_pixels, bool has_attached_effect,
                               bool hud_flat, bool skybox_only) {
+  const bool accepts_attached_effect =
+      DioramaPlaneIsObjectPriority(plane) ||
+      plane == kPpuOverlaySource_Bg1 ||
+      plane == kPpuOverlaySource_Bg2 ||
+      plane == kDioramaPlane_Bg1Hi;
   const bool has_effect_content =
-      has_obj_effect && DioramaPlaneIsObjectPriority(plane);
+      has_attached_effect && accepts_attached_effect;
   return Diorama_PlaneEligible(
-      plane, visible, has_texture, has_pixels || has_effect_content,
+      plane, visible, has_texture || has_effect_content,
+      has_pixels || has_effect_content,
       hud_flat, skybox_only);
 }
 
@@ -45,6 +51,17 @@ uint8_t Diorama_FilterObjEffectProjectionMask(
     filtered |= priority_bit;
   }
   return filtered;
+}
+
+uint32_t Diorama_FilterBgEffectProjectionMask(
+    uint32_t required_planes, uint32_t requested_planes,
+    uint32_t content_planes, uint32_t uploaded_planes) {
+  const uint32_t valid_planes =
+      (1u << kPpuOverlaySource_Bg1) |
+      (1u << kPpuOverlaySource_Bg2) |
+      (1u << kDioramaPlane_Bg1Hi);
+  const uint32_t failed_content = content_planes & ~uploaded_planes;
+  return required_planes & valid_planes & requested_planes & ~failed_content;
 }
 
 static bool ProjectCapturedPlanePoint(
@@ -129,6 +146,16 @@ bool Diorama_ProjectCapturedBg1Point(const DioramaProjection *projection,
   return ProjectCapturedPlanePoint(
       projection, capture_x, capture_y,
       &projection->bg1_plane, point, scale_x, scale_y);
+}
+
+bool Diorama_ProjectCapturedBg1HighPoint(
+    const DioramaProjection *projection,
+    float capture_x, float capture_y, SDL_FPoint *point,
+    float *scale_x, float *scale_y) {
+  if (!projection || !point) return false;
+  return ProjectCapturedPlanePoint(
+      projection, capture_x, capture_y,
+      &projection->bg1_high_plane, point, scale_x, scale_y);
 }
 
 bool Diorama_ProjectCapturedBg2Point(const DioramaProjection *projection,

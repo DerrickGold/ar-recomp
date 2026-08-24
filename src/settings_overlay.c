@@ -15,6 +15,7 @@
 #include "presentation_geometry.h"
 #include "quintet_lzss.h"
 #include "settings.h"
+#include "snes_bgr555.h"
 #include "user_data_dir.h"
 
 enum {
@@ -507,10 +508,23 @@ static SettingsOverlayInspectorInfoProvider s_inspector_info_provider;
 static SettingsOverlayLayerTableFn s_layer_table_provider;
 static SettingsOverlayLayerRoomFn s_layer_room_provider;
 static SettingsOverlayLayerSaveFn s_layer_save_provider;
+static SettingsOverlayLayerPaletteFn s_layer_palette_provider;
 /* Which plane's parameters are expanded, or -1. Held rather than derived from
  * the cursor so the expansion does not collapse while the player steps DOWN
  * through its own parameter rows. */
 static int s_layer_plane = -1;
+static bool s_layer_palette_open;
+static uint8_t s_layer_palette_cursor;
+static uint16_t s_layer_palette[kSettingsOverlayLayerPaletteEntries];
+static DioramaEditorRow s_layer_palette_row;
+static SDL_Texture *s_layer_palette_texture;
+
+enum {
+  kLayerPaletteCell = 9,
+  kLayerPaletteGridPixels = 16 * kLayerPaletteCell,
+};
+
+static bool RebuildLayerPaletteTexture(void);
 
 static void ClearSectionResetArm(void) {
   s_reset_armed_section = -1;
@@ -546,6 +560,16 @@ void SettingsOverlay_SetLayerEditorHooks(SettingsOverlayLayerTableFn table,
   s_layer_table_provider = table;
   s_layer_room_provider = room;
   s_layer_save_provider = save;
+}
+
+void SettingsOverlay_SetLayerPaletteProvider(
+    SettingsOverlayLayerPaletteFn provider) {
+  s_layer_palette_provider = provider;
+  if (!provider) {
+    s_layer_palette_open = false;
+    SDL_DestroyTexture(s_layer_palette_texture);
+    s_layer_palette_texture = NULL;
+  }
 }
 
 /* SDL3 render primitives take float rects. Layout math stays integer (it also
@@ -1302,6 +1326,7 @@ static const char *LayerParamKey(DioramaEditorParam param) {
     case kDioramaEditorParam_Direction: return "dir";
     case kDioramaEditorParam_Z:         return "z";
     case kDioramaEditorParam_Alpha:     return "alpha";
+    case kDioramaEditorParam_TransparentFill: return "transparent";
     case kDioramaEditorParam_Source:    return "source";
     case kDioramaEditorParam_Order:     return "order";
     case kDioramaEditorParam_None:
@@ -1723,22 +1748,63 @@ static void BeginValueHold(const SettingDesc *desc, int direction,
  *
  * Returns true when the row belonged to the editor, so the ordinary descriptor
  * paths are skipped. */
-static DioramaPlaneOverride *LayerPlaneForRow(const DioramaEditorRow *row) {
+static DioramaPlaneOverride *LayerPlaneForRow(const DioramaEditorRow *row,
+                                              bool create) {
   if (!row || row->plane < 0 || !s_layer_table_provider) return NULL;
   DioramaLayerOrderTable *table = s_layer_table_provider();
   if (!table) return NULL;
-  /* FindOrAdd, not Find: the first edit to a room is what creates its entry. A
-   * full table returns NULL and is reported rather than dropping the edit
-   * silently. */
-  DioramaRoomOverride *room = DioramaLayerOrder_FindOrAddSection(
-      table, row->map_group, row->map_number, row->section);
+  DioramaRoomOverride *room = NULL;
+  if (create) {
+    /* The first committed edit creates its room entry. A full table returns
+     * NULL and is reported rather than dropping the edit silently. */
+    room = DioramaLayerOrder_FindOrAddSection(
+        table, row->map_group, row->map_number, row->section);
+  } else {
+    /* Clear only an already-existing record; reset/preview paths must not
+     * allocate one of the bounded section slots. */
+    room = DioramaLayerOrder_FindMutableSection(
+        table, row->map_group, row->map_number, row->section);
+  }
   if (!room) return NULL;
   return &room->planes[row->plane];
+}
+
+static void LayerPruneEmptySection(const DioramaEditorRow *row) {
+  if (!row || !s_layer_table_provider) return;
+  DioramaLayerOrderTable *table = s_layer_table_provider();
+  if (!table) return;
+  const DioramaRoomOverride *room = DioramaLayerOrder_FindSection(
+      table, row->map_group, row->map_number, row->section);
+  if (room && !DioramaLayerOrder_RoomIsActive(room))
+    DioramaLayerOrder_ResetSection(
+        table, row->map_group, row->map_number, row->section);
 }
 
 static void LayerSaveEdit(void) {
   if (s_layer_save_provider && !s_layer_save_provider())
     SetStatus("SAVE FAILED");
+}
+
+static bool LayerOpenPalette(const DioramaEditorRow *row) {
+  if (!row || row->param != kDioramaEditorParam_TransparentFill ||
+      !s_layer_palette_provider ||
+      !s_layer_palette_provider(s_layer_palette)) {
+    SetStatus("LIVE PALETTE UNAVAILABLE");
+    return false;
+  }
+  s_layer_palette_row = *row;
+  s_layer_palette_cursor =
+      row->effective_transparent_fill_set &&
+      row->effective_transparent_fill_kind == kDioramaTransparentFill_Cgram
+          ? row->effective_transparent_fill_cgram : 0;
+  /* Snapshot CGRAM once when the modal opens. The game is suspended while the
+   * menu owns input, so rebuilding this immutable atlas on cursor movement (or
+   * issuing 256 rectangle draws every frame) would only duplicate work. */
+  SDL_DestroyTexture(s_layer_palette_texture);
+  s_layer_palette_texture = NULL;
+  if (s_renderer) (void)RebuildLayerPaletteTexture();
+  s_layer_palette_open = true;
+  return true;
 }
 
 static void ReportActionBgTunerResult(ActionBgTunerResult result) {
@@ -1775,7 +1841,7 @@ static bool LayerChangeSelected(int direction) {
     return true;
   }
 
-  DioramaPlaneOverride *plane = LayerPlaneForRow(diorama);
+  DioramaPlaneOverride *plane = LayerPlaneForRow(diorama, true);
   if (!plane) {
     SetStatus("NO ROOM TO EDIT");
     return true;
@@ -1897,6 +1963,10 @@ static bool LayerActivateSelected(void) {
         ? -1 : diorama->plane;
     return true;
   }
+  if (diorama->param == kDioramaEditorParam_TransparentFill) {
+    (void)LayerOpenPalette(diorama);
+    return true;
+  }
   /* A parameter row: confirm is one fine step up, matching what an Int
    * descriptor row does elsewhere in this menu. */
   return LayerChangeSelected(+1);
@@ -1944,9 +2014,9 @@ static bool LayerResetSelected(void) {
   if (diorama->kind == kDioramaEditorRow_ResetRoom)
     return LayerActivateSelected();
 
-  DioramaPlaneOverride *plane = LayerPlaneForRow(diorama);
+  DioramaPlaneOverride *plane = LayerPlaneForRow(diorama, false);
   if (!plane) {
-    SetStatus("NO ROOM TO EDIT");
+    SetStatus("ALREADY INHERITED");
     return true;
   }
   if (diorama->kind == kDioramaEditorRow_Plane) {
@@ -1956,6 +2026,7 @@ static bool LayerResetSelected(void) {
     DioramaLayerEditor_ClearParam(plane, diorama->param);
     SetStatus("CLEARED");
   }
+  LayerPruneEmptySection(diorama);
   LayerSaveEdit();
   return true;
 }
@@ -2129,6 +2200,8 @@ bool SettingsOverlay_ReloadTextures(const uint8_t *rom_data, size_t rom_size) {
   s_icon_texture = NULL;
   SDL_DestroyTexture(s_dialog_frame_texture);
   s_dialog_frame_texture = NULL;
+  SDL_DestroyTexture(s_layer_palette_texture);
+  s_layer_palette_texture = NULL;
   /* The decoded font tiles (s_font_tiles/s_glyph_defined) are CPU-side and
    * survive the reset; only the GPU-side atlases need rebuilding. */
   return CreateOverlayTextures(rom_data, rom_size);
@@ -2141,6 +2214,8 @@ void SettingsOverlay_Destroy(void) {
   s_icon_texture = NULL;
   SDL_DestroyTexture(s_dialog_frame_texture);
   s_dialog_frame_texture = NULL;
+  SDL_DestroyTexture(s_layer_palette_texture);
+  s_layer_palette_texture = NULL;
   s_renderer = NULL;
   s_open = false;
   s_submenu_open = false;
@@ -2175,6 +2250,7 @@ void SettingsOverlay_Close(void) {
   ClearSectionResetArm();
   s_capture_desc = NULL;
   s_submenu_open = false;
+  s_layer_palette_open = false;
   s_open = false;
   fprintf(stderr, "[settings-menu] closed\n");
 }
@@ -2287,7 +2363,73 @@ typedef enum {
   kMenuNav_Close,
 } MenuNav;
 
+static bool ApplyLayerPaletteNav(MenuNav nav, bool repeat) {
+  if (!s_layer_palette_open) return false;
+  switch (nav) {
+    case kMenuNav_Up:
+      s_layer_palette_cursor = (uint8_t)(s_layer_palette_cursor - 16);
+      break;
+    case kMenuNav_Down:
+      s_layer_palette_cursor = (uint8_t)(s_layer_palette_cursor + 16);
+      break;
+    case kMenuNav_Left:
+      s_layer_palette_cursor = (uint8_t)(
+          (s_layer_palette_cursor & 0xf0) |
+          ((s_layer_palette_cursor - 1) & 0x0f));
+      break;
+    case kMenuNav_Right:
+      s_layer_palette_cursor = (uint8_t)(
+          (s_layer_palette_cursor & 0xf0) |
+          ((s_layer_palette_cursor + 1) & 0x0f));
+      break;
+    case kMenuNav_Confirm: {
+      if (repeat) break;
+      DioramaPlaneOverride *plane = LayerPlaneForRow(
+          &s_layer_palette_row, true);
+      if (!plane) {
+        SetStatus("NO ROOM TO EDIT");
+        s_layer_palette_open = false;
+        break;
+      }
+      plane->set_transparent_fill = true;
+      plane->transparent_fill_kind = kDioramaTransparentFill_Cgram;
+      plane->transparent_fill_cgram = s_layer_palette_cursor;
+      LayerSaveEdit();
+      SetStatus("PALETTE FILL APPLIED");
+      s_layer_palette_open = false;
+      break;
+    }
+    case kMenuNav_Reset: {
+      if (repeat) break;
+      DioramaPlaneOverride *plane = LayerPlaneForRow(
+          &s_layer_palette_row, false);
+      if (plane) {
+        DioramaLayerEditor_ClearParam(
+            plane, kDioramaEditorParam_TransparentFill);
+        LayerPruneEmptySection(&s_layer_palette_row);
+        LayerSaveEdit();
+        SetStatus("FILL CLEARED");
+      } else {
+        SetStatus("ALREADY INHERITED");
+      }
+      s_layer_palette_open = false;
+      break;
+    }
+    case kMenuNav_Back:
+      if (!repeat) s_layer_palette_open = false;
+      break;
+    case kMenuNav_Close:
+      if (!repeat) SettingsOverlay_Close();
+      break;
+    case kMenuNav_TabPrev:
+    case kMenuNav_TabNext:
+      break;
+  }
+  return true;
+}
+
 static void ApplyMenuNav(MenuNav nav, bool repeat) {
+  if (ApplyLayerPaletteNav(nav, repeat)) return;
   if (!s_submenu_open) {
     switch (nav) {
       case kMenuNav_Up:      MoveSection(-1); break;
@@ -3751,6 +3893,99 @@ static void DrawMenu(const MenuLayout *layout) {
   DrawMenuFooter(layout, &chrome, section, custom_rows);
 }
 
+static uint32_t LayerPaletteColor(uint16_t bgr555) {
+  return ARGB(255,
+              ExpandColor5(bgr555, 15),
+              ExpandColor5(bgr555 >> 5, 15),
+              ExpandColor5(bgr555 >> 10, 15));
+}
+
+static bool RebuildLayerPaletteTexture(void) {
+  if (!s_renderer) return false;
+  uint32_t *pixels = calloc(
+      (size_t)kLayerPaletteGridPixels * kLayerPaletteGridPixels,
+      sizeof(*pixels));
+  if (!pixels) return false;
+  for (int index = 0; index < kSettingsOverlayLayerPaletteEntries; index++) {
+    const int x0 = (index & 15) * kLayerPaletteCell;
+    const int y0 = (index >> 4) * kLayerPaletteCell;
+    const uint32_t color = LayerPaletteColor(s_layer_palette[index]);
+    for (int y = 0; y < kLayerPaletteCell - 1; y++)
+      for (int x = 0; x < kLayerPaletteCell - 1; x++)
+        pixels[(size_t)(y0 + y) * kLayerPaletteGridPixels + x0 + x] = color;
+  }
+
+  SDL_Texture *texture = SDL_CreateTexture(
+      s_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC,
+      kLayerPaletteGridPixels, kLayerPaletteGridPixels);
+  const bool ready = texture &&
+      SDL_UpdateTexture(texture, NULL, pixels,
+                        kLayerPaletteGridPixels * (int)sizeof(*pixels)) &&
+      SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND) &&
+      SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
+  free(pixels);
+  if (!ready) {
+    SDL_DestroyTexture(texture);
+    return false;
+  }
+  s_layer_palette_texture = texture;
+  return true;
+}
+
+static void DrawLayerPalettePicker(const MenuLayout *layout) {
+  if (!s_layer_palette_open) return;
+  enum {
+    kPickerWidth = 172,
+    kPickerHeight = 190,
+    kPickerGridX = 14,
+    kPickerGridY = 25,
+  };
+  const int x = (layout->logical_width - kPickerWidth) / 2;
+  const int y = (layout->logical_height - kPickerHeight) / 2;
+  DrawDialogPanel(layout, x, y, kPickerWidth, kPickerHeight);
+  DrawSmallText(layout, x + 14, y + 11, "LIVE CGRAM BACKDROP FILL",
+                kSteelBlue);
+
+  if (!s_layer_palette_texture) (void)RebuildLayerPaletteTexture();
+  if (s_layer_palette_texture) {
+    const SDL_FRect destination = ToFRect(LogicalRect(
+        layout, x + kPickerGridX, y + kPickerGridY,
+        kLayerPaletteGridPixels, kLayerPaletteGridPixels));
+    SDL_RenderTexture(
+        s_renderer, s_layer_palette_texture, NULL, &destination);
+  } else {
+    /* Texture creation failure should not make the editor unusable. This slow
+     * fallback is exceptional; the normal path submits the entire grid once. */
+    for (int index = 0; index < kSettingsOverlayLayerPaletteEntries; index++) {
+      FillLogicalRect(
+          layout,
+          x + kPickerGridX + (index & 15) * kLayerPaletteCell,
+          y + kPickerGridY + (index >> 4) * kLayerPaletteCell,
+          kLayerPaletteCell - 1, kLayerPaletteCell - 1,
+          LayerPaletteColor(s_layer_palette[index]));
+    }
+  }
+
+  const int selected_x =
+      x + kPickerGridX + (s_layer_palette_cursor & 15) * kLayerPaletteCell;
+  const int selected_y =
+      y + kPickerGridY + (s_layer_palette_cursor >> 4) * kLayerPaletteCell;
+  FillLogicalRect(layout, selected_x, selected_y,
+                  kLayerPaletteCell, 1, kSelectYellow);
+  FillLogicalRect(layout, selected_x, selected_y + kLayerPaletteCell - 1,
+                  kLayerPaletteCell, 1, kSelectYellow);
+  FillLogicalRect(layout, selected_x, selected_y,
+                  1, kLayerPaletteCell, kSelectYellow);
+  FillLogicalRect(layout, selected_x + kLayerPaletteCell - 1, selected_y,
+                  1, kLayerPaletteCell, kSelectYellow);
+
+  char selected[32];
+  snprintf(selected, sizeof(selected), "CGRAM $%02X",
+           (unsigned)s_layer_palette_cursor);
+  DrawSmallText(layout, x + 14, y + 173, selected, kGameGold);
+  DrawSmallText(layout, x + 76, y + 173, "B USE  A CANCEL", kMutedText);
+}
+
 
 void SettingsOverlay_Render(SDL_Rect game_viewport) {
   if (!s_open || !s_renderer || !s_font_textures[kText_Normal]) return;
@@ -3795,6 +4030,7 @@ void SettingsOverlay_Render(SDL_Rect game_viewport) {
 
   MenuLayout layout = BuildLayout(output_width, output_height);
   DrawMenu(&layout);
+  DrawLayerPalettePicker(&layout);
 
   SDL_SetRenderDrawBlendMode(s_renderer, old_blend_mode);
   SDL_SetRenderDrawColor(s_renderer, old_r, old_g, old_b, old_a);

@@ -1158,14 +1158,10 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
                               kPpuOverlayFlag_MarkOwningScreenWinner;
     CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, 0, 0,
                                kActRaiserAuthenticWidth,
-                               kActRaiserAuthenticHeight, kAllFlags));
-    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg2].flags == kAllFlags);
-    /* And an undeclared bit is still rejected -- the whitelist must stay a
-     * whitelist rather than becoming a passthrough. */
-    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, 0, 0,
-                               kActRaiserAuthenticWidth,
                                kActRaiserAuthenticHeight,
-                               (uint8_t)(kAllFlags | 0x80)));
+                               (uint8_t)(kAllFlags | 0x80u)));
+    /* Fill is structured capture state now; its former high bit is once again
+     * unknown and must be rejected by the flag whitelist. */
     CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg2].flags == kAllFlags);
     PpuClearOverlayCaptures(ppu);
   }
@@ -1655,6 +1651,52 @@ static void TestOverlayContentMetadata(void) {
   CHECK(!PpuOverlaySurfaceHasContent(ppu, kPpuOverlaySource_Bg2, 0));
   CHECK(PpuOverlaySurfaceHasContent(ppu, kPpuOverlaySource_Bg2, 1));
 
+  /* A room-scoped black resolve makes the sparse primary BG2 an opaque black
+   * backing, including underneath high-priority BG2 art. It is extraction-only:
+   * the authentic scanout still resolves a transparent tile to CGRAM backdrop. */
+  ppu->cgram[0] = bgr555(0, 31, 0);
+  for (int i = 0; i < 0x400; i++)
+    ppu->vram[0x2000 + i] = 0;
+  ppu->vram[0x2000] = (uint16_t)(1 | (2 << 10) | (1u << 13));
+  /* Fill and geometry are independently configured. Setting the fill first
+   * must survive PpuSetOverlayCapture; call order is not presentation policy. */
+  CHECK(PpuSetOverlayTransparentFill(
+      ppu, kPpuOverlaySource_Bg2,
+      kPpuOverlayTransparentFill_Black, 0));
+  CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg2]
+            .transparentFillConfigured == 1);
+  CHECK(PpuSetOverlayCapture(
+      ppu, kPpuOverlaySource_Bg2, 0, 0, kW, 2,
+      0));
+  CHECK(PpuOverlayTransparentFillColor(
+            ppu, kPpuOverlaySource_Bg2) == 0xff000000u);
+  ppu_runLine(ppu, 0);
+  ppu_runLine(ppu, 1);
+  CHECK(primary[0] == 0xff000000u);
+  CHECK(primary[8] == 0xff000000u);
+  CHECK(high[0] == 0xffff00ffu);
+  CHECK(high[8] == 0);
+  CHECK(PpuOverlaySurfaceHasContent(ppu, kPpuOverlaySource_Bg2, 0));
+  CHECK(PpuOverlaySurfaceHasContent(ppu, kPpuOverlaySource_Bg2, 1));
+  CHECK(((const uint32_t *)(const void *)fb)[8] == rgb555(0, 31, 0));
+
+  /* CGRAM index zero is a valid opaque fill choice even though tile colour
+   * zero remains transparent. A non-zero index follows live palette changes. */
+  CHECK(PpuSetOverlayTransparentFill(
+      ppu, kPpuOverlaySource_Bg2,
+      kPpuOverlayTransparentFill_Cgram, 0));
+  CHECK(PpuOverlayTransparentFillColor(
+            ppu, kPpuOverlaySource_Bg2) == 0xff00ff00u);
+  ppu_runLine(ppu, 0);
+  ppu_runLine(ppu, 1);
+  CHECK(primary[8] == 0xff00ff00u);
+  ppu->cgram[0x21] = bgr555(0, 0, 31);
+  CHECK(PpuSetOverlayTransparentFill(
+      ppu, kPpuOverlaySource_Bg2,
+      kPpuOverlayTransparentFill_Cgram, 0x21));
+  CHECK(PpuOverlayTransparentFillColor(
+            ppu, kPpuOverlaySource_Bg2) == 0xff0000ffu);
+
   /* An active capture with its layer disabled still clears the surfaces, but
    * correctly reports no content in either destination. */
   ppu->screenEnabled[0] = 0;
@@ -1664,6 +1706,21 @@ static void TestOverlayContentMetadata(void) {
   CHECK(!PpuOverlaySurfaceHasContent(ppu, kPpuOverlaySource_Bg2, 1));
   CHECK(!PpuOverlaySurfaceHasContent(ppu, kPpuOverlaySource_Bg2, 4));
   CHECK(!PpuOverlaySurfaceHasContent(NULL, kPpuOverlaySource_Bg2, 0));
+  CHECK(!PpuSetOverlayTransparentFill(
+      ppu, kPpuOverlaySource_Bg2,
+      (PpuOverlayTransparentFill)99, 0));
+  CHECK(PpuSetOverlayTransparentFill(
+      ppu, kPpuOverlaySource_Bg2,
+      kPpuOverlayTransparentFill_None, 0));
+  CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg2]
+            .transparentFillConfigured == 1);
+  CHECK(PpuOverlayTransparentFillColor(
+            ppu, kPpuOverlaySource_Bg2) == 0);
+  PpuClearOverlayCaptures(ppu);
+  CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg2]
+            .transparentFillConfigured == 0);
+  CHECK(PpuOverlayTransparentFillColor(
+            ppu, kPpuOverlaySource_Bg2) == 0);
 
   g_new_ppu = saved_new_ppu;
   ppu_free(ppu);

@@ -225,6 +225,14 @@ extern const RtlGameInfo kActRaiserGameInfo;
 
 bool g_new_ppu = true;
 
+static bool SettingsOverlayLiveCgram(
+    uint16_t out_cgram[kSettingsOverlayLayerPaletteEntries]) {
+  if (!g_ppu || !out_cgram) return false;
+  memcpy(out_cgram, g_ppu->cgram,
+         sizeof(uint16_t) * kSettingsOverlayLayerPaletteEntries);
+  return true;
+}
+
 void NORETURN Die(const char *error) {
   SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kWindowTitle, error, NULL);
   fprintf(stderr, "Error: %s\n", error);
@@ -1174,6 +1182,7 @@ static void AppBoot_InstallSubsystems(AppBoot *app) {
    * see settings_overlay.h. */
   SettingsOverlay_SetLayerEditorHooks(Diorama_LayerOverrides, Diorama_LiveRoom,
                                       Diorama_SaveLayerManifest);
+  SettingsOverlay_SetLayerPaletteProvider(SettingsOverlayLiveCgram);
 
   /* The in-game manual, injected for the same reason: it owns textures and an
    * image decoder, and the overlay's own test links settings_overlay.c with no

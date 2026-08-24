@@ -2791,6 +2791,81 @@ if archaeology is ever needed. The distilled outcomes:
     `$64/$74` page handoff (or settled song-state fallback). Planner regressions
     enumerate every room and guard source, edge, motion, and extent together.
 
+79. **Aitos Act 2 read as an unlit tile room, map `0405` exposed black
+    rectangles, and Flaming Wheel's fire ring had no attachment. FIXED
+    2026-08-23.** Rooms `0404-0406` now recognize their measured side-view lava
+    lips and add overlapping at-most-96px lights, 32 distributed sparks, and
+    a fixed 16×14 heat-refraction mesh with pinned screen edges. Follow-up run
+    `20260823-225935` proved the detector published the same four reservoirs at
+    every reported position; the blink came from projecting side-lava through
+    BG1-low even when its actual priority-1 art lived wholly on BG1-high. Those
+    records now publish and draw immediately after the exact BG1-high plane,
+    whose effect-only transform remains valid for an intentionally empty band
+    but not for a failed upload. Runs `20260823-221731` and
+    `20260823-232614` also showed that rooms `0405` and `0406` deliberately mix
+    colour-zero transparency with opaque-black BG2 cells. Authentic composition
+    resolves colour zero against a final black backdrop, so both blend. The
+    authored `bg2 = transparent:black` mode reproduces that contract by first
+    filling the complete live BG2-low presentation plane black—including
+    untiled regions—and then painting its low/high art. The same rule applies
+    to each immutable ROM skybox without deleting opaque or mixed black detail;
+    the residual Backdrop plane stays disabled and live VRAM/authentic flat
+    emulation remain unchanged. The heat pass is now gated by lava-room identity rather
+    than camera-local reservoir capture and scales up to a restrained 6.5
+    output pixels, eliminating positional blink and high-resolution
+    invisibility. Its intermediate is viewport-sized and resolves with one
+    warped draw instead of copying the complete host output before redrawing
+    the viewport. Flaming Wheel's four complete ring compositions now
+    emit from twelve exact fireball centres, while its exact `$8661/$A65D`
+    cyan projectiles receive their own cool glow and particle wake. Capacity,
+    identity, transparent-backdrop routing, and deterministic heat geometry all have
+    positive and mutation regressions.
+
+80. **Visible Aitos statue fire could remain inert in the vertical Diorama
+    margin, and four of Flaming Wheel's five shots projected through the wrong
+    OBJ plane. FIXED 2026-08-24.** Run `20260824-034218` identifies the statue
+    hazards as map-`0406` source `$D5B1/$D5C0`, loaded `$7E:4000` actors with
+    exact `$17/$46FD` and `$1C-$1E/$4763-$4790` art. Generic vertical activation
+    remains authentic, but the enabled extension now admits only that complete
+    room/source/graphics tuple through the vertical draw window, so a visible
+    timed flame advances instead of retaining `$0400`. Its live frames receive
+    a warm plume-shaped light and twelve bounded rising sparks. The boss defect
+    was not missed identity: all five `$D838` children already matched. Capture
+    instead hardcoded effect priority 0 while their real OAM used priority 2.
+    Wheel identity remains stage/room + retained source + `$7E:5000` exact art
+    + ancestry; after that match, body and every child inherit bits 12-13 from
+    the live `$008F` sprite-attribute bias. Tests exercise five simultaneous
+    shots and deliberately assign Death Heim `$F712` a different priority,
+    proving priority is projection metadata rather than an identifier.
+
+81. **The statue-fire effect decorated the idle mouth and skipped the sustained
+    full pillar. FIXED 2026-08-24.** Run `20260824-041410` captures four idle
+    state-`$1A` records at `$17/$46FD` and one visibly complete state-`$19`
+    pillar at `$1E/$4790`. The first matcher had inferred only states `$18/$1A`:
+    it therefore enhanced the inactive hold and rejected the live sustained
+    phase. The loaded `$7E:4000` animation table proves the complete contract:
+    state `$18` grows through `$1C/$4763`, `$1D/$4776`, `$1E/$4790`; state `$19`
+    sustains through `$1F/$47B1` and `$1E/$4790`; state `$1A` holds idle
+    `$17/$46FD`. Capture and the renderer now fail closed to the two active
+    states and four pillar visuals. Activation still keys the whole timed actor
+    by room/source/graphics so an offscreen idle statue can reach its next
+    breath, but presentation fire exists only while authored flame is visible.
+
+82. **Bloodpool's original fireball and trap classifiers were globally scoped,
+    and scene generations could survive a direct room handoff. FIXED
+    2026-08-24.** The fireball documentation already identified retained source
+    `$BD76/$BD84`, but `IsEnemyFireball` checked only control flow, loaded art,
+    and current frame; both it and source-aware trap `$BD2A` were then evaluated
+    in every action room. They now require Bloodpool Act 2 (`$02/$02-$08`) plus
+    the exact source/animation/lifecycle tuple. This is deliberately an act
+    range rather than discovery map `$05`: Bloodpool's ordinary-enemy blob is
+    loaded at map `$02` and is legal throughout all seven Act-2 rooms. The scene
+    observer also records stage/map identity and retires actor generations,
+    pulses, and the map-decoration clock at every handoff, preventing same-slot
+    source reuse from carrying a trail into the next room. Regressions cover
+    maps `$02/$08`, Bloodpool Act 1, another stage, both invalid-source cases,
+    and generation reset without an intervening inactive frame.
+
 
 Process lessons folded out of statement-then-correction text elsewhere; the docs now state final
 truths, and the journey that earned them lives here.

@@ -99,6 +99,7 @@ static void TestGenericRoomScriptAndInheritance(void) {
     kPalette = 0x9800,
     kPalette2 = 0x9900,
     kPaletteUpper = 0x9A00,
+    kMap5 = 0x9C00,
     kVideoProfiles = 0x1093E,
     kProfile = 0x17,
   };
@@ -125,10 +126,25 @@ static void TestGenericRoomScriptAndInheritance(void) {
   for (unsigned row = 0; row < 8; row++) {
     chars0[row * 2] = 0xFF;          /* tile $000: colour 1 */
     chars1[row * 2 + 1] = 0xFF;      /* tile $100: colour 2 */
+    /* Local tile 2/global tile $102 is solid non-zero colour 3. Its palette
+     * entry is deliberately left at opaque black, distinguishing authored
+     * black artwork from colour-zero handling. */
+    chars1[2 * 32 + row * 2] = 0xFF;
+    chars1[2 * 32 + row * 2 + 1] = 0xFF;
+    /* Tile $103 is also colour 3/black, except one colour-2/red pixel. It
+     * verifies that black detail in a mixed cell stays authored. */
+    chars1[3 * 32 + row * 2] = 0xFF;
+    chars1[3 * 32 + row * 2 + 1] = 0xFF;
   }
+  chars1[3 * 32] &= 0x7F;
   for (unsigned quadrant = 0; quadrant < 4; quadrant++) {
     meta1[quadrant * 2] = 0x01;      /* byte-swapped SNES word $0100 */
     meta2[quadrant * 2] = 0x02;      /* byte-swapped SNES word $0200 */
+    /* Metatile 1 selects the solid-black $102, mixed-detail $103, then two
+     * zero-filled $101 cells after the permanent BG2 attribute merge. */
+    meta2[8 + quadrant * 2] = 0x02;
+    meta2[9 + quadrant * 2] =
+        quadrant == 0 ? 0x02 : quadrant == 1 ? 0x03 : 0x01;
   }
   WriteLiteralAsset(rom + kChr0, chars0, 0x2000);
   WriteLiteralAsset(rom + kChr1, chars1, 0x2000);
@@ -143,8 +159,14 @@ static void TestGenericRoomScriptAndInheritance(void) {
   rom[kPalette + 4] = 0x1F;         /* BGR15 red at palette 0 colour 2 */
   rom[kPalette2 + 4] = 0xE0;        /* BGR15 green at palette 0 colour 2 */
   rom[kPalette2 + 5] = 0x03;
+  rom[kPalette2] = 0x1F;             /* inherited colour zero: red, not black */
+  rom[kPalette2 + 1] = 0x00;
   rom[kPaletteUpper + 2] = 0x00;    /* BGR15 blue at palette 4 colour 1 */
   rom[kPaletteUpper + 3] = 0x7C;
+  rom[kPalette + 0x32 * 2] = 0xE0;  /* unrelated palette entry: BGR15 green */
+  rom[kPalette + 0x32 * 2 + 1] = 0x03;
+  rom[kPalette2 + 0x32 * 2] = 0xE0;
+  rom[kPalette2 + 0x32 * 2 + 1] = 0x03;
   /* Profile bit 1 forces common priority onto BG2 independently of the
    * permanent $01 character-bank attribute. */
   rom[kVideoProfiles + kProfile * kActionRoomSceneVideoProfileBytes + 4] =
@@ -179,6 +201,15 @@ static void TestGenericRoomScriptAndInheritance(void) {
   { COMMAND(0x40, 6); rom[ops] = 0; rom[ops + 1] = 0x40;
     rom[ops + 2] = 0; Put24(rom + ops + 3, kPalette2); }
   rom[at++] = 0;
+  memset(zeros, 1, 0x0100);
+  rom[kMap5] = rom[kMap5 + 1] = 1;
+  WriteLiteralAsset(rom + kMap5 + 2, zeros, 0x0100);
+  rom[at++] = 0x04; rom[at++] = 0x05;
+  { COMMAND(0x10, 4); rom[ops] = 2; Put24(rom + ops + 1, kMap5); }
+  rom[at++] = 0;
+  rom[at++] = 0x04; rom[at++] = 0x06;
+  { COMMAND(0x10, 4); rom[ops] = 2; Put24(rom + ops + 1, kMap5); }
+  rom[at++] = 0;
 #undef COMMAND
 
   const size_t pixel_count =
@@ -194,6 +225,42 @@ static void TestGenericRoomScriptAndInheritance(void) {
   CHECK(DioramaRomBackdrop_LoadActionBg(
       rom, kRomSize, 0x04, 0x03, 2, pixels, pixel_count));
   CHECK(pixels[12345] == 0xFF00FF00u);
+  CHECK(DioramaRomBackdrop_LoadActionBg(
+      rom, kRomSize, 0x04, 0x05, 2, pixels, pixel_count));
+  CHECK(pixels[0] == 0xFF000000u);  /* opaque-black cell remains authored */
+  CHECK(pixels[8] == 0xFF00FF00u);  /* mixed cell remains authored */
+  CHECK(pixels[9] == 0xFF000000u);  /* mixed-cell black survives */
+  CHECK(pixels[8 * kDioramaRomBackdropPixels] ==
+        0xFFFF0000u);               /* ordinary decode uses palette zero */
+  CHECK(DioramaRomBackdrop_LoadActionBgTransparentBlack(
+      rom, kRomSize, 0x04, 0x05, 2, pixels, pixel_count));
+  CHECK(pixels[0] == 0xFF000000u);  /* opaque black is not deleted */
+  CHECK(pixels[8] == 0xFF00FF00u);
+  CHECK(pixels[9] == 0xFF000000u);
+  CHECK(pixels[8 * kDioramaRomBackdropPixels] ==
+        0xFF000000u);               /* empty art retains black prefill */
+  CHECK(DioramaRomBackdrop_LoadActionBgTransparentFill(
+      rom, kRomSize, 0x04, 0x05, 2, 0xFF123456u, pixels, pixel_count));
+  CHECK(pixels[0] == 0xFF000000u);  /* authored opaque black still wins */
+  CHECK(pixels[8] == 0xFF00FF00u);  /* non-zero tile art still wins */
+  CHECK(pixels[8 * kDioramaRomBackdropPixels] ==
+        0xFF123456u);               /* empty cells retain arbitrary backing */
+  CHECK(!DioramaRomBackdrop_LoadActionBgTransparentFill(
+      rom, kRomSize, 0x04, 0x05, 2, 0x00123456u, pixels, pixel_count));
+  uint32_t default_fill = 0;
+  CHECK(DioramaRomBackdrop_LoadActionBgSparse(
+      rom, kRomSize, 0x04, 0x05, 2, pixels, pixel_count, &default_fill));
+  CHECK(default_fill == 0xFFFF0000u); /* source palette colour zero */
+  CHECK(pixels[0] == 0xFF000000u);   /* authored black remains opaque */
+  CHECK(pixels[8] == 0xFF00FF00u);   /* authored colour remains opaque */
+  CHECK(pixels[8 * kDioramaRomBackdropPixels] == 0);
+  CHECK(!DioramaRomBackdrop_LoadActionBgSparse(
+      rom, kRomSize, 0x04, 0x05, 2, pixels, pixel_count, NULL));
+  CHECK(DioramaRomBackdrop_LoadActionBg(
+      rom, kRomSize, 0x04, 0x06, 2, pixels, pixel_count));
+  CHECK(pixels[0] == 0xFF000000u);
+  CHECK(pixels[8] == 0xFF00FF00u);
+  CHECK(pixels[9] == 0xFF000000u);
   CHECK(!DioramaRomBackdrop_LoadActionBg(
       rom, kRomSize, 0x04, 0x04, 1, pixels, pixel_count));
   CHECK(!DioramaRomBackdrop_LoadActionBg(
@@ -601,6 +668,27 @@ static void TestStockRomCatalogue(const char *path) {
           failures++;
         } else {
           decoded++;
+          if (group == kActRaiserMapGroup_Aitos &&
+              (map == 0x05 || map == 0x06) && bg == 2) {
+            CHECK(DioramaRomBackdrop_LoadActionBgTransparentBlack(
+                rom, (size_t)length, group, map, bg, pixels,
+                pixel_count));
+            unsigned opaque_black_cells = 0;
+            for (unsigned tile_y = 0; tile_y < 32; tile_y++) {
+              for (unsigned tile_x = 0; tile_x < 32; tile_x++) {
+                unsigned black = 0;
+                for (unsigned py = 0; py < 8; py++)
+                  for (unsigned px = 0; px < 8; px++)
+                    black += pixels[(tile_y * 8 + py) *
+                                        kDioramaRomBackdropPixels +
+                                    tile_x * 8 + px] == 0xFF000000u;
+                if (black == 64) opaque_black_cells++;
+              }
+            }
+            /* The authored mode keeps opaque black and resolves colour zero
+             * to the same black final backing; it never deletes source art. */
+            CHECK(opaque_black_cells > 0);
+          }
         }
       }
     }

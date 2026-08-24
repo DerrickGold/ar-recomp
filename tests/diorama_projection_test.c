@@ -216,19 +216,27 @@ static void TestPlaneEligibilityMatchesDrawableInputs(void) {
   CHECK(!Diorama_PlaneEligible(
       kPpuOverlaySource_Bg3, true, true, true, true, false));
 
-  /* A current actor effect supplies current projection content for its exact
-   * visible OBJ band. It must not weaken the BG2 drawable-pixel contract that
-   * keeps the waterfall hidden when its source backdrop is skipped. */
+  /* A current attached effect supplies current projection content for its
+   * exact BG or OBJ plane. It needs no source texture when that isolated
+   * hardware band is empty, but cannot bypass visibility or skybox policy. */
   CHECK(Diorama_PlaneProjectable(
       kPpuOverlaySource_Obj, true, true, false, true, false, false));
   CHECK(!Diorama_PlaneProjectable(
       kPpuOverlaySource_Obj, false, true, false, true, false, false));
-  CHECK(!Diorama_PlaneProjectable(
+  CHECK(Diorama_PlaneProjectable(
       kPpuOverlaySource_Obj, true, false, false, true, false, false));
-  CHECK(!Diorama_PlaneProjectable(
+  CHECK(Diorama_PlaneProjectable(
       kPpuOverlaySource_Bg2, true, true, false, true, false, false));
   CHECK(Diorama_PlaneProjectable(
+      kPpuOverlaySource_Bg1, true, false, false, true, false, false));
+  CHECK(Diorama_PlaneProjectable(
+      kDioramaPlane_Bg1Hi, true, false, false, true, false, false));
+  CHECK(Diorama_PlaneProjectable(
       kPpuOverlaySource_Bg2, true, true, true, true, false, false));
+  CHECK(!Diorama_PlaneProjectable(
+      kDioramaPlane_Bg2Hi, true, true, false, true, false, false));
+  CHECK(!Diorama_PlaneProjectable(
+      kPpuOverlaySource_Bg2, true, true, false, true, false, true));
   CHECK(!Diorama_PlaneProjectable(
       kPpuOverlaySource_Obj, true, true, false, false, false, false));
 }
@@ -252,6 +260,24 @@ static void TestObjEffectMaskDistinguishesEmptyFromFailedUpload(void) {
       0xFFu, 0, 0, 0) == 0);
 }
 
+static void TestBgEffectMaskDistinguishesEmptyFromFailedUpload(void) {
+  const uint32_t bg1 = 1u << kPpuOverlaySource_Bg1;
+  const uint32_t bg2 = 1u << kPpuOverlaySource_Bg2;
+  const uint32_t bg1hi = 1u << kDioramaPlane_Bg1Hi;
+  const uint32_t bg2hi = 1u << kDioramaPlane_Bg2Hi;
+  const uint32_t required = bg1 | bg2 | bg1hi | bg2hi;
+
+  CHECK(Diorama_FilterBgEffectProjectionMask(
+      required, bg1 | bg2 | bg1hi | bg2hi, bg2, bg2) ==
+      (bg1 | bg2 | bg1hi));
+  CHECK(Diorama_FilterBgEffectProjectionMask(
+      required, bg1 | bg2, bg1 | bg2, bg2) == bg2);
+  CHECK(Diorama_FilterBgEffectProjectionMask(
+      required, bg2, 0, 0) == bg2);
+  CHECK(Diorama_FilterBgEffectProjectionMask(
+      required, 0, 0, 0) == 0);
+}
+
 int main(void) {
   TestRegisteredProjectionAndScale();
   TestPriorityPlaneShapeIsApplied();
@@ -263,6 +289,7 @@ int main(void) {
   TestInvalidInputsFailClosed();
   TestPlaneEligibilityMatchesDrawableInputs();
   TestObjEffectMaskDistinguishesEmptyFromFailedUpload();
+  TestBgEffectMaskDistinguishesEmptyFromFailedUpload();
   if (g_failures) {
     fprintf(stderr, "%d diorama projection test(s) failed\n", g_failures);
     return 1;

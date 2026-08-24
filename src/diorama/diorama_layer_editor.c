@@ -368,6 +368,29 @@ bool DioramaLayerEditor_StepParam(DioramaPlaneOverride *p,
       if (p->set_alpha && next == p->alpha) return false;
       p->alpha = (uint8_t)next; p->set_alpha = true; return true;
     }
+    case kDioramaEditorParam_TransparentFill:
+      /* Left/Right provides a quick OFF/BLACK toggle. Confirm opens the live
+       * CGRAM picker in settings_overlay.c; keeping BLACK here preserves the
+       * original fixed-colour escape hatch even when no palette is available.
+       * OFF is authored rather than cleared so a camera-local section can
+       * suppress a fill inherited from its base room; Reset remains the
+       * distinct operation that restores inheritance. */
+      if (direction < 0) {
+        if (p->set_transparent_fill &&
+            p->transparent_fill_kind == kDioramaTransparentFill_None)
+          return false;
+        p->set_transparent_fill = true;
+        p->transparent_fill_kind = kDioramaTransparentFill_None;
+        p->transparent_fill_cgram = 0;
+      } else {
+        if (p->set_transparent_fill &&
+            p->transparent_fill_kind == kDioramaTransparentFill_Black)
+          return false;
+        p->set_transparent_fill = true;
+        p->transparent_fill_kind = kDioramaTransparentFill_Black;
+        p->transparent_fill_cgram = 0;
+      }
+      return true;
     case kDioramaEditorParam_Source: {
       int base = p->set_source ? p->source : kDioramaLayerSource_Captured;
       int next = DioramaLayerOrder_NextSource(base, direction);
@@ -417,6 +440,11 @@ void DioramaLayerEditor_ClearParam(DioramaPlaneOverride *p,
       break;
     case kDioramaEditorParam_Alpha:
       p->set_alpha = false; p->alpha = 0;
+      break;
+    case kDioramaEditorParam_TransparentFill:
+      p->set_transparent_fill = false;
+      p->transparent_fill_kind = kDioramaTransparentFill_None;
+      p->transparent_fill_cgram = 0;
       break;
     case kDioramaEditorParam_Source:
       p->set_source = false;
@@ -525,6 +553,13 @@ const char *DioramaLayerEditor_RowHelp(DioramaEditorRowKind kind,
     case kDioramaEditorParam_Alpha:
       return "This plane's opacity. Lets a room compensate for a translucency "
              "the capture did not reproduce.";
+    case kDioramaEditorParam_TransparentFill:
+      return "Pre-fills the complete base BG plane before its tiles draw, so "
+             "empty map cells and colour-zero pixels cannot reveal the "
+             "diorama skybox. Mirror, repeat, clamp and live-world tiles paint "
+             "over this backing normally; the high-priority band stays sparse. "
+             "B opens the live CGRAM palette, Left turns it off, Right uses "
+             "fixed black.";
     case kDioramaEditorParam_Source:
       return "Skybox image source. Captured uses the current room's BG2; ROM "
              "GG/MM BG1 or BG2 reconstructs that action room directly from "
@@ -583,10 +618,13 @@ static void FormatPlaneValue(char *dst, size_t size,
  * nothing changes. */
 static void PushParamRows(DioramaEditorRow *out, int capacity, int *count,
                           int plane, const DioramaPlaneOverride *p,
-                          uint8_t effective_source) {
+                          uint8_t effective_source,
+                          bool effective_fill_set,
+                          DioramaTransparentFill effective_fill_kind,
+                          uint8_t effective_fill_cgram) {
   const DioramaDepthStrategy strategy = DioramaLayerEditor_StrategyOfPlane(p);
 
-  struct { DioramaEditorParam param; const char *label; } rows[9];
+  struct { DioramaEditorParam param; const char *label; } rows[10];
   int n = 0;
   if (strategy != kDioramaDepth_Flat)
     rows[n].param = kDioramaEditorParam_Depth, rows[n++].label = "depth";
@@ -602,6 +640,10 @@ static void PushParamRows(DioramaEditorRow *out, int capacity, int *count,
     rows[n].param = kDioramaEditorParam_Density, rows[n++].label = "density";
   rows[n].param = kDioramaEditorParam_Z, rows[n++].label = "z depth";
   rows[n].param = kDioramaEditorParam_Alpha, rows[n++].label = "alpha";
+  if (plane == kPpuOverlaySource_Bg1 || plane == kPpuOverlaySource_Bg2) {
+    rows[n].param = kDioramaEditorParam_TransparentFill;
+    rows[n++].label = "backdrop fill";
+  }
   if (plane == kDioramaPlane_Backdrop) {
     rows[n].param = kDioramaEditorParam_Source;
     rows[n++].label = "skybox source";
@@ -612,7 +654,8 @@ static void PushParamRows(DioramaEditorRow *out, int capacity, int *count,
     DioramaEditorRow *row = PushRow(out, capacity, count);
     if (!row) return;
     row->kind = (rows[i].param == kDioramaEditorParam_Direction ||
-                 rows[i].param == kDioramaEditorParam_Source)
+                 rows[i].param == kDioramaEditorParam_Source ||
+                 rows[i].param == kDioramaEditorParam_TransparentFill)
         ? kDioramaEditorRow_ParamEnum : kDioramaEditorRow_Param;
     row->plane = plane;
     row->param = rows[i].param;
@@ -665,6 +708,21 @@ static void PushParamRows(DioramaEditorRow *out, int capacity, int *count,
         if (p->set_alpha) snprintf(row->value, sizeof(row->value), "%u",
                                    (unsigned)p->alpha);
         else SetText(row->value, sizeof(row->value), "--");
+        break;
+      case kDioramaEditorParam_TransparentFill:
+        row->effective_transparent_fill_set = effective_fill_set;
+        row->effective_transparent_fill_kind =
+            (uint8_t)effective_fill_kind;
+        row->effective_transparent_fill_cgram = effective_fill_cgram;
+        if (!effective_fill_set) {
+          SetText(row->value, sizeof(row->value), "OFF");
+        } else if (effective_fill_kind ==
+                   kDioramaTransparentFill_Cgram) {
+          snprintf(row->value, sizeof(row->value), "CGRAM $%02X",
+                   (unsigned)effective_fill_cgram);
+        } else {
+          SetText(row->value, sizeof(row->value), "BLACK");
+        }
         break;
       case kDioramaEditorParam_Source:
         row->effective_source = effective_source;
@@ -755,8 +813,20 @@ int DioramaLayerEditor_BuildRows(const DioramaLayerOrderTable *table,
     SetText(row->label, sizeof(row->label), token);
     FormatPlaneValue(row->value, sizeof(row->value), p);
 
-    if (plane == context->selected_plane)
-      PushParamRows(out, capacity, &count, plane, p, effective_source);
+    if (plane == context->selected_plane) {
+      DioramaTransparentFill effective_fill_kind =
+          kDioramaTransparentFill_None;
+      uint8_t effective_fill_cgram = 0;
+      const bool effective_fill_authored =
+          DioramaLayerOrder_ResolveTransparentFill(
+              table, group, context->map_number, context->section, plane,
+              &effective_fill_kind, &effective_fill_cgram);
+      PushParamRows(out, capacity, &count, plane, p, effective_source,
+                    effective_fill_authored &&
+                        effective_fill_kind != kDioramaTransparentFill_None,
+                    effective_fill_kind,
+                    effective_fill_cgram);
+    }
   }
 
   DioramaEditorRow *reset = PushRow(out, capacity, &count);

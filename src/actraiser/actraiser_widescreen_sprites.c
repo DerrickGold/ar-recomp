@@ -541,6 +541,29 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
           ? ws_scan_axis_visible(world_y, top_extent, bottom_extent, camera_y,
                                  draw_t, draw_b, kActRaiserAuthenticHeight)
           : vertical;
+      int vertical_activation = vertical;
+      if (activation_wide && vertical_draw && !vertical) {
+        /* The statue flame is a timed gameplay hazard, not scenery. Diorama's
+         * vertical extension can expose it before the native 224-line window;
+         * admitting only this measured room/source/graphics tuple keeps the
+         * visible breath advancing without changing generic enemy timing. */
+        const uint16 source_descriptor = cpu_read16(
+            cpu, cpu->DB,
+            (uint16)(object_address +
+                     kActRaiserActionObject_SourceDescriptor));
+        const uint16 animation_address = cpu_read16(
+            cpu, cpu->DB,
+            (uint16)(object_address +
+                     kActRaiserActionObject_AnimationAddress));
+        const uint8 animation_bank = cpu_read8(
+            cpu, cpu->DB,
+            (uint16)(object_address +
+                     kActRaiserActionObject_AnimationBank));
+        vertical_activation = ActRaiser_IsAitosStatueFireActor(
+            g_ram[kActRaiserWram_MapGroup],
+            g_ram[kActRaiserWram_CurrentMap], source_descriptor,
+            animation_address, animation_bank);
+      }
       int authentic = vertical &&
           ws_scan_axis_visible(world_x, left_extent, right_extent,
                                authentic_camera_x, 0, 0,
@@ -549,7 +572,7 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
           ws_scan_axis_visible(world_x, left_extent, right_extent,
                                camera_x, draw_l, draw_r,
                                kActRaiserAuthenticWidth);
-      int activation = vertical && ws_scan_axis_visible(
+      int activation = vertical_activation && ws_scan_axis_visible(
           world_x, left_extent, right_extent, activation_camera_x,
           activation_l, activation_r, kActRaiserAuthenticWidth);
 

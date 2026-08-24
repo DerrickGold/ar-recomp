@@ -324,9 +324,22 @@ static ActionEffectInstance SceneEffect(uint8_t kind, int world_x) {
       effect.geometry.data.rect =
           (ActionEffectLocalRect){-64.0f, -24.0f, 64.0f, 24.0f};
       break;
+    case kActionEffect_AitosLavaReservoir:
+      effect.phase = kActionEffectPhase_AitosLavaReservoir;
+      effect.projection_plane = kActionEffectProjectionPlane_Bg1High;
+      effect.render_layer = kActionEffectRenderLayer_Bg1HighPlane;
+      effect.geometry.data.rect =
+          (ActionEffectLocalRect){-144.0f, -4.0f, 144.0f, 4.0f};
+      break;
     case kActionEffect_AitosLavaFireball:
       effect.velocity_y = -4;
       effect.phase = kActionEffectPhase_AitosLavaFireballFlight;
+      break;
+    case kActionEffect_AitosStatueFire:
+      effect.visual = 0x1E;
+      effect.phase = kActionEffectPhase_AitosStatueFireBreath;
+      effect.geometry.data.rect =
+          (ActionEffectLocalRect){-16.0f, -8.0f, 48.0f, 8.0f};
       break;
     case kActionEffect_AitosMoltenRock:
       effect.velocity_x = -2;
@@ -394,9 +407,16 @@ static ActionEffectInstance SceneEffect(uint8_t kind, int world_x) {
       break;
     case kActionEffect_FlamingWheel:
       effect.visual = 0x0F;
+      effect.composition = 0x5276;
       effect.phase = kActionEffectPhase_FlamingWheelBody;
       effect.geometry.data.rect =
           (ActionEffectLocalRect){-32.0f, -32.0f, 32.0f, 32.0f};
+      break;
+    case kActionEffect_FlamingWheelProjectile:
+      effect.velocity_x = 1;
+      effect.visual = 0;
+      effect.composition = 0x51B5;
+      effect.phase = kActionEffectPhase_FlamingWheelProjectileFlight;
       break;
     case kActionEffect_IceDragonIceBall:
       effect.velocity_x = -4;
@@ -419,7 +439,7 @@ static ActionEffectInstance SceneEffect(uint8_t kind, int world_x) {
 static void TestSceneFeatureSwitchesAndDeterminism(void) {
   ActionSceneEffectFrame frame = {.effect_count = 1, .visible_count = 1};
   frame.effects[0] = SceneEffect(kActionEffect_WallTorch, 100);
-  ActionSceneEffectRenderBatch lighting, particles, both, repeat;
+  static ActionSceneEffectRenderBatch lighting, particles, both, repeat;
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, false, IdentityProjection, NULL, &lighting));
   CHECK(lighting.vertex_count == 2 * kActionEffectGlowVertices);
@@ -450,7 +470,7 @@ static void TestSceneKindsRemainIndependent(void) {
   frame.effects[3] = SceneEffect(kActionEffect_MarahnaFireball, 400);
   frame.effects[4] = SceneEffect(kActionEffect_AitosLavaPit, 500);
   frame.effects[5] = SceneEffect(kActionEffect_AitosLavaFireball, 600);
-  ActionSceneEffectRenderBatch batch;
+  static ActionSceneEffectRenderBatch batch;
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, true, IdentityProjection, NULL, &batch));
   CHECK(batch.vertex_count == 12 * kActionEffectGlowVertices +
@@ -475,11 +495,11 @@ static void TestBossRushEffectStyles(void) {
   frame.effects[1] = SceneEffect(kActionEffect_FlamingWheel, 260);
   frame.effects[2] = SceneEffect(kActionEffect_IceDragonIceBall, 340);
   frame.effects[3] = SceneEffect(kActionEffect_TanzaraProjectile, 420);
-  ActionSceneEffectRenderBatch lighting, particles, both, repeat;
+  static ActionSceneEffectRenderBatch lighting, particles, both, repeat;
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, false, IdentityProjection, NULL, &lighting));
-  CHECK(lighting.vertex_count == 8 * kActionEffectGlowVertices);
-  CHECK(lighting.index_count == 8 * kActionEffectGlowIndices);
+  CHECK(lighting.vertex_count == 20 * kActionEffectGlowVertices);
+  CHECK(lighting.index_count == 20 * kActionEffectGlowIndices);
   CHECK(ActionSceneEffectRender_Build(
       &frame, false, true, IdentityProjection, NULL, &particles));
   CHECK(particles.vertex_count == 4 * 12 * 4);
@@ -503,7 +523,7 @@ static void TestAitosLavaLightingAndParticles(void) {
   ActionSceneEffectFrame frame = {.effect_count = 2, .visible_count = 2};
   frame.effects[0] = SceneEffect(kActionEffect_AitosLavaPit, 400);
   frame.effects[1] = SceneEffect(kActionEffect_AitosLavaFireball, 520);
-  ActionSceneEffectRenderBatch lighting, particles, repeat;
+  static ActionSceneEffectRenderBatch lighting, particles, repeat;
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, false, IdentityProjection, NULL, &lighting));
   CHECK(lighting.vertex_count == 4 * kActionEffectGlowVertices);
@@ -573,9 +593,195 @@ static void TestAitosLavaLightingAndParticles(void) {
   CHECK(!SceneBatchesEqual(&repeat, &lighting));
 }
 
+static void TestAitosStatueFireLightingAndFacing(void) {
+  ActionSceneEffectFrame frame = {.effect_count = 3, .visible_count = 3};
+  frame.effects[0] = SceneEffect(kActionEffect_AitosStatueFire, 400);
+  frame.effects[0].visual = 0x1F;
+  frame.effects[1] = frame.effects[0];
+  frame.effects[1].visual = 0x1E;
+  frame.effects[1].record_address += kActRaiserActionObjectStride;
+  frame.effects[1].flags |= kActionEffectFlag_FlipHorizontal;
+  frame.effects[1].geometry.data.rect =
+      (ActionEffectLocalRect){-48.0f, -8.0f, 16.0f, 8.0f};
+  /* Even a malformed direct render frame cannot decorate the idle hold. */
+  frame.effects[2] = frame.effects[0];
+  frame.effects[2].record_address += 2 * kActRaiserActionObjectStride;
+  frame.effects[2].visual = 0x17;
+  static ActionSceneEffectRenderBatch lighting, particles;
+  CHECK(ActionSceneEffectRender_Build(
+      &frame, true, false, IdentityProjection, NULL, &lighting));
+  CHECK(lighting.vertex_count == 4 * kActionEffectGlowVertices);
+  CHECK(lighting.index_count == 4 * kActionEffectGlowIndices);
+  CHECK(ActionSceneEffectRender_Build(
+      &frame, false, true, IdentityProjection, NULL, &particles));
+  CHECK(particles.vertex_count == 24 * 4);
+  CHECK(particles.index_count == 24 * 6);
+
+  float right_mean = 0.0f, left_mean = 0.0f;
+  for (int particle = 0; particle < 12; particle++) {
+    for (int vertex = 0; vertex < 4; vertex++) {
+      right_mean += particles.vertices[particle * 4 + vertex].position.x;
+      left_mean += particles.vertices[(12 + particle) * 4 + vertex].position.x;
+    }
+  }
+  right_mean /= 48.0f;
+  left_mean /= 48.0f;
+  CHECK(right_mean > frame.effects[0].world_x + 8.0f);
+  CHECK(left_mean < frame.effects[1].world_x - 8.0f);
+}
+
+static void TestAitosSideLavaLightingAndHeatMesh(void) {
+  ActionSceneEffectFrame frame = {
+    .decoration_count = 1,
+    .decoration_visible_count = 1,
+  };
+  frame.decorations[0] =
+      SceneEffect(kActionEffect_AitosLavaReservoir, 400);
+  static ActionSceneEffectRenderBatch lighting, particles;
+  CHECK(ActionSceneDecorationRender_Build(
+      &frame, kActionEffectRenderLayer_Bg1HighPlane, true, false,
+      IdentityProjection, NULL, &lighting));
+  CHECK(lighting.vertex_count == 6 * kActionEffectGlowVertices);
+  CHECK(lighting.index_count == 6 * kActionEffectGlowIndices);
+  /* A 288px lip becomes three overlapping 96px sections. The first vertex
+   * of each spill/body glow is its centre, so all three local anchors remain
+   * visible instead of fading toward one reservoir-wide outer ring. */
+  CHECK(fabsf(lighting.vertices[0].position.x - 304.0f) < 0.001f);
+  CHECK(fabsf(lighting.vertices[2 * kActionEffectGlowVertices].position.x -
+               400.0f) < 0.001f);
+  CHECK(fabsf(lighting.vertices[4 * kActionEffectGlowVertices].position.x -
+               496.0f) < 0.001f);
+  frame.decorations[0].geometry.data.rect =
+      (ActionEffectLocalRect){-320.0f, -4.0f, 320.0f, 4.0f};
+  CHECK(ActionSceneDecorationRender_Build(
+      &frame, kActionEffectRenderLayer_Bg1HighPlane, true, false,
+      IdentityProjection, NULL, &lighting));
+  CHECK(lighting.vertex_count == 14 * kActionEffectGlowVertices);
+  CHECK(lighting.index_count == 14 * kActionEffectGlowIndices);
+  frame.decorations[0].geometry.data.rect =
+      (ActionEffectLocalRect){-144.0f, -4.0f, 144.0f, 4.0f};
+  CHECK(ActionSceneDecorationRender_Build(
+      &frame, kActionEffectRenderLayer_Bg1HighPlane, false, true,
+      IdentityProjection, NULL, &particles));
+  CHECK(particles.vertex_count ==
+        kActionSceneEffectLavaReservoirParticleCount * 4);
+  CHECK(particles.index_count ==
+        kActionSceneEffectLavaReservoirParticleCount * 6);
+  float min_x = 10000.0f, max_x = -10000.0f;
+  for (int i = 0; i < particles.vertex_count; i++) {
+    if (particles.vertices[i].position.x < min_x)
+      min_x = particles.vertices[i].position.x;
+    if (particles.vertices[i].position.x > max_x)
+      max_x = particles.vertices[i].position.x;
+  }
+  CHECK(max_x - min_x > 180.0f);
+
+  frame.decorations[0].geometry.data.rect =
+      (ActionEffectLocalRect){-624.0f, -4.0f, 624.0f, 4.0f};
+  CHECK(!ActionSceneDecorationRender_Build(
+      &frame, kActionEffectRenderLayer_Bg1HighPlane, true, false,
+      IdentityProjection, NULL, &lighting));
+  CHECK(lighting.vertex_count == 0 && lighting.index_count == 0);
+  frame.decorations[0].geometry.data.rect =
+      (ActionEffectLocalRect){-1.0e30f, -4.0f, 1.0e30f, 4.0f};
+  CHECK(!ActionSceneDecorationRender_Build(
+      &frame, kActionEffectRenderLayer_Bg1HighPlane, true, false,
+      IdentityProjection, NULL, &lighting));
+  CHECK(lighting.vertex_count == 0 && lighting.index_count == 0);
+
+  const SDL_Rect viewport = {120, 40, 960, 840};
+  ActionHeatRenderMesh heat, repeat, advanced;
+  CHECK(ActionHeatRender_Build(5009, viewport, 960, 840, 256, &heat));
+  CHECK(heat.vertex_count == kActionHeatMeshVertices);
+  CHECK(heat.index_count == kActionHeatMeshIndices);
+  CHECK(ActionHeatRender_Build(5009, viewport, 960, 840, 256, &repeat));
+  CHECK(heat.vertex_count == repeat.vertex_count);
+  CHECK(heat.index_count == repeat.index_count);
+  CHECK(memcmp(heat.vertices, repeat.vertices, sizeof(heat.vertices)) == 0);
+  CHECK(memcmp(heat.indices, repeat.indices, sizeof(heat.indices)) == 0);
+  CHECK(ActionHeatRender_Build(5010, viewport, 960, 840, 256, &advanced));
+  CHECK(memcmp(heat.vertices, advanced.vertices,
+               sizeof(heat.vertices)) != 0);
+  /* Every border vertex samples its exact position; refraction cannot pull
+   * black bars or undefined target pixels into the game image. */
+  for (int row = 0; row <= kActionHeatMeshRows; row++) {
+    for (int column = 0; column <= kActionHeatMeshColumns; column++) {
+      if (row != 0 && row != kActionHeatMeshRows && column != 0 &&
+          column != kActionHeatMeshColumns)
+        continue;
+      const int index = row * (kActionHeatMeshColumns + 1) + column;
+      CHECK(fabsf(heat.vertices[index].tex_coord.x -
+                  (heat.vertices[index].position.x - viewport.x) /
+                      (float)viewport.w) < 0.00001f);
+      CHECK(fabsf(heat.vertices[index].tex_coord.y -
+                  (heat.vertices[index].position.y - viewport.y) /
+                      (float)viewport.h) < 0.00001f);
+    }
+  }
+  CHECK(!ActionHeatRender_Build(
+      1, (SDL_Rect){0, 0, 0, 100}, 100, 100, 256, &heat));
+  CHECK(heat.vertex_count == 0 && heat.index_count == 0);
+
+  /* A high-resolution host viewport still gets a perceptible displacement.
+   * Capping this at the former 3.25 output pixels made the room haze look
+   * intermittent because only especially sharp edges exposed it. */
+  CHECK(ActionHeatRender_Build(
+      5009, (SDL_Rect){10, 10, 3400, 2100}, 3400, 2100, 432, &heat));
+  float max_heat_offset = 0.0f;
+  for (int i = 0; i < heat.vertex_count; i++) {
+    const float source_x = heat.vertices[i].tex_coord.x * 3400.0f;
+    const float output_local_x = heat.vertices[i].position.x - 10.0f;
+    const float offset = fabsf(source_x - output_local_x);
+    if (offset > max_heat_offset) max_heat_offset = offset;
+  }
+  CHECK(max_heat_offset > 5.0f);
+}
+
+static void TestFlamingWheelRimAndProjectile(void) {
+  static const float kAnchors[12][2] = {
+    {-24, -24}, {-8, -24}, {8, -24}, {24, -24},
+    {-24, -8}, {24, -8}, {-24, 8}, {24, 8},
+    {-24, 24}, {-8, 24}, {8, 24}, {24, 24},
+  };
+  ActionSceneEffectFrame frame = {.effect_count = 2, .visible_count = 2};
+  frame.effects[0] = SceneEffect(kActionEffect_FlamingWheel, 300);
+  frame.effects[1] =
+      SceneEffect(kActionEffect_FlamingWheelProjectile, 500);
+  static ActionSceneEffectRenderBatch lighting, particles;
+  CHECK(ActionSceneEffectRender_Build(
+      &frame, true, false, IdentityProjection, NULL, &lighting));
+  CHECK(lighting.vertex_count == 16 * kActionEffectGlowVertices);
+  CHECK(lighting.index_count == 16 * kActionEffectGlowIndices);
+  for (int i = 0; i < 12; i++) {
+    const int centre = (2 + i) * kActionEffectGlowVertices;
+    CHECK(fabsf(lighting.vertices[centre].position.x -
+                (frame.effects[0].world_x + kAnchors[i][0])) < 0.001f);
+    CHECK(fabsf(lighting.vertices[centre].position.y -
+                (frame.effects[0].world_y + kAnchors[i][1])) < 0.001f);
+  }
+  CHECK(ActionSceneEffectRender_Build(
+      &frame, false, true, IdentityProjection, NULL, &particles));
+  CHECK(particles.vertex_count == 24 * 4);
+  CHECK(particles.index_count == 24 * 6);
+  float projectile_mean_x = 0.0f;
+  for (int i = 12 * 4; i < particles.vertex_count; i++)
+    projectile_mean_x += particles.vertices[i].position.x;
+  projectile_mean_x /= 12.0f * 4.0f;
+  CHECK(projectile_mean_x < frame.effects[1].world_x - 5.0f);
+
+  /* Incomplete transition artwork retains its broad body light, but cannot
+   * manufacture twelve detached emitters around a rim that is not present. */
+  frame.effect_count = frame.visible_count = 1;
+  frame.effects[0].composition = 0x5000;
+  CHECK(ActionSceneEffectRender_Build(
+      &frame, true, true, IdentityProjection, NULL, &lighting));
+  CHECK(lighting.vertex_count == 2 * kActionEffectGlowVertices);
+  CHECK(lighting.index_count == 2 * kActionEffectGlowIndices);
+}
+
 static void TestMarahnaFireballFramesAndDirections(void) {
   ActionSceneEffectFrame frame = {.effect_count = 1, .visible_count = 1};
-  ActionSceneEffectRenderBatch lighting, particles;
+  static ActionSceneEffectRenderBatch lighting, particles;
   ActionEffectInstance *effect = &frame.effects[0];
   *effect = SceneEffect(kActionEffect_MarahnaFireball, 400);
 
@@ -638,7 +844,7 @@ static void TestAitosUsesRakedDioramaSourcePlanes(void) {
     .diorama_projection = &projection,
   };
   ActionSceneEffectFrame frame = {.effect_count = 1, .visible_count = 1};
-  ActionSceneEffectRenderBatch pit, fireball;
+  static ActionSceneEffectRenderBatch pit, fireball;
   SDL_FPoint expected;
 
   /* camera-relative (-30,-7), plus display margins (60,32), produces the
@@ -740,10 +946,20 @@ static void TestCurrentActorEffectsRequestExactObjPlanes(void) {
   scene.effects[3] = SceneEffect(kActionEffect_SwordBeam, 260);
   scene.effects[3].visual = 0x21;
   scene.effects[3].obj_priority = 2;
+  scene.decoration_count = 3;
+  scene.decorations[0] = SceneEffect(kActionEffect_AitosLavaPit, 300);
+  scene.decorations[1] = SceneEffect(kActionEffect_AitosWaterfall, 320);
+  scene.decorations[1].projection_plane = kActionEffectProjectionPlane_Bg2;
+  scene.decorations[2] =
+      SceneEffect(kActionEffect_AitosLavaReservoir, 340);
   CHECK(ActionEffectProjection_RequiredObjPriorityMask(&spells, &scene) ==
         ((1u << 0) | (1u << 2) | (1u << 3)));
   CHECK(ActionEffectProjection_RequiredObjPriorityMask(NULL, &scene) ==
         ((1u << 0) | (1u << 2) | (1u << 3)));
+  CHECK(ActionEffectProjection_RequiredBgPlaneMask(&spells, &scene) ==
+        ((1u << kPpuOverlaySource_Bg1) |
+         (1u << kPpuOverlaySource_Bg2) |
+         (1u << kDioramaPlane_Bg1Hi)));
 
   /* A malformed actor list fails closed as a unit, without suppressing the
    * independently valid spell request. BG-local decorations never acquire an
@@ -751,9 +967,20 @@ static void TestCurrentActorEffectsRequestExactObjPlanes(void) {
   scene.overflow = 1;
   CHECK(ActionEffectProjection_RequiredObjPriorityMask(&spells, &scene) ==
         (1u << 2));
+  CHECK(ActionEffectProjection_RequiredBgPlaneMask(NULL, &scene) ==
+        ((1u << kPpuOverlaySource_Bg1) |
+         (1u << kPpuOverlaySource_Bg2) |
+         (1u << kDioramaPlane_Bg1Hi)));
+  scene.decoration_overflow = 1;
+  CHECK(ActionEffectProjection_RequiredBgPlaneMask(NULL, &scene) == 0);
+  scene.decoration_overflow = 0;
   scene.overflow = 0;
   scene.effect_count = kActionSceneEffectMaxInstances + 1;
   CHECK(ActionEffectProjection_RequiredObjPriorityMask(NULL, &scene) == 0);
+  CHECK(ActionEffectProjection_RequiredBgPlaneMask(NULL, &scene) ==
+        ((1u << kPpuOverlaySource_Bg1) |
+         (1u << kPpuOverlaySource_Bg2) |
+         (1u << kDioramaPlane_Bg1Hi)));
 }
 
 static void TestDecorationLayerBuildsAreIndependent(void) {
@@ -771,7 +998,7 @@ static void TestDecorationLayerBuildsAreIndependent(void) {
   frame.decorations[3] = SceneEffect(kActionEffect_WallTorch, 140);
   frame.decorations[3].render_layer = kActionEffectRenderLayer_Bg1Plane;
   frame.decorations[3].projection_plane = kActionEffectProjectionPlane_Bg1;
-  ActionSceneEffectRenderBatch world, bg1, bg2, atmosphere;
+  static ActionSceneEffectRenderBatch world, bg1, bg2, atmosphere;
   CHECK(ActionSceneDecorationRender_Build(
       &frame, kActionEffectRenderLayer_WorldOverlay, true, true,
       IdentityProjection, NULL, &world));
@@ -903,7 +1130,7 @@ static void TestDecorationLayerBuildsAreIndependent(void) {
 static void TestLightningVisibleLightCoversCapturedArc(void) {
   ActionSceneEffectFrame frame = {.effect_count = 1, .visible_count = 1};
   frame.effects[0] = SceneEffect(kActionEffect_LightningTrap, 300);
-  ActionSceneEffectRenderBatch batch;
+  static ActionSceneEffectRenderBatch batch;
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, false, IdentityProjection, NULL, &batch));
 
@@ -929,7 +1156,7 @@ static void TestBossLightningFilamentAndStages(void) {
   ActionSceneEffectFrame frame = {.effect_count = 1, .visible_count = 1};
   frame.effects[0] = SceneEffect(
       kActionEffect_BloodpoolBossLightning, 300);
-  ActionSceneEffectRenderBatch lighting, particles, repeat;
+  static ActionSceneEffectRenderBatch lighting, particles, repeat;
   static const uint8_t kLeft[] = {6, 6, 1, 48, 36, 30};
   static const uint8_t kRight[] = {11, 11, 11, 8, 8, 8};
   static const uint8_t kBottom[] = {117, 69, 21, 117, 69, 21};
@@ -1013,7 +1240,7 @@ static void TestMarahnaLightningLinksAndOrientations(void) {
   ActionSceneEffectFrame frame = {.effect_count = 1, .visible_count = 1};
   frame.effects[0] = SceneEffect(
       kActionEffect_MarahnaLightningLink, 300);
-  ActionSceneEffectRenderBatch horizontal, vertical, particles, repeat;
+  static ActionSceneEffectRenderBatch horizontal, vertical, particles, repeat;
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, false, IdentityProjection, NULL, &horizontal));
   CHECK(horizontal.vertex_count == 2 * kActionEffectGlowVertices +
@@ -1078,7 +1305,7 @@ static void TestMarahnaBossLightningStagesAndOrientations(void) {
   ActionSceneEffectFrame frame = {.effect_count = 1, .visible_count = 1};
   frame.effects[0] = SceneEffect(
       kActionEffect_MarahnaBossLightning, 300);
-  ActionSceneEffectRenderBatch left, right, charge, orb, ground_right,
+  static ActionSceneEffectRenderBatch left, right, charge, orb, ground_right,
       ground_left, particles;
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, false, IdentityProjection, NULL, &left));
@@ -1202,7 +1429,7 @@ static void TestMarahnaBossLightningStagesAndOrientations(void) {
 static void TestSwordBeamLightingTrailAndStars(void) {
   ActionSceneEffectFrame frame = {.effect_count = 1, .visible_count = 1};
   frame.effects[0] = SceneEffect(kActionEffect_SwordBeam, 300);
-  ActionSceneEffectRenderBatch lighting, particles, repeat;
+  static ActionSceneEffectRenderBatch lighting, particles, repeat;
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, false, IdentityProjection, NULL, &lighting));
   CHECK(lighting.vertex_count == 2 * kActionEffectGlowVertices + 8);
@@ -1368,7 +1595,7 @@ static void TestSceneCapacityAndMalformedInput(void) {
   frame.effects[10].visual = 0x20;
   frame.effects[10].velocity_x = -3;
   frame.effects[10].velocity_y = -1;
-  ActionSceneEffectRenderBatch batch;
+  static ActionSceneEffectRenderBatch batch;
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, true, IdentityProjection, NULL, &batch));
   /* The shared public capacity additionally reserves one bottom-atmosphere
@@ -1376,10 +1603,18 @@ static void TestSceneCapacityAndMalformedInput(void) {
    * within it without manufacturing that separate map-derived record. */
   CHECK(batch.vertex_count ==
         kActionSceneEffectRenderMaxVertices -
-        kActionSceneEffectWaterfallMistExtraVertices);
+        kActionSceneEffectWaterfallMistExtraVertices -
+        kActionSceneEffectLavaReservoirParticleExtraVertices -
+        kActionSceneEffectLavaReservoirGlowExtraVertices -
+        kActionSceneEffectMaxFlamingWheels *
+            kActionSceneEffectFlamingWheelExtraVertices);
   CHECK(batch.index_count ==
         kActionSceneEffectRenderMaxIndices -
-        kActionSceneEffectWaterfallMistExtraIndices);
+        kActionSceneEffectWaterfallMistExtraIndices -
+        kActionSceneEffectLavaReservoirParticleExtraIndices -
+        kActionSceneEffectLavaReservoirGlowExtraIndices -
+        kActionSceneEffectMaxFlamingWheels *
+            kActionSceneEffectFlamingWheelExtraIndices);
 
   /* A second active boss filament cannot arise from the mapped one-boss
    * lifecycle. Reject it as a capacity-contract violation without publishing
@@ -1438,6 +1673,9 @@ int main(void) {
   TestSceneKindsRemainIndependent();
   TestBossRushEffectStyles();
   TestAitosLavaLightingAndParticles();
+  TestAitosStatueFireLightingAndFacing();
+  TestAitosSideLavaLightingAndHeatMesh();
+  TestFlamingWheelRimAndProjectile();
   TestMarahnaFireballFramesAndDirections();
   TestAitosUsesRakedDioramaSourcePlanes();
   TestCurrentActorEffectsRequestExactObjPlanes();

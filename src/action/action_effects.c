@@ -223,6 +223,12 @@ static uint8_t Read8(const uint8_t *wram, size_t wram_size, size_t address) {
   return wram[address];
 }
 
+static uint8_t ScenePriorityFromSpriteAttributeBias(
+    const uint8_t *wram, size_t wram_size) {
+  return (uint8_t)((Read16(wram, wram_size,
+                           kActRaiserWram_SpriteAttributeBias) >> 12) & 0x03u);
+}
+
 static uint16_t AddSaturated16(uint16_t value, unsigned amount) {
   if (amount > UINT16_MAX - value) return UINT16_MAX;
   return (uint16_t)(value + amount);
@@ -252,6 +258,7 @@ static void RetireSceneAll(ActionEffectObserver *observer) {
   if (!observer) return;
   memset(observer->scene_tracks, 0, sizeof(observer->scene_tracks));
   observer->scene_clock_valid = 0;
+  observer->scene_map_valid = 0;
 }
 
 static bool IsActionMap(const uint8_t *wram, size_t wram_size) {
@@ -628,6 +635,8 @@ enum {
   kEnemyFireballHandler = 0xBDF0,
   kEnemyFireballResume = 0xBDD9,
   kEnemyFireballState = 0x0023,
+  kEnemyFireballSourceFirst = 0xBD76,
+  kEnemyFireballSourceSecond = 0xBD84,
   kLightningSourceDescriptor = 0xBD2A,
   kLightningResume = 0xBD69,
   kLightningState = 0x0014,
@@ -637,6 +646,8 @@ enum {
   kSharedActionChildResume = 0xA65D,
   kSceneAnimationAddress = 0x4000,
   kSceneAnimationBank = 0x7E,
+  kBloodpoolAct2FirstMap = 0x02,
+  kBloodpoolAct2LastMap = 0x08,
   kBloodpoolBossMap = 0x08,
   kBossLightningSourceDescriptor = 0xBDFF,
   kDeathHeimWizardSourceDescriptor = 0xF6E2,
@@ -687,6 +698,8 @@ enum {
   kAitosLavaMaxMiddleCells = 6,
   kAitosLavaFireballSourceDescriptor = 0xCF9E,
   kAitosLavaFireballResume = 0xCFCD,
+  kAitosStatueFireMap = 0x06,
+  kAitosStatueFireSourceLeft = 0xD5C0,
   kAitosMoltenRockSourceDescriptor = 0xCEEC,
   kAitosMoltenRockResume = 0xCF16,
   kAitosMoltenRockState = 0x0027,
@@ -698,6 +711,18 @@ enum {
   kAitosBossSwordBeamParentResume = 0xD793,
   kAitosWaterfallFirstMap = 0x02,
   kAitosWaterfallLastMap = 0x03,
+  kAitosAct2FirstLavaMap = 0x04,
+  kAitosAct2LastLavaMap = 0x06,
+  /* Act 2 lake signature. $01 is the continuous bright side-view lip. The
+   * row above interleaves transparent cells with animated splash/flame cells;
+   * $77 is the map-$06 variant. $33/$34 and $2C/$32 are the two measured
+   * left/right bank pairs. */
+  kAitosSideLavaLipMetatile = 0x01,
+  kAitosSideLavaBodyMetatile = 0x05,
+  kAitosSideLavaFirstAnimatedMetatile = 0x02,
+  kAitosSideLavaLastAnimatedMetatile = 0x04,
+  kAitosSideLavaMap6AnimatedMetatile = 0x77,
+  kAitosSideLavaMaxCells = 64,
   kAitosSplashTopLeft = 0x36,
   kAitosSplashTopMiddle = 0x5E,
   kAitosSplashTopRight = 0x81,
@@ -714,6 +739,8 @@ enum {
   kMinotaurAxeResume = 0xB008,
   kFlamingWheelSourceDescriptor = 0xD838,
   kDeathHeimFlamingWheelSourceDescriptor = 0xF712,
+  kFlamingWheelProjectileFirstState = 0x0008,
+  kFlamingWheelProjectileLastState = 0x000C,
   kNorthwallBossMap = 0x08,
   kIceDragonSourceDescriptor = 0xF161,
   kDeathHeimIceDragonSourceDescriptor = 0xF760,
@@ -763,11 +790,31 @@ static bool IsMarahnaEffectMap(const uint8_t *wram, size_t wram_size) {
   return map >= kMarahnaFirstEffectMap && map <= kMarahnaLastEffectMap;
 }
 
+static bool IsBloodpoolAct2Map(const uint8_t *wram, size_t wram_size) {
+  if (!wram ||
+      Read8(wram, wram_size, kActRaiserWram_MapGroup) !=
+          kActRaiserMapGroup_Bloodpool)
+    return false;
+  const uint8_t map = Read8(wram, wram_size, kActRaiserWram_CurrentMap);
+  /* Bloodpool Act 2 loads one ordinary-enemy animation family at map $02 and
+   * retains it through map $08. Randomized enemies are therefore legal in
+   * every room of this range, not only the rooms in the discovery capture. */
+  return map >= kBloodpoolAct2FirstMap && map <= kBloodpoolAct2LastMap;
+}
+
 static bool IsAitosLavaMap(const uint8_t *wram, size_t wram_size) {
   return wram &&
       Read8(wram, wram_size, kActRaiserWram_MapGroup) ==
           kActRaiserMapGroup_Aitos &&
       Read8(wram, wram_size, kActRaiserWram_CurrentMap) == kAitosLavaMap;
+}
+
+static bool IsAitosStatueFireMap(const uint8_t *wram, size_t wram_size) {
+  return wram &&
+      Read8(wram, wram_size, kActRaiserWram_MapGroup) ==
+          kActRaiserMapGroup_Aitos &&
+      Read8(wram, wram_size, kActRaiserWram_CurrentMap) ==
+          kAitosStatueFireMap;
 }
 
 static bool IsAitosWaterfallMap(const uint8_t *wram, size_t wram_size) {
@@ -779,6 +826,19 @@ static bool IsAitosWaterfallMap(const uint8_t *wram, size_t wram_size) {
   return map >= kAitosWaterfallFirstMap && map <= kAitosWaterfallLastMap;
 }
 
+bool ActionEffects_IsAitosAct2LavaRoom(uint8_t map_group,
+                                      uint8_t map_number) {
+  return map_group == kActRaiserMapGroup_Aitos &&
+      map_number >= kAitosAct2FirstLavaMap &&
+      map_number <= kAitosAct2LastLavaMap;
+}
+
+static bool IsAitosAct2LavaMap(const uint8_t *wram, size_t wram_size) {
+  return wram && ActionEffects_IsAitosAct2LavaRoom(
+      Read8(wram, wram_size, kActRaiserWram_MapGroup),
+      Read8(wram, wram_size, kActRaiserWram_CurrentMap));
+}
+
 static bool ActionObjectVisible(const ActionObjectSnapshot *object) {
   return object &&
       !(object->status & (kActRaiserObjectStatus_InactiveMask |
@@ -788,7 +848,10 @@ static bool ActionObjectVisible(const ActionObjectSnapshot *object) {
 }
 
 static bool IsEnemyFireball(const ActionObjectSnapshot *object) {
-  if (!object || object->handler != kEnemyFireballHandler ||
+  if (!object ||
+      !SourceIs(object->source_descriptor, kEnemyFireballSourceFirst,
+                kEnemyFireballSourceSecond) ||
+      object->handler != kEnemyFireballHandler ||
       object->resume_address != kEnemyFireballResume ||
       object->animation_address != kSceneAnimationAddress ||
       object->animation_bank != kSceneAnimationBank ||
@@ -999,6 +1062,45 @@ static bool IsAitosLavaFireball(const ActionObjectSnapshot *object) {
         object->velocity_y == kLifecycle[i].velocity_y)
       return true;
   return false;
+}
+
+static bool IsAitosStatueFire(const ActionObjectSnapshot *object) {
+  if (!object || !ActRaiser_IsAitosStatueFireActor(
+          kActRaiserMapGroup_Aitos, kAitosStatueFireMap,
+          object->source_descriptor, object->animation_address,
+      object->animation_bank) ||
+      object->spawner_backlink != 0 || object->velocity_x != 0 ||
+      object->velocity_y != 0)
+    return false;
+
+  /* `$D5B1/$D5C0` are the two facing spawn records. Their retained source and
+   * base flip select the direction; priority is deliberately not part of the
+   * identity. State $18 grows the plume through visuals $1C-$1E and state $19
+   * sustains it with the $1F/$1E flicker. State $1A's long $17 hold is the
+   * inactive interval between breaths and must not emit presentation fire. */
+  const uint16_t expected_flip =
+      object->source_descriptor == kAitosStatueFireSourceLeft
+          ? kActRaiserObjectFlip_Horizontal : 0;
+  if ((object->flip_attributes & kActRaiserObjectFlip_Mask) != expected_flip ||
+      (object->animation_state != 0x0018 &&
+       object->animation_state != 0x0019))
+    return false;
+
+  if (object->top_extent != 8 || object->bottom_extent != 8) return false;
+  if (object->animation_state == 0x0018 &&
+      object->visual == 0x001C && object->composition == 0x4763)
+    return object->left_extent == 16 && object->right_extent == 16;
+  if (object->animation_state == 0x0018 &&
+      object->visual == 0x001D && object->composition == 0x4776)
+    return object->left_extent + object->right_extent == 48 &&
+        object->left_extent >= 16 && object->right_extent >= 16;
+  const bool full_pillar =
+      (object->visual == 0x001E && object->composition == 0x4790) ||
+      (object->animation_state == 0x0019 &&
+       object->visual == 0x001F && object->composition == 0x47B1);
+  return full_pillar &&
+      object->left_extent + object->right_extent == 64 &&
+      object->left_extent >= 16 && object->right_extent >= 16;
 }
 
 static bool IsAitosMoltenRock(const ActionObjectSnapshot *object) {
@@ -1430,6 +1532,47 @@ static bool IsFlamingWheel(const ActionObjectSnapshot *object) {
       : object->spawner_backlink == kDeathHeimRoomOwnerBacklink;
 }
 
+static bool IsFlamingWheelProjectile(
+    const uint8_t *wram, size_t wram_size,
+    const ActionObjectSnapshot *object) {
+  static const uint16_t kCompositions[] = {
+    0x51B5, 0x51C1, 0x51CD, 0x51D9,
+  };
+  static const int8_t kVelocity[][2] = {
+    {-1, 1}, {0, 1}, {1, 1}, {-1, 0}, {1, 0},
+  };
+  if (!object ||
+      !SourceIs(object->source_descriptor, kFlamingWheelSourceDescriptor,
+                kDeathHeimFlamingWheelSourceDescriptor) ||
+      object->handler != kAnimationDelayHandler ||
+      object->resume_address != kSharedActionChildResume ||
+      object->animation_address != kBossAnimationAddress ||
+      object->animation_bank != kSceneAnimationBank ||
+      object->animation_state < kFlamingWheelProjectileFirstState ||
+      object->animation_state > kFlamingWheelProjectileLastState ||
+      object->visual >= sizeof(kCompositions) / sizeof(kCompositions[0]) ||
+      object->composition != kCompositions[object->visual] ||
+      object->left_extent != 8 || object->top_extent != 8 ||
+      object->right_extent != 8 || object->bottom_extent != 8 ||
+      object->local_counter != object->animation_state ||
+      object->flags != 0x0020 ||
+      object->flip_attributes != kActRaiserObjectFlip_Horizontal ||
+      !ActionObjectAddressIsValid(object->spawner_backlink))
+    return false;
+
+  const unsigned direction =
+      (unsigned)(object->animation_state - kFlamingWheelProjectileFirstState);
+  if (object->velocity_x != kVelocity[direction][0] ||
+      object->velocity_y != kVelocity[direction][1])
+    return false;
+
+  ActionObjectSnapshot parent;
+  return ReadActionObject(wram, wram_size, object->spawner_backlink,
+                          &parent) &&
+      parent.source_descriptor == object->source_descriptor &&
+      IsFlamingWheel(&parent);
+}
+
 static bool IsIceDragonIceBall(const uint8_t *wram, size_t wram_size,
                                const ActionObjectSnapshot *object) {
   static const uint16_t kCompositions[] = {
@@ -1828,6 +1971,150 @@ static void CaptureAitosLavaPits(ActionSceneEffectFrame *dst,
   }
 }
 
+static bool IsAitosSideLavaAnimatedCell(uint8_t metatile) {
+  return (metatile >= kAitosSideLavaFirstAnimatedMetatile &&
+          metatile <= kAitosSideLavaLastAnimatedMetatile) ||
+      metatile == kAitosSideLavaMap6AnimatedMetatile;
+}
+
+static bool IsAitosSideLavaBankPair(uint8_t left, uint8_t right) {
+  return (left == 0x33 && right == 0x34) ||
+      (left == 0x2C && right == 0x32) ||
+      (left == 0x33 && right == 0x32);
+}
+
+/* Act 2 turns the isometric pit mouths into broad side-on lakes. Their exact
+ * semantic is a maximal $01 lip run, one of the measured bank pairs, an
+ * animated/transparent surface row immediately above, and lava body below.
+ * Lighting is anchored to the lip rather than the red volume: using the full
+ * lake depth as an emitter would put sparks hundreds of pixels underwater. */
+static void CaptureAitosSideLavaReservoirs(
+    ActionSceneEffectFrame *dst, const uint8_t *wram,
+    size_t wram_size, uint16_t clock) {
+  if (!dst || !IsAitosAct2LavaMap(wram, wram_size)) return;
+  ActionBgMapView map;
+  if (!ActionBgMapView_Init(
+          &map, wram, wram_size,
+          Read16(wram, wram_size, kActRaiserWram_Bg1Width),
+          Read16(wram, wram_size, kActRaiserWram_Bg1Height),
+          Read16(wram, wram_size, kActRaiserWram_BgMapPage)))
+    return;
+  const int camera_x = Read16(wram, wram_size, kActRaiserWram_Bg1CameraX);
+  const int camera_y = Read16(wram, wram_size, kActRaiserWram_Bg1CameraY);
+  SceneBgScanBounds bounds;
+  if (!SceneBgScanBounds_Init(&bounds, &map, true, camera_x, camera_y))
+    return;
+
+  for (unsigned y = bounds.y0; y < bounds.y1;
+       y += kActionBgMetatilePixels) {
+    if (y < kActionBgMetatilePixels ||
+        y + kActionBgMetatilePixels >= map.world_height)
+      continue;
+    for (unsigned x = bounds.x0; x < bounds.x1;
+         x += kActionBgMetatilePixels) {
+      if (x < kActionBgMetatilePixels) continue;
+      uint8_t metatile = 0, left_bank = 0;
+      if (!ActionBgMapView_LookupMetatile(
+               &map, (int)x, (int)y, &metatile) ||
+          metatile != kAitosSideLavaLipMetatile)
+        continue;
+
+      /* If the camera window begins inside a very wide lake, walk left to its
+       * authentic bank once. Later in-window cells see a lip immediately to
+       * their left and skip as duplicates. Without this, map $06's 640px lake
+       * lost all heat whenever its left bank sat beyond the scan margin. */
+      unsigned run_x = x;
+      unsigned walked = 0;
+      if (x == bounds.x0) {
+        while (run_x >= 2u * kActionBgMetatilePixels &&
+               walked < kAitosSideLavaMaxCells) {
+          uint8_t previous = 0;
+          if (!ActionBgMapView_LookupMetatile(
+                  &map, (int)(run_x - kActionBgMetatilePixels),
+                  (int)y, &previous) ||
+              previous != kAitosSideLavaLipMetatile)
+            break;
+          run_x -= kActionBgMetatilePixels;
+          walked++;
+        }
+        if (walked == kAitosSideLavaMaxCells) continue;
+      }
+      if (!ActionBgMapView_LookupMetatile(
+               &map, (int)(run_x - kActionBgMetatilePixels),
+               (int)y, &left_bank) ||
+          left_bank == kAitosSideLavaLipMetatile)
+        continue;
+
+      unsigned cells = 0;
+      bool surface_valid = true;
+      bool has_animated_surface = false;
+      bool has_lava_body = false;
+      for (; cells < kAitosSideLavaMaxCells; cells++) {
+        const unsigned cell_x = run_x + cells * kActionBgMetatilePixels;
+        if (cell_x < run_x || cell_x >= map.world_width ||
+            !ActionBgMapView_LookupMetatile(
+                &map, (int)cell_x, (int)y, &metatile) ||
+            metatile != kAitosSideLavaLipMetatile)
+          break;
+        uint8_t surface = 0, body = 0;
+        if (!ActionBgMapView_LookupMetatile(
+                 &map, (int)cell_x,
+                 (int)(y - kActionBgMetatilePixels), &surface) ||
+            (surface != 0 && !IsAitosSideLavaAnimatedCell(surface)) ||
+            !ActionBgMapView_LookupMetatile(
+                 &map, (int)cell_x,
+                 (int)(y + kActionBgMetatilePixels), &body)) {
+          surface_valid = false;
+          break;
+        }
+        has_animated_surface |= IsAitosSideLavaAnimatedCell(surface);
+        has_lava_body |= body == kAitosSideLavaBodyMetatile;
+      }
+      if (!surface_valid || cells < 3 || !has_animated_surface ||
+          !has_lava_body || cells == kAitosSideLavaMaxCells)
+        continue;
+      const unsigned right_x = run_x + cells * kActionBgMetatilePixels;
+      uint8_t right_bank = 0;
+      if (right_x < run_x || right_x >= map.world_width ||
+          !ActionBgMapView_LookupMetatile(
+              &map, (int)right_x, (int)y, &right_bank) ||
+          !IsAitosSideLavaBankPair(left_bank, right_bank))
+        continue;
+
+      const unsigned width = cells * kActionBgMetatilePixels;
+      const float half_width = (float)width * 0.5f;
+      const uint32_t identity =
+          ((uint32_t)(y / kActionBgMetatilePixels) << 16) |
+          (uint32_t)(run_x / kActionBgMetatilePixels);
+      ActionEffectInstance effect = {
+        .generation = 0x4A000000u ^ identity,
+        .pulse_generation = 0x6A000000u ^ identity,
+        .world_x = (int16_t)(run_x + width / 2u),
+        /* The visible orange lip occupies the top half of the $01 row. */
+        .world_y = (int16_t)(y + 4u),
+        .left_extent = (uint16_t)(width / 2u),
+        .top_extent = 4,
+        .right_extent = (uint16_t)(width / 2u),
+        .bottom_extent = 4,
+        .age_ticks = clock,
+        .phase_ticks = clock,
+        .pulse_ticks = clock,
+        .kind = kActionEffect_AitosLavaReservoir,
+        .phase = kActionEffectPhase_AitosLavaReservoir,
+        .role = kActionEffectRole_Body,
+        .flags = kActionEffectFlag_Visible,
+        .render_layer = kActionEffectRenderLayer_Bg1HighPlane,
+        .projection_plane = kActionEffectProjectionPlane_Bg1High,
+        .geometry = {
+          .kind = kActionEffectGeometry_Rect,
+          .data.rect = {-half_width, -4.0f, half_width, 4.0f},
+        },
+      };
+      SceneDecorationAppend(dst, &effect);
+    }
+  }
+}
+
 static bool AitosSplashStructureWidth(
     const ActionBgMapView *map, unsigned x, unsigned y,
     unsigned *total_cells) {
@@ -2084,6 +2371,22 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
     return;
   }
 
+  const uint8_t map_group =
+      Read8(wram, wram_size, kActRaiserWram_MapGroup);
+  const uint8_t map_number =
+      Read8(wram, wram_size, kActRaiserWram_CurrentMap);
+  if (!observer->scene_map_valid ||
+      observer->scene_map_group != map_group ||
+      observer->scene_map_number != map_number) {
+    /* A room handoff can replace the whole action table without presenting an
+     * intermediate inactive frame. Never let a same-slot/source actor inherit
+     * the previous room's trail, pulse, or map-decoration clock. */
+    RetireSceneAll(observer);
+    observer->scene_map_group = map_group;
+    observer->scene_map_number = map_number;
+    observer->scene_map_valid = 1;
+  }
+
   if (!observer->scene_clock_valid) {
     /* Preserve the established visual phase on entry/load, then decouple it
      * from $0088: that ROM clock keeps moving on the native pause screen. */
@@ -2094,13 +2397,18 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
   }
   CaptureWallTorches(dst, wram, wram_size, observer->scene_clock);
   CaptureAitosLavaPits(dst, wram, wram_size, observer->scene_clock);
+  CaptureAitosSideLavaReservoirs(
+      dst, wram, wram_size, observer->scene_clock);
   CaptureAitosWater(dst, wram, wram_size, observer->scene_clock);
   if (dst->decoration_overflow) {
     dst->decoration_count = 0;
     dst->decoration_visible_count = 0;
   }
   const bool marahna_effect_map = IsMarahnaEffectMap(wram, wram_size);
+  const bool bloodpool_act2_map = IsBloodpoolAct2Map(wram, wram_size);
   const bool aitos_lava_map = IsAitosLavaMap(wram, wram_size);
+  const bool aitos_statue_fire_map =
+      IsAitosStatueFireMap(wram, wram_size);
   const bool aitos_boss_map =
       Read8(wram, wram_size, kActRaiserWram_MapGroup) ==
           kActRaiserMapGroup_Aitos &&
@@ -2164,6 +2472,16 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
                IsFlamingWheel(&object)) {
       kind = kActionEffect_FlamingWheel;
       phase = kActionEffectPhase_FlamingWheelBody;
+    } else if (flaming_wheel_map &&
+               SourceMatchesOriginalOrDeathHeimRoom(
+                   wram, wram_size, object.source_descriptor,
+                   kActRaiserMapGroup_Aitos, kFlamingWheelBossMap,
+                   kFlamingWheelSourceDescriptor,
+                   kDeathHeimFlamingWheelMap,
+                   kDeathHeimFlamingWheelSourceDescriptor) &&
+               IsFlamingWheelProjectile(wram, wram_size, &object)) {
+      kind = kActionEffect_FlamingWheelProjectile;
+      phase = kActionEffectPhase_FlamingWheelProjectileFlight;
     } else if (ice_dragon_map &&
                SourceMatchesOriginalOrDeathHeimRoom(
                    wram, wram_size, object.source_descriptor,
@@ -2176,7 +2494,7 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
     } else if (tanzara_map && IsTanzaraProjectile(&object)) {
       kind = kActionEffect_TanzaraProjectile;
       phase = kActionEffectPhase_TanzaraProjectileFlight;
-    } else if (IsEnemyFireball(&object)) {
+    } else if (bloodpool_act2_map && IsEnemyFireball(&object)) {
       kind = kActionEffect_EnemyFireball;
       phase = kActionEffectPhase_EnemyFireballFlight;
     } else if (marahna_effect_map &&
@@ -2202,6 +2520,9 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
     } else if (aitos_lava_map && IsAitosLavaFireball(&object)) {
       kind = kActionEffect_AitosLavaFireball;
       phase = kActionEffectPhase_AitosLavaFireballFlight;
+    } else if (aitos_statue_fire_map && IsAitosStatueFire(&object)) {
+      kind = kActionEffect_AitosStatueFire;
+      phase = kActionEffectPhase_AitosStatueFireBreath;
     } else if (aitos_lava_map && IsAitosMoltenRock(&object)) {
       kind = kActionEffect_AitosMoltenRock;
       phase = kActionEffectPhase_AitosMoltenRockFlight;
@@ -2213,7 +2534,7 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
     } else if (IsPlayerSwordBeam(wram, wram_size, &object)) {
       kind = kActionEffect_SwordBeam;
       phase = kActionEffectPhase_SwordBeamFlight;
-    } else if (IsLightningTrap(&object)) {
+    } else if (bloodpool_act2_map && IsLightningTrap(&object)) {
       kind = kActionEffect_LightningTrap;
       phase = kActionEffectPhase_LightningActive;
     } else if (boss_lightning_map &&
@@ -2234,6 +2555,16 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
     seen[slot] = true;
     ActionEffectInstance effect;
     PopulateSceneObjectEffect(&effect, address, &object, kind, phase);
+    if (kind == kActionEffect_AitosStatueFire ||
+        kind == kActionEffect_FlamingWheel ||
+        kind == kActionEffect_FlamingWheelProjectile) {
+      /* These measured compositions carry raw priority zero in their part
+       * words; $00:8D68 supplies the room's live OBJ band through $008F.
+       * Death Heim is therefore free to select a different band without
+       * changing or weakening the family identity. */
+      effect.obj_priority = ScenePriorityFromSpriteAttributeBias(
+          wram, wram_size);
+    }
     if (kind == kActionEffect_MarahnaBossLightning &&
         phase == kActionEffectPhase_MarahnaBossLightningBolt) {
       /* The authored bolt owns one asymmetric 32x32 quadrant extending down

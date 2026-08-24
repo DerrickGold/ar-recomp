@@ -31,6 +31,14 @@ uint8_t ActionEffectProjection_RequiredObjPriorityMask(
     const ActionEffectFrame *spell_frame,
     const ActionSceneEffectFrame *scene_frame);
 
+/* Returns the exact BG priority planes needed by current BG-attached effects. Unlike a
+ * texture-content mask, this remains set when the isolated hardware plane is
+ * empty at the current scroll position: the attached host effect is itself
+ * current content at that authored transform. */
+uint32_t ActionEffectProjection_RequiredBgPlaneMask(
+    const ActionEffectFrame *spell_frame,
+    const ActionSceneEffectFrame *scene_frame);
+
 /* ActionEffectProjectPointFn-compatible projection callback. Flat mode maps
  * through the resolved viewport. Diorama mode uses the compositor-published
  * BG1/BG2/OBJ source plane, including display margins and the hidden apron

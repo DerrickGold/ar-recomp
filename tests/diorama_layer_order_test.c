@@ -365,6 +365,37 @@ static void TestLineParsing(void) {
   CHECK(room.planes[kPpuOverlaySource_Bg2].set_alpha);
   CHECK(room.planes[kPpuOverlaySource_Bg2].z == 0.9f);
   CHECK(room.planes[kPpuOverlaySource_Bg2].alpha == 128);
+  CHECK(DioramaLayerOrder_ParseLine(
+      &room, "bg2 = transparent:black", &error));
+  CHECK(room.planes[kPpuOverlaySource_Bg2].set_transparent_fill);
+  CHECK(room.planes[kPpuOverlaySource_Bg2].transparent_fill_kind ==
+        kDioramaTransparentFill_Black);
+  room.used = true;
+  room.map_group = 4;
+  room.map_number = 5;
+  char transparent_text[256];
+  CHECK(DioramaLayerOrder_FormatRoom(
+      &room, transparent_text, sizeof(transparent_text)) > 0);
+  CHECK(strstr(transparent_text, "bg2 = z:0.9 alpha:128 transparent:black") !=
+        NULL);
+  CHECK(DioramaLayerOrder_ParseLine(
+      &room, "bg1 = transparent:cgram-2A", &error));
+  CHECK(room.planes[kPpuOverlaySource_Bg1].set_transparent_fill);
+  CHECK(room.planes[kPpuOverlaySource_Bg1].transparent_fill_kind ==
+        kDioramaTransparentFill_Cgram);
+  CHECK(room.planes[kPpuOverlaySource_Bg1].transparent_fill_cgram == 0x2a);
+  CHECK(DioramaLayerOrder_FormatRoom(
+      &room, transparent_text, sizeof(transparent_text)) > 0);
+  CHECK(strstr(transparent_text, "bg1 = transparent:cgram-2A") != NULL);
+  CHECK(DioramaLayerOrder_ParseLine(
+      &room, "bg2 = transparent:off", &error));
+  CHECK(room.planes[kPpuOverlaySource_Bg2].set_transparent_fill);
+  CHECK(room.planes[kPpuOverlaySource_Bg2].transparent_fill_kind ==
+        kDioramaTransparentFill_None);
+  CHECK(DioramaLayerOrder_FormatRoom(
+      &room, transparent_text, sizeof(transparent_text)) > 0);
+  CHECK(strstr(transparent_text, "bg2 = z:0.9 alpha:128 transparent:off") !=
+        NULL);
 
   /* z only: alpha must default to opaque, NOT to 0 (invisible). */
   memset(&room, 0, sizeof(room));
@@ -389,9 +420,11 @@ static void TestLineParsing(void) {
         kDioramaLayerSource_AitosSky);
   memset(&room, 0, sizeof(room));
   CHECK(DioramaLayerOrder_ParseLine(
-      &room, "backdrop = source:rom-06-08-bg1", &error));
+      &room, "backdrop = source:rom-06-08-bg1 alpha:0", &error));
   CHECK(room.planes[kDioramaPlane_Backdrop].source ==
         DioramaLayerOrder_ActionBgSource(0x06, 0x08, 1));
+  CHECK(room.planes[kDioramaPlane_Backdrop].set_alpha);
+  CHECK(room.planes[kDioramaPlane_Backdrop].alpha == 0);
 
   /* Rejections, each with a reason for the log. */
   const char *cases[] = {
@@ -404,6 +437,10 @@ static void TestLineParsing(void) {
     "bg1 = alpha:999",
     "bg1 = alpha:-1",
     "bg1 = source:aitos-sky",
+    "bg2hi = transparent:black",
+    "bg2 = transparent:red",
+    "bg2 = transparent:cgram-0",
+    "bg2 = transparent:cgram-XYZ",
     "backdrop = source:unknown",
     "backdrop = source:rom-01-05-bg1", /* Fillmore has no map 5 */
     "backdrop = source:rom-04-01-bg3",
@@ -1656,6 +1693,45 @@ static void TestDeathHeimHubFaceBandStopsBeforeWater(void) {
   CHECK(DioramaLayerOrder_VirtualBand(&room, 1, 0, 9, 0x6A, 0x2000) == 2);
 }
 
+static void TestTransparentFillInheritsAndRefines(void) {
+  DioramaLayerOrderTable table;
+  memset(&table, 0, sizeof(table));
+  DioramaRoomOverride *base = DioramaLayerOrder_FindOrAdd(&table, 0x04, 0x05);
+  DioramaRoomOverride *scoped = DioramaLayerOrder_FindOrAddSection(
+      &table, 0x04, 0x05, kDioramaLayerSection_AitosWaterfall);
+  CHECK(base != NULL && scoped != NULL);
+  if (!base || !scoped) return;
+  base->planes[kPpuOverlaySource_Bg2].set_transparent_fill = true;
+  base->planes[kPpuOverlaySource_Bg2].transparent_fill_kind =
+      kDioramaTransparentFill_Black;
+
+  DioramaTransparentFill kind = kDioramaTransparentFill_None;
+  uint8_t cgram = 0xff;
+  CHECK(DioramaLayerOrder_ResolveTransparentFill(
+      &table, 0x04, 0x05, kDioramaLayerSection_AitosWaterfall,
+      kPpuOverlaySource_Bg2, &kind, &cgram));
+  CHECK(kind == kDioramaTransparentFill_Black && cgram == 0);
+
+  scoped->planes[kPpuOverlaySource_Bg2].set_transparent_fill = true;
+  scoped->planes[kPpuOverlaySource_Bg2].transparent_fill_kind =
+      kDioramaTransparentFill_Cgram;
+  scoped->planes[kPpuOverlaySource_Bg2].transparent_fill_cgram = 0x36;
+  CHECK(DioramaLayerOrder_ResolveTransparentFill(
+      &table, 0x04, 0x05, kDioramaLayerSection_AitosWaterfall,
+      kPpuOverlaySource_Bg2, &kind, &cgram));
+  CHECK(kind == kDioramaTransparentFill_Cgram && cgram == 0x36);
+  scoped->planes[kPpuOverlaySource_Bg2].transparent_fill_kind =
+      kDioramaTransparentFill_None;
+  scoped->planes[kPpuOverlaySource_Bg2].transparent_fill_cgram = 0;
+  CHECK(DioramaLayerOrder_ResolveTransparentFill(
+      &table, 0x04, 0x05, kDioramaLayerSection_AitosWaterfall,
+      kPpuOverlaySource_Bg2, &kind, &cgram));
+  CHECK(kind == kDioramaTransparentFill_None && cgram == 0);
+  CHECK(!DioramaLayerOrder_ResolveTransparentFill(
+      &table, 0x04, 0x05, kDioramaLayerSection_Room,
+      kDioramaPlane_Bg2Hi, &kind, &cgram));
+}
+
 int main(void) {
   TestNoOverrideIsIdentity();
   TestOverrideIsScopedToItsRoom();
@@ -1696,6 +1772,7 @@ int main(void) {
   TestVirtualLayerParseResolveAndRoundTrip();
   TestInGamePlaneResetPreservesVirtualLayers();
   TestDeathHeimHubFaceBandStopsBeforeWater();
+  TestTransparentFillInheritsAndRefines();
   if (g_failures) {
     printf("diorama_layer_order_test: %d failure(s)\n", g_failures);
     return 1;

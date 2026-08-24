@@ -132,6 +132,7 @@ typedef struct DioramaProjection {
   int output_width, output_height;
   DioramaPlaneProjection bg1_plane;
   DioramaPlaneProjection bg2_plane;
+  DioramaPlaneProjection bg1_high_plane;
   DioramaPlaneProjection object_planes[kDioramaObjectPriorityCount];
 } DioramaProjection;
 
@@ -147,11 +148,10 @@ bool Diorama_PlaneEligible(int plane, bool visible, bool has_texture,
                            bool has_pixels, bool hud_flat, bool skybox_only);
 
 /* Projection normally has the same current-pixel contract as drawing. A
- * current OBJ-attached host effect is also current content for its authentic
- * priority plane, even when that isolated sprite band has no winning pixels.
- * The exception is deliberately rejected for every non-OBJ plane. */
+ * current host effect is also current content for its authentic BG or OBJ
+ * plane, even when that isolated hardware band has no winning pixels. */
 bool Diorama_PlaneProjectable(int plane, bool visible, bool has_texture,
-                              bool has_pixels, bool has_obj_effect,
+                              bool has_pixels, bool has_attached_effect,
                               bool hud_flat, bool skybox_only);
 
 /* Keeps required OBJ priorities whose plane was requested and either had no
@@ -160,6 +160,12 @@ bool Diorama_PlaneProjectable(int plane, bool visible, bool has_texture,
  * both to NULL at composite time. */
 uint8_t Diorama_FilterObjEffectProjectionMask(
     uint8_t required_priorities, uint32_t requested_planes,
+    uint32_t content_planes, uint32_t uploaded_planes);
+
+/* Keeps required BG transforms when their capture was intentionally empty,
+ * but removes a content-bearing plane whose texture upload actually failed. */
+uint32_t Diorama_FilterBgEffectProjectionMask(
+    uint32_t required_planes, uint32_t requested_planes,
     uint32_t content_planes, uint32_t uploaded_planes);
 
 /* Maps a captured framebuffer point onto its authentic action OBJ priority
@@ -176,6 +182,12 @@ bool Diorama_ProjectCapturedBg1Point(const DioramaProjection *projection,
                                      float capture_x, float capture_y,
                                      SDL_FPoint *point,
                                      float *scale_x, float *scale_y);
+
+/* Same mapping for BG1's priority-1 tile band. */
+bool Diorama_ProjectCapturedBg1HighPoint(
+    const DioramaProjection *projection,
+    float capture_x, float capture_y, SDL_FPoint *point,
+    float *scale_x, float *scale_y);
 
 /* Same mapping, using the resolved BG2-low backdrop plane. Waterfall accents
  * follow the independently-authored backdrop rake/depth instead of borrowing
@@ -215,10 +227,9 @@ bool Diorama_ProjectCapturedBg2Point(const DioramaProjection *projection,
  * the apron and apron 0 reproduces the pre-apron geometry exactly. Only the UV
  * window and the supersample source rect move.
  *
- * effect_obj_priority_mask: authentic OBJ bands required by current captured
- * world-overlay effects. Those actors are current projection content even if
- * their isolated hardware band has no final winning pixels; this cannot make
- * a BG plane projectable or bypass a hidden OBJ layer/missing texture. */
+ * effect_obj_priority_mask/effect_bg_plane_mask: authentic hardware planes
+ * required by current captured effects. An effect is current projection
+ * content even if its isolated band has no final winning pixels. */
 bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        int authentic_y0,
                        int obj_apron,
@@ -226,10 +237,13 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        int visible_width, SDL_Rect viewport,
                        SDL_Texture *textures[],
                        uint8_t *pixels[],
+                       const bool bg_transparent_fill_configured[2],
+                       const uint32_t bg_transparent_fill_argb[2],
                        const DioramaCameraPose *cam_pose,
                        float distance_scale,
                        uint32_t additive_plane_mask,
                        uint8_t effect_obj_priority_mask,
+                       uint32_t effect_bg_plane_mask,
                        uint8_t map_group, uint8_t map_number,
                        uint8_t layer_section,
                        const DioramaBgValidSpanPlan *bg2_valid_spans,
