@@ -439,6 +439,11 @@ struct Ppu {
   int16_t objPosX[128];
   int16_t objPosY[128];
   uint8_t objPosValid[128];
+  /* Independent presentation ownership for the authentic-camera pass. An
+   * exact position only says that the widened renderer may trust an
+   * untruncated coordinate; it does not imply that the slot belongs to the
+   * scrolling world. See PpuSetObjCameraRelative. */
+  uint8_t objCameraRelative[128];
   // Widescreen HUD split (see PpuSetWidescreenHudSplit). 0 height = off.
   uint8_t wsHudSplitHeight, wsHudLeftEnd, wsHudRightStart;
   uint8_t wsHudPlayerRowY;
@@ -511,6 +516,19 @@ struct Ppu {
   PpuObjRangeCapture objRangeCapture;
   uint32_t renderPitch;
   uint8_t *renderBuffer;
+  /* Optional independent native-geometry PPU pass. It disables host plane
+   * extraction and restores hardware sprite limits; explicit camera state can
+   * differ per layer/scanline without feeding emulation back into itself. */
+  uint32_t authenticRenderPitch;
+  uint8_t *authenticRenderBuffer;
+  /* Optional native-camera state for the parallel comparison scanout. BG1
+   * and BG2 are stored per visible line because ActRaiser's camera-dependent
+   * HDMA can give each layer a different displacement. OBJ displacement is
+   * applied only to slots explicitly marked camera-relative; exact-position
+   * availability and camera ownership are deliberately separate contracts. */
+  uint16_t authenticHScroll[2][kPpuYPixels];
+  int16_t authenticObjOffsetX;
+  uint8_t authenticHScrollMask;
   uint32_t overlayRenderPitch[kPpuOverlaySource_Count];
   uint8_t *overlayRenderBuffer[kPpuOverlaySource_Count];
   /* Optional priority-band split surfaces (PpuBindOverlayPrioSurface). When
@@ -714,6 +732,35 @@ uint8_t ppu_read(Ppu* ppu, uint8_t adr);
 void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val);
 void ppu_saveload(Ppu *ppu, SaveLoadInfo *sli);
 void PpuBeginDrawing(Ppu *ppu, uint8_t *pixels, size_t pitch, uint32_t render_flags);
+/* Bind the optional native-camera PPU pass used for live comparison. Passing
+ * NULL disables it. The pitch must cover the current native image plus both
+ * centering margins; render-time validation also protects later margin
+ * changes. The surface needs no OBJ apron. */
+bool PpuBindAuthenticSurface(Ppu *ppu, uint8_t *pixels, size_t pitch);
+bool PpuAuthenticSurfaceBound(const Ppu *ppu);
+/* Bound and wide enough for the current centering budget. This is the
+ * completion-side counterpart to render-time bounds protection: a skipped
+ * native pass must never be published as a fresh frame. */
+bool PpuAuthenticSurfaceReady(const Ppu *ppu);
+enum {
+  kPpuAuthenticCameraLayer_Bg1 = 1u << 0,
+  kPpuAuthenticCameraLayer_Bg2 = 1u << 1,
+  kPpuAuthenticCameraLayer_All =
+      kPpuAuthenticCameraLayer_Bg1 | kPpuAuthenticCameraLayer_Bg2,
+};
+/* Supply one frame of independently resolved native camera state. Use the
+ * kPpuAuthenticCameraLayer_* mask; a selected layer must provide
+ * kPpuYPixels scroll values. Passing no layers still installs the OBJ
+ * displacement. */
+bool PpuSetAuthenticCameraFrame(
+    Ppu *ppu, uint8_t layer_mask,
+    const uint16_t bg1_hscroll[kPpuYPixels],
+    const uint16_t bg2_hscroll[kPpuYPixels], int obj_offset_x);
+/* True only when every requested layer has exact per-line native state for
+ * this scanout. Availability, not an approximate relative phase, gates frame
+ * publication to the comparison presenter. */
+bool PpuAuthenticCameraFrameReady(const Ppu *ppu, uint8_t layer_mask);
+void PpuClearAuthenticCameraFrame(Ppu *ppu);
 
 /* Reusable semantic-OBJ extraction. `first/count` select contiguous OAM slots
  * and every selected slot must have `priority` (the raw 0..3 OAM priority).
@@ -902,6 +949,14 @@ void PpuClearVirtualTilemaps(Ppu *ppu);
 // ppu->oam word-pair order.
 void PpuClearObjExactPositions(Ppu *ppu);
 void PpuSetObjExactPosition(Ppu *ppu, uint8_t slot, int x, int y);
+
+/* Authentic-pass camera ownership is independent of exact-coordinate
+ * availability: a HUD sprite can have an exact coordinate and remain fixed,
+ * while a world sprite is shifted by the native-vs-enhanced camera delta.
+ * Clear this once when an OAM owner starts a new build, then mark only the
+ * committed world slots. */
+void PpuClearObjCameraRelative(Ppu *ppu);
+void PpuSetObjCameraRelative(Ppu *ppu, uint8_t slot, bool camera_relative);
 
 // ── Part resolution ──────────────────────────────────────────────────────
 // Decode OAM slots [first, first+count) into parts, in the renderer's

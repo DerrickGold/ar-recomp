@@ -40,15 +40,19 @@
  * constants (not live state) — fine to pull in just for those. */
 #include "settings.h"
 #include "present_internal.h"
+#include "render_comparison.h"
+#include "session_fatal.h"
 #include "presentation_geometry.h"
 #include "presentation_upload_mirror.h"
 
 
 extern SDL_Renderer *g_renderer;
 extern SDL_Texture *g_texture;
+extern SDL_Texture *g_authentic_texture;
 extern SDL_Texture *g_hud_bg_texture;
 extern SDL_Texture *g_hud_obj_texture;
 extern uint8_t g_pixels[];
+extern uint8_t g_authentic_pixels[];
 extern uint8_t g_hud_bg_pixels[];
 extern uint8_t g_hud_obj_pixels[];
 extern uint8_t g_action_bg1_mask_pixels[];
@@ -112,6 +116,7 @@ enum {
 
 enum {
   kActionUploadSurface_Frame,
+  kActionUploadSurface_Authentic,
   kActionUploadSurface_Bg1Mask,
   kActionUploadSurface_Bg2Mask,
   kActionUploadSurface_HudBg,
@@ -123,6 +128,7 @@ static PresentationUploadMirror
     s_sim3d_upload_mirrors[kSim3DUploadSurface_Count];
 static PresentationUploadMirror
     s_action_upload_mirrors[kActionUploadSurface_Count];
+static uint64_t s_authentic_uploaded_frame_serial;
 
 static void ResetSim3DUploadMirrors(void) {
   for (int surface = 0; surface < kSim3DUploadSurface_Count; surface++)
@@ -132,6 +138,11 @@ static void ResetSim3DUploadMirrors(void) {
 static void ResetActionUploadMirrors(void) {
   for (int surface = 0; surface < kActionUploadSurface_Count; surface++)
     PresentationUploadMirror_Reset(&s_action_upload_mirrors[surface]);
+  s_authentic_uploaded_frame_serial = 0;
+}
+
+uint64_t PresentAuthenticUploadedFrameSerial(void) {
+  return s_authentic_uploaded_frame_serial;
 }
 
 static bool UploadChangedSurface(
@@ -719,6 +730,28 @@ void PresentUpload(const FrameSlot *slot) {
   Sim3DPerformanceScope performance = {0};
   if (slot->sim.view == kSimView_Enhanced)
     performance = Sim3DPerformance_Begin(kSim3DPerformance_Upload);
+
+  if (g_authentic_texture && slot->authentic_frame_serial) {
+    const int authentic_height = slot->snes_height + slot->ws_extra_top +
+                                 slot->ws_extra_bottom;
+    if (UploadChangedSurface(
+        g_authentic_texture,
+        &s_action_upload_mirrors[kActionUploadSurface_Authentic],
+        g_authentic_pixels, slot->snes_width, authentic_height,
+        slot->snes_width * (int)sizeof(uint32_t), 0, 0)) {
+      s_authentic_uploaded_frame_serial = slot->authentic_frame_serial;
+    } else {
+      s_authentic_uploaded_frame_serial = 0;
+      if (RenderComparison_RequiresAuthenticFrame()) {
+        const char *sdl_error = SDL_GetError();
+        SessionFatal_Request(
+            "Authentic comparison could not upload its current native frame "
+            "(%s). Restart the game; if this repeats, update your graphics "
+            "driver or select a different SDL renderer.",
+            sdl_error[0] ? sdl_error : "texture upload failed");
+      }
+    }
+  }
 
   if (slot->diorama_active) {
     uint8_t *pixels[kDioramaPlane_Count];
@@ -1798,9 +1831,16 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
     PresentSim3D(slot);
     return;
   }
-  if (slot->sim.view == kSimView_WorldNavigation &&
-      PresentWorldNavigation3D(slot))
+  if (slot->sim.view == kSimView_WorldNavigation) {
+    if (PresentWorldNavigation3D(slot)) return;
+    const char *sdl_error = SDL_GetError();
+    SessionFatal_Request(
+        "The enhanced world-navigation renderer failed while it was active "
+        "(%s). Restart the game. If this happens again, update your graphics "
+        "driver or disable enhanced world navigation before entering the map.",
+        sdl_error[0] ? sdl_error : "invalid renderer frame state");
     return;
+  }
 
   if (slot->diorama_active) {
     DioramaPerformanceScope presentation_performance =
@@ -2083,4 +2123,116 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
   PresentHudOverlay(slot, output_viewport);
   PresentHdReplacements(slot, output_viewport);
   ApplyLogicalPresentation(slot);
+}
+
+bool PresentAuthenticScene(const FrameSlot *slot, SDL_Rect viewport) {
+  if (!slot || !g_renderer || !g_authentic_texture ||
+      viewport.w <= 0 || viewport.h <= 0)
+    return false;
+  /* The orchestrator owns the current target: this may be either the window
+   * backbuffer or the CRT scene target. Authentic comparison changes the game
+   * image, not the player's independent display treatment. */
+  if (!SDL_SetRenderLogicalPresentation(
+          g_renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED) ||
+      !SDL_SetRenderViewport(g_renderer, NULL) ||
+      !SDL_SetRenderClipRect(g_renderer, NULL) ||
+      !SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE) ||
+      !SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255) ||
+      !SDL_RenderClear(g_renderer))
+    return false;
+  const SDL_FRect source = {
+    (float)slot->authentic_x0, (float)slot->authentic_y0,
+    (float)kFrameSlotAuthenticWidth, (float)kFrameSlotAuthenticHeight,
+  };
+  const SDL_FRect destination = ToFRect(viewport);
+  return SDL_RenderTexture(
+      g_renderer, g_authentic_texture, &source, &destination);
+}
+
+bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
+                                      SDL_Rect priority_viewport) {
+  if (!slot || !g_renderer || !g_authentic_texture ||
+      priority_viewport.w <= 0 || priority_viewport.h <= 0)
+    return false;
+  PresentationOutputState output_state;
+  if (!PresentationGeometry_PushFullOutput(g_renderer, &output_state))
+    return false;
+
+  enum { kPipWidthPercent = 31, kPipMarginPercent = 3 };
+  int width = priority_viewport.w * kPipWidthPercent / 100;
+  int height = width * 3 / 4;
+  const int maximum_height = priority_viewport.h * 38 / 100;
+  if (height > maximum_height) {
+    height = maximum_height;
+    width = height * 4 / 3;
+  }
+  int margin = priority_viewport.h * kPipMarginPercent / 100;
+  if (margin < 12) margin = 12;
+  int border = priority_viewport.h / 180;
+  if (border < 3) border = 3;
+  const SDL_FRect destination = {
+    (float)(priority_viewport.x + priority_viewport.w - margin - width),
+    (float)(priority_viewport.y + priority_viewport.h - margin - height),
+    (float)width, (float)height,
+  };
+  const SDL_FRect shadow = {
+    destination.x - border + border * 2.0f,
+    destination.y - border + border * 2.0f,
+    destination.w + border * 2.0f,
+    destination.h + border * 2.0f,
+  };
+  const SDL_FRect frame = {
+    destination.x - border, destination.y - border,
+    destination.w + border * 2.0f, destination.h + border * 2.0f,
+  };
+  bool rendered =
+      SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND) &&
+      SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 150) &&
+      SDL_RenderFillRect(g_renderer, &shadow) &&
+      SDL_SetRenderDrawColor(g_renderer, 236, 206, 120, 255) &&
+      SDL_RenderFillRect(g_renderer, &frame) &&
+      SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE) &&
+      SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255) &&
+      SDL_RenderFillRect(g_renderer, &destination);
+  const SDL_FRect source = {
+    (float)slot->authentic_x0, (float)slot->authentic_y0,
+    (float)kFrameSlotAuthenticWidth, (float)kFrameSlotAuthenticHeight,
+  };
+  if (rendered)
+    rendered = SDL_RenderTexture(
+        g_renderer, g_authentic_texture, &source, &destination);
+
+  if (rendered) {
+    const int scale = height >= 540 ? 3 : height >= 300 ? 2 : 1;
+    const char *label = "AUTHENTIC";
+    const int label_x = (int)destination.x + border * 2;
+    const int label_y = (int)destination.y -
+        kSettingsOverlayGlyphSize * scale - border * 2;
+    SettingsOverlay_DrawGameText(label_x, label_y, scale, 255, label);
+  }
+  return PresentationGeometry_PopFullOutput(
+      g_renderer, &output_state) && rendered;
+}
+
+bool PresentComparisonTransitionOverlay(uint8_t alpha, const char *label) {
+  if (!alpha) return true;
+  if (!g_renderer) return false;
+  PresentationOutputState output_state;
+  if (!PresentationGeometry_PushFullOutput(g_renderer, &output_state))
+    return false;
+  int width = 0, height = 0;
+  bool rendered = SDL_GetRenderOutputSize(g_renderer, &width, &height) &&
+      SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND) &&
+      SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, alpha) &&
+      SDL_RenderFillRect(g_renderer, NULL);
+  if (rendered && label && alpha >= 192 && width > 0 && height > 0) {
+    const int scale = height >= 900 ? 3 : height >= 480 ? 2 : 1;
+    const int text_width = SettingsOverlay_GameTextWidth(label, scale);
+    SettingsOverlay_DrawGameText(
+        (width - text_width) / 2,
+        (height - kSettingsOverlayGlyphSize * scale) / 2,
+        scale, alpha, label);
+  }
+  return PresentationGeometry_PopFullOutput(
+      g_renderer, &output_state) && rendered;
 }

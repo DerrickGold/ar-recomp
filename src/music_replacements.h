@@ -85,6 +85,11 @@ void MusicReplacements_ApplySetting(void);
  * advances its cursor; playback resumes only after both pause reasons clear. */
 void MusicReplacements_SetHostPaused(bool paused);
 
+/* Session-only output bypass. The decoder keeps advancing so the SPC
+ * sequencer and enhanced track remain on the same timeline; only which one
+ * reaches the final mix changes. The persistent setting is not modified. */
+void MusicReplacements_SetSessionBypassed(bool bypassed);
+
 /* Combined native/host pause state, exposed for diagnostics and tests. */
 bool MusicReplacements_IsPlaybackPaused(void);
 

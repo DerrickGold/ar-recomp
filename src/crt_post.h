@@ -24,8 +24,9 @@
 #include <SDL3/SDL.h>
 #include <stdbool.h>
 
-/* Redirect rendering into the offscreen scene target. Returns false (and
- * changes nothing) when the effect is disabled or unavailable. */
+/* Redirect rendering into the offscreen scene target. Returns false without
+ * side effects when disabled. A selected-mode setup failure also returns
+ * false, but latches SessionFatal so the caller can end the frame/session. */
 bool CrtPost_Begin(SDL_Renderer *renderer);
 
 /* Resolve the scene target to the backbuffer through the CRT shader. Safe to

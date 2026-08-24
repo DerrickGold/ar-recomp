@@ -16,7 +16,8 @@
  *
  * The first twelve actions ARE that bit order (bit index == enum value), which
  * is the layout SwapInputBits translates into the SNES auto-joypad word. The
- * host actions after them are gamepad-only (except MagicCycle, see below):
+ * host actions after them are gamepad-only (except MagicCycle and the render
+ * comparison control, see below):
  * keyboard hotkeys (Esc/F1, P, T, F5, F7) stay hard-wired in main.c so a
  * rebind cannot strand a desktop player without a way back into the menu. On a
  * Steam Deck there is no keyboard at all, so the pad needs its own way to
@@ -49,6 +50,9 @@ typedef enum {
    * keyboard row — it is a testing control a desktop developer reaches for,
    * and it cannot strand anyone the way a rebound menu key could. */
   kInputAction_MagicCycle,
+  /* Session-only authentic/enhanced comparison. It has both keyboard and pad
+   * rows because press duration selects its picture-in-picture hold mode. */
+  kInputAction_RenderCompare,
   kInputAction_EdgeEnd,
 
   /* Analog camera actions. Unlike everything above these are POLLED, not
@@ -159,6 +163,15 @@ void InputMap_Clear(void);
  * device mode. A bound stick axis scales with deflection past the camera
  * deadzone; a bound button or key is all-or-nothing. */
 float InputMap_AnalogAction(InputAction action);
+
+/* Physical held state across both host-binding classes. Host comparison uses
+ * this beside its press edge to distinguish click from hold. */
+bool InputMap_ActionHeld(InputAction action);
+
+/* Stateful threshold used by both event edges and held-state polling. Kept
+ * pure/public so the press/release hysteresis contract can be regression
+ * tested without attaching a physical controller. */
+bool InputMap_AxisBindingHeld(uint32 binding, int value, bool was_held);
 
 /* Host-action dispatch (gamepad only; see the header comment). Fires on the
  * press edge. */

@@ -41,6 +41,10 @@ SDL_FRect ToFRect(SDL_Rect r);
 void ApplyLogicalPresentation(const FrameSlot *slot);
 void PresentHudOverlayComposited(const FrameSlot *slot, SDL_Rect viewport);
 void PresentCompositeScene(const FrameSlot *slot, float alpha);
+bool PresentAuthenticScene(const FrameSlot *slot, SDL_Rect viewport);
+bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
+                                      SDL_Rect priority_viewport);
+bool PresentComparisonTransitionOverlay(uint8_t alpha, const char *label);
 void PresentHostUi(const FrameSlot *slot, SDL_Rect viewport,
                    SDL_Point output_size,
                    double presentation_fps);

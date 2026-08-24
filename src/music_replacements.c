@@ -45,6 +45,7 @@ MusicReplacement g_music_replacements[kMusicMaxReplacements];
 int g_music_replacement_count;
 
 static bool s_musiclog;
+static bool s_session_bypassed;
 static uint32 s_loaded_src; /* most recent SPC image upload source */
 static int s_current_song = -1;
 /* Native pause ($F2) and host pause (P/settings overlay) are independent.
@@ -311,6 +312,11 @@ static void EndSession(const char *why) {
   RtlApuUnlock();
 }
 
+static void ApplyVoiceMutePolicyLocked(void) {
+  g_dsp_voice_mute_srcn_min = s.session && !s_session_bypassed
+      ? kActRaiserSpcMusicSourceMinimum : -1;
+}
+
 static void StartSession(const MusicReplacement *entry, int song) {
   RtlApuLock();
   if (s.v) stb_vorbis_close(s.v);
@@ -338,7 +344,7 @@ static void StartSession(const MusicReplacement *entry, int song) {
   s.src_carry = 0.0;
   s.hist[0] = 0;
   s.hist[1] = 0;
-  g_dsp_voice_mute_srcn_min = kActRaiserSpcMusicSourceMinimum;
+  ApplyVoiceMutePolicyLocked();
   fprintf(stderr, "[music] src=%02X:%04X song=%02x -> [music:%s] %s\n",
           (unsigned)(entry->src >> 16), (unsigned)(entry->src & 0xffff),
           (unsigned)song, entry->name, entry->file);
@@ -539,9 +545,11 @@ static void MixMusic(int16_t *out, int out_frames) {
                           frac * (3.0 * (p1 - p2) + p3 - p0)));
       int sample = (int)v;
       sample = (sample * gain) / kPercentScale;
-      int mixed = out[i * 2 + ch] + sample;
-      out[i * 2 + ch] = (int16_t)(mixed < -32768 ? -32768
-                                  : (mixed > 32767 ? 32767 : mixed));
+      if (!s_session_bypassed) {
+        int mixed = out[i * 2 + ch] + sample;
+        out[i * 2 + ch] = (int16_t)(mixed < -32768 ? -32768
+                                    : (mixed > 32767 ? 32767 : mixed));
+      }
     }
     pos += step;
   }
@@ -575,6 +583,7 @@ void MusicReplacements_InstallHooks(void) {
   s_current_song = -1;
   s_driver_paused = false;
   s_host_paused = false;
+  s_session_bypassed = false;
   s_next_session_token = 0;
   g_rtl_spc_upload_hook = OnSpcUpload;
   g_rtl_apu_port_hook = OnApuPortWrite;
@@ -606,6 +615,17 @@ void MusicReplacements_SetHostPaused(bool paused) {
   if (was_paused != now_paused && s.session) {
     fprintf(stderr, "[music] host %s [music:%s] at frame %u\n",
             now_paused ? "pause" : "resume", s.session->name, s.pos);
+  }
+  RtlApuUnlock();
+}
+
+void MusicReplacements_SetSessionBypassed(bool bypassed) {
+  RtlApuLock();
+  if (s_session_bypassed != bypassed) {
+    s_session_bypassed = bypassed;
+    ApplyVoiceMutePolicyLocked();
+    fprintf(stderr, "[music] session output -> %s\n",
+            bypassed ? "native SPC" : "enhanced replacement");
   }
   RtlApuUnlock();
 }

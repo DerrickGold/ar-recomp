@@ -124,10 +124,12 @@ configurable. Camera bindings do nothing outside these modes.
 
 ### Host actions on the pad
 
-Six host actions are gamepad-bindable: open settings (default L3), reset camera
-(default R3), pause, fast forward, save state, and load state. The pad also
-drives the settings menu using your SNES bindings. Keyboard hotkeys remain fixed
-so a bad rebind cannot lock a desktop player out of the menu.
+Seven host actions are gamepad-bindable: open settings (default L3), reset
+camera (default R3), pause, fast forward, save state, load state, and compare
+rendering. The comparison action also has a bindable keyboard row; it is
+unbound by default on both devices. The pad also drives the settings menu using
+your SNES bindings. Keyboard hotkeys for the other host actions remain fixed so
+a bad rebind cannot lock a desktop player out of the menu.
 
 ### Steam Deck
 
@@ -175,6 +177,33 @@ Camera, Light, and Weather together.
 F2 remains available for a full snapshot while the overlay is open. The game and
 SNES input stay frozen until the overlay closes. Accepted setting changes are
 written atomically to `settings.ini`; action rows are not persisted.
+
+### Authentic/enhanced comparison control
+
+Bind **Compare rendering** in **Settings → Controls**. A tap toggles between
+the player's current enhanced presentation and an authentic view; a hold opens
+an enhanced-priority comparison with the authentic view inset as
+picture-in-picture. Releasing the hold returns to the tap-selected view.
+
+The authentic view is the ROM's complete 256×224 PPU composition and native SPC
+audio. It bypasses widescreen, diorama/town 3D, HD replacements, other enhanced
+host graphics effects, enhanced music replacements, and the dialogue-blip mute.
+Action stages render it as a second native-geometry PPU pass with independent
+BG1/BG2 raster camera phases and native world-sprite framing; fixed HUD sprites
+remain screen-relative. The scanout is armed while either comparison binding is
+configured or a comparison view needs it, and otherwise remains dormant.
+CRT is an independent output treatment rather than part of the enhanced game
+renderer, so the player's current CRT configuration continues to apply in
+authentic and side-by-side views. The side-by-side view keeps the enhanced
+audio. Host master volume and output device settings still apply in every view.
+
+This is a session-only presentation override: it does not edit any video or
+audio setting, it carries between action and simulation modes, and it resets to
+enhanced on every launch. Gameplay QoL settings, cheats, and all other
+non-graphics/audio options continue to apply. The transition briefly freezes
+gameplay and audio, using the same host-owned pause behavior as the settings
+overlay. In widescreen action stages the authentic view has its own native
+camera framing so the player stays tracked independently of the extended view.
 
 Restart Game and Exit Desktop live at the end of System → Tools. Both flush
 `settings.ini` and battery SRAM through the normal shutdown path; restart then

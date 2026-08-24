@@ -1,6 +1,7 @@
 #include "input_map.h"
 
 #include <stddef.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,6 +10,8 @@ _Static_assert(kInputClass_Count == kSettingsInputClasses,
                "settings.h input class count out of sync");
 _Static_assert(kInputAction_Count == kSettingsInputActions,
                "settings.h input action count out of sync");
+_Static_assert(kInputAction_Count <= sizeof(uint32) * CHAR_BIT,
+               "input held-state masks require one bit per action");
 
 /* --- Device registry ------------------------------------------------------ */
 
@@ -36,6 +39,7 @@ static bool s_key_down[SDL_SCANCODE_COUNT];
 static bool s_pad_button_down[SDL_GAMEPAD_BUTTON_COUNT];
 static int s_pad_axis_value[SDL_GAMEPAD_AXIS_COUNT];
 static uint32 s_host_axis_held;
+static uint32 s_menu_axis_held;
 /* Press-edge memory for keyboard-bound edge host actions; SDL auto-repeat
  * would otherwise re-fire them for as long as the key is down. Kept separate
  * from s_host_axis_held so it never feeds InputMap_GamepadIsActive. */
@@ -104,6 +108,8 @@ static void RemoveGamepad(SDL_JoystickID id) {
   /* A pad going away must not leave its bits — or a deflected stick — stuck. */
   s_pad_bits = 0;
   s_stick_bits = 0;
+  s_host_axis_held = 0;
+  s_menu_axis_held = 0;
   memset(s_pad_button_down, 0, sizeof(s_pad_button_down));
   memset(s_pad_axis_value, 0, sizeof(s_pad_axis_value));
 }
@@ -208,6 +214,8 @@ static const struct {
    * presses, and every remaining pad button is already spoken for. */
   [kInputAction_MagicCycle] = { "Cycle magic spell", SDL_SCANCODE_M,
                                 kInputBind_None, 0 },
+  [kInputAction_RenderCompare] = { "Compare authentic rendering", 0,
+                                   kInputBind_None, 0 },
 
   /* Right stick orbits, triggers zoom — the layout any 3D game trains for.
    * The keyboard column is left unbound: the desktop path is the mouse
@@ -594,7 +602,7 @@ void InputMap_HandleKey(int scancode, bool pressed) {
  * should not fire on a resting finger. */
 enum { kAxisPressThreshold = 20000, kAxisReleaseThreshold = 12000 };
 
-static bool AxisBindingHeld(uint32 binding, int value, bool was_held) {
+bool InputMap_AxisBindingHeld(uint32 binding, int value, bool was_held) {
   bool negative = INPUT_BIND_NEG(binding);
   int magnitude = negative ? -value : value;
   return magnitude > (was_held ? kAxisReleaseThreshold : kAxisPressThreshold);
@@ -694,12 +702,12 @@ static void HandlePadAxis(SDL_GamepadAxis axis, int value) {
     if (a < kInputAction_PadCount) {
       bool was_held = (s_pad_bits & (1u << a)) != 0;
       SetActionBit(&s_pad_bits, (InputAction)a,
-                   AxisBindingHeld(binding, value, was_held));
+                   InputMap_AxisBindingHeld(binding, value, was_held));
     } else if (INPUT_ACTION_IS_ANALOG(a)) {
       /* Polled, not dispatched. */
     } else if (s_action_handler) {
       bool was_held = (s_host_axis_held & (1u << a)) != 0;
-      bool held = AxisBindingHeld(binding, value, was_held);
+      bool held = InputMap_AxisBindingHeld(binding, value, was_held);
       if (held) s_host_axis_held |= 1u << a;
       else s_host_axis_held &= ~(1u << a);
       if (held && !was_held) s_action_handler((InputAction)a);
@@ -777,6 +785,35 @@ float InputMap_AnalogAction(InputAction action) {
   return keyboard;
 }
 
+static bool BindingIsHeld(uint32 binding, bool was_held) {
+  const int kind = INPUT_BIND_KIND(binding);
+  const int code = INPUT_BIND_CODE(binding);
+  if (kind == kInputBind_Key)
+    return code >= 0 && code < SDL_SCANCODE_COUNT && s_key_down[code];
+  if (kind == kInputBind_PadButton)
+    return code >= 0 && code < SDL_GAMEPAD_BUTTON_COUNT &&
+           s_pad_button_down[code];
+  if (kind == kInputBind_PadAxis &&
+      code >= 0 && code < SDL_GAMEPAD_AXIS_COUNT)
+    return InputMap_AxisBindingHeld(
+        binding, s_pad_axis_value[code], was_held);
+  return false;
+}
+
+bool InputMap_ActionHeld(InputAction action) {
+  if (action < 0 || action >= kInputAction_Count) return false;
+  const bool keyboard = BindingIsHeld(
+      g_settings.input_bind[kInputClass_Keyboard][action], false);
+  const bool gamepad = BindingIsHeld(
+      g_settings.input_bind[kInputClass_Gamepad][action],
+      (s_host_axis_held & (1u << action)) != 0);
+  /* Edge-triggered host bindings dispatch from either configured device in
+   * every input mode. Preserve whichever physical source produced that edge:
+   * the ordinary game-input arbiter must not cancel a keyboard hold merely
+   * because a connected pad is active (or vice versa). */
+  return keyboard || gamepad;
+}
+
 void InputMap_HandleEvent(const SDL_Event *event) {
   if (!event) return;
   switch (event->type) {
@@ -801,9 +838,8 @@ void InputMap_HandleEvent(const SDL_Event *event) {
   }
 }
 
-/* Menu-nav edge tracking, kept apart from the gameplay bits so opening the
+/* Menu-nav edge tracking is kept apart from gameplay bits so opening the
  * overlay (which clears those) cannot desynchronize it. */
-static uint32 s_menu_axis_held;
 
 bool InputMap_ActionForEvent(const SDL_Event *event, InputAction *action,
                              bool *pressed) {
@@ -834,7 +870,7 @@ bool InputMap_ActionForEvent(const SDL_Event *event, InputAction *action,
     bool was_held = (s_menu_axis_held & (1u << a)) != 0;
     if (INPUT_BIND_KIND(binding) == kInputBind_PadAxis &&
         INPUT_BIND_CODE(binding) == axis) {
-      held = AxisBindingHeld(binding, value, was_held);
+      held = InputMap_AxisBindingHeld(binding, value, was_held);
     } else if (g_settings.input_stick_as_dpad &&
                ((axis == SDL_GAMEPAD_AXIS_LEFTX &&
                  (a == kInputAction_Left || a == kInputAction_Right)) ||

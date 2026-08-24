@@ -947,6 +947,16 @@ static void TestSim3DFlatCompositionDemand(void) {
     .height = height,
   };
 
+  /* Capture reports a selected-resource contract failure without reaching
+   * into application shutdown policy. This keeps the producer independently
+   * testable and lets the host seam own the user-facing outcome. */
+  Sim3D_BeginFrame();
+  request.renderer_ready = false;
+  CHECK(!Sim3D_PrepareCapture(ppu, &request));
+  CHECK(Sim3D_GetCaptureContractFailure() ==
+        kSim3DCaptureContract_RendererUnavailable);
+  request.renderer_ready = true;
+
   /* The projected profile has no flat-buffer reader. A sentinel proves the
    * finish path did not merely produce an equivalent-looking composite. */
   Sim3D_BeginFrame();
@@ -2472,6 +2482,206 @@ static void TestCapturedPaddingReachesBudget(void) {
   g_new_ppu = saved_new_ppu;
 }
 
+static void TestAuthenticComparisonSurface(void) {
+  const bool saved_new_ppu = g_new_ppu;
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+
+  static uint8_t fb[kW * sizeof(uint32_t)];
+  static uint32_t authentic[kW];
+  static uint32_t isolated_bg1[kW];
+
+  /* The enhanced diorama path removes BG1 from the ordinary framebuffer. The
+   * parallel authentic pass must independently render the complete native
+   * winner, not merely copy the presentation framebuffer after extraction. */
+  g_new_ppu = true;
+  setup_virtual_bg(ppu, 0, fb, sizeof(fb));
+  memset(authentic, 0, sizeof(authentic));
+  memset(isolated_bg1, 0, sizeof(isolated_bg1));
+  CHECK(PpuBindAuthenticSurface(
+      ppu, (uint8_t *)authentic, sizeof(authentic)));
+  CHECK(PpuBindOverlaySurface(
+      ppu, kPpuOverlaySource_Bg1,
+      (uint8_t *)isolated_bg1, sizeof(isolated_bg1)));
+  CHECK(PpuSetOverlayCapture(
+      ppu, kPpuOverlaySource_Bg1, 0, 0, kW, 1,
+      kPpuOverlayFlag_RemoveFromGame));
+  render_first_line(ppu);
+  CHECK((isolated_bg1[0] & 0x00ffffffu) == rgb555(31, 0, 0));
+  CHECK((((const uint32_t *)(const void *)fb)[0] & 0x00ffffffu) == 0);
+  CHECK((authentic[0] & 0x00ffffffu) == rgb555(31, 0, 0));
+  CHECK((authentic[0] & 0xff000000u) == 0);
+
+  /* Configurations using the legacy renderer have no extracted layers; their
+   * complete scanout is mirrored byte-for-byte into the same surface. */
+  g_new_ppu = false;
+  ppu_reset(ppu);
+  memset(fb, 0, sizeof(fb));
+  memset(authentic, 0x5a, sizeof(authentic));
+  PpuBeginDrawing(ppu, fb, sizeof(fb), 0);
+  CHECK(PpuBindAuthenticSurface(
+      ppu, (uint8_t *)authentic, sizeof(authentic)));
+  ppu->inidisp = 0x0f;
+  ppu->cgram[0] = bgr555(7, 13, 29);
+  render_first_line(ppu);
+  CHECK(memcmp(fb, authentic, sizeof(fb)) == 0);
+
+  g_new_ppu = saved_new_ppu;
+  ppu_free(ppu);
+}
+
+static void TestAuthenticCameraAndSurfaceContract(void) {
+  enum { kExtra = 8, kWidth = kW + kExtra * 2, kGuard = 8 };
+  const bool saved_new_ppu = g_new_ppu;
+  g_new_ppu = true;
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+
+  static uint8_t fb[kWidth * sizeof(uint32_t)];
+  static uint32_t authentic[kWidth];
+  static uint16_t native_bg1[kH];
+  static uint16_t native_bg2[kH];
+
+  /* The enhanced camera sees the even tile while the independent native BG1
+   * camera starts one tile later. This cannot pass by translating an already
+   * composited widescreen image: the authentic pass consumes its own BG1
+   * scroll phase before priority/color resolve. */
+  setup_virtual_bg(ppu, kExtra, fb, sizeof(fb));
+  fill_virtual_native_ring(
+      ppu, (uint16_t)(1 | (1 << 10)),
+      (uint16_t)(2 | (2 << 10)));
+  ppu->hScroll[kActRaiserPpuLayer_Bg1] = 0;
+  for (int y = 0; y < kH; y++) native_bg1[y] = 8;
+  memset(authentic, 0, sizeof(authentic));
+  CHECK(PpuBindAuthenticSurface(
+      ppu, (uint8_t *)authentic, sizeof(authentic)));
+  CHECK(PpuSetAuthenticCameraFrame(
+      ppu, kPpuAuthenticCameraLayer_Bg1, native_bg1, NULL, 8));
+  CHECK(PpuAuthenticCameraFrameReady(
+      ppu, kPpuAuthenticCameraLayer_Bg1));
+  CHECK(!PpuAuthenticCameraFrameReady(
+      ppu, kPpuAuthenticCameraLayer_All));
+  render_first_line(ppu);
+  const uint32_t *enhanced = (const uint32_t *)(const void *)fb;
+  CHECK(enhanced[kExtra] == rgb555(31, 0, 0));
+  CHECK(authentic[kExtra] == rgb555(0, 0, 31));
+  CHECK(ppu->hScroll[kActRaiserPpuLayer_Bg1] == 0);
+
+  /* BG2 receives its own phase rather than inheriting a BG1-sized crop. This
+   * pins parallax and camera-driven raster layers to the independent pass. */
+  setup_virtual_bg(ppu, kExtra, fb, sizeof(fb));
+  ppu->screenEnabled[0] =
+      (uint8_t)(1u << kActRaiserPpuLayer_Bg2);
+  ppu->bgXsc[kActRaiserPpuLayer_Bg2] = 0x20 | 3;
+  fill_virtual_native_ring(
+      ppu, (uint16_t)(1 | (1 << 10)),
+      (uint16_t)(2 | (2 << 10)));
+  ppu->hScroll[kActRaiserPpuLayer_Bg2] = 0;
+  for (int y = 0; y < kH; y++) native_bg2[y] = 8;
+  memset(authentic, 0, sizeof(authentic));
+  CHECK(PpuBindAuthenticSurface(
+      ppu, (uint8_t *)authentic, sizeof(authentic)));
+  CHECK(PpuSetAuthenticCameraFrame(
+      ppu, kPpuAuthenticCameraLayer_Bg2, NULL, native_bg2, 8));
+  render_first_line(ppu);
+  enhanced = (const uint32_t *)(const void *)fb;
+  CHECK(enhanced[kExtra] == rgb555(31, 0, 0));
+  CHECK(authentic[kExtra] == rgb555(0, 0, 31));
+  CHECK(ppu->hScroll[kActRaiserPpuLayer_Bg2] == 0);
+
+  /* Exact-coordinate availability must not decide camera ownership. Keep an
+   * exact world sprite and an exact HUD sprite on the same scanline: only the
+   * explicitly camera-relative world slot follows the authentic offset. */
+  ppu_reset(ppu);
+  memset(fb, 0, sizeof(fb));
+  memset(authentic, 0, sizeof(authentic));
+  for (int slot = 0; slot < 128; slot++)
+    ppu->oam[slot * 2] = (uint16_t)(0x80 | (0xe0u << 8));
+  ppu->inidisp = 0x0f;
+  ppu->screenEnabled[0] = 1u << kPpuOverlaySource_Obj;
+  ppu->cgram[0x81] = bgr555(31, 31, 0);
+  set_solid_4bpp_tile(ppu, 0, 1);
+  ppu->oam[0] = (uint16_t)(40 | (0u << 8));
+  ppu->oam[1] = 0;
+  ppu->oam[2] = (uint16_t)(100 | (0u << 8));
+  ppu->oam[3] = 0;
+  /* Thirty-one more live sprites force the native pass across its 32-sprite
+   * hardware limit. The enhanced pass explicitly lifts that limit, so any
+   * leaked range-over status below can only have come from the comparison
+   * pass. */
+  for (int slot = 2; slot < 33; slot++) {
+    ppu->oam[slot * 2] = (uint16_t)(200 | (0u << 8));
+    ppu->oam[slot * 2 + 1] = 0;
+  }
+  PpuSetObjExactPosition(ppu, 0, 40, 0);
+  PpuSetObjExactPosition(ppu, 1, 100, 0);
+  PpuSetObjCameraRelative(ppu, 0, true);
+  PpuSetExtraSpace(ppu, kExtra);
+  PpuBeginDrawing(
+      ppu, fb, sizeof(fb), kPpuRenderFlags_NoSpriteLimits);
+  CHECK(PpuBindAuthenticSurface(
+      ppu, (uint8_t *)authentic, sizeof(authentic)));
+  CHECK(PpuSetAuthenticCameraFrame(ppu, 0, NULL, NULL, 8));
+  static const uint32_t mode7_sentinel = 0xff00ff00u;
+  ppu->m7Override = (PpuMode7Override){
+    .rgba = &mode7_sentinel,
+    .width = 1,
+    .height = 1,
+    .canvasX1 = 1,
+    .canvasY1 = 1,
+    .wrap = 1,
+  };
+  const PpuMode7Override expected_m7_override = ppu->m7Override;
+  uint8_t *const expected_overlay =
+      ppu->overlayRenderBuffer[kPpuOverlaySource_Bg1];
+  const uint32_t expected_overlay_pitch =
+      ppu->overlayRenderPitch[kPpuOverlaySource_Bg1];
+  render_first_line(ppu);
+  enhanced = (const uint32_t *)(const void *)fb;
+  CHECK(enhanced[kExtra + 40] == rgb555(31, 31, 0));
+  CHECK(enhanced[kExtra + 100] == rgb555(31, 31, 0));
+  CHECK(authentic[kExtra + 40] == 0);
+  CHECK(authentic[kExtra + 48] == rgb555(31, 31, 0));
+  CHECK(authentic[kExtra + 100] == rgb555(31, 31, 0));
+  CHECK(ppu->extraLeftRight == kExtra);
+  CHECK(ppu->extraLeftCur == kExtra && ppu->extraRightCur == kExtra);
+  CHECK(ppu->renderFlags == kPpuRenderFlags_NoSpriteLimits);
+  CHECK(!ppu->rangeOver && !ppu->timeOver);
+  CHECK(!memcmp(
+      &ppu->m7Override, &expected_m7_override,
+      sizeof(expected_m7_override)));
+  CHECK(ppu->overlayRenderBuffer[kPpuOverlaySource_Bg1] ==
+        expected_overlay);
+  CHECK(ppu->overlayRenderPitch[kPpuOverlaySource_Bg1] ==
+        expected_overlay_pitch);
+
+  /* A surface that was valid before margins widened must fail closed instead
+   * of accepting writes past its 256-pixel pitch. Guard words prove both the
+   * row and its neighbours remain untouched. */
+  struct GuardedAuthenticRow {
+    uint32_t before[kGuard];
+    uint32_t pixels[kW];
+    uint32_t after[kGuard];
+  } guarded;
+  memset(&guarded, 0x5a, sizeof(guarded));
+  setup_virtual_bg(ppu, 0, fb, sizeof(fb));
+  CHECK(PpuBindAuthenticSurface(
+      ppu, (uint8_t *)guarded.pixels, sizeof(guarded.pixels)));
+  CHECK(PpuAuthenticSurfaceReady(ppu));
+  PpuSetExtraSpace(ppu, kExtra);
+  CHECK(!PpuAuthenticSurfaceReady(ppu));
+  render_first_line(ppu);
+  for (size_t i = 0; i < sizeof(guarded) / sizeof(uint32_t); i++)
+    CHECK(((const uint32_t *)(const void *)&guarded)[i] == 0x5a5a5a5au);
+  CHECK(!PpuBindAuthenticSurface(
+      ppu, (uint8_t *)guarded.pixels, sizeof(guarded.pixels)));
+
+  g_new_ppu = saved_new_ppu;
+  ppu_free(ppu);
+}
+
 int main(void) {
   TestWorldNavigationPartialBrightnessCapture();
   TestObjRangeRaster();
@@ -2493,6 +2703,8 @@ int main(void) {
   TestLayerPresentationExtents();
   TestMovingEdgePoliciesInVerticalMargins();
   TestCapturedPaddingReachesBudget();
+  TestAuthenticComparisonSurface();
+  TestAuthenticCameraAndSurfaceContract();
   TestVirtualTilemapMargins();
   TestVirtualTilemapEffects();
   TestVirtualTilemapAuthenticParity();

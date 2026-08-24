@@ -12,6 +12,7 @@ document it. The examples come from this repository.
 - [Where data lives](#where-data-lives)
 - [Constants and numeric data](#constants-and-numeric-data)
 - [Put the decision on the thing it describes](#put-the-decision-on-the-thing-it-describes)
+- [Runtime failure policy](#runtime-failure-policy)
 - [Enforce invariants with the compiler](#enforce-invariants-with-the-compiler)
 - [Includes and folders](#includes-and-folders)
 - [Comments](#comments)
@@ -168,12 +169,26 @@ the record instead: a field, table flag, or named constructor such as
 `BOOL_SETTING_MODERN`.
 
 Two mechanics worth reusing:
+
 - Put a new struct field **last** when rows use positional initializers — the
   existing rows zero-initialize it and need no edit. This is how 258 descriptors
   absorbed a new field while only 60 rows changed.
 - Mark exceptional rows with a **designated** initializer (`.modern_env = true`)
   so the value cannot land in the wrong field regardless of how many positional
   values that row supplies.
+
+## Runtime failure policy
+
+Do not add a compatibility path merely because continuing is mechanically
+possible. The project-wide [runtime reliability policy](reliability-policy.md)
+distinguishes optional authentic handoffs, bounded platform recovery, broken
+selected experiences, and states too unsafe to unwind.
+
+Runtime failures that can safely return to the host use
+`SessionFatal_Request`; the main loop then persists user data and performs the
+normal teardown before reporting the initiating error. A fallback is valid only
+when it retains a complete supported experience, not when it silently removes a
+selected graphics/audio mode or risks progress.
 
 ## Enforce invariants with the compiler
 

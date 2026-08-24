@@ -981,6 +981,9 @@ static const char *const kRandoScopeLabels[] = { "Within map", "Within act" };
 static bool RandoAvailable(void) {
   return Randomizer_IsAvailable() && g_settings.rando_enable;
 }
+static bool RandoRuntimeAvailable(void) {
+  return Randomizer_IsAvailable();
+}
 static bool RandoEnemyTypesOn(void) {
   return RandoAvailable() && g_settings.rando_enemy_types != kRandomMode_Off;
 }
@@ -2033,6 +2036,14 @@ const SettingDesc g_setting_descs[] = {
                   "Debug aid; needs the Cycle magic spell cheat. Press "
                   "Enter, then the button to bind. Y resets it to the "
                   "default."),
+  BINDING_SETTING(kInputAction_RenderCompare, kInputClass_Keyboard,
+                  "bind_key_render_compare", "Compare rendering",
+                  "Click to swap authentic and enhanced graphics/audio. Hold "
+                  "for enhanced view with an authentic picture-in-picture."),
+  BINDING_SETTING(kInputAction_RenderCompare, kInputClass_Gamepad,
+                  "bind_pad_render_compare", "Compare rendering",
+                  "Click to swap authentic and enhanced graphics/audio. Hold "
+                  "for enhanced view with an authentic picture-in-picture."),
 
   /* This is an optional gameplay enhancement rather than a bug fix: the
    * original 128-record structure cap is authentic. Completed bridges move
@@ -2073,7 +2084,8 @@ const SettingDesc g_setting_descs[] = {
                "restores the non-randomized ROM baseline. Stat changes take "
                "effect at the next spawn, placement changes at the next level "
                "load.",
-               kSettingCat_RandoSeed, 0, false, NULL, RandoChanged),
+               kSettingCat_RandoSeed, 0, false, RandoRuntimeAvailable,
+               RandoChanged),
   INT_SETTING(rando_seed, "AR_RANDO_SEED", "Seed",
               "Runs with the same seed and the same options are identical. "
               "Each option draws from its own stream, so toggling one does not "
@@ -2385,6 +2397,9 @@ const SettingDesc g_setting_descs[] = {
 
 const int g_setting_desc_count =
     (int)(sizeof(g_setting_descs) / sizeof(g_setting_descs[0]));
+_Static_assert(sizeof(g_setting_descs) / sizeof(g_setting_descs[0]) <=
+                   kSettingsMaxDescriptors,
+               "settings descriptor registry exceeds fixed boot-layer storage");
 
 static int Settings_FindIndexByKey(const char *key) {
   if (!key) return -1;
@@ -3034,12 +3049,6 @@ static bool Settings_LoadInternal(const char *path, bool boot, int rank,
 }
 
 void Settings_InitWithFile(const char *path) {
-  if (g_setting_desc_count > kSettingsMaxDescriptors) {
-    fprintf(stderr, "[settings] descriptor capacity exceeded (%d > %d)\n",
-            g_setting_desc_count, kSettingsMaxDescriptors);
-    abort();
-  }
-
   SettingsChangeObserver observer = s_change_observer;
   s_change_observer = NULL;
   memset(&g_settings, 0, sizeof(g_settings));

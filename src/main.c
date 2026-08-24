@@ -39,6 +39,8 @@
 #include "save_system.h"
 #include "hd_replacement_host.h"
 #include "music_replacements.h"
+#include "audio_presentation_policy.h"
+#include "render_comparison.h"
 #include "dev/sfx_census.h"
 #include "run_dir.h"
 #include "launcher.h"
@@ -65,6 +67,7 @@
 #include "portable_paths.h"
 #include "randomizer.h"
 #include "runtime_settings.h"
+#include "session_fatal.h"
 #include "runtime_diagnostics.h"
 #include "scheduled_settings.h"
 #include "user_data_dir.h"
@@ -105,6 +108,7 @@ SDL_Renderer *g_renderer;
 bool g_gpu_shaders_requested;
 bool g_gpu_shaders_active;
 SDL_Texture *g_texture;
+SDL_Texture *g_authentic_texture;
 SDL_Texture *g_hud_bg_texture;
 SDL_Texture *g_hud_obj_texture;
 /* InspectorPresentationKind/InspectorPresentationSelection now live in
@@ -124,6 +128,11 @@ int g_snes_width = kActRaiserAuthenticWidth,
 _Static_assert(kHostDisplayFramebufferHeight >= kPpuBufHeight,
                "frame surfaces must hold every row the PPU can render");
 uint8_t g_pixels[
+    kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
+/* Complete native PPU result captured beside g_pixels before host presentation
+ * extractions remove layers. It stays at the active scanline width (no OBJ
+ * apron) because comparison presents only a native 256x224 crop. */
+uint8_t g_authentic_pixels[
     kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
 uint8_t g_hud_bg_pixels[
     kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
@@ -483,11 +492,12 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
     if (now - draw_win_start >= kPerformanceReportIntervalMs) {
       fprintf(stderr,
               "[draw-perf] frames=%d draw-ms avg=%.1f max=%llu "
-              "$18=%02x $19=%02x\n",
+              "$18=%02x $19=%02x authentic-capture=%s\n",
               draw_win_frames, (double)draw_ms_sum / draw_win_frames,
               (unsigned long long)draw_ms_max,
               g_ram[kActRaiserWram_MapGroup],
-              g_ram[kActRaiserWram_CurrentMap]);
+              g_ram[kActRaiserWram_CurrentMap],
+              ActRaiser_AuthenticCaptureEnabled() ? "on" : "off");
       draw_win_start = now;
       draw_ms_sum = 0;
       draw_ms_max = 0;
@@ -639,13 +649,24 @@ static void RunPostTickHousekeeping(void) {
    * the frame alignment (the recording then no longer reaches the same spot). */
   if (!InputReplay_ShouldProtectSaveData()) {
     static bool write_error_reported;
+    static uint64_t first_write_failure_ms;
     SaveError error = {{0}};
     if (!SaveSystem_AutoPersistIfChanged(&error)) {
       if (!write_error_reported)
         fprintf(stderr, "[saves] auto-persist failed: %s\n", error.message);
       write_error_reported = true;
+      const uint64_t now_ms = SDL_GetTicks();
+      if (!first_write_failure_ms) first_write_failure_ms = now_ms;
+      if (now_ms - first_write_failure_ms >= 5000) {
+        SessionFatal_Request(
+            "The game could not write your battery save for five seconds "
+            "(%s). It is closing instead of letting you continue with "
+            "unsaved progress. Check free disk space and permissions for %s.",
+            error.message, SaveSystem_ActivePath());
+      }
     } else {
       write_error_reported = false;
+      first_write_failure_ms = 0;
     }
   }
 }
@@ -660,9 +681,17 @@ static void ApplyHostAudioPause(bool paused) {
   if (initialized && applied_pause == paused) return;
   initialized = true;
   applied_pause = paused;
-  if (paused) HostAudio_SetHostPaused(true);
+  bool success = true;
+  if (paused) success = HostAudio_SetHostPaused(true);
   MusicReplacements_SetHostPaused(paused);
-  if (!paused) HostAudio_SetHostPaused(false);
+  if (!paused) success = HostAudio_SetHostPaused(false);
+  if (!success) {
+    SessionFatal_Request(
+        "The audio device stopped accepting the game's audio stream (%s). "
+        "Restart the game after checking the selected output device. If the "
+        "problem repeats, choose another device or buffer size.",
+        SDL_GetError());
+  }
 }
 
 
@@ -883,6 +912,14 @@ static void AppBoot_CreatePresentationTextures(void) {
    * the pixel-art framebuffer and HUD planes upscale crisply. */
   SDL_SetTextureScaleMode(g_texture, SDL_SCALEMODE_NEAREST);
 
+  g_authentic_texture = SDL_CreateTexture(
+      g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+      kPpuSurfaceWidth, kPpuBufHeight);
+  if (!g_authentic_texture)
+    Die("SDL_CreateTexture for authentic comparison failed");
+  SDL_SetTextureBlendMode(g_authentic_texture, SDL_BLENDMODE_NONE);
+  SDL_SetTextureScaleMode(g_authentic_texture, SDL_SCALEMODE_NEAREST);
+
   g_hud_bg_texture = SDL_CreateTexture(g_renderer,
     SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
     kPpuSurfaceWidth, g_snes_height);
@@ -950,6 +987,18 @@ static void AppBoot_CreatePresentationTextures(void) {
     }
     SDL_DestroyTexture(g_sim3d_flat_texture);
     g_sim3d_flat_texture = NULL;
+  }
+  if (g_settings.sim3d_mode && !g_sim3d_textures_ready) {
+    Die("Simulation town 3D is enabled, but its core capture textures could "
+        "not be created. Restart after checking graphics memory and driver "
+        "stability, or disable Simulation town 3D in settings.ini.");
+  }
+  if (g_settings.sim3d_mode &&
+      (Settings_Sim3DRequestedFeatures() & kSimFeature_ObjectBillboards) &&
+      !g_sim3d_billboard_renderer_ready) {
+    Die("Simulation object billboards are enabled, but their renderer atlas "
+        "could not be created. Restart after checking graphics memory and "
+        "driver stability, or disable object billboards in settings.ini.");
   }
 
   HdReplacementHost_LoadTextures();
@@ -1204,6 +1253,7 @@ static void AppBoot_InstallSubsystems(AppBoot *app) {
    * bindings route through it. */
   InputMap_Init();
   HostInput_InstallActionHandler();
+  RenderComparison_Reset();
   Diorama_SeedCameraFromSettings();
 
   /* Music replacement is audio-side and works headless too (unlike the HD
@@ -1215,6 +1265,7 @@ static void AppBoot_InstallSubsystems(AppBoot *app) {
       music_manifest = "game-assets/manifest.ini";
     MusicReplacements_Load(music_manifest);
     MusicReplacements_InstallHooks();
+    AudioPresentationPolicy_Reset();
   }
 
   /* After music: the census chains the APU port seam music installs. */
@@ -1246,8 +1297,13 @@ static void AppBoot_StartGame(AppBoot *app) {
    * game coroutine starts. Its pristine snapshot deliberately includes the
    * deterministic visual adjustments above, so later option changes restore
    * a stable non-randomized baseline instead of erasing them. */
-  if (Randomizer_Init(app->snes->cart->rom, app->snes->cart->romSize))
+  if (Randomizer_Init(app->snes->cart->rom, app->snes->cart->romSize)) {
     Randomizer_Apply();
+  } else if (g_settings.rando_enable) {
+    Die("The Randomizer is enabled, but its pristine ROM snapshot could not "
+        "be created. Verify that the configured ROM is supported and that "
+        "enough memory is available, or disable Randomizer in settings.ini.");
+  }
 
   HdReplacementHost_BindSurfaces();
   ActRaiser_RebindPpuOutputSurfaces();
@@ -1319,9 +1375,14 @@ static void AppBoot_StartGame(AppBoot *app) {
                            native_path, ini_path, &error))
       Die(error.message);
     if (!SaveSystem_LoadActive(&error)) {
-      fprintf(stderr, "[saves] active load rejected: %s; using fresh SRAM\n",
-              error.message);
-      SaveSystem_ResyncShadow();
+      char message[512];
+      snprintf(message, sizeof(message),
+               "The active save could not be loaded: %s\n\nThe game will "
+               "not start with fresh SRAM because doing so could overwrite "
+               "recoverable progress. Repair, restore, or move %s and try "
+               "again.",
+               error.message, SaveSystem_ActivePath());
+      Die(message);
     }
 
     SaveEditRequest edits;
@@ -1351,7 +1412,9 @@ static void AppBoot_StartGame(AppBoot *app) {
   if (!HostAudio_Init(Settings_AudioFrequencyHz(), g_settings.audio_samples,
                       g_settings.audio_master_volume,
                       g_settings.audio_enabled)) {
-    fprintf(stderr, "[audio] host audio disabled for this session\n");
+    Die("The selected audio output could not be opened. Check the system "
+        "output device, then restart the game. You can also change the "
+        "audio buffer or sample-rate setting before launching again.");
   }
 
   /* AR_LOADSTATE=<slot>: load a savestate at boot (before the main loop), so a
@@ -1447,9 +1510,13 @@ static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
            * frame re-decodes from the retained PDF bytes under its normal budget. */
           ManualReader_DestroyTextures();
           HdReplacementHost_ReloadTextures();
-          if (!SettingsOverlay_ReloadTextures(app->rom_data, app->rom_size))
-            fprintf(stderr,
-                    "[settings-menu] atlas reload after device reset failed\n");
+          if (!SettingsOverlay_ReloadTextures(app->rom_data, app->rom_size)) {
+            SessionFatal_Request(
+                "The graphics device reset, but the settings and controls "
+                "overlay could not be restored (%s). Restart the game after "
+                "checking graphics-driver stability.",
+                SDL_GetError());
+          }
           /* The sim-3D caches are serial-gated on GAME state, so they would
            * never notice the reset and would keep presenting discarded
            * contents for the rest of the session (a settled town never bumps
@@ -1466,8 +1533,11 @@ static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
           HostDisplay_InvalidatePresentHistory();
           break;
         case SDL_EVENT_RENDER_DEVICE_LOST:
-          fprintf(stderr, "[render] device lost, cannot recover — exiting\n");
-          *running = false;
+          SessionFatal_Request(
+              "The graphics device was lost and cannot continue this session "
+              "(%s). Restart the game after checking graphics-driver and GPU "
+              "stability.",
+              SDL_GetError());
           break;
         case SDL_EVENT_KEY_DOWN:
           /* An armed binding row consumes the raw key: it needs the scancode,
@@ -1656,12 +1726,15 @@ static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
           /* Diorama owns right-drag (orbit) and middle-click (reset) while it
            * is on screen; §8.7 disables click-inspect in diorama for v1
            * because the flat hit-testing does not follow the tilted planes. */
-          if (!SettingsOverlay_IsOpen() && Diorama_IsActiveThisFrame()) {
+          if (!SettingsOverlay_IsOpen() &&
+              !RenderComparison_FreezesGameplay() &&
+              Diorama_IsActiveThisFrame()) {
             if (event.button.button == SDL_BUTTON_RIGHT)
               Diorama_SetDragging(true);
             else if (event.button.button == SDL_BUTTON_MIDDLE)
               Diorama_ResetCamera();
           } else if (!SettingsOverlay_IsOpen() &&
+                     !RenderComparison_FreezesGameplay() &&
                      Sim3DCamera_ControlsAvailable(
                          g_sim3d_textures_ready)) {
             if (event.button.button == SDL_BUTTON_RIGHT)
@@ -1690,11 +1763,13 @@ static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
             (void)ManualReader_HandleMouse(&event);
             break;
           }
-          if (Diorama_IsDragging() && Diorama_IsActiveThisFrame()) {
+          if (!RenderComparison_FreezesGameplay() &&
+              Diorama_IsDragging() && Diorama_IsActiveThisFrame()) {
             Diorama_AdjustCamera(event.motion.xrel * Diorama_DragRadPerPx(),
                                  event.motion.yrel * Diorama_DragRadPerPx(),
                                  0.0f);
-          } else if (Sim3DCamera_IsDragging() &&
+          } else if (!RenderComparison_FreezesGameplay() &&
+                     Sim3DCamera_IsDragging() &&
                      Sim3DCamera_ControlsAvailable(
                          g_sim3d_textures_ready)) {
             HostInput_AdjustSim3DCamera(
@@ -1715,10 +1790,13 @@ static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
             break;
           }
           /* Wheel up zooms in, i.e. decreases the camera distance. */
-          if (!SettingsOverlay_IsOpen() && Diorama_IsActiveThisFrame())
+          if (!SettingsOverlay_IsOpen() &&
+              !RenderComparison_FreezesGameplay() &&
+              Diorama_IsActiveThisFrame())
             Diorama_AdjustCamera(0.0f, 0.0f,
                                  -event.wheel.y * Diorama_ZoomStep());
           else if (!SettingsOverlay_IsOpen() &&
+                   !RenderComparison_FreezesGameplay() &&
                    Sim3DCamera_ControlsAvailable(
                        g_sim3d_textures_ready))
             HostInput_AdjustSim3DCamera(
@@ -1804,22 +1882,28 @@ static void AppRunMainLoop(AppBoot *app) {
   const HostDisplayPresentMode emulated_frame_present_mode =
       HostDisplay_EmulatedFramePresentMode(
           app->headless, app->headless_video);
-
   while (running) {
     AppLoop_PumpEvents(app, &running);
 
-    if (RuntimeSettings_LifecycleRequest() != kRuntimeLifecycle_None) {
+    if (RuntimeSettings_LifecycleRequest() != kRuntimeLifecycle_None ||
+        SessionFatal_Requested()) {
       running = false;
       continue;
     }
 
     HostInput_ApplyAnalogCamera();
+    ActRaiser_SetAuthenticCaptureEnabled(
+        HostInput_RenderComparisonCaptureRequired());
+    HostInput_UpdateRenderComparison();
 
     /* Host-owned pauses do not issue the game's native SPC $F2 command. The
      * coordinator above freezes authentic music, replacement music, and SFX. */
     const bool host_paused =
-        HostInput_IsPaused() || SettingsOverlay_IsOpen();
+        HostInput_IsPaused() || SettingsOverlay_IsOpen() ||
+        HostInput_RenderComparisonOwnsPause();
     ApplyHostAudioPause(host_paused);
+    AudioPresentationPolicy_SetAuthentic(
+        RenderComparison_UsesAuthenticAudio());
 
     if (host_paused) {
       /* §3.4: don't accumulate wall-clock time spent paused — otherwise
@@ -1991,6 +2075,20 @@ static void AppRunMainLoop(AppBoot *app) {
 /* Teardown, in strict reverse-dependency order: everything owning a texture, a
  * shader, or render state goes before the renderer that created it. */
 static int AppShutdown(AppBoot *app, char **argv) {
+  const bool fatal_session = SessionFatal_Requested();
+  bool settings_flush_failed = false;
+  bool save_flush_failed = false;
+
+  /* A fatal request can arrive before the normal delayed camera-settings
+   * flush. Persist the complete live registry once; comparison state is not a
+   * setting and therefore remains session-only. Diagnostic replays keep their
+   * existing no-write contract inside Settings_Save. */
+  if (fatal_session) {
+    char settings_path[kHostPathCapacity];
+    UserDataFile(settings_path, sizeof(settings_path), "settings.ini");
+    settings_flush_failed = !Settings_Save(settings_path);
+  }
+
   /* Rendering is synchronous, so nothing can be mid-render during the reverse-
    * dependency teardown below. Flush only game-originated battery changes on
    * exit. Deliberate session-only editor changes re-sync the save-system shadow;
@@ -1999,12 +2097,16 @@ static int AppShutdown(AppBoot *app, char **argv) {
    * the auto-persist note above — it would break the next replay's alignment). */
   if (!InputReplay_ShouldProtectSaveData()) {
     SaveError error = {{0}};
-    if (!SaveSystem_AutoPersistIfChanged(&error))
+    if (!SaveSystem_AutoPersistIfChanged(&error)) {
+      save_flush_failed = true;
       fprintf(stderr, "[saves] shutdown flush failed: %s\n", error.message);
+    }
   }
-  DumpDiagState(RuntimeSettings_LifecycleRequest() ==
-                        kRuntimeLifecycle_Restart
-                    ? "restart" : "exit");
+  DumpDiagState(fatal_session
+                    ? "fatal"
+                    : RuntimeSettings_LifecycleRequest() ==
+                              kRuntimeLifecycle_Restart
+                          ? "restart" : "exit");
   SimPhase0Trace_Close();
   SimRenderMetadata_TraceClose();
   ActRaiserActionBg_Shutdown();
@@ -2049,6 +2151,7 @@ static int AppShutdown(AppBoot *app, char **argv) {
   InputMap_Shutdown();
   SDL_DestroyTexture(g_hud_obj_texture);
   SDL_DestroyTexture(g_hud_bg_texture);
+  SDL_DestroyTexture(g_authentic_texture);
   SDL_DestroyTexture(g_texture);
   for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
     free(g_diorama_layer_pixels[plane]);
@@ -2059,6 +2162,30 @@ static int AppShutdown(AppBoot *app, char **argv) {
   CrtPost_Shutdown();
   SDL_DestroyRenderer(g_renderer);
   SDL_DestroyWindow(g_window);
+  if (fatal_session) {
+    char message[1536];
+    snprintf(
+        message, sizeof(message),
+        "%s\n\nThe game has closed to avoid continuing in a broken state.%s%s",
+        SessionFatal_Message(),
+        settings_flush_failed
+            ? "\n\nWarning: settings.ini could not be updated."
+            : "",
+        save_flush_failed
+            ? "\n\nWarning: the latest battery save could not be written. "
+              "Check free disk space and folder permissions before restarting."
+            : "");
+    fprintf(stderr, "[fatal-session] shutdown complete%s%s\n",
+            settings_flush_failed ? "; settings write failed" : "",
+            save_flush_failed ? "; battery save write failed" : "");
+    if (!app->headless &&
+        !SDL_ShowSimpleMessageBox(
+            SDL_MESSAGEBOX_ERROR, "ActRaiser Recompiled closed safely",
+            message, NULL)) {
+      fprintf(stderr, "[fatal-session] could not show error dialog: %s\n",
+              SDL_GetError());
+    }
+  }
   SDL_Quit();
   free(app->rom_data);
 
@@ -2072,7 +2199,7 @@ static int AppShutdown(AppBoot *app, char **argv) {
     fprintf(stderr, "[lifecycle] restart failed: %s\n", strerror(errno));
     return 1;
   }
-  return 0;
+  if (fatal_session) return 1;
   return 0;
 }
 

@@ -38,6 +38,8 @@ extern int g_snes_width;
 extern int g_snes_height;
 extern uint8_t g_pixels[
     kPpuSurfaceWidth * kArgbBytesPerPixel * kHostDisplayFramebufferHeight];
+extern uint8_t g_authentic_pixels[
+    kPpuSurfaceWidth * kArgbBytesPerPixel * kHostDisplayFramebufferHeight];
 extern uint8_t g_hud_bg_pixels[
     kPpuSurfaceWidth * kArgbBytesPerPixel * kHostDisplayFramebufferHeight];
 extern uint8_t g_hud_obj_pixels[
@@ -50,6 +52,9 @@ extern Ppu *g_ppu;
  * bindings exist because RemoveFromGame only engages for a bound source;
  * BG3 and OBJ reuse the dedicated HUD surfaces. */
 static uint8_t *s_overlay_pixels[kPpuOverlaySource_Count];
+static bool s_authentic_capture_enabled;
+static uint64_t s_authentic_frame_serial;
+static uint64_t s_authentic_next_frame_serial;
 
 uint8_t *g_m7_overlay_pixels;
 SDL_Texture *g_m7_texture;
@@ -195,8 +200,52 @@ void HdReplacementHost_ReloadTextures(void) {
   HdReplacementHost_BindSurfaces();
 }
 
+void ActRaiser_SetAuthenticCaptureEnabled(bool enabled) {
+  if (s_authentic_capture_enabled == enabled &&
+      (!g_ppu || PpuAuthenticSurfaceBound(g_ppu) == enabled))
+    return;
+  s_authentic_capture_enabled = enabled;
+  s_authentic_frame_serial = 0;
+  if (!g_ppu) return;
+  const size_t pitch = (size_t)g_snes_width * kArgbBytesPerPixel;
+  if (!PpuBindAuthenticSurface(
+          g_ppu, enabled ? g_authentic_pixels : NULL,
+          enabled ? pitch : 0)) {
+    s_authentic_capture_enabled = false;
+    PpuBindAuthenticSurface(g_ppu, NULL, 0);
+    fprintf(stderr,
+            "[compare] authentic surface rejected for width %d\n",
+            g_snes_width);
+  }
+}
+
+bool ActRaiser_AuthenticCaptureEnabled(void) {
+  return s_authentic_capture_enabled;
+}
+
+void ActRaiser_AuthenticCaptureFrameCompleted(bool frame_valid) {
+  if (!frame_valid) {
+    s_authentic_frame_serial = 0;
+    return;
+  }
+  if (!s_authentic_capture_enabled || !g_ppu ||
+      !PpuAuthenticSurfaceBound(g_ppu))
+    return;
+  s_authentic_next_frame_serial++;
+  if (!s_authentic_next_frame_serial) s_authentic_next_frame_serial++;
+  s_authentic_frame_serial = s_authentic_next_frame_serial;
+}
+
+uint64_t ActRaiser_AuthenticFrameSerial(void) {
+  return s_authentic_frame_serial;
+}
+
 void ActRaiser_RebindPpuOutputSurfaces(void) {
   if (!g_ppu) return;
+
+  /* The old pixels describe the old surface geometry until a complete pass
+   * reaches the new binding. */
+  s_authentic_frame_serial = 0;
 
   const size_t pitch = (size_t)g_snes_width * kArgbBytesPerPixel;
   /* The main framebuffer is bound APRON-WIDE: it doubles as the diorama's
@@ -208,6 +257,9 @@ void ActRaiser_RebindPpuOutputSurfaces(void) {
   const size_t frame_pitch =
       ActionApron_SurfacePitch(g_snes_width, kPpuObjApron);
   PpuBeginDrawing(g_ppu, g_pixels, frame_pitch, 0);
+  /* Geometry may be contracting from a wider prior bind. Clear first so a
+   * validation failure cannot leave the old stride attached to new pixels. */
+  PpuBindAuthenticSurface(g_ppu, NULL, 0);
   PpuClearOverlayBindings(g_ppu);
   PpuBindOverlaySurface(
       g_ppu, kPpuOverlaySource_Bg3,
@@ -232,6 +284,13 @@ void ActRaiser_RebindPpuOutputSurfaces(void) {
     PpuSetExtraSpaceCentered(g_ppu, (uint8_t)g_ws_extra);
   else
     PpuSetExtraSpace(g_ppu, 0);
+  if (s_authentic_capture_enabled && !PpuBindAuthenticSurface(
+          g_ppu, g_authentic_pixels, pitch)) {
+    s_authentic_capture_enabled = false;
+    fprintf(stderr,
+            "[compare] authentic surface rejected after rebind for width %d\n",
+            g_snes_width);
+  }
 }
 
 void HdReplacementHost_Shutdown(void) {
@@ -251,4 +310,7 @@ void HdReplacementHost_Shutdown(void) {
     free(s_overlay_pixels[source]);
     s_overlay_pixels[source] = NULL;
   }
+  s_authentic_capture_enabled = false;
+  s_authentic_frame_serial = 0;
+  s_authentic_next_frame_serial = 0;
 }

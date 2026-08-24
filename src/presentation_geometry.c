@@ -49,16 +49,17 @@ bool PresentationGeometry_PushFullOutput(
   return true;
 }
 
-void PresentationGeometry_PopFullOutput(
+bool PresentationGeometry_PopFullOutput(
     SDL_Renderer *renderer, const PresentationOutputState *state) {
-  if (!renderer || !state || !state->valid) return;
-  SDL_SetRenderLogicalPresentation(
+  if (!renderer || !state || !state->valid) return false;
+  bool restored = SDL_SetRenderLogicalPresentation(
       renderer, state->logical_width, state->logical_height,
       state->logical_mode);
-  SDL_SetRenderViewport(
-      renderer, state->viewport_set ? &state->viewport : NULL);
-  SDL_SetRenderClipRect(
-      renderer, state->clip_enabled ? &state->clip : NULL);
+  restored = SDL_SetRenderViewport(
+      renderer, state->viewport_set ? &state->viewport : NULL) && restored;
+  restored = SDL_SetRenderClipRect(
+      renderer, state->clip_enabled ? &state->clip : NULL) && restored;
+  return restored;
 }
 
 SDL_Rect PresentationGeometry_CalculateViewport(int output_width,

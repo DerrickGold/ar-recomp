@@ -345,6 +345,13 @@ static void CheckLayerEditorSection(void) {
   CHECK(!Settings_IsMenuVisible(Settings_Find("rando_lair_types")));
 
   g_settings.show_debug_settings = true;
+  /* Production initializes the randomizer before the overlay can open. Give
+   * this isolated menu test the same stable capability before asserting that
+   * its master row is available. */
+  {
+    static uint8_t fake_rom[0x100000];
+    CHECK(Randomizer_Init(fake_rom, (uint32_t)sizeof fake_rom));
+  }
   CHECK(SettingsOverlay_GetNavigationState(NULL, NULL, NULL, &total));
   CHECK(total == kDebugSectionCount);
   /* ...and revealed by the same flag, so the gate is a switch and not a wall. */
@@ -359,13 +366,6 @@ static void CheckLayerEditorSection(void) {
   CHECK(SettingsOverlay_GetNavigationState(&wrapped, NULL, NULL, NULL));
   CHECK(wrapped == kSection_Layers);
 
-  /* Give the randomizer a ROM image to own before touching its rows: its gated
-   * rows require a snapshot, and a synthetic buffer exercises Init/Apply's
-   * bounds handling on a degenerate image at the same time. */
-  {
-    static uint8_t fake_rom[0x100000];
-    CHECK(Randomizer_Init(fake_rom, (uint32_t)sizeof fake_rom));
-  }
   /* The randomizer section: four tabs, and every row the player edits must be
    * reachable by name. Its rows are gated on the master being on and on the ROM
    * snapshot existing, so this drives the master first -- otherwise the gated

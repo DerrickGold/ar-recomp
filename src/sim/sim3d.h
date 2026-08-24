@@ -33,6 +33,16 @@ typedef struct Sim3DCaptureRequest {
   int width, height;
 } Sim3DCaptureRequest;
 
+/* The capture layer reports broken producer/resource contracts without
+ * deciding application policy. The host seam maps these to an orderly fatal
+ * session; expected unsupported game states continue to report no failure. */
+typedef enum Sim3DCaptureContractFailure {
+  kSim3DCaptureContract_Ok = 0,
+  kSim3DCaptureContract_RendererUnavailable,
+  kSim3DCaptureContract_SurfaceAllocation,
+  kSim3DCaptureContract_ObjectSourcesUnavailable,
+} Sim3DCaptureContractFailure;
+
 enum {
   kSim3DMaxWidth = 512,  /* kPpuBufWidth, asserted in sim3d.c */
   kSim3DMaxHeight = 240,
@@ -63,6 +73,8 @@ bool Sim3D_BeginFrame(void);
  * the complete SIM planes; every other owner fails closed. SIM captures are
  * observational: the authentic PPU framebuffer is never removed or modified. */
 bool Sim3D_PrepareCapture(Ppu *ppu, const Sim3DCaptureRequest *request);
+
+Sim3DCaptureContractFailure Sim3D_GetCaptureContractFailure(void);
 
 /* Rebuilds the pitch-zero image after scanout only when the flat stage or a
  * diagnostic consumer needs it. Diagnostic modes also compare it against the

@@ -38,6 +38,14 @@ void HostInput_AdjustSim3DCamera(float yaw_delta, float pitch_delta,
 void HostInput_ResetSim3DCamera(void);
 void HostInput_ApplyAnalogCamera(void);
 
+/* Advances the session-only click/hold comparison control. A pending fresh
+ * native-frame upload and the visible transition both count as host pauses;
+ * callers include them in the same freeze coordinator as the settings
+ * overlay. */
+void HostInput_UpdateRenderComparison(void);
+bool HostInput_RenderComparisonOwnsPause(void);
+bool HostInput_RenderComparisonCaptureRequired(void);
+
 /* Installs the gamepad edge-action bridge after InputMap_Init. */
 void HostInput_InstallActionHandler(void);
 

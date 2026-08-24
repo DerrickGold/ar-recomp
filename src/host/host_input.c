@@ -9,10 +9,13 @@
 #include "common_cpu_infra.h"
 #include "diorama/diorama.h"
 #include "forced_input.h"
+#include "hd_replacement_host.h"
 #include "input_map.h"
 #include "input_replay.h"
 #include "present.h"
 #include "runtime_settings.h"
+#include "render_comparison.h"
+#include "session_fatal.h"
 #include "dev/scene_inspector.h"
 #include "settings.h"
 #include "settings_overlay.h"
@@ -109,7 +112,8 @@ bool HostInput_IsPausedRedrawPending(void) {
 }
 
 bool HostInput_RedrawPausedFrameIfNeeded(void) {
-  if ((!s_paused && !SettingsOverlay_IsOpen()) ||
+  if ((!s_paused && !SettingsOverlay_IsOpen() &&
+       !RenderComparison_FreezesGameplay()) ||
       !s_paused_redraw_pending) {
     return false;
   }
@@ -172,8 +176,10 @@ void HostInput_ApplyAnalogCamera(void) {
   if (!elapsed_ns) return;
 
   const bool diorama =
-      !SettingsOverlay_IsOpen() && Diorama_IsActiveThisFrame();
-  const bool sim3d = !SettingsOverlay_IsOpen() && !diorama &&
+      !SettingsOverlay_IsOpen() &&
+      !RenderComparison_FreezesGameplay() && Diorama_IsActiveThisFrame();
+  const bool sim3d = !SettingsOverlay_IsOpen() &&
+      !RenderComparison_FreezesGameplay() && !diorama &&
       Sim3DCamera_ControlsAvailable(g_sim3d_textures_ready);
 
   const float elapsed_seconds =
@@ -218,6 +224,49 @@ void HostInput_ApplyAnalogCamera(void) {
     RequestCameraRedrawIfFrozen();
 }
 
+static bool AuthenticFrameReady(void) {
+  const uint64_t captured = ActRaiser_AuthenticFrameSerial();
+  return captured != 0 &&
+      PresentAuthenticUploadedFrameSerial() == captured;
+}
+
+void HostInput_UpdateRenderComparison(void) {
+  if (RenderComparison_RequiresAuthenticFrame() &&
+      !ActRaiser_AuthenticCaptureEnabled()) {
+    SessionFatal_Request(
+        "Authentic comparison could not create a native rendering surface. "
+        "Restart the game. If this happens again, update your graphics "
+        "driver or select a different SDL renderer.");
+    return;
+  }
+  RenderComparison_Tick(
+      SDL_GetTicks(), InputMap_ActionHeld(kInputAction_RenderCompare),
+      AuthenticFrameReady());
+  if (RenderComparison_IsAwaitingAuthenticFrame())
+    HostInput_RequestPausedRedraw();
+  if (RenderComparison_AuthenticWaitExpired()) {
+    SessionFatal_Request(
+        "Authentic comparison could not produce a current native-camera "
+        "frame within %d ms. Restart the game; if the problem repeats, "
+        "disable the comparison binding and report the current room and "
+        "graphics settings.",
+        kRenderComparisonAuthenticWaitMilliseconds);
+  }
+}
+
+bool HostInput_RenderComparisonOwnsPause(void) {
+  return RenderComparison_FreezesGameplay();
+}
+
+bool HostInput_RenderComparisonCaptureRequired(void) {
+  const bool configured =
+      g_settings.input_bind[kInputClass_Keyboard]
+                           [kInputAction_RenderCompare] != 0 ||
+      g_settings.input_bind[kInputClass_Gamepad]
+                           [kInputAction_RenderCompare] != 0;
+  return configured || RenderComparison_RequiresAuthenticFrame();
+}
+
 static void OnGamepadHostAction(InputAction action) {
   switch (action) {
     case kInputAction_Menu:
@@ -253,6 +302,15 @@ static void OnGamepadHostAction(InputAction action) {
        * reload belong to the game thread's frame boundary, where nothing
        * else is touching WRAM or VRAM. */
       ActRaiser_RequestMagicCycle();
+      break;
+    case kInputAction_RenderCompare:
+      if (!SettingsOverlay_IsOpen()) {
+        RenderComparison_OnPress(SDL_GetTicks(), AuthenticFrameReady());
+        if (RenderComparison_IsAwaitingAuthenticFrame())
+          HostInput_RequestPausedRedraw();
+        fprintf(stderr, "[compare] requested %s\n",
+                RenderComparison_ViewName(RenderComparison_BaseView()));
+      }
       break;
     default:
       break;

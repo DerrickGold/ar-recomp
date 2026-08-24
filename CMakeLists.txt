@@ -949,6 +949,8 @@ if(BUILD_TESTING)
     add_executable(actraiser_present_frame_order_test
         tests/present_frame_order_test.c
         src/present_frame.c
+        src/render_comparison.c
+        src/session_fatal.c
     )
     target_include_directories(actraiser_present_frame_order_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -960,6 +962,34 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_present_frame_order
         COMMAND actraiser_present_frame_order_test)
+
+    add_executable(actraiser_render_comparison_test
+        tests/render_comparison_test.c
+        src/render_comparison.c
+    )
+    target_include_directories(actraiser_render_comparison_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_render_comparison
+        COMMAND actraiser_render_comparison_test)
+
+    add_executable(actraiser_session_fatal_test
+        tests/session_fatal_test.c
+        src/session_fatal.c
+    )
+    target_include_directories(actraiser_session_fatal_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_session_fatal
+        COMMAND actraiser_session_fatal_test)
+
+    add_executable(actraiser_audio_presentation_policy_test
+        tests/audio_presentation_policy_test.c
+        src/audio_presentation_policy.c
+    )
+    target_include_directories(actraiser_audio_presentation_policy_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS})
+    add_test(NAME actraiser_audio_presentation_policy
+        COMMAND actraiser_audio_presentation_policy_test)
 
     # Generated-shader distribution guard: asserts the COMMITTED shader blobs
     # (src/shaders/*_frag.h, produced by tools/build_shaders.py) are accepted by
