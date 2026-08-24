@@ -52,6 +52,44 @@ enum {
       kActionSceneEffectMaxInstances * kActionSceneEffectGlowsPerInstance,
   kActionSceneEffectMaxParticles =
       kActionSceneEffectMaxInstances * kActionSceneEffectParticlesPerInstance,
+  /* Act 2's widest camera can see several hundred source pixels of one lava
+   * lip. A denser fixed field keeps ambient sparks from collapsing to two or
+   * three visible motes, while an explicit four-lake ceiling retains a hard
+   * geometry bound for malformed frames. */
+  kActionSceneEffectLavaReservoirParticleCount = 32,
+  kActionSceneEffectMaxLavaReservoirs = 4,
+  kActionSceneEffectLavaReservoirParticleExtraVertices =
+      kActionSceneEffectMaxLavaReservoirs *
+      (kActionSceneEffectLavaReservoirParticleCount -
+       kActionSceneEffectParticlesPerInstance) * 4,
+  kActionSceneEffectLavaReservoirParticleExtraIndices =
+      kActionSceneEffectMaxLavaReservoirs *
+      (kActionSceneEffectLavaReservoirParticleCount -
+       kActionSceneEffectParticlesPerInstance) * 6,
+  /* A single ellipse over a 640px lake becomes transparent at its ends. Keep
+   * the light local with overlapping <=96px lip segments; twelve covers the
+   * measured maximum camera-local set while retaining a hard malformed-frame
+   * ceiling. The ordinary per-instance budget already reserves two glows, so
+   * the conservative extra scratch remains explicitly bounded. */
+  kActionSceneEffectLavaGlowSpanPixels = 96,
+  kActionSceneEffectMaxLavaGlowSegments = 12,
+  kActionSceneEffectLavaReservoirGlowExtraVertices =
+      kActionSceneEffectMaxLavaGlowSegments * 2 *
+      kActionEffectGlowVertices,
+  kActionSceneEffectLavaReservoirGlowExtraIndices =
+      kActionSceneEffectMaxLavaGlowSegments * 2 *
+      kActionEffectGlowIndices,
+  /* The wheel composition authors twelve distinct 16x16 fireball parts. The
+   * ordinary two-glow budget still covers its core/spill; these are the exact
+   * extra flame shells anchored to the rim. Only one root wheel is legal. */
+  kActionSceneEffectMaxFlamingWheels = 1,
+  kActionSceneEffectFlamingWheelFireballs = 12,
+  kActionSceneEffectFlamingWheelExtraVertices =
+      kActionSceneEffectFlamingWheelFireballs *
+      kActionEffectGlowVertices,
+  kActionSceneEffectFlamingWheelExtraIndices =
+      kActionSceneEffectFlamingWheelFireballs *
+      kActionEffectGlowIndices,
   /* Bottom waterfall atmosphere uses four tiers of six low-poly cloud puffs
    * plus thirty-two deterministic foam/mist motes. A dedicated 12-segment
    * primitive keeps the volume dense without paying the generic 32-segment
@@ -163,7 +201,11 @@ enum {
           kActionSceneEffectSwordExtraVertices +
       kActionSceneEffectMaxWaterfallVeils *
           (kActionSceneEffectWaterfallExtraVertices +
-           kActionSceneEffectWaterfallMistExtraVertices),
+           kActionSceneEffectWaterfallMistExtraVertices) +
+      kActionSceneEffectLavaReservoirParticleExtraVertices +
+      kActionSceneEffectLavaReservoirGlowExtraVertices +
+      kActionSceneEffectMaxFlamingWheels *
+          kActionSceneEffectFlamingWheelExtraVertices,
   kActionSceneEffectRenderMaxIndices =
       kActionSceneEffectMaxGlows * kActionEffectGlowIndices +
       kActionSceneEffectMaxParticles * 6 +
@@ -177,7 +219,21 @@ enum {
           kActionSceneEffectSwordExtraIndices +
       kActionSceneEffectMaxWaterfallVeils *
           (kActionSceneEffectWaterfallExtraIndices +
-           kActionSceneEffectWaterfallMistExtraIndices),
+           kActionSceneEffectWaterfallMistExtraIndices) +
+      kActionSceneEffectLavaReservoirParticleExtraIndices +
+      kActionSceneEffectLavaReservoirGlowExtraIndices +
+      kActionSceneEffectMaxFlamingWheels *
+          kActionSceneEffectFlamingWheelExtraIndices,
+
+  /* One textured mesh draw resolves the already-composited lava room through
+   * this small refraction grid. It is the portable renderer equivalent of a
+   * heat shader: fixed cost, no per-pixel CPU work or backend-specific blob. */
+  kActionHeatMeshColumns = 16,
+  kActionHeatMeshRows = 14,
+  kActionHeatMeshVertices =
+      (kActionHeatMeshColumns + 1) * (kActionHeatMeshRows + 1),
+  kActionHeatMeshIndices =
+      kActionHeatMeshColumns * kActionHeatMeshRows * 6,
 };
 
 typedef bool (*ActionEffectProjectPointFn)(
@@ -199,6 +255,13 @@ typedef struct ActionSceneEffectRenderBatch {
   int vertex_count;
   int index_count;
 } ActionSceneEffectRenderBatch;
+
+typedef struct ActionHeatRenderMesh {
+  SDL_Vertex vertices[kActionHeatMeshVertices];
+  int indices[kActionHeatMeshIndices];
+  int vertex_count;
+  int index_count;
+} ActionHeatRenderMesh;
 
 /* Unknown effect/phase/geometry/layer values are ignored (fail closed).
  * False reports malformed input or an internal capacity violation. Output
@@ -226,5 +289,14 @@ bool ActionSceneDecorationRender_Build(
     bool lighting_enabled, bool particles_enabled,
     ActionEffectProjectPointFn project_point, void *project_userdata,
     ActionSceneEffectRenderBatch *batch);
+
+/* Builds output-space positions and normalized UVs into a viewport-sized
+ * source texture for subtle lower-screen heat refraction. The outer edge is
+ * pinned exactly, so the mesh cannot sample beyond the scene target or pull
+ * letterbox pixels into the game image. */
+bool ActionHeatRender_Build(uint16_t game_frame, SDL_Rect output_viewport,
+                            int target_width, int target_height,
+                            int source_width,
+                            ActionHeatRenderMesh *mesh);
 
 #endif  /* ACTION_EFFECT_RENDER_H */

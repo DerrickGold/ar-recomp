@@ -695,6 +695,44 @@ static void TestDeathHeimTunedBossExtents(void) {
   CHECK(plan.layer[1].default_edge == kActionBgEdge_LiveWorld);
 }
 
+static void TestAitosMap5BackdropExtent(void) {
+  ActionBgFrameState state = State(4, 5);
+  state.layer[1].world_width = 256;
+  ActionBgPlan plan = Build(&state);
+  CHECK(plan.layer[0].role == kActionBgLayerRole_Playfield);
+  CHECK(plan.layer[0].source == kActionBgSource_WorldMap);
+  CHECK(plan.layer[0].default_edge == kActionBgEdge_LiveWorld);
+  CHECK(plan.layer[0].default_motion == kActionBgMotion_FillRelative);
+  CHECK(plan.layer[0].horizontal_extent.mode == kActionBgExtent_Available);
+  CHECK(plan.layer[0].vertical_extent.mode == kActionBgExtent_Available);
+  CHECK(plan.layer[1].role == kActionBgLayerRole_Backdrop);
+  CHECK(plan.layer[1].source == kActionBgSource_AuthenticViewport);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_Repeat);
+  CHECK(plan.layer[1].default_motion == kActionBgMotion_FillRelative);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(plan.layer[1].horizontal_extent.left == 128 &&
+        plan.layer[1].horizontal_extent.right == 128);
+  CHECK(plan.layer[1].vertical_extent.mode == kActionBgExtent_Available);
+  CHECK(plan.layer[1].band_count == 0);
+  ActionBgPresentationPolicy policy = Compile(&plan);
+  CHECK(policy.repeat_layers == 2 && !policy.clamp_layers &&
+        !policy.mirror_layers && !policy.normal_scroll_layers);
+
+  /* Source/edge guards keep a future decoded-world topology canonical. */
+  state.layer[1].world_width = 512;
+  plan = Build(&state);
+  CHECK(plan.layer[1].source == kActionBgSource_WorldMap);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_LiveWorld);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Available);
+
+  state.layer[1].world_width = 256;
+  state.decorative_padding_enabled = false;
+  plan = Build(&state);
+  CHECK(plan.layer[1].source == kActionBgSource_AuthenticViewport);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_Clamp);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Available);
+}
+
 static void TestAitosWaterfallVerticalExtent(void) {
   ActionBgFrameState state = State(4, 2);
   /* The captured PPU uses a native 32x32 map (`bgsc=$70`) even though the
@@ -987,6 +1025,8 @@ static void TestEveryKnownMapClassifies(void) {
       ActionBgFrameState state = State(group, map);
       if (group == 3 && (map == 1 || map == 2))
         state.layer[1].world_height = 512;
+      if (group == 4 && map == 5)
+        state.layer[1].world_width = 256;
       if (group == 7 && map >= 2 && map <= 7)
         state.layer[1].world_width = 256;
       ActionBgPlan plan;
@@ -1010,13 +1050,16 @@ static void TestEveryKnownMapClassifies(void) {
             layer == 1 && group == 3 && (map == 1 || map == 2);
         const bool fixed_marahna_bg2 =
             layer == 1 && group == 5 && map == 5;
+        const bool fixed_aitos_map5_bg2 =
+            layer == 1 && group == 4 && map == 5;
         const bool fixed_bloodpool_boss_bg1 =
             layer == 0 && group == 2 && map == 8;
         CHECK(plan.layer[layer].horizontal_extent.mode ==
               (fixed_fillmore_bg2 || fixed_death_heim_bg2 ||
                    fixed_death_heim_second_boss_bg1 ||
                    fixed_death_heim_last_boss_bg2 ||
-                   fixed_kasandora_bg2 || fixed_marahna_bg2 ||
+                   fixed_kasandora_bg2 || fixed_aitos_map5_bg2 ||
+                   fixed_marahna_bg2 ||
                    fixed_bloodpool_boss_bg1
                    ? kActionBgExtent_Fixed : kActionBgExtent_Available));
         CHECK(plan.layer[layer].vertical_extent.mode ==
@@ -1038,6 +1081,7 @@ int main(void) {
   TestFillmoreAct1BackdropExtent();
   TestNarrowDecorativeBg2();
   TestDeathHeimTunedBossExtents();
+  TestAitosMap5BackdropExtent();
   TestAitosWaterfallVerticalExtent();
   TestBloodpoolBand();
   TestBloodpoolUnbandedBackdropExtents();

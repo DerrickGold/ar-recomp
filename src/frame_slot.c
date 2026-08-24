@@ -620,6 +620,16 @@ void FrameSlot_Capture(FrameSlot *dst) {
         (g_ppu->overlayCaptures[kPpuOverlaySource_Bg2].flags &
          kPpuOverlayFlag_MarkMainScreenWinner) != 0 &&
         PpuOverlaySurfaceHasContent(g_ppu, kPpuOverlaySource_Bg2, 0);
+    dst->diorama_bg_transparent_fill_argb[0] =
+        PpuOverlayTransparentFillColor(g_ppu, kPpuOverlaySource_Bg1);
+    dst->diorama_bg_transparent_fill_argb[1] =
+        PpuOverlayTransparentFillColor(g_ppu, kPpuOverlaySource_Bg2);
+    dst->diorama_bg_transparent_fill_configured[0] =
+        g_ppu->overlayCaptures[kPpuOverlaySource_Bg1]
+            .transparentFillConfigured != 0;
+    dst->diorama_bg_transparent_fill_configured[1] =
+        g_ppu->overlayCaptures[kPpuOverlaySource_Bg2]
+            .transparentFillConfigured != 0;
     /* These mirrors are load-bearing allocation contracts shared by capture,
      * frame generation, and the compositor. */
     _Static_assert(kFrameSlotLayerTextureWidth == kPpuSurfaceWidth,

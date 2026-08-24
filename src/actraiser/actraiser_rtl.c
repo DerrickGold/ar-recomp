@@ -2428,6 +2428,10 @@ void ActRaiserDrawPpuFrame(void) {
               (uint8_t)g_ppu->cgwsel, (uint8_t)g_ppu->cgadsub,
               (uint8_t)g_ppu->screenEnabled[0],
               (uint8_t)g_ppu->screenEnabled[1]);
+      uint8_t layer_group = 0, layer_map = 0;
+      uint8_t layer_section = kDioramaLayerSection_Room;
+      const bool layer_room_live = Diorama_LiveRoom(
+          &layer_group, &layer_map, &layer_section);
       /* F4 (2026-07-26 handback: "missing transparency on background layers in
        * diorama mode"). SNES colour math is not reproduced by the capture, so a
        * half-added BG used to arrive fully opaque and HIDE the planes behind it
@@ -2509,6 +2513,30 @@ void ActRaiserDrawPpuFrame(void) {
                       g_ppu->screenEnabled[0], g_ppu->screenEnabled[1],
                       full_add_sub_sources);
             }
+          }
+        }
+        /* Backing is presentation policy even when this particular live BG is
+         * disabled: a named ROM skybox can source BG1/BG2 independently of the
+         * current room's screen-enable bits. Geometry and fill setup are
+         * deliberately order-independent within this per-frame policy. */
+        if (layer_room_live && (src == kPpuOverlaySource_Bg1 ||
+                                src == kPpuOverlaySource_Bg2)) {
+          DioramaTransparentFill fill = kDioramaTransparentFill_None;
+          uint8_t fill_cgram = 0;
+          if (DioramaLayerOrder_ResolveTransparentFill(
+                  Diorama_LayerOverrides(), layer_group, layer_map,
+                  layer_section, src, &fill, &fill_cgram)) {
+            PpuOverlayTransparentFill mode =
+                kPpuOverlayTransparentFill_None;
+            if (fill == kDioramaTransparentFill_Black)
+              mode = kPpuOverlayTransparentFill_Black;
+            else if (fill == kDioramaTransparentFill_Cgram)
+              mode = kPpuOverlayTransparentFill_Cgram;
+            /* Unknown/corrupt values fail transparent rather than silently
+             * becoming black and hiding a platform-specific capture fault.
+             * Setting None is still significant: it carries authored Off into
+             * the immutable frame snapshot used by ROM backdrop composition. */
+            PpuSetOverlayTransparentFill(g_ppu, src, mode, fill_cgram);
           }
         }
       }

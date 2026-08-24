@@ -1,6 +1,7 @@
 #include "diorama_rom_backdrop.h"
 
 #include "action/action_room_scene.h"
+#include "actraiser_game.h"
 #include "byte_order.h"
 #include "quintet_lzss.h"
 #include "snes_bgr555.h"
@@ -29,11 +30,11 @@ static unsigned TilePixel4Bpp(const uint8_t *characters, unsigned tile,
       (((high >> (shift + 8)) & 1u) << 3);
 }
 
-bool DioramaRomBackdrop_LoadActionBg(const uint8_t *rom, size_t rom_size,
-                                     uint8_t map_group, uint8_t map_number,
-                                     uint8_t bg_layer,
-                                     uint32_t *out_argb,
-                                     size_t out_pixel_count) {
+static bool LoadActionBg(const uint8_t *rom, size_t rom_size,
+                         uint8_t map_group, uint8_t map_number,
+                         uint8_t bg_layer, uint32_t transparent_fill_argb,
+                         bool sparse, uint32_t *out_default_fill_argb,
+                         uint32_t *out_argb, size_t out_pixel_count) {
   if (!rom || !out_argb ||
       out_pixel_count <
           (size_t)kDioramaRomBackdropPixels * kDioramaRomBackdropPixels ||
@@ -55,6 +56,17 @@ bool DioramaRomBackdrop_LoadActionBg(const uint8_t *rom, size_t rom_size,
         (uint32_t)ExpandColor5(colour, 15) << 16 |
         (uint32_t)ExpandColor5(colour >> 5, 15) << 8 |
         ExpandColor5(colour >> 10, 15);
+  }
+  if (out_default_fill_argb) *out_default_fill_argb = palette[0];
+  /* Match the live-plane contract literally: an authored transparent fill
+   * begins as a complete opaque plane, then non-zero tile pixels paint over
+   * it. This also covers wholly empty map cells; artwork is never reclassified
+   * or filtered. */
+  if (transparent_fill_argb || sparse) {
+    const size_t pixels =
+        (size_t)kDioramaRomBackdropPixels * kDioramaRomBackdropPixels;
+    for (size_t i = 0; i < pixels; i++)
+      out_argb[i] = sparse ? 0 : transparent_fill_argb;
   }
 
   for (unsigned tile_y = 0; tile_y < 32; tile_y++) {
@@ -82,6 +94,8 @@ bool DioramaRomBackdrop_LoadActionBg(const uint8_t *rom, size_t rom_size,
           const unsigned sy = flip_y ? 7 - py : py;
           const unsigned colour = TilePixel4Bpp(
               tile_characters, tile_index, sx, sy);
+          if (!colour && (transparent_fill_argb || sparse))
+            continue;
           out_argb[(size_t)(tile_y * 8 + py) * kDioramaRomBackdropPixels +
                    tile_x * 8 + px] =
               palette[colour ? palette_base + colour : 0];
@@ -90,6 +104,47 @@ bool DioramaRomBackdrop_LoadActionBg(const uint8_t *rom, size_t rom_size,
     }
   }
   return true;
+}
+
+bool DioramaRomBackdrop_LoadActionBg(const uint8_t *rom, size_t rom_size,
+                                     uint8_t map_group, uint8_t map_number,
+                                     uint8_t bg_layer,
+                                     uint32_t *out_argb,
+                                     size_t out_pixel_count) {
+  return LoadActionBg(
+      rom, rom_size, map_group, map_number, bg_layer, 0, false, NULL,
+      out_argb, out_pixel_count);
+}
+
+bool DioramaRomBackdrop_LoadActionBgTransparentBlack(
+    const uint8_t *rom, size_t rom_size,
+    uint8_t map_group, uint8_t map_number, uint8_t bg_layer,
+    uint32_t *out_argb, size_t out_pixel_count) {
+  return LoadActionBg(
+      rom, rom_size, map_group, map_number, bg_layer, 0xFF000000u,
+      false, NULL,
+      out_argb, out_pixel_count);
+}
+
+bool DioramaRomBackdrop_LoadActionBgTransparentFill(
+    const uint8_t *rom, size_t rom_size,
+    uint8_t map_group, uint8_t map_number, uint8_t bg_layer,
+    uint32_t fill_argb, uint32_t *out_argb, size_t out_pixel_count) {
+  if ((fill_argb & 0xff000000u) != 0xff000000u) return false;
+  return LoadActionBg(
+      rom, rom_size, map_group, map_number, bg_layer, fill_argb, false, NULL,
+      out_argb, out_pixel_count);
+}
+
+bool DioramaRomBackdrop_LoadActionBgSparse(
+    const uint8_t *rom, size_t rom_size,
+    uint8_t map_group, uint8_t map_number, uint8_t bg_layer,
+    uint32_t *out_argb, size_t out_pixel_count,
+    uint32_t *out_default_fill_argb) {
+  if (!out_default_fill_argb) return false;
+  return LoadActionBg(
+      rom, rom_size, map_group, map_number, bg_layer, 0, true,
+      out_default_fill_argb, out_argb, out_pixel_count);
 }
 
 bool DioramaRomBackdrop_LoadAitosSky(const uint8_t *rom, size_t rom_size,

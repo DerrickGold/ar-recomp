@@ -97,6 +97,20 @@ static void TestActionEntryActivationPolicy(void) {
   CHECK(ActRaiser_AuthenticActionCameraX(500, 768) == 372);
   CHECK(ActRaiser_AuthenticActionCameraX(1000, 768) == 512);
   CHECK(ActRaiser_AuthenticActionCameraX(80, 224) == 0);
+
+  /* The vertical activation exception is an exact room + retained spawn
+   * source + loaded graphics tuple. Neither priority nor a visually similar
+   * composition is part of the identity. */
+  CHECK(ActRaiser_IsAitosStatueFireActor(
+      kActRaiserMapGroup_Aitos, 6, 0xD5B1, 0x4000, 0x7E));
+  CHECK(ActRaiser_IsAitosStatueFireActor(
+      kActRaiserMapGroup_Aitos, 6, 0xD5C0, 0x4000, 0x7E));
+  CHECK(!ActRaiser_IsAitosStatueFireActor(
+      kActRaiserMapGroup_Aitos, 5, 0xD5B1, 0x4000, 0x7E));
+  CHECK(!ActRaiser_IsAitosStatueFireActor(
+      kActRaiserMapGroup_Aitos, 6, 0xD5B0, 0x4000, 0x7E));
+  CHECK(!ActRaiser_IsAitosStatueFireActor(
+      kActRaiserMapGroup_Aitos, 6, 0xD5B1, 0x5000, 0x7E));
 }
 
 static void TestPurePickerPredicate(void) {

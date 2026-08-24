@@ -204,17 +204,33 @@ const DioramaRoomOverride *DioramaLayerOrder_Find(
       table, map_group, map_number, kDioramaLayerSection_Room);
 }
 
-const DioramaRoomOverride *DioramaLayerOrder_FindSection(
-    const DioramaLayerOrderTable *table, uint8_t map_group,
-    uint8_t map_number, uint8_t section) {
-  if (!table) return NULL;
+static int FindSectionIndex(const DioramaLayerOrderTable *table,
+                            uint8_t map_group, uint8_t map_number,
+                            uint8_t section) {
+  if (!table) return -1;
   for (int i = 0; i < table->count; i++) {
     const DioramaRoomOverride *room = &table->rooms[i];
     if (room->used && room->map_group == map_group &&
         room->map_number == map_number && room->section == section)
-      return room;
+      return i;
   }
-  return NULL;
+  return -1;
+}
+
+const DioramaRoomOverride *DioramaLayerOrder_FindSection(
+    const DioramaLayerOrderTable *table, uint8_t map_group,
+    uint8_t map_number, uint8_t section) {
+  const int index = FindSectionIndex(
+      table, map_group, map_number, section);
+  return index >= 0 ? &table->rooms[index] : NULL;
+}
+
+DioramaRoomOverride *DioramaLayerOrder_FindMutableSection(
+    DioramaLayerOrderTable *table, uint8_t map_group,
+    uint8_t map_number, uint8_t section) {
+  const int index = FindSectionIndex(
+      table, map_group, map_number, section);
+  return index >= 0 ? &table->rooms[index] : NULL;
 }
 
 DioramaRoomOverride *DioramaLayerOrder_FindOrAdd(
@@ -228,12 +244,9 @@ DioramaRoomOverride *DioramaLayerOrder_FindOrAddSection(
     uint8_t section) {
   if (section >= kDioramaLayerSection_Count) return NULL;
   if (!table) return NULL;
-  for (int i = 0; i < table->count; i++) {
-    DioramaRoomOverride *room = &table->rooms[i];
-    if (room->used && room->map_group == map_group &&
-        room->map_number == map_number && room->section == section)
-      return room;
-  }
+  DioramaRoomOverride *existing = DioramaLayerOrder_FindMutableSection(
+      table, map_group, map_number, section);
+  if (existing) return existing;
   /* Reuse a slot vacated by a reset before growing. */
   for (int i = 0; i < table->count; i++) {
     if (!table->rooms[i].used) {
@@ -262,6 +275,7 @@ DioramaRoomOverride *DioramaLayerOrder_FindOrAddSection(
  * it lives in one place. NOT the same as the editor's shape-only clear subset. */
 static bool PlaneOverrideIsAuthored(const DioramaPlaneOverride *o) {
   return o->set_order || o->set_z || o->set_alpha || o->set_source ||
+         o->set_transparent_fill ||
          o->set_rake || o->set_bow ||
          o->set_thickness || o->set_stack || o->set_stack_copies ||
          o->set_stack_density || o->set_stack_direction || o->set_voxel ||
@@ -383,6 +397,39 @@ int DioramaLayerOrder_Resolve(const DioramaLayerOrderTable *table,
   return DioramaLayerOrder_ResolveSection(
       table, map_group, map_number, kDioramaLayerSection_Room,
       defaults, default_count, out, capacity);
+}
+
+bool DioramaLayerOrder_ResolveTransparentFill(
+    const DioramaLayerOrderTable *table,
+    uint8_t map_group, uint8_t map_number, uint8_t section, int plane,
+    DioramaTransparentFill *out_kind, uint8_t *out_cgram) {
+  if (!table || (plane != kPpuOverlaySource_Bg1 &&
+                 plane != kPpuOverlaySource_Bg2))
+    return false;
+  const DioramaRoomOverride *rooms[2] = {
+    DioramaLayerOrder_Find(table, map_group, map_number),
+    section == kDioramaLayerSection_Room ? NULL :
+        DioramaLayerOrder_FindSection(table, map_group, map_number, section),
+  };
+  bool found = false;
+  DioramaTransparentFill kind = kDioramaTransparentFill_None;
+  uint8_t cgram = 0;
+  for (int scope = 0; scope < 2; scope++) {
+    const DioramaRoomOverride *room = rooms[scope];
+    if (!room) continue;
+    const DioramaPlaneOverride *override = &room->planes[plane];
+    if (!override->set_transparent_fill) continue;
+    kind = (DioramaTransparentFill)override->transparent_fill_kind;
+    cgram = override->transparent_fill_cgram;
+    found = true;
+  }
+  if (out_kind) *out_kind = kind;
+  if (out_cgram) *out_cgram = cgram;
+  /* An explicitly authored None is the scoped tombstone that suppresses an
+   * inherited room fill. Return `found`, not "fill active", so capture can
+   * preserve the difference between explicit Off and no authored policy for
+   * ROM backdrop composition. */
+  return found;
 }
 
 int DioramaLayerOrder_ResolveSection(const DioramaLayerOrderTable *table,
@@ -808,6 +855,35 @@ bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
       edit.source = (uint8_t)source;
       edit.set_source = true;
       touched = true;
+    } else if (!strcmp(word, "transparent")) {
+      if (plane != kPpuOverlaySource_Bg1 &&
+          plane != kPpuOverlaySource_Bg2) {
+        if (out_error) *out_error =
+            "bad transparent fill (base BG1/BG2 only)";
+        return false;
+      }
+      if (!strcmp(value, "off")) {
+        edit.transparent_fill_kind = kDioramaTransparentFill_None;
+        edit.transparent_fill_cgram = 0;
+      } else if (!strcmp(value, "black")) {
+        edit.transparent_fill_kind = kDioramaTransparentFill_Black;
+        edit.transparent_fill_cgram = 0;
+      } else if (!strncmp(value, "cgram-", 6) && strlen(value + 6) == 2) {
+        long index = strtol(value + 6, &end, 16);
+        if (end == value + 6 || (end && *end) || index < 0 || index > 0xff) {
+          if (out_error) *out_error =
+              "bad transparent fill (off, black or cgram-00..FF)";
+          return false;
+        }
+        edit.transparent_fill_kind = kDioramaTransparentFill_Cgram;
+        edit.transparent_fill_cgram = (uint8_t)index;
+      } else {
+        if (out_error) *out_error =
+            "bad transparent fill (off, black or cgram-00..FF)";
+        return false;
+      }
+      edit.set_transparent_fill = true;
+      touched = true;
     } else if (!strcmp(word, "rake")) {
       /* Signed: a negative rake tilts the bottom edge AWAY, which is the right
        * shape for a ceiling. Bounded to one world unit so a typo cannot fling a
@@ -968,6 +1044,15 @@ static void DioramaLayerOrder_FormatRoomBody(const DioramaRoomOverride *room,
     if (o->set_alpha) APPEND(" alpha:%u", (unsigned)o->alpha);
     if (o->set_source)
       APPEND(" source:%s", DioramaLayerOrder_SourceToken(o->source));
+    if (o->set_transparent_fill) {
+      if (o->transparent_fill_kind == kDioramaTransparentFill_Cgram)
+        APPEND(" transparent:cgram-%02X",
+               (unsigned)o->transparent_fill_cgram);
+      else if (o->transparent_fill_kind == kDioramaTransparentFill_None)
+        APPEND(" transparent:off");
+      else
+        APPEND(" transparent:black");
+    }
     if (o->set_rake) APPEND(" rake:%.4g", (double)o->rake);
     if (o->set_bow) APPEND(" bow:%.4g", (double)o->bow);
     if (o->set_thickness) APPEND(" thick:%.4g", (double)o->thickness);

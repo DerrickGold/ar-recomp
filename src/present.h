@@ -152,6 +152,13 @@ typedef struct FrameSlot {
   uint8_t diorama_map_group;
   uint8_t diorama_map_number;
   uint8_t diorama_layer_section;
+  /* Frame-resolved backing policy for base BG1/BG2. `configured` preserves
+   * explicit Off versus no authored override for ROM backdrop composition;
+   * zero ARGB means the configured policy is Off. CGRAM fills are resolved at
+   * capture time so retained/generated presents never observe a newer palette
+   * than their pixels. */
+  bool diorama_bg_transparent_fill_configured[2];
+  uint32_t diorama_bg_transparent_fill_argb[2];
   /* True only when flat-mode PPU capture produced current winner masks.
    * Presentation must not reuse stale mask texture content. BG1 uses the
    * source's owning screen because Marahna/Viper wall art is TS-only; BG2's

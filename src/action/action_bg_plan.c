@@ -32,6 +32,7 @@ enum {
   kKasandoraFirstHybridRoom = 1,
   kKasandoraLastHybridRoom = 2,
   kKasandoraDunesWorldY = 256,
+  kAitosMap5 = 5,
   kMarahnaMap5 = 5,
   kDeathHeimHub = 1,
   kDeathHeimFirstBoss = 2,
@@ -291,6 +292,20 @@ static const TunedLayerPolicy kTunedLayerPolicies[] = {
     .top = 24,
     .bottom = kActionBgAitosWaterfallBottomExtensionPixels,
     .apply_vertical_extent = true,
+  },
+  {
+    /* Promoted from the live 0405 draft. Its narrow BG2 is viewport-backed,
+     * but the authored backdrop repeats within a bounded 128px side budget. */
+    .map_group = kAitos,
+    .map_number = kAitosMap5,
+    .layer = kBg2,
+    .required_source = kActionBgSource_AuthenticViewport,
+    .required_edge = kActionBgEdge_Mirror,
+    .edge = kActionBgEdge_Repeat,
+    .motion = kActionBgMotion_FillRelative,
+    .apply_horizontal_extent = true,
+    .left = 128,
+    .right = 128,
   },
 };
 

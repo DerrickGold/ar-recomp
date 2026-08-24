@@ -48,6 +48,13 @@ typedef bool (*SettingsOverlayLayerSaveFn)(void);
 void SettingsOverlay_SetLayerEditorHooks(SettingsOverlayLayerTableFn table,
                                          SettingsOverlayLayerRoomFn room,
                                          SettingsOverlayLayerSaveFn save);
+enum { kSettingsOverlayLayerPaletteEntries = 256 };
+/* Snapshot the currently loaded SNES CGRAM for the layer-fill picker. The room
+ * stores only the selected index; rendering resolves that entry every frame. */
+typedef bool (*SettingsOverlayLayerPaletteFn)(
+    uint16_t out_cgram[kSettingsOverlayLayerPaletteEntries]);
+void SettingsOverlay_SetLayerPaletteProvider(
+    SettingsOverlayLayerPaletteFn provider);
 
 /* The in-game manual, injected for the same reason the layer editor is: the
  * reader owns textures and an image decoder, and calling it directly from here

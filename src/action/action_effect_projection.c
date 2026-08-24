@@ -15,6 +15,23 @@ static void AddRequiredObjPriorities(
   }
 }
 
+static void AddRequiredBgPlanes(
+    uint32_t *mask, const ActionEffectInstance *effects, uint8_t count,
+    uint8_t capacity, bool overflow) {
+  if (!mask || !effects || overflow || count > capacity) return;
+  for (uint8_t i = 0; i < count; i++) {
+    const ActionEffectInstance *effect = &effects[i];
+    if (!(effect->flags & kActionEffectFlag_Visible)) continue;
+    if (effect->projection_plane == kActionEffectProjectionPlane_Bg1)
+      *mask |= 1u << kPpuOverlaySource_Bg1;
+    else if (effect->projection_plane == kActionEffectProjectionPlane_Bg2)
+      *mask |= 1u << kPpuOverlaySource_Bg2;
+    else if (effect->projection_plane ==
+             kActionEffectProjectionPlane_Bg1High)
+      *mask |= 1u << kDioramaPlane_Bg1Hi;
+  }
+}
+
 uint8_t ActionEffectProjection_RequiredObjPriorityMask(
     const ActionEffectFrame *spell_frame,
     const ActionSceneEffectFrame *scene_frame) {
@@ -27,6 +44,26 @@ uint8_t ActionEffectProjection_RequiredObjPriorityMask(
     AddRequiredObjPriorities(
         &mask, scene_frame->effects, scene_frame->effect_count,
         kActionSceneEffectMaxInstances, scene_frame->overflow != 0);
+  }
+  return mask;
+}
+
+uint32_t ActionEffectProjection_RequiredBgPlaneMask(
+    const ActionEffectFrame *spell_frame,
+    const ActionSceneEffectFrame *scene_frame) {
+  uint32_t mask = 0;
+  if (spell_frame)
+    AddRequiredBgPlanes(
+        &mask, spell_frame->effects, spell_frame->effect_count,
+        kActionEffectMaxInstances, false);
+  if (scene_frame) {
+    AddRequiredBgPlanes(
+        &mask, scene_frame->effects, scene_frame->effect_count,
+        kActionSceneEffectMaxInstances, scene_frame->overflow != 0);
+    AddRequiredBgPlanes(
+        &mask, scene_frame->decorations, scene_frame->decoration_count,
+        kActionSceneDecorationMaxInstances,
+        scene_frame->decoration_overflow != 0);
   }
   return mask;
 }
@@ -60,6 +97,10 @@ bool ActionEffectProjection_ProjectPoint(
           point, NULL, NULL);
     if (effect->projection_plane == kActionEffectProjectionPlane_Bg2)
       return Diorama_ProjectCapturedBg2Point(
+          context->diorama_projection, capture_x, texture_y,
+          point, NULL, NULL);
+    if (effect->projection_plane == kActionEffectProjectionPlane_Bg1High)
+      return Diorama_ProjectCapturedBg1HighPoint(
           context->diorama_projection, capture_x, texture_y,
           point, NULL, NULL);
     return Diorama_ProjectCapturedPoint(

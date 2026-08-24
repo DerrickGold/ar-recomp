@@ -1,5 +1,4 @@
 #include "diorama.h"
-#include "crt_post.h"
 #include "gpu_shader_blob.h"
 #include "actraiser_game.h"
 #include "constants.h"
@@ -23,8 +22,14 @@
 
 typedef struct DioramaRomSkyboxCache {
   uint32_t pixels[kDioramaRomBackdropPixels * kDioramaRomBackdropPixels];
+  SDL_Texture *art_texture;
   SDL_Texture *texture;
   int source;
+  uint32_t default_fill_argb;
+  uint32_t transparent_fill_argb;
+  bool transparent_fill_configured;
+  bool composite_valid;
+  bool resource_failed;
   bool available;
 } DioramaRomSkyboxCache;
 
@@ -36,6 +41,14 @@ static DioramaRomSkyboxCache g_rom_skybox = {
 static PresentationUploadMirror
     g_diorama_upload_mirrors[kDioramaPlane_Count];
 
+static void FailRomSkyboxResource(const char *operation) {
+  if (g_rom_skybox.resource_failed) return;
+  g_rom_skybox.resource_failed = true;
+  fprintf(stderr,
+          "[diorama] ROM skybox %s failed (%s); using captured fallback\n",
+          operation ? operation : "resource", SDL_GetError());
+}
+
 bool Diorama_InitRomBackdrops(const uint8_t *rom_data, size_t rom_size) {
   g_diorama_rom_data = rom_data;
   g_diorama_rom_size = rom_size;
@@ -44,7 +57,11 @@ bool Diorama_InitRomBackdrops(const uint8_t *rom_data, size_t rom_size) {
   return rom_data && rom_size > 0;
 }
 
-static SDL_Texture *RomSkyboxTexture(SDL_Renderer *renderer, int source) {
+static SDL_Texture *RomSkyboxTexture(SDL_Renderer *renderer, int source,
+                                     bool transparent_fill_configured,
+                                     uint32_t transparent_fill_argb,
+                                     bool *state_restore_failed) {
+  if (state_restore_failed) *state_restore_failed = false;
   if (!renderer || !g_diorama_rom_data ||
       !DioramaLayerOrder_SourceIsValid(source) ||
       source == kDioramaLayerSource_Captured)
@@ -54,34 +71,116 @@ static SDL_Texture *RomSkyboxTexture(SDL_Renderer *renderer, int source) {
     g_rom_skybox.available =
         DioramaLayerOrder_DecodeActionBgSource(
             source, &group, &map, &bg) &&
-        DioramaRomBackdrop_LoadActionBg(
+        DioramaRomBackdrop_LoadActionBgSparse(
             g_diorama_rom_data, g_diorama_rom_size, group, map, bg,
             g_rom_skybox.pixels,
             sizeof(g_rom_skybox.pixels) /
-                sizeof(g_rom_skybox.pixels[0]));
+                sizeof(g_rom_skybox.pixels[0]),
+            &g_rom_skybox.default_fill_argb);
     g_rom_skybox.source = source;
+    g_rom_skybox.composite_valid = false;
+    g_rom_skybox.resource_failed = false;
+    SDL_DestroyTexture(g_rom_skybox.art_texture);
+    g_rom_skybox.art_texture = NULL;
     SDL_DestroyTexture(g_rom_skybox.texture);
     g_rom_skybox.texture = NULL;
-    fprintf(stderr, "[diorama] ROM skybox source=%s decoded=%d\n",
+    fprintf(stderr,
+            "[diorama] ROM skybox source=%s decoded=%d\n",
             DioramaLayerOrder_SourceToken(source),
             g_rom_skybox.available ? 1 : 0);
   }
-  if (!g_rom_skybox.available) return NULL;
-  if (!g_rom_skybox.texture) {
-    g_rom_skybox.texture = SDL_CreateTexture(
+  if (!g_rom_skybox.available || g_rom_skybox.resource_failed) return NULL;
+  if (!g_rom_skybox.art_texture) {
+    g_rom_skybox.art_texture = SDL_CreateTexture(
         renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC,
         kDioramaRomBackdropPixels, kDioramaRomBackdropPixels);
-    if (!g_rom_skybox.texture ||
-        !SDL_UpdateTexture(g_rom_skybox.texture, NULL,
+    if (!g_rom_skybox.art_texture ||
+        !SDL_UpdateTexture(g_rom_skybox.art_texture, NULL,
                            g_rom_skybox.pixels,
                            kDioramaRomBackdropPixels *
-                               (int)sizeof(g_rom_skybox.pixels[0]))) {
-      SDL_DestroyTexture(g_rom_skybox.texture);
-      g_rom_skybox.texture = NULL;
+                               (int)sizeof(g_rom_skybox.pixels[0])) ||
+        !SDL_SetTextureScaleMode(
+            g_rom_skybox.art_texture, SDL_SCALEMODE_NEAREST) ||
+        !SDL_SetTextureBlendMode(
+            g_rom_skybox.art_texture, SDL_BLENDMODE_BLEND)) {
+      SDL_DestroyTexture(g_rom_skybox.art_texture);
+      g_rom_skybox.art_texture = NULL;
+      FailRomSkyboxResource("art upload");
       return NULL;
     }
-    SDL_SetTextureScaleMode(g_rom_skybox.texture, SDL_SCALEMODE_NEAREST);
-    SDL_SetTextureBlendMode(g_rom_skybox.texture, SDL_BLENDMODE_NONE);
+  }
+  if (!g_rom_skybox.texture) {
+    g_rom_skybox.texture = SDL_CreateTexture(
+        renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET,
+        kDioramaRomBackdropPixels, kDioramaRomBackdropPixels);
+    if (!g_rom_skybox.texture ||
+        !SDL_SetTextureScaleMode(
+            g_rom_skybox.texture, SDL_SCALEMODE_NEAREST) ||
+        !SDL_SetTextureBlendMode(
+            g_rom_skybox.texture, SDL_BLENDMODE_BLEND)) {
+      SDL_DestroyTexture(g_rom_skybox.texture);
+      g_rom_skybox.texture = NULL;
+      FailRomSkyboxResource("composite target creation");
+      return NULL;
+    }
+    g_rom_skybox.composite_valid = false;
+  }
+
+  const uint32_t fill_argb = transparent_fill_configured
+      ? transparent_fill_argb : g_rom_skybox.default_fill_argb;
+  if (!g_rom_skybox.composite_valid ||
+      g_rom_skybox.transparent_fill_configured !=
+          transparent_fill_configured ||
+      g_rom_skybox.transparent_fill_argb != fill_argb) {
+    SDL_Texture *saved_target = SDL_GetRenderTarget(renderer);
+    SDL_Rect saved_viewport = {0};
+    SDL_Rect saved_clip = {0};
+    const bool saved_viewport_set = SDL_RenderViewportSet(renderer);
+    const bool saved_clip_enabled = SDL_RenderClipEnabled(renderer);
+    SDL_BlendMode saved_blend = SDL_BLENDMODE_NONE;
+    Uint8 saved_r = 0, saved_g = 0, saved_b = 0, saved_a = 0;
+    if (!SDL_GetRenderViewport(renderer, &saved_viewport) ||
+        !SDL_GetRenderClipRect(renderer, &saved_clip) ||
+        !SDL_GetRenderDrawBlendMode(renderer, &saved_blend) ||
+        !SDL_GetRenderDrawColor(
+            renderer, &saved_r, &saved_g, &saved_b, &saved_a)) {
+      FailRomSkyboxResource("render-state capture");
+      return NULL;
+    }
+    bool composed = SDL_SetRenderTarget(renderer, g_rom_skybox.texture) &&
+        SDL_SetRenderViewport(renderer, NULL) &&
+        SDL_SetRenderClipRect(renderer, NULL) &&
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE) &&
+        SDL_SetRenderDrawColor(
+            renderer, (Uint8)(fill_argb >> 16), (Uint8)(fill_argb >> 8),
+            (Uint8)fill_argb, (Uint8)(fill_argb >> 24)) &&
+        SDL_RenderClear(renderer) &&
+        SDL_RenderTexture(renderer, g_rom_skybox.art_texture, NULL, NULL);
+    const bool target_restored = SDL_SetRenderTarget(renderer, saved_target);
+    const bool viewport_restored =
+        SDL_SetRenderViewport(
+            renderer, saved_viewport_set ? &saved_viewport : NULL);
+    const bool clip_restored = SDL_SetRenderClipRect(
+        renderer, saved_clip_enabled ? &saved_clip : NULL);
+    const bool blend_restored =
+        SDL_SetRenderDrawBlendMode(renderer, saved_blend);
+    const bool color_restored = SDL_SetRenderDrawColor(
+        renderer, saved_r, saved_g, saved_b, saved_a);
+    const bool state_restored = target_restored && viewport_restored &&
+        clip_restored && blend_restored && color_restored;
+    if (!state_restored) {
+      FailRomSkyboxResource("render-state restore");
+      if (state_restore_failed) *state_restore_failed = true;
+      return NULL;
+    }
+    if (!composed) {
+      FailRomSkyboxResource("fill composition");
+      return NULL;
+    }
+    g_rom_skybox.transparent_fill_configured =
+        transparent_fill_configured;
+    g_rom_skybox.transparent_fill_argb = fill_argb;
+    g_rom_skybox.composite_valid = true;
   }
   return g_rom_skybox.texture;
 }
@@ -461,6 +560,7 @@ static SDL_Texture *BuildDioramaSupersample(SDL_Renderer *renderer,
       renderer, snes_width * kDioramaSupersample,
       snes_height * kDioramaSupersample);
   if (!ss) return NULL;
+  SDL_Texture *saved_target = SDL_GetRenderTarget(renderer);
   if (!SDL_SetRenderTarget(renderer, ss)) return NULL;
   bool success =
       SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE) &&
@@ -485,7 +585,11 @@ static SDL_Texture *BuildDioramaSupersample(SDL_Renderer *renderer,
   }
   if (have_old_blend && !SDL_SetTextureBlendMode(source, old_blend))
     success = false;
-  if (!SDL_SetRenderTarget(renderer, CrtPost_BaseTarget())) {
+  /* Restore the caller's target, not an assumed CRT target. Presentation can
+   * deliberately wrap the complete scene in another render pass (heat haze,
+   * capture, accessibility filters); hard-coding the boot target silently
+   * escaped all of those wrappers whenever this crisp path was active. */
+  if (!SDL_SetRenderTarget(renderer, saved_target)) {
     if (target_restore_failed) *target_restore_failed = true;
     return NULL;
   }
@@ -678,7 +782,7 @@ typedef struct DioramaLayerDesc {
   SDL_FColor shade;
   bool *visible;
   bool is_figure;
-  bool casts_shadow;  /* see kDioramaLayers comment: false for BG2/BG2Hi */
+  bool casts_shadow;  /* see the kDioramaLayers interaction policy below */
 } DioramaLayerDesc;
 
 /* Table order IS the draw order (painter's algorithm) and, ignoring the two
@@ -691,12 +795,11 @@ typedef struct DioramaLayerDesc {
  * four sprite bands share one depth. BG3 stays one plane: ActRaiser action
  * HUDs ride the $2105 quirk rank in front of everything.
  *
- * casts_shadow=false for the BG2 family: BG2 is drawn right after the backdrop
- * (nothing but sky/distant scenery behind it), so its shadow would land
- * squarely on the sky — visually nonsensical (confirmed live: a large soft
- * blurred shadow next to the moon in a night scene, M8 GPU shadow-blur
- * testing). The BG1 family and sprites keep casting shadows onto whatever's
- * behind them (BG2, the ground, each other). */
+ * The BG1 and BG2 families do not cast drop shadows. The shadow pass has no
+ * receiver mask: it paints an offset silhouette over everything already drawn,
+ * so a BG1 shadow necessarily darkens BG2/the sky rather than a meaningful
+ * receiving surface. Figure planes retain shadows against the background
+ * stack; BG3 keeps its existing policy. */
 static const DioramaLayerDesc kDioramaLayers[] = {
   { kDioramaPlane_Backdrop, 0.00f, { 0.70f, 0.70f, 0.80f, 1.0f },
     &g_settings.diorama_layer_backdrop, false, false },
@@ -709,15 +812,15 @@ static const DioramaLayerDesc kDioramaLayers[] = {
   { kPpuOverlaySource_Bg2,  0.20f, { 0.82f, 0.82f, 0.88f, 1.0f },   /* prio 0 */
     &g_settings.diorama_layer_bg2, false, false },
   { kDioramaPlane_Bg1Far,   0.35f, { 0.92f, 0.92f, 0.95f, 1.0f },
-    &g_settings.diorama_layer_bg1, false, true },
+    &g_settings.diorama_layer_bg1, false, false },
   { kPpuOverlaySource_Bg1,  0.50f, { 0.92f, 0.92f, 0.95f, 1.0f },   /* prio 0 */
-    &g_settings.diorama_layer_bg1, false, true },
+    &g_settings.diorama_layer_bg1, false, false },
   { kDioramaPlane_Obj2,     0.51f, { 1.0f,  1.0f,  1.0f,  1.0f },
     &g_settings.diorama_layer_obj, true, true },
   { kDioramaPlane_Bg2Hi,    0.21f, { 0.82f, 0.82f, 0.88f, 1.0f },
     &g_settings.diorama_layer_bg2, false, false },
   { kDioramaPlane_Bg1Hi,    0.51f, { 0.92f, 0.92f, 0.95f, 1.0f },
-    &g_settings.diorama_layer_bg1, false, true },
+    &g_settings.diorama_layer_bg1, false, false },
   { kDioramaPlane_Obj3,     0.52f, { 1.0f,  1.0f,  1.0f,  1.0f },
     &g_settings.diorama_layer_obj, true, true },
   { kPpuOverlaySource_Bg3,  0.95f, { 1.0f,  1.0f,  1.0f,  1.0f },
@@ -765,21 +868,23 @@ static bool DioramaLayerIsDrawable(
       g_settings.diorama_skybox == kDioramaSky_Only);
 }
 
-/* BG projections retain the exact drawing predicate above. An OBJ plane may
- * additionally be requested by a current captured actor effect: its metadata
- * is current content even if the isolated hardware band contributed no final
- * pixels. Visibility and texture readiness still gate that projection. */
+/* A BG or OBJ plane may additionally be requested by a current captured
+ * effect: its metadata is current content even if the isolated hardware band
+ * contributed no final pixels. A content-bearing upload failure is filtered
+ * by present.c before it reaches this predicate. */
 static bool DioramaLayerIsProjectable(
     const DioramaLayerDesc *layer, SDL_Texture *textures[], uint8_t *pixels[],
-    uint8_t effect_obj_priority_mask) {
+    uint8_t effect_obj_priority_mask, uint32_t effect_bg_plane_mask) {
   if (!layer) return false;
   const int priority = DioramaPlaneObjectPriority(layer->plane);
   const bool has_obj_effect = priority >= 0 &&
       (effect_obj_priority_mask & (1u << (unsigned)priority)) != 0;
+  const bool has_bg_effect = layer->plane >= 0 && layer->plane < 32 &&
+      (effect_bg_plane_mask & (1u << (unsigned)layer->plane)) != 0;
   return Diorama_PlaneProjectable(
       layer->plane, !layer->visible || *layer->visible,
       textures[layer->plane] != NULL, pixels[layer->plane] != NULL,
-      has_obj_effect, g_settings.diorama_hud_flat,
+      has_obj_effect || has_bg_effect, g_settings.diorama_hud_flat,
       g_settings.diorama_skybox == kDioramaSky_Only);
 }
 
@@ -925,6 +1030,10 @@ static const char kLayerManifestPreamble[] =
     "#   stack:<0..1>  copies:<1..8>  density:<per unit>  dir:<forward|"
     "backward|both>\n"
     "#   voxel:<0..1>  slices:<2..24>\n"
+    "# Base BG1/BG2 accept transparent:off, transparent:black, or\n"
+    "# transparent:cgram-XX. Off suppresses an inherited room fill. A fill\n"
+    "# fills the complete low plane before tiles paint, including untiled areas;\n"
+    "# mirror/repeat/clamp remain tile policies and the high band stays sparse.\n"
     "# Action BG virtual depth bands share the same room section. Band 0 is the\n"
     "# new far plane, band 1 the ordinary BG plane, and band 2 its priority-1\n"
     "# plane. Cell rectangles override metatile rules; the ROM priority bit is\n"
@@ -935,6 +1044,7 @@ static const char kLayerManifestPreamble[] =
     "# Backdrop's source key selects the SKYBOX: captured uses current BG2;\n"
     "# rom-GG-MM-bgN (N=1/2) decodes a stock action BG. Backdrop alpha/z/order\n"
     "# control only the residual plane and do not disable that skybox source.\n"
+    "# A named ROM BG source follows the same fill-then-paint rule.\n"
     "# rake tilts a plane in depth (top keeps z, bottom sits at z+rake); bow is\n"
     "# the same tilt EASED. thick extrudes the bottom edge forward. stack fills\n"
     "# the gap with PARALLEL repeats (no tilt, one parallax rate); dir picks which\n"
@@ -1478,7 +1588,12 @@ static void DrawDioramaSkybox(SDL_Renderer *renderer,
   static const SDL_FColor kSkyboxFull = { 1.0f, 1.0f, 1.0f, 1.0f };
   SDL_FColor tint = dim ? kSkyboxDim : kSkyboxFull;
   int indices[6] = { 0, 1, 2, 0, 2, 3 };
-  SDL_SetTextureBlendMode(skybox_texture, SDL_BLENDMODE_NONE);
+  /* Captured skyboxes are opaque resolved surfaces. A ROM composite may carry
+   * authored transparent gaps when a scoped fill is explicitly Off, so keep
+   * its alpha meaningful; opaque default/colour fills render identically. */
+  SDL_SetTextureBlendMode(
+      skybox_texture,
+      rom_source ? SDL_BLENDMODE_BLEND : SDL_BLENDMODE_NONE);
   bool blur = SkyboxBlurEnabled(renderer);
   if (blur) {
     const float source_width = rom_source
@@ -1815,6 +1930,22 @@ static float DioramaVerticalShift(const float mvp[16], float height_scale,
       mirrored, height_scale, -pin, out_w, out_h);
 }
 
+static void DioramaSubmitPlaneEffect(
+    SDL_Renderer *renderer, DioramaPlaneEffectFn plane_effect,
+    void *plane_effect_userdata, int plane,
+    const DioramaProjection *projection, bool viewport_is_output,
+    const SDL_Rect *viewport) {
+  if (!renderer || !plane_effect || !projection || !projection->valid ||
+      !viewport)
+    return;
+  if (!viewport_is_output) SDL_SetRenderViewport(renderer, NULL);
+  DioramaPerformanceScope callback_performance =
+      DioramaPerformance_Begin(kDioramaPerformance_Callback);
+  plane_effect(plane_effect_userdata, plane, projection);
+  DioramaPerformance_End(callback_performance);
+  if (!viewport_is_output) SDL_SetRenderViewport(renderer, viewport);
+}
+
 bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        int authentic_y0,
                        int obj_apron,
@@ -1822,10 +1953,13 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
                        int visible_width, SDL_Rect viewport,
                        SDL_Texture *textures[],
                        uint8_t *pixels[],
+                       const bool bg_transparent_fill_configured[2],
+                       const uint32_t bg_transparent_fill_argb[2],
                        const DioramaCameraPose *cam_pose,
                        float distance_scale,
                        uint32_t additive_plane_mask,
                        uint8_t effect_obj_priority_mask,
+                       uint32_t effect_bg_plane_mask,
                        uint8_t map_group, uint8_t map_number,
                        uint8_t layer_section,
                        const DioramaBgValidSpanPlan *bg2_valid_spans,
@@ -1916,7 +2050,31 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     const int skybox_source =
         DioramaLayerOrder_SkyboxSource(resolved, resolved_count);
     if (skybox_source != kDioramaLayerSource_Captured) {
-      SDL_Texture *named = RomSkyboxTexture(renderer, skybox_source);
+      uint8_t source_group = 0, source_map = 0, source_bg = 0;
+      bool transparent_fill_configured = false;
+      uint32_t transparent_fill_argb = 0;
+      if (bg_transparent_fill_configured && bg_transparent_fill_argb &&
+          DioramaLayerOrder_DecodeActionBgSource(
+              skybox_source, &source_group, &source_map, &source_bg) &&
+          (source_bg == 1 || source_bg == 2)) {
+        transparent_fill_configured =
+            bg_transparent_fill_configured[source_bg - 1];
+        transparent_fill_argb =
+            bg_transparent_fill_argb[source_bg - 1];
+      }
+      bool skybox_state_restore_failed = false;
+      SDL_Texture *named = RomSkyboxTexture(
+          renderer, skybox_source, transparent_fill_configured,
+          transparent_fill_argb,
+          &skybox_state_restore_failed);
+      /* A missing/invalid ROM backdrop can safely fall back to captured BG2.
+       * A failed renderer-state restore cannot: continuing could submit the
+       * rest of the frame to the cache target or through stale clip/viewport
+       * state, producing backend-specific corruption. */
+      if (skybox_state_restore_failed) {
+        if (!viewport_is_output) SDL_SetRenderViewport(renderer, NULL);
+        return false;
+      }
       if (named) {
         skybox_texture = named;
         rom_skybox = true;
@@ -2065,17 +2223,17 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
   int indices[DIORAMA_INDICES_PER_LAYER];
   int nv, ni;
 
-  /* Publish the exact authored shape/window of both low-priority BG planes
-   * and each OBJ priority plane. BG planes use the identical drawable gate
-   * below; a current actor effect can additionally retain its visible OBJ
-   * transform when the isolated source band has no winning pixels. */
+  /* Publish the exact authored shape/window of the effect-addressable BG
+   * planes and each OBJ priority plane. A current attached effect can retain
+   * its transform when the isolated source band has no winning pixels. */
   if (out_projection) {
     for (int i = 0; i < resolved_count; i++) {
       if (resolved[i].alpha == 0) continue;
       const DioramaLayerDesc *layer =
           DioramaDescForPlane(resolved[i].plane);
       if (!DioramaLayerIsProjectable(
-              layer, textures, pixels, effect_obj_priority_mask))
+              layer, textures, pixels, effect_obj_priority_mask,
+              effect_bg_plane_mask))
         continue;
       DioramaPlaneProjection plane = {
         .valid = true,
@@ -2092,6 +2250,9 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
       }
       if (resolved[i].plane == kPpuOverlaySource_Bg2) {
         out_projection->bg2_plane = plane;
+      }
+      if (resolved[i].plane == kDioramaPlane_Bg1Hi) {
+        out_projection->bg1_high_plane = plane;
       }
       const int priority = DioramaPlaneObjectPriority(resolved[i].plane);
       if (priority < 0) continue;
@@ -2161,8 +2322,19 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
      * gaps the way it always has. */
     bool is_backdrop = (layer->plane == kDioramaPlane_Backdrop);
     SDL_Texture *texture = textures[layer->plane];
-    if (!DioramaLayerIsDrawable(layer, textures, pixels))
+    if (!DioramaLayerIsDrawable(layer, textures, pixels)) {
+      /* An isolated BG band can legitimately have no winning pixels at a
+       * particular scroll position while an environmental effect remains
+       * anchored to that plane. Preserve its painter-order callback and
+       * transform without drawing a stale/empty texture. */
+      if (DioramaLayerIsProjectable(
+              layer, textures, pixels, effect_obj_priority_mask,
+              effect_bg_plane_mask))
+        DioramaSubmitPlaneEffect(
+            renderer, plane_effect, plane_effect_userdata, layer->plane,
+            out_projection, viewport_is_output, &viewport);
       continue;
+    }
 
     SDL_FColor shade = {
       1.0f + (layer->shade.r - 1.0f) * shade_mix,
@@ -2559,14 +2731,9 @@ bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
     }
     if (rim_light || dof_or_edge)
       SDL_SetGPURenderState(renderer, NULL);
-    if (plane_effect && out_projection && out_projection->valid) {
-      if (!viewport_is_output) SDL_SetRenderViewport(renderer, NULL);
-      DioramaPerformanceScope callback_performance =
-          DioramaPerformance_Begin(kDioramaPerformance_Callback);
-      plane_effect(plane_effect_userdata, layer->plane, out_projection);
-      DioramaPerformance_End(callback_performance);
-      if (!viewport_is_output) SDL_SetRenderViewport(renderer, &viewport);
-    }
+    DioramaSubmitPlaneEffect(
+        renderer, plane_effect, plane_effect_userdata, layer->plane,
+        out_projection, viewport_is_output, &viewport);
   }
 
   if (!viewport_is_output)
@@ -2597,6 +2764,10 @@ static void DioramaReleaseRendererResources(SDL_Renderer *renderer) {
 
   SDL_DestroyTexture(g_rom_skybox.texture);
   g_rom_skybox.texture = NULL;
+  SDL_DestroyTexture(g_rom_skybox.art_texture);
+  g_rom_skybox.art_texture = NULL;
+  g_rom_skybox.composite_valid = false;
+  g_rom_skybox.resource_failed = false;
 
   SDL_GPUDevice *current_device = DioramaRendererGpuDevice(renderer);
   bool same_device = !g_diorama_shader_device ||

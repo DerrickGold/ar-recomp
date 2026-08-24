@@ -59,11 +59,15 @@ references: [SEAMS.md](SEAMS.md), [rendering-engine.md](rendering-engine.md), an
    local `(8,15)` within that 16x32 pair. Capture therefore matches that bounded pair throughout
    the Bloodpool group rather than maintaining a room allowlist. A colour-key or screen-space
    pixel search is unnecessary.
-9. **The observed enemy fireballs and lightning are independent action objects.** Fireball flight
-   is handler `$BDF0`, resume `$BDD9`, state `$23`, animation `$7E:4000`, with exact
+9. **The observed enemy fireballs and lightning are independent Bloodpool Act-2 action objects.**
+   The room family is `$02/$02-$08`: the ordinary-enemy blob is shared across the act, so exact
+   discovery-room gates would reject legal randomized placements. Fireball flight retains source
+   `$BD76/$BD84` and is handler `$BDF0`, resume `$BDD9`, state `$23`, animation `$7E:4000`, with exact
    visual/composition pairs `$17/$45EF` and `$18/$4610`. The lightning-trap bolt is source `$BD2A`,
    resume `$BD69`, state `$14`, animation `$7E:4000`, handler `$BD36`/`$8683`, with pairs
    `$1F/$46FE` and `$20/$479D`. Their live slot positions and culling extents are the anchors.
+   Both source families fail closed outside the scoped act, and a stage/map handoff retires their
+   observer generations even if the next room immediately reuses the same action slots.
 10. **The Bloodpool boss attack is a third lightning family.** In map `$02/$08`, source `$BDFF`
     creates linked `$7E:5000` children through `$BFDF/$BFF9`. States `$02-$04` are long/medium/
     short VERTICAL strikes using visuals/compositions `$00/$5346`, `$01/$5401`, `$02/$5492`;
@@ -179,6 +183,29 @@ references: [SEAMS.md](SEAMS.md), [rendering-engine.md](rendering-engine.md), an
     50-tuple projectile allowlist. Pharaoh (`0704`) remains intentionally undecorated. Wizard and
     Viper reuse their measured lightning styles, and Viper's Death Heim room also reuses Marahna's
     single-metatile `$43` BG1 torch rule.
+18. **Aitos Act 2's lava and Flaming Wheel need their own measured geometry.** Run
+    `20260823-211358` maps the side-view lakes in rooms `$04-$06` as maximal `$01` BG1 lips over
+    `$05` lava body, with `$02-$04`/`$77` animated surface cells and exact `$33/$34`, `$2C/$32`,
+    or `$33/$32` banks. The wide map-`$06` lake can begin outside the bounded camera scan, so
+    capture walks left to its authentic bank before publishing one reservoir. Flaming Wheel's
+    cyan shots are exact `$8661/$A65D`, state `$08-$0C`, visual/composition `$00/$51B5` through
+    `$03/$51D9` children linked to the same-source root. Full-ring body compositions
+    `$5276/$5398/$54BA/$55DC` place twelve fireballs at exact local centres from `(-24,-24)`
+    through `(24,24)`; the ring effect is anchored to those centres rather than to a circular
+    approximation.
+19. **Priority is projection metadata, not Flaming Wheel identity; Aitos statue fire is a scoped
+    timed actor.** Run `20260824-034218` shows the original wheel body and all five cyan children
+    in OBJ priority 2. The family is still identified by `(stage, room, retained source)`, loaded
+    `$7E:5000` animation/composition, and root/child ancestry. Its exact part words carry raw
+    priority zero, so `$00:8D68` adds the live band from `$008F`; the host now copies that value
+    after matching, allowing Death Heim `$F712` to choose a different priority without weakening
+    the discriminator. Map `0406`'s statue-fire records likewise retain source `$D5B1/$D5C0`,
+    loaded animation `$7E:4000`, and no flip/H-flip facing. State `$18` grows through exact plume
+    art `$1C/$4763`, `$1D/$4776`, `$1E/$4790`; state `$19` sustains the full pillar with
+    `$1F/$47B1` and `$1E/$4790`. State `$1A` is the inactive `$17/$46FD` hold. Several are drawable
+    in the vertical Diorama margin while `$0400` remains set under the authentic-height test, so
+    the enabled activation extension admits only this exact room/source/graphics tuple vertically.
+    Their warm light and buoyant sparks follow the live OBJ plane and the authored plume bounds.
 
 These findings leave no ROM-decompilation blocker to choosing particle and light styles. They
 also mean the first implementation should expose per-instance metadata, rather than a single
@@ -303,6 +330,20 @@ torch-occlusion, and audit contracts on 2026-08-23.
   use the velocity-aligned flame body and wake, with an upward fallback during the stationary wait.
   Both animated BG fire styles sample presentation at 2× while retaining authentic 60Hz capture
   clocks.
+- Aitos Act-2 maps `$04/$04-$06` use a separate side-lava capture. Overlapping at-most-96px light
+  sections and 32 deterministic sparks follow the complete lip, while one fixed 16×14 textured mesh refracts the
+  already-composited world by at most 6.5 output pixels before the HUD. This bounded geometry
+  pass is room-gated for all three volcanic chambers rather than keyed to a camera-local lake
+  signature, is shared by flat and Diorama rendering, and is disabled with Action Effect Particles.
+  Snapshot `snap_02_gf5009` first proved map `$04/$05`'s black rectangles were in the authored BG2
+  source rather than HLE loss; `20260823-232614/snap_00_gf3879` found the same convention at much
+  larger scale in `$04/$06`. The source deliberately mixes colour-zero transparency with opaque
+  black cells and linework. Hardware resolves the former against its final black backdrop, making
+  the two visually continuous. Diorama rooms `0405` and `0406` therefore opt into
+  `bg2 = transparent:black`: the complete live BG2-low presentation plane is filled black first,
+  including untiled regions, and then all low/high tile art paints over it. Their immutable ROM BG2
+  skyboxes follow the same rule. Every non-zero pixel remains intact; the residual Backdrop plane is
+  disabled, and authentic 2D scanout is untouched.
 - The separately identified `$CEEC/$CF16` rocks receive a compact molten halo and close tumbling
   sparks rather than a directional flame wake. Exact waterfall-platform structures receive cool
   lip spray plus downward drips. When at least one is camera-local, one bounded BG2 record adds a
@@ -333,11 +374,17 @@ torch-occlusion, and audit contracts on 2026-08-23.
 - Death Heim rooms admit the measured rematch source only alongside its corresponding room and
   retain every original-room route. Wizard `$F6E2` and Viper `$F72A` reuse the complete existing
   lightning renderers. Minotaur `$F6CA` axes receive a warm spinning light and velocity-aligned
-  sparks; the `$F712` Flaming Wheel body receives a persistent flame shell and embers; `$F760`
+  sparks; the `$F712` Flaming Wheel body receives a persistent flame shell plus emitters at its
+  twelve exact rim-fireball centres, and its exact cyan children receive cool light and wakes; `$F760`
   Ice Dragon balls receive cool light, crystalline particles, and a velocity trail; Tanzara
   source `$F80F` receives restrained generic projectile light/trails for only its exact tuple
   allowlist. Pharaoh remains a negative case. Death Heim Viper room `$07/$06` runs the same
   camera-local `$43` BG1 torch scan as Marahna `$05/$04-$08`.
+- Aitos map `$04/$06` admits the measured `$D5B1/$D5C0` statue-fire family only with its
+  `$7E:4000` animation source. The enabled vertical activation extension advances these visible
+  timed hazards in the Diorama margin, while the effect itself admits only active state `$18/$19`
+  and exact `$1C-$1F` pillar compositions. Idle state `$1A`/`$17` remains undecorated. Active
+  pillars add a warm horizontal spill and distributed rising sparks without changing other enemies.
 - Each source remains an independent light centre. Torches receive a warm two-tier wall spill and
   a small rising ember plume; fireballs receive a heading-aligned hot body, warm spill, and trailing
   sparks; trap lightning receives a tall cyan shaft aura, crawling sparks, and a small impact fan.

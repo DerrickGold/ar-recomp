@@ -106,6 +106,16 @@ typedef enum DioramaStackDirection {
   kDioramaStack_DirectionCount,
 } DioramaStackDirection;
 
+/* How colour-zero / otherwise unpainted pixels in a captured base BG plane are
+ * initialized before that plane's tiles are drawn. This is deliberately a
+ * plane backing, not a tile transform: mirror/repeat/clamp operate on the
+ * authored art above it and can never expose the diorama skybox through gaps. */
+typedef enum DioramaTransparentFill {
+  kDioramaTransparentFill_None = 0,
+  kDioramaTransparentFill_Black,
+  kDioramaTransparentFill_Cgram,
+} DioramaTransparentFill;
+
 /* One plane's override within a room. Each knob has its own `set` flag so a
  * room can author exactly one of them: `set_order` without `set_z` reorders
  * without touching depth-of-field, and vice versa. That also makes export /
@@ -120,6 +130,14 @@ typedef struct DioramaPlaneOverride {
   uint8_t alpha;
   bool set_source;
   uint8_t source;     /* DioramaLayerSource; Backdrop record → skybox */
+  /* Full-plane backing for the base BG1/BG2 capture. A set override with kind
+   * None explicitly disables an inherited fill; an unset override inherits.
+   * `transparent_fill_cgram` is a live CGRAM index, so palette animation
+   * remains visible. Priority-one split surfaces stay sparse and paint above
+   * the backed base plane. */
+  bool set_transparent_fill;
+  uint8_t transparent_fill_kind;  /* DioramaTransparentFill */
+  uint8_t transparent_fill_cgram;
   /* Linear tilt: the bottom edge sits at z + rake. */
   bool set_rake;
   float rake;
@@ -254,6 +272,11 @@ DioramaRoomOverride *DioramaLayerOrder_FindOrAdd(
 const DioramaRoomOverride *DioramaLayerOrder_FindSection(
     const DioramaLayerOrderTable *table, uint8_t map_group,
     uint8_t map_number, uint8_t section);
+/* Mutable lookup without insertion, for reset/edit paths that must not consume
+ * a bounded table slot merely by inspecting an inherited value. */
+DioramaRoomOverride *DioramaLayerOrder_FindMutableSection(
+    DioramaLayerOrderTable *table, uint8_t map_group,
+    uint8_t map_number, uint8_t section);
 DioramaRoomOverride *DioramaLayerOrder_FindOrAddSection(
     DioramaLayerOrderTable *table, uint8_t map_group, uint8_t map_number,
     uint8_t section);
@@ -323,6 +346,15 @@ int DioramaLayerOrder_ResolveSection(const DioramaLayerOrderTable *table,
                                      const DioramaResolvedLayer *defaults,
                                      int default_count,
                                      DioramaResolvedLayer *out, int capacity);
+
+/* Resolve the base/scoped backing for BG1 or BG2. A camera-local section
+ * inherits the room value and replaces it when it authors a fill or explicit
+ * Off. Returns true when a final policy was authored, including explicit Off;
+ * inspect out_kind to determine whether a backing is active. */
+bool DioramaLayerOrder_ResolveTransparentFill(
+    const DioramaLayerOrderTable *table,
+    uint8_t map_group, uint8_t map_number, uint8_t section, int plane,
+    DioramaTransparentFill *out_kind, uint8_t *out_cgram);
 
 /* The plane's manifest token ("bg1", "bg2hi", "obj2", ...), or NULL if the
  * plane index is not one the diorama draws. Stable across versions: these

@@ -453,7 +453,7 @@ and rematch:
 |---|---|---|---|
 | Minotaur axe | `0104`, `$AF5D` | `0702`, `$F6CA` | `$8661/$B008`, state 3, exact spin artwork, same-source parent; warm spin light and sparks |
 | Wizard lightning | `0208`, `$BDFF` | `0703`, `$F6E2` | existing six-strike plus floor-impact family |
-| Flaming Wheel body | `0407`, `$D838` | `0705`, `$F712` | active `$4000`, `$7E:5000` body with root backlink `0` or room-owner `$001C`; flame shell and embers |
+| Flaming Wheel body/shots | `0407`, `$D838` | `0705`, `$F712` | active `$4000`, `$7E:5000` body with root backlink `0` or room-owner `$001C`; four full wheel compositions anchor twelve rim-fire emitters to exact OAM-local centres. `$8661/$A65D` state `$08-$0C` children with exact `$51B5-$51D9` art receive cyan light and wakes. |
 | Viper lightning | `0508`, `$E483` | `0706`, `$F72A` | existing charge/orb/diagonal/ground family; rematch parent backlink `$001C` |
 | Ice Dragon ball | `0608`, `$F161` | `0707`, `$F760` | `$8661/$F2CA`, exact state `$19/$1A` ice-ball artwork, same-source parent; cool light, crystalline trail and particles |
 | Tanzara projectile | — | `0708`, `$F80F` | exact 50-tuple projectile allowlist; restrained generic light and trail |
@@ -464,6 +464,50 @@ Flaming Wheel handler is not used as identity because the same visible body
 legitimately moves among delay, repeat, and boss-AI handlers. This rejects its
 same-source helpers without duplicating a full-strength flame emitter.
 
+Priority is also not identity. The admitted wheel/shot compositions carry raw
+priority zero and the native sprite builder ORs the live `$008F` attribute bias
+into every part. Effect capture therefore matches room + retained source +
+`$7E:5000` graphics/composition + ancestry first, then copies `$008F` bits 12-13
+to `obj_priority`. The original `0407` capture measures priority 2; a Death Heim
+room may choose another band and will still project every one of its five shots
+through the same plane as its source sprite.
+
+Runs `20260824-034218` and `20260824-041410` close the `0406` statue-fire seam.
+Its two facing records retain `$D5B1/$D5C0` and `$7E:4000`. State `$18` grows
+the pillar through `$1C-$1E/$4763-$4790`; state `$19` sustains it with
+`$1F/$47B1` and `$1E/$4790`. State `$1A`'s `$17/$46FD` hold is inactive and
+receives no fire effect. Diorama vertical extension can draw one
+before the authentic 224-line activation window clears `$0400`; when extended
+activation is enabled, only this exact room/source/graphics tuple uses the
+vertical draw window as its activation window. The actor effect inherits live
+OBJ priority and adds a warm horizontal spill plus bounded rising sparks.
+
+Snapshots `runs/20260823-211358/snapshots/snap_02_gf5009` and
+`runs/20260823-232614/snapshots/snap_00_gf3879` prove that maps `0405` and
+`0406` deliberately mix colour-zero BG2 transparency with opaque-black cells.
+The authentic PPU ultimately resolves empty BG2 regions against a final black
+backdrop, so both encodings blend; Diorama's coloured backing exposed the latter
+as rectangles. Each room selects its immutable ROM BG2 source and authors
+`bg2 = transparent:black`. Capture first fills the complete BG2-low presentation
+plane opaque black, including untiled areas, and then paints low/high tile art;
+BG2-high remains sparse and preserves its painter position. A named ROM skybox
+uses the same fill-then-paint rule. Every non-zero black outline/cell remains
+exact, and authentic 2D scanout plus emulated map/VRAM remain unchanged.
+`backdrop alpha:0` prevents the residual framebuffer plane from duplicating the
+room behind the configured presentation surfaces.
+
+This is also a general base-BG property in the per-level Layers editor. BG1 and
+BG2 can use fixed black or a live entry from the current 16x16 CGRAM palette;
+the manifest stores `transparent:cgram-XX`, so palette animation is retained.
+Camera-local sections can author `transparent:off` to suppress an inherited
+room fill; Reset removes that local key and restores inheritance. The authored
+Off bit is snapshotted separately from the resolved colour so immutable ROM
+skyboxes do not mistake it for an unauthored default fill.
+The backing is initialized across the whole captured plane before any tile
+sampling. Mirroring, repeat, clamp, and live-world extension therefore paint
+normally above it without transforming or clipping the backing, while split
+high-priority surfaces remain sparse and preserve their normal paint order.
+
 Aitos map `$04/$01` uses a separate camera-local BG1 semantic: `$DC`, one to
 six `$DD`, then `$DE`, over an equally wide `$DF` row and the following `$E7`
 bubbly row when it exists. This yields the exact 64px/128px lava-surface
@@ -473,6 +517,31 @@ cyclic projectile slots retain source/resume `$CF9E/$CFCD`, exact artwork
 `$CFE3/$22`, `$8661/$23`, and `$CFFE/$24` cover rise, reset/wait, and return;
 bounded position continuity resets the particle generation when a persistent
 slot jumps back to its launch point.
+
+Aitos Act 2 maps `$04-$06` use a different BG1 semantic for their side-on
+lakes: a maximal three-to-63-cell `$01` bright lip, an animated/transparent
+`$02-$04` surface row (`$77` in map `$06`), `$05` lava body, and one of the
+measured `$33/$34`, `$2C/$32`, or `$33/$32` bank pairs. Capture walks back to
+the authentic bank when the camera begins inside map `$06`'s 640px lake, then
+publishes one broad lip identity. Rendering divides that identity into
+overlapping at-most-96px light sections: run `20260823-220042` proved that one
+reservoir-wide radial gradient faded to transparency at long-lake ends even
+though capture was present. Each local section keeps its intense strip on the
+side-view surface while a shallow low-alpha spill rises into the cave; 32
+deterministic sparks are distributed over the whole reservoir instead of
+forming a torch plume.
+
+When an Aitos Act-2 lava room (`0404-0406`) is active and Action Effect
+Particles is enabled, the
+already-composited world is resolved through a fixed 16×14 textured geometry
+grid before the HUD. The gate follows room identity rather than the bounded
+reservoir scan, so crossing a camera window without a complete bank-to-bank
+signature cannot blink the atmosphere off. Interior UVs scale to less than one
+authentic pixel and cap at 6.5 output pixels (the former 3.25px cap was nearly
+invisible at 3420px output), weighted toward the lower room; every outer vertex
+is pinned. This gives flat and Diorama paths visible but restrained heat
+refraction without per-pixel CPU work or backend-specific shader binaries.
+Tilted-HUD mode fails the pass closed so interface art is never distorted.
 
 Run `20260812-000613` adds two deliberately separate Aitos styles. Volcano
 rocks are `$CEEC/$CF16` actors with exact `$8661/$27`, `$2B/$4D2D`, 8px extents,
@@ -1761,11 +1830,14 @@ This boundary-band rule is complementary to the previously audited moving
 cloud/snow policy. Aitos `0401-0403` and Northwall `0601-0605` and `0608`
 classify the complete narrow BG2 as cyclic Repeat, so every authentic and
 synthetic top/bottom row already preserves its motion direction; they do not
-need a `y0=0` band. Death Heim rematches `0702-0706` instead promote their
-finite viewport BG2 to Clamp/fill with available horizontal and vertical
-extents. The undersized `0703` additionally gives world-backed BG1 Mirror/fill
-with an `80/80` horizontal cap. Room `0707` is the rematch exception: viewport
-BG2 uses the world edge with normal motion, a fixed asymmetric `100/96`
+need a `y0=0` band. Tuned Aitos room `0405` likewise uses viewport Repeat/fill,
+but bounds that backdrop to a fixed `128/128` horizontal extent while leaving
+its vertical extent available. Death Heim rematches `0702-0706` instead
+promote their finite viewport BG2 to Clamp/fill with available horizontal and
+vertical extents. The undersized `0703` additionally gives world-backed BG1
+Mirror/fill with an `80/80` horizontal cap. Room `0707` is the rematch
+exception: viewport BG2 uses the world edge with normal motion, a fixed
+asymmetric `100/96`
 horizontal extent, and available vertical extent. Rematch BG1 otherwise keeps
 the canonical world/fill/available policy. The special endpoints stay
 independent: hub `0701` keeps its fog-band policy and final arena `0708` keeps

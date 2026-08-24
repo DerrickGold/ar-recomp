@@ -29,12 +29,17 @@ typedef enum ActionEffectKind {
   kActionEffect_MarahnaBossLightning,
   kActionEffect_AitosLavaPit,
   kActionEffect_AitosLavaFireball,
+  kActionEffect_AitosStatueFire,
   kActionEffect_AitosMoltenRock,
   kActionEffect_AitosWaterSplash,
   kActionEffect_AitosWaterfall,
   kActionEffect_AitosWaterfallMist,
+  /* Act 2's broad, side-on lava lakes use a different source plane and
+   * lighting profile from Act 1's isometric pit mouths. */
+  kActionEffect_AitosLavaReservoir,
   kActionEffect_MinotaurAxe,
   kActionEffect_FlamingWheel,
+  kActionEffect_FlamingWheelProjectile,
   kActionEffect_IceDragonIceBall,
   kActionEffect_TanzaraProjectile,
   kActionEffect_KindCount,
@@ -84,12 +89,15 @@ typedef enum ActionEffectPhase {
   kActionEffectPhase_MarahnaBossLightningGroundCharge,
   kActionEffectPhase_AitosLavaPit,
   kActionEffectPhase_AitosLavaFireballFlight,
+  kActionEffectPhase_AitosStatueFireBreath,
   kActionEffectPhase_AitosMoltenRockFlight,
   kActionEffectPhase_AitosWaterSplash,
   kActionEffectPhase_AitosWaterfallFlow,
   kActionEffectPhase_AitosWaterfallMist,
+  kActionEffectPhase_AitosLavaReservoir,
   kActionEffectPhase_MinotaurAxeFlight,
   kActionEffectPhase_FlamingWheelBody,
+  kActionEffectPhase_FlamingWheelProjectileFlight,
   kActionEffectPhase_IceDragonIceBallFlight,
   kActionEffectPhase_TanzaraProjectileFlight,
   kActionEffectPhase_Count,
@@ -126,6 +134,10 @@ typedef enum ActionEffectRenderLayer {
    * BG2 extension. Unlike the source veil, this is unmasked inside the
    * after-BG2 callback so later BG1/OBJ planes remain in front. */
   kActionEffectRenderLayer_Atmosphere,
+  /* Side-view Aitos Act-2 lava lips are priority-1 BG1 tiles. Keep their
+   * lighting immediately after that exact band instead of projecting through
+   * BG1-low and submitting it as a late world overlay. */
+  kActionEffectRenderLayer_Bg1HighPlane,
   kActionEffectRenderLayer_Count,
 } ActionEffectRenderLayer;
 
@@ -138,6 +150,7 @@ typedef enum ActionEffectProjectionPlane {
   kActionEffectProjectionPlane_Obj = 0,
   kActionEffectProjectionPlane_Bg1,
   kActionEffectProjectionPlane_Bg2,
+  kActionEffectProjectionPlane_Bg1High,
 } ActionEffectProjectionPlane;
 
 typedef enum ActionEffectGeometryKind {
@@ -289,6 +302,11 @@ typedef struct ActionEffectObserver {
    * or lava while their source BG is frozen. */
   uint16_t scene_clock;
   uint8_t scene_clock_valid;
+  /* Scene actor generations are room-local even when adjacent rooms reuse the
+   * same action slot, retained source, and loaded animation family. */
+  uint8_t scene_map_group;
+  uint8_t scene_map_number;
+  uint8_t scene_map_valid;
   ActionEffectObserverTrack tracks[kActionEffectObserverTrackCount];
   ActionEffectObserverTrack
       scene_tracks[kActionSceneEffectObserverTrackCount];
@@ -303,6 +321,12 @@ void ActionEffects_CaptureFrame(ActionEffectObserver *observer,
                                 ActionEffectFrame *dst,
                                 const uint8_t *wram, size_t wram_size,
                                 unsigned elapsed_ticks);
+
+/* Room-level presentation policy for Aitos Act 2's volcanic chambers. Heat
+ * haze belongs to the whole room, so it must not blink when a camera window
+ * temporarily contains no complete map-derived reservoir signature. */
+bool ActionEffects_IsAitosAct2LavaRoom(uint8_t map_group,
+                                      uint8_t map_number);
 
 /* Captures exact, measured scene identities used by the enhanced action pass:
  * Bloodpool/Marahna/Death-Heim-Viper BG1 torches, Aitos lava/water signatures,

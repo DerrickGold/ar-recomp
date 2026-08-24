@@ -81,6 +81,7 @@ typedef enum DioramaEditorParam {
   kDioramaEditorParam_Direction,  /* stack fill side */
   kDioramaEditorParam_Z,
   kDioramaEditorParam_Alpha,
+  kDioramaEditorParam_TransparentFill,
   kDioramaEditorParam_Source,
   kDioramaEditorParam_Order,
 } DioramaEditorParam;
@@ -108,6 +109,9 @@ typedef struct DioramaEditorRow {
    * only their own authored fields, but the Source row must display and step
    * from what is actually being drawn. */
   uint8_t effective_source;
+  bool effective_transparent_fill_set;
+  uint8_t effective_transparent_fill_kind;  /* DioramaTransparentFill */
+  uint8_t effective_transparent_fill_cgram;
   /* True when the row is a parameter of the selected plane, so the overlay can
    * indent it and dim it distinctly from a plane row. */
   bool nested;

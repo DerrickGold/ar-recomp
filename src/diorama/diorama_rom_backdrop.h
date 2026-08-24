@@ -27,6 +27,32 @@ bool DioramaRomBackdrop_LoadActionBg(const uint8_t *rom, size_t rom_size,
                                      uint32_t *out_argb,
                                      size_t out_pixel_count);
 
+/* Same immutable decode, but first fills the complete plane opaque black and
+ * then paints its non-zero tile pixels. This models the authentic final black
+ * backing even where the source is not fully tiled, without changing opaque
+ * black or mixed tile detail. */
+bool DioramaRomBackdrop_LoadActionBgTransparentBlack(
+    const uint8_t *rom, size_t rom_size,
+    uint8_t map_group, uint8_t map_number, uint8_t bg_layer,
+    uint32_t *out_argb, size_t out_pixel_count);
+
+/* General form used by the layer editor: pre-fill the complete output plane
+ * with one opaque ARGB colour, then paint every non-zero source pixel. */
+bool DioramaRomBackdrop_LoadActionBgTransparentFill(
+    const uint8_t *rom, size_t rom_size,
+    uint8_t map_group, uint8_t map_number, uint8_t bg_layer,
+    uint32_t fill_argb, uint32_t *out_argb, size_t out_pixel_count);
+
+/* Decode only authored non-zero tile pixels. Colour-zero pixels and untiled
+ * regions remain transparent; `out_default_fill_argb` receives the source
+ * palette's colour zero so a renderer can cheaply compose either the stock
+ * backdrop or a live fill behind the immutable artwork. */
+bool DioramaRomBackdrop_LoadActionBgSparse(
+    const uint8_t *rom, size_t rom_size,
+    uint8_t map_group, uint8_t map_number, uint8_t bg_layer,
+    uint32_t *out_argb, size_t out_pixel_count,
+    uint32_t *out_default_fill_argb);
+
 /* Compatibility wrapper for the named source that originally established
  * this seam. Equivalent to LoadActionBg($04,$01,BG2). */
 bool DioramaRomBackdrop_LoadAitosSky(const uint8_t *rom, size_t rom_size,

@@ -212,6 +212,12 @@ enum {
   kPpuOverlayFlag_MarkOwningScreenWinner = 64,
 };
 
+typedef enum PpuOverlayTransparentFill {
+  kPpuOverlayTransparentFill_None = 0,
+  kPpuOverlayTransparentFill_Black,
+  kPpuOverlayTransparentFill_Cgram,
+} PpuOverlayTransparentFill;
+
 /* Per-row widescreen padding policy. Inherit selects the whole-layer mask;
  * the remaining values intentionally mirror the host action-background edge
  * vocabulary without making the generic PPU depend on that game module. */
@@ -270,6 +276,15 @@ typedef struct PpuOverlayCapture {
   int16_t x0, x1;
   int16_t y0, y1;
   uint8_t flags;
+  /* Full primary-plane backing applied before isolated pixels are resolved.
+   * It is capture state rather than a flag because CGRAM supplies 256 possible
+   * live colours. Split high-priority surfaces intentionally remain sparse. */
+  uint8_t transparentFillMode;   /* PpuOverlayTransparentFill */
+  uint8_t transparentFillCgram;
+  /* Distinguishes an explicit None policy from no frontend policy. Rendering
+   * treats both as transparent; immutable host presentation may need the
+   * distinction to suppress an inherited/default backing. */
+  uint8_t transparentFillConfigured;
   /* OBJ-only selector. A zero count captures no objects. Games validate any
    * semantic identity (HUD icon, portrait, etc.) before supplying the range. */
   uint8_t oamFirst, oamCount;
@@ -761,6 +776,16 @@ bool PpuOverlaySurfaceHasContent(const Ppu *ppu, PpuOverlaySource source,
 void PpuClearOverlayCaptures(Ppu *ppu);
 bool PpuSetOverlayCapture(Ppu *ppu, PpuOverlaySource source,
                           int x, int y, int width, int height, uint8_t flags);
+/* Configure the primary surface's backing policy independently of capture
+ * geometry; explicit None is retained as configured policy for immutable host
+ * presentation. This may be called before or after PpuSetOverlayCapture. */
+bool PpuSetOverlayTransparentFill(Ppu *ppu, PpuOverlaySource source,
+                                  PpuOverlayTransparentFill mode,
+                                  uint8_t cgram_index);
+/* Resolves the current frame's fill through brightness and CGRAM. Returns
+ * zero for no fill, otherwise opaque ARGB (including opaque black). */
+uint32_t PpuOverlayTransparentFillColor(const Ppu *ppu,
+                                        PpuOverlaySource source);
 
 // Select a contiguous OAM slot range for an already configured OBJ capture.
 // The game remains responsible for validating what those slots represent.

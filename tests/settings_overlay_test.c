@@ -267,6 +267,7 @@ static uint8_t s_fake_group = 0x01;   /* Fillmore */
 static uint8_t s_fake_map = 0x02;     /* act 2, the reported room */
 static uint8_t s_fake_section = kDioramaLayerSection_Room;
 static int s_fake_saves;
+static uint16_t s_fake_cgram[kSettingsOverlayLayerPaletteEntries];
 
 static DioramaLayerOrderTable *FakeLayerTable(void) {
   return &s_fake_layer_table;
@@ -285,6 +286,12 @@ static bool FakeLayerSave(void) {
   return true;
 }
 
+static bool FakeLayerPalette(
+    uint16_t out_cgram[kSettingsOverlayLayerPaletteEntries]) {
+  memcpy(out_cgram, s_fake_cgram, sizeof(s_fake_cgram));
+  return true;
+}
+
 /* Drive the Layers section the way a player would: keys only, no direct calls
  * into the row model. What is asserted is the WIRING -- that a keypress reaches
  * the override table, that the cursor never rests on a caption, that the section
@@ -293,7 +300,10 @@ static bool FakeLayerSave(void) {
 static void CheckLayerEditorSection(void) {
   SettingsOverlay_SetLayerEditorHooks(FakeLayerTable, FakeLayerRoom,
                                       FakeLayerSave);
+  SettingsOverlay_SetLayerPaletteProvider(FakeLayerPalette);
   memset(&s_fake_layer_table, 0, sizeof(s_fake_layer_table));
+  for (int i = 0; i < kSettingsOverlayLayerPaletteEntries; i++)
+    s_fake_cgram[i] = (uint16_t)i;
   s_fake_room_live = true;
   s_fake_section = kDioramaLayerSection_Room;
   s_fake_saves = 0;
@@ -473,6 +483,38 @@ static void CheckLayerEditorSection(void) {
   room = DioramaLayerOrder_Find(&s_fake_layer_table, s_fake_group, s_fake_map);
   CHECK(!room || !DioramaLayerOrder_RoomIsActive(room));
 
+  /* Base BG1/BG2 expose a live 16x16 CGRAM picker. The selection stores the
+   * index (not the sampled RGB), so palette animation remains live. Starting at
+   * $00, Right, Right, Down lands on $12. */
+  RowToKey("bg2");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  RowToKey("bg2.transparent");
+  const int saves_before_palette = s_fake_saves;
+  /* Opening and cancelling the picker is read-only: it must not consume one
+   * of the bounded room override slots before a colour is confirmed. */
+  CHECK(!DioramaLayerOrder_Find(
+      &s_fake_layer_table, s_fake_group, s_fake_map));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+  CHECK(!DioramaLayerOrder_Find(
+      &s_fake_layer_table, s_fake_group, s_fake_map));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  room = DioramaLayerOrder_Find(&s_fake_layer_table, s_fake_group, s_fake_map);
+  const DioramaPlaneOverride *filled =
+      room ? &room->planes[kPpuOverlaySource_Bg2] : NULL;
+  CHECK(filled && filled->set_transparent_fill);
+  CHECK(filled && filled->transparent_fill_kind ==
+                      kDioramaTransparentFill_Cgram);
+  CHECK(filled && filled->transparent_fill_cgram == 0x12);
+  CHECK(s_fake_saves > saves_before_palette);
+  CHECK(SettingsOverlay_HandleKey(SDLK_A, true, false));
+  room = DioramaLayerOrder_Find(&s_fake_layer_table, s_fake_group, s_fake_map);
+  CHECK(room == NULL);  /* clearing the final key recycles the bounded slot */
+
   /* The production room hook also carries a camera-local section. Edits while
    * that section is live must land in its refining record, never the base room. */
   s_fake_section = kDioramaLayerSection_AitosWaterfall;
@@ -488,10 +530,40 @@ static void CheckLayerEditorSection(void) {
                       DioramaLayerOrder_ActionBgSource(0x01, 0x01, 1));
   room = DioramaLayerOrder_Find(&s_fake_layer_table, s_fake_group, s_fake_map);
   CHECK(!room || !DioramaLayerOrder_RoomIsActive(room));
+
+  /* Left in a scoped section authors OFF, rather than merely clearing the
+   * local key and exposing an inherited base-room fill again. */
+  DioramaRoomOverride *base = DioramaLayerOrder_FindOrAdd(
+      &s_fake_layer_table, s_fake_group, s_fake_map);
+  CHECK(base != NULL);
+  if (base) {
+    base->planes[kPpuOverlaySource_Bg2].set_transparent_fill = true;
+    base->planes[kPpuOverlaySource_Bg2].transparent_fill_kind =
+        kDioramaTransparentFill_Black;
+  }
+  RowToKey("bg2");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  RowToKey("bg2.transparent");
+  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, true, false));
+  scoped = DioramaLayerOrder_FindSection(
+      &s_fake_layer_table, s_fake_group, s_fake_map, s_fake_section);
+  CHECK(scoped &&
+        scoped->planes[kPpuOverlaySource_Bg2].set_transparent_fill);
+  CHECK(scoped &&
+        scoped->planes[kPpuOverlaySource_Bg2].transparent_fill_kind ==
+            kDioramaTransparentFill_None);
+  DioramaTransparentFill effective_fill = kDioramaTransparentFill_Black;
+  uint8_t effective_cgram = 0xff;
+  CHECK(DioramaLayerOrder_ResolveTransparentFill(
+      &s_fake_layer_table, s_fake_group, s_fake_map, s_fake_section,
+      kPpuOverlaySource_Bg2, &effective_fill, &effective_cgram));
+  CHECK(effective_fill == kDioramaTransparentFill_None);
   RowToKey("layer_reset_room");
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   CHECK(!DioramaLayerOrder_FindSection(
       &s_fake_layer_table, s_fake_group, s_fake_map, s_fake_section));
+  DioramaLayerOrder_ResetRoom(
+      &s_fake_layer_table, s_fake_group, s_fake_map);
   s_fake_section = kDioramaLayerSection_Room;
 
   /* The final Layers tab is a separate, session-only action-BG tuner. It uses
@@ -585,6 +657,7 @@ static void CheckLayerEditorSection(void) {
   CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));   /* leave submenu */
   /* Leave no hooks behind: later blocks drive other sections. */
   SettingsOverlay_SetLayerEditorHooks(NULL, NULL, NULL);
+  SettingsOverlay_SetLayerPaletteProvider(NULL);
   ActionBgTuner_ResetSession();
 }
 

@@ -593,6 +593,8 @@ static void TestParamRowsFollowTheActiveShape(void) {
   int n = DioramaLayerEditor_BuildRows(&table, &ctx, level, rows,
                                       kDioramaEditorRowMax);
   CHECK(!FindRow(rows, n, kDioramaPlane_Bg2Hi, kDioramaEditorParam_Depth));
+  CHECK(!FindRow(rows, n, kDioramaPlane_Bg2Hi,
+                 kDioramaEditorParam_TransparentFill));
   /* But z/alpha/order apply to any plane, shape or not. */
   CHECK(FindRow(rows, n, kDioramaPlane_Bg2Hi, kDioramaEditorParam_Z));
 
@@ -660,6 +662,25 @@ static void TestUnauthoredKnobsShowDash(void) {
   const DioramaEditorRow *z =
       FindRow(rows, n, kPpuOverlaySource_Bg1, kDioramaEditorParam_Z);
   CHECK(z && !strcmp(z->value, "--"));
+  const DioramaEditorRow *fill = FindRow(
+      rows, n, kPpuOverlaySource_Bg1,
+      kDioramaEditorParam_TransparentFill);
+  CHECK(fill && fill->kind == kDioramaEditorRow_ParamEnum);
+  CHECK(fill && !strcmp(fill->value, "OFF"));
+
+  DioramaPlaneOverride plane;
+  memset(&plane, 0, sizeof(plane));
+  CHECK(DioramaLayerEditor_StepParam(
+      &plane, kDioramaEditorParam_TransparentFill, +1));
+  CHECK(plane.set_transparent_fill);
+  CHECK(plane.transparent_fill_kind == kDioramaTransparentFill_Black);
+  CHECK(DioramaLayerEditor_StepParam(
+      &plane, kDioramaEditorParam_TransparentFill, -1));
+  CHECK(plane.set_transparent_fill);
+  CHECK(plane.transparent_fill_kind == kDioramaTransparentFill_None);
+  DioramaLayerEditor_ClearParam(
+      &plane, kDioramaEditorParam_TransparentFill);
+  CHECK(!plane.set_transparent_fill);
 }
 
 static void TestBackdropSourceIsScopedAndEditable(void) {
