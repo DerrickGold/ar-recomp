@@ -4,6 +4,7 @@
 #include <SDL3/SDL.h>
 
 #include "present.h"
+#include "presentation_outcome.h"
 #include "sim/sim_render_metadata.h"
 
 /* SimShadowLight is declared in present_sim3d_internal.h: the world-map
@@ -27,7 +28,7 @@ SDL_Texture *CreateSimShadowTarget(int w, int h);
 /* Accumulates every classified caster into the screen-space mask, blurs it,
  * and composites it -- or, in an elevated town, hands it to the shared depth
  * pass to be sampled by visible terrain tops only. */
-void DrawSimShadowMask(
+PresentationOutcome DrawSimShadowMask(
     const FrameSlot *slot, bool virtual_height, bool soft_shadows,
     bool terrain_depth_receiver, SDL_Rect source, SDL_Rect viewport,
     const float matrix[16]);

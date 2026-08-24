@@ -13,9 +13,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "crt_post.h"
 #include "gpu_shader_blob.h"
 #include "present_internal.h"
+#include "presentation_geometry.h"
 #include "present_sim3d_internal.h"
 #include "present_sim3d_project.h"
 #include "present_sim3d_shadows.h"
@@ -38,8 +38,18 @@ extern SDL_Texture *g_sim_obj_atlas_texture;
 static SDL_Texture *s_sim_shadow_texture;
 static SDL_Texture *s_sim_shadow_scratch;
 static int s_sim_shadow_w, s_sim_shadow_h;
-static bool s_sim_shadow_alloc_failed;
+static bool s_sim_shadow_unavailable;
 static bool s_sim_shadow_scratch_alloc_failed;
+
+static void DisableSimShadowTargets(void) {
+  SDL_DestroyTexture(s_sim_shadow_texture);
+  SDL_DestroyTexture(s_sim_shadow_scratch);
+  s_sim_shadow_texture = NULL;
+  s_sim_shadow_scratch = NULL;
+  s_sim_shadow_w = s_sim_shadow_h = 0;
+  s_sim_shadow_unavailable = true;
+  s_sim_shadow_scratch_alloc_failed = true;
+}
 
 typedef struct SimShadowBlurUniforms {
   float texel_x, texel_y;
@@ -146,9 +156,11 @@ static const float kSimShadowFootprintDepth = 0.6f;
 SDL_Texture *CreateSimShadowTarget(int w, int h) {
   SDL_Texture *texture = SDL_CreateTexture(
       g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET, w, h);
-  if (texture) {
-    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
-    SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_LINEAR);
+  if (texture &&
+      (!SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND) ||
+       !SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_LINEAR))) {
+    SDL_DestroyTexture(texture);
+    texture = NULL;
   }
   return texture;
 }
@@ -157,6 +169,7 @@ static SDL_Texture *EnsureSimShadowTexture(int w, int h) {
   if (!g_renderer || w <= 0 || h <= 0) return NULL;
   if (s_sim_shadow_texture && s_sim_shadow_w == w && s_sim_shadow_h == h)
     return s_sim_shadow_texture;
+  if (s_sim_shadow_unavailable) return NULL;
   if (s_sim_shadow_texture) SDL_DestroyTexture(s_sim_shadow_texture);
   if (s_sim_shadow_scratch) SDL_DestroyTexture(s_sim_shadow_scratch);
   s_sim_shadow_scratch = NULL;
@@ -164,10 +177,10 @@ static SDL_Texture *EnsureSimShadowTexture(int w, int h) {
   s_sim_shadow_texture = CreateSimShadowTarget(w, h);
   s_sim_shadow_w = w;
   s_sim_shadow_h = h;
-  if (!s_sim_shadow_texture && !s_sim_shadow_alloc_failed) {
-    /* Geometry must survive a target-allocation failure; only the shadow
-     * stage drops out. Logged once so it cannot flood a play session. */
-    s_sim_shadow_alloc_failed = true;
+  if (!s_sim_shadow_texture) {
+    /* A large target rejection is stable for this renderer generation. Do not
+     * turn an optional shadow into a per-frame allocation/stutter loop. */
+    s_sim_shadow_unavailable = true;
     fprintf(stderr, "[sim3d-d4] shadow mask target unavailable: %s\n",
             SDL_GetError());
   }
@@ -229,23 +242,59 @@ static SDL_BlendMode SimShadowAccumulateBlend(void) {
   return mode;
 }
 
-static void BlurSimShadowAxis(SDL_Texture *source, SDL_Texture *destination,
-                              int w, int h, float radius, bool horizontal) {
-  SDL_SetRenderTarget(g_renderer, destination);
-  SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE);
-  SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 0);
-  SDL_RenderClear(g_renderer);
+typedef struct SimShadowAxisResult {
+  PresentationOutcome outcome;
+  bool destination_valid;
+  bool resources_invalid;
+} SimShadowAxisResult;
 
-  if (EnsureSimShadowBlurShader()) {
+static bool RestoreShadowTextureState(
+    SDL_Texture *texture, SDL_BlendMode blend, Uint8 alpha) {
+  bool restored = SDL_SetTextureAlphaMod(texture, alpha);
+  restored = SDL_SetTextureBlendMode(texture, blend) && restored;
+  return restored;
+}
+
+static SimShadowAxisResult BlurSimShadowAxis(
+    SDL_Texture *source, SDL_Texture *destination,
+    int w, int h, float radius, bool horizontal) {
+  SimShadowAxisResult result = {
+    kPresentationOutcome_Complete, false, false,
+  };
+  SDL_BlendMode saved_source_blend = SDL_BLENDMODE_INVALID;
+  Uint8 saved_source_alpha = 255;
+  if (!SDL_GetTextureBlendMode(source, &saved_source_blend) ||
+      !SDL_GetTextureAlphaMod(source, &saved_source_alpha)) {
+    result.outcome = kPresentationOutcome_OptionalOmitted;
+    return result;
+  }
+  PresentationTargetState target_state;
+  const PresentationTargetBeginResult begin =
+      PresentationGeometry_BeginTarget(
+          g_renderer, destination, &target_state);
+  if (begin == kPresentationTargetBegin_StateLost) {
+    result.outcome = kPresentationOutcome_CoreFailure;
+    return result;
+  }
+  if (begin != kPresentationTargetBegin_Ready) {
+    result.outcome = kPresentationOutcome_OptionalOmitted;
+    return result;
+  }
+  bool valid = SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE) &&
+      SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 0) &&
+      SDL_RenderClear(g_renderer);
+
+  if (valid && EnsureSimShadowBlurShader()) {
     SimShadowBlurUniforms uniforms = {
       horizontal ? 1.0f / (float)w : 0.0f,
       horizontal ? 0.0f : 1.0f / (float)h,
       radius,
       0.0f,
     };
-    SDL_SetTextureAlphaMod(source, 255);
-    SDL_SetTextureBlendMode(source, SDL_BLENDMODE_NONE);
-    const bool bound = SDL_SetGPURenderStateFragmentUniforms(
+    const bool source_configured = SDL_SetTextureAlphaMod(source, 255) &&
+        SDL_SetTextureBlendMode(source, SDL_BLENDMODE_NONE);
+    const bool bound = source_configured &&
+        SDL_SetGPURenderStateFragmentUniforms(
             s_sim_shadow_blur_state, 0, &uniforms,
             (Uint32)sizeof(uniforms)) &&
         SDL_SetGPURenderState(g_renderer, s_sim_shadow_blur_state);
@@ -253,51 +302,100 @@ static void BlurSimShadowAxis(SDL_Texture *source, SDL_Texture *destination,
       /* Once submitted, do not run the fallback on an SDL draw error: a
        * backend may already have recorded the draw, and repeating it would
        * double the shadow. The next axis/frame can still continue safely. */
-      if (SDL_RenderTexture(g_renderer, source, NULL, NULL))
+      valid = SDL_RenderTexture(g_renderer, source, NULL, NULL);
+      if (valid)
         Sim3DPerformance_AddDraw(0, 0);
-      SDL_SetGPURenderState(g_renderer, NULL);
-      SDL_SetTextureBlendMode(source, SDL_BLENDMODE_BLEND);
-      return;
+      const bool gpu_state_restored =
+          SDL_SetGPURenderState(g_renderer, NULL);
+      const bool source_restored = RestoreShadowTextureState(
+          source, saved_source_blend, saved_source_alpha);
+      const bool target_restored =
+          PresentationGeometry_EndTarget(g_renderer, &target_state);
+      if (!gpu_state_restored || !target_restored) {
+        result.outcome = kPresentationOutcome_CoreFailure;
+        return result;
+      }
+      if (!source_restored) {
+        result.outcome = kPresentationOutcome_OptionalOmitted;
+        result.resources_invalid = true;
+        return result;
+      }
+      result.destination_valid = valid;
+      if (!valid)
+        result.outcome = kPresentationOutcome_OptionalOmitted;
+      return result;
     }
-    SDL_SetGPURenderState(g_renderer, NULL);
-    SDL_SetTextureBlendMode(source, SDL_BLENDMODE_BLEND);
+    const bool gpu_state_restored =
+        SDL_SetGPURenderState(g_renderer, NULL);
+    const bool source_restored = RestoreShadowTextureState(
+        source, saved_source_blend, saved_source_alpha);
+    const bool target_restored =
+        PresentationGeometry_EndTarget(g_renderer, &target_state);
+    if (!gpu_state_restored || !target_restored) {
+      result.outcome = kPresentationOutcome_CoreFailure;
+      return result;
+    }
+    if (!source_restored) {
+      result.outcome = kPresentationOutcome_OptionalOmitted;
+      result.resources_invalid = true;
+      return result;
+    }
   }
 
-  SDL_BlendMode accumulate = SimShadowAccumulateBlend();
-  if (accumulate == SDL_BLENDMODE_INVALID) {
+  SDL_BlendMode accumulate = valid
+      ? SimShadowAccumulateBlend() : SDL_BLENDMODE_INVALID;
+  if (valid && accumulate == SDL_BLENDMODE_INVALID) {
     /* Without the custom blend the taps would composite instead of average,
      * which reads as a smeared double image rather than a soft edge. Copy the
      * mask through unchanged and leave the shadow hard. */
-    SDL_SetTextureBlendMode(source, SDL_BLENDMODE_NONE);
-    if (SDL_RenderTexture(g_renderer, source, NULL, NULL))
+    valid = SDL_SetTextureBlendMode(source, SDL_BLENDMODE_NONE) &&
+        SDL_RenderTexture(g_renderer, source, NULL, NULL);
+    if (valid)
       Sim3DPerformance_AddDraw(0, 0);
-    SDL_SetTextureBlendMode(source, SDL_BLENDMODE_BLEND);
-    return;
+  } else if (valid) {
+    valid = SDL_SetTextureBlendMode(source, accumulate);
+    int half = kSimShadowBlurTaps / 2;
+    for (int tap = -half; valid && tap <= half; tap++) {
+      float offset = radius * (float)tap / (float)half;
+      SDL_FRect destination_rect = {
+        horizontal ? offset : 0.0f, horizontal ? 0.0f : offset,
+        (float)w, (float)h,
+      };
+      valid = SDL_SetTextureAlphaMod(
+                  source, (Uint8)(255 / kSimShadowBlurTaps)) &&
+          SDL_RenderTexture(g_renderer, source, NULL, &destination_rect);
+      if (valid) Sim3DPerformance_AddDraw(0, 0);
+    }
   }
-  SDL_SetTextureBlendMode(source, accumulate);
-  int half = kSimShadowBlurTaps / 2;
-  for (int tap = -half; tap <= half; tap++) {
-    float offset = radius * (float)tap / (float)half;
-    SDL_FRect destination_rect = {
-      horizontal ? offset : 0.0f, horizontal ? 0.0f : offset,
-      (float)w, (float)h,
-    };
-    SDL_SetTextureAlphaMod(source, (Uint8)(255 / kSimShadowBlurTaps));
-    if (SDL_RenderTexture(g_renderer, source, NULL, &destination_rect))
-      Sim3DPerformance_AddDraw(0, 0);
+  const bool source_restored = RestoreShadowTextureState(
+      source, saved_source_blend, saved_source_alpha);
+  const bool target_restored =
+      PresentationGeometry_EndTarget(g_renderer, &target_state);
+  if (!target_restored) {
+    result.outcome = kPresentationOutcome_CoreFailure;
+    return result;
   }
-  SDL_SetTextureAlphaMod(source, 255);
-  SDL_SetTextureBlendMode(source, SDL_BLENDMODE_BLEND);
+  if (!source_restored) {
+    result.outcome = kPresentationOutcome_OptionalOmitted;
+    result.resources_invalid = true;
+    return result;
+  }
+  result.destination_valid = valid;
+  if (!valid) result.outcome = kPresentationOutcome_OptionalOmitted;
+  return result;
 }
 
 /* Softness is a radius in output pixels, scaled with the viewport so the look
  * is resolution-independent rather than shrinking as the window grows. */
-static void BlurSimShadowMask(SDL_Texture *mask, int w, int h,
-                              unsigned softness_pct) {
-  if (!softness_pct) return;
+static PresentationOutcome BlurSimShadowMask(
+    SDL_Texture *mask, int w, int h, unsigned softness_pct,
+    bool *mask_valid, bool *resources_invalid) {
+  if (mask_valid) *mask_valid = true;
+  if (resources_invalid) *resources_invalid = false;
+  if (!softness_pct) return kPresentationOutcome_Complete;
   float radius =
       (float)softness_pct / (float)kPercentScale * (float)h * 0.02f;
-  if (radius < 0.5f) return;
+  if (radius < 0.5f) return kPresentationOutcome_Complete;
   /* D4b's separable blur alone needs the second full-viewport target. Keep a
    * hard-shadow run from reserving it, which is 31.6 MiB at 4K. Allocation
    * failure degrades softness without touching the primary mask. */
@@ -305,9 +403,24 @@ static void BlurSimShadowMask(SDL_Texture *mask, int w, int h,
     s_sim_shadow_scratch = CreateSimShadowTarget(w, h);
     s_sim_shadow_scratch_alloc_failed = !s_sim_shadow_scratch;
   }
-  if (!s_sim_shadow_scratch) return;
-  BlurSimShadowAxis(mask, s_sim_shadow_scratch, w, h, radius, true);
-  BlurSimShadowAxis(s_sim_shadow_scratch, mask, w, h, radius, false);
+  if (!s_sim_shadow_scratch)
+    return kPresentationOutcome_OptionalOmitted;
+  const SimShadowAxisResult horizontal = BlurSimShadowAxis(
+      mask, s_sim_shadow_scratch, w, h, radius, true);
+  if (horizontal.resources_invalid && resources_invalid)
+    *resources_invalid = true;
+  if (!PresentationOutcome_IsUsable(horizontal.outcome))
+    return horizontal.outcome;
+  if (!horizontal.destination_valid) {
+    if (horizontal.resources_invalid && mask_valid) *mask_valid = false;
+    return kPresentationOutcome_OptionalOmitted;
+  }
+  const SimShadowAxisResult vertical = BlurSimShadowAxis(
+      s_sim_shadow_scratch, mask, w, h, radius, false);
+  if (vertical.resources_invalid && resources_invalid)
+    *resources_invalid = true;
+  if (!vertical.destination_valid && mask_valid) *mask_valid = false;
+  return PresentationOutcome_Combine(horizontal.outcome, vertical.outcome);
 }
 
 /* Where an object is actually DRAWN, in authentic map pixels.
@@ -331,12 +444,14 @@ void SimObjectDrawnWorld(const SimRenderObject *object,
 /* Silhouettes are accumulated into a transparent mask and composited once, so
  * overlapping casters cannot double-darken the ground and the darkened result
  * can never touch sky, dialogs, HUD, or settings. */
-void DrawSimShadowMask(
+PresentationOutcome DrawSimShadowMask(
     const FrameSlot *slot, bool virtual_height, bool soft_shadows,
     bool terrain_depth_receiver, SDL_Rect source, SDL_Rect viewport,
     const float matrix[16]) {
-  if (!g_sim_obj_atlas_texture || !slot->sim.atlas_valid) return;
-  if (!slot->sim.shadow_opacity_pct) return;
+  if (!g_sim_obj_atlas_texture || !slot->sim.atlas_valid)
+    return kPresentationOutcome_Complete;
+  if (!slot->sim.shadow_opacity_pct)
+    return kPresentationOutcome_Complete;
   bool any_caster = false;
   for (size_t i = 0; i < slot->sim.object_count; i++) {
     if (Sim3D_ObjectCastsShadow(&slot->sim.objects[i])) {
@@ -348,13 +463,14 @@ void DrawSimShadowMask(
       SimBackgroundVoxelRenderer_Ready(slot->sim.background_voxel_serial);
   /* An empty mask contributes nothing. Avoid a full-viewport target clear,
    * optional fourteen-draw blur and full-viewport composite on such frames. */
-  if (!any_caster && !voxel_caster) return;
+  if (!any_caster && !voxel_caster)
+    return kPresentationOutcome_Complete;
   int shadow_w, shadow_h;
   Scene3D_CappedTargetSize(
       viewport.w, viewport.h, kSimShadowMaxTargetPixels,
       &shadow_w, &shadow_h);
   SDL_Texture *mask = EnsureSimShadowTexture(shadow_w, shadow_h);
-  if (!mask) return;
+  if (!mask) return kPresentationOutcome_OptionalOmitted;
 
   SDL_Rect local_viewport = { 0, 0, shadow_w, shadow_h };
   float unit_x = ((float)shadow_w / (float)shadow_h) / (float)source.w;
@@ -362,20 +478,26 @@ void DrawSimShadowMask(
   float light_x, light_y;
   SimShadowLight(slot, &light_x, &light_y);
 
-  /* The clip rect belongs to the current target, and the caller may have set
-   * one on the output before this runs; the mask must be built unclipped, and
-   * the composite below then re-clips it. */
-  SDL_Rect saved_clip;
-  bool clipped = SDL_RenderClipEnabled(g_renderer);
-  if (clipped) SDL_GetRenderClipRect(g_renderer, &saved_clip);
+  SDL_BlendMode saved_atlas_blend = SDL_BLENDMODE_INVALID;
+  Uint8 saved_atlas_alpha = 255;
+  if (!SDL_GetTextureBlendMode(g_sim_obj_atlas_texture, &saved_atlas_blend) ||
+      !SDL_GetTextureAlphaMod(g_sim_obj_atlas_texture, &saved_atlas_alpha))
+    return kPresentationOutcome_OptionalOmitted;
 
-  SDL_SetRenderTarget(g_renderer, mask);
-  SDL_SetRenderClipRect(g_renderer, NULL);
-  SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE);
-  SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 0);
-  SDL_RenderClear(g_renderer);
-  SDL_SetTextureBlendMode(g_sim_obj_atlas_texture, SDL_BLENDMODE_BLEND);
-  SDL_SetTextureAlphaMod(g_sim_obj_atlas_texture, 255);
+  PresentationTargetState target_state;
+  const PresentationTargetBeginResult begin =
+      PresentationGeometry_BeginTarget(g_renderer, mask, &target_state);
+  if (begin == kPresentationTargetBegin_StateLost)
+    return kPresentationOutcome_CoreFailure;
+  if (begin != kPresentationTargetBegin_Ready)
+    return kPresentationOutcome_OptionalOmitted;
+  bool mask_valid =
+      SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE) &&
+      SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 0) &&
+      SDL_RenderClear(g_renderer) &&
+      SDL_SetTextureBlendMode(
+          g_sim_obj_atlas_texture, SDL_BLENDMODE_BLEND) &&
+      SDL_SetTextureAlphaMod(g_sim_obj_atlas_texture, 255);
 
   int vertex_count = 0;
   int index_count = 0;
@@ -480,48 +602,89 @@ void DrawSimShadowMask(
     index_count += kSimShadowIndicesPerCaster;
   }
 
-  if (index_count) {
-    if (SDL_RenderGeometry(g_renderer, g_sim_obj_atlas_texture,
-                           s_sim_shadow_vertices, vertex_count,
-                           s_sim_shadow_indices, index_count)) {
+  if (mask_valid && index_count) {
+    mask_valid = SDL_RenderGeometry(
+        g_renderer, g_sim_obj_atlas_texture,
+        s_sim_shadow_vertices, vertex_count,
+        s_sim_shadow_indices, index_count);
+    if (mask_valid) {
       Sim3DPerformance_AddDraw(
           (uint64_t)vertex_count, (uint64_t)index_count);
     }
   }
 
-  if (voxel_caster) {
+  if (mask_valid && voxel_caster) {
     SimBackgroundVoxelRenderParams voxel_params =
         SimVoxelRenderParams(slot, source, local_viewport, matrix);
     SimBackgroundVoxelRenderer_DrawShadowMask(
         g_renderer, &voxel_params, light_x, light_y);
   }
 
-  if (soft_shadows)
-    BlurSimShadowMask(mask, shadow_w, shadow_h,
-                      slot->sim.shadow_softness_pct);
+  PresentationOutcome outcome = mask_valid
+      ? kPresentationOutcome_Complete
+      : kPresentationOutcome_OptionalOmitted;
+  bool shadow_resources_invalid = false;
+  if (mask_valid && soft_shadows) {
+    const PresentationOutcome blur = BlurSimShadowMask(
+        mask, shadow_w, shadow_h, slot->sim.shadow_softness_pct,
+        &mask_valid, &shadow_resources_invalid);
+    outcome = PresentationOutcome_Combine(outcome, blur);
+  }
 
-  SDL_SetRenderTarget(g_renderer, CrtPost_BaseTarget());
-  if (clipped) SDL_SetRenderClipRect(g_renderer, &saved_clip);
+  const bool atlas_restored = RestoreShadowTextureState(
+      g_sim_obj_atlas_texture, saved_atlas_blend, saved_atlas_alpha);
+  const bool target_restored =
+      PresentationGeometry_EndTarget(g_renderer, &target_state);
+  if (!atlas_restored || !target_restored ||
+      !PresentationOutcome_IsUsable(outcome))
+    return kPresentationOutcome_CoreFailure;
+  if (shadow_resources_invalid) {
+    DisableSimShadowTargets();
+    return kPresentationOutcome_OptionalOmitted;
+  }
+  if (!mask_valid) return kPresentationOutcome_OptionalOmitted;
 
   /* In an elevated voxel town this texture is consumed later by the same GPU
    * pass that owns terrain/model depth. Leaving it uncomposited here prevents
    * a screen-space quad from painting straight through a cliff face. */
   if (terrain_depth_receiver) {
-    SDL_SetTextureAlphaMod(mask, 255);
+    Uint8 saved_mask_alpha = 255;
+    if (!SDL_GetTextureAlphaMod(mask, &saved_mask_alpha) ||
+        !SDL_SetTextureAlphaMod(mask, 255)) {
+      DisableSimShadowTargets();
+      return kPresentationOutcome_OptionalOmitted;
+    }
     SimBackgroundVoxelRenderParams voxel_params =
         SimVoxelRenderParams(slot, source, viewport, matrix);
     voxel_params.shadow_mask = mask;
     SimBackgroundVoxelRenderer_DrawTerrainShadow(
         g_renderer, &voxel_params);
-    return;
+    if (!SDL_SetTextureAlphaMod(mask, saved_mask_alpha)) {
+      DisableSimShadowTargets();
+      return kPresentationOutcome_OptionalOmitted;
+    }
+    return outcome;
   }
 
-  SDL_SetTextureAlphaMod(
-      mask, (Uint8)(slot->sim.shadow_opacity_pct * 255 / kPercentScale));
+  Uint8 saved_mask_alpha = 255;
+  if (!SDL_GetTextureAlphaMod(mask, &saved_mask_alpha) ||
+      !SDL_SetTextureAlphaMod(
+          mask, (Uint8)(slot->sim.shadow_opacity_pct * 255 / kPercentScale))) {
+    DisableSimShadowTargets();
+    return kPresentationOutcome_OptionalOmitted;
+  }
   SDL_FRect dst = ToFRect(viewport);
-  if (SDL_RenderTexture(g_renderer, mask, NULL, &dst))
+  const bool composited = SDL_RenderTexture(g_renderer, mask, NULL, &dst);
+  if (composited)
     Sim3DPerformance_AddDraw(0, 0);
-  SDL_SetTextureAlphaMod(mask, 255);
+  if (!SDL_SetTextureAlphaMod(mask, saved_mask_alpha)) {
+    DisableSimShadowTargets();
+    return kPresentationOutcome_OptionalOmitted;
+  }
+  if (!composited)
+    outcome = PresentationOutcome_Combine(
+        outcome, kPresentationOutcome_OptionalOmitted);
+  return outcome;
 }
 
 void PresentSim3DShadows_ResetResources(void) {
@@ -547,6 +710,6 @@ void PresentSim3DShadows_ResetResources(void) {
   if (s_sim_shadow_scratch) SDL_DestroyTexture(s_sim_shadow_scratch);
   s_sim_shadow_scratch = NULL;
   s_sim_shadow_w = s_sim_shadow_h = 0;
-  s_sim_shadow_alloc_failed = false;
+  s_sim_shadow_unavailable = false;
   s_sim_shadow_scratch_alloc_failed = false;
 }

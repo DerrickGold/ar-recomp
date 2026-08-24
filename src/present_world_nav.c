@@ -317,11 +317,12 @@ static bool DrawWorldNavigationActiveRegionHaze(
     }
   }
 
-  if (slot->sim.underlay_defocus_pct && s_sim_underlay_blur_texture) {
-    SDL_SetTextureColorMod(s_sim_underlay_blur_texture, 255, 255, 255);
-    SDL_SetTextureAlphaMod(s_sim_underlay_blur_texture, 255);
+  SDL_Texture *blur = SimUnderlayBlurTexture(slot->sim.underlay_serial);
+  if (slot->sim.underlay_defocus_pct && blur) {
+    SDL_SetTextureColorMod(blur, 255, 255, 255);
+    SDL_SetTextureAlphaMod(blur, 255);
     if (!SDL_RenderGeometry(
-            g_renderer, s_sim_underlay_blur_texture, vertices, vertex_count,
+            g_renderer, blur, vertices, vertex_count,
             indices, index_count))
       return false;
   }

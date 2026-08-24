@@ -56,8 +56,11 @@ void EndEffectBlend(const EffectRenderState *state);
 bool SubmitEffectBatch(EffectBatch *batch);
 
 /* ---- sim entry points present.c calls back into --------------------------
- * Defined in present_sim3d.c. */
-void PresentSim3D(const FrameSlot *slot);
+ * Defined in present_sim3d.c. PresentSim3D requires entry without a custom GPU
+ * render state, owns and unbinds every state it binds, and cannot preserve an
+ * inherited binding because SDL exposes no getter for it. Apply an outer
+ * shader after this stage instead. */
+PresentationOutcome PresentSim3D(const FrameSlot *slot);
 PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot);
 void UploadSimTownCanvas(void);
 void UploadWorldNavigationComposition(const FrameSlot *slot);

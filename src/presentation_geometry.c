@@ -62,6 +62,57 @@ bool PresentationGeometry_PopFullOutput(
   return restored;
 }
 
+static bool RestoreTargetState(
+    SDL_Renderer *renderer, const PresentationTargetState *state) {
+  if (!renderer || !state || !state->valid) return false;
+  bool restored = SDL_SetRenderTarget(renderer, state->target);
+  restored = SDL_SetRenderViewport(
+      renderer, state->viewport_set ? &state->viewport : NULL) && restored;
+  restored = SDL_SetRenderClipRect(
+      renderer, state->clip_enabled ? &state->clip : NULL) && restored;
+  restored = SDL_SetRenderDrawBlendMode(renderer, state->draw_blend) &&
+      restored;
+  restored = SDL_SetRenderDrawColor(
+      renderer, state->draw_r, state->draw_g, state->draw_b,
+      state->draw_a) && restored;
+  return restored;
+}
+
+PresentationTargetBeginResult PresentationGeometry_BeginTarget(
+    SDL_Renderer *renderer, SDL_Texture *target,
+    PresentationTargetState *state) {
+  if (!renderer || !target || !state)
+    return kPresentationTargetBegin_Omitted;
+  memset(state, 0, sizeof(*state));
+  state->target = SDL_GetRenderTarget(renderer);
+  state->viewport_set = SDL_RenderViewportSet(renderer);
+  state->clip_enabled = SDL_RenderClipEnabled(renderer);
+  if (!SDL_GetRenderViewport(renderer, &state->viewport) ||
+      (state->clip_enabled &&
+       !SDL_GetRenderClipRect(renderer, &state->clip)) ||
+      !SDL_GetRenderDrawBlendMode(renderer, &state->draw_blend) ||
+      !SDL_GetRenderDrawColor(
+          renderer, &state->draw_r, &state->draw_g, &state->draw_b,
+          &state->draw_a)) {
+    return kPresentationTargetBegin_Omitted;
+  }
+  state->valid = true;
+  if (!SDL_SetRenderTarget(renderer, target))
+    return kPresentationTargetBegin_Omitted;
+  if (SDL_SetRenderViewport(renderer, NULL) &&
+      SDL_SetRenderClipRect(renderer, NULL)) {
+    return kPresentationTargetBegin_Ready;
+  }
+  return RestoreTargetState(renderer, state)
+      ? kPresentationTargetBegin_Omitted
+      : kPresentationTargetBegin_StateLost;
+}
+
+bool PresentationGeometry_EndTarget(
+    SDL_Renderer *renderer, const PresentationTargetState *state) {
+  return RestoreTargetState(renderer, state);
+}
+
 SDL_Rect PresentationGeometry_CalculateViewport(int output_width,
                                                 int output_height,
                                                 bool stretch,

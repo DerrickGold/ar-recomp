@@ -1828,7 +1828,16 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
   }
 
   if (slot->sim.view == kSimView_Enhanced && slot->sim.separated_valid) {
-    PresentSim3D(slot);
+    SDL_ClearError();
+    const PresentationOutcome sim = PresentSim3D(slot);
+    if (!PresentationOutcome_IsUsable(sim)) {
+      const char *sdl_error = SDL_GetError();
+      SessionFatal_Request(
+          "The enhanced SIM renderer lost its active frame state (%s). "
+          "Restart the game. If this happens again, update your graphics "
+          "driver or select a different SDL renderer.",
+          sdl_error[0] ? sdl_error : "renderer target/state restore failed");
+    }
     return;
   }
   if (slot->sim.view == kSimView_WorldNavigation) {

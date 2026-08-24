@@ -127,8 +127,17 @@ static SDL_Texture *EnsureSimCloudTexture(void) {
             SDL_GetError());
     return NULL;
   }
-  SDL_SetTextureBlendMode(s_sim_cloud_texture, SDL_BLENDMODE_BLEND);
-  SDL_SetTextureScaleMode(s_sim_cloud_texture, SDL_SCALEMODE_LINEAR);
+  if (!SDL_SetTextureBlendMode(
+          s_sim_cloud_texture, SDL_BLENDMODE_BLEND) ||
+      !SDL_SetTextureScaleMode(
+          s_sim_cloud_texture, SDL_SCALEMODE_LINEAR)) {
+    fprintf(stderr, "[sim3d-cloud] shroud texture setup failed: %s\n",
+            SDL_GetError());
+    SDL_DestroyTexture(s_sim_cloud_texture);
+    s_sim_cloud_texture = NULL;
+    s_sim_cloud_alloc_failed = true;
+    return NULL;
+  }
 
   void *pixels = NULL;
   int pitch = 0;

@@ -35,6 +35,38 @@ bool PresentationGeometry_PushFullOutput(
 bool PresentationGeometry_PopFullOutput(
     SDL_Renderer *renderer, const PresentationOutputState *state);
 
+/* Scoped ownership for a temporary render target. Optional effects may omit
+ * themselves when capture/bind is rejected before use; a failed restoration
+ * is different because the caller no longer knows where subsequent draws
+ * would land. The tri-state begin result preserves that distinction without
+ * making every effect duplicate renderer-state bookkeeping. */
+typedef struct PresentationTargetState {
+  SDL_Texture *target;
+  SDL_Rect viewport;
+  SDL_Rect clip;
+  SDL_BlendMode draw_blend;
+  Uint8 draw_r;
+  Uint8 draw_g;
+  Uint8 draw_b;
+  Uint8 draw_a;
+  bool viewport_set;
+  bool clip_enabled;
+  bool valid;
+} PresentationTargetState;
+
+typedef enum PresentationTargetBeginResult {
+  kPresentationTargetBegin_Ready,
+  kPresentationTargetBegin_Omitted,
+  kPresentationTargetBegin_StateLost,
+} PresentationTargetBeginResult;
+
+PresentationTargetBeginResult PresentationGeometry_BeginTarget(
+    SDL_Renderer *renderer, SDL_Texture *target,
+    PresentationTargetState *state);
+/* Attempts every restore step even after one fails. */
+bool PresentationGeometry_EndTarget(
+    SDL_Renderer *renderer, const PresentationTargetState *state);
+
 SDL_Rect PresentationGeometry_CalculateViewport(int output_width,
                                                 int output_height,
                                                 bool stretch,
