@@ -1033,6 +1033,16 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_native_audio_mixer
         COMMAND actraiser_native_audio_mixer_test)
 
+    add_executable(actraiser_native_audio_extension_test
+        tests/native_audio_extension_test.c
+        src/native_audio_extension.c
+    )
+    target_include_directories(actraiser_native_audio_extension_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS})
+    add_test(NAME actraiser_native_audio_extension
+        COMMAND actraiser_native_audio_extension_test)
+
     add_executable(actraiser_dsp_bus_mix_test
         tests/dsp_bus_mix_test.c
         snesrecomp-go/runtime/src/snes/dsp.c

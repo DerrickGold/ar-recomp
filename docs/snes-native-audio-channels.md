@@ -369,26 +369,28 @@ the extended-channel design:
   state loads reconstruct them from `$1A`, and subsequent logical-track writes
   immediately refine them.
 
-This foundation changes levels only. It does not add voices, queue requests, or
-remove any of the four native loss mechanisms. Extended voices must carry the
-same bus enum at allocation time so the existing faders, echo sends,
-replacement mute, and master stage keep working without a second mixer
-architecture.
+The mixer foundation itself changes levels only. The optional Phase-1 extension
+below now adds voices 8/9 and removes music stealing, while deliberately leaving
+request queuing and the other three native loss mechanisms for Phase 2. Added
+voices carry the same bus enum, so faders, echo sends, replacement mute, and the
+master stage need no second mixer architecture.
 
 `AR_AUDIO_BUSLOG=1` logs live gain values and only label transitions (voice,
 Music/SFX, SPC X, `$47`, `$1A`, and DSP register), which makes a replay-sized
 validation readable without dumping every DSP write.
 
-## Recommended extended-channel design
+## Extended-channel design and implementation status
 
 ### Compatibility contract
 
-Keep authentic mode byte-for-byte behaviorally unchanged. Extended mode should
-be opt-in and serialized in settings/save-state compatibility metadata. The
-safest first version treats changing the setting as restart-required; migrating
-live envelopes and driver tracks during a toggle is otherwise ambiguous.
+Authentic mode remains the default eight-voice path. Extended mode is opt-in as
+`audio_extended_channels` / `AR_EXTENDED_AUDIO_CHANNELS`, and changing it is
+restart-required because migrating live envelopes and sequencer ownership
+during a toggle is ambiguous. Quick-state format v5 serializes the two added
+DSP channels and tags the active eight/ten-voice mode in its header, rejecting
+older layouts or a state from the other topology rather than misreading it.
 
-### Phase 1: ten-voice “music-safe effects”
+### Phase 1: ten-voice “music-safe effects” — implemented
 
 Add two virtual DSP voices and map by sequencer provenance:
 
@@ -398,7 +400,7 @@ Add two virtual DSP voices and map by sequencer provenance:
 | 8 | `$10` | port-2 event-effect lane |
 | 9 | `$12` | port-3 ordinary-SFX lane / second half of high-bit event |
 
-This phase must do both of the following:
+The implementation does both of the following:
 
 - Route track `$10/$12` register writes, KON, and KOF to virtual voices 8/9.
 - Stop `$1A` ownership from suppressing song-track writes on native voices 6/7.
@@ -412,6 +414,35 @@ Phase 1 removes music gaps but deliberately preserves one active instance per
 effect lane. A new ordinary SFX can still replace the preceding ordinary SFX,
 and a dual-lane event can still block request processing unless that logic is
 changed too.
+
+Implementation details:
+
+- `DspChannel channel[10]` stores two serialized BRR/envelope voices. Authentic
+  mode still cycles and mixes exactly eight; extended mode cycles ten through
+  the same dry, Music/SFX gain, master, and shared FIR/feedback echo paths.
+- `native_audio_extension.c` maps physical `$40/$80` provenance to virtual
+  voices 8/9. Per-voice registers never reach physical song voices 6/7. KON,
+  KOF, PMON, NON, and EON are split bitwise: the effect bit updates the virtual
+  voice while the native register update preserves that physical song bit.
+- The driver helper at SPC `$0834` has already replaced X with `$64-$67` or
+  `$74-$77` and can see `$1A=0`. The bridge captures its logical sequencer track
+  at `$080A`, ensuring SRCN, ADSR, and GAIN follow pitch/volume to the virtual
+  voice rather than leaking onto music.
+- At BNE instructions `$04D4`, `$05B6`, and `$080E`, extended mode forces
+  fall-through only for a proven song track whose `$47` bit is currently owned.
+  The original sequencer then executes its ordinary update; effect tracks and
+  every other branch retain native behavior.
+- `AR_AUDIO_EXTLOG=1` reports rerouted register/control transitions and each
+  ownership-suppression branch that was prevented.
+
+Paced replay `runs/20260824-154930/` routed complete event voice configuration
+(SRCN/ADSR/GAIN/pitch/volume) to voice 8 and preserved six song-track updates
+that authentic ownership would have skipped. A focused KON replay at
+`runs/20260824-155009/` applied the expected event sample (SRCN `$02`) on voice
+8 while native voice 6 continued keying song SRCN `$0C`. Unit tests cover both
+virtual lanes, bitwise mask preservation, independent SFX gain/echo, and
+serialization. The replay contained no qualifying voice-9 request, so that
+lane's live natural-game validation remains in the Phase-2 fixture work.
 
 ### Phase 2: queued, polyphonic effects
 

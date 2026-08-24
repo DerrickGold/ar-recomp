@@ -43,5 +43,9 @@ void spc_saveload(Spc *spc, SaveLoadInfo *sli);
 
 /* Called immediately before an opcode executes, with its pre-fetch PC. */
 extern void (*g_spc_opcode_trace_hook)(Spc *spc, uint16_t pc);
+/* Optional game-owned correction seam. Runs after the observer above but
+ * before opcode fetch, so it may adjust flags/PC while trace provenance keeps
+ * the original instruction address. */
+extern void (*g_spc_opcode_patch_hook)(Spc *spc, uint16_t pc);
 
 #endif

@@ -40,6 +40,7 @@
 #include "hd_replacement_host.h"
 #include "music_replacements.h"
 #include "audio_presentation_policy.h"
+#include "native_audio_extension.h"
 #include "native_audio_mixer.h"
 #include "render_comparison.h"
 #include "dev/sfx_census.h"
@@ -1276,6 +1277,7 @@ static void AppBoot_InstallSubsystems(AppBoot *app) {
       music_manifest = "game-assets/manifest.ini";
     MusicReplacements_Load(music_manifest);
     MusicReplacements_InstallHooks();
+    NativeAudioExtension_Install();
     NativeAudioMixer_Install();
     AudioPresentationPolicy_Reset();
   }

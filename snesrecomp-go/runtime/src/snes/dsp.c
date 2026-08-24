@@ -59,6 +59,15 @@ static void dsp_handleGain(Dsp* dsp, int ch, bool liveGain);
 static void dsp_decodeBrr(Dsp* dsp, int ch);
 static int16_t dsp_getSample(Dsp* dsp, int ch, int sampleNum, int offset);
 static void dsp_handleNoise(Dsp* dsp);
+static void dsp_applyVoiceRegister(Dsp *dsp, int ch, uint8_t reg,
+                                   uint8_t val);
+static void dsp_applyHardwareVoiceMask(Dsp *dsp, uint8_t addr, uint8_t val,
+                                       uint8_t update_mask);
+
+/* Fixed at application boot by a restart-class game setting. Keeping this
+ * outside Dsp means the legacy saved blob still starts at `ram`; version 5
+ * states nevertheless include both added DspChannel records. */
+static bool s_dsp_extended_voices_enabled;
 
 Dsp* dsp_init(uint8_t *ram) {
   Dsp* dsp = malloc(sizeof(Dsp));
@@ -77,7 +86,7 @@ void dsp_reset(Dsp* dsp) {
   memset(dsp->voiceBus, kDspVoiceBus_Unclassified, sizeof(dsp->voiceBus));
   memset(dsp->ram, 0, sizeof(dsp->ram));
   dsp->ram[0x7c] = 0xff; // set ENDx
-  for(int i = 0; i < 8; i++) {
+  for(int i = 0; i < kDspMaximumVoiceCount; i++) {
     dsp->channel[i].pitch = 0;
     dsp->channel[i].pitchCounter = 0;
     dsp->channel[i].pitchModulation = false;
@@ -149,6 +158,19 @@ static int s_dsp_music_gain_percent = 100;
 static int s_dsp_sfx_gain_percent = 100;
 static bool s_dsp_music_bus_muted;
 
+void dsp_setExtendedVoicesEnabled(bool enabled) {
+  s_dsp_extended_voices_enabled = enabled;
+}
+
+bool dsp_extendedVoicesEnabled(void) {
+  return s_dsp_extended_voices_enabled;
+}
+
+int dsp_activeVoiceCount(void) {
+  return kDspHardwareVoiceCount +
+      (s_dsp_extended_voices_enabled ? kDspExtendedVoiceCount : 0);
+}
+
 static int dsp_clampBusGain(int percent) {
   if(percent < 0) return 0;
   if(percent > 100) return 100;
@@ -156,14 +178,15 @@ static int dsp_clampBusGain(int percent) {
 }
 
 void dsp_setVoiceBus(Dsp *dsp, int ch, DspVoiceBus bus) {
-  if(!dsp || ch < 0 || ch >= 8) return;
+  if(!dsp || ch < 0 || ch >= kDspMaximumVoiceCount) return;
   if(bus < kDspVoiceBus_Unclassified || bus > kDspVoiceBus_Sfx)
     bus = kDspVoiceBus_Unclassified;
   dsp->voiceBus[ch] = (uint8_t)bus;
 }
 
 DspVoiceBus dsp_getVoiceBus(const Dsp *dsp, int ch) {
-  if(!dsp || ch < 0 || ch >= 8) return kDspVoiceBus_Unclassified;
+  if(!dsp || ch < 0 || ch >= kDspMaximumVoiceCount)
+    return kDspVoiceBus_Unclassified;
   return (DspVoiceBus)dsp->voiceBus[ch];
 }
 
@@ -228,31 +251,29 @@ void (*g_dsp_voice_kon_hook)(int ch, uint8_t srcn, uint16_t decodeOffset,
  *                                      same srcn recurs across songs tells
  *                                      which.
  *
- * Kept as a file-static side table rather than a Dsp field on purpose:
- * dsp_saveload serialises sizeof(Dsp) wholesale, so widening the struct would
- * invalidate every existing savestate. This is pure runtime diagnostics. */
+ * Kept as a file-static side table because it is pure runtime diagnostics and
+ * should not influence deterministic save continuation. */
 static int dsp_musicLeakEnabled(void) {
   static int enabled = -1;
   if(enabled < 0) enabled = getenv("AR_MUSICLEAK") ? 1 : 0;
   return enabled;
 }
-static uint8_t s_leakKonSrcn[8];  /* srcn latched at key-on, per voice */
-static int s_leakPeak[8];         /* peak |sampleOut| this window, per voice */
-static int s_leakHits[8];         /* nonzero-output samples = how sustained */
-static uint8_t s_leakLiveSrcn[8]; /* last live srcn observed leaking, per voice */
-static uint8_t s_leakKonSeen[8];  /* kon srcn in effect for the AUDIBLE samples.
-                                   * Distinct from s_leakKonSrcn, which by flush
-                                   * time may already hold a LATER key-on that was
-                                   * muted and so contributed no samples. */
-static int s_leakSlipped[8];      /* samples where kon >= gate but live < gate */
+static uint8_t s_leakKonSrcn[kDspMaximumVoiceCount];
+static int s_leakPeak[kDspMaximumVoiceCount];
+static int s_leakHits[kDspMaximumVoiceCount];
+static uint8_t s_leakLiveSrcn[kDspMaximumVoiceCount];
+/* kon srcn in effect for the AUDIBLE samples. Distinct from s_leakKonSrcn,
+ * which by flush time may already hold a later key-on that was muted. */
+static uint8_t s_leakKonSeen[kDspMaximumVoiceCount];
+static int s_leakSlipped[kDspMaximumVoiceCount];
 /* srcn is only an INDEX into dirPage — the same srcn number denotes different
  * samples under different directories. The resolved BRR start address is the
  * sample's real identity, so record both: two voices reported as "srcn 00" are
  * only the same sound if their brr addresses agree. */
-static uint16_t s_leakKonDir[8];
-static uint16_t s_leakKonBrr[8];
-static uint16_t s_leakSeenDir[8];
-static uint16_t s_leakSeenBrr[8];
+static uint16_t s_leakKonDir[kDspMaximumVoiceCount];
+static uint16_t s_leakKonBrr[kDspMaximumVoiceCount];
+static uint16_t s_leakSeenDir[kDspMaximumVoiceCount];
+static uint16_t s_leakSeenBrr[kDspMaximumVoiceCount];
 
 static void dsp_musicLeakNoteKon(Dsp* dsp, int ch) {
   if(!dsp_musicLeakEnabled()) return;
@@ -278,7 +299,7 @@ static void dsp_musicLeakFlush(void) {
   static unsigned window;
   if(++window < 32000) return;   /* ~1 s of DSP samples */
   window = 0;
-  for(int ch = 0; ch < 8; ch++) {
+  for(int ch = 0; ch < dsp_activeVoiceCount(); ch++) {
     if(!s_leakHits[ch]) continue;
     fprintf(stderr, "[musicleak] ch=%d kon_srcn=%02x live_srcn=%02x dir=%04x "
             "brr=%04x peak=%5d duty=%3u%% slipped=%3u%% %s\n",
@@ -294,7 +315,8 @@ static void dsp_musicLeakFlush(void) {
 void dsp_cycle(Dsp* dsp) {
   int totalL = 0;
   int totalR = 0;
-  for(int i = 0; i < 8; i++) {
+  const int voice_count = dsp_activeVoiceCount();
+  for(int i = 0; i < voice_count; i++) {
     dsp_cycleChannel(dsp, i);
     if(dsp_voiceIsPresentationMuted(dsp, i))
       continue;
@@ -318,7 +340,8 @@ void dsp_cycle(Dsp* dsp) {
   // matches this canon dry mix. No-op (totalL/R unchanged) when disabled or
   // unproven, so default output is byte-identical. Echo below applies to the
   // chosen dry mix either way.
-  if (dsp->shadow && s_dsp_music_gain_percent == 100 &&
+  if (dsp->shadow && !s_dsp_extended_voices_enabled &&
+      s_dsp_music_gain_percent == 100 &&
       s_dsp_sfx_gain_percent == 100 && !s_dsp_music_bus_muted &&
       g_dsp_voice_mute_srcn_min < 0) {
     int sL = totalL, sR = totalR;
@@ -380,7 +403,7 @@ static void dsp_handleEcho(Dsp* dsp, int* outputL, int* outputR) {
   *outputR = outR < -0x8000 ? -0x8000 : (outR > 0x7fff ? 0x7fff : outR); // clamp 16-bit
   // get echo input
   int inL = 0, inR = 0;
-  for(int i = 0; i < 8; i++) {
+  for(int i = 0; i < dsp_activeVoiceCount(); i++) {
     if(dsp_voiceIsPresentationMuted(dsp, i))
       continue; /* muted music voices must not bleed through the echo */
     if(dsp->channel[i].echoEnable) {
@@ -420,7 +443,14 @@ static void dsp_cycleChannel(Dsp* dsp, int ch) {
   // handle pitch counter
   uint16_t pitch = dsp->channel[ch].pitch;
   if(ch > 0 && dsp->channel[ch].pitchModulation) {
-    int factor = (dsp->channel[ch - 1].sampleOut >> 4) + 0x400;
+    /* Preserve the effect lanes' original logical predecessors after they
+     * move beyond the eight-bit hardware namespace. Track $10 originally
+     * occupied voice 6 (predecessor 5); track $12 follows the remapped $10
+     * lane for paired high-bit events. Native voices remain ch-1 exactly. */
+    int predecessor = ch - 1;
+    if(ch == kDspHardwareVoiceCount)
+      predecessor = 5;
+    int factor = (dsp->channel[predecessor].sampleOut >> 4) + 0x400;
     pitch = (pitch * factor) >> 10;
     if(pitch > 0x3fff) pitch = 0x3fff;
   }
@@ -526,9 +556,11 @@ static void dsp_cycleChannel(Dsp* dsp, int ch) {
   }
   if(doingDirectGain) dsp->channel[ch].gain = dsp->channel[ch].gainValue;
   // set outputs
-  dsp->ram[(ch << 4) | 8] = dsp->channel[ch].gain >> 4;
+  if(ch < kDspHardwareVoiceCount)
+    dsp->ram[(ch << 4) | 8] = dsp->channel[ch].gain >> 4;
   sample = (sample * dsp->channel[ch].gain) >> 11;
-  dsp->ram[(ch << 4) | 9] = sample >> 7;
+  if(ch < kDspHardwareVoiceCount)
+    dsp->ram[(ch << 4) | 9] = sample >> 7;
   dsp->channel[ch].sampleOut = sample;
 }
 
@@ -623,7 +655,8 @@ static void dsp_decodeBrr(Dsp* dsp, int ch) {
       dsp->channel[ch].adsrState = 4;
       dsp->channel[ch].gain = 0;
     }
-    dsp->ram[0x7c] |= 1 << ch; // set ENDx
+    if(ch < kDspHardwareVoiceCount)
+      dsp->ram[0x7c] |= 1 << ch; // set ENDx
   }
   uint8_t header = dsp->apu_ram[dsp->channel[ch].decodeOffset++];
   int shift = header >> 4;
@@ -682,51 +715,108 @@ uint8_t dsp_read(Dsp* dsp, uint8_t adr) {
   return dsp->ram[adr];
 }
 
+static void dsp_applyVoiceRegister(Dsp *dsp, int ch, uint8_t reg,
+                                   uint8_t val) {
+  if(!dsp || ch < 0 || ch >= kDspMaximumVoiceCount || reg > 7)
+    return;
+  DspChannel *voice = &dsp->channel[ch];
+  switch(reg) {
+    case 0:
+      voice->volumeL = val;
+      break;
+    case 1:
+      voice->volumeR = val;
+      break;
+    case 2:
+      voice->pitch = (voice->pitch & 0x3f00) | val;
+      break;
+    case 3:
+      voice->pitch = ((voice->pitch & 0x00ff) | (val << 8)) & 0x3fff;
+      break;
+    case 4:
+      voice->srcn = val;
+      break;
+    case 5:
+      voice->adsrRates[0] = rateValues[(val & 0xf) * 2 + 1];
+      voice->adsrRates[1] = rateValues[((val & 0x70) >> 4) * 2 + 16];
+      voice->useGain = (val & 0x80) == 0;
+      break;
+    case 6:
+      voice->adsrRates[2] = rateValues[val & 0x1f];
+      voice->sustainLevel = (((val & 0xe0) >> 5) + 1) * 0x100;
+      break;
+    case 7:
+      voice->directGain = (val & 0x80) == 0;
+      if(val & 0x80) {
+        voice->gainMode = (val & 0x60) >> 5;
+        voice->adsrRates[3] = rateValues[val & 0x1f];
+      } else {
+        voice->gainValue = (val & 0x7f) * 16;
+      }
+      break;
+  }
+}
+
+void dsp_writeVirtualVoiceRegister(Dsp *dsp, int ch, uint8_t source_addr,
+                                   uint8_t val) {
+  if(ch < kDspHardwareVoiceCount || ch >= kDspMaximumVoiceCount)
+    return;
+  audio_trace_on_reg_write(source_addr, val);
+  dsp_applyVoiceRegister(dsp, ch, source_addr & 0x0f, val);
+}
+
+void dsp_writeVirtualVoiceControl(Dsp *dsp, int ch, uint8_t global_addr,
+                                  bool enabled) {
+  if(!dsp || ch < kDspHardwareVoiceCount ||
+      ch >= kDspMaximumVoiceCount)
+    return;
+  DspChannel *voice = &dsp->channel[ch];
+  switch(global_addr) {
+    case 0x4c: voice->keyOn = enabled; break;
+    case 0x5c: voice->keyOff = enabled; break;
+    case 0x2d: voice->pitchModulation = enabled; break;
+    case 0x3d: voice->useNoise = enabled; break;
+    case 0x4d: voice->echoEnable = enabled; break;
+  }
+}
+
+static void dsp_applyHardwareVoiceMask(Dsp *dsp, uint8_t addr, uint8_t val,
+                                       uint8_t update_mask) {
+  if(!dsp) return;
+  for(int ch = 0; ch < kDspHardwareVoiceCount; ch++) {
+    const uint8_t bit = (uint8_t)(1u << ch);
+    if(!(update_mask & bit)) continue;
+    const bool enabled = (val & bit) != 0;
+    switch(addr) {
+      case 0x4c: dsp->channel[ch].keyOn = enabled; break;
+      case 0x5c: dsp->channel[ch].keyOff = enabled; break;
+      case 0x2d: dsp->channel[ch].pitchModulation = enabled; break;
+      case 0x3d: dsp->channel[ch].useNoise = enabled; break;
+      case 0x4d: dsp->channel[ch].echoEnable = enabled; break;
+    }
+  }
+  dsp->ram[addr] =
+      (uint8_t)((dsp->ram[addr] & ~update_mask) | (val & update_mask));
+}
+
+void dsp_writeHardwareVoiceMask(Dsp *dsp, uint8_t addr, uint8_t val,
+                                uint8_t update_mask) {
+  if(addr != 0x4c && addr != 0x5c && addr != 0x2d &&
+      addr != 0x3d && addr != 0x4d)
+    return;
+  audio_trace_on_reg_write(addr, val);
+  dsp_applyHardwareVoiceMask(dsp, addr, val, update_mask);
+}
+
 void dsp_write(Dsp* dsp, uint8_t adr, uint8_t val) {
   audio_trace_on_reg_write(adr, val);
   int ch = adr >> 4;
+  if(ch < kDspHardwareVoiceCount && (adr & 0x0f) <= 7) {
+    dsp_applyVoiceRegister(dsp, ch, adr & 0x0f, val);
+    dsp->ram[adr] = val;
+    return;
+  }
   switch(adr) {
-    case 0x00: case 0x10: case 0x20: case 0x30: case 0x40: case 0x50: case 0x60: case 0x70: {
-      dsp->channel[ch].volumeL = val;
-      break;
-    }
-    case 0x01: case 0x11: case 0x21: case 0x31: case 0x41: case 0x51: case 0x61: case 0x71: {
-      dsp->channel[ch].volumeR = val;
-      break;
-    }
-    case 0x02: case 0x12: case 0x22: case 0x32: case 0x42: case 0x52: case 0x62: case 0x72: {
-      dsp->channel[ch].pitch = (dsp->channel[ch].pitch & 0x3f00) | val;
-      break;
-    }
-    case 0x03: case 0x13: case 0x23: case 0x33: case 0x43: case 0x53: case 0x63: case 0x73: {
-      dsp->channel[ch].pitch = ((dsp->channel[ch].pitch & 0x00ff) | (val << 8)) & 0x3fff;
-      break;
-    }
-    case 0x04: case 0x14: case 0x24: case 0x34: case 0x44: case 0x54: case 0x64: case 0x74: {
-      dsp->channel[ch].srcn = val;
-      break;
-    }
-    case 0x05: case 0x15: case 0x25: case 0x35: case 0x45: case 0x55: case 0x65: case 0x75: {
-      dsp->channel[ch].adsrRates[0] = rateValues[(val & 0xf) * 2 + 1];
-      dsp->channel[ch].adsrRates[1] = rateValues[((val & 0x70) >> 4) * 2 + 16];
-      dsp->channel[ch].useGain = (val & 0x80) == 0;
-      break;
-    }
-    case 0x06: case 0x16: case 0x26: case 0x36: case 0x46: case 0x56: case 0x66: case 0x76: {
-      dsp->channel[ch].adsrRates[2] = rateValues[val & 0x1f];
-      dsp->channel[ch].sustainLevel = (((val & 0xe0) >> 5) + 1) * 0x100;
-      break;
-    }
-    case 0x07: case 0x17: case 0x27: case 0x37: case 0x47: case 0x57: case 0x67: case 0x77: {
-      dsp->channel[ch].directGain = (val & 0x80) == 0;
-      if(val & 0x80) {
-        dsp->channel[ch].gainMode = (val & 0x60) >> 5;
-        dsp->channel[ch].adsrRates[3] = rateValues[val & 0x1f];
-      } else {
-        dsp->channel[ch].gainValue = (val & 0x7f) * 16;
-      }
-      break;
-    }
     case 0x0c: {
       dsp->masterVolumeL = val;
       break;
@@ -752,15 +842,11 @@ void dsp_write(Dsp* dsp, uint8_t adr, uint8_t val) {
                 snes_frame_counter, val, dsp->ram[0x5c], (int)dsp->mute,
                 dsp->ram[0x5d], dsp->masterVolumeL);
       }
-      for(int ch = 0; ch < 8; ch++) {
-        dsp->channel[ch].keyOn = val & (1 << ch);
-      }
+      dsp_applyHardwareVoiceMask(dsp, adr, val, 0xff);
       break;
     }
     case 0x5c: {
-      for(int ch = 0; ch < 8; ch++) {
-        dsp->channel[ch].keyOff = val & (1 << ch);
-      }
+      dsp_applyHardwareVoiceMask(dsp, adr, val, 0xff);
       break;
     }
     case 0x6c: {
@@ -779,21 +865,15 @@ void dsp_write(Dsp* dsp, uint8_t adr, uint8_t val) {
       break;
     }
     case 0x2d: {
-      for(int i = 0; i < 8; i++) {
-        dsp->channel[i].pitchModulation = val & (1 << i);
-      }
+      dsp_applyHardwareVoiceMask(dsp, adr, val, 0xff);
       break;
     }
     case 0x3d: {
-      for(int i = 0; i < 8; i++) {
-        dsp->channel[i].useNoise = val & (1 << i);
-      }
+      dsp_applyHardwareVoiceMask(dsp, adr, val, 0xff);
       break;
     }
     case 0x4d: {
-      for(int i = 0; i < 8; i++) {
-        dsp->channel[i].echoEnable = val & (1 << i);
-      }
+      dsp_applyHardwareVoiceMask(dsp, adr, val, 0xff);
       break;
     }
     case 0x5d: {

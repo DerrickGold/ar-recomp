@@ -4,6 +4,7 @@
 #include <stdlib.h>
 
 #include "common_rtl.h"
+#include "native_audio_extension.h"
 #include "run_dir.h"
 #include "snes/apu.h"
 #include "snes/spc.h"
@@ -52,7 +53,8 @@ static void OnSpcOpcode(Spc *spc, uint16_t pc) {
   NativeAudioTraceModel_SpcOpcode(
       pc, spc->a, spc->x, spc->apu->ram[0x35], spc->apu->inPorts[3],
       snes_apu_cycle_count());
-  if (pc == 0x04D0 || pc == 0x05B1 || pc == 0x080A) {
+  if (!NativeAudioExtension_IsEnabled() &&
+      (pc == 0x04D0 || pc == 0x05B1 || pc == 0x080A)) {
     NativeAudioTraceModel_MusicUpdateSuppressed(
         pc, spc->x, spc->apu->ram[0x47], spc->apu->ram[0x1A],
         snes_apu_cycle_count());

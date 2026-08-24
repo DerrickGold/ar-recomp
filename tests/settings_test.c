@@ -98,8 +98,9 @@ static void TestDefaultsAndMetadata(void) {
    * host FPS overlay adds one Video row, and frame generation adds one explicit
    * 30-to-60 Hz validation cadence. The runtime-only render comparison adds
    * one keyboard and one gamepad binding row, but deliberately no persisted
-   * mode setting. */
-  CHECK(g_setting_desc_count == 274);
+   * mode setting. The native-audio work then added one restart-class extended
+   * channel toggle. */
+  CHECK(g_setting_desc_count == 275);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -149,6 +150,7 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(g_settings.audio_master_volume == 100);
   CHECK(g_settings.audio_music_volume == 100);
   CHECK(g_settings.audio_sfx_volume == 100);
+  CHECK(!g_settings.audio_extended_channels);
   CHECK(g_settings.audio_dialog_blip);
   CHECK(g_settings.turbo_multiplier == 8);
   CHECK(g_settings.warp_target == 0x0101);
@@ -270,6 +272,8 @@ static void TestDefaultsAndMetadata(void) {
   const SettingDesc *volume = Settings_Find("audio_master_volume");
   const SettingDesc *music_volume = Settings_Find("audio_music_volume");
   const SettingDesc *sfx_volume = Settings_Find("audio_sfx_volume");
+  const SettingDesc *extended_channels =
+      Settings_Find("audio_extended_channels");
   const SettingDesc *warp = Settings_Find("warp_target");
   const SettingDesc *warp_action = Settings_Find("warp_now");
   const SettingDesc *save_state_action = Settings_Find("save_state");
@@ -312,6 +316,10 @@ static void TestDefaultsAndMetadata(void) {
         sfx_volume->apply == kApply_Callback &&
         sfx_volume->minval == 0 && sfx_volume->maxval == 100 &&
         sfx_volume->step == 5);
+  CHECK(extended_channels &&
+        extended_channels->category == kSettingCat_Audio &&
+        extended_channels->type == kSettingType_Bool &&
+        extended_channels->apply == kApply_Restart);
   CHECK(warp && warp->type == kSettingType_Custom);
   CHECK(!Settings_IsMenuVisible(warp));
   CHECK(!Settings_IsMenuVisible(warp_action));
@@ -539,6 +547,7 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
       "audio_master_volume = 70%\n"
       "audio_music_volume = 60%\n"
       "audio_sfx_volume = 75%\n"
+      "audio_extended_channels = On\n"
       "extended_aspect = 16:10\n"
       "pixel_aspect = Square pixels\n"
       "ws_sprites = On\n"
@@ -565,6 +574,7 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
   CHECK(g_settings.audio_master_volume == 85); /* env > settings > config */
   CHECK(g_settings.audio_music_volume == 55);
   CHECK(g_settings.audio_sfx_volume == 75);
+  CHECK(g_settings.audio_extended_channels);
   CHECK(!g_settings.ws_sprites);
   CHECK(g_settings.display_mode == kDisplayMode_Custom);
   CHECK(Settings_ExtendedAspectX() == 16 && Settings_ExtendedAspectY() == 10);
@@ -581,6 +591,7 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
   CHECK(FileContains(saved_path, "audio_master_volume = 40%"));
   CHECK(FileContains(saved_path, "audio_music_volume = 55%"));
   CHECK(FileContains(saved_path, "audio_sfx_volume = 75%"));
+  CHECK(FileContains(saved_path, "audio_extended_channels = On"));
   CHECK(FileContains(saved_path, "audio_frequency = 32.04 kHz"));
   CHECK(FileContains(saved_path, "turbo_multiplier = 8"));
   CHECK(FileContains(saved_path, "cheat_moonjump = On"));
@@ -698,6 +709,8 @@ static void TestMutationApi(void) {
   const SettingDesc *volume = Settings_Find("audio_master_volume");
   const SettingDesc *music_volume = Settings_Find("audio_music_volume");
   const SettingDesc *sfx_volume = Settings_Find("audio_sfx_volume");
+  const SettingDesc *extended_channels =
+      Settings_Find("audio_extended_channels");
   CHECK(Settings_SetLong(volume, 87) == kSettingChange_Applied);
   CHECK(g_settings.audio_master_volume == 85);
   CHECK(s_observer_desc == volume);
@@ -712,6 +725,9 @@ static void TestMutationApi(void) {
   CHECK(g_settings.audio_music_volume == 65);
   CHECK(Settings_SetLong(sfx_volume, 42) == kSettingChange_Applied);
   CHECK(g_settings.audio_sfx_volume == 40);
+  CHECK(Settings_SetLong(extended_channels, 1) ==
+        kSettingChange_RestartPending);
+  CHECK(g_settings.audio_extended_channels);
 
   const SettingDesc *dialog_blip = Settings_Find("audio_dialog_blip");
   CHECK(Settings_SetLong(dialog_blip, 0) == kSettingChange_Applied);

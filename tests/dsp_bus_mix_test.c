@@ -131,10 +131,97 @@ static void TestEchoSendFollowsBus(void) {
   dsp_free(live);
 }
 
+static void TestExtendedVoiceIsMixedAndIndependentlyControlled(void) {
+  uint8_t live_ram[0x10000], muted_ram[0x10000];
+  dsp_setExtendedVoicesEnabled(true);
+  CHECK(dsp_activeVoiceCount() == 10);
+  Dsp *live = NewDsp(live_ram);
+  Dsp *muted = NewDsp(muted_ram);
+  ConfigureVoice(live, 8, kDspVoiceBus_Sfx, true);
+  ConfigureVoice(muted, 8, kDspVoiceBus_Sfx, true);
+  live->echoWrites = muted->echoWrites = true;
+
+  dsp_setBusGains(100, 100);
+  dsp_cycle(live);
+  CHECK(live->sampleBuffer[0] != 0);
+  CHECK(live_ram[0] != 0 || live_ram[1] != 0 ||
+        live_ram[2] != 0 || live_ram[3] != 0);
+
+  dsp_setBusGains(100, 0);
+  dsp_cycle(muted);
+  CHECK(muted->sampleBuffer[0] == 0);
+  CHECK(muted_ram[0] == 0 && muted_ram[1] == 0 &&
+        muted_ram[2] == 0 && muted_ram[3] == 0);
+
+  /* A split effect mask updates the unowned native bits only. Voice 6 keeps
+   * its song KON latch while virtual voice 8 receives the effect KON. */
+  live->channel[6].keyOn = true;
+  dsp_writeVirtualVoiceControl(live, 8, 0x4c, true);
+  dsp_writeHardwareVoiceMask(live, 0x4c, 0x40, 0xbf);
+  CHECK(live->channel[6].keyOn);
+  CHECK(live->channel[8].keyOn);
+
+  dsp_free(live);
+  dsp_free(muted);
+  dsp_setExtendedVoicesEnabled(false);
+  CHECK(dsp_activeVoiceCount() == 8);
+}
+
+typedef struct MemoryState {
+  SaveLoadInfo sli;
+  uint8_t bytes[sizeof(Dsp)];
+  size_t offset;
+  bool loading;
+} MemoryState;
+
+static void TransferMemoryState(SaveLoadInfo *sli, void *data, size_t size) {
+  MemoryState *state = (MemoryState *)sli;
+  CHECK(state->offset + size <= sizeof(state->bytes));
+  if (state->offset + size > sizeof(state->bytes)) return;
+  if (state->loading)
+    memcpy(data, state->bytes + state->offset, size);
+  else
+    memcpy(state->bytes + state->offset, data, size);
+  state->offset += size;
+}
+
+static void TestExtendedVoiceStateIsSerialized(void) {
+  uint8_t ram[0x10000];
+  dsp_setExtendedVoicesEnabled(true);
+  Dsp *dsp = NewDsp(ram);
+  dsp->channel[8].srcn = 0x0a;
+  dsp->channel[8].pitch = 0x2345;
+  dsp->channel[8].decodeOffset = 0x4567;
+  dsp->channel[8].gain = 0x321;
+  dsp->channel[8].keyOn = true;
+
+  MemoryState state;
+  memset(&state, 0, sizeof(state));
+  state.sli.func = TransferMemoryState;
+  dsp_saveload(dsp, &state.sli);
+  CHECK(state.offset > 0);
+
+  memset(&dsp->channel[8], 0, sizeof(dsp->channel[8]));
+  state.offset = 0;
+  state.loading = true;
+  dsp_saveload(dsp, &state.sli);
+  CHECK(dsp->channel[8].srcn == 0x0a);
+  CHECK(dsp->channel[8].pitch == 0x2345);
+  CHECK(dsp->channel[8].decodeOffset == 0x4567);
+  CHECK(dsp->channel[8].gain == 0x321);
+  CHECK(dsp->channel[8].keyOn);
+
+  dsp_free(dsp);
+  dsp_setExtendedVoicesEnabled(false);
+}
+
 int main(void) {
+  dsp_setExtendedVoicesEnabled(false);
   TestUnityIsLabelNeutral();
   TestIndependentDryGains();
   TestEchoSendFollowsBus();
+  TestExtendedVoiceIsMixedAndIndependentlyControlled();
+  TestExtendedVoiceStateIsSerialized();
   if (s_failures) {
     fprintf(stderr, "dsp_bus_mix_test: %d failure(s)\n", s_failures);
     return 1;

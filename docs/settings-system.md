@@ -104,6 +104,7 @@ typedef struct Settings {
   int  audio_master_volume;    // 0..100; atomic callback mirror
   int  audio_music_volume;     // 0..100; native + replacement music bus
   int  audio_sfx_volume;       // 0..100; native effect bus
+  bool audio_extended_channels;// restart-class virtual DSP voices 8/9
   bool audio_dialog_blip;      // exact $01:902D COP #$07 site
 
   /* Extras and inspection utility state */
@@ -428,6 +429,19 @@ problems:
   `100/100`, voice contributions take the exact legacy integer path without an
   added multiply/divide; the optional DSP shadow remains eligible only there
   when no replacement-music voice gate is active.
+- **Extended sound channels are restart-class.**
+  `audio_extended_channels` / `AR_EXTENDED_AUDIO_CHANNELS` fixes the running
+  DSP topology at boot. Off cycles the original eight voices and leaves every
+  register write and ownership branch authentic. On cycles ten voices: logical
+  effect tracks `$10/$12` route to voices 8/9, while the three confirmed
+  `$1A & $47` branches fall through for song tracks so native voices 6/7 keep
+  receiving their notes. The shared writer at SPC `$0834` inherits provenance
+  captured at `$080A`, which is required for SRCN/ADSR/GAIN writes made after X
+  has become the DSP address. Mask writes are split bitwise so effect KON/KOF,
+  PMON, NON and EON cannot mutate the corresponding physical song voice. The
+  added BRR/envelope/control state is included in quick-state format v5, whose
+  header rejects a state captured under the other eight/ten-voice topology.
+  The setting does not yet queue or duplicate effect sequence instances.
 - **Dialogue blip is suppressed at its native request site.** The message
   composer calls `$01:901C` for each printable glyph. After the character delay
   (`$01:9278`), the non-space path at block `$01:902D` loads `#$07` and executes
@@ -439,9 +453,10 @@ problems:
 The classifier deliberately uses sequencer provenance rather than SRCN: music
 can use common-bank samples, and an extended effect voice must remain SFX
 regardless of instrument. The serial trace and static driver map supporting
-that choice are in `snes-native-audio-channels.md`. This mixer foundation does
-not add voices or change native request priority; those remain opt-in extension
-phases.
+that choice are in `snes-native-audio-channels.md`. The implemented opt-in
+ten-voice phase prevents music stealing but does not change mailbox depth,
+driver busy rejection, or one-instance effect-lane replacement; those belong
+to the queued/polyphonic phase.
 
 - **Enhanced music (`music_replacements` / `AR_MUSIC_REPLACEMENTS`, default
   on, callback).** Master toggle for manifest-driven OGG music streaming
@@ -761,6 +776,7 @@ structure allocation).
 | Master volume | `AR_AUDIO_VOLUME` | int percent | 100 | CALLBACK; atomic post-mix gain, live `0..100` in steps of 5 |
 | Music volume | `AR_MUSIC_VOLUME` | int percent | 100 | CALLBACK; native song voices + replacement OGG, live `0..100` in steps of 5 |
 | Sound effects volume | `AR_SFX_VOLUME` | int percent | 100 | CALLBACK; native logical effect tracks `$10/$12`, live `0..100` in steps of 5 |
+| Extended sound channels | `AR_EXTENDED_AUDIO_CHANNELS` | bool | off | RESTART; ten native-mixer voices, preserving song 6/7 while effects use 8/9 |
 | Dialogue text blip | `AR_DIALOG_BLIP` | bool | on | PASSIVE; exact `$01:902D` COP request only |
 | Screen ratio | `ExtendedAspectRatio` / `AR_EXTENDED_ASPECT_RATIO` | enum 4:3/16:9/16:10 | 4:3 | CALLBACK; changes active PPU border/pitch and presentation live |
 | Pixel aspect | `AspectPAR` / `AR_ASPECT_PAR` | enum 4:3/square | 4:3 | CALLBACK; recomputes active internal width live |

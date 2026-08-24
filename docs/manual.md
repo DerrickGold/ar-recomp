@@ -303,6 +303,7 @@ config's `AR_*` bridge or changed through the settings overlay:
 | `AR_AUDIO_VOLUME=<0..100>` | master output volume (default 100); scales the final music/SFX/MSU-1 mix |
 | `AR_MUSIC_VOLUME=<0..100>` | music volume (default 100); scales authentic SPC songs and enhanced OGG music without changing SFX |
 | `AR_SFX_VOLUME=<0..100>` | sound-effects volume (default 100); scales native event and ordinary effects without changing music |
+| `AR_EXTENDED_AUDIO_CHANNELS=1` | enables the restart-class ten-voice native mode; song voices 6/7 remain active while the two original effect tracks render through virtual voices 8/9 |
 | `AR_DIALOG_BLIP=0` | mutes only the per-character Sky Palace dialogue sound; other uses of the same sound/event ID remain active |
 | `AR_MUSIC_REPLACEMENTS=0` | disables enhanced manifest-driven music replacement (default on, inert without audio files); toggling live immediately hands the current song between OGG and the authentic SPC sequencer |
 
@@ -314,7 +315,13 @@ Music/SFX separation follows the SPC driver's logical track provenance, not
 sample number: song tracks `$00-$0E` feed Music and effect tracks `$10/$12`
 feed SFX before DSP summation. Both controls preserve sequencing and the shared
 hardware echo; an existing echo tail decays naturally after a live change. At
-100%/100% the native DSP uses its legacy integer mix path. See
+100%/100% the native DSP uses its legacy integer mix path. Extended sound
+channels retain that same classification and mixer:
+the original SPC700 effect sequencer still runs, but its `$10/$12` DSP writes
+are bridged to voices 8/9 and the three proven ownership branches no longer
+discard song-track updates for voices 6/7. This first extension prevents music
+voice stealing; it intentionally retains the original one-instance effect
+lanes until the later queued/polyphonic phase. See
 [`settings-system.md`](settings-system.md), "Audio control seams".
 
 Custom music (OGG streaming in place of SPC songs) is covered in

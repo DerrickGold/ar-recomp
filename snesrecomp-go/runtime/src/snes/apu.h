@@ -114,6 +114,11 @@ extern void (*g_apu_spc_port_read_trace_hook)(Apu *apu, uint8_t port,
  * register write is applied. Caller holds the APU lock. */
 extern void (*g_apu_spc_dsp_write_hook)(Apu *apu, uint8_t addr,
                                         uint8_t value);
+/* Optional game-owned transform. It runs after observers receive the original
+ * write. The hook may change `value`; false means it fully applied/rerouted the
+ * write and the eight-voice hardware register write must be skipped. */
+extern bool (*g_apu_spc_dsp_write_filter_hook)(Apu *apu, uint8_t addr,
+                                               uint8_t *value);
 extern void (*g_apu_spc_dsp_write_trace_hook)(Apu *apu, uint8_t addr,
                                               uint8_t value);
 #endif

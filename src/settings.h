@@ -306,6 +306,7 @@ typedef struct Settings {
   int  audio_master_volume;  /* final host PCM gain, 0..100 percent */
   int  audio_music_volume;   /* native + replacement music bus, 0..100 */
   int  audio_sfx_volume;     /* provenance-tagged native effects, 0..100 */
+  bool audio_extended_channels; /* restart-class virtual DSP voices 8/9 */
   bool audio_dialog_blip;    /* per-glyph Sky Palace dialogue sound */
   /* Master toggle for manifest-driven music replacement ([music:] entries of
    * game-assets/manifest.ini). Silently inert when the manifest/audio files
