@@ -78,16 +78,23 @@ static void ClassifyDspWrite(Apu *apu, uint8_t addr, uint8_t value) {
 
   const DspVoiceBus bus = voice_class == kNativeAudioVoice_Sfx
       ? kDspVoiceBus_Sfx : kDspVoiceBus_Music;
-  if (s_bus_log && dsp_getVoiceBus(apu->dsp, voice) != bus) {
+  const int output_voice =
+      bus == kDspVoiceBus_Sfx && dsp_extendedVoicesEnabled() && voice >= 6
+          ? voice + 2
+          : voice;
+  if (s_bus_log && dsp_getVoiceBus(apu->dsp, output_voice) != bus) {
     fprintf(stderr,
             "[audio-bus] voice=%d -> %s x=%02x mask=%02x owner=%02x "
-            "dsp=%02x\n",
-            voice, bus == kDspVoiceBus_Sfx ? "SFX" : "MUSIC",
+            "dsp=%02x%s\n",
+            output_voice, bus == kDspVoiceBus_Sfx ? "SFX" : "MUSIC",
             apu->spc ? apu->spc->x : 0xff,
             apu->ram[kActRaiserCurrentTrackMaskAddress],
-            apu->ram[kActRaiserEffectOwnershipMaskAddress], addr);
+            apu->ram[kActRaiserEffectOwnershipMaskAddress], addr,
+            output_voice != voice ? " virtual" : "");
   }
-  dsp_setVoiceBus(apu->dsp, voice, bus);
+  dsp_setVoiceBus(apu->dsp, output_voice, bus);
+  if (output_voice != voice)
+    dsp_setVoiceBus(apu->dsp, voice, kDspVoiceBus_Music);
 }
 
 static void RestoreVoiceClasses(Apu *apu) {
@@ -102,9 +109,14 @@ static void RestoreVoiceClasses(Apu *apu) {
   for (int voice = 0; voice < kDspVoiceCount; voice++) {
     const uint8_t mask = (uint8_t)(1u << voice);
     dsp_setVoiceBus(apu->dsp, voice,
-                    (voice >= 6 && (ownership & mask))
+                    (!dsp_extendedVoicesEnabled() && voice >= 6 &&
+                     (ownership & mask))
                         ? kDspVoiceBus_Sfx
                         : kDspVoiceBus_Music);
+  }
+  if (dsp_extendedVoicesEnabled()) {
+    dsp_setVoiceBus(apu->dsp, 8, kDspVoiceBus_Sfx);
+    dsp_setVoiceBus(apu->dsp, 9, kDspVoiceBus_Sfx);
   }
 }
 

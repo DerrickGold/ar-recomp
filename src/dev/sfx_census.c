@@ -51,7 +51,7 @@ typedef struct {
   int srcn_n;
   unsigned srcn_overflow;
 
-  uint8_t voice_mask;
+  uint16_t voice_mask;
   uint16_t pitch_min, pitch_max;
   int vol_l_min, vol_l_max;   /* the driver's own pan for this effect */
   int vol_r_min, vol_r_max;
@@ -188,7 +188,8 @@ static void OnVoiceKeyOn(int ch, uint8_t srcn, uint16_t decodeOffset,
   SfxEntry *e = &s_sfx[s_pending.id];
   e->correlated++;
   s_pending.claimed++;
-  e->voice_mask |= (uint8_t)(1u << ch);
+  if (ch >= 0 && ch < 16)
+    e->voice_mask |= (uint16_t)(1u << ch);
 
   if (!e->pitch_min || pitch < e->pitch_min) e->pitch_min = pitch;
   if (pitch > e->pitch_max) e->pitch_max = pitch;
@@ -265,7 +266,7 @@ static void WriteReport(FILE *f) {
     char vox[16] = "-";
     if (e->voice_mask) {
       int o = 0;
-      for (int c = 0; c < 8; c++)
+      for (int c = 0; c < 10; c++)
         if (e->voice_mask & (1u << c))
           o += snprintf(vox + o, sizeof vox - o, "%s%d", o ? "," : "", c);
     }

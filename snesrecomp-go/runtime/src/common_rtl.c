@@ -102,7 +102,13 @@ void ApuProfFrameReset(void) {
 // scalar/blob; we route each call to fread/fwrite. Single magic+version
 // header lets future format changes be detected.
 #define RTL_SAV_MAGIC   0x52544c53u  /* "RTLS" */
-#define RTL_SAV_VERSION 4u  /* v4: dropped Dma.pad[7] blob tail */
+#define RTL_SAV_VERSION 5u  /* v5: serialize optional DSP voices 8 and 9 */
+#define RTL_SAV_EXTENDED_AUDIO_FLAG 0x00010000u
+
+static uint32 RtlSnapshotVersion(void) {
+  return RTL_SAV_VERSION |
+      (dsp_extendedVoicesEnabled() ? RTL_SAV_EXTENDED_AUDIO_FLAG : 0);
+}
 
 typedef struct FileSli {
   SaveLoadInfo base;
@@ -192,7 +198,7 @@ void RtlSaveSnapshot(const char *filename) {
     printf("Failed fopen for save: %s\n", filename);
     return;
   }
-  uint32 hdr[2] = { RTL_SAV_MAGIC, RTL_SAV_VERSION };
+  uint32 hdr[2] = { RTL_SAV_MAGIC, RtlSnapshotVersion() };
   fwrite(hdr, sizeof(hdr), 1, f);
   RtlApuLock();
   FileSli fs = { { &file_sli_func }, f, true, false };
@@ -208,8 +214,9 @@ bool RtlLoadSnapshot(const char *filename) {
     return false;
   uint32 hdr[2];
   if (fread(hdr, sizeof(hdr), 1, f) != 1
-      || hdr[0] != RTL_SAV_MAGIC || hdr[1] != RTL_SAV_VERSION) {
-    printf("Save file %s: bad magic/version (legacy StateRecorder format no longer supported)\n", filename);
+      || hdr[0] != RTL_SAV_MAGIC || hdr[1] != RtlSnapshotVersion()) {
+    printf("Save file %s: incompatible magic/version/audio mode "
+           "(legacy StateRecorder format no longer supported)\n", filename);
     fclose(f);
     return false;
   }

@@ -173,8 +173,12 @@ values and nonzero port-2 ids to catch them in play.
    The settings layer uses this seam for `audio_master_volume` (`0..100`) and
    the pre-sum logical-track seam for `audio_music_volume` /
    `audio_sfx_volume`. Native dry contributions and echo sends are scaled per
-   tagged voice; replacement OGG follows Music. The serial trace remains the
-   acceptance tool for extending those same labels onto virtual voices. See
+   tagged voice; replacement OGG follows Music. With restart-class
+   `audio_extended_channels`, logical effect tracks `$10/$12` are rerouted to
+   serialized DSP voices 8/9 and the driver keeps updating physical song
+   voices 6/7. The same bus labels and shared echo mixer cover all ten voices;
+   authentic-off remains the original eight-voice loop. The serial trace is
+   the acceptance tool for this bridge and the later polyphonic queue. See
    `settings-system.md`, "Audio control seams".
 
 The verified common sample directory, effect sequence catalogue, loss taxonomy,

@@ -16,7 +16,8 @@ static int s_lock_depth;
 static int s_music_gain = -1;
 static int s_sfx_gain = -1;
 static int s_replacement_music_gain = -1;
-static int s_voice_bus[8];
+static int s_voice_bus[kDspMaximumVoiceCount];
+static bool s_extended_voices;
 
 void RtlApuLock(void) { s_lock_depth++; }
 void RtlApuUnlock(void) { s_lock_depth--; }
@@ -29,14 +30,15 @@ void MusicReplacements_SetMusicVolumePercent(int volume_percent) {
 }
 void dsp_setVoiceBus(Dsp *dsp, int ch, DspVoiceBus bus) {
   (void)dsp;
-  if (ch >= 0 && ch < 8) s_voice_bus[ch] = bus;
+  if (ch >= 0 && ch < kDspMaximumVoiceCount) s_voice_bus[ch] = bus;
 }
 DspVoiceBus dsp_getVoiceBus(const Dsp *dsp, int ch) {
   (void)dsp;
-  return ch >= 0 && ch < 8
+  return ch >= 0 && ch < kDspMaximumVoiceCount
       ? (DspVoiceBus)s_voice_bus[ch]
       : kDspVoiceBus_Unclassified;
 }
+bool dsp_extendedVoicesEnabled(void) { return s_extended_voices; }
 
 static int s_failures;
 #define CHECK(expr) do { \

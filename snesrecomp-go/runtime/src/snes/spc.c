@@ -29,6 +29,7 @@ static const int cyclesPerOpcode[256] = {
 };
 
 void (*g_spc_opcode_trace_hook)(Spc *, uint16_t) = NULL;
+void (*g_spc_opcode_patch_hook)(Spc *, uint16_t) = NULL;
 
 static uint8_t spc_read(Spc* spc, uint16_t adr);
 static void spc_write(Spc* spc, uint16_t adr, uint8_t val);
@@ -94,6 +95,8 @@ int spc_runOpcode(Spc* spc) {
   uint16_t opcodePc = spc->pc;
   if (g_spc_opcode_trace_hook)
     g_spc_opcode_trace_hook(spc, opcodePc);
+  if (g_spc_opcode_patch_hook)
+    g_spc_opcode_patch_hook(spc, opcodePc);
   uint8_t opcode = spc_readOpcode(spc);
   spc->cyclesUsed = cyclesPerOpcode[opcode];
   spc_doOpcode(spc, opcode);

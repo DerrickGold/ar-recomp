@@ -1936,6 +1936,13 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Int, kApply_Callback, kSettingCat_Audio,
     &g_settings.audio_sfx_volume, 100, 0, 100, 5, false, NULL, 0,
     NULL, NULL, ParseAudioVolume, FormatAudioVolume, .modern_env = true },
+  { "audio_extended_channels", "AR_EXTENDED_AUDIO_CHANNELS",
+    "Extended sound channels",
+    "Keep all eight music voices while native effects use two added voices. "
+    "Takes effect after restart; effect-lane queuing is a later enhancement.",
+    kSettingType_Bool, kApply_Restart, kSettingCat_Audio,
+    &g_settings.audio_extended_channels, 0, 0, 1, 1, false, NULL, 0,
+    NULL, NULL, NULL, NULL, .modern_env = true },
   BOOL_SETTING(audio_dialog_blip, "AR_DIALOG_BLIP", "Dialogue text blip",
                "Play the per-character sound while Sky Palace dialogue is printed.",
                kSettingCat_Audio, 1, false, NULL, NULL),

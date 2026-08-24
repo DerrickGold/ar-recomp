@@ -23,6 +23,7 @@ static const uint8_t bootRom[0x40] = {
 void (*g_apu_port_apply_trace_hook)(Apu *, uint8_t, uint8_t) = NULL;
 void (*g_apu_spc_port_read_trace_hook)(Apu *, uint8_t, uint8_t) = NULL;
 void (*g_apu_spc_dsp_write_hook)(Apu *, uint8_t, uint8_t) = NULL;
+bool (*g_apu_spc_dsp_write_filter_hook)(Apu *, uint8_t, uint8_t *) = NULL;
 void (*g_apu_spc_dsp_write_trace_hook)(Apu *, uint8_t, uint8_t) = NULL;
 
 Apu* apu_init(void) {
@@ -244,11 +245,14 @@ void apu_cpuWrite(Apu* apu, uint16_t adr, uint8_t val) {
     }
     case 0xf3: {
       if(apu->dspAdr < 0x80) {
+        const uint8_t original = val;
         if (g_apu_spc_dsp_write_hook)
-          g_apu_spc_dsp_write_hook(apu, apu->dspAdr, val);
+          g_apu_spc_dsp_write_hook(apu, apu->dspAdr, original);
         if (g_apu_spc_dsp_write_trace_hook)
-          g_apu_spc_dsp_write_trace_hook(apu, apu->dspAdr, val);
-        dsp_write(apu->dsp, apu->dspAdr, val);
+          g_apu_spc_dsp_write_trace_hook(apu, apu->dspAdr, original);
+        if (!g_apu_spc_dsp_write_filter_hook ||
+            g_apu_spc_dsp_write_filter_hook(apu, apu->dspAdr, &val))
+          dsp_write(apu->dsp, apu->dspAdr, val);
       }
       break;
     }

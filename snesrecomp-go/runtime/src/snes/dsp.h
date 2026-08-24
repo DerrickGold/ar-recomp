@@ -23,6 +23,13 @@ typedef enum DspVoiceBus {
   kDspVoiceBus_Sfx,
 } DspVoiceBus;
 
+enum {
+  kDspHardwareVoiceCount = 8,
+  kDspExtendedVoiceCount = 2,
+  kDspMaximumVoiceCount =
+      kDspHardwareVoiceCount + kDspExtendedVoiceCount,
+};
+
 // Output-sample ring capacity (stereo pairs). Must be a power of two so
 // the monotonic write/read counters can index with a mask and survive
 // uint32 wraparound. 8192 samples ≈ 256 ms at 32 kHz — far larger than
@@ -74,11 +81,13 @@ struct Dsp {
   void *shadow;
   // Presentation-only voice provenance. Kept before `ram`, outside the frozen
   // dsp_saveload region; the game observer reconstructs it after a state load.
-  uint8_t voiceBus[8];
+  uint8_t voiceBus[kDspMaximumVoiceCount];
   // mirror ram
   uint8_t ram[0x80];
-  // 8 channels
-  DspChannel channel[8];
+  // Eight hardware channels plus two optional game-owned virtual channels.
+  // Authentic mode cycles only the first eight. The extra state is serialized
+  // with the rest of the DSP so an extended-mode save resumes sample-exactly.
+  DspChannel channel[kDspMaximumVoiceCount];
   // overarching
   uint16_t dirPage;
   bool evenCycle;
@@ -143,5 +152,22 @@ void dsp_getBusGains(int *music_percent, int *sfx_percent);
  * the existing SRCN threshold remains only as an unclassified startup
  * fallback. */
 void dsp_setMusicBusMuted(bool muted);
+
+/* Optional game-owned virtual voice extension. The ordinary S-DSP register
+ * interface remains eight-voice; a provenance bridge uses the targeted APIs
+ * below for logical tracks that have been remapped beyond the hardware mask.
+ * Enablement is fixed at boot (the player setting is restart-class). */
+void dsp_setExtendedVoicesEnabled(bool enabled);
+bool dsp_extendedVoicesEnabled(void);
+int dsp_activeVoiceCount(void);
+void dsp_writeVirtualVoiceRegister(Dsp *dsp, int ch, uint8_t source_addr,
+                                   uint8_t val);
+void dsp_writeVirtualVoiceControl(Dsp *dsp, int ch, uint8_t global_addr,
+                                  bool enabled);
+/* Apply a hardware mask register to only the selected native bits. This lets
+ * the extension split an original $40/$80 effect bit from the physical song
+ * voice without disturbing the remaining authentic mask update. */
+void dsp_writeHardwareVoiceMask(Dsp *dsp, uint8_t addr, uint8_t val,
+                                uint8_t update_mask);
 
 #endif
