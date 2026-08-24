@@ -1311,56 +1311,10 @@ static void ClampSimCameraPitch(Scene3DCamera *camera) {
   if (camera->tilt_x > maximum) camera->tilt_x = maximum;
 }
 
-/* Atmospheric backdrop.
- *
- * Replaces the flat clear behind the finite ground with a vertical gradient.
- * Everything opaque still draws over it, so "behind the finite ground" is
- * enforced by draw order rather than by a mask: the only pixels this can reach
- * are the ones nothing else covered.
- *
- * **The ground-plane horizon is never on screen.** Measured across the whole
- * supported pitch range (-1350..-575 mrad): the vanishing line remains outside
- * a 224-row viewport. The plan's D5a-2 wording
- * ("at the tilted map horizon") describes something this camera cannot show.
- * What actually reads as sky in frame is where the ground *data* runs out --
- * past the world map extent or the near-clip bound -- which is a different
- * edge in a different place.
- *
- * So the sky is graded around a **synthetic** horizon placed at a fraction of
- * the viewport height, and the real one is used as the anchor only if it ever
- * becomes visible. That is not dead generality: it is one comparison, and it
- * means widening the pitch range later cannot silently produce sky below the
- * horizon.
- *
- * The synthetic anchor is honest about what it is. The backdrop is only ever
- * seen fully zoomed out, in the corners past the end of the extended map, and
- * there is no horizon line in frame for the eye to check it against -- so its
- * job is to look like sky at those edges, not to agree with a vanishing point
- * that is 1674 pixels off the top of the screen.
- *
- * The two endpoints are authored sky colours, and the scene's own backdrop is
- * what they are mixed *from* rather than what they are derived from.
- *
- * The first version derived both by lifting the backdrop toward white and
- * dropping it toward black, on the reasoning that this keeps whatever hue the
- * game chose. That reasoning only holds if there is a hue: a simulation town's
- * `separated_backdrop_argb` is black, and black lifted toward white is grey,
- * so the sky came out greyscale. Mixing toward an authored blue instead is
- * well-defined for any backdrop, and a town that does pick a coloured one
- * still tints the result rather than being overruled.
- *
- * Strength is the mix, so 0 still reproduces the previous flat fill exactly --
- * the property that makes the D5a-2 checkpoint's "only pixels behind the
- * finite ground change" checkable against A8 rather than against a
- * differently-coloured screen.
- *
- * Sky brightens and desaturates toward the horizon and deepens toward the
- * zenith, which is the one thing about real sky that survives being reduced to
- * two colours. */
-/* Authored sky endpoints, mixed with the scene backdrop by strength. Pale and
- * slightly green at the horizon, deeper and bluer overhead -- the same
- * direction ActRaiser's own world-map sky and water use, so the corners past
- * the end of the extended map do not read as a different game's palette. */
+/* The finite ground reveals this gradient only where no opaque geometry was
+ * drawn. Supported camera pitches keep the real vanishing line off-screen, so
+ * a synthetic horizon anchors the gradient unless the real one becomes
+ * visible. Strength zero must remain the exact flat-backdrop baseline. */
 static const SDL_FColor kSimSkyHorizon = { 0.60f, 0.74f, 0.90f, 1.0f };
 static const SDL_FColor kSimSkyZenith = { 0.16f, 0.33f, 0.66f, 1.0f };
 

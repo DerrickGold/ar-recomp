@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+#include "byte_order.h"
+
 enum {
   /* LoROM $02:8000, $02:8100, and $02:87A5. */
   kOrdinaryTranslationRomOffset = 0x010000,
@@ -18,10 +20,6 @@ enum {
   kSpecialFirstCell = 0xE3,
 };
 
-static uint16_t ReadLe16(const uint8_t *p) {
-  return (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
-}
-
 bool SimWorldMap_LoadRomTables(SimWorldMapRomTables *out,
                                const uint8_t *rom_data, size_t rom_size) {
   const size_t needed =
@@ -35,7 +33,8 @@ bool SimWorldMap_LoadRomTables(SimWorldMapRomTables *out,
          sizeof(decoded.special));
   for (int town = 0; town < kSimWorldMapTownCount; town++)
     decoded.town_destination[town] =
-        ReadLe16(rom_data + kTownDestinationRomOffset + town * 2);
+        ByteOrder_ReadLe16(
+            rom_data + kTownDestinationRomOffset + town * 2);
   *out = decoded;
   return true;
 }

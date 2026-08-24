@@ -17,6 +17,8 @@ Usage:
 import sys, json, argparse
 from collections import defaultdict
 
+from oracle_utils import format_wram_address
+
 
 def load(path):
     final = {}            # addr -> last written value
@@ -42,13 +44,6 @@ def load(path):
                 max_frame = fr
     return dict(final=final, first=first_frame, last=last_frame,
                 writes=writes, max_frame=max_frame)
-
-
-def fmt_addr(a):
-    # WRAM byte addr -> SNES address ($7E0000 + a, or $7F for a>=0x10000)
-    if a >= 0x10000:
-        return f"$7F{a-0x10000:04X}"
-    return f"$7E{a:04X}"
 
 
 def main():
@@ -78,7 +73,8 @@ def main():
     print(f"\n=== earliest-diverging common addresses (top {args.top}) ===")
     print(f"{'addr':>10} {'recompF':>8} {'oracleF':>8}  {'oracleVal':>9} {'recompVal':>9}")
     for a in divergent[:args.top]:
-        print(f"{fmt_addr(a):>10} {r['first'][a]:>8} {o['first'][a]:>8}  "
+        print(f"{format_wram_address(a):>10} "
+              f"{r['first'][a]:>8} {o['first'][a]:>8}  "
               f"{o['final'][a]:>#9x} {r['final'][a]:>#9x}")
 
     # Addresses the recomp writes that the oracle never does = likely runaway
@@ -88,7 +84,9 @@ def main():
         print(f"\n=== recomp-only writes (oracle never wrote these; top {args.top}) ===")
         print(f"{'addr':>10} {'recompF':>8} {'writes':>7} {'val':>6}")
         for a in only_recomp[:args.top]:
-            print(f"{fmt_addr(a):>10} {r['first'][a]:>8} {r['writes'][a]:>7} {r['final'][a]:>#6x}")
+            print(f"{format_wram_address(a):>10} "
+                  f"{r['first'][a]:>8} {r['writes'][a]:>7} "
+                  f"{r['final'][a]:>#6x}")
 
 
 if __name__ == "__main__":

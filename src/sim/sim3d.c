@@ -12,6 +12,7 @@
 
 #include "actraiser_game.h"
 #include "constants.h"
+#include "deterministic_hash.h"
 #include "snes_bgr555.h"
 #include "snes/ppu.h"
 
@@ -720,8 +721,8 @@ static uint32_t BuildDifference(const uint8_t *authentic_pixels,
       if (out_flat_hash) {
         uint32_t color = b & 0xffffff;
         for (int byte = 0; byte < 3; byte++) {
-          hash ^= color & 0xff;
-          hash *= UINT64_C(1099511628211);
+          hash = DeterministicHash_Fnv1a64Byte(
+              hash, (uint8_t)(color & 0xff));
           color >>= 8;
         }
       }

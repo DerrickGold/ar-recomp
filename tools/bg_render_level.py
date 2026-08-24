@@ -14,14 +14,16 @@ Caveat: CHRBASE is assumed 0 (correct for the Fillmore acts, where BG1 ids are
 renders as garbage.
 """
 import struct, sys
+
+from ar_lib import read_le16
 d, layer, out = sys.argv[1], int(sys.argv[2]), sys.argv[3]
 W = open(f"{d}.wram.bin","rb").read()
 V = struct.unpack("<32768H", open(f"{d}.vram.bin","rb").read())
 C = struct.unpack("<256H", open(f"{d}.cgram.bin","rb").read())
-def r16(a): return W[a]|(W[a+1]<<8)
 o = layer*4
-width,height = r16(0x2E+o), r16(0x30+o)
-s46,s52,s54 = r16(0x46+o), r16(0x52+o), r16(0x54+o)
+width,height = read_le16(W, 0x2E+o), read_le16(W, 0x30+o)
+s46,s52,s54 = (read_le16(W, 0x46+o), read_le16(W, 0x52+o),
+               read_le16(W, 0x54+o))
 s6b = W[0x6B+o]; orw = s6b<<8
 pw = width>>8; base=(s46>>8)<<8
 CHRBASE = 0x0000                      # 4bpp chars, word address

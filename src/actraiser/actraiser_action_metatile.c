@@ -2,10 +2,9 @@
 
 #include <limits.h>
 #include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
 
 #include "action/action_bg_metatile.h"
+#include "actraiser/actraiser_cpu_hle_internal.h"
 #include "cpu_65816_math.h"
 
 enum {
@@ -23,22 +22,12 @@ enum {
       kActionBgOutputBottomTileOffset + kActionBgOutputRightTileOffset,
   kActionBgColumnSourceMetatileStride = 0x10,
   kWordBits = sizeof(uint16_t) * CHAR_BIT,
-  kWordSignBit = 1u << (kWordBits - 1),
 };
 
 typedef enum ActionBgStripOrientation {
   kActionBgStripOrientation_Column = 0,
   kActionBgStripOrientation_Row,
 } ActionBgStripOrientation;
-
-static void RequireActionBgMetatileEntryMode(CpuState *cpu,
-                                              const char *routine_name) {
-  if (!cpu->m_flag && !cpu->x_flag && !cpu->emulation) return;
-  fprintf(stderr,
-          "FATAL: %s HLE requires native mode with 16-bit A/X/Y\n",
-          routine_name);
-  abort();
-}
 
 static uint16_t ReadDirectPageWord(CpuState *cpu, uint16_t offset) {
   return cpu_read16_dp(cpu, (uint16_t)(cpu->D + offset));
@@ -65,42 +54,21 @@ static void WriteDataBankIndexedWord(CpuState *cpu, uint16_t base,
               (uint16_t)address, value);
 }
 
-static void PushCpuWord(CpuState *cpu, uint16_t value) {
-  cpu_write8(cpu, k65816StackBank, cpu->S,
-             (uint8_t)(value >> CHAR_BIT));
-  cpu->S = (uint16_t)(cpu->S - 1);
-  cpu_write8(cpu, k65816StackBank, cpu->S, (uint8_t)value);
-  cpu->S = (uint16_t)(cpu->S - 1);
-}
-
-static uint16_t PopCpuWord(CpuState *cpu) {
-  cpu->S = (uint16_t)(cpu->S + 1);
-  const uint16_t value = cpu_read16(cpu, k65816StackBank, cpu->S);
-  cpu->S = (uint16_t)(cpu->S + 1);
-  return value;
-}
-
-static void SetCpuWordNegativeZero(CpuState *cpu, uint16_t value) {
-  cpu->_flag_Z = value == 0;
-  cpu->_flag_N = (value & kWordSignBit) != 0;
-  cpu->P = (uint8_t)((cpu->P & ~(CPU_P_N | CPU_P_Z)) |
-                     (cpu->_flag_N ? CPU_P_N : 0) |
-                     (cpu->_flag_Z ? CPU_P_Z : 0));
-}
-
 static RecompReturn ExpandActionBgMetatileStrip(
     CpuState *cpu, ActionBgStripOrientation orientation,
     const char *routine_name) {
   if (!cpu) return RECOMP_RETURN_NORMAL;
 
   cpu_mirrors_to_p(cpu);
-  RequireActionBgMetatileEntryMode(cpu, routine_name);
+  ActRaiserCpuHle_RequireEntryMode(
+      cpu, routine_name,
+      kActRaiserCpuHleEntryMode_Native16BitAccumulatorAndIndexes);
 
   const uint16_t saved_x = cpu->X;
   const uint16_t saved_y = cpu->Y;
   const bool saved_overflow = cpu->_flag_V != 0;
-  PushCpuWord(cpu, saved_x);
-  PushCpuWord(cpu, saved_y);
+  ActRaiserCpuHle_PushWord(cpu, saved_x);
+  ActRaiserCpuHle_PushWord(cpu, saved_y);
 
   const uint16_t definition_base = ReadDirectPageWord(
       cpu, kActionBgMetatileDefinitionPointer);
@@ -123,7 +91,7 @@ static RecompReturn ExpandActionBgMetatileStrip(
         cpu, 0, source_address);
     if (orientation == kActionBgStripOrientation_Row)
       source_address = (uint16_t)(source_address + 1);
-    PushCpuWord(cpu, source_address);
+    ActRaiserCpuHle_PushWord(cpu, source_address);
 
     const uint16_t metatile_definition_offset = (uint16_t)(
         metatile_id * kActionBgMetatileDefinitionBytes);
@@ -163,7 +131,7 @@ static RecompReturn ExpandActionBgMetatileStrip(
     output_address = (uint16_t)(
         output_address + kActionBgMetatileOutputAdvanceBytes);
 
-    source_address = PopCpuWord(cpu);
+    source_address = ActRaiserCpuHle_PopWord(cpu);
     if (orientation == kActionBgStripOrientation_Column) {
       const Cpu65816Add16Result next_source = Cpu65816_Add16(
           source_address, kActionBgColumnSourceMetatileStride, false,
@@ -182,15 +150,15 @@ static RecompReturn ExpandActionBgMetatileStrip(
         (uint16_t)(kActionBgMetatilesPerStrip - metatile_index - 1));
   }
 
-  cpu->Y = PopCpuWord(cpu);
-  cpu->X = PopCpuWord(cpu);
+  cpu->Y = ActRaiserCpuHle_PopWord(cpu);
+  cpu->X = ActRaiserCpuHle_PopWord(cpu);
   cpu->A = final_accumulator;
   cpu->_flag_C = final_carry;
   cpu->_flag_V = final_overflow;
   cpu->P = (uint8_t)((cpu->P & ~(CPU_P_C | CPU_P_V)) |
                      (final_carry ? CPU_P_C : 0) |
                      (final_overflow ? CPU_P_V : 0));
-  SetCpuWordNegativeZero(cpu, cpu->X);
+  ActRaiserCpuHle_SetNegativeZero16(cpu, cpu->X);
   cpu_p_to_mirrors(cpu);
   cpu->S = (uint16_t)(cpu->S + k65816RtsStackBytes);
   return RECOMP_RETURN_NORMAL;

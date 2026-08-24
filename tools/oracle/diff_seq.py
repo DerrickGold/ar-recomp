@@ -23,6 +23,8 @@ Usage:
 import sys, json, argparse
 from collections import defaultdict
 
+from oracle_utils import format_wram_address
+
 
 def load_seqs(path):
     """addr -> list of (frame, value), consecutive duplicates collapsed."""
@@ -40,12 +42,6 @@ def load_seqs(path):
             if not s or s[-1][1] != v:
                 s.append((fr, v))
     return seq
-
-
-def fmt_addr(a):
-    if a >= 0x10000:
-        return f"$7F{a - 0x10000:04X}"
-    return f"$7E{a:04X}"
 
 
 def main():
@@ -102,7 +98,8 @@ def main():
     print(f"=== earliest genuine sequence divergences (top {args.top}) ===")
     print(f"{'addr':>10} {'seqIdx':>6} {'recF':>6} {'oracleVal':>9} {'recompVal':>9}  prefix")
     for rf, idx, a, ov, rv, pl in divergent[:args.top]:
-        print(f"{fmt_addr(a):>10} {idx:>6} {rf:>6} {ov:>#9x} {rv:>#9x}  "
+        print(f"{format_wram_address(a):>10} "
+              f"{idx:>6} {rf:>6} {ov:>#9x} {rv:>#9x}  "
               f"agreed {pl} vals first")
 
 

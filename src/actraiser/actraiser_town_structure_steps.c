@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "actraiser/actraiser_cpu_hle_internal.h"
 #include "cpu_65816_math.h"
 
 enum {
@@ -25,7 +26,6 @@ enum {
   kTownStructureStepInitialRepeatCount = 0,
   kAccumulatorHighByteMask = 0xFF00,
   kWordBits = sizeof(uint16_t) * CHAR_BIT,
-  kWordSignBit = 1u << (kWordBits - 1),
 };
 
 static uint16_t TownStructureStepClassTable(
@@ -120,38 +120,6 @@ void ActRaiser_ArmTownStructureStepProgram(
       program_address);
 }
 
-static void PushCpuWord(CpuState *cpu, uint16_t value) {
-  cpu_write8(cpu, k65816StackBank, cpu->S,
-             (uint8_t)(value >> CHAR_BIT));
-  cpu->S = (uint16_t)(cpu->S - 1);
-  cpu_write8(cpu, k65816StackBank, cpu->S, (uint8_t)value);
-  cpu->S = (uint16_t)(cpu->S - 1);
-}
-
-static uint16_t PopCpuWord(CpuState *cpu) {
-  cpu->S = (uint16_t)(cpu->S + 1);
-  const uint16_t value = cpu_read16(cpu, k65816StackBank, cpu->S);
-  cpu->S = (uint16_t)(cpu->S + 1);
-  return value;
-}
-
-static void SetCpuWordNegativeZero(CpuState *cpu, uint16_t value) {
-  cpu->_flag_Z = value == 0;
-  cpu->_flag_N = (value & kWordSignBit) != 0;
-  cpu->P = (uint8_t)((cpu->P & ~(CPU_P_N | CPU_P_Z)) |
-                     (cpu->_flag_N ? CPU_P_N : 0) |
-                     (cpu->_flag_Z ? CPU_P_Z : 0));
-}
-
-static void RequireTownStructureStepEntryMode(CpuState *cpu,
-                                               const char *routine_name) {
-  if (!cpu->m_flag && !cpu->x_flag && !cpu->emulation) return;
-  fprintf(stderr,
-          "FATAL: %s HLE requires native mode with 16-bit A/X/Y\n",
-          routine_name);
-  abort();
-}
-
 /* $03:A4A8 and $03:A4B8 share the same gated slot-armer body. Their sole
  * semantic difference is the rebuild ($D4E2) versus construction ($D4D2)
  * class table. This wrapper retains the native temporary pushes, decimal ADC
@@ -163,12 +131,14 @@ static RecompReturn ArmTownStructureStepProgramHle(
   if (!cpu) return RECOMP_RETURN_NORMAL;
 
   cpu_mirrors_to_p(cpu);
-  RequireTownStructureStepEntryMode(cpu, routine_name);
+  ActRaiserCpuHle_RequireEntryMode(
+      cpu, routine_name,
+      kActRaiserCpuHleEntryMode_Native16BitAccumulatorAndIndexes);
 
   const uint16_t gate =
       cpu_read16(cpu, cpu->DB, kTownStructureStepGate);
   cpu->A = gate;
-  SetCpuWordNegativeZero(cpu, gate);
+  ActRaiserCpuHle_SetNegativeZero16(cpu, gate);
   if (gate != 0) {
     cpu_p_to_mirrors(cpu);
     cpu->S = (uint16_t)(cpu->S + k65816RtsStackBytes);
@@ -176,14 +146,14 @@ static RecompReturn ArmTownStructureStepProgramHle(
   }
 
   const uint16_t saved_x = cpu->X;
-  PushCpuWord(cpu, saved_x);
+  ActRaiserCpuHle_PushWord(cpu, saved_x);
 
   const uint16_t class_offset =
       cpu_read16(cpu, cpu->DB, kTownStructureStepClassOffset);
   const uint16_t variant_pointer_table_address = ReadLongIndexedWord(
       cpu, kTownStructureStepProgramRomBank,
       TownStructureStepClassTable(program_family), class_offset);
-  PushCpuWord(cpu, variant_pointer_table_address);
+  ActRaiserCpuHle_PushWord(cpu, variant_pointer_table_address);
 
   const uint16_t variant_offset =
       cpu_read16(cpu, cpu->DB, kTownStructureStepVariantOffset);
@@ -193,7 +163,7 @@ static RecompReturn ArmTownStructureStepProgramHle(
   const uint16_t program_address = ReadLongIndexedWord(
       cpu, kTownStructureStepProgramRomBank, 0,
       program_pointer_address.value);
-  PopCpuWord(cpu);
+  ActRaiserCpuHle_PopWord(cpu);
 
   const uint8_t record_index = (uint8_t)cpu_read16(
       cpu, cpu->DB, kTownStructureStepRecordIndex);
@@ -219,11 +189,11 @@ static RecompReturn ArmTownStructureStepProgramHle(
   cpu->A = (uint16_t)((program_address & kAccumulatorHighByteMask) |
                       kTownStructureStepInitialCountdown);
   cpu->Y = slot_address.value;
-  cpu->X = PopCpuWord(cpu);
+  cpu->X = ActRaiserCpuHle_PopWord(cpu);
   cpu->P = (uint8_t)((cpu->P & (CPU_P_I | CPU_P_D)) |
                      (slot_address.carry ? CPU_P_C : 0) |
                      (slot_address.overflow ? CPU_P_V : 0));
-  SetCpuWordNegativeZero(cpu, cpu->X);
+  ActRaiserCpuHle_SetNegativeZero16(cpu, cpu->X);
   cpu_p_to_mirrors(cpu);
   cpu->S = (uint16_t)(cpu->S + k65816RtsStackBytes);
   return RECOMP_RETURN_NORMAL;

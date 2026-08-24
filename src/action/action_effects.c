@@ -620,69 +620,10 @@ void ActionEffects_CaptureFrame(ActionEffectObserver *observer,
     if (!seen[i]) memset(&observer->tracks[i], 0, sizeof(observer->tracks[i]));
 }
 
-/* ── Measured action-scene identities ─────────────────────────────────────
- *
- * These rules come from runs 20260810-124203 through -190729 and Marahna run
- * 20260811-151353. They deliberately combine control-flow identity with
- * animation/composition identity: object fields are polymorphic in ActRaiser,
- * so matching a visual number or palette colour by itself would eventually
- * decorate an unrelated actor.
- *
- * Enemy fireballs (snap_03_gf7397):
- *   handler $BDF0, resume $BDD9, state $23, animation $7E:4000,
- *   visual/composition $17/$45EF or $18/$4610.
- * Lightning traps (snap_04_gf9417):
- *   source descriptor $BD2A, resume $BD69, state $14, animation $7E:4000,
- *   handler $BD36 or the shared animation-repeat handler $8683, and
- *   visual/composition $1F/$46FE or $20/$479D.
- * Bloodpool boss lightning (runs 20260810-174202 and -180202):
- *   map group/current map $02/$08, source descriptor $BDFF, animation
- *   $7E:5000, shared delay handler $8661, and a validated +$3A backlink.
- *   States $02-$07 are six different authored strikes: vertical/diagonal,
- *   each in long/medium/short lengths, using visuals $00-$05. Their shared
- *   visual $20 is the blank half-cycle, not a telegraph. State $09 is the
- *   linked floor impact. Exact state/visual/composition tuples below cover
- *   every strike shape rather than extrapolating from one captured pose.
- * Player sword beam (run 20260810-175403 snap_01_gf1726):
- *   handler $9D1C, animation $06:8000, player backlink $08A0, and exact
- *   state/visual/composition pairs $13/$30/$99E8 or $14/$31/$9A17.
- * Aitos boss sword volley (run 20260812-000613 snap_05_gf21056):
- *   source $D646 emits two diagonal $7E:5000 crescents through an inactive
- *   state-$00 volley controller. Children retain resume $A65D and exact
- *   state/visual/composition/velocity tuples $01/$21/$56D8/(-3,+1) and
- *   $02/$20/$56BE/(-3,-1). Their captured OAM uses OBJ priority 2.
- * Bloodpool wall torches (snap_01_gf2479, snap_06_gf7654):
- *   BG1 metatile $47 immediately above $4F in maps $02/$03 and $02/$05.
- *   The exact pair is the authored object identity and applies across the
- *   Bloodpool group rather than being tied to either observed room number.
- * Marahna (runs 20260811-151353 and -221433, maps $05/$04-$08):
- *   one BG1 metatile $43 is the complete wall torch. Source $E047 emits a
- *   large four-frame $05-$08 orb, then four backlink-linked $32/$4BCD or
- *   $33/$4BD9 children with exact cardinal velocities and direction flips.
- *   Source $DE96 emits the snake enemy's separate $1D/$1E fire shot. $4AA1/$4B82 are
- *   ten-part
- *   horizontal/vertical lightning links whose parent, partner, and midpoint
- *   are validated before capture. The visually fiery $34/$4BE5 family is
- *   moving-platform machinery and must not receive a projectile effect. In
- *   the boss room, source $E483 authors exact $57C2/$5868 charge arcs, the
- *   $59DE orb, backlink-validated $5CE0 diagonal launched bolts, and the
- *   complete $5D01/$5D0D/$5D2E ground-charge cycle.
- * Aitos (same run, map $04/$01):
- *   lava pits are BG1 rows $DC, one-or-more $DD, $DE over an equally wide
- *   sequence $DF/$E7; these are the two bubbly rows above the solid-red $F7
- *   fill. Their emitted fireballs share source $CF9E and resume $CFCD;
- *   exact handler/state and visual/composition pairs cover the wait, rising,
- *   and return phases without matching unrelated $7E:4000 actors. Run
- *   20260812-000613 separates launched volcano rocks as the $CEEC/$CF16
- *   family, and maps waterfall-platform splash frames as exact three-row BG1
- *   structures in maps $04/$02-$03.
- * Death Heim (runs 20260822-195453 and -195726):
- *   rematch sources are Minotaur $F6CA, Wizard $F6E2, Flaming Wheel $F712,
- *   Viper $F72A, and Ice Dragon $F760. Their original boss sources are
- *   $AF5D/$BDFF/$D838/$E483/$F161 respectively. The rematches preserve the
- *   attack control flow and artwork used below, except that Viper's boss body
- *   retains the Death Heim room-owner backlink $001C. Tanzara's $F80F
- *   projectile tuples cover the observed attacks without styling its body. */
+/* Exact action-scene identities. These signatures intentionally combine
+ * control flow, animation, composition, and relationship fields because the
+ * object record is polymorphic. Capture evidence and rejected lookalikes are
+ * documented in docs/effects-hook-investigation.md. */
 enum {
   kEnemyFireballHandler = 0xBDF0,
   kEnemyFireballResume = 0xBDD9,

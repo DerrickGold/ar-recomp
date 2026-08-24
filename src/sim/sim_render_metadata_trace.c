@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "deterministic_hash.h"
+
 static FILE *g_sim_d1_trace;
 static bool g_sim_d1_trace_env_checked;
 
@@ -12,10 +14,7 @@ static uint64_t FrameHash(const uint8_t *rgba, int width, int height,
   if (!rgba || width <= 0 || height <= 0 || pitch < width * 4) return 0;
   for (int y = 0; y < height; y++) {
     const uint8_t *row = rgba + (size_t)y * pitch;
-    for (int x = 0; x < width * 4; x++) {
-      hash ^= row[x];
-      hash *= UINT64_C(1099511628211);
-    }
+    hash = DeterministicHash_Fnv1a64(hash, row, (size_t)width * 4);
   }
   return hash;
 }

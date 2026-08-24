@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "byte_order.h"
 #include "constants.h"
 #include "diorama/diorama_layer_editor.h"
 #include "action/action_bg_tuner.h"
@@ -1062,18 +1063,13 @@ static void DestroyFontTextures(void) {
   s_debug_font_texture = NULL;
 }
 
-static uint16_t ReadLe16(const uint8_t *data) {
-  return (uint16_t)(
-      (uint16_t)data[0] | ((uint16_t)data[1] << 8));
-}
-
 static int CursorBlinkOffset(void) {
   return (int)((SDL_GetTicks() / kCursorBlinkHalfPeriodMs) & 1u);
 }
 
 static uint32_t DialogColor(const uint8_t *palette, unsigned index) {
   if (index == 0) return ARGB(0, 0, 0, 0);
-  uint16_t color = ReadLe16(palette + index * 2);
+  uint16_t color = ByteOrder_ReadLe16(palette + index * 2);
   unsigned red = (color & 0x1f) * 255 / 31;
   unsigned green = ((color >> 5) & 0x1f) * 255 / 31;
   unsigned blue = ((color >> 10) & 0x1f) * 255 / 31;

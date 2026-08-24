@@ -25,6 +25,8 @@ import argparse
 import json
 from pathlib import Path
 
+from ar_lib import lorom_off, read_le16
+
 
 SPELLS = {
     "magical_fire": {"base": 0x07C000, "states": [2, 3]},
@@ -33,18 +35,6 @@ SPELLS = {
     "magical_light_center": {"base": 0x07C800, "states": [1]},
     "magical_light_sides": {"base": 0x07C800, "states": [0]},
 }
-
-
-def lorom_offset(address: int) -> int:
-    bank = (address >> 16) & 0xFF
-    offset = address & 0xFFFF
-    if offset < 0x8000:
-        raise ValueError(f"not a LoROM ROM address: ${address:06X}")
-    return (bank & 0x7F) * 0x8000 + (offset - 0x8000)
-
-
-def u16(data: bytes, offset: int) -> int:
-    return data[offset] | (data[offset + 1] << 8)
 
 
 def s8(value: int) -> int:
@@ -106,9 +96,9 @@ def decode_composition(data: bytes, base_file: int, relative: int) -> dict:
 
 
 def decode_state(data: bytes, base: int, state: int) -> dict:
-    base_file = lorom_offset(base)
-    sequence_relative = u16(data, base_file + (state + 1) * 2)
-    composition_table_relative = u16(data, base_file)
+    base_file = lorom_off(base)
+    sequence_relative = read_le16(data, base_file + (state + 1) * 2)
+    composition_table_relative = read_le16(data, base_file)
     cursor = base_file + sequence_relative
     steps = []
     visuals = {}

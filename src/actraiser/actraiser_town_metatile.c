@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "actraiser/actraiser_cpu_hle_internal.h"
 #include "cpu_65816_math.h"
 
 enum {
@@ -140,43 +141,6 @@ static TownMetatileAddressResult CalculateCpuDestination(
   return result;
 }
 
-static uint16_t EmulateWordPush(CpuState *cpu, uint16_t stack_pointer,
-                                uint16_t value) {
-  cpu_write8(cpu, k65816StackBank, stack_pointer,
-             (uint8_t)(value >> CHAR_BIT));
-  stack_pointer = (uint16_t)(stack_pointer - 1);
-  cpu_write8(cpu, k65816StackBank, stack_pointer, (uint8_t)value);
-  return (uint16_t)(stack_pointer - 1);
-}
-
-static void PushCpuWord(CpuState *cpu, uint16_t value) {
-  cpu->S = EmulateWordPush(cpu, cpu->S, value);
-}
-
-static uint16_t PopCpuWord(CpuState *cpu) {
-  cpu->S = (uint16_t)(cpu->S + 1);
-  const uint16_t value = cpu_read16(cpu, k65816StackBank, cpu->S);
-  cpu->S = (uint16_t)(cpu->S + 1);
-  return value;
-}
-
-static void SetCpuWordNegativeZero(CpuState *cpu, uint16_t value) {
-  cpu->_flag_Z = value == 0;
-  cpu->_flag_N = (value & kWordSignBit) != 0;
-  cpu->P = (uint8_t)((cpu->P & ~(CPU_P_N | CPU_P_Z)) |
-                     (cpu->_flag_N ? CPU_P_N : 0) |
-                     (cpu->_flag_Z ? CPU_P_Z : 0));
-}
-
-static void RequireTownMetatileEntryMode(CpuState *cpu,
-                                          const char *routine_name) {
-  if (!cpu->m_flag && !cpu->x_flag && !cpu->emulation) return;
-  fprintf(stderr,
-          "FATAL: %s HLE requires native mode with 16-bit A/X/Y\n",
-          routine_name);
-  abort();
-}
-
 /* $03:9B5A and $03:9C43 are identical bounded leaves except for their source
  * definition tables ($7E:2100 terrain and $7E:3100 structures). Both derive
  * a quadrant-paged destination from $7CAF/$7CB1, clear attribute bit 9 from
@@ -189,7 +153,9 @@ static RecompReturn TownCopyMetatileHle(CpuState *cpu,
   if (!cpu) return RECOMP_RETURN_NORMAL;
 
   cpu_mirrors_to_p(cpu);
-  RequireTownMetatileEntryMode(cpu, routine_name);
+  ActRaiserCpuHle_RequireEntryMode(
+      cpu, routine_name,
+      kActRaiserCpuHleEntryMode_Native16BitAccumulatorAndIndexes);
 
   const uint16_t cell_x =
       cpu_read16(cpu, cpu->DB, kTownMetatileCellX);
@@ -201,9 +167,10 @@ static RecompReturn TownCopyMetatileHle(CpuState *cpu,
       cell_x, cell_y, cpu->_flag_D != 0);
 
   uint16_t stack_pointer = cpu->S;
-  stack_pointer = EmulateWordPush(
+  stack_pointer = ActRaiserCpuHle_PushWordAt(
       cpu, stack_pointer, address.horizontal_byte_offset);
-  EmulateWordPush(cpu, stack_pointer, address.within_quadrant.value);
+  ActRaiserCpuHle_PushWordAt(
+      cpu, stack_pointer, address.within_quadrant.value);
 
   const uint16_t final_accumulator = CopyTownMetatileAtOffset(
       cpu, cpu->DB, address.destination.value, metatile_id, atlas);
@@ -278,22 +245,22 @@ static bool ExecuteTownDrawList(
       /* PHX / JSR $9C43. Calling the CPU-facing metatile HLE retains the
        * nested routine's own two temporary word pushes and final ABI. */
       cpu->X = command_address;
-      PushCpuWord(cpu, cpu->X);
-      PushCpuWord(cpu, kTownDrawMetatileCopyReturnAddress);
+      ActRaiserCpuHle_PushWord(cpu, cpu->X);
+      ActRaiserCpuHle_PushWord(cpu, kTownDrawMetatileCopyReturnAddress);
       cpu->host_return_valid = 1;
       if (ActRaiser_TownCopyStructureMetatile(cpu) !=
           RECOMP_RETURN_NORMAL)
         return false;
 
-      cpu->X = PopCpuWord(cpu);
-      SetCpuWordNegativeZero(cpu, cpu->X);
+      cpu->X = ActRaiserCpuHle_PopWord(cpu);
+      ActRaiserCpuHle_SetNegativeZero16(cpu, cpu->X);
       cpu->X = (uint16_t)(cpu->X + kTownDrawCommandBytes);
 
       const uint16_t commands_remaining = (uint16_t)(
           cpu_read16(cpu, cpu->DB, kTownDrawCommandCount) - 1);
       cpu_write16(cpu, cpu->DB, kTownDrawCommandCount,
                   commands_remaining);
-      SetCpuWordNegativeZero(cpu, commands_remaining);
+      ActRaiserCpuHle_SetNegativeZero16(cpu, commands_remaining);
     }
 
     command_address = (uint16_t)(
@@ -321,10 +288,12 @@ RecompReturn ActRaiser_TownExecuteDrawList(CpuState *cpu) {
   if (!cpu) return RECOMP_RETURN_NORMAL;
 
   cpu_mirrors_to_p(cpu);
-  RequireTownMetatileEntryMode(cpu, "$03:A591");
+  ActRaiserCpuHle_RequireEntryMode(
+      cpu, "$03:A591",
+      kActRaiserCpuHleEntryMode_Native16BitAccumulatorAndIndexes);
 
   const uint16_t saved_x = cpu->X;
-  PushCpuWord(cpu, saved_x);
+  ActRaiserCpuHle_PushWord(cpu, saved_x);
   const uint16_t draw_step_address = cpu_read16(
       cpu, cpu->DB,
       (uint16_t)(saved_x + kTownDrawStepListPointerOffset));
@@ -345,8 +314,8 @@ RecompReturn ActRaiser_TownExecuteDrawList(CpuState *cpu) {
     abort();
   }
 
-  cpu->X = PopCpuWord(cpu);
-  SetCpuWordNegativeZero(cpu, cpu->X);
+  cpu->X = ActRaiserCpuHle_PopWord(cpu);
+  ActRaiserCpuHle_SetNegativeZero16(cpu, cpu->X);
   cpu->S = (uint16_t)(cpu->S + k65816RtsStackBytes);
   return RECOMP_RETURN_NORMAL;
 }

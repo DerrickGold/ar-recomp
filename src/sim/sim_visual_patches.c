@@ -1,5 +1,7 @@
 #include "sim_visual_patches.h"
 
+#include "byte_order.h"
+
 enum {
   /* LoROM $01:A838. The three entries are [duration, composition word], then
    * FE 01 loops back to the script base. */
@@ -12,10 +14,6 @@ enum {
    * a readable 15 fps flicker without changing its actor-owned lifetime. */
   kHouseFireAdjustedDuration = 4,
 };
-
-static uint16_t ReadLe16(const uint8_t *p) {
-  return (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
-}
 
 bool SimVisualPatches_Apply(uint8_t *rom_data, size_t rom_size) {
   static const uint16_t kHouseFireCompositions[kHouseFireFrameCount] = {
@@ -32,7 +30,8 @@ bool SimVisualPatches_Apply(uint8_t *rom_data, size_t rom_size) {
     uint8_t duration = rom_data[offset];
     if ((duration != kHouseFireSourceDuration &&
          duration != kHouseFireAdjustedDuration) ||
-        ReadLe16(&rom_data[offset + 1]) != kHouseFireCompositions[i])
+        ByteOrder_ReadLe16(
+            &rom_data[offset + 1]) != kHouseFireCompositions[i])
       return false;
   }
   if (rom_data[kHouseFireLoopOffset] != 0xFE ||

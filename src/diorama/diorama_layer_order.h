@@ -7,46 +7,10 @@
 
 #include "diorama_planes.h"
 
-/* Per-room diorama layer overrides.
- *
- * The problem: a stage's layers do not always want the diorama's default paint
- * order. Fillmore Act 2 renders its water band BEHIND the rock path, when it
- * should be in front. Which layer belongs in front is a property of what the
- * stage is drawing, so it cannot be derived — it has to be authored per room.
- *
- * The room key is ($18, $19) — the game's own map-group and map-number bytes.
- * $19 already indexes rooms WITHIN a group: Death Heim is group $07 with maps
- * $01..$08 (hub, six bosses, final — see actraiser_game.h), which is where the
- * distinction was first observed while mapping level warps. So no new
- * identifier is needed and no ROM tracing is required.
- *
- * Three knobs per plane:
- *   - `order`  where the plane sits in the paint sequence, back to front.
- *   - `z`      the plane's depth in the 3D projection.
- *   - `alpha`  the plane's opacity, 0..255. Lets a room compensate for a
- *              translucency the capture did not reproduce.
- *
- * IMPORTANT — why `order` is SEPARATE from `z`, which an earlier revision of
- * this module got wrong. diorama.c's paint order is the literal order of the
- * kDioramaLayers table and nothing sorts by z (no qsort in diorama.c; the file
- * notes at each SDL_RenderGeometry call that it has no depth test). Crucially the two
- * do not agree: Bg2Hi (z=0.21) is painted at slot 7, AFTER Bg1 (z=0.50)
- * at slot 5. So "sort by ascending z when an override is active" is not a
- * refinement of the default order — it is a DIFFERENT order, and it reshuffled
- * five planes even for an edit that changed nothing.
- *
- * `z` also feeds the depth-of-field radius: DofRadiusForLayer(layer->z) against
- * a focal plane hardcoded to BG1's 0.50 (kDofFocalZ in diorama.c). Moving a plane's
- * z to reorder it would therefore silently change how blurred it is — pushing
- * BG2 from 0.20 to 0.52 drops its blur below the cutoff and the water would
- * turn sharp. Keeping the two keys distinct lets a room reorder without
- * disturbing focus, or change focus without reordering.
- *
- * Everything here is pure: no SDL, no globals, no file I/O beyond a caller-
- * supplied line. That keeps the arithmetic and the manifest grammar testable
- * without a ROM or a renderer (precedent: actraiser_ws_gap.c and
- * host_display_pacing.c).
- */
+/* Pure per-room diorama authoring keyed by the game's (map group, map) pair.
+ * Paint order is independent of geometric z because SDL does not depth-sort
+ * these meshes and z also controls focus. Shape choices and tradeoffs are
+ * documented in docs/diorama-depth-shapes.md. */
 
 enum {
   /* A room override is identified by (group, map, section). */
@@ -119,18 +83,8 @@ bool DioramaLayerOrder_DecodeActionBgSource(int source,
                                             uint8_t *out_bg_layer);
 int DioramaLayerOrder_NextSource(int source, int direction);
 
-/* The depth strategies a plane can use, as ONE enumeration.
- *
- * This exists for the layer editor: the point of the editor is to cycle a room's
- * plane through the available strategies and watch the result, which needs a
- * single ordered list with names -- not four independent keys the UI has to know
- * to clear in the right combinations. The manifest keys stay as they are (they are
- * more expressive, since a plane can carry a rake AND a thickness), so this is the
- * editor's view of the same data, resolved from whichever keys are authored.
- *
- * Ordered cheapest-first so cycling forward from Flat escalates cost gradually,
- * and so a room half-tuned by an author who ran out of budget stops somewhere
- * sensible. Voxel is last because it is the only one that can cost 24 draws. */
+/* Editor-facing strategy order, cheapest to most expensive. Manifest fields
+ * remain composable even though the editor presents one resolved strategy. */
 typedef enum DioramaDepthStrategy {
   kDioramaDepth_Flat = 0,   /* no depth: a parallel sheet, as every room shipped */
   kDioramaDepth_Rake,       /* tilt the plane linearly */
@@ -144,16 +98,7 @@ typedef enum DioramaDepthStrategy {
 /* Strategy name for the editor row and logs ("flat", "rake", ...). Never NULL. */
 const char *DioramaLayerOrder_StrategyName(DioramaDepthStrategy strategy);
 
-/* Which way a stack lays its copies, relative to the plane's own depth. Higher z
- * is NEARER the camera in this projection (the backdrop is z=0.00, the HUD z=0.95),
- * so Forward means toward the viewer.
- *
- * Forward is the default because the reported case needs it: Fillmore act 2's
- * water sits BEHIND the rock path (z=0.21 vs 0.50), so the gap to fill is between
- * the water and the camera. Backward exists for the mirror case -- a foreground
- * layer that should recede into the scene behind it -- and Both spreads the fill
- * either side of the plane, for something the plane sits in the MIDDLE of, like a
- * cloud bank or a dust volume. */
+/* Stack direction relative to the source plane; higher z is nearer. */
 typedef enum DioramaStackDirection {
   kDioramaStack_Forward = 0,   /* z .. z + depth  (toward the camera) */
   kDioramaStack_Backward = 1,  /* z - depth .. z  (away from the camera) */
@@ -175,134 +120,27 @@ typedef struct DioramaPlaneOverride {
   uint8_t alpha;
   bool set_source;
   uint8_t source;     /* DioramaLayerSource; Backdrop record → skybox */
-  /* RAKE — the layer stops being parallel to the screen and tilts in depth: its
-   * TOP edge keeps `z`, its BOTTOM edge sits at `z + rake`. Positive rakes the
-   * bottom toward the camera.
-   *
-   * This exists because two parallel planes at different depths leave a visible
-   * VOID between them once the diorama camera tilts — you see past the near
-   * plane's bottom edge into the gap. Fillmore act 2 is the reported case: the
-   * water is Bg2Hi at z=0.21 and the rock path is Bg1 at z=0.50, so the water
-   * appears to float behind a hole. Raking the water forward until its near edge
-   * meets the rock's depth closes the gap, and for a water surface viewed from
-   * an angle it is also the physically right shape -- a surface receding into
-   * the distance rather than a billboard.
-   *
-   * Free-form rather than "snap to the next layer": the converging target is a
-   * judgement call per room, and the editor can offer the snap as a preset
-   * without the data model hard-coding it. */
+  /* Linear tilt: the bottom edge sits at z + rake. */
   bool set_rake;
   float rake;
-  /* BOW — a rake on a curve instead of a straight tilt.
-   *
-   * Same endpoints as a rake: the top edge keeps `z`, the bottom edge lands at
-   * `z + bow`. What differs is everything in between. A rake's depth is linear in
-   * t, so dz/dt is CONSTANT: every row is displaced in depth, including the ones
-   * near the top, which is why a raked layer's parallax reads uniformly
-   * exaggerated. A bow is quadratic, so dz/dt is 0 at the top and greatest at the
-   * bottom -- the layer keeps its original depth behaviour where it meets the sky
-   * and only bends forward near the fold, which is where it actually needs to
-   * reach the layer in front.
-   *
-   * Worth trying wherever a rake was the right idea but read as too much: it
-   * closes the same gap with the same number, concentrating the distortion where
-   * the geometry demands it instead of spreading it over the whole plane. Still a
-   * tilt, so it still spans a depth range and still has more than one parallax
-   * rate -- if that is unacceptable at all, the shape wanted is a stack. */
+  /* Quadratic tilt with the same endpoint convention as rake. */
   bool set_bow;
   float bow;
-  /* THICKNESS — the solid-volume alternative to a rake: extrude the plane's
-   * BOTTOM edge forward from `z` to `z + thickness`, so the layer reads as a
-   * block with a near face rather than an infinitely thin sheet.
-   *
-   * Kept distinct from `rake` because they are different shapes, not two
-   * spellings of one, and a room may want both (they compose: the skirt starts
-   * at the raked bottom edge, so the fold does not tear).
-   *
-   * Which to reach for: a rake tilts the WHOLE plane, so its art stretches in
-   * depth and it stops being parallel to the screen -- right for a water surface
-   * receding into the distance, wrong for a rock face whose front should stay
-   * square to the camera. A thickness leaves the plane untouched and adds
-   * geometry below it, so the art is unchanged and only the fold is new.
-   *
-   * The skirt is textured with the plane's bottom source row repeated, shaded
-   * darker with depth. That is the honest limit of extruding a flat 2D capture:
-   * there is no side-face art to sample, so the row already at the fold is what
-   * continues, and the gradient is what makes the fold legible rather than a
-   * smear. */
+  /* Shaded skirt extruded from the (possibly raked) bottom edge. */
   bool set_thickness;
   float thickness;
-  /* STACK — fill the depth gap by REPEATING the layer at intermediate depths,
-   * instead of tilting it (rake) or extruding a side face from it (thickness).
-   *
-   * `stack` is how deep to fill, in the same z units as `rake`: copies are laid
-   * from `z` toward `z + stack`. `stack_copies` is how many, 1..kDioramaStackMax.
-   *
-   * Why a third shape rather than a variant of the other two. A rake tilts the
-   * plane, which puts its own rows at DIFFERENT depths -- so the layer picks up
-   * two different parallax rates inside itself and shears as the camera moves,
-   * over-exaggerating that layer's parallax. That is the reported problem with
-   * the rake, and it is intrinsic to tilting rather than a tuning error: the
-   * perspective divide is per-vertex, so any plane spanning a depth range has a
-   * depth-dependent scale across its own surface. A stack never tilts anything.
-   * Every copy stays exactly parallel to the screen, so every copy has ONE
-   * parallax rate, and the layer as a whole keeps the flat, poster-like motion
-   * the diorama is built on -- it just occupies depth instead of being a sheet.
-   *
-   * The trade, stated honestly: copies are discrete, so the gap is filled by
-   * layered slices rather than continuous solid, and gaps remain BETWEEN slices.
-   * More copies close them at a linear cost in draw calls. This reads well for
-   * foliage, crowds, rain, cloud banks and rubble -- anything whose real-world
-   * form is many similar things at different depths -- and poorly for a surface
-   * that should be continuous, which is what thickness and rake are for.
-   *
-   * Copies fade and darken with depth so the stack reads as receding volume
-   * rather than as a smear of identical sprites. */
+  /* Faded parallel copies spanning stack depth. */
   bool set_stack;
   float stack;
-  /* Copy count. Authoring this directly pins an EXACT number of slices, which is
-   * what you want when the look depends on the count itself (four distinct
-   * cloud banks, say). Mutually informative with `stack_density` below: an
-   * explicit count always wins, since it is the more specific instruction. */
+  /* Explicit copy count takes precedence over density. */
   bool set_stack_copies;
   int stack_copies;
-  /* Copies per unit of depth, as a fraction of the fill. Density rather than an
-   * absolute count because slice SPACING is what the eye judges, and a fixed
-   * count gives different spacing in every room: `copies:4` across a 0.29 gap
-   * spaces slices 0.097 apart, but across a 0.10 gap only 0.033. Authoring a
-   * density instead keeps the visual result consistent as the gap changes, and
-   * lets one value be reused across rooms.
-   *
-   * Resolved to a count and clamped to kDioramaStackMax, so a large density on a
-   * deep fill cannot silently blow the per-frame draw budget. */
+  /* Copies per depth unit, resolved and clamped to the stack cap. */
   bool set_stack_density;
   float stack_density;
   bool set_stack_direction;
   int stack_direction;   /* DioramaStackDirection */
-  /* VOXEL — extrude the layer through depth by repeating it densely with NO
-   * fade, so it reads as one solid object rather than as separate slices.
-   *
-   * Mechanically a stack: parallel copies, so it inherits the stack's freedom
-   * from the rake's shear. What differs is intent, and therefore two settings --
-   * the falloff is off and the slice count is much higher (kDioramaVoxelMax).
-   *
-   * Why it is not just `thick` with more work. A thickness hangs its skirt from
-   * the QUAD's bottom edge, so it draws a straight band across the layer's whole
-   * width even where the art is transparent -- right for a cliff that spans the
-   * layer, wrong for a rock island with sky either side. A voxel's copies carry
-   * the layer's OWN alpha (a captured BG is mostly transparent with art islands;
-   * palette index 0 stays transparent, see ppu.c), so every island extrudes
-   * itself and the silhouette is respected for free. That is the case thick
-   * cannot express.
-   *
-   * Why it is not just `stack` with density cranked up: it can be authored that
-   * way, and that is precisely the point -- but the stack's cap and its fade are
-   * tuned for reading as depth LAYERS. Naming the solid intent separately means
-   * the defaults are right without every room restating them, and a reader can
-   * tell "several things at different depths" from "one object with volume".
-   *
-   * COST: the most expensive shape here, up to kDioramaVoxelMax draws of the
-   * whole layer. Use it on one plane in a room, not on all of them. */
+  /* Dense, unfaded parallel copies capped independently from stacks. */
   bool set_voxel;
   float voxel;
   bool set_voxel_copies;

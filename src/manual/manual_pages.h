@@ -266,75 +266,14 @@ bool ManualView_AdvanceTurn(ManualView *view, float elapsed_seconds,
 /* Jump straight to an item with no animation, clamped into range. */
 void ManualView_GoTo(ManualView *view, int item, int count);
 
-/* ── Turn geometry ─────────────────────────────────────────────────────────
- *
- * The turning sheet is hinged on one edge and BOWS as it lifts, like paper. It
- * does not curl freely: SDL_RenderGeometry has NO DEPTH TEST and no backface
- * culling, so correctness comes from draw ORDER alone, and the bow is bounded so
- * that order is provably right.
- *
- * TWO INVARIANTS, both bounded by the same number, both asserted by tests:
- *
- *   1. z >= 0 everywhere, so the leaf never dips behind a settled page and the
- *      fixed draw order (backdrop -> destination -> shadow -> leaf) holds for
- *      every frame with no mid-animation reordering.
- *
- *   2. z is MONOTONICALLY NON-DECREASING in u. This is the subtle one, and it is
- *      what makes a bow safe at all. A bowed sheet DOES fold back on itself in
- *      screen x near the hinge when it is edge-on -- measured 14 px of overlap at
- *      the amplitude below, so it genuinely self-occludes. Painter's order still
- *      renders it correctly, but ONLY IF THE RENDERER EMITS ITS MESH WITH u AS
- *      THE OUTER LOOP (column-major). Depth rises monotonically with u, so a
- *      later-emitted triangle is a nearer one -- but row-major emission resets u
- *      to 0 on every row, making depth jump BACKWARD at each row boundary and a
- *      far triangle paint over a near one. Measured 6 out-of-order steps per
- *      frame that way, versus 0 column-major. The sheet is constant in v, so
- *      ordering by column costs nothing.
- *
- *      This is a CONSTRAINT ON THE RENDERER, not a property of this module, and
- *      the module cannot enforce it -- ManualTurn_DepthRisesWithU exists so a
- *      renderer can assert the premise it depends on.
- *
- * Both hold exactly while amplitude <= 0.5/pi ~= 0.159, and THE BINDING CASE IS
- * THE HINGE, not the free edge. Writing the depth out,
- *
- *     z(u) = sin(a) * [ u/2 + A*sin(pi*u)*cos(a) ]
- *
- * the bracket is worst at a = pi, where it is u/2 - A*sin(pi*u). At the free edge
- * sin(pi*u) is ZERO, so that end is trivially safe and cannot be the worst case;
- * as u -> 0 the sine goes like pi*u and the bracket goes like u*(1/2 - A*pi),
- * which is where 0.5 - A*pi >= 0 actually comes from. Measured: at A = 0.160,
- * one thousandth over the bound, the first violation appears at u = 0.0285 --
- * against the hinge, as the algebra says. (An earlier revision of this comment
- * attributed the bound to u=1. The BOUND was right; the attribution pointed at
- * the one place on the sheet where the bow vanishes.)
- *
- * kManualCurlPermille is set well under the bound, so it is a guard rail rather
- * than a cliff edge.
- *
- * This is why the bow is a BOW and not a curl: a freely curled sheet -- one whose
- * far half rolls back over its near half -- breaks invariant 2, and then no
- * ordering of whole strips can fix it. It would need the mesh split along the
- * silhouette, which this project has no precedent for.
- */
+/* The painter-ordered turn mesh requires z >= 0 and depth non-decreasing in
+ * u. Keep the bow below 0.5/pi and emit it column-major. The proof and renderer
+ * rationale are in docs/manual.md#manual-page-turn-geometry. */
 
 enum {
-  /* Bow amplitude, in thousandths of the sheet's width. 70 is a visible lift
-   * with better than 2x headroom under the limit below, because the amplitude
-   * interacts with the projection and a value that is merely *provably* safe is
-   * not the same as a comfortable one. Raising this past the limit turns the
-   * geometry tests red rather than producing a subtly wrong image. */
+  /* Bow amplitude in thousandths of the sheet width. */
   kManualCurlPermille = 70,
-  /* THE DERIVED CEILING, floor(1000 * 0.5/pi). This is not a tuning knob and
-   * must never be raised to accommodate a larger amplitude: it is what the
-   * invariant proof above ALLOWS, so moving it does not make a bigger bow safe,
-   * it just stops the guard from reporting that the bow is unsafe.
-   *
-   * The guard used to be a plain `<=` comparison in a test, which the obvious
-   * edit -- raising the amplitude and the ceiling together -- satisfied happily.
-   * Two things stop that now: the static assertion below fires at COMPILE time
-   * for the amplitude, and a test independently recomputes floor(500/pi) and
-   * compares it to this constant, so moving the ceiling fails on its own. */
+  /* Derived ceiling: floor(1000 * 0.5/pi), independently pinned by tests. */
   kManualCurlLimitPermille = 159,
 };
 

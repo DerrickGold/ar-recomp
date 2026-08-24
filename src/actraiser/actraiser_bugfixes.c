@@ -1,75 +1,8 @@
-/* Simulation-mode bridge-limit enhancement (settings category: Extras).
- *
- * This option relaxes an original-hardware compromise: every town keeps its
- * structures in a fixed 128-record array, and bridges occupy a record
- * while providing the least support of any structure (32 people) and being
- * indestructible. Per The Admiral's Maximum Population Guide (GameFAQs 47431),
- * the 128-record cap is the binding constraint on Fillmore/Bloodpool/Kasandora
- * population, so accidental extra bridges permanently cost population.
- *
- * Structure-record system (bank $03, reverse-engineered 2026-07-17):
- *
- *   - Per-town record arrays: base = word ROM[$03:DC74 + town*2]
- *     ($6BE7/$6DE7/$6FE7/$71E7/$73E7/$75E7 in the town data bank $7F),
- *     128 records x 4 bytes: +0 cell X, +1 cell Y (0-31 map cells),
- *     +2 flags/type (bit7 active, bit6 under construction, bits 4-5
- *     subtype/level, bits 0-3 type class), +3 pending action (low nibble)
- *     plus progress bits ($70).
- *   - Type classes: 0 house, 1 BRIDGE, 2 field (corn; +$10 = wheat),
- *     3/4 factory/windmill tier, others support. The census at $03:C07F
- *     credits 32/48/72 supported people by class — the FAQ's numbers.
- *   - Allocator $03:9D9F: first-free scan, capacity #$0080; carry set =
- *     table full. Bridge records (types $01/$11) are allocated by the
- *     road-crossing sites $03:9985/$99CA, gated on river bits $0080/$0100
- *     of the road map $6800,X; the road bit stays set forever, so a bridge
- *     is never allocated twice for the same crossing.
- * HISTORY — v1 toggles WITHDRAWN 2026-07-17 after play-testing. Both v1
- * behavior extensions freed bridge records (slot reuse on a full table;
- * lightning destruction), and the playtest proved that construction events
- * REGENERATE town tiles from the record table: a recordless bridge visibly
- * vanishes at the next "Town Under Construction" event and can strand the
- * build-direction cursor across the now-uncrossable river. Miracle handling
- * is therefore completely native again; the live fix never destroys bridges.
- *
- * v2 (fix_bridge_limit, LIVE): completed bridges MIGRATE out of the 128-slot
- * table into a per-town EXTENSION AREA in free checksummed SRAM. The bridge
- * never stops existing — it keeps its road-map bit, its cell marks are
- * rewritten every construction scene, its metatile is restamped after the
- * native reconstruction pass, and its 32-person support stays in the census
- * — it just no longer occupies one of the 128 records, so bridges stop
- * counting toward the population cap. Four cooperating HLE bodies:
- *
- *   $03:9D9F allocator  — lazily migrates completed bridge records
- *                         (active, class 1, not under construction) into the
- *                         extension area whenever an allocation runs with the
- *                         toggle on, then performs the authentic first-free
- *                         scan (which now finds the vacated slots).
- *   $03:C07E census     — faithful population/support recompute, plus 32
- *                         support per extension bridge. Extension bridges are
- *                         counted regardless of the toggle so that disabling
- *                         it never collapses a town's support.
- *   $03:9CFB marks pass — the construction-scene scanner that rewrites the
- *                         per-cell structure marks ($7F:2000 map, codes
- *                         $E0-$E8) from the record table; reimplemented with
- *                         the seven per-type handlers inlined and extension
- *                         bridges appended, so migrated bridges keep their
- *                         map identity across every redraw. The appended sidecar
- *                         pass has no architectural CPU/scratch side effects.
- *   $03:89F0 scene finish— immediately after the native $9D4D reconstruction
- *                         scanner, decodes the same bridge rebuild program
- *                         and copies its metatile from the native $7E:3100
- *                         atlas. This is the rendering half of slot presence;
- *                         it does not consume an animation/structure slot.
- *
- * Extension area format (SRAM bank $70, inside the checksummed range so the
- * game's own save path persists it). Runtime migration refreshes the live
- * checksum but shadows sidecar-only changes so they do not reach disk until
- * the ROM's normal save transaction changes the native town block:
- *   0x1D70: magic "AXB1"; 0x1D74: 6 towns x 16 x 4-byte records (same
- *   {cell X, cell Y, flags, action} layout; flags==0 = free slot). Ends at
- *   0x1EF4, well inside [0x0000,0x1FEC). The ROM's own write footprint ends
- *   at 0x1D6A and it never reads this region.
- */
+/* Optional bridge-limit enhancement. Completed bridges migrate from each
+ * town's 128-record array into checksummed SRAM without losing support,
+ * marks, rendering, or crossing state. The four HLE entry points below must
+ * remain coordinated. Design, ROM mapping, and persistence details live in
+ * docs/settings-system.md, docs/SEAMS.md, and docs/save-format.md. */
 
 #include "actraiser_cell_map.h"
 #include "actraiser_town_metatile.h"

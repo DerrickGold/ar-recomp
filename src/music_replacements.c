@@ -6,6 +6,7 @@
 #include "music_replacements.h"
 #include "constants.h"
 #include "host/host_audio.h"
+#include "manifest_utils.h"
 #include "settings.h"
 
 #define STB_VORBIS_HEADER_ONLY
@@ -77,15 +78,6 @@ static struct {
 
 /* ---- parsing ------------------------------------------------------------ */
 
-static char *TrimInPlace(char *str) {
-  while (*str == ' ' || *str == '\t') str++;
-  char *end = str + strlen(str);
-  while (end > str && (end[-1] == ' ' || end[-1] == '\t' ||
-                       end[-1] == '\r' || end[-1] == '\n'))
-    *--end = 0;
-  return str;
-}
-
 /* BB:AAAA (hex) -> 24-bit source address. */
 static bool ParseSrcAddress(const char *value, uint32 *out) {
   unsigned bank = 0, addr = 0;
@@ -95,21 +87,6 @@ static bool ParseSrcAddress(const char *value, uint32 *out) {
   if (bank > 0xff || addr > 0xffff) return false;
   *out = (uint32)((bank << 16) | addr);
   return true;
-}
-
-static void ResolveFilePath(const char *manifest_path, const char *value,
-                            char *out, size_t out_size) {
-  const char *slash = strrchr(manifest_path, '/');
-#ifdef _WIN32
-  const char *backslash = strrchr(manifest_path, '\\');
-  if (backslash && (!slash || backslash > slash)) slash = backslash;
-#endif
-  if (value[0] == '/' || !slash) {
-    snprintf(out, out_size, "%s", value);
-  } else {
-    snprintf(out, out_size, "%.*s/%s",
-             (int)(slash - manifest_path), manifest_path, value);
-  }
 }
 
 static bool EntryComplete(const MusicReplacement *entry, const char *path,
@@ -203,7 +180,7 @@ int MusicReplacements_Load(const char *manifest_path) {
 
   while (fgets(line, sizeof(line), f)) {
     line_number++;
-    char *cursor = TrimInPlace(line);
+    char *cursor = Manifest_Trim(line);
     if (!cursor[0] || cursor[0] == '#' || cursor[0] == ';') continue;
 
     if (cursor[0] == '[') {
@@ -228,14 +205,14 @@ int MusicReplacements_Load(const char *manifest_path) {
     char *equals = strchr(cursor, '=');
     if (!equals) continue;
     *equals = 0;
-    char *key = TrimInPlace(cursor);
-    char *value = TrimInPlace(equals + 1);
+    char *key = Manifest_Trim(cursor);
+    char *value = Manifest_Trim(equals + 1);
     bool ok = true;
     if (!strcmp(key, "src")) {
       ok = ParseSrcAddress(value, &pending.src);
     } else if (!strcmp(key, "file")) {
-      ResolveFilePath(manifest_path, value, pending.file,
-                      sizeof(pending.file));
+      Manifest_ResolvePath(
+          manifest_path, value, pending.file, sizeof(pending.file));
     } else if (!strcmp(key, "song")) {
       pending.song = (int)strtol(value, NULL, 0);
       ok = pending.song >= 0 && pending.song <= 0xef;

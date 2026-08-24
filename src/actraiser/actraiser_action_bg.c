@@ -7,6 +7,7 @@
 
 #include "actraiser_game.h"
 #include "action/action_room_scene.h"
+#include "deterministic_hash.h"
 #include "diorama/diorama_layer_order.h"
 #include "snes/dma.h"
 #include "snes/ppu.h"
@@ -1175,13 +1176,9 @@ static bool ProviderLookup(const void *context, int32_t tile_x,
   return false;
 }
 
-static uint64_t HashTileBandByte(uint64_t hash, uint8_t value) {
-  return (hash ^ value) * UINT64_C(1099511628211);
-}
-
 static uint64_t HashTileBandWord(uint64_t hash, uint16_t value) {
-  hash = HashTileBandByte(hash, (uint8_t)value);
-  return HashTileBandByte(hash, (uint8_t)(value >> 8));
+  hash = DeterministicHash_Fnv1a64Byte(hash, (uint8_t)value);
+  return DeterministicHash_Fnv1a64Byte(hash, (uint8_t)(value >> 8));
 }
 
 /* Hash only classification fields. Geometry (z/order/alpha) can change
@@ -1192,11 +1189,11 @@ static bool HashTileBandRules(const DioramaVirtualLayerOverride *layer,
   if (!layer || !out_hash ||
       layer->cell_span_count > kDioramaVirtualCellSpanMax)
     return false;
-  uint64_t hash = UINT64_C(14695981039346656037);
+  uint64_t hash = DETERMINISTIC_HASH_FNV1A64_OFFSET;
   for (size_t i = 0; i < sizeof(layer->metatile_set); i++)
-    hash = HashTileBandByte(hash, layer->metatile_set[i]);
+    hash = DeterministicHash_Fnv1a64Byte(hash, layer->metatile_set[i]);
   for (size_t i = 0; i < sizeof(layer->metatile_bands); i++)
-    hash = HashTileBandByte(hash, layer->metatile_bands[i]);
+    hash = DeterministicHash_Fnv1a64Byte(hash, layer->metatile_bands[i]);
   hash = HashTileBandWord(hash, layer->cell_span_count);
   for (size_t i = 0; i < layer->cell_span_count; i++) {
     const DioramaVirtualCellSpan *span = &layer->cell_spans[i];
@@ -1204,7 +1201,7 @@ static bool HashTileBandRules(const DioramaVirtualLayerOverride *layer,
     hash = HashTileBandWord(hash, span->y0);
     hash = HashTileBandWord(hash, span->x1);
     hash = HashTileBandWord(hash, span->y1);
-    hash = HashTileBandByte(hash, span->band);
+    hash = DeterministicHash_Fnv1a64Byte(hash, span->band);
   }
   *out_hash = hash;
   return true;

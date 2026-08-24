@@ -2,9 +2,8 @@
 
 #include <limits.h>
 #include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
 
+#include "actraiser/actraiser_cpu_hle_internal.h"
 #include "cpu_65816_math.h"
 
 enum {
@@ -15,7 +14,6 @@ enum {
   kTownLairBitMaskTableAddress = 0xF4D7,
   kBitsPerMaskByte = CHAR_BIT,
   kBitIndexMask = kBitsPerMaskByte - 1,
-  kByteSignBit = 1u << (CHAR_BIT - 1),
   kAccumulatorHighByteMask = UINT16_MAX ^ UINT8_MAX,
   kWordBits = sizeof(uint16_t) * CHAR_BIT,
   kWordSignBit = 1u << (kWordBits - 1),
@@ -48,47 +46,6 @@ typedef struct TownBitResolution {
   bool address_overflow;
 } TownBitResolution;
 
-static void RequireTownBitEntryMode(CpuState *cpu,
-                                    const char *routine_name) {
-  if (cpu->m_flag && !cpu->x_flag && !cpu->emulation) return;
-  fprintf(stderr,
-          "FATAL: %s HLE requires native mode with 8-bit A and "
-          "16-bit X/Y\n",
-          routine_name);
-  abort();
-}
-
-static void PushCpuWord(CpuState *cpu, uint16_t value) {
-  cpu_write8(cpu, k65816StackBank, cpu->S,
-             (uint8_t)(value >> CHAR_BIT));
-  cpu->S = (uint16_t)(cpu->S - 1);
-  cpu_write8(cpu, k65816StackBank, cpu->S, (uint8_t)value);
-  cpu->S = (uint16_t)(cpu->S - 1);
-}
-
-static uint16_t PopCpuWord(CpuState *cpu) {
-  cpu->S = (uint16_t)(cpu->S + 1);
-  const uint16_t value = cpu_read16(cpu, k65816StackBank, cpu->S);
-  cpu->S = (uint16_t)(cpu->S + 1);
-  return value;
-}
-
-static void SetCpuByteNegativeZero(CpuState *cpu, uint8_t value) {
-  cpu->_flag_Z = value == 0;
-  cpu->_flag_N = (value & kByteSignBit) != 0;
-  cpu->P = (uint8_t)((cpu->P & ~(CPU_P_N | CPU_P_Z)) |
-                     (cpu->_flag_N ? CPU_P_N : 0) |
-                     (cpu->_flag_Z ? CPU_P_Z : 0));
-}
-
-static void SetCpuWordNegativeZero(CpuState *cpu, uint16_t value) {
-  cpu->_flag_Z = value == 0;
-  cpu->_flag_N = (value & kWordSignBit) != 0;
-  cpu->P = (uint8_t)((cpu->P & ~(CPU_P_N | CPU_P_Z)) |
-                     (cpu->_flag_N ? CPU_P_N : 0) |
-                     (cpu->_flag_Z ? CPU_P_Z : 0));
-}
-
 static void WriteAccumulatorLowByte(CpuState *cpu, uint8_t value) {
   cpu->A = (uint16_t)((cpu->A & kAccumulatorHighByteMask) | value);
 }
@@ -104,18 +61,18 @@ static void ResolveTownBit(CpuState *cpu,
   uint16_t mask_base;
 
   if (address_kind == kTownBitAddress_PerTownPointerTable) {
-    PushCpuWord(cpu, entry_accumulator);
+    ActRaiserCpuHle_PushWord(cpu, entry_accumulator);
     const uint16_t encoded_town_index =
         cpu_read16(cpu, cpu->DB, kCurrentTownIndex);
-    PushCpuWord(cpu, cpu->Y);
+    ActRaiserCpuHle_PushWord(cpu, cpu->Y);
     const Cpu65816Add16Result pointer_address = Cpu65816_Add16(
         encoded_town_index, cpu->Y, false, decimal);
     cpu->X = pointer_address.value;
     mask_base = cpu_read16(cpu, kTownLairBitMaskTableBank,
                            pointer_address.value);
     cpu->Y = mask_base;
-    cpu->A = PopCpuWord(cpu);
-    cpu->A = PopCpuWord(cpu);
+    cpu->A = ActRaiserCpuHle_PopWord(cpu);
+    cpu->A = ActRaiserCpuHle_PopWord(cpu);
   } else {
     mask_base = kTownGlobalFlagsBase;
     cpu->Y = mask_base;
@@ -123,13 +80,13 @@ static void ResolveTownBit(CpuState *cpu,
 
   const uint16_t flag_id = entry_accumulator & UINT8_MAX;
   cpu->A = flag_id;
-  PushCpuWord(cpu, flag_id);
+  ActRaiserCpuHle_PushWord(cpu, flag_id);
   const uint16_t byte_offset = flag_id / kBitsPerMaskByte;
   cpu->A = byte_offset;
-  PushCpuWord(cpu, mask_base);
+  ActRaiserCpuHle_PushWord(cpu, mask_base);
   const Cpu65816Add16Result address = Cpu65816_Add16(
       byte_offset, mask_base, false, decimal);
-  cpu->X = PopCpuWord(cpu);
+  cpu->X = ActRaiserCpuHle_PopWord(cpu);
   cpu->A = address.value;
   cpu->Y = address.value;
 
@@ -138,7 +95,7 @@ static void ResolveTownBit(CpuState *cpu,
   resolution.byte_value = cpu_read8(cpu, cpu->DB, address.value);
   cpu_write8(cpu, cpu->DB, kTownLairByteScratch,
              resolution.byte_value);
-  cpu->A = PopCpuWord(cpu);
+  cpu->A = ActRaiserCpuHle_PopWord(cpu);
   resolution.bit_index = flag_id & kBitIndexMask;
   cpu->A = resolution.bit_index;
   cpu->X = resolution.bit_index;
@@ -150,9 +107,9 @@ static void ResolveTownBit(CpuState *cpu,
 
   if (address_kind == kTownBitAddress_PerTownPointerTable) {
     cpu->A = resolution.mask;
-    PushCpuWord(cpu, resolution.bit_index);
+    ActRaiserCpuHle_PushWord(cpu, resolution.bit_index);
     cpu->X = resolution.byte_address;
-    cpu->Y = PopCpuWord(cpu);
+    cpu->Y = ActRaiserCpuHle_PopWord(cpu);
   } else {
     cpu->A = resolution.mask_table_word;
     cpu->X = resolution.bit_index;
@@ -179,7 +136,9 @@ static RecompReturn ResolveTownBitHle(CpuState *cpu,
                                       const char *routine_name) {
   if (!cpu) return RECOMP_RETURN_NORMAL;
   cpu_mirrors_to_p(cpu);
-  RequireTownBitEntryMode(cpu, routine_name);
+  ActRaiserCpuHle_RequireEntryMode(
+      cpu, routine_name,
+      kActRaiserCpuHleEntryMode_Native8BitAccumulator16BitIndexes);
   ResolveTownBit(cpu, address_kind);
   cpu->S = (uint16_t)(cpu->S + k65816RtsStackBytes);
   return RECOMP_RETURN_NORMAL;
@@ -201,13 +160,15 @@ static RecompReturn ApplyTownBitOperation(
     const char *routine_name) {
   if (!cpu) return RECOMP_RETURN_NORMAL;
   cpu_mirrors_to_p(cpu);
-  RequireTownBitEntryMode(cpu, routine_name);
+  ActRaiserCpuHle_RequireEntryMode(
+      cpu, routine_name,
+      kActRaiserCpuHleEntryMode_Native8BitAccumulator16BitIndexes);
 
   const uint16_t saved_x = cpu->X;
   const uint16_t saved_y = cpu->Y;
-  PushCpuWord(cpu, saved_x);
-  PushCpuWord(cpu, saved_y);
-  PushCpuWord(cpu, resolver_return_address);
+  ActRaiserCpuHle_PushWord(cpu, saved_x);
+  ActRaiserCpuHle_PushWord(cpu, saved_y);
+  ActRaiserCpuHle_PushWord(cpu, resolver_return_address);
   cpu->host_return_valid = 1;
 
   uint16_t byte_address;
@@ -227,31 +188,31 @@ static RecompReturn ApplyTownBitOperation(
   uint8_t result;
   switch (operation) {
     case kTownBitOperation_Test:
-      cpu->Y = PopCpuWord(cpu);
-      cpu->X = PopCpuWord(cpu);
+      cpu->Y = ActRaiserCpuHle_PopWord(cpu);
+      cpu->X = ActRaiserCpuHle_PopWord(cpu);
       result = mask & byte_value;
       WriteAccumulatorLowByte(cpu, result);
-      SetCpuByteNegativeZero(cpu, result);
+      ActRaiserCpuHle_SetNegativeZero8(cpu, result);
       break;
 
     case kTownBitOperation_Set:
       result = mask | byte_value;
       WriteAccumulatorLowByte(cpu, result);
-      SetCpuByteNegativeZero(cpu, result);
+      ActRaiserCpuHle_SetNegativeZero8(cpu, result);
       cpu_write8(cpu, cpu->DB, byte_address, result);
-      cpu->Y = PopCpuWord(cpu);
-      cpu->X = PopCpuWord(cpu);
-      SetCpuWordNegativeZero(cpu, cpu->X);
+      cpu->Y = ActRaiserCpuHle_PopWord(cpu);
+      cpu->X = ActRaiserCpuHle_PopWord(cpu);
+      ActRaiserCpuHle_SetNegativeZero16(cpu, cpu->X);
       break;
 
     case kTownBitOperation_Clear:
       result = (uint8_t)(~mask & byte_value);
       WriteAccumulatorLowByte(cpu, result);
-      SetCpuByteNegativeZero(cpu, result);
+      ActRaiserCpuHle_SetNegativeZero8(cpu, result);
       cpu_write8(cpu, cpu->DB, byte_address, result);
-      cpu->Y = PopCpuWord(cpu);
-      cpu->X = PopCpuWord(cpu);
-      SetCpuWordNegativeZero(cpu, cpu->X);
+      cpu->Y = ActRaiserCpuHle_PopWord(cpu);
+      cpu->X = ActRaiserCpuHle_PopWord(cpu);
+      ActRaiserCpuHle_SetNegativeZero16(cpu, cpu->X);
       break;
   }
 

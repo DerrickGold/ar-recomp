@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 
+#include "actraiser/actraiser_cpu_hle_internal.h"
 #include "actraiser_game.h"
 #include "cpu_state.h"
 
@@ -42,20 +43,6 @@ static inline uint8_t ActionRoomHle_ReadLongIndexed(
            cpu, (uint16_t)(direct_page_pointer + 2u)) << 16);
   const uint32_t address = (base + index) & 0xFFFFFFu;
   return cpu_read8(cpu, (uint8_t)(address >> 16), (uint16_t)address);
-}
-
-static inline void ActionRoomHle_PushStackWord(
-    CpuState *cpu, uint16_t value) {
-  cpu->S = (uint16_t)(cpu->S - 1u);
-  cpu_write16(cpu, 0x00, cpu->S, value);
-  cpu->S = (uint16_t)(cpu->S - 1u);
-}
-
-static inline uint16_t ActionRoomHle_PopStackWord(CpuState *cpu) {
-  cpu->S = (uint16_t)(cpu->S + 1u);
-  const uint16_t value = cpu_read16(cpu, 0x00, cpu->S);
-  cpu->S = (uint16_t)(cpu->S + 1u);
-  return value;
 }
 
 #endif /* ACTRAISER_ACTION_ROOM_HLE_INTERNAL_H */

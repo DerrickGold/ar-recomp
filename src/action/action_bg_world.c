@@ -1,5 +1,7 @@
 #include "action_bg_world.h"
 
+#include "byte_order.h"
+
 #include "action_bg_metatile.h"
 
 #include <stdlib.h>
@@ -281,15 +283,10 @@ static void SnapshotSources(ActionBgWorld *world,
          kActionBgDefinitionBytes);
 }
 
-static uint16_t ReadWord(const uint8_t *bytes) {
-  return (uint16_t)(bytes[0] | ((uint16_t)bytes[1] << 8));
-}
-
 static uint16_t ReadDefinitionWord(const uint8_t *bytes,
                                    bool big_endian) {
-  return big_endian
-      ? (uint16_t)(((uint16_t)bytes[0] << 8) | bytes[1])
-      : ReadWord(bytes);
+  return big_endian ? ByteOrder_ReadBe16(bytes)
+                    : ByteOrder_ReadLe16(bytes);
 }
 
 static void DecodeSnapshot(ActionBgWorld *world,

@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/DerrickGold/snesrecomp-go/internal/fsutil"
 )
 
 // TargetGo maps a Zig target triple ("x86_64-windows-gnu") to the GOOS/GOARCH
@@ -50,8 +52,8 @@ func StageSDL3(target, cacheDir, stageDir string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if directoryExists(filepath.Join(stageDir, "include", "SDL3")) &&
-		directoryExists(filepath.Join(stageDir, "lib")) {
+	if fsutil.DirectoryExists(filepath.Join(stageDir, "include", "SDL3")) &&
+		fsutil.DirectoryExists(filepath.Join(stageDir, "lib")) {
 		fmt.Fprintf(stdout, "sdl: %s already staged (%s)\n", target, stageDir)
 		return nil
 	}
@@ -95,7 +97,7 @@ func StageSDL3(target, cacheDir, stageDir string, stdout io.Writer) error {
 	// one matching the target rather than assuming a single directory.
 	abi := map[string]string{"amd64": "x86_64-w64-mingw32", "arm64": "aarch64-w64-mingw32"}[goarch]
 	root := filepath.Join(unpacked, "SDL3-"+PinnedSDL3Version, abi)
-	if !directoryExists(root) {
+	if !fsutil.DirectoryExists(root) {
 		return fmt.Errorf("%s has no %s subtree (looked in %s)", archive, abi, root)
 	}
 	if err := os.RemoveAll(stageDir); err != nil {
@@ -121,11 +123,6 @@ func StageSDL3(target, cacheDir, stageDir string, stdout io.Writer) error {
 	}
 	fmt.Fprintf(stdout, "sdl: SDL3 %s staged for %s (%s)\n", PinnedSDL3Version, target, stageDir)
 	return nil
-}
-
-func directoryExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
 }
 
 func copyFile(from, to string) error {

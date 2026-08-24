@@ -10,8 +10,8 @@ Usage:
       <base_tile_hex> <icon_count> out.png [per_row]
 """
 import sys
-import struct
-import zlib
+
+from ar_lib import write_rgb_png
 
 DIGITS = {
     '0': ["111", "101", "101", "101", "111"],
@@ -62,22 +62,6 @@ def icon_px(vram, base_tile, idx, per_grid=8):
             for x in range(8):
                 out[qy * 8 + y][qx * 8 + x] = tp[y][x]
     return out
-
-
-def write_png(path, w, h, rgb):
-    def chunk(tag, p):
-        c = tag + p
-        return struct.pack(">I", len(p)) + c + \
-            struct.pack(">I", zlib.crc32(c) & 0xffffffff)
-    raw = bytearray()
-    for y in range(h):
-        raw.append(0)
-        raw.extend(rgb[y * w * 3:(y + 1) * w * 3])
-    png = b"\x89PNG\r\n\x1a\n"
-    png += chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
-    png += chunk(b"IDAT", zlib.compress(bytes(raw), 9))
-    png += chunk(b"IEND", b"")
-    open(path, "wb").write(png)
 
 
 def put(rgb, W, x, y, c):
@@ -136,7 +120,7 @@ def main():
                         put(rgb, W, gx + x * scale + sx, gy + y * scale + sy,
                             (r, g, b))
         label(rgb, W, gx + 2, gy - label_h + 2, str(n))
-    write_png(out, W, H, rgb)
+    write_rgb_png(out, W, H, rgb)
     print(f"{out}: {count} icons from tile ${base:03X}, pal {pal}, {rows}x{per_row}")
 
 

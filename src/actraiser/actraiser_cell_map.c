@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "actraiser/actraiser_cpu_hle_internal.h"
 #include "cpu_65816_math.h"
 
 enum {
@@ -171,40 +172,6 @@ static TownCellMarkIndexResult CalculateTownCellMarkIndex(
   return result;
 }
 
-static void RequireTownCellIndexEntryMode(CpuState *cpu,
-                                          const char *routine_name) {
-  if (!cpu->x_flag && !cpu->emulation) return;
-  fprintf(stderr,
-          "FATAL: %s HLE requires native mode with 16-bit indexes\n",
-          routine_name);
-  abort();
-}
-
-static void RequireTownStructureMarkEntryMode(CpuState *cpu,
-                                               const char *routine_name) {
-  if (cpu->m_flag && !cpu->x_flag && !cpu->emulation) return;
-  fprintf(stderr,
-          "FATAL: %s HLE requires native mode with 8-bit A and "
-          "16-bit X/Y\n",
-          routine_name);
-  abort();
-}
-
-static void PushCpuWord(CpuState *cpu, uint16_t value) {
-  cpu_write8(cpu, k65816StackBank, cpu->S,
-             (uint8_t)(value >> CHAR_BIT));
-  cpu->S = (uint16_t)(cpu->S - 1);
-  cpu_write8(cpu, k65816StackBank, cpu->S, (uint8_t)value);
-  cpu->S = (uint16_t)(cpu->S - 1);
-}
-
-static uint16_t PopCpuWord(CpuState *cpu) {
-  cpu->S = (uint16_t)(cpu->S + 1);
-  const uint16_t value = cpu_read16(cpu, k65816StackBank, cpu->S);
-  cpu->S = (uint16_t)(cpu->S + 1);
-  return value;
-}
-
 static void PushCpuByte(CpuState *cpu, uint8_t value) {
   cpu_write8(cpu, k65816StackBank, cpu->S, value);
   cpu->S = (uint16_t)(cpu->S - 1);
@@ -215,16 +182,8 @@ static uint8_t PopCpuByte(CpuState *cpu) {
   return cpu_read8(cpu, k65816StackBank, cpu->S);
 }
 
-static void SetCpuWordNegativeZero(CpuState *cpu, uint16_t value) {
-  cpu->_flag_Z = value == 0;
-  cpu->_flag_N = (value & kWordSignBit) != 0;
-  cpu->P = (uint8_t)((cpu->P & ~(CPU_P_N | CPU_P_Z)) |
-                     (cpu->_flag_N ? CPU_P_N : 0) |
-                     (cpu->_flag_Z ? CPU_P_Z : 0));
-}
-
 static void EmulateNestedCellIndexJsr(CpuState *cpu) {
-  PushCpuWord(cpu, kTownCellIndexJsrReturnAddress);
+  ActRaiserCpuHle_PushWord(cpu, kTownCellIndexJsrReturnAddress);
 
   /* $03:9710's RTS restores the caller-visible stack pointer. The bytes remain
    * in stack RAM, just as they do after the native nested call. */
@@ -253,7 +212,8 @@ RecompReturn ActRaiser_TownCellMarkIndex(CpuState *cpu) {
   if (!cpu) return RECOMP_RETURN_NORMAL;
 
   cpu_mirrors_to_p(cpu);
-  RequireTownCellIndexEntryMode(cpu, "$03:9710");
+  ActRaiserCpuHle_RequireEntryMode(
+      cpu, "$03:9710", kActRaiserCpuHleEntryMode_Native16BitIndexes);
 
   const uint16_t staged_cell_x =
       cpu_read16(cpu, cpu->DB, kCellMapCellX);
@@ -285,11 +245,13 @@ static RecompReturn WriteTownStructureMarkHle(
   if (!cpu) return RECOMP_RETURN_NORMAL;
 
   cpu_mirrors_to_p(cpu);
-  RequireTownStructureMarkEntryMode(cpu, routine_name);
+  ActRaiserCpuHle_RequireEntryMode(
+      cpu, routine_name,
+      kActRaiserCpuHleEntryMode_Native8BitAccumulator16BitIndexes);
 
   const uint16_t saved_x = cpu->X;
   const uint8_t mark = (uint8_t)cpu->A;
-  PushCpuWord(cpu, saved_x);
+  ActRaiserCpuHle_PushWord(cpu, saved_x);
   PushCpuByte(cpu, mark);
 
   const uint8_t cell_x = ReadDataBankIndexedByte(
@@ -299,7 +261,7 @@ static RecompReturn WriteTownStructureMarkHle(
   cpu_write8(cpu, cpu->DB, kCellMapCellX, cell_x);
   cpu_write8(cpu, cpu->DB, kCellMapCellY, cell_y);
 
-  PushCpuWord(cpu, nested_return_address);
+  ActRaiserCpuHle_PushWord(cpu, nested_return_address);
   cpu->host_return_valid = 1;
   const RecompReturn nested_result = ActRaiser_TownCellMarkIndex(cpu);
   if (nested_result != RECOMP_RETURN_NORMAL) return nested_result;
@@ -309,8 +271,8 @@ static RecompReturn WriteTownStructureMarkHle(
   cpu->A = (uint16_t)((cpu->A & kWordHighByteMask) | restored_mark);
   WriteTownStructureMarkAtIndex(
       cpu, cpu->DB, mark_index, restored_mark, shape);
-  cpu->X = PopCpuWord(cpu);
-  SetCpuWordNegativeZero(cpu, cpu->X);
+  cpu->X = ActRaiserCpuHle_PopWord(cpu);
+  ActRaiserCpuHle_SetNegativeZero16(cpu, cpu->X);
   cpu_p_to_mirrors(cpu);
   cpu->S = (uint16_t)(cpu->S + k65816RtsStackBytes);
   return RECOMP_RETURN_NORMAL;
@@ -338,7 +300,8 @@ RecompReturn ActRaiser_TownCellTestTraversalBlocked(CpuState *cpu) {
   if (!cpu) return RECOMP_RETURN_NORMAL;
 
   cpu_mirrors_to_p(cpu);
-  RequireTownCellIndexEntryMode(cpu, "$03:96EF");
+  ActRaiserCpuHle_RequireEntryMode(
+      cpu, "$03:96EF", kActRaiserCpuHleEntryMode_Native16BitIndexes);
   EmulateNestedCellIndexJsr(cpu);
 
   const uint16_t staged_cell_x =
