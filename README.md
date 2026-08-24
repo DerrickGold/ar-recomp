@@ -26,8 +26,8 @@ an in-game settings menu.
 | | |
 |---|---|
 | ✅ | **Action stages** — every act across all regions, plus Death Heim, played through end to end |
-| 🟡 | **Simulation mode** — Fillmore, Bloodpool, Kasandora, and Marahna verified end to end; Aitos and Northwall remain |
-| 🟡 | **Diorama mode** — Fillmore, Bloodpool, Kasandora, and Marahna acts/towns are play-tested; remaining rooms still need tuning and acceptance |
+| 🟡 | **Simulation mode** — Fillmore, Bloodpool, Kasandora, Aitos, and Marahna have confirmed event coverage; Northwall remains |
+| 🟡 | **Diorama mode** — every action route except Northwall is play-tested; a future action-editor pass will further enhance room presentation |
 | 🟡 | **Platforms** — builds confirmed on macOS and Steam Deck. **Windows is untested and unverified.** |
 
 Per-stage detail: [`docs/progress.md`](docs/progress.md).
@@ -312,7 +312,8 @@ each design spec lives in [`specs/README.md`](specs/README.md).
 |---|---|
 | [`docs/manual.md`](docs/manual.md) | Player and power-user reference |
 | [`docs/contributing.md`](docs/contributing.md) | Source builds, repository layout, and contribution rules |
-| [`DEBUG.md`](DEBUG.md) | Debugging workflow, tools, and known bug classes |
+| [`DEBUG.md`](DEBUG.md) | Debugging workflow, tools, and open issues |
+| [`docs/bug-ledger.md`](docs/bug-ledger.md) | Resolved defects and reusable engineering lessons |
 | [`docs/SEAMS.md`](docs/SEAMS.md) | Logic↔hardware boundary and architecture map |
 | [`docs/progress.md`](docs/progress.md) | Stage, town, and subsystem status |
 | [`docs/rendering-engine.md`](docs/rendering-engine.md) | Rendering, streaming, and OAM architecture |

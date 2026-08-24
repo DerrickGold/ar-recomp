@@ -566,7 +566,6 @@ static void TestNarrowDecorativeBg2(void) {
     /* Moving cloud/snow families retained from the legacy widescreen policy. */
     { 4, 1 }, { 4, 2 }, { 4, 3 },
     { 6, 1 }, { 6, 2 }, { 6, 3 }, { 6, 4 }, { 6, 5 }, { 6, 8 },
-    { 7, 2 }, { 7, 3 }, { 7, 4 }, { 7, 5 }, { 7, 6 }, { 7, 7 },
   };
   for (size_t i = 0; i < sizeof(repeat_cases) / sizeof(repeat_cases[0]); i++) {
     state = State(repeat_cases[i][0], repeat_cases[i][1]);
@@ -588,6 +587,112 @@ static void TestNarrowDecorativeBg2(void) {
     CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror);
     CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
   }
+}
+
+static void TestDeathHeimTunedBossExtents(void) {
+  ActionBgFrameState state = State(7, 3);
+  state.layer[0].world_width = 256;
+  state.layer[0].world_height = 256;
+  state.layer[1].world_width = 256;
+  ActionBgPlan plan = Build(&state);
+  CHECK(plan.layer[0].role == kActionBgLayerRole_Playfield);
+  CHECK(plan.layer[0].source == kActionBgSource_WorldMap);
+  CHECK(plan.layer[0].default_edge == kActionBgEdge_Mirror);
+  CHECK(plan.layer[0].default_motion == kActionBgMotion_FillRelative);
+  CHECK(plan.layer[0].horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(plan.layer[0].horizontal_extent.left == 80 &&
+        plan.layer[0].horizontal_extent.right == 80);
+  CHECK(plan.layer[0].vertical_extent.mode == kActionBgExtent_Available);
+  CHECK(plan.layer[0].band_count == 0);
+  CHECK(plan.layer[1].role == kActionBgLayerRole_Backdrop);
+  CHECK(plan.layer[1].source == kActionBgSource_AuthenticViewport);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_Clamp);
+  CHECK(plan.layer[1].default_motion == kActionBgMotion_FillRelative);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Available);
+  CHECK(plan.layer[1].vertical_extent.mode == kActionBgExtent_Available);
+  CHECK(plan.layer[1].band_count == 0);
+  ActionBgPresentationPolicy policy = Compile(&plan);
+  CHECK(policy.mirror_layers == 1 && policy.clamp_layers == 2);
+  CHECK(!policy.repeat_layers && !policy.normal_scroll_layers &&
+        !policy.band_count);
+
+  /* Both promoted entries are guarded by the canonical source and edge.
+   * A future decoded-world BG2 or native BG1 must keep its own classification
+   * instead of inheriting a stale room tuning. */
+  state.layer[1].world_width = 512;
+  plan = Build(&state);
+  CHECK(plan.layer[1].source == kActionBgSource_WorldMap);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_LiveWorld);
+  state.layer[0].bgsc = 0x60;
+  plan = Build(&state);
+  CHECK(plan.layer[0].source == kActionBgSource_NativeTilemap);
+  CHECK(plan.layer[0].default_edge == kActionBgEdge_RawWrap);
+  CHECK(plan.layer[0].horizontal_extent.mode == kActionBgExtent_Available);
+
+  state = State(7, 3);
+  state.layer[0].world_width = 256;
+  state.layer[0].world_height = 256;
+  state.layer[1].world_width = 256;
+  state.decorative_padding_enabled = false;
+  plan = Build(&state);
+  CHECK(plan.layer[0].default_edge == kActionBgEdge_LiveWorld);
+  CHECK(plan.layer[0].horizontal_extent.mode == kActionBgExtent_Available);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_Clamp);
+
+  const uint8_t clamp_only_maps[] = { 2, 4, 5, 6 };
+  for (size_t i = 0;
+       i < sizeof(clamp_only_maps) / sizeof(clamp_only_maps[0]); i++) {
+    state = State(7, clamp_only_maps[i]);
+    state.layer[1].world_width = 256;
+    plan = Build(&state);
+    CHECK(plan.layer[0].role == kActionBgLayerRole_Playfield);
+    CHECK(plan.layer[0].source == kActionBgSource_WorldMap);
+    CHECK(plan.layer[0].default_edge == kActionBgEdge_LiveWorld);
+    CHECK(plan.layer[0].default_motion == kActionBgMotion_FillRelative);
+    CHECK(plan.layer[0].horizontal_extent.mode == kActionBgExtent_Available);
+    CHECK(plan.layer[0].vertical_extent.mode == kActionBgExtent_Available);
+    CHECK(plan.layer[0].band_count == 0);
+    CHECK(plan.layer[1].role == kActionBgLayerRole_Backdrop);
+    CHECK(plan.layer[1].source == kActionBgSource_AuthenticViewport);
+    CHECK(plan.layer[1].default_edge == kActionBgEdge_Clamp);
+    CHECK(plan.layer[1].default_motion == kActionBgMotion_FillRelative);
+    CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Available);
+    CHECK(plan.layer[1].vertical_extent.mode == kActionBgExtent_Available);
+    CHECK(plan.layer[1].band_count == 0);
+    policy = Compile(&plan);
+    CHECK(!policy.mirror_layers && policy.clamp_layers == 2);
+    CHECK(!policy.repeat_layers && !policy.normal_scroll_layers &&
+          !policy.band_count);
+  }
+
+  state = State(7, 7);
+  state.layer[1].world_width = 256;
+  plan = Build(&state);
+  CHECK(plan.layer[0].role == kActionBgLayerRole_Playfield);
+  CHECK(plan.layer[0].source == kActionBgSource_WorldMap);
+  CHECK(plan.layer[0].default_edge == kActionBgEdge_LiveWorld);
+  CHECK(plan.layer[0].default_motion == kActionBgMotion_FillRelative);
+  CHECK(plan.layer[0].horizontal_extent.mode == kActionBgExtent_Available);
+  CHECK(plan.layer[0].vertical_extent.mode == kActionBgExtent_Available);
+  CHECK(plan.layer[1].role == kActionBgLayerRole_Backdrop);
+  CHECK(plan.layer[1].source == kActionBgSource_AuthenticViewport);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_LiveWorld);
+  CHECK(plan.layer[1].default_motion == kActionBgMotion_NormalScroll);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(plan.layer[1].horizontal_extent.left == 100 &&
+        plan.layer[1].horizontal_extent.right == 96);
+  CHECK(plan.layer[1].vertical_extent.mode == kActionBgExtent_Available);
+  CHECK(plan.layer[1].band_count == 0);
+  policy = Compile(&plan);
+  CHECK(!policy.clamp_layers && !policy.mirror_layers &&
+        !policy.repeat_layers);
+  CHECK(policy.normal_scroll_layers == 2 && !policy.band_count);
+
+  state = State(7, 4);
+  state.layer[1].world_width = 512;
+  plan = Build(&state);
+  CHECK(plan.layer[1].source == kActionBgSource_WorldMap);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_LiveWorld);
 }
 
 static void TestAitosWaterfallVerticalExtent(void) {
@@ -804,7 +909,22 @@ static void TestDeathHeimStates(void) {
   CHECK(policy.band_count == 1 && PresentationBandIs(
       &policy, 0, 1, 144, 224, kActionBgEdge_Repeat));
 
+  /* Final-boss progress is set while the original face scene is still live.
+   * It must not select the clear-screen Mirror/128 policy before the black
+   * fade swaps the BG pages. */
   state.death_heim_progress = 7;
+  plan = Build(&state);
+  policy = Compile(&plan);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_Clamp);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(!plan.layer[1].horizontal_extent.left &&
+        !plan.layer[1].horizontal_extent.right);
+  CHECK(plan.layer[1].band_count == 1);
+  CHECK(policy.clamp_layers == 3 && !policy.mirror_layers);
+  CHECK(policy.band_count == 1);
+
+  /* The live $64/$74 page handoff occurs under the black frame and is the
+   * first safe point for the completed-scene tuning. */
   state.layer[0].bgsc = 0x64;
   state.layer[1].bgsc = 0x74;
   plan = Build(&state);
@@ -812,12 +932,31 @@ static void TestDeathHeimStates(void) {
   CHECK(policy.clamp_layers == 1 && policy.mirror_layers == 2);
   CHECK(!policy.band_count);
   CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(plan.layer[1].horizontal_extent.left == 128 &&
+        plan.layer[1].horizontal_extent.right == 128);
+  CHECK(plan.layer[1].vertical_extent.mode == kActionBgExtent_Available);
 
+  /* The settled-state fallback reaches the same immutable policy if the page
+   * registers are no longer observable at their transition values. */
   state.layer[0].bgsc = 0x60;
   state.layer[1].bgsc = 0x70;
   state.death_heim_ending_state = 3;
   plan = Build(&state);
   CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror);
+  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
+  CHECK(plan.layer[1].horizontal_extent.left == 128 &&
+        plan.layer[1].horizontal_extent.right == 128);
+
+  /* Matching pages without completed progress are not sufficient. */
+  state.death_heim_progress = 0;
+  state.death_heim_ending_state = 0;
+  state.layer[0].bgsc = 0x64;
+  state.layer[1].bgsc = 0x74;
+  plan = Build(&state);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_Clamp);
+  CHECK(!plan.layer[1].horizontal_extent.left &&
+        !plan.layer[1].horizontal_extent.right);
+  CHECK(plan.layer[1].band_count == 1);
 
   state = State(7, 8);
   state.layer[0].world_width = 256;
@@ -848,6 +987,8 @@ static void TestEveryKnownMapClassifies(void) {
       ActionBgFrameState state = State(group, map);
       if (group == 3 && (map == 1 || map == 2))
         state.layer[1].world_height = 512;
+      if (group == 7 && map >= 2 && map <= 7)
+        state.layer[1].world_width = 256;
       ActionBgPlan plan;
       CHECK(ActionBgPlan_Build(&state, &plan));
       CHECK(plan.valid);
@@ -861,6 +1002,10 @@ static void TestEveryKnownMapClassifies(void) {
             layer == 1 && group == 1 && map == 1;
         const bool fixed_death_heim_bg2 =
             layer == 1 && group == 7 && map == 1;
+        const bool fixed_death_heim_second_boss_bg1 =
+            layer == 0 && group == 7 && map == 3;
+        const bool fixed_death_heim_last_boss_bg2 =
+            layer == 1 && group == 7 && map == 7;
         const bool fixed_kasandora_bg2 =
             layer == 1 && group == 3 && (map == 1 || map == 2);
         const bool fixed_marahna_bg2 =
@@ -869,6 +1014,8 @@ static void TestEveryKnownMapClassifies(void) {
             layer == 0 && group == 2 && map == 8;
         CHECK(plan.layer[layer].horizontal_extent.mode ==
               (fixed_fillmore_bg2 || fixed_death_heim_bg2 ||
+                   fixed_death_heim_second_boss_bg1 ||
+                   fixed_death_heim_last_boss_bg2 ||
                    fixed_kasandora_bg2 || fixed_marahna_bg2 ||
                    fixed_bloodpool_boss_bg1
                    ? kActionBgExtent_Fixed : kActionBgExtent_Available));
@@ -890,6 +1037,7 @@ int main(void) {
   TestMarahnaMap5BackdropExtent();
   TestFillmoreAct1BackdropExtent();
   TestNarrowDecorativeBg2();
+  TestDeathHeimTunedBossExtents();
   TestAitosWaterfallVerticalExtent();
   TestBloodpoolBand();
   TestBloodpoolUnbandedBackdropExtents();

@@ -1321,6 +1321,8 @@ static void TestBloodpoolTorchMetatileIdentity(void) {
   CHECK(frame.decorations[0].world_y == 63);
   CHECK(frame.decorations[0].projection_plane ==
         kActionEffectProjectionPlane_Bg1);
+  CHECK(frame.decorations[0].render_layer ==
+        kActionEffectRenderLayer_Bg1Plane);
   CHECK(frame.decorations[0].phase_ticks == 2479);
   CHECK(frame.decorations[1].world_x == 72);
   CHECK(frame.decorations[1].world_y == 63);
@@ -1373,6 +1375,7 @@ static void TestMarahnaTorchMetatileIdentityAndWindow(void) {
 
   for (unsigned map = 4; map <= 8; map++) {
     wram[kActRaiserWram_CurrentMap] = (uint8_t)map;
+    CHECK(ActionSceneEffects_RoomUsesBg1Decorations(wram, sizeof(wram)));
     ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
     CHECK(frame.decoration_count == 1);
     CHECK(frame.decoration_visible_count == 1);
@@ -1385,6 +1388,8 @@ static void TestMarahnaTorchMetatileIdentityAndWindow(void) {
     CHECK(frame.decorations[0].geometry.data.rect.y1 == 5.0f);
     CHECK(frame.decorations[0].projection_plane ==
           kActionEffectProjectionPlane_Bg1);
+    CHECK(frame.decorations[0].render_layer ==
+          kActionEffectRenderLayer_Bg1Plane);
     CHECK(frame.decorations[0].phase_ticks == 20296 + map - 4);
   }
 
@@ -1410,6 +1415,24 @@ static void TestMarahnaTorchMetatileIdentityAndWindow(void) {
   ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
   CHECK(frame.decoration_count == 10);
   CHECK(frame.decoration_visible_count == 10);
+
+  /* Death Heim room $06 reuses Viper's boss background and its exact `$43`
+   * torch cells. The rematch needs the same map-derived treatment even though
+   * its map group and boss source identity differ from Marahna Act 2. */
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_DeathHeim;
+  wram[kActRaiserWram_CurrentMap] = 6;
+  CHECK(ActionSceneEffects_RoomUsesBg1Decorations(wram, sizeof(wram)));
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.decoration_count == 10);
+  CHECK(frame.decoration_visible_count == 10);
+  for (unsigned i = 0; i < frame.decoration_count; i++)
+    CHECK(frame.decorations[i].kind == kActionEffect_WallTorch);
+  wram[kActRaiserWram_CurrentMap] = 5;
+  CHECK(!ActionSceneEffects_RoomUsesBg1Decorations(wram, sizeof(wram)));
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.decoration_count == 0);
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Marahna;
+  wram[kActRaiserWram_CurrentMap] = 8;
 
   /* Restore the shared act-world fixture used by the scan-edge checks. */
   memset(wram + 0x8000, 0, 0x10000);
@@ -2183,6 +2206,195 @@ static void TestAitosLavaFireballIdentityAndContinuity(void) {
   CHECK(frame.effect_count == 0);
 }
 
+static size_t BossEffectSlot(unsigned slot) {
+  return kActRaiserWram_ActionObjectTable +
+      slot * kActRaiserActionObjectStride;
+}
+
+static void SeedBossFamilyObject(uint8_t *wram, unsigned slot,
+                                 uint16_t source, uint16_t composition,
+                                 uint16_t visual, uint16_t state,
+                                 uint16_t resume, uint16_t flags,
+                                 uint16_t backlink) {
+  const size_t address = BossEffectSlot(slot);
+  Write16(wram, address + 0x00, 0x0000);
+  Write16(wram, address + 0x02, (uint16_t)(240 + slot));
+  Write16(wram, address + 0x04, (uint16_t)(180 + slot));
+  Write16(wram, address + 0x06, 0xFFFC);
+  Write16(wram, address + 0x08, 2);
+  Write16(wram, address + 0x0A, 8);
+  Write16(wram, address + 0x0C, 8);
+  Write16(wram, address + 0x0E, 8);
+  Write16(wram, address + 0x10, 8);
+  Write16(wram, address + 0x12, 0x8661);
+  Write16(wram, address + 0x16, 0x5000);
+  wram[address + 0x18] = 0x7E;
+  Write16(wram, address + 0x1A, state);
+  Write16(wram, address + 0x1E, resume);
+  Write16(wram, address + 0x20, composition);
+  Write16(wram, address + 0x22, visual);
+  Write16(wram, address + 0x30, flags);
+  Write16(wram, address + 0x32, source);
+  Write16(wram, address + 0x3A, backlink);
+}
+
+static void TestBossEffectsCarryIntoDeathHeim(void) {
+  uint8_t wram[kActRaiserWramSize];
+  ActionSceneEffectFrame frame;
+  ActionEffectObserver observer = {0};
+
+  /* Wizard: Death Heim changes only the owning source family. */
+  memset(wram, 0, sizeof(wram));
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_DeathHeim;
+  wram[kActRaiserWram_CurrentMap] = 3;
+  SeedBloodpoolBoss(wram);
+  SeedBloodpoolBossLightningStrike(wram, 9, 2, false);
+  Write16(wram, 0x12E0 + 0x32, 0xF6E2);
+  Write16(wram, BossEffectSlot(9) + 0x32, 0xF6E2);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 1);
+  CHECK(frame.effects[0].kind == kActionEffect_BloodpoolBossLightning);
+  SeedBloodpoolBossLightningImpact(wram, 10, 9);
+  Write16(wram, BossEffectSlot(10) + 0x32, 0xF6E2);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 2);
+  CHECK(frame.effects[1].phase == kActionEffectPhase_BossLightningImpact);
+
+  /* Viper: its rematch parent retains the native $001C owner backlink. */
+  memset(wram, 0, sizeof(wram));
+  ActionEffectObserver_Reset(&observer);
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_DeathHeim;
+  wram[kActRaiserWram_CurrentMap] = 6;
+  SeedMarahnaBossParent(wram, 49, 0, 0x0007, 0x57C2);
+  Write16(wram, BossEffectSlot(49) + 0x32, 0xF72A);
+  Write16(wram, BossEffectSlot(49) + 0x3A, 0x001C);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 1);
+  CHECK(frame.effects[0].phase ==
+        kActionEffectPhase_MarahnaBossLightningCharge);
+  SeedMarahnaBossParent(wram, 49, 1, 0x0003, 0x54AC);
+  SeedMarahnaBossBolt(wram, 11, 49, false);
+  Write16(wram, BossEffectSlot(49) + 0x32, 0xF72A);
+  Write16(wram, BossEffectSlot(49) + 0x3A, 0x001C);
+  Write16(wram, BossEffectSlot(11) + 0x32, 0xF72A);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 1);
+  CHECK(frame.effects[0].kind == kActionEffect_MarahnaBossLightning);
+  const size_t viper_parent = BossEffectSlot(49);
+  Write16(wram, viper_parent + 0x12, 0x8683);
+  Write16(wram, viper_parent + 0x1A, 0x000A);
+  Write16(wram, viper_parent + 0x1E, 0xE4D7);
+  Write16(wram, viper_parent + 0x20, 0x5307);
+  Write16(wram, viper_parent + 0x22, 0x0000);
+  SeedMarahnaBossGroundCharge(wram, 11, 49, false, 0x0013);
+  Write16(wram, BossEffectSlot(11) + 0x32, 0xF72A);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 1);
+  CHECK(frame.effects[0].phase ==
+        kActionEffectPhase_MarahnaBossLightningGroundCharge);
+
+  /* Minotaur axe in Fillmore and the first Death Heim rematch. */
+  static const struct { uint8_t group, map; uint16_t source; } kAxeRooms[] = {
+    {kActRaiserMapGroup_Fillmore, 4, 0xAF5D},
+    {kActRaiserMapGroup_DeathHeim, 2, 0xF6CA},
+  };
+  for (size_t i = 0; i < sizeof(kAxeRooms) / sizeof(kAxeRooms[0]); i++) {
+    memset(wram, 0, sizeof(wram));
+    ActionEffectObserver_Reset(&observer);
+    wram[kActRaiserWram_MapGroup] = kAxeRooms[i].group;
+    wram[kActRaiserWram_CurrentMap] = kAxeRooms[i].map;
+    SeedBossFamilyObject(wram, 49, kAxeRooms[i].source, 0x5300,
+                         0, 0, 0, 0x4000, 0);
+    SeedBossFamilyObject(wram, 11, kAxeRooms[i].source, 0x50FB,
+                         0, 3, 0xB008, 0x0020,
+                         (uint16_t)BossEffectSlot(49));
+    ActionSceneEffects_CaptureFrame(&observer, &frame,
+                                    wram, sizeof(wram), 1);
+    CHECK(frame.effect_count == 1);
+    CHECK(frame.effects[0].kind == kActionEffect_MinotaurAxe);
+  }
+  Write16(wram, BossEffectSlot(49) + 0x32, 0xAF5D);
+  Write16(wram, BossEffectSlot(11) + 0x32, 0xAF5D);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 0);
+
+  /* Flaming Wheel's body is the source: illuminate it in both boss rooms. */
+  static const struct { uint8_t group, map; uint16_t source; } kWheelRooms[] = {
+    {kActRaiserMapGroup_Aitos, 7, 0xD838},
+    {kActRaiserMapGroup_DeathHeim, 5, 0xF712},
+  };
+  for (size_t i = 0; i < sizeof(kWheelRooms) / sizeof(kWheelRooms[0]); i++) {
+    memset(wram, 0, sizeof(wram));
+    ActionEffectObserver_Reset(&observer);
+    wram[kActRaiserWram_MapGroup] = kWheelRooms[i].group;
+    wram[kActRaiserWram_CurrentMap] = kWheelRooms[i].map;
+    /* Recorded body frame: the wheel uses both repeat and delay handlers over
+     * its lifecycle, so ownership—not a transient handler—is its discriminator. */
+    SeedBossFamilyObject(wram, 49, kWheelRooms[i].source, 0x5276,
+                         0x0005, 7, 0xD85E, 0x4000,
+                         kWheelRooms[i].group == kActRaiserMapGroup_DeathHeim
+                             ? 0x001C : 0);
+    Write16(wram, BossEffectSlot(49) + 0x12, 0x8683);
+    ActionSceneEffects_CaptureFrame(&observer, &frame,
+                                    wram, sizeof(wram), 1);
+    CHECK(frame.effect_count == 1);
+    CHECK(frame.effects[0].kind == kActionEffect_FlamingWheel);
+
+    /* The spawn source is shared by boss-family helpers. A visually plausible
+     * child must not become a second full-body flame emitter. */
+    SeedBossFamilyObject(wram, 11, kWheelRooms[i].source, 0x5276,
+                         0x0005, 7, 0xD85E, 0x4000,
+                         (uint16_t)BossEffectSlot(49));
+    Write16(wram, BossEffectSlot(11) + 0x12, 0x8683);
+    ActionSceneEffects_CaptureFrame(&observer, &frame,
+                                    wram, sizeof(wram), 1);
+    CHECK(frame.effect_count == 1);
+
+    /* Conversely, a body that acquires a child-style backlink is no longer the
+     * stable root/room-owned wheel and must fail closed. */
+    Write16(wram, BossEffectSlot(49) + 0x3A,
+            (uint16_t)BossEffectSlot(11));
+    ActionSceneEffects_CaptureFrame(&observer, &frame,
+                                    wram, sizeof(wram), 1);
+    CHECK(frame.effect_count == 0);
+  }
+
+  /* Ice Dragon balls retain their exact eight-frame artwork in the rematch. */
+  static const struct { uint8_t group, map; uint16_t source; } kIceRooms[] = {
+    {kActRaiserMapGroup_Northwall, 8, 0xF161},
+    {kActRaiserMapGroup_DeathHeim, 7, 0xF760},
+  };
+  for (size_t i = 0; i < sizeof(kIceRooms) / sizeof(kIceRooms[0]); i++) {
+    memset(wram, 0, sizeof(wram));
+    ActionEffectObserver_Reset(&observer);
+    wram[kActRaiserWram_MapGroup] = kIceRooms[i].group;
+    wram[kActRaiserWram_CurrentMap] = kIceRooms[i].map;
+    SeedBossFamilyObject(wram, 54, kIceRooms[i].source, 0x5C00,
+                         0x0011, 0x000C, 0xF280, 0x0020, 0);
+    SeedBossFamilyObject(wram, 11, kIceRooms[i].source, 0x5D9C,
+                         0x0012, 0x0019, 0xF2CA, 0x0020,
+                         (uint16_t)BossEffectSlot(54));
+    ActionSceneEffects_CaptureFrame(&observer, &frame,
+                                    wram, sizeof(wram), 1);
+    CHECK(frame.effect_count == 1);
+    CHECK(frame.effects[0].kind == kActionEffect_IceDragonIceBall);
+  }
+
+  /* Tanzara is Death Heim-only and uses several exact projectile families. */
+  memset(wram, 0, sizeof(wram));
+  ActionEffectObserver_Reset(&observer);
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_DeathHeim;
+  wram[kActRaiserWram_CurrentMap] = 8;
+  SeedBossFamilyObject(wram, 11, 0xF80F, 0x5D17,
+                       0x0016, 0x0008, 0xFD77, 0x0020, 0);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 1);
+  CHECK(frame.effects[0].kind == kActionEffect_TanzaraProjectile);
+  wram[kActRaiserWram_CurrentMap] = 7;
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+  CHECK(frame.effect_count == 0);
+}
+
 static void TestSceneCaptureCapacityFailsClosed(void) {
   uint8_t wram[kActRaiserWramSize];
   ActionSceneEffectFrame frame;
@@ -2269,6 +2481,7 @@ int main(void) {
   TestAitosMoltenRockIdentity();
   TestAitosWaterfallSplashIdentity();
   TestAitosLavaFireballIdentityAndContinuity();
+  TestBossEffectsCarryIntoDeathHeim();
   TestSceneCaptureCapacityFailsClosed();
   if (g_failures) {
     fprintf(stderr, "%d action-effects test(s) failed\\n", g_failures);

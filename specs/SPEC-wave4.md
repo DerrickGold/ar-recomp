@@ -188,9 +188,9 @@ reports failure.
 
 ## 4. WN1 — 3D world-navigation view (map `$09`)
 
-Full spec: `SPEC-world-navigation-3d.md`. Steps 1-5e are implemented except the
-2048² high-fidelity-town reconstruction research and the final complete
-movement/action-entry replay. The whole developed world is one 1024² texture;
+Full spec: `SPEC-world-navigation-3d.md`. The current implementation and its
+movement/action-entry flow are confirmed in play. The optional 2048²
+high-fidelity-town reconstruction remains research. The whole developed world is one 1024² texture;
 the host owns its pure build from ROM tables plus simulation state and never
 observes shared scratch `$7E:C000`.
 

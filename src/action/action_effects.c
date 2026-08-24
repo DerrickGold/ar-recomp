@@ -500,6 +500,9 @@ static void BeginOrAdvanceSceneTrack(ActionEffectObserver *observer,
            kind == kActionEffect_MarahnaBossLightning)
     continuity_key = (uint32_t)object->source_descriptor |
         ((uint32_t)object->spawner_backlink << 16);
+  else if (kind == kActionEffect_FlamingWheel)
+    continuity_key = (uint32_t)object->source_descriptor |
+        ((uint32_t)object->spawner_backlink << 16);
   if (SceneTrackDiscontinuous(track, object, kind, continuity_key,
                               elapsed_ticks))
     memset(track, 0, sizeof(*track));
@@ -672,7 +675,14 @@ void ActionEffects_CaptureFrame(ActionEffectObserver *observer,
  *   and return phases without matching unrelated $7E:4000 actors. Run
  *   20260812-000613 separates launched volcano rocks as the $CEEC/$CF16
  *   family, and maps waterfall-platform splash frames as exact three-row BG1
- *   structures in maps $04/$02-$03. */
+ *   structures in maps $04/$02-$03.
+ * Death Heim (runs 20260822-195453 and -195726):
+ *   rematch sources are Minotaur $F6CA, Wizard $F6E2, Flaming Wheel $F712,
+ *   Viper $F72A, and Ice Dragon $F760. Their original boss sources are
+ *   $AF5D/$BDFF/$D838/$E483/$F161 respectively. The rematches preserve the
+ *   attack control flow and artwork used below, except that Viper's boss body
+ *   retains the Death Heim room-owner backlink $001C. Tanzara's $F80F
+ *   projectile tuples cover the observed attacks without styling its body. */
 enum {
   kEnemyFireballHandler = 0xBDF0,
   kEnemyFireballResume = 0xBDD9,
@@ -688,6 +698,7 @@ enum {
   kSceneAnimationBank = 0x7E,
   kBloodpoolBossMap = 0x08,
   kBossLightningSourceDescriptor = 0xBDFF,
+  kDeathHeimWizardSourceDescriptor = 0xF6E2,
   kBossAnimationAddress = 0x5000,
   kBossLightningFirstStrikeState = 0x0002,
   kBossLightningLastStrikeState = 0x0007,
@@ -720,6 +731,7 @@ enum {
   kMarahnaLightningHorizontalState = 0x0027,
   kMarahnaLightningVerticalState = 0x0028,
   kMarahnaBossLightningSourceDescriptor = 0xE483,
+  kDeathHeimViperSourceDescriptor = 0xF72A,
   kMarahnaBossLightningParentResume = 0xE4E5,
   kMarahnaBossLightningActiveParentResume = 0xE4F4,
   kMarahnaBossLightningGroundParentResume = 0xE4D7,
@@ -740,6 +752,7 @@ enum {
   kAitosMoltenRockVisual = 0x002B,
   kAitosMoltenRockComposition = 0x4D2D,
   kAitosBossMap = 0x03,
+  kFlamingWheelBossMap = 0x07,
   kAitosBossSourceDescriptor = 0xD646,
   kAitosBossSwordBeamParentResume = 0xD793,
   kAitosWaterfallFirstMap = 0x02,
@@ -754,7 +767,51 @@ enum {
   kAitosSplashDripMiddle = 0xFC,
   kAitosSplashDripRight = 0xFE,
   kAitosSplashMaxCells = 8,
+  kFillmoreBossMap = 0x04,
+  kMinotaurSourceDescriptor = 0xAF5D,
+  kDeathHeimMinotaurSourceDescriptor = 0xF6CA,
+  kMinotaurAxeResume = 0xB008,
+  kFlamingWheelSourceDescriptor = 0xD838,
+  kDeathHeimFlamingWheelSourceDescriptor = 0xF712,
+  kNorthwallBossMap = 0x08,
+  kIceDragonSourceDescriptor = 0xF161,
+  kDeathHeimIceDragonSourceDescriptor = 0xF760,
+  kIceDragonIceBallResume = 0xF2CA,
+  kTanzaraSourceDescriptor = 0xF80F,
+  kDeathHeimMinotaurMap = 0x02,
+  kDeathHeimWizardMap = 0x03,
+  kDeathHeimFlamingWheelMap = 0x05,
+  kDeathHeimViperMap = 0x06,
+  kDeathHeimIceDragonMap = 0x07,
+  kDeathHeimRoomOwnerBacklink = 0x001C,
 };
+
+static bool SourceIs(uint16_t source, uint16_t original,
+                     uint16_t death_heim) {
+  return source == original || source == death_heim;
+}
+
+static bool IsOriginalOrDeathHeimRoom(const uint8_t *wram, size_t wram_size,
+                                      uint8_t original_group,
+                                      uint8_t original_map,
+                                      uint8_t death_heim_map) {
+  const uint8_t group = Read8(wram, wram_size, kActRaiserWram_MapGroup);
+  const uint8_t map = Read8(wram, wram_size, kActRaiserWram_CurrentMap);
+  return (group == original_group && map == original_map) ||
+      (group == kActRaiserMapGroup_DeathHeim && map == death_heim_map);
+}
+
+static bool SourceMatchesOriginalOrDeathHeimRoom(
+    const uint8_t *wram, size_t wram_size, uint16_t source,
+    uint8_t original_group, uint8_t original_map, uint16_t original_source,
+    uint8_t death_heim_map, uint16_t death_heim_source) {
+  const uint8_t group = Read8(wram, wram_size, kActRaiserWram_MapGroup);
+  const uint8_t map = Read8(wram, wram_size, kActRaiserWram_CurrentMap);
+  return (group == original_group && map == original_map &&
+          source == original_source) ||
+      (group == kActRaiserMapGroup_DeathHeim && map == death_heim_map &&
+       source == death_heim_source);
+}
 
 static bool IsMarahnaEffectMap(const uint8_t *wram, size_t wram_size) {
   if (!wram ||
@@ -1097,12 +1154,16 @@ static bool IsMarahnaLightningLink(const uint8_t *wram, size_t wram_size,
 static bool MarahnaBossParentMatches(const ActionObjectSnapshot *object) {
   if (!object || (object->status & kActRaiserObjectStatus_InactiveMask) ||
       !object->composition ||
-      object->source_descriptor != kMarahnaBossLightningSourceDescriptor ||
+      !SourceIs(object->source_descriptor,
+                kMarahnaBossLightningSourceDescriptor,
+                kDeathHeimViperSourceDescriptor) ||
       object->animation_address != kBossAnimationAddress ||
       object->animation_bank != kSceneAnimationBank ||
       object->left_extent != 48 || object->top_extent != 40 ||
       object->right_extent != 48 || object->bottom_extent != 8 ||
-      object->spawner_backlink ||
+      (object->source_descriptor == kMarahnaBossLightningSourceDescriptor
+           ? object->spawner_backlink != 0
+           : object->spawner_backlink != kDeathHeimRoomOwnerBacklink) ||
       (object->flip_attributes & kActRaiserObjectFlip_Mask))
     return false;
   return (object->handler == kAnimationDelayHandler &&
@@ -1121,7 +1182,9 @@ static uint8_t MatchMarahnaBossLightning(
     const uint8_t *wram, size_t wram_size,
     const ActionObjectSnapshot *object) {
   if (!object ||
-      object->source_descriptor != kMarahnaBossLightningSourceDescriptor ||
+      !SourceIs(object->source_descriptor,
+                kMarahnaBossLightningSourceDescriptor,
+                kDeathHeimViperSourceDescriptor) ||
       object->handler != kAnimationDelayHandler ||
       object->animation_address != kBossAnimationAddress ||
       object->animation_bank != kSceneAnimationBank)
@@ -1185,7 +1248,8 @@ static uint8_t MatchMarahnaBossLightning(
 
   ActionObjectSnapshot parent;
   if (!ReadActionObject(wram, wram_size, object->spawner_backlink, &parent) ||
-      !MarahnaBossParentMatches(&parent))
+      !MarahnaBossParentMatches(&parent) ||
+      parent.source_descriptor != object->source_descriptor)
     return kActionEffectPhase_None;
   const bool post_impact_parent =
       parent.handler == kAnimationRepeatHandler &&
@@ -1324,7 +1388,9 @@ static bool BloodpoolBossLightningParentIsValid(
                           &parent) &&
       !(parent.status & kActRaiserObjectStatus_InactiveMask) &&
       parent.composition &&
-      parent.source_descriptor == kBossLightningSourceDescriptor &&
+      SourceIs(parent.source_descriptor, kBossLightningSourceDescriptor,
+               kDeathHeimWizardSourceDescriptor) &&
+      parent.source_descriptor == object->source_descriptor &&
       parent.animation_address == kBossAnimationAddress &&
       parent.animation_bank == kSceneAnimationBank;
 }
@@ -1332,8 +1398,9 @@ static bool BloodpoolBossLightningParentIsValid(
 static uint8_t MatchBloodpoolBossLightning(
     const uint8_t *wram, size_t wram_size,
     const ActionObjectSnapshot *object) {
-  if (!object || object->source_descriptor !=
-          kBossLightningSourceDescriptor ||
+  if (!object ||
+      !SourceIs(object->source_descriptor, kBossLightningSourceDescriptor,
+                kDeathHeimWizardSourceDescriptor) ||
       object->handler != kAnimationDelayHandler ||
       object->animation_address != kBossAnimationAddress ||
       object->animation_bank != kSceneAnimationBank ||
@@ -1361,6 +1428,160 @@ static uint8_t MatchBloodpoolBossLightning(
     return kActionEffectPhase_BossLightningImpact;
 
   return kActionEffectPhase_None;
+}
+
+static bool BossFamilyParentIsValid(const uint8_t *wram, size_t wram_size,
+                                    const ActionObjectSnapshot *object,
+                                    uint16_t original_source,
+                                    uint16_t death_heim_source) {
+  if (!object || !ActionObjectAddressIsValid(object->spawner_backlink))
+    return false;
+  ActionObjectSnapshot parent;
+  return ReadActionObject(wram, wram_size, object->spawner_backlink,
+                          &parent) &&
+      parent.composition &&
+      SourceIs(parent.source_descriptor, original_source,
+               death_heim_source) &&
+      parent.source_descriptor == object->source_descriptor &&
+      parent.animation_address == kBossAnimationAddress &&
+      parent.animation_bank == kSceneAnimationBank;
+}
+
+static bool IsMinotaurAxe(const uint8_t *wram, size_t wram_size,
+                         const ActionObjectSnapshot *object) {
+  static const uint16_t kCompositions[] = {
+    0x50FB, 0x5138, 0x5159, 0x5196, 0x51B7, 0x51F4, 0x5215, 0x5252,
+  };
+  if (!object ||
+      !SourceIs(object->source_descriptor, kMinotaurSourceDescriptor,
+                kDeathHeimMinotaurSourceDescriptor) ||
+      object->handler != kAnimationDelayHandler ||
+      object->resume_address != kMinotaurAxeResume ||
+      object->animation_address != kBossAnimationAddress ||
+      object->animation_bank != kSceneAnimationBank ||
+      object->animation_state != 0x0003 ||
+      !BossFamilyParentIsValid(wram, wram_size, object,
+                               kMinotaurSourceDescriptor,
+                               kDeathHeimMinotaurSourceDescriptor))
+    return false;
+  if (object->visual <= 7u)
+    return object->composition == kCompositions[object->visual];
+  return object->visual == 0x0010 && object->composition == 0x59B0 &&
+      object->left_extent == 4 && object->top_extent == 4 &&
+      object->right_extent == 4 && object->bottom_extent == 4;
+}
+
+static bool IsFlamingWheel(const ActionObjectSnapshot *object) {
+  if (!object ||
+      !SourceIs(object->source_descriptor, kFlamingWheelSourceDescriptor,
+                kDeathHeimFlamingWheelSourceDescriptor) ||
+      object->animation_address != kBossAnimationAddress ||
+      object->animation_bank != kSceneAnimationBank ||
+      !(object->flags & 0x4000u) || !object->composition)
+    return false;
+  /* The source descriptor identifies the whole boss family, not just the
+   * visible wheel. Children retain an action-object backlink, while the native
+   * body is root-owned and the rematch body retains Death Heim's room owner.
+   * This remains stable as the body moves between delay, repeat, and AI
+   * handlers without admitting helpers as additional full-strength emitters. */
+  return object->source_descriptor == kFlamingWheelSourceDescriptor
+      ? object->spawner_backlink == 0
+      : object->spawner_backlink == kDeathHeimRoomOwnerBacklink;
+}
+
+static bool IsIceDragonIceBall(const uint8_t *wram, size_t wram_size,
+                               const ActionObjectSnapshot *object) {
+  static const uint16_t kCompositions[] = {
+    0x5D9C, 0x5DA8, 0x5DB4, 0x5DC0,
+    0x5DCC, 0x5DD8, 0x5DE4, 0x5DF0,
+  };
+  if (!object ||
+      !SourceIs(object->source_descriptor, kIceDragonSourceDescriptor,
+                kDeathHeimIceDragonSourceDescriptor) ||
+      object->handler != kAnimationDelayHandler ||
+      object->resume_address != kIceDragonIceBallResume ||
+      object->animation_address != kBossAnimationAddress ||
+      object->animation_bank != kSceneAnimationBank ||
+      !BossFamilyParentIsValid(wram, wram_size, object,
+                               kIceDragonSourceDescriptor,
+                               kDeathHeimIceDragonSourceDescriptor))
+    return false;
+  if (object->visual < 0x0012 || object->visual > 0x0019)
+    return false;
+  const unsigned frame = object->visual - 0x0012;
+  return object->composition == kCompositions[frame] &&
+      object->animation_state == (frame < 4u ? 0x0019 : 0x001A);
+}
+
+typedef struct TanzaraProjectileFrame {
+  uint16_t resume, state, visual, composition;
+} TanzaraProjectileFrame;
+
+static bool IsTanzaraProjectile(const ActionObjectSnapshot *object) {
+  static const TanzaraProjectileFrame kFrames[] = {
+    {0xFD77, 0x0008, 0x0016, 0x5D17},
+    {0xFD77, 0x0008, 0x0017, 0x5D23},
+    {0xFD77, 0x0008, 0x0018, 0x5D2F},
+    {0xFD77, 0x0008, 0x0019, 0x5D50},
+    {0xFD77, 0x0008, 0x001A, 0x5D71},
+    {0xFD77, 0x0008, 0x001B, 0x5D92},
+    {0xFD77, 0x0008, 0x001C, 0x5DB3},
+    {0xFD9E, 0x0009, 0x0027, 0x5E68},
+    {0xFD9E, 0x0009, 0x0028, 0x5E74},
+    {0xFBEA, 0x002D, 0x0030, 0x5EF7},
+    {0xFBEA, 0x002D, 0x0031, 0x5F03},
+    {0xFBEA, 0x002D, 0x0032, 0x5F0F},
+    {0xFBEA, 0x002D, 0x0033, 0x5F1B},
+    {0xFBEA, 0x002D, 0x0034, 0x5F27},
+    {0xFBF5, 0x0025, 0x0033, 0x5F1B},
+    {0xFBF5, 0x0025, 0x0035, 0x5F48},
+    {0xFC13, 0x0027, 0x0033, 0x5F1B},
+    {0xFC13, 0x0027, 0x0035, 0x5F48},
+    {0xFC21, 0x0028, 0x0033, 0x5F1B},
+    {0xFC21, 0x0028, 0x0035, 0x5F48},
+    {0xFCA1, 0x001B, 0x001F, 0x5E08},
+    {0xFCA1, 0x001B, 0x0021, 0x5E20},
+    {0xFCA1, 0x001B, 0x0023, 0x5E38},
+    {0xFCA1, 0x001B, 0x0025, 0x5E50},
+    {0xFCAF, 0x001B, 0x001F, 0x5E08},
+    {0xFCAF, 0x001B, 0x0021, 0x5E20},
+    {0xFCAF, 0x001B, 0x0023, 0x5E38},
+    {0xFCAF, 0x001B, 0x0025, 0x5E50},
+    {0xFCB5, 0x0016, 0x001F, 0x5E08},
+    {0xFCB5, 0x0016, 0x0021, 0x5E20},
+    {0xFCB5, 0x0016, 0x0023, 0x5E38},
+    {0xFCB5, 0x0016, 0x0025, 0x5E50},
+    {0xFCD6, 0x0017, 0x001F, 0x5E08},
+    {0xFCD6, 0x0017, 0x0021, 0x5E20},
+    {0xFCD6, 0x0019, 0x001F, 0x5E08},
+    {0xFCD6, 0x0019, 0x0021, 0x5E20},
+    {0xFCED, 0x001A, 0x0020, 0x5E14},
+    {0xFCED, 0x001A, 0x0022, 0x5E2C},
+    {0xFCED, 0x001A, 0x0024, 0x5E44},
+    {0xFCED, 0x001A, 0x0026, 0x5E5C},
+    {0xFCFB, 0x001A, 0x0020, 0x5E14},
+    {0xFCFB, 0x001A, 0x0022, 0x5E2C},
+    {0xFCFB, 0x001A, 0x0024, 0x5E44},
+    {0xFCFB, 0x001A, 0x0026, 0x5E5C},
+    {0xFD22, 0x0013, 0x0020, 0x5E14},
+    {0xFD22, 0x0013, 0x0022, 0x5E2C},
+    {0xFD22, 0x0014, 0x0020, 0x5E14},
+    {0xFD22, 0x0014, 0x0022, 0x5E2C},
+    {0xFD44, 0x0022, 0x0029, 0x5E95},
+    {0xFD44, 0x0022, 0x002A, 0x5EA8},
+  };
+  if (!object || object->source_descriptor != kTanzaraSourceDescriptor ||
+      object->handler != kAnimationDelayHandler ||
+      object->animation_address != kBossAnimationAddress ||
+      object->animation_bank != kSceneAnimationBank)
+    return false;
+  for (size_t i = 0; i < sizeof(kFrames) / sizeof(kFrames[0]); i++)
+    if (object->resume_address == kFrames[i].resume &&
+        object->animation_state == kFrames[i].state &&
+        object->visual == kFrames[i].visual &&
+        object->composition == kFrames[i].composition)
+      return true;
+  return false;
 }
 
 static bool SceneFrameAppend(ActionSceneEffectFrame *dst,
@@ -1416,7 +1637,11 @@ static bool WallTorchRuleFor(const uint8_t *wram, size_t wram_size,
       (Read8(wram, wram_size, kActRaiserWram_MapGroup) ==
            kActRaiserMapGroup_Marahna &&
        Read8(wram, wram_size, kActRaiserWram_CurrentMap) ==
-           kMarahnaBossMap)) {
+           kMarahnaBossMap) ||
+      (Read8(wram, wram_size, kActRaiserWram_MapGroup) ==
+           kActRaiserMapGroup_DeathHeim &&
+       Read8(wram, wram_size, kActRaiserWram_CurrentMap) ==
+           kDeathHeimViperMap)) {
     *rule = (WallTorchMapRule) {
       .top_metatile = kMarahnaTorchMetatile,
       .anchor_y = 11,
@@ -1426,6 +1651,12 @@ static bool WallTorchRuleFor(const uint8_t *wram, size_t wram_size,
     return true;
   }
   return false;
+}
+
+bool ActionSceneEffects_RoomUsesBg1Decorations(
+    const uint8_t *wram, size_t wram_size) {
+  WallTorchMapRule rule;
+  return WallTorchRuleFor(wram, wram_size, &rule);
 }
 
 typedef struct SceneBgScanBounds {
@@ -1536,7 +1767,7 @@ static void CaptureWallTorches(ActionSceneEffectFrame *dst,
         .phase = kActionEffectPhase_WallTorch,
         .role = kActionEffectRole_Body,
         .flags = kActionEffectFlag_Visible,
-        .render_layer = kActionEffectRenderLayer_WorldOverlay,
+        .render_layer = kActionEffectRenderLayer_Bg1Plane,
         .projection_plane = kActionEffectProjectionPlane_Bg1,
         .geometry = {
           .kind = kActionEffectGeometry_Rect,
@@ -1934,15 +2165,31 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
           kActRaiserMapGroup_Aitos &&
       Read8(wram, wram_size, kActRaiserWram_CurrentMap) == kAitosBossMap;
   const bool boss_lightning_map =
-      Read8(wram, wram_size, kActRaiserWram_MapGroup) ==
-          kActRaiserMapGroup_Bloodpool &&
-      Read8(wram, wram_size, kActRaiserWram_CurrentMap) ==
-          kBloodpoolBossMap;
+      IsOriginalOrDeathHeimRoom(wram, wram_size,
+                                kActRaiserMapGroup_Bloodpool,
+                                kBloodpoolBossMap, kDeathHeimWizardMap);
   const bool marahna_boss_map =
+      IsOriginalOrDeathHeimRoom(wram, wram_size,
+                                kActRaiserMapGroup_Marahna,
+                                kMarahnaBossMap, kDeathHeimViperMap);
+  const bool minotaur_map =
+      IsOriginalOrDeathHeimRoom(wram, wram_size,
+                                kActRaiserMapGroup_Fillmore,
+                                kFillmoreBossMap, kDeathHeimMinotaurMap);
+  const bool flaming_wheel_map =
+      IsOriginalOrDeathHeimRoom(wram, wram_size,
+                                kActRaiserMapGroup_Aitos,
+                                kFlamingWheelBossMap,
+                                kDeathHeimFlamingWheelMap);
+  const bool ice_dragon_map =
+      IsOriginalOrDeathHeimRoom(wram, wram_size,
+                                kActRaiserMapGroup_Northwall,
+                                kNorthwallBossMap, kDeathHeimIceDragonMap);
+  const bool tanzara_map =
       Read8(wram, wram_size, kActRaiserWram_MapGroup) ==
-          kActRaiserMapGroup_Marahna &&
+          kActRaiserMapGroup_DeathHeim &&
       Read8(wram, wram_size, kActRaiserWram_CurrentMap) ==
-          kMarahnaBossMap;
+          kActRaiserDeathHeimMap_FinalBoss;
   bool seen[kActionSceneEffectObserverTrackCount] = {false};
   for (unsigned slot = 0; slot < kActionSceneEffectObserverTrackCount;
        slot++) {
@@ -1957,7 +2204,38 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
     uint8_t kind = kActionEffect_None;
     uint8_t phase = kActionEffectPhase_None;
     bool aitos_boss_sword_beam = false;
-    if (IsEnemyFireball(&object)) {
+    if (minotaur_map &&
+        SourceMatchesOriginalOrDeathHeimRoom(
+            wram, wram_size, object.source_descriptor,
+            kActRaiserMapGroup_Fillmore, kFillmoreBossMap,
+            kMinotaurSourceDescriptor, kDeathHeimMinotaurMap,
+            kDeathHeimMinotaurSourceDescriptor) &&
+        IsMinotaurAxe(wram, wram_size, &object)) {
+      kind = kActionEffect_MinotaurAxe;
+      phase = kActionEffectPhase_MinotaurAxeFlight;
+    } else if (flaming_wheel_map &&
+               SourceMatchesOriginalOrDeathHeimRoom(
+                   wram, wram_size, object.source_descriptor,
+                   kActRaiserMapGroup_Aitos, kFlamingWheelBossMap,
+                   kFlamingWheelSourceDescriptor,
+                   kDeathHeimFlamingWheelMap,
+                   kDeathHeimFlamingWheelSourceDescriptor) &&
+               IsFlamingWheel(&object)) {
+      kind = kActionEffect_FlamingWheel;
+      phase = kActionEffectPhase_FlamingWheelBody;
+    } else if (ice_dragon_map &&
+               SourceMatchesOriginalOrDeathHeimRoom(
+                   wram, wram_size, object.source_descriptor,
+                   kActRaiserMapGroup_Northwall, kNorthwallBossMap,
+                   kIceDragonSourceDescriptor, kDeathHeimIceDragonMap,
+                   kDeathHeimIceDragonSourceDescriptor) &&
+               IsIceDragonIceBall(wram, wram_size, &object)) {
+      kind = kActionEffect_IceDragonIceBall;
+      phase = kActionEffectPhase_IceDragonIceBallFlight;
+    } else if (tanzara_map && IsTanzaraProjectile(&object)) {
+      kind = kActionEffect_TanzaraProjectile;
+      phase = kActionEffectPhase_TanzaraProjectileFlight;
+    } else if (IsEnemyFireball(&object)) {
       kind = kActionEffect_EnemyFireball;
       phase = kActionEffectPhase_EnemyFireballFlight;
     } else if (marahna_effect_map &&
@@ -1970,6 +2248,12 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
       kind = kActionEffect_MarahnaLightningLink;
       phase = kActionEffectPhase_MarahnaLightningActive;
     } else if (marahna_boss_map &&
+               SourceMatchesOriginalOrDeathHeimRoom(
+                   wram, wram_size, object.source_descriptor,
+                   kActRaiserMapGroup_Marahna, kMarahnaBossMap,
+                   kMarahnaBossLightningSourceDescriptor,
+                   kDeathHeimViperMap,
+                   kDeathHeimViperSourceDescriptor) &&
                (phase = MatchMarahnaBossLightning(
                     wram, wram_size, &object)) !=
                    kActionEffectPhase_None) {
@@ -1992,6 +2276,12 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
       kind = kActionEffect_LightningTrap;
       phase = kActionEffectPhase_LightningActive;
     } else if (boss_lightning_map &&
+               SourceMatchesOriginalOrDeathHeimRoom(
+                   wram, wram_size, object.source_descriptor,
+                   kActRaiserMapGroup_Bloodpool, kBloodpoolBossMap,
+                   kBossLightningSourceDescriptor,
+                   kDeathHeimWizardMap,
+                   kDeathHeimWizardSourceDescriptor) &&
                (phase = MatchBloodpoolBossLightning(
                     wram, wram_size, &object)) !=
                    kActionEffectPhase_None) {

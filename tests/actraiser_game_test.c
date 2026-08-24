@@ -165,6 +165,57 @@ static void TestSimulationHourglassScanRange(void) {
   CHECK(ActRaiser_FindSimulationHourglass(NULL, NULL, 0) == -1);
 }
 
+static void TestDeathHeimHubEyeScan(void) {
+  enum { kLeadingSlots = 5, kSlots = 40 };
+  uint16 oam[kSlots * 2];
+  uint8 high_oam[(kSlots + 3) / 4];
+  memset(oam, 0, sizeof(oam));
+  memset(high_oam, 0, sizeof(high_oam));
+
+  static const uint8 kX[kActRaiserDeathHeimHubEyeOamCount] = {
+      8, 24, 16, 16, 240, 224, 232, 224, 40, 56, 48, 48, 192,
+      200, 192, 72, 88, 80, 80, 176, 160, 168, 160, 128, 112, 120,
+  };
+  static const uint8 kY[kActRaiserDeathHeimHubEyeOamCount] = {
+      103, 103, 103, 95, 103, 103, 103, 95, 87, 87, 87, 79, 87,
+      87, 79, 71, 71, 71, 63, 71, 71, 71, 63, 63, 63, 39,
+  };
+  static const uint8 kAttr[kActRaiserDeathHeimHubEyeOamCount] = {
+      0x21, 0x21, 0x21, 0x21, 0x61, 0x61, 0x61, 0x61,
+      0x21, 0x21, 0x21, 0x21, 0x21, 0x21, 0x61,
+      0x21, 0x21, 0x21, 0x21, 0x61, 0x61, 0x61, 0x61,
+      0x21, 0x61, 0x21,
+  };
+  static const uint8 kLarge[kActRaiserDeathHeimHubEyeOamCount] = {
+      0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0,
+      0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1,
+  };
+
+  for (int i = 0; i < kActRaiserDeathHeimHubEyeOamCount; i++) {
+    const int slot = kLeadingSlots + i;
+    oam[slot * 2] = (uint16)(kX[i] | (uint16)kY[i] << 8);
+    /* Deliberately arbitrary tile values: animation art is not identity. */
+    oam[slot * 2 + 1] = (uint16)((i * 7u) | (uint16)kAttr[i] << 8);
+    high_oam[slot >> 2] |=
+        (uint8)(kLarge[i] << (((slot & 3) * 2) + 1));
+  }
+  CHECK(ActRaiser_FindDeathHeimHubEyes(oam, high_oam, kSlots) ==
+        kLeadingSlots);
+
+  /* A moving allocation is fine; an incomplete or merely similar group is
+   * not. Exercise one invariant from each part of the raw OAM encoding. */
+  oam[(kLeadingSlots + 9) * 2] ^= 1;
+  CHECK(ActRaiser_FindDeathHeimHubEyes(oam, high_oam, kSlots) == -1);
+  oam[(kLeadingSlots + 9) * 2] ^= 1;
+  oam[(kLeadingSlots + 17) * 2 + 1] ^= 0x0100;
+  CHECK(ActRaiser_FindDeathHeimHubEyes(oam, high_oam, kSlots) == -1);
+  oam[(kLeadingSlots + 17) * 2 + 1] ^= 0x0100;
+  high_oam[(kLeadingSlots + 2) >> 2] |=
+      (uint8)(1u << ((((kLeadingSlots + 2) & 3) * 2) + 1));
+  CHECK(ActRaiser_FindDeathHeimHubEyes(oam, high_oam, kSlots) == -1);
+  CHECK(ActRaiser_FindDeathHeimHubEyes(NULL, NULL, 0) == -1);
+}
+
 /* Captured OAM, one snapshot per spell, from runs/20260806-232552 with all four
  * spells unlocked in the Sky Palace. These are the real bytes the ROM emitted,
  * not a reconstruction: slot 6 onward, x / y / attr / size-bit, read out of
@@ -310,6 +361,7 @@ int main(void) {
   TestPurePickerPredicate();
   TestLivePickerPredicate();
   TestSimulationHourglassScanRange();
+  TestDeathHeimHubEyeScan();
   TestSkyPalaceMagicIconShapes();
   TestSkyPalaceMagicIconScanRange();
   if (failures) {

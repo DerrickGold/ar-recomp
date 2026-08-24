@@ -1,6 +1,7 @@
 #ifndef ACTION_EFFECTS_H
 #define ACTION_EFFECTS_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -32,6 +33,10 @@ typedef enum ActionEffectKind {
   kActionEffect_AitosWaterSplash,
   kActionEffect_AitosWaterfall,
   kActionEffect_AitosWaterfallMist,
+  kActionEffect_MinotaurAxe,
+  kActionEffect_FlamingWheel,
+  kActionEffect_IceDragonIceBall,
+  kActionEffect_TanzaraProjectile,
   kActionEffect_KindCount,
 } ActionEffectKind;
 
@@ -83,6 +88,10 @@ typedef enum ActionEffectPhase {
   kActionEffectPhase_AitosWaterSplash,
   kActionEffectPhase_AitosWaterfallFlow,
   kActionEffectPhase_AitosWaterfallMist,
+  kActionEffectPhase_MinotaurAxeFlight,
+  kActionEffectPhase_FlamingWheelBody,
+  kActionEffectPhase_IceDragonIceBallFlight,
+  kActionEffectPhase_TanzaraProjectileFlight,
   kActionEffectPhase_Count,
 } ActionEffectPhase;
 
@@ -104,6 +113,11 @@ typedef enum ActionEffectRole {
  * leaves a clean path to priority-aware masking later. */
 typedef enum ActionEffectRenderLayer {
   kActionEffectRenderLayer_WorldOverlay = 0,
+  /* Environmental accents attached to BG1. Flat presentation clips these
+   * through the PPU winner mask for BG1's owning screen; Diorama inserts them
+   * immediately after the resolved BG1-low plane so later OBJ bands occlude
+   * them exactly like the source wall art. */
+  kActionEffectRenderLayer_Bg1Plane,
   /* Environmental accents that belong inside the captured BG2 plane. Flat
    * presentation clips these through the PPU's BG2-winner mask; Diorama
    * inserts them immediately after the resolved BG2 draw. */
@@ -118,7 +132,8 @@ typedef enum ActionEffectRenderLayer {
 /* Diorama rooms can shape BG1 and each OBJ priority band independently. Keep
  * the source plane with the captured effect so presentation projects a torch
  * with its wall and an action object with its authentic OBJ band. Flat-mode
- * projection intentionally treats both identically. */
+ * geometry uses the same camera adapter, then BG-local render layers apply
+ * their PPU winner masks during composition. */
 typedef enum ActionEffectProjectionPlane {
   kActionEffectProjectionPlane_Obj = 0,
   kActionEffectProjectionPlane_Bg1,
@@ -290,15 +305,22 @@ void ActionEffects_CaptureFrame(ActionEffectObserver *observer,
                                 unsigned elapsed_ticks);
 
 /* Captures exact, measured scene identities used by the enhanced action pass:
- * Bloodpool/Marahna BG1 torch and Aitos lava-pit signatures, the measured
- * enemy projectile families, the vertical trap, linked Marahna lightning and
- * Marahna boss-lightning families, the Bloodpool map-$08 boss lightning
- * sequence, the global player sword beam, and the exact two-child Aitos boss
- * sword volley. Unknown objects are ignored;
+ * Bloodpool/Marahna/Death-Heim-Viper BG1 torches, Aitos lava/water signatures,
+ * measured enemy projectile families, the vertical trap, linked Marahna
+ * lightning, Wizard/Viper lightning in both native and Death Heim rooms, the
+ * Minotaur axe, Flaming Wheel body, Ice Dragon balls, Tanzara projectile
+ * allowlist, global player sword beam, and exact two-child Aitos boss sword
+ * volley. Unknown objects are ignored;
  * presentation never guesses from pixels or palette colours. */
 void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
                                      ActionSceneEffectFrame *dst,
                                      const uint8_t *wram, size_t wram_size,
                                      unsigned elapsed_ticks);
+
+/* Capture-policy predicate for flat presentation. A positive result reserves
+ * BG1's overlay slot for an owning-screen winner mask before PPU scanout; the
+ * semantic frame still decides whether any matching map decorations exist. */
+bool ActionSceneEffects_RoomUsesBg1Decorations(
+    const uint8_t *wram, size_t wram_size);
 
 #endif  /* ACTION_EFFECTS_H */

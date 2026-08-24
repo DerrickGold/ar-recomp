@@ -152,8 +152,11 @@ typedef struct FrameSlot {
   uint8_t diorama_map_group;
   uint8_t diorama_map_number;
   uint8_t diorama_layer_section;
-  /* True only when the flat-mode PPU capture produced a current BG2-winner
-   * mask. Presentation must not reuse stale mask texture content. */
+  /* True only when flat-mode PPU capture produced current winner masks.
+   * Presentation must not reuse stale mask texture content. BG1 uses the
+   * source's owning screen because Marahna/Viper wall art is TS-only; BG2's
+   * waterfall source is a main-screen plane. */
+  bool action_bg1_mask_valid;
   bool action_bg2_mask_valid;
 
   /* Simulation-town semantic payload. Presentation consumes this value copy;

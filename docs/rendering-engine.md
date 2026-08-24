@@ -5,6 +5,10 @@ addresses, data layouts, and unknowns marked `?`. See [SEAMS.md](SEAMS.md) for
 conversion status, [widescreen-survey.md](widescreen-survey.md) for the evidence
 trail, and [ram-map.md](ram-map.md) for variables.
 
+This document owns the renderer's current mechanisms. Project acceptance lives
+in [progress.md](progress.md), and resolved defect narratives live in
+[bug-ledger.md](bug-ledger.md).
+
 Evidence basis: `saves/level1-action.rec` replay traces (faithful config,
 channels dma/vram/vmadd/wram), disassembly of `$02:ABF0-$C72B`, and the
 user's F2 snapshots in `runs/20260711-092516/`.
@@ -440,6 +444,26 @@ That phase receives a compact ground-aligned bloom plus contact sparks and a
 direction-aware electrical wake. Its exact OBJ-local geometry uses the same
 production projection path in flat and Diorama modes.
 
+Runs `20260822-195453` and `20260822-195726` close the Death Heim boss-rematch
+seam without making the new effects Death-Heim-only. Every enhanced family is
+admitted by an exact `(room, retained source)` pair for both its original arena
+and rematch:
+
+| Boss/effect | Original | Death Heim | Positive identity/style |
+|---|---|---|---|
+| Minotaur axe | `0104`, `$AF5D` | `0702`, `$F6CA` | `$8661/$B008`, state 3, exact spin artwork, same-source parent; warm spin light and sparks |
+| Wizard lightning | `0208`, `$BDFF` | `0703`, `$F6E2` | existing six-strike plus floor-impact family |
+| Flaming Wheel body | `0407`, `$D838` | `0705`, `$F712` | active `$4000`, `$7E:5000` body with root backlink `0` or room-owner `$001C`; flame shell and embers |
+| Viper lightning | `0508`, `$E483` | `0706`, `$F72A` | existing charge/orb/diagonal/ground family; rematch parent backlink `$001C` |
+| Ice Dragon ball | `0608`, `$F161` | `0707`, `$F760` | `$8661/$F2CA`, exact state `$19/$1A` ice-ball artwork, same-source parent; cool light, crystalline trail and particles |
+| Tanzara projectile | — | `0708`, `$F80F` | exact 50-tuple projectile allowlist; restrained generic light and trail |
+
+Pharaoh room `0704` remains intentionally undecorated. Room/source pairing is
+strict: an original source cannot claim a rematch room or vice versa, and the
+Flaming Wheel handler is not used as identity because the same visible body
+legitimately moves among delay, repeat, and boss-AI handlers. This rejects its
+same-source helpers without duplicating a full-strength flame emitter.
+
 Aitos map `$04/$01` uses a separate camera-local BG1 semantic: `$DC`, one to
 six `$DD`, then `$DE`, over an equally wide `$DF` row and the following `$E7`
 bubbly row when it exists. This yields the exact 64px/128px lava-surface
@@ -485,8 +509,11 @@ validated relation covers state 2, yielding all four authored diagonals.
 Capture consequently publishes their real diagonal headings and OBJ band, but
 reuses the portable cool halo, tapered wake, and materializing-star renderer.
 
-Dynamic scene actors and BG1-local decorations run after the authentic action
-image and before flat HUD, HD-replacement, inspector, and settings overlays.
+Dynamic scene actors and ordinary world-overlay decorations run after the
+authentic action image and before flat HUD, HD-replacement, inspector, and
+settings overlays. BG-local decorations instead use the depth-aware contracts
+below; merely projecting geometry onto a BG plane does not make a late submit
+obey that plane's occlusion.
 Flat mode uses the resolved physical viewport. Diorama mode receives a
 `DioramaProjection` value from the same composite call that drew the BG and OBJ
 planes: camera matrix, capture mesh dimensions, output dimensions, and one
@@ -519,6 +546,24 @@ player in front. They use standard SDL additive/multiply blend modes and fail
 closed if the backend substitutes an unsupported mode; no backend shader is
 required. One-time success logs now report the first Diorama BG2-local submit
 and the first flat winner-masked composite independently.
+
+Wall-torch lighting and embers are likewise BG1-stage decorations. This is
+load-bearing in Marahna's Viper arena and Death Heim rematch `$07/$06`: a late
+world overlay made the torch spill visible through the boss even though the
+authentic OBJ pixels correctly covered the source wall flame. Diorama now
+submits each torch batch from the after-BG1-low callback, before OBJ2/BG-high/
+OBJ3 painter bands. Flat mode renders the batch into the shared BG-local target
+and multiplies it by a BG1 winner mask before compositing. That mask follows
+BG1's owning PPU screen rather than assuming TM: in the measured Marahna form,
+BG1 and OBJ are TS-only, so the sparse white region comes from the resolved
+subscreen winner and is black wherever Viper's higher-priority OBJ wins. Main-
+screen BG1 rooms use the same flag and resolve against TM. The capture reserves
+BG1 only in exact torch-admitting room families, respects earlier HD/dump
+capture ownership, and fails closed if no current mask was produced. It also
+skips BG1/BG2 winner capture when both Action Effect lighting and Particles are
+disabled. The shared BG-local target is sized to the resolved viewport and
+uses target-local geometry; final composition restores the viewport offset, so
+letterbox and pillarbox pixels incur neither clear nor multiply work.
 
 The paired bottom atmosphere solves a different problem and therefore has a
 different painter contract. `$04/$02` deliberately caps raw-wrap BG2 at 24px
@@ -1424,7 +1469,7 @@ the former `0..223` offline interval; its captured snapshots and runtime
 comparisons are unchanged. All twelve BG1 layers were eligible at entry; BG2
 split into six eligible layers, four explicit 32x32 decorative/native layers,
 and two disabled samples. See
-`docs/bg-hle-census.md` for the table and the still-open special-room gate.
+`docs/bg-hle-census.md` for the table and the later special-room closure.
 
 The first special-room sweep adds an important boundary. Death Heim
 `$0702-$0707` has eligible BG1/native-32x32 BG2 and passes 1,032,404 more
@@ -1435,10 +1480,15 @@ source activations and 6,646,861 in-world comparisons all matched. Its 364
 finite exits are one explained `0705` BG2 frame: that decorative world is only
 256px wide while camera X is 104, so the authentic viewport begins beyond tile
 X 31. This is policy input for isolated repeat/clamp, not a decoder mismatch.
-The `0707`/`0708`/ending tail remains open. Northwall `$0608` is a rejected
-shortcut: its BG1 tile words match the ring while live CHR renders as patterned
-garbage before the room self-exits. Therefore BH2 tile-word parity cannot stand
-in for BH1 CHR residency or BH5 pixel/priority parity.
+At this checkpoint the `0707`/`0708`/ending tail remained open, and Northwall
+`$0608` was a rejected shortcut: its BG1 tile words matched the ring while live
+CHR rendered as patterned garbage before the room self-exited. The later
+natural fixtures close both gaps: `runs/20260822-180657/` reaches coherent
+`0608`, and `runs/20260822-180704/` covers every Death Heim rematch, `0708`,
+and the ending with zero register mismatch; paired default/native-control runs
+match their frame and final-state artifacts. The rejected shortcut still proves
+that BH2 tile-word parity cannot stand in for BH1 CHR residency or BH5
+pixel/priority parity.
 
 The decoder is intentionally scheduled at the authentic streamer's tile
 cadence, not at scanout cadence. A host-only key contains the action room,
@@ -1536,6 +1586,19 @@ does not alter the native scroll registers or tilemaps. Direct testing on
 the divider/fog fills both margins cleanly, and the animated effect continues
 normally.
 
+Diorama now uses that same measured boundary as a depth split. BG2 metatile
+rows 0-8 (screen `y=0-143`) move into a room-authored virtual plane at focal
+`z=0.5`, while row 9 onward remains on ordinary BG2 so depth of field can still
+soften the animated water independently. Because `0701` deliberately stays on
+the native background path, this split is completed on the isolated capture
+rather than by enabling the world-map provider. The seven red-eye ornaments
+are a contiguous 26-piece priority-2 OAM group; their complete position,
+attribute, X-high, and size signature is validated (tiles remain animation),
+then only their winning pixels move from OBJ2 to the same focal face plane.
+This seats the eyes in their sockets under every Diorama transform without
+changing OAM or flat presentation. The policy requires the face-scene BG2SC
+page `$70`; the post-final `$74` sky variant cannot inherit it.
+
 The post-final-boss return reuses raw map `0701` with different presentation
 state. Paired captures in `runs/20260714-184728/` separate the transition:
 `snap_01_gf14676` already has boss-rush progress `$0347=$07` but current-song id
@@ -1556,27 +1619,26 @@ too early, but `$0334>=3` is also visibly late in
 The policy now requires `$0347>=7` and observes the live BGSC page bases
 `$64/$74`; song id `$0334>=3` remains a settled-state fallback. It keeps BG1
 clamped and replaces the lower repeat band with whole-BG2 reflection
-immediately when the sky pages become active. The current extent catalogue
-then independently bounds that unique ending backdrop to the authentic
-viewport. Edge selection and extent are separate: the former still describes
-how the captured sky joins if a future canonical cap permits it. Direct testing
-on 2026-07-14 confirmed that the page handoff occurs invisibly during the black
-frame; a new natural-tail pixel fixture remains desirable for the later extent
-decision.
+immediately when the sky pages become active, and only in that post-handoff
+state changes BG2's fixed horizontal extent from `0/0` to the live-tuned
+`128/128`. Progress `$0347=7` alone therefore leaves the face scene clamped
+with its lower Repeat band, preventing repeated faces before the fade. Edge
+selection and extent remain separate. Direct testing on 2026-07-14 confirmed
+that the page handoff occurs invisibly during the black frame; a fresh
+natural-tail pixel fixture remains desirable for visual acceptance of the
+promoted `128/128` extent.
 
-Death Heim raw maps `$02-$07` (`0702-0707`) select the narrow-parallax repeat
-policy. Capture
-`runs/20260714-173750/snapshots/snap_00_gf4875` records `$18=$07`, `$19=$04`,
-and BG2 logical width `$32=$0100`; the policy log showed `mirror=02`. Direct
-observation found the padded mountain/parallax image moving opposite the
-authentic center at the 256px boundaries. The same effect was then directly
-reported on maps `$05-$07`. Maps `$02` and `$03` are provisionally
-classified with that background family so boss-rush transitions cannot restore
-reflection. The full `$02-$07` range therefore selects the same
-isolated-scanline cyclic repeat as Aitos and Northwall. Direct 2026-08-10
-matrices now cover all six rooms in Wide Full and Diorama-32 with zero provider
-mismatch; the Wide Full artifacts are 102/102 byte-exact to their frozen
-baseline.
+Death Heim raw maps `$02-$07` (`0702-0707`) begin with the historically
+validated narrow-BG2 Repeat classification, then apply source/edge-guarded room
+tunings to the finite rematch art. Rooms `0702-0706` promote viewport BG2 to
+Clamp/fill with available horizontal and vertical extent. Undersized `0703`
+also mirrors its world-backed BG1 with a fixed `80/80` horizontal cap. `0707`
+is the finite exception: viewport BG2 uses its decoded world edge with normal
+motion, fixed asymmetric `100/96` horizontal extent, and available vertical
+extent. BG1 otherwise retains the canonical world/fill/available policy.
+These promoted policies supersede the 2026-07-14 provisional all-Repeat visual
+classification while retaining it as the guarded fallback if a room's decoded
+source topology changes.
 
 Final-boss map `0708` is a distinct two-layer raster arena. Snapshots
 `runs/20260714-183142/snapshots/snap_00_gf12574` and `snap_01_gf12654` record
@@ -1696,14 +1758,21 @@ edges to prove the bottom margin samples the opposite edge (Repeat), not the
 near edge (Mirror), and that the Available band extent survives there.
 
 This boundary-band rule is complementary to the previously audited moving
-cloud/snow policy. Aitos `0401-0403`, Northwall `0601-0605` and `0608`, and
-Death Heim `0702-0707` classify the complete narrow BG2 as cyclic Repeat, so
-every authentic and synthetic top/bottom row already preserves its motion
-direction; they do not need a `y0=0` band. `0708` remains the intentional
-native RawWrap exception for its two-plane raster scene. The planner test lists
-every member rather than only range endpoints, and the real-PPU fixture now
-proves same-direction cyclic sampling on a synthetic top row as well as the
-Bloodpool bottom band.
+cloud/snow policy. Aitos `0401-0403` and Northwall `0601-0605` and `0608`
+classify the complete narrow BG2 as cyclic Repeat, so every authentic and
+synthetic top/bottom row already preserves its motion direction; they do not
+need a `y0=0` band. Death Heim rematches `0702-0706` instead promote their
+finite viewport BG2 to Clamp/fill with available horizontal and vertical
+extents. The undersized `0703` additionally gives world-backed BG1 Mirror/fill
+with an `80/80` horizontal cap. Room `0707` is the rematch exception: viewport
+BG2 uses the world edge with normal motion, a fixed asymmetric `100/96`
+horizontal extent, and available vertical extent. Rematch BG1 otherwise keeps
+the canonical world/fill/available policy. The special endpoints stay
+independent: hub `0701` keeps its fog-band policy and final arena `0708` keeps
+the intentional native RawWrap policy for its two-plane raster scene. The
+planner test lists every cyclic member rather than only range endpoints, and
+the real-PPU fixture now proves same-direction cyclic sampling on a synthetic
+top row as well as the Bloodpool bottom band.
 
 ### 13.4 Action Diorama main/subscreen colour math (2026-08-11)
 
@@ -2774,10 +2843,10 @@ A/B lever; verified byte-identical against a from-source pre-apron build.
 
 Three separate consumers read apron-wide surfaces with the DISPLAY width and
 produced three distinct visible regressions in one commit (sheared HUD, black
-stripe down the backdrop, HUD icon loose in the scene — ledger §36). The
-arithmetic is trivial; the bug is always *which width am I holding*. Use
+stripe down the backdrop, HUD icon loose in the scene). Use
 `ActionApron_SurfacePitch` / `ActionApron_DisplayOffset` /
-`ActionApron_SurfaceColumn` rather than open-coding it.
+`ActionApron_SurfaceColumn` rather than open-coding it; the root-cause history
+and reusable lesson belong in [bug-ledger.md](bug-ledger.md) §36.
 
 ## 14. Open questions (all remaining, none blocks the §13 design)
 
@@ -2792,9 +2861,3 @@ arithmetic is trivial; the bug is always *which width am I holding*. Use
 5. Map the remaining `$02:AFCB` `$47F0` sim upload. World-navigation
    `$02:8384` is now verified as the current-matrix/focus Mode-7 register
    uploader; the town camera writer remains `$01:B4C6`.
-6. Native camera/world-edge clamp ownership and its presentation-aware wide
-   bounds. Distinguish changing the gameplay camera limit from merely hiding or
-   padding pixels outside finite BG data; verify both axes and parallax layers.
-7. Death Heim/`70X` is complete: the first-boss crash and later soft-lock were
-   repaired, and the boss rush, final boss, and return transition were directly
-   validated on 2026-07-14.

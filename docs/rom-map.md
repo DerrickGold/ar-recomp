@@ -157,10 +157,27 @@ Tables `$A8F6-$E722` correspond to the six ordinary two-act kingdom regions.
 layout (repaired + user-verified end-to-end 2026-07-14, bug-ledger #20): `$19=1` =
 teleport hub, whose spawn record `$F3C8` (handler `$F3D4`) stages the next boss
 via `$1A = $0347 + 2`; `$19=2..7` = the six boss arenas; `$19=8` = final boss.
+The rematch wrappers keep a Death Heim-local 12-byte spawn record in object
+`+$32`, set room-owner backlink `$001C`, yield through `$F778`, and then
+tail-call the corresponding original boss handler. That distinction matters:
+the record address is persistent object identity, while the wrapper, `$F778`
+continuation, and original handler are control flow.
+
+| Room | Boss | Retained `+$32` source record | Spawn wrapper → boss family | Host accent |
+|---|---|---:|---|---|
+| `0702` | Minotaur | `$F6CA` (original `$AF5D`) | `$F6D6` → `$AF69` | spinning axe |
+| `0703` | Wizard | `$F6E2` (original `$BDFF`) | `$F6EE` → `$BE0B` | complete lightning family |
+| `0704` | Pharaoh | `$F6FA` | `$F706` → `$C1AE` | none |
+| `0705` | Flaming Wheel | `$F712` (original `$D838`) | `$F71E` → `$D844` | body flame |
+| `0706` | Viper | `$F72A` (original `$E483`) | `$F736` → `$E48F` | charge/orb/bolt/ground lightning plus BG1 torches |
+| `0707` | Ice Dragon | `$F760` (original `$F161`) | `$F76C` → `$F16D` | ice-ball light, trail, and particles |
+| `0708` | Tanzara | `$F80F` | `$F81B` → `$F82D+` final-boss family | exact projectile allowlist |
+
 Key code: `$00:FEEC` (end of the `$FE89` teleport-out sequencer) writes
 `$0347 = $19 - 1` (rush progress) and `LDA #$0701; STA $1A` (16-bit = stage
 `$1A=$01/$1B=$07`, the hub warp), and sets `$0334=1` when `$19==8`. The
-boss/summon spawn stubs `$F6D6/F6EE/F6FA/F706/F712/F71E` (+`$F81B`) each
+six rematch spawn wrappers `$F6D6/$F6EE/$F706/$F71E/$F736/$F76C` (plus the
+final-boss `$F81B` wrapper) each
 `JSR $F778`, which stashes the stub continuation in object field `$3E,X`
 (re-pushed by `$F7C9`, consumed by `$F807`'s RTS). The all-six-regions
 completion check is `$00:A343` over `$7F:6B18`.

@@ -1752,6 +1752,26 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
       hot = (SDL_FColor){1.00f, 1.00f, 0.82f, 0.98f};
       cool = (SDL_FColor){1.00f, 0.34f, 0.01f, 0.00f};
       break;
+    case kActionEffect_MinotaurAxe:
+      count = kActionSceneEffectParticlesPerInstance;
+      hot = (SDL_FColor){1.00f, 1.00f, 0.90f, 0.92f};
+      cool = (SDL_FColor){1.00f, 0.48f, 0.06f, 0.00f};
+      break;
+    case kActionEffect_FlamingWheel:
+      count = kActionSceneEffectParticlesPerInstance;
+      hot = (SDL_FColor){1.00f, 0.96f, 0.58f, 0.96f};
+      cool = (SDL_FColor){0.96f, 0.08f, 0.00f, 0.00f};
+      break;
+    case kActionEffect_IceDragonIceBall:
+      count = kActionSceneEffectParticlesPerInstance;
+      hot = (SDL_FColor){0.96f, 1.00f, 1.00f, 0.94f};
+      cool = (SDL_FColor){0.10f, 0.55f, 1.00f, 0.00f};
+      break;
+    case kActionEffect_TanzaraProjectile:
+      count = kActionSceneEffectParticlesPerInstance;
+      hot = (SDL_FColor){1.00f, 0.94f, 1.00f, 0.94f};
+      cool = (SDL_FColor){0.62f, 0.08f, 1.00f, 0.00f};
+      break;
     default:
       return true;
   }
@@ -1906,6 +1926,40 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
       previous_y = -heading_y * previous_distance + heading_x * side;
       width = 0.80f + 0.60f * (1.0f - t);
       reach = 3.0f + 5.0f * t;
+    } else if (effect->kind == kActionEffect_FlamingWheel) {
+      const float span = fmaxf(8.0f, rect->x1 - rect->x0);
+      const float birth_x = rect->x0 + span * HashUnit(seed ^ 0x53u);
+      const float base_y = rect->y0 +
+          (rect->y1 - rect->y0) * HashUnit(seed ^ 0x71u);
+      const float sway = (HashUnit(seed ^ 0x37u) - 0.5f) * 14.0f;
+      x = birth_x + sway * t * t;
+      y = base_y - 8.0f * t - 24.0f * t * t;
+      previous_x = birth_x + sway * previous_t * previous_t;
+      previous_y = base_y - 8.0f * previous_t -
+          24.0f * previous_t * previous_t;
+      width = 0.65f + 0.50f * (1.0f - t);
+      reach = 2.5f + 4.0f * t;
+    } else if (effect->kind == kActionEffect_MinotaurAxe ||
+               effect->kind == kActionEffect_IceDragonIceBall ||
+               effect->kind == kActionEffect_TanzaraProjectile) {
+      const float spread = effect->kind == kActionEffect_IceDragonIceBall
+          ? 16.0f : 11.0f;
+      const float length = effect->kind == kActionEffect_MinotaurAxe
+          ? 32.0f : 42.0f;
+      const float side = (HashUnit(seed ^ 0x53u) - 0.5f) *
+          (4.0f + spread * t);
+      const float distance = 5.0f + length * t;
+      const float old_distance = 5.0f + length * previous_t;
+      x = -heading_x * distance - heading_y * side;
+      y = -heading_y * distance + heading_x * side;
+      previous_x = -heading_x * old_distance - heading_y * side;
+      previous_y = -heading_y * old_distance + heading_x * side;
+      if (effect->kind == kActionEffect_IceDragonIceBall) {
+        y += 5.0f * t * t;
+        previous_y += 5.0f * previous_t * previous_t;
+      }
+      width = 0.50f + 0.48f * (1.0f - t);
+      reach = 2.0f + 4.0f * t;
     } else if (effect->kind == kActionEffect_SwordBeam) {
       /* Sixteen fixed cross-sections span the path, each with top/centre/
        * bottom lanes. Position depends only on identity; the materialization
@@ -2304,6 +2358,91 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
       body_y = mid_y - hy * 6.0f;
       break;
     }
+    case kActionEffect_FlamingWheel: {
+      const float half_width = (rect->x1 - rect->x0) * 0.5f;
+      const float half_height = (rect->y1 - rect->y0) * 0.5f;
+      spill = (ActionEffectGlowStyle){
+        .radius_x = fmaxf(42.0f, half_width + 18.0f),
+        .radius_y = fmaxf(38.0f, half_height + 18.0f),
+        .ring_scale = {0.24f, 0.68f, 1.0f},
+        .centre = {1.00f, 0.48f, 0.05f, 0.25f},
+        .ring = {{1.00f, 0.29f, 0.02f, 0.17f},
+                 {0.86f, 0.08f, 0.00f, 0.065f},
+                 {0.48f, 0.01f, 0.00f, 0.00f}},
+        .flare = 0.20f, .rise = 0.24f,
+        .axis_x = 1.0f, .lift_y = -1.0f,
+        .seed = (unsigned)effect->record_address,
+      };
+      body = (ActionEffectGlowStyle){
+        .radius_x = fmaxf(22.0f, half_width + 4.0f),
+        .radius_y = fmaxf(22.0f, half_height + 4.0f),
+        .ring_scale = {0.18f, 0.60f, 1.0f},
+        .centre = {1.00f, 1.00f, 0.72f, 0.82f},
+        .ring = {{1.00f, 0.67f, 0.12f, 0.52f},
+                 {1.00f, 0.19f, 0.01f, 0.20f},
+                 {0.70f, 0.03f, 0.00f, 0.00f}},
+        .flare = 0.31f, .rise = 0.34f,
+        .axis_x = 1.0f, .lift_y = -1.0f,
+        .seed = (unsigned)effect->pulse_generation,
+      };
+      body_y -= 3.0f;
+      break;
+    }
+    case kActionEffect_MinotaurAxe:
+    case kActionEffect_IceDragonIceBall:
+    case kActionEffect_TanzaraProjectile: {
+      float hx = 1.0f, hy = 0.0f;
+      SceneActorHeading(effect, &hx, &hy);
+      const bool ice = effect->kind == kActionEffect_IceDragonIceBall;
+      const bool axe = effect->kind == kActionEffect_MinotaurAxe;
+      const SDL_FColor spill_centre = ice
+          ? (SDL_FColor){0.42f, 0.84f, 1.00f, 0.22f}
+          : (axe ? (SDL_FColor){1.00f, 0.70f, 0.22f, 0.19f}
+                 : (SDL_FColor){0.76f, 0.28f, 1.00f, 0.22f});
+      const SDL_FColor spill_mid = ice
+          ? (SDL_FColor){0.18f, 0.55f, 1.00f, 0.13f}
+          : (axe ? (SDL_FColor){1.00f, 0.43f, 0.06f, 0.12f}
+                 : (SDL_FColor){0.54f, 0.12f, 1.00f, 0.14f});
+      const SDL_FColor body_mid = ice
+          ? (SDL_FColor){0.56f, 0.91f, 1.00f, 0.52f}
+          : (axe ? (SDL_FColor){1.00f, 0.78f, 0.31f, 0.48f}
+                 : (SDL_FColor){0.88f, 0.54f, 1.00f, 0.50f});
+      spill = (ActionEffectGlowStyle){
+        .radius_x = ice ? 35.0f : 31.0f,
+        .radius_y = ice ? 22.0f : 20.0f,
+        .ring_scale = {0.24f, 0.68f, 1.0f},
+        .centre = spill_centre,
+        .ring = {spill_mid,
+                 ice ? (SDL_FColor){0.06f, 0.22f, 0.76f, 0.045f}
+                     : (axe ? (SDL_FColor){0.76f, 0.15f, 0.01f, 0.04f}
+                            : (SDL_FColor){0.28f, 0.04f, 0.70f, 0.05f}),
+                 {0.03f, 0.02f, 0.25f, 0.00f}},
+        .flare = ice ? 0.07f : 0.12f, .rise = 0.06f,
+        .axis_x = hx, .axis_y = hy,
+        .lift_x = -hx, .lift_y = -hy,
+        .seed = (unsigned)effect->record_address,
+      };
+      body = (ActionEffectGlowStyle){
+        .radius_x = ice ? 19.0f : 17.0f,
+        .radius_y = ice ? 9.0f : 10.0f,
+        .ring_scale = {0.17f, 0.60f, 1.0f},
+        .centre = {1.00f, 1.00f, 1.00f, ice ? 0.86f : 0.78f},
+        .ring = {body_mid,
+                 ice ? (SDL_FColor){0.15f, 0.55f, 1.00f, 0.17f}
+                     : (axe ? (SDL_FColor){1.00f, 0.30f, 0.03f, 0.15f}
+                            : (SDL_FColor){0.58f, 0.12f, 1.00f, 0.18f}),
+                 {0.05f, 0.02f, 0.30f, 0.00f}},
+        .flare = ice ? 0.08f : 0.16f, .rise = 0.09f,
+        .axis_x = hx, .axis_y = hy,
+        .lift_x = -hx, .lift_y = -hy,
+        .seed = (unsigned)effect->pulse_generation,
+      };
+      spill_x = mid_x - hx * 5.0f;
+      spill_y = mid_y - hy * 5.0f;
+      body_x = mid_x - hx * 2.0f;
+      body_y = mid_y - hy * 2.0f;
+      break;
+    }
     case kActionEffect_MarahnaLightningLink: {
       const bool horizontal =
           rect->x1 - rect->x0 >= rect->y1 - rect->y0;
@@ -2625,6 +2764,16 @@ static bool SceneEffectStyleKnown(const ActionEffectInstance *effect) {
       return effect->phase == kActionEffectPhase_SwordBeamFlight &&
           (effect->visual == 0x20u || effect->visual == 0x21u ||
            effect->visual == 0x30u || effect->visual == 0x31u);
+    case kActionEffect_MinotaurAxe:
+      return effect->phase == kActionEffectPhase_MinotaurAxeFlight &&
+          (effect->visual <= 0x07u || effect->visual == 0x10u);
+    case kActionEffect_FlamingWheel:
+      return effect->phase == kActionEffectPhase_FlamingWheelBody;
+    case kActionEffect_IceDragonIceBall:
+      return effect->phase == kActionEffectPhase_IceDragonIceBallFlight &&
+          effect->visual >= 0x12u && effect->visual <= 0x19u;
+    case kActionEffect_TanzaraProjectile:
+      return effect->phase == kActionEffectPhase_TanzaraProjectileFlight;
     default:
       return false;
   }

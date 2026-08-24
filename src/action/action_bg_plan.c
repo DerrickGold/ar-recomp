@@ -35,6 +35,10 @@ enum {
   kMarahnaMap5 = 5,
   kDeathHeimHub = 1,
   kDeathHeimFirstBoss = 2,
+  kDeathHeimSecondBoss = 3,
+  kDeathHeimThirdBoss = 4,
+  kDeathHeimFourthBoss = 5,
+  kDeathHeimFifthBoss = 6,
   kDeathHeimLastBoss = 7,
   kDeathHeimFinalBoss = 8,
   kDeathHeimFogStartY = 144,
@@ -191,6 +195,87 @@ static const TunedLayerPolicy kTunedLayerPolicies[] = {
     .apply_horizontal_extent = true,
     .left = 128,
     .right = 128,
+  },
+  {
+    /* Death Heim's rematch backdrops are finite viewport art. The base
+     * classifier still supplies the guarded narrow/Repeat topology shared by
+     * the moving-backdrop family before these promoted room tunings clamp it. */
+    .map_group = kDeathHeim,
+    .map_number = kDeathHeimFirstBoss,
+    .layer = kBg2,
+    .required_source = kActionBgSource_AuthenticViewport,
+    .required_edge = kActionBgEdge_Repeat,
+    .edge = kActionBgEdge_Clamp,
+    .motion = kActionBgMotion_FillRelative,
+  },
+  {
+    /* Promoted from the live BG Extents draft for the undersized 0703
+     * rematch arena. Keep its world-backed playfield, but mirror no farther
+     * than the verified 80px synthetic interval on either side. */
+    .map_group = kDeathHeim,
+    .map_number = kDeathHeimSecondBoss,
+    .layer = kBg1,
+    .required_source = kActionBgSource_WorldMap,
+    .required_edge = kActionBgEdge_LiveWorld,
+    .edge = kActionBgEdge_Mirror,
+    .motion = kActionBgMotion_FillRelative,
+    .apply_horizontal_extent = true,
+    .left = 80,
+    .right = 80,
+  },
+  {
+    /* The same draft identifies the complete narrow BG2 as finite art rather
+     * than continuing its base cyclic classification. */
+    .map_group = kDeathHeim,
+    .map_number = kDeathHeimSecondBoss,
+    .layer = kBg2,
+    .required_source = kActionBgSource_AuthenticViewport,
+    .required_edge = kActionBgEdge_Repeat,
+    .edge = kActionBgEdge_Clamp,
+    .motion = kActionBgMotion_FillRelative,
+  },
+  {
+    /* The 0704 draft retains the canonical world-backed BG1 unchanged and
+     * identifies only its complete narrow BG2 as finite backdrop art. */
+    .map_group = kDeathHeim,
+    .map_number = kDeathHeimThirdBoss,
+    .layer = kBg2,
+    .required_source = kActionBgSource_AuthenticViewport,
+    .required_edge = kActionBgEdge_Repeat,
+    .edge = kActionBgEdge_Clamp,
+    .motion = kActionBgMotion_FillRelative,
+  },
+  {
+    .map_group = kDeathHeim,
+    .map_number = kDeathHeimFourthBoss,
+    .layer = kBg2,
+    .required_source = kActionBgSource_AuthenticViewport,
+    .required_edge = kActionBgEdge_Repeat,
+    .edge = kActionBgEdge_Clamp,
+    .motion = kActionBgMotion_FillRelative,
+  },
+  {
+    .map_group = kDeathHeim,
+    .map_number = kDeathHeimFifthBoss,
+    .layer = kBg2,
+    .required_source = kActionBgSource_AuthenticViewport,
+    .required_edge = kActionBgEdge_Repeat,
+    .edge = kActionBgEdge_Clamp,
+    .motion = kActionBgMotion_FillRelative,
+  },
+  {
+    /* 0707 is the finite rematch exception: its viewport-backed BG2 uses the
+     * decoded world edge with compensated motion and an asymmetric cap. */
+    .map_group = kDeathHeim,
+    .map_number = kDeathHeimLastBoss,
+    .layer = kBg2,
+    .required_source = kActionBgSource_AuthenticViewport,
+    .required_edge = kActionBgEdge_Repeat,
+    .edge = kActionBgEdge_LiveWorld,
+    .motion = kActionBgMotion_NormalScroll,
+    .apply_horizontal_extent = true,
+    .left = 100,
+    .right = 96,
   },
   {
     /* Promoted verbatim from the 20260812-000613 BG Extents draft. This
@@ -447,6 +532,7 @@ static void ClassifyDeathHeim(const ActionBgFrameState *state,
   plan->layer[1].horizontal_extent = FixedHorizontalExtent(0, 0);
   if (DeathHeimEndingSky(state)) {
     plan->layer[1].default_edge = kActionBgEdge_Mirror;
+    plan->layer[1].horizontal_extent = FixedHorizontalExtent(128, 128);
   } else {
     plan->layer[1].bands[0] = (ActionBgBand) {
       .y0 = kDeathHeimFogStartY,

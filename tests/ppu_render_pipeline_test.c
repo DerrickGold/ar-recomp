@@ -1154,7 +1154,8 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
                               kPpuOverlayFlag_MarkBgHalfAdd |
                               kPpuOverlayFlag_ApplyBgFixedColorSubtract |
                               kPpuOverlayFlag_MarkFullAddSubscreen |
-                              kPpuOverlayFlag_MarkMainScreenWinner;
+                              kPpuOverlayFlag_MarkMainScreenWinner |
+                              kPpuOverlayFlag_MarkOwningScreenWinner;
     CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, 0, 0,
                                kActRaiserAuthenticWidth,
                                kActRaiserAuthenticHeight, kAllFlags));
@@ -1477,6 +1478,22 @@ static void TestFullAddSubscreenWinnerCapture(void) {
   CHECK(bg1_capture[24] == 0);
   CHECK(obj_capture[24] == (0xff000000u | rgb555(0, 31, 0)));
 
+  /* BG1 is TS-only in this measured screen configuration. Its owning-screen
+   * mask is white where BG1 supplies the colour addend and opaque black where
+   * the higher-priority OBJ sprite wins, which lets a host wall light retain
+   * Viper's authentic sprite occlusion. */
+  CHECK(PpuSetOverlayCapture(
+      ppu, kPpuOverlaySource_Bg1, 0, 0, kW, 1,
+      kPpuOverlayFlag_MarkOwningScreenWinner));
+  memset(bg1_capture, 0, sizeof(bg1_capture));
+  render_first_line(ppu);
+  CHECK(bg1_capture[0] == 0xffffffffu);
+  CHECK(bg1_capture[24] == 0xff000000u);
+  CHECK(PpuSetOverlayCapture(
+      ppu, kPpuOverlaySource_Bg1, 0, 0, kW, 1,
+      kPpuOverlayFlag_RemoveFromGame |
+          kPpuOverlayFlag_MarkFullAddSubscreen));
+
   /* A host-relocated OBJ (the Marahna status icon in flat-HUD mode) is not a
    * world addend. Removing it must reveal the BG1 pixel it covered rather than
    * leave an icon-shaped hole, while the ordinary OAM capture range remains
@@ -1573,6 +1590,18 @@ static void TestMainScreenWinnerMask(void) {
   CHECK(mask[128] == 0xff000000u);
   CHECK(mask[255] == 0xff000000u);
   CHECK(PpuOverlaySurfaceHasContent(ppu, kPpuOverlaySource_Bg2, 0));
+
+  /* The owning-screen form must reduce to the same mask for a TM source; its
+   * extra behavior is only the TS fallback exercised by the Marahna fixture. */
+  CHECK(PpuSetOverlayCapture(
+      ppu, kPpuOverlaySource_Bg2, 0, 0, kW, 1,
+      kPpuOverlayFlag_MarkOwningScreenWinner));
+  memset(mask, 0, sizeof(mask));
+  render_first_line(ppu);
+  CHECK(mask[0] == 0xffffffffu);
+  CHECK(mask[127] == 0xffffffffu);
+  CHECK(mask[128] == 0xff000000u);
+  CHECK(mask[255] == 0xff000000u);
   PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
   g_new_ppu = saved_new_ppu;
   ppu_free(ppu);
