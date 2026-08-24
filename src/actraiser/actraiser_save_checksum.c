@@ -1,9 +1,9 @@
 #include "actraiser/actraiser_save_checksum.h"
 
 #include <limits.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include <stddef.h>
 
+#include "actraiser/actraiser_hle_fatal.h"
 #include "byte_order.h"
 #include "cpu_65816_math.h"
 #include "save_system.h"
@@ -43,10 +43,9 @@ static uint32_t ComputePackedBcdChecksum(const uint8_t *sram) {
 RecompReturn ActRaiser_SaveAccumulateChecksum(CpuState *cpu) {
   if (!cpu) return RECOMP_RETURN_NORMAL;
   if (!g_sram || g_sram_size < kActRaiserSramSize) {
-    fprintf(stderr,
-            "FATAL: $00:84F3 HLE requires a complete %d-byte SRAM image\n",
-            kActRaiserSramSize);
-    abort();
+    ActRaiserHleFatal(
+        "$00:84F3 HLE requires a complete %d-byte SRAM image",
+        kActRaiserSramSize);
   }
 
   cpu_mirrors_to_p(cpu);

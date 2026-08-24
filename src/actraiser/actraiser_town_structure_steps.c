@@ -2,10 +2,9 @@
 
 #include <limits.h>
 #include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
 
 #include "actraiser/actraiser_cpu_hle_internal.h"
+#include "actraiser/actraiser_hle_fatal.h"
 #include "cpu_65816_math.h"
 
 enum {
@@ -37,9 +36,8 @@ static uint16_t TownStructureStepClassTable(
       return kTownStructureStepRebuildClassTable;
   }
 
-  fprintf(stderr, "FATAL: invalid town structure step program family %d\n",
-          (int)program_family);
-  abort();
+  ActRaiserHleFatal("invalid town structure step program family %d",
+                    (int)program_family);
 }
 
 static uint16_t ReadLongIndexedWord(CpuState *cpu, uint8_t bank,

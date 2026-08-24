@@ -267,6 +267,14 @@ endif() # NOT AR_TESTS_ONLY
 if(BUILD_TESTING)
     find_package(Python3 QUIET COMPONENTS Interpreter)
 
+    # The production HLE fatal path escapes through the game coroutine. Unit
+    # targets link only the formatter/trampoline core; invalid direct calls
+    # retain abort semantics unless a focused test registers its own escape.
+    add_library(actraiser_hle_fatal_test_support STATIC
+        src/actraiser/actraiser_hle_fatal.c)
+    target_include_directories(actraiser_hle_fatal_test_support PUBLIC
+        ${CMAKE_SOURCE_DIR}/src)
+
     add_executable(actraiser_consolidated_utils_test
         tests/consolidated_utils_test.c
         src/manifest_utils.c
@@ -981,6 +989,21 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_session_fatal
         COMMAND actraiser_session_fatal_test)
 
+    add_executable(actraiser_presentation_outcome_test
+        tests/presentation_outcome_test.c
+    )
+    target_include_directories(actraiser_presentation_outcome_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_presentation_outcome
+        COMMAND actraiser_presentation_outcome_test)
+
+    add_executable(actraiser_hle_fatal_test
+        tests/actraiser_hle_fatal_test.c)
+    target_link_libraries(actraiser_hle_fatal_test PRIVATE
+        actraiser_hle_fatal_test_support)
+    add_test(NAME actraiser_hle_fatal
+        COMMAND actraiser_hle_fatal_test)
+
     add_executable(actraiser_audio_presentation_policy_test
         tests/audio_presentation_policy_test.c
         src/audio_presentation_policy.c
@@ -1470,4 +1493,19 @@ if(BUILD_TESTING)
     )
     target_link_libraries(actraiser_manual_input_test PRIVATE SDL3::SDL3)
     add_test(NAME actraiser_manual_input COMMAND actraiser_manual_input_test)
+
+    foreach(_ar_hle_target IN ITEMS
+            actraiser_action_metatile_hle_test
+            actraiser_action_room_loader_hle_test
+            actraiser_action_room_graphics_hle_test
+            actraiser_action_video_config_hle_test
+            actraiser_town_lair_bits_hle_test
+            actraiser_save_checksum_hle_test
+            actraiser_cell_map_hle_test
+            actraiser_town_metatile_hle_test
+            actraiser_town_structure_steps_hle_test
+            actraiser_lzss_hle_test)
+        target_link_libraries(${_ar_hle_target} PRIVATE
+            actraiser_hle_fatal_test_support)
+    endforeach()
 endif()

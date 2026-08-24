@@ -6,6 +6,7 @@
 #include <SDL3/SDL.h>
 #include "diorama_planes.h"
 #include "diorama_skybox_uv.h"
+#include "presentation_outcome.h"
 
 /* The per-room ($18,$19) layer override table the editor edits and the draw
  * loop reads. Never NULL. Empty means "every room draws as built". */
@@ -229,27 +230,24 @@ bool Diorama_ProjectCapturedBg2Point(const DioramaProjection *projection,
  *
  * effect_obj_priority_mask/effect_bg_plane_mask: authentic hardware planes
  * required by current captured effects. An effect is current projection
- * content even if its isolated band has no final winning pixels. */
-bool Diorama_Composite(SDL_Renderer *renderer, int snes_width, int snes_height,
-                       int authentic_y0,
-                       int obj_apron,
-                       int active_pixel_aspect, bool ignore_aspect_ratio,
-                       int visible_width, SDL_Rect viewport,
-                       SDL_Texture *textures[],
-                       uint8_t *pixels[],
-                       const bool bg_transparent_fill_configured[2],
-                       const uint32_t bg_transparent_fill_argb[2],
-                       const DioramaCameraPose *cam_pose,
-                       float distance_scale,
-                       uint32_t additive_plane_mask,
-                       uint8_t effect_obj_priority_mask,
-                       uint32_t effect_bg_plane_mask,
-                       uint8_t map_group, uint8_t map_number,
-                       uint8_t layer_section,
-                       const DioramaBgValidSpanPlan *bg2_valid_spans,
-                       DioramaPlaneEffectFn plane_effect,
-                       void *plane_effect_userdata,
-                       DioramaProjection *out_projection);
+ * content even if its isolated band has no final winning pixels.
+ * Complete and OptionalOmitted both mean the selected scene is usable;
+ * CoreFailure means the caller must stop rather than present a partial view. */
+PresentationOutcome Diorama_Composite(
+    SDL_Renderer *renderer, int snes_width, int snes_height,
+    int authentic_y0, int obj_apron,
+    int active_pixel_aspect, bool ignore_aspect_ratio,
+    int visible_width, SDL_Rect viewport,
+    SDL_Texture *textures[], uint8_t *pixels[],
+    const bool bg_transparent_fill_configured[2],
+    const uint32_t bg_transparent_fill_argb[2],
+    const DioramaCameraPose *cam_pose, float distance_scale,
+    uint32_t additive_plane_mask,
+    uint8_t effect_obj_priority_mask, uint32_t effect_bg_plane_mask,
+    uint8_t map_group, uint8_t map_number, uint8_t layer_section,
+    const DioramaBgValidSpanPlan *bg2_valid_spans,
+    DioramaPlaneEffectFn plane_effect, void *plane_effect_userdata,
+    DioramaProjection *out_projection);
 
 /* Drops renderer-owned targets/effects after SDL_EVENT_RENDER_DEVICE_RESET so
  * they are lazily recreated against the current device. */

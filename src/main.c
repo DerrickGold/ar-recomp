@@ -304,6 +304,10 @@ static void RunOneEmulatedTick(bool *stop_running) {
    * advance while the game thread held the lock. */
   bool r = RtlRunFrame(inputs);
   (void)r;
+  if (SessionFatal_Requested()) {
+    *stop_running = true;
+    return;
+  }
   /* TURBO ('t' toggle): real fast-forward = run extra game frames per
    * emulated TICK (not per rendered/present frame — that decoupling is
    * M5's job). Same input word each sub-frame (level-held buttons repeat;
@@ -311,7 +315,12 @@ static void RunOneEmulatedTick(bool *stop_running) {
    * they hold during the skipped frames too. */
   if (HostInput_IsTurbo()) {
     int mult = g_settings.turbo_multiplier;
-    for (int tf = 1; tf < mult; tf++) RtlRunFrame(inputs);
+    for (int tf = 1; tf < mult && !SessionFatal_Requested(); tf++)
+      RtlRunFrame(inputs);
+    if (SessionFatal_Requested()) {
+      *stop_running = true;
+      return;
+    }
   }
   if (apuprof_t0) {
     extern uint64_t audio_trace_wall_ns(void);
@@ -1424,11 +1433,14 @@ static void AppBoot_StartGame(AppBoot *app) {
   { const char *ls = getenv("AR_LOADSTATE");
     if (ls && ls[0]) {
       int slot = atoi(ls);
-      for (int i = 0; i < 4; i++) RtlRunFrame(0);
-      RtlSaveLoad(kSaveLoad_Load, slot);
-      FrameSlot_ResetActionEffects();
-      ActRaiserActionBg_Reset();
-      fprintf(stderr, "[loadstate] loaded slot %d at boot\n", slot);
+      for (int i = 0; i < 4 && !SessionFatal_Requested(); i++)
+        RtlRunFrame(0);
+      if (!SessionFatal_Requested()) {
+        RtlSaveLoad(kSaveLoad_Load, slot);
+        FrameSlot_ResetActionEffects();
+        ActRaiserActionBg_Reset();
+        fprintf(stderr, "[loadstate] loaded slot %d at boot\n", slot);
+      }
     } }
 }
 

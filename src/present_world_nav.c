@@ -51,6 +51,8 @@ extern SDL_Texture *g_sim3d_flat_texture;
 static SDL_Texture *s_world_navigation_palace_texture;
 static SDL_Texture *s_world_navigation_ui_texture;
 static bool s_world_navigation_composition_upload_valid;
+static bool s_world_navigation_cloud_unavailable;
+static bool s_world_navigation_weather_failure_reported;
 
 static SDL_Texture *EnsureWorldNavigationCompositionTexture(
     SDL_Texture **texture) {
@@ -109,10 +111,15 @@ static SDL_Texture *EnsureWorldNavigationCloudTexture(void) {
   };
   if (s_world_navigation_cloud_texture)
     return s_world_navigation_cloud_texture;
+  /* A texture-allocation or lock failure makes clouds unavailable only for
+   * this renderer generation.  They are optional atmosphere, so keep the
+   * complete ground/composition path and re-probe after a renderer reset. */
+  if (s_world_navigation_cloud_unavailable) return NULL;
   s_world_navigation_cloud_texture = SDL_CreateTexture(
       g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
       kPaddedPixels, kPaddedPixels);
   if (!s_world_navigation_cloud_texture) {
+    s_world_navigation_cloud_unavailable = true;
     fprintf(stderr,
             "[world-navigation] cloud texture unavailable: %s\n",
             SDL_GetError());
@@ -128,6 +135,10 @@ static SDL_Texture *EnsureWorldNavigationCloudTexture(void) {
           s_world_navigation_cloud_texture, NULL, &pixels, &pitch)) {
     SDL_DestroyTexture(s_world_navigation_cloud_texture);
     s_world_navigation_cloud_texture = NULL;
+    s_world_navigation_cloud_unavailable = true;
+    fprintf(stderr,
+            "[world-navigation] cloud texture lock unavailable: %s\n",
+            SDL_GetError());
     return NULL;
   }
   for (int y = 0; y < kPaddedPixels; y++) {
@@ -393,13 +404,22 @@ static bool DrawWorldNavigationCloudLayer(
   return SDL_RenderGeometry(g_renderer, texture, vertices, 4, indices, 6);
 }
 
-static bool DrawWorldNavigationWeather(
+static PresentationOutcome OmitWorldNavigationWeather(const char *reason) {
+  if (!s_world_navigation_weather_failure_reported) {
+    s_world_navigation_weather_failure_reported = true;
+    fprintf(stderr, "[world-navigation] optional weather omitted: %s\n",
+            reason && reason[0] ? reason : "renderer rejected the effect");
+  }
+  return kPresentationOutcome_OptionalOmitted;
+}
+
+static PresentationOutcome DrawWorldNavigationWeather(
     const FrameSlot *slot, SDL_Rect viewport) {
   if (!slot->sim.world_navigation_clouds ||
       !slot->sim.cloud_opacity_pct)
-    return true;
+    return kPresentationOutcome_Complete;
   SDL_Texture *texture = EnsureWorldNavigationCloudTexture();
-  if (!texture) return false;
+  if (!texture) return OmitWorldNavigationWeather(SDL_GetError());
 
   const float opacity =
       (float)slot->sim.cloud_opacity_pct / (float)kPercentScale;
@@ -450,7 +470,7 @@ static bool DrawWorldNavigationWeather(
                 shadow_x + perpendicular_x * spread,
                 shadow_y + perpendicular_y * spread,
                 (SDL_FColor){0.0f, 0.0f, 0.0f, alpha}))
-          return false;
+          return OmitWorldNavigationWeather(SDL_GetError());
       }
     }
   }
@@ -466,11 +486,11 @@ static bool DrawWorldNavigationWeather(
                 1.0f, 1.0f, 1.0f,
                 opacity * layer->weight * body_visibility,
               })) {
-        return false;
+        return OmitWorldNavigationWeather(SDL_GetError());
       }
     }
   }
-  return true;
+  return kPresentationOutcome_Complete;
 }
 
 static bool DrawWorldNavigationCompositionLayer(
@@ -507,19 +527,20 @@ static bool DrawWorldNavigationMasterFade(
   return ok;
 }
 
-bool PresentWorldNavigation3D(const FrameSlot *slot) {
+PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
+  PresentationOutcome outcome = kPresentationOutcome_Complete;
   const SimWorldNavigationScene *scene =
       &slot->sim.world_navigation_scene;
   const SimWorldNavigationComposition *composition = &scene->composition;
   if (!scene->valid || !composition->valid ||
       !s_world_navigation_composition_upload_valid)
-    return false;
+    return kPresentationOutcome_CoreFailure;
   SDL_Texture *world = EnsureSimUnderlayTexture(slot);
-  if (!world) return false;
+  if (!world) return kPresentationOutcome_CoreFailure;
   if (!composition->empty_animation &&
       (!s_world_navigation_palace_texture ||
        !s_world_navigation_ui_texture))
-    return false;
+    return kPresentationOutcome_CoreFailure;
 
   SDL_Rect viewport = ComputePresentationViewport(
       g_renderer, slot->ignore_aspect_ratio,
@@ -534,28 +555,25 @@ bool PresentWorldNavigation3D(const FrameSlot *slot) {
   if (!DrawWorldNavigationGround(slot, viewport, world)) {
     SDL_SetRenderClipRect(g_renderer, NULL);
     ApplyLogicalPresentation(slot);
-    return false;
+    return kPresentationOutcome_CoreFailure;
   }
   if (!DrawWorldNavigationLightTreatment(slot, viewport)) {
     SDL_SetRenderClipRect(g_renderer, NULL);
     ApplyLogicalPresentation(slot);
-    return false;
+    return kPresentationOutcome_CoreFailure;
   }
   if (!DrawWorldNavigationActiveRegionHaze(slot, viewport)) {
     SDL_SetRenderClipRect(g_renderer, NULL);
     ApplyLogicalPresentation(slot);
-    return false;
+    return kPresentationOutcome_CoreFailure;
   }
 
   /* Whole-world weather uses the same affine map as the ground. It has no
    * town sprite-window hole or cull boundary: every part of this world is
    * intentional content. The authentic top-down Palace stays over it, and
    * the location label/frame stays screen-space and last. */
-  if (!DrawWorldNavigationWeather(slot, viewport)) {
-    SDL_SetRenderClipRect(g_renderer, NULL);
-    ApplyLogicalPresentation(slot);
-    return false;
-  }
+  outcome = PresentationOutcome_Combine(
+      outcome, DrawWorldNavigationWeather(slot, viewport));
   /* INIDISP is a master brightness applied after the PPU has composed every
    * layer. Do the same for the host-owned world and all its effects. The
    * Palace/UI captures are drawn afterward because PpuRasterizeObjRange has
@@ -563,7 +581,7 @@ bool PresentWorldNavigation3D(const FrameSlot *slot) {
   if (!DrawWorldNavigationMasterFade(slot, viewport)) {
     SDL_SetRenderClipRect(g_renderer, NULL);
     ApplyLogicalPresentation(slot);
-    return false;
+    return kPresentationOutcome_CoreFailure;
   }
   if (!composition->empty_animation &&
       (!DrawWorldNavigationCompositionLayer(
@@ -574,11 +592,11 @@ bool PresentWorldNavigation3D(const FrameSlot *slot) {
            s_world_navigation_ui_texture))) {
     SDL_SetRenderClipRect(g_renderer, NULL);
     ApplyLogicalPresentation(slot);
-    return false;
+    return kPresentationOutcome_CoreFailure;
   }
   SDL_SetRenderClipRect(g_renderer, NULL);
   ApplyLogicalPresentation(slot);
-  return true;
+  return outcome;
 }
 
 /* The world-map half of the presentation-resource reset. PresentSim3D_ResetResources
@@ -595,4 +613,6 @@ void PresentWorldNav_ResetResources(void) {
     SDL_DestroyTexture(s_world_navigation_ui_texture);
   s_world_navigation_ui_texture = NULL;
   s_world_navigation_composition_upload_valid = false;
+  s_world_navigation_cloud_unavailable = false;
+  s_world_navigation_weather_failure_reported = false;
 }

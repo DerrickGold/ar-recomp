@@ -1,9 +1,9 @@
 #include "actraiser/actraiser_lzss.h"
 
 #include <limits.h>
-#include <stdio.h>
 #include <stdlib.h>
 
+#include "actraiser/actraiser_hle_fatal.h"
 #include "quintet_lzss.h"
 
 enum {
@@ -98,17 +98,15 @@ RecompReturn ActRaiser_LzssDecompress(CpuState *cpu) {
   const uint16_t output_address = ReadDp16(cpu, kLzssDpOutputAddress);
 
   if (!output_size) {
-    fprintf(stderr,
-            "FATAL: $02:C5C9 HLE received a zero-byte output request\n");
-    abort();
+    ActRaiserHleFatal(
+        "$02:C5C9 HLE received a zero-byte output request");
   }
 
   uint8_t *output = malloc(output_size);
   if (!output) {
-    fprintf(stderr,
-            "FATAL: $02:C5C9 HLE could not allocate %u output bytes\n",
-            (unsigned)output_size);
-    abort();
+    ActRaiserHleFatal(
+        "$02:C5C9 HLE could not allocate %u output bytes",
+        (unsigned)output_size);
   }
 
   ActRaiserLzssReader reader = {
@@ -119,9 +117,9 @@ RecompReturn ActRaiser_LzssDecompress(CpuState *cpu) {
   QuintetLzssState state;
   if (!QuintetLzss_DecompressReader(
           ReadMappedSourceByte, &reader, output, output_size, &state)) {
-    fprintf(stderr, "FATAL: $02:C5C9 HLE could not read its source stream\n");
     free(output);
-    abort();
+    ActRaiserHleFatal(
+        "$02:C5C9 HLE could not read its source stream");
   }
 
   /* Native DB is $7E during both writes. X is 16-bit and wraps without

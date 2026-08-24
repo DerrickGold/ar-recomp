@@ -1832,7 +1832,9 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
     return;
   }
   if (slot->sim.view == kSimView_WorldNavigation) {
-    if (PresentWorldNavigation3D(slot)) return;
+    SDL_ClearError();
+    const PresentationOutcome navigation = PresentWorldNavigation3D(slot);
+    if (PresentationOutcome_IsUsable(navigation)) return;
     const char *sdl_error = SDL_GetError();
     SessionFatal_Request(
         "The enhanced world-navigation renderer failed while it was active "
@@ -2037,30 +2039,33 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
     (void)BeginActionHeat(slot, output_viewport);
     const SDL_Rect viewport = ActionHeatSceneViewport(output_viewport);
     ActionDioramaPlaneEffectContext plane_effect = {slot, viewport};
-    if (!Diorama_Composite(g_renderer, slot->snes_width,
-                           slot->snes_height + slot->ws_extra_top +
-                               slot->ws_extra_bottom,
-                           slot->ws_extra_top,
-                           slot->obj_apron,
-                           slot->pixel_aspect, slot->ignore_aspect_ratio,
-                           slot->visible_width, viewport,
-                           scene_textures, pixels,
-                           slot->diorama_bg_transparent_fill_configured,
-                           slot->diorama_bg_transparent_fill_argb,
-                           &final_cam, distance_scale,
-                           slot->diorama_plane_additive_mask &
-                               s_diorama_uploaded_plane_mask,
-                           effect_obj_priority_mask,
-                           effect_bg_plane_mask,
-                           slot->diorama_map_group,
-                           slot->diorama_map_number,
-                           slot->diorama_layer_section,
-                           &bg2_valid_spans,
-                           DrawActionDioramaPlaneEffect, &plane_effect,
-                           &action_projection)) {
+    SDL_ClearError();
+    const PresentationOutcome diorama = Diorama_Composite(
+        g_renderer, slot->snes_width,
+        slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom,
+        slot->ws_extra_top, slot->obj_apron,
+        slot->pixel_aspect, slot->ignore_aspect_ratio,
+        slot->visible_width, viewport, scene_textures, pixels,
+        slot->diorama_bg_transparent_fill_configured,
+        slot->diorama_bg_transparent_fill_argb,
+        &final_cam, distance_scale,
+        slot->diorama_plane_additive_mask & s_diorama_uploaded_plane_mask,
+        effect_obj_priority_mask, effect_bg_plane_mask,
+        slot->diorama_map_group, slot->diorama_map_number,
+        slot->diorama_layer_section, &bg2_valid_spans,
+        DrawActionDioramaPlaneEffect, &plane_effect, &action_projection);
+    if (!PresentationOutcome_IsUsable(diorama)) {
+      char renderer_error[256];
+      snprintf(renderer_error, sizeof(renderer_error), "%s", SDL_GetError());
       CancelActionHeat();
       DioramaPerformance_End(presentation_performance);
       DioramaPerformance_PresentCompleted();
+      SessionFatal_Request(
+          "The selected Diorama renderer could not complete its core scene "
+          "(%s). Restart the game. If this happens again, update your "
+          "graphics driver or disable Diorama mode before entering the room.",
+          renderer_error[0] ? renderer_error
+                            : "invalid renderer frame state");
       return;
     }
     DioramaPerformanceScope callback_performance =
