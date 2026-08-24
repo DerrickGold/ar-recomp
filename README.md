@@ -302,7 +302,7 @@ live and are written back to `settings.ini` atomically.
 | **Save editor** | Inspect and stage battery-save edits in-game behind an explicit safety switch: town states, unlocks, levels, magic, items, scores. Backs up, checksums, and supports lossless INI import/export. |
 | **Bridge-free structure limit** | Optional fix: completed bridges stop consuming a town's 128-structure population cap, migrating to spare save space while keeping their tiles, crossing, and 32-person support. Retroactive on existing towns. |
 | **Cheats** | Infinite HP/MP/SP, moonjump, invincibility, all magic, ranged sword, angel health, and a generic Pro Action Replay code pinner — all toggleable live from the menu. |
-| **Audio** | Independent music, sound-effects, and master volume; optional ten-voice native mode that keeps song voices 6/7 audible while effects use added voices 8/9; 32.04/44.1/48 kHz output through a continuous resampler; and a dialogue-blip mute. |
+| **Audio** | Independent music, sound-effects, and master volume; optional 24-voice mode that preserves all eight song voices while queued native effects use 16 independent virtual voices; 32.04/44.1/48 kHz output through a continuous resampler; and a dialogue-blip mute. |
 
 ![Independently scaled simulation-mode HUD in widescreen](/assets/hud-scaling.png)
 

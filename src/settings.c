@@ -1938,8 +1938,8 @@ const SettingDesc g_setting_descs[] = {
     NULL, NULL, ParseAudioVolume, FormatAudioVolume, .modern_env = true },
   { "audio_extended_channels", "AR_EXTENDED_AUDIO_CHANNELS",
     "Extended sound channels",
-    "Keep all eight music voices while native effects use two added voices. "
-    "Takes effect after restart; effect-lane queuing is a later enhancement.",
+    "Keep all eight music voices while queued native effects use a pool of "
+    "16 added voices. Takes effect after restart.",
     kSettingType_Bool, kApply_Restart, kSettingCat_Audio,
     &g_settings.audio_extended_channels, 0, 0, 1, 1, false, NULL, 0,
     NULL, NULL, NULL, NULL, .modern_env = true },

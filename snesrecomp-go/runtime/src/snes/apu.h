@@ -121,4 +121,7 @@ extern bool (*g_apu_spc_dsp_write_filter_hook)(Apu *apu, uint8_t addr,
                                                uint8_t *value);
 extern void (*g_apu_spc_dsp_write_trace_hook)(Apu *apu, uint8_t addr,
                                               uint8_t value);
+/* Optional game-owned state appended to the APU save blob. This is used by
+ * extensions whose state cannot live in the emulated 64 KiB ARAM image. */
+extern void (*g_apu_extra_saveload_hook)(Apu *apu, SaveLoadInfo *sli);
 #endif

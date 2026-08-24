@@ -26,6 +26,8 @@ typedef enum NativeAudioRequestOutcome {
   kNativeAudioOutcome_RejectedDualBusy,
   kNativeAudioOutcome_ReplacedLane,
   kNativeAudioOutcome_CanceledSongTransition,
+  kNativeAudioOutcome_CoalescedExtendedDuplicate,
+  kNativeAudioOutcome_ExtendedFifoOverflow,
   kNativeAudioOutcome_Completed,
   kNativeAudioOutcome_Count,
 } NativeAudioRequestOutcome;
@@ -38,6 +40,7 @@ enum NativeAudioRequestFlags {
   kNativeAudioFlag_SequenceStarted = 1u << 4,
   kNativeAudioFlag_DualBusySeen = 1u << 5,
   kNativeAudioFlag_LaneReplaced = 1u << 6,
+  kNativeAudioFlag_ExtendedTransport = 1u << 7,
 };
 
 typedef struct NativeAudioRequestRecord {
@@ -58,9 +61,10 @@ typedef struct NativeAudioRequestRecord {
   uint8_t id;
   uint8_t effective_id;
   uint8_t outcome;
-  uint8_t flags;
+  uint16_t flags;
   uint8_t lanes_started; /* bit 0 = X $10, bit 1 = X $12 */
   uint8_t active_lanes;
+  uint16_t virtual_voices_started; /* bit 0 = virtual voice 8 */
   uint8_t music_suppressed_voice_mask;
   uint32_t music_updates_suppressed;
 } NativeAudioRequestRecord;
@@ -128,6 +132,19 @@ uint64_t NativeAudioTraceModel_PostRequest(
     NativeAudioRequestKind kind, uint8_t id, int emitted,
     const char *caller, uint32_t site, uint32_t game_frame,
     uint16_t cpu_x, uint16_t cpu_y, uint64_t cycle);
+uint64_t NativeAudioTraceModel_PostExtendedRequest(
+    NativeAudioRequestKind kind, uint8_t id, const char *caller,
+    uint32_t site, uint32_t game_frame, uint16_t cpu_x,
+    uint16_t cpu_y, uint64_t cycle);
+void NativeAudioTraceModel_ExtendedDisposition(
+    uint64_t serial, uint64_t existing_serial,
+    int coalesced, int overflow, uint64_t cycle);
+void NativeAudioTraceModel_ExtendedSequenceStart(
+    uint64_t serial, uint8_t lane, uint8_t virtual_voice, uint64_t cycle);
+void NativeAudioTraceModel_ExtendedSequenceEnd(
+    uint64_t serial, uint8_t lane, uint64_t cycle);
+void NativeAudioTraceModel_ExtendedCancel(
+    uint64_t serial, uint64_t cycle);
 void NativeAudioTraceModel_CpuPortWrite(
     uint8_t port, uint8_t value, const char *caller,
     uint32_t game_frame, uint64_t cycle);
@@ -165,7 +182,7 @@ const char *NativeAudioTrace_SongEventName(NativeAudioSongEventKind kind);
 /* Runtime wrapper. Safe no-ops unless AR_NATIVE_AUDIO_TRACE is enabled. */
 void NativeAudioTrace_Init(void);
 void NativeAudioTrace_Report(void);
-void NativeAudioTrace_OnCpuRequest(
+uint64_t NativeAudioTrace_OnCpuRequest(
     NativeAudioRequestKind kind, uint8_t id, int emitted,
     const char *caller, uint32_t site, uint32_t game_frame,
     uint16_t cpu_x, uint16_t cpu_y);

@@ -28,6 +28,7 @@
 #include "hd_replacement_host.h"
 #include "hd_replacements.h"
 #include "music_replacements.h"
+#include "native_audio_extension.h"
 #include "dev/native_audio_trace.h"
 #include "dev/sfx_census.h"
 #include "sim/sim_render_atlas.h"
@@ -502,13 +503,18 @@ static uint32 ActRaiser_LastBlockPc(void);
 static void ActRaiser_BrkHook(CpuState *cpu) {
   const uint8 id = (uint8)(cpu->A & 0xFF);
   extern const char *g_last_recomp_func;
-  NativeAudioTrace_OnCpuRequest(
+  const uint32 site = ActRaiser_LastBlockPc();
+  const uint32 game_frame =
+      ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
+  const uint64_t trace_serial = NativeAudioTrace_OnCpuRequest(
       kNativeAudioRequest_Sfx, id, true, g_last_recomp_func,
-      ActRaiser_LastBlockPc(),
-      ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
+      site, game_frame,
       (uint16_t)cpu->X, (uint16_t)cpu->Y);
-  cpu_write8(cpu, 0x00, kActRaiserWram_BrkSoundRequest,
-             id);
+  const bool extended = NativeAudioExtension_QueueRequest(
+      false, id, site, game_frame, (uint16_t)cpu->X, (uint16_t)cpu->Y,
+      trace_serial);
+  if (!extended)
+    cpu_write8(cpu, 0x00, kActRaiserWram_BrkSoundRequest, id);
   /* AR_SFXCENSUS=1: record the request with its caller and the index registers
    * that identify the requesting actor, so the census can join it to whatever
    * sample the SPC driver ends up keying. No-op when disabled. */
@@ -557,12 +563,17 @@ static void ActRaiser_CopHook(CpuState *cpu) {
       !AudioPresentationPolicy_ShouldEmitDialogBlip(
           g_settings.audio_dialog_blip) &&
       id == 0x07 && site == 0x01902D;
-  NativeAudioTrace_OnCpuRequest(
+  const uint64_t trace_serial = NativeAudioTrace_OnCpuRequest(
       kNativeAudioRequest_Event, id, !suppress_dialog_blip,
       g_last_recomp_func, site,
       ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
       (uint16_t)cpu->X, (uint16_t)cpu->Y);
-  if (!suppress_dialog_blip)
+  const bool extended = !suppress_dialog_blip &&
+      NativeAudioExtension_QueueRequest(
+          true, id, site,
+          ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
+          (uint16_t)cpu->X, (uint16_t)cpu->Y, trace_serial);
+  if (!suppress_dialog_blip && !extended)
     cpu_write8(cpu, 0x00, kActRaiserWram_CopRequest, id);
   /* AR_COPLOG=1: log every COP-posted event id + game-frame + calling recomp
    * function, so a Death-Heim stuck-state capture shows whether the

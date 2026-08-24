@@ -115,8 +115,9 @@ static void RestoreVoiceClasses(Apu *apu) {
                         : kDspVoiceBus_Music);
   }
   if (dsp_extendedVoicesEnabled()) {
-    dsp_setVoiceBus(apu->dsp, 8, kDspVoiceBus_Sfx);
-    dsp_setVoiceBus(apu->dsp, 9, kDspVoiceBus_Sfx);
+    for (int voice = kDspHardwareVoiceCount;
+         voice < kDspMaximumVoiceCount; voice++)
+      dsp_setVoiceBus(apu->dsp, voice, kDspVoiceBus_Sfx);
   }
 }
 

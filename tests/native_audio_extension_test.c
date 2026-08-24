@@ -11,6 +11,13 @@
 Settings g_settings;
 bool (*g_apu_spc_dsp_write_filter_hook)(Apu *, uint8_t, uint8_t *);
 void (*g_spc_opcode_patch_hook)(Spc *, uint16_t);
+int (*g_spc_opcode_cycle_hook)(Spc *, uint16_t, int);
+void (*g_apu_extra_saveload_hook)(Apu *, SaveLoadInfo *);
+void (*g_rtl_spc_upload_hook)(uint32_t);
+Snes *g_snes;
+
+void RtlApuLock(void) {}
+void RtlApuUnlock(void) {}
 
 static bool s_dsp_enabled;
 static int s_bus_voice = -1;
@@ -162,9 +169,186 @@ static void TestInstalledBridge(void) {
   CHECK(s_hardware_value == 0 && s_hardware_update_mask == 0xff);
 }
 
+static void SetSequencePointer(Apu *apu, uint8_t id, uint16_t pointer) {
+  const uint16_t address = (uint16_t)(0x2400 + id * 2);
+  apu->ram[address] = (uint8_t)pointer;
+  apu->ram[(uint16_t)(address + 1)] = (uint8_t)(pointer >> 8);
+}
+
+typedef struct TestSaveLoad {
+  SaveLoadInfo base;
+  uint8_t bytes[32768];
+  size_t offset;
+  bool loading;
+} TestSaveLoad;
+
+static void TransferTestState(SaveLoadInfo *base, void *data, size_t size) {
+  TestSaveLoad *state = (TestSaveLoad *)base;
+  CHECK(state->offset + size <= sizeof(state->bytes));
+  if (state->offset + size > sizeof(state->bytes)) return;
+  if (state->loading)
+    memcpy(data, state->bytes + state->offset, size);
+  else
+    memcpy(state->bytes + state->offset, data, size);
+  state->offset += size;
+}
+
+static void TestIndependentSequencerInstances(void) {
+  Apu apu;
+  Spc spc;
+  Dsp dsp;
+  memset(&apu, 0, sizeof(apu));
+  memset(&spc, 0, sizeof(spc));
+  memset(&dsp, 0, sizeof(dsp));
+  apu.spc = &spc;
+  apu.dsp = &dsp;
+  spc.apu = &apu;
+  SetSequencePointer(&apu, 0x10, 0x2676);
+  SetSequencePointer(&apu, 0x03, 0x2478);
+  SetSequencePointer(&apu, 0x07, 0x2549);
+
+  CHECK(NativeAudioExtension_QueueRequest(
+      false, 0x10, 0x01bb6d, 100, 7, 9, 0));
+  CHECK(NativeAudioExtension_QueueRequest(
+      false, 0x10, 0x01bb6d, 100, 7, 9, 0));
+  CHECK(NativeAudioExtension_QueuedRequestCount() == 1);
+  /* Same producer and frame but a different actor remains independent. */
+  CHECK(NativeAudioExtension_QueueRequest(
+      false, 0x10, 0x01bb6d, 100, 7, 10, 0));
+  CHECK(NativeAudioExtension_QueuedRequestCount() == 2);
+
+  g_spc_opcode_patch_hook(&spc, 0x0da0);
+  CHECK(NativeAudioExtension_QueuedRequestCount() == 0);
+  CHECK(NativeAudioExtension_ActiveInstanceCount() == 2);
+  CHECK(spc.pc == 0x0e7f && spc.x == 0x12);
+  CHECK(apu.ram[0x00e6] == 0x76 && apu.ram[0x00e7] == 0x26);
+
+  uint8_t value = 0x09;
+  CHECK(!g_apu_spc_dsp_write_filter_hook(&apu, 0x74, &value));
+  CHECK(s_register_voice == 8);
+  apu.ram[0x0082] = 0x55; /* $70 + X=$12 */
+  apu.ram[0x45] = 0x80;   /* this instance requested KON */
+  g_spc_opcode_patch_hook(&spc, 0x0f0b);
+  CHECK(spc.pc == 0x0e7f && spc.x == 0x12);
+  value = 0x0a;
+  CHECK(!g_apu_spc_dsp_write_filter_hook(&apu, 0x74, &value));
+  CHECK(s_register_voice == 9);
+  g_spc_opcode_patch_hook(&spc, 0x0e7e);
+  CHECK(NativeAudioExtension_ActiveInstanceCount() == 1);
+
+  /* The first instance's full track context was saved and is restored on its
+   * next native interpreter tick. */
+  g_spc_opcode_patch_hook(&spc, 0x0da0);
+  CHECK(apu.ram[0x0082] == 0x55);
+  g_spc_opcode_patch_hook(&spc, 0x0e7e);
+  CHECK(NativeAudioExtension_ActiveInstanceCount() == 0);
+
+  /* High-bit events are one request but retain the native paired X=$10/$12
+   * contexts and delayed second-lane countdown. */
+  CHECK(NativeAudioExtension_QueueRequest(
+      true, 0x83, 0x00f68c, 101, 0, 0, 0));
+  g_spc_opcode_patch_hook(&spc, 0x0da0);
+  CHECK(NativeAudioExtension_ActiveInstanceCount() == 2);
+  CHECK(spc.x == 0x10 && apu.ram[0x80] == 2);
+  g_spc_opcode_patch_hook(&spc, 0x0f0b);
+  CHECK(spc.x == 0x12 && apu.ram[0x82] == 3);
+  g_spc_opcode_patch_hook(&spc, 0x0e7e);
+  CHECK(NativeAudioExtension_ActiveInstanceCount() == 1);
+  g_spc_opcode_patch_hook(&spc, 0x0da0);
+  g_spc_opcode_patch_hook(&spc, 0x0e7e);
+  CHECK(NativeAudioExtension_ActiveInstanceCount() == 0);
+
+  CHECK(NativeAudioExtension_QueueRequest(
+      true, 0x07, 0x01902d, 102, 1, 2, 0));
+  CHECK(NativeAudioExtension_QueueRequest(
+      true, 0x07, 0x01902d, 102, 30, 40, 0));
+  CHECK(NativeAudioExtension_QueuedRequestCount() == 1);
+  g_spc_opcode_patch_hook(&spc, 0x0da0);
+  g_spc_opcode_patch_hook(&spc, 0x0e7e);
+
+  for (uint16_t actor = 0; actor < 3; actor++)
+    CHECK(NativeAudioExtension_QueueRequest(
+        false, 0x10, 0x01bb6d, 103, actor, 0, 0));
+  g_spc_opcode_patch_hook(&spc, 0x0da0);
+  CHECK(g_spc_opcode_cycle_hook(&spc, 0x0e7f, 5) == 5);
+  g_spc_opcode_patch_hook(&spc, 0x0f0b);
+  CHECK(g_spc_opcode_cycle_hook(&spc, 0x0e7f, 5) == 0);
+  g_spc_opcode_patch_hook(&spc, 0x0f0b);
+  CHECK(g_spc_opcode_cycle_hook(&spc, 0x0e7f, 5) == 0);
+  g_spc_opcode_patch_hook(&spc, 0x0e7e);
+  g_spc_opcode_patch_hook(&spc, 0x0da0);
+  g_spc_opcode_patch_hook(&spc, 0x0e7e);
+  g_spc_opcode_patch_hook(&spc, 0x0e7e);
+  CHECK(NativeAudioExtension_ActiveInstanceCount() == 0);
+}
+
+static void TestExtensionStateSerialization(void) {
+  Apu apu;
+  Spc spc;
+  Dsp dsp;
+  memset(&apu, 0, sizeof(apu));
+  memset(&spc, 0, sizeof(spc));
+  memset(&dsp, 0, sizeof(dsp));
+  apu.spc = &spc;
+  apu.dsp = &dsp;
+  spc.apu = &apu;
+  SetSequencePointer(&apu, 0x10, 0x2676);
+
+  CHECK(NativeAudioExtension_QueueRequest(
+      false, 0x10, 0x01bb6d, 200, 1, 2, 0));
+  TestSaveLoad state;
+  memset(&state, 0, sizeof(state));
+  state.base.func = TransferTestState;
+  g_apu_extra_saveload_hook(&apu, &state.base);
+  CHECK(state.offset > 0 && state.offset < sizeof(state.bytes));
+
+  g_spc_opcode_patch_hook(&spc, 0x0da0);
+  CHECK(NativeAudioExtension_QueuedRequestCount() == 0);
+  CHECK(NativeAudioExtension_ActiveInstanceCount() == 1);
+
+  state.offset = 0;
+  state.loading = true;
+  g_apu_extra_saveload_hook(&apu, &state.base);
+  CHECK(NativeAudioExtension_QueuedRequestCount() == 1);
+  CHECK(NativeAudioExtension_ActiveInstanceCount() == 0);
+  g_spc_opcode_patch_hook(&spc, 0x0da0);
+  g_spc_opcode_patch_hook(&spc, 0x0e7e);
+}
+
+static void TestPoolBackpressureQueuesInsteadOfReplacing(void) {
+  Apu apu;
+  Spc spc;
+  Dsp dsp;
+  memset(&apu, 0, sizeof(apu));
+  memset(&spc, 0, sizeof(spc));
+  memset(&dsp, 0, sizeof(dsp));
+  apu.spc = &spc;
+  apu.dsp = &dsp;
+  spc.apu = &apu;
+  SetSequencePointer(&apu, 0x10, 0x2676);
+
+  for (uint16_t actor = 0; actor < kDspExtendedVoiceCount + 1; actor++)
+    CHECK(NativeAudioExtension_QueueRequest(
+        false, 0x10, 0x01bb6d, 300, actor, 0, 0));
+  g_spc_opcode_patch_hook(&spc, 0x0da0);
+  CHECK(NativeAudioExtension_ActiveInstanceCount() ==
+        kDspExtendedVoiceCount);
+  CHECK(NativeAudioExtension_QueuedRequestCount() == 1);
+  for (int i = 0; i < kDspExtendedVoiceCount; i++)
+    g_spc_opcode_patch_hook(&spc, 0x0e7e);
+  CHECK(NativeAudioExtension_ActiveInstanceCount() == 0);
+  g_spc_opcode_patch_hook(&spc, 0x0da0);
+  CHECK(NativeAudioExtension_QueuedRequestCount() == 0);
+  CHECK(NativeAudioExtension_ActiveInstanceCount() == 1);
+  g_spc_opcode_patch_hook(&spc, 0x0e7e);
+}
+
 int main(void) {
   TestPureRouting();
   TestInstalledBridge();
+  TestIndependentSequencerInstances();
+  TestExtensionStateSerialization();
+  TestPoolBackpressureQueuesInsteadOfReplacing();
   if (s_failures) {
     fprintf(stderr, "native_audio_extension_test: %d failure(s)\n", s_failures);
     return 1;
