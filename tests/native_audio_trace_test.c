@@ -225,6 +225,60 @@ static void TestMusicSuppressionIsAttributedToLaneOwner(void) {
   assert(suppression.occurrences == 1);
 }
 
+static void TestExtendedTransportLifecycle(void) {
+  NativeAudioTraceModel_Reset();
+  uint64_t serial = NativeAudioTraceModel_PostExtendedRequest(
+      kNativeAudioRequest_Sfx, 0x10, "extended", 0x01bb6d,
+      20, 4, 5, 1);
+  NativeAudioTraceModel_ExtendedDisposition(serial, 0, 0, 0, 2);
+  NativeAudioTraceModel_ExtendedSequenceStart(serial, 1, 8, 3);
+  const NativeAudioRequestRecord *request = Request(serial);
+  assert(request->flags & kNativeAudioFlag_ExtendedTransport);
+  assert(request->active_lanes == 2);
+  assert(request->virtual_voices_started == 1);
+  NativeAudioTraceModel_ExtendedSequenceEnd(serial, 1, 4);
+  assert(Request(serial)->outcome == kNativeAudioOutcome_Completed);
+
+  uint64_t duplicate = NativeAudioTraceModel_PostExtendedRequest(
+      kNativeAudioRequest_Sfx, 0x10, "extended", 0x01bb6d,
+      20, 4, 5, 5);
+  NativeAudioTraceModel_ExtendedDisposition(
+      duplicate, serial, 1, 0, 6);
+  assert(Request(duplicate)->outcome ==
+         kNativeAudioOutcome_CoalescedExtendedDuplicate);
+  assert(Request(duplicate)->replaced_by_serial == serial);
+
+  uint64_t overflow = NativeAudioTraceModel_PostExtendedRequest(
+      kNativeAudioRequest_Event, 0x83, "extended", 0x00f68c,
+      21, 0, 0, 7);
+  NativeAudioTraceModel_ExtendedDisposition(overflow, 0, 0, 1, 8);
+  assert(Request(overflow)->outcome ==
+         kNativeAudioOutcome_ExtendedFifoOverflow);
+}
+
+static void TestExtendedPairAndUploadCancel(void) {
+  NativeAudioTraceModel_Reset();
+  uint64_t pair = NativeAudioTraceModel_PostExtendedRequest(
+      kNativeAudioRequest_Event, 0x83, "extended", 0x00f68c,
+      30, 0, 0, 1);
+  NativeAudioTraceModel_ExtendedSequenceStart(pair, 0, 10, 2);
+  NativeAudioTraceModel_ExtendedSequenceStart(pair, 1, 11, 3);
+  assert(Request(pair)->active_lanes == 3);
+  assert(Request(pair)->virtual_voices_started == 0x0c);
+  NativeAudioTraceModel_ExtendedSequenceEnd(pair, 0, 4);
+  assert(Request(pair)->outcome == kNativeAudioOutcome_Pending);
+  NativeAudioTraceModel_ExtendedSequenceEnd(pair, 1, 5);
+  assert(Request(pair)->outcome == kNativeAudioOutcome_Completed);
+
+  uint64_t canceled = NativeAudioTraceModel_PostExtendedRequest(
+      kNativeAudioRequest_Sfx, 0x18, "extended", 0x01bc21,
+      31, 0, 0, 6);
+  NativeAudioTraceModel_ExtendedSequenceStart(canceled, 1, 12, 7);
+  NativeAudioTraceModel_ExtendedCancel(canceled, 8);
+  assert(Request(canceled)->outcome ==
+         kNativeAudioOutcome_CanceledSongTransition);
+}
+
 int main(void) {
   TestMailboxOverwrite();
   TestMailboxDuplicateCoalescing();
@@ -240,6 +294,8 @@ int main(void) {
   TestSuppressionAndSongEventsAreNotDrops();
   TestActiveEffectCanceledBySongUpload();
   TestMusicSuppressionIsAttributedToLaneOwner();
+  TestExtendedTransportLifecycle();
+  TestExtendedPairAndUploadCancel();
   puts("native audio trace tests passed");
   return 0;
 }

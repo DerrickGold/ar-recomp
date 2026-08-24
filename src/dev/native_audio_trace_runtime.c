@@ -78,6 +78,29 @@ static void OnSpcUpload(uint32_t image_src) {
   RtlApuUnlock();
 }
 
+static void OnExtendedDisposition(
+    uint64_t serial, uint64_t existing_serial,
+    bool coalesced, bool overflow) {
+  NativeAudioTraceModel_ExtendedDisposition(
+      serial, existing_serial, coalesced, overflow,
+      snes_apu_cycle_count());
+}
+
+static void OnExtendedStart(
+    uint64_t serial, uint8_t lane, uint8_t virtual_voice) {
+  NativeAudioTraceModel_ExtendedSequenceStart(
+      serial, lane, virtual_voice, snes_apu_cycle_count());
+}
+
+static void OnExtendedEnd(uint64_t serial, uint8_t lane) {
+  NativeAudioTraceModel_ExtendedSequenceEnd(
+      serial, lane, snes_apu_cycle_count());
+}
+
+static void OnExtendedCancel(uint64_t serial) {
+  NativeAudioTraceModel_ExtendedCancel(serial, snes_apu_cycle_count());
+}
+
 void NativeAudioTrace_Init(void) {
   if (!TraceEnabled()) return;
   NativeAudioTraceModel_Reset();
@@ -87,21 +110,30 @@ void NativeAudioTrace_Init(void) {
   g_apu_spc_port_read_trace_hook = OnSpcPortRead;
   g_apu_spc_dsp_write_trace_hook = OnSpcDspWrite;
   g_spc_opcode_trace_hook = OnSpcOpcode;
+  g_native_audio_extension_trace_disposition_hook = OnExtendedDisposition;
+  g_native_audio_extension_trace_start_hook = OnExtendedStart;
+  g_native_audio_extension_trace_end_hook = OnExtendedEnd;
+  g_native_audio_extension_trace_cancel_hook = OnExtendedCancel;
   fprintf(stderr,
           "[native-audio-trace] enabled — serial request/lane provenance "
           "will be written at shutdown\n");
 }
 
-void NativeAudioTrace_OnCpuRequest(
+uint64_t NativeAudioTrace_OnCpuRequest(
     NativeAudioRequestKind kind, uint8_t id, int emitted,
     const char *caller, uint32_t site, uint32_t game_frame,
     uint16_t cpu_x, uint16_t cpu_y) {
-  if (!TraceEnabled()) return;
+  if (!TraceEnabled()) return 0;
   RtlApuLock();
-  NativeAudioTraceModel_PostRequest(
-      kind, id, emitted, caller, site, game_frame, cpu_x, cpu_y,
-      snes_apu_cycle_count());
+  const uint64_t serial = emitted && NativeAudioExtension_IsEnabled()
+      ? NativeAudioTraceModel_PostExtendedRequest(
+            kind, id, caller, site, game_frame, cpu_x, cpu_y,
+            snes_apu_cycle_count())
+      : NativeAudioTraceModel_PostRequest(
+            kind, id, emitted, caller, site, game_frame, cpu_x, cpu_y,
+            snes_apu_cycle_count());
   RtlApuUnlock();
+  return serial;
 }
 
 static const char *FinalOutcome(const NativeAudioRequestRecord *r) {
@@ -119,20 +151,22 @@ static void WriteRequests(const NativeAudioRequestRecord *records,
   if (!f) return;
   fprintf(f,
           "serial,kind,id,effective_id,frame,site,caller,outcome,flags,"
-          "lanes_started,active_lanes,posted_cycle,port_write_cycle,"
+          "lanes_started,active_lanes,virtual_voices_started,"
+          "posted_cycle,port_write_cycle,"
           "port_apply_cycle,spc_read_cycle,start_cycle,end_cycle,"
           "replaced_by,cpu_x,cpu_y,music_updates_suppressed,"
           "music_suppressed_voice_mask\n");
   for (size_t i = 0; i < count; i++) {
     const NativeAudioRequestRecord *r = &records[i];
     fprintf(f,
-            "%llu,%s,%02x,%02x,%u,%06x,\"%s\",%s,%02x,%02x,%02x,"
+            "%llu,%s,%02x,%02x,%u,%06x,\"%s\",%s,%04x,%02x,%02x,%04x,"
             "%llu,%llu,%llu,%llu,%llu,%llu,%llu,%04x,%04x,%u,%02x\n",
             (unsigned long long)r->serial,
             r->kind == kNativeAudioRequest_Event ? "COP" : "BRK",
             r->id, r->effective_id, r->game_frame, r->site,
             r->caller ? r->caller : "?", FinalOutcome(r), r->flags,
             r->lanes_started, r->active_lanes,
+            r->virtual_voices_started,
             (unsigned long long)r->posted_cycle,
             (unsigned long long)r->port_write_cycle,
             (unsigned long long)r->port_apply_cycle,
@@ -251,6 +285,7 @@ void NativeAudioTrace_Report(void) {
           "completed=%llu mailbox-coalesced=%llu mailbox-drop=%llu "
           "port-coalesced=%llu port-drop=%llu busy-drop=%llu "
           "lane-replaced=%llu song-cancelled=%llu suppressed=%llu "
+          "extended-coalesced=%llu extended-overflow=%llu "
           "pending=%llu dsp-writes=%llu "
           "music-updates-suppressed=%llu unattributed=%llu\n",
           (unsigned long long)stats.requests,
@@ -267,6 +302,10 @@ void NativeAudioTrace_Report(void) {
           (unsigned long long)stats.outcome[
               kNativeAudioOutcome_CanceledSongTransition],
           (unsigned long long)stats.outcome[kNativeAudioOutcome_SuppressedSetting],
+          (unsigned long long)stats.outcome[
+              kNativeAudioOutcome_CoalescedExtendedDuplicate],
+          (unsigned long long)stats.outcome[
+              kNativeAudioOutcome_ExtendedFifoOverflow],
           (unsigned long long)stats.outcome[kNativeAudioOutcome_Pending],
           (unsigned long long)stats.dsp_writes,
           (unsigned long long)stats.music_updates_suppressed,

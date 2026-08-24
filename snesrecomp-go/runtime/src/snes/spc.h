@@ -47,5 +47,8 @@ extern void (*g_spc_opcode_trace_hook)(Spc *spc, uint16_t pc);
  * before opcode fetch, so it may adjust flags/PC while trace provenance keeps
  * the original instruction address. */
 extern void (*g_spc_opcode_patch_hook)(Spc *spc, uint16_t pc);
+/* Optional game-owned timing seam. Returning zero executes the next opcode in
+ * the same APU master cycle; NULL preserves every native opcode cost. */
+extern int (*g_spc_opcode_cycle_hook)(Spc *spc, uint16_t pc, int cycles);
 
 #endif

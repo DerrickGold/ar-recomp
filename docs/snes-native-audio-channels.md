@@ -1,7 +1,8 @@
 # SNES native audio channels and ActRaiser effect ownership
 
-Status: ROM-static channel map complete; runtime sound-name labeling is still
-partial. Investigated 2026-08-23.
+Status: ROM-static channel map and the opt-in 24-voice scheduler are complete;
+runtime sound-name labeling is still partial. Investigated 2026-08-23 and
+implemented 2026-08-24.
 
 This document is authoritative for native channel allocation, effect-lane
 ownership, loss mechanisms, and extended-channel design. `SEAMS.md` owns the
@@ -14,19 +15,23 @@ This note answers two separate questions:
 2. At which stages can a sound request be overwritten, rejected, or steal a
    voice from music?
 
-The short answer is that the game does not have a general eight-voice allocator.
-It has eight song sequencer tracks plus two logical effect tracks which are
-hard-wired over physical voices 6 and 7. Extending the DSP voice array alone
-will therefore not remove the gaps. Extended mode also has to remove the
-driver's voice-6/7 ownership mask and its one-request effect lanes.
+The game does not have a general eight-voice allocator. It has eight song
+sequencer tracks plus two logical effect tracks which are hard-wired over
+physical voices 6 and 7. Extending the DSP voice array alone therefore cannot
+remove the gaps. The implemented extended mode also bypasses the voice-6/7
+ownership conflict, captures requests before the native depth-one mailboxes,
+and gives each accepted request an isolated copy of the original effect-track
+state.
 
 ## Confirmed channel layout
 
 The SNES S-DSP exposes eight voices. Each voice has its own left/right volume,
 pitch, source number, ADSR, and gain registers; the global KON, KOF, PMON, NON,
 and EON registers address them with one bit per voice. The local DSP core models
-the same fixed array as `DspChannel channel[8]` in
-`snesrecomp-go/runtime/src/snes/dsp.h`.
+the authentic eight plus sixteen optional game-owned virtual voices as
+`DspChannel channel[kDspMaximumVoiceCount]` in
+`snesrecomp-go/runtime/src/snes/dsp.h`; authentic mode cycles only the first
+eight.
 
 ActRaiser's uploaded SPC700 program is the ROM block at file `$011ACD`, loaded
 to ARAM `$0400-$0F4C`. Its allocation is:
@@ -129,8 +134,9 @@ lose audio at four different stages:
 4. **Music voice stealing.** Accepted effects claim bits `$40/$80`; the music
    sequencer advances while its voice-6/7 DSP writes are suppressed.
 
-A ten-voice mixer fixes only item 4 unless request transport and logical track
-allocation are extended as well.
+A mixer-only expansion fixes only item 4 unless request transport and logical
+track allocation are extended as well. The ten-voice Phase-1 milestone did
+exactly that; the current 24-voice mode addresses all four stages.
 
 The recomp runtime already schedules APU writes and gives distinct values on a
 port a 128-sample minimum dwell, which prevents a host-thread timing artifact
@@ -369,11 +375,11 @@ the extended-channel design:
   state loads reconstruct them from `$1A`, and subsequent logical-track writes
   immediately refine them.
 
-The mixer foundation itself changes levels only. The optional Phase-1 extension
-below now adds voices 8/9 and removes music stealing, while deliberately leaving
-request queuing and the other three native loss mechanisms for Phase 2. Added
-voices carry the same bus enum, so faders, echo sends, replacement mute, and the
-master stage need no second mixer architecture.
+The mixer foundation itself changes levels only. Added voices carry the same
+bus enum, so faders, echo sends, replacement mute, and the master stage need no
+second mixer architecture. Phase 1 established the routing and music-safety
+bridge with voices 8/9; Phase 2 expands that bridge to a 16-voice effect pool
+and removes the native request/lane bottlenecks.
 
 `AR_AUDIO_BUSLOG=1` logs live gain values and only label transitions (voice,
 Music/SFX, SPC X, `$47`, `$1A`, and DSP register), which makes a replay-sized
@@ -386,11 +392,12 @@ validation readable without dumping every DSP write.
 Authentic mode remains the default eight-voice path. Extended mode is opt-in as
 `audio_extended_channels` / `AR_EXTENDED_AUDIO_CHANNELS`, and changing it is
 restart-required because migrating live envelopes and sequencer ownership
-during a toggle is ambiguous. Quick-state format v5 serializes the two added
-DSP channels and tags the active eight/ten-voice mode in its header, rejecting
-older layouts or a state from the other topology rather than misreading it.
+during a toggle is ambiguous. Quick-state format v6 serializes all sixteen added
+DSP channels, the request FIFO, and every independent sequencer context. Its
+header tags the active eight/24-voice mode and rejects older layouts or a state
+from the other topology rather than misreading it.
 
-### Phase 1: ten-voice “music-safe effects” — implemented
+### Phase 1: ten-voice “music-safe effects” — completed milestone
 
 Add two virtual DSP voices and map by sequencer provenance:
 
@@ -410,16 +417,17 @@ increasing `voice[8]` to `voice[10]`. The bridge needs explicit logical-track
 provenance or an extended ownership representation outside the original SPC
 direct page.
 
-Phase 1 removes music gaps but deliberately preserves one active instance per
-effect lane. A new ordinary SFX can still replace the preceding ordinary SFX,
-and a dual-lane event can still block request processing unless that logic is
-changed too.
+At this milestone, music gaps were removed while the native one-instance
+effect lanes remained. A new ordinary SFX could still replace the preceding
+ordinary SFX, and a dual-lane event could still block request processing. Phase
+2 below supersedes those restrictions in current extended mode.
 
 Implementation details:
 
-- `DspChannel channel[10]` stores two serialized BRR/envelope voices. Authentic
-  mode still cycles and mixes exactly eight; extended mode cycles ten through
-  the same dry, Music/SFX gain, master, and shared FIR/feedback echo paths.
+- The first implementation stored two added serialized BRR/envelope voices.
+  The same design now backs `DspChannel channel[24]`; authentic mode still
+  cycles exactly eight and extended mode cycles all 24 through the same dry,
+  Music/SFX gain, master, and shared FIR/feedback echo paths.
 - `native_audio_extension.c` maps physical `$40/$80` provenance to virtual
   voices 8/9. Per-voice registers never reach physical song voices 6/7. KON,
   KOF, PMON, NON, and EON are split bitwise: the effect bit updates the virtual
@@ -441,42 +449,59 @@ that authentic ownership would have skipped. A focused KON replay at
 `runs/20260824-155009/` applied the expected event sample (SRCN `$02`) on voice
 8 while native voice 6 continued keying song SRCN `$0C`. Unit tests cover both
 virtual lanes, bitwise mask preservation, independent SFX gain/echo, and
-serialization. The replay contained no qualifying voice-9 request, so that
-lane's live natural-game validation remains in the Phase-2 fixture work.
+serialization. The later Phase-2 replay below naturally exercises simultaneous
+voices 8 and 9.
 
-### Phase 2: queued, polyphonic effects
+### Phase 2: queued, polyphonic effects — implemented
 
-For the requested “do not drop or suppress effects” behavior:
+Current extended mode implements the requested “do not drop or suppress
+effects” behavior as follows:
 
 1. Capture BRK/COP requests at the software-interrupt hook with a monotonically
-   increasing serial before they can overwrite `$035A/$035B`.
-2. Preserve ordering in an extended-mode FIFO.
+   increasing serial before they can overwrite `$035A/$035B`; extended-owned
+   requests do not enter the native mailbox/port path.
+2. Preserve ordering in a 128-entry extended-mode FIFO. Exact duplicate posts
+   from the same producer, actor, and frame are coalesced; the dialogue glyph
+   producer has a site-specific same-frame rule because its X/Y changes for
+   every character.
 3. Give each accepted request an independent sequence state and allocate it
-   from a configurable virtual-voice pool (for example 16 or 24 total voices).
+   from the sixteen virtual voices at indices 8-23. A full voice pool applies
+   backpressure and leaves the request queued instead of replacing a lane.
 4. Preserve high-bit event semantics as a paired/two-instance effect, including
-   its small second-lane delay, without globally blocking unrelated requests.
+   its three-tick second-lane delay, without globally blocking unrelated
+   requests; allocation waits until two pool entries are available.
 5. Retain the original sequence interpreter, sample directory, pitch, envelope,
-   pan, noise, pitch-modulation, and echo-routing semantics.
+   pan, re-keying, and noise commands. Each context saves all 29 two-byte
+   per-track fields around the original `$0E7F-$0F0B` interpreter.
 
 Copying only the first KON/SRCN to a host mixer is insufficient: many effects
 re-key or alter parameters later without another CPU request. The robust choices
 are either an extended clone of the SPC sequence-track state or a faithful
-host-side implementation of this driver's effect sequencer.
+host-side implementation of this driver's effect sequencer. This implementation
+uses the former: it time-multiplexes the original SPC700 interpreter and routes
+each context's writes to its allocated virtual DSP voice.
 
-If the virtual pool itself fills, make that a new explicit cap with telemetry.
-Only then should an extended-mode priority policy run. That keeps “authentic
-priority quirks” separate from a genuine user-configured resource limit.
+The scheduler charges emulated SPC time for at most one `$10` and one `$12`
+update per native driver tick. Additional contexts of the same lane execute in
+host time, so adding overlapping sounds cannot slow music timers. A full FIFO
+is the only new drop cap and is reported explicitly as
+`extended_fifo_overflow`; the allocator has no extended-mode priority eviction.
+An SPC image upload deliberately cancels queued/active effects because their
+sequence pointers and samples no longer belong to the installed image.
 
-### DSP integration details that must not be lost
+### DSP integration details and remaining caveat
 
-- Virtual voices must feed the same final stereo and echo buses. EON behavior,
-  FIR state, feedback, and echo RAM timing are global, not per independent
-  post-mix player.
-- PMON depends on the preceding voice. Remapping must define whether the logical
-  predecessor or physical virtual index controls modulation.
-- Noise clock and NON are global/masked DSP state.
-- Save states need every added voice, BRR decoder position, envelope, KON delay,
-  logical sequence cursor, request FIFO, and ownership flag.
+- Virtual voices feed the same final stereo and echo buses. EON behavior, FIR
+  state, feedback, and echo RAM timing remain global rather than becoming a
+  separate post-mix player.
+- NON is captured per context while every voice shares the authentic global
+  noise clock. New contexts initialize PMON and EON clear, matching the observed
+  effect programs; later mask writes are routed to their allocated voice.
+- PMON depends on the preceding physical voice. No captured ActRaiser effect has
+  required PMON, so predecessor behavior remains a content-specific validation
+  item if a future trace finds one.
+- Quick states include every added voice, BRR decoder position, envelope, KON
+  delay, logical sequence cursor, FIFO entry, and scheduler ownership field.
 - Replacement-music muting now uses explicit song/effect provenance, with SRCN
   `$0C+` only as an unclassified startup fallback. Every virtual voice must set
   the same bus label when allocated.
@@ -500,7 +525,9 @@ and observes the following stages without modifying emulated state:
    ownership-caused music-update skips are recorded separately and attributed
    to the active request serial.
 7. Sequence end at `$0E51`.
-8. Port-0 command, uploaded image source, selected song number, and explicit
+8. Extended FIFO disposition plus every virtual-lane start, end, cancellation,
+   and allocated voice index.
+9. Port-0 command, uploaded image source, selected song number, and explicit
    transition owner/caller. This separates full-image swaps, in-bank song
    changes, pause/resume, and restore operations from effect-channel loss.
 
@@ -514,7 +541,7 @@ At clean shutdown it writes these files under `runs/latest/`:
 
 | File | Purpose |
 |---|---|
-| `native_audio_requests.csv` | request serial, caller/site, every transport/lane timestamp, terminal outcome, replacement serial, and music-update suppression attributed to that request |
+| `native_audio_requests.csv` | request serial, caller/site, every native or extended transport/lane timestamp, terminal outcome, replacement/coalescing serial, virtual-voice mask, and music-update suppression attributed to that request |
 | `native_audio_song_events.csv` | port-0 controls, selected song number, image upload identity, frame, and caller; deliberate level-up/restore transitions stay separate from drops |
 | `native_audio_dsp_provenance.csv` | every reached DSP writer aggregated by SPC PC, track/ownership masks, DSP register, and count |
 | `native_audio_music_suppression.csv` | the three `$1A & $47` music-update skip sites aggregated by song track mask and ownership mask |
@@ -552,23 +579,40 @@ automatically enqueue every identical per-glyph post as a simultaneous voice.
 It needs either native duplicate coalescing by default or an explicit producer-
 aware policy, while still preserving genuinely independent overlapping effects.
 
+### Extended-mode paced replay result
+
+`runs/20260824-164306/` replayed 700 frames of the same recording with
+`AR_EXTENDED_AUDIO_CHANNELS=1`, dummy audio, and normal pacing. Its 214 posts
+classified as:
+
+| Outcome | Count | Interpretation |
+|---|---:|---|
+| completed | 10 | independent extended sequence instances reached their terminal return |
+| coalesced extended duplicate | 204 | same-frame dialogue glyph posts deliberately folded into their producer's existing request |
+| FIFO overflow / native mailbox or port loss / busy reject / lane replacement | 0 | no resource or native transport loss |
+
+Serials 1 and 48 were posted at frames 303 and 319 but both began at APU cycle
+4,643,118 on virtual voices 8 and 9. They then completed independently. A second
+natural overlap at frame 492 likewise used voices 8 and 9. The suppression CSV
+contained only its header: no song update was blocked, and every completed row
+reported zero suppressed music updates. This capture validates that deliberate
+same-producer coalescing remains distinct from genuinely overlapping requests.
+
 ## Verification matrix
 
-- **Authentic-off parity:** same replay produces identical DSP register stream
-  and PCM hash with extended mode disabled.
-- **Music collision:** force active song notes on voices 6/7 while posting one
-  low event, one ordinary SFX, and each high-bit event. Extended mode must retain
-  all song-track writes.
-- **Mailbox burst:** post multiple BRKs and COPs inside one NMI interval. The
-  request serials must all reach independent extended sequence instances.
-- **Long/re-keying effects:** prove later sequence KONs remain attached to the
-  original logical request.
-- **Pool stress:** exceed the configured extended pool and report only the new,
-  intentional cap policy.
-- **Echo/pan parity:** compare isolated authentic effects with their extended
-  equivalents before testing overlap.
-- **Save/load:** save during a dual-lane event and several ordinary effects,
-  then require sample-identical continuation after load.
+- **Implemented and unit-tested:** music-update preservation on all three
+  ownership branches; mailbox bypass/FIFO ordering; independent full sequencer
+  contexts and later-tick restoration; paired high-bit delays; 16-active-plus-
+  one-queued pool backpressure; per-lane emulated-cycle charging; DSP and
+  scheduler-state serialization.
+- **Implemented and live-tested:** simultaneous virtual voices 8/9, producer-
+  aware duplicate coalescing, zero native transport/lane outcomes, and zero
+  music suppression in the paced simulation replay above.
+- **Still required before calling audio parity complete:** authentic-off PCM
+  hash regression; isolated authentic-versus-extended PCM/pan/echo comparison;
+  sample-exact continuation after loading a quick state in the middle of a
+  natural multi-effect overlap; and a trace sweep broad enough to confirm no
+  shipped effect sequence enables PMON.
 
 ## Evidence and confidence
 
@@ -587,12 +631,12 @@ Still incomplete:
 
 - player-facing names for every sequence ID;
 - complete data-selected/dynamically computed BRK caller coverage;
-- exact natural-game frequency of each of the four loss mechanisms.
+- exact natural-game frequency of each of the four authentic-mode loss
+  mechanisms across a full playthrough;
+- broader content coverage for isolated output parity and the PMON caveat above.
 
-Fresh replay attempts during this investigation did not reproduce the previous
-BRK census because the available recordings are coupled to different save/run
-state. They are not counted as validation. The static driver map is cross-checked
-against the earlier live capture documented in `research-symbol-map.md`.
+The static driver map is cross-checked against the live captures here and the
+earlier capture documented in `research-symbol-map.md`.
 
 External register references: Nintendo's *SNES Development Manual*, Book I,
 section 7.1 (DSP register map), and the ares SFC DSP implementation, which also

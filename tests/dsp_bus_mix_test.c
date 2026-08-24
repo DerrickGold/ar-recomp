@@ -134,7 +134,7 @@ static void TestEchoSendFollowsBus(void) {
 static void TestExtendedVoiceIsMixedAndIndependentlyControlled(void) {
   uint8_t live_ram[0x10000], muted_ram[0x10000];
   dsp_setExtendedVoicesEnabled(true);
-  CHECK(dsp_activeVoiceCount() == 10);
+  CHECK(dsp_activeVoiceCount() == kDspMaximumVoiceCount);
   Dsp *live = NewDsp(live_ram);
   Dsp *muted = NewDsp(muted_ram);
   ConfigureVoice(live, 8, kDspVoiceBus_Sfx, true);

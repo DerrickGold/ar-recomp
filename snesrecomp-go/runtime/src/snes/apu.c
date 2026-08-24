@@ -103,7 +103,11 @@ void apu_saveload(Apu *apu, SaveLoadInfo *sli) {
   sli->func(sli, apu->ram, offsetof(Apu, pad) + 6 - offsetof(Apu, ram));
   dsp_saveload(apu->dsp, sli);
   spc_saveload(apu->spc, sli);
+  if (g_apu_extra_saveload_hook)
+    g_apu_extra_saveload_hook(apu, sli);
 }
+
+void (*g_apu_extra_saveload_hook)(Apu *, SaveLoadInfo *) = NULL;
 
 extern uint64_t g_spc_pc_histogram[0x10000];
 extern int g_spc_pc_max_seen;
@@ -113,11 +117,18 @@ uint64_t snes_apu_cycle_count(void) { return s_apu_cycle_count; }
 void apu_cycle(Apu* apu) {
   s_apu_cycle_count++;
   if(apu->cpuCyclesLeft == 0) {
-    /* Sample PC right BEFORE running the opcode — so PC reflects the
-     * instruction we're about to execute, not the post-opcode PC. */
-    g_spc_pc_histogram[apu->spc->pc]++;
-    if (apu->spc->pc > g_spc_pc_max_seen) g_spc_pc_max_seen = apu->spc->pc;
-    apu->cpuCyclesLeft = spc_runOpcode(apu->spc);
+    int zero_cycle_guard = 0;
+    do {
+      /* Sample PC right BEFORE running the opcode — so PC reflects the
+       * instruction we're about to execute, not the post-opcode PC. */
+      g_spc_pc_histogram[apu->spc->pc]++;
+      if (apu->spc->pc > g_spc_pc_max_seen)
+        g_spc_pc_max_seen = apu->spc->pc;
+      apu->cpuCyclesLeft = spc_runOpcode(apu->spc);
+    } while (apu->cpuCyclesLeft == 0 && !apu->spc->stopped &&
+             ++zero_cycle_guard < 65536);
+    if (apu->cpuCyclesLeft == 0)
+      apu->cpuCyclesLeft = 1;
   }
   apu->cpuCyclesLeft--;
 

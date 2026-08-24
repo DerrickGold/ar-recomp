@@ -25,7 +25,9 @@ typedef enum DspVoiceBus {
 
 enum {
   kDspHardwareVoiceCount = 8,
-  kDspExtendedVoiceCount = 2,
+  /* Sixteen virtual lanes leave enough room for independent effect requests
+   * while keeping the fixed-size DSP state small and deterministic. */
+  kDspExtendedVoiceCount = 16,
   kDspMaximumVoiceCount =
       kDspHardwareVoiceCount + kDspExtendedVoiceCount,
 };
@@ -84,7 +86,7 @@ struct Dsp {
   uint8_t voiceBus[kDspMaximumVoiceCount];
   // mirror ram
   uint8_t ram[0x80];
-  // Eight hardware channels plus two optional game-owned virtual channels.
+  // Eight hardware channels plus optional game-owned virtual channels.
   // Authentic mode cycles only the first eight. The extra state is serialized
   // with the rest of the DSP so an extended-mode save resumes sample-exactly.
   DspChannel channel[kDspMaximumVoiceCount];
