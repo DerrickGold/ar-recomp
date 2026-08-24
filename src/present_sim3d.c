@@ -20,7 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "crt_post.h"
+#include "presentation_geometry.h"
 #include "render_capabilities.h"
 #include "sim/sim_background_voxels.h"
 #include "sim/sim3d.h"
@@ -465,9 +465,10 @@ typedef struct SimVoxelBillboardLayerContext {
   bool virtual_height;
   bool rim_light;
   const Scene3DCamera *camera;
+  PresentationOutcome outcome;
 } SimVoxelBillboardLayerContext;
 
-static void DrawSimRimLight(
+static PresentationOutcome DrawSimRimLight(
     const FrameSlot *slot, int priority, bool virtual_height,
     SDL_Rect source, SDL_Rect viewport, const Scene3DCamera *camera,
     const float matrix[16], SimObjectTerrainFilter terrain_filter);
@@ -502,9 +503,12 @@ static void DrawSimVoxelBillboardLayer(
   /* Immediately after its own sprites, so the rim is covered by whatever
    * covers them. Overhead art keeps the whole-band rim it has always had. */
   if (context->rim_light && !overhead)
-    DrawSimRimLight(context->slot, context->priority, context->virtual_height,
-                    params->source, params->viewport, context->camera,
-                    params->matrix, terrain);
+    context->outcome = PresentationOutcome_Combine(
+        context->outcome,
+        DrawSimRimLight(
+            context->slot, context->priority, context->virtual_height,
+            params->source, params->viewport, context->camera,
+            params->matrix, terrain));
   Sim3DPerformance_End(performance);
 }
 
@@ -565,6 +569,33 @@ static void DrawSimSelectionOverlays(
  * band, so it can never light the ground, the HUD, or a later band's sprite. */
 static SDL_Texture *s_sim_rim_texture;
 static int s_sim_rim_w, s_sim_rim_h;
+static bool s_sim_rim_unavailable;
+/* Reads true until a set actually fails. Settings sees this only through the
+ * atomic, read-only capability accessor below. */
+SDL_AtomicInt s_sim_rim_mask_supported = { .value = 1 };
+
+static bool RestoreTextureBlendAndAlpha(
+    SDL_Texture *texture, SDL_BlendMode blend, Uint8 alpha) {
+  bool restored = SDL_SetTextureAlphaMod(texture, alpha);
+  restored = SDL_SetTextureBlendMode(texture, blend) && restored;
+  return restored;
+}
+
+static bool RestoreSimAtlasState(
+    SDL_BlendMode blend, Uint8 r, Uint8 g, Uint8 b, Uint8 alpha) {
+  bool restored = SDL_SetTextureColorMod(g_sim_obj_atlas_texture, r, g, b);
+  restored = SDL_SetTextureAlphaMod(g_sim_obj_atlas_texture, alpha) && restored;
+  restored = SDL_SetTextureBlendMode(g_sim_obj_atlas_texture, blend) && restored;
+  return restored;
+}
+
+static void DisableSimRimTexture(void) {
+  SDL_DestroyTexture(s_sim_rim_texture);
+  s_sim_rim_texture = NULL;
+  s_sim_rim_w = s_sim_rim_h = 0;
+  s_sim_rim_unavailable = true;
+  SDL_SetAtomicInt(&s_sim_rim_mask_supported, 0);
+}
 
 static const SDL_Color kSimRimColor = { 255, 244, 214, 255 };
 
@@ -572,10 +603,18 @@ static SDL_Texture *EnsureSimRimTexture(int w, int h) {
   if (!g_renderer || w <= 0 || h <= 0) return NULL;
   if (s_sim_rim_texture && s_sim_rim_w == w && s_sim_rim_h == h)
     return s_sim_rim_texture;
+  if (s_sim_rim_unavailable) return NULL;
   if (s_sim_rim_texture) SDL_DestroyTexture(s_sim_rim_texture);
   s_sim_rim_texture = CreateSimShadowTarget(w, h);
   s_sim_rim_w = w;
   s_sim_rim_h = h;
+  if (!s_sim_rim_texture) {
+    s_sim_rim_unavailable = true;
+    fprintf(stderr,
+            "[sim3d-rim] rim target unavailable; optional rim light disabled "
+            "for this renderer: %s\n",
+            SDL_GetError());
+  }
   return s_sim_rim_texture;
 }
 
@@ -592,10 +631,6 @@ static SDL_Texture *EnsureSimRimTexture(int w, int h) {
  * happens the mode is "composed but unproven", which is why this returns
  * SDL_BLENDMODE_INVALID once a set has actually failed rather than optimistically
  * forever. */
-/* Reads true until a set actually fails. Settings sees this only through the
- * atomic, read-only capability accessor below. */
-SDL_AtomicInt s_sim_rim_mask_supported = { .value = 1 };
-
 static SDL_BlendMode SimRimMaskBlend(void) {
   if (!Present_SimRimMaskSupported()) return SDL_BLENDMODE_INVALID;
   static SDL_BlendMode mode = SDL_BLENDMODE_INVALID;
@@ -645,12 +680,14 @@ static void SimRimOffset(const FrameSlot *slot, float distance,
  * composite has just hidden -- sprite silhouettes glowing through a mountain.
  * Each band builds and composites only its own actors, at its own point in the
  * painter order. */
-static void DrawSimRimLight(
+static PresentationOutcome DrawSimRimLight(
     const FrameSlot *slot, int priority, bool virtual_height,
     SDL_Rect source, SDL_Rect viewport, const Scene3DCamera *camera,
     const float matrix[16], SimObjectTerrainFilter terrain_filter) {
-  if (!slot->sim.rim_strength_pct) return;
-  if (!g_sim_obj_atlas_texture || !slot->sim.atlas_valid) return;
+  if (!slot->sim.rim_strength_pct)
+    return kPresentationOutcome_Complete;
+  if (!g_sim_obj_atlas_texture || !slot->sim.atlas_valid)
+    return kPresentationOutcome_Complete;
   bool any_rim = false;
   for (size_t i = 0; i < slot->sim.object_count; i++) {
     const SimRenderObject *object = &slot->sim.objects[i];
@@ -668,16 +705,31 @@ static void DrawSimRimLight(
    * commonly uses only one or two. An empty band used to clear and composite a
    * full-output target anyway; three of four bands were empty on every frame
    * in the representative replay. */
-  if (!any_rim) return;
+  if (!any_rim) return kPresentationOutcome_Complete;
   SDL_Texture *rim = EnsureSimRimTexture(viewport.w, viewport.h);
   SDL_BlendMode mask_blend = SimRimMaskBlend();
-  if (!rim || mask_blend == SDL_BLENDMODE_INVALID) return;
+  if (!rim || mask_blend == SDL_BLENDMODE_INVALID)
+    return kPresentationOutcome_OptionalOmitted;
+
+  SDL_BlendMode saved_atlas_blend = SDL_BLENDMODE_INVALID;
+  Uint8 saved_atlas_r = 255, saved_atlas_g = 255, saved_atlas_b = 255;
+  Uint8 saved_atlas_alpha = 255;
+  if (!SDL_GetTextureBlendMode(g_sim_obj_atlas_texture, &saved_atlas_blend) ||
+      !SDL_GetTextureColorMod(
+          g_sim_obj_atlas_texture, &saved_atlas_r, &saved_atlas_g,
+          &saved_atlas_b) ||
+      !SDL_GetTextureAlphaMod(g_sim_obj_atlas_texture, &saved_atlas_alpha))
+    return kPresentationOutcome_OptionalOmitted;
   /*
    * Probe the custom mask blend before drawing the fill. If the renderer
    * rejects it, compositing after the mask pass would otherwise expose the
    * unmasked fill for one priority band.
    */
-  if (!SimApplyAtlasBlendMode(mask_blend)) return;
+  if (!SimApplyAtlasBlendMode(mask_blend)) {
+    if (!SDL_SetTextureBlendMode(g_sim_obj_atlas_texture, saved_atlas_blend))
+      return kPresentationOutcome_CoreFailure;
+    return kPresentationOutcome_OptionalOmitted;
+  }
 
   /* Band width scales with the output so the rim does not thin out to nothing
    * as the window grows. */
@@ -692,41 +744,72 @@ static void DrawSimRimLight(
   SimRimOffset(slot, distance, &fill.offset_x, &fill.offset_y);
   SimBillboardPass mask = { kSimBillboardPass_Mask, 0.0f, 0.0f, mask_blend };
 
-  SDL_Rect saved_clip;
-  bool clipped = SDL_RenderClipEnabled(g_renderer);
-  if (clipped) SDL_GetRenderClipRect(g_renderer, &saved_clip);
+  PresentationTargetState target_state;
+  const PresentationTargetBeginResult begin =
+      PresentationGeometry_BeginTarget(g_renderer, rim, &target_state);
+  if (begin != kPresentationTargetBegin_Ready) {
+    const bool atlas_restored =
+        SDL_SetTextureBlendMode(g_sim_obj_atlas_texture, saved_atlas_blend);
+    if (begin == kPresentationTargetBegin_StateLost || !atlas_restored)
+      return kPresentationOutcome_CoreFailure;
+    return kPresentationOutcome_OptionalOmitted;
+  }
 
-  SDL_SetRenderTarget(g_renderer, rim);
-  SDL_SetRenderClipRect(g_renderer, NULL);
-  SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE);
-  SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 0);
-  SDL_RenderClear(g_renderer);
-
-  SDL_SetTextureColorMod(g_sim_obj_atlas_texture, kSimRimColor.r,
-                         kSimRimColor.g, kSimRimColor.b);
-  SDL_Rect local_viewport = { 0, 0, viewport.w, viewport.h };
-  DrawSimObjectPriorityTerrain(slot, priority, kSimTierFilter_World,
-                               terrain_filter, true, virtual_height, source,
-                               local_viewport, camera, matrix, &fill);
-  DrawSimObjectPriorityTerrain(slot, priority, kSimTierFilter_World,
-                               terrain_filter, true, virtual_height, source,
-                               local_viewport, camera, matrix, &mask);
+  bool rim_valid = SDL_SetRenderDrawBlendMode(
+                       g_renderer, SDL_BLENDMODE_NONE) &&
+      SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 0) &&
+      SDL_RenderClear(g_renderer) &&
+      SDL_SetTextureColorMod(g_sim_obj_atlas_texture, kSimRimColor.r,
+                             kSimRimColor.g, kSimRimColor.b);
+  if (rim_valid) {
+    SDL_Rect local_viewport = { 0, 0, viewport.w, viewport.h };
+    DrawSimObjectPriorityTerrain(slot, priority, kSimTierFilter_World,
+                                 terrain_filter, true, virtual_height, source,
+                                 local_viewport, camera, matrix, &fill);
+    DrawSimObjectPriorityTerrain(slot, priority, kSimTierFilter_World,
+                                 terrain_filter, true, virtual_height, source,
+                                 local_viewport, camera, matrix, &mask);
+  }
   /* Restore the shared atlas state this function borrowed. The blend mode is
    * left at the ordinary draw mode rather than whatever the mask pass used. */
-  SDL_SetTextureColorMod(g_sim_obj_atlas_texture, 255, 255, 255);
-  SDL_SetTextureBlendMode(g_sim_obj_atlas_texture, SDL_BLENDMODE_BLEND);
+  const bool atlas_restored = RestoreSimAtlasState(
+      saved_atlas_blend, saved_atlas_r, saved_atlas_g, saved_atlas_b,
+      saved_atlas_alpha);
+  const bool target_restored =
+      PresentationGeometry_EndTarget(g_renderer, &target_state);
+  if (!atlas_restored || !target_restored)
+    return kPresentationOutcome_CoreFailure;
+  if (!rim_valid) return kPresentationOutcome_OptionalOmitted;
 
-  SDL_SetRenderTarget(g_renderer, CrtPost_BaseTarget());
-  if (clipped) SDL_SetRenderClipRect(g_renderer, &saved_clip);
-
-  SDL_SetTextureBlendMode(rim, SDL_BLENDMODE_ADD);
-  SDL_SetTextureAlphaMod(
-      rim, (Uint8)(slot->sim.rim_strength_pct * 255 / kPercentScale));
+  SDL_BlendMode saved_rim_blend = SDL_BLENDMODE_INVALID;
+  Uint8 saved_rim_alpha = 255;
+  if (!SDL_GetTextureBlendMode(rim, &saved_rim_blend) ||
+      !SDL_GetTextureAlphaMod(rim, &saved_rim_alpha))
+    return kPresentationOutcome_OptionalOmitted;
+  const bool rim_configured =
+      SDL_SetTextureBlendMode(rim, SDL_BLENDMODE_ADD) &&
+      SDL_SetTextureAlphaMod(
+          rim, (Uint8)(slot->sim.rim_strength_pct * 255 / kPercentScale));
+  if (!rim_configured) {
+    const bool restored = RestoreTextureBlendAndAlpha(
+        rim, saved_rim_blend, saved_rim_alpha);
+    if (!restored) DisableSimRimTexture();
+    return kPresentationOutcome_OptionalOmitted;
+  }
   SDL_FRect destination = ToFRect(viewport);
-  if (SDL_RenderTexture(g_renderer, rim, NULL, &destination))
+  const bool composited =
+      SDL_RenderTexture(g_renderer, rim, NULL, &destination);
+  if (composited)
     Sim3DPerformance_AddDraw(0, 0);
-  SDL_SetTextureAlphaMod(rim, 255);
-  SDL_SetTextureBlendMode(rim, SDL_BLENDMODE_BLEND);
+  const bool rim_state_restored = RestoreTextureBlendAndAlpha(
+      rim, saved_rim_blend, saved_rim_alpha);
+  if (!rim_state_restored) {
+    DisableSimRimTexture();
+    return kPresentationOutcome_OptionalOmitted;
+  }
+  return composited
+      ? kPresentationOutcome_Complete
+      : kPresentationOutcome_OptionalOmitted;
 }
 
 /* World-map underlay (ground extension).
@@ -777,15 +860,45 @@ static SDL_Texture *s_sim_underlay_texture;
  * in for a blur. The far field is out of focus rather than merely dim: a
  * distant thing that is sharp reads as a small thing nearby, which is exactly
  * the wrong statement about ground the camera can never reach. */
-SDL_Texture *s_sim_underlay_blur_texture;
+static SDL_Texture *s_sim_underlay_blur_texture;
 static uint32_t s_sim_underlay_serial;
+static uint32_t s_sim_underlay_blur_serial;
 static bool s_sim_underlay_alloc_failed;
+static bool s_sim_underlay_blur_unavailable;
 static SDL_Texture *s_sim_canvas_texture;
-static bool s_sim_canvas_alloc_failed;
-/* Dirty rectangles are consumed as they are uploaded. If the driver rejects
- * one, republish the complete CPU canvas on the next presentation so a
- * transient backend/device failure cannot leave an indefinitely stale hole. */
-static bool s_sim_canvas_force_full_upload;
+static uint32_t s_sim_canvas_uploaded_serial;
+typedef enum SimCanvasUploadState {
+  kSimCanvasUpload_Uninitialized,
+  kSimCanvasUpload_Valid,
+  /* One bounded full-image retry after a failed initial or dirty upload. */
+  kSimCanvasUpload_RetryFull,
+  kSimCanvasUpload_Unavailable,
+} SimCanvasUploadState;
+static SimCanvasUploadState s_sim_canvas_upload_state;
+
+static void DisableSimUnderlayBlur(void) {
+  SDL_DestroyTexture(s_sim_underlay_blur_texture);
+  s_sim_underlay_blur_texture = NULL;
+  s_sim_underlay_blur_serial = 0;
+  s_sim_underlay_blur_unavailable = true;
+}
+
+static void RefreshSimUnderlayBlur(uint32_t serial) {
+  if (!s_sim_underlay_blur_texture || !serial) return;
+  void *pixels = NULL;
+  int pitch = 0;
+  const bool locked = SDL_LockTexture(
+      s_sim_underlay_blur_texture, NULL, &pixels, &pitch);
+  const bool refreshed = locked && pitch > 0 &&
+      SimWorldMap_Downsample(
+          (uint32_t *)pixels, pitch / (int)sizeof(uint32_t),
+          kSimUnderlayBlurDivisor);
+  if (locked) SDL_UnlockTexture(s_sim_underlay_blur_texture);
+  if (refreshed)
+    s_sim_underlay_blur_serial = serial;
+  else
+    DisableSimUnderlayBlur();
+}
 
 typedef enum SimGroundMeshCacheKind {
   kSimGroundMeshCache_UnderlayBlur,
@@ -878,21 +991,34 @@ static void SimGroundMeshCacheSetKey(
  * buffer, and only over the region written since the last upload — a still
  * camera in a quiet town uploads nothing at all. */
 void UploadSimTownCanvas(void) {
-  if (s_sim_canvas_alloc_failed || !SimTownCanvas_Serial()) return;
+  const uint32_t serial = SimTownCanvas_Serial();
+  if (!serial ||
+      s_sim_canvas_upload_state == kSimCanvasUpload_Unavailable)
+    return;
   if (!s_sim_canvas_texture) {
     s_sim_canvas_texture = SDL_CreateTexture(
         g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
         kSimTownCanvasPixels, kSimTownCanvasPixels);
     if (!s_sim_canvas_texture) {
-      s_sim_canvas_alloc_failed = true;
+      s_sim_canvas_upload_state = kSimCanvasUpload_Unavailable;
       fprintf(stderr, "[sim3d-canvas] town canvas texture unavailable: %s\n",
               SDL_GetError());
       return;
     }
-    SDL_SetTextureBlendMode(s_sim_canvas_texture, SDL_BLENDMODE_BLEND);
     /* Matches the ground mesh's own sampling: this is the same captured
      * pixels, just held in town space instead of screen space. */
-    SDL_SetTextureScaleMode(s_sim_canvas_texture, SDL_SCALEMODE_LINEAR);
+    if (!SDL_SetTextureBlendMode(
+            s_sim_canvas_texture, SDL_BLENDMODE_BLEND) ||
+        !SDL_SetTextureScaleMode(
+            s_sim_canvas_texture, SDL_SCALEMODE_LINEAR)) {
+      fprintf(stderr,
+              "[sim3d-canvas] town canvas texture setup failed: %s\n",
+              SDL_GetError());
+      SDL_DestroyTexture(s_sim_canvas_texture);
+      s_sim_canvas_texture = NULL;
+      s_sim_canvas_upload_state = kSimCanvasUpload_Unavailable;
+      return;
+    }
     /* A new streaming texture holds uninitialized memory, and from here on
      * only dirty sub-rectangles are uploaded — so anything the camera never
      * covers would keep whatever garbage the driver allocated (it showed as
@@ -906,16 +1032,26 @@ void UploadSimTownCanvas(void) {
           sizeof(uint32_t));
       int x, y, w, h;
       while (SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h)) {}
-      s_sim_canvas_force_full_upload = false;
+      s_sim_canvas_uploaded_serial = serial;
+      s_sim_canvas_upload_state = kSimCanvasUpload_Valid;
     } else {
-      s_sim_canvas_force_full_upload = true;
+      s_sim_canvas_uploaded_serial = 0;
+      s_sim_canvas_upload_state = kSimCanvasUpload_RetryFull;
     }
     return;
   }
-  if (s_sim_canvas_force_full_upload) {
+  if (s_sim_canvas_upload_state == kSimCanvasUpload_RetryFull) {
     if (!SDL_UpdateTexture(s_sim_canvas_texture, NULL,
                            SimTownCanvas_Pixels(),
                            kSimTownCanvasPixels * (int)sizeof(uint32_t))) {
+      fprintf(stderr,
+              "[sim3d-canvas] full canvas retry failed; disabling the "
+              "optional town extension for this renderer: %s\n",
+              SDL_GetError());
+      SDL_DestroyTexture(s_sim_canvas_texture);
+      s_sim_canvas_texture = NULL;
+      s_sim_canvas_uploaded_serial = 0;
+      s_sim_canvas_upload_state = kSimCanvasUpload_Unavailable;
       return;
     }
     Sim3DPerformance_AddUpload(
@@ -923,7 +1059,8 @@ void UploadSimTownCanvas(void) {
         sizeof(uint32_t));
     int x, y, w, h;
     while (SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h)) {}
-    s_sim_canvas_force_full_upload = false;
+    s_sim_canvas_uploaded_serial = serial;
+    s_sim_canvas_upload_state = kSimCanvasUpload_Valid;
     return;
   }
   int x = 0, y = 0, w = 0, h = 0;
@@ -933,20 +1070,28 @@ void UploadSimTownCanvas(void) {
             s_sim_canvas_texture, &(SDL_Rect){ x, y, w, h },
             pixels + (size_t)y * kSimTownCanvasPixels + (size_t)x,
             kSimTownCanvasPixels * (int)sizeof(uint32_t))) {
-      s_sim_canvas_force_full_upload = true;
+      /* Some earlier dirty rectangles may already have landed. Suppress the
+       * mixed-generation texture until one complete upload succeeds. */
+      s_sim_canvas_uploaded_serial = 0;
+      s_sim_canvas_upload_state = kSimCanvasUpload_RetryFull;
       break;
     }
     Sim3DPerformance_AddUpload(
-        (uint64_t)w * (uint64_t)h * sizeof(uint32_t));
+      (uint64_t)w * (uint64_t)h * sizeof(uint32_t));
   }
+  if (s_sim_canvas_upload_state == kSimCanvasUpload_Valid)
+    s_sim_canvas_uploaded_serial = serial;
 }
 
 /* Rebuilt only when the baked image would differ, which the serial reports.
  * The image is town-independent — only where it is sampled changes when the
  * player moves between towns — so a town change costs nothing here. */
 SDL_Texture *EnsureSimUnderlayTexture(const FrameSlot *slot) {
-  if (s_sim_underlay_texture &&
-      s_sim_underlay_serial == slot->sim.underlay_serial)
+  const bool sharp_current = s_sim_underlay_texture &&
+      s_sim_underlay_serial == slot->sim.underlay_serial;
+  const bool blur_current = !s_sim_underlay_blur_texture ||
+      s_sim_underlay_blur_serial == slot->sim.underlay_serial;
+  if (sharp_current && blur_current)
     return s_sim_underlay_texture;
   if (s_sim_underlay_alloc_failed) return NULL;
 
@@ -960,26 +1105,44 @@ SDL_Texture *EnsureSimUnderlayTexture(const FrameSlot *slot) {
               SDL_GetError());
       return NULL;
     }
-    SDL_SetTextureBlendMode(s_sim_underlay_texture, SDL_BLENDMODE_BLEND);
     /* Nearest keeps the world map's own 8x8 tile grid crisp under the 2x
      * upscale, which reads as a deliberate lower-detail layer rather than a
      * blurred copy of the town. */
-    SDL_SetTextureScaleMode(s_sim_underlay_texture, SDL_SCALEMODE_NEAREST);
+    if (!SDL_SetTextureBlendMode(
+            s_sim_underlay_texture, SDL_BLENDMODE_BLEND) ||
+        !SDL_SetTextureScaleMode(
+            s_sim_underlay_texture, SDL_SCALEMODE_NEAREST)) {
+      fprintf(stderr, "[sim3d-underlay] world map texture setup failed: %s\n",
+              SDL_GetError());
+      SDL_DestroyTexture(s_sim_underlay_texture);
+      s_sim_underlay_texture = NULL;
+      s_sim_underlay_alloc_failed = true;
+      return NULL;
+    }
   }
 
-  if (!s_sim_underlay_blur_texture) {
+  if (!s_sim_underlay_blur_texture && !s_sim_underlay_blur_unavailable) {
     s_sim_underlay_blur_texture = SDL_CreateTexture(
         g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
         kSimUnderlayBlurPixels, kSimUnderlayBlurPixels);
-    if (s_sim_underlay_blur_texture) {
-      SDL_SetTextureBlendMode(s_sim_underlay_blur_texture,
-                              SDL_BLENDMODE_BLEND);
+    if (s_sim_underlay_blur_texture &&
+        SDL_SetTextureBlendMode(
+            s_sim_underlay_blur_texture, SDL_BLENDMODE_BLEND) &&
+        SDL_SetTextureScaleMode(
+            s_sim_underlay_blur_texture, SDL_SCALEMODE_LINEAR)) {
       /* Linear is the whole trick: the box-downsampled image scaled back up
        * with bilinear filtering is a cheap, stable blur, and it costs one
        * texture rather than a multi-tap pass over the full 1024 square. */
-      SDL_SetTextureScaleMode(s_sim_underlay_blur_texture,
-                              SDL_SCALEMODE_LINEAR);
+    } else {
+      DisableSimUnderlayBlur();
     }
+  }
+
+  if (sharp_current) {
+    /* Only the optional blur is stale. Refresh it from the persistent CPU
+     * image without rebaking or relocking the already-current sharp texture. */
+    RefreshSimUnderlayBlur(slot->sim.underlay_serial);
+    return s_sim_underlay_texture;
   }
 
   void *pixels = NULL;
@@ -1008,22 +1171,15 @@ SDL_Texture *EnsureSimUnderlayTexture(const FrameSlot *slot) {
    * and is what this lock was a copy OF. */
   SDL_UnlockTexture(s_sim_underlay_texture);
   if (!baked) return NULL;
-  if (s_sim_underlay_blur_texture) {
-    void *blur_pixels = NULL;
-    int blur_pitch = 0;
-    if (SDL_LockTexture(s_sim_underlay_blur_texture, NULL, &blur_pixels,
-                        &blur_pitch)) {
-      if (!SimWorldMap_Downsample((uint32_t *)blur_pixels,
-                                  blur_pitch / (int)sizeof(uint32_t),
-                                  kSimUnderlayBlurDivisor)) {
-        /* Leave the mip as-is rather than presenting a half-written lock. */
-        fprintf(stderr, "[sim3d-underlay] world map downsample failed\n");
-      }
-      SDL_UnlockTexture(s_sim_underlay_blur_texture);
-    }
-  }
+  RefreshSimUnderlayBlur(slot->sim.underlay_serial);
   s_sim_underlay_serial = slot->sim.underlay_serial;
   return s_sim_underlay_texture;
+}
+
+SDL_Texture *SimUnderlayBlurTexture(uint32_t serial) {
+  return serial && s_sim_underlay_blur_serial == serial
+      ? s_sim_underlay_blur_texture
+      : NULL;
 }
 
 /* Draws one texture as an extension of the ground plane. `texture_x_at_zero`
@@ -1544,11 +1700,12 @@ static void DrawSimWorldUnderlay(const FrameSlot *slot, SDL_Rect source,
    * to and the far field would go transparent instead of dark. */
   SimCullFade blurred_dim = focus;
   blurred_dim.fade = 0.0f;
-  bool defocus = s_sim_underlay_blur_texture &&
+  SDL_Texture *blur = SimUnderlayBlurTexture(slot->sim.underlay_serial);
+  bool defocus = blur &&
       slot->sim.underlay_defocus_pct != 0 &&
       (slot->sim.effective_features & kSimFeature_CullHaze) != 0;
   if (defocus) {
-    DrawSimGroundExtension(s_sim_underlay_blur_texture, texture_x_at_zero,
+    DrawSimGroundExtension(blur, texture_x_at_zero,
                            texture_y_at_zero, span, hazed, source, viewport,
                            matrix, &blurred_dim, NULL,
                            kSimGroundMeshCache_UnderlayBlur);
@@ -1574,11 +1731,18 @@ static void DrawSimTownCanvas(const FrameSlot *slot, SDL_Rect source,
                               bool cull_fade, int lift_inset,
                               const SDL_FRect *exclude,
                               bool background_voxels) {
-  if (!slot->sim.town_canvas_serial || !s_sim_canvas_texture) return;
-  SDL_Texture *canvas = background_voxels
-      ? SimBackgroundVoxelRenderer_GroundTexture(
-            slot->sim.background_voxel_serial)
-      : s_sim_canvas_texture;
+  if (!slot->sim.town_canvas_serial) return;
+  SDL_Texture *canvas = NULL;
+  if (background_voxels) {
+    canvas = SimBackgroundVoxelRenderer_GroundTexture(
+        slot->sim.background_voxel_serial);
+  } else {
+    if (!s_sim_canvas_texture ||
+        s_sim_canvas_upload_state != kSimCanvasUpload_Valid ||
+        s_sim_canvas_uploaded_serial != slot->sim.town_canvas_serial)
+      return;
+    canvas = s_sim_canvas_texture;
+  }
   if (!canvas) return;
   float extent_x0 =
       (float)slot->sim.underlay_screen_x0 - (float)slot->sim.camera_x;
@@ -1679,11 +1843,12 @@ static void PublishSimCraterAnchor(const FrameSlot *slot) {
       (int16_t)lroundf(height));
 }
 
-static void RenderSimProfile(const FrameSlot *slot,
-                             SimRenderFeatureMask features,
-                             SDL_Rect source, SDL_Rect viewport,
-                             const SDL_Rect *clip) {
-  SDL_SetRenderClipRect(g_renderer, clip);
+static PresentationOutcome RenderSimProfile(
+    const FrameSlot *slot, SimRenderFeatureMask features,
+    SDL_Rect source, SDL_Rect viewport, const SDL_Rect *clip) {
+  if (!SDL_SetRenderClipRect(g_renderer, clip))
+    return kPresentationOutcome_CoreFailure;
+  PresentationOutcome outcome = kPresentationOutcome_Complete;
   bool separated = (features & kSimFeature_SeparatedComposite) != 0;
   bool ground = (features & kSimFeature_GroundProjection) != 0;
   bool billboards = ground &&
@@ -1710,21 +1875,23 @@ static void RenderSimProfile(const FrameSlot *slot,
       ? Sim3D_MaxDrawLift(slot->sim.height_scale_x100) : 0;
   if (!separated) {
     SDL_FRect src = ToFRect(source), dst = ToFRect(viewport);
-    SDL_RenderTexture(g_renderer, g_texture, &src, &dst);
-    return;
+    return SDL_RenderTexture(g_renderer, g_texture, &src, &dst)
+        ? outcome : kPresentationOutcome_CoreFailure;
   }
   if (!ground) {
     SDL_FRect src = ToFRect(source), dst = ToFRect(viewport);
-    SDL_RenderTexture(g_renderer, g_sim3d_flat_texture, &src, &dst);
-    return;
+    return SDL_RenderTexture(g_renderer, g_sim3d_flat_texture, &src, &dst)
+        ? outcome : kPresentationOutcome_CoreFailure;
   }
 
   uint32_t backdrop = slot->sim.separated_backdrop_argb;
-  SDL_SetRenderDrawColor(g_renderer, (backdrop >> 16) & 0xff,
-                        (backdrop >> 8) & 0xff, backdrop & 0xff, 255);
-  SDL_RenderFillRect(g_renderer, &(SDL_FRect){
-      (float)viewport.x, (float)viewport.y,
-      (float)viewport.w, (float)viewport.h });
+  if (!SDL_SetRenderDrawColor(g_renderer, (backdrop >> 16) & 0xff,
+                              (backdrop >> 8) & 0xff,
+                              backdrop & 0xff, 255) ||
+      !SDL_RenderFillRect(g_renderer, &(SDL_FRect){
+          (float)viewport.x, (float)viewport.y,
+          (float)viewport.w, (float)viewport.h }))
+    return kPresentationOutcome_CoreFailure;
 
   Scene3DCamera camera = {
     .tilt_x = (float)slot->sim.projection_pitch_mrad / (float)kPermilleScale,
@@ -1864,6 +2031,7 @@ static void RenderSimProfile(const FrameSlot *slot,
             .virtual_height = virtual_height,
             .rim_light = rim_light,
             .camera = &camera,
+            .outcome = kPresentationOutcome_Complete,
           };
           SimBackgroundVoxelRenderParams voxel_params =
               SimVoxelRenderParams(slot, source, viewport, matrix);
@@ -1873,6 +2041,7 @@ static void RenderSimProfile(const FrameSlot *slot,
               g_renderer, &voxel_params,
               DrawSimVoxelBillboardLayer, &context);
           Sim3DPerformance_End(performance);
+          outcome = PresentationOutcome_Combine(outcome, context.outcome);
         } else {
           Sim3DPerformanceScope performance =
               Sim3DPerformance_Begin(kSim3DPerformance_Billboard);
@@ -1880,12 +2049,16 @@ static void RenderSimProfile(const FrameSlot *slot,
                                 kSimTierFilter_World,
                                 true, virtual_height,
                                 source, viewport, &camera, matrix, NULL);
-          if (rim_light)
-            DrawSimRimLight(slot, object_priority, virtual_height, source,
-                            viewport, &camera, matrix,
-                            kSimObjectTerrain_Any);
+          if (rim_light) {
+            outcome = PresentationOutcome_Combine(
+                outcome,
+                DrawSimRimLight(
+                    slot, object_priority, virtual_height, source,
+                    viewport, &camera, matrix, kSimObjectTerrain_Any));
+          }
           Sim3DPerformance_End(performance);
         }
+        if (!PresentationOutcome_IsUsable(outcome)) return outcome;
         continue;
       }
     }
@@ -1907,12 +2080,15 @@ static void RenderSimProfile(const FrameSlot *slot,
       if (plane == kSim3DPlane_Bg1Low && shadows) {
         Sim3DPerformanceScope performance =
             Sim3DPerformance_Begin(kSim3DPerformance_Shadow);
-        DrawSimShadowMask(
-            slot, virtual_height, soft_shadows,
-            AR_SIM3D_TERRAIN_ELEVATION && background_voxels &&
-                (enabled_planes & (1u << kSim3DPlane_Obj2)),
-            source, viewport, matrix);
+        outcome = PresentationOutcome_Combine(
+            outcome,
+            DrawSimShadowMask(
+                slot, virtual_height, soft_shadows,
+                AR_SIM3D_TERRAIN_ELEVATION && background_voxels &&
+                    (enabled_planes & (1u << kSim3DPlane_Obj2)),
+                source, viewport, matrix));
         Sim3DPerformance_End(performance);
+        if (!PresentationOutcome_IsUsable(outcome)) return outcome;
       }
     } else
       SDL_RenderTexture(g_renderer, texture, &src, &dst);
@@ -1996,6 +2172,7 @@ static void RenderSimProfile(const FrameSlot *slot,
    * cover exists where a record is being taken away, and a marker hidden by
    * the very cover under test cannot answer it. */
   DrawSimCullMarkers(slot, source, viewport, matrix, lift_inset);
+  return outcome;
 }
 
 /* Captured SNES planes already contain INIDISP's master brightness, but host
@@ -2018,7 +2195,7 @@ static void DrawSimMasterFade(const FrameSlot *slot) {
   SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE);
 }
 
-void PresentSim3D(const FrameSlot *slot) {
+PresentationOutcome PresentSim3D(const FrameSlot *slot) {
   static bool logged_ground_profile;
   if (!logged_ground_profile &&
       (slot->sim.effective_features & kSimFeature_GroundProjection)) {
@@ -2031,19 +2208,27 @@ void PresentSim3D(const FrameSlot *slot) {
             (unsigned)slot->sim.projection_distance_x100);
   }
 
-  SDL_SetRenderLogicalPresentation(g_renderer, 0, 0,
-                                   SDL_LOGICAL_PRESENTATION_DISABLED);
-  SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255);
-  SDL_RenderClear(g_renderer);
+  if (!SDL_SetRenderLogicalPresentation(
+          g_renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED) ||
+      !SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255) ||
+      !SDL_RenderClear(g_renderer)) {
+    Sim3DPerformance_EndPresentation();
+    return kPresentationOutcome_CoreFailure;
+  }
   SDL_Rect viewport = ComputePresentationViewport(
       g_renderer, slot->ignore_aspect_ratio,
       slot->pixel_aspect, slot->visible_width, slot->snes_height);
   SDL_Rect source = { slot->visible_x0, 0,
                       slot->visible_width, slot->snes_height };
 
-  RenderSimProfile(slot, slot->sim.effective_features, source, viewport,
-                   &viewport);
-  SDL_SetRenderClipRect(g_renderer, NULL);
+  PresentationOutcome outcome = RenderSimProfile(
+      slot, slot->sim.effective_features, source, viewport, &viewport);
+  if (!SDL_SetRenderClipRect(g_renderer, NULL))
+    outcome = kPresentationOutcome_CoreFailure;
+  if (!PresentationOutcome_IsUsable(outcome)) {
+    Sim3DPerformance_EndPresentation();
+    return outcome;
+  }
   PublishSimCraterAnchor(slot);
 
   /* A full SIM capture temporarily supersedes the normal widescreen town-HUD
@@ -2057,6 +2242,7 @@ void PresentSim3D(const FrameSlot *slot) {
   Sim3DPerformance_End(host_ui_performance);
   ApplyLogicalPresentation(slot);
   Sim3DPerformance_EndPresentation();
+  return outcome;
 }
 /* T2a: the sim half of PresentRendererResources_Reset. present.c keeps the
  * HUD-composite and effect-capability half and calls this. Defined after the
@@ -2067,6 +2253,7 @@ void PresentSim3D_ResetResources(void) {
   if (s_sim_rim_texture) SDL_DestroyTexture(s_sim_rim_texture);
   s_sim_rim_texture = NULL;
   s_sim_rim_w = s_sim_rim_h = 0;
+  s_sim_rim_unavailable = false;
   SDL_SetAtomicInt(&s_sim_rim_mask_supported, 1);
   if (s_sim_underlay_texture) SDL_DestroyTexture(s_sim_underlay_texture);
   s_sim_underlay_texture = NULL;
@@ -2074,11 +2261,13 @@ void PresentSim3D_ResetResources(void) {
     SDL_DestroyTexture(s_sim_underlay_blur_texture);
   s_sim_underlay_blur_texture = NULL;
   s_sim_underlay_serial = 0;
+  s_sim_underlay_blur_serial = 0;
   s_sim_underlay_alloc_failed = false;
+  s_sim_underlay_blur_unavailable = false;
   if (s_sim_canvas_texture) SDL_DestroyTexture(s_sim_canvas_texture);
   s_sim_canvas_texture = NULL;
-  s_sim_canvas_alloc_failed = false;
-  s_sim_canvas_force_full_upload = false;
+  s_sim_canvas_uploaded_serial = 0;
+  s_sim_canvas_upload_state = kSimCanvasUpload_Uninitialized;
   memset(s_sim_ground_mesh_cache, 0, sizeof(s_sim_ground_mesh_cache));
   SimBackgroundVoxelRenderer_Reset();
   PresentSim3DClouds_ResetResources();

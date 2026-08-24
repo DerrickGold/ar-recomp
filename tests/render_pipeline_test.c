@@ -106,6 +106,56 @@ int main(void) {
     CHECK(SDL_SetRenderClipRect(renderer, NULL));
   }
 
+  /* Temporary cosmetic targets must restore the exact caller-owned render
+   * state. A hard-coded backbuffer/CRT target would pass ordinary frames but
+   * escape any future outer capture or post-processing pass. */
+  {
+    SDL_Texture *offscreen = SDL_CreateTexture(
+        renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET,
+        64, 64);
+    CHECK(offscreen != NULL);
+    SDL_Rect viewport = { 30, 40, 320, 180 };
+    SDL_Rect clip = { 5, 6, 90, 70 };
+    CHECK(SDL_SetRenderViewport(renderer, &viewport));
+    CHECK(SDL_SetRenderClipRect(renderer, &clip));
+    CHECK(SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_ADD));
+    CHECK(SDL_SetRenderDrawColor(renderer, 11, 22, 33, 44));
+
+    PresentationTargetState state;
+    CHECK(PresentationGeometry_BeginTarget(renderer, offscreen, &state) ==
+          kPresentationTargetBegin_Ready);
+    CHECK(SDL_GetRenderTarget(renderer) == offscreen);
+    CHECK(!SDL_RenderViewportSet(renderer));
+    CHECK(!SDL_RenderClipEnabled(renderer));
+    CHECK(SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE));
+    CHECK(SDL_SetRenderDrawColor(renderer, 1, 2, 3, 4));
+    CHECK(PresentationGeometry_EndTarget(renderer, &state));
+
+    CHECK(SDL_GetRenderTarget(renderer) == NULL);
+    CHECK(SDL_RenderViewportSet(renderer));
+    SDL_Rect restored = {0};
+    CHECK(SDL_GetRenderViewport(renderer, &restored));
+    CHECK(SDL_RectsEqual(&restored, &viewport));
+    CHECK(SDL_RenderClipEnabled(renderer));
+    CHECK(SDL_GetRenderClipRect(renderer, &restored));
+    CHECK(SDL_RectsEqual(&restored, &clip));
+    SDL_BlendMode restored_blend = SDL_BLENDMODE_INVALID;
+    Uint8 r = 0, g = 0, b = 0, a = 0;
+    CHECK(SDL_GetRenderDrawBlendMode(renderer, &restored_blend));
+    CHECK(restored_blend == SDL_BLENDMODE_ADD);
+    CHECK(SDL_GetRenderDrawColor(renderer, &r, &g, &b, &a));
+    CHECK(r == 11 && g == 22 && b == 33 && a == 44);
+    CHECK(PresentationGeometry_BeginTarget(renderer, NULL, &state) ==
+          kPresentationTargetBegin_Omitted);
+    CHECK(SDL_GetRenderTarget(renderer) == NULL);
+
+    CHECK(SDL_SetRenderViewport(renderer, NULL));
+    CHECK(SDL_SetRenderClipRect(renderer, NULL));
+    CHECK(SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE));
+    CHECK(SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255));
+    SDL_DestroyTexture(offscreen);
+  }
+
   /* Streaming texture at the full widescreen budget, like g_texture — created
    * the SAME way main.c creates it, including the blend mode. This is the
    * regression guard for the black-screen bug: SDL3 defaults new textures to

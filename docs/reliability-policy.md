@@ -78,6 +78,9 @@ valid content or arithmetic defaults.
 | CRT processing | Changed: when selected, shader or target failure stops the session. CRT can no longer disappear from Authentic or Enhanced comparison output. |
 | World-navigation renderer | Changed: a valid selected navigation frame that cannot render stops the session. Sticky allocation-failed flags and the flat presentation fallback were removed. |
 | Presentation stage outcomes | Changed: shared outcomes distinguish a complete frame, optional omitted polish, and an unusable core view. World-navigation weather and Diorama supersampling may degrade; a core Diorama failure now requests orderly shutdown instead of silently ending the frame. |
+| Temporary presentation targets | Changed: SIM shadow, blur, and rim passes capture the caller's exact target/viewport/clip/draw state. Failure to enter an optional pass omits it before mutation; failure to restore ownership makes the selected SIM frame unusable. |
+| SIM extension freshness | Changed: the town canvas is drawable only after a complete upload of the slot's exact serial. A failed dirty upload invalidates the mixed-generation texture and gets one bounded full retry. The optional underlay blur carries its own serial and can no longer outlive the sharp world map it represents. |
+| Diorama draw submissions | Changed: selected skybox and main-plane submissions are core; shoebox, stack, thickness, shadow, and shader polish report optional omission. Target, viewport, texture-address, and GPU-state restoration failures remain core because later drawing ownership is unknown. |
 | Hand-written HLE invariants | Changed: invalid CPU entry modes, data contracts, and HLE allocation failures use one non-returning coroutine-to-host fatal trampoline. The host returns before NMI or further game-state execution, while a missing/incorrect escape still aborts rather than continuing through invalid CPU state. |
 | SIM 3D core textures/billboard atlas | Changed: absence remains harmless while SIM 3D is off; booting or switching on a mode that needs the missing resource stops with an actionable error. |
 | Renderer device loss/reset | Changed: device loss stops with an actionable error; a reset gets one rebuild pass and failure to restore the controls overlay stops the session. |
@@ -96,10 +99,14 @@ valid content or arithmetic defaults.
 Some presentation modules still combine core geometry resources and cosmetic
 resources without publishing their outcome. Do not convert those wholesale to
 fatal errors. First split “core selected view unavailable” from “optional
-cosmetic stage unavailable,” then apply the decision rule above. The dynamic
-SIM town canvas/underlay/cloud/shadow family and Diorama's individual GPU draw
-submissions remain the main examples; world-navigation weather and Diorama's
-supersample helper now use the shared outcome contract.
+cosmetic stage unavailable,” then apply the decision rule above. SIM town
+canvas/underlay allocation remains intentionally optional because the live town
+ground retains ownership; validation captures at the supported camera extremes
+should precede any stricter policy. Cloud, shadow, rim, Diorama shoebox/depth
+polish, world-navigation weather, and Diorama supersampling remain cosmetic.
+Allocation and setup failures for large optional target resources are latched
+until renderer reset so a graceful visual downgrade cannot become a per-frame
+allocation or setup-failure loop.
 
 Generated recompiler dispatch guards still contain generator-owned aborts.
 They are outside this hand-written-runtime audit and must be changed in the

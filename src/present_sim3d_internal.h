@@ -34,12 +34,14 @@ uint32_t SimCloudTexel(int x, int y);
  * These are defined by the SIM 3D presentation stage that owns the work and
  * are exposed only because the world-map renderer deliberately shares it. */
 extern const float kPi;
-extern SDL_Texture *s_sim_underlay_blur_texture;
 
 int InsertSimGroundCoordinate(float *coordinates, int count, int capacity,
                               float coordinate);
 void SimShadowLight(const FrameSlot *slot, float *light_x, float *light_y);
 SDL_Texture *EnsureSimUnderlayTexture(const FrameSlot *slot);
+/* Returns the optional blur only when it represents the requested world-map
+ * revision. Consumers must never infer freshness from allocation alone. */
+SDL_Texture *SimUnderlayBlurTexture(uint32_t serial);
 void DrawSimBackdrop(const FrameSlot *slot, SDL_Rect viewport,
                      const float matrix[16]);
 

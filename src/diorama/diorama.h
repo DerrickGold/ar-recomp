@@ -231,6 +231,12 @@ bool Diorama_ProjectCapturedBg2Point(const DioramaProjection *projection,
  * effect_obj_priority_mask/effect_bg_plane_mask: authentic hardware planes
  * required by current captured effects. An effect is current projection
  * content even if its isolated band has no final winning pixels.
+ *
+ * The caller must enter without a custom GPU render state bound. This
+ * compositor owns and unbinds every state it binds; it cannot preserve an
+ * inherited state because SDL exposes no getter for it. An outer shader pass
+ * must bind after Diorama_Composite returns, around the resulting scene.
+ *
  * Complete and OptionalOmitted both mean the selected scene is usable;
  * CoreFailure means the caller must stop rather than present a partial view. */
 PresentationOutcome Diorama_Composite(
