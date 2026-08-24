@@ -17,6 +17,7 @@
 #include "host/host_input.h"
 #include "manual/manual_reader.h"
 #include "music_replacements.h"
+#include "native_audio_mixer.h"
 #include "save_system.h"
 #include "session_fatal.h"
 #include "settings_overlay.h"
@@ -233,6 +234,9 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
 
   if (desc->field == &g_settings.audio_master_volume)
     HostAudio_SetMasterVolumePercent(g_settings.audio_master_volume);
+  if (desc->field == &g_settings.audio_music_volume ||
+      desc->field == &g_settings.audio_sfx_volume)
+    NativeAudioMixer_ApplySettings();
   if (desc->field == &g_settings.audio_enabled)
     (void)HostAudio_SetEnabled(g_settings.audio_enabled);
   if (desc->field == &g_settings.music_replacements)

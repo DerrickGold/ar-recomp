@@ -39,7 +39,7 @@ identity are the perishable, expensive-to-rederive parts.
 | Song upload (image identity) | `$02:9964` HLE — stage 1 (`$9A56` block image) + stage 2 (BRR streaming) | APU ports + ARAM | "load song N's sequence + instruments" | image src addr = song identity (`06:AC00` = common sample bank, `1A:94B8` = title = song 7); song table `$02:C7E5` (17 entries, 3-byte ptrs, all enumerated in `game-assets/manifest.ini`); more pointers inline in the `[$A2]` command scripts read via `$02:B4C0` | 🟢 |
 | **BRR sample bank (per-sample!)** | stage 2 of the `$9964` HLE (`RtlUploadSpcImageFromDpInternal`, common_rtl.c) | ARAM `$3000-$6E67` (common) / `$795F+` (per-song) | "install instrument waveforms" | chunk pool at ROM `$08:8000` — length-prefixed `[len16][BRR data]` chunks, selected by index; script = image terminator's target word (lo byte = count, hi byte onward = chunk indices); dest base = WRAM `$0358` | 🟢 |
 | Sample directory (DSP `DIR`) | uploaded as image blocks targeting ARAM `$2C00` (`DIR` page = `$2C`) | DSP `$5D` | "sample N lives at ARAM addr X, loops at Y" | 4-byte entries `{start16, loop16}` per srcn; common srcn `00-0B`, per-song `0C+` (block target `$2C30`) | 🟢 |
-| Final PCM out | `RtlRenderAudio` (common_rtl.c) → continuous `dsp_getSamplesResampled` + MSU-1/OGG mix → SDL `AudioCallback` | host audio | "the mixed stereo stream" | native DSP stays 32.04 kHz; actual SDL rate controls time-based resampling, so frequency/buffer changes preserve pitch; `audio_master_volume` applies atomic post-mix gain and `audio_enabled` applies an atomic post-mix mute without stopping any cursor | 🟢 |
+| Final PCM out | `RtlRenderAudio` (common_rtl.c) → continuous `dsp_getSamplesResampled` + MSU-1/OGG mix → SDL `AudioCallback` | host audio | "the mixed stereo stream" | native DSP stays 32.04 kHz; actual SDL rate controls time-based resampling, so frequency/buffer changes preserve pitch; native voices are tagged Music/SFX before summation, replacement OGG joins Music, `audio_master_volume` applies atomic post-mix gain, and `audio_enabled` applies an atomic post-mix mute without stopping any cursor | 🟢 |
 | Raw APU port write | `RtlApuWrite` (`$2140-$2143`) | APU I/O | low-level handshake / param | — | 🔴 |
 | **Voice key-on observation** | `g_dsp_voice_kon_hook` (dsp.c, fires once per applied key-on) | DSP `KON` | "voice C started sample S" | `(ch, srcn, decodeOffset, volL, volR, pitch)`; NULL by default; installed by `sfx_census.c`. Called on whichever thread is cycling the APU, APU lock held. Must be invoked **after** `decodeOffset` is resolved from the directory — earlier and it reports the previous note's advancing decode cursor | 🟢 |
 
@@ -48,8 +48,19 @@ other games are byte-identical): `g_rtl_spc_upload_hook` (image src = song
 identity), `g_rtl_apu_port_hook` (every `$2140-43` write — **chained**, not
 owned: `music_replacements.c` installs first and `sfx_census.c` forwards to it,
 so init order in `main.c` matters), `g_rtl_music_mix_hook` (OGG mix inside
-`RtlRenderAudio`'s locked region), `g_dsp_voice_mute_srcn_min` (the music mute
-gate), `g_dsp_voice_kon_hook` (key-on observation).
+`RtlRenderAudio`'s locked region), `g_apu_spc_dsp_write_hook` (normal-play
+logical-track provenance), the DSP Music-bus gate plus its unclassified SRCN
+fallback, and `g_dsp_voice_kon_hook` (key-on observation).
+
+The opt-in serial provenance tracer uses dedicated observation seams rather
+than joining that chained game hook: `g_rtl_apu_port_trace_hook` and
+`g_rtl_spc_upload_trace_hook` at the CPU boundary;
+`g_apu_port_apply_trace_hook`, `g_apu_spc_port_read_trace_hook`, and
+`g_apu_spc_dsp_write_trace_hook` inside the APU; and
+`g_spc_opcode_trace_hook` at the pre-fetch SPC700 PC. All are NULL by default,
+observation-only, and live outside serialized emulator structs. See
+[snes-native-audio-channels.md](snes-native-audio-channels.md#implemented-baseline-instrumentation)
+for the request/outcome CSV contract.
 
 > Audio is the highest-payoff first HAL target: the `$035A`/`$035B` events are already ID-based.
 > Found while fixing the boss-music handshake and the silent-DSP bug (memory:
@@ -102,9 +113,9 @@ values and nonzero port-2 ids to catch them in play.
    `LOOPSTART/LOOPLENGTH` Vorbis tags > whole file) mixed in
    `RtlRenderAudio`'s locked region via `g_rtl_music_mix_hook`, msu1-style.
    Muting: every handshake/port write stays authentic (zero soft-lock risk);
-   instead the DSP excludes voices with srcn >= 0x0C from the dry mix and
-   echo input (`g_dsp_voice_mute_srcn_min`, dsp.c) — per-song instruments
-   live there while SFX use the common bank.
+   instead the DSP excludes provenance-tagged Music voices from the dry mix
+   and echo input. `g_dsp_voice_mute_srcn_min` remains only as a startup
+   fallback before a voice receives its first classified write.
    The apparent counterexample captured on 2026-07-21 (music keying srcn
    `00`-`06` intermittently across several songs) was resolved on 2026-07-25:
    it was a bootstrap/upload ordering race, not intentional shared-bank music.
@@ -159,13 +170,12 @@ values and nonzero port-2 ids to catch them in play.
    `runner/src/snes/msu1.{c,h}` (mix point documented there as `RtlRenderAudio`'s locked
    region).
 
-   The Phase-4 settings work now uses this seam for `audio_master_volume`
-   (`0..100`). It deliberately does not label any post-mix control "music" or
-   "SFX": independent levels require stable DSP voice classification or native
-   SPC-driver bus controls, including a defined echo policy. See
-   `settings-system.md`, "Audio control seams". The SFX census (tier 3 above) is
-   the groundwork for that classification; its orphan-key-on accounting is the
-   measurement that says whether a proposed classifier is safe.
+   The settings layer uses this seam for `audio_master_volume` (`0..100`) and
+   the pre-sum logical-track seam for `audio_music_volume` /
+   `audio_sfx_volume`. Native dry contributions and echo sends are scaled per
+   tagged voice; replacement OGG follows Music. The serial trace remains the
+   acceptance tool for extending those same labels onto virtual voices. See
+   `settings-system.md`, "Audio control seams".
 
 The verified common sample directory, effect sequence catalogue, loss taxonomy,
 and audio-specific instrumentation now live only in

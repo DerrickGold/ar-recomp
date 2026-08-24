@@ -102,4 +102,18 @@ void apu_schedulePortWrite(Apu* apu, uint8_t port, uint8_t val,
                            uint64_t target_sample);
 /* Drop all pending scheduled port writes (reset / HLE image upload). */
 void apu_clearPortQueue(Apu* apu);
+
+/* Observation-only diagnostics. Kept outside Apu so the frozen save-state
+ * layout and normal emulation state remain unchanged. */
+extern void (*g_apu_port_apply_trace_hook)(Apu *apu, uint8_t port,
+                                           uint8_t value);
+extern void (*g_apu_spc_port_read_trace_hook)(Apu *apu, uint8_t port,
+                                              uint8_t value);
+/* Optional game-owned DSP-write observer. Unlike the trace seam, this remains
+ * installed in normal play and may attach presentation provenance before the
+ * register write is applied. Caller holds the APU lock. */
+extern void (*g_apu_spc_dsp_write_hook)(Apu *apu, uint8_t addr,
+                                        uint8_t value);
+extern void (*g_apu_spc_dsp_write_trace_hook)(Apu *apu, uint8_t addr,
+                                              uint8_t value);
 #endif

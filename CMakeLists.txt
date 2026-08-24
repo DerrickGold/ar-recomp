@@ -1014,6 +1014,34 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_audio_presentation_policy
         COMMAND actraiser_audio_presentation_policy_test)
 
+    add_executable(actraiser_native_audio_trace_test
+        tests/native_audio_trace_test.c
+        src/dev/native_audio_trace.c
+    )
+    target_include_directories(actraiser_native_audio_trace_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_native_audio_trace
+        COMMAND actraiser_native_audio_trace_test)
+
+    add_executable(actraiser_native_audio_mixer_test
+        tests/native_audio_mixer_test.c
+        src/native_audio_mixer.c
+    )
+    target_include_directories(actraiser_native_audio_mixer_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS})
+    add_test(NAME actraiser_native_audio_mixer
+        COMMAND actraiser_native_audio_mixer_test)
+
+    add_executable(actraiser_dsp_bus_mix_test
+        tests/dsp_bus_mix_test.c
+        snesrecomp-go/runtime/src/snes/dsp.c
+    )
+    target_include_directories(actraiser_dsp_bus_mix_test PRIVATE
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS})
+    add_test(NAME actraiser_dsp_bus_mix
+        COMMAND actraiser_dsp_bus_mix_test)
+
     # Generated-shader distribution guard: asserts the COMMITTED shader blobs
     # (src/shaders/*_frag.h, produced by tools/build_shaders.py) are accepted by
     # the live GPU backend, and that the per-format entrypoint name is real.

@@ -49,6 +49,8 @@ void (*g_rtl_spc_upload_hook)(uint32_t src);
 void (*g_rtl_apu_port_hook)(uint8_t port, uint8_t val);
 void (*g_rtl_music_mix_hook)(int16_t *buf, int frames);
 int g_dsp_voice_mute_srcn_min = -1;
+static bool s_music_bus_muted;
+void dsp_setMusicBusMuted(bool muted) { s_music_bus_muted = muted; }
 
 /* ---- helpers ------------------------------------------------------------ */
 
@@ -264,6 +266,7 @@ static void TestTriggerStateMachine(void) {
   g_rtl_apu_port_hook(0, 0xFF); /* upload */
   g_rtl_apu_port_hook(0, 0x01); /* play song 1: no audio -> authentic */
   CHECK(g_dsp_voice_mute_srcn_min == -1);
+  CHECK(!s_music_bus_muted);
   MusicReplacements_FormatPlaybackStatus(status, sizeof(status));
   CHECK(strstr(status, "MUSIC tune $01 AUTH") != NULL);
 
@@ -294,6 +297,7 @@ static void TestTriggerStateMachine(void) {
   g_music_replacements[0].file_frames = 44100;
   g_rtl_apu_port_hook(0, 0x01);
   CHECK(g_dsp_voice_mute_srcn_min == -1);
+  CHECK(!s_music_bus_muted);
 
   /* The menu callback may toggle either direction while the game is paused.
    * With this deliberately missing fixture both paths stay authentic, but

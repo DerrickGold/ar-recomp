@@ -68,7 +68,7 @@ queue: the later value replaces `$035B`. The same applies independently to
 
 The decisive driver routine is ARAM `$0DA0-$0E13`.
 
-At `$0DB1` it reads event port `$F6`:
+At `$0DB5` it reads event port `$F6`:
 
 - A positive nonzero event starts track X=`$10` with mask `$40`, DSP voice 6.
 - A high-bit event starts track X=`$10`, sets the driver's two-lane busy byte
@@ -76,11 +76,14 @@ At `$0DB1` it reads event port `$F6`:
   a mode flag: `$0E14` doubles the byte, discarding bit 7, so the sequence-table
   index is the low seven bits. Effective IDs above `$26` are clamped to the
   driver's fallback sequence `$07`.
-- While `$35 != 0`, new port-2 events are rejected.
+- While `$35 != 0`, positive port-2 events are rejected. A new high-bit event
+  takes the BMI path before the `$35` test, so it replaces the currently owned
+  pair instead of being rejected.
 
-At `$0DFA` it reads ordinary-SFX port `$F7` and starts track X=`$12`, but only
-when `$35 == 0`. A high-bit event therefore blocks ordinary SFX without even
-reading port `$F7` until the dual-lane event ends.
+At `$0DFA` it tests `$35`; at `$0DFE` it reads ordinary-SFX port `$F7` and
+starts track X=`$12`, but only when `$35 == 0`. A high-bit event therefore
+blocks ordinary SFX without even reading port `$F7` until the dual-lane event
+ends.
 
 The driver copies its effect-ownership mask through direct-page bytes `$37`
 and `$1A`. The song sequencer continues to advance, but several DSP write paths
@@ -118,10 +121,11 @@ lose audio at four different stages:
 2. **SPC input-port overwrite.** A newer CPU port write can become visible
    before the SPC700 consumes the preceding value. The existing audio trace
    already counts this stage per port.
-3. **Driver rejection/replacement.** A dual-voice high-bit event prevents new
-   effects from being accepted: port 2 is read but rejected, while port 3 is
-   not read. Otherwise, a new request reinitializes the same logical track,
-   replacing an effect already active on that lane.
+3. **Driver rejection/replacement.** A dual-voice high-bit event rejects new
+   positive port-2 effects and prevents port 3 from being read. A new high-bit
+   event is still accepted and replaces both active lanes. Otherwise, a new
+   accepted request reinitializes the same logical track, replacing an effect
+   already active on that lane.
 4. **Music voice stealing.** Accepted effects claim bits `$40/$80`; the music
    sequencer advances while its voice-6/7 DSP writes are suppressed.
 
@@ -172,11 +176,14 @@ A useful loss/transition taxonomy is:
 
 | Classification | Required evidence | Meaning |
 |---|---|---|
+| `request_coalesced_mailbox_duplicate` | a request is replaced in `$035A/$035B` by the same kind and ID before NMI drain | native depth-one coalescing; keep separate from different-sound loss because blindly making every copy polyphonic can amplify producer loops such as per-glyph dialogue posts |
 | `request_overwritten_mailbox` | request serial written to `$035A/$035B`, then replaced before NMI drain | genuinely dropped before reaching the SPC |
+| `request_coalesced_port_duplicate` | an unread applied value is replaced by another serial with the same kind and ID | duplicate transport coalescing; potentially distinct emitters, but not evidence that two different sounds competed |
 | `request_overwritten_port` | CPU port write applied, then replaced before the SPC reads it | genuinely dropped in transport |
-| `event_rejected_dual_busy` | nonzero port-2 event is read while SPC `$35 != 0`, but no X=`$10` start follows | genuinely rejected by native priority logic |
+| `event_rejected_dual_busy` | positive port-2 event is read while SPC `$35 != 0`, but no X=`$10` start follows | genuinely rejected by native priority logic; high-bit events bypass this test |
 | `ordinary_blocked_dual_busy` | port 3 contains a nonzero request while `$35 != 0`, so `$0DFA` does not read it | pending/blocked; count as dropped only if a later port write replaces it before acceptance |
 | `effect_lane_replaced` | accepted request reinitializes an already-active X=`$10` or X=`$12` track | preceding effect was truncated by another effect |
+| `effect_canceled_song_transition` | a full SPC image upload clears a scheduled/applied/read/active effect serial | deliberate global driver/image replacement, not channel exhaustion |
 | `music_voice_masked` | `$1A & $47 != 0` skips a song-track DSP write | music note/parameter update was genuinely lost to voice stealing |
 | `song_swap_begin/restore` | port-0 song-image identity and/or selected song number changes | deliberate whole-song replacement, not a drop |
 | `song_pause/resume` | native `$F2` and matching resume command | deliberate pause, not a drop |
@@ -199,9 +206,10 @@ caller census.
 | `$9C` | `$1C` | 6 + 7 | `$03:8365` | `$03:82DB` |
 | `$A0` | `$20` | 6 + 7 | `$00:F67C` | `$00:F668/$F674` |
 
-High-bit events are the worst authentic collision case: they take both
-music voices, block both new event effects and ordinary SFX, and hold that state
-until their shared sequence completes.
+High-bit events are the worst authentic collision case: they take both music
+voices, block positive event effects and ordinary SFX, and hold that state
+until their shared sequence completes. A later high-bit event is the exception:
+it is accepted and truncates/replaces the currently active pair.
 
 ## Conservative static ordinary-SFX post catalog (BRK / voice 7)
 
@@ -336,6 +344,41 @@ overlap matter too: a rare long sequence may be easier to truncate than a
 frequent short click. Exact per-ID loss rates require request serials and the
 driver-decision/end events described below.
 
+## Implemented mixer foundation
+
+Independent level control now uses the same logical-track evidence required by
+the extended-channel design:
+
+- `g_apu_spc_dsp_write_hook` runs before each applied DSP write. For ordinary
+  per-voice writes, SPC X directly identifies song tracks `$00-$0E` and effect
+  tracks `$10/$12`; ARAM `$47` proves the physical voice. Captured X=`$10`,
+  mask=`$40` effect writes sometimes see `$1A=0`, so ownership alone is not a
+  safe classifier. `$1A` remains the fallback when a shared helper has
+  repurposed X for a DSP register address; if that fallback is also clear, the
+  helper preserves the voice's last proven label instead of guessing Music.
+- Each native DSP voice carries a presentation-only Music/SFX label. Music and
+  SFX gains scale its dry contribution and echo send before the authentic
+  per-voice clamp. The one hardware FIR/feedback echo stays shared, so an
+  already accumulated tail decays naturally after a live fader change.
+- Replacement OGG follows the Music gain. Its native-voice mute now uses the
+  explicit Music label, retaining SRCN `$0C+` only for an unclassified startup
+  voice. This avoids baking the common-bank heuristic into future virtual
+  effects.
+- At Music=100 and SFX=100 the DSP takes the legacy arithmetic path exactly.
+  Voice labels sit outside the frozen emulated savestate region; player/debug
+  state loads reconstruct them from `$1A`, and subsequent logical-track writes
+  immediately refine them.
+
+This foundation changes levels only. It does not add voices, queue requests, or
+remove any of the four native loss mechanisms. Extended voices must carry the
+same bus enum at allocation time so the existing faders, echo sends,
+replacement mute, and master stage keep working without a second mixer
+architecture.
+
+`AR_AUDIO_BUSLOG=1` logs live gain values and only label transitions (voice,
+Music/SFX, SPC X, `$47`, `$1A`, and DSP register), which makes a replay-sized
+validation readable without dumping every DSP write.
+
 ## Recommended extended-channel design
 
 ### Compatibility contract
@@ -403,32 +446,80 @@ priority quirks” separate from a genuine user-configured resource limit.
 - Noise clock and NON are global/masked DSP state.
 - Save states need every added voice, BRR decoder position, envelope, KON delay,
   logical sequence cursor, request FIFO, and ownership flag.
-- Replacement-music muting currently uses SRCN `$0C+` as a pragmatic music
-  gate. Extended classification should instead carry explicit song/effect
-  provenance so common-bank ambience is not misclassified.
+- Replacement-music muting now uses explicit song/effect provenance, with SRCN
+  `$0C+` only as an unclassified startup fallback. Every virtual voice must set
+  the same bus label when allocated.
 
-## Instrumentation needed before implementation
+## Implemented baseline instrumentation
 
-`src/dev/sfx_census.c` is a useful first pass, but it keeps one pending request
-and uses a two-frame key-on correlation window. Extend the trace with one record
-per request serial and these timestamps/stages:
+`src/dev/sfx_census.c` remains useful for rough sample-name correlation, but it
+keeps one pending request and uses a two-frame key-on window. The behavior-neutral
+serial tracer in `src/dev/native_audio_trace*.c` now records one row per request
+and observes the following stages without modifying emulated state:
 
 1. BRK/COP hook: ID, caller, X/Y, CPU frame, serial.
 2. `$035A/$035B` write and NMI drain: prove game-mailbox overwrite.
 3. CPU port write, SPC-visible apply, and SPC read: the runtime audio trace
    already has most of this and per-port overwrite counters.
-4. Driver decision at `$0DB1/$0DFA`: accepted, zero, blocked by `$35`, or lane
+4. Driver decision at `$0DB5/$0DFA`: accepted, zero, blocked by `$35`, or lane
    replacement.
 5. Sequence start at `$0E14`: effective low-7-bit ID and logical X=`$10/$12`.
-6. Every DSP write/KON/KOF: logical track, target native/virtual voice, SRCN,
-   pitch, volumes, and ownership mask.
+6. Every reached DSPDATA writer, aggregated by SPC PC, DSP register, current
+   track mask, ownership mask, and write count; the three confirmed
+   ownership-caused music-update skips are recorded separately and attributed
+   to the active request serial.
 7. Sequence end at `$0E51`.
 8. Port-0 command, uploaded image source, selected song number, and explicit
    transition owner/caller. This separates full-image swaps, in-bank song
    changes, pause/resume, and restore operations from effect-channel loss.
 
-That trace turns every missing sound into one exact reason instead of an
-“unmatched request” bucket.
+Enable it with:
+
+```sh
+AR_NATIVE_AUDIO_TRACE=1 ./build-release/ActRaiserRecomp ar.sfc --config config.ini
+```
+
+At clean shutdown it writes these files under `runs/latest/`:
+
+| File | Purpose |
+|---|---|
+| `native_audio_requests.csv` | request serial, caller/site, every transport/lane timestamp, terminal outcome, replacement serial, and music-update suppression attributed to that request |
+| `native_audio_song_events.csv` | port-0 controls, selected song number, image upload identity, frame, and caller; deliberate level-up/restore transitions stay separate from drops |
+| `native_audio_dsp_provenance.csv` | every reached DSP writer aggregated by SPC PC, track/ownership masks, DSP register, and count |
+| `native_audio_music_suppression.csv` | the three `$1A & $47` music-update skip sites aggregated by song track mask and ownership mask |
+
+The classifier has focused tests for mailbox overwrite/coalescing, port
+overwrite/coalescing, positive-event/ordinary-SFX busy rejection, lane
+replacement, high-bit paired completion, deliberate song transitions, settings
+suppression, and ownership-caused music gaps. A 180-frame title smoke run at
+`runs/20260824-143539/` produced the four files, captured the expected common-
+image/title-image upload and play sequence, and observed 42 DSP writes with no
+effect requests or false drop classifications.
+
+### First paced replay result
+
+`runs/20260824-143929/` replayed the first 1,100 frames of `sim-actions.rec`
+with a dummy audio device and `AR_PACE=1`, so the CPU and SPC remained on a
+normal-time relationship. Its 371 request posts classified as:
+
+| Outcome | Count | Interpretation |
+|---|---:|---|
+| completed | 16 | accepted X=`$10` event sequences that reached `$0E51` |
+| coalesced mailbox duplicate | 354 | repeated COP `$07` posts, overwhelmingly the dialogue composer drawing many glyphs in one game frame; not counted as 354 different-sound drops |
+| overwritten port | 1 | the final dialogue COP `$07` at game frame 303 reached port 2 but was cleared before the SPC read it |
+| different-ID mailbox overwrite / busy reject / lane replacement | 0 | none in this short capture |
+
+One completed COP `$07` from `$01:8B82` at game frame 614 owned voice 6 long
+enough to skip three song-track updates: two at SPC `$05B1` and one at `$04D0`.
+This is the first serial-attributed proof in the new trace of an effect that
+completed normally while still creating a genuine music gap. The same run
+recorded title → sky-palace → simulation image transitions in the song-event
+file; they are deliberate swaps and did not enter any request-drop count.
+
+The duplicate result is also a design constraint: extended mode should not
+automatically enqueue every identical per-glyph post as a simultaneous voice.
+It needs either native duplicate coalescing by default or an explicit producer-
+aware policy, while still preserving genuinely independent overlapping effects.
 
 ## Verification matrix
 
@@ -455,7 +546,8 @@ High confidence:
 - eight native voices and their register layout;
 - song X=`$00-$0E`, event X=`$10`, ordinary SFX X=`$12`;
 - physical masks `$40/$80` and voices 6/7;
-- high-bit events duplicate onto both lanes and block port `$F7` via `$35`;
+- high-bit events duplicate onto both lanes, block port `$F7` via `$35`, reject
+  positive port-2 events, and can themselves replace an existing pair;
 - music DSP writes are suppressed by `$1A & $47` while sequencing continues;
 - the common sequence table, pointers, and initial SRCN values;
 - direct BRK/COP post sites listed above.

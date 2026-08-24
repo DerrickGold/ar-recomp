@@ -40,8 +40,10 @@
 #include "hd_replacement_host.h"
 #include "music_replacements.h"
 #include "audio_presentation_policy.h"
+#include "native_audio_mixer.h"
 #include "render_comparison.h"
 #include "dev/sfx_census.h"
+#include "dev/native_audio_trace.h"
 #include "run_dir.h"
 #include "launcher.h"
 #include "util.h"
@@ -1274,11 +1276,13 @@ static void AppBoot_InstallSubsystems(AppBoot *app) {
       music_manifest = "game-assets/manifest.ini";
     MusicReplacements_Load(music_manifest);
     MusicReplacements_InstallHooks();
+    NativeAudioMixer_Install();
     AudioPresentationPolicy_Reset();
   }
 
   /* After music: the census chains the APU port seam music installs. */
   SfxCensus_Init();
+  NativeAudioTrace_Init();
 
   g_spc_player = ActRaiserSpcPlayer_Create();
 }
@@ -2126,6 +2130,7 @@ static int AppShutdown(AppBoot *app, char **argv) {
   /* Before tearing down audio: the census reads only its own accumulators,
    * but the report should land while the run dir is still current. */
   SfxCensus_Report();
+  NativeAudioTrace_Report();
   if (getenv("AR_AUDIODBG")) {
     AudioTraceStats stats;
     audio_trace_get_stats(&stats);

@@ -99,7 +99,7 @@ static void TestDefaultsAndMetadata(void) {
    * 30-to-60 Hz validation cadence. The runtime-only render comparison adds
    * one keyboard and one gamepad binding row, but deliberately no persisted
    * mode setting. */
-  CHECK(g_setting_desc_count == 272);
+  CHECK(g_setting_desc_count == 274);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -147,6 +147,8 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(Settings_AudioFrequencyHz() == 0);   /* 0 = device-native at open */
   CHECK(g_settings.audio_samples == 2048);
   CHECK(g_settings.audio_master_volume == 100);
+  CHECK(g_settings.audio_music_volume == 100);
+  CHECK(g_settings.audio_sfx_volume == 100);
   CHECK(g_settings.audio_dialog_blip);
   CHECK(g_settings.turbo_multiplier == 8);
   CHECK(g_settings.warp_target == 0x0101);
@@ -266,6 +268,8 @@ static void TestDefaultsAndMetadata(void) {
   const SettingDesc *display = Settings_Find("display_mode");
   const SettingDesc *hp = Settings_Find("cheat_inf_hp");
   const SettingDesc *volume = Settings_Find("audio_master_volume");
+  const SettingDesc *music_volume = Settings_Find("audio_music_volume");
+  const SettingDesc *sfx_volume = Settings_Find("audio_sfx_volume");
   const SettingDesc *warp = Settings_Find("warp_target");
   const SettingDesc *warp_action = Settings_Find("warp_now");
   const SettingDesc *save_state_action = Settings_Find("save_state");
@@ -300,6 +304,14 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(volume && volume->apply == kApply_Callback);
   CHECK(volume && volume->minval == 0 && volume->maxval == 100 &&
         volume->step == 5);
+  CHECK(music_volume && music_volume->category == kSettingCat_Audio &&
+        music_volume->apply == kApply_Callback &&
+        music_volume->minval == 0 && music_volume->maxval == 100 &&
+        music_volume->step == 5);
+  CHECK(sfx_volume && sfx_volume->category == kSettingCat_Audio &&
+        sfx_volume->apply == kApply_Callback &&
+        sfx_volume->minval == 0 && sfx_volume->maxval == 100 &&
+        sfx_volume->step == 5);
   CHECK(warp && warp->type == kSettingType_Custom);
   CHECK(!Settings_IsMenuVisible(warp));
   CHECK(!Settings_IsMenuVisible(warp_action));
@@ -525,6 +537,8 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
       "# menu-owned layer\n"
       "window_scale = 5\n"
       "audio_master_volume = 70%\n"
+      "audio_music_volume = 60%\n"
+      "audio_sfx_volume = 75%\n"
       "extended_aspect = 16:10\n"
       "pixel_aspect = Square pixels\n"
       "ws_sprites = On\n"
@@ -535,6 +549,7 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
   /* Real environment values must remain distinguishable from config.ini's
    * staged AR_* compatibility values and win over both file layers. */
   setenv("AR_AUDIO_VOLUME", "85", 1);
+  setenv("AR_MUSIC_VOLUME", "55", 1);
   setenv("AR_WS_SPRITES", "0", 1);
   g_ws_active = true;
   g_ws_extra = g_ws_display_extra = 52;
@@ -548,6 +563,8 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
   CHECK(g_settings.audio_frequency == kAudioFrequency_32040);
   CHECK(Settings_AudioFrequencyHz() == 32040);
   CHECK(g_settings.audio_master_volume == 85); /* env > settings > config */
+  CHECK(g_settings.audio_music_volume == 55);
+  CHECK(g_settings.audio_sfx_volume == 75);
   CHECK(!g_settings.ws_sprites);
   CHECK(g_settings.display_mode == kDisplayMode_Custom);
   CHECK(Settings_ExtendedAspectX() == 16 && Settings_ExtendedAspectY() == 10);
@@ -562,6 +579,8 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
   CHECK(Settings_Save(saved_path));
   CHECK(FileContains(saved_path, "window_scale = 6"));
   CHECK(FileContains(saved_path, "audio_master_volume = 40%"));
+  CHECK(FileContains(saved_path, "audio_music_volume = 55%"));
+  CHECK(FileContains(saved_path, "audio_sfx_volume = 75%"));
   CHECK(FileContains(saved_path, "audio_frequency = 32.04 kHz"));
   CHECK(FileContains(saved_path, "turbo_multiplier = 8"));
   CHECK(FileContains(saved_path, "cheat_moonjump = On"));
@@ -677,6 +696,8 @@ static void TestMutationApi(void) {
   CHECK(g_settings.menu_scale_percent == 0);
 
   const SettingDesc *volume = Settings_Find("audio_master_volume");
+  const SettingDesc *music_volume = Settings_Find("audio_music_volume");
+  const SettingDesc *sfx_volume = Settings_Find("audio_sfx_volume");
   CHECK(Settings_SetLong(volume, 87) == kSettingChange_Applied);
   CHECK(g_settings.audio_master_volume == 85);
   CHECK(s_observer_desc == volume);
@@ -687,6 +708,10 @@ static void TestMutationApi(void) {
   CHECK(g_settings.audio_master_volume == 40);
   CHECK(Settings_SetLong(volume, -1) == kSettingChange_Applied);
   CHECK(g_settings.audio_master_volume == 0);
+  CHECK(Settings_SetText(music_volume, "65%") == kSettingChange_Applied);
+  CHECK(g_settings.audio_music_volume == 65);
+  CHECK(Settings_SetLong(sfx_volume, 42) == kSettingChange_Applied);
+  CHECK(g_settings.audio_sfx_volume == 40);
 
   const SettingDesc *dialog_blip = Settings_Find("audio_dialog_blip");
   CHECK(Settings_SetLong(dialog_blip, 0) == kSettingChange_Applied);

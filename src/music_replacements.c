@@ -25,11 +25,12 @@ extern void (*g_rtl_spc_upload_hook)(uint32_t src);
 extern void (*g_rtl_apu_port_hook)(uint8_t port, uint8_t val);
 extern void (*g_rtl_music_mix_hook)(int16_t *buf, int frames);
 extern int g_dsp_voice_mute_srcn_min;
+extern void dsp_setMusicBusMuted(bool muted);
 
 /* ActRaiser's SPC driver: per-song instruments occupy srcn 0x0C and up; the
  * common sample bank (srcn 0x00-0x0B, uploaded once from 06:AC00) carries the
- * SFX, which must survive any song-bank swap and therefore never live in the
- * per-song range. Muting from the shared boundary silences music voices only. */
+ * SFX. That boundary is retained only for voices not yet tagged by logical
+ * track provenance. */
 
 /* Driver command vocabulary on APU port 0 ($2140). Anything other than these
  * controls and idle zero is a "start/resume song N" request. */
@@ -55,9 +56,16 @@ static int s_current_song = -1;
 static bool s_driver_paused;
 static bool s_host_paused;
 static uint64_t s_next_session_token;
+static int s_music_volume_percent = 100;
 
 static bool PlaybackPaused(void) {
   return s_driver_paused || s_host_paused;
+}
+
+void MusicReplacements_SetMusicVolumePercent(int volume_percent) {
+  if (volume_percent < 0) volume_percent = 0;
+  if (volume_percent > 100) volume_percent = 100;
+  s_music_volume_percent = volume_percent;
 }
 
 /* ---- streamer state (serialised by the APU lock) ----------------------- */
@@ -307,13 +315,16 @@ static void EndSession(const char *why) {
     fprintf(stderr, "[music] stop [music:%s] (%s)\n", s.session->name, why);
     if (s.v) stb_vorbis_close(s.v);
     memset(&s, 0, sizeof(s));
+    dsp_setMusicBusMuted(false);
     g_dsp_voice_mute_srcn_min = -1;
   }
   RtlApuUnlock();
 }
 
 static void ApplyVoiceMutePolicyLocked(void) {
-  g_dsp_voice_mute_srcn_min = s.session && !s_session_bypassed
+  const bool muted = s.session && !s_session_bypassed;
+  dsp_setMusicBusMuted(muted);
+  g_dsp_voice_mute_srcn_min = muted
       ? kActRaiserSpcMusicSourceMinimum : -1;
 }
 
@@ -326,7 +337,10 @@ static void StartSession(const MusicReplacement *entry, int song) {
     /* File vanished since the probe: fall back to authentic playback. */
     fprintf(stderr, "[music] [music:%s] open failed at play time (%d) — "
             "authentic\n", entry->name, error);
-    if (s.session) g_dsp_voice_mute_srcn_min = -1;
+    if (s.session) {
+      dsp_setMusicBusMuted(false);
+      g_dsp_voice_mute_srcn_min = -1;
+    }
     memset(&s, 0, sizeof(s));
     RtlApuUnlock();
     return;
@@ -455,6 +469,7 @@ static void MixMusic(int16_t *out, int out_frames) {
 
   const MusicReplacement *entry = s.session;
   const int gain = s.gain_percent;
+  const int music_volume = s_music_volume_percent;
   int output_rate = RtlGetAudioOutputRate();
   if (output_rate <= 0)
     output_rate = kHostAudioMinimumOutputFrequencyHz;
@@ -545,6 +560,7 @@ static void MixMusic(int16_t *out, int out_frames) {
                           frac * (3.0 * (p1 - p2) + p3 - p0)));
       int sample = (int)v;
       sample = (sample * gain) / kPercentScale;
+      sample = (sample * music_volume) / kPercentScale;
       if (!s_session_bypassed) {
         int mixed = out[i * 2 + ch] + sample;
         out[i * 2 + ch] = (int16_t)(mixed < -32768 ? -32768
