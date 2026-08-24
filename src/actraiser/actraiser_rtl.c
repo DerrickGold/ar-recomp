@@ -22,6 +22,9 @@
 #include "deterministic_hash.h"
 #include "host/host_display.h"   /* kHostDisplayFramebufferHeight */
 #include "settings.h"
+#include "session_fatal.h"
+#include "audio_presentation_policy.h"
+#include "hd_replacement_host.h"
 #include "hd_replacements.h"
 #include "music_replacements.h"
 #include "dev/sfx_census.h"
@@ -65,7 +68,6 @@ extern int snes_frame_counter;
 enum {
   kGameCoroutineStackReserveBytes = 2 * 1024 * 1024,
   kGameCoroutineStackCommitBytes = 64 * 1024,
-  kFallbackHostPageBytes = 4096,
   kRdnmiRepeatedReadWarningThreshold = 4096,
 };
 
@@ -516,7 +518,9 @@ static void ActRaiser_CopHook(CpuState *cpu) {
    * non-space path at $01:902D posts COP #$07 after drawing each character.
    * Suppress only this exact site: id 07 also drives unrelated game events. */
   const bool suppress_dialog_blip =
-      !g_settings.audio_dialog_blip && id == 0x07 && site == 0x01902D;
+      !AudioPresentationPolicy_ShouldEmitDialogBlip(
+          g_settings.audio_dialog_blip) &&
+      id == 0x07 && site == 0x01902D;
   if (!suppress_dialog_blip)
     cpu_write8(cpu, 0x00, kActRaiserWram_CopRequest, id);
   /* AR_COPLOG=1: log every COP-posted event id + game-frame + calling recomp
@@ -2301,6 +2305,35 @@ static int s_live_margin_bottom;
 static ActionBgPlan s_live_action_bg_plan;
 static bool s_live_bg_capture_pad_to_budget;
 
+/* Sim3D reports renderer-local contract state; this host seam owns the policy
+ * decision to end the session. Keeping that conversion beside the capture
+ * orchestration prevents the low-level renderer from depending on app state. */
+static void ActRaiser_ReportSim3DCaptureContractFailure(void) {
+  switch (Sim3D_GetCaptureContractFailure()) {
+    case kSim3DCaptureContract_RendererUnavailable:
+      SessionFatal_Request(
+          "Simulation town 3D is active, but its core renderer is unavailable. "
+          "Restart after checking graphics memory and driver stability, or "
+          "disable Simulation town 3D in settings.ini.");
+      break;
+    case kSim3DCaptureContract_SurfaceAllocation:
+      SessionFatal_Request(
+          "Simulation town 3D could not allocate or bind its core capture "
+          "surfaces. Close other graphics-heavy applications and restart, or "
+          "disable Simulation town 3D in settings.ini.");
+      break;
+    case kSim3DCaptureContract_ObjectSourcesUnavailable:
+      SessionFatal_Request(
+          "Simulation town 3D lost both of its object-rendering sources. "
+          "Restart the game. If this repeats, disable Simulation object "
+          "billboards in settings.ini and report the affected town/frame.");
+      break;
+    case kSim3DCaptureContract_Ok:
+    default:
+      break;
+  }
+}
+
 void ActRaiserDrawPpuFrame(void) {
   const uint8_t map_group = g_ram[kActRaiserWram_MapGroup];
   const uint8_t map_number = g_ram[kActRaiserWram_CurrentMap];
@@ -2332,6 +2365,7 @@ void ActRaiserDrawPpuFrame(void) {
   if (expected_owner == kActRaiserExactPositionOwner_None ||
       ActRaiser_GetExactPositionOwner() != expected_owner) {
     PpuClearObjExactPositions(g_ppu);
+    PpuClearObjCameraRelative(g_ppu);
     ActRaiser_MarkExactPositionOwner(kActRaiserExactPositionOwner_None);
   }
   ActRaiser_ApplyWidescreenPolicy();
@@ -2747,6 +2781,7 @@ void ActRaiserDrawPpuFrame(void) {
       .height = kActRaiserAuthenticHeight,
     };
     Sim3D_PrepareCapture(g_ppu, &request);
+    ActRaiser_ReportSim3DCaptureContractFailure();
   }
 
   /* AR_TILE_CENSUS=1: read-only HD tile-pack sizing survey (hd_tile_census.c). */
@@ -2843,6 +2878,13 @@ void ActRaiserDrawPpuFrame(void) {
    * unambiguous even though the stored OAM Y byte itself wraps at 256. */
   for (int m = 1; m <= g_ppu->extraBottomCur; m++)
     ppu_runMarginLine(g_ppu, kActRaiserAuthenticHeight + m);
+  const bool authentic_frame_valid =
+      PpuAuthenticSurfaceReady(g_ppu) &&
+      (!action || (g_ppu->inidisp & 0x80u) ||
+       (g_ppu->bgmode & 7u) != 1u ||
+       PpuAuthenticCameraFrameReady(
+           g_ppu, kPpuAuthenticCameraLayer_All));
+  ActRaiser_AuthenticCaptureFrameCompleted(authentic_frame_valid);
   DioramaPerformance_End(scanout_performance);
   DioramaPerformanceScope producer_finish_performance = {0};
   if (profile_diorama)
@@ -2858,6 +2900,7 @@ void ActRaiserDrawPpuFrame(void) {
         g_pixels + ActionApron_DisplayOffset(kPpuObjApron),
         ActionApron_SurfacePitch(width, kPpuObjApron),
         ActRaiser_ReadWram16(kActRaiserWram_GameFrame));
+    ActRaiser_ReportSim3DCaptureContractFailure();
     /* After scanout (the diorama planes only hold this frame's sprites now) and
      * before FrameSlot_Capture publishes them to the presentation path. */
     ActRaiser_DioramaHudObjFinish(width);
@@ -3349,11 +3392,9 @@ void ActRaiser_Warp(unsigned region, unsigned map) {
   }
 }
 
-/* (Re)create the game coroutine on its own 2MB stack. Split out of
- * RunOneFrameOfGame so the watchdog-trip path can rebuild it: a tripped frame
- * was left SUSPENDED mid-spin (the trip yields rather than unwinding — see
- * WatchdogCheck), so resuming that context would re-enter the same infinite
- * loop. Returns false if the coroutine could not be created. */
+/* Create the game coroutine on its own 2MB stack. Returns false if the
+ * supported coroutine contract cannot be established; callers end the
+ * session instead of attempting to continue with a partial runtime. */
 static bool CreateGameCoroutine(void) {
 #ifdef _WIN32
   /* FIBER_FLAG_FLOAT_SWITCH is REQUIRED, not optional: MS documents that with
@@ -3393,7 +3434,11 @@ static bool CreateGameCoroutine(void) {
      * crash). With a guard page the overflow faults immediately, at the site
      * that caused it. */
     long page = sysconf(_SC_PAGESIZE);
-    size_t guard = page > 0 ? (size_t)page : kFallbackHostPageBytes;
+    if (page <= 0) {
+      fprintf(stderr, "Failed to query the host page size\n");
+      return false;
+    }
+    size_t guard = (size_t)page;
     size_t total = kGameCoroutineStackReserveBytes + guard;
     void *map = mmap(NULL, total, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -3402,9 +3447,12 @@ static bool CreateGameCoroutine(void) {
       return false;
     }
     /* Stacks grow DOWN, so the guard belongs at the lowest address. */
-    if (mprotect(map, guard, PROT_NONE) != 0)
-      fprintf(stderr, "[coroutine] guard page unavailable (%s) — stack "
-                      "overflow will not fault cleanly\n", strerror(errno));
+    if (mprotect(map, guard, PROT_NONE) != 0) {
+      fprintf(stderr, "Failed to protect the game coroutine guard page: %s\n",
+              strerror(errno));
+      munmap(map, total);
+      return false;
+    }
     g_game_stack_map = map;
     g_game_stack_map_len = total;
     g_game_stack = (char *)map + guard;
@@ -3456,18 +3504,13 @@ void RunOneFrameOfGame(void) {
     { extern void (*g_watchdog_yield_hook)(void);
       g_watchdog_yield_hook = ActRaiser_YieldToHost; }
 #endif
-    if (!CreateGameCoroutine()) return;
-  }
-
-  /* A previous frame tripped the watchdog: its coroutine is suspended inside
-   * the spin it never left, so rebuild rather than resume. The emulated CPU
-   * state is re-initialized by game_coroutine's ResetHandler — i.e. this is a
-   * soft reset, which is the honest outcome of an unrecoverable hang. */
-  if (g_watchdog_tripped) {
-    fprintf(stderr, "[watchdog] rebuilding the game coroutine after a hang "
-                    "(the abandoned frame cannot be resumed)\n");
-    g_watchdog_tripped = 0;
-    if (!CreateGameCoroutine()) return;
+    if (!CreateGameCoroutine()) {
+      SessionFatal_Request(
+          "The game could not create its emulation coroutine. Restart the "
+          "game; if this repeats, check security software and virtual-memory "
+          "limits for this process.");
+      return;
+    }
   }
 
   ActRaiser_ApplyCheats();   /* host-side cheats (live settings, default off) */
@@ -3510,10 +3553,24 @@ void RunOneFrameOfGame(void) {
   SwitchToFiber(g_game_fiber);
 #else
   if (swapcontext(&g_host_ctx, &g_game_ctx) != 0) {
-    fprintf(stderr, "FATAL: swapcontext (host -> game) failed\n");
-    abort();
+    g_snes->forceNmi = false;
+    SessionFatal_Request(
+        "The operating system could not resume the emulation coroutine "
+        "(%s). Restart the game; if this repeats, check virtual-memory and "
+        "process limits.",
+        strerror(errno));
+    return;
   }
 #endif
+  if (g_watchdog_tripped) {
+    g_snes->forceNmi = false;
+    SessionFatal_Request(
+        "The emulated game stopped responding and the watchdog ended the "
+        "session. Your latest battery save will be flushed before exit. "
+        "Restart the game; if the same room hangs again, report the room and "
+        "active gameplay settings.");
+    return;
+  }
   g_snes->forceNmi = false;
 
   /* $4200 bit 7 is the hardware NMI gate. This matters when a game-coroutine

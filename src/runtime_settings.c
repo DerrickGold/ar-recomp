@@ -18,6 +18,7 @@
 #include "manual/manual_reader.h"
 #include "music_replacements.h"
 #include "save_system.h"
+#include "session_fatal.h"
 #include "settings_overlay.h"
 #include "user_data_dir.h"
 
@@ -27,6 +28,8 @@ extern SDL_Window *g_window;
 extern SDL_Renderer *g_renderer;
 extern bool g_new_ppu;
 extern bool g_ws_active;
+extern bool g_sim3d_textures_ready;
+extern bool g_sim3d_billboard_renderer_ready;
 
 bool RuntimeSettings_BuildSaveEditRequest(SaveEditRequest *edits) {
   static const int kRegionStates[kSaveProgressEdit_Count] = {
@@ -231,7 +234,7 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
   if (desc->field == &g_settings.audio_master_volume)
     HostAudio_SetMasterVolumePercent(g_settings.audio_master_volume);
   if (desc->field == &g_settings.audio_enabled)
-    HostAudio_SetEnabled(g_settings.audio_enabled);
+    (void)HostAudio_SetEnabled(g_settings.audio_enabled);
   if (desc->field == &g_settings.music_replacements)
     MusicReplacements_ApplySetting();
   if (desc->field == &g_settings.scene_inspector &&
@@ -259,6 +262,24 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
   if (desc->field == &g_settings.new_renderer) {
     g_new_ppu = g_settings.new_renderer || g_ws_active;
     HostInput_RequestPausedRedraw();
+  }
+  if (g_settings.sim3d_mode &&
+      (desc->field == &g_settings.sim3d_mode ||
+       desc->field == &g_settings.sim3d_object_billboards)) {
+    if (!g_sim3d_textures_ready) {
+      SessionFatal_Request(
+          "Simulation town 3D was selected, but its core renderer textures "
+          "are unavailable. Restart after checking graphics memory and driver "
+          "stability, or leave Simulation town 3D disabled.");
+      return;
+    } else if (g_settings.sim3d_object_billboards &&
+               !g_sim3d_billboard_renderer_ready) {
+      SessionFatal_Request(
+          "Simulation object billboards were selected, but their renderer "
+          "atlas is unavailable. Restart after checking graphics memory and "
+          "driver stability, or leave object billboards disabled.");
+      return;
+    }
   }
   if (desc->field == &g_settings.window_scale)
     HostDisplay_ApplyWindowScale();

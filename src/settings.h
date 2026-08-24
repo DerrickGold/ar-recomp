@@ -131,7 +131,7 @@ typedef enum {
  * still match its own InputClass/InputAction counts. */
 enum {
   kSettingsInputClasses = 2,
-  kSettingsInputActions = 25,
+  kSettingsInputActions = 26,
 };
 
 typedef enum {

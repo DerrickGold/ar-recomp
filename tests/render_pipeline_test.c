@@ -90,7 +90,7 @@ int main(void) {
     CHECK(logical_mode == SDL_LOGICAL_PRESENTATION_DISABLED);
     CHECK(!SDL_RenderViewportSet(renderer));
     CHECK(!SDL_RenderClipEnabled(renderer));
-    PresentationGeometry_PopFullOutput(renderer, &state);
+    CHECK(PresentationGeometry_PopFullOutput(renderer, &state));
     CHECK(SDL_GetRenderLogicalPresentation(
         renderer, &logical_w, &logical_h, &logical_mode));
     CHECK(logical_w == 1024 && logical_h == 768);

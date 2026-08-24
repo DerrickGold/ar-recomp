@@ -24,7 +24,8 @@ extern bool g_new_ppu;
 void PpuDrawWholeLineOldPpu(Ppu *ppu, int line);
 static void PpuDrawWholeLine(Ppu *ppu, int y);
 
-static bool ppu_evaluateSprites(Ppu* ppu, int line);
+static bool ppu_evaluateSprites(Ppu *ppu, int line, int exact_x_offset,
+                                bool capture_outputs);
 static uint16_t ppu_getVramRemap(Ppu* ppu);
 
 const uint8_t kPpuSpriteSizes[8][2] = {
@@ -126,6 +127,8 @@ void ppu_reset(Ppu* ppu) {
   {
     size_t pitch = ppu->renderPitch;
     uint8_t *renderBuffer = ppu->renderBuffer;
+    uint32_t authenticPitch = ppu->authenticRenderPitch;
+    uint8_t *authenticBuffer = ppu->authenticRenderBuffer;
     uint32_t renderFlags = ppu->renderFlags;
     uint32_t overlayPitch[kPpuOverlaySource_Count];
     uint8_t *overlayBuffer[kPpuOverlaySource_Count];
@@ -139,6 +142,8 @@ void ppu_reset(Ppu* ppu) {
     memset(ppu, 0, sizeof(*ppu));
     ppu->renderBuffer = renderBuffer;
     ppu->renderPitch = (uint32_t)pitch;
+    ppu->authenticRenderBuffer = authenticBuffer;
+    ppu->authenticRenderPitch = authenticPitch;
     ppu->renderFlags = renderFlags;
     memcpy(ppu->overlayRenderPitch, overlayPitch, sizeof(overlayPitch));
     memcpy(ppu->overlayRenderBuffer, overlayBuffer, sizeof(overlayBuffer));
@@ -168,6 +173,54 @@ void PpuBeginDrawing(Ppu *ppu, uint8_t *pixels, size_t pitch, uint32_t render_fl
   ppu->renderPitch = (uint)pitch;
   ppu->renderBuffer = pixels;
   ppu->renderFlags = render_flags;
+}
+
+bool PpuBindAuthenticSurface(Ppu *ppu, uint8_t *pixels, size_t pitch) {
+  const size_t minimum_width = ppu
+      ? kPpuXPixels + (size_t)ppu->extraLeftRight * 2u : 0;
+  if (!ppu || (pixels && (!pitch || pitch % sizeof(uint32_t) != 0 ||
+                         pitch / sizeof(uint32_t) < minimum_width ||
+                         pitch / sizeof(uint32_t) > kPpuSurfaceWidth)))
+    return false;
+  ppu->authenticRenderBuffer = pixels;
+  ppu->authenticRenderPitch = pixels ? (uint32_t)pitch : 0;
+  return true;
+}
+
+bool PpuAuthenticSurfaceBound(const Ppu *ppu) {
+  return ppu && ppu->authenticRenderBuffer &&
+      ppu->authenticRenderPitch != 0;
+}
+
+bool PpuSetAuthenticCameraFrame(
+    Ppu *ppu, uint8_t layer_mask,
+    const uint16_t bg1_hscroll[kPpuYPixels],
+    const uint16_t bg2_hscroll[kPpuYPixels], int obj_offset_x) {
+  if (!ppu || (layer_mask & ~kPpuAuthenticCameraLayer_All) ||
+      ((layer_mask & kPpuAuthenticCameraLayer_Bg1) && !bg1_hscroll) ||
+      ((layer_mask & kPpuAuthenticCameraLayer_Bg2) && !bg2_hscroll) ||
+      obj_offset_x < INT16_MIN || obj_offset_x > INT16_MAX)
+    return false;
+  if (layer_mask & kPpuAuthenticCameraLayer_Bg1)
+    memcpy(ppu->authenticHScroll[0], bg1_hscroll,
+           sizeof(ppu->authenticHScroll[0]));
+  if (layer_mask & kPpuAuthenticCameraLayer_Bg2)
+    memcpy(ppu->authenticHScroll[1], bg2_hscroll,
+           sizeof(ppu->authenticHScroll[1]));
+  ppu->authenticHScrollMask = layer_mask;
+  ppu->authenticObjOffsetX = (int16_t)obj_offset_x;
+  return true;
+}
+
+bool PpuAuthenticCameraFrameReady(const Ppu *ppu, uint8_t layer_mask) {
+  return ppu && !(layer_mask & ~kPpuAuthenticCameraLayer_All) &&
+      (ppu->authenticHScrollMask & layer_mask) == layer_mask;
+}
+
+void PpuClearAuthenticCameraFrame(Ppu *ppu) {
+  if (!ppu) return;
+  ppu->authenticHScrollMask = 0;
+  ppu->authenticObjOffsetX = 0;
 }
 
 void PpuClearOverlayBindings(Ppu *ppu) {
@@ -495,6 +548,16 @@ void PpuSetObjExactPosition(Ppu *ppu, uint8_t slot, int x, int y) {
   ppu->objPosValid[slot] = 1;
 }
 
+void PpuClearObjCameraRelative(Ppu *ppu) {
+  if (!ppu) return;
+  memset(ppu->objCameraRelative, 0, sizeof(ppu->objCameraRelative));
+}
+
+void PpuSetObjCameraRelative(Ppu *ppu, uint8_t slot, bool camera_relative) {
+  if (!ppu || slot >= 128) return;
+  ppu->objCameraRelative[slot] = camera_relative ? 1 : 0;
+}
+
 void PpuSetExtraVerticalSpace(Ppu *ppu, int top, int bottom) {
   ppu->extraTopCur = (uint8_t)IntMin(IntMax(top, 0), kPpuExtraTopBottom);
   ppu->extraBottomCur = (uint8_t)IntMin(IntMax(bottom, 0), kPpuExtraTopBottom);
@@ -757,12 +820,29 @@ static void PpuRenderLine(Ppu *ppu, int line) {
   }
   /* Margin lines use the frontend's exact signed OBJ sideband; authentic lines
    * retain the ordinary OAM path for slots without one. */
-  ppu->lineHasSprites = !PPU_forcedBlank(ppu) && ppu_evaluateSprites(ppu, line - 1);
+  ppu->lineHasSprites = !PPU_forcedBlank(ppu) &&
+      ppu_evaluateSprites(ppu, line - 1, 0, true);
 
   if (g_new_ppu) {
     PpuDrawWholeLine(ppu, line);
   } else {
     PpuDrawWholeLineOldPpu(ppu, line);
+    /* The legacy renderer has no host extraction path, so its framebuffer is
+     * already the complete native composition. Mirror that 256-pixel scanline
+     * into the comparison surface to keep the bind useful for configurations
+     * that do not otherwise require the new PPU. */
+    if (PpuAuthenticSurfaceReady(ppu)) {
+      const uint8_t *source = &ppu->renderBuffer[
+          (size_t)(line - 1) * ppu->renderPitch +
+          (size_t)ppu->extraLeftRight * sizeof(uint32_t)];
+      uint8_t *destination_row = &ppu->authenticRenderBuffer[
+          (size_t)PpuOutputRow(ppu, line) * ppu->authenticRenderPitch];
+      memset(destination_row, 0, ppu->authenticRenderPitch);
+      uint8_t *destination = destination_row +
+          (size_t)(PpuSurfaceApron(ppu, ppu->authenticRenderPitch) +
+                   ppu->extraLeftRight) * sizeof(uint32_t);
+      memcpy(destination, source, kPpuXPixels * sizeof(uint32_t));
+    }
   }
 }
 
@@ -2429,6 +2509,192 @@ static void PpuDrawBackgrounds(Ppu *ppu, int y, bool sub) {
   }
 }
 
+/* Resolve one already-rendered priority pair into an ARGB scanline. The live
+ * presentation and independent authentic pass share this exact color-window,
+ * fixed-color, add/subtract and brightness path. */
+static void PpuCompositeResolvedLine(
+    Ppu *ppu, int y, const PpuZbufType *main, const PpuZbufType *sub,
+    bool rendered_subscreen, uint8_t *render_buffer, uint32_t render_pitch) {
+  if (!render_buffer || !render_pitch) return;
+
+  PpuWindows cwin;
+  PpuWindows_Calc(&cwin, ppu, 5, y);
+  static const uint8 kCwBitsMod[8] = {
+    0x00, 0xff, 0xff, 0x00,
+    0xff, 0x00, 0xff, 0x00,
+  };
+  uint32 cw_clip_math =
+      ((cwin.bits & kCwBitsMod[PPU_clipMode(ppu)]) ^
+       kCwBitsMod[PPU_clipMode(ppu) + 4]) |
+      (((cwin.bits & kCwBitsMod[PPU_preventMathMode(ppu)]) ^
+        kCwBitsMod[PPU_preventMathMode(ppu) + 4]) << 8);
+  uint32 *dst_org = (uint32 *)&render_buffer[
+      (size_t)PpuOutputRow(ppu, y) * render_pitch];
+
+  int composite_left = ppu->extraLeftCur;
+  int composite_right = ppu->extraRightCur;
+  if (ppu->wsHudSplitHeight && y < ppu->wsHudSplitHeight) {
+    composite_left = ppu->extraLeftRight;
+    composite_right = ppu->extraLeftRight;
+  }
+  int surface_apron = PpuSurfaceApron(ppu, render_pitch);
+  uint32 *scanline_start = dst_org + surface_apron;
+  if (composite_left < ppu->extraLeftRight) {
+    memset(scanline_start, 0,
+           (size_t)(ppu->extraLeftRight - composite_left) * sizeof(uint32));
+  }
+  if (composite_right < ppu->extraLeftRight) {
+    uint32 *right_gap = scanline_start + ppu->extraLeftRight +
+                          kPpuXPixels + composite_right;
+    memset(right_gap, 0,
+           (size_t)(ppu->extraLeftRight - composite_right) * sizeof(uint32));
+  }
+
+  uint32 *dst = scanline_start + ppu->extraLeftRight - composite_left;
+  uint32 windex = 0;
+  do {
+    uint32 left = cwin.edges[windex] + kPpuExtraLeftRight;
+    uint32 right = cwin.edges[windex + 1] + kPpuExtraLeftRight;
+    uint32 clip_color_mask = (cw_clip_math & 1) ? 0x1f : 0;
+    uint32 math_enabled_cur =
+        PPU_mathEnabled(ppu) & ((cw_clip_math & 0x100) ? -1 : 0);
+    uint32 fixed_color = ppu->fixedColor;
+    if (math_enabled_cur == 0 ||
+        (fixed_color == 0 && !PPU_halfColor(ppu) && !rendered_subscreen)) {
+      uint32 i = left;
+      do {
+        uint32 color = ppu->cgram[main[i] & 0xff];
+        dst[0] = ppu->brightnessMult[color & clip_color_mask] << 16 |
+          ppu->brightnessMult[(color >> 5) & clip_color_mask] << 8 |
+          ppu->brightnessMult[(color >> 10) & clip_color_mask];
+      } while (dst++, ++i < right);
+    } else {
+      uint8 *half_color_map = PPU_halfColor(ppu)
+          ? ppu->brightnessMultHalf : ppu->brightnessMult;
+      math_enabled_cur |=
+          PPU_addSubscreen(ppu) << 8 | PPU_subtractColor(ppu) << 9;
+      uint32 i = left;
+      do {
+        uint32 color = ppu->cgram[main[i] & 0xff], color2;
+        uint8 main_layer = (main[i] >> 8) & 0xf;
+        uint32 r = color & clip_color_mask;
+        uint32 g = (color >> 5) & clip_color_mask;
+        uint32 b = (color >> 10) & clip_color_mask;
+        uint8 *color_map = ppu->brightnessMult;
+        if (math_enabled_cur & (1 << main_layer)) {
+          if (math_enabled_cur & 0x100) {
+            if ((sub[i] & 0xff) != 0) {
+              color2 = ppu->cgram[sub[i] & 0xff];
+              color_map = half_color_map;
+            } else {
+              color2 = fixed_color;
+            }
+          } else {
+            color2 = fixed_color;
+            color_map = half_color_map;
+          }
+          uint32 r2 = color2 & 0x1f;
+          uint32 g2 = (color2 >> 5) & 0x1f;
+          uint32 b2 = (color2 >> 10) & 0x1f;
+          if (math_enabled_cur & 0x200) {
+            r = r >= r2 ? r - r2 : 0;
+            g = g >= g2 ? g - g2 : 0;
+            b = b >= b2 ? b - b2 : 0;
+          } else {
+            r += r2;
+            g += g2;
+            b += b2;
+          }
+        }
+        dst[0] = color_map[b] | color_map[g] << 8 | color_map[r] << 16;
+      } while (dst++, ++i < right);
+    }
+  } while (cw_clip_math >>= 1, ++windex < cwin.nr);
+}
+
+bool PpuAuthenticSurfaceReady(const Ppu *ppu) {
+  if (!PpuAuthenticSurfaceBound(ppu)) return false;
+  const size_t width =
+      ppu->authenticRenderPitch / sizeof(uint32_t);
+  const size_t required =
+      kPpuXPixels + (size_t)ppu->extraLeftRight * 2u;
+  return width >= required && width <= kPpuSurfaceWidth;
+}
+
+/* Render the native 256-pixel camera as a genuinely separate PPU pass. The
+ * enhanced pass owns widened margins, extracted planes and relaxed OBJ
+ * limits; this pass temporarily restores native geometry, independently
+ * supplied per-layer camera phases and hardware sprite limits. None of its
+ * transient PPU status is allowed to feed back into emulation. */
+static void PpuDrawAuthenticLine(Ppu *ppu, int y) {
+  if (!PpuAuthenticSurfaceReady(ppu) || y < 1 || y > kPpuYPixels)
+    return;
+
+  const uint8_t saved_extra_left = ppu->extraLeftCur;
+  const uint8_t saved_extra_right = ppu->extraRightCur;
+  const uint8_t saved_extra_budget = ppu->extraLeftRight;
+  const uint32_t saved_render_flags = ppu->renderFlags;
+  const uint16_t saved_hscroll0 = ppu->hScroll[0];
+  const uint16_t saved_hscroll1 = ppu->hScroll[1];
+  const bool saved_line_has_sprites = ppu->lineHasSprites;
+  const bool saved_range_over = ppu->rangeOver;
+  const bool saved_time_over = ppu->timeOver;
+  const PpuMode7Override saved_m7_override = ppu->m7Override;
+  uint8_t *saved_overlay_buffer[kPpuOverlaySource_Count];
+  uint32_t saved_overlay_pitch[kPpuOverlaySource_Count];
+  memcpy(saved_overlay_buffer, ppu->overlayRenderBuffer,
+         sizeof(saved_overlay_buffer));
+  memcpy(saved_overlay_pitch, ppu->overlayRenderPitch,
+         sizeof(saved_overlay_pitch));
+
+  ppu->extraLeftCur = 0;
+  ppu->extraRightCur = 0;
+  ppu->extraLeftRight = 0;
+  ppu->renderFlags &= ~kPpuRenderFlags_NoSpriteLimits;
+  memset(ppu->overlayRenderBuffer, 0, sizeof(ppu->overlayRenderBuffer));
+  memset(ppu->overlayRenderPitch, 0, sizeof(ppu->overlayRenderPitch));
+  memset(&ppu->m7Override, 0, sizeof(ppu->m7Override));
+  const int line_index = y - 1;
+  if (ppu->authenticHScrollMask & kPpuAuthenticCameraLayer_Bg1)
+    ppu->hScroll[0] = ppu->authenticHScroll[0][line_index];
+  if (ppu->authenticHScrollMask & kPpuAuthenticCameraLayer_Bg2)
+    ppu->hScroll[1] = ppu->authenticHScroll[1][line_index];
+
+  ClearBackdrop(&ppu->objBuffer);
+  ppu->lineHasSprites = !PPU_forcedBlank(ppu) &&
+      ppu_evaluateSprites(
+          ppu, line_index, ppu->authenticObjOffsetX, false);
+  ClearBackdrop(&ppu->bgBuffers[0]);
+  PpuDrawBackgrounds(ppu, y, false);
+
+  bool rendered_subscreen = false;
+  ClearBackdrop(&ppu->bgBuffers[1]);
+  if (PPU_preventMathMode(ppu) != 3 && PPU_addSubscreen(ppu) &&
+      PPU_mathEnabled(ppu) && ppu->screenEnabled[1] != 0) {
+    PpuDrawBackgrounds(ppu, y, true);
+    rendered_subscreen = true;
+  }
+  PpuCompositeResolvedLine(
+      ppu, y, ppu->bgBuffers[0].data, ppu->bgBuffers[1].data,
+      rendered_subscreen, ppu->authenticRenderBuffer,
+      ppu->authenticRenderPitch);
+
+  ppu->extraLeftCur = saved_extra_left;
+  ppu->extraRightCur = saved_extra_right;
+  ppu->extraLeftRight = saved_extra_budget;
+  ppu->renderFlags = saved_render_flags;
+  ppu->hScroll[0] = saved_hscroll0;
+  ppu->hScroll[1] = saved_hscroll1;
+  ppu->lineHasSprites = saved_line_has_sprites;
+  ppu->rangeOver = saved_range_over;
+  ppu->timeOver = saved_time_over;
+  ppu->m7Override = saved_m7_override;
+  memcpy(ppu->overlayRenderBuffer, saved_overlay_buffer,
+         sizeof(saved_overlay_buffer));
+  memcpy(ppu->overlayRenderPitch, saved_overlay_pitch,
+         sizeof(saved_overlay_pitch));
+}
+
 static NOINLINE void PpuDrawWholeLine(Ppu *ppu, int y) {
   PpuClearOverlayRenderLine(ppu, y);
   if (PPU_forcedBlank(ppu)) {
@@ -2437,6 +2703,11 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, int y) {
      * leave last frame's apron content standing beside a blanked centre. */
     size_t n = ppu->renderPitch;
     memset(dst, 0, n);
+    if (PpuAuthenticSurfaceReady(ppu)) {
+      uint8 *authentic = &ppu->authenticRenderBuffer[
+          (size_t)PpuOutputRow(ppu, y) * ppu->authenticRenderPitch];
+      memset(authentic, 0, ppu->authenticRenderPitch);
+    }
     return;
   }
 
@@ -2446,7 +2717,6 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, int y) {
   /* This filter needs the COMPLETE main priority resolve, so it cannot be
    * written from PpuFinishBackgroundOverlay while later layers are pending. */
   PpuWriteMainScreenWinnerOverlayLines(ppu, y);
-
   bool rendered_subscreen = false;
   if (PPU_preventMathMode(ppu) != 3 && PPU_addSubscreen(ppu) && PPU_mathEnabled(ppu)) {
     ClearBackdrop(&ppu->bgBuffers[1]);
@@ -2460,113 +2730,15 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, int y) {
     }
   }
 
-  // Color window affects the drawing mode in each region
-  PpuWindows cwin;
-  PpuWindows_Calc(&cwin, ppu, 5, y);
-  static const uint8 kCwBitsMod[8] = {
-    0x00, 0xff, 0xff, 0x00,
-    0xff, 0x00, 0xff, 0x00,
-  };
-  uint32 cw_clip_math = ((cwin.bits & kCwBitsMod[PPU_clipMode(ppu)]) ^ kCwBitsMod[PPU_clipMode(ppu) + 4]) |
-    ((cwin.bits & kCwBitsMod[PPU_preventMathMode(ppu)]) ^ kCwBitsMod[PPU_preventMathMode(ppu) + 4]) << 8;
-
-  uint32 *dst = (uint32*)&ppu->renderBuffer[(size_t)PpuOutputRow(ppu, y) * ppu->renderPitch], *dst_org = dst;
-
-  /* Normal scanlines cover only the finite world's live side margins. HUD
-   * split lines cover the full presentation budget so their edge-anchored BG3
-   * chunks survive at a level boundary. PpuLayerExtra made the color-window
-   * spans use the matching full interval above. */
-  int composite_left = ppu->extraLeftCur;
-  int composite_right = ppu->extraRightCur;
-  if (ppu->wsHudSplitHeight && y < ppu->wsHudSplitHeight) {
-    composite_left = ppu->extraLeftRight;
-    composite_right = ppu->extraLeftRight;
-  }
-  /* + the apron so the scanline span sits CENTRED in a wider surface, matching
-   * where PpuWriteOverlayRenderLine's pitch-derived texture_extra puts the
-   * captured layers. Without it the backdrop plane (this buffer) would be
-   * flush-left while every captured plane was centred, and the diorama would
-   * composite them offset from each other by the apron. Zero when the surface
-   * is bound at scanline width, which is every non-diorama bind. */
-  int surface_apron = PpuSurfaceApron(ppu, ppu->renderPitch);
-  uint32 *scanline_start = dst_org + surface_apron;
-
-  /* Finite worlds can contract either live margin while keeping a fixed-size
-   * presentation surface. Those newly inactive columns were outside the
-   * compositor's write span and therefore retained pixels from the preceding
-   * frame. Clear only the collapsed strips; the live interval below is still
-   * authored entirely by the authentic color-window compositor. */
-  if (composite_left < ppu->extraLeftRight) {
-    memset(scanline_start, 0,
-           (size_t)(ppu->extraLeftRight - composite_left) * sizeof(uint32));
-  }
-  if (composite_right < ppu->extraLeftRight) {
-    uint32 *right_gap = scanline_start + ppu->extraLeftRight +
-                          kPpuXPixels + composite_right;
-    memset(right_gap, 0,
-           (size_t)(ppu->extraLeftRight - composite_right) * sizeof(uint32));
-  }
-
-  dst = scanline_start + ppu->extraLeftRight - composite_left;
-
-  uint32 windex = 0;
-  do {
-    uint32 left = cwin.edges[windex] + kPpuExtraLeftRight, right = cwin.edges[windex + 1] + kPpuExtraLeftRight;
-    // If clip is set, then zero out the rgb values from the main screen.
-    uint32 clip_color_mask = (cw_clip_math & 1) ? 0x1f : 0;
-    uint32 math_enabled_cur = PPU_mathEnabled(ppu) & ((cw_clip_math & 0x100) ? -1 : 0);
-    uint32 fixed_color = ppu->fixedColor;
-    if (math_enabled_cur == 0 || fixed_color == 0 && !PPU_halfColor(ppu) && !rendered_subscreen) {
-      // Math is disabled (or has no effect), so can avoid the per-pixel maths check
-      uint32 i = left;
-      do {
-        uint32 color = ppu->cgram[ppu->bgBuffers[0].data[i] & 0xff];
-        dst[0] = ppu->brightnessMult[color & clip_color_mask] << 16 |
-          ppu->brightnessMult[(color >> 5) & clip_color_mask] << 8 |
-          ppu->brightnessMult[(color >> 10) & clip_color_mask];
-      } while (dst++, ++i < right);
-    } else {
-      uint8 *half_color_map = PPU_halfColor(ppu) ? ppu->brightnessMultHalf : ppu->brightnessMult;
-      // Store this in locals
-      math_enabled_cur |= PPU_addSubscreen(ppu) << 8 | PPU_subtractColor(ppu) << 9;
-      // Need to check for each pixel whether to use math or not based on the main screen layer.
-      uint32 i = left;
-      do {
-        uint32 color = ppu->cgram[ppu->bgBuffers[0].data[i] & 0xff], color2;
-        uint8 main_layer = (ppu->bgBuffers[0].data[i] >> 8) & 0xf;
-        uint32 r = color & clip_color_mask;
-        uint32 g = (color >> 5) & clip_color_mask;
-        uint32 b = (color >> 10) & clip_color_mask;
-        uint8 *color_map = ppu->brightnessMult;
-        if (math_enabled_cur & (1 << main_layer)) {
-          if (math_enabled_cur & 0x100) {  // addSubscreen ?
-            if ((ppu->bgBuffers[1].data[i] & 0xff) != 0)
-              color2 = ppu->cgram[ppu->bgBuffers[1].data[i] & 0xff], color_map = half_color_map;
-            else  // Don't halve if PPU_addSubscreen(ppu) && backdrop
-              color2 = fixed_color;
-          } else {
-            color2 = fixed_color, color_map = half_color_map;
-          }
-          uint32 r2 = (color2 & 0x1f), g2 = ((color2 >> 5) & 0x1f), b2 = ((color2 >> 10) & 0x1f);
-          if (math_enabled_cur & 0x200) {  // subtractColor?
-            r = (r >= r2) ? r - r2 : 0;
-            g = (g >= g2) ? g - g2 : 0;
-            b = (b >= b2) ? b - b2 : 0;
-          } else {
-            r += r2;
-            g += g2;
-            b += b2;
-          }
-        }
-        dst[0] = color_map[b] | color_map[g] << 8 | color_map[r] << 16;
-      } while (dst++, ++i < right);
-    }
-  } while (cw_clip_math >>= 1, ++windex < cwin.nr);
+  PpuCompositeResolvedLine(
+      ppu, y, ppu->bgBuffers[0].data, ppu->bgBuffers[1].data,
+      rendered_subscreen, ppu->renderBuffer, ppu->renderPitch);
 
   if (!(ppu->overlayCaptures[kPpuOverlaySource_Obj].flags &
         kPpuOverlayFlag_MarkFullAddSubscreen))
     PpuWriteOverlayRenderLine(ppu, kPpuOverlaySource_Obj, y);
 
+  PpuDrawAuthenticLine(ppu, y);
 }
 
 bool PpuResolveObjSlot(Ppu *ppu, uint8_t slot, PpuObjPart *out_part) {
@@ -2711,7 +2883,8 @@ bool PpuRasterizeObjRange(Ppu *ppu, uint8_t first, uint8_t count,
                            pitch);
 }
 
-static bool ppu_evaluateSprites(Ppu* ppu, int line) {
+static bool ppu_evaluateSprites(Ppu *ppu, int line, int exact_x_offset,
+                                bool capture_outputs) {
 
   // TODO: iterate over oam normally to determine in-range sprites,
   //   then iterate those in-range sprites in reverse for tile-fetching
@@ -2767,6 +2940,10 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
     if(on_line) {
       // in y-range, get the x location, using the high bit as well
       int x = PpuObjScreenX(ppu, index);
+      /* Coordinate fidelity and camera ownership are different contracts.
+       * Only an explicitly world-owned slot follows the independently
+       * resolved authentic camera; an exact HUD coordinate remains fixed. */
+      if (ppu->objCameraRelative[slot]) x += exact_x_offset;
       // SNES OAM x is 9-bit; values >255 normally wrap to negative so sprites
       // can straddle the LEFT edge. In widescreen that wrap would also pull
       // legitimate right-margin sprites (screen x 256..) to the left, hiding
@@ -2801,7 +2978,8 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
         int prio = SPRITE_PRIO_TO_PRIO((oam1 & 0x3000) >> 12, (oam1 & 0x800) == 0);
         PpuZbufType z = paletteBase + (prio << 8);
         PpuObjRangeCapture *range_capture = &ppu->objRangeCapture;
-        const bool capture_range_slot = range_capture->pixels &&
+        const bool capture_range_slot = capture_outputs &&
+            range_capture->pixels &&
             range_capture->count && slot >= range_capture->first &&
             slot < range_capture->first + range_capture->count &&
             line >= range_capture->y0 && line < range_capture->y1;
@@ -2824,7 +3002,7 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
             int slot = index >> 1;
             PpuOverlayCapture *obj_capture =
                 &ppu->overlayCaptures[kPpuOverlaySource_Obj];
-            bool capture_slot = PpuOverlayActiveOnLine(
+            bool capture_slot = capture_outputs && PpuOverlayActiveOnLine(
                 ppu, kPpuOverlaySource_Obj, line) &&
                 obj_capture->oamCount && slot >= obj_capture->oamFirst &&
                 slot < obj_capture->oamFirst + obj_capture->oamCount;

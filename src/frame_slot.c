@@ -26,6 +26,7 @@
 #include "actraiser_rtl.h"
 #include "common_rtl.h"      /* g_ram, g_ppu */
 #include "frame_timing.h"
+#include "hd_replacement_host.h"
 #include "snes/ppu.h"        /* PPU_mode, PpuOverlay* */
 
 /* main.c-owned globals with no header declaration, read here. */
@@ -495,6 +496,11 @@ void FrameSlot_Capture(FrameSlot *dst) {
   /* Latched, not read from g_ppu, for the same reason extra_left_cur is. */
   ActRaiser_LiveVerticalMargins(
       &dst->ws_extra_top, &dst->ws_extra_bottom);
+  /* The PPU authors the native camera as its own centred 256-pixel pass; this
+   * crop no longer translates a completed enhanced scanout. */
+  dst->authentic_x0 = g_ws_extra;
+  dst->authentic_y0 = dst->ws_extra_top;
+  dst->authentic_frame_serial = ActRaiser_AuthenticFrameSerial();
   dst->obj_apron = kPpuObjApron;
   /* Density-corrected here, at the D6 producer, so present.c consumes a value
    * already expressed in PHYSICAL output pixels (0 = auto passes through). */

@@ -7,6 +7,7 @@
 #include "constants.h"
 #include "gpu_shader_blob.h"
 #include "settings.h"
+#include "session_fatal.h"
 
 /* Mirrors the uniform block in src/shaders/crt.frag.glsl field-for-field. All
  * scalars on purpose: packing any pair into a vec2 would shift every later
@@ -61,6 +62,11 @@ static SDL_GPURenderState *s_state;
 static SDL_GPUDevice *s_device;
 static bool s_shader_attempted;
 
+static const char *CrtSdlErrorOr(const char *fallback) {
+  const char *error = SDL_GetError();
+  return error && error[0] ? error : fallback;
+}
+
 static CrtMode Mode(void) {
   if (!s_passthrough_checked) {
     s_passthrough_checked = true;
@@ -107,8 +113,12 @@ static bool EnsureScene(SDL_Renderer *renderer, int width, int height) {
    * produces stair-stepping along the bow. The game's own art is still
    * nearest-sampled when it is drawn INTO this target, so pixels stay crisp
    * everywhere the warp is not actually bending them. */
-  SDL_SetTextureScaleMode(s_scene, SDL_SCALEMODE_LINEAR);
-  SDL_SetTextureBlendMode(s_scene, SDL_BLENDMODE_NONE);
+  if (!SDL_SetTextureScaleMode(s_scene, SDL_SCALEMODE_LINEAR) ||
+      !SDL_SetTextureBlendMode(s_scene, SDL_BLENDMODE_NONE)) {
+    fprintf(stderr, "[crt] scene target setup failed: %s\n", SDL_GetError());
+    ReleaseScene();
+    return false;
+  }
   s_scene_w = width;
   s_scene_h = height;
   return true;
@@ -154,23 +164,56 @@ bool CrtPost_Begin(SDL_Renderer *renderer) {
     return false;
   }
 
-  /* Shader first: a machine without one gets the ORIGINAL path, and checking
-   * before allocating avoids reserving the target only to bail. */
-  if (mode == kCrtMode_Full && !EnsureShader(renderer)) return false;
+  /* Once selected, CRT is part of the promised presentation in authentic and
+   * enhanced views alike. Silently dropping it would make the comparison lie
+   * about the player's graphics configuration. */
+  if (mode == kCrtMode_Full && !EnsureShader(renderer)) {
+    SessionFatal_Request(
+        "CRT processing was enabled, but the renderer could not create its "
+        "GPU shader (%s). Restart with GPU shader effects available, update "
+        "your graphics driver, or disable CRT processing.",
+        CrtSdlErrorOr("no compatible GPU device"));
+    return false;
+  }
 
   int width = 0, height = 0;
-  SDL_GetRenderOutputSize(renderer, &width, &height);
-  if (!EnsureScene(renderer, width, height)) return false;
+  if (!SDL_GetRenderOutputSize(renderer, &width, &height) ||
+      !EnsureScene(renderer, width, height)) {
+    SessionFatal_Request(
+        "CRT processing was enabled, but its %dx%d render target could not "
+        "be created (%s). Restart the game after checking graphics memory "
+        "and driver availability, or disable CRT processing.",
+        width, height, CrtSdlErrorOr("invalid output size"));
+    return false;
+  }
 
-  SDL_SetRenderTarget(renderer, s_scene);
+  if (!SDL_SetRenderTarget(renderer, s_scene)) {
+    SessionFatal_Request(
+        "CRT processing could not bind its render target (%s). Restart the "
+        "game; if this repeats, update your graphics driver or disable CRT "
+        "processing.",
+        SDL_GetError());
+    return false;
+  }
   /* The target carries its own logical presentation state (SDL_render.h: "Each
    * render target has its own logical presentation state"), which is what lets
    * PresentCompositeScene's per-mode logical-presentation handling work
    * unchanged in here. Start from a known state each frame. */
-  SDL_SetRenderLogicalPresentation(renderer, 0, 0,
-                                   SDL_LOGICAL_PRESENTATION_DISABLED);
-  SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-  SDL_RenderClear(renderer);
+  if (!SDL_SetRenderLogicalPresentation(
+          renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED) ||
+      !SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255) ||
+      !SDL_RenderClear(renderer)) {
+    char error[256];
+    snprintf(error, sizeof(error), "%s",
+             CrtSdlErrorOr("render-target setup failed"));
+    (void)SDL_SetRenderTarget(renderer, NULL);
+    SessionFatal_Request(
+        "CRT processing could not prepare its render target (%s). Restart "
+        "the game; if this repeats, update your graphics driver or disable "
+        "CRT processing.",
+        error);
+    return false;
+  }
   s_engaged = true;
   s_engaged_mode = mode;
   return true;
@@ -208,7 +251,14 @@ SDL_Rect CrtPost_End(SDL_Renderer *renderer,
   /* Before unbinding — this reads the scene target's own presentation state. */
   image = ResolveImageRect(renderer, image);
 
-  SDL_SetRenderTarget(renderer, NULL);
+  if (!SDL_SetRenderTarget(renderer, NULL)) {
+    SessionFatal_Request(
+        "CRT processing could not restore the window render target (%s). "
+        "Restart the game; if this repeats, update your graphics driver or "
+        "disable CRT processing.",
+        CrtSdlErrorOr("render-target restore failed"));
+    return image;
+  }
 
   /* The resolve must cover the whole backbuffer, so logical presentation has to
    * come off for the duration — but it gets PUT BACK.
@@ -223,13 +273,12 @@ SDL_Rect CrtPost_End(SDL_Renderer *renderer,
   int logical_w = 0, logical_h = 0;
   SDL_RendererLogicalPresentation logical_mode =
       SDL_LOGICAL_PRESENTATION_DISABLED;
-  SDL_GetRenderLogicalPresentation(renderer, &logical_w, &logical_h,
-                                   &logical_mode);
-
-  SDL_SetRenderLogicalPresentation(renderer, 0, 0,
-                                   SDL_LOGICAL_PRESENTATION_DISABLED);
-  SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-  SDL_RenderClear(renderer);
+  bool resolved = SDL_GetRenderLogicalPresentation(
+      renderer, &logical_w, &logical_h, &logical_mode) &&
+      SDL_SetRenderLogicalPresentation(
+          renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED) &&
+      SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255) &&
+      SDL_RenderClear(renderer);
 
   if (s_engaged_mode == kCrtMode_Full && s_state) {
     /* An empty rect would divide by zero in the shader; the whole target is
@@ -266,18 +315,25 @@ SDL_Rect CrtPost_End(SDL_Renderer *renderer,
     uniforms.brightness =
         (float)g_settings.crt_brightness_x100 / (float)kPercentScale;
 
-    SDL_SetGPURenderStateFragmentUniforms(s_state, 0, &uniforms,
-                                          (Uint32)sizeof uniforms);
-    SDL_SetGPURenderState(renderer, s_state);
+    resolved = resolved && SDL_SetGPURenderStateFragmentUniforms(
+        s_state, 0, &uniforms, (Uint32)sizeof uniforms);
+    resolved = resolved && SDL_SetGPURenderState(renderer, s_state);
   }
 
-  SDL_RenderTexture(renderer, s_scene, NULL, NULL);
+  resolved = resolved && SDL_RenderTexture(renderer, s_scene, NULL, NULL);
 
   if (s_engaged_mode == kCrtMode_Full && s_state)
-    SDL_SetGPURenderState(renderer, NULL);
+    resolved = SDL_SetGPURenderState(renderer, NULL) && resolved;
 
-  SDL_SetRenderLogicalPresentation(renderer, logical_w, logical_h,
-                                   logical_mode);
+  resolved = SDL_SetRenderLogicalPresentation(
+      renderer, logical_w, logical_h, logical_mode) && resolved;
+  if (!resolved) {
+    SessionFatal_Request(
+        "CRT processing could not resolve the completed frame (%s). Restart "
+        "the game; if this repeats, update your graphics driver or disable "
+        "CRT processing.",
+        CrtSdlErrorOr("frame resolve failed"));
+  }
   return image;
 }
 

@@ -35,12 +35,15 @@ typedef struct ActRaiserActionBgObserver {
   ActionRoomScene *room_scene;
   ActionRoomSceneFrameState room_frame;
   ActionRoomSceneFrameState previous_room_frame;
+  ActionRoomSceneFrameState authentic_room_frame;
   uint16_t last_game_frame;
   uint16_t last_room_camera_x;
   uint16_t prior_room_camera_x;
   uint16_t room_frame_current_camera_x;
   uint16_t room_frame_raster_camera_x;
   uint16_t room_frame_prior_camera_x;
+  uint16_t last_authentic_camera_x;
+  uint16_t last_capture_live_camera_x;
   uint8_t map_group;
   uint8_t map_number;
   bool reported_fallback[kActRaiserActionBgFallback_Count];
@@ -53,6 +56,8 @@ typedef struct ActRaiserActionBgObserver {
   bool room_frame_uses_previous;
   bool room_frame_raster_matches_current;
   bool room_camera_valid;
+  bool authentic_camera_valid;
+  bool capture_live_camera_valid;
   bool room_scene_entry_frame;
   bool reported_room_frame_mismatch;
   bool reported_room_scene_hle_fallback[kActionBgLayerCount];
@@ -95,6 +100,8 @@ static ActRaiserActionBgProvider s_provider[kActionBgLayerCount];
 
 _Static_assert(kActionBgLayerCount == 2,
                "ActRaiser action HLE currently owns BG1/BG2 only");
+_Static_assert(kActionRoomSceneFrameHeight == kPpuYPixels,
+               "authentic camera frames must cover every PPU line");
 _Static_assert(kActRaiserBgLayerStateStride == 4,
                "background capture offsets assume a four-byte layer stride");
 
@@ -568,6 +575,8 @@ bool ActRaiserActionBg_InitRoomScenes(const uint8_t *rom, size_t rom_size) {
   s_observer.previous_room_frame_valid = false;
   s_observer.room_frame_uses_previous = false;
   s_observer.room_camera_valid = false;
+  s_observer.authentic_camera_valid = false;
+  s_observer.capture_live_camera_valid = false;
   s_observer.room_scene_entry_frame = false;
   s_observer.reported_room_frame_mismatch = false;
   memset(s_observer.reported_room_scene_hle_fallback, 0,
@@ -608,6 +617,8 @@ static void ResetWorlds(void) {
   s_observer.previous_room_frame_valid = false;
   s_observer.room_frame_uses_previous = false;
   s_observer.room_camera_valid = false;
+  s_observer.authentic_camera_valid = false;
+  s_observer.capture_live_camera_valid = false;
   s_observer.reported_room_frame_mismatch = false;
   memset(s_observer.reported_room_scene_hle_fallback, 0,
          sizeof(s_observer.reported_room_scene_hle_fallback));
@@ -962,24 +973,122 @@ static bool SyncFrameIdentity(const uint8_t *wram, size_t wram_size) {
   return true;
 }
 
+static uint16_t ResolveAuthenticActionCameraX(
+    const uint8_t *wram, size_t wram_size, uint16_t live_camera_x) {
+  if (!wram || wram_size < kActRaiserWramSize)
+    return live_camera_x;
+  uint16_t subject_x;
+  const uint16_t player_handler =
+      ReadWram16(wram, kActRaiserWram_PlayerHandler);
+  if (ActRaiser_PlayerArrivalAnimationActive(player_handler)) {
+    subject_x = ReadWram16(wram, kActRaiserWram_PlayerPositionX);
+  } else {
+    const uint16_t subject =
+        ReadWram16(wram, kActRaiserWram_ActionCameraSubject);
+    const uint16_t table_end = (uint16_t)(
+        kActRaiserWram_ActionObjectTable +
+        kActRaiserActionObjectCount * kActRaiserActionObjectStride);
+    if (subject < kActRaiserWram_ActionObjectTable || subject >= table_end ||
+        (subject - kActRaiserWram_ActionObjectTable) %
+            kActRaiserActionObjectStride != 0) {
+      /* Match the authentic activation gate: a transient/invalid subject
+       * leaves the live game camera authoritative rather than snapping to a
+       * different actor for one comparison frame. */
+      return live_camera_x;
+    } else {
+      subject_x = ReadWram16(
+          wram, (size_t)subject + kActRaiserActionObject_WorldX);
+    }
+  }
+  return ActRaiser_AuthenticActionCameraX(
+      subject_x, ReadWram16(wram, kActRaiserWram_Bg1Width));
+}
+
 void ActRaiserActionBg_BeginRoomSceneFrame(
-    const uint8_t *wram, size_t wram_size, const Ppu *ppu,
+    const uint8_t *wram, size_t wram_size, Ppu *ppu,
     const Dma *dma) {
   s_observer.room_frame_valid = false;
   s_observer.room_frame_uses_previous = false;
   s_observer.room_frame_raster_matches_current = true;
-  if (!RoomSceneCompareEnabled() || !wram || !ppu ||
+  if (ppu) PpuClearAuthenticCameraFrame(ppu);
+  const bool compare_room_frame = RoomSceneCompareEnabled();
+  const bool capture_authentic = PpuAuthenticSurfaceBound(ppu);
+  if (!capture_authentic) {
+    s_observer.authentic_camera_valid = false;
+    s_observer.capture_live_camera_valid = false;
+  }
+  if ((!compare_room_frame && !capture_authentic) || !wram || !ppu ||
       (ppu->inidisp & 0x80u) || (ppu->bgmode & 7u) != 1u ||
       wram_size <= kActRaiserWram_Bg1CameraY + 1u ||
       !SyncFrameIdentity(wram, wram_size))
     return;
   const uint8_t map_group = wram[kActRaiserWram_MapGroup];
   const uint8_t map_number = wram[kActRaiserWram_CurrentMap];
+  const uint16_t camera_x =
+      ReadWram16(wram, kActRaiserWram_Bg1CameraX);
+  const uint16_t authentic_camera_x =
+      ResolveAuthenticActionCameraX(wram, wram_size, camera_x);
+  const int background_delta =
+      (int)authentic_camera_x - (int)camera_x;
+  const int object_delta = -background_delta;
   if (!EnsureRoomScene(map_group, map_number)) return;
+
+  const uint16_t raster_camera_x = s_observer.room_camera_valid
+      ? s_observer.last_room_camera_x : camera_x;
+  ActionRoomSceneFrameRequest request = {
+    .camera_x = camera_x,
+    .camera_y = ReadWram16(wram, kActRaiserWram_Bg1CameraY),
+    .raster_camera_x = raster_camera_x,
+    .game_frame = ReadWram16(wram, kActRaiserWram_GameFrame),
+    .animation_phase = -1,
+    .page_phase = -1,
+    .have_raster_camera_x = true,
+    .raster_entry_frame = s_observer.room_scene_entry_frame,
+  };
+  /* `$00:F5F0-$F619` replaces the Death Heim hub's BG pages during the
+   * post-final-boss black frame. Progress makes the override eligible; the
+   * live page bases are the script's authoritative phase signal. */
+  if (map_group == kActRaiserMapGroup_DeathHeim &&
+      map_number == kActRaiserDeathHeimMap_Hub &&
+      wram[kActRaiserWram_DeathHeimProgress] >=
+          kActRaiserDeathHeimProgress_FinalBossBeaten) {
+    if ((ppu->bgXsc[0] & 0xfcu) == 0x64u) {
+      request.bgsc_override_mask |= 1u << 0;
+      request.bgsc_override[0] = ppu->bgXsc[0];
+    }
+    if ((ppu->bgXsc[1] & 0xfcu) == 0x74u) {
+      request.bgsc_override_mask |= 1u << 1;
+      request.bgsc_override[1] = ppu->bgXsc[1];
+    }
+  }
+
+  bool authentic_reference_ready = false;
+  if (capture_authentic) {
+    ActionRoomSceneFrameRequest live_reference_request = request;
+    live_reference_request.raster_camera_x =
+        s_observer.capture_live_camera_valid
+        ? s_observer.last_capture_live_camera_x : camera_x;
+    ActionRoomSceneFrameRequest authentic_request = request;
+    authentic_request.camera_x = authentic_camera_x;
+    authentic_request.raster_camera_x = s_observer.authentic_camera_valid
+        ? s_observer.last_authentic_camera_x : authentic_camera_x;
+    ActionRoomSceneFrameState live_reference;
+    if (ActionRoomScene_BuildFrameState(
+            s_observer.room_scene, &live_reference_request,
+            &live_reference) &&
+        ActionRoomScene_BuildFrameState(
+            s_observer.room_scene, &authentic_request,
+            &s_observer.authentic_room_frame)) {
+      authentic_reference_ready = true;
+    }
+  }
+
   /* Loading/fade frames can already carry the destination room identity while
    * another effect still owns channel 2. Match the complete raster DMA
-   * contract—not only HDMAEN—before treating the frame as stable. This also
-   * pins the non-default R7 `$6800` and R9 `$7000` table bases. */
+   * contract—not only HDMAEN—before publishing an exact state. Until then the
+   * authentic comparison frame is unavailable; no approximate camera state is
+   * installed. This also pins the non-default R7 `$6800` and R9 `$7000` table
+   * bases. */
   if (s_observer.room_scene->raster_effect != kActionRoomRaster_None) {
     if (!dma) return;
     uint16_t table = 0x6000;
@@ -1015,49 +1124,34 @@ void ActRaiserActionBg_BeginRoomSceneFrame(
         return;
     }
   }
-  const uint16_t camera_x =
-      ReadWram16(wram, kActRaiserWram_Bg1CameraX);
-  const uint16_t raster_camera_x = s_observer.room_camera_valid
-      ? s_observer.last_room_camera_x : camera_x;
-  ActionRoomSceneFrameRequest request = {
-    .camera_x = camera_x,
-    .camera_y = ReadWram16(wram, kActRaiserWram_Bg1CameraY),
-    .raster_camera_x = raster_camera_x,
-    .game_frame = ReadWram16(wram, kActRaiserWram_GameFrame),
-    .animation_phase = -1,
-    .page_phase = -1,
-    .have_raster_camera_x = true,
-    .raster_entry_frame = s_observer.room_scene_entry_frame,
-  };
-  /* `$00:F5F0-$F619` replaces the Death Heim hub's BG pages during the
-   * post-final-boss black frame. Progress makes the override eligible; the
-   * live page bases are the script's authoritative phase signal. */
-  if (map_group == kActRaiserMapGroup_DeathHeim &&
-      map_number == kActRaiserDeathHeimMap_Hub &&
-      wram[kActRaiserWram_DeathHeimProgress] >=
-          kActRaiserDeathHeimProgress_FinalBossBeaten) {
-    if ((ppu->bgXsc[0] & 0xfcu) == 0x64u) {
-      request.bgsc_override_mask |= 1u << 0;
-      request.bgsc_override[0] = ppu->bgXsc[0];
-    }
-    if ((ppu->bgXsc[1] & 0xfcu) == 0x74u) {
-      request.bgsc_override_mask |= 1u << 1;
-      request.bgsc_override[1] = ppu->bgXsc[1];
+  bool built_any = false;
+  if (compare_room_frame && ActionRoomScene_BuildFrameState(
+          s_observer.room_scene, &request, &s_observer.room_frame)) {
+    s_observer.room_frame_current_camera_x = camera_x;
+    s_observer.room_frame_raster_camera_x = raster_camera_x;
+    s_observer.room_frame_prior_camera_x = s_observer.room_camera_valid
+        ? s_observer.prior_room_camera_x : camera_x;
+    s_observer.prior_room_camera_x = s_observer.last_room_camera_x;
+    s_observer.last_room_camera_x = camera_x;
+    s_observer.room_camera_valid = true;
+    s_observer.room_frame_valid = true;
+    s_observer.diagnostics.room_scene_frames_built++;
+    built_any = true;
+  }
+  if (capture_authentic && authentic_reference_ready) {
+    if (PpuSetAuthenticCameraFrame(
+            ppu, kPpuAuthenticCameraLayer_All,
+            s_observer.authentic_room_frame.bg_hscroll[0],
+            s_observer.authentic_room_frame.bg_hscroll[1],
+            object_delta)) {
+      s_observer.last_capture_live_camera_x = camera_x;
+      s_observer.capture_live_camera_valid = true;
+      s_observer.last_authentic_camera_x = authentic_camera_x;
+      s_observer.authentic_camera_valid = true;
+      built_any = true;
     }
   }
-  if (!ActionRoomScene_BuildFrameState(
-          s_observer.room_scene, &request, &s_observer.room_frame))
-    return;
-  s_observer.room_scene_entry_frame = false;
-  s_observer.room_frame_current_camera_x = camera_x;
-  s_observer.room_frame_raster_camera_x = raster_camera_x;
-  s_observer.room_frame_prior_camera_x = s_observer.room_camera_valid
-      ? s_observer.prior_room_camera_x : camera_x;
-  s_observer.prior_room_camera_x = s_observer.last_room_camera_x;
-  s_observer.last_room_camera_x = camera_x;
-  s_observer.room_camera_valid = true;
-  s_observer.room_frame_valid = true;
-  s_observer.diagnostics.room_scene_frames_built++;
+  if (built_any) s_observer.room_scene_entry_frame = false;
 }
 
 void ActRaiserActionBg_ObserveRoomSceneFrameLine(

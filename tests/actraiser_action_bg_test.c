@@ -30,6 +30,26 @@ void PpuClearVirtualTilemaps(Ppu *ppu) {
   if (ppu) memset(ppu->virtualTilemap, 0, sizeof(ppu->virtualTilemap));
 }
 
+bool PpuAuthenticSurfaceBound(const Ppu *ppu) {
+  return ppu && ppu->authenticRenderBuffer && ppu->authenticRenderPitch;
+}
+
+void PpuClearAuthenticCameraFrame(Ppu *ppu) {
+  if (!ppu) return;
+  ppu->authenticHScrollMask = 0;
+  ppu->authenticObjOffsetX = 0;
+}
+
+bool PpuSetAuthenticCameraFrame(
+    Ppu *ppu, uint8_t layer_mask,
+    const uint16_t bg1_hscroll[kPpuYPixels],
+    const uint16_t bg2_hscroll[kPpuYPixels], int obj_offset_x) {
+  (void)bg1_hscroll;
+  (void)bg2_hscroll;
+  (void)obj_offset_x;
+  return ppu && !(layer_mask & ~kPpuAuthenticCameraLayer_All);
+}
+
 bool PpuSetVirtualTilemap(Ppu *ppu, uint8_t layer,
                           const PpuVirtualTilemapBinding *binding) {
   if (!ppu || layer >= 2) return false;

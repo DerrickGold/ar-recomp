@@ -115,6 +115,11 @@ typedef struct FrameSlot {
   bool ignore_aspect_ratio;
   int visible_x0;
   int visible_width;
+  /* Centred 256x224 crop inside the independent native-camera PPU pass. */
+  int authentic_x0;
+  int authentic_y0;
+  /* Nonzero only after a complete native-camera pass for this geometry. */
+  uint64_t authentic_frame_serial;
   /* Vertical margin the PPU actually rendered for this frame (the transpose of
    * ws_extra). snes_height stays the AUTHENTIC visible height, so the captured
    * surfaces are snes_height + ws_extra_top + ws_extra_bottom rows tall and
@@ -405,6 +410,8 @@ SDL_Rect ComputePresentationViewportWithOutput(
  * Upload remains separate from composite so texture updates stay grouped ahead
  * of the potentially vsync-blocking present. */
 void PresentUpload(const FrameSlot *slot);
+/* Last native-pass serial successfully synchronized to the GPU texture. */
+uint64_t PresentAuthenticUploadedFrameSerial(void);
 /* alpha: the sub-tick phase this present sits at — the main loop's
  * accumulator remainder over kFrameNs, in [0,1) — or
  * kPresentationFrameGenerationPhaseNone

@@ -96,8 +96,10 @@ static void TestDefaultsAndMetadata(void) {
    * player-facing magnitude row, and the Aitos wind event one Extras row for
    * whether it stills every windmill or only the ones the ROM stamped. The
    * host FPS overlay adds one Video row, and frame generation adds one explicit
-   * 30-to-60 Hz validation cadence. */
-  CHECK(g_setting_desc_count == 270);
+   * 30-to-60 Hz validation cadence. The runtime-only render comparison adds
+   * one keyboard and one gamepad binding row, but deliberately no persisted
+   * mode setting. */
+  CHECK(g_setting_desc_count == 272);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -946,6 +948,13 @@ static void TestInputBindings(void) {
         INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_M, false));
   CHECK(g_settings.input_bind[kInputClass_Gamepad][kInputAction_MagicCycle] ==
         0);
+  const SettingDesc *key_compare = Settings_Find("bind_key_render_compare");
+  const SettingDesc *pad_compare = Settings_Find("bind_pad_render_compare");
+  CHECK(key_compare && pad_compare);
+  CHECK(g_settings.input_bind[kInputClass_Keyboard]
+                             [kInputAction_RenderCompare] == 0);
+  CHECK(g_settings.input_bind[kInputClass_Gamepad]
+                             [kInputAction_RenderCompare] == 0);
   const SettingDesc *cycle_cheat = Settings_Find("cheat_magic_cycle");
   CHECK(cycle_cheat != NULL);
   CHECK(!g_settings.cheat_magic_cycle);
@@ -1014,6 +1023,16 @@ static void TestInputBindings(void) {
   Settings_FormatValue(pad_up, text, sizeof(text));
   CHECK(!strcmp(text, "Pad L-Stick Up"));
   CHECK(Settings_SetText(pad_up, text) == kSettingChange_Unchanged);
+
+  /* A held trigger remains held inside the press/release hysteresis band.
+   * This is the exact sequence hold-to-comparison uses: the initial edge
+   * crosses 20000, natural trigger settling must not turn it into a click,
+   * and only crossing back below 12000 releases it. */
+  const uint32 positive_axis = INPUT_BIND_MAKE(
+      kInputBind_PadAxis, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, false);
+  CHECK(InputMap_AxisBindingHeld(positive_axis, 21000, false));
+  CHECK(InputMap_AxisBindingHeld(positive_axis, 16000, true));
+  CHECK(!InputMap_AxisBindingHeld(positive_axis, 11000, true));
 
   /* Camera actions default to the right stick (signed, sharing one axis) and
    * the triggers, and are analog rather than edge-dispatched. */

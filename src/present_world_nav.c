@@ -50,19 +50,16 @@ extern SDL_Texture *g_sim3d_flat_texture;
 
 static SDL_Texture *s_world_navigation_palace_texture;
 static SDL_Texture *s_world_navigation_ui_texture;
-static bool s_world_navigation_composition_alloc_failed;
 static bool s_world_navigation_composition_upload_valid;
 
 static SDL_Texture *EnsureWorldNavigationCompositionTexture(
     SDL_Texture **texture) {
-  if (*texture || s_world_navigation_composition_alloc_failed)
-    return *texture;
+  if (*texture) return *texture;
   *texture = SDL_CreateTexture(
       g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
       kSimWorldNavigationCompositionWidth,
       kSimWorldNavigationCompositionHeight);
   if (!*texture) {
-    s_world_navigation_composition_alloc_failed = true;
     fprintf(stderr,
             "[world-navigation] composition texture unavailable: %s\n",
             SDL_GetError());
@@ -105,20 +102,17 @@ void UploadWorldNavigationComposition(const FrameSlot *slot) {
   s_world_navigation_composition_upload_valid = true;
 }
 static SDL_Texture *s_world_navigation_cloud_texture;
-static bool s_world_navigation_cloud_alloc_failed;
 
 static SDL_Texture *EnsureWorldNavigationCloudTexture(void) {
   enum {
     kPaddedPixels = kSimCloudTexturePixels * 2,
   };
-  if (s_world_navigation_cloud_texture ||
-      s_world_navigation_cloud_alloc_failed)
+  if (s_world_navigation_cloud_texture)
     return s_world_navigation_cloud_texture;
   s_world_navigation_cloud_texture = SDL_CreateTexture(
       g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
       kPaddedPixels, kPaddedPixels);
   if (!s_world_navigation_cloud_texture) {
-    s_world_navigation_cloud_alloc_failed = true;
     fprintf(stderr,
             "[world-navigation] cloud texture unavailable: %s\n",
             SDL_GetError());
@@ -134,7 +128,6 @@ static SDL_Texture *EnsureWorldNavigationCloudTexture(void) {
           s_world_navigation_cloud_texture, NULL, &pixels, &pitch)) {
     SDL_DestroyTexture(s_world_navigation_cloud_texture);
     s_world_navigation_cloud_texture = NULL;
-    s_world_navigation_cloud_alloc_failed = true;
     return NULL;
   }
   for (int y = 0; y < kPaddedPixels; y++) {
@@ -595,13 +588,11 @@ void PresentWorldNav_ResetResources(void) {
   if (s_world_navigation_cloud_texture)
     SDL_DestroyTexture(s_world_navigation_cloud_texture);
   s_world_navigation_cloud_texture = NULL;
-  s_world_navigation_cloud_alloc_failed = false;
   if (s_world_navigation_palace_texture)
     SDL_DestroyTexture(s_world_navigation_palace_texture);
   s_world_navigation_palace_texture = NULL;
   if (s_world_navigation_ui_texture)
     SDL_DestroyTexture(s_world_navigation_ui_texture);
   s_world_navigation_ui_texture = NULL;
-  s_world_navigation_composition_alloc_failed = false;
   s_world_navigation_composition_upload_valid = false;
 }

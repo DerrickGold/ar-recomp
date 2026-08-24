@@ -1079,6 +1079,21 @@ void Sim3D_FinishCapture(uint8_t *authentic_pixels,
   }
 }
 
+Sim3DCaptureContractFailure Sim3D_GetCaptureContractFailure(void) {
+  switch (g_sim3d.status) {
+    case kSim3DCapture_NoRenderer:
+      return kSim3DCaptureContract_RendererUnavailable;
+    case kSim3DCapture_AllocationFailure:
+      return kSim3DCaptureContract_SurfaceAllocation;
+    case kSim3DCapture_AtlasInvalid:
+      return g_sim3d.separated_valid
+          ? kSim3DCaptureContract_Ok
+          : kSim3DCaptureContract_ObjectSourcesUnavailable;
+    default:
+      return kSim3DCaptureContract_Ok;
+  }
+}
+
 /* One line whenever the simulation presentation changes ownership or loses a
  * usable separated composite. `None` is a real observable state: resetting to
  * unknown there hid the 1-3 frame drops this diagnostic exists to explain.

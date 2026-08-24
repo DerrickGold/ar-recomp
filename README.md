@@ -17,7 +17,7 @@ an in-game settings menu.
 
 **[Quick start](#quick-start)** · **[Features](#features)** ·
 **[Manual](docs/manual.md)** · **[Contributing](docs/contributing.md)** ·
-**[Status](#current-status)**
+**[Reliability policy](docs/reliability-policy.md)** · **[Status](#current-status)**
 
 ---
 
@@ -264,6 +264,19 @@ Toggle between your track and the original sequencer live, mid-song.
 Every song the game starts without a replacement prints exactly what to drop in,
 so one playthrough identifies all 17 tracks.
 
+### Live authentic comparison
+
+Bind **Compare rendering** in **Settings → Controls** to switch between the
+player's current enhanced presentation and the ROM's native 256×224 graphics
+and SPC audio without changing any saved settings. Tap the control to toggle
+the two views; hold it for an enhanced-priority view with the authentic game in
+a picture-in-picture window. The comparison state is shared by action and
+simulation modes and resets to enhanced on every launch. Gameplay pauses during
+the short transition, while gameplay QoL options and cheats remain active in
+both views. CRT remains independently controlled by the player's current Video
+settings and applies to every comparison view. When neither comparison binding
+is configured, the parallel authentic scanout stays dormant.
+
 ### The settings overlay
 
 A complete in-game menu, drawn with ActRaiser's own 2bpp dialog font and Sky
@@ -279,7 +292,7 @@ live and are written back to `settings.ini` atomically.
 | | |
 |---|---|
 | **Re-bindable controls** | Every button, keyboard and gamepad independently, from Settings → Controls. Keyboard binds are stored by physical key position, so layout changes follow the keys. |
-| **Full gamepad support** | Standard SNES-on-Xbox mapping, multiple pads with hotplug, `gamecontrollerdb.txt` support, and six host actions (menu, pause, turbo, save/load state, reset camera) bound to the pad so no keyboard is needed. |
+| **Full gamepad support** | Standard SNES-on-Xbox mapping, multiple pads with hotplug, `gamecontrollerdb.txt` support, and seven host actions (menu, pause, turbo, save/load state, reset camera, rendering comparison) available on the pad so no keyboard is needed. |
 | **Steam Deck** | A dedicated bundle with Valve's Steam Runtime SDL3. Works with defaults through Steam Input, and via SDL's HIDAPI Steam driver from desktop mode. L3 opens the menu. |
 | **Camera on the stick** | Right stick orbits, triggers zoom, R3 recentres — with sensitivity, deadzone, and invert-Y, integrated over real elapsed time so orbit speed is frame-rate independent. |
 | **Save states** | `F5` / `F7`, or bind them to the pad. |

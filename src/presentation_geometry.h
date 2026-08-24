@@ -29,7 +29,10 @@ typedef struct PresentationOutputState {
 
 bool PresentationGeometry_PushFullOutput(
     SDL_Renderer *renderer, PresentationOutputState *state);
-void PresentationGeometry_PopFullOutput(
+/* Attempts every restore step and reports whether the renderer accepted all
+ * of them. Selected rendering paths must propagate failure rather than leak
+ * full-output state into the next stage. */
+bool PresentationGeometry_PopFullOutput(
     SDL_Renderer *renderer, const PresentationOutputState *state);
 
 SDL_Rect PresentationGeometry_CalculateViewport(int output_width,

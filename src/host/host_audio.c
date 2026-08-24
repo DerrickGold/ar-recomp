@@ -215,34 +215,36 @@ bool HostAudio_Init(int requested_frequency_hz, int requested_buffer_frames,
     return false;
   }
   s_game_thread_id = SDL_GetCurrentThreadID();
-  HostAudio_SetEnabled(enabled);
-  return true;
+  return HostAudio_SetEnabled(enabled);
 }
 
-static void ApplyHostPauseState(void) {
-  if (!s_audio_mutex) return;
+static bool ApplyHostPauseState(void) {
+  if (!s_audio_mutex) return false;
   if (!s_host_paused) {
-    if (OpenAudioStream() &&
-        !SDL_ResumeAudioStreamDevice(s_audio_stream)) {
+    if (!OpenAudioStream()) return false;
+    if (!SDL_ResumeAudioStreamDevice(s_audio_stream)) {
       fprintf(stderr, "[audio] resume failed: %s\n", SDL_GetError());
+      return false;
     }
   } else if (s_audio_open &&
              !SDL_PauseAudioStreamDevice(s_audio_stream)) {
     fprintf(stderr, "[audio] pause failed: %s\n", SDL_GetError());
+    return false;
   }
+  return true;
 }
 
-void HostAudio_SetEnabled(bool enabled) {
+bool HostAudio_SetEnabled(bool enabled) {
   SDL_SetAtomicInt(&s_output_enabled, enabled ? 1 : 0);
   /* Init and a prior open failure reach here without a stream. Once open, a
    * mute toggle is purely atomic and need not issue a redundant device resume. */
-  if (!s_audio_open) ApplyHostPauseState();
+  return s_audio_open || ApplyHostPauseState();
 }
 
-void HostAudio_SetHostPaused(bool paused) {
-  if (s_host_paused == paused) return;
+bool HostAudio_SetHostPaused(bool paused) {
+  if (s_host_paused == paused) return true;
   s_host_paused = paused;
-  ApplyHostPauseState();
+  return ApplyHostPauseState();
 }
 
 void HostAudio_SetMasterVolumePercent(int master_volume_percent) {

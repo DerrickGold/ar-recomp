@@ -234,7 +234,7 @@ bool ActRaiserActionBg_CompareRoomSceneFrameLine(
  * before ppu_runLine(N + 1). Both calls are inert unless
  * AR_ACTION_ROOM_SCENE_COMPARE=1. */
 void ActRaiserActionBg_BeginRoomSceneFrame(
-    const uint8_t *wram, size_t wram_size, const struct Ppu *ppu,
+    const uint8_t *wram, size_t wram_size, struct Ppu *ppu,
     const struct Dma *dma);
 void ActRaiserActionBg_ObserveRoomSceneFrameLine(
     const struct Ppu *ppu, unsigned output_y);

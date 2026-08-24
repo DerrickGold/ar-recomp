@@ -46,6 +46,8 @@ extern int g_ws_extra;
 extern int g_ws_display_extra;
 extern uint8_t g_pixels[
     kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
+extern uint8_t g_authentic_pixels[
+    kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
 extern uint8_t g_hud_bg_pixels[
     kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
 extern uint8_t g_hud_obj_pixels[
@@ -348,6 +350,7 @@ void HostDisplay_ResolveVideoGeometry(bool apply_runtime_changes) {
      * correction profile. */
     Settings_ReconcileDisplayModeAfterGeometryChange(previous_display_mode);
     memset(g_pixels, 0, sizeof(g_pixels));
+    memset(g_authentic_pixels, 0, sizeof(g_authentic_pixels));
     memset(g_hud_bg_pixels, 0, sizeof(g_hud_bg_pixels));
     memset(g_hud_obj_pixels, 0, sizeof(g_hud_obj_pixels));
     ActRaiser_RebindPpuOutputSurfaces();

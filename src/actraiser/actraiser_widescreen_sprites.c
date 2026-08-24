@@ -411,6 +411,7 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
    * override" and "not emitted" are the same statement. */
   if (g_ppu) {
     PpuClearObjExactPositions(g_ppu);
+    PpuClearObjCameraRelative(g_ppu);
     ActRaiser_MarkExactPositionOwner(kActRaiserExactPositionOwner_Action);
   }
 
@@ -865,9 +866,12 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
         const int exact_y =
             (int)(int16)ws_dp16(cpu, kSpriteDp_ScreenOriginY) +
             (int)component_offset_y - (kSpriteDrawBias + 1);
-        if (g_ppu)
+        if (g_ppu) {
           PpuSetObjExactPosition(
               g_ppu, (uint8)(oam_offset >> 2), exact_x, exact_y);
+          PpuSetObjCameraRelative(
+              g_ppu, (uint8)(oam_offset >> 2), true);
+        }
         uint16 slots = (uint16)(
             ws_dp16(cpu, kSpriteDp_OamHighSlotsRemaining) - 1);
         ws_dp16w(cpu, kSpriteDp_OamHighSlotsRemaining, slots);
@@ -1514,6 +1518,7 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
       oam_before);
   if (began_build && g_ppu) {
     PpuClearObjExactPositions(g_ppu);
+    PpuClearObjCameraRelative(g_ppu);
     ActRaiser_MarkExactPositionOwner(kActRaiserExactPositionOwner_Sim);
   }
   SimRenderMetadata_RecordWord06(cpu_read16(

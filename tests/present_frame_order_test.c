@@ -5,9 +5,13 @@
 #include "present.h"
 #include "present_internal.h"
 #include "crt_post.h"
+#include "render_comparison.h"
+#include "session_fatal.h"
+#include "settings.h"
 
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 SDL_Renderer *g_renderer = (SDL_Renderer *)(uintptr_t)1;
 
@@ -16,6 +20,11 @@ static int s_stage;
 static const FrameSlot *s_expected_slot;
 static float s_expected_alpha;
 static double s_expected_presentation_fps;
+static RenderComparisonView s_expected_view;
+static SDL_Rect s_expected_host_viewport;
+static uint8_t s_expected_transition_alpha;
+static int s_expected_stages;
+static uint64_t s_authentic_uploaded_serial;
 static const SDL_Rect kFallback = { 160, 0, 960, 720 };
 static const SDL_Rect kResolved = { 161, 1, 958, 718 };
 
@@ -34,9 +43,15 @@ SDL_Rect ComputePresentationViewportWithOutput(
   CHECK(s_stage++ == 0);
   CHECK(renderer == g_renderer);
   CHECK(!ignore_aspect_ratio);
-  CHECK(pixel_aspect == 7);
-  CHECK(visible_width == 256);
-  CHECK(snes_height == 224);
+  if (s_expected_view == kRenderComparison_Authentic) {
+    CHECK(pixel_aspect == kPixelAspect_Crt43);
+    CHECK(visible_width == kFrameSlotAuthenticWidth);
+    CHECK(snes_height == kFrameSlotAuthenticHeight);
+  } else {
+    CHECK(pixel_aspect == 7);
+    CHECK(visible_width == 256);
+    CHECK(snes_height == 224);
+  }
   CHECK(output_size != NULL);
   *output_size = (SDL_Point){1280, 720};
   return kFallback;
@@ -48,15 +63,46 @@ bool CrtPost_Begin(SDL_Renderer *renderer) {
   return true;
 }
 
+uint64_t PresentAuthenticUploadedFrameSerial(void) {
+  return s_authentic_uploaded_serial;
+}
+
 void PresentCompositeScene(const FrameSlot *slot, float alpha) {
   CHECK(s_stage++ == 2);
   CHECK(slot == s_expected_slot);
   CHECK(alpha == s_expected_alpha);
 }
 
+bool PresentAuthenticScene(const FrameSlot *slot, SDL_Rect viewport) {
+  CHECK(s_stage++ == 2);
+  CHECK(s_expected_view == kRenderComparison_Authentic);
+  CHECK(slot == s_expected_slot);
+  CHECK(SDL_RectsEqual(&viewport, &kFallback));
+  return true;
+}
+
+bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
+                                      SDL_Rect priority_viewport) {
+  CHECK(s_stage++ == 3);
+  CHECK(s_expected_view == kRenderComparison_SideBySide);
+  CHECK(slot == s_expected_slot);
+  CHECK(SDL_RectsEqual(&priority_viewport, &kFallback));
+  return true;
+}
+
+bool PresentComparisonTransitionOverlay(uint8_t alpha, const char *label) {
+  CHECK(s_stage++ == 4);
+  CHECK(alpha == s_expected_transition_alpha);
+  CHECK(label != NULL);
+  CHECK(strcmp(label, RenderComparison_ViewName(s_expected_view)) == 0);
+  return true;
+}
+
 SDL_Rect CrtPost_End(SDL_Renderer *renderer,
                      int scan_columns, int scan_lines, SDL_Rect image) {
-  CHECK(s_stage++ == 3);
+  const int expected_stage =
+      s_expected_view == kRenderComparison_SideBySide ? 4 : 3;
+  CHECK(s_stage++ == expected_stage);
   CHECK(renderer == g_renderer);
   CHECK(scan_columns == 256);
   CHECK(scan_lines == 224);
@@ -67,13 +113,21 @@ SDL_Rect CrtPost_End(SDL_Renderer *renderer,
 void PresentHostUi(const FrameSlot *slot, SDL_Rect viewport,
                    SDL_Point output_size,
                    double presentation_fps) {
-  CHECK(s_stage++ == 4);
+  CHECK(s_stage++ == s_expected_stages - 1);
   CHECK(slot == s_expected_slot);
   /* The UI must receive End's authoritative rectangle, not the fallback that
    * was calculated before SDL resolved its per-target logical presentation. */
-  CHECK(SDL_RectsEqual(&viewport, &kResolved));
+  CHECK(SDL_RectsEqual(&viewport, &s_expected_host_viewport));
   CHECK(output_size.x == 1280 && output_size.y == 720);
   CHECK(presentation_fps == s_expected_presentation_fps);
+}
+
+static void RunCase(FrameSlot *slot) {
+  s_stage = 0;
+  SDL_Rect image = PresentFrame(
+      slot, s_expected_alpha, s_expected_presentation_fps);
+  CHECK(s_stage == s_expected_stages);
+  CHECK(SDL_RectsEqual(&image, &s_expected_host_viewport));
 }
 
 int main(void) {
@@ -86,10 +140,54 @@ int main(void) {
   s_expected_alpha = 0.375f;
   s_expected_presentation_fps = 144.25;
 
-  SDL_Rect resolved = PresentFrame(
-      &slot, s_expected_alpha, s_expected_presentation_fps);
-  CHECK(s_stage == 5);
-  CHECK(SDL_RectsEqual(&resolved, &kResolved));
+  RenderComparison_Reset();
+  s_expected_view = kRenderComparison_Enhanced;
+  s_expected_host_viewport = kResolved;
+  s_expected_transition_alpha = 0;
+  s_expected_stages = 5;
+  RunCase(&slot);
+
+  /* Authentic bypasses the enhanced compositor while retaining the player's
+   * independent CRT configuration. */
+  RenderComparison_OnPress(1000, true);
+  RenderComparison_Tick(1360, false, true);
+  slot.authentic_frame_serial = 7;
+  s_authentic_uploaded_serial = 7;
+  s_expected_view = kRenderComparison_Authentic;
+  s_expected_host_viewport = kResolved;
+  s_expected_stages = 5;
+  RunCase(&slot);
+
+  /* A hold makes enhanced rendering the priority path and adds authentic PiP
+   * inside the game composite before CRT resolve and all host UI. */
+  RenderComparison_OnPress(2000, true);
+  RenderComparison_Tick(2420, true, true);
+  RenderComparison_Tick(2780, true, true);
+  s_expected_view = kRenderComparison_SideBySide;
+  s_expected_host_viewport = kResolved;
+  s_expected_stages = 6;
+  RunCase(&slot);
+
+  /* Releasing the hold fades back to the tap-selected enhanced view. The
+   * transition overlay must remain below host UI. */
+  RenderComparison_Tick(2800, false, true);
+  RenderComparison_Tick(2980, false, true);
+  s_expected_view = kRenderComparison_Enhanced;
+  s_expected_transition_alpha = 255;
+  s_expected_stages = 6;
+  RunCase(&slot);
+
+  /* A nonzero capture serial is not enough: presentation must reject a frame
+   * the upload stage did not synchronize for this exact geometry. Keep this
+   * terminal because SessionFatal deliberately latches for process lifetime. */
+  RenderComparison_Tick(3160, false, true);
+  RenderComparison_OnPress(4000, true);
+  RenderComparison_Tick(4360, false, true);
+  slot.authentic_frame_serial = 8;
+  s_stage = 0;
+  (void)PresentFrame(&slot, s_expected_alpha, s_expected_presentation_fps);
+  CHECK(s_stage == 0);
+  CHECK(SessionFatal_Requested());
 
   if (s_failures) {
     fprintf(stderr, "present_frame_order_test: %d failure(s)\n", s_failures);
