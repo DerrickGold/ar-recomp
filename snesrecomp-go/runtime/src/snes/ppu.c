@@ -324,7 +324,8 @@ bool PpuSetOverlayCapture(Ppu *ppu, PpuOverlaySource source,
        kPpuOverlayFlag_MarkBgHalfAdd |
        kPpuOverlayFlag_ApplyBgFixedColorSubtract |
        kPpuOverlayFlag_MarkFullAddSubscreen |
-       kPpuOverlayFlag_MarkMainScreenWinner);
+       kPpuOverlayFlag_MarkMainScreenWinner |
+       kPpuOverlayFlag_MarkOwningScreenWinner);
   capture->oamFirst = 0;
   capture->oamCount = 0;
   return true;
@@ -1837,7 +1838,8 @@ static uint32 PpuOverlayColor(Ppu *ppu, PpuZbufType pixel) {
 static uint32 PpuCapturedOverlayColor(
     Ppu *ppu, PpuOverlaySource source,
     const PpuOverlayCapture *capture, PpuZbufType pixel) {
-  if (capture->flags & kPpuOverlayFlag_MarkMainScreenWinner)
+  if (capture->flags & (kPpuOverlayFlag_MarkMainScreenWinner |
+                        kPpuOverlayFlag_MarkOwningScreenWinner))
     return (pixel & 0xff) ? 0xffffffffu : 0;
   uint32 color = PpuOverlayColor(ppu, pixel);
   /* Fixed-colour subtraction is not a compositing operation: apply it to the
@@ -1903,7 +1905,8 @@ static void PpuClearOverlayRenderLine(Ppu *ppu, int y) {
     if (row < 0)
       continue;
     if (active &&
-        (capture->flags & kPpuOverlayFlag_MarkMainScreenWinner)) {
+        (capture->flags & (kPpuOverlayFlag_MarkMainScreenWinner |
+                           kPpuOverlayFlag_MarkOwningScreenWinner))) {
       uint32 *dst = (uint32 *)(pixels + (size_t)row * pitch);
       for (uint32_t x = 0; x < pitch / sizeof(uint32); x++)
         dst[x] = 0xff000000u;
@@ -2037,7 +2040,8 @@ static void PpuWriteOverlayRenderLineFiltered(
       kPpuOverlayFlag_MarkObjColorMath |
       kPpuOverlayFlag_MarkBgHalfAdd |
       kPpuOverlayFlag_ApplyBgFixedColorSubtract |
-      kPpuOverlayFlag_MarkMainScreenWinner;
+      kPpuOverlayFlag_MarkMainScreenWinner |
+      kPpuOverlayFlag_MarkOwningScreenWinner;
   const bool ordinary =
       filter == NULL && !(capture->flags & color_flags);
   if (!any_bands) {
@@ -2201,8 +2205,12 @@ static void PpuResolveScreenWithCapturedSources(
 static void PpuWriteFullAddSubscreenOverlayLines(Ppu *ppu, int y) {
   bool active = false;
   for (int source = 0; source < kPpuOverlaySource_Count; source++) {
-    if (ppu->overlayCaptures[source].flags &
-        kPpuOverlayFlag_MarkFullAddSubscreen) {
+    const PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
+    const uint8_t source_bit = (uint8_t)(1u << source);
+    if ((capture->flags & kPpuOverlayFlag_MarkFullAddSubscreen) ||
+        ((capture->flags & kPpuOverlayFlag_MarkOwningScreenWinner) &&
+         !(ppu->screenEnabled[0] & source_bit) &&
+         (ppu->screenEnabled[1] & source_bit))) {
       active = true;
       break;
     }
@@ -2226,7 +2234,11 @@ static void PpuWriteFullAddSubscreenOverlayLines(Ppu *ppu, int y) {
   };
   for (int source = 0; source < kPpuOverlaySource_Count; source++) {
     const PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
-    if (!(capture->flags & kPpuOverlayFlag_MarkFullAddSubscreen))
+    const uint8_t source_bit = (uint8_t)(1u << source);
+    if (!(capture->flags & kPpuOverlayFlag_MarkFullAddSubscreen) &&
+        !((capture->flags & kPpuOverlayFlag_MarkOwningScreenWinner) &&
+          !(ppu->screenEnabled[0] & source_bit) &&
+          (ppu->screenEnabled[1] & source_bit)))
       continue;
     PpuWriteOverlayRenderLineFiltered(
         ppu, (PpuOverlaySource)source, y, &filter);
@@ -2239,7 +2251,8 @@ static void PpuWriteMainScreenWinnerOverlayLines(Ppu *ppu, int y) {
   };
   for (int source = 0; source < kPpuOverlaySource_Count; source++) {
     if (!(ppu->overlayCaptures[source].flags &
-          kPpuOverlayFlag_MarkMainScreenWinner) ||
+          (kPpuOverlayFlag_MarkMainScreenWinner |
+           kPpuOverlayFlag_MarkOwningScreenWinner)) ||
         !(ppu->screenEnabled[0] & (1u << source)))
       continue;
     PpuWriteOverlayRenderLineFiltered(
@@ -2295,7 +2308,8 @@ static void PpuFinishBackgroundOverlay(Ppu *ppu, int y, bool sub,
   const PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
   const bool deferred =
       (sub && (capture->flags & kPpuOverlayFlag_MarkFullAddSubscreen)) ||
-      (capture->flags & kPpuOverlayFlag_MarkMainScreenWinner);
+      (capture->flags & (kPpuOverlayFlag_MarkMainScreenWinner |
+                         kPpuOverlayFlag_MarkOwningScreenWinner));
   if (export_this_pass && !deferred)
     PpuWriteOverlayRenderLine(ppu, source, y);
 

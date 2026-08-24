@@ -6,7 +6,10 @@ docs resolves to entry 15 HERE. OPEN entries live in DEBUG.md §7 (the working s
 here when resolved (THE DEBUG LOOP step 8).
 
 Each entry records: root cause, the fix, and the reusable lesson. Read §0/§1 of DEBUG.md for
-the current debugging process; this file is the case law.
+the current debugging process; this file is the case law. Current feature and
+acceptance status belongs in [progress.md](progress.md), while current boundary
+and renderer contracts belong in [SEAMS.md](SEAMS.md) and
+[rendering-engine.md](rendering-engine.md).
 
 
 1. **Misdecode from an M-leak** — runtime m wrong → wrong variant → garbage writes.
@@ -388,9 +391,38 @@ the current debugging process; this file is the case law.
     makes a wrong `func` registration self-healing, which is what allows the §5 static closure
     loop (`find_rts_webs --suggest`) to run without the manual shape check being fatal-if-wrong.
 
+17. **Partial multi-actor cutscene sprites — FIXED and accepted.** Missing
+    late-bound pool-allocator and call-site continuation entries caused lair-seal
+    attackers and one member of Bloodpool's lightning pair to disappear. Registering
+    the genuine dispatch-only targets restored every actor. A broader first attempt
+    also registered active-frame JSR/JSL return continuations, double-executing town
+    actors and animations; those registrations were reverted. `trace_slice --diagnose`
+    now identifies this paired-resume class. **Lesson:** classify a dispatch miss by
+    control-flow ownership before registering it—tail targets and coroutine entries are
+    valid functions; a continuation whose generated caller is still active is not.
+
+18. **Magic casting blocked by `AR_NO_KNOCKBACK` — FIXED 2026-07-07; all spells
+    accepted 2026-08-23.** The cast chain was healthy, but the cheat permanently
+    pinned player-state bit `$2000`, which is the game's hurt/invulnerability gate;
+    casting correctly refuses to start while that bit is set. The cheat now releases
+    the pin while a cast button is held and restores it otherwise. The same authentic
+    state also disables Bloodpool water drag, so cheat-assisted recordings are not
+    physics-neutral. **Lesson:** active cheats are part of the system under test; audit
+    every pinned bit read by a failing gameplay gate before changing recompilation.
+
+18b. **Simulation rewards silently dropped — FIXED and verified 2026-07-07.**
+    `$01:9C6F` dispatches through a 20-entry reward table, but its 17 unique
+    handlers and shared continuation were not registered, so every reward path
+    host-unwound before writing its result. Registering the 18 dispatch targets
+    restored the complete web. Live captures proved a magic scroll increments
+    persistent MP `$0295` and working MP `$21` exactly once, persists across modes,
+    and is usable in the next act. **Lesson:** single-shot table-dispatched handlers
+    still need a complete target census; persistent stats may use long-addressed
+    event writers that ordinary direct-store searches miss.
+
 20. **Death Heim boss rush (one crash + one SILENT soft-lock) — FIXED 2026-07-14,
-    user-verified end-to-end (every boss + final boss).** (Entries 17–19 remain open in
-    DEBUG.md §7.) Three symptoms, two root causes — both **yield helpers missing from the
+    user-verified end-to-end (every boss + final boss).** Three symptoms, two root causes —
+    both **yield helpers missing from the
     hand-maintained helper list** ($8623/$8657/$8669/$A673/$F8A6/$F8D2/$F977):
     - **`$86FA`** (wait-N-frames: `STZ $6,X; STZ $8,X; STA $24,X; PLA; INC A; STA $12,X`)
       was unknown → the three continuations inside `$FE89`, the DH teleport-out sequencer
@@ -1212,7 +1244,9 @@ the current debugging process; this file is the case law.
     special override. Wide Full is 17/17 byte-exact to the accepted role
     baseline and Diorama-32 is 17/17 exact to the role-driven owner baseline.
     The same validation sweep covers every Death Heim rematch in Full and
-    Diorama-32; the Full set is 102/102 exact.
+    Diorama-32; the Full set was 102/102 exact to the then-current all-Repeat
+    baseline. Entry 78 records the later finite-rematch tuning that supersedes
+    those rematch margin pixels without changing this `0708` fix.
 
     **Reusable lesson:** changing one axis of a classified policy does not
     reset orthogonal axes. A special-case override must either construct a
@@ -1283,10 +1317,13 @@ the current debugging process; this file is the case law.
     Regressions cover top/internal/bottom canonical row resolution, Bloodpool
     and Death Heim Diorama bottom spans, and a real-PPU asymmetric-edge fixture
     that distinguishes Repeat from Mirror while pinning the Available band
-    extent. A follow-up legacy-policy audit confirms that Aitos `0401-0403`,
-    Northwall `0601-0605`/`0608`, and Death Heim `0702-0707` retain their
-    whole-layer Repeat classification for moving upper clouds/snow; every map
-    member and a synthetic top-row direction probe are pinned explicitly.
+    extent. A follow-up legacy-policy audit confirmed at the time that Aitos
+    `0401-0403`, Northwall `0601-0605`/`0608`, and Death Heim `0702-0707`
+    retained whole-layer Repeat for moving upper clouds/snow. The later
+    2026-08-23 Death Heim room tunings supersede only that last current-policy
+    claim: `0702-0706` now clamp finite BG2 and `0707` uses its bounded world
+    edge; Aitos/Northwall and the synthetic top-row direction probe remain
+    pinned.
     Debug and release application builds succeed. The complete 44-test suite
     passes; as usual, its display-backed shader test requires ordinary macOS
     display access and passes there.
@@ -2699,6 +2736,60 @@ if archaeology is ever needed. The distilled outcomes:
     to what this host recorded last time. Only the first three are portable --
     the screenshots read back the real swapchain -- so the reference lives
     outside the repo and a new host records one instead of failing.
+
+75. **A rematch is not the original room, even when it tail-calls the original
+    boss. FIXED 2026-08-23.** Action accents were gated by the native map and
+    retained `+$32` source, so Death Heim's Wizard and Viper lost their mapped
+    lightning and every new boss style risked becoming rematch-only. Runs
+    `20260822-195453`/`195726` show that the boss-rush wrappers preserve attack
+    control flow and `$7E:5000` artwork while replacing the retained source:
+    Minotaur `$AF5D/$F6CA`, Wizard `$BDFF/$F6E2`, Flaming Wheel `$D838/$F712`,
+    Viper `$E483/$F72A`, and Ice Dragon `$F161/$F760`; Tanzara uses `$F80F`.
+    Matchers now admit only the exact original room/source pair or exact
+    rematch pair. Minotaur axes and Ice Dragon balls require measured resumes,
+    artwork, and same-source parents; Tanzara uses an exact tuple allowlist.
+    The Flaming Wheel audit found that its body changes handler during normal
+    AI, while source-shared helpers do not own the body. Stable backlink `0`
+    originally and room-owner `$001C` in Death Heim now select one emitter
+    without rejecting valid AI phases. Pharaoh remains deliberately plain.
+
+76. **Projecting a torch onto BG1 does not make a late overlay obey BG1
+    occlusion. FIXED 2026-08-23.** Marahna's boss-room wall light was submitted
+    after the composed world, so it showed through Viper; Death Heim `0706`
+    also omitted the reused `$43` torch map rule. Diorama now submits torches
+    immediately after BG1-low. Flat mode multiplies a viewport-sized,
+    target-local effect batch by `MarkOwningScreenWinner`: TM wins when BG1 is
+    present there, otherwise the resolved TS winner is used. This is necessary
+    for measured Marahna TM `$06` / TS `$11`, where Viper OBJ must black out the
+    BG1 mask. Exact room gates cover Marahna `$05/$04-$08` and Death Heim
+    `$07/$06`; capture respects HD/dump ownership and is skipped when both
+    action-effect settings are disabled. Tests cover TM and TS winner masks,
+    Viper occlusion, the Death Heim torch census, viewport offsets, and the
+    disabled-settings fast path.
+
+77. **A Diorama face plane needs its animated ornaments, not merely its
+    background tiles. FIXED 2026-08-23.** Death Heim hub `0701` kept its boss
+    faces on ordinary BG2, so depth of field blurred them with the water; their
+    priority-2 red-eye sprites stayed on OBJ2 and floated ahead of their
+    sockets. The room manifest now authors BG2 rows 0-8 at focal `z=0.5` while
+    row 9 onward remains ordinary BG2. Since the hub is native-only, scanout
+    moves both BG2 priority bands into that virtual plane after isolation. A
+    complete position/attribute/X-high/size signature identifies the seven-eye,
+    26-piece OAM group; only pixels actually won by its raster migrate from
+    OBJ2 to the face plane. Flat rendering and emulated VRAM/OAM remain exact,
+    earlier OBJ winners remain in place, and BG2SC `$70` prevents the post-final
+    `$74` sky from inheriting the policy.
+
+78. **The original all-Repeat Death Heim backdrop classification outlived its
+    evidence. FIXED 2026-08-23.** Live BG Extents drafts showed the rematch art
+    is finite. Source/edge-guarded tunings now clamp viewport BG2 in
+    `0702-0706`, add only the verified `80/80` mirrored BG1 span in `0703`, and
+    give `0707` BG2 world-edge/normal motion with asymmetric `100/96` extent.
+    The old Repeat family remains the safe canonical fallback if topology
+    changes. Hub progress `$0347=7` no longer widens the still-visible face
+    scene: the post-final Mirror/`128/128` sky policy begins only at the live
+    `$64/$74` page handoff (or settled song-state fallback). Planner regressions
+    enumerate every room and guard source, edge, motion, and extent together.
 
 
 Process lessons folded out of statement-then-correction text elsewhere; the docs now state final

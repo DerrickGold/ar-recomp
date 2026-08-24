@@ -40,6 +40,11 @@ unsigned ActRaiser_TakeVextUnlockedObjects(void);
  * 0..127 scene claim, so reading the range back from there silently loses the
  * icon exactly when the diorama is on. Either pointer may be NULL. */
 bool ActRaiser_HudObjIconRange(uint8_t *first, uint8_t *count);
+/* True when the most recently rendered frame moved Death Heim 0701's face
+ * band into its focal virtual plane after native capture. The PPU content mask
+ * cannot observe host-side postprocessing, so FrameSlot uses this latch to
+ * publish that plane. */
+bool ActRaiser_DioramaDeathHeimHubFacesPromoted(void);
 void ActRaiser_FullSnapshot(const char *prefix);
 void RunOneFrameOfGame(void);
 /* Release the game coroutine's stack (guard-page mapping) / fiber at shutdown.

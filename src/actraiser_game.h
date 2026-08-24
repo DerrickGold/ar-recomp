@@ -512,6 +512,61 @@ static inline int ActRaiser_FindSimulationHourglass(
   return -1;
 }
 
+/* Find the seven red-eye ornaments attached to the boss statues in Death
+ * Heim's hub. They are ordinary priority-2 OBJ even though their sockets are
+ * painted into BG2, which makes the two separate in depth when Diorama tilts
+ * the planes. The allocation follows the portal/player sprites and therefore
+ * must be searched rather than assumed; the complete 26-part footprint is the
+ * identity.
+ *
+ * Measured across gf1180..1380 of runs/20260823-182959. The leftmost eye does
+ * animate ($00/$01/$02 -> $09/$0A/$0B), so tile numbers are deliberately not
+ * part of the signature. Position, attribute, X-high, and size are invariant.
+ * Returns the first slot, or -1 without a complete match. */
+enum { kActRaiserDeathHeimHubEyeOamCount = 26 };
+static inline int ActRaiser_FindDeathHeimHubEyes(
+    const uint16 *oam, const uint8 *high_oam, int oam_slots) {
+  static const uint8 kX[kActRaiserDeathHeimHubEyeOamCount] = {
+      8, 24, 16, 16, 240, 224, 232, 224, 40, 56, 48, 48, 192,
+      200, 192, 72, 88, 80, 80, 176, 160, 168, 160, 128, 112, 120,
+  };
+  static const uint8 kY[kActRaiserDeathHeimHubEyeOamCount] = {
+      103, 103, 103, 95, 103, 103, 103, 95, 87, 87, 87, 79, 87,
+      87, 79, 71, 71, 71, 63, 71, 71, 71, 63, 63, 63, 39,
+  };
+  static const uint8 kAttr[kActRaiserDeathHeimHubEyeOamCount] = {
+      0x21, 0x21, 0x21, 0x21, 0x61, 0x61, 0x61, 0x61,
+      0x21, 0x21, 0x21, 0x21, 0x21, 0x21, 0x61,
+      0x21, 0x21, 0x21, 0x21, 0x61, 0x61, 0x61, 0x61,
+      0x21, 0x61, 0x21,
+  };
+  static const uint8 kLarge[kActRaiserDeathHeimHubEyeOamCount] = {
+      0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0,
+      0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1,
+  };
+
+  if (!oam || !high_oam ||
+      oam_slots < kActRaiserDeathHeimHubEyeOamCount)
+    return -1;
+  for (int first = 0;
+       first + kActRaiserDeathHeimHubEyeOamCount <= oam_slots; first++) {
+    int matches = 1;
+    for (int i = 0; i < kActRaiserDeathHeimHubEyeOamCount && matches; i++) {
+      const int slot = first + i;
+      const int index = slot * 2;
+      const uint8 shape =
+          (high_oam[slot >> 2] >> ((slot & 3) * 2)) & 3;
+      if ((uint8)oam[index] != kX[i] ||
+          (uint8)(oam[index] >> 8) != kY[i] ||
+          (uint8)(oam[index + 1] >> 8) != kAttr[i] ||
+          (shape & 1) != 0 || (shape >> 1) != kLarge[i])
+        matches = 0;
+    }
+    if (matches) return first;
+  }
+  return -1;
+}
+
 /* Does an OAM slot with these attributes START the Sky Palace selected-magic
  * HUD icon, and if so how many slots does the icon occupy? Pure so the promote,
  * and its test, agree on one answer; `large` is the slot's high-OAM size bit

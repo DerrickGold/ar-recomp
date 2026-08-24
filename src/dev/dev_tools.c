@@ -227,8 +227,10 @@ void DevTools_DumpDioramaLayers(const DevToolsContext *context) {
   } layers[] = {
     {kPpuOverlaySource_Bg1, "bg1"},
     {kDioramaPlane_Bg1Hi, "bg1_hi"},
+    {kDioramaPlane_Bg1Far, "bg1_virtual"},
     {kPpuOverlaySource_Bg2, "bg2"},
     {kDioramaPlane_Bg2Hi, "bg2_hi"},
+    {kDioramaPlane_Bg2Far, "bg2_virtual"},
     {kPpuOverlaySource_Bg3, "bg3"},
     {kPpuOverlaySource_Obj, "obj_p0"},
     {kDioramaPlane_Obj1, "obj_p1"},

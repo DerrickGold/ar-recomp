@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Yield-helper census: derive the helper list from the ROM, not from folklore.
 
-Motivation (DEBUG.md §7.19, the Death Heim boss-rush pair of bugs): ActRaiser's
+Motivation (bug ledger §20, the Death Heim boss-rush pair of bugs): ActRaiser's
 object system has a family of tiny "yield helpers" — routines a handler JSRs
 into that POP THE CALLER'S RETURN ADDRESS and stash it in an object field, so
 the object loop (or a later RTS) can resume the handler at JSR-site+3 frames
@@ -106,7 +106,7 @@ def helper_shape(rom, tgt):
             # frame read in place. Any other offset/balance is the routine
             # reading its own pushed temps (e.g. $C09C's spawn-coords arg) —
             # those continuations are ordinary paired returns; registering
-            # them would double-execute (DEBUG.md §7.17). Deep-offset
+            # them would double-execute (bug ledger §17). Deep-offset
             # ancestor peeks ($F8A6-family LDA $FD,S) exist but have no JSR
             # callers; if one grows a JSR site, review it by hand.
             if balance == 0 and ins.raw[1] == 0x01:

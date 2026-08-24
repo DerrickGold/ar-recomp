@@ -1628,6 +1628,34 @@ static void TestInGamePlaneResetPreservesVirtualLayers(void) {
   CHECK(strstr(text, "bg1-virtual = metatile:23 band:0") != NULL);
 }
 
+static void TestDeathHeimHubFaceBandStopsBeforeWater(void) {
+  DioramaRoomOverride room;
+  memset(&room, 0, sizeof(room));
+  room.used = true;
+  room.map_group = 0x07;
+  room.map_number = 0x01;
+  const char *error = NULL;
+
+  CHECK(DioramaLayerOrder_ParseLine(
+      &room, "bg2-virtual = z:0.5 order:3 alpha:255", &error));
+  CHECK(DioramaLayerOrder_ParseLine(
+      &room, "bg2-virtual = cells:0,0-15,8 band:0", &error));
+  CHECK(DioramaLayerOrder_VirtualLayerIsAuthored(&room.virtual_layers[1]));
+  CHECK(DioramaLayerOrder_VirtualLayerHasClassification(
+      &room.virtual_layers[1]));
+  CHECK(room.virtual_layers[1].set_z &&
+        room.virtual_layers[1].z == 0.5f);
+  CHECK(room.virtual_layers[1].set_order &&
+        room.virtual_layers[1].order == 3);
+
+  /* Every statue cell is focal band 0. The very next row is the divider and
+   * water; it must fall back to the authentic low/high priority split. */
+  CHECK(DioramaLayerOrder_VirtualBand(&room, 1, 0, 0, 0x2D, 0) == 0);
+  CHECK(DioramaLayerOrder_VirtualBand(&room, 1, 15, 8, 0x5D, 0x2000) == 0);
+  CHECK(DioramaLayerOrder_VirtualBand(&room, 1, 0, 9, 0x6A, 0) == 1);
+  CHECK(DioramaLayerOrder_VirtualBand(&room, 1, 0, 9, 0x6A, 0x2000) == 2);
+}
+
 int main(void) {
   TestNoOverrideIsIdentity();
   TestOverrideIsScopedToItsRoom();
@@ -1667,6 +1695,7 @@ int main(void) {
   TestMergeDropsStalePlaneLinesAfterAComment();
   TestVirtualLayerParseResolveAndRoundTrip();
   TestInGamePlaneResetPreservesVirtualLayers();
+  TestDeathHeimHubFaceBandStopsBeforeWater();
   if (g_failures) {
     printf("diorama_layer_order_test: %d failure(s)\n", g_failures);
     return 1;

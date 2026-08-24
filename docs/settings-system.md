@@ -3,8 +3,8 @@
 Architecture and implementation record for the typed settings registry,
 layered configuration, in-game overlay, and save editor.
 
-**Status:** Phases 1–6 are implemented. The remaining acceptance item is loading
-a host-edited save through the title-screen Continue flow.
+**Status:** Phases 1–6 are implemented and the save editor is confirmed through
+regular in-game use (2026-08-23).
 
 `src/settings.{c,h}` owns the live `g_settings` state and descriptor registry.
 The registry drives lookup, parsing, formatting, availability, mutation,
@@ -502,13 +502,12 @@ and re-synchronizes its shadow after an editor swap. Consequently **Apply for
 session** does not touch disk, while **Apply and save** performs the backup and
 atomic write explicitly.
 
-**Verification gate.** The field addresses and encodings are backed by the USA
+**Verification.** The field addresses and encodings are backed by the USA
 offset adjustment in the external editor, the linear SRAM→WRAM status mapping,
 repository fixtures, and transactional byte-level tests. The codec has also
 proven every repository fixture checksum-valid plus an unedited
-`.srm → .ini → .srm` byte-identical round trip. The remaining manual gate is to
-apply representative persistent edits on every page, Restart Game, choose
-Continue, and confirm the game displays/uses each intended value.
+`.srm → .ini → .srm` byte-identical round trip. Persistent edits and Continue
+flows are confirmed through regular use of the in-game editor.
 
 ---
 
@@ -869,7 +868,7 @@ read mutable format fields directly from `g_settings`.
 | 3 | Descriptor metadata and apply-kind callbacks | Implemented |
 | 4 | Layered config, atomic persistence, and live video/audio callbacks | Implemented |
 | 5 | ROM-themed in-game overlay, text editing, and host actions | Implemented |
-| 6 | SRAM codec, native/INI backends, import/export, and save editor | Implemented; one manual acceptance check remains |
+| 6 | SRAM codec, native/INI backends, import/export, and save editor | Implemented and confirmed in regular use |
 
 Phase 6 preserves all 8192 bytes in unedited cross-format round trips, rejects
 malformed INI transactionally, limits named-field edits to verified bytes plus

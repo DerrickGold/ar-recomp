@@ -204,6 +204,12 @@ enum {
    * presentation effect by the mask without a custom shader. Extraction-only;
    * authentic scanout remains unchanged. */
   kPpuOverlayFlag_MarkMainScreenWinner = 32,
+  /* Export an opaque black/white mask where this isolated source wins the
+   * priority resolve of the screen that owns it (main preferred, otherwise
+   * sub). This is the environmental-effect counterpart to the main-only mask:
+   * stages such as Marahna put BG1 and OBJ exclusively on TS, so an owning-
+   * screen mask preserves their authentic occlusion before colour addition. */
+  kPpuOverlayFlag_MarkOwningScreenWinner = 64,
 };
 
 /* Per-row widescreen padding policy. Inherit selects the whole-layer mask;

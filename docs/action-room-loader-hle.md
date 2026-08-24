@@ -557,19 +557,6 @@ not open-ended ROM archaeology.
 
 ### Natural-entry fixture capture
 
-The older Fillmore recordings, including the historically named
-`act1-boss2.bin`, `act1-bossfreeze.bin`, and `act1-bosshealth.bin`, stop in
-`0102`. `saves/fillmore-r1-natural.rec` now supplies the complete deterministic
-`0102 -> 0103 -> 0104` route and boss defeat. Its SHA-256 is
-`90a16a09d014c1630ddebc6017ae8857072286061ed24094e831f8b10fd4bbb1`; its
-unchanged boot SRAM is `saves/save.srm`, SHA-256
-`56aa0b7ea4b4e478a6164a592b06b62e4ad03a4c40d19e06ce6d61155f900134`.
-Manual capture `runs/20260822-170359/` and headless replay
-`runs/20260822-170748/` have byte-identical final WRAM, SRAM, dispatch log and
-complete state. Both build 6,447 compared action frames and 7,278,663 exact
-registers overall; the 621 `0104` frames contribute 701,109 exact R1 register
-comparisons.
-
 `AR_REPLAY_LIVE_AFTER_END=1` remains the fixture-acquisition path for future
 transients: it replays a deterministic prefix, then returns control to live
 input on the first later game frame. It takes precedence over
@@ -589,62 +576,12 @@ AR_ACTION_ROOM_SCENE_COMPARE=1 \
 ./build-release/ActRaiserRecomp ar.sfc --config config.ini
 ```
 
-The R7/R8/R10 recordings described below complete that capture set. Keep the
-boot SRAM and gameplay-affecting settings with every new fixture; controller
-input alone is not deterministic without them. The comparator remains
-read-only, and replay sessions protect the normal SRAM and settings files even
-after control is handed back to the player.
-
-`saves/aitos-r4-natural.rec` is the completed R4 fixture (SHA-256
-`bd1e7b576e0c11529844175173ee16127a3a9781af021105f66b978d6b7509e4`). It
-uses boot SRAM SHA-256
-`11dcdfb6c28cbf97f4ccd5f3c8ba1cf831f1864d029d6f8aaf67ad962ab79858`
-and traverses `0404 -> 0405 -> 0406 -> 0407`. Manual capture
-`runs/20260822-171954/` and deterministic replay `runs/20260822-173608/`
-have byte-identical final WRAM, SRAM, dispatch log, and complete state. The
-route compares 3,353 action frames / 3,785,537 registers with zero mismatch;
-its 222 R4 frames account for 250,638 registers. Capture and replay pin the
-same gameplay-assist profile explicitly. Default-HLE run
-`runs/20260822-174151/` and commands-7-through-3 plus immutable-source-off
-control `runs/20260822-174203/` are byte-identical for all 11 comparable
-frame-2700 and final-state artifacts:
-
-```sh
-AR_MOONJUMP=1 \
-AR_NO_KNOCKBACK=1 \
-AR_RANGED_SWORD=1 \
-AR_ACTION_ROOM_SCENE_COMPARE=1 \
-AR_INPUT_REPLAY=saves/aitos-r4-natural.rec \
-./build-release/ActRaiserRecomp ar.sfc --config config.ini
-```
-
-`saves/northwall-r7-natural.rec` (SHA-256
-`c20d244499e73ff72f27052f5011c8b85ef89320b9ea7006c99e038975353c58`)
-traverses `0605 -> 0606 -> 0607 -> 0608` using the same three gameplay assists.
-Manual capture `runs/20260822-174442/` and deterministic replay
-`runs/20260822-180657/` have byte-identical final state, WRAM, SRAM, and
-dispatch log. The replay compares 3,592 action frames / 4,055,368 registers
-with zero mismatch and pins the `0605` bootstrap camera plus natural R7 entry.
-Default HLE `runs/20260822-180838/` and native presentation-loader/source
-control `runs/20260822-180845/` are byte-identical for all 11 frame-4200 and
-final-state artifacts; the control also compares six published layers / 80,896
-tiles with zero mismatch.
-
-`saves/death-heim-r8-r10-natural.rec` (SHA-256
-`3fba9582f2ff0401c85414510bcf8e555e3c3273df69a6948a42d877dd7a184a`)
-covers the complete hub/rematch route, `0708`, the final boss, and the ending
-handoff with the same assist profile. Manual capture
-`runs/20260822-174637/` and replay `runs/20260822-180704/` end with identical
-complete state and SRAM. The manual settings-menu interaction is absent from
-the controller recording, so ten transient object bytes and diagnostic event
-ordinals are not a replay-equivalence claim. The rendering gate is exact:
-14,637 action frames / 16,525,173 registers, including 1,351 retained-R8-table
-frames, all have zero mismatch in every field. Default HLE
-`runs/20260822-180852/` and native presentation-loader/source control
-`runs/20260822-180913/` are byte-identical for all 18 PPU snapshots at R8,
-R10, and the ending fade, the R10 framebuffer, and final state/WRAM/SRAM. Their
-dispatch events are semantically identical after removing the monotonic
-diagnostic ordinal; native command dispatch changes that ordinal/total by 94.
+Keep the boot SRAM and gameplay-affecting settings with every new fixture;
+controller input alone is not deterministic without them. The comparator
+remains read-only, and replay sessions protect normal SRAM and settings after
+control returns to the player. Canonical fixture hashes, run identifiers,
+comparison counts, and results for Fillmore, Aitos, Northwall, and Death Heim
+live in the [action-background evidence census](bg-hle-census.md#guarded-command-3-video-profile-handoff--2026-08-22).
 
 ## Complete room matrix
 

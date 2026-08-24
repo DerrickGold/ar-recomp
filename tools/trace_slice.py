@@ -96,7 +96,7 @@ def _meta_note(meta, tgt, m, x, sources=()):
     if not meta:
         return [f"SUGGESTED FIX:  {suggest}   (no gen_meta.json — run v2regen metadata to verify)"]
     out = []
-    # ── paired-resume-double guard (3rd hazard class, DEBUG.md §7.17 2026-07-07) ──
+    # ── paired-resume-double guard (3rd hazard class, bug ledger §17, 2026-07-07) ──
     # If the target is the RETURN address of a decoded JSR/JSL (site+3 / site+4)
     # with live C fall-through (it's a label inside a decoded function), the miss
     # is the engine's BENIGN unwind-and-resume: the paired call site restores S
@@ -115,12 +115,12 @@ def _meta_note(meta, tgt, m, x, sources=()):
                     f"{hosts_pr[0]} — a PAIRED host-C call site. The miss is the "
                     f"engine's benign unwind-and-resume (single execution); registering "
                     f"it DOUBLE-EXECUTES the continuation (nested dispatch + natural "
-                    f"fall-through; the paired-resume-double class, DEBUG.md §7.17 ⚠️). "
+                    f"fall-through; the paired-resume-double class, bug ledger §17 ⚠️). "
                     f"If work is genuinely lost here, the fix is engine-level "
                     f"(ancestor-skip), not a cfg reg."]
         out.append(f"CAUTION: byte before target decodes as `{kind} ${callee_disp}` "
                    f"(site ${bank}:{site:04X}) — if that is a real decoded call, this is "
-                   f"the paired-resume-double class (DEBUG.md §7.17): registering "
+                   f"the paired-resume-double class (bug ledger §17): registering "
                    f"double-executes the continuation. Verify the site is code, not data, "
                    f"before registering.")
     # ── mid-loop-continuation guard (the B8C2 stack-overflow class) ──

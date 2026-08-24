@@ -154,6 +154,8 @@ static uint32_t CaptureDioramaPlaneContentMask(void) {
             g_ppu, kSurfaces[i].source, kSurfaces[i].band))
       mask |= DioramaPlaneBit(kSurfaces[i].plane);
   }
+  if (ActRaiser_DioramaDeathHeimHubFacesPromoted())
+    mask |= DioramaPlaneBit(kDioramaPlane_Bg2Far);
   return mask;
 }
 
@@ -608,6 +610,11 @@ void FrameSlot_Capture(FrameSlot *dst) {
     _Static_assert(kFrameSlotOverlayFlag_MarkFullAddSubscreen ==
                    kPpuOverlayFlag_MarkFullAddSubscreen,
                    "present.h's mirrored full-add flag must match ppu.h");
+    dst->action_bg1_mask_valid =
+        !dst->diorama_active &&
+        (g_ppu->overlayCaptures[kPpuOverlaySource_Bg1].flags &
+         kPpuOverlayFlag_MarkOwningScreenWinner) != 0 &&
+        PpuOverlaySurfaceHasContent(g_ppu, kPpuOverlaySource_Bg1, 0);
     dst->action_bg2_mask_valid =
         !dst->diorama_active &&
         (g_ppu->overlayCaptures[kPpuOverlaySource_Bg2].flags &

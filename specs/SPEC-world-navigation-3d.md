@@ -1,8 +1,9 @@
 # Spec — WN1: 3D sim-mode inter-town navigation (map `$09`)
 
-**Status:** Steps 1-4d and visual-tuning Steps 5a/5b/5d/5e implemented and
-fixture/live-replay-proven 2026-07-27. Step 4e still awaits a complete
-movement/action-entry replay; Step 5c remains an explicit research checkpoint.
+**Status:** Implemented and confirmed in play. The current forced-top-down
+presentation, movement, destination, fade, and action-entry behavior were
+accepted on 2026-08-23. Step 5c's optional high-fidelity reconstruction remains
+research and is not part of the current roadmap.
 
 ## 1. Intent
 
@@ -619,20 +620,21 @@ from a possibly warped PPU matrix is no longer the design.
 - **Step 2 — view classification and immutable camera metadata:** complete.
 - **Step 3 — full-world top-down scene:** complete.
 - **Step 4 — Palace/UI composition, transitions, tuning, and replay tests:**
-  implemented except the full movement/action-entry replay.
+  complete and accepted in play.
 - **Step 5a/5b/5d/5e — backdrop, location haze, cloud ceiling, animated
   world water:** complete.
-- **Step 5c — 2048x2048 high-fidelity composition:** research pending.
+- **Step 5c — 2048x2048 high-fidelity composition:** optional research,
+  deferred outside the current roadmap.
 
-## 9. Remaining audit questions
+## 9. Deferred technical follow-ups
 
-1. Record one `$09` replay covering movement, every available steady zoom
-   state, location-label changes, and the complete action-entry zoom-and-spin.
-2. Pin the runtime OAM boundary between Palace marker and location UI instead
+These possible refinements do not reopen the accepted current implementation:
+
+1. Pin the runtime OAM boundary between Palace marker and location UI instead
    of relying solely on the gf782 entry grouping.
-3. Verify the earliest possible `$09` entry, including a new/empty save, has all
+2. Verify the earliest possible `$09` entry, including a new/empty save, has all
    six `$7F:2000-$37FF` town maps initialized before the HLE build point.
-4. Identify deterministic ROM inputs and seam/mip policy for Step 5c's
+3. Identify deterministic ROM inputs and seam/mip policy for Step 5c's
    2048x2048 high-fidelity world composition.
 
 The former `town`-gate audit is resolved: generic diagnostics and view

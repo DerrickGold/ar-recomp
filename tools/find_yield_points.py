@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Static yield-point census: find + classify every RDNMI/HVBJOY read in the ROM.
 
-Motivation (DEBUG.md §7.12, the sim-effect 1/2-speed bug): host-frame yields can
+Motivation (bug ledger §12, the sim-effect 1/2-speed bug): host-frame yields can
 only come from (1) cfg-HLE'd wait routines, (2) the runtime's $4210 spin
 detector, (3) the idle coroutine. The spin detector is a HEURISTIC (same block
 re-read, ring-adjacent, same host frame), and both pacing bugs so far were

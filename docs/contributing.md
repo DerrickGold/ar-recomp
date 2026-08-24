@@ -161,8 +161,7 @@ ActRaiserRecomp/
 ├── CMakeLists.txt            # developer build (CMake presets: dev/play/asan/trace)
 ├── snesbuild.ini             # game build manifest for the hermetic/bundled path
 ├── Makefile                  # `make release` (all platform bundles), `make clean`
-├── DEBUG.md                  # ★ the debugging guide — every tool, every known
-│                                bug class, and the full bug-hunt journal.
+├── DEBUG.md                  # ★ debugging workflow, tools, and open issues.
 │                                Start here if something's broken.
 ├── docs/
 │   ├── manual.md              # ★ player/power-user reference: every config key,
@@ -172,6 +171,7 @@ ActRaiserRecomp/
 │   │                             engineered game architecture (object systems,
 │   │                             dispatch tables, subsystem roles) — the
 │   │                             groundwork for a future full decompilation.
+│   ├── bug-ledger.md          # resolved defect history and reusable lessons
 │   ├── research-symbol-map.md  # manually curated address → candidate semantic
 │   │                             name index, with confidence/promotion status
 │   ├── ram-map.md             # WRAM address reference
@@ -239,6 +239,7 @@ ActRaiserRecomp/
 | If you need to… | Read |
 |---|---|
 | Diagnose a problem | [`DEBUG.md`](../DEBUG.md) |
+| Review a resolved defect or reusable lesson | [`bug-ledger.md`](bug-ledger.md) |
 | Understand game architecture and hardware seams | [`SEAMS.md`](SEAMS.md) |
 | Look up candidate symbols | [`research-symbol-map.md`](research-symbol-map.md) |
 | Check current playability and subsystem status | [`progress.md`](progress.md) |
@@ -248,7 +249,8 @@ ActRaiserRecomp/
 
 Documents under `docs/` describe the living system. Files under `specs/` record
 work at a point in time and may be historical; use their index for current
-status.
+status. `DEBUG.md` owns active investigations, while `bug-ledger.md` preserves
+resolved history; neither should restate the current roadmap.
 
 ## What can (and can't) be committed here
 

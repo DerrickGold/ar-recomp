@@ -10,6 +10,7 @@
 #include "actraiser_game.h"
 #include "actraiser_action_bg.h"
 #include "action/action_bg_tuner.h"
+#include "action/action_effects.h"
 #include "action/action_load_pacing.h"
 #include "actraiser_ws_gap.h"
 #include "cpu_65816_math.h"
@@ -1250,9 +1251,18 @@ static void ActRaiser_ApplyVerticalMarginPolicy(uint8_t map_group,
 
 static const DioramaRoomOverride *ActRaiser_CurrentVirtualLayerRoom(void) {
   if (!g_settings.diorama_mode) return NULL;
-  return DioramaLayerOrder_Find(
+  const DioramaRoomOverride *room = DioramaLayerOrder_Find(
       Diorama_LayerOverrides(), g_ram[kActRaiserWram_MapGroup],
       g_ram[kActRaiserWram_CurrentMap]);
+  /* Raw map 0701 is reused after the final boss. The face scene owns BG2SC
+   * $70; the sky/cloud return scene switches it to $74. The manifest's virtual
+   * face band must not make that later sky foreground-sharp merely because the
+   * two scenes share map bytes. */
+  if (room && g_ram[kActRaiserWram_MapGroup] == kActRaiserMapGroup_DeathHeim &&
+      g_ram[kActRaiserWram_CurrentMap] == kActRaiserDeathHeimMap_Hub &&
+      PPU_bgTilemapAdr(g_ppu, 1) != 0x7000)
+    return NULL;
+  return room;
 }
 
 static void ActRaiser_ApplyWidescreenPolicy(void) {
@@ -2018,6 +2028,135 @@ static void ActRaiser_DioramaHudObjFinish(int width) {
   }
 }
 
+/* Promote Death Heim's BG2 statues and attach their seven red-eye ornaments.
+ *
+ * The ROM models the eyes as priority-2 sprites so it can blink them without
+ * rewriting the background. That is indistinguishable from being painted in
+ * the sockets in flat presentation, but Diorama correctly gives OBJ and BG2
+ * different depth transforms: the eyes then float in front of the faces. The
+ * room manifest promotes the face band to BG2Far at focal z. Because 0701 is
+ * native-only, the upper BG2 rows are split after scanout; then only the pixels
+ * won by the complete measured eye range move from OBJ2 to that same surface.
+ * Gameplay OAM, native composition, the water, portals, player, and every
+ * other room stay untouched.
+ *
+ * Comparing the rasterized range against the captured OBJ pixel is important:
+ * if an earlier OAM slot ever covers an eye, that earlier winner remains on
+ * its own OBJ plane instead of being mistaken for part of the statue. */
+enum {
+  kDeathHeimHubFaceRows = 9 * 16,
+  kDeathHeimHubEyeRasterMaxHeight = 128,
+};
+static uint32_t s_death_heim_hub_eye_raster[
+    kActRaiserAuthenticWidth * kDeathHeimHubEyeRasterMaxHeight];
+static bool s_death_heim_hub_faces_promoted;
+
+bool ActRaiser_DioramaDeathHeimHubFacesPromoted(void) {
+  return s_death_heim_hub_faces_promoted;
+}
+
+static void ActRaiser_DioramaDeathHeimHubStatuesFinish(int width) {
+  extern bool g_diorama_frame_active;
+  extern int g_ws_extra_top;
+  extern uint8_t *g_diorama_layer_pixels[];
+
+  s_death_heim_hub_faces_promoted = false;
+  if (!g_ppu || !g_diorama_frame_active ||
+      g_ram[kActRaiserWram_MapGroup] != kActRaiserMapGroup_DeathHeim ||
+      g_ram[kActRaiserWram_CurrentMap] != kActRaiserDeathHeimMap_Hub ||
+      width < kActRaiserAuthenticWidth)
+    return;
+
+  const DioramaRoomOverride *room = ActRaiser_CurrentVirtualLayerRoom();
+  if (!room || !DioramaLayerOrder_VirtualLayerHasClassification(
+                   &room->virtual_layers[1]))
+    return;
+
+  uint32_t *bg2 =
+      (uint32_t *)g_diorama_layer_pixels[kPpuOverlaySource_Bg2];
+  uint32_t *bg2_hi =
+      (uint32_t *)g_diorama_layer_pixels[kDioramaPlane_Bg2Hi];
+  uint32_t *faces =
+      (uint32_t *)g_diorama_layer_pixels[kDioramaPlane_Bg2Far];
+  if (!bg2 || !bg2_hi || !faces) return;
+
+  const int extra = (width - kActRaiserAuthenticWidth) / 2;
+  const ActionApronGeometry geom = { extra, kPpuObjApron };
+  const int plane_width = ActionApron_SurfaceWidth(&geom);
+  /* 0701 is deliberately native-only (docs/rendering-engine.md): its BG2
+   * cannot acquire virtual-band metadata from the world provider. Perform the
+   * same authored cell split on the already-isolated pixels instead. Rows
+   * 0..8 are statues/faces; row 9 begins the divider/fog/water. Both authentic
+   * priority bands feed one focal plane because the distinction here is
+   * semantic depth, not SNES paint order. */
+  uint32_t *sources[] = { bg2, bg2_hi };
+  for (size_t source = 0; source < sizeof(sources) / sizeof(sources[0]);
+       source++) {
+    for (int screen_y = 0; screen_y < kDeathHeimHubFaceRows; screen_y++) {
+      const size_t row =
+          (size_t)(screen_y + g_ws_extra_top) * plane_width;
+      for (int screen_x = 0; screen_x < kActRaiserAuthenticWidth;
+           screen_x++) {
+        const int column = ActionApron_SurfaceColumn(&geom, screen_x);
+        if (column < 0 || column >= plane_width) continue;
+        const size_t index = row + column;
+        const uint32_t pixel = sources[source][index];
+        if (!pixel) continue;
+        faces[index] = pixel;
+        sources[source][index] = 0;
+        s_death_heim_hub_faces_promoted = true;
+      }
+    }
+  }
+
+  const int first = ActRaiser_FindDeathHeimHubEyes(
+      g_ppu->oam, g_ppu->highOam, kPpuOamWords / 2);
+  if (first < 0) return;
+
+  enum { kEyePriority = 2 };
+  PpuObjRangeBounds bounds;
+  if (!PpuGetObjRangeBounds(
+          g_ppu, (uint8_t)first, kActRaiserDeathHeimHubEyeOamCount,
+          kEyePriority, &bounds))
+    return;
+  const int raster_width = bounds.x1 - bounds.x0;
+  const int raster_height = bounds.y1 - bounds.y0;
+  if (raster_width <= 0 || raster_width > kActRaiserAuthenticWidth ||
+      raster_height <= 0 ||
+      raster_height > kDeathHeimHubEyeRasterMaxHeight || bounds.x0 < 0 ||
+      bounds.x1 > kActRaiserAuthenticWidth)
+    return;
+  if (!PpuRasterizeObjRange(
+          g_ppu, (uint8_t)first, kActRaiserDeathHeimHubEyeOamCount,
+          kEyePriority, &bounds, s_death_heim_hub_eye_raster,
+          raster_width, raster_height,
+          (size_t)raster_width * sizeof(uint32_t)))
+    return;
+
+  uint32_t *eyes = (uint32_t *)g_diorama_layer_pixels[kDioramaPlane_Obj2];
+  if (!eyes) return;
+
+  for (int y = 0; y < raster_height; y++) {
+    const int screen_y = bounds.y0 + y;
+    if (screen_y < 0 || screen_y >= kActRaiserAuthenticHeight) continue;
+    for (int x = 0; x < raster_width; x++) {
+      const uint32_t expected =
+          s_death_heim_hub_eye_raster[(size_t)y * raster_width + x];
+      if (!expected) continue;
+      const int column = ActionApron_SurfaceColumn(&geom, bounds.x0 + x);
+      if (column < 0 || column >= plane_width) continue;
+      const size_t index =
+          (size_t)(screen_y + g_ws_extra_top) * plane_width + column;
+      const uint32_t captured = eyes[index];
+      if (!captured ||
+          (captured & 0x00ffffffu) != (expected & 0x00ffffffu))
+        continue;
+      faces[index] = captured;
+      eyes[index] = 0;
+    }
+  }
+}
+
 ActionApronGeometry ActRaiser_ObjApronGeometry(void) {
   extern bool g_ws_active;
   extern int g_ws_extra;
@@ -2485,14 +2624,37 @@ void ActRaiserDrawPpuFrame(void) {
     }
   }
 
-  /* Flat presentation has one already-composited framebuffer, so a BG2-stage
-   * enhancement needs the PPU's real priority winner as an occlusion mask.
-   * Diorama owns isolated planes and inserts the effect directly after BG2;
-   * a one-shot dump likewise owns this capture slot. HD replacements get
+  /* Flat presentation has one already-composited framebuffer, so BG-local
+   * enhancements need the PPU's real priority winners as occlusion masks.
+   * Diorama owns isolated planes and inserts effects directly after BG1/BG2;
+   * a one-shot dump likewise owns these capture slots. HD replacements get
    * first refusal above—never overwrite another source policy. */
   extern bool g_diorama_frame_active;
   extern bool g_diorama_dump_pending;
-  if (!g_diorama_frame_active && !g_diorama_dump_pending &&
+  const bool action_effects_enabled =
+      g_settings.action_effect_lighting || g_settings.action_effect_particles;
+  if (action_effects_enabled &&
+      !g_diorama_frame_active && !g_diorama_dump_pending &&
+      ActionSceneEffects_RoomUsesBg1Decorations(
+          g_ram, kActRaiserWramSize)) {
+    PpuOverlayCapture *bg1 =
+        &g_ppu->overlayCaptures[kPpuOverlaySource_Bg1];
+    if (bg1->x1 <= bg1->x0 || bg1->y1 <= bg1->y0) {
+      extern int g_ws_extra;
+      extern uint8_t g_action_bg1_mask_pixels[];
+      const int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
+      if (PpuBindOverlaySurface(
+              g_ppu, kPpuOverlaySource_Bg1,
+              g_action_bg1_mask_pixels, (size_t)width * 4)) {
+        PpuSetOverlayCapture(
+            g_ppu, kPpuOverlaySource_Bg1, -g_ws_extra, 0,
+            width, kActRaiserAuthenticHeight,
+            kPpuOverlayFlag_MarkOwningScreenWinner);
+      }
+    }
+  }
+  if (action_effects_enabled &&
+      !g_diorama_frame_active && !g_diorama_dump_pending &&
       map_group == kActRaiserMapGroup_Aitos &&
       map_number >= 2 && map_number <= 3) {
     PpuOverlayCapture *bg2 =
@@ -2671,6 +2833,7 @@ void ActRaiserDrawPpuFrame(void) {
     /* After scanout (the diorama planes only hold this frame's sprites now) and
      * before FrameSlot_Capture publishes them to the presentation path. */
     ActRaiser_DioramaHudObjFinish(width);
+    ActRaiser_DioramaDeathHeimHubStatuesFinish(width);
     /* After the HUD-icon promote, not before: that pass PUNCHES the promoted
      * icon out of the OBJ planes, and the apron's claimed-set test reads those
      * planes. Running first would let a hole it is about to punch look like
@@ -2915,7 +3078,8 @@ void ActRaiser_ApplyCheats(void) {
   /* AR_ALL_MAGIC=1: unlock all four spells. HAVE flags $0299-$029C = 01/02/03/04
    * (cheat-map values, docs/ram-map.md). Pinned in ALL modes so the sim-mode
    * equip menu lists them; SELECTING one still goes through the menu (the equip
-   * routine $01:915D derives $02AC from these). DEBUG.md #18 has the full
+   * routine $01:915D derives $02AC from these). docs/bug-ledger.md §18 has the
+   * resolved cheat interaction; docs/SEAMS.md has the full
    * magic wiring map. */
   {
     if (g_settings.cheat_all_magic) {
@@ -2932,7 +3096,7 @@ void ActRaiser_ApplyCheats(void) {
 
   /* AR_INF_MP: infinite magic scrolls. =1 -> pin the WORKING count $21 to 10
    * (PAR 7E00210A); =<n> -> pin to n. Deliberately does NOT touch the
-   * PERSISTENT count $0295 (DEBUG.md #18b: $21 is the act-mode working copy,
+   * PERSISTENT count $0295 (docs/bug-ledger.md §18b: $21 is the act-mode working copy,
    * loaded from $0295 at $02:84E0) so the cheat never bakes into save.srm. */
   if (g_settings.cheat_inf_mp)
     g_ram[kActRaiserWram_WorkingMagicPoints] =
@@ -3101,7 +3265,7 @@ void ActRaiser_ApplyCheats(void) {
     if (mode) {
       if (mode == 1) {
         g_ram[kActRaiserWram_PlayerInvulnerabilityTimer] = 0xFF;
-        /* MAGIC EXCEPTION (2026-07-07, DEBUG.md #18): the cast gate ($00:9843 ->
+        /* MAGIC EXCEPTION (2026-07-07, docs/bug-ledger.md §18): the cast gate ($00:9843 ->
          * $00:9DE1) does BIT #$2008 on player state $08D0 and refuses to cast
          * while the invuln flag ($2000) is set -- pinning it unconditionally made
          * magic permanently dead. Lift the pin ONLY when a cast will actually

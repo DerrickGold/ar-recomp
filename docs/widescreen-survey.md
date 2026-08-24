@@ -112,32 +112,17 @@ into both margins.
 **Direct source-map margin decode (implemented 2026-07-12; validated
 2026-07-13):** static ROM evidence at `$02:B6F8-$B726` is a conditional 256-byte
 copy from ROM `$07:D0A0` to WRAM `$7E:C200`. The source is a 16x16 metatile page
-with the authentic palace beam, capitals, shafts, and floor. Its metatile rows
-9-12 contain a box; the box-free scene behind it is reconstructed per column
-class (established 2026-07-13 by prediction-vs-live-map diffs, `runs/20260713-*`,
-after three staged fixes):
+with the authentic palace beam, capitals, shafts, and floor. Prediction-vs-live
+map diffs in `runs/20260713-*` established the correct quadrant order, the
+box-covered shaft/floor reconstruction, and the metatile-only pillar flares
+after three staged fixes. The current layout and reconstruction algorithm live
+in [rendering-engine.md](rendering-engine.md#11-ui--dialog-compose-sim-engine);
+this survey retains only the dated evidence and outcome.
 
-1. Quadrant order is row-major within the metatile (`((y&1)<<1)|(x&1)` =
-   TL,TR,BL,BR); the initial x-major read transposed every 2x2 block and drew
-   the split shaft metatiles as 8px checkerboards.
-2. Rows 9-10 continue the shaft row 8; meta cols 0/15 keep rows 11-12 (the
-   page-seam base halves `$42/$40`+`$4A/$48` that complete each center-edge
-   half-base); the floor plane's top two rows sit under the box bottom, so
-   row 12 maps to floor row 13 at plain columns (the page's own floor rows
-   13-15 only cover the lower floor — true in BOTH scroll bands; a
-   band-conditional first attempt left a one-row black band in menu state).
-3. Pillar base flares exist only in the metatile table, never in a page row:
-   `$41/$49` center (the `$41` top half is plain shaft, so the splice is
-   seamless) flanked by `$40/$48` / `$42/$4A` skirts at the row-8 shaft
-   neighbors — recovered by reverse-lookup of the words the boot-time
-   colonnade left in the scratch columns.
-
-The game stages menu UI by rewriting the WRAM `$C200` page copy (rows 2-6)
-and re-decoding, so the pristine ROM page is the correct box-free source. The
-64x64 map holds four quadrant canvases (2 x-pages x 2 y-bands) selected per
-UI state via scroll; the mapping above applies to all of them. F2 VRAM dumps
-are taken after the post-scanout restore, so margins must be validated from
-rendered pixels or predictions, never from the dump.
+The game stages menu UI by rewriting the WRAM `$C200` page copy, so the
+pristine ROM page is the box-free source. F2 VRAM dumps are taken after the
+post-scanout restore; margins therefore require rendered-pixel or prediction
+validation.
 
 For rendering, only BG2 tile columns sampled by the side margins are generated.
 The source IDs are expanded through the live `$7E:2900` BG2 metatile table and
@@ -146,9 +131,8 @@ Columns belonging to the authentic center are explicitly excluded. The game
 keeps its real center box and offscreen staging; the temporary VRAM map is
 restored byte-for-byte after scanout. This remains presentation-only and needs
 no generated-code change. `AR_WS_SKYPALACE_BG=0` restores raw-wide output.
-**Validation:** the final margin decode is byte-identical to the game's own
-boot-composed colonnade (scratch cols 56-63, rows 18-31), and the user
-confirmed clean margins in both the dialogue and submenu states.
+**Validation:** the output matches the boot-composed colonnade byte for byte,
+and the user confirmed clean margins in dialogue and submenu states.
 
 **Engine widescreen primitives built along the way.** The whole-layer clamp
 remains live. BH8's final consumer census removed the unused scanline clamp-band
@@ -657,11 +641,12 @@ live behavior/update, frame composition (`ADAD/AE6F`), and graphics upload/VRAM
 identity as separate modules. That structure permits replacing assets or the
 renderer without silently changing simulation behavior.
 
-## Remaining task queue (execute in order)
+## Historical task queue (2026-07-12 checkpoint)
 
-Each item is deliberately bounded so it can be implemented, rebuilt, and
-direct-tested before the next begins. Regeneration is user-owned: stop and hand
-off whenever a cfg/emitter change makes it necessary.
+This queue records the implementation order at that checkpoint; it is not a
+current roadmap. See [progress.md](progress.md) for remaining work. Each item
+was deliberately bounded so it could be implemented, rebuilt, and directly
+tested before the next began.
 
 1. **Action Stage D2 — COMPLETE.** D1 drawing is unchanged; wide activation is
    default-on and `AR_WS_MARGIN_ACTIVATION=0` retains the same-binary fidelity
@@ -714,9 +699,10 @@ regions `$01-$06`. All are fully playable and correctly render/activate sprites
 and backgrounds in widescreen, including the repaired fast fall, previously
 inert enemies/platforms, bosses, Aitos cloud bands, and Northwall cloud/snow
 bands. The bullets below retain the chronological discovery evidence; their
-intermediate “pending retest” states are superseded by this result. Death Heim
-and camera/world-edge presentation remain open as described above; Death Heim
-is broken at its first boss transition.
+intermediate “pending retest” states are superseded by this result. At this
+checkpoint Death Heim and camera/world-edge presentation were still open, and
+the first boss transition was broken; those findings were subsequently
+resolved as recorded in the status note at the top of this document.
 
 - Fillmore act 1: clean. Fillmore act 2: completed, but character movement
   slowed; the action→action F6 path is now the leading suspect rather than
@@ -798,16 +784,16 @@ is broken at its first boss transition.
   the complete live BG2. Reflection removes the hard cloud-edge seam seen with
   cyclic repeat. Direct testing on 2026-07-14 confirmed that the switch is
   hidden by the black frame and completes before the sky fade-in.
-- Death Heim raw maps `0702-0707` select cyclic repeat for the moving
-  mountain/parallax background.
-  In
+- Death Heim raw maps `0702-0707` historically selected cyclic repeat for the
+  moving mountain/parallax background. In
   `runs/20260714-173750/snapshots/snap_00_gf4875`, the active policy was
   `mirror=02` with BG2 `$32=$0100`; direct observation showed those reflected
   margins scrolling opposite the authentic center on maps `$19=04-$07`.
-  `$19=02/$03` are classified with the same background family. The full
-  `$02-$07` range selects cyclic repeat; 2026-08-10 direct Wide Full and
-  Diorama-32 matrices cover all six rooms with zero provider mismatch, and the
-  Wide Full set is 102/102 artifacts byte-exact to its frozen baseline.
+  `$19=02/$03` were classified with the same background family. The current
+  source/edge-guarded room tunings promote finite BG2 to Clamp/fill in
+  `0702-0706`; `0703` also mirrors world-backed BG1 with an `80/80` cap, while
+  `0707` gives BG2 world-edge/normal motion with a `100/96` cap. The former
+  Repeat classification remains the fallback if decoded topology changes.
 - Final-boss map `0708` is separate: both BG1 and BG2 declare `$0100` width and
   form stacked transparent star-road/star-field effects with scanline/sine
   motion (`runs/20260714-183142/snapshots/snap_00_gf12574` and

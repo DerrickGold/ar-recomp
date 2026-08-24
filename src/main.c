@@ -129,6 +129,11 @@ uint8_t g_hud_bg_pixels[
     kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
 uint8_t g_hud_obj_pixels[
     kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
+/* Flat-mode mask of pixels for which BG1 wins the priority resolve of its
+ * owning PPU screen. This remains correct in Marahna/Viper rooms where BG1
+ * and OBJ are TS-only inputs to the final colour-add composite. */
+uint8_t g_action_bg1_mask_pixels[
+    kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
 /* Flat-mode mask of pixels for which BG2 wins the complete PPU main-screen
  * priority resolve. A BG2-stage presentation effect is multiplied by this
  * before compositing, so later BG1/OBJ art retains authentic occlusion. */

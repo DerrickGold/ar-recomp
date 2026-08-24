@@ -647,8 +647,10 @@ classification:
 | `0208` | playfield / finite world | backdrop / 256x256 viewport | both use Mirror/fill motion; BG1 exposes only `16/16` pixels beyond the authentic view and BG2 is fixed to `0/0` |
 | `0401`, `0601`, `0605` | playfield / finite world | backdrop / 256x256 viewport | current cyclic backdrop strategy is repeat-safe and may use the available canvas |
 | `0701` pre-ending | playfield / captured viewport | backdrop / captured viewport | bounded upper statue/face art and repeat-safe fog `144..224` remain separate policies |
-| `0701` ending sky | playfield / captured viewport | backdrop / captured viewport | the page/state handoff replaces the fog band and remains a separately tuned backdrop |
-| `0702`-`0707` | playfield / finite world | backdrop / 256x256 viewport | rematch parallax is cyclic; the playfield may grow independently |
+| `0701` ending sky | playfield / captured viewport | backdrop / captured viewport | the page/state handoff replaces the fog band, mirrors BG2, and enables its fixed `128/128` extent only after `$64/$74` is live |
+| `0702`, `0704`-`0706` | playfield / finite world | backdrop / 256x256 viewport | finite BG2 is Clamp/fill with available extent; BG1 may grow independently |
+| `0703` | playfield / finite world | backdrop / 256x256 viewport | BG1 Mirror/fill is capped at `80/80`; finite BG2 is Clamp/fill with available extent |
+| `0707` | playfield / finite world | backdrop / 256x256 viewport | BG2 uses its decoded world edge with normal motion, fixed `100/96` horizontal extent, and available vertical extent |
 | `0708` | primary scene / native raster | backdrop / native raster | no playfield owns finite-world growth; BG1 still anchors the native Diorama raster presentation |
 
 The ordinary entry worlds observed in this fresh matrix are, respectively,
@@ -768,12 +770,15 @@ Bands that stop before an edge do not leak into either synthetic margin. The
 rule is inferred from the existing bounds, so the census gains no second map
 table or runtime source of truth.
 
-The older upper-cloud cases remain whole-layer cyclic policies, not top bands:
-Aitos `0401-0403`, Northwall `0601-0605`/`0608`, and Death Heim
-`0702-0707`. Whole-layer Repeat naturally applies to synthetic vertical rows
-on either side, retaining the established same-direction parallax behavior.
-The all-map planner assertions and a real-PPU top-margin direction probe now pin
-that distinction explicitly.
+The older upper-cloud cases remain whole-layer cyclic policies, not top bands,
+for Aitos `0401-0403` and Northwall `0601-0605`/`0608`. Whole-layer Repeat
+naturally applies to their synthetic vertical rows on either side, retaining
+the established same-direction parallax behavior. Death Heim rematches retain
+that classification only as a source/edge-guarded fallback: promoted room
+tunings clamp finite BG2 in `0702-0706`, mirror `0703` BG1 only to `80/80`, and
+give `0707` BG2 world-edge/normal motion with a `100/96` cap. All-map planner
+assertions and a real-PPU top-margin direction probe pin the remaining cyclic
+family explicitly.
 
 The initial conservative Wide Full captures stop the moon/cloud plane at the
 authentic side boundaries while BG1 platforms and lower water continue. For
@@ -788,11 +793,14 @@ Diorama-32 because its existing clamp/repeat edges already produced the
 now-explicit limits.
 
 This confirms the Bloodpool diagrammed behavior and the Death Heim policy seam.
-The final gate covers every ordinary entry in 4:3, Wide Raw and Diorama-32,
-plus all six Death Heim rematches in Wide Full and Diorama-32. The rematch Wide
-Full control is 102/102 artifacts byte-exact to its frozen baseline. Native
-`0708` is 17/17 exact in Wide Full and Diorama-32 after its special classifier
-resets both raw raster planes to available extents.
+The pre-tuning gate covered every ordinary entry in 4:3, Wide Raw and
+Diorama-32, plus all six Death Heim rematches in Wide Full and Diorama-32; its
+rematch Wide Full control was 102/102 artifacts byte-exact to the frozen
+all-Repeat baseline. The promoted 2026-08-23 rematch policies are pinned by
+source/edge/extent planner regressions and require a fresh visual matrix rather
+than claiming byte identity to that superseded output. Native `0708` remains
+17/17 exact in Wide Full and Diorama-32 after its special classifier resets
+both raw raster planes to available extents.
 
 That `0708` reset was found by the cross-mode gate. Generic narrow-BG2
 classification had assigned a fixed `0/0` cap before the final-room override
@@ -806,4 +814,4 @@ remains black, so it is not accepted as a visual shortcut for the natural
 ending. The later natural recordings close both archival gaps: Northwall
 reaches `0608` through act 2, while Death Heim naturally exercises `$64/$74`
 and retains the last R8 table across 1,351 ending frames. These validate the
-transition behavior without changing the implemented extent policy.
+transition boundary used by the later `128/128` ending-sky extent policy.

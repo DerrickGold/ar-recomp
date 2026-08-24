@@ -7,11 +7,10 @@ motivation is sim-mode testing: the `AR_WARP` path stages an act transition but
 **cannot reach sim-mode progress state** (population, per-region advancement,
 spells, lairs). Editing the save can.
 
-The **file-level contract** is settled: size, written footprint, fill behavior,
-and checksum are documented below. The player/progress fields exposed by the
-editor now have a USA address and encoding model, but the large live town-state
-block in §3.4 remains unknown. That distinction is why the structured INI
-format in §4 carries a lossless raw image as well as readable verified fields.
+The **file-level contract** and the fields exposed by the editor are settled:
+size, written footprint, fill behavior, checksum, USA offsets, and encodings
+are documented below. The structured INI format still carries a lossless raw
+image so bytes outside the named editor surface remain preserved.
 
 **Provenance — read this before trusting any offset below.** The starting field
 map came from the open-source editor
@@ -28,8 +27,7 @@ SRAM→WRAM on load; this is our best oracle for promoting fields to ✅),
 [settings-system.md](settings-system.md) (how editing is exposed),
 [progress.md](progress.md) (region/act naming).
 
-**Legend:** ✅ Verified against our ROM (method noted) · 🟡 Address/codec tested,
-but the user-visible result still needs an in-game round trip.
+**Legend:** ✅ Verified against our ROM and confirmed through in-game use.
 
 ---
 
@@ -139,7 +137,7 @@ use the combined model.
 The region order is Fillmore, Bloodpool, Kasandora, Aitos, Marahna, Northwall.
 Menu labels use **“Town State”** to leave enough room for “Act 2 cleared.”
 
-### 3.2 USA player/status block ✅ addresses; 🟡 gameplay round trip
+### 3.2 USA player/status block ✅
 
 Subtracting two from the external template's European offsets aligns the save
 block with the known WRAM block (`SRAM - $11B1 = WRAM` through the player
@@ -390,9 +388,8 @@ The test suite proves exact native size/checksum rejection, transactional
 destination preservation on malformed/missing/duplicate INI chunks, unedited
 cross-format byte identity, field-only mutation plus checksum, session-only
 shadow re-sync, and persistent active-backend writes. The codec also validates
-all nine repository fixtures. The remaining acceptance gate is the manual game
-round trip in §6.3: persist one host edit, Restart Game, Continue, and confirm
-the region is accepted and displayed as intended.
+all nine repository fixtures. Persistent edits and subsequent Continue flows
+are also confirmed through regular in-game use (2026-08-23).
 
 ---
 
@@ -423,7 +420,7 @@ the middle of its own save routine.
 
 ---
 
-## 6. Verification methodology (promoting 🟡 → ✅)
+## 6. Verification methodology
 
 We have a better oracle than the third-party map: **our own WRAM map.** The game
 copies SRAM→WRAM when a save is loaded, and [ram-map.md](ram-map.md) already
@@ -444,13 +441,14 @@ already isolates 752 changed bytes). Capture a save before/after a single
 discrete sim action (seal one lair, gain one population tick) to bisect the
 `0x0000`–`0x07ff` block field-by-field.
 
-### 6.3 Round-trip (the gating test)
+### 6.3 Round-trip
 Turn **Allow save edits** on → stage one low-risk field → **Apply and save** →
 **Restart Game** → Continue → confirm the game accepts the save and shows the
 intended value. Repeat representative tests for town state, Status, Magic,
-Items, Scores, Death Heim, and Professional mode. Phase 6 remains 🟡 until that
-matrix passes. **Apply for session** is intentionally not the restart path: its
-shadow re-sync guarantees that Restart/Exit leaves disk unchanged.
+Items, Scores, Death Heim, and Professional mode. This path is confirmed through
+regular use of the editor. **Apply for session** is intentionally not the
+restart path: its shadow re-sync guarantees that Restart/Exit leaves disk
+unchanged.
 
 ### 6.4 Tooling
 `tools/srm.py` is the checked-in command-line companion. Its `check`, `decode`,
@@ -471,6 +469,3 @@ codec.
 3. **City internals.** The reference template disables population, town level,
    offerings, and construction-speed fields. Derive these from single-action
    save diffs rather than exposing its dormant offsets.
-4. **Manual acceptance matrix.** Which fields are immediately re-read on
-   Continue, and which require a particular mode/town transition before their
-   user-visible effect appears?

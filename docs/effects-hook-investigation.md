@@ -3,11 +3,15 @@
 **Status:** Lifecycle, animation, geometry, and anchor mapping is complete for
 the four action magics, five simulation miracles, and four simulation enemy
 classes. Implemented effects cover simulation lightning and fire families,
-burning houses, Magical Fire, and the mapped Bloodpool, Marahna, and Aitos scene
-accents. Snapshot hooks and rendering have ROM-free regression coverage.
+burning houses, Magical Fire, and the mapped Bloodpool, Marahna, Aitos, and
+Death Heim scene accents. Enhanced boss families cover each original room as
+well as its Death Heim rematch. Snapshot hooks and rendering have ROM-free
+regression coverage.
 
-Remaining acceptance work is the short live sweep for all four action spells, a
-Red Demon capture, and final visual tuning. See
+The remaining acceptance work is the focused Bloodpool, sword-beam, Marahna,
+and simulation-effect sweep described below. Current project acceptance lives
+only in [progress.md](progress.md); all four action spells, Aitos, and Death
+Heim are confirmed. See
 [Validation remaining](#validation-remaining).
 
 The mapping is implementation-neutral: it identifies authentic 60 Hz state an
@@ -147,8 +151,10 @@ references: [SEAMS.md](SEAMS.md), [rendering-engine.md](rendering-engine.md), an
     catalogue can select BG1 or BG2 from any valid action map; it is not a previous-frame/previous-
     room cache, and a failed decode falls back to the current room's captured BG2 skybox.
 16. **Marahna's boss attack is a third electrical family with four presentation stages.** Only
-    map `$05/$08` admits it. The live boss parent retains source `$E483`, animation `$7E:5000`,
-    48/40/48/8 extents, and no spawner backlink. Handler `$8661` owns its pre-impact stages: exact
+    original map `$05/$08` or Death Heim rematch `$07/$06` admits it. The live boss parent retains
+    source `$E483` in Marahna or `$F72A` in Death Heim, animation `$7E:5000`,
+    and 48/40/48/8 extents. The original parent has no spawner backlink; the
+    rematch parent retains `$001C`. Handler `$8661` owns its pre-impact stages: exact
     visual/composition `$07/$57C2` and `$08/$5868` are its hand-charge cycles; `$0A/$59DE` is the
     central orb. A launched child uses the same source,
     backlink `$12E0`, resume/state/visual/composition `$E578/$04/$11/$5CE0`, velocity
@@ -156,8 +162,23 @@ references: [SEAMS.md](SEAMS.md), [rendering-engine.md](rendering-engine.md), an
     impact, that child resumes at `$E57E` in state `$07` and rides the floor at `(-4,0)` unflipped
     or `(+4,0)` H-flipped. The complete loaded cycle is `$12/$5D01`, `$13/$5D0D`,
     `$14/$5D2E`, `$13/$5D0D`; its backlink parent is then the exact shared-repeat tuple
-    `$8683/$0A/$E4D7/$00/$5307`. These identities supply measured local geometry for both flat
-    and Diorama projection without estimating an angle from pixels.
+    `$8683/$0A/$E4D7/$00/$5307`. Death Heim's parent instead retains the room-owner backlink
+    `$001C`; child linkage remains otherwise unchanged. These identities supply measured local
+    geometry for both flat and Diorama projection without estimating an angle from pixels.
+17. **Death Heim wraps original boss families instead of preserving their source records.** Runs
+    `20260822-195453` and `20260822-195726` map the room-order aliases: Minotaur `$AF5D→$F6CA`
+    (`0702`), Wizard `$BDFF→$F6E2` (`0703`), Flaming Wheel `$D838→$F712` (`0705`), Viper
+    `$E483→$F72A` (`0706`), and Ice Dragon `$F161→$F760` (`0707`). The wrappers preserve the
+    original attack control flow and `$7E:5000` artwork, so every matcher accepts exactly its
+    original room/source pair or its rematch room/source pair; cross-paired aliases fail closed.
+    Minotaur axes are exact `$8661/$B008`, state-3 spin frames with a same-source parent backlink.
+    Flaming Wheel is the visible active `$4000` body, not every record sharing its source: the
+    original body has backlink 0 and the rematch body has room-owner backlink `$001C`, while its
+    handler legitimately changes. Ice balls are exact `$8661/$F2CA`, state `$19/$1A`, visual
+    `$12-$19` children with a same-source parent. Tanzara (`0708`, source `$F80F`) uses an exact
+    50-tuple projectile allowlist. Pharaoh (`0704`) remains intentionally undecorated. Wizard and
+    Viper reuse their measured lightning styles, and Viper's Death Heim room also reuses Marahna's
+    single-metatile `$43` BG1 torch rule.
 
 These findings leave no ROM-decompilation blocker to choosing particle and light styles. They
 also mean the first implementation should expose per-instance metadata, rather than a single
@@ -224,22 +245,27 @@ The action animation interpreter is `$00:8E2F`; OAM emission is `$00:8D68`.
 - Flat mode maps through the resolved presentation viewport. Diorama mode consumes the compositor's
   exact resolved matrix, mesh dimensions, and paired UV-window/shape record for the source BG or
   OBJ plane, keeping the overlay registered without reading live WRAM, duplicating camera auto-fit,
-  or guessing a parallel depth. Dynamic actors and BG1-local accents remain a world overlay above
-  the composed world and below HUD/HD UI. The waterfall is instead inserted at BG2-low painter
-  depth in Diorama and multiplied by a current PPU BG2-winner mask in flat presentation, preserving
-  later BG1/OBJ occlusion without a custom shader.
+  or guessing a parallel depth. Dynamic actors remain a world overlay above the composed world and
+  below HUD/HD UI. BG-local accents use painter-aware paths: torches submit after BG1-low in Diorama
+  and through an owning-screen BG1-winner mask in flat presentation; the waterfall submits after
+  BG2-low in Diorama and through a main-screen BG2-winner mask in flat presentation. Later BG/OBJ
+  occlusion is therefore preserved without a custom shader.
 - Both modes share the same capability-checked SDL additive/untextured-geometry path as simulation
   effects. No platform shader is required. Settings expose independent `action_effect_lighting`
   and `action_effect_particles` switches (`AR_ACTION_EFFECT_LIGHTING` /
   `AR_ACTION_EFFECT_PARTICLES`), both on by default.
 
-### Action-scene accent slice (2026-08-10/12)
+### Action-scene accent slice (2026-08-10)
+
+Updated with the Aitos depth work on 2026-08-12 and the Death Heim rematch,
+torch-occlusion, and audit contracts on 2026-08-23.
 
 - `ActionSceneEffects_CaptureFrame` is a separate immutable frame contract from the spell cast.
   It scans BG1's bounded page map for Bloodpool torch pairs through the same pure
   `ActionBgMapView` validation/addressing contract used by `ActionBgWorld`, then walks the ordinary
-  action-object table for the three measured actor signatures above. The boss-lightning rule is
-  additionally limited to Bloodpool map `$08`, validates its linked parent through `+$3A`, and
+  action-object table for the measured actor signatures above. The Wizard boss-lightning rule is
+  limited to Bloodpool `$02/$08` or Death Heim `$07/$03` with the corresponding retained source,
+  validates its linked parent through `+$3A`, and
   matches every pair decoded from animation states 2 through 7 and 9. Unknown lookalikes fail closed;
   inactive, no-draw, ineligible, and outside-activation records never submit geometry. Scene actor
   generations also combine stable resume/source identity with bounded motion continuity, so an
@@ -247,7 +273,8 @@ The action animation interpreter is `$00:8E2F`; OAM emission is `$00:8D68`.
   child uses source/backlink continuity because its saved resume intentionally changes across
   repeated strike/blank cycles.
 - Marahna adds a second bounded torch rule for maps `$05/$04-$08`, exact fireball/link actor rules
-  for `$04-$07`, and an exact boss-lightning rule only for `$08`.
+  for `$04-$07`, and an exact Viper boss-lightning rule for original `$05/$08` or rematch
+  `$07/$06`. The rematch room also admits the same `$43` torch signature.
   The torch rule matches single metatile `$43` and applies a camera-local publication window; it
   uses shared metatile-aligned scan bounds rather than traversing the complete world, does not scan
   pixels, and does not consume one record for all 31 shared-world torches. The boss room's ten
@@ -303,6 +330,14 @@ The action animation interpreter is `$00:8E2F`; OAM emission is `$00:8D68`.
   backlink to the live boss root. Normal children use no flip; the reflected family requires
   matching controller/child H+V flip, reversed velocity, and side-swapped extents. Both retain their authored priority-2 projection and exact
   OAM-local rectangles while sharing the player beam's portable halo/wake/star style.
+- Death Heim rooms admit the measured rematch source only alongside its corresponding room and
+  retain every original-room route. Wizard `$F6E2` and Viper `$F72A` reuse the complete existing
+  lightning renderers. Minotaur `$F6CA` axes receive a warm spinning light and velocity-aligned
+  sparks; the `$F712` Flaming Wheel body receives a persistent flame shell and embers; `$F760`
+  Ice Dragon balls receive cool light, crystalline particles, and a velocity trail; Tanzara
+  source `$F80F` receives restrained generic projectile light/trails for only its exact tuple
+  allowlist. Pharaoh remains a negative case. Death Heim Viper room `$07/$06` runs the same
+  camera-local `$43` BG1 torch scan as Marahna `$05/$04-$08`.
 - Each source remains an independent light centre. Torches receive a warm two-tier wall spill and
   a small rising ember plume; fireballs receive a heading-aligned hot body, warm spill, and trailing
   sparks; trap lightning receives a tall cyan shaft aura, crawling sparks, and a small impact fan.
@@ -334,7 +369,12 @@ The action animation interpreter is `$00:8E2F`; OAM emission is `$00:8D68`.
   and platform splash/drips follow BG1 depth/rake/bow; the waterfall veil follows BG2 camera and
   geometry and is drawn immediately after BG2-low rather than after the complete world; fireballs
   and lightning follow OBJ priority 0. Flat mode clips that veil with the PPU's completed
-  main-screen BG2-winner mask before additive composition. A missing plane or mask fails closed instead of
+  main-screen BG2-winner mask before additive composition. Flat wall torches instead use an
+  owning-screen BG1-winner mask: it resolves TM when BG1 is a main-screen source and the resolved
+  TS winner when BG1 is subscreen-only, preserving Viper OBJ occlusion in both Marahna and Death
+  Heim. The BG-local intermediate is viewport-sized and uses target-local coordinates, so
+  letterbox/pillarbox pixels are neither cleared nor multiplied. Mask capture is skipped entirely
+  when both Action Effect lighting and Particles are disabled. A missing plane or mask fails closed instead of
   placing the effect at a guessed depth. The published projection also owns the hidden
   OBJ-resolve apron origin of the 640-column layer textures; callers remain in displayed-capture
   coordinates, preventing overlays from drifting across a raked plane while the flat path stays
@@ -606,6 +646,11 @@ frames, or Red Demon body-only alternation.
 
 ## Validation remaining
 
+Current project acceptance is tracked only in [progress.md](progress.md). All
+four magic spells, Aitos, and Death Heim have completed their visual acceptance;
+the remaining technical passes are listed here without restating completed
+coverage.
+
 No additional decompilation is required for the mapped effect families. Simulation Lightning,
 Blue Dragon lightning, and blue ground fire now have strict replay coverage. The scripted red fire
 has a frame-11,645 native snapshot proving palette-1 emission from the shared ground-fire pointers.
@@ -613,10 +658,7 @@ Run `20260803-130945` frame 19,950 separately proves the burning-house `$0A01/$A
 identity and placement; its post-implementation visual acceptance capture remains to be taken.
 Before final visual tuning, finish these focused acceptance captures:
 
-1. Enable `AR_ALL_MAGIC=1` and `AR_INF_MP=1`; cast Magical Fire with both flat and diorama action
-   presentation and visually accept attachment, coverage, intensity, lifecycle end, and pause
-   behavior. Then cast the other three spells in a scrollable action stage.
-2. Revisit Bloodpool `$02/$03` and `$02/$05` in flat and diorama modes. Visually accept torch wall
+1. Revisit Bloodpool `$02/$03` and `$02/$05` in flat and diorama modes. Visually accept torch wall
    registration and synchronized faster cadence, the strengthened fireball trail, complete
    176px lightning-column coverage, source retirement, and the lighting/particle setting switches.
    The discovery anchors remain `snap_01_gf2479`, `snap_03_gf7397`, and `snap_04_gf9417` from run
@@ -624,17 +666,17 @@ Before final visual tuning, finish these focused acceptance captures:
    `snap_07_gf10026` from `20260810-163044`. The latter run corrected the fireball matcher from
    non-live visual values to `$17/$45EF` and `$18/$4610`, proved `$47/$4F` torches in map `$05`,
    and measured lightning extents at 88px above plus 88px below the actor hot point.
-3. Revisit the Bloodpool boss in `$02/$08` using run `20260810-180202` as the correction baseline.
+2. Revisit the Bloodpool boss in `$02/$08` using run `20260810-180202` as the correction baseline.
    Accept all six vertical/diagonal and long/medium/short white-gold/amber strike paths, horizontal
    mirroring, the separate floor impact, pause behavior, retirement, and both Graphics switches in
    flat and Diorama presentation.
-4. Revisit the second snapshot from `20260810-175403`, using `20260810-184935` as the failed
+3. Revisit the second snapshot from `20260810-175403`, using `20260810-184935` as the failed
    alignment baseline, `20260810-190012` as the low-density baseline, and `20260810-190729` as
    the narrow-centreline baseline. Accept exact crescent registration for both `$13/$14` cycles
    and both travel directions, the restrained cold halo, full-height long haze, materializing
    forty-eight-star path, pause and retirement behavior, and both Graphics switches in flat and
    Diorama presentation.
-5. Revisit Marahna maps `$05/$04-$08` using the first three snapshots of run
+4. Revisit Marahna maps `$05/$04-$08` using the first three snapshots of run
    `20260811-151353` plus snapshots 0-11 of `20260811-221433`. Accept torch registration/cadence
    across subsection transitions and all ten boss-room torches, flame lighting on the `$E047`
    large orb and four cardinal children, both `$4AA1` horizontal and `$4B82` vertical connector
@@ -642,23 +684,9 @@ Before final visual tuning, finish these focused acceptance captures:
    the three-frame left/right ground-riding charge. Confirm `$34/$4BE5` moving platforms and the
    `$E0BA` reaper orb remain undecorated, then accept pause/retirement, flat/Diorama registration,
    and both Graphics switches.
-6. Revisit Aitos maps `$04/$01-$03` using snapshots 3-7 of `20260811-151353` and all six snapshots
-   of `20260812-000613`, plus the perspective-source correction in
-   `20260812-105106/snap_00_gf3728`. Accept full-volume lava spill for both observed 64px and 128px
-   pits, with embers born across the width at the isometric plane one quarter-height above the
-   bubbly volume's geometric midpoint,
-   the rising/reset/return fireball cycles, the separate molten-rock accent without a flame wake,
-   platform lip spray/drips, the restrained BG2 waterfall veil/flow streaks, and the Diorama-only unmasked
-   bottom foam/mist covering the finite-backdrop gap. Confirm the shared
-   `$04/$02` cave receives no water overlay, then accept slot relaunch, pause/retirement,
-   flat/Diorama registration, and both Graphics switches. Lava and platform accents must follow
-   BG1 rake/bow, the waterfall must follow BG2 camera/rake/bow, and projectiles must follow OBJ
-   priority 0.
-7. Log the controller kind and cohort slot `status, X/Y, +0A/+0C/+0E/+10, +20, +22, +28` each
-   tick. Confirm the decoded timing, clone count, and slot reuse for IDs 2-4.
-8. Cast simulation Rain and Sunlight once. Confirm the class-3 `$0503` transitions and the
+5. Cast simulation Rain and Sunlight once. Confirm the class-3 `$0503` transitions and the
    `$923E=0..140` sunlight ramp before implementing their distinct weather/scene-light styles.
-9. Capture one Red Demon attack to visually accept its elevated red flame attachment, and one Skull
+6. Capture one Red Demon attack to visually accept its elevated red flame attachment, and one Skull
    Head attack to confirm the statically decoded Earthquake-posting window against live
    presentation.
 

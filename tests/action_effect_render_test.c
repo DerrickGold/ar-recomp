@@ -386,6 +386,30 @@ static ActionEffectInstance SceneEffect(uint8_t kind, int world_x) {
       effect.geometry.data.rect =
           (ActionEffectLocalRect){32.0f, -33.0f, 48.0f, -1.0f};
       break;
+    case kActionEffect_MinotaurAxe:
+      effect.velocity_x = -4;
+      effect.velocity_y = 2;
+      effect.visual = 0x00;
+      effect.phase = kActionEffectPhase_MinotaurAxeFlight;
+      break;
+    case kActionEffect_FlamingWheel:
+      effect.visual = 0x0F;
+      effect.phase = kActionEffectPhase_FlamingWheelBody;
+      effect.geometry.data.rect =
+          (ActionEffectLocalRect){-32.0f, -32.0f, 32.0f, 32.0f};
+      break;
+    case kActionEffect_IceDragonIceBall:
+      effect.velocity_x = -4;
+      effect.velocity_y = -2;
+      effect.visual = 0x12;
+      effect.phase = kActionEffectPhase_IceDragonIceBallFlight;
+      break;
+    case kActionEffect_TanzaraProjectile:
+      effect.velocity_x = 3;
+      effect.velocity_y = 2;
+      effect.visual = 0x16;
+      effect.phase = kActionEffectPhase_TanzaraProjectileFlight;
+      break;
     default:
       break;
   }
@@ -443,6 +467,36 @@ static void TestSceneKindsRemainIndependent(void) {
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, true, IdentityProjection, NULL, &batch));
   CHECK(batch.vertex_count == 8 * kActionEffectGlowVertices + 48 * 4);
+}
+
+static void TestBossRushEffectStyles(void) {
+  ActionSceneEffectFrame frame = {.effect_count = 4, .visible_count = 4};
+  frame.effects[0] = SceneEffect(kActionEffect_MinotaurAxe, 180);
+  frame.effects[1] = SceneEffect(kActionEffect_FlamingWheel, 260);
+  frame.effects[2] = SceneEffect(kActionEffect_IceDragonIceBall, 340);
+  frame.effects[3] = SceneEffect(kActionEffect_TanzaraProjectile, 420);
+  ActionSceneEffectRenderBatch lighting, particles, both, repeat;
+  CHECK(ActionSceneEffectRender_Build(
+      &frame, true, false, IdentityProjection, NULL, &lighting));
+  CHECK(lighting.vertex_count == 8 * kActionEffectGlowVertices);
+  CHECK(lighting.index_count == 8 * kActionEffectGlowIndices);
+  CHECK(ActionSceneEffectRender_Build(
+      &frame, false, true, IdentityProjection, NULL, &particles));
+  CHECK(particles.vertex_count == 4 * 12 * 4);
+  CHECK(particles.index_count == 4 * 12 * 6);
+  CHECK(ActionSceneEffectRender_Build(
+      &frame, true, true, IdentityProjection, NULL, &both));
+  CHECK(both.vertex_count == lighting.vertex_count + particles.vertex_count);
+  CHECK(both.index_count == lighting.index_count + particles.index_count);
+  CHECK(ActionSceneEffectRender_Build(
+      &frame, true, true, IdentityProjection, NULL, &repeat));
+  CHECK(SceneBatchesEqual(&both, &repeat));
+
+  frame.effects[2].visual = 0x11;
+  CHECK(ActionSceneEffectRender_Build(
+      &frame, true, true, IdentityProjection, NULL, &repeat));
+  CHECK(repeat.vertex_count == both.vertex_count -
+      2 * kActionEffectGlowVertices - 12 * 4);
 }
 
 static void TestAitosLavaLightingAndParticles(void) {
@@ -704,8 +758,8 @@ static void TestCurrentActorEffectsRequestExactObjPlanes(void) {
 
 static void TestDecorationLayerBuildsAreIndependent(void) {
   ActionSceneEffectFrame frame = {
-    .decoration_count = 3,
-    .decoration_visible_count = 3,
+    .decoration_count = 4,
+    .decoration_visible_count = 4,
   };
   frame.decorations[0] = SceneEffect(kActionEffect_AitosWaterSplash, 100);
   frame.decorations[1] = SceneEffect(kActionEffect_AitosWaterfall, 120);
@@ -714,10 +768,16 @@ static void TestDecorationLayerBuildsAreIndependent(void) {
   frame.decorations[2].world_y =
       kActRaiserAuthenticHeight +
       kActionBgAitosWaterfallBottomExtensionPixels;
-  ActionSceneEffectRenderBatch world, bg2, atmosphere;
+  frame.decorations[3] = SceneEffect(kActionEffect_WallTorch, 140);
+  frame.decorations[3].render_layer = kActionEffectRenderLayer_Bg1Plane;
+  frame.decorations[3].projection_plane = kActionEffectProjectionPlane_Bg1;
+  ActionSceneEffectRenderBatch world, bg1, bg2, atmosphere;
   CHECK(ActionSceneDecorationRender_Build(
       &frame, kActionEffectRenderLayer_WorldOverlay, true, true,
       IdentityProjection, NULL, &world));
+  CHECK(ActionSceneDecorationRender_Build(
+      &frame, kActionEffectRenderLayer_Bg1Plane, true, true,
+      IdentityProjection, NULL, &bg1));
   CHECK(ActionSceneDecorationRender_Build(
       &frame, kActionEffectRenderLayer_Bg2Plane, true, true,
       IdentityProjection, NULL, &bg2));
@@ -725,8 +785,10 @@ static void TestDecorationLayerBuildsAreIndependent(void) {
       &frame, kActionEffectRenderLayer_Atmosphere, true, true,
       IdentityProjection, NULL, &atmosphere));
   CHECK(world.index_count > 0);
+  CHECK(bg1.index_count > 0);
   CHECK(bg2.index_count > 0);
   CHECK(atmosphere.index_count > 0);
+  CHECK(bg1.index_count != world.index_count);
   CHECK(world.index_count != bg2.index_count);
   CHECK(atmosphere.index_count != bg2.index_count);
   CHECK(atmosphere.vertex_count ==
@@ -1374,6 +1436,7 @@ int main(void) {
   TestCapacityIsDerivedFromPublishedLimits();
   TestSceneFeatureSwitchesAndDeterminism();
   TestSceneKindsRemainIndependent();
+  TestBossRushEffectStyles();
   TestAitosLavaLightingAndParticles();
   TestMarahnaFireballFramesAndDirections();
   TestAitosUsesRakedDioramaSourcePlanes();
