@@ -20,6 +20,11 @@ static const uint8_t bootRom[0x40] = {
   0xf6, 0xda, 0x00, 0xba, 0xf4, 0xc4, 0xf4, 0xdd, 0x5d, 0xd0, 0xdb, 0x1f, 0x00, 0x00, 0xc0, 0xff
 };
 
+void (*g_apu_port_apply_trace_hook)(Apu *, uint8_t, uint8_t) = NULL;
+void (*g_apu_spc_port_read_trace_hook)(Apu *, uint8_t, uint8_t) = NULL;
+void (*g_apu_spc_dsp_write_hook)(Apu *, uint8_t, uint8_t) = NULL;
+void (*g_apu_spc_dsp_write_trace_hook)(Apu *, uint8_t, uint8_t) = NULL;
+
 Apu* apu_init(void) {
   Apu* apu = malloc(sizeof(Apu));
   apu->spc = spc_init(apu);
@@ -61,6 +66,8 @@ void apu_clearPortQueue(Apu* apu) {
 static void apu_applyPortWrite(Apu* apu, const ApuPortWrite *w) {
   apu->inPorts[w->port & 3] = w->val;
   audio_trace_on_cpu_port_apply(w->port, w->val);
+  if (g_apu_port_apply_trace_hook)
+    g_apu_port_apply_trace_hook(apu, (uint8_t)(w->port & 3), w->val);
 }
 
 void apu_schedulePortWrite(Apu* apu, uint8_t port, uint8_t val,
@@ -161,6 +168,9 @@ uint8_t apu_cpuRead(Apu* apu, uint16_t adr) {
     case 0xf7: {
       uint8_t v = apu->inPorts[adr - 0xf4];
       audio_trace_on_spc_port_read((uint8_t)(adr - 0xf4), v);
+      if (g_apu_spc_port_read_trace_hook)
+        g_apu_spc_port_read_trace_hook(
+            apu, (uint8_t)(adr - 0xf4), v);
       return v;
     }
     case 0xf8:
@@ -233,7 +243,13 @@ void apu_cpuWrite(Apu* apu, uint16_t adr, uint8_t val) {
       break;
     }
     case 0xf3: {
-      if(apu->dspAdr < 0x80) dsp_write(apu->dsp, apu->dspAdr, val);
+      if(apu->dspAdr < 0x80) {
+        if (g_apu_spc_dsp_write_hook)
+          g_apu_spc_dsp_write_hook(apu, apu->dspAdr, val);
+        if (g_apu_spc_dsp_write_trace_hook)
+          g_apu_spc_dsp_write_trace_hook(apu, apu->dspAdr, val);
+        dsp_write(apu->dsp, apu->dspAdr, val);
+      }
       break;
     }
     case 0xf4:

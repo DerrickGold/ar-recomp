@@ -301,6 +301,8 @@ config's `AR_*` bridge or changed through the settings overlay:
 | Key | Effect |
 |---|---|
 | `AR_AUDIO_VOLUME=<0..100>` | master output volume (default 100); scales the final music/SFX/MSU-1 mix |
+| `AR_MUSIC_VOLUME=<0..100>` | music volume (default 100); scales authentic SPC songs and enhanced OGG music without changing SFX |
+| `AR_SFX_VOLUME=<0..100>` | sound-effects volume (default 100); scales native event and ordinary effects without changing music |
 | `AR_DIALOG_BLIP=0` | mutes only the per-character Sky Palace dialogue sound; other uses of the same sound/event ID remain active |
 | `AR_MUSIC_REPLACEMENTS=0` | disables enhanced manifest-driven music replacement (default on, inert without audio files); toggling live immediately hands the current song between OGG and the authentic SPC sequencer |
 
@@ -308,8 +310,11 @@ For an automated live probe without the overlay, use for example
 `AR_SETTING_SET=audio_master_volume=25`; the scheduled settings mechanism
 applies it through the same registry callback the menu uses.
 
-Independent music and SFX levels are not exposed yet because the SPC/DSP mix
-must first be separated or its voice ownership proven; see
+Music/SFX separation follows the SPC driver's logical track provenance, not
+sample number: song tracks `$00-$0E` feed Music and effect tracks `$10/$12`
+feed SFX before DSP summation. Both controls preserve sequencing and the shared
+hardware echo; an existing echo tail decays naturally after a live change. At
+100%/100% the native DSP uses its legacy integer mix path. See
 [`settings-system.md`](settings-system.md), "Audio control seams".
 
 Custom music (OGG streaming in place of SPC songs) is covered in

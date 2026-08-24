@@ -64,6 +64,7 @@ Dsp* dsp_init(uint8_t *ram) {
   Dsp* dsp = malloc(sizeof(Dsp));
   dsp->apu_ram = ram;
   dsp->shadow = dsp_shadow_create();  // opt-in; NULL/disabled unless env set
+  memset(dsp->voiceBus, kDspVoiceBus_Unclassified, sizeof(dsp->voiceBus));
   return dsp;
 }
 
@@ -73,6 +74,7 @@ void dsp_free(Dsp* dsp) {
 }
 
 void dsp_reset(Dsp* dsp) {
+  memset(dsp->voiceBus, kDspVoiceBus_Unclassified, sizeof(dsp->voiceBus));
   memset(dsp->ram, 0, sizeof(dsp->ram));
   dsp->ram[0x7c] = 0xff; // set ENDx
   for(int i = 0; i < 8; i++) {
@@ -132,14 +134,74 @@ void dsp_saveload(Dsp *dsp, SaveLoadInfo *sli) {
   sli->func(sli, &dsp->ram, sizeof(Dsp) - offsetof(Dsp, ram));
 }
 
-/* Voice mute gate for host-side music replacement: when >= 0, voices whose
- * live srcn is >= the threshold are excluded from the dry mix AND the echo
- * input (their envelopes/BRR decoding still run, so ungating is seamless).
- * ActRaiser's driver keeps per-song instruments at srcn 0x0C+ and the shared
- * SFX bank below, so a threshold of 0x0C silences music but not effects.
- * -1 (default) = no gating, byte-identical output. Serialised by the APU
+/* Startup fallback for host-side music replacement. Provenance-tagged Music
+ * voices use s_dsp_music_bus_muted below; only an Unclassified voice consults
+ * this SRCN threshold. ActRaiser's driver keeps per-song instruments at 0x0C+
+ * and the shared bank below, so the fallback remains safe before a voice's
+ * first logical-track write. -1 (default) disables it. Serialized by the APU
  * lock like every other dsp_cycle caller. */
 int g_dsp_voice_mute_srcn_min = -1;
+
+/* Presentation-only bus levels. Every read and write is serialized by the APU
+ * lock. Keeping them outside Dsp preserves the frozen savestate layout and
+ * lets settings be installed before the console itself is constructed. */
+static int s_dsp_music_gain_percent = 100;
+static int s_dsp_sfx_gain_percent = 100;
+static bool s_dsp_music_bus_muted;
+
+static int dsp_clampBusGain(int percent) {
+  if(percent < 0) return 0;
+  if(percent > 100) return 100;
+  return percent;
+}
+
+void dsp_setVoiceBus(Dsp *dsp, int ch, DspVoiceBus bus) {
+  if(!dsp || ch < 0 || ch >= 8) return;
+  if(bus < kDspVoiceBus_Unclassified || bus > kDspVoiceBus_Sfx)
+    bus = kDspVoiceBus_Unclassified;
+  dsp->voiceBus[ch] = (uint8_t)bus;
+}
+
+DspVoiceBus dsp_getVoiceBus(const Dsp *dsp, int ch) {
+  if(!dsp || ch < 0 || ch >= 8) return kDspVoiceBus_Unclassified;
+  return (DspVoiceBus)dsp->voiceBus[ch];
+}
+
+void dsp_setBusGains(int music_percent, int sfx_percent) {
+  s_dsp_music_gain_percent = dsp_clampBusGain(music_percent);
+  s_dsp_sfx_gain_percent = dsp_clampBusGain(sfx_percent);
+}
+
+void dsp_getBusGains(int *music_percent, int *sfx_percent) {
+  if(music_percent) *music_percent = s_dsp_music_gain_percent;
+  if(sfx_percent) *sfx_percent = s_dsp_sfx_gain_percent;
+}
+
+void dsp_setMusicBusMuted(bool muted) {
+  s_dsp_music_bus_muted = muted;
+}
+
+static bool dsp_voiceIsPresentationMuted(const Dsp *dsp, int ch) {
+  const DspVoiceBus bus = dsp_getVoiceBus(dsp, ch);
+  if(s_dsp_music_bus_muted && bus == kDspVoiceBus_Music)
+    return true;
+  return bus == kDspVoiceBus_Unclassified &&
+      g_dsp_voice_mute_srcn_min >= 0 &&
+      dsp->channel[ch].srcn >= g_dsp_voice_mute_srcn_min;
+}
+
+static int dsp_voiceBusGain(const Dsp *dsp, int ch) {
+  switch(dsp_getVoiceBus(dsp, ch)) {
+    case kDspVoiceBus_Music: return s_dsp_music_gain_percent;
+    case kDspVoiceBus_Sfx: return s_dsp_sfx_gain_percent;
+    default: return 100;
+  }
+}
+
+static int dsp_scaleVoiceForBus(const Dsp *dsp, int ch, int sample) {
+  int gain = dsp_voiceBusGain(dsp, ch);
+  return gain == 100 ? sample : (sample * gain) / 100;
+}
 
 /* Voice key-on observation seam (NULL by default = zero behavior change for
  * other games). Fires once per applied key-on, on whichever thread is cycling
@@ -234,13 +296,14 @@ void dsp_cycle(Dsp* dsp) {
   int totalR = 0;
   for(int i = 0; i < 8; i++) {
     dsp_cycleChannel(dsp, i);
-    if(g_dsp_voice_mute_srcn_min >= 0 &&
-       dsp->channel[i].srcn >= g_dsp_voice_mute_srcn_min)
+    if(dsp_voiceIsPresentationMuted(dsp, i))
       continue;
     if(g_dsp_voice_mute_srcn_min >= 0 && dsp_musicLeakEnabled())
       dsp_musicLeakAccum(dsp, i);
-    totalL += (dsp->channel[i].sampleOut * dsp->channel[i].volumeL) >> 6;
-    totalR += (dsp->channel[i].sampleOut * dsp->channel[i].volumeR) >> 6;
+    int voiceL = (dsp->channel[i].sampleOut * dsp->channel[i].volumeL) >> 6;
+    int voiceR = (dsp->channel[i].sampleOut * dsp->channel[i].volumeR) >> 6;
+    totalL += dsp_scaleVoiceForBus(dsp, i, voiceL);
+    totalR += dsp_scaleVoiceForBus(dsp, i, voiceR);
     totalL = totalL < -0x8000 ? -0x8000 : (totalL > 0x7fff ? 0x7fff : totalL); // clamp 16-bit
     totalR = totalR < -0x8000 ? -0x8000 : (totalR > 0x7fff ? 0x7fff : totalR); // clamp 16-bit
   }
@@ -255,7 +318,9 @@ void dsp_cycle(Dsp* dsp) {
   // matches this canon dry mix. No-op (totalL/R unchanged) when disabled or
   // unproven, so default output is byte-identical. Echo below applies to the
   // chosen dry mix either way.
-  if (dsp->shadow) {
+  if (dsp->shadow && s_dsp_music_gain_percent == 100 &&
+      s_dsp_sfx_gain_percent == 100 && !s_dsp_music_bus_muted &&
+      g_dsp_voice_mute_srcn_min < 0) {
     int sL = totalL, sR = totalR;
     dsp_shadow_process((DspShadow*)dsp->shadow, dsp, totalL, totalR, &sL, &sR);
     totalL = sL;
@@ -316,12 +381,13 @@ static void dsp_handleEcho(Dsp* dsp, int* outputL, int* outputR) {
   // get echo input
   int inL = 0, inR = 0;
   for(int i = 0; i < 8; i++) {
-    if(g_dsp_voice_mute_srcn_min >= 0 &&
-       dsp->channel[i].srcn >= g_dsp_voice_mute_srcn_min)
+    if(dsp_voiceIsPresentationMuted(dsp, i))
       continue; /* muted music voices must not bleed through the echo */
     if(dsp->channel[i].echoEnable) {
-      inL += (dsp->channel[i].sampleOut * dsp->channel[i].volumeL) >> 6;
-      inR += (dsp->channel[i].sampleOut * dsp->channel[i].volumeR) >> 6;
+      int voiceL = (dsp->channel[i].sampleOut * dsp->channel[i].volumeL) >> 6;
+      int voiceR = (dsp->channel[i].sampleOut * dsp->channel[i].volumeR) >> 6;
+      inL += dsp_scaleVoiceForBus(dsp, i, voiceL);
+      inR += dsp_scaleVoiceForBus(dsp, i, voiceR);
       inL = inL < -0x8000 ? -0x8000 : (inL > 0x7fff ? 0x7fff : inL); // clamp 16-bit
       inR = inR < -0x8000 ? -0x8000 : (inR > 0x7fff ? 0x7fff : inR); // clamp 16-bit
     }

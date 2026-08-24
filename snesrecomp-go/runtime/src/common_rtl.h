@@ -21,6 +21,7 @@ typedef struct Dma Dma;
 typedef struct DmaChannel DmaChannel;
 typedef struct Ppu Ppu;
 typedef struct CpuState CpuState;
+typedef struct Apu Apu;
 
 void SimpleHdma_Init(SimpleHdma *c, DmaChannel *dc);
 void SimpleHdma_DoLine(SimpleHdma *c);
@@ -347,6 +348,14 @@ bool RtlRunFrame(uint32 inputs);
  * the corresponding port write. */
 extern void (*g_rtl_inidisp_hook)(uint8_t val);
 extern void (*g_rtl_apu_port_pace_hook)(uint8_t port, uint8_t val);
+/* Optional, observation-only diagnostic seams. Unlike the game-owned port
+ * hook above, these are dedicated to tracing so installing a diagnostic does
+ * not have to participate in another hook's chaining contract. */
+extern void (*g_rtl_apu_port_trace_hook)(uint8_t port, uint8_t val);
+extern void (*g_rtl_spc_upload_trace_hook)(uint32_t src);
+/* Runs after a player/debug savestate load while the APU lock is held. Games
+ * use it only to reconstruct host-side metadata excluded from frozen states. */
+extern void (*g_rtl_apu_state_loaded_hook)(Apu *apu);
 void RtlReadSram();
 void RtlWriteSram();
 // Copy a legacy saves/<legacy_title>.srm forward to the generic saves/save.srm

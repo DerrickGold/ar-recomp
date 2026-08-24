@@ -28,6 +28,7 @@
 #include "hd_replacement_host.h"
 #include "hd_replacements.h"
 #include "music_replacements.h"
+#include "dev/native_audio_trace.h"
 #include "dev/sfx_census.h"
 #include "sim/sim_render_atlas.h"
 #include "sim/sim3d.h"
@@ -489,6 +490,8 @@ static void ActRaiser_RestoreRegs(CpuState *c, const CpuRegSnapshot *s) {
  * The stack-drift tripwire reads this to ignore handler-internal imbalance. */
 volatile int g_ar_in_interrupt = 0;
 
+static uint32 ActRaiser_LastBlockPc(void);
+
 /* ActRaiser BRK syscall. The ROM's BRK vector ($00:852F) is:
  *   PHP; SEP #$20; STA $00035B; PLP; RTI
  * i.e. it stores A's low byte to $035B (the sound-effect request port) and
@@ -497,14 +500,20 @@ volatile int g_ar_in_interrupt = 0;
  * SFX in the object/OAM loops). Generated code invokes this at every BRK site
  * via g_cpu_brk_hook, then falls through to the next instruction. */
 static void ActRaiser_BrkHook(CpuState *cpu) {
+  const uint8 id = (uint8)(cpu->A & 0xFF);
+  extern const char *g_last_recomp_func;
+  NativeAudioTrace_OnCpuRequest(
+      kNativeAudioRequest_Sfx, id, true, g_last_recomp_func,
+      ActRaiser_LastBlockPc(),
+      ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
+      (uint16_t)cpu->X, (uint16_t)cpu->Y);
   cpu_write8(cpu, 0x00, kActRaiserWram_BrkSoundRequest,
-             (uint8)(cpu->A & 0xFF));
+             id);
   /* AR_SFXCENSUS=1: record the request with its caller and the index registers
    * that identify the requesting actor, so the census can join it to whatever
    * sample the SPC driver ends up keying. No-op when disabled. */
   {
-    extern const char *g_last_recomp_func;
-    SfxCensus_OnRequest((uint8_t)(cpu->A & 0xFF), g_last_recomp_func,
+    SfxCensus_OnRequest(id, g_last_recomp_func,
                         ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
                         (uint16_t)cpu->X, (uint16_t)cpu->Y);
   }
@@ -512,11 +521,10 @@ static void ActRaiser_BrkHook(CpuState *cpu) {
    * event posts below -- lets a stuck-state capture show whether the game is
    * still alive and posting routine SFX while a specific event id never posts. */
   if (ActRaiser_DeveloperFlagEnabled(kActRaiserDeveloperFlag_CopLog)) {
-    extern const char *g_last_recomp_func;
     unsigned game_frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
     fprintf(stderr, "[brk] gf=%u fn=%s id=%02x $18=%02x $19=%02x\n",
             game_frame, g_last_recomp_func ? g_last_recomp_func : "?",
-            (uint8)(cpu->A & 0xFF), g_ram[kActRaiserWram_MapGroup],
+            id, g_ram[kActRaiserWram_MapGroup],
             g_ram[kActRaiserWram_CurrentMap]);
   }
 }
@@ -541,6 +549,7 @@ static uint32 ActRaiser_LastBlockPc(void) {
 static void ActRaiser_CopHook(CpuState *cpu) {
   const uint8 id = (uint8)(cpu->A & 0xFF);
   const uint32 site = ActRaiser_LastBlockPc();
+  extern const char *g_last_recomp_func;
   /* $01:901C is the message composer's per-glyph pacing helper. Its
    * non-space path at $01:902D posts COP #$07 after drawing each character.
    * Suppress only this exact site: id 07 also drives unrelated game events. */
@@ -548,6 +557,11 @@ static void ActRaiser_CopHook(CpuState *cpu) {
       !AudioPresentationPolicy_ShouldEmitDialogBlip(
           g_settings.audio_dialog_blip) &&
       id == 0x07 && site == 0x01902D;
+  NativeAudioTrace_OnCpuRequest(
+      kNativeAudioRequest_Event, id, !suppress_dialog_blip,
+      g_last_recomp_func, site,
+      ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
+      (uint16_t)cpu->X, (uint16_t)cpu->Y);
   if (!suppress_dialog_blip)
     cpu_write8(cpu, 0x00, kActRaiserWram_CopRequest, id);
   /* AR_COPLOG=1: log every COP-posted event id + game-frame + calling recomp
@@ -556,7 +570,6 @@ static void ActRaiser_CopHook(CpuState *cpu) {
    * consumer is unreached (see [[cop-syscall-hook-fix]] -- $C3DA consumer was
    * previously suspected still-unreached for a different event id). */
   if (ActRaiser_DeveloperFlagEnabled(kActRaiserDeveloperFlag_CopLog)) {
-    extern const char *g_last_recomp_func;
     unsigned game_frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
     fprintf(stderr, "[cop] gf=%u fn=%s site=%06x id=%02x%s $18=%02x $19=%02x\n",
             game_frame, g_last_recomp_func ? g_last_recomp_func : "?",

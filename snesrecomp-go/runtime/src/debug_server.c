@@ -3462,6 +3462,11 @@ static void cmd_load_state(const char *args) {
     }
     FileSli fs = {{_file_sli_func}, f, 0, 0, 0};
     snes_saveload(g_snes, &fs.sli);
+    if (!fs.error && g_rtl_apu_state_loaded_hook) {
+        RtlApuLock();
+        g_rtl_apu_state_loaded_hook(g_snes->apu);
+        RtlApuUnlock();
+    }
     fclose(f);
     if (fs.error) {
         send_fmt("{\"error\":\"read failed after %zu bytes\"}", fs.total);

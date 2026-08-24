@@ -41,4 +41,7 @@ void spc_reset(Spc* spc);
 int spc_runOpcode(Spc* spc);
 void spc_saveload(Spc *spc, SaveLoadInfo *sli);
 
+/* Called immediately before an opcode executes, with its pre-fetch PC. */
+extern void (*g_spc_opcode_trace_hook)(Spc *spc, uint16_t pc);
+
 #endif

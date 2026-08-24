@@ -102,6 +102,8 @@ typedef struct Settings {
   AudioFrequency audio_frequency; // enum: 32.04, 44.1, or 48 kHz
   int  audio_samples;             // restart-class device format
   int  audio_master_volume;    // 0..100; atomic callback mirror
+  int  audio_music_volume;     // 0..100; native + replacement music bus
+  int  audio_sfx_volume;       // 0..100; native effect bus
   bool audio_dialog_blip;      // exact $01:902D COP #$07 site
 
   /* Extras and inspection utility state */
@@ -389,7 +391,7 @@ so 4:3, 16:9, and 16:10 can switch live without reallocating game state.
 
 ### Audio control seams (Phase 4)
 
-The current audio path has two useful control points, and they solve different
+The audio path has three useful control points, and they solve different
 problems:
 
 - **Device rate is a presentation boundary, not a clock.** The runner's S-DSP
@@ -405,6 +407,27 @@ problems:
   block by `audio_master_volume` (`0..100`). This includes the DSP mix, sound
   effects, music, echo, and MSU-1 audio. The audio thread reads an
   `SDL_atomic_t` mirror; it never races on `g_settings`.
+- **Music and SFX are tagged before DSP summation.**
+  `native_audio_mixer.c` observes each SPC `$F3` DSP write before it is applied.
+  ActRaiser's logical sequence track in SPC X is authoritative: `$00-$0E` are
+  song tracks, `$10` is the event-effect lane, and `$12` is the ordinary-effect
+  / paired-event lane. ARAM `$47` proves the physical voice bit; `$1A` is a
+  fallback for shared helpers after X has been repurposed; an ambiguous helper
+  write preserves the last proven label. The DSP scales each
+  tagged voice's dry contribution and echo send before authentic per-voice
+  saturation. Unclassified startup writes remain at unity, and state loads
+  reconstruct labels from the driver ownership byte until normal writes refine
+  them.
+- **Music and SFX levels are live bus gains.** `audio_music_volume` /
+  `AR_MUSIC_VOLUME` controls native songs and replacement OGG;
+  `audio_sfx_volume` / `AR_SFX_VOLUME` controls native effects. Both are
+  `0..100` percent in steps of 5. They do not stop sequencing, envelopes, BRR
+  decoding, pitch modulation, or source cursors. Echo retains the hardware's
+  one shared FIR/feedback path with post-fader sends, so new echo input follows
+  its bus and an existing tail decays naturally after a live change. At
+  `100/100`, voice contributions take the exact legacy integer path without an
+  added multiply/divide; the optional DSP shadow remains eligible only there
+  when no replacement-music voice gate is active.
 - **Dialogue blip is suppressed at its native request site.** The message
   composer calls `$01:901C` for each printable glyph. After the character delay
   (`$01:9278`), the non-space path at block `$01:902D` loads `#$07` and executes
@@ -413,29 +436,21 @@ problems:
   `$01:902D` post. It must not suppress every COP request with ID `$07`, because
   the same ID is also used by unrelated events elsewhere in the game.
 
-Independent music and SFX sliders are **not yet exposed**. By the time
-`RtlRenderAudio()` returns, all eight DSP voices and echo are already summed;
-scaling that PCM cannot separate categories. A correct implementation requires
-one of these to be proven first:
-
-1. identify stable ActRaiser music/SFX voice ownership across Sky Palace, sim,
-   action, and bosses, then scale voices before DSP summation (including a
-   defined echo policy); or
-2. reverse-engineer the native SPC driver commands/state that control its music
-   and SFX buses, and adjust those buses before mixing.
-
-Use `AR_COPLOG=1` to correlate CPU sound requests and `AR_KONLOG=1` to correlate
-DSP key-on/voice/source activity. Acceptance requires captures from every major
-mode and an explicit echo test; a slider that merely changes DSP master volume
-would be a mislabeled duplicate of the implemented master control.
+The classifier deliberately uses sequencer provenance rather than SRCN: music
+can use common-bank samples, and an extended effect voice must remain SFX
+regardless of instrument. The serial trace and static driver map supporting
+that choice are in `snes-native-audio-channels.md`. This mixer foundation does
+not add voices or change native request priority; those remain opt-in extension
+phases.
 
 - **Enhanced music (`music_replacements` / `AR_MUSIC_REPLACEMENTS`, default
   on, callback).** Master toggle for manifest-driven OGG music streaming
   (`[music:]` entries of `game-assets/manifest.ini`; see docs/SEAMS.md
   "Audio"). Inert without audio files. The registry callback calls
   `MusicReplacements_ApplySetting()` while game execution is paused: off stops
-  the stream and clears `g_dsp_voice_mute_srcn_min`, while on reselects and
-  starts a replacement for the remembered current `(src, song)` immediately.
+  the stream and clears the provenance-aware DSP Music-bus gate, while on
+  reselects and starts a replacement for the remembered current `(src, song)`
+  immediately.
   Native `$F2` pause suspends the Vorbis decoder without closing it or
   advancing its cursor. Host-owned pause/settings-overlay state additionally
   pauses the SDL stream device itself, freezing replacement music, authentic
@@ -450,10 +465,8 @@ would be a mislabeled duplicate of the implemented master control.
   disabling reveals the authentic sequencer at its current position. An
   unexpected loop seek/decoder failure releases the music voice gate and falls
   back to authentic audio instead of leaving permanent silence. Note the
-  srcn>=0x0C voice-gate
-  discovery here is ALSO prerequisite work for the music/SFX slider problem
-  above: if the srcn split proves stable across all modes, option 1 becomes
-  "scale srcn>=0x0C voices" rather than full voice-ownership RE.
+  explicit bus gate retains srcn>=0x0C only as a fallback for a voice that has
+  not received its first classified register write.
 
 ### 4.1 The save backend / `APPLY_SAVE` path
 
@@ -746,6 +759,8 @@ structure allocation).
 | Menu output scale | `AR_MENU_SCALE` | int percent or `x` suffix | Auto (`0`) | PASSIVE; full-window content scale from 25–800, `100` = native 1× |
 | HD replacements | `AR_HD_REPLACEMENTS` | bool | on | PASSIVE; inert when art is absent |
 | Master volume | `AR_AUDIO_VOLUME` | int percent | 100 | CALLBACK; atomic post-mix gain, live `0..100` in steps of 5 |
+| Music volume | `AR_MUSIC_VOLUME` | int percent | 100 | CALLBACK; native song voices + replacement OGG, live `0..100` in steps of 5 |
+| Sound effects volume | `AR_SFX_VOLUME` | int percent | 100 | CALLBACK; native logical effect tracks `$10/$12`, live `0..100` in steps of 5 |
 | Dialogue text blip | `AR_DIALOG_BLIP` | bool | on | PASSIVE; exact `$01:902D` COP request only |
 | Screen ratio | `ExtendedAspectRatio` / `AR_EXTENDED_ASPECT_RATIO` | enum 4:3/16:9/16:10 | 4:3 | CALLBACK; changes active PPU border/pitch and presentation live |
 | Pixel aspect | `AspectPAR` / `AR_ASPECT_PAR` | enum 4:3/square | 4:3 | CALLBACK; recomputes active internal width live |
@@ -851,11 +866,13 @@ event loop. The menu mutates `g_settings` *between* frames; ordinary game and
 host code reads it on the next frame without locks.
 
 SDL's audio callback is the exception: it runs on a separate audio thread.
-Live callback inputs must use a synchronized mirror. Master volume therefore
-copies the descriptor value into `SDL_atomic_t g_audio_master_percent`, which
-the callback reads after rendering. Audio-format settings remain RESTART-class
-because device close/reopen must be serialized by SDL; never have the callback
-read mutable format fields directly from `g_settings`.
+Live callback inputs must use a synchronized mirror or the APU lock. Master
+volume therefore copies the descriptor value into an `SDL_AtomicInt`, which the
+callback reads after rendering. Music/SFX gains and replacement-stream gain
+change under `RtlApuLock`, the same lock held while DSP voices and OGG are
+mixed. Audio-format settings remain RESTART-class because device close/reopen
+must be serialized by SDL; never have the callback read mutable format fields
+directly from `g_settings`.
 
 ---
 

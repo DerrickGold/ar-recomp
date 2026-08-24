@@ -216,6 +216,8 @@ bool RtlLoadSnapshot(const char *filename) {
   RtlApuLock();
   FileSli fs = { { &file_sli_func }, f, false, false };
   snes_saveload(g_snes, &fs.base);
+  if (!fs.error && g_rtl_apu_state_loaded_hook)
+    g_rtl_apu_state_loaded_hook(g_snes->apu);
   RtlApuUnlock();
   fclose(f);
   if (fs.error) {
@@ -516,6 +518,8 @@ void RtlSetApuCatchupSuppressed(bool suppressed) {
  *                          the APU lock; may yield for game-specific timing
  *   g_rtl_spc_upload_hook  after each successful HLE SPC image upload, with
  *                          the 24-bit ROM source address (the song identity)
+ *   g_rtl_apu_port_trace_hook / g_rtl_spc_upload_trace_hook observation-only
+ *                          diagnostic counterparts; never replace game hooks
  *   g_rtl_inidisp_hook      after each CPU $2100 write, on the game coroutine;
  *                          may yield to preserve game-specific load timing
  *   g_rtl_music_mix_hook   inside RtlRenderAudio's locked region after the
@@ -525,6 +529,9 @@ void RtlSetApuCatchupSuppressed(bool suppressed) {
 void (*g_rtl_apu_port_hook)(uint8_t port, uint8_t val) = NULL;
 void (*g_rtl_apu_port_pace_hook)(uint8_t port, uint8_t val) = NULL;
 void (*g_rtl_spc_upload_hook)(uint32_t src) = NULL;
+void (*g_rtl_apu_port_trace_hook)(uint8_t port, uint8_t val) = NULL;
+void (*g_rtl_spc_upload_trace_hook)(uint32_t src) = NULL;
+void (*g_rtl_apu_state_loaded_hook)(Apu *apu) = NULL;
 void (*g_rtl_inidisp_hook)(uint8_t val) = NULL;
 void (*g_rtl_music_mix_hook)(int16_t *buf, int frames) = NULL;
 
@@ -572,6 +579,8 @@ void RtlApuWrite(uint16 adr, uint8 val) {
     }
   } else if (g_rtl_apu_port_hook)
     g_rtl_apu_port_hook((uint8_t)(adr & 0x3), val);
+  if (g_rtl_apu_port_trace_hook)
+    g_rtl_apu_port_trace_hook((uint8_t)(adr & 0x3), val);
   if (getenv("AR_APULOG") && (adr & 0xfc) == 0x40) {
     extern int snes_frame_counter;
     fprintf(stderr, "[apu] f=%d WRITE $21%02x <- %02x  (spc.pc=%04x in=%02x%02x%02x%02x out=%02x%02x%02x%02x)\n",
@@ -980,6 +989,8 @@ static bool RtlUploadSpcImageFromDpInternal(CpuState *cpu, bool update_cpu_resul
 
   if (g_rtl_spc_upload_hook)
     g_rtl_spc_upload_hook(((uint32_t)data_bank << 16) | data_lo);
+  if (g_rtl_spc_upload_trace_hook)
+    g_rtl_spc_upload_trace_hook(((uint32_t)data_bank << 16) | data_lo);
   if (prof_t0) g_apuprof_upload_ns += audio_trace_wall_ns() - prof_t0;
 
   if (update_cpu_result) {

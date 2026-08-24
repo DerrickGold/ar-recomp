@@ -13,6 +13,16 @@ typedef struct Dsp Dsp;
 
 typedef struct Apu Apu;
 
+/* Host-side bus provenance. The emulated S-DSP still owns exactly eight
+ * hardware voices; a game-specific observer may label each live voice so
+ * presentation controls can scale music and effects independently before
+ * their authentic summation. Unclassified voices remain at unity gain. */
+typedef enum DspVoiceBus {
+  kDspVoiceBus_Unclassified = 0,
+  kDspVoiceBus_Music,
+  kDspVoiceBus_Sfx,
+} DspVoiceBus;
+
 // Output-sample ring capacity (stereo pairs). Must be a power of two so
 // the monotonic write/read counters can index with a mask and survive
 // uint32 wraparound. 8192 samples ≈ 256 ms at 32 kHz — far larger than
@@ -62,6 +72,9 @@ struct Dsp {
   // (which serializes from `ram` to end) — savestate layout is unchanged.
   // void* to keep dsp.h free of the shadow header; dsp.c owns the type.
   void *shadow;
+  // Presentation-only voice provenance. Kept before `ram`, outside the frozen
+  // dsp_saveload region; the game observer reconstructs it after a state load.
+  uint8_t voiceBus[8];
   // mirror ram
   uint8_t ram[0x80];
   // 8 channels
@@ -119,5 +132,16 @@ void dsp_getSamplesResampled(Dsp* dsp, int16_t* sampleData,
                              int samplesPerFrame, double native_step,
                              double *phase);
 void dsp_saveload(Dsp *dsp, SaveLoadInfo *sli);
+/* Presentation bus controls. Callers serialize these with dsp_cycle using the
+ * APU lock. Gains are percentages in [0,100]; 100/100 is the exact legacy
+ * path. Voice labels are outside emulated/save-state state. */
+void dsp_setVoiceBus(Dsp *dsp, int ch, DspVoiceBus bus);
+DspVoiceBus dsp_getVoiceBus(const Dsp *dsp, int ch);
+void dsp_setBusGains(int music_percent, int sfx_percent);
+void dsp_getBusGains(int *music_percent, int *sfx_percent);
+/* Replacement-stream gate. Classified music voices are muted by provenance;
+ * the existing SRCN threshold remains only as an unclassified startup
+ * fallback. */
+void dsp_setMusicBusMuted(bool muted);
 
 #endif

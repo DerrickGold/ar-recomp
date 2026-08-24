@@ -24,11 +24,11 @@
  * Replacement model: every port write and upload still happens authentically
  * (no handshake is suppressed, so no soft-lock risk). When a play command
  * names a song with a matching manifest entry whose .ogg exists, the host
- * streams the file into the final mix and mutes the DSP voices whose srcn is
- * >= 0x0C — per-song instruments live there, while SFX use the common sample
- * bank (srcn 00-0B) by design and stay audible. $F0 (halt) stops the stream;
- * a new play command switches it. Missing file / no entry = fully authentic
- * playback.
+ * streams the file into the final mix and mutes DSP voices tagged Music by the
+ * logical-track observer. SRCN >= 0x0C remains only a startup fallback before
+ * a voice has a tag; explicit SFX voices stay audible regardless of sample.
+ * $F0 (halt) stops the stream; a new play command switches it. Missing file /
+ * no entry = fully authentic playback.
  *
  * Threading: trigger callbacks run on the game thread (under the APU lock —
  * RtlApuWrite holds it); the mix callback runs on the audio thread inside
@@ -77,6 +77,10 @@ void MusicReplacements_InstallHooks(void);
  * stream and unmutes the authentic SPC voices; enabling can adopt the song
  * already playing instead of waiting for the next song-change command. */
 void MusicReplacements_ApplySetting(void);
+
+/* Music-bus gain applied in addition to each manifest entry's authored gain.
+ * The caller holds the APU lock; 100 preserves the legacy mix exactly. */
+void MusicReplacements_SetMusicVolumePercent(int volume_percent);
 
 /* Suspend/resume the replacement decoder for host-owned pauses (P and the
  * settings overlay). HostAudio gates the whole SDL device at the same edge so
