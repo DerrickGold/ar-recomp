@@ -2,10 +2,9 @@
 
 #include <limits.h>
 #include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
 
 #include "actraiser/actraiser_cpu_hle_internal.h"
+#include "actraiser/actraiser_hle_fatal.h"
 #include "cpu_65816_math.h"
 
 enum {
@@ -97,9 +96,7 @@ static void WriteTownStructureMarkAtIndex(
       cpu, data_bank, kTownCellMapBase, mark_index, mark);
   if (shape == kActRaiserTownStructureMarkShape_Cell) return;
   if (shape != kActRaiserTownStructureMarkShape_Block2x2) {
-    fprintf(stderr, "FATAL: invalid town structure-mark shape %d\n",
-            (int)shape);
-    abort();
+    ActRaiserHleFatal("invalid town structure-mark shape %d", (int)shape);
   }
 
   const uint16_t right_index = (uint16_t)(mark_index + 1);

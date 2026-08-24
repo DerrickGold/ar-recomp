@@ -2,10 +2,9 @@
 
 #include <limits.h>
 #include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
 
 #include "actraiser/actraiser_cpu_hle_internal.h"
+#include "actraiser/actraiser_hle_fatal.h"
 #include "cpu_65816_math.h"
 
 enum {
@@ -64,9 +63,7 @@ static uint16_t TownMetatileDefinitionBase(
       return kStructureMetatileDefinitionsBase;
   }
 
-  fprintf(stderr, "FATAL: invalid simulation-town metatile atlas %d\n",
-          (int)atlas);
-  abort();
+  ActRaiserHleFatal("invalid simulation-town metatile atlas %d", (int)atlas);
 }
 
 static unsigned TownMetatileQuadrantIndex(uint16_t cell_x,
@@ -307,11 +304,9 @@ RecompReturn ActRaiser_TownExecuteDrawList(CpuState *cpu) {
   if (!ExecuteTownDrawList(
           cpu, cpu->DB, origin_cell_x, origin_cell_y, draw_list_address,
           UINT8_MAX, true)) {
-    fprintf(stderr,
-            "FATAL: $03:A591 HLE received an invalid town draw list at "
-            "$03:%04X\n",
-            draw_list_address);
-    abort();
+    ActRaiserHleFatal(
+        "$03:A591 HLE received an invalid town draw list at $03:%04X",
+        draw_list_address);
   }
 
   cpu->X = ActRaiserCpuHle_PopWord(cpu);

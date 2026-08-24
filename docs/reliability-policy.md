@@ -77,6 +77,8 @@ valid content or arithmetic defaults.
 | Coroutine setup | Changed: missing page-size/guard-page/coroutine support stops the session. There is no unguarded-stack compatibility mode. |
 | CRT processing | Changed: when selected, shader or target failure stops the session. CRT can no longer disappear from Authentic or Enhanced comparison output. |
 | World-navigation renderer | Changed: a valid selected navigation frame that cannot render stops the session. Sticky allocation-failed flags and the flat presentation fallback were removed. |
+| Presentation stage outcomes | Changed: shared outcomes distinguish a complete frame, optional omitted polish, and an unusable core view. World-navigation weather and Diorama supersampling may degrade; a core Diorama failure now requests orderly shutdown instead of silently ending the frame. |
+| Hand-written HLE invariants | Changed: invalid CPU entry modes, data contracts, and HLE allocation failures use one non-returning coroutine-to-host fatal trampoline. The host returns before NMI or further game-state execution, while a missing/incorrect escape still aborts rather than continuing through invalid CPU state. |
 | SIM 3D core textures/billboard atlas | Changed: absence remains harmless while SIM 3D is off; booting or switching on a mode that needs the missing resource stops with an actionable error. |
 | Renderer device loss/reset | Changed: device loss stops with an actionable error; a reset gets one rebuild pass and failure to restore the controls overlay stops the session. |
 | Battery-save writes | Changed: transient failures retry for five seconds. A sustained failure stops play rather than accumulating progress that cannot be saved. Shutdown reports if the final flush also fails. |
@@ -92,17 +94,16 @@ valid content or arithmetic defaults.
 ## Remaining boundaries
 
 Some presentation modules still combine core geometry resources and cosmetic
-resources behind one boolean return. Do not convert those wholesale to fatal
-errors. First split the result into “core selected view unavailable” and
-“optional cosmetic stage unavailable,” then apply the decision rule above.
-Current examples are the dynamic SIM town canvas/underlay/cloud/shadow resource
-family and Diorama's supersample/GPU-effect helpers.
+resources without publishing their outcome. Do not convert those wholesale to
+fatal errors. First split “core selected view unavailable” from “optional
+cosmetic stage unavailable,” then apply the decision rule above. The dynamic
+SIM town canvas/underlay/cloud/shadow family and Diorama's individual GPU draw
+submissions remain the main examples; world-navigation weather and Diorama's
+supersample helper now use the shared outcome contract.
 
-Several low-level HLE invariant checks still call `abort()`. They execute inside
-the game coroutine, and their callers currently continue under invalid CPU
-preconditions if the check merely returns. Moving them to orderly shutdown
-requires a non-returning coroutine-to-host fatal trampoline; replacing the
-abort one call at a time would be less safe than the current behavior.
+Generated recompiler dispatch guards still contain generator-owned aborts.
+They are outside this hand-written-runtime audit and must be changed in the
+generator, with its dispatch contract tests, rather than patched in generated C.
 
 ## Review checklist
 

@@ -17,6 +17,7 @@
 #include <stdbool.h>
 
 #include "present.h"
+#include "presentation_outcome.h"
 
 /* ---- shared effect types -------------------------------------------------
  * Both translation units need these by value / by field, so the definitions
@@ -57,7 +58,7 @@ bool SubmitEffectBatch(EffectBatch *batch);
 /* ---- sim entry points present.c calls back into --------------------------
  * Defined in present_sim3d.c. */
 void PresentSim3D(const FrameSlot *slot);
-bool PresentWorldNavigation3D(const FrameSlot *slot);
+PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot);
 void UploadSimTownCanvas(void);
 void UploadWorldNavigationComposition(const FrameSlot *slot);
 

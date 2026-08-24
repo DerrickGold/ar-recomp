@@ -1,9 +1,8 @@
 #include "actraiser/actraiser_cpu_hle_internal.h"
 
 #include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
 
+#include "actraiser/actraiser_hle_fatal.h"
 #include "runtime_constants.h"
 
 static bool EntryModeMatches(
@@ -31,37 +30,27 @@ void ActRaiserCpuHle_RequireEntryMode(
     ActRaiserCpuHleEntryMode required_mode) {
   if (EntryModeMatches(cpu, required_mode)) return;
 
+  const char *requirement = "a valid declared CPU entry mode";
   switch (required_mode) {
     case kActRaiserCpuHleEntryMode_Native16BitIndexes:
-      fprintf(stderr,
-              "FATAL: %s HLE requires native mode with 16-bit indexes\n",
-              routine_name);
+      requirement = "native mode with 16-bit indexes";
       break;
     case kActRaiserCpuHleEntryMode_Native8BitAccumulator16BitIndexes:
-      fprintf(stderr,
-              "FATAL: %s HLE requires native mode with 8-bit A and "
-              "16-bit X/Y\n",
-              routine_name);
+      requirement = "native mode with 8-bit A and 16-bit X/Y";
       break;
     case kActRaiserCpuHleEntryMode_Native16BitAccumulatorAndIndexes:
-      fprintf(stderr,
-              "FATAL: %s HLE requires native mode with 16-bit A/X/Y\n",
-              routine_name);
+      requirement = "native mode with 16-bit A/X/Y";
       break;
     case kActRaiserCpuHleEntryMode_DbZeroNative8BitAccumulator16BitIndexes:
-      fprintf(stderr,
-              "FATAL: %s HLE requires DB=0 native mode with 8-bit A and "
-              "16-bit X/Y\n",
-              routine_name);
+      requirement = "DB=0 native mode with 8-bit A and 16-bit X/Y";
       break;
     case kActRaiserCpuHleEntryMode_DirectPageAndDbZeroNative8BitAccumulator16BitIndexes:
-      fprintf(stderr,
-              "FATAL: %s HLE requires D/DB=0 native mode with 8-bit A and "
-              "16-bit X/Y\n",
-              routine_name);
+      requirement = "D/DB=0 native mode with 8-bit A and 16-bit X/Y";
       break;
   }
-  abort();
+  ActRaiserHleFatal("%s HLE requires %s",
+                    routine_name ? routine_name : "unnamed routine",
+                    requirement);
 }
 
 uint16_t ActRaiserCpuHle_PushWordAt(

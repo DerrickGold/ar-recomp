@@ -9,6 +9,7 @@
 #include "actraiser_rtl.h"
 #include "actraiser_game.h"
 #include "actraiser_action_bg.h"
+#include "actraiser_hle_fatal.h"
 #include "action/action_bg_tuner.h"
 #include "action/action_effects.h"
 #include "action/action_load_pacing.h"
@@ -170,6 +171,7 @@ static void  *g_game_stack_map;   /* mmap base, including the guard page */
 static size_t g_game_stack_map_len;
 #endif
 static bool g_game_started;
+static bool g_game_coroutine_executing;
 
 void ActRaiser_YieldToHost(void) {
 #ifdef _WIN32
@@ -183,6 +185,31 @@ void ActRaiser_YieldToHost(void) {
     abort();
   }
 #endif
+}
+
+/* HLE failures cannot return through a partly executed emulated routine. The
+ * fatal module formats the invariant at its owner, then this registered seam
+ * latches it and suspends the complete game coroutine. RunOneFrameOfGame sees
+ * the latch immediately after the context switch and returns without running
+ * NMI or executing any more game state. If the host ever resumes this
+ * coroutine, ActRaiserHleFatal aborts rather than returning into invalid CPU
+ * state. */
+static void ActRaiser_HleFatalEscapeToHost(const char *message) {
+  SessionFatal_Request(
+      "The emulated game encountered an internal runtime error: %s. Your "
+      "latest battery save will be flushed before exit. Restart the game; "
+      "if the same event repeats, report the room and active gameplay "
+      "settings.",
+      message && message[0] ? message : "unspecified HLE invariant failure");
+  if (!g_game_coroutine_executing) {
+    /* This escape is valid only while RunOneFrameOfGame is blocked in the
+     * matching SwitchToFiber/swapcontext. Calling it from host-side NMI/IRQ or
+     * a standalone helper would overwrite/switch to the wrong context. */
+    fprintf(stderr,
+            "FATAL: HLE invariant failed outside the game coroutine\n");
+    abort();
+  }
+  ActRaiser_YieldToHost();
 }
 
 /* The recompiler executes the action loader's decompression and bulk graphics
@@ -3477,6 +3504,8 @@ static bool CreateGameCoroutine(void) {
  * the guard-page mapping and the fiber are not leaked, and so a leak checker
  * run against a clean exit stays quiet. Safe to call without a coroutine. */
 void ActRaiser_DestroyGameCoroutine(void) {
+  ActRaiserHleFatal_RegisterHostEscape(NULL);
+  g_game_coroutine_executing = false;
 #ifdef _WIN32
   if (g_game_fiber) {
     DeleteFiber(g_game_fiber);
@@ -3511,6 +3540,7 @@ void RunOneFrameOfGame(void) {
           "limits for this process.");
       return;
     }
+    ActRaiserHleFatal_RegisterHostEscape(ActRaiser_HleFatalEscapeToHost);
   }
 
   ActRaiser_ApplyCheats();   /* host-side cheats (live settings, default off) */
@@ -3549,10 +3579,12 @@ void RunOneFrameOfGame(void) {
   }
   g_snes->forceNmi = true;
   g_snes->nmiAvail = true;   /* fresh RDNMI ($4210 bit7) vblank token this frame */
+  g_game_coroutine_executing = true;
 #ifdef _WIN32
   SwitchToFiber(g_game_fiber);
 #else
   if (swapcontext(&g_host_ctx, &g_game_ctx) != 0) {
+    g_game_coroutine_executing = false;
     g_snes->forceNmi = false;
     SessionFatal_Request(
         "The operating system could not resume the emulation coroutine "
@@ -3562,6 +3594,11 @@ void RunOneFrameOfGame(void) {
     return;
   }
 #endif
+  g_game_coroutine_executing = false;
+  if (SessionFatal_Requested()) {
+    g_snes->forceNmi = false;
+    return;
+  }
   if (g_watchdog_tripped) {
     g_snes->forceNmi = false;
     SessionFatal_Request(
