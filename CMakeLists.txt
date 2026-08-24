@@ -267,6 +267,16 @@ endif() # NOT AR_TESTS_ONLY
 if(BUILD_TESTING)
     find_package(Python3 QUIET COMPONENTS Interpreter)
 
+    add_executable(actraiser_consolidated_utils_test
+        tests/consolidated_utils_test.c
+        src/manifest_utils.c
+    )
+    target_include_directories(actraiser_consolidated_utils_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    add_test(NAME actraiser_consolidated_utils
+        COMMAND actraiser_consolidated_utils_test)
+
     add_executable(actraiser_action_load_pacing_test
         tests/action_load_pacing_test.c
     )
@@ -388,6 +398,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_background_voxels_test
         tests/sim_background_voxels_test.c
+        src/sim/sim_town_layout.c
         src/sim/sim_background_voxels.c
         src/sim/sim_background_voxel_landmarks.c
         src/sim/sim_background_mountains.c
@@ -409,6 +420,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_background_voxel_landmarks_test
         tests/sim_background_voxel_landmarks_test.c
+        src/sim/sim_town_layout.c
         src/sim/sim_background_voxel_landmarks.c
     )
     target_include_directories(
@@ -421,6 +433,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_background_mountains_test
         tests/sim_background_mountains_test.c
+        src/sim/sim_town_layout.c
         src/sim/sim_background_mountains.c
         src/sim/sim_background_mountain_objects.c
     )
@@ -630,6 +643,7 @@ if(BUILD_TESTING)
     # HLE, including their distinct geometry and stack/register/flag effects.
     add_executable(actraiser_action_metatile_hle_test
         tests/actraiser_action_metatile_hle_test.c
+        src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_action_metatile.c
         src/cpu_65816_math.c
     )
@@ -648,6 +662,7 @@ if(BUILD_TESTING)
         tests/actraiser_action_room_loader_hle_test.c
         src/quintet_lzss.c
         src/actraiser/actraiser_lzss.c
+        src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_action_room_loader.c
     )
     target_include_directories(actraiser_action_room_loader_hle_test PRIVATE
@@ -664,6 +679,7 @@ if(BUILD_TESTING)
         tests/actraiser_action_room_graphics_hle_test.c
         src/quintet_lzss.c
         src/actraiser/actraiser_lzss.c
+        src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_action_room_graphics.c
     )
     target_include_directories(actraiser_action_room_graphics_hle_test PRIVATE
@@ -678,6 +694,7 @@ if(BUILD_TESTING)
     # the action-only command-3 28-byte video-profile applicator.
     add_executable(actraiser_action_video_config_hle_test
         tests/actraiser_action_video_config_hle_test.c
+        src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_action_video_config.c
     )
     target_include_directories(actraiser_action_video_config_hle_test PRIVATE
@@ -692,6 +709,7 @@ if(BUILD_TESTING)
     # its six operations, stack writes, registers, and final flags.
     add_executable(actraiser_town_lair_bits_hle_test
         tests/actraiser_town_lair_bits_hle_test.c
+        src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_town_lair_bits.c
         src/cpu_65816_math.c
     )
@@ -990,6 +1008,7 @@ if(BUILD_TESTING)
         src/sim/sim_world_navigation_capture.c
         src/sim/sim_town_canvas.c
         src/sim/sim_town_terrain.c
+        src/sim/sim_town_layout.c
         src/sim/sim_background_voxels.c
         src/sim/sim_background_voxel_landmarks.c
         src/sim/sim_background_mountains.c
@@ -1034,6 +1053,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_hd_manifest_test
         tests/hd_manifest_test.c
+        src/manifest_utils.c
         src/hd_replacements.c
     )
     target_include_directories(actraiser_hd_manifest_test PRIVATE
@@ -1059,6 +1079,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_scene_asset_dump_test
         tests/scene_asset_dump_test.c
+        ${SNESRECOMP_RUNNER_ROOT}/src/crc32.c
         src/dev/scene_asset_dump.c
     )
     target_include_directories(actraiser_scene_asset_dump_test PRIVATE
@@ -1071,6 +1092,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_music_manifest_test
         tests/music_manifest_test.c
+        src/manifest_utils.c
         src/music_replacements.c
         src/hd_replacements.c
         third_party/stb/stb_vorbis.c
@@ -1131,6 +1153,7 @@ if(BUILD_TESTING)
     # HLEs. Raw-width and decimal-mode cases pin instruction-level edges too.
     add_executable(actraiser_cell_map_hle_test
         tests/actraiser_cell_map_hle_test.c
+        src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_cell_map.c
         src/cpu_65816_math.c
     )
@@ -1145,6 +1168,7 @@ if(BUILD_TESTING)
     # CPU contracts for $03:9B5A, $03:9C43, and $03:A591.
     add_executable(actraiser_town_metatile_hle_test
         tests/actraiser_town_metatile_hle_test.c
+        src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_town_metatile.c
         src/cpu_65816_math.c
     )
@@ -1159,6 +1183,7 @@ if(BUILD_TESTING)
     # complete CPU contracts for rebuild $03:A4A8 and construction $03:A4B8.
     add_executable(actraiser_town_structure_steps_hle_test
         tests/actraiser_town_structure_steps_hle_test.c
+        src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_town_structure_steps.c
         src/cpu_65816_math.c
     )

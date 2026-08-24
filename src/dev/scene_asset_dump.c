@@ -13,7 +13,10 @@
 #endif
 
 #include "actraiser_game.h"
+#include "byte_order.h"
+#include "crc32.h"
 #include "snes/ppu.h"
+#include "snes_bgr555.h"
 
 enum {
   kSceneAssetPathCapacity = 512,
@@ -57,46 +60,16 @@ static bool MakeDirectory(const char *path) {
   return false;
 }
 
-static uint32_t CrcTableEntry(uint32_t value) {
-  for (int bit = 0; bit < 8; bit++)
-    value = (value >> 1) ^ (0xedb88320u & (uint32_t)-(int32_t)(value & 1));
-  return value;
-}
-
-/* CRC-32 lookup table size: 256 because the table is indexed by one byte. */
-enum { kCrcTableEntries = 256 };
-
-static uint32_t UpdateCrc(uint32_t crc, const uint8_t *data, size_t size) {
-  /* CRC-32 byte-at-a-time lookup: 256 entries because the index is a byte. */
-  static uint32_t table[kCrcTableEntries];
-  static bool initialized;
-  if (!initialized) {
-    for (int i = 0; i < kCrcTableEntries; i++)
-    table[i] = CrcTableEntry((uint32_t)i);
-    initialized = true;
-  }
-  for (size_t i = 0; i < size; i++)
-    crc = table[(crc ^ data[i]) & 0xff] ^ (crc >> 8);
-  return crc;
-}
-
-static void PutBe32(uint8_t *out, uint32_t value) {
-  out[0] = (uint8_t)(value >> 24);
-  out[1] = (uint8_t)(value >> 16);
-  out[2] = (uint8_t)(value >> 8);
-  out[3] = (uint8_t)value;
-}
-
 static bool WriteChunk(FILE *file, const char type[4],
                        const uint8_t *data, size_t size) {
   if (size > 0xffffffffu) return false;
   uint8_t header[8];
-  PutBe32(header, (uint32_t)size);
+  ByteOrder_WriteBe32(header, (uint32_t)size);
   memcpy(header + 4, type, 4);
-  uint32_t crc = UpdateCrc(0xffffffffu, header + 4, 4);
-  crc = UpdateCrc(crc, data, size) ^ 0xffffffffu;
+  uint32_t crc = crc32_update(UINT32_C(0xFFFFFFFF), header + 4, 4);
+  crc = crc32_update(crc, data, size) ^ UINT32_C(0xFFFFFFFF);
   uint8_t crc_bytes[4];
-  PutBe32(crc_bytes, crc);
+  ByteOrder_WriteBe32(crc_bytes, crc);
   return fwrite(header, 1, sizeof(header), file) == sizeof(header) &&
          (!size || fwrite(data, 1, size, file) == size) &&
          fwrite(crc_bytes, 1, sizeof(crc_bytes), file) == sizeof(crc_bytes);
@@ -149,7 +122,7 @@ bool WritePng(const char *path, const uint8_t *rgba,
     s1 = (s1 + raw[i]) % 65521u;
     s2 = (s2 + s1) % 65521u;
   }
-  PutBe32(z + at, (s2 << 16) | s1);
+  ByteOrder_WriteBe32(z + at, (s2 << 16) | s1);
   at += 4;
   free(raw);
 
@@ -162,8 +135,8 @@ bool WritePng(const char *path, const uint8_t *rgba,
     0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'
   };
   uint8_t ihdr[13] = {0};
-  PutBe32(ihdr, (uint32_t)width);
-  PutBe32(ihdr + 4, (uint32_t)height);
+  ByteOrder_WriteBe32(ihdr, (uint32_t)width);
+  ByteOrder_WriteBe32(ihdr + 4, (uint32_t)height);
   ihdr[8] = 8;
   ihdr[9] = 6; /* RGBA */
   bool ok = fwrite(signature, 1, sizeof(signature), file) == sizeof(signature) &&
@@ -176,17 +149,12 @@ bool WritePng(const char *path, const uint8_t *rgba,
   return ok;
 }
 
-static uint8_t Expand5(int value) {
-  value &= 31;
-  return (uint8_t)((value << 3) | (value >> 2));
-}
-
 static void PutPalettePixel(const Ppu *ppu, uint8_t *rgba, int palette_index,
                             bool transparent_zero) {
   uint16_t xbgr = ppu->cgram[palette_index & 0xff] & 0x7fff;
-  rgba[0] = Expand5(xbgr);
-  rgba[1] = Expand5(xbgr >> 5);
-  rgba[2] = Expand5(xbgr >> 10);
+  rgba[0] = ExpandColor5(xbgr, 15);
+  rgba[1] = ExpandColor5(xbgr >> 5, 15);
+  rgba[2] = ExpandColor5(xbgr >> 10, 15);
   rgba[3] = transparent_zero ? 0 : 255;
 }
 

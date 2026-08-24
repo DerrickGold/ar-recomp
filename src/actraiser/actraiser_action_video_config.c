@@ -58,16 +58,6 @@ bool ActRaiser_ActionVideoConfigHleEnabled(CpuState *cpu) {
   return IsAuditedActionProfile(PeekOperand(cpu));
 }
 
-static void RequireEntryMode(CpuState *cpu) {
-  if (cpu && !cpu->emulation && cpu->m_flag && !cpu->x_flag &&
-      cpu->D == 0 && cpu->DB == 0)
-    return;
-  fprintf(stderr,
-          "FATAL: $02:B4E8 HLE requires D/DB=0 native mode with 8-bit A "
-          "and 16-bit X/Y\n");
-  abort();
-}
-
 static void PushWordResidue(CpuState *cpu, uint16_t stack,
                             uint16_t value) {
   cpu_write8(cpu, 0x00, stack, (uint8_t)value);
@@ -100,7 +90,9 @@ static void RegisterDiagnostics(void) {
 RecompReturn ActRaiser_ApplyActionVideoConfig(CpuState *cpu) {
   if (!cpu) return RECOMP_RETURN_NORMAL;
   cpu_mirrors_to_p(cpu);
-  RequireEntryMode(cpu);
+  ActRaiserCpuHle_RequireEntryMode(
+      cpu, "$02:B4E8",
+      kActRaiserCpuHleEntryMode_DirectPageAndDbZeroNative8BitAccumulator16BitIndexes);
 
   const uint8_t saved_p = cpu->P;
   const uint8_t saved_db = cpu->DB;

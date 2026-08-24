@@ -13,10 +13,10 @@ import os
 from pathlib import Path
 import platform
 import re
-import struct
 import subprocess
 import sys
-import zlib
+
+from ar_lib import write_rgb_png
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1174,31 +1174,16 @@ def validate_d2_artifacts(prefix: Path) -> tuple[dict, list[str]]:
             "D2 artifact metadata mismatch_pixels is not zero: "
             f"{metadata.get('mismatch_pixels')!r}")
 
-    def png_chunk(kind: bytes, payload: bytes) -> bytes:
-        return (struct.pack(">I", len(payload)) + kind + payload +
-                struct.pack(">I", zlib.crc32(kind + payload) & 0xffffffff))
-
-    def write_png(path: Path, dimensions: list[int], pixels: bytes) -> None:
-        width, height = dimensions
-        scanlines = b"".join(
-            b"\0" + pixels[y * width * 3:(y + 1) * width * 3]
-            for y in range(height))
-        data = (b"\x89PNG\r\n\x1a\n" +
-                png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height,
-                                                8, 2, 0, 0, 0)) +
-                png_chunk(b"IDAT", zlib.compress(scanlines, 9)) +
-                png_chunk(b"IEND", b""))
-        path.write_bytes(data)
-
     png_paths = {
         "a_png": Path(f"{prefix}-A.png"),
         "b_png": Path(f"{prefix}-B.png"),
         "difference_png": Path(f"{prefix}-difference.png"),
     }
-    write_png(png_paths["a_png"], dimensions_a, pixels_a)
-    write_png(png_paths["b_png"], dimensions_b, pixels_b)
-    write_png(png_paths["difference_png"], dimensions_difference,
-              pixels_difference)
+    write_rgb_png(png_paths["a_png"], *dimensions_a, pixels_a)
+    write_rgb_png(png_paths["b_png"], *dimensions_b, pixels_b)
+    write_rgb_png(
+        png_paths["difference_png"], *dimensions_difference,
+        pixels_difference)
     paths.update(png_paths)
     return {
         "paths": {key: str(value) for key, value in paths.items()},
@@ -1424,20 +1409,6 @@ def validate_d3_artifact(output: Path, label: str, picker_topdown: bool,
             "back to the authentic view")
 
     width, height = dimensions
-    def chunk(kind: bytes, payload: bytes) -> bytes:
-        return (struct.pack(">I", len(payload)) + kind + payload +
-                struct.pack(">I", zlib.crc32(kind + payload) & 0xffffffff))
-
-    def write_png(path: Path, pixels: bytes) -> None:
-        scanlines = b"".join(
-            b"\0" + pixels[y * width * 3:(y + 1) * width * 3]
-            for y in range(height))
-        path.write_bytes(
-            b"\x89PNG\r\n\x1a\n" +
-            chunk(b"IHDR", struct.pack(">IIBBBBB", width, height,
-                                        8, 2, 0, 0, 0)) +
-            chunk(b"IDAT", zlib.compress(scanlines, 9)) +
-            chunk(b"IEND", b""))
 
     projected_png = output / f"{label}-B.png"
     authentic_png = output / f"{label}-A.png"
@@ -1445,12 +1416,12 @@ def validate_d3_artifact(output: Path, label: str, picker_topdown: bool,
     picker_png = output / f"{label}-picker-top-down.png"
     difference = bytes(abs(projected[i] - authentic[i])
                        for i in range(min(len(projected), len(authentic))))
-    write_png(projected_png, projected)
-    write_png(authentic_png, authentic)
+    write_rgb_png(projected_png, width, height, projected)
+    write_rgb_png(authentic_png, width, height, authentic)
     if len(difference) == len(projected):
-        write_png(difference_png, difference)
+        write_rgb_png(difference_png, width, height, difference)
     if picker_dimensions == dimensions:
-        write_png(picker_png, picker_enhanced)
+        write_rgb_png(picker_png, width, height, picker_enhanced)
     return {
         "projected_source_path": str(candidates[0]),
         "authentic_source_path": str(candidates[1]),

@@ -22,6 +22,8 @@ Usage:
 import sys, json, argparse
 from collections import defaultdict
 
+from oracle_utils import format_wram_address
+
 CLOCK_LO, CLOCK_HI = 0x88, 0x89
 
 
@@ -53,12 +55,6 @@ def load_deltas(path):
             if gf > maxgf:
                 maxgf = gf
     return deltas, maxgf
-
-
-def fmt_addr(a):
-    if a >= 0x10000:
-        return f"$7F{a - 0x10000:04X}"
-    return f"$7E{a:04X}"
 
 
 def main():
@@ -126,7 +122,7 @@ def main():
           f"({div_per_gf[earliest_gf]} addr(s) that gf) ===")
     print(f"{'addr':>10} {'gf':>7} {'oracleVal':>9} {'recompVal':>9}")
     for a, (gf, ov, rv) in rows[:args.top]:
-        print(f"{fmt_addr(a):>10} {gf:>7} {ov:>#9x} {rv:>#9x}")
+        print(f"{format_wram_address(a):>10} {gf:>7} {ov:>#9x} {rv:>#9x}")
 
     print(f"\n=== divergence onset by game-frame (first {args.top} gf) ===")
     for gf in sorted(div_per_gf)[:args.top]:

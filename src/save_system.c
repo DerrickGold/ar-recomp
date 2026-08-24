@@ -1,5 +1,8 @@
 #include "save_system.h"
+
+#include "byte_order.h"
 #include "atomic_replace.h"
+#include "text_parse_utils.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -92,33 +95,12 @@ static void ClearError(SaveError *error) {
   if (error) error->message[0] = 0;
 }
 
-static uint16_t ReadLe16(const uint8_t *data) {
-  return (uint16_t)data[0] | ((uint16_t)data[1] << 8);
-}
-
-static void WriteLe16(uint8_t *data, uint16_t value) {
-  data[0] = (uint8_t)value;
-  data[1] = (uint8_t)(value >> 8);
-}
-
-static uint32_t ReadLe32(const uint8_t *data) {
-  return (uint32_t)data[0] | ((uint32_t)data[1] << 8) |
-         ((uint32_t)data[2] << 16) | ((uint32_t)data[3] << 24);
-}
-
-static void WriteLe32(uint8_t *data, uint32_t value) {
-  data[0] = (uint8_t)value;
-  data[1] = (uint8_t)(value >> 8);
-  data[2] = (uint8_t)(value >> 16);
-  data[3] = (uint8_t)(value >> 24);
-}
-
 uint32_t Save_ComputeChecksum(const uint8_t sram[kActRaiserSramSize]) {
   uint16_t xored = 0;
   uint16_t summed = 0;
   if (!sram) return 0;
   for (int offset = 0; offset < kActRaiserSramChecksumOffset; offset += 2) {
-    uint16_t word = ReadLe16(sram + offset);
+    uint16_t word = ByteOrder_ReadLe16(sram + offset);
     xored ^= word;
     summed = (uint16_t)(summed + word);
   }
@@ -126,7 +108,8 @@ uint32_t Save_ComputeChecksum(const uint8_t sram[kActRaiserSramSize]) {
 }
 
 uint32_t Save_StoredChecksum(const uint8_t sram[kActRaiserSramSize]) {
-  return sram ? ReadLe32(sram + kActRaiserSramChecksumOffset) : 0;
+  return sram ? ByteOrder_ReadLe32(
+                    sram + kActRaiserSramChecksumOffset) : 0;
 }
 
 bool Save_ChecksumValid(const uint8_t sram[kActRaiserSramSize]) {
@@ -135,7 +118,8 @@ bool Save_ChecksumValid(const uint8_t sram[kActRaiserSramSize]) {
 
 uint32_t Save_RecomputeChecksum(uint8_t sram[kActRaiserSramSize]) {
   uint32_t checksum = Save_ComputeChecksum(sram);
-  if (sram) WriteLe32(sram + kActRaiserSramChecksumOffset, checksum);
+  if (sram)
+    ByteOrder_WriteLe32(sram + kActRaiserSramChecksumOffset, checksum);
   return checksum;
 }
 
@@ -196,30 +180,6 @@ bool Save_ParseRegionState(const char *text, int *value) {
     }
   }
   return false;
-}
-
-static char *TrimLeft(char *text) {
-  while (*text == ' ' || *text == '\t' || *text == '\r' || *text == '\n')
-    text++;
-  return text;
-}
-
-static void TrimRight(char *text) {
-  size_t length = strlen(text);
-  while (length && (text[length - 1] == ' ' || text[length - 1] == '\t' ||
-                    text[length - 1] == '\r' || text[length - 1] == '\n'))
-    text[--length] = 0;
-}
-
-static void StripComment(char *text) {
-  for (char *p = text; *p; p++) {
-    if ((*p == ';' || *p == '#') &&
-        (p == text || p[-1] == ' ' || p[-1] == '\t')) {
-      *p = 0;
-      break;
-    }
-  }
-  TrimRight(text);
 }
 
 static int HexDigit(char ch) {
@@ -284,8 +244,8 @@ static bool LoadIni(const char *path,
 
   while (success && fgets(line, sizeof(line), file)) {
     line_number++;
-    char *key = TrimLeft(line);
-    TrimRight(key);
+    char *key = TextParse_TrimLeft(line);
+    TextParse_TrimRight(key);
     if (!key[0] || key[0] == ';' || key[0] == '#') continue;
     if (key[0] == '[') {
       if (!strcmp(key, "[Meta]")) section = kSection_Meta;
@@ -301,9 +261,9 @@ static bool LoadIni(const char *path,
       break;
     }
     *equals = 0;
-    TrimRight(key);
-    char *value = TrimLeft(equals + 1);
-    StripComment(value);
+    TextParse_TrimRight(key);
+    char *value = TextParse_TrimLeft(equals + 1);
+    TextParse_StripInlineComment(value);
 
     if (section == kSection_Meta) {
       if (!strcmp(key, "format")) {
@@ -701,7 +661,7 @@ static bool SetStagedU16(uint8_t *scratch, int offset, int value,
   if (value < 0) return true;
   if (value < minimum || value > maximum)
     return Fail(error, "%s must be %d..%d", label, minimum, maximum);
-  WriteLe16(scratch + offset, (uint16_t)value);
+  ByteOrder_WriteLe16(scratch + offset, (uint16_t)value);
   return true;
 }
 
@@ -853,7 +813,7 @@ bool SaveSystem_ApplyEdits(const SaveEditRequest *edits,
       if (!ScoreToBcd(score, &bcd))
         return Fail(error, "%s Act %d score must be 0..99990 by 10",
                     g_save_region_fields[region].label, act + 1);
-      WriteLe16(scratch + kSaveScores +
+      ByteOrder_WriteLe16(scratch + kSaveScores +
                     region * kActRaiserSaveActCount * (int)sizeof(uint16_t) +
                     act * (int)sizeof(uint16_t),
                 bcd);

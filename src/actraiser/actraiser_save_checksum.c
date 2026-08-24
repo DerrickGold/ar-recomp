@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "byte_order.h"
 #include "cpu_65816_math.h"
 #include "save_system.h"
 
@@ -16,10 +17,6 @@ enum {
   kChecksumComponentBits = sizeof(uint16_t) * CHAR_BIT,
 };
 
-static uint16_t ReadLittleEndianWord(const uint8_t *bytes) {
-  return (uint16_t)(bytes[0] | ((uint16_t)bytes[1] << CHAR_BIT));
-}
-
 static uint16_t AddPackedBcdWordsAfterClearCarry(uint16_t left,
                                                  uint16_t right) {
   return Cpu65816_Add16(left, right, false, true).value;
@@ -30,7 +27,7 @@ static uint32_t ComputePackedBcdChecksum(const uint8_t *sram) {
   uint16_t sum = 0;
   for (size_t offset = 0; offset < kActRaiserSramChecksumOffset;
        offset += sizeof(uint16_t)) {
-    const uint16_t word = ReadLittleEndianWord(sram + offset);
+    const uint16_t word = ByteOrder_ReadLe16(sram + offset);
     sum = AddPackedBcdWordsAfterClearCarry(word, sum);
     xor_value ^= word;
   }

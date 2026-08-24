@@ -20,6 +20,7 @@ overlay (`Esc`/`F1`) also explains each selected row.
 - [Enhancements](#enhancements)
 - [Level warp](#level-warp)
 - [Asset replacement (HD art & music)](#asset-replacement-hd-art--music)
+- [Manual page-turn geometry](#manual-page-turn-geometry)
 
 ## Launching the game
 
@@ -472,3 +473,26 @@ Note the licensing angle before sharing packs: files ripped from the original
 game (its soundtrack, its art) are copyrighted content and belong in the
 gitignored asset directories only — see
 [what can and can't be committed](contributing.md#what-can-and-cant-be-committed-here).
+
+## Manual page-turn geometry
+
+The in-game manual uses painter-ordered geometry: SDL provides no depth test or
+backface culling for the turning sheet. The bow is therefore constrained by two
+invariants tested by the geometry suite: its depth is never negative, and depth
+is monotonically non-decreasing from the hinge (`u = 0`) to the free edge
+(`u = 1`). The renderer must emit the mesh column-major so later triangles are
+also nearer triangles when the bowed sheet overlaps itself on screen.
+
+For hinge angle `a` and normalized span `u`, the depth term is
+
+```text
+z(u) = sin(a) * [u/2 + A*sin(pi*u)*cos(a)]
+```
+
+The worst case approaches the hinge when `cos(a) = -1`. Since
+`sin(pi*u) ~ pi*u` there, non-negative and monotonic depth require
+`A <= 0.5/pi`. `kManualCurlLimitPermille` is consequently
+`floor(1000 * 0.5/pi) = 159`; it is a derived bound, not a tuning value.
+`kManualCurlPermille` remains at 70 for comfortable headroom. A freely rolling
+curl would violate monotonic depth and would require silhouette-aware mesh
+splitting rather than the current fixed draw order.

@@ -18,10 +18,11 @@ sides. This pins the intentional BH8 removal of offscreen host repair writes.
 """
 
 import argparse
-import hashlib
 import json
 import os
 import sys
+
+from ar_lib import file_sha256
 
 
 FINAL_ARTIFACTS = (
@@ -63,14 +64,6 @@ LEGACY_SETTINGS_FIXTURES = {
 
 class ArtifactCompareError(Exception):
     """A manifest or run directory does not satisfy the comparison contract."""
-
-
-def file_sha256(path):
-    digest = hashlib.sha256()
-    with open(path, "rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def read_ppm(path):

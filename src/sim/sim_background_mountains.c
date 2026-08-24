@@ -1,22 +1,12 @@
 #include "sim_background_mountains.h"
 
+#include "sim_town_layout.h"
+
 #include <stddef.h>
 #include <string.h>
 
-enum {
-  kTownCellMapsWram = 0x12000,  /* flat $7F:2000 */
-  kTownCellMapBytes = 0x400,
-};
-
 static size_t CellIndex(int x, int y) {
   return (size_t)y * kSimBackgroundMountainTownCells + (size_t)x;
-}
-
-/* The cell maps use four 16x16 pages rather than row-major 32x32 storage. */
-static size_t TownCellMapIndex(uint8_t town, int x, int y) {
-  int quadrant = (y >= 16 ? 2 : 0) + (x >= 16 ? 1 : 0);
-  return kTownCellMapsWram + (size_t)(town - 1) * kTownCellMapBytes +
-      (size_t)quadrant * 0x100 + (size_t)(y & 15) * 16 + (x & 15);
 }
 
 uint8_t SimBackgroundMountains_TileFlags(uint8_t town, uint8_t tile) {
@@ -58,7 +48,7 @@ void SimBackgroundMountains_Classify(
   for (int y = 0; y < kSimBackgroundMountainTownCells; y++)
     for (int x = 0; x < kSimBackgroundMountainTownCells; x++) {
       size_t cell = CellIndex(x, y);
-      uint8_t tile = wram[TownCellMapIndex(town, x, y)];
+      uint8_t tile = wram[SimTownLayout_CellMapIndex(town, x, y)];
       out->tile[cell] = tile;
       out->flags[cell] = SimBackgroundMountains_TileFlags(town, tile);
       if (out->flags[cell] & kSimBackgroundMountainCell_Occupied) {

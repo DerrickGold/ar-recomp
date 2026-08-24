@@ -11,9 +11,12 @@ trace_slice.py). One canonical place for:
 Address conventions: pc24 as int 0xBBAAAA or string "BBAAAA"; user-facing
 accepts "BB:AAAA", "BBAAAA", "$BB:AAAA", "AAAA" (bank required unless 24-bit).
 """
+import hashlib
 import json
 import os
 import re
+import struct
+import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, '..'))
@@ -68,11 +71,52 @@ def lorom_off(pc24):
     return (bank & 0x7F) * 0x8000 + (addr - 0x8000)
 
 
+def lorom_offset(bank, address):
+    """Bank/address LoROM mapping for tools that keep the fields separate."""
+    offset = lorom_off(((bank & 0xFF) << 16) | address)
+    if offset is None:
+        raise ValueError(f"not ROM-mapped: ${bank:02X}:{address:04X}")
+    return offset
+
+
+def read_le16(data, offset=0):
+    return data[offset] | (data[offset + 1] << 8)
+
+
 def rom_read(rom, pc24, n=1):
     off = lorom_off(pc24)
     if off is None or off + n > len(rom):
         return None
     return rom[off:off + n]
+
+
+def file_sha256(path, chunk_size=1024 * 1024):
+    """Hex SHA-256 of a file, streamed in bounded chunks."""
+    digest = hashlib.sha256()
+    with open(path, 'rb') as source:
+        for chunk in iter(lambda: source.read(chunk_size), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def write_rgb_png(path, width, height, rgb):
+    """Write packed RGB bytes as a dependency-free PNG."""
+    def chunk(tag, payload):
+        content = tag + payload
+        return (struct.pack('>I', len(payload)) + content +
+                struct.pack('>I', zlib.crc32(content) & 0xFFFFFFFF))
+
+    raw = bytearray()
+    for y in range(height):
+        raw.append(0)
+        raw.extend(rgb[y * width * 3:(y + 1) * width * 3])
+    png = b'\x89PNG\r\n\x1a\n'
+    png += chunk(b'IHDR', struct.pack(
+        '>IIBBBBB', width, height, 8, 2, 0, 0, 0))
+    png += chunk(b'IDAT', zlib.compress(bytes(raw), 9))
+    png += chunk(b'IEND', b'')
+    with open(path, 'wb') as output:
+        output.write(png)
 
 # ── ram-map.md symbol table ──────────────────────────────────────────────────
 

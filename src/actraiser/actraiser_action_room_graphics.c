@@ -104,15 +104,6 @@ bool ActRaiser_ActionPaletteLoadHleEnabled(CpuState *cpu) {
       destination == 0x80;
 }
 
-static void RequireEntryMode(CpuState *cpu, const char *routine) {
-  if (cpu && !cpu->emulation && cpu->m_flag && !cpu->x_flag && cpu->DB == 0)
-    return;
-  fprintf(stderr,
-          "FATAL: %s HLE requires DB=0 native mode with 8-bit A and "
-          "16-bit X/Y\n", routine);
-  abort();
-}
-
 static uint32_t ReadLinearPointer(CpuState *cpu) {
   const uint32_t linear = (uint32_t)ReadOperand(cpu) |
       ((uint32_t)ReadOperand(cpu) << CHAR_BIT) |
@@ -182,7 +173,9 @@ static void RegisterDiagnostics(void) {
 RecompReturn ActRaiser_LoadActionCharacters(CpuState *cpu) {
   if (!cpu) return RECOMP_RETURN_NORMAL;
   cpu_mirrors_to_p(cpu);
-  RequireEntryMode(cpu, "$02:B28E");
+  ActRaiserCpuHle_RequireEntryMode(
+      cpu, "$02:B28E",
+      kActRaiserCpuHleEntryMode_DbZeroNative8BitAccumulator16BitIndexes);
   const uint8_t saved_p = cpu->P;
   cpu_write8(cpu, 0x00, cpu->S, saved_p); /* PHP */
   cpu->S = (uint16_t)(cpu->S - 1u);
@@ -194,7 +187,7 @@ RecompReturn ActRaiser_LoadActionCharacters(CpuState *cpu) {
   ActionRoomHle_WriteDirectPage16(cpu, kDpUploadEnd, copy_bytes);
 
   const uint16_t destination = ReadOperand(cpu);
-  ActionRoomHle_PushStackWord(cpu, destination);
+  ActRaiserCpuHle_PushWord(cpu, destination);
   cpu_write16(cpu, cpu->DB, kPpuVramAddress,
               (uint16_t)(destination << 8));
   cpu->X = kDpSource;
@@ -214,7 +207,7 @@ RecompReturn ActRaiser_LoadActionCharacters(CpuState *cpu) {
   const RecompReturn decompressed = CallLzss(cpu, 0xB2FE);
   if (decompressed != RECOMP_RETURN_NORMAL) return decompressed;
 
-  (void)ActionRoomHle_PopStackWord(cpu);
+  (void)ActRaiserCpuHle_PopWord(cpu);
   cpu->X = source_begin;
   while (cpu->X != copy_bytes) {
     cpu->A = cpu_read16(
@@ -235,7 +228,9 @@ RecompReturn ActRaiser_LoadActionCharacters(CpuState *cpu) {
 RecompReturn ActRaiser_LoadActionPalette(CpuState *cpu) {
   if (!cpu) return RECOMP_RETURN_NORMAL;
   cpu_mirrors_to_p(cpu);
-  RequireEntryMode(cpu, "$02:B330");
+  ActRaiserCpuHle_RequireEntryMode(
+      cpu, "$02:B330",
+      kActRaiserCpuHleEntryMode_DbZeroNative8BitAccumulator16BitIndexes);
   const uint8_t saved_p = cpu->P;
   cpu_write8(cpu, 0x00, cpu->S, saved_p); /* PHP */
   cpu->S = (uint16_t)(cpu->S - 1u);
@@ -252,7 +247,7 @@ RecompReturn ActRaiser_LoadActionPalette(CpuState *cpu) {
   cpu->X = kDpSource;
   (void)ReadLinearPointer(cpu);
   const uint16_t script_y = cpu->Y;
-  ActionRoomHle_PushStackWord(cpu, script_y); /* PHY */
+  ActRaiserCpuHle_PushWord(cpu, script_y); /* PHY */
   cpu->Y = source_begin;
   while (cpu->Y != source_end) {
     const uint8_t low =
@@ -264,7 +259,7 @@ RecompReturn ActRaiser_LoadActionPalette(CpuState *cpu) {
     cpu->A = (uint16_t)((cpu->A & 0xFF00u) | high);
     cpu_write8(cpu, cpu->DB, kPpuCgramData, high);
   }
-  cpu->Y = ActionRoomHle_PopStackWord(cpu); /* PLY */
+  cpu->Y = ActRaiserCpuHle_PopWord(cpu); /* PLY */
 
   RestoreStatus(cpu, saved_p);
   cpu->S = (uint16_t)(cpu->S + 1u + k65816RtsStackBytes);

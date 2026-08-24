@@ -19,8 +19,9 @@
 #include <string.h>
 
 #include "actraiser_game.h"
-#include "snes/ppu.h"
+#include "deterministic_hash.h"
 #include "run_dir.h"
+#include "snes/ppu.h"
 
 extern Ppu *g_ppu;
 
@@ -98,17 +99,6 @@ static int g_enabled = -1;
 static uint32 g_frames_surveyed;
 static uint32 g_skipped_mode_mask;
 
-/* ---- hashing ----------------------------------------------------------- */
-
-static uint64 Fnv1a(uint64 hash, const void *data, size_t size) {
-  const uint8 *bytes = (const uint8 *)data;
-  for (size_t i = 0; i < size; i++) {
-    hash ^= bytes[i];
-    hash *= 0x100000001b3ull;
-  }
-  return hash;
-}
-
 static TileRecord *FindOrAddRecord(uint64 hash, CensusClass class_) {
   uint32 slot = (uint32)hash & ((1u << kCensusHashBits) - 1);
   for (;;) {
@@ -143,9 +133,9 @@ static void RecordSighting(TileRecord *record, uint8 layer_bit,
   record->layer_mask |= layer_bit;
   record->palette_group_mask |= (uint8)(1u << (palette_group & 7));
 
-  uint64 palette_hash =
-      Fnv1a(0xcbf29ce484222325ull, &g_ppu->cgram[palette_base & 0xff],
-            (size_t)colors * 2);
+  uint64 palette_hash = DeterministicHash_Fnv1a64(
+      DETERMINISTIC_HASH_FNV1A64_OFFSET,
+      &g_ppu->cgram[palette_base & 0xff], (size_t)colors * 2);
   PaletteVariant *variant = NULL;
   for (int i = 0; i < record->palette_variant_count; i++)
     if (record->palette_variants[i].hash == palette_hash) {
@@ -210,8 +200,9 @@ static TileRecord *RecordPlanarTile(int tile_word_adr, int bpp,
   int word_count = bpp == 4 ? 16 : 8;
   for (int i = 0; i < word_count; i++)
     words[i] = g_ppu->vram[(tile_word_adr + i) & 0x7fff];
-  uint64 hash = Fnv1a(0xcbf29ce484222325ull ^ (uint64)class_,
-                      words, (size_t)word_count * 2);
+  uint64 hash = DeterministicHash_Fnv1a64(
+      DETERMINISTIC_HASH_FNV1A64_OFFSET ^ (uint64)class_, words,
+      (size_t)word_count * 2);
   TileRecord *record = FindOrAddRecord(hash, class_);
   if (record && !record->sightings)
     DecodePlanar(words, bpp, record->pixels);
@@ -393,8 +384,9 @@ static void SurveyMode7(void) {
     uint8 bytes[64];
     for (int p = 0; p < 64; p++)
       bytes[p] = (uint8)(g_ppu->vram[tile * 64 + p] >> 8);
-    uint64 hash = Fnv1a(0xcbf29ce484222325ull ^ (uint64)kCensusClass_Mode7,
-                        bytes, sizeof(bytes));
+    uint64 hash = DeterministicHash_Fnv1a64(
+        DETERMINISTIC_HASH_FNV1A64_OFFSET ^ (uint64)kCensusClass_Mode7,
+        bytes, sizeof(bytes));
     TileRecord *record = FindOrAddRecord(hash, kCensusClass_Mode7);
     if (record && !record->sightings)
       memcpy(record->pixels, bytes, 64);
@@ -554,7 +546,8 @@ static void HdMode7Dump_Frame(void) {
     return;
   /* Canvas content = the high byte (pixels) of all 128*128 tile words plus
    * the low-byte tilemap. Hash both so tilemap rearrangements re-dump. */
-  uint64 hash = Fnv1a(0xcbf29ce484222325ull, g_ppu->vram, 0x8000 * 2);
+  uint64 hash = DeterministicHash_Fnv1a64(
+      DETERMINISTIC_HASH_FNV1A64_OFFSET, g_ppu->vram, 0x8000 * 2);
   if (hash == last_hash) return;
   last_hash = hash;
 

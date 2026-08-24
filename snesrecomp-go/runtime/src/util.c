@@ -1,4 +1,5 @@
 #include "util.h"
+#include "crc32.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
@@ -257,29 +258,15 @@ static uint64 BpsDecodeInt(const uint8 **src) {
   return data;
 }
 
-#define CRC32_POLYNOMIAL 0xEDB88320
-
-static uint32 crc32(const void *data, size_t length) {
-  uint32 crc = 0xFFFFFFFF;
-  const uint8 *byteData = (const uint8 *)data;
-  for (size_t i = 0; i < length; i++) {
-    crc ^= byteData[i];
-    for (int j = 0; j < 8; j++)
-      crc = (crc >> 1) ^ ((crc & 1) * CRC32_POLYNOMIAL);
-  }
-  return crc ^ 0xFFFFFFFF;
-}
-
-
 uint8 *ApplyBps(const uint8 *src, size_t src_size_in,
                 const uint8 *bps, size_t bps_size, size_t *length_out) {
   const uint8 *bps_end = bps + bps_size - 12;
 
   if (memcmp(bps, "BPS1", 4))
     return NULL;
-  if (crc32(src, src_size_in) != *(uint32 *)(bps_end))
+  if (crc32_compute(src, src_size_in) != *(uint32 *)(bps_end))
     return NULL;
-  if (crc32(bps, bps_size - 4) != *(uint32 *)(bps_end + 8))
+  if (crc32_compute(bps, bps_size - 4) != *(uint32 *)(bps_end + 8))
     return NULL;
 
   bps += 4;
@@ -325,7 +312,7 @@ uint8 *ApplyBps(const uint8 *src, size_t src_size_in,
   }
   if (dst_size != outputOffset)
     return NULL;
-  if (crc32(dst, dst_size) != *(uint32 *)(bps_end + 4))
+  if (crc32_compute(dst, dst_size) != *(uint32 *)(bps_end + 4))
     return NULL;
   return dst;
 }

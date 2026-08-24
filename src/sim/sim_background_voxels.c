@@ -5,15 +5,15 @@
 #include "sim_background_mountain_relief.h"
 #include "sim_background_voxel_region.h"
 #include "sim_town_terrain.h"
+#include "sim_town_layout.h"
 
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "byte_order.h"
 enum {
-  kTownCellMapsWram = 0x12000,       /* flat $7F:2000 */
-  kTownCellMapBytes = 0x400,
   kTownTilemapWram = 0x10000,        /* flat $7F:0000 */
   kTerrainDefinitionsWram = 0x2100,  /* flat $7E:2100 */
   /* Structure art is a second metatile atlas with the same four-word entry
@@ -146,7 +146,7 @@ static struct {
    * grounding samples this several times per actor, so resolve immutable
    * object footprints once when the voxel scene is rebuilt. */
   float structure_height[kCellCount];
-  uint8_t cell_map[kTownCellMapBytes];
+  uint8_t cell_map[kSimTownCellMapBytes];
   uint8_t structure_records[kStructureSceneInputBytes];
   uint8_t terrain_definitions[kMetatileDefinitionBytes];
   uint8_t structure_definitions[kMetatileDefinitionBytes];
@@ -178,19 +178,8 @@ static size_t CellIndex(int x, int y) {
   return (size_t)y * kSimBackgroundTownCells + (size_t)x;
 }
 
-/* The cell maps use four 16x16 pages rather than row-major 32x32 storage. */
-static size_t TownCellMapIndex(uint8_t town, int x, int y) {
-  int quadrant = (y >= 16 ? 2 : 0) + (x >= 16 ? 1 : 0);
-  return kTownCellMapsWram + (size_t)(town - 1) * kTownCellMapBytes +
-      (size_t)quadrant * 0x100 + (size_t)(y & 15) * 16 + (x & 15);
-}
-
 static uint8_t CellMapValue(uint8_t town, const uint8_t *wram, int x, int y) {
-  return wram[TownCellMapIndex(town, x, y)];
-}
-
-static uint16_t Read16(const uint8_t *wram, size_t address) {
-  return (uint16_t)(wram[address] | (uint16_t)wram[address + 1] << 8);
+  return wram[SimTownLayout_CellMapIndex(town, x, y)];
 }
 
 /* The town tilemap is quadrant-paged, 64x64 8x8 entries. */
@@ -200,7 +189,8 @@ static uint16_t TownTilemapWord(const uint8_t *wram, int tile_x, int tile_y) {
   size_t word = (size_t)quadrant * kTilemapPageWords +
       (size_t)(tile_y & (kTilemapPageTiles - 1)) * kTilemapPageTiles +
       (size_t)(tile_x & (kTilemapPageTiles - 1));
-  return Read16(wram, kTownTilemapWram + word * 2) & kMetatileCompareMask;
+  return ByteOrder_ReadLe16(
+      wram + kTownTilemapWram + word * 2) & kMetatileCompareMask;
 }
 
 static void LiveCellEntries(const uint8_t *wram, int x, int y,
@@ -217,7 +207,8 @@ static bool MetatileMatches(const uint8_t *wram, size_t definitions,
   size_t at = definitions + (size_t)metatile * kTerrainDefinitionBytes;
   uint16_t defined = 0;
   for (int entry = 0; entry < 4; entry++) {
-    uint16_t word = Read16(wram, at + (size_t)entry * 2) & kMetatileCompareMask;
+    uint16_t word = ByteOrder_ReadLe16(
+        wram + at + (size_t)entry * 2) & kMetatileCompareMask;
     if (word != live[entry]) return false;
     defined |= word;
   }
@@ -1362,8 +1353,8 @@ static void LogWindmills(uint8_t town, const uint8_t *wram,
 }
 
 static const uint8_t *TownCellMapSource(uint8_t town, const uint8_t *wram) {
-  return wram + kTownCellMapsWram +
-      (size_t)(town - 1) * kTownCellMapBytes;
+  return wram + kSimTownCellMapsWram +
+      (size_t)(town - 1) * kSimTownCellMapBytes;
 }
 
 static const uint8_t *TownStructureRecordSource(

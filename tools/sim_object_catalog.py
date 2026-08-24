@@ -28,6 +28,8 @@ import re
 from collections import defaultdict
 from pathlib import Path
 
+from ar_lib import lorom_offset
+
 
 ROOT = Path(__file__).resolve().parent.parent
 ROM_BANK = 0x01
@@ -160,12 +162,6 @@ KNOWN_SPAWN_VISUALS = {
     0xEC2A: {"name": "angel cloud/miracle tile 3", "plane": "flying_effect"},
     0xEC35: {"name": "angel cloud/miracle tile 4", "plane": "flying_effect"},
 }
-
-
-def lorom_offset(bank: int, address: int) -> int:
-    if address < 0x8000:
-        raise ValueError(f"not ROM-mapped: ${bank:02X}:{address:04X}")
-    return (bank & 0x7F) * 0x8000 + address - 0x8000
 
 
 class Rom:

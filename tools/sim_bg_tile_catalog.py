@@ -33,6 +33,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from ar_lib import lorom_offset, read_le16
+
 
 TOWNS = (
     ("fillmore", "Fillmore", 1),
@@ -83,16 +85,6 @@ RECORD_COLORS = (
     "#b5179e", "#ff9f1c", "#9b5de5", "#adb5bd",
 )
 QUADRANT_NAMES = ("TL", "TR", "BL", "BR")
-
-
-def lorom_offset(bank: int, address: int) -> int:
-    if address < 0x8000:
-        raise ValueError(f"not ROM-mapped: ${bank:02X}:{address:04X}")
-    return (bank & 0x7F) * 0x8000 + address - 0x8000
-
-
-def read_u16(data: bytes, offset: int) -> int:
-    return data[offset] | data[offset + 1] << 8
 
 
 def strip_snapshot_suffix(path: Path) -> Path:
@@ -181,7 +173,7 @@ class Snapshot:
         self.palette = tuple(self._decode_color(index) for index in range(256))
 
     def _decode_color(self, index: int) -> tuple[int, int, int]:
-        color = read_u16(self.cgram, index * 2) & 0x7FFF
+        color = read_le16(self.cgram, index * 2) & 0x7FFF
         return (
             (color & 0x1F) * 255 // 31,
             (color >> 5 & 0x1F) * 255 // 31,
@@ -192,13 +184,13 @@ class Snapshot:
         base = (STRUCTURE_DEFINITIONS if atlas == "structure"
                 else TERRAIN_DEFINITIONS)
         offset = base + metatile * METATILE_BYTES
-        return tuple(read_u16(self.wram, offset + index * 2) & VISUAL_WORD_MASK
+        return tuple(read_le16(self.wram, offset + index * 2) & VISUAL_WORD_MASK
                      for index in range(4))
 
     def town_tilemap_word(self, tile_x: int, tile_y: int) -> int:
         quadrant = (2 if tile_y >= 32 else 0) + (1 if tile_x >= 32 else 0)
         word = (quadrant * 1024 + (tile_y & 31) * 32 + (tile_x & 31))
-        return read_u16(self.wram, TOWN_TILEMAP + word * 2)
+        return read_le16(self.wram, TOWN_TILEMAP + word * 2)
 
     def live_cell_words(self, cell_x: int, cell_y: int) -> tuple[int, ...]:
         tile_x, tile_y = cell_x * 2, cell_y * 2

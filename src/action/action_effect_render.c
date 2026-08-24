@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "deterministic_hash.h"
+
 /* A spell's captured parts are not independent effects. Rendering each one as
  * its own self-contained glow with its own outward spray made Magical Fire
  * read as four smudges arranged in a square: the eye groups by silhouette,
@@ -123,18 +125,9 @@ kMistCircle12[kActionSceneEffectWaterfallMistCloudSegments][2] = {
   { 0.500000f,-0.866025f }, { 0.866025f,-0.500000f },
 };
 
-static uint32_t EffectHash(uint32_t value) {
-  value ^= value >> 16;
-  value *= 0x7FEB352Du;
-  value ^= value >> 15;
-  value *= 0x846CA68Bu;
-  value ^= value >> 16;
-  return value;
-}
-
 /* Hash -> 0..1. */
 static float HashUnit(uint32_t value) {
-  return (float)(EffectHash(value) & 0xFFFFu) / 65535.0f;
+  return (float)(DeterministicHash_Mix32(value) & 0xFFFFu) / 65535.0f;
 }
 
 /* Capacity-aware view over either public batch type. Geometry builders write
@@ -758,7 +751,7 @@ static bool AppendWaterfallMistCloudVolume(
        cloud < kActionSceneEffectWaterfallMistCloudCount; cloud++) {
     const unsigned tier = cloud / kColumns;
     const unsigned column = cloud % kColumns;
-    const unsigned seed = EffectHash(
+    const unsigned seed = DeterministicHash_Mix32(
         (uint32_t)effect->pulse_generation ^
         ((uint32_t)cloud + 1u) * 0x9E3779B9u);
     const unsigned x_period = 132u + tier * 17u + (seed & 15u);
@@ -844,7 +837,7 @@ static bool AppendEmbers(ActionEffectGeometryWriter *writer,
   if (!burst->flame_count) return true;
 
   for (uint32_t i = 0; i < count; i++) {
-    uint32_t seed = EffectHash(
+    uint32_t seed = DeterministicHash_Mix32(
         burst->anchor->pulse_generation * 0x9E3779B9u ^
         (uint32_t)burst->anchor->record_address * 0x85EBCA6Bu ^
         i * 0xC2B2AE35u);
@@ -1512,7 +1505,7 @@ static bool AppendMarahnaLightningRibbonLayer(
     float y = horizontal ? mid_y
                          : rect->y0 + (rect->y1 - rect->y0) * along;
     if (i && i + 1u < kJoints) {
-      const uint32_t seed = EffectHash(
+      const uint32_t seed = DeterministicHash_Mix32(
           effect->generation * 0x9E3779B9u ^ i * 0x85EBCA6Bu);
       const float static_bend = HashUnit(seed) - 0.5f;
       const float animated_bend =
@@ -1579,7 +1572,7 @@ static bool AppendMarahnaBossLightningRibbonLayer(
     float x = x0 + dx * along;
     float y = y0 + dy * along;
     if (i && i + 1u < kJoints) {
-      const uint32_t seed = EffectHash(
+      const uint32_t seed = DeterministicHash_Mix32(
           effect->generation * 0x9E3779B9u ^ i * 0x85EBCA6Bu);
       const float bend = (HashUnit(seed) - 0.5f) * 3.0f +
           (TriangleWave(ticks + i * 5u, 11u) - 0.5f) * 5.0f;
@@ -1787,7 +1780,7 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
   else
     SceneActorHeading(effect, &heading_x, &heading_y);
   for (unsigned i = 0; i < count; i++) {
-    const uint32_t seed = EffectHash(
+    const uint32_t seed = DeterministicHash_Mix32(
         effect->pulse_generation * 0x9E3779B9u ^
         (uint32_t)effect->record_address * 0x85EBCA6Bu ^
         i * 0xC2B2AE35u);

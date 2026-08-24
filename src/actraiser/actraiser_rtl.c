@@ -19,6 +19,7 @@
 #include "diorama/diorama_layer_order.h"
 #include "diorama/diorama_performance.h"
 #include "diorama/diorama_planes.h"
+#include "deterministic_hash.h"
 #include "host/host_display.h"   /* kHostDisplayFramebufferHeight */
 #include "settings.h"
 #include "hd_replacements.h"
@@ -1012,17 +1013,16 @@ static void ActRaiser_ApplyBgPresentationBands(
 static uint32 ActRaiser_BgBandSignature(
     const ActionBgPresentationPolicy *policy) {
   if (!policy) return 0;
-  uint32 signature = 2166136261u;
+  uint32 signature = DETERMINISTIC_HASH_FNV1A32_OFFSET;
   for (unsigned i = 0; i < policy->band_count; i++) {
     const ActionBgPresentationBand *band = &policy->bands[i];
     const uint8 bytes[] = {
       band->layer, band->y0, band->y1,
       (uint8)band->edge, (uint8)band->motion,
     };
-    for (unsigned byte = 0; byte < sizeof(bytes); byte++) {
-      signature ^= bytes[byte];
-      signature *= 16777619u;
-    }
+    for (unsigned byte = 0; byte < sizeof(bytes); byte++)
+      signature = DeterministicHash_Fnv1a32Byte(
+          signature, bytes[byte]);
   }
   return signature;
 }

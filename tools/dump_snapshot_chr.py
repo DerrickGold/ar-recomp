@@ -11,8 +11,8 @@ Usage:
   python3 tools/dump_snapshot_chr.py <vram.bin> <cgram.bin> <palette> out.png [cols] [first] [count]
 """
 import sys
-import struct
-import zlib
+
+from ar_lib import write_rgb_png
 
 
 def cgram_palette(cgram, pal):
@@ -38,22 +38,6 @@ def decode_tile(vram, off):
             px[y][x] = ((p0 >> b) & 1) | (((p1 >> b) & 1) << 1) | \
                 (((p2 >> b) & 1) << 2) | (((p3 >> b) & 1) << 3)
     return px
-
-
-def write_png(path, w, h, rgb):
-    def chunk(tag, payload):
-        c = tag + payload
-        return struct.pack(">I", len(payload)) + c + \
-            struct.pack(">I", zlib.crc32(c) & 0xffffffff)
-    raw = bytearray()
-    for y in range(h):
-        raw.append(0)
-        raw.extend(rgb[y * w * 3:(y + 1) * w * 3])
-    png = b"\x89PNG\r\n\x1a\n"
-    png += chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
-    png += chunk(b"IDAT", zlib.compress(bytes(raw), 9))
-    png += chunk(b"IEND", b"")
-    open(path, "wb").write(png)
 
 
 def main():
@@ -86,7 +70,7 @@ def main():
                 r, g, b = colors[v]
                 o = ((cy + y) * W + (cx + x)) * 3
                 rgb[o], rgb[o + 1], rgb[o + 2] = r, g, b
-    write_png(out, W, H, rgb)
+    write_rgb_png(out, W, H, rgb)
     print(f"{out}: pal {pal}, tiles {first}..{first+count}, {rows}x{cols}")
 
 

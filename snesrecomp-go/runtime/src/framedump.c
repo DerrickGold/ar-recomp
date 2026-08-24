@@ -1,4 +1,6 @@
 #include "framedump.h"
+#include "crc32.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,32 +17,10 @@ FrameDumpCallback g_framedump_callback;
 
 static char g_framedump_dir[512];
 
-// --- CRC32 (standard polynomial) ---
-static uint32_t s_crc32_table[256];
-static int s_crc32_init = 0;
-
-static void crc32_init_table(void) {
-  for (uint32_t i = 0; i < 256; i++) {
-    uint32_t c = i;
-    for (int j = 0; j < 8; j++)
-      c = (c >> 1) ^ (c & 1 ? 0xEDB88320u : 0);
-    s_crc32_table[i] = c;
-  }
-  s_crc32_init = 1;
-}
-
-static uint32_t crc32(const uint8_t *buf, size_t len) {
-  if (!s_crc32_init) crc32_init_table();
-  uint32_t c = 0xFFFFFFFFu;
-  for (size_t i = 0; i < len; i++)
-    c = s_crc32_table[(c ^ buf[i]) & 0xFF] ^ (c >> 8);
-  return c ^ 0xFFFFFFFFu;
-}
-
 // Game-agnostic per-frame metadata. Per-game offline tools decode the
 // accompanying .bin dump for game-specific fields.
 static void write_json(const char *path, uint32_t frame, const uint8_t *wram) {
-  uint32_t crc = crc32(wram, kSnesWramSize);
+  uint32_t crc = crc32_compute(wram, kSnesWramSize);
   FILE *f = fopen(path, "w");
   if (!f) return;
   fprintf(f,

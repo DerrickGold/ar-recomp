@@ -1,12 +1,10 @@
 #include "sim_background_voxel_landmarks.h"
 
+#include "sim_town_layout.h"
+
 #include <stdbool.h>
 
-enum {
-  kTownCellMapsWram = 0x12000,  /* flat $7F:2000 */
-  kTownCellMapBytes = 0x400,
-  kLandmarkCells = 2,
-};
+enum { kLandmarkCells = 2 };
 
 typedef struct SimBackgroundLandmarkDefinition {
   uint8_t town;
@@ -29,18 +27,12 @@ static const SimBackgroundLandmarkDefinition kLandmarks[] = {
   {6, 0xEB, kSimBackgroundVoxel_StoryTree},
 };
 
-/* The cell maps use four 16x16 pages rather than row-major 32x32 storage. */
-static size_t TownCellMapIndex(uint8_t town, int x, int y) {
-  int quadrant = (y >= 16 ? 2 : 0) + (x >= 16 ? 1 : 0);
-  return kTownCellMapsWram + (size_t)(town - 1) * kTownCellMapBytes +
-      (size_t)quadrant * 0x100 + (size_t)(y & 15) * 16 + (x & 15);
-}
-
 static bool PlotIsMarked(uint8_t town, const uint8_t *wram,
                          uint8_t metatile, int x, int y) {
   for (int row = 0; row < kLandmarkCells; row++)
     for (int column = 0; column < kLandmarkCells; column++)
-      if (wram[TownCellMapIndex(town, x + column, y + row)] != metatile)
+      if (wram[SimTownLayout_CellMapIndex(
+              town, x + column, y + row)] != metatile)
         return false;
   return true;
 }

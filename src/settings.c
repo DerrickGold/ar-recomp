@@ -1,4 +1,5 @@
 #include "settings.h"
+#include "text_parse_utils.h"
 #include "constants.h"
 #include "randomizer.h"
 #include "render_capabilities.h"
@@ -2954,30 +2955,6 @@ static bool ApplyBootLayerValue(const SettingDesc *desc, const char *text,
   return ok;
 }
 
-static char *TrimLeft(char *text) {
-  while (*text == ' ' || *text == '\t' || *text == '\r' || *text == '\n')
-    text++;
-  return text;
-}
-
-static void TrimRight(char *text) {
-  size_t length = strlen(text);
-  while (length && (text[length - 1] == ' ' || text[length - 1] == '\t' ||
-                    text[length - 1] == '\r' || text[length - 1] == '\n'))
-    text[--length] = 0;
-}
-
-static void StripInlineComment(char *text) {
-  for (char *p = text; *p; p++) {
-    if ((*p == '#' || *p == ';') &&
-        (p == text || p[-1] == ' ' || p[-1] == '\t')) {
-      *p = 0;
-      break;
-    }
-  }
-  TrimRight(text);
-}
-
 static bool Settings_LoadInternal(const char *path, bool boot, int rank,
                                   bool missing_ok) {
   if (!path || !path[0]) return true;
@@ -2997,8 +2974,8 @@ static bool Settings_LoadInternal(const char *path, bool boot, int rank,
   int line_number = 0;
   while (fgets(line, sizeof(line), file)) {
     line_number++;
-    char *key = TrimLeft(line);
-    TrimRight(key);
+    char *key = TextParse_TrimLeft(line);
+    TextParse_TrimRight(key);
     if (!key[0] || key[0] == '#' || key[0] == ';' || key[0] == '[')
       continue;
     char *equals = strchr(key, '=');
@@ -3009,9 +2986,9 @@ static bool Settings_LoadInternal(const char *path, bool boot, int rank,
       continue;
     }
     *equals = 0;
-    TrimRight(key);
-    char *value = TrimLeft(equals + 1);
-    StripInlineComment(value);
+    TextParse_TrimRight(key);
+    char *value = TextParse_TrimLeft(equals + 1);
+    TextParse_StripInlineComment(value);
 
     /* Removed menu state may remain in settings.ini until the next save. */
     if (!strcmp(key, "cheat_moonjump_button")) continue;

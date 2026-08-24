@@ -78,14 +78,6 @@ bool ActRaiser_ActionMapLoadHleEnabled(CpuState *cpu) {
       (PeekOperand(cpu, 0) == 1 || PeekOperand(cpu, 0) == 2);
 }
 
-static void RequireEntryMode(CpuState *cpu, const char *routine) {
-  if (cpu && !cpu->emulation && cpu->m_flag && !cpu->x_flag) return;
-  fprintf(stderr,
-          "FATAL: %s HLE requires native mode with 8-bit A and "
-          "16-bit X/Y\n", routine);
-  abort();
-}
-
 static uint32_t ReadLinearPointer(CpuState *cpu) {
   const uint32_t value = (uint32_t)ReadOperand(cpu) |
       ((uint32_t)ReadOperand(cpu) << 8) |
@@ -180,7 +172,9 @@ static void RegisterDiagnostics(void) {
 RecompReturn ActRaiser_LoadActionMetatiles(CpuState *cpu) {
   if (!cpu) return RECOMP_RETURN_NORMAL;
   cpu_mirrors_to_p(cpu);
-  RequireEntryMode(cpu, "$02:B363");
+  ActRaiserCpuHle_RequireEntryMode(
+      cpu, "$02:B363",
+      kActRaiserCpuHleEntryMode_Native8BitAccumulator16BitIndexes);
   const uint8_t saved_p = cpu->P;
   cpu_write8(cpu, 0x00, cpu->S, saved_p); /* PHP */
   cpu->S = (uint16_t)(cpu->S - 1u);
@@ -201,7 +195,7 @@ RecompReturn ActRaiser_LoadActionMetatiles(CpuState *cpu) {
                                   destination_offset);
 
   uint16_t selector = ReadOperand(cpu);
-  ActionRoomHle_PushStackWord(cpu, selector);
+  ActRaiserCpuHle_PushWord(cpu, selector);
   cpu->X = kDpSource;
   (void)ReadLinearPointer(cpu);
 
@@ -214,7 +208,7 @@ RecompReturn ActRaiser_LoadActionMetatiles(CpuState *cpu) {
   const RecompReturn decompressed = CallLzss(cpu, 0xB3B8);
   if (decompressed != RECOMP_RETURN_NORMAL) return decompressed;
 
-  selector = ActionRoomHle_PopStackWord(cpu);
+  selector = ActRaiserCpuHle_PopWord(cpu);
   static const uint16_t kDestinations[] = {
     kBg1Definitions, kBg2Definitions, kBg3Definitions,
   };
@@ -223,12 +217,12 @@ RecompReturn ActRaiser_LoadActionMetatiles(CpuState *cpu) {
     const bool selected = (selector & 1u) != 0;
     selector >>= 1;
     if (!selected) continue;
-    ActionRoomHle_PushStackWord(cpu, selector);
-    ActionRoomHle_PushStackWord(cpu, cpu->Y);
+    ActRaiserCpuHle_PushWord(cpu, selector);
+    ActRaiserCpuHle_PushWord(cpu, cpu->Y);
     CopyMetatileSlice(cpu, kDestinations[layer], source_begin, source_end,
                       destination_offset);
-    cpu->Y = ActionRoomHle_PopStackWord(cpu);
-    selector = ActionRoomHle_PopStackWord(cpu);
+    cpu->Y = ActRaiserCpuHle_PopWord(cpu);
+    selector = ActRaiserCpuHle_PopWord(cpu);
   }
   cpu->A = selector;
   cpu->X = kBg3Definitions;
@@ -244,7 +238,9 @@ RecompReturn ActRaiser_LoadActionMetatiles(CpuState *cpu) {
 RecompReturn ActRaiser_LoadActionMap(CpuState *cpu) {
   if (!cpu) return RECOMP_RETURN_NORMAL;
   cpu_mirrors_to_p(cpu);
-  RequireEntryMode(cpu, "$02:B3EB");
+  ActRaiserCpuHle_RequireEntryMode(
+      cpu, "$02:B3EB",
+      kActRaiserCpuHleEntryMode_Native8BitAccumulator16BitIndexes);
   const uint8_t saved_p = cpu->P;
   cpu_write8(cpu, 0x00, cpu->S, saved_p); /* PHP */
   cpu->S = (uint16_t)(cpu->S - 1u);
@@ -281,8 +277,8 @@ RecompReturn ActRaiser_LoadActionMap(CpuState *cpu) {
   if (destination_index < 2) {
     selector >>= 1;
     cpu->X = (uint16_t)(destination_index * 4u);
-    ActionRoomHle_PushStackWord(cpu, selector);
-    ActionRoomHle_PushStackWord(cpu, cpu->Y);
+    ActRaiserCpuHle_PushWord(cpu, selector);
+    ActRaiserCpuHle_PushWord(cpu, cpu->Y);
     ActionRoomHle_WriteDirectPage16(
         cpu, (uint16_t)(kActRaiserWram_Bg1Width + cpu->X),
         ActionRoomHle_ReadDirectPage16(cpu, kDpBgWidth));
@@ -294,8 +290,8 @@ RecompReturn ActRaiser_LoadActionMap(CpuState *cpu) {
     ActionRoomHle_WriteDirectPage16(cpu, kDpOutputAddress, destination);
     const RecompReturn decompressed = CallLzss(cpu, 0xB470);
     if (decompressed != RECOMP_RETURN_NORMAL) return decompressed;
-    cpu->Y = ActionRoomHle_PopStackWord(cpu);
-    selector = ActionRoomHle_PopStackWord(cpu);
+    cpu->Y = ActRaiserCpuHle_PopWord(cpu);
+    selector = ActRaiserCpuHle_PopWord(cpu);
   }
 
   cpu->A = selector;

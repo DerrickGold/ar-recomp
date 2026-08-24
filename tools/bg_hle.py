@@ -15,20 +15,21 @@ pages, one byte per 16x16 metatile, 16x16 metatiles per page.
 """
 import struct, sys
 
+from ar_lib import read_le16
+
 if len(sys.argv) != 2:
     sys.exit(__doc__)
 d = sys.argv[1]
 W = open(f"{d}.wram.bin", "rb").read()          # $7E:0000.. (128K = 7E+7F)
 V = struct.unpack("<32768H", open(f"{d}.vram.bin", "rb").read())
 def r8(a):  return W[a]
-def r16(a): return W[a] | (W[a+1] << 8)
 
 for layer, name, tmbase in ((0, "BG1", 0x6000), (1, "BG2", 0x7000)):
     o = layer * 4
-    camx, camy = r16(0x22+o), r16(0x24+o)
-    width      = r16(0x2E+o)
-    s46, s48   = r16(0x46+o), r16(0x48+o)
-    s52, s54   = r16(0x52+o), r16(0x54+o)
+    camx, camy = read_le16(W, 0x22+o), read_le16(W, 0x24+o)
+    width      = read_le16(W, 0x2E+o)
+    s46, s48   = read_le16(W, 0x46+o), read_le16(W, 0x48+o)
+    s52, s54   = read_le16(W, 0x52+o), read_le16(W, 0x54+o)
     s6b        = r8(0x6B+o)
     or_word    = (s6b << 8)                      # DP $06/$07 = 0 | State6B<<8
     pages_wide = width >> 8

@@ -13,6 +13,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "deterministic_hash.h"
 #include "present_internal.h"
 #include "present_sim3d_effects.h"
 #include "present_sim3d_project.h"
@@ -307,14 +309,6 @@ static bool AppendSimEffectGlow(
   return true;
 }
 
-static uint32_t EffectHash(uint32_t value) {
-  value ^= value >> 16;
-  value *= 0x7FEB352Du;
-  value ^= value >> 15;
-  value *= 0x846CA68Bu;
-  return value ^ (value >> 16);
-}
-
 static void AppendEffectQuad(EffectBatch *batch, float x, float y,
                              float size, SDL_FColor color) {
   int base_vertex = batch->vertex_count;
@@ -408,7 +402,7 @@ static bool AppendSimEffectTrail(
 
     for (unsigned p = 0; p < puffs; p++) {
       if (!EffectBatchReserve(batch, 4, 6)) return false;
-      uint32_t seed = EffectHash(
+      uint32_t seed = DeterministicHash_Mix32(
           (uint32_t)effect->trail[i].world_x * 0x9E3779B9u ^
           (uint32_t)effect->trail[i].world_y * 0x85EBCA6Bu ^
           effect->generation * 0xC2B2AE35u ^ p * 0x27D4EB2Fu);
@@ -453,7 +447,7 @@ static bool AppendSimEffectParticles(
   if (output_scale < 0.5f) output_scale = 0.5f;
 
   for (uint32_t i = 0; i < style->particle_count; i++) {
-    uint32_t seed = EffectHash(
+    uint32_t seed = DeterministicHash_Mix32(
         (uint32_t)effect->record_address * 0x9E3779B9u ^
         effect->generation * 0x85EBCA6Bu ^
         effect->pulse_generation * 0xC2B2AE35u ^

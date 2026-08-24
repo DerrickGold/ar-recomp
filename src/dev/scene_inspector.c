@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "actraiser_game.h"
+#include "deterministic_hash.h"
 #include "snes/ppu.h"
 
 extern Ppu *g_ppu;
@@ -60,15 +61,6 @@ static void Append(TextBuilder *builder, const char *format, ...) {
   builder->length += (size_t)written < room ? (size_t)written : room - 1;
 }
 
-static uint64_t Fnv1a(uint64_t hash, const void *data, size_t size) {
-  const uint8_t *bytes = (const uint8_t *)data;
-  for (size_t i = 0; i < size; i++) {
-    hash ^= bytes[i];
-    hash *= 0x100000001b3ull;
-  }
-  return hash;
-}
-
 /* Class seeds deliberately match hd_tile_census.c: 0=BG2bpp, 1=BG4bpp,
  * 2=OBJ4bpp, 3=Mode7. This makes a click hash directly searchable in
  * tile_census.jsonl. */
@@ -77,8 +69,9 @@ static uint64_t PlanarHash(int word_address, int bpp, int class_) {
   int count = bpp == 4 ? 16 : 8;
   for (int i = 0; i < count; i++)
     words[i] = g_ppu->vram[(word_address + i) & 0x7fff];
-  return Fnv1a(0xcbf29ce484222325ull ^ (uint64_t)class_,
-               words, (size_t)count * sizeof(words[0]));
+  return DeterministicHash_Fnv1a64(
+      DETERMINISTIC_HASH_FNV1A64_OFFSET ^ (uint64_t)class_, words,
+      (size_t)count * sizeof(words[0]));
 }
 
 static int PlanarPixel(int word_address, int bpp, int x, int y) {
@@ -417,8 +410,9 @@ static bool InspectMode7(int scan_y, TextBuilder *panel,
   uint8 bytes[64];
   for (int i = 0; i < 64; i++)
     bytes[i] = (uint8)(g_ppu->vram[(tile * 64 + i) & 0x7fff] >> 8);
-  uint64_t hash = Fnv1a(0xcbf29ce484222325ull ^ 3ull,
-                        bytes, sizeof(bytes));
+  uint64_t hash = DeterministicHash_Fnv1a64(
+      DETERMINISTIC_HASH_FNV1A64_OFFSET ^ UINT64_C(3), bytes,
+      sizeof(bytes));
 
   Append(panel,
          "M7 CANVAS %d,%d TILE$%02X PIX$%02X HASH %08llX\n",

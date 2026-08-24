@@ -16,6 +16,7 @@
 
 #include "action/action_room_scene.h"
 #include "actraiser_game.h"
+#include "deterministic_hash.h"
 
 /* Assets repeat heavily: rooms in one act inherit the act's character and
  * palette uploads, so the same 16 KiB CHR blob backs many rooms. Emitting one
@@ -113,11 +114,10 @@ int main(int argc, char **argv) {
         failures++;
         continue;
       }
-      uint32_t native_hash = UINT32_C(2166136261);
-      for (size_t i = 0; i < kActionRoomSceneFramePixels; i++) {
-        native_hash ^= native_pixels[i];
-        native_hash *= UINT32_C(16777619);
-      }
+      uint32_t native_hash = DETERMINISTIC_HASH_FNV1A32_OFFSET;
+      for (size_t i = 0; i < kActionRoomSceneFramePixels; i++)
+        native_hash = DeterministicHash_Fnv1a32Word(
+            native_hash, native_pixels[i]);
       if (rooms) fprintf(out, ",\n");
       if (scene.have_raster_waveform)
         raster_waveform_blob = InternBlob(

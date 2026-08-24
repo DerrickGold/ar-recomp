@@ -14,6 +14,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/DerrickGold/snesrecomp-go/internal/fsutil"
 )
 
 // HermeticOptions drives the CMake-free build path: every translation unit is
@@ -441,7 +443,8 @@ func resolveSDL3(options HermeticOptions) (includeDir, libDir string, bundled bo
 	}
 	base := CrossSDL3Dir(options.Paths.BuildDir, options.Target)
 	include, lib := filepath.Join(base, "include"), filepath.Join(base, "lib")
-	if directoryExists(filepath.Join(include, "SDL3")) && directoryExists(lib) {
+	if fsutil.DirectoryExists(filepath.Join(include, "SDL3")) &&
+		fsutil.DirectoryExists(lib) {
 		return include, lib, true, nil
 	}
 	return "", "", false, fmt.Errorf(
@@ -464,7 +467,8 @@ func discoverSDL3() (includeDir, libDir string, bundled bool, err error) {
 		lib := filepath.Join(base, "lib")
 		// Bundled headers live under include/SDL3/; the include dir stays the
 		// parent so the game's <SDL3/SDL.h> resolves.
-		if directoryExists(filepath.Join(include, "SDL3")) && directoryExists(lib) {
+		if fsutil.DirectoryExists(filepath.Join(include, "SDL3")) &&
+			fsutil.DirectoryExists(lib) {
 			return include, lib, true, nil
 		}
 	}
@@ -497,7 +501,8 @@ func discoverSDL3() (includeDir, libDir string, bundled bool, err error) {
 		)
 	}
 	for _, candidate := range candidates {
-		if directoryExists(filepath.Join(candidate.include, "SDL3")) && sdlLibDirHasLib(candidate.lib) {
+		if fsutil.DirectoryExists(filepath.Join(candidate.include, "SDL3")) &&
+			sdlLibDirHasLib(candidate.lib) {
 			return candidate.include, candidate.lib, false, nil
 		}
 	}
@@ -511,9 +516,4 @@ func firstFlagValue(output, prefix string) string {
 		}
 	}
 	return ""
-}
-
-func directoryExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
 }

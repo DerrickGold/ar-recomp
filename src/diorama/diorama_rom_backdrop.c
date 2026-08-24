@@ -1,7 +1,9 @@
 #include "diorama_rom_backdrop.h"
 
 #include "action/action_room_scene.h"
+#include "byte_order.h"
 #include "quintet_lzss.h"
+#include "snes_bgr555.h"
 
 enum {
   kTileBytes4Bpp = 32,
@@ -16,21 +18,12 @@ bool DioramaRomBackdrop_DecompressAsset(const uint8_t *packed,
       packed, packed_size, out, expected_size, NULL);
 }
 
-static uint16_t Read16(const uint8_t *bytes) {
-  return (uint16_t)(bytes[0] | ((uint16_t)bytes[1] << 8));
-}
-
-static uint8_t Expand5(unsigned value) {
-  value &= 31;
-  return (uint8_t)((value << 3) | (value >> 2));
-}
-
 static unsigned TilePixel4Bpp(const uint8_t *characters, unsigned tile,
                               unsigned x, unsigned y) {
   const uint8_t *art = characters + tile * kTileBytes4Bpp;
   const unsigned shift = 7 - x;
-  const uint16_t low = Read16(art + y * 2);
-  const uint16_t high = Read16(art + (y + 8) * 2);
+  const uint16_t low = ByteOrder_ReadLe16(art + y * 2);
+  const uint16_t high = ByteOrder_ReadLe16(art + (y + 8) * 2);
   return ((low >> shift) & 1u) | (((low >> (shift + 8)) & 1u) << 1) |
       (((high >> shift) & 1u) << 2) |
       (((high >> (shift + 8)) & 1u) << 3);
@@ -57,9 +50,11 @@ bool DioramaRomBackdrop_LoadActionBg(const uint8_t *rom, size_t rom_size,
 
   uint32_t palette[128];
   for (unsigned i = 0; i < 128; i++) {
-    const uint16_t colour = Read16(scene.palette + i * 2);
-    palette[i] = 0xFF000000u | (uint32_t)Expand5(colour) << 16 |
-        (uint32_t)Expand5(colour >> 5) << 8 | Expand5(colour >> 10);
+    const uint16_t colour = ByteOrder_ReadLe16(scene.palette + i * 2);
+    palette[i] = 0xFF000000u |
+        (uint32_t)ExpandColor5(colour, 15) << 16 |
+        (uint32_t)ExpandColor5(colour >> 5, 15) << 8 |
+        ExpandColor5(colour >> 10, 15);
   }
 
   for (unsigned tile_y = 0; tile_y < 32; tile_y++) {

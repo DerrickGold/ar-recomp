@@ -18,6 +18,8 @@ import json
 import os
 import sys
 
+from ar_lib import file_sha256, read_le16
+
 
 WRAM_BYTES = 0x20000
 VRAM_WORDS = 0x8000
@@ -36,7 +38,7 @@ class CensusError(Exception):
 def read_u16(data, address):
     if address < 0 or address + 1 >= len(data):
         raise CensusError("16-bit read outside snapshot")
-    return data[address] | (data[address + 1] << 8)
+    return read_le16(data, address)
 
 
 def sha256_bytes(data):
@@ -435,14 +437,6 @@ def format_human_summary(summary):
                 group["eligible"]["unknown"], group["tiles_compared"],
                 group["mismatches"], group["outside_world"]))
     return lines
-
-
-def file_sha256(path):
-    digest = hashlib.sha256()
-    with open(path, "rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def parse_args(argv):

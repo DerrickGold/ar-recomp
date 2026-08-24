@@ -1,5 +1,7 @@
 #include "input_replay.h"
 
+#include "byte_order.h"
+
 #include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -28,20 +30,6 @@ static bool s_save_data_protected;
 static bool s_game_frame_logging_enabled;
 static bool s_action_entry_reported;
 
-static uint32_t ReadLittleEndian32(const uint8_t *bytes) {
-  return (uint32_t)bytes[0] |
-         ((uint32_t)bytes[1] << 8) |
-         ((uint32_t)bytes[2] << 16) |
-         ((uint32_t)bytes[3] << 24);
-}
-
-static void WriteLittleEndian32(uint8_t *bytes, uint32_t value) {
-  bytes[0] = (uint8_t)value;
-  bytes[1] = (uint8_t)(value >> 8);
-  bytes[2] = (uint8_t)(value >> 16);
-  bytes[3] = (uint8_t)(value >> 24);
-}
-
 static unsigned ReadGameFrame(void) {
   return ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
 }
@@ -66,8 +54,8 @@ static void LoadReplayFile(const char *path) {
   size_t invalid_frame_count = 0;
   while (fread(record, 1, sizeof(record), replay_file) == sizeof(record)) {
     record_count++;
-    const uint32_t game_frame = ReadLittleEndian32(record);
-    const uint32_t inputs = ReadLittleEndian32(record + sizeof(uint32_t));
+    const uint32_t game_frame = ByteOrder_ReadLe32(record);
+    const uint32_t inputs = ByteOrder_ReadLe32(record + sizeof(uint32_t));
     if (game_frame >= kReplayFrameCapacity) {
       invalid_frame_count++;
       continue;
@@ -130,8 +118,8 @@ static void RecordFrame(unsigned game_frame, uint32_t inputs) {
   if (!s_record_file) return;
 
   uint8_t record[kReplayRecordByteCount];
-  WriteLittleEndian32(record, game_frame);
-  WriteLittleEndian32(record + sizeof(uint32_t), inputs);
+  ByteOrder_WriteLe32(record, game_frame);
+  ByteOrder_WriteLe32(record + sizeof(uint32_t), inputs);
   if (fwrite(record, 1, sizeof(record), s_record_file) != sizeof(record) ||
       fflush(s_record_file) != 0) {
     fprintf(stderr, "[input-record] write failed; recording stopped\n");

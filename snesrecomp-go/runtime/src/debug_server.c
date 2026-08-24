@@ -36,11 +36,9 @@ typedef int socket_t;
 #include <limits.h>
 #include "debug_server.h"
 
-// External references
 extern const char *g_last_recomp_func;
 extern int snes_frame_counter;
 
-// Hardware state access (for exhaustive debug dumps)
 #include "snes/ppu.h"
 #include "snes/cpu.h"
 #include "snes/dma.h"
@@ -54,7 +52,6 @@ extern Ppu *g_ppu;
 extern Cpu *g_snes_cpu;
 extern Dma *g_dma;
 extern Snes *g_snes;
-// APU pacing counter; defined in common_rtl.c.
 extern uint64_t g_main_cpu_cycles_estimate;
 extern uint8 g_ram[kSnesWramSize];
 extern uint8 *g_sram;
@@ -69,19 +66,16 @@ void snes_saveload(Snes *snes, SaveLoadInfo *sli);
 extern const char *g_recomp_stack[];
 extern int g_recomp_stack_top;
 
-// Server state
 static socket_t s_listen_sock = SOCKET_INVALID;
 static socket_t s_client_sock = SOCKET_INVALID;
 static uint8_t *s_ram = NULL;
 static uint32_t s_ram_size = 0;
-// Note: s_frame_counter pointer removed — use snes_frame_counter directly
 static volatile int s_paused = 0;
 static volatile int s_step_remaining = 0;  // frames remaining before auto-re-pause
 static volatile int s_pending_loadstate = -1;  // -1 = none, 0-9 = slot to load
 static volatile uint32_t s_controller_inputs = 0;  // p1 bits 0..11, p2 bits 12..23
 static volatile uint32_t s_controller_active = 0;  // bit0=p1 present, bit1=p2 present
 
-// Threading state
 #ifdef _WIN32
 static CRITICAL_SECTION s_mutex;
 static HANDLE s_thread = NULL;
@@ -92,7 +86,6 @@ static int s_thread_created = 0;
 #endif
 static volatile int s_shutdown = 0;
 
-// Forward declarations for thread function
 #ifdef _WIN32
 static unsigned __stdcall debug_server_thread(void *arg);
 #else
@@ -115,7 +108,6 @@ static void unlock_mutex(void) {
 #endif
 }
 
-// WRAM write watchpoints
 #define MAX_WATCHPOINTS 8
 static struct {
     uint32_t addr;

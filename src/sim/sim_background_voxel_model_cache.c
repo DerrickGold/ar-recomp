@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <string.h>
 
+#include "deterministic_hash.h"
 #include "sim_background_voxel_lighting.h"
 
 typedef struct SimBackgroundVoxelModelCacheKey {
@@ -128,43 +129,35 @@ static void ResolveShading(SimBackgroundVoxelModelCacheEntry *entry) {
   entry->shading_valid = true;
 }
 
-static uint32_t HashByte(uint32_t hash, uint8_t value) {
-  return (hash ^ value) * 16777619u;
-}
-
 static uint32_t HashKey(const SimBackgroundVoxelModelCacheKey *key) {
   /* FNV-1a over explicit fields avoids hashing struct padding, whose bytes are
   * unspecified and can differ between compilers and architectures. */
-  uint32_t hash = 2166136261u;
-  hash = HashByte(hash, (uint8_t)key->group);
-  hash = HashByte(hash, (uint8_t)(key->group >> 8));
-  hash = HashByte(hash, key->kind);
-  hash = HashByte(hash, key->flags);
-  hash = HashByte(hash, key->town);
-  hash = HashByte(hash, key->development_level);
-  hash = HashByte(hash, key->cell_x);
-  hash = HashByte(hash, key->cell_y);
-  hash = HashByte(hash, key->tree_edges);
-  hash = HashByte(hash, key->record_slot);
-  hash = HashByte(hash, key->source_cells_w);
-  hash = HashByte(hash, key->source_cells_h);
-  hash = HashByte(hash, key->bridge_axis);
-  hash = HashByte(hash, key->bridge_bank_a_x);
-  hash = HashByte(hash, key->bridge_bank_a_y);
-  hash = HashByte(hash, key->bridge_bank_b_x);
-  hash = HashByte(hash, key->bridge_bank_b_y);
-  hash = HashByte(hash, key->detail);
-  hash = HashByte(hash, key->style);
-  hash = HashByte(hash, key->animation_phase);
+  uint32_t hash = DETERMINISTIC_HASH_FNV1A32_OFFSET;
+  hash = DeterministicHash_Fnv1a32Byte(hash, (uint8_t)key->group);
+  hash = DeterministicHash_Fnv1a32Byte(
+      hash, (uint8_t)(key->group >> 8));
+  hash = DeterministicHash_Fnv1a32Byte(hash, key->kind);
+  hash = DeterministicHash_Fnv1a32Byte(hash, key->flags);
+  hash = DeterministicHash_Fnv1a32Byte(hash, key->town);
+  hash = DeterministicHash_Fnv1a32Byte(hash, key->development_level);
+  hash = DeterministicHash_Fnv1a32Byte(hash, key->cell_x);
+  hash = DeterministicHash_Fnv1a32Byte(hash, key->cell_y);
+  hash = DeterministicHash_Fnv1a32Byte(hash, key->tree_edges);
+  hash = DeterministicHash_Fnv1a32Byte(hash, key->record_slot);
+  hash = DeterministicHash_Fnv1a32Byte(hash, key->source_cells_w);
+  hash = DeterministicHash_Fnv1a32Byte(hash, key->source_cells_h);
+  hash = DeterministicHash_Fnv1a32Byte(hash, key->bridge_axis);
+  hash = DeterministicHash_Fnv1a32Byte(hash, key->bridge_bank_a_x);
+  hash = DeterministicHash_Fnv1a32Byte(hash, key->bridge_bank_a_y);
+  hash = DeterministicHash_Fnv1a32Byte(hash, key->bridge_bank_b_x);
+  hash = DeterministicHash_Fnv1a32Byte(hash, key->bridge_bank_b_y);
+  hash = DeterministicHash_Fnv1a32Byte(hash, key->detail);
+  hash = DeterministicHash_Fnv1a32Byte(hash, key->style);
+  hash = DeterministicHash_Fnv1a32Byte(hash, key->animation_phase);
   /* The set count is a power of two, so avalanche the structured coordinates
    * before selecting its low bits. This keeps adjacent town cells and the new
    * regional identity bytes from clustering into a handful of four-way sets. */
-  hash ^= hash >> 16;
-  hash *= 0x7FEB352Du;
-  hash ^= hash >> 15;
-  hash *= 0x846CA68Bu;
-  hash ^= hash >> 16;
-  return hash;
+  return DeterministicHash_Mix32(hash);
 }
 
 /* Bring `entry`'s stored shading up to date with the requested lighting,

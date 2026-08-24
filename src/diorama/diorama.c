@@ -1073,10 +1073,7 @@ static bool ProjectWorldPoint(const float mvp[16], float x, float y, float z,
   return true;
 }
 
-/* Shared triangulation: a (subdiv_u+1)x(subdiv_v+1) vertex grid into
- * subdiv_u*subdiv_v quads, each split into 2 triangles. Identical to what
- * BuildLayerMesh always did (diorama.c, pre-GEO) — factored out verbatim so
- * BuildQuadMesh doesn't duplicate it. */
+/* Split a regular vertex grid into two triangles per cell. */
 static void TriangulateGrid(int subdiv_u, int subdiv_v, int *out_indices,
                             int *num_indices) {
   int ii = 0, cols = subdiv_u + 1;
@@ -1094,21 +1091,7 @@ static void TriangulateGrid(int subdiv_u, int subdiv_v, int *out_indices,
   *num_indices = ii;
 }
 
-/* `z_rake` tilts the plane in DEPTH: the top edge stays at `z_world`, the bottom
- * edge lands at `z_world + z_rake`. Zero keeps the plane parallel to the screen,
- * which is what every unedited room uses.
- *
- * Why this exists: two parallel planes at different depths leave a visible VOID
- * between them once the camera tilts — you see past the near plane's bottom edge
- * into the gap behind it. Fillmore act 2 is the reported case (water at Bg2Hi
- * z=0.21, rock path at Bg1 z=0.50: the water reads as floating behind a hole).
- * Raking the far plane forward until its near edge meets the near plane's depth
- * closes the gap, and for a water surface seen at an angle it is also the right
- * shape — a surface receding into the distance rather than a billboard.
- *
- * The mesh was already subdivided DIORAMA_SUBDIV_Y deep for the projection, so
- * this costs no extra vertices and no extra draw calls; only the per-row z
- * changes. */
+/* Assemble the pure rake/bow row depths into the projected layer mesh. */
 static void BuildLayerMesh(const float mvp[16], float z_world, float z_rake,
                            float z_bow,
                            float u0, float v0, float u1, float v1,
@@ -1147,31 +1130,8 @@ static void BuildLayerMesh(const float mvp[16], float z_world, float z_rake,
   DioramaPerformance_End(performance);
 }
 
-/* THICKNESS — extrude the plane's BOTTOM edge forward into a skirt, so the layer
- * reads as a solid block with a near face rather than an infinitely thin sheet.
- *
- * This closes the same void a rake closes, but with the opposite shape and the
- * opposite trade. A rake tilts the WHOLE plane, so the art stretches in depth and
- * the layer stops being parallel to the screen — right for a water surface
- * receding into the distance, wrong for a wall or a rock face, whose front should
- * stay square to the camera. A thickness leaves the plane exactly where it was
- * (so its art is untouched, bit for bit) and adds geometry BELOW its bottom edge
- * that runs from `z` forward to `z + thickness`.
- *
- * The skirt is textured with the plane's BOTTOM SOURCE ROW, repeated down its
- * height. That is the honest choice available: the capture is a flat 2D layer, so
- * there is no side-face art to sample. Repeating the row that is already at the
- * fold means the seam is invisible and the skirt reads as the same material
- * continuing downward, which is what a cliff edge or a water wall looks like.
- *
- * Shaded darker with depth, because a real near face turned away from the light
- * is not the same brightness as the top surface — without this the skirt reads as
- * a smear of the bottom row rather than a separate surface. The gradient is what
- * makes the fold legible.
- *
- * `v_bottom` is the layer's live bottom V, so the skirt tracks scroll
- * interpolation with the plane rather than drifting against it.
- */
+/* Assemble a shaded skirt from the pure thickness geometry. v_bottom follows
+ * the live source edge so the fold remains attached during scrolling. */
 static void BuildLayerSkirtMesh(const float mvp[16], float z_world,
                                 float z_rake, float thickness,
                                 float u0, float u1, float v_bottom,

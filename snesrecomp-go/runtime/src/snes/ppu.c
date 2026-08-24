@@ -599,7 +599,7 @@ void ppu_handleVblank(Ppu* ppu) {
     ppu->oamInHigh = ppu->oamaddh & 1;
     ppu->oamSecondWrite = false;
   }
-  ppu->frameInterlace = PPU_interlace(ppu); // set if we have a interlaced frame
+  ppu->frameInterlace = PPU_interlace(ppu);
 }
 
 static inline void ClearBackdrop(PpuPixelPrioBufs *buf) {
@@ -607,34 +607,15 @@ static inline void ClearBackdrop(PpuPixelPrioBufs *buf) {
     *(uint64*)&buf->data[i] = 0x0500050005000500;
 }
 
-// mosaicModulo is sized for the logical 256-wide screen, but widescreen window
-// edges can fall in either border. Extend its x-(x%mod) pattern arithmetically
-// there, just as PpuMosaicRow does vertically. Clamping to entry 0/255 made the
-// right-border run length reach zero for some mosaic sizes.
-static inline int PpuMosaicAt(Ppu *ppu, int i) {
-  if ((unsigned)i < (unsigned)kPpuXPixels)
-    return ppu->mosaicModulo[i];
+// Extend the 256-entry lookup's i-(i%mod) pattern into either margin.
+static inline int PpuMosaicCoordinate(const Ppu *ppu, int coordinate) {
+  if ((unsigned)coordinate < (unsigned)kPpuXPixels)
+    return ppu->mosaicModulo[coordinate];
   int mod = ppu->lastMosaicModulo;
   if (mod <= 1)
-    return i;
-  int phase = i % mod;
-  return i - (phase < 0 ? phase + mod : phase);
-}
-
-// The same table read on the Y axis, where a vertical margin scanline can be
-// negative (above the screen) instead of merely out of range. Clamping like
-// PpuMosaicAt would flatten the whole top band onto one mosaic row, so extend
-// the pattern arithmetically instead: the table is built as
-// mosaicModulo[i] == i - (i % mod), which is exact for negative i too once the
-// C remainder's sign is corrected.
-static inline int PpuMosaicRow(const Ppu *ppu, int y) {
-  if ((unsigned)y < (unsigned)kPpuXPixels)
-    return ppu->mosaicModulo[y];
-  int mod = ppu->lastMosaicModulo;
-  if (mod <= 1)
-    return y;
-  int phase = y % mod;
-  return y - (phase < 0 ? phase + mod : phase);
+    return coordinate;
+  int phase = coordinate % mod;
+  return coordinate - (phase < 0 ? phase + mod : phase);
 }
 
 // Authentic scanline `y` (1-based, as the line renderer numbers them) maps to
@@ -725,7 +706,6 @@ static void PpuRenderLine(Ppu *ppu, int line) {
   // Cache the brightness computation
   PpuUpdateBrightnessCache(ppu);
 
-  // evaluate sprites
   PpuClearObjRangeCaptureLine(ppu, line - 1);
   ClearBackdrop(&ppu->objBuffer);
   if (ppu->overlayRenderBuffer[kPpuOverlaySource_Obj]) {
@@ -1039,7 +1019,7 @@ static void PpuDrawVirtualTilemapSpan(
     int run = 1;
     if (mosaic) {
       run = PPU_mosaicSize(ppu) -
-          (screen_x - PpuMosaicAt(ppu, screen_x));
+          (screen_x - PpuMosaicCoordinate(ppu, screen_x));
       run = IntMin(run, x1 - screen_x);
     }
     int64_t world_x64 = (int64_t)binding->camera_x + sample_x + x_delta;
@@ -1406,7 +1386,7 @@ static void PpuDrawBackground_4bpp_mosaic(Ppu *ppu,
     PpuWindowsSplit(&win, ws_bias, 0);
     PpuWindowsSplit(&win, ws_bias, kPpuXPixels);
   }
-  const int mosaic_y = PpuMosaicRow(ppu, screen_y);
+  const int mosaic_y = PpuMosaicCoordinate(ppu, screen_y);
   y = PpuBgTilemapRow(ppu, mosaic_y, layer);
   int sc_offs = PPU_bgTilemapAdr(ppu, layer) + (((y >> 3) & 0x1f) << 5);
   if ((y & 0x100) && PPU_bgTilemapHigher(ppu, layer))
@@ -1437,7 +1417,7 @@ static void PpuDrawBackground_4bpp_mosaic(Ppu *ppu,
     const uint16 *tp_last = tps[x >> 8 & 1] + 31, *tp_next = tps[(x >> 8 & 1) ^ 1];
     x &= 7;
     int mosaic_size = PPU_mosaicSize(ppu);
-    int w = mosaic_size - (sx - PpuMosaicAt(ppu, sx));
+    int w = mosaic_size - (sx - PpuMosaicCoordinate(ppu, sx));
     do {
       w = IntMin(w, dstz_end - dstz);
       uint32 tile = *tp;
@@ -1568,7 +1548,7 @@ static void PpuDrawBackground_2bpp_mosaic(Ppu *ppu,
     return;  // layer is completely hidden
   PpuWindows win;
   IS_SCREEN_WINDOWED(ppu, sub, layer) ? PpuWindows_Calc(&win, ppu, layer, y) : PpuWindows_Clear(&win, ppu, layer, y);
-  y = PpuBgTilemapRow(ppu, PpuMosaicRow(ppu, y), layer);
+  y = PpuBgTilemapRow(ppu, PpuMosaicCoordinate(ppu, y), layer);
   int sc_offs = PPU_bgTilemapAdr(ppu, layer) + (((y >> 3) & 0x1f) << 5);
   if ((y & 0x100) && PPU_bgTilemapHigher(ppu, layer))
     sc_offs += PPU_bgTilemapWider(ppu, layer) ? 0x800 : 0x400;
@@ -1590,7 +1570,7 @@ static void PpuDrawBackground_2bpp_mosaic(Ppu *ppu,
     const uint16 *tp_last = tps[x >> 8 & 1] + 31, *tp_next = tps[(x >> 8 & 1) ^ 1];
     x &= 7;
     int mosaic_size = PPU_mosaicSize(ppu);
-    int w = mosaic_size - (sx - PpuMosaicAt(ppu, sx));
+    int w = mosaic_size - (sx - PpuMosaicCoordinate(ppu, sx));
     do {
       w = IntMin(w, dstz_end - dstz);
       uint32 tile = *tp;
@@ -1744,7 +1724,8 @@ static void PpuDrawBackground_mode7(Ppu *ppu, PpuPixelPrioBufs *dstbuf,
     uint32 outside_value = PPU_m7largeField(ppu) ? 0x3ffff : 0xffffffff;
     bool char_fill = PPU_m7charFill(ppu);
     if (mosaic_enabled) {
-      int w = PPU_mosaicSize(ppu) - (x - PpuMosaicAt(ppu, x));
+      int w = PPU_mosaicSize(ppu) -
+          (x - PpuMosaicCoordinate(ppu, x));
       do {
         w = IntMin(w, dstz_end - dstz);
         if ((uint32)(xpos | ypos) > outside_value) {
@@ -2398,16 +2379,13 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, int y) {
     return;
   }
 
-  // Default background is backdrop
   ClearBackdrop(&ppu->bgBuffers[0]);
 
-  // Render main screen
   PpuDrawBackgrounds(ppu, y, false);
   /* This filter needs the COMPLETE main priority resolve, so it cannot be
    * written from PpuFinishBackgroundOverlay while later layers are pending. */
   PpuWriteMainScreenWinnerOverlayLines(ppu, y);
 
-  // Render also the subscreen?
   bool rendered_subscreen = false;
   if (PPU_preventMathMode(ppu) != 3 && PPU_addSubscreen(ppu) && PPU_mathEnabled(ppu)) {
     ClearBackdrop(&ppu->bgBuffers[1]);

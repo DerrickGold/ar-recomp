@@ -4,6 +4,7 @@
 
 #include "actraiser_game.h"
 #include "hd_replacements.h"
+#include "manifest_utils.h"
 #include "snes/ppu.h"
 #include "settings.h"
 
@@ -15,15 +16,6 @@ int g_hd_replacement_count;
 enum { kHdManifestLineCapacity = 1024 };
 
 /* ---- parsing ---------------------------------------------------------- */
-
-static char *TrimInPlace(char *s) {
-  while (*s == ' ' || *s == '\t') s++;
-  char *end = s + strlen(s);
-  while (end > s && (end[-1] == ' ' || end[-1] == '\t' ||
-                     end[-1] == '\r' || end[-1] == '\n'))
-    *--end = 0;
-  return s;
-}
 
 static int ParseSourceName(const char *value) {
   if (!strcmp(value, "bg1")) return kPpuOverlaySource_Bg1;
@@ -49,8 +41,8 @@ bool HdManifest_ParseCondition(char *term, HdCondition *cond) {
   if (!op) { op = strstr(term, "!="); cond->negate = 1; }
   if (!op) return false;
   *op = 0;
-  char *lhs = TrimInPlace(term);
-  char *rhs = TrimInPlace(op + 2);
+  char *lhs = Manifest_Trim(term);
+  char *rhs = Manifest_Trim(op + 2);
   if (!lhs[0] || !rhs[0]) return false;
 
   if (!strncmp(lhs, "wram[", 5)) {
@@ -92,7 +84,7 @@ bool HdManifest_ParseWhen(char *value, HdCondition *conditions, int max,
   while (cursor && *cursor) {
     char *comma = strchr(cursor, ',');
     if (comma) *comma = 0;
-    char *term = TrimInPlace(cursor);
+    char *term = Manifest_Trim(cursor);
     if (term[0]) {
       if (*count >= max) return false;
       if (!HdManifest_ParseCondition(term, &conditions[*count]))
@@ -102,22 +94,6 @@ bool HdManifest_ParseWhen(char *value, HdCondition *conditions, int max,
     cursor = comma ? comma + 1 : NULL;
   }
   return *count > 0;
-}
-
-/* Resolve an image path relative to the manifest's directory. */
-static void ResolveImagePath(const char *manifest_path, const char *value,
-                             char *out, size_t out_size) {
-  const char *slash = strrchr(manifest_path, '/');
-#ifdef _WIN32
-  const char *backslash = strrchr(manifest_path, '\\');
-  if (backslash && (!slash || backslash > slash)) slash = backslash;
-#endif
-  if (value[0] == '/' || !slash) {
-    snprintf(out, out_size, "%s", value);
-  } else {
-    snprintf(out, out_size, "%.*s/%s",
-             (int)(slash - manifest_path), manifest_path, value);
-  }
 }
 
 static bool EntryComplete(const HdReplacement *entry, const char *path,
@@ -162,7 +138,7 @@ int HdReplacements_Load(const char *path) {
 
   while (fgets(line, sizeof(line), f)) {
     line_number++;
-    char *s = TrimInPlace(line);
+    char *s = Manifest_Trim(line);
     if (!s[0] || s[0] == '#' || s[0] == ';') continue;
 
     if (s[0] == '[') {
@@ -190,8 +166,8 @@ int HdReplacements_Load(const char *path) {
     char *equals = strchr(s, '=');
     if (!equals) continue;
     *equals = 0;
-    char *key = TrimInPlace(s);
-    char *value = TrimInPlace(equals + 1);
+    char *key = Manifest_Trim(s);
+    char *value = Manifest_Trim(equals + 1);
     bool ok = true;
     if (!strcmp(key, "plane")) {
       if (!strcmp(value, "screen")) pending.plane = kHdPlane_Screen;
@@ -210,7 +186,8 @@ int HdReplacements_Load(const char *path) {
     } else if (!strcmp(key, "wrap")) {
       pending.canvas_wrap = strtoul(value, NULL, 0) != 0;
     } else if (!strcmp(key, "image")) {
-      ResolveImagePath(path, value, pending.image, sizeof(pending.image));
+      Manifest_ResolvePath(
+          path, value, pending.image, sizeof(pending.image));
     } else if (!strcmp(key, "when")) {
       ok = HdManifest_ParseWhen(value, pending.conditions, kHdMaxConditions,
                                 &pending.condition_count);
