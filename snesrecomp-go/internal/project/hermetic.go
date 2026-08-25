@@ -267,14 +267,22 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	if targetOS == "windows" {
 		binary += ".exe"
 	}
+	objects := make([]string, 0, len(sources))
+	for _, source := range sources {
+		objects = append(objects, filepath.Join(objectDir, objectName(paths.Root, source)))
+	}
+	archive, cleanupArchive, err := createObjectArchive(options.ZigPath, targetOS, outputDir, objects)
+	if err != nil {
+		return "", err
+	}
+	defer cleanupArchive()
+
 	linkArgs := []string{"cc"}
 	if options.Target != "" {
 		linkArgs = append(linkArgs, "-target", options.Target)
 	}
 	linkArgs = append(linkArgs, "-o", binary)
-	for _, source := range sources {
-		linkArgs = append(linkArgs, filepath.Join(objectDir, objectName(paths.Root, source)))
-	}
+	linkArgs = append(linkArgs, forceLoadArchiveArgs(targetOS, archive)...)
 	if manifest.UseSDL3 {
 		linkArgs = append(linkArgs, "-L"+options.SDLLibDir, "-lSDL3")
 		// Look for the SDL runtime beside the game binary first so a copied
