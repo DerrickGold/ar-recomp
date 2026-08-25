@@ -228,6 +228,23 @@ static void TestVirtualLifecycleUsesCentralMaskFlush(void) {
   CHECK(s_control_voice == 8 && s_control_addr == 0x4c &&
         !s_control_enabled);
 
+  /* Once startup has cleared, an ordinary note-ending KOF is routed while
+   * the logical lane is loaded. The driver's next central zero write must
+   * release that latch even though extended instances deliberately keep the
+   * native $1A ownership bits clear. Otherwise only the first note sounds. */
+  g_spc_opcode_patch_hook(&spc, 0x0da0);
+  CHECK(spc.x == 0x12 && apu.ram[0x47] == 0x80);
+  value = 0x80;
+  CHECK(!g_apu_spc_dsp_write_filter_hook(&apu, 0x5c, &value));
+  CHECK(s_control_voice == 8 && s_control_addr == 0x5c &&
+        s_control_enabled);
+  g_spc_opcode_patch_hook(&spc, 0x0f0b);
+  spc.x = 0x46;
+  value = 0;
+  CHECK(g_apu_spc_dsp_write_filter_hook(&apu, 0x5c, &value));
+  CHECK(s_control_voice == 8 && s_control_addr == 0x5c &&
+        !s_control_enabled);
+
   g_spc_opcode_patch_hook(&spc, 0x0da0);
   g_spc_opcode_patch_hook(&spc, 0x0e7e);
   CHECK(NativeAudioExtension_ActiveInstanceCount() == 0);
