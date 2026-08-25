@@ -20,7 +20,8 @@ functions. See
 [`../docs/RUNTIME.md`](../docs/RUNTIME.md).
 
 The historical upstream repository did not declare an overall license at the
-snapshot used for this port. The ActRaiserRecomp root MIT license therefore
-excludes this directory; attribution alone does not grant redistribution
-rights. The SNES core and individual files may also carry inherited or inline
-terms that downstream distributors must review.
+snapshot used for this port. Both the ActRaiserRecomp root MIT license and the
+Go module's MIT license therefore exclude this directory. The current written
+status is recorded in [`LICENSE`](LICENSE); attribution alone does not grant
+redistribution rights. The SNES core and individual files may also carry
+inherited or inline terms that downstream distributors must review.

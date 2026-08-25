@@ -21,27 +21,78 @@ func renderPage(t *testing.T) string {
 	return response.Body.String()
 }
 
-/* The shell is a two-tab layout with a sticky progress dock. Each piece is
+/* The shell is a three-tab layout with a sticky progress dock. Each piece is
  * asserted because the page is a single Go string constant: an editing slip
  * cannot be caught by the compiler, only here. */
 func TestPageHasTabShellAndDock(t *testing.T) {
 	body := renderPage(t)
 	for _, want := range []string{
 		`role="tablist"`,
-		`id="tab-build"`, `id="tab-manual"`,
-		`id="panel-build"`, `id="panel-manual"`,
+		`id="tab-build"`, `id="tab-assets"`, `id="tab-manual"`,
+		`id="panel-build"`, `id="panel-assets"`, `id="panel-manual"`,
 		`id="dock"`, `id="dock-phase"`, `id="dock-pct"`, `id="dock-launch"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("page is missing %s", want)
 		}
 	}
-	// Build is the landing tab; Manual starts hidden.
+	// Build is the landing tab; Assets and Manual start hidden.
 	if !strings.Contains(body, `id="tab-build" role="tab" aria-selected="true"`) {
 		t.Error("the Build tab should be selected on load")
 	}
 	if !strings.Contains(body, `id="panel-manual" role="tabpanel" aria-labelledby="tab-manual" hidden`) {
 		t.Error("the Manual panel should start hidden")
+	}
+	if !strings.Contains(body, `id="panel-assets" role="tabpanel" aria-labelledby="tab-assets" hidden`) {
+		t.Error("the Assets panel should start hidden")
+	}
+}
+
+func TestAssetsTabHasTitleToggleAndIdentifiedTrackPickers(t *testing.T) {
+	body := renderPage(t)
+	for _, want := range []string{
+		`id="title-toggle"`, `id="save-assets"`, `src="title-logo.png"`,
+		`id="generate-previews"`, `class="original-audio"`,
+		`class="replacement-audio"`,
+		`name="track-title-theme"`, `name="track-song-00"`,
+		`name="track-song-03"`, `name="track-song-06"`,
+		`name="track-song-12"`, `name="track-song-15"`,
+		`name="track-song-08"`, `name="track-song-16"`,
+		`Unidentified track 03`, `Manifest [music:song-03]`,
+		`accept=".ogg,.oga,audio/ogg"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("Assets tab is missing %s", want)
+		}
+	}
+	if !strings.Contains(body, `fetch("assets",{method:"POST",body:new FormData(assetForm)})`) {
+		t.Error("Assets form is not wired to the save endpoint")
+	}
+	if !strings.Contains(body, `fetch("audio-previews",{method:"POST"})`) {
+		t.Error("original-audio extraction is not wired to the preview endpoint")
+	}
+	if !strings.Contains(body, `URL.createObjectURL(input.files[0])`) {
+		t.Error("selected replacement files do not get local browser playback")
+	}
+}
+
+func TestAssetsTabCoversEverySongTableImage(t *testing.T) {
+	want := []string{
+		"title-theme",
+		"song-00", "song-01", "song-02", "song-03", "song-04", "song-05", "song-06",
+		"song-08", "song-09", "song-10", "song-11", "song-12", "song-13", "song-14",
+		"song-15", "song-16",
+	}
+	if len(assetTracks) != len(want) {
+		t.Fatalf("Assets tab has %d song images, want all %d", len(assetTracks), len(want))
+	}
+	for index, id := range want {
+		if assetTracks[index].ID != id {
+			t.Errorf("song image %d = %q, want %q", index, assetTracks[index].ID, id)
+		}
+		if assetTracks[index].PreviewSource == 0 {
+			t.Errorf("song image %q has no preview source", id)
+		}
 	}
 }
 

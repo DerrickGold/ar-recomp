@@ -35,6 +35,14 @@ var boxArtWebP []byte
 //go:embed assets/manual.pdf
 var manualPDF []byte
 
+// The project's current high-resolution title treatment. It stays inside the
+// builder until a player enables it on the Assets tab, so a fresh install still
+// presents the authentic ROM title. Saving the toggle materializes these bytes
+// under game-assets/hd/builder/ and points both title hooks at that copy.
+//
+//go:embed assets/title-logo.png
+var titleLogoPNG []byte
+
 // materializeBundledManual makes the builder's copy available to the game at
 // the runtime path it already reads. The live game-assets directory survives a
 // "keep just the game" cleanup, so this is a one-time handoff rather than a
@@ -93,7 +101,7 @@ func materializeBundledManual(root string) error {
 // when the binary does.
 var assetModTime = time.Date(2026, time.July, 26, 0, 0, 0, 0, time.UTC)
 
-// serveEmbeddedAsset writes one of the embedded static assets. Both are
+// serveEmbeddedAsset writes one of the embedded static assets. They are
 // immutable for the life of the process, so they are cacheable and support
 // conditional/range requests via http.ServeContent -- the latter matters for
 // the multi-megabyte PDF, which browsers fetch in ranges as the reader pages
@@ -110,6 +118,10 @@ func serveEmbeddedAsset(response http.ResponseWriter, request *http.Request,
 
 func serveBoxArt(response http.ResponseWriter, request *http.Request) {
 	serveEmbeddedAsset(response, request, "boxart.webp", "image/webp", boxArtWebP)
+}
+
+func serveTitleLogo(response http.ResponseWriter, request *http.Request) {
+	serveEmbeddedAsset(response, request, "title-logo.png", "image/png", titleLogoPNG)
 }
 
 // serveManual writes the manual PDF. Content-Disposition is deliberately

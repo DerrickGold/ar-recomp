@@ -80,9 +80,13 @@ type Options struct {
 	MeasureSlim func() int64
 	// Slim removes the build-only files, keeping everything the game needs to
 	// run. Optional; the cleanup offer is not shown when it is absent.
-	Slim         func(io.Writer) error
-	openURL      func(string) error
-	sessionToken string
+	Slim func(io.Writer) error
+	// AudioPreviewCacheDir overrides the per-user cache used for ROM-derived
+	// WAV previews. It is primarily useful to embedders and tests. Empty uses
+	// the operating system cache directory, never game-assets or the manifest.
+	AudioPreviewCacheDir string
+	openURL              func(string) error
+	sessionToken         string
 }
 
 // Run starts a loopback-only server, opens the system browser when requested,
@@ -220,6 +224,13 @@ type application struct {
 	options Options
 	prefix  string
 	closed  chan struct{}
+	// Asset saves are synchronous, but two browser tabs can still submit at the
+	// same time. Serializing the read/merge/install transaction prevents the
+	// second request from rebuilding a manifest from stale text.
+	assetMu      sync.Mutex
+	previewMu    sync.Mutex
+	preview      audioPreviewStatus
+	previewPaths map[string]string
 
 	mu           sync.Mutex
 	state        string
@@ -240,6 +251,8 @@ func newApplication(ctx context.Context, options Options, token string) *applica
 	app := &application{
 		ctx: ctx, options: options, prefix: "/" + token + "/",
 		closed: make(chan struct{}), state: "idle",
+		preview:      audioPreviewStatus{State: "idle", Total: len(assetTracks)},
+		previewPaths: make(map[string]string),
 	}
 	// Adopt an existing build as this session's result, which is what makes
 	// Launch work without rebuilding first: the launch handler needs an
@@ -343,7 +356,7 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 		// `object-src`, which stays 'none'.
 		response.Header().Set("Content-Security-Policy",
 			"default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "+
-				"connect-src 'self'; img-src 'self'; frame-src 'self'; "+
+				"connect-src 'self'; img-src 'self'; media-src 'self' blob:; frame-src 'self'; "+
 				"object-src 'none'; base-uri 'none'")
 		response.Header().Set("Cache-Control", "no-store")
 		response.Header().Set("Referrer-Policy", "no-referrer")
@@ -351,11 +364,25 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 		page := strings.Replace(pageHTML, "{{TITLE}}",
 			html.EscapeString(app.options.Title), 1)
 		page = strings.Replace(page, "{{STEPS}}", renderStepList(), 1)
+		page = strings.Replace(page, "{{ASSET_TRACKS}}", renderAssetTrackRows(), 1)
 		_, _ = io.WriteString(response, page)
 	case endpoint == "boxart.webp" && request.Method == http.MethodGet:
 		serveBoxArt(response, request)
+	case endpoint == "title-logo.png" && request.Method == http.MethodGet:
+		serveTitleLogo(response, request)
 	case endpoint == "manual.pdf" && request.Method == http.MethodGet:
 		serveManual(response, request)
+	case endpoint == "assets" && request.Method == http.MethodGet:
+		app.writeAssets(response)
+	case endpoint == "assets" && request.Method == http.MethodPost:
+		app.saveAssets(response, request)
+	case endpoint == "audio-previews" && request.Method == http.MethodGet:
+		app.writeAudioPreviewStatus(response)
+	case endpoint == "audio-previews" && request.Method == http.MethodPost:
+		app.startAudioPreviews(response)
+	case strings.HasPrefix(endpoint, "audio-preview/") && request.Method == http.MethodGet:
+		app.serveAudioPreview(response, request,
+			strings.TrimPrefix(endpoint, "audio-preview/"))
 	case endpoint == "status" && request.Method == http.MethodGet:
 		app.writeStatus(response)
 	case endpoint == "build" && request.Method == http.MethodPost:
@@ -704,11 +731,12 @@ const pageHTML = `<!doctype html>
 /* The look borrows from the game's own presentation: a high, pale sky over a
  * hazy horizon (the Sky Palace's outlook), the Palace's fluted marble columns
  * framing the content, and the manual/box palette of warm gold on deep blue.
- * Every visual is CSS or inline SVG apart from the cover art, which is served
- * from this origin -- no other bitmap ships (the release bundle deliberately
- * carries no media; see packaging/CMakeLists.txt).
+ * Every visual is CSS apart from the cover and optional HD title preview,
+ * which are served from this origin. Both are embedded in snesbuild rather
+ * than shipped as loose sidecars (see packaging/CMakeLists.txt).
  *
- * Structure: a two-tab shell (Build / Manual) with a STICKY PROGRESS DOCK. The
+ * Structure: a three-tab shell (Build / Assets / Manual) with a STICKY PROGRESS
+ * DOCK. The
  * build is not a full-height section -- once it starts, its progress detaches
  * into the dock so the reader can sit in the manual for the several minutes a
  * build takes and still see exactly where it is. */
@@ -838,8 +866,7 @@ h1 {
   .masthead .cover { width:min(260px,60%); }
 }
 
-/* Tab strip. Two tabs only: the thing you came to do, and the thing to do while
- * it runs. */
+/* Tab strip: build/launch, local asset management, and the manual reader. */
 .tabs { display:flex; gap:4px; margin:26px 0 0; border-bottom:2px solid var(--gold-deep); }
 .tab {
   appearance:none; border:1px solid transparent; border-bottom:0;
@@ -879,6 +906,57 @@ input[type=file]::file-selector-button {
   margin-right:12px; padding:7px 13px; border:1px solid var(--gold-deep); border-radius:2px;
   background:linear-gradient(180deg,#f0d795,var(--gold)); color:#3a2a08;
   font:inherit; font-weight:700; cursor:pointer;
+}
+.asset-intro { margin:0 0 18px; color:#e4dece; font-size:.9rem;
+  font-family:system-ui,-apple-system,sans-serif; }
+.asset-title-card {
+  display:grid; grid-template-columns:minmax(180px,280px) 1fr; gap:20px;
+  align-items:center; margin-bottom:24px; padding:16px; border:1px solid var(--line);
+  border-radius:3px; background:#0c142759;
+}
+.asset-title-card img { display:block; width:100%; height:auto; border-radius:2px;
+  background:#050a13; box-shadow:0 8px 24px #05091580; }
+.asset-title-copy h2, .asset-music h2 { margin:0 0 5px; color:#fff3d6;
+  font-size:1.05rem; }
+.asset-title-copy p, .asset-music > p { margin:0; color:var(--muted); font-size:.82rem;
+  font-family:system-ui,-apple-system,sans-serif; }
+.asset-toggle { display:flex; align-items:center; gap:9px; margin-top:13px; }
+.asset-toggle input { width:18px; height:18px; accent-color:var(--gold); }
+.asset-toggle label { display:inline; margin:0; cursor:pointer; }
+.asset-music { border-top:1px solid var(--line); padding-top:20px; }
+.asset-rows { margin-top:14px; border-top:1px solid #2b3d60; }
+.asset-row { display:grid; grid-template-columns:minmax(170px,.72fr) minmax(280px,1.28fr);
+  gap:18px; align-items:center; padding:13px 0; border-bottom:1px solid #2b3d60; }
+.asset-copy label { margin:0; color:#f6edda; }
+.asset-copy span, .asset-current { display:block; color:var(--muted); font-size:.72rem;
+  font-family:system-ui,-apple-system,sans-serif; }
+.asset-picker input[type=file] { padding:8px; }
+.asset-picker input[type=file]::file-selector-button { padding:5px 10px; }
+.asset-current { margin-top:4px; }
+.asset-current[data-configured=true] { color:var(--ok); }
+.preview-tools { display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  margin:14px 0 4px; padding:12px; border:1px solid #2b3d60; border-radius:3px;
+  background:#0c142759; }
+.preview-tools button { padding:8px 13px; }
+#preview-state { color:var(--muted); font-size:.78rem;
+  font-family:system-ui,-apple-system,sans-serif; }
+#preview-state[data-kind=ready] { color:var(--ok); }
+#preview-state[data-kind=failed] { color:var(--bad); }
+.audio-compare { display:grid; grid-template-columns:1fr 1fr; gap:9px; margin-top:8px; }
+.audio-compare > div { min-width:0; }
+.audio-compare span { display:block; margin-bottom:3px; color:var(--muted);
+  font:600 .67rem/1.2 system-ui,-apple-system,sans-serif; text-transform:uppercase;
+  letter-spacing:.04em; }
+.audio-compare audio { display:block; width:100%; height:32px; }
+.audio-compare audio[hidden] { display:none; }
+#asset-state { min-height:1.4em; margin-top:13px; font-size:.86rem;
+  font-family:system-ui,-apple-system,sans-serif; color:var(--muted); }
+#asset-state[data-kind=succeeded] { color:var(--ok); }
+#asset-state[data-kind=failed] { color:var(--bad); }
+@media (max-width:680px) {
+  .asset-title-card, .asset-row { grid-template-columns:1fr; }
+  .asset-title-card img { max-width:360px; }
+  .audio-compare { grid-template-columns:1fr; }
 }
 .actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:18px; }
 button {
@@ -1070,6 +1148,8 @@ pre {
   <div class="tabs" role="tablist" aria-label="Builder sections">
     <button class="tab" id="tab-build" role="tab" aria-selected="true"
             aria-controls="panel-build">Build<span class="badge" aria-hidden="true"></span></button>
+    <button class="tab" id="tab-assets" role="tab" aria-selected="false"
+            aria-controls="panel-assets" tabindex="-1">Assets</button>
     <button class="tab" id="tab-manual" role="tab" aria-selected="false"
             aria-controls="panel-manual" tabindex="-1">Manual</button>
   </div>
@@ -1148,6 +1228,53 @@ pre {
     This page talks only to the builder on 127.0.0.1.</p>
   </section>
 
+  <section class="panel" id="panel-assets" role="tabpanel" aria-labelledby="tab-assets" hidden>
+    <form id="assets-form">
+      <p class="asset-intro">Choose optional replacements, then save. Files are copied into
+      <strong>game-assets</strong> in the game's working directory and the shared manifest is
+      updated for you. Existing custom sections and loop settings are preserved.</p>
+
+      <div class="asset-title-card">
+        <img src="title-logo.png" width="2087" height="754" loading="lazy"
+             alt="Preview of the included high-resolution ActRaiser title treatment">
+        <div class="asset-title-copy">
+          <h2>High-resolution title</h2>
+          <p>The included art replaces both the settled title logo and its Mode-7 intro swirl.
+          Turn it off at any time to return to the ROM artwork.</p>
+          <div class="asset-toggle">
+            <input id="title-toggle" name="title" type="checkbox">
+            <label for="title-toggle">Use the included HD title</label>
+          </div>
+          <input id="title-change" name="title-change" type="hidden" value="0">
+        </div>
+      </div>
+
+      <div class="asset-music">
+        <h2>Music replacements</h2>
+        <p>All 17 ROM song images are listed below. Unknown names remain labeled by their
+        song-table slot so you can extract, listen, and identify them without finding each
+        one during play. Select an Ogg Vorbis replacement for any slot; untouched tracks and
+        hand-authored manifest settings stay as they are.</p>
+        <div class="preview-tools">
+          <button id="generate-previews" class="secondary" type="button" disabled>
+            Extract original-audio previews
+          </button>
+          <span id="preview-state" role="status">
+            Supply a ROM on the Build tab to enable original-audio comparisons.
+          </span>
+        </div>
+        <div class="asset-rows">{{ASSET_TRACKS}}</div>
+      </div>
+
+      <div class="actions">
+        <button id="save-assets" type="submit">Save assets</button>
+      </div>
+      <div id="asset-state" role="status">Open this tab to load the current configuration.</div>
+      <p class="privacy">Replacement files stay on this computer and are never uploaded.
+      Saved changes take effect the next time the game starts.</p>
+    </form>
+  </section>
+
   <section class="panel" id="panel-manual" role="tabpanel" aria-labelledby="tab-manual" hidden>
     <div class="manual-bar">
       <p>The original 40-page instruction booklet &mdash; your browser's own reader
@@ -1194,7 +1321,13 @@ const dockLaunch=document.querySelector("#dock-launch"), stepsBox=document.query
 const steps=[...document.querySelectorAll(".step")];
 const tabs=[...document.querySelectorAll(".tab")];
 const buildTab=document.querySelector("#tab-build");
+const assetTab=document.querySelector("#tab-assets"), assetForm=document.querySelector("#assets-form");
+const titleToggle=document.querySelector("#title-toggle"), titleChange=document.querySelector("#title-change");
+const saveAssets=document.querySelector("#save-assets"), assetState=document.querySelector("#asset-state");
+const generatePreviews=document.querySelector("#generate-previews"), previewState=document.querySelector("#preview-state");
 let polling=false;
+let assetsLoaded=false;
+let previewPolling=false, previewTimer=0;
 
 /* Tabs. The manual's <iframe> is HIDDEN rather than removed when its tab is not
  * showing: unmounting it would refetch 8 MB and lose the reader's page. It is
@@ -1211,6 +1344,10 @@ function selectTab(tab){
     const frame=document.querySelector("#manual-frame");
     if(!frame.getAttribute("src")) frame.setAttribute("src","manual.pdf");
   }
+  if(tab===assetTab){
+    if(!assetsLoaded) loadAssetConfiguration();
+    loadAudioPreviewStatus();
+  }
   if(tab===buildTab) buildTab.removeAttribute("data-badge");
   tab.focus({preventScroll:true});
 }
@@ -1226,6 +1363,149 @@ document.querySelector(".tabs").addEventListener("keydown",event=>{
 });
 
 function show(kind,text){ state.dataset.kind=kind; state.textContent=text; }
+
+/* ASSETS. File inputs cannot be populated by a web page, so each row carries a
+ * separate installed-file label. Choosing a file only changes that slot after
+ * Save; the title's dirty bit similarly prevents an unrelated music save from
+ * changing a pre-existing custom title mapping. */
+function paintAssetConfiguration(config){
+  titleToggle.checked=!!(config.title&&config.title.enabled);
+  titleChange.value="0";
+  const statuses=new Map((config.tracks||[]).map(track=>[track.id,track]));
+  document.querySelectorAll(".asset-row").forEach(row=>{
+    const current=statuses.get(row.dataset.track), label=row.querySelector(".asset-current");
+    const configured=!!(current&&current.configured);
+    label.dataset.configured=String(configured);
+    label.textContent=configured ? "Installed: "+current.file : "Using original game music";
+  });
+}
+
+async function loadAssetConfiguration(){
+  assetState.dataset.kind="loading";
+  assetState.textContent="Loading current assets…";
+  try {
+    const config=await responseJSON(await fetch("assets",{cache:"no-store"}));
+    paintAssetConfiguration(config);
+    assetsLoaded=true;
+    assetState.dataset.kind="idle";
+    assetState.textContent="Ready — choose any replacements, then save.";
+  } catch(error){
+    assetState.dataset.kind="failed";
+    assetState.textContent=error.message;
+  }
+}
+
+function paintAudioPreviewStatus(status){
+  const generating=status.state==="generating";
+  generatePreviews.disabled=!status.romAvailable||generating;
+  if(!status.romAvailable){
+    previewState.dataset.kind="idle";
+    previewState.textContent="Supply a ROM on the Build tab to enable original-audio comparisons.";
+  } else if(generating){
+    previewState.dataset.kind="loading";
+    previewState.textContent=status.message||("Rendering "+(status.current||"audio")+"…");
+  } else if(status.state==="failed"){
+    previewState.dataset.kind="failed";
+    previewState.textContent=status.error||"Original-audio preview generation failed.";
+  } else if(status.state==="ready"){
+    previewState.dataset.kind="ready";
+    previewState.textContent=status.message||"Original ROM previews are ready.";
+  } else {
+    previewState.dataset.kind="idle";
+    previewState.textContent="ROM ready — extract 30-second WAV previews for side-by-side listening.";
+  }
+  const tracks=new Map((status.tracks||[]).map(track=>[track.id,track]));
+  document.querySelectorAll(".asset-row").forEach(row=>{
+    const track=tracks.get(row.dataset.track), audio=row.querySelector(".original-audio");
+    if(track&&track.ready&&track.url){
+      if(audio.getAttribute("src")!==track.url) audio.setAttribute("src",track.url);
+      audio.hidden=false;
+    } else {
+      audio.hidden=true;
+      audio.removeAttribute("src");
+    }
+  });
+  return generating;
+}
+
+async function loadAudioPreviewStatus(){
+  clearTimeout(previewTimer);
+  try {
+    const status=await responseJSON(await fetch("audio-previews",{cache:"no-store"}));
+    previewPolling=paintAudioPreviewStatus(status);
+  } catch(error){
+    previewPolling=false;
+    previewState.dataset.kind="failed";
+    previewState.textContent=error.message;
+  }
+  if(previewPolling) previewTimer=setTimeout(loadAudioPreviewStatus,500);
+}
+
+generatePreviews.addEventListener("click",async()=>{
+  generatePreviews.disabled=true;
+  previewState.dataset.kind="loading";
+  previewState.textContent="Starting the pure-Go audio renderer…";
+  try {
+    const status=await responseJSON(await fetch("audio-previews",{method:"POST"}));
+    paintAudioPreviewStatus(status);
+    previewPolling=true;
+    previewTimer=setTimeout(loadAudioPreviewStatus,250);
+  } catch(error){
+    previewState.dataset.kind="failed";
+    previewState.textContent=error.message;
+    generatePreviews.disabled=false;
+  }
+});
+
+titleToggle.addEventListener("change",()=>{ titleChange.value="1"; });
+document.querySelectorAll(".asset-row input[type=file]").forEach(input=>{
+  input.addEventListener("change",()=>{
+    const row=input.closest(".asset-row"), label=row.querySelector(".asset-current");
+    const audio=row.querySelector(".replacement-audio");
+    if(audio.dataset.objectUrl){
+      URL.revokeObjectURL(audio.dataset.objectUrl);
+      delete audio.dataset.objectUrl;
+    }
+    if(input.files.length){
+      label.dataset.configured="pending";
+      label.textContent="Selected: "+input.files[0].name;
+      const objectUrl=URL.createObjectURL(input.files[0]);
+      audio.dataset.objectUrl=objectUrl;
+      audio.src=objectUrl;
+      audio.hidden=false;
+    } else {
+      audio.hidden=true;
+      audio.removeAttribute("src");
+    }
+  });
+});
+
+/* A/B means one source at a time; starting either side pauses every other
+ * preview so overlapping tracks cannot make the comparison misleading. */
+document.addEventListener("play",event=>{
+  if(!(event.target instanceof HTMLAudioElement)) return;
+  document.querySelectorAll(".audio-compare audio").forEach(audio=>{
+    if(audio!==event.target) audio.pause();
+  });
+},true);
+
+assetForm.addEventListener("submit",async event=>{
+  event.preventDefault();
+  saveAssets.disabled=true;
+  assetState.dataset.kind="loading";
+  assetState.textContent="Copying assets and updating the manifest…";
+  try {
+    const result=await responseJSON(await fetch("assets",{method:"POST",body:new FormData(assetForm)}));
+    paintAssetConfiguration(result.config);
+    assetForm.querySelectorAll("input[type=file]").forEach(input=>{ input.value=""; });
+    assetState.dataset.kind="succeeded";
+    assetState.textContent=result.message||"Assets saved.";
+  } catch(error){
+    assetState.dataset.kind="failed";
+    assetState.textContent=error.message;
+  }
+  saveAssets.disabled=false;
+});
 
 /* MODE. The server decides which shape the page takes (buildgui/install.go), so
  * the page cannot disagree with what the server will actually permit -- the same

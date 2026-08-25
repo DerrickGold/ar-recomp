@@ -21,6 +21,7 @@ game-assets/audio/*
 *.bin
 *.rec
 !assets/*.png
+!snesrecomp-go/internal/buildgui/assets/title-logo.png
 
 # Build output. These are listed individually rather than as a bare `build*/`
 # glob: unanchored, that also matched snesrecomp-go/internal/buildgui/ — the

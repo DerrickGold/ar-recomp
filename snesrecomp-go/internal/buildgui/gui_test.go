@@ -144,6 +144,9 @@ func TestBuilderPageEscapesTitleAndSetsLocalSecurityHeaders(t *testing.T) {
 			t.Errorf("missing %s header", header)
 		}
 	}
+	if policy := response.Header().Get("Content-Security-Policy"); !strings.Contains(policy, "media-src 'self' blob:") {
+		t.Errorf("audio policy does not admit local WAV/blob playback: %s", policy)
+	}
 }
 
 func TestLockedLogWriterKeepsBoundedTail(t *testing.T) {
