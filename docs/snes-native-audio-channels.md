@@ -226,9 +226,14 @@ caller census.
 | `$83` | `$03` | 6 + 7 | `$00:F68C` | `$00:F668/$F674/$F684` |
 | `$85` | `$05` | 6 + 7 | `$00:A5CE` | `$00:A54A/$A560/$A593` |
 | `$89` | `$09` | 6 + 7 | `$00:FD3D` | `$00:FD25/$FD3A` |
+| `$8A` | `$0A` | 6 + 7 | `$00:AF9C/$AFC1/$C1F4/$E508/$F9C0/$FA57` | multiple regional and Death Heim boss states |
 | `$91` | `$11` | 6 + 7 | `$02:8513` | `$02:84EC` |
+| `$94` | `$14` | 6 + 7 | `$00:E54C/$F8B4` | Marahna and Death Heim final-boss states `$00:E540/$F8A2` |
+| `$9A` | `$1A` | 6 + 7 | `$00:BFFF` | Bloodpool state `$00:BFF9` |
 | `$9C` | `$1C` | 6 + 7 | `$03:8365` | `$03:82DB` |
+| `$9E` | `$1E` | 6 + 7 | `$00:F1F3/$F217` | Northwall states `$00:F1ED/$F214` |
 | `$A0` | `$20` | 6 + 7 | `$00:F67C` | `$00:F668/$F674` |
+| `$A1` | `$21` | 6 + 7 | `$00:D90A` | Aitos child/event spawner `$00:D903` |
 
 High-bit events are the worst authentic collision case: they take both music
 voices, block positive event effects and ordinary SFX, and hold that state
@@ -700,12 +705,14 @@ genuinely overlapping requests.
 
 ### Coupled action-stage drop census
 
-`tools/analyze_native_audio_trace.py RUN [--sites] [--transitions]` summarizes
-the request CSV by kind/ID while keeping genuine transport/different-sound
-loss, deliberate suppression/cancellation, duplicate coalescing, same-ID
-restarts, and requests still active when a recording stops in separate
-columns. It also normalizes older captures made before `retriggered_lane` was
-an explicit terminal outcome by comparing the old and replacement serials.
+`tools/analyze_native_audio_trace.py RUN... [--rank-drops] [--sites]
+[--transitions]` summarizes one or more request CSVs by kind/ID while keeping
+genuine transport/different-sound loss, deliberate suppression/cancellation,
+duplicate coalescing, same-ID restarts, and requests still active when a
+recording stops in separate columns. Multi-run transition lookup is namespaced
+by capture, so repeated serial numbers cannot connect unrelated runs. It also
+normalizes older captures made before `retriggered_lane` was an explicit
+terminal outcome by comparing the old and replacement serials.
 
 The following action recordings were replayed with `AR_SAVE_EDIT=0` and the
 exact SRAM fixture used while recording. This coupling matters: staged save-
@@ -803,6 +810,44 @@ extended captures accept all 1,095 exposed requests spanning 22 distinct
 kind/ID pairs; 1,084 finish inside their recording and Aitos's remaining 11
 are already active at shutdown. This is broad staged-route coverage, not yet a
 single title-to-ending full-playthrough frequency census.
+
+### Cross-run drop-prone ranking
+
+The four canonical authentic captures above can be combined reproducibly:
+
+```sh
+python3 tools/analyze_native_audio_trace.py \
+  runs/20260824-172558 runs/20260824-173312 \
+  runs/20260824-183359 runs/20260824-184548 \
+  --rank-drops --transitions
+```
+
+After excluding 1,625 setting-suppressed dialogue posts and 23 true duplicate
+posts, this validation corpus contains 1,072 distinct/exposed cues: 207 finish,
+618 suffer a genuine transport/busy/different-ID replacement loss, 245 are
+same-ID restarts, and two are still active/pending at capture shutdown. The
+most exposed rows are:
+
+| Request | Distinct cues | Genuine losses | Loss rate | Same-ID restarts | Main interpretation |
+|---|---:|---:|---:|---:|---|
+| COP `$01` | 291 | 291 | 100.0% | 0 | project sword swing always replaced by its paired ranged beam |
+| COP `$12` | 291 | 237 | 81.4% | 0 | project ranged beam frequently replaced by the next swing or a high-bit event |
+| BRK `$02` | 124 | 55 | 44.4% | 49 | stock enemy-hit cue is both dropped and repeatedly restarted |
+| BRK `$09` | 18 | 6 | 33.3% | 7 | projectile/spawn cue shared by regional handlers and final-boss child projectiles; 12 additional posts are true duplicates |
+| COP `$85` | 153 | 6 | 3.9% | 143 | boss-death explosion is primarily reset/truncated by another explosion, not absent |
+| BRK `$03` | 17 | 5 | 29.4% | 2 | stock enemy-death cue |
+| BRK `$0C` | 7 | 4 | 57.1% | 2 | combat resolver's guarded/invulnerable-contact cue; 11 duplicates excluded |
+| BRK `$20` | 2 | 2 | 100.0% | 0 | Bloodpool-boss state cue; both observations are busy-rejected, too few for a frequency claim |
+
+This corpus is intentionally collision-heavy: Death Heim repeats regional
+bosses, and the COP `$01/$12` alternation includes this project's ranged-sword
+enhancement. The percentages therefore rank reproduced vulnerability, not
+stock whole-game likelihood. The separate `music-skips` column catches a
+second risk axis: a cue can finish while muting song updates. For example,
+completed COP `$89` requests still account for 2,823 skipped updates here,
+while COP `$12`, COP `$01`, and COP `$85` account for 14,997, 6,568, and 2,246
+respectively. Extended mode removes both request loss/restart reuse and the
+music-ownership suppression path.
 
 ### Isolated PCM parity
 
