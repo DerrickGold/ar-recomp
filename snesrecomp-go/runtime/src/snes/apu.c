@@ -47,6 +47,7 @@ void apu_reset(Apu* apu) {
   memset(apu->ram, 0, sizeof(apu->ram));
   apu->dspAdr = 0;
   apu->cycles = 0;
+  apu->sampleClock = 0;
   memset(apu->inPorts, 0, sizeof(apu->inPorts));
   memset(apu->outPorts, 0, sizeof(apu->outPorts));
   for(int i = 0; i < 3; i++) {
@@ -62,6 +63,12 @@ void apu_reset(Apu* apu) {
 
 void apu_clearPortQueue(Apu* apu) {
   apu->portQHead = apu->portQTail = 0;
+  memset(apu->portQueue, 0, sizeof(apu->portQueue));
+  apu->portClock = 0;
+  apu->portClockNs = 0;
+  memset(apu->portLastTarget, 0, sizeof(apu->portLastTarget));
+  memset(apu->portLastVal, 0, sizeof(apu->portLastVal));
+  memset(apu->portLastValid, 0, sizeof(apu->portLastValid));
 }
 
 static void apu_applyPortWrite(Apu* apu, const ApuPortWrite *w) {
@@ -88,11 +95,9 @@ void apu_schedulePortWrite(Apu* apu, uint8_t port, uint8_t val,
 /* Apply every queued write whose target the produced-sample clock has
  * reached. Called at each DSP sample boundary inside apu_cycle. */
 static void apu_drainPortQueue(Apu* apu) {
-  uint64_t produced;
-  audio_trace_sample_clocks(&produced, NULL);
   while (apu->portQHead != apu->portQTail) {
     ApuPortWrite *w = &apu->portQueue[apu->portQHead & (APU_PORT_QUEUE_LEN - 1)];
-    if (w->target_sample > produced)
+    if (w->target_sample > apu->sampleClock)
       break;
     apu_applyPortWrite(apu, w);
     apu->portQHead++;
@@ -103,6 +108,15 @@ void apu_saveload(Apu *apu, SaveLoadInfo *sli) {
   sli->func(sli, apu->ram, offsetof(Apu, pad) + 6 - offsetof(Apu, ram));
   dsp_saveload(apu->dsp, sli);
   spc_saveload(apu->spc, sli);
+  sli->func(sli, apu->portQueue, sizeof(apu->portQueue));
+  sli->func(sli, &apu->portQHead, sizeof(apu->portQHead));
+  sli->func(sli, &apu->portQTail, sizeof(apu->portQTail));
+  sli->func(sli, &apu->sampleClock, sizeof(apu->sampleClock));
+  sli->func(sli, &apu->portClock, sizeof(apu->portClock));
+  sli->func(sli, &apu->portClockNs, sizeof(apu->portClockNs));
+  sli->func(sli, apu->portLastTarget, sizeof(apu->portLastTarget));
+  sli->func(sli, apu->portLastVal, sizeof(apu->portLastVal));
+  sli->func(sli, apu->portLastValid, sizeof(apu->portLastValid));
   if (g_apu_extra_saveload_hook)
     g_apu_extra_saveload_hook(apu, sli);
 }
@@ -136,6 +150,7 @@ void apu_cycle(Apu* apu) {
     // every 32 cycles
     apu_drainPortQueue(apu);
     dsp_cycle(apu->dsp);
+    apu->sampleClock++;
   }
 
   // handle timers

@@ -78,13 +78,19 @@ struct Apu {
   Timer timer[3];
   uint8_t cpuCyclesLeft;
   uint8_t pad[6];
-  /* Port-write scheduler — MUST stay after `pad`: apu_saveload snapshots
-   * [ram, pad+6) and the savestate layout is frozen. Cleared on reset
-   * and on the HLE SPC-image upload; deliberately not serialized (any
-   * still-pending write applies on the first cycles after load). */
+  /* Port-write scheduler. The core APU blob above retains its historical
+   * layout; apu_saveload transfers this second block explicitly so pending
+   * song/effect controls and their sample-time deadlines survive quick-state
+   * loads. */
   ApuPortWrite portQueue[APU_PORT_QUEUE_LEN];
   uint32_t portQHead;     /* next slot to apply  */
   uint32_t portQTail;     /* next slot to fill   */
+  uint64_t sampleClock;   /* DSP sample boundaries produced by this APU */
+  uint64_t portClock;     /* previous CPU-port write target */
+  uint64_t portClockNs;   /* wall timestamp of previous CPU-port write */
+  uint64_t portLastTarget[4];
+  uint8_t portLastVal[4];
+  uint8_t portLastValid[4];
 };
 
 Apu* apu_init();
@@ -100,7 +106,7 @@ void apu_saveload(Apu *apu, SaveLoadInfo *sli);
  * (order is always preserved). */
 void apu_schedulePortWrite(Apu* apu, uint8_t port, uint8_t val,
                            uint64_t target_sample);
-/* Drop all pending scheduled port writes (reset / HLE image upload). */
+/* Drop pending writes and reset their scheduling clocks (reset/upload). */
 void apu_clearPortQueue(Apu* apu);
 
 /* Observation-only diagnostics. Kept outside Apu so the frozen save-state

@@ -85,6 +85,10 @@ typedef struct NativeAudioExtensionState {
   uint8_t active_virtual_voice;
   uint8_t charged_lane_mask;
   uint8_t current_update_free;
+  uint8_t sequence_track;
+  uint8_t sequence_mask;
+  uint8_t song_kon_pending_mask;
+  uint8_t current_opcode_free;
 } NativeAudioExtensionState;
 
 /* Every per-track array is packed for ten native logical tracks: X is the
@@ -107,13 +111,9 @@ static int (*s_previous_cycle_hook)(Spc *, uint16_t, int);
 static void (*s_previous_extra_saveload)(Apu *, SaveLoadInfo *);
 static void (*s_previous_upload_hook)(uint32_t);
 static NativeAudioExtensionState s_state;
-static uint8_t s_sequence_track = 0xff;
-static uint8_t s_sequence_mask;
-static uint8_t s_song_kon_pending_mask;
 static uint8_t s_logged_routed_mask[0x80];
 static uint8_t s_logged_routed_value[0x80];
 static bool s_logged_routed_seen[0x80];
-static bool s_current_opcode_free;
 
 void (*g_native_audio_extension_trace_disposition_hook)(
     uint64_t, uint64_t, bool, bool) = NULL;
@@ -638,15 +638,15 @@ static bool RouteDspWrite(Apu *apu, uint8_t addr, uint8_t *value) {
   const uint8_t ownership = apu->ram[kEffectOwnershipMaskAddress];
   if (track_mask == 0)
     FlushVirtualLifecycleControls(apu, addr);
-  s_song_kon_pending_mask &= ownership;
+  s_state.song_kon_pending_mask &= ownership;
   /* $080A still has the sequencer track in X. Its shared writer at $0834
    * replaces X with $64-$67/$74-$77 and can temporarily see $1A clear. Carry
    * the proven track across that helper so SRCN/ADSR/GAIN follow the same
    * route as pitch/volume instead of leaking back onto song voice 6/7. */
   uint8_t routed_track = logical_track;
   if (IsPerVoiceWritable(addr) && logical_track == addr &&
-      track_mask == s_sequence_mask)
-    routed_track = s_sequence_track;
+      track_mask == s_state.sequence_mask)
+    routed_track = s_state.sequence_track;
   int hardware_voice = -1;
   int virtual_voice = -1;
   if (NativeAudioExtension_RouteVoiceWrite(
@@ -699,8 +699,9 @@ static bool RouteDspWrite(Apu *apu, uint8_t addr, uint8_t *value) {
         /* A song note admitted at $04D4 sets the same driver KON bit as the
          * effect. Apply that one proven pending bit to both destinations;
          * otherwise the owned central KON remains virtual-only. */
-        hardware_update_mask |= s_song_kon_pending_mask & route_mask;
-        s_song_kon_pending_mask &= (uint8_t)~route_mask;
+        hardware_update_mask |=
+            s_state.song_kon_pending_mask & route_mask;
+        s_state.song_kon_pending_mask &= (uint8_t)~route_mask;
       }
       dsp_writeHardwareVoiceMask(
           apu->dsp, addr, hardware_value, hardware_update_mask);
@@ -725,14 +726,14 @@ static bool RouteDspWrite(Apu *apu, uint8_t addr, uint8_t *value) {
 }
 
 static void PatchSpcOpcode(Spc *spc, uint16_t pc) {
-  s_current_opcode_free = s_enabled && s_state.scheduler_active &&
+  s_state.current_opcode_free = s_enabled && s_state.scheduler_active &&
       s_state.current_update_free;
   if (s_previous_opcode_patch)
     s_previous_opcode_patch(spc, pc);
   if (!s_enabled || !spc || !spc->apu) return;
   if (pc == kEffectDriverEntry) {
     StartEffectScheduler(spc);
-    s_current_opcode_free =
+    s_state.current_opcode_free =
         s_state.scheduler_active && s_state.current_update_free;
     return;
   }
@@ -742,13 +743,13 @@ static void PatchSpcOpcode(Spc *spc, uint16_t pc) {
     FinishScheduledInstance(
         spc, pc == kEffectCleanupReturn || pc == kEffectEmptyReturn);
     if (spc->pc == kEffectUpdateEntry)
-      s_current_opcode_free =
+      s_state.current_opcode_free =
           s_state.scheduler_active && s_state.current_update_free;
     return;
   }
   if (pc == 0x080a) {
-    s_sequence_track = spc->x;
-    s_sequence_mask = spc->apu->ram[kCurrentTrackMaskAddress];
+    s_state.sequence_track = spc->x;
+    s_state.sequence_mask = spc->apu->ram[kCurrentTrackMaskAddress];
   }
   if (NativeAudioExtension_ShouldBypassMusicSuppression(
           pc, spc->x, spc->apu->ram[kCurrentTrackMaskAddress],
@@ -758,7 +759,7 @@ static void PatchSpcOpcode(Spc *spc, uint16_t pc) {
      * already-advancing song track to reach its normal DSP write. */
     spc->z = true;
     if (pc == 0x04d4)
-      s_song_kon_pending_mask |=
+      s_state.song_kon_pending_mask |=
           spc->apu->ram[kCurrentTrackMaskAddress];
     if (s_log) {
       fprintf(stderr,
@@ -773,7 +774,7 @@ static void PatchSpcOpcode(Spc *spc, uint16_t pc) {
 static int AdjustSpcOpcodeCycles(Spc *spc, uint16_t pc, int cycles) {
   if (s_previous_cycle_hook)
     cycles = s_previous_cycle_hook(spc, pc, cycles);
-  return s_enabled && s_current_opcode_free ? 0 : cycles;
+  return s_enabled && s_state.current_opcode_free ? 0 : cycles;
 }
 
 static void SaveLoadExtensionState(Apu *apu, SaveLoadInfo *sli) {
@@ -829,12 +830,10 @@ void NativeAudioExtension_Install(void) {
   s_enabled = g_settings.audio_extended_channels;
   const char *log = getenv("AR_AUDIO_EXTLOG");
   s_log = log && log[0] && log[0] != '0';
-  s_sequence_track = 0xff;
-  s_sequence_mask = 0;
-  s_song_kon_pending_mask = 0;
   memset(&s_state, 0, sizeof(s_state));
   s_state.current_slot = 0xff;
   s_state.active_virtual_voice = 0xff;
+  s_state.sequence_track = 0xff;
   memset(s_logged_routed_seen, 0, sizeof(s_logged_routed_seen));
   dsp_setExtendedVoicesEnabled(s_enabled);
   if (!s_enabled) {

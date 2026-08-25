@@ -65,7 +65,7 @@ static void dsp_applyHardwareVoiceMask(Dsp *dsp, uint8_t addr, uint8_t val,
                                        uint8_t update_mask);
 
 /* Fixed at application boot by a restart-class game setting. Keeping this
- * outside Dsp means the saved blob still starts at `ram`; version 7 states
+ * outside Dsp means the saved blob still starts at `ram`; version 9 states
  * include all added DspChannel records plus the sequencer/FIFO state
  * serialized by the game-specific APU extension hook. */
 static bool s_dsp_extended_voices_enabled;

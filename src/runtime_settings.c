@@ -32,6 +32,21 @@ extern bool g_ws_active;
 extern bool g_sim3d_textures_ready;
 extern bool g_sim3d_billboard_renderer_ready;
 
+static int RuntimeSettings_QuickStateSlot(void) {
+  const char *text = getenv("AR_QUICKSTATE_SLOT");
+  if (!text || !text[0]) return 0;
+  char *end = NULL;
+  const long slot = strtol(text, &end, 0);
+  if (!end || *end || slot < 0 || slot > 99) {
+    fprintf(stderr,
+            "[settings] invalid AR_QUICKSTATE_SLOT='%s' (want 0..99); "
+            "using slot 0\n",
+            text);
+    return 0;
+  }
+  return (int)slot;
+}
+
 bool RuntimeSettings_BuildSaveEditRequest(SaveEditRequest *edits) {
   static const int kRegionStates[kSaveProgressEdit_Count] = {
     -1,
@@ -133,10 +148,10 @@ bool RuntimeSettings_HandleAction(const SettingDesc *desc) {
   } else if (!strcmp(desc->key, "toggle_turbo")) {
     HostInput_ToggleTurbo();
   } else if (!strcmp(desc->key, "save_state")) {
-    RtlSaveLoad(kSaveLoad_Save, 0);
+    RtlSaveLoad(kSaveLoad_Save, RuntimeSettings_QuickStateSlot());
     fprintf(stderr, "State saved.\n");
   } else if (!strcmp(desc->key, "load_state")) {
-    RtlSaveLoad(kSaveLoad_Load, 0);
+    RtlSaveLoad(kSaveLoad_Load, RuntimeSettings_QuickStateSlot());
     FrameSlot_ResetActionEffects();
     ActRaiserActionBg_Reset();
     HostDisplay_InvalidatePresentHistory();

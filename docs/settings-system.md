@@ -446,8 +446,9 @@ problems:
   Per-context KON/KOF is applied at the original central mask-flush cadence,
   and a finishing slot remains reserved through its control clears before it
   can be reused.
-  Quick-state format v7 includes all virtual BRR/envelope/control state, FIFO,
-  and sequencer contexts; its header rejects a state captured under the other
+  Quick-state format v9 includes all virtual BRR/envelope/control state, FIFO,
+  sequencer contexts, and pending CPU-to-SPC port transport; its header rejects
+  a state captured under the other
   eight/40-voice topology. Exact same-frame duplicates from one producer are
   coalesced, and a full FIFO is an explicit traced overflow rather than an
   implicit native lane replacement.
@@ -931,7 +932,11 @@ requires WRAM correspondence, known-state diffs, and a real game round trip.
   pins the total descriptor count so additions must update the fixture
   deliberately.
 - **Live-path test:** `AR_SETTING_SET=key=value AR_SETTING_AT_GF=N` applies via
-  the same mutation API the overlay calls; observe enforcement at N+1.
+  the same mutation API the overlay calls; observe enforcement at N+1. Action
+  descriptors use `key=run`; `AR_QUICKSTATE_SLOT=0..99` lets replay diagnostics
+  exercise save/load without overwriting the player's usual slot 0. A second
+  change may use `AR_SETTING_SET_2` / `AR_SETTING_AT_GF_2`, allowing a single
+  deterministic run to exercise both save and load.
 - **Save-codec tests (Phase 6):** exact 8192-byte native round trip; fixture
   `.srm → .ini → .srm` identity; malformed/missing/duplicate INI chunks rejected
   without touching the destination; named-field override changes only its

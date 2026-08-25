@@ -410,8 +410,9 @@ validation readable without dumping every DSP write.
 Authentic mode remains the default eight-voice path. Extended mode is opt-in as
 `audio_extended_channels` / `AR_EXTENDED_AUDIO_CHANNELS`, and changing it is
 restart-required because migrating live envelopes and sequencer ownership
-during a toggle is ambiguous. Quick-state format v7 serializes all 32 added
-DSP channels, the request FIFO, and every independent sequencer context. Its
+during a toggle is ambiguous. Quick-state format v9 serializes all 32 added
+DSP channels, the request FIFO, every independent sequencer context, and the
+pending CPU-to-SPC port queue with its sample clock. Its
 header tags the active eight/40-voice mode and rejects older layouts or a state
 from the other topology rather than misreading it.
 
@@ -731,6 +732,34 @@ error relative to the signal. That is inside the 5% natural-replay threshold;
 the remaining difference is consistent with the two runs entering on different
 DSP/interpolation phases rather than different voice mixing.
 
+### Quick-state continuation
+
+The paced extended Aitos replay `runs/20260824-182100/` saved quick-state slot
+99 at game frame 4611 in the natural boss-death multi-effect burst, loaded it
+at frame 4651, and then replayed the same interval in the same process. The
+native PCM following the restored sample clock matches the first pass byte for
+byte for 6,524 stereo DSP frames (about 204 ms), beginning one DSP frame after
+the repeated frame-4611 request. That exact interval crosses the next repeated
+CPU request and ends only after its asynchronously scheduled port command can
+affect the SPC. Later CPU-to-SPC arrival time is intentionally real-time and
+may move slightly with host thread scheduling; the serialized APU/DSP/queue
+continuation itself is sample-exact.
+
+The result is reproducible with:
+
+```sh
+python3 tools/verify_quickstate_pcm.py runs/20260824-182100 \
+  --frame 4611 --site a5cb --id 85 --minimum-exact-frames 6000
+```
+
+The rewound run reaches the recording endpoint normally, with no extended
+overflow, replacement, retrigger loss, or music suppression. Its final WRAM
+(`d8659055...7facca`) and SRAM (`11dcdfb6...b79858`) hashes exactly match the
+uninterrupted reference `runs/20260824-181500/`. This is an in-process
+quick-state contract: a boot-time load in a fresh process cannot reproduce the
+recompiled game's live coroutine stack, so it is not used as a whole-run
+continuation test.
+
 ## Verification matrix
 
 - **Implemented and unit-tested:** music-update preservation on all three
@@ -741,15 +770,15 @@ DSP/interpolation phases rather than different voice mixing.
 - **Implemented and live-tested:** simultaneous virtual voices 8/9, producer-
   aware duplicate coalescing, simultaneous 22-lane boss-burst demand, zero
   native transport/lane outcomes, and zero music suppression in coupled
-  simulation, Fillmore, and Aitos replays.
+  simulation, Fillmore, and Aitos replays; sample-exact in-process quick-state
+  continuation through a natural multi-effect overlap.
 - **Statically audited and parity-tested:** all 38 shipped effect sequences use
   clear PMON/NON/EON state; physical/virtual DSP voice rendering is byte-exact
   from identical state; one isolated natural request is within 3.5055% RMS
   after phase alignment.
-- **Still required for broad release confidence:** sample-exact continuation
-  after loading a quick state in the middle of a natural multi-effect overlap,
-  and full-playthrough recordings for frequency coverage beyond the coupled
-  action-stage and high-bit collision fixtures.
+- **Still required for broad release confidence:** full-playthrough recordings
+  for frequency coverage beyond the coupled action-stage and high-bit collision
+  fixtures.
 
 ## Evidence and confidence
 
