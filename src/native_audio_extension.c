@@ -602,6 +602,16 @@ static void FlushVirtualLifecycleControls(Apu *apu, uint8_t addr) {
         dsp_writeVirtualVoiceControl(
             apu->dsp, instance->voice, 0x5c, false);
         instance->start_kof_stage = 0;
+      } else {
+        /* A sequence's ordinary per-note KOF is routed immediately while its
+         * logical track is loaded. The native driver then clears the global
+         * KOF latch in the following $0458 mask flush. Extended instances do
+         * not retain their lane in $1A (that would suppress song 6/7 again),
+         * so the ownership-based global router cannot see that later clear.
+         * Mirror it for every live instance or KOF remains held after the
+         * first note and multi-note effects collapse to a short click. */
+        dsp_writeVirtualVoiceControl(
+            apu->dsp, instance->voice, 0x5c, false);
       }
     } else {
       dsp_writeVirtualVoiceControl(

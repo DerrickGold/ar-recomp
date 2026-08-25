@@ -534,6 +534,13 @@ sequence pointers and samples no longer belong to the installed image.
 - NON is captured per context while every voice shares the authentic global
   noise clock. New contexts initialize PMON, NON, and EON clear; later mask
   writes are routed to their allocated voice.
+- Ordinary per-note KOF writes occur while a virtual sequence context is
+  loaded, but the driver clears the KOF latch later through its central
+  `$0458` mask flush. Extended contexts deliberately clear their native `$1A`
+  ownership bits before that flush so they cannot suppress song voices 6/7;
+  the bridge therefore mirrors each central KOF clear to every live virtual
+  voice. Without that lifecycle edge, KOF remained held after the first note
+  and multi-note effects collapsed into a short initial click.
 - `tools/audit_spc_effects.py` statically walks all 38 common-bank sequences
   `$01-$26` using the resident driver's own command-length table. All 38
   terminate, none selects an instrument whose descriptor enables noise, and
@@ -552,6 +559,14 @@ sequence pointers and samples no longer belong to the installed image.
 - Replacement-music muting now uses explicit song/effect provenance, with SRCN
   `$0C+` only as an unclassified startup fallback. Every virtual voice must set
   the same bus label when allocated.
+
+The KOF-clear regression was reproduced by construction BRK `$0D` from
+`$01:962B` at game frame 1101. Authentic capture `runs/20260824-195553/`
+applied eight key-ons to voice 7; the faulty extended capture
+`runs/20260824-195522/` applied only the first to voice 8. After the lifecycle
+fix, `runs/20260824-200035/` applies all eight on voice 8 with the same sample,
+pitch, and volume progression. Its nonzero PCM span is 24,264 native-rate
+frames versus 24,186 in the authentic capture.
 
 ### Emulation boundary and performance
 
@@ -776,6 +791,18 @@ falls to 10,400 APU cycles. It again records zero native/extended loss and zero
 music suppression. Its final WRAM (`d8659055...7facca`), SRAM
 (`11dcdfb6...b79858`), and dispatch-log (`e4736323...f651`) hashes are identical
 to the authentic Aitos run, and all 24 song event identities match.
+
+The later manual report `runs/20260824-193508/` appeared to lose the Aitos
+boss-defeat song. Its console confirms the deliberate boss image handoff from
+`$1B:9470` (`song-06`) to `$1C:A5FB` (`song-04`); because `song-04.ogg` is not
+installed, replacement-music mode correctly selects the authentic native
+fallback. Paced reproduction `runs/20260824-194623/` reaches the same handoff:
+the `$1C:A5FB` image is uploaded at cycle 91,144,929 and song `$01` starts at
+91,180,714 with no ownership suppression. The PCM is strongly nonzero for the
+first five seconds before the boss-explosion requests begin, then follows the
+native cue's arranged gaps and silent tail before its halt. This report is
+therefore not reproduced as a dropped song; retain it separately from the
+confirmed effect KOF-lifecycle fault above.
 
 Natural Northwall runs `runs/20260824-183359/` (authentic) and
 `runs/20260824-183542/` (extended) add the complete `0605 -> 0606 -> 0607 ->
