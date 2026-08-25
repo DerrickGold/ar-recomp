@@ -90,10 +90,20 @@ IF SOMETHING GOES WRONG
 
 OPTIONAL: YOUR OWN MUSIC AND HD GRAPHICS
 ----------------------------------------
-This package plays the ROM's original music and graphics. If you want to add
-your own, look in the "utils/game-assets" folder: "manifest.ini" lists every
-music and graphic slot, and you drop matching files into the "audio" and "hd"
-folders beside it. Anything you don't add simply stays original.
+This package starts with the ROM's original music and graphics. Open the Assets
+tab in the builder to toggle the included high-resolution title art or browse
+to an Ogg Vorbis file for any music track, then press Save assets. All 17 ROM
+song images are listed; currently unknown names use an "Unidentified track NN"
+label so you can extract and listen to them before naming them.
+The builder copies those files into "utils/game-assets" and updates
+"manifest.ini" for you. Advanced packs can still add their own files and
+records there directly. Anything you don't add simply stays original.
+
+After supplying the ROM on the Build tab, you can also press "Extract
+original-audio previews" on Assets. The bundled pure-Go audio renderer creates
+local 30-second WAVs so each original track can be played beside the selected
+replacement. These previews stay in your computer's user cache; they are not
+copied into the game, its manifest, or a release package.
 
 
 WHAT THE FOLDERS ARE

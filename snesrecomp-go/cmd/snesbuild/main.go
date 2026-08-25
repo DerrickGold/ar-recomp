@@ -45,6 +45,8 @@ func run(args []string) error {
 		return runAll(args[1:])
 	case "gui":
 		return runGUI(args[1:])
+	case "audio-preview":
+		return runAudioPreview(args[1:])
 	case "toolchain":
 		return runToolchain(args[1:])
 	case "sdl":
@@ -73,6 +75,8 @@ Commands:
               (--hermetic compiles with the pinned Zig toolchain, no CMake)
   all         Regenerate, configure, and compile in one command
   gui         Open the local graphical hermetic game builder
+  audio-preview
+              Render local ActRaiser soundtrack comparison WAVs in pure Go
   toolchain   Report, fetch, or pin the hermetic C toolchain (Zig)
   sdl         Stage the pinned SDL3 redistributable for a cross target
   doctor      Report host tools and project inputs

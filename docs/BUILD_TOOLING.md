@@ -54,11 +54,18 @@ snesbuild toolchain fetch          # one-time: download + sha256-verify + extrac
 snesbuild build --hermetic --root . --rom ar.sfc
 snesbuild all --hermetic --root . --rom ar.sfc --allow-stubs   # regen + build
 snesbuild gui --root .         # local graphical ROM picker + hermetic build
+snesbuild audio-preview --rom ar.sfc --out build/audio-previews
 ```
 
 Zig 0.16.0 is resolved from `$SNESBUILD_ZIG`, `build/toolchain/`, then `PATH`.
 `snesbuild toolchain status` reports the pin and local availability. Fetches are
 verified against a checksum embedded in `snesbuild`.
+
+`audio-preview` is the same MIT-licensed, pure-Go audio-only emulator used by
+the GUI's Assets tab. It directly interprets the SPC700 driver and renders the
+S-DSP/BRR stream to stereo WAV; it does not launch, link, or copy the inherited
+C runner. The GUI keeps those ROM-derived WAVs in the operating-system user
+cache, outside `game-assets`, the runtime manifest, and release archives.
 
 The macOS/Linux Zig pins are `.tar.xz` archives, unpacked via the host `tar`,
 which must support `.xz` (standard on modern macOS and Linux). The Windows Zig
@@ -221,23 +228,29 @@ actraiser-recomp-<platform>/
 └── utils/                  hidden: the whole build (ignore it)
     ├── snesbuild.ini, config.ini
     ├── recomp/ src/ third_party/stb/ snesrecomp-go/runtime/   authored source (no generated C)
-    ├── game-assets/        manifest template + empty audio/+hd/; manual appears on first launch
+    ├── game-assets/        manifest template + managed audio/HD assets; manual appears on first launch
     ├── tools/snesbuild     the driver (stripped, git-describe-stamped)
     ├── tools/toolchain/zig-*/   pinned C compiler (Zig 0.16.0)
     ├── tools/sdl3/         bundled SDL3 (macOS, Windows x86_64, Steam Deck)
     └── LICENSE, ATTRIBUTION.md
 ```
 
-The bundle excludes the ROM, ROM-derived generated C, and optional replacement
-assets. The embedded manual is written to `utils/game-assets/manual.pdf` on the
-first launch unless one already exists. The asset manifest maps the available
-replacement slots. macOS and Windows x86_64 use official SDL
+The bundle excludes the ROM, ROM-derived generated C, and user-provided
+replacement assets. The embedded manual is written to
+`utils/game-assets/manual.pdf` on the first launch unless one already exists.
+The builder also embeds the project's optional HD title treatment: the Assets
+tab installs or removes it and can copy selected Ogg Vorbis tracks into the live
+`game-assets/` tree while updating the manifest. macOS and Windows x86_64 use official SDL
 redistributables; Steam Deck uses Valve's Steam Runtime SDL. Generic Linux uses
 the system SDL.
 
 The user unpacks the archive and runs `run-build`. It starts a local interface on
 `127.0.0.1` behind a per-session URL. The selected ROM is copied locally to
-`utils/user-rom.sfc` and never uploaded. After the hermetic build, the GUI:
+`utils/user-rom.sfc` and never uploaded. Alongside Build and Manual, the Assets
+tab manages the bundled title option and all 17 soundtrack images from the ROM
+song table. Unidentified entries remain visible by table slot so their
+extracted previews can be auditioned and named without encountering them during
+gameplay. After the hermetic build, the GUI:
 
 1. Copies the executable and bundled SDL library, where applicable, to the root.
 2. Generates a `run-game` script beside it for later launches without a rebuild.

@@ -206,6 +206,21 @@ targets with no official redistributable to stage.
 Run `v2regen help` or `v2regen <command> -h` for every option.
 Run `snesbuild help` or `snesbuild <command> -h` for project-driver options.
 
+### Local audio previews
+
+The `snesbuild` binary also contains an independently authored, pure-Go
+SPC700/S-DSP audio-only emulator for ROM-owner preview generation:
+
+```sh
+snesbuild audio-preview --rom ../game.sfc --out ../build/audio-previews \
+  --seconds 30 --tracks title-theme,song-00
+```
+
+The GUI invokes the same package from its Assets tab and writes stereo WAVs to
+the per-user cache. It has no dependency on `runtime/`, a browser SPC player,
+FFmpeg, or a system audio converter. The generated WAVs are ROM-derived game
+content and are intentionally outside the module's MIT grant.
+
 ## Distribution packaging
 
 `packaging/` is a standalone CMake project that builds a **fully
@@ -239,9 +254,11 @@ repository's `docs/BUILD_TOOLING.md` for the full bundle contract.
 
 ## Licensing
 
-The historical source repository had not declared an overall license at the
-snapshot used for this port. Attribution is not a substitute for a license.
-Until that status is clarified, do not assume this directory is covered by the
-ActRaiserRecomp repository's MIT grant. See [`LICENSE`](LICENSE),
-[`ATTRIBUTION.md`](ATTRIBUTION.md), and
-[`runtime/README.md`](runtime/README.md).
+The original Go implementation, tooling, tests, and documentation in this
+module are [MIT-licensed](LICENSE). The inherited C runner under `runtime/` is
+explicitly outside that grant and retains its current unresolved written-
+license status; see [`runtime/LICENSE`](runtime/LICENSE),
+[`runtime/README.md`](runtime/README.md), and [`ATTRIBUTION.md`](ATTRIBUTION.md).
+
+Game ROMs, generated/recompiled ROM code, extracted previews, and embedded
+retail media are not relicensed under MIT.

@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// Both assets must actually be embedded. A `go:embed` of a missing file is a
+// All assets must actually be embedded. A `go:embed` of a missing file is a
 // compile error, but an empty or truncated file is not -- and either would only
 // show up as a broken image or an unreadable manual in a browser.
 func TestEmbeddedAssetsArePresentAndWellFormed(t *testing.T) {
@@ -32,6 +32,13 @@ func TestEmbeddedAssetsArePresentAndWellFormed(t *testing.T) {
 	// A truncated PDF is the likely corruption; the trailer proves the tail.
 	if !bytes.Contains(manualPDF[max(0, len(manualPDF)-2048):], []byte("%%EOF")) {
 		t.Error("manual PDF has no EOF trailer; it may be truncated")
+	}
+	if len(titleLogoPNG) < 100_000 {
+		t.Errorf("HD title art is %d bytes; expected the full image", len(titleLogoPNG))
+	}
+	if !bytes.HasPrefix(titleLogoPNG, []byte("\x89PNG\r\n\x1a\n")) {
+		t.Errorf("HD title art is not a PNG (prefix %q)",
+			titleLogoPNG[:min(8, len(titleLogoPNG))])
 	}
 }
 
@@ -81,6 +88,7 @@ func TestAssetEndpointsServeCorrectTypes(t *testing.T) {
 		minBytes              int
 	}{
 		{"boxart.webp", "image/webp", 4096},
+		{"title-logo.png", "image/png", 100_000},
 		{"manual.pdf", "application/pdf", 100_000},
 	}
 	for _, testCase := range cases {
@@ -137,7 +145,9 @@ func TestPageReferencesAssetsAndPermitsTheManualFrame(t *testing.T) {
 	response := httptest.NewRecorder()
 	app.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/tok/", nil))
 	body := response.Body.String()
-	for _, reference := range []string{`src="boxart.webp"`, `href="manual.pdf"`} {
+	for _, reference := range []string{
+		`src="boxart.webp"`, `src="title-logo.png"`, `href="manual.pdf"`,
+	} {
 		if !strings.Contains(body, reference) {
 			t.Errorf("page does not reference %s", reference)
 		}

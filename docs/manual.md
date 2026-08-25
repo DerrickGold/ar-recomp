@@ -483,10 +483,11 @@ In a downloaded bundle, the same folder is `utils/game-assets/`.
 Substitutes HD art for individual graphics via a declared plane: `screen`
 (screen-locked elements like the title logo — any resolution, scales to the
 output viewport) or `mode7` (canvas-space art rendered through the live Mode-7
-matrix, so rotation/zoom/HDMA warps apply to the HD art). The title
-logo/medallion ships as the worked example, engaged by dropping
-`game-assets/hd/title-logo.png`. Toggled live by `hd_replacements` /
-`AR_HD_REPLACEMENTS`. Full plane/key/gate reference: the manifest header and
+matrix, so rotation/zoom/HDMA warps apply to the HD art). The builder's
+**Assets** tab previews the included title treatment and installs or removes it
+with one toggle, updating both title hooks in the manifest. Hand-authored packs
+can still be mapped directly under `game-assets/hd/`. Toggled live by
+`hd_replacements` / `AR_HD_REPLACEMENTS`. Full plane/key/gate reference: the manifest header and
 [`rendering-engine.md`](rendering-engine.md) §13.
 
 ### Music (`[music:<name>]` entries, files under `game-assets/audio/`)
@@ -494,16 +495,33 @@ logo/medallion ships as the worked example, engaged by dropping
 Streams OGG Vorbis files in place of the SPC driver's songs — sound effects
 stay authentic (the SPC driver keeps running; only its per-song instrument
 voices are muted at the DSP). All 17 songs of the ROM's song table ship as
-inert manifest entries (`audio/title.ogg` is the title theme). Adding a track
-needs no configuration: whenever a song starts without audio, the console
-prints exactly what to provide, e.g.
+inert manifest entries (`audio/title.ogg` is the title theme). The builder's
+**Assets** tab lists all 17 images, including entries whose names have not been
+identified yet. Those appear as **Unidentified track NN** with their exact
+`[music:song-NN]` manifest identity and ROM source, so their extracted preview
+can be auditioned and tagged without first encountering the music in-game.
+Browse to an Ogg Vorbis file and Save copies it into the game's working
+directory and updates that manifest record without discarding authored gain,
+loop, or gate keys.
+
+For side-by-side comparison, first supply the ROM on the **Build** tab, then
+choose **Extract original-audio previews** on **Assets**. The builder's bundled
+pure-Go audio-only emulator loads the original SPC700 driver and song/sample
+images from that local ROM and creates 30-second stereo WAV previews. Each
+track row then has separate **Original ROM** and **Selected replacement**
+players; starting one pauses the others for a clean A/B comparison. The WAVs
+live in the operating-system cache and are never added to `game-assets` or the
+manifest. No browser SPC plug-in, system player, or network service is used.
+
+For additional hand-authored slots outside the 17-entry table, whenever a song
+starts without audio the console prints exactly what to provide, e.g.
 
 ```
 [music] src=18:947F song=01 authentic — drop game-assets/audio/song-00.ogg to replace ([music:song-00])
 ```
 
-so one normal play session identifies every track — rename the `song-NN`
-entry/file in the manifest as you recognize each one. Loops are
+Rename the `song-NN` entry/file in the manifest as you recognize each one.
+Loops are
 sample-accurate: set `LOOPSTART`/`LOOPLENGTH` Vorbis comment tags in the file
 (the RPG Maker convention, so existing tagging tools work), or
 `loop_start`/`loop_end` keys in the manifest entry; untagged files loop whole.

@@ -249,6 +249,13 @@ launch — `screen`-plane art scales to the viewport, `mode7`-plane art is
 rendered through the live Mode-7 matrix so warps and zooms apply to your
 artwork. Nothing to configure; a missing file is silently inert.
 
+The hermetic builder's **Assets** tab also previews the included HD title art,
+toggles it without manual file editing, and provides preview/replacement
+controls for all 17 ROM song images. Unidentified entries stay visible by song-
+table slot so they can be auditioned and named without encountering them in
+gameplay. Save copies the selected assets into the game's working directory and
+keeps `game-assets/manifest.ini` in sync.
+
 ![Mode 7 rendering at increased internal resolution](/assets/mode7.png)
 
 ![The title screen twice: the ROM's original logo on the left, a high-resolution replacement in its place on the right](/assets/hd-title-comparison.png)
@@ -343,9 +350,9 @@ ActRaiser ROM or anything derived from it — see the LICENSE file's Scope
 section, and
 [what can and can't be committed](docs/contributing.md#what-can-and-cant-be-committed-here).
 
-The bundled `snesrecomp-go/` is a Go reimplementation of the historical Python
-recompiler and includes its copied C runtime and adapted documentation. That
-source repository had not declared an overall license at the snapshot used for
-the port. The module is therefore explicitly excluded from this repository's
-MIT grant; see `snesrecomp-go/ATTRIBUTION.md`, its runtime provenance README,
-and the LICENSE Scope section.
+The original Go implementation, tooling, tests, and documentation under
+`snesrecomp-go/` have their own [MIT license](snesrecomp-go/LICENSE). Its
+inherited C runner under `snesrecomp-go/runtime/` is explicitly outside both
+MIT grants and retains its current unresolved written-license status; see
+`snesrecomp-go/runtime/LICENSE`, `snesrecomp-go/ATTRIBUTION.md`, and the root
+LICENSE Scope section.

@@ -66,21 +66,22 @@ this port and bundled runtime:
 
 ## License status
 
-At the pinned snapshot, the historical `snesrecomp` repository stated that an
-overall license was not yet declared. Its README also identified inherited
-LakeSnes/Snes9x terms and separately licensed components.
+The independently maintained Go module, tooling, tests, and documentation are
+now provided under the MIT terms in [`LICENSE`](LICENSE). This includes the new
+pure-Go audio-preview emulator; it is an original implementation and does not
+link to or incorporate the inherited C runner.
 
-Consequently:
+That grant deliberately stops at [`runtime/`](runtime/). At the pinned
+historical snapshot, `snesrecomp` stated that an overall license had not yet
+been declared, and the runner also identified inherited LakeSnes/Snes9x terms
+and separately licensed components. `runtime/LICENSE` records that unresolved
+written-license status without attempting to relicense upstream work.
 
-- attribution does not grant permission to copy, modify, or redistribute;
-- the ActRaiserRecomp root MIT license explicitly excludes this derived module
-  and its copied runtime unless/until the upstream rights are clarified; and
-- downstream users must review the provenance and applicable terms before
-  redistribution.
+Attribution is not itself a license. Downstream distributors must therefore
+treat the Go/tooling MIT grant and the C-runtime provenance as separate
+licensing scopes, and review any individual third-party notices that apply.
 
-[`LICENSE`](LICENSE) records the resulting no-project-wide-license notice in a
-standard repository location.
-
-No game ROM, translated ROM code, game assets, or captured memory/gameplay data
-is included here. Those works are outside the toolchain's provenance and must
-not be added to this module.
+No game ROM, translated ROM code, extracted audio, or captured memory/gameplay
+data is included here. Those works are outside the toolchain's license and must
+not be added to this module. Embedded retail media is also excluded from the
+MIT grant as described in `LICENSE`.

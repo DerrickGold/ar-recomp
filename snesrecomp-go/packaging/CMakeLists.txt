@@ -15,10 +15,11 @@
 #    developer tools. Go cross-compiles every target from any host.
 #
 # Only generic tools, the project's own authored source, and redistributable
-# third-party components ship — never a ROM or generated C. HD art and music do
-# not ship (the game-assets/ manifest + those folders are empty templates); the
-# manual is embedded in snesbuild for its browser reader and materialized from
-# there into game-assets/ when the builder/launcher starts.
+# third-party components ship — never a ROM or generated C. User-provided HD
+# packs and music do not ship (the game-assets/ folders are empty templates).
+# The optional project-authored HD title and the manual are embedded in
+# snesbuild; the Assets tab materializes the title only when selected, while the
+# manual is materialized when the builder/launcher starts.
 
 cmake_minimum_required(VERSION 3.25)
 project(actraiser-recomp-dist NONE)
@@ -420,11 +421,12 @@ install(DIRECTORY ${GAME_ROOT}/third_party/stb/ DESTINATION utils/third_party/st
 install(DIRECTORY ${SNESBUILD_MODULE_DIR}/runtime/ DESTINATION utils/snesrecomp-go/runtime
     PATTERN ".DS_Store" EXCLUDE)
 
-# game-assets: empty HD/music folders. The bundled manual is already embedded in
-# snesbuild and is materialized into this live directory when the builder starts,
-# unless a manual is already present. manifest.ini itself is user-editable and
-# ships under utils/defaults/game-assets/ above, so an upgrade cannot overwrite
-# the entries a user added.
+# game-assets: initially empty HD/music folders. The bundled manual and optional
+# HD title are already embedded in snesbuild; the manual is materialized when the
+# builder starts, while the title is installed only from the Assets-tab toggle.
+# manifest.ini itself is user-editable and ships under
+# utils/defaults/game-assets/ above, so an upgrade cannot overwrite the entries
+# a user added.
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/templates/audio-README.txt
     DESTINATION utils/game-assets/audio RENAME README.txt)
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/templates/hd-README.txt

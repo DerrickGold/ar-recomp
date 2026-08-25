@@ -112,5 +112,6 @@ a consuming project verifies and documents them for its own ROM.
 
 ## Provenance
 
-The runtime was copied from the historical Python project's `runner/` tree.
-See `../ATTRIBUTION.md` and `runtime/README.md` before redistribution.
+The runtime was copied from the historical Python project's `runner/` tree and
+is outside the Go module's MIT grant. See `../ATTRIBUTION.md`,
+`../runtime/LICENSE`, and `../runtime/README.md` before redistribution.

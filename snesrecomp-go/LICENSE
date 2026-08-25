@@ -1,14 +1,42 @@
-No project-wide license has been granted for this directory.
+Scope
+-----
 
-This module is derived from the historical snesrecomp project and includes a
-copied and modified C runtime. At the source snapshot used for this port, that
-project had not declared an overall license. Copyright remains with the
-respective authors and contributors.
+This license covers the original Go implementation, build and packaging
+tooling, tests, and documentation in this module.
 
-Nothing in this notice grants permission to use, copy, modify, or redistribute
-material beyond rights supplied by an applicable license on an individual
-file or dependency, or by law. See ATTRIBUTION.md and runtime/README.md for
-source lineage, acknowledgements, and inherited components.
+It does **not** cover, and grants no rights to:
 
-No game ROM, translated ROM code, game asset, or captured gameplay data is
-licensed or distributed by this module.
+- `runtime/`, the copied and modified C runner inherited from the historical
+  Python `snesrecomp` project. See `runtime/LICENSE`, `runtime/README.md`, and
+  `ATTRIBUTION.md`.
+- Retail/manual/cover media under `internal/buildgui/assets/`, or any other
+  third-party game artwork. The Go code which embeds or serves those files is
+  covered; the media itself is not relicensed.
+- A game ROM, generated/recompiled ROM code, extracted audio, or other content
+  derived from a ROM. Those inputs and outputs remain subject to the rights in
+  the original game and are not distributed by this module.
+- Third-party components carrying their own license notices. Those notices
+  continue to govern their respective components.
+
+MIT License
+-----------
+
+Copyright (c) 2026 Derrick Gold
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
