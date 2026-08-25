@@ -1062,6 +1062,13 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_dsp_bus_mix
         COMMAND actraiser_dsp_bus_mix_test)
 
+    add_executable(actraiser_dsp_voice_benchmark
+        tools/benchmark_dsp_voices.c
+        snesrecomp-go/runtime/src/snes/dsp.c
+    )
+    target_include_directories(actraiser_dsp_voice_benchmark PRIVATE
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS})
+
     # Generated-shader distribution guard: asserts the COMMITTED shader blobs
     # (src/shaders/*_frag.h, produced by tools/build_shaders.py) are accepted by
     # the live GPU backend, and that the per-format entrypoint name is real.
