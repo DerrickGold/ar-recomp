@@ -26,6 +26,53 @@ func TestObjectNameMangling(t *testing.T) {
 	}
 }
 
+func TestObjectArchiveFormat(t *testing.T) {
+	for targetOS, want := range map[string]string{
+		"darwin":  "darwin",
+		"linux":   "gnu",
+		"windows": "coff",
+	} {
+		if got := objectArchiveFormat(targetOS); got != want {
+			t.Errorf("objectArchiveFormat(%q) = %q, want %q", targetOS, got, want)
+		}
+	}
+}
+
+func TestForceLoadArchiveArgs(t *testing.T) {
+	archive := filepath.FromSlash("/tmp/build with spaces/objects.a")
+	darwin := forceLoadArchiveArgs("darwin", archive)
+	if len(darwin) != 1 || darwin[0] != "-Wl,-force_load,"+archive {
+		t.Fatalf("Darwin force-load args: %#v", darwin)
+	}
+	for _, targetOS := range []string{"linux", "windows"} {
+		got := forceLoadArchiveArgs(targetOS, archive)
+		want := []string{"-Wl,--whole-archive", archive, "-Wl,--no-whole-archive"}
+		if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+			t.Errorf("%s force-load args: %#v, want %#v", targetOS, got, want)
+		}
+	}
+}
+
+func TestArchiveResponseFileQuoting(t *testing.T) {
+	response, err := archiveResponseFile([]string{
+		filepath.FromSlash("/tmp/plain.o"),
+		filepath.FromSlash("/tmp/build with spaces/quoted\"name.o"),
+		`C:\build dir\bank00.o`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "\"/tmp/plain.o\"\n" +
+		"\"/tmp/build with spaces/quoted\\\"name.o\"\n" +
+		"\"C:\\\\build dir\\\\bank00.o\"\n"
+	if string(response) != want {
+		t.Fatalf("response file:\n%q\nwant:\n%q", response, want)
+	}
+	if _, err := archiveResponseFile([]string{"bad\npath.o"}); err == nil {
+		t.Fatal("newline-containing object path was accepted")
+	}
+}
+
 func TestObjectFresh(t *testing.T) {
 	directory := t.TempDir()
 	source := filepath.Join(directory, "a.c")
