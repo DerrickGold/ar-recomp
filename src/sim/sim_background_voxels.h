@@ -8,6 +8,14 @@
 #include "sim_town_canvas.h"
 #include "sim_background_voxel_types.h"
 
+enum { kSimBackgroundMaxUnmatchedVisuals = 128 };
+
+typedef struct SimBackgroundUnmatchedVisual {
+  uint8_t family;
+  uint8_t cell_x, cell_y;
+  uint8_t record_slot;
+} SimBackgroundUnmatchedVisual;
+
 typedef struct SimBackgroundVoxelScene {
   uint8_t town;
   bool overflow;
@@ -16,6 +24,13 @@ typedef struct SimBackgroundVoxelScene {
   uint16_t tree_group_count;
   /* Clearable single-cell brush: round bushes and Marahna's palms. */
   uint16_t brush_cell_count;
+  /* A live plot owned by an enhanced replacement whose current structure
+   * metatile was absent from the audited ROM catalog. Such plots deliberately
+   * remain authentic instead of silently becoming completed geometry. */
+  uint16_t unmatched_visual_count;
+  bool unmatched_visual_overflow;
+  SimBackgroundUnmatchedVisual
+      unmatched_visuals[kSimBackgroundMaxUnmatchedVisuals];
   SimBackgroundMountainField mountains;
   SimBackgroundMountainCaps mountain_caps;
   SimBackgroundVoxelObject objects[kSimBackgroundMaxObjects];

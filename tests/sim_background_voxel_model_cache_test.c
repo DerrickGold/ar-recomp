@@ -90,6 +90,33 @@ int main(void) {
   stats = SimBackgroundVoxelModelCache_Stats();
   CHECK(stats.misses == 2 && stats.hits == 0);
 
+  /* The shared visual state is explicit cache identity. Today construction
+   * also changes flags, but keeping the state itself in the key prevents a
+   * future phase-specific model from aliasing before its geometry is rebuilt. */
+  SimBackgroundVoxelModelCache_Reset();
+  SimBackgroundVoxelObject state_house = {
+    .kind = kSimBackgroundVoxel_House,
+    .town = 4,
+    .development_level = 2,
+    .cell_x = 12,
+    .cell_y = 8,
+    .record_slot = 9,
+    .visual_state = kSimStructureVisualState_Finished,
+  };
+  const SimBackgroundVoxelModel *finished_state =
+      SimBackgroundVoxelModelCache_Get(
+          &state_house, kSimBackgroundVoxelDetail_Balanced,
+          kSimBackgroundVoxelStyle_Basic, 8, NULL, NULL);
+  state_house.visual_state = kSimStructureVisualState_Construction0;
+  const SimBackgroundVoxelModel *construction_state =
+      SimBackgroundVoxelModelCache_Get(
+          &state_house, kSimBackgroundVoxelDetail_Balanced,
+          kSimBackgroundVoxelStyle_Basic, 9, NULL, NULL);
+  CHECK(finished_state && construction_state &&
+        finished_state != construction_state);
+  stats = SimBackgroundVoxelModelCache_Stats();
+  CHECK(stats.misses == 2 && stats.hits == 0);
+
   /* A developed-town pass should retain hundreds of independently seeded
    * objects and hit them on the following frame instead of linearly scanning
    * and evicting the next entry before it can be reused. */
