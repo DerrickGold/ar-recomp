@@ -175,6 +175,82 @@ static void SetSequencePointer(Apu *apu, uint8_t id, uint16_t pointer) {
   apu->ram[(uint16_t)(address + 1)] = (uint8_t)(pointer >> 8);
 }
 
+static void FlushVirtualLifecycle(Apu *apu, Spc *spc) {
+  for (int pass = 0; pass < 2; pass++) {
+    uint8_t value = 0;
+    spc->x = 0x46;
+    apu->ram[0x47] = 0;
+    CHECK(g_apu_spc_dsp_write_filter_hook(apu, 0x5c, &value));
+    spc->x = 0x45;
+    CHECK(g_apu_spc_dsp_write_filter_hook(apu, 0x4c, &value));
+  }
+}
+
+static void TestVirtualLifecycleUsesCentralMaskFlush(void) {
+  Apu apu;
+  Spc spc;
+  Dsp dsp;
+  memset(&apu, 0, sizeof(apu));
+  memset(&spc, 0, sizeof(spc));
+  memset(&dsp, 0, sizeof(dsp));
+  apu.spc = &spc;
+  apu.dsp = &dsp;
+  spc.apu = &apu;
+  SetSequencePointer(&apu, 0x10, 0x2676);
+
+  CHECK(NativeAudioExtension_QueueRequest(
+      false, 0x10, 0x01bb6d, 150, 1, 2, 0));
+  g_spc_opcode_patch_hook(&spc, 0x0da0);
+  CHECK(NativeAudioExtension_ActiveInstanceCount() == 1);
+  apu.ram[0x45] = 0x80;
+  g_spc_opcode_patch_hook(&spc, 0x0f0b);
+
+  /* Sequence work captures the pending key-on, but the virtual voice changes
+   * state only when the original driver's central KOF/KON writers run. */
+  s_control_voice = -1;
+  uint8_t value = 0;
+  spc.x = 0x46;
+  apu.ram[0x47] = 0;
+  CHECK(g_apu_spc_dsp_write_filter_hook(&apu, 0x5c, &value));
+  CHECK(s_control_voice == 8 && s_control_addr == 0x5c &&
+        s_control_enabled);
+  spc.x = 0x45;
+  CHECK(g_apu_spc_dsp_write_filter_hook(&apu, 0x4c, &value));
+  CHECK(s_control_voice == 8 && s_control_addr == 0x4c &&
+        s_control_enabled);
+
+  spc.x = 0x46;
+  CHECK(g_apu_spc_dsp_write_filter_hook(&apu, 0x5c, &value));
+  CHECK(s_control_voice == 8 && s_control_addr == 0x5c &&
+        !s_control_enabled);
+  spc.x = 0x45;
+  CHECK(g_apu_spc_dsp_write_filter_hook(&apu, 0x4c, &value));
+  CHECK(s_control_voice == 8 && s_control_addr == 0x4c &&
+        !s_control_enabled);
+
+  g_spc_opcode_patch_hook(&spc, 0x0da0);
+  g_spc_opcode_patch_hook(&spc, 0x0e7e);
+  CHECK(NativeAudioExtension_ActiveInstanceCount() == 0);
+
+  /* The ending slot remains reserved through KOF true, KOF clear, and the
+   * matching KON clear. Releasing sooner can overlap a new KON on voice 8. */
+  CHECK(NativeAudioExtension_QueueRequest(
+      false, 0x10, 0x01bb6d, 151, 3, 4, 0));
+  g_spc_opcode_patch_hook(&spc, 0x0da0);
+  CHECK(NativeAudioExtension_ActiveInstanceCount() == 1);
+  CHECK(s_bus_voice == 9);
+  g_spc_opcode_patch_hook(&spc, 0x0e7e);
+  FlushVirtualLifecycle(&apu, &spc);
+
+  CHECK(NativeAudioExtension_QueueRequest(
+      false, 0x10, 0x01bb6d, 152, 5, 6, 0));
+  g_spc_opcode_patch_hook(&spc, 0x0da0);
+  CHECK(NativeAudioExtension_ActiveInstanceCount() == 1);
+  CHECK(s_bus_voice == 8);
+  g_spc_opcode_patch_hook(&spc, 0x0e7e);
+  FlushVirtualLifecycle(&apu, &spc);
+}
+
 typedef struct TestSaveLoad {
   SaveLoadInfo base;
   uint8_t bytes[32768];
@@ -280,6 +356,7 @@ static void TestIndependentSequencerInstances(void) {
   g_spc_opcode_patch_hook(&spc, 0x0e7e);
   g_spc_opcode_patch_hook(&spc, 0x0e7e);
   CHECK(NativeAudioExtension_ActiveInstanceCount() == 0);
+  FlushVirtualLifecycle(&apu, &spc);
 }
 
 static void TestExtensionStateSerialization(void) {
@@ -313,6 +390,7 @@ static void TestExtensionStateSerialization(void) {
   CHECK(NativeAudioExtension_ActiveInstanceCount() == 0);
   g_spc_opcode_patch_hook(&spc, 0x0da0);
   g_spc_opcode_patch_hook(&spc, 0x0e7e);
+  FlushVirtualLifecycle(&apu, &spc);
 }
 
 static void TestPoolBackpressureQueuesInsteadOfReplacing(void) {
@@ -337,6 +415,7 @@ static void TestPoolBackpressureQueuesInsteadOfReplacing(void) {
   for (int i = 0; i < kDspExtendedVoiceCount; i++)
     g_spc_opcode_patch_hook(&spc, 0x0e7e);
   CHECK(NativeAudioExtension_ActiveInstanceCount() == 0);
+  FlushVirtualLifecycle(&apu, &spc);
   g_spc_opcode_patch_hook(&spc, 0x0da0);
   CHECK(NativeAudioExtension_QueuedRequestCount() == 0);
   CHECK(NativeAudioExtension_ActiveInstanceCount() == 1);
@@ -346,6 +425,7 @@ static void TestPoolBackpressureQueuesInsteadOfReplacing(void) {
 int main(void) {
   TestPureRouting();
   TestInstalledBridge();
+  TestVirtualLifecycleUsesCentralMaskFlush();
   TestIndependentSequencerInstances();
   TestExtensionStateSerialization();
   TestPoolBackpressureQueuesInsteadOfReplacing();

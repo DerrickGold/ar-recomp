@@ -1,5 +1,6 @@
 #include "native_audio_trace.h"
 
+#include <stdbool.h>
 #include <string.h>
 
 enum {
@@ -356,6 +357,25 @@ static void ReplaceLaneOwner(int lane, uint64_t new_serial, uint64_t cycle) {
   s_lane_owner[lane] = new_serial;
 }
 
+static bool RetainLaneOwnerForNativeRetrigger(
+    int lane, uint8_t id, uint64_t cycle) {
+  NativeAudioRequestRecord *owner = FindMutable(s_lane_owner[lane]);
+  const uint8_t lane_bit = (uint8_t)(1u << lane);
+  if (!owner || owner->outcome != kNativeAudioOutcome_Pending ||
+      !(owner->active_lanes & lane_bit) || owner->id != id)
+    return false;
+  /* A stable SPC input-port value can make the native driver enter $0E14
+   * again without a second CPU request/read serial. This restarts the same
+   * lane instance; it is not evidence that another sound displaced it. */
+  owner->flags |= kNativeAudioFlag_NativeLaneRetriggered;
+  if (!owner->native_retrigger_first_cycle)
+    owner->native_retrigger_first_cycle = cycle;
+  owner->native_retrigger_last_cycle = cycle;
+  owner->native_lane_retriggers++;
+  s_stats.native_lane_retriggers++;
+  return true;
+}
+
 static void SequenceStart(uint8_t a, uint8_t x, uint64_t cycle) {
   int lane = x == 0x10 ? 0 : x == 0x12 ? 1 : -1;
   if (lane < 0) return;
@@ -375,6 +395,8 @@ static void SequenceStart(uint8_t a, uint8_t x, uint64_t cycle) {
 
   NativeAudioRequestRecord *r = FindMutable(serial);
   if (!r) {
+    if (RetainLaneOwnerForNativeRetrigger(lane, a, cycle))
+      return;
     /* A sequence start with no matching traced request still replaces the
      * physical lane. Clear any prior attribution rather than letting a later
      * end opcode falsely complete the old request. */

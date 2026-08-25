@@ -443,6 +443,9 @@ problems:
   provenance captured at `$080A`, which keeps SRCN/ADSR/GAIN on the allocated
   virtual voice. Additional same-lane contexts execute without charging extra
   emulated SPC cycles, preventing effect density from slowing song timers.
+  Per-context KON/KOF is applied at the original central mask-flush cadence,
+  and a finishing slot remains reserved through its control clears before it
+  can be reused.
   Quick-state format v6 includes all virtual BRR/envelope/control state, FIFO,
   and sequencer contexts; its header rejects a state captured under the other
   eight/24-voice topology. Exact same-frame duplicates from one producer are

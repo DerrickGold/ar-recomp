@@ -167,6 +167,78 @@ static void TestExtendedVoiceIsMixedAndIndependentlyControlled(void) {
   CHECK(dsp_activeVoiceCount() == 8);
 }
 
+static void ConfigureParityVoice(Dsp *dsp, uint8_t *ram, int voice) {
+  /* One looping BRR block with an asymmetric stereo pan. The echo tail is
+   * shared/global while the effect itself has EON clear, matching the static
+   * audit of all 38 ActRaiser effect sequences. */
+  dsp->dirPage = 0x0200;
+  ram[0x0200] = 0x00;
+  ram[0x0201] = 0x03;
+  ram[0x0202] = 0x00;
+  ram[0x0203] = 0x03;
+  ram[0x0300] = 0x03; /* loop + end, shift 0, filter 0 */
+  const uint8_t brr[8] = {
+    0x71, 0xe2, 0x63, 0xd4, 0x55, 0xc6, 0x37, 0xa8,
+  };
+  memcpy(ram + 0x0301, brr, sizeof(brr));
+
+  DspChannel *channel = &dsp->channel[voice];
+  channel->srcn = 0;
+  channel->pitch = 0x1000;
+  channel->useGain = true;
+  channel->directGain = true;
+  channel->gainValue = 0x7f0;
+  channel->volumeL = 83;
+  channel->volumeR = -37;
+  channel->echoEnable = false;
+  channel->keyOn = true;
+  dsp_setVoiceBus(dsp, voice, kDspVoiceBus_Sfx);
+
+  dsp->echoWrites = true;
+  dsp->echoVolumeL = 32;
+  dsp->echoVolumeR = -24;
+  dsp->feedbackVolume = 20;
+  dsp->echoBufferAdr = 0x4000;
+  dsp->echoDelay = 32;
+  dsp->echoRemain = 32;
+  dsp->firValues[7] = 64;
+  ram[0x4000] = 0x00;
+  ram[0x4001] = 0x20;
+  ram[0x4002] = 0x00;
+  ram[0x4003] = 0xf0;
+}
+
+static void TestPhysicalAndVirtualVoicePcmParity(void) {
+  uint8_t authentic_ram[0x10000], extended_ram[0x10000];
+  dsp_setExtendedVoicesEnabled(false);
+  Dsp *authentic = NewDsp(authentic_ram);
+  Dsp *extended = NewDsp(extended_ram);
+  ConfigureParityVoice(authentic, authentic_ram, 7);
+  ConfigureParityVoice(extended, extended_ram, 8);
+  dsp_setBusGains(100, 100);
+
+  for (int i = 0; i < 512; i++)
+    dsp_cycle(authentic);
+  dsp_setExtendedVoicesEnabled(true);
+  for (int i = 0; i < 512; i++)
+    dsp_cycle(extended);
+
+  CHECK(authentic->sampleWrite == 512 && extended->sampleWrite == 512);
+  CHECK(memcmp(authentic->sampleBuffer, extended->sampleBuffer,
+               512 * 2 * sizeof(authentic->sampleBuffer[0])) == 0);
+  CHECK(memcmp(&authentic->channel[7], &extended->channel[8],
+               sizeof(DspChannel)) == 0);
+  CHECK(memcmp(authentic_ram + 0x4000, extended_ram + 0x4000,
+               512) == 0);
+  CHECK(authentic->sampleBuffer[128 * 2] != 0);
+  CHECK(authentic->sampleBuffer[128 * 2] !=
+        authentic->sampleBuffer[128 * 2 + 1]);
+
+  dsp_free(authentic);
+  dsp_free(extended);
+  dsp_setExtendedVoicesEnabled(false);
+}
+
 typedef struct MemoryState {
   SaveLoadInfo sli;
   uint8_t bytes[sizeof(Dsp)];
@@ -221,6 +293,7 @@ int main(void) {
   TestIndependentDryGains();
   TestEchoSendFollowsBus();
   TestExtendedVoiceIsMixedAndIndependentlyControlled();
+  TestPhysicalAndVirtualVoicePcmParity();
   TestExtendedVoiceStateIsSerialized();
   if (s_failures) {
     fprintf(stderr, "dsp_bus_mix_test: %d failure(s)\n", s_failures);

@@ -41,6 +41,7 @@ enum NativeAudioRequestFlags {
   kNativeAudioFlag_DualBusySeen = 1u << 5,
   kNativeAudioFlag_LaneReplaced = 1u << 6,
   kNativeAudioFlag_ExtendedTransport = 1u << 7,
+  kNativeAudioFlag_NativeLaneRetriggered = 1u << 8,
 };
 
 typedef struct NativeAudioRequestRecord {
@@ -52,6 +53,8 @@ typedef struct NativeAudioRequestRecord {
   uint64_t sequence_start_cycle;
   uint64_t sequence_end_cycle;
   uint64_t replaced_by_serial;
+  uint64_t native_retrigger_first_cycle;
+  uint64_t native_retrigger_last_cycle;
   const char *caller;
   uint32_t site;
   uint32_t game_frame;
@@ -67,6 +70,7 @@ typedef struct NativeAudioRequestRecord {
   uint16_t virtual_voices_started; /* bit 0 = virtual voice 8 */
   uint8_t music_suppressed_voice_mask;
   uint32_t music_updates_suppressed;
+  uint32_t native_lane_retriggers;
 } NativeAudioRequestRecord;
 
 typedef enum NativeAudioSongEventKind {
@@ -119,6 +123,7 @@ typedef struct NativeAudioTraceStats {
   uint64_t dsp_writes;
   uint64_t music_updates_suppressed;
   uint64_t music_suppressions_unattributed;
+  uint64_t native_lane_retriggers;
   uint64_t request_records_evicted;
   uint64_t scheduled_port_overflow;
   uint64_t song_event_overflow;

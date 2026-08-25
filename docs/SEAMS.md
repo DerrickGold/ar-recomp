@@ -60,7 +60,9 @@ than joining that chained game hook: `g_rtl_apu_port_trace_hook` and
 `g_spc_opcode_trace_hook` at the pre-fetch SPC700 PC. All are NULL by default,
 observation-only, and live outside serialized emulator structs. See
 [snes-native-audio-channels.md](snes-native-audio-channels.md#implemented-baseline-instrumentation)
-for the request/outcome CSV contract.
+for the request/outcome CSV contract. With the serial trace enabled,
+`AR_NATIVE_AUDIO_PCM=1` additionally writes the retained native-rate PCM ring
+as `native_audio_pcm.wav` for waveform parity checks.
 
 > Audio is the highest-payoff first HAL target: the `$035A`/`$035B` events are already ID-based.
 > Found while fixing the boss-music handshake and the silent-DSP bug (memory:

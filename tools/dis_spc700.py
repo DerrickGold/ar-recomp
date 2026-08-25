@@ -9,6 +9,7 @@ live SPC traces.
 Usage:
   python3 tools/dis_spc700.py 0D90 0E70
   python3 tools/dis_spc700.py 0800 08F0 --rom ar.sfc
+  python3 tools/dis_spc700.py 0400 0F4D --find-ref 004B
 """
 
 from __future__ import annotations
@@ -84,11 +85,28 @@ def parse_address(value: str) -> int:
     return int(value.removeprefix("$").removeprefix("0x"), 16)
 
 
+def operand_references(template: str, raw: bytes) -> set[int]:
+    """Return literal DP/absolute addresses encoded by one instruction."""
+    if "{w}" in template:
+        return {raw[1] | (raw[2] << 8)}
+    if "{m}" in template:
+        return {(raw[1] | (raw[2] << 8)) & 0x1FFF}
+    if "{b2}" in template:
+        return {raw[1], raw[2]}
+    if "{b}" in template:
+        return {raw[1]}
+    return set()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("start", type=parse_address)
     parser.add_argument("end", type=parse_address)
     parser.add_argument("--rom", type=Path, default=Path("ar.sfc"))
+    parser.add_argument(
+        "--find-ref", type=parse_address,
+        help="print only instructions with this literal DP/absolute operand",
+    )
     args = parser.parse_args()
 
     rom = args.rom.read_bytes()
@@ -109,8 +127,11 @@ def main() -> None:
         raw = payload[pc - target:pc - target + size]
         if len(raw) != size:
             break
-        bytes_text = " ".join(f"{byte:02X}" for byte in raw)
-        print(f"{pc:04X}: {bytes_text:<8} {decode_operand(template, raw, pc)}")
+        if (args.find_ref is None or
+                args.find_ref in operand_references(template, raw)):
+            bytes_text = " ".join(f"{byte:02X}" for byte in raw)
+            decoded = decode_operand(template, raw, pc)
+            print(f"{pc:04X}: {bytes_text:<8} {decoded}")
         pc += size
 
 

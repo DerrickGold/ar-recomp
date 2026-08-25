@@ -65,6 +65,10 @@ typedef struct NativeAudioEffectInstance {
   uint8_t pair_phase;
   uint8_t noise_enabled;
   uint8_t start_kof_stage;
+  uint8_t pending_kon;
+  uint8_t ending;
+  uint8_t end_kof_stage;
+  uint8_t release_after_kon;
 } NativeAudioEffectInstance;
 
 typedef struct NativeAudioExtensionState {
@@ -172,7 +176,7 @@ static bool SameActiveProducer(const NativeAudioEffectInstance *instance,
                                bool event_request, uint8_t id,
                                uint32_t caller_pc, uint32_t game_frame,
                                uint16_t actor_x, uint16_t actor_y) {
-  const bool same_site = instance && instance->active &&
+  const bool same_site = instance && instance->active && !instance->ending &&
       instance->event_request == (uint8_t)event_request &&
       instance->id == id && instance->caller_pc == caller_pc &&
       instance->game_frame == game_frame;
@@ -264,7 +268,7 @@ int NativeAudioExtension_QueuedRequestCount(void) {
 int NativeAudioExtension_ActiveInstanceCount(void) {
   int count = 0;
   for (int i = 0; i < kVirtualVoicePoolSize; i++)
-    count += s_state.instance[i].active != 0;
+    count += s_state.instance[i].active && !s_state.instance[i].ending;
   return count;
 }
 
@@ -345,7 +349,8 @@ static bool PairIsActive(uint64_t serial) {
   int lanes = 0;
   for (int i = 0; i < kVirtualVoicePoolSize; i++) {
     const NativeAudioEffectInstance *instance = &s_state.instance[i];
-    if (instance->active && instance->paired && instance->serial == serial)
+    if (instance->active && !instance->ending && instance->paired &&
+        instance->serial == serial)
       lanes++;
   }
   return lanes == 2;
@@ -354,7 +359,8 @@ static bool PairIsActive(uint64_t serial) {
 static void SynchronizePairPhase(uint64_t serial, uint8_t phase) {
   for (int i = 0; i < kVirtualVoicePoolSize; i++) {
     NativeAudioEffectInstance *instance = &s_state.instance[i];
-    if (instance->active && instance->paired && instance->serial == serial)
+    if (instance->active && !instance->ending && instance->paired &&
+        instance->serial == serial)
       instance->pair_phase = phase;
   }
 }
@@ -468,7 +474,8 @@ static void AllocateQueuedRequests(Apu *apu) {
 
 static int FirstScheduledSlot(void) {
   for (int i = 0; i < kVirtualVoicePoolSize; i++) {
-    if (s_state.schedule_mask & (uint16_t)(1u << i))
+    if ((s_state.schedule_mask & (uint16_t)(1u << i)) &&
+        !s_state.instance[i].ending)
       return i;
   }
   return -1;
@@ -507,15 +514,8 @@ static void FinishScheduledInstance(Spc *spc, bool ended) {
   dsp_writeVirtualVoiceControl(apu->dsp, instance->voice, 0x3d,
                                instance->noise_enabled != 0);
 
-  if (instance->start_kof_stage == 2) {
-    dsp_writeVirtualVoiceControl(apu->dsp, instance->voice, 0x5c, true);
-    instance->start_kof_stage = 1;
-  } else if (instance->start_kof_stage == 1) {
-    dsp_writeVirtualVoiceControl(apu->dsp, instance->voice, 0x5c, false);
-    instance->start_kof_stage = 0;
-  }
   if (apu->ram[0x45] & instance->lane_mask)
-    dsp_writeVirtualVoiceControl(apu->dsp, instance->voice, 0x4c, true);
+    instance->pending_kon = 1;
 
   if (instance->paired)
     SynchronizePairPhase(instance->serial, apu->ram[0x3f]);
@@ -531,7 +531,11 @@ static void FinishScheduledInstance(Spc *spc, bool ended) {
       g_native_audio_extension_trace_end_hook(
           instance->trace_serial,
           instance->lane_track == kEventTrack ? 0 : 1);
-    instance->active = 0;
+    /* Cleanup's KOF is applied by the same central $0458 flush that services
+     * native voices. Hold this pool slot through the following clear flush so
+     * KOF cannot overlap a newly allocated KON on the same virtual voice. */
+    instance->ending = 1;
+    instance->end_kof_stage = 2;
   }
 
   const int next = FirstScheduledSlot();
@@ -544,6 +548,7 @@ static void FinishScheduledInstance(Spc *spc, bool ended) {
   s_state.active_virtual_voice = 0xff;
   apu->ram[0x34] = 0;
   apu->ram[0x35] = 0;
+  apu->ram[kCurrentTrackMaskAddress] = 0;
   ClearEffectScratchMasks(apu);
 }
 
@@ -557,7 +562,7 @@ static void StartEffectScheduler(Spc *spc) {
   s_state.charged_lane_mask = 0;
   s_state.schedule_mask = 0;
   for (int i = 0; i < kVirtualVoicePoolSize; i++) {
-    if (s_state.instance[i].active)
+    if (s_state.instance[i].active && !s_state.instance[i].ending)
       s_state.schedule_mask |= (uint16_t)(1u << i);
   }
   const int first = FirstScheduledSlot();
@@ -567,7 +572,47 @@ static void StartEffectScheduler(Spc *spc) {
     ClearEffectScratchMasks(apu);
     apu->ram[0x34] = 0;
     apu->ram[0x35] = 0;
+    apu->ram[kCurrentTrackMaskAddress] = 0;
     spc->pc = kEffectDriverReturn;
+  }
+}
+
+static void FlushVirtualLifecycleControls(Apu *apu, uint8_t addr) {
+  if (!apu || !apu->dsp || (addr != 0x4c && addr != 0x5c)) return;
+  for (int i = 0; i < kVirtualVoicePoolSize; i++) {
+    NativeAudioEffectInstance *instance = &s_state.instance[i];
+    if (!instance->active) continue;
+    if (addr == 0x5c) {
+      if (instance->ending) {
+        if (instance->end_kof_stage == 2) {
+          dsp_writeVirtualVoiceControl(
+              apu->dsp, instance->voice, 0x5c, true);
+          instance->end_kof_stage = 1;
+        } else if (instance->end_kof_stage == 1) {
+          dsp_writeVirtualVoiceControl(
+              apu->dsp, instance->voice, 0x5c, false);
+          instance->end_kof_stage = 0;
+          instance->release_after_kon = 1;
+        }
+      } else if (instance->start_kof_stage == 2) {
+        dsp_writeVirtualVoiceControl(
+            apu->dsp, instance->voice, 0x5c, true);
+        instance->start_kof_stage = 1;
+      } else if (instance->start_kof_stage == 1) {
+        dsp_writeVirtualVoiceControl(
+            apu->dsp, instance->voice, 0x5c, false);
+        instance->start_kof_stage = 0;
+      }
+    } else {
+      dsp_writeVirtualVoiceControl(
+          apu->dsp, instance->voice, 0x4c,
+          instance->pending_kon != 0);
+      instance->pending_kon = 0;
+      if (instance->ending && instance->release_after_kon) {
+        instance->active = 0;
+        instance->release_after_kon = 0;
+      }
+    }
   }
 }
 
@@ -591,6 +636,8 @@ static bool RouteDspWrite(Apu *apu, uint8_t addr, uint8_t *value) {
   const uint8_t logical_track = apu->spc->x;
   const uint8_t track_mask = apu->ram[kCurrentTrackMaskAddress];
   const uint8_t ownership = apu->ram[kEffectOwnershipMaskAddress];
+  if (track_mask == 0)
+    FlushVirtualLifecycleControls(apu, addr);
   s_song_kon_pending_mask &= ownership;
   /* $080A still has the sequencer track in X. Its shared writer at $0834
    * replaces X with $64-$67/$74-$77 and can temporarily see $1A clear. Carry

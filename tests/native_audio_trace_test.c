@@ -128,6 +128,25 @@ static void TestLaneReplacement(void) {
   assert(Request(second)->outcome == kNativeAudioOutcome_Completed);
 }
 
+static void TestStablePortRetriggerIsNotLaneReplacement(void) {
+  NativeAudioTraceModel_Reset();
+  uint64_t serial = Post(kNativeAudioRequest_Event, 0x07, 1);
+  DeliverToRead(kNativeAudioRequest_Event, 0x07, 2);
+  NativeAudioTraceModel_SpcOpcode(0x0E14, 0x07, 0x10, 0, 0, 5);
+  /* No second CPU/SPC read serial: this is the same stable input value. */
+  NativeAudioTraceModel_SpcOpcode(0x0E14, 0x07, 0x10, 0, 0, 6);
+  assert(Request(serial)->outcome == kNativeAudioOutcome_Pending);
+  assert(Request(serial)->flags & kNativeAudioFlag_NativeLaneRetriggered);
+  assert(Request(serial)->native_lane_retriggers == 1);
+  assert(Request(serial)->native_retrigger_first_cycle == 6);
+  assert(Request(serial)->native_retrigger_last_cycle == 6);
+  NativeAudioTraceStats stats;
+  NativeAudioTraceModel_GetStats(&stats);
+  assert(stats.native_lane_retriggers == 1);
+  NativeAudioTraceModel_SpcOpcode(0x0E51, 0, 0x10, 0, 0, 20);
+  assert(Request(serial)->outcome == kNativeAudioOutcome_Completed);
+}
+
 static void TestHighBitDualLaneCompletion(void) {
   NativeAudioTraceModel_Reset();
   uint64_t serial = Post(kNativeAudioRequest_Event, 0xA0, 1);
@@ -289,6 +308,7 @@ int main(void) {
   TestOrdinaryBusyRejection();
   TestPositiveEventBusyRejection();
   TestLaneReplacement();
+  TestStablePortRetriggerIsNotLaneReplacement();
   TestHighBitDualLaneCompletion();
   TestHighBitEventBypassesBusyAndReplacesPair();
   TestSuppressionAndSongEventsAreNotDrops();

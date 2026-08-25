@@ -1,8 +1,9 @@
 # SNES native audio channels and ActRaiser effect ownership
 
-Status: ROM-static channel map and the opt-in 24-voice scheduler are complete;
-runtime sound-name labeling is still partial. Investigated 2026-08-23 and
-implemented 2026-08-24.
+Status: ROM-static channel map, the opt-in 24-voice scheduler, shipped-effect
+control audit, and isolated PCM parity are complete; runtime sound-name
+labeling and full-playthrough frequency coverage are still partial.
+Investigated 2026-08-23 and implemented 2026-08-24.
 
 This document is authoritative for native channel allocation, effect-lane
 ownership, loss mechanisms, and extended-channel design. `SEAMS.md` owns the
@@ -133,6 +134,14 @@ lose audio at four different stages:
    already active on that lane.
 4. **Music voice stealing.** Accepted effects claim bits `$40/$80`; the music
    sequencer advances while its voice-6/7 DSP writes are suppressed.
+
+A separate native behavior can look like item 3 unless it is tracked
+explicitly. If an unchanged input-port value makes the driver enter `$0E14`
+again without a new traced CPU request/read serial, it restarts the *same*
+effect on the same lane. The trace classifies this as `native_lane_retrigger`,
+retains the original request owner, and records the first/last retrigger cycle.
+It can change the audible envelope or duration, but it is neither a different
+sound replacing the request nor evidence of a dropped request.
 
 A mixer-only expansion fixes only item 4 unless request transport and logical
 track allocation are extended as well. The ten-voice Phase-1 milestone did
@@ -489,17 +498,27 @@ is the only new drop cap and is reported explicitly as
 An SPC image upload deliberately cancels queued/active effects because their
 sequence pointers and samples no longer belong to the installed image.
 
-### DSP integration details and remaining caveat
+### DSP integration and validated control semantics
 
 - Virtual voices feed the same final stereo and echo buses. EON behavior, FIR
   state, feedback, and echo RAM timing remain global rather than becoming a
   separate post-mix player.
 - NON is captured per context while every voice shares the authentic global
-  noise clock. New contexts initialize PMON and EON clear, matching the observed
-  effect programs; later mask writes are routed to their allocated voice.
-- PMON depends on the preceding physical voice. No captured ActRaiser effect has
-  required PMON, so predecessor behavior remains a content-specific validation
-  item if a future trace finds one.
+  noise clock. New contexts initialize PMON, NON, and EON clear; later mask
+  writes are routed to their allocated voice.
+- `tools/audit_spc_effects.py` statically walks all 38 common-bank sequences
+  `$01-$26` using the resident driver's own command-length table. All 38
+  terminate, none selects an instrument whose descriptor enables noise, and
+  none executes an echo-control command `$F5-$F8`. The resident program has no
+  decoded literal reference to the PMON source byte `$4B`, while `$0436-$043C`
+  computes EON as `$38 = $4A & ~$36`, explicitly excluding effect-owned bits.
+  Therefore every shipped effect uses clear PMON/NON/EON state; the extension's
+  initialization is exact for this ROM rather than an assumption based on the
+  replayed IDs.
+- Virtual KON/KOF changes are captured per context and applied at the original
+  driver's central `$0458` mask-writer cadence. An ending voice stays reserved
+  through KOF assertion, KOF clear, and the matching KON clear, preventing a
+  newly allocated effect from overlapping stale control state on that voice.
 - Quick states include every added voice, BRR decoder position, envelope, KON
   delay, logical sequence cursor, FIFO entry, and scheduler ownership field.
 - Replacement-music muting now uses explicit song/effect provenance, with SRCN
@@ -530,6 +549,8 @@ and observes the following stages without modifying emulated state:
 9. Port-0 command, uploaded image source, selected song number, and explicit
    transition owner/caller. This separates full-image swaps, in-bank song
    changes, pause/resume, and restore operations from effect-channel loss.
+10. Same-request native lane retriggers, including count and first/last cycle,
+    kept separate from lane replacement.
 
 Enable it with:
 
@@ -537,14 +558,19 @@ Enable it with:
 AR_NATIVE_AUDIO_TRACE=1 ./build-release/ActRaiserRecomp ar.sfc --config config.ini
 ```
 
+Set `AR_NATIVE_AUDIO_PCM=1` alongside the trace to dump the retained native-rate
+PCM ring to `native_audio_pcm.wav`. This is intended for reproducible
+authentic-versus-extended waveform comparisons, not normal logging.
+
 At clean shutdown it writes these files under `runs/latest/`:
 
 | File | Purpose |
 |---|---|
-| `native_audio_requests.csv` | request serial, caller/site, every native or extended transport/lane timestamp, terminal outcome, replacement/coalescing serial, virtual-voice mask, and music-update suppression attributed to that request |
+| `native_audio_requests.csv` | request serial, caller/site, every native or extended transport/lane timestamp, terminal outcome, replacement/coalescing serial, native retrigger cycles/count, virtual-voice mask, and music-update suppression attributed to that request |
 | `native_audio_song_events.csv` | port-0 controls, selected song number, image upload identity, frame, and caller; deliberate level-up/restore transitions stay separate from drops |
 | `native_audio_dsp_provenance.csv` | every reached DSP writer aggregated by SPC PC, track/ownership masks, DSP register, and count |
 | `native_audio_music_suppression.csv` | the three `$1A & $47` music-update skip sites aggregated by song track mask and ownership mask |
+| `native_audio_pcm.wav` | optional S-DSP PCM ring dump when `AR_NATIVE_AUDIO_PCM=1` is also set |
 
 The classifier has focused tests for mailbox overwrite/coalescing, port
 overwrite/coalescing, positive-event/ordinary-SFX busy rejection, lane
@@ -579,9 +605,17 @@ automatically enqueue every identical per-glyph post as a simultaneous voice.
 It needs either native duplicate coalescing by default or an explicit producer-
 aware policy, while still preserving genuinely independent overlapping effects.
 
-### Extended-mode paced replay result
+### Corrected authentic and extended paced replay
 
-`runs/20260824-164306/` replayed 700 frames of the same recording with
+`runs/20260824-171030/` replayed 700 frames in authentic mode after adding the
+same-request retrigger distinction. Its 214 posts classified as seven
+completed requests, 205 same-producer mailbox duplicates, two actual port
+overwrites, three same-request native lane retriggers, and zero lane
+replacements. Both overwritten requests were dialogue COP `$07` posts from
+`$01:902D`; this recording contains no ordinary BRK exposure, so it is not a
+general SFX drop-rate census.
+
+`runs/20260824-171219/` replayed the same 700 frames with
 `AR_EXTENDED_AUDIO_CHANNELS=1`, dummy audio, and normal pacing. Its 214 posts
 classified as:
 
@@ -591,12 +625,28 @@ classified as:
 | coalesced extended duplicate | 204 | same-frame dialogue glyph posts deliberately folded into their producer's existing request |
 | FIFO overflow / native mailbox or port loss / busy reject / lane replacement | 0 | no resource or native transport loss |
 
-Serials 1 and 48 were posted at frames 303 and 319 but both began at APU cycle
-4,643,118 on virtual voices 8 and 9. They then completed independently. A second
-natural overlap at frame 492 likewise used voices 8 and 9. The suppression CSV
-contained only its header: no song update was blocked, and every completed row
-reported zero suppressed music updates. This capture validates that deliberate
-same-producer coalescing remains distinct from genuinely overlapping requests.
+Natural overlaps used virtual voices 8 and 9 and completed independently. The
+suppression CSV contained only its header: no song update was blocked, and
+every completed row reported zero suppressed music updates. This capture
+validates that deliberate same-producer coalescing remains distinct from
+genuinely overlapping requests.
+
+### Isolated PCM parity
+
+The DSP regression test initializes the same looping BRR source, asymmetric
+left/right pan, gain, and shared echo state on authentic physical voice 7 and
+extended virtual voice 8. Across 512 stereo frames, the PCM output, complete
+`DspChannel` state, and touched echo RAM are byte-identical.
+
+A natural replay comparison adds the scheduling boundary that the unit test
+deliberately removes. Authentic `runs/20260824-170303/` and extended
+`runs/20260824-170825/` isolate the completed COP `$07` at frame 492 from site
+`$01:8C1C`, with Music 0, SFX 100, and the dialogue blip disabled. After the
+central KON/KOF cadence fix, `tools/compare_native_audio_pcm.py` measured 1,190
+versus 1,194 active stereo frames, a four-frame alignment lag, and 3.5055% RMS
+error relative to the signal. That is inside the 5% natural-replay threshold;
+the remaining difference is consistent with the two runs entering on different
+DSP/interpolation phases rather than different voice mixing.
 
 ## Verification matrix
 
@@ -608,11 +658,14 @@ same-producer coalescing remains distinct from genuinely overlapping requests.
 - **Implemented and live-tested:** simultaneous virtual voices 8/9, producer-
   aware duplicate coalescing, zero native transport/lane outcomes, and zero
   music suppression in the paced simulation replay above.
-- **Still required before calling audio parity complete:** authentic-off PCM
-  hash regression; isolated authentic-versus-extended PCM/pan/echo comparison;
-  sample-exact continuation after loading a quick state in the middle of a
-  natural multi-effect overlap; and a trace sweep broad enough to confirm no
-  shipped effect sequence enables PMON.
+- **Statically audited and parity-tested:** all 38 shipped effect sequences use
+  clear PMON/NON/EON state; physical/virtual DSP voice rendering is byte-exact
+  from identical state; one isolated natural request is within 3.5055% RMS
+  after phase alignment.
+- **Still required for broad release confidence:** sample-exact continuation
+  after loading a quick state in the middle of a natural multi-effect overlap,
+  and properly coupled action-stage/full-playthrough recordings that expose
+  ordinary BRK effects and the less common high-bit event collision cases.
 
 ## Evidence and confidence
 
@@ -633,7 +686,7 @@ Still incomplete:
 - complete data-selected/dynamically computed BRK caller coverage;
 - exact natural-game frequency of each of the four authentic-mode loss
   mechanisms across a full playthrough;
-- broader content coverage for isolated output parity and the PMON caveat above.
+- broader content coverage for natural replay output parity.
 
 The static driver map is cross-checked against the live captures here and the
 earlier capture documented in `research-symbol-map.md`.
