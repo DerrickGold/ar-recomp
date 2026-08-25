@@ -7,7 +7,7 @@
 /* Host-owned controls sit above the physical input mapper. They own pause,
  * turbo, the held joypad word, and the one-shot redraw request used while
  * emulation is frozen. */
-void HostInput_HandleKeyboard(int scancode, bool pressed);
+void HostInput_HandleKeyboard(int scancode, bool pressed, bool repeated);
 void HostInput_ClearHeld(void);
 uint32_t HostInput_ComputeGameInputs(bool *keep_running);
 

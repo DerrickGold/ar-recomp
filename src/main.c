@@ -1725,7 +1725,8 @@ static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
               HostInput_RequestPausedRedraw();
             }
           } else {
-            HostInput_HandleKeyboard((int)event.key.scancode, true);
+            HostInput_HandleKeyboard((int)event.key.scancode, true,
+                                     event.key.repeat != 0);
           }
           break;
         case SDL_EVENT_TEXT_INPUT:
@@ -1860,7 +1861,7 @@ static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
             if (HostInput_MenuKeyboardIsActive())
               (void)SettingsOverlay_HandleKey(event.key.key, false, false);
           } else {
-            HostInput_HandleKeyboard((int)event.key.scancode, false);
+            HostInput_HandleKeyboard((int)event.key.scancode, false, false);
           }
           break;
       }

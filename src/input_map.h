@@ -134,8 +134,12 @@ void InputMap_Shutdown(void);
  * the return value is informational, not a consume flag). */
 void InputMap_HandleEvent(const SDL_Event *event);
 /* Keyboard path, kept separate because main.c's hotkey chain also wants the
- * event and ordering there matters. `scancode` is SDL_Scancode. */
-void InputMap_HandleKey(int scancode, bool pressed);
+ * event and ordering there matters. `scancode` is SDL_Scancode; `repeated`
+ * is SDL's key-down auto-repeat flag and is false for key-up. */
+void InputMap_HandleKey(int scancode, bool pressed, bool repeated);
+/* Selected-gamepad button path. Exposed beside the keyboard path so its
+ * press-edge contract can be tested without attaching a physical pad. */
+void InputMap_HandlePadButton(SDL_GamepadButton button, bool pressed);
 
 /* Resolves the two physical sources under the device policy. Kept public as a
  * pure function so the simultaneous-input contract is testable without

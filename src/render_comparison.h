@@ -15,7 +15,11 @@ typedef enum RenderComparisonView {
 
 enum {
   kRenderComparisonHoldMilliseconds = 420,
-  kRenderComparisonTransitionMilliseconds = 360,
+  kRenderComparisonTransitionFadeMilliseconds = 180,
+  kRenderComparisonTransitionBlackMilliseconds = 540,
+  kRenderComparisonTransitionMilliseconds =
+      kRenderComparisonTransitionFadeMilliseconds * 2 +
+      kRenderComparisonTransitionBlackMilliseconds,
   /* A frozen redraw/upload should finish in a handful of frames. A generous
    * bound accommodates a device-reset redraw without freezing gameplay
    * forever when the native pass can no longer satisfy its contract. */
@@ -23,15 +27,19 @@ enum {
 };
 
 void RenderComparison_Reset(void);
-/* A comparison press cannot expose the authentic texture until a completed
- * native PPU pass with the current geometry has reached the GPU. When false,
- * the state machine freezes in an enhanced-only wait state. */
-void RenderComparison_OnPress(uint64_t now_ms, bool authentic_frame_ready);
+/* Press only begins intent detection. A short release swaps the base view and
+ * clears PiP; crossing the hold threshold toggles persistent side-by-side
+ * without changing that base view. Tick owns both decisions and native-frame
+ * readiness. */
+void RenderComparison_OnPress(uint64_t now_ms);
 void RenderComparison_Tick(uint64_t now_ms, bool control_held,
                            bool authentic_frame_ready);
 
 RenderComparisonView RenderComparison_PresentView(void);
 RenderComparisonView RenderComparison_BaseView(void);
+/* Destination of the active transition. Unlike PresentView, this never names
+ * the outgoing mode during the fade-to-black half of the title card. */
+RenderComparisonView RenderComparison_TransitionTargetView(void);
 bool RenderComparison_IsTransitioning(void);
 bool RenderComparison_IsAwaitingAuthenticFrame(void);
 bool RenderComparison_AuthenticWaitExpired(void);

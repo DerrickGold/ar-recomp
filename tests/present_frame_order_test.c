@@ -149,8 +149,9 @@ int main(void) {
 
   /* Authentic bypasses the enhanced compositor while retaining the player's
    * independent CRT configuration. */
-  RenderComparison_OnPress(1000, true);
-  RenderComparison_Tick(1360, false, true);
+  RenderComparison_OnPress(1000);
+  RenderComparison_Tick(1050, false, true);
+  RenderComparison_Tick(1950, false, true);
   slot.authentic_frame_serial = 7;
   s_authentic_uploaded_serial = 7;
   s_expected_view = kRenderComparison_Authentic;
@@ -160,18 +161,23 @@ int main(void) {
 
   /* A hold makes enhanced rendering the priority path and adds authentic PiP
    * inside the game composite before CRT resolve and all host UI. */
-  RenderComparison_OnPress(2000, true);
-  RenderComparison_Tick(2420, true, true);
-  RenderComparison_Tick(2780, true, true);
+  RenderComparison_OnPress(2200);
+  RenderComparison_Tick(2620, true, true);
+  RenderComparison_Tick(3520, true, true);
   s_expected_view = kRenderComparison_SideBySide;
   s_expected_host_viewport = kResolved;
   s_expected_stages = 6;
   RunCase(&slot);
 
-  /* Releasing the hold fades back to the tap-selected enhanced view. The
-   * transition overlay must remain below host UI. */
-  RenderComparison_Tick(2800, false, true);
-  RenderComparison_Tick(2980, false, true);
+  /* Releasing the hold leaves PiP latched. */
+  RenderComparison_Tick(3540, false, true);
+  CHECK(RenderComparison_PresentView() == kRenderComparison_SideBySide);
+
+  /* A later short click clears PiP and toggles the underlying authentic base
+   * to enhanced. The transition overlay must remain below host UI. */
+  RenderComparison_OnPress(3700);
+  RenderComparison_Tick(3750, false, true);
+  RenderComparison_Tick(4200, false, true);
   s_expected_view = kRenderComparison_Enhanced;
   s_expected_transition_alpha = 255;
   s_expected_stages = 6;
@@ -180,9 +186,10 @@ int main(void) {
   /* A nonzero capture serial is not enough: presentation must reject a frame
    * the upload stage did not synchronize for this exact geometry. Keep this
    * terminal because SessionFatal deliberately latches for process lifetime. */
-  RenderComparison_Tick(3160, false, true);
-  RenderComparison_OnPress(4000, true);
-  RenderComparison_Tick(4360, false, true);
+  RenderComparison_Tick(4650, false, true);
+  RenderComparison_OnPress(5000);
+  RenderComparison_Tick(5050, false, true);
+  RenderComparison_Tick(5950, false, true);
   slot.authentic_frame_serial = 8;
   s_stage = 0;
   (void)PresentFrame(&slot, s_expected_alpha, s_expected_presentation_fps);

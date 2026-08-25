@@ -733,6 +733,30 @@ int main(void) {
         if (r != 32 || g != 24 || b != 16) changed_pixels++;
       }
     CHECK(changed_pixels > 0);
+
+    /* PiP reuses the same native frame atlas at output coordinates. Exercise
+     * the checked draw seam with exact scaled-tile dimensions; it must render
+     * both with a real ROM atlas and with the normal host-frame fallback used
+     * by this test when AR_OVERLAY_TEST_ROM is absent. */
+    const SDL_Rect comparison_frame = { 80, 56, 176, 144 };
+    SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
+    CHECK(SDL_RenderClear(renderer));
+    CHECK(SettingsOverlay_DrawGameFrame(comparison_frame, 2));
+    CHECK(SDL_RenderPresent(renderer));
+    changed_pixels = 0;
+    for (int y = comparison_frame.y;
+         y < comparison_frame.y + comparison_frame.h; y++)
+      for (int x = comparison_frame.x;
+           x < comparison_frame.x + comparison_frame.w; x++) {
+        Uint8 r = 0, g = 0, b = 0, a = 0;
+        CHECK(SDL_ReadSurfacePixel(surface, x, y, &r, &g, &b, &a));
+        if (r != 32 || g != 24 || b != 16) changed_pixels++;
+      }
+    CHECK(changed_pixels > 0);
+    const char *frame_preview =
+        getenv("AR_OVERLAY_GAME_FRAME_TEST_BMP");
+    if (frame_preview && frame_preview[0])
+      CHECK(SDL_SaveBMP(surface, frame_preview));
   }
 
   /* Headless SDL reports no refresh rate; let a preview inject one so the

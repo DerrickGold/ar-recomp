@@ -40,6 +40,8 @@ static const SettingDesc *s_observer_desc;
 static SettingChangeResult s_observer_result;
 static int s_action_calls;
 static const SettingDesc *s_action_desc;
+static int s_input_action_calls;
+static InputAction s_last_input_action;
 
 #define CHECK(expr) do { \
   if (!(expr)) { \
@@ -59,6 +61,11 @@ static bool ActionObserved(const SettingDesc *desc) {
   s_action_calls++;
   s_action_desc = desc;
   return true;
+}
+
+static void InputActionObserved(InputAction action) {
+  s_input_action_calls++;
+  s_last_input_action = action;
 }
 
 static void ClearSettingsEnv(void) {
@@ -1074,6 +1081,51 @@ static void TestInputBindings(void) {
   CHECK(InputMap_AxisBindingHeld(positive_axis, 21000, false));
   CHECK(InputMap_AxisBindingHeld(positive_axis, 16000, true));
   CHECK(!InputMap_AxisBindingHeld(positive_axis, 11000, true));
+
+  /* Keyboard auto-repeat is not a new physical press. Preserve SDL's repeat
+   * signal all the way to host-action dispatch so a held key such as Tab can
+   * never retrigger comparison, even if the platform reports an unusual
+   * intervening release before the repeated down event. */
+  g_settings.input_bind[kInputClass_Keyboard][kInputAction_RenderCompare] =
+      INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_TAB, false);
+  InputMap_Clear();
+  s_input_action_calls = 0;
+  InputMap_SetActionHandler(InputActionObserved);
+  InputMap_HandleKey(SDL_SCANCODE_TAB, true, false);
+  InputMap_HandleKey(SDL_SCANCODE_TAB, true, true);
+  CHECK(s_input_action_calls == 1);
+  InputMap_HandleKey(SDL_SCANCODE_TAB, false, false);
+  InputMap_HandleKey(SDL_SCANCODE_TAB, true, true);
+  CHECK(s_input_action_calls == 1);
+  InputMap_HandleKey(SDL_SCANCODE_TAB, false, false);
+  InputMap_HandleKey(SDL_SCANCODE_TAB, true, false);
+  CHECK(s_input_action_calls == 2);
+  InputMap_HandleKey(SDL_SCANCODE_TAB, false, false);
+  InputMap_SetActionHandler(NULL);
+  InputMap_Clear();
+
+  /* Some controller drivers can repeat button-down events while a button is
+   * held. Edge host actions must ignore those repeats, then re-arm only after
+   * the matching release. Render comparison depends on this: one sustained
+   * hold selects picture-in-picture and must never keep flipping base views. */
+  g_settings.input_bind[kInputClass_Gamepad][kInputAction_RenderCompare] =
+      INPUT_BIND_MAKE(kInputBind_PadButton, SDL_GAMEPAD_BUTTON_GUIDE, false);
+  InputMap_Clear();
+  s_input_action_calls = 0;
+  InputMap_SetActionHandler(InputActionObserved);
+  InputMap_HandlePadButton(SDL_GAMEPAD_BUTTON_GUIDE, true);
+  InputMap_HandlePadButton(SDL_GAMEPAD_BUTTON_GUIDE, true);
+  CHECK(s_input_action_calls == 1);
+  CHECK(s_last_input_action == kInputAction_RenderCompare);
+  CHECK(InputMap_ActionHeld(kInputAction_RenderCompare));
+  InputMap_HandlePadButton(SDL_GAMEPAD_BUTTON_GUIDE, false);
+  CHECK(s_input_action_calls == 1);
+  CHECK(!InputMap_ActionHeld(kInputAction_RenderCompare));
+  InputMap_HandlePadButton(SDL_GAMEPAD_BUTTON_GUIDE, true);
+  CHECK(s_input_action_calls == 2);
+  InputMap_HandlePadButton(SDL_GAMEPAD_BUTTON_GUIDE, false);
+  InputMap_SetActionHandler(NULL);
+  InputMap_Clear();
 
   /* Camera actions default to the right stick (signed, sharing one axis) and
    * the triggers, and are analog rather than edge-dispatched. */

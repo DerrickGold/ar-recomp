@@ -104,6 +104,12 @@ int SettingsOverlay_GameTextWidth(const char *text, int scale);
 void SettingsOverlay_DrawGameText(int x, int y, int scale, uint8_t alpha,
                                   const char *text);
 
+/* Draw the ROM's native dialog-window frame at output-pixel coordinates.
+ * `scale` is an integer multiple of its 8x8 tiles; rectangle dimensions must
+ * therefore be divisible by 8*scale. Falls back to the overlay's host-drawn
+ * blue frame when the ROM atlas was unavailable. */
+bool SettingsOverlay_DrawGameFrame(SDL_Rect rect, int scale);
+
 bool SettingsOverlay_IsOpen(void);
 void SettingsOverlay_Open(void);
 void SettingsOverlay_Close(void);
