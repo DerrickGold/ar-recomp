@@ -102,7 +102,7 @@ void ApuProfFrameReset(void) {
 // scalar/blob; we route each call to fread/fwrite. Single magic+version
 // header lets future format changes be detected.
 #define RTL_SAV_MAGIC   0x52544c53u  /* "RTLS" */
-#define RTL_SAV_VERSION 7u  /* v7: measured 32-voice effect pool */
+#define RTL_SAV_VERSION 9u  /* v9: serialized APU port transport */
 #define RTL_SAV_EXTENDED_AUDIO_FLAG 0x00010000u
 
 static uint32 RtlSnapshotVersion(void) {
@@ -617,25 +617,15 @@ void RtlApuWrite(uint16 adr, uint8 val) {
      * with the observed burst granularity (audio_samples in config.ini
      * is user-tunable): a ceiling smaller than the real burst would pin
      * late-window writes to the same target and re-collapse spacing. */
-    static uint64_t s_port_clock;     /* previous write's target */
-    static uint64_t s_port_clock_ns;  /* wall_ns of previous write */
-    /* Per-port history for the minimum-dwell floor below. Statics, like
-     * s_port_clock: not reset across RtlReset/upload, which is benign —
-     * after a reset `produced` has advanced far past any stale target, so
-     * the floor (stale_target + dwell) is already in the past and never
-     * engages spuriously. */
-    static uint64_t s_port_last_target[4];
-    static uint8_t  s_port_last_val[4];
-    static uint8_t  s_port_last_valid[4];
+    Apu *apu = g_snes->apu;
     uint64_t quantum = audio_trace_consume_quantum();
     uint64_t now_ns = audio_trace_wall_ns();
-    uint64_t produced, consumed;
-    audio_trace_sample_clocks(&produced, &consumed);
+    uint64_t produced = apu->sampleClock;
     uint64_t delta = 0;
-    if (s_port_clock_ns != 0)
-      delta = (now_ns - s_port_clock_ns) * 32040u / 1000000000u;
+    if (apu->portClockNs != 0)
+      delta = (now_ns - apu->portClockNs) * 32040u / 1000000000u;
     if (delta > 4u * quantum) delta = 4u * quantum;
-    uint64_t target = s_port_clock + delta;
+    uint64_t target = apu->portClock + delta;
     if (target < produced) target = produced;
     if (target > produced + 3u * quantum) target = produced + 3u * quantum;
 
@@ -661,23 +651,23 @@ void RtlApuWrite(uint16 adr, uint8 val) {
      * already ~534 samples apart, far above the floor. */
     {
       int p = (int)(adr & 0x3);
-      if (s_port_last_valid[p] && val != s_port_last_val[p]) {
-        uint64_t floor = s_port_last_target[p] + APU_PORT_MIN_DWELL;
+      if (apu->portLastValid[p] && val != apu->portLastVal[p]) {
+        uint64_t floor = apu->portLastTarget[p] + APU_PORT_MIN_DWELL;
         uint64_t ceil  = produced + 8u * quantum;
         if (target < floor) target = floor < ceil ? floor : ceil;
       }
-      s_port_last_target[p] = target;
-      s_port_last_val[p]    = val;
-      s_port_last_valid[p]  = 1;
+      apu->portLastTarget[p] = target;
+      apu->portLastVal[p] = val;
+      apu->portLastValid[p] = 1;
     }
 
-    s_port_clock = target;
-    s_port_clock_ns = now_ns;
+    apu->portClock = target;
+    apu->portClockNs = now_ns;
     if (ApuProfEnabled()) {
       uint64_t lat = target > produced ? target - produced : 0;
       if (lat > g_apuprof_sched_lat_max) g_apuprof_sched_lat_max = lat;
     }
-    apu_schedulePortWrite(g_snes->apu, (uint8_t)(adr & 0x3), val, target);
+    apu_schedulePortWrite(apu, (uint8_t)(adr & 0x3), val, target);
   }
   RtlApuUnlock();
 }

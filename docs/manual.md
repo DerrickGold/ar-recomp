@@ -309,7 +309,9 @@ config's `AR_*` bridge or changed through the settings overlay:
 
 For an automated live probe without the overlay, use for example
 `AR_SETTING_SET=audio_master_volume=25`; the scheduled settings mechanism
-applies it through the same registry callback the menu uses.
+applies it through the same registry callback the menu uses. Diagnostic action
+probes use `key=run` (for example `save_state=run`) and may select a temporary
+slot with `AR_QUICKSTATE_SLOT=0..99`.
 
 Music/SFX separation follows the SPC driver's logical track provenance, not
 sample number: song tracks `$00-$0E` feed Music and effect tracks `$10/$12`

@@ -934,6 +934,16 @@ if(BUILD_TESTING)
     set_tests_properties(actraiser_settings_overlay_pillarbox PROPERTIES
         ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy;AR_OVERLAY_TEST_SIZE=1280x720")
 
+    add_executable(actraiser_scheduled_settings_test
+        tests/scheduled_settings_test.c
+        src/scheduled_settings.c
+    )
+    target_include_directories(actraiser_scheduled_settings_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS})
+    add_test(NAME actraiser_scheduled_settings
+        COMMAND actraiser_scheduled_settings_test)
+
     # SDL3 render-pipeline regression guard: presents a known framebuffer
     # through the same texture/FRect/logical-presentation path main.c uses and
     # asserts the read-back frame is not black (the prior SDL3 attempt's bug).
