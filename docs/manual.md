@@ -303,7 +303,7 @@ config's `AR_*` bridge or changed through the settings overlay:
 | `AR_AUDIO_VOLUME=<0..100>` | master output volume (default 100); scales the final music/SFX/MSU-1 mix |
 | `AR_MUSIC_VOLUME=<0..100>` | music volume (default 100); scales authentic SPC songs and enhanced OGG music without changing SFX |
 | `AR_SFX_VOLUME=<0..100>` | sound-effects volume (default 100); scales native event and ordinary effects without changing music |
-| `AR_EXTENDED_AUDIO_CHANNELS=1` | enables the restart-class 24-voice mode; all eight song voices remain active while queued native effects use 16 independent virtual voices |
+| `AR_EXTENDED_AUDIO_CHANNELS=1` | enables the restart-class 40-voice mode; all eight song voices remain active while queued native effects use 32 independent virtual voices |
 | `AR_DIALOG_BLIP=0` | mutes only the per-character Sky Palace dialogue sound; other uses of the same sound/event ID remain active |
 | `AR_MUSIC_REPLACEMENTS=0` | disables enhanced manifest-driven music replacement (default on, inert without audio files); toggling live immediately hands the current song between OGG and the authentic SPC sequencer |
 
@@ -319,7 +319,7 @@ hardware echo; an existing echo tail decays naturally after a live change. At
 channels retain that same classification and mixer. BRK/COP requests enter a
 128-entry FIFO before the game's depth-one mailboxes, and the original SPC700
 effect interpreter advances an isolated sequencer context for each allocated
-virtual voice. Voices 8-23 therefore carry overlapping effects while physical
+virtual voice. Voices 8-39 therefore carry overlapping effects while physical
 voices 0-7 remain dedicated to music. Exact duplicate posts from the same
 producer in one game frame are deliberately coalesced. See
 [`settings-system.md`](settings-system.md), "Audio control seams".

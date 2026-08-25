@@ -161,7 +161,7 @@ static void WriteRequests(const NativeAudioRequestRecord *records,
   for (size_t i = 0; i < count; i++) {
     const NativeAudioRequestRecord *r = &records[i];
     fprintf(f,
-            "%llu,%s,%02x,%02x,%u,%06x,\"%s\",%s,%04x,%02x,%02x,%04x,"
+            "%llu,%s,%02x,%02x,%u,%06x,\"%s\",%s,%04x,%02x,%02x,%08x,"
             "%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,"
             "%04x,%04x,%u,%02x,%u\n",
             (unsigned long long)r->serial,
@@ -306,7 +306,8 @@ void NativeAudioTrace_Report(void) {
           "[native-audio-trace] requests=%llu retained=%llu "
           "completed=%llu mailbox-coalesced=%llu mailbox-drop=%llu "
           "port-coalesced=%llu port-drop=%llu busy-drop=%llu "
-          "lane-replaced=%llu song-cancelled=%llu suppressed=%llu "
+          "lane-retriggered=%llu lane-replaced=%llu "
+          "song-cancelled=%llu suppressed=%llu "
           "native-retriggers=%llu "
           "extended-coalesced=%llu extended-overflow=%llu "
           "pending=%llu dsp-writes=%llu "
@@ -321,6 +322,8 @@ void NativeAudioTrace_Report(void) {
               kNativeAudioOutcome_CoalescedPortDuplicate],
           (unsigned long long)stats.outcome[kNativeAudioOutcome_OverwrittenPort],
           (unsigned long long)stats.outcome[kNativeAudioOutcome_RejectedDualBusy],
+          (unsigned long long)stats.outcome[
+              kNativeAudioOutcome_RetriggeredLane],
           (unsigned long long)stats.outcome[kNativeAudioOutcome_ReplacedLane],
           (unsigned long long)stats.outcome[
               kNativeAudioOutcome_CanceledSongTransition],

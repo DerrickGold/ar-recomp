@@ -178,8 +178,8 @@ values and nonzero port-2 ids to catch them in play.
    tagged voice; replacement OGG follows Music. With restart-class
    `audio_extended_channels`, BRK/COP requests enter a 128-entry host FIFO and
    isolated copies of the original `$10/$12` sequencer state render through
-   serialized DSP voices 8-23. Physical voices 0-7 remain music-only. The same
-   bus labels and shared echo mixer cover all 24 voices; authentic-off remains
+   serialized DSP voices 8-39. Physical voices 0-7 remain music-only. The same
+   bus labels and shared echo mixer cover all 40 voices; authentic-off remains
    the original eight-voice loop. The serial trace distinguishes native loss,
    extended duplicate coalescing/FIFO overflow, and intentional song swaps. See
    `settings-system.md`, "Audio control seams".

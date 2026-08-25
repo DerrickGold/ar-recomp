@@ -79,7 +79,7 @@ typedef struct NativeAudioExtensionState {
   uint32_t queue_count;
   uint32_t coalesced_count;
   uint32_t overflow_count;
-  uint16_t schedule_mask;
+  uint32_t schedule_mask;
   uint8_t scheduler_active;
   uint8_t current_slot;
   uint8_t active_virtual_voice;
@@ -474,7 +474,7 @@ static void AllocateQueuedRequests(Apu *apu) {
 
 static int FirstScheduledSlot(void) {
   for (int i = 0; i < kVirtualVoicePoolSize; i++) {
-    if ((s_state.schedule_mask & (uint16_t)(1u << i)) &&
+    if ((s_state.schedule_mask & (1u << i)) &&
         !s_state.instance[i].ending)
       return i;
   }
@@ -520,7 +520,7 @@ static void FinishScheduledInstance(Spc *spc, bool ended) {
   if (instance->paired)
     SynchronizePairPhase(instance->serial, apu->ram[0x3f]);
   ClearEffectScratchMasks(apu);
-  s_state.schedule_mask &= (uint16_t)~(1u << slot);
+  s_state.schedule_mask &= ~(1u << slot);
   if (ended) {
     if (s_log)
       fprintf(stderr,
@@ -563,7 +563,7 @@ static void StartEffectScheduler(Spc *spc) {
   s_state.schedule_mask = 0;
   for (int i = 0; i < kVirtualVoicePoolSize; i++) {
     if (s_state.instance[i].active && !s_state.instance[i].ending)
-      s_state.schedule_mask |= (uint16_t)(1u << i);
+      s_state.schedule_mask |= 1u << i;
   }
   const int first = FirstScheduledSlot();
   if (first >= 0) {

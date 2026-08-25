@@ -258,8 +258,8 @@ void NativeAudioTraceModel_ExtendedSequenceStart(
   r->flags |= kNativeAudioFlag_SequenceStarted;
   r->lanes_started |= (uint8_t)(1u << lane);
   r->active_lanes |= (uint8_t)(1u << lane);
-  if (virtual_voice >= 8 && virtual_voice < 24)
-    r->virtual_voices_started |= (uint16_t)(1u << (virtual_voice - 8));
+  if (virtual_voice >= 8 && virtual_voice < 40)
+    r->virtual_voices_started |= 1u << (virtual_voice - 8);
   if (!r->sequence_start_cycle) r->sequence_start_cycle = cycle;
 }
 
@@ -348,10 +348,17 @@ static void ReplaceLaneOwner(int lane, uint64_t new_serial, uint64_t cycle) {
   if (old_serial && old_serial != new_serial) {
     NativeAudioRequestRecord *old = FindMutable(old_serial);
     if (old) {
-      old->flags |= kNativeAudioFlag_LaneReplaced;
+      const NativeAudioRequestRecord *replacement = FindMutable(new_serial);
+      const bool same_request_kind_and_id = replacement &&
+          replacement->kind == old->kind && replacement->id == old->id;
+      old->flags |= same_request_kind_and_id
+          ? kNativeAudioFlag_LaneRetriggeredByRequest
+          : kNativeAudioFlag_LaneReplaced;
       old->active_lanes &= (uint8_t)~(1u << lane);
       old->replaced_by_serial = new_serial;
-      SetOutcome(old, kNativeAudioOutcome_ReplacedLane, cycle);
+      SetOutcome(old, same_request_kind_and_id
+          ? kNativeAudioOutcome_RetriggeredLane
+          : kNativeAudioOutcome_ReplacedLane, cycle);
     }
   }
   s_lane_owner[lane] = new_serial;
@@ -593,8 +600,9 @@ const char *NativeAudioTrace_OutcomeName(NativeAudioRequestOutcome outcome) {
   static const char *const names[kNativeAudioOutcome_Count] = {
     "pending", "suppressed_setting", "coalesced_mailbox_duplicate",
     "overwritten_mailbox", "coalesced_port_duplicate", "overwritten_port",
-    "rejected_dual_busy", "replaced_lane", "canceled_song_transition",
-    "coalesced_extended_duplicate", "extended_fifo_overflow", "completed"
+    "rejected_dual_busy", "retriggered_lane", "replaced_lane",
+    "canceled_song_transition", "coalesced_extended_duplicate",
+    "extended_fifo_overflow", "completed"
   };
   return outcome < kNativeAudioOutcome_Count ? names[outcome] : "unknown";
 }

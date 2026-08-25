@@ -24,6 +24,7 @@ typedef enum NativeAudioRequestOutcome {
   kNativeAudioOutcome_CoalescedPortDuplicate,
   kNativeAudioOutcome_OverwrittenPort,
   kNativeAudioOutcome_RejectedDualBusy,
+  kNativeAudioOutcome_RetriggeredLane,
   kNativeAudioOutcome_ReplacedLane,
   kNativeAudioOutcome_CanceledSongTransition,
   kNativeAudioOutcome_CoalescedExtendedDuplicate,
@@ -42,6 +43,7 @@ enum NativeAudioRequestFlags {
   kNativeAudioFlag_LaneReplaced = 1u << 6,
   kNativeAudioFlag_ExtendedTransport = 1u << 7,
   kNativeAudioFlag_NativeLaneRetriggered = 1u << 8,
+  kNativeAudioFlag_LaneRetriggeredByRequest = 1u << 9,
 };
 
 typedef struct NativeAudioRequestRecord {
@@ -67,7 +69,7 @@ typedef struct NativeAudioRequestRecord {
   uint16_t flags;
   uint8_t lanes_started; /* bit 0 = X $10, bit 1 = X $12 */
   uint8_t active_lanes;
-  uint16_t virtual_voices_started; /* bit 0 = virtual voice 8 */
+  uint32_t virtual_voices_started; /* bit 0 = virtual voice 8 */
   uint8_t music_suppressed_voice_mask;
   uint32_t music_updates_suppressed;
   uint32_t native_lane_retriggers;

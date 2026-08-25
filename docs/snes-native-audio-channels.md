@@ -1,8 +1,9 @@
 # SNES native audio channels and ActRaiser effect ownership
 
-Status: ROM-static channel map, the opt-in 24-voice scheduler, shipped-effect
-control audit, and isolated PCM parity are complete; runtime sound-name
-labeling and full-playthrough frequency coverage are still partial.
+Status: ROM-static channel map, the opt-in 40-voice scheduler, shipped-effect
+control audit, isolated PCM parity, and coupled action-stage/high-bit collision
+replays are complete; runtime sound-name labeling and full-playthrough
+frequency coverage are still partial.
 Investigated 2026-08-23 and implemented 2026-08-24.
 
 This document is authoritative for native channel allocation, effect-lane
@@ -29,7 +30,7 @@ state.
 The SNES S-DSP exposes eight voices. Each voice has its own left/right volume,
 pitch, source number, ADSR, and gain registers; the global KON, KOF, PMON, NON,
 and EON registers address them with one bit per voice. The local DSP core models
-the authentic eight plus sixteen optional game-owned virtual voices as
+the authentic eight plus 32 optional game-owned virtual voices as
 `DspChannel channel[kDspMaximumVoiceCount]` in
 `snesrecomp-go/runtime/src/snes/dsp.h`; authentic mode cycles only the first
 eight.
@@ -143,9 +144,16 @@ retains the original request owner, and records the first/last retrigger cycle.
 It can change the audible envelope or duration, but it is neither a different
 sound replacing the request nor evidence of a dropped request.
 
+A second restart case has a new CPU request serial but the same kind and ID as
+the active lane owner. It still truncates and restarts the envelope/sequence,
+so it is not harmless, but it does not prove that one *different* sound was
+lost. The trace classifies it as `new_request_lane_retrigger`; only a new kind
+or ID terminating the old owner is `effect_lane_replaced`. This distinction is
+especially important for repeated explosion producers.
+
 A mixer-only expansion fixes only item 4 unless request transport and logical
 track allocation are extended as well. The ten-voice Phase-1 milestone did
-exactly that; the current 24-voice mode addresses all four stages.
+exactly that; the current 40-voice mode addresses all four stages.
 
 The recomp runtime already schedules APU writes and gives distinct values on a
 port a 128-sample minimum dwell, which prevents a host-thread timing artifact
@@ -197,6 +205,7 @@ A useful loss/transition taxonomy is:
 | `request_overwritten_port` | CPU port write applied, then replaced before the SPC reads it | genuinely dropped in transport |
 | `event_rejected_dual_busy` | positive port-2 event is read while SPC `$35 != 0`, but no X=`$10` start follows | genuinely rejected by native priority logic; high-bit events bypass this test |
 | `ordinary_blocked_dual_busy` | port 3 contains a nonzero request while `$35 != 0`, so `$0DFA` does not read it | pending/blocked; count as dropped only if a later port write replaces it before acceptance |
+| `new_request_lane_retrigger` | a new request serial with the same kind and ID reinitializes an active `$10/$12` track | the earlier instance was truncated/restarted, but no different-sound loss is proven |
 | `effect_lane_replaced` | accepted request reinitializes an already-active X=`$10` or X=`$12` track | preceding effect was truncated by another effect |
 | `effect_canceled_song_transition` | a full SPC image upload clears a scheduled/applied/read/active effect serial | deliberate global driver/image replacement, not channel exhaustion |
 | `music_voice_masked` | `$1A & $47 != 0` skips a song-track DSP write | music note/parameter update was genuinely lost to voice stealing |
@@ -387,7 +396,7 @@ the extended-channel design:
 The mixer foundation itself changes levels only. Added voices carry the same
 bus enum, so faders, echo sends, replacement mute, and the master stage need no
 second mixer architecture. Phase 1 established the routing and music-safety
-bridge with voices 8/9; Phase 2 expands that bridge to a 16-voice effect pool
+bridge with voices 8/9; Phase 2 expands that bridge to a 32-voice effect pool
 and removes the native request/lane bottlenecks.
 
 `AR_AUDIO_BUSLOG=1` logs live gain values and only label transitions (voice,
@@ -401,9 +410,9 @@ validation readable without dumping every DSP write.
 Authentic mode remains the default eight-voice path. Extended mode is opt-in as
 `audio_extended_channels` / `AR_EXTENDED_AUDIO_CHANNELS`, and changing it is
 restart-required because migrating live envelopes and sequencer ownership
-during a toggle is ambiguous. Quick-state format v6 serializes all sixteen added
+during a toggle is ambiguous. Quick-state format v7 serializes all 32 added
 DSP channels, the request FIFO, and every independent sequencer context. Its
-header tags the active eight/24-voice mode and rejects older layouts or a state
+header tags the active eight/40-voice mode and rejects older layouts or a state
 from the other topology rather than misreading it.
 
 ### Phase 1: ten-voice “music-safe effects” — completed milestone
@@ -434,8 +443,8 @@ ordinary SFX, and a dual-lane event could still block request processing. Phase
 Implementation details:
 
 - The first implementation stored two added serialized BRR/envelope voices.
-  The same design now backs `DspChannel channel[24]`; authentic mode still
-  cycles exactly eight and extended mode cycles all 24 through the same dry,
+  The same design now backs `DspChannel channel[40]`; authentic mode still
+  cycles exactly eight and extended mode cycles all 40 through the same dry,
   Music/SFX gain, master, and shared FIR/feedback echo paths.
 - `native_audio_extension.c` maps physical `$40/$80` provenance to virtual
   voices 8/9. Per-voice registers never reach physical song voices 6/7. KON,
@@ -474,7 +483,7 @@ effects” behavior as follows:
    producer has a site-specific same-frame rule because its X/Y changes for
    every character.
 3. Give each accepted request an independent sequence state and allocate it
-   from the sixteen virtual voices at indices 8-23. A full voice pool applies
+   from the 32 virtual voices at indices 8-39. A full voice pool applies
    backpressure and leaves the request queued instead of replacing a lane.
 4. Preserve high-bit event semantics as a paired/two-instance effect, including
    its three-tick second-lane delay, without globally blocking unrelated
@@ -551,6 +560,8 @@ and observes the following stages without modifying emulated state:
    changes, pause/resume, and restore operations from effect-channel loss.
 10. Same-request native lane retriggers, including count and first/last cycle,
     kept separate from lane replacement.
+11. New-serial same-kind/ID lane restarts as `retriggered_lane`, kept separate
+    from a different-kind/ID `replaced_lane` loss.
 
 Enable it with:
 
@@ -631,6 +642,78 @@ every completed row reported zero suppressed music updates. This capture
 validates that deliberate same-producer coalescing remains distinct from
 genuinely overlapping requests.
 
+### Coupled action-stage drop census
+
+`tools/analyze_native_audio_trace.py RUN [--sites] [--transitions]` summarizes
+the request CSV by kind/ID while keeping genuine transport/different-sound
+loss, deliberate suppression/cancellation, duplicate coalescing, same-ID
+restarts, and requests still active when a recording stops in separate
+columns. It also normalizes older captures made before `retriggered_lane` was
+an explicit terminal outcome by comparing the old and replacement serials.
+
+The following action recordings were replayed with `AR_SAVE_EDIT=0` and the
+exact SRAM fixture used while recording. This coupling matters: staged save-
+editor changes occur before replay protection and can otherwise change the
+route while the input stream remains identical.
+
+Fillmore run `runs/20260824-172558/` produced 356 requests. Dialogue settings
+deliberately suppressed 247, leaving 109 exposed action requests:
+
+| ID | Posted | Completed | Different-sound lane loss | Same-ID restart |
+|---|---:|---:|---:|---:|
+| BRK `$02` enemy hit | 3 | 1 | 1 (replaced by enemy-death `$03`) | 1 |
+| BRK `$03` enemy death | 4 | 4 | 0 | 0 |
+| BRK `$1B` | 22 | 19 | 2 (replaced by `$03`) | 1 |
+| COP `$01` sword swing | 38 | 0 | 38 (replaced by `$12`) | 0 |
+| COP `$12` sword beam | 38 | 23 | 15 (replaced by the next `$01`) | 0 |
+| COP `$07` | 4 | 4 | 0 | 0 |
+
+The COP `$01/$12` alternation comes from this project's ranged-sword
+enhancement (`$00:9CF2` creates the beam); it proves the native lane-reuse
+mechanism but is not attributed to the stock game's encounter balance. The
+enemy hit/death transition is stock combat at `$00:8B07/$00:8B44`.
+
+Extended replay `runs/20260824-172955/` retained the same 356 request
+identities, completed all 109 exposed requests, and recorded zero transport,
+busy, lane, FIFO, or music-suppression loss. Final WRAM, SRAM, and dispatch-log
+hashes are byte-identical to the authentic run, as are song event identities;
+the audio topology therefore did not perturb game execution.
+
+Aitos run `runs/20260824-173312/` deliberately stresses high-bit events. Of 578
+requests, 460 dialogue posts were suppressed and 118 were exposed. Thirty-five
+completed before the recording ended; 47 were genuine losses, 34 were same-ID
+new-request restarts, and two were still open at shutdown. Genuine losses were
+two mailbox overwrites, one port overwrite, ten native dual-busy rejections,
+and 34 different-sound lane replacements. In particular:
+
+- COP `$A1` at `$00:D907` has effective sequence `$21`; its eight posts use
+  distinct child Y slots. COP `$85` at `$00:A5CB` is the boss-death explosion;
+  its 16 posts also correspond to separately allocated explosion objects.
+  Their 20 same-ID restarts are therefore distinct cues being collapsed by the
+  native lanes, not an intentional song transition.
+- BRK `$03` at frame 2037 and COP `$12` at frame 4270 were overwritten in the
+  CPU mailboxes. BRK `$02` at frame 4270 was overwritten at the SPC port.
+  The ten busy rejections occur under the high-bit `$A1/$85` ownership period.
+- The 23 COP `$01` requests incurred five busy rejections and 18 lane
+  replacements. Of 23 COP `$12` requests, six completed, one was overwritten
+  in the mailbox, three were busy-rejected, and 13 were lane-replaced.
+
+The first extended Aitos replay with 16 added voices
+(`runs/20260824-173609/`) removed every native loss but measured 22 simultaneous
+effect lanes during the boss-death burst. Eight paired requests were active and
+three more were queued when the recording ended; the largest observed start
+delay was 241,358 APU cycles. This is backpressure rather than a drop, but its
+roughly 0.24-second latency is avoidable.
+
+The implemented pool therefore has 32 added voices. Replay
+`runs/20260824-174757/` starts all 118 exposed requests: 107 finish and all 11
+remaining boss explosions are already active when the recording ends. There
+are no queued-at-shutdown rows and the largest request-to-sequence-start delay
+falls to 10,400 APU cycles. It again records zero native/extended loss and zero
+music suppression. Its final WRAM (`d8659055...7facca`), SRAM
+(`11dcdfb6...b79858`), and dispatch-log (`e4736323...f651`) hashes are identical
+to the authentic Aitos run, and all 24 song event identities match.
+
 ### Isolated PCM parity
 
 The DSP regression test initializes the same looping BRR source, asymmetric
@@ -652,20 +735,21 @@ DSP/interpolation phases rather than different voice mixing.
 
 - **Implemented and unit-tested:** music-update preservation on all three
   ownership branches; mailbox bypass/FIFO ordering; independent full sequencer
-  contexts and later-tick restoration; paired high-bit delays; 16-active-plus-
-  one-queued pool backpressure; per-lane emulated-cycle charging; DSP and
-  scheduler-state serialization.
+  contexts and later-tick restoration; paired high-bit delays; 32-voice pool
+  allocation/backpressure and bit-31 trace coverage; per-lane emulated-cycle
+  charging; DSP and scheduler-state serialization.
 - **Implemented and live-tested:** simultaneous virtual voices 8/9, producer-
-  aware duplicate coalescing, zero native transport/lane outcomes, and zero
-  music suppression in the paced simulation replay above.
+  aware duplicate coalescing, simultaneous 22-lane boss-burst demand, zero
+  native transport/lane outcomes, and zero music suppression in coupled
+  simulation, Fillmore, and Aitos replays.
 - **Statically audited and parity-tested:** all 38 shipped effect sequences use
   clear PMON/NON/EON state; physical/virtual DSP voice rendering is byte-exact
   from identical state; one isolated natural request is within 3.5055% RMS
   after phase alignment.
 - **Still required for broad release confidence:** sample-exact continuation
   after loading a quick state in the middle of a natural multi-effect overlap,
-  and properly coupled action-stage/full-playthrough recordings that expose
-  ordinary BRK effects and the less common high-bit event collision cases.
+  and full-playthrough recordings for frequency coverage beyond the coupled
+  action-stage and high-bit collision fixtures.
 
 ## Evidence and confidence
 

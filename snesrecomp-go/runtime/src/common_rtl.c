@@ -102,7 +102,7 @@ void ApuProfFrameReset(void) {
 // scalar/blob; we route each call to fread/fwrite. Single magic+version
 // header lets future format changes be detected.
 #define RTL_SAV_MAGIC   0x52544c53u  /* "RTLS" */
-#define RTL_SAV_VERSION 6u  /* v6: virtual effect pool + sequencer instances */
+#define RTL_SAV_VERSION 7u  /* v7: measured 32-voice effect pool */
 #define RTL_SAV_EXTENDED_AUDIO_FLAG 0x00010000u
 
 static uint32 RtlSnapshotVersion(void) {
