@@ -268,14 +268,16 @@ so one playthrough identifies all 17 tracks.
 
 Bind **Compare rendering** in **Settings → Controls** to switch between the
 player's current enhanced presentation and the ROM's native 256×224 graphics
-and SPC audio without changing any saved settings. Tap the control to toggle
-the two views; hold it for an enhanced-priority view with the authentic game in
-a picture-in-picture window. The comparison state is shared by action and
-simulation modes and resets to enhanced on every launch. Gameplay pauses during
-the short transition, while gameplay QoL options and cheats remain active in
-both views. CRT remains independently controlled by the player's current Video
-settings and applies to every comparison view. When neither comparison binding
-is configured, the parallel authentic scanout stays dormant.
+and SPC audio without changing any saved settings. A short click toggles the
+two base views. A long hold toggles a persistent enhanced-priority view with
+the authentic game in a picture-in-picture window; releasing the hold leaves
+PiP active, and the next short click exits PiP while switching base views. The
+comparison state is shared by action and simulation modes and resets to
+enhanced on every launch. Gameplay pauses during the short transition, while
+gameplay QoL options and cheats remain active in both views. CRT remains
+independently controlled by the player's current Video settings and applies to
+every comparison view. When neither comparison binding is configured, the
+parallel authentic scanout stays dormant.
 
 ### The settings overlay
 

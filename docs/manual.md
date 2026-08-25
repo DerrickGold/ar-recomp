@@ -180,10 +180,12 @@ written atomically to `settings.ini`; action rows are not persisted.
 
 ### Authentic/enhanced comparison control
 
-Bind **Compare rendering** in **Settings → Controls**. A tap toggles between
-the player's current enhanced presentation and an authentic view; a hold opens
-an enhanced-priority comparison with the authentic view inset as
-picture-in-picture. Releasing the hold returns to the tap-selected view.
+Bind **Compare rendering** in **Settings → Controls**. A short click toggles
+between the player's current enhanced presentation and an authentic view. A
+long hold toggles an enhanced-priority comparison with the authentic view inset
+as picture-in-picture. Releasing the hold leaves PiP active; another long hold
+returns to the unchanged base view, while a short click exits PiP and switches
+base views.
 
 The authentic view is the ROM's complete 256×224 PPU composition and native SPC
 audio. It bypasses widescreen, diorama/town 3D, HD replacements, other enhanced

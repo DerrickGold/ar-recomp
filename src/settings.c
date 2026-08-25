@@ -2055,12 +2055,12 @@ const SettingDesc g_setting_descs[] = {
                   "default."),
   BINDING_SETTING(kInputAction_RenderCompare, kInputClass_Keyboard,
                   "bind_key_render_compare", "Compare rendering",
-                  "Click to swap authentic and enhanced graphics/audio. Hold "
-                  "for enhanced view with an authentic picture-in-picture."),
+                  "Click to swap authentic and enhanced. Hold to toggle a "
+                  "persistent authentic picture-in-picture."),
   BINDING_SETTING(kInputAction_RenderCompare, kInputClass_Gamepad,
                   "bind_pad_render_compare", "Compare rendering",
-                  "Click to swap authentic and enhanced graphics/audio. Hold "
-                  "for enhanced view with an authentic picture-in-picture."),
+                  "Click to swap authentic and enhanced. Hold to toggle a "
+                  "persistent authentic picture-in-picture."),
 
   /* This is an optional gameplay enhancement rather than a bug fix: the
    * original 128-record structure cap is authentic. Completed bridges move

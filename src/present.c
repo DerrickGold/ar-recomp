@@ -2173,38 +2173,45 @@ bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
     return false;
 
   enum { kPipWidthPercent = 31, kPipMarginPercent = 3 };
-  int width = priority_viewport.w * kPipWidthPercent / 100;
-  int height = width * 3 / 4;
+  const int frame_scale = priority_viewport.h >= 1080 ? 3
+      : priority_viewport.h >= 600 ? 2 : 1;
+  int ratio_unit =
+      priority_viewport.w * kPipWidthPercent / 100 / (4 * frame_scale);
   const int maximum_height = priority_viewport.h * 38 / 100;
-  if (height > maximum_height) {
-    height = maximum_height;
-    width = height * 4 / 3;
-  }
+  const int maximum_ratio_unit = maximum_height / (3 * frame_scale);
+  if (ratio_unit > maximum_ratio_unit) ratio_unit = maximum_ratio_unit;
+  /* The dialog frame repeats exact 8x8 ROM tiles. Keeping the 4:3 ratio unit
+   * on that grid prevents a partial edge tile from being stretched or hidden
+   * beneath a corner. */
+  ratio_unit -= ratio_unit % 8;
+  if (ratio_unit < 8) ratio_unit = 8;
+  const int width = ratio_unit * 4 * frame_scale;
+  const int height = ratio_unit * 3 * frame_scale;
+  const int frame_size = kSettingsOverlayGlyphSize * frame_scale;
   int margin = priority_viewport.h * kPipMarginPercent / 100;
-  if (margin < 12) margin = 12;
-  int border = priority_viewport.h / 180;
-  if (border < 3) border = 3;
+  if (margin < frame_size + 8) margin = frame_size + 8;
   const SDL_FRect destination = {
     (float)(priority_viewport.x + priority_viewport.w - margin - width),
     (float)(priority_viewport.y + priority_viewport.h - margin - height),
     (float)width, (float)height,
   };
-  const SDL_FRect shadow = {
-    destination.x - border + border * 2.0f,
-    destination.y - border + border * 2.0f,
-    destination.w + border * 2.0f,
-    destination.h + border * 2.0f,
+  const SDL_Rect frame = {
+    (int)destination.x - frame_size,
+    (int)destination.y - frame_size,
+    width + frame_size * 2,
+    height + frame_size * 2,
   };
-  const SDL_FRect frame = {
-    destination.x - border, destination.y - border,
-    destination.w + border * 2.0f, destination.h + border * 2.0f,
+  const int shadow_offset = frame_scale * 4;
+  const SDL_FRect shadow = {
+    (float)(frame.x + shadow_offset),
+    (float)(frame.y + shadow_offset),
+    (float)frame.w, (float)frame.h,
   };
   bool rendered =
       SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND) &&
       SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 150) &&
       SDL_RenderFillRect(g_renderer, &shadow) &&
-      SDL_SetRenderDrawColor(g_renderer, 236, 206, 120, 255) &&
-      SDL_RenderFillRect(g_renderer, &frame) &&
+      SettingsOverlay_DrawGameFrame(frame, frame_scale) &&
       SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE) &&
       SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255) &&
       SDL_RenderFillRect(g_renderer, &destination);
@@ -2215,15 +2222,6 @@ bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
   if (rendered)
     rendered = SDL_RenderTexture(
         g_renderer, g_authentic_texture, &source, &destination);
-
-  if (rendered) {
-    const int scale = height >= 540 ? 3 : height >= 300 ? 2 : 1;
-    const char *label = "AUTHENTIC";
-    const int label_x = (int)destination.x + border * 2;
-    const int label_y = (int)destination.y -
-        kSettingsOverlayGlyphSize * scale - border * 2;
-    SettingsOverlay_DrawGameText(label_x, label_y, scale, 255, label);
-  }
   return PresentationGeometry_PopFullOutput(
       g_renderer, &output_state) && rendered;
 }
@@ -2239,13 +2237,18 @@ bool PresentComparisonTransitionOverlay(uint8_t alpha, const char *label) {
       SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND) &&
       SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, alpha) &&
       SDL_RenderFillRect(g_renderer, NULL);
-  if (rendered && label && alpha >= 192 && width > 0 && height > 0) {
-    const int scale = height >= 900 ? 3 : height >= 480 ? 2 : 1;
-    const int text_width = SettingsOverlay_GameTextWidth(label, scale);
+  if (rendered && label && alpha >= 240 && width > 0 && height > 0) {
+    int scale = height >= 1080 ? 6 : height >= 720 ? 5
+        : height >= 480 ? 4 : height >= 240 ? 3 : 2;
+    int text_width = SettingsOverlay_GameTextWidth(label, scale);
+    while (scale > 1 && text_width > width * 3 / 4) {
+      scale--;
+      text_width = SettingsOverlay_GameTextWidth(label, scale);
+    }
     SettingsOverlay_DrawGameText(
         (width - text_width) / 2,
         (height - kSettingsOverlayGlyphSize * scale) / 2,
-        scale, alpha, label);
+        scale, 255, label);
   }
   return PresentationGeometry_PopFullOutput(
       g_renderer, &output_state) && rendered;

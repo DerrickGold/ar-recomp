@@ -570,7 +570,7 @@ static void SetActionBit(uint32 *bits, InputAction action, bool pressed) {
   else *bits &= ~(1u << action);
 }
 
-void InputMap_HandleKey(int scancode, bool pressed) {
+void InputMap_HandleKey(int scancode, bool pressed, bool repeated) {
   if (scancode >= 0 && scancode < SDL_SCANCODE_COUNT)
     s_key_down[scancode] = pressed;
   uint32 want = INPUT_BIND_MAKE(kInputBind_Key, scancode, false);
@@ -585,13 +585,14 @@ void InputMap_HandleKey(int scancode, bool pressed) {
        * publishes a keyboard binding for can land here: the menu/pause/state
        * actions store kInputBind_None (0), which never equals a real
        * scancode's binding word, so their hard-wired hotkeys stay the only
-       * keyboard path to them (input_map.h). SDL delivers auto-repeat as more
-       * key-down events and main.c does not filter them, so track held state
-       * per action and fire only on the true press edge. */
+       * keyboard path to them (input_map.h). Retain both defenses against
+       * repeat: SDL's explicit repeat flag remains authoritative even if a
+       * platform emits an unusual intervening key state, while per-action
+       * held memory rejects duplicate non-repeat down events. */
       bool was_held = (s_host_key_held & (1u << a)) != 0;
       if (pressed) s_host_key_held |= 1u << a;
       else s_host_key_held &= ~(1u << a);
-      if (pressed && !was_held && s_action_handler)
+      if (pressed && !repeated && !was_held && s_action_handler)
         s_action_handler((InputAction)a);
     }
   }
@@ -673,9 +674,10 @@ uint32 InputMap_ArbitrateState(InputDeviceMode mode, bool gamepad_connected,
   return keyboard_state & 0xFFFu;
 }
 
-static void HandlePadButton(SDL_GamepadButton button, bool pressed) {
-  if (button >= 0 && button < SDL_GAMEPAD_BUTTON_COUNT)
-    s_pad_button_down[button] = pressed;
+void InputMap_HandlePadButton(SDL_GamepadButton button, bool pressed) {
+  if (button < 0 || button >= SDL_GAMEPAD_BUTTON_COUNT) return;
+  const bool was_pressed = s_pad_button_down[button];
+  s_pad_button_down[button] = pressed;
   uint32 want = INPUT_BIND_MAKE(kInputBind_PadButton, button, false);
   for (int a = 0; a < kInputAction_Count; a++) {
     if (g_settings.input_bind[kInputClass_Gamepad][a] != want) continue;
@@ -683,7 +685,7 @@ static void HandlePadButton(SDL_GamepadButton button, bool pressed) {
       SetActionBit(&s_pad_bits, (InputAction)a, pressed);
     } else if (INPUT_ACTION_IS_ANALOG(a)) {
       /* Polled, not dispatched — see InputMap_AnalogAction. */
-    } else if (pressed && s_action_handler) {
+    } else if (pressed && !was_pressed && s_action_handler) {
       s_action_handler((InputAction)a);
     }
   }
@@ -826,8 +828,9 @@ void InputMap_HandleEvent(const SDL_Event *event) {
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
     case SDL_EVENT_GAMEPAD_BUTTON_UP:
       if (!JoystickIsSelected(event->gbutton.which)) break;
-      HandlePadButton((SDL_GamepadButton)event->gbutton.button,
-                      event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN);
+      InputMap_HandlePadButton(
+          (SDL_GamepadButton)event->gbutton.button,
+          event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN);
       break;
     case SDL_EVENT_GAMEPAD_AXIS_MOTION:
       if (!JoystickIsSelected(event->gaxis.which)) break;

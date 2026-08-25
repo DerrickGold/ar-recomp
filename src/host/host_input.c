@@ -33,8 +33,8 @@ static uint32_t s_input_state;
 extern bool g_sim3d_textures_ready;
 extern InspectorPresentationSelection g_scene_inspector_presentation;
 
-void HostInput_HandleKeyboard(int scancode, bool pressed) {
-  InputMap_HandleKey(scancode, pressed);
+void HostInput_HandleKeyboard(int scancode, bool pressed, bool repeated) {
+  InputMap_HandleKey(scancode, pressed, repeated);
   s_input_state = InputMap_State();
 }
 
@@ -305,11 +305,8 @@ static void OnGamepadHostAction(InputAction action) {
       break;
     case kInputAction_RenderCompare:
       if (!SettingsOverlay_IsOpen()) {
-        RenderComparison_OnPress(SDL_GetTicks(), AuthenticFrameReady());
-        if (RenderComparison_IsAwaitingAuthenticFrame())
-          HostInput_RequestPausedRedraw();
-        fprintf(stderr, "[compare] requested %s\n",
-                RenderComparison_ViewName(RenderComparison_BaseView()));
+        RenderComparison_OnPress(SDL_GetTicks());
+        fprintf(stderr, "[compare] pressed; waiting for click or hold\n");
       }
       break;
     default:

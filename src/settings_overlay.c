@@ -2744,6 +2744,18 @@ static void SetDrawColor(uint32_t color) {
       (Uint8)color, (Uint8)(color >> 24));
 }
 
+static bool FillPixelRectChecked(int x, int y, int width, int height,
+                                 uint32_t color) {
+  if (width <= 0 || height <= 0) return true;
+  const SDL_FRect rect = {
+    (float)x, (float)y, (float)width, (float)height,
+  };
+  return SDL_SetRenderDrawColor(
+             s_renderer, (Uint8)(color >> 16), (Uint8)(color >> 8),
+             (Uint8)color, (Uint8)(color >> 24)) &&
+      SDL_RenderFillRect(s_renderer, &rect);
+}
+
 static void FillPixelRect(int x, int y, int width, int height,
                           uint32_t color) {
   if (width <= 0 || height <= 0) return;
@@ -2759,8 +2771,8 @@ void FillLogicalRect(const MenuLayout *layout,
   FillPixelRect(rect.x, rect.y, rect.w, rect.h, color);
 }
 
-static void DrawDialogTile(const MenuLayout *layout, int atlas_column,
-                           int atlas_row, int x, int y) {
+static bool DrawDialogTileChecked(const MenuLayout *layout, int atlas_column,
+                                  int atlas_row, int x, int y) {
   SDL_Rect source = {
     atlas_column * kGlyphSize,
     atlas_row * kGlyphSize,
@@ -2770,45 +2782,79 @@ static void DrawDialogTile(const MenuLayout *layout, int atlas_column,
   SDL_FRect destination =
       ToFRect(LogicalRect(layout, x, y, kGlyphSize, kGlyphSize));
   SDL_FRect source_f = ToFRect(source);
-  SDL_RenderTexture(s_renderer, s_dialog_frame_texture,
-                    &source_f, &destination);
+  return SDL_RenderTexture(s_renderer, s_dialog_frame_texture,
+                           &source_f, &destination);
 }
 
-void DrawDialogPanel(const MenuLayout *layout,
-                            int x, int y, int width, int height) {
-  if (width < 16 || height < 16) return;
+static bool DrawDialogPanelChecked(const MenuLayout *layout,
+                                   int x, int y, int width, int height) {
+  if (width < 16 || height < 16) return false;
   if (!s_dialog_frame_texture) {
-    FillLogicalRect(layout, x, y, width, height, kFrameDark);
-    FillLogicalRect(layout, x + 2, y + 2,
-                    width - 4, height - 4, kFrameLight);
-    FillLogicalRect(layout, x + 4, y + 4,
-                    width - 8, height - 8, kPanel);
-    return;
+    const SDL_Rect outer = LogicalRect(layout, x, y, width, height);
+    const SDL_Rect middle = LogicalRect(
+        layout, x + 2, y + 2, width - 4, height - 4);
+    const SDL_Rect inner = LogicalRect(
+        layout, x + 4, y + 4, width - 8, height - 8);
+    return FillPixelRectChecked(
+               outer.x, outer.y, outer.w, outer.h, kFrameDark) &&
+        FillPixelRectChecked(
+               middle.x, middle.y, middle.w, middle.h, kFrameLight) &&
+        FillPixelRectChecked(
+               inner.x, inner.y, inner.w, inner.h, kPanel);
   }
 
-  FillLogicalRect(layout, x + kGlyphSize, y + kGlyphSize,
-                  width - kGlyphSize * 2, height - kGlyphSize * 2,
-                  kPanel);
+  const SDL_Rect inner = LogicalRect(
+      layout, x + kGlyphSize, y + kGlyphSize,
+      width - kGlyphSize * 2, height - kGlyphSize * 2);
+  if (!FillPixelRectChecked(
+          inner.x, inner.y, inner.w, inner.h, kPanel))
+    return false;
   for (int tile_x = x + kGlyphSize;
        tile_x < x + width - kGlyphSize; tile_x += kGlyphSize) {
-    DrawDialogTile(layout, 1, 0, tile_x, y);
-    DrawDialogTile(layout, 1, 2, tile_x,
-                   y + height - kGlyphSize);
+    if (!DrawDialogTileChecked(layout, 1, 0, tile_x, y) ||
+        !DrawDialogTileChecked(layout, 1, 2, tile_x,
+                               y + height - kGlyphSize))
+      return false;
   }
   for (int tile_y = y + kGlyphSize;
        tile_y < y + height - kGlyphSize; tile_y += kGlyphSize) {
-    DrawDialogTile(layout, 0, 1, x, tile_y);
-    DrawDialogTile(layout, 2, 1,
-                   x + width - kGlyphSize, tile_y);
+    if (!DrawDialogTileChecked(layout, 0, 1, x, tile_y) ||
+        !DrawDialogTileChecked(layout, 2, 1,
+                               x + width - kGlyphSize, tile_y))
+      return false;
   }
-  DrawDialogTile(layout, 0, 0, x, y);
-  DrawDialogTile(layout, 2, 0,
-                 x + width - kGlyphSize, y);
-  DrawDialogTile(layout, 0, 2,
-                 x, y + height - kGlyphSize);
-  DrawDialogTile(layout, 2, 2,
-                 x + width - kGlyphSize,
-                 y + height - kGlyphSize);
+  return DrawDialogTileChecked(layout, 0, 0, x, y) &&
+      DrawDialogTileChecked(
+          layout, 2, 0, x + width - kGlyphSize, y) &&
+      DrawDialogTileChecked(
+          layout, 0, 2, x, y + height - kGlyphSize) &&
+      DrawDialogTileChecked(
+          layout, 2, 2, x + width - kGlyphSize,
+          y + height - kGlyphSize);
+}
+
+void DrawDialogPanel(const MenuLayout *layout,
+                     int x, int y, int width, int height) {
+  (void)DrawDialogPanelChecked(layout, x, y, width, height);
+}
+
+bool SettingsOverlay_DrawGameFrame(SDL_Rect rect, int scale) {
+  if (!s_renderer || scale <= 0) return false;
+  const int tile_size = kGlyphSize * scale;
+  if (rect.w <= 0 || rect.h <= 0 ||
+      rect.w % tile_size != 0 || rect.h % tile_size != 0)
+    return false;
+  const MenuLayout layout = {
+    .output_width = rect.w,
+    .output_height = rect.h,
+    .scale_percent = scale * kPercentScale,
+    .logical_width = rect.w / scale,
+    .logical_height = rect.h / scale,
+    .origin_x = rect.x,
+    .origin_y = rect.y,
+  };
+  return DrawDialogPanelChecked(
+      &layout, 0, 0, layout.logical_width, layout.logical_height);
 }
 
 static void DrawGlyph(const MenuLayout *layout, int x, int y,

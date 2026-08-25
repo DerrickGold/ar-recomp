@@ -85,7 +85,8 @@ SDL_Rect PresentFrame(const FrameSlot *slot, float alpha,
   if (SessionFatal_Requested()) return image;
   const uint8_t fade = RenderComparison_TransitionFadeAlpha();
   if (fade && !PresentComparisonTransitionOverlay(
-                  fade, RenderComparison_ViewName(view))) {
+                  fade, RenderComparison_ViewName(
+                            RenderComparison_TransitionTargetView()))) {
     RequestComparisonDrawFailure("transition overlay");
     return image;
   }
