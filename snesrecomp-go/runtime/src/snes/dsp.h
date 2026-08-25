@@ -25,9 +25,9 @@ typedef enum DspVoiceBus {
 
 enum {
   kDspHardwareVoiceCount = 8,
-  /* Sixteen virtual lanes leave enough room for independent effect requests
-   * while keeping the fixed-size DSP state small and deterministic. */
-  kDspExtendedVoiceCount = 16,
+  /* The Aitos boss-death burst reaches 22 simultaneous effect lanes. Thirty-
+   * two leaves measured headroom while keeping state fixed and deterministic. */
+  kDspExtendedVoiceCount = 32,
   kDspMaximumVoiceCount =
       kDspHardwareVoiceCount + kDspExtendedVoiceCount,
 };

@@ -432,8 +432,8 @@ problems:
 - **Extended sound channels are restart-class.**
   `audio_extended_channels` / `AR_EXTENDED_AUDIO_CHANNELS` fixes the running
   DSP topology at boot. Off cycles the original eight voices and leaves every
-  register write and ownership branch authentic. On cycles 24 voices: physical
-  voices 0-7 remain song-only and a 16-voice pool at 8-23 carries independent
+  register write and ownership branch authentic. On cycles 40 voices: physical
+  voices 0-7 remain song-only and a 32-voice pool at 8-39 carries independent
   effects. BRK/COP hooks capture requests into a 128-entry FIFO before the
   native depth-one mailboxes. A scheduler time-multiplexes the original SPC700
   `$0E7F-$0F0B` interpreter over a complete isolated copy of each `$10/$12`
@@ -446,9 +446,9 @@ problems:
   Per-context KON/KOF is applied at the original central mask-flush cadence,
   and a finishing slot remains reserved through its control clears before it
   can be reused.
-  Quick-state format v6 includes all virtual BRR/envelope/control state, FIFO,
+  Quick-state format v7 includes all virtual BRR/envelope/control state, FIFO,
   and sequencer contexts; its header rejects a state captured under the other
-  eight/24-voice topology. Exact same-frame duplicates from one producer are
+  eight/40-voice topology. Exact same-frame duplicates from one producer are
   coalesced, and a full FIFO is an explicit traced overflow rather than an
   implicit native lane replacement.
 - **Dialogue blip is suppressed at its native request site.** The message
@@ -463,7 +463,7 @@ The classifier deliberately uses sequencer provenance rather than SRCN: music
 can use common-bank samples, and an extended effect voice must remain SFX
 regardless of instrument. The serial trace and static driver map supporting
 that choice are in `snes-native-audio-channels.md`. The implemented opt-in
-24-voice phase removes the native mailbox, port, busy-rejection, lane-reuse,
+40-voice phase removes the native mailbox, port, busy-rejection, lane-reuse,
 and music-stealing limits from accepted requests; only the explicit FIFO/pool
 capacity and producer-aware duplicate policy remain.
 
@@ -785,7 +785,7 @@ structure allocation).
 | Master volume | `AR_AUDIO_VOLUME` | int percent | 100 | CALLBACK; atomic post-mix gain, live `0..100` in steps of 5 |
 | Music volume | `AR_MUSIC_VOLUME` | int percent | 100 | CALLBACK; native song voices + replacement OGG, live `0..100` in steps of 5 |
 | Sound effects volume | `AR_SFX_VOLUME` | int percent | 100 | CALLBACK; native logical effect tracks `$10/$12`, live `0..100` in steps of 5 |
-| Extended sound channels | `AR_EXTENDED_AUDIO_CHANNELS` | bool | off | RESTART; 8 song voices plus a 16-voice queued effect pool |
+| Extended sound channels | `AR_EXTENDED_AUDIO_CHANNELS` | bool | off | RESTART; 8 song voices plus a 32-voice queued effect pool |
 | Dialogue text blip | `AR_DIALOG_BLIP` | bool | on | PASSIVE; exact `$01:902D` COP request only |
 | Screen ratio | `ExtendedAspectRatio` / `AR_EXTENDED_ASPECT_RATIO` | enum 4:3/16:9/16:10 | 4:3 | CALLBACK; changes active PPU border/pitch and presentation live |
 | Pixel aspect | `AspectPAR` / `AR_ASPECT_PAR` | enum 4:3/square | 4:3 | CALLBACK; recomputes active internal width live |

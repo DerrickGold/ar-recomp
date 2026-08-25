@@ -128,6 +128,24 @@ static void TestLaneReplacement(void) {
   assert(Request(second)->outcome == kNativeAudioOutcome_Completed);
 }
 
+static void TestNewRequestForSameIdIsLaneRetrigger(void) {
+  NativeAudioTraceModel_Reset();
+  uint64_t first = Post(kNativeAudioRequest_Sfx, 0x1B, 1);
+  DeliverToRead(kNativeAudioRequest_Sfx, 0x1B, 2);
+  NativeAudioTraceModel_SpcOpcode(0x0E14, 0x1B, 0x12, 0, 0, 5);
+
+  uint64_t second = Post(kNativeAudioRequest_Sfx, 0x1B, 6);
+  DeliverToRead(kNativeAudioRequest_Sfx, 0x1B, 7);
+  NativeAudioTraceModel_SpcOpcode(0x0E14, 0x1B, 0x12, 0, 0, 10);
+  NativeAudioTraceModel_SpcOpcode(0x0E51, 0, 0x12, 0, 0, 20);
+
+  assert(Request(first)->outcome == kNativeAudioOutcome_RetriggeredLane);
+  assert(Request(first)->flags & kNativeAudioFlag_LaneRetriggeredByRequest);
+  assert(!(Request(first)->flags & kNativeAudioFlag_LaneReplaced));
+  assert(Request(first)->replaced_by_serial == second);
+  assert(Request(second)->outcome == kNativeAudioOutcome_Completed);
+}
+
 static void TestStablePortRetriggerIsNotLaneReplacement(void) {
   NativeAudioTraceModel_Reset();
   uint64_t serial = Post(kNativeAudioRequest_Event, 0x07, 1);
@@ -258,19 +276,27 @@ static void TestExtendedTransportLifecycle(void) {
   NativeAudioTraceModel_ExtendedSequenceEnd(serial, 1, 4);
   assert(Request(serial)->outcome == kNativeAudioOutcome_Completed);
 
+  uint64_t highest_voice = NativeAudioTraceModel_PostExtendedRequest(
+      kNativeAudioRequest_Sfx, 0x11, "extended", 0x01bb6d,
+      20, 4, 5, 4);
+  NativeAudioTraceModel_ExtendedSequenceStart(highest_voice, 1, 39, 5);
+  assert(Request(highest_voice)->virtual_voices_started == 0x80000000u);
+  NativeAudioTraceModel_ExtendedSequenceEnd(highest_voice, 1, 6);
+  assert(Request(highest_voice)->outcome == kNativeAudioOutcome_Completed);
+
   uint64_t duplicate = NativeAudioTraceModel_PostExtendedRequest(
       kNativeAudioRequest_Sfx, 0x10, "extended", 0x01bb6d,
-      20, 4, 5, 5);
+      20, 4, 5, 7);
   NativeAudioTraceModel_ExtendedDisposition(
-      duplicate, serial, 1, 0, 6);
+      duplicate, serial, 1, 0, 8);
   assert(Request(duplicate)->outcome ==
          kNativeAudioOutcome_CoalescedExtendedDuplicate);
   assert(Request(duplicate)->replaced_by_serial == serial);
 
   uint64_t overflow = NativeAudioTraceModel_PostExtendedRequest(
       kNativeAudioRequest_Event, 0x83, "extended", 0x00f68c,
-      21, 0, 0, 7);
-  NativeAudioTraceModel_ExtendedDisposition(overflow, 0, 0, 1, 8);
+      21, 0, 0, 9);
+  NativeAudioTraceModel_ExtendedDisposition(overflow, 0, 0, 1, 10);
   assert(Request(overflow)->outcome ==
          kNativeAudioOutcome_ExtendedFifoOverflow);
 }
@@ -308,6 +334,7 @@ int main(void) {
   TestOrdinaryBusyRejection();
   TestPositiveEventBusyRejection();
   TestLaneReplacement();
+  TestNewRequestForSameIdIsLaneRetrigger();
   TestStablePortRetriggerIsNotLaneReplacement();
   TestHighBitDualLaneCompletion();
   TestHighBitEventBypassesBusyAndReplacesPair();
