@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "audio_trace.h"
 #include "common_rtl.h"
 #include "native_audio_extension.h"
 #include "run_dir.h"
@@ -154,13 +155,15 @@ static void WriteRequests(const NativeAudioRequestRecord *records,
           "lanes_started,active_lanes,virtual_voices_started,"
           "posted_cycle,port_write_cycle,"
           "port_apply_cycle,spc_read_cycle,start_cycle,end_cycle,"
-          "replaced_by,cpu_x,cpu_y,music_updates_suppressed,"
-          "music_suppressed_voice_mask\n");
+          "replaced_by,retrigger_first_cycle,retrigger_last_cycle,"
+          "cpu_x,cpu_y,music_updates_suppressed,"
+          "music_suppressed_voice_mask,native_lane_retriggers\n");
   for (size_t i = 0; i < count; i++) {
     const NativeAudioRequestRecord *r = &records[i];
     fprintf(f,
             "%llu,%s,%02x,%02x,%u,%06x,\"%s\",%s,%04x,%02x,%02x,%04x,"
-            "%llu,%llu,%llu,%llu,%llu,%llu,%llu,%04x,%04x,%u,%02x\n",
+            "%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,"
+            "%04x,%04x,%u,%02x,%u\n",
             (unsigned long long)r->serial,
             r->kind == kNativeAudioRequest_Event ? "COP" : "BRK",
             r->id, r->effective_id, r->game_frame, r->site,
@@ -174,11 +177,29 @@ static void WriteRequests(const NativeAudioRequestRecord *records,
             (unsigned long long)r->sequence_start_cycle,
             (unsigned long long)r->sequence_end_cycle,
             (unsigned long long)r->replaced_by_serial,
+            (unsigned long long)r->native_retrigger_first_cycle,
+            (unsigned long long)r->native_retrigger_last_cycle,
             r->cpu_x, r->cpu_y, r->music_updates_suppressed,
-            r->music_suppressed_voice_mask);
+            r->music_suppressed_voice_mask, r->native_lane_retriggers);
   }
   fclose(f);
   fprintf(stderr, "[native-audio-trace] wrote %s\n", path);
+}
+
+static void WritePcmIfRequested(void) {
+  const char *enabled = getenv("AR_NATIVE_AUDIO_PCM");
+  if (!enabled || !enabled[0] || enabled[0] == '0') return;
+  char path[kRuntimePathCapacity];
+  RunDirFile(path, sizeof(path), "native_audio_pcm.wav");
+  uint64_t start = 0, count = 0;
+  if (audio_trace_dump_wav(path, -1, 0, &start, &count) == 0) {
+    fprintf(stderr,
+            "[native-audio-trace] wrote %s (samples %llu..%llu)\n",
+            path, (unsigned long long)start,
+            (unsigned long long)(start + count));
+  } else {
+    fprintf(stderr, "[native-audio-trace] could not write %s\n", path);
+  }
 }
 
 static void WriteSongEvents(const NativeAudioSongEvent *events, size_t count) {
@@ -280,11 +301,13 @@ void NativeAudioTrace_Report(void) {
   WriteSongEvents(songs, song_count);
   WriteProvenance(provenance, provenance_count);
   WriteMusicSuppressions(suppressions, suppression_count);
+  WritePcmIfRequested();
   fprintf(stderr,
           "[native-audio-trace] requests=%llu retained=%llu "
           "completed=%llu mailbox-coalesced=%llu mailbox-drop=%llu "
           "port-coalesced=%llu port-drop=%llu busy-drop=%llu "
           "lane-replaced=%llu song-cancelled=%llu suppressed=%llu "
+          "native-retriggers=%llu "
           "extended-coalesced=%llu extended-overflow=%llu "
           "pending=%llu dsp-writes=%llu "
           "music-updates-suppressed=%llu unattributed=%llu\n",
@@ -302,6 +325,7 @@ void NativeAudioTrace_Report(void) {
           (unsigned long long)stats.outcome[
               kNativeAudioOutcome_CanceledSongTransition],
           (unsigned long long)stats.outcome[kNativeAudioOutcome_SuppressedSetting],
+          (unsigned long long)stats.native_lane_retriggers,
           (unsigned long long)stats.outcome[
               kNativeAudioOutcome_CoalescedExtendedDuplicate],
           (unsigned long long)stats.outcome[
