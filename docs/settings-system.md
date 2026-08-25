@@ -104,7 +104,7 @@ typedef struct Settings {
   int  audio_master_volume;    // 0..100; atomic callback mirror
   int  audio_music_volume;     // 0..100; native + replacement music bus
   int  audio_sfx_volume;       // 0..100; native effect bus
-  bool audio_extended_channels;// restart-class 8+16 native audio
+  bool audio_extended_channels;// restart-class 8+32 native audio
   bool audio_dialog_blip;      // exact $01:902D COP #$07 site
 
   /* Extras and inspection utility state */
