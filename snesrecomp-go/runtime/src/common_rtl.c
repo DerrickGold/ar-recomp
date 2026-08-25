@@ -125,6 +125,17 @@ static void file_sli_func(SaveLoadInfo *sli, void *data, size_t n) {
   if (got != n) fs->error = true;
 }
 
+static void RtlLogQuickStateAudioBoundary(const char *operation) {
+  const char *enabled = getenv("AR_QUICKSTATE_AUDIOLOG");
+  if (!enabled || !enabled[0] || enabled[0] == '0') return;
+  uint64_t trace_frame = 0;
+  audio_trace_sample_clocks(&trace_frame, NULL);
+  fprintf(stderr,
+          "[quickstate-audio] %s trace-frame=%llu apu-sample-clock=%llu\n",
+          operation, (unsigned long long)trace_frame,
+          (unsigned long long)g_snes->apu->sampleClock);
+}
+
 void RtlReset(int mode) {
   snes_frame_counter = 0;
   g_main_cpu_cycles_estimate = 0;
@@ -203,6 +214,8 @@ void RtlSaveSnapshot(const char *filename) {
   RtlApuLock();
   FileSli fs = { { &file_sli_func }, f, true, false };
   snes_saveload(g_snes, &fs.base);
+  if (!fs.error)
+    RtlLogQuickStateAudioBoundary("save");
   RtlApuUnlock();
   if (fs.error) printf("Save write error: %s\n", filename);
   fclose(f);
@@ -225,6 +238,8 @@ bool RtlLoadSnapshot(const char *filename) {
   snes_saveload(g_snes, &fs.base);
   if (!fs.error && g_rtl_apu_state_loaded_hook)
     g_rtl_apu_state_loaded_hook(g_snes->apu);
+  if (!fs.error)
+    RtlLogQuickStateAudioBoundary("load");
   RtlApuUnlock();
   fclose(f);
   if (fs.error) {

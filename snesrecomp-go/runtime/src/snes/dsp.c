@@ -276,6 +276,23 @@ static uint16_t s_leakKonBrr[kDspMaximumVoiceCount];
 static uint16_t s_leakSeenDir[kDspMaximumVoiceCount];
 static uint16_t s_leakSeenBrr[kDspMaximumVoiceCount];
 
+/* Added voices are game-owned effect contexts rather than addressable SNES
+ * hardware. Once one is fully released, advancing its silent BRR decoder,
+ * envelope, dry mix, and echo-send checks serves no observable purpose: the
+ * next KON resets the BRR cursor, interpolation history, gain, and ADSR stage
+ * before it can render. Native voices and pending KON/KOF remain exact. */
+static bool dsp_virtualVoiceIsSleeping(Dsp *dsp, int ch) {
+#ifdef DSP_DISABLE_VIRTUAL_VOICE_SLEEP
+  (void)dsp;
+  (void)ch;
+  return false;
+#else
+  return ch >= kDspHardwareVoiceCount &&
+      dsp->channel[ch].gain == 0 && dsp->channel[ch].adsrState == 4 &&
+      !dsp->channel[ch].keyOn && !dsp->channel[ch].keyOff && !dsp->reset;
+#endif
+}
+
 static void dsp_musicLeakNoteKon(Dsp* dsp, int ch) {
   if(!dsp_musicLeakEnabled()) return;
   s_leakKonSrcn[ch] = dsp->channel[ch].srcn;
@@ -318,6 +335,10 @@ void dsp_cycle(Dsp* dsp) {
   int totalR = 0;
   const int voice_count = dsp_activeVoiceCount();
   for(int i = 0; i < voice_count; i++) {
+    if(dsp_virtualVoiceIsSleeping(dsp, i)) {
+      dsp->channel[i].sampleOut = 0;
+      continue;
+    }
     dsp_cycleChannel(dsp, i);
     if(dsp_voiceIsPresentationMuted(dsp, i))
       continue;
@@ -405,6 +426,8 @@ static void dsp_handleEcho(Dsp* dsp, int* outputL, int* outputR) {
   // get echo input
   int inL = 0, inR = 0;
   for(int i = 0; i < dsp_activeVoiceCount(); i++) {
+    if(dsp_virtualVoiceIsSleeping(dsp, i))
+      continue;
     if(dsp_voiceIsPresentationMuted(dsp, i))
       continue; /* muted music voices must not bleed through the echo */
     if(dsp->channel[i].echoEnable) {

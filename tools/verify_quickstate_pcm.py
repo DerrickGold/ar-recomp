@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Verify sample-exact native PCM across an in-process quick-state rewind.
 
-The run must post the same traced request once before and once after loading a
-quick state. The diagnostic APU cycle counter and PCM capture remain monotonic
-across the load, so the two request records establish the offset between the
-original and restored streams. The script reports the longest non-silent,
-byte-identical stereo-frame run at that offset.
+New captures log the save/load PCM boundaries while holding the APU lock, so
+the script compares the two continuations directly. Older captures can still
+use a duplicated traced request to estimate the offset. The result reports a
+non-silent, byte-identical stereo-frame prefix (or legacy aligned run).
 """
 
 from __future__ import annotations
@@ -13,6 +12,7 @@ from __future__ import annotations
 import argparse
 import csv
 from pathlib import Path
+import re
 import wave
 
 
@@ -51,6 +51,40 @@ def read_pcm_frames(run: Path) -> list[bytes]:
     return [data[index:index + 4] for index in range(0, len(data), 4)]
 
 
+def find_audio_boundaries(run: Path) -> tuple[int, int] | None:
+    path = run / "console.log"
+    pattern = re.compile(
+        r"\[quickstate-audio\] (save|load) "
+        r"trace-frame=(\d+) apu-sample-clock=(\d+)"
+    )
+    matches = pattern.findall(path.read_text(errors="replace"))
+    if not matches:
+        return None
+    if len(matches) != 2 or [match[0] for match in matches] != ["save", "load"]:
+        raise ValueError(f"{path}: expected one ordered save/load audio marker")
+    if matches[0][2] != matches[1][2]:
+        raise ValueError(
+            f"{path}: restored APU sample clocks differ: "
+            f"{matches[0][2]} != {matches[1][2]}"
+        )
+    return int(matches[0][1]), int(matches[1][1])
+
+
+def exact_prefix(
+    frames: list[bytes], first: int, second: int,
+) -> tuple[int, int]:
+    zero = b"\0\0\0\0"
+    length = 0
+    signal_frames = 0
+    while (first + length < len(frames)
+           and second + length < len(frames)
+           and frames[first + length] == frames[second + length]):
+        if frames[first + length] != zero:
+            signal_frames += 1
+        length += 1
+    return length, signal_frames
+
+
 def longest_exact_signal_run(
     frames: list[bytes], first_estimate: int, offset: int,
     search_before: int, search_after: int,
@@ -83,14 +117,38 @@ def longest_exact_signal_run(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("run", type=Path)
-    parser.add_argument("--frame", type=int, required=True)
-    parser.add_argument("--site", type=parse_hex, required=True)
-    parser.add_argument("--id", type=parse_hex, required=True)
+    parser.add_argument("--frame", type=int)
+    parser.add_argument("--site", type=parse_hex)
+    parser.add_argument("--id", type=parse_hex)
     parser.add_argument("--search-before", type=int, default=512)
     parser.add_argument("--search-after", type=int, default=4096)
     parser.add_argument("--minimum-exact-frames", type=int, default=512)
     args = parser.parse_args()
 
+    boundaries = find_audio_boundaries(args.run)
+    frames = read_pcm_frames(args.run)
+    if boundaries is not None:
+        first, second = boundaries
+        if second <= first:
+            raise ValueError("load PCM boundary must follow save boundary")
+        length, signal_frames = exact_prefix(frames, first, second)
+        print(
+            f"audio_boundaries={first},{second} "
+            f"pcm_frame_offset={second - first}"
+        )
+        print(
+            f"exact_start_frames={first},{second} exact_frames={length} "
+            f"signal_frames={signal_frames} seconds={length / 32000:.6f}"
+        )
+        if length < args.minimum_exact_frames or signal_frames == 0:
+            raise SystemExit(1)
+        return
+
+    if args.frame is None or args.site is None or args.id is None:
+        raise ValueError(
+            "run has no quick-state audio markers; --frame, --site, and --id "
+            "are required for legacy request-based alignment"
+        )
     before, after = find_duplicate_requests(
         args.run, args.frame, args.site, args.id
     )
@@ -103,7 +161,6 @@ def main() -> None:
             "DSP-frame interval"
         )
     frame_offset = cycle_delta // 32
-    frames = read_pcm_frames(args.run)
     start, length, signal_frames = longest_exact_signal_run(
         frames,
         first_cycle // 32,

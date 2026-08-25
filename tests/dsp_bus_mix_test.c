@@ -167,6 +167,33 @@ static void TestExtendedVoiceIsMixedAndIndependentlyControlled(void) {
   CHECK(dsp_activeVoiceCount() == 8);
 }
 
+static void TestReleasedVirtualVoiceSleepsAndWakesOnKeyOn(void) {
+  uint8_t ram[0x10000];
+  dsp_setExtendedVoicesEnabled(true);
+  Dsp *dsp = NewDsp(ram);
+  ConfigureVoice(dsp, 8, kDspVoiceBus_Sfx, false);
+  DspChannel *voice = &dsp->channel[8];
+  voice->adsrState = 4;
+  voice->gain = 0;
+  voice->pitch = 0x1000;
+  voice->pitchCounter = 0x0123;
+
+  dsp_cycle(dsp);
+  CHECK(voice->pitchCounter == 0x0123);
+  CHECK(voice->sampleOut == 0);
+
+  voice->keyOn = true;
+  dsp->evenCycle = true;
+  dsp_cycle(dsp);
+  CHECK(!voice->keyOn);
+  CHECK(voice->pitchCounter != 0x0123);
+  CHECK(voice->gain == voice->gainValue);
+  CHECK(voice->sampleOut != 0);
+
+  dsp_free(dsp);
+  dsp_setExtendedVoicesEnabled(false);
+}
+
 static void ConfigureParityVoice(Dsp *dsp, uint8_t *ram, int voice) {
   /* One looping BRR block with an asymmetric stereo pan. The echo tail is
    * shared/global while the effect itself has EON clear, matching the static
@@ -293,6 +320,7 @@ int main(void) {
   TestIndependentDryGains();
   TestEchoSendFollowsBus();
   TestExtendedVoiceIsMixedAndIndependentlyControlled();
+  TestReleasedVirtualVoiceSleepsAndWakesOnKeyOn();
   TestPhysicalAndVirtualVoicePcmParity();
   TestExtendedVoiceStateIsSerialized();
   if (s_failures) {

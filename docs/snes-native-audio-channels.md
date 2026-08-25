@@ -403,6 +403,19 @@ and removes the native request/lane bottlenecks.
 Music/SFX, SPC X, `$47`, `$1A`, and DSP register), which makes a replay-sized
 validation readable without dumping every DSP write.
 
+Paced extended replay `runs/20260824-185549/` exercises the live settings seam
+during Aitos's natural multi-effect burst. At game frame 4570 it changes Music
+from 100% to 20% while leaving SFX at 100%; at frame 4611 it independently
+changes SFX to 35%. Both mutations reach the same registry callbacks used by
+the overlay and the bus log reports the expected `20/100` then `20/35` gains.
+The 40-voice scheduler retains the exact 100/100 reference disposition: 107
+requests complete and the remaining 11 boss explosions are already active at
+shutdown, with zero transport/lane/FIFO loss or music suppression. Final WRAM,
+SRAM, and dispatch log are byte-identical to reference run
+`runs/20260824-174757/`, and all 24 song-event identities/game-frame positions
+match; the faders therefore change only presentation gain, not extended
+scheduling or game/audio-driver control flow.
+
 ## Extended-channel design and implementation status
 
 ### Compatibility contract
@@ -534,6 +547,48 @@ sequence pointers and samples no longer belong to the installed image.
 - Replacement-music muting now uses explicit song/effect provenance, with SRCN
   `$0C+` only as an unclassified startup fallback. Every virtual voice must set
   the same bus label when allocated.
+
+### Emulation boundary and performance
+
+Extended audio is a narrow HLE/virtualization layer around request transport,
+sequencer ownership, and logical voice allocation; it is not a replacement
+audio engine. Each independent effect still runs ActRaiser's original SPC700
+sequence interpreter and reaches the same BRR decoder, Gaussian interpolator,
+ADSR/GAIN envelope, stereo voice sum, and global echo implementation as the
+eight hardware voices. Authentic mode bypasses that scheduler and retains the
+eight-voice path.
+
+The host audio device does not synthesize these voices. The emulator renders
+signed 16-bit stereo PCM in software at the native DSP rate, continuously
+resamples it to the selected output rate, mixes replacement music when active,
+and hands the completed stream to SDL/the operating system. Commodity audio
+APIs generally expose the PCM sink, not a portable SNES-style BRR/envelope/echo
+accelerator, so moving voice state into the device would sacrifice exactness
+without a useful general hardware-offload path.
+
+A released virtual voice now sleeps when its envelope is at zero and it has no
+pending KON/KOF. Native voices remain cycle-exact, and the next virtual KON
+wakes the voice through the existing reset path before rendering. On the local
+Apple host, a five-million-frame release benchmark reports approximately 0.21%
+of one CPU core for eight authentic active voices, 0.43% for the 40-voice
+topology with only eight active, and 0.93% with all 40 active. Run the focused
+diagnostic with:
+
+```sh
+./build-release/actraiser_dsp_voice_benchmark
+```
+
+These figures measure only the canonical DSP voice/echo mixer and will vary by
+compiler and CPU. The steady extended-mode optimization is a CPU fast path,
+not audio-device offload; its absolute cost is already well under one percent
+of one core in the worst benchmark case on this machine.
+
+Natural optimized replay `runs/20260824-190838/` retains the reference Aitos
+result: 107 requests complete, 11 boss explosions are active at shutdown, and
+no request is lost or music update suppressed. WRAM, SRAM, and the complete
+dispatch log are byte-identical to `runs/20260824-174757/`; all 24 song-event
+identities and game-frame positions also match. This covers the sleep/wake path
+under the same 22-lane peak used to size the extended pool.
 
 ## Implemented baseline instrumentation
 
@@ -768,31 +823,31 @@ DSP/interpolation phases rather than different voice mixing.
 
 ### Quick-state continuation
 
-The paced extended Aitos replay `runs/20260824-182100/` saved quick-state slot
+The paced extended Aitos replay `runs/20260824-191442/` saved quick-state slot
 99 at game frame 4611 in the natural boss-death multi-effect burst, loaded it
-at frame 4651, and then replayed the same interval in the same process. The
-native PCM following the restored sample clock matches the first pass byte for
-byte for 6,524 stereo DSP frames (about 204 ms), beginning one DSP frame after
-the repeated frame-4611 request. That exact interval crosses the next repeated
-CPU request and ends only after its asynchronously scheduled port command can
-affect the SPC. Later CPU-to-SPC arrival time is intentionally real-time and
-may move slightly with host thread scheduling; the serialized APU/DSP/queue
-continuation itself is sample-exact.
+at frame 4651, and then replayed the same interval in the same process. With
+`AR_QUICKSTATE_AUDIOLOG=1`, save/load markers are captured under the APU lock
+rather than inferred from a later asynchronous request. Both markers report
+APU sample clock 2,737,801 after restoration. From those exact boundaries, the
+two non-silent PCM continuations match byte for byte for 6,802 stereo DSP frames
+(about 213 ms). They diverge only after a later host-timed CPU command reaches
+the APU; that arrival can move with thread scheduling, while the serialized
+APU/DSP/queue continuation itself is sample-exact.
 
 The result is reproducible with:
 
 ```sh
-python3 tools/verify_quickstate_pcm.py runs/20260824-182100 \
-  --frame 4611 --site a5cb --id 85 --minimum-exact-frames 6000
+python3 tools/verify_quickstate_pcm.py runs/20260824-191442 \
+  --minimum-exact-frames 6000
 ```
 
 The rewound run reaches the recording endpoint normally, with no extended
 overflow, replacement, retrigger loss, or music suppression. Its final WRAM
 (`d8659055...7facca`) and SRAM (`11dcdfb6...b79858`) hashes exactly match the
-uninterrupted reference `runs/20260824-181500/`. This is an in-process
-quick-state contract: a boot-time load in a fresh process cannot reproduce the
-recompiled game's live coroutine stack, so it is not used as a whole-run
-continuation test.
+prior pre-optimization quick-state run `runs/20260824-182100/`, as does its
+complete dispatch log. This is an in-process quick-state contract: a boot-time
+load in a fresh process cannot reproduce the recompiled game's live coroutine
+stack, so it is not used as a whole-run continuation test.
 
 ## Verification matrix
 
@@ -800,13 +855,16 @@ continuation test.
   ownership branches; mailbox bypass/FIFO ordering; independent full sequencer
   contexts and later-tick restoration; paired high-bit delays; 32-voice pool
   allocation/backpressure and bit-31 trace coverage; per-lane emulated-cycle
-  charging; DSP and scheduler-state serialization.
+  charging; DSP and scheduler-state serialization; released-virtual-voice
+  sleep and KON wake-up.
 - **Implemented and live-tested:** simultaneous virtual voices 8/9, producer-
   aware duplicate coalescing, simultaneous 22-lane boss-burst demand, zero
   native transport/lane outcomes, and zero music suppression in coupled
   simulation, Fillmore, Aitos, Northwall, and complete Death Heim replays;
-  sample-exact in-process quick-state continuation through a natural multi-
-  effect overlap.
+  independent live Music/SFX faders during a 40-voice overlap; sample-exact
+  in-process quick-state continuation through a natural multi-effect overlap;
+  optimized Aitos replay parity for WRAM, SRAM, dispatches, request outcomes,
+  and all song-event identities/game-frame positions.
 - **Statically audited and parity-tested:** all 38 shipped effect sequences use
   clear PMON/NON/EON state; physical/virtual DSP voice rendering is byte-exact
   from identical state; one isolated natural request is within 3.5055% RMS
