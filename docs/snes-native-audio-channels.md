@@ -1,9 +1,9 @@
 # SNES native audio channels and ActRaiser effect ownership
 
 Status: ROM-static channel map, the opt-in 40-voice scheduler, shipped-effect
-control audit, isolated PCM parity, and coupled action-stage/high-bit collision
-replays are complete; runtime sound-name labeling and full-playthrough
-frequency coverage are still partial.
+control audit, isolated PCM parity, coupled action-stage/high-bit collision
+replays, and complete late-game boss-rush coverage are done; runtime sound-name
+labeling and a single title-to-ending frequency census are still partial.
 Investigated 2026-08-23 and implemented 2026-08-24.
 
 This document is authoritative for native channel allocation, effect-lane
@@ -715,6 +715,40 @@ music suppression. Its final WRAM (`d8659055...7facca`), SRAM
 (`11dcdfb6...b79858`), and dispatch-log (`e4736323...f651`) hashes are identical
 to the authentic Aitos run, and all 24 song event identities match.
 
+Natural Northwall runs `runs/20260824-183359/` (authentic) and
+`runs/20260824-183542/` (extended) add the complete `0605 -> 0606 -> 0607 ->
+0608` route. After 460 dialogue posts are deliberately suppressed, authentic
+mode loses 45 of 70 exposed requests: one mailbox overwrite, 14 dual-busy
+rejections, and 30 different-sound lane replacements. Six duplicate mailbox
+posts and six same-ID restarts remain separate from those losses. It also
+suppresses 297 song-track updates. Extended mode completes all 70 requests,
+including the newly covered ordinary BRK `$0C` and paired high-bit COP `$9E`,
+with zero loss or music suppression. WRAM, SRAM, the complete dispatch log, and
+all 24 song-event identities match between modes.
+
+The full Death Heim recording broadens this from one boss burst to every
+rematch, the final boss, the ending handoff, and the ending town. The clean
+endpoint runs are `runs/20260824-184548/` (authentic) and
+`runs/20260824-184558/` (extended); both disable only the presentation-side
+Simulation-3D view so a headless process follows the authentic 2D town through
+recorded game frame 19664. Authentic mode exposes 798 effect requests and
+classifies 470 genuine losses: 15 mailbox overwrites, two SPC-port overwrites,
+144 dual-busy rejections, and 309 different-sound lane replacements. Another
+203 are distinct same-ID restarts and 17 are true duplicate posts, not loss.
+It records 28,450 skipped music updates while effects own song voices 6/7.
+
+Extended mode completes all 798 Death Heim requests with zero overflow,
+transport loss, lane replacement, busy rejection, or music suppression. This
+includes eight ordinary BRK IDs (`$02/$03/$09/$0C/$10/$1B/$20/$21`) and twelve
+COP IDs (`$01/$07/$12/$83/$85/$89/$8A/$90/$94/$9A/$A0/$A1`). Final WRAM
+(`d3f7d834...e219a7`) and SRAM (`11dcdfb6...b79858`) are byte-identical; the
+normalized trailing 1,024 game dispatches and all 34 deliberate song-event
+identities also match. Across Fillmore, Aitos, Northwall, and Death Heim, the
+extended captures accept all 1,095 exposed requests spanning 22 distinct
+kind/ID pairs; 1,084 finish inside their recording and Aitos's remaining 11
+are already active at shutdown. This is broad staged-route coverage, not yet a
+single title-to-ending full-playthrough frequency census.
+
 ### Isolated PCM parity
 
 The DSP regression test initializes the same looping BRR source, asymmetric
@@ -770,15 +804,15 @@ continuation test.
 - **Implemented and live-tested:** simultaneous virtual voices 8/9, producer-
   aware duplicate coalescing, simultaneous 22-lane boss-burst demand, zero
   native transport/lane outcomes, and zero music suppression in coupled
-  simulation, Fillmore, and Aitos replays; sample-exact in-process quick-state
-  continuation through a natural multi-effect overlap.
+  simulation, Fillmore, Aitos, Northwall, and complete Death Heim replays;
+  sample-exact in-process quick-state continuation through a natural multi-
+  effect overlap.
 - **Statically audited and parity-tested:** all 38 shipped effect sequences use
   clear PMON/NON/EON state; physical/virtual DSP voice rendering is byte-exact
   from identical state; one isolated natural request is within 3.5055% RMS
   after phase alignment.
-- **Still required for broad release confidence:** full-playthrough recordings
-  for frequency coverage beyond the coupled action-stage and high-bit collision
-  fixtures.
+- **Still required for broad release confidence:** a single title-to-ending
+  full-playthrough recording for unbiased whole-game frequency coverage.
 
 ## Evidence and confidence
 
