@@ -408,6 +408,8 @@ if(BUILD_TESTING)
         tests/sim_background_voxels_test.c
         src/sim/sim_town_layout.c
         src/sim/sim_background_voxels.c
+        src/sim/sim_structure_visuals.c
+        src/sim/sim_background_voxel_models.c
         src/sim/sim_background_voxel_landmarks.c
         src/sim/sim_background_mountains.c
         src/sim/sim_background_mountain_silhouette.c
@@ -468,6 +470,7 @@ if(BUILD_TESTING)
         tests/sim_background_voxel_models_test.c
         src/sim/sim_background_voxel_models.c
         src/sim/sim_background_voxel_region.c
+        src/sim/sim_structure_visuals.c
     )
     target_include_directories(actraiser_sim_background_voxel_models_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -1118,6 +1121,7 @@ if(BUILD_TESTING)
         src/sim/sim_town_terrain.c
         src/sim/sim_town_layout.c
         src/sim/sim_background_voxels.c
+        src/sim/sim_structure_visuals.c
         src/sim/sim_background_voxel_landmarks.c
         src/sim/sim_background_mountains.c
         src/sim/sim_background_mountain_silhouette.c

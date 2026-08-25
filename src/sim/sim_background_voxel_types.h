@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 
+#include "sim_structure_visuals.h"
 #include "sim_world_map.h"
 
 enum {
@@ -53,8 +54,8 @@ typedef enum SimBackgroundBridgeAxis {
 typedef enum SimBackgroundVoxelFlags {
   /* Genuinely unfinished art. This is NOT the structure record's `$40` flag:
    * see the windmill note on `animation_phase` below. It is resolved from the
-   * frame the town tilemap is actually displaying, so a structure can only
-   * lose its finished model when the game itself redraws a scaffold. */
+   * frame the town tilemap is actually displaying. An unrecognised frame does
+   * not set this flag or publish a replacement object; authentic art remains. */
   kSimBackgroundVoxel_UnderConstruction = 1u << 0,
   kSimBackgroundVoxel_IsolatedTree = 1u << 1,
   /* Completed-town house art uses the structure record's $40 variant as a
@@ -91,15 +92,17 @@ typedef struct SimBackgroundVoxelObject {
   uint8_t bridge_bank_a_x, bridge_bank_a_y;
   uint8_t bridge_bank_b_x, bridge_bank_b_y;
   /* Which authored animation frame this structure is currently showing, as an
-   * index into its family's frame cycle. Windmills are the only animated
-   * family today: their visual step program ($03:D573 rebuild / $03:D6F4
-   * construction, class 6) cycles three 2x2 metatile sets whose blades sit 30
-   * degrees apart, and the "no wind" story event ($03:E2BB) parks every mill
-   * on one of them until the Wind miracle queues record action 6 ($03:A1F4)
-   * and the cycle resumes. Reading the displayed frame therefore gives the
-   * spin, its pause and its restart from one source, with no host clock to
-   * drift against the authentic art. Part of the model cache key. */
+   * index into its family's frame cycle. Windmills use all three values for
+   * both scaffold growth and blade position; houses use 0/1 for their two
+   * scaffold stages. Part of the model cache key. */
   uint8_t animation_phase;
+  /* Shared construction/finished state resolved from the live structure
+   * metatile. `Unknown` objects are never published: enhanced replacement
+   * stands down so the authentic flat art remains visible. */
+  uint8_t visual_state;
+  /* Top-left structure-atlas metatile that produced `visual_state`. Diagnostic
+   * identity only; model geometry is keyed by the resolved state and phase. */
+  uint8_t visual_metatile;
 } SimBackgroundVoxelObject;
 
 #endif  /* SIM_BACKGROUND_VOXEL_TYPES_H */

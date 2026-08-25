@@ -108,6 +108,7 @@ float SimBackgroundVoxelRegion_AuthoredHeight(
       (object->flags & kSimBackgroundVoxel_UnderConstruction) != 0;
   switch ((SimBackgroundVoxelKind)object->kind) {
     case kSimBackgroundVoxel_House:
+      if (construction) return object->animation_phase ? 12.0f : 8.0f;
       switch (SimBackgroundVoxelRegion_HouseStyle(
           object->town, object->development_level)) {
         case kSimBackgroundHouseStyle_Tent: return 9.5f;
@@ -140,7 +141,7 @@ float SimBackgroundVoxelRegion_AuthoredHeight(
     case kSimBackgroundVoxel_MarahnaTemple: return 24.0f;
     case kSimBackgroundVoxel_Pyramid: return 28.0f;
     case kSimBackgroundVoxel_Bridge:
-      return SimBackgroundBridge_AuthoredHeight();
+      return construction ? 4.5f : SimBackgroundBridge_AuthoredHeight();
   }
   return 16.0f;
 }

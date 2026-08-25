@@ -1,5 +1,10 @@
 #include "sim/sim_background_voxels.h"
+#include "sim/sim_background_voxel_models.h"
+#include "sim/sim_background_voxel_region.h"
+#include "sim/sim_structure_visuals.h"
 #include "sim/sim_town_terrain.h"
+#include "fixtures/sim_aitos_house_build_gf14690.h"
+#include "fixtures/sim_bridge_build_programs.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -10,6 +15,8 @@ enum {
   kCellMapBytes = 0x400,
   kRecords = 0x16BE7,
   kRecordsPerTown = 0x200,
+  kStepSlots = 0x177E7,
+  kStepSlotBytes = 8,
   kVramWords = 0x8000,
   kMarahnaTown = 5,
 };
@@ -110,6 +117,69 @@ static void SetStructureDefinition(uint8_t *wram, int metatile,
     wram[at + entry * 2] = (uint8_t)entries[entry];
     wram[at + entry * 2 + 1] = (uint8_t)(entries[entry] >> 8);
   }
+}
+
+static int MaterialFaces(const SimBackgroundVoxelModel *model,
+                         SimBackgroundVoxelMaterial material) {
+  int count = 0;
+  for (uint16_t face = 0; face < model->face_count; face++)
+    if (model->faces[face].material == material) count++;
+  return count;
+}
+
+static uint64_t ModelHash(const SimBackgroundVoxelModel *model) {
+  const uint8_t *bytes = (const uint8_t *)model->faces;
+  size_t byte_count = model->face_count * sizeof(model->faces[0]);
+  uint64_t hash = 1469598103934665603ull;
+  for (size_t at = 0; at < byte_count; at++) {
+    hash ^= bytes[at];
+    hash *= 1099511628211ull;
+  }
+  return hash ^ model->face_count;
+}
+
+/* Give every catalog frame a unique synthetic atlas definition while keeping
+ * all live words below attribute bit 9, which the native copier strips. */
+static bool CatalogFrameEntries(SimStructureVisualFamily target_family,
+                                uint8_t target_metatile,
+                                uint16_t entries[4]) {
+  int ordinal = 0;
+  for (int family = 0; family < kSimStructureVisualFamilyCount; family++) {
+    size_t count = 0;
+    const SimStructureVisualFrame *frames = SimStructureVisuals_Frames(
+        (SimStructureVisualFamily)family, &count);
+    for (size_t frame = 0; frame < count; frame++, ordinal++)
+      if (family == target_family &&
+          frames[frame].metatile == target_metatile) {
+        for (int entry = 0; entry < 4; entry++)
+          entries[entry] = (uint16_t)(0x0100 + ordinal * 4 + entry);
+        return true;
+      }
+  }
+  return false;
+}
+
+static void SeedStructureVisualCatalog(uint8_t *wram) {
+  for (int family = 0; family < kSimStructureVisualFamilyCount; family++) {
+    size_t count = 0;
+    const SimStructureVisualFrame *frames = SimStructureVisuals_Frames(
+        (SimStructureVisualFamily)family, &count);
+    for (size_t frame = 0; frame < count; frame++) {
+      uint16_t entries[4];
+      CHECK(CatalogFrameEntries((SimStructureVisualFamily)family,
+                                frames[frame].metatile, entries));
+      SetStructureDefinition(wram, frames[frame].metatile,
+                             entries[0], entries[1], entries[2], entries[3]);
+    }
+  }
+}
+
+static void SetCatalogFrame(uint8_t *wram, SimStructureVisualFamily family,
+                            uint8_t metatile, int cell_x, int cell_y) {
+  uint16_t entries[4] = {0};
+  CHECK(CatalogFrameEntries(family, metatile, entries));
+  SetCanvasCell(wram, cell_x, cell_y,
+                entries[0], entries[1], entries[2], entries[3]);
 }
 
 /* A mountain hides only what is BEHIND it, and only within the reach of its
@@ -374,6 +444,309 @@ static void CheckIndependentSceneAndPixelPublications(void) {
   CHECK(SimBackgroundVoxels_SceneSerial() != scene_serial);
 }
 
+static void CheckStructureVisualCatalog(void) {
+  static const uint8_t expected_metatiles[kSimStructureVisualFamilyCount][32] = {
+    {
+      0x00, 0x01, 0x02, 0x03, 0x08, 0x09, 0x0A, 0x0B,
+      0x10, 0x11, 0x12, 0x13, 0x18, 0x19, 0x1A, 0x1B,
+      0x20, 0x21, 0x22, 0x23, 0x28, 0x29, 0x2A, 0x2B,
+      0x30, 0x31, 0x32, 0x33, 0x38, 0x39, 0x3A, 0x3B,
+    },
+    {0x4C, 0x44, 0x4D, 0x45, 0xEA, 0xE2, 0xEB, 0xE3},
+    {0x04, 0x06, 0x14, 0x24, 0x26, 0x16},
+    {0x34, 0x36},
+  };
+  static const size_t expected_counts[kSimStructureVisualFamilyCount] = {
+    32, 8, 6, 2,
+  };
+  bool seen[256] = {false};
+  for (int family = 0; family < kSimStructureVisualFamilyCount; family++) {
+    size_t count = 0;
+    const SimStructureVisualFrame *frames = SimStructureVisuals_Frames(
+        (SimStructureVisualFamily)family, &count);
+    CHECK(frames != NULL);
+    CHECK(count == expected_counts[family]);
+    for (size_t frame = 0; frame < count; frame++) {
+      CHECK(frames[frame].metatile == expected_metatiles[family][frame]);
+      CHECK(!seen[frames[frame].metatile]);
+      seen[frames[frame].metatile] = true;
+      CHECK(frames[frame].state > kSimStructureVisualState_Unknown);
+      CHECK(frames[frame].state < kSimStructureVisualStateCount);
+      if (family == kSimStructureVisual_House) {
+        uint8_t position = (uint8_t)(frame % 4);
+        uint8_t expected_state = position == 0
+            ? kSimStructureVisualState_Construction0
+            : position == 1
+                ? kSimStructureVisualState_Construction1
+                : kSimStructureVisualState_Finished;
+        CHECK(frames[frame].state == expected_state);
+      } else if (family == kSimStructureVisual_Bridge) {
+        CHECK(frames[frame].state == ((frame & 1)
+            ? kSimStructureVisualState_Finished
+            : kSimStructureVisualState_Construction0));
+      } else if (family == kSimStructureVisual_Windmill) {
+        CHECK(frames[frame].animation_phase == (uint8_t)(frame % 3));
+        CHECK(frames[frame].state == (frame < 3
+            ? kSimStructureVisualState_Construction0 + frame
+            : kSimStructureVisualState_Finished));
+      } else {
+        CHECK(frames[frame].state == (frame == 0
+            ? kSimStructureVisualState_Construction0
+            : kSimStructureVisualState_Finished));
+      }
+    }
+  }
+  size_t invalid_count = 99;
+  CHECK(SimStructureVisuals_Frames(
+      kSimStructureVisualFamilyCount, &invalid_count) == NULL);
+  CHECK(invalid_count == 0);
+}
+
+/* Full ownership matrix: every native house frame must survive every regional
+ * model identity, development level and facing through classification and
+ * geometry compilation. This is the seam the former isolated tests missed. */
+static void CheckHouseFramesEndToEnd(void) {
+  static uint8_t wram[kWramBytes];
+  memset(wram, 0, sizeof(wram));
+  SeedStructureVisualCatalog(wram);
+  size_t frame_count = 0;
+  const SimStructureVisualFrame *frames = SimStructureVisuals_Frames(
+      kSimStructureVisual_House, &frame_count);
+  uint64_t construction_hash[2] = {0, 0};
+  const int cell_x = 6, cell_y = 6;
+  for (int town = 1; town <= kSimBackgroundTownCount; town++)
+    for (int level = 0;
+         level < kSimBackgroundDevelopmentLevelCount; level++)
+      for (int facing = 0; facing < 2; facing++)
+        for (size_t frame = 0; frame < frame_count; frame++) {
+          uint8_t *record = wram + kRecords +
+              (size_t)(town - 1) * kRecordsPerTown;
+          record[0] = cell_x;
+          record[1] = cell_y;
+          record[2] = (uint8_t)(0x80 | level << 4 |
+              (facing ? 0x40 : 0));
+          SetCatalogFrame(wram, kSimStructureVisual_House,
+                          frames[frame].metatile, cell_x, cell_y);
+          SimBackgroundVoxelScene scene;
+          SimBackgroundVoxels_Classify((uint8_t)town, wram, true, &scene);
+          const SimBackgroundVoxelObject *house =
+              FindKind(&scene, kSimBackgroundVoxel_House);
+          CHECK(scene.unmatched_visual_count == 0);
+          CHECK(house != NULL);
+          if (!house) continue;
+          CHECK(house->visual_metatile == frames[frame].metatile);
+          CHECK(house->visual_state == frames[frame].state);
+          CHECK(house->animation_phase == frames[frame].animation_phase);
+          CHECK(((house->flags & kSimBackgroundVoxel_AlternateFacing) != 0) ==
+                (facing != 0));
+          bool under_construction =
+              SimStructureVisuals_IsConstruction(frames[frame].state);
+          CHECK(((house->flags & kSimBackgroundVoxel_UnderConstruction) != 0) ==
+                under_construction);
+
+          SimBackgroundVoxelModel model;
+          SimBackgroundVoxelModel_BuildStyled(
+              house, kSimBackgroundVoxelDetail_Balanced,
+              kSimBackgroundVoxelStyle_Basic, &model);
+          CHECK(!model.overflow && model.face_count > 0);
+          if (under_construction) {
+            CHECK(MaterialFaces(&model, kSimVoxelMaterial_Wood) > 0);
+            CHECK(MaterialFaces(&model, kSimVoxelMaterial_Roof) == 0);
+            uint8_t phase = frames[frame].animation_phase ? 1 : 0;
+            uint64_t hash = ModelHash(&model);
+            if (!construction_hash[phase]) construction_hash[phase] = hash;
+            CHECK(construction_hash[phase] == hash);
+          }
+        }
+  CHECK(construction_hash[0] != 0 && construction_hash[1] != 0);
+  CHECK(construction_hash[0] != construction_hash[1]);
+}
+
+static void CheckAitosSnapshotHouseFrame(void) {
+  static uint8_t wram[kWramBytes];
+  memset(wram, 0, sizeof(wram));
+  uint8_t *record = wram + kRecords +
+      (size_t)(kAitosBuildTown - 1) * kRecordsPerTown +
+      kAitosBuildRecordSlot * 4;
+  memcpy(record, kAitosBuildRecord, sizeof(kAitosBuildRecord));
+  memcpy(wram + kStepSlots + kAitosBuildRecordSlot * kStepSlotBytes,
+         kAitosBuildStepSlot, sizeof(kAitosBuildStepSlot));
+  SetStructureDefinition(wram, kAitosBuildMetatile,
+                         kAitosBuildDefinition[0], kAitosBuildDefinition[1],
+                         kAitosBuildDefinition[2], kAitosBuildDefinition[3]);
+  SetCanvasCell(wram, kAitosBuildCellX, kAitosBuildCellY,
+                kAitosBuildLiveCell[0], kAitosBuildLiveCell[1],
+                kAitosBuildLiveCell[2], kAitosBuildLiveCell[3]);
+  wram[TownCellIndex(kAitosBuildTown - 1,
+                     kAitosBuildCellX, kAitosBuildCellY)] =
+      kAitosBuildCellMarker;
+
+  SimBackgroundVoxelScene scene;
+  SimBackgroundVoxels_Classify(kAitosBuildTown, wram, true, &scene);
+  const SimBackgroundVoxelObject *house =
+      FindKind(&scene, kSimBackgroundVoxel_House);
+  CHECK(scene.unmatched_visual_count == 0);
+  CHECK(house != NULL);
+  if (!house) return;
+  CHECK(house->record_slot == kAitosBuildRecordSlot);
+  CHECK(house->town == kAitosBuildTown);
+  CHECK(house->development_level == 2);
+  CHECK(house->visual_metatile == kAitosBuildMetatile);
+  CHECK(house->visual_state == kSimStructureVisualState_Construction0);
+  CHECK(house->flags & kSimBackgroundVoxel_UnderConstruction);
+
+  SimBackgroundVoxelModel model;
+  SimBackgroundVoxelModel_Build(
+      house, kSimBackgroundVoxelDetail_Balanced, &model);
+  CHECK(!model.overflow && model.face_count > 0);
+  CHECK(MaterialFaces(&model, kSimVoxelMaterial_Wood) > 0);
+  CHECK(MaterialFaces(&model, kSimVoxelMaterial_Roof) == 0);
+  CHECK(model.max_z == 8.0f);
+
+  /* Replay the ROM's exact $30 -> $31 -> $32 sequence from the resident Aitos
+   * atlas. The enhanced models must progress scaffold -> taller scaffold ->
+   * finished rather than collapsing the first publication into the last. */
+  static const uint8_t expected_state[3] = {
+    kSimStructureVisualState_Construction0,
+    kSimStructureVisualState_Construction1,
+    kSimStructureVisualState_Finished,
+  };
+  uint64_t sequence_hash[3] = {0};
+  for (int step = 0; step < 3; step++) {
+    SetStructureDefinition(
+        wram, kAitosBuildSequenceMetatiles[step],
+        kAitosBuildSequenceDefinitions[step][0],
+        kAitosBuildSequenceDefinitions[step][1],
+        kAitosBuildSequenceDefinitions[step][2],
+        kAitosBuildSequenceDefinitions[step][3]);
+    SetCanvasCell(
+        wram, kAitosBuildCellX, kAitosBuildCellY,
+        kAitosBuildSequenceDefinitions[step][0],
+        kAitosBuildSequenceDefinitions[step][1],
+        kAitosBuildSequenceDefinitions[step][2],
+        kAitosBuildSequenceDefinitions[step][3]);
+    SimBackgroundVoxels_Classify(kAitosBuildTown, wram, true, &scene);
+    house = FindKind(&scene, kSimBackgroundVoxel_House);
+    CHECK(house != NULL && scene.unmatched_visual_count == 0);
+    if (!house) continue;
+    CHECK(house->visual_state == expected_state[step]);
+    SimBackgroundVoxelModel_Build(
+        house, kSimBackgroundVoxelDetail_Balanced, &model);
+    sequence_hash[step] = ModelHash(&model);
+  }
+  CHECK(sequence_hash[0] != sequence_hash[1]);
+  CHECK(sequence_hash[1] != sequence_hash[2]);
+  CHECK(sequence_hash[0] != sequence_hash[2]);
+}
+
+static void CheckUnknownFramesFailClosed(void) {
+  static uint8_t wram[kWramBytes];
+  static uint16_t vram[kVramWords];
+  static uint32_t pixels[kSimTownCanvasPixels * kSimTownCanvasPixels];
+  static const struct {
+    uint8_t structure_class;
+    uint8_t kind;
+    uint8_t family;
+  } record_cases[] = {
+    {0, kSimBackgroundVoxel_House, kSimStructureVisual_House},
+    {3, kSimBackgroundVoxel_Windmill, kSimStructureVisual_Windmill},
+    {4, kSimBackgroundVoxel_Factory, kSimStructureVisual_Factory},
+  };
+  for (size_t at = 0; at < sizeof(record_cases) / sizeof(record_cases[0]); at++) {
+    memset(wram, 0, sizeof(wram));
+    uint8_t *record = wram + kRecords;
+    record[0] = 4;
+    record[1] = 5;
+    record[2] = (uint8_t)(0x80 | record_cases[at].structure_class);
+    SimBackgroundVoxelScene scene;
+    SimBackgroundVoxels_Classify(1, wram, true, &scene);
+    CHECK(FindKind(&scene, (SimBackgroundVoxelKind)record_cases[at].kind) ==
+          NULL);
+    CHECK(scene.unmatched_visual_count == 1);
+    CHECK(scene.unmatched_visuals[0].family == record_cases[at].family);
+    CHECK(scene.unmatched_visuals[0].record_slot == 0);
+  }
+
+  memset(wram, 0, sizeof(wram));
+  wram[CellIndex(10, 10)] = 0xE2;
+  SimBackgroundVoxelScene bridge_scene;
+  SimBackgroundVoxels_Classify(1, wram, true, &bridge_scene);
+  CHECK(FindKind(&bridge_scene, kSimBackgroundVoxel_Bridge) == NULL);
+  CHECK(bridge_scene.unmatched_visual_count == 1);
+  CHECK(bridge_scene.unmatched_visuals[0].family ==
+        kSimStructureVisual_Bridge);
+
+  /* The fail-safe is visible behavior, not just a diagnostic counter: an
+   * unknown house source cell remains byte-for-byte authentic in the enhanced
+   * ground and is absent from the replacement atlas. */
+  memset(wram, 0, sizeof(wram));
+  memset(vram, 0, sizeof(vram));
+  for (size_t at = 0;
+       at < (size_t)kSimTownCanvasPixels * kSimTownCanvasPixels; at++)
+    pixels[at] = 0xFF2468AC;
+  uint8_t *record = wram + kRecords;
+  record[0] = 4;
+  record[1] = 5;
+  record[2] = 0x80;
+  SimBackgroundVoxels_Reset();
+  SimBackgroundVoxels_Build(1, wram, pixels, vram, 1, 1, true);
+  size_t centre = (size_t)(5 * 16 + 8) * kSimTownCanvasPixels + 4 * 16 + 8;
+  CHECK(SimBackgroundVoxels_GroundPixels()[centre] == 0xFF2468AC);
+  CHECK((SimBackgroundVoxels_AtlasPixels()[centre] >> 24) == 0);
+}
+
+static void CheckBridgeFramesEndToEnd(void) {
+  static uint8_t wram[kWramBytes];
+  const int cell_x = 10, cell_y = 10, record_slot = 7;
+  for (size_t at = 0;
+       at < sizeof(kBridgeBuildProgramFrames) /
+                sizeof(kBridgeBuildProgramFrames[0]); at++) {
+    const SimBridgeBuildProgramFixture *frame =
+        &kBridgeBuildProgramFrames[at];
+    memset(wram, 0, sizeof(wram));
+    uint16_t entries[4];
+    CHECK(CatalogFrameEntries(
+        kSimStructureVisual_Bridge, frame->metatile, entries));
+    SetStructureDefinition(wram, frame->metatile,
+                           entries[0], entries[1], entries[2], entries[3]);
+    SetCanvasCell(wram, cell_x, cell_y,
+                  entries[0], entries[1], entries[2], entries[3]);
+    wram[TownCellIndex(frame->town - 1, cell_x, cell_y)] = frame->marker;
+    uint8_t *record = wram + kRecords +
+        (size_t)(frame->town - 1) * kRecordsPerTown + record_slot * 4;
+    record[0] = cell_x;
+    record[1] = cell_y;
+    record[2] = (uint8_t)(0x81 | (frame->marker == 0xE1 ? 0x10 : 0));
+
+    SimBackgroundVoxelScene scene;
+    SimBackgroundVoxels_Classify(frame->town, wram, true, &scene);
+    const SimBackgroundVoxelObject *bridge =
+        FindKind(&scene, kSimBackgroundVoxel_Bridge);
+    CHECK(scene.unmatched_visual_count == 0);
+    CHECK(bridge != NULL);
+    if (!bridge) continue;
+    CHECK(bridge->record_slot == record_slot);
+    CHECK(bridge->visual_metatile == frame->metatile);
+    CHECK(bridge->visual_state == frame->state);
+    CHECK(frame->program == (uint16_t)(0xD754 + at * 6));
+    CHECK(frame->draw_list == (uint16_t)(0xDC18 + at * 4));
+    bool construction = SimStructureVisuals_IsConstruction(frame->state);
+    CHECK(((bridge->flags & kSimBackgroundVoxel_UnderConstruction) != 0) ==
+          construction);
+
+    SimBackgroundVoxelModel model;
+    SimBackgroundVoxelModel_Build(
+        bridge, kSimBackgroundVoxelDetail_Balanced, &model);
+    CHECK(!model.overflow && model.face_count > 0);
+    if (construction) {
+      CHECK(MaterialFaces(&model, kSimVoxelMaterial_Wood) > 0);
+      CHECK(MaterialFaces(&model, kSimVoxelMaterial_Paving) == 0);
+    } else {
+      CHECK(MaterialFaces(&model, kSimVoxelMaterial_Paving) > 0);
+    }
+  }
+}
+
 /* A windmill's state comes from the frame its plot is drawing, not from the
  * record's `$40` flag - that bit is the "no wind" story state, and reading it
  * as construction put a scaffold over a standing mill for the whole event. */
@@ -470,8 +843,8 @@ static void CheckWindmillFrames(void) {
   }
   CHECK(released == 1);
 
-  /* No recognisable frame on the plot - a town whose tilemap has not been
-   * rebuilt yet - keeps the finished mill rather than dropping to a scaffold. */
+  /* No recognisable frame on the plot fails closed: preserve authentic art and
+   * expose the missing ownership entry instead of guessing "finished". */
   memset(wram, 0, sizeof(wram));
   uint8_t *record = wram + kRecords;
   record[0] = 10;
@@ -481,8 +854,10 @@ static void CheckWindmillFrames(void) {
   SimBackgroundVoxels_Classify(1, wram, true, &scene);
   const SimBackgroundVoxelObject *mill =
       FindKind(&scene, kSimBackgroundVoxel_Windmill);
-  CHECK(mill && !(mill->flags & kSimBackgroundVoxel_UnderConstruction));
-  CHECK(mill && mill->animation_phase == 0);
+  CHECK(mill == NULL);
+  CHECK(scene.unmatched_visual_count == 1);
+  CHECK(scene.unmatched_visuals[0].family == kSimStructureVisual_Windmill);
+  CHECK(scene.unmatched_visuals[0].record_slot == 0);
 
   /* Same rule for the factory tier: $34 is its scaffold and $36 the finished
    * building. Its record never carries `$40` on any ROM path at all. */
@@ -525,6 +900,11 @@ static void CheckStoneBridgeClassificationAndInpaint(void) {
   wram[CellIndex(20, 5)] = 0x25;
   wram[CellIndex(20, 6)] = 0xE1;
   wram[CellIndex(20, 7)] = 0x25;
+  SetStructureDefinition(wram, 0x44, 0x0300, 0x0301, 0x0302, 0x0303);
+  SetStructureDefinition(wram, 0x45, 0x0304, 0x0305, 0x0306, 0x0307);
+  SetCanvasCell(wram, 10, 10, 0x0300, 0x0301, 0x0302, 0x0303);
+  SetCanvasCell(wram, 11, 10, 0x0300, 0x0301, 0x0302, 0x0303);
+  SetCanvasCell(wram, 20, 6, 0x0304, 0x0305, 0x0306, 0x0307);
 
   SimBackgroundVoxelScene scene;
   SimBackgroundVoxels_Classify(1, wram, true, &scene);
@@ -541,6 +921,7 @@ static void CheckStoneBridgeClassificationAndInpaint(void) {
       north_south = bridge;
   }
   CHECK(bridge_count == 2);
+  CHECK(scene.unmatched_visual_count == 0);
   CHECK(east_west && east_west->source_cells_w == 2 &&
         east_west->source_cells_h == 1);
   CHECK(east_west && east_west->bridge_bank_a_x == 8 &&
@@ -624,6 +1005,12 @@ int main(void) {
   factory[0] = 20; factory[1] = 20; factory[2] = 0x84;
   uint8_t *field = factory + 4;
   field[0] = 25; field[1] = 25; field[2] = 0x82;
+  SetStructureDefinition(wram, 0x03, 0x0400, 0x0401, 0x0402, 0x0403);
+  SetStructureDefinition(wram, 0x24, 0x0404, 0x0405, 0x0406, 0x0407);
+  SetStructureDefinition(wram, 0x36, 0x0408, 0x0409, 0x040A, 0x040B);
+  SetCanvasCell(wram, 4, 5, 0x0400, 0x0401, 0x0402, 0x0403);
+  SetCanvasCell(wram, 10, 11, 0x0404, 0x0405, 0x0406, 0x0407);
+  SetCanvasCell(wram, 20, 20, 0x0408, 0x0409, 0x040A, 0x040B);
 
   wram[CellIndex(1, 1)] = kTileForest;
   wram[CellIndex(2, 1)] = kTileForest;
@@ -668,6 +1055,7 @@ int main(void) {
   SimBackgroundVoxels_Classify(1, wram, true, &scene);
   CHECK(scene.town == 1);
   CHECK(!scene.overflow);
+  CHECK(scene.unmatched_visual_count == 0);
   /* Four structures, four tree cells and two bushes. */
   CHECK(scene.object_count == 10);
   CHECK(scene.tree_cell_count == 4);
@@ -861,6 +1249,8 @@ int main(void) {
   snow_house[0] = 4;
   snow_house[1] = 5;
   snow_house[2] = 0x80;
+  SetStructureDefinition(wram, 0x02, 0x0500, 0x0501, 0x0502, 0x0503);
+  SetCanvasCell(wram, 4, 5, 0x0500, 0x0501, 0x0502, 0x0503);
   wram[TownCellIndex(5, 1, 1)] = kTileForest;
   FillCell(pixels, 1, 1, 0xFF087020);
   /* Northwall's green cathedral plot surrounds the masked source closely
@@ -901,6 +1291,11 @@ int main(void) {
   CHECK((atlas[north_mountain_opaque] >> 24) == 0xFF);
 
   CheckWindmillFrames();
+  CheckStructureVisualCatalog();
+  CheckHouseFramesEndToEnd();
+  CheckAitosSnapshotHouseFrame();
+  CheckUnknownFramesFailClosed();
+  CheckBridgeFramesEndToEnd();
   CheckMountainOcclusionReach();
   CheckMarahnaEarthquakeCanvasRebuild();
   CheckMarahnaGroundSourceRejectsWaterDuringFade();

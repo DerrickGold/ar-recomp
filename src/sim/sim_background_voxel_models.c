@@ -112,6 +112,9 @@ static void AddStandardBox(SimBackgroundVoxelModel *model,
          kBoxFace_AllVisible);
 }
 
+static void BuildConstructionFrame(SimBackgroundVoxelModel *model,
+                                   float width, float depth, float height);
+
 enum {
   kStoneBridgeDeckBrightness = 245,
   kStoneBridgeCourseBrightness = 218,
@@ -132,6 +135,17 @@ static void BuildStoneBridge(const SimBackgroundVoxelObject *object,
       SimBackgroundBridge_ResolveBounds(object);
   const float width = bounds.width, depth = bounds.depth;
   if (width <= 0.0f || depth <= 0.0f) return;
+  if (object->flags & kSimBackgroundVoxel_UnderConstruction) {
+    /* Native visual class 2 has one held construction frame before its
+     * completed stone stage. Keep the crossing visibly open and skeletal
+     * instead of publishing the full parapets as soon as its E1/E2 semantic
+     * marker appears. */
+    AddStandardBox(model, 1.0f, 1.0f, -1.2f,
+                   width - 1.0f, depth - 1.0f, 0.0f,
+                   kSimVoxelMaterial_Wall);
+    BuildConstructionFrame(model, width, depth, 4.5f);
+    return;
+  }
   const float deck_height = 0.35f;
   const float slab_bottom = -2.4f;
   const float parapet_embed = -0.75f;
@@ -446,16 +460,8 @@ static void AddShedRoofX(SimBackgroundVoxelModel *model,
           Point(x1, y0, low_z), Point(x1, y0, high_z));
 }
 
-static void BuildFillmoreHouse(const SimBackgroundVoxelObject *object,
-                               SimBackgroundVoxelDetail detail,
+static void BuildFillmoreHouse(SimBackgroundVoxelDetail detail,
                                SimBackgroundVoxelModel *model) {
-  if (object->flags & kSimBackgroundVoxel_UnderConstruction) {
-    AddStandardBox(model, 2.0f, 3.0f, 1.5f, 14.0f, 14.0f, 6.5f,
-                   kSimVoxelMaterial_Wall);
-    BuildConstructionFrame(model, 16.0f, 16.0f, 12.0f);
-    return;
-  }
-
   AddStandardBox(model, 1.5f, 2.0f, 0.0f, 14.5f, 15.0f, 2.0f,
                  kSimVoxelMaterial_Trim);
   AddRoofedBox(model, 2.5f, 3.0f, 2.0f, 13.5f, 14.5f, 10.0f,
@@ -804,6 +810,18 @@ static void BuildMarahnaLogCabin(SimBackgroundVoxelDetail detail,
 static void BuildHouse(const SimBackgroundVoxelObject *object,
                        SimBackgroundVoxelDetail detail,
                        SimBackgroundVoxelModel *model) {
+  if (object->flags & kSimBackgroundVoxel_UnderConstruction) {
+    /* All sixteen house construction programs share their two scaffold stages;
+     * only the final regional/facing metatile differs. Resolve this before the
+     * regional dispatcher so no architecture can bypass construction again. */
+    int phase = object->animation_phase > 0 ? 1 : 0;
+    float wall_height = phase ? 6.5f : 3.5f;
+    float frame_height = phase ? 12.0f : 8.0f;
+    AddStandardBox(model, 2.0f, 3.0f, 1.5f, 14.0f, 14.0f, wall_height,
+                   kSimVoxelMaterial_Wall);
+    BuildConstructionFrame(model, 16.0f, 16.0f, frame_height);
+    return;
+  }
   switch (SimBackgroundVoxelRegion_HouseStyle(
       object->town, object->development_level)) {
     case kSimBackgroundHouseStyle_Tent:
@@ -813,7 +831,7 @@ static void BuildHouse(const SimBackgroundVoxelObject *object,
       BuildTimberHouse(detail, model);
       break;
     case kSimBackgroundHouseStyle_Fillmore:
-      BuildFillmoreHouse(object, detail, model);
+      BuildFillmoreHouse(detail, model);
       break;
     case kSimBackgroundHouseStyle_Bloodpool:
       BuildBloodpoolHouse(detail, model);
@@ -840,7 +858,7 @@ static void BuildHouse(const SimBackgroundVoxelObject *object,
       BuildMarahnaLogCabin(detail, model);
       break;
     case kSimBackgroundHouseStyle_Count:
-      BuildFillmoreHouse(object, detail, model);
+      BuildFillmoreHouse(detail, model);
       break;
   }
 }
@@ -2455,7 +2473,8 @@ void SimBackgroundVoxelModel_BuildStyled(
        * left its canopy and posts visibly offset to the left of the opening. */
       if (style >= kSimBackgroundVoxelStyle_Varied)
         BuildDeterministicVariation(object, detail, out);
-      if (object->flags & kSimBackgroundVoxel_AlternateFacing)
+      if (!(object->flags & kSimBackgroundVoxel_UnderConstruction) &&
+          (object->flags & kSimBackgroundVoxel_AlternateFacing))
         BuildAlternateFacingHouse(object, detail, out);
       break;
     case kSimBackgroundVoxel_Cathedral:

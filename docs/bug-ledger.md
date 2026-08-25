@@ -2097,8 +2097,8 @@ if archaeology is ever needed. The distilled outcomes:
     the plot's top-left metatile *is* the answer. Windmill and factory state now
     comes from matching that cell against `$7E:3100` — `$04/$06/$14` scaffold and
     `$24/$26/$16` the three blade positions for class 6, `$34`/`$36` for class 8
-    — and an unmatched plot keeps the finished model, because un-building
-    something the town has already finished is the louder error. The same read
+    — and an unmatched plot now fails closed to authentic flat art, with an
+    explicit scene diagnostic, rather than guessing a presentation state. The same read
     supplies `animation_phase`, so the 3D blades turn on the authentic cadence
     and stop and restart with the event instead of on a host clock.
 
@@ -2155,8 +2155,9 @@ if archaeology is ever needed. The distilled outcomes:
     identical sibling `$9EF5` did not.** When one leaf of a web needs an exit
     pin, sweep the whole web for the same shape rather than fixing the one that
     happened to be reported — the same five-minute ROM scan that found these
-    would have found them then. `AR_WINDMILL_DEBUG=1` prints the record plus
-    step slot plus resolved phase per mill and is the first tool for any repeat.
+    would have found them then. `AR_SIM_STRUCTURE_DEBUG=1` now prints the
+    record, step slot, live metatile and resolved state for every enhanced
+    structure family (`AR_WINDMILL_DEBUG` remains an alias).
 
 63. **The volcanic eruption's ground fire was already the burning-house
     animation — the enhanced view just never recognised it. ADDED 2026-08-18.**
@@ -2865,6 +2866,34 @@ if archaeology is ever needed. The distilled outcomes:
     source reuse from carrying a trail into the next room. Regressions cover
     maps `$02/$08`, Bloodpool Act 1, another stage, both invalid-source cases,
     and generation reset without an intervening inactive frame.
+
+83. **Small-house and bridge construction were hidden by completed enhanced
+    models. FIXED 2026-08-24.** `runs/20260824-201110` catches Aitos slot 82 at
+    cell (23,20): record `$17,$14,$A0,$E0`, step slot
+    `$03,$00,$DC,$D7,$D8,$D7,$DA,$D7`, and live structure metatile `$30` prove
+    the native view is on its first scaffold frame while the 3D view had already
+    published the finished Aitos house. The original voxel commit contained
+    scaffold geometry but never resolved house frames; the regional refactor
+    then left the construction guard inside Fillmore alone. The later windmill
+    repair established the correct live-art rule but hand-listed only windmill
+    and factory frames. Bridges had the same ownership error through a different
+    seam: persistent semantic cell marker `$E1/$E2` immediately selected a full
+    stone model even while visual class 2 still drew `$4C/$4D` (or Northwall
+    `$EA/$EB`) before `$44/$45` (`$E2/$E3`).
+
+    All four replaced families now share the ROM-derived
+    `sim_structure_visuals` catalog and one explicit visual-state resolver.
+    House construction runs before regional/facing dispatch; bridges publish a
+    skeletal build model until their completed live frame appears. Unknown
+    owned frames fail closed to authentic flat art and enter a bounded scene
+    diagnostic instead of silently becoming finished. The regression is
+    end-to-end: every house catalog frame crosses all six towns, three levels
+    and two facings through classification and model compilation; all bridge
+    orientations/stone/ice stages are covered; and a minimal lossless fixture
+    pins the exact gf14690 record, step slot, definition and live words. This is
+    the ownership-contract pattern: when an enhanced layer replaces native
+    art, enumerate every producer frame and test the replacement consumer in
+    the same call chain.
 
 
 Process lessons folded out of statement-then-correction text elsewhere; the docs now state final
