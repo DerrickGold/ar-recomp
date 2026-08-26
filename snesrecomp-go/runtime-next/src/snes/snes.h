@@ -32,6 +32,13 @@ struct Snes {
     bool disableRender;
     uint32_t ramAdr;
     uint8_t *ram;
+    /* ABI view generations live before hPos so the legacy raw savestate tail
+     * that begins at hPos retains its exact byte count and layout. */
+    uint64_t abiLifetimeGeneration;
+    uint64_t abiTickGeneration;
+    uint64_t abiResetGeneration;
+    uint64_t abiLoadGeneration;
+    uint64_t abiMutationGeneration;
     uint16_t hPos;
     uint16_t vPos;
     double apuCatchupCycles;

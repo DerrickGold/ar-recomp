@@ -1163,6 +1163,8 @@ if(BUILD_TESTING)
         src/sim/sim_background_mountain_relief.c
         src/sim/sim_background_voxel_region.c
         src/sim/sim_render_atlas.c
+        ${SNESRECOMP_RUNNER_ROOT}/src/runner_next.c
+        ${SNESRECOMP_RUNNER_ROOT}/src/runner_next_ppu_services.c
         ${SNESRECOMP_RUNNER_DEVICE_ROOT}/src/snes/ppu.c
         ${SNESRECOMP_RUNNER_SAVELOAD_SOURCE}
     )

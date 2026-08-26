@@ -1,6 +1,7 @@
 #include "snes.h"
 
 #include "../apu_sync.h"
+#include "../runner_next_internal.h"
 #include "../runtime_constants.h"
 #include "apu.h"
 #include "cart.h"
@@ -80,6 +81,7 @@ void snes_saveload(Snes *snes, SaveLoadInfo *info) {
         info->func(info, snes->ram, kSnesWramSize);
         info->func(info, &snes->ramAdr, sizeof(snes->ramAdr));
         snes->cpu->e = false;
+        if (!info->saving && !info->failed) sr_runner_note_load(snes);
         return;
     }
     cpu_saveload(snes->cpu, info);
@@ -111,6 +113,7 @@ void snes_saveload(Snes *snes, SaveLoadInfo *info) {
     saveload_bytes(info, snes->ram, kSnesWramSize);
     saveload_u32(info, &snes->ramAdr);
     snes->cpu->e = false;
+    if (!info->saving && !info->failed) sr_runner_note_load(snes);
 }
 
 void snes_reset(Snes *snes, bool hard) {
@@ -147,6 +150,7 @@ void snes_reset(Snes *snes, bool hard) {
     snes->multiplyResult = 0xfe01u;
     snes->divideA = 0xffffu;
     snes->divideResult = 0x0101u;
+    sr_runner_note_reset(snes);
 }
 
 void snes_catchupApu(Snes *snes) {

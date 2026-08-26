@@ -338,6 +338,8 @@ struct Ppu {
     uint32_t m7OverlayPitch;
     uint8_t m7OverlayScale;
     PpuMode7Override m7Override;
+    /* Host-output binding epoch. Derived state: not serialized. */
+    uint64_t surfaceBindingGeneration;
     uint8_t brightnessMult[63], brightnessMultHalf[64];
     uint8_t mosaicModulo[kPpuXPixels];
     void *pad2;

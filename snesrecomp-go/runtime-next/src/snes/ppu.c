@@ -71,6 +71,11 @@ static int surface_origin_x(const Ppu *ppu, size_t pitch) {
     return PpuSurfaceApron(ppu, pitch) + ppu->extraLeftRight;
 }
 
+static void note_surface_binding(Ppu *ppu) {
+    if (++ppu->surfaceBindingGeneration == 0u)
+        ++ppu->surfaceBindingGeneration;
+}
+
 static uint16_t remap_vram(const Ppu *ppu) {
     uint16_t address = ppu->vramPointer;
     switch (ppu->vramRemapMode) {
@@ -163,6 +168,7 @@ Ppu *ppu_init(void) {
     if (ppu != NULL) {
         ppu->lastBrightnessMult = 0xffu;
         ppu->vramIncrement = 1u;
+        ppu->surfaceBindingGeneration = 1u;
         reset_layer_policy(ppu);
     }
     return ppu;
@@ -181,6 +187,7 @@ void ppu_reset(Ppu *ppu) {
     uint8_t *m7;
     uint32_t m7_pitch;
     uint8_t m7_scale;
+    uint64_t surface_binding_generation;
     if (ppu == NULL) return;
     render = ppu->renderBuffer;
     render_pitch = ppu->renderPitch;
@@ -193,6 +200,7 @@ void ppu_reset(Ppu *ppu) {
     m7 = ppu->m7OverlayBuffer;
     m7_pitch = ppu->m7OverlayPitch;
     m7_scale = ppu->m7OverlayScale;
+    surface_binding_generation = ppu->surfaceBindingGeneration;
     memset(ppu, 0, sizeof(*ppu));
     ppu->renderBuffer = render;
     ppu->renderPitch = render_pitch;
@@ -205,6 +213,8 @@ void ppu_reset(Ppu *ppu) {
     ppu->m7OverlayBuffer = m7;
     ppu->m7OverlayPitch = m7_pitch;
     ppu->m7OverlayScale = m7_scale;
+    ppu->surfaceBindingGeneration = surface_binding_generation;
+    note_surface_binding(ppu);
     for (int source = 0; source < kPpuOverlaySource_Count; ++source)
         ppu->overlayRenderMaybeDirty[source] = overlays[source] != NULL;
     ppu->m7OverlayMaybeDirty = m7 != NULL;
@@ -305,6 +315,7 @@ void PpuBeginDrawing(Ppu *ppu, uint8_t *pixels, size_t pitch,
     ppu->renderBuffer = pixels;
     ppu->renderPitch = (uint32_t)pitch;
     ppu->renderFlags = render_flags;
+    note_surface_binding(ppu);
     /* The struct remains intentionally inspectable to host enhancements.
      * Refresh the derived palette at output binding so direct CGRAM edits are
      * visible without a write barrier in the scanline hot path. */
@@ -319,6 +330,7 @@ bool PpuBindAuthenticSurface(Ppu *ppu, uint8_t *pixels, size_t pitch) {
         pitch / 4u < minimum || pitch / 4u > kPpuSurfaceWidth)) return false;
     ppu->authenticRenderBuffer = pixels;
     ppu->authenticRenderPitch = pixels != NULL ? (uint32_t)pitch : 0u;
+    note_surface_binding(ppu);
     return true;
 }
 
@@ -368,6 +380,7 @@ void PpuClearOverlayBindings(Ppu *ppu) {
     memset(ppu->overlayRenderContentMask, 0,
            sizeof(ppu->overlayRenderContentMask));
     PpuClearOverlayCaptures(ppu);
+    note_surface_binding(ppu);
 }
 
 bool PpuBindOverlaySurface(Ppu *ppu, PpuOverlaySource source,
@@ -383,6 +396,7 @@ bool PpuBindOverlaySurface(Ppu *ppu, PpuOverlaySource source,
     ppu->overlayRenderMaybeDirty[source] = pixels != NULL;
     if (pixels == NULL) memset(&ppu->overlayCaptures[source], 0,
                                sizeof(ppu->overlayCaptures[source]));
+    note_surface_binding(ppu);
     return true;
 }
 
@@ -394,6 +408,7 @@ bool PpuBindOverlayPrioSurface(Ppu *ppu, PpuOverlaySource source, int band,
     ppu->overlayRenderBands[source][band - 1] = pixels;
     ppu->overlayRenderContentMask[source] &= (uint8_t)~(1u << band);
     if (pixels != NULL) ppu->overlayRenderMaybeDirty[source] = 1u;
+    note_surface_binding(ppu);
     return true;
 }
 
@@ -519,6 +534,7 @@ bool PpuBindMode7OverlaySurface(Ppu *ppu, uint8_t *pixels, size_t pitch,
     ppu->m7OverlayScale = pixels != NULL ? scale : 0u;
     ppu->m7OverlayMaybeDirty = pixels != NULL;
     if (pixels == NULL) memset(&ppu->m7Override, 0, sizeof(ppu->m7Override));
+    note_surface_binding(ppu);
     return true;
 }
 

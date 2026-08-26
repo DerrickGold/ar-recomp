@@ -4,14 +4,24 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef struct Ppu Ppu;
+#include "runner_next.h"
+
+typedef struct SceneAssetDumpSource {
+  SrPpuStateSnapshot ppu;
+  SrBorrowedU16Span vram;
+  SrBorrowedU16Span cgram;
+  SrBorrowedU16Span oam;
+  SrBorrowedSpan high_oam;
+  SrBorrowedSpan wram;
+} SceneAssetDumpSource;
 
 /* Write a complete, point-in-time asset package from resident SNES state.
  * `directory` is created by this function and must have an existing parent.
- * The caller should invoke this while emulation is paused so PPU/WRAM state is
- * coherent for the entire synchronous export. */
-bool SceneAssetDump_Write(const char *directory, const Ppu *ppu,
-                          const uint8_t *wram, int host_frame);
+ * Every span is borrowed from one runner generation. The caller must invoke
+ * this synchronously while emulation is paused. */
+bool SceneAssetDump_Write(const char *directory,
+                          const SceneAssetDumpSource *source,
+                          int host_frame);
 
 bool WritePng(const char *path, const uint8_t *rgba, int width, int height);
 

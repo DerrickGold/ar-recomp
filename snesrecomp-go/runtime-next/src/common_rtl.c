@@ -7,6 +7,7 @@
 #include "debug_server.h"
 #include "framedump.h"
 #include "recomp_hw.h"
+#include "runner_next_internal.h"
 #include "spc_player.h"
 #include "spc_upload.h"
 #include "snes/apu.h"
@@ -150,6 +151,9 @@ bool RtlRunFrame(uint32 inputs) {
     if ((inputs & 0xc0u) == 0xc0u) inputs ^= 0xc0u;
     if ((inputs & 0x30000u) == 0x30000u) inputs ^= 0x30000u;
     if ((inputs & 0xc0000u) == 0xc0000u) inputs ^= 0xc0000u;
+    /* Expire thread-confined borrowed views before this tick mutates any
+     * runner-owned input, memory, or component state. */
+    sr_runner_note_tick(g_snes);
     if (g_snes != NULL) {
         g_snes->input1_currentState = (uint16)(inputs & 0xfffu);
         g_snes->input2_currentState = (uint16)((inputs >> 12) & 0xfffu);

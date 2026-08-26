@@ -29,6 +29,28 @@ int main(void) {
                     "variant mismatch");
     failed |= check(descriptor != NULL && descriptor->legacy_source_count == 0u,
                     "legacy source count mismatch");
+    failed |= check(descriptor != NULL &&
+                        descriptor->struct_size == sizeof(*descriptor),
+                    "descriptor size mismatch");
+    failed |= check(descriptor != NULL &&
+                        (descriptor->capabilities &
+                         SR_RUNNER_CAP_GENERATION_COUNTERS) != 0u,
+                    "descriptor capability mismatch");
+    failed |= check(descriptor != NULL &&
+                        (descriptor->capabilities &
+                         SR_RUNNER_CAP_CPU_STATE) != 0u,
+                    "descriptor CPU-state capability mismatch");
+    failed |= check(descriptor != NULL &&
+                        (descriptor->capabilities &
+                         (SR_RUNNER_CAP_PPU_STATE |
+                          SR_RUNNER_CAP_BORROWED_U16_SPANS |
+                          SR_RUNNER_CAP_PPU_FRAME_STATE |
+                          SR_RUNNER_CAP_PPU_OBJ_RASTER)) ==
+                            (SR_RUNNER_CAP_PPU_STATE |
+                             SR_RUNNER_CAP_BORROWED_U16_SPANS |
+                             SR_RUNNER_CAP_PPU_FRAME_STATE |
+                             SR_RUNNER_CAP_PPU_OBJ_RASTER),
+                    "descriptor PPU capability mismatch");
     failed |= check(crc32_compute(NULL, 0) == 0u, "empty CRC32 mismatch");
     failed |= check(crc32_compute(known_vector, sizeof(known_vector) - 1) == 0xCBF43926u,
                     "known CRC32 vector mismatch");

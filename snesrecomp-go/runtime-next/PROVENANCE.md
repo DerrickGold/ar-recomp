@@ -90,6 +90,27 @@ devices above. The PPU implements the SNES register/memory model and the
 project's tested tile, sprite, Mode-7, window, color-math, widescreen,
 authentic-surface, and overlay-extraction contracts.
 
+The versioned component API is an independently designed fixed-width C table
+over those local devices. Its opaque handles, capability negotiation, borrowed
+span lifetimes, generation counters, and CPU-state descriptor do not expose or
+depend on the retired runner's concrete layouts. A registered game adapter
+publishes the generated CPU register view without introducing title-specific
+state into the portable runner. Fixed-width PPU descriptors and typed borrowed
+VRAM/CGRAM/OAM views are derived directly from the independent PPU state and
+likewise carry no game-specific addresses or semantics. The compact frame-state
+view describes generic BG/OBJ overlay composition and presentation geometry;
+it contains no ActRaiser scene policy. A separate retained-surface snapshot
+describes the host-owned main, authentic, BG/OBJ priority-band, and Mode-7
+bindings using generic pixel format, extent, pitch, origin, scale, and lifetime
+metadata. It neither owns nor copies those pixels, and its independent binding
+generation is maintained by this runner's PPU surface API.
+The derived OBJ raster operation is a thin versioned adapter over this runner's
+independently implemented OAM resolver and tile rasterizer. It writes directly
+to caller-owned storage and likewise contains no title-specific classification.
+The external HD tile census and Mode-7 canvas dumper use only those fixed-width
+PPU descriptions and immutable generation-scoped views; their tile and palette
+classification remains game-side tooling rather than runner policy.
+
 The sole runner manifest links and includes only files from `runtime-next`.
 The historical comparison runner was retired after parity validation and is
 not part of the repository or distribution.

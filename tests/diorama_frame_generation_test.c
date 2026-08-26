@@ -143,8 +143,11 @@ int main(void) {
   FillFrame(previous_pixels, 0, false);
   FillFrame(current_pixels, 2, true);
   CHECK(current_pixels[8 * kSurfaceWidth + kApron + 11] == 0xff0000ffu);
-  uint8_t *planes[kDioramaPlane_Count] = {0};
+  const uint8_t *planes[kDioramaPlane_Count] = {0};
+  size_t plane_pitches[kDioramaPlane_Count] = {0};
   planes[kDioramaPlane_Backdrop] = (uint8_t *)previous_pixels;
+  plane_pitches[kDioramaPlane_Backdrop] =
+      kSurfaceWidth * sizeof(uint32_t);
 
   static FrameSlot slot;
   slot.diorama_active = true;
@@ -158,12 +161,14 @@ int main(void) {
   slot.diorama_plane_content_mask = slot.diorama_plane_request_mask;
   slot.timestamp_ns = 1000000;
   DioramaFrameGeneration_Capture(
-      renderer, &slot, planes, 1u << kDioramaPlane_Backdrop);
+      renderer, &slot, planes, plane_pitches,
+      1u << kDioramaPlane_Backdrop);
 
   planes[kDioramaPlane_Backdrop] = (uint8_t *)current_pixels;
   slot.timestamp_ns += 16666667;
   DioramaFrameGeneration_Capture(
-      renderer, &slot, planes, 1u << kDioramaPlane_Backdrop);
+      renderer, &slot, planes, plane_pitches,
+      1u << kDioramaPlane_Backdrop);
   SDL_Rect endpoint_rect = {kApron, 0, kDisplayWidth, kHeight};
   CHECK(SDL_UpdateTexture(
       current, &endpoint_rect, &current_pixels[kApron],
@@ -260,7 +265,8 @@ int main(void) {
   /* A synchronized but byte-identical raw endpoint is already authoritative.
    * It must not create a redundant private pair or generated plane. */
   slot.timestamp_ns += 16666667;
-  DioramaFrameGeneration_Capture(renderer, &slot, planes, 0);
+  DioramaFrameGeneration_Capture(
+      renderer, &slot, planes, plane_pitches, 0);
   memset(resolved, 0, sizeof(resolved));
   CHECK(DioramaFrameGeneration_Prepare(
       renderer, &slot, 0.5f, raw,
@@ -271,7 +277,8 @@ int main(void) {
    * transition. */
   slot.timestamp_ns += 16666667;
   slot.diorama_map_number++;
-  DioramaFrameGeneration_Capture(renderer, &slot, planes, 0);
+  DioramaFrameGeneration_Capture(
+      renderer, &slot, planes, plane_pitches, 0);
   memset(resolved, 0, sizeof(resolved));
   CHECK(DioramaFrameGeneration_Prepare(
       renderer, &slot, 0.5f, raw,

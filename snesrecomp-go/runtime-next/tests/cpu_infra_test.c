@@ -32,6 +32,9 @@ static int ppu_reset_count;
 static int dma_reset_count;
 static int msu_init_count;
 static int free_count;
+static int abi_bind_count;
+static int abi_unbind_count;
+static Snes *abi_bound_runner;
 static bool load_rom_success = true;
 static int failures;
 
@@ -82,6 +85,15 @@ uint8 *RomPtr(uint32 address) {
 
 static void initialize_game(void) { ++initialize_count; }
 static int read_rdnmi(Snes *snes) { (void)snes; return 1; }
+static void bind_runner_abi(Snes *snes, bool enabled) {
+    if (enabled) {
+        ++abi_bind_count;
+        abi_bound_runner = snes;
+    } else {
+        ++abi_unbind_count;
+        if (abi_bound_runner == snes) abi_bound_runner = NULL;
+    }
+}
 
 static void test_registration_and_initialization(void) {
     static const RtlGameInfo info = {
@@ -89,6 +101,7 @@ static void test_registration_and_initialization(void) {
         .initialize = initialize_game,
         .read_rdnmi = read_rdnmi,
         .save_name_prefix = "test",
+        .bind_runner_abi = bind_runner_abi,
     };
     RtlRegisterGame(&info);
     check(g_rtl_game_info == &info, "game registration");
@@ -98,6 +111,9 @@ static void test_registration_and_initialization(void) {
     check(SnesInit(test_rom, (int)sizeof(test_rom)) == &test_snes,
           "ROM-backed initialization");
     check(initialize_count == 1, "game initialization callback");
+    check(abi_bind_count == 1 && abi_unbind_count == 0 &&
+              abi_bound_runner == &test_snes,
+          "runner ABI initial bind");
     check(reset_count == 1, "hard reset after ROM load");
     check(g_snes_cpu == &test_cpu && g_ppu == &test_ppu && g_dma == &test_dma,
           "device publication");
@@ -109,6 +125,9 @@ static void test_registration_and_initialization(void) {
     check(SnesInit(NULL, 0) == &test_snes, "ROM-free initialization");
     check(free_count == 1, "reinitialization releases previous runner");
     check(initialize_count == 2, "ROM-free callback");
+    check(abi_bind_count == 2 && abi_unbind_count == 1 &&
+              abi_bound_runner == &test_snes,
+          "runner ABI rebind");
     check(ppu_reset_count == 1 && dma_reset_count == 1,
           "ROM-free device resets");
     check(g_sram_size == 2048, "ROM-free SRAM allocation");
@@ -117,6 +136,9 @@ static void test_registration_and_initialization(void) {
     check(SnesInit(test_rom, (int)sizeof(test_rom)) == NULL,
           "ROM load failure is reported");
     check(free_count == 3, "failed replacement releases both runner instances");
+    check(abi_bind_count == 3 && abi_unbind_count == 3 &&
+              abi_bound_runner == NULL,
+          "failed initialization revokes runner ABI");
     check(g_snes == NULL && g_snes_cpu == NULL && g_ppu == NULL &&
               g_dma == NULL && g_rom == NULL && g_sram == NULL &&
               g_sram_size == 0,
@@ -128,6 +150,9 @@ static void test_registration_and_initialization(void) {
     SnesShutdown();
     check(free_count == 4 && g_snes == NULL,
           "explicit shutdown is idempotent and clears runner");
+    check(abi_bind_count == 4 && abi_unbind_count == 4 &&
+              abi_bound_runner == NULL,
+          "runner ABI shutdown revoke");
     SnesShutdown();
     check(free_count == 4, "repeated shutdown is harmless");
 }

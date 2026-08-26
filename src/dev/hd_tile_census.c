@@ -20,10 +20,8 @@
 
 #include "actraiser_game.h"
 #include "deterministic_hash.h"
+#include "hd_tile_census.h"
 #include "run_dir.h"
-#include "snes/ppu.h"
-
-extern Ppu *g_ppu;
 
 enum {
   kCensusHashBits = 16, /* 65536 slots, open addressing */
@@ -35,6 +33,14 @@ enum {
   kMode7CanvasPixelsPerAxis =
       kMode7CanvasTilesPerAxis * kMode7TilePixelsPerAxis,
 };
+
+typedef struct HdTileCensusPpuView {
+  SrPpuStateSnapshot state;
+  SrBorrowedU16Span vram;
+  SrBorrowedU16Span cgram;
+  SrBorrowedU16Span oam;
+  SrBorrowedSpan high_oam;
+} HdTileCensusPpuView;
 
 typedef enum CensusClass {
   kCensusClass_Bg2bpp = 0,
@@ -88,7 +94,7 @@ typedef struct GroupDynamics {
 } GroupDynamics;
 
 static GroupDynamics g_group_dynamics[16];
-static uint16 g_prev_cgram[kPpuCgramEntries];
+static uint16 g_prev_cgram[SR_PPU_CGRAM_WORD_COUNT];
 static uint16 g_prev_cgram_gf;
 static int g_prev_cgram_valid;
 
@@ -96,8 +102,45 @@ static TileRecord *g_records;
 static int g_record_count;
 static int32_t *g_hash_slots; /* -1 empty, else record index */
 static int g_enabled = -1;
+static int g_mode7_dump_enabled = -1;
 static uint32 g_frames_surveyed;
 static uint32 g_skipped_mode_mask;
+
+static bool CapturePpuView(HdTileCensusPpuView *view,
+                           SrRunnerHandle *runner, bool include_objects) {
+  const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+  const uint64_t required_caps =
+      SR_RUNNER_CAP_PPU_STATE | SR_RUNNER_CAP_BORROWED_U16_SPANS |
+      (include_objects ? SR_RUNNER_CAP_BORROWED_BYTE_SPANS : 0u);
+  memset(view, 0, sizeof(*view));
+  view->state.struct_size = sizeof(view->state);
+  view->vram.struct_size = sizeof(view->vram);
+  view->cgram.struct_size = sizeof(view->cgram);
+  view->oam.struct_size = sizeof(view->oam);
+  view->high_oam.struct_size = sizeof(view->high_oam);
+  if (!api || !runner ||
+      api->struct_size < SNES_RUNNER_API_PPU_STATE_SIZE ||
+      (api->capabilities & required_caps) != required_caps ||
+      api->query_ppu_state(runner, &view->state) != SR_RESULT_OK ||
+      api->borrow_u16_memory(runner, SR_MEMORY_VRAM, &view->vram) !=
+          SR_RESULT_OK ||
+      api->borrow_u16_memory(runner, SR_MEMORY_CGRAM, &view->cgram) !=
+          SR_RESULT_OK ||
+      view->vram.element_count < SR_PPU_VRAM_WORD_COUNT ||
+      view->cgram.element_count < SR_PPU_CGRAM_WORD_COUNT ||
+      view->vram.lifetime_generation != view->state.lifetime_generation ||
+      view->cgram.lifetime_generation != view->state.lifetime_generation)
+    return false;
+  if (!include_objects) return true;
+  return api->borrow_u16_memory(runner, SR_MEMORY_OAM, &view->oam) ==
+             SR_RESULT_OK &&
+      api->borrow_memory(runner, SR_MEMORY_HIGH_OAM, &view->high_oam) ==
+          SR_RESULT_OK &&
+      view->oam.element_count >= SR_PPU_OAM_WORD_COUNT &&
+      view->high_oam.byte_size >= SR_PPU_HIGH_OAM_BYTE_COUNT &&
+      view->oam.lifetime_generation == view->state.lifetime_generation &&
+      view->high_oam.lifetime_generation == view->state.lifetime_generation;
+}
 
 static TileRecord *FindOrAddRecord(uint64 hash, CensusClass class_) {
   uint32 slot = (uint32)hash & ((1u << kCensusHashBits) - 1);
@@ -122,7 +165,8 @@ static TileRecord *FindOrAddRecord(uint64 hash, CensusClass class_) {
 
 /* Per-sighting bookkeeping shared by all walkers. `palette_base`/`colors`
  * describe the CGRAM range this sighting uses. */
-static void RecordSighting(TileRecord *record, uint8 layer_bit,
+static void RecordSighting(const HdTileCensusPpuView *view,
+                           TileRecord *record, uint8 layer_bit,
                            uint8 palette_group, int palette_base, int colors) {
   if (!record) return;
   uint16 gf = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
@@ -135,7 +179,7 @@ static void RecordSighting(TileRecord *record, uint8 layer_bit,
 
   uint64 palette_hash = DeterministicHash_Fnv1a64(
       DETERMINISTIC_HASH_FNV1A64_OFFSET,
-      &g_ppu->cgram[palette_base & 0xff], (size_t)colors * 2);
+      &view->cgram.data[palette_base & 0xff], (size_t)colors * 2);
   PaletteVariant *variant = NULL;
   for (int i = 0; i < record->palette_variant_count; i++)
     if (record->palette_variants[i].hash == palette_hash) {
@@ -145,8 +189,9 @@ static void RecordSighting(TileRecord *record, uint8 layer_bit,
   if (!variant) {
     if (record->palette_variant_count == 0) {
       for (int c = 0; c < 16; c++) {
-        uint16 xbgr = c < colors ? g_ppu->cgram[(palette_base + c) & 0xff]
-                                 : 0;
+        uint16 xbgr = c < colors
+            ? view->cgram.data[(palette_base + c) & 0xff]
+            : 0;
         record->first_palette_rgb[c][0] = (uint8)(((xbgr >> 0) & 0x1f) << 3);
         record->first_palette_rgb[c][1] = (uint8)(((xbgr >> 5) & 0x1f) << 3);
         record->first_palette_rgb[c][2] = (uint8)(((xbgr >> 10) & 0x1f) << 3);
@@ -194,12 +239,13 @@ static void DecodePlanar(const uint16 *words, int bpp, uint8 *out64) {
   }
 }
 
-static TileRecord *RecordPlanarTile(int tile_word_adr, int bpp,
+static TileRecord *RecordPlanarTile(const HdTileCensusPpuView *view,
+                                    int tile_word_adr, int bpp,
                                     CensusClass class_) {
   uint16 words[16];
   int word_count = bpp == 4 ? 16 : 8;
   for (int i = 0; i < word_count; i++)
-    words[i] = g_ppu->vram[(tile_word_adr + i) & 0x7fff];
+    words[i] = view->vram.data[(tile_word_adr + i) & 0x7fff];
   uint64 hash = DeterministicHash_Fnv1a64(
       DETERMINISTIC_HASH_FNV1A64_OFFSET ^ (uint64)class_, words,
       (size_t)word_count * 2);
@@ -271,14 +317,14 @@ static int GroupIsPermutation(const uint16 *prev, const uint16 *cur) {
 /* Once per game frame, classify each changed 16-color CGRAM group. A gap in
  * surveyed frames (forced blank, census disabled scene) resnapshots without
  * classifying so scene transitions don't pollute the statistics. */
-static void ClassifyPaletteWrites(void) {
+static void ClassifyPaletteWrites(const HdTileCensusPpuView *view) {
   uint16 gf = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
   if (g_prev_cgram_valid && gf == g_prev_cgram_gf) return;
   int classify = g_prev_cgram_valid && (uint16)(gf - g_prev_cgram_gf) == 1;
   if (classify) {
     for (int group = 0; group < 16; group++) {
       const uint16 *prev = &g_prev_cgram[group * 16];
-      const uint16 *cur = &g_ppu->cgram[group * 16];
+      const uint16 *cur = &view->cgram.data[group * 16];
       if (!memcmp(prev, cur, 16 * sizeof(uint16))) continue;
       GroupDynamics *dyn = &g_group_dynamics[group];
       dyn->change_frames++;
@@ -296,24 +342,26 @@ static void ClassifyPaletteWrites(void) {
       else dyn->other++;
     }
   }
-  memcpy(g_prev_cgram, g_ppu->cgram, sizeof(g_prev_cgram));
+  memcpy(g_prev_cgram, view->cgram.data, sizeof(g_prev_cgram));
   g_prev_cgram_gf = gf;
   g_prev_cgram_valid = 1;
 }
 
 /* ---- per-frame walkers -------------------------------------------------- */
 
-static void SurveyBgLayer(int layer, int bpp) {
-  int enabled = (g_ppu->screenEnabled[0] | g_ppu->screenEnabled[1]) &
+static void SurveyBgLayer(const HdTileCensusPpuView *view, int layer,
+                          int bpp) {
+  const SrPpuBackgroundState *bg = &view->state.backgrounds[layer];
+  int enabled = (view->state.main_screen | view->state.sub_screen) &
                 (1 << layer);
   if (!enabled) return;
   CensusClass class_ = bpp == 4 ? kCensusClass_Bg4bpp : kCensusClass_Bg2bpp;
-  int tilemap_adr = (g_ppu->bgXsc[layer] & 0xfc) << 8;
-  int wider = g_ppu->bgXsc[layer] & 1;
-  int higher = g_ppu->bgXsc[layer] & 2;
-  int tile_adr = ((g_ppu->bgTileAdr >> (layer * 4)) & 0xf) << 12;
-  int first_col = g_ppu->hScroll[layer] >> 3;
-  int first_row = g_ppu->vScroll[layer] >> 3;
+  int tilemap_adr = bg->tilemap_base_word;
+  int wider = bg->tilemap_width_tiles > 32;
+  int higher = bg->tilemap_height_tiles > 32;
+  int tile_adr = bg->tile_base_word;
+  int first_col = bg->h_scroll >> 3;
+  int first_row = bg->v_scroll >> 3;
 
   for (int row = 0; row < 29; row++) {
     for (int col = 0; col < 33; col++) {
@@ -322,68 +370,75 @@ static void SurveyBgLayer(int layer, int bpp) {
       int index = (ty & 0x1f) * 32 + (tx & 0x1f);
       if ((tx & 0x20) && wider) index += 0x400;
       if ((ty & 0x20) && higher) index += wider ? 0x800 : 0x400;
-      uint16 entry = g_ppu->vram[(tilemap_adr + index) & 0x7fff];
+      uint16 entry = view->vram.data[(tilemap_adr + index) & 0x7fff];
       int tile = entry & 0x3ff;
       int group = (entry >> 10) & 7;
-      TileRecord *record = RecordPlanarTile(
+      TileRecord *record = RecordPlanarTile(view,
           tile_adr + tile * (bpp == 4 ? 16 : 8), bpp, class_);
       int palette_base = bpp == 4 ? group * 16 : group * 4;
-      RecordSighting(record, (uint8)(1 << layer), (uint8)group,
+      RecordSighting(view, record, (uint8)(1 << layer), (uint8)group,
                      palette_base, bpp == 4 ? 16 : 4);
     }
   }
 }
 
-static void SurveyObjects(void) {
+static void SurveyObjects(const HdTileCensusPpuView *view) {
   static const uint8 kSpriteSizes[8][2] = {
     {8, 16}, {8, 32}, {8, 64}, {16, 32},
     {16, 64}, {32, 64}, {16, 32}, {16, 32}
   };
-  if (!((g_ppu->screenEnabled[0] | g_ppu->screenEnabled[1]) & 0x10)) return;
+  if (!((view->state.main_screen | view->state.sub_screen) & 0x10)) return;
   for (int i = 0; i < 128; i++) {
     int index = i * 2;
-    int y = g_ppu->oam[index] >> 8;
-    int size = kSpriteSizes[g_ppu->obsel >> 5]
-                           [(g_ppu->highOam[index >> 3] >> ((index & 7) + 1)) & 1];
+    int y = view->oam.data[index] >> 8;
+    int size = kSpriteSizes[view->state.object_size_select]
+                           [(view->high_oam.data[index >> 3] >>
+                             ((index & 7) + 1)) & 1];
     /* Y in the negative-position band (kPpuObjYNegativeFrom..kPpuObjYWrap) that
      * never wraps back onto a visible line: fully below the screen. */
-    if (y >= kPpuObjYNegativeFrom && y + size <= kPpuObjYWrap) continue;
-    int x = g_ppu->oam[index] & 0xff;
-    x |= ((g_ppu->highOam[index >> 3] >> (index & 7)) & 1) << 8;
+    if (y >= (int)SR_PPU_OBJ_Y_NEGATIVE_FROM &&
+        y + size <= (int)SR_PPU_OBJ_Y_WRAP)
+      continue;
+    int x = view->oam.data[index] & 0xff;
+    x |= ((view->high_oam.data[index >> 3] >> (index & 7)) & 1) << 8;
     /* X past the visible width but short of the 9-bit wrap: off to the right
      * and not straddling back onto the left edge. */
-    if (x >= kPpuXPixels && x + size <= kPpuObjXWrap) continue;
-    int oam1 = g_ppu->oam[index + 1];
-    int obj_adr = (oam1 & 0x100) ? PPU_objTileAdr2(g_ppu)
-                                 : PPU_objTileAdr1(g_ppu);
+    if (x >= (int)SR_PPU_NATIVE_WIDTH &&
+        x + size <= (int)SR_PPU_OBJ_X_WRAP)
+      continue;
+    int oam1 = view->oam.data[index + 1];
+    int obj_adr = (int)((oam1 & 0x100)
+        ? view->state.object_tile_base_2_word
+        : view->state.object_tile_base_1_word);
     int group = (oam1 >> 9) & 7;
     for (int ty = 0; ty < size; ty += 8) {
       for (int tx = 0; tx < size; tx += 8) {
         int tile = ((((oam1 & 0xff) >> 4) + (ty >> 3)) << 4) |
                    (((oam1 & 0xf) + (tx >> 3)) & 0xf);
-        TileRecord *record = RecordPlanarTile(obj_adr + tile * 16, 4,
+        TileRecord *record = RecordPlanarTile(view, obj_adr + tile * 16, 4,
                                               kCensusClass_Obj4bpp);
-        RecordSighting(record, 0x10, (uint8)group, 0x80 + group * 16, 16);
+        RecordSighting(view, record, 0x10, (uint8)group,
+                       0x80 + group * 16, 16);
       }
     }
   }
 }
 
-static void SurveyMode7(void) {
-  if (!((g_ppu->screenEnabled[0] | g_ppu->screenEnabled[1]) & 1)) return;
+static void SurveyMode7(const HdTileCensusPpuView *view) {
+  if (!((view->state.main_screen | view->state.sub_screen) & 1)) return;
   /* The matrix can show any part of the 128x128-tile canvas; a screen-window
    * estimate under rotation is unreliable, so record every canvas tile that
    * is referenced by the tilemap. Coarse but complete, and the canvas is at
    * most 256 tiles. */
   /* One flag per tile id; 256 because the OAM tile field is one byte. */
-  uint8 seen[kPpuObjTileIds] = { 0 };
+  uint8 seen[SR_PPU_TILE_ID_COUNT] = { 0 };
   for (int i = 0; i < 128 * 128; i++)
-    seen[g_ppu->vram[i] & 0xff] = 1;
-  for (int tile = 0; tile < kPpuObjTileIds; tile++) {
+    seen[view->vram.data[i] & 0xff] = 1;
+  for (unsigned tile = 0; tile < SR_PPU_TILE_ID_COUNT; tile++) {
     if (!seen[tile]) continue;
     uint8 bytes[64];
     for (int p = 0; p < 64; p++)
-      bytes[p] = (uint8)(g_ppu->vram[tile * 64 + p] >> 8);
+      bytes[p] = (uint8)(view->vram.data[tile * 64 + p] >> 8);
     uint64 hash = DeterministicHash_Fnv1a64(
         DETERMINISTIC_HASH_FNV1A64_OFFSET ^ (uint64)kCensusClass_Mode7,
         bytes, sizeof(bytes));
@@ -392,7 +447,7 @@ static void SurveyMode7(void) {
       memcpy(record->pixels, bytes, 64);
     /* 8bpp: record the first 16 CGRAM colors for the sheet; variants hash
      * the full 256-color palette. */
-    RecordSighting(record, 0x20, 0, 0, 16);
+    RecordSighting(view, record, 0x20, 0, 0, 16);
   }
 }
 
@@ -416,7 +471,7 @@ static void WriteContactSheet(CensusClass class_, const int *indices,
         const TileRecord *record = &g_records[indices[cell]];
         uint8 pixel = record->pixels[(py % 16) / 2 * 8 + (px % 16) / 2];
         if (record->class_ == kCensusClass_Mode7) {
-          uint16 xbgr = g_ppu->cgram[pixel];
+          uint16 xbgr = g_prev_cgram[pixel];
           rgb[0] = (uint8)(((xbgr >> 0) & 0x1f) << 3);
           rgb[1] = (uint8)(((xbgr >> 5) & 0x1f) << 3);
           rgb[2] = (uint8)(((xbgr >> 10) & 0x1f) << 3);
@@ -534,20 +589,16 @@ static void CensusDump(void) {
  * source for `plane = mode7` manifest entries: paint over the dump at any
  * scale; the canvas rect in the manifest maps the art back. Read-only. */
 
-static void HdMode7Dump_Frame(void) {
-  static int enabled = -1;
+static void HdMode7Dump_Frame(const HdTileCensusPpuView *view) {
   static uint64 last_hash;
-  if (enabled < 0) {
-    const char *env = getenv("AR_M7_DUMP");
-    enabled = env && env[0] && env[0] != '0';
-  }
-  if (!enabled || !g_ppu || (g_ppu->bgmode & 7) != 7 ||
-      (g_ppu->inidisp & 0x80))
+  if (!g_mode7_dump_enabled || view->state.bg_mode != 7 ||
+      (view->state.flags & SR_PPU_STATE_FORCED_BLANK))
     return;
   /* Canvas content = the high byte (pixels) of all 128*128 tile words plus
    * the low-byte tilemap. Hash both so tilemap rearrangements re-dump. */
   uint64 hash = DeterministicHash_Fnv1a64(
-      DETERMINISTIC_HASH_FNV1A64_OFFSET, g_ppu->vram, 0x8000 * 2);
+      DETERMINISTIC_HASH_FNV1A64_OFFSET, view->vram.data,
+      SR_PPU_VRAM_WORD_COUNT * sizeof(uint16_t));
   if (hash == last_hash) return;
   last_hash = hash;
 
@@ -561,14 +612,14 @@ static void HdMode7Dump_Frame(void) {
           kMode7CanvasPixelsPerAxis);
   for (int py = 0; py < kMode7CanvasPixelsPerAxis; py++) {
     for (int px = 0; px < kMode7CanvasPixelsPerAxis; px++) {
-      int tile = g_ppu->vram[
+      int tile = view->vram.data[
           (py / kMode7TilePixelsPerAxis) * kMode7CanvasTilesPerAxis +
           px / kMode7TilePixelsPerAxis] & 0xff;
-      uint8 pixel = (uint8)(g_ppu->vram[
+      uint8 pixel = (uint8)(view->vram.data[
           tile * kMode7TilePixelsPerAxis * kMode7TilePixelsPerAxis +
           (py % kMode7TilePixelsPerAxis) * kMode7TilePixelsPerAxis +
           px % kMode7TilePixelsPerAxis] >> 8);
-      uint16 xbgr = g_ppu->cgram[pixel];
+      uint16 xbgr = view->cgram.data[pixel];
       uint8 rgb[3] = {
         (uint8)(((xbgr >> 0) & 0x1f) << 3),
         (uint8)(((xbgr >> 5) & 0x1f) << 3),
@@ -584,40 +635,55 @@ static void HdMode7Dump_Frame(void) {
 
 /* ---- entry point -------------------------------------------------------- */
 
-void HdTileCensus_Frame(void) {
-  HdMode7Dump_Frame();
+void HdTileCensus_Frame(SrRunnerHandle *runner) {
   if (g_enabled < 0) {
     const char *env = getenv("AR_TILE_CENSUS");
     g_enabled = env && env[0] && env[0] != '0';
+    env = getenv("AR_M7_DUMP");
+    g_mode7_dump_enabled = env && env[0] && env[0] != '0';
     if (g_enabled) {
       g_records = calloc(kCensusMaxRecords, sizeof(TileRecord));
       g_hash_slots = malloc(sizeof(int32_t) << kCensusHashBits);
-      if (!g_records || !g_hash_slots) { g_enabled = 0; return; }
+      if (!g_records || !g_hash_slots) {
+        free(g_records);
+        free(g_hash_slots);
+        g_records = NULL;
+        g_hash_slots = NULL;
+        g_enabled = 0;
+      }
+    }
+    if (g_enabled) {
       memset(g_hash_slots, 0xff, sizeof(int32_t) << kCensusHashBits);
       atexit(CensusDump);
       fprintf(stderr, "[tile-census] enabled\n");
     }
   }
-  if (!g_enabled || !g_ppu || (g_ppu->inidisp & 0x80)) return;
+  if (!g_enabled && !g_mode7_dump_enabled) return;
 
-  ClassifyPaletteWrites();
+  HdTileCensusPpuView view;
+  if (!CapturePpuView(&view, runner, g_enabled != 0)) return;
+  HdMode7Dump_Frame(&view);
+  if (!g_enabled || (view.state.flags & SR_PPU_STATE_FORCED_BLANK)) return;
+
+  ClassifyPaletteWrites(&view);
   g_frames_surveyed++;
-  int mode = g_ppu->bgmode & 7;
+  int mode = view.state.bg_mode;
   switch (mode) {
     case 0:
-      for (int layer = 0; layer < 4; layer++) SurveyBgLayer(layer, 2);
+      for (int layer = 0; layer < 4; layer++)
+        SurveyBgLayer(&view, layer, 2);
       break;
     case 1:
-      SurveyBgLayer(0, 4);
-      SurveyBgLayer(1, 4);
-      SurveyBgLayer(2, 2);
+      SurveyBgLayer(&view, 0, 4);
+      SurveyBgLayer(&view, 1, 4);
+      SurveyBgLayer(&view, 2, 2);
       break;
     case 7:
-      SurveyMode7();
+      SurveyMode7(&view);
       break;
     default:
       g_skipped_mode_mask |= (uint32)(1u << mode);
       break;
   }
-  SurveyObjects();
+  SurveyObjects(&view);
 }
