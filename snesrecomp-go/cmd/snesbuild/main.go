@@ -86,7 +86,8 @@ The binary itself has no runtime dependencies. Regeneration needs only a local
 ROM. The default CMake build needs CMake, a C compiler, and the frontend
 dependencies of the game project; --hermetic replaces CMake and the compiler
 with the pinned Zig toolchain, leaving only the frontend's native libraries
-(for example SDL3) as external inputs.`)
+(for example SDL3) as external inputs. Build commands accept --runner legacy
+(the default) or --runner next (the independent portable runner).`)
 }
 
 type regenFlags struct {
@@ -138,6 +139,7 @@ func (values *stringList) Set(value string) error {
 
 type buildFlags struct {
 	root, buildDir, toolchainDir, cmake, config, generator, prefixPath string
+	runner                                                             string
 	jobs                                                               int
 	buildOnly                                                          bool
 	cmakeArgs                                                          stringList
@@ -174,7 +176,7 @@ func (values *buildFlags) hermeticOptions() (project.HermeticOptions, error) {
 		zigPath = located.Path
 	}
 	return project.HermeticOptions{
-		Paths: paths, ZigPath: zigPath, Jobs: values.jobs, Optimize: values.optimize,
+		Paths: paths, Runner: values.runner, ZigPath: zigPath, Jobs: values.jobs, Optimize: values.optimize,
 		SDLIncludeDir: values.sdlInclude, SDLLibDir: values.sdlLib, Target: values.target,
 		Verbose: values.verbose,
 		Stdout:  os.Stdout, Stderr: os.Stderr,
@@ -186,6 +188,7 @@ func addBuildFlags(flags *flag.FlagSet) *buildFlags {
 	flags.StringVar(&values.root, "root", ".", "game project root")
 	flags.StringVar(&values.buildDir, "build-dir", "build", "native build directory")
 	flags.StringVar(&values.toolchainDir, "toolchain-dir", "snesrecomp-go", "snesrecomp-go module directory")
+	flags.StringVar(&values.runner, "runner", project.RunnerLegacy, "runner implementation: legacy or next")
 	flags.StringVar(&values.cmake, "cmake", "cmake", "CMake executable")
 	flags.StringVar(&values.config, "config", "RelWithDebInfo", "CMake build configuration")
 	flags.StringVar(&values.generator, "generator", "", "optional CMake generator")
@@ -201,7 +204,7 @@ func (values *buildFlags) options() project.BuildOptions {
 	paths := project.DefaultPaths(values.root)
 	paths.BuildDir, paths.ToolchainDir = values.buildDir, values.toolchainDir
 	return project.BuildOptions{
-		Paths: paths, CMakeCommand: values.cmake, Config: values.config,
+		Paths: paths, Runner: values.runner, CMakeCommand: values.cmake, Config: values.config,
 		Generator: values.generator, PrefixPath: values.prefixPath, Jobs: values.jobs,
 		CMakeArgs: append([]string(nil), values.cmakeArgs...), Configure: !values.buildOnly,
 		Stdout: os.Stdout, Stderr: os.Stderr,
@@ -276,6 +279,7 @@ func addBuildFlagsForAll(flags *flag.FlagSet) *buildFlags {
 	flags.StringVar(&values.config, "config", "RelWithDebInfo", "CMake build configuration")
 	flags.StringVar(&values.generator, "generator", "", "optional CMake generator")
 	flags.StringVar(&values.prefixPath, "prefix-path", os.Getenv("CMAKE_PREFIX_PATH"), "CMake package prefix path")
+	flags.StringVar(&values.runner, "runner", project.RunnerLegacy, "runner implementation: legacy or next")
 	flags.IntVar(&values.jobs, "build-jobs", runtime.NumCPU(), "parallel native build jobs")
 	flags.BoolVar(&values.buildOnly, "build-only", false, "skip CMake configure")
 	flags.Var(&values.cmakeArgs, "cmake-arg", "additional CMake configure argument; repeat as needed")
@@ -407,12 +411,15 @@ func runDoctor(args []string) error {
 	root := flags.String("root", ".", "game project root")
 	romPath := flags.String("rom", "game.sfc", "ROM path, relative to project root")
 	cmake := flags.String("cmake", "cmake", "CMake executable")
+	toolchainDir := flags.String("toolchain-dir", "snesrecomp-go", "snesrecomp-go module directory")
+	runnerName := flags.String("runner", project.RunnerLegacy, "runner implementation: legacy or next")
 	requireBuild := flags.Bool("require-build", false, "fail unless native build dependencies are present")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	paths := project.DefaultPaths(*root)
 	paths.ROM = *romPath
+	paths.ToolchainDir = *toolchainDir
 	resolved, err := paths.Resolve()
 	if err != nil {
 		return err
@@ -433,12 +440,20 @@ func runDoctor(args []string) error {
 		}
 	}
 	buildMissing := false
-	runtimePath := filepath.Join(resolved.ToolchainDir, "runtime", "runner.cmake")
+	runner, runnerErr := project.ResolveRunner(resolved.ToolchainDir, *runnerName)
+	if runnerErr != nil {
+		return runnerErr
+	}
+	runtimePath := filepath.Join(runner.Directory, "runner.cmake")
 	if _, statErr := os.Stat(runtimePath); statErr != nil {
-		fmt.Printf("%-15s MISSING (%s)\n", "runtime", runtimePath)
+		fmt.Printf("%-15s MISSING (%s)\n", "runner", runtimePath)
 		buildMissing = true
 	} else {
-		fmt.Printf("%-15s ok (%s)\n", "runtime", runtimePath)
+		fallback := ""
+		if runner.LegacyFallback {
+			fallback = ", migration build with legacy fallbacks"
+		}
+		fmt.Printf("%-15s ok (%s%s)\n", "runner", runner.Name, fallback)
 	}
 	if path, lookErr := exec.LookPath(*cmake); lookErr != nil {
 		fmt.Printf("cmake          MISSING (%s)\n", *cmake)

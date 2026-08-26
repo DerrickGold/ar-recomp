@@ -13,6 +13,15 @@
       }
     },
     {
+      "name": "dev-next",
+      "displayName": "Dev with independent next runner",
+      "inherits": "dev",
+      "binaryDir": "${sourceDir}/build-next",
+      "cacheVariables": {
+        "SNESRECOMP_RUNNER": "next"
+      }
+    },
+    {
       "name": "play",
       "displayName": "Play (RelWithDebInfo, optimized)",
       "binaryDir": "${sourceDir}/build-release",
@@ -62,12 +71,14 @@
   ],
   "buildPresets": [
     { "name": "dev", "configurePreset": "dev", "jobs": 8 },
+    { "name": "dev-next", "configurePreset": "dev-next", "jobs": 8 },
     { "name": "play", "configurePreset": "play", "jobs": 8 },
     { "name": "control", "configurePreset": "control", "jobs": 8 },
     { "name": "asan", "configurePreset": "asan", "jobs": 8 },
     { "name": "trace", "configurePreset": "trace", "jobs": 8 }
   ],
   "testPresets": [
-    { "name": "dev", "configurePreset": "dev", "output": { "outputOnFailure": true } }
+    { "name": "dev", "configurePreset": "dev", "output": { "outputOnFailure": true } },
+    { "name": "dev-next", "configurePreset": "dev-next", "output": { "outputOnFailure": true } }
   ]
 }

@@ -1,6 +1,7 @@
 #include "audio_trace.h"
 #include "snes/dsp.h"
 #include "snes/dsp_shadow.h"
+#include "snes/saveload.h"
 
 #include <stdio.h>
 #include <string.h>

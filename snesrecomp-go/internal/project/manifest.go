@@ -11,8 +11,8 @@ import (
 
 // Manifest describes the game-specific half of a hermetic (CMake-free) build:
 // everything the engine cannot know about a particular game project. The
-// runtime's own source list stays in runtime/runner.cmake, which the engine
-// module owns and parses directly (see RunnerSources).
+// runner's own source list stays in its runner.cmake, which the engine module
+// owns and parses directly (see RunnerSources).
 //
 // File format (snesbuild.ini at the project root): `key = value` lines with
 // optional [section] headers and # comments. The list-valued keys (source,
@@ -86,7 +86,7 @@ func LoadManifest(path string) (Manifest, error) {
 	return manifest, nil
 }
 
-// RunnerSources parses runtime/runner.cmake for the engine's shared source
+// RunnerSources parses a selected runner.cmake for the engine's shared source
 // and include lists so the hermetic build and the CMake build cannot drift.
 // Only the unconditional first set(...) block of each variable is read; the
 // SNESRECOMP_ENABLE_TRACE-conditional append is a developer-only source that
@@ -190,7 +190,7 @@ func cmakeSetEntries(content, variable, runtimeDir string) ([]string, error) {
 			continue
 		}
 		line = strings.ReplaceAll(line, "${SNESRECOMP_RUNNER_ROOT}", runtimeDir)
-		entries = append(entries, filepath.FromSlash(line))
+		entries = append(entries, filepath.Clean(filepath.FromSlash(line)))
 	}
 	if len(entries) == 0 {
 		return nil, fmt.Errorf("set(%s ...) block is empty", variable)

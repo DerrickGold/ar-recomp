@@ -39,7 +39,27 @@ else()
 endif()
 
 set(SNESRECOMP_GO_ROOT ${CMAKE_SOURCE_DIR}/snesrecomp-go)
-include(${SNESRECOMP_GO_ROOT}/runtime/runner.cmake)
+set(SNESRECOMP_RUNNER "legacy" CACHE STRING
+    "Runner implementation to build (legacy or next)")
+set_property(CACHE SNESRECOMP_RUNNER PROPERTY STRINGS legacy next)
+if(SNESRECOMP_RUNNER STREQUAL "legacy")
+    set(_SNESRECOMP_RUNNER_MANIFEST
+        ${SNESRECOMP_GO_ROOT}/runtime/runner.cmake)
+elseif(SNESRECOMP_RUNNER STREQUAL "next")
+    set(_SNESRECOMP_RUNNER_MANIFEST
+        ${SNESRECOMP_GO_ROOT}/runtime-next/runner.cmake)
+else()
+    message(FATAL_ERROR
+        "Unknown SNESRECOMP_RUNNER='${SNESRECOMP_RUNNER}'; expected legacy or next")
+endif()
+include(${_SNESRECOMP_RUNNER_MANIFEST})
+message(STATUS
+    "snesrecomp runner: ${SNESRECOMP_RUNNER_VARIANT} "
+    "(legacy fallback: ${SNESRECOMP_RUNNER_LEGACY_FALLBACK})")
+# `src/constants.h` intentionally includes the selected runner's neutral
+# runtime_constants.h by name.  Apply that header contract to ROM-free test
+# targets as well as the game executable.
+include_directories(${SNESRECOMP_RUNNER_INCLUDE_DIRS})
 
 find_package(SDL3 3.4.0 REQUIRED)
 
@@ -1058,7 +1078,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_dsp_bus_mix_test
         tests/dsp_bus_mix_test.c
-        snesrecomp-go/runtime/src/snes/dsp.c
+        ${SNESRECOMP_RUNNER_DSP_SOURCE}
     )
     target_include_directories(actraiser_dsp_bus_mix_test PRIVATE
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS})
@@ -1067,7 +1087,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_dsp_voice_benchmark
         tools/benchmark_dsp_voices.c
-        snesrecomp-go/runtime/src/snes/dsp.c
+        ${SNESRECOMP_RUNNER_DSP_SOURCE}
     )
     target_include_directories(actraiser_dsp_voice_benchmark PRIVATE
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS})
@@ -1128,8 +1148,8 @@ if(BUILD_TESTING)
         src/sim/sim_background_mountain_relief.c
         src/sim/sim_background_voxel_region.c
         src/sim/sim_render_atlas.c
-        ${SNESRECOMP_RUNNER_ROOT}/src/snes/ppu.c
-        ${SNESRECOMP_RUNNER_ROOT}/src/snes/ppu_old.c
+        ${SNESRECOMP_RUNNER_DEVICE_ROOT}/src/snes/ppu.c
+        ${SNESRECOMP_RUNNER_DEVICE_ROOT}/src/snes/ppu_old.c
     )
     target_include_directories(actraiser_ppu_render_pipeline_test PRIVATE
         ${CMAKE_SOURCE_DIR}
@@ -1151,8 +1171,8 @@ if(BUILD_TESTING)
     # threshold, and range-vs-explicit-part rasterization identity.
     add_executable(actraiser_ppu_exact_pos_test
         tests/ppu_exact_pos_test.c
-        ${SNESRECOMP_RUNNER_ROOT}/src/snes/ppu.c
-        ${SNESRECOMP_RUNNER_ROOT}/src/snes/ppu_old.c
+        ${SNESRECOMP_RUNNER_DEVICE_ROOT}/src/snes/ppu.c
+        ${SNESRECOMP_RUNNER_DEVICE_ROOT}/src/snes/ppu_old.c
     )
     target_include_directories(actraiser_ppu_exact_pos_test PRIVATE
         ${CMAKE_SOURCE_DIR}
@@ -1191,7 +1211,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_scene_asset_dump_test
         tests/scene_asset_dump_test.c
-        ${SNESRECOMP_RUNNER_ROOT}/src/crc32.c
+        ${SNESRECOMP_RUNNER_CRC32_SOURCE}
         src/dev/scene_asset_dump.c
     )
     target_include_directories(actraiser_scene_asset_dump_test PRIVATE

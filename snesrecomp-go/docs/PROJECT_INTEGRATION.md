@@ -83,14 +83,21 @@ build/v2regen rts-webs --rom game.sfc --cfg-dir recomp --suggest
 
 ## CMake integration
 
-`runtime/runner.cmake` exports two variables:
+Each selected `runner.cmake` exports two variables:
 
 - `SNESRECOMP_RUNNER_SOURCES`: shared C runtime and SNES hardware sources.
 - `SNESRECOMP_RUNNER_INCLUDE_DIRS`: `runtime/src` and `runtime/src/snes`.
 
-It also defines `SNESRECOMP_USE_CCACHE`, `SNESRECOMP_DEV_FAST_BUILD`, and
-`SNESRECOMP_ENABLE_TRACE` options. The trace option compiles local trace rings
-and a link stub; the historical TCP debug server is not currently enabled.
+Both manifests define `SNESRECOMP_ENABLE_TRACE`; the legacy manifest also owns
+its existing `SNESRECOMP_USE_CCACHE` and `SNESRECOMP_DEV_FAST_BUILD` controls.
+The trace option compiles local trace rings and a link stub; the historical TCP
+debug server is not currently enabled.
+
+The default comparison manifest is `runtime/runner.cmake`. The independent MIT
+runner is `runtime-next/runner.cmake`; its source and include lists contain no
+legacy fallback. A game project can select it in its own CMake dispatch or use
+`snesbuild build --runner next`; ActRaiserRecomp's top-level build provides the
+reference dispatch.
 
 ```cmake
 cmake_minimum_required(VERSION 3.16)
@@ -185,10 +192,10 @@ The hermetic path compiles every translation unit with a pinned Zig toolchain
 and links the executable itself — no CMake and no system compiler. It reads
 two inputs the CMake path also uses, plus one manifest it owns:
 
-- `runtime/runner.cmake` — the engine's source/include lists (parsed
-  directly; the first unconditional `set(...)` block of each variable). The
-  `SNESRECOMP_ENABLE_TRACE` developer sources are never part of hermetic
-  builds.
+- the selected `runtime/runner.cmake` or `runtime-next/runner.cmake` — the
+  engine's source/include lists (parsed directly; the first unconditional
+  `set(...)` block of each variable). The `SNESRECOMP_ENABLE_TRACE` developer
+  sources are never part of hermetic builds.
 - `src/gen/*.c` — globbed as always.
 - `snesbuild.ini` at the project root — the game half:
 
@@ -208,8 +215,10 @@ source = src/main.c    # repeatable, game translation units only
 Toolchain resolution order: `$SNESBUILD_ZIG`, the project's
 `build/toolchain/` cache (populated by `snesbuild toolchain fetch`, which
 verifies the release archive against a checksum embedded in the binary),
-then `PATH`. Objects and the executable land in `build/hermetic/`; rebuilds
-are incremental by source/header mtime plus a compile-flags hash.
+then `PATH`. Legacy objects and the executable land in `build/hermetic/`; next
+uses `build/hermetic-next/`, preventing runner swaps from invalidating or,
+worse, reusing incompatible objects. Rebuilds are incremental by source/header
+mtime plus a compile-flags hash.
 
 ## Per-game conventions
 

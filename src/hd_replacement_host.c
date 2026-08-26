@@ -256,7 +256,13 @@ void ActRaiser_RebindPpuOutputSurfaces(void) {
    * offset by kPpuObjApron columns -- see present.c's flat upload. */
   const size_t frame_pitch =
       ActionApron_SurfacePitch(g_snes_width, kPpuObjApron);
-  PpuBeginDrawing(g_ppu, g_pixels, frame_pitch, 0);
+  /* Keep the general renderer available as a deterministic A/B oracle for
+   * optimized scanout.  This is intentionally a process-start diagnostic,
+   * not a player setting: switching algorithms mid-frame would invalidate
+   * comparison captures. */
+  const uint32_t render_flags = getenv("AR_PPU_REFERENCE")
+      ? kPpuRenderFlags_ReferencePixelRenderer : 0u;
+  PpuBeginDrawing(g_ppu, g_pixels, frame_pitch, render_flags);
   /* Geometry may be contracting from a wider prior bind. Clear first so a
    * validation failure cannot leave the old stride attached to new pixels. */
   PpuBindAuthenticSurface(g_ppu, NULL, 0);

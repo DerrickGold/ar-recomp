@@ -24,6 +24,7 @@ import (
 // docs/PROJECT_INTEGRATION.md for the snesbuild.ini contract.
 type HermeticOptions struct {
 	Paths
+	Runner        string // legacy (default) or next
 	ManifestPath  string // defaults to <root>/snesbuild.ini
 	ZigPath       string // required: resolved zig executable
 	Jobs          int
@@ -116,11 +117,19 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 			ManifestFileName, strings.Join(drift, "\n  "))
 	}
 
-	runtimeDir := filepath.Join(paths.ToolchainDir, "runtime")
-	runnerSources, runnerIncludes, err := RunnerSources(runtimeDir)
+	runner, err := ResolveRunner(paths.ToolchainDir, options.Runner)
 	if err != nil {
 		return "", err
 	}
+	runnerSources, runnerIncludes, err := RunnerSources(runner.Directory)
+	if err != nil {
+		return "", err
+	}
+	fallbackNote := ""
+	if runner.LegacyFallback {
+		fallbackNote = "; legacy fallbacks active"
+	}
+	fmt.Fprintf(options.Stdout, "hermetic: runner %s%s\n", runner.Name, fallbackNote)
 	generated, err := filepath.Glob(filepath.Join(paths.GeneratedDir, "*.c"))
 	if err != nil {
 		return "", err
@@ -179,6 +188,11 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	}
 	compileArgs = append(compileArgs, "-std="+manifest.Std, options.Optimize, "-g",
 		"-w", "-Wno-implicit-function-declaration")
+	if runner.Name == RunnerNext {
+		compileArgs = append(compileArgs, "-DSNESRECOMP_RUNNER_NEXT=1")
+	} else {
+		compileArgs = append(compileArgs, "-DSNESRECOMP_RUNNER_NEXT=0")
+	}
 	for _, define := range manifest.Defines {
 		compileArgs = append(compileArgs, "-D"+define)
 	}
@@ -191,9 +205,9 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	// so a cross-check would silently throw away the developer's native
 	// objects and vice versa. Separate trees make a cross build cheap enough
 	// to run as a gate.
-	outputDir := filepath.Join(paths.BuildDir, "hermetic")
-	if options.Target != "" {
-		outputDir = filepath.Join(outputDir, options.Target)
+	outputDir, err := HermeticOutputDir(paths.BuildDir, options.Target, runner.Name)
+	if err != nil {
+		return "", err
 	}
 	objectDir := filepath.Join(outputDir, "obj")
 	if err := os.MkdirAll(objectDir, 0o755); err != nil {

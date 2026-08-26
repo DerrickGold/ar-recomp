@@ -151,6 +151,33 @@ policy, and any C functions named by `hle_func`/`hle_func_if`/`hle_dispatch`.
 See [`docs/PROJECT_INTEGRATION.md`](docs/PROJECT_INTEGRATION.md) for the full
 contract and [`docs/CFG_FORMAT.md`](docs/CFG_FORMAT.md) for bank directives.
 
+### Selectable replacement runner
+
+The inherited runner remains the default comparison target. The independently
+authored MIT runner is available under `runtime-next/` through an explicit
+build selection:
+
+```sh
+snesbuild build --root . --runner legacy       # default
+snesbuild build --root . --runner next         # independent MIT runner
+snesbuild build --hermetic --root . --runner next
+```
+
+The CMake equivalent is `-DSNESRECOMP_RUNNER=legacy|next`. The `next` manifest
+contains no legacy source or include fallbacks and reports that boundary in its
+runner descriptor. Its standalone module tests every core subsystem without a
+ROM, generated game code, SDL, or the historical runner:
+
+```sh
+cmake -S snesrecomp-go/runtime-next -B build/runtime-next
+cmake --build build/runtime-next
+ctest --test-dir build/runtime-next --output-on-failure
+```
+
+Core replacement code is portable C11 and must keep OS, SDL, graphics API, and
+audio API types behind host adapters. The isolated object caches are
+`build/hermetic/` for `legacy` and `build/hermetic-next/` for `next`.
+
 ## Commands
 
 All commands accept explicit paths and can be run from the game project root:
@@ -198,10 +225,12 @@ snesbuild sdl stage  --root . --target x86_64-windows-gnu
 snesbuild build --hermetic --root . --target x86_64-windows-gnu
 ```
 
-Each target keeps a separate object tree under `build/hermetic/<target>/`, so
-cross checks and the native build stay independently incremental. A cross build
-never falls back to the host's SDL3; pass `--sdl-include`/`--sdl-lib` for
-targets with no official redistributable to stage.
+Each target keeps a separate object tree under `build/hermetic/<target>/` for
+legacy or `build/hermetic-next/<target>/` for next, so cross checks, runner
+comparisons, and the native build stay independently incremental. A cross
+build never falls back to the host's SDL3; pass
+`--sdl-include`/`--sdl-lib` for targets with no official redistributable to
+stage.
 
 Run `v2regen help` or `v2regen <command> -h` for every option.
 Run `snesbuild help` or `snesbuild <command> -h` for project-driver options.
