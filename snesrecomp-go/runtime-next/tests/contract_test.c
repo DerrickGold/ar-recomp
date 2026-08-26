@@ -42,6 +42,10 @@ int main(void) {
                     "descriptor CPU-state capability mismatch");
     failed |= check(descriptor != NULL &&
                         (descriptor->capabilities &
+                         SR_RUNNER_CAP_SAFE_POINT_MUTATIONS) != 0u,
+                    "descriptor mutation capability mismatch");
+    failed |= check(descriptor != NULL &&
+                        (descriptor->capabilities &
                          (SR_RUNNER_CAP_PPU_STATE |
                           SR_RUNNER_CAP_BORROWED_U16_SPANS |
                           SR_RUNNER_CAP_PPU_FRAME_STATE |

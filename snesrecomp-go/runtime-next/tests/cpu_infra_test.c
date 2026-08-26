@@ -1,6 +1,7 @@
 #include "common_cpu_infra.h"
 #include "cpu_state.h"
 #include "cpu_trace.h"
+#include "runner_next_internal.h"
 #include "snes/cart.h"
 #include "snes/cpu.h"
 #include "snes/dma.h"
@@ -19,6 +20,16 @@ Ppu *g_ppu;
 Dma *g_dma;
 int snes_frame_counter;
 SnesRdnmiReadHook *g_snes_rdnmi_read_hook;
+SrEventMask g_sr_runner_event_mask;
+
+void sr_runner_emit_event(Snes *snes, SrEventMask event_mask,
+                          SrRunnerEvent *event) {
+    (void)snes;
+    (void)event_mask;
+    (void)event;
+}
+
+void sr_runner_clear_event_subscriptions(Snes *snes) { (void)snes; }
 
 static Snes test_snes;
 static Cpu test_cpu;

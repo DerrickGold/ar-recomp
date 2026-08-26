@@ -1,5 +1,6 @@
 #include "common_cpu_infra.h"
 #include "cpu_state.h"
+#include "runner_next_internal.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -12,6 +13,8 @@ int g_sram_size = sizeof(save_ram);
 uint64_t g_main_cpu_cycles_estimate;
 uint64_t g_apu_pace_cycles_estimate;
 int snes_frame_counter;
+Snes *g_snes;
+SrEventMask g_sr_runner_event_mask;
 const char *g_last_recomp_func = "cpu-test";
 uint32_t g_ar_blk_ring[kRuntimeBlockTraceRingCapacity];
 unsigned g_ar_blk_idx;
@@ -25,6 +28,45 @@ static uint8 selected_variant;
 static unsigned continuation_calls;
 static uint8 continuation_mx;
 static uint8 continuation_host_return_valid;
+static unsigned runner_error_count;
+static SrRunnerErrorCode runner_error_code;
+static uint32_t runner_error_pc;
+
+void sr_runner_emit_event(Snes *snes, SrEventMask event_mask,
+                          SrRunnerEvent *event) {
+    (void)snes;
+    (void)event_mask;
+    (void)event;
+}
+
+void sr_runner_emit_memory_write(Snes *snes, SrMemoryRegion region,
+                                 uint32_t address, uint32_t previous_value,
+                                 uint32_t value, uint32_t width_bytes) {
+    (void)snes;
+    (void)region;
+    (void)address;
+    (void)previous_value;
+    (void)value;
+    (void)width_bytes;
+}
+
+void sr_runner_emit_error(Snes *snes, SrRunnerErrorCode code,
+                          uint32_t flags, uint32_t pc24,
+                          uint32_t source_pc24, const char *label) {
+    (void)snes;
+    (void)flags;
+    (void)source_pc24;
+    (void)label;
+    ++runner_error_count;
+    runner_error_code = code;
+    runner_error_pc = pc24;
+}
+
+int ar_trace_active(void) { return 0; }
+void ar_trace_dispmiss(uint32 from_pc, uint32 to_pc) {
+    (void)from_pc;
+    (void)to_pc;
+}
 
 static RecompReturn variant_handler(CpuState *cpu, uint8 variant) {
     ++handler_calls;
@@ -177,13 +219,18 @@ static void test_stack_and_dispatch(void) {
     cpu.A = 10u;
     handler_calls = 0u;
     selected_variant = 0xffu;
+    runner_error_count = 0u;
+    g_sr_runner_event_mask = SR_EVENT_MASK_ERROR;
     check(cpu_dispatch_pc(&cpu, 0x818000u, 0x01f0u) ==
               RECOMP_RETURN_SKIP_1 &&
               cpu.A == 11u && handler_calls == 1u && selected_variant == 0u,
           "LoROM mirror dispatch variant");
     cpu.S = 0x0100u;
     check(cpu_dispatch_pc(&cpu, 0x777777u, 0x0123u) ==
-              RECOMP_RETURN_NORMAL && cpu.S == 0x0123u,
+              RECOMP_RETURN_NORMAL && cpu.S == 0x0123u &&
+              runner_error_count == 1u &&
+              runner_error_code == SR_RUNNER_ERROR_DISPATCH_MISS &&
+              runner_error_pc == 0x777777u,
           "dispatch miss stack restore");
     cpu.S = 0x0100u;
     *RomPtr(0x018500u) = 0x60u;
@@ -213,6 +260,7 @@ static void test_stack_and_dispatch(void) {
     check(cpu_dispatch_pc(&cpu, 0x028000u, 0x01f0u) ==
               RECOMP_RETURN_SKIP_1 && handler_calls == 4u,
           "flat tail dispatch");
+    g_sr_runner_event_mask = 0u;
 }
 
 static void test_dispatch_mx_variants(void) {

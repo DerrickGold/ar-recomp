@@ -1,5 +1,6 @@
 #include "common_cpu_infra.h"
 #include "actraiser_rtl.h"
+#include "ar_trace.h"
 #include "cpu_state.h"
 #include "runner_next.h"
 #include "runner_next_internal.h"
@@ -30,11 +31,64 @@ static SrResult ActRaiser_QueryCpuState(
   return SR_RESULT_OK;
 }
 
+static SrResult ActRaiser_QueryExecutionState(
+    Snes *snes, SrExecutionSnapshot *out_state) {
+  uint32_t depth;
+  uint32_t frame;
+  uint32_t history_count;
+  uint32_t history_start;
+  if (!snes || !out_state) return SR_RESULT_INVALID_ARGUMENT;
+
+  out_state->block_serial = g_ar_blk_idx;
+  if (g_ar_blk_idx > 0u) {
+    out_state->current_block_pc24 =
+        g_ar_blk_ring[(g_ar_blk_idx - 1u) & kRuntimeBlockTraceRingMask] &
+        0x00ffffffu;
+    out_state->flags |= SR_EXECUTION_CURRENT_BLOCK_VALID;
+  }
+  if (g_last_recomp_func) {
+    out_state->current_function = g_last_recomp_func;
+    out_state->flags |= SR_EXECUTION_CURRENT_FUNCTION_VALID;
+  }
+
+  depth = g_recomp_stack_top > 0 ? (uint32_t)g_recomp_stack_top : 0u;
+  out_state->stack_depth = depth;
+  if (depth > SR_EXECUTION_STACK_CAPACITY) {
+    depth = SR_EXECUTION_STACK_CAPACITY;
+    out_state->flags |= SR_EXECUTION_STACK_TRUNCATED;
+  }
+  for (frame = 0u; frame < depth; ++frame) {
+    out_state->stack[frame].function_name = g_recomp_stack[frame];
+    out_state->stack[frame].entry_stack = g_cpu_entry_s[frame];
+    out_state->stack[frame].host_return_valid = g_cpu_entry_hrv[frame];
+  }
+
+  history_count = g_ar_blk_idx < SR_EXECUTION_HISTORY_CAPACITY
+      ? g_ar_blk_idx : SR_EXECUTION_HISTORY_CAPACITY;
+  history_start = g_ar_blk_idx - history_count;
+  out_state->history_count = history_count;
+  for (frame = 0u; frame < history_count; ++frame) {
+    const uint32_t slot =
+        (history_start + frame) & kRuntimeBlockTraceRingMask;
+    SrExecutionBlock *block = &out_state->history[frame];
+    block->pc24 = g_ar_blk_ring[slot] & 0x00ffffffu;
+    block->cpu_flags =
+        ((g_ar_blk_aux[slot] >> 16) & 1u ? SR_CPU_STATE_M_FLAG : 0u) |
+        ((g_ar_blk_aux[slot] >> 17) & 1u ? SR_CPU_STATE_X_FLAG : 0u);
+    block->register_x = (uint16_t)g_ar_blk_aux[slot];
+    block->stack_pointer = g_ar_blk_s[slot];
+  }
+  return SR_RESULT_OK;
+}
+
 static void ActRaiser_BindRunnerAbi(Snes *snes, bool enabled) {
+  ar_trace_bind_runner(snes, enabled);
   sr_runner_bind_ppu_services(snes, enabled);
   sr_runner_set_cpu_state_provider(
       snes, enabled ? ActRaiser_QueryCpuState : NULL,
       enabled ? &g_cpu : NULL);
+  sr_runner_set_execution_state_provider(
+      snes, enabled ? ActRaiser_QueryExecutionState : NULL);
 }
 
 const RtlGameInfo kActRaiserGameInfo = {

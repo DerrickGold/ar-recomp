@@ -22,6 +22,7 @@
 #include <string.h>
 
 #include "snes/ppu.h"
+#include "runner_next_internal.h"
 
 /* Externs the PPU references; only fire under instrumentation. */
 bool g_new_ppu = true;
@@ -39,6 +40,19 @@ uint32_t g_ar_blk_ring[256];
 const char *g_last_recomp_func;
 uint8_t g_ram[0x20000];
 int snes_frame_counter;
+SrEventMask g_sr_runner_event_mask;
+void sr_runner_emit_ppu_memory_write(Ppu *ppu, SrMemoryRegion region,
+                                     uint32_t address,
+                                     uint32_t previous_value,
+                                     uint32_t value,
+                                     uint32_t width_bytes) {
+  (void)ppu;
+  (void)region;
+  (void)address;
+  (void)previous_value;
+  (void)value;
+  (void)width_bytes;
+}
 
 static int g_failures;
 

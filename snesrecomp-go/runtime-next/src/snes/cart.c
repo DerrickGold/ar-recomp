@@ -1,5 +1,6 @@
 #include "cart.h"
 #include "cart_map_internal.h"
+#include "../runner_next_internal.h"
 #include "saveload.h"
 
 #include <stdlib.h>
@@ -96,7 +97,15 @@ void cart_write(Cart *cart, uint8_t bank, uint16_t address, uint8_t value) {
     const SrCartAddress mapped = sr_cart_map_write_inline(
         (SrCartMapping)cart->type, bank, address, cart->ramSize);
     if (mapped.region == SR_CART_REGION_SRAM) {
-        cart->ram[mapped.offset] = value;
+        if (sr_runner_event_enabled(SR_EVENT_MASK_MEMORY_WRITE)) {
+            const uint8_t old_value = cart->ram[mapped.offset];
+            cart->ram[mapped.offset] = value;
+            sr_runner_emit_memory_write(
+                cart->snes, SR_MEMORY_SRAM, mapped.offset,
+                old_value, value, 1u);
+        } else {
+            cart->ram[mapped.offset] = value;
+        }
     }
 }
 

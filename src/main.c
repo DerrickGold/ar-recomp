@@ -1297,6 +1297,8 @@ static void AppBoot_StartGame(AppBoot *app) {
   RtlRegisterGame(&kActRaiserGameInfo);
   app->snes = SnesInit(app->rom_data, (int)app->rom_size);
   if (!app->snes) Die("SnesInit failed");
+  if (!RuntimeDiagnostics_Bind(sr_runner_handle(app->snes)))
+    Die("runner diagnostics observer bind failed");
 
   /* Keep deterministic visual source-data adjustments below cart_load (which
    * copies rom_data) and above Randomizer_Init (which snapshots the live cart
@@ -2173,6 +2175,7 @@ static int AppShutdown(AppBoot *app, char **argv) {
   ActRaiser_DestroyGameCoroutine();
   InputMap_Shutdown();
 #ifdef SNESRECOMP_NEXT_COMMON_CPU_INFRA_H
+  RuntimeDiagnostics_Unbind();
   SnesShutdown();
 #endif
   SDL_DestroyTexture(g_hud_obj_texture);

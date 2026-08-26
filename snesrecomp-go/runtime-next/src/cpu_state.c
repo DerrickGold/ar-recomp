@@ -1,8 +1,8 @@
 #include "cpu_state.h"
 
-#include "ar_trace.h"
 #include "common_cpu_infra.h"
 #include "common_rtl.h"
+#include "runner_next_internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,19 +15,7 @@ void (*g_cpu_cop_hook)(CpuState *cpu);
 uint16 ar_cpu_S(void) { return g_cpu.S; }
 uint8 ar_cpu_PB(void) { return g_cpu.PB; }
 
-typedef struct DispatchLogEntry {
-    uint32 pc24;
-    uint32 source_pc24;
-    const char *function_name;
-    uint8 mx;
-    uint8 found;
-    uint8 mirrored;
-    uint32 frame;
-} DispatchLogEntry;
-
-enum { kDispatchLogCapacity = 1024, kDispatchDepthCapacity = 256 };
-static DispatchLogEntry g_dispatch_log[kDispatchLogCapacity];
-static unsigned g_dispatch_count;
+enum { kDispatchDepthCapacity = 256 };
 static uint32 g_dispatch_depth[kDispatchDepthCapacity];
 static unsigned g_dispatch_depth_count;
 
@@ -100,10 +88,14 @@ void cpu_write8(CpuState *cpu, uint8 bank, uint16 address, uint8 value) {
     int offset = ram_offset(bank, address);
     int save_offset;
     if (offset >= 0) {
-        uint8 old_value = cpu->ram[offset];
-        cpu->ram[offset] = value;
-        if (ar_trace_active()) {
-            ar_trace_wram((uint32)offset, old_value, value, 1);
+        if (sr_runner_event_enabled(SR_EVENT_MASK_MEMORY_WRITE)) {
+            uint8 old_value = cpu->ram[offset];
+            cpu->ram[offset] = value;
+            sr_runner_emit_memory_write(
+                g_snes, SR_MEMORY_WRAM, (uint32)offset,
+                old_value, value, 1u);
+        } else {
+            cpu->ram[offset] = value;
         }
         return;
     }
@@ -113,18 +105,33 @@ void cpu_write8(CpuState *cpu, uint8 bank, uint16 address, uint8 value) {
         return;
     }
     save_offset = sram_offset(bank, address);
-    if (save_offset >= 0) g_sram[save_offset] = value;
+    if (save_offset >= 0) {
+        if (sr_runner_event_enabled(SR_EVENT_MASK_MEMORY_WRITE)) {
+            uint8 old_value = g_sram[save_offset];
+            g_sram[save_offset] = value;
+            sr_runner_emit_memory_write(
+                g_snes, SR_MEMORY_SRAM, (uint32)save_offset,
+                old_value, value, 1u);
+        } else {
+            g_sram[save_offset] = value;
+        }
+    }
 }
 
 void cpu_write16(CpuState *cpu, uint8 bank, uint16 address, uint16 value) {
     int offset = ram_offset(bank, address);
     if (offset >= 0 && offset + 1 < kSnesWramSize) {
-        uint16 old_value = (uint16)cpu->ram[offset] |
-                           ((uint16)cpu->ram[offset + 1] << 8);
-        cpu->ram[offset] = (uint8)value;
-        cpu->ram[offset + 1] = (uint8)(value >> 8);
-        if (ar_trace_active()) {
-            ar_trace_wram((uint32)offset, old_value, value, 2);
+        if (sr_runner_event_enabled(SR_EVENT_MASK_MEMORY_WRITE)) {
+            uint16 old_value = (uint16)cpu->ram[offset] |
+                               ((uint16)cpu->ram[offset + 1] << 8);
+            cpu->ram[offset] = (uint8)value;
+            cpu->ram[offset + 1] = (uint8)(value >> 8);
+            sr_runner_emit_memory_write(
+                g_snes, SR_MEMORY_WRAM, (uint32)offset,
+                old_value, value, 2u);
+        } else {
+            cpu->ram[offset] = (uint8)value;
+            cpu->ram[offset + 1] = (uint8)(value >> 8);
         }
         return;
     }
@@ -195,16 +202,27 @@ static RecompReturn (*dispatch_lookup_mirrored(CpuState *cpu, uint32 pc24,
 
 static void record_dispatch(uint32 pc24, uint32 source_pc24, CpuState *cpu,
                             int found, int mirrored) {
-    DispatchLogEntry *event =
-        &g_dispatch_log[g_dispatch_count % kDispatchLogCapacity];
-    event->pc24 = pc24;
-    event->source_pc24 = source_pc24;
-    event->function_name = g_last_recomp_func;
-    event->mx = (uint8)(((cpu->m_flag & 1u) << 1) | (cpu->x_flag & 1u));
-    event->found = found != 0;
-    event->mirrored = mirrored != 0;
-    event->frame = (uint32)snes_frame_counter;
-    ++g_dispatch_count;
+    if (sr_runner_event_enabled(SR_EVENT_MASK_DYNAMIC_DISPATCH)) {
+        SrRunnerEvent runner_event = {0};
+        runner_event.type = SR_EVENT_DYNAMIC_DISPATCH;
+        runner_event.frame_counter = snes_frame_counter >= 0
+            ? (uint64)snes_frame_counter : 0u;
+        runner_event.flags =
+            (found ? SR_EVENT_DISPATCH_FOUND : 0u) |
+            (mirrored ? SR_EVENT_DISPATCH_MIRRORED : 0u);
+        runner_event.cpu_flags =
+            (cpu->m_flag ? SR_CPU_STATE_M_FLAG : 0u) |
+            (cpu->x_flag ? SR_CPU_STATE_X_FLAG : 0u) |
+            (cpu->emulation ? SR_CPU_STATE_EMULATION : 0u) |
+            (cpu->host_return_valid ? SR_CPU_STATE_HOST_RETURN_VALID : 0u);
+        runner_event.pc24 = pc24 & 0x00ffffffu;
+        runner_event.source_pc24 = source_pc24 & 0x00ffffffu;
+        runner_event.register_x = cpu->X;
+        runner_event.stack_pointer = cpu->S;
+        runner_event.label = g_last_recomp_func;
+        sr_runner_emit_event(g_snes, SR_EVENT_MASK_DYNAMIC_DISPATCH,
+                             &runner_event);
+    }
 }
 
 static RecompReturn dispatch_once(CpuState *cpu, uint32 pc24,
@@ -274,7 +292,12 @@ static RecompReturn dispatch_once(CpuState *cpu, uint32 pc24,
     }
 
     if (function == NULL) {
-        if (ar_trace_active()) ar_trace_dispmiss(source_pc24, pc24);
+        if (sr_runner_event_enabled(SR_EVENT_MASK_ERROR)) {
+            sr_runner_emit_error(
+                g_snes, SR_RUNNER_ERROR_DISPATCH_MISS,
+                SR_EVENT_ERROR_RECOVERABLE, pc24, source_pc24,
+                "dispatch-miss");
+        }
         cpu->S = miss_restore_stack;
         return RECOMP_RETURN_NORMAL;
     }
@@ -282,6 +305,12 @@ static RecompReturn dispatch_once(CpuState *cpu, uint32 pc24,
         if (g_dispatch_depth[index] == pc24) ++live;
     }
     if (live >= 24u) {
+        if (sr_runner_event_enabled(SR_EVENT_MASK_ERROR)) {
+            sr_runner_emit_error(
+                g_snes, SR_RUNNER_ERROR_DISPATCH_RECURSION_LIMIT,
+                SR_EVENT_ERROR_RECOVERABLE, pc24, source_pc24,
+                "dispatch-recursion-limit");
+        }
         cpu->S = miss_restore_stack;
         return RECOMP_RETURN_NORMAL;
     }
@@ -318,43 +347,4 @@ RecompReturn cpu_dispatch_pc(CpuState *cpu, uint32 pc24,
 int cpu_dispatch_has_entry(CpuState *cpu, uint32 pc24) {
     int mirrored;
     return dispatch_lookup_mirrored(cpu, pc24 & 0xffffffu, &mirrored) != NULL;
-}
-
-static void json_string(FILE *file, const char *text) {
-    const unsigned char *cursor = (const unsigned char *)(text != NULL ? text : "");
-    fputc('"', file);
-    while (*cursor != '\0') {
-        if (*cursor == '"' || *cursor == '\\') fputc('\\', file);
-        if (*cursor >= 0x20u) fputc(*cursor, file);
-        ++cursor;
-    }
-    fputc('"', file);
-}
-
-void CpuDispatchLogWriteFile(const char *path) {
-    FILE *file;
-    unsigned shown;
-    unsigned start;
-    unsigned index;
-    if (path == NULL || (file = fopen(path, "wb")) == NULL) return;
-    shown = g_dispatch_count < kDispatchLogCapacity
-                ? g_dispatch_count
-                : kDispatchLogCapacity;
-    start = g_dispatch_count - shown;
-    fprintf(file, "{\n  \"dispatch_log\": {\"total\": %u, \"shown\": %u, \"events\": [",
-            g_dispatch_count, shown);
-    for (index = 0u; index < shown; ++index) {
-        const DispatchLogEntry *event =
-            &g_dispatch_log[(start + index) % kDispatchLogCapacity];
-        fprintf(file,
-                "%s\n    {\"i\":%u,\"pc24\":\"%06X\",\"source_pc24\":\"%06X\",\"func\":",
-                index == 0u ? "" : ",", start + index, event->pc24,
-                event->source_pc24);
-        json_string(file, event->function_name);
-        fprintf(file,
-                ",\"mx\":%u,\"found\":%u,\"mirror\":%u,\"frame\":%u}",
-                event->mx, event->found, event->mirrored, event->frame);
-    }
-    fputs("\n  ]}\n}\n", file);
-    fclose(file);
 }

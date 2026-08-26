@@ -1,6 +1,7 @@
 #include "ppu.h"
 
 #include "../debug_server.h"
+#include "../runner_next_internal.h"
 #include "../simd.h"
 #include <limits.h>
 #include <stdlib.h>
@@ -4368,7 +4369,15 @@ void ppu_write(Ppu *ppu, uint8_t address, uint8_t value) {
         case 0x04:
             if (ppu->oamInHigh) {
                 unsigned index = ((ppu->oamAdr & 15u) << 1) | ppu->oamSecondWrite;
-                ppu->highOam[index] = value;
+                if (sr_runner_event_enabled(SR_EVENT_MASK_MEMORY_WRITE)) {
+                    uint8_t old_value = ppu->highOam[index];
+                    ppu->highOam[index] = value;
+                    sr_runner_emit_ppu_memory_write(
+                        ppu, SR_MEMORY_HIGH_OAM, index,
+                        old_value, value, 1u);
+                } else {
+                    ppu->highOam[index] = value;
+                }
                 ppu->objScanlineMasksValid = false;
                 debug_server_on_oam_write(1, (uint16_t)index, value);
                 if (ppu->oamSecondWrite && ++ppu->oamAdr == 0u) ppu->oamInHigh = false;
@@ -4376,7 +4385,16 @@ void ppu_write(Ppu *ppu, uint8_t address, uint8_t value) {
             else {
                 uint16_t word = (uint16_t)(ppu->oamBuffer | ((uint16_t)value << 8));
                 debug_server_on_oam_write(0, ppu->oamAdr, word);
-                ppu->oam[ppu->oamAdr++] = word;
+                if (sr_runner_event_enabled(SR_EVENT_MASK_MEMORY_WRITE)) {
+                    uint16_t old_value = ppu->oam[ppu->oamAdr];
+                    ppu->oam[ppu->oamAdr++] = word;
+                    sr_runner_emit_ppu_memory_write(
+                        ppu, SR_MEMORY_OAM,
+                        (uint32_t)(uint8_t)(ppu->oamAdr - 1u) * 2u,
+                        old_value, word, 2u);
+                } else {
+                    ppu->oam[ppu->oamAdr++] = word;
+                }
                 ppu->objScanlineMasksValid = false;
                 if (ppu->oamAdr == 0u) ppu->oamInHigh = true;
             }
@@ -4415,15 +4433,26 @@ void ppu_write(Ppu *ppu, uint8_t address, uint8_t value) {
                    ppu->vramReadBuffer = ppu->vram[remap_vram(ppu) & 0x7fffu]; break;
         case 0x18: {
             uint16_t index = remap_vram(ppu) & 0x7fffu;
+            uint8_t old_value = (uint8_t)ppu->vram[index];
             ppu->vram[index] = (ppu->vram[index] & 0xff00u) | value;
+            if (sr_runner_event_enabled(SR_EVENT_MASK_MEMORY_WRITE))
+                sr_runner_emit_ppu_memory_write(
+                    ppu, SR_MEMORY_VRAM, (uint32_t)index * 2u,
+                    old_value, value, 1u);
             debug_server_on_vram_write((uint32_t)index * 2u, value);
             if (!ppu->vramIncrementOnHigh) ppu->vramPointer += ppu->vramIncrement;
             break;
         }
         case 0x19: {
             uint16_t index = remap_vram(ppu) & 0x7fffu;
+            uint8_t old_value = (uint8_t)(ppu->vram[index] >> 8);
             ppu->vram[index] = (ppu->vram[index] & 0x00ffu) |
                                ((uint16_t)value << 8);
+            if (sr_runner_event_enabled(SR_EVENT_MASK_MEMORY_WRITE))
+                sr_runner_emit_ppu_memory_write(
+                    ppu, SR_MEMORY_VRAM,
+                    (uint32_t)index * 2u + 1u,
+                    old_value, value, 1u);
             debug_server_on_vram_write((uint32_t)index * 2u + 1u, value);
             if (ppu->vramIncrementOnHigh) ppu->vramPointer += ppu->vramIncrement;
             break;
@@ -4442,8 +4471,17 @@ void ppu_write(Ppu *ppu, uint8_t address, uint8_t value) {
             if (!ppu->cgramSecondWrite) ppu->cgramBuffer = value;
             else {
                 unsigned index = ppu->cgramPointer++;
-                ppu->cgram[index] = (uint16_t)(ppu->cgramBuffer |
+                uint16_t new_value = (uint16_t)(ppu->cgramBuffer |
                     ((uint16_t)(value & 0x7fu) << 8));
+                if (sr_runner_event_enabled(SR_EVENT_MASK_MEMORY_WRITE)) {
+                    uint16_t old_value = ppu->cgram[index];
+                    ppu->cgram[index] = new_value;
+                    sr_runner_emit_ppu_memory_write(
+                        ppu, SR_MEMORY_CGRAM, (uint32_t)index * 2u,
+                        old_value, new_value, 2u);
+                } else {
+                    ppu->cgram[index] = new_value;
+                }
                 if (ppu->cgramRgbValid)
                     ppu->cgramRgb[index] = color_rgb(ppu, ppu->cgram[index]);
             }

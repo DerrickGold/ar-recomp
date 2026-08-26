@@ -1,5 +1,8 @@
+#include "common_cpu_infra.h"
+#include "common_rtl.h"
 #include "runner_next.h"
 #include "runner_next_internal.h"
+#include "snes/dma.h"
 #include "snes/ppu.h"
 #include "snes/saveload.h"
 #include "snes/snes.h"
@@ -33,6 +36,17 @@ static uint32_t s_overlay_surface[384u * 232u];
 static uint32_t s_overlay_band_surface[384u * 232u];
 static uint32_t s_mode7_surface[768u * 506u];
 
+typedef struct TestObserver {
+    unsigned count;
+    SrRunnerHandle *runner;
+    SrRunnerEvent event;
+    const int16_t *expected_audio_samples;
+    uint32_t expected_audio_frame_count;
+    int16_t expected_audio_first;
+    int16_t expected_audio_last;
+    int audio_payload_valid;
+} TestObserver;
+
 static SrResult query_test_cpu_state(
         Snes *snes, SrCpuStateSnapshot *out_state) {
     (void)snes;
@@ -50,6 +64,57 @@ static SrResult query_test_cpu_state(
     out_state->pb = 0x03u;
     out_state->p = 0xa5u;
     return SR_RESULT_OK;
+}
+
+static SrResult query_test_execution_state(
+        Snes *snes, SrExecutionSnapshot *out_state) {
+    (void)snes;
+    out_state->flags = SR_EXECUTION_CURRENT_BLOCK_VALID |
+                       SR_EXECUTION_CURRENT_FUNCTION_VALID;
+    out_state->block_serial = 91u;
+    out_state->current_block_pc24 = 0x345678u;
+    out_state->current_function = "test_current";
+    out_state->stack_depth = 2u;
+    out_state->stack[0].function_name = "outer";
+    out_state->stack[0].entry_stack = 0x01ffu;
+    out_state->stack[0].host_return_valid = 1u;
+    out_state->stack[1].function_name = "inner";
+    out_state->stack[1].entry_stack = 0x01fbu;
+    out_state->history_count = 2u;
+    out_state->history[0].pc24 = 0x123400u;
+    out_state->history[0].cpu_flags = SR_CPU_STATE_M_FLAG;
+    out_state->history[0].register_x = 0x4567u;
+    out_state->history[0].stack_pointer = 0x01f0u;
+    out_state->history[1].pc24 = 0x123456u;
+    out_state->history[1].cpu_flags = SR_CPU_STATE_X_FLAG;
+    out_state->history[1].register_x = 0x89abu;
+    out_state->history[1].stack_pointer = 0x01eau;
+    return SR_RESULT_OK;
+}
+
+static void observe_test_event(void *user_data, SrRunnerHandle *runner,
+                               const SrRunnerEvent *event) {
+    TestObserver *observer = (TestObserver *)user_data;
+    ++observer->count;
+    observer->runner = runner;
+    observer->event = *event;
+    if (event->type == SR_EVENT_AUDIO_PRODUCED) {
+        observer->audio_payload_valid =
+            event->audio_samples == observer->expected_audio_samples &&
+            event->audio_frame_count == observer->expected_audio_frame_count &&
+            event->audio_samples != NULL &&
+            event->audio_samples[0] == observer->expected_audio_first &&
+            event->audio_samples[event->audio_frame_count *
+                                 event->audio_channel_count - 1u] ==
+                observer->expected_audio_last;
+        observer->event.audio_samples = NULL;
+    }
+}
+
+static void mix_test_audio(int16 *buffer, int frames) {
+    int sample;
+    for (sample = 0; sample < frames * 2; ++sample)
+        buffer[sample] = (int16)(0x1200 + sample);
 }
 
 static int check(int condition, const char *message) {
@@ -113,6 +178,123 @@ int main(void) {
     SrCpuStateSnapshot small_cpu_state = {sizeof(uint32_t), 0u, 0u, 0u, 0u,
                                           0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u,
                                           0u};
+    SrExecutionSnapshot execution_state = {sizeof(execution_state), 0u};
+    SrExecutionSnapshot small_execution_state = {sizeof(uint32_t), 0u};
+    TestObserver block_observer = {0};
+    TestObserver dispatch_observer = {0};
+    TestObserver memory_observer = {0};
+    TestObserver ppu_memory_observer = {0};
+    TestObserver register_observer = {0};
+    TestObserver dma_observer = {0};
+    TestObserver frame_observer = {0};
+    TestObserver interrupt_error_observer = {0};
+    SrEventSubscription subscription = {
+        .struct_size = sizeof(subscription),
+        .flags = SR_EVENT_FILTER_PC_RANGE,
+        .event_mask = SR_EVENT_MASK_EXECUTION_BLOCK |
+                      SR_EVENT_MASK_DYNAMIC_DISPATCH,
+        .pc_first = 0x100000u,
+        .pc_last = 0x10ffffu,
+        .callback = observe_test_event,
+        .user_data = &block_observer,
+    };
+    SrEventSubscription dispatch_subscription = {
+        .struct_size = sizeof(dispatch_subscription),
+        .event_mask = SR_EVENT_MASK_DYNAMIC_DISPATCH,
+        .callback = observe_test_event,
+        .user_data = &dispatch_observer,
+    };
+    SrEventSubscription memory_subscription = {
+        .struct_size = sizeof(memory_subscription),
+        .flags = SR_EVENT_FILTER_ADDRESS_RANGE |
+                 SR_EVENT_FILTER_MEMORY_REGION,
+        .event_mask = SR_EVENT_MASK_MEMORY_WRITE,
+        .memory_region = SR_MEMORY_WRAM,
+        .address_first = 0x0100u,
+        .address_last = 0x010fu,
+        .callback = observe_test_event,
+        .user_data = &memory_observer,
+    };
+    SrEventSubscription register_subscription = {
+        .struct_size = sizeof(register_subscription),
+        .flags = SR_EVENT_FILTER_ADDRESS_RANGE,
+        .event_mask = SR_EVENT_MASK_REGISTER_ACCESS,
+        .address_first = 0x2100u,
+        .address_last = 0x213fu,
+        .callback = observe_test_event,
+        .user_data = &register_observer,
+    };
+    SrEventSubscription ppu_memory_subscription = {
+        .struct_size = sizeof(ppu_memory_subscription),
+        .flags = SR_EVENT_FILTER_ADDRESS_RANGE |
+                 SR_EVENT_FILTER_MEMORY_REGION,
+        .event_mask = SR_EVENT_MASK_MEMORY_WRITE,
+        .memory_region = SR_MEMORY_VRAM,
+        .address_first = 6u,
+        .address_last = 6u,
+        .callback = observe_test_event,
+        .user_data = &ppu_memory_observer,
+    };
+    SrEventSubscription dma_subscription = {
+        .struct_size = sizeof(dma_subscription),
+        .flags = SR_EVENT_FILTER_ADDRESS_RANGE,
+        .event_mask = SR_EVENT_MASK_DMA,
+        .address_first = 0x7e1234u,
+        .address_last = 0x7e1234u,
+        .callback = observe_test_event,
+        .user_data = &dma_observer,
+    };
+    SrEventSubscription frame_subscription = {
+        .struct_size = sizeof(frame_subscription),
+        .event_mask = SR_EVENT_MASK_FRAME | SR_EVENT_MASK_AUDIO,
+        .callback = observe_test_event,
+        .user_data = &frame_observer,
+    };
+    SrEventSubscription interrupt_error_subscription = {
+        .struct_size = sizeof(interrupt_error_subscription),
+        .flags = SR_EVENT_FILTER_PC_RANGE,
+        .event_mask = SR_EVENT_MASK_INTERRUPT | SR_EVENT_MASK_ERROR,
+        .pc_first = 0x123400u,
+        .pc_last = 0x1234ffu,
+        .callback = observe_test_event,
+        .user_data = &interrupt_error_observer,
+    };
+    SrRunnerEvent runner_event = {0u};
+    int16_t audio_samples[8] = {0};
+    SrMutationCommand memory_mutation = {
+        .struct_size = sizeof(memory_mutation),
+        .type = SR_MUTATION_WRITE_MEMORY,
+        .memory_region = SR_MEMORY_WRAM,
+        .address = 0x0106u,
+        .byte_count = 3u,
+        .bytes = {0xa1u, 0xb2u, 0xc3u},
+    };
+    SrMutationCommand input_mutation = {
+        .struct_size = sizeof(input_mutation),
+        .type = SR_MUTATION_SET_INPUT,
+        .input_value = 0x0001u,
+        .input_mask = 0x0fffu,
+    };
+    SrMutationCommand vram_mutation = {
+        .struct_size = sizeof(vram_mutation),
+        .type = SR_MUTATION_WRITE_MEMORY,
+        .memory_region = SR_MEMORY_VRAM,
+        .address = 0x4001u,
+        .byte_count = 3u,
+        .bytes = {0x11u, 0x22u, 0x33u},
+    };
+    SrMutationStatus mutation_status = {sizeof(mutation_status), 0u};
+    uint64_t subscription_id = 0u;
+    uint64_t dispatch_subscription_id = 0u;
+    uint64_t memory_subscription_id = 0u;
+    uint64_t ppu_memory_subscription_id = 0u;
+    uint64_t register_subscription_id = 0u;
+    uint64_t dma_subscription_id = 0u;
+    uint64_t frame_subscription_id = 0u;
+    uint64_t interrupt_error_subscription_id = 0u;
+    uint64_t memory_mutation_id = 0u;
+    uint64_t input_mutation_id = 0u;
+    uint64_t vram_mutation_id = 0u;
     SrBorrowedU16Span vram_span = {
         sizeof(vram_span), 0u, NULL, 0u, 0u};
     SrBorrowedU16Span cgram_span = {
@@ -197,6 +379,24 @@ int main(void) {
     failed |= check(SNES_RUNNER_API_PPU_SURFACE_SIZE <=
                         sizeof(SnesRunnerApi),
                     "PPU surface API extent exceeds structure");
+    failed |= check(SR_EXECUTION_SNAPSHOT_V1_SIZE <=
+                        sizeof(SrExecutionSnapshot),
+                    "execution snapshot extent exceeds structure");
+    failed |= check(SR_RUNNER_EVENT_V1_SIZE <= sizeof(SrRunnerEvent) &&
+                        SR_EVENT_SUBSCRIPTION_V1_SIZE <=
+                            sizeof(SrEventSubscription),
+                    "event observer structure extent exceeds structure");
+    failed |= check(SNES_RUNNER_API_EVENT_OBSERVER_SIZE <=
+                        sizeof(SnesRunnerApi),
+                    "event observer API extent exceeds structure");
+    failed |= check(SR_MUTATION_COMMAND_V1_SIZE <=
+                        sizeof(SrMutationCommand) &&
+                        SR_MUTATION_STATUS_V1_SIZE <=
+                            sizeof(SrMutationStatus),
+                    "safe-point mutation extent exceeds structure");
+    failed |= check(SNES_RUNNER_API_SAFE_POINT_MUTATION_SIZE <=
+                        sizeof(SnesRunnerApi),
+                    "safe-point mutation API extent exceeds structure");
     failed |= check(sizeof(((SrBorrowedSpan *)0)->byte_size) == sizeof(uint64_t),
                     "span size is not fixed width");
     failed |= check(sr_runner_get_api(SR_RUNNER_ABI_VERSION + 1u) == NULL,
@@ -226,6 +426,14 @@ int main(void) {
                          SR_RUNNER_CAP_PPU_OBJ_RASTER |
                          SR_RUNNER_CAP_PPU_SURFACE_VIEWS),
                     "PPU capabilities missing");
+    failed |= check((api->capabilities &
+                         (SR_RUNNER_CAP_EXECUTION_STATE |
+                          SR_RUNNER_CAP_EVENT_OBSERVERS |
+                          SR_RUNNER_CAP_SAFE_POINT_MUTATIONS)) ==
+                        (SR_RUNNER_CAP_EXECUTION_STATE |
+                         SR_RUNNER_CAP_EVENT_OBSERVERS |
+                         SR_RUNNER_CAP_SAFE_POINT_MUTATIONS),
+                    "observer capabilities missing");
 
     snes = snes_init(wram);
     failed |= check(snes != NULL, "runner allocation failed");
@@ -279,6 +487,9 @@ int main(void) {
     failed |= check(api->query_cpu_state(runner, &cpu_state) ==
                         SR_RESULT_UNAVAILABLE,
                     "CPU state without a provider was available");
+    failed |= check(api->query_execution_state(runner, &execution_state) ==
+                        SR_RESULT_UNAVAILABLE,
+                    "execution state without a provider was available");
     failed |= check(api->rasterize_ppu_obj_range(
                         runner, &obj_request, &obj_result) ==
                         SR_RESULT_UNAVAILABLE,
@@ -286,6 +497,8 @@ int main(void) {
     cpu_state.struct_size = sizeof(cpu_state);
     sr_runner_set_cpu_state_provider(
         snes, query_test_cpu_state, &s_cpu_component);
+    sr_runner_set_execution_state_provider(
+        snes, query_test_execution_state);
     sr_runner_bind_ppu_services(snes, true);
 
     failed |= check_generation(api, runner, 0u, 0u, 0u, 0u, 0u);
@@ -572,6 +785,430 @@ int main(void) {
                         SR_RESULT_INVALID_ARGUMENT,
                     "undersized CPU snapshot accepted");
 
+    failed |= check(api->query_execution_state(runner, &execution_state) ==
+                        SR_RESULT_OK,
+                    "execution state query failed");
+    failed |= check(execution_state.lifetime_generation == 0u &&
+                        execution_state.block_serial == 91u &&
+                        execution_state.current_block_pc24 == 0x345678u &&
+                        execution_state.stack_depth == 2u &&
+                        execution_state.history_count == 2u &&
+                        strcmp(execution_state.current_function,
+                               "test_current") == 0,
+                    "execution state metadata mismatch");
+    failed |= check(strcmp(execution_state.stack[0].function_name,
+                           "outer") == 0 &&
+                        execution_state.stack[0].entry_stack == 0x01ffu &&
+                        execution_state.stack[0].host_return_valid == 1u &&
+                        strcmp(execution_state.stack[1].function_name,
+                               "inner") == 0 &&
+                        execution_state.stack[1].entry_stack == 0x01fbu,
+                    "execution stack mismatch");
+    failed |= check(execution_state.history[0].pc24 == 0x123400u &&
+                        execution_state.history[0].cpu_flags ==
+                            SR_CPU_STATE_M_FLAG &&
+                        execution_state.history[0].register_x == 0x4567u &&
+                        execution_state.history[0].stack_pointer == 0x01f0u &&
+                        execution_state.history[1].pc24 == 0x123456u &&
+                        execution_state.history[1].cpu_flags ==
+                            SR_CPU_STATE_X_FLAG,
+                    "execution block history mismatch");
+    failed |= check(api->query_execution_state(
+                        runner, &small_execution_state) ==
+                        SR_RESULT_INVALID_ARGUMENT,
+                    "undersized execution snapshot accepted");
+
+    {
+        SrEventSubscription invalid = subscription;
+        uint64_t invalid_id = 7u;
+        invalid.struct_size = sizeof(uint32_t);
+        failed |= check(api->subscribe_events(runner, &invalid,
+                                               &invalid_id) ==
+                            SR_RESULT_INVALID_ARGUMENT &&
+                            invalid_id == 0u,
+                        "undersized event subscription accepted");
+        invalid = subscription;
+        invalid.event_mask = SR_EVENT_MASK_RECOMP_FUNCTION;
+        failed |= check(api->subscribe_events(runner, &invalid,
+                                               &invalid_id) ==
+                            SR_RESULT_UNSUPPORTED,
+                        "unsupported event class accepted");
+        invalid = frame_subscription;
+        invalid.flags = SR_EVENT_FILTER_PC_RANGE;
+        invalid.pc_first = 0u;
+        invalid.pc_last = 0xffffffu;
+        failed |= check(api->subscribe_events(runner, &invalid,
+                                               &invalid_id) ==
+                            SR_RESULT_UNSUPPORTED,
+                        "PC filter accepted for frame events");
+        invalid = subscription;
+        invalid.flags = SR_EVENT_FILTER_ADDRESS_RANGE;
+        failed |= check(api->subscribe_events(runner, &invalid,
+                                               &invalid_id) ==
+                            SR_RESULT_UNSUPPORTED,
+                        "address filter accepted for block events");
+        invalid = memory_subscription;
+        invalid.address_first = 0x0200u;
+        invalid.address_last = 0x0100u;
+        failed |= check(api->subscribe_events(runner, &invalid,
+                                               &invalid_id) ==
+                            SR_RESULT_INVALID_ARGUMENT,
+                        "inverted address filter accepted");
+        invalid = register_subscription;
+        invalid.flags |= SR_EVENT_FILTER_MEMORY_REGION;
+        failed |= check(api->subscribe_events(runner, &invalid,
+                                               &invalid_id) ==
+                            SR_RESULT_UNSUPPORTED,
+                        "memory-region filter accepted for registers");
+        invalid = subscription;
+        invalid.pc_first = 0x110000u;
+        invalid.pc_last = 0x100000u;
+        failed |= check(api->subscribe_events(runner, &invalid,
+                                               &invalid_id) ==
+                            SR_RESULT_INVALID_ARGUMENT,
+                        "inverted PC filter accepted");
+    }
+    {
+        SrMutationCommand invalid = memory_mutation;
+        uint64_t invalid_id = 7u;
+        invalid.struct_size = sizeof(uint32_t);
+        failed |= check(api->queue_mutation(runner, &invalid, &invalid_id) ==
+                            SR_RESULT_INVALID_ARGUMENT &&
+                            invalid_id == 0u,
+                        "undersized mutation command accepted");
+        invalid = memory_mutation;
+        invalid.memory_region = SR_MEMORY_ROM;
+        failed |= check(api->queue_mutation(runner, &invalid, &invalid_id) ==
+                            SR_RESULT_UNSUPPORTED,
+                        "ROM mutation accepted");
+        invalid = memory_mutation;
+        invalid.address = TEST_WRAM_SIZE - 1u;
+        invalid.byte_count = 2u;
+        failed |= check(api->queue_mutation(runner, &invalid, &invalid_id) ==
+                            SR_RESULT_INVALID_ARGUMENT,
+                        "out-of-range memory mutation accepted");
+        invalid = memory_mutation;
+        invalid.type = UINT32_MAX;
+        failed |= check(api->queue_mutation(runner, &invalid, &invalid_id) ==
+                            SR_RESULT_UNSUPPORTED,
+                        "unknown mutation type accepted");
+        invalid = input_mutation;
+        invalid.input_mask = UINT32_C(0x01000000);
+        failed |= check(api->queue_mutation(runner, &invalid, &invalid_id) ==
+                            SR_RESULT_INVALID_ARGUMENT,
+                        "out-of-range input mutation accepted");
+        failed |= check(api->query_mutation(
+                            runner, 0u, 0u, &mutation_status) ==
+                            SR_RESULT_INVALID_ARGUMENT,
+                        "zero mutation id accepted");
+    }
+    failed |= check(api->subscribe_events(runner, &subscription,
+                                           &subscription_id) ==
+                        SR_RESULT_OK && subscription_id != 0u,
+                    "filtered observer subscription failed");
+    failed |= check(api->subscribe_events(runner, &dispatch_subscription,
+                                           &dispatch_subscription_id) ==
+                        SR_RESULT_OK && dispatch_subscription_id != 0u &&
+                        dispatch_subscription_id != subscription_id,
+                    "second observer subscription failed");
+    failed |= check(api->subscribe_events(runner, &memory_subscription,
+                                           &memory_subscription_id) ==
+                        SR_RESULT_OK && memory_subscription_id != 0u,
+                    "memory observer subscription failed");
+    failed |= check(api->subscribe_events(runner, &register_subscription,
+                                           &register_subscription_id) ==
+                        SR_RESULT_OK && register_subscription_id != 0u,
+                    "register observer subscription failed");
+    failed |= check(api->subscribe_events(runner, &ppu_memory_subscription,
+                                           &ppu_memory_subscription_id) ==
+                        SR_RESULT_OK && ppu_memory_subscription_id != 0u,
+                    "PPU memory observer subscription failed");
+    failed |= check(api->subscribe_events(runner, &dma_subscription,
+                                           &dma_subscription_id) ==
+                        SR_RESULT_OK && dma_subscription_id != 0u,
+                    "DMA observer subscription failed");
+    failed |= check(api->subscribe_events(runner, &frame_subscription,
+                                           &frame_subscription_id) ==
+                        SR_RESULT_OK && frame_subscription_id != 0u,
+                    "frame observer subscription failed");
+    failed |= check(api->subscribe_events(
+                        runner, &interrupt_error_subscription,
+                        &interrupt_error_subscription_id) == SR_RESULT_OK &&
+                        interrupt_error_subscription_id != 0u,
+                    "interrupt/error observer subscription failed");
+    failed |= check(g_sr_runner_event_mask ==
+                        (SR_EVENT_MASK_EXECUTION_BLOCK |
+                         SR_EVENT_MASK_DYNAMIC_DISPATCH |
+                         SR_EVENT_MASK_MEMORY_WRITE |
+                         SR_EVENT_MASK_REGISTER_ACCESS |
+                         SR_EVENT_MASK_DMA |
+                         SR_EVENT_MASK_AUDIO |
+                         SR_EVENT_MASK_FRAME |
+                         SR_EVENT_MASK_INTERRUPT |
+                         SR_EVENT_MASK_ERROR),
+                    "observer union mask mismatch");
+
+    snes->abiFrameCounter = 9u;
+    snes_write(snes, 0x000105u, 0x4cu);
+    snes_write(snes, 0x000205u, 0x5du);
+    failed |= check(memory_observer.count == 1u &&
+                        memory_observer.event.type == SR_EVENT_MEMORY_WRITE &&
+                        memory_observer.event.frame_counter == 9u &&
+                        memory_observer.event.memory_region == SR_MEMORY_WRAM &&
+                        memory_observer.event.address == 0x0105u &&
+                        memory_observer.event.previous_value == 0u &&
+                        memory_observer.event.value == 0x4cu &&
+                        memory_observer.event.width_bytes == 1u,
+                    "filtered WRAM write event mismatch");
+
+    snes->ppu->vramPointer = 3u;
+    snes->ppu->vram[3] = 0x1200u;
+    ppu_write(snes->ppu, 0x18u, 0x34u);
+    failed |= check(ppu_memory_observer.count == 1u &&
+                        ppu_memory_observer.event.type ==
+                            SR_EVENT_MEMORY_WRITE &&
+                        ppu_memory_observer.event.memory_region ==
+                            SR_MEMORY_VRAM &&
+                        ppu_memory_observer.event.address == 6u &&
+                        ppu_memory_observer.event.previous_value == 0u &&
+                        ppu_memory_observer.event.value == 0x34u &&
+                        ppu_memory_observer.event.width_bytes == 1u,
+                    "filtered VRAM write event mismatch");
+
+    snes_write(snes, 0x002100u, 0x8fu);
+    snes_write(snes, 0x004200u, 0x00u);
+    failed |= check(register_observer.count == 1u &&
+                        register_observer.event.type ==
+                            SR_EVENT_REGISTER_WRITE &&
+                        register_observer.event.frame_counter == 9u &&
+                        register_observer.event.address == 0x2100u &&
+                        register_observer.event.value == 0x8fu &&
+                        register_observer.event.width_bytes == 1u,
+                    "filtered register event mismatch");
+
+    dma_write(snes->dma, 0x4320u, 0xddu);
+    dma_write(snes->dma, 0x4321u, 0x18u);
+    dma_write(snes->dma, 0x4322u, 0x34u);
+    dma_write(snes->dma, 0x4323u, 0x12u);
+    dma_write(snes->dma, 0x4324u, 0x7eu);
+    dma_write(snes->dma, 0x4325u, 0x00u);
+    dma_write(snes->dma, 0x4326u, 0x00u);
+    dma_write(snes->dma, 0x4327u, 0x7fu);
+    dma_startDma(snes->dma, 0x04u, false);
+    failed |= check(dma_observer.count == 1u &&
+                        dma_observer.event.type == SR_EVENT_DMA_BEGIN &&
+                        dma_observer.event.frame_counter == 9u &&
+                        dma_observer.event.flags ==
+                            (SR_EVENT_DMA_FROM_B_BUS |
+                             SR_EVENT_DMA_FIXED_A_BUS |
+                             SR_EVENT_DMA_DECREMENT_A_BUS |
+                             SR_EVENT_DMA_INDIRECT) &&
+                        dma_observer.event.address == 0x7e1234u &&
+                        dma_observer.event.dma_a_address24 == 0x7e1234u &&
+                        dma_observer.event.dma_transfer_bytes == 0x10000u &&
+                        dma_observer.event.dma_table_address == 0u &&
+                        dma_observer.event.dma_channel == 2u &&
+                        dma_observer.event.dma_mode == 5u &&
+                        dma_observer.event.dma_b_address == 0x18u &&
+                        dma_observer.event.dma_indirect_bank == 0x7fu &&
+                        strcmp(dma_observer.event.label, "dma") == 0,
+                    "general DMA begin event mismatch");
+
+    dma_reset(snes->dma);
+    dma_write(snes->dma, 0x4320u, 0x45u);
+    dma_write(snes->dma, 0x4321u, 0x19u);
+    dma_write(snes->dma, 0x4322u, 0x34u);
+    dma_write(snes->dma, 0x4323u, 0x12u);
+    dma_write(snes->dma, 0x4324u, 0x7eu);
+    dma_write(snes->dma, 0x4327u, 0x7fu);
+    dma_startDma(snes->dma, 0x04u, true);
+    failed |= check(dma_observer.count == 2u &&
+                        dma_observer.event.type == SR_EVENT_DMA_BEGIN &&
+                        dma_observer.event.flags ==
+                            (SR_EVENT_DMA_HDMA | SR_EVENT_DMA_INDIRECT) &&
+                        dma_observer.event.dma_transfer_bytes == 0u &&
+                        dma_observer.event.dma_table_address == 0x1234u &&
+                        dma_observer.event.dma_b_address == 0x19u &&
+                        strcmp(dma_observer.event.label, "hdma") == 0,
+                    "HDMA begin event mismatch");
+    dma_reset(snes->dma);
+
+    sr_runner_emit_frame_boundary(
+        snes, SR_EVENT_FRAME_BEGIN | SR_EVENT_FRAME_VBLANK, "vblank");
+    failed |= check(frame_observer.count == 1u &&
+                        frame_observer.event.type ==
+                            SR_EVENT_FRAME_BOUNDARY &&
+                        frame_observer.event.frame_counter == 9u &&
+                        frame_observer.event.flags ==
+                            (SR_EVENT_FRAME_BEGIN |
+                             SR_EVENT_FRAME_VBLANK) &&
+                        strcmp(frame_observer.event.label, "vblank") == 0,
+                    "frame boundary event mismatch");
+
+    g_snes = snes;
+    g_rtl_music_mix_hook = mix_test_audio;
+    RtlSetAudioOutputRate(44100);
+    frame_observer.expected_audio_samples = audio_samples;
+    frame_observer.expected_audio_frame_count = 4u;
+    frame_observer.expected_audio_first = 0x1200;
+    frame_observer.expected_audio_last = 0x1207;
+    RtlRenderAudio(audio_samples, 4, 2);
+    failed |= check(frame_observer.count == 2u &&
+                        frame_observer.event.type ==
+                            SR_EVENT_AUDIO_PRODUCED &&
+                        frame_observer.event.frame_counter == 0u &&
+                        frame_observer.event.flags ==
+                            (SR_EVENT_AUDIO_FINAL_MIX |
+                             SR_EVENT_AUDIO_TRANSIENT_SAMPLES) &&
+                        frame_observer.event.audio_frame_offset == 0u &&
+                        frame_observer.event.audio_frame_count == 4u &&
+                        frame_observer.event.audio_sample_rate == 44100u &&
+                        frame_observer.event.audio_channel_count == 2u &&
+                        frame_observer.event.audio_sample_format ==
+                            SR_AUDIO_SAMPLE_FORMAT_S16_NATIVE &&
+                        frame_observer.audio_payload_valid &&
+                        strcmp(frame_observer.event.label, "final-mix") == 0,
+                    "final mixed audio event mismatch");
+    frame_observer.expected_audio_frame_count = 2u;
+    frame_observer.expected_audio_last = 0x1203;
+    RtlRenderAudio(audio_samples, 2, 2);
+    failed |= check(frame_observer.count == 3u &&
+                        frame_observer.event.audio_frame_offset == 4u &&
+                        frame_observer.event.audio_frame_count == 2u &&
+                        frame_observer.audio_payload_valid &&
+                        snes->abiAudioFrameCounter == 6u,
+                    "audio output clock mismatch");
+    g_rtl_music_mix_hook = NULL;
+    g_snes = NULL;
+
+    sr_runner_emit_interrupt(
+        snes, SR_INTERRUPT_NMI, SR_EVENT_INTERRUPT_ENTER, 0x123456u,
+        0xffeau, SR_INTERRUPT_SCANLINE_UNKNOWN, "nmi");
+    failed |= check(interrupt_error_observer.count == 1u &&
+                        interrupt_error_observer.event.type ==
+                            SR_EVENT_INTERRUPT &&
+                        interrupt_error_observer.event.frame_counter == 9u &&
+                        interrupt_error_observer.event.flags ==
+                            SR_EVENT_INTERRUPT_ENTER &&
+                        interrupt_error_observer.event.pc24 == 0x123456u &&
+                        interrupt_error_observer.event.interrupt_kind ==
+                            SR_INTERRUPT_NMI &&
+                        interrupt_error_observer.event.interrupt_vector ==
+                            0xffeau &&
+                        interrupt_error_observer.event.interrupt_scanline ==
+                            SR_INTERRUPT_SCANLINE_UNKNOWN &&
+                        strcmp(interrupt_error_observer.event.label, "nmi") ==
+                            0,
+                    "interrupt event mismatch");
+
+    sr_runner_emit_error(
+        snes, SR_RUNNER_ERROR_DISPATCH_MISS, SR_EVENT_ERROR_RECOVERABLE,
+        0x123478u, 0x101000u, "dispatch-miss");
+    failed |= check(interrupt_error_observer.count == 2u &&
+                        interrupt_error_observer.event.type ==
+                            SR_EVENT_ERROR &&
+                        interrupt_error_observer.event.flags ==
+                            SR_EVENT_ERROR_RECOVERABLE &&
+                        interrupt_error_observer.event.pc24 == 0x123478u &&
+                        interrupt_error_observer.event.source_pc24 ==
+                            0x101000u &&
+                        interrupt_error_observer.event.address == 0x123478u &&
+                        interrupt_error_observer.event.error_code ==
+                            SR_RUNNER_ERROR_DISPATCH_MISS &&
+                        strcmp(interrupt_error_observer.event.label,
+                               "dispatch-miss") == 0,
+                    "error event mismatch");
+    sr_runner_emit_error(
+        snes, SR_RUNNER_ERROR_UNREACHABLE, 0u, 0x200000u, 0u,
+        "filtered-error");
+    failed |= check(interrupt_error_observer.count == 2u,
+                    "interrupt/error PC filter mismatch");
+
+    runner_event.type = SR_EVENT_EXECUTION_BLOCK;
+    runner_event.frame_counter = 7u;
+    runner_event.cpu_flags = SR_CPU_STATE_M_FLAG;
+    runner_event.pc24 = 0x100123u;
+    runner_event.register_x = 0x4567u;
+    runner_event.stack_pointer = 0x01f0u;
+    runner_event.label = "block";
+    sr_runner_emit_event(snes, SR_EVENT_MASK_EXECUTION_BLOCK,
+                         &runner_event);
+    failed |= check(block_observer.count == 1u &&
+                        dispatch_observer.count == 0u &&
+                        block_observer.runner == runner &&
+                        block_observer.event.struct_size ==
+                            SR_RUNNER_EVENT_V1_SIZE &&
+                        block_observer.event.serial != 0u &&
+                        block_observer.event.frame_counter == 7u &&
+                        block_observer.event.pc24 == 0x100123u &&
+                        block_observer.event.register_x == 0x4567u &&
+                        block_observer.event.stack_pointer == 0x01f0u,
+                    "filtered block event mismatch");
+
+    runner_event.type = SR_EVENT_DYNAMIC_DISPATCH;
+    runner_event.flags = SR_EVENT_DISPATCH_FOUND |
+                         SR_EVENT_DISPATCH_MIRRORED;
+    runner_event.pc24 = 0x200123u;
+    runner_event.source_pc24 = 0x200100u;
+    runner_event.label = "dispatch";
+    sr_runner_emit_event(snes, SR_EVENT_MASK_DYNAMIC_DISPATCH,
+                         &runner_event);
+    failed |= check(block_observer.count == 1u &&
+                        dispatch_observer.count == 1u &&
+                        dispatch_observer.event.serial >
+                            block_observer.event.serial &&
+                        dispatch_observer.event.type ==
+                            SR_EVENT_DYNAMIC_DISPATCH &&
+                        dispatch_observer.event.flags ==
+                            (SR_EVENT_DISPATCH_FOUND |
+                             SR_EVENT_DISPATCH_MIRRORED) &&
+                        dispatch_observer.event.source_pc24 == 0x200100u,
+                    "dispatch event/filter mismatch");
+    failed |= check(api->unsubscribe_events(runner, subscription_id) ==
+                        SR_RESULT_OK &&
+                        g_sr_runner_event_mask ==
+                            (SR_EVENT_MASK_DYNAMIC_DISPATCH |
+                             SR_EVENT_MASK_MEMORY_WRITE |
+                             SR_EVENT_MASK_REGISTER_ACCESS |
+                             SR_EVENT_MASK_DMA |
+                             SR_EVENT_MASK_AUDIO |
+                             SR_EVENT_MASK_FRAME |
+                             SR_EVENT_MASK_INTERRUPT |
+                             SR_EVENT_MASK_ERROR),
+                    "first observer unsubscribe failed");
+    failed |= check(api->unsubscribe_events(
+                        runner, dispatch_subscription_id) == SR_RESULT_OK &&
+                        api->unsubscribe_events(
+                            runner, memory_subscription_id) == SR_RESULT_OK &&
+                        api->unsubscribe_events(
+                            runner, ppu_memory_subscription_id) ==
+                            SR_RESULT_OK &&
+                        api->unsubscribe_events(
+                            runner, register_subscription_id) == SR_RESULT_OK &&
+                        api->unsubscribe_events(
+                            runner, dma_subscription_id) == SR_RESULT_OK &&
+                        api->unsubscribe_events(
+                            runner, frame_subscription_id) == SR_RESULT_OK &&
+                        api->unsubscribe_events(
+                            runner, interrupt_error_subscription_id) ==
+                            SR_RESULT_OK &&
+                        g_sr_runner_event_mask == 0u,
+                    "remaining observers unsubscribe failed");
+    failed |= check(api->unsubscribe_events(runner, subscription_id) ==
+                        SR_RESULT_UNAVAILABLE,
+                    "duplicate observer unsubscribe accepted");
+
+    subscription.flags = 0u;
+    failed |= check(api->subscribe_events(runner, &subscription,
+                                           &subscription_id) ==
+                        SR_RESULT_OK,
+                    "observer resubscribe failed");
+    sr_runner_clear_event_subscriptions(snes);
+    failed |= check(g_sr_runner_event_mask == 0u &&
+                        api->unsubscribe_events(runner, subscription_id) ==
+                            SR_RESULT_UNAVAILABLE,
+                    "runner observer cleanup failed");
+
     sr_runner_note_tick(snes);
     failed |= check_generation(api, runner, 1u, 1u, 0u, 0u, 0u);
     failed |= check(!api->borrow_is_valid(runner, &wram_span),
@@ -593,6 +1230,8 @@ int main(void) {
                     "WRAM reborrow failed");
     snes_reset(snes, false);
     failed |= check_generation(api, runner, 2u, 1u, 1u, 0u, 0u);
+    failed |= check(snes->abiAudioFrameCounter == 0u,
+                    "reset did not restart audio output clock");
     failed |= check(!api->borrow_is_valid(runner, &wram_span),
                     "reset did not expire WRAM span");
 
@@ -601,7 +1240,96 @@ int main(void) {
     sr_runner_note_mutation(snes);
     failed |= check_generation(api, runner, 4u, 1u, 1u, 1u, 1u);
 
+    memory_observer = (TestObserver){0};
+    failed |= check(api->subscribe_events(runner, &memory_subscription,
+                                           &memory_subscription_id) ==
+                        SR_RESULT_OK,
+                    "mutation observer subscription failed");
+    failed |= check(api->queue_mutation(runner, &memory_mutation,
+                                         &memory_mutation_id) ==
+                        SR_RESULT_OK && memory_mutation_id != 0u &&
+                        wram[0x0106u] == 0u,
+                    "memory mutation queue failed");
+    failed |= check(api->queue_mutation(runner, &input_mutation,
+                                         &input_mutation_id) ==
+                        SR_RESULT_OK && input_mutation_id != 0u &&
+                        input_mutation_id != memory_mutation_id,
+                    "input mutation queue failed");
+    failed |= check(api->queue_mutation(runner, &vram_mutation,
+                                         &vram_mutation_id) ==
+                        SR_RESULT_OK && vram_mutation_id != 0u &&
+                        vram_mutation_id != input_mutation_id &&
+                        snes->ppu->vram[0x2000u] == 0u &&
+                        snes->ppu->vram[0x2001u] == 0u,
+                    "VRAM mutation queue failed");
+    failed |= check(api->query_mutation(
+                        runner, memory_mutation_id, 0u,
+                        &mutation_status) == SR_RESULT_OK &&
+                        mutation_status.struct_size ==
+                            SR_MUTATION_STATUS_V1_SIZE &&
+                        mutation_status.state == SR_MUTATION_STATE_QUEUED &&
+                        mutation_status.result == SR_RESULT_PENDING &&
+                        mutation_status.command_id == memory_mutation_id &&
+                        mutation_status.applied_frame_counter == 0u,
+                    "queued mutation status mismatch");
+
+    g_snes = snes;
+    snes_frame_counter = 17;
+    RtlRunFrame(0u);
+    g_snes = NULL;
+    failed |= check(wram[0x0106u] == 0xa1u &&
+                        wram[0x0107u] == 0xb2u &&
+                        wram[0x0108u] == 0xc3u &&
+                        snes->ppu->vram[0x2000u] == 0x1100u &&
+                        snes->ppu->vram[0x2001u] == 0x3322u &&
+                        snes->input1_currentState == 0x0001u &&
+                        snes->input2_currentState == 0u,
+                    "safe-point mutation application mismatch");
+    failed |= check(memory_observer.count == 3u &&
+                        memory_observer.event.type ==
+                            SR_EVENT_MEMORY_WRITE &&
+                        memory_observer.event.frame_counter == 17u &&
+                        memory_observer.event.memory_region == SR_MEMORY_WRAM &&
+                        memory_observer.event.address == 0x0108u &&
+                        memory_observer.event.previous_value == 0u &&
+                        memory_observer.event.value == 0xc3u,
+                    "safe-point memory observation mismatch");
+    failed |= check_generation(api, runner, 8u, 2u, 1u, 1u, 4u);
+    failed |= check(api->query_mutation(
+                        runner, memory_mutation_id,
+                        SR_MUTATION_QUERY_CONSUME,
+                        &mutation_status) == SR_RESULT_OK &&
+                        mutation_status.state == SR_MUTATION_STATE_APPLIED &&
+                        mutation_status.result == SR_RESULT_OK &&
+                        mutation_status.applied_frame_counter == 17u,
+                    "applied memory mutation status mismatch");
+    failed |= check(api->query_mutation(
+                        runner, memory_mutation_id, 0u,
+                        &mutation_status) == SR_RESULT_UNAVAILABLE,
+                    "consumed mutation status remained available");
+    failed |= check(api->query_mutation(
+                        runner, input_mutation_id,
+                        SR_MUTATION_QUERY_CONSUME,
+                        &mutation_status) == SR_RESULT_OK &&
+                        mutation_status.state == SR_MUTATION_STATE_APPLIED &&
+                        mutation_status.result == SR_RESULT_OK &&
+                        mutation_status.applied_frame_counter == 17u,
+                    "applied input mutation status mismatch");
+    failed |= check(api->query_mutation(
+                        runner, vram_mutation_id,
+                        SR_MUTATION_QUERY_CONSUME,
+                        &mutation_status) == SR_RESULT_OK &&
+                        mutation_status.state == SR_MUTATION_STATE_APPLIED &&
+                        mutation_status.result == SR_RESULT_OK &&
+                        mutation_status.applied_frame_counter == 17u,
+                    "applied VRAM mutation status mismatch");
+    failed |= check(api->unsubscribe_events(
+                        runner, memory_subscription_id) == SR_RESULT_OK &&
+                        g_sr_runner_event_mask == 0u,
+                    "mutation observer cleanup failed");
+
     sr_runner_set_cpu_state_provider(snes, NULL, NULL);
+    sr_runner_set_execution_state_provider(snes, NULL);
     sr_runner_bind_ppu_services(snes, false);
     snes_free(snes);
     memset(wram, 0, sizeof(wram));
