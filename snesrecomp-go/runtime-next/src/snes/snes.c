@@ -52,6 +52,7 @@ Snes *snes_init(uint8_t *ram) {
         snes_free(snes);
         return NULL;
     }
+    sr_runner_bind_ppu_owner(snes, snes->ppu, true);
     return snes;
 }
 
@@ -59,6 +60,8 @@ void snes_free(Snes *snes) {
     if (snes == NULL) {
         return;
     }
+    sr_runner_clear_mutations(snes);
+    sr_runner_bind_ppu_owner(snes, snes->ppu, false);
     cpu_free(snes->cpu);
     apu_free(snes->apu);
     dma_free(snes->dma);
@@ -150,6 +153,8 @@ void snes_reset(Snes *snes, bool hard) {
     snes->multiplyResult = 0xfe01u;
     snes->divideA = 0xffffu;
     snes->divideResult = 0x0101u;
+    snes->abiFrameCounter = 0u;
+    snes->abiAudioFrameCounter = 0u;
     sr_runner_note_reset(snes);
 }
 
@@ -181,65 +186,79 @@ void snes_catchup_stats(uint64_t *calls, uint64_t *cycles) {
 }
 
 static void write_wram(Snes *snes, uint32_t offset, uint8_t value) {
+    bool observe;
     offset &= kSnesWramMask;
-    const uint8_t old_value = snes->ram[offset];
-    snes->ram[offset] = value;
-    if (g_snes_wram_write_hook != NULL) {
-        g_snes_wram_write_hook(offset, old_value, value);
+    observe = sr_runner_event_enabled(SR_EVENT_MASK_MEMORY_WRITE);
+    if (observe || g_snes_wram_write_hook != NULL) {
+        const uint8_t old_value = snes->ram[offset];
+        snes->ram[offset] = value;
+        if (observe) {
+            sr_runner_emit_memory_write(
+                snes, SR_MEMORY_WRAM, offset, old_value, value, 1u);
+        }
+        if (g_snes_wram_write_hook != NULL) {
+            g_snes_wram_write_hook(offset, old_value, value);
+        }
+    } else {
+        snes->ram[offset] = value;
     }
 }
 
 uint8_t snes_readBBus(Snes *snes, uint8_t address) {
-    if (snes == NULL) return 0u;
+    uint8_t value = 0u;
+    if (snes == NULL) return value;
     if (address < 0x40u) {
-        return ppu_read(snes->ppu, address);
-    }
-    if (address < 0x80u) {
+        value = ppu_read(snes->ppu, address);
+    } else if (address < 0x80u) {
         RtlApuLock();
         rtl_accumulate_apu_catchup();
         snes_catchupApu(snes);
         const uint8_t port = (uint8_t)(address & 3u);
-        const uint8_t value = snes->apu->outPorts[port];
+        value = snes->apu->outPorts[port];
         if (g_snes_apu_port_read_hook != NULL) {
             g_snes_apu_port_read_hook(snes, port, value);
         }
         RtlApuUnlock();
-        return value;
-    }
-    if (address == 0x80u) {
-        const uint8_t value = snes->ram[snes->ramAdr & kSnesWramMask];
+    } else if (address == 0x80u) {
+        value = snes->ram[snes->ramAdr & kSnesWramMask];
         snes->ramAdr = (snes->ramAdr + 1u) & kSnesWramMask;
-        return value;
     }
-    return 0u;
+    if (sr_runner_event_enabled(SR_EVENT_MASK_REGISTER_ACCESS)) {
+        sr_runner_emit_register_access(
+            snes, false, UINT32_C(0x2100) + address, value, 1u);
+    }
+    return value;
 }
 
 void snes_writeBBus(Snes *snes, uint8_t address, uint8_t value) {
     if (snes == NULL) return;
     if (address < 0x40u) {
         ppu_write(snes->ppu, address, value);
-        return;
-    }
-    if (address < 0x80u) {
+    } else if (address < 0x80u) {
         RtlApuWrite((uint16_t)(0x2100u + address), value);
-        return;
+    } else {
+        switch (address) {
+            case 0x80u:
+                write_wram(snes, snes->ramAdr, value);
+                snes->ramAdr = (snes->ramAdr + 1u) & kSnesWramMask;
+                break;
+            case 0x81u:
+                snes->ramAdr = (snes->ramAdr & 0x1ff00u) | value;
+                break;
+            case 0x82u:
+                snes->ramAdr = (snes->ramAdr & 0x100ffu) |
+                               ((uint32_t)value << 8);
+                break;
+            case 0x83u:
+                snes->ramAdr = (snes->ramAdr & 0x0ffffu) |
+                               ((uint32_t)(value & 1u) << 16);
+                break;
+            default: break;
+        }
     }
-    switch (address) {
-        case 0x80u:
-            write_wram(snes, snes->ramAdr, value);
-            snes->ramAdr = (snes->ramAdr + 1u) & kSnesWramMask;
-            break;
-        case 0x81u:
-            snes->ramAdr = (snes->ramAdr & 0x1ff00u) | value;
-            break;
-        case 0x82u:
-            snes->ramAdr = (snes->ramAdr & 0x100ffu) | ((uint32_t)value << 8);
-            break;
-        case 0x83u:
-            snes->ramAdr = (snes->ramAdr & 0x0ffffu) |
-                           ((uint32_t)(value & 1u) << 16);
-            break;
-        default: break;
+    if (sr_runner_event_enabled(SR_EVENT_MASK_REGISTER_ACCESS)) {
+        sr_runner_emit_register_access(
+            snes, true, UINT32_C(0x2100) + address, value, 1u);
     }
 }
 
@@ -251,42 +270,55 @@ uint16_t SwapInputBits(uint16_t value) {
 }
 
 uint8_t snes_readReg(Snes *snes, uint16_t address) {
-    if (snes == NULL) return 0u;
+    uint8_t value = 0u;
+    if (snes == NULL) return value;
     switch (address) {
-        case 0x4210u: {
+        case 0x4210u:
             if (g_snes_rdnmi_read_hook != NULL) {
-                const int value = g_snes_rdnmi_read_hook(snes);
-                if (value >= 0) return (uint8_t)value;
+                const int overridden = g_snes_rdnmi_read_hook(snes);
+                if (overridden >= 0) {
+                    value = (uint8_t)overridden;
+                    break;
+                }
             }
-            const uint8_t value = (uint8_t)(0x02u |
+            value = (uint8_t)(0x02u |
                 ((snes->inNmi || snes->forceNmi) ? 0x80u : 0u));
             snes->inNmi = false;
-            return value;
-        }
-        case 0x4211u: {
-            const uint8_t value = snes->inIrq ? 0x80u : 0u;
+            break;
+        case 0x4211u:
+            value = snes->inIrq ? 0x80u : 0u;
             snes->inIrq = false;
-            return value;
-        }
+            break;
         case 0x4212u:
             snes->hPos = (uint16_t)((snes->hPos + SNES_STATUS_READ_STEP) %
                                     SNES_SCANLINE_MASTER_CYCLES);
-            return (uint8_t)((snes->autoJoyTimer != 0u ? 1u : 0u) |
-                             (snes->hPos >= SNES_HBLANK_START ? 0x40u : 0u) |
-                             (snes->inVblank ? 0x80u : 0u));
-        case 0x4213u: return snes->ppuLatch ? 0x80u : 0u;
-        case 0x4214u: return (uint8_t)snes->divideResult;
-        case 0x4215u: return (uint8_t)(snes->divideResult >> 8);
-        case 0x4216u: return (uint8_t)snes->multiplyResult;
-        case 0x4217u: return (uint8_t)(snes->multiplyResult >> 8);
+            value = (uint8_t)((snes->autoJoyTimer != 0u ? 1u : 0u) |
+                              (snes->hPos >= SNES_HBLANK_START ? 0x40u : 0u) |
+                              (snes->inVblank ? 0x80u : 0u));
+            break;
+        case 0x4213u: value = snes->ppuLatch ? 0x80u : 0u; break;
+        case 0x4214u: value = (uint8_t)snes->divideResult; break;
+        case 0x4215u: value = (uint8_t)(snes->divideResult >> 8); break;
+        case 0x4216u: value = (uint8_t)snes->multiplyResult; break;
+        case 0x4217u: value = (uint8_t)(snes->multiplyResult >> 8); break;
         case 0x4016u:
-        case 0x4017u: return 1u;
-        case 0x4218u: return (uint8_t)SwapInputBits(snes->input1_currentState);
-        case 0x4219u: return (uint8_t)(SwapInputBits(snes->input1_currentState) >> 8);
-        case 0x421au: return (uint8_t)SwapInputBits(snes->input2_currentState);
-        case 0x421bu: return (uint8_t)(SwapInputBits(snes->input2_currentState) >> 8);
-        default: return 0u;
+        case 0x4017u: value = 1u; break;
+        case 0x4218u:
+            value = (uint8_t)SwapInputBits(snes->input1_currentState); break;
+        case 0x4219u:
+            value = (uint8_t)(SwapInputBits(snes->input1_currentState) >> 8);
+            break;
+        case 0x421au:
+            value = (uint8_t)SwapInputBits(snes->input2_currentState); break;
+        case 0x421bu:
+            value = (uint8_t)(SwapInputBits(snes->input2_currentState) >> 8);
+            break;
+        default: break;
     }
+    if (sr_runner_event_enabled(SR_EVENT_MASK_REGISTER_ACCESS)) {
+        sr_runner_emit_register_access(snes, false, address, value, 1u);
+    }
+    return value;
 }
 
 void snes_writeReg(Snes *snes, uint16_t address, uint8_t value) {
@@ -333,6 +365,9 @@ void snes_writeReg(Snes *snes, uint16_t address, uint8_t value) {
         case 0x420cu: dma_startDma(snes->dma, value, true); break;
         default: break;
     }
+    if (sr_runner_event_enabled(SR_EVENT_MASK_REGISTER_ACCESS)) {
+        sr_runner_emit_register_access(snes, true, address, value, 1u);
+    }
 }
 
 static bool is_system_bank(uint8_t bank) {
@@ -354,7 +389,14 @@ uint8_t snes_read(Snes *snes, uint32_t address) {
             if (g_snes_hardware_read_hook != NULL) g_snes_hardware_read_hook(offset, value);
             return value;
         }
-        if (offset == 0x4016u || offset == 0x4017u) return 0u;
+        if (offset == 0x4016u || offset == 0x4017u) {
+            value = 0u;
+            if (sr_runner_event_enabled(SR_EVENT_MASK_REGISTER_ACCESS)) {
+                sr_runner_emit_register_access(
+                    snes, false, offset, value, 1u);
+            }
+            return value;
+        }
         if (offset >= 0x4200u && offset < 0x4220u) {
             value = snes_readReg(snes, offset);
             if (g_snes_hardware_read_hook != NULL) g_snes_hardware_read_hook(offset, value);
@@ -376,6 +418,13 @@ void snes_write(Snes *snes, uint32_t address, uint8_t value) {
     if (is_system_bank(bank)) {
         if (offset < 0x2000u) {
             write_wram(snes, offset, value);
+            return;
+        }
+        if (offset == 0x4016u) {
+            if (sr_runner_event_enabled(SR_EVENT_MASK_REGISTER_ACCESS)) {
+                sr_runner_emit_register_access(
+                    snes, true, offset, value, 1u);
+            }
             return;
         }
         if (offset >= 0x2100u && offset < 0x2200u) {

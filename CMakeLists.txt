@@ -21,6 +21,13 @@ if(NOT MSVC)
 endif()
 include(CTest)
 
+if(BUILD_TESTING)
+    add_test(NAME actraiser_runner_concrete_boundary
+        COMMAND ${CMAKE_COMMAND}
+            -DAR_SOURCE_ROOT=${CMAKE_SOURCE_DIR}/src
+            -P ${CMAKE_SOURCE_DIR}/tools/check_runner_boundary.cmake)
+endif()
+
 # Configure the ROM-free test tier without requiring generated ROM banks. This
 # skips the game target; tests link only the hand-written sources they exercise.
 option(AR_TESTS_ONLY "Configure only the ROM-free test tier (no ROM required)" OFF)

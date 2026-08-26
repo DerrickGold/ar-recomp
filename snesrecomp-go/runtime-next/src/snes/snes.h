@@ -39,6 +39,8 @@ struct Snes {
     uint64_t abiResetGeneration;
     uint64_t abiLoadGeneration;
     uint64_t abiMutationGeneration;
+    uint64_t abiFrameCounter;
+    uint64_t abiAudioFrameCounter;
     uint16_t hPos;
     uint16_t vPos;
     double apuCatchupCycles;

@@ -1,4 +1,5 @@
 #include "dma.h"
+#include "../runner_next_internal.h"
 #include "saveload.h"
 #include "snes.h"
 
@@ -99,32 +100,37 @@ static DmaChannel *selected_channel(Dma *dma, uint16_t address) {
 }
 
 uint8_t dma_read(Dma *dma, uint16_t address) {
-    if (dma == NULL) {
-        return 0u;
-    }
+    uint8_t value = 0u;
+    if (dma == NULL) return value;
     const DmaChannel *channel = selected_channel(dma, address);
     switch (address & 0x0fu) {
         case 0x0u:
-            return (uint8_t)(channel->mode |
-                             (channel->fixed ? 0x08u : 0u) |
-                             (channel->decrement ? 0x10u : 0u) |
-                             (channel->unusedBit ? 0x20u : 0u) |
-                             (channel->indirect ? 0x40u : 0u) |
-                             (channel->fromB ? 0x80u : 0u));
-        case 0x1u: return channel->bAdr;
-        case 0x2u: return (uint8_t)channel->aAdr;
-        case 0x3u: return (uint8_t)(channel->aAdr >> 8);
-        case 0x4u: return channel->aBank;
-        case 0x5u: return (uint8_t)channel->size;
-        case 0x6u: return (uint8_t)(channel->size >> 8);
-        case 0x7u: return channel->indBank;
-        case 0x8u: return (uint8_t)channel->tableAdr;
-        case 0x9u: return (uint8_t)(channel->tableAdr >> 8);
-        case 0xau: return channel->repCount;
+            value = (uint8_t)(channel->mode |
+                              (channel->fixed ? 0x08u : 0u) |
+                              (channel->decrement ? 0x10u : 0u) |
+                              (channel->unusedBit ? 0x20u : 0u) |
+                              (channel->indirect ? 0x40u : 0u) |
+                              (channel->fromB ? 0x80u : 0u));
+            break;
+        case 0x1u: value = channel->bAdr; break;
+        case 0x2u: value = (uint8_t)channel->aAdr; break;
+        case 0x3u: value = (uint8_t)(channel->aAdr >> 8); break;
+        case 0x4u: value = channel->aBank; break;
+        case 0x5u: value = (uint8_t)channel->size; break;
+        case 0x6u: value = (uint8_t)(channel->size >> 8); break;
+        case 0x7u: value = channel->indBank; break;
+        case 0x8u: value = (uint8_t)channel->tableAdr; break;
+        case 0x9u: value = (uint8_t)(channel->tableAdr >> 8); break;
+        case 0xau: value = channel->repCount; break;
         case 0xbu:
-        case 0xfu: return channel->unusedByte;
-        default: return 0u;
+        case 0xfu: value = channel->unusedByte; break;
+        default: break;
     }
+    if (sr_runner_event_enabled(SR_EVENT_MASK_REGISTER_ACCESS)) {
+        sr_runner_emit_register_access(
+            dma->snes, false, address, value, 1u);
+    }
+    return value;
 }
 
 void dma_write(Dma *dma, uint16_t address, uint8_t value) {
@@ -157,6 +163,10 @@ void dma_write(Dma *dma, uint16_t address, uint8_t value) {
         case 0xbu:
         case 0xfu: channel->unusedByte = value; break;
         default: break;
+    }
+    if (sr_runner_event_enabled(SR_EVENT_MASK_REGISTER_ACCESS)) {
+        sr_runner_emit_register_access(
+            dma->snes, true, address, value, 1u);
     }
 }
 
@@ -234,6 +244,33 @@ void dma_run_to_idle(Dma *dma) {
     dma->dmaBusy = false;
 }
 
+static void emit_dma_begin(Dma *dma, unsigned index, bool hdma) {
+    const DmaChannel *channel;
+    SrRunnerEvent event = {0};
+    if (!sr_runner_event_enabled(SR_EVENT_MASK_DMA)) return;
+    channel = &dma->channel[index];
+    event.type = SR_EVENT_DMA_BEGIN;
+    event.frame_counter = dma->snes != NULL
+        ? dma->snes->abiFrameCounter : 0u;
+    event.flags = (hdma ? SR_EVENT_DMA_HDMA : 0u) |
+                  (channel->fromB ? SR_EVENT_DMA_FROM_B_BUS : 0u) |
+                  (channel->fixed ? SR_EVENT_DMA_FIXED_A_BUS : 0u) |
+                  (channel->decrement
+                       ? SR_EVENT_DMA_DECREMENT_A_BUS : 0u) |
+                  (channel->indirect ? SR_EVENT_DMA_INDIRECT : 0u);
+    event.address = ((uint32_t)channel->aBank << 16) | channel->aAdr;
+    event.dma_a_address24 = event.address;
+    event.dma_transfer_bytes = hdma ? 0u
+        : (channel->size == 0u ? UINT32_C(0x10000) : channel->size);
+    event.dma_table_address = hdma ? channel->aAdr : 0u;
+    event.dma_channel = (uint8_t)index;
+    event.dma_mode = channel->mode;
+    event.dma_b_address = channel->bAdr;
+    event.dma_indirect_bank = channel->indBank;
+    event.label = hdma ? "hdma" : "dma";
+    sr_runner_emit_event(dma->snes, SR_EVENT_MASK_DMA, &event);
+}
+
 void dma_startDma(Dma *dma, uint8_t channels, bool hdma) {
     if (dma == NULL) {
         return;
@@ -248,6 +285,7 @@ void dma_startDma(Dma *dma, uint8_t channels, bool hdma) {
                 g_dma_start_trace_hook(index, &dma->channel[index]);
             }
         }
+        if (selected) emit_dma_begin(dma, index, hdma);
     }
     if (!hdma) {
         dma->dmaBusy = channels != 0u;

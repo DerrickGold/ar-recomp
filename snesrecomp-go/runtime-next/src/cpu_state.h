@@ -161,7 +161,6 @@ extern CpuState g_cpu;
 uint16 ar_cpu_S(void);
 uint8 ar_cpu_PB(void);
 void cpu_dbg_funcname(const char *name);
-void CpuDispatchLogWriteFile(const char *path);
 
 extern int g_ar_mx_check;
 extern int g_ar_mxhist;

@@ -724,6 +724,12 @@ volatile int g_ar_in_interrupt = 0;
 
 static uint32 ActRaiser_LastBlockPc(void);
 
+static void ActRaiser_EmitInterrupt(SrInterruptKind kind, uint32 flags,
+                                    uint32 pc24, uint16 vector,
+                                    int32 scanline, const char *label) {
+  sr_runner_emit_interrupt(g_snes, kind, flags, pc24, vector, scanline, label);
+}
+
 /* ActRaiser BRK syscall. The ROM's BRK vector ($00:852F) is:
  *   PHP; SEP #$20; STA $00035B; PLP; RTI
  * i.e. it stores A's low byte to $035B (the sound-effect request port) and
@@ -735,6 +741,14 @@ static void ActRaiser_BrkHook(CpuState *cpu) {
   const uint8 id = (uint8)(cpu->A & 0xFF);
   extern const char *g_last_recomp_func;
   const uint32 site = ActRaiser_LastBlockPc();
+  const uint16 vector = cpu->emulation ? 0xfffeu : 0xffe6u;
+  const bool observe_interrupt =
+      sr_runner_event_enabled(SR_EVENT_MASK_INTERRUPT);
+  if (observe_interrupt) {
+    ActRaiser_EmitInterrupt(
+        SR_INTERRUPT_BRK, SR_EVENT_INTERRUPT_ENTER, site, vector,
+        SR_INTERRUPT_SCANLINE_UNKNOWN, "brk");
+  }
   const uint32 game_frame =
       ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
   const uint64_t trace_serial = NativeAudioTrace_OnCpuRequest(
@@ -764,6 +778,11 @@ static void ActRaiser_BrkHook(CpuState *cpu) {
             id, g_ram[kActRaiserWram_MapGroup],
             g_ram[kActRaiserWram_CurrentMap]);
   }
+  if (observe_interrupt) {
+    ActRaiser_EmitInterrupt(
+        SR_INTERRUPT_BRK, SR_EVENT_INTERRUPT_EXIT, site, vector,
+        SR_INTERRUPT_SCANLINE_UNKNOWN, "brk");
+  }
 }
 
 /* Return the most recent recompiled block PC. The always-on ring is also used
@@ -786,7 +805,15 @@ static uint32 ActRaiser_LastBlockPc(void) {
 static void ActRaiser_CopHook(CpuState *cpu) {
   const uint8 id = (uint8)(cpu->A & 0xFF);
   const uint32 site = ActRaiser_LastBlockPc();
+  const uint16 vector = cpu->emulation ? 0xfff4u : 0xffe4u;
+  const bool observe_interrupt =
+      sr_runner_event_enabled(SR_EVENT_MASK_INTERRUPT);
   extern const char *g_last_recomp_func;
+  if (observe_interrupt) {
+    ActRaiser_EmitInterrupt(
+        SR_INTERRUPT_COP, SR_EVENT_INTERRUPT_ENTER, site, vector,
+        SR_INTERRUPT_SCANLINE_UNKNOWN, "cop");
+  }
   /* $01:901C is the message composer's per-glyph pacing helper. Its
    * non-space path at $01:902D posts COP #$07 after drawing each character.
    * Suppress only this exact site: id 07 also drives unrelated game events. */
@@ -818,6 +845,11 @@ static void ActRaiser_CopHook(CpuState *cpu) {
             site, id, suppress_dialog_blip ? " suppressed-dialog-blip" : "",
             g_ram[kActRaiserWram_MapGroup],
             g_ram[kActRaiserWram_CurrentMap]);
+  }
+  if (observe_interrupt) {
+    ActRaiser_EmitInterrupt(
+        SR_INTERRUPT_COP, SR_EVENT_INTERRUPT_EXIT, site, vector,
+        SR_INTERRUPT_SCANLINE_UNKNOWN, "cop");
   }
 }
 
@@ -3154,12 +3186,28 @@ void ActRaiserDrawPpuFrame(void) {
     if (i == trigger) {
       g_snes->inIrq = true;
       CpuRegSnapshot snap;
+      const bool observe_interrupt =
+          sr_runner_event_enabled(SR_EVENT_MASK_INTERRUPT);
+      const uint32 interrupt_pc =
+          observe_interrupt ? ActRaiser_LastBlockPc() : 0u;
+      const uint16 interrupt_vector =
+          g_cpu.emulation ? 0xfffeu : 0xffeeu;
       ActRaiser_SaveRegs(&g_cpu, &snap);
+      if (observe_interrupt) {
+        ActRaiser_EmitInterrupt(
+            SR_INTERRUPT_IRQ, SR_EVENT_INTERRUPT_ENTER, interrupt_pc,
+            interrupt_vector, i, "irq");
+      }
       cpu_push_interrupt_frame(&g_cpu);
       g_ar_in_interrupt = 1;
       IrqHandler_M1X1(&g_cpu);
       g_ar_in_interrupt = 0;
       ActRaiser_RestoreRegs(&g_cpu, &snap);
+      if (observe_interrupt) {
+        ActRaiser_EmitInterrupt(
+            SR_INTERRUPT_IRQ, SR_EVENT_INTERRUPT_EXIT, interrupt_pc,
+            interrupt_vector, i, "irq");
+      }
       trigger = g_snes->vIrqEnabled ? g_snes->vTimer + 1 : -1;
     }
   }
@@ -3809,8 +3857,6 @@ void RunOneFrameOfGame(void) {
 
   ActRaiser_ApplyCheats();   /* host-side cheats (live settings, default off) */
 
-  { extern int ar_trace_active(void); extern void ar_trace_frame(const char *);
-    if (ar_trace_active()) ar_trace_frame("vblank"); }  /* frame boundary marker */
   if (g_action_load_hold_frames) {
     bool one_shot_completed = false;
     uint64_t one_shot_token = 0;
@@ -3889,13 +3935,27 @@ void RunOneFrameOfGame(void) {
    * IRQ path in ActRaiserDrawPpuFrame. */
   {
     CpuRegSnapshot snap;
+    const bool observe_interrupt =
+        sr_runner_event_enabled(SR_EVENT_MASK_INTERRUPT);
+    const uint32 interrupt_pc =
+        observe_interrupt ? ActRaiser_LastBlockPc() : 0u;
+    const uint16 interrupt_vector =
+        g_cpu.emulation ? 0xfffau : 0xffeau;
     ActRaiser_SaveRegs(&g_cpu, &snap);
+    if (observe_interrupt) {
+      ActRaiser_EmitInterrupt(
+          SR_INTERRUPT_NMI, SR_EVENT_INTERRUPT_ENTER, interrupt_pc,
+          interrupt_vector, SR_INTERRUPT_SCANLINE_UNKNOWN, "nmi");
+    }
     cpu_push_interrupt_frame(&g_cpu);
     g_ar_in_interrupt = 1;
-    { extern int ar_trace_active(void); extern void ar_trace_frame(const char *);
-      if (ar_trace_active()) ar_trace_frame("nmi"); }
     NmiHandler_M1X1(&g_cpu);
     g_ar_in_interrupt = 0;
     ActRaiser_RestoreRegs(&g_cpu, &snap);
+    if (observe_interrupt) {
+      ActRaiser_EmitInterrupt(
+          SR_INTERRUPT_NMI, SR_EVENT_INTERRUPT_EXIT, interrupt_pc,
+          interrupt_vector, SR_INTERRUPT_SCANLINE_UNKNOWN, "nmi");
+    }
   }
 }

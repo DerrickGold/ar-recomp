@@ -147,6 +147,12 @@ void RtlSetAudioOutputRate(int hz) {
 int RtlGetAudioOutputRate(void) { return g_audio_output_rate; }
 
 bool RtlRunFrame(uint32 inputs) {
+    if (g_snes != NULL) {
+        g_snes->abiFrameCounter = snes_frame_counter >= 0
+            ? (uint64_t)snes_frame_counter : 0u;
+    }
+    sr_runner_apply_pending_mutations(
+        g_snes, &inputs, g_snes != NULL ? g_snes->abiFrameCounter : 0u);
     if ((inputs & 0x30u) == 0x30u) inputs ^= 0x30u;
     if ((inputs & 0xc0u) == 0xc0u) inputs ^= 0xc0u;
     if ((inputs & 0x30000u) == 0x30000u) inputs ^= 0x30000u;
@@ -158,10 +164,18 @@ bool RtlRunFrame(uint32 inputs) {
         g_snes->input1_currentState = (uint16)(inputs & 0xfffu);
         g_snes->input2_currentState = (uint16)((inputs >> 12) & 0xfffu);
     }
+    if (sr_runner_event_enabled(SR_EVENT_MASK_FRAME)) {
+        sr_runner_emit_frame_boundary(
+            g_snes, SR_EVENT_FRAME_BEGIN | SR_EVENT_FRAME_VBLANK, "vblank");
+    }
     WatchdogFrameStart();
     if (g_rtl_game_info != NULL && g_rtl_game_info->run_frame != NULL)
         g_rtl_game_info->run_frame();
     WatchdogFrameEnd();
+    if (sr_runner_event_enabled(SR_EVENT_MASK_FRAME)) {
+        sr_runner_emit_frame_boundary(g_snes, SR_EVENT_FRAME_END,
+                                      "complete");
+    }
     if (g_framedump_callback != NULL)
         g_framedump_callback((uint32)snes_frame_counter, g_ram);
     debug_server_record_frame(snes_frame_counter);
@@ -249,6 +263,10 @@ void MemCpy(void *destination, const void *source, int size) {
 
 bool Unreachable(void) {
     g_fail = true;
+    if (sr_runner_event_enabled(SR_EVENT_MASK_ERROR)) {
+        sr_runner_emit_error(g_snes, SR_RUNNER_ERROR_UNREACHABLE, 0u,
+                             0u, 0u, "unreachable");
+    }
     return false;
 }
 
@@ -268,6 +286,10 @@ uint8 *RomPtr(uint32 address) {
                                (uint16)address, size, 0u);
     if (decoded.region != SR_CART_REGION_ROM) {
         g_fail = true;
+        if (sr_runner_event_enabled(SR_EVENT_MASK_ERROR)) {
+            sr_runner_emit_error(g_snes, SR_RUNNER_ERROR_UNMAPPED_ROM, 0u,
+                                 address, 0u, "unmapped-rom");
+        }
         cpu_trace_offrails("RomPtr-unmapped", address & 0xffffffu);
         decoded = sr_cart_map_read(SR_CART_MAPPING_LOROM,
                                    (uint8)(address >> 16),
@@ -288,15 +310,24 @@ uint8 *IndirPtr_Slow(LongPtr pointer, uint16 offset) {
     return IndirPtr(pointer, offset);
 }
 
+static void observe_register_access(bool write, uint16 reg, uint8 value) {
+    if (sr_runner_event_enabled(SR_EVENT_MASK_REGISTER_ACCESS)) {
+        sr_runner_emit_register_access(g_snes, write, reg, value, 1u);
+    }
+}
+
 void WriteReg(uint16 reg, uint8 value) {
     if (reg >= 0x2000u && reg < 0x2008u) {
         if (msu1_enabled()) msu1_write(reg, value);
+        observe_register_access(true, reg, value);
     } else if (reg >= 0x2100u && reg < 0x2140u) {
         ppu_write(g_ppu, (uint8)reg, value);
         if (reg == 0x2100u && g_rtl_inidisp_hook != NULL)
             g_rtl_inidisp_hook(value);
+        observe_register_access(true, reg, value);
     } else if (reg >= 0x2140u && reg < 0x2180u) {
         RtlApuWrite(reg, value);
+        observe_register_access(true, reg, value);
     } else if (reg >= 0x2180u && reg < 0x2184u) {
         snes_writeBBus(g_snes, (uint8)reg, value);
     } else if (reg >= 0x4200u && reg < 0x4220u) {
@@ -304,15 +335,23 @@ void WriteReg(uint16 reg, uint8 value) {
         recomp_write_internal_reg(reg, value);
     } else if (reg >= 0x4300u && reg < 0x4380u) {
         dma_write(g_dma, reg, value);
+    } else {
+        observe_register_access(true, reg, value);
     }
     debug_server_on_reg_write(reg, value);
 }
 
 uint8 ReadReg(uint16 reg) {
-    if (reg >= 0x2000u && reg < 0x2008u)
-        return msu1_enabled() ? msu1_read(reg) : 0u;
-    if (reg >= 0x2100u && reg < 0x2140u)
-        return ppu_read(g_ppu, (uint8)reg);
+    if (reg >= 0x2000u && reg < 0x2008u) {
+        uint8 value = msu1_enabled() ? msu1_read(reg) : 0u;
+        observe_register_access(false, reg, value);
+        return value;
+    }
+    if (reg >= 0x2100u && reg < 0x2140u) {
+        uint8 value = ppu_read(g_ppu, (uint8)reg);
+        observe_register_access(false, reg, value);
+        return value;
+    }
     if (reg >= 0x2140u && reg < 0x2180u)
         return snes_read(g_snes, reg);
     if (reg == 0x2180u) return snes_readBBus(g_snes, (uint8)reg);
@@ -320,6 +359,7 @@ uint8 ReadReg(uint16 reg) {
     if (reg >= 0x4200u && reg < 0x4220u)
         return recomp_read_internal_reg(reg);
     if (reg >= 0x4300u && reg < 0x4380u) return dma_read(g_dma, reg);
+    observe_register_access(false, reg, 0u);
     return 0u;
 }
 
@@ -333,6 +373,8 @@ uint16 ReadRegWord(uint16 reg) {
         low = g_snes->apu->outPorts[reg & 3u];
         high = g_snes->apu->outPorts[(reg + 1u) & 3u];
         RtlApuUnlock();
+        observe_register_access(false, reg, low);
+        observe_register_access(false, (uint16)(reg + 1u), high);
         return (uint16)low | ((uint16)high << 8);
     }
     return (uint16)ReadReg(reg) | ((uint16)ReadReg((uint16)(reg + 1u)) << 8);
@@ -344,6 +386,8 @@ void WriteRegWord(uint16 reg, uint16 value) {
          * increments the address, so the ordinary PPU ports are sufficient. */
         ppu_write(g_ppu, 0x18u, (uint8)value);
         ppu_write(g_ppu, 0x19u, (uint8)(value >> 8));
+        observe_register_access(true, 0x2118u, (uint8)value);
+        observe_register_access(true, 0x2119u, (uint8)(value >> 8));
         debug_server_on_reg_write(0x2118u, (uint8)value);
         debug_server_on_reg_write(0x2119u, (uint8)(value >> 8));
         return;
@@ -572,6 +616,15 @@ void RtlRenderAudio(int16 *audio_buffer, int samples, int channels) {
     if (g_rtl_music_mix_hook != NULL)
         g_rtl_music_mix_hook(audio_buffer, samples);
     RtlApuUnlock();
+    {
+        uint64_t frame_offset = g_snes->abiAudioFrameCounter;
+        g_snes->abiAudioFrameCounter += (uint64_t)samples;
+        if (sr_runner_event_enabled(SR_EVENT_MASK_AUDIO)) {
+            sr_runner_emit_audio_produced(
+                g_snes, audio_buffer, frame_offset, (uint32_t)samples,
+                (uint32_t)g_audio_output_rate, (uint16_t)channels);
+        }
+    }
 }
 
 void RtlMigrateLegacySram(const char *legacy_title) {
@@ -696,6 +749,7 @@ void SimpleHdma_DoLine(SimpleHdma *channel) {
             else ++channel->table;
             reg = (uint16)(0x2100u + channel->ppu_addr + offsets[mode][index]);
             ppu_write(g_ppu, (uint8)reg, value);
+            observe_register_access(true, reg, value);
             debug_server_on_reg_write(reg, value);
         }
     }

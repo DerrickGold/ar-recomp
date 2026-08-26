@@ -245,11 +245,214 @@ regression was +0.23%. Native-SIMD changed by +0.36%, +0.03%, -0.31%, and
 dispatch artifacts remained identical, and both configurations remain inside
 the performance gate.
 
+## ABI v1 execution-observer checkpoint (2026-08-26)
+
+ABI v1 now exposes one coherent generated-execution snapshot containing the
+current function and block, the bounded recompiled call stack, and the last 256
+basic blocks with M/X flags, X, and S. A lifecycle-bound game adapter supplies
+that generated-code view; the portable runner still contains no ActRaiser
+addresses, symbols, or meanings.
+
+The first synchronous observer classes cover basic-block execution and dynamic
+dispatch. Subscriptions are fixed-capacity, allocation-free, capability-gated,
+and optionally filtered by a 24-bit PC range before callback dispatch. Hot
+instrumentation checks a union class mask before constructing an event. The
+application crash recorder uses the snapshot for bounded block history and
+subscribes only to the much rarer dispatch stream; per-block callbacks remain
+available to opt-in tools without imposing their callback cost on normal play.
+The retired private dispatch ring and JSON writer were removed after their sole
+production consumer moved behind the ABI.
+
+The contract suite covers structure extents, provider availability, stack and
+history contents, unsupported classes and filters, invalid ranges, multiple
+subscriptions, PC filtering, serial order, unsubscribe behavior, and lifecycle
+cleanup. The standalone runner remains 27/27, the complete application suite
+passes 91/91 including all GPU tests, the public header passes C++17 syntax
+validation, and the implementation passes an x86-64 macOS cross-target syntax
+build.
+
+Seven adjacent baseline/candidate pairs kept every WRAM, SRAM, CPU-state, and
+dispatch artifact identical. Portable paired median deltas were +0.13% for
+Mode 7/world map, -0.26% for SIM, -1.08% for Aitos wide, and -0.70% for Death
+Heim wide; the suite was 0.48% faster. Native-SIMD deltas were -0.24%, +0.16%,
++0.06%, and +0.16%; suite regression was +0.04%. Both configurations remain
+well inside the performance gate.
+
+## ABI v1 memory/register-observer checkpoint (2026-08-26)
+
+ABI v1 now reports canonical memory writes for WRAM, SRAM, VRAM, CGRAM, OAM,
+and high OAM, plus CPU-visible register reads and writes across the recompiled
+fast path and the portable SNES bus/device path. Memory addresses are byte
+offsets within an explicit region; register addresses retain their full CPU
+bus value. Address and memory-region filters are validated when a subscription
+is installed, before any hot-path payload is built.
+
+The unified JSONL trace now consumes these observer classes for WRAM/stack,
+PPU-memory, and register channels. Its old per-WRAM-write environment poll was
+removed. Disabled observation uses an unlikely class-mask branch, and previous
+values are loaded only when a memory observer or compatibility hook actually
+needs them. The PPU-to-runner association remains in the cold ABI adapter so
+the large VRAM/CGRAM/OAM arrays retain their prior layout and alignment.
+
+The contract tests exercise filtered real WRAM, VRAM, and register accesses,
+invalid address/region filter combinations, subscription union masks, and
+trace-consumer bind/unbind cleanup. The standalone runner passes 27/27 and the
+full application passes 91/91, including all GPU tests. The public header also
+passes C++17 syntax validation and the touched implementation passes an
+x86-64 macOS cross-target syntax build from the ARM64 host.
+
+Seven alternating adjacent pairs kept every final WRAM, SRAM, CPU-state, and
+dispatch artifact identical. Portable median deltas were +1.19% for Mode
+7/world map, +0.23% for SIM, +0.04% for Aitos wide, and -0.12% for Death Heim
+wide; suite regression was +0.33%. Native-SIMD deltas were -0.71%, +0.16%,
+-0.36%, and -0.20%; the suite was 0.28% faster. Both configurations remain
+well inside the performance gate.
+
+## ABI v1 DMA-observer checkpoint (2026-08-26)
+
+ABI v1 now reports one `DMA_BEGIN` event for every selected general-DMA or
+HDMA channel at activation. The payload exposes the channel, transfer mode,
+initial 24-bit A-bus address, B-bus register, indirect bank, direction and
+address-control flags, and normalized general-DMA byte count. HDMA reports its
+table start and a zero byte count because the table determines the eventual
+transfer length. Address filtering uses the initial A-bus/table address.
+
+The event is deliberately not emitted per transferred byte or HDMA scanline.
+Normal play pays only the same unlikely union-mask branch used by the other
+observer classes. The unified JSONL trace now subscribes to the public DMA
+class and distinguishes DMA from HDMA; the narrow historical start hook remains
+available as an internal compatibility seam.
+
+The contract suite covers filtered general DMA, the SNES zero-size-to-65536
+rule, HDMA metadata, subscription masks, and trace bind/unbind behavior. The
+standalone runner passes 27/27 and both portable and native-SIMD application
+configurations pass 91/91, including all GPU tests. The public header passes
+C++17 syntax validation, and the touched C sources pass an x86-64 macOS
+cross-target syntax build from the ARM64 host.
+
+Seven alternating adjacent pairs kept every final WRAM, SRAM, CPU-state, and
+dispatch artifact identical. Portable median deltas were +0.77% for Mode
+7/world map, +0.20% for SIM, -0.03% for Aitos wide, and -0.28% for Death Heim
+wide; suite regression was +0.17%. Native-SIMD deltas were +0.81%, +0.28%,
+-0.29%, and -0.01%; suite regression was +0.20%. Both configurations remain
+well inside the performance gate.
+
+## ABI v1 frame/interrupt/error-observer checkpoint (2026-08-26)
+
+ABI v1 now reports host-frame begin/end boundaries, typed NMI/IRQ/BRK/COP
+entry and exit, and stable runner error codes. Interrupt payloads include the
+interrupted PC, hardware vector, and IRQ scanline when one applies. Error
+payloads distinguish unreachable execution, unmapped ROM access, final dynamic
+dispatch misses, and dispatch recursion limits; PC filters apply to interrupt
+and error streams.
+
+Frame boundaries originate in the common runtime. A game adapter reports its
+hardware and software interrupt calls through one generic runner seam, without
+placing title addresses or meanings in the ABI. Dispatch, mapping, and
+unreachable errors originate at their portable runtime owners. The unified
+JSONL trace consumes these public events for its historical vblank, NMI, and
+dispatch-miss records; direct game/dispatcher calls into the trace were
+removed. A 120-frame application smoke trace observed all 120 vblank boundaries
+and 11 actual NMI entries through the new route.
+
+The contract suite covers structured frame, interrupt, and error payloads;
+supported and unsupported PC-filter combinations; filtered errors; subscription
+union masks; CPU-dispatch error emission; and trace cleanup. The standalone
+runner passes 27/27 and both portable and native-SIMD application configurations
+pass 91/91, including all GPU tests. The public header passes C++17 syntax
+validation, and all touched C sources pass an x86-64 macOS cross-target syntax
+build from the ARM64 host.
+
+Seven alternating adjacent pairs kept every final WRAM, SRAM, CPU-state, and
+dispatch artifact identical. Portable median deltas were -0.14% for Mode
+7/world map, -0.27% for SIM, +0.37% for Aitos wide, and +0.78% for Death Heim
+wide; suite regression was +0.18%. Native-SIMD deltas were -0.91%, -0.38%,
++0.19%, and -0.13%; the suite was 0.31% faster. Both configurations remain
+well inside the performance gate.
+
+## ABI v1 audio-observer checkpoint (2026-08-26)
+
+ABI v1 now reports one `AUDIO_PRODUCED` event for each completed host PCM
+block, after DSP resampling, MSU-1 mixing, and replacement-music mixing. The
+payload describes interleaved native-endian signed 16-bit samples, output rate,
+channel count, frame count, and a monotonic output-frame offset since reset.
+The sample pointer is zero-copy and valid only for the synchronous callback.
+
+Audio events originate on the host audio thread. Observer dispatch is now
+serialized across runner and audio producers so a subscription never receives
+concurrent callbacks. Subscription installation/removal remains a lifecycle
+operation that must not race active producers. The event is emitted after the
+APU lock is released, keeping external work out of the emulation/audio critical
+section. Normal play adds only one 64-bit audio-clock increment and the existing
+unlikely observer-mask branch per host block; the per-DSP-sample loop is
+unchanged.
+
+The raw DSP-sample trace remains an internal diagnostic because routing every
+native sample through the general observer registry would add unacceptable hot
+loop overhead and would not describe the final host mix. Likewise, the
+replacement-music mixer remains a mutation hook and belongs to the later
+controlled-mutation API rather than a read-only observer.
+
+The contract suite drives the real `RtlRenderAudio` path and verifies final-mix
+ordering, transient buffer contents, format metadata, and consecutive audio
+clock offsets. The standalone runner passes 27/27 and both portable and
+native-SIMD application configurations pass 91/91, including all GPU tests.
+The public header passes C++17 syntax validation, and all touched C sources
+pass an x86-64 macOS cross-target syntax build from the ARM64 host.
+
+Seven alternating adjacent pairs kept every final WRAM, SRAM, CPU-state, and
+dispatch artifact identical, including across portable and native builds.
+Portable median deltas were -0.29% for Mode 7/world map, +0.05% for SIM,
+-0.47% for Aitos wide, and -0.67% for Death Heim wide; the suite was 0.35%
+faster. Native-SIMD deltas were +0.07%, +0.12%, +0.14%, and +0.20%; suite
+regression was +0.13%. Both configurations remain well inside the performance
+gate.
+
+## ABI v1 safe-point-mutation checkpoint (2026-08-26)
+
+ABI v1 now accepts fixed-size, caller-independent mutation commands from host
+threads and applies them in command-ID order at the beginning of the next host
+frame. The initial command set covers up to 16 copied bytes in WRAM, SRAM,
+VRAM, CGRAM, OAM, or high OAM, plus masked one-frame input overrides for both
+controllers. ROM, APU RAM, and DSP registers fail closed because they require
+different ownership or mutation contracts.
+
+The 32-entry queue retains no caller pointers. Each accepted command has a
+queryable queued/applying/applied/failed state, explicit result, safe-point
+frame number, and caller-consumed terminal record. A short C11 atomic lock
+protects cross-thread queue/status access. The emulation thread performs only
+one acquire load when the queue is empty; it takes no lock in normal frames.
+Commands accepted after a safe point begins are deferred to the following
+frame by an ID cutoff.
+
+Borrowed views expire before the first write becomes observable. Memory
+mutations reuse the generic memory-event stream, including canonical
+little-endian byte addresses for host-native PPU word arrays. Input overrides
+are applied before the existing opposing-direction normalization. Pending and
+terminal records are removed when a runner is destroyed.
+
+The contract suite validates rejected structure extents, command types,
+regions and ranges; queued/terminal status and consumption; deferred WRAM and
+cross-word VRAM writes; memory-event routing; input application through the
+real `RtlRunFrame` safe point; command ordering; frame metadata; and generation
+invalidation. The standalone runner passes 27/27 and both portable and
+native-SIMD application configurations pass 91/91, including all GPU tests.
+The public header passes C++17 syntax validation, and all touched C sources
+pass an x86-64 macOS cross-target syntax build from the ARM64 host.
+
+Seven alternating adjacent pairs kept every final WRAM, SRAM, CPU-state, and
+dispatch artifact identical, including across portable and native builds.
+Portable median deltas were -0.37% for Mode 7/world map, -0.17% for SIM,
+-0.08% for Aitos wide, and -0.04% for Death Heim wide; the suite was 0.16%
+faster. Native-SIMD deltas were +0.28%, +0.07%, -0.17%, and +0.17%; suite
+regression was +0.09%. Both configurations remain well inside the performance
+gate.
+
 ## Migration order
 
 1. [x] Add ABI layout, capability, lifetime, and generation-counter tests while
    retaining the existing globals as an internal compatibility adapter.
-2. [ ] Move read-only inspection, diagnostics, and snapshot consumers to ABI v1.
+2. [x] Move read-only inspection, diagnostics, and snapshot consumers to ABI v1.
    - [x] Move diagnostic CPU registers and WRAM/SRAM dumps.
    - [x] Add typed PPU register/memory views and migrate the resident-asset
      snapshot exporter.
@@ -260,11 +463,32 @@ the performance gate.
      typed PPU views.
    - [x] Add retained render-surface views and migrate remaining per-frame
      consumers.
-3. [ ] Move trace/event consumers to filtered observers and measure disabled-hook
+3. [x] Move trace/event consumers to filtered observers and measure disabled-hook
    overhead.
+   - [x] Add coherent execution/flight-recorder state plus filtered block and
+     dispatch observers; migrate runtime crash diagnostics.
+   - [x] Add filtered memory/register observers and migrate unified trace
+     memory/register channels.
+   - [x] Add filtered DMA activation observers and migrate the unified trace
+     DMA channel.
+   - [x] Add frame and interrupt/error observers and migrate unified trace
+     lifecycle/error channels.
+   - [x] Add final-mix audio observers; retain the raw sample diagnostic and
+     mutating replacement mixer under their distinct contracts.
 4. [ ] Add safe-point mutation commands and versioned save-state serialization.
+   - [x] Add a copied, ordered, queryable safe-point queue for bounded memory
+     writes and one-frame input overrides.
+   - [ ] Add caller-buffer versioned serialization and queue state loads through
+     the same safe-point boundary.
 5. [ ] Remove external concrete-structure access only after all game adapters use
    the versioned boundary.
+
+The cutover scope for item 5 is tracked in
+`docs/runner-concrete-access-audit.md`.  The application begins this phase with
+27 exact concrete-header exceptions guarded by a build-time test.  Serialization,
+asynchronous pinning, language bindings, and broad SDK fixtures are follow-up
+work; the only optimization included in this pass is measured dirty-range or
+scatter/gather support that removes a real bulk copy from a migrated consumer.
 
 Cross-platform CI should compile the ABI from C, C++, Go/cgo, and Rust bindgen
 fixtures; poison expired borrowed views in tests; verify serialized versions;

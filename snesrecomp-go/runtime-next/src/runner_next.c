@@ -7,6 +7,7 @@
 #include "snes/ppu.h"
 #include "snes/snes.h"
 
+#include <stdatomic.h>
 #include <string.h>
 
 _Static_assert(SR_PPU_NATIVE_WIDTH == kPpuXPixels,
@@ -27,8 +28,58 @@ _Static_assert(SR_PPU_SURFACE_BAND_COUNT == 4u,
 static SrRunnerCpuStateProvider *s_cpu_state_provider;
 static const void *s_cpu_component;
 static Snes *s_cpu_state_runner;
+static SrRunnerExecutionStateProvider *s_execution_state_provider;
+static Snes *s_execution_state_runner;
 static SrRunnerPpuObjRasterProvider *s_ppu_obj_raster_provider;
 static Snes *s_ppu_obj_raster_runner;
+static Snes *s_ppu_owner_runner;
+static Ppu *s_owned_ppu;
+
+enum { kEventObserverCapacity = 8 };
+enum { kMutationCapacity = 32 };
+
+typedef struct EventObserverSlot {
+    Snes *runner;
+    uint64_t id;
+    SrEventSubscription subscription;
+} EventObserverSlot;
+
+typedef struct MutationSlot {
+    Snes *runner;
+    uint64_t id;
+    SrMutationCommand command;
+    SrMutationState state;
+    SrResult result;
+    uint64_t applied_frame_counter;
+} MutationSlot;
+
+static EventObserverSlot s_event_observers[kEventObserverCapacity];
+static uint64_t s_next_event_observer_id = 1u;
+static uint64_t s_event_serial;
+static atomic_flag s_event_dispatch_lock = ATOMIC_FLAG_INIT;
+static MutationSlot s_mutations[kMutationCapacity];
+static uint64_t s_next_mutation_id = 1u;
+static atomic_uint s_pending_mutation_count;
+static atomic_flag s_mutation_lock = ATOMIC_FLAG_INIT;
+SrEventMask g_sr_runner_event_mask;
+
+static void lock_event_dispatch(void) {
+    while (atomic_flag_test_and_set_explicit(
+               &s_event_dispatch_lock, memory_order_acquire)) {}
+}
+
+static void unlock_event_dispatch(void) {
+    atomic_flag_clear_explicit(&s_event_dispatch_lock, memory_order_release);
+}
+
+static void lock_mutations(void) {
+    while (atomic_flag_test_and_set_explicit(
+               &s_mutation_lock, memory_order_acquire)) {}
+}
+
+static void unlock_mutations(void) {
+    atomic_flag_clear_explicit(&s_mutation_lock, memory_order_release);
+}
 
 static Snes *runner_from_handle(SrRunnerHandle *runner) {
     return (Snes *)(void *)runner;
@@ -259,6 +310,534 @@ static SrResult query_cpu_state(SrRunnerHandle *runner,
     if (s_cpu_state_runner != snes || s_cpu_state_provider == NULL)
         return SR_RESULT_UNAVAILABLE;
     return s_cpu_state_provider(snes, out_state);
+}
+
+static SrResult query_execution_state(
+        SrRunnerHandle *runner, SrExecutionSnapshot *out_state) {
+    Snes *snes = runner_from_handle(runner);
+    if (snes == NULL || out_state == NULL ||
+        out_state->struct_size < SR_EXECUTION_SNAPSHOT_V1_SIZE)
+        return SR_RESULT_INVALID_ARGUMENT;
+    memset(out_state, 0, SR_EXECUTION_SNAPSHOT_V1_SIZE);
+    out_state->struct_size = SR_EXECUTION_SNAPSHOT_V1_SIZE;
+    out_state->lifetime_generation = snes->abiLifetimeGeneration;
+    if (s_execution_state_runner != snes ||
+        s_execution_state_provider == NULL)
+        return SR_RESULT_UNAVAILABLE;
+    return s_execution_state_provider(snes, out_state);
+}
+
+static void recompute_event_mask(void) {
+    SrEventMask mask = 0u;
+    unsigned index;
+    for (index = 0u; index < kEventObserverCapacity; ++index) {
+        if (s_event_observers[index].id != 0u)
+            mask |= s_event_observers[index].subscription.event_mask;
+    }
+    g_sr_runner_event_mask = mask;
+}
+
+static SrResult subscribe_events(
+        SrRunnerHandle *runner, const SrEventSubscription *subscription,
+        uint64_t *out_subscription_id) {
+    Snes *snes = runner_from_handle(runner);
+    unsigned index;
+    if (out_subscription_id != NULL) *out_subscription_id = 0u;
+    if (snes == NULL || subscription == NULL || out_subscription_id == NULL ||
+        subscription->struct_size < SR_EVENT_SUBSCRIPTION_V1_SIZE ||
+        subscription->callback == NULL || subscription->event_mask == 0u)
+        return SR_RESULT_INVALID_ARGUMENT;
+    if ((subscription->event_mask & ~SR_EVENT_MASK_V1_SUPPORTED) != 0u)
+        return SR_RESULT_UNSUPPORTED;
+    if ((subscription->flags &
+         ~(SR_EVENT_FILTER_PC_RANGE | SR_EVENT_FILTER_ADDRESS_RANGE |
+           SR_EVENT_FILTER_MEMORY_REGION)) != 0u)
+        return SR_RESULT_UNSUPPORTED;
+    if ((subscription->flags & SR_EVENT_FILTER_ADDRESS_RANGE) != 0u &&
+        (subscription->event_mask &
+         ~(SR_EVENT_MASK_MEMORY_WRITE | SR_EVENT_MASK_REGISTER_ACCESS |
+           SR_EVENT_MASK_DMA)) != 0u)
+        return SR_RESULT_UNSUPPORTED;
+    if ((subscription->flags & SR_EVENT_FILTER_MEMORY_REGION) != 0u &&
+        (subscription->event_mask & ~SR_EVENT_MASK_MEMORY_WRITE) != 0u)
+        return SR_RESULT_UNSUPPORTED;
+    if ((subscription->flags & SR_EVENT_FILTER_PC_RANGE) != 0u &&
+        ((subscription->event_mask &
+          ~(SR_EVENT_MASK_EXECUTION_BLOCK |
+            SR_EVENT_MASK_DYNAMIC_DISPATCH |
+            SR_EVENT_MASK_INTERRUPT |
+            SR_EVENT_MASK_ERROR)) != 0u ||
+         subscription->pc_first > subscription->pc_last ||
+         subscription->pc_last > UINT32_C(0x00ffffff)))
+        return (subscription->event_mask &
+                ~(SR_EVENT_MASK_EXECUTION_BLOCK |
+                  SR_EVENT_MASK_DYNAMIC_DISPATCH |
+                  SR_EVENT_MASK_INTERRUPT |
+                  SR_EVENT_MASK_ERROR)) != 0u
+            ? SR_RESULT_UNSUPPORTED : SR_RESULT_INVALID_ARGUMENT;
+    if ((subscription->flags & SR_EVENT_FILTER_ADDRESS_RANGE) != 0u &&
+        subscription->address_first > subscription->address_last)
+        return SR_RESULT_INVALID_ARGUMENT;
+    if ((subscription->flags & SR_EVENT_FILTER_MEMORY_REGION) != 0u &&
+        subscription->memory_region > SR_MEMORY_HIGH_OAM)
+        return SR_RESULT_INVALID_ARGUMENT;
+    for (index = 0u; index < kEventObserverCapacity; ++index) {
+        EventObserverSlot *slot = &s_event_observers[index];
+        if (slot->id != 0u) continue;
+        slot->runner = snes;
+        slot->subscription = *subscription;
+        slot->subscription.struct_size = SR_EVENT_SUBSCRIPTION_V1_SIZE;
+        slot->id = s_next_event_observer_id++;
+        if (slot->id == 0u) slot->id = s_next_event_observer_id++;
+        *out_subscription_id = slot->id;
+        recompute_event_mask();
+        return SR_RESULT_OK;
+    }
+    return SR_RESULT_UNAVAILABLE;
+}
+
+static SrResult unsubscribe_events(SrRunnerHandle *runner,
+                                   uint64_t subscription_id) {
+    Snes *snes = runner_from_handle(runner);
+    unsigned index;
+    if (snes == NULL || subscription_id == 0u)
+        return SR_RESULT_INVALID_ARGUMENT;
+    for (index = 0u; index < kEventObserverCapacity; ++index) {
+        EventObserverSlot *slot = &s_event_observers[index];
+        if (slot->runner == snes && slot->id == subscription_id) {
+            memset(slot, 0, sizeof(*slot));
+            recompute_event_mask();
+            return SR_RESULT_OK;
+        }
+    }
+    return SR_RESULT_UNAVAILABLE;
+}
+
+void sr_runner_emit_event(Snes *snes, SrEventMask event_mask,
+                          SrRunnerEvent *event) {
+    unsigned index;
+    if (snes == NULL || event == NULL || event_mask == 0u ||
+        (g_sr_runner_event_mask & event_mask) == 0u)
+        return;
+    lock_event_dispatch();
+    event->struct_size = SR_RUNNER_EVENT_V1_SIZE;
+    event->serial = ++s_event_serial;
+    for (index = 0u; index < kEventObserverCapacity; ++index) {
+        EventObserverSlot *slot = &s_event_observers[index];
+        const SrEventSubscription *filter = &slot->subscription;
+        SrRunnerEventCallback callback;
+        void *user_data;
+        if (slot->runner != snes || slot->id == 0u ||
+            (filter->event_mask & event_mask) == 0u)
+            continue;
+        if ((filter->flags & SR_EVENT_FILTER_PC_RANGE) != 0u &&
+            (event->pc24 < filter->pc_first ||
+             event->pc24 > filter->pc_last))
+            continue;
+        if ((filter->flags & SR_EVENT_FILTER_ADDRESS_RANGE) != 0u &&
+            (event->address < filter->address_first ||
+             event->address > filter->address_last))
+            continue;
+        if ((filter->flags & SR_EVENT_FILTER_MEMORY_REGION) != 0u &&
+            event->memory_region != filter->memory_region)
+            continue;
+        callback = filter->callback;
+        user_data = filter->user_data;
+        callback(user_data, (SrRunnerHandle *)(void *)snes, event);
+    }
+    unlock_event_dispatch();
+}
+
+void sr_runner_emit_memory_write(Snes *snes, SrMemoryRegion region,
+                                 uint32_t address, uint32_t previous_value,
+                                 uint32_t value, uint32_t width_bytes) {
+    SrRunnerEvent event = {0};
+    event.type = SR_EVENT_MEMORY_WRITE;
+    event.frame_counter = snes != NULL ? snes->abiFrameCounter : 0u;
+    event.memory_region = region;
+    event.address = address;
+    event.previous_value = previous_value;
+    event.value = value;
+    event.width_bytes = width_bytes;
+    sr_runner_emit_event(snes, SR_EVENT_MASK_MEMORY_WRITE, &event);
+}
+
+void sr_runner_emit_ppu_memory_write(Ppu *ppu, SrMemoryRegion region,
+                                     uint32_t address,
+                                     uint32_t previous_value,
+                                     uint32_t value,
+                                     uint32_t width_bytes) {
+    if (ppu != s_owned_ppu) return;
+    sr_runner_emit_memory_write(s_ppu_owner_runner, region, address,
+                                previous_value, value, width_bytes);
+}
+
+void sr_runner_emit_register_access(Snes *snes, bool write,
+                                    uint32_t address, uint32_t value,
+                                    uint32_t width_bytes) {
+    SrRunnerEvent event = {0};
+    event.type = write ? SR_EVENT_REGISTER_WRITE : SR_EVENT_REGISTER_READ;
+    event.frame_counter = snes != NULL ? snes->abiFrameCounter : 0u;
+    event.address = address;
+    event.value = value;
+    event.width_bytes = width_bytes;
+    sr_runner_emit_event(snes, SR_EVENT_MASK_REGISTER_ACCESS, &event);
+}
+
+void sr_runner_emit_frame_boundary(Snes *snes, uint32_t flags,
+                                   const char *label) {
+    SrRunnerEvent event = {0};
+    event.type = SR_EVENT_FRAME_BOUNDARY;
+    event.frame_counter = snes != NULL ? snes->abiFrameCounter : 0u;
+    event.flags = flags;
+    event.label = label;
+    sr_runner_emit_event(snes, SR_EVENT_MASK_FRAME, &event);
+}
+
+void sr_runner_emit_audio_produced(Snes *snes, const int16_t *samples,
+                                   uint64_t frame_offset,
+                                   uint32_t frame_count,
+                                   uint32_t sample_rate,
+                                   uint16_t channel_count) {
+    SrRunnerEvent event = {0};
+    event.type = SR_EVENT_AUDIO_PRODUCED;
+    event.flags = SR_EVENT_AUDIO_FINAL_MIX |
+                  SR_EVENT_AUDIO_TRANSIENT_SAMPLES;
+    event.label = "final-mix";
+    event.audio_frame_offset = frame_offset;
+    event.audio_samples = samples;
+    event.audio_frame_count = frame_count;
+    event.audio_sample_rate = sample_rate;
+    event.audio_channel_count = channel_count;
+    event.audio_sample_format = SR_AUDIO_SAMPLE_FORMAT_S16_NATIVE;
+    sr_runner_emit_event(snes, SR_EVENT_MASK_AUDIO, &event);
+}
+
+void sr_runner_emit_interrupt(Snes *snes, SrInterruptKind kind,
+                              uint32_t flags, uint32_t pc24,
+                              uint16_t vector, int32_t scanline,
+                              const char *label) {
+    SrRunnerEvent event = {0};
+    event.type = SR_EVENT_INTERRUPT;
+    event.frame_counter = snes != NULL ? snes->abiFrameCounter : 0u;
+    event.flags = flags;
+    event.pc24 = pc24 & UINT32_C(0x00ffffff);
+    event.interrupt_kind = kind;
+    event.interrupt_vector = vector;
+    event.interrupt_scanline = scanline;
+    event.label = label;
+    sr_runner_emit_event(snes, SR_EVENT_MASK_INTERRUPT, &event);
+}
+
+void sr_runner_emit_error(Snes *snes, SrRunnerErrorCode code,
+                          uint32_t flags, uint32_t pc24,
+                          uint32_t source_pc24, const char *label) {
+    SrRunnerEvent event = {0};
+    event.type = SR_EVENT_ERROR;
+    event.frame_counter = snes != NULL ? snes->abiFrameCounter : 0u;
+    event.flags = flags;
+    event.pc24 = pc24 & UINT32_C(0x00ffffff);
+    event.source_pc24 = source_pc24 & UINT32_C(0x00ffffff);
+    event.address = event.pc24;
+    event.error_code = code;
+    event.label = label;
+    sr_runner_emit_event(snes, SR_EVENT_MASK_ERROR, &event);
+}
+
+void sr_runner_clear_event_subscriptions(Snes *snes) {
+    unsigned index;
+    if (snes == NULL) return;
+    for (index = 0u; index < kEventObserverCapacity; ++index) {
+        if (s_event_observers[index].runner == snes)
+            memset(&s_event_observers[index], 0,
+                   sizeof(s_event_observers[index]));
+    }
+    recompute_event_mask();
+}
+
+static SrResult mutation_region_size(Snes *snes, SrMemoryRegion region,
+                                     uint64_t *out_size) {
+    if (snes == NULL || out_size == NULL) return SR_RESULT_INVALID_ARGUMENT;
+    switch (region) {
+        case SR_MEMORY_WRAM:
+            *out_size = kSnesWramSize;
+            return snes->ram != NULL ? SR_RESULT_OK : SR_RESULT_UNAVAILABLE;
+        case SR_MEMORY_SRAM:
+            if (snes->cart == NULL || snes->cart->ram == NULL)
+                return SR_RESULT_UNAVAILABLE;
+            *out_size = snes->cart->ramSize;
+            return SR_RESULT_OK;
+        case SR_MEMORY_VRAM:
+            *out_size = SR_PPU_VRAM_WORD_COUNT * 2u;
+            return snes->ppu != NULL ? SR_RESULT_OK : SR_RESULT_UNAVAILABLE;
+        case SR_MEMORY_CGRAM:
+            *out_size = SR_PPU_CGRAM_WORD_COUNT * 2u;
+            return snes->ppu != NULL ? SR_RESULT_OK : SR_RESULT_UNAVAILABLE;
+        case SR_MEMORY_OAM:
+            *out_size = SR_PPU_OAM_WORD_COUNT * 2u;
+            return snes->ppu != NULL ? SR_RESULT_OK : SR_RESULT_UNAVAILABLE;
+        case SR_MEMORY_HIGH_OAM:
+            *out_size = SR_PPU_HIGH_OAM_BYTE_COUNT;
+            return snes->ppu != NULL ? SR_RESULT_OK : SR_RESULT_UNAVAILABLE;
+        case SR_MEMORY_ROM:
+        case SR_MEMORY_APU_RAM:
+        case SR_MEMORY_DSP_REGISTERS:
+            return SR_RESULT_UNSUPPORTED;
+        default:
+            return SR_RESULT_INVALID_ARGUMENT;
+    }
+}
+
+static SrResult validate_mutation(Snes *snes,
+                                  const SrMutationCommand *command) {
+    uint64_t region_size;
+    SrResult result;
+    if (snes == NULL || command == NULL ||
+        command->struct_size < SR_MUTATION_COMMAND_V1_SIZE)
+        return SR_RESULT_INVALID_ARGUMENT;
+    if (command->flags != 0u) return SR_RESULT_UNSUPPORTED;
+    switch (command->type) {
+        case SR_MUTATION_WRITE_MEMORY:
+            if (command->byte_count == 0u ||
+                command->byte_count > SR_MUTATION_INLINE_BYTE_CAPACITY)
+                return SR_RESULT_INVALID_ARGUMENT;
+            result = mutation_region_size(snes, command->memory_region,
+                                          &region_size);
+            if (result != SR_RESULT_OK) return result;
+            if (command->address > region_size ||
+                command->byte_count > region_size - command->address)
+                return SR_RESULT_INVALID_ARGUMENT;
+            return SR_RESULT_OK;
+        case SR_MUTATION_SET_INPUT:
+            if ((command->input_value & UINT32_C(0xff000000)) != 0u ||
+                (command->input_mask & UINT32_C(0xff000000)) != 0u)
+                return SR_RESULT_INVALID_ARGUMENT;
+            return SR_RESULT_OK;
+        default:
+            return SR_RESULT_UNSUPPORTED;
+    }
+}
+
+static SrResult queue_mutation(SrRunnerHandle *runner,
+                               const SrMutationCommand *command,
+                               uint64_t *out_command_id) {
+    Snes *snes = runner_from_handle(runner);
+    SrResult result;
+    unsigned index;
+    if (out_command_id != NULL) *out_command_id = 0u;
+    if (out_command_id == NULL) return SR_RESULT_INVALID_ARGUMENT;
+    result = validate_mutation(snes, command);
+    if (result != SR_RESULT_OK) return result;
+    lock_mutations();
+    for (index = 0u; index < kMutationCapacity; ++index) {
+        MutationSlot *slot = &s_mutations[index];
+        if (slot->id != 0u) continue;
+        slot->runner = snes;
+        slot->command = *command;
+        slot->command.struct_size = SR_MUTATION_COMMAND_V1_SIZE;
+        slot->id = s_next_mutation_id++;
+        if (slot->id == 0u) slot->id = s_next_mutation_id++;
+        slot->state = SR_MUTATION_STATE_QUEUED;
+        slot->result = SR_RESULT_PENDING;
+        *out_command_id = slot->id;
+        atomic_fetch_add_explicit(&s_pending_mutation_count, 1u,
+                                  memory_order_release);
+        unlock_mutations();
+        return SR_RESULT_OK;
+    }
+    unlock_mutations();
+    return SR_RESULT_UNAVAILABLE;
+}
+
+static SrResult query_mutation(SrRunnerHandle *runner, uint64_t command_id,
+                               uint32_t flags,
+                               SrMutationStatus *out_status) {
+    Snes *snes = runner_from_handle(runner);
+    unsigned index;
+    if (snes == NULL || command_id == 0u || out_status == NULL ||
+        out_status->struct_size < SR_MUTATION_STATUS_V1_SIZE)
+        return SR_RESULT_INVALID_ARGUMENT;
+    if ((flags & ~SR_MUTATION_QUERY_CONSUME) != 0u)
+        return SR_RESULT_UNSUPPORTED;
+    lock_mutations();
+    for (index = 0u; index < kMutationCapacity; ++index) {
+        MutationSlot *slot = &s_mutations[index];
+        if (slot->runner != snes || slot->id != command_id) continue;
+        memset(out_status, 0, SR_MUTATION_STATUS_V1_SIZE);
+        out_status->struct_size = SR_MUTATION_STATUS_V1_SIZE;
+        out_status->state = slot->state;
+        out_status->result = slot->result;
+        out_status->command_id = slot->id;
+        out_status->applied_frame_counter = slot->applied_frame_counter;
+        if ((flags & SR_MUTATION_QUERY_CONSUME) != 0u &&
+            (slot->state == SR_MUTATION_STATE_APPLIED ||
+             slot->state == SR_MUTATION_STATE_FAILED))
+            memset(slot, 0, sizeof(*slot));
+        unlock_mutations();
+        return SR_RESULT_OK;
+    }
+    unlock_mutations();
+    return SR_RESULT_UNAVAILABLE;
+}
+
+static uint8_t read_word_byte(const uint16_t *values, uint64_t address) {
+    uint16_t word = values[address >> 1u];
+    return (uint8_t)((word >> ((address & 1u) * 8u)) & 0xffu);
+}
+
+static void write_word_byte(uint16_t *values, uint64_t address,
+                            uint8_t value) {
+    unsigned shift = (unsigned)(address & 1u) * 8u;
+    uint16_t mask = (uint16_t)(UINT16_C(0x00ff) << shift);
+    uint16_t word = values[address >> 1u];
+    values[address >> 1u] = (uint16_t)((word & ~mask) |
+                                      ((uint16_t)value << shift));
+}
+
+static SrResult apply_memory_mutation(Snes *snes,
+                                      const SrMutationCommand *command) {
+    uint64_t index;
+    SrResult result = validate_mutation(snes, command);
+    if (result != SR_RESULT_OK) return result;
+    /* Expire borrowed views before the first externally observable write. */
+    sr_runner_note_mutation(snes);
+    for (index = 0u; index < command->byte_count; ++index) {
+        uint64_t address = command->address + index;
+        uint8_t previous = 0u;
+        uint8_t value = command->bytes[index];
+        switch (command->memory_region) {
+            case SR_MEMORY_WRAM:
+                previous = snes->ram[address];
+                snes->ram[address] = value;
+                break;
+            case SR_MEMORY_SRAM:
+                previous = snes->cart->ram[address];
+                snes->cart->ram[address] = value;
+                break;
+            case SR_MEMORY_VRAM:
+                previous = read_word_byte(snes->ppu->vram, address);
+                write_word_byte(snes->ppu->vram, address, value);
+                break;
+            case SR_MEMORY_CGRAM:
+                previous = read_word_byte(snes->ppu->cgram, address);
+                write_word_byte(snes->ppu->cgram, address, value);
+                break;
+            case SR_MEMORY_OAM:
+                previous = read_word_byte(snes->ppu->oam, address);
+                write_word_byte(snes->ppu->oam, address, value);
+                break;
+            case SR_MEMORY_HIGH_OAM:
+                previous = snes->ppu->highOam[address];
+                snes->ppu->highOam[address] = value;
+                break;
+            default:
+                return SR_RESULT_UNSUPPORTED;
+        }
+        if (sr_runner_event_enabled(SR_EVENT_MASK_MEMORY_WRITE)) {
+            sr_runner_emit_memory_write(
+                snes, command->memory_region, (uint32_t)address,
+                previous, value, 1u);
+        }
+    }
+    return SR_RESULT_OK;
+}
+
+static SrResult apply_mutation(Snes *snes,
+                               const SrMutationCommand *command,
+                               uint32_t *inputs) {
+    SrResult result;
+    switch (command->type) {
+        case SR_MUTATION_WRITE_MEMORY:
+            result = apply_memory_mutation(snes, command);
+            break;
+        case SR_MUTATION_SET_INPUT:
+            if (inputs == NULL) return SR_RESULT_UNAVAILABLE;
+            sr_runner_note_mutation(snes);
+            *inputs = (*inputs & ~command->input_mask) |
+                      (command->input_value & command->input_mask);
+            result = SR_RESULT_OK;
+            break;
+        default:
+            result = SR_RESULT_UNSUPPORTED;
+            break;
+    }
+    return result;
+}
+
+void sr_runner_apply_pending_mutations(Snes *snes, uint32_t *inputs,
+                                       uint64_t frame_counter) {
+    uint64_t cutoff;
+    if (snes == NULL ||
+        atomic_load_explicit(&s_pending_mutation_count,
+                             memory_order_acquire) == 0u)
+        return;
+    lock_mutations();
+    cutoff = s_next_mutation_id - 1u;
+    unlock_mutations();
+    for (;;) {
+        SrMutationCommand command;
+        MutationSlot *selected = NULL;
+        uint64_t selected_id = 0u;
+        SrResult result;
+        unsigned index;
+        lock_mutations();
+        for (index = 0u; index < kMutationCapacity; ++index) {
+            MutationSlot *slot = &s_mutations[index];
+            if (slot->runner != snes ||
+                slot->state != SR_MUTATION_STATE_QUEUED ||
+                slot->id > cutoff ||
+                (selected != NULL && slot->id >= selected->id))
+                continue;
+            selected = slot;
+        }
+        if (selected == NULL) {
+            unlock_mutations();
+            break;
+        }
+        selected->state = SR_MUTATION_STATE_APPLYING;
+        selected_id = selected->id;
+        command = selected->command;
+        atomic_fetch_sub_explicit(&s_pending_mutation_count, 1u,
+                                  memory_order_release);
+        unlock_mutations();
+
+        result = apply_mutation(snes, &command, inputs);
+
+        lock_mutations();
+        for (index = 0u; index < kMutationCapacity; ++index) {
+            MutationSlot *slot = &s_mutations[index];
+            if (slot->runner != snes || slot->id != selected_id) continue;
+            slot->state = result == SR_RESULT_OK
+                ? SR_MUTATION_STATE_APPLIED : SR_MUTATION_STATE_FAILED;
+            slot->result = result;
+            slot->applied_frame_counter = frame_counter;
+            break;
+        }
+        unlock_mutations();
+    }
+}
+
+void sr_runner_clear_mutations(Snes *snes) {
+    unsigned removed_pending = 0u;
+    unsigned index;
+    if (snes == NULL) return;
+    lock_mutations();
+    for (index = 0u; index < kMutationCapacity; ++index) {
+        MutationSlot *slot = &s_mutations[index];
+        if (slot->runner != snes) continue;
+        if (slot->state == SR_MUTATION_STATE_QUEUED) ++removed_pending;
+        memset(slot, 0, sizeof(*slot));
+    }
+    if (removed_pending != 0u)
+        atomic_fetch_sub_explicit(&s_pending_mutation_count, removed_pending,
+                                  memory_order_release);
+    unlock_mutations();
+}
+
+void sr_runner_bind_ppu_owner(Snes *snes, Ppu *ppu, bool enabled) {
+    if (!enabled && s_ppu_owner_runner != snes) return;
+    s_ppu_owner_runner = enabled ? snes : NULL;
+    s_owned_ppu = enabled ? ppu : NULL;
 }
 
 static uint8_t ppu_background_bpp(uint8_t mode, unsigned layer,
@@ -569,7 +1148,10 @@ static const SnesRunnerApi k_runner_api = {
         SR_RUNNER_CAP_BORROWED_U16_SPANS |
         SR_RUNNER_CAP_PPU_FRAME_STATE |
         SR_RUNNER_CAP_PPU_OBJ_RASTER |
-        SR_RUNNER_CAP_PPU_SURFACE_VIEWS,
+        SR_RUNNER_CAP_PPU_SURFACE_VIEWS |
+        SR_RUNNER_CAP_EXECUTION_STATE |
+        SR_RUNNER_CAP_EVENT_OBSERVERS |
+        SR_RUNNER_CAP_SAFE_POINT_MUTATIONS,
     get_component,
     query_generations,
     borrow_memory,
@@ -582,6 +1164,11 @@ static const SnesRunnerApi k_runner_api = {
     rasterize_ppu_obj_range,
     query_ppu_surfaces,
     ppu_surface_snapshot_is_valid,
+    query_execution_state,
+    subscribe_events,
+    unsubscribe_events,
+    queue_mutation,
+    query_mutation,
 };
 
 /* Keep synchronized with the source boundary in runner.cmake. */
@@ -598,7 +1185,10 @@ static const SrRunnerDescriptor k_runner = {
         SR_RUNNER_CAP_BORROWED_U16_SPANS |
         SR_RUNNER_CAP_PPU_FRAME_STATE |
         SR_RUNNER_CAP_PPU_OBJ_RASTER |
-        SR_RUNNER_CAP_PPU_SURFACE_VIEWS,
+        SR_RUNNER_CAP_PPU_SURFACE_VIEWS |
+        SR_RUNNER_CAP_EXECUTION_STATE |
+        SR_RUNNER_CAP_EVENT_OBSERVERS |
+        SR_RUNNER_CAP_SAFE_POINT_MUTATIONS,
 };
 
 const SrRunnerDescriptor *sr_runner_descriptor(void) {
@@ -621,6 +1211,13 @@ void sr_runner_set_cpu_state_provider(
     s_cpu_state_runner = provider != NULL ? snes : NULL;
     s_cpu_state_provider = provider;
     s_cpu_component = provider != NULL ? component_handle : NULL;
+}
+
+void sr_runner_set_execution_state_provider(
+        Snes *snes, SrRunnerExecutionStateProvider *provider) {
+    if (provider == NULL && s_execution_state_runner != snes) return;
+    s_execution_state_runner = provider != NULL ? snes : NULL;
+    s_execution_state_provider = provider;
 }
 
 void sr_runner_set_ppu_obj_raster_provider(

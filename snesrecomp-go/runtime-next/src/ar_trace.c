@@ -3,6 +3,7 @@
 #include "common_cpu_infra.h"
 #include "common_rtl.h"
 #include "cpu_state.h"
+#include "runner_next.h"
 
 #include <stdarg.h>
 #include <stdbool.h>
@@ -44,6 +45,35 @@ static unsigned s_capture_number;
 static const char *s_pending_anomaly;
 static uint32_t s_dedupe_keys[kMaximumDedupeKeys];
 static unsigned s_dedupe_count;
+static const SnesRunnerApi *s_runner_api;
+static SrRunnerHandle *s_runner;
+static uint64_t s_memory_subscription;
+static uint64_t s_register_subscription;
+static uint64_t s_dma_subscription;
+static uint64_t s_lifecycle_subscription;
+
+static void unsubscribe_runner(void) {
+    if (s_runner_api != NULL && s_runner != NULL) {
+        if (s_memory_subscription != 0u)
+            (void)s_runner_api->unsubscribe_events(
+                s_runner, s_memory_subscription);
+        if (s_register_subscription != 0u)
+            (void)s_runner_api->unsubscribe_events(
+                s_runner, s_register_subscription);
+        if (s_dma_subscription != 0u)
+            (void)s_runner_api->unsubscribe_events(
+                s_runner, s_dma_subscription);
+        if (s_lifecycle_subscription != 0u)
+            (void)s_runner_api->unsubscribe_events(
+                s_runner, s_lifecycle_subscription);
+    }
+    s_memory_subscription = 0u;
+    s_register_subscription = 0u;
+    s_dma_subscription = 0u;
+    s_lifecycle_subscription = 0u;
+    s_runner_api = NULL;
+    s_runner = NULL;
+}
 
 static void escape_json(const char *source, char *destination,
                         size_t capacity) {
@@ -63,6 +93,7 @@ static void escape_json(const char *source, char *destination,
 }
 
 void ar_trace_close(void) {
+    unsubscribe_runner();
     if (s_file != NULL) fclose(s_file);
     if (s_capture != NULL) fclose(s_capture);
     free(s_ring);
@@ -80,6 +111,7 @@ void ar_trace_close(void) {
 
 int ar_trace_open_file(const char *path, int channel_mask,
                        long host_frame_low, long host_frame_high) {
+    Snes *runner = (Snes *)(void *)s_runner;
     ar_trace_close();
     s_initialized = true;
     s_channels = channel_mask;
@@ -87,6 +119,7 @@ int ar_trace_open_file(const char *path, int channel_mask,
     s_frame_high = host_frame_high;
     if (path == NULL || path[0] == '\0') return 0;
     s_file = fopen(path, "w");
+    if (runner != NULL) ar_trace_bind_runner(runner, 1);
     return s_file != NULL;
 }
 
@@ -330,9 +363,23 @@ void ar_trace_dma(int channel, uint8_t b_address, uint8_t a_bank,
                   uint16_t a_address, uint32_t size, int from_b_bus) {
     if (ar_trace_active() && ar_trace_ch(AR_TR_DMA))
         write_event("dma", ",\"dch\":%d,\"bAdr\":\"%02X\","
-                    "\"src\":\"%02X:%04X\",\"size\":%u,\"fromB\":%d}\n",
+                    "\"src\":\"%02X:%04X\",\"size\":%u,\"fromB\":%d,"
+                    "\"hdma\":0}\n",
                     channel, b_address, a_bank, a_address, size,
                     from_b_bus != 0);
+}
+
+static void ar_trace_dma_event(const SrRunnerEvent *event) {
+    if (ar_trace_active() && ar_trace_ch(AR_TR_DMA))
+        write_event("dma", ",\"dch\":%u,\"bAdr\":\"%02X\","
+                    "\"src\":\"%02X:%04X\",\"size\":%u,\"fromB\":%d,"
+                    "\"hdma\":%d}\n",
+                    event->dma_channel, event->dma_b_address,
+                    (uint8_t)(event->dma_a_address24 >> 16),
+                    (uint16_t)event->dma_a_address24,
+                    event->dma_transfer_bytes,
+                    (event->flags & SR_EVENT_DMA_FROM_B_BUS) != 0u,
+                    (event->flags & SR_EVENT_DMA_HDMA) != 0u);
 }
 
 void ar_trace_dispmiss(uint32_t from_pc, uint32_t to_pc) {
@@ -385,6 +432,98 @@ void ar_trace_frame(const char *event) {
     if (!ar_trace_active() || !ar_trace_ch(AR_TR_FRAME)) return;
     char escaped[80]; escape_json(event, escaped, sizeof(escaped));
     write_event("frame", ",\"what\":\"%s\"}\n", escaped);
+}
+
+static void observe_runner_event(void *user_data, SrRunnerHandle *runner,
+                                 const SrRunnerEvent *event) {
+    (void)user_data;
+    (void)runner;
+    if (event == NULL) return;
+    if (event->type == SR_EVENT_MEMORY_WRITE) {
+        if (event->memory_region == SR_MEMORY_WRAM) {
+            ar_trace_wram(event->address, (uint16_t)event->previous_value,
+                          (uint16_t)event->value,
+                          (int)event->width_bytes);
+        } else if (ar_trace_active() && ar_trace_ch(AR_TR_PPUMEM)) {
+            const char *name = NULL;
+            switch (event->memory_region) {
+                case SR_MEMORY_SRAM: name = "sram"; break;
+                case SR_MEMORY_VRAM: name = "vram"; break;
+                case SR_MEMORY_CGRAM: name = "cgram"; break;
+                case SR_MEMORY_OAM: name = "oam"; break;
+                case SR_MEMORY_HIGH_OAM: name = "high_oam"; break;
+                default: break;
+            }
+            if (name != NULL)
+                ar_trace_ppumem(name, (uint16_t)event->address,
+                                (uint16_t)event->value);
+        }
+    } else if (event->type == SR_EVENT_REGISTER_WRITE) {
+        ar_trace_reg((uint16_t)event->address, (uint8_t)event->value);
+    } else if (event->type == SR_EVENT_REGISTER_READ) {
+        ar_trace_hwread((uint16_t)event->address, (uint8_t)event->value);
+    } else if (event->type == SR_EVENT_DMA_BEGIN) {
+        ar_trace_dma_event(event);
+    } else if (event->type == SR_EVENT_FRAME_BOUNDARY &&
+               (event->flags & SR_EVENT_FRAME_BEGIN) != 0u) {
+        ar_trace_frame(event->label);
+    } else if (event->type == SR_EVENT_INTERRUPT &&
+               event->interrupt_kind == SR_INTERRUPT_NMI &&
+               (event->flags & SR_EVENT_INTERRUPT_ENTER) != 0u) {
+        ar_trace_frame(event->label);
+    } else if (event->type == SR_EVENT_ERROR &&
+               event->error_code == SR_RUNNER_ERROR_DISPATCH_MISS) {
+        ar_trace_dispmiss(event->source_pc24, event->pc24);
+    }
+}
+
+void ar_trace_bind_runner(Snes *runner, int enabled) {
+    SrEventSubscription subscription = {0};
+    const SnesRunnerApi *api;
+    unsubscribe_runner();
+    if (!enabled || runner == NULL) return;
+    if (!s_initialized) initialize_from_environment();
+    api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+    if (api == NULL ||
+        api->struct_size < SNES_RUNNER_API_EVENT_OBSERVER_SIZE ||
+        (api->capabilities & SR_RUNNER_CAP_EVENT_OBSERVERS) == 0u)
+        return;
+    s_runner_api = api;
+    s_runner = (SrRunnerHandle *)(void *)runner;
+    /* Retain the association even with no active sink so an embedder can
+     * enable deterministic file tracing after runner initialization. */
+    if (s_file == NULL && !s_watch) return;
+    subscription.struct_size = sizeof(subscription);
+    subscription.callback = observe_runner_event;
+    if ((s_channels & (AR_TR_WRAM | AR_TR_STACK | AR_TR_PPUMEM)) != 0) {
+        subscription.event_mask = SR_EVENT_MASK_MEMORY_WRITE;
+        if (api->subscribe_events(s_runner, &subscription,
+                                  &s_memory_subscription) != SR_RESULT_OK)
+            s_memory_subscription = 0u;
+    }
+    if ((s_channels & (AR_TR_REG | AR_TR_HWREAD)) != 0) {
+        subscription.event_mask = SR_EVENT_MASK_REGISTER_ACCESS;
+        if (api->subscribe_events(s_runner, &subscription,
+                                  &s_register_subscription) != SR_RESULT_OK)
+            s_register_subscription = 0u;
+    }
+    if ((s_channels & AR_TR_DMA) != 0) {
+        subscription.event_mask = SR_EVENT_MASK_DMA;
+        if (api->subscribe_events(s_runner, &subscription,
+                                  &s_dma_subscription) != SR_RESULT_OK)
+            s_dma_subscription = 0u;
+    }
+    if ((s_channels & (AR_TR_FRAME | AR_TR_DISPMISS)) != 0) {
+        subscription.event_mask = 0u;
+        if ((s_channels & AR_TR_FRAME) != 0)
+            subscription.event_mask |=
+                SR_EVENT_MASK_FRAME | SR_EVENT_MASK_INTERRUPT;
+        if ((s_channels & AR_TR_DISPMISS) != 0)
+            subscription.event_mask |= SR_EVENT_MASK_ERROR;
+        if (api->subscribe_events(s_runner, &subscription,
+                                  &s_lifecycle_subscription) != SR_RESULT_OK)
+            s_lifecycle_subscription = 0u;
+    }
 }
 
 void ar_trace_flush(const char *reason) {

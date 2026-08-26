@@ -110,6 +110,40 @@ to caller-owned storage and likewise contains no title-specific classification.
 The external HD tile census and Mode-7 canvas dumper use only those fixed-width
 PPU descriptions and immutable generation-scoped views; their tile and palette
 classification remains game-side tooling rather than runner policy.
+The generated-execution snapshot and filtered synchronous observer registry are
+likewise new versioned adapters over this runner's own instrumentation seams.
+They describe generic block, stack, and dynamic-dispatch state only. The game
+adapter owns symbol publication, while application diagnostics own retention
+and JSON formatting; no title-specific address or crash policy enters the
+runner.
+Memory/register observers extend the same registry at the independently
+implemented CPU, system-bus, DMA-register, and PPU-memory seams. They publish
+canonical region-relative byte offsets and CPU-visible register addresses;
+the unified trace remains an external formatting/filtering consumer. A cold
+runner-side PPU association avoids changing the alignment of emulated memory
+arrays merely to route optional observations.
+DMA activation observers extend that registry at this runner's channel-enable
+boundary. Their generic channel, mode, bus-endpoint, direction, address-control,
+and byte-count metadata follows the public SNES DMA register contract. Events
+are emitted once per selected channel rather than per byte or scanline, and
+the unified trace remains an external consumer.
+Frame, interrupt, and error observers extend the registry at the common host
+tick, game-adapter interrupt, dispatcher, and ROM-mapping boundaries. Their
+generic phase, vector, raster position, PC, and stable error-code metadata
+follows the runner's independently implemented execution model. Title-specific
+interrupt scheduling and recovery policy remain outside the ABI, while the
+unified trace is only a filtered formatting consumer.
+Final-mix audio observers extend the registry at the common runtime's host PCM
+boundary. Their sample format, rate, channel count, block size, and monotonic
+output-frame metadata are generic host-audio properties. The zero-copy sample
+view is callback-scoped and is published after this runner's DSP, MSU-1, and
+replacement-music stages complete; it contains no title-specific track or
+sound-effect meaning.
+The safe-point mutation queue is a new fixed-capacity synchronization boundary
+around this runner's component state. Its copied byte writes, packed controller
+override, monotonic command IDs, completion states, and frame cutoff are generic
+runner mechanisms. It neither exposes a concrete component layout nor assigns
+game meaning to an address or input bit.
 
 The sole runner manifest links and includes only files from `runtime-next`.
 The historical comparison runner was retired after parity validation and is

@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+typedef struct Snes Snes;
+
 #define AR_TR_FUNC 0x01
 #define AR_TR_VRAM 0x02
 #define AR_TR_VMADD 0x04
@@ -44,5 +46,6 @@ void ar_trace_flush(const char *reason);
 int ar_trace_open_file(const char *path, int channel_mask,
                        long host_frame_low, long host_frame_high);
 void ar_trace_close(void);
+void ar_trace_bind_runner(Snes *runner, int enabled);
 
 #endif

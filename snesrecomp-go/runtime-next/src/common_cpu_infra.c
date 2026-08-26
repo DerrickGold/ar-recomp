@@ -10,6 +10,7 @@
 #include "snes/msu1.h"
 #include "snes/ppu.h"
 #include "snes/snes.h"
+#include "runner_next_internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -86,6 +87,22 @@ void cpu_trace_block(CpuState *cpu, uint32 pc24) {
     g_ar_blk_aux[slot] = ((uint32)(cpu->x_flag & 1u) << 17) |
                          ((uint32)(cpu->m_flag & 1u) << 16) | cpu->X;
     g_ar_blk_s[slot] = cpu->S;
+    if (sr_runner_event_enabled(SR_EVENT_MASK_EXECUTION_BLOCK)) {
+        SrRunnerEvent event = {0};
+        event.type = SR_EVENT_EXECUTION_BLOCK;
+        event.frame_counter = snes_frame_counter >= 0
+            ? (uint64)snes_frame_counter : 0u;
+        event.cpu_flags =
+            (cpu->m_flag ? SR_CPU_STATE_M_FLAG : 0u) |
+            (cpu->x_flag ? SR_CPU_STATE_X_FLAG : 0u) |
+            (cpu->emulation ? SR_CPU_STATE_EMULATION : 0u) |
+            (cpu->host_return_valid ? SR_CPU_STATE_HOST_RETURN_VALID : 0u);
+        event.pc24 = pc24 & 0x00ffffffu;
+        event.register_x = cpu->X;
+        event.stack_pointer = cpu->S;
+        event.label = g_last_recomp_func;
+        sr_runner_emit_event(g_snes, SR_EVENT_MASK_EXECUTION_BLOCK, &event);
+    }
 #if SNESRECOMP_TRACE
     cpu_trace_event(cpu, pc24, CPU_TR_BLOCK, 0u, 0u);
 #endif
@@ -243,6 +260,7 @@ static void clear_published_runner(void) {
         g_rtl_game_info->bind_runner_abi != NULL) {
         g_rtl_game_info->bind_runner_abi(g_snes, false);
     }
+    sr_runner_clear_event_subscriptions(g_snes);
     g_snes = NULL;
     g_snes_cpu = NULL;
     g_dma = NULL;
