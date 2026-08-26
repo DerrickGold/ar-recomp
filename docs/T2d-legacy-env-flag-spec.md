@@ -86,7 +86,7 @@ means adding one key to one list, mirroring today's "add one clause."
 
 **Procedure:**
 1. Re-add the probe shim; build:
-   `cc -std=gnu11 -w -Isrc -Irecomp -Ithird_party/stb -Isnesrecomp-go/runtime/src -I/opt/homebrew/include docs/t2d-attachments/legacy_env_probe.c src/settings.c -o /tmp/probe`
+   `cc -std=gnu11 -w -Isrc -Irecomp -Ithird_party/stb -Isnesrecomp-go/runtime-next/src -I/opt/homebrew/include docs/t2d-attachments/legacy_env_probe.c src/settings.c -o /tmp/probe`
 2. Do the refactor (option 1 or 2).
 3. Re-run `/tmp/probe > /tmp/after.tsv` and
    `diff docs/t2d-attachments/legacy_env_baseline.tsv /tmp/after.tsv`.

@@ -78,7 +78,7 @@ var buildOnlySubtrees = []string{
 //
 //   - recomp/ holds the per-bank configuration the generator reads.
 //   - snesbuild.ini is the source manifest (project.ManifestFileName).
-//   - snesrecomp-go/runtime/ is what the generated C compiles against.
+//   - snesrecomp-go/runtime-next/ is what the generated C compiles against.
 //   - src/ is the authored game code.
 //
 // Deliberately NOT gated on: the Zig toolchain (project.HermeticBuild fetches
@@ -87,7 +87,7 @@ var buildOnlySubtrees = []string{
 var rebuildInputs = []string{
 	"recomp",
 	project.ManifestFileName,
-	filepath.Join("snesrecomp-go", "runtime"),
+	filepath.Join("snesrecomp-go", "runtime-next"),
 	"src",
 }
 

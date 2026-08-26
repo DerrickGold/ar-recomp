@@ -486,7 +486,7 @@ is no separate opposite-edge clip heuristic in the completed HLE path.
 | `tests/action_bg_plan_test.c` | exhaustive rule/transition matrix |
 | `tests/action_bg_world_test.c` | synthetic decoder, bounds, invalidation and capacity tests |
 
-The generic provider contract belongs in `snesrecomp-go/runtime/src/snes/ppu.h`
+The generic provider contract belongs in `snesrecomp-go/runtime-next/src/snes/ppu.h`
 and its execution in `ppu.c`. It must not include an `action/` or `actraiser/`
 header.
 

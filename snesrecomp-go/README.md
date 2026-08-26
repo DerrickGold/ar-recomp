@@ -123,8 +123,9 @@ It is driven by a `snesbuild.ini` manifest at the project root; see
 [`docs/PROJECT_INTEGRATION.md`](docs/PROJECT_INTEGRATION.md).
 
 Generated C includes `cpu_state.h`, `cpu_trace.h`, `common_cpu_infra.h`, and
-`funcs.h`. The game target must therefore include `runtime/src`,
-`runtime/src/snes`, and its own `recomp` directory. A minimal CMake pattern is:
+`funcs.h`. The game target must therefore use the include directories exported
+by `runtime-next/runner.cmake` plus its own `recomp` directory. A minimal CMake
+pattern is:
 
 ```cmake
 set(SNESRECOMP_GO_ROOT "${CMAKE_SOURCE_DIR}/snesrecomp-go")
@@ -151,21 +152,17 @@ policy, and any C functions named by `hle_func`/`hle_func_if`/`hle_dispatch`.
 See [`docs/PROJECT_INTEGRATION.md`](docs/PROJECT_INTEGRATION.md) for the full
 contract and [`docs/CFG_FORMAT.md`](docs/CFG_FORMAT.md) for bank directives.
 
-### Selectable runner
+### Portable runner
 
-The independently authored MIT runner under `runtime-next/` is the default.
-The inherited runner remains available as an explicit comparison target:
+The independently authored MIT runner under `runtime-next/` is the sole runtime:
 
 ```sh
-snesbuild build --root .                       # next (default)
-snesbuild build --hermetic --root .            # next, isolated Zig build
-snesbuild build --root . --runner legacy       # historical A/B target
+snesbuild build --root .
+snesbuild build --hermetic --root .
 ```
 
-The CMake equivalent is `-DSNESRECOMP_RUNNER=legacy|next`. The `next` manifest
-contains no legacy source or include fallbacks and reports that boundary in its
-runner descriptor. Its standalone module tests every core subsystem without a
-ROM, generated game code, SDL, or the historical runner:
+Its standalone module tests every core subsystem without a ROM, generated game
+code, or SDL:
 
 ```sh
 cmake -S snesrecomp-go/runtime-next -B build/runtime-next
@@ -173,10 +170,8 @@ cmake --build build/runtime-next
 ctest --test-dir build/runtime-next --output-on-failure
 ```
 
-Core replacement code is portable C11 and must keep OS, SDL, graphics API, and
-audio API types behind host adapters. The isolated object caches remain
-`build/hermetic/` for `legacy` and `build/hermetic-next/` for `next`, so the
-default transition cannot reuse incompatible historical objects.
+Core code is portable C11 and must keep OS, SDL, graphics API, and audio API
+types behind host adapters. Hermetic objects live under `build/hermetic/`.
 
 ## Commands
 
@@ -189,7 +184,7 @@ v2regen metadata --gen-dir src/gen --cfg-dir recomp --out build/gen_meta.json
 v2regen rts-webs --rom game.sfc --cfg-dir recomp --suggest
 v2regen stub-census --gen-dir src/gen
 v2regen link-audit --gen-dir src/gen --src-dir src \
-  --runtime-dir snesrecomp-go/runtime/src
+  --runtime-dir snesrecomp-go/runtime-next/src
 v2regen inspect --rom game.sfc --cfg-dir recomp --jobs 8
 v2regen emit-function --rom game.sfc --cfg-dir recomp \
   --bank 00 --start 8000 --m 1 --x 1
@@ -200,7 +195,7 @@ The opcode differential harness consumes locally cached
 
 ```sh
 v2regen opcode-diff --cache-dir tools/oracle/harte_cache \
-  --runtime-dir snesrecomp-go/runtime/src --all
+  --runtime-dir snesrecomp-go/runtime-next/src --all
 ```
 
 Generated-output snapshots are useful locally but should not be distributed
@@ -225,10 +220,9 @@ snesbuild sdl stage  --root . --target x86_64-windows-gnu
 snesbuild build --hermetic --root . --target x86_64-windows-gnu
 ```
 
-Each target keeps a separate object tree under `build/hermetic/<target>/` for
-legacy or `build/hermetic-next/<target>/` for next, so cross checks, runner
-comparisons, and the native build stay independently incremental. A cross
-build never falls back to the host's SDL3; pass
+Each target keeps a separate object tree under `build/hermetic/<target>/`, so
+cross checks and the native build stay independently incremental. A cross build
+never falls back to the host's SDL3; pass
 `--sdl-include`/`--sdl-lib` for targets with no official redistributable to
 stage.
 
@@ -246,8 +240,8 @@ snesbuild audio-preview --rom ../game.sfc --out ../build/audio-previews \
 ```
 
 The GUI invokes the same package from its Assets tab and writes stereo WAVs to
-the per-user cache. It has no dependency on `runtime/`, a browser SPC player,
-FFmpeg, or a system audio converter. The generated WAVs are ROM-derived game
+the per-user cache. It has no dependency on the playable C runner, a browser
+SPC player, FFmpeg, or a system audio converter. The generated WAVs are ROM-derived game
 content and are intentionally outside the module's MIT grant.
 
 ## Distribution packaging
@@ -284,10 +278,9 @@ repository's `docs/BUILD_TOOLING.md` for the full bundle contract.
 ## Licensing
 
 The original Go implementation, tooling, tests, and documentation in this
-module are [MIT-licensed](LICENSE). The inherited C runner under `runtime/` is
-explicitly outside that grant and retains its current unresolved written-
-license status; see [`runtime/LICENSE`](runtime/LICENSE),
-[`runtime/README.md`](runtime/README.md), and [`ATTRIBUTION.md`](ATTRIBUTION.md).
+module, including the independently authored portable C runner, are
+[MIT-licensed](LICENSE). See [`ATTRIBUTION.md`](ATTRIBUTION.md) for historical
+project lineage and third-party acknowledgements.
 
 Game ROMs, generated/recompiled ROM code, extracted previews, and embedded
 retail media are not relicensed under MIT.

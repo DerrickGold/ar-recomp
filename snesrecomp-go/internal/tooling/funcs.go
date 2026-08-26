@@ -81,7 +81,7 @@ func SyncFuncs(cfgDir, outputPath string) (int, error) {
 	source.WriteString(" * referenced by recompiled code via funcs.h.\n")
 	source.WriteString(" */\nvoid ResetSpritesFunc(int wh);\nvoid RunOneFrameOfGame_Internal(void);\n\n")
 	source.WriteString("/* Watchdog hook called at every block label. Implemented in\n")
-	source.WriteString(" * snesrecomp-go/runtime/src/common_cpu_infra.c.\n")
+	source.WriteString(" * snesrecomp-go/runtime-next/src/common_cpu_infra.c.\n")
 	source.WriteString(" */\nvoid WatchdogCheck(void);\n")
 
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {

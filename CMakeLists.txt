@@ -39,23 +39,8 @@ else()
 endif()
 
 set(SNESRECOMP_GO_ROOT ${CMAKE_SOURCE_DIR}/snesrecomp-go)
-set(SNESRECOMP_RUNNER "next" CACHE STRING
-    "Runner implementation to build (legacy or next)")
-set_property(CACHE SNESRECOMP_RUNNER PROPERTY STRINGS legacy next)
-if(SNESRECOMP_RUNNER STREQUAL "legacy")
-    set(_SNESRECOMP_RUNNER_MANIFEST
-        ${SNESRECOMP_GO_ROOT}/runtime/runner.cmake)
-elseif(SNESRECOMP_RUNNER STREQUAL "next")
-    set(_SNESRECOMP_RUNNER_MANIFEST
-        ${SNESRECOMP_GO_ROOT}/runtime-next/runner.cmake)
-else()
-    message(FATAL_ERROR
-        "Unknown SNESRECOMP_RUNNER='${SNESRECOMP_RUNNER}'; expected legacy or next")
-endif()
-include(${_SNESRECOMP_RUNNER_MANIFEST})
-message(STATUS
-    "snesrecomp runner: ${SNESRECOMP_RUNNER_VARIANT} "
-    "(legacy fallback: ${SNESRECOMP_RUNNER_LEGACY_FALLBACK})")
+include(${SNESRECOMP_GO_ROOT}/runtime-next/runner.cmake)
+message(STATUS "snesrecomp runner: independent portable runtime")
 
 # Architecture-specific paths are optional accelerators. The compiler's
 # target macros decide which implementation is available, which is correct
@@ -82,7 +67,7 @@ if(NOT SNESRECOMP_PPU_BIT_WORD_BITS STREQUAL "auto")
     add_compile_definitions(
         SNESRECOMP_PPU_BIT_WORD_BITS=${SNESRECOMP_PPU_BIT_WORD_BITS})
 endif()
-# `src/constants.h` intentionally includes the selected runner's neutral
+# `src/constants.h` intentionally includes the runner's neutral
 # runtime_constants.h by name.  Apply that header contract to ROM-free test
 # targets as well as the game executable.
 include_directories(${SNESRECOMP_RUNNER_INCLUDE_DIRS})
@@ -240,8 +225,8 @@ if(NOT MSVC)
     #
     # -w wins over -Wall in clang regardless of order, so the polarity has to
     # be this way round: real warnings on the target, `-w` re-applied to the
-    # generated (and, for the legacy runner, vendored-runtime) sources per
-    # file. runtime-next is maintained here and keeps its warnings visible.
+    # generated sources per file. runtime-next is maintained here and keeps
+    # its warnings visible.
     target_compile_options(ActRaiserRecomp PRIVATE
         -Wall -Wextra
         # Designated initializers are the house style for the settings
@@ -255,13 +240,8 @@ if(NOT MSVC)
         # source passes; see docs/code-style.md "Verifying a change".
         -Werror=implicit-function-declaration
         -Werror=implicit-int)
-    set(_AR_WARNING_SUPPRESSED_SOURCES ${ACTRAISER_GEN_SOURCES})
-    if(NOT SNESRECOMP_RUNNER_VARIANT STREQUAL "next")
-        list(APPEND _AR_WARNING_SUPPRESSED_SOURCES
-            ${SNESRECOMP_RUNNER_SOURCES})
-    endif()
     set_source_files_properties(
-        ${_AR_WARNING_SUPPRESSED_SOURCES}
+        ${ACTRAISER_GEN_SOURCES}
         PROPERTIES COMPILE_OPTIONS "-w")
 endif()
 
@@ -1608,20 +1588,18 @@ if(BUILD_TESTING)
     target_link_libraries(actraiser_manual_input_test PRIVATE SDL3::SDL3)
     add_test(NAME actraiser_manual_input COMMAND actraiser_manual_input_test)
 
-    if(SNESRECOMP_RUNNER_VARIANT STREQUAL "next")
-        # Cartridge-specific source pointers, sample pools, bootstrap signature,
-        # and resident-uploader timing must stay in the game adapter rather
-        # than leaking back into the portable runner.
-        add_executable(actraiser_spc_upload_adapter_test
-            tests/actraiser_spc_upload_test.c
-            src/actraiser/actraiser_spc_upload.c
-            snesrecomp-go/runtime-next/src/spc_upload.c)
-        target_include_directories(actraiser_spc_upload_adapter_test PRIVATE
-            ${CMAKE_SOURCE_DIR}/src
-            ${SNESRECOMP_RUNNER_INCLUDE_DIRS})
-        add_test(NAME actraiser_spc_upload_adapter
-            COMMAND actraiser_spc_upload_adapter_test)
-    endif()
+    # Cartridge-specific source pointers, sample pools, bootstrap signature,
+    # and resident-uploader timing must stay in the game adapter rather than
+    # leaking back into the portable runner.
+    add_executable(actraiser_spc_upload_adapter_test
+        tests/actraiser_spc_upload_test.c
+        src/actraiser/actraiser_spc_upload.c
+        snesrecomp-go/runtime-next/src/spc_upload.c)
+    target_include_directories(actraiser_spc_upload_adapter_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_INCLUDE_DIRS})
+    add_test(NAME actraiser_spc_upload_adapter
+        COMMAND actraiser_spc_upload_adapter_test)
 
     foreach(_ar_hle_target IN ITEMS
             actraiser_action_metatile_hle_test

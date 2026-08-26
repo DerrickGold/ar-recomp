@@ -12,7 +12,6 @@ import (
 
 type BuildOptions struct {
 	Paths
-	Runner       string
 	CMakeCommand string
 	Config       string
 	Generator    string
@@ -31,16 +30,12 @@ func Configure(options BuildOptions) error {
 	}
 	options.Paths = paths
 	applyBuildDefaults(&options)
-	runner, err := ResolveRunner(paths.ToolchainDir, options.Runner)
-	if err != nil {
-		return err
-	}
-	if _, err := os.Stat(filepath.Join(runner.Directory, "runner.cmake")); err != nil {
-		return fmt.Errorf("runner %s is incomplete: %w", runner.Name, err)
+	runnerDirectory := RunnerDirectory(paths.ToolchainDir)
+	if _, err := os.Stat(filepath.Join(runnerDirectory, "runner.cmake")); err != nil {
+		return fmt.Errorf("runner is incomplete: %w", err)
 	}
 	args := []string{"-S", paths.Root, "-B", paths.BuildDir,
-		"-DCMAKE_BUILD_TYPE=" + options.Config,
-		"-DSNESRECOMP_RUNNER=" + runner.Name}
+		"-DCMAKE_BUILD_TYPE=" + options.Config}
 	if options.Generator != "" {
 		args = append(args, "-G", options.Generator)
 	}
@@ -48,7 +43,7 @@ func Configure(options BuildOptions) error {
 		args = append(args, "-DCMAKE_PREFIX_PATH="+options.PrefixPath)
 	}
 	args = append(args, options.CMakeArgs...)
-	step(options.Stdout, fmt.Sprintf("Configuring project (%s, runner %s)", options.Config, runner.Name))
+	step(options.Stdout, fmt.Sprintf("Configuring project (%s)", options.Config))
 	return runExternal(options.CMakeCommand, args, paths.Root, options.Stdout, options.Stderr)
 }
 

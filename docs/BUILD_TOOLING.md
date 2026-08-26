@@ -57,20 +57,16 @@ snesbuild gui --root .         # local graphical ROM picker + hermetic build
 snesbuild audio-preview --rom ar.sfc --out build/audio-previews
 ```
 
-Runner comparisons use the same build entry points:
+The independent runner is the only build target:
 
 ```sh
-cmake --preset dev                         # independent runner (default)
-cmake --preset dev-legacy                  # historical comparison runner
-cmake --preset play-legacy                 # optimized legacy A/B build
-snesbuild build --hermetic                 # independent runner (default)
-snesbuild build --hermetic --runner legacy # isolated historical comparison
+cmake --preset dev
+cmake --preset play
+snesbuild build --hermetic
 ```
 
-`next` is the default and contains only the independently authored MIT runner;
-its manifest has no legacy source or include fallbacks. `legacy` remains an
-explicit comparison target. Projects can switch between them without sharing
-object caches.
+`runtime-next` contains only the independently authored MIT runner. The
+historical comparison implementation was retired after parity validation.
 
 Zig 0.16.0 is resolved from `$SNESBUILD_ZIG`, `build/toolchain/`, then `PATH`.
 `snesbuild toolchain status` reports the pin and local availability. Fetches are
@@ -78,8 +74,8 @@ verified against a checksum embedded in `snesbuild`.
 
 `audio-preview` is the same MIT-licensed, pure-Go audio-only emulator used by
 the GUI's Assets tab. It directly interprets the SPC700 driver and renders the
-S-DSP/BRR stream to stereo WAV; it does not launch, link, or copy the inherited
-C runner. The GUI keeps those ROM-derived WAVs in the operating-system user
+S-DSP/BRR stream to stereo WAV; it does not launch or link the playable C
+runner. The GUI keeps those ROM-derived WAVs in the operating-system user
 cache, outside `game-assets`, the runtime manifest, and release archives.
 
 The macOS/Linux Zig pins are `.tar.xz` archives, unpacked via the host `tar`,
@@ -89,8 +85,7 @@ never depends on `tar` having `.xz` support.
 
 Inputs are split along the same boundary as the redistribution rules:
 
-- the selected `snesrecomp-go/runtime/runner.cmake` or
-  `snesrecomp-go/runtime-next/runner.cmake` stays the source of truth for the
+- `snesrecomp-go/runtime-next/runner.cmake` stays the source of truth for the
   engine's source list (parsed directly, so the CMake and hermetic builds
   cannot drift);
 - `snesbuild.ini` at the project root declares the game half: target name,
@@ -99,8 +94,7 @@ Inputs are split along the same boundary as the redistribution rules:
   drift;
 - generated banks are globbed from `src/gen` as always.
 
-Default next-runner output lands in `build/hermetic-next/`; explicit legacy
-output lands in `build/hermetic/`. Both use flat per-source objects and
+Hermetic output lands in `build/hermetic/` and uses flat per-source objects and
 incremental source/header mtimes plus a flags hash. Use CMake for normal
 development, tests, and sanitizers; use the hermetic path for distribution.
 
@@ -244,7 +238,7 @@ actraiser-recomp-<platform>/
 ├── run-build.command/.bat/.sh   the one thing to run
 └── utils/                  hidden: the whole build (ignore it)
     ├── snesbuild.ini, config.ini
-    ├── recomp/ src/ third_party/stb/ snesrecomp-go/runtime/   authored source (no generated C)
+    ├── recomp/ src/ third_party/stb/ snesrecomp-go/runtime-next/   authored source (no generated C)
     ├── game-assets/        manifest template + managed audio/HD assets; manual appears on first launch
     ├── tools/snesbuild     the driver (stripped, git-describe-stamped)
     ├── tools/toolchain/zig-*/   pinned C compiler (Zig 0.16.0)
@@ -277,7 +271,7 @@ On later launches, the GUI independently detects two capabilities:
 - **can launch** — the `run-game` launcher and the game binary are both present in
   the output folder. Nothing about the toolchain matters.
 - **can rebuild** — every non-regenerable input is present: `recomp/`,
-  `snesbuild.ini`, `snesrecomp-go/runtime/`, `src/`. Deliberately *not* gated on
+  `snesbuild.ini`, `snesrecomp-go/runtime-next/`, `src/`. Deliberately *not* gated on
   the Zig toolchain or `src/gen`, which the build fetches and regenerates —
   gating on those would refuse a rebuild that would have succeeded.
 

@@ -7,9 +7,6 @@ documentation in this module.
 
 It does **not** cover, and grants no rights to:
 
-- `runtime/`, the copied and modified C runner inherited from the historical
-  Python `snesrecomp` project. See `runtime/LICENSE`, `runtime/README.md`, and
-  `ATTRIBUTION.md`.
 - Retail/manual/cover media under `internal/buildgui/assets/`, or any other
   third-party game artwork. The Go code which embeds or serves those files is
   covered; the media itself is not relicensed.

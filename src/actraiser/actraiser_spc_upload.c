@@ -1,7 +1,5 @@
 #include "actraiser_rtl.h"
 
-#ifdef SNESRECOMP_NEXT_COMMON_CPU_INFRA_H
-
 #include "audio_trace.h"
 #include "cpu_state.h"
 #include "spc_upload.h"
@@ -149,14 +147,3 @@ void ActRaiser_SpcUploaderCompleteTick(void) {
   }
   RtlApuUnlock();
 }
-
-#else
-
-/* The legacy runner retains this policy internally until it is retired. */
-void ar_uploader_complete_tick(void);
-
-void ActRaiser_SpcUploaderCompleteTick(void) {
-  ar_uploader_complete_tick();
-}
-
-#endif

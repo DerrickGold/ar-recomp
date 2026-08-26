@@ -1,65 +1,22 @@
 package project
 
 import (
-	"fmt"
 	"path/filepath"
-	"strings"
 )
 
-const (
-	RunnerLegacy  = "legacy"
-	RunnerNext    = "next"
-	RunnerDefault = RunnerNext
-)
+const RunnerName = "next"
 
-// RunnerInfo is the build-system identity and filesystem location of one
-// selectable runner. LegacyFallback is a disclosure about the complete game
-// manifest, not about the license of independently authored files.
-type RunnerInfo struct {
-	Name           string
-	Directory      string
-	LegacyFallback bool
+// RunnerDirectory is the single independently authored runtime shipped by the
+// toolchain. The legacy runner was retired after the parity cutover.
+func RunnerDirectory(toolchainDir string) string {
+	return filepath.Join(toolchainDir, "runtime-next")
 }
 
-// ResolveRunner validates a user-facing runner name. An empty value selects
-// the independently authored default runner; callers can still request the
-// historical implementation explicitly for parity comparisons.
-func ResolveRunner(toolchainDir, name string) (RunnerInfo, error) {
-	normalized := strings.ToLower(strings.TrimSpace(name))
-	if normalized == "" {
-		normalized = RunnerDefault
-	}
-	switch normalized {
-	case RunnerLegacy:
-		return RunnerInfo{
-			Name:      RunnerLegacy,
-			Directory: filepath.Join(toolchainDir, "runtime"),
-		}, nil
-	case RunnerNext:
-		return RunnerInfo{
-			Name:      RunnerNext,
-			Directory: filepath.Join(toolchainDir, "runtime-next"),
-		}, nil
-	default:
-		return RunnerInfo{}, fmt.Errorf("unknown runner %q (expected %s or %s)", name, RunnerLegacy, RunnerNext)
-	}
-}
-
-// HermeticOutputDir isolates object caches for incompatible runner source
-// sets. The directory names remain stable across the default transition so an
-// existing legacy cache can never be mistaken for a next-runner cache.
-func HermeticOutputDir(buildDir, target, runner string) (string, error) {
-	selected, err := ResolveRunner("", runner)
-	if err != nil {
-		return "", err
-	}
-	directoryName := "hermetic"
-	if selected.Name == RunnerNext {
-		directoryName = "hermetic-next"
-	}
-	output := filepath.Join(buildDir, directoryName)
+// HermeticOutputDir returns the canonical target-specific hermetic build tree.
+func HermeticOutputDir(buildDir, target string) string {
+	output := filepath.Join(buildDir, "hermetic")
 	if target != "" {
 		output = filepath.Join(output, target)
 	}
-	return output, nil
+	return output
 }

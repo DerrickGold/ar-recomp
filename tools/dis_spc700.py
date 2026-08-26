@@ -24,7 +24,7 @@ ROM_BLOCK_OFFSET = 0x011ACD
 # Operand templates use b=direct-page byte, w=absolute word, r=relative byte,
 # and m=the SPC700's 13-bit-address + 3-bit bit-number encoding.  The opcode
 # matrix mirrors the hardware's regular 16x16 layout, making the table easy to
-# audit against runtime/src/snes/spc.c.
+# audit against runtime-next/src/snes/spc.c.
 ROWS = [
     "nop|tcall 0|set1 {b}.0|bbs {b}.0,{r}|or a,{b}|or a,!{w}|or a,(x)|or a,[{b}+x]|or a,#{b}|or {b},{b2}|or1 c,{m}|asl {b}|asl !{w}|push psw|tset1 !{w}|brk",
     "bpl {r}|tcall 1|clr1 {b}.0|bbc {b}.0,{r}|or a,{b}+x|or a,!{w}+x|or a,!{w}+y|or a,[{b}]+y|or {b},#{b2}|or (x),(y)|decw {b}|asl {b}+x|asl a|dec x|cmp x,!{w}|jmp [!{w}+x]",

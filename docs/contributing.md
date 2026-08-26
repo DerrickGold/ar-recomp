@@ -71,7 +71,7 @@ sudo apt install build-essential cmake libsdl3-dev golang-go
 ```
 
 **Windows**: the runtime has MSVC-oriented support in
-`snesrecomp-go/runtime/runner.cmake`, but this project has not been run from a
+`snesrecomp-go/runtime-next/runner.cmake`, but this project has not been run from a
 Windows source build. Documented build steps are welcome.
 
 ### Steps
@@ -223,7 +223,7 @@ ActRaiserRecomp/
 │   ├── docs/                  # per-project integration/config/runtime guides
 │   ├── internal/buildgui/     # the local browser builder served by `snesbuild gui`
 │   ├── packaging/             # builds the self-contained per-platform bundles
-│   └── runtime/               # bundled C runtime + SNES hardware model
+│   └── runtime-next/          # portable C runtime + SNES hardware model
 ├── tools/
 │   ├── regen.sh                # compatibility launcher for Go snesbuild
 │   ├── rom_info.py, quintet_lzss.py, ... — game/trace analysis tools

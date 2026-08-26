@@ -2114,7 +2114,6 @@ that nuance; the phase graph does not.
 | `src/settings.c` | M3, M6 | New descriptors + `kSettingCat_Presentation` (§10.3) |
 | `src/settings_overlay.c` | M3 | New Presentation/Diorama menu section |
 | `CMakeLists.txt` | M1 | Add `src/diorama/diorama.c` to build |
-| `snesrecomp-go/runtime/src/snes/ppu.c` | (fallback only) | Overlay capture for OLD PPU path — only if new-PPU parity fails (§4.1) |
 
 (Milestone→Phase map: M0-M3 = Phases 3+4; M4 = instrumentation only, no phase;
 M5 = Phase 1; M6 = Phase 2; M7 = Phase 5; M8 = Phase 6.)

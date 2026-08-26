@@ -49,7 +49,7 @@ func bundleFixture(t *testing.T) (root, utils string) {
 	write(filepath.Join(utils, "src", "main.c"), "int main(void){return 0;}")
 	write(filepath.Join(utils, "src", "gen", "bank00.c"), "generated")
 	write(filepath.Join(utils, "recomp", "bank00.cfg"), "cfg")
-	write(filepath.Join(utils, "snesrecomp-go", "runtime", "snes", "ppu.h"), "header")
+	write(filepath.Join(utils, "snesrecomp-go", "runtime-next", "src", "snes", "ppu.h"), "header")
 	write(filepath.Join(utils, "third_party", "stb", "stb_image.h"), "header")
 	write(filepath.Join(utils, "snesbuild.ini"), "[project]")
 
@@ -590,7 +590,7 @@ func TestGameBinaryFoundAlongsideBundleScripts(t *testing.T) {
 func TestCleanupRefusesInASourceCheckout(t *testing.T) {
 	repo := t.TempDir()
 	for _, dir := range []string{"src", "recomp", "tools", "third_party",
-		"snesrecomp-go/runtime", "build"} {
+		"snesrecomp-go/runtime-next", "build"} {
 		if err := os.MkdirAll(filepath.Join(repo, dir), 0o755); err != nil {
 			t.Fatal(err)
 		}

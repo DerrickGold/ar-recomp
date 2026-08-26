@@ -2,8 +2,8 @@
 // the SPC700, the S-DSP register interface, timers, BRR voices, and the pieces
 // of the ActRaiser upload protocol needed to render local comparison WAVs.
 //
-// It is an original Go implementation. It does not link to or incorporate the
-// inherited C runner under snesrecomp-go/runtime.
+// It is an original Go implementation and does not link to the playable C
+// runner.
 package spcaudio
 
 import "fmt"

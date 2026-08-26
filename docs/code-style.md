@@ -101,7 +101,7 @@ preprocessor constants—no functions, types, storage, or runtime policy—so it
 safe for low-level and pure modules to include. Hardware constants shared by the
 standalone SNES runtime stay at that runtime's lowest shared layer; for example,
 `kSnesWramSize` and its derived mask live in the pure-defines
-`snesrecomp-go/runtime/src/runtime_constants.h`.
+`snesrecomp-go/runtime-next/src/runtime_constants.h`.
 
 Prefer the narrowest owner that has every real consumer:
 
