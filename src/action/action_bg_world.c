@@ -444,6 +444,45 @@ ActionBgLookupResult ActionBgWorld_Lookup(const ActionBgWorld *world,
   return kActionBgLookup_Tile;
 }
 
+size_t ActionBgWorld_LookupSpan(const ActionBgWorld *world,
+                                int tile_x, int tile_y, int tile_step,
+                                size_t capacity, const uint16_t **entries,
+                                ptrdiff_t *entry_step) {
+  if (!world || !world->valid || !entries || !entry_step || !capacity ||
+      (tile_step != 1 && tile_step != -1))
+    return 0;
+
+  const unsigned width = world->key.tile_width;
+  if ((unsigned)tile_y >= world->key.tile_height) {
+    *entries = NULL;
+    *entry_step = 0;
+    return capacity;
+  }
+
+  if (tile_x >= 0 && (unsigned)tile_x < width) {
+    size_t count = tile_step > 0
+        ? width - (unsigned)tile_x : (unsigned)tile_x + 1u;
+    if (count > capacity) count = capacity;
+    const uint16_t *row = world->tiles + (size_t)(unsigned)tile_y * width;
+    *entries = row + (unsigned)tile_x;
+    *entry_step = tile_step;
+    return count;
+  }
+
+  size_t count = capacity;
+  if (tile_step > 0 && tile_x < 0) {
+    const uint64_t distance = (uint64_t)(-(int64_t)tile_x);
+    if (distance < count) count = (size_t)distance;
+  } else if (tile_step < 0 && tile_x >= 0 && (uint64_t)tile_x >= width) {
+    const uint64_t distance =
+        (uint64_t)tile_x - width + 1u;
+    if (distance < count) count = (size_t)distance;
+  }
+  *entries = NULL;
+  *entry_step = 0;
+  return count;
+}
+
 bool ActionBgWorld_LookupMetatile(const ActionBgWorld *world,
                                   int tile_x, int tile_y,
                                   uint8_t *metatile) {

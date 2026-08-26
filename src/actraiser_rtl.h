@@ -52,6 +52,16 @@ void RunOneFrameOfGame(void);
 void ActRaiser_DestroyGameCoroutine(void);
 int ActRaiser_ReadRdnmi(Snes *snes);
 bool ActRaiser_RecoverDispatchMiss(uint32 source_pc24, uint32 target_pc24);
+void ActRaiser_SpcUploaderCompleteTick(void);
+#ifdef SNESRECOMP_NEXT_COMMON_CPU_INFRA_H
+bool ActRaiser_SpcUploadSource(CpuState *cpu, uint32 *source24);
+bool ActRaiser_SpcUploadCustomize(CpuState *cpu,
+                                  const SrSpcUploadResult *upload,
+                                  uint32 source24);
+void ActRaiser_SpcUploadCommit(Apu *apu, uint16 entry_point,
+                               bool initial_upload);
+int ActRaiser_SpcUploadStackPop(const CpuState *cpu);
+#endif
 
 /* Debug aid: queue one action-stage spell-cycle step. Called from the host
  * input path; the request is consumed at the next frame boundary inside

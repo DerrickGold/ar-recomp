@@ -24,7 +24,7 @@ import (
 // docs/PROJECT_INTEGRATION.md for the snesbuild.ini contract.
 type HermeticOptions struct {
 	Paths
-	Runner        string // legacy (default) or next
+	Runner        string // next (default) or legacy
 	ManifestPath  string // defaults to <root>/snesbuild.ini
 	ZigPath       string // required: resolved zig executable
 	Jobs          int
@@ -381,7 +381,10 @@ func objectName(root, source string) string {
 
 func objectFresh(source, object string, newestHeader time.Time) bool {
 	objectInfo, err := os.Stat(object)
-	if err != nil {
+	// A compiler can create/truncate its output before failing (for example
+	// when its cache directory is unavailable). Never promote that placeholder
+	// into the incremental cache merely because its timestamp is newest.
+	if err != nil || objectInfo.Size() == 0 {
 		return false
 	}
 	sourceInfo, err := os.Stat(source)

@@ -1,4 +1,5 @@
 #include "ar_trace.h"
+#include "cpu_state.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -9,19 +10,12 @@
 #define AR_TRACE_TEST_PATH "runtime-next-ar-trace.jsonl"
 #endif
 
-typedef struct TestCpuState {
-    uint16_t A, X, Y, S, D;
-    uint8_t DB, PB, host_return_valid, P, m_flag, x_flag, emulation;
-    uint8_t negative, overflow, zero, carry, irq_disable, decimal;
-    uint8_t *ram;
-} TestCpuState;
-
 int snes_frame_counter;
 unsigned char g_ram[0x20000];
 const char *g_last_recomp_func;
 uint32_t g_ar_blk_ring[1024];
 unsigned g_ar_blk_idx;
-TestCpuState g_cpu;
+CpuState g_cpu;
 static int failures;
 
 static void check(bool condition, const char *message) {

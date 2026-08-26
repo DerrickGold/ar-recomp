@@ -1,5 +1,5 @@
-#ifndef DSP_H
-#define DSP_H
+#ifndef SNESRECOMP_NEXT_DSP_H
+#define SNESRECOMP_NEXT_DSP_H
 
 #include <stdbool.h>
 #include <stdint.h>

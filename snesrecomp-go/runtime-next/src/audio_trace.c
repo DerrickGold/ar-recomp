@@ -1,5 +1,8 @@
 #include "audio_trace.h"
 
+#include "apu_sync.h"
+#include "snes/snes.h"
+
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -9,10 +12,6 @@
 #else
 #include <time.h>
 #endif
-
-extern void RtlApuLock(void);
-extern void RtlApuUnlock(void);
-extern int snes_frame_counter;
 
 static int16_t s_pcm[AUDIO_TRACE_PCM_RING * 2u];
 static AudioTraceEvent s_events[AUDIO_TRACE_EVENT_RING];

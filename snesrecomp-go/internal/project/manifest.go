@@ -89,21 +89,19 @@ func LoadManifest(path string) (Manifest, error) {
 // RunnerSources parses a selected runner.cmake for the engine's shared source
 // and include lists so the hermetic build and the CMake build cannot drift.
 // Only the unconditional first set(...) block of each variable is read; the
-// SNESRECOMP_ENABLE_TRACE-conditional append is a developer-only source that
-// hermetic release builds never compile.
+// block may live directly in runner.cmake or in a single-line, runner-root-
+// relative include owned by that manifest. The SNESRECOMP_ENABLE_TRACE-
+// conditional append is a developer-only source that hermetic release builds
+// never compile.
 func RunnerSources(runtimeDir string) (sources, includeDirs []string, err error) {
 	path := filepath.Join(runtimeDir, "runner.cmake")
-	content, err := os.ReadFile(path)
+	sources, err = runnerSetEntries(path, "SNESRECOMP_RUNNER_SOURCES", runtimeDir)
 	if err != nil {
 		return nil, nil, err
 	}
-	sources, err = cmakeSetEntries(string(content), "SNESRECOMP_RUNNER_SOURCES", runtimeDir)
+	includeDirs, err = runnerSetEntries(path, "SNESRECOMP_RUNNER_INCLUDE_DIRS", runtimeDir)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%s: %w", path, err)
-	}
-	includeDirs, err = cmakeSetEntries(string(content), "SNESRECOMP_RUNNER_INCLUDE_DIRS", runtimeDir)
-	if err != nil {
-		return nil, nil, fmt.Errorf("%s: %w", path, err)
+		return nil, nil, err
 	}
 	return sources, includeDirs, nil
 }
@@ -196,4 +194,64 @@ func cmakeSetEntries(content, variable, runtimeDir string) ([]string, error) {
 		return nil, fmt.Errorf("set(%s ...) block is empty", variable)
 	}
 	return entries, nil
+}
+
+// runnerSetEntries reads a set(...) block from runner.cmake or one of its
+// runner-root-relative includes. It deliberately supports only the small,
+// declarative include form used by runner manifests; hermetic builds must not
+// execute or attempt to interpret arbitrary CMake.
+func runnerSetEntries(path, variable, runtimeDir string) ([]string, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if strings.Contains(string(content), "set("+variable) {
+		entries, err := cmakeSetEntries(string(content), variable, runtimeDir)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		return entries, nil
+	}
+
+	for _, includePath := range runnerRootIncludes(string(content), runtimeDir) {
+		includeContent, err := os.ReadFile(includePath)
+		if err != nil {
+			return nil, fmt.Errorf("%s: included manifest: %w", includePath, err)
+		}
+		if !strings.Contains(string(includeContent), "set("+variable) {
+			continue
+		}
+		entries, err := cmakeSetEntries(string(includeContent), variable, runtimeDir)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", includePath, err)
+		}
+		return entries, nil
+	}
+
+	return nil, fmt.Errorf("%s: no set(%s ...) block found", path, variable)
+}
+
+// runnerRootIncludes returns only simple includes rooted beneath the selected
+// runner directory, for example:
+//
+//	include(${SNESRECOMP_RUNNER_ROOT}/sources.cmake)
+//
+// Other CMake include forms are outside the hermetic manifest contract.
+func runnerRootIncludes(content, runtimeDir string) []string {
+	const prefix = "include(${SNESRECOMP_RUNNER_ROOT}/"
+	var paths []string
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, prefix) || !strings.HasSuffix(line, ")") {
+			continue
+		}
+		relative := strings.TrimSuffix(strings.TrimPrefix(line, prefix), ")")
+		relative = filepath.Clean(filepath.FromSlash(relative))
+		if relative == "." || relative == ".." || filepath.IsAbs(relative) ||
+			strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			continue
+		}
+		paths = append(paths, filepath.Join(runtimeDir, relative))
+	}
+	return paths
 }

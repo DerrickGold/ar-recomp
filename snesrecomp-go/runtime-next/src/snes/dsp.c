@@ -1,6 +1,7 @@
 #include "dsp.h"
 
 #include "../audio_trace.h"
+#include "../simd.h"
 #include "dsp_shadow.h"
 #include "saveload.h"
 
@@ -8,6 +9,12 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+#if SR_SIMD_NEON64
+#include <arm_neon.h>
+#elif SR_SIMD_SSE2
+#include <emmintrin.h>
+#endif
 
 /* These optional services are supplied by the complete runner. Focused tests
  * provide inert definitions, keeping the device core independent of a host. */
@@ -162,7 +169,71 @@ void dsp_reset(Dsp *dsp) {
 
 void dsp_saveload(Dsp *dsp, SaveLoadInfo *info) {
     if (dsp == NULL || info == NULL || info->func == NULL) return;
-    info->func(info, &dsp->ram, sizeof(*dsp) - offsetof(Dsp, ram));
+    if (!info->portable) {
+        info->func(info, &dsp->ram, sizeof(*dsp) - offsetof(Dsp, ram));
+        return;
+    }
+    saveload_bytes(info, dsp->ram, sizeof(dsp->ram));
+    for (unsigned index = 0; index < kDspMaximumVoiceCount; ++index) {
+        DspChannel *voice = &dsp->channel[index];
+        saveload_u16(info, &voice->pitch);
+        saveload_u16(info, &voice->pitchCounter);
+        saveload_bool(info, &voice->pitchModulation);
+        saveload_i16_array(info, voice->decodeBuffer,
+                           sizeof(voice->decodeBuffer) /
+                               sizeof(voice->decodeBuffer[0]));
+        saveload_u8(info, &voice->srcn);
+        saveload_u16(info, &voice->decodeOffset);
+        saveload_u8(info, &voice->previousFlags);
+        saveload_i16(info, &voice->old);
+        saveload_i16(info, &voice->older);
+        saveload_bool(info, &voice->useNoise);
+        saveload_u16_array(info, voice->adsrRates,
+                           sizeof(voice->adsrRates) /
+                               sizeof(voice->adsrRates[0]));
+        saveload_u16(info, &voice->rateCounter);
+        saveload_u8(info, &voice->adsrState);
+        saveload_u16(info, &voice->sustainLevel);
+        saveload_bool(info, &voice->useGain);
+        saveload_u8(info, &voice->gainMode);
+        saveload_bool(info, &voice->directGain);
+        saveload_u16(info, &voice->gainValue);
+        saveload_u16(info, &voice->gain);
+        saveload_bool(info, &voice->keyOn);
+        saveload_bool(info, &voice->keyOff);
+        saveload_i16(info, &voice->sampleOut);
+        saveload_i8(info, &voice->volumeL);
+        saveload_i8(info, &voice->volumeR);
+        saveload_bool(info, &voice->echoEnable);
+    }
+    saveload_u16(info, &dsp->dirPage);
+    saveload_bool(info, &dsp->evenCycle);
+    saveload_bool(info, &dsp->mute);
+    saveload_bool(info, &dsp->reset);
+    saveload_i8(info, &dsp->masterVolumeL);
+    saveload_i8(info, &dsp->masterVolumeR);
+    saveload_i16(info, &dsp->noiseSample);
+    saveload_u16(info, &dsp->noiseRate);
+    saveload_u16(info, &dsp->noiseCounter);
+    saveload_bool(info, &dsp->echoWrites);
+    saveload_i8(info, &dsp->echoVolumeL);
+    saveload_i8(info, &dsp->echoVolumeR);
+    saveload_i8(info, &dsp->feedbackVolume);
+    saveload_u16(info, &dsp->echoBufferAdr);
+    saveload_u16(info, &dsp->echoDelay);
+    saveload_u16(info, &dsp->echoRemain);
+    saveload_u16(info, &dsp->echoBufferIndex);
+    saveload_u8(info, &dsp->firBufferIndex);
+    saveload_bytes(info, dsp->firValues, sizeof(dsp->firValues));
+    saveload_i16_array(info, dsp->firBufferL,
+                       sizeof(dsp->firBufferL) / sizeof(dsp->firBufferL[0]));
+    saveload_i16_array(info, dsp->firBufferR,
+                       sizeof(dsp->firBufferR) / sizeof(dsp->firBufferR[0]));
+    saveload_i16_array(info, dsp->sampleBuffer,
+                       sizeof(dsp->sampleBuffer) /
+                           sizeof(dsp->sampleBuffer[0]));
+    saveload_u32(info, &dsp->sampleWrite);
+    saveload_u32(info, &dsp->sampleRead);
 }
 
 static void apply_voice_register(Dsp *dsp, int channel, uint8_t reg,
@@ -594,6 +665,57 @@ void dsp_getSamples(Dsp *dsp, int16_t *samples, int sample_count) {
     audio_trace_on_consume(base, 534u, dsp->sampleWrite - dsp->sampleRead);
 }
 
+static void interpolate_stereo_scalar(const int16_t *first,
+                                      const int16_t *second,
+                                      double fraction, int16_t *output) {
+    for (int side = 0; side < 2; ++side) {
+        const int a = first[side];
+        const int b = second[side];
+        output[side] = (int16_t)(a + (int)((b - a) * fraction));
+    }
+}
+
+#if SR_SIMD_NEON64
+static void interpolate_stereo_simd(const int16_t *first,
+                                    const int16_t *second,
+                                    double fraction, int16_t *output) {
+    /* Each load includes the following stereo frame. The caller keeps the
+     * final ring entry on the scalar boundary path, so both loads are within
+     * the sample buffer. Only the low two lanes participate. */
+    const int32x2_t first32 = vget_low_s32(vmovl_s16(vld1_s16(first)));
+    const int32x2_t second32 = vget_low_s32(vmovl_s16(vld1_s16(second)));
+    const int64x2_t delta64 = vmovl_s32(vsub_s32(second32, first32));
+    const float64x2_t scaled = vmulq_n_f64(vcvtq_f64_s64(delta64), fraction);
+    const int32x2_t delta32 = vmovn_s64(vcvtq_s64_f64(scaled));
+    const int16x4_t mixed = vmovn_s32(vcombine_s32(
+        vadd_s32(first32, delta32), vdup_n_s32(0)));
+    output[0] = vget_lane_s16(mixed, 0);
+    output[1] = vget_lane_s16(mixed, 1);
+}
+#elif SR_SIMD_SSE2
+static void interpolate_stereo_simd(const int16_t *first,
+                                    const int16_t *second,
+                                    double fraction, int16_t *output) {
+    int32_t first_packed, second_packed, output_packed;
+    __m128i first16, second16, first32, second32, delta32, scaled32;
+    __m128i zero = _mm_setzero_si128();
+    memcpy(&first_packed, first, sizeof(first_packed));
+    memcpy(&second_packed, second, sizeof(second_packed));
+    first16 = _mm_cvtsi32_si128(first_packed);
+    second16 = _mm_cvtsi32_si128(second_packed);
+    first32 = _mm_unpacklo_epi16(first16,
+        _mm_cmpgt_epi16(zero, first16));
+    second32 = _mm_unpacklo_epi16(second16,
+        _mm_cmpgt_epi16(zero, second16));
+    delta32 = _mm_sub_epi32(second32, first32);
+    scaled32 = _mm_cvttpd_epi32(_mm_mul_pd(
+        _mm_cvtepi32_pd(delta32), _mm_set1_pd(fraction)));
+    output_packed = _mm_cvtsi128_si32(_mm_packs_epi32(
+        _mm_add_epi32(first32, scaled32), zero));
+    memcpy(output, &output_packed, sizeof(output_packed));
+}
+#endif
+
 void dsp_getSamplesResampled(Dsp *dsp, int16_t *samples, int sample_count,
                              double native_step, double *phase) {
     if (dsp == NULL || samples == NULL || sample_count <= 0 ||
@@ -607,11 +729,18 @@ void dsp_getSamplesResampled(Dsp *dsp, int16_t *samples, int sample_count,
         const double fraction = position - (double)whole;
         const uint32_t first = (base + whole) & (DSP_SAMPLE_RING - 1u);
         const uint32_t second = (first + 1u) & (DSP_SAMPLE_RING - 1u);
-        for (int side = 0; side < 2; ++side) {
-            const int a = dsp->sampleBuffer[first * 2u + (unsigned)side];
-            const int b = dsp->sampleBuffer[second * 2u + (unsigned)side];
-            samples[index * 2 + side] =
-                (int16_t)(a + (int)((b - a) * fraction));
+#if SR_SIMD_NEON64 || SR_SIMD_SSE2
+        if (first + 1u < DSP_SAMPLE_RING &&
+            second + 1u < DSP_SAMPLE_RING) {
+            interpolate_stereo_simd(dsp->sampleBuffer + first * 2u,
+                                    dsp->sampleBuffer + second * 2u,
+                                    fraction, samples + index * 2);
+        } else
+#endif
+        {
+            interpolate_stereo_scalar(dsp->sampleBuffer + first * 2u,
+                                      dsp->sampleBuffer + second * 2u,
+                                      fraction, samples + index * 2);
         }
         position += native_step;
     }

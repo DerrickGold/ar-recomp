@@ -7,7 +7,7 @@
 #
 # The loop:
 #   1. If any recomp/*.cfg is newer than the generated sources -> tools/regen.sh
-#   2. cmake --build build -j8
+#   2. reapply the default dev preset, then build
 #   3. Run via tools/run.sh: every run gets its own timestamped runs/<ts>/
 #      folder holding console.log (stdout+stderr), anomaly captures, and any
 #      F2/F9/exit dumps — so parallel analysis of older runs never gets
@@ -39,7 +39,9 @@ if [ "$BUILD" = 1 ]; then
   else
     echo "[cycle] cfg unchanged -> skipping regen"
   fi
-  # 2. build
+  # 2. Reconfigure before the incremental build so promoted defaults (notably
+  # the next runner) replace values retained by an older CMake cache.
+  cmake --preset dev || exit 1
   cmake --build build -j8 || exit 1
 fi
 

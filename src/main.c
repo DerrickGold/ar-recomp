@@ -589,7 +589,7 @@ static void RunPostTickHousekeeping(void) {
   /* Complete the SPC engine's resident uploader once it enters the $CC-wait,
    * for the case where the CPU's HLEd $9A56 ran before the engine got there
    * (takes its own APU lock — must be outside the lock above). */
-  { extern void ar_uploader_complete_tick(void); ar_uploader_complete_tick(); }
+  ActRaiser_SpcUploaderCompleteTick();
 
   /* Music replacement live policy (setting toggled off mid-song). Takes
    * its own APU lock — also outside the lock above. */
@@ -2152,6 +2152,8 @@ static int AppShutdown(AppBoot *app, char **argv) {
   InputReplay_Shutdown();
   OracleTrace_Shutdown();
   HostAudio_Shutdown();
+  ActRaiserSpcPlayer_Destroy(g_spc_player);
+  g_spc_player = NULL;
   HdReplacementHost_Shutdown();
   PresentRendererResources_Reset();
   DioramaFrameGeneration_Shutdown();
@@ -2169,6 +2171,9 @@ static int AppShutdown(AppBoot *app, char **argv) {
    * running on that stack. */
   ActRaiser_DestroyGameCoroutine();
   InputMap_Shutdown();
+#ifdef SNESRECOMP_NEXT_COMMON_CPU_INFRA_H
+  SnesShutdown();
+#endif
   SDL_DestroyTexture(g_hud_obj_texture);
   SDL_DestroyTexture(g_hud_bg_texture);
   SDL_DestroyTexture(g_authentic_texture);

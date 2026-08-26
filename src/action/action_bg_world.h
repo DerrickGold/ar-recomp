@@ -116,6 +116,15 @@ ActionBgLookupResult ActionBgWorld_Lookup(const ActionBgWorld *world,
                                            int tile_x, int tile_y,
                                            uint16_t *entry);
 
+/* Exposes one horizontal run from the immutable publication without copying.
+ * tile_step must be +1 or -1. A NULL entries view represents a finite-world
+ * gap. The returned run is at most capacity and the pointer remains valid
+ * until the next publication; zero reports invalid arguments or no world. */
+size_t ActionBgWorld_LookupSpan(const ActionBgWorld *world,
+                                int tile_x, int tile_y, int tile_step,
+                                size_t capacity, const uint16_t **entries,
+                                ptrdiff_t *entry_step);
+
 /* Returns the 16x16 metatile ID containing an expanded 8x8 tile coordinate.
  * This uses the same snapshotted map publication as ActionBgWorld_Lookup, so
  * presentation classification cannot race live WRAM or disagree with the

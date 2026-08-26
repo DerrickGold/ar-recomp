@@ -3,18 +3,18 @@
 
 #include "types.h"
 
-#ifdef _MSC_VER
-#pragma warning(disable : 4013 4028 4033 4090 4133 4305)
-#endif
-
 typedef struct Snes Snes;
 typedef struct Cpu Cpu;
+typedef struct CpuState CpuState;
+typedef struct Apu Apu;
+typedef struct SrSpcUploadResult SrSpcUploadResult;
 
 extern Snes *g_snes;
 extern Cpu *g_snes_cpu;
 extern bool g_fail;
 
 Snes *SnesInit(const uint8 *data, int data_size);
+void SnesShutdown(void);
 uint8 *SnesRomPtr(uint32 address);
 void SnesEnterNativeMode(void);
 uint8 *IndirPtrDB(uint8 direct_page_address, uint16 offset);
@@ -23,6 +23,13 @@ typedef void CpuInfraInitializeFunc(void);
 typedef void RunOneFrameOfGameFunc(void);
 typedef int RdnmiReadHookFunc(Snes *snes);
 typedef bool DispatchMissRecoveryFunc(uint32 source_pc24, uint32 target_pc24);
+typedef bool RtlSpcUploadSourceFunc(CpuState *cpu, uint32 *source24);
+typedef bool RtlSpcUploadCustomizeFunc(CpuState *cpu,
+                                       const SrSpcUploadResult *upload,
+                                       uint32 source24);
+typedef void RtlSpcUploadCommitFunc(Apu *apu, uint16 entry_point,
+                                    bool initial_upload);
+typedef int RtlSpcUploadStackPopFunc(const CpuState *cpu);
 
 #ifndef AR_WATCHDOG
 #define AR_WATCHDOG 0
@@ -68,6 +75,10 @@ typedef struct RtlGameInfo {
     RdnmiReadHookFunc *read_rdnmi;
     DispatchMissRecoveryFunc *recover_dispatch_miss;
     const char *save_name_prefix;
+    RtlSpcUploadSourceFunc *spc_upload_source;
+    RtlSpcUploadCustomizeFunc *spc_upload_customize;
+    RtlSpcUploadCommitFunc *spc_upload_commit;
+    RtlSpcUploadStackPopFunc *spc_upload_stack_pop;
 } RtlGameInfo;
 
 extern const RtlGameInfo *g_rtl_game_info;

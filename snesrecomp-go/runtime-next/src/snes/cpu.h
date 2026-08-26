@@ -1,5 +1,5 @@
-#ifndef CPU_H
-#define CPU_H
+#ifndef SNESRECOMP_NEXT_CPU_H
+#define SNESRECOMP_NEXT_CPU_H
 
 #include <stdbool.h>
 #include <stdint.h>

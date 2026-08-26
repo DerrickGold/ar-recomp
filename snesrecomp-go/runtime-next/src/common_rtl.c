@@ -14,6 +14,7 @@
 #include "snes/cart_map.h"
 #include "snes/dsp.h"
 #include "snes/msu1.h"
+#include "snes/ppu.h"
 #include "snes/saveload.h"
 #include "snes/snes.h"
 #include "snes/spc.h"
@@ -27,22 +28,13 @@
 #include <windows.h>
 #endif
 
-extern Ppu *ppu_init(void);
-extern void ppu_reset(Ppu *ppu);
-extern uint8 ppu_read(Ppu *ppu, uint8 address);
-extern void ppu_write(Ppu *ppu, uint8 address, uint8 value);
-
 enum {
     RTL_SNAPSHOT_MAGIC = 0x52544c53u,
-    RTL_SNAPSHOT_VERSION = 9u,
+    RTL_SNAPSHOT_LEGACY_VERSION = 9u,
+    RTL_SNAPSHOT_VERSION = 10u,
     RTL_SNAPSHOT_EXTENDED_AUDIO = 0x00010000u,
     RTL_AUDIO_NATIVE_RATE = 32040,
-    RTL_AUDIO_CHUNK = 1024,
-    AR_SPC_UPLOAD_DP_POINTER = 0xa5,
-    AR_SPC_BOOT_ENTRY = 0x0400,
-    AR_SPC_BOOT_IDLE_0 = 0x0460,
-    AR_SPC_BOOT_IDLE_1 = 0x0462,
-    AR_SPC_BOOT_MAX_CYCLES = 131072
+    RTL_AUDIO_CHUNK = 1024
 };
 
 #define RTL_SRAM_FILE "saves/save.srm"
@@ -85,7 +77,6 @@ const char *g_apuprof_last_port_func;
 static int g_audio_output_rate = 44100;
 static double g_audio_phase;
 static bool g_apu_catchup_suppressed;
-int g_ar_uploader_complete_pending;
 
 int ApuProfEnabled(void) {
     if (g_apuprof < 0) {
@@ -116,17 +107,15 @@ static uint32 snapshot_version(void) {
 typedef struct FileSaveLoad {
     SaveLoadInfo base;
     FILE *file;
-    bool saving;
-    bool failed;
 } FileSaveLoad;
 
 static void file_saveload(SaveLoadInfo *base, void *data, size_t size) {
     FileSaveLoad *state = (FileSaveLoad *)base;
     size_t transferred;
-    if (state->failed) return;
-    transferred = state->saving ? fwrite(data, 1u, size, state->file)
-                                : fread(data, 1u, size, state->file);
-    state->failed = transferred != size;
+    if (base->failed) return;
+    transferred = base->saving ? fwrite(data, 1u, size, state->file)
+                               : fread(data, 1u, size, state->file);
+    base->failed = transferred != size;
 }
 
 void RtlReset(int mode) {
@@ -177,50 +166,61 @@ bool RtlRunFrame(uint32 inputs) {
 }
 
 void RtlSaveSnapshot(const char *filename) {
-    uint32 header[2] = {RTL_SNAPSHOT_MAGIC, snapshot_version()};
+    uint32 magic = RTL_SNAPSHOT_MAGIC;
+    uint32 version = snapshot_version();
     FILE *file;
     FileSaveLoad state;
     if (filename == NULL || g_snes == NULL) return;
     file = fopen(filename, "wb");
     if (file == NULL) return;
-    if (fwrite(header, sizeof(header), 1u, file) != 1u) {
-        fclose(file);
-        return;
-    }
     state.base.func = file_saveload;
+    state.base.saving = true;
+    state.base.portable = true;
+    state.base.failed = false;
     state.file = file;
-    state.saving = true;
-    state.failed = false;
+    saveload_u32(&state.base, &magic);
+    saveload_u32(&state.base, &version);
     RtlApuLock();
     snes_saveload(g_snes, &state.base);
     RtlApuUnlock();
     fclose(file);
-    if (state.failed) fprintf(stderr, "Unable to write snapshot %s\n", filename);
+    if (state.base.failed)
+        fprintf(stderr, "Unable to write snapshot %s\n", filename);
 }
 
 bool RtlLoadSnapshot(const char *filename) {
-    uint32 header[2];
+    uint8 header[8];
+    bool portable;
+    uint32 legacy_version;
     FILE *file;
     FileSaveLoad state;
     if (filename == NULL || g_snes == NULL) return false;
     file = fopen(filename, "rb");
     if (file == NULL) return false;
-    if (fread(header, sizeof(header), 1u, file) != 1u ||
-        header[0] != RTL_SNAPSHOT_MAGIC || header[1] != snapshot_version()) {
+    if (fread(header, sizeof(header), 1u, file) != 1u) {
+        fclose(file);
+        return false;
+    }
+    legacy_version = RTL_SNAPSHOT_LEGACY_VERSION |
+        (dsp_extendedVoicesEnabled() ? RTL_SNAPSHOT_EXTENDED_AUDIO : 0u);
+    if (!saveload_decode_snapshot_header(
+            header, RTL_SNAPSHOT_MAGIC, snapshot_version(), legacy_version,
+            &portable)) {
         fclose(file);
         return false;
     }
     state.base.func = file_saveload;
+    state.base.saving = false;
+    state.base.portable = portable;
+    state.base.failed = false;
     state.file = file;
-    state.saving = false;
-    state.failed = false;
     RtlApuLock();
     snes_saveload(g_snes, &state.base);
-    if (!state.failed && g_rtl_apu_state_loaded_hook != NULL)
+    if (!state.base.failed && g_rtl_apu_state_loaded_hook != NULL)
         g_rtl_apu_state_loaded_hook(g_snes->apu);
     RtlApuUnlock();
     fclose(file);
-    return !state.failed;
+    return !state.base.failed;
 }
 
 void RtlSaveLoad(int command, int slot) {
@@ -449,64 +449,18 @@ void RtlApuWrite(uint16 address, uint8 value) {
     RtlApuUnlock();
 }
 
-static bool actraiser_bootstrap_present(const Apu *apu) {
-    static const uint8 entry[] = {
-        0x20, 0xcd, 0xcf, 0xbd, 0xe8, 0x00, 0x5d, 0xaf,
-        0xc8, 0xf0, 0xd0, 0xfb, 0xc5, 0xff, 0x11
-    };
-    static const uint8 idle[] = {0xeb, 0xfd, 0xf0, 0xfc};
-    return memcmp(apu->ram + AR_SPC_BOOT_ENTRY, entry, sizeof(entry)) == 0 &&
-           memcmp(apu->ram + AR_SPC_BOOT_IDLE_0, idle, sizeof(idle)) == 0;
-}
-
-static bool finish_actraiser_bootstrap(Apu *apu) {
-    unsigned cycles = 0u;
-    if (!actraiser_bootstrap_present(apu)) return true;
-    audio_trace_set_producer(AUDIO_TRACE_PRODUCER_CPU);
-    while (cycles++ < AR_SPC_BOOT_MAX_CYCLES &&
-           apu->spc->pc != AR_SPC_BOOT_IDLE_0 &&
-           apu->spc->pc != AR_SPC_BOOT_IDLE_1 && !apu->spc->stopped)
-        apu_cycle(apu);
-    audio_trace_set_producer(AUDIO_TRACE_PRODUCER_UNKNOWN);
-    return apu->spc->pc == AR_SPC_BOOT_IDLE_0 ||
-           apu->spc->pc == AR_SPC_BOOT_IDLE_1;
-}
-
-static bool resident_uploader_present(const Apu *apu) {
-    const uint8 *ram = apu->ram;
-    return ram[0x0f48] == 0xcdu && ram[0x0f49] == 0x31u &&
-           ram[0x0f4a] == 0xd8u && ram[0x0f4b] == 0xf1u &&
-           ram[0x0f4c] == 0x6fu;
-}
-
-void ar_uploader_complete_tick(void) {
-    if (!g_ar_uploader_complete_pending || g_snes == NULL) return;
-    RtlApuLock();
-    if (resident_uploader_present(g_snes->apu) &&
-        g_snes->apu->spc->pc >= 0x0f0eu &&
-        g_snes->apu->spc->pc <= 0x0f18u) {
-        g_snes->apu->spc->pc = 0x0f48u;
-        g_ar_uploader_complete_pending = 0;
-    }
-    RtlApuUnlock();
-}
-
 static bool upload_spc_image(CpuState *cpu, bool update_result) {
-    uint16 dp;
-    uint16 source_address;
-    uint8 source_bank;
     uint32 source24;
     size_t source_offset;
     SrSpcUploadResult upload;
     uint64_t profile_start = ApuProfEnabled() ? audio_trace_wall_ns() : 0u;
+    bool initial_upload;
     bool success;
     if (cpu == NULL || g_snes == NULL || g_snes->apu == NULL || g_rom == NULL)
         return false;
-    dp = (uint16)(cpu->D + AR_SPC_UPLOAD_DP_POINTER);
-    source_address = (uint16)g_ram[dp] |
-                     ((uint16)g_ram[(uint16)(dp + 1u)] << 8);
-    source_bank = g_ram[(uint16)(dp + 2u)];
-    source24 = ((uint32)source_bank << 16) | source_address;
+    if (g_rtl_game_info == NULL ||
+        g_rtl_game_info->spc_upload_source == NULL ||
+        !g_rtl_game_info->spc_upload_source(cpu, &source24)) return false;
     source_offset = (size_t)(RomPtr(source24) - g_rom);
 
     RtlApuLock();
@@ -516,27 +470,9 @@ static bool upload_spc_image(CpuState *cpu, bool update_result) {
         RtlApuUnlock();
         return false;
     }
-    if (g_last_recomp_func != NULL && strstr(g_last_recomp_func, "9964") != NULL &&
-        (upload.entry_point & 0xffu) != 0u) {
-        uint16 destination = (uint16)g_ram[0x358] |
-                             ((uint16)g_ram[0x359] << 8);
-        uint16 last_destination = destination;
-        uint16 last_length = 0u;
-        size_t pool_offset = (size_t)(RomPtr(0x088000u) - g_rom);
-        success = sr_spc_upload_samples(
-            g_rom, rom_size(), upload.script_offset,
-            (uint8)upload.entry_point, pool_offset, destination,
-            g_snes->apu->ram, &last_destination, &last_length);
-        if (success) {
-            uint16 d = cpu->D;
-            g_ram[d] = 0u;
-            g_ram[(uint16)(d + 1u)] = 0u;
-            g_ram[(uint16)(d + 2u)] = (uint8)last_destination;
-            g_ram[(uint16)(d + 3u)] = (uint8)(last_destination >> 8);
-            g_ram[(uint16)(d + 8u)] = (uint8)last_length;
-            g_ram[(uint16)(d + 9u)] = (uint8)(last_length >> 8);
-        }
-    }
+    if (g_rtl_game_info->spc_upload_customize != NULL)
+        success = g_rtl_game_info->spc_upload_customize(
+            cpu, &upload, source24);
     if (!success) {
         RtlApuUnlock();
         return false;
@@ -545,7 +481,8 @@ static bool upload_spc_image(CpuState *cpu, bool update_result) {
     apu_clearPortQueue(g_snes->apu);
     memset(g_snes->apu->inPorts, 0, sizeof(g_snes->apu->inPorts));
     memset(g_snes->apu->outPorts, 0, sizeof(g_snes->apu->outPorts));
-    if (g_snes->apu->romReadable) {
+    initial_upload = g_snes->apu->romReadable;
+    if (initial_upload) {
         g_snes->apu->romReadable = false;
         g_snes->apuCatchupCycles = 0.0;
         g_snes->apu->cpuCyclesLeft = 0u;
@@ -554,18 +491,11 @@ static bool upload_spc_image(CpuState *cpu, bool update_result) {
             spc->a = spc->x = spc->y = 0u;
             if (spc->sp == 0u) spc->sp = 0xefu;
             spc->pc = upload.entry_point;
-            if (spc->pc == AR_SPC_BOOT_ENTRY)
-                (void)finish_actraiser_bootstrap(g_snes->apu);
-        }
-    } else if (resident_uploader_present(g_snes->apu)) {
-        if (g_snes->apu->spc->pc >= 0x0f0eu &&
-            g_snes->apu->spc->pc <= 0x0f18u) {
-            g_snes->apu->spc->pc = 0x0f48u;
-            g_ar_uploader_complete_pending = 0;
-        } else {
-            g_ar_uploader_complete_pending = 1;
         }
     }
+    if (g_rtl_game_info->spc_upload_commit != NULL)
+        g_rtl_game_info->spc_upload_commit(
+            g_snes->apu, upload.entry_point, initial_upload);
     g_apu_last_sync_cycles = g_apu_pace_cycles_estimate;
     RtlApuUnlock();
 
@@ -586,8 +516,9 @@ static bool upload_spc_image(CpuState *cpu, bool update_result) {
 
 bool RtlUploadSpcImageFromDp(CpuState *cpu) {
     bool success = upload_spc_image(cpu, false);
-    int pop = g_last_recomp_func != NULL &&
-              strstr(g_last_recomp_func, "9A56") != NULL ? 2 : 3;
+    int pop = g_rtl_game_info != NULL &&
+                      g_rtl_game_info->spc_upload_stack_pop != NULL ?
+                  g_rtl_game_info->spc_upload_stack_pop(cpu) : 0;
     if (cpu != NULL) cpu->S = (uint16)(cpu->S + pop);
     return success;
 }
@@ -641,7 +572,7 @@ void RtlRenderAudio(int16 *audio_buffer, int samples, int channels) {
 
 void RtlMigrateLegacySram(const char *legacy_title) {
     char legacy[128];
-    char buffer[4096];
+    char buffer[1024];
     size_t count;
     FILE *source;
     FILE *destination;

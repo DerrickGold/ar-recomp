@@ -1,5 +1,5 @@
-#ifndef PPU_H
-#define PPU_H
+#ifndef SNESRECOMP_NEXT_PPU_H
+#define SNESRECOMP_NEXT_PPU_H
 
 #include "../types.h"
 #include "saveload.h"
@@ -12,6 +12,14 @@ typedef struct Ppu Ppu;
 
 typedef bool (*PpuVirtualTilemapLookup)(const void *, int32_t, int32_t,
                                         uint16_t *);
+/* Optional zero-copy scanline companion to lookup.  A provider exposes up to
+ * capacity consecutive tile coordinates (tile_x + i * tile_step) through a
+ * borrowed pointer and word stride.  A NULL entries result is a finite-world
+ * gap of the returned length.  The view remains valid until the provider's
+ * next span call; returning zero asks the PPU to use scalar lookup. */
+typedef size_t (*PpuVirtualTilemapSpanLookup)(
+    const void *, int32_t, int32_t, int32_t, size_t,
+    const uint16_t **, ptrdiff_t *);
 typedef bool (*PpuVirtualTilemapBandLookup)(const void *, int32_t, int32_t,
                                             uint16_t, uint8_t *);
 
@@ -19,6 +27,7 @@ enum { kPpuVirtualTilemapFlag_IncludeAuthentic = 1 };
 
 typedef struct PpuVirtualTilemapBinding {
     PpuVirtualTilemapLookup lookup;
+    PpuVirtualTilemapSpanLookup lookup_span;
     PpuVirtualTilemapBandLookup band_lookup;
     const void *context;
     int32_t camera_x, camera_y;
@@ -51,20 +60,49 @@ enum {
     kPpuOamWords = 256
 };
 
+/* Bitsets follow the target's native integer width.  This keeps the common
+ * set-bit iteration in registers on 32-bit ports such as ARMv6K/ARM11 while
+ * retaining the wider desktop path.  A build may force either width to run
+ * the same implementation through parity tests on a different host. */
+#ifndef SNESRECOMP_PPU_BIT_WORD_BITS
+#if UINTPTR_MAX <= UINT32_MAX
+#define SNESRECOMP_PPU_BIT_WORD_BITS 32
+#else
+#define SNESRECOMP_PPU_BIT_WORD_BITS 64
+#endif
+#endif
+
+#if SNESRECOMP_PPU_BIT_WORD_BITS == 32
+typedef uint32_t PpuBitWord;
+#elif SNESRECOMP_PPU_BIT_WORD_BITS == 64
+typedef uint64_t PpuBitWord;
+#else
+#error "SNESRECOMP_PPU_BIT_WORD_BITS must be 32 or 64"
+#endif
+
+enum {
+    kPpuBitWordBits = SNESRECOMP_PPU_BIT_WORD_BITS,
+    kPpuObjMaskWords = 128 / kPpuBitWordBits,
+    kPpuPixelMaskWords = kPpuXPixels / kPpuBitWordBits
+};
+
 typedef uint16_t PpuZbufType;
 typedef struct PpuPixelPrioBufs { PpuZbufType data[kPpuBufWidth]; }
     PpuPixelPrioBufs;
 
-enum { kPpuObjSampleCacheCount = 2 };
+enum { kPpuObjSampleCacheCount = 8 };
 
-/* Per-scanline OBJ winners for the two coordinate spaces scanout may use:
- * the live presentation and the authentic comparison surface.  Keeping this
- * bounded scratch storage on the PPU avoids re-walking all 128 OAM slots for
- * every output pixel. */
+/* Per-scanline OBJ winners for the coordinate spaces and source subsets that
+ * scanout may use.  A handful of entries covers the live/authentic views plus
+ * overlay removal, relocation, and semantic HUD ranges.  Keeping this bounded
+ * scratch storage on the PPU avoids re-walking all 128 OAM slots for every
+ * output pixel. */
 typedef struct PpuObjSampleCache {
     PpuPixelPrioBufs pixels;
-    uint64_t opaque[(kPpuXPixels + 63) / 64];
+    PpuBitWord opaque[kPpuPixelMaskWords];
     int16_t screen_y, x_offset;
+    uint8_t include_first, include_count;
+    uint8_t exclude_first, exclude_count;
     bool valid;
 } PpuObjSampleCache;
 
@@ -75,6 +113,29 @@ typedef struct PpuDecoded4bppRow {
     uint32_t source;
     uint32_t pixels;
 } PpuDecoded4bppRow;
+
+/* The virtual tilemap callback returns one word for an entire 8x8 tile.  The
+ * renderer samples pixels, so retain the last word per eligible BG layer for
+ * the duration of one scanline instead of repeating the same callback eight
+ * times. */
+typedef struct PpuVirtualSampleCache {
+    int32_t tile_x, tile_y;
+    uint16_t entry;
+    uint8_t band;
+    bool found;
+    bool valid;
+} PpuVirtualSampleCache;
+
+/* Mode 7 is affine across a scanline.  This cache carries the transformed
+ * canvas coordinate between adjacent pixel samples (and shares it between
+ * EXTBG's two logical layers), preserving the general sampler while avoiding
+ * a complete origin calculation for every pixel. */
+typedef struct PpuMode7SampleCache {
+    uint32_t source_x, source_y;
+    int32_t screen_x;
+    int sample_y, step_x, step_y;
+    bool valid;
+} PpuMode7SampleCache;
 
 typedef enum PpuOverlaySource {
     kPpuOverlaySource_Bg1,
@@ -148,6 +209,17 @@ typedef struct PpuObjRangeCapture {
     uint8_t *pixels;
     uint32_t pitch;
 } PpuObjRangeCapture;
+
+/* Per-PPU scanline workspace. Keeping the capture planes with the renderer
+ * avoids a roughly 16 KiB call frame on constrained ports without introducing
+ * process-global state or changing the portable rendering algorithm. */
+typedef struct PpuNativeLineScratch {
+    uint16_t layerMain[kPpuOverlaySource_Count][kPpuBufWidth];
+    uint16_t layerSub[kPpuOverlaySource_Count][kPpuBufWidth];
+    uint16_t mainPixels[kPpuBufWidth], subPixels[kPpuBufWidth];
+    uint16_t originalMain[kPpuBufWidth], originalSub[kPpuBufWidth];
+    uint8_t bands[2][kPpuBufWidth];
+} PpuNativeLineScratch;
 
 typedef struct PpuObjPart {
     int16_t x, y;
@@ -231,12 +303,15 @@ struct Ppu {
     uint32_t cgramRgb[kPpuCgramEntries];
     bool cgramRgbValid;
     PpuPixelPrioBufs bgBuffers[2], objBuffer;
-    /* Dense hardware-shaped eligibility: two OAM bitsets for every signed
-     * scanline the renderer can expose.  Rebuilt lazily after OAM geometry
-     * changes, then consumed in hardware rotation order. */
-    uint64_t objScanlineMasks[kPpuBufHeight][2];
+    /* Dense hardware-shaped 128-bit eligibility for every signed scanline the
+     * renderer can expose. Rebuilt lazily after OAM geometry changes, then
+     * consumed in hardware rotation order. */
+    PpuBitWord objScanlineMasks[kPpuBufHeight][kPpuObjMaskWords];
     bool objScanlineMasksValid;
     PpuObjSampleCache objSampleCache[kPpuObjSampleCacheCount];
+    PpuVirtualSampleCache virtualSampleCache[2];
+    PpuMode7SampleCache mode7SampleCache;
+    PpuNativeLineScratch nativeLineScratch;
     PpuDecoded4bppRow decoded4bppRows[0x8000];
     /* Low 16 bits are the source word; high 16 bits hold eight 2-bit pixels. */
     uint32_t decoded2bppRows[0x8000];

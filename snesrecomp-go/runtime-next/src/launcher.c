@@ -3,15 +3,16 @@
 #include "crc32.h"
 #include "sha256.h"
 
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #include <commdlg.h>
 #include <direct.h>
-#include <windows.h>
 #define sr_chdir _chdir
 #define sr_getcwd _getcwd
 #elif defined(__APPLE__)
@@ -80,10 +81,12 @@ static int executable_path(char *output, size_t capacity) {
 }
 
 static int executable_directory(char *output, size_t capacity) {
-    char path[kPathCapacity];
+    char *path = (char *)malloc(kPathCapacity);
     char *separator = NULL;
     char *cursor;
-    if (!executable_path(path, sizeof(path))) {
+    int success;
+    if (path == NULL || !executable_path(path, kPathCapacity)) {
+        free(path);
         return 0;
     }
     for (cursor = path; *cursor != '\0'; ++cursor) {
@@ -92,10 +95,13 @@ static int executable_directory(char *output, size_t capacity) {
         }
     }
     if (separator == NULL) {
+        free(path);
         return 0;
     }
     separator[1] = '\0';
-    return copy_path(output, capacity, path);
+    success = copy_path(output, capacity, path);
+    free(path);
+    return success;
 }
 
 int snesrecomp_abspath(const char *path, char *output, size_t capacity) {
@@ -104,77 +110,99 @@ int snesrecomp_abspath(const char *path, char *output, size_t capacity) {
     }
 #if defined(_WIN32)
     {
-        char resolved[kPathCapacity];
-        if (_fullpath(resolved, path, sizeof(resolved)) == NULL) {
+        char *resolved = (char *)malloc(kPathCapacity);
+        int success;
+        if (resolved == NULL ||
+            _fullpath(resolved, path, kPathCapacity) == NULL) {
+            free(resolved);
             return 0;
         }
-        return copy_path(output, capacity, resolved);
+        success = copy_path(output, capacity, resolved);
+        free(resolved);
+        return success;
     }
 #else
     if (path[0] == '/') {
         return copy_path(output, capacity, path);
     }
     {
-        char working_directory[kPathCapacity];
+        char *working_directory = (char *)malloc(kPathCapacity);
         int length;
-        if (sr_getcwd(working_directory, sizeof(working_directory)) == NULL) {
+        if (working_directory == NULL ||
+            sr_getcwd(working_directory, kPathCapacity) == NULL) {
+            free(working_directory);
             return 0;
         }
         length = snprintf(output, capacity, "%s/%s", working_directory, path);
+        free(working_directory);
         return length >= 0 && (size_t)length < capacity;
     }
 #endif
 }
 
 int snesrecomp_exe_dir_path(const char *leaf, char *output, size_t capacity) {
-    char directory[kPathCapacity];
+    char *directory = (char *)malloc(kPathCapacity);
     int length;
-    if (leaf == NULL || output == NULL || capacity == 0u ||
-        !executable_directory(directory, sizeof(directory))) {
+    if (directory == NULL || leaf == NULL || output == NULL || capacity == 0u ||
+        !executable_directory(directory, kPathCapacity)) {
+        free(directory);
         return 0;
     }
     length = snprintf(output, capacity, "%s%s", directory, leaf);
+    free(directory);
     return length >= 0 && (size_t)length < capacity;
 }
 
 static int directory_is_writable(const char *directory) {
-    char probe[kPathCapacity];
+    char *probe = (char *)malloc(kPathCapacity);
     FILE *file;
-    int length = snprintf(probe, sizeof(probe),
-                          "%s.snesrecomp-write-probe", directory);
-    if (length < 0 || (size_t)length >= sizeof(probe)) {
+    int length;
+    if (probe == NULL) return 0;
+    length = snprintf(probe, kPathCapacity,
+                      "%s.snesrecomp-write-probe", directory);
+    if (length < 0 || length >= kPathCapacity) {
+        free(probe);
         return 0;
     }
     file = fopen(probe, "wb");
     if (file == NULL) {
+        free(probe);
         return 0;
     }
     if (fclose(file) != 0) {
         remove(probe);
+        free(probe);
         return 0;
     }
     if (remove(probe) != 0) {
+        free(probe);
         return 0;
     }
+    free(probe);
     return 1;
 }
 
 int snesrecomp_anchor_to_exe_dir(void) {
-    char directory[kPathCapacity];
-    if (!executable_directory(directory, sizeof(directory))) {
+    char *directory = (char *)malloc(kPathCapacity);
+    if (directory == NULL ||
+        !executable_directory(directory, kPathCapacity)) {
+        free(directory);
         return 0;
     }
     if (!directory_is_writable(directory)) {
         fprintf(stderr, "[Launcher] Executable directory is not writable: %s\n",
                 directory);
+        free(directory);
         return 0;
     }
     if (sr_chdir(directory) != 0) {
         fprintf(stderr, "[Launcher] Could not use executable directory: %s\n",
                 directory);
+        free(directory);
         return 0;
     }
     fprintf(stderr, "[Launcher] Config/saves anchored to '%s'.\n", directory);
+    free(directory);
     return 1;
 }
 
@@ -186,13 +214,16 @@ static int rom_config_path(char *output, size_t capacity) {
 }
 
 static void read_cached_rom(char *output, size_t capacity) {
-    char path[kPathCapacity];
+    char *path = (char *)malloc(kPathCapacity);
     FILE *file;
     size_t length;
     output[0] = '\0';
-    if (!rom_config_path(path, sizeof(path)) || (file = fopen(path, "rb")) == NULL) {
+    if (path == NULL || !rom_config_path(path, kPathCapacity) ||
+        (file = fopen(path, "rb")) == NULL) {
+        free(path);
         return;
     }
+    free(path);
     if (fgets(output, (int)capacity, file) == NULL) {
         output[0] = '\0';
     }
@@ -205,11 +236,14 @@ static void read_cached_rom(char *output, size_t capacity) {
 }
 
 static void cache_rom(const char *rom_path) {
-    char path[kPathCapacity];
+    char *path = (char *)malloc(kPathCapacity);
     FILE *file;
-    if (!rom_config_path(path, sizeof(path)) || (file = fopen(path, "wb")) == NULL) {
+    if (path == NULL || !rom_config_path(path, kPathCapacity) ||
+        (file = fopen(path, "wb")) == NULL) {
+        free(path);
         return;
     }
+    free(path);
     if (fputs(rom_path, file) >= 0) {
         fputc('\n', file);
     }
@@ -323,25 +357,28 @@ static int matching_sha256(const char *path, const uint8_t (*hashes)[32],
 
 #if !defined(_WIN32)
 static int command_picker(const char *command, char *output, size_t capacity) {
-    char selected[kPathCapacity];
     FILE *pipe = popen(command, "r");
     int status;
     size_t length;
     if (pipe == NULL) {
         return 0;
     }
-    selected[0] = '\0';
-    if (fgets(selected, sizeof(selected), pipe) == NULL) {
-        selected[0] = '\0';
+    if (output == NULL || capacity == 0u) {
+        (void)pclose(pipe);
+        return 0;
+    }
+    if (capacity > (size_t)INT_MAX) capacity = (size_t)INT_MAX;
+    output[0] = '\0';
+    if (fgets(output, (int)capacity, pipe) == NULL) {
+        output[0] = '\0';
     }
     status = pclose(pipe);
-    length = strlen(selected);
+    length = strlen(output);
     while (length != 0u &&
-           (selected[length - 1u] == '\n' || selected[length - 1u] == '\r')) {
-        selected[--length] = '\0';
+           (output[length - 1u] == '\n' || output[length - 1u] == '\r')) {
+        output[--length] = '\0';
     }
-    return status == 0 && selected[0] != '\0' &&
-           copy_path(output, capacity, selected);
+    return status == 0 && output[0] != '\0';
 }
 #endif
 

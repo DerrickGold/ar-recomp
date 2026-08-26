@@ -274,61 +274,6 @@ bool ParseBool(const char *value, bool *result) {
     return parsed;
 }
 
-void ByteArray_Resize(ByteArray *array, size_t new_size) {
-    uint8 *replacement;
-    size_t capacity;
-    if (array == NULL) {
-        return;
-    }
-    if (new_size <= array->capacity) {
-        array->size = new_size;
-        return;
-    }
-    capacity = array->capacity;
-    if (capacity < 8u) {
-        capacity = 8u;
-    }
-    while (capacity < new_size) {
-        size_t growth = capacity / 2u + 1u;
-        if (capacity > SIZE_MAX - growth) {
-            capacity = new_size;
-            break;
-        }
-        capacity += growth;
-    }
-    replacement = (uint8 *)realloc(array->data, capacity);
-    if (replacement == NULL) {
-        abort();
-    }
-    array->data = replacement;
-    array->capacity = capacity;
-    array->size = new_size;
-}
-
-void ByteArray_Destroy(ByteArray *array) {
-    if (array == NULL) {
-        return;
-    }
-    free(array->data);
-    array->data = NULL;
-    array->size = 0u;
-    array->capacity = 0u;
-}
-
-void ByteArray_AppendData(ByteArray *array, const uint8 *data,
-                          size_t data_size) {
-    size_t old_size;
-    if (array == NULL || data_size == 0u) {
-        return;
-    }
-    if (data == NULL || array->size > SIZE_MAX - data_size) {
-        abort();
-    }
-    old_size = array->size;
-    ByteArray_Resize(array, old_size + data_size);
-    memcpy(array->data + old_size, data, data_size);
-}
-
 MemBlk FindIndexInMemblk(MemBlk data, size_t index) {
     size_t table_end;
     size_t item_count;

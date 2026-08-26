@@ -118,6 +118,7 @@ typedef struct ActRaiserActionBgDiagnostics {
   uint64_t provider_eligible_layers;
   uint64_t provider_layers;
   uint64_t provider_lookups;
+  uint64_t provider_batches;
   uint64_t provider_tiles;
   uint64_t provider_outside_world;
   uint64_t provider_tile_band_cache_builds;

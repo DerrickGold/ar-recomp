@@ -1,5 +1,5 @@
-#ifndef SPC_H
-#define SPC_H
+#ifndef SNESRECOMP_NEXT_SPC_H
+#define SNESRECOMP_NEXT_SPC_H
 
 #include <stdbool.h>
 #include <stdint.h>

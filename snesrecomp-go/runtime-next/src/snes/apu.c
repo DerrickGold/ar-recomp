@@ -1,6 +1,8 @@
 #include "apu.h"
 
+#include "dsp.h"
 #include "saveload.h"
+#include "snes.h"
 #include "spc.h"
 
 #include <stddef.h>
@@ -24,15 +26,6 @@ static const uint8_t k_recomp_boot_rom[0x40] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0xff,
 };
-
-extern Dsp *dsp_init(uint8_t *ram);
-extern void dsp_free(Dsp *dsp);
-extern void dsp_reset(Dsp *dsp);
-extern void dsp_cycle(Dsp *dsp);
-extern uint8_t dsp_read(Dsp *dsp, uint8_t address);
-extern void dsp_write(Dsp *dsp, uint8_t address, uint8_t value);
-extern void dsp_saveload(Dsp *dsp, SaveLoadInfo *info);
-extern uint64_t g_apu_timer0_total_ticks;
 
 void (*g_apu_port_apply_trace_hook)(Apu *, uint8_t, uint8_t);
 void (*g_apu_spc_port_read_trace_hook)(Apu *, uint8_t, uint8_t);
@@ -140,19 +133,57 @@ static void drain_port_queue(Apu *apu) {
 
 void apu_saveload(Apu *apu, SaveLoadInfo *info) {
     if (apu == NULL || info == NULL || info->func == NULL) return;
-    info->func(info, apu->ram,
-               offsetof(Apu, pad) + sizeof(apu->pad) - offsetof(Apu, ram));
+    if (!info->portable) {
+        info->func(info, apu->ram,
+                   offsetof(Apu, pad) + sizeof(apu->pad) -
+                       offsetof(Apu, ram));
+        dsp_saveload(apu->dsp, info);
+        spc_saveload(apu->spc, info);
+        info->func(info, apu->portQueue, sizeof(apu->portQueue));
+        info->func(info, &apu->portQHead, sizeof(apu->portQHead));
+        info->func(info, &apu->portQTail, sizeof(apu->portQTail));
+        info->func(info, &apu->sampleClock, sizeof(apu->sampleClock));
+        info->func(info, &apu->portClock, sizeof(apu->portClock));
+        info->func(info, &apu->portClockNs, sizeof(apu->portClockNs));
+        info->func(info, apu->portLastTarget, sizeof(apu->portLastTarget));
+        info->func(info, apu->portLastVal, sizeof(apu->portLastVal));
+        info->func(info, apu->portLastValid, sizeof(apu->portLastValid));
+        if (g_apu_extra_saveload_hook != NULL)
+            g_apu_extra_saveload_hook(apu, info);
+        return;
+    }
+    saveload_bytes(info, apu->ram, sizeof(apu->ram));
+    saveload_bool(info, &apu->romReadable);
+    saveload_u8(info, &apu->dspAdr);
+    saveload_u32(info, &apu->cycles);
+    saveload_bytes(info, apu->inPorts, sizeof(apu->inPorts));
+    saveload_bytes(info, apu->outPorts, sizeof(apu->outPorts));
+    for (unsigned index = 0; index < 3u; ++index) {
+        Timer *timer = &apu->timer[index];
+        saveload_u8(info, &timer->cycles);
+        saveload_u8(info, &timer->divider);
+        saveload_u8(info, &timer->target);
+        saveload_u8(info, &timer->counter);
+        saveload_bool(info, &timer->enabled);
+    }
+    saveload_u8(info, &apu->cpuCyclesLeft);
+    saveload_bytes(info, apu->pad, sizeof(apu->pad));
     dsp_saveload(apu->dsp, info);
     spc_saveload(apu->spc, info);
-    info->func(info, apu->portQueue, sizeof(apu->portQueue));
-    info->func(info, &apu->portQHead, sizeof(apu->portQHead));
-    info->func(info, &apu->portQTail, sizeof(apu->portQTail));
-    info->func(info, &apu->sampleClock, sizeof(apu->sampleClock));
-    info->func(info, &apu->portClock, sizeof(apu->portClock));
-    info->func(info, &apu->portClockNs, sizeof(apu->portClockNs));
-    info->func(info, apu->portLastTarget, sizeof(apu->portLastTarget));
-    info->func(info, apu->portLastVal, sizeof(apu->portLastVal));
-    info->func(info, apu->portLastValid, sizeof(apu->portLastValid));
+    for (unsigned index = 0; index < APU_PORT_QUEUE_LEN; ++index) {
+        saveload_u64(info, &apu->portQueue[index].target_sample);
+        saveload_u8(info, &apu->portQueue[index].port);
+        saveload_u8(info, &apu->portQueue[index].val);
+    }
+    saveload_u32(info, &apu->portQHead);
+    saveload_u32(info, &apu->portQTail);
+    saveload_u64(info, &apu->sampleClock);
+    saveload_u64(info, &apu->portClock);
+    saveload_u64(info, &apu->portClockNs);
+    for (unsigned index = 0; index < 4u; ++index)
+        saveload_u64(info, &apu->portLastTarget[index]);
+    saveload_bytes(info, apu->portLastVal, sizeof(apu->portLastVal));
+    saveload_bytes(info, apu->portLastValid, sizeof(apu->portLastValid));
     if (g_apu_extra_saveload_hook != NULL) g_apu_extra_saveload_hook(apu, info);
 }
 

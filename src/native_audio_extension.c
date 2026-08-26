@@ -8,6 +8,7 @@
 #include "settings.h"
 #include "snes/apu.h"
 #include "snes/dsp.h"
+#include "snes/saveload.h"
 #include "snes/snes.h"
 #include "snes/spc.h"
 
@@ -790,8 +791,65 @@ static int AdjustSpcOpcodeCycles(Spc *spc, uint16_t pc, int cycles) {
 static void SaveLoadExtensionState(Apu *apu, SaveLoadInfo *sli) {
   if (s_previous_extra_saveload)
     s_previous_extra_saveload(apu, sli);
-  if (s_enabled && sli)
+  if (!s_enabled || !sli || !sli->func) return;
+#if SNESRECOMP_PORTABLE_SAVELOAD
+  if (!sli->portable) {
     sli->func(sli, &s_state, sizeof(s_state));
+    return;
+  }
+  saveload_u64(sli, &s_state.next_serial);
+  for (int i = 0; i < kRequestQueueCapacity; i++) {
+    NativeAudioQueuedRequest *request = &s_state.queue[i];
+    saveload_u64(sli, &request->serial);
+    saveload_u64(sli, &request->trace_serial);
+    saveload_u32(sli, &request->caller_pc);
+    saveload_u32(sli, &request->game_frame);
+    saveload_u16(sli, &request->actor_x);
+    saveload_u16(sli, &request->actor_y);
+    saveload_u8(sli, &request->id);
+    saveload_u8(sli, &request->event_request);
+  }
+  for (int i = 0; i < kVirtualVoicePoolSize; i++) {
+    NativeAudioEffectInstance *instance = &s_state.instance[i];
+    saveload_u64(sli, &instance->serial);
+    saveload_u64(sli, &instance->trace_serial);
+    saveload_u32(sli, &instance->caller_pc);
+    saveload_u32(sli, &instance->game_frame);
+    saveload_u16(sli, &instance->actor_x);
+    saveload_u16(sli, &instance->actor_y);
+    saveload_bytes(sli, instance->state, sizeof(instance->state));
+    saveload_u8(sli, &instance->id);
+    saveload_u8(sli, &instance->voice);
+    saveload_u8(sli, &instance->lane_track);
+    saveload_u8(sli, &instance->lane_mask);
+    saveload_u8(sli, &instance->active);
+    saveload_u8(sli, &instance->event_request);
+    saveload_u8(sli, &instance->paired);
+    saveload_u8(sli, &instance->pair_phase);
+    saveload_u8(sli, &instance->noise_enabled);
+    saveload_u8(sli, &instance->start_kof_stage);
+    saveload_u8(sli, &instance->pending_kon);
+    saveload_u8(sli, &instance->ending);
+    saveload_u8(sli, &instance->end_kof_stage);
+    saveload_u8(sli, &instance->release_after_kon);
+  }
+  saveload_u32(sli, &s_state.queue_head);
+  saveload_u32(sli, &s_state.queue_count);
+  saveload_u32(sli, &s_state.coalesced_count);
+  saveload_u32(sli, &s_state.overflow_count);
+  saveload_u32(sli, &s_state.schedule_mask);
+  saveload_u8(sli, &s_state.scheduler_active);
+  saveload_u8(sli, &s_state.current_slot);
+  saveload_u8(sli, &s_state.active_virtual_voice);
+  saveload_u8(sli, &s_state.charged_lane_mask);
+  saveload_u8(sli, &s_state.current_update_free);
+  saveload_u8(sli, &s_state.sequence_track);
+  saveload_u8(sli, &s_state.sequence_mask);
+  saveload_u8(sli, &s_state.song_kon_pending_mask);
+  saveload_u8(sli, &s_state.current_opcode_free);
+#else
+  sli->func(sli, &s_state, sizeof(s_state));
+#endif
 }
 
 static void CancelAllEffectsLocked(Apu *apu) {

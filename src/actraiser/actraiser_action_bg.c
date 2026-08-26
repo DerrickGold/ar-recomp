@@ -1270,6 +1270,43 @@ static bool ProviderLookup(const void *context, int32_t tile_x,
   return false;
 }
 
+static size_t ProviderLookupSpan(const void *context, int32_t tile_x,
+                                 int32_t tile_y, int32_t tile_step,
+                                 size_t capacity,
+                                 const uint16_t **entries,
+                                 ptrdiff_t *entry_step) {
+  const ActRaiserActionBgProvider *provider = context;
+  if (!provider || !provider->world || !entries || !entry_step || !capacity ||
+      (tile_step != 1 && tile_step != -1))
+    return 0;
+
+  size_t filled = 0;
+  if (!provider->wrap_world_x) {
+    filled = ActionBgWorld_LookupSpan(
+        provider->world, tile_x, tile_y, tile_step,
+        capacity, entries, entry_step);
+  } else {
+    const unsigned width = ActionBgWorld_TileWidth(provider->world);
+    if (!width) return 0;
+    int64_t wrapped_coordinate = tile_x % (int64_t)width;
+    if (wrapped_coordinate < 0) wrapped_coordinate += width;
+    const int32_t wrapped = (int32_t)wrapped_coordinate;
+    size_t chunk = tile_step > 0
+        ? width - (unsigned)wrapped : (unsigned)wrapped + 1u;
+    if (chunk > capacity) chunk = capacity;
+    filled = ActionBgWorld_LookupSpan(
+        provider->world, wrapped, tile_y, tile_step,
+        chunk, entries, entry_step);
+  }
+
+  if (!filled) return 0;
+  s_observer.diagnostics.provider_batches++;
+  s_observer.diagnostics.provider_lookups += filled;
+  if (*entries) s_observer.diagnostics.provider_tiles += filled;
+  else s_observer.diagnostics.provider_outside_world += filled;
+  return filled;
+}
+
 static uint64_t HashTileBandWord(uint64_t hash, uint16_t value) {
   hash = DeterministicHash_Fnv1a64Byte(hash, (uint8_t)value);
   return DeterministicHash_Fnv1a64Byte(hash, (uint8_t)(value >> 8));
@@ -1628,6 +1665,7 @@ uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
     }
     const PpuVirtualTilemapBinding binding = {
       .lookup = ProviderLookup,
+      .lookup_span = ProviderLookupSpan,
       .band_lookup = tile_band_cache_ready ? ProviderBandLookup : NULL,
       .context = &s_provider[layer],
       .camera_x = snapshot.camera_x,
@@ -1803,7 +1841,7 @@ void ActRaiserActionBg_Shutdown(void) {
             " preflight={layers:%" PRIu64 ",tiles:%" PRIu64
             ",mismatches:%" PRIu64 ",outside:%" PRIu64 "}"
             " eligible=%" PRIu64 " layers=%" PRIu64
-            " lookups=%" PRIu64
+            " lookups=%" PRIu64 " batches=%" PRIu64
             " tiles=%" PRIu64 " outside=%" PRIu64
             " band-cache={builds:%" PRIu64 ",hits:%" PRIu64 "}\n",
             s_observer.diagnostics.provider_frames,
@@ -1814,6 +1852,7 @@ void ActRaiserActionBg_Shutdown(void) {
             s_observer.diagnostics.provider_eligible_layers,
             s_observer.diagnostics.provider_layers,
             s_observer.diagnostics.provider_lookups,
+            s_observer.diagnostics.provider_batches,
             s_observer.diagnostics.provider_tiles,
             s_observer.diagnostics.provider_outside_world,
             s_observer.diagnostics.provider_tile_band_cache_builds,

@@ -1,5 +1,7 @@
 #include "msu1.h"
 
+#include "../apu_sync.h"
+
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,9 +13,6 @@
 #else
 #include <dirent.h>
 #endif
-
-extern void RtlApuLock(void);
-extern void RtlApuUnlock(void);
 
 enum {
     kPathCapacity = 1024,
@@ -134,30 +133,43 @@ static void resolve_directory_base(void) {
            (directory[length - 1u] == '/' || directory[length - 1u] == '\\')) {
         directory[--length] = '\0';
     }
-    BaseCandidate candidates[16];
-    memset(candidates, 0, sizeof(candidates));
+    BaseCandidate *candidates =
+        (BaseCandidate *)calloc(16u, sizeof(*candidates));
+    if (candidates == NULL) return;
     unsigned candidate_count = 0u;
 #ifdef _WIN32
     char pattern[kPathCapacity];
     if (snprintf(pattern, sizeof(pattern), "%s\\*", directory) >=
-        (int)sizeof(pattern)) return;
+        (int)sizeof(pattern)) {
+        free(candidates);
+        return;
+    }
     WIN32_FIND_DATAA entry;
     HANDLE search = FindFirstFileA(pattern, &entry);
-    if (search == INVALID_HANDLE_VALUE) return;
+    if (search == INVALID_HANDLE_VALUE) {
+        free(candidates);
+        return;
+    }
     do {
         count_candidate(candidates, &candidate_count, entry.cFileName);
     } while (FindNextFileA(search, &entry));
     FindClose(search);
 #else
     DIR *stream = opendir(directory);
-    if (stream == NULL) return;
+    if (stream == NULL) {
+        free(candidates);
+        return;
+    }
     struct dirent *entry;
     while ((entry = readdir(stream)) != NULL) {
         count_candidate(candidates, &candidate_count, entry->d_name);
     }
     closedir(stream);
 #endif
-    if (candidate_count == 0u) return;
+    if (candidate_count == 0u) {
+        free(candidates);
+        return;
+    }
     unsigned best = 0u;
     for (unsigned index = 1u; index < candidate_count; ++index) {
         if (candidates[index].tracks > candidates[best].tracks) best = index;
@@ -165,9 +177,11 @@ static void resolve_directory_base(void) {
     char resolved[kPathCapacity];
     if (snprintf(resolved, sizeof(resolved), "%s/%s", directory,
                  candidates[best].name) >= (int)sizeof(resolved)) {
+        free(candidates);
         return;
     }
     snprintf(s_msu.base, sizeof(s_msu.base), "%s", resolved);
+    free(candidates);
 }
 
 bool msu1_configure_base(const char *path_prefix) {

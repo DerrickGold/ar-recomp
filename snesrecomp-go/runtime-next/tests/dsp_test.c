@@ -236,6 +236,64 @@ static void transfer_state(SaveLoadInfo *info, void *data, size_t size) {
     state->offset += size;
 }
 
+static void reference_resample(const int16_t *ring, uint32_t base,
+                               int16_t *output, int sample_count,
+                               double native_step, double *phase,
+                               uint32_t *consumed_out) {
+    double position = *phase;
+    for (int index = 0; index < sample_count; ++index) {
+        const uint32_t whole = (uint32_t)position;
+        const double fraction = position - (double)whole;
+        const uint32_t first = (base + whole) & (DSP_SAMPLE_RING - 1u);
+        const uint32_t second = (first + 1u) & (DSP_SAMPLE_RING - 1u);
+        for (int side = 0; side < 2; ++side) {
+            const int a = ring[first * 2u + (unsigned)side];
+            const int b = ring[second * 2u + (unsigned)side];
+            output[index * 2 + side] =
+                (int16_t)(a + (int)((b - a) * fraction));
+        }
+        position += native_step;
+    }
+    *consumed_out = (uint32_t)position;
+    *phase = position - (double)*consumed_out;
+}
+
+static void test_resampler_matches_portable_reference(Dsp *dsp) {
+    static const double steps[] = {
+        32040.0 / 48000.0, 32040.0 / 44100.0, 1.0, 1.375, 2.125
+    };
+    static const uint32_t starts[] = {0u, 1u, 8189u, 8191u, 0xfffffff0u};
+    int16_t actual[257 * 2];
+    int16_t expected[257 * 2];
+    uint32_t random = 0x12d4a76bu;
+    for (unsigned index = 0; index < DSP_SAMPLE_RING * 2u; ++index) {
+        random = random * 1664525u + 1013904223u;
+        dsp->sampleBuffer[index] = (int16_t)(random >> 16);
+    }
+    for (unsigned step_index = 0;
+         step_index < sizeof(steps) / sizeof(steps[0]); ++step_index) {
+        for (unsigned start_index = 0;
+             start_index < sizeof(starts) / sizeof(starts[0]); ++start_index) {
+            double actual_phase = 0.3141592653589793;
+            double expected_phase = actual_phase;
+            uint32_t expected_consumed = 0u;
+            const uint32_t base = starts[start_index];
+            dsp->sampleRead = base;
+            dsp->sampleWrite = base + DSP_SAMPLE_RING;
+            reference_resample(dsp->sampleBuffer, base, expected, 257,
+                               steps[step_index], &expected_phase,
+                               &expected_consumed);
+            dsp_getSamplesResampled(dsp, actual, 257, steps[step_index],
+                                    &actual_phase);
+            check(memcmp(actual, expected, sizeof(actual)) == 0,
+                  "selected resampler is PCM-exact to portable reference");
+            check(dsp->sampleRead == base + expected_consumed &&
+                      actual_phase == expected_phase,
+                  "selected resampler preserves portable phase advancement");
+        }
+    }
+}
+
 static void test_state_ring_and_resampling(void) {
     uint8_t ram[0x10000];
     Dsp *dsp = new_dsp(ram);
@@ -245,12 +303,15 @@ static void test_state_ring_and_resampling(void) {
     MemoryState state;
     memset(&state, 0, sizeof(state));
     state.info.func = transfer_state;
+    state.info.saving = true;
+    state.info.portable = true;
     dsp_saveload(dsp, &state.info);
     check(state.offset > sizeof(dsp->ram),
           "save span includes channel and sequencer state");
     memset(&dsp->channel[8], 0, sizeof(dsp->channel[8]));
     state.offset = 0u;
     state.loading = true;
+    state.info.saving = false;
     dsp_saveload(dsp, &state.info);
     check(dsp->channel[8].srcn == 0x55u &&
           dsp->channel[8].pitch == 0x2345u,
@@ -274,6 +335,7 @@ static void test_state_ring_and_resampling(void) {
     check(output[0] == 500 && output[1] == 600 && dsp->sampleRead == 1u &&
           phase == 0.5 && trace_consumes > 0u,
           "continuous resampler interpolates and preserves fractional phase");
+    test_resampler_matches_portable_reference(dsp);
     dsp_free(dsp);
 }
 

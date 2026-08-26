@@ -2,21 +2,11 @@
 
 #include "ar_trace.h"
 #include "common_cpu_infra.h"
+#include "common_rtl.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-extern uint8 g_ram[kSnesWramSize];
-extern uint8 *g_sram;
-extern int g_sram_size;
-extern uint64_t g_main_cpu_cycles_estimate;
-extern uint64_t g_apu_pace_cycles_estimate;
-uint8 ReadReg(uint16 reg);
-uint16 ReadRegWord(uint16 reg);
-void WriteReg(uint16 reg, uint8 value);
-void WriteRegWord(uint16 reg, uint16 value);
-uint8 *RomPtr(uint32 address);
 
 CpuState g_cpu;
 void (*g_cpu_brk_hook)(CpuState *cpu);
@@ -40,7 +30,6 @@ static DispatchLogEntry g_dispatch_log[kDispatchLogCapacity];
 static unsigned g_dispatch_count;
 static uint32 g_dispatch_depth[kDispatchDepthCapacity];
 static unsigned g_dispatch_depth_count;
-extern int snes_frame_counter;
 
 static int ram_offset(uint8 bank, uint16 address) {
     if (bank == 0x7eu) return address;
@@ -249,6 +238,21 @@ static RecompReturn dispatch_once(CpuState *cpu, uint32 pc24,
         if (followed != 0xffffffffu) {
             function = dispatch_lookup_mirrored(cpu, followed, &mirrored);
             if (function != NULL) pc24 = followed;
+        }
+        if (function == NULL) {
+            /* The game-approved target is a data-driven handler that has no
+             * emitted body. Model its return instead of treating the miss as
+             * a return from the surrounding host function: the next word on
+             * the 65816 stack is the handler's RTS continuation, and that
+             * continuation may contain width-restoring REP/SEP instructions. */
+            uint16 return_address =
+                (uint16)cpu_read8(cpu, 0u, (uint16)(cpu->S + 1u));
+            return_address |=
+                (uint16)cpu_read8(cpu, 0u, (uint16)(cpu->S + 2u)) << 8;
+            cpu->S = (uint16)(cpu->S + 2u);
+            pc24 = ((uint32)bank << 16) |
+                   (uint16)(return_address + 1u);
+            function = dispatch_lookup_mirrored(cpu, pc24, &mirrored);
         }
     }
 

@@ -8,7 +8,21 @@ import (
 
 func TestResolveRunner(t *testing.T) {
 	toolchain := filepath.FromSlash("/project/snesrecomp-go")
-	legacy, err := ResolveRunner(toolchain, "")
+	defaultRunner, err := ResolveRunner(toolchain, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if RunnerDefault != RunnerNext {
+		t.Fatalf("default runner = %q, want %q", RunnerDefault, RunnerNext)
+	}
+	if defaultRunner.Name != RunnerNext || defaultRunner.LegacyFallback {
+		t.Fatalf("default runner: %+v", defaultRunner)
+	}
+	if defaultRunner.Directory != filepath.Join(toolchain, "runtime-next") {
+		t.Fatalf("default runner directory: %s", defaultRunner.Directory)
+	}
+
+	legacy, err := ResolveRunner(toolchain, " LEGACY ")
 	if err != nil {
 		t.Fatal(err)
 	}
