@@ -420,6 +420,8 @@ install(DIRECTORY ${GAME_ROOT}/third_party/stb/ DESTINATION utils/third_party/st
     PATTERN ".DS_Store" EXCLUDE)
 install(DIRECTORY ${SNESBUILD_MODULE_DIR}/runtime/ DESTINATION utils/snesrecomp-go/runtime
     PATTERN ".DS_Store" EXCLUDE)
+install(DIRECTORY ${SNESBUILD_MODULE_DIR}/runtime-next/ DESTINATION utils/snesrecomp-go/runtime-next
+    PATTERN ".DS_Store" EXCLUDE)
 
 # game-assets: initially empty HD/music folders. The bundled manual and optional
 # HD title are already embedded in snesbuild; the manual is materialized when the

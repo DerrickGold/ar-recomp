@@ -57,6 +57,18 @@ snesbuild gui --root .         # local graphical ROM picker + hermetic build
 snesbuild audio-preview --rom ar.sfc --out build/audio-previews
 ```
 
+Runner comparisons use the same build entry points:
+
+```sh
+cmake --preset dev                         # inherited release runner
+cmake --preset dev-next                    # independent portable runner
+snesbuild build --hermetic --runner next   # isolated Zig object tree
+```
+
+`legacy` remains the default comparison target. `next` contains only the
+independently authored MIT runner; its manifest has no legacy source or include
+fallbacks. Projects can switch between them without sharing object caches.
+
 Zig 0.16.0 is resolved from `$SNESBUILD_ZIG`, `build/toolchain/`, then `PATH`.
 `snesbuild toolchain status` reports the pin and local availability. Fetches are
 verified against a checksum embedded in `snesbuild`.
@@ -74,8 +86,9 @@ never depends on `tar` having `.xz` support.
 
 Inputs are split along the same boundary as the redistribution rules:
 
-- `snesrecomp-go/runtime/runner.cmake` stays the single source of truth for
-  the engine's source list (parsed directly, so the CMake and hermetic builds
+- the selected `snesrecomp-go/runtime/runner.cmake` or
+  `snesrecomp-go/runtime-next/runner.cmake` stays the source of truth for the
+  engine's source list (parsed directly, so the CMake and hermetic builds
   cannot drift);
 - `snesbuild.ini` at the project root declares the game half: target name,
   game sources, includes, defines, and SDL3 usage. `snesbuild doctor`
@@ -83,9 +96,10 @@ Inputs are split along the same boundary as the redistribution rules:
   drift;
 - generated banks are globbed from `src/gen` as always.
 
-Output lands in `build/hermetic/` with flat per-source objects. Rebuilds are
-incremental using source/header mtimes and a flags hash. Use CMake for normal
-development, tests, and sanitizers; use the hermetic path for distribution.
+Legacy output lands in `build/hermetic/`; next output lands in
+`build/hermetic-next/`. Both use flat per-source objects and incremental
+source/header mtimes plus a flags hash. Use CMake for normal development,
+tests, and sanitizers; use the hermetic path for distribution.
 
 ### Cross-target link checks
 

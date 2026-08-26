@@ -51,7 +51,7 @@ ROM ?= ar.sfc
 
 # Regenerable artifacts, grouped. Never lists the ROM, saves/*.srm, recordings,
 # or authored source; only the specific generated sidecars inside saves/.
-CLEAN_BUILD_DIRS := build build-release build-control build-terrain build-asan build-trace $(PACKAGING)/build snesrecomp-go/build
+CLEAN_BUILD_DIRS := build build-next build-release build-control build-terrain build-asan build-trace $(PACKAGING)/build snesrecomp-go/build
 CLEAN_GENERATED  := src/gen recomp/funcs.h saves/gen_meta.json saves/rts_webs.txt saves/rts_webs.prev.txt
 CLEAN_RELEASE    := release
 

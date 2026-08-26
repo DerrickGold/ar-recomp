@@ -2390,6 +2390,44 @@ static void TestCapturedPaddingReachesBudget(void) {
   CHECK((right_on & 0xffffffu) != 0);
   CHECK(right_off == 0);
 
+  /* Padding to the fixed capture budget applies only to synthesized
+   * mirror/repeat layers. A raw-wrap BG3 HUD split can occupy the live margin,
+   * but it must not leak wrapped HUD tiles into a side whose finite-world
+   * margin has collapsed. The sim-arrowbug replay exposed this as a solid
+   * 24x32 mismatch at the far-left edge of every separated composite. */
+  {
+    const int bg3 = kActRaiserPpuLayer_Bg3;
+    ppu_reset(ppu);
+    memset(capture, 0, sizeof(capture));
+    memset(fb, 0, sizeof(fb));
+    ppu->inidisp = 0x0f;
+    ppu->bgmode = 1;
+    ppu->screenEnabled[0] = (uint8_t)(1u << bg3);
+    ppu->cgram[0] = bgr555(0, 0, 0);
+    ppu->cgram[1] = bgr555(31, 0, 31);
+    set_solid_2bpp_tile(ppu, 0, 1, 1);
+    ppu->bgTileAdr = 0;
+    ppu->bgXsc[bg3] = 0x20 | 0x3;
+    for (int i = 0; i < 0x1000; i++)
+      ppu->vram[0x2000 + i] = 1;
+    PpuSetExtraSpace(ppu, kBudget);
+    PpuSetWidescreenPadCapturedToBudget(ppu, 1);
+    PpuSetWidescreenHudSplit(ppu, 8, 100, 100, 8, 8);
+    PpuSetExtraSideSpace(ppu, 0, kLiveRight, 0);
+
+    PpuBeginDrawing(ppu, fb, kCaptureWidth * 4, 0);
+    CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg3,
+                                (uint8_t *)capture,
+                                kCaptureWidth * sizeof(uint32_t)));
+    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg3, -kBudget, 0,
+                               kCaptureWidth, 2, 0));
+    ppu_runLine(ppu, 1);
+
+    CHECK(capture[0] == 0);
+    CHECK((capture[kBudget + 10] & 0xffffffu) != 0);
+    PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg3, NULL, 0);
+  }
+
   /* GATE PROOF. The game's own framebuffer must NOT gain the widened padding:
    * a narrower margin there is the intended pillarbox at a world edge, and
    * HUD-split rows composite the full budget. Framebuffer column 0 stays the

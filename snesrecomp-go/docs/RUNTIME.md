@@ -4,6 +4,10 @@
 `snesrecomp-go`. It remains C because generated functions are C and link
 directly against its ABI. Go is needed for regeneration, not at game runtime.
 
+The independently authored portable replacement lives in parallel under
+`runtime-next/`; see its README and provenance record. It contains no legacy
+source/include fallback. `legacy` remains selectable for comparisons.
+
 ## Boundary
 
 The shared layer provides:
@@ -109,6 +113,11 @@ a consuming project verifies and documents them for its own ROM.
   built by the default or trace source lists.
 - Platform claims should be based on each consuming project's CI/build matrix;
   the ActRaiser host project currently validates macOS most thoroughly.
+
+These constraints describe the inherited runner. Replacement code in
+`runtime-next/` has a stricter contract: portable C11, fixed-width public ABI
+types, no platform-library types in core headers, read-only/no-allocation hot
+paths, and native plus Zig cross-target compile gates.
 
 ## Provenance
 

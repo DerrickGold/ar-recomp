@@ -71,6 +71,11 @@ now provided under the MIT terms in [`LICENSE`](LICENSE). This includes the new
 pure-Go audio-preview emulator; it is an original implementation and does not
 link to or incorporate the inherited C runner.
 
+It also includes the independently authored sources in
+[`runtime-next/`](runtime-next/). The selectable `next` whole-game manifest has
+no source or include fallback to `runtime/`. Generated/recompiled game code and
+game assets remain outside the runner grant as described below.
+
 That grant deliberately stops at [`runtime/`](runtime/). At the pinned
 historical snapshot, `snesrecomp` stated that an overall license had not yet
 been declared, and the runner also identified inherited LakeSnes/Snes9x terms

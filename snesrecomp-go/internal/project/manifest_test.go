@@ -102,6 +102,33 @@ set(SNESRECOMP_RUNNER_INCLUDE_DIRS
 	}
 }
 
+func TestRunnerSourcesCleansMigrationFallbackPaths(t *testing.T) {
+	toolchain := t.TempDir()
+	nextDir := filepath.Join(toolchain, "runtime-next")
+	writeTestFile(t, filepath.Join(nextDir, "runner.cmake"), `
+set(SNESRECOMP_RUNNER_ROOT ${CMAKE_CURRENT_LIST_DIR})
+set(SNESRECOMP_RUNNER_SOURCES
+    ${SNESRECOMP_RUNNER_ROOT}/src/new.c
+    ${SNESRECOMP_RUNNER_ROOT}/../runtime/src/legacy.c
+)
+set(SNESRECOMP_RUNNER_INCLUDE_DIRS
+    ${SNESRECOMP_RUNNER_ROOT}/src
+    ${SNESRECOMP_RUNNER_ROOT}/../runtime/src
+)
+`)
+	sources, includes, err := RunnerSources(nextDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantLegacy := filepath.Join(toolchain, "runtime", "src", "legacy.c")
+	if sources[1] != wantLegacy {
+		t.Fatalf("fallback source = %s, want %s", sources[1], wantLegacy)
+	}
+	if strings.Contains(sources[1], "..") || strings.Contains(includes[1], "..") {
+		t.Fatalf("fallback paths were not cleaned: %v %v", sources, includes)
+	}
+}
+
 func TestManifestDriftWarnings(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, filepath.Join(root, "CMakeLists.txt"), `
