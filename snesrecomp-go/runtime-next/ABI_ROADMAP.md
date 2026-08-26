@@ -1,12 +1,12 @@
 # Runner ABI roadmap
 
-`runtime-next` currently preserves the generated-code ABI and the legacy-shaped
-global surface needed for side-by-side rollout. Those globals and concrete
+`runtime-next` currently preserves the generated-code ABI and the compatibility
+global surface used during rollout. Those globals and concrete
 `Ppu`, `Snes`, CPU, APU, and DSP layouts are compatibility details, not the
 long-term extension API.
 
-After the legacy runner is retired, expose a versioned portable C ABI centered
-on a `SnesRunnerApi` table. The table starts with an ABI version and structure
+The next ABI phase is a versioned portable C API centered on a
+`SnesRunnerApi` table. The table starts with an ABI version and structure
 size, advertises capability bits, and operates on opaque runner, CPU, PPU, APU,
 DSP, cartridge, and host handles. Public values use fixed-width integers and
 descriptors; they never expose compiler layout, SDL objects, native file

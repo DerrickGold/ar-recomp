@@ -32,7 +32,7 @@ pitch, source number, ADSR, and gain registers; the global KON, KOF, PMON, NON,
 and EON registers address them with one bit per voice. The local DSP core models
 the authentic eight plus 32 optional game-owned virtual voices as
 `DspChannel channel[kDspMaximumVoiceCount]` in
-`snesrecomp-go/runtime/src/snes/dsp.h`; authentic mode cycles only the first
+`snesrecomp-go/runtime-next/src/snes/dsp.h`; authentic mode cycles only the first
 eight.
 
 ActRaiser's uploaded SPC700 program is the ROM block at file `$011ACD`, loaded

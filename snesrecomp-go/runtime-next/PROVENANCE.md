@@ -90,7 +90,6 @@ devices above. The PPU implements the SNES register/memory model and the
 project's tested tile, sprite, Mode-7, window, color-math, widescreen,
 authentic-surface, and overlay-extraction contracts.
 
-The selectable `next` manifest links and includes only files from
-`runtime-next`; `legacy_source_count` is zero and `runner.cmake` declares
-`SNESRECOMP_RUNNER_LEGACY_FALLBACK=OFF`. The historical runner remains a
-separately selectable comparison target and is outside this MIT grant.
+The sole runner manifest links and includes only files from `runtime-next`.
+The historical comparison runner was retired after parity validation and is
+not part of the repository or distribution.

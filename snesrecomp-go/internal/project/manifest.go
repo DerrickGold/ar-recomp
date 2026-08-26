@@ -86,7 +86,7 @@ func LoadManifest(path string) (Manifest, error) {
 	return manifest, nil
 }
 
-// RunnerSources parses a selected runner.cmake for the engine's shared source
+// RunnerSources parses runner.cmake for the engine's shared source
 // and include lists so the hermetic build and the CMake build cannot drift.
 // Only the unconditional first set(...) block of each variable is read; the
 // block may live directly in runner.cmake or in a single-line, runner-root-

@@ -1,6 +1,7 @@
 #include "snes.h"
 
 #include "../apu_sync.h"
+#include "../runtime_constants.h"
 #include "apu.h"
 #include "cart.h"
 #include "cpu.h"
@@ -13,8 +14,6 @@
 #include <string.h>
 
 enum {
-    SNES_WRAM_SIZE = 0x20000,
-    SNES_WRAM_MASK = SNES_WRAM_SIZE - 1,
     SNES_SCANLINE_MASTER_CYCLES = 1364,
     SNES_HBLANK_START = 1024,
     SNES_STATUS_READ_STEP = 64,
@@ -78,7 +77,7 @@ void snes_saveload(Snes *snes, SaveLoadInfo *info) {
         ppu_saveload(snes->ppu, info);
         cart_saveload(snes->cart, info);
         info->func(info, &snes->hPos, sizeof(*snes) - offsetof(Snes, hPos));
-        info->func(info, snes->ram, SNES_WRAM_SIZE);
+        info->func(info, snes->ram, kSnesWramSize);
         info->func(info, &snes->ramAdr, sizeof(snes->ramAdr));
         snes->cpu->e = false;
         return;
@@ -109,7 +108,7 @@ void snes_saveload(Snes *snes, SaveLoadInfo *info) {
     saveload_u16(info, &snes->multiplyResult);
     saveload_u16(info, &snes->divideA);
     saveload_u16(info, &snes->divideResult);
-    saveload_bytes(info, snes->ram, SNES_WRAM_SIZE);
+    saveload_bytes(info, snes->ram, kSnesWramSize);
     saveload_u32(info, &snes->ramAdr);
     snes->cpu->e = false;
 }
@@ -124,7 +123,7 @@ void snes_reset(Snes *snes, bool hard) {
     dma_reset(snes->dma);
     ppu_reset(snes->ppu);
     if (hard) {
-        memset(snes->ram, 0, SNES_WRAM_SIZE);
+        memset(snes->ram, 0, kSnesWramSize);
     }
     snes->ramAdr = 0u;
     snes->hPos = 0u;
@@ -178,7 +177,7 @@ void snes_catchup_stats(uint64_t *calls, uint64_t *cycles) {
 }
 
 static void write_wram(Snes *snes, uint32_t offset, uint8_t value) {
-    offset &= SNES_WRAM_MASK;
+    offset &= kSnesWramMask;
     const uint8_t old_value = snes->ram[offset];
     snes->ram[offset] = value;
     if (g_snes_wram_write_hook != NULL) {
@@ -204,8 +203,8 @@ uint8_t snes_readBBus(Snes *snes, uint8_t address) {
         return value;
     }
     if (address == 0x80u) {
-        const uint8_t value = snes->ram[snes->ramAdr & SNES_WRAM_MASK];
-        snes->ramAdr = (snes->ramAdr + 1u) & SNES_WRAM_MASK;
+        const uint8_t value = snes->ram[snes->ramAdr & kSnesWramMask];
+        snes->ramAdr = (snes->ramAdr + 1u) & kSnesWramMask;
         return value;
     }
     return 0u;
@@ -224,7 +223,7 @@ void snes_writeBBus(Snes *snes, uint8_t address, uint8_t value) {
     switch (address) {
         case 0x80u:
             write_wram(snes, snes->ramAdr, value);
-            snes->ramAdr = (snes->ramAdr + 1u) & SNES_WRAM_MASK;
+            snes->ramAdr = (snes->ramAdr + 1u) & kSnesWramMask;
             break;
         case 0x81u:
             snes->ramAdr = (snes->ramAdr & 0x1ff00u) | value;

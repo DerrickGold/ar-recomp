@@ -351,8 +351,7 @@ section, and
 [what can and can't be committed](docs/contributing.md#what-can-and-cant-be-committed-here).
 
 The original Go implementation, tooling, tests, and documentation under
-`snesrecomp-go/` have their own [MIT license](snesrecomp-go/LICENSE). Its
-inherited C runner under `snesrecomp-go/runtime/` is explicitly outside both
-MIT grants and retains its current unresolved written-license status; see
-`snesrecomp-go/runtime/LICENSE`, `snesrecomp-go/ATTRIBUTION.md`, and the root
-LICENSE Scope section.
+`snesrecomp-go/`, including its independently authored portable C runner, have
+their own [MIT license](snesrecomp-go/LICENSE). Historical project lineage and
+third-party acknowledgements are recorded in
+[`snesrecomp-go/ATTRIBUTION.md`](snesrecomp-go/ATTRIBUTION.md).

@@ -418,8 +418,6 @@ install(DIRECTORY ${GAME_ROOT}/src/ DESTINATION utils/src
     PATTERN ".DS_Store" EXCLUDE)
 install(DIRECTORY ${GAME_ROOT}/third_party/stb/ DESTINATION utils/third_party/stb
     PATTERN ".DS_Store" EXCLUDE)
-install(DIRECTORY ${SNESBUILD_MODULE_DIR}/runtime/ DESTINATION utils/snesrecomp-go/runtime
-    PATTERN ".DS_Store" EXCLUDE)
 install(DIRECTORY ${SNESBUILD_MODULE_DIR}/runtime-next/ DESTINATION utils/snesrecomp-go/runtime-next
     PATTERN ".DS_Store" EXCLUDE)
 

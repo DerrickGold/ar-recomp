@@ -1,22 +1,17 @@
-# Portable runner (`next`)
+# Portable runner
 
-This directory is the independently authored replacement for the inherited C
-runner in `../runtime`. Both remain selectable so projects can run behavioral
-comparisons during rollout.
+This directory contains the independently authored portable C runner. It is the
+sole runtime used by project, hermetic, and distribution builds.
 
 Current status:
 
-- `next` is the default standalone playable runner. Its manifest has no legacy
-  sources or include paths and reports `legacy_source_count == 0`.
-- `legacy` remains separately selectable for behavioral and performance A/B
-  comparisons during the transition.
+- `runner.cmake` is the sole whole-game source and include manifest.
 - The implementation covers hashing, ROM/SRAM and LoROM/HiROM mapping, 65816
   generated-code ABI and dispatch, DMA, the SNES bus/register model, PPU,
   APU/SPC700/S-DSP, MSU-1, frame/audio pacing, save state, diagnostics,
   widescreen and overlay presentation, key bindings, and launcher utilities.
 - `cmake -S runtime-next -B <build-dir>` builds only independently authored MIT
-  sources and runs without SDL, a ROM, generated game code, or the legacy
-  runtime.
+  sources and runs without SDL, a ROM, or generated game code.
 
 Design requirements for every replacement subsystem:
 
@@ -61,16 +56,10 @@ cmake -S runtime-next -B <build-dir> \
 
 `auto` is the default; the other accepted values are `32` and `64`.
 
-The historical runner is still available explicitly:
-
-```sh
-cmake --preset play-legacy
-go run ./snesrecomp-go/cmd/snesbuild build --runner legacy
-```
-
-The MIT grant covers this runner and its manifest. It does not cover ROMs,
-generated game code, extracted media, or the separately selectable historical
-runner; see `../LICENSE` and `PROVENANCE.md` for the precise boundary.
+The historical comparison runner was retired after parity validation. The MIT
+grant covers this runner and its manifest. It does not cover ROMs, generated
+game code, or extracted media; see `../LICENSE` and `PROVENANCE.md` for the
+precise boundary.
 
 The post-cutover component-access and low-copy ABI plan is tracked in
 [`ABI_ROADMAP.md`](ABI_ROADMAP.md). It deliberately keeps game semantics in

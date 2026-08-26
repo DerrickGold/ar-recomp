@@ -1,8 +1,8 @@
 # Pure-Go audio preview core
 
 This package is an independently authored, audio-only SNES APU implementation
-for local ROM-owner preview generation. It does not import, link, translate, or
-copy the inherited C runner under `runtime/`.
+for local ROM-owner preview generation. It does not import or link the playable
+C runner.
 
 The preview path models:
 

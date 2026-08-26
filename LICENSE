@@ -15,10 +15,6 @@ It does **not** cover, and grants no rights to:
   generate them yourself, locally, from your own legally obtained ROM, and
   they remain subject to the original game's copyright regardless of this
   license.
-- `snesrecomp-go/runtime/`, the copied and modified C runner inherited from
-  the historical Python `snesrecomp` project. It is deliberately outside both
-  this grant and the separate MIT grant in `snesrecomp-go/LICENSE`; see
-  `snesrecomp-go/runtime/LICENSE` for its current status.
 - Retail/manual/cover media under `snesrecomp-go/internal/buildgui/assets/`.
   Those files are distributed for project use but are not relicensed under
   MIT. The independently authored Go source which embeds and serves them is

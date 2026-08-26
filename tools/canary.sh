@@ -15,7 +15,7 @@ cd "${ROOT}"
 echo "[canary] configure ROM-free test tier"
 cmake -S "${ROOT}" -B "${BUILD}" -G Ninja \
       -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON \
-      -DAR_TESTS_ONLY=ON -DSNESRECOMP_RUNNER=next \
+      -DAR_TESTS_ONLY=ON \
       >/tmp/canary_cfg.log 2>&1 \
   || { echo "[canary] CONFIGURE FAILED — see /tmp/canary_cfg.log"; tail -15 /tmp/canary_cfg.log; exit 1; }
 

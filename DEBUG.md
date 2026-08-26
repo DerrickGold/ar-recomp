@@ -224,7 +224,7 @@ those cases.
 | **Rendering wrong (no text, no HBlank, missing BG, black screen)** | `AR_PPULOG=1` (bgmode, brightness, forced-blank, layer enables, HDMAEN) + **oracle screenshots** (`AR_SHOT_AT_GF` vs `SNESREF_SHOT_AT_GF`) | audit the PPU/DMA runtime (`ActRaiserDrawPpuFrame`); WRAM oracle is **blind** to VRAM |
 | **Missing/extra sound or music** | check **BRK/COP syscall hooks** (§7) — `$035B`=SFX (BRK), `$035A`=music/event (COP). `AR_COPLOG=1` now includes the exact current block PC and marks a suppressed dialogue glyph blip; the known glyph site is `$01:902D` (`COP #$07`) | `AR_COPLOG=1`; `AR_WATCH16` on the request port |
 | **Game runs at exactly 1/2 or 1/3 speed in ONE mode/screen (smooth elsewhere, audio fine)** | This is usually the **pacing/yield-multiplication class**, not host performance. Confirm + count in one shot: quit (or Shift+F9) **while the mode is slow**, then in the dump's block ring **count `02ABF0` (NMI-handler) entries per game-loop iteration** — each entry = one host-frame yield; N entries per iteration = 1/N speed, and the ring block *preceding* each entry names the yield site. Cross-check with any per-frame `[wobj]`/`[frame]` log: updates at delta=N host frames. Known causes so far: a non-HLE'd `$4210` wait yielding per read (§7 the `$9284` fix), and spin-detector false pairing on a twice-per-frame ack helper (§7.12 `$93CB`) | `AR_PERF=1` separates the two classes numerically (fps<60 = host-bound; fps=60 + crawling = pacing). Its `run-ms` covers game execution; `[draw-perf]` covers `RtlDrawPpuFrame`, including host widescreen refresh. A low `run-ms` therefore does not by itself rule out draw-side load. `env AR_FRAMELOG=1 AR_VBLOG=1` names every yield's callsite/block live. NOTE: static `$4210` scans must include the long form `AF 10 42 00`, not just `AD 10 42` |
-| **Suspect a single opcode is wrong** | `go -C snesrecomp-go run ./cmd/v2regen opcode-diff --cache-dir ../tools/oracle/harte_cache --runtime-dir runtime/src` (Tom Harte differential, §5) | — |
+| **Suspect a single opcode is wrong** | `go -C snesrecomp-go run ./cmd/v2regen opcode-diff --cache-dir ../tools/oracle/harte_cache --runtime-dir runtime-next/src` (Tom Harte differential, §5) | — |
 | **Per-frame game-state progression** | `AR_FRAMELOG=1` (callsite, work delta, mode `$18/$19`, timer, HP) | `AR_OBJLOG=1` for the object table |
 | **Is the CPU layer even the problem?** | `AR_MXCHECK=1` — if it stays silent through the repro, the m/x layer is clean → look at the **runtime/PPU layer** | — |
 | **Crash on a mode/level TRANSITION; SNES stack corrupted (`S` walks to `$FFxx`/`$42xx`/I-O); `ppu_write`/`ppu_read` abort** | Check stderr for **`[dispatch-miss]`** (default-on tripwire) — it names the unresolved RTS-trick/computed target. Then `AR_SCHECK=1` (S-drift + impending-underflow path) | confirm with `AR_RTSLOG=0x<rts_pc>`; register the popped target as a cfg `func` (see §7.7) |
@@ -467,7 +467,7 @@ stack drift (`S`), and a wrong data/program bank (`DB`/`PB`) are all visible on 
   `exit_mx_at 039D4D 0 0` attempt changed decode-time width only and did nothing. See
   [bug ledger §15](docs/bug-ledger.md).
 - Choke points live in `ar_trace.c`/`.h` (build list
-  `snesrecomp-go/runtime/runner.cmake`), wired at `ar_entry_mx_check`
+  `snesrecomp-go/runtime-next/runner.cmake`), wired at `ar_entry_mx_check`
   (`cpu_state.h`, always-on — the `SNESRECOMP_TRACE` cpu_trace hooks are OFF in the fast build),
   ppu `WriteReg`/`$2139`, `WriteVramWord` (`common_rtl.c`), `dma_startDma`.
 - Caveat: the `func` `misdecode` flag only catches **entry-variant** mismatches (runtime m/x ≠ the
@@ -1409,7 +1409,7 @@ width observation only if the ending prelude shows visible corruption.
 
 ## 8. Build & regen workflow
 
-- **Changed a runner source** (`src/*.c`, `snesrecomp-go/runtime/src/*`) → **rebuild only**:
+- **Changed a runner source** (`src/*.c`, `snesrecomp-go/runtime-next/src/*`) → **rebuild only**:
   `go -C snesrecomp-go run ./cmd/snesbuild build --root .. --build-only --jobs 8`.
 - **Changed the emitter** (`snesrecomp-go/internal/{decoder,lowering,codegen,emitter}/*`) **or a cfg**
   (`recomp/*.cfg`) → **regenerate then rebuild** with `snesbuild all` (while the inherited stub
