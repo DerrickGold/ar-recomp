@@ -106,6 +106,15 @@ func TestObjectFresh(t *testing.T) {
 	if objectFresh(source, filepath.Join(directory, "missing.o"), time.Time{}) {
 		t.Fatal("missing object must not count as fresh")
 	}
+	if err := os.WriteFile(object, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(object, newer.Add(3*time.Hour), newer.Add(3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if objectFresh(source, object, time.Time{}) {
+		t.Fatal("zero-byte object left by a failed compiler must not count as fresh")
+	}
 }
 
 func TestNewestHeaderTime(t *testing.T) {

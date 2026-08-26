@@ -2,8 +2,16 @@
   "version": 6,
   "configurePresets": [
     {
+      "name": "runner-next",
+      "hidden": true,
+      "cacheVariables": {
+        "SNESRECOMP_RUNNER": "next"
+      }
+    },
+    {
       "name": "dev",
       "displayName": "Dev (Debug, tests, no sanitizers)",
+      "inherits": "runner-next",
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
@@ -14,7 +22,7 @@
     },
     {
       "name": "dev-next",
-      "displayName": "Dev with independent next runner",
+      "displayName": "Dev with independent next runner (compatibility alias)",
       "inherits": "dev",
       "binaryDir": "${sourceDir}/build-next",
       "cacheVariables": {
@@ -22,8 +30,18 @@
       }
     },
     {
+      "name": "dev-legacy",
+      "displayName": "Dev with historical legacy runner",
+      "inherits": "dev",
+      "binaryDir": "${sourceDir}/build-legacy",
+      "cacheVariables": {
+        "SNESRECOMP_RUNNER": "legacy"
+      }
+    },
+    {
       "name": "play",
       "displayName": "Play (RelWithDebInfo, optimized)",
+      "inherits": "runner-next",
       "binaryDir": "${sourceDir}/build-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
@@ -34,8 +52,18 @@
       }
     },
     {
+      "name": "play-legacy",
+      "displayName": "Play with historical legacy runner",
+      "inherits": "play",
+      "binaryDir": "${sourceDir}/build-release-legacy",
+      "cacheVariables": {
+        "SNESRECOMP_RUNNER": "legacy"
+      }
+    },
+    {
       "name": "control",
       "displayName": "Flat terrain control (RelWithDebInfo, optimized)",
+      "inherits": "runner-next",
       "binaryDir": "${sourceDir}/build-control",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
@@ -48,6 +76,7 @@
     {
       "name": "asan",
       "displayName": "ASan+UBSan (corruption hunts, slow)",
+      "inherits": "runner-next",
       "binaryDir": "${sourceDir}/build-asan",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
@@ -59,6 +88,7 @@
     {
       "name": "trace",
       "displayName": "Trace (SNESRECOMP_ENABLE_TRACE instrumentation)",
+      "inherits": "runner-next",
       "binaryDir": "${sourceDir}/build-trace",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
@@ -72,13 +102,16 @@
   "buildPresets": [
     { "name": "dev", "configurePreset": "dev", "jobs": 8 },
     { "name": "dev-next", "configurePreset": "dev-next", "jobs": 8 },
+    { "name": "dev-legacy", "configurePreset": "dev-legacy", "jobs": 8 },
     { "name": "play", "configurePreset": "play", "jobs": 8 },
+    { "name": "play-legacy", "configurePreset": "play-legacy", "jobs": 8 },
     { "name": "control", "configurePreset": "control", "jobs": 8 },
     { "name": "asan", "configurePreset": "asan", "jobs": 8 },
     { "name": "trace", "configurePreset": "trace", "jobs": 8 }
   ],
   "testPresets": [
     { "name": "dev", "configurePreset": "dev", "output": { "outputOnFailure": true } },
-    { "name": "dev-next", "configurePreset": "dev-next", "output": { "outputOnFailure": true } }
+    { "name": "dev-next", "configurePreset": "dev-next", "output": { "outputOnFailure": true } },
+    { "name": "dev-legacy", "configurePreset": "dev-legacy", "output": { "outputOnFailure": true } }
   ]
 }

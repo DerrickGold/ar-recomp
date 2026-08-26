@@ -1,9 +1,11 @@
 #include "snes.h"
 
+#include "../apu_sync.h"
 #include "apu.h"
 #include "cart.h"
 #include "cpu.h"
 #include "dma.h"
+#include "ppu.h"
 #include "saveload.h"
 
 #include <stddef.h>
@@ -18,18 +20,6 @@ enum {
     SNES_STATUS_READ_STEP = 64,
     SNES_APU_CATCHUP_LIMIT = 10000
 };
-
-extern Ppu *ppu_init(void);
-extern void ppu_free(Ppu *ppu);
-extern void ppu_reset(Ppu *ppu);
-extern uint8_t ppu_read(Ppu *ppu, uint8_t address);
-extern void ppu_write(Ppu *ppu, uint8_t address, uint8_t value);
-extern void ppu_saveload(Ppu *ppu, SaveLoadInfo *info);
-
-extern void RtlApuLock(void);
-extern void RtlApuUnlock(void);
-extern void rtl_accumulate_apu_catchup(void);
-extern void RtlApuWrite(uint16_t address, uint8_t value);
 
 int snes_frame_counter;
 uint64_t g_apu_timer0_total_ticks;
@@ -81,14 +71,46 @@ void snes_saveload(Snes *snes, SaveLoadInfo *info) {
     if (snes == NULL || info == NULL || info->func == NULL) {
         return;
     }
+    if (!info->portable) {
+        cpu_saveload(snes->cpu, info);
+        apu_saveload(snes->apu, info);
+        dma_saveload(snes->dma, info);
+        ppu_saveload(snes->ppu, info);
+        cart_saveload(snes->cart, info);
+        info->func(info, &snes->hPos, sizeof(*snes) - offsetof(Snes, hPos));
+        info->func(info, snes->ram, SNES_WRAM_SIZE);
+        info->func(info, &snes->ramAdr, sizeof(snes->ramAdr));
+        snes->cpu->e = false;
+        return;
+    }
     cpu_saveload(snes->cpu, info);
     apu_saveload(snes->apu, info);
     dma_saveload(snes->dma, info);
     ppu_saveload(snes->ppu, info);
     cart_saveload(snes->cart, info);
-    info->func(info, &snes->hPos, sizeof(*snes) - offsetof(Snes, hPos));
-    info->func(info, snes->ram, SNES_WRAM_SIZE);
-    info->func(info, &snes->ramAdr, sizeof(snes->ramAdr));
+    saveload_u16(info, &snes->hPos);
+    saveload_u16(info, &snes->vPos);
+    saveload_f64(info, &snes->apuCatchupCycles);
+    saveload_bool(info, &snes->hIrqEnabled);
+    saveload_bool(info, &snes->vIrqEnabled);
+    saveload_bool(info, &snes->nmiEnabled);
+    saveload_u16(info, &snes->hTimer);
+    saveload_u16(info, &snes->vTimer);
+    saveload_bool(info, &snes->inNmi);
+    saveload_bool(info, &snes->forceNmi);
+    saveload_bool(info, &snes->nmiAvail);
+    saveload_u32(info, &snes->last4210Block);
+    saveload_bool(info, &snes->inIrq);
+    saveload_bool(info, &snes->inVblank);
+    saveload_bool(info, &snes->autoJoyRead);
+    saveload_u16(info, &snes->autoJoyTimer);
+    saveload_bool(info, &snes->ppuLatch);
+    saveload_u8(info, &snes->multiplyA);
+    saveload_u16(info, &snes->multiplyResult);
+    saveload_u16(info, &snes->divideA);
+    saveload_u16(info, &snes->divideResult);
+    saveload_bytes(info, snes->ram, SNES_WRAM_SIZE);
+    saveload_u32(info, &snes->ramAdr);
     snes->cpu->e = false;
 }
 
@@ -303,7 +325,7 @@ void snes_writeReg(Snes *snes, uint16_t address, uint8_t value) {
                                                 ((uint16_t)(value & 1u) << 8)); break;
         case 0x420bu:
             dma_startDma(snes->dma, value, false);
-            while (dma_cycle(snes->dma)) { }
+            dma_run_to_idle(snes->dma);
             break;
         case 0x420cu: dma_startDma(snes->dma, value, true); break;
         default: break;

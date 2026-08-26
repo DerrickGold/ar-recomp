@@ -767,7 +767,8 @@ static void TestFramePlanBinding(void) {
       wram, kActRaiserWramSize, &plan, ppu) ==
       kActRaiserBgLayerMask_Bg1);
   const PpuVirtualTilemapBinding *binding = &ppu->virtualTilemap[0];
-  CHECK(binding->lookup != NULL && binding->context != NULL);
+  CHECK(binding->lookup != NULL && binding->lookup_span != NULL &&
+        binding->context != NULL);
   CHECK(binding->camera_x == 13 && binding->camera_y == 7);
   CHECK(binding->hscroll_anchor == 13);
   CHECK(binding->vscroll_anchor == 7);
@@ -780,6 +781,16 @@ static void TestFramePlanBinding(void) {
   CHECK(binding->lookup(binding->context, 0, 0, &actual));
   CHECK(actual == expected);
   CHECK(!binding->lookup(binding->context, 64, 0, &actual));
+  const uint16_t *span = NULL;
+  ptrdiff_t span_step = 0;
+  CHECK(binding->lookup_span(
+      binding->context, 0, 0, 1, 4, &span, &span_step) == 4);
+  CHECK(span != NULL && span_step == 1);
+  for (int i = 0; i < 4; i++) {
+    CHECK(ActionBgWorld_Lookup(reference, i, 0, &expected) ==
+          kActionBgLookup_Tile);
+    CHECK(span[(ptrdiff_t)i * span_step] == expected);
+  }
 
   const ActRaiserActionBgDiagnostics *diagnostics =
       ActRaiserActionBg_GetDiagnostics();

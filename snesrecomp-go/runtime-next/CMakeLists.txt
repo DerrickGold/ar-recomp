@@ -7,50 +7,59 @@ if(NOT MSVC)
     add_compile_options(-fno-common)
 endif()
 
+option(SNESRECOMP_ENABLE_SIMD
+    "Enable SIMD implementations supported by the build target" ON)
+set(SNESRECOMP_PPU_BIT_WORD_BITS "auto" CACHE STRING
+    "PPU bitset word width: auto, 32, or 64")
+set_property(CACHE SNESRECOMP_PPU_BIT_WORD_BITS PROPERTY STRINGS auto 32 64)
+
+set(SNESRECOMP_RUNNER_ROOT ${CMAKE_CURRENT_LIST_DIR})
+include(${SNESRECOMP_RUNNER_ROOT}/sources.cmake)
+
+option(SNESRECOMP_ENABLE_TRACE
+    "Build local observability rings and tripwires" OFF)
+if(SNESRECOMP_ENABLE_TRACE)
+    list(APPEND SNESRECOMP_RUNNER_SOURCES
+        ${SNESRECOMP_RUNNER_ROOT}/src/debug_server_stub.c)
+endif()
+
 add_library(snesrecomp_runtime_next_contract STATIC
-    src/runner_next.c
-    src/crc32.c
-    src/sha256.c
-    src/widescreen.c
-    src/recomp_hw.c
-    src/framedump.c
-    src/audio_trace.c
-    src/ar_trace.c
-    src/util.c
-    src/launcher.c
-    src/keybinds.c
-    src/debug_server_stub.c
-    src/cpu_state.c
-    src/common_cpu_infra.c
-    src/diagnostic.c
-    src/cpu_trace.c
-    src/common_rtl.c
-    src/spc_upload.c
-    src/snes/cart_map.c
-    src/snes/cart.c
-    src/snes/rom.c
-    src/snes/dma.c
-    src/snes/snes.c
-    src/snes/apu.c
-    src/snes/spc.c
-    src/snes/dsp.c
-    src/snes/audio_shadow.c
-    src/snes/dsp_shadow.c
-    src/snes/msu1.c
-    src/snes/color_lut.c
-    src/snes/cpu.c
-    src/snes/ppu.c
-    src/snes/ppu_old.c)
+    ${SNESRECOMP_RUNNER_SOURCES})
 target_include_directories(snesrecomp_runtime_next_contract PUBLIC src)
+if(NOT SNESRECOMP_PPU_BIT_WORD_BITS STREQUAL "auto")
+    if(NOT SNESRECOMP_PPU_BIT_WORD_BITS STREQUAL "32" AND
+       NOT SNESRECOMP_PPU_BIT_WORD_BITS STREQUAL "64")
+        message(FATAL_ERROR
+            "SNESRECOMP_PPU_BIT_WORD_BITS must be auto, 32, or 64")
+    endif()
+    target_compile_definitions(snesrecomp_runtime_next_contract PUBLIC
+        SNESRECOMP_PPU_BIT_WORD_BITS=${SNESRECOMP_PPU_BIT_WORD_BITS})
+endif()
+if(SNESRECOMP_ENABLE_SIMD)
+    target_compile_definitions(snesrecomp_runtime_next_contract PRIVATE
+        SNESRECOMP_ENABLE_SIMD=1)
+    message(STATUS "runtime-next SIMD: enabled when supported by build target")
+else()
+    target_compile_definitions(snesrecomp_runtime_next_contract PRIVATE
+        SNESRECOMP_ENABLE_SIMD=0)
+    message(STATUS "runtime-next SIMD: portable implementation forced")
+endif()
 if(MSVC)
     target_compile_options(snesrecomp_runtime_next_contract PRIVATE /W4)
 else()
     target_compile_options(snesrecomp_runtime_next_contract PRIVATE
-        -Wall -Wextra -Wpedantic)
+        -Wall -Wextra -Wpedantic -Wmissing-prototypes -Wstrict-prototypes)
 endif()
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(snesrecomp_runtime_next_saveload_test
+        tests/saveload_test.c)
+    target_link_libraries(snesrecomp_runtime_next_saveload_test PRIVATE
+        snesrecomp_runtime_next_contract)
+    add_test(NAME snesrecomp_runtime_next_saveload
+        COMMAND snesrecomp_runtime_next_saveload_test)
+
     add_executable(snesrecomp_runtime_next_contract_test tests/contract_test.c)
     target_link_libraries(snesrecomp_runtime_next_contract_test PRIVATE
         snesrecomp_runtime_next_contract)

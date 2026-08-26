@@ -10,7 +10,8 @@
 #endif
 
 #if SNESRECOMP_TRACE
-extern void cpu_trace_offrails(const char *tag, uint32_t hint);
+#include "../cpu_trace.h"
+
 static void report_unmapped(uint8_t bank, uint16_t address) {
     cpu_trace_offrails("cart_read", ((uint32_t)bank << 16) | address);
 }

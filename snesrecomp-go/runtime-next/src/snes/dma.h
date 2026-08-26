@@ -1,5 +1,5 @@
-#ifndef DMA_H
-#define DMA_H
+#ifndef SNESRECOMP_NEXT_DMA_H
+#define SNESRECOMP_NEXT_DMA_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -52,7 +52,10 @@ void dma_reset(Dma *dma);
 uint8_t dma_read(Dma *dma, uint16_t address);
 void dma_write(Dma *dma, uint16_t address, uint8_t value);
 void dma_doDma(Dma *dma);
+/* Retained timer-stepped reference/debug path. */
 bool dma_cycle(Dma *dma);
+/* Complete the current synchronous general DMA without host-only timer polls. */
+void dma_run_to_idle(Dma *dma);
 void dma_startDma(Dma *dma, uint8_t channels, bool hdma);
 void dma_saveload(Dma *dma, SaveLoadInfo *info);
 

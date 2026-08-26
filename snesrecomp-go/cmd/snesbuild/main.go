@@ -86,8 +86,8 @@ The binary itself has no runtime dependencies. Regeneration needs only a local
 ROM. The default CMake build needs CMake, a C compiler, and the frontend
 dependencies of the game project; --hermetic replaces CMake and the compiler
 with the pinned Zig toolchain, leaving only the frontend's native libraries
-(for example SDL3) as external inputs. Build commands accept --runner legacy
-(the default) or --runner next (the independent portable runner).`)
+(for example SDL3) as external inputs. Build commands use the independent
+portable runner by default; pass --runner legacy for comparison builds.`)
 }
 
 type regenFlags struct {
@@ -188,7 +188,7 @@ func addBuildFlags(flags *flag.FlagSet) *buildFlags {
 	flags.StringVar(&values.root, "root", ".", "game project root")
 	flags.StringVar(&values.buildDir, "build-dir", "build", "native build directory")
 	flags.StringVar(&values.toolchainDir, "toolchain-dir", "snesrecomp-go", "snesrecomp-go module directory")
-	flags.StringVar(&values.runner, "runner", project.RunnerLegacy, "runner implementation: legacy or next")
+	flags.StringVar(&values.runner, "runner", project.RunnerDefault, "runner implementation: next (default) or legacy")
 	flags.StringVar(&values.cmake, "cmake", "cmake", "CMake executable")
 	flags.StringVar(&values.config, "config", "RelWithDebInfo", "CMake build configuration")
 	flags.StringVar(&values.generator, "generator", "", "optional CMake generator")
@@ -279,7 +279,7 @@ func addBuildFlagsForAll(flags *flag.FlagSet) *buildFlags {
 	flags.StringVar(&values.config, "config", "RelWithDebInfo", "CMake build configuration")
 	flags.StringVar(&values.generator, "generator", "", "optional CMake generator")
 	flags.StringVar(&values.prefixPath, "prefix-path", os.Getenv("CMAKE_PREFIX_PATH"), "CMake package prefix path")
-	flags.StringVar(&values.runner, "runner", project.RunnerLegacy, "runner implementation: legacy or next")
+	flags.StringVar(&values.runner, "runner", project.RunnerDefault, "runner implementation: next (default) or legacy")
 	flags.IntVar(&values.jobs, "build-jobs", runtime.NumCPU(), "parallel native build jobs")
 	flags.BoolVar(&values.buildOnly, "build-only", false, "skip CMake configure")
 	flags.Var(&values.cmakeArgs, "cmake-arg", "additional CMake configure argument; repeat as needed")
@@ -412,7 +412,7 @@ func runDoctor(args []string) error {
 	romPath := flags.String("rom", "game.sfc", "ROM path, relative to project root")
 	cmake := flags.String("cmake", "cmake", "CMake executable")
 	toolchainDir := flags.String("toolchain-dir", "snesrecomp-go", "snesrecomp-go module directory")
-	runnerName := flags.String("runner", project.RunnerLegacy, "runner implementation: legacy or next")
+	runnerName := flags.String("runner", project.RunnerDefault, "runner implementation: next (default) or legacy")
 	requireBuild := flags.Bool("require-build", false, "fail unless native build dependencies are present")
 	if err := flags.Parse(args); err != nil {
 		return err

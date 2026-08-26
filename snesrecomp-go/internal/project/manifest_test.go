@@ -102,6 +102,51 @@ set(SNESRECOMP_RUNNER_INCLUDE_DIRS
 	}
 }
 
+func TestRunnerSourcesFromIncludedManifest(t *testing.T) {
+	runtimeDir := t.TempDir()
+	writeTestFile(t, filepath.Join(runtimeDir, "runner.cmake"), `
+set(SNESRECOMP_RUNNER_ROOT ${CMAKE_CURRENT_LIST_DIR})
+include(${SNESRECOMP_RUNNER_ROOT}/sources.cmake)
+set(SNESRECOMP_RUNNER_INCLUDE_DIRS
+    ${SNESRECOMP_RUNNER_ROOT}/src
+)
+`)
+	writeTestFile(t, filepath.Join(runtimeDir, "sources.cmake"), `
+set(SNESRECOMP_RUNNER_SOURCES
+    ${SNESRECOMP_RUNNER_ROOT}/src/a.c
+    ${SNESRECOMP_RUNNER_ROOT}/src/snes/b.c
+)
+`)
+
+	sources, includes, err := RunnerSources(runtimeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 2 || !strings.HasSuffix(sources[1], filepath.FromSlash("src/snes/b.c")) {
+		t.Fatalf("sources: %v", sources)
+	}
+	if len(includes) != 1 || !strings.HasSuffix(includes[0], "src") {
+		t.Fatalf("includes: %v", includes)
+	}
+}
+
+func TestRealNextRunnerSources(t *testing.T) {
+	// internal/project -> snesrecomp-go/runtime-next.
+	runtimeDir := filepath.Join("..", "..", "runtime-next")
+	sources, includes, err := RunnerSources(runtimeDir)
+	if err != nil {
+		t.Fatalf("parse real runtime-next manifest: %v", err)
+	}
+	if len(sources) == 0 || len(includes) == 0 {
+		t.Fatalf("real runtime-next manifest is incomplete: %v %v", sources, includes)
+	}
+	for _, source := range sources {
+		if _, err := os.Stat(source); err != nil {
+			t.Errorf("runtime-next lists %s, which does not exist: %v", source, err)
+		}
+	}
+}
+
 func TestRunnerSourcesCleansMigrationFallbackPaths(t *testing.T) {
 	toolchain := t.TempDir()
 	nextDir := filepath.Join(toolchain, "runtime-next")

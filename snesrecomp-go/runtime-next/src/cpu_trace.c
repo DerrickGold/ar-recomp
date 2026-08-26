@@ -2,6 +2,7 @@
 
 #include "common_cpu_infra.h"
 #include "diagnostic.h"
+#include "snes/snes.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,9 +35,6 @@ typedef struct OffrailsRecord {
     uint32 last_hint;
     uint64 hits;
 } OffrailsRecord;
-
-extern int snes_frame_counter;
-extern CpuState g_cpu;
 
 static SrCpuTraceRecord *g_trace;
 static uint64 g_trace_capacity;

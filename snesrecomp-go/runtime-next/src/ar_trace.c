@@ -1,5 +1,9 @@
 #include "ar_trace.h"
 
+#include "common_cpu_infra.h"
+#include "common_rtl.h"
+#include "cpu_state.h"
+
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -14,20 +18,6 @@ enum {
     kDefaultRingLines = 4096,
     kMaximumDedupeKeys = 512
 };
-
-typedef struct TraceCpuState {
-    uint16_t A, X, Y, S, D;
-    uint8_t DB, PB, host_return_valid, P, m_flag, x_flag, emulation;
-    uint8_t negative, overflow, zero, carry, irq_disable, decimal;
-    uint8_t *ram;
-} TraceCpuState;
-
-extern int snes_frame_counter;
-extern unsigned char g_ram[];
-extern const char *g_last_recomp_func;
-extern uint32_t g_ar_blk_ring[];
-extern unsigned g_ar_blk_idx;
-extern TraceCpuState g_cpu;
 
 static bool s_initialized;
 static FILE *s_file;

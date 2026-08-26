@@ -39,7 +39,7 @@ else()
 endif()
 
 set(SNESRECOMP_GO_ROOT ${CMAKE_SOURCE_DIR}/snesrecomp-go)
-set(SNESRECOMP_RUNNER "legacy" CACHE STRING
+set(SNESRECOMP_RUNNER "next" CACHE STRING
     "Runner implementation to build (legacy or next)")
 set_property(CACHE SNESRECOMP_RUNNER PROPERTY STRINGS legacy next)
 if(SNESRECOMP_RUNNER STREQUAL "legacy")
@@ -56,6 +56,32 @@ include(${_SNESRECOMP_RUNNER_MANIFEST})
 message(STATUS
     "snesrecomp runner: ${SNESRECOMP_RUNNER_VARIANT} "
     "(legacy fallback: ${SNESRECOMP_RUNNER_LEGACY_FALLBACK})")
+
+# Architecture-specific paths are optional accelerators. The compiler's
+# target macros decide which implementation is available, which is correct
+# for native and cross builds alike. This switch can force the portable C11
+# implementation without changing source files or removing their test oracle.
+option(SNESRECOMP_ENABLE_SIMD
+    "Enable runner SIMD implementations supported by the build target" ON)
+if(SNESRECOMP_ENABLE_SIMD)
+    add_compile_definitions(SNESRECOMP_ENABLE_SIMD=1)
+    message(STATUS "snesrecomp SIMD: enabled when supported by build target")
+else()
+    add_compile_definitions(SNESRECOMP_ENABLE_SIMD=0)
+    message(STATUS "snesrecomp SIMD: portable implementation forced")
+endif()
+set(SNESRECOMP_PPU_BIT_WORD_BITS "auto" CACHE STRING
+    "Runner PPU bitset word width: auto, 32, or 64")
+set_property(CACHE SNESRECOMP_PPU_BIT_WORD_BITS PROPERTY STRINGS auto 32 64)
+if(NOT SNESRECOMP_PPU_BIT_WORD_BITS STREQUAL "auto")
+    if(NOT SNESRECOMP_PPU_BIT_WORD_BITS STREQUAL "32" AND
+       NOT SNESRECOMP_PPU_BIT_WORD_BITS STREQUAL "64")
+        message(FATAL_ERROR
+            "SNESRECOMP_PPU_BIT_WORD_BITS must be auto, 32, or 64")
+    endif()
+    add_compile_definitions(
+        SNESRECOMP_PPU_BIT_WORD_BITS=${SNESRECOMP_PPU_BIT_WORD_BITS})
+endif()
 # `src/constants.h` intentionally includes the selected runner's neutral
 # runtime_constants.h by name.  Apply that header contract to ROM-free test
 # targets as well as the game executable.
@@ -214,7 +240,8 @@ if(NOT MSVC)
     #
     # -w wins over -Wall in clang regardless of order, so the polarity has to
     # be this way round: real warnings on the target, `-w` re-applied to the
-    # generated and vendored-runtime sources per file.
+    # generated (and, for the legacy runner, vendored-runtime) sources per
+    # file. runtime-next is maintained here and keeps its warnings visible.
     target_compile_options(ActRaiserRecomp PRIVATE
         -Wall -Wextra
         # Designated initializers are the house style for the settings
@@ -228,8 +255,13 @@ if(NOT MSVC)
         # source passes; see docs/code-style.md "Verifying a change".
         -Werror=implicit-function-declaration
         -Werror=implicit-int)
+    set(_AR_WARNING_SUPPRESSED_SOURCES ${ACTRAISER_GEN_SOURCES})
+    if(NOT SNESRECOMP_RUNNER_VARIANT STREQUAL "next")
+        list(APPEND _AR_WARNING_SUPPRESSED_SOURCES
+            ${SNESRECOMP_RUNNER_SOURCES})
+    endif()
     set_source_files_properties(
-        ${ACTRAISER_GEN_SOURCES} ${SNESRECOMP_RUNNER_SOURCES}
+        ${_AR_WARNING_SUPPRESSED_SOURCES}
         PROPERTIES COMPILE_OPTIONS "-w")
 endif()
 
@@ -1069,6 +1101,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_native_audio_extension_test
         tests/native_audio_extension_test.c
         src/native_audio_extension.c
+        ${SNESRECOMP_RUNNER_SAVELOAD_SOURCE}
     )
     target_include_directories(actraiser_native_audio_extension_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -1079,6 +1112,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_dsp_bus_mix_test
         tests/dsp_bus_mix_test.c
         ${SNESRECOMP_RUNNER_DSP_SOURCE}
+        ${SNESRECOMP_RUNNER_SAVELOAD_SOURCE}
     )
     target_include_directories(actraiser_dsp_bus_mix_test PRIVATE
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS})
@@ -1088,6 +1122,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_dsp_voice_benchmark
         tools/benchmark_dsp_voices.c
         ${SNESRECOMP_RUNNER_DSP_SOURCE}
+        ${SNESRECOMP_RUNNER_SAVELOAD_SOURCE}
     )
     target_include_directories(actraiser_dsp_voice_benchmark PRIVATE
         ${SNESRECOMP_RUNNER_INCLUDE_DIRS})
@@ -1149,7 +1184,7 @@ if(BUILD_TESTING)
         src/sim/sim_background_voxel_region.c
         src/sim/sim_render_atlas.c
         ${SNESRECOMP_RUNNER_DEVICE_ROOT}/src/snes/ppu.c
-        ${SNESRECOMP_RUNNER_DEVICE_ROOT}/src/snes/ppu_old.c
+        ${SNESRECOMP_RUNNER_SAVELOAD_SOURCE}
     )
     target_include_directories(actraiser_ppu_render_pipeline_test PRIVATE
         ${CMAKE_SOURCE_DIR}
@@ -1172,7 +1207,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_ppu_exact_pos_test
         tests/ppu_exact_pos_test.c
         ${SNESRECOMP_RUNNER_DEVICE_ROOT}/src/snes/ppu.c
-        ${SNESRECOMP_RUNNER_DEVICE_ROOT}/src/snes/ppu_old.c
+        ${SNESRECOMP_RUNNER_SAVELOAD_SOURCE}
     )
     target_include_directories(actraiser_ppu_exact_pos_test PRIVATE
         ${CMAKE_SOURCE_DIR}
@@ -1572,6 +1607,21 @@ if(BUILD_TESTING)
     )
     target_link_libraries(actraiser_manual_input_test PRIVATE SDL3::SDL3)
     add_test(NAME actraiser_manual_input COMMAND actraiser_manual_input_test)
+
+    if(SNESRECOMP_RUNNER_VARIANT STREQUAL "next")
+        # Cartridge-specific source pointers, sample pools, bootstrap signature,
+        # and resident-uploader timing must stay in the game adapter rather
+        # than leaking back into the portable runner.
+        add_executable(actraiser_spc_upload_adapter_test
+            tests/actraiser_spc_upload_test.c
+            src/actraiser/actraiser_spc_upload.c
+            snesrecomp-go/runtime-next/src/spc_upload.c)
+        target_include_directories(actraiser_spc_upload_adapter_test PRIVATE
+            ${CMAKE_SOURCE_DIR}/src
+            ${SNESRECOMP_RUNNER_INCLUDE_DIRS})
+        add_test(NAME actraiser_spc_upload_adapter
+            COMMAND actraiser_spc_upload_adapter_test)
+    endif()
 
     foreach(_ar_hle_target IN ITEMS
             actraiser_action_metatile_hle_test

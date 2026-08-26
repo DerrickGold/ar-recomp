@@ -21,8 +21,8 @@ bool sr_spc_upload_image(const uint8_t *rom, size_t rom_size,
                          size_t source_offset, uint8_t aram[0x10000],
                          SrSpcUploadResult *result);
 
-/* Applies ActRaiser's second-stage length-prefixed BRR chunks. Script bytes
- * select chunks from pool_offset. Chunks are packed consecutively in ARAM. */
+/* Applies a second-stage length-prefixed sample stream. Script bytes select
+ * chunks from pool_offset. Chunks are packed consecutively in ARAM. */
 bool sr_spc_upload_samples(const uint8_t *rom, size_t rom_size,
                            size_t script_offset, uint8_t segment_count,
                            size_t pool_offset, uint16_t first_destination,

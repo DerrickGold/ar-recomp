@@ -7,8 +7,9 @@ import (
 )
 
 const (
-	RunnerLegacy = "legacy"
-	RunnerNext   = "next"
+	RunnerLegacy  = "legacy"
+	RunnerNext    = "next"
+	RunnerDefault = RunnerNext
 )
 
 // RunnerInfo is the build-system identity and filesystem location of one
@@ -20,12 +21,13 @@ type RunnerInfo struct {
 	LegacyFallback bool
 }
 
-// ResolveRunner validates a user-facing runner name. The empty value remains
-// an alias for legacy so existing callers and release builds do not change.
+// ResolveRunner validates a user-facing runner name. An empty value selects
+// the independently authored default runner; callers can still request the
+// historical implementation explicitly for parity comparisons.
 func ResolveRunner(toolchainDir, name string) (RunnerInfo, error) {
 	normalized := strings.ToLower(strings.TrimSpace(name))
 	if normalized == "" {
-		normalized = RunnerLegacy
+		normalized = RunnerDefault
 	}
 	switch normalized {
 	case RunnerLegacy:
@@ -44,7 +46,8 @@ func ResolveRunner(toolchainDir, name string) (RunnerInfo, error) {
 }
 
 // HermeticOutputDir isolates object caches for incompatible runner source
-// sets while preserving the historical path for the default legacy build.
+// sets. The directory names remain stable across the default transition so an
+// existing legacy cache can never be mistaken for a next-runner cache.
 func HermeticOutputDir(buildDir, target, runner string) (string, error) {
 	selected, err := ResolveRunner("", runner)
 	if err != nil {

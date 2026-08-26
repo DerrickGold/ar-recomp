@@ -31,6 +31,8 @@ static int reset_count;
 static int ppu_reset_count;
 static int dma_reset_count;
 static int msu_init_count;
+static int free_count;
+static bool load_rom_success = true;
 static int failures;
 
 static void check(int condition, const char *message) {
@@ -55,11 +57,16 @@ Snes *snes_init(uint8 *ram) {
 }
 
 bool snes_loadRom(Snes *snes, const uint8 *data, int length) {
+    if (!load_rom_success) return false;
     snes->cart->rom = (uint8 *)data;
     snes->cart->romSize = (uint32)length;
     snes->cart->ram = g_ram + 0x18000;
     snes->cart->ramSize = 0x2000u;
     return length > 0;
+}
+
+void snes_free(Snes *snes) {
+    if (snes != NULL) ++free_count;
 }
 
 void snes_reset(Snes *snes, bool hard) {
@@ -78,7 +85,10 @@ static int read_rdnmi(Snes *snes) { (void)snes; return 1; }
 
 static void test_registration_and_initialization(void) {
     static const RtlGameInfo info = {
-        "test", initialize_game, NULL, NULL, read_rdnmi, NULL, "test"
+        .title = "test",
+        .initialize = initialize_game,
+        .read_rdnmi = read_rdnmi,
+        .save_name_prefix = "test",
     };
     RtlRegisterGame(&info);
     check(g_rtl_game_info == &info, "game registration");
@@ -97,10 +107,29 @@ static void test_registration_and_initialization(void) {
           !test_cpu.xf && test_cpu.i, "native-mode bootstrap");
 
     check(SnesInit(NULL, 0) == &test_snes, "ROM-free initialization");
+    check(free_count == 1, "reinitialization releases previous runner");
     check(initialize_count == 2, "ROM-free callback");
     check(ppu_reset_count == 1 && dma_reset_count == 1,
           "ROM-free device resets");
     check(g_sram_size == 2048, "ROM-free SRAM allocation");
+
+    load_rom_success = false;
+    check(SnesInit(test_rom, (int)sizeof(test_rom)) == NULL,
+          "ROM load failure is reported");
+    check(free_count == 3, "failed replacement releases both runner instances");
+    check(g_snes == NULL && g_snes_cpu == NULL && g_ppu == NULL &&
+              g_dma == NULL && g_rom == NULL && g_sram == NULL &&
+              g_sram_size == 0,
+          "failed initialization clears published state");
+    load_rom_success = true;
+
+    check(SnesInit(test_rom, (int)sizeof(test_rom)) == &test_snes,
+          "runner can initialize after failure");
+    SnesShutdown();
+    check(free_count == 4 && g_snes == NULL,
+          "explicit shutdown is idempotent and clears runner");
+    SnesShutdown();
+    check(free_count == 4, "repeated shutdown is harmless");
 }
 
 static void test_indirect_pointer(void) {
@@ -171,10 +200,10 @@ static void test_ancestor_skip(void) {
     check(cpu_resolve_ancestor_skip(0x01fdu) == 2,
           "nearest ancestor distance");
     g_cpu_entry_hrv[2] = 1u;
-    check(cpu_resolve_ancestor_skip(0x01fdu) == -1,
-          "paired host-return boundary");
+    check(cpu_resolve_ancestor_skip(0x01fdu) == 2,
+          "hardware-stack ancestor crosses paired host frame");
     check(cpu_resolve_ancestor_skip(0x01fbu) == 1,
-          "boundary frame remains a valid target");
+          "nearest paired frame remains a valid target");
 }
 
 int main(void) {

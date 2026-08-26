@@ -5,6 +5,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stddef.h>
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -23,6 +24,16 @@ typedef bool (*PpuVirtualTilemapLookup)(const void *context,
                                        int32_t tile_x, int32_t tile_y,
                                        uint16_t *entry);
 
+/* Optional zero-copy batching companion for renderers that consume a scanline
+ * of consecutive finite-world tiles. The callback exposes coordinates
+ * tile_x + i * tile_step for tile_step +1 or -1 through a borrowed entries
+ * pointer and word stride. NULL entries describes an outside-world run.
+ * Returning zero preserves scalar lookup. The view remains valid until the
+ * provider's next span call and must not be retained by the renderer. */
+typedef size_t (*PpuVirtualTilemapSpanLookup)(
+    const void *context, int32_t tile_x, int32_t tile_y, int32_t tile_step,
+    size_t capacity, const uint16_t **entries, ptrdiff_t *entry_step);
+
 /* Optional presentation-only classification for a virtual tilemap word.
  * Bands 0..2 route a captured BG pixel to its far, ordinary, or priority
  * Diorama surface without changing the word or its native z-buffer rank.
@@ -39,6 +50,7 @@ enum {
 
 typedef struct PpuVirtualTilemapBinding {
   PpuVirtualTilemapLookup lookup;
+  PpuVirtualTilemapSpanLookup lookup_span;
   PpuVirtualTilemapBandLookup band_lookup;
   const void *context;
   int32_t camera_x;
@@ -327,6 +339,10 @@ enum {
   kPpuRenderFlags_Height240 = 4,
   // Disable sprite render limits
   kPpuRenderFlags_NoSpriteLimits = 8,
+  /* Shared host diagnostic. The legacy renderer has no separate reference
+   * scanout, so it intentionally ignores this bit; declaring it keeps the
+   * runner-neutral host ABI source-compatible across both build presets. */
+  kPpuRenderFlags_ReferencePixelRenderer = 16,
 };
 
 typedef struct Layer {

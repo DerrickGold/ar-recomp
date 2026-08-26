@@ -2,6 +2,7 @@
 
 #include "ar_trace.h"
 #include "common_cpu_infra.h"
+#include "common_rtl.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,9 +33,6 @@ typedef struct WarningKey {
     uint32 first;
     uint32 second;
 } WarningKey;
-
-extern int snes_frame_counter;
-extern uint8 g_ram[kSnesWramSize];
 
 int g_ar_mx_check;
 int g_ar_mxhist;

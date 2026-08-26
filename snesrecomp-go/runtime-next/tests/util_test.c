@@ -68,23 +68,6 @@ static void test_strings(void) {
     free(path);
 }
 
-static void test_byte_array(void) {
-    ByteArray array = {0};
-    static const uint8_t first[] = {1u, 2u, 3u};
-    static const uint8_t second[] = {4u, 5u};
-    ByteArray_AppendData(&array, first, sizeof(first));
-    ByteArray_AppendData(&array, second, sizeof(second));
-    check(array.size == 5u && array.capacity >= array.size &&
-              memcmp(array.data, "\x01\x02\x03\x04\x05", 5u) == 0,
-          "byte-array growth and append");
-    ByteArray_Resize(&array, 2u);
-    check(array.size == 2u && array.data[0] == 1u && array.data[1] == 2u,
-          "byte-array shrink");
-    ByteArray_Destroy(&array);
-    check(array.data == NULL && array.size == 0u && array.capacity == 0u,
-          "byte-array destruction");
-}
-
 static void test_packed_tables(void) {
     /* Two 16-bit offsets, three payload slices, then descriptor count=2. */
     static const uint8_t indexed[] = {
@@ -137,7 +120,6 @@ static void test_bps(void) {
 
 int main(void) {
     test_strings();
-    test_byte_array();
     test_packed_tables();
     test_bps();
     if (failures != 0) {

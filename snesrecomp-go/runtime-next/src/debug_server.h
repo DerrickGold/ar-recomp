@@ -1,5 +1,5 @@
-#ifndef DEBUG_SERVER_H
-#define DEBUG_SERVER_H
+#ifndef SNESRECOMP_NEXT_DEBUG_SERVER_H
+#define SNESRECOMP_NEXT_DEBUG_SERVER_H
 
 #include "types.h"
 

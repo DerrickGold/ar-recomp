@@ -1,5 +1,6 @@
 #include "common_cpu_infra.h"
 
+#include "common_rtl.h"
 #include "cpu_state.h"
 #include "cpu_trace.h"
 #include "debug_server.h"
@@ -7,6 +8,7 @@
 #include "snes/cpu.h"
 #include "snes/dma.h"
 #include "snes/msu1.h"
+#include "snes/ppu.h"
 #include "snes/snes.h"
 
 #include <stdio.h>
@@ -19,15 +21,6 @@
 #endif
 
 enum { kRecompStackCapacity = 64 };
-
-extern uint8 g_ram[kSnesWramSize];
-extern uint8 *g_sram;
-extern int g_sram_size;
-extern const uint8 *g_rom;
-extern Ppu *g_ppu;
-extern Dma *g_dma;
-uint8 *RomPtr(uint32 address);
-void ppu_reset(Ppu *ppu);
 
 Snes *g_snes;
 Cpu *g_snes_cpu;
@@ -141,11 +134,14 @@ int cpu_resolve_ancestor_skip(uint16 return_stack) {
     int frame;
     if (g_recomp_stack_top < 2 ||
         g_recomp_stack_top > kRecompStackCapacity) return -1;
+    /* The emulated stack is authoritative. A hardware RTS may deliberately
+     * discard several nested frames, including frames that happened to have
+     * paired host callers. Return a SKIP distance to the nearest matching
+     * emulated entry instead of resuming an arbitrary lexical C caller. */
     for (frame = g_recomp_stack_top - 2; frame >= 0; --frame) {
         if (g_cpu_entry_s[frame] == return_stack) {
             return (g_recomp_stack_top - 1) - frame;
         }
-        if (g_cpu_entry_hrv[frame] != 0u) break;
     }
     return -1;
 }
@@ -242,10 +238,27 @@ void WatchdogFrameEnd(void) {}
 void WatchdogCheck(void) { ++g_watchdog_loop_headers; }
 #endif
 
+static void clear_published_runner(void) {
+    g_snes = NULL;
+    g_snes_cpu = NULL;
+    g_dma = NULL;
+    g_ppu = NULL;
+    g_rom = NULL;
+    g_sram = NULL;
+    g_sram_size = 0;
+}
+
+void SnesShutdown(void) {
+    Snes *snes = g_snes;
+    clear_published_runner();
+    snes_free(snes);
+}
+
 Snes *SnesInit(const uint8 *data, int data_size) {
     bool loaded;
     if (data_size < 0 || (data_size > 0 && data == NULL) ||
         g_rtl_game_info == NULL) return NULL;
+    SnesShutdown();
     g_snes = snes_init(g_ram);
     if (g_snes == NULL) return NULL;
     g_snes_cpu = g_snes->cpu;
@@ -253,7 +266,7 @@ Snes *SnesInit(const uint8 *data, int data_size) {
     g_ppu = g_snes->ppu;
     if (data_size > 0) {
         loaded = snes_loadRom(g_snes, data, data_size);
-        if (!loaded) return NULL;
+        if (!loaded) goto fail;
         g_rom = g_snes->cart->rom;
         if (g_rtl_game_info->initialize != NULL) {
             g_rtl_game_info->initialize();
@@ -261,9 +274,10 @@ Snes *SnesInit(const uint8 *data, int data_size) {
         snes_reset(g_snes, true);
         SnesEnterNativeMode();
     } else {
+        uint8 *ram = (uint8 *)calloc(2048u, 1u);
+        if (ram == NULL) goto fail;
+        g_snes->cart->ram = ram;
         g_snes->cart->ramSize = 2048u;
-        g_snes->cart->ram = (uint8 *)calloc(2048u, 1u);
-        if (g_snes->cart->ram == NULL) return NULL;
         if (g_rtl_game_info->initialize != NULL) {
             g_rtl_game_info->initialize();
         }
@@ -273,4 +287,8 @@ Snes *SnesInit(const uint8 *data, int data_size) {
     g_sram = g_snes->cart->ram;
     g_sram_size = (int)g_snes->cart->ramSize;
     return g_snes;
+
+fail:
+    SnesShutdown();
+    return NULL;
 }

@@ -140,6 +140,36 @@ static void test_apu_bus(Snes *snes) {
           snes->apu->inPorts[3] == 0xa6u, "APU write scheduler routing");
 }
 
+static void test_synchronous_dma_register(Snes *snes, uint8_t *ram) {
+    ram[0x1000u] = 0x5au;
+    ram[0x1001u] = 0xa5u;
+    dma_write(snes->dma, 0x4300u, 0x01u);
+    dma_write(snes->dma, 0x4301u, 0x18u);
+    dma_write(snes->dma, 0x4302u, 0x00u);
+    dma_write(snes->dma, 0x4303u, 0x10u);
+    dma_write(snes->dma, 0x4304u, 0x7eu);
+    dma_write(snes->dma, 0x4305u, 2u);
+    dma_write(snes->dma, 0x4306u, 0u);
+    snes_writeReg(snes, 0x420bu, 1u);
+    check(snes->ppu->registers[0x18u] == 0x5au &&
+          snes->ppu->registers[0x19u] == 0xa5u,
+          "$420B drains PPU DMA synchronously");
+    check(!snes->dma->dmaBusy && snes->dma->dmaTimer == 0u &&
+          snes->dma->channel[0].aAdr == 0x1002u,
+          "$420B leaves completed DMA state");
+
+    ram[0x1010u] = 0x6cu;
+    dma_write(snes->dma, 0x4300u, 0x00u);
+    dma_write(snes->dma, 0x4301u, 0x40u);
+    dma_write(snes->dma, 0x4302u, 0x10u);
+    dma_write(snes->dma, 0x4303u, 0x10u);
+    dma_write(snes->dma, 0x4305u, 1u);
+    snes_writeReg(snes, 0x420bu, 1u);
+    check(last_host_apu_address == 0x2140u &&
+          last_host_apu_value == 0x6cu && snes->apu->inPorts[0] == 0x6cu,
+          "$420B retains DMA-to-APU-port routing");
+}
+
 static void test_cartridge(Snes *snes) {
     uint8_t rom[0x8000u];
     memset(rom, 0, sizeof(rom));
@@ -162,6 +192,7 @@ int main(void) {
     test_internal_registers(snes);
     test_bus(snes, ram);
     test_apu_bus(snes);
+    test_synchronous_dma_register(snes, ram);
     test_cartridge(snes);
     active_snes = NULL;
     snes_free(snes);

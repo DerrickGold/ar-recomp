@@ -1,6 +1,7 @@
 #ifndef SNESRECOMP_NEXT_COMMON_RTL_H
 #define SNESRECOMP_NEXT_COMMON_RTL_H
 
+#include "apu_sync.h"
 #include "types.h"
 #include "snes/dma.h"
 
@@ -96,14 +97,9 @@ bool RtlRunFrame(uint32 inputs);
 void RtlSetAudioOutputRate(int hz);
 int RtlGetAudioOutputRate(void);
 void RtlRenderAudio(int16 *audio_buffer, int samples, int channels);
-void RtlApuLock(void);
-void RtlApuUnlock(void);
-void RtlApuWrite(uint16 address, uint8 value);
-void rtl_accumulate_apu_catchup(void);
 void RtlSetApuCatchupSuppressed(bool suppressed);
 bool RtlUploadSpcImageFromDp(CpuState *cpu);
 bool RtlHandleSpcUpload(CpuState *cpu);
-void ar_uploader_complete_tick(void);
 
 enum { kSaveLoad_Save = 1, kSaveLoad_Load = 2 };
 void RtlSaveLoad(int command, int slot);

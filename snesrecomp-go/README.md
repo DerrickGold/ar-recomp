@@ -128,7 +128,7 @@ Generated C includes `cpu_state.h`, `cpu_trace.h`, `common_cpu_infra.h`, and
 
 ```cmake
 set(SNESRECOMP_GO_ROOT "${CMAKE_SOURCE_DIR}/snesrecomp-go")
-include("${SNESRECOMP_GO_ROOT}/runtime/runner.cmake")
+include("${SNESRECOMP_GO_ROOT}/runtime-next/runner.cmake")
 
 file(GLOB GAME_GEN_SOURCES CONFIGURE_DEPENDS
      "${CMAKE_SOURCE_DIR}/src/gen/*.c")
@@ -151,16 +151,15 @@ policy, and any C functions named by `hle_func`/`hle_func_if`/`hle_dispatch`.
 See [`docs/PROJECT_INTEGRATION.md`](docs/PROJECT_INTEGRATION.md) for the full
 contract and [`docs/CFG_FORMAT.md`](docs/CFG_FORMAT.md) for bank directives.
 
-### Selectable replacement runner
+### Selectable runner
 
-The inherited runner remains the default comparison target. The independently
-authored MIT runner is available under `runtime-next/` through an explicit
-build selection:
+The independently authored MIT runner under `runtime-next/` is the default.
+The inherited runner remains available as an explicit comparison target:
 
 ```sh
-snesbuild build --root . --runner legacy       # default
-snesbuild build --root . --runner next         # independent MIT runner
-snesbuild build --hermetic --root . --runner next
+snesbuild build --root .                       # next (default)
+snesbuild build --hermetic --root .            # next, isolated Zig build
+snesbuild build --root . --runner legacy       # historical A/B target
 ```
 
 The CMake equivalent is `-DSNESRECOMP_RUNNER=legacy|next`. The `next` manifest
@@ -175,8 +174,9 @@ ctest --test-dir build/runtime-next --output-on-failure
 ```
 
 Core replacement code is portable C11 and must keep OS, SDL, graphics API, and
-audio API types behind host adapters. The isolated object caches are
-`build/hermetic/` for `legacy` and `build/hermetic-next/` for `next`.
+audio API types behind host adapters. The isolated object caches remain
+`build/hermetic/` for `legacy` and `build/hermetic-next/` for `next`, so the
+default transition cannot reuse incompatible historical objects.
 
 ## Commands
 

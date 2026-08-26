@@ -1,5 +1,5 @@
-#ifndef CART_H
-#define CART_H
+#ifndef SNESRECOMP_NEXT_CART_H
+#define SNESRECOMP_NEXT_CART_H
 
 #include <stdint.h>
 

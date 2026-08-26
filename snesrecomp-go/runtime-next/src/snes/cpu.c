@@ -74,7 +74,26 @@ void cpu_setFlags(Cpu *cpu, uint8_t value) {
 }
 
 void cpu_saveload(Cpu *cpu, SaveLoadInfo *info) {
-    if (cpu != NULL && info != NULL && info->func != NULL) {
+    if (cpu == NULL || info == NULL || info->func == NULL) return;
+    if (!info->portable) {
         info->func(info, &cpu->a, sizeof(*cpu) - offsetof(Cpu, a));
+        return;
     }
+    saveload_u16(info, &cpu->a);
+    saveload_u16(info, &cpu->x);
+    saveload_u16(info, &cpu->y);
+    saveload_u16(info, &cpu->sp);
+    saveload_u16(info, &cpu->pc);
+    saveload_u16(info, &cpu->dp);
+    saveload_u8(info, &cpu->k);
+    saveload_u8(info, &cpu->db);
+    saveload_bool(info, &cpu->c);
+    saveload_bool(info, &cpu->z);
+    saveload_bool(info, &cpu->v);
+    saveload_bool(info, &cpu->n);
+    saveload_bool(info, &cpu->i);
+    saveload_bool(info, &cpu->d);
+    saveload_bool(info, &cpu->xf);
+    saveload_bool(info, &cpu->mf);
+    saveload_bool(info, &cpu->e);
 }

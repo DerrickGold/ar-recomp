@@ -93,11 +93,12 @@ its existing `SNESRECOMP_USE_CCACHE` and `SNESRECOMP_DEV_FAST_BUILD` controls.
 The trace option compiles local trace rings and a link stub; the historical TCP
 debug server is not currently enabled.
 
-The default comparison manifest is `runtime/runner.cmake`. The independent MIT
-runner is `runtime-next/runner.cmake`; its source and include lists contain no
-legacy fallback. A game project can select it in its own CMake dispatch or use
-`snesbuild build --runner next`; ActRaiserRecomp's top-level build provides the
-reference dispatch.
+The default manifest is the independent MIT runner at
+`runtime-next/runner.cmake`; its source and include lists contain no legacy
+fallback. The historical comparison target remains at `runtime/runner.cmake`.
+A game project can select either in its own CMake dispatch or use
+`snesbuild build --runner legacy|next`; ActRaiserRecomp's top-level build
+provides the reference dispatch.
 
 ```cmake
 cmake_minimum_required(VERSION 3.16)
@@ -105,7 +106,7 @@ project(MyGameRecomp C)
 set(CMAKE_C_STANDARD 11)
 
 set(SNESRECOMP_GO_ROOT "${CMAKE_SOURCE_DIR}/snesrecomp-go")
-include("${SNESRECOMP_GO_ROOT}/runtime/runner.cmake")
+include("${SNESRECOMP_GO_ROOT}/runtime-next/runner.cmake")
 
 find_package(SDL2 REQUIRED)
 file(GLOB GAME_GEN_SOURCES CONFIGURE_DEPENDS
@@ -215,10 +216,10 @@ source = src/main.c    # repeatable, game translation units only
 Toolchain resolution order: `$SNESBUILD_ZIG`, the project's
 `build/toolchain/` cache (populated by `snesbuild toolchain fetch`, which
 verifies the release archive against a checksum embedded in the binary),
-then `PATH`. Legacy objects and the executable land in `build/hermetic/`; next
-uses `build/hermetic-next/`, preventing runner swaps from invalidating or,
-worse, reusing incompatible objects. Rebuilds are incremental by source/header
-mtime plus a compile-flags hash.
+then `PATH`. The default next-runner objects and executable land in
+`build/hermetic-next/`; explicit legacy builds use `build/hermetic/`, preventing
+runner swaps from invalidating or, worse, reusing incompatible objects.
+Rebuilds are incremental by source/header mtime plus a compile-flags hash.
 
 ## Per-game conventions
 

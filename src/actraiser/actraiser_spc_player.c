@@ -29,19 +29,21 @@ static void Spc_Reset(ActRaiserSpcPlayer *p) {
 
 static void ActRaiserSpcPlayer_Initialize(SpcPlayer *p_in) {
   ActRaiserSpcPlayer *p = (ActRaiserSpcPlayer *)p_in;
+  if (!p || !p->base.dsp) return;
   dsp_reset(p->base.dsp);
   Spc_Reset(p);
 }
 
 static void ActRaiserSpcPlayer_Upload(SpcPlayer *p_in, const uint8_t *data) {
   ActRaiserSpcPlayer *p = (ActRaiserSpcPlayer *)p_in;
+  if (!p || !data) return;
   Dsp_Write(p, FLG, 0x60);
   Dsp_Write(p, KOF, 0xff);
   for (;;) {
-    int numbytes = *(uint16 *)(data);
+    int numbytes = data[0] | (data[1] << 8);
     if (numbytes == 0)
       break;
-    int target = *(uint16 *)(data + 2);
+    int target = data[2] | (data[3] << 8);
     data += 4;
     do {
       p->ram[target++ & 0xffff] = *data++;
@@ -53,10 +55,22 @@ static void ActRaiserSpcPlayer_Upload(SpcPlayer *p_in, const uint8_t *data) {
 }
 
 SpcPlayer *ActRaiserSpcPlayer_Create(void) {
-  ActRaiserSpcPlayer *p = (ActRaiserSpcPlayer *)malloc(sizeof(ActRaiserSpcPlayer));
-  memset(p, 0, sizeof(ActRaiserSpcPlayer));
+  ActRaiserSpcPlayer *p =
+      (ActRaiserSpcPlayer *)calloc(1u, sizeof(ActRaiserSpcPlayer));
+  if (!p) return NULL;
   p->base.dsp = dsp_init(p->ram);
+  if (!p->base.dsp) {
+    free(p);
+    return NULL;
+  }
   p->base.initialize = &ActRaiserSpcPlayer_Initialize;
   p->base.upload = &ActRaiserSpcPlayer_Upload;
   return &p->base;
+}
+
+void ActRaiserSpcPlayer_Destroy(SpcPlayer *player) {
+  ActRaiserSpcPlayer *p = (ActRaiserSpcPlayer *)player;
+  if (!p) return;
+  dsp_free(p->base.dsp);
+  free(p);
 }

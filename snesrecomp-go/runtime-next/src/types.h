@@ -1,5 +1,5 @@
-#ifndef SM_TYPES_H_
-#define SM_TYPES_H_
+#ifndef SNESRECOMP_NEXT_TYPES_H
+#define SNESRECOMP_NEXT_TYPES_H
 
 #include "runtime_constants.h"
 
@@ -10,7 +10,6 @@
 #include <stdlib.h>
 
 #ifdef _MSC_VER
-#pragma warning(disable : 4244)
 #define countof(value) _countof(value)
 #define NORETURN __declspec(noreturn)
 #define SNES_FORCEINLINE __forceinline

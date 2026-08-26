@@ -1,13 +1,9 @@
 #include "dma.h"
 #include "saveload.h"
+#include "snes.h"
 
 #include <stddef.h>
 #include <stdlib.h>
-
-extern uint8_t snes_read(Snes *snes, uint32_t address);
-extern void snes_write(Snes *snes, uint32_t address, uint8_t value);
-extern uint8_t snes_readBBus(Snes *snes, uint8_t address);
-extern void snes_writeBBus(Snes *snes, uint8_t address, uint8_t value);
 
 DmaStartTraceHook *g_dma_start_trace_hook;
 
@@ -66,10 +62,36 @@ void dma_reset(Dma *dma) {
 }
 
 void dma_saveload(Dma *dma, SaveLoadInfo *info) {
-    if (dma != NULL && info != NULL && info->func != NULL) {
+    if (dma == NULL || info == NULL || info->func == NULL) return;
+    if (!info->portable) {
         info->func(info, &dma->channel,
                    sizeof(*dma) - offsetof(Dma, channel));
+        return;
     }
+    for (unsigned index = 0; index < kDmaChannelCount; ++index) {
+        DmaChannel *channel = &dma->channel[index];
+        saveload_u8(info, &channel->bAdr);
+        saveload_u16(info, &channel->aAdr);
+        saveload_u8(info, &channel->aBank);
+        saveload_u16(info, &channel->size);
+        saveload_u8(info, &channel->indBank);
+        saveload_u16(info, &channel->tableAdr);
+        saveload_u8(info, &channel->repCount);
+        saveload_u8(info, &channel->unusedByte);
+        saveload_bool(info, &channel->dmaActive);
+        saveload_bool(info, &channel->hdmaActive);
+        saveload_u8(info, &channel->mode);
+        saveload_bool(info, &channel->fixed);
+        saveload_bool(info, &channel->decrement);
+        saveload_bool(info, &channel->indirect);
+        saveload_bool(info, &channel->fromB);
+        saveload_bool(info, &channel->unusedBit);
+        saveload_bool(info, &channel->doTransfer);
+        saveload_bool(info, &channel->terminated);
+        saveload_u8(info, &channel->offIndex);
+    }
+    saveload_u32(info, &dma->dmaTimer);
+    saveload_bool(info, &dma->dmaBusy);
 }
 
 static DmaChannel *selected_channel(Dma *dma, uint16_t address) {
@@ -186,6 +208,30 @@ bool dma_cycle(Dma *dma) {
     }
     dma_doDma(dma);
     return true;
+}
+
+void dma_run_to_idle(Dma *dma) {
+    if (dma == NULL || !dma->dmaBusy) {
+        return;
+    }
+
+    /*
+     * General DMA is currently synchronous: the CPU waits for the complete
+     * transfer, and dma_cycle() does not advance any other emulated hardware.
+     * Preserve dma_cycle() as the timer-stepped reference path, but avoid its
+     * host-only countdown and repeated channel scan for synchronous callers.
+     */
+    for (unsigned index = 0; index < kDmaChannelCount && dma->dmaBusy; ++index) {
+        DmaChannel *channel = &dma->channel[index];
+        while (dma->dmaBusy && channel->dmaActive) {
+            transfer_byte(dma, channel);
+        }
+    }
+
+    /* The stepped path consumes all startup, byte, and channel timers before
+     * reporting idle. No other runtime component observes those timer ticks. */
+    dma->dmaTimer = 0u;
+    dma->dmaBusy = false;
 }
 
 void dma_startDma(Dma *dma, uint8_t channels, bool hdma) {

@@ -21,11 +21,29 @@ uint32_t g_tailcall_src24;
 static uint16 last_register;
 static uint16 last_register_value;
 static unsigned handler_calls;
+static uint8 selected_variant;
+static unsigned continuation_calls;
+static uint8 continuation_mx;
+static uint8 continuation_host_return_valid;
 
-static RecompReturn handler(CpuState *cpu) {
+static RecompReturn variant_handler(CpuState *cpu, uint8 variant) {
     ++handler_calls;
+    selected_variant = variant;
     ++cpu->A;
     return RECOMP_RETURN_SKIP_1;
+}
+
+static RecompReturn handler_m0x0(CpuState *cpu) {
+    return variant_handler(cpu, 0u);
+}
+static RecompReturn handler_m0x1(CpuState *cpu) {
+    return variant_handler(cpu, 1u);
+}
+static RecompReturn handler_m1x0(CpuState *cpu) {
+    return variant_handler(cpu, 2u);
+}
+static RecompReturn handler_m1x1(CpuState *cpu) {
+    return variant_handler(cpu, 3u);
 }
 
 static RecompReturn tail_handler(CpuState *cpu) {
@@ -36,8 +54,32 @@ static RecompReturn tail_handler(CpuState *cpu) {
     return RECOMP_RETURN_TAILCALL;
 }
 
+static RecompReturn continuation_handler(CpuState *cpu) {
+    ++continuation_calls;
+    continuation_mx = (uint8)(((cpu->m_flag & 1u) << 1) |
+                              (cpu->x_flag & 1u));
+    continuation_host_return_valid = cpu->host_return_valid;
+    return RECOMP_RETURN_SKIP_2;
+}
+
+static bool recover_test_dispatch(uint32 source_pc24, uint32 target_pc24) {
+    (void)target_pc24;
+    return source_pc24 == 0x018900u;
+}
+
+static const RtlGameInfo test_game_info = {
+    .title = "cpu-state-test",
+    .recover_dispatch_miss = recover_test_dispatch,
+    .save_name_prefix = "test",
+};
+
 const DispatchEntry g_dispatch_table[] = {
-    {0x018000u, {handler, NULL, NULL, handler}},
+    {0x018000u, {handler_m0x0, handler_m0x1,
+                 handler_m1x0, handler_m1x1}},
+    {0x018300u, {continuation_handler, continuation_handler,
+                 continuation_handler, continuation_handler}},
+    {0x018400u, {continuation_handler, continuation_handler,
+                 continuation_handler, continuation_handler}},
     {0x028000u, {tail_handler, NULL, NULL, tail_handler}},
 };
 const unsigned g_dispatch_table_count =
@@ -134,30 +176,124 @@ static void test_stack_and_dispatch(void) {
     cpu.x_flag = 0u;
     cpu.A = 10u;
     handler_calls = 0u;
+    selected_variant = 0xffu;
     check(cpu_dispatch_pc(&cpu, 0x818000u, 0x01f0u) ==
               RECOMP_RETURN_SKIP_1 &&
-              cpu.A == 11u && handler_calls == 1u,
+              cpu.A == 11u && handler_calls == 1u && selected_variant == 0u,
           "LoROM mirror dispatch variant");
     cpu.S = 0x0100u;
     check(cpu_dispatch_pc(&cpu, 0x777777u, 0x0123u) ==
               RECOMP_RETURN_NORMAL && cpu.S == 0x0123u,
           "dispatch miss stack restore");
     cpu.S = 0x0100u;
-    *RomPtr(0x018100u) = 0x60u;
+    *RomPtr(0x018500u) = 0x60u;
     g_ram[0x0101u] = 0xffu;
     g_ram[0x0102u] = 0x7fu;
-    check(cpu_dispatch_pc(&cpu, 0x018100u, 0x0130u) ==
-              RECOMP_RETURN_SKIP_1 && handler_calls == 2u,
+    check(cpu_dispatch_pc(&cpu, 0x018500u, 0x0130u) ==
+              RECOMP_RETURN_SKIP_1 && handler_calls == 2u &&
+              cpu.S == 0x0102u,
           "bare RTS dispatch following");
+    cpu.S = 0x0100u;
+    *RomPtr(0x018510u) = 0x6bu;
+    g_ram[0x0101u] = 0xffu;
+    g_ram[0x0102u] = 0x7fu;
+    g_ram[0x0103u] = 0x01u;
+    check(cpu_dispatch_pc(&cpu, 0x018510u, 0x0130u) ==
+              RECOMP_RETURN_SKIP_1 && handler_calls == 3u &&
+              cpu.S == 0x0103u,
+          "bare RTL dispatch following");
+    cpu.S = 0x0100u;
+    *RomPtr(0x018520u) = 0x60u;
+    g_ram[0x0101u] = 0xffu;
+    g_ram[0x0102u] = 0x86u;
+    check(cpu_dispatch_pc(&cpu, 0x018520u, 0x0130u) ==
+              RECOMP_RETURN_NORMAL && cpu.S == 0x0130u,
+          "bare-return chain miss restores caller stack");
     cpu.S = 0x01f0u;
     check(cpu_dispatch_pc(&cpu, 0x028000u, 0x01f0u) ==
-              RECOMP_RETURN_SKIP_1 && handler_calls == 3u,
+              RECOMP_RETURN_SKIP_1 && handler_calls == 4u,
           "flat tail dispatch");
+}
+
+static void test_dispatch_mx_variants(void) {
+    CpuState cpu;
+    unsigned variant;
+    for (variant = 0u; variant < 4u; ++variant) {
+        cpu_state_init(&cpu, g_ram);
+        cpu.emulation = 0u;
+        cpu.m_flag = (uint8)(variant >> 1);
+        cpu.x_flag = (uint8)(variant & 1u);
+        selected_variant = 0xffu;
+        check(cpu_dispatch_pc(&cpu, 0x018000u, 0x01ffu) ==
+                  RECOMP_RETURN_SKIP_1 && selected_variant == variant,
+              "dispatch selects exact runtime M/X variant");
+    }
+}
+
+static void test_recovered_branch_handlers(void) {
+    CpuState cpu;
+    cpu_state_init(&cpu, g_ram);
+    cpu.emulation = 0u;
+    cpu.m_flag = 0u;
+    cpu.x_flag = 1u;
+    cpu.S = 0x01e0u;
+    g_rtl_game_info = &test_game_info;
+
+    *RomPtr(0x0183f0u) = 0x80u; /* BRA $8400 */
+    *RomPtr(0x0183f1u) = 0x0eu;
+    continuation_calls = 0u;
+    check(cpu_dispatch_pc_from(&cpu, 0x0183f0u, 0x01f0u, 0x018900u) ==
+              RECOMP_RETURN_SKIP_2 && continuation_calls == 1u &&
+              continuation_mx == 1u && cpu.S == 0x01e0u,
+          "approved BRA handler resolves without consuming an RTS frame");
+
+    *RomPtr(0x018100u) = 0x82u; /* BRL $8400 */
+    *RomPtr(0x018101u) = 0xfdu;
+    *RomPtr(0x018102u) = 0x02u;
+    continuation_calls = 0u;
+    check(cpu_dispatch_pc_from(&cpu, 0x018100u, 0x01f0u, 0x018900u) ==
+              RECOMP_RETURN_SKIP_2 && continuation_calls == 1u &&
+              continuation_mx == 1u && cpu.S == 0x01e0u,
+          "approved BRL handler resolves without consuming an RTS frame");
+    g_rtl_game_info = NULL;
+}
+
+static void test_recovered_handler_continuation(void) {
+    CpuState cpu;
+    cpu_state_init(&cpu, g_ram);
+    cpu.emulation = 0u;
+    cpu.m_flag = 1u;
+    cpu.x_flag = 0u;
+    cpu.PB = 1u;
+    cpu.S = 0x01e0u;
+
+    /* A policy-approved computed handler may be data rather than emitted code.
+     * Treating that miss as an ordinary host unwind skips the handler's RTS
+     * continuation, including any REP/SEP epilogue located there. */
+    *RomPtr(0x018200u) = 0xeau; /* unresolved handler body (not BRA/BRL/RTS) */
+    g_ram[0x01e1u] = 0xffu;    /* RTS return address $82ff -> $8300 */
+    g_ram[0x01e2u] = 0x82u;
+    continuation_calls = 0u;
+    continuation_mx = 0xffu;
+    continuation_host_return_valid = 0xffu;
+    g_rtl_game_info = &test_game_info;
+
+    check(cpu_dispatch_pc_from(&cpu, 0x018200u, 0x01f0u, 0x018900u) ==
+              RECOMP_RETURN_SKIP_2,
+          "approved unresolved handler resumes its RTS continuation");
+    check(continuation_calls == 1u && continuation_mx == 2u,
+          "recovered continuation preserves runtime M/X variant");
+    check(cpu.S == 0x01e2u && continuation_host_return_valid == 0u,
+          "recovered continuation consumes handler frame and is unpaired");
+    g_rtl_game_info = NULL;
 }
 
 int main(void) {
     test_registers();
     test_memory();
     test_stack_and_dispatch();
+    test_dispatch_mx_variants();
+    test_recovered_branch_handlers();
+    test_recovered_handler_continuation();
     return failures == 0 ? 0 : 1;
 }

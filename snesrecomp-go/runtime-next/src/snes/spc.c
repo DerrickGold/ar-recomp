@@ -198,8 +198,25 @@ void spc_reset(Spc *spc) {
     spc->pc = (uint16_t)(read8(spc, 0xfffeu) | ((uint16_t)read8(spc, 0xffffu) << 8));
 }
 void spc_saveload(Spc *spc, SaveLoadInfo *info) {
-    if (spc != NULL && info != NULL && info->func != NULL)
+    if (spc == NULL || info == NULL || info->func == NULL) return;
+    if (!info->portable) {
         info->func(info, &spc->a, offsetof(Spc, cyclesUsed) - offsetof(Spc, a));
+        return;
+    }
+    saveload_u8(info, &spc->a);
+    saveload_u8(info, &spc->x);
+    saveload_u8(info, &spc->y);
+    saveload_u8(info, &spc->sp);
+    saveload_u16(info, &spc->pc);
+    saveload_bool(info, &spc->c);
+    saveload_bool(info, &spc->z);
+    saveload_bool(info, &spc->v);
+    saveload_bool(info, &spc->n);
+    saveload_bool(info, &spc->i);
+    saveload_bool(info, &spc->h);
+    saveload_bool(info, &spc->p);
+    saveload_bool(info, &spc->b);
+    saveload_bool(info, &spc->stopped);
 }
 
 int spc_runOpcode(Spc *spc) {

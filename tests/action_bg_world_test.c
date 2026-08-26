@@ -214,6 +214,32 @@ static void TestDecodePagesQuadrantsAndBounds(void) {
   CHECK(ActionBgWorld_Lookup(world, 0, 0, NULL) ==
         kActionBgLookup_ProviderFailure);
 
+  const uint16_t *span = NULL;
+  ptrdiff_t span_step = 0;
+  CHECK(ActionBgWorld_LookupSpan(
+      world, 30, 17, 1, 4, &span, &span_step) == 4);
+  CHECK(span != NULL && span_step == 1);
+  for (unsigned i = 0; i < 4; i++) {
+    CHECK(span[i * span_step] == ExpectedAtTile(&fixture, 30u + i, 17u));
+  }
+  CHECK(ActionBgWorld_LookupSpan(
+      world, 33, 17, -1, 4, &span, &span_step) == 4);
+  CHECK(span != NULL && span_step == -1);
+  for (unsigned i = 0; i < 4; i++) {
+    CHECK(span[(ptrdiff_t)i * span_step] ==
+          ExpectedAtTile(&fixture, 33u - i, 17u));
+  }
+  CHECK(ActionBgWorld_LookupSpan(
+      world, -2, 17, 1, 4, &span, &span_step) == 2);
+  CHECK(span == NULL && span_step == 0);
+  CHECK(ActionBgWorld_LookupSpan(
+      world, 0, 17, 1, 2, &span, &span_step) == 2);
+  CHECK(span != NULL && span_step == 1);
+  CHECK(span[0] == ExpectedAtTile(&fixture, 0, 17));
+  CHECK(span[1] == ExpectedAtTile(&fixture, 1, 17));
+  CHECK(ActionBgWorld_LookupSpan(
+      world, 0, 0, 0, 4, &span, &span_step) == 0);
+
   ActionBgWorld_Destroy(world);
   DestroyFixture(&fixture);
 }

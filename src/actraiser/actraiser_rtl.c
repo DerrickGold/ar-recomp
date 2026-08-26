@@ -41,11 +41,11 @@
 #include "cpu_trace.h"
 #include <stdio.h>
 #include <stdbool.h>
+#include <errno.h>
 #ifdef _WIN32
 #include <windows.h>
 #else
 #include <ucontext.h>
-#include <errno.h>
 #include <sys/mman.h>   /* mmap: guard page below the coroutine stack */
 #include <unistd.h>
 /* _XOPEN_SOURCE (needed for ucontext) hides MAP_ANONYMOUS on some libcs;
@@ -160,6 +160,235 @@ ActRaiser_GetDeveloperEnvironment(void) {
 
 static bool ActRaiser_DeveloperFlagEnabled(ActRaiserDeveloperFlag flag) {
   return ActRaiser_GetDeveloperEnvironment()->flags[flag];
+}
+
+/* Bounded behavioral-oracle trace for renderer parity work.  This deliberately
+ * lives above both PPU implementations: the same game-side call site records
+ * the registers presented to scanout, the resulting visible-row hashes, and
+ * the registers left by HDMA for the following line.  That makes the first
+ * divergent contract visible without teaching either renderer about its
+ * comparison peer.
+ *
+ * AR_PPU_SHAPE_TRACE=<path> enables CSV output.  AR_PPU_SHAPE_GF selects one
+ * game frame, while AR_PPU_SHAPE_GF_LO/HI select an inclusive range.  The
+ * record ceiling defaults to 4096 and is hard-capped so a stuck frame cannot
+ * produce another unbounded diagnostic file. */
+enum {
+  kActRaiserPpuShapeDefaultRecords = 4096,
+  kActRaiserPpuShapeMaximumRecords = 65536,
+};
+
+typedef struct ActRaiserPpuShapeRegisters {
+  uint8_t inidisp, bgmode, mosaic, m7sel, setini;
+  uint8_t bg_xsc[4];
+  uint16_t bg_tile_adr;
+  uint16_t hscroll[4], vscroll[4];
+  int16_t m7matrix[8];
+  uint8_t screen_enabled[2], screen_windowed[2];
+  uint32_t windowsel;
+  uint16_t wbgobjlog, fixed_color;
+  uint8_t cgwsel, cgadsub;
+} ActRaiserPpuShapeRegisters;
+
+typedef struct ActRaiserPpuShapeTrace {
+  bool initialized;
+  bool limit_reported;
+  FILE *file;
+  unsigned gf_lo, gf_hi;
+  unsigned maximum_records, records;
+} ActRaiserPpuShapeTrace;
+
+static ActRaiserPpuShapeTrace s_ppu_shape_trace;
+
+static unsigned ActRaiser_PpuShapeUnsignedEnvironment(
+    const char *name, unsigned fallback, unsigned maximum) {
+  const char *text = getenv(name);
+  char *end = NULL;
+  unsigned long value;
+  if (!text || !text[0])
+    return fallback;
+  value = strtoul(text, &end, 0);
+  if (end == text || *end != '\0')
+    return fallback;
+  return value > maximum ? maximum : (unsigned)value;
+}
+
+static bool ActRaiser_PpuShapeTraceActive(unsigned gf) {
+  ActRaiserPpuShapeTrace *trace = &s_ppu_shape_trace;
+  if (!trace->initialized) {
+    const char *path = getenv("AR_PPU_SHAPE_TRACE");
+    const unsigned any_gf = kActRaiserPpuShapeMaximumRecords;
+    unsigned exact_gf = ActRaiser_PpuShapeUnsignedEnvironment(
+        "AR_PPU_SHAPE_GF", any_gf, 0xffffu);
+    trace->initialized = true;
+    trace->gf_lo = exact_gf != any_gf
+        ? exact_gf
+        : ActRaiser_PpuShapeUnsignedEnvironment(
+              "AR_PPU_SHAPE_GF_LO", 0u, 0xffffu);
+    trace->gf_hi = exact_gf != any_gf
+        ? exact_gf
+        : ActRaiser_PpuShapeUnsignedEnvironment(
+              "AR_PPU_SHAPE_GF_HI", 0xffffu, 0xffffu);
+    trace->maximum_records = ActRaiser_PpuShapeUnsignedEnvironment(
+        "AR_PPU_SHAPE_MAX", kActRaiserPpuShapeDefaultRecords,
+        kActRaiserPpuShapeMaximumRecords);
+    if (path && path[0]) {
+      trace->file = fopen(path, "wb");
+      if (!trace->file) {
+        fprintf(stderr, "[ppu-shape] unable to open %s: %s\n", path,
+                strerror(errno));
+      } else {
+        fprintf(trace->file,
+                "gf,host_frame,line,pre_inidisp,pre_bgmode,pre_mosaic,"
+                "pre_m7sel,pre_setini,pre_bg1sc,pre_bg2sc,pre_bg3sc,"
+                "pre_bg4sc,pre_bgtile,pre_h1,pre_h2,pre_h3,pre_h4,"
+                "pre_v1,pre_v2,pre_v3,pre_v4,pre_m7a,pre_m7b,pre_m7c,"
+                "pre_m7d,pre_m7x,pre_m7y,pre_m7h,pre_m7v,pre_tm,pre_ts,"
+                "pre_tmw,pre_tsw,pre_winsel,pre_wbgobj,pre_fixed,"
+                "pre_cgwsel,pre_cgadsub,visible_hash,visible_left_hash,"
+                "visible_center_hash,visible_right_hash,authentic_hash,"
+                "post_inidisp,post_bgmode,post_mosaic,post_m7sel,"
+                "post_setini,post_bg1sc,post_bg2sc,post_bg3sc,post_bg4sc,"
+                "post_bgtile,post_h1,post_h2,post_h3,post_h4,post_v1,"
+                "post_v2,post_v3,post_v4,post_m7a,post_m7b,post_m7c,"
+                "post_m7d,post_m7x,post_m7y,post_m7h,post_m7v,post_tm,"
+                "post_ts,post_tmw,post_tsw,post_winsel,post_wbgobj,"
+                "post_fixed,post_cgwsel,post_cgadsub,hdma_rep0,hdma_rep1,"
+                "hdma_rep2,hdma_rep3,hdma_rep4,hdma_rep5,hdma_rep6,"
+                "hdma_rep7,hdma_live\n");
+        fprintf(stderr,
+                "[ppu-shape] tracing gf=%u..%u, maximum %u records -> %s\n",
+                trace->gf_lo, trace->gf_hi, trace->maximum_records, path);
+      }
+    }
+  }
+  if (!trace->file || gf < trace->gf_lo || gf > trace->gf_hi)
+    return false;
+  if (trace->records < trace->maximum_records)
+    return true;
+  if (!trace->limit_reported) {
+    trace->limit_reported = true;
+    fflush(trace->file);
+    fprintf(stderr, "[ppu-shape] stopped at the %u-record safety limit\n",
+            trace->maximum_records);
+  }
+  return false;
+}
+
+static void ActRaiser_PpuShapeCaptureRegisters(
+    const Ppu *ppu, ActRaiserPpuShapeRegisters *output) {
+  output->inidisp = ppu->inidisp;
+  output->bgmode = ppu->bgmode;
+  output->mosaic = ppu->mosaic;
+  output->m7sel = ppu->m7sel;
+  output->setini = ppu->setini;
+  memcpy(output->bg_xsc, ppu->bgXsc, sizeof(output->bg_xsc));
+  output->bg_tile_adr = ppu->bgTileAdr;
+  memcpy(output->hscroll, ppu->hScroll, sizeof(output->hscroll));
+  memcpy(output->vscroll, ppu->vScroll, sizeof(output->vscroll));
+  memcpy(output->m7matrix, ppu->m7matrix, sizeof(output->m7matrix));
+  memcpy(output->screen_enabled, ppu->screenEnabled,
+         sizeof(output->screen_enabled));
+  memcpy(output->screen_windowed, ppu->screenWindowed,
+         sizeof(output->screen_windowed));
+  output->windowsel = ppu->windowsel;
+  output->wbgobjlog = ppu->wbgobjlog;
+  output->fixed_color = ppu->fixedColor;
+  output->cgwsel = ppu->cgwsel;
+  output->cgadsub = ppu->cgadsub;
+}
+
+static uint64_t ActRaiser_PpuShapeHash(const void *data, size_t size) {
+  const uint8_t *bytes = (const uint8_t *)data;
+  uint64_t hash = UINT64_C(14695981039346656037);
+  for (size_t i = 0; i < size; i++) {
+    hash ^= bytes[i];
+    hash *= UINT64_C(1099511628211);
+  }
+  return hash;
+}
+
+static uint64_t ActRaiser_PpuShapeRenderRangeHash(
+    const Ppu *ppu, int line, bool authentic, int left, int right) {
+  const uint8_t *buffer = authentic
+      ? ppu->authenticRenderBuffer : ppu->renderBuffer;
+  size_t pitch = authentic
+      ? ppu->authenticRenderPitch : ppu->renderPitch;
+  int row = line - 1 + ppu->extraTopCur;
+  int origin;
+  if (!buffer || !pitch || line <= 0 || row < 0 || row >= kPpuBufHeight ||
+      right <= left)
+    return 0;
+  origin = PpuSurfaceApron(ppu, pitch) + ppu->extraLeftRight;
+  return ActRaiser_PpuShapeHash(
+      buffer + (size_t)row * pitch +
+          (size_t)(origin + left) * sizeof(uint32_t),
+      (size_t)(right - left) * sizeof(uint32_t));
+}
+
+static uint64_t ActRaiser_PpuShapeRenderHash(
+    const Ppu *ppu, int line, bool authentic) {
+  return ActRaiser_PpuShapeRenderRangeHash(
+      ppu, line, authentic,
+      authentic ? 0 : -(int)ppu->extraLeftCur,
+      authentic ? kPpuXPixels
+                  : kPpuXPixels + (int)ppu->extraRightCur);
+}
+
+static void ActRaiser_PpuShapeWriteRegisters(
+    FILE *file, const ActRaiserPpuShapeRegisters *state) {
+  fprintf(file,
+          "%02x,%02x,%02x,%02x,%02x,%02x,%02x,%02x,%02x,%04x,"
+          "%04x,%04x,%04x,%04x,%04x,%04x,%04x,%04x,%04x,%04x,"
+          "%04x,%04x,%04x,%04x,%04x,%04x,%02x,%02x,%02x,%02x,"
+          "%08x,%04x,%04x,%02x,%02x",
+          state->inidisp, state->bgmode, state->mosaic, state->m7sel,
+          state->setini, state->bg_xsc[0], state->bg_xsc[1],
+          state->bg_xsc[2], state->bg_xsc[3], state->bg_tile_adr,
+          state->hscroll[0], state->hscroll[1], state->hscroll[2],
+          state->hscroll[3], state->vscroll[0], state->vscroll[1],
+          state->vscroll[2], state->vscroll[3],
+          (uint16_t)state->m7matrix[0], (uint16_t)state->m7matrix[1],
+          (uint16_t)state->m7matrix[2], (uint16_t)state->m7matrix[3],
+          (uint16_t)state->m7matrix[4], (uint16_t)state->m7matrix[5],
+          (uint16_t)state->m7matrix[6], (uint16_t)state->m7matrix[7],
+          state->screen_enabled[0], state->screen_enabled[1],
+          state->screen_windowed[0], state->screen_windowed[1],
+          state->windowsel, state->wbgobjlog, state->fixed_color,
+          state->cgwsel, state->cgadsub);
+}
+
+static void ActRaiser_PpuShapeTraceLine(
+    unsigned gf, int line, const ActRaiserPpuShapeRegisters *before,
+    const SimpleHdma hdma[kDmaChannelCount]) {
+  ActRaiserPpuShapeTrace *trace = &s_ppu_shape_trace;
+  ActRaiserPpuShapeRegisters after;
+  unsigned live = 0;
+  if (!trace->file || trace->records >= trace->maximum_records)
+    return;
+  ActRaiser_PpuShapeCaptureRegisters(g_ppu, &after);
+  fprintf(trace->file, "%u,%d,%d,", gf, snes_frame_counter, line);
+  ActRaiser_PpuShapeWriteRegisters(trace->file, before);
+  fprintf(trace->file, ",%016llx,%016llx,%016llx,%016llx,%016llx,",
+          (unsigned long long)ActRaiser_PpuShapeRenderHash(g_ppu, line, false),
+          (unsigned long long)ActRaiser_PpuShapeRenderRangeHash(
+              g_ppu, line, false, -(int)g_ppu->extraLeftCur, 0),
+          (unsigned long long)ActRaiser_PpuShapeRenderRangeHash(
+              g_ppu, line, false, 0, kPpuXPixels),
+          (unsigned long long)ActRaiser_PpuShapeRenderRangeHash(
+              g_ppu, line, false, kPpuXPixels,
+              kPpuXPixels + (int)g_ppu->extraRightCur),
+          (unsigned long long)ActRaiser_PpuShapeRenderHash(g_ppu, line, true));
+  ActRaiser_PpuShapeWriteRegisters(trace->file, &after);
+  for (int ch = 0; ch < kDmaChannelCount; ch++) {
+    if (hdma[ch].table)
+      live |= 1u << ch;
+    fprintf(trace->file, ",%02x", hdma[ch].rep_count);
+  }
+  fprintf(trace->file, ",%02x\n", live);
+  trace->records++;
+  if (line == kActRaiserAuthenticHeight)
+    fflush(trace->file);
 }
 
 #ifdef _WIN32
@@ -2890,6 +3119,12 @@ void ActRaiserDrawPpuFrame(void) {
   ActRaiser_DioramaHudObjPrepare();
 
   for (int i = 0; i <= kActRaiserAuthenticHeight; i++) {
+    const unsigned shape_gf =
+        (unsigned)ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
+    const bool shape_trace = ActRaiser_PpuShapeTraceActive(shape_gf);
+    ActRaiserPpuShapeRegisters shape_before;
+    if (shape_trace)
+      ActRaiser_PpuShapeCaptureRegisters(g_ppu, &shape_before);
     if (i > 0)
       ActRaiserActionBg_ObserveRoomSceneFrameLine(g_ppu, (unsigned)(i - 1));
     ppu_runLine(g_ppu, i);
@@ -2911,6 +3146,9 @@ void ActRaiserDrawPpuFrame(void) {
     }
     for (int ch = 0; ch < kDmaChannelCount; ch++)
       SimpleHdma_DoLine(&hdma_chans[ch]);
+    if (shape_trace)
+      ActRaiser_PpuShapeTraceLine(
+          shape_gf, i, &shape_before, hdma_chans);
     if (i == trigger) {
       g_snes->inIrq = true;
       CpuRegSnapshot snap;

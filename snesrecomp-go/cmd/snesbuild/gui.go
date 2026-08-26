@@ -105,7 +105,8 @@ func buildFromGUI(
 	}
 	fmt.Fprintf(output, "\nHermetic compiler: Zig %s (%s)\n", zig.Version, zig.Source)
 	binary, err := project.HermeticBuild(project.HermeticOptions{
-		Paths: paths, ZigPath: zig.Path, Jobs: values.jobs,
+		Paths: paths, Runner: project.RunnerDefault,
+		ZigPath: zig.Path, Jobs: values.jobs,
 		Optimize: values.optimize, Stdout: output, Stderr: output,
 	})
 	if err != nil {

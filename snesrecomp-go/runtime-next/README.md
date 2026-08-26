@@ -6,10 +6,10 @@ comparisons during rollout.
 
 Current status:
 
-- `legacy` remains the default comparison runner until project release policy
-  explicitly changes it.
-- `next` is a standalone playable runner. Its manifest has no legacy sources
-  or include paths and reports `legacy_source_count == 0`.
+- `next` is the default standalone playable runner. Its manifest has no legacy
+  sources or include paths and reports `legacy_source_count == 0`.
+- `legacy` remains separately selectable for behavioral and performance A/B
+  comparisons during the transition.
 - The implementation covers hashing, ROM/SRAM and LoROM/HiROM mapping, 65816
   generated-code ABI and dispatch, DMA, the SNES bus/register model, PPU,
   APU/SPC700/S-DSP, MSU-1, frame/audio pacing, save state, diagnostics,
@@ -29,18 +29,43 @@ Design requirements for every replacement subsystem:
   Zig cross targets; and
 - performance measurements before a replacement becomes the release default.
 
-From the ActRaiserRecomp root, select a game build with either:
+From the ActRaiserRecomp root, the normal build selects this runner:
 
 ```sh
-cmake -S . -B build-next -DSNESRECOMP_RUNNER=next
-cmake --build build-next
+cmake --preset play
+cmake --build --preset play
 ```
 
-or:
+Supported build targets use their compile-time SIMD implementation by default.
+The portable C11 paths remain complete and can be selected explicitly for
+portability checks and performance A/B tests:
 
 ```sh
-go run ./snesrecomp-go/cmd/snesbuild build --runner next
-go run ./snesrecomp-go/cmd/snesbuild build --hermetic --runner next
+cmake --preset play -DSNESRECOMP_ENABLE_SIMD=OFF
+cmake --build --preset play
+```
+
+The compiler target, rather than the machine running CMake, selects ARM NEON
+or x86 SSE2. Cross-compiles therefore cannot accidentally emit instructions
+for the build host.
+
+PPU sprite and resolved-pixel bitsets also follow the target's native pointer
+width. A 32-bit target uses 32-bit set-bit iteration without changing the
+64-bit NEON/SSE2 desktop path. The width can be forced to exercise either
+representation through the parity suite on a different host:
+
+```sh
+cmake -S runtime-next -B <build-dir> \
+  -DSNESRECOMP_PPU_BIT_WORD_BITS=32
+```
+
+`auto` is the default; the other accepted values are `32` and `64`.
+
+The historical runner is still available explicitly:
+
+```sh
+cmake --preset play-legacy
+go run ./snesrecomp-go/cmd/snesbuild build --runner legacy
 ```
 
 The MIT grant covers this runner and its manifest. It does not cover ROMs,
