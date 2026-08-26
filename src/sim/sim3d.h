@@ -188,9 +188,5 @@ void Sim3D_ComposeFlatPixels(
  * the widescreen margin-gap fill (actraiser_ws_gap.h) and the sim-3D flat
  * composite cannot disagree about it. */
 uint32_t ActRaiser_BackdropArgb(const Ppu *ppu);
-/* World navigation composites its complete host scene at full intensity, then
- * applies INIDISP master brightness once. This form prevents the backdrop
- * from being darkened once during capture and again during composition. */
-uint32_t ActRaiser_BackdropArgbFullBrightness(const Ppu *ppu);
 
 #endif  /* SIM3D_H */

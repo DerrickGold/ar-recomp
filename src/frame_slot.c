@@ -24,16 +24,18 @@
 #include "actraiser_game.h"
 #include "constants.h"
 #include "actraiser_rtl.h"
+#include "common_cpu_infra.h"
 #include "common_rtl.h"      /* g_ram, g_ppu */
 #include "frame_timing.h"
 #include "hd_replacement_host.h"
+#include "runner_next.h"
+#include "runner_next_internal.h"
 #include "snes/ppu.h"        /* PPU_mode, PpuOverlay* */
 
 /* main.c-owned globals with no header declaration, read here. */
 extern bool g_ws_active;
 extern int g_ws_extra;
 extern bool g_diorama_frame_active;
-extern uint8_t *g_diorama_layer_pixels[kDioramaPlane_Count];
 
 /* Self-calibrating velocity normalization uses a recent-activity EMA, not a
  * running or decaying peak. Live traces showed ordinary horizontal velocity at
@@ -131,28 +133,64 @@ static uint32_t CaptureDioramaPlaneRequestMask(void) {
   return mask;
 }
 
-static uint32_t CaptureDioramaPlaneContentMask(void) {
+typedef struct FramePpuView {
+  const SnesRunnerApi *api;
+  SrRunnerHandle *runner;
+  SrPpuFrameSnapshot state;
+} FramePpuView;
+
+static bool FramePpuView_Capture(
+    FramePpuView *view, SrPpuSurfaceSnapshot *surfaces) {
+  memset(view, 0, sizeof(*view));
+  memset(surfaces, 0, sizeof(*surfaces));
+  view->api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+  view->runner = sr_runner_handle(g_snes);
+  view->state.struct_size = sizeof(view->state);
+  surfaces->struct_size = sizeof(*surfaces);
+  return view->api && view->runner &&
+      view->api->struct_size >= SNES_RUNNER_API_PPU_SURFACE_SIZE &&
+      (view->api->capabilities &
+       (SR_RUNNER_CAP_PPU_FRAME_STATE |
+        SR_RUNNER_CAP_PPU_SURFACE_VIEWS |
+        SR_RUNNER_CAP_BORROWED_BYTE_SPANS |
+        SR_RUNNER_CAP_BORROWED_U16_SPANS)) ==
+          (SR_RUNNER_CAP_PPU_FRAME_STATE |
+           SR_RUNNER_CAP_PPU_SURFACE_VIEWS |
+           SR_RUNNER_CAP_BORROWED_BYTE_SPANS |
+           SR_RUNNER_CAP_BORROWED_U16_SPANS) &&
+      view->api->query_ppu_frame_state(view->runner, &view->state) ==
+          SR_RESULT_OK &&
+      view->api->query_ppu_surfaces(view->runner, surfaces) == SR_RESULT_OK &&
+      view->state.overlay_count == SR_PPU_OVERLAY_SOURCE_COUNT &&
+      surfaces->overlay_count == SR_PPU_OVERLAY_SOURCE_COUNT &&
+      surfaces->band_count == SR_PPU_SURFACE_BAND_COUNT &&
+      surfaces->lifetime_generation == view->state.lifetime_generation &&
+      view->api->ppu_surface_snapshot_is_valid(view->runner, surfaces) != 0u;
+}
+
+static uint32_t CaptureDioramaPlaneContentMask(
+    const SrPpuFrameSnapshot *ppu_frame) {
   uint32_t mask = DioramaPlaneBit(kDioramaPlane_Backdrop);
   static const struct {
-    PpuOverlaySource source;
+    uint8_t source;
     uint8_t band;
     uint8_t plane;
   } kSurfaces[] = {
-    { kPpuOverlaySource_Bg1, 0, kPpuOverlaySource_Bg1 },
-    { kPpuOverlaySource_Bg2, 0, kPpuOverlaySource_Bg2 },
-    { kPpuOverlaySource_Bg3, 0, kPpuOverlaySource_Bg3 },
-    { kPpuOverlaySource_Obj, 0, kPpuOverlaySource_Obj },
-    { kPpuOverlaySource_Bg1, 1, kDioramaPlane_Bg1Hi },
-    { kPpuOverlaySource_Bg2, 1, kDioramaPlane_Bg2Hi },
-    { kPpuOverlaySource_Bg1, 2, kDioramaPlane_Bg1Far },
-    { kPpuOverlaySource_Bg2, 2, kDioramaPlane_Bg2Far },
-    { kPpuOverlaySource_Obj, 1, kDioramaPlane_Obj1 },
-    { kPpuOverlaySource_Obj, 2, kDioramaPlane_Obj2 },
-    { kPpuOverlaySource_Obj, 3, kDioramaPlane_Obj3 },
+    { SR_PPU_OVERLAY_BG1, 0, kPpuOverlaySource_Bg1 },
+    { SR_PPU_OVERLAY_BG2, 0, kPpuOverlaySource_Bg2 },
+    { SR_PPU_OVERLAY_BG3, 0, kPpuOverlaySource_Bg3 },
+    { SR_PPU_OVERLAY_OBJ, 0, kPpuOverlaySource_Obj },
+    { SR_PPU_OVERLAY_BG1, 1, kDioramaPlane_Bg1Hi },
+    { SR_PPU_OVERLAY_BG2, 1, kDioramaPlane_Bg2Hi },
+    { SR_PPU_OVERLAY_BG1, 2, kDioramaPlane_Bg1Far },
+    { SR_PPU_OVERLAY_BG2, 2, kDioramaPlane_Bg2Far },
+    { SR_PPU_OVERLAY_OBJ, 1, kDioramaPlane_Obj1 },
+    { SR_PPU_OVERLAY_OBJ, 2, kDioramaPlane_Obj2 },
+    { SR_PPU_OVERLAY_OBJ, 3, kDioramaPlane_Obj3 },
   };
   for (size_t i = 0; i < sizeof(kSurfaces) / sizeof(kSurfaces[0]); i++) {
-    if (PpuOverlaySurfaceHasContent(
-            g_ppu, kSurfaces[i].source, kSurfaces[i].band))
+    if ((ppu_frame->overlays[kSurfaces[i].source].content_band_mask &
+         (1u << kSurfaces[i].band)) != 0u)
       mask |= DioramaPlaneBit(kSurfaces[i].plane);
   }
   if (ActRaiser_DioramaDeathHeimHubFacesPromoted())
@@ -160,23 +198,24 @@ static uint32_t CaptureDioramaPlaneContentMask(void) {
   return mask;
 }
 
-static uint32_t CaptureDioramaAdditivePlaneMask(void) {
+static uint32_t CaptureDioramaAdditivePlaneMask(
+    const SrPpuFrameSnapshot *ppu_frame) {
   uint32_t mask = 0;
-  if (g_ppu->overlayCaptures[kPpuOverlaySource_Bg1].flags &
-      kPpuOverlayFlag_MarkFullAddSubscreen)
+  if (ppu_frame->overlays[SR_PPU_OVERLAY_BG1].flags &
+      SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN)
     mask |= DioramaPlaneBit(kPpuOverlaySource_Bg1) |
             DioramaPlaneBit(kDioramaPlane_Bg1Hi) |
             DioramaPlaneBit(kDioramaPlane_Bg1Far);
-  if (g_ppu->overlayCaptures[kPpuOverlaySource_Bg2].flags &
-      kPpuOverlayFlag_MarkFullAddSubscreen)
+  if (ppu_frame->overlays[SR_PPU_OVERLAY_BG2].flags &
+      SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN)
     mask |= DioramaPlaneBit(kPpuOverlaySource_Bg2) |
             DioramaPlaneBit(kDioramaPlane_Bg2Hi) |
             DioramaPlaneBit(kDioramaPlane_Bg2Far);
-  if (g_ppu->overlayCaptures[kPpuOverlaySource_Bg3].flags &
-      kPpuOverlayFlag_MarkFullAddSubscreen)
+  if (ppu_frame->overlays[SR_PPU_OVERLAY_BG3].flags &
+      SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN)
     mask |= DioramaPlaneBit(kPpuOverlaySource_Bg3);
-  if (g_ppu->overlayCaptures[kPpuOverlaySource_Obj].flags &
-      kPpuOverlayFlag_MarkFullAddSubscreen)
+  if (ppu_frame->overlays[SR_PPU_OVERLAY_OBJ].flags &
+      SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN)
     mask |= DioramaPlaneBit(kPpuOverlaySource_Obj) |
             DioramaPlaneBit(kDioramaPlane_Obj1) |
             DioramaPlaneBit(kDioramaPlane_Obj2) |
@@ -304,6 +343,9 @@ void FrameSlot_SetPendingAnnotatedSim(const SimFrameData *sim) {
  * never do this; it only reads the FrameSlot this produces. */
 void FrameSlot_Capture(FrameSlot *dst) {
   memset(dst, 0, sizeof(*dst));
+  FramePpuView ppu_view;
+  const bool have_ppu_view =
+      FramePpuView_Capture(&ppu_view, &dst->ppu_surfaces);
 
   /* Emulated ticks since the previous capture—the advancement unit for the
    * reactive-camera statistics below. Clamp stalls and discontinuities to the
@@ -477,7 +519,8 @@ void FrameSlot_Capture(FrameSlot *dst) {
         g_settings.sim3d_diagnostic_layers, Sim3D_ImplementedFeatures());
     Sim3DTuning tuning = BuildSim3DTuning();
     Sim3D_AnnotateFrame(&dst->sim, &tuning);
-    SimWorldNavigationCapture_Capture(&dst->sim, g_ppu);
+    SimWorldNavigationCapture_Capture(
+        &dst->sim, sr_runner_handle(g_snes));
     /* Accumulation itself happens once a frame at the always-run site below;
      * this only publishes the current canvas state into the slot. */
     dst->sim.town_canvas_serial = SimTownCanvas_Serial();
@@ -514,8 +557,12 @@ void FrameSlot_Capture(FrameSlot *dst) {
   dst->diorama_plane_additive_mask = 0;
   if (dst->diorama_active) {
     dst->diorama_plane_request_mask = CaptureDioramaPlaneRequestMask();
-    dst->diorama_plane_content_mask = CaptureDioramaPlaneContentMask();
-    dst->diorama_plane_additive_mask = CaptureDioramaAdditivePlaneMask();
+    if (have_ppu_view) {
+      dst->diorama_plane_content_mask =
+          CaptureDioramaPlaneContentMask(&ppu_view.state);
+      dst->diorama_plane_additive_mask =
+          CaptureDioramaAdditivePlaneMask(&ppu_view.state);
+    }
   }
 
   /* Pair timestamp and feature gates for presentation-time frame generation. */
@@ -584,13 +631,14 @@ void FrameSlot_Capture(FrameSlot *dst) {
   dst->bg2_camera_x = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg2CameraX);
   dst->bg2_camera_y = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg2CameraY);
 
-  if (g_ppu) {
-    dst->hud_split_height = g_ppu->wsHudSplitHeight;
-    dst->hud_left_end = g_ppu->wsHudLeftEnd;
-    dst->hud_right_start = g_ppu->wsHudRightStart;
-    dst->hud_player_row_y = g_ppu->wsHudPlayerRowY;
-    dst->hud_left_only_y = g_ppu->wsHudLeftOnlyY;
-    dst->extra_left_right = g_ppu->extraLeftRight;
+  if (have_ppu_view) {
+    const SrPpuFrameSnapshot *ppu_frame = &ppu_view.state;
+    dst->hud_split_height = ppu_frame->hud_split_height;
+    dst->hud_left_end = ppu_frame->hud_left_end;
+    dst->hud_right_start = ppu_frame->hud_right_start;
+    dst->hud_player_row_y = ppu_frame->hud_player_row_y;
+    dst->hud_left_only_y = ppu_frame->hud_left_only_y;
+    dst->extra_left_right = ppu_frame->margin_budget;
     /* Fix B: from the latch, NOT g_ppu — see the field comment in present.h and
      * the latch in ActRaiserDrawPpuFrame. */
     {
@@ -602,40 +650,43 @@ void FrameSlot_Capture(FrameSlot *dst) {
                                  &dst->bg_capture_pad_to_budget);
       dst->action_bg_extent_guides = ActionBgTuner_GuidesEnabled();
     }
-    dst->inidisp = g_ppu->inidisp;
-    dst->bg_mode = (uint8_t)PPU_mode(g_ppu);
+    dst->inidisp = ppu_frame->display_control;
+    dst->bg_mode = ppu_frame->bg_mode;
 
     _Static_assert(kFrameSlotOverlaySourceCount == kPpuOverlaySource_Count,
                    "FrameSlot overlay source count must match the PPU's");
+    _Static_assert(kFrameSlotOverlaySourceCount ==
+                       SR_PPU_OVERLAY_SOURCE_COUNT,
+                   "FrameSlot overlay source count must match the ABI's");
     _Static_assert(kFrameSlotOverlay_Bg3 == kPpuOverlaySource_Bg3 &&
                    kFrameSlotOverlay_Obj == kPpuOverlaySource_Obj,
                    "present.h's mirrored overlay source order must match ppu.h");
     _Static_assert(kFrameSlotOverlayFlag_RemoveFromGame ==
-                   kPpuOverlayFlag_RemoveFromGame,
-                   "present.h's mirrored overlay flag must match ppu.h");
+                       SR_PPU_OVERLAY_REMOVE_FROM_GAME,
+                   "present.h's mirrored overlay flag must match the ABI");
     _Static_assert(kFrameSlotOverlayFlag_MarkFullAddSubscreen ==
-                   kPpuOverlayFlag_MarkFullAddSubscreen,
-                   "present.h's mirrored full-add flag must match ppu.h");
+                       SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN,
+                   "present.h's mirrored full-add flag must match the ABI");
     dst->action_bg1_mask_valid =
         !dst->diorama_active &&
-        (g_ppu->overlayCaptures[kPpuOverlaySource_Bg1].flags &
-         kPpuOverlayFlag_MarkOwningScreenWinner) != 0 &&
-        PpuOverlaySurfaceHasContent(g_ppu, kPpuOverlaySource_Bg1, 0);
+        (ppu_frame->overlays[SR_PPU_OVERLAY_BG1].flags &
+         SR_PPU_OVERLAY_MARK_OWNING_SCREEN_WINNER) != 0u &&
+        (ppu_frame->overlays[SR_PPU_OVERLAY_BG1].content_band_mask & 1u) != 0u;
     dst->action_bg2_mask_valid =
         !dst->diorama_active &&
-        (g_ppu->overlayCaptures[kPpuOverlaySource_Bg2].flags &
-         kPpuOverlayFlag_MarkMainScreenWinner) != 0 &&
-        PpuOverlaySurfaceHasContent(g_ppu, kPpuOverlaySource_Bg2, 0);
+        (ppu_frame->overlays[SR_PPU_OVERLAY_BG2].flags &
+         SR_PPU_OVERLAY_MARK_MAIN_SCREEN_WINNER) != 0u &&
+        (ppu_frame->overlays[SR_PPU_OVERLAY_BG2].content_band_mask & 1u) != 0u;
     dst->diorama_bg_transparent_fill_argb[0] =
-        PpuOverlayTransparentFillColor(g_ppu, kPpuOverlaySource_Bg1);
+        ppu_frame->overlays[SR_PPU_OVERLAY_BG1].transparent_fill_argb;
     dst->diorama_bg_transparent_fill_argb[1] =
-        PpuOverlayTransparentFillColor(g_ppu, kPpuOverlaySource_Bg2);
+        ppu_frame->overlays[SR_PPU_OVERLAY_BG2].transparent_fill_argb;
     dst->diorama_bg_transparent_fill_configured[0] =
-        g_ppu->overlayCaptures[kPpuOverlaySource_Bg1]
-            .transparentFillConfigured != 0;
+        ppu_frame->overlays[SR_PPU_OVERLAY_BG1]
+            .transparent_fill_configured != 0u;
     dst->diorama_bg_transparent_fill_configured[1] =
-        g_ppu->overlayCaptures[kPpuOverlaySource_Bg2]
-            .transparentFillConfigured != 0;
+        ppu_frame->overlays[SR_PPU_OVERLAY_BG2]
+            .transparent_fill_configured != 0u;
     /* These mirrors are load-bearing allocation contracts shared by capture,
      * frame generation, and the compositor. */
     _Static_assert(kFrameSlotLayerTextureWidth == kPpuSurfaceWidth,
@@ -649,29 +700,44 @@ void FrameSlot_Capture(FrameSlot *dst) {
                    "present.h's mirrored authentic height must match "
                    "actraiser_game.h");
     for (int i = 0; i < kFrameSlotOverlaySourceCount; i++) {
-      const PpuOverlayCapture *src = &g_ppu->overlayCaptures[i];
+      const SrPpuOverlayState *src = &ppu_frame->overlays[i];
       FrameSlotOverlayCapture *d = &dst->overlay_captures[i];
       d->x0 = src->x0; d->x1 = src->x1;
       d->y0 = src->y0; d->y1 = src->y1;
-      d->flags = src->flags;
-      d->oamFirst = src->oamFirst; d->oamCount = src->oamCount;
+      d->flags = (uint8_t)src->flags;
+      d->oamFirst = src->oam_first; d->oamCount = src->oam_count;
     }
 
     ActRaiser_HudObjIconRange(&dst->hud_icon_first, &dst->hud_icon_count);
 
     /* Only needed when an OBJ overlay/HUD icon is active this frame (§2.8
      * cost note). */
-    if (g_ppu->overlayCaptures[kPpuOverlaySource_Obj].oamCount ||
+    if (ppu_frame->overlays[SR_PPU_OVERLAY_OBJ].oam_count ||
         dst->hud_icon_count) {
-      _Static_assert(sizeof(dst->oam) == sizeof(g_ppu->oam), "oam size (D18)");
-      _Static_assert(sizeof(dst->high_oam) == sizeof(g_ppu->highOam),
-                     "highOam size (D18)");
-      memcpy(dst->oam, g_ppu->oam, sizeof(dst->oam));
-      memcpy(dst->high_oam, g_ppu->highOam, sizeof(dst->high_oam));
-      dst->oam_valid = true;
+      SrBorrowedU16Span oam = {sizeof(oam), 0u, NULL, 0u, 0u};
+      SrBorrowedSpan high_oam = {
+          sizeof(high_oam), 0u, NULL, 0u, 0u};
+      _Static_assert(sizeof(dst->oam) ==
+                         SR_PPU_OAM_WORD_COUNT * sizeof(uint16_t),
+                     "oam size (D18)");
+      _Static_assert(sizeof(dst->high_oam) == SR_PPU_HIGH_OAM_BYTE_COUNT,
+                     "high OAM size (D18)");
+      if (ppu_view.api->borrow_u16_memory(
+              ppu_view.runner, SR_MEMORY_OAM, &oam) == SR_RESULT_OK &&
+          ppu_view.api->borrow_memory(
+              ppu_view.runner, SR_MEMORY_HIGH_OAM, &high_oam) ==
+              SR_RESULT_OK &&
+          oam.element_count >= SR_PPU_OAM_WORD_COUNT &&
+          high_oam.byte_size >= SR_PPU_HIGH_OAM_BYTE_COUNT &&
+          oam.lifetime_generation == ppu_frame->lifetime_generation &&
+          high_oam.lifetime_generation == ppu_frame->lifetime_generation) {
+        memcpy(dst->oam, oam.data, sizeof(dst->oam));
+        memcpy(dst->high_oam, high_oam.data, sizeof(dst->high_oam));
+        dst->oam_valid = true;
+      }
     }
 
-    dst->m7_active = (g_ppu->m7Override.rgba != NULL);
+    dst->m7_active = ppu_frame->mode7_override_active != 0u;
   }
 
   dst->hd_entry_count = 0;

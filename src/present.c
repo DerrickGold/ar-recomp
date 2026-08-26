@@ -5,8 +5,9 @@
  * undeclared makes a stray live read a compile error.
  *
  * Presentation resources are different: the renderer, window, textures, and
- * raw pixel buffers are boot-owned and used synchronously on the render/main
- * thread. The isolation rule applies to mutable game state, not these resources. */
+ * host-derived pixel products are boot-owned and used synchronously on the
+ * render/main thread. PPU-bound output surfaces arrive through FrameSlot's
+ * runner-ABI snapshot. */
 
 #include <SDL3/SDL.h>
 #include <limits.h>
@@ -16,7 +17,6 @@
 #include <string.h>
 #include "action/action_bg_tuner.h"
 #include "action/action_effect_projection.h"
-#include "action/action_obj_apron.h"
 #include "present.h"
 #include "action/action_effect_render.h"
 #include "constants.h"
@@ -51,14 +51,7 @@ extern SDL_Texture *g_texture;
 extern SDL_Texture *g_authentic_texture;
 extern SDL_Texture *g_hud_bg_texture;
 extern SDL_Texture *g_hud_obj_texture;
-extern uint8_t g_pixels[];
-extern uint8_t g_authentic_pixels[];
-extern uint8_t g_hud_bg_pixels[];
-extern uint8_t g_hud_obj_pixels[];
-extern uint8_t g_action_bg1_mask_pixels[];
-extern uint8_t g_action_bg2_mask_pixels[];
 extern SDL_Texture *g_diorama_textures[kDioramaPlane_Count];
-extern uint8_t *g_diorama_layer_pixels[kDioramaPlane_Count];
 extern SDL_Texture *g_sim_obj_atlas_texture;
 
 extern SDL_Texture *g_sim3d_layer_textures[kSim3DPlane_Count];
@@ -91,6 +84,113 @@ typedef struct ActionHeatMeshCache {
 
 static ActionHeatPassState s_action_heat_saved_state;
 static ActionHeatMeshCache s_action_heat_mesh_cache;
+
+static const SrPpuSurfaceView *BoundPpuSurface(
+    const SrPpuSurfaceView *surface) {
+  return surface && surface->data &&
+      (surface->flags & SR_PPU_SURFACE_BOUND) != 0u &&
+      surface->pixel_format == SR_PPU_PIXEL_FORMAT_ARGB8888_U32 &&
+      surface->pitch_bytes != 0u &&
+      surface->pitch_bytes <= INT_MAX &&
+      surface->width_pixels == surface->pitch_bytes / sizeof(uint32_t) &&
+      surface->byte_size >=
+          surface->pitch_bytes * (uint64_t)surface->height_pixels
+      ? surface : NULL;
+}
+
+static bool PpuSurfaceHolds(
+    const SrPpuSurfaceView *surface, int width, int height) {
+  surface = BoundPpuSurface(surface);
+  return surface && width > 0 && height > 0 &&
+      (uint32_t)width <= surface->width_pixels &&
+      (uint32_t)height <= surface->height_pixels;
+}
+
+static const uint8_t *PpuSurfaceRegion(
+    const SrPpuSurfaceView *surface, int x, int y, int width, int height) {
+  surface = BoundPpuSurface(surface);
+  if (!surface || x < 0 || y < 0 || width <= 0 || height <= 0 ||
+      (uint64_t)(uint32_t)x + (uint32_t)width > surface->width_pixels ||
+      (uint64_t)(uint32_t)y + (uint32_t)height > surface->height_pixels)
+    return NULL;
+  return surface->data + (size_t)y * (size_t)surface->pitch_bytes +
+      (size_t)x * sizeof(uint32_t);
+}
+
+static const SrPpuSurfaceView *DioramaPpuSurface(
+    const FrameSlot *slot, int plane) {
+  if (!slot) return NULL;
+  if (plane >= SR_PPU_OVERLAY_BG1 && plane <= SR_PPU_OVERLAY_OBJ)
+    return &slot->ppu_surfaces.overlays[plane][0];
+  switch (plane) {
+    case kDioramaPlane_Backdrop:
+      return &slot->ppu_surfaces.main;
+    case kDioramaPlane_Bg1Hi:
+      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG1][1];
+    case kDioramaPlane_Bg2Hi:
+      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG2][1];
+    case kDioramaPlane_Obj1:
+      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][1];
+    case kDioramaPlane_Obj2:
+      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][2];
+    case kDioramaPlane_Obj3:
+      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][3];
+    case kDioramaPlane_Bg1Far:
+      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG1][2];
+    case kDioramaPlane_Bg2Far:
+      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG2][2];
+    default:
+      return NULL;
+  }
+}
+
+static const SrPpuSurfaceView *Sim3DPpuSurface(
+    const FrameSlot *slot, int plane) {
+  if (!slot) return NULL;
+  switch (plane) {
+    case kSim3DPlane_Bg3Low:
+      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG3][0];
+    case kSim3DPlane_Obj0:
+      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][0];
+    case kSim3DPlane_Obj1:
+      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][1];
+    case kSim3DPlane_Bg2Low:
+      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG2][0];
+    case kSim3DPlane_Bg1Low:
+      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG1][0];
+    case kSim3DPlane_Obj2:
+      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][2];
+    case kSim3DPlane_Bg2High:
+      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG2][1];
+    case kSim3DPlane_Bg1High:
+      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG1][1];
+    case kSim3DPlane_Obj3:
+      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][3];
+    case kSim3DPlane_Bg3High:
+      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG3][1];
+    default:
+      return NULL;
+  }
+}
+
+static void CaptureDioramaPpuSurfaces(
+    const FrameSlot *slot,
+    const uint8_t *pixels[kDioramaPlane_Count],
+    size_t pitch_bytes[kDioramaPlane_Count]) {
+  const int width = slot->snes_width + slot->obj_apron * 2;
+  const int height = slot->snes_height +
+      slot->ws_extra_top + slot->ws_extra_bottom;
+  memset(pixels, 0, sizeof(*pixels) * kDioramaPlane_Count);
+  if (pitch_bytes)
+    memset(pitch_bytes, 0, sizeof(*pitch_bytes) * kDioramaPlane_Count);
+  for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
+    const SrPpuSurfaceView *surface = DioramaPpuSurface(slot, plane);
+    if (!PpuSurfaceHolds(surface, width, height)) continue;
+    pixels[plane] = surface->data;
+    if (pitch_bytes)
+      pitch_bytes[plane] = (size_t)surface->pitch_bytes;
+  }
+}
 
 /* Effect builders are synchronous and presentation runs on one render thread,
  * so one reusable workspace covers actor and every depth-ordered decoration
@@ -703,9 +803,10 @@ static void PresentSceneInspector(const FrameSlot *slot, SDL_Rect viewport) {
 
 static void UploadActionWinnerMask(SDL_Texture **texture, int mirror,
                                    const uint8_t *pixels,
+                                   int pitch_bytes,
                                    const FrameSlot *slot) {
   if (!texture || !pixels || !slot || mirror < 0 ||
-      mirror >= kActionUploadSurface_Count)
+      mirror >= kActionUploadSurface_Count || pitch_bytes <= 0)
     return;
   if (!*texture) {
     *texture = SDL_CreateTexture(
@@ -720,7 +821,7 @@ static void UploadActionWinnerMask(SDL_Texture **texture, int mirror,
     const SDL_Rect mask = {0, 0, slot->snes_width, slot->snes_height};
     UploadChangedSurface(
         *texture, &s_action_upload_mirrors[mirror], pixels,
-        mask.w, mask.h, slot->snes_width * (int)sizeof(uint32_t),
+        mask.w, mask.h, pitch_bytes,
         mask.x, mask.y);
   }
 }
@@ -734,11 +835,15 @@ void PresentUpload(const FrameSlot *slot) {
   if (g_authentic_texture && slot->authentic_frame_serial) {
     const int authentic_height = slot->snes_height + slot->ws_extra_top +
                                  slot->ws_extra_bottom;
-    if (UploadChangedSurface(
+    const SrPpuSurfaceView *surface =
+        BoundPpuSurface(&slot->ppu_surfaces.authentic);
+    const uint8_t *pixels = PpuSurfaceRegion(
+        surface, 0, 0, slot->snes_width, authentic_height);
+    if (pixels && UploadChangedSurface(
         g_authentic_texture,
         &s_action_upload_mirrors[kActionUploadSurface_Authentic],
-        g_authentic_pixels, slot->snes_width, authentic_height,
-        slot->snes_width * (int)sizeof(uint32_t), 0, 0)) {
+        pixels, slot->snes_width, authentic_height,
+        (int)surface->pitch_bytes, 0, 0)) {
       s_authentic_uploaded_frame_serial = slot->authentic_frame_serial;
     } else {
       s_authentic_uploaded_frame_serial = 0;
@@ -754,15 +859,16 @@ void PresentUpload(const FrameSlot *slot) {
   }
 
   if (slot->diorama_active) {
-    uint8_t *pixels[kDioramaPlane_Count];
-    memcpy(pixels, g_diorama_layer_pixels, sizeof(pixels));
-    pixels[kDioramaPlane_Backdrop] = g_pixels;
+    const uint8_t *pixels[kDioramaPlane_Count];
+    size_t pitch_bytes[kDioramaPlane_Count];
+    CaptureDioramaPpuSurfaces(slot, pixels, pitch_bytes);
     uint32_t upload_mask = slot->diorama_plane_request_mask &
                            slot->diorama_plane_content_mask;
     /* Row 0 is the top of the captured world band. Upload both sides; the
      * authentic frame begins at ws_extra_top and the lower band follows it. */
     const DioramaUploadResult upload = Diorama_Upload(
-        g_diorama_textures, pixels, slot->snes_width + slot->obj_apron * 2,
+        g_diorama_textures, pixels, pitch_bytes,
+        slot->snes_width + slot->obj_apron * 2,
         slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom,
         slot->obj_apron, upload_mask);
     s_diorama_uploaded_plane_mask = upload.synchronized_plane_mask;
@@ -775,32 +881,43 @@ void PresentUpload(const FrameSlot *slot) {
     DioramaPerformanceScope frame_analysis =
         DioramaPerformance_Begin(kDioramaPerformance_FrameAnalysis);
     DioramaFrameGeneration_Capture(
-        g_renderer, slot, pixels, upload.changed_plane_mask);
+        g_renderer, slot, pixels, pitch_bytes, upload.changed_plane_mask);
     DioramaPerformance_End(frame_analysis);
   } else {
     s_diorama_uploaded_plane_mask = 0;
     SDL_Rect upload = { 0, 0, slot->snes_width, slot->snes_height };
-    const size_t surface_pitch =
-        ActionApron_SurfacePitch(slot->snes_width, slot->obj_apron);
-    /* g_pixels is bound apron-wide (it doubles as the diorama backdrop plane),
-     * so the authentic frame starts kPpuObjApron columns in. Offset the source
-     * and use the real pitch; the upload rect is unchanged. */
-    if (surface_pitch <= INT_MAX)
+    const SrPpuSurfaceView *surface =
+        BoundPpuSurface(&slot->ppu_surfaces.main);
+    /* The main view reports the physical column for screen x=0. Upload starts
+     * at screen x=-ws_extra, leaving any resolve apron outside the texture. */
+    const int source_x = surface ? surface->origin_x - slot->ws_extra : -1;
+    const int source_y = surface ? surface->origin_y - slot->ws_extra_top : -1;
+    const uint8_t *pixels = PpuSurfaceRegion(
+        surface, source_x, source_y, upload.w, upload.h);
+    if (pixels)
       UploadChangedSurface(
           g_texture,
           &s_action_upload_mirrors[kActionUploadSurface_Frame],
-          g_pixels + ActionApron_DisplayOffset(slot->obj_apron),
-          upload.w, upload.h, (int)surface_pitch, upload.x, upload.y);
+          pixels, upload.w, upload.h, (int)surface->pitch_bytes,
+          upload.x, upload.y);
   }
 
-  if (!slot->diorama_active && slot->action_bg1_mask_valid)
+  const SrPpuSurfaceView *bg1_surface =
+      BoundPpuSurface(
+          &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG1][0]);
+  const SrPpuSurfaceView *bg2_surface =
+      BoundPpuSurface(
+          &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG2][0]);
+  if (!slot->diorama_active && slot->action_bg1_mask_valid &&
+      PpuSurfaceHolds(bg1_surface, slot->snes_width, slot->snes_height))
     UploadActionWinnerMask(
         &s_action_bg1_mask_texture, kActionUploadSurface_Bg1Mask,
-        g_action_bg1_mask_pixels, slot);
-  if (!slot->diorama_active && slot->action_bg2_mask_valid)
+        bg1_surface->data, (int)bg1_surface->pitch_bytes, slot);
+  if (!slot->diorama_active && slot->action_bg2_mask_valid &&
+      PpuSurfaceHolds(bg2_surface, slot->snes_width, slot->snes_height))
     UploadActionWinnerMask(
         &s_action_bg2_mask_texture, kActionUploadSurface_Bg2Mask,
-        g_action_bg2_mask_pixels, slot);
+        bg2_surface->data, (int)bg2_surface->pitch_bytes, slot);
 
   /* Refresh HUD textures for both presentation paths. Diorama anchors the HUD
    * through the same textures as flat mode; skipping this upload would combine
@@ -811,21 +928,27 @@ void PresentUpload(const FrameSlot *slot) {
       int rows = slot->overlay_captures[kFrameSlotOverlay_Bg3].y1;
       if (rows < split_rows) rows = split_rows;
       SDL_Rect hud = { 0, 0, slot->snes_width, rows };
-      UploadChangedSurface(
-          g_hud_bg_texture,
-          &s_action_upload_mirrors[kActionUploadSurface_HudBg],
-          g_hud_bg_pixels, hud.w, hud.h,
-          slot->snes_width * (int)sizeof(uint32_t), hud.x, hud.y);
+      const SrPpuSurfaceView *surface = BoundPpuSurface(
+          &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG3][0]);
+      if (PpuSurfaceHolds(surface, hud.w, hud.h))
+        UploadChangedSurface(
+            g_hud_bg_texture,
+            &s_action_upload_mirrors[kActionUploadSurface_HudBg],
+            surface->data, hud.w, hud.h,
+            (int)surface->pitch_bytes, hud.x, hud.y);
     }
     if (g_hud_obj_texture) {
       int rows = slot->overlay_captures[kFrameSlotOverlay_Obj].y1;
       if (rows < split_rows) rows = split_rows;
       SDL_Rect hud = { 0, 0, slot->snes_width, rows };
-      UploadChangedSurface(
-          g_hud_obj_texture,
-          &s_action_upload_mirrors[kActionUploadSurface_HudObj],
-          g_hud_obj_pixels, hud.w, hud.h,
-          slot->snes_width * (int)sizeof(uint32_t), hud.x, hud.y);
+      const SrPpuSurfaceView *surface = BoundPpuSurface(
+          &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][0]);
+      if (PpuSurfaceHolds(surface, hud.w, hud.h))
+        UploadChangedSurface(
+            g_hud_obj_texture,
+            &s_action_upload_mirrors[kActionUploadSurface_HudObj],
+            surface->data, hud.w, hud.h,
+            (int)surface->pitch_bytes, hud.x, hud.y);
     }
   }
 
@@ -833,10 +956,12 @@ void PresentUpload(const FrameSlot *slot) {
     SDL_Rect src = { slot->visible_x0 * kHdMode7Scale, 0,
                      slot->visible_width * kHdMode7Scale,
                      slot->snes_height * kHdMode7Scale };
-    if (SDL_UpdateTexture(
-            g_m7_texture, &src,
-            g_m7_overlay_pixels + (size_t)src.x * sizeof(uint32_t),
-            slot->snes_width * kHdMode7Scale * (int)sizeof(uint32_t))) {
+    const SrPpuSurfaceView *surface =
+        BoundPpuSurface(&slot->ppu_surfaces.mode7);
+    const uint8_t *pixels =
+        PpuSurfaceRegion(surface, src.x, src.y, src.w, src.h);
+    if (pixels && SDL_UpdateTexture(
+            g_m7_texture, &src, pixels, (int)surface->pitch_bytes)) {
       Sim3DPerformance_AddUpload(
           (uint64_t)src.w * (uint64_t)src.h * sizeof(uint32_t));
     }
@@ -862,12 +987,16 @@ void PresentUpload(const FrameSlot *slot) {
             slot->sim.effective_features,
             slot->sim.separated_plane_mask);
     for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
+      const SrPpuSurfaceView *surface =
+          BoundPpuSurface(Sim3DPpuSurface(slot, plane));
       if ((plane_upload_mask & (1u << plane)) &&
-          g_sim3d_layer_textures[plane] && g_sim3d_layer_pixels[plane]) {
+          g_sim3d_layer_textures[plane] &&
+          PpuSurfaceHolds(surface, frame.w, frame.h)) {
         UploadChangedSim3DSurface(
             g_sim3d_layer_textures[plane], plane,
-            g_sim3d_layer_pixels[plane],
-            frame.w, frame.h, frame.w);
+            (const uint32_t *)surface->data,
+            frame.w, frame.h,
+            (int)(surface->pitch_bytes / sizeof(uint32_t)));
       }
     }
     /* Ground projection samples the separated planes directly. Upload the
@@ -1856,9 +1985,8 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
   if (slot->diorama_active) {
     DioramaPerformanceScope presentation_performance =
         DioramaPerformance_Begin(kDioramaPerformance_Total);
-    uint8_t *pixels[kDioramaPlane_Count];
-    memcpy(pixels, g_diorama_layer_pixels, sizeof(pixels));
-    pixels[kDioramaPlane_Backdrop] = g_pixels;
+    const uint8_t *pixels[kDioramaPlane_Count];
+    CaptureDioramaPpuSurfaces(slot, pixels, NULL);
     /* PresentUpload recorded exactly which requested/content-bearing surfaces
      * uploaded successfully before releasing their producer. A NULL entry is
      * already Diorama_Composite's established "plane absent" contract, and

@@ -179,12 +179,10 @@ static bool KeysAreContinuous(const DioramaFrameGenerationKey *previous,
 }
 
 static void CopySurfaceRegion(
-    uint32_t *destination, const uint8_t *source, int source_pitch_pixels,
+    uint32_t *destination, const uint8_t *source, size_t source_pitch_bytes,
     const DioramaPlaneCaptureRegion *region) {
   const size_t row_bytes = (size_t)region->width * sizeof(uint32_t);
   const size_t source_x_bytes = (size_t)region->x * sizeof(uint32_t);
-  const size_t source_pitch_bytes =
-      (size_t)source_pitch_pixels * sizeof(uint32_t);
   for (int y = 0; y < region->height; y++) {
     memcpy(&destination[(size_t)y * kFrameSlotLayerTextureWidth],
            source + (size_t)y * source_pitch_bytes + source_x_bytes,
@@ -194,10 +192,13 @@ static void CopySurfaceRegion(
 
 void DioramaFrameGeneration_Capture(
     SDL_Renderer *renderer, const FrameSlot *slot,
-    uint8_t *const pixels[kDioramaPlane_Count], uint32_t changed_plane_mask) {
+    const uint8_t *const pixels[kDioramaPlane_Count],
+    const size_t pitch_bytes[kDioramaPlane_Count],
+    uint32_t changed_plane_mask) {
   s_pair_timestamp_ns = 0;
   s_pair_mask = 0;
-  if (!renderer || !slot || !pixels || !slot->diorama_active ||
+  if (!renderer || !slot || !pixels || !pitch_bytes ||
+      !slot->diorama_active ||
       !slot->interp_setting_enabled || !slot->capture_ticks ||
       slot->turbo_active || (slot->inidisp & 0x80u) != 0) {
     s_last_key.valid = false;
@@ -237,7 +238,8 @@ void DioramaFrameGeneration_Capture(
        plane_index++) {
     DioramaFrameGenerationPlane *plane = &s_planes[plane_index];
     plane->pair_valid = false;
-    if (!(plane_mask & (1u << plane_index)) || !pixels[plane_index]) {
+    if (!(plane_mask & (1u << plane_index)) || !pixels[plane_index] ||
+        pitch_bytes[plane_index] < (size_t)width * sizeof(uint32_t)) {
       plane->current_valid = false;
       continue;
     }
@@ -270,7 +272,8 @@ void DioramaFrameGeneration_Capture(
     const bool had_previous = plane->current_valid && continuous &&
         region_matches && (s_last_key.plane_mask & (1u << plane_index));
     CopySurfaceRegion(
-        plane->current_pixels, pixels[plane_index], width, &region);
+        plane->current_pixels, pixels[plane_index],
+        pitch_bytes[plane_index], &region);
     if (!EnsurePlaneTextures(renderer, plane_index, &region)) {
       plane->current_valid = false;
       continue;

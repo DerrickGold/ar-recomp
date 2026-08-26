@@ -30,10 +30,12 @@
 #include "music_replacements.h"
 #include "native_audio_extension.h"
 #include "dev/native_audio_trace.h"
+#include "dev/hd_tile_census.h"
 #include "dev/sfx_census.h"
 #include "sim/sim_render_atlas.h"
 #include "sim/sim3d.h"
 #include "common_cpu_infra.h"
+#include "runner_next_internal.h"
 #include "snes/snes.h"
 #include "snes/ppu.h"
 #include "cpu_state.h"
@@ -3065,7 +3067,7 @@ void ActRaiserDrawPpuFrame(void) {
   }
 
   /* AR_TILE_CENSUS=1: read-only HD tile-pack sizing survey (hd_tile_census.c). */
-  { extern void HdTileCensus_Frame(void); HdTileCensus_Frame(); }
+  HdTileCensus_Frame(sr_runner_handle(g_snes));
   /* AR_TITLELOG=1: per-frame title-screen PPU probe (map bytes, BG mode,
    * HDMAEN, Mode-7 matrix, INIDISP) for deriving/validating the settled-logo
    * gate above. Diagnostic only. */

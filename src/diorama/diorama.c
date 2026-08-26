@@ -884,7 +884,8 @@ static const DioramaLayerDesc *DioramaDescForPlane(int plane) {
  * every visibility/resource gate here prevents a hidden or unuploaded plane
  * from remaining projectable to presentation effects. */
 static bool DioramaLayerIsDrawable(
-    const DioramaLayerDesc *layer, SDL_Texture *textures[], uint8_t *pixels[]) {
+    const DioramaLayerDesc *layer, SDL_Texture *textures[],
+    const uint8_t *const pixels[]) {
   return layer && Diorama_PlaneEligible(
       layer->plane, !layer->visible || *layer->visible,
       textures[layer->plane] != NULL, pixels[layer->plane] != NULL,
@@ -897,7 +898,8 @@ static bool DioramaLayerIsDrawable(
  * contributed no final pixels. A content-bearing upload failure is filtered
  * by present.c before it reaches this predicate. */
 static bool DioramaLayerIsProjectable(
-    const DioramaLayerDesc *layer, SDL_Texture *textures[], uint8_t *pixels[],
+    const DioramaLayerDesc *layer, SDL_Texture *textures[],
+    const uint8_t *const pixels[],
     uint8_t effect_obj_priority_mask, uint32_t effect_bg_plane_mask) {
   if (!layer) return false;
   const int priority = DioramaPlaneObjectPriority(layer->plane);
@@ -1465,7 +1467,8 @@ static void RemapMeshToSupersampleTexture(SDL_Vertex *vertices, int count,
  * request/content intersection; this function neither reads live settings nor
  * rescans producer-owned pixels. */
 DioramaUploadResult Diorama_Upload(
-    SDL_Texture *textures[], uint8_t *pixels[],
+    SDL_Texture *textures[], const uint8_t *const pixels[],
+    const size_t pitch_bytes[],
     int snes_width, int snes_height, int obj_apron, uint32_t plane_mask) {
   DioramaUploadResult upload = {0};
   DioramaPerformanceScope performance =
@@ -1477,17 +1480,16 @@ DioramaUploadResult Diorama_Upload(
    * zeros and the textures were zero-filled at creation, so nothing ever
    * changes there. Skipping them is ~47 MB/s at 60fps -- most of the apron's
    * steady-state cost. */
-  if (!textures || !pixels || snes_width <= 0 || snes_height <= 0 ||
-      obj_apron < 0 || obj_apron > snes_width / 2 ||
-      snes_width > INT_MAX / (int)sizeof(uint32_t)) {
+  if (!textures || !pixels || !pitch_bytes || snes_width <= 0 ||
+      snes_height <= 0 || obj_apron < 0 || obj_apron > snes_width / 2) {
     DioramaPerformance_End(performance);
     return upload;
   }
-  const int pitch = snes_width * (int)sizeof(uint32_t);
   for (int i = 0; i < kDioramaLayerCount; i++) {
     int plane = kDioramaLayers[i].plane;
     if (!(plane_mask & (1u << plane)) ||
-        !textures[plane] || !pixels[plane])
+        !textures[plane] || !pixels[plane] ||
+        pitch_bytes[plane] > INT_MAX)
       continue;
     DioramaPlaneCaptureRegion region;
     if (!DioramaPlaneCaptureRegion_Resolve(
@@ -1498,7 +1500,8 @@ DioramaUploadResult Diorama_Upload(
     PresentationUploadResult plane_upload = {0};
     const bool synchronized = PresentationUploadMirror_UploadArgb8888(
         &g_diorama_upload_mirrors[plane], textures[plane], src,
-        region.width, region.height, pitch, region.x, 0, &plane_upload);
+        region.width, region.height, (int)pitch_bytes[plane],
+        region.x, 0, &plane_upload);
     DioramaPerformance_AddPlaneSync(
         synchronized, synchronized && plane_upload.changed,
         plane_upload.uploaded_bytes);
@@ -2038,7 +2041,7 @@ PresentationOutcome Diorama_Composite(
     int authentic_y0, int obj_apron,
     int active_pixel_aspect, bool ignore_aspect_ratio,
     int visible_width, SDL_Rect viewport,
-    SDL_Texture *textures[], uint8_t *pixels[],
+    SDL_Texture *textures[], const uint8_t *const pixels[],
     const bool bg_transparent_fill_configured[2],
     const uint32_t bg_transparent_fill_argb[2],
     const DioramaCameraPose *cam_pose, float distance_scale,

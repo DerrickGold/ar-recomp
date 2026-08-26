@@ -30,6 +30,7 @@ typedef bool RtlSpcUploadCustomizeFunc(CpuState *cpu,
 typedef void RtlSpcUploadCommitFunc(Apu *apu, uint16 entry_point,
                                     bool initial_upload);
 typedef int RtlSpcUploadStackPopFunc(const CpuState *cpu);
+typedef void RunnerAbiBindFunc(Snes *snes, bool enabled);
 
 #ifndef AR_WATCHDOG
 #define AR_WATCHDOG 0
@@ -79,6 +80,8 @@ typedef struct RtlGameInfo {
     RtlSpcUploadCustomizeFunc *spc_upload_customize;
     RtlSpcUploadCommitFunc *spc_upload_commit;
     RtlSpcUploadStackPopFunc *spc_upload_stack_pop;
+    /* Optional game adapter for authoritative recompiled-CPU state. */
+    RunnerAbiBindFunc *bind_runner_abi;
 } RtlGameInfo;
 
 extern const RtlGameInfo *g_rtl_game_info;

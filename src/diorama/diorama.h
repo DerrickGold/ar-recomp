@@ -64,7 +64,8 @@ typedef struct DioramaUploadResult {
 } DioramaUploadResult;
 
 DioramaUploadResult Diorama_Upload(
-    SDL_Texture *textures[], uint8_t *pixels[],
+    SDL_Texture *textures[], const uint8_t *const pixels[],
+    const size_t pitch_bytes[],
     int snes_width, int snes_height, int obj_apron, uint32_t plane_mask);
 
 /* B4-split (followup doc): the camera pose Diorama_Composite renders with,
@@ -244,7 +245,7 @@ PresentationOutcome Diorama_Composite(
     int authentic_y0, int obj_apron,
     int active_pixel_aspect, bool ignore_aspect_ratio,
     int visible_width, SDL_Rect viewport,
-    SDL_Texture *textures[], uint8_t *pixels[],
+    SDL_Texture *textures[], const uint8_t *const pixels[],
     const bool bg_transparent_fill_configured[2],
     const uint32_t bg_transparent_fill_argb[2],
     const DioramaCameraPose *cam_pose, float distance_scale,

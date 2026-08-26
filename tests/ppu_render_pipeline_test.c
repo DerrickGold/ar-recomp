@@ -25,6 +25,8 @@
 #include "sim_render_atlas.h"
 #include "sim_render_metadata.h"
 #include "sim_world_navigation_capture.h"
+#include "runner_next_internal.h"
+#include "snes/snes.h"
 
 /* main.c owns this global; the PPU line renderer reads it to pick new/old path. */
 bool g_new_ppu = false;
@@ -707,8 +709,12 @@ static void TestObjRangeScanoutCapture(void) {
 
 static void TestWorldNavigationPartialBrightnessCapture(void) {
   Ppu *ppu = ppu_init();
+  Snes snes = {0};
   CHECK(ppu != NULL);
   if (!ppu) return;
+  snes.ppu = ppu;
+  snes.abiLifetimeGeneration = 7u;
+  sr_runner_bind_ppu_services(&snes, true);
   ppu_reset(ppu);
   ppu->bgmode = 7;
   ppu->cgram[0] = bgr555(31, 0, 0);
@@ -724,7 +730,8 @@ static void TestWorldNavigationPartialBrightnessCapture(void) {
     frame.view = kSimView_WorldNavigation;
     frame.world_navigation_scene.valid = true;
     ppu->inidisp = brightness;
-    CHECK(SimWorldNavigationCapture_Capture(&frame, ppu));
+    CHECK(SimWorldNavigationCapture_Capture(
+        &frame, sr_runner_handle(&snes)));
     CHECK(frame.view == kSimView_WorldNavigation);
     CHECK(frame.world_navigation_brightness == brightness);
     CHECK(frame.separated_backdrop_argb == 0xffff0000u);
@@ -732,14 +739,57 @@ static void TestWorldNavigationPartialBrightnessCapture(void) {
     CHECK(frame.world_navigation_scene.composition.empty_animation);
   }
 
+  /* Synthetic copy of the measured steady navigation ownership shape: a
+   * packed priority-3 UI prefix followed by the fixed 3x3 Palace. This drives
+   * both caller-owned ABI raster requests, not just the empty-animation path. */
+  for (int tile = 0; tile < 256; tile++)
+    set_solid_4bpp_tile(ppu, tile, 1);
+  ppu->cgram[0x81] = bgr555(31, 0, 0);
+  ppu->cgram[0x91] = bgr555(0, 0, 31);
+  for (int slot = 0; slot < 20; slot++) {
+    ppu->oam[slot * 2] =
+        (uint16_t)((0x11u << 8) | (uint8_t)(0x20 + slot));
+    ppu->oam[slot * 2 + 1] = (uint16_t)(0x3000u | (uint8_t)slot);
+  }
+  static const uint8_t palace_x[9] =
+      {104, 120, 136, 104, 120, 136, 104, 120, 136};
+  static const uint8_t palace_y[9] =
+      {81, 81, 81, 97, 97, 97, 113, 113, 113};
+  static const uint8_t palace_tile[9] =
+      {0x06, 0x08, 0x0a, 0x0c, 0x0e, 0x26, 0x60, 0x62, 0x64};
+  for (int i = 0; i < 9; i++) {
+    ppu->oam[(20 + i) * 2] =
+        (uint16_t)(palace_x[i] | ((uint16_t)palace_y[i] << 8));
+    ppu->oam[(20 + i) * 2 + 1] =
+        (uint16_t)(palace_tile[i] | 0x3200u);
+  }
+  SimFrameData composed = {0};
+  composed.view = kSimView_WorldNavigation;
+  composed.world_navigation_scene.valid = true;
+  ppu->inidisp = 0x0f;
+  CHECK(SimWorldNavigationCapture_Capture(
+      &composed, sr_runner_handle(&snes)));
+  CHECK(composed.world_navigation_scene.composition.ui.screen_x == 32);
+  CHECK(composed.world_navigation_scene.composition.ui.screen_y == 17);
+  CHECK(composed.world_navigation_scene.composition.ui.width == 27);
+  CHECK(composed.world_navigation_scene.composition.ui.height == 8);
+  CHECK(composed.world_navigation_scene.composition.palace.screen_x == 104);
+  CHECK(composed.world_navigation_scene.composition.palace.screen_y == 81);
+  CHECK(composed.world_navigation_scene.composition.palace.width == 40);
+  CHECK(composed.world_navigation_scene.composition.palace.height == 40);
+  CHECK(g_sim_world_navigation_ui_pixels[0] == 0xffff0000u);
+  CHECK(g_sim_world_navigation_palace_pixels[0] == 0xff0000ffu);
+
   SimFrameData blank = {0};
   blank.view = kSimView_WorldNavigation;
   blank.world_navigation_scene.valid = true;
   ppu->inidisp = 0x8f;
-  CHECK(!SimWorldNavigationCapture_Capture(&blank, ppu));
+  CHECK(!SimWorldNavigationCapture_Capture(
+      &blank, sr_runner_handle(&snes)));
   CHECK(blank.view == kSimView_AuthenticFallback);
   CHECK(blank.world_navigation_brightness == 15);
 
+  sr_runner_bind_ppu_services(&snes, false);
   ppu_free(ppu);
 }
 

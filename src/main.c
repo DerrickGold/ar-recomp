@@ -72,6 +72,7 @@
 #include "runtime_settings.h"
 #include "session_fatal.h"
 #include "runtime_diagnostics.h"
+#include "runner_next_internal.h"
 #include "scheduled_settings.h"
 #include "user_data_dir.h"
 #include "sim/sim_phase0_trace.h"
@@ -437,7 +438,7 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
         g_settings.sim3d_diagnostic_layers, Sim3D_ImplementedFeatures());
     Sim3DTuning tuning = BuildSim3DTuning();
     Sim3D_AnnotateFrame(&sim, &tuning);
-    SimWorldNavigationCapture_Capture(&sim, g_ppu);
+    SimWorldNavigationCapture_Capture(&sim, sr_runner_handle(g_snes));
     /* This site runs for every drawn frame, including headless runs that never
      * call HostDisplay_SubmitFrame or FrameSlot_Capture. */
     Sim3D_RenderTownCanvas(&sim, g_ram, g_ppu);

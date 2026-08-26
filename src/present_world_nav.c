@@ -36,11 +36,7 @@ extern SDL_Renderer *g_renderer;
 extern SDL_Texture *g_texture;
 extern SDL_Texture *g_hud_bg_texture;
 extern SDL_Texture *g_hud_obj_texture;
-extern uint8_t g_pixels[];
-extern uint8_t g_hud_bg_pixels[];
-extern uint8_t g_hud_obj_pixels[];
 extern SDL_Texture *g_diorama_textures[kDioramaPlane_Count];
-extern uint8_t *g_diorama_layer_pixels[kDioramaPlane_Count];
 extern SDL_Texture *g_sim_obj_atlas_texture;
 
 extern SDL_Texture *g_sim3d_layer_textures[kSim3DPlane_Count];

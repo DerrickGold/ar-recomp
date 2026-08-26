@@ -15,7 +15,6 @@
 #include "actraiser_game.h"
 #include "byte_order.h"
 #include "crc32.h"
-#include "snes/ppu.h"
 #include "snes_bgr555.h"
 
 enum {
@@ -25,6 +24,9 @@ enum {
   kObjAtlasHeight = 2 * 8 * 16 * 8,
   kOamSheetWidth = 16 * 64,
   kOamSheetHeight = 8 * 64,
+  kObjTileIds = 256,
+  kObjYNegativeFrom = 224,
+  kObjYWrap = 256,
 };
 
 typedef struct BgDump {
@@ -149,35 +151,26 @@ bool WritePng(const char *path, const uint8_t *rgba,
   return ok;
 }
 
-static void PutPalettePixel(const Ppu *ppu, uint8_t *rgba, int palette_index,
-                            bool transparent_zero) {
-  uint16_t xbgr = ppu->cgram[palette_index & 0xff] & 0x7fff;
+static void PutPalettePixel(const SceneAssetDumpSource *source, uint8_t *rgba,
+                            int palette_index, bool transparent_zero) {
+  uint16_t xbgr = source->cgram.data[palette_index & 0xff] & 0x7fff;
   rgba[0] = ExpandColor5(xbgr, 15);
   rgba[1] = ExpandColor5(xbgr >> 5, 15);
   rgba[2] = ExpandColor5(xbgr >> 10, 15);
   rgba[3] = transparent_zero ? 0 : 255;
 }
 
-static int PlanarPixel(const Ppu *ppu, int word_address, int bpp,
-                       int x, int y) {
+static int PlanarPixel(const SceneAssetDumpSource *source, int word_address,
+                       int bpp, int x, int y) {
   int shift = 7 - (x & 7);
   int pixel = 0;
   for (int pair = 0; pair < bpp / 2; pair++) {
-    uint16_t planes = ppu->vram[(word_address + pair * 8 + (y & 7)) & 0x7fff];
+    uint16_t planes =
+        source->vram.data[(word_address + pair * 8 + (y & 7)) & 0x7fff];
     pixel |= ((planes >> shift) & 1) << (pair * 2);
     pixel |= ((planes >> (shift + 8)) & 1) << (pair * 2 + 1);
   }
   return pixel;
-}
-
-static int BgBpp(int mode, int layer) {
-  static const int table[7][4] = {
-    {2, 2, 2, 2}, {4, 4, 2, 0}, {4, 4, 0, 0},
-    {8, 4, 0, 0}, {8, 2, 0, 0}, {4, 2, 0, 0},
-    {4, 0, 0, 0},
-  };
-  return mode >= 0 && mode < 7 && layer >= 0 && layer < 4
-      ? table[mode][layer] : 0;
 }
 
 static int TilemapIndex(int tx, int ty, bool wider, bool higher) {
@@ -187,26 +180,28 @@ static int TilemapIndex(int tx, int ty, bool wider, bool higher) {
   return index;
 }
 
-static bool WritePlanarBackground(const char *directory, const Ppu *ppu,
+static bool WritePlanarBackground(const char *directory,
+                                  const SceneAssetDumpSource *source,
                                   int mode, int layer, BgDump *dump) {
-  int bpp = BgBpp(mode, layer);
+  const SrPpuBackgroundState *background = &source->ppu.backgrounds[layer];
+  int bpp = background->bits_per_pixel;
   if (!bpp) return false;
-  bool wider = PPU_bgTilemapWider(ppu, layer) != 0;
-  bool higher = PPU_bgTilemapHigher(ppu, layer) != 0;
-  int tile_width = wider ? 64 : 32;
-  int tile_height = higher ? 64 : 32;
+  bool wider = background->tilemap_width_tiles > 32u;
+  bool higher = background->tilemap_height_tiles > 32u;
+  int tile_width = background->tilemap_width_tiles;
+  int tile_height = background->tilemap_height_tiles;
   int width = tile_width * 8;
   int height = tile_height * 8;
   size_t byte_count = (size_t)width * height * kRgbaChannels;
   uint8_t *pixels = (uint8_t *)calloc(1, byte_count);
   if (!pixels) return false;
-  int map_base = PPU_bgTilemapAdr(ppu, layer);
-  int tile_base = PPU_bgTileAdr(ppu, layer);
+  int map_base = background->tilemap_base_word;
+  int tile_base = background->tile_base_word;
   int words_per_tile = bpp * 4;
   for (int ty = 0; ty < tile_height; ty++) {
     for (int tx = 0; tx < tile_width; tx++) {
       int map_address = (map_base + TilemapIndex(tx, ty, wider, higher)) & 0x7fff;
-      uint16_t entry = ppu->vram[map_address];
+      uint16_t entry = source->vram.data[map_address];
       int tile = entry & 0x3ff;
       int palette = (entry >> 10) & 7;
       bool hflip = (entry & 0x4000) != 0;
@@ -216,12 +211,12 @@ static bool WritePlanarBackground(const char *directory, const Ppu *ppu,
         for (int px = 0; px < 8; px++) {
           int sx = hflip ? 7 - px : px;
           int sy = vflip ? 7 - py : py;
-          int pixel = PlanarPixel(ppu, char_address, bpp, sx, sy);
+          int pixel = PlanarPixel(source, char_address, bpp, sx, sy);
           int palette_base = bpp == 8 ? 0 : palette * (1 << bpp);
           if (mode == 0) palette_base += layer * 32;
           uint8_t *out = pixels +
               ((size_t)(ty * 8 + py) * width + tx * 8 + px) * 4;
-          PutPalettePixel(ppu, out, palette_base + pixel, pixel == 0);
+          PutPalettePixel(source, out, palette_base + pixel, pixel == 0);
         }
       }
     }
@@ -234,14 +229,15 @@ static bool WritePlanarBackground(const char *directory, const Ppu *ppu,
   *dump = (BgDump){
     .layer = layer + 1, .bpp = bpp, .width = width, .height = height,
     .map_base = map_base, .tile_base = tile_base,
-    .enabled_main = (ppu->screenEnabled[0] >> layer) & 1,
-    .enabled_sub = (ppu->screenEnabled[1] >> layer) & 1,
+    .enabled_main = (source->ppu.main_screen >> layer) & 1,
+    .enabled_sub = (source->ppu.sub_screen >> layer) & 1,
   };
   snprintf(dump->file, sizeof(dump->file), "bg%d.png", layer + 1);
   return ok;
 }
 
-static bool WriteMode7Background(const char *directory, const Ppu *ppu,
+static bool WriteMode7Background(const char *directory,
+                                 const SceneAssetDumpSource *source,
                                  BgDump *dump) {
   enum { kCanvas = 1024 };
   uint8_t *pixels = (uint8_t *)calloc(
@@ -249,14 +245,14 @@ static bool WriteMode7Background(const char *directory, const Ppu *ppu,
   if (!pixels) return false;
   for (int ty = 0; ty < 128; ty++) {
     for (int tx = 0; tx < 128; tx++) {
-      int tile = ppu->vram[ty * 128 + tx] & 0xff;
+      int tile = source->vram.data[ty * 128 + tx] & 0xff;
       for (int py = 0; py < 8; py++) {
         for (int px = 0; px < 8; px++) {
           int char_address = (tile * 64 + py * 8 + px) & 0x7fff;
-          int pixel = ppu->vram[char_address] >> 8;
+          int pixel = source->vram.data[char_address] >> 8;
           uint8_t *out = pixels +
               ((size_t)(ty * 8 + py) * kCanvas + tx * 8 + px) * 4;
-          PutPalettePixel(ppu, out, pixel, pixel == 0);
+          PutPalettePixel(source, out, pixel, pixel == 0);
         }
       }
     }
@@ -268,21 +264,22 @@ static bool WriteMode7Background(const char *directory, const Ppu *ppu,
   *dump = (BgDump){
     .layer = 1, .bpp = 8, .width = kCanvas, .height = kCanvas,
     .map_base = 0, .tile_base = 0,
-    .enabled_main = ppu->screenEnabled[0] & 1,
-    .enabled_sub = ppu->screenEnabled[1] & 1,
+    .enabled_main = source->ppu.main_screen & 1,
+    .enabled_sub = source->ppu.sub_screen & 1,
   };
   snprintf(dump->file, sizeof(dump->file), "bg1_mode7.png");
   return ok;
 }
 
-static bool WritePalette(const char *directory, const Ppu *ppu) {
+static bool WritePalette(const char *directory,
+                         const SceneAssetDumpSource *source) {
   enum { kSwatch = 16, kSize = 16 * kSwatch };
   uint8_t *pixels = (uint8_t *)malloc((size_t)kSize * kSize * 4);
   if (!pixels) return false;
   for (int y = 0; y < kSize; y++) {
     for (int x = 0; x < kSize; x++) {
       int index = (y / kSwatch) * 16 + x / kSwatch;
-      PutPalettePixel(ppu, pixels + ((size_t)y * kSize + x) * 4,
+      PutPalettePixel(source, pixels + ((size_t)y * kSize + x) * 4,
                       index, false);
     }
   }
@@ -293,24 +290,26 @@ static bool WritePalette(const char *directory, const Ppu *ppu) {
   return ok;
 }
 
-static bool WriteObjAtlas(const char *directory, const Ppu *ppu) {
+static bool WriteObjAtlas(const char *directory,
+                          const SceneAssetDumpSource *source) {
   uint8_t *pixels = (uint8_t *)calloc(
       (size_t)kObjAtlasWidth * kObjAtlasHeight, 4);
   if (!pixels) return false;
   for (int name_select = 0; name_select < 2; name_select++) {
-    int base = name_select ? PPU_objTileAdr2(ppu) : PPU_objTileAdr1(ppu);
+    int base = (int)(name_select ? source->ppu.object_tile_base_2_word
+                                : source->ppu.object_tile_base_1_word);
     for (int palette = 0; palette < 8; palette++) {
       int section = name_select * 8 + palette;
-      for (int tile = 0; tile < kPpuObjTileIds; tile++) {
+      for (int tile = 0; tile < kObjTileIds; tile++) {
         int char_address = (base + tile * 16) & 0x7fff;
         int tile_x = (tile & 15) * 8;
         int tile_y = section * 128 + (tile >> 4) * 8;
         for (int py = 0; py < 8; py++) {
           for (int px = 0; px < 8; px++) {
-            int pixel = PlanarPixel(ppu, char_address, 4, px, py);
+            int pixel = PlanarPixel(source, char_address, 4, px, py);
             uint8_t *out = pixels +
                 ((size_t)(tile_y + py) * kObjAtlasWidth + tile_x + px) * 4;
-            PutPalettePixel(ppu, out, 0x80 + palette * 16 + pixel,
+            PutPalettePixel(source, out, 0x80 + palette * 16 + pixel,
                             pixel == 0);
           }
         }
@@ -324,20 +323,22 @@ static bool WriteObjAtlas(const char *directory, const Ppu *ppu) {
   return ok;
 }
 
-static bool WriteOamSheet(const char *directory, const Ppu *ppu) {
+static bool WriteOamSheet(const char *directory,
+                          const SceneAssetDumpSource *source) {
   uint8_t *pixels = (uint8_t *)calloc(
       (size_t)kOamSheetWidth * kOamSheetHeight, 4);
   if (!pixels) return false;
   for (int slot = 0; slot < 128; slot++) {
     int index = slot * 2;
-    int oam1 = ppu->oam[index + 1];
+    int oam1 = source->oam.data[index + 1];
     int size_bit =
-        (ppu->highOam[index >> 3] >> ((index & 7) + 1)) & 1;
-    int size = kSpriteSizes[PPU_objSize(ppu)][size_bit];
+        (source->high_oam.data[index >> 3] >> ((index & 7) + 1)) & 1;
+    int size = kSpriteSizes[source->ppu.object_size_select][size_bit];
     bool hflip = (oam1 & 0x4000) != 0;
     bool vflip = (oam1 & 0x8000) != 0;
-    int base = (oam1 & 0x100) ? PPU_objTileAdr2(ppu)
-                              : PPU_objTileAdr1(ppu);
+    int base = (int)((oam1 & 0x100)
+        ? source->ppu.object_tile_base_2_word
+        : source->ppu.object_tile_base_1_word);
     int palette = (oam1 >> 9) & 7;
     int cell_x = (slot & 15) * 64;
     int cell_y = (slot >> 4) * 64;
@@ -349,11 +350,11 @@ static bool WriteOamSheet(const char *directory, const Ppu *ppu) {
                    (((oam1 & 15) + (used_x >> 3)) & 15);
         tile &= 0xff;
         int char_address = (base + tile * 16) & 0x7fff;
-        int pixel = PlanarPixel(ppu, char_address, 4,
+        int pixel = PlanarPixel(source, char_address, 4,
                                 used_x & 7, used_y & 7);
         uint8_t *out = pixels +
             ((size_t)(cell_y + py) * kOamSheetWidth + cell_x + px) * 4;
-        PutPalettePixel(ppu, out, 0x80 + palette * 16 + pixel,
+        PutPalettePixel(source, out, 0x80 + palette * 16 + pixel,
                         pixel == 0);
       }
     }
@@ -376,26 +377,28 @@ static bool WriteBinary(const char *directory, const char *name,
   return ok;
 }
 
-static bool WriteOamBinary(const char *directory, const Ppu *ppu) {
+static bool WriteOamBinary(const char *directory,
+                           const SceneAssetDumpSource *source) {
   char path[kSceneAssetPathCapacity];
   BuildPath(path, sizeof(path), directory, "oam.bin");
   FILE *file = fopen(path, "wb");
-  bool ok = file &&
-      fwrite(ppu->oam, 1, sizeof(ppu->oam), file) == sizeof(ppu->oam) &&
-      fwrite(ppu->highOam, 1, sizeof(ppu->highOam), file) ==
-          sizeof(ppu->highOam);
+  size_t oam_bytes = (size_t)source->oam.element_count * sizeof(uint16_t);
+  size_t high_oam_bytes = (size_t)source->high_oam.byte_size;
+  bool ok = file && fwrite(source->oam.data, 1, oam_bytes, file) == oam_bytes &&
+      fwrite(source->high_oam.data, 1, high_oam_bytes, file) == high_oam_bytes;
   if (file && fclose(file) != 0) ok = false;
   if (!ok) fprintf(stderr, "[scene-assets] cannot write %s\n", path);
   return ok;
 }
 
-static bool WriteMetadata(const char *directory, const Ppu *ppu,
-                          const uint8_t *wram, int host_frame,
+static bool WriteMetadata(const char *directory,
+                          const SceneAssetDumpSource *source, int host_frame,
                           const BgDump *backgrounds, int background_count) {
   char path[kSceneAssetPathCapacity];
   BuildPath(path, sizeof(path), directory, "metadata.json");
   FILE *file = fopen(path, "w");
   if (!file) return false;
+  const uint8_t *wram = source->wram.data;
   unsigned game_frame = wram
       ? wram[kActRaiserWram_GameFrame] |
             (wram[kActRaiserWram_GameFrame + 1] << 8)
@@ -411,9 +414,11 @@ static bool WriteMetadata(const char *directory, const Ppu *ppu,
       "    \"obsel\": %u, \"obj_base_1_word\": %u, "
       "\"obj_base_2_word\": %u\n  },\n  \"backgrounds\": [\n",
       host_frame, game_frame, map_group, current_map,
-      PPU_mode(ppu), ppu->bgmode,
-      PPU_brightness(ppu), ppu->screenEnabled[0], ppu->screenEnabled[1],
-      ppu->obsel, PPU_objTileAdr1(ppu), PPU_objTileAdr2(ppu));
+      source->ppu.bg_mode, source->ppu.bg_mode_control,
+      source->ppu.brightness, source->ppu.main_screen,
+      source->ppu.sub_screen, source->ppu.object_select,
+      source->ppu.object_tile_base_1_word,
+      source->ppu.object_tile_base_2_word);
   for (int i = 0; i < background_count; i++) {
     const BgDump *bg = &backgrounds[i];
     fprintf(file,
@@ -438,16 +443,16 @@ static bool WriteMetadata(const char *directory, const Ppu *ppu,
       kObjAtlasWidth, kObjAtlasHeight, kOamSheetWidth, kOamSheetHeight);
   for (int slot = 0; slot < 128; slot++) {
     int index = slot * 2;
-    int x_raw = ppu->oam[index] & 0xff;
-    x_raw |= ((ppu->highOam[index >> 3] >> (index & 7)) & 1) << 8;
+    int x_raw = source->oam.data[index] & 0xff;
+    x_raw |= ((source->high_oam.data[index >> 3] >> (index & 7)) & 1) << 8;
     int x = x_raw;
-    if (x >= kPpuXPixels + ppu->extraRightCur) x -= kPpuObjXWrap;
-    int y_raw = ppu->oam[index] >> 8;
-    int y = y_raw >= kPpuObjYNegativeFrom ? y_raw - kPpuObjYWrap : y_raw;
-    int oam1 = ppu->oam[index + 1];
+    if (x >= 256 + source->ppu.margin_right) x -= 512;
+    int y_raw = source->oam.data[index] >> 8;
+    int y = y_raw >= kObjYNegativeFrom ? y_raw - kObjYWrap : y_raw;
+    int oam1 = source->oam.data[index + 1];
     int size_bit =
-        (ppu->highOam[index >> 3] >> ((index & 7) + 1)) & 1;
-    int size = kSpriteSizes[PPU_objSize(ppu)][size_bit];
+        (source->high_oam.data[index >> 3] >> ((index & 7) + 1)) & 1;
+    int size = kSpriteSizes[source->ppu.object_size_select][size_bit];
     fprintf(file,
         "    %s{\"slot\": %d, \"x\": %d, \"y\": %d, "
         "\"x_raw_9bit\": %d, \"y_raw\": %d, "
@@ -467,35 +472,74 @@ static bool WriteMetadata(const char *directory, const Ppu *ppu,
   return ok;
 }
 
-bool SceneAssetDump_Write(const char *directory, const Ppu *ppu,
-                          const uint8_t *wram, int host_frame) {
-  if (!directory || !directory[0] || !ppu || !MakeDirectory(directory))
+static bool SceneAssetDumpSource_IsCoherent(
+    const SceneAssetDumpSource *source) {
+  if (!source || source->ppu.struct_size < SR_PPU_STATE_SNAPSHOT_V1_SIZE ||
+      source->vram.struct_size < SR_BORROWED_U16_SPAN_V1_SIZE ||
+      source->cgram.struct_size < SR_BORROWED_U16_SPAN_V1_SIZE ||
+      source->oam.struct_size < SR_BORROWED_U16_SPAN_V1_SIZE ||
+      source->high_oam.struct_size < SR_BORROWED_SPAN_V1_SIZE ||
+      source->vram.region != SR_MEMORY_VRAM ||
+      source->cgram.region != SR_MEMORY_CGRAM ||
+      source->oam.region != SR_MEMORY_OAM ||
+      source->high_oam.region != SR_MEMORY_HIGH_OAM ||
+      !source->vram.data ||
+      source->vram.element_count < SR_PPU_VRAM_WORD_COUNT ||
+      !source->cgram.data ||
+      source->cgram.element_count < SR_PPU_CGRAM_WORD_COUNT ||
+      !source->oam.data ||
+      source->oam.element_count < SR_PPU_OAM_WORD_COUNT ||
+      !source->high_oam.data ||
+      source->high_oam.byte_size < SR_PPU_HIGH_OAM_BYTE_COUNT ||
+      (source->wram.data &&
+       (source->wram.struct_size < SR_BORROWED_SPAN_V1_SIZE ||
+        source->wram.region != SR_MEMORY_WRAM ||
+        source->wram.byte_size < kActRaiserWramSize)) ||
+      source->ppu.object_size_select >= 8u)
+    return false;
+  uint64_t generation = source->ppu.lifetime_generation;
+  if (source->vram.lifetime_generation != generation ||
+      source->cgram.lifetime_generation != generation ||
+      source->oam.lifetime_generation != generation ||
+      source->high_oam.lifetime_generation != generation ||
+      (source->wram.data && source->wram.lifetime_generation != generation))
+    return false;
+  return true;
+}
+
+bool SceneAssetDump_Write(const char *directory,
+                          const SceneAssetDumpSource *source,
+                          int host_frame) {
+  if (!directory || !directory[0] ||
+      !SceneAssetDumpSource_IsCoherent(source) || !MakeDirectory(directory))
     return false;
 
   bool ok = true;
   BgDump backgrounds[4];
   int background_count = 0;
-  int mode = PPU_mode(ppu);
+  int mode = source->ppu.bg_mode;
   if (mode == 7) {
-    ok &= WriteMode7Background(directory, ppu,
+    ok &= WriteMode7Background(directory, source,
                                &backgrounds[background_count++]);
   } else {
     for (int layer = 0; layer < 4; layer++) {
-      if (!BgBpp(mode, layer)) continue;
-      ok &= WritePlanarBackground(directory, ppu, mode, layer,
+      if (!source->ppu.backgrounds[layer].bits_per_pixel) continue;
+      ok &= WritePlanarBackground(directory, source, mode, layer,
                                   &backgrounds[background_count++]);
     }
   }
-  ok &= WritePalette(directory, ppu);
-  ok &= WriteObjAtlas(directory, ppu);
-  ok &= WriteOamSheet(directory, ppu);
-  ok &= WriteBinary(directory, "vram.bin", ppu->vram, sizeof(ppu->vram));
-  ok &= WriteBinary(directory, "cgram.bin", ppu->cgram, sizeof(ppu->cgram));
-  ok &= WriteOamBinary(directory, ppu);
-  if (wram)
-    ok &= WriteBinary(
-        directory, "wram.bin", wram, kActRaiserWramSize);
-  ok &= WriteMetadata(directory, ppu, wram, host_frame,
+  ok &= WritePalette(directory, source);
+  ok &= WriteObjAtlas(directory, source);
+  ok &= WriteOamSheet(directory, source);
+  ok &= WriteBinary(directory, "vram.bin", source->vram.data,
+                    (size_t)SR_PPU_VRAM_WORD_COUNT * sizeof(uint16_t));
+  ok &= WriteBinary(directory, "cgram.bin", source->cgram.data,
+                    (size_t)SR_PPU_CGRAM_WORD_COUNT * sizeof(uint16_t));
+  ok &= WriteOamBinary(directory, source);
+  if (source->wram.data && source->wram.byte_size >= kActRaiserWramSize)
+    ok &= WriteBinary(directory, "wram.bin", source->wram.data,
+                      kActRaiserWramSize);
+  ok &= WriteMetadata(directory, source, host_frame,
                       backgrounds, background_count);
   if (ok)
     fprintf(stderr, "[scene-assets] complete resident asset dump -> %s/\n",

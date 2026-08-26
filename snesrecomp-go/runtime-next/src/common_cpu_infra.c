@@ -239,6 +239,10 @@ void WatchdogCheck(void) { ++g_watchdog_loop_headers; }
 #endif
 
 static void clear_published_runner(void) {
+    if (g_snes != NULL && g_rtl_game_info != NULL &&
+        g_rtl_game_info->bind_runner_abi != NULL) {
+        g_rtl_game_info->bind_runner_abi(g_snes, false);
+    }
     g_snes = NULL;
     g_snes_cpu = NULL;
     g_dma = NULL;
@@ -261,6 +265,9 @@ Snes *SnesInit(const uint8 *data, int data_size) {
     SnesShutdown();
     g_snes = snes_init(g_ram);
     if (g_snes == NULL) return NULL;
+    if (g_rtl_game_info->bind_runner_abi != NULL) {
+        g_rtl_game_info->bind_runner_abi(g_snes, true);
+    }
     g_snes_cpu = g_snes->cpu;
     g_dma = g_snes->dma;
     g_ppu = g_snes->ppu;

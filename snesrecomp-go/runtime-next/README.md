@@ -10,6 +10,9 @@ Current status:
   generated-code ABI and dispatch, DMA, the SNES bus/register model, PPU,
   APU/SPC700/S-DSP, MSU-1, frame/audio pacing, save state, diagnostics,
   widescreen and overlay presentation, key bindings, and launcher utilities.
+- ABI v1 exposes a versioned capability table, opaque component handles,
+  generation counters, and thread-confined WRAM/SRAM/ROM views while the
+  compatibility globals are migrated incrementally.
 - `cmake -S runtime-next -B <build-dir>` builds only independently authored MIT
   sources and runs without SDL, a ROM, or generated game code.
 

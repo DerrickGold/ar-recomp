@@ -12,17 +12,18 @@
 #include "action/action_effects.h"
 #include "action/action_bg_plan.h"
 #include "presentation_frame_generation.h"
+#include "runner_next.h"
 
 /* FrameSlot is the sole game-state contract for presentation. FrameSlot_Capture
  * populates it immediately after RtlDrawPpuFrame; presentation consumes the
  * captured values instead of reading g_ppu, g_settings, or geometry globals.
  *
- * Pixel buffers (g_pixels, g_hud_bg_pixels, g_hud_obj_pixels,
- * g_m7_overlay_pixels, g_diorama_layer_pixels[], g_sim_obj_atlas_pixels,
- * presentation atlases) are not copied. Synchronous
- * ordering guarantees Upload consumes them before the next tick overwrites
- * them. The slot carries scalar and derived state to enforce presentation
- * isolation, not as a cross-thread handoff. */
+ * PPU-bound pixel buffers travel as immutable, borrowed runner-ABI surface
+ * descriptors in the slot. Host-derived products (the SIM OBJ atlas, flat
+ * composite, town canvases, and presentation atlases) remain boot-owned
+ * globals and are not copied. Synchronous ordering guarantees Upload consumes
+ * every borrowed buffer before the next tick overwrites or invalidates it.
+ * The slot is not a cross-thread handoff. */
 
 /* Mirrors ppu.h's kPpuOverlaySource_* / kPpuOverlayFlag_RemoveFromGame.
  * present.c does not include ppu.h (D6), so the order/value is pinned here
@@ -104,6 +105,12 @@ typedef struct InspectorPresentationSelection {
 } InspectorPresentationSelection;
 
 typedef struct FrameSlot {
+  /* Coherent, zero-copy views of the PPU output bindings that produced this
+   * frame. The descriptors are copied; their host-owned pixels are not. They
+   * remain valid through synchronous upload and retained re-presents between
+   * ticks, but never across a runner tick/reset/load or PPU surface rebind. */
+  SrPpuSurfaceSnapshot ppu_surfaces;
+
   /* Geometry, resolved (D3 — never call Settings_Visible*()/live globals from
    * present-time code; these are the already-resolved results). */
   int snes_width;

@@ -66,6 +66,12 @@ if(BUILD_TESTING)
     add_test(NAME snesrecomp_runtime_next_contract
         COMMAND snesrecomp_runtime_next_contract_test)
 
+    add_executable(snesrecomp_runtime_next_abi_test tests/abi_test.c)
+    target_link_libraries(snesrecomp_runtime_next_abi_test PRIVATE
+        snesrecomp_runtime_next_contract)
+    add_test(NAME snesrecomp_runtime_next_abi
+        COMMAND snesrecomp_runtime_next_abi_test)
+
     add_executable(snesrecomp_runtime_next_cart_test tests/cart_test.c)
     target_link_libraries(snesrecomp_runtime_next_cart_test PRIVATE
         snesrecomp_runtime_next_contract)

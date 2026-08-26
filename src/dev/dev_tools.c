@@ -12,12 +12,15 @@
 
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
+#include "common_cpu_infra.h"
 #include "diorama/diorama.h"
 #include "host/host_display.h"
 #include "music_replacements.h"
 #include "present.h"
 #include "presentation_frame_generation.h"
 #include "run_dir.h"
+#include "runner_next.h"
+#include "runner_next_internal.h"
 #include "scene_asset_dump.h"
 #include "scene_inspector.h"
 #include "settings.h"
@@ -88,15 +91,48 @@ void DevTools_FormatInspectorInfo(const DevToolsContext *context,
 }
 
 bool DevTools_DumpSceneAssets(const DevToolsContext *context) {
-  if (!context || !context->ppu) return false;
+  const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+  SrRunnerHandle *runner = sr_runner_handle(g_snes);
+  SceneAssetDumpSource source;
+  SrCpuStateSnapshot cpu = {sizeof(cpu), 0u};
+  if (!context || !api || !runner ||
+      api->struct_size < SNES_RUNNER_API_PPU_STATE_SIZE ||
+      (api->capabilities &
+       (SR_RUNNER_CAP_BORROWED_BYTE_SPANS |
+        SR_RUNNER_CAP_BORROWED_U16_SPANS |
+        SR_RUNNER_CAP_CPU_STATE | SR_RUNNER_CAP_PPU_STATE)) !=
+          (SR_RUNNER_CAP_BORROWED_BYTE_SPANS |
+           SR_RUNNER_CAP_BORROWED_U16_SPANS |
+           SR_RUNNER_CAP_CPU_STATE | SR_RUNNER_CAP_PPU_STATE))
+    return false;
+  memset(&source, 0, sizeof(source));
+  source.ppu.struct_size = sizeof(source.ppu);
+  source.vram.struct_size = sizeof(source.vram);
+  source.cgram.struct_size = sizeof(source.cgram);
+  source.oam.struct_size = sizeof(source.oam);
+  source.high_oam.struct_size = sizeof(source.high_oam);
+  source.wram.struct_size = sizeof(source.wram);
+  if (api->query_cpu_state(runner, &cpu) != SR_RESULT_OK ||
+      api->query_ppu_state(runner, &source.ppu) != SR_RESULT_OK ||
+      api->borrow_u16_memory(runner, SR_MEMORY_VRAM, &source.vram) !=
+          SR_RESULT_OK ||
+      api->borrow_u16_memory(runner, SR_MEMORY_CGRAM, &source.cgram) !=
+          SR_RESULT_OK ||
+      api->borrow_u16_memory(runner, SR_MEMORY_OAM, &source.oam) !=
+          SR_RESULT_OK ||
+      api->borrow_memory(runner, SR_MEMORY_HIGH_OAM, &source.high_oam) !=
+          SR_RESULT_OK ||
+      api->borrow_memory(runner, SR_MEMORY_WRAM, &source.wram) != SR_RESULT_OK)
+    return false;
   static unsigned dump_number;
   const unsigned game_frame =
-      ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
+      source.wram.data[kActRaiserWram_GameFrame] |
+      ((unsigned)source.wram.data[kActRaiserWram_GameFrame + 1u] << 8);
+  const int host_frame = (int)cpu.frame_counter;
   char directory[320];
   RunDirFile(directory, sizeof(directory), "scene_assets_%02u_h%d_gf%u",
-             dump_number++, snes_frame_counter, game_frame);
-  return SceneAssetDump_Write(
-      directory, context->ppu, g_ram, snes_frame_counter);
+             dump_number++, host_frame, game_frame);
+  return SceneAssetDump_Write(directory, &source, host_frame);
 }
 
 /* Write the live framebuffer to an open PPM, cropped to the active display

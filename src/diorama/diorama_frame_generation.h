@@ -2,6 +2,7 @@
 #define DIORAMA_FRAME_GENERATION_H
 
 #include <SDL3/SDL.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "diorama_planes.h"
@@ -16,7 +17,9 @@ typedef struct FrameSlot FrameSlot;
  * the FrameSlot and pixel pointers are the complete input. */
 void DioramaFrameGeneration_Capture(
     SDL_Renderer *renderer, const FrameSlot *slot,
-    uint8_t *const pixels[kDioramaPlane_Count], uint32_t changed_plane_mask);
+    const uint8_t *const pixels[kDioramaPlane_Count],
+    const size_t pitch_bytes[kDioramaPlane_Count],
+    uint32_t changed_plane_mask);
 
 /* Resolve the plane textures for one host present. `current_textures` are the
  * exact 60 Hz endpoints uploaded by Diorama_Upload. Valid generated planes are

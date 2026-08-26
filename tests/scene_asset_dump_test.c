@@ -8,8 +8,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "snes/ppu.h"
-
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
 #define STBI_NO_LINEAR
@@ -72,28 +70,59 @@ int main(void) {
   snprintf(directory, sizeof(directory),
            "/tmp/actraiser-scene-assets-%ld", (long)getpid());
 
-  Ppu *ppu = (Ppu *)calloc(1, sizeof(Ppu));
+  uint16_t *vram = (uint16_t *)calloc(
+      (size_t)SR_PPU_VRAM_WORD_COUNT, sizeof(uint16_t));
+  uint16_t *cgram = (uint16_t *)calloc(
+      (size_t)SR_PPU_CGRAM_WORD_COUNT, sizeof(uint16_t));
+  uint16_t *oam = (uint16_t *)calloc(
+      (size_t)SR_PPU_OAM_WORD_COUNT, sizeof(uint16_t));
+  uint8_t *high_oam = (uint8_t *)calloc(
+      (size_t)SR_PPU_HIGH_OAM_BYTE_COUNT, 1u);
   uint8_t *wram = (uint8_t *)calloc(1, 0x20000);
-  CHECK(ppu != NULL && wram != NULL);
-  if (!ppu || !wram) return 1;
-  ppu->bgmode = 1;
-  ppu->screenEnabled[0] = 0x17;
-  ppu->bgXsc[0] = 0x60;
-  ppu->bgXsc[1] = 0x70;
-  ppu->bgXsc[2] = 0x78;
-  ppu->bgTileAdr = 0x0500;
-  ppu->obsel = 3;
-  ppu->cgram[1] = 0x001f;
-  ppu->cgram[0x81] = 0x7c00;
+  CHECK(vram != NULL && cgram != NULL && oam != NULL &&
+        high_oam != NULL && wram != NULL);
+  if (!vram || !cgram || !oam || !high_oam || !wram) return 1;
+  SceneAssetDumpSource source = {
+    .ppu = {
+      .struct_size = sizeof(SrPpuStateSnapshot),
+      .object_select = 3,
+      .bg_mode_control = 1,
+      .bg_mode = 1,
+      .main_screen = 0x17,
+      .object_size_select = 0,
+      .object_tile_base_1_word = 0x6000,
+      .object_tile_base_2_word = 0x7000,
+      .backgrounds = {
+        {0, 0, 0x6000, 0x0000, 32, 32, 8, 4},
+        {0, 0, 0x7000, 0x0000, 32, 32, 8, 4},
+        {0, 0, 0x7800, 0x5000, 32, 32, 8, 2},
+        {0, 0, 0x0000, 0x0000, 32, 32, 8, 0},
+      },
+    },
+    .vram = {sizeof(SrBorrowedU16Span), SR_MEMORY_VRAM, vram,
+             SR_PPU_VRAM_WORD_COUNT, 0},
+    .cgram = {sizeof(SrBorrowedU16Span), SR_MEMORY_CGRAM, cgram,
+              SR_PPU_CGRAM_WORD_COUNT, 0},
+    .oam = {sizeof(SrBorrowedU16Span), SR_MEMORY_OAM, oam,
+            SR_PPU_OAM_WORD_COUNT, 0},
+    .high_oam = {sizeof(SrBorrowedSpan), SR_MEMORY_HIGH_OAM, high_oam,
+                 SR_PPU_HIGH_OAM_BYTE_COUNT, 0},
+    .wram = {sizeof(SrBorrowedSpan), SR_MEMORY_WRAM, wram, 0x20000, 0},
+  };
+  cgram[1] = 0x001f;
+  cgram[0x81] = 0x7c00;
   /* One opaque pixel in planar tile 1 at BG1's base. */
-  ppu->vram[16] = 0x0080;
-  ppu->vram[0x6000] = 1;
+  vram[16] = 0x0080;
+  vram[0x6000] = 1;
   wram[0x18] = 1;
   wram[0x19] = 2;
   wram[0x88] = 0x34;
   wram[0x89] = 0x12;
 
-  CHECK(SceneAssetDump_Write(directory, ppu, wram, 5678));
+  source.vram.lifetime_generation = 1;
+  CHECK(!SceneAssetDump_Write(directory, &source, 5678));
+  source.vram.lifetime_generation = 0;
+  CHECK(SceneAssetDump_Write(directory, &source, 5678));
   CheckPngSize(directory, "bg1.png", 256, 256);
   CheckPngSize(directory, "bg2.png", 256, 256);
   CheckPngSize(directory, "bg3.png", 256, 256);
@@ -112,10 +141,13 @@ int main(void) {
       stbi_image_free(pixels);
     }
   }
-  CHECK(FileSize(directory, "vram.bin") == (long)sizeof(ppu->vram));
-  CHECK(FileSize(directory, "cgram.bin") == (long)sizeof(ppu->cgram));
+  CHECK(FileSize(directory, "vram.bin") ==
+        (long)(SR_PPU_VRAM_WORD_COUNT * sizeof(uint16_t)));
+  CHECK(FileSize(directory, "cgram.bin") ==
+        (long)(SR_PPU_CGRAM_WORD_COUNT * sizeof(uint16_t)));
   CHECK(FileSize(directory, "oam.bin") ==
-        (long)(sizeof(ppu->oam) + sizeof(ppu->highOam)));
+        (long)(SR_PPU_OAM_WORD_COUNT * sizeof(uint16_t) +
+               SR_PPU_HIGH_OAM_BYTE_COUNT));
   CHECK(FileSize(directory, "wram.bin") == 0x20000);
 
   char metadata_path[320];
@@ -150,7 +182,10 @@ int main(void) {
     remove(path);
   }
   rmdir(directory);
-  free(ppu);
+  free(vram);
+  free(cgram);
+  free(oam);
+  free(high_oam);
   free(wram);
   if (s_failures) {
     fprintf(stderr, "%d scene asset dump test(s) failed\n", s_failures);

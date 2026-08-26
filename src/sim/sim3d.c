@@ -115,14 +115,6 @@ uint32_t ActRaiser_BackdropArgb(const Ppu *ppu) {
       ExpandColor5((color >> 10) & 0x1f, brightness);
 }
 
-uint32_t ActRaiser_BackdropArgbFullBrightness(const Ppu *ppu) {
-  uint32_t color = ppu->cgram[0];
-  return 0xff000000u |
-      (uint32_t)ExpandColor5(color & 0x1f, 15) << 16 |
-      (uint32_t)ExpandColor5((color >> 5) & 0x1f, 15) << 8 |
-      ExpandColor5((color >> 10) & 0x1f, 15);
-}
-
 static bool AllocatePlanes(uint32_t plane_mask) {
   const size_t bytes =
       (size_t)kSim3DMaxWidth * kSim3DMaxHeight * sizeof(uint32_t);
