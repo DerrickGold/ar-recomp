@@ -8,7 +8,7 @@
 #include <SDL3/SDL.h>
 
 #include "present.h"
-#include "runner_next.h"
+#include "snesrecomp/runner.h"
 
 /* Live host-owned resources needed by diagnostic capture and inspector tools.
  * Keep this value snapshot explicit: these resources are recreated when video

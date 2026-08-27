@@ -21,9 +21,6 @@ enum { kMusicManifestLineCapacity = 1024 };
 /* Engine seams (snesrecomp-go/runtime). The APU mutex is recursive (SDL), so the
  * handlers below may take it even when the caller already holds it. */
 extern int RtlGetAudioOutputRate(void);
-extern void (*g_rtl_spc_upload_hook)(uint32_t src);
-extern void (*g_rtl_apu_port_hook)(uint8_t port, uint8_t val);
-extern void (*g_rtl_music_mix_hook)(int16_t *buf, int frames);
 extern int g_dsp_voice_mute_srcn_min;
 extern void dsp_setMusicBusMuted(bool muted);
 
@@ -367,14 +364,14 @@ static void StartSession(const MusicReplacement *entry, int song) {
 
 /* ---- engine hooks -------------------------------------------------------- */
 
-static void OnSpcUpload(uint32_t src) {
+void MusicReplacements_OnSpcUpload(uint32_t src) {
   s_loaded_src = src;
   if (s_musiclog)
     fprintf(stderr, "[music] upload src=%02X:%04X\n",
             (unsigned)(src >> 16), (unsigned)(src & 0xffff));
 }
 
-static void OnApuPortWrite(uint8_t port, uint8_t val) {
+void MusicReplacements_OnApuPortWrite(uint8_t port, uint8_t val) {
   if (port == SPC_PORT_SOUND_EFFECT) {
     if (val && s_musiclog)
       fprintf(stderr, "[music] event id=%02x on port %d\n", val,
@@ -463,7 +460,7 @@ static void OnApuPortWrite(uint8_t port, uint8_t val) {
 }
 
 /* Audio thread, APU lock held (RtlRenderAudio's locked region). */
-static void MixMusic(int16_t *out, int out_frames) {
+void MusicReplacements_MixOutput(int16_t *out, int out_frames) {
   if (!s.session || !s.v || PlaybackPaused() || out_frames <= 0)
     return;
 
@@ -601,9 +598,6 @@ void MusicReplacements_InstallHooks(void) {
   s_host_paused = false;
   s_session_bypassed = false;
   s_next_session_token = 0;
-  g_rtl_spc_upload_hook = OnSpcUpload;
-  g_rtl_apu_port_hook = OnApuPortWrite;
-  g_rtl_music_mix_hook = MixMusic;
 }
 
 void MusicReplacements_ApplySetting(void) {

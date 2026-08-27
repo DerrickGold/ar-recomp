@@ -39,8 +39,8 @@ if [ "$BUILD" = 1 ]; then
   else
     echo "[cycle] cfg unchanged -> skipping regen"
   fi
-  # 2. Reconfigure before the incremental build so promoted defaults (notably
-  # the next runner) replace values retained by an older CMake cache.
+  # 2. Reconfigure before the incremental build so current runtime/build
+  # defaults replace values retained by an older CMake cache.
   cmake --preset dev || exit 1
   cmake --build build -j8 || exit 1
 fi

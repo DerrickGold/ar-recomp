@@ -5,6 +5,10 @@ and a per-game project. The toolchain is game-agnostic; ROM knowledge, authored
 configuration, frontend code, and game-specific runtime policy stay in the
 game repository.
 
+For the graphics-producer, widescreen, separated-layer, and enhanced-audio
+workflow, continue with
+[`GAME_ENHANCEMENT_INTEGRATION.md`](../runtime/docs/GAME_ENHANCEMENT_INTEGRATION.md).
+
 ## Recommended layout
 
 ```text
@@ -77,16 +81,20 @@ Recommended additional gates are:
 ```sh
 go -C snesrecomp-go test ./...
 build/v2regen link-audit --gen-dir src/gen --src-dir src \
-  --runtime-dir snesrecomp-go/runtime-next/src
+  --runtime-dir snesrecomp-go/runtime/src
 build/v2regen rts-webs --rom game.sfc --cfg-dir recomp --suggest
 ```
 
 ## CMake integration
 
-`runtime-next/runner.cmake` exports two variables:
+`runtime/runner.cmake` exports a source list, two include classifications, and
+a target configuration helper:
 
 - `SNESRECOMP_RUNNER_SOURCES`: shared C runtime and SNES hardware sources.
-- `SNESRECOMP_RUNNER_INCLUDE_DIRS`: the portable runner's public include root.
+- `SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS`: supported namespaced SDK headers.
+- `SNESRECOMP_RUNNER_PRIVATE_INCLUDE_DIRS`: runner implementation headers.
+- `snesrecomp_configure_runtime_target(target)`: applies the public/private
+  boundary, C11 requirement, SIMD selection, and bitset configuration.
 
 The manifest defines `SNESRECOMP_ENABLE_TRACE`. The trace option compiles local
 trace rings and a link stub; the historical TCP debug server was intentionally
@@ -98,7 +106,7 @@ project(MyGameRecomp C)
 set(CMAKE_C_STANDARD 11)
 
 set(SNESRECOMP_GO_ROOT "${CMAKE_SOURCE_DIR}/snesrecomp-go")
-include("${SNESRECOMP_GO_ROOT}/runtime-next/runner.cmake")
+include("${SNESRECOMP_GO_ROOT}/runtime/runner.cmake")
 
 find_package(SDL2 REQUIRED)
 file(GLOB GAME_GEN_SOURCES CONFIGURE_DEPENDS
@@ -107,8 +115,12 @@ if(NOT GAME_GEN_SOURCES)
   message(FATAL_ERROR "Run the project regeneration script before building")
 endif()
 
+add_library(snesrecomp_runtime STATIC
+  ${SNESRECOMP_RUNNER_SOURCES})
+snesrecomp_configure_runtime_target(snesrecomp_runtime)
+add_library(snesrecomp::runtime ALIAS snesrecomp_runtime)
+
 add_executable(MyGame
-  ${SNESRECOMP_RUNNER_SOURCES}
   ${GAME_GEN_SOURCES}
   src/main.c
   src/config.c
@@ -118,13 +130,23 @@ add_executable(MyGame
 target_include_directories(MyGame PRIVATE
   "${CMAKE_SOURCE_DIR}/src"
   "${CMAKE_SOURCE_DIR}/recomp"
-  ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
   ${SDL2_INCLUDE_DIRS})
 
 target_compile_definitions(MyGame PRIVATE
   SNESRECOMP_TRACE=$<BOOL:${SNESRECOMP_ENABLE_TRACE}>
   SNESRECOMP_REVERSE_DEBUG=0)
-target_link_libraries(MyGame PRIVATE ${SDL2_LIBRARIES} m)
+target_link_libraries(MyGame PRIVATE
+  snesrecomp::runtime ${SDL2_LIBRARIES} m)
+```
+
+The runner must be its own static-library target. Game and generated
+translation units compile against public headers only; they do not compile or
+reference runner implementation objects. With an installed or vended SDK, use
+the equivalent package target:
+
+```cmake
+find_package(snesrecomp-runtime CONFIG REQUIRED)
+target_link_libraries(MyGame PRIVATE snesrecomp::runtime)
 ```
 
 Projects with a non-SDL frontend can omit `keybinds.c` from their local source
@@ -163,7 +185,7 @@ does not supply a complete application. A game project owns:
 A minimal registration unit looks like:
 
 ```c
-#include "common_cpu_infra.h"
+#include "snesrecomp/game/bootstrap.h"
 #include "game_rtl.h"
 
 static const RtlGameIdentity kGameIdentity = {
@@ -174,7 +196,7 @@ static const RtlGameIdentity kGameIdentity = {
 };
 
 static const RtlGameExecutionApi kGameExecution = {
-  .struct_size = RTL_GAME_EXECUTION_API_V1_SIZE,
+  .struct_size = RTL_GAME_EXECUTION_API_V2_SIZE,
   .run_frame = &RunOneFrameOfGame,
   .draw_ppu_frame = NULL,
   .read_rdnmi = NULL,
@@ -183,7 +205,7 @@ static const RtlGameExecutionApi kGameExecution = {
 
 const RtlGameModule kGameModule = {
   .abi_version = RTL_GAME_MODULE_ABI_VERSION,
-  .struct_size = RTL_GAME_MODULE_V1_SIZE,
+  .struct_size = RTL_GAME_MODULE_V2_SIZE,
   .capabilities = RTL_GAME_MODULE_CAP_IDENTITY |
                   RTL_GAME_MODULE_CAP_EXECUTION,
   .identity = &kGameIdentity,
@@ -224,16 +246,24 @@ The generated ABI is `RecompReturn Function_MxXx(CpuState *cpu)`. Do not invent
 per-function return structs or pass CPU registers as C parameters; mutate the
 shared `CpuState` exactly as generated code does.
 
+Current generated output includes `snesrecomp/game/cpu.h`,
+`snesrecomp/game/trace.h`, and `snesrecomp/game/generated_support.h`.
+`snesrecomp/game/bootstrap.h` is the frontend lifecycle and game-registration
+surface. Legacy short-header forwarders are not shipped: generated and
+authored project code must use the namespaced public headers and must not
+include runner implementation or `snes/*` headers. The full public operation
+matrix is documented in
+[`API_REFERENCE.md`](../runtime/docs/API_REFERENCE.md).
+
 ## Hermetic builds (`snesbuild build --hermetic`)
 
-The hermetic path compiles every translation unit with a pinned Zig toolchain
-and links the executable itself — no CMake and no system compiler. It reads
-two inputs the CMake path also uses, plus one manifest it owns:
+The hermetic path compiles game translation units with a pinned Zig toolchain
+and links the executable itself — no CMake and no system compiler. It first
+looks for `runtime/lib/<zig-target>/libsnesrecomp_runtime.a` (or the Windows
+`.lib`) and uses the matching public headers under `runtime/include`. When no
+archive is present in a source checkout, it builds the same library from
+`runner.cmake`. It then reads these project inputs:
 
-- `runtime-next/runner.cmake` — the engine's source/include lists (parsed
-  directly; the first unconditional
-  `set(...)` block of each variable). The `SNESRECOMP_ENABLE_TRACE` developer
-  sources are never part of hermetic builds.
 - `src/gen/*.c` — globbed as always.
 - `snesbuild.ini` at the project root — the game half:
 

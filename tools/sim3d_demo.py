@@ -1690,9 +1690,9 @@ def main() -> int:
         # Disable the ambient anomaly ring without enabling detailed tracing in
         # the visual-state pass. Old input streams can take a different menu
         # transition path when the much heavier function trace is active.
-        "AR_TRACE": str((output / "disabled-general-trace.jsonl").resolve()),
-        "AR_TRACE_HF_LO": "999999",
-        "AR_TRACE_HF_HI": "999999",
+        "SNESRECOMP_TRACE_FILE": str((output / "disabled-general-trace.jsonl").resolve()),
+        "SNESRECOMP_TRACE_HARDWARE_LOW": "999999",
+        "SNESRECOMP_TRACE_HARDWARE_HIGH": "999999",
     })
     if settings is not None:
         state_env["AR_SETTINGS_PATH"] = str(settings)
@@ -1734,7 +1734,7 @@ def main() -> int:
             (output / f"{d3_label}-planes").resolve())
         state_env["AR_SIM3D_D2_DUMP_AT_GF"] = str(
             int(checkpoint.get("d3a_shot_game_frame", 700)))
-    state_env.pop("AR_TRACE_WATCH", None)
+    state_env.pop("SNESRECOMP_TRACE_WATCH_FILE", None)
 
     routine_env = state_env.copy()
     routine_env.pop("AR_SIM3D_TRACE", None)
@@ -1750,11 +1750,11 @@ def main() -> int:
         # routines distinguishes Direct the People / Building Direction from
         # targeted miracles,
         # even though both stage pending world type $0009.
-        "AR_TRACE": str(function_trace.resolve()),
-        "AR_TRACE_HF_LO": "0",
-        "AR_TRACE_HF_HI": str(int(checkpoint["quit_frames"])),
-        "AR_TRACE_CH": "func",
-        "AR_TRACE_FUNC": "bank_01_9",
+        "SNESRECOMP_TRACE_FILE": str(function_trace.resolve()),
+        "SNESRECOMP_TRACE_HARDWARE_LOW": "0",
+        "SNESRECOMP_TRACE_HARDWARE_HIGH": str(int(checkpoint["quit_frames"])),
+        "SNESRECOMP_TRACE_CHANNELS": "func",
+        "SNESRECOMP_TRACE_FUNCTION": "bank_01_9",
     })
     command = command_for(checkpoint, binary, rom, config)
 

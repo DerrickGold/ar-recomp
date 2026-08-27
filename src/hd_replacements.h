@@ -2,8 +2,8 @@
 #define HD_REPLACEMENTS_H
 
 #include <stdbool.h>
-#include "runner_next.h"
-#include "types.h"
+#include "snesrecomp/runner.h"
+#include "snesrecomp/game/types.h"
 
 /* Manifest-driven HD graphics replacements (game-assets/manifest.ini).
  *

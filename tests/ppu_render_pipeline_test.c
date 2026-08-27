@@ -25,7 +25,7 @@
 #include "sim_render_atlas.h"
 #include "sim_render_metadata.h"
 #include "sim_world_navigation_capture.h"
-#include "runner_next_internal.h"
+#include "runner_internal.h"
 #include "snes/snes.h"
 
 /* main.c owns this global; the PPU line renderer reads it to pick new/old path. */
@@ -34,16 +34,16 @@ bool g_new_ppu = false;
 /* Trace/debug hooks the PPU references but that only fire under instrumentation
  * (SNESRECOMP_TRACE / debug server). Stub them so this standalone harness links
  * without pulling in the whole runtime. None run in a normal render. */
-int ar_trace_active(void) { return 0; }
-void ar_trace_ppumem(uint16_t a, uint8_t v) { (void)a; (void)v; }
-void ar_trace_reg(uint16_t a, uint8_t v) { (void)a; (void)v; }
-void ar_trace_vmadd(uint16_t a) { (void)a; }
-void ar_trace_vram(uint16_t a, uint16_t v) { (void)a; (void)v; }
-void ar_vramraw(uint16_t a, uint8_t v, int p) { (void)a; (void)v; (void)p; }
-int ar_vramwatch(uint16_t a, uint8_t v) { (void)a; (void)v; return 0; }
+int sr_trace_active(void) { return 0; }
+void sr_trace_ppumem(uint16_t a, uint8_t v) { (void)a; (void)v; }
+void sr_trace_reg(uint16_t a, uint8_t v) { (void)a; (void)v; }
+void sr_trace_vmadd(uint16_t a) { (void)a; }
+void sr_trace_vram(uint16_t a, uint16_t v) { (void)a; (void)v; }
+void sr_vram_trace_raw(uint16_t a, uint8_t v, int p) { (void)a; (void)v; (void)p; }
+int sr_vram_watch(uint16_t a, uint8_t v) { (void)a; (void)v; return 0; }
 void CpuDispatchLogWriteFile(const char *path) { (void)path; }
-unsigned g_ar_blk_idx;
-uint32_t g_ar_blk_ring[256];
+unsigned g_sr_block_index;
+uint32_t g_sr_block_ring[256];
 const char *g_last_recomp_func;
 uint8_t g_ram[0x20000];
 int snes_frame_counter;

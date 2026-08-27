@@ -151,15 +151,15 @@ func defaultBankHeader(bank byte) string {
  *
  * Bank $%02X. Each function below mutates the shared CpuState
  * struct via cpu->A / cpu->X / etc. Memory access goes through the
- * cpu_read{8,16} / cpu_write{8,16} helpers in cpu_state.h.
+ * cpu_read{8,16} / cpu_write{8,16} helpers in the game CPU contract.
  */
 
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "cpu_state.h"
-#include "cpu_trace.h"
-#include "common_cpu_infra.h"
+#include "snesrecomp/game/cpu.h"
+#include "snesrecomp/game/trace.h"
+#include "snesrecomp/game/generated_support.h"
 #include "funcs.h"
 `, bank)
 }

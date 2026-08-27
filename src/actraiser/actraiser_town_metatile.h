@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "cpu_state.h"
+#include "snesrecomp/game/cpu.h"
 
 typedef enum ActRaiserTownMetatileAtlas {
   kActRaiserTownMetatileAtlas_Terrain = 0,

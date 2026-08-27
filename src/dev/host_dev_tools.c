@@ -2,11 +2,10 @@
 #include "host_dev_tools.h"
 
 #include "dev_tools.h"
-#include "common_cpu_infra.h"
+#include "snesrecomp/game_runtime.h"
 #include "host/host_input.h"
 #include "present.h"
-#include "runner_next.h"
-#include "runner_next_internal.h"
+#include "snesrecomp/runner.h"
 #include "scene_inspector.h"
 #include "settings.h"
 
@@ -29,7 +28,7 @@ static DevToolsContext CurrentContext(void) {
     .renderer = g_renderer,
     .hud_bg_texture = g_hud_bg_texture,
     .hud_obj_texture = g_hud_obj_texture,
-    .runner = sr_runner_handle(g_snes),
+    .runner = RtlGameRunner(),
     .framebuffer_pixels =
         g_pixels + ActionApron_DisplayOffset(SR_PPU_OBJ_APRON),
     .framebuffer_pitch =

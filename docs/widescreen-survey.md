@@ -191,14 +191,14 @@ two-edge unsigned structure as the ROM); builder draw window
 `(x+extL) < 0x110+extL+extR`. Y windows untouched.
 
 Still open for Phase 3: tilemap column-streaming margin (locate streamer via
-AR_TRACE vram while walking a stage), level-edge clamp (camera $22 bounds →
+SNESRECOMP_TRACE_FILE vram while walking a stage), level-edge clamp (camera $22 bounds →
 PpuSetExtraSideSpace), and the action-mode wide policy switch itself
 (action stays pillarboxed until those land; the hle wide branches follow the
 margins automatically once the policy widens).
 
 ## Phase 3.4/3.5 landed (2026-07-10): action-stage margin policy
 
-Measured with saves/level1-action.rec (AR_TRACE vram $6000-67FF, writer =
+Measured with saves/level1-action.rec (SNESRECOMP_TRACE_FILE vram $6000-67FF, writer =
 $02:ADA8 strip DMAs):
 - Column streamer uploads a 2-col strip at camera+257..273 every 16px of
   scroll -> the leading margin is only guaranteed ~16px past the authentic

@@ -6,7 +6,7 @@
  * writes what that decoder already reconstructed. This is the same immutable
  * room authority linked into the game; the exporter owns no ROM interpretation.
  *
- *   cc -I src -I recomp -I snesrecomp-go/runtime-next/src \
+ *   cc -I src -I recomp -I snesrecomp-go/runtime/include \
  *      tools/action_editor/action_bg_export.c -o /tmp/action_bg_export
  *   /tmp/action_bg_export ar.sfc rooms.json
  */

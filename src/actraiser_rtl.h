@@ -3,12 +3,15 @@
 
 #include "action/action_obj_apron.h"
 #include "action/action_bg_plan.h"
-#include "common_rtl.h"
-#include "common_cpu_infra.h"
-#include "snes/snes_regs.h"
+#include "snesrecomp/game.h"
+#include "snesrecomp/game/runtime.h"
+#include "snesrecomp/game/snes_regs.h"
 
 typedef struct SrRunnerHandle SrRunnerHandle;
 
+/* Lifecycle-owned runner binding. Game code retains only the opaque handle;
+ * concrete console/component layouts remain runner-private. */
+void ActRaiser_BindRunner(SrRunnerHandle *runner);
 void ActRaiserDrawPpuFrame(void);
 void ActRaiser_RebindPpuOutputSurfaces(void);
 
@@ -60,6 +63,8 @@ bool ActRaiser_HudObjIconRange(uint8_t *first, uint8_t *count);
 bool ActRaiser_DioramaDeathHeimHubFacesPromoted(void);
 void ActRaiser_FullSnapshot(const char *prefix);
 void RunOneFrameOfGame(void);
+void ActRaiser_OnInidispWrite(uint8 value);
+void ActRaiser_OnApuPortPace(uint8 port, uint8 value);
 /* Release the game coroutine's stack (guard-page mapping) / fiber at shutdown.
  * Safe to call when none was created. */
 void ActRaiser_DestroyGameCoroutine(void);
@@ -68,14 +73,12 @@ bool ActRaiser_RecoverDispatchMiss(uint32 source_pc24, uint32 target_pc24);
 void ActRaiser_SpcUploaderCompleteTick(void);
 void ActRaiser_SpcUploadBindRunner(SrRunnerHandle *runner);
 void ActRaiser_WidescreenSpritesBindRunner(SrRunnerHandle *runner);
-#ifdef SNESRECOMP_NEXT_COMMON_CPU_INFRA_H
 bool ActRaiser_SpcUploadSource(CpuState *cpu, uint32 *source24);
 bool ActRaiser_SpcUploadCustomize(CpuState *cpu,
                                   const SrSpcUploadContext *upload,
                                   uint32 source24);
 void ActRaiser_SpcUploadCommit(SrSpcUploadContext *upload);
 int ActRaiser_SpcUploadStackPop(const CpuState *cpu);
-#endif
 
 /* Debug aid: queue one action-stage spell-cycle step. Called from the host
  * input path; the request is consumed at the next frame boundary inside

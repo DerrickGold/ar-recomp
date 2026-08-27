@@ -2,14 +2,15 @@ package main
 
 import (
 	"io"
-
-	"github.com/DerrickGold/snesrecomp-go/internal/buildgui"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/DerrickGold/snesrecomp-go/internal/buildgui"
+	"github.com/DerrickGold/snesrecomp-go/internal/project"
 )
 
 // A bundle-shaped fixture: build inputs under utils/, the playable game in the
@@ -49,7 +50,13 @@ func bundleFixture(t *testing.T) (root, utils string) {
 	write(filepath.Join(utils, "src", "main.c"), "int main(void){return 0;}")
 	write(filepath.Join(utils, "src", "gen", "bank00.c"), "generated")
 	write(filepath.Join(utils, "recomp", "bank00.cfg"), "cfg")
-	write(filepath.Join(utils, "snesrecomp-go", "runtime-next", "src", "snes", "ppu.h"), "header")
+	write(filepath.Join(utils, "snesrecomp-go", "runtime", "include", "snesrecomp", "runner.h"), "header")
+	runtimeArchive, err := project.VendedRuntimeArchivePath(
+		filepath.Join(utils, "snesrecomp-go", "runtime"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(runtimeArchive, "archive")
 	write(filepath.Join(utils, "third_party", "stb", "stb_image.h"), "header")
 	write(filepath.Join(utils, "snesbuild.ini"), "[project]")
 
@@ -333,6 +340,29 @@ func TestEveryRebuildInputIsRequired(t *testing.T) {
 	}
 }
 
+func TestMismatchedRuntimeArchiveCannotClaimRebuild(t *testing.T) {
+	root, utils := bundleFixture(t)
+	runtimeDir := filepath.Join(utils, "snesrecomp-go", "runtime")
+	archive, err := project.VendedRuntimeArchivePath(runtimeDir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(archive); err != nil {
+		t.Fatal(err)
+	}
+	writeTestArchive := filepath.Join(runtimeDir, "lib", "wrong-target",
+		"libsnesrecomp_runtime.a")
+	if err := os.MkdirAll(filepath.Dir(writeTestArchive), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(writeTestArchive, []byte("archive"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if state := detectInstallState(utils, root); state.CanRebuild {
+		t.Fatal("CanRebuild = true with only a mismatched runner archive")
+	}
+}
+
 // The bundle README tells users which folders they may delete by hand. That list
 // and the allowlist this code deletes must be the SAME list: if they drift, the
 // README either tells someone to remove a file the game needs, or omits one the
@@ -590,7 +620,7 @@ func TestGameBinaryFoundAlongsideBundleScripts(t *testing.T) {
 func TestCleanupRefusesInASourceCheckout(t *testing.T) {
 	repo := t.TempDir()
 	for _, dir := range []string{"src", "recomp", "tools", "third_party",
-		"snesrecomp-go/runtime-next", "build"} {
+		"snesrecomp-go/runtime", "build"} {
 		if err := os.MkdirAll(filepath.Join(repo, dir), 0o755); err != nil {
 			t.Fatal(err)
 		}

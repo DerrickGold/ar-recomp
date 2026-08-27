@@ -30,37 +30,65 @@ func createObjectArchive(zigPath, targetOS, outputDir string, objects []string) 
 		extension = ".lib"
 	}
 	archivePath := filepath.Join(temporaryDir, "objects"+extension)
-	responsePath := filepath.Join(temporaryDir, "objects.rsp")
 	cleanup := func() {
-		_ = os.Remove(responsePath)
 		_ = os.Remove(archivePath)
 		_ = os.Remove(temporaryDir)
 	}
+	if err := writeObjectArchive(zigPath, targetOS, archivePath, objects); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	return archivePath, cleanup, nil
+}
 
+// writeObjectArchive creates one deterministic static-library input from an
+// exact object list. A fresh archive is built beside the destination and then
+// renamed into place, so removed manifest entries cannot survive as stale
+// members and a failed `ar` invocation cannot destroy the last good archive.
+// The response file is transient; the result is suitable for retaining as the
+// separately vendable runner build artifact.
+func writeObjectArchive(zigPath, targetOS, archivePath string, objects []string) error {
+	if len(objects) == 0 {
+		return fmt.Errorf("cannot create an empty object archive")
+	}
+	responsePath := archivePath + ".rsp"
+	stagingPath := archivePath + ".tmp"
 	response, err := archiveResponseFile(objects)
 	if err != nil {
-		cleanup()
-		return "", nil, err
+		return err
 	}
 	if err := os.WriteFile(responsePath, response, 0o600); err != nil {
-		cleanup()
-		return "", nil, err
+		return err
 	}
+	defer os.Remove(responsePath)
+	if err := os.Remove(stagingPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	defer os.Remove(stagingPath)
 
 	args := []string{
 		"ar",
 		"--format=" + objectArchiveFormat(targetOS),
 		"--rsp-quoting=posix",
-		"rcs",
-		archivePath,
+		"rcsD",
+		stagingPath,
 		"@" + responsePath,
 	}
 	output, err := exec.Command(zigPath, args...).CombinedOutput()
 	if err != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("archive %d objects: %w\n%s", len(objects), err, strings.TrimSpace(string(output)))
+		return fmt.Errorf("archive %d objects: %w\n%s", len(objects), err, strings.TrimSpace(string(output)))
 	}
-	return archivePath, cleanup, nil
+	if err := os.Remove(archivePath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return os.Rename(stagingPath, archivePath)
+}
+
+func runtimeArchiveName(targetOS string) string {
+	if targetOS == "windows" {
+		return "snesrecomp_runtime.lib"
+	}
+	return "libsnesrecomp_runtime.a"
 }
 
 func objectArchiveFormat(targetOS string) string {

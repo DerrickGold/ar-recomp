@@ -20,9 +20,8 @@
 #include <string.h>
 
 #include "actraiser_game.h"
-#include "common_cpu_infra.h"
-#include "common_rtl.h"
-#include "cpu_state.h"
+#include "snesrecomp/game/runtime.h"
+#include "snesrecomp/game/cpu.h"
 #include "funcs.h"
 #include "sim_world_map.h"
 #include "sim_world_map_compose.h"

@@ -69,7 +69,7 @@ var buildOnlySubtrees = []string{
 	"build",           // CMake/Zig scratch, incl. the fetched toolchain cache
 	"src",             // authored C sources, and src/gen's regenerated output
 	"recomp",          // the recompiler's per-bank .cfg inputs
-	"snesrecomp-go",   // the runtime headers the hermetic build compiles against
+	"snesrecomp-go",   // public runner headers + target archive used by the build
 	"third_party",     // stb, vendored for the build
 }
 
@@ -78,7 +78,8 @@ var buildOnlySubtrees = []string{
 //
 //   - recomp/ holds the per-bank configuration the generator reads.
 //   - snesbuild.ini is the source manifest (project.ManifestFileName).
-//   - snesrecomp-go/runtime-next/ is what the generated C compiles against.
+//   - snesrecomp-go/runtime/ holds public headers plus either a target archive
+//     (release bundles) or the source fallback (developer checkouts).
 //   - src/ is the authored game code.
 //
 // Deliberately NOT gated on: the Zig toolchain (project.HermeticBuild fetches
@@ -87,7 +88,7 @@ var buildOnlySubtrees = []string{
 var rebuildInputs = []string{
 	"recomp",
 	project.ManifestFileName,
-	filepath.Join("snesrecomp-go", "runtime-next"),
+	filepath.Join("snesrecomp-go", "runtime"),
 	"src",
 }
 
@@ -120,6 +121,9 @@ func detectInstallState(root, outputDir string) buildgui.InstallState {
 			break
 		}
 	}
+	if state.CanRebuild && !runtimeBuildInputAvailable(root) {
+		state.CanRebuild = false
+	}
 
 	// CAN SLIM: there is a build-only subtree left to remove. Offered only when
 	// the game is playable, since reclaiming space before there is a working
@@ -138,6 +142,23 @@ func detectInstallState(root, outputDir string) buildgui.InstallState {
 		}
 	}
 	return state
+}
+
+func runtimeBuildInputAvailable(root string) bool {
+	runtimeDir := filepath.Join(root, "snesrecomp-go", "runtime")
+	if info, err := os.Stat(filepath.Join(runtimeDir, "runner.cmake")); err == nil && info.Mode().IsRegular() {
+		return true
+	}
+	archive, err := project.VendedRuntimeArchivePath(runtimeDir, "")
+	if err != nil {
+		return false
+	}
+	archiveInfo, err := os.Stat(archive)
+	if err != nil || !archiveInfo.Mode().IsRegular() || archiveInfo.Size() == 0 {
+		return false
+	}
+	includeInfo, err := os.Stat(filepath.Join(runtimeDir, "include"))
+	return err == nil && includeInfo.IsDir()
 }
 
 // measureSlimBytes sums the build-only subtrees. Split from detectInstallState

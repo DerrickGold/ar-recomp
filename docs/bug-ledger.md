@@ -13,7 +13,7 @@ and renderer contracts belong in [SEAMS.md](SEAMS.md) and
 
 
 1. **Misdecode from an M-leak** — runtime m wrong → wrong variant → garbage writes.
-   *Find:* `AR_MXHIST`. *Common cause:* an **unregistered object handler** reached via nested
+   *Find:* `SNESRECOMP_MX_HISTORY`. *Common cause:* an **unregistered object handler** reached via nested
    dispatch leaks m=0 out of the `$8915` object loop (it skips the `$896E` PLP that restores m).
    *Fix:* register the handler in `recomp/<bank>.cfg` (`func ... entry_mx:0,0`). Examples:
    `$A9D1`, `$AB05`.
@@ -76,7 +76,7 @@ and renderer contracts belong in [SEAMS.md](SEAMS.md) and
    back to the in-function continuation `$B8C2`), not a terminal tail-call. The recomp's generic RTS
    couldn't resolve the computed target and host-unwound `S` by **−1 per call**, which ratcheted up
    over `bank_03_B20C`'s loop until the over-pop → the entire boss→sim hang (the "x-leak" was a
-   downstream symptom; see §0 RESOLVED). *Find:* `AR_STRACE` (per-instruction `S`, scoped to the
+   downstream symptom; see §0 RESOLVED). *Find:* `SNESRECOMP_STACK_TRACE` (per-instruction `S`, scoped to the
    loop's PC window) → the one call that returns with `S` off names the culprit. *Fix:* the existing
    `indirect_dispatch <PHA_pc> <count> idx:<X|Y> tables:<addr>` directive, **extended with
    `ret:<pc16>`** — when present, the PHA jump-table is emitted as a call-with-return (dispatch each
@@ -159,7 +159,7 @@ and renderer contracts belong in [SEAMS.md](SEAMS.md) and
    *Concrete cases:* `$01:B898` (session-long chase, root-caused via `AR_MXCHECK_BT` real
    backtrace + direct instruction-shape comparison), `$00:8465`, `$00:845F`, `$00:A3E1`,
    `$02:AB05`, and 11 more addresses found by the same static check in one pass (see §5's
-   proven-equivalent-routing entry). *Find:* `AR_MXCHECK`/`AR_CALLMX` catching the wrong-width
+   proven-equivalent-routing entry). *Find:* `SNESRECOMP_ENTRY_MX_CHECK`/`SNESRECOMP_CALL_MX_CHECK` catching the wrong-width
    entry live, followed by inspection of the generated dispatch switch and the Go
    `findEquivalentVariants`/`routeVariant` implementation. *Fix:* the
    proven-equivalence pass now routes automatically wherever it CAN prove an answer; for the
@@ -177,7 +177,7 @@ and renderer contracts belong in [SEAMS.md](SEAMS.md) and
    `rg -n 'Call indirect SUPPRESSED|Call: target unknown|not a valid LoROM code address' src/gen`.
    The Go port no longer emits the historical Python console report for data-region-suppressed
    table entries, so inspect the suspect generated switch against cfg `data_region` ranges. Use
-   `AR_INDIRLOG=1` for a specific suppressed `JSR (abs,X)` site (classifies the table base as
+   `SNESRECOMP_INDIRECT_LOG=1` for a specific suppressed `JSR (abs,X)` site (classifies the table base as
    WRAM/genuine-table, SNES-hardware-register-space/likely-decode-artifact, or ROM/genuine-table).
    *Fix:* author `indirect_call_table`/`indirect_dispatch` cfg directives once the real table shape
    is known (§7.7's `indirect_dispatch … ret:` directive is the same mechanism, just for the
@@ -360,24 +360,24 @@ and renderer contracts belong in [SEAMS.md](SEAMS.md) and
     *decode-time* m; here the decode was already correct (m=0) and the leak was a *runtime*
     host-unwind. **An m/x leak is NOT automatically an exit-mx bug** — see the §1 decision tree.
     (b) The `[dispatch-miss]` stderr tripwire **hid** the root event because it gates on `S>=$0200`
-    and this miss had `S=$01F2`; the ungated `AR_TRACE dispmiss` channel (`03A590 -> 039D8E`) is
+    and this miss had `S=$01F2`; the ungated `SNESRECOMP_TRACE_FILE dispmiss` channel (`03A590 -> 039D8E`) is
     what found it. `tools/find_tailcall_past_end.py` flags the `9D4D→A4F7 ×7` fingerprint statically
     (and a whole `→$9FCD` sibling family — likely the same class, watch for missing-actor bugs).
-    **The trap that cost ~10 runs on the *background* half (now permanently solved — see `AR_TRACE`):**
+    **The trap that cost ~10 runs on the *background* half (now permanently solved — see `SNESRECOMP_TRACE_FILE`):**
     the tilemap indices reach VRAM via the per-frame `AF3D` DMA whose source buffer `$7F:BB00` was
     filled by `BAF5`'s `$2139` readback of the (already-corrupt) VRAM `$0000` — a self-copy loop that
     PERPETUATES but doesn't inject. The injecting writes used atomic 16-bit `STA $2118` →
     `WriteRegWord`/`WriteVramWord` → direct `ppu->vram[]`, which
     **bypasses the `$2118`/`$2119` byte handlers** every VRAM watch hooked, so byte-level watches
-    (`AR_VRAMWATCH`, ppu case `0x18`) never saw it. Also the game-frame `$0088` clock is
+    (`SNESRECOMP_VRAM_WATCH`, ppu case `0x18`) never saw it. Also the game-frame `$0088` clock is
     NON-MONOTONIC near cutscenes → gate probes on **host frame** (`snes_frame_counter`), not `$0088`.
     Repro: `saves/lairseal.rec` (corrupt onset host-frame ~5089). Oracle still blocked (can't seed
     snes9x from a coroutine savestate; `AR_LOADSTATE` renders state but logic won't advance — the
-    coroutine host-stack isn't restorable). Found in ONE run with `AR_TRACE` (below).
+    coroutine host-stack isn't restorable). Found in ONE run with `SNESRECOMP_TRACE_FILE` (below).
 
 16. **Story-event system (rock-zap hang + fire event + the whole $F921 web) — FIXED 2026-07-06.**
     Three stacked fixes: (a) `func bank_03_FA5F/F98A` — the event dispatcher's pushed continuation
-    chain, found link-by-link via `AR_TRACE_WATCH` + `--diagnose` (each registration exposed the
+    chain, found link-by-link via `SNESRECOMP_TRACE_WATCH_FILE` + `--diagnose` (each registration exposed the
     next handler's RTS target); (b) the **static table walk** that ended the link-by-link cycle:
     the dispatcher's record table (`$03:F99A–$F9F4`, 6-byte records w/ embedded `handler-1`
     words) enumerated ALL 11 handlers — 10 were unregistered, batch-registered in one round
@@ -2060,7 +2060,7 @@ if archaeology is ever needed. The distilled outcomes:
   oracle WRAM diff is address-sorted, NOT temporal — stack-page bytes in a diff are residue, not
   writes (this lesson is now §0 gotcha material).
 - Methodology extracted into: §1 THE DEBUG LOOP, the m/x decision tree, §5 static tools
-  (`find_rts_webs`, `find_yield_points`, `find_handler_chain`), and the AR_TRACE channels.
+  (`find_rts_webs`, `find_yield_points`, `find_handler_chain`), and the SNESRECOMP_TRACE_FILE channels.
 
 ---
 
@@ -2902,7 +2902,7 @@ truths, and the journey that earned them lives here.
 - **Flag symptoms are often stack symptoms.** The act→sim hang (§7.7 era) was framed for days as
   an m/x "perfect storm"; the root was a 1-byte-per-call SNES stack leak — a shifted stack slot
   makes `PLP` read garbage, so flag corruption appeared DOWNSTREAM of the real bug. Found by
-  per-instruction `S` tracing (`AR_STRACE`), not the oracle. When flags look haunted, check `S`
+  per-instruction `S` tracing (`SNESRECOMP_STACK_TRACE`), not the oracle. When flags look haunted, check `S`
   drift across calls first.
 - **A 4-PC branch probe beats re-deriving gate logic.** `AR_SIMTRACE` settled "does the sim
   update run or get skipped?" in one run by tagging the four branch targets — after WRAM-history

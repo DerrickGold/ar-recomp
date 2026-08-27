@@ -3,6 +3,7 @@ package project
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -62,7 +63,7 @@ func TestLoadManifestRejects(t *testing.T) {
 	}
 }
 
-func TestRunnerSources(t *testing.T) {
+func TestLoadRunnerManifest(t *testing.T) {
 	runtimeDir := t.TempDir()
 	writeTestFile(t, filepath.Join(runtimeDir, "runner.cmake"), `
 set(SNESRECOMP_RUNNER_ROOT ${CMAKE_CURRENT_LIST_DIR})
@@ -80,34 +81,43 @@ if(SNESRECOMP_ENABLE_TRACE)
     )
 endif()
 
-set(SNESRECOMP_RUNNER_INCLUDE_DIRS
+set(SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS
+    ${SNESRECOMP_RUNNER_ROOT}/include
+)
+set(SNESRECOMP_RUNNER_PRIVATE_INCLUDE_DIRS
     ${SNESRECOMP_RUNNER_ROOT}/src
     ${SNESRECOMP_RUNNER_ROOT}/src/snes
 )
 `)
-	sources, includes, err := RunnerSources(runtimeDir)
+	manifest, err := LoadRunnerManifest(runtimeDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sources) != 2 || !strings.HasSuffix(sources[1], filepath.FromSlash("src/snes/b.c")) {
-		t.Fatalf("sources: %v", sources)
+	if len(manifest.Sources) != 2 || !strings.HasSuffix(manifest.Sources[1], filepath.FromSlash("src/snes/b.c")) {
+		t.Fatalf("sources: %v", manifest.Sources)
 	}
-	for _, source := range sources {
+	for _, source := range manifest.Sources {
 		if strings.Contains(source, "debug_only") {
-			t.Fatalf("conditional trace source must be excluded: %v", sources)
+			t.Fatalf("conditional trace source must be excluded: %v", manifest.Sources)
 		}
 	}
-	if len(includes) != 2 || !strings.HasSuffix(includes[0], "src") {
-		t.Fatalf("includes: %v", includes)
+	if len(manifest.PublicIncludes) != 1 ||
+		!strings.HasSuffix(manifest.PublicIncludes[0], "include") ||
+		len(manifest.PrivateIncludes) != 2 {
+		t.Fatalf("includes: public=%v private=%v",
+			manifest.PublicIncludes, manifest.PrivateIncludes)
 	}
 }
 
-func TestRunnerSourcesFromIncludedManifest(t *testing.T) {
+func TestLoadRunnerManifestFromIncludedManifest(t *testing.T) {
 	runtimeDir := t.TempDir()
 	writeTestFile(t, filepath.Join(runtimeDir, "runner.cmake"), `
 set(SNESRECOMP_RUNNER_ROOT ${CMAKE_CURRENT_LIST_DIR})
 include(${SNESRECOMP_RUNNER_ROOT}/sources.cmake)
-set(SNESRECOMP_RUNNER_INCLUDE_DIRS
+set(SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS
+    ${SNESRECOMP_RUNNER_ROOT}/include
+)
+set(SNESRECOMP_RUNNER_PRIVATE_INCLUDE_DIRS
     ${SNESRECOMP_RUNNER_ROOT}/src
 )
 `)
@@ -118,59 +128,99 @@ set(SNESRECOMP_RUNNER_SOURCES
 )
 `)
 
-	sources, includes, err := RunnerSources(runtimeDir)
+	manifest, err := LoadRunnerManifest(runtimeDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sources) != 2 || !strings.HasSuffix(sources[1], filepath.FromSlash("src/snes/b.c")) {
-		t.Fatalf("sources: %v", sources)
+	if len(manifest.Sources) != 2 || !strings.HasSuffix(manifest.Sources[1], filepath.FromSlash("src/snes/b.c")) {
+		t.Fatalf("sources: %v", manifest.Sources)
 	}
-	if len(includes) != 1 || !strings.HasSuffix(includes[0], "src") {
-		t.Fatalf("includes: %v", includes)
+	if len(manifest.PrivateIncludes) != 1 ||
+		!strings.HasSuffix(manifest.PrivateIncludes[0], "src") {
+		t.Fatalf("private includes: %v", manifest.PrivateIncludes)
 	}
 }
 
-func TestRealNextRunnerSources(t *testing.T) {
-	// internal/project -> snesrecomp-go/runtime-next.
-	runtimeDir := filepath.Join("..", "..", "runtime-next")
-	sources, includes, err := RunnerSources(runtimeDir)
+func TestLoadRunnerManifestClassifiedIncludes(t *testing.T) {
+	runtimeDir := t.TempDir()
+	writeTestFile(t, filepath.Join(runtimeDir, "runner.cmake"), `
+set(SNESRECOMP_RUNNER_ROOT ${CMAKE_CURRENT_LIST_DIR})
+set(SNESRECOMP_RUNNER_SOURCES
+    ${SNESRECOMP_RUNNER_ROOT}/src/runner.c
+)
+set(SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS
+    ${SNESRECOMP_RUNNER_ROOT}/include
+)
+set(SNESRECOMP_RUNNER_PRIVATE_INCLUDE_DIRS
+    ${SNESRECOMP_RUNNER_ROOT}/src
+)
+`)
+
+	manifest, err := LoadRunnerManifest(runtimeDir)
 	if err != nil {
-		t.Fatalf("parse real runtime-next manifest: %v", err)
+		t.Fatal(err)
 	}
-	if len(sources) == 0 || len(includes) == 0 {
-		t.Fatalf("real runtime-next manifest is incomplete: %v %v", sources, includes)
+	if !slices.Equal(manifest.PublicIncludes,
+		[]string{filepath.Join(runtimeDir, "include")}) ||
+		!slices.Equal(manifest.PrivateIncludes,
+			[]string{filepath.Join(runtimeDir, "src")}) {
+		t.Fatalf("classified includes = public:%v private:%v",
+			manifest.PublicIncludes, manifest.PrivateIncludes)
 	}
-	for _, source := range sources {
+}
+
+func TestRealRunnerManifest(t *testing.T) {
+	// internal/project -> snesrecomp-go/runtime.
+	runtimeDir := filepath.Join("..", "..", "runtime")
+	manifest, err := LoadRunnerManifest(runtimeDir)
+	if err != nil {
+		t.Fatalf("parse real runtime manifest: %v", err)
+	}
+	if len(manifest.Sources) == 0 || len(manifest.PublicIncludes) == 0 ||
+		len(manifest.PrivateIncludes) == 0 {
+		t.Fatalf("real runtime manifest is incomplete: %+v", manifest)
+	}
+	for _, include := range append(manifest.PublicIncludes, manifest.PrivateIncludes...) {
+		if _, err := os.Stat(include); err != nil {
+			t.Errorf("runtime lists include root %s, which does not exist: %v",
+				include, err)
+		}
+	}
+	for _, source := range manifest.Sources {
 		if _, err := os.Stat(source); err != nil {
-			t.Errorf("runtime-next lists %s, which does not exist: %v", source, err)
+			t.Errorf("runtime lists %s, which does not exist: %v", source, err)
 		}
 	}
 }
 
-func TestRunnerSourcesCleansRelativePaths(t *testing.T) {
+func TestLoadRunnerManifestCleansRelativePaths(t *testing.T) {
 	toolchain := t.TempDir()
-	nextDir := filepath.Join(toolchain, "runtime-next")
-	writeTestFile(t, filepath.Join(nextDir, "runner.cmake"), `
+	runtimeDir := filepath.Join(toolchain, "runtime")
+	writeTestFile(t, filepath.Join(runtimeDir, "runner.cmake"), `
 set(SNESRECOMP_RUNNER_ROOT ${CMAKE_CURRENT_LIST_DIR})
 set(SNESRECOMP_RUNNER_SOURCES
     ${SNESRECOMP_RUNNER_ROOT}/src/new.c
     ${SNESRECOMP_RUNNER_ROOT}/../shared/src/shared.c
 )
-set(SNESRECOMP_RUNNER_INCLUDE_DIRS
+set(SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS
+    ${SNESRECOMP_RUNNER_ROOT}/include
+)
+set(SNESRECOMP_RUNNER_PRIVATE_INCLUDE_DIRS
     ${SNESRECOMP_RUNNER_ROOT}/src
     ${SNESRECOMP_RUNNER_ROOT}/../shared/src
 )
 `)
-	sources, includes, err := RunnerSources(nextDir)
+	manifest, err := LoadRunnerManifest(runtimeDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	wantShared := filepath.Join(toolchain, "shared", "src", "shared.c")
-	if sources[1] != wantShared {
-		t.Fatalf("relative source = %s, want %s", sources[1], wantShared)
+	if manifest.Sources[1] != wantShared {
+		t.Fatalf("relative source = %s, want %s", manifest.Sources[1], wantShared)
 	}
-	if strings.Contains(sources[1], "..") || strings.Contains(includes[1], "..") {
-		t.Fatalf("relative paths were not cleaned: %v %v", sources, includes)
+	if strings.Contains(manifest.Sources[1], "..") ||
+		strings.Contains(manifest.PrivateIncludes[1], "..") {
+		t.Fatalf("relative paths were not cleaned: %+v", manifest)
 	}
 }
 

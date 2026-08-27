@@ -14,9 +14,9 @@
 #endif
 
 #include "actraiser_rtl.h"
-#include "common_rtl.h"
-#include "cpu_state.h"
-#include "framedump.h"
+#include "snesrecomp/game/runtime.h"
+#include "snesrecomp/game/cpu.h"
+#include "snesrecomp/host/framedump.h"
 #include "run_dir.h"
 
 enum {

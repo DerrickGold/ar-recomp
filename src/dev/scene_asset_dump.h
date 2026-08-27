@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "runner_next.h"
+#include "snesrecomp/runner.h"
 
 typedef struct SceneAssetDumpSource {
   SrPpuStateSnapshot ppu;

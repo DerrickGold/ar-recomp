@@ -69,7 +69,7 @@ will not start without it.
       utils/build          leftover build scratch
       utils/src            the game's source code
       utils/recomp         recompiler configuration
-      utils/snesrecomp-go  runtime headers used while building
+      utils/snesrecomp-go  runner SDK headers and static library used while building
       utils/third_party    a support library used while building
 
 Do NOT delete anything else in "utils". The game runs from inside that folder,

@@ -14,7 +14,7 @@
 
 #include "actraiser_game.h"
 #include "byte_order.h"
-#include "crc32.h"
+#include "snesrecomp/support/crc32.h"
 #include "snes_bgr555.h"
 
 enum {

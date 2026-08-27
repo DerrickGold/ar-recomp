@@ -8,10 +8,10 @@
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
 #include "action/action_bg_metatile.h"
-#include "common_rtl.h"
-#include "runner_next.h"
+#include "snesrecomp/game/runtime.h"
+#include "snesrecomp/runner.h"
 #include "settings.h"
-#include "widescreen.h"
+#include "snesrecomp/host/widescreen.h"
 
 #include <stdio.h>
 #include <stdlib.h>

@@ -1,7 +1,7 @@
 #ifndef SETTINGS_H
 #define SETTINGS_H
 #include "constants.h"
-#include "types.h"
+#include "snesrecomp/game/types.h"
 #include "sim/sim_background_voxel_quality.h"
 #include "sim/sim_render_metadata.h"
 

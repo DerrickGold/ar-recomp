@@ -66,7 +66,7 @@ func SyncFuncs(cfgDir, outputPath string) (int, error) {
 	source.WriteString(" * variant without a side-car header dependency. Unused\n")
 	source.WriteString(" * variants are harmless (C only flags undefined REFERENCES,\n")
 	source.WriteString(" * not undefined DECLARATIONS at link time).\n")
-	source.WriteString(" */\n#pragma once\n\n#include \"cpu_state.h\"\n\n")
+	source.WriteString(" */\n#pragma once\n\n#include \"snesrecomp/game/cpu.h\"\n\n")
 	fmt.Fprintf(&source, "/* %d functions across all banks (5 decls each). */\n\n", len(items))
 	for _, item := range items {
 		fmt.Fprintf(&source, "void %s(CpuState *cpu);  /* $%02X:%04X alias */\n", item.Name, byte(item.Address>>16), uint16(item.Address))
@@ -81,7 +81,7 @@ func SyncFuncs(cfgDir, outputPath string) (int, error) {
 	source.WriteString(" * referenced by recompiled code via funcs.h.\n")
 	source.WriteString(" */\nvoid ResetSpritesFunc(int wh);\nvoid RunOneFrameOfGame_Internal(void);\n\n")
 	source.WriteString("/* Watchdog hook called at every block label. Implemented in\n")
-	source.WriteString(" * snesrecomp-go/runtime-next/src/common_cpu_infra.c.\n")
+	source.WriteString(" * snesrecomp-go/runtime/src/core/common_cpu_infra.c.\n")
 	source.WriteString(" */\nvoid WatchdogCheck(void);\n")
 
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {

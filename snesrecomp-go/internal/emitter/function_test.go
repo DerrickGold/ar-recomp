@@ -90,7 +90,7 @@ func TestSplitImmediateGarbageTrapRequiresSurvivingSibling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EmitFunction without survivors: %v", err)
 	}
-	if strings.Contains(withoutSurvivors.Source, "ar_garbage_variant_trap") {
+	if strings.Contains(withoutSurvivors.Source, "sr_garbage_variant_trap") {
 		t.Fatalf("trap emitted before survivor map was established:\n%s", withoutSurvivors.Source)
 	}
 	if len(withoutSurvivors.GarbageEvidence) == 0 {
@@ -103,7 +103,7 @@ func TestSplitImmediateGarbageTrapRequiresSurvivingSibling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EmitFunction with survivor: %v", err)
 	}
-	if !strings.Contains(withSurvivor.Source, "ar_garbage_variant_trap(cpu, \"Split_M1X1\"") {
+	if !strings.Contains(withSurvivor.Source, "sr_garbage_variant_trap(cpu, \"Split_M1X1\"") {
 		t.Fatalf("missing split-immediate trap:\n%s", withSurvivor.Source)
 	}
 }

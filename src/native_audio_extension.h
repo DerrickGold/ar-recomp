@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "audio_adapter.h"
+#include "snesrecomp/game_audio.h"
 
 /* Pure routing helpers for ActRaiser's two effect sequencer tracks. */
 bool NativeAudioExtension_RouteVoiceWrite(

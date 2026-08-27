@@ -1,7 +1,7 @@
 #ifndef ORACLE_TRACE_H
 #define ORACLE_TRACE_H
 
-#include "runner_next.h"
+#include "snesrecomp/runner.h"
 
 /* Install the optional frame-end WRAM/oracle callback when any supported
  * AR_* trace or snapshot environment control is enabled. */

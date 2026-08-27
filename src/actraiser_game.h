@@ -7,8 +7,7 @@
  * interprets them; this header is only for meanings that are stable across the
  * handwritten game-specific code. */
 
-#include "types.h"
-#include "actraiser_runtime_constants.h"
+#include "snesrecomp/game/types.h"
 #include "constants.h"
 
 _Static_assert(kActRaiserWramSize == kSnesWramSize,
@@ -58,8 +57,8 @@ enum {
 /* Stable low-WRAM state addresses. These are offsets within g_ram's $7E bank
  * mirror, not general SNES bus addresses. */
 enum {
-  kActRaiserWram_MapGroup = kActRaiserRuntimeWram_MapGroup,
-  kActRaiserWram_CurrentMap = kActRaiserRuntimeWram_CurrentMap,
+  kActRaiserWram_MapGroup = 0x0018,
+  kActRaiserWram_CurrentMap = 0x0019,
   kActRaiserWram_DestinationMap = 0x001A,
   kActRaiserWram_DestinationMapGroup = 0x001B,
   kActRaiserWram_Lives = 0x001C,
@@ -88,7 +87,7 @@ enum {
   kActRaiserWram_Bg2MetatileDefinitions = 0x2900,
   kActRaiserWram_Bg1Map = 0x8000,
   kActRaiserWram_Bg2Map = 0xC000,
-  kActRaiserWram_GameFrame = kActRaiserRuntimeWram_GameFrame,
+  kActRaiserWram_GameFrame = 0x0088,
   kActRaiserWram_ActionCameraSubject = 0x008A,
   /* Global attributes OR'd into every action-object composition part by
    * $00:8D68. Bits 12-13 are therefore the live OBJ priority for artwork

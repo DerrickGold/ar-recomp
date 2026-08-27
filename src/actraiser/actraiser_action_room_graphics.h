@@ -3,7 +3,7 @@
 
 #include <stdbool.h>
 
-#include "cpu_state.h"
+#include "snesrecomp/game/cpu.h"
 
 /* Conditional whole-body HLEs for the action-only command-7 character loader
  * at $02:B28E and command-6 palette loader at $02:B330. Their predicates are

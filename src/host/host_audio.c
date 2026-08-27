@@ -6,8 +6,8 @@
 
 #include <SDL3/SDL.h>
 
-#include "audio_trace.h"
-#include "common_rtl.h"
+#include "snesrecomp/host/audio_trace.h"
+#include "snesrecomp/game/runtime.h"
 
 enum {
   kAudioChannelCount = 2,
@@ -32,10 +32,6 @@ static int s_requested_buffer_frames;
 static bool s_audio_open;
 static bool s_host_paused;
 
-extern int ApuProfEnabled(void);
-extern uint64_t g_apuprof_lockwait_ns;
-extern uint64_t g_apuprof_audiowait_max_ns;
-
 static int ClampVolumePercent(int volume_percent) {
   if (volume_percent < 0) return 0;
   if (volume_percent > kFullVolumePercent) return kFullVolumePercent;
@@ -44,7 +40,7 @@ static int ClampVolumePercent(int volume_percent) {
 
 void RtlApuLock(void) {
   if (!s_audio_mutex) return;
-  if (ApuProfEnabled()) {
+  if (RtlApuProfileIsEnabled()) {
     if (SDL_TryLockMutex(s_audio_mutex)) return;
     const uint64_t wait_start_ns = audio_trace_wall_ns();
     SDL_LockMutex(s_audio_mutex);
@@ -52,9 +48,9 @@ void RtlApuLock(void) {
         audio_trace_wall_ns() - wait_start_ns;
     if (s_game_thread_id != 0 &&
         SDL_GetCurrentThreadID() == s_game_thread_id) {
-      g_apuprof_lockwait_ns += wait_duration_ns;
-    } else if (wait_duration_ns > g_apuprof_audiowait_max_ns) {
-      g_apuprof_audiowait_max_ns = wait_duration_ns;
+      RtlApuProfileRecordHostWait(wait_duration_ns, true);
+    } else {
+      RtlApuProfileRecordHostWait(wait_duration_ns, false);
     }
     return;
   }
@@ -77,13 +73,12 @@ static void SDLCALL AudioCallback(void *userdata, SDL_AudioStream *stream,
 
   /* This outer acquire is the one that can block. RtlRenderAudio's nested
    * RtlApuLock calls are recursive re-entries on the same audio thread. */
-  if (ApuProfEnabled()) {
+  if (RtlApuProfileIsEnabled()) {
     const uint64_t wait_start_ns = audio_trace_wall_ns();
     SDL_LockMutex(s_audio_mutex);
     const uint64_t wait_duration_ns =
         audio_trace_wall_ns() - wait_start_ns;
-    if (wait_duration_ns > g_apuprof_audiowait_max_ns)
-      g_apuprof_audiowait_max_ns = wait_duration_ns;
+    RtlApuProfileRecordHostWait(wait_duration_ns, false);
   } else {
     SDL_LockMutex(s_audio_mutex);
   }

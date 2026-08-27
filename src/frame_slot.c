@@ -8,7 +8,7 @@
 
 #include "frame_slot.h"
 #include "present.h"
-#include "types.h"
+#include "snesrecomp/game/types.h"
 #include "settings.h"
 #include "diorama/diorama_planes.h"
 #include "diorama/diorama.h"
@@ -24,12 +24,11 @@
 #include "actraiser_game.h"
 #include "constants.h"
 #include "actraiser_rtl.h"
-#include "common_cpu_infra.h"
-#include "common_rtl.h"      /* g_ram */
+#include "snesrecomp/game_runtime.h"
+#include "snesrecomp/game/runtime.h" /* g_ram */
 #include "frame_timing.h"
 #include "hd_replacement_host.h"
-#include "runner_next.h"
-#include "runner_next_internal.h"
+#include "snesrecomp/runner.h"
 
 /* main.c-owned globals with no header declaration, read here. */
 extern bool g_ws_active;
@@ -143,7 +142,7 @@ static bool FramePpuView_Capture(
   memset(view, 0, sizeof(*view));
   memset(surfaces, 0, sizeof(*surfaces));
   view->api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
-  view->runner = sr_runner_handle(g_snes);
+  view->runner = RtlGameRunner();
   view->state.struct_size = sizeof(view->state);
   surfaces->struct_size = sizeof(*surfaces);
   return view->api && view->runner &&
@@ -519,7 +518,7 @@ void FrameSlot_Capture(FrameSlot *dst) {
     Sim3DTuning tuning = BuildSim3DTuning();
     Sim3D_AnnotateFrame(&dst->sim, &tuning);
     SimWorldNavigationCapture_Capture(
-        &dst->sim, sr_runner_handle(g_snes));
+        &dst->sim, RtlGameRunner());
     /* Accumulation itself happens once a frame at the always-run site below;
      * this only publishes the current canvas state into the slot. */
     dst->sim.town_canvas_serial = SimTownCanvas_Serial();

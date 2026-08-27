@@ -7,11 +7,10 @@
 #include <stdlib.h>
 
 #include "actraiser_rtl.h"
-#include "common_cpu_infra.h"
+#include "snesrecomp/game_runtime.h"
 #include "hd_replacements.h"
 #include "host/host_display.h"
-#include "runner_next.h"
-#include "runner_next_internal.h"
+#include "snesrecomp/runner.h"
 #include "settings.h"
 
 /* HD art substitution is PNG-only and decoded once when textures are loaded.
@@ -72,7 +71,7 @@ typedef struct PpuOutputControl {
 } PpuOutputControl;
 
 static bool PpuOutputControl_Begin(PpuOutputControl *control) {
-  if (!control || !g_snes) return false;
+  if (!control || !RtlGameRunner()) return false;
   const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
   if (!api || api->struct_size < SNES_RUNNER_API_PPU_OUTPUT_CONTROL_SIZE ||
       (api->capabilities & SR_RUNNER_CAP_PPU_OUTPUT_CONTROL) == 0u)
@@ -80,7 +79,7 @@ static bool PpuOutputControl_Begin(PpuOutputControl *control) {
   SrGenerationSnapshot generation = {
       .struct_size = sizeof(generation),
   };
-  SrRunnerHandle *runner = sr_runner_handle(g_snes);
+  SrRunnerHandle *runner = RtlGameRunner();
   if (api->query_generations(runner, &generation) != SR_RESULT_OK)
     return false;
   control->api = api;

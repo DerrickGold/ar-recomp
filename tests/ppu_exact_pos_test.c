@@ -22,21 +22,21 @@
 #include <string.h>
 
 #include "snes/ppu.h"
-#include "runner_next_internal.h"
+#include "runner_internal.h"
 
 /* Externs the PPU references; only fire under instrumentation. */
 bool g_new_ppu = true;
-int ar_trace_active(void) { return 0; }
-void ar_trace_ppumem(uint16_t a, uint8_t v) { (void)a; (void)v; }
-void ar_trace_reg(uint16_t a, uint8_t v) { (void)a; (void)v; }
-void ar_trace_vmadd(uint16_t a) { (void)a; }
-void ar_trace_vram(uint16_t a, uint16_t v) { (void)a; (void)v; }
-void ar_vramraw(uint16_t a, uint8_t v, int p) { (void)a; (void)v; (void)p; }
-int ar_vramwatch(uint16_t a, uint8_t v) { (void)a; (void)v; return 0; }
+int sr_trace_active(void) { return 0; }
+void sr_trace_ppumem(uint16_t a, uint8_t v) { (void)a; (void)v; }
+void sr_trace_reg(uint16_t a, uint8_t v) { (void)a; (void)v; }
+void sr_trace_vmadd(uint16_t a) { (void)a; }
+void sr_trace_vram(uint16_t a, uint16_t v) { (void)a; (void)v; }
+void sr_vram_trace_raw(uint16_t a, uint8_t v, int p) { (void)a; (void)v; (void)p; }
+int sr_vram_watch(uint16_t a, uint8_t v) { (void)a; (void)v; return 0; }
 void debug_server_on_oam_render(void) {}
 void CpuDispatchLogWriteFile(const char *path) { (void)path; }
-unsigned g_ar_blk_idx;
-uint32_t g_ar_blk_ring[256];
+unsigned g_sr_block_index;
+uint32_t g_sr_block_ring[256];
 const char *g_last_recomp_func;
 uint8_t g_ram[0x20000];
 int snes_frame_counter;

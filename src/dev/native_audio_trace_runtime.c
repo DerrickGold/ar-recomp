@@ -3,10 +3,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "audio_trace.h"
-#include "common_rtl.h"
+#include "snesrecomp/host/audio_trace.h"
+#include "snesrecomp/game/runtime.h"
 #include "native_audio_extension.h"
-#include "runner_next.h"
+#include "snesrecomp/runner.h"
 #include "run_dir.h"
 
 enum {
@@ -17,8 +17,6 @@ enum {
   kRuntimePathCapacity = 512,
 };
 
-extern const char *g_last_recomp_func;
-extern int snes_frame_counter;
 extern uint64_t snes_apu_cycle_count(void);
 
 static int s_enabled = -1;
@@ -34,12 +32,6 @@ static int TraceEnabled(void) {
   return s_enabled;
 }
 
-static void OnCpuPortWrite(uint8_t port, uint8_t value) {
-  NativeAudioTraceModel_CpuPortWrite(
-      port, value, g_last_recomp_func, (uint32_t)snes_frame_counter,
-      snes_apu_cycle_count());
-}
-
 static void OnRunnerAudioTrace(void *user_data, SrRunnerHandle *runner,
                                const SrAudioTraceEvent *event) {
   (void)user_data;
@@ -48,6 +40,16 @@ static void OnRunnerAudioTrace(void *user_data, SrRunnerHandle *runner,
       !event->apu_ram || event->apu_ram_byte_size < SR_APU_RAM_BYTE_COUNT)
     return;
   switch (event->type) {
+    case SR_AUDIO_TRACE_CPU_PORT_WRITE:
+      NativeAudioTraceModel_CpuPortWrite(
+          event->port, event->value, event->function_name,
+          event->frame_counter, event->cycle_count);
+      break;
+    case SR_AUDIO_TRACE_SPC_UPLOAD:
+      NativeAudioTraceModel_SpcUpload(
+          event->source_address, event->function_name,
+          event->frame_counter, event->cycle_count);
+      break;
     case SR_AUDIO_TRACE_APU_PORT_APPLY:
       NativeAudioTraceModel_PortApply(
           event->port, event->value, event->cycle_count);
@@ -78,17 +80,6 @@ static void OnRunnerAudioTrace(void *user_data, SrRunnerHandle *runner,
     default:
       break;
   }
-}
-
-static void OnSpcUpload(uint32_t image_src) {
-  /* The upload observer runs just after the upload routine releases the APU
-   * lock, unlike port/SPC observers which run inside it. Reacquire here so a
-   * live audio callback cannot mutate the trace model concurrently. */
-  RtlApuLock();
-  NativeAudioTraceModel_SpcUpload(
-      image_src, g_last_recomp_func, (uint32_t)snes_frame_counter,
-      snes_apu_cycle_count());
-  RtlApuUnlock();
 }
 
 static void OnExtendedDisposition(
@@ -135,8 +126,6 @@ bool NativeAudioTrace_Init(SrRunnerHandle *runner) {
     s_audio_trace_subscription = 0;
     return false;
   }
-  g_rtl_apu_port_trace_hook = OnCpuPortWrite;
-  g_rtl_spc_upload_trace_hook = OnSpcUpload;
   g_native_audio_extension_trace_disposition_hook = OnExtendedDisposition;
   g_native_audio_extension_trace_start_hook = OnExtendedStart;
   g_native_audio_extension_trace_end_hook = OnExtendedEnd;
@@ -155,10 +144,6 @@ void NativeAudioTrace_Shutdown(void) {
   s_audio_trace_subscription = 0;
   s_runner = NULL;
   s_runner_api = NULL;
-  if (g_rtl_apu_port_trace_hook == OnCpuPortWrite)
-    g_rtl_apu_port_trace_hook = NULL;
-  if (g_rtl_spc_upload_trace_hook == OnSpcUpload)
-    g_rtl_spc_upload_trace_hook = NULL;
   if (g_native_audio_extension_trace_disposition_hook == OnExtendedDisposition)
     g_native_audio_extension_trace_disposition_hook = NULL;
   if (g_native_audio_extension_trace_start_hook == OnExtendedStart)

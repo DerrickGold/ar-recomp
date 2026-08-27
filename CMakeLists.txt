@@ -22,9 +22,10 @@ endif()
 include(CTest)
 
 if(BUILD_TESTING)
-    add_test(NAME actraiser_runner_concrete_boundary
-        COMMAND ${CMAKE_COMMAND}
-            -DAR_SOURCE_ROOT=${CMAKE_SOURCE_DIR}/src
+    add_test(NAME actraiser_runner_private_boundary
+    COMMAND ${CMAKE_COMMAND}
+            -DGAME_SOURCE_ROOT=${CMAKE_SOURCE_DIR}/src
+            -DSNESRECOMP_RUNNER_PRIVATE_ROOT=${CMAKE_SOURCE_DIR}/snesrecomp-go/runtime/src
             -P ${CMAKE_SOURCE_DIR}/tools/check_runner_boundary.cmake)
 endif()
 
@@ -46,38 +47,22 @@ else()
 endif()
 
 set(SNESRECOMP_GO_ROOT ${CMAKE_SOURCE_DIR}/snesrecomp-go)
-include(${SNESRECOMP_GO_ROOT}/runtime-next/runner.cmake)
+include(${SNESRECOMP_GO_ROOT}/runtime/runner.cmake)
 message(STATUS "snesrecomp runner: independent portable runtime")
+add_library(snesrecomp_sdk_headers INTERFACE)
+target_include_directories(snesrecomp_sdk_headers INTERFACE
+    ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+add_library(snesrecomp::sdk ALIAS snesrecomp_sdk_headers)
 
 # Architecture-specific paths are optional accelerators. The compiler's
 # target macros decide which implementation is available, which is correct
 # for native and cross builds alike. This switch can force the portable C11
 # implementation without changing source files or removing their test oracle.
-option(SNESRECOMP_ENABLE_SIMD
-    "Enable runner SIMD implementations supported by the build target" ON)
 if(SNESRECOMP_ENABLE_SIMD)
-    add_compile_definitions(SNESRECOMP_ENABLE_SIMD=1)
     message(STATUS "snesrecomp SIMD: enabled when supported by build target")
 else()
-    add_compile_definitions(SNESRECOMP_ENABLE_SIMD=0)
     message(STATUS "snesrecomp SIMD: portable implementation forced")
 endif()
-set(SNESRECOMP_PPU_BIT_WORD_BITS "auto" CACHE STRING
-    "Runner PPU bitset word width: auto, 32, or 64")
-set_property(CACHE SNESRECOMP_PPU_BIT_WORD_BITS PROPERTY STRINGS auto 32 64)
-if(NOT SNESRECOMP_PPU_BIT_WORD_BITS STREQUAL "auto")
-    if(NOT SNESRECOMP_PPU_BIT_WORD_BITS STREQUAL "32" AND
-       NOT SNESRECOMP_PPU_BIT_WORD_BITS STREQUAL "64")
-        message(FATAL_ERROR
-            "SNESRECOMP_PPU_BIT_WORD_BITS must be auto, 32, or 64")
-    endif()
-    add_compile_definitions(
-        SNESRECOMP_PPU_BIT_WORD_BITS=${SNESRECOMP_PPU_BIT_WORD_BITS})
-endif()
-# `src/constants.h` intentionally includes the runner's neutral
-# runtime_constants.h by name.  Apply that header contract to ROM-free test
-# targets as well as the game executable.
-include_directories(${SNESRECOMP_RUNNER_INCLUDE_DIRS})
 
 find_package(SDL3 3.4.0 REQUIRED)
 
@@ -167,8 +152,12 @@ if(ACTRAISER_GAME_SOURCES STREQUAL "")
     message(FATAL_ERROR "snesbuild.ini declares no `source =` entries")
 endif()
 
+add_library(snesrecomp_runtime STATIC
+    ${SNESRECOMP_RUNNER_SOURCES})
+snesrecomp_configure_runtime_target(snesrecomp_runtime)
+add_library(snesrecomp::runtime ALIAS snesrecomp_runtime)
+
 add_executable(ActRaiserRecomp
-    ${SNESRECOMP_RUNNER_SOURCES}
     # game-specific runtime, from snesbuild.ini (see above)
     ${ACTRAISER_GAME_SOURCES}
     # recompiled banks (generated)
@@ -180,46 +169,52 @@ target_include_directories(ActRaiserRecomp PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/recomp
     ${CMAKE_SOURCE_DIR}/third_party/stb
-    ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+    ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
 )
 
 if(SNESRECOMP_ENABLE_TRACE)
-    set(_AR_TRACE 1)
+    set(_SNESRECOMP_TRACE 1)
 else()
-    set(_AR_TRACE 0)
+    set(_SNESRECOMP_TRACE 0)
 endif()
 
-# AR_WATCHDOG: the 5s hang watchdog. Bring-up instrumentation — it exists to
+# SNESRECOMP_WATCHDOG: the 5s hang watchdog. Bring-up instrumentation — it exists to
 # catch an infinite loop in recompiled code during porting, and once a build is
 # verified there is nothing left for it to find. It is not free: the generated
 # code calls WatchdogCheck at EVERY loop header (thousands of sites per bank),
 # and escaping a stuck frame necessarily abandons it. Default ON for the
 # development configurations and OFF for Release, so shipping builds carry
 # neither the per-loop-header clock check nor the abandon path.
-if(NOT DEFINED AR_WATCHDOG)
+if(NOT DEFINED SNESRECOMP_WATCHDOG)
     if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
-        set(_AR_WATCHDOG_DEFAULT OFF)
+        set(_SNESRECOMP_WATCHDOG_DEFAULT OFF)
     else()
-        set(_AR_WATCHDOG_DEFAULT ON)
+        set(_SNESRECOMP_WATCHDOG_DEFAULT ON)
     endif()
 else()
-    set(_AR_WATCHDOG_DEFAULT ${AR_WATCHDOG})
+    set(_SNESRECOMP_WATCHDOG_DEFAULT ${SNESRECOMP_WATCHDOG})
 endif()
-option(AR_WATCHDOG "Build the 5s hang watchdog (dev instrumentation)"
-       ${_AR_WATCHDOG_DEFAULT})
-if(AR_WATCHDOG)
-    set(_AR_WATCHDOG 1)
+option(SNESRECOMP_WATCHDOG "Build the 5s hang watchdog (dev instrumentation)"
+       ${_SNESRECOMP_WATCHDOG_DEFAULT})
+if(SNESRECOMP_WATCHDOG)
+    set(_SNESRECOMP_WATCHDOG 1)
     message(STATUS "ActRaiserRecomp: hang watchdog ENABLED (dev build)")
 else()
-    set(_AR_WATCHDOG 0)
+    set(_SNESRECOMP_WATCHDOG 0)
     message(STATUS "ActRaiserRecomp: hang watchdog omitted (release build)")
 endif()
 
 target_compile_definitions(ActRaiserRecomp PRIVATE
     SYSTEM_VOLUME_MIXER_AVAILABLE=0
-    SNESRECOMP_TRACE=${_AR_TRACE}
+    SNESRECOMP_TRACE=${_SNESRECOMP_TRACE}
     SNESRECOMP_REVERSE_DEBUG=0
-    AR_WATCHDOG=${_AR_WATCHDOG}
+    SNESRECOMP_WATCHDOG=${_SNESRECOMP_WATCHDOG}
+)
+target_compile_definitions(snesrecomp_runtime PRIVATE
+    SYSTEM_VOLUME_MIXER_AVAILABLE=0
+    SNESRECOMP_TRACE=${_SNESRECOMP_TRACE}
+    SNESRECOMP_REVERSE_DEBUG=0
+    SNESRECOMP_WATCHDOG=${_SNESRECOMP_WATCHDOG}
 )
 
 if(NOT MSVC)
@@ -232,7 +227,7 @@ if(NOT MSVC)
     #
     # -w wins over -Wall in clang regardless of order, so the polarity has to
     # be this way round: real warnings on the target, `-w` re-applied to the
-    # generated sources per file. runtime-next is maintained here and keeps
+    # generated sources per file. runtime is maintained here and keeps
     # its warnings visible.
     target_compile_options(ActRaiserRecomp PRIVATE
         -Wall -Wextra
@@ -297,6 +292,7 @@ if(AR_TSAN AND NOT MSVC)
 endif()
 
 target_link_libraries(ActRaiserRecomp PRIVATE
+    snesrecomp::runtime
     SDL3::SDL3
     actraiser_math
 )
@@ -341,7 +337,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_host_audio_pause_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/host
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_host_audio_pause_test PRIVATE
         SDL3::SDL3
@@ -359,7 +355,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_host_display_pacing_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/host
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_host_display_pacing
         COMMAND actraiser_host_display_pacing_test)
@@ -381,7 +377,7 @@ if(BUILD_TESTING)
     )
     target_include_directories(actraiser_input_replay_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_input_replay COMMAND actraiser_input_replay_test)
 
@@ -425,7 +421,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_sim_town_canvas_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/sim
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_sim_town_canvas
         COMMAND actraiser_sim_town_canvas_test)
@@ -460,7 +456,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_sim_background_voxels_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/sim
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_sim_background_voxels_test PRIVATE
         actraiser_math)
@@ -514,7 +510,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_sim_background_voxel_models_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/sim
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_sim_background_voxel_models
         COMMAND actraiser_sim_background_voxel_models_test)
@@ -526,7 +522,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_sim_background_voxel_biome_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/sim
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_sim_background_voxel_biome_test PRIVATE
         actraiser_math)
@@ -546,7 +542,7 @@ if(BUILD_TESTING)
         PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/sim
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_sim_background_voxel_model_cache
         COMMAND actraiser_sim_background_voxel_model_cache_test)
@@ -581,7 +577,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_sim_background_voxel_palette_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/sim
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_sim_background_voxel_palette
         COMMAND actraiser_sim_background_voxel_palette_test)
@@ -595,7 +591,7 @@ if(BUILD_TESTING)
         PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/sim
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_sim_background_voxel_lighting_test PRIVATE
         actraiser_math)
@@ -612,7 +608,7 @@ if(BUILD_TESTING)
         PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/sim
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_sim_background_voxel_proportions
         COMMAND actraiser_sim_background_voxel_proportions_test)
@@ -637,7 +633,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_sim_world_map_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/sim
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_sim_world_map COMMAND actraiser_sim_world_map_test)
 
@@ -646,7 +642,7 @@ if(BUILD_TESTING)
     )
     target_include_directories(actraiser_game_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_game COMMAND actraiser_game_test)
 
@@ -659,7 +655,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_action_effects_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/action
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_action_effects COMMAND actraiser_action_effects_test)
 
@@ -700,7 +696,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_action_metatile_hle_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/action
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_action_metatile_hle
         COMMAND actraiser_action_metatile_hle_test)
@@ -718,7 +714,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_action_room_loader_hle_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/actraiser
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_action_room_loader_hle
         COMMAND actraiser_action_room_loader_hle_test)
@@ -735,7 +731,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_action_room_graphics_hle_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/actraiser
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_action_room_graphics_hle
         COMMAND actraiser_action_room_graphics_hle_test)
@@ -750,7 +746,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_action_video_config_hle_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/actraiser
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_action_video_config_hle
         COMMAND actraiser_action_video_config_hle_test)
@@ -765,7 +761,7 @@ if(BUILD_TESTING)
     )
     target_include_directories(actraiser_town_lair_bits_hle_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_town_lair_bits_hle
         COMMAND actraiser_town_lair_bits_hle_test)
@@ -777,7 +773,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_action_bg_plan_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/action
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_action_bg_plan
         COMMAND actraiser_action_bg_plan_test)
@@ -790,7 +786,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_action_bg_tuner_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/action
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_action_bg_tuner
         COMMAND actraiser_action_bg_tuner_test)
@@ -808,7 +804,8 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/action
         ${CMAKE_SOURCE_DIR}/src/actraiser
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PRIVATE_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_action_bg COMMAND actraiser_action_bg_test)
 
@@ -832,7 +829,7 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/action
         ${CMAKE_SOURCE_DIR}/src/diorama
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_action_effect_render_test PRIVATE
         SDL3::SDL3
@@ -850,7 +847,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_diorama_projection_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/diorama
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_diorama_projection_test PRIVATE
         SDL3::SDL3
@@ -866,7 +863,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_sim_phase0_trace_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/sim
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_sim_phase0_trace
         COMMAND actraiser_sim_phase0_trace_test)
@@ -880,7 +877,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_sim_render_metadata_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/sim
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_sim_render_metadata_test PRIVATE
         actraiser_math)
@@ -924,7 +921,7 @@ if(BUILD_TESTING)
         SDL3::SDL3 actraiser_math)
     target_include_directories(actraiser_settings_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     target_compile_definitions(actraiser_settings_test PRIVATE
         AR_SIM3D_TERRAIN_ELEVATION=${AR_SIM3D_TERRAIN_ELEVATION_VALUE})
@@ -956,7 +953,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_settings_overlay_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/diorama
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_settings_overlay_test PRIVATE
         SDL3::SDL3
@@ -982,7 +979,7 @@ if(BUILD_TESTING)
     )
     target_include_directories(actraiser_scheduled_settings_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS})
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_scheduled_settings
         COMMAND actraiser_scheduled_settings_test)
 
@@ -1014,7 +1011,7 @@ if(BUILD_TESTING)
     )
     target_include_directories(actraiser_present_frame_order_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_present_frame_order_test PRIVATE
         SDL3::SDL3
@@ -1062,7 +1059,7 @@ if(BUILD_TESTING)
     )
     target_include_directories(actraiser_audio_presentation_policy_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS})
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_audio_presentation_policy
         COMMAND actraiser_audio_presentation_policy_test)
 
@@ -1081,7 +1078,7 @@ if(BUILD_TESTING)
     )
     target_include_directories(actraiser_native_audio_mixer_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS})
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_native_audio_mixer
         COMMAND actraiser_native_audio_mixer_test)
 
@@ -1092,7 +1089,8 @@ if(BUILD_TESTING)
     )
     target_include_directories(actraiser_native_audio_extension_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS})
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PRIVATE_INCLUDE_DIRS})
     add_test(NAME actraiser_native_audio_extension
         COMMAND actraiser_native_audio_extension_test)
 
@@ -1102,7 +1100,8 @@ if(BUILD_TESTING)
         ${SNESRECOMP_RUNNER_SAVELOAD_SOURCE}
     )
     target_include_directories(actraiser_dsp_bus_mix_test PRIVATE
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS})
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PRIVATE_INCLUDE_DIRS})
     add_test(NAME actraiser_dsp_bus_mix
         COMMAND actraiser_dsp_bus_mix_test)
 
@@ -1112,7 +1111,8 @@ if(BUILD_TESTING)
         ${SNESRECOMP_RUNNER_SAVELOAD_SOURCE}
     )
     target_include_directories(actraiser_dsp_voice_benchmark PRIVATE
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS})
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PRIVATE_INCLUDE_DIRS})
 
     # Generated-shader distribution guard: asserts the COMMITTED shader blobs
     # (src/shaders/*_frag.h, produced by tools/build_shaders.py) are accepted by
@@ -1170,10 +1170,10 @@ if(BUILD_TESTING)
         src/sim/sim_background_mountain_relief.c
         src/sim/sim_background_voxel_region.c
         src/sim/sim_render_atlas.c
-        ${SNESRECOMP_RUNNER_ROOT}/src/runner_next.c
-        ${SNESRECOMP_RUNNER_ROOT}/src/runner_next_audio_trace.c
-        ${SNESRECOMP_RUNNER_ROOT}/src/runner_next_audio_control.c
-        ${SNESRECOMP_RUNNER_ROOT}/src/runner_next_ppu_services.c
+        ${SNESRECOMP_RUNNER_ROOT}/src/runner/runner.c
+        ${SNESRECOMP_RUNNER_ROOT}/src/runner/runner_audio_trace.c
+        ${SNESRECOMP_RUNNER_ROOT}/src/runner/runner_audio_control.c
+        ${SNESRECOMP_RUNNER_ROOT}/src/runner/runner_ppu_services.c
         ${SNESRECOMP_RUNNER_ROOT}/tests/apu_sync_stub.c
         tests/audio_mix_control_stub.c
         ${SNESRECOMP_RUNNER_DEVICE_ROOT}/src/snes/ppu.c
@@ -1183,7 +1183,8 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/sim
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PRIVATE_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_ppu_render_pipeline_test PRIVATE
         SDL3::SDL3
@@ -1205,7 +1206,8 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_ppu_exact_pos_test PRIVATE
         ${CMAKE_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/src
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PRIVATE_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_ppu_exact_pos_test PRIVATE actraiser_math)
     add_test(NAME actraiser_ppu_exact_pos
@@ -1218,7 +1220,7 @@ if(BUILD_TESTING)
     )
     target_include_directories(actraiser_hd_manifest_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_hd_manifest COMMAND actraiser_hd_manifest_test)
 
@@ -1233,7 +1235,8 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/sim
         ${CMAKE_SOURCE_DIR}/src/dev
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PRIVATE_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_scene_inspector COMMAND actraiser_scene_inspector_test)
 
@@ -1246,7 +1249,7 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/dev
         ${CMAKE_SOURCE_DIR}/third_party/stb
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_scene_asset_dump COMMAND actraiser_scene_asset_dump_test)
 
@@ -1260,7 +1263,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_music_manifest_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/third_party/stb
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_music_manifest_test PRIVATE actraiser_math)
     add_test(NAME actraiser_music_manifest COMMAND actraiser_music_manifest_test)
@@ -1272,7 +1275,7 @@ if(BUILD_TESTING)
     )
     target_include_directories(actraiser_save_system_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     target_compile_definitions(actraiser_save_system_test PRIVATE
         ACTRAISER_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
@@ -1303,7 +1306,7 @@ if(BUILD_TESTING)
     )
     target_include_directories(actraiser_save_checksum_hle_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_save_checksum_hle
         COMMAND actraiser_save_checksum_hle_test)
@@ -1319,7 +1322,7 @@ if(BUILD_TESTING)
     )
     target_include_directories(actraiser_cell_map_hle_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_cell_map_hle
         COMMAND actraiser_cell_map_hle_test)
@@ -1334,7 +1337,7 @@ if(BUILD_TESTING)
     )
     target_include_directories(actraiser_town_metatile_hle_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_town_metatile_hle
         COMMAND actraiser_town_metatile_hle_test)
@@ -1349,7 +1352,7 @@ if(BUILD_TESTING)
     )
     target_include_directories(actraiser_town_structure_steps_hle_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_town_structure_steps_hle
         COMMAND actraiser_town_structure_steps_hle_test)
@@ -1384,7 +1387,7 @@ if(BUILD_TESTING)
     )
     target_include_directories(actraiser_diorama_frame_generation_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_diorama_frame_generation_test PRIVATE
         SDL3::SDL3 actraiser_math)
@@ -1440,7 +1443,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_diorama_skybox_uv_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/diorama
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_diorama_skybox_uv_test PRIVATE
         actraiser_math)
@@ -1458,7 +1461,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_action_obj_apron_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/action
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_action_obj_apron
         COMMAND actraiser_action_obj_apron_test)
@@ -1485,7 +1488,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_diorama_layer_order_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/diorama
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_diorama_layer_order
         COMMAND actraiser_diorama_layer_order_test)
@@ -1503,7 +1506,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_diorama_rom_backdrop_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/diorama
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_diorama_rom_backdrop
         COMMAND actraiser_diorama_rom_backdrop_test)
@@ -1530,7 +1533,7 @@ if(BUILD_TESTING)
     )
     target_include_directories(actraiser_lzss_hle_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_lzss_hle
         COMMAND actraiser_lzss_hle_test)
@@ -1546,7 +1549,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_diorama_layer_editor_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/diorama
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_diorama_layer_editor
         COMMAND actraiser_diorama_layer_editor_test)
@@ -1607,10 +1610,10 @@ if(BUILD_TESTING)
     add_executable(actraiser_spc_upload_adapter_test
         tests/actraiser_spc_upload_test.c
         src/actraiser/actraiser_spc_upload.c
-        snesrecomp-go/runtime-next/src/spc_upload.c)
+        snesrecomp-go/runtime/src/support/spc_upload.c)
     target_include_directories(actraiser_spc_upload_adapter_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${SNESRECOMP_RUNNER_INCLUDE_DIRS})
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_spc_upload_adapter
         COMMAND actraiser_spc_upload_adapter_test)
 
@@ -1627,5 +1630,23 @@ if(BUILD_TESTING)
             actraiser_lzss_hle_test)
         target_link_libraries(${_ar_hle_target} PRIVATE
             actraiser_hle_fatal_test_support)
+    endforeach()
+endif()
+
+# ROM-free targets are authored consumers of the SDK unless they explicitly
+# compile runner implementation sources. Give every local target the public
+# headers through a target relationship instead of a directory-wide include
+# path; focused hardware tests add the private roots themselves above.
+if(BUILD_TESTING)
+    get_property(_ar_directory_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(_ar_target IN LISTS _ar_directory_targets)
+        get_target_property(_ar_target_type ${_ar_target} TYPE)
+        if(_ar_target_type STREQUAL "EXECUTABLE" OR
+           _ar_target_type STREQUAL "STATIC_LIBRARY" OR
+           _ar_target_type STREQUAL "SHARED_LIBRARY" OR
+           _ar_target_type STREQUAL "MODULE_LIBRARY" OR
+           _ar_target_type STREQUAL "OBJECT_LIBRARY")
+            target_link_libraries(${_ar_target} PRIVATE snesrecomp::sdk)
+        endif()
     endforeach()
 endif()

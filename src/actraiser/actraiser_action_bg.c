@@ -9,7 +9,7 @@
 #include "action/action_room_scene.h"
 #include "deterministic_hash.h"
 #include "diorama/diorama_layer_order.h"
-#include "runner_next.h"
+#include "snesrecomp/runner.h"
 
 enum {
   kActionBgLayerCount = 2,

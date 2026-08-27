@@ -4,8 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "runner_next.h"
-#include "types.h"
+#include "snesrecomp/runner.h"
+#include "snesrecomp/game/types.h"
 
 enum {
   kSimObjAtlasWidth = 512,

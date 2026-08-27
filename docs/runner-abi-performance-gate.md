@@ -32,7 +32,7 @@ Use distinct build directories and do not rebuild them during the ABI series:
 cmake -S . -B build-abi-baseline-portable -G Ninja \
   -DCMAKE_BUILD_TYPE=RelWithDebInfo \
   -DAR_SIM3D_TERRAIN_ELEVATION=ON \
-  -DAR_WATCHDOG=OFF -DAR_SANITIZE=OFF -DBUILD_TESTING=OFF \
+  -DSNESRECOMP_WATCHDOG=OFF -DAR_SANITIZE=OFF -DBUILD_TESTING=OFF \
   -DSNESRECOMP_ENABLE_SIMD=OFF
 cmake --build build-abi-baseline-portable --target ActRaiserRecomp -j 8
 
@@ -518,6 +518,44 @@ policy path avoids allocation, framebuffer copies, emulated-memory copies, and
 surface generation invalidation. Machine-readable paired records are
 `runner-abi-frame-policy-transaction-{portable,native}.json` outside the source
 tree.
+
+The final concrete-layout migration moved ActRaiser's capture, composition,
+diagnostic, and complete-state paths behind the runner ABI. It added no
+framebuffer or emulated-memory copies: the hot frame callback borrows VRAM and
+writes directly to runner-owned output surfaces. Seven alternating adjacent
+pairs against the frozen frame-policy checkpoint measured:
+
+| Workload | Portable | Native-SIMD |
+| --- | ---: | ---: |
+| `mode7_worldmap` | -0.14% | -0.07% |
+| `sim_actions` | +0.08% | -0.10% |
+| `aitos_wide` | +3.05% | +0.42% |
+| `death_heim_wide` | +1.50% | +2.32% |
+| **Suite geometric mean** | **+1.11%** | **+0.64%** |
+
+Positive is slower. Every final WRAM, SRAM, CPU-state, and dispatch artifact
+hash matches the frozen reference. Both suite results remain below the 3%
+gate, and all individual workloads remain below the 5% gate. Machine-readable
+paired records are `benchmarks/runner-abi-final-migration-{portable,native}.json`.
+
+Publishing the SDK under `include/snesrecomp`, separating frontend bootstrap
+from generated-code support, and moving singleton/component declarations into
+private headers did not add a hot-path copy or descriptor walk. Seven
+alternating adjacent pairs against the final concrete-layout migration measured:
+
+| Workload | Portable | Native-SIMD |
+| --- | ---: | ---: |
+| `mode7_worldmap` | +0.01% | +0.29% |
+| `sim_actions` | -0.57% | +0.11% |
+| `aitos_wide` | -3.04% | +2.11% |
+| `death_heim_wide` | -1.34% | -0.03% |
+| **Suite geometric mean** | **-1.24%** | **+0.62%** |
+
+Positive is slower. Every final WRAM, SRAM, CPU-state, and dispatch artifact
+hash matches the frozen reference. The portable target improves overall; the
+native Aitos movement remains below the 5% workload gate and the suite remains
+well below 3%. Machine-readable paired records are
+`benchmarks/runner-sdk-cleanup-{portable,native}.json`.
 
 ## Phase acceptance
 

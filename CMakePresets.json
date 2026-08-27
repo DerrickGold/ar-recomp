@@ -19,7 +19,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "AR_SIM3D_TERRAIN_ELEVATION": "ON",
-        "AR_WATCHDOG": "OFF",
+        "SNESRECOMP_WATCHDOG": "OFF",
         "AR_SANITIZE": "OFF",
         "BUILD_TESTING": "OFF"
       }
@@ -31,7 +31,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "AR_SIM3D_TERRAIN_ELEVATION": "OFF",
-        "AR_WATCHDOG": "OFF",
+        "SNESRECOMP_WATCHDOG": "OFF",
         "AR_SANITIZE": "OFF",
         "BUILD_TESTING": "OFF"
       }

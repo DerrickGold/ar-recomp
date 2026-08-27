@@ -1,8 +1,9 @@
 #include "actraiser_rtl.h"
+#include "snesrecomp/game/generated_support.h"
 
-#include "cpu_state.h"
-#include "runner_next.h"
-#include "spc_upload.h"
+#include "snesrecomp/game/cpu.h"
+#include "snesrecomp/runner.h"
+#include "snesrecomp/spc_upload.h"
 
 #include <stddef.h>
 #include <stdint.h>

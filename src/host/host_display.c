@@ -30,10 +30,10 @@
 #include "presentation_frame_generation.h"
 #include "presentation_geometry.h"
 #include "present_cadence_metrics.h"
-#include "runner_next.h"
+#include "snesrecomp/runner.h"
 #include "settings.h"
 #include "constants.h"
-#include "widescreen.h"
+#include "snesrecomp/host/widescreen.h"
 
 extern SDL_Window *g_window;
 extern SDL_Renderer *g_renderer;

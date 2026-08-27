@@ -25,18 +25,18 @@ check_forbidden \
 check_forbidden \
   "use kSnesWramSize throughout the bundled runtime" \
   '\b0x20000([uU]([lL]{1,2})?)?\b' \
-  snesrecomp-go/runtime-next/src --glob '*.[ch]' \
+  snesrecomp-go/runtime/src --glob '*.[ch]' \
   --glob '!**/runtime_constants.h'
 
 check_forbidden \
   "use kActRaiserRuntimeWram_GameFrame in runtime diagnostics" \
   'g_ram[[:space:]]*\[[[:space:]]*0x0*(88|89)\b' \
-  snesrecomp-go/runtime-next/src --glob '*.[ch]'
+  snesrecomp-go/runtime/src --glob '*.[ch]'
 
 check_forbidden \
   "use the canonical runtime block-trace ring capacity and derived mask" \
   '\bAR_BLK_RING\b|g_ar_blk_idx[^;]*&[[:space:]]*1023[uU]?' \
-  src snesrecomp-go/runtime-next/src --glob '*.[ch]' --glob '!gen/**'
+  src snesrecomp-go/runtime/src --glob '*.[ch]' --glob '!gen/**'
 
 check_forbidden \
   "use kActRaiserWramSize throughout authored game code" \
@@ -46,7 +46,7 @@ check_forbidden \
 check_forbidden \
   "do not redeclare the canonical WRAM storage with a literal extent" \
   'extern[[:space:]]+(unsigned char|uint8|uint8_t)[[:space:]]+g_ram[[:space:]]*\[[[:space:]]*0x' \
-  src snesrecomp-go/runtime-next/src --glob '*.[ch]' --glob '!gen/**'
+  src snesrecomp-go/runtime/src --glob '*.[ch]' --glob '!gen/**'
 
 check_forbidden \
   "authentic dimensions belong in src/constants.h" \

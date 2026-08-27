@@ -15,12 +15,14 @@ baseline snapshots ignored in each game project.
 
 ## Origin and status
 
-This implementation is a Go port of the Python `snesrecomp` project created by
+The recompiler is a Go port of the Python `snesrecomp` project created by
 Matthew Stanley and subsequently developed by its contributors. The bundled C
-runtime was carried forward from the same project. Exact repositories, the
-source snapshot used for this port, contributor credit, prior-project
-acknowledgements, and licensing caveats are recorded in
-[`ATTRIBUTION.md`](ATTRIBUTION.md).
+runner is now an independently authored implementation under `runtime/`; the
+historical comparison runner is not distributed. Exact repositories, the
+source snapshot used for the Go port, contributor credit, prior-project
+acknowledgements, and licensing boundaries are recorded in
+[`ATTRIBUTION.md`](ATTRIBUTION.md) and
+[`runtime/PROVENANCE.md`](runtime/PROVENANCE.md).
 
 The normal recompiler path is Go-only. It covers ROM/config loading, 65816
 decode, control-flow analysis, IR lowering, C emission, variant discovery and
@@ -122,40 +124,54 @@ snesbuild build --hermetic --root .      # zig cc + link, no CMake
 It is driven by a `snesbuild.ini` manifest at the project root; see
 [`docs/PROJECT_INTEGRATION.md`](docs/PROJECT_INTEGRATION.md).
 
-Generated C includes `cpu_state.h`, `cpu_trace.h`, `common_cpu_infra.h`, and
+Generated C includes the public `snesrecomp/game/cpu.h`,
+`snesrecomp/game/trace.h`, `snesrecomp/game/generated_support.h`, and project-owned
 `funcs.h`. The game target must therefore use the include directories exported
-by `runtime-next/runner.cmake` plus its own `recomp` directory. A minimal CMake
+by `runtime/runner.cmake` plus its own `recomp` directory. A minimal CMake
 pattern is:
 
 ```cmake
 set(SNESRECOMP_GO_ROOT "${CMAKE_SOURCE_DIR}/snesrecomp-go")
-include("${SNESRECOMP_GO_ROOT}/runtime-next/runner.cmake")
+include("${SNESRECOMP_GO_ROOT}/runtime/runner.cmake")
 
 file(GLOB GAME_GEN_SOURCES CONFIGURE_DEPENDS
      "${CMAKE_SOURCE_DIR}/src/gen/*.c")
 
+add_library(snesrecomp_runtime STATIC
+  ${SNESRECOMP_RUNNER_SOURCES})
+snesrecomp_configure_runtime_target(snesrecomp_runtime)
+add_library(snesrecomp::runtime ALIAS snesrecomp_runtime)
+
 add_executable(MyGame
-  ${SNESRECOMP_RUNNER_SOURCES}
   ${GAME_GEN_SOURCES}
   src/main.c
   src/game_runtime.c)
 
 target_include_directories(MyGame PRIVATE
-  ${SNESRECOMP_RUNNER_INCLUDE_DIRS}
   "${CMAKE_SOURCE_DIR}/recomp"
   "${CMAKE_SOURCE_DIR}/src")
+target_link_libraries(MyGame PRIVATE snesrecomp::runtime)
 ```
+
+For a vended SDK, replace the source-library block with
+`find_package(snesrecomp-runtime CONFIG REQUIRED)`. The game still links the
+same `snesrecomp::runtime` target and never receives runner-private headers.
 
 The runtime is not a complete frontend. Each project supplies ROM validation
 and loading, video/audio presentation, its versioned `RtlGameModule`, frame
 and interrupt policy, and any C functions named by
 `hle_func`/`hle_func_if`/`hle_dispatch`.
 See [`docs/PROJECT_INTEGRATION.md`](docs/PROJECT_INTEGRATION.md) for the full
-contract and [`docs/CFG_FORMAT.md`](docs/CFG_FORMAT.md) for bank directives.
+toolchain contract,
+[`runtime/docs/GAME_ENHANCEMENT_INTEGRATION.md`](runtime/docs/GAME_ENHANCEMENT_INTEGRATION.md)
+for widescreen and enhanced-audio producer integration, and
+[`runtime/docs/API_REFERENCE.md`](runtime/docs/API_REFERENCE.md) for the capability, lifetime,
+and function-level SDK reference. See
+[`docs/CFG_FORMAT.md`](docs/CFG_FORMAT.md) for bank directives.
 
 ### Portable runner
 
-The independently authored MIT runner under `runtime-next/` is the sole runtime:
+The independently authored MIT runner under `runtime/` is the sole runtime:
 
 ```sh
 snesbuild build --root .
@@ -166,9 +182,9 @@ Its standalone module tests every core subsystem without a ROM, generated game
 code, or SDL:
 
 ```sh
-cmake -S snesrecomp-go/runtime-next -B build/runtime-next
-cmake --build build/runtime-next
-ctest --test-dir build/runtime-next --output-on-failure
+cmake -S snesrecomp-go/runtime -B build/runtime
+cmake --build build/runtime
+ctest --test-dir build/runtime --output-on-failure
 ```
 
 Core code is portable C11 and must keep OS, SDL, graphics API, and audio API
@@ -185,7 +201,7 @@ v2regen metadata --gen-dir src/gen --cfg-dir recomp --out build/gen_meta.json
 v2regen rts-webs --rom game.sfc --cfg-dir recomp --suggest
 v2regen stub-census --gen-dir src/gen
 v2regen link-audit --gen-dir src/gen --src-dir src \
-  --runtime-dir snesrecomp-go/runtime-next/src
+  --runtime-dir snesrecomp-go/runtime/src
 v2regen inspect --rom game.sfc --cfg-dir recomp --jobs 8
 v2regen emit-function --rom game.sfc --cfg-dir recomp \
   --bank 00 --start 8000 --m 1 --x 1
@@ -196,7 +212,7 @@ The opcode differential harness consumes locally cached
 
 ```sh
 v2regen opcode-diff --cache-dir tools/oracle/harte_cache \
-  --runtime-dir snesrecomp-go/runtime-next/src --all
+  --runtime-dir snesrecomp-go/runtime/src --all
 ```
 
 Generated-output snapshots are useful locally but should not be distributed
@@ -271,7 +287,7 @@ repository's `docs/BUILD_TOOLING.md` for the full bundle contract.
 - [`docs/PROJECT_INTEGRATION.md`](docs/PROJECT_INTEGRATION.md): project layout,
   generation pipeline, CMake, runtime hooks, and redistribution rules.
 - [`docs/CFG_FORMAT.md`](docs/CFG_FORMAT.md): supported `bankNN.cfg` syntax.
-- [`docs/RUNTIME.md`](docs/RUNTIME.md): shared runtime boundary, optional
+- [`runtime/docs/RUNTIME.md`](runtime/docs/RUNTIME.md): shared runtime boundary, optional
   features, and current limitations.
 - [`ATTRIBUTION.md`](ATTRIBUTION.md): Python-source provenance, prior work,
   contributor credit, and licensing status.

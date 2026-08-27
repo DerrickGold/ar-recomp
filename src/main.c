@@ -20,9 +20,10 @@
 #endif
 
 #include "action/action_obj_apron.h"
-#include "types.h"
+#include "snesrecomp/game/types.h"
 #include "actraiser_rtl.h"
-#include "common_cpu_infra.h"
+#include "snesrecomp/game/bootstrap.h"
+#include "snesrecomp/game/generated_support.h"
 #include "config.h"
 #include "crt_post.h"
 #include "settings.h"
@@ -45,14 +46,13 @@
 #include "dev/sfx_census.h"
 #include "dev/native_audio_trace.h"
 #include "run_dir.h"
-#include "launcher.h"
-#include "util.h"
+#include "snesrecomp/host/launcher.h"
+#include "snesrecomp/support/file.h"
 #include "actraiser/actraiser_action_bg.h"
 #include "actraiser_game.h"
-#include "cpu_trace.h"
-#include "audio_trace.h"
-#include "debug_server.h"
-#include "widescreen.h"
+#include "snesrecomp/game/trace.h"
+#include "snesrecomp/host/audio_trace.h"
+#include "snesrecomp/host/widescreen.h"
 #include "present.h"
 #include "frame_slot.h"
 #include "host/host_audio.h"
@@ -68,8 +68,7 @@
 #include "runtime_settings.h"
 #include "session_fatal.h"
 #include "runtime_diagnostics.h"
-#include "runner_next.h"
-#include "runner_next_internal.h"
+#include "snesrecomp/runner.h"
 #include "scheduled_settings.h"
 #include "user_data_dir.h"
 #include "sim/sim_phase0_trace.h"
@@ -233,7 +232,7 @@ bool g_new_ppu = true;
 static bool SettingsOverlayLiveCgram(
     uint16_t out_cgram[kSettingsOverlayLayerPaletteEntries]) {
   const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
-  SrRunnerHandle *runner = g_snes ? sr_runner_handle(g_snes) : NULL;
+  SrRunnerHandle *runner = RtlGameRunner();
   SrBorrowedU16Span cgram = {
     .struct_size = sizeof(cgram),
   };
@@ -253,7 +252,7 @@ static bool CaptureTownCanvasPpuView(SrPpuStateSnapshot *ppu,
                                      SrBorrowedU16Span *vram,
                                      SrBorrowedU16Span *cgram) {
   const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
-  SrRunnerHandle *runner = g_snes ? sr_runner_handle(g_snes) : NULL;
+  SrRunnerHandle *runner = RtlGameRunner();
   const uint64_t required_caps =
       SR_RUNNER_CAP_PPU_STATE | SR_RUNNER_CAP_BORROWED_U16_SPANS;
   if (!api || !runner || !ppu || !vram || !cgram ||
@@ -287,7 +286,7 @@ static void RtlDrawPpuFrame(void) {
 /* One emulated tick: sample input, run the recompiled game logic, apply
  * turbo's extra same-input sub-frames (§3.2 — unchanged mechanism, just
  * relocated so it fires once per emulated tick instead of once per outer
- * host iteration), and the AR_PERF/AR_APUPROF instrumentation that measures
+ * host iteration), and the AR_PERF/SNESRECOMP_APU_PROFILE instrumentation that measures
  * it (§3.5 — "wrap the per-tick RtlRunFrame"). Called once per outer
  * iteration by the headless loop (§3.6) and 0-N times per outer iteration by
  * the non-headless fixed-timestep accumulator loop (§3.1). */
@@ -296,25 +295,24 @@ static void RunOneEmulatedTick(bool *stop_running) {
   static int perf_on = -1;
   if (perf_on < 0) perf_on = getenv("AR_PERF") ? 1 : 0;
   uint64_t perf_t0 = perf_on ? SDL_GetTicks() : 0;
-  /* AR_APUPROF=<ms>: per-frame APU-stall attribution. Any game frame whose
+  /* SNESRECOMP_APU_PROFILE=<ms>: per-frame APU-stall attribution. Any game frame whose
    * wall time reaches the threshold (default 8 ms; the flag value overrides
    * when >= 2) prints one [apuprof] line splitting the frame into lock-wait
    * vs SPC catch-up vs handshake-spin vs upload vs music-hook time. */
   static int apuprof_ms = kUninitializedEnvironmentOption;
   if (apuprof_ms == kUninitializedEnvironmentOption) {
-    extern int ApuProfEnabled(void);
-    apuprof_ms = ApuProfEnabled() ? atoi(getenv("AR_APUPROF")) : -1;
+    apuprof_ms = RtlApuProfileIsEnabled()
+        ? atoi(getenv("SNESRECOMP_APU_PROFILE")) : -1;
     if (apuprof_ms >= 0 && apuprof_ms < 2) apuprof_ms = 8;
   }
   uint64_t apuprof_t0 = 0;
   unsigned long apuprof_push0 = 0;
   uint64_t apuprof_loop0 = 0;
   if (apuprof_ms > 0) {
-    extern void ApuProfFrameReset(void);
     extern uint64_t audio_trace_wall_ns(void);
     extern unsigned long g_recomp_push_count;
     extern uint64_t g_watchdog_loop_headers;
-    ApuProfFrameReset();
+    RtlApuProfileReset();
     apuprof_push0 = g_recomp_push_count;
     apuprof_loop0 = g_watchdog_loop_headers;
     apuprof_t0 = audio_trace_wall_ns();
@@ -355,46 +353,39 @@ static void RunOneEmulatedTick(bool *stop_running) {
     }
   }
   if (apuprof_t0) {
+    RtlApuProfile profile = {.struct_size = RTL_APU_PROFILE_V2_SIZE};
     extern uint64_t audio_trace_wall_ns(void);
-    extern uint64_t g_apuprof_lockwait_ns, g_apuprof_catchup_ns,
-        g_apuprof_catchup_cyc, g_apuprof_hook_ns, g_apuprof_upload_ns,
-        g_apuprof_sched_lat_max;
-    extern uint32_t g_apuprof_catchup_calls, g_apuprof_port_reads,
-        g_apuprof_port_writes;
-    extern const char *g_apuprof_last_port_func;
     extern unsigned long g_recomp_push_count;
     extern uint64_t g_watchdog_loop_headers;
-    extern uint64_t g_apuprof_audiowait_max_ns;
     uint64_t dt_ns = audio_trace_wall_ns() - apuprof_t0;
+    RtlApuProfileRead(&profile);
     if (dt_ns >=
         (uint64_t)apuprof_ms * kNanosecondsPerMillisecond) {
       const unsigned gf =
           ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
-      double audiowait_ms =
-          g_apuprof_audiowait_max_ns /
+      double audiowait_ms = RtlApuProfileTakeAudioWaitMax() /
           (double)kNanosecondsPerMillisecond;
-      g_apuprof_audiowait_max_ns = 0;
       fprintf(stderr,
               "[apuprof] gf=%u dt=%.1fms lockwait=%.2fms "
               "catchup=%.2fms/%llucyc/%uc reads=%u writes=%u "
               "hook=%.2fms upload=%.2fms schedlat=%llusmp pushes=%lu "
               "loops=%llu audiowait-max=%.2fms last=%s\n",
               gf, dt_ns / (double)kNanosecondsPerMillisecond,
-              g_apuprof_lockwait_ns /
+              profile.lock_wait_ns /
                   (double)kNanosecondsPerMillisecond,
-              g_apuprof_catchup_ns /
+              profile.catchup_ns /
                   (double)kNanosecondsPerMillisecond,
-              (unsigned long long)g_apuprof_catchup_cyc,
-              g_apuprof_catchup_calls, g_apuprof_port_reads,
-              g_apuprof_port_writes,
-              g_apuprof_hook_ns / (double)kNanosecondsPerMillisecond,
-              g_apuprof_upload_ns /
+              (unsigned long long)profile.catchup_cycles,
+              profile.catchup_calls, profile.port_reads,
+              profile.port_writes,
+              profile.hook_ns / (double)kNanosecondsPerMillisecond,
+              profile.upload_ns /
                   (double)kNanosecondsPerMillisecond,
-              (unsigned long long)g_apuprof_sched_lat_max,
+              (unsigned long long)profile.scheduled_latency_max,
               g_recomp_push_count - apuprof_push0,
               (unsigned long long)(g_watchdog_loop_headers - apuprof_loop0),
               audiowait_ms,
-              g_apuprof_last_port_func ? g_apuprof_last_port_func : "-");
+              profile.last_port_function ? profile.last_port_function : "-");
     }
   }
   if (perf_on) {
@@ -459,7 +450,7 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
   {
     extern int snes_frame_counter;
     SimPhase0Trace_Frame((uint32)snes_frame_counter, g_ram,
-                         sr_runner_handle(g_snes));
+                         RtlGameRunner());
     SimRenderMetadata_CaptureFrame(
         &sim, g_ram, g_settings.sim3d_mode,
         g_settings.sim3d_world_navigation,
@@ -467,7 +458,7 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
         g_settings.sim3d_diagnostic_layers, Sim3D_ImplementedFeatures());
     Sim3DTuning tuning = BuildSim3DTuning();
     Sim3D_AnnotateFrame(&sim, &tuning);
-    SimWorldNavigationCapture_Capture(&sim, sr_runner_handle(g_snes));
+    SimWorldNavigationCapture_Capture(&sim, RtlGameRunner());
     /* This site runs for every drawn frame, including headless runs that never
      * call HostDisplay_SubmitFrame or FrameSlot_Capture. */
     SrPpuStateSnapshot town_ppu;
@@ -854,7 +845,7 @@ static int AppBoot_ParseArgs(AppBoot *app, int argc, char **argv) {
   }
 
   app->rom_size = 0;
-  app->rom_data = ReadWholeFile(app->rom_path, &app->rom_size);
+  app->rom_data = snesrecomp_read_whole_file(app->rom_path, &app->rom_size);
   if (!app->rom_data) {
     fprintf(stderr, "Error: cannot open ROM file '%s'\n", app->rom_path);
     return 1;
@@ -907,41 +898,41 @@ static void AppBoot_ResolveDisplayAndSettings(AppBoot *app) {
   Settings_FinalizeDisplayMode();
 }
 
-/* The AR_MXCHECK / AR_MXHIST / AR_EXITMX / AR_CALLMX / AR_TRAPFN family: runtime
+/* The SNESRECOMP_ENTRY_MX_CHECK / SNESRECOMP_MX_HISTORY / SNESRECOMP_EXIT_MX_CHECK / SNESRECOMP_CALL_MX_CHECK / SNESRECOMP_TRAP_FUNCTION family: runtime
  * m/x invariant checks and call-stack traps. All diagnostic, all opt-in, and all
  * resolved once here so no hot path pays a getenv. */
 static void AppBoot_ArmDiagnostics(void) {
-  /* AR_MXCHECK=1: enable the per-function-entry m/x invariant check
+  /* SNESRECOMP_ENTRY_MX_CHECK=1: enable the per-function-entry m/x invariant check
    * (validates the emitter's static m/x analysis on every direct call). */
-  { extern int g_ar_mx_check; const char *e = getenv("AR_MXCHECK");
-    g_ar_mx_check = (e && e[0] && e[0] != '0') ? 1 : 0; }
-  /* AR_MXHIST=1: per-PC runtime m/x histogram + live misdecode anomaly trap. */
-  { extern int g_ar_mxhist; extern void ar_mxhist_dump(void);
-    const char *e = getenv("AR_MXHIST");
-    g_ar_mxhist = (e && e[0] && e[0] != '0') ? 1 : 0;
-    if (g_ar_mxhist) atexit(ar_mxhist_dump); }
-  /* AR_EXITMX=1: per-function EXIT m/x check — fires when a function's runtime
+  { extern int g_sr_entry_mx_check_enabled; const char *e = getenv("SNESRECOMP_ENTRY_MX_CHECK");
+    g_sr_entry_mx_check_enabled = (e && e[0] && e[0] != '0') ? 1 : 0; }
+  /* SNESRECOMP_MX_HISTORY=1: per-PC runtime m/x histogram + live misdecode anomaly trap. */
+  { extern int g_sr_mx_history_enabled; extern void sr_mx_history_dump(void);
+    const char *e = getenv("SNESRECOMP_MX_HISTORY");
+    g_sr_mx_history_enabled = (e && e[0] && e[0] != '0') ? 1 : 0;
+    if (g_sr_mx_history_enabled) atexit(sr_mx_history_dump); }
+  /* SNESRECOMP_EXIT_MX_CHECK=1: per-function EXIT m/x check — fires when a function's runtime
    * exit (m,x) differs from what the emitter told its callers (exit-mx
-   * misdecode, e.g. $03:9156). AR_EXITS=1: per-function EXIT stack-balance
+   * misdecode, e.g. $03:9156). SNESRECOMP_EXIT_STACK_CHECK=1: per-function EXIT stack-balance
    * check — fires when a paired frame's RTS/RTL drifts S (e.g. $01:B8CF).
-   * Symmetric twins of AR_MXCHECK; name the culprit at its own return. */
-  { extern int g_ar_exit_mx_check; const char *e = getenv("AR_EXITMX");
-    g_ar_exit_mx_check = (e && e[0] && e[0] != '0') ? 1 : 0; }
-  { extern int g_ar_exit_s_check; const char *e = getenv("AR_EXITS");
-    g_ar_exit_s_check = (e && e[0] && e[0] != '0') ? 1 : 0; }
-  /* AR_CALLMX=1: per-CALL-SITE m/x invariant check — fires at every JSR/JSL
+   * Symmetric twins of SNESRECOMP_ENTRY_MX_CHECK; name the culprit at its own return. */
+  { extern int g_sr_exit_mx_check_enabled; const char *e = getenv("SNESRECOMP_EXIT_MX_CHECK");
+    g_sr_exit_mx_check_enabled = (e && e[0] && e[0] != '0') ? 1 : 0; }
+  { extern int g_sr_exit_stack_check_enabled; const char *e = getenv("SNESRECOMP_EXIT_STACK_CHECK");
+    g_sr_exit_stack_check_enabled = (e && e[0] && e[0] != '0') ? 1 : 0; }
+  /* SNESRECOMP_CALL_MX_CHECK=1: per-CALL-SITE m/x invariant check — fires at every JSR/JSL
    * when runtime (m,x) disagrees with what the decoder statically knew at
    * that exact instruction. Catches (m,x) corruption from ANYWHERE upstream
-   * of a call (not just decode-time mistakes AR_MXCHECK/AR_EXITMX cover),
+   * of a call (not just decode-time mistakes SNESRECOMP_ENTRY_MX_CHECK/SNESRECOMP_EXIT_MX_CHECK cover),
    * narrowed to the first call site downstream of the corruption. */
-  { extern int g_ar_call_mx_check; const char *e = getenv("AR_CALLMX");
-    g_ar_call_mx_check = (e && e[0] && e[0] != '0') ? 1 : 0; }
+  { extern int g_sr_call_mx_check_enabled; const char *e = getenv("SNESRECOMP_CALL_MX_CHECK");
+    g_sr_call_mx_check_enabled = (e && e[0] && e[0] != '0') ? 1 : 0; }
 
-  /* AR_TRAPFN=<substring>: dump the recomp call stack the first time a matching
+  /* SNESRECOMP_TRAP_FUNCTION=<substring>: dump the recomp call stack the first time a matching
    * function is entered (finds the dispatch chain into a misdecode variant). */
-  { extern const char *g_ar_trapfn;
-    const char *e = getenv("AR_TRAPFN");
-    g_ar_trapfn = (e && e[0]) ? e : 0; }
+  { extern const char *g_sr_trap_function;
+    const char *e = getenv("SNESRECOMP_TRAP_FUNCTION");
+    g_sr_trap_function = (e && e[0]) ? e : 0; }
 
 }
 
@@ -1337,9 +1328,9 @@ static void AppBoot_StartGame(AppBoot *app) {
     Die("The linked game module is incompatible with this runner.");
   app->snes = SnesInit(app->rom_data, (int)app->rom_size);
   if (!app->snes) Die("SnesInit failed");
-  if (!RuntimeDiagnostics_Bind(sr_runner_handle(app->snes)))
+  if (!RuntimeDiagnostics_Bind(RtlGameRunner()))
     Die("runner diagnostics observer bind failed");
-  if (!NativeAudioTrace_Init(sr_runner_handle(app->snes)))
+  if (!NativeAudioTrace_Init(RtlGameRunner()))
     Die("native audio trace observer bind failed");
 
   /* Lifecycle initialization applies deterministic visual source-data
@@ -1454,7 +1445,7 @@ static void AppBoot_StartGame(AppBoot *app) {
     }
   }
 
-  OracleTrace_Init(sr_runner_handle(app->snes));
+  OracleTrace_Init(RtlGameRunner());
   ForcedInput_Init();
   InputReplay_Init();
   /* A replay must not mutate the player's configuration, for the same reason it
@@ -2209,10 +2200,8 @@ static int AppShutdown(AppBoot *app, char **argv) {
    * running on that stack. */
   ActRaiser_DestroyGameCoroutine();
   InputMap_Shutdown();
-#ifdef SNESRECOMP_NEXT_COMMON_CPU_INFRA_H
   RuntimeDiagnostics_Unbind();
   SnesShutdown();
-#endif
   SDL_DestroyTexture(g_hud_obj_texture);
   SDL_DestroyTexture(g_hud_bg_texture);
   SDL_DestroyTexture(g_authentic_texture);

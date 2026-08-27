@@ -3,8 +3,8 @@
 
 #include <stdbool.h>
 
-#include "runner_next.h"
-#include "types.h"
+#include "snesrecomp/runner.h"
+#include "snesrecomp/game/types.h"
 
 /* Read-only Phase 0 evidence trace. The explicit Open entry is useful for
  * tests/tools; production normally uses InitFromEnvironment after run-dir

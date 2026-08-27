@@ -12,7 +12,7 @@
 #endif
 
 #include "present_cadence_metrics.h"
-#include "runner_next.h"
+#include "snesrecomp/runner.h"
 #include "run_dir.h"
 
 enum {

@@ -1199,7 +1199,7 @@ comment for the full key/gate grammar. Planes are capability tiers:
   promotion — that was evaluated and rejected as a paste-path special
   case.): canvas-space texture override rendered through
   the live matrix. The engine API (`PpuBindMode7OverlaySurface` +
-  `PpuSetMode7Override`, `snesrecomp-go/runtime-next/src/snes/ppu.c`) samples the entry's ARGB art at
+  `PpuSetMode7Override`, `snesrecomp-go/runtime/src/snes/ppu.c`) samples the entry's ARGB art at
   the per-pixel canvas coordinates inside `PpuDrawBackground_mode7`, so
   rotation, zoom, per-scanline HDMA warps, windows, field wrap, and INIDISP
   brightness all apply. Output goes to a 4x-supersampled overlay surface

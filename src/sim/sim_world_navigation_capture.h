@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 #include "constants.h"
-#include "runner_next.h"
+#include "snesrecomp/runner.h"
 #include "sim_render_metadata.h"
 
 enum {

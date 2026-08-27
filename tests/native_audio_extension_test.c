@@ -14,7 +14,6 @@ bool (*g_apu_spc_dsp_write_filter_hook)(Apu *, uint8_t, uint8_t *);
 void (*g_spc_opcode_patch_hook)(Spc *, uint16_t);
 int (*g_spc_opcode_cycle_hook)(Spc *, uint16_t, int);
 void (*g_apu_extra_saveload_hook)(Apu *, SaveLoadInfo *);
-void (*g_rtl_spc_upload_hook)(uint32_t);
 Snes *g_snes;
 
 void RtlApuLock(void) {}

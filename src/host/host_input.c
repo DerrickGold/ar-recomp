@@ -6,7 +6,7 @@
 #include <SDL3/SDL.h>
 
 #include "actraiser_rtl.h"
-#include "common_cpu_infra.h"
+#include "snesrecomp/game/bootstrap.h"
 #include "diorama/diorama.h"
 #include "forced_input.h"
 #include "hd_replacement_host.h"

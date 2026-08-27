@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <SDL3/SDL.h>
-#include "types.h"
+#include "snesrecomp/game/types.h"
 #include "constants.h"
 #include "hd_replacements.h"
 #include "diorama/diorama.h"
@@ -12,7 +12,7 @@
 #include "action/action_effects.h"
 #include "action/action_bg_plan.h"
 #include "presentation_frame_generation.h"
-#include "runner_next.h"
+#include "snesrecomp/runner.h"
 
 /* FrameSlot is the sole game-state contract for presentation. FrameSlot_Capture
  * populates it immediately after RtlDrawPpuFrame; presentation consumes the

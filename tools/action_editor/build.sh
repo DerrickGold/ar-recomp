@@ -15,7 +15,7 @@ LAYERS="${3:-diorama-layers.ini}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 "${CC:-cc}" -O2 -std=c11 -Wall -Wextra -Wpedantic -I src -I recomp \
-   -I snesrecomp-go/runtime-next/src -I snesrecomp-go/runtime-next/src/snes \
+   -I snesrecomp-go/runtime/include \
    tools/action_editor/action_bg_export.c \
    src/action/action_room_scene.c src/quintet_lzss.c \
    -o "$TMP/export"

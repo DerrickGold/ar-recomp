@@ -4,7 +4,7 @@
 /* Internal dependencies of the sole FrameSlot producer. The public capture API
  * and FrameSlot type remain in present.h. */
 
-#include "types.h"
+#include "snesrecomp/game/types.h"
 #include "present.h"   /* InspectorPresentationSelection, FrameSlot */
 #include "sim/sim3d.h"     /* Sim3DTuning */
 

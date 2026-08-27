@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Slice/pivot an ar_trace unified JSONL trace (AR_TRACE=<file>).
+"""Slice/pivot an runtime_trace unified JSONL trace (SNESRECOMP_TRACE_FILE=<file>).
 
 One capture run holds every layer (func entries w/ m/x, all VRAM write paths,
 VMADD sets, PPU regs, DMA), correlated by a monotonic `seq`. Query it locally

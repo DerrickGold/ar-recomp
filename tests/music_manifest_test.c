@@ -33,9 +33,6 @@ const SnesRunnerApi *sr_runner_get_api(uint32_t requested_abi_version) {
 void RtlApuLock(void) {}
 void RtlApuUnlock(void) {}
 int RtlGetAudioOutputRate(void) { return 44100; }
-void (*g_rtl_spc_upload_hook)(uint32_t src);
-void (*g_rtl_apu_port_hook)(uint8_t port, uint8_t val);
-void (*g_rtl_music_mix_hook)(int16_t *buf, int frames);
 int g_dsp_voice_mute_srcn_min = -1;
 static bool s_music_bus_muted;
 void dsp_setMusicBusMuted(bool muted) { s_music_bus_muted = muted; }
@@ -241,18 +238,15 @@ static void TestTriggerStateMachine(void) {
   memset(&g_settings, 0, sizeof(g_settings));
   g_settings.music_replacements = true;
   MusicReplacements_InstallHooks();
-  CHECK(g_rtl_apu_port_hook != NULL);
-  CHECK(g_rtl_spc_upload_hook != NULL);
-  CHECK(g_rtl_music_mix_hook != NULL);
   CHECK(!MusicReplacements_IsPlaybackPaused());
   char status[128];
   MusicReplacements_FormatPlaybackStatus(status, sizeof(status));
   CHECK(!strcmp(status, "MUSIC NONE"));
 
-  g_rtl_spc_upload_hook(0x1A94B8);
-  g_rtl_apu_port_hook(0, 0xF0); /* halt */
-  g_rtl_apu_port_hook(0, 0xFF); /* upload */
-  g_rtl_apu_port_hook(0, 0x01); /* play song 1: no audio -> authentic */
+  MusicReplacements_OnSpcUpload(0x1A94B8);
+  MusicReplacements_OnApuPortWrite(0, 0xF0); /* halt */
+  MusicReplacements_OnApuPortWrite(0, 0xFF); /* upload */
+  MusicReplacements_OnApuPortWrite(0, 0x01); /* play song 1: no audio -> authentic */
   CHECK(g_dsp_voice_mute_srcn_min == -1);
   CHECK(!s_music_bus_muted);
   MusicReplacements_FormatPlaybackStatus(status, sizeof(status));
@@ -261,21 +255,21 @@ static void TestTriggerStateMachine(void) {
   /* $F2 is native pause, not song F2. The same remembered song command
    * resumes it. Host pause is an independent reason, so clearing only one
    * latch must not resume playback. */
-  g_rtl_apu_port_hook(0, 0xF2);
+  MusicReplacements_OnApuPortWrite(0, 0xF2);
   CHECK(MusicReplacements_IsPlaybackPaused());
   MusicReplacements_SetHostPaused(true);
   MusicReplacements_FormatPlaybackStatus(status, sizeof(status));
   CHECK(strstr(status, "PAUSED") != NULL);
-  g_rtl_apu_port_hook(0, 0x01);
+  MusicReplacements_OnApuPortWrite(0, 0x01);
   CHECK(MusicReplacements_IsPlaybackPaused());
   MusicReplacements_SetHostPaused(false);
   CHECK(!MusicReplacements_IsPlaybackPaused());
 
   MusicReplacements_SetHostPaused(true);
-  g_rtl_apu_port_hook(0, 0xF2);
+  MusicReplacements_OnApuPortWrite(0, 0xF2);
   MusicReplacements_SetHostPaused(false);
   CHECK(MusicReplacements_IsPlaybackPaused());
-  g_rtl_apu_port_hook(0, 0x01);
+  MusicReplacements_OnApuPortWrite(0, 0x01);
   CHECK(!MusicReplacements_IsPlaybackPaused());
 
   /* Force the entry playable but keep the file missing: the play-time open
@@ -283,7 +277,7 @@ static void TestTriggerStateMachine(void) {
   g_music_replacements[0].has_audio = true;
   g_music_replacements[0].file_rate = 44100;
   g_music_replacements[0].file_frames = 44100;
-  g_rtl_apu_port_hook(0, 0x01);
+  MusicReplacements_OnApuPortWrite(0, 0x01);
   CHECK(g_dsp_voice_mute_srcn_min == -1);
   CHECK(!s_music_bus_muted);
 
@@ -300,7 +294,7 @@ static void TestTriggerStateMachine(void) {
   /* Mix hook without a session: must not touch the buffer. */
   int16_t buf[64];
   memset(buf, 0x11, sizeof(buf));
-  g_rtl_music_mix_hook(buf, 16);
+  MusicReplacements_MixOutput(buf, 16);
   CHECK(buf[0] == 0x1111 && buf[31] == 0x1111);
 }
 

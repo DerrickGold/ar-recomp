@@ -5,7 +5,7 @@
 #include <string.h>
 
 #include "host_audio.h"
-#include "types.h"
+#include "snesrecomp/game/runtime.h"
 
 static int s_failures;
 static SDL_AtomicInt s_render_calls;
@@ -20,9 +20,11 @@ static SDL_AtomicInt s_render_calls;
 
 /* host_audio.c's runtime collaborators. The test needs only a producing audio
  * callback; zero PCM is sufficient to prove whether SDL is advancing it. */
-int ApuProfEnabled(void) { return 0; }
-uint64_t g_apuprof_lockwait_ns;
-uint64_t g_apuprof_audiowait_max_ns;
+bool RtlApuProfileIsEnabled(void) { return false; }
+void RtlApuProfileRecordHostWait(uint64_t wait_ns, bool lock_wait) {
+  (void)wait_ns;
+  (void)lock_wait;
+}
 uint64_t audio_trace_wall_ns(void) { return SDL_GetTicksNS(); }
 void RtlSetAudioOutputRate(int rate) { (void)rate; }
 void RtlRenderAudio(int16 *buffer, int frames, int channels) {

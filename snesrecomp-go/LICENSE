@@ -2,7 +2,7 @@ Scope
 -----
 
 This license covers the original Go implementation, the independently authored
-C sources under `runtime-next/`, build and packaging tooling, tests, and
+C sources under `runtime/`, build and packaging tooling, tests, and
 documentation in this module.
 
 It does **not** cover, and grants no rights to:

@@ -12,7 +12,7 @@
 #include "scene3d_math.h"
 #include "presentation_geometry.h"
 #include "presentation_upload_mirror.h"
-#include "runner_next.h"
+#include "snesrecomp/runner.h"
 #include "settings.h"
 #include "user_data_dir.h"
 #include <limits.h>

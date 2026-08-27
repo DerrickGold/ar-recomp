@@ -1,0 +1,366 @@
+{
+  "build": {
+    "binary": {
+      "bytes": 21639280,
+      "path": "build-sdk-cleanup-native/ActRaiserRecomp",
+      "sha256": "f1ba040bffd25915c438e81e02a0f106424e5c685f3eb93a31bd9f22fb6aba0f"
+    },
+    "cmake": {
+      "AR_SANITIZE": "OFF",
+      "AR_WATCHDOG": "OFF",
+      "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+      "CMAKE_C_COMPILER": "/usr/bin/cc",
+      "SNESRECOMP_ENABLE_SIMD": "ON"
+    }
+  },
+  "captured_at_utc": "2026-08-27T20:47:05.079107+00:00",
+  "host": {
+    "logical_cpus": 8,
+    "machine": "arm64",
+    "python": "3.14.6",
+    "release": "24.6.0",
+    "system": "Darwin"
+  },
+  "inputs": {
+    "config": {
+      "bytes": 1521,
+      "path": "config.ini",
+      "sha256": "24d22dea93bb0781e2a6ad2516673a79df78bcb46981ab7cb12d1b2f15c87653"
+    },
+    "rom": {
+      "bytes": 1048576,
+      "path": "ar.sfc",
+      "sha256": "b8055844825653210d252d29a2229f9a3e7e512004e83940620173c57d8723f0"
+    },
+    "save": {
+      "bytes": 8192,
+      "path": "saves/save.srm",
+      "sha256": "480a8375b6255ad681202986640c5b06889458125ec0f82641a0e4fb425c0d45"
+    }
+  },
+  "label": "sdk-cleanup-native",
+  "method": {
+    "clock": "time.perf_counter_ns",
+    "diagnostics": "AR_NO_RUN_DIR=1; no trace/watch instrumentation",
+    "drivers": {
+      "audio": "dummy",
+      "video": "dummy"
+    },
+    "measured_runs": 7,
+    "order": "alternating workload order by measured round",
+    "warmups": 1
+  },
+  "paired_reference": {
+    "build": {
+      "binary": {
+        "bytes": 21640880,
+        "path": "build-abi-final-migration-native/ActRaiserRecomp",
+        "sha256": "ec7ebf31536a5b3d1af74ed9eee31d28a257aab0e548b1c719d078bf0ae66d71"
+      },
+      "cmake": {
+        "AR_SANITIZE": "OFF",
+        "AR_WATCHDOG": "OFF",
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_C_COMPILER": "/usr/bin/cc",
+        "SNESRECOMP_ENABLE_SIMD": "ON"
+      }
+    },
+    "median_adjacent_delta_percent": {
+      "aitos_wide": 2.109,
+      "death_heim_wide": -0.026,
+      "mode7_worldmap": 0.286,
+      "sim_actions": 0.109
+    },
+    "suite_geometric_mean_emulated_fps": 3117.86,
+    "suite_regression_percent": 0.616,
+    "workloads": {
+      "aitos_wide": {
+        "final_artifact_sha256": {
+          "dump_dispatch_log.json": "69a3dfa754286c85d963627ec8bf7c972eab27a20e8c0a66dbd495206c4fcd71",
+          "dump_sram.bin": "480a8375b6255ad681202986640c5b06889458125ec0f82641a0e4fb425c0d45",
+          "dump_state.txt": "8e70491b59922e7de0f8cbaa466078c533c7a39d35aa7e3075ce2ba6b15d4265",
+          "dump_wram.bin": "9b06845487a69cfaceddb70301ce97863769e227f41f538f5316a8e554f24906"
+        },
+        "performance": {
+          "durations_seconds": [
+            1.844904,
+            1.833818,
+            1.833376,
+            1.835658,
+            1.833981,
+            1.835766,
+            1.853397
+          ],
+          "max_seconds": 1.853397,
+          "mean_seconds": 1.8387,
+          "median_absolute_deviation_seconds": 0.001839,
+          "median_emulated_fps": 2179.06,
+          "median_seconds": 1.835658,
+          "min_seconds": 1.833376,
+          "stdev_seconds": 0.007603
+        }
+      },
+      "death_heim_wide": {
+        "final_artifact_sha256": {
+          "dump_dispatch_log.json": "79aa885d961cfd4f590fd6ae1d9ca89f49efc429a12669f40ddd372a99e81aee",
+          "dump_sram.bin": "480a8375b6255ad681202986640c5b06889458125ec0f82641a0e4fb425c0d45",
+          "dump_state.txt": "da4836ea9b2b4e1dd39a4141ad0097c5433f19fbc5ec138a1dcf4c95b0ad5214",
+          "dump_wram.bin": "9d156d5fc8cdf59f9d0cc66928d264b418dd6dbfa036ea2bcbe7ab76d41a6e65"
+        },
+        "performance": {
+          "durations_seconds": [
+            1.788559,
+            1.779364,
+            1.786496,
+            1.781573,
+            1.782002,
+            1.78121,
+            1.780813
+          ],
+          "max_seconds": 1.788559,
+          "mean_seconds": 1.78286,
+          "median_absolute_deviation_seconds": 0.00076,
+          "median_emulated_fps": 2245.21,
+          "median_seconds": 1.781573,
+          "min_seconds": 1.779364,
+          "stdev_seconds": 0.003347
+        }
+      },
+      "mode7_worldmap": {
+        "final_artifact_sha256": {
+          "dump_dispatch_log.json": "79aa885d961cfd4f590fd6ae1d9ca89f49efc429a12669f40ddd372a99e81aee",
+          "dump_sram.bin": "480a8375b6255ad681202986640c5b06889458125ec0f82641a0e4fb425c0d45",
+          "dump_state.txt": "f910c6a1e0e2d039d97f9678245e3dd99724241ab68cdaa848d5f9257a28b506",
+          "dump_wram.bin": "fa3294b7dc347653181265fe7fb46ae5826bd945541c5d67bcace07fb63f4bd2"
+        },
+        "performance": {
+          "durations_seconds": [
+            1.310423,
+            1.315116,
+            1.314505,
+            1.307617,
+            1.301122,
+            1.29823,
+            1.309333
+          ],
+          "max_seconds": 1.315116,
+          "mean_seconds": 1.30805,
+          "median_absolute_deviation_seconds": 0.005172,
+          "median_emulated_fps": 4582.48,
+          "median_seconds": 1.309333,
+          "min_seconds": 1.29823,
+          "stdev_seconds": 0.00637
+        }
+      },
+      "sim_actions": {
+        "final_artifact_sha256": {
+          "dump_dispatch_log.json": "9302f274bf70e69b211e0beeb5759e59bbaad78c02076c47a5d81c52a5b909c5",
+          "dump_sram.bin": "480a8375b6255ad681202986640c5b06889458125ec0f82641a0e4fb425c0d45",
+          "dump_state.txt": "9b03cf0e63dcd48d3625ebe34c1e0f2937db53fcd62b7ff22131dadc500239cb",
+          "dump_wram.bin": "050ae4e6e0a66424568d398d4ba4513960632bb052f2d0d09e33a0c32077654d"
+        },
+        "performance": {
+          "durations_seconds": [
+            1.414403,
+            1.439243,
+            1.423475,
+            1.414057,
+            1.41512,
+            1.42452,
+            1.424323
+          ],
+          "max_seconds": 1.439243,
+          "mean_seconds": 1.422163,
+          "median_absolute_deviation_seconds": 0.008356,
+          "median_emulated_fps": 4215.04,
+          "median_seconds": 1.423475,
+          "min_seconds": 1.414057,
+          "stdev_seconds": 0.008937
+        }
+      }
+    }
+  },
+  "schema_version": 1,
+  "source": {
+    "git_commit": "baeb7a01752aa98d9681f54ac4f7163a730dc194",
+    "git_describe": "baeb7a0-dirty",
+    "working_tree_clean": false
+  },
+  "suite_geometric_mean_emulated_fps": 3098.04,
+  "workloads": {
+    "aitos_wide": {
+      "final_artifact_sha256": {
+        "dump_dispatch_log.json": "69a3dfa754286c85d963627ec8bf7c972eab27a20e8c0a66dbd495206c4fcd71",
+        "dump_sram.bin": "480a8375b6255ad681202986640c5b06889458125ec0f82641a0e4fb425c0d45",
+        "dump_state.txt": "8e70491b59922e7de0f8cbaa466078c533c7a39d35aa7e3075ce2ba6b15d4265",
+        "dump_wram.bin": "9b06845487a69cfaceddb70301ce97863769e227f41f538f5316a8e554f24906"
+      },
+      "input": {
+        "description": "Wide action-mode traversal with background HLE enabled",
+        "environment": {
+          "AR_ACTION_BG_HLE": "1",
+          "AR_ASPECT_PAR": "Square pixels",
+          "AR_DIORAMA": "0",
+          "AR_DISPLAY_MODE": "2",
+          "AR_EXTENDED_ASPECT_RATIO": "16:10",
+          "AR_MOONJUMP": "1",
+          "AR_NO_KNOCKBACK": "1",
+          "AR_RANGED_SWORD": "1",
+          "AR_SIM3D": "0",
+          "AR_WS_HEADLESS": "1"
+        },
+        "frames": 4000,
+        "replay": {
+          "bytes": 40072,
+          "path": "saves/aitos-r4-natural.rec",
+          "sha256": "bd1e7b576e0c11529844175173ee16127a3a9781af021105f66b978d6b7509e4"
+        },
+        "settings": null
+      },
+      "performance": {
+        "durations_seconds": [
+          1.882595,
+          1.883563,
+          1.876246,
+          1.873542,
+          1.877169,
+          1.874474,
+          1.885616
+        ],
+        "max_seconds": 1.885616,
+        "mean_seconds": 1.879029,
+        "median_absolute_deviation_seconds": 0.003627,
+        "median_emulated_fps": 2130.87,
+        "median_seconds": 1.877169,
+        "min_seconds": 1.873542,
+        "stdev_seconds": 0.004808
+      }
+    },
+    "death_heim_wide": {
+      "final_artifact_sha256": {
+        "dump_dispatch_log.json": "79aa885d961cfd4f590fd6ae1d9ca89f49efc429a12669f40ddd372a99e81aee",
+        "dump_sram.bin": "480a8375b6255ad681202986640c5b06889458125ec0f82641a0e4fb425c0d45",
+        "dump_state.txt": "da4836ea9b2b4e1dd39a4141ad0097c5433f19fbc5ec138a1dcf4c95b0ad5214",
+        "dump_wram.bin": "9d156d5fc8cdf59f9d0cc66928d264b418dd6dbfa036ea2bcbe7ab76d41a6e65"
+      },
+      "input": {
+        "description": "Wide late-game action and effects workload",
+        "environment": {
+          "AR_ACTION_BG_HLE": "1",
+          "AR_ASPECT_PAR": "Square pixels",
+          "AR_DIORAMA": "0",
+          "AR_DISPLAY_MODE": "2",
+          "AR_EXTENDED_ASPECT_RATIO": "16:10",
+          "AR_MOONJUMP": "1",
+          "AR_NO_KNOCKBACK": "1",
+          "AR_RANGED_SWORD": "1",
+          "AR_SIM3D": "0",
+          "AR_WS_HEADLESS": "1"
+        },
+        "frames": 4000,
+        "replay": {
+          "bytes": 160168,
+          "path": "saves/death-heim-r8-r10-natural.rec",
+          "sha256": "3fba9582f2ff0401c85414510bcf8e555e3c3273df69a6948a42d877dd7a184a"
+        },
+        "settings": null
+      },
+      "performance": {
+        "durations_seconds": [
+          1.775676,
+          1.78345,
+          1.786447,
+          1.781072,
+          1.781541,
+          1.791182,
+          1.778374
+        ],
+        "max_seconds": 1.791182,
+        "mean_seconds": 1.782535,
+        "median_absolute_deviation_seconds": 0.003166,
+        "median_emulated_fps": 2245.25,
+        "median_seconds": 1.781541,
+        "min_seconds": 1.775676,
+        "stdev_seconds": 0.005138
+      }
+    },
+    "mode7_worldmap": {
+      "final_artifact_sha256": {
+        "dump_dispatch_log.json": "79aa885d961cfd4f590fd6ae1d9ca89f49efc429a12669f40ddd372a99e81aee",
+        "dump_sram.bin": "480a8375b6255ad681202986640c5b06889458125ec0f82641a0e4fb425c0d45",
+        "dump_state.txt": "f910c6a1e0e2d039d97f9678245e3dd99724241ab68cdaa848d5f9257a28b506",
+        "dump_wram.bin": "fa3294b7dc347653181265fe7fb46ae5826bd945541c5d67bcace07fb63f4bd2"
+      },
+      "input": {
+        "description": "Repeated authentic-width Mode 7 and world-map transitions",
+        "environment": {},
+        "frames": 6000,
+        "replay": {
+          "bytes": 61472,
+          "path": "saves/fillmore-r1-natural.rec",
+          "sha256": "90a16a09d014c1630ddebc6017ae8857072286061ed24094e831f8b10fd4bbb1"
+        },
+        "settings": null
+      },
+      "performance": {
+        "durations_seconds": [
+          1.312819,
+          1.309547,
+          1.317543,
+          1.334762,
+          1.315308,
+          1.314119,
+          1.313079
+        ],
+        "max_seconds": 1.334762,
+        "mean_seconds": 1.31674,
+        "median_absolute_deviation_seconds": 0.0013,
+        "median_emulated_fps": 4565.8,
+        "median_seconds": 1.314119,
+        "min_seconds": 1.309547,
+        "stdev_seconds": 0.008315
+      }
+    },
+    "sim_actions": {
+      "final_artifact_sha256": {
+        "dump_dispatch_log.json": "9302f274bf70e69b211e0beeb5759e59bbaad78c02076c47a5d81c52a5b909c5",
+        "dump_sram.bin": "480a8375b6255ad681202986640c5b06889458125ec0f82641a0e4fb425c0d45",
+        "dump_state.txt": "9b03cf0e63dcd48d3625ebe34c1e0f2937db53fcd62b7ff22131dadc500239cb",
+        "dump_wram.bin": "050ae4e6e0a66424568d398d4ba4513960632bb052f2d0d09e33a0c32077654d"
+      },
+      "input": {
+        "description": "Simulation-mode actions with the replay's pinned settings",
+        "environment": {},
+        "frames": 6000,
+        "replay": {
+          "bytes": 89624,
+          "path": "saves/sim-actions.rec",
+          "sha256": "1e4e4c17af08b356a9d7ff00fea0726c900f51cb0415f43b53e29d636346fa26"
+        },
+        "settings": {
+          "bytes": 922,
+          "path": "tests/fixtures/sim3d/sim-actions-settings.ini",
+          "sha256": "2fff33d56d0d3ca9d9d3be6df6d079ca8b4665b46549111b46a54a769c39da91"
+        }
+      },
+      "performance": {
+        "durations_seconds": [
+          1.418894,
+          1.423502,
+          1.425034,
+          1.425757,
+          1.419983,
+          1.421303,
+          1.422786
+        ],
+        "max_seconds": 1.425757,
+        "mean_seconds": 1.422466,
+        "median_absolute_deviation_seconds": 0.002248,
+        "median_emulated_fps": 4217.08,
+        "median_seconds": 1.422786,
+        "min_seconds": 1.418894,
+        "stdev_seconds": 0.002545
+      }
+    }
+  }
+}
