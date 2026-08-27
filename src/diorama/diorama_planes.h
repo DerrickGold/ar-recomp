@@ -3,7 +3,7 @@
 
 #include <stdbool.h>
 
-#include "runner_next.h"
+#include "snesrecomp/runner.h"
 
 /* Diorama plane indexing for g_diorama_layer_pixels[] and the plane texture
  * array. The engine-source primaries keep their ABI overlay-source index and,

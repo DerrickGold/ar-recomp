@@ -1,6 +1,6 @@
 #ifndef RANDOMIZER_H
 #define RANDOMIZER_H
-#include "types.h"
+#include "snesrecomp/game/types.h"
 
 /* Seeded content randomizer.
  *

@@ -1,11 +1,12 @@
-#include "common_cpu_infra.h"
+#include "snesrecomp/game/generated_support.h"
 #include "actraiser_action_bg.h"
 #include "actraiser_rtl.h"
-#include "cpu_state.h"
+#include "snesrecomp/game/cpu.h"
 #include "hd_replacements.h"
 #include "native_audio_mixer.h"
 #include "native_audio_extension.h"
-#include "runner_next.h"
+#include "music_replacements.h"
+#include "snesrecomp/runner.h"
 #include "sim/sim_world_map_build.h"
 
 static SrResult ActRaiser_QueryCpuState(
@@ -14,7 +15,7 @@ static SrResult ActRaiser_QueryCpuState(
   uint32 execution_pc24 = 0u;
   int execution_count;
   if (!cpu || !out_state) return SR_RESULT_INVALID_ARGUMENT;
-  execution_count = ar_block_history(&execution_pc24, 1);
+  execution_count = sr_block_history(&execution_pc24, 1);
   out_state->frame_counter =
       snes_frame_counter >= 0 ? (uint64_t)snes_frame_counter : 0u;
   out_state->flags =
@@ -43,10 +44,10 @@ static SrResult ActRaiser_QueryExecutionState(
   uint32_t history_start;
   if (user_data != &g_cpu || !out_state) return SR_RESULT_INVALID_ARGUMENT;
 
-  out_state->block_serial = g_ar_blk_idx;
-  if (g_ar_blk_idx > 0u) {
+  out_state->block_serial = g_sr_block_index;
+  if (g_sr_block_index > 0u) {
     out_state->current_block_pc24 =
-        g_ar_blk_ring[(g_ar_blk_idx - 1u) & kRuntimeBlockTraceRingMask] &
+        g_sr_block_ring[(g_sr_block_index - 1u) & kRuntimeBlockTraceRingMask] &
         0x00ffffffu;
     out_state->flags |= SR_EXECUTION_CURRENT_BLOCK_VALID;
   }
@@ -67,25 +68,26 @@ static SrResult ActRaiser_QueryExecutionState(
     out_state->stack[frame].host_return_valid = g_cpu_entry_hrv[frame];
   }
 
-  history_count = g_ar_blk_idx < SR_EXECUTION_HISTORY_CAPACITY
-      ? g_ar_blk_idx : SR_EXECUTION_HISTORY_CAPACITY;
-  history_start = g_ar_blk_idx - history_count;
+  history_count = g_sr_block_index < SR_EXECUTION_HISTORY_CAPACITY
+      ? g_sr_block_index : SR_EXECUTION_HISTORY_CAPACITY;
+  history_start = g_sr_block_index - history_count;
   out_state->history_count = history_count;
   for (frame = 0u; frame < history_count; ++frame) {
     const uint32_t slot =
         (history_start + frame) & kRuntimeBlockTraceRingMask;
     SrExecutionBlock *block = &out_state->history[frame];
-    block->pc24 = g_ar_blk_ring[slot] & 0x00ffffffu;
+    block->pc24 = g_sr_block_ring[slot] & 0x00ffffffu;
     block->cpu_flags =
-        ((g_ar_blk_aux[slot] >> 16) & 1u ? SR_CPU_STATE_M_FLAG : 0u) |
-        ((g_ar_blk_aux[slot] >> 17) & 1u ? SR_CPU_STATE_X_FLAG : 0u);
-    block->register_x = (uint16_t)g_ar_blk_aux[slot];
-    block->stack_pointer = g_ar_blk_s[slot];
+        ((g_sr_block_aux[slot] >> 16) & 1u ? SR_CPU_STATE_M_FLAG : 0u) |
+        ((g_sr_block_aux[slot] >> 17) & 1u ? SR_CPU_STATE_X_FLAG : 0u);
+    block->register_x = (uint16_t)g_sr_block_aux[slot];
+    block->stack_pointer = g_sr_block_stack[slot];
   }
   return SR_RESULT_OK;
 }
 
 static void ActRaiser_RunnerChanged(SrRunnerHandle *runner) {
+  ActRaiser_BindRunner(runner);
   HdReplacements_BindRunner(runner);
   SimWorldMapBuild_BindRunner(runner);
   ActRaiser_SpcUploadBindRunner(runner);
@@ -108,11 +110,12 @@ static const RtlGameLifecycleApi kActRaiserLifecycle = {
 };
 
 static const RtlGameExecutionApi kActRaiserExecution = {
-  .struct_size = RTL_GAME_EXECUTION_API_V1_SIZE,
+  .struct_size = RTL_GAME_EXECUTION_API_V2_SIZE,
   .run_frame = &RunOneFrameOfGame,
   .draw_ppu_frame = &ActRaiserDrawPpuFrame,
   .read_rdnmi = &ActRaiser_ReadRdnmi,
   .recover_dispatch_miss = &ActRaiser_RecoverDispatchMiss,
+  .ppu_display_control_write = &ActRaiser_OnInidispWrite,
 };
 
 static const RtlGameStateProviderApi kActRaiserStateProviders = {
@@ -124,10 +127,11 @@ static const RtlGameStateProviderApi kActRaiserStateProviders = {
 };
 
 static const RtlGameAudioApi kActRaiserAudio = {
-  .struct_size = RTL_GAME_AUDIO_API_V1_SIZE,
+  .struct_size = RTL_GAME_AUDIO_API_V2_SIZE,
   .capabilities = RTL_GAME_AUDIO_CAP_SPC_UPLOAD |
                   RTL_GAME_AUDIO_CAP_VOICE_ROUTING |
-                  RTL_GAME_AUDIO_CAP_EXTENSION,
+                  RTL_GAME_AUDIO_CAP_EXTENSION |
+                  RTL_GAME_AUDIO_CAP_PRESENTATION,
   .spc_upload_source = &ActRaiser_SpcUploadSource,
   .spc_upload_customize = &ActRaiser_SpcUploadCustomize,
   .spc_upload_commit = &ActRaiser_SpcUploadCommit,
@@ -140,11 +144,15 @@ static const RtlGameAudioApi kActRaiserAudio = {
       &NativeAudioExtension_AdjustSpcOpcodeCycles,
   .extension_save = &NativeAudioExtension_SaveState,
   .extension_upload = &NativeAudioExtension_OnSpcUpload,
+  .apu_port_pace = &ActRaiser_OnApuPortPace,
+  .apu_port_write = &MusicReplacements_OnApuPortWrite,
+  .spc_upload_completed = &MusicReplacements_OnSpcUpload,
+  .mix_output = &MusicReplacements_MixOutput,
 };
 
 const RtlGameModule kActRaiserGameModule = {
   .abi_version = RTL_GAME_MODULE_ABI_VERSION,
-  .struct_size = RTL_GAME_MODULE_V1_SIZE,
+  .struct_size = RTL_GAME_MODULE_V2_SIZE,
   .capabilities = RTL_GAME_MODULE_CAP_IDENTITY |
                   RTL_GAME_MODULE_CAP_LIFECYCLE |
                   RTL_GAME_MODULE_CAP_EXECUTION |

@@ -4,7 +4,7 @@
 #include <stdlib.h>
 
 #include "music_replacements.h"
-#include "runner_next.h"
+#include "snesrecomp/runner.h"
 #include "settings.h"
 
 enum {

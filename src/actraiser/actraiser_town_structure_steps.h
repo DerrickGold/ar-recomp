@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#include "cpu_state.h"
+#include "snesrecomp/game/cpu.h"
 
 typedef enum ActRaiserTownStructureStepProgramFamily {
   kActRaiserTownStructureStepProgramFamily_Construction = 0,

@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "runner_next_internal.h"
+#include "runner_internal.h"
 #include "snes/ppu.h"
 
 uint8 g_ram[0x20000];
@@ -163,8 +163,8 @@ const SnesRunnerApi *sr_runner_get_api(uint32_t version) {
   return version == SR_RUNNER_ABI_VERSION ? &s_api : NULL;
 }
 
-SrRunnerHandle *sr_runner_handle(Snes *snes) {
-  return (SrRunnerHandle *)(void *)snes;
+SrRunnerHandle *RtlGameRunner(void) {
+  return (SrRunnerHandle *)(void *)g_snes;
 }
 
 #define CHECK(expr) do { \

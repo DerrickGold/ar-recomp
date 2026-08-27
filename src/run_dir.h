@@ -13,15 +13,15 @@
  * for the launcher/production or quick throwaway runs). */
 
 /* Create the run dir, tee the console, export AR_RUN_DIR, default
- * AR_TRACE_WATCH on, write run_info.txt, update the runs/latest symlink.
+ * SNESRECOMP_TRACE_WATCH_FILE on, write run_info.txt, update the runs/latest symlink.
  * Call once, first thing in main() — before anything prints. */
 void RunDirInit(int argc, char **argv);
 
-/* Rebase bare-filename output env vars (AR_TRACE_WATCH / AR_TRACE /
+/* Rebase bare-filename output env vars (SNESRECOMP_TRACE_WATCH_FILE / SNESRECOMP_TRACE_FILE /
  * AR_INPUT_RECORD / AR_DRIFT_LOG / AR_MX_OUT / AR_WRAM_TRACE / AR_SIM3D_TRACE /
  * AR_SIM3D_D1_TRACE) into the run
  * dir — call once right after ParseConfigFile so ini-provided values (e.g.
- * `AR_TRACE_WATCH = anom` in dev-config.ini) are covered too. Values
+ * `SNESRECOMP_TRACE_WATCH_FILE = anom` in dev-config.ini) are covered too. Values
  * containing '/' are left alone. */
 void RunDirRebaseEnvOutputs(void);
 

@@ -11,8 +11,9 @@ import (
 
 // Manifest describes the game-specific half of a hermetic (CMake-free) build:
 // everything the engine cannot know about a particular game project. The
-// runner's own source list stays in its runner.cmake, which the engine module
-// owns and parses directly (see RunnerSources).
+// runner is supplied by a target-specific archive in distributions. Its source
+// list stays in runner.cmake for checkout builds, which the engine module owns
+// and parses directly through LoadRunnerManifest.
 //
 // File format (snesbuild.ini at the project root): `key = value` lines with
 // optional [section] headers and # comments. The list-valued keys (source,
@@ -86,24 +87,42 @@ func LoadManifest(path string) (Manifest, error) {
 	return manifest, nil
 }
 
-// RunnerSources parses runner.cmake for the engine's shared source
-// and include lists so the hermetic build and the CMake build cannot drift.
+// RunnerManifest is the runner-owned half of a hermetic build. Public include
+// roots are available to the game; private roots are used only while compiling
+// runner translation units.
+type RunnerManifest struct {
+	Sources         []string
+	PublicIncludes  []string
+	PrivateIncludes []string
+}
+
+// LoadRunnerManifest parses runner.cmake for the engine's shared source and
+// classified include lists so the hermetic build and CMake build cannot drift.
 // Only the unconditional first set(...) block of each variable is read; the
 // block may live directly in runner.cmake or in a single-line, runner-root-
 // relative include owned by that manifest. The SNESRECOMP_ENABLE_TRACE-
 // conditional append is a developer-only source that hermetic release builds
 // never compile.
-func RunnerSources(runtimeDir string) (sources, includeDirs []string, err error) {
+func LoadRunnerManifest(runtimeDir string) (RunnerManifest, error) {
 	path := filepath.Join(runtimeDir, "runner.cmake")
-	sources, err = runnerSetEntries(path, "SNESRECOMP_RUNNER_SOURCES", runtimeDir)
+	sources, err := runnerSetEntries(path, "SNESRECOMP_RUNNER_SOURCES", runtimeDir)
 	if err != nil {
-		return nil, nil, err
+		return RunnerManifest{}, err
 	}
-	includeDirs, err = runnerSetEntries(path, "SNESRECOMP_RUNNER_INCLUDE_DIRS", runtimeDir)
+	publicIncludes, err := runnerSetEntries(
+		path, "SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS", runtimeDir)
 	if err != nil {
-		return nil, nil, err
+		return RunnerManifest{}, fmt.Errorf("runner public includes: %w", err)
 	}
-	return sources, includeDirs, nil
+	privateIncludes, err := runnerSetEntries(
+		path, "SNESRECOMP_RUNNER_PRIVATE_INCLUDE_DIRS", runtimeDir)
+	if err != nil {
+		return RunnerManifest{}, fmt.Errorf("runner private includes: %w", err)
+	}
+	return RunnerManifest{
+		Sources: sources, PublicIncludes: publicIncludes,
+		PrivateIncludes: privateIncludes,
+	}, nil
 }
 
 // ManifestDriftWarnings cross-checks the manifest's game source list against

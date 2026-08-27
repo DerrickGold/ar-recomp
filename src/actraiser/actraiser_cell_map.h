@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "cpu_state.h"
+#include "snesrecomp/game/cpu.h"
 
 typedef enum ActRaiserTownStructureMarkShape {
   kActRaiserTownStructureMarkShape_Cell = 0,

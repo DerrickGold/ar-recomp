@@ -5,7 +5,7 @@
 
 #include "actraiser/actraiser_cpu_hle_internal.h"
 #include "actraiser_game.h"
-#include "cpu_state.h"
+#include "snesrecomp/game/cpu.h"
 
 /* Shared 65816 primitives for the action-room command HLEs. Keeping these
  * exact bus operations in one place prevents the loader, graphics, and video

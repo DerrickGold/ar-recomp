@@ -18,9 +18,10 @@ import (
 	"github.com/DerrickGold/snesrecomp-go/internal/fsutil"
 )
 
-// HermeticOptions drives the CMake-free build path: every translation unit is
-// compiled with the pinned Zig toolchain and linked into the game executable
-// directly, so end users need neither CMake nor a system compiler. See
+// HermeticOptions drives the CMake-free build path. A distribution links its
+// target-matched vended runtime archive; a source checkout builds that archive
+// first as a fallback. The pinned Zig toolchain then compiles and links the
+// game. End users need neither CMake nor a system compiler. See
 // docs/PROJECT_INTEGRATION.md for the snesbuild.ini contract.
 type HermeticOptions struct {
 	Paths
@@ -71,8 +72,9 @@ func CrossSDL3Dir(buildDir, target string) string {
 	return filepath.Join(buildDir, "hermetic", target, "sdl3")
 }
 
-// HermeticBuild compiles the full project (runtime + game + generated
-// sources) with `zig cc` and links the executable. Returns the binary path.
+// HermeticBuild selects or produces a standalone runtime archive, then compiles
+// the game and generated sources with `zig cc` and links them against it.
+// Returns the binary path.
 //
 // Incrementality is deliberately simple and safe: an object is reused only if
 // it is newer than its source, newer than every header in every include
@@ -117,11 +119,17 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	}
 
 	runnerDirectory := RunnerDirectory(paths.ToolchainDir)
-	runnerSources, runnerIncludes, err := RunnerSources(runnerDirectory)
+	runner, err := selectRuntimeInputs(runnerDirectory, options.Target)
 	if err != nil {
 		return "", err
 	}
-	fmt.Fprintf(options.Stdout, "hermetic: runner %s\n", RunnerName)
+	if runner.Archive != "" {
+		fmt.Fprintf(options.Stdout, "hermetic: runner %s (vended archive %s)\n",
+			RunnerName, runner.Archive)
+	} else {
+		fmt.Fprintf(options.Stdout, "hermetic: runner %s (source fallback)\n",
+			RunnerName)
+	}
 	generated, err := filepath.Glob(filepath.Join(paths.GeneratedDir, "*.c"))
 	if err != nil {
 		return "", err
@@ -132,18 +140,20 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	sort.Strings(generated)
 
 	var sources []string
-	sources = append(sources, runnerSources...)
+	sources = append(sources, runner.SourceManifest.Sources...)
+	runnerSourceCount := len(sources)
 	for _, source := range manifest.Sources {
 		sources = append(sources, resolveUnder(paths.Root, source))
 	}
 	sources = append(sources, generated...)
 	for _, source := range sources {
 		if _, statErr := os.Stat(source); statErr != nil {
-			return "", fmt.Errorf("missing source %s (listed in %s or runner.cmake)", source, manifestPath)
+			return "", fmt.Errorf("missing source %s (listed in %s or the runner source manifest)",
+				source, manifestPath)
 		}
 	}
 
-	includeDirs := append([]string(nil), runnerIncludes...)
+	includeDirs := append([]string(nil), runner.PublicIncludes...)
 	for _, include := range manifest.Includes {
 		includeDirs = append(includeDirs, resolveUnder(paths.Root, include))
 	}
@@ -186,6 +196,11 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	for _, include := range includeDirs {
 		compileArgs = append(compileArgs, "-I"+include)
 	}
+	var runnerCompileArgs []string
+	if runnerSourceCount > 0 {
+		runnerCompileArgs = runtimeCompileArgs(runnerDirectory, options.ZigPath,
+			options.Target, options.Optimize, true, runner.SourceManifest)
+	}
 
 	// Each target gets its own output tree. Sharing one would be worse than
 	// slow: the flags hash below would invalidate everything on every switch,
@@ -198,25 +213,57 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 		return "", err
 	}
 
-	// Invalidate every object when the flag set (or compiler) changes.
-	flagsDigest := sha256.Sum256([]byte(options.ZigPath + "\x00" + strings.Join(compileArgs, "\x00")))
-	flagsHash := hex.EncodeToString(flagsDigest[:])
-	flagsPath := filepath.Join(outputDir, "flags.sha256")
-	previousFlags, _ := os.ReadFile(flagsPath)
-	flagsChanged := strings.TrimSpace(string(previousFlags)) != flagsHash
+	// Runtime-private include roots and flags invalidate only runtime objects.
+	// The game side has its own cache key and never receives private includes.
+	gameFlagsDigest := sha256.Sum256([]byte(options.ZigPath + "\x00" +
+		strings.Join(compileArgs, "\x00")))
+	gameFlagsHash := hex.EncodeToString(gameFlagsDigest[:])
+	gameFlagsPath := filepath.Join(outputDir, "game-flags.sha256")
+	runnerFlagsPath := filepath.Join(outputDir, "runner-flags.sha256")
+	previousGameFlags, _ := os.ReadFile(gameFlagsPath)
+	gameFlagsChanged := strings.TrimSpace(string(previousGameFlags)) != gameFlagsHash
+	runnerFlagsHash := ""
+	runnerFlagsChanged := false
+	if runnerSourceCount > 0 {
+		runnerFlagsDigest := sha256.Sum256([]byte(options.ZigPath + "\x00" +
+			strings.Join(runnerCompileArgs, "\x00")))
+		runnerFlagsHash = hex.EncodeToString(runnerFlagsDigest[:])
+		previousRunnerFlags, _ := os.ReadFile(runnerFlagsPath)
+		runnerFlagsChanged = strings.TrimSpace(string(previousRunnerFlags)) != runnerFlagsHash
+	}
 
-	newestHeader := newestHeaderTime(includeDirs, paths.BuildDir)
+	newestGameHeader := newestHeaderTime(includeDirs, paths.BuildDir)
+	newestRunnerHeader := time.Time{}
+	if runnerSourceCount > 0 {
+		runnerHeaderDirs := append([]string(nil), runner.SourceManifest.PublicIncludes...)
+		runnerHeaderDirs = append(runnerHeaderDirs,
+			runner.SourceManifest.PrivateIncludes...)
+		newestRunnerHeader = newestHeaderTime(runnerHeaderDirs, paths.BuildDir)
+	}
 
-	type job struct{ source, object string }
+	type job struct {
+		source, object string
+		runner         bool
+	}
 	var jobs []job
 	cached := 0
-	for _, source := range sources {
+	for sourceIndex, source := range sources {
 		object := filepath.Join(objectDir, objectName(paths.Root, source))
+		isRunner := sourceIndex < runnerSourceCount
+		flagsChanged := gameFlagsChanged
+		newestHeader := newestGameHeader
+		if isRunner {
+			flagsChanged = runnerFlagsChanged
+			newestHeader = newestRunnerHeader
+		}
 		if !flagsChanged && objectFresh(source, object, newestHeader) {
 			cached++
 			continue
 		}
-		jobs = append(jobs, job{source, object})
+		jobs = append(jobs, job{
+			source: source, object: object,
+			runner: isRunner,
+		})
 	}
 	fmt.Fprintf(options.Stdout, "hermetic: %d translation units (%d cached, %d to compile, %d jobs)\n",
 		len(sources), cached, len(jobs), options.Jobs)
@@ -242,7 +289,11 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 			if options.Verbose {
 				fmt.Fprintf(options.Stdout, "  cc %s\n", item.source)
 			}
-			command := exec.Command(options.ZigPath, append(append([]string(nil), compileArgs...), "-c", item.source, "-o", item.object)...)
+			args := compileArgs
+			if item.runner {
+				args = runnerCompileArgs
+			}
+			command := exec.Command(options.ZigPath, append(append([]string(nil), args...), "-c", item.source, "-o", item.object)...)
 			output, err := command.CombinedOutput()
 			if err != nil {
 				failed.Store(true)
@@ -256,10 +307,22 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	if firstError != nil {
 		return "", firstError
 	}
-	if err := os.WriteFile(flagsPath, []byte(flagsHash+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(gameFlagsPath, []byte(gameFlagsHash+"\n"), 0o644); err != nil {
 		return "", err
 	}
-	fmt.Fprintf(options.Stdout, "hermetic: compile done in %.1fs; linking\n", time.Since(started).Seconds())
+	if runnerSourceCount > 0 {
+		if err := os.WriteFile(runnerFlagsPath,
+			[]byte(runnerFlagsHash+"\n"), 0o644); err != nil {
+			return "", err
+		}
+		fmt.Fprintf(options.Stdout,
+			"hermetic: compile done in %.1fs; archiving runner\n",
+			time.Since(started).Seconds())
+	} else {
+		fmt.Fprintf(options.Stdout,
+			"hermetic: compile done in %.1fs; linking vended runner\n",
+			time.Since(started).Seconds())
+	}
 
 	binary := filepath.Join(outputDir, manifest.Name)
 	if targetOS == "windows" {
@@ -269,7 +332,18 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	for _, source := range sources {
 		objects = append(objects, filepath.Join(objectDir, objectName(paths.Root, source)))
 	}
-	archive, cleanupArchive, err := createObjectArchive(options.ZigPath, targetOS, outputDir, objects)
+	runtimeArchive := runner.Archive
+	if runtimeArchive == "" {
+		runtimeArchive = filepath.Join(outputDir, runtimeArchiveName(targetOS))
+		if err := writeObjectArchive(options.ZigPath, targetOS, runtimeArchive,
+			objects[:runnerSourceCount]); err != nil {
+			return "", err
+		}
+		fmt.Fprintf(options.Stdout, "hermetic: built runner archive %s; linking game\n",
+			runtimeArchive)
+	}
+	gameArchive, cleanupArchive, err := createObjectArchive(
+		options.ZigPath, targetOS, outputDir, objects[runnerSourceCount:])
 	if err != nil {
 		return "", err
 	}
@@ -280,7 +354,8 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 		linkArgs = append(linkArgs, "-target", options.Target)
 	}
 	linkArgs = append(linkArgs, "-o", binary)
-	linkArgs = append(linkArgs, forceLoadArchiveArgs(targetOS, archive)...)
+	linkArgs = append(linkArgs, forceLoadArchiveArgs(targetOS, gameArchive)...)
+	linkArgs = append(linkArgs, runtimeArchive)
 	if manifest.UseSDL3 {
 		linkArgs = append(linkArgs, "-L"+options.SDLLibDir, "-lSDL3")
 		// Look for the SDL runtime beside the game binary first so a copied

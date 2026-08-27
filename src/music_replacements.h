@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include "types.h"
+#include "snesrecomp/game/types.h"
 #include "hd_replacements.h" /* shared HdCondition gate grammar */
 
 /* Manifest-driven music replacement ([music:<name>] sections of
@@ -69,9 +69,12 @@ extern int g_music_replacement_count;
  * output if the manifest does not exist. */
 int MusicReplacements_Load(const char *manifest_path);
 
-/* Install the engine trigger/mix hooks (upload observer, APU port observer,
- * music mix). Call once at startup after Load. Safe headless. */
+/* Reset replacement playback state. The game module registers the three
+ * callbacks below with its immutable RtlGameAudioApi table. */
 void MusicReplacements_InstallHooks(void);
+void MusicReplacements_OnSpcUpload(uint32_t source24);
+void MusicReplacements_OnApuPortWrite(uint8_t port, uint8_t value);
+void MusicReplacements_MixOutput(int16_t *stereo_buffer, int frames);
 
 /* Apply the live enhanced-music setting. Disabling immediately stops the OGG
  * stream and unmutes the authentic SPC voices; enabling can adopt the song

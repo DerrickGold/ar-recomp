@@ -1,7 +1,7 @@
 #ifndef ACTRAISER_TOWN_LAIR_BITS_H
 #define ACTRAISER_TOWN_LAIR_BITS_H
 
-#include "cpu_state.h"
+#include "snesrecomp/game/cpu.h"
 
 /* Per-town mask operations. Y selects a six-entry WRAM-pointer table and the
  * low accumulator byte selects a bit within the current town's mask. */

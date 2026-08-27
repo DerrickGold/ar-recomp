@@ -1,7 +1,7 @@
 # Runner concrete-access audit
 
 This audit defines the cutover-critical portion of the runner ABI work.  A
-concrete runtime layout may be used inside `runtime-next`; application code in
+concrete runtime layout may be used inside `runtime`; application code in
 `src/` must depend on the versioned ABI or an explicitly versioned host service
 instead.  Generated CPU state is a separate game/compiler contract and is not
 part of this component-layout fence.
@@ -363,8 +363,8 @@ game-frame timing are runner-owned, and RDNMI pacing receives only
 callback-lifetime flags. The central widescreen policy now uses a bounded
 BEGIN/FINALIZE transaction for horizontal/vertical margins, fill and motion
 masks, row bands, vertical clipping, capture padding, and HUD geometry. The
-remaining exception is capture/composition and developer-diagnostic work in
-the core ActRaiser adapter.
+final capture/composition and developer-diagnostic work in the core ActRaiser
+adapter is now migrated as well; the application allowlist is empty.
 
 ### APU, SPC, and DSP integration
 
@@ -382,3 +382,29 @@ SDK fixtures are useful follow-ups but do not block concrete-layout isolation.
 The current pass includes one optimization effort: dirty ranges or
 scatter/gather descriptors where measurement identifies a real redundant bulk
 copy in a migrated consumer.
+
+## Final ActRaiser migration checkpoint (2026-08-27)
+
+ActRaiser no longer includes the concrete SNES or PPU headers and no application
+source reads or mutates `Snes`/`Ppu` layout. The final adapter paths use:
+
+- coherent PPU frame transactions with borrowed VRAM and writable output
+  surfaces;
+- copied register/frame snapshots and generation-checked VRAM, CGRAM, OAM, and
+  high-OAM borrows for diagnostics and complete-state capture;
+- ownership-checked overlay claims and output bindings for separated-layer
+  composition;
+- bounded OBJ resolve/raster services and an atomic live-capture request for
+  diorama HUD relocation; and
+- a bounded per-frame reset request for transient capture and Mode-7 override
+  state.
+
+The build-time concrete-boundary test now accepts no application exceptions.
+The standalone runtime suite passes 27/27. Four replay workloads retain
+byte-identical final WRAM, SRAM, CPU-state, and dispatch artifacts in both
+portable and native-SIMD builds. Seven alternating adjacent pairs measured a
+1.11% portable suite regression and a 0.64% native-SIMD suite regression; both
+are within the phase gate. The largest individual measurements were +3.05% for
+portable Aitos widescreen and +2.32% for native-SIMD Death Heim widescreen.
+Machine-readable results are
+`benchmarks/runner-abi-final-migration-{portable,native}.json`.

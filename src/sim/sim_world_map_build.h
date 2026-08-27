@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "runner_next.h"
+#include "snesrecomp/runner.h"
 
 /* Bind the opaque runner used only by the opt-in transactional comparison
  * oracle. The production compositor does not query runner state. */

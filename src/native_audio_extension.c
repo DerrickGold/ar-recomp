@@ -4,8 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "common_cpu_infra.h"
-#include "common_rtl.h"
+#include "snesrecomp/game/bootstrap.h"
+#include "snesrecomp/game/runtime.h"
 #include "settings.h"
 
 enum {

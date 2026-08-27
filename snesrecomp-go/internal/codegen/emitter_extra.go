@@ -143,7 +143,7 @@ func emitCall(context *Context, op ir.Call) []string {
 		if op.SourcePC != nil && op.TableBase != nil {
 			bank := byte(*op.SourcePC >> 16)
 			return []string{
-				fmt.Sprintf("  ar_indirect_suppressed_log(cpu, 0x%06xu, 0x%02xu, 0x%04xu, cpu->X);", *op.SourcePC&0xffffff, bank, *op.TableBase),
+				fmt.Sprintf("  sr_indirect_suppressed_log(cpu, 0x%06xu, 0x%02xu, 0x%04xu, cpu->X);", *op.SourcePC&0xffffff, bank, *op.TableBase),
 				fmt.Sprintf("/* Call indirect SUPPRESSED: JSR ($%04X,X) at $%06X — cfg-required-dispatch-or-kill, no indirect_call_table authorisation */", *op.TableBase, *op.SourcePC&0xffffff),
 			}
 		}
@@ -181,7 +181,7 @@ func emitCall(context *Context, op ir.Call) []string {
 	if op.Long {
 		lines = append(lines, "  uint8 _saved_pb = cpu->PB;", fmt.Sprintf("  cpu_trace_pb_change(cpu, 0, _saved_pb, 0x%02x, CPU_TR_JSL);", byte(address>>16)), fmt.Sprintf("  cpu->PB = 0x%02x;", byte(address>>16)))
 	}
-	lines = append(lines, fmt.Sprintf("  ar_call_mx_check(cpu, %d, %d, \"%s\", 0x%06xu);", op.EntryM&1, op.EntryX&1, context.CurrentName, context.CurrentSite&0xffffff), "  RecompReturn _r;", "  switch (((cpu->m_flag & 1) << 1) | (cpu->x_flag & 1)) {")
+	lines = append(lines, fmt.Sprintf("  sr_call_mx_check(cpu, %d, %d, \"%s\", 0x%06xu);", op.EntryM&1, op.EntryX&1, context.CurrentName, context.CurrentSite&0xffffff), "  RecompReturn _r;", "  switch (((cpu->m_flag & 1) << 1) | (cpu->x_flag & 1)) {")
 	lines = append(lines, VariantDispatchCases(context, address, baseName, "    ", "")...)
 	lines = append(lines, "  }")
 	if op.Long {
@@ -252,7 +252,7 @@ func emitReturn(context *Context, op ir.Return) []string {
 		"  if (_hrv && _ret_s == _entry_s) {",
 	)
 	if context.CurrentExitM != nil && context.CurrentExitX != nil {
-		lines = append(lines, fmt.Sprintf("    ar_exit_mx_check(cpu, %d, %d, \"%s\", 0x%06xu);", *context.CurrentExitM&1, *context.CurrentExitX&1, context.CurrentName, source))
+		lines = append(lines, fmt.Sprintf("    sr_exit_mx_check(cpu, %d, %d, \"%s\", 0x%06xu);", *context.CurrentExitM&1, *context.CurrentExitX&1, context.CurrentName, source))
 	}
 	lines = append(lines,
 		fmt.Sprintf("    return RECOMP_RETURN_NORMAL;  /* %s host return */ }", label),
@@ -267,7 +267,7 @@ func emitReturn(context *Context, op ir.Return) []string {
 		"  }",
 		"  cpu_trace_mark_nlr_exit(BD_EXIT_KIND_TRAMPOLINE);",
 		fmt.Sprintf("  uint16 _miss_s = (uint16)(((_ret_s > _entry_s) ? _ret_s : _entry_s) + %du);", frameSize),
-		fmt.Sprintf("  ar_exit_s_check(cpu, _entry_s, _ret_s, \"%s\", 0x%06xu);", context.CurrentName, source),
+		fmt.Sprintf("  sr_exit_s_check(cpu, _entry_s, _ret_s, \"%s\", 0x%06xu);", context.CurrentName, source),
 		"  if (!_hrv) {",
 		fmt.Sprintf("    cpu_tailcall_request(_rpc24, _miss_s, 0x%06xu);", source),
 		fmt.Sprintf("    return RECOMP_RETURN_TAILCALL;  /* %s tail-dispatch (trampolined) */ }", label),

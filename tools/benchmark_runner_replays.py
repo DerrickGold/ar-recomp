@@ -265,7 +265,7 @@ def cmake_identity(binary: Path) -> dict[str, str]:
         "CMAKE_C_COMPILER_VERSION",
         "SNESRECOMP_ENABLE_SIMD",
         "SNESRECOMP_BIT_WORDS",
-        "AR_WATCHDOG",
+        "SNESRECOMP_WATCHDOG",
         "AR_SANITIZE",
     }
     values: dict[str, str] = {}

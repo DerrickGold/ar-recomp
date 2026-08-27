@@ -1,6 +1,6 @@
 #include "native_audio_mixer.h"
 
-#include "runner_next.h"
+#include "snesrecomp/runner.h"
 #include "settings.h"
 
 #include <stdio.h>

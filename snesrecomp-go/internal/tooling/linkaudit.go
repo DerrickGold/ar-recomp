@@ -117,16 +117,20 @@ func RunLinkAudit(options LinkAuditOptions) error {
 		}
 	}
 	for _, directory := range []string{options.SourceDir, options.RuntimeDir} {
-		for _, pattern := range []string{"*.c", "*.h"} {
-			paths, _ := filepath.Glob(filepath.Join(directory, pattern))
-			for _, path := range paths {
-				if err := collectLinkReferences(path, false, referenced); err != nil {
-					return err
-				}
-				if err := collectLinkReferences(path, true, referenced); err != nil {
-					return err
-				}
+		err := filepath.Walk(directory, func(path string, info os.FileInfo, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
 			}
+			if info.IsDir() || (filepath.Ext(path) != ".c" && filepath.Ext(path) != ".h") {
+				return nil
+			}
+			if err := collectLinkReferences(path, false, referenced); err != nil {
+				return err
+			}
+			return collectLinkReferences(path, true, referenced)
+		})
+		if err != nil {
+			return err
 		}
 	}
 	orphans, unreferenced := make(map[string]struct{}), make(map[string]struct{})

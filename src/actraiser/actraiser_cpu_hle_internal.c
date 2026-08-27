@@ -3,7 +3,7 @@
 #include <stdbool.h>
 
 #include "actraiser/actraiser_hle_fatal.h"
-#include "runtime_constants.h"
+#include "snesrecomp/game/runtime_constants.h"
 
 static bool EntryModeMatches(
     const CpuState *cpu, ActRaiserCpuHleEntryMode required_mode) {

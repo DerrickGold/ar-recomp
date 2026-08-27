@@ -379,10 +379,10 @@ func EmitFunction(image rom.Image, bank byte, start uint16, entryM, entryX uint8
 		fmt.Sprintf("  RecompStackPush(\"%s\");", name),
 		fmt.Sprintf("  cpu_dbg_funcname(\"%s\");", name),
 		fmt.Sprintf("  cpu_trace_func_entry(cpu, 0x%06X, \"%s\");", entryPC, name),
-		fmt.Sprintf("  ar_entry_mx_check(cpu, %d, %d, \"%s\", 0x%06X);", entryM&1, entryX&1, name, entryPC),
+		fmt.Sprintf("  sr_entry_mx_check(cpu, %d, %d, \"%s\", 0x%06X);", entryM&1, entryX&1, name, entryPC),
 	)
 	if result.GarbageBRK != nil {
-		source = append(source, fmt.Sprintf("  ar_garbage_variant_trap(cpu, \"%s\", 0x%06X);  /* split-immediate BRK at $%04X */", name, entryPC, *result.GarbageBRK))
+		source = append(source, fmt.Sprintf("  sr_garbage_variant_trap(cpu, \"%s\", 0x%06X);  /* split-immediate BRK at $%04X */", name, entryPC, *result.GarbageBRK))
 	}
 	source = append(source,
 		"  RecompReturn _pending_skip = RECOMP_RETURN_NORMAL;",

@@ -1,4 +1,4 @@
-#include "cpu_state.h"
+#include "snesrecomp/game/cpu.h"
 #include "funcs.h"
 #include "actraiser_game.h"
 

@@ -3,7 +3,7 @@
 
 #include <stdbool.h>
 
-#include "cpu_state.h"
+#include "snesrecomp/game/cpu.h"
 
 /* Conditional whole-body HLE for the action-only command-3 video-profile
  * applicator at $02:B4E8. The predicate is read-only; non-action, unsupported

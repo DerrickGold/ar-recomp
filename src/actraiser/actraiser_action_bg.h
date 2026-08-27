@@ -7,7 +7,7 @@
 
 #include "action/action_bg_plan.h"
 #include "action/action_bg_world.h"
-#include "runner_next.h"
+#include "snesrecomp/runner.h"
 
 struct DioramaRoomOverride;
 struct ActionRoomScene;

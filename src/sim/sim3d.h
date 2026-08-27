@@ -6,10 +6,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "runner_next.h"
+#include "snesrecomp/runner.h"
 #include "sim3d_planes.h"
 #include "sim_render_metadata.h"
-#include "types.h"
+#include "snesrecomp/game/types.h"
 
 typedef struct Sim3DCaptureRequest {
   bool town;

@@ -1,7 +1,7 @@
 #ifndef CONSTANTS_H
 #define CONSTANTS_H
 
-#include "runtime_constants.h"
+#include "snesrecomp/game/runtime_constants.h"
 
 /* Cross-cutting compile-time constants only. This header deliberately owns no
  * functions, types, globals, or subsystem policy, so low-level and pure-math

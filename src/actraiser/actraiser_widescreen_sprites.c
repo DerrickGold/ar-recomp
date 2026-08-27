@@ -18,12 +18,12 @@
  * AR_WS_SIM=0 restores the authentic camera; AR_WS_SIM_SPRITES=0 keeps both
  * sprite/projectile predicates authentic. */
 
-#include "cpu_state.h"
+#include "snesrecomp/game/cpu.h"
 #include "action/action_effect_clock.h"
 #include "action/action_obj_apron.h"
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
-#include "runner_next.h"
+#include "snesrecomp/runner.h"
 #include "settings.h"
 #include "sim/sim_render_metadata.h"
 

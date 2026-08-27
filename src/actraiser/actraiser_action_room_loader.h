@@ -3,7 +3,7 @@
 
 #include <stdbool.h>
 
-#include "cpu_state.h"
+#include "snesrecomp/game/cpu.h"
 
 /* Conditional whole-body HLEs for the action-only command-5 metatile loader
  * at $02:B363 and command-4 map loader at $02:B3EB. Their predicates are

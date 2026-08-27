@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "types.h"
+#include "snesrecomp/game/types.h"
 
 /* The complete town ground, for the parts of it the camera cannot see.
  *

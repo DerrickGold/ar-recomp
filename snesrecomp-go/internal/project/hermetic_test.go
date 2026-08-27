@@ -38,6 +38,19 @@ func TestObjectArchiveFormat(t *testing.T) {
 	}
 }
 
+func TestRuntimeArchiveName(t *testing.T) {
+	for targetOS, want := range map[string]string{
+		"darwin":  "libsnesrecomp_runtime.a",
+		"linux":   "libsnesrecomp_runtime.a",
+		"windows": "snesrecomp_runtime.lib",
+	} {
+		if got := runtimeArchiveName(targetOS); got != want {
+			t.Errorf("runtimeArchiveName(%q) = %q, want %q",
+				targetOS, got, want)
+		}
+	}
+}
+
 func TestForceLoadArchiveArgs(t *testing.T) {
 	archive := filepath.FromSlash("/tmp/build with spaces/objects.a")
 	darwin := forceLoadArchiveArgs("darwin", archive)

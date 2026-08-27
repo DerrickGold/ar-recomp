@@ -13,7 +13,7 @@ Today the project has three layers, and only the middle one is missing:
 
 | Layer | State |
 | --- | --- |
-| **Discover** — find the address | Well tooled. `dis65.py`, `romxref.py`, `find_handler_chain.py`, `resolve_miss.py`, `AR_TRACE`, `AR_MXCHECK`. Not the bottleneck. |
+| **Discover** — find the address | Well tooled. `dis65.py`, `romxref.py`, `find_handler_chain.py`, `resolve_miss.py`, `SNESRECOMP_TRACE_FILE`, `SNESRECOMP_ENTRY_MX_CHECK`. Not the bottleneck. |
 | **Label** — record what it is, once | **Prose only.** 213 rows in `docs/research-symbol-map.md` that no program reads. |
 | **Manipulate** — hook it | Partly built, three incompatible ways (§2). |
 
@@ -72,7 +72,7 @@ them is what makes this kind of effort thrash.
    no relocation — `$00:9DE1` is `$00:9DE1` forever. Addresses stay primary not
    because names drift against a moving target, but because *every piece of
    evidence we own cites the address*: `DEBUG.md`, `bug-ledger.md`, `SEAMS.md`,
-   every `AR_TRACE` log. No rebase step ever needs building.
+   every `SNESRECOMP_TRACE_FILE` log. No rebase step ever needs building.
 
 2. **One name is a *variant set*, not one function.** Every entry is emitted per
    M/X width variant: `Magic_CastGate_M0X0`, `_M0X1`, `_M1X0`, `_M1X1`. A hook
@@ -86,7 +86,7 @@ them is what makes this kind of effort thrash.
 
 4. **Confidence and heat are orthogonal.** `status` (Observed/Mapped/Verified/
    Stable) is hand-authored judgement. `heat` (execution frequency) is derived
-   from `AR_TRACE` and regenerated. Never merge them into one enum.
+   from `SNESRECOMP_TRACE_FILE` and regenerated. Never merge them into one enum.
 
 5. **The DB holds only what a program must read.** Contracts, evidence, and
    reasoning stay in `SEAMS.md` / `rendering-engine.md` / `ram-map.md`. DB rows
@@ -186,7 +186,7 @@ obeyed; a confident wrong name is worse than `bank_00_8465`.
 
 **The payoff is not `src/gen/*.c`.** Nobody reads 102 MB of generated C. The win
 is that `g_last_recomp_func`, `RecompStackPush`, `cpu_trace_func_entry`, and
-every `AR_TRACE` log become legible — which pays back within a day of debugging.
+every `SNESRECOMP_TRACE_FILE` log become legible — which pays back within a day of debugging.
 
 **Risk control.** Bank at a time; regen + visual-regression A/B between each;
 update the 5 handwritten references in the same commit.
@@ -200,7 +200,7 @@ deliberate crash reads in names.
 ### MS3 — Heat: rank by what actually executes
 
 `cpu_trace_func_entry` is already emitted in every generated function, so an
-`AR_TRACE` playthrough yields an execution-frequency ranking over all 1748
+`SNESRECOMP_TRACE_FILE` playthrough yields an execution-frequency ranking over all 1748
 functions for free.
 
 `tools/symbols.py --heat runs/<trace>` writes a **generated, never hand-edited**

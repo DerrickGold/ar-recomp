@@ -9,7 +9,7 @@
 #include <stdlib.h>
 
 #include "actraiser_game.h"
-#include "common_rtl.h"
+#include "snesrecomp/game/runtime.h"
 
 enum {
   kReplayRecordByteCount = 8,

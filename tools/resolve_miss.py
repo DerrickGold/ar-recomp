@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """resolve_miss.py — automated dispatch-miss triage -> cfg patch proposals.
 
-The mechanized DEBUG.md §1 registration decision tree. Feed it AR_TRACE_WATCH
+The mechanized DEBUG.md §1 registration decision tree. Feed it SNESRECOMP_TRACE_WATCH_FILE
 anomaly dumps (saves/anom_*.jsonl) and/or saves/dump_dispatch_log.json; for
 every missed target it runs the full hazard-class analysis and emits either a
 ready-to-paste cfg line with evidence, or a DO-NOT verdict:
@@ -53,7 +53,7 @@ def collect_misses(paths):
                 out[t]['srcs'][e.get('source_pc24', '??????').upper()] += 1
                 out[t]['mx'][((mx >> 1) & 1, mx & 1)] += 1
                 out[t]['n'] += 1
-        else:                             # anom_*.jsonl (AR_TRACE watch dump)
+        else:                             # anom_*.jsonl (SNESRECOMP_TRACE_FILE watch dump)
             for line in open(path):
                 try:
                     e = json.loads(line)

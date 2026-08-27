@@ -10,9 +10,10 @@
 #  * Single platform (-DSNESBUILD_GOOS/-GOARCH, set by the package-* presets):
 #    cross-builds snesbuild, stages that platform's pinned build dependencies
 #    (Zig, and prebuilt SDL3 where an official redistributable exists), and
-#    assembles a STANDALONE bundle with the whole buildable game project so a
-#    user needs only this archive and their own ROM — no repo checkout, no
-#    developer tools. Go cross-compiles every target from any host.
+#    assembles a STANDALONE bundle with the authored game project and a
+#    target-specific prebuilt runner SDK so a user needs only this archive and
+#    their own ROM — no repo checkout or developer tools. Go and Zig
+#    cross-compile every target from any host.
 #
 # Only generic tools, the project's own authored source, and redistributable
 # third-party components ship — never a ROM or generated C. User-provided HD
@@ -122,6 +123,61 @@ add_custom_target(snesbuild_binary ALL
         -o ${_snesbuild} ./cmd/snesbuild
     COMMENT "go build snesbuild for ${SNESBUILD_GOOS}/${SNESBUILD_GOARCH} (${SNESBUILD_VERSION})"
     VERBATIM)
+
+# ── Target-specific runner SDK archive ──────────────────────────────────────
+# The target Zig bundled below cannot necessarily run on the packaging host
+# (for example a Windows release assembled on macOS). Build the archive with a
+# runnable host Zig and an explicit cross target, then ship only that archive
+# and the public headers. The runtime command locates a host Zig or fetches the
+# pinned one into a shared packaging cache; it never relies on the target Zig.
+if(SNESBUILD_GOARCH STREQUAL "amd64")
+    set(_runtime_zig_arch x86_64)
+elseif(SNESBUILD_GOARCH STREQUAL "arm64")
+    set(_runtime_zig_arch aarch64)
+else()
+    message(FATAL_ERROR "No runner archive target for ${SNESBUILD_GOARCH}")
+endif()
+if(SNESBUILD_GOOS STREQUAL "darwin")
+    set(_runtime_zig_os macos)
+elseif(SNESBUILD_GOOS STREQUAL "linux")
+    set(_runtime_zig_os linux-gnu)
+elseif(SNESBUILD_GOOS STREQUAL "windows")
+    set(_runtime_zig_os windows-gnu)
+else()
+    message(FATAL_ERROR "No runner archive target for ${SNESBUILD_GOOS}")
+endif()
+set(_runtime_zig_target "${_runtime_zig_arch}-${_runtime_zig_os}")
+if(SNESBUILD_GOOS STREQUAL "windows")
+    set(_runtime_archive_name snesrecomp_runtime.lib)
+else()
+    set(_runtime_archive_name libsnesrecomp_runtime.a)
+endif()
+set(_runtime_sdk_stage ${CMAKE_BINARY_DIR}/runtime-sdk)
+set(_runtime_archive
+    ${_runtime_sdk_stage}/lib/${_runtime_zig_target}/${_runtime_archive_name})
+file(GLOB_RECURSE _runtime_archive_inputs CONFIGURE_DEPENDS
+    ${SNESBUILD_MODULE_DIR}/runtime/include/*.h
+    ${SNESBUILD_MODULE_DIR}/runtime/src/*.c
+    ${SNESBUILD_MODULE_DIR}/runtime/src/*.h
+    ${SNESBUILD_MODULE_DIR}/cmd/snesbuild/*.go
+    ${SNESBUILD_MODULE_DIR}/internal/project/*.go
+    ${SNESBUILD_MODULE_DIR}/internal/toolchain/*.go)
+list(APPEND _runtime_archive_inputs
+    ${SNESBUILD_MODULE_DIR}/runtime/runner.cmake
+    ${SNESBUILD_MODULE_DIR}/runtime/sources.cmake)
+add_custom_command(
+    OUTPUT ${_runtime_archive}
+    COMMAND ${GO_EXECUTABLE} -C ${SNESBUILD_MODULE_DIR} run ./cmd/snesbuild
+        runtime archive
+        --runtime-dir ${SNESBUILD_MODULE_DIR}/runtime
+        --output ${_runtime_archive}
+        --target ${_runtime_zig_target}
+        --cache-dir ${CMAKE_CURRENT_SOURCE_DIR}/build/host-toolchain
+        --optimize=-O2
+    DEPENDS ${_runtime_archive_inputs}
+    COMMENT "Building runner SDK archive for ${_runtime_zig_target}"
+    VERBATIM)
+add_custom_target(runtime_archive ALL DEPENDS ${_runtime_archive})
 
 # ── Bundled Zig toolchain (pin comes from the Go source of truth) ────────────
 execute_process(
@@ -418,8 +474,23 @@ install(DIRECTORY ${GAME_ROOT}/src/ DESTINATION utils/src
     PATTERN ".DS_Store" EXCLUDE)
 install(DIRECTORY ${GAME_ROOT}/third_party/stb/ DESTINATION utils/third_party/stb
     PATTERN ".DS_Store" EXCLUDE)
-install(DIRECTORY ${SNESBUILD_MODULE_DIR}/runtime-next/ DESTINATION utils/snesrecomp-go/runtime-next
+# Vended runner SDK: generated/game sources compile against public headers and
+# link this target-matched archive. Private headers, implementation sources,
+# tests, examples, and source-build manifests intentionally do not ship.
+install(DIRECTORY ${SNESBUILD_MODULE_DIR}/runtime/include/
+    DESTINATION utils/snesrecomp-go/runtime/include
     PATTERN ".DS_Store" EXCLUDE)
+install(FILES
+    ${SNESBUILD_MODULE_DIR}/runtime/LICENSE
+    ${SNESBUILD_MODULE_DIR}/runtime/PROVENANCE.md
+    DESTINATION utils/snesrecomp-go/runtime)
+install(FILES ${SNESBUILD_MODULE_DIR}/runtime/BINARY_SDK.md
+    DESTINATION utils/snesrecomp-go/runtime RENAME README.md)
+install(DIRECTORY ${SNESBUILD_MODULE_DIR}/runtime/docs/
+    DESTINATION utils/snesrecomp-go/runtime/docs
+    FILES_MATCHING PATTERN "*.md")
+install(FILES ${_runtime_archive}
+    DESTINATION utils/snesrecomp-go/runtime/lib/${_runtime_zig_target})
 
 # game-assets: initially empty HD/music folders. The bundled manual and optional
 # HD title are already embedded in snesbuild; the manual is materialized when the

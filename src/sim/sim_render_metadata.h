@@ -7,8 +7,8 @@
 
 #include "constants.h"
 #include "sim_world_navigation_scene.h"
-#include "runner_next.h"
-#include "types.h"
+#include "snesrecomp/runner.h"
+#include "snesrecomp/game/types.h"
 
 /* Immutable simulation-town render contract. The $01:ADAD/$01:AE6F HLE leaves
  * produce it; presentation receives a value copy through FrameSlot and never

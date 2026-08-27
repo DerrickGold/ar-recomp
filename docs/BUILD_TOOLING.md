@@ -65,7 +65,7 @@ cmake --preset play
 snesbuild build --hermetic
 ```
 
-`runtime-next` contains only the independently authored MIT runner. The
+`runtime` contains only the independently authored MIT runner. The
 historical comparison implementation was retired after parity validation.
 
 Zig 0.16.0 is resolved from `$SNESBUILD_ZIG`, `build/toolchain/`, then `PATH`.
@@ -85,9 +85,10 @@ never depends on `tar` having `.xz` support.
 
 Inputs are split along the same boundary as the redistribution rules:
 
-- `snesrecomp-go/runtime-next/runner.cmake` stays the source of truth for the
-  engine's source list (parsed directly, so the CMake and hermetic builds
-  cannot drift);
+- release bundles provide `snesrecomp-go/runtime/include` plus one archive at
+  `runtime/lib/<zig-target>/`; source checkouts fall back to
+  `runtime/runner.cmake`, which stays the source of truth for the engine source
+  list and cannot drift from CMake;
 - `snesbuild.ini` at the project root declares the game half: target name,
   game sources, includes, defines, and SDL3 usage. `snesbuild doctor`
   cross-checks it against the game target in `CMakeLists.txt` and warns on
@@ -238,7 +239,8 @@ actraiser-recomp-<platform>/
 ├── run-build.command/.bat/.sh   the one thing to run
 └── utils/                  hidden: the whole build (ignore it)
     ├── snesbuild.ini, config.ini
-    ├── recomp/ src/ third_party/stb/ snesrecomp-go/runtime-next/   authored source (no generated C)
+    ├── recomp/ src/ third_party/stb/   authored game source (no generated C)
+    ├── snesrecomp-go/runtime/          public headers + target static library
     ├── game-assets/        manifest template + managed audio/HD assets; manual appears on first launch
     ├── tools/snesbuild     the driver (stripped, git-describe-stamped)
     ├── tools/toolchain/zig-*/   pinned C compiler (Zig 0.16.0)
@@ -271,7 +273,7 @@ On later launches, the GUI independently detects two capabilities:
 - **can launch** — the `run-game` launcher and the game binary are both present in
   the output folder. Nothing about the toolchain matters.
 - **can rebuild** — every non-regenerable input is present: `recomp/`,
-  `snesbuild.ini`, `snesrecomp-go/runtime-next/`, `src/`. Deliberately *not* gated on
+  `snesbuild.ini`, `snesrecomp-go/runtime/`, `src/`. Deliberately *not* gated on
   the Zig toolchain or `src/gen`, which the build fetches and regenerates —
   gating on those would refuse a rebuild that would have succeeded.
 
@@ -313,6 +315,7 @@ SDL, and third-party payloads are exempt from the path scan.
 4. **`--allow-stubs` decision.** The one-click flow currently passes it so
    regen always completes; closing the hard-stub backlog would let the shipped
    flow drop it.
-Only generic tools and runtime sources should be distributed. The ROM,
-generated C, generated manifests, and the resulting ROM-derived game binary
-must continue to be produced locally from the user's legally obtained ROM.
+Only generic tools, authored game inputs, and the binary runner SDK should be
+distributed. Runner implementation sources and private headers are excluded
+from release bundles. The ROM, generated C, generated manifests, and resulting
+ROM-derived game binary continue to be produced locally from the user's ROM.

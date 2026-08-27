@@ -52,7 +52,7 @@ static void tee_console(const char *log_path) {
 }
 
 /* Bare filenames (no '/') for per-run outputs land inside the run dir, so
- * `AR_TRACE=win.jsonl ./build/ActRaiserRecomp ...` doesn't litter the cwd. */
+ * `SNESRECOMP_TRACE_FILE=win.jsonl ./build/ActRaiserRecomp ...` doesn't litter the cwd. */
 static void rebase_bare_env(const char *name) {
   const char *v = getenv(name);
   if (!v || !v[0] || strchr(v, '/')) return;
@@ -82,7 +82,7 @@ static void write_run_info(int argc, char **argv) {
 void RunDirInit(int argc, char **argv) {
   const char *no = getenv("AR_NO_RUN_DIR");
   if (no && no[0] && no[0] != '0') return;   /* legacy saves/ layout; the
-                                              * config file's AR_TRACE_WATCH
+                                              * config file's SNESRECOMP_TRACE_WATCH_FILE
                                               * fallback line applies */
 
   if (mkdir("runs", 0755) != 0 && access("runs", W_OK) != 0) return;
@@ -107,11 +107,11 @@ void RunDirInit(int argc, char **argv) {
   setenv("AR_RUN_DIR", g_run_dir, 1);
 
   /* Default the always-on anomaly capture on. overwrite=0: a real env var
-   * or a config-file AR_TRACE_WATCH line still wins; the bare name is
+   * or a config-file SNESRECOMP_TRACE_WATCH_FILE line still wins; the bare name is
    * rebased into the run dir by RunDirRebaseEnvOutputs() after config
-   * parsing. A deliberate AR_TRACE=<file> windowed capture disables watch
-   * mode in ar_trace.c, so the default is harmless in that case too. */
-  setenv("AR_TRACE_WATCH", "anom", 0);
+   * parsing. A deliberate SNESRECOMP_TRACE_FILE=<file> windowed capture disables watch
+   * mode in sr_trace.c, so the default is harmless in that case too. */
+  setenv("SNESRECOMP_TRACE_WATCH_FILE", "anom", 0);
 
   write_run_info(argc, argv);
 
@@ -129,9 +129,9 @@ void RunDirRebaseEnvOutputs(void) {
    * setenv) get the same treatment as command-line env vars. Bare names
    * land in the run dir — or under saves/ when the run dir is disabled
    * (RunDirPath falls back to "saves"), so a dev-config.ini line like
-   * `AR_TRACE_WATCH = anom` does the right thing in both layouts. */
-  rebase_bare_env("AR_TRACE_WATCH");
-  rebase_bare_env("AR_TRACE");
+   * `SNESRECOMP_TRACE_WATCH_FILE = anom` does the right thing in both layouts. */
+  rebase_bare_env("SNESRECOMP_TRACE_WATCH_FILE");
+  rebase_bare_env("SNESRECOMP_TRACE_FILE");
   rebase_bare_env("AR_INPUT_RECORD");
   rebase_bare_env("AR_DRIFT_LOG");
   rebase_bare_env("AR_MX_OUT");
@@ -197,11 +197,11 @@ void RunDirInit(int argc, char **argv) {
   /* Engine-side writers (fn_census, crash dispatch log) key off this. */
   _putenv_s("AR_RUN_DIR", g_run_dir);
 
-  /* No AR_TRACE_WATCH default here, unlike the POSIX branch. Watch mode needs
+  /* No SNESRECOMP_TRACE_WATCH_FILE default here, unlike the POSIX branch. Watch mode needs
    * a memory-backed FILE* (funopen/fopencookie) that Windows has no spelling
-   * for, so ar_trace.c declines it with a diagnostic — and defaulting it on
+   * for, so sr_trace.c declines it with a diagnostic — and defaulting it on
    * would print that diagnostic to every player's console on every boot.
-   * Setting AR_TRACE_WATCH explicitly still works and still explains itself. */
+   * Setting SNESRECOMP_TRACE_WATCH_FILE explicitly still works and still explains itself. */
 
   write_run_info(argc, argv);
 
@@ -212,8 +212,8 @@ void RunDirInit(int argc, char **argv) {
 }
 
 void RunDirRebaseEnvOutputs(void) {
-  rebase_bare_env("AR_TRACE_WATCH");
-  rebase_bare_env("AR_TRACE");
+  rebase_bare_env("SNESRECOMP_TRACE_WATCH_FILE");
+  rebase_bare_env("SNESRECOMP_TRACE_FILE");
   rebase_bare_env("AR_INPUT_RECORD");
   rebase_bare_env("AR_DRIFT_LOG");
   rebase_bare_env("AR_MX_OUT");

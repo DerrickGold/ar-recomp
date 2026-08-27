@@ -7,10 +7,11 @@
 #include "constants.h"
 #include "host/host_audio.h"
 #include "run_dir.h"
+#include "snesrecomp/game_runtime.h"
+#include "snesrecomp/runner.h"
 
 /* Engine seams. The APU mutex is recursive, so handlers may take it even when
  * the caller already holds it (both of ours are called with it held). */
-extern void (*g_rtl_apu_port_hook)(uint8_t port, uint8_t val);
 extern void (*g_dsp_voice_kon_hook)(int ch, uint8_t srcn, uint16_t decodeOffset,
                                     int volL, int volR, uint16_t pitch);
 extern uint64_t snes_apu_cycle_count(void);
@@ -82,7 +83,9 @@ static struct {
 static unsigned s_orphan_kon[kActRaiserSpcMusicSourceMinimum];
 static unsigned s_orphan_total;
 
-static void (*s_prev_port_hook)(uint8_t port, uint8_t val);
+static const SnesRunnerApi *s_runner_api;
+static SrRunnerHandle *s_runner;
+static uint64_t s_audio_trace_subscription;
 
 static int CensusEnabled(void) {
   if (s_enabled < 0) s_enabled = getenv("AR_SFXCENSUS") ? 1 : 0;
@@ -144,11 +147,7 @@ void SfxCensus_OnRequest(uint8_t id, const char *fn, unsigned game_frame,
 
 /* ---- APU port side ------------------------------------------------------- */
 
-/* Chained: music_replacements.c owns this seam for the port-0 song protocol,
- * so the census must forward rather than displace it. Installed after music,
- * so s_prev_port_hook is music's handler. */
 static void OnApuPortWrite(uint8_t port, uint8_t val) {
-  if (s_prev_port_hook) s_prev_port_hook(port, val);
   if (port != 3 || val == 0) return;
   /* Port 3 carries the high byte of the NMI's packed mailbox store = the BRK
    * sound id. Refresh the correlation deadline from the moment the driver can
@@ -164,6 +163,15 @@ static void OnApuPortWrite(uint8_t port, uint8_t val) {
     s_pending.claimed = 0;
     s_pending.deadline = snes_apu_cycle_count() + SFX_CORRELATE_WINDOW_CYCLES;
   }
+}
+
+static void OnAudioTrace(void *user_data, SrRunnerHandle *runner,
+                         const SrAudioTraceEvent *event) {
+  (void)user_data;
+  if (runner == s_runner && event &&
+      event->struct_size >= SR_AUDIO_TRACE_EVENT_V2_SIZE &&
+      event->type == SR_AUDIO_TRACE_CPU_PORT_WRITE)
+    OnApuPortWrite(event->port, event->value);
 }
 
 /* ---- DSP side ------------------------------------------------------------ */
@@ -220,9 +228,22 @@ static void OnVoiceKeyOn(int ch, uint8_t srcn, uint16_t decodeOffset,
 /* ---- lifecycle ----------------------------------------------------------- */
 
 void SfxCensus_Init(void) {
+  SrAudioTraceSubscription subscription = {
+    .struct_size = SR_AUDIO_TRACE_SUBSCRIPTION_V2_SIZE,
+    .callback = &OnAudioTrace,
+  };
   if (!CensusEnabled()) return;
-  s_prev_port_hook = g_rtl_apu_port_hook;
-  g_rtl_apu_port_hook = OnApuPortWrite;
+  s_runner_api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+  s_runner = RtlGameRunner();
+  if (!s_runner_api || !s_runner ||
+      s_runner_api->subscribe_audio_trace(
+          s_runner, &subscription, &s_audio_trace_subscription) !=
+          SR_RESULT_OK) {
+    s_runner_api = NULL;
+    s_runner = NULL;
+    fprintf(stderr, "[sfx-census] audio observer unavailable\n");
+    return;
+  }
   g_dsp_voice_kon_hook = OnVoiceKeyOn;
   fprintf(stderr, "[sfx-census] enabled — correlating BRK sound requests with "
                   "shared-bank (srcn < %02x) key-ons\n",
@@ -307,6 +328,12 @@ static void WriteReport(FILE *f) {
 
 void SfxCensus_Report(void) {
   if (!CensusEnabled()) return;
+  if (s_runner_api && s_runner && s_audio_trace_subscription)
+    s_runner_api->unsubscribe_audio_trace(
+        s_runner, s_audio_trace_subscription);
+  s_audio_trace_subscription = 0u;
+  s_runner = NULL;
+  s_runner_api = NULL;
   unsigned any = s_orphan_total;
   for (int i = 0; i < kSfxIdCount && !any; i++)
     any = s_sfx[i].requests + s_sfx[i].correlated;

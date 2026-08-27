@@ -9,7 +9,7 @@
 #include <string.h>
 
 #include "actraiser_game.h"
-#include "common_rtl.h"
+#include "snesrecomp/game/runtime.h"
 #include "settings.h"
 
 enum {

@@ -61,7 +61,7 @@ the next opcode:
 risky = rom[o] == 0x20 and rom[o+3] in (0xA9, 0x89, 0x29, 0x09, 0x49, 0xC9, 0x69, 0xE9)
 ```
 
-Before diagnosing flag inference, rule out stack-pointer drift with `AR_STRACE`.
+Before diagnosing flag inference, rule out stack-pointer drift with `SNESRECOMP_STACK_TRACE`.
 A one-byte `S` error can make a later `PLP` look like an M/X leak. This was the
 root cause of the act-to-sim cascade: an unconverted RTS-trick lost one stack
 byte per call. See [bug-ledger §7](docs/bug-ledger.md) and §7.7 below for the
@@ -122,7 +122,7 @@ flat layout.
 
 ### First step: capture a unified trace
 
-Start with `AR_TRACE`, which combines most symptom-specific probes. Record a
+Start with `SNESRECOMP_TRACE_FILE`, which combines most symptom-specific probes. Record a
 deterministic reproduction, locate the host frame, and capture a narrow window:
 
 ```
@@ -132,7 +132,7 @@ AR_HEADLESS=1 AR_INPUT_RECORD=saves/bug.rec ./build/ActRaiserRecomp ar.sfc     #
 AR_HEADLESS=1 AR_INPUT_REPLAY=saves/bug.rec AR_SHOT_EVERY=10 ./build/ActRaiserRecomp ar.sfc
 # 3. capture ALL layers over a tight window around it:
 AR_HEADLESS=1 AR_INPUT_REPLAY=saves/bug.rec \
-  AR_TRACE=/tmp/bug.jsonl AR_TRACE_HF_LO=<hf-2> AR_TRACE_HF_HI=<hf> ./build/ActRaiserRecomp ar.sfc
+  SNESRECOMP_TRACE_FILE=/tmp/bug.jsonl SNESRECOMP_TRACE_HARDWARE_LOW=<hf-2> SNESRECOMP_TRACE_HARDWARE_HIGH=<hf> ./build/ActRaiserRecomp ar.sfc
 ```
 
 **Then read the trace in this fixed order — it classifies the bug before you touch a flag:**
@@ -201,7 +201,7 @@ declaring it fixed.
 something the trace genuinely doesn't carry: a **single address's history across a whole run**
 (wider than a practical window) → `AR_WATCHOBJ`/`AR_WATCH16`; **opcode-level** correctness →
 `v2regen opcode-diff`; a **real-hardware cross-check** → the oracle (§6); **whole-run leak
-boundary without knowing the window** → `AR_MXHIST=1` (still the right first pass when you can't
+boundary without knowing the window** → `SNESRECOMP_MX_HISTORY=1` (still the right first pass when you can't
 yet name the host frame). The per-symptom table below is now mostly the *fall-through* detail for
 those cases.
 
@@ -216,20 +216,20 @@ those cases.
 
 | Symptom | First tool(s) | Then |
 |---|---|---|
-| **Hang / freeze / watchdog SIGSEGV** | `saves/dump_state.txt` (auto-written by watchdog: call stack + **block-history ring** with PC/m/X) | `AR_MXHIST=1` to check for a misdecode leak; trace the looping block |
-| **Garbage / character disappears / stuck-but-animating / hard crash on an object** | On exit/Shift+F9 inspect `dump_dispatch_log.json` for non-benign `found:0` first (the ring is complete even when default stderr is silent); then `AR_MXHIST=1` if a misdecode/leak remains possible | feed live missing roots to `find_handler_chain.py` (§5); if the ring did not cover the onset, use `AR_DISPMISSALL=1 \| grep -v 'from 00896f'` or take an **F2 full-snapshot** (§9) and scan ≥64 object slots for an active `$12` with no converted `bank_00_*` fn |
+| **Hang / freeze / watchdog SIGSEGV** | `saves/dump_state.txt` (auto-written by watchdog: call stack + **block-history ring** with PC/m/X) | `SNESRECOMP_MX_HISTORY=1` to check for a misdecode leak; trace the looping block |
+| **Garbage / character disappears / stuck-but-animating / hard crash on an object** | On exit/Shift+F9 inspect `dump_dispatch_log.json` for non-benign `found:0` first (the ring is complete even when default stderr is silent); then `SNESRECOMP_MX_HISTORY=1` if a misdecode/leak remains possible | feed live missing roots to `find_handler_chain.py` (§5); if the ring did not cover the onset, use `AR_DISPMISSALL=1 \| grep -v 'from 00896f'` or take an **F2 full-snapshot** (§9) and scan ≥64 object slots for an active `$12` with no converted `bank_00_*` fn |
 | **"Who corrupted this byte/value?"** | `AR_WATCHOBJ=<hexaddr>` (writes to an object slot) or `AR_WATCH16=<hexval>` (a specific 16-bit write) — both log the **writing function + stack + frame** | — |
 | **Missing object / event / spawn (logic)** | First check it's not an **unconverted spawn-data handler** (§11): F2 snapshot → object-table scan (**scan ≥64 slots, not 24**) for an active slot with an un-converted `$12`. Else differential oracle: `diff_seq.py` + oracle-only analysis (**must load SRAM** — see §6) | trace the spawn trigger / gate condition |
 | **Silent soft-lock: a sequence/cutscene finishes, then NOTHING — no logs, no anomaly, game alive** (§7.20 Death Heim) | `tools/find_yield_helpers.py` (§5) — an unregistered yield continuation misses dispatch EVERY frame *invisibly* (stderr tripwire gates `S>=$0200`; loop runs at S≈$01F5; graceful fallback skips forever) | If census clean: `AR_WRAM_TRACE=wram.jsonl` + decode the object table (80 slots, `$06A0` stride `$40`) — find the slot whose `$12` stops changing / whose `$24` wait expires with no effects; who wrote its `$12/$1E/$3E` names the (new) helper |
 | **Rendering wrong (no text, no HBlank, missing BG, black screen)** | `AR_PPULOG=1` (bgmode, brightness, forced-blank, layer enables, HDMAEN) + **oracle screenshots** (`AR_SHOT_AT_GF` vs `SNESREF_SHOT_AT_GF`) | audit the PPU/DMA runtime (`ActRaiserDrawPpuFrame`); WRAM oracle is **blind** to VRAM |
 | **Missing/extra sound or music** | check **BRK/COP syscall hooks** (§7) — `$035B`=SFX (BRK), `$035A`=music/event (COP). `AR_COPLOG=1` now includes the exact current block PC and marks a suppressed dialogue glyph blip; the known glyph site is `$01:902D` (`COP #$07`) | `AR_COPLOG=1`; `AR_WATCH16` on the request port |
 | **Game runs at exactly 1/2 or 1/3 speed in ONE mode/screen (smooth elsewhere, audio fine)** | This is usually the **pacing/yield-multiplication class**, not host performance. Confirm + count in one shot: quit (or Shift+F9) **while the mode is slow**, then in the dump's block ring **count `02ABF0` (NMI-handler) entries per game-loop iteration** — each entry = one host-frame yield; N entries per iteration = 1/N speed, and the ring block *preceding* each entry names the yield site. Cross-check with any per-frame `[wobj]`/`[frame]` log: updates at delta=N host frames. Known causes so far: a non-HLE'd `$4210` wait yielding per read (§7 the `$9284` fix), and spin-detector false pairing on a twice-per-frame ack helper (§7.12 `$93CB`) | `AR_PERF=1` separates the two classes numerically (fps<60 = host-bound; fps=60 + crawling = pacing). Its `run-ms` covers game execution; `[draw-perf]` covers `RtlDrawPpuFrame`, including host widescreen refresh. A low `run-ms` therefore does not by itself rule out draw-side load. `env AR_FRAMELOG=1 AR_VBLOG=1` names every yield's callsite/block live. NOTE: static `$4210` scans must include the long form `AF 10 42 00`, not just `AD 10 42` |
-| **Suspect a single opcode is wrong** | `go -C snesrecomp-go run ./cmd/v2regen opcode-diff --cache-dir ../tools/oracle/harte_cache --runtime-dir runtime-next/src` (Tom Harte differential, §5) | — |
+| **Suspect a single opcode is wrong** | `go -C snesrecomp-go run ./cmd/v2regen opcode-diff --cache-dir ../tools/oracle/harte_cache --runtime-dir runtime/src` (Tom Harte differential, §5) | — |
 | **Per-frame game-state progression** | `AR_FRAMELOG=1` (callsite, work delta, mode `$18/$19`, timer, HP) | `AR_OBJLOG=1` for the object table |
-| **Is the CPU layer even the problem?** | `AR_MXCHECK=1` — if it stays silent through the repro, the m/x layer is clean → look at the **runtime/PPU layer** | — |
+| **Is the CPU layer even the problem?** | `SNESRECOMP_ENTRY_MX_CHECK=1` — if it stays silent through the repro, the m/x layer is clean → look at the **runtime/PPU layer** | — |
 | **Crash on a mode/level TRANSITION; SNES stack corrupted (`S` walks to `$FFxx`/`$42xx`/I-O); `ppu_write`/`ppu_read` abort** | Check stderr for **`[dispatch-miss]`** (default-on tripwire) — it names the unresolved RTS-trick/computed target. Then `AR_SCHECK=1` (S-drift + impending-underflow path) | confirm with `AR_RTSLOG=0x<rts_pc>`; register the popped target as a cfg `func` (see §7.7) |
-| **A feature/menu/effect just silently never happens — no crash, no garbage, nothing runs** | This is NOT the misdecode class (that produces garbage, not clean silence). Search the generated output for silent-drop markers: `rg -n -e 'Call indirect SUPPRESSED' -e 'Call: target unknown' -e 'not a valid LoROM code address' src/gen`. If none name the suspect bank/address range, it is probably a genuine logic/state bug (for example, a gate reading the wrong value) — see the DP-scratch-reuse gotcha above before assuming a memory address means what you think | `AR_INDIRLOG=1` if a suppressed `JSR (abs,X)` site is in range; otherwise trace the gate condition directly (a targeted branch probe — the 4-PC "which branch fired" pattern, bug-ledger "Methodology learnings") |
-| **Wrong dispatch-case routing suspected (a runtime `(m,x)` switch calls a variant that doesn't match the caller's real width)** | The Go port does not emit the Python tool's historical detailed routing report. Use `AR_MXCHECK`/`AR_CALLMX` to confirm the live mismatch, then inspect the generated `(m,x)` switch and, if the static route is suspect, `findEquivalentVariants` in `snesrecomp-go/internal/emitter/function.go` plus `routeVariant` in `snesrecomp-go/internal/codegen/emitter.go`. `snesbuild regen` logs how many equivalences each fixpoint pass learned | If no survivor is provably equivalent, investigate the caller-side width leak or pin the intended width with cfg `entry_mx:`; do not infer safety from variant distance |
+| **A feature/menu/effect just silently never happens — no crash, no garbage, nothing runs** | This is NOT the misdecode class (that produces garbage, not clean silence). Search the generated output for silent-drop markers: `rg -n -e 'Call indirect SUPPRESSED' -e 'Call: target unknown' -e 'not a valid LoROM code address' src/gen`. If none name the suspect bank/address range, it is probably a genuine logic/state bug (for example, a gate reading the wrong value) — see the DP-scratch-reuse gotcha above before assuming a memory address means what you think | `SNESRECOMP_INDIRECT_LOG=1` if a suppressed `JSR (abs,X)` site is in range; otherwise trace the gate condition directly (a targeted branch probe — the 4-PC "which branch fired" pattern, bug-ledger "Methodology learnings") |
+| **Wrong dispatch-case routing suspected (a runtime `(m,x)` switch calls a variant that doesn't match the caller's real width)** | The Go port does not emit the Python tool's historical detailed routing report. Use `SNESRECOMP_ENTRY_MX_CHECK`/`SNESRECOMP_CALL_MX_CHECK` to confirm the live mismatch, then inspect the generated `(m,x)` switch and, if the static route is suspect, `findEquivalentVariants` in `snesrecomp-go/internal/emitter/function.go` plus `routeVariant` in `snesrecomp-go/internal/codegen/emitter.go`. `snesbuild regen` logs how many equivalences each fixpoint pass learned | If no survivor is provably equivalent, investigate the caller-side width leak or pin the intended width with cfg `entry_mx:`; do not infer safety from variant distance |
 
 Two cautions:
 
@@ -244,25 +244,25 @@ Two cautions:
 
 ## 2. The core detection toolkit (permanent, always-available)
 
-Start with `AR_TRACE` or `AR_TRACE_WATCH`. The older flags below remain useful
-for whole-run coverage (`AR_MXHIST`), single-address history (`AR_WATCHOBJ`,
-`AR_WATCH16`), and always-on regression guards (`AR_MXCHECK`, `AR_CALLMX`).
+Start with `SNESRECOMP_TRACE_FILE` or `SNESRECOMP_TRACE_WATCH_FILE`. The older flags below remain useful
+for whole-run coverage (`SNESRECOMP_MX_HISTORY`), single-address history (`AR_WATCHOBJ`,
+`AR_WATCH16`), and always-on regression guards (`SNESRECOMP_ENTRY_MX_CHECK`, `SNESRECOMP_CALL_MX_CHECK`).
 
 Default-on tripwires include `[dispatch-miss]`, `[garbage-variant]`,
 `[dispatch-recursion]`, and `[4210-wedge]`. The trace's `dispmiss` channel is the
 complete dispatch-miss source; stderr reports only the dangerous high-stack
 subset.
 
-### `AR_MXCHECK=1` — entry M/X invariant check *(tier two: permanent regression guard)*
+### `SNESRECOMP_ENTRY_MX_CHECK=1` — entry M/X invariant check *(tier two: permanent regression guard)*
 
 Emitted in every function prologue (`ar_entry_mx_check`; see
 `snesrecomp-go/internal/emitter/function.go`). Logs when a
 function is entered with `(m,x)` ≠ the variant it was compiled for. Catches **direct-call
 variant mismatches** = the emitter's static M/X analysis being wrong.
 *Limit:* can't catch a wrongly-*leaked* runtime flag (dispatch always picks the matching
-variant) — that's what `AR_MXHIST` is for. Leave it as a permanent regression guard.
+variant) — that's what `SNESRECOMP_MX_HISTORY` is for. Leave it as a permanent regression guard.
 
-### `AR_MXHIST=1` — runtime M/X histogram + live misdecode trap  *(tier two — the fallback misdecode finder when you can't window an AR_TRACE)*
+### `SNESRECOMP_MX_HISTORY=1` — runtime M/X histogram + live misdecode trap  *(tier two — the fallback misdecode finder when you can't window an SNESRECOMP_TRACE_FILE)*
 
 Records per-PC `(m,x)` execution counts (`ar_mxhist_record`, `common_cpu_infra.c`). Once a PC is
 established with a dominant `(m,x)` (≥64 hits), the **first** time it runs a different `(m,x)`
@@ -296,7 +296,7 @@ Host-unwinding is **correct for an ordinary mid-caller return**, but it is *also
 **RTS-trick to an intra-function label goes silently wrong** (see §7.7): the unwind resumes the
 wrong PC carrying whatever m/x the trick left set. This tripwire **names the offending computed
 target on the first run** — it is the single signal that would have collapsed the multi-tool
-act→sim hunt into one step (the symptoms — stack underflow, `AR_MXHIST` misdecode, the `BRK`
+act→sim hunt into one step (the symptoms — stack underflow, `SNESRECOMP_MX_HISTORY` misdecode, the `BRK`
 decode — were all downstream of this one miss). By default it flags only the **dangerous subset**:
 a miss while the SNES stack is **relocated out of page 0/1** (`S >= $0200`) — the RTS-trick
 signature — so ordinary mid-caller returns (which unwind here too, but with `S` in page 1) don't
@@ -317,7 +317,7 @@ a variant is **never legitimately reached**, so entering it means **a leaked m/x
 into garbage** — and the trap fires at that *exact entry*, which is **far closer to the misdecode
 root than the eventual downstream crash, and needs no oracle**. Logs the caller + runtime m/x +
 frame, deduped per `(caller, variant)`. `AR_GARBAGE_STACK=1` adds the recomp call stack + block
-ring; `AR_GARBAGE_ABORT=1` stops at the first hit; `AR_NOGARBAGEWARN=1` silences. This is the
+ring; `SNESRECOMP_GARBAGE_ABORT=1` stops at the first hit; `SNESRECOMP_NO_GARBAGE_WARNING=1` silences. This is the
 sharpest tool we have for the m/x-drift class (§0): it turns "somewhere in this cascade m/x leaked"
 into "the leak put us in a garbage variant **here**." (Complement to `[dispatch-miss]`: that catches
 RTS-trick/computed misses; this catches wrong-*variant* dispatches.) *Known limitation:* a real
@@ -333,7 +333,7 @@ ring shows the routine draining the stack. Use for stack-corruption crashes. (Re
 rule 3: high `S` is often a legit relocation — the underflow + `[dispatch-miss]` are the real
 signals.)
 
-### `AR_STACKPROV=1` — stack pusher-provenance  *(tier two — the trace `stack` channel covers windowed pushes; this one maps pusher-PC per byte whole-run)*
+### `SNESRECOMP_STACK_PROVENANCE=1` — stack pusher-provenance  *(tier two — the trace `stack` channel covers windowed pushes; this one maps pusher-PC per byte whole-run)*
 
 In `cpu_write8` (records) + the `[dispatch-miss]` site (reads), `cpu_state.c`. A shadow array
 (`g_stack_pusher[0x10000]`, `common_cpu_infra.c`) stamps, for each bank-0 stack byte, the recomp
@@ -360,17 +360,17 @@ the final result. `AR_RTSLOG=0x039b59` is what proved `$9156`'s RTS-trick dispat
 unregistered `$9B22` and host-unwinds (`final r=0`). Reach for it after `[dispatch-miss]` names a
 suspicious RTS site, to see the whole chain and where it bails.
 
-### `AR_TRAPFN=<substring>` — entry call-stack + block-path dump
+### `SNESRECOMP_TRAP_FUNCTION=<substring>` — entry call-stack + block-path dump
 
 In `ar_entry_mx_check`/`ar_entry_trapfn` (`common_cpu_infra.c`). The first time a function whose
 name contains the substring is entered, dumps the **recomp call stack** + a **40-block pc/m ring**.
-`AR_TRAPFN=bank_03_AC8E_M1X0` named the caller (`bank_03_8053`) and the m-flip path into a garbage
+`SNESRECOMP_TRAP_FUNCTION=bank_03_AC8E_M1X0` named the caller (`bank_03_8053`) and the m-flip path into a garbage
 misdecode variant. Use to find *who* dispatched into a known-bad variant.
 
-### `AR_CALLMX=1` — per-call-site m/x invariant check  *(tier two — folded into the trace `call` channel / `--leaks`; keep on in dev-config as a live tripwire)*
+### `SNESRECOMP_CALL_MX_CHECK=1` — per-call-site m/x invariant check  *(tier two — folded into the trace `call` channel / `--leaks`; keep on in dev-config as a live tripwire)*
 
 Set once at startup from env (`src/main.c`), read by `ar_call_mx_check` (inlined in every emitted
-JSR/JSL, `cpu_state.h`). Unlike `AR_MXCHECK` (checks a function's *entry*), this fires at every
+JSR/JSL, `cpu_state.h`). Unlike `SNESRECOMP_ENTRY_MX_CHECK` (checks a function's *entry*), this fires at every
 **call site**, comparing the decoder's static assumed `(m,x)` for that JSR/JSL against the runtime
 CPU state right before the call. Prints `[call-mx] <fn> call-site $<pc>: runtime m=.. x=.. but
 decoder assumed m=.. x=.. here -> (m,x) corrupted between fn entry and this call`. Narrows a leak
@@ -380,13 +380,13 @@ call site.
 ### `AR_MXCHECK_BT=<fn-substring>` — real host C call-stack backtrace  *(2026-06-30)*
 
 In `ar_entry_mx_fail` (`common_cpu_infra.c`), fires once (first hit) when a function whose name
-contains the substring fails its entry `AR_MXCHECK` invariant. Captures the actual host
+contains the substring fails its entry `SNESRECOMP_ENTRY_MX_CHECK` invariant. Captures the actual host
 `backtrace()`/`backtrace_symbols_fd()` — the REAL C call stack, not the `g_recomp_stack`-based
 approximation every other diagnostic relies on. Ground truth when a misdecode's caller chain is
 in doubt; this is what finally proved `$01:933C_M1X0 -> $01:B898_M1X1`'s exact caller during the
 2026-06-30/07-01 investigation.
 
-### `AR_INDIRLOG=1` — suppressed `JSR (abs,X)` inspection  *(2026-07-01)*
+### `SNESRECOMP_INDIRECT_LOG=1` — suppressed `JSR (abs,X)` inspection  *(2026-07-01)*
 
 In `ar_indirect_suppressed_log` (`cpu_state.c`), called from every codegen-emitted
 `Call indirect SUPPRESSED` site (an unauthorised `JSR (abs,X)` the decoder severed — see
@@ -399,13 +399,13 @@ runtime-populated table, candidate for `indirect_call_table`/`indirect_dispatch`
 unique sites. Reach for this whenever a generated-source search such as
 `rg -n 'Call indirect SUPPRESSED' src/gen` lists a site you're trying to resolve.
 
-### `AR_TRACE=<file.jsonl>` / `AR_TRACE_WATCH=<prefix>` — unified single-run trace  *(TIER ONE — start here; see §1 THE DEBUG LOOP)*
+### `SNESRECOMP_TRACE_FILE=<file.jsonl>` / `SNESRECOMP_TRACE_WATCH_FILE=<prefix>` — unified single-run trace  *(TIER ONE — start here; see §1 THE DEBUG LOOP)*
 
 The answer to "why did that take a dozen small runs that each missed a layer." ONE windowed run
 emits a correlated JSONL stream across **every** layer, so you never again enable one probe, miss
 the path that mattered, and re-run. Channels:
 - **`call`** — every JSR/JSL site (from `ar_call_mx_check`) with the DECODER-expected m/x vs
-  runtime m/x; `leak:1` when they differ. **This is the misdecode finder** (`AR_CALLMX` folded in):
+  runtime m/x; `leak:1` when they differ. **This is the misdecode finder** (`SNESRECOMP_CALL_MX_CHECK` folded in):
   it catches a self-consistent m-leak that `func` cannot (the lair-seal `$9D4D` case). Walk the
   flagged site back to the previous clean call site to bracket the leaking callee.
 - **`func`** — every function entry with runtime + the DISPATCHED variant's m/x. Note its
@@ -419,7 +419,7 @@ the path that mattered, and re-run. Channels:
 - **`dma`** — channel triggers · **`dispmiss`** — computed-dispatch miss (`[dispatch-miss]` folded
   in — the RTS-trick / unregistered-handler root event) · **`garbage`** — entered a known-misdecode
   variant (`[garbage-variant]` folded in).
-- **`wram`** — WRAM writes (range-gated `AR_TRACE_WLO/WHI`), across **all four** write paths:
+- **`wram`** — WRAM writes (range-gated `SNESRECOMP_TRACE_WRAM_LOW/WHI`), across **all four** write paths:
   `cpu_write8/16`, indirect `STA [dp],Y` (IndirWrite), AND DMA-driven writes — so "who wrote this
   WRAM address" is complete in one run (subsumes `AR_WATCHOBJ`/`AR_WATCH*`/`AR_WRAM_TRACE`).
 - **`stack`** — writes into the stack page (`$0100-$01FF`) = pushes, with value + who (the
@@ -436,17 +436,17 @@ frame), `gf`, `fn`, last block PC, and the **live `mnow`/`xnow`/`S`/`DB`/`PB`** 
 stack drift (`S`), and a wrong data/program bank (`DB`/`PB`) are all visible on every line.
 `trace_slice.py` adds `--wram <lo-hi>` alongside `--vram`.
 - Enable + window (ALWAYS window — a full run is huge):
-  `AR_TRACE=/tmp/t.jsonl AR_TRACE_HF_LO=5089 AR_TRACE_HF_HI=5089` (host frames).
-- **`AR_TRACE_WATCH=<prefix>` — ALWAYS-ON anomaly capture (no window, no replay needed).** For deep
+  `SNESRECOMP_TRACE_FILE=/tmp/t.jsonl SNESRECOMP_TRACE_HARDWARE_LOW=5089 SNESRECOMP_TRACE_HARDWARE_HIGH=5089` (host frames).
+- **`SNESRECOMP_TRACE_WATCH_FILE=<prefix>` — ALWAYS-ON anomaly capture (no window, no replay needed).** For deep
   manual play where a replay is infeasible: keeps a rolling in-memory RING of the last N trace lines
-  and **auto-dumps `<prefix>_hf<frame>_<kind><n>.jsonl`** (the ring + the next `AR_TRACE_POST` lines)
+  and **auto-dumps `<prefix>_hf<frame>_<kind><n>.jsonl`** (the ring + the next `SNESRECOMP_TRACE_POST_LINES` lines)
   the instant an anomaly fires — a **dispatch-miss with S<$0200** (the tripwire-hidden RTS-trick
   class), a **garbage-variant**, or an **m/x leak**; the **watchdog** also flushes the ring on a
   hang. Dedups per anomaly. Lean default channels (func/call/dispmiss/garbage/frame/vmadd/reg);
-  widen with `AR_TRACE_CH`. Knobs: `AR_TRACE_RING` (default 4096), `AR_TRACE_POST` (default 400).
+  widen with `SNESRECOMP_TRACE_CHANNELS`. Knobs: `SNESRECOMP_TRACE_RING_LINES` (default 4096), `SNESRECOMP_TRACE_POST_LINES` (default 400).
   Just play with it on; when something breaks, the window is already on disk → `trace_slice.py
   <dump> --diagnose`.
-- Narrow: `AR_TRACE_CH=func,vram,vmadd` · `AR_TRACE_VLO/VHI` (vram word-addr) · `AR_TRACE_FUNC=<sub>`.
+- Narrow: `SNESRECOMP_TRACE_CHANNELS=func,vram,vmadd` · `SNESRECOMP_TRACE_VRAM_LOW/VHI` (vram word-addr) · `SNESRECOMP_TRACE_FUNCTION=<sub>`.
 - Slice locally with **`tools/trace_slice.py t.jsonl`**: `--summary` (reports m/x LEAKS by site) ·
   `--leaks` (the m-leak boundary — the misdecode finder) · `--misdecodes` · `--vmadd` ·
   `--vram 0000-00ff` (who wrote it) · `--wram <range>` · `--fn 8053` · `--around <seq> --window N`
@@ -461,13 +461,13 @@ stack drift (`S`), and a wrong data/program bank (`DB`/`PB`) are all visible on 
   mismatch; already-registered-with-variant → stale trace or benign post-fix unwind. Plus which
   function(s) contain the target as a local label (names the dispatch web it belongs to). Works
   first-class for pure-miss captures (no leak needed — the case the old diagnose under-served).
-- **The lair-seal in one run:** `AR_TRACE_CH=call,vmadd,vram` then `--leaks` → the leak surfaces at
+- **The lair-seal in one run:** `SNESRECOMP_TRACE_CHANNELS=call,vmadd,vram` then `--leaks` → the leak surfaces at
   `$8053` sites `$80BF/$80C2/$80C5` (m=1, expected m=0); the previous clean call `$80BC` calls
   `$9D4D`. The actual fix is registering its `$03:9D8E` loop continuation; the earlier
   `exit_mx_at 039D4D 0 0` attempt changed decode-time width only and did nothing. See
   [bug ledger §15](docs/bug-ledger.md).
-- Choke points live in `ar_trace.c`/`.h` (build list
-  `snesrecomp-go/runtime-next/runner.cmake`), wired at `ar_entry_mx_check`
+- Choke points live in `runtime_trace.c`/`.h` (build list
+  `snesrecomp-go/runtime/runner.cmake`), wired at `ar_entry_mx_check`
   (`cpu_state.h`, always-on — the `SNESRECOMP_TRACE` cpu_trace hooks are OFF in the fast build),
   ppu `WriteReg`/`$2139`, `WriteVramWord` (`common_rtl.c`), `dma_startDma`.
 - Caveat: the `func` `misdecode` flag only catches **entry-variant** mismatches (runtime m/x ≠ the
@@ -477,7 +477,7 @@ stack drift (`S`), and a wrong data/program bank (`DB`/`PB`) are all visible on 
 
 ### Legacy misdecode/m-leak pipeline *(superseded — kept for context)*
 
-The pre-trace-era loop was: `AR_MXHIST` (locate the leak boundary) → `AR_DISPMISSALL` (name the
+The pre-trace-era loop was: `SNESRECOMP_MX_HISTORY` (locate the leak boundary) → `AR_DISPMISSALL` (name the
 missed handler) → register in cfg → regen. **The modern equivalent is §1 THE DEBUG LOOP**:
 watch-mode dump → `--diagnose` does the locate+name+suggest in one shot, and knows the
 DO-NOT-REGISTER cases these flags never did. Use the old pipeline only when there is no
@@ -507,7 +507,7 @@ capture-able window at all.
 > `[wobj-ind]`/`[watch16-ind]` so you can tell which store form actually hit.
 
 - **`blkpc=` in `[wobj]` (added 2026-07-01)** — `AR_WATCHOBJ`'s log line now also prints the most
-  recently executed block PC (from the same ring buffer `AR_TRAPFN` uses:
+  recently executed block PC (from the same ring buffer `SNESRECOMP_TRAP_FUNCTION` uses:
   `g_ar_blk_ring[(g_ar_blk_idx-1)&1023]`) plus `X=`/`DB=`. Plain `cur=<func>` only names the C
   function; when a function is hundreds of lines with many internal labels/gotos, `blkpc=` tells
   you the *exact instruction* (65816 address) that did the store — the difference between "some
@@ -543,13 +543,13 @@ bug, §10):
    - `watchpoint set expression -- <ptr-expr>` defaults to **8-byte width** (pointer-size) —
      it will fire on writes to *neighboring* bytes/variables sharing that 8-byte-aligned region, not
      just the one you meant. Use `-s <bytes>` (e.g. `-s 2` for a 16-bit DP variable) to narrow it.
-   - `g_ar_blk_ring`/`g_ar_blk_idx` (the same block-history ring `AR_TRAPFN` and the `blkpc=` field
+   - `g_ar_blk_ring`/`g_ar_blk_idx` (the same block-history ring `SNESRECOMP_TRAP_FUNCTION` and the `blkpc=` field
      above use) are real globals — printable directly from lldb
      (`p/x g_ar_blk_ring[(g_ar_blk_idx-1)&1023]`) to see the last N executed 65816 block addresses,
      which is often more precise than a C-level `bt` for pinpointing which internal label of a large
      function actually ran.
 4. `bt` at any stop gives the **real recompiled C call chain** — genuinely independent of
-   `g_recomp_stack`/`AR_CALLMX`/every other stack-bookkeeping-based diagnostic, useful as a
+   `g_recomp_stack`/`SNESRECOMP_CALL_MX_CHECK`/every other stack-bookkeeping-based diagnostic, useful as a
    cross-check if you ever suspect our own instrumentation's bookkeeping (see `mxcheck-bt` memory
    entry for a prior case where this distinction mattered).
 
@@ -1242,7 +1242,7 @@ pipeline; `tools/regen.sh` is now only a compatibility launcher.
   canonical width, (3) the `(1,1)` SNES-reset default, (4) the old distance heuristic as a last
   resort. `snesbuild regen` logs the number of equivalences learned by each fixpoint pass. The Go
   port intentionally has no detailed equivalent of the historical Python routing report, so
-  validate a suspect decision with `AR_CALLMX`/`AR_MXCHECK` and inspect the generated dispatch
+  validate a suspect decision with `SNESRECOMP_CALL_MX_CHECK`/`SNESRECOMP_ENTRY_MX_CHECK` and inspect the generated dispatch
   switch. **Not every wrong-width variant has a provable answer** — if `findEquivalentVariants`
   cannot match a pruned variant's decode to ANY surviving sibling (a genuine divergence, not just
   "never checked"), routing falls back to tiers 2-4 exactly as before. That means the ROM has no
@@ -1409,7 +1409,7 @@ width observation only if the ending prelude shows visible corruption.
 
 ## 8. Build & regen workflow
 
-- **Changed a runner source** (`src/*.c`, `snesrecomp-go/runtime-next/src/*`) → **rebuild only**:
+- **Changed a runner source** (`src/*.c`, `snesrecomp-go/runtime/src/*`) → **rebuild only**:
   `go -C snesrecomp-go run ./cmd/snesbuild build --root .. --build-only --jobs 8`.
 - **Changed the emitter** (`snesrecomp-go/internal/{decoder,lowering,codegen,emitter}/*`) **or a cfg**
   (`recomp/*.cfg`) → **regenerate then rebuild** with `snesbuild all` (while the inherited stub
@@ -1511,7 +1511,7 @@ the pattern.
 
 **From the resolved 2026-07-01 sim-mode arc** (all theories they tested are closed; the probes
 remain inert-unless-set): `AR_SIMTRACE`/`AR_SAVECHECK` (see the legacy inventory below +
-bug-ledger "Methodology learnings"), `AR_INDIRLOG` (general-purpose — worth keeping for any
+bug-ledger "Methodology learnings"), `SNESRECOMP_INDIRECT_LOG` (general-purpose — worth keeping for any
 future suppressed-dispatch site), `AR_ADADTRACE`, `AR_WATCH14`.
 
 ### Case study archive
@@ -1520,7 +1520,7 @@ The full sim-mode bring-up arc narrative (2026-07-01→04) lives in
 [docs/bug-ledger.md](docs/bug-ledger.md)'s appendix.
 
 Current crop (this debugging arc): `AR_B90D_CATCH`, `AR_B127_CATCH`, `AR_896E_CATCH`,
-`AR_8A3C_CATCH`, `AR_8664_CATCH`, `AR_STRACE`, `AR_EVTRACE`. Legacy from prior arcs:
+`AR_8A3C_CATCH`, `AR_8664_CATCH`, `SNESRECOMP_STACK_TRACE`, `AR_EVTRACE`. Legacy from prior arcs:
 `AR_CALLTRACE(_GF)`, `AR_CTACTION`, `AR_FUNCLOG`, `AR_MLOG`, `AR_SPAWNLOG`, `AR_8966X(_GF)`,
 `AR_92CBLOG`, `AR_B127LOG`, `AR_DISP8465`, `AR_TRAP8465`, `AR_1EHIT`, `AR_SIMTRACE` (4-PC
 sim-dispatch branch probe; the reusable "which branch fired" pattern — retarget the PC list in
@@ -1543,11 +1543,11 @@ unconverted-handler crash class + `find_handler_chain.py` derivation recipe are 
 == TIER ONE — the loop (§1): ==
 runs/<ts>/ (NATIVE)         every invocation ringfences console.log + run_info.txt + all dumps
                             (src/run_dir.c); runs/latest symlink; AR_NO_RUN_DIR=1 = legacy layout
-AR_TRACE_WATCH              always-on anomaly capture (defaults into the run dir; dev-config's
+SNESRECOMP_TRACE_WATCH_FILE              always-on anomaly capture (defaults into the run dir; dev-config's
                             saves/anom line = legacy fallback): auto-dumps the lead-up
                             window on hidden dispmiss / garbage-variant / m-x leak / watchdog hang
 trace_slice.py <dump> --diagnose   ranked verdicts + paste-ready cfg lines (needs gen_meta.json)
-AR_TRACE=<f> + HF_LO/HI     targeted windowed capture (beats watch mode when both set)
+SNESRECOMP_TRACE_FILE=<f> + HF_LO/HI     targeted windowed capture (beats watch mode when both set)
 v2regen metadata           static sidecar refresh (auto-run by snesbuild regen)
 AR_PIN=<par8>[,..]          generic PAR-code pinner (codes.txt catalogue -> instant debug cheat / state probe)
 v2regen rts-webs --suggest  shape-classified cfg candidates for uncovered continuation pushes
@@ -1557,31 +1557,31 @@ snesbuild census delta      "NEW uncovered continuations" printed per regen — 
 [4210-wedge]                DEFAULT-ON: vblank spin stuck 4096 reads -> prints which gate refused
 
 == TIER TWO — fallbacks / single-layer flags: ==
-AR_MXHIST=1            misdecode leak boundary, WHOLE-RUN (fallback when you can't window a trace)
+SNESRECOMP_MX_HISTORY=1            misdecode leak boundary, WHOLE-RUN (fallback when you can't window a trace)
 [dispatch-miss]        DEFAULT-ON stderr tripwire — but GATED S>=$0200; the trace dispmiss channel
                        is the ungated truth. AR_DISPWARN=1 adds stack; AR_NODISPWARN=1 silences.
 AR_RTSLOG=0x<pc>       trace an RTS site's dispatch chain (target/m/x/S per hop)   (confirm §7.7)
 AR_SCHECK=1            SNES stack corruption: S-drift + underflow path  (high S is often LEGIT, §GR3)
-AR_STACKPROV=1         bad-RTS: who PUSHED the corrupt return frame (or NEVER-PUSHED = wrong-S, not bad-push)
+SNESRECOMP_STACK_PROVENANCE=1         bad-RTS: who PUSHED the corrupt return frame (or NEVER-PUSHED = wrong-S, not bad-push)
 AR_XFLIP_GF=<gframe>   the block where x flips 0->1 during game-frame N (N from the snes9x m/x oracle)
-AR_XTRACE=1            x-flip ring auto-dumped at the first x=1 garbage variant -> the real fault's x history (no frame guess)
-AR_STRACE=1            per-instruction cpu->S in a PC window (AR_STRACE_LO/HI, def $03B200-$03B260): find the call that returns with S off = the stack leak  (THE tool that root-caused act->sim)
+SNESRECOMP_X_TRACE=1            x-flip ring auto-dumped at the first x=1 garbage variant -> the real fault's x history (no frame guess)
+SNESRECOMP_STACK_TRACE=1            per-instruction cpu->S in a PC window (SNESRECOMP_STACK_TRACE_LOW/HI, def $03B200-$03B260): find the call that returns with S off = the stack leak  (THE tool that root-caused act->sim)
 (diag dump now shows per-block S — watch S drift across a call to spot an unbalanced subroutine)
-AR_CALLMX=1            per-CALL-SITE m/x invariant (narrower than AR_MXCHECK's entry-only check)
-AR_MXCHECK_BT=<fn>     real host backtrace() on the first AR_MXCHECK failure matching <fn> (ground truth, not g_recomp_stack)
-AR_INDIRLOG=1          inspect a suppressed JSR (abs,X): WRAM table / HW-register decode-artifact / ROM table
+SNESRECOMP_CALL_MX_CHECK=1            per-CALL-SITE m/x invariant (narrower than SNESRECOMP_ENTRY_MX_CHECK's entry-only check)
+AR_MXCHECK_BT=<fn>     real host backtrace() on the first SNESRECOMP_ENTRY_MX_CHECK failure matching <fn> (ground truth, not g_recomp_stack)
+SNESRECOMP_INDIRECT_LOG=1          inspect a suppressed JSR (abs,X): WRAM table / HW-register decode-artifact / ROM table
 SNESREF_MX_OUT / AR_MX_OUT + tools/oracle/diff_mx.py  snes9x CPU m/x ground-truth diff (finds the leak FRAME)
-AR_TRAPFN=<fnsubstr>   who entered this (garbage) variant: call stack + 40-block m-path
+SNESRECOMP_TRAP_FUNCTION=<fnsubstr>   who entered this (garbage) variant: call stack + 40-block m-path
 AR_DISPMISSALL=1       unregistered handler (grep -v 00896f)     (then register in cfg + regen)
-AR_MXCHECK=1           emitter m/x analysis wrong on direct calls
+SNESRECOMP_ENTRY_MX_CHECK=1           emitter m/x analysis wrong on direct calls
 AR_OBJSLOTLOG=1        object -> OAM-slot map, one line per emitted action object per frame (ActRaiser_BuildObjectSprites): `obj=$XXXX slot=N screen=(x,y) anim=$BB:AAAA comps=N`. THE tool for "which object owns these OAM slots / what is this sprite on screen" — the OAM alone cannot answer it. Found the magic-swap flourish (obj $10E0, anim $06:A9C1) in one run; its screen= column also gives an object's whole flight path when grepped over frames
 AR_APRONLOG=1          OBJ apron channel per frame: `[apron] gf=N parts=N peak=N overflow=N`. peak/overflow are the SIZING verdict for kActionApronMaxParts (measured peak 16 vs capacity 128 over ~2200 diorama frames). A non-zero overflow means parts were dropped and the apron is incomplete on those frames; the plane dumps will show a truncated sprite in the band. Diorama-only
 AR_WATCHOBJ=<addr>     who writes this object slot (also fires on indirect + DMA writes, tagged [wobj-ind]/[wobj-dma])
 AR_WATCH16=<val>       who writes this 16-bit value (also fires on indirect + DMA writes, tagged [watch16-ind]/[watch16-dma])
-AR_MXCHECK / AR_CALLMX + generated dispatch switch  verify wrong-width routing (§5)
+SNESRECOMP_ENTRY_MX_CHECK / SNESRECOMP_CALL_MX_CHECK + generated dispatch switch  verify wrong-width routing (§5)
 rg silent-drop markers in src/gen  `Call indirect SUPPRESSED` / unknown or invalid call targets (§7.9)
 AR_PERF=1              once-per-second game + draw budgets: [perf] fps/run-ms/gf/APU and [draw-perf] RtlDrawPpuFrame ms — separates host-bound (fps<60) from pacing (fps=60 but game crawls). CAVEAT: gf is NMI-driven, always 1:1 — it can NOT detect the pacing class; use the ring trick below
-AR_APUPROF=<ms>        per-frame stall attribution: any game frame >= <ms> (bare `1` = 8 ms default) prints [apuprof] splitting the frame into game-thread lockwait / SPC catchup (ms+cycles+calls) / $2140 handshake reads+writes / music-hook / upload HLE, plus schedlat (samples the last port write was scheduled past `produced`), pushes+loops (execution volume — loops = loop-header count; pushes alone under-report straight-line decompression), and audiowait-max (worst blocked AudioCallback acquire since last report — >16 ms = missed fill deadline = audible dropout). This is the tool that root-caused the 2026-07-16 transition dropouts: collapsed multi-hardware-frame map loads (loops 25k-75k vs ~3k normal) under the then-frame-wide main-loop APU lock starved the callback 12-23 ms; the frame-wide lock is now removed (fine-grained locks inside every APU path already serialize) — audiowait-max stays ~0 through 55 ms loading frames
+SNESRECOMP_APU_PROFILE=<ms>        per-frame stall attribution: any game frame >= <ms> (bare `1` = 8 ms default) prints [apuprof] splitting the frame into game-thread lockwait / SPC catchup (ms+cycles+calls) / $2140 handshake reads+writes / music-hook / upload HLE, plus schedlat (samples the last port write was scheduled past `produced`), pushes+loops (execution volume — loops = loop-header count; pushes alone under-report straight-line decompression), and audiowait-max (worst blocked AudioCallback acquire since last report — >16 ms = missed fill deadline = audible dropout). This is the tool that root-caused the 2026-07-16 transition dropouts: collapsed multi-hardware-frame map loads (loops 25k-75k vs ~3k normal) under the then-frame-wide main-loop APU lock starved the callback 12-23 ms; the frame-wide lock is now removed (fine-grained locks inside every APU path already serialize) — audiowait-max stays ~0 through 55 ms loading frames
 Shift+F9 mid-bug + ring exact-1/N-speed in one mode? quit/Shift+F9 WHILE slow, count 02ABF0 (NMI) entries per iteration in the block ring = yields per game frame; block before each = the yield site (found §7.12 in minutes)
 find_yield_points.py   static census of ALL $4210/$4212 reads (incl. AF long form) classified SPIN/CLEAR/POST/ACK + HLE cross-ref; its 7 SPIN sites ARE the runtime yield whitelist (snes.c kSpinBlocks — keep in sync!); unlisted spin = watchdog hang naming the block (loud), never silent slowdown
 v2regen rts-webs       Go static census of the PHA;RTS pushed-continuation dispatch idiom (A9../A0.. +48 pushes, 48 60 sites) vs cfg coverage; run FIRST on a silent-no-op sim subsystem to see the whole uncovered backlog in one pass (§5, §7.13). RAM-ptr handler targets still need runtime found:0
@@ -1597,7 +1597,7 @@ AR_RTSDISP_MISS=1      names any continuation a `rts_dispatch` list doesn't cove
 AR_GARBAGE_HIST=<n>    garbage-trap block-ring depth (default 24, max 1000) incl. per-block S — 1000 spans a whole sim frame; how the dev-cycle m-leak origin was found (§7.13)
 AR_SIMDEV=1 / AR_SIMDEV2=1   dev-cycle gate-branch probes (cpu_trace.h; retarget the PC list per hunt — the reusable "which branch fired" pattern)
 AR_SIMWALK=1           town-actor script executor: script byte + behavior state ($+12) + script ptr ($+16) at $01:CD41/$CD5E — "actor spawns but is frozen" (§7.14)
-AR_VRAMWATCH=1         BG-tilemap VRAM-write tracer: who writes a VRAM region + game func, gated AR_VW_LO/HI (game-frame) + AR_VW_VLO/VHI (vram addr) — graphics-corruption hunts (§7.15)
+SNESRECOMP_VRAM_WATCH=1         BG-tilemap VRAM-write tracer: who writes a VRAM region + game func, gated AR_VW_LO/HI (game-frame) + AR_VW_VLO/VHI (vram addr) — graphics-corruption hunts (§7.15)
 AR_LAIRDMA=1           logs each VRAM-targeting DMA's source ($7E/$7F buffer + first bytes) + dest + size (dma.c) — finds the garbage tilemap/tile-gfx SOURCE behind a corrupt strip (§7.15)
 AR_LOADSTATE=<slot>    boot-time savestate load (main.c). CAVEAT: renders the state but game LOGIC won't advance (coroutine host-stack not restored) — not usable to resume/instrument from a captured moment; redirect AR_SAVE_NATIVE_PATH to a disposable copy because state SRAM may auto-persist
 AR_AUDIODBG=1          DSP health: mvol/mute/output peak/SPC cyc-per-ms/pending KON  (peak=0 = silence GENERATED, not a device problem)

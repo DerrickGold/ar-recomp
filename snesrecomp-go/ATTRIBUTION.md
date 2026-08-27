@@ -33,7 +33,7 @@ documentation rather than copied as stale instructions:
   [`docs/PROJECT_INTEGRATION.md`](docs/PROJECT_INTEGRATION.md);
 - runtime responsibilities, MSU-1, host-overlay extraction, shadow audio/color,
   and trace tripwires are summarized in
-  [`docs/RUNTIME.md`](docs/RUNTIME.md);
+  [`runtime/docs/RUNTIME.md`](runtime/docs/RUNTIME.md);
 - contributor-facing decoder/config guidance is represented by
   [`docs/CFG_FORMAT.md`](docs/CFG_FORMAT.md) and Go package tests.
 
@@ -41,7 +41,7 @@ The old `IMPROVEMENTS.md`, `ISSUES.md`, branch plans, and analyzer inventories
 were not copied as current documentation because they describe the historical
 Python directory layout, closed investigations, and game-specific sessions.
 They remain available at the pinned source commit above. Current instructions
-use `snesrecomp-go`, `runtime-next/`, and per-project paths consistently.
+use `snesrecomp-go`, `runtime/`, and per-project paths consistently.
 
 ## Prior-project acknowledgements
 
@@ -65,7 +65,7 @@ The independently maintained Go module, tooling, tests, and documentation are
 provided under the MIT terms in [`LICENSE`](LICENSE). This includes the pure-Go
 audio-preview emulator and the independently authored portable C runner.
 
-The runner sources live in [`runtime-next/`](runtime-next/). The historical
+The runner sources live in [`runtime/`](runtime/). The historical
 runner used during parity development was retired before this cutover and is
 not distributed. Generated/recompiled game code and game assets remain outside
 the runner grant as described below.

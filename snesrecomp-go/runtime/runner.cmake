@@ -1,0 +1,68 @@
+# Manifest for the independently authored portable runner.
+
+set(SNESRECOMP_RUNNER_ROOT ${CMAKE_CURRENT_LIST_DIR})
+set(SNESRECOMP_RUNNER_DEVICE_ROOT ${SNESRECOMP_RUNNER_ROOT})
+set(SNESRECOMP_RUNNER_CRC32_SOURCE ${SNESRECOMP_RUNNER_ROOT}/src/support/crc32.c)
+set(SNESRECOMP_RUNNER_DSP_SOURCE ${SNESRECOMP_RUNNER_ROOT}/src/snes/dsp.c)
+set(SNESRECOMP_RUNNER_SAVELOAD_SOURCE ${SNESRECOMP_RUNNER_ROOT}/src/snes/saveload.c)
+
+include(${SNESRECOMP_RUNNER_ROOT}/sources.cmake)
+
+option(SNESRECOMP_ENABLE_TRACE "Build local observability rings and tripwires" OFF)
+if(SNESRECOMP_ENABLE_TRACE)
+    list(APPEND SNESRECOMP_RUNNER_SOURCES
+        ${SNESRECOMP_RUNNER_ROOT}/src/support/generated_trace_stub.c)
+endif()
+
+option(SNESRECOMP_ENABLE_SIMD
+    "Enable runner SIMD implementations supported by the build target" ON)
+set(SNESRECOMP_PPU_BIT_WORD_BITS "auto" CACHE STRING
+    "Runner PPU bitset word width: auto, 32, or 64")
+set_property(CACHE SNESRECOMP_PPU_BIT_WORD_BITS PROPERTY STRINGS auto 32 64)
+if(NOT SNESRECOMP_PPU_BIT_WORD_BITS STREQUAL "auto" AND
+   NOT SNESRECOMP_PPU_BIT_WORD_BITS STREQUAL "32" AND
+   NOT SNESRECOMP_PPU_BIT_WORD_BITS STREQUAL "64")
+    message(FATAL_ERROR
+        "SNESRECOMP_PPU_BIT_WORD_BITS must be auto, 32, or 64")
+endif()
+
+set(SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS
+    ${SNESRECOMP_RUNNER_ROOT}/include
+)
+set(SNESRECOMP_RUNNER_PRIVATE_INCLUDE_DIRS
+    ${SNESRECOMP_RUNNER_ROOT}/src
+    ${SNESRECOMP_RUNNER_ROOT}/src/core
+    ${SNESRECOMP_RUNNER_ROOT}/src/runner
+    ${SNESRECOMP_RUNNER_ROOT}/src/support
+)
+
+# Configure a target that compiles runner implementation sources. Consumers
+# inherit only the supported SDK headers; implementation roots never propagate.
+function(snesrecomp_configure_runtime_target target)
+    if(DEFINED CMAKE_INSTALL_INCLUDEDIR AND
+       NOT CMAKE_INSTALL_INCLUDEDIR STREQUAL "")
+        set(_snesrecomp_install_include ${CMAKE_INSTALL_INCLUDEDIR})
+    else()
+        set(_snesrecomp_install_include include)
+    endif()
+    target_compile_features(${target} PUBLIC c_std_11)
+    target_include_directories(${target}
+        PUBLIC
+            $<BUILD_INTERFACE:${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}>
+            $<INSTALL_INTERFACE:${_snesrecomp_install_include}>
+        PRIVATE ${SNESRECOMP_RUNNER_PRIVATE_INCLUDE_DIRS})
+    if(SNESRECOMP_ENABLE_SIMD)
+        target_compile_definitions(${target} PRIVATE SNESRECOMP_ENABLE_SIMD=1)
+    else()
+        target_compile_definitions(${target} PRIVATE SNESRECOMP_ENABLE_SIMD=0)
+    endif()
+    if(SNESRECOMP_ENABLE_TRACE)
+        target_compile_definitions(${target} PRIVATE SNESRECOMP_TRACE=1)
+    else()
+        target_compile_definitions(${target} PRIVATE SNESRECOMP_TRACE=0)
+    endif()
+    if(NOT SNESRECOMP_PPU_BIT_WORD_BITS STREQUAL "auto")
+        target_compile_definitions(${target} PRIVATE
+            SNESRECOMP_PPU_BIT_WORD_BITS=${SNESRECOMP_PPU_BIT_WORD_BITS})
+    endif()
+endfunction()

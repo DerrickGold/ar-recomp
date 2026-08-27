@@ -18,7 +18,7 @@
 #include "action/action_camera_bounds.h"
 #include "actraiser_action_bg.h"
 #include "actraiser_game.h"
-#include "cpu_state.h"
+#include "snesrecomp/game/cpu.h"
 #include "settings.h"
 
 #include <stdio.h>

@@ -149,8 +149,8 @@ const opcodeHarnessPreamble = `
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include "cpu_state.h"
-#include "cpu_trace.h"
+#include "snesrecomp/game/cpu.h"
+#include "snesrecomp/game/trace.h"
 int snes_frame_counter;
 const char *g_last_recomp_func;
 uint8_t g_ram[0x20000];

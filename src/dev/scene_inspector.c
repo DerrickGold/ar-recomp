@@ -6,10 +6,9 @@
 #include <string.h>
 
 #include "actraiser_game.h"
-#include "common_cpu_infra.h"
+#include "snesrecomp/game_runtime.h"
 #include "deterministic_hash.h"
-#include "runner_next.h"
-#include "runner_next_internal.h"
+#include "snesrecomp/runner.h"
 
 enum {
   kPanelCapacity = 4096,
@@ -53,10 +52,10 @@ static bool CapturePpuView(ScenePpuView *view) {
       SR_RUNNER_CAP_BORROWED_BYTE_SPANS |
       SR_RUNNER_CAP_BORROWED_U16_SPANS |
       SR_RUNNER_CAP_PPU_BACKGROUND_COORDINATE;
-  if (!view || !g_snes) return false;
+  if (!view || !RtlGameRunner()) return false;
   memset(view, 0, sizeof(*view));
   view->api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
-  view->runner = sr_runner_handle(g_snes);
+  view->runner = RtlGameRunner();
   if (!view->api || !view->runner ||
       view->api->struct_size <
           SNES_RUNNER_API_PPU_BACKGROUND_COORDINATE_SIZE ||

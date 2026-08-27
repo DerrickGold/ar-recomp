@@ -6,7 +6,7 @@
 #include <SDL3/SDL.h>
 
 #include "settings.h"
-#include "types.h"
+#include "snesrecomp/game/types.h"
 
 /* Host input mapping: the single owner of "what the player physically did" ->
  * "which SNES joypad bits are held". Everything above this layer (the runner's

@@ -43,23 +43,23 @@ identity are the perishable, expensive-to-rederive parts.
 | Raw APU port write | `RtlApuWrite` (`$2140-$2143`) | APU I/O | low-level handshake / param | — | 🔴 |
 | **Voice key-on observation** | `g_dsp_voice_kon_hook` (dsp.c, fires once per applied key-on) | DSP `KON` | "voice C started sample S" | `(ch, srcn, decodeOffset, volL, volR, pitch)`; NULL by default; installed by `sfx_census.c`. Called on whichever thread is cycling the APU, APU lock held. Must be invoked **after** `decodeOffset` is resolved from the directory — earlier and it reports the previous note's advancing decode cursor | 🟢 |
 
-Host-side engine seams installed for this subsystem (all NULL/-1 by default, so
-other games are byte-identical): `g_rtl_spc_upload_hook` (image src = song
-identity), `g_rtl_apu_port_hook` (every `$2140-43` write — **chained**, not
-owned: `music_replacements.c` installs first and `sfx_census.c` forwards to it,
-so init order in `main.c` matters), `g_rtl_music_mix_hook` (OGG mix inside
-`RtlRenderAudio`'s locked region), the fixed-width game-adapter route on the
-runner-owned pre-DSP-write seam (normal-play logical-track provenance), the DSP
-Music-bus gate plus its unclassified SRCN fallback, and
-`g_dsp_voice_kon_hook` (key-on observation).
+The immutable `RtlGameAudioApi` now owns the game-side seams for this
+subsystem. Its presentation callbacks deliver completed SPC uploads, every
+CPU `$2140-43` write, pacing notifications, and final replacement mixing.
+Voice/state routing and bounded audio-extension callbacks occupy the same
+module table behind separate capability bits. Registration validates and
+caches the table once, so there is no mutable global hook installation,
+callback chaining, or initialization-order dependency. The DSP-internal
+`g_dsp_voice_kon_hook` remains a private diagnostic seam used only by the SFX
+census.
 
-The opt-in serial provenance tracer uses the CPU-side
-`g_rtl_apu_port_trace_hook` and `g_rtl_spc_upload_trace_hook`, plus the public
-runner audio-trace observer for APU port apply, SPC port read, pre-fetch SPC700
-PC, and DSP writes. The observer exposes fixed registers and a synchronous,
-read-only ARAM view while the APU lock is held; ActRaiser-specific driver
-offsets stay in the tracer. Disabled observation is one unlikely check at each
-existing seam and no state is serialized. See
+The opt-in serial provenance tracer and SFX census subscribe to the public
+runner audio-trace observer. It reports CPU port writes, completed SPC uploads,
+APU port apply, SPC port read, pre-fetch SPC700 PC, and DSP writes. The observer
+exposes fixed registers and a synchronous, read-only ARAM view while the APU
+lock is held; ActRaiser-specific driver offsets stay in the tracer. Disabled
+observation is one unlikely check at each existing seam and no state is
+serialized. See
 [snes-native-audio-channels.md](snes-native-audio-channels.md#implemented-baseline-instrumentation)
 for the request/outcome CSV contract. With the serial trace enabled,
 `AR_NATIVE_AUDIO_PCM=1` additionally writes the retained native-rate PCM ring
@@ -109,12 +109,14 @@ values and nonzero port-2 ids to catch them in play.
    `src/music_replacements.c` + `[music:<name>]` sections of
    `game-assets/manifest.ini` (all 17 table songs enumerated; the tracked
    manifest ships them inert until their .ogg exists). Identity = the stage-1
-   image source address captured by an engine upload hook
-   (`g_rtl_spc_upload_hook`); start/stop keyed off the port-0 protocol above
-   via `g_rtl_apu_port_hook`; OGG Vorbis streaming (stb_vorbis) with
+   image source address delivered by
+   `RtlGameAudioApi.spc_upload_completed`; start/stop keyed off the port-0
+   protocol above via `RtlGameAudioApi.apu_port_write`; OGG Vorbis streaming
+   (stb_vorbis) with
    sample-accurate loops (manifest `loop_start/loop_end` >
    `LOOPSTART/LOOPLENGTH` Vorbis tags > whole file) mixed in
-   `RtlRenderAudio`'s locked region via `g_rtl_music_mix_hook`, msu1-style.
+   `RtlRenderAudio`'s locked region via `RtlGameAudioApi.mix_output`,
+   msu1-style.
    Muting: every handshake/port write stays authentic (zero soft-lock risk);
    instead the DSP excludes provenance-tagged Music voices from the dry mix
    and echo input. `g_dsp_voice_mute_srcn_min` remains only as a startup
@@ -396,7 +398,7 @@ ROM table (5 real entries, confirmed by reading the
 bytes), but `$2920`/`$208E` resolve to SNES hardware-register space (`$2000-$5FFF`) under LoROM,
 meaning either they're populated at runtime via DMA (not yet confirmed) or the `JSR (abs,X)`
 instructions decoding there are themselves decode artifacts from a wrong entry width — not yet
-resolved, `AR_INDIRLOG=1` is armed to help if a future investigation reaches these sites.
+resolved, `SNESRECOMP_INDIRECT_LOG=1` is armed to help if a future investigation reaches these sites.
 
 ---
 
@@ -1215,7 +1217,7 @@ contiguous 4 KiB snapshot of already-loaded tile character data (written by
 intercept at either the WRAM buffer (replace tile indices / graphics) or the DMA (redirect to
 a hi-res path).
 
-**Confirmed BG register layout for the sim town map** (2026-07-05, `AR_TRACE reg` channel):
+**Confirmed BG register layout for the sim town map** (2026-07-05, `SNESRECOMP_TRACE_FILE reg` channel):
 `bgmode=$09` (mode 1, BG3 priority), `bgTileAdr=$0500` → **BG1 char/tiles base = VRAM `$0000`**,
 BG3 char base `$5000`; `bgXsc=[$63,$73,$58,$00]` → BG1 map `$6000`, BG2 map `$7000`, BG3 map `$5800`.
 So BG1 (the town playfield) reads its **graphics from `$0000`** and its **tilemap from `$6000`** —
@@ -1255,7 +1257,7 @@ and the half-resolution terrain outside a 3D town animated.
 graphics-pipeline bug at all — `bank_03_8053` ran its `LDA #$6000; STA $2116` at m=1 (an exit-mx
 leak from `$9D4D`), so the tilemap upload's VMADD truncated to `$0000` and dumped tilemap indices
 into BG1's *character* VRAM. Lesson for this seam: a "graphics corruption" here can originate in the
-**m/x width** of the upload's address setup, not in the tile data — check `AR_TRACE --vmadd/--leaks`
+**m/x width** of the upload's address setup, not in the tile data — check `SNESRECOMP_TRACE_FILE --vmadd/--leaks`
 before suspecting the buffers.
 
 ---
@@ -1461,7 +1463,7 @@ it must repeat the last completed tick without collapsing presentation back to t
 
 **The tick boundary (the seam you must preserve).** Outside an explicit NMI-disabled load hold,
 `RunOneFrameOfGame` supplies one atomic 60 Hz logic tick: the host resumes the game coroutine,
-which runs until its next vblank-wait, then NMI services the frame. The `AR_TRACE` **`frame`**
+which runs until its next vblank-wait, then NMI services the frame. The `SNESRECOMP_TRACE_FILE` **`frame`**
 channel marks the edges (`vblank` = host frame boundary, `nmi` = logic tick serviced); a run of
 `vblank` markers without `nmi` is expected only for the calibrated action load. Use the pairing to
 *verify the tick cadence is clean* before building on it (a mode that yields N times per tick —

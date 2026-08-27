@@ -715,7 +715,7 @@ oracle harness.
 | `SaveSystem_AutoPersistIfChanged` | 2598 | Per outer iteration | Battery-save persistence; once per iter. Skipped under `AR_INPUT_REPLAY`. |
 | `AR_WARP_AT` | 2572 | Per outer iteration | One-shot warp trigger. |
 | PPM screenshot capture | 2636-2664 | Per outer iteration (see §2.4 — must move to present thread) | Reads the rendered frame. |
-| `AR_PERF` / `AR_APUPROF` instrumentation | 2451-2535 | Wrap the per-tick RtlRunFrame | These measure per-frame time. |
+| `AR_PERF` / `SNESRECOMP_APU_PROFILE` instrumentation | 2451-2535 | Wrap the per-tick RtlRunFrame | These measure per-frame time. |
 | Diorama camera settings flush (new) | — | Per outer iteration | If `g_diorama_settings_dirty` and ~0.5s since the last camera adjust (or on menu-close/mode-toggle/quit): `Settings_Save`, clear the flag. Debounces the per-motion camera writes (§5.6). |
 
 **Rule of thumb:** anything that reads/writes emulator state per emulated frame

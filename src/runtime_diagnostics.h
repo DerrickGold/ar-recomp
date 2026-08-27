@@ -3,7 +3,7 @@
 
 #include <stdbool.h>
 
-#include "runner_next.h"
+#include "snesrecomp/runner.h"
 
 /* Subscribe the application-owned flight recorder to public runner events.
  * Bind once after SnesInit and unbind before SnesShutdown. */

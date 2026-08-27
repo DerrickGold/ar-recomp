@@ -19,7 +19,7 @@
 #include "present.h"
 #include "action/action_effect_render.h"
 #include "constants.h"
-#include "types.h"
+#include "snesrecomp/game/types.h"
 #include "diorama/diorama.h"
 #include "scene3d_math.h"
 #include "sim/sim_world_map.h"

@@ -1,3 +1,3 @@
-#include "cpu_state.h"
-#include "common_rtl.h"
-#include "cpu_trace.h"
+#include "snesrecomp/game/cpu.h"
+#include "snesrecomp/game/runtime.h"
+#include "snesrecomp/game/trace.h"

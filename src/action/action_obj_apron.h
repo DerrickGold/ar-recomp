@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "runner_next.h"
+#include "snesrecomp/runner.h"
 
 /* ── The action-side OBJ apron channel ────────────────────────────────────
  *

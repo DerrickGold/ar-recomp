@@ -7,7 +7,7 @@
 #include "actraiser_cell_map.h"
 #include "actraiser_town_metatile.h"
 #include "actraiser_town_structure_steps.h"
-#include "cpu_state.h"
+#include "snesrecomp/game/cpu.h"
 #include "save_system.h"
 #include "settings.h"
 

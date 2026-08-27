@@ -49,6 +49,8 @@ func run(args []string) error {
 		return runAudioPreview(args[1:])
 	case "toolchain":
 		return runToolchain(args[1:])
+	case "runtime":
+		return runRuntime(args[1:])
 	case "sdl":
 		return runSDL(args[1:])
 	case "doctor":
@@ -78,6 +80,7 @@ Commands:
   audio-preview
               Render local ActRaiser soundtrack comparison WAVs in pure Go
   toolchain   Report, fetch, or pin the hermetic C toolchain (Zig)
+  runtime     Build a target-specific vended runner archive
   sdl         Stage the pinned SDL3 redistributable for a cross target
   doctor      Report host tools and project inputs
   version     Print the driver version and target platform
@@ -360,6 +363,54 @@ func runToolchain(args []string) error {
 	}
 }
 
+func runRuntime(args []string) error {
+	flags := flag.NewFlagSet("runtime", flag.ContinueOnError)
+	runtimeDir := flags.String("runtime-dir", "snesrecomp-go/runtime",
+		"runner source directory")
+	output := flags.String("output", "",
+		"archive output (default <runtime-dir>/lib/<target>/<archive>)")
+	target := flags.String("target", "", "Zig target triple (default: host)")
+	zigPath := flags.String("zig", "", "Zig executable")
+	cacheDir := flags.String("cache-dir", "", "host Zig cache directory")
+	optimize := flags.String("optimize", "-O2", "optimization level")
+	jobs := flags.Int("jobs", runtime.NumCPU(), "parallel compile jobs")
+	portable := flags.Bool("portable", false, "disable target SIMD implementations")
+	verbose := flags.Bool("verbose", false, "print each runner source as it compiles")
+	subcommand := "archive"
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		subcommand, args = args[0], args[1:]
+	}
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if subcommand != "archive" {
+		return fmt.Errorf("unknown runtime subcommand %q (expected archive)", subcommand)
+	}
+	zig := *zigPath
+	if zig == "" {
+		cache := *cacheDir
+		if cache == "" {
+			cache = toolchainCacheDir(".")
+		}
+		located, err := toolchain.Locate(cache)
+		if err != nil {
+			located, err = toolchain.Fetch(cache, os.Stdout)
+			if err != nil {
+				return err
+			}
+		}
+		fmt.Printf("runtime archive: using Zig %s (%s, via %s)\n",
+			located.Version, located.Path, located.Source)
+		zig = located.Path
+	}
+	_, err := project.BuildRuntimeArchive(project.RuntimeArchiveOptions{
+		RuntimeDir: *runtimeDir, OutputPath: *output, ZigPath: zig,
+		Target: *target, Optimize: *optimize, Jobs: *jobs,
+		SIMD: !*portable, Verbose: *verbose, Stdout: os.Stdout,
+	})
+	return err
+}
+
 // runSDL stages the pinned SDL3 redistributable for a cross target. It exists
 // so `build --hermetic --target <t>` has a real SDL to link against: the host's
 // own SDL3 is never right for another platform, and the point of a cross build
@@ -436,12 +487,21 @@ func runDoctor(args []string) error {
 		}
 	}
 	buildMissing := false
-	runtimePath := filepath.Join(project.RunnerDirectory(resolved.ToolchainDir), "runner.cmake")
-	if _, statErr := os.Stat(runtimePath); statErr != nil {
-		fmt.Printf("%-15s MISSING (%s)\n", "runner", runtimePath)
-		buildMissing = true
+	runtimeDir := project.RunnerDirectory(resolved.ToolchainDir)
+	runtimePath := filepath.Join(runtimeDir, "runner.cmake")
+	archivePath, archiveErr := project.VendedRuntimeArchivePath(runtimeDir, "")
+	archiveInfo, archiveStatErr := os.Stat(archivePath)
+	includeInfo, includeStatErr := os.Stat(filepath.Join(runtimeDir, "include"))
+	if archiveErr == nil && archiveStatErr == nil &&
+		archiveInfo.Mode().IsRegular() && archiveInfo.Size() > 0 &&
+		includeStatErr == nil && includeInfo.IsDir() {
+		fmt.Printf("%-15s ok (vended archive %s)\n", "runner", archivePath)
+	} else if _, statErr := os.Stat(runtimePath); statErr == nil {
+		fmt.Printf("%-15s ok (%s source fallback)\n", "runner", project.RunnerName)
 	} else {
-		fmt.Printf("%-15s ok (%s)\n", "runner", project.RunnerName)
+		fmt.Printf("%-15s MISSING (%s or matching runtime/lib archive)\n",
+			"runner", runtimePath)
+		buildMissing = true
 	}
 	if path, lookErr := exec.LookPath(*cmake); lookErr != nil {
 		fmt.Printf("cmake          MISSING (%s)\n", *cmake)

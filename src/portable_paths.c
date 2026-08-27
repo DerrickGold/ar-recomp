@@ -4,7 +4,7 @@
 #include <sys/stat.h>
 
 #include "constants.h"
-#include "launcher.h"
+#include "snesrecomp/host/launcher.h"
 
 static bool PathExists(const char *path) {
   struct stat path_info;

@@ -21,7 +21,7 @@
 #include "action/action_effect_render.h"
 #include "constants.h"
 #include "crt_post.h"
-#include "types.h"
+#include "snesrecomp/game/types.h"
 #include "diorama/diorama.h"
 #include "diorama/diorama_frame_generation.h"
 #include "diorama/diorama_performance.h"
