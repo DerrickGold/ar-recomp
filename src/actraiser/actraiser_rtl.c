@@ -3081,7 +3081,7 @@ void ActRaiserDrawPpuFrame(void) {
      * an atlas or metadata failure can retain raw OBJ before scanout instead
      * of being discovered after those fallback pixels were omitted. */
     bool billboard_atlas_ready = town && SimRenderAtlas_Build(
-        g_ppu,
+        sr_runner_handle(g_snes),
         ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraX),
         ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY));
     Sim3DCaptureRequest request = {

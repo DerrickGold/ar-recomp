@@ -66,12 +66,9 @@ void apu_schedulePortWrite(Apu *apu, uint8_t port, uint8_t value,
                            uint64_t target_sample);
 void apu_clearPortQueue(Apu *apu);
 
-extern void (*g_apu_port_apply_trace_hook)(Apu *, uint8_t, uint8_t);
-extern void (*g_apu_spc_port_read_trace_hook)(Apu *, uint8_t, uint8_t);
 extern void (*g_apu_spc_port_write_trace_hook)(Apu *, uint8_t, uint8_t);
 extern void (*g_apu_spc_dsp_write_hook)(Apu *, uint8_t, uint8_t);
 extern bool (*g_apu_spc_dsp_write_filter_hook)(Apu *, uint8_t, uint8_t *);
-extern void (*g_apu_spc_dsp_write_trace_hook)(Apu *, uint8_t, uint8_t);
 extern void (*g_apu_extra_saveload_hook)(Apu *, SaveLoadInfo *);
 uint64_t snes_apu_cycle_count(void);
 

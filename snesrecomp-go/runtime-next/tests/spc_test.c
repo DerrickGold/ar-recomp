@@ -9,7 +9,6 @@
 #include <string.h>
 
 static int failures;
-static unsigned trace_calls;
 static unsigned patch_calls;
 static unsigned cycle_calls;
 static void *save_address;
@@ -24,6 +23,7 @@ static void check(int condition, const char *message) {
 
 uint8_t apu_cpuRead(Apu *apu, uint16_t address) { return apu->ram[address]; }
 void apu_cpuWrite(Apu *apu, uint16_t address, uint8_t value) { apu->ram[address] = value; }
+uint64_t snes_apu_cycle_count(void) { return 0u; }
 
 static Spc *fixture(Apu *apu, uint16_t pc) {
     memset(apu, 0, sizeof(*apu));
@@ -101,7 +101,6 @@ static void test_call_word_and_bit_ops(void) {
     spc_free(spc);
 }
 
-static void trace_hook(Spc *spc, uint16_t pc) { (void)spc; (void)pc; ++trace_calls; }
 static void patch_hook(Spc *spc, uint16_t pc) { (void)pc; ++patch_calls; spc->a = 7u; }
 static int cycle_hook(Spc *spc, uint16_t pc, int cycles) {
     (void)spc; (void)pc; ++cycle_calls; return cycles + 1;
@@ -116,13 +115,12 @@ static void test_hooks_and_saveload(void) {
     check(spc != NULL, "hook fixture");
     if (spc == NULL) return;
     apu.ram[0x0200u] = 0xbcu; /* INC A */
-    g_spc_opcode_trace_hook = trace_hook;
     g_spc_opcode_patch_hook = patch_hook;
     g_spc_opcode_cycle_hook = cycle_hook;
     check(spc_runOpcode(spc) == 3 && spc->a == 8u,
-          "observer/patch/cycle hook ordering");
-    check(trace_calls == 1u && patch_calls == 1u && cycle_calls == 1u,
-          "all opcode hooks called");
+          "patch/cycle hook ordering");
+    check(patch_calls == 1u && cycle_calls == 1u,
+          "opcode patch and cycle hooks called");
     SaveLoadInfo info = {capture_save};
     spc_saveload(spc, &info);
     check(save_address == &spc->a &&

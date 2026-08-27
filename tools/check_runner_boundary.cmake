@@ -9,15 +9,9 @@ endif()
 set(_allowed
   actraiser/actraiser_action_bg.c
   actraiser/actraiser_rtl.c
-  actraiser/actraiser_spc_player.c
-  actraiser/actraiser_spc_upload.c
   actraiser/actraiser_widescreen_bg.c
   actraiser/actraiser_widescreen_sprites.c
-  dev/native_audio_trace_runtime.c
-  native_audio_extension.c
-  native_audio_mixer.c
   sim/sim3d.c
-  sim/sim_render_atlas.c
 )
 list(SORT _allowed)
 

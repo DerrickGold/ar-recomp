@@ -48,17 +48,18 @@ other games are byte-identical): `g_rtl_spc_upload_hook` (image src = song
 identity), `g_rtl_apu_port_hook` (every `$2140-43` write — **chained**, not
 owned: `music_replacements.c` installs first and `sfx_census.c` forwards to it,
 so init order in `main.c` matters), `g_rtl_music_mix_hook` (OGG mix inside
-`RtlRenderAudio`'s locked region), `g_apu_spc_dsp_write_hook` (normal-play
-logical-track provenance), the DSP Music-bus gate plus its unclassified SRCN
-fallback, and `g_dsp_voice_kon_hook` (key-on observation).
+`RtlRenderAudio`'s locked region), the fixed-width game-adapter route on the
+runner-owned pre-DSP-write seam (normal-play logical-track provenance), the DSP
+Music-bus gate plus its unclassified SRCN fallback, and
+`g_dsp_voice_kon_hook` (key-on observation).
 
-The opt-in serial provenance tracer uses dedicated observation seams rather
-than joining that chained game hook: `g_rtl_apu_port_trace_hook` and
-`g_rtl_spc_upload_trace_hook` at the CPU boundary;
-`g_apu_port_apply_trace_hook`, `g_apu_spc_port_read_trace_hook`, and
-`g_apu_spc_dsp_write_trace_hook` inside the APU; and
-`g_spc_opcode_trace_hook` at the pre-fetch SPC700 PC. All are NULL by default,
-observation-only, and live outside serialized emulator structs. See
+The opt-in serial provenance tracer uses the CPU-side
+`g_rtl_apu_port_trace_hook` and `g_rtl_spc_upload_trace_hook`, plus the public
+runner audio-trace observer for APU port apply, SPC port read, pre-fetch SPC700
+PC, and DSP writes. The observer exposes fixed registers and a synchronous,
+read-only ARAM view while the APU lock is held; ActRaiser-specific driver
+offsets stay in the tracer. Disabled observation is one unlikely check at each
+existing seam and no state is serialized. See
 [snes-native-audio-channels.md](snes-native-audio-channels.md#implemented-baseline-instrumentation)
 for the request/outcome CSV contract. With the serial trace enabled,
 `AR_NATIVE_AUDIO_PCM=1` additionally writes the retained native-rate PCM ring

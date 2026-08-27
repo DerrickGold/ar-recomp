@@ -61,6 +61,112 @@ void dsp_writeHardwareVoiceMask(Dsp *dsp, uint8_t addr, uint8_t val,
   s_hardware_update_mask = update_mask;
 }
 
+static bool TestDspOperation(
+    void *service_context, uint32_t operation, uint32_t voice,
+    uint8_t address, uint8_t value, uint8_t update_mask) {
+  Apu *apu = (Apu *)service_context;
+  switch ((RtlAudioDspOperation)operation) {
+    case RTL_AUDIO_DSP_SET_VOICE_BUS:
+      dsp_setVoiceBus(apu->dsp, (int)voice, (DspVoiceBus)value);
+      return true;
+    case RTL_AUDIO_DSP_WRITE_VIRTUAL_REGISTER:
+      dsp_writeVirtualVoiceRegister(
+          apu->dsp, (int)voice, address, value);
+      return true;
+    case RTL_AUDIO_DSP_WRITE_VIRTUAL_CONTROL:
+      dsp_writeVirtualVoiceControl(
+          apu->dsp, (int)voice, address, value != 0u);
+      return true;
+    case RTL_AUDIO_DSP_WRITE_HARDWARE_MASK:
+      dsp_writeHardwareVoiceMask(
+          apu->dsp, address, value, update_mask);
+      return true;
+    default:
+      return false;
+  }
+}
+
+static RtlAudioExtensionContext TestAudioContext(Apu *apu) {
+  RtlAudioExtensionContext context = {
+      .struct_size = RTL_AUDIO_EXTENSION_CONTEXT_V2_SIZE,
+      .apu_ram = apu->ram,
+      .apu_ram_byte_size = sizeof(apu->ram),
+      .hardware_voice_count = RTL_AUDIO_ADAPTER_HARDWARE_VOICE_COUNT,
+      .extended_voice_count = RTL_AUDIO_ADAPTER_EXTENDED_VOICE_COUNT,
+      .spc_pc = apu->spc->pc,
+      .spc_x = apu->spc->x,
+      .spc_z = (uint8_t)apu->spc->z,
+      .service_context = apu,
+      .dsp_operation = TestDspOperation,
+  };
+  return context;
+}
+
+static bool TestDspWriteBridge(Apu *apu, uint8_t address, uint8_t *value) {
+  RtlAudioExtensionContext context = TestAudioContext(apu);
+  return NativeAudioExtension_FilterDspWrite(
+      &context, address, value);
+}
+
+static void TestSpcOpcodeBridge(Spc *spc, uint16_t opcode_pc) {
+  RtlAudioExtensionContext context = TestAudioContext(spc->apu);
+  NativeAudioExtension_PatchSpcOpcode(&context, opcode_pc);
+  spc->pc = context.spc_pc;
+  spc->x = context.spc_x;
+  spc->z = context.spc_z != 0u;
+}
+
+static int TestSpcCycleBridge(Spc *spc, uint16_t opcode_pc, int cycles) {
+  (void)spc;
+  return NativeAudioExtension_AdjustSpcOpcodeCycles(opcode_pc, cycles);
+}
+
+static bool TestSaveTransfer(
+    void *service_context, uint32_t kind, void *values, uint64_t count) {
+  SaveLoadInfo *info = (SaveLoadInfo *)service_context;
+  uint64_t index;
+  switch ((RtlAudioSaveValueKind)kind) {
+    case RTL_AUDIO_SAVE_BYTES:
+    case RTL_AUDIO_SAVE_U8:
+      info->func(info, values, (size_t)count);
+      return true;
+    case RTL_AUDIO_SAVE_U16:
+      for (index = 0; index < count; ++index)
+        saveload_u16(info, &((uint16_t *)values)[index]);
+      return true;
+    case RTL_AUDIO_SAVE_U32:
+      for (index = 0; index < count; ++index)
+        saveload_u32(info, &((uint32_t *)values)[index]);
+      return true;
+    case RTL_AUDIO_SAVE_U64:
+      for (index = 0; index < count; ++index)
+        saveload_u64(info, &((uint64_t *)values)[index]);
+      return true;
+    default:
+      return false;
+  }
+}
+
+static void TestSaveBridge(Apu *apu, SaveLoadInfo *info) {
+  RtlAudioSaveContext context = {
+      .struct_size = RTL_AUDIO_SAVE_CONTEXT_V2_SIZE,
+      .saving = (uint8_t)info->saving,
+      .portable = (uint8_t)info->portable,
+      .service_context = info,
+      .transfer = TestSaveTransfer,
+  };
+  (void)apu;
+  NativeAudioExtension_SaveState(&context);
+}
+
+void RtlAudioExtensionConfigure(bool enabled) {
+  s_dsp_enabled = enabled;
+  g_apu_spc_dsp_write_filter_hook = enabled ? TestDspWriteBridge : NULL;
+  g_spc_opcode_patch_hook = enabled ? TestSpcOpcodeBridge : NULL;
+  g_spc_opcode_cycle_hook = enabled ? TestSpcCycleBridge : NULL;
+  g_apu_extra_saveload_hook = enabled ? TestSaveBridge : NULL;
+}
+
 static int s_failures;
 #define CHECK(expr) do { \
   if (!(expr)) { \
@@ -394,6 +500,7 @@ static void TestExtensionStateSerialization(void) {
   TestSaveLoad state;
   memset(&state, 0, sizeof(state));
   state.base.func = TransferTestState;
+  state.base.saving = true;
   g_apu_extra_saveload_hook(&apu, &state.base);
   CHECK(state.offset > 0 && state.offset < sizeof(state.bytes));
 
@@ -403,6 +510,29 @@ static void TestExtensionStateSerialization(void) {
 
   state.offset = 0;
   state.loading = true;
+  state.base.saving = false;
+  g_apu_extra_saveload_hook(&apu, &state.base);
+  CHECK(NativeAudioExtension_QueuedRequestCount() == 1);
+  CHECK(NativeAudioExtension_ActiveInstanceCount() == 0);
+  g_spc_opcode_patch_hook(&spc, 0x0da0);
+  g_spc_opcode_patch_hook(&spc, 0x0e7e);
+  FlushVirtualLifecycle(&apu, &spc);
+
+  /* The canonical snapshot path transfers each fixed-width member through
+   * the adapter instead of relying on application structure layout. */
+  CHECK(NativeAudioExtension_QueueRequest(
+      false, 0x10, 0x01bb6d, 201, 3, 4, 0));
+  memset(&state, 0, sizeof(state));
+  state.base.func = TransferTestState;
+  state.base.saving = true;
+  state.base.portable = true;
+  g_apu_extra_saveload_hook(&apu, &state.base);
+  CHECK(state.offset > 0 && state.offset < sizeof(state.bytes));
+  g_spc_opcode_patch_hook(&spc, 0x0da0);
+  CHECK(NativeAudioExtension_QueuedRequestCount() == 0);
+  state.offset = 0;
+  state.loading = true;
+  state.base.saving = false;
   g_apu_extra_saveload_hook(&apu, &state.base);
   CHECK(NativeAudioExtension_QueuedRequestCount() == 1);
   CHECK(NativeAudioExtension_ActiveInstanceCount() == 0);

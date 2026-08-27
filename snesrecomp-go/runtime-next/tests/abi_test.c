@@ -3,6 +3,7 @@
 #include "runner_next.h"
 #include "runner_next_internal.h"
 #include "snes/dma.h"
+#include "snes/dsp.h"
 #include "snes/ppu.h"
 #include "snes/saveload.h"
 #include "snes/snes.h"
@@ -13,9 +14,6 @@
 #include <string.h>
 
 enum { TEST_WRAM_SIZE = 128 * 1024 };
-
-typedef struct SpcPlayer SpcPlayer;
-SpcPlayer *g_spc_player;
 
 void RtlApuLock(void) {}
 void RtlApuUnlock(void) {}
@@ -46,6 +44,13 @@ typedef struct TestObserver {
     int16_t expected_audio_last;
     int audio_payload_valid;
 } TestObserver;
+
+typedef struct TestAudioTraceObserver {
+    unsigned count;
+    SrRunnerHandle *runner;
+    SrAudioTraceEvent events[4];
+    uint8_t driver_bytes[4][3];
+} TestAudioTraceObserver;
 
 static SrResult query_test_cpu_state(
         Snes *snes, SrCpuStateSnapshot *out_state) {
@@ -109,6 +114,23 @@ static void observe_test_event(void *user_data, SrRunnerHandle *runner,
                 observer->expected_audio_last;
         observer->event.audio_samples = NULL;
     }
+}
+
+static void observe_test_audio_trace(void *user_data,
+                                     SrRunnerHandle *runner,
+                                     const SrAudioTraceEvent *event) {
+    TestAudioTraceObserver *observer = (TestAudioTraceObserver *)user_data;
+    unsigned index = observer->count++;
+    if (index >= 4u) return;
+    observer->runner = runner;
+    observer->events[index] = *event;
+    if (event->apu_ram != NULL &&
+        event->apu_ram_byte_size >= SR_APU_RAM_BYTE_COUNT) {
+        observer->driver_bytes[index][0] = event->apu_ram[0x1a];
+        observer->driver_bytes[index][1] = event->apu_ram[0x35];
+        observer->driver_bytes[index][2] = event->apu_ram[0x47];
+    }
+    observer->events[index].apu_ram = NULL;
 }
 
 static void mix_test_audio(int16 *buffer, int frames) {
@@ -292,6 +314,7 @@ int main(void) {
     uint64_t dma_subscription_id = 0u;
     uint64_t frame_subscription_id = 0u;
     uint64_t interrupt_error_subscription_id = 0u;
+    uint64_t audio_trace_subscription_id = 0u;
     uint64_t memory_mutation_id = 0u;
     uint64_t input_mutation_id = 0u;
     uint64_t vram_mutation_id = 0u;
@@ -338,6 +361,43 @@ int main(void) {
     SrCpuMathState small_math_state = {
         .struct_size = sizeof(uint32_t),
     };
+    TestAudioTraceObserver audio_trace_observer = {0};
+    SrAudioTraceSubscription audio_trace_subscription = {
+        .struct_size = sizeof(audio_trace_subscription),
+        .callback = observe_test_audio_trace,
+        .user_data = &audio_trace_observer,
+    };
+    SrAudioTraceSubscription small_audio_trace_subscription = {
+        .struct_size = sizeof(uint32_t),
+        .callback = observe_test_audio_trace,
+        .user_data = &audio_trace_observer,
+    };
+    SrSpcPcControlRequest spc_control_request = {
+        .struct_size = sizeof(spc_control_request),
+        .expected_pc_low = 0x0f0eu,
+        .expected_pc_high = 0x0f18u,
+        .replacement_pc = 0x0f48u,
+        .expected_aram_address = 0x0f48u,
+        .expected_aram_count = 5u,
+        .expected_aram = {0xcdu, 0x31u, 0xd8u, 0xf1u, 0x6fu},
+    };
+    SrSpcPcControlRequest small_spc_control_request = {
+        .struct_size = sizeof(uint32_t),
+    };
+    SrSpcPcControlResult spc_control_result = {
+        .struct_size = sizeof(spc_control_result),
+    };
+    SrSpcPcControlResult small_spc_control_result = {
+        .struct_size = sizeof(uint32_t),
+    };
+    SrAudioMixControl audio_mix_control = {
+        .struct_size = sizeof(audio_mix_control),
+        .music_gain_percent = 65u,
+        .sfx_gain_percent = 35u,
+    };
+    SrAudioMixControl small_audio_mix_control = {
+        .struct_size = sizeof(uint32_t),
+    };
     uint32_t obj_pixels[8u * 8u];
     SrPpuObjRasterRequest obj_request = {
         .struct_size = sizeof(obj_request),
@@ -352,6 +412,30 @@ int main(void) {
     };
     SrPpuObjRasterResult obj_result = {sizeof(obj_result), 0u};
     SrPpuObjRasterResult small_obj_result = {sizeof(uint32_t), 0u};
+    SrPpuObjPart obj_parts[1];
+    SrPpuObjResolveRequest obj_resolve_request = {
+        .struct_size = sizeof(obj_resolve_request),
+        .first_sprite = 0u,
+        .sprite_count = 1u,
+        .priority = 2u,
+        .part_capacity = 1u,
+        .parts = obj_parts,
+    };
+    SrPpuObjResolveResult obj_resolve_result = {
+        .struct_size = sizeof(obj_resolve_result),
+    };
+    SrPpuObjResolveResult small_obj_resolve_result = {
+        .struct_size = sizeof(uint32_t),
+    };
+    SrPpuObjPartsRasterRequest obj_parts_request = {
+        .struct_size = sizeof(obj_parts_request),
+        .parts = obj_parts,
+        .part_count = 1u,
+        .pixel_format = SR_PPU_OBJ_PIXEL_FORMAT_ARGB8888_U32,
+        .pixels = obj_pixels,
+        .pixel_byte_size = sizeof(obj_pixels),
+        .pitch_bytes = 8u * sizeof(uint32_t),
+    };
     SaveLoadInfo load = {leave_loaded_state_unchanged, false, false, false};
     Snes *snes;
     SrRunnerHandle *runner;
@@ -412,6 +496,15 @@ int main(void) {
     failed |= check(SNES_RUNNER_API_PPU_OBJ_RASTER_SIZE <=
                         sizeof(SnesRunnerApi),
                     "PPU OBJ raster API extent exceeds structure");
+    failed |= check(SR_PPU_OBJ_RESOLVE_REQUEST_V2_SIZE <=
+                            sizeof(SrPpuObjResolveRequest) &&
+                        SR_PPU_OBJ_RESOLVE_RESULT_V2_SIZE <=
+                            sizeof(SrPpuObjResolveResult) &&
+                        SR_PPU_OBJ_PARTS_RASTER_REQUEST_V2_SIZE <=
+                            sizeof(SrPpuObjPartsRasterRequest) &&
+                        SNES_RUNNER_API_PPU_OBJ_PARTS_SIZE <=
+                            sizeof(SnesRunnerApi),
+                    "PPU OBJ parts API extent exceeds structure");
     failed |= check(SR_PPU_SURFACE_SNAPSHOT_V2_SIZE <=
                         sizeof(SrPpuSurfaceSnapshot),
                     "PPU surface snapshot extent exceeds structure");
@@ -446,6 +539,25 @@ int main(void) {
     failed |= check(SNES_RUNNER_API_EVENT_OBSERVER_SIZE <=
                         sizeof(SnesRunnerApi),
                     "event observer API extent exceeds structure");
+    failed |= check(SR_AUDIO_TRACE_EVENT_V2_SIZE <=
+                            sizeof(SrAudioTraceEvent) &&
+                        SR_AUDIO_TRACE_SUBSCRIPTION_V2_SIZE <=
+                            sizeof(SrAudioTraceSubscription) &&
+                        SNES_RUNNER_API_AUDIO_TRACE_OBSERVER_SIZE <=
+                            sizeof(SnesRunnerApi),
+                    "audio trace observer extent exceeds structure");
+    failed |= check(SR_SPC_PC_CONTROL_REQUEST_V2_SIZE <=
+                            sizeof(SrSpcPcControlRequest) &&
+                        SR_SPC_PC_CONTROL_RESULT_V2_SIZE <=
+                            sizeof(SrSpcPcControlResult) &&
+                        SNES_RUNNER_API_SPC_CONTROL_SIZE <=
+                            sizeof(SnesRunnerApi),
+                    "SPC control extent exceeds structure");
+    failed |= check(SR_AUDIO_MIX_CONTROL_V2_SIZE <=
+                            sizeof(SrAudioMixControl) &&
+                        SNES_RUNNER_API_AUDIO_MIX_CONTROL_SIZE <=
+                            sizeof(SnesRunnerApi),
+                    "audio mix control extent exceeds structure");
     failed |= check(SR_MUTATION_COMMAND_V2_SIZE <=
                         sizeof(SrMutationCommand) &&
                         SR_MUTATION_STATUS_V2_SIZE <=
@@ -475,6 +587,14 @@ int main(void) {
                     "CPU state capability missing");
     failed |= check((api->capabilities & SR_RUNNER_CAP_CPU_MATH_STATE) != 0u,
                     "CPU math state capability missing");
+    failed |= check((api->capabilities &
+                     SR_RUNNER_CAP_AUDIO_TRACE_OBSERVERS) != 0u,
+                    "audio trace observer capability missing");
+    failed |= check((api->capabilities & SR_RUNNER_CAP_SPC_CONTROL) != 0u,
+                    "SPC control capability missing");
+    failed |= check((api->capabilities &
+                     SR_RUNNER_CAP_AUDIO_MIX_CONTROL) != 0u,
+                    "audio mix control capability missing");
     failed |= check((api->capabilities &
                          (SR_RUNNER_CAP_PPU_STATE |
                           SR_RUNNER_CAP_BORROWED_U16_SPANS |
@@ -506,6 +626,81 @@ int main(void) {
     failed |= check(snes != NULL, "runner allocation failed");
     if (snes == NULL) return 1;
     runner = sr_runner_handle(snes);
+
+    snes->apu->ram[0x1a] = 0xa1u;
+    snes->apu->ram[0x35] = 0xb2u;
+    snes->apu->ram[0x47] = 0xc3u;
+    snes->apu->inPorts[3] = 0xd4u;
+    snes->apu->outPorts[2] = 0xe5u;
+    snes->apu->spc->a = 0x16u;
+    snes->apu->spc->x = 0x27u;
+    snes->apu->spc->y = 0x38u;
+    snes->apu->spc->sp = 0x49u;
+    failed |= check(api->subscribe_audio_trace(
+                        runner, &small_audio_trace_subscription,
+                        &audio_trace_subscription_id) ==
+                            SR_RESULT_INVALID_ARGUMENT &&
+                        audio_trace_subscription_id == 0u,
+                    "undersized audio trace subscription accepted");
+    failed |= check(api->subscribe_audio_trace(
+                        runner, &audio_trace_subscription,
+                        &audio_trace_subscription_id) == SR_RESULT_OK &&
+                        audio_trace_subscription_id != 0u,
+                    "audio trace subscription failed");
+    failed |= check(sr_runner_audio_trace_enabled(),
+                    "audio trace observation did not become active");
+    snes->apu->spc->pc = 0x3456u;
+    snes->apu->spc->stopped = false;
+    snes->apu->ram[0x3456u] = 0x00u;
+    (void)spc_runOpcode(snes->apu->spc);
+    apu_cpuWrite(snes->apu, 0xf2u, 0x5du);
+    apu_cpuWrite(snes->apu, 0xf3u, 0x6eu);
+    apu_clearPortQueue(snes->apu);
+    snes->apu->cycles = 0u;
+    snes->apu->cpuCyclesLeft = 1u;
+    apu_schedulePortWrite(snes->apu, 2u, 0x7fu, 0u);
+    apu_cycle(snes->apu);
+    snes->apu->inPorts[3] = 0x80u;
+    (void)apu_cpuRead(snes->apu, 0xf7u);
+    failed |= check(audio_trace_observer.count == 4u &&
+                        audio_trace_observer.runner == runner,
+                    "audio trace callback count mismatch");
+    failed |= check(audio_trace_observer.events[0].type ==
+                            SR_AUDIO_TRACE_SPC_OPCODE &&
+                        audio_trace_observer.events[0].spc_pc == 0x3456u &&
+                        audio_trace_observer.events[0].spc_a == 0x16u &&
+                        audio_trace_observer.events[0].spc_x == 0x27u &&
+                        audio_trace_observer.events[0].spc_y == 0x38u &&
+                        audio_trace_observer.events[0].spc_sp == 0x49u &&
+                        audio_trace_observer.events[0].apu_input_ports[3] ==
+                            0xd4u &&
+                        audio_trace_observer.events[0].apu_output_ports[2] ==
+                            0xe5u &&
+                        audio_trace_observer.driver_bytes[0][0] == 0xa1u &&
+                        audio_trace_observer.driver_bytes[0][1] == 0xb2u &&
+                        audio_trace_observer.driver_bytes[0][2] == 0xc3u,
+                    "SPC opcode trace payload mismatch");
+    failed |= check(audio_trace_observer.events[1].type ==
+                            SR_AUDIO_TRACE_DSP_WRITE &&
+                        audio_trace_observer.events[1].spc_pc == 0x3456u &&
+                        audio_trace_observer.events[1].dsp_address == 0x5du &&
+                        audio_trace_observer.events[1].value == 0x6eu,
+                    "DSP trace payload mismatch");
+    failed |= check(audio_trace_observer.events[2].type ==
+                            SR_AUDIO_TRACE_APU_PORT_APPLY &&
+                        audio_trace_observer.events[2].port == 2u &&
+                        audio_trace_observer.events[2].value == 0x7fu &&
+                        audio_trace_observer.events[3].type ==
+                            SR_AUDIO_TRACE_SPC_PORT_READ &&
+                        audio_trace_observer.events[3].port == 3u &&
+                        audio_trace_observer.events[3].value == 0x80u,
+                    "APU port trace payload mismatch");
+    failed |= check(api->unsubscribe_audio_trace(
+                        runner, audio_trace_subscription_id) ==
+                            SR_RESULT_OK &&
+                        !sr_runner_audio_trace_enabled(),
+                    "audio trace unsubscribe remained active");
+    audio_trace_subscription_id = 0u;
 
     snes->ppu->inidisp = 0x8du;
     snes->ppu->obsel = 0x63u;
@@ -573,6 +768,14 @@ int main(void) {
                         runner, &obj_request, &obj_result) ==
                         SR_RESULT_UNAVAILABLE,
                     "PPU OBJ raster without a provider was available");
+    failed |= check(api->resolve_ppu_obj_range(
+                        runner, &obj_resolve_request,
+                        &obj_resolve_result) == SR_RESULT_UNAVAILABLE,
+                    "PPU OBJ resolve without a provider was available");
+    failed |= check(api->rasterize_ppu_obj_parts(
+                        runner, &obj_parts_request, &obj_result) ==
+                        SR_RESULT_UNAVAILABLE,
+                    "PPU OBJ parts raster without a provider was available");
     cpu_state.struct_size = sizeof(cpu_state);
     sr_runner_set_cpu_state_provider(
         snes, query_test_cpu_state, &s_cpu_component);
@@ -1091,6 +1294,61 @@ int main(void) {
                     "unknown PPU OBJ pixel format accepted");
     obj_request.pixel_format = SR_PPU_OBJ_PIXEL_FORMAT_ARGB8888_U32;
 
+    failed |= check(api->resolve_ppu_obj_range(
+                        runner, &obj_resolve_request,
+                        &obj_resolve_result) == SR_RESULT_OK,
+                    "PPU OBJ resolve failed");
+    failed |= check(obj_resolve_result.lifetime_generation == 0u &&
+                        obj_resolve_result.part_count == 1u &&
+                        obj_resolve_result.x0 == 10 &&
+                        obj_resolve_result.y0 == 20 &&
+                        obj_resolve_result.x1 == 18 &&
+                        obj_resolve_result.y1 == 28 &&
+                        obj_parts[0].x == 10 && obj_parts[0].y == 20 &&
+                        obj_parts[0].size == 8u &&
+                        obj_parts[0].reserved == 0u,
+                    "PPU OBJ resolved parts mismatch");
+    failed |= check(api->resolve_ppu_obj_range(
+                        runner, &obj_resolve_request,
+                        &small_obj_resolve_result) ==
+                        SR_RESULT_INVALID_ARGUMENT,
+                    "undersized PPU OBJ resolve result accepted");
+    obj_resolve_request.part_capacity = 0u;
+    obj_resolve_result.struct_size = sizeof(obj_resolve_result);
+    failed |= check(api->resolve_ppu_obj_range(
+                        runner, &obj_resolve_request,
+                        &obj_resolve_result) == SR_RESULT_INVALID_ARGUMENT,
+                    "undersized PPU OBJ part capacity accepted");
+    obj_resolve_request.part_capacity = 1u;
+    obj_resolve_result.struct_size = sizeof(obj_resolve_result);
+    failed |= check(api->resolve_ppu_obj_range(
+                        runner, &obj_resolve_request,
+                        &obj_resolve_result) == SR_RESULT_OK,
+                    "PPU OBJ resolve did not recover after rejection");
+
+    obj_parts_request.x0 = obj_resolve_result.x0;
+    obj_parts_request.y0 = obj_resolve_result.y0;
+    obj_parts_request.x1 = obj_resolve_result.x1;
+    obj_parts_request.y1 = obj_resolve_result.y1;
+    memset(obj_pixels, 0x5a, sizeof(obj_pixels));
+    obj_result.struct_size = sizeof(obj_result);
+    failed |= check(api->rasterize_ppu_obj_parts(
+                        runner, &obj_parts_request, &obj_result) ==
+                        SR_RESULT_OK,
+                    "PPU OBJ parts raster failed");
+    failed |= check(obj_result.x0 == 10 && obj_result.y0 == 20 &&
+                        obj_result.width == 8u && obj_result.height == 8u &&
+                        obj_pixels[0] == UINT32_C(0xffff0000) &&
+                        obj_pixels[63] == UINT32_C(0xffff0000),
+                    "PPU OBJ parts raster result mismatch");
+    obj_parts[0].reserved = 1u;
+    obj_result.struct_size = sizeof(obj_result);
+    failed |= check(api->rasterize_ppu_obj_parts(
+                        runner, &obj_parts_request, &obj_result) ==
+                        SR_RESULT_INVALID_ARGUMENT,
+                    "invalid PPU OBJ part accepted");
+    obj_parts[0].reserved = 0u;
+
     failed |= check(api->query_cpu_state(runner, &cpu_state) == SR_RESULT_OK,
                     "CPU state query failed");
     failed |= check(cpu_state.a == 0x1234u && cpu_state.x == 0x5678u &&
@@ -1555,6 +1813,16 @@ int main(void) {
                         runner, &obj_request, &obj_result) ==
                         SR_RESULT_STALE_VIEW,
                     "stale PPU OBJ raster request accepted");
+    obj_resolve_result.struct_size = sizeof(obj_resolve_result);
+    failed |= check(api->resolve_ppu_obj_range(
+                        runner, &obj_resolve_request,
+                        &obj_resolve_result) == SR_RESULT_STALE_VIEW,
+                    "stale PPU OBJ resolve request accepted");
+    obj_result.struct_size = sizeof(obj_result);
+    failed |= check(api->rasterize_ppu_obj_parts(
+                        runner, &obj_parts_request, &obj_result) ==
+                        SR_RESULT_STALE_VIEW,
+                    "stale PPU OBJ parts raster request accepted");
 
     wram_span.struct_size = sizeof(wram_span);
     failed |= check(api->borrow_memory(runner, SR_MEMORY_WRAM, &wram_span) ==
@@ -1692,6 +1960,75 @@ int main(void) {
     failed |= check(api->restore_cpu_math_state(runner, &math_state) ==
                         SR_RESULT_STALE_VIEW,
                     "stale CPU math state restore accepted");
+
+    memcpy(snes->apu->ram + 0x0f48u,
+           spc_control_request.expected_aram,
+           spc_control_request.expected_aram_count);
+    snes->apu->spc->pc = 0x0f10u;
+    failed |= check(api->compare_exchange_spc_pc(
+                        runner, &small_spc_control_request,
+                        &spc_control_result) == SR_RESULT_INVALID_ARGUMENT,
+                    "undersized SPC control request accepted");
+    failed |= check(api->compare_exchange_spc_pc(
+                        runner, &spc_control_request,
+                        &small_spc_control_result) == SR_RESULT_INVALID_ARGUMENT,
+                    "undersized SPC control result accepted");
+    spc_control_request.expected_aram_count =
+        SR_SPC_PC_EXPECTED_ARAM_MAX + 1u;
+    failed |= check(api->compare_exchange_spc_pc(
+                        runner, &spc_control_request,
+                        &spc_control_result) == SR_RESULT_INVALID_ARGUMENT,
+                    "oversized SPC control signature accepted");
+    spc_control_request.expected_aram_count = 5u;
+    spc_control_request.expected_aram_address = 0xfffeu;
+    failed |= check(api->compare_exchange_spc_pc(
+                        runner, &spc_control_request,
+                        &spc_control_result) == SR_RESULT_INVALID_ARGUMENT,
+                    "out-of-range SPC control signature accepted");
+    spc_control_request.expected_aram_address = 0x0f48u;
+    spc_control_request.expected_aram[0] ^= 0xffu;
+    failed |= check(api->compare_exchange_spc_pc(
+                        runner, &spc_control_request,
+                        &spc_control_result) == SR_RESULT_OK &&
+                        spc_control_result.flags == 0u &&
+                        spc_control_result.observed_pc == 0x0f10u &&
+                        spc_control_result.current_pc == 0x0f10u &&
+                        snes->apu->spc->pc == 0x0f10u,
+                    "SPC control changed state after an ARAM mismatch");
+    failed |= check_generation(api, runner, 9u, 2u, 1u, 1u, 5u);
+    spc_control_request.expected_aram[0] ^= 0xffu;
+    failed |= check(api->compare_exchange_spc_pc(
+                        runner, &spc_control_request,
+                        &spc_control_result) == SR_RESULT_OK &&
+                        spc_control_result.flags ==
+                            (SR_SPC_PC_CONTROL_MATCHED |
+                             SR_SPC_PC_CONTROL_WRITTEN) &&
+                        spc_control_result.observed_pc == 0x0f10u &&
+                        spc_control_result.current_pc == 0x0f48u &&
+                        snes->apu->spc->pc == 0x0f48u,
+                    "SPC control compare-and-set mismatch");
+    failed |= check_generation(api, runner, 10u, 2u, 1u, 1u, 6u);
+
+    failed |= check(api->configure_audio_mix(
+                        runner, &small_audio_mix_control) ==
+                            SR_RESULT_INVALID_ARGUMENT,
+                    "undersized audio mix control accepted");
+    audio_mix_control.music_gain_percent = 101u;
+    failed |= check(api->configure_audio_mix(runner, &audio_mix_control) ==
+                        SR_RESULT_INVALID_ARGUMENT,
+                    "out-of-range audio mix gain accepted");
+    audio_mix_control.music_gain_percent = 65u;
+    failed |= check(api->configure_audio_mix(runner, &audio_mix_control) ==
+                        SR_RESULT_OK,
+                    "audio mix control failed");
+    {
+        int music_gain = -1;
+        int sfx_gain = -1;
+        dsp_getBusGains(&music_gain, &sfx_gain);
+        failed |= check(music_gain == 65 && sfx_gain == 35,
+                        "audio mix gains mismatch");
+    }
+    failed |= check_generation(api, runner, 10u, 2u, 1u, 1u, 6u);
 
     sr_runner_set_cpu_state_provider(snes, NULL, NULL);
     sr_runner_set_execution_state_provider(snes, NULL);

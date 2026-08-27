@@ -11,11 +11,9 @@
 uint64_t g_apu_timer0_total_ticks;
 static int failures;
 static unsigned opcode_runs;
-static unsigned apply_calls;
 static unsigned dsp_observer_calls;
 static unsigned save_calls;
 static unsigned extra_save_calls;
-static uint8_t applied_value;
 
 static void check(int condition, const char *message) {
     if (!condition) {
@@ -46,11 +44,6 @@ uint8_t dsp_read(Dsp *dsp, uint8_t address) { return dsp->ram[address]; }
 void dsp_write(Dsp *dsp, uint8_t address, uint8_t value) { dsp->ram[address] = value; }
 void dsp_saveload(Dsp *dsp, SaveLoadInfo *info) { (void)dsp; (void)info; }
 
-static void on_apply(Apu *apu, uint8_t port, uint8_t value) {
-    (void)apu; (void)port;
-    ++apply_calls;
-    applied_value = value;
-}
 static void on_dsp(Apu *apu, uint8_t address, uint8_t value) {
     (void)apu; (void)address; (void)value;
     ++dsp_observer_calls;
@@ -97,13 +90,12 @@ static void test_dsp_hooks(Apu *apu) {
 
 static void test_queue_and_cycles(Apu *apu) {
     apu_reset(apu);
-    g_apu_port_apply_trace_hook = on_apply;
     apu_schedulePortWrite(apu, 2u, 0x33u, 1u);
     apu_cycle(apu);
     check(apu->inPorts[2] == 0u && apu->sampleClock == 1u,
           "future write waits through first sample boundary");
     for (unsigned index = 0; index < 32u; ++index) apu_cycle(apu);
-    check(apu->inPorts[2] == 0x33u && apply_calls == 1u && applied_value == 0x33u,
+    check(apu->inPorts[2] == 0x33u,
           "queued write applies on produced-sample clock");
     check(((Dsp *)apu->dsp)->sampleWrite == 2u && opcode_runs != 0u,
           "DSP and SPC advance on their clocks");

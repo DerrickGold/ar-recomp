@@ -187,6 +187,112 @@ presentations per second in its settled town windows. Paired records are
 `runner-abi-main-boundary-portable.json` and
 `runner-abi-main-boundary-native.json` outside the source tree.
 
+Migrating native-audio provenance tracing to the public observer retained one
+unlikely disabled check at each pre-existing APU/SPC seam and performs no
+payload construction unless a subscriber is active. Every replay artifact hash
+matched. Adjacent paired deltas were:
+
+| Workload | Portable | Native-SIMD |
+| --- | ---: | ---: |
+| `mode7_worldmap` | -0.03% | -0.06% |
+| `sim_actions` | -0.33% | +0.12% |
+| `aitos_wide` | +0.40% | -0.12% |
+| `death_heim_wide` | +0.02% | +0.10% |
+| **Suite geometric mean** | **+0.02%** | **+0.01%** |
+
+A separate 240-frame trace-enabled replay wrote all four CSV reports, retained
+valid SPC-PC provenance, and aggregated 454 DSP writes. Paired records are
+`runner-abi-audio-trace-portable.json` and
+`runner-abi-audio-trace-native.json` outside the source tree.
+
+Removing the unused standalone `SpcPlayer` adapter retained every replay
+artifact hash. Seven adjacent baseline/candidate pairs measured the following
+elapsed-time deltas:
+
+| Workload | Portable | Native-SIMD |
+| --- | ---: | ---: |
+| `mode7_worldmap` | -0.81% | +0.76% |
+| `sim_actions` | -0.69% | +0.81% |
+| `aitos_wide` | +0.12% | +0.09% |
+| `death_heim_wide` | -0.70% | +0.51% |
+| **Suite geometric mean** | **-0.52%** | **+0.54%** |
+
+The adapter had no per-frame caller, so these small opposing configuration
+deltas are treated as link-layout variation rather than an optimization. Paired
+records are `runner-abi-audio-cleanup-portable.json` and
+`runner-abi-audio-cleanup-native.json` outside the source tree.
+
+Migrating the live SPC image/sample adapter to a callback-lifetime upload
+transaction and an atomic deferred PC control retained every replay artifact
+hash. The new control object is deliberately last in the canonical source
+list: it is cold, and keeping it there avoids perturbing established hot runner
+link order. Seven adjacent baseline/candidate pairs measured:
+
+| Workload | Portable | Native-SIMD |
+| --- | ---: | ---: |
+| `mode7_worldmap` | +0.90% | -1.03% |
+| `sim_actions` | +0.40% | -0.53% |
+| `aitos_wide` | -0.09% | +0.17% |
+| `death_heim_wide` | +0.94% | -0.57% |
+| **Suite geometric mean** | **+0.54%** | **-0.49%** |
+
+The public deferred operation runs only while a resident upload completion is
+pending; normal frames make no call. Paired records are
+`runner-abi-spc-upload-portable-final.json` and
+`runner-abi-spc-upload-native-final.json` outside the source tree.
+
+Migrating native Music/SFX classification to a validated callback-lifetime
+route and moving live native-bus gains behind public control retained every
+replay artifact hash. The hot DSP-write transaction borrows ARAM and current
+bus labels read-only, returning no more than two small updates; it performs no
+snapshot or bulk copy. Seven adjacent baseline/candidate pairs measured:
+
+| Workload | Portable | Native-SIMD |
+| --- | ---: | ---: |
+| `mode7_worldmap` | +0.03% | +0.07% |
+| `sim_actions` | -0.36% | +0.27% |
+| `aitos_wide` | +0.11% | +0.08% |
+| `death_heim_wide` | +0.18% | -0.08% |
+| **Suite geometric mean** | **-0.01%** | **+0.08%** |
+
+Paired records are `runner-abi-audio-mixer-portable.json` and
+`runner-abi-audio-mixer-native.json` outside the source tree.
+
+Migrating the native extended-audio path to fixed-width game-adapter callbacks
+retained every replay artifact hash. ARAM stays zero-copy, DSP mutation is
+validated and applied by the runner, and the upload callback reuses the
+existing APU lock. Seven adjacent baseline/candidate pairs measured:
+
+| Workload | Portable | Native-SIMD |
+| --- | ---: | ---: |
+| `mode7_worldmap` | -0.09% | +0.64% |
+| `sim_actions` | -0.07% | +0.77% |
+| `aitos_wide` | +0.56% | +0.18% |
+| `death_heim_wide` | -0.67% | +1.45% |
+| **Suite geometric mean** | **-0.07%** | **+0.76%** |
+
+The portable suite is neutral and every native workload remains below the 2%
+mandatory-rerun band. Paired records are
+`runner-abi-audio-extension-portable.json` and
+`runner-abi-audio-extension-native.json` outside the source tree.
+
+Extending the public OBJ service with caller-owned range resolution and direct
+resolved/synthetic-part rasterization, then migrating the SIM atlas, retained
+every replay artifact hash. The normal path reuses parts already recorded by
+the game and writes directly into the final packed atlas rectangle. Seven
+adjacent baseline/candidate pairs measured:
+
+| Workload | Portable | Native-SIMD |
+| --- | ---: | ---: |
+| `mode7_worldmap` | -0.81% | +0.04% |
+| `sim_actions` | -0.84% | -0.03% |
+| `aitos_wide` | -0.19% | +0.08% |
+| `death_heim_wide` | -0.02% | -0.04% |
+| **Suite geometric mean** | **-0.47%** | **+0.01%** |
+
+Paired records are `runner-abi-sim-atlas-portable.json` and
+`runner-abi-sim-atlas-native.json` outside the source tree.
+
 ## Phase acceptance
 
 The target is no measurable regression.  A phase is accepted automatically

@@ -4,6 +4,7 @@
 #include "saveload.h"
 #include "snes.h"
 #include "spc.h"
+#include "runner_next_internal.h"
 
 #include <stddef.h>
 #include <stdlib.h>
@@ -27,12 +28,9 @@ static const uint8_t k_recomp_boot_rom[0x40] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0xff,
 };
 
-void (*g_apu_port_apply_trace_hook)(Apu *, uint8_t, uint8_t);
-void (*g_apu_spc_port_read_trace_hook)(Apu *, uint8_t, uint8_t);
 void (*g_apu_spc_port_write_trace_hook)(Apu *, uint8_t, uint8_t);
 void (*g_apu_spc_dsp_write_hook)(Apu *, uint8_t, uint8_t);
 bool (*g_apu_spc_dsp_write_filter_hook)(Apu *, uint8_t, uint8_t *);
-void (*g_apu_spc_dsp_write_trace_hook)(Apu *, uint8_t, uint8_t);
 void (*g_apu_extra_saveload_hook)(Apu *, SaveLoadInfo *);
 
 uint64_t g_spc_write_counts[0x100];
@@ -100,9 +98,10 @@ void apu_reset(Apu *apu) {
 static void apply_port_write(Apu *apu, const ApuPortWrite *write) {
     const uint8_t port = (uint8_t)(write->port & 3u);
     apu->inPorts[port] = write->val;
-    if (g_apu_port_apply_trace_hook != NULL) {
-        g_apu_port_apply_trace_hook(apu, port, write->val);
-    }
+    if (sr_runner_audio_trace_enabled())
+        sr_runner_emit_audio_trace(
+            apu, SR_AUDIO_TRACE_APU_PORT_APPLY, 0u, port, 0u,
+            write->val, s_apu_cycle_count);
 }
 
 void apu_schedulePortWrite(Apu *apu, uint8_t port, uint8_t value,
@@ -247,9 +246,10 @@ uint8_t apu_cpuRead(Apu *apu, uint16_t address) {
         case 0xf7u: {
             const uint8_t port = (uint8_t)(address - 0xf4u);
             const uint8_t value = apu->inPorts[port];
-            if (g_apu_spc_port_read_trace_hook != NULL) {
-                g_apu_spc_port_read_trace_hook(apu, port, value);
-            }
+            if (sr_runner_audio_trace_enabled())
+                sr_runner_emit_audio_trace(
+                    apu, SR_AUDIO_TRACE_SPC_PORT_READ, 0u, port, 0u,
+                    value, s_apu_cycle_count);
             return value;
         }
         case 0xf8u:
@@ -309,8 +309,10 @@ void apu_cpuWrite(Apu *apu, uint16_t address, uint8_t value) {
                 const uint8_t original = value;
                 if (g_apu_spc_dsp_write_hook != NULL)
                     g_apu_spc_dsp_write_hook(apu, apu->dspAdr, original);
-                if (g_apu_spc_dsp_write_trace_hook != NULL)
-                    g_apu_spc_dsp_write_trace_hook(apu, apu->dspAdr, original);
+                if (sr_runner_audio_trace_enabled())
+                    sr_runner_emit_audio_trace(
+                        apu, SR_AUDIO_TRACE_DSP_WRITE, 0u, 0u,
+                        apu->dspAdr, original, s_apu_cycle_count);
                 if (g_apu_spc_dsp_write_filter_hook == NULL ||
                     g_apu_spc_dsp_write_filter_hook(apu, apu->dspAdr, &value)) {
                     dsp_write(apu->dsp, apu->dspAdr, value);

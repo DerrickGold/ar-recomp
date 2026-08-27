@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "audio_adapter.h"
+
 /* Pure routing helpers for ActRaiser's two effect sequencer tracks. */
 bool NativeAudioExtension_RouteVoiceWrite(
     uint8_t dsp_addr, uint8_t logical_track, uint8_t track_mask,
@@ -37,6 +39,19 @@ extern void (*g_native_audio_extension_trace_end_hook)(
     uint64_t trace_serial, uint8_t lane);
 extern void (*g_native_audio_extension_trace_cancel_hook)(
     uint64_t trace_serial);
+
+/* Fixed-width game-adapter callbacks. The runner invokes these synchronously
+ * while it owns the live audio state; no concrete APU/SPC/DSP layout crosses
+ * this boundary. */
+bool NativeAudioExtension_FilterDspWrite(
+    RtlAudioExtensionContext *context, uint8_t address, uint8_t *value);
+void NativeAudioExtension_PatchSpcOpcode(
+    RtlAudioExtensionContext *context, uint16_t opcode_pc);
+int NativeAudioExtension_AdjustSpcOpcodeCycles(
+    uint16_t opcode_pc, int cycles);
+void NativeAudioExtension_SaveState(RtlAudioSaveContext *context);
+void NativeAudioExtension_OnSpcUpload(
+    RtlAudioExtensionContext *context, uint32_t source24);
 
 /* Install the restart-class optional bridge. Safe before SnesInit; the DSP
  * core stores enablement globally and initializes its virtual pool on reset. */

@@ -4,12 +4,16 @@
 #include "cpu_state.h"
 #include "cpu_trace.h"
 #include "debug_server.h"
+#include "snes/apu.h"
 #include "snes/cart.h"
 #include "snes/cpu.h"
 #include "snes/dma.h"
+#include "snes/dsp.h"
 #include "snes/msu1.h"
 #include "snes/ppu.h"
+#include "snes/saveload.h"
 #include "snes/snes.h"
+#include "snes/spc.h"
 #include "runner_next_internal.h"
 
 #include <stdio.h>
@@ -50,9 +54,285 @@ static bool g_tailcall_context_valid;
 uint64 g_watchdog_loop_headers;
 int g_watchdog_tripped;
 
+_Static_assert(kDspHardwareVoiceCount == 8,
+               "audio adapter hardware voice count mismatch");
+_Static_assert(kDspHardwareVoiceCount ==
+                   RTL_AUDIO_ADAPTER_HARDWARE_VOICE_COUNT,
+               "audio adapter hardware voice count mismatch");
+_Static_assert(kDspExtendedVoiceCount ==
+                   RTL_AUDIO_ADAPTER_EXTENDED_VOICE_COUNT,
+               "audio adapter extended voice count mismatch");
+_Static_assert(kDspMaximumVoiceCount == RTL_AUDIO_ADAPTER_VOICE_MAX,
+               "audio adapter maximum voice count mismatch");
+_Static_assert(kDspVoiceBus_Unclassified == RTL_AUDIO_VOICE_BUS_UNCLASSIFIED &&
+                   kDspVoiceBus_Music == RTL_AUDIO_VOICE_BUS_MUSIC &&
+                   kDspVoiceBus_Sfx == RTL_AUDIO_VOICE_BUS_SFX,
+               "audio adapter bus values must match the DSP");
+
+static uint32 audio_voice_count(void) {
+    return dsp_extendedVoicesEnabled()
+        ? kDspMaximumVoiceCount : kDspHardwareVoiceCount;
+}
+
+static bool s_audio_extension_enabled;
+
+static bool audio_extension_dsp_operation(
+        void *service_context, uint32_t operation, uint32_t voice,
+        uint8_t address, uint8_t value, uint8_t update_mask) {
+    Apu *apu = (Apu *)service_context;
+    const uint32_t voice_count = audio_voice_count();
+    if (apu == NULL || apu->dsp == NULL) return false;
+    switch ((RtlAudioDspOperation)operation) {
+    case RTL_AUDIO_DSP_SET_VOICE_BUS:
+        if (voice >= voice_count || value > RTL_AUDIO_VOICE_BUS_SFX)
+            return false;
+        dsp_setVoiceBus(apu->dsp, (int)voice, (DspVoiceBus)value);
+        return true;
+    case RTL_AUDIO_DSP_WRITE_VIRTUAL_REGISTER:
+        if (voice < kDspHardwareVoiceCount || voice >= voice_count ||
+            address >= 0x80u)
+            return false;
+        dsp_writeVirtualVoiceRegister(
+            apu->dsp, (int)voice, address, value);
+        return true;
+    case RTL_AUDIO_DSP_WRITE_VIRTUAL_CONTROL:
+        if (voice < kDspHardwareVoiceCount || voice >= voice_count ||
+            address >= 0x80u || value > 1u)
+            return false;
+        dsp_writeVirtualVoiceControl(
+            apu->dsp, (int)voice, address, value != 0u);
+        return true;
+    case RTL_AUDIO_DSP_WRITE_HARDWARE_MASK:
+        if (address >= 0x80u) return false;
+        dsp_writeHardwareVoiceMask(apu->dsp, address, value, update_mask);
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool populate_audio_extension_context(
+        Apu *apu, RtlAudioExtensionContext *context) {
+    uint32_t voice_count;
+    if (apu == NULL || context == NULL || apu->spc == NULL ||
+        apu->dsp == NULL)
+        return false;
+    voice_count = audio_voice_count();
+    memset(context, 0, sizeof(*context));
+    context->struct_size = RTL_AUDIO_EXTENSION_CONTEXT_V2_SIZE;
+    context->apu_ram = apu->ram;
+    context->apu_ram_byte_size = sizeof(apu->ram);
+    context->hardware_voice_count = kDspHardwareVoiceCount;
+    context->extended_voice_count =
+        voice_count - kDspHardwareVoiceCount;
+    context->spc_pc = apu->spc->pc;
+    context->spc_x = apu->spc->x;
+    context->spc_z = (uint8_t)apu->spc->z;
+    context->service_context = apu;
+    context->dsp_operation = audio_extension_dsp_operation;
+    return true;
+}
+
+static bool route_game_audio_extension_dsp_write(
+        Apu *apu, uint8_t address, uint8_t *value) {
+    RtlAudioExtensionContext context;
+    if (!s_audio_extension_enabled || g_rtl_game_info == NULL ||
+        g_rtl_game_info->audio_extension_dsp_write == NULL ||
+        value == NULL || !populate_audio_extension_context(apu, &context))
+        return true;
+    return g_rtl_game_info->audio_extension_dsp_write(
+        &context, address, value);
+}
+
+static void route_game_audio_extension_spc_opcode(
+        Spc *spc, uint16_t opcode_pc) {
+    RtlAudioExtensionContext context;
+    if (!s_audio_extension_enabled || g_rtl_game_info == NULL ||
+        g_rtl_game_info->audio_extension_spc_opcode == NULL || spc == NULL ||
+        !populate_audio_extension_context(spc->apu, &context))
+        return;
+    g_rtl_game_info->audio_extension_spc_opcode(&context, opcode_pc);
+    if (context.struct_size < RTL_AUDIO_EXTENSION_CONTEXT_V2_SIZE ||
+        context.flags != 0u || context.spc_z > 1u)
+        return;
+    spc->pc = context.spc_pc;
+    spc->x = context.spc_x;
+    spc->z = context.spc_z != 0u;
+}
+
+static int route_game_audio_extension_spc_cycle(
+        Spc *spc, uint16_t opcode_pc, int cycles) {
+    (void)spc;
+    if (!s_audio_extension_enabled || g_rtl_game_info == NULL ||
+        g_rtl_game_info->audio_extension_spc_cycle == NULL)
+        return cycles;
+    return g_rtl_game_info->audio_extension_spc_cycle(opcode_pc, cycles);
+}
+
+static bool audio_save_transfer(
+        void *service_context, uint32_t kind, void *values, uint64_t count) {
+    SaveLoadInfo *info = (SaveLoadInfo *)service_context;
+    uint64_t index;
+    if (info == NULL || info->func == NULL || values == NULL ||
+        count > (uint64_t)SIZE_MAX)
+        return false;
+    switch ((RtlAudioSaveValueKind)kind) {
+    case RTL_AUDIO_SAVE_BYTES:
+        saveload_bytes(info, values, (size_t)count);
+        break;
+    case RTL_AUDIO_SAVE_U8:
+        saveload_bytes(info, values, (size_t)count);
+        break;
+    case RTL_AUDIO_SAVE_U16:
+        for (index = 0u; index < count; ++index)
+            saveload_u16(info, &((uint16_t *)values)[index]);
+        break;
+    case RTL_AUDIO_SAVE_U32:
+        for (index = 0u; index < count; ++index)
+            saveload_u32(info, &((uint32_t *)values)[index]);
+        break;
+    case RTL_AUDIO_SAVE_U64:
+        for (index = 0u; index < count; ++index)
+            saveload_u64(info, &((uint64_t *)values)[index]);
+        break;
+    default:
+        info->failed = true;
+        return false;
+    }
+    return !info->failed;
+}
+
+static void route_game_audio_extension_save(
+        Apu *apu, SaveLoadInfo *info) {
+    RtlAudioSaveContext context;
+    (void)apu;
+    if (!s_audio_extension_enabled || g_rtl_game_info == NULL ||
+        g_rtl_game_info->audio_extension_save == NULL || info == NULL ||
+        info->func == NULL)
+        return;
+    memset(&context, 0, sizeof(context));
+    context.struct_size = RTL_AUDIO_SAVE_CONTEXT_V2_SIZE;
+    context.saving = (uint8_t)info->saving;
+    context.portable = (uint8_t)info->portable;
+    context.service_context = info;
+    context.transfer = audio_save_transfer;
+    g_rtl_game_info->audio_extension_save(&context);
+}
+
+void RtlAudioExtensionConfigure(bool enabled) {
+    s_audio_extension_enabled = enabled;
+    dsp_setExtendedVoicesEnabled(enabled);
+}
+
+void RtlAudioExtensionNotifyUploadLocked(uint32 source24) {
+    RtlAudioExtensionContext context;
+    if (!s_audio_extension_enabled || g_rtl_game_info == NULL ||
+        g_rtl_game_info->audio_extension_upload == NULL || g_snes == NULL ||
+        g_snes->apu == NULL)
+        return;
+    if (populate_audio_extension_context(g_snes->apu, &context))
+        g_rtl_game_info->audio_extension_upload(&context, source24);
+}
+
+static bool audio_bus_update_valid(const RtlAudioVoiceBusUpdate *update,
+                                   uint32 voice_count) {
+    return update != NULL && update->voice < voice_count &&
+        update->bus <= RTL_AUDIO_VOICE_BUS_SFX &&
+        update->reserved8[0] == 0u && update->reserved8[1] == 0u;
+}
+
+static void route_game_audio_dsp_write(Apu *apu, uint8 address, uint8 value) {
+    RtlAudioDspWriteContext context;
+    RtlAudioDspWriteRouting routing = {
+        .struct_size = RTL_AUDIO_DSP_WRITE_ROUTING_V2_SIZE,
+    };
+    uint32 voice_count;
+    uint32 index;
+    if (apu == NULL || apu->spc == NULL || apu->dsp == NULL ||
+        g_rtl_game_info == NULL ||
+        g_rtl_game_info->audio_dsp_write_routing == NULL)
+        return;
+    voice_count = audio_voice_count();
+    context.struct_size = RTL_AUDIO_DSP_WRITE_CONTEXT_V2_SIZE;
+    context.flags = 0u;
+    context.apu_ram = apu->ram;
+    context.voice_bus = apu->dsp->voiceBus;
+    context.apu_ram_byte_size = sizeof(apu->ram);
+    context.voice_bus_count = voice_count;
+    context.spc_x = apu->spc->x;
+    context.dsp_address = address;
+    context.dsp_value = value;
+    context.extended_voices_enabled =
+        (uint8)(voice_count > kDspHardwareVoiceCount);
+    g_rtl_game_info->audio_dsp_write_routing(&context, &routing);
+    if (routing.struct_size < RTL_AUDIO_DSP_WRITE_ROUTING_V2_SIZE ||
+        routing.flags != 0u || routing.reserved != 0u ||
+        routing.update_count > RTL_AUDIO_DSP_WRITE_UPDATE_MAX)
+        return;
+    for (index = 0u; index < routing.update_count; ++index) {
+        if (!audio_bus_update_valid(&routing.update[index], voice_count))
+            return;
+    }
+    for (index = 0u; index < routing.update_count; ++index) {
+        dsp_setVoiceBus(apu->dsp, routing.update[index].voice,
+                        (DspVoiceBus)routing.update[index].bus);
+    }
+}
+
+static void route_game_audio_state_loaded(Apu *apu) {
+    RtlAudioStateLoadedContext context;
+    RtlAudioStateLoadedRouting routing = {
+        .struct_size = RTL_AUDIO_STATE_LOADED_ROUTING_V2_SIZE,
+    };
+    uint32 voice_count;
+    uint32 index;
+    if (apu == NULL || apu->dsp == NULL || g_rtl_game_info == NULL ||
+        g_rtl_game_info->audio_state_loaded_routing == NULL)
+        return;
+    voice_count = audio_voice_count();
+    context.struct_size = RTL_AUDIO_STATE_LOADED_CONTEXT_V2_SIZE;
+    context.flags = 0u;
+    context.apu_ram = apu->ram;
+    context.apu_ram_byte_size = sizeof(apu->ram);
+    context.voice_bus_count = voice_count;
+    context.extended_voices_enabled =
+        (uint8)(voice_count > kDspHardwareVoiceCount);
+    memset(context.reserved8, 0, sizeof(context.reserved8));
+    g_rtl_game_info->audio_state_loaded_routing(&context, &routing);
+    if (routing.struct_size < RTL_AUDIO_STATE_LOADED_ROUTING_V2_SIZE ||
+        routing.flags != 0u || routing.reserved != 0u ||
+        routing.voice_bus_count > voice_count)
+        return;
+    for (index = 0u; index < routing.voice_bus_count; ++index) {
+        if (routing.voice_bus[index] > RTL_AUDIO_VOICE_BUS_SFX) return;
+    }
+    for (index = 0u; index < routing.voice_bus_count; ++index) {
+        dsp_setVoiceBus(apu->dsp, (int)index,
+                        (DspVoiceBus)routing.voice_bus[index]);
+    }
+}
+
 void RtlRegisterGame(const RtlGameInfo *info) {
     g_rtl_game_info = info;
     g_snes_rdnmi_read_hook = info != NULL ? info->read_rdnmi : NULL;
+    g_apu_spc_dsp_write_hook = info != NULL &&
+            info->audio_dsp_write_routing != NULL
+        ? route_game_audio_dsp_write : NULL;
+    g_rtl_apu_state_loaded_hook = info != NULL &&
+            info->audio_state_loaded_routing != NULL
+        ? route_game_audio_state_loaded : NULL;
+    g_apu_spc_dsp_write_filter_hook = s_audio_extension_enabled &&
+            info != NULL && info->audio_extension_dsp_write != NULL
+        ? route_game_audio_extension_dsp_write : NULL;
+    g_spc_opcode_patch_hook = s_audio_extension_enabled && info != NULL &&
+            info->audio_extension_spc_opcode != NULL
+        ? route_game_audio_extension_spc_opcode : NULL;
+    g_spc_opcode_cycle_hook = s_audio_extension_enabled && info != NULL &&
+            info->audio_extension_spc_cycle != NULL
+        ? route_game_audio_extension_spc_cycle : NULL;
+    g_apu_extra_saveload_hook = s_audio_extension_enabled && info != NULL &&
+            info->audio_extension_save != NULL
+        ? route_game_audio_extension_save : NULL;
     msu1_init();
 }
 
@@ -261,6 +541,7 @@ static void clear_published_runner(void) {
         g_rtl_game_info->bind_runner_abi(g_snes, false);
     }
     sr_runner_clear_event_subscriptions(g_snes);
+    sr_runner_clear_audio_trace_subscriptions(g_snes);
     g_snes = NULL;
     g_snes_cpu = NULL;
     g_dma = NULL;

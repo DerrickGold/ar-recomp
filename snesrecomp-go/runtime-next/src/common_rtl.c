@@ -8,7 +8,6 @@
 #include "framedump.h"
 #include "recomp_hw.h"
 #include "runner_next_internal.h"
-#include "spc_player.h"
 #include "spc_upload.h"
 #include "snes/apu.h"
 #include "snes/cart.h"
@@ -132,8 +131,6 @@ void RtlReset(int mode) {
         memset(g_sram, 0, (size_t)g_sram_size);
     RtlApuLock();
     g_audio_phase = 0.0;
-    if (g_spc_player != NULL && g_spc_player->initialize != NULL)
-        g_spc_player->initialize(g_spc_player);
     RtlApuUnlock();
 }
 
@@ -497,10 +494,48 @@ void RtlApuWrite(uint16 address, uint8 value) {
     RtlApuUnlock();
 }
 
+static bool apply_spc_upload_control(
+        Apu *apu, const SrSpcUploadContext *upload) {
+    uint32_t cycles;
+    if (apu == NULL || apu->spc == NULL || upload == NULL ||
+        upload->struct_size < SR_SPC_UPLOAD_CONTEXT_V2_SIZE ||
+        (upload->control_flags &
+         ~(SR_SPC_UPLOAD_CONTROL_SET_PC |
+           SR_SPC_UPLOAD_CONTROL_RUN_UNTIL_PC)) != 0u ||
+        upload->reserved8[0] != 0u || upload->reserved8[1] != 0u ||
+        upload->reserved8[2] != 0u)
+        return false;
+    if ((upload->control_flags & SR_SPC_UPLOAD_CONTROL_SET_PC) != 0u)
+        apu->spc->pc = upload->requested_pc;
+    if ((upload->control_flags & SR_SPC_UPLOAD_CONTROL_RUN_UNTIL_PC) == 0u)
+        return true;
+    if (upload->stop_pc_count == 0u ||
+        upload->stop_pc_count > SR_SPC_UPLOAD_STOP_PC_MAX ||
+        upload->max_cycles == 0u ||
+        upload->max_cycles > SR_SPC_UPLOAD_MAX_CONTROL_CYCLES)
+        return false;
+    audio_trace_set_producer(AUDIO_TRACE_PRODUCER_CPU);
+    for (cycles = 0u; cycles < upload->max_cycles; ++cycles) {
+        uint32_t index;
+        bool reached = false;
+        for (index = 0u; index < upload->stop_pc_count; ++index) {
+            if (apu->spc->pc == upload->stop_pc[index]) {
+                reached = true;
+                break;
+            }
+        }
+        if (reached || apu->spc->stopped) break;
+        apu_cycle(apu);
+    }
+    audio_trace_set_producer(AUDIO_TRACE_PRODUCER_UNKNOWN);
+    return true;
+}
+
 static bool upload_spc_image(CpuState *cpu, bool update_result) {
     uint32 source24;
     size_t source_offset;
-    SrSpcUploadResult upload;
+    SrSpcUploadResult parsed;
+    SrSpcUploadContext upload;
     uint64_t profile_start = ApuProfEnabled() ? audio_trace_wall_ns() : 0u;
     bool initial_upload;
     bool success;
@@ -512,12 +547,21 @@ static bool upload_spc_image(CpuState *cpu, bool update_result) {
     source_offset = (size_t)(RomPtr(source24) - g_rom);
 
     RtlApuLock();
+    memset(&upload, 0, sizeof(upload));
+    upload.struct_size = SR_SPC_UPLOAD_CONTEXT_V2_SIZE;
+    upload.rom_data = g_rom;
+    upload.apu_ram = g_snes->apu->ram;
+    upload.rom_byte_size = rom_size();
+    upload.apu_ram_byte_size = SR_APU_RAM_BYTE_COUNT;
     success = sr_spc_upload_image(g_rom, rom_size(), source_offset,
-                                  g_snes->apu->ram, &upload);
+                                  g_snes->apu->ram, &parsed);
     if (!success) {
         RtlApuUnlock();
         return false;
     }
+    upload.script_offset = parsed.script_offset;
+    upload.entry_point = parsed.entry_point;
+    upload.block_count = parsed.block_count;
     if (g_rtl_game_info->spc_upload_customize != NULL)
         success = g_rtl_game_info->spc_upload_customize(
             cpu, &upload, source24);
@@ -525,7 +569,6 @@ static bool upload_spc_image(CpuState *cpu, bool update_result) {
         RtlApuUnlock();
         return false;
     }
-
     apu_clearPortQueue(g_snes->apu);
     memset(g_snes->apu->inPorts, 0, sizeof(g_snes->apu->inPorts));
     memset(g_snes->apu->outPorts, 0, sizeof(g_snes->apu->outPorts));
@@ -541,10 +584,19 @@ static bool upload_spc_image(CpuState *cpu, bool update_result) {
             spc->pc = upload.entry_point;
         }
     }
+    upload.state_flags = initial_upload ? SR_SPC_UPLOAD_STATE_INITIAL : 0u;
+    if (g_snes->apu->spc->stopped)
+        upload.state_flags |= SR_SPC_UPLOAD_STATE_SPC_STOPPED;
+    upload.spc_pc = g_snes->apu->spc->pc;
     if (g_rtl_game_info->spc_upload_commit != NULL)
-        g_rtl_game_info->spc_upload_commit(
-            g_snes->apu, upload.entry_point, initial_upload);
+        g_rtl_game_info->spc_upload_commit(&upload);
+    success = apply_spc_upload_control(g_snes->apu, &upload);
+    if (!success) {
+        RtlApuUnlock();
+        return false;
+    }
     g_apu_last_sync_cycles = g_apu_pace_cycles_estimate;
+    RtlAudioExtensionNotifyUploadLocked(source24);
     RtlApuUnlock();
 
     if (g_rtl_spc_upload_hook != NULL) g_rtl_spc_upload_hook(source24);

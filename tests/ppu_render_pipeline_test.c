@@ -801,8 +801,11 @@ static void BeginSimRecord(uint16_t record, bool world, uint16_t cursor,
 
 static void TestSemanticAtlasPacking(void) {
   Ppu *ppu = ppu_init();
+  Snes snes = {0};
   CHECK(ppu != NULL);
   if (!ppu) return;
+  snes.ppu = ppu;
+  sr_runner_bind_ppu_services(&snes, true);
   ppu_reset(ppu);
   ppu->inidisp = 0x0f;
   ppu->cgram[0x81] = bgr555(31, 31, 31);
@@ -818,7 +821,7 @@ static void TestSemanticAtlasPacking(void) {
   ppu->oam[2] = 13 | (7 << 8);
   ppu->oam[3] = 2u << 12;
 
-  CHECK(SimRenderAtlas_Build(ppu, 100, 50));
+  CHECK(SimRenderAtlas_Build(sr_runner_handle(&snes), 100, 50));
   SimAtlasBuildInput atlas;
   CHECK(SimRenderMetadata_CopyAtlasInput(&atlas));
   CHECK(atlas.object_count == 2);
@@ -854,7 +857,7 @@ static void TestSemanticAtlasPacking(void) {
     ppu->oam[1] = real.tile_attr;
     PpuSetObjExactPosition(ppu, 0, real.x, real.y);
   }
-  CHECK(SimRenderAtlas_Build(ppu, 0, 0));
+  CHECK(SimRenderAtlas_Build(sr_runner_handle(&snes), 0, 0));
   CHECK(SimRenderMetadata_CopyAtlasInput(&atlas));
   CHECK(atlas.object_count == 1);
   CHECK(atlas.part_count == 2);
@@ -911,7 +914,7 @@ static void TestSemanticAtlasPacking(void) {
     ppu->oam[index + 1] = 1u << 12;
     ppu->highOam[index >> 3] |= (uint8_t)(1u << ((index & 7) + 1));
   }
-  CHECK(SimRenderAtlas_Build(ppu, 0, 0));
+  CHECK(SimRenderAtlas_Build(sr_runner_handle(&snes), 0, 0));
 
   uint8_t wram[kActRaiserWramSize] = {0};
   wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
@@ -932,6 +935,7 @@ static void TestSemanticAtlasPacking(void) {
   CHECK(packed == 49);
   CHECK(purged == 1);
 
+  sr_runner_bind_ppu_services(&snes, false);
   ppu_free(ppu);
 }
 

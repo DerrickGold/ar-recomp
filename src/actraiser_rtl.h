@@ -7,6 +7,8 @@
 #include "common_cpu_infra.h"
 #include "snes/snes_regs.h"
 
+typedef struct SrRunnerHandle SrRunnerHandle;
+
 void ActRaiserDrawPpuFrame(void);
 void ActRaiser_RebindPpuOutputSurfaces(void);
 
@@ -63,13 +65,13 @@ void ActRaiser_DestroyGameCoroutine(void);
 int ActRaiser_ReadRdnmi(Snes *snes);
 bool ActRaiser_RecoverDispatchMiss(uint32 source_pc24, uint32 target_pc24);
 void ActRaiser_SpcUploaderCompleteTick(void);
+void ActRaiser_SpcUploadBindRunner(SrRunnerHandle *runner);
 #ifdef SNESRECOMP_NEXT_COMMON_CPU_INFRA_H
 bool ActRaiser_SpcUploadSource(CpuState *cpu, uint32 *source24);
 bool ActRaiser_SpcUploadCustomize(CpuState *cpu,
-                                  const SrSpcUploadResult *upload,
+                                  const SrSpcUploadContext *upload,
                                   uint32 source24);
-void ActRaiser_SpcUploadCommit(Apu *apu, uint16 entry_point,
-                               bool initial_upload);
+void ActRaiser_SpcUploadCommit(SrSpcUploadContext *upload);
 int ActRaiser_SpcUploadStackPop(const CpuState *cpu);
 #endif
 

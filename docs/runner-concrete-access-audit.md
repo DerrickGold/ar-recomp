@@ -99,6 +99,61 @@ inside the already-fenced ActRaiser adapter, and the obsolete direct startup
 margin write is gone because the preceding ABI surface rebind already performs
 that configuration.
 
+The native-audio diagnostic slice replaces four concrete APU/SPC trace-hook
+payloads with a capability-gated public observer and leaves 10 temporary
+exceptions. Events carry fixed-width SPC registers, port/DSP values, the APU
+cycle clock, and a callback-lifetime read-only ARAM view. The game-specific
+driver offsets remain in the ActRaiser tracer rather than entering the runner
+contract. The old nullable hook check at each existing audio seam became one
+unlikely observer-count check, so disabled tracing adds neither a second
+branch nor a copy. Subscriptions are cleared with runner teardown.
+
+The standalone ActRaiser `SpcPlayer` compatibility adapter was then removed,
+leaving 9 temporary exceptions. Repository-wide symbol analysis showed that
+no caller uploaded data to it, rendered its DSP, or observed its ports: boot
+allocated a second isolated DSP and reset only cleared that unused instance.
+Deleting the adapter avoids inventing a public ABI for dead behavior and does
+not alter the live APU, SPC, DSP, upload, replacement-music, or native-mixer
+paths.
+
+The live SPC-upload slice moves `actraiser/actraiser_spc_upload.c` behind two
+narrow boundaries and leaves 8 temporary exceptions. The runner supplies a
+versioned callback-lifetime transaction containing immutable ROM, live ARAM,
+parsed upload metadata, and current SPC state while it already owns the APU
+lock. The game adapter can extend the upload and request the same bounded
+bootstrap execution without learning `Apu` or `Spc` layout. Its later
+resident-uploader handshake uses a public atomic compare-and-set service:
+an inclusive PC range and bounded ARAM signature must both match before the
+runner changes the SPC PC. The common fast path is unchanged; this control is
+called only while a game upload completion is pending.
+
+The native mixer slice moves `native_audio_mixer.c` behind a zero-copy,
+callback-lifetime routing transaction and leaves 7 temporary exceptions. On
+each existing DSP-write seam the runner supplies fixed-width SPC X/address/
+value fields plus read-only ARAM and voice-bus spans; the ActRaiser adapter
+returns at most two validated bus-label updates. State loads use a separate
+cold full-label plan. Live Music/SFX gains now use capability-gated public
+audio-mix control, with the runner owning APU locking. The replacement-stream
+gain remains host policy. No ARAM, DSP, or audio buffer is copied.
+
+The native extended-audio slice moves `native_audio_extension.c` behind
+synchronous game-adapter transactions and leaves 6 temporary exceptions. The
+runner supplies fixed-width SPC state and a callback-lifetime, zero-copy ARAM
+view, owns validation and application of the small DSP operation set, and
+publishes the existing upload safe point while the APU lock is already held.
+Extension save/load state crosses a canonical fixed-width transfer service;
+the application no longer imports APU, SPC, DSP, SNES, or save-state layouts.
+When the extension is disabled the runner installs no opcode, cycle, DSP,
+save-state, or upload callback.
+
+The SIM object-atlas slice removes `sim/sim_render_atlas.c` and leaves 5
+temporary exceptions. ABI v2 can now resolve a live OAM range once into
+caller-owned fixed-width OBJ parts, including rotation, exact-position,
+camera-relative, size, and priority policy, then rasterize resolved or
+synthetic parts directly into caller-owned cropped storage. The atlas uses its
+already captured parts on the normal path and the resolver only as a fallback;
+neither path takes a full PPU snapshot or copies an intermediate image.
+
 ## Required seams
 
 ### Type leakage
@@ -109,14 +164,10 @@ cost.
 
 ### Read-only inspection
 
-Developer tools and capture code read registers or memories without owning the
-component:
-
-- `dev/native_audio_trace_runtime.c`
-
-Use coherent fixed-width queries and generation-checked borrowed spans.  The
-dirty-range/scatter-gather work belongs here only where it removes an existing
-bulk copy; it is not a mandate to invent unused infrastructure.
+Complete for the concrete-layout fence. Developer tools consume coherent
+fixed-width snapshots, generation-checked borrows, or synchronous
+callback-lifetime views. Dirty-range/scatter-gather support remains warranted
+only where it removes an observed bulk copy.
 
 ### Host surface and presentation control
 
@@ -132,7 +183,7 @@ game frame is being produced:
 - `actraiser/actraiser_rtl.c`, `actraiser/actraiser_action_bg.c`,
   `actraiser/actraiser_widescreen_bg.c`, and
   `actraiser/actraiser_widescreen_sprites.c`
-- `sim/sim3d.c` and `sim/sim_render_atlas.c`
+- `sim/sim3d.c`
 
 Do not replace these with asynchronous commands or repeated full snapshots.
 They need synchronous game-adapter services at the emulation-thread safe point,
@@ -143,14 +194,10 @@ remain.
 
 ### APU, SPC, and DSP integration
 
-These modules currently cross the audio-thread ownership boundary directly:
-
-- `actraiser/actraiser_spc_player.c` and `actraiser/actraiser_spc_upload.c`
-- `native_audio_extension.c`, `native_audio_mixer.c`, and
-  `dev/native_audio_trace_runtime.c`
-
-Only the operations these consumers use are cutover-critical.  A general audio
-inspection SDK, asynchronous pinned snapshots, and speculative DSP controls are
+Complete for the concrete-layout fence. Audio diagnostics, SPC upload, native
+mixing, and the extended-audio path now use distinct fixed-width observer,
+transaction, control, and serialization services. A general audio inspection
+SDK, asynchronous pinned snapshots, and speculative DSP controls remain
 deferred.
 
 ## Deferred work
