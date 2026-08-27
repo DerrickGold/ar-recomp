@@ -3,17 +3,17 @@
 
 #include <stdbool.h>
 
-#include "snes/ppu.h"
+#include "runner_next.h"
 
 /* Diorama plane indexing for g_diorama_layer_pixels[] and the plane texture
- * array. The engine-source primaries keep their PpuOverlaySource index and,
+ * array. The engine-source primaries keep their ABI overlay-source index and,
  * once the priority bands are bound, hold only the LOWEST priority rank of
  * their layer (BG1/BG2 = priority-0 tiles, OBJ = priority-0 sprites; BG3
  * stays whole — the HUD). The appended entries are priority/virtual-band
- * splits (PpuBindOverlayPrioSurface) plus the backdrop slot the render wrapper
- * points at g_pixels. SDL-free so actraiser_rtl.c can bind bands by index. */
+ * splits plus the backdrop slot the render wrapper points at g_pixels.
+ * SDL-free so actraiser_rtl.c can bind bands by index. */
 enum {
-  kDioramaPlane_Backdrop = kPpuOverlaySource_Count,  /* residual main frame */
+  kDioramaPlane_Backdrop = SR_PPU_OVERLAY_SOURCE_COUNT,
   kDioramaPlane_Bg1Hi,                               /* BG1 priority-1 tiles */
   kDioramaPlane_Bg2Hi,                               /* BG2 priority-1 tiles */
   kDioramaPlane_Obj1,                                /* sprites, priority 1 */
@@ -29,7 +29,7 @@ enum {
  * and effect projection so neither grows an incidental definition of OBJ. */
 static inline int DioramaPlaneObjectPriority(int plane) {
   switch (plane) {
-    case kPpuOverlaySource_Obj: return 0;
+    case SR_PPU_OVERLAY_OBJ: return 0;
     case kDioramaPlane_Obj1: return 1;
     case kDioramaPlane_Obj2: return 2;
     case kDioramaPlane_Obj3: return 3;
@@ -39,7 +39,7 @@ static inline int DioramaPlaneObjectPriority(int plane) {
 
 static inline int DioramaPlaneForObjectPriority(unsigned priority) {
   switch (priority) {
-    case 0: return kPpuOverlaySource_Obj;
+    case 0: return SR_PPU_OVERLAY_OBJ;
     case 1: return kDioramaPlane_Obj1;
     case 2: return kDioramaPlane_Obj2;
     case 3: return kDioramaPlane_Obj3;

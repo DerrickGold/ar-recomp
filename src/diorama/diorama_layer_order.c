@@ -14,12 +14,12 @@ static const double kManifestStackDensityMaximum = 1000.0;
  * authored manifest, so they are deliberately terse and stable. */
 static const struct { int plane; const char *token; } kPlaneTokens[] = {
   { kDioramaPlane_Backdrop, "backdrop" },
-  { kPpuOverlaySource_Bg1,  "bg1" },
+  { SR_PPU_OVERLAY_BG1,     "bg1" },
   { kDioramaPlane_Bg1Hi,    "bg1hi" },
-  { kPpuOverlaySource_Bg2,  "bg2" },
+  { SR_PPU_OVERLAY_BG2,     "bg2" },
   { kDioramaPlane_Bg2Hi,    "bg2hi" },
-  { kPpuOverlaySource_Bg3,  "bg3" },
-  { kPpuOverlaySource_Obj,  "obj0" },
+  { SR_PPU_OVERLAY_BG3,     "bg3" },
+  { SR_PPU_OVERLAY_OBJ,     "obj0" },
   { kDioramaPlane_Obj1,     "obj1" },
   { kDioramaPlane_Obj2,     "obj2" },
   { kDioramaPlane_Obj3,     "obj3" },
@@ -374,17 +374,17 @@ void DioramaLayerOrder_ResetSection(DioramaLayerOrderTable *table,
 static int DefaultPaintKey(int plane, int input_index) {
   switch (plane) {
     case kDioramaPlane_Backdrop: return 0;
-    case kPpuOverlaySource_Obj: return 1;
+    case SR_PPU_OVERLAY_OBJ: return 1;
     case kDioramaPlane_Obj1: return 2;
     case kDioramaPlane_Bg2Far:
-    case kPpuOverlaySource_Bg2: return 3;
+    case SR_PPU_OVERLAY_BG2: return 3;
     case kDioramaPlane_Bg1Far:
-    case kPpuOverlaySource_Bg1: return 4;
+    case SR_PPU_OVERLAY_BG1: return 4;
     case kDioramaPlane_Obj2: return 5;
     case kDioramaPlane_Bg2Hi: return 6;
     case kDioramaPlane_Bg1Hi: return 7;
     case kDioramaPlane_Obj3: return 8;
-    case kPpuOverlaySource_Bg3: return 9;
+    case SR_PPU_OVERLAY_BG3: return 9;
     default: return input_index;
   }
 }
@@ -403,8 +403,8 @@ bool DioramaLayerOrder_ResolveTransparentFill(
     const DioramaLayerOrderTable *table,
     uint8_t map_group, uint8_t map_number, uint8_t section, int plane,
     DioramaTransparentFill *out_kind, uint8_t *out_cgram) {
-  if (!table || (plane != kPpuOverlaySource_Bg1 &&
-                 plane != kPpuOverlaySource_Bg2))
+  if (!table || (plane != SR_PPU_OVERLAY_BG1 &&
+                 plane != SR_PPU_OVERLAY_BG2))
     return false;
   const DioramaRoomOverride *rooms[2] = {
     DioramaLayerOrder_Find(table, map_group, map_number),
@@ -856,8 +856,8 @@ bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
       edit.set_source = true;
       touched = true;
     } else if (!strcmp(word, "transparent")) {
-      if (plane != kPpuOverlaySource_Bg1 &&
-          plane != kPpuOverlaySource_Bg2) {
+      if (plane != SR_PPU_OVERLAY_BG1 &&
+          plane != SR_PPU_OVERLAY_BG2) {
         if (out_error) *out_error =
             "bad transparent fill (base BG1/BG2 only)";
         return false;

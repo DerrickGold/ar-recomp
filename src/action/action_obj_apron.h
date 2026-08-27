@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "snes/ppu.h"
+#include "runner_next.h"
 
 /* ── The action-side OBJ apron channel ────────────────────────────────────
  *
@@ -119,6 +119,6 @@ bool ActionApron_AddPart(const ActionApronGeometry *g, int screen_x,
 int ActionApron_Count(void);
 int ActionApron_Overflow(void);
 int ActionApron_PeakCount(void);
-const PpuObjPart *ActionApron_Parts(void);
+const SrPpuObjPart *ActionApron_Parts(void);
 
 #endif  /* ACTION_OBJ_APRON_H */

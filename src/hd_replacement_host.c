@@ -7,10 +7,12 @@
 #include <stdlib.h>
 
 #include "actraiser_rtl.h"
+#include "common_cpu_infra.h"
 #include "hd_replacements.h"
 #include "host/host_display.h"
+#include "runner_next.h"
+#include "runner_next_internal.h"
 #include "settings.h"
-#include "snes/ppu.h"
 
 /* HD art substitution is PNG-only and decoded once when textures are loaded.
  *
@@ -37,27 +39,92 @@ extern SDL_Texture *g_hud_obj_texture;
 extern int g_snes_width;
 extern int g_snes_height;
 extern uint8_t g_pixels[
-    kPpuSurfaceWidth * kArgbBytesPerPixel * kHostDisplayFramebufferHeight];
+    SR_PPU_SURFACE_MAX_WIDTH * kArgbBytesPerPixel *
+    kHostDisplayFramebufferHeight];
 extern uint8_t g_authentic_pixels[
-    kPpuSurfaceWidth * kArgbBytesPerPixel * kHostDisplayFramebufferHeight];
+    SR_PPU_SURFACE_MAX_WIDTH * kArgbBytesPerPixel *
+    kHostDisplayFramebufferHeight];
 extern uint8_t g_hud_bg_pixels[
-    kPpuSurfaceWidth * kArgbBytesPerPixel * kHostDisplayFramebufferHeight];
+    SR_PPU_SURFACE_MAX_WIDTH * kArgbBytesPerPixel *
+    kHostDisplayFramebufferHeight];
 extern uint8_t g_hud_obj_pixels[
-    kPpuSurfaceWidth * kArgbBytesPerPixel * kHostDisplayFramebufferHeight];
+    SR_PPU_SURFACE_MAX_WIDTH * kArgbBytesPerPixel *
+    kHostDisplayFramebufferHeight];
 extern bool g_ws_active;
 extern int g_ws_extra;
-extern Ppu *g_ppu;
 
 /* Authentic pixels captured for a replacement are never presented. These
  * bindings exist because RemoveFromGame only engages for a bound source;
  * BG3 and OBJ reuse the dedicated HUD surfaces. */
-static uint8_t *s_overlay_pixels[kPpuOverlaySource_Count];
+static uint8_t *s_overlay_pixels[SR_PPU_OVERLAY_SOURCE_COUNT];
 static bool s_authentic_capture_enabled;
+static bool s_authentic_surface_bound;
 static uint64_t s_authentic_frame_serial;
 static uint64_t s_authentic_next_frame_serial;
 
 uint8_t *g_m7_overlay_pixels;
 SDL_Texture *g_m7_texture;
+
+typedef struct PpuOutputControl {
+  const SnesRunnerApi *api;
+  SrRunnerHandle *runner;
+  uint64_t lifetime_generation;
+} PpuOutputControl;
+
+static bool PpuOutputControl_Begin(PpuOutputControl *control) {
+  if (!control || !g_snes) return false;
+  const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+  if (!api || api->struct_size < SNES_RUNNER_API_PPU_OUTPUT_CONTROL_SIZE ||
+      (api->capabilities & SR_RUNNER_CAP_PPU_OUTPUT_CONTROL) == 0u)
+    return false;
+  SrGenerationSnapshot generation = {
+      .struct_size = sizeof(generation),
+  };
+  SrRunnerHandle *runner = sr_runner_handle(g_snes);
+  if (api->query_generations(runner, &generation) != SR_RESULT_OK)
+    return false;
+  control->api = api;
+  control->runner = runner;
+  control->lifetime_generation = generation.lifetime_generation;
+  return true;
+}
+
+static SrResult PpuOutputControl_Bind(
+    const PpuOutputControl *control, SrPpuOutputKind kind,
+    uint32_t source, uint32_t band, uint32_t scale, uint8_t *pixels,
+    uint64_t pixel_byte_size, uint64_t pitch_bytes, uint32_t height_pixels,
+    uint32_t flags) {
+  if (!control) return SR_RESULT_UNAVAILABLE;
+  const SrPpuOutputBindingRequest request = {
+      .struct_size = sizeof(request),
+      .flags = flags,
+      .lifetime_generation = control->lifetime_generation,
+      .kind = kind,
+      .source = source,
+      .band = band,
+      .scale = scale,
+      .pixels = pixels,
+      .pixel_byte_size = pixel_byte_size,
+      .pitch_bytes = pitch_bytes,
+      .height_pixels = height_pixels,
+  };
+  return control->api->bind_ppu_output_surface(
+      control->runner, &request);
+}
+
+static SrResult PpuOutputControl_SetHorizontalMargin(
+    const PpuOutputControl *control, SrPpuHorizontalMarginMode mode,
+    uint32_t budget_pixels) {
+  if (!control) return SR_RESULT_UNAVAILABLE;
+  const SrPpuHorizontalMarginRequest request = {
+      .struct_size = sizeof(request),
+      .lifetime_generation = control->lifetime_generation,
+      .mode = mode,
+      .budget_pixels = budget_pixels,
+  };
+  return control->api->configure_ppu_horizontal_margin(
+      control->runner, &request);
+}
 
 void HdReplacementHost_LoadTextures(void) {
   Settings_SetHdReplacementsAvailable(false);
@@ -139,25 +206,33 @@ void HdReplacementHost_LoadTextures(void) {
 }
 
 void HdReplacementHost_BindSurfaces(void) {
+  PpuOutputControl output;
+  const bool output_available = PpuOutputControl_Begin(&output);
   for (int i = 0; i < g_hd_replacement_count; i++) {
     const HdReplacement *entry = &g_hd_replacements[i];
     if (entry->plane == kHdPlane_Mode7 && entry->pixels &&
         !g_m7_overlay_pixels && g_renderer) {
       const size_t capacity_pitch =
-          (size_t)kPpuSurfaceWidth * kHdMode7Scale * kArgbBytesPerPixel;
+          (size_t)SR_PPU_SURFACE_MAX_WIDTH * kHdMode7Scale *
+          kArgbBytesPerPixel;
       const size_t active_pitch =
           (size_t)g_snes_width * kHdMode7Scale * kArgbBytesPerPixel;
+      const size_t capacity_bytes =
+          capacity_pitch * kActRaiserAuthenticHeight * kHdMode7Scale;
       g_m7_overlay_pixels = calloc(
-          1, capacity_pitch * kActRaiserAuthenticHeight * kHdMode7Scale);
+          1, capacity_bytes);
       g_m7_texture = SDL_CreateTexture(
           g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-          kPpuSurfaceWidth * kHdMode7Scale,
+          SR_PPU_SURFACE_MAX_WIDTH * kHdMode7Scale,
           g_snes_height * kHdMode7Scale);
       if (g_m7_overlay_pixels && g_m7_texture) {
         SDL_SetTextureBlendMode(g_m7_texture, SDL_BLENDMODE_BLEND);
         SDL_SetTextureScaleMode(g_m7_texture, SDL_SCALEMODE_NEAREST);
-        PpuBindMode7OverlaySurface(
-            g_ppu, g_m7_overlay_pixels, active_pitch, kHdMode7Scale);
+        if (output_available)
+          (void)PpuOutputControl_Bind(
+              &output, SR_PPU_OUTPUT_MODE7, 0u, 0u, kHdMode7Scale,
+              g_m7_overlay_pixels, capacity_bytes, active_pitch,
+              kActRaiserAuthenticHeight * kHdMode7Scale, 0u);
       } else {
         SDL_DestroyTexture(g_m7_texture);
         g_m7_texture = NULL;
@@ -172,18 +247,22 @@ void HdReplacementHost_BindSurfaces(void) {
     if (entry->plane != kHdPlane_Screen || !entry->texture) continue;
 
     const int source = entry->source;
-    if (source < 0 || source >= kPpuOverlaySource_Count) continue;
-    if (source == kPpuOverlaySource_Bg3 ||
-        source == kPpuOverlaySource_Obj ||
+    if (source < 0 || source >= SR_PPU_OVERLAY_SOURCE_COUNT) continue;
+    if (source == SR_PPU_OVERLAY_BG3 ||
+        source == SR_PPU_OVERLAY_OBJ ||
         s_overlay_pixels[source])
       continue;
     s_overlay_pixels[source] = calloc(
-        1, (size_t)kPpuSurfaceWidth * kArgbBytesPerPixel *
+        1, (size_t)SR_PPU_SURFACE_MAX_WIDTH * kArgbBytesPerPixel *
             kHostDisplayFramebufferHeight);
-    if (s_overlay_pixels[source])
-      PpuBindOverlaySurface(
-          g_ppu, (PpuOverlaySource)source, s_overlay_pixels[source],
-          (size_t)g_snes_width * kArgbBytesPerPixel);
+    if (s_overlay_pixels[source] && output_available)
+      (void)PpuOutputControl_Bind(
+          &output, SR_PPU_OUTPUT_OVERLAY, (uint32_t)source, 0u, 0u,
+          s_overlay_pixels[source],
+          (uint64_t)SR_PPU_SURFACE_MAX_WIDTH * kArgbBytesPerPixel *
+              kHostDisplayFramebufferHeight,
+          (size_t)g_snes_width * kArgbBytesPerPixel,
+          kHostDisplayFramebufferHeight, 0u);
   }
 }
 
@@ -202,20 +281,30 @@ void HdReplacementHost_ReloadTextures(void) {
 
 void ActRaiser_SetAuthenticCaptureEnabled(bool enabled) {
   if (s_authentic_capture_enabled == enabled &&
-      (!g_ppu || PpuAuthenticSurfaceBound(g_ppu) == enabled))
+      s_authentic_surface_bound == enabled)
     return;
   s_authentic_capture_enabled = enabled;
+  s_authentic_surface_bound = false;
   s_authentic_frame_serial = 0;
-  if (!g_ppu) return;
+  PpuOutputControl output;
+  if (!PpuOutputControl_Begin(&output)) return;
   const size_t pitch = (size_t)g_snes_width * kArgbBytesPerPixel;
-  if (!PpuBindAuthenticSurface(
-          g_ppu, enabled ? g_authentic_pixels : NULL,
-          enabled ? pitch : 0)) {
+  const SrResult result = PpuOutputControl_Bind(
+      &output, SR_PPU_OUTPUT_AUTHENTIC, 0u, 0u, 0u,
+      enabled ? g_authentic_pixels : NULL,
+      enabled ? sizeof(g_authentic_pixels) : 0u,
+      enabled ? pitch : 0u,
+      enabled ? kHostDisplayFramebufferHeight : 0u, 0u);
+  if (result != SR_RESULT_OK) {
     s_authentic_capture_enabled = false;
-    PpuBindAuthenticSurface(g_ppu, NULL, 0);
+    (void)PpuOutputControl_Bind(
+        &output, SR_PPU_OUTPUT_AUTHENTIC, 0u, 0u, 0u,
+        NULL, 0u, 0u, 0u, 0u);
     fprintf(stderr,
             "[compare] authentic surface rejected for width %d\n",
             g_snes_width);
+  } else {
+    s_authentic_surface_bound = enabled;
   }
 }
 
@@ -228,8 +317,7 @@ void ActRaiser_AuthenticCaptureFrameCompleted(bool frame_valid) {
     s_authentic_frame_serial = 0;
     return;
   }
-  if (!s_authentic_capture_enabled || !g_ppu ||
-      !PpuAuthenticSurfaceBound(g_ppu))
+  if (!s_authentic_capture_enabled || !s_authentic_surface_bound)
     return;
   s_authentic_next_frame_serial++;
   if (!s_authentic_next_frame_serial) s_authentic_next_frame_serial++;
@@ -241,7 +329,8 @@ uint64_t ActRaiser_AuthenticFrameSerial(void) {
 }
 
 void ActRaiser_RebindPpuOutputSurfaces(void) {
-  if (!g_ppu) return;
+  PpuOutputControl output;
+  if (!PpuOutputControl_Begin(&output)) return;
 
   /* The old pixels describe the old surface geometry until a complete pass
    * reaches the new binding. */
@@ -255,47 +344,77 @@ void ActRaiser_RebindPpuOutputSurfaces(void) {
    * x = 0 lands at column apron + ws_extra. Readers of g_pixels therefore
    * offset by kPpuObjApron columns -- see present.c's flat upload. */
   const size_t frame_pitch =
-      ActionApron_SurfacePitch(g_snes_width, kPpuObjApron);
+      ActionApron_SurfacePitch(g_snes_width, SR_PPU_OBJ_APRON);
   /* Keep the general renderer available as a deterministic A/B oracle for
    * optimized scanout.  This is intentionally a process-start diagnostic,
    * not a player setting: switching algorithms mid-frame would invalidate
    * comparison captures. */
   const uint32_t render_flags = getenv("AR_PPU_REFERENCE")
-      ? kPpuRenderFlags_ReferencePixelRenderer : 0u;
-  PpuBeginDrawing(g_ppu, g_pixels, frame_pitch, render_flags);
+      ? SR_PPU_OUTPUT_REFERENCE_PIXEL_RENDERER : 0u;
+  (void)PpuOutputControl_Bind(
+      &output, SR_PPU_OUTPUT_MAIN, 0u, 0u, 0u, g_pixels,
+      sizeof(g_pixels), frame_pitch, kHostDisplayFramebufferHeight,
+      render_flags);
   /* Geometry may be contracting from a wider prior bind. Clear first so a
    * validation failure cannot leave the old stride attached to new pixels. */
-  PpuBindAuthenticSurface(g_ppu, NULL, 0);
-  PpuClearOverlayBindings(g_ppu);
-  PpuBindOverlaySurface(
-      g_ppu, kPpuOverlaySource_Bg3,
-      g_hud_bg_texture ? g_hud_bg_pixels : NULL, pitch);
-  PpuBindOverlaySurface(
-      g_ppu, kPpuOverlaySource_Obj,
-      g_hud_obj_texture ? g_hud_obj_pixels : NULL, pitch);
-  for (int source = 0; source < kPpuOverlaySource_Count; source++) {
-    if (source == kPpuOverlaySource_Bg3 ||
-        source == kPpuOverlaySource_Obj ||
+  (void)PpuOutputControl_Bind(
+      &output, SR_PPU_OUTPUT_AUTHENTIC, 0u, 0u, 0u,
+      NULL, 0u, 0u, 0u, 0u);
+  s_authentic_surface_bound = false;
+  (void)PpuOutputControl_Bind(
+      &output, SR_PPU_OUTPUT_CLEAR_OVERLAY_SOURCES, 0u, 0u, 0u,
+      NULL, 0u, 0u, 0u, 0u);
+  (void)PpuOutputControl_Bind(
+      &output, SR_PPU_OUTPUT_OVERLAY, SR_PPU_OVERLAY_BG3, 0u, 0u,
+      g_hud_bg_texture ? g_hud_bg_pixels : NULL,
+      g_hud_bg_texture ? sizeof(g_hud_bg_pixels) : 0u,
+      g_hud_bg_texture ? pitch : 0u,
+      g_hud_bg_texture ? kHostDisplayFramebufferHeight : 0u, 0u);
+  (void)PpuOutputControl_Bind(
+      &output, SR_PPU_OUTPUT_OVERLAY, SR_PPU_OVERLAY_OBJ, 0u, 0u,
+      g_hud_obj_texture ? g_hud_obj_pixels : NULL,
+      g_hud_obj_texture ? sizeof(g_hud_obj_pixels) : 0u,
+      g_hud_obj_texture ? pitch : 0u,
+      g_hud_obj_texture ? kHostDisplayFramebufferHeight : 0u, 0u);
+  for (int source = 0; source < SR_PPU_OVERLAY_SOURCE_COUNT; source++) {
+    if (source == SR_PPU_OVERLAY_BG3 ||
+        source == SR_PPU_OVERLAY_OBJ ||
         !s_overlay_pixels[source])
       continue;
-    PpuBindOverlaySurface(
-        g_ppu, (PpuOverlaySource)source, s_overlay_pixels[source], pitch);
+    (void)PpuOutputControl_Bind(
+        &output, SR_PPU_OUTPUT_OVERLAY, (uint32_t)source, 0u, 0u,
+        s_overlay_pixels[source],
+        (uint64_t)SR_PPU_SURFACE_MAX_WIDTH * kArgbBytesPerPixel *
+            kHostDisplayFramebufferHeight,
+        pitch, kHostDisplayFramebufferHeight, 0u);
   }
   if (g_m7_overlay_pixels)
-    PpuBindMode7OverlaySurface(
-        g_ppu, g_m7_overlay_pixels,
+    (void)PpuOutputControl_Bind(
+        &output, SR_PPU_OUTPUT_MODE7, 0u, 0u, kHdMode7Scale,
+        g_m7_overlay_pixels,
+        (uint64_t)SR_PPU_SURFACE_MAX_WIDTH * kHdMode7Scale *
+            kArgbBytesPerPixel * kActRaiserAuthenticHeight * kHdMode7Scale,
         (size_t)g_snes_width * kHdMode7Scale * kArgbBytesPerPixel,
-        kHdMode7Scale);
+        kActRaiserAuthenticHeight * kHdMode7Scale, 0u);
   if (g_ws_active)
-    PpuSetExtraSpaceCentered(g_ppu, (uint8_t)g_ws_extra);
+    (void)PpuOutputControl_SetHorizontalMargin(
+        &output, SR_PPU_HORIZONTAL_MARGIN_CENTERED, (uint32_t)g_ws_extra);
   else
-    PpuSetExtraSpace(g_ppu, 0);
-  if (s_authentic_capture_enabled && !PpuBindAuthenticSurface(
-          g_ppu, g_authentic_pixels, pitch)) {
-    s_authentic_capture_enabled = false;
-    fprintf(stderr,
-            "[compare] authentic surface rejected after rebind for width %d\n",
-            g_snes_width);
+    (void)PpuOutputControl_SetHorizontalMargin(
+        &output, SR_PPU_HORIZONTAL_MARGIN_AVAILABLE, 0u);
+  if (s_authentic_capture_enabled) {
+    const SrResult result = PpuOutputControl_Bind(
+        &output, SR_PPU_OUTPUT_AUTHENTIC, 0u, 0u, 0u,
+        g_authentic_pixels, sizeof(g_authentic_pixels), pitch,
+        kHostDisplayFramebufferHeight, 0u);
+    if (result != SR_RESULT_OK) {
+      s_authentic_capture_enabled = false;
+      fprintf(stderr,
+              "[compare] authentic surface rejected after rebind for width %d\n",
+              g_snes_width);
+    } else {
+      s_authentic_surface_bound = true;
+    }
   }
 }
 
@@ -312,11 +431,12 @@ void HdReplacementHost_Shutdown(void) {
   g_m7_texture = NULL;
   free(g_m7_overlay_pixels);
   g_m7_overlay_pixels = NULL;
-  for (int source = 0; source < kPpuOverlaySource_Count; source++) {
+  for (int source = 0; source < SR_PPU_OVERLAY_SOURCE_COUNT; source++) {
     free(s_overlay_pixels[source]);
     s_overlay_pixels[source] = NULL;
   }
   s_authentic_capture_enabled = false;
+  s_authentic_surface_bound = false;
   s_authentic_frame_serial = 0;
   s_authentic_next_frame_serial = 0;
 }

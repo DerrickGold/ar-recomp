@@ -16,6 +16,7 @@
 #include "diorama_layer_order.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int g_failures;
@@ -33,17 +34,17 @@ static int g_failures;
  * failure maps directly onto what the game would do. */
 static const DioramaResolvedLayer kDefaults[] = {
   { kDioramaPlane_Backdrop, 0.00f, 255 },
-  { kPpuOverlaySource_Obj,  0.51f, 255 },
+  { SR_PPU_OVERLAY_OBJ,  0.51f, 255 },
   { kDioramaPlane_Obj1,     0.51f, 255 },
   { kDioramaPlane_Bg2Far,   0.05f, 255 },
-  { kPpuOverlaySource_Bg2,  0.20f, 255 },
+  { SR_PPU_OVERLAY_BG2,  0.20f, 255 },
   { kDioramaPlane_Bg1Far,   0.35f, 255 },
-  { kPpuOverlaySource_Bg1,  0.50f, 255 },
+  { SR_PPU_OVERLAY_BG1,  0.50f, 255 },
   { kDioramaPlane_Obj2,     0.51f, 255 },
   { kDioramaPlane_Bg2Hi,    0.21f, 255 },
   { kDioramaPlane_Bg1Hi,    0.51f, 255 },
   { kDioramaPlane_Obj3,     0.52f, 255 },
-  { kPpuOverlaySource_Bg3,  0.95f, 255 },
+  { SR_PPU_OVERLAY_BG3,  0.95f, 255 },
 };
 static const int kDefaultCount =
     (int)(sizeof(kDefaults) / sizeof(kDefaults[0]));
@@ -69,8 +70,8 @@ static void TestOverrideIsScopedToItsRoom(void) {
   memset(&table, 0, sizeof(table));
   DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
   CHECK(room != NULL);
-  room->planes[kPpuOverlaySource_Bg1].set_order = true;
-  room->planes[kPpuOverlaySource_Bg1].order = 0;
+  room->planes[SR_PPU_OVERLAY_BG1].set_order = true;
+  room->planes[SR_PPU_OVERLAY_BG1].order = 0;
 
   /* Same group, different room ($19 differs) — must be untouched. */
   DioramaResolvedLayer out[16];
@@ -90,8 +91,8 @@ static void TestOrderEditReordersPaint(void) {
   /* Push BG2 (built-in slot 3) past BG1 (built-in slot 4) by authoring an
    * explicit paint slot. Note this does NOT touch z, so depth-of-field is
    * unaffected -- which is the whole reason order and z are separate keys. */
-  room->planes[kPpuOverlaySource_Bg2].set_order = true;
-  room->planes[kPpuOverlaySource_Bg2].order = 5;
+  room->planes[SR_PPU_OVERLAY_BG2].set_order = true;
+  room->planes[SR_PPU_OVERLAY_BG2].order = 5;
 
   DioramaResolvedLayer out[16];
   int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults,
@@ -100,8 +101,8 @@ static void TestOrderEditReordersPaint(void) {
 
   int bg2_at = -1, bg1_at = -1;
   for (int i = 0; i < n; i++) {
-    if (out[i].plane == kPpuOverlaySource_Bg2) bg2_at = i;
-    if (out[i].plane == kPpuOverlaySource_Bg1) bg1_at = i;
+    if (out[i].plane == SR_PPU_OVERLAY_BG2) bg2_at = i;
+    if (out[i].plane == SR_PPU_OVERLAY_BG1) bg1_at = i;
   }
   CHECK(bg2_at >= 0 && bg1_at >= 0);
   /* The whole point: BG2 now paints AFTER BG1, i.e. in front of it. */
@@ -133,7 +134,7 @@ static void TestSortIsStableForUnnamedPlanes(void) {
     seen[k++] = out[i].plane;
   }
   CHECK(k == 4);
-  CHECK(seen[0] == kPpuOverlaySource_Obj);
+  CHECK(seen[0] == SR_PPU_OVERLAY_OBJ);
   CHECK(seen[1] == kDioramaPlane_Obj1);
   CHECK(seen[2] == kDioramaPlane_Obj2);
   CHECK(seen[3] == kDioramaPlane_Bg1Hi);
@@ -147,8 +148,8 @@ static void TestSortIsStableForUnnamedPlanes(void) {
  * z=0.50). */
 static void TestNonOrderEditDoesNotReorder(void) {
   const struct { const char *what; int plane; bool z, alpha; } cases[] = {
-    { "z only",     kPpuOverlaySource_Bg2, true,  false },
-    { "alpha only", kPpuOverlaySource_Bg1, false, true  },
+    { "z only",     SR_PPU_OVERLAY_BG2, true,  false },
+    { "alpha only", SR_PPU_OVERLAY_BG1, false, true  },
     { "both",       kDioramaPlane_Bg2Hi,   true,  true  },
   };
   for (size_t c = 0; c < sizeof(cases) / sizeof(cases[0]); c++) {
@@ -175,8 +176,8 @@ static void TestNonOrderEditDoesNotReorder(void) {
   DioramaLayerOrderTable table;
   memset(&table, 0, sizeof(table));
   DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
-  room->planes[kPpuOverlaySource_Bg2].set_order = true;
-  room->planes[kPpuOverlaySource_Bg2].order = 3;  /* its built-in slot */
+  room->planes[SR_PPU_OVERLAY_BG2].set_order = true;
+  room->planes[SR_PPU_OVERLAY_BG2].order = 3;  /* its built-in slot */
   DioramaResolvedLayer out[16];
   int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults,
                                     kDefaultCount, out, 16);
@@ -188,14 +189,14 @@ static void TestAlphaOverride(void) {
   DioramaLayerOrderTable table;
   memset(&table, 0, sizeof(table));
   DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
-  room->planes[kPpuOverlaySource_Bg2].set_alpha = true;
-  room->planes[kPpuOverlaySource_Bg2].alpha = 128;
+  room->planes[SR_PPU_OVERLAY_BG2].set_alpha = true;
+  room->planes[SR_PPU_OVERLAY_BG2].alpha = 128;
 
   DioramaResolvedLayer out[16];
   int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults,
                                     kDefaultCount, out, 16);
   for (int i = 0; i < n; i++) {
-    if (out[i].plane == kPpuOverlaySource_Bg2) CHECK(out[i].alpha == 128);
+    if (out[i].plane == SR_PPU_OVERLAY_BG2) CHECK(out[i].alpha == 128);
     else CHECK(out[i].alpha == 255);
   }
 }
@@ -206,8 +207,8 @@ static void TestResetRoomRestoresDefaults(void) {
   DioramaLayerOrderTable table;
   memset(&table, 0, sizeof(table));
   DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
-  room->planes[kPpuOverlaySource_Bg2].set_order = true;
-  room->planes[kPpuOverlaySource_Bg2].order = 9;
+  room->planes[SR_PPU_OVERLAY_BG2].set_order = true;
+  room->planes[SR_PPU_OVERLAY_BG2].order = 9;
   CHECK(DioramaLayerOrder_RoomIsActive(
       DioramaLayerOrder_Find(&table, 0x01, 0x02)));
 
@@ -225,7 +226,7 @@ static void TestResetSlotIsRecycled(void) {
   DioramaLayerOrderTable table;
   memset(&table, 0, sizeof(table));
   DioramaRoomOverride *a = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x01);
-  a->planes[kPpuOverlaySource_Bg1].set_order = true;
+  a->planes[SR_PPU_OVERLAY_BG1].set_order = true;
   int after_first = table.count;
   DioramaLayerOrder_ResetRoom(&table, 0x01, 0x01);
   DioramaRoomOverride *b = DioramaLayerOrder_FindOrAdd(&table, 0x02, 0x02);
@@ -233,7 +234,7 @@ static void TestResetSlotIsRecycled(void) {
   CHECK(table.count == after_first);  /* reused, did not grow */
   CHECK(b->map_group == 0x02 && b->map_number == 0x02);
   /* And the recycled slot carries none of the old room's edits. */
-  CHECK(!b->planes[kPpuOverlaySource_Bg1].set_order);
+  CHECK(!b->planes[SR_PPU_OVERLAY_BG1].set_order);
 }
 
 static void TestSectionParsing(void) {
@@ -273,8 +274,8 @@ static void TestScopedSourceInheritsBaseRoom(void) {
   CHECK(base != NULL && waterfall != NULL);
   if (!base || !waterfall) return;
 
-  base->planes[kPpuOverlaySource_Bg1].set_z = true;
-  base->planes[kPpuOverlaySource_Bg1].z = 0.63f;
+  base->planes[SR_PPU_OVERLAY_BG1].set_z = true;
+  base->planes[SR_PPU_OVERLAY_BG1].z = 0.63f;
   waterfall->planes[kDioramaPlane_Backdrop].set_source = true;
   waterfall->planes[kDioramaPlane_Backdrop].source =
       kDioramaLayerSource_AitosSky;
@@ -289,7 +290,7 @@ static void TestScopedSourceInheritsBaseRoom(void) {
       kDefaults, kDefaultCount, out, 16);
   bool saw_bg1 = false, saw_backdrop = false;
   for (int i = 0; i < n; i++) {
-    if (out[i].plane == kPpuOverlaySource_Bg1) {
+    if (out[i].plane == SR_PPU_OVERLAY_BG1) {
       saw_bg1 = true;
       CHECK(out[i].z == 0.63f);       /* inherited from base room */
     }
@@ -361,14 +362,14 @@ static void TestLineParsing(void) {
   const char *error = NULL;
 
   CHECK(DioramaLayerOrder_ParseLine(&room, "bg2 = z:0.9 alpha:128", &error));
-  CHECK(room.planes[kPpuOverlaySource_Bg2].set_z);
-  CHECK(room.planes[kPpuOverlaySource_Bg2].set_alpha);
-  CHECK(room.planes[kPpuOverlaySource_Bg2].z == 0.9f);
-  CHECK(room.planes[kPpuOverlaySource_Bg2].alpha == 128);
+  CHECK(room.planes[SR_PPU_OVERLAY_BG2].set_z);
+  CHECK(room.planes[SR_PPU_OVERLAY_BG2].set_alpha);
+  CHECK(room.planes[SR_PPU_OVERLAY_BG2].z == 0.9f);
+  CHECK(room.planes[SR_PPU_OVERLAY_BG2].alpha == 128);
   CHECK(DioramaLayerOrder_ParseLine(
       &room, "bg2 = transparent:black", &error));
-  CHECK(room.planes[kPpuOverlaySource_Bg2].set_transparent_fill);
-  CHECK(room.planes[kPpuOverlaySource_Bg2].transparent_fill_kind ==
+  CHECK(room.planes[SR_PPU_OVERLAY_BG2].set_transparent_fill);
+  CHECK(room.planes[SR_PPU_OVERLAY_BG2].transparent_fill_kind ==
         kDioramaTransparentFill_Black);
   room.used = true;
   room.map_group = 4;
@@ -380,17 +381,17 @@ static void TestLineParsing(void) {
         NULL);
   CHECK(DioramaLayerOrder_ParseLine(
       &room, "bg1 = transparent:cgram-2A", &error));
-  CHECK(room.planes[kPpuOverlaySource_Bg1].set_transparent_fill);
-  CHECK(room.planes[kPpuOverlaySource_Bg1].transparent_fill_kind ==
+  CHECK(room.planes[SR_PPU_OVERLAY_BG1].set_transparent_fill);
+  CHECK(room.planes[SR_PPU_OVERLAY_BG1].transparent_fill_kind ==
         kDioramaTransparentFill_Cgram);
-  CHECK(room.planes[kPpuOverlaySource_Bg1].transparent_fill_cgram == 0x2a);
+  CHECK(room.planes[SR_PPU_OVERLAY_BG1].transparent_fill_cgram == 0x2a);
   CHECK(DioramaLayerOrder_FormatRoom(
       &room, transparent_text, sizeof(transparent_text)) > 0);
   CHECK(strstr(transparent_text, "bg1 = transparent:cgram-2A") != NULL);
   CHECK(DioramaLayerOrder_ParseLine(
       &room, "bg2 = transparent:off", &error));
-  CHECK(room.planes[kPpuOverlaySource_Bg2].set_transparent_fill);
-  CHECK(room.planes[kPpuOverlaySource_Bg2].transparent_fill_kind ==
+  CHECK(room.planes[SR_PPU_OVERLAY_BG2].set_transparent_fill);
+  CHECK(room.planes[SR_PPU_OVERLAY_BG2].transparent_fill_kind ==
         kDioramaTransparentFill_None);
   CHECK(DioramaLayerOrder_FormatRoom(
       &room, transparent_text, sizeof(transparent_text)) > 0);
@@ -400,7 +401,7 @@ static void TestLineParsing(void) {
   /* z only: alpha must default to opaque, NOT to 0 (invisible). */
   memset(&room, 0, sizeof(room));
   CHECK(DioramaLayerOrder_ParseLine(&room, "bg1 = z:0.55", &error));
-  CHECK(room.planes[kPpuOverlaySource_Bg1].alpha == 255);
+  CHECK(room.planes[SR_PPU_OVERLAY_BG1].alpha == 255);
 
   /* Whitespace tolerance and the band planes. */
   memset(&room, 0, sizeof(room));
@@ -467,14 +468,14 @@ static void TestFormatRoundTrips(void) {
   DioramaLayerOrderTable table;
   memset(&table, 0, sizeof(table));
   DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
-  room->planes[kPpuOverlaySource_Bg2].set_order = true;
-  room->planes[kPpuOverlaySource_Bg2].order = 5;
-  room->planes[kPpuOverlaySource_Bg2].set_z = true;
-  room->planes[kPpuOverlaySource_Bg2].z = 0.875f;
-  room->planes[kPpuOverlaySource_Bg2].set_alpha = true;
-  room->planes[kPpuOverlaySource_Bg2].alpha = 128;
-  room->planes[kPpuOverlaySource_Bg1].set_z = true;
-  room->planes[kPpuOverlaySource_Bg1].z = 0.5f;
+  room->planes[SR_PPU_OVERLAY_BG2].set_order = true;
+  room->planes[SR_PPU_OVERLAY_BG2].order = 5;
+  room->planes[SR_PPU_OVERLAY_BG2].set_z = true;
+  room->planes[SR_PPU_OVERLAY_BG2].z = 0.875f;
+  room->planes[SR_PPU_OVERLAY_BG2].set_alpha = true;
+  room->planes[SR_PPU_OVERLAY_BG2].alpha = 128;
+  room->planes[SR_PPU_OVERLAY_BG1].set_z = true;
+  room->planes[SR_PPU_OVERLAY_BG1].z = 0.5f;
 
   char text[512];
   size_t need = DioramaLayerOrder_FormatRoom(room, text, sizeof(text));
@@ -504,14 +505,14 @@ static void TestFormatRoundTrips(void) {
     CHECK(DioramaLayerOrder_ParseLine(&reparsed, line, &error));
   }
   CHECK(group == 0x01 && map == 0x02);
-  CHECK(reparsed.planes[kPpuOverlaySource_Bg2].order == 5);
-  CHECK(reparsed.planes[kPpuOverlaySource_Bg2].z == 0.875f);
-  CHECK(reparsed.planes[kPpuOverlaySource_Bg2].alpha == 128);
-  CHECK(reparsed.planes[kPpuOverlaySource_Bg1].set_z);
-  CHECK(reparsed.planes[kPpuOverlaySource_Bg1].z == 0.5f);
+  CHECK(reparsed.planes[SR_PPU_OVERLAY_BG2].order == 5);
+  CHECK(reparsed.planes[SR_PPU_OVERLAY_BG2].z == 0.875f);
+  CHECK(reparsed.planes[SR_PPU_OVERLAY_BG2].alpha == 128);
+  CHECK(reparsed.planes[SR_PPU_OVERLAY_BG1].set_z);
+  CHECK(reparsed.planes[SR_PPU_OVERLAY_BG1].z == 0.5f);
   /* BG1 never authored order or alpha, so the re-import must not invent them. */
-  CHECK(!reparsed.planes[kPpuOverlaySource_Bg1].set_order);
-  CHECK(!reparsed.planes[kPpuOverlaySource_Bg1].set_alpha);
+  CHECK(!reparsed.planes[SR_PPU_OVERLAY_BG1].set_order);
+  CHECK(!reparsed.planes[SR_PPU_OVERLAY_BG1].set_alpha);
 }
 
 /* An inactive room emits nothing, so a manifest never gains empty sections. */
@@ -522,17 +523,17 @@ static void TestRakeAndThicknessResolve(void) {
   DioramaLayerOrderTable table;
   memset(&table, 0, sizeof(table));
   DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
-  room->planes[kPpuOverlaySource_Bg2].set_rake = true;
-  room->planes[kPpuOverlaySource_Bg2].rake = 0.29f;
-  room->planes[kPpuOverlaySource_Bg2].set_thickness = true;
-  room->planes[kPpuOverlaySource_Bg2].thickness = 0.10f;
+  room->planes[SR_PPU_OVERLAY_BG2].set_rake = true;
+  room->planes[SR_PPU_OVERLAY_BG2].rake = 0.29f;
+  room->planes[SR_PPU_OVERLAY_BG2].set_thickness = true;
+  room->planes[SR_PPU_OVERLAY_BG2].thickness = 0.10f;
 
   DioramaResolvedLayer out[16];
   int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults,
                                     kDefaultCount, out, 16);
   CHECK(n == kDefaultCount);
   for (int i = 0; i < n; i++) {
-    if (out[i].plane == kPpuOverlaySource_Bg2) {
+    if (out[i].plane == SR_PPU_OVERLAY_BG2) {
       CHECK(out[i].rake == 0.29f);
       CHECK(out[i].thickness == 0.10f);
     } else {
@@ -767,14 +768,14 @@ static void TestVoxelResolve(void) {
   DioramaLayerOrderTable table;
   memset(&table, 0, sizeof(table));
   DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
-  room->planes[kPpuOverlaySource_Bg1].set_voxel = true;
-  room->planes[kPpuOverlaySource_Bg1].voxel = 0.20f;
+  room->planes[SR_PPU_OVERLAY_BG1].set_voxel = true;
+  room->planes[SR_PPU_OVERLAY_BG1].voxel = 0.20f;
 
   DioramaResolvedLayer out[16];
   int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults,
                                     kDefaultCount, out, 16);
   for (int i = 0; i < n; i++) {
-    if (out[i].plane == kPpuOverlaySource_Bg1) {
+    if (out[i].plane == SR_PPU_OVERLAY_BG1) {
       CHECK(out[i].stack == 0.20f);        /* shares the stack's depth field */
       CHECK(out[i].stack_solid);
       /* A voxel default must be dense enough to read as solid, so it is much
@@ -794,12 +795,12 @@ static void TestVoxelResolve(void) {
 
   /* An explicit slice count wins, and is clamped to the VOXEL cap (not the
    * stack's), since that is the budget the author opted into. */
-  room->planes[kPpuOverlaySource_Bg1].set_voxel_copies = true;
-  room->planes[kPpuOverlaySource_Bg1].voxel_copies = kDioramaVoxelMax;
+  room->planes[SR_PPU_OVERLAY_BG1].set_voxel_copies = true;
+  room->planes[SR_PPU_OVERLAY_BG1].voxel_copies = kDioramaVoxelMax;
   n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults, kDefaultCount,
                                 out, 16);
   for (int i = 0; i < n; i++)
-    if (out[i].plane == kPpuOverlaySource_Bg1)
+    if (out[i].plane == SR_PPU_OVERLAY_BG1)
       CHECK(out[i].stack_copies == kDioramaVoxelMax);
   CHECK(kDioramaVoxelMax > kDioramaStackMax);
 
@@ -807,25 +808,25 @@ static void TestVoxelResolve(void) {
    * slices > kDioramaVoxelMax, so a manifest cannot reach this -- but the editor
    * and any future caller set the struct field directly, and an unclamped count
    * blows the per-frame draw budget. Set it out of range on purpose. */
-  room->planes[kPpuOverlaySource_Bg1].voxel_copies = kDioramaVoxelMax + 50;
+  room->planes[SR_PPU_OVERLAY_BG1].voxel_copies = kDioramaVoxelMax + 50;
   n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults, kDefaultCount,
                                 out, 16);
   for (int i = 0; i < n; i++)
-    if (out[i].plane == kPpuOverlaySource_Bg1)
+    if (out[i].plane == SR_PPU_OVERLAY_BG1)
       CHECK(out[i].stack_copies == kDioramaVoxelMax);
 
   /* A voxel authored alongside a stack WINS -- it is the more specific intent,
    * and silently blending the two would give neither. */
   memset(&table, 0, sizeof(table));
   room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
-  room->planes[kPpuOverlaySource_Bg1].set_stack = true;
-  room->planes[kPpuOverlaySource_Bg1].stack = 0.50f;
-  room->planes[kPpuOverlaySource_Bg1].set_voxel = true;
-  room->planes[kPpuOverlaySource_Bg1].voxel = 0.20f;
+  room->planes[SR_PPU_OVERLAY_BG1].set_stack = true;
+  room->planes[SR_PPU_OVERLAY_BG1].stack = 0.50f;
+  room->planes[SR_PPU_OVERLAY_BG1].set_voxel = true;
+  room->planes[SR_PPU_OVERLAY_BG1].voxel = 0.20f;
   n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults, kDefaultCount,
                                 out, 16);
   for (int i = 0; i < n; i++)
-    if (out[i].plane == kPpuOverlaySource_Bg1) {
+    if (out[i].plane == SR_PPU_OVERLAY_BG1) {
       CHECK(out[i].stack == 0.20f);
       CHECK(out[i].stack_solid);
     }
@@ -836,8 +837,8 @@ static void TestVoxelResolve(void) {
   const char *error = NULL;
   CHECK(DioramaLayerOrder_ParseLine(&parsed, "bg1 = voxel:0.20 slices:16",
                                     &error));
-  CHECK(parsed.planes[kPpuOverlaySource_Bg1].voxel == 0.20f);
-  CHECK(parsed.planes[kPpuOverlaySource_Bg1].voxel_copies == 16);
+  CHECK(parsed.planes[SR_PPU_OVERLAY_BG1].voxel == 0.20f);
+  CHECK(parsed.planes[SR_PPU_OVERLAY_BG1].voxel_copies == 16);
   parsed.used = true; parsed.map_group = 0x01; parsed.map_number = 0x02;
   CHECK(DioramaLayerOrder_RoomIsActive(&parsed));
   char text[512];
@@ -866,8 +867,8 @@ static void TestVoxelResolve(void) {
   DioramaLayerOrderTable lone;
   memset(&lone, 0, sizeof(lone));
   DioramaRoomOverride *r2 = DioramaLayerOrder_FindOrAdd(&lone, 0x02, 0x01);
-  r2->planes[kPpuOverlaySource_Bg1].set_voxel_copies = true;
-  r2->planes[kPpuOverlaySource_Bg1].voxel_copies = 16;
+  r2->planes[SR_PPU_OVERLAY_BG1].set_voxel_copies = true;
+  r2->planes[SR_PPU_OVERLAY_BG1].voxel_copies = 16;
   CHECK(DioramaLayerOrder_RoomIsActive(r2));
   n = DioramaLayerOrder_Resolve(&lone, 0x02, 0x01, kDefaults, kDefaultCount,
                                 out, 16);
@@ -973,8 +974,8 @@ static void TestBowResolveAndRoundTrip(void) {
   CHECK(DioramaLayerOrder_ParseLine(&parsed, "bg2hi = bow:0.29", &error));
   CHECK(parsed.planes[kDioramaPlane_Bg2Hi].bow == 0.29f);
   CHECK(DioramaLayerOrder_ParseLine(&parsed, "bg1 = rake:0.1 bow:0.2", &error));
-  CHECK(parsed.planes[kPpuOverlaySource_Bg1].rake == 0.1f);
-  CHECK(parsed.planes[kPpuOverlaySource_Bg1].bow == 0.2f);
+  CHECK(parsed.planes[SR_PPU_OVERLAY_BG1].rake == 0.1f);
+  CHECK(parsed.planes[SR_PPU_OVERLAY_BG1].bow == 0.2f);
   parsed.used = true; parsed.map_group = 0x01; parsed.map_number = 0x02;
   CHECK(DioramaLayerOrder_RoomIsActive(&parsed));
   char text[512];
@@ -1026,8 +1027,8 @@ static void TestRakeOnlyRoomIsActiveAndRoundTrips(void) {
   memset(&reparsed, 0, sizeof(reparsed));
   CHECK(DioramaLayerOrder_ParseLine(&reparsed, "bg2 = rake:0.3 thick:0.125",
                                     &error));
-  CHECK(reparsed.planes[kPpuOverlaySource_Bg2].rake == 0.3f);
-  CHECK(reparsed.planes[kPpuOverlaySource_Bg2].thickness == 0.125f);
+  CHECK(reparsed.planes[SR_PPU_OVERLAY_BG2].rake == 0.3f);
+  CHECK(reparsed.planes[SR_PPU_OVERLAY_BG2].thickness == 0.125f);
 }
 
 static void TestRakeAndThicknessRejectBadValues(void) {
@@ -1044,8 +1045,8 @@ static void TestRakeAndThicknessRejectBadValues(void) {
   CHECK(!DioramaLayerOrder_ParseLine(&room, "bg2 = thick:9", &error));
   CHECK(!DioramaLayerOrder_ParseLine(&room, "bg2 = rake:abc", &error));
   /* A rejected line leaves nothing behind. */
-  CHECK(!room.planes[kPpuOverlaySource_Bg2].set_rake);
-  CHECK(!room.planes[kPpuOverlaySource_Bg2].set_thickness);
+  CHECK(!room.planes[SR_PPU_OVERLAY_BG2].set_rake);
+  CHECK(!room.planes[SR_PPU_OVERLAY_BG2].set_thickness);
 }
 
 /* NON-FINITE values, which every earlier version of this parser ACCEPTED.
@@ -1108,7 +1109,7 @@ static void TestZIsBounded(void) {
   CHECK(DioramaLayerOrder_ParseLine(&room, "bg2 = z:0.95", &error));
   CHECK(DioramaLayerOrder_ParseLine(&room, "bg2 = z:1.5", &error));
   CHECK(DioramaLayerOrder_ParseLine(&room, "bg2 = z:-0.5", &error));
-  CHECK(room.planes[kPpuOverlaySource_Bg2].set_z);
+  CHECK(room.planes[SR_PPU_OVERLAY_BG2].set_z);
 }
 
 static void TestInactiveRoomEmitsNothing(void) {
@@ -1129,8 +1130,8 @@ static void TestFormatReportsTruncation(void) {
   room.used = true;
   room.map_group = 0x01;
   room.map_number = 0x02;
-  room.planes[kPpuOverlaySource_Bg1].set_z = true;
-  room.planes[kPpuOverlaySource_Bg1].z = 0.5f;
+  room.planes[SR_PPU_OVERLAY_BG1].set_z = true;
+  room.planes[SR_PPU_OVERLAY_BG1].z = 0.5f;
   char tiny[8];
   size_t need = DioramaLayerOrder_FormatRoom(&room, tiny, sizeof(tiny));
   CHECK(need >= sizeof(tiny));      /* caller can detect it did not fit */
@@ -1139,9 +1140,9 @@ static void TestFormatReportsTruncation(void) {
 
 static void TestTokenRoundTrip(void) {
   static const int kPlanes[] = {
-    kDioramaPlane_Backdrop, kPpuOverlaySource_Bg1, kDioramaPlane_Bg1Hi,
-    kPpuOverlaySource_Bg2, kDioramaPlane_Bg2Hi, kPpuOverlaySource_Bg3,
-    kPpuOverlaySource_Obj, kDioramaPlane_Obj1, kDioramaPlane_Obj2,
+    kDioramaPlane_Backdrop, SR_PPU_OVERLAY_BG1, kDioramaPlane_Bg1Hi,
+    SR_PPU_OVERLAY_BG2, kDioramaPlane_Bg2Hi, SR_PPU_OVERLAY_BG3,
+    SR_PPU_OVERLAY_OBJ, kDioramaPlane_Obj1, kDioramaPlane_Obj2,
     kDioramaPlane_Obj3,
   };
   for (size_t i = 0; i < sizeof(kPlanes) / sizeof(kPlanes[0]); i++) {
@@ -1161,7 +1162,7 @@ static void TestTableCapacity(void) {
     DioramaRoomOverride *room =
         DioramaLayerOrder_FindOrAdd(&table, 0x01, (uint8_t)i);
     CHECK(room != NULL);
-    room->planes[kPpuOverlaySource_Bg1].set_order = true;
+    room->planes[SR_PPU_OVERLAY_BG1].set_order = true;
   }
   CHECK(DioramaLayerOrder_FindOrAdd(&table, 0x7F, 0x7F) == NULL);
   /* An existing room is still findable when full. */
@@ -1274,8 +1275,8 @@ static void TestMergeAppendsNewRooms(void) {
   keep->planes[kDioramaPlane_Bg2Hi].set_rake = true;
   keep->planes[kDioramaPlane_Bg2Hi].rake = 0.29f;
   DioramaRoomOverride *fresh = DioramaLayerOrder_FindOrAdd(&table, 0x02, 0x01);
-  fresh->planes[kPpuOverlaySource_Bg1].set_thickness = true;
-  fresh->planes[kPpuOverlaySource_Bg1].thickness = 0.2f;
+  fresh->planes[SR_PPU_OVERLAY_BG1].set_thickness = true;
+  fresh->planes[SR_PPU_OVERLAY_BG1].thickness = 0.2f;
 
   char *out = MergeToHeap(&table, existing, NULL);
   if (!out) return;
@@ -1430,8 +1431,8 @@ static void TestMergeDropsStalePlaneLinesAfterAComment(void) {
     (void)DioramaLayerOrder_ParseLine(&back, at, &error);
   }
   CHECK(back.planes[kDioramaPlane_Bg2Hi].set_bow);
-  CHECK(!back.planes[kPpuOverlaySource_Bg1].set_z);
-  CHECK(!back.planes[kPpuOverlaySource_Bg3].set_alpha);
+  CHECK(!back.planes[SR_PPU_OVERLAY_BG1].set_z);
+  CHECK(!back.planes[SR_PPU_OVERLAY_BG3].set_alpha);
   free(scratch);
   free(out);
 }
@@ -1486,10 +1487,10 @@ static void TestMergeSizingContract(void) {
   DioramaLayerOrderTable table;
   memset(&table, 0, sizeof(table));
   DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x03, 0x04);
-  room->planes[kPpuOverlaySource_Bg1].set_voxel = true;
-  room->planes[kPpuOverlaySource_Bg1].voxel = 0.18f;
-  room->planes[kPpuOverlaySource_Bg1].set_voxel_copies = true;
-  room->planes[kPpuOverlaySource_Bg1].voxel_copies = 14;
+  room->planes[SR_PPU_OVERLAY_BG1].set_voxel = true;
+  room->planes[SR_PPU_OVERLAY_BG1].voxel = 0.18f;
+  room->planes[SR_PPU_OVERLAY_BG1].set_voxel_copies = true;
+  room->planes[SR_PPU_OVERLAY_BG1].voxel_copies = 14;
 
   const char *existing = "# doc line one\n# doc line two\n\n[layers:03:04]\nbg1 = voxel:0.18 slices:14\n";
   size_t need = DioramaLayerOrder_MergeManifest(&table, existing, NULL, NULL, 0);
@@ -1624,8 +1625,8 @@ static void TestInGamePlaneResetPreservesVirtualLayers(void) {
       DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
   CHECK(room != NULL);
   if (!room) return;
-  room->planes[kPpuOverlaySource_Bg1].set_z = true;
-  room->planes[kPpuOverlaySource_Bg1].z = 0.4f;
+  room->planes[SR_PPU_OVERLAY_BG1].set_z = true;
+  room->planes[SR_PPU_OVERLAY_BG1].z = 0.4f;
   room->virtual_layers[0].metatile_set[0x23 >> 3] |=
       (uint8_t)(1u << (0x23 & 7));
   room->virtual_layers[0].metatile_bands[0x23] = 0;
@@ -1642,7 +1643,7 @@ static void TestInGamePlaneResetPreservesVirtualLayers(void) {
       DioramaLayerOrder_Find(&table, 0x01, 0x02);
   CHECK(found != NULL);
   if (!found) return;
-  CHECK(!found->planes[kPpuOverlaySource_Bg1].set_z);
+  CHECK(!found->planes[SR_PPU_OVERLAY_BG1].set_z);
   CHECK(DioramaLayerOrder_VirtualLayerIsAuthored(&found->virtual_layers[0]));
   CHECK(DioramaLayerOrder_VirtualBand(found, 0, 0, 0, 0x23, 0x2000) == 0);
 
@@ -1701,31 +1702,31 @@ static void TestTransparentFillInheritsAndRefines(void) {
       &table, 0x04, 0x05, kDioramaLayerSection_AitosWaterfall);
   CHECK(base != NULL && scoped != NULL);
   if (!base || !scoped) return;
-  base->planes[kPpuOverlaySource_Bg2].set_transparent_fill = true;
-  base->planes[kPpuOverlaySource_Bg2].transparent_fill_kind =
+  base->planes[SR_PPU_OVERLAY_BG2].set_transparent_fill = true;
+  base->planes[SR_PPU_OVERLAY_BG2].transparent_fill_kind =
       kDioramaTransparentFill_Black;
 
   DioramaTransparentFill kind = kDioramaTransparentFill_None;
   uint8_t cgram = 0xff;
   CHECK(DioramaLayerOrder_ResolveTransparentFill(
       &table, 0x04, 0x05, kDioramaLayerSection_AitosWaterfall,
-      kPpuOverlaySource_Bg2, &kind, &cgram));
+      SR_PPU_OVERLAY_BG2, &kind, &cgram));
   CHECK(kind == kDioramaTransparentFill_Black && cgram == 0);
 
-  scoped->planes[kPpuOverlaySource_Bg2].set_transparent_fill = true;
-  scoped->planes[kPpuOverlaySource_Bg2].transparent_fill_kind =
+  scoped->planes[SR_PPU_OVERLAY_BG2].set_transparent_fill = true;
+  scoped->planes[SR_PPU_OVERLAY_BG2].transparent_fill_kind =
       kDioramaTransparentFill_Cgram;
-  scoped->planes[kPpuOverlaySource_Bg2].transparent_fill_cgram = 0x36;
+  scoped->planes[SR_PPU_OVERLAY_BG2].transparent_fill_cgram = 0x36;
   CHECK(DioramaLayerOrder_ResolveTransparentFill(
       &table, 0x04, 0x05, kDioramaLayerSection_AitosWaterfall,
-      kPpuOverlaySource_Bg2, &kind, &cgram));
+      SR_PPU_OVERLAY_BG2, &kind, &cgram));
   CHECK(kind == kDioramaTransparentFill_Cgram && cgram == 0x36);
-  scoped->planes[kPpuOverlaySource_Bg2].transparent_fill_kind =
+  scoped->planes[SR_PPU_OVERLAY_BG2].transparent_fill_kind =
       kDioramaTransparentFill_None;
-  scoped->planes[kPpuOverlaySource_Bg2].transparent_fill_cgram = 0;
+  scoped->planes[SR_PPU_OVERLAY_BG2].transparent_fill_cgram = 0;
   CHECK(DioramaLayerOrder_ResolveTransparentFill(
       &table, 0x04, 0x05, kDioramaLayerSection_AitosWaterfall,
-      kPpuOverlaySource_Bg2, &kind, &cgram));
+      SR_PPU_OVERLAY_BG2, &kind, &cgram));
   CHECK(kind == kDioramaTransparentFill_None && cgram == 0);
   CHECK(!DioramaLayerOrder_ResolveTransparentFill(
       &table, 0x04, 0x05, kDioramaLayerSection_Room,

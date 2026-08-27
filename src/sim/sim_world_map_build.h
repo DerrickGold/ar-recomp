@@ -5,6 +5,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "runner_next.h"
+
+/* Bind the opaque runner used only by the opt-in transactional comparison
+ * oracle. The production compositor does not query runner state. */
+void SimWorldMapBuild_BindRunner(SrRunnerHandle *runner);
+
 /* Load the immutable translation and destination tables used by the pure HLE.
  * Safe to fail: BuildIfNeeded then leaves the pristine SimWorldMap unpublished
  * and the renderer falls back to the authentic path. */

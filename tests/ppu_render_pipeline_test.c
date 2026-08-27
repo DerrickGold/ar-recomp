@@ -1239,6 +1239,7 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
 
   const int extra = 43;
   const int width = kActRaiserAuthenticWidth + 2 * extra;
+  static uint32_t hud_bg[kSim3DMaxWidth * kActRaiserAuthenticHeight];
   static uint32_t hud_obj[kSim3DMaxWidth * kActRaiserAuthenticHeight];
   static uint32_t authentic[kSim3DMaxWidth * kActRaiserAuthenticHeight];
   /* Give every referenced OBJ tile an opaque test colour. The handoff
@@ -1284,8 +1285,12 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
    * repopulates it from the independent range raster. */
   for (int suppress_raw = 0; suppress_raw <= 1; suppress_raw++) {
     PpuClearOverlayBindings(ppu);
+    memset(hud_bg, 0, sizeof(hud_bg));
     memset(hud_obj, 0, sizeof(hud_obj));
     memset(authentic, 0, sizeof(authentic));
+    CHECK(PpuBindOverlaySurface(
+        ppu, kPpuOverlaySource_Bg3, (uint8_t *)hud_bg,
+        (size_t)width * sizeof(uint32_t)));
     CHECK(PpuBindOverlaySurface(
         ppu, kPpuOverlaySource_Obj, (uint8_t *)hud_obj,
         (size_t)width * sizeof(uint32_t)));
@@ -1312,6 +1317,24 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
         (uint8_t *)authentic, width * (int)sizeof(uint32_t), 1);
     CHECK(hud_obj[(size_t)kActRaiserHudObjUpperY * width +
                   extra + kActRaiserSimulationHourglassLeftX] != 0);
+    if (!suppress_raw) {
+      Sim3DOutputSurfaceViews views = {0};
+      Sim3D_CaptureOutputSurfaceViews(&views);
+      CHECK(views.planes[kSim3DPlane_Bg3Low].data ==
+            (const uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg3Low]);
+      CHECK(views.planes[kSim3DPlane_Bg3Low].width_pixels == (uint32_t)width);
+      CHECK(views.planes[kSim3DPlane_Bg3Low].height_pixels ==
+            kActRaiserAuthenticHeight);
+      CHECK((views.planes[kSim3DPlane_Bg3Low].flags &
+             SR_PPU_SURFACE_HAS_CONTENT) != 0u);
+      CHECK(views.planes[kSim3DPlane_Obj0].data ==
+            (const uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Obj0]);
+      CHECK(views.hud_bg.data == (const uint8_t *)hud_bg);
+      CHECK(views.hud_bg.height_pixels == kActRaiserSimulationHudHeight);
+      CHECK(views.hud_obj.data == (const uint8_t *)hud_obj);
+      CHECK(views.hud_obj.width_pixels == (uint32_t)width);
+      CHECK(views.hud_obj.height_pixels == kActRaiserSimulationHudHeight);
+    }
     CHECK(Sim3D_BeginFrame());
   }
 

@@ -23,9 +23,9 @@ static void AddRequiredBgPlanes(
     const ActionEffectInstance *effect = &effects[i];
     if (!(effect->flags & kActionEffectFlag_Visible)) continue;
     if (effect->projection_plane == kActionEffectProjectionPlane_Bg1)
-      *mask |= 1u << kPpuOverlaySource_Bg1;
+      *mask |= 1u << SR_PPU_OVERLAY_BG1;
     else if (effect->projection_plane == kActionEffectProjectionPlane_Bg2)
-      *mask |= 1u << kPpuOverlaySource_Bg2;
+      *mask |= 1u << SR_PPU_OVERLAY_BG2;
     else if (effect->projection_plane ==
              kActionEffectProjectionPlane_Bg1High)
       *mask |= 1u << kDioramaPlane_Bg1Hi;

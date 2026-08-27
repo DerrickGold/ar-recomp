@@ -25,12 +25,11 @@
 #include "constants.h"
 #include "actraiser_rtl.h"
 #include "common_cpu_infra.h"
-#include "common_rtl.h"      /* g_ram, g_ppu */
+#include "common_rtl.h"      /* g_ram */
 #include "frame_timing.h"
 #include "hd_replacement_host.h"
 #include "runner_next.h"
 #include "runner_next_internal.h"
-#include "snes/ppu.h"        /* PPU_mode, PpuOverlay* */
 
 /* main.c-owned globals with no header declaration, read here. */
 extern bool g_ws_active;
@@ -114,22 +113,22 @@ static uint32_t CaptureDioramaPlaneRequestMask(void) {
       g_settings.diorama_skybox != kDioramaSky_Only)
     mask |= DioramaPlaneBit(kDioramaPlane_Backdrop);
   if (g_settings.diorama_layer_bg1)
-    mask |= DioramaPlaneBit(kPpuOverlaySource_Bg1) |
+    mask |= DioramaPlaneBit(SR_PPU_OVERLAY_BG1) |
             DioramaPlaneBit(kDioramaPlane_Bg1Hi) |
             DioramaPlaneBit(kDioramaPlane_Bg1Far);
   if (g_settings.diorama_layer_bg2)
-    mask |= DioramaPlaneBit(kPpuOverlaySource_Bg2) |
+    mask |= DioramaPlaneBit(SR_PPU_OVERLAY_BG2) |
             DioramaPlaneBit(kDioramaPlane_Bg2Hi) |
             DioramaPlaneBit(kDioramaPlane_Bg2Far);
   else if (g_settings.diorama_skybox != kDioramaSky_Off)
-    mask |= DioramaPlaneBit(kPpuOverlaySource_Bg2);
+    mask |= DioramaPlaneBit(SR_PPU_OVERLAY_BG2);
   if (g_settings.diorama_layer_obj)
-    mask |= DioramaPlaneBit(kPpuOverlaySource_Obj) |
+    mask |= DioramaPlaneBit(SR_PPU_OVERLAY_OBJ) |
             DioramaPlaneBit(kDioramaPlane_Obj1) |
             DioramaPlaneBit(kDioramaPlane_Obj2) |
             DioramaPlaneBit(kDioramaPlane_Obj3);
   if (g_settings.diorama_layer_bg3 && !g_settings.diorama_hud_flat)
-    mask |= DioramaPlaneBit(kPpuOverlaySource_Bg3);
+    mask |= DioramaPlaneBit(SR_PPU_OVERLAY_BG3);
   return mask;
 }
 
@@ -176,10 +175,10 @@ static uint32_t CaptureDioramaPlaneContentMask(
     uint8_t band;
     uint8_t plane;
   } kSurfaces[] = {
-    { SR_PPU_OVERLAY_BG1, 0, kPpuOverlaySource_Bg1 },
-    { SR_PPU_OVERLAY_BG2, 0, kPpuOverlaySource_Bg2 },
-    { SR_PPU_OVERLAY_BG3, 0, kPpuOverlaySource_Bg3 },
-    { SR_PPU_OVERLAY_OBJ, 0, kPpuOverlaySource_Obj },
+    { SR_PPU_OVERLAY_BG1, 0, SR_PPU_OVERLAY_BG1 },
+    { SR_PPU_OVERLAY_BG2, 0, SR_PPU_OVERLAY_BG2 },
+    { SR_PPU_OVERLAY_BG3, 0, SR_PPU_OVERLAY_BG3 },
+    { SR_PPU_OVERLAY_OBJ, 0, SR_PPU_OVERLAY_OBJ },
     { SR_PPU_OVERLAY_BG1, 1, kDioramaPlane_Bg1Hi },
     { SR_PPU_OVERLAY_BG2, 1, kDioramaPlane_Bg2Hi },
     { SR_PPU_OVERLAY_BG1, 2, kDioramaPlane_Bg1Far },
@@ -203,20 +202,20 @@ static uint32_t CaptureDioramaAdditivePlaneMask(
   uint32_t mask = 0;
   if (ppu_frame->overlays[SR_PPU_OVERLAY_BG1].flags &
       SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN)
-    mask |= DioramaPlaneBit(kPpuOverlaySource_Bg1) |
+    mask |= DioramaPlaneBit(SR_PPU_OVERLAY_BG1) |
             DioramaPlaneBit(kDioramaPlane_Bg1Hi) |
             DioramaPlaneBit(kDioramaPlane_Bg1Far);
   if (ppu_frame->overlays[SR_PPU_OVERLAY_BG2].flags &
       SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN)
-    mask |= DioramaPlaneBit(kPpuOverlaySource_Bg2) |
+    mask |= DioramaPlaneBit(SR_PPU_OVERLAY_BG2) |
             DioramaPlaneBit(kDioramaPlane_Bg2Hi) |
             DioramaPlaneBit(kDioramaPlane_Bg2Far);
   if (ppu_frame->overlays[SR_PPU_OVERLAY_BG3].flags &
       SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN)
-    mask |= DioramaPlaneBit(kPpuOverlaySource_Bg3);
+    mask |= DioramaPlaneBit(SR_PPU_OVERLAY_BG3);
   if (ppu_frame->overlays[SR_PPU_OVERLAY_OBJ].flags &
       SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN)
-    mask |= DioramaPlaneBit(kPpuOverlaySource_Obj) |
+    mask |= DioramaPlaneBit(SR_PPU_OVERLAY_OBJ) |
             DioramaPlaneBit(kDioramaPlane_Obj1) |
             DioramaPlaneBit(kDioramaPlane_Obj2) |
             DioramaPlaneBit(kDioramaPlane_Obj3);
@@ -336,7 +335,7 @@ void FrameSlot_SetPendingAnnotatedSim(const SimFrameData *sim) {
 }
 
 /* M5 (ar-recomp-threading-impl.md Appendix D5): the sole FrameSlot writer.
- * Reads live g_ppu, g_settings, g_snes_width/height,
+ * Reads the coherent ABI PPU view, g_settings, g_snes_width/height,
  * g_scene_inspector_presentation, g_hd_replacements: legitimate here (this
  * runs on the game thread, immediately after RtlDrawPpuFrame() returns,
  * before the game thread touches any of this state again). present.c must
@@ -526,6 +525,7 @@ void FrameSlot_Capture(FrameSlot *dst) {
     dst->sim.town_canvas_serial = SimTownCanvas_Serial();
     dst->sim.background_voxel_serial = SimBackgroundVoxels_Serial();
   }
+  Sim3D_CaptureOutputSurfaceViews(&dst->sim3d_output_surfaces);
 
   dst->snes_width = g_snes_width;
   dst->snes_height = g_snes_height;
@@ -544,7 +544,7 @@ void FrameSlot_Capture(FrameSlot *dst) {
   dst->authentic_x0 = g_ws_extra;
   dst->authentic_y0 = dst->ws_extra_top;
   dst->authentic_frame_serial = ActRaiser_AuthenticFrameSerial();
-  dst->obj_apron = kPpuObjApron;
+  dst->obj_apron = SR_PPU_OBJ_APRON;
   /* Density-corrected here, at the D6 producer, so present.c consumes a value
    * already expressed in PHYSICAL output pixels (0 = auto passes through). */
   dst->hud_scale_percent =
@@ -653,13 +653,13 @@ void FrameSlot_Capture(FrameSlot *dst) {
     dst->inidisp = ppu_frame->display_control;
     dst->bg_mode = ppu_frame->bg_mode;
 
-    _Static_assert(kFrameSlotOverlaySourceCount == kPpuOverlaySource_Count,
+    _Static_assert(kFrameSlotOverlaySourceCount == SR_PPU_OVERLAY_SOURCE_COUNT,
                    "FrameSlot overlay source count must match the PPU's");
     _Static_assert(kFrameSlotOverlaySourceCount ==
                        SR_PPU_OVERLAY_SOURCE_COUNT,
                    "FrameSlot overlay source count must match the ABI's");
-    _Static_assert(kFrameSlotOverlay_Bg3 == kPpuOverlaySource_Bg3 &&
-                   kFrameSlotOverlay_Obj == kPpuOverlaySource_Obj,
+    _Static_assert(kFrameSlotOverlay_Bg3 == SR_PPU_OVERLAY_BG3 &&
+                   kFrameSlotOverlay_Obj == SR_PPU_OVERLAY_OBJ,
                    "present.h's mirrored overlay source order must match ppu.h");
     _Static_assert(kFrameSlotOverlayFlag_RemoveFromGame ==
                        SR_PPU_OVERLAY_REMOVE_FROM_GAME,
@@ -689,10 +689,10 @@ void FrameSlot_Capture(FrameSlot *dst) {
             .transparent_fill_configured != 0u;
     /* These mirrors are load-bearing allocation contracts shared by capture,
      * frame generation, and the compositor. */
-    _Static_assert(kFrameSlotLayerTextureWidth == kPpuSurfaceWidth,
-                   "present.h's mirrored layer texture width must match ppu.h");
-    _Static_assert(kFrameSlotLayerTextureHeight == kPpuBufHeight,
-                   "present.h's mirrored layer texture height must match ppu.h");
+    _Static_assert(kFrameSlotLayerTextureWidth == SR_PPU_SURFACE_MAX_WIDTH,
+                   "present.h's layer texture width must match the ABI");
+    _Static_assert(kFrameSlotLayerTextureHeight == SR_PPU_SURFACE_MAX_HEIGHT,
+                   "present.h's layer texture height must match the ABI");
     _Static_assert(kFrameSlotAuthenticWidth == kActRaiserAuthenticWidth,
                    "present.h's mirrored authentic width must match "
                    "actraiser_game.h");

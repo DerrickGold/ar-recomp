@@ -20,7 +20,6 @@
 #endif
 
 #include "action/action_obj_apron.h"
-#include "snes/ppu.h"
 #include "types.h"
 #include "actraiser_rtl.h"
 #include "common_cpu_infra.h"
@@ -51,7 +50,6 @@
 #include "actraiser/actraiser_spc_player.h"
 #include "actraiser/actraiser_action_bg.h"
 #include "actraiser_game.h"
-#include "snes/snes.h"
 #include "cpu_trace.h"
 #include "audio_trace.h"
 #include "debug_server.h"
@@ -68,17 +66,16 @@
 #include "input_replay.h"
 #include "dev/oracle_trace.h"
 #include "portable_paths.h"
-#include "randomizer.h"
 #include "runtime_settings.h"
 #include "session_fatal.h"
 #include "runtime_diagnostics.h"
+#include "runner_next.h"
 #include "runner_next_internal.h"
 #include "scheduled_settings.h"
 #include "user_data_dir.h"
 #include "sim/sim_phase0_trace.h"
 #include "sim/sim_render_metadata.h"
 #include "sim/sim_world_map_build.h"
-#include "sim/sim_visual_patches.h"
 #include "sim/sim_world_navigation_capture.h"
 #include "sim/sim_render_atlas.h"
 #include "sim/sim_background_voxels.h"
@@ -129,29 +126,29 @@ int g_snes_width = kActRaiserAuthenticWidth,
  * only the leading g_snes_width*4 bytes per row. Rows follow the same rule on
  * the other axis: capacity for the full vertical margin band, of which a frame
  * uses only 224 + g_ws_extra_top + g_ws_extra_bottom. */
-_Static_assert(kHostDisplayFramebufferHeight >= kPpuBufHeight,
+_Static_assert(kHostDisplayFramebufferHeight >= SR_PPU_SURFACE_MAX_HEIGHT,
                "frame surfaces must hold every row the PPU can render");
 uint8_t g_pixels[
-    kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
+    SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight];
 /* Complete native PPU result captured beside g_pixels before host presentation
  * extractions remove layers. It stays at the active scanline width (no OBJ
  * apron) because comparison presents only a native 256x224 crop. */
 uint8_t g_authentic_pixels[
-    kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
+    SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight];
 uint8_t g_hud_bg_pixels[
-    kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
+    SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight];
 uint8_t g_hud_obj_pixels[
-    kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
+    SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight];
 /* Flat-mode mask of pixels for which BG1 wins the priority resolve of its
  * owning PPU screen. This remains correct in Marahna/Viper rooms where BG1
  * and OBJ are TS-only inputs to the final colour-add composite. */
 uint8_t g_action_bg1_mask_pixels[
-    kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
+    SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight];
 /* Flat-mode mask of pixels for which BG2 wins the complete PPU main-screen
  * priority resolve. A BG2-stage presentation effect is multiplied by this
  * before compositing, so later BG1/OBJ art retains authentic occlusion. */
 uint8_t g_action_bg2_mask_pixels[
-    kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
+    SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight];
 
 /* Diorama per-plane capture buffers, indexed by kDioramaPlane_* (engine
  * sources = the priority-0 remainder of each layer, appended entries = the
@@ -180,20 +177,20 @@ static void DestroyDioramaTextures(void) {
 
 static void CreateDioramaTextures(void) {
   /* Allocated at the PPU's full render-target size on BOTH axes, for the same
-   * reason: kPpuBufWidth already covered every widescreen margin without a
-   * realloc, and kPpuBufHeight now does the same for the vertical band. Only
-   * the leading snes_width x
+   * reason: the ABI surface limits already cover every horizontal and vertical
+   * margin without a realloc. Only the leading snes_width x
    * (snes_height + ws_extra_top + ws_extra_bottom) region is uploaded
    * each frame; Diorama_Composite's UV window is expressed against these
    * allocated dimensions. */
   uint8_t *zero_fill =
-      calloc(1, (size_t)kPpuSurfaceWidth * kPpuBufHeight * 4);
+      calloc(1, (size_t)SR_PPU_SURFACE_MAX_WIDTH *
+                    SR_PPU_SURFACE_MAX_HEIGHT * 4);
   for (int i = 0; i < kDioramaPlane_Count; i++) {
-    if (i == kPpuOverlaySource_Bg4)
+    if (i == SR_PPU_OVERLAY_BG4)
       continue;
     g_diorama_textures[i] = SDL_CreateTexture(
         g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-        kPpuSurfaceWidth, kPpuBufHeight);
+        SR_PPU_SURFACE_MAX_WIDTH, SR_PPU_SURFACE_MAX_HEIGHT);
     if (!g_diorama_textures[i])
       continue;
     SDL_SetTextureBlendMode(g_diorama_textures[i],
@@ -202,7 +199,7 @@ static void CreateDioramaTextures(void) {
     SDL_SetTextureScaleMode(g_diorama_textures[i], SDL_SCALEMODE_NEAREST);
     if (zero_fill)
       SDL_UpdateTexture(g_diorama_textures[i], NULL, zero_fill,
-                        kPpuSurfaceWidth * 4);
+                        SR_PPU_SURFACE_MAX_WIDTH * 4);
   }
   free(zero_fill);
 }
@@ -226,12 +223,10 @@ int g_ws_display_extra;
  * output everywhere.
  * Exact signed positions published by the action HLE emitter disambiguate OAM
  * Y in both bands; margin scanlines ignore slots without that sideband. See
- * kPpuExtraTopBottom. */
+ * SR_PPU_VERTICAL_MARGIN_MAX. */
 int g_ws_extra_top;
 int g_ws_extra_bottom;
 
-extern Snes *g_snes;
-extern Ppu *g_ppu;
 struct SpcPlayer *g_spc_player;
 
 extern const RtlGameInfo kActRaiserGameInfo;
@@ -240,10 +235,46 @@ bool g_new_ppu = true;
 
 static bool SettingsOverlayLiveCgram(
     uint16_t out_cgram[kSettingsOverlayLayerPaletteEntries]) {
-  if (!g_ppu || !out_cgram) return false;
-  memcpy(out_cgram, g_ppu->cgram,
+  const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+  SrRunnerHandle *runner = g_snes ? sr_runner_handle(g_snes) : NULL;
+  SrBorrowedU16Span cgram = {
+    .struct_size = sizeof(cgram),
+  };
+  if (!api || !runner || !out_cgram ||
+      api->struct_size < SNES_RUNNER_API_PPU_STATE_SIZE ||
+      !(api->capabilities & SR_RUNNER_CAP_BORROWED_U16_SPANS) ||
+      api->borrow_u16_memory(runner, SR_MEMORY_CGRAM, &cgram) !=
+          SR_RESULT_OK ||
+      cgram.element_count < kSettingsOverlayLayerPaletteEntries)
+    return false;
+  memcpy(out_cgram, cgram.data,
          sizeof(uint16_t) * kSettingsOverlayLayerPaletteEntries);
   return true;
+}
+
+static bool CaptureTownCanvasPpuView(SrPpuStateSnapshot *ppu,
+                                     SrBorrowedU16Span *vram,
+                                     SrBorrowedU16Span *cgram) {
+  const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+  SrRunnerHandle *runner = g_snes ? sr_runner_handle(g_snes) : NULL;
+  const uint64_t required_caps =
+      SR_RUNNER_CAP_PPU_STATE | SR_RUNNER_CAP_BORROWED_U16_SPANS;
+  if (!api || !runner || !ppu || !vram || !cgram ||
+      api->struct_size < SNES_RUNNER_API_PPU_STATE_SIZE ||
+      (api->capabilities & required_caps) != required_caps)
+    return false;
+  *ppu = (SrPpuStateSnapshot){.struct_size = sizeof(*ppu)};
+  *vram = (SrBorrowedU16Span){.struct_size = sizeof(*vram)};
+  *cgram = (SrBorrowedU16Span){.struct_size = sizeof(*cgram)};
+  return api->query_ppu_state(runner, ppu) == SR_RESULT_OK &&
+      api->borrow_u16_memory(runner, SR_MEMORY_VRAM, vram) ==
+             SR_RESULT_OK &&
+      api->borrow_u16_memory(runner, SR_MEMORY_CGRAM, cgram) ==
+             SR_RESULT_OK &&
+      vram->element_count >= SR_PPU_VRAM_WORD_COUNT &&
+      cgram->element_count >= SR_PPU_CGRAM_WORD_COUNT &&
+      vram->lifetime_generation == ppu->lifetime_generation &&
+      cgram->lifetime_generation == ppu->lifetime_generation;
 }
 
 void NORETURN Die(const char *error) {
@@ -430,7 +461,8 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
   SimFrameData sim;
   {
     extern int snes_frame_counter;
-    SimPhase0Trace_Frame((uint32)snes_frame_counter, g_ram, g_ppu);
+    SimPhase0Trace_Frame((uint32)snes_frame_counter, g_ram,
+                         sr_runner_handle(g_snes));
     SimRenderMetadata_CaptureFrame(
         &sim, g_ram, g_settings.sim3d_mode,
         g_settings.sim3d_world_navigation,
@@ -441,7 +473,17 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
     SimWorldNavigationCapture_Capture(&sim, sr_runner_handle(g_snes));
     /* This site runs for every drawn frame, including headless runs that never
      * call HostDisplay_SubmitFrame or FrameSlot_Capture. */
-    Sim3D_RenderTownCanvas(&sim, g_ram, g_ppu);
+    SrPpuStateSnapshot town_ppu;
+    SrBorrowedU16Span town_vram;
+    SrBorrowedU16Span town_cgram;
+    const bool have_town_ppu_view =
+        Sim3D_TownCanvasNeedsPpuView(&sim) &&
+        CaptureTownCanvasPpuView(&town_ppu, &town_vram, &town_cgram);
+    Sim3D_RenderTownCanvas(
+        &sim, g_ram,
+        have_town_ppu_view ? &town_ppu : NULL,
+        have_town_ppu_view ? &town_vram : NULL,
+        have_town_ppu_view ? &town_cgram : NULL);
     sim.town_canvas_serial = SimTownCanvas_Serial();
     sim.background_voxel_serial = SimBackgroundVoxels_Serial();
     Sim3D_LogViewTransition(&sim);
@@ -449,11 +491,11 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
     /* g_pixels is bound apron-wide; offset past the apron so the trace sees
      * the authentic frame at column 0, as it always has. */
     const size_t trace_pitch =
-        ActionApron_SurfacePitch(g_snes_width, kPpuObjApron);
+        ActionApron_SurfacePitch(g_snes_width, SR_PPU_OBJ_APRON);
     if (trace_pitch <= INT_MAX) {
       SimRenderMetadata_TraceFrame(
           (uint32)snes_frame_counter, &sim,
-          g_pixels + ActionApron_DisplayOffset(kPpuObjApron),
+          g_pixels + ActionApron_DisplayOffset(SR_PPU_OBJ_APRON),
           g_snes_width, g_snes_height, (int)trace_pitch);
     }
   }
@@ -547,9 +589,12 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
         const SDL_Point shot_size =
             HostDevTools_WriteFramebufferPpm(pf);
         fclose(pf);
+        int margin_left = 0;
+        int margin_right = 0;
+        ActRaiser_LiveMargins(&margin_left, &margin_right);
         fprintf(stderr, "[shot] wrote %s at gf=%u (%dx%d) margins=%d/%d mode=%s\n",
                 fname, gf, shot_size.x, shot_size.y,
-                g_ppu->extraLeftCur, g_ppu->extraRightCur,
+                margin_left, margin_right,
                 Settings_DisplayModeName(g_settings.display_mode));
       }
     }
@@ -911,7 +956,7 @@ static void AppBoot_ArmDiagnostics(void) {
 static void AppBoot_CreatePresentationTextures(void) {
   g_texture = SDL_CreateTexture(g_renderer,
     SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-    kPpuSurfaceWidth, g_snes_height);
+    SR_PPU_SURFACE_MAX_WIDTH, g_snes_height);
   if (!g_texture) Die("SDL_CreateTexture failed");
   /* The base framebuffer is opaque: the PPU writes RGB with the alpha byte
    * left 0 (see ppu_old.c). SDL2 defaulted new textures to BLENDMODE_NONE so
@@ -927,7 +972,7 @@ static void AppBoot_CreatePresentationTextures(void) {
 
   g_authentic_texture = SDL_CreateTexture(
       g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-      kPpuSurfaceWidth, kPpuBufHeight);
+      SR_PPU_SURFACE_MAX_WIDTH, SR_PPU_SURFACE_MAX_HEIGHT);
   if (!g_authentic_texture)
     Die("SDL_CreateTexture for authentic comparison failed");
   SDL_SetTextureBlendMode(g_authentic_texture, SDL_BLENDMODE_NONE);
@@ -935,10 +980,10 @@ static void AppBoot_CreatePresentationTextures(void) {
 
   g_hud_bg_texture = SDL_CreateTexture(g_renderer,
     SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-    kPpuSurfaceWidth, g_snes_height);
+    SR_PPU_SURFACE_MAX_WIDTH, g_snes_height);
   g_hud_obj_texture = SDL_CreateTexture(g_renderer,
     SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-    kPpuSurfaceWidth, g_snes_height);
+    SR_PPU_SURFACE_MAX_WIDTH, g_snes_height);
   if (!g_hud_bg_texture || !g_hud_obj_texture)
     Die("SDL_CreateTexture for HUD overlay failed");
   SDL_SetTextureBlendMode(g_hud_bg_texture, SDL_BLENDMODE_BLEND);
@@ -1023,10 +1068,10 @@ static void AppBoot_CreatePresentationTextures(void) {
    * B1b-crisp supersample copy, then suspected in the DOF/edge-AA shader)
    * before landing on the actual source: every consumer that ever samples
    * near the true edge of what Diorama_Upload writes (u=uv_u1 =
-   * snes_width/kPpuBufWidth, always < 1.0 — the buffer is allocated at
-   * the PPU's max width but a layer's real captured content is narrower,
+   * snes_width/SR_PPU_SURFACE_MAX_WIDTH, always < 1.0 — the buffer is
+   * allocated at the PPU's max width but a layer's real content is narrower,
    * capped by kWsExtraMax's tilemap-ring streaming limit) can reach into
-   * columns snes_width..kPpuBufWidth-1, which Diorama_Upload's
+   * columns snes_width..SR_PPU_SURFACE_MAX_WIDTH-1, which Diorama_Upload's
    * SDL_UpdateTexture never touches. SDL_TEXTUREACCESS_STREAMING content
    * is undefined until written (no zero guarantee, confirmed non-zero in
    * practice on this backend), so that tail is genuine garbage, not just
@@ -1305,19 +1350,14 @@ static void AppBoot_StartGame(AppBoot *app) {
    * as its non-randomized restore baseline). A signature mismatch is safe but
    * important: it means effects metadata and the running visual script would
    * no longer share the investigated USA-ROM contract. */
-  if (!SimVisualPatches_Apply(app->snes->cart->rom, app->snes->cart->romSize))
+  const ActRaiserRomSetupResult rom_setup =
+      ActRaiser_SetupLiveRom(app->snes);
+  if (!rom_setup.visual_patches_applied)
     fprintf(stderr,
             "[sim-visuals] house-fire cadence patch skipped: "
             "unexpected ROM signature\n");
 
-  /* Randomizer: cart_load COPIES the image, so the buffer the game actually
-   * reads is the cart's, not rom_data. Register that one and apply before the
-   * game coroutine starts. Its pristine snapshot deliberately includes the
-   * deterministic visual adjustments above, so later option changes restore
-   * a stable non-randomized baseline instead of erasing them. */
-  if (Randomizer_Init(app->snes->cart->rom, app->snes->cart->romSize)) {
-    Randomizer_Apply();
-  } else if (g_settings.rando_enable) {
+  if (!rom_setup.randomizer_initialized && g_settings.rando_enable) {
     Die("The Randomizer is enabled, but its pristine ROM snapshot could not "
         "be created. Verify that the configured ROM is supported and that "
         "enough memory is available, or disable Randomizer in settings.ini.");
@@ -1326,10 +1366,9 @@ static void AppBoot_StartGame(AppBoot *app) {
   HdReplacementHost_BindSurfaces();
   ActRaiser_RebindPpuOutputSurfaces();
   /* Frame-0 margin state: pillarboxed-authentic (render the 256 columns
-   * centered in the wide framebuffer). Re-applied every frame by
-   * ActRaiser_ApplyWidescreenPolicy since ppu_reset zeroes these fields. */
-  if (g_ws_active)
-    PpuSetExtraSpaceCentered(g_ppu, (uint8_t)g_ws_extra);
+   * centered in the wide framebuffer). The ABI surface rebind above configures
+   * it; ActRaiser_ApplyWidescreenPolicy reapplies per-frame policy after the
+   * PPU reset clears the live fields. */
 
   /* Power-on WRAM fill. The SNES does not clear WRAM at power-on; snes9x (our
    * reference emulator) fills it with the 0x55 pattern, and ActRaiser's title
@@ -1418,7 +1457,7 @@ static void AppBoot_StartGame(AppBoot *app) {
     }
   }
 
-  OracleTrace_Init();
+  OracleTrace_Init(sr_runner_handle(app->snes));
   ForcedInput_Init();
   InputReplay_Init();
   /* A replay must not mutate the player's configuration, for the same reason it

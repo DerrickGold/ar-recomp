@@ -640,7 +640,7 @@ static void PushParamRows(DioramaEditorRow *out, int capacity, int *count,
     rows[n].param = kDioramaEditorParam_Density, rows[n++].label = "density";
   rows[n].param = kDioramaEditorParam_Z, rows[n++].label = "z depth";
   rows[n].param = kDioramaEditorParam_Alpha, rows[n++].label = "alpha";
-  if (plane == kPpuOverlaySource_Bg1 || plane == kPpuOverlaySource_Bg2) {
+  if (plane == SR_PPU_OVERLAY_BG1 || plane == SR_PPU_OVERLAY_BG2) {
     rows[n].param = kDioramaEditorParam_TransparentFill;
     rows[n++].label = "backdrop fill";
   }

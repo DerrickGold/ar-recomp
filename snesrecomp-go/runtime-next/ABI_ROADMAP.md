@@ -448,6 +448,57 @@ faster. Native-SIMD deltas were +0.28%, +0.07%, -0.17%, and +0.17%; suite
 regression was +0.09%. Both configurations remain well inside the performance
 gate.
 
+## ABI v2 first concrete-access checkpoint (2026-08-26)
+
+ABI v2 makes the expanded PPU state snapshot the sole supported layout. It
+adds raw SNES window selection/logic, color-math selection/designation, BG
+tilemap controls, and BG tile-base control to the existing derived state. The
+repository is the runner's only ABI consumer, so version 1 is deliberately
+retired instead of retaining a dual-size branch for hypothetical clients.
+
+The optional SIM phase trace and oracle PPU-register dump now consume only the
+opaque runner handle and coherent ABI snapshots. Their output formats remain
+unchanged, and both concrete `Ppu` dependencies were removed. The exact
+application exception fence falls from 27 files to 25. Both diagnostic paths
+return before issuing a query unless their corresponding environment controls
+are active.
+
+The standalone ABI suite, C++17 public-header syntax check, and x86-64 macOS
+cross-target syntax check pass. Portable and native-SIMD application builds
+each pass all 92 CPU and GPU tests. Seven alternating adjacent replay pairs
+kept every final WRAM, SRAM, CPU-state, and dispatch artifact identical,
+including across portable and native builds. Portable median deltas were
++0.04% for Mode 7/world map, -0.09% for SIM, +0.39% for Aitos wide, and -0.05%
+for Death Heim wide; suite regression was +0.07%. Native-SIMD deltas were
++1.15%, +0.41%, +0.04%, and +0.04%; suite regression was +0.41%. Both remain
+inside the performance gate.
+
+## ABI v2 host-boundary checkpoint (2026-08-26)
+
+The application host bootstrap and presentation orchestrator no longer include
+or dereference concrete `Ppu` or `Snes` layouts. Public surface limits now
+size its retained storage and textures. Settings-only palette inspection
+borrows CGRAM, while the enhanced town canvas consumes one coherent PPU
+snapshot and generation-matched, zero-copy VRAM/CGRAM spans only on frames that
+can actually build the canvas. Screenshot diagnostics use the already-latched
+rendered margin state.
+
+Loaded-ROM transformations now sit behind the ActRaiser game adapter rather
+than exposing cartridge layout to host boot policy. The adapter remains one of
+the deliberately fenced game-critical consumers until its broader mutation
+contract is migrated. The host's redundant direct frame-zero PPU margin write
+was removed because its ABI surface rebind already configures that margin. The
+exact concrete-header fence falls from 12 files to 11.
+
+All 92 application tests pass with host display access for the three GPU tests.
+Seven adjacent baseline/candidate pairs retained identical final artifacts.
+Portable paired deltas were -0.36% for Mode 7/world map, +0.24% for SIM,
++0.05% for Aitos wide, and +0.02% for Death Heim wide; the suite was 0.01%
+faster. Native-SIMD deltas were +0.15%, +0.09%, -0.10%, and -0.12%; suite
+regression was +0.01%. A GPU-backed enhanced Aitos replay also retained
+identical WRAM, SRAM, and dispatch artifacts while sustaining 142-145
+presentations per second in settled town rendering.
+
 ## Migration order
 
 1. [x] Add ABI layout, capability, lifetime, and generation-counter tests while

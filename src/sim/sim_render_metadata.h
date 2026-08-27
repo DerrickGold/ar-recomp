@@ -7,7 +7,7 @@
 
 #include "constants.h"
 #include "sim_world_navigation_scene.h"
-#include "snes/ppu.h"
+#include "runner_next.h"
 #include "types.h"
 
 /* Immutable simulation-town render contract. The $01:ADAD/$01:AE6F HLE leaves
@@ -1140,7 +1140,7 @@ typedef struct SimAtlasBuildInput {
   uint16_t object_count;
   uint16_t part_count;
   SimRenderObject objects[kSimMaxRenderObjects];
-  PpuObjPart parts[kSimMaxResolvedParts];
+  SrPpuObjPart parts[kSimMaxResolvedParts];
 } SimAtlasBuildInput;
 
 /* Pure dependency resolver.  implemented_features is a capability mask, not
@@ -1190,9 +1190,9 @@ void SimRenderMetadata_SetEruptionCraterAnchor(
  * a record without this call simply has no cull-lead anchor. */
 void SimRenderMetadata_RecordAnchor(int16_t base_x, int16_t base_y);
 void SimRenderMetadata_RecordPart(uint16_t oam_cursor, uint16_t attributes);
-void SimRenderMetadata_RecordExactOamPart(const PpuObjPart *part);
+void SimRenderMetadata_RecordExactOamPart(const SrPpuObjPart *part);
 void SimRenderMetadata_RecordSyntheticPart(uint16_t oam_cursor,
-                                           const PpuObjPart *part);
+                                           const SrPpuObjPart *part);
 /* One composition part the sprite window rejected. Counted per part rather
  * than per record because a wide composition can straddle the edge, and a
  * record that lost half its parts is already visibly wrong. */

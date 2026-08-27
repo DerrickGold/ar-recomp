@@ -5,24 +5,26 @@
 #include "actraiser_game.h"
 #include "hd_replacements.h"
 #include "manifest_utils.h"
-#include "snes/ppu.h"
 #include "settings.h"
-
-extern Ppu *g_ppu;
 
 HdReplacement g_hd_replacements[kHdMaxReplacements];
 int g_hd_replacement_count;
+static SrRunnerHandle *s_runner;
 
 enum { kHdManifestLineCapacity = 1024 };
+
+void HdReplacements_BindRunner(SrRunnerHandle *runner) {
+  s_runner = runner;
+}
 
 /* ---- parsing ---------------------------------------------------------- */
 
 static int ParseSourceName(const char *value) {
-  if (!strcmp(value, "bg1")) return kPpuOverlaySource_Bg1;
-  if (!strcmp(value, "bg2")) return kPpuOverlaySource_Bg2;
-  if (!strcmp(value, "bg3")) return kPpuOverlaySource_Bg3;
-  if (!strcmp(value, "bg4")) return kPpuOverlaySource_Bg4;
-  if (!strcmp(value, "obj")) return kPpuOverlaySource_Obj;
+  if (!strcmp(value, "bg1")) return SR_PPU_OVERLAY_BG1;
+  if (!strcmp(value, "bg2")) return SR_PPU_OVERLAY_BG2;
+  if (!strcmp(value, "bg3")) return SR_PPU_OVERLAY_BG3;
+  if (!strcmp(value, "bg4")) return SR_PPU_OVERLAY_BG4;
+  if (!strcmp(value, "obj")) return SR_PPU_OVERLAY_OBJ;
   return -1;
 }
 
@@ -106,9 +108,9 @@ static bool EntryComplete(const HdReplacement *entry, const char *path,
     missing = "rect";
   else if (entry->plane == kHdPlane_Mode7 &&
            (entry->canvas_x1 <= entry->canvas_x0 || entry->canvas_x0 < 0 ||
-            entry->canvas_x1 > kPpuMode7CanvasExtent ||
+            entry->canvas_x1 > (int)SR_PPU_MODE7_CANVAS_EXTENT ||
             entry->canvas_y0 < 0 ||
-            entry->canvas_y1 > kPpuMode7CanvasExtent))
+            entry->canvas_y1 > (int)SR_PPU_MODE7_CANVAS_EXTENT))
     missing = "canvas_rect";
   else if (!entry->condition_count) missing = "when";
   if (missing)
@@ -218,43 +220,91 @@ int HdReplacements_Load(const char *path) {
 
 /* ---- per-frame policy -------------------------------------------------- */
 
-bool HdManifest_ConditionPasses(const HdCondition *cond) {
+static bool QueryPpuState(const SnesRunnerApi **out_api,
+                          SrPpuStateSnapshot *out_state,
+                          bool require_capture_control) {
+  const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+  const uint64_t required_caps = SR_RUNNER_CAP_PPU_STATE |
+      (require_capture_control ? SR_RUNNER_CAP_PPU_CAPTURE_CONTROL : 0u);
+  const uint32_t required_size = require_capture_control
+      ? SNES_RUNNER_API_PPU_CAPTURE_CONTROL_SIZE
+      : SNES_RUNNER_API_PPU_STATE_SIZE;
+  if (!s_runner || !api || api->struct_size < required_size ||
+      (api->capabilities & required_caps) != required_caps)
+    return false;
+  out_state->struct_size = sizeof(*out_state);
+  if (api->query_ppu_state(s_runner, out_state) != SR_RESULT_OK)
+    return false;
+  if (out_api) *out_api = api;
+  return true;
+}
+
+static bool ConditionPassesWithPpuState(
+    const HdCondition *cond, const SrPpuStateSnapshot *ppu_state) {
   uint16 actual = 0;
-  /* PPU-dependent operands never pass without a PPU (headless music gates);
+  if (!cond) return false;
+  /* PPU-dependent operands never pass without a coherent PPU snapshot;
    * WRAM operands stay valid everywhere. */
-  if (!g_ppu && cond->kind != kHdCond_WramByte) return false;
+  if (!ppu_state && cond->kind != kHdCond_WramByte) return false;
   switch (cond->kind) {
     case kHdCond_WramByte: actual = g_ram[cond->address]; break;
-    case kHdCond_BgMode: actual = (uint16)(g_ppu->bgmode & 7); break;
+    case kHdCond_BgMode: actual = ppu_state->bg_mode; break;
     case kHdCond_M7Element:
-      actual = (uint16)g_ppu->m7matrix[cond->address & 3];
+      actual = (uint16)ppu_state->mode7_matrix[cond->address & 3];
       break;
     case kHdCond_M7Identity: {
-      bool identity = g_ppu->m7matrix[0] == 0x0100 &&
-                      g_ppu->m7matrix[1] == 0 && g_ppu->m7matrix[2] == 0 &&
-                      g_ppu->m7matrix[3] == 0x0100;
+      bool identity = ppu_state->mode7_matrix[0] == 0x0100 &&
+                      ppu_state->mode7_matrix[1] == 0 &&
+                      ppu_state->mode7_matrix[2] == 0 &&
+                      ppu_state->mode7_matrix[3] == 0x0100;
       return cond->negate ? !identity : identity;
     }
+    default: return false;
   }
   bool equal = actual == cond->value;
   return cond->negate ? !equal : equal;
 }
 
+bool HdManifest_ConditionPasses(const HdCondition *cond) {
+  SrPpuStateSnapshot ppu_state = {0};
+  if (!cond)
+    return false;
+  if (cond->kind == kHdCond_WramByte)
+    return ConditionPassesWithPpuState(cond, NULL);
+  return QueryPpuState(NULL, &ppu_state, false) &&
+         ConditionPassesWithPpuState(cond, &ppu_state);
+}
+
+static bool EntryHasLoadedArt(const HdReplacement *entry) {
+  if (entry->plane == kHdPlane_Screen)
+    return entry->texture != NULL;
+  if (entry->plane == kHdPlane_Mode7)
+    return entry->pixels != NULL;
+  return false;
+}
+
 void HdReplacements_EvaluateFrame(void) {
-  for (int i = 0; i < g_hd_replacement_count; i++)
+  const SnesRunnerApi *api;
+  SrPpuStateSnapshot ppu_state = {0};
+  bool has_any_art = false;
+  for (int i = 0; i < g_hd_replacement_count; i++) {
     g_hd_replacements[i].active = false;
-  if (!g_ppu || !g_settings.hd_replacements)
+    const HdReplacement *entry = &g_hd_replacements[i];
+    if (EntryHasLoadedArt(entry))
+      has_any_art = true;
+  }
+  if (!g_settings.hd_replacements || !has_any_art ||
+      !QueryPpuState(&api, &ppu_state, true))
     return;
 
   for (int i = 0; i < g_hd_replacement_count; i++) {
     HdReplacement *entry = &g_hd_replacements[i];
-    bool has_art = entry->plane == kHdPlane_Screen ? entry->texture != NULL
-                                                   : entry->pixels != NULL;
-    if (entry->plane == kHdPlane_Tiles || !has_art)
+    if (!EntryHasLoadedArt(entry))
       continue;
     bool pass = true;
     for (int c = 0; c < entry->condition_count && pass; c++)
-      pass = HdManifest_ConditionPasses(&entry->conditions[c]);
+      pass = ConditionPassesWithPpuState(
+          &entry->conditions[c], &ppu_state);
     if (!pass)
       continue;
     /* One capture rect per source (and one Mode-7 override) per frame is a
@@ -263,7 +313,28 @@ void HdReplacements_EvaluateFrame(void) {
      * so once. */
     static uint32 warned_mask;
     if (entry->plane == kHdPlane_Mode7) {
-      if (g_ppu->m7Override.rgba) {
+      const SrPpuMode7OverrideRequest request = {
+          .struct_size = sizeof(request),
+          .lifetime_generation = ppu_state.lifetime_generation,
+          .pixels = (const uint32_t *)entry->pixels,
+          .pixel_byte_size = entry->pixels_width > 0 &&
+                  entry->pixels_height > 0
+              ? (uint64_t)(unsigned)entry->pixels_width *
+                    (unsigned)entry->pixels_height * sizeof(uint32_t)
+              : 0u,
+          .width_pixels = entry->pixels_width > 0
+              ? (uint32_t)entry->pixels_width : 0u,
+          .height_pixels = entry->pixels_height > 0
+              ? (uint32_t)entry->pixels_height : 0u,
+          .canvas_x0 = entry->canvas_x0,
+          .canvas_y0 = entry->canvas_y0,
+          .canvas_x1 = entry->canvas_x1,
+          .canvas_y1 = entry->canvas_y1,
+          .wrap = entry->canvas_wrap ? 1u : 0u,
+      };
+      const SrResult result = api->claim_ppu_mode7_override(
+          s_runner, &request);
+      if (result == SR_RESULT_BUSY) {
         if (!(warned_mask & (1u << i))) {
           warned_mask |= 1u << i;
           fprintf(stderr, "[hd-manifest] [replace:%s] Mode-7 override busy "
@@ -272,17 +343,22 @@ void HdReplacements_EvaluateFrame(void) {
         }
         continue;
       }
-      if (PpuSetMode7Override(g_ppu, (const uint32 *)entry->pixels,
-                              entry->pixels_width, entry->pixels_height,
-                              entry->canvas_x0, entry->canvas_y0,
-                              entry->canvas_x1, entry->canvas_y1,
-                              entry->canvas_wrap))
-        entry->active = true;
+      entry->active = result == SR_RESULT_OK;
       continue;
     }
-    const PpuOverlayCapture *existing =
-        &g_ppu->overlayCaptures[entry->source];
-    if (existing->x1 > existing->x0) {
+    const SrPpuOverlayCaptureRequest request = {
+        .struct_size = sizeof(request),
+        .flags = SR_PPU_OVERLAY_REMOVE_FROM_GAME,
+        .lifetime_generation = ppu_state.lifetime_generation,
+        .source = (uint32_t)entry->source,
+        .x = entry->x0,
+        .y = entry->y0,
+        .width = entry->x1 - entry->x0,
+        .height = entry->y1 - entry->y0,
+    };
+    const SrResult result = api->claim_ppu_overlay_capture(
+        s_runner, &request);
+    if (result == SR_RESULT_BUSY) {
       if (!(warned_mask & (1u << i))) {
         warned_mask |= 1u << i;
         fprintf(stderr, "[hd-manifest] [replace:%s] source busy (another "
@@ -290,10 +366,6 @@ void HdReplacements_EvaluateFrame(void) {
       }
       continue;
     }
-    if (PpuSetOverlayCapture(g_ppu, (PpuOverlaySource)entry->source,
-                             entry->x0, entry->y0,
-                             entry->x1 - entry->x0, entry->y1 - entry->y0,
-                             kPpuOverlayFlag_RemoveFromGame))
-      entry->active = true;
+    entry->active = result == SR_RESULT_OK;
   }
 }

@@ -2,16 +2,17 @@
 #include "host_dev_tools.h"
 
 #include "dev_tools.h"
+#include "common_cpu_infra.h"
 #include "host/host_input.h"
 #include "present.h"
+#include "runner_next.h"
+#include "runner_next_internal.h"
 #include "scene_inspector.h"
 #include "settings.h"
-#include "snes/ppu.h"
 
 extern SDL_Renderer *g_renderer;
 extern SDL_Texture *g_hud_bg_texture;
 extern SDL_Texture *g_hud_obj_texture;
-extern Ppu *g_ppu;
 extern uint8_t g_pixels[];
 extern uint8_t g_hud_bg_pixels[];
 extern uint8_t g_hud_obj_pixels[];
@@ -24,15 +25,16 @@ extern int g_ws_extra;
 extern bool g_ws_active;
 
 static DevToolsContext CurrentContext(void) {
-  return (DevToolsContext){
+  DevToolsContext context = {
     .renderer = g_renderer,
     .hud_bg_texture = g_hud_bg_texture,
     .hud_obj_texture = g_hud_obj_texture,
-    .ppu = g_ppu,
-    .framebuffer_pixels = g_pixels + ActionApron_DisplayOffset(kPpuObjApron),
+    .runner = sr_runner_handle(g_snes),
+    .framebuffer_pixels =
+        g_pixels + ActionApron_DisplayOffset(SR_PPU_OBJ_APRON),
     .framebuffer_pitch =
-        (g_snes_width + kPpuObjApron * 2) * 4,
-    .obj_apron = kPpuObjApron,
+        (g_snes_width + (int)SR_PPU_OBJ_APRON * 2) * 4,
+    .obj_apron = SR_PPU_OBJ_APRON,
     .hud_bg_pixels = g_hud_bg_pixels,
     .hud_obj_pixels = g_hud_obj_pixels,
     .diorama_layer_pixels = g_diorama_layer_pixels,
@@ -46,6 +48,38 @@ static DevToolsContext CurrentContext(void) {
     .paused = HostInput_IsPaused(),
     .turbo = HostInput_IsTurbo(),
   };
+  const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+  if (!api || !context.runner ||
+      api->struct_size < SNES_RUNNER_API_PPU_FRAME_STATE_SIZE ||
+      (api->capabilities &
+       (SR_RUNNER_CAP_PPU_STATE | SR_RUNNER_CAP_PPU_FRAME_STATE |
+        SR_RUNNER_CAP_BORROWED_BYTE_SPANS |
+        SR_RUNNER_CAP_BORROWED_U16_SPANS)) !=
+          (SR_RUNNER_CAP_PPU_STATE | SR_RUNNER_CAP_PPU_FRAME_STATE |
+           SR_RUNNER_CAP_BORROWED_BYTE_SPANS |
+           SR_RUNNER_CAP_BORROWED_U16_SPANS))
+    return context;
+
+  context.ppu_state.struct_size = sizeof(context.ppu_state);
+  context.ppu_frame.struct_size = sizeof(context.ppu_frame);
+  context.oam.struct_size = sizeof(context.oam);
+  context.high_oam.struct_size = sizeof(context.high_oam);
+  if (api->query_ppu_state(context.runner, &context.ppu_state) !=
+          SR_RESULT_OK ||
+      api->query_ppu_frame_state(context.runner, &context.ppu_frame) !=
+          SR_RESULT_OK ||
+      api->borrow_u16_memory(context.runner, SR_MEMORY_OAM, &context.oam) !=
+          SR_RESULT_OK ||
+      api->borrow_memory(context.runner, SR_MEMORY_HIGH_OAM,
+                         &context.high_oam) != SR_RESULT_OK)
+    return context;
+
+  const uint64_t generation = context.ppu_state.lifetime_generation;
+  context.ppu_snapshot_valid =
+      context.ppu_frame.lifetime_generation == generation &&
+      context.oam.lifetime_generation == generation &&
+      context.high_oam.lifetime_generation == generation;
+  return context;
 }
 
 void HostDevTools_FormatInspectorInfo(char *buffer, size_t buffer_size) {

@@ -3,12 +3,169 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "runner_next_internal.h"
 #include "snes/ppu.h"
 
 uint8 g_ram[0x20000];
-Ppu *g_ppu;
+Snes *g_snes;
 static Ppu s_ppu;
 static int s_failures;
+
+static SrResult QueryPpuState(SrRunnerHandle *runner,
+                              SrPpuStateSnapshot *state) {
+  (void)runner;
+  if (!state || state->struct_size < SR_PPU_STATE_SNAPSHOT_V2_SIZE)
+    return SR_RESULT_INVALID_ARGUMENT;
+  memset(state, 0, sizeof(*state));
+  state->struct_size = SR_PPU_STATE_SNAPSHOT_V2_SIZE;
+  state->lifetime_generation = 1u;
+  state->display_control = s_ppu.inidisp;
+  state->bg_mode_control = s_ppu.bgmode;
+  state->mosaic_control = s_ppu.mosaic;
+  state->bg_mode = PPU_mode(&s_ppu);
+  state->brightness = PPU_brightness(&s_ppu);
+  state->main_screen = s_ppu.screenEnabled[0];
+  state->sub_screen = s_ppu.screenEnabled[1];
+  state->main_windowed = s_ppu.screenWindowed[0];
+  state->sub_windowed = s_ppu.screenWindowed[1];
+  state->object_size_select = PPU_objSize(&s_ppu);
+  state->margin_left = s_ppu.extraLeftCur;
+  state->margin_right = s_ppu.extraRightCur;
+  state->object_tile_base_1_word = PPU_objTileAdr1(&s_ppu);
+  state->object_tile_base_2_word = PPU_objTileAdr2(&s_ppu);
+  state->mode7_select = s_ppu.m7sel;
+  memcpy(state->mode7_matrix, s_ppu.m7matrix,
+         sizeof(state->mode7_matrix));
+  for (unsigned layer = 0u; layer < 4u; ++layer) {
+    SrPpuBackgroundState *background = &state->backgrounds[layer];
+    background->h_scroll = s_ppu.hScroll[layer];
+    background->v_scroll = s_ppu.vScroll[layer];
+    background->tilemap_base_word = PPU_bgTilemapAdr(&s_ppu, layer);
+    background->tile_base_word = PPU_bgTileAdr(&s_ppu, layer);
+    background->tilemap_width_tiles =
+        PPU_bgTilemapWider(&s_ppu, layer) ? 64u : 32u;
+    background->tilemap_height_tiles =
+        PPU_bgTilemapHigher(&s_ppu, layer) ? 64u : 32u;
+  }
+  return SR_RESULT_OK;
+}
+
+static SrResult QueryPpuFrame(SrRunnerHandle *runner,
+                              SrPpuFrameSnapshot *frame) {
+  (void)runner;
+  if (!frame || frame->struct_size < SR_PPU_FRAME_SNAPSHOT_V2_SIZE)
+    return SR_RESULT_INVALID_ARGUMENT;
+  memset(frame, 0, sizeof(*frame));
+  frame->struct_size = SR_PPU_FRAME_SNAPSHOT_V2_SIZE;
+  frame->lifetime_generation = 1u;
+  frame->margin_budget = s_ppu.extraLeftRight;
+  frame->hud_split_height = s_ppu.wsHudSplitHeight;
+  frame->hud_left_end = s_ppu.wsHudLeftEnd;
+  frame->hud_right_start = s_ppu.wsHudRightStart;
+  frame->hud_left_only_y = s_ppu.wsHudLeftOnlyY;
+  return SR_RESULT_OK;
+}
+
+static SrResult BorrowU16(SrRunnerHandle *runner, SrMemoryRegion region,
+                          SrBorrowedU16Span *span) {
+  (void)runner;
+  if (!span || span->struct_size < SR_BORROWED_U16_SPAN_V2_SIZE)
+    return SR_RESULT_INVALID_ARGUMENT;
+  span->region = region;
+  span->lifetime_generation = 1u;
+  if (region == SR_MEMORY_VRAM) {
+    span->data = s_ppu.vram;
+    span->element_count = SR_PPU_VRAM_WORD_COUNT;
+  } else if (region == SR_MEMORY_OAM) {
+    span->data = s_ppu.oam;
+    span->element_count = SR_PPU_OAM_WORD_COUNT;
+  } else {
+    return SR_RESULT_UNSUPPORTED;
+  }
+  return SR_RESULT_OK;
+}
+
+static SrResult BorrowBytes(SrRunnerHandle *runner, SrMemoryRegion region,
+                            SrBorrowedSpan *span) {
+  (void)runner;
+  if (!span || span->struct_size < SR_BORROWED_SPAN_V2_SIZE)
+    return SR_RESULT_INVALID_ARGUMENT;
+  if (region != SR_MEMORY_HIGH_OAM) return SR_RESULT_UNSUPPORTED;
+  span->region = region;
+  span->data = s_ppu.highOam;
+  span->byte_size = sizeof(s_ppu.highOam);
+  span->lifetime_generation = 1u;
+  return SR_RESULT_OK;
+}
+
+static uint32_t BorrowU16Valid(SrRunnerHandle *runner,
+                               const SrBorrowedU16Span *span) {
+  (void)runner;
+  return span && span->lifetime_generation == 1u;
+}
+
+static uint32_t BorrowValid(SrRunnerHandle *runner,
+                            const SrBorrowedSpan *span) {
+  (void)runner;
+  return span && span->lifetime_generation == 1u;
+}
+
+static SrResult ResolveBackgroundCoordinate(
+    SrRunnerHandle *runner,
+    const SrPpuBackgroundCoordinateRequest *request,
+    SrPpuBackgroundCoordinateResult *result) {
+  (void)runner;
+  if (!request || !result || request->layer >= 4u ||
+      request->lifetime_generation != 1u)
+    return SR_RESULT_INVALID_ARGUMENT;
+  PpuWidescreenLayerPolicy policy = {
+    kPpuWidescreenBandFill_RawWrap,
+    kPpuWidescreenMotion_FillRelative,
+    false,
+  };
+  int source_x = 0;
+  bool mapped = request->screen_x >= -s_ppu.extraLeftCur &&
+      request->screen_x < kPpuXPixels + s_ppu.extraRightCur &&
+      PpuMapWidescreenLayerX(
+          &s_ppu, (uint8_t)request->layer, request->screen_y,
+          request->screen_x, &source_x, &policy);
+  memset(result, 0, sizeof(*result));
+  result->struct_size = SR_PPU_BACKGROUND_COORDINATE_RESULT_V2_SIZE;
+  result->lifetime_generation = 1u;
+  result->flags = (mapped ? SR_PPU_BACKGROUND_COORDINATE_MAPPED : 0u) |
+      (policy.band_override
+          ? SR_PPU_BACKGROUND_COORDINATE_BAND_OVERRIDE : 0u);
+  result->source_x = source_x;
+  result->sample_y = request->screen_y + 1;
+  result->fill = (SrPpuBackgroundFill)policy.fill;
+  result->motion = (SrPpuBackgroundMotion)policy.motion;
+  return SR_RESULT_OK;
+}
+
+static const SnesRunnerApi s_api = {
+  .abi_version = SR_RUNNER_ABI_VERSION,
+  .struct_size = sizeof(SnesRunnerApi),
+  .capabilities = SR_RUNNER_CAP_PPU_STATE |
+      SR_RUNNER_CAP_PPU_FRAME_STATE |
+      SR_RUNNER_CAP_BORROWED_BYTE_SPANS |
+      SR_RUNNER_CAP_BORROWED_U16_SPANS |
+      SR_RUNNER_CAP_PPU_BACKGROUND_COORDINATE,
+  .borrow_memory = BorrowBytes,
+  .borrow_is_valid = BorrowValid,
+  .query_ppu_state = QueryPpuState,
+  .borrow_u16_memory = BorrowU16,
+  .borrow_u16_is_valid = BorrowU16Valid,
+  .query_ppu_frame_state = QueryPpuFrame,
+  .resolve_ppu_background_coordinate = ResolveBackgroundCoordinate,
+};
+
+const SnesRunnerApi *sr_runner_get_api(uint32_t version) {
+  return version == SR_RUNNER_ABI_VERSION ? &s_api : NULL;
+}
+
+SrRunnerHandle *sr_runner_handle(Snes *snes) {
+  return (SrRunnerHandle *)(void *)snes;
+}
 
 #define CHECK(expr) do { \
   if (!(expr)) { \
@@ -21,7 +178,7 @@ static int s_failures;
 static void ResetPpu(void) {
   memset(&s_ppu, 0, sizeof(s_ppu));
   memset(g_ram, 0, sizeof(g_ram));
-  g_ppu = &s_ppu;
+  g_snes = (Snes *)(void *)&s_ppu;
   s_ppu.bgmode = 1;
   s_ppu.inidisp = 15;
   s_ppu.extraLeftRight = 43;

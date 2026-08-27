@@ -41,7 +41,7 @@ typedef struct SimMetadataProducer {
   uint8_t claimed_oam[128];
   SimSourceRecord sources[kSimMaxSourceRecords];
   SimRenderObject objects[kSimMaxRenderObjects];
-  PpuObjPart parts[kSimMaxResolvedParts];
+  SrPpuObjPart parts[kSimMaxResolvedParts];
 } SimMetadataProducer;
 
 static SimMetadataProducer g_sim_metadata;
@@ -1746,7 +1746,7 @@ static SimRenderObject *RecordObjectForPart(uint16_t slot,
 }
 
 static bool AppendExactPart(SimRenderObject *object,
-                            const PpuObjPart *part, bool synthetic) {
+                            const SrPpuObjPart *part, bool synthetic) {
   if (!object || !part || !part->size ||
       object->part_first + object->part_count != g_sim_metadata.part_count) {
     g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_PartContract;
@@ -1803,7 +1803,7 @@ void SimRenderMetadata_RecordPart(uint16_t oam_cursor,
   if (object) object->oam_count++;
 }
 
-void SimRenderMetadata_RecordExactOamPart(const PpuObjPart *part) {
+void SimRenderMetadata_RecordExactOamPart(const SrPpuObjPart *part) {
   if (!g_sim_metadata.record_active || !g_sim_metadata.object_count || !part) {
     g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_PartContract;
     return;
@@ -1820,7 +1820,7 @@ void SimRenderMetadata_RecordExactOamPart(const PpuObjPart *part) {
 }
 
 void SimRenderMetadata_RecordSyntheticPart(uint16_t oam_cursor,
-                                           const PpuObjPart *part) {
+                                           const SrPpuObjPart *part) {
   if (!g_sim_metadata.record_active || !part || !part->size ||
       (oam_cursor & 3) || oam_cursor > kActRaiserOamLowTableBytes) {
     g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_PartContract;
@@ -1877,7 +1877,7 @@ bool SimRenderMetadata_CopyAtlasInput(SimAtlasBuildInput *out) {
   memcpy(out->objects, g_sim_metadata.objects,
          sizeof(SimRenderObject) * out->object_count);
   memcpy(out->parts, g_sim_metadata.parts,
-         sizeof(PpuObjPart) * out->part_count);
+         sizeof(SrPpuObjPart) * out->part_count);
   return true;
 }
 

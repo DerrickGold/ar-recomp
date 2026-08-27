@@ -7,33 +7,17 @@ if(NOT DEFINED AR_SOURCE_ROOT)
 endif()
 
 set(_allowed
-  action/action_obj_apron.h
   actraiser/actraiser_action_bg.c
   actraiser/actraiser_rtl.c
   actraiser/actraiser_spc_player.c
   actraiser/actraiser_spc_upload.c
   actraiser/actraiser_widescreen_bg.c
   actraiser/actraiser_widescreen_sprites.c
-  dev/dev_tools.c
-  dev/host_dev_tools.c
   dev/native_audio_trace_runtime.c
-  dev/oracle_trace.c
-  dev/scene_inspector.c
-  diorama/diorama.c
-  diorama/diorama_host.c
-  diorama/diorama_planes.h
-  frame_slot.c
-  hd_replacement_host.c
-  hd_replacements.c
-  host/host_display.c
-  main.c
   native_audio_extension.c
   native_audio_mixer.c
   sim/sim3d.c
-  sim/sim_phase0_trace.c
   sim/sim_render_atlas.c
-  sim/sim_render_metadata.h
-  sim/sim_world_map_build.c
 )
 list(SORT _allowed)
 

@@ -46,7 +46,7 @@ bool ActionApron_PartUsesColorMath(uint16_t tile_attr) {
 
 /* ── Per-frame channel ──────────────────────────────────────────────────── */
 
-static PpuObjPart s_parts[kActionApronMaxParts];
+static SrPpuObjPart s_parts[kActionApronMaxParts];
 static int s_count;
 static int s_overflow;
 static int s_peak;
@@ -78,4 +78,4 @@ bool ActionApron_AddPart(const ActionApronGeometry *g, int screen_x,
 int ActionApron_Count(void) { return s_count; }
 int ActionApron_Overflow(void) { return s_overflow; }
 int ActionApron_PeakCount(void) { return s_peak; }
-const PpuObjPart *ActionApron_Parts(void) { return s_parts; }
+const SrPpuObjPart *ActionApron_Parts(void) { return s_parts; }

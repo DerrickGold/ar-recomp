@@ -8,11 +8,41 @@
 #include <unistd.h>
 
 #include "actraiser_game.h"
-#include "snes/ppu.h"
 
 uint8 g_ram[kActRaiserWramSize];
 
 static int failures;
+static SrPpuStateSnapshot test_ppu;
+static SrPpuFrameSnapshot test_frame;
+
+static SrResult QueryPpuState(SrRunnerHandle *runner,
+                              SrPpuStateSnapshot *out) {
+  (void)runner;
+  if (!out || out->struct_size < SR_PPU_STATE_SNAPSHOT_V2_SIZE)
+    return SR_RESULT_INVALID_ARGUMENT;
+  *out = test_ppu;
+  return SR_RESULT_OK;
+}
+
+static SrResult QueryPpuFrame(SrRunnerHandle *runner,
+                              SrPpuFrameSnapshot *out) {
+  (void)runner;
+  if (!out || out->struct_size < SR_PPU_FRAME_SNAPSHOT_V2_SIZE)
+    return SR_RESULT_INVALID_ARGUMENT;
+  *out = test_frame;
+  return SR_RESULT_OK;
+}
+
+const SnesRunnerApi *sr_runner_get_api(uint32_t requested_abi_version) {
+  static const SnesRunnerApi api = {
+    .abi_version = SR_RUNNER_ABI_VERSION,
+    .struct_size = SNES_RUNNER_API_PPU_FRAME_STATE_SIZE,
+    .capabilities = SR_RUNNER_CAP_PPU_STATE | SR_RUNNER_CAP_PPU_FRAME_STATE,
+    .query_ppu_state = QueryPpuState,
+    .query_ppu_frame_state = QueryPpuFrame,
+  };
+  return requested_abi_version == SR_RUNNER_ABI_VERSION ? &api : NULL;
+}
 
 #define CHECK(expr) do {                                                    \
   if (!(expr)) {                                                            \
@@ -32,9 +62,9 @@ int main(void) {
            (long)getpid());
 
   uint8 *wram = calloc(1, kActRaiserWramSize);
-  Ppu *ppu = calloc(1, sizeof(*ppu));
-  CHECK(wram != NULL && ppu != NULL);
-  if (!wram || !ppu) return 1;
+  SrRunnerHandle *runner = (SrRunnerHandle *)(uintptr_t)1u;
+  CHECK(wram != NULL);
+  if (!wram) return 1;
 
   wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
   wram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Fillmore;
@@ -45,25 +75,29 @@ int main(void) {
   Write16(wram, kActRaiserWram_SimAimedMapCellY, 11);
   Write16(wram, kActRaiserWram_SimCameraTargetX, 0x70);
   Write16(wram, kActRaiserWram_SimCameraTargetY, 0xB0);
-  ppu->bgmode = 9;
-  ppu->screenEnabled[0] = 0x15;
-  ppu->cgwsel = 2;
-  ppu->cgadsub = 0x51;
-  ppu->overlayCaptures[kPpuOverlaySource_Obj] = (PpuOverlayCapture){
+  test_ppu = (SrPpuStateSnapshot){
+    .struct_size = sizeof(test_ppu),
+    .bg_mode_control = 9,
+    .main_screen = 0x15,
+    .color_math_control = 2,
+    .color_math_designation = 0x51,
+  };
+  test_frame = (SrPpuFrameSnapshot){.struct_size = sizeof(test_frame)};
+  test_frame.overlays[SR_PPU_OVERLAY_OBJ] = (SrPpuOverlayState){
     .x0 = -4, .y0 = 0, .x1 = 260, .y1 = 224,
-    .flags = kPpuOverlayFlag_RemoveFromGame,
-    .oamFirst = 12, .oamCount = 7,
+    .flags = SR_PPU_OVERLAY_REMOVE_FROM_GAME,
+    .oam_first = 12, .oam_count = 7,
   };
 
   CHECK(SimPhase0Trace_Open(path));
-  SimPhase0Trace_Frame(80, wram, ppu);
-  SimPhase0Trace_Frame(80, wram, ppu);  /* identical redraw is suppressed */
+  SimPhase0Trace_Frame(80, wram, runner);
+  SimPhase0Trace_Frame(80, wram, runner);  /* identical redraw is suppressed */
   Write16(wram, kActRaiserWram_SimMapPickerFlag, 0x0100);
-  SimPhase0Trace_Frame(81, wram, ppu);  /* word semantics, same game frame */
+  SimPhase0Trace_Frame(81, wram, runner);  /* word semantics, same game frame */
   Write16(wram, kActRaiserWram_GameFrame, 101);
   wram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_WorldMap;
-  SimPhase0Trace_Frame(82, wram, ppu);  /* one out-of-scope exit record */
-  SimPhase0Trace_Frame(83, wram, ppu);
+  SimPhase0Trace_Frame(82, wram, runner);  /* one out-of-scope exit record */
+  SimPhase0Trace_Frame(83, wram, runner);
   SimPhase0Trace_Close();
 
   FILE *file = fopen(path, "rb");
@@ -98,7 +132,6 @@ int main(void) {
   }
 
   free(text);
-  free(ppu);
   free(wram);
   unlink(path);
   if (failures) {

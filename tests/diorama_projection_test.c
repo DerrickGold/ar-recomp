@@ -202,47 +202,47 @@ static void TestInvalidInputsFailClosed(void) {
 
 static void TestPlaneEligibilityMatchesDrawableInputs(void) {
   CHECK(Diorama_PlaneEligible(
-      kPpuOverlaySource_Bg2, true, true, true, false, false));
+      SR_PPU_OVERLAY_BG2, true, true, true, false, false));
   CHECK(!Diorama_PlaneEligible(
-      kPpuOverlaySource_Bg2, false, true, true, false, false));
+      SR_PPU_OVERLAY_BG2, false, true, true, false, false));
   CHECK(!Diorama_PlaneEligible(
-      kPpuOverlaySource_Bg2, true, false, true, false, false));
+      SR_PPU_OVERLAY_BG2, true, false, true, false, false));
   CHECK(!Diorama_PlaneEligible(
-      kPpuOverlaySource_Bg2, true, true, false, false, false));
+      SR_PPU_OVERLAY_BG2, true, true, false, false, false));
   CHECK(!Diorama_PlaneEligible(
-      kPpuOverlaySource_Bg2, true, true, true, false, true));
+      SR_PPU_OVERLAY_BG2, true, true, true, false, true));
   CHECK(!Diorama_PlaneEligible(
       kDioramaPlane_Bg2Far, true, true, true, false, true));
   CHECK(!Diorama_PlaneEligible(
-      kPpuOverlaySource_Bg3, true, true, true, true, false));
+      SR_PPU_OVERLAY_BG3, true, true, true, true, false));
 
   /* A current attached effect supplies current projection content for its
    * exact BG or OBJ plane. It needs no source texture when that isolated
    * hardware band is empty, but cannot bypass visibility or skybox policy. */
   CHECK(Diorama_PlaneProjectable(
-      kPpuOverlaySource_Obj, true, true, false, true, false, false));
+      SR_PPU_OVERLAY_OBJ, true, true, false, true, false, false));
   CHECK(!Diorama_PlaneProjectable(
-      kPpuOverlaySource_Obj, false, true, false, true, false, false));
+      SR_PPU_OVERLAY_OBJ, false, true, false, true, false, false));
   CHECK(Diorama_PlaneProjectable(
-      kPpuOverlaySource_Obj, true, false, false, true, false, false));
+      SR_PPU_OVERLAY_OBJ, true, false, false, true, false, false));
   CHECK(Diorama_PlaneProjectable(
-      kPpuOverlaySource_Bg2, true, true, false, true, false, false));
+      SR_PPU_OVERLAY_BG2, true, true, false, true, false, false));
   CHECK(Diorama_PlaneProjectable(
-      kPpuOverlaySource_Bg1, true, false, false, true, false, false));
+      SR_PPU_OVERLAY_BG1, true, false, false, true, false, false));
   CHECK(Diorama_PlaneProjectable(
       kDioramaPlane_Bg1Hi, true, false, false, true, false, false));
   CHECK(Diorama_PlaneProjectable(
-      kPpuOverlaySource_Bg2, true, true, true, true, false, false));
+      SR_PPU_OVERLAY_BG2, true, true, true, true, false, false));
   CHECK(!Diorama_PlaneProjectable(
       kDioramaPlane_Bg2Hi, true, true, false, true, false, false));
   CHECK(!Diorama_PlaneProjectable(
-      kPpuOverlaySource_Bg2, true, true, false, true, false, true));
+      SR_PPU_OVERLAY_BG2, true, true, false, true, false, true));
   CHECK(!Diorama_PlaneProjectable(
-      kPpuOverlaySource_Obj, true, true, false, false, false, false));
+      SR_PPU_OVERLAY_OBJ, true, true, false, false, false, false));
 }
 
 static void TestObjEffectMaskDistinguishesEmptyFromFailedUpload(void) {
-  const uint32_t obj0 = 1u << kPpuOverlaySource_Obj;
+  const uint32_t obj0 = 1u << SR_PPU_OVERLAY_OBJ;
   const uint32_t obj2 = 1u << kDioramaPlane_Obj2;
   const uint8_t required = (1u << 0) | (1u << 2);
 
@@ -261,8 +261,8 @@ static void TestObjEffectMaskDistinguishesEmptyFromFailedUpload(void) {
 }
 
 static void TestBgEffectMaskDistinguishesEmptyFromFailedUpload(void) {
-  const uint32_t bg1 = 1u << kPpuOverlaySource_Bg1;
-  const uint32_t bg2 = 1u << kPpuOverlaySource_Bg2;
+  const uint32_t bg1 = 1u << SR_PPU_OVERLAY_BG1;
+  const uint32_t bg2 = 1u << SR_PPU_OVERLAY_BG2;
   const uint32_t bg1hi = 1u << kDioramaPlane_Bg1Hi;
   const uint32_t bg2hi = 1u << kDioramaPlane_Bg2Hi;
   const uint32_t required = bg1 | bg2 | bg1hi | bg2hi;

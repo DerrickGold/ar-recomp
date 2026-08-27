@@ -63,7 +63,7 @@ static uint32_t BackdropArgbFullBrightness(uint16_t color) {
 bool SimWorldNavigationCapture_Capture(SimFrameData *frame,
                                        SrRunnerHandle *runner) {
   const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
-  SrPpuStateSnapshot ppu = {sizeof(ppu), 0u};
+  SrPpuStateSnapshot ppu = {SR_PPU_STATE_SNAPSHOT_V2_SIZE, 0u};
   SrBorrowedU16Span oam = {sizeof(oam), 0u, NULL, 0u, 0u};
   SrBorrowedU16Span cgram = {sizeof(cgram), 0u, NULL, 0u, 0u};
   if (!frame || frame->view != kSimView_WorldNavigation ||

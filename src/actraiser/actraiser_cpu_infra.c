@@ -2,8 +2,10 @@
 #include "actraiser_rtl.h"
 #include "ar_trace.h"
 #include "cpu_state.h"
+#include "hd_replacements.h"
 #include "runner_next.h"
 #include "runner_next_internal.h"
+#include "sim/sim_world_map_build.h"
 
 static SrResult ActRaiser_QueryCpuState(
     Snes *snes, SrCpuStateSnapshot *out_state) {
@@ -82,6 +84,8 @@ static SrResult ActRaiser_QueryExecutionState(
 }
 
 static void ActRaiser_BindRunnerAbi(Snes *snes, bool enabled) {
+  HdReplacements_BindRunner(enabled ? sr_runner_handle(snes) : NULL);
+  SimWorldMapBuild_BindRunner(enabled ? sr_runner_handle(snes) : NULL);
   ar_trace_bind_runner(snes, enabled);
   sr_runner_bind_ppu_services(snes, enabled);
   sr_runner_set_cpu_state_provider(

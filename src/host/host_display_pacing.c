@@ -45,6 +45,19 @@ double HostDisplayPacing_FramesPerSecond(
   return counter ? counter->frames_per_second : 0.0;
 }
 
+uint32_t HostDisplayPacing_AllowedFramesInFlight(RefreshMode refresh_mode) {
+  switch (refresh_mode) {
+    case kRefreshMode_Uncapped:
+    case kRefreshMode_Limit:
+    case kRefreshMode_Unlimited:
+      return 2;
+    case kRefreshMode_Vsync:
+    case kRefreshMode_Count:
+    default:
+      return 1;
+  }
+}
+
 uint64_t HostDisplayPacing_FrameLimitIntervalNs(
     HostDisplayPacingOptions options) {
   if (options.refresh_mode != kRefreshMode_Limit) return 0;

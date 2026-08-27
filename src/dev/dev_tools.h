@@ -8,8 +8,7 @@
 #include <SDL3/SDL.h>
 
 #include "present.h"
-
-typedef struct Ppu Ppu;
+#include "runner_next.h"
 
 /* Live host-owned resources needed by diagnostic capture and inspector tools.
  * Keep this value snapshot explicit: these resources are recreated when video
@@ -18,7 +17,12 @@ typedef struct DevToolsContext {
   SDL_Renderer *renderer;
   SDL_Texture *hud_bg_texture;
   SDL_Texture *hud_obj_texture;
-  Ppu *ppu;
+  SrRunnerHandle *runner;
+  SrPpuStateSnapshot ppu_state;
+  SrPpuFrameSnapshot ppu_frame;
+  SrBorrowedU16Span oam;
+  SrBorrowedSpan high_oam;
+  bool ppu_snapshot_valid;
   /* Points at the AUTHENTIC frame's first column: g_pixels is bound apron-wide
    * (it doubles as the diorama backdrop plane), so the host offsets past the
    * apron. framebuffer_pitch is the real row stride, which is therefore wider

@@ -3,6 +3,7 @@
 #include "settings.h"
 #include "snes/apu.h"
 #include "snes/dsp.h"
+#include "snes/saveload.h"
 #include "snes/spc.h"
 
 #include <stdio.h>

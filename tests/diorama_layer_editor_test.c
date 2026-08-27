@@ -44,17 +44,17 @@ static int g_failures;
  * game would actually draw. */
 static const DioramaResolvedLayer kDefaults[] = {
   { kDioramaPlane_Backdrop, 0.00f, 255 },
-  { kPpuOverlaySource_Obj,  0.51f, 255 },
+  { SR_PPU_OVERLAY_OBJ,  0.51f, 255 },
   { kDioramaPlane_Obj1,     0.51f, 255 },
   { kDioramaPlane_Bg2Far,   0.05f, 255 },
-  { kPpuOverlaySource_Bg2,  0.20f, 255 },
+  { SR_PPU_OVERLAY_BG2,  0.20f, 255 },
   { kDioramaPlane_Bg1Far,   0.35f, 255 },
-  { kPpuOverlaySource_Bg1,  0.50f, 255 },
+  { SR_PPU_OVERLAY_BG1,  0.50f, 255 },
   { kDioramaPlane_Obj2,     0.51f, 255 },
   { kDioramaPlane_Bg2Hi,    0.21f, 255 },
   { kDioramaPlane_Bg1Hi,    0.51f, 255 },
   { kDioramaPlane_Obj3,     0.52f, 255 },
-  { kPpuOverlaySource_Bg3,  0.95f, 255 },
+  { SR_PPU_OVERLAY_BG3,  0.95f, 255 },
 };
 static const int kDefaultCount =
     (int)(sizeof(kDefaults) / sizeof(kDefaults[0]));
@@ -196,13 +196,13 @@ static void TestAuthoredStrategyIsNonZero(void) {
     DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
     CHECK(room != NULL);
     if (!room) continue;
-    room->planes[kPpuOverlaySource_Bg1] = plane;
+    room->planes[SR_PPU_OVERLAY_BG1] = plane;
 
     DioramaResolvedLayer out[16];
     int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults,
                                       kDefaultCount, out, 16);
     const DioramaResolvedLayer *layer =
-        FindResolved(out, n, kPpuOverlaySource_Bg1);
+        FindResolved(out, n, SR_PPU_OVERLAY_BG1);
     CHECK(layer != NULL);
     if (!layer) continue;
     /* Whichever shape it is, SOMETHING must be non-zero, and a repeat-based
@@ -379,7 +379,7 @@ static void TestSteppingStaysWithinParserBounds(void) {
         DioramaRoomOverride room;
         memset(&room, 0, sizeof(room));
         room.used = true;
-        DioramaPlaneOverride *plane = &room.planes[kPpuOverlaySource_Bg1];
+        DioramaPlaneOverride *plane = &room.planes[SR_PPU_OVERLAY_BG1];
         DioramaLayerEditor_SetStrategy(plane, (DioramaDepthStrategy)s);
         /* Density is only offered once authored, so author it first when that
          * is the key under test. */
@@ -652,7 +652,7 @@ static void TestUnauthoredKnobsShowDash(void) {
   ctx.room_live = true;
   ctx.map_group = kActRaiserMapGroup_Fillmore;
   ctx.map_number = 0x02;
-  ctx.selected_plane = kPpuOverlaySource_Bg1;
+  ctx.selected_plane = SR_PPU_OVERLAY_BG1;
 
   DioramaEditorRow rows[kDioramaEditorRowMax];
   const int level =
@@ -660,10 +660,10 @@ static void TestUnauthoredKnobsShowDash(void) {
   int n = DioramaLayerEditor_BuildRows(NULL, &ctx, level, rows,
                                        kDioramaEditorRowMax);
   const DioramaEditorRow *z =
-      FindRow(rows, n, kPpuOverlaySource_Bg1, kDioramaEditorParam_Z);
+      FindRow(rows, n, SR_PPU_OVERLAY_BG1, kDioramaEditorParam_Z);
   CHECK(z && !strcmp(z->value, "--"));
   const DioramaEditorRow *fill = FindRow(
-      rows, n, kPpuOverlaySource_Bg1,
+      rows, n, SR_PPU_OVERLAY_BG1,
       kDioramaEditorParam_TransparentFill);
   CHECK(fill && fill->kind == kDioramaEditorRow_ParamEnum);
   CHECK(fill && !strcmp(fill->value, "OFF"));
@@ -715,10 +715,10 @@ static void TestBackdropSourceIsScopedAndEditable(void) {
   CHECK(source && !strcmp(source->label, "skybox source"));
   CHECK(source && !strcmp(source->value, "ROM-04-01-BG2"));
   /* Other planes cannot offer a source row the manifest would reject. */
-  ctx.selected_plane = kPpuOverlaySource_Bg1;
+  ctx.selected_plane = SR_PPU_OVERLAY_BG1;
   n = DioramaLayerEditor_BuildRows(
       &table, &ctx, level, rows, kDioramaEditorRowMax);
-  CHECK(!FindRow(rows, n, kPpuOverlaySource_Bg1,
+  CHECK(!FindRow(rows, n, SR_PPU_OVERLAY_BG1,
                  kDioramaEditorParam_Source));
 
   /* A scoped record with no local source displays the renderer's inherited
@@ -982,7 +982,7 @@ static void TestSteppingToZeroClearsTheShape(void) {
     DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
     CHECK(room != NULL);
     if (!room) continue;
-    DioramaPlaneOverride *plane = &room->planes[kPpuOverlaySource_Bg1];
+    DioramaPlaneOverride *plane = &room->planes[SR_PPU_OVERLAY_BG1];
     DioramaLayerEditor_SetStrategy(plane, (DioramaDepthStrategy)s);
 
     /* Hold Left through zero. */

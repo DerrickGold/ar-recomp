@@ -22,7 +22,7 @@ int main(void) {
   const ActionApronGeometry g = { 120, 64 };
   const int surface = ActionApron_SurfaceWidth(&g);
   CHECK(surface == kAuthentic + 2 * 120 + 2 * 64);  /* 624 */
-  CHECK(surface <= kPpuSurfaceWidth);               /* fits the allocation */
+  CHECK(surface <= SR_PPU_SURFACE_MAX_WIDTH);       /* fits the allocation */
 
   /* Screen x = 0 sits at apron + ws_extra; the display window is the middle. */
   CHECK(ActionApron_SurfaceColumn(&g, 0) == 64 + 120);
@@ -95,7 +95,7 @@ int main(void) {
   CHECK(ActionApron_AddPart(&g, kAuthentic + 115, 12, 0x2345, 16));
   CHECK(ActionApron_Count() == 1);
   {
-    const PpuObjPart *p = ActionApron_Parts();
+    const SrPpuObjPart *p = ActionApron_Parts();
     CHECK(p[0].x == kAuthentic + 115 && p[0].y == 12);
     CHECK(p[0].tile_attr == 0x2345 && p[0].size == 16);
   }

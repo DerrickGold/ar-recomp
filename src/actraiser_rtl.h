@@ -10,6 +10,16 @@
 void ActRaiserDrawPpuFrame(void);
 void ActRaiser_RebindPpuOutputSurfaces(void);
 
+typedef struct ActRaiserRomSetupResult {
+  bool visual_patches_applied;
+  bool randomizer_initialized;
+} ActRaiserRomSetupResult;
+
+/* Game-adapter ownership of the loaded cartridge layout. This keeps host boot
+ * policy outside the concrete runner while the randomizer's live-ROM mutation
+ * contract remains intentionally internal to the ActRaiser adapter. */
+ActRaiserRomSetupResult ActRaiser_SetupLiveRom(Snes *snes);
+
 /* The apron geometry in force this frame, or {ws_extra, 0} when the apron is
  * not live. `apron == 0` is the disable lever the whole phase rides on: every
  * apron-aware site collapses to its pre-apron expression, so callers test that

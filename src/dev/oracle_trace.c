@@ -18,7 +18,6 @@
 #include "cpu_state.h"
 #include "framedump.h"
 #include "run_dir.h"
-#include "snes/ppu.h"
 
 enum {
   kWramLastAddress = kActRaiserWramSize - 1,
@@ -46,6 +45,7 @@ static bool s_vram_dump_list_initialized;
 static const char *s_vram_dump_list;
 static unsigned s_last_vram_dumped_game_frame = UINT_MAX;
 static bool s_mx_trace_initialized;
+static SrRunnerHandle *s_runner;
 
 static unsigned ReadGameFrame(const uint8_t *wram) {
   return (unsigned)wram[kActRaiserWram_GameFrame] |
@@ -96,12 +96,22 @@ static void DumpRequestedGameFrame(const uint8_t *wram) {
 }
 
 static void DumpPpuRegisters(unsigned game_frame) {
-  if (!g_ppu) return;
+  const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+  SrPpuStateSnapshot ppu = {.struct_size = sizeof(ppu)};
+  if (!s_runner || !api ||
+      (api->capabilities & SR_RUNNER_CAP_PPU_STATE) == 0u ||
+      api->struct_size < SNES_RUNNER_API_PPU_STATE_SIZE ||
+      api->query_ppu_state(s_runner, &ppu) != SR_RESULT_OK)
+    return;
   fprintf(stderr,
           "[ppureg] gf=%u bgmode=$%02x bgsc=[%02x %02x %02x %02x] "
           "bgTileAdr=$%04x\n",
-          game_frame, g_ppu->bgmode, g_ppu->bgXsc[0], g_ppu->bgXsc[1],
-          g_ppu->bgXsc[2], g_ppu->bgXsc[3], g_ppu->bgTileAdr);
+          game_frame, ppu.bg_mode_control,
+          ppu.background_tilemap_control[0],
+          ppu.background_tilemap_control[1],
+          ppu.background_tilemap_control[2],
+          ppu.background_tilemap_control[3],
+          ppu.background_tile_base_control);
 }
 
 static void DumpRequestedVramFrames(const uint8_t *wram) {
@@ -198,8 +208,9 @@ static bool AnySnapshotControlEnabled(void) {
          getenv("AR_MX_OUT") || getenv("AR_VRAMDUMP_GF");
 }
 
-void OracleTrace_Init(void) {
+void OracleTrace_Init(SrRunnerHandle *runner) {
   const char *trace_path = getenv("AR_WRAM_TRACE");
+  s_runner = runner;
   if (!trace_path || !trace_path[0]) {
     if (AnySnapshotControlEnabled())
       g_framedump_callback = OracleTrace_FrameCallback;
@@ -239,4 +250,5 @@ void OracleTrace_Shutdown(void) {
   if (s_mx_trace_file) fclose(s_mx_trace_file);
   s_wram_trace_file = NULL;
   s_mx_trace_file = NULL;
+  s_runner = NULL;
 }

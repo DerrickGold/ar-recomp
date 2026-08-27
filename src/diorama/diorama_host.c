@@ -4,13 +4,13 @@
 
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
+#include "common_cpu_infra.h"
 #include "diorama_layer_order.h"
 #include "host/host_display.h"
 #include "host/host_input.h"
+#include "runner_next.h"
 #include "settings.h"
-#include "snes/ppu.h"
 
-extern Ppu *g_ppu;
 extern bool g_diorama_frame_active;
 extern uint8_t g_pixels[];
 extern uint8_t g_hud_bg_pixels[];
@@ -61,15 +61,15 @@ bool Diorama_LiveRoom(uint8_t *out_group, uint8_t *out_map,
  * clear buffers at their new pitch, and rebind the PPU output surfaces. */
 void Diorama_OnModeChanged(void) {
   if (!g_settings.diorama_mode) g_diorama_frame_active = false;
-  if (!g_ppu) return;
+  if (!g_snes) return;
 
   HostDisplay_ResolveVideoGeometry(false);
   memset(g_pixels, 0,
-         kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight);
+         SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight);
   memset(g_hud_bg_pixels, 0,
-         kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight);
+         SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight);
   memset(g_hud_obj_pixels, 0,
-         kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight);
+         SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight);
   ActRaiser_RebindPpuOutputSurfaces();
   HostInput_RequestPausedRedraw();
   HostDisplay_InvalidatePresentHistory();

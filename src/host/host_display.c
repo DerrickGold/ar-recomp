@@ -30,8 +30,8 @@
 #include "presentation_frame_generation.h"
 #include "presentation_geometry.h"
 #include "present_cadence_metrics.h"
+#include "runner_next.h"
 #include "settings.h"
-#include "snes/ppu.h"
 #include "constants.h"
 #include "widescreen.h"
 
@@ -45,13 +45,13 @@ extern bool g_ws_active;
 extern int g_ws_extra;
 extern int g_ws_display_extra;
 extern uint8_t g_pixels[
-    kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
+    SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight];
 extern uint8_t g_authentic_pixels[
-    kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
+    SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight];
 extern uint8_t g_hud_bg_pixels[
-    kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
+    SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight];
 extern uint8_t g_hud_obj_pixels[
-    kPpuSurfaceWidth * 4 * kHostDisplayFramebufferHeight];
+    SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight];
 
 const uint64_t kHostDisplayEmulationFrameIntervalNs = 16639267ull;
 int g_active_pixel_aspect = kPixelAspect_Crt43;
@@ -82,6 +82,8 @@ static int s_active_aspect_y;
 static bool s_widescreen_runtime_allowed;
 static HostDisplayRefreshCache s_display_refresh_cache;
 static SDL_DisplayID s_active_display_id;
+static SDL_GPUDevice *s_frames_in_flight_device;
+static uint32_t s_applied_frames_in_flight;
 
 /* Refresh only the presentation-owned camera portion of a retained SIM frame.
  * The captured game/PPU snapshot, timestamp, interpolation pair, textures, and
@@ -501,12 +503,44 @@ static void SetRenderVsync(int requested) {
       SDL_GetRenderVSync(g_renderer, &actual) && actual != 0);
 }
 
+static void SetAllowedFramesInFlight(uint32_t requested) {
+  if (!g_renderer) return;
+  SDL_PropertiesID props = SDL_GetRendererProperties(g_renderer);
+  SDL_GPUDevice *device = props ? (SDL_GPUDevice *)SDL_GetPointerProperty(
+      props, SDL_PROP_RENDERER_GPU_DEVICE_POINTER, NULL) : NULL;
+  if (!device) {
+    fprintf(stderr,
+            "[display] GPU renderer did not expose its device; "
+            "could not set frames in flight\n");
+    return;
+  }
+  if (device == s_frames_in_flight_device &&
+      requested == s_applied_frames_in_flight)
+    return;
+  if (!SDL_SetGPUAllowedFramesInFlight(device, requested)) {
+    fprintf(stderr,
+            "[display] SDL_SetGPUAllowedFramesInFlight(%" PRIu32
+            ") rejected: %s\n",
+            requested, SDL_GetError());
+    return;
+  }
+  s_frames_in_flight_device = device;
+  s_applied_frames_in_flight = requested;
+  fprintf(stderr, "[display] GPU frames in flight: %" PRIu32 "\n",
+          requested);
+}
+
 void HostDisplay_ApplyRefreshVsync(void) {
-  SetRenderVsync(g_settings.refresh_mode == kRefreshMode_Vsync ? 1 : 0);
+  const RefreshMode mode = (RefreshMode)g_settings.refresh_mode;
+  SetRenderVsync(mode == kRefreshMode_Vsync ? 1 : 0);
+  SetAllowedFramesInFlight(
+      HostDisplayPacing_AllowedFramesInFlight(mode));
 }
 
 void HostDisplay_DisableVsync(void) {
   SetRenderVsync(0);
+  SetAllowedFramesInFlight(
+      HostDisplayPacing_AllowedFramesInFlight(kRefreshMode_Unlimited));
 }
 
 uint64_t HostDisplay_CatchupCapNs(uint64_t emulation_frame_interval_ns,
