@@ -117,7 +117,7 @@ bool HostInput_RedrawPausedFrameIfNeeded(void) {
       !s_paused_redraw_pending) {
     return false;
   }
-  g_rtl_game_info->draw_ppu_frame();
+  (void)RtlGameDrawPpuFrame();
   s_paused_redraw_pending = false;
   return true;
 }

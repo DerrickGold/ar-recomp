@@ -20,7 +20,7 @@ MyGameRecomp/
 │   ├── main.c                  # host frontend and ROM verification
 │   ├── config.h                # optional project/frontend configuration
 │   ├── config.c
-│   ├── game_cpu_infra.c        # RtlGameInfo registration
+│   ├── game_cpu_infra.c        # RtlGameModule registration
 │   └── game_rtl.c              # frame loop, interrupts, HLE hooks
 └── snesrecomp-go/              # this module
 ```
@@ -144,9 +144,10 @@ does not supply a complete application. A game project owns:
    framebuffer, and drive `RtlRunFrame` or the project's equivalent loop.
 3. **Project configuration.** Define any config types, files, and settings the
    chosen frontend needs. The shared runtime does not impose a config schema.
-4. **Game registration.** Define a stable `RtlGameInfo`, call
-   `RtlRegisterGame(&game_info)` before `SnesInit`, and keep the structure alive
-   for the process lifetime.
+4. **Game registration.** Define one immutable, versioned `RtlGameModule`, call
+   `RtlRegisterGame(&game_module)` before `SnesInit`, require
+   `SR_RESULT_OK`, and keep the module and every referenced table alive for the
+   process lifetime. Registration is rejected while a runner exists.
 5. **Frame/interrupt policy.** Supply `run_frame`, optional `draw_ppu_frame`,
    reset entry, NMI/IRQ invocation, and any coroutine/yield policy.
 6. **HLE hooks.** Every C symbol named by `hle_func`, `hle_func_if`, or
@@ -154,9 +155,10 @@ does not supply a complete application. A game project owns:
    generated `CpuState *` ABI. An `hle_func_if` predicate returns `bool` and
    must not mutate CPU or emulated state.
 7. **Game-specific hardware workarounds.** Put ROM-address policy in the game
-   layer. `RtlGameInfo.read_rdnmi` may override a `$4210` read (return `-1` for
-   shared behavior), and `recover_dispatch_miss` may opt verified dispatch
-   sites into the shared recovery mechanism. Leave both NULL unless needed.
+   layer. `RtlGameExecutionApi.read_rdnmi` may override a `$4210` read (return
+   `-1` for shared behavior), and `recover_dispatch_miss` may opt verified
+   dispatch sites into the shared recovery mechanism. Leave both NULL unless
+   needed.
 
 A minimal registration unit looks like:
 
@@ -164,16 +166,59 @@ A minimal registration unit looks like:
 #include "common_cpu_infra.h"
 #include "game_rtl.h"
 
-const RtlGameInfo kGameInfo = {
-  .title = "my_game",
-  .initialize = NULL,
+static const RtlGameIdentity kGameIdentity = {
+  .struct_size = RTL_GAME_IDENTITY_V1_SIZE,
+  .game_id = "my_game",
+  .display_name = "My Game",
+  .save_name_prefix = "save",
+};
+
+static const RtlGameExecutionApi kGameExecution = {
+  .struct_size = RTL_GAME_EXECUTION_API_V1_SIZE,
   .run_frame = &RunOneFrameOfGame,
   .draw_ppu_frame = NULL,
   .read_rdnmi = NULL,
   .recover_dispatch_miss = NULL,
-  .save_name_prefix = "save",
 };
+
+const RtlGameModule kGameModule = {
+  .abi_version = RTL_GAME_MODULE_ABI_VERSION,
+  .struct_size = RTL_GAME_MODULE_V1_SIZE,
+  .capabilities = RTL_GAME_MODULE_CAP_IDENTITY |
+                  RTL_GAME_MODULE_CAP_EXECUTION,
+  .identity = &kGameIdentity,
+  .execution = &kGameExecution,
+};
+
+/* Before SnesInit: */
+if (RtlRegisterGame(&kGameModule) != SR_RESULT_OK)
+  return false;
 ```
+
+Add `RtlGameLifecycleApi`, `RtlGameStateProviderApi`, or `RtlGameAudioApi`
+only when the project needs those contracts, and set the matching module
+capability bit. The lifecycle initialization callback gets callback-lifetime
+mutable ROM bytes for verified game patches. The runner installs state
+providers and revokes them at shutdown; game code does not call private runner
+binding functions. Audio sub-capabilities independently opt into SPC upload,
+voice classification, and extended-audio safe points.
+
+## Frame presentation policy
+
+Use `SrPpuFramePolicy` once per rendered frame instead of calling private PPU
+setters. A normal application is a BEGIN transaction: it validates and replaces
+margin geometry, layer fill/motion, row bands, vertical clipping, capture
+padding, and HUD split state while clearing the previous frame's retained
+virtual providers and layer extents. Publish any provider/extent resources only
+after BEGIN.
+
+If exact margins or fallback masks depend on whether those resources were
+accepted, apply the same policy again with `SR_PPU_FRAME_POLICY_FINALIZE`.
+FINALIZE requires the active margin budget to match and preserves providers and
+extents. Both phases are synchronous, allocation-free, and retain no caller
+pointer. The linked game uses `RtlGameApplyPpuFramePolicy`; external enhancement
+layers use the capability-gated `SnesRunnerApi.apply_ppu_frame_policy` request
+with the current lifetime generation.
 
 The generated ABI is `RecompReturn Function_MxXx(CpuState *cpu)`. Do not invent
 per-function return structs or pass CPU registers as C parameters; mutate the

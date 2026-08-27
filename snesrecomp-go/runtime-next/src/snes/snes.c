@@ -275,7 +275,13 @@ uint8_t snes_readReg(Snes *snes, uint16_t address) {
     switch (address) {
         case 0x4210u:
             if (g_snes_rdnmi_read_hook != NULL) {
-                const int overridden = g_snes_rdnmi_read_hook(snes);
+                const RtlRdnmiReadContext context = {
+                    RTL_RDNMI_READ_CONTEXT_V2_SIZE,
+                    (snes->forceNmi ? RTL_RDNMI_FORCE_NMI : 0u) |
+                        (snes->inNmi ? RTL_RDNMI_IN_NMI : 0u) |
+                        (snes->nmiAvail ? RTL_RDNMI_AVAILABLE : 0u),
+                };
+                const int overridden = g_snes_rdnmi_read_hook(&context);
                 if (overridden >= 0) {
                     value = (uint8_t)overridden;
                     break;

@@ -544,6 +544,7 @@ void PpuSetWidescreenLayerClamp(Ppu *, uint8_t);
 void PpuSetWidescreenLayerMirror(Ppu *, uint8_t);
 void PpuSetWidescreenLayerRepeat(Ppu *, uint8_t);
 void PpuSetWidescreenLayerNormalScroll(Ppu *, uint8_t);
+void PpuClearWidescreenLayerBands(Ppu *);
 void PpuSetWidescreenLayerBand(Ppu *, uint8_t, uint8_t, uint8_t,
                                PpuWidescreenBandFill, PpuWidescreenMotion);
 void PpuSetWidescreenPadCapturedToBudget(Ppu *, uint8_t);

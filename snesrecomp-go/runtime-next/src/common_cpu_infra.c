@@ -1,6 +1,7 @@
 #include "common_cpu_infra.h"
 
 #include "common_rtl.h"
+#include "ar_trace.h"
 #include "cpu_state.h"
 #include "cpu_trace.h"
 #include "debug_server.h"
@@ -15,6 +16,7 @@
 #include "snes/snes.h"
 #include "snes/spc.h"
 #include "runner_next_internal.h"
+#include "runner_game_module_internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,7 +32,6 @@ enum { kRecompStackCapacity = 64 };
 Snes *g_snes;
 Cpu *g_snes_cpu;
 bool g_fail;
-const RtlGameInfo *g_rtl_game_info;
 
 const char *g_last_recomp_func = "(none)";
 const char *g_recomp_stack[kRecompStackCapacity];
@@ -75,6 +76,7 @@ static uint32 audio_voice_count(void) {
 }
 
 static bool s_audio_extension_enabled;
+static void install_game_hooks(void);
 
 static bool audio_extension_dsp_operation(
         void *service_context, uint32_t operation, uint32_t voice,
@@ -136,22 +138,22 @@ static bool populate_audio_extension_context(
 static bool route_game_audio_extension_dsp_write(
         Apu *apu, uint8_t address, uint8_t *value) {
     RtlAudioExtensionContext context;
-    if (!s_audio_extension_enabled || g_rtl_game_info == NULL ||
-        g_rtl_game_info->audio_extension_dsp_write == NULL ||
+    if (!s_audio_extension_enabled || g_rtl_game_audio == NULL ||
+        g_rtl_game_audio->extension_dsp_write == NULL ||
         value == NULL || !populate_audio_extension_context(apu, &context))
         return true;
-    return g_rtl_game_info->audio_extension_dsp_write(
+    return g_rtl_game_audio->extension_dsp_write(
         &context, address, value);
 }
 
 static void route_game_audio_extension_spc_opcode(
         Spc *spc, uint16_t opcode_pc) {
     RtlAudioExtensionContext context;
-    if (!s_audio_extension_enabled || g_rtl_game_info == NULL ||
-        g_rtl_game_info->audio_extension_spc_opcode == NULL || spc == NULL ||
+    if (!s_audio_extension_enabled || g_rtl_game_audio == NULL ||
+        g_rtl_game_audio->extension_spc_opcode == NULL || spc == NULL ||
         !populate_audio_extension_context(spc->apu, &context))
         return;
-    g_rtl_game_info->audio_extension_spc_opcode(&context, opcode_pc);
+    g_rtl_game_audio->extension_spc_opcode(&context, opcode_pc);
     if (context.struct_size < RTL_AUDIO_EXTENSION_CONTEXT_V2_SIZE ||
         context.flags != 0u || context.spc_z > 1u)
         return;
@@ -163,10 +165,10 @@ static void route_game_audio_extension_spc_opcode(
 static int route_game_audio_extension_spc_cycle(
         Spc *spc, uint16_t opcode_pc, int cycles) {
     (void)spc;
-    if (!s_audio_extension_enabled || g_rtl_game_info == NULL ||
-        g_rtl_game_info->audio_extension_spc_cycle == NULL)
+    if (!s_audio_extension_enabled || g_rtl_game_audio == NULL ||
+        g_rtl_game_audio->extension_spc_cycle == NULL)
         return cycles;
-    return g_rtl_game_info->audio_extension_spc_cycle(opcode_pc, cycles);
+    return g_rtl_game_audio->extension_spc_cycle(opcode_pc, cycles);
 }
 
 static bool audio_save_transfer(
@@ -206,8 +208,8 @@ static void route_game_audio_extension_save(
         Apu *apu, SaveLoadInfo *info) {
     RtlAudioSaveContext context;
     (void)apu;
-    if (!s_audio_extension_enabled || g_rtl_game_info == NULL ||
-        g_rtl_game_info->audio_extension_save == NULL || info == NULL ||
+    if (!s_audio_extension_enabled || g_rtl_game_audio == NULL ||
+        g_rtl_game_audio->extension_save == NULL || info == NULL ||
         info->func == NULL)
         return;
     memset(&context, 0, sizeof(context));
@@ -216,22 +218,23 @@ static void route_game_audio_extension_save(
     context.portable = (uint8_t)info->portable;
     context.service_context = info;
     context.transfer = audio_save_transfer;
-    g_rtl_game_info->audio_extension_save(&context);
+    g_rtl_game_audio->extension_save(&context);
 }
 
 void RtlAudioExtensionConfigure(bool enabled) {
     s_audio_extension_enabled = enabled;
     dsp_setExtendedVoicesEnabled(enabled);
+    install_game_hooks();
 }
 
 void RtlAudioExtensionNotifyUploadLocked(uint32 source24) {
     RtlAudioExtensionContext context;
-    if (!s_audio_extension_enabled || g_rtl_game_info == NULL ||
-        g_rtl_game_info->audio_extension_upload == NULL || g_snes == NULL ||
+    if (!s_audio_extension_enabled || g_rtl_game_audio == NULL ||
+        g_rtl_game_audio->extension_upload == NULL || g_snes == NULL ||
         g_snes->apu == NULL)
         return;
     if (populate_audio_extension_context(g_snes->apu, &context))
-        g_rtl_game_info->audio_extension_upload(&context, source24);
+        g_rtl_game_audio->extension_upload(&context, source24);
 }
 
 static bool audio_bus_update_valid(const RtlAudioVoiceBusUpdate *update,
@@ -249,8 +252,8 @@ static void route_game_audio_dsp_write(Apu *apu, uint8 address, uint8 value) {
     uint32 voice_count;
     uint32 index;
     if (apu == NULL || apu->spc == NULL || apu->dsp == NULL ||
-        g_rtl_game_info == NULL ||
-        g_rtl_game_info->audio_dsp_write_routing == NULL)
+        g_rtl_game_audio == NULL ||
+        g_rtl_game_audio->dsp_write_routing == NULL)
         return;
     voice_count = audio_voice_count();
     context.struct_size = RTL_AUDIO_DSP_WRITE_CONTEXT_V2_SIZE;
@@ -264,7 +267,7 @@ static void route_game_audio_dsp_write(Apu *apu, uint8 address, uint8 value) {
     context.dsp_value = value;
     context.extended_voices_enabled =
         (uint8)(voice_count > kDspHardwareVoiceCount);
-    g_rtl_game_info->audio_dsp_write_routing(&context, &routing);
+    g_rtl_game_audio->dsp_write_routing(&context, &routing);
     if (routing.struct_size < RTL_AUDIO_DSP_WRITE_ROUTING_V2_SIZE ||
         routing.flags != 0u || routing.reserved != 0u ||
         routing.update_count > RTL_AUDIO_DSP_WRITE_UPDATE_MAX)
@@ -286,8 +289,8 @@ static void route_game_audio_state_loaded(Apu *apu) {
     };
     uint32 voice_count;
     uint32 index;
-    if (apu == NULL || apu->dsp == NULL || g_rtl_game_info == NULL ||
-        g_rtl_game_info->audio_state_loaded_routing == NULL)
+    if (apu == NULL || apu->dsp == NULL || g_rtl_game_audio == NULL ||
+        g_rtl_game_audio->state_loaded_routing == NULL)
         return;
     voice_count = audio_voice_count();
     context.struct_size = RTL_AUDIO_STATE_LOADED_CONTEXT_V2_SIZE;
@@ -298,7 +301,7 @@ static void route_game_audio_state_loaded(Apu *apu) {
     context.extended_voices_enabled =
         (uint8)(voice_count > kDspHardwareVoiceCount);
     memset(context.reserved8, 0, sizeof(context.reserved8));
-    g_rtl_game_info->audio_state_loaded_routing(&context, &routing);
+    g_rtl_game_audio->state_loaded_routing(&context, &routing);
     if (routing.struct_size < RTL_AUDIO_STATE_LOADED_ROUTING_V2_SIZE ||
         routing.flags != 0u || routing.reserved != 0u ||
         routing.voice_bus_count > voice_count)
@@ -312,28 +315,190 @@ static void route_game_audio_state_loaded(Apu *apu) {
     }
 }
 
-void RtlRegisterGame(const RtlGameInfo *info) {
-    g_rtl_game_info = info;
-    g_snes_rdnmi_read_hook = info != NULL ? info->read_rdnmi : NULL;
-    g_apu_spc_dsp_write_hook = info != NULL &&
-            info->audio_dsp_write_routing != NULL
+static bool optional_table_matches(uint64_t capabilities, uint64_t bit,
+                                   const void *table) {
+    return ((capabilities & bit) != 0u) == (table != NULL);
+}
+
+static bool game_identity_valid(const RtlGameIdentity *identity) {
+    return identity != NULL &&
+        identity->struct_size >= RTL_GAME_IDENTITY_V1_SIZE &&
+        identity->flags == 0u && identity->game_id != NULL &&
+        identity->game_id[0] != '\0';
+}
+
+static bool game_execution_valid(const RtlGameExecutionApi *execution) {
+    return execution != NULL &&
+        execution->struct_size >= RTL_GAME_EXECUTION_API_V1_SIZE &&
+        execution->flags == 0u && execution->run_frame != NULL;
+}
+
+static bool game_lifecycle_valid(const RtlGameLifecycleApi *lifecycle) {
+    return lifecycle != NULL &&
+        lifecycle->struct_size >= RTL_GAME_LIFECYCLE_API_V1_SIZE &&
+        lifecycle->flags == 0u;
+}
+
+static bool game_state_providers_valid(
+        const RtlGameStateProviderApi *providers) {
+    if (providers == NULL ||
+        providers->struct_size < RTL_GAME_STATE_PROVIDER_API_V1_SIZE ||
+        providers->flags != 0u ||
+        (providers->query_cpu_state == NULL &&
+         providers->query_execution_state == NULL))
+        return false;
+    return providers->query_cpu_state == NULL ||
+        providers->cpu_component_handle != NULL;
+}
+
+static bool game_audio_valid(const RtlGameAudioApi *audio) {
+    const bool spc_upload = audio != NULL &&
+        (audio->capabilities & RTL_GAME_AUDIO_CAP_SPC_UPLOAD) != 0u;
+    const bool voice_routing = audio != NULL &&
+        (audio->capabilities & RTL_GAME_AUDIO_CAP_VOICE_ROUTING) != 0u;
+    const bool extension = audio != NULL &&
+        (audio->capabilities & RTL_GAME_AUDIO_CAP_EXTENSION) != 0u;
+    if (audio == NULL || audio->struct_size < RTL_GAME_AUDIO_API_V1_SIZE ||
+        audio->flags != 0u || audio->capabilities == 0u ||
+        (audio->capabilities & ~RTL_GAME_AUDIO_CAP_SUPPORTED) != 0u)
+        return false;
+    if (spc_upload != (audio->spc_upload_source != NULL) ||
+        (!spc_upload && (audio->spc_upload_customize != NULL ||
+                         audio->spc_upload_commit != NULL ||
+                         audio->spc_upload_stack_pop != NULL)))
+        return false;
+    if (voice_routing != (audio->dsp_write_routing != NULL) ||
+        voice_routing != (audio->state_loaded_routing != NULL))
+        return false;
+    if (extension != (audio->extension_dsp_write != NULL ||
+                      audio->extension_spc_opcode != NULL ||
+                      audio->extension_spc_cycle != NULL ||
+                      audio->extension_save != NULL ||
+                      audio->extension_upload != NULL))
+        return false;
+    return true;
+}
+
+static SrResult validate_game_module(const RtlGameModule *module) {
+    uint64_t capabilities;
+    if (module == NULL || module->struct_size < RTL_GAME_MODULE_V1_SIZE)
+        return SR_RESULT_INVALID_ARGUMENT;
+    if (module->abi_version != RTL_GAME_MODULE_ABI_VERSION)
+        return SR_RESULT_UNSUPPORTED;
+    capabilities = module->capabilities;
+    if ((capabilities & ~RTL_GAME_MODULE_CAP_SUPPORTED) != 0u)
+        return SR_RESULT_UNSUPPORTED;
+    if ((capabilities & RTL_GAME_MODULE_CAP_REQUIRED) !=
+            RTL_GAME_MODULE_CAP_REQUIRED ||
+        !optional_table_matches(
+            capabilities, RTL_GAME_MODULE_CAP_IDENTITY, module->identity) ||
+        !optional_table_matches(
+            capabilities, RTL_GAME_MODULE_CAP_EXECUTION,
+            module->execution) ||
+        !optional_table_matches(
+            capabilities, RTL_GAME_MODULE_CAP_LIFECYCLE,
+            module->lifecycle) ||
+        !optional_table_matches(
+            capabilities, RTL_GAME_MODULE_CAP_STATE_PROVIDERS,
+            module->state_providers) ||
+        !optional_table_matches(
+            capabilities, RTL_GAME_MODULE_CAP_AUDIO, module->audio))
+        return SR_RESULT_INVALID_ARGUMENT;
+    return game_identity_valid(module->identity) &&
+        game_execution_valid(module->execution) &&
+        (module->lifecycle == NULL ||
+         game_lifecycle_valid(module->lifecycle)) &&
+        (module->state_providers == NULL ||
+         game_state_providers_valid(module->state_providers)) &&
+        (module->audio == NULL || game_audio_valid(module->audio))
+        ? SR_RESULT_OK : SR_RESULT_INVALID_ARGUMENT;
+}
+
+static void install_game_hooks(void) {
+    g_snes_rdnmi_read_hook = g_rtl_game_execution != NULL
+        ? g_rtl_game_execution->read_rdnmi : NULL;
+    g_apu_spc_dsp_write_hook = g_rtl_game_audio != NULL &&
+            g_rtl_game_audio->dsp_write_routing != NULL
         ? route_game_audio_dsp_write : NULL;
-    g_rtl_apu_state_loaded_hook = info != NULL &&
-            info->audio_state_loaded_routing != NULL
+    g_rtl_apu_state_loaded_hook = g_rtl_game_audio != NULL &&
+            g_rtl_game_audio->state_loaded_routing != NULL
         ? route_game_audio_state_loaded : NULL;
     g_apu_spc_dsp_write_filter_hook = s_audio_extension_enabled &&
-            info != NULL && info->audio_extension_dsp_write != NULL
+            g_rtl_game_audio != NULL &&
+            g_rtl_game_audio->extension_dsp_write != NULL
         ? route_game_audio_extension_dsp_write : NULL;
-    g_spc_opcode_patch_hook = s_audio_extension_enabled && info != NULL &&
-            info->audio_extension_spc_opcode != NULL
+    g_spc_opcode_patch_hook = s_audio_extension_enabled &&
+            g_rtl_game_audio != NULL &&
+            g_rtl_game_audio->extension_spc_opcode != NULL
         ? route_game_audio_extension_spc_opcode : NULL;
-    g_spc_opcode_cycle_hook = s_audio_extension_enabled && info != NULL &&
-            info->audio_extension_spc_cycle != NULL
+    g_spc_opcode_cycle_hook = s_audio_extension_enabled &&
+            g_rtl_game_audio != NULL &&
+            g_rtl_game_audio->extension_spc_cycle != NULL
         ? route_game_audio_extension_spc_cycle : NULL;
-    g_apu_extra_saveload_hook = s_audio_extension_enabled && info != NULL &&
-            info->audio_extension_save != NULL
+    g_apu_extra_saveload_hook = s_audio_extension_enabled &&
+            g_rtl_game_audio != NULL &&
+            g_rtl_game_audio->extension_save != NULL
         ? route_game_audio_extension_save : NULL;
+}
+
+SrResult RtlRegisterGame(const RtlGameModule *module) {
+    SrResult result;
+    if (g_snes != NULL) return SR_RESULT_BUSY;
+    result = validate_game_module(module);
+    if (result != SR_RESULT_OK) return result;
+    g_rtl_game_identity = module->identity;
+    g_rtl_game_lifecycle = module->lifecycle;
+    g_rtl_game_execution = module->execution;
+    g_rtl_game_state_providers = module->state_providers;
+    g_rtl_game_audio = module->audio;
+    install_game_hooks();
     msu1_init();
+    return SR_RESULT_OK;
+}
+
+const char *RtlGameIdentifier(void) {
+    return g_rtl_game_identity != NULL ? g_rtl_game_identity->game_id : NULL;
+}
+
+bool RtlGameDrawPpuFrame(void) {
+    if (g_rtl_game_execution == NULL ||
+        g_rtl_game_execution->draw_ppu_frame == NULL)
+        return false;
+    g_rtl_game_execution->draw_ppu_frame();
+    return true;
+}
+
+int RtlGameFrameBegin(void) {
+    if (g_snes == NULL) return -1;
+    g_snes->forceNmi = true;
+    g_snes->nmiAvail = true;
+    return 0;
+}
+
+int RtlGameFrameComplete(uint32_t flags) {
+    int enter_nmi;
+    if (g_snes == NULL ||
+        (flags & ~RTL_GAME_FRAME_DISPATCH_NMI_IF_ENABLED) != 0u)
+        return -1;
+    enter_nmi = (flags & RTL_GAME_FRAME_DISPATCH_NMI_IF_ENABLED) != 0u &&
+        g_snes->nmiEnabled;
+    g_snes->forceNmi = false;
+    g_snes->inNmi = g_snes->inNmi || enter_nmi;
+    return enter_nmi ? RTL_GAME_FRAME_NMI_ENTERED : 0;
+}
+
+uint32_t RtlGamePpuDisplayState(void) {
+    const Ppu *ppu = g_snes != NULL ? g_snes->ppu : NULL;
+    if (ppu == NULL) return 0u;
+    return (uint32_t)ppu->inidisp |
+        ((uint32_t)ppu->bgmode << 8) |
+        ((uint32_t)ppu->screenEnabled[0] << 16) |
+        ((uint32_t)ppu->screenEnabled[1] << 24);
+}
+
+SrResult RtlGameApplyPpuFramePolicy(const SrPpuFramePolicy *policy) {
+    if (g_snes == NULL) return SR_RESULT_UNAVAILABLE;
+    return sr_runner_apply_ppu_frame_policy(g_snes, policy);
 }
 
 uint8 *SnesRomPtr(uint32 address) { return RomPtr(address); }
@@ -536,12 +701,19 @@ void WatchdogCheck(void) { ++g_watchdog_loop_headers; }
 #endif
 
 static void clear_published_runner(void) {
-    if (g_snes != NULL && g_rtl_game_info != NULL &&
-        g_rtl_game_info->bind_runner_abi != NULL) {
-        g_rtl_game_info->bind_runner_abi(g_snes, false);
+    Snes *snes = g_snes;
+    if (snes != NULL && g_rtl_game_lifecycle != NULL &&
+        g_rtl_game_lifecycle->runner_changed != NULL) {
+        g_rtl_game_lifecycle->runner_changed(NULL);
     }
-    sr_runner_clear_event_subscriptions(g_snes);
-    sr_runner_clear_audio_trace_subscriptions(g_snes);
+    if (snes != NULL) {
+        sr_runner_set_cpu_state_provider(snes, NULL, NULL, NULL);
+        sr_runner_set_execution_state_provider(snes, NULL, NULL);
+        sr_runner_bind_ppu_services(snes, false);
+        ar_trace_bind_runner(snes, 0);
+    }
+    sr_runner_clear_event_subscriptions(snes);
+    sr_runner_clear_audio_trace_subscriptions(snes);
     g_snes = NULL;
     g_snes_cpu = NULL;
     g_dma = NULL;
@@ -549,6 +721,39 @@ static void clear_published_runner(void) {
     g_rom = NULL;
     g_sram = NULL;
     g_sram_size = 0;
+}
+
+static void publish_runner(Snes *snes) {
+    const RtlGameStateProviderApi *providers = g_rtl_game_state_providers;
+    if (snes == NULL) return;
+    sr_runner_bind_ppu_services(snes, true);
+    ar_trace_bind_runner(snes, 1);
+    if (providers != NULL) {
+        sr_runner_set_cpu_state_provider(
+            snes, providers->query_cpu_state, providers->user_data,
+            providers->cpu_component_handle);
+        sr_runner_set_execution_state_provider(
+            snes, providers->query_execution_state, providers->user_data);
+    }
+    if (g_rtl_game_lifecycle != NULL &&
+        g_rtl_game_lifecycle->runner_changed != NULL)
+        g_rtl_game_lifecycle->runner_changed(sr_runner_handle(snes));
+}
+
+static bool initialize_game(bool has_rom) {
+    RtlGameInitializeContext context;
+    if (g_rtl_game_lifecycle == NULL ||
+        g_rtl_game_lifecycle->initialize == NULL)
+        return true;
+    memset(&context, 0, sizeof(context));
+    context.struct_size = RTL_GAME_INITIALIZE_CONTEXT_V1_SIZE;
+    context.flags = has_rom ? RTL_GAME_INITIALIZE_HAS_ROM : 0u;
+    context.runner = sr_runner_handle(g_snes);
+    if (has_rom) {
+        context.rom_data = g_snes->cart->rom;
+        context.rom_byte_size = g_snes->cart->romSize;
+    }
+    return g_rtl_game_lifecycle->initialize(&context);
 }
 
 void SnesShutdown(void) {
@@ -560,13 +765,11 @@ void SnesShutdown(void) {
 Snes *SnesInit(const uint8 *data, int data_size) {
     bool loaded;
     if (data_size < 0 || (data_size > 0 && data == NULL) ||
-        g_rtl_game_info == NULL) return NULL;
+        g_rtl_game_execution == NULL) return NULL;
     SnesShutdown();
     g_snes = snes_init(g_ram);
     if (g_snes == NULL) return NULL;
-    if (g_rtl_game_info->bind_runner_abi != NULL) {
-        g_rtl_game_info->bind_runner_abi(g_snes, true);
-    }
+    publish_runner(g_snes);
     g_snes_cpu = g_snes->cpu;
     g_dma = g_snes->dma;
     g_ppu = g_snes->ppu;
@@ -574,9 +777,7 @@ Snes *SnesInit(const uint8 *data, int data_size) {
         loaded = snes_loadRom(g_snes, data, data_size);
         if (!loaded) goto fail;
         g_rom = g_snes->cart->rom;
-        if (g_rtl_game_info->initialize != NULL) {
-            g_rtl_game_info->initialize();
-        }
+        if (!initialize_game(true)) goto fail;
         snes_reset(g_snes, true);
         SnesEnterNativeMode();
     } else {
@@ -584,9 +785,7 @@ Snes *SnesInit(const uint8 *data, int data_size) {
         if (ram == NULL) goto fail;
         g_snes->cart->ram = ram;
         g_snes->cart->ramSize = 2048u;
-        if (g_rtl_game_info->initialize != NULL) {
-            g_rtl_game_info->initialize();
-        }
+        if (!initialize_game(false)) goto fail;
         ppu_reset(g_ppu);
         dma_reset(g_dma);
     }

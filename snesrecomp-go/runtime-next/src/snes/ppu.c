@@ -679,6 +679,11 @@ void PpuSetWidescreenLayerRepeat(Ppu *ppu, uint8_t mask) {
 void PpuSetWidescreenLayerNormalScroll(Ppu *ppu, uint8_t mask) {
     if (ppu != NULL) ppu->wsLayerNormalScroll = mask;
 }
+void PpuClearWidescreenLayerBands(Ppu *ppu) {
+    if (ppu == NULL) return;
+    memset(ppu->wsBandFill, 0, sizeof(ppu->wsBandFill));
+    memset(ppu->wsBandMotion, 0, sizeof(ppu->wsBandMotion));
+}
 void PpuSetWidescreenPadCapturedToBudget(Ppu *ppu, uint8_t enabled) {
     if (ppu != NULL) ppu->wsPadCapturedToBudget = enabled != 0u;
 }

@@ -764,6 +764,67 @@ suite is 0.39% faster and native-SIMD regresses 0.76%, with no workload above
 1.17%. Eleven active Fillmore action frames and final machine-state artifacts
 match the frozen reference byte-for-byte.
 
+## Versioned game-module SDK checkpoint (2026-08-27)
+
+The linked-game boundary is now a versioned `RtlGameModule` rather than an
+unversioned 19-field callback bag. Identity, lifecycle, execution,
+generated-state providers, and privileged audio policy have separate sized
+tables and exact capability contracts. Registration validates the complete
+module atomically and distinguishes malformed descriptors, unsupported
+versions/capabilities, and active-runner conflicts. Initialization receives an
+opaque runner plus callback-lifetime mutable ROM bytes; runner-owned state
+providers and core PPU/trace services are installed and revoked symmetrically.
+
+ActRaiser now declares all five tables without importing private runner APIs in
+its registration unit. The runner caches the resolved tables once, preserving
+the direct frame/audio callback cost and adding no allocation or descriptor
+walk to a normal frame. Standalone device fixtures also stop selecting the
+whole runner merely to satisfy disabled observer hooks, which makes the static
+library's subsystem boundaries easier to test.
+
+The portable standalone suite passes 27/27. The application suite passes all
+92 tests when the three host-display tests are given GPU access. Strict C11 and
+C++17 header checks pass for ARM64 and x86-64 macOS targets, and the 267-unit
+Zig hermetic bundle builds successfully. Four replay
+workloads retain identical WRAM, SRAM, CPU-state, and dispatch artifacts in
+both builds. Portable adjacent deltas are -0.83%, -0.58%, -0.36%, and -0.64%
+in workload order, for a 0.60% suite improvement. Native-SIMD deltas are
+-0.11%, +0.10%, +0.33%, and +0.69%, for a 0.25% suite regression.
+
+The Super Mario World- and Zelda 3-shaped design audit finds no new core
+hardware blocker. Its first SDK priority, a bounded PPU frame-policy lifecycle,
+is implemented in the checkpoint below. Game-owned semantic audio catalogue
+metadata above the low-level safe points and public versioned serialization
+remain. See `../docs/GAME_SDK_EVALUATION.md`.
+
+## ABI v2 PPU frame-policy checkpoint (2026-08-27)
+
+ABI v2 now accepts one bounded, declarative `SrPpuFramePolicy` covering exact
+horizontal and vertical margins, layer clamp/mirror/repeat and motion masks,
+up to 32 ordered row bands, per-layer vertical clipping, captured-margin
+padding, and HUD split geometry. BEGIN validates the whole descriptor before
+clearing stale providers/extents and replacing policy. The optional FINALIZE
+phase requires the active budget to match and preserves providers/extents while
+applying decisions that depend on publication success. Neither phase allocates,
+copies a framebuffer or emulated-memory region, or retains the caller's band
+pointer.
+
+ActRaiser uses BEGIN before publishing finite-world tile providers and FINALIZE
+after provider fallback and finite-canvas resolution. The game-specific map and
+semantic-layer decisions remain in the project; the runner receives only
+generic geometry and fill policy. ROM transforms/randomizer initialization also
+move into the module lifecycle's callback-scoped mutable ROM view, removing the
+host's concrete post-initialization cartridge handoff.
+
+The standalone runtime suite passes 27/27 and the application suite passes all
+92 tests, including the three host-GPU tests. C11 and C++17 public-header checks
+and the concrete-runner fence pass. Seven alternating adjacent replay pairs
+retain identical WRAM, SRAM, CPU-state, and dispatch artifacts. Portable
+workload deltas are +0.78%, +0.86%, +0.24%, and +0.92%, for a 0.70% suite
+regression. Native-SIMD deltas are -1.39%, -1.24%, -0.45%, and -1.60%, for a
+1.17% suite improvement. Both are inside the phase gate; no portable workload
+reaches the 2% investigation threshold.
+
 ## Migration order
 
 1. [x] Add ABI layout, capability, lifetime, and generation-counter tests while
@@ -800,6 +861,15 @@ match the frozen reference byte-for-byte.
      the same safe-point boundary.
 5. [ ] Remove external concrete-structure access only after all game adapters use
    the versioned boundary.
+6. [ ] Stabilize reusable game-project integration contracts.
+   - [x] Replace the callback bag with a versioned, capability-gated game
+     module and runner-owned provider lifecycle.
+   - [x] Add a bounded PPU frame-policy lifecycle and migrate ActRaiser's
+     margin, fill, row-band, vertical-clip, capture-padding, and HUD policy.
+   - [ ] Migrate the remaining capture/composition and diagnostic work from
+     the final concrete ActRaiser frame adapter.
+   - [ ] Define the boundary between low-level audio safe points and
+     game-owned semantic track/replacement metadata.
 
 The cutover scope for item 5 is tracked in
 `docs/runner-concrete-access-audit.md`.  The application begins this phase with

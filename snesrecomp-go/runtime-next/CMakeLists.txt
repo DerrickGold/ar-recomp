@@ -73,7 +73,8 @@ if(BUILD_TESTING)
     add_test(NAME snesrecomp_runtime_next_abi
         COMMAND snesrecomp_runtime_next_abi_test)
 
-    add_executable(snesrecomp_runtime_next_cart_test tests/cart_test.c)
+    add_executable(snesrecomp_runtime_next_cart_test
+        tests/cart_test.c tests/runner_event_stub.c)
     target_link_libraries(snesrecomp_runtime_next_cart_test PRIVATE
         snesrecomp_runtime_next_contract)
     add_test(NAME snesrecomp_runtime_next_cart
@@ -85,7 +86,8 @@ if(BUILD_TESTING)
     add_test(NAME snesrecomp_runtime_next_rom
         COMMAND snesrecomp_runtime_next_rom_test)
 
-    add_executable(snesrecomp_runtime_next_dma_test tests/dma_test.c)
+    add_executable(snesrecomp_runtime_next_dma_test
+        tests/dma_test.c tests/runner_event_stub.c)
     target_link_libraries(snesrecomp_runtime_next_dma_test PRIVATE
         snesrecomp_runtime_next_contract)
     add_test(NAME snesrecomp_runtime_next_dma
@@ -152,7 +154,8 @@ if(BUILD_TESTING)
     add_test(NAME snesrecomp_runtime_next_audio_trace
         COMMAND snesrecomp_runtime_next_audio_trace_test)
 
-    add_executable(snesrecomp_runtime_next_ar_trace_test tests/ar_trace_test.c)
+    add_executable(snesrecomp_runtime_next_ar_trace_test
+        tests/ar_trace_test.c tests/apu_sync_stub.c)
     target_compile_definitions(snesrecomp_runtime_next_ar_trace_test PRIVATE
         AR_TRACE_TEST_PATH="${CMAKE_CURRENT_BINARY_DIR}/runtime-next-ar-trace.jsonl")
     target_link_libraries(snesrecomp_runtime_next_ar_trace_test PRIVATE
@@ -190,7 +193,8 @@ if(BUILD_TESTING)
         COMMAND snesrecomp_runtime_next_cpu_state_test)
 
     add_executable(snesrecomp_runtime_next_cpu_infra_test
-        tests/cpu_infra_test.c src/common_cpu_infra.c src/snes/saveload.c)
+        tests/cpu_infra_test.c src/common_cpu_infra.c
+        src/runner_game_module.c src/snes/saveload.c)
     target_include_directories(snesrecomp_runtime_next_cpu_infra_test PRIVATE src)
     target_compile_definitions(snesrecomp_runtime_next_cpu_infra_test PRIVATE
         AR_WATCHDOG=0 SNESRECOMP_TRACE=0 SNESRECOMP_REVERSE_DEBUG=0)
@@ -261,7 +265,8 @@ if(BUILD_TESTING)
     add_test(NAME snesrecomp_runtime_next_framedump
         COMMAND snesrecomp_runtime_next_framedump_test)
 
-    add_executable(snesrecomp_runtime_next_ppu_test tests/ppu_test.c)
+    add_executable(snesrecomp_runtime_next_ppu_test
+        tests/ppu_test.c tests/runner_event_stub.c)
     target_link_libraries(snesrecomp_runtime_next_ppu_test PRIVATE
         snesrecomp_runtime_next_contract)
     add_test(NAME snesrecomp_runtime_next_ppu

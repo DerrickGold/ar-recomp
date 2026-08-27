@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "../runner_game_adapter.h"
 #include "apu.h"
 #include "cart.h"
 #include "cpu.h"
@@ -41,6 +42,8 @@ struct Snes {
     uint64_t abiMutationGeneration;
     uint64_t abiFrameCounter;
     uint64_t abiAudioFrameCounter;
+    uint64_t abiPpuFramePolicyGeneration;
+    bool abiPpuFramePolicyActive;
     uint16_t hPos;
     uint16_t vPos;
     double apuCatchupCycles;
@@ -64,7 +67,7 @@ struct Snes {
     uint16_t divideResult;
 };
 
-typedef int SnesRdnmiReadHook(Snes *snes);
+typedef int SnesRdnmiReadHook(const RtlRdnmiReadContext *context);
 typedef void SnesWramWriteHook(uint32_t offset, uint8_t old_value,
                                uint8_t new_value);
 typedef void SnesRegisterWriteHook(uint16_t address, uint8_t value);

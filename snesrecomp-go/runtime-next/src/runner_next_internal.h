@@ -2,15 +2,12 @@
 
 #include <stdbool.h>
 
+#include "runner_game_module.h"
 #include "runner_next.h"
 
 typedef struct Snes Snes;
 typedef struct Ppu Ppu;
 typedef struct Apu Apu;
-typedef SrResult SrRunnerCpuStateProvider(
-    Snes *snes, SrCpuStateSnapshot *out_state);
-typedef SrResult SrRunnerExecutionStateProvider(
-    Snes *snes, SrExecutionSnapshot *out_state);
 typedef SrResult SrRunnerPpuObjRasterProvider(
     Snes *snes, const SrPpuObjRasterRequest *request,
     SrPpuObjRasterResult *out_result);
@@ -29,10 +26,10 @@ typedef SrResult SrRunnerPpuScanoutProvider(
  * public ABI. */
 SrRunnerHandle *sr_runner_handle(Snes *snes);
 void sr_runner_set_cpu_state_provider(
-    Snes *snes, SrRunnerCpuStateProvider *provider,
+    Snes *snes, RtlGameCpuStateQueryFunc *provider, void *user_data,
     const void *component_handle);
 void sr_runner_set_execution_state_provider(
-    Snes *snes, SrRunnerExecutionStateProvider *provider);
+    Snes *snes, RtlGameExecutionStateQueryFunc *provider, void *user_data);
 void sr_runner_set_ppu_obj_raster_provider(
     Snes *snes, SrRunnerPpuObjRasterProvider *provider);
 void sr_runner_set_ppu_obj_resolve_provider(
@@ -121,3 +118,5 @@ SrResult sr_runner_compare_exchange_spc_pc(
     SrSpcPcControlResult *out_result);
 SrResult sr_runner_configure_audio_mix(
     SrRunnerHandle *runner, const SrAudioMixControl *control);
+SrResult sr_runner_apply_ppu_frame_policy(
+    Snes *snes, const SrPpuFramePolicy *policy);

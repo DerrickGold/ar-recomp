@@ -12,7 +12,6 @@
 #define AR_TRACE_TEST_PATH "runtime-next-ar-trace.jsonl"
 #endif
 
-int snes_frame_counter;
 unsigned char g_ram[0x20000];
 const char *g_last_recomp_func;
 uint32_t g_ar_blk_ring[1024];

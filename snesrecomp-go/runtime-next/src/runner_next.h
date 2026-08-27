@@ -36,6 +36,9 @@ extern "C" {
 #define SR_RUNNER_CAP_DMA_STATE UINT64_C(0x0000000000400000)
 #define SR_RUNNER_CAP_PPU_BACKGROUND_POLICY UINT64_C(0x0000000000800000)
 #define SR_RUNNER_CAP_PPU_SCANOUT UINT64_C(0x0000000001000000)
+#define SR_RUNNER_CAP_GAME_TIMING_CONTROL UINT64_C(0x0000000002000000)
+#define SR_RUNNER_CAP_INPUT_STATE UINT64_C(0x0000000004000000)
+#define SR_RUNNER_CAP_PPU_FRAME_POLICY UINT64_C(0x0000000008000000)
 
 typedef uint32_t SrResult;
 enum {
@@ -120,6 +123,68 @@ enum {
  * the independently implemented runner's internal components. */
 typedef struct SrRunnerHandle SrRunnerHandle;
 typedef struct SrComponentHandle SrComponentHandle;
+
+typedef uint32_t SrGameTimingOperation;
+enum {
+    SR_GAME_TIMING_BEGIN_FRAME_SLICE = 1u,
+    SR_GAME_TIMING_COMPLETE_FRAME_SLICE = 2u
+};
+
+#define SR_GAME_TIMING_DISPATCH_NMI_IF_ENABLED UINT32_C(0x00000001)
+#define SR_GAME_TIMING_REQUEST_FLAGS_SUPPORTED                            \
+    SR_GAME_TIMING_DISPATCH_NMI_IF_ENABLED
+
+#define SR_GAME_TIMING_STATE_FORCE_NMI UINT32_C(0x00000001)
+#define SR_GAME_TIMING_STATE_NMI_AVAILABLE UINT32_C(0x00000002)
+#define SR_GAME_TIMING_STATE_NMI_ENABLED UINT32_C(0x00000004)
+#define SR_GAME_TIMING_STATE_IN_NMI UINT32_C(0x00000008)
+#define SR_GAME_TIMING_TRANSITION_NMI_ENTERED UINT32_C(0x00000001)
+
+/* Synchronous control for a recompiled game's host-resumable frame slice.
+ * BEGIN publishes a fresh RDNMI token and enables forced pacing. COMPLETE
+ * always disables forced pacing, then optionally enters NMI when the emulated
+ * hardware gate is enabled. No runner generation changes: these are live
+ * emulated timing latches, not borrowed-view ownership. */
+typedef struct SrGameTimingRequest {
+    uint32_t struct_size;
+    SrGameTimingOperation operation;
+    uint32_t flags;
+    uint32_t reserved;
+} SrGameTimingRequest;
+
+#define SR_GAME_TIMING_REQUEST_V2_SIZE                                   \
+    ((uint32_t)(offsetof(SrGameTimingRequest, reserved) +                 \
+                sizeof(((SrGameTimingRequest *)0)->reserved)))
+
+typedef struct SrGameTimingResult {
+    uint32_t struct_size;
+    uint32_t state_flags;
+    uint32_t transition_flags;
+} SrGameTimingResult;
+
+#define SR_GAME_TIMING_RESULT_V2_SIZE                                    \
+    ((uint32_t)(offsetof(SrGameTimingResult, transition_flags) +          \
+                sizeof(((SrGameTimingResult *)0)->transition_flags)))
+
+#define SR_INPUT_CONTROLLER_COUNT 2u
+
+/* Coherent copied controller state at the current runner safe point.
+ * packed_buttons uses the 12-bit-per-controller order accepted by RtlRunFrame
+ * and SR_MUTATION_SET_INPUT. auto_joypad contains the SNES $4218-$421B bit
+ * layout observed by the emulated game. */
+typedef struct SrInputStateSnapshot {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t lifetime_generation;
+    uint64_t frame_counter;
+    uint16_t packed_buttons[SR_INPUT_CONTROLLER_COUNT];
+    uint16_t auto_joypad[SR_INPUT_CONTROLLER_COUNT];
+    uint32_t reserved;
+} SrInputStateSnapshot;
+
+#define SR_INPUT_STATE_SNAPSHOT_V2_SIZE                                 \
+    ((uint32_t)(offsetof(SrInputStateSnapshot, reserved) +               \
+                sizeof(((SrInputStateSnapshot *)0)->reserved)))
 
 /* A borrowed view is immutable through this API and thread-confined. It is
  * valid only while borrow_is_valid reports true: the next runner tick, reset,
@@ -631,6 +696,75 @@ typedef struct SrPpuHorizontalMarginRequest {
 #define SR_PPU_HORIZONTAL_MARGIN_REQUEST_V2_SIZE                         \
     ((uint32_t)(offsetof(SrPpuHorizontalMarginRequest, reserved) +        \
                 sizeof(((SrPpuHorizontalMarginRequest *)0)->reserved)))
+
+/* Declarative, frame-scoped presentation policy. Applying a policy replaces
+ * horizontal/vertical margin geometry, layer fill modes, row-band overrides,
+ * vertical clipping, and HUD split state as one validated transaction. It
+ * normally starts a new background-policy frame: retained virtual tilemaps
+ * and layer extents are cleared and may be republished afterward. FINALIZE is
+ * the optional second phase for policy that depends on publication success;
+ * it preserves those resources. The runner retains no request or band
+ * pointer. Later bands win when ordered ranges overlap, matching normal
+ * raster-policy composition. Per-frame geometry does not change host surface
+ * bindings; borrowed surface snapshots still expire at the normal runner tick
+ * boundary. */
+#define SR_PPU_FRAME_POLICY_PAD_CAPTURED_TO_BUDGET UINT32_C(0x00000001)
+/* Finalize a policy after frame-scoped virtual providers have been published.
+ * The budget must match the active begin transaction. Finalize preserves
+ * provider bindings and layer extents while replacing exact margins, fill
+ * modes, row bands, vertical clipping, and HUD state. */
+#define SR_PPU_FRAME_POLICY_FINALIZE UINT32_C(0x00000002)
+#define SR_PPU_FRAME_POLICY_LAYER_MASK UINT32_C(0x0000000f)
+#define SR_PPU_FRAME_POLICY_BAND_MAX 32u
+
+typedef struct SrPpuFramePolicyBand {
+    uint32_t layer;
+    uint32_t y0;
+    uint32_t y1;
+    SrPpuBackgroundFill fill;
+    SrPpuBackgroundMotion motion;
+} SrPpuFramePolicyBand;
+
+typedef struct SrPpuFramePolicy {
+    uint32_t struct_size;
+    uint32_t flags;
+    SrPpuHorizontalMarginMode horizontal_mode;
+    uint32_t margin_budget_pixels;
+    uint32_t margin_left_pixels;
+    uint32_t margin_right_pixels;
+    uint32_t margin_top_pixels;
+    uint32_t margin_bottom_pixels;
+    uint32_t layer_clamp_mask;
+    uint32_t layer_mirror_mask;
+    uint32_t layer_repeat_mask;
+    uint32_t layer_normal_scroll_mask;
+    uint32_t vertical_clip_layer_mask;
+    uint32_t vertical_clip_top_rows[4];
+    uint32_t vertical_clip_bottom_rows[4];
+    uint32_t hud_split_height;
+    uint32_t hud_left_end_x;
+    uint32_t hud_right_start_x;
+    uint32_t hud_player_row_y;
+    uint32_t hud_left_only_y;
+    const SrPpuFramePolicyBand *bands;
+    uint32_t band_count;
+    uint32_t reserved;
+} SrPpuFramePolicy;
+
+#define SR_PPU_FRAME_POLICY_V2_SIZE                                     \
+    ((uint32_t)(offsetof(SrPpuFramePolicy, reserved) +                   \
+                sizeof(((SrPpuFramePolicy *)0)->reserved)))
+
+typedef struct SrPpuFramePolicyRequest {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t lifetime_generation;
+    SrPpuFramePolicy policy;
+} SrPpuFramePolicyRequest;
+
+#define SR_PPU_FRAME_POLICY_REQUEST_V2_SIZE                             \
+    ((uint32_t)(offsetof(SrPpuFramePolicyRequest, policy) +              \
+                sizeof(((SrPpuFramePolicyRequest *)0)->policy)))
 
 /* Atomic, synchronous claims for frame-scoped enhancement capture. Claims
  * return SR_RESULT_BUSY when an earlier game/host policy already owns the
@@ -1483,6 +1617,14 @@ typedef struct SnesRunnerApi {
         SrRunnerHandle *runner,
         const SrPpuScanoutRequest *request,
         SrPpuScanoutResult *out_result);
+    SrResult (*control_game_timing)(
+        SrRunnerHandle *runner,
+        const SrGameTimingRequest *request,
+        SrGameTimingResult *out_result);
+    SrResult (*query_input_state)(
+        SrRunnerHandle *runner, SrInputStateSnapshot *out_state);
+    SrResult (*apply_ppu_frame_policy)(
+        SrRunnerHandle *runner, const SrPpuFramePolicyRequest *request);
 } SnesRunnerApi;
 
 #define SNES_RUNNER_API_V2_BASE_SIZE                                           \
@@ -1582,6 +1724,18 @@ typedef struct SnesRunnerApi {
 #define SNES_RUNNER_API_PPU_SCANOUT_SIZE                                 \
     ((uint32_t)(offsetof(SnesRunnerApi, run_ppu_scanout) +                \
                 sizeof(((SnesRunnerApi *)0)->run_ppu_scanout)))
+
+#define SNES_RUNNER_API_GAME_TIMING_CONTROL_SIZE                         \
+    ((uint32_t)(offsetof(SnesRunnerApi, control_game_timing) +            \
+                sizeof(((SnesRunnerApi *)0)->control_game_timing)))
+
+#define SNES_RUNNER_API_INPUT_STATE_SIZE                                \
+    ((uint32_t)(offsetof(SnesRunnerApi, query_input_state) +             \
+                sizeof(((SnesRunnerApi *)0)->query_input_state)))
+
+#define SNES_RUNNER_API_PPU_FRAME_POLICY_SIZE                           \
+    ((uint32_t)(offsetof(SnesRunnerApi, apply_ppu_frame_policy) +        \
+                sizeof(((SnesRunnerApi *)0)->apply_ppu_frame_policy)))
 
 typedef struct SrRunnerDescriptor {
     uint32_t abi_version;

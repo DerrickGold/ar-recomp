@@ -7,14 +7,13 @@
 #include "snes/cpu.h"
 #include "snes/dma.h"
 #include "snes/dsp.h"
+#include "snes/ppu.h"
 #include "snes/saveload.h"
 #include "snes/snes.h"
 #include "snes/spc.h"
 
 #include <stdio.h>
 #include <string.h>
-
-struct Ppu { int marker; };
 
 uint8 g_ram[kSnesWramSize];
 uint8 *g_sram;
@@ -59,7 +58,19 @@ static int msu_init_count;
 static int free_count;
 static int abi_bind_count;
 static int abi_unbind_count;
-static Snes *abi_bound_runner;
+static SrRunnerHandle *abi_bound_runner;
+static int cpu_provider_bind_count;
+static int cpu_provider_unbind_count;
+static int execution_provider_bind_count;
+static int execution_provider_unbind_count;
+static int ppu_service_bind_count;
+static int ppu_service_unbind_count;
+static int ppu_frame_policy_count;
+static int trace_bind_count;
+static int trace_unbind_count;
+static int draw_frame_count;
+static int initialization_context_valid = 1;
+static bool initialize_success = true;
 static bool load_rom_success = true;
 static int failures;
 static int dsp_routing_count;
@@ -68,6 +79,7 @@ static int extension_dsp_count;
 static int extension_opcode_count;
 static int extension_save_count;
 static int extension_upload_count;
+static int rdnmi_context_valid;
 static int apu_lock_count;
 static int apu_unlock_count;
 static bool extended_voices_enabled;
@@ -75,6 +87,55 @@ static int virtual_register_voice = -1;
 static uint8 virtual_register_address;
 static uint8 virtual_register_value;
 static size_t extension_saved_bytes;
+
+SrResult sr_runner_apply_ppu_frame_policy(
+        Snes *snes, const SrPpuFramePolicy *policy) {
+    if (snes != &test_snes || policy == NULL ||
+        policy->struct_size < SR_PPU_FRAME_POLICY_V2_SIZE)
+        return SR_RESULT_INVALID_ARGUMENT;
+    ++ppu_frame_policy_count;
+    return SR_RESULT_OK;
+}
+
+SrRunnerHandle *sr_runner_handle(Snes *snes) {
+    return (SrRunnerHandle *)(void *)snes;
+}
+
+void sr_runner_set_cpu_state_provider(
+        Snes *snes, RtlGameCpuStateQueryFunc *provider, void *user_data,
+        const void *component_handle) {
+    (void)snes;
+    if (provider != NULL && user_data == &test_cpu &&
+        component_handle == &test_cpu) {
+        ++cpu_provider_bind_count;
+    } else if (provider == NULL && user_data == NULL &&
+               component_handle == NULL) {
+        ++cpu_provider_unbind_count;
+    }
+}
+
+void sr_runner_set_execution_state_provider(
+        Snes *snes, RtlGameExecutionStateQueryFunc *provider,
+        void *user_data) {
+    (void)snes;
+    if (provider != NULL && user_data == &test_cpu) {
+        ++execution_provider_bind_count;
+    } else if (provider == NULL && user_data == NULL) {
+        ++execution_provider_unbind_count;
+    }
+}
+
+void sr_runner_bind_ppu_services(Snes *snes, bool enabled) {
+    (void)snes;
+    if (enabled) ++ppu_service_bind_count;
+    else ++ppu_service_unbind_count;
+}
+
+void ar_trace_bind_runner(Snes *snes, int enabled) {
+    (void)snes;
+    if (enabled) ++trace_bind_count;
+    else ++trace_unbind_count;
+}
 
 static void check(int condition, const char *message) {
     if (condition) return;
@@ -153,15 +214,54 @@ uint8 *RomPtr(uint32 address) {
     return &test_rom[address & (sizeof(test_rom) - 1u)];
 }
 
-static void initialize_game(void) { ++initialize_count; }
-static int read_rdnmi(Snes *snes) { (void)snes; return 1; }
-static void bind_runner_abi(Snes *snes, bool enabled) {
-    if (enabled) {
+static bool initialize_game(const RtlGameInitializeContext *context) {
+    ++initialize_count;
+    initialization_context_valid &= context != NULL &&
+        context->struct_size == RTL_GAME_INITIALIZE_CONTEXT_V1_SIZE &&
+        context->runner == (SrRunnerHandle *)(void *)&test_snes;
+    if (context != NULL &&
+        (context->flags & RTL_GAME_INITIALIZE_HAS_ROM) != 0u) {
+        initialization_context_valid &=
+            context->flags == RTL_GAME_INITIALIZE_HAS_ROM &&
+            context->rom_data == test_rom &&
+            context->rom_byte_size == sizeof(test_rom);
+    } else if (context != NULL) {
+        initialization_context_valid &= context->flags == 0u &&
+            context->rom_data == NULL && context->rom_byte_size == 0u;
+    }
+    return initialize_success;
+}
+
+static void run_frame(void) {}
+static void draw_ppu_frame(void) { ++draw_frame_count; }
+
+static SrResult query_cpu_state(
+        void *user_data, SrCpuStateSnapshot *out_state) {
+    if (user_data != &test_cpu || out_state == NULL)
+        return SR_RESULT_INVALID_ARGUMENT;
+    return SR_RESULT_OK;
+}
+
+static SrResult query_execution_state(
+        void *user_data, SrExecutionSnapshot *out_state) {
+    if (user_data != &test_cpu || out_state == NULL)
+        return SR_RESULT_INVALID_ARGUMENT;
+    return SR_RESULT_OK;
+}
+
+static int read_rdnmi(const RtlRdnmiReadContext *context) {
+    rdnmi_context_valid = context != NULL &&
+        context->struct_size == RTL_RDNMI_READ_CONTEXT_V2_SIZE &&
+        context->flags == (RTL_RDNMI_FORCE_NMI | RTL_RDNMI_AVAILABLE);
+    return 1;
+}
+static void runner_changed(SrRunnerHandle *runner) {
+    if (runner != NULL) {
         ++abi_bind_count;
-        abi_bound_runner = snes;
+        abi_bound_runner = runner;
     } else {
         ++abi_unbind_count;
-        if (abi_bound_runner == snes) abi_bound_runner = NULL;
+        abi_bound_runner = NULL;
     }
 }
 
@@ -260,24 +360,93 @@ static void route_extension_upload(
 }
 
 static void test_registration_and_initialization(void) {
-    static const RtlGameInfo info = {
-        .title = "test",
-        .initialize = initialize_game,
-        .read_rdnmi = read_rdnmi,
+    static const RtlGameIdentity identity = {
+        .struct_size = RTL_GAME_IDENTITY_V1_SIZE,
+        .game_id = "test",
+        .display_name = "Runner Contract Test",
         .save_name_prefix = "test",
-        .audio_dsp_write_routing = route_dsp_write,
-        .audio_state_loaded_routing = route_state_loaded,
-        .audio_extension_dsp_write = route_extension_dsp_write,
-        .audio_extension_spc_opcode = route_extension_spc_opcode,
-        .audio_extension_spc_cycle = route_extension_spc_cycle,
-        .audio_extension_save = route_extension_save,
-        .audio_extension_upload = route_extension_upload,
-        .bind_runner_abi = bind_runner_abi,
     };
+    static const RtlGameLifecycleApi lifecycle = {
+        .struct_size = RTL_GAME_LIFECYCLE_API_V1_SIZE,
+        .initialize = initialize_game,
+        .runner_changed = runner_changed,
+    };
+    static const RtlGameExecutionApi execution = {
+        .struct_size = RTL_GAME_EXECUTION_API_V1_SIZE,
+        .run_frame = run_frame,
+        .draw_ppu_frame = draw_ppu_frame,
+        .read_rdnmi = read_rdnmi,
+    };
+    static const RtlGameStateProviderApi state_providers = {
+        .struct_size = RTL_GAME_STATE_PROVIDER_API_V1_SIZE,
+        .user_data = &test_cpu,
+        .cpu_component_handle = &test_cpu,
+        .query_cpu_state = query_cpu_state,
+        .query_execution_state = query_execution_state,
+    };
+    static const RtlGameAudioApi audio = {
+        .struct_size = RTL_GAME_AUDIO_API_V1_SIZE,
+        .capabilities = RTL_GAME_AUDIO_CAP_VOICE_ROUTING |
+                        RTL_GAME_AUDIO_CAP_EXTENSION,
+        .dsp_write_routing = route_dsp_write,
+        .state_loaded_routing = route_state_loaded,
+        .extension_dsp_write = route_extension_dsp_write,
+        .extension_spc_opcode = route_extension_spc_opcode,
+        .extension_spc_cycle = route_extension_spc_cycle,
+        .extension_save = route_extension_save,
+        .extension_upload = route_extension_upload,
+    };
+    static const RtlGameModule module = {
+        .abi_version = RTL_GAME_MODULE_ABI_VERSION,
+        .struct_size = RTL_GAME_MODULE_V1_SIZE,
+        .capabilities = RTL_GAME_MODULE_CAP_IDENTITY |
+                        RTL_GAME_MODULE_CAP_LIFECYCLE |
+                        RTL_GAME_MODULE_CAP_EXECUTION |
+                        RTL_GAME_MODULE_CAP_STATE_PROVIDERS |
+                        RTL_GAME_MODULE_CAP_AUDIO,
+        .identity = &identity,
+        .lifecycle = &lifecycle,
+        .execution = &execution,
+        .state_providers = &state_providers,
+        .audio = &audio,
+    };
+    RtlGameModule incompatible = module;
+    RtlGameModule malformed = module;
+    RtlGameExecutionApi missing_frame = execution;
+    incompatible.abi_version = RTL_GAME_MODULE_ABI_VERSION + 1u;
+    check(RtlRegisterGame(NULL) == SR_RESULT_INVALID_ARGUMENT,
+          "null game module rejected");
+    check(RtlRegisterGame(&incompatible) == SR_RESULT_UNSUPPORTED,
+          "incompatible game module rejected");
+    incompatible = module;
+    incompatible.capabilities |= UINT64_C(0x8000000000000000);
+    check(RtlRegisterGame(&incompatible) == SR_RESULT_UNSUPPORTED,
+          "unknown game capability rejected");
+    malformed.capabilities &= ~RTL_GAME_MODULE_CAP_AUDIO;
+    check(RtlRegisterGame(&malformed) == SR_RESULT_INVALID_ARGUMENT,
+          "module capability and table mismatch rejected");
+    malformed = module;
+    missing_frame.run_frame = NULL;
+    malformed.execution = &missing_frame;
+    check(RtlRegisterGame(&malformed) == SR_RESULT_INVALID_ARGUMENT,
+          "missing required frame callback rejected");
     RtlAudioExtensionConfigure(true);
-    RtlRegisterGame(&info);
-    check(g_rtl_game_info == &info, "game registration");
-    check(g_snes_rdnmi_read_hook == read_rdnmi, "RDNMI hook registration");
+    check(RtlRegisterGame(&module) == SR_RESULT_OK,
+          "game module registration");
+    check(strcmp(RtlGameIdentifier(), "test") == 0,
+          "registered game identity");
+    check(RtlGameDrawPpuFrame() && draw_frame_count == 1,
+          "registered draw callback");
+    check(g_snes_rdnmi_read_hook == read_rdnmi,
+          "direct RDNMI hook registration");
+    {
+        const RtlRdnmiReadContext context = {
+            RTL_RDNMI_READ_CONTEXT_V2_SIZE,
+            RTL_RDNMI_FORCE_NMI | RTL_RDNMI_AVAILABLE,
+        };
+        check(g_snes_rdnmi_read_hook(&context) == 1 && rdnmi_context_valid,
+              "RDNMI fixed-width callback context");
+    }
     check(g_apu_spc_dsp_write_hook != NULL,
           "DSP routing hook registration");
     check(g_rtl_apu_state_loaded_hook != NULL,
@@ -292,10 +461,17 @@ static void test_registration_and_initialization(void) {
 
     check(SnesInit(test_rom, (int)sizeof(test_rom)) == &test_snes,
           "ROM-backed initialization");
-    check(initialize_count == 1, "game initialization callback");
+    check(initialize_count == 1 && initialization_context_valid,
+          "game initialization callback context");
+    check(RtlRegisterGame(&module) == SR_RESULT_BUSY,
+          "registration rejected while a runner is active");
     check(abi_bind_count == 1 && abi_unbind_count == 0 &&
-              abi_bound_runner == &test_snes,
+              abi_bound_runner == (SrRunnerHandle *)(void *)&test_snes,
           "runner ABI initial bind");
+    check(cpu_provider_bind_count == 1 &&
+              execution_provider_bind_count == 1 &&
+              ppu_service_bind_count == 1 && trace_bind_count == 1,
+          "runner-owned service publication");
     check(reset_count == 1, "hard reset after ROM load");
     check(g_snes_cpu == &test_cpu && g_ppu == &test_ppu && g_dma == &test_dma,
           "device publication");
@@ -303,6 +479,49 @@ static void test_registration_and_initialization(void) {
           g_sram_size == 0x2000, "cartridge memory publication");
     check(!test_cpu.e && test_cpu.sp == 0x01ffu && !test_cpu.mf &&
           !test_cpu.xf && test_cpu.i, "native-mode bootstrap");
+
+    check(RtlGameFrameBegin() == 0 && test_snes.forceNmi &&
+              test_snes.nmiAvail,
+          "direct game-frame begin adapter");
+    check(RtlGameFrameComplete(UINT32_C(0x80000000)) == -1 &&
+              test_snes.forceNmi,
+          "invalid game-frame completion preserves timing state");
+    test_snes.inNmi = true;
+    test_snes.nmiEnabled = false;
+    check(RtlGameFrameComplete(
+              RTL_GAME_FRAME_DISPATCH_NMI_IF_ENABLED) == 0 &&
+              !test_snes.forceNmi && test_snes.inNmi,
+          "disabled NMI gate reports no new transition");
+    test_snes.nmiEnabled = true;
+    check(RtlGameFrameComplete(
+              RTL_GAME_FRAME_DISPATCH_NMI_IF_ENABLED) ==
+                  RTL_GAME_FRAME_NMI_ENTERED &&
+              test_snes.inNmi,
+          "enabled NMI gate reports transition");
+    test_snes.inNmi = false;
+    test_snes.nmiEnabled = false;
+
+    test_ppu.inidisp = 0x8fu;
+    test_ppu.bgmode = 0x17u;
+    test_ppu.screenEnabled[0] = 0x15u;
+    test_ppu.screenEnabled[1] = 0x0au;
+    {
+        const uint32_t display = RtlGamePpuDisplayState();
+        check(RTL_GAME_PPU_DISPLAY_CONTROL(display) == 0x8fu &&
+                  RTL_GAME_PPU_BG_MODE_CONTROL(display) == 0x17u &&
+                  RTL_GAME_PPU_MAIN_SCREEN(display) == 0x15u &&
+                  RTL_GAME_PPU_SUB_SCREEN(display) == 0x0au,
+              "direct PPU display-state adapter");
+    }
+    {
+        const SrPpuFramePolicy policy = {
+            .struct_size = sizeof(policy),
+            .horizontal_mode = SR_PPU_HORIZONTAL_MARGIN_CENTERED,
+        };
+        check(RtlGameApplyPpuFramePolicy(&policy) == SR_RESULT_OK &&
+                  ppu_frame_policy_count == 1,
+              "direct PPU frame-policy adapter");
+    }
 
     test_spc.x = 0x12u;
     g_apu_spc_dsp_write_hook(&test_apu, 0x74u, 0x09u);
@@ -354,7 +573,7 @@ static void test_registration_and_initialization(void) {
     check(free_count == 1, "reinitialization releases previous runner");
     check(initialize_count == 2, "ROM-free callback");
     check(abi_bind_count == 2 && abi_unbind_count == 1 &&
-              abi_bound_runner == &test_snes,
+              abi_bound_runner == (SrRunnerHandle *)(void *)&test_snes,
           "runner ABI rebind");
     check(ppu_reset_count == 1 && dma_reset_count == 1,
           "ROM-free device resets");
@@ -373,19 +592,46 @@ static void test_registration_and_initialization(void) {
           "failed initialization clears published state");
     load_rom_success = true;
 
+    initialize_success = false;
+    check(SnesInit(test_rom, (int)sizeof(test_rom)) == NULL,
+          "game initialization failure is reported");
+    check(free_count == 4 && initialize_count == 3 &&
+              abi_bind_count == 4 && abi_unbind_count == 4,
+          "failed game initialization revokes runner services");
+    initialize_success = true;
+
     check(SnesInit(test_rom, (int)sizeof(test_rom)) == &test_snes,
           "runner can initialize after failure");
     SnesShutdown();
-    check(free_count == 4 && g_snes == NULL,
+    check(free_count == 5 && g_snes == NULL,
           "explicit shutdown is idempotent and clears runner");
-    check(abi_bind_count == 4 && abi_unbind_count == 4 &&
+    check(RtlGamePpuDisplayState() == 0u,
+          "PPU display-state adapter is safe without a runner");
+    {
+        const SrPpuFramePolicy policy = {
+            .struct_size = sizeof(policy),
+            .horizontal_mode = SR_PPU_HORIZONTAL_MARGIN_CENTERED,
+        };
+        check(RtlGameApplyPpuFramePolicy(&policy) == SR_RESULT_UNAVAILABLE &&
+                  ppu_frame_policy_count == 1,
+              "PPU frame-policy adapter is safe without a runner");
+    }
+    check(abi_bind_count == 5 && abi_unbind_count == 5 &&
               abi_bound_runner == NULL,
           "runner ABI shutdown revoke");
+    check(cpu_provider_bind_count == 5 && cpu_provider_unbind_count == 5 &&
+              execution_provider_bind_count == 5 &&
+              execution_provider_unbind_count == 5 &&
+              ppu_service_bind_count == 5 &&
+              ppu_service_unbind_count == 5 &&
+              trace_bind_count == 5 && trace_unbind_count == 5,
+          "runner-owned services are symmetrically revoked");
     SnesShutdown();
-    check(free_count == 4, "repeated shutdown is harmless");
+    check(free_count == 5, "repeated shutdown is harmless");
 
     RtlAudioExtensionConfigure(false);
-    RtlRegisterGame(&info);
+    check(RtlRegisterGame(&module) == SR_RESULT_OK,
+          "game module re-registration");
     check(!extended_voices_enabled &&
               g_apu_spc_dsp_write_filter_hook == NULL &&
               g_spc_opcode_patch_hook == NULL &&
