@@ -146,31 +146,8 @@ static const SrPpuSurfaceView *DioramaPpuSurface(
 
 static const SrPpuSurfaceView *Sim3DPpuSurface(
     const FrameSlot *slot, int plane) {
-  if (!slot) return NULL;
-  switch (plane) {
-    case kSim3DPlane_Bg3Low:
-      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG3][0];
-    case kSim3DPlane_Obj0:
-      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][0];
-    case kSim3DPlane_Obj1:
-      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][1];
-    case kSim3DPlane_Bg2Low:
-      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG2][0];
-    case kSim3DPlane_Bg1Low:
-      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG1][0];
-    case kSim3DPlane_Obj2:
-      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][2];
-    case kSim3DPlane_Bg2High:
-      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG2][1];
-    case kSim3DPlane_Bg1High:
-      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG1][1];
-    case kSim3DPlane_Obj3:
-      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][3];
-    case kSim3DPlane_Bg3High:
-      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG3][1];
-    default:
-      return NULL;
-  }
+  return slot && plane >= 0 && plane < kSim3DPlane_Count
+      ? &slot->sim3d_output_surfaces.planes[plane] : NULL;
 }
 
 static void CaptureDioramaPpuSurfaces(
@@ -929,7 +906,10 @@ void PresentUpload(const FrameSlot *slot) {
       if (rows < split_rows) rows = split_rows;
       SDL_Rect hud = { 0, 0, slot->snes_width, rows };
       const SrPpuSurfaceView *surface = BoundPpuSurface(
-          &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG3][0]);
+          &slot->sim3d_output_surfaces.hud_bg);
+      if (!surface)
+        surface = BoundPpuSurface(
+            &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG3][0]);
       if (PpuSurfaceHolds(surface, hud.w, hud.h))
         UploadChangedSurface(
             g_hud_bg_texture,
@@ -942,7 +922,10 @@ void PresentUpload(const FrameSlot *slot) {
       if (rows < split_rows) rows = split_rows;
       SDL_Rect hud = { 0, 0, slot->snes_width, rows };
       const SrPpuSurfaceView *surface = BoundPpuSurface(
-          &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][0]);
+          &slot->sim3d_output_surfaces.hud_obj);
+      if (!surface)
+        surface = BoundPpuSurface(
+            &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][0]);
       if (PpuSurfaceHolds(surface, hud.w, hud.h))
         UploadChangedSurface(
             g_hud_obj_texture,
@@ -1502,10 +1485,10 @@ static void DrawActionDioramaPlaneEffect(
       !diorama_projection || !EffectRendererAvailable())
     return;
   uint8_t render_layer;
-  if (plane == kPpuOverlaySource_Bg1 &&
+  if (plane == SR_PPU_OVERLAY_BG1 &&
       diorama_projection->bg1_plane.valid) {
     render_layer = kActionEffectRenderLayer_Bg1Plane;
-  } else if (plane == kPpuOverlaySource_Bg2 &&
+  } else if (plane == SR_PPU_OVERLAY_BG2 &&
              diorama_projection->bg2_plane.valid) {
     render_layer = kActionEffectRenderLayer_Bg2Plane;
   } else if (plane == kDioramaPlane_Bg1Hi &&

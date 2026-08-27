@@ -9,7 +9,6 @@
 
 #include "music_replacements.h"
 #include "hd_replacements.h"
-#include "snes/ppu.h"
 #include "settings.h"
 
 static int g_failures;
@@ -23,22 +22,11 @@ static int g_failures;
 /* ---- stubs -------------------------------------------------------------- */
 
 uint8 g_ram[0x20000];
-Ppu *g_ppu; /* NULL: music gates must still work for wram operands */
 Settings g_settings;
 
-bool PpuSetOverlayCapture(Ppu *ppu, PpuOverlaySource source, int x, int y,
-                          int width, int height, uint8_t flags) {
-  (void)ppu; (void)source; (void)x; (void)y; (void)width; (void)height;
-  (void)flags;
-  return true;
-}
-
-bool PpuSetMode7Override(Ppu *ppu, const uint32_t *rgba, int width,
-                         int height, int canvas_x0, int canvas_y0,
-                         int canvas_x1, int canvas_y1, uint8_t wrap) {
-  (void)ppu; (void)rgba; (void)width; (void)height; (void)canvas_x0;
-  (void)canvas_y0; (void)canvas_x1; (void)canvas_y1; (void)wrap;
-  return true;
+const SnesRunnerApi *sr_runner_get_api(uint32_t requested_abi_version) {
+  (void)requested_abi_version;
+  return NULL; /* WRAM-only music gates do not require a live PPU. */
 }
 
 /* Engine seams music_replacements.c binds against. */

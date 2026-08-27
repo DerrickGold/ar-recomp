@@ -66,6 +66,14 @@ static void TestOnlyExplicitLimitOwnsFrameLimitInterval(void) {
             Options(kRefreshMode_Vsync, 60, 60, false)) == 0);
 }
 
+static void TestAllowedFramesInFlightPolicy(void) {
+  CHECK(HostDisplayPacing_AllowedFramesInFlight(kRefreshMode_Vsync) == 1);
+  CHECK(HostDisplayPacing_AllowedFramesInFlight(kRefreshMode_Uncapped) == 2);
+  CHECK(HostDisplayPacing_AllowedFramesInFlight(kRefreshMode_Limit) == 2);
+  CHECK(HostDisplayPacing_AllowedFramesInFlight(kRefreshMode_Unlimited) == 2);
+  CHECK(HostDisplayPacing_AllowedFramesInFlight(kRefreshMode_Count) == 1);
+}
+
 static void TestUiAndPausedIntervals(void) {
   const HostDisplayPacingOptions vsync_144 =
       Options(kRefreshMode_Vsync, 60, 144, false);
@@ -291,6 +299,7 @@ int main(void) {
   TestInterpolationSourceCadence();
   TestExplicitFrameLimits();
   TestOnlyExplicitLimitOwnsFrameLimitInterval();
+  TestAllowedFramesInFlightPolicy();
   TestUiAndPausedIntervals();
   TestGamePresentAntiSpinFloor();
   TestCompletedPresentRate();

@@ -101,7 +101,7 @@ int main(void) {
   CHECK(region.x == kApron && region.width == kDisplayWidth &&
         region.height == kHeight);
   CHECK(DioramaPlaneCaptureRegion_Resolve(
-      kPpuOverlaySource_Obj, kSurfaceWidth, kHeight, kApron, &region));
+      SR_PPU_OVERLAY_OBJ, kSurfaceWidth, kHeight, kApron, &region));
   CHECK(region.x == 0 && region.width == kSurfaceWidth &&
         region.height == kHeight);
   if (!SDL_Init(SDL_INIT_VIDEO) && RequireProductionGpuRenderer()) {

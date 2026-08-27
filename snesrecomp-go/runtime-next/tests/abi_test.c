@@ -307,9 +307,37 @@ int main(void) {
     SrPpuStateSnapshot small_ppu_state = {sizeof(uint32_t), 0u};
     SrPpuFrameSnapshot ppu_frame = {sizeof(ppu_frame), 0u};
     SrPpuFrameSnapshot small_ppu_frame = {sizeof(uint32_t), 0u};
+    SrPpuBackgroundCoordinateRequest coordinate_request = {
+        .struct_size = sizeof(coordinate_request),
+        .layer = 0u,
+        .screen_x = -1,
+        .screen_y = 9,
+    };
+    SrPpuBackgroundCoordinateResult coordinate_result = {
+        sizeof(coordinate_result), 0u};
+    SrPpuBackgroundCoordinateResult small_coordinate_result = {
+        sizeof(uint32_t), 0u};
     SrPpuSurfaceSnapshot ppu_surfaces = {sizeof(ppu_surfaces), 0u};
     SrPpuSurfaceSnapshot rebound_surfaces = {sizeof(rebound_surfaces), 0u};
     SrPpuSurfaceSnapshot small_ppu_surfaces = {sizeof(uint32_t), 0u};
+    SrPpuOutputBindingRequest output_binding = {
+        .struct_size = sizeof(output_binding),
+    };
+    SrPpuHorizontalMarginRequest margin_request = {
+        .struct_size = sizeof(margin_request),
+    };
+    SrPpuOverlayCaptureRequest capture_request = {
+        .struct_size = sizeof(capture_request),
+    };
+    SrPpuMode7OverrideRequest mode7_override_request = {
+        .struct_size = sizeof(mode7_override_request),
+    };
+    SrCpuMathState math_state = {
+        .struct_size = sizeof(math_state),
+    };
+    SrCpuMathState small_math_state = {
+        .struct_size = sizeof(uint32_t),
+    };
     uint32_t obj_pixels[8u * 8u];
     SrPpuObjRasterRequest obj_request = {
         .struct_size = sizeof(obj_request),
@@ -339,59 +367,88 @@ int main(void) {
                     "span size is not the first field");
     failed |= check(offsetof(SrGenerationSnapshot, struct_size) == 0u,
                     "generation size is not the first field");
-    failed |= check(SR_BORROWED_SPAN_V1_SIZE <= sizeof(SrBorrowedSpan),
-                    "span v1 size exceeds structure");
-    failed |= check(SR_GENERATION_SNAPSHOT_V1_SIZE <=
+    failed |= check(sizeof(SrPpuObjPart) == 8u &&
+                        offsetof(SrPpuObjPart, tile_attr) == 4u &&
+                        offsetof(SrPpuObjPart, reserved) == 7u,
+                    "PPU OBJ value descriptor layout mismatch");
+    failed |= check(SR_BORROWED_SPAN_V2_SIZE <= sizeof(SrBorrowedSpan),
+                    "span v2 size exceeds structure");
+    failed |= check(SR_GENERATION_SNAPSHOT_V2_SIZE <=
                         sizeof(SrGenerationSnapshot),
-                    "generation v1 size exceeds structure");
-    failed |= check(SNES_RUNNER_API_V1_SIZE <= sizeof(SnesRunnerApi),
-                    "API v1 size exceeds structure");
-    failed |= check(SR_CPU_STATE_SNAPSHOT_V1_SIZE <=
+                    "generation v2 size exceeds structure");
+    failed |= check(SNES_RUNNER_API_V2_BASE_SIZE <= sizeof(SnesRunnerApi),
+                    "API v2 base size exceeds structure");
+    failed |= check(SR_CPU_STATE_SNAPSHOT_V2_SIZE <=
                         sizeof(SrCpuStateSnapshot),
-                    "CPU snapshot v1 size exceeds structure");
+                    "CPU snapshot v2 size exceeds structure");
     failed |= check(SNES_RUNNER_API_CPU_STATE_SIZE <= sizeof(SnesRunnerApi),
                     "CPU API extent exceeds structure");
-    failed |= check(SR_BORROWED_U16_SPAN_V1_SIZE <=
+    failed |= check(SR_BORROWED_U16_SPAN_V2_SIZE <=
                         sizeof(SrBorrowedU16Span),
-                    "u16 span v1 size exceeds structure");
-    failed |= check(SR_PPU_STATE_SNAPSHOT_V1_SIZE <=
-                        sizeof(SrPpuStateSnapshot),
-                    "PPU snapshot v1 size exceeds structure");
+                    "u16 span v2 size exceeds structure");
+    failed |= check(SR_PPU_STATE_SNAPSHOT_V2_SIZE <=
+                            sizeof(SrPpuStateSnapshot),
+                    "PPU snapshot v2 extent mismatch");
     failed |= check(SNES_RUNNER_API_PPU_STATE_SIZE <= sizeof(SnesRunnerApi),
                     "PPU API extent exceeds structure");
-    failed |= check(SR_PPU_FRAME_SNAPSHOT_V1_SIZE <=
+    failed |= check(SR_PPU_FRAME_SNAPSHOT_V2_SIZE <=
                         sizeof(SrPpuFrameSnapshot),
-                    "PPU frame snapshot v1 size exceeds structure");
+                    "PPU frame snapshot v2 size exceeds structure");
     failed |= check(SNES_RUNNER_API_PPU_FRAME_STATE_SIZE <=
                         sizeof(SnesRunnerApi),
                     "PPU frame API extent exceeds structure");
-    failed |= check(SR_PPU_OBJ_RASTER_REQUEST_V1_SIZE <=
+    failed |= check(SR_PPU_BACKGROUND_COORDINATE_REQUEST_V2_SIZE <=
+                            sizeof(SrPpuBackgroundCoordinateRequest) &&
+                        SR_PPU_BACKGROUND_COORDINATE_RESULT_V2_SIZE <=
+                            sizeof(SrPpuBackgroundCoordinateResult) &&
+                        SNES_RUNNER_API_PPU_BACKGROUND_COORDINATE_SIZE <=
+                            sizeof(SnesRunnerApi),
+                    "PPU background coordinate extent exceeds structure");
+    failed |= check(SR_PPU_OBJ_RASTER_REQUEST_V2_SIZE <=
                         sizeof(SrPpuObjRasterRequest) &&
-                        SR_PPU_OBJ_RASTER_RESULT_V1_SIZE <=
+                        SR_PPU_OBJ_RASTER_RESULT_V2_SIZE <=
                             sizeof(SrPpuObjRasterResult),
                     "PPU OBJ raster extent exceeds structure");
     failed |= check(SNES_RUNNER_API_PPU_OBJ_RASTER_SIZE <=
                         sizeof(SnesRunnerApi),
                     "PPU OBJ raster API extent exceeds structure");
-    failed |= check(SR_PPU_SURFACE_SNAPSHOT_V1_SIZE <=
+    failed |= check(SR_PPU_SURFACE_SNAPSHOT_V2_SIZE <=
                         sizeof(SrPpuSurfaceSnapshot),
                     "PPU surface snapshot extent exceeds structure");
     failed |= check(SNES_RUNNER_API_PPU_SURFACE_SIZE <=
                         sizeof(SnesRunnerApi),
                     "PPU surface API extent exceeds structure");
-    failed |= check(SR_EXECUTION_SNAPSHOT_V1_SIZE <=
+    failed |= check(SR_PPU_OUTPUT_BINDING_REQUEST_V2_SIZE <=
+                            sizeof(SrPpuOutputBindingRequest) &&
+                        SR_PPU_HORIZONTAL_MARGIN_REQUEST_V2_SIZE <=
+                            sizeof(SrPpuHorizontalMarginRequest) &&
+                        SNES_RUNNER_API_PPU_OUTPUT_CONTROL_SIZE <=
+                            sizeof(SnesRunnerApi),
+                    "PPU output control extent exceeds structure");
+    failed |= check(SR_PPU_OVERLAY_CAPTURE_REQUEST_V2_SIZE <=
+                            sizeof(SrPpuOverlayCaptureRequest) &&
+                        SR_PPU_MODE7_OVERRIDE_REQUEST_V2_SIZE <=
+                            sizeof(SrPpuMode7OverrideRequest) &&
+                        SNES_RUNNER_API_PPU_CAPTURE_CONTROL_SIZE <=
+                            sizeof(SnesRunnerApi),
+                    "PPU capture control extent exceeds structure");
+    failed |= check(SR_CPU_MATH_STATE_V2_SIZE <= sizeof(SrCpuMathState) &&
+                        SNES_RUNNER_API_CPU_MATH_STATE_SIZE <=
+                            sizeof(SnesRunnerApi),
+                    "CPU math state extent exceeds structure");
+    failed |= check(SR_EXECUTION_SNAPSHOT_V2_SIZE <=
                         sizeof(SrExecutionSnapshot),
                     "execution snapshot extent exceeds structure");
-    failed |= check(SR_RUNNER_EVENT_V1_SIZE <= sizeof(SrRunnerEvent) &&
-                        SR_EVENT_SUBSCRIPTION_V1_SIZE <=
+    failed |= check(SR_RUNNER_EVENT_V2_SIZE <= sizeof(SrRunnerEvent) &&
+                        SR_EVENT_SUBSCRIPTION_V2_SIZE <=
                             sizeof(SrEventSubscription),
                     "event observer structure extent exceeds structure");
     failed |= check(SNES_RUNNER_API_EVENT_OBSERVER_SIZE <=
                         sizeof(SnesRunnerApi),
                     "event observer API extent exceeds structure");
-    failed |= check(SR_MUTATION_COMMAND_V1_SIZE <=
+    failed |= check(SR_MUTATION_COMMAND_V2_SIZE <=
                         sizeof(SrMutationCommand) &&
-                        SR_MUTATION_STATUS_V1_SIZE <=
+                        SR_MUTATION_STATUS_V2_SIZE <=
                             sizeof(SrMutationStatus),
                     "safe-point mutation extent exceeds structure");
     failed |= check(SNES_RUNNER_API_SAFE_POINT_MUTATION_SIZE <=
@@ -401,6 +458,8 @@ int main(void) {
                     "span size is not fixed width");
     failed |= check(sr_runner_get_api(SR_RUNNER_ABI_VERSION + 1u) == NULL,
                     "unsupported API version accepted");
+    failed |= check(sr_runner_get_api(1u) == NULL,
+                    "retired ABI v1 accepted");
     failed |= check(api != NULL, "API is null");
     if (api == NULL) return 1;
     failed |= check(api->abi_version == SR_RUNNER_ABI_VERSION,
@@ -414,17 +473,25 @@ int main(void) {
                     "borrow capability missing");
     failed |= check((api->capabilities & SR_RUNNER_CAP_CPU_STATE) != 0u,
                     "CPU state capability missing");
+    failed |= check((api->capabilities & SR_RUNNER_CAP_CPU_MATH_STATE) != 0u,
+                    "CPU math state capability missing");
     failed |= check((api->capabilities &
                          (SR_RUNNER_CAP_PPU_STATE |
                           SR_RUNNER_CAP_BORROWED_U16_SPANS |
                           SR_RUNNER_CAP_PPU_FRAME_STATE |
                           SR_RUNNER_CAP_PPU_OBJ_RASTER |
-                          SR_RUNNER_CAP_PPU_SURFACE_VIEWS)) ==
+                          SR_RUNNER_CAP_PPU_SURFACE_VIEWS |
+                          SR_RUNNER_CAP_PPU_BACKGROUND_COORDINATE |
+                          SR_RUNNER_CAP_PPU_OUTPUT_CONTROL |
+                          SR_RUNNER_CAP_PPU_CAPTURE_CONTROL)) ==
                         (SR_RUNNER_CAP_PPU_STATE |
                          SR_RUNNER_CAP_BORROWED_U16_SPANS |
                          SR_RUNNER_CAP_PPU_FRAME_STATE |
                          SR_RUNNER_CAP_PPU_OBJ_RASTER |
-                         SR_RUNNER_CAP_PPU_SURFACE_VIEWS),
+                         SR_RUNNER_CAP_PPU_SURFACE_VIEWS |
+                         SR_RUNNER_CAP_PPU_BACKGROUND_COORDINATE |
+                         SR_RUNNER_CAP_PPU_OUTPUT_CONTROL |
+                         SR_RUNNER_CAP_PPU_CAPTURE_CONTROL),
                     "PPU capabilities missing");
     failed |= check((api->capabilities &
                          (SR_RUNNER_CAP_EXECUTION_STATE |
@@ -445,7 +512,17 @@ int main(void) {
     snes->ppu->bgmode = 0x19u;
     snes->ppu->mosaic = 0x31u;
     snes->ppu->bgXsc[0] = 0x63u;
+    snes->ppu->bgXsc[1] = 0x54u;
+    snes->ppu->bgXsc[2] = 0x45u;
+    snes->ppu->bgXsc[3] = 0x36u;
     snes->ppu->bgTileAdr = 0x0005u;
+    snes->ppu->m7sel = 0xc3u;
+    for (unsigned matrix = 0u; matrix < 8u; ++matrix)
+        snes->ppu->m7matrix[matrix] = (int16_t)(0x1100u + matrix);
+    snes->ppu->windowsel = 0x91u;
+    snes->ppu->wbgobjlog = 0x82u;
+    snes->ppu->cgwsel = 0x73u;
+    snes->ppu->cgadsub = 0x64u;
     snes->ppu->hScroll[0] = 0x1234u;
     snes->ppu->vScroll[0] = 0x2345u;
     snes->ppu->screenEnabled[0] = 0x17u;
@@ -466,6 +543,8 @@ int main(void) {
     snes->ppu->wsHudPlayerRowY = 8u;
     snes->ppu->wsHudLeftOnlyY = 16u;
     snes->ppu->extraLeftRight = 48u;
+    PpuSetWidescreenLayerMirror(snes->ppu, 0x01u);
+    PpuSetWidescreenLayerRepeatBand(snes->ppu, 1u, 20u, 21u);
     snes->ppu->overlayCaptures[0].x0 = -12;
     snes->ppu->overlayCaptures[0].x1 = 268;
     snes->ppu->overlayCaptures[0].y0 = -4;
@@ -595,6 +674,20 @@ int main(void) {
                         ppu_state.backgrounds[0].tile_size_pixels == 16u &&
                         ppu_state.backgrounds[0].bits_per_pixel == 4u,
                     "PPU background snapshot mismatch");
+    failed |= check(ppu_state.struct_size == SR_PPU_STATE_SNAPSHOT_V2_SIZE &&
+                        ppu_state.window_select == 0x91u &&
+                        ppu_state.window_logic == 0x82u &&
+                        ppu_state.color_math_control == 0x73u &&
+                        ppu_state.color_math_designation == 0x64u &&
+                        ppu_state.background_tilemap_control[0] == 0x63u &&
+                        ppu_state.background_tilemap_control[1] == 0x54u &&
+                        ppu_state.background_tilemap_control[2] == 0x45u &&
+                        ppu_state.background_tilemap_control[3] == 0x36u &&
+                        ppu_state.background_tile_base_control == 0x0005u &&
+                        ppu_state.mode7_select == 0xc3u &&
+                        ppu_state.mode7_matrix[0] == 0x1100 &&
+                        ppu_state.mode7_matrix[7] == 0x1107,
+                    "PPU v2 raw-control snapshot mismatch");
     failed |= check(api->query_ppu_state(runner, &small_ppu_state) ==
                         SR_RESULT_INVALID_ARGUMENT,
                     "undersized PPU snapshot accepted");
@@ -633,26 +726,121 @@ int main(void) {
                         SR_RESULT_INVALID_ARGUMENT,
                     "undersized PPU frame snapshot accepted");
 
-    PpuBeginDrawing(snes->ppu, (uint8_t *)s_main_surface,
-                    384u * sizeof(uint32_t), 0u);
-    failed |= check(PpuBindAuthenticSurface(
-                        snes->ppu, (uint8_t *)s_authentic_surface,
-                        384u * sizeof(uint32_t)),
-                    "authentic surface bind failed");
-    failed |= check(PpuBindOverlaySurface(
-                        snes->ppu, kPpuOverlaySource_Bg1,
-                        (uint8_t *)s_overlay_surface,
-                        384u * sizeof(uint32_t)),
-                    "overlay surface bind failed");
-    failed |= check(PpuBindOverlayPrioSurface(
-                        snes->ppu, kPpuOverlaySource_Bg1, 1,
-                        (uint8_t *)s_overlay_band_surface),
-                    "overlay band surface bind failed");
+    coordinate_request.lifetime_generation =
+        ppu_state.lifetime_generation;
+    failed |= check(api->resolve_ppu_background_coordinate(
+                        runner, &coordinate_request, &coordinate_result) ==
+                            SR_RESULT_OK &&
+                        coordinate_result.struct_size ==
+                            SR_PPU_BACKGROUND_COORDINATE_RESULT_V2_SIZE &&
+                        coordinate_result.flags ==
+                            (SR_PPU_BACKGROUND_COORDINATE_MAPPED |
+                             SR_PPU_BACKGROUND_COORDINATE_MOSAIC) &&
+                        coordinate_result.source_x == 4 &&
+                        coordinate_result.sample_y == 8 &&
+                        coordinate_result.fill ==
+                            SR_PPU_BACKGROUND_FILL_MIRROR &&
+                        coordinate_result.motion ==
+                            SR_PPU_BACKGROUND_MOTION_FILL_RELATIVE,
+                    "PPU mirrored mosaic coordinate mismatch");
+    coordinate_request.layer = 1u;
+    coordinate_request.screen_x = 260;
+    coordinate_request.screen_y = 20;
+    coordinate_result.struct_size = sizeof(coordinate_result);
+    failed |= check(api->resolve_ppu_background_coordinate(
+                        runner, &coordinate_request, &coordinate_result) ==
+                            SR_RESULT_OK &&
+                        coordinate_result.flags ==
+                            (SR_PPU_BACKGROUND_COORDINATE_MAPPED |
+                             SR_PPU_BACKGROUND_COORDINATE_BAND_OVERRIDE) &&
+                        coordinate_result.source_x == 4 &&
+                        coordinate_result.sample_y == 21 &&
+                        coordinate_result.fill ==
+                            SR_PPU_BACKGROUND_FILL_REPEAT,
+                    "PPU repeat-band coordinate mismatch");
+    failed |= check(api->resolve_ppu_background_coordinate(
+                        runner, &coordinate_request,
+                        &small_coordinate_result) ==
+                            SR_RESULT_INVALID_ARGUMENT,
+                    "undersized PPU coordinate result accepted");
+    coordinate_request.lifetime_generation++;
+    coordinate_result.struct_size = sizeof(coordinate_result);
+    failed |= check(api->resolve_ppu_background_coordinate(
+                        runner, &coordinate_request, &coordinate_result) ==
+                            SR_RESULT_STALE_VIEW,
+                    "stale PPU coordinate request accepted");
+    coordinate_request.lifetime_generation--;
+    coordinate_request.screen_x =
+        (int32_t)(SR_PPU_NATIVE_WIDTH + SR_PPU_HORIZONTAL_MARGIN_MAX);
+    coordinate_result.struct_size = sizeof(coordinate_result);
+    failed |= check(api->resolve_ppu_background_coordinate(
+                        runner, &coordinate_request, &coordinate_result) ==
+                            SR_RESULT_INVALID_ARGUMENT,
+                    "out-of-range PPU coordinate accepted");
+
+    output_binding = (SrPpuOutputBindingRequest) {
+        .struct_size = sizeof(output_binding),
+        .flags = SR_PPU_OUTPUT_REFERENCE_PIXEL_RENDERER,
+        .kind = SR_PPU_OUTPUT_MAIN,
+        .pixels = (uint8_t *)s_main_surface,
+        .pixel_byte_size = sizeof(s_main_surface),
+        .pitch_bytes = 384u * sizeof(uint32_t),
+        .height_pixels = 253u,
+    };
+    failed |= check(api->bind_ppu_output_surface(
+                        runner, &output_binding) == SR_RESULT_OK &&
+                        snes->ppu->renderFlags ==
+                            kPpuRenderFlags_ReferencePixelRenderer,
+                    "main output surface bind failed");
+    output_binding = (SrPpuOutputBindingRequest) {
+        .struct_size = sizeof(output_binding),
+        .kind = SR_PPU_OUTPUT_AUTHENTIC,
+        .pixels = (uint8_t *)s_authentic_surface,
+        .pixel_byte_size = sizeof(s_authentic_surface),
+        .pitch_bytes = 384u * sizeof(uint32_t),
+        .height_pixels = 253u,
+    };
+    failed |= check(api->bind_ppu_output_surface(
+                        runner, &output_binding) == SR_RESULT_OK,
+                    "authentic output surface bind failed");
+    output_binding = (SrPpuOutputBindingRequest) {
+        .struct_size = sizeof(output_binding),
+        .kind = SR_PPU_OUTPUT_OVERLAY,
+        .source = SR_PPU_OVERLAY_BG1,
+        .pixels = (uint8_t *)s_overlay_surface,
+        .pixel_byte_size = sizeof(s_overlay_surface),
+        .pitch_bytes = 384u * sizeof(uint32_t),
+        .height_pixels = 232u,
+    };
+    failed |= check(api->bind_ppu_output_surface(
+                        runner, &output_binding) == SR_RESULT_OK,
+                    "overlay output surface bind failed");
+    output_binding = (SrPpuOutputBindingRequest) {
+        .struct_size = sizeof(output_binding),
+        .kind = SR_PPU_OUTPUT_OVERLAY_PRIORITY,
+        .source = SR_PPU_OVERLAY_BG1,
+        .band = 1u,
+        .pixels = (uint8_t *)s_overlay_band_surface,
+        .pixel_byte_size = sizeof(s_overlay_band_surface),
+        .pitch_bytes = 384u * sizeof(uint32_t),
+        .height_pixels = 232u,
+    };
+    failed |= check(api->bind_ppu_output_surface(
+                        runner, &output_binding) == SR_RESULT_OK,
+                    "overlay priority output surface bind failed");
     snes->ppu->overlayRenderContentMask[0] = 3u;
-    failed |= check(PpuBindMode7OverlaySurface(
-                        snes->ppu, (uint8_t *)s_mode7_surface,
-                        768u * sizeof(uint32_t), 2u),
-                    "Mode-7 surface bind failed");
+    output_binding = (SrPpuOutputBindingRequest) {
+        .struct_size = sizeof(output_binding),
+        .kind = SR_PPU_OUTPUT_MODE7,
+        .scale = 2u,
+        .pixels = (uint8_t *)s_mode7_surface,
+        .pixel_byte_size = sizeof(s_mode7_surface),
+        .pitch_bytes = 768u * sizeof(uint32_t),
+        .height_pixels = 506u,
+    };
+    failed |= check(api->bind_ppu_output_surface(
+                        runner, &output_binding) == SR_RESULT_OK,
+                    "Mode-7 output surface bind failed");
     failed |= check(api->query_ppu_surfaces(runner, &ppu_surfaces) ==
                         SR_RESULT_OK,
                     "PPU surface query failed");
@@ -692,6 +880,17 @@ int main(void) {
                          SR_PPU_SURFACE_HAS_CONTENT) != 0u &&
                         ppu_surfaces.overlays[1][0].data == NULL,
                     "overlay PPU surface mismatch");
+    /* Presentation may restore a short HUD capture after a full separated
+     * plane was rendered. The bound buffer capacity, not that later policy,
+     * remains the readable surface extent. */
+    memset(&snes->ppu->overlayCaptures[0], 0,
+           sizeof(snes->ppu->overlayCaptures[0]));
+    ppu_surfaces.struct_size = sizeof(ppu_surfaces);
+    failed |= check(api->query_ppu_surfaces(runner, &ppu_surfaces) ==
+                            SR_RESULT_OK &&
+                        ppu_surfaces.overlays[0][0].height_pixels == 232u &&
+                        ppu_surfaces.overlays[0][1].height_pixels == 232u,
+                    "restored capture truncated bound overlay capacity");
     failed |= check(ppu_surfaces.mode7.data ==
                             (const uint8_t *)s_mode7_surface &&
                         ppu_surfaces.mode7.width_pixels == 768u &&
@@ -708,11 +907,18 @@ int main(void) {
     failed |= check(api->query_ppu_surfaces(runner, &small_ppu_surfaces) ==
                         SR_RESULT_INVALID_ARGUMENT,
                     "undersized PPU surface snapshot accepted");
-    failed |= check(PpuBindOverlaySurface(
-                        snes->ppu, kPpuOverlaySource_Bg1,
-                        (uint8_t *)s_overlay_surface,
-                        384u * sizeof(uint32_t)),
-                    "overlay surface rebind failed");
+    output_binding = (SrPpuOutputBindingRequest) {
+        .struct_size = sizeof(output_binding),
+        .kind = SR_PPU_OUTPUT_OVERLAY,
+        .source = SR_PPU_OVERLAY_BG1,
+        .pixels = (uint8_t *)s_overlay_surface,
+        .pixel_byte_size = sizeof(s_overlay_surface),
+        .pitch_bytes = 384u * sizeof(uint32_t),
+        .height_pixels = 232u,
+    };
+    failed |= check(api->bind_ppu_output_surface(
+                        runner, &output_binding) == SR_RESULT_OK,
+                    "overlay output surface rebind failed");
     failed |= check(!api->ppu_surface_snapshot_is_valid(
                         runner, &ppu_surfaces),
                     "surface rebind did not expire PPU surface snapshot");
@@ -721,6 +927,132 @@ int main(void) {
                         api->ppu_surface_snapshot_is_valid(
                             runner, &rebound_surfaces),
                     "PPU surface snapshot requery failed");
+    output_binding.struct_size = sizeof(uint32_t);
+    failed |= check(api->bind_ppu_output_surface(
+                        runner, &output_binding) ==
+                            SR_RESULT_INVALID_ARGUMENT,
+                    "undersized PPU output binding accepted");
+    output_binding.struct_size = sizeof(output_binding);
+    output_binding.lifetime_generation++;
+    failed |= check(api->bind_ppu_output_surface(
+                        runner, &output_binding) == SR_RESULT_STALE_VIEW,
+                    "stale PPU output binding accepted");
+    output_binding.lifetime_generation--;
+    output_binding.pixel_byte_size--;
+    failed |= check(api->bind_ppu_output_surface(
+                        runner, &output_binding) ==
+                            SR_RESULT_INVALID_ARGUMENT,
+                    "undersized PPU output capacity accepted");
+    output_binding.pixel_byte_size++;
+
+    margin_request.mode = SR_PPU_HORIZONTAL_MARGIN_CENTERED;
+    margin_request.budget_pixels = 64u;
+    failed |= check(api->configure_ppu_horizontal_margin(
+                        runner, &margin_request) == SR_RESULT_OK &&
+                        snes->ppu->extraLeftRight == 64u &&
+                        snes->ppu->extraLeftCur == 0u &&
+                        snes->ppu->extraRightCur == 0u,
+                    "centered PPU margin configuration failed");
+    failed |= check(!api->ppu_surface_snapshot_is_valid(
+                        runner, &rebound_surfaces),
+                    "PPU margin change did not expire surface snapshot");
+    rebound_surfaces.struct_size = sizeof(rebound_surfaces);
+    failed |= check(api->query_ppu_surfaces(runner, &rebound_surfaces) ==
+                        SR_RESULT_OK,
+                    "PPU surface query after margin change failed");
+    failed |= check(api->configure_ppu_horizontal_margin(
+                        runner, &margin_request) == SR_RESULT_OK &&
+                        api->ppu_surface_snapshot_is_valid(
+                            runner, &rebound_surfaces),
+                    "unchanged PPU margin expired surface snapshot");
+    margin_request.budget_pixels = SR_PPU_HORIZONTAL_MARGIN_MAX + 1u;
+    failed |= check(api->configure_ppu_horizontal_margin(
+                        runner, &margin_request) ==
+                            SR_RESULT_INVALID_ARGUMENT,
+                    "out-of-range PPU margin accepted");
+    margin_request.budget_pixels = 48u;
+    margin_request.mode = SR_PPU_HORIZONTAL_MARGIN_AVAILABLE;
+    failed |= check(api->configure_ppu_horizontal_margin(
+                        runner, &margin_request) == SR_RESULT_OK &&
+                        snes->ppu->extraLeftRight == 48u &&
+                        snes->ppu->extraLeftCur == 48u &&
+                        snes->ppu->extraRightCur == 48u,
+                    "available PPU margin configuration failed");
+
+    output_binding = (SrPpuOutputBindingRequest) {
+        .struct_size = sizeof(output_binding),
+        .kind = SR_PPU_OUTPUT_CLEAR_OVERLAY_SOURCES,
+    };
+    failed |= check(api->bind_ppu_output_surface(
+                        runner, &output_binding) == SR_RESULT_OK &&
+                        snes->ppu->overlayRenderBuffer[0] == NULL &&
+                        snes->ppu->overlayRenderBands[0][0] == NULL,
+                    "PPU overlay clear failed");
+
+    capture_request = (SrPpuOverlayCaptureRequest) {
+        .struct_size = sizeof(capture_request),
+        .flags = SR_PPU_OVERLAY_REMOVE_FROM_GAME |
+                 SR_PPU_OVERLAY_MARK_MAIN_SCREEN_WINNER,
+        .source = SR_PPU_OVERLAY_BG2,
+        .x = -8,
+        .y = 4,
+        .width = 120,
+        .height = 32,
+    };
+    failed |= check(api->claim_ppu_overlay_capture(
+                        runner, &capture_request) == SR_RESULT_OK &&
+                        snes->ppu->overlayCaptures[SR_PPU_OVERLAY_BG2].x0 ==
+                            -8 &&
+                        snes->ppu->overlayCaptures[SR_PPU_OVERLAY_BG2].x1 ==
+                            112 &&
+                        snes->ppu->overlayCaptures[SR_PPU_OVERLAY_BG2].flags ==
+                            (SR_PPU_OVERLAY_REMOVE_FROM_GAME |
+                             SR_PPU_OVERLAY_MARK_MAIN_SCREEN_WINNER),
+                    "PPU overlay capture claim failed");
+    failed |= check(api->claim_ppu_overlay_capture(
+                        runner, &capture_request) == SR_RESULT_BUSY,
+                    "busy PPU overlay capture claim accepted");
+    capture_request.lifetime_generation++;
+    failed |= check(api->claim_ppu_overlay_capture(
+                        runner, &capture_request) == SR_RESULT_STALE_VIEW,
+                    "stale PPU overlay capture claim accepted");
+    capture_request.lifetime_generation--;
+    capture_request.flags = UINT32_MAX;
+    failed |= check(api->claim_ppu_overlay_capture(
+                        runner, &capture_request) ==
+                            SR_RESULT_INVALID_ARGUMENT,
+                    "invalid PPU overlay capture flags accepted");
+
+    mode7_override_request = (SrPpuMode7OverrideRequest) {
+        .struct_size = sizeof(mode7_override_request),
+        .pixels = s_mode7_surface,
+        .pixel_byte_size = 4u * sizeof(uint32_t),
+        .width_pixels = 2u,
+        .height_pixels = 2u,
+        .canvas_x0 = 10,
+        .canvas_y0 = 20,
+        .canvas_x1 = 30,
+        .canvas_y1 = 40,
+        .wrap = 1u,
+    };
+    failed |= check(api->claim_ppu_mode7_override(
+                        runner, &mode7_override_request) == SR_RESULT_OK &&
+                        snes->ppu->m7Override.rgba == s_mode7_surface &&
+                        snes->ppu->m7Override.width == 2 &&
+                        snes->ppu->m7Override.height == 2 &&
+                        snes->ppu->m7Override.canvasX0 == 10 &&
+                        snes->ppu->m7Override.canvasY1 == 40 &&
+                        snes->ppu->m7Override.wrap == 1u,
+                    "PPU Mode-7 override claim failed");
+    failed |= check(api->claim_ppu_mode7_override(
+                        runner, &mode7_override_request) == SR_RESULT_BUSY,
+                    "busy PPU Mode-7 override claim accepted");
+    snes->ppu->m7Override.rgba = NULL;
+    mode7_override_request.pixel_byte_size--;
+    failed |= check(api->claim_ppu_mode7_override(
+                        runner, &mode7_override_request) ==
+                            SR_RESULT_INVALID_ARGUMENT,
+                    "undersized PPU Mode-7 image accepted");
 
     snes->ppu->inidisp = 0x0fu;
     snes->ppu->obsel = 0u;
@@ -1137,7 +1469,7 @@ int main(void) {
                         dispatch_observer.count == 0u &&
                         block_observer.runner == runner &&
                         block_observer.event.struct_size ==
-                            SR_RUNNER_EVENT_V1_SIZE &&
+                            SR_RUNNER_EVENT_V2_SIZE &&
                         block_observer.event.serial != 0u &&
                         block_observer.event.frame_counter == 7u &&
                         block_observer.event.pc24 == 0x100123u &&
@@ -1266,7 +1598,7 @@ int main(void) {
                         runner, memory_mutation_id, 0u,
                         &mutation_status) == SR_RESULT_OK &&
                         mutation_status.struct_size ==
-                            SR_MUTATION_STATUS_V1_SIZE &&
+                            SR_MUTATION_STATUS_V2_SIZE &&
                         mutation_status.state == SR_MUTATION_STATE_QUEUED &&
                         mutation_status.result == SR_RESULT_PENDING &&
                         mutation_status.command_id == memory_mutation_id &&
@@ -1327,6 +1659,39 @@ int main(void) {
                         runner, memory_subscription_id) == SR_RESULT_OK &&
                         g_sr_runner_event_mask == 0u,
                     "mutation observer cleanup failed");
+
+    snes->multiplyA = 0x12u;
+    snes->multiplyResult = 0x3456u;
+    snes->divideA = 0x789au;
+    snes->divideResult = 0xbcdeu;
+    failed |= check(api->query_cpu_math_state(runner, &math_state) ==
+                            SR_RESULT_OK &&
+                        math_state.struct_size == SR_CPU_MATH_STATE_V2_SIZE &&
+                        math_state.lifetime_generation ==
+                            snes->abiLifetimeGeneration &&
+                        math_state.multiply_operand == 0x12u &&
+                        math_state.multiply_or_remainder_result == 0x3456u &&
+                        math_state.divide_dividend == 0x789au &&
+                        math_state.divide_quotient == 0xbcdeu,
+                    "CPU math state query mismatch");
+    failed |= check(api->query_cpu_math_state(runner, &small_math_state) ==
+                        SR_RESULT_INVALID_ARGUMENT,
+                    "undersized CPU math state output accepted");
+    snes->multiplyA = 1u;
+    snes->multiplyResult = 2u;
+    snes->divideA = 3u;
+    snes->divideResult = 4u;
+    failed |= check(api->restore_cpu_math_state(runner, &math_state) ==
+                            SR_RESULT_OK &&
+                        snes->multiplyA == 0x12u &&
+                        snes->multiplyResult == 0x3456u &&
+                        snes->divideA == 0x789au &&
+                        snes->divideResult == 0xbcdeu,
+                    "CPU math state restore mismatch");
+    failed |= check_generation(api, runner, 9u, 2u, 1u, 1u, 5u);
+    failed |= check(api->restore_cpu_math_state(runner, &math_state) ==
+                        SR_RESULT_STALE_VIEW,
+                    "stale CPU math state restore accepted");
 
     sr_runner_set_cpu_state_provider(snes, NULL, NULL);
     sr_runner_set_execution_state_provider(snes, NULL);

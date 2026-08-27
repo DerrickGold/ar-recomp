@@ -474,11 +474,11 @@ static bool WriteMetadata(const char *directory,
 
 static bool SceneAssetDumpSource_IsCoherent(
     const SceneAssetDumpSource *source) {
-  if (!source || source->ppu.struct_size < SR_PPU_STATE_SNAPSHOT_V1_SIZE ||
-      source->vram.struct_size < SR_BORROWED_U16_SPAN_V1_SIZE ||
-      source->cgram.struct_size < SR_BORROWED_U16_SPAN_V1_SIZE ||
-      source->oam.struct_size < SR_BORROWED_U16_SPAN_V1_SIZE ||
-      source->high_oam.struct_size < SR_BORROWED_SPAN_V1_SIZE ||
+  if (!source || source->ppu.struct_size < SR_PPU_STATE_SNAPSHOT_V2_SIZE ||
+      source->vram.struct_size < SR_BORROWED_U16_SPAN_V2_SIZE ||
+      source->cgram.struct_size < SR_BORROWED_U16_SPAN_V2_SIZE ||
+      source->oam.struct_size < SR_BORROWED_U16_SPAN_V2_SIZE ||
+      source->high_oam.struct_size < SR_BORROWED_SPAN_V2_SIZE ||
       source->vram.region != SR_MEMORY_VRAM ||
       source->cgram.region != SR_MEMORY_CGRAM ||
       source->oam.region != SR_MEMORY_OAM ||
@@ -492,7 +492,7 @@ static bool SceneAssetDumpSource_IsCoherent(
       !source->high_oam.data ||
       source->high_oam.byte_size < SR_PPU_HIGH_OAM_BYTE_COUNT ||
       (source->wram.data &&
-       (source->wram.struct_size < SR_BORROWED_SPAN_V1_SIZE ||
+       (source->wram.struct_size < SR_BORROWED_SPAN_V2_SIZE ||
         source->wram.region != SR_MEMORY_WRAM ||
         source->wram.byte_size < kActRaiserWramSize)) ||
       source->ppu.object_size_select >= 8u)

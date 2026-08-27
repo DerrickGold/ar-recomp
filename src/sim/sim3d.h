@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "runner_next.h"
 #include "sim3d_planes.h"
 #include "sim_render_metadata.h"
 #include "types.h"
@@ -48,6 +49,17 @@ enum {
   kSim3DMaxHeight = 240,
 };
 
+/* A separated SIM frame has two simultaneous host products: the full plane
+ * set temporarily bound for scanout and the ordinary HUD buffers rebuilt
+ * afterward. The runner's current-binding snapshot cannot name both, so the
+ * game producer publishes these immutable, host-owned views beside its frame
+ * metadata. */
+typedef struct Sim3DOutputSurfaceViews {
+  SrPpuSurfaceView planes[kSim3DPlane_Count];
+  SrPpuSurfaceView hud_bg;
+  SrPpuSurfaceView hud_obj;
+} Sim3DOutputSurfaceViews;
+
 /* Raw capture buffers are game-thread-written until PresentUpload completes.
  * Each plane is allocated lazily on first demand and never reallocated. */
 extern uint32_t *g_sim3d_layer_pixels[kSim3DPlane_Count];
@@ -75,6 +87,8 @@ bool Sim3D_BeginFrame(void);
 bool Sim3D_PrepareCapture(Ppu *ppu, const Sim3DCaptureRequest *request);
 
 Sim3DCaptureContractFailure Sim3D_GetCaptureContractFailure(void);
+
+void Sim3D_CaptureOutputSurfaceViews(Sim3DOutputSurfaceViews *views);
 
 /* Rebuilds the pitch-zero image after scanout only when the flat stage or a
  * diagnostic consumer needs it. Diagnostic modes also compare it against the
@@ -172,9 +186,14 @@ typedef struct Sim3DTuning {
 void Sim3D_AnnotateFrame(SimFrameData *frame, const Sim3DTuning *tuning);
 /* Re-renders the whole town's ground from the resident WRAM tilemap plus
  * live VRAM/CGRAM. Call once per game frame, after Sim3D_AnnotateFrame; a
- * frame without a usable separated capture is skipped. */
+ * frame without a usable separated capture is skipped. The predicate keeps
+ * all ABI queries out of those skipped frames. The caller retains ownership;
+ * the renderer neither copies nor stores the borrowed spans. */
+bool Sim3D_TownCanvasNeedsPpuView(const SimFrameData *frame);
 void Sim3D_RenderTownCanvas(const SimFrameData *frame, const uint8 *wram,
-                            const Ppu *ppu);
+                            const SrPpuStateSnapshot *ppu,
+                            const SrBorrowedU16Span *vram,
+                            const SrBorrowedU16Span *cgram);
 /* Pure painter-order reference used by focused tests. `plane_mask==0` means
  * every plane; otherwise bit P controls Sim3DPlane P. */
 void Sim3D_ComposeFlatPixels(

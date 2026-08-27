@@ -20,12 +20,9 @@
 #include "presentation_frame_generation.h"
 #include "run_dir.h"
 #include "runner_next.h"
-#include "runner_next_internal.h"
 #include "scene_asset_dump.h"
 #include "scene_inspector.h"
 #include "settings.h"
-#include "snes/ppu.h"
-#include "snes/snes.h"
 
 enum {
   kArgbBytesPerPixel = 4,
@@ -84,18 +81,17 @@ void DevTools_FormatInspectorInfo(const DevToolsContext *context,
            ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY),
            ActRaiser_ReadWram16(kActRaiserWram_Bg1Width),
            ActRaiser_ReadWram16(kActRaiserWram_Bg1Height),
-           context->ppu ? PPU_mode(context->ppu) : 0,
-           context->ppu ? context->ppu->screenEnabled[0] : 0,
-           context->ppu ? context->ppu->screenEnabled[1] : 0,
+           context->ppu_snapshot_valid ? context->ppu_state.bg_mode : 0,
+           context->ppu_snapshot_valid ? context->ppu_state.main_screen : 0,
+           context->ppu_snapshot_valid ? context->ppu_state.sub_screen : 0,
            music);
 }
 
 bool DevTools_DumpSceneAssets(const DevToolsContext *context) {
   const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
-  SrRunnerHandle *runner = sr_runner_handle(g_snes);
   SceneAssetDumpSource source;
   SrCpuStateSnapshot cpu = {sizeof(cpu), 0u};
-  if (!context || !api || !runner ||
+  if (!context || !api || !context->runner ||
       api->struct_size < SNES_RUNNER_API_PPU_STATE_SIZE ||
       (api->capabilities &
        (SR_RUNNER_CAP_BORROWED_BYTE_SPANS |
@@ -112,17 +108,19 @@ bool DevTools_DumpSceneAssets(const DevToolsContext *context) {
   source.oam.struct_size = sizeof(source.oam);
   source.high_oam.struct_size = sizeof(source.high_oam);
   source.wram.struct_size = sizeof(source.wram);
-  if (api->query_cpu_state(runner, &cpu) != SR_RESULT_OK ||
-      api->query_ppu_state(runner, &source.ppu) != SR_RESULT_OK ||
-      api->borrow_u16_memory(runner, SR_MEMORY_VRAM, &source.vram) !=
+  if (api->query_cpu_state(context->runner, &cpu) != SR_RESULT_OK ||
+      api->query_ppu_state(context->runner, &source.ppu) != SR_RESULT_OK ||
+      api->borrow_u16_memory(context->runner, SR_MEMORY_VRAM, &source.vram) !=
           SR_RESULT_OK ||
-      api->borrow_u16_memory(runner, SR_MEMORY_CGRAM, &source.cgram) !=
+      api->borrow_u16_memory(context->runner, SR_MEMORY_CGRAM, &source.cgram) !=
           SR_RESULT_OK ||
-      api->borrow_u16_memory(runner, SR_MEMORY_OAM, &source.oam) !=
+      api->borrow_u16_memory(context->runner, SR_MEMORY_OAM, &source.oam) !=
           SR_RESULT_OK ||
-      api->borrow_memory(runner, SR_MEMORY_HIGH_OAM, &source.high_oam) !=
+      api->borrow_memory(context->runner, SR_MEMORY_HIGH_OAM,
+                         &source.high_oam) !=
           SR_RESULT_OK ||
-      api->borrow_memory(runner, SR_MEMORY_WRAM, &source.wram) != SR_RESULT_OK)
+      api->borrow_memory(context->runner, SR_MEMORY_WRAM, &source.wram) !=
+          SR_RESULT_OK)
     return false;
   static unsigned dump_number;
   const unsigned game_frame =
@@ -261,14 +259,14 @@ void DevTools_DumpDioramaLayers(const DevToolsContext *context) {
     int source;
     const char *name;
   } layers[] = {
-    {kPpuOverlaySource_Bg1, "bg1"},
+    {SR_PPU_OVERLAY_BG1, "bg1"},
     {kDioramaPlane_Bg1Hi, "bg1_hi"},
     {kDioramaPlane_Bg1Far, "bg1_virtual"},
-    {kPpuOverlaySource_Bg2, "bg2"},
+    {SR_PPU_OVERLAY_BG2, "bg2"},
     {kDioramaPlane_Bg2Hi, "bg2_hi"},
     {kDioramaPlane_Bg2Far, "bg2_virtual"},
-    {kPpuOverlaySource_Bg3, "bg3"},
-    {kPpuOverlaySource_Obj, "obj_p0"},
+    {SR_PPU_OVERLAY_BG3, "bg3"},
+    {SR_PPU_OVERLAY_OBJ, "obj_p0"},
     {kDioramaPlane_Obj1, "obj_p1"},
     {kDioramaPlane_Obj2, "obj_p2"},
     {kDioramaPlane_Obj3, "obj_p3"},
@@ -351,7 +349,8 @@ static bool HudChunkPixelVisible(const DevToolsContext *context,
           ? context->hud_obj_pixels
           : context->hud_bg_pixels;
   const int texture_x =
-      source_x + (context->snes_width - kPpuXPixels) / 2;
+      source_x +
+          (context->snes_width - (int)SR_PPU_NATIVE_WIDTH) / 2;
   if (!pixels || texture_x < 0 || texture_x >= context->snes_width ||
       source_y < 0 || source_y >= context->snes_height)
     return false;
@@ -372,16 +371,16 @@ static void FillLiveHudProjectionInputs(const DevToolsContext *context,
   inputs->snes_width = context->snes_width;
   inputs->snes_height = context->snes_height;
   inputs->visible_width = Settings_VisibleWidth();
-  if (!context->ppu) return;
+  if (!context->ppu_snapshot_valid) return;
 
-  inputs->hud_split_height = context->ppu->wsHudSplitHeight;
-  inputs->hud_left_end = context->ppu->wsHudLeftEnd;
-  inputs->hud_right_start = context->ppu->wsHudRightStart;
-  inputs->hud_player_row_y = context->ppu->wsHudPlayerRowY;
-  inputs->hud_left_only_y = context->ppu->wsHudLeftOnlyY;
-  inputs->extra_left_right = context->ppu->extraLeftRight;
-  const PpuOverlayCapture *bg3_capture =
-      &context->ppu->overlayCaptures[kPpuOverlaySource_Bg3];
+  inputs->hud_split_height = context->ppu_frame.hud_split_height;
+  inputs->hud_left_end = context->ppu_frame.hud_left_end;
+  inputs->hud_right_start = context->ppu_frame.hud_right_start;
+  inputs->hud_player_row_y = context->ppu_frame.hud_player_row_y;
+  inputs->hud_left_only_y = context->ppu_frame.hud_left_only_y;
+  inputs->extra_left_right = context->ppu_frame.margin_budget;
+  const SrPpuOverlayState *bg3_capture =
+      &context->ppu_frame.overlays[SR_PPU_OVERLAY_BG3];
   if (bg3_capture->y1 > (int16_t)inputs->hud_split_height &&
       bg3_capture->y1 <= kHostDisplayFramebufferHeight)
     inputs->hud_body_y1 = (uint8_t)bg3_capture->y1;
@@ -393,11 +392,17 @@ static void FillLiveHudProjectionInputs(const DevToolsContext *context,
    * hit-test disagree with what was actually drawn. */
   uint8_t icon_first = 0, icon_count = 0;
   ActRaiser_HudObjIconRange(&icon_first, &icon_count);
-  if (icon_count) {
+  if (icon_count && context->oam.data && context->high_oam.data) {
     const int first = icon_first;
-    inputs->obj_icon_x = (context->ppu->oam[first * 2] & 0xff) |
-        ((context->ppu->highOam[first >> 2] >> ((first & 3) * 2)) & 1) << 8;
-    inputs->obj_icon_y = context->ppu->oam[first * 2] >> 8;
+    const uint64_t oam_word = (uint64_t)first * 2u;
+    const uint64_t high_oam_byte = (uint64_t)first >> 2;
+    if (oam_word >= context->oam.element_count ||
+        high_oam_byte >= context->high_oam.byte_size)
+      return;
+    inputs->obj_icon_x = (context->oam.data[oam_word] & 0xff) |
+        ((context->high_oam.data[high_oam_byte] >>
+          ((first & 3) * 2)) & 1) << 8;
+    inputs->obj_icon_y = context->oam.data[oam_word] >> 8;
     inputs->obj_icon_valid = true;
   }
 }

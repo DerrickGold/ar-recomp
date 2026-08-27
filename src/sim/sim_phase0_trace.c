@@ -5,7 +5,6 @@
 #include <string.h>
 
 #include "actraiser_game.h"
-#include "snes/ppu.h"
 
 typedef struct SimPhase0TraceKey {
   uint16 game_frame;
@@ -72,24 +71,28 @@ void SimPhase0Trace_InitFromEnvironment(void) {
   fprintf(stderr, "[sim3d-phase0] state trace -> %s\n", path);
 }
 
-static void WriteCaptureArray(FILE *out, const Ppu *ppu) {
+static void WriteCaptureArray(FILE *out, const SrPpuFrameSnapshot *frame) {
   fputs("[", out);
-  for (int source = 0; source < kPpuOverlaySource_Count; source++) {
-    const PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
+  for (unsigned source = 0; source < SR_PPU_OVERLAY_SOURCE_COUNT; source++) {
+    const SrPpuOverlayState *capture = &frame->overlays[source];
     if (source) fputc(',', out);
     fprintf(out,
-            "{\"source\":%d,\"x0\":%d,\"y0\":%d,\"x1\":%d,"
+            "{\"source\":%u,\"x0\":%d,\"y0\":%d,\"x1\":%d,"
             "\"y1\":%d,\"flags\":%u,\"oam_first\":%u,"
             "\"oam_count\":%u}",
             source, capture->x0, capture->y0, capture->x1, capture->y1,
-            (unsigned)capture->flags, (unsigned)capture->oamFirst,
-            (unsigned)capture->oamCount);
+            (unsigned)capture->flags, (unsigned)capture->oam_first,
+            (unsigned)capture->oam_count);
   }
   fputs("]", out);
 }
 
 void SimPhase0Trace_Frame(uint32 host_frame, const uint8 *wram,
-                          const Ppu *ppu) {
+                          SrRunnerHandle *runner) {
+  const SnesRunnerApi *api;
+  SrPpuStateSnapshot ppu = {.struct_size = sizeof(ppu)};
+  SrPpuFrameSnapshot frame = {.struct_size = sizeof(frame)};
+  bool have_ppu = false;
   SimPhase0Trace_InitFromEnvironment();
   if (!g_sim_phase0_trace || !wram) return;
 
@@ -97,6 +100,16 @@ void SimPhase0Trace_Frame(uint32 host_frame, const uint8 *wram,
   uint8 map_number = wram[kActRaiserWram_CurrentMap];
   bool town = ActRaiser_IsSimulationTown(map_group, map_number);
   if (!town && !g_sim_phase0_prior_town) return;
+
+  api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+  if (runner != NULL && api != NULL &&
+      (api->capabilities & (SR_RUNNER_CAP_PPU_STATE |
+                            SR_RUNNER_CAP_PPU_FRAME_STATE)) ==
+          (SR_RUNNER_CAP_PPU_STATE | SR_RUNNER_CAP_PPU_FRAME_STATE) &&
+      api->struct_size >= SNES_RUNNER_API_PPU_FRAME_STATE_SIZE &&
+      api->query_ppu_state(runner, &ppu) == SR_RESULT_OK &&
+      api->query_ppu_frame_state(runner, &frame) == SR_RESULT_OK)
+    have_ppu = true;
 
   SimPhase0TraceKey key = {
     .game_frame = ReadMirror16(wram, kActRaiserWram_GameFrame),
@@ -106,11 +119,11 @@ void SimPhase0Trace_Frame(uint32 host_frame, const uint8 *wram,
     .miracle_kind = ReadMirror16(wram, kActRaiserWram_SimMiracleKind),
     .map_group = map_group,
     .map_number = map_number,
-    .bgmode = ppu ? ppu->bgmode : 0,
-    .screen_main = ppu ? ppu->screenEnabled[0] : 0,
-    .screen_sub = ppu ? ppu->screenEnabled[1] : 0,
-    .cgwsel = ppu ? ppu->cgwsel : 0,
-    .cgadsub = ppu ? ppu->cgadsub : 0,
+    .bgmode = have_ppu ? ppu.bg_mode_control : 0,
+    .screen_main = have_ppu ? ppu.main_screen : 0,
+    .screen_sub = have_ppu ? ppu.sub_screen : 0,
+    .cgwsel = have_ppu ? ppu.color_math_control : 0,
+    .cgadsub = have_ppu ? ppu.color_math_designation : 0,
   };
   if (g_sim_phase0_key_valid && TraceKeysEqual(&key, &g_sim_phase0_key)) {
     g_sim_phase0_prior_town = town;
@@ -151,7 +164,7 @@ void SimPhase0Trace_Frame(uint32 host_frame, const uint8 *wram,
           (unsigned)ReadMirror16(wram, kActRaiserWram_Bg1CameraX),
           (unsigned)ReadMirror16(wram, kActRaiserWram_Bg1CameraY));
 
-  if (!ppu) {
+  if (!have_ppu) {
     fputs("\"ppu\":null}\n", g_sim_phase0_trace);
     fflush(g_sim_phase0_trace);
     return;
@@ -166,20 +179,26 @@ void SimPhase0Trace_Frame(uint32 host_frame, const uint8 *wram,
           "\"bg_sc\":[%u,%u,%u,%u],\"bg_tile_adr\":%u,"
           "\"hscroll\":[%u,%u,%u,%u],"
           "\"vscroll\":[%u,%u,%u,%u],\"captures\":",
-          (unsigned)ppu->bgmode, (unsigned)ppu->inidisp,
-          (unsigned)ppu->windowsel, (unsigned)ppu->wbgobjlog,
-          (unsigned)ppu->screenEnabled[0], (unsigned)ppu->screenEnabled[1],
-          (unsigned)ppu->screenWindowed[0],
-          (unsigned)ppu->screenWindowed[1],
-          (unsigned)ppu->cgwsel, (unsigned)ppu->cgadsub,
-          (unsigned)ppu->bgXsc[0], (unsigned)ppu->bgXsc[1],
-          (unsigned)ppu->bgXsc[2], (unsigned)ppu->bgXsc[3],
-          (unsigned)ppu->bgTileAdr,
-          (unsigned)ppu->hScroll[0], (unsigned)ppu->hScroll[1],
-          (unsigned)ppu->hScroll[2], (unsigned)ppu->hScroll[3],
-          (unsigned)ppu->vScroll[0], (unsigned)ppu->vScroll[1],
-          (unsigned)ppu->vScroll[2], (unsigned)ppu->vScroll[3]);
-  WriteCaptureArray(g_sim_phase0_trace, ppu);
+          (unsigned)ppu.bg_mode_control, (unsigned)ppu.display_control,
+          (unsigned)ppu.window_select, (unsigned)ppu.window_logic,
+          (unsigned)ppu.main_screen, (unsigned)ppu.sub_screen,
+          (unsigned)ppu.main_windowed, (unsigned)ppu.sub_windowed,
+          (unsigned)ppu.color_math_control,
+          (unsigned)ppu.color_math_designation,
+          (unsigned)ppu.background_tilemap_control[0],
+          (unsigned)ppu.background_tilemap_control[1],
+          (unsigned)ppu.background_tilemap_control[2],
+          (unsigned)ppu.background_tilemap_control[3],
+          (unsigned)ppu.background_tile_base_control,
+          (unsigned)ppu.backgrounds[0].h_scroll,
+          (unsigned)ppu.backgrounds[1].h_scroll,
+          (unsigned)ppu.backgrounds[2].h_scroll,
+          (unsigned)ppu.backgrounds[3].h_scroll,
+          (unsigned)ppu.backgrounds[0].v_scroll,
+          (unsigned)ppu.backgrounds[1].v_scroll,
+          (unsigned)ppu.backgrounds[2].v_scroll,
+          (unsigned)ppu.backgrounds[3].v_scroll);
+  WriteCaptureArray(g_sim_phase0_trace, &frame);
   fputs("}}\n", g_sim_phase0_trace);
   fflush(g_sim_phase0_trace);
 }

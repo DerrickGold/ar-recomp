@@ -505,7 +505,7 @@ static void CheckLayerEditorSection(void) {
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   room = DioramaLayerOrder_Find(&s_fake_layer_table, s_fake_group, s_fake_map);
   const DioramaPlaneOverride *filled =
-      room ? &room->planes[kPpuOverlaySource_Bg2] : NULL;
+      room ? &room->planes[SR_PPU_OVERLAY_BG2] : NULL;
   CHECK(filled && filled->set_transparent_fill);
   CHECK(filled && filled->transparent_fill_kind ==
                       kDioramaTransparentFill_Cgram);
@@ -537,8 +537,8 @@ static void CheckLayerEditorSection(void) {
       &s_fake_layer_table, s_fake_group, s_fake_map);
   CHECK(base != NULL);
   if (base) {
-    base->planes[kPpuOverlaySource_Bg2].set_transparent_fill = true;
-    base->planes[kPpuOverlaySource_Bg2].transparent_fill_kind =
+    base->planes[SR_PPU_OVERLAY_BG2].set_transparent_fill = true;
+    base->planes[SR_PPU_OVERLAY_BG2].transparent_fill_kind =
         kDioramaTransparentFill_Black;
   }
   RowToKey("bg2");
@@ -548,15 +548,15 @@ static void CheckLayerEditorSection(void) {
   scoped = DioramaLayerOrder_FindSection(
       &s_fake_layer_table, s_fake_group, s_fake_map, s_fake_section);
   CHECK(scoped &&
-        scoped->planes[kPpuOverlaySource_Bg2].set_transparent_fill);
+        scoped->planes[SR_PPU_OVERLAY_BG2].set_transparent_fill);
   CHECK(scoped &&
-        scoped->planes[kPpuOverlaySource_Bg2].transparent_fill_kind ==
+        scoped->planes[SR_PPU_OVERLAY_BG2].transparent_fill_kind ==
             kDioramaTransparentFill_None);
   DioramaTransparentFill effective_fill = kDioramaTransparentFill_Black;
   uint8_t effective_cgram = 0xff;
   CHECK(DioramaLayerOrder_ResolveTransparentFill(
       &s_fake_layer_table, s_fake_group, s_fake_map, s_fake_section,
-      kPpuOverlaySource_Bg2, &effective_fill, &effective_cgram));
+      SR_PPU_OVERLAY_BG2, &effective_fill, &effective_cgram));
   CHECK(effective_fill == kDioramaTransparentFill_None);
   RowToKey("layer_reset_room");
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
@@ -1335,7 +1335,7 @@ int main(void) {
     if (preview_room) {
       DioramaLayerEditor_SetStrategy(&preview_room->planes[kDioramaPlane_Bg2Hi],
                                      kDioramaDepth_Stack);
-      DioramaLayerEditor_SetStrategy(&preview_room->planes[kPpuOverlaySource_Bg1],
+      DioramaLayerEditor_SetStrategy(&preview_room->planes[SR_PPU_OVERLAY_BG1],
                                      kDioramaDepth_Rake);
     }
   }

@@ -8,9 +8,9 @@
 bool Diorama_PlaneEligible(int plane, bool visible, bool has_texture,
                            bool has_pixels, bool hud_flat, bool skybox_only) {
   if (!visible || !has_texture || !has_pixels) return false;
-  if (plane == kPpuOverlaySource_Bg3 && hud_flat) return false;
+  if (plane == SR_PPU_OVERLAY_BG3 && hud_flat) return false;
   if (skybox_only &&
-      (plane == kPpuOverlaySource_Bg2 ||
+      (plane == SR_PPU_OVERLAY_BG2 ||
        plane == kDioramaPlane_Bg2Hi ||
        plane == kDioramaPlane_Bg2Far ||
        plane == kDioramaPlane_Backdrop))
@@ -23,8 +23,8 @@ bool Diorama_PlaneProjectable(int plane, bool visible, bool has_texture,
                               bool hud_flat, bool skybox_only) {
   const bool accepts_attached_effect =
       DioramaPlaneIsObjectPriority(plane) ||
-      plane == kPpuOverlaySource_Bg1 ||
-      plane == kPpuOverlaySource_Bg2 ||
+      plane == SR_PPU_OVERLAY_BG1 ||
+      plane == SR_PPU_OVERLAY_BG2 ||
       plane == kDioramaPlane_Bg1Hi;
   const bool has_effect_content =
       has_attached_effect && accepts_attached_effect;
@@ -57,8 +57,8 @@ uint32_t Diorama_FilterBgEffectProjectionMask(
     uint32_t required_planes, uint32_t requested_planes,
     uint32_t content_planes, uint32_t uploaded_planes) {
   const uint32_t valid_planes =
-      (1u << kPpuOverlaySource_Bg1) |
-      (1u << kPpuOverlaySource_Bg2) |
+      (1u << SR_PPU_OVERLAY_BG1) |
+      (1u << SR_PPU_OVERLAY_BG2) |
       (1u << kDioramaPlane_Bg1Hi);
   const uint32_t failed_content = content_planes & ~uploaded_planes;
   return required_planes & valid_planes & requested_planes & ~failed_content;

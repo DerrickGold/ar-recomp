@@ -2,6 +2,7 @@
 #define HD_REPLACEMENTS_H
 
 #include <stdbool.h>
+#include "runner_next.h"
 #include "types.h"
 
 /* Manifest-driven HD graphics replacements (game-assets/manifest.ini).
@@ -90,6 +91,10 @@ extern int g_hd_replacement_count;
 /* Parse a manifest. Returns the number of entries loaded; 0 with no error
  * output if the file simply does not exist. Safe to call once at startup. */
 int HdReplacements_Load(const char *path);
+
+/* The game adapter publishes the active opaque runner for gate queries and
+ * synchronous capture claims, and clears it before runner destruction. */
+void HdReplacements_BindRunner(SrRunnerHandle *runner);
 
 /* The gate mini-language is shared with the music manifest sections
  * (music_replacements.c): one comparison term / one full comma-separated

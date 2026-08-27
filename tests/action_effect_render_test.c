@@ -957,8 +957,8 @@ static void TestCurrentActorEffectsRequestExactObjPlanes(void) {
   CHECK(ActionEffectProjection_RequiredObjPriorityMask(NULL, &scene) ==
         ((1u << 0) | (1u << 2) | (1u << 3)));
   CHECK(ActionEffectProjection_RequiredBgPlaneMask(&spells, &scene) ==
-        ((1u << kPpuOverlaySource_Bg1) |
-         (1u << kPpuOverlaySource_Bg2) |
+        ((1u << SR_PPU_OVERLAY_BG1) |
+         (1u << SR_PPU_OVERLAY_BG2) |
          (1u << kDioramaPlane_Bg1Hi)));
 
   /* A malformed actor list fails closed as a unit, without suppressing the
@@ -968,8 +968,8 @@ static void TestCurrentActorEffectsRequestExactObjPlanes(void) {
   CHECK(ActionEffectProjection_RequiredObjPriorityMask(&spells, &scene) ==
         (1u << 2));
   CHECK(ActionEffectProjection_RequiredBgPlaneMask(NULL, &scene) ==
-        ((1u << kPpuOverlaySource_Bg1) |
-         (1u << kPpuOverlaySource_Bg2) |
+        ((1u << SR_PPU_OVERLAY_BG1) |
+         (1u << SR_PPU_OVERLAY_BG2) |
          (1u << kDioramaPlane_Bg1Hi)));
   scene.decoration_overflow = 1;
   CHECK(ActionEffectProjection_RequiredBgPlaneMask(NULL, &scene) == 0);
@@ -978,8 +978,8 @@ static void TestCurrentActorEffectsRequestExactObjPlanes(void) {
   scene.effect_count = kActionSceneEffectMaxInstances + 1;
   CHECK(ActionEffectProjection_RequiredObjPriorityMask(NULL, &scene) == 0);
   CHECK(ActionEffectProjection_RequiredBgPlaneMask(NULL, &scene) ==
-        ((1u << kPpuOverlaySource_Bg1) |
-         (1u << kPpuOverlaySource_Bg2) |
+        ((1u << SR_PPU_OVERLAY_BG1) |
+         (1u << SR_PPU_OVERLAY_BG2) |
          (1u << kDioramaPlane_Bg1Hi)));
 }
 

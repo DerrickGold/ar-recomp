@@ -8,7 +8,7 @@
 #include "constants.h"
 #include "hd_replacements.h"
 #include "diorama/diorama.h"
-#include "sim/sim_render_metadata.h"
+#include "sim/sim3d.h"
 #include "action/action_effects.h"
 #include "action/action_bg_plan.h"
 #include "presentation_frame_generation.h"
@@ -35,7 +35,7 @@ enum {
   kFrameSlotOverlay_Bg3 = 2,
   kFrameSlotOverlay_Bg4 = 3,
   kFrameSlotOverlay_Obj = 4,
-  kFrameSlotOverlaySourceCount = 5,  /* kPpuOverlaySource_Count */
+  kFrameSlotOverlaySourceCount = 5,  /* SR_PPU_OVERLAY_SOURCE_COUNT */
   /* Mirrors ppu.h's allocated layer-texture axes for the same D6 reason as the
    * overlay enum above: present-time code must not include ppu.h. Width is the
    * full surface (PPU buffer plus resolve aprons); height is the authentic 224
@@ -110,6 +110,9 @@ typedef struct FrameSlot {
    * remain valid through synchronous upload and retained re-presents between
    * ticks, but never across a runner tick/reset/load or PPU surface rebind. */
   SrPpuSurfaceSnapshot ppu_surfaces;
+  /* Application-owned products that coexist with, rather than replace, the
+   * PPU's current host bindings during separated SIM capture. */
+  Sim3DOutputSurfaceViews sim3d_output_surfaces;
 
   /* Geometry, resolved (D3 — never call Settings_Visible*()/live globals from
    * present-time code; these are the already-resolved results). */

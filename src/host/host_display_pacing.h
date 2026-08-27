@@ -36,6 +36,11 @@ void HostDisplayPacing_RecordPresent(
 double HostDisplayPacing_FramesPerSecond(
     const HostDisplayFpsCounter *counter);
 
+/* Keep VSync latency to one queued frame. Software-paced and unlimited modes
+ * need two so the GPU renderer can overlap submission with the preceding
+ * frame instead of serializing each SDL_RenderPresent. */
+uint32_t HostDisplayPacing_AllowedFramesInFlight(RefreshMode refresh_mode);
+
 uint64_t HostDisplayPacing_FrameLimitIntervalNs(
     HostDisplayPacingOptions options);
 /* Software presentation deadline. VSync returns zero when the renderer

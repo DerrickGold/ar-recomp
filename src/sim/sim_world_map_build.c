@@ -26,7 +26,6 @@
 #include "funcs.h"
 #include "sim_world_map.h"
 #include "sim_world_map_compose.h"
-#include "snes/snes.h"
 
 RecompReturn bank_02_865C_M0X0(CpuState *cpu);
 
@@ -65,6 +64,11 @@ static bool s_have_cached_inputs;
 static SimWorldMapBuildConsumer s_previous_consumer;
 static uint8_t s_built_tilemap[kSimWorldMapBytes];
 static uint8_t s_oracle_tilemap[kSimWorldMapBytes];
+static SrRunnerHandle *s_runner;
+
+void SimWorldMapBuild_BindRunner(SrRunnerHandle *runner) {
+  s_runner = runner;
+}
 
 bool SimWorldMapBuild_Init(const uint8_t *rom_data, size_t rom_size) {
   s_rom_tables_available =
@@ -82,13 +86,19 @@ bool SimWorldMapBuild_Init(const uint8_t *rom_data, size_t rom_size) {
 static bool BuildTilemapOracle(const uint8_t *baseline, uint8_t *out) {
   if (!baseline || !out) return false;
 
+  const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+  SrCpuMathState math_state = {
+    .struct_size = sizeof(math_state),
+  };
+  if (!s_runner || !api ||
+      api->struct_size < SNES_RUNNER_API_CPU_MATH_STATE_SIZE ||
+      !(api->capabilities & SR_RUNNER_CAP_CPU_MATH_STATE) ||
+      api->query_cpu_math_state(s_runner, &math_state) != SR_RESULT_OK)
+    return false;
+
   uint8_t *wram_snapshot = (uint8_t *)malloc(kActRaiserWramSize);
   if (!wram_snapshot) return false;
   CpuState cpu_snapshot = g_cpu;
-  uint8 multiply_a = g_snes->multiplyA;
-  uint16 multiply_result = g_snes->multiplyResult;
-  uint16 divide_a = g_snes->divideA;
-  uint16 divide_result = g_snes->divideResult;
   memcpy(wram_snapshot, g_ram, kActRaiserWramSize);
 
   /* Phase 1, done for free: the base tilemap the game would have copied or
@@ -138,10 +148,8 @@ static bool BuildTilemapOracle(const uint8_t *baseline, uint8_t *out) {
    * scratch. The game cannot tell this ran. */
   memcpy(g_ram, wram_snapshot, kActRaiserWramSize);
   g_cpu = cpu_snapshot;
-  g_snes->multiplyA = multiply_a;
-  g_snes->multiplyResult = multiply_result;
-  g_snes->divideA = divide_a;
-  g_snes->divideResult = divide_result;
+  if (api->restore_cpu_math_state(s_runner, &math_state) != SR_RESULT_OK)
+    ok = false;
   free(wram_snapshot);
   return ok;
 }

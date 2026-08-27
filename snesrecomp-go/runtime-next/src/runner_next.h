@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-#define SR_RUNNER_ABI_VERSION 1u
+#define SR_RUNNER_ABI_VERSION 2u
 
 /* ABI features are additive. A caller must test a bit before using the
  * corresponding table entry or data contract. */
@@ -23,6 +23,10 @@ extern "C" {
 #define SR_RUNNER_CAP_EXECUTION_STATE UINT64_C(0x0000000000000200)
 #define SR_RUNNER_CAP_EVENT_OBSERVERS UINT64_C(0x0000000000000400)
 #define SR_RUNNER_CAP_SAFE_POINT_MUTATIONS UINT64_C(0x0000000000000800)
+#define SR_RUNNER_CAP_PPU_BACKGROUND_COORDINATE UINT64_C(0x0000000000001000)
+#define SR_RUNNER_CAP_PPU_OUTPUT_CONTROL UINT64_C(0x0000000000002000)
+#define SR_RUNNER_CAP_PPU_CAPTURE_CONTROL UINT64_C(0x0000000000004000)
+#define SR_RUNNER_CAP_CPU_MATH_STATE UINT64_C(0x0000000000008000)
 
 typedef uint32_t SrResult;
 enum {
@@ -31,7 +35,8 @@ enum {
     SR_RESULT_UNSUPPORTED = 2u,
     SR_RESULT_UNAVAILABLE = 3u,
     SR_RESULT_STALE_VIEW = 4u,
-    SR_RESULT_PENDING = 5u
+    SR_RESULT_PENDING = 5u,
+    SR_RESULT_BUSY = 6u
 };
 
 typedef uint32_t SrComponentKind;
@@ -64,18 +69,25 @@ enum {
 #define SR_PPU_OAM_WORD_COUNT UINT64_C(0x0100)
 #define SR_PPU_HIGH_OAM_BYTE_COUNT UINT64_C(0x0020)
 #define SR_PPU_NATIVE_WIDTH 256u
+#define SR_PPU_NATIVE_HEIGHT 224u
+#define SR_PPU_HORIZONTAL_MARGIN_MAX 128u
+#define SR_PPU_VERTICAL_MARGIN_MAX 64u
+#define SR_PPU_SURFACE_MAX_WIDTH 640u
+#define SR_PPU_SURFACE_MAX_HEIGHT 352u
+#define SR_PPU_OBJ_APRON 64u
 #define SR_PPU_OBJ_X_WRAP 512u
 #define SR_PPU_OBJ_Y_WRAP 256u
 #define SR_PPU_OBJ_Y_NEGATIVE_FROM 224u
+#define SR_PPU_MODE7_CANVAS_EXTENT 1024u
 #define SR_PPU_TILE_ID_COUNT 256u
-#define SR_PPU_OVERLAY_SOURCE_COUNT 5u
 #define SR_PPU_SURFACE_BAND_COUNT 4u
 enum {
     SR_PPU_OVERLAY_BG1 = 0u,
     SR_PPU_OVERLAY_BG2 = 1u,
     SR_PPU_OVERLAY_BG3 = 2u,
     SR_PPU_OVERLAY_BG4 = 3u,
-    SR_PPU_OVERLAY_OBJ = 4u
+    SR_PPU_OVERLAY_OBJ = 4u,
+    SR_PPU_OVERLAY_SOURCE_COUNT = 5u
 };
 
 #define SR_PPU_OVERLAY_REMOVE_FROM_GAME UINT32_C(0x00000001)
@@ -85,6 +97,14 @@ enum {
 #define SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN UINT32_C(0x00000010)
 #define SR_PPU_OVERLAY_MARK_MAIN_SCREEN_WINNER UINT32_C(0x00000020)
 #define SR_PPU_OVERLAY_MARK_OWNING_SCREEN_WINNER UINT32_C(0x00000040)
+#define SR_PPU_OVERLAY_FLAGS_SUPPORTED                                  \
+    (SR_PPU_OVERLAY_REMOVE_FROM_GAME |                                   \
+     SR_PPU_OVERLAY_MARK_OBJ_COLOR_MATH |                                \
+     SR_PPU_OVERLAY_MARK_BG_HALF_ADD |                                   \
+     SR_PPU_OVERLAY_APPLY_BG_FIXED_COLOR_SUBTRACT |                      \
+     SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN |                            \
+     SR_PPU_OVERLAY_MARK_MAIN_SCREEN_WINNER |                            \
+     SR_PPU_OVERLAY_MARK_OWNING_SCREEN_WINNER)
 
 /* Opaque to ABI consumers. The compatibility adapter currently maps these to
  * the independently implemented runner's internal components. */
@@ -103,7 +123,7 @@ typedef struct SrBorrowedSpan {
     uint64_t lifetime_generation;
 } SrBorrowedSpan;
 
-#define SR_BORROWED_SPAN_V1_SIZE                                           \
+#define SR_BORROWED_SPAN_V2_SIZE                                           \
     ((uint32_t)(offsetof(SrBorrowedSpan, lifetime_generation) +            \
                 sizeof(((SrBorrowedSpan *)0)->lifetime_generation)))
 
@@ -117,7 +137,7 @@ typedef struct SrBorrowedU16Span {
     uint64_t lifetime_generation;
 } SrBorrowedU16Span;
 
-#define SR_BORROWED_U16_SPAN_V1_SIZE                                      \
+#define SR_BORROWED_U16_SPAN_V2_SIZE                                      \
     ((uint32_t)(offsetof(SrBorrowedU16Span, lifetime_generation) +         \
                 sizeof(((SrBorrowedU16Span *)0)->lifetime_generation)))
 
@@ -131,7 +151,7 @@ typedef struct SrGenerationSnapshot {
     uint64_t mutation_generation;
 } SrGenerationSnapshot;
 
-#define SR_GENERATION_SNAPSHOT_V1_SIZE                                    \
+#define SR_GENERATION_SNAPSHOT_V2_SIZE                                    \
     ((uint32_t)(offsetof(SrGenerationSnapshot, mutation_generation) +      \
                 sizeof(((SrGenerationSnapshot *)0)->mutation_generation)))
 
@@ -158,9 +178,29 @@ typedef struct SrCpuStateSnapshot {
     uint8_t reserved;
 } SrCpuStateSnapshot;
 
-#define SR_CPU_STATE_SNAPSHOT_V1_SIZE                                    \
+#define SR_CPU_STATE_SNAPSHOT_V2_SIZE                                    \
     ((uint32_t)(offsetof(SrCpuStateSnapshot, reserved) +                  \
                 sizeof(((SrCpuStateSnapshot *)0)->reserved)))
+
+/* SNES CPU arithmetic-unit latches. The multiplication result register also
+ * holds the remainder after division, matching $4216-$4217. Restore is a
+ * synchronous operation intended for transactional diagnostics and must run
+ * on the emulation thread at a safe point. */
+typedef struct SrCpuMathState {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t lifetime_generation;
+    uint8_t multiply_operand;
+    uint8_t reserved8;
+    uint16_t multiply_or_remainder_result;
+    uint16_t divide_dividend;
+    uint16_t divide_quotient;
+    uint32_t reserved32;
+} SrCpuMathState;
+
+#define SR_CPU_MATH_STATE_V2_SIZE                                       \
+    ((uint32_t)(offsetof(SrCpuMathState, reserved32) +                    \
+                sizeof(((SrCpuMathState *)0)->reserved32)))
 
 #define SR_PPU_STATE_FORCED_BLANK UINT32_C(0x00000001)
 #define SR_PPU_STATE_BG3_PRIORITY UINT32_C(0x00000002)
@@ -169,6 +209,11 @@ typedef struct SrCpuStateSnapshot {
 #define SR_PPU_STATE_OVERSCAN UINT32_C(0x00000010)
 #define SR_PPU_STATE_PSEUDO_HIRES UINT32_C(0x00000020)
 #define SR_PPU_STATE_MODE7_EXT_BG UINT32_C(0x00000040)
+
+#define SR_PPU_MODE7_X_FLIP UINT8_C(0x01)
+#define SR_PPU_MODE7_Y_FLIP UINT8_C(0x02)
+#define SR_PPU_MODE7_LARGE_FIELD UINT8_C(0x40)
+#define SR_PPU_MODE7_CHARACTER_FILL UINT8_C(0x80)
 
 typedef struct SrPpuBackgroundState {
     uint16_t h_scroll;
@@ -204,11 +249,22 @@ typedef struct SrPpuStateSnapshot {
     uint32_t object_tile_base_1_word;
     uint32_t object_tile_base_2_word;
     SrPpuBackgroundState backgrounds[4];
+    /* V2: raw controls retained for diagnostics and game-agnostic render
+     * inspection. Derived fields above remain the preferred normal path. */
+    uint8_t window_select;
+    uint8_t window_logic;
+    uint8_t color_math_control;
+    uint8_t color_math_designation;
+    uint8_t background_tilemap_control[4];
+    uint16_t background_tile_base_control;
+    uint8_t mode7_select;
+    uint8_t reserved8_2;
+    int16_t mode7_matrix[8];
 } SrPpuStateSnapshot;
 
-#define SR_PPU_STATE_SNAPSHOT_V1_SIZE                                    \
-    ((uint32_t)(offsetof(SrPpuStateSnapshot, backgrounds) +               \
-                sizeof(((SrPpuStateSnapshot *)0)->backgrounds)))
+#define SR_PPU_STATE_SNAPSHOT_V2_SIZE                                    \
+    ((uint32_t)(offsetof(SrPpuStateSnapshot, mode7_matrix) +               \
+                sizeof(((SrPpuStateSnapshot *)0)->mode7_matrix)))
 
 typedef struct SrPpuOverlayState {
     int16_t x0;
@@ -242,9 +298,63 @@ typedef struct SrPpuFrameSnapshot {
     SrPpuOverlayState overlays[SR_PPU_OVERLAY_SOURCE_COUNT];
 } SrPpuFrameSnapshot;
 
-#define SR_PPU_FRAME_SNAPSHOT_V1_SIZE                                    \
+#define SR_PPU_FRAME_SNAPSHOT_V2_SIZE                                    \
     ((uint32_t)(offsetof(SrPpuFrameSnapshot, overlays) +                  \
                 sizeof(((SrPpuFrameSnapshot *)0)->overlays)))
+
+typedef uint32_t SrPpuBackgroundFill;
+enum {
+    SR_PPU_BACKGROUND_FILL_INHERIT = 0u,
+    SR_PPU_BACKGROUND_FILL_TRANSPARENT = 1u,
+    SR_PPU_BACKGROUND_FILL_LIVE_WORLD = 2u,
+    SR_PPU_BACKGROUND_FILL_CLAMP = 3u,
+    SR_PPU_BACKGROUND_FILL_MIRROR = 4u,
+    SR_PPU_BACKGROUND_FILL_REPEAT = 5u,
+    SR_PPU_BACKGROUND_FILL_RAW_WRAP = 6u
+};
+
+typedef uint32_t SrPpuBackgroundMotion;
+enum {
+    SR_PPU_BACKGROUND_MOTION_FILL_RELATIVE = 0u,
+    SR_PPU_BACKGROUND_MOTION_NORMAL_SCROLL = 1u
+};
+
+#define SR_PPU_BACKGROUND_COORDINATE_MAPPED UINT32_C(0x00000001)
+#define SR_PPU_BACKGROUND_COORDINATE_BAND_OVERRIDE UINT32_C(0x00000002)
+#define SR_PPU_BACKGROUND_COORDINATE_MOSAIC UINT32_C(0x00000004)
+
+/* Resolves the source coordinates sampled for a displayed BG point after
+ * per-layer mosaic, finite-world extents, vertical clipping, and widescreen
+ * fill policy. screen_y is zero-based display space; sample_y follows the
+ * PPU's one-based BG/Mode-7 fetch convention. An unmapped point is a normal
+ * result with the MAPPED flag clear. */
+typedef struct SrPpuBackgroundCoordinateRequest {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t lifetime_generation;
+    uint32_t layer;
+    int32_t screen_x;
+    int32_t screen_y;
+    uint32_t reserved;
+} SrPpuBackgroundCoordinateRequest;
+
+#define SR_PPU_BACKGROUND_COORDINATE_REQUEST_V2_SIZE                     \
+    ((uint32_t)(offsetof(SrPpuBackgroundCoordinateRequest, reserved) +    \
+                sizeof(((SrPpuBackgroundCoordinateRequest *)0)->reserved)))
+
+typedef struct SrPpuBackgroundCoordinateResult {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t lifetime_generation;
+    int32_t source_x;
+    int32_t sample_y;
+    SrPpuBackgroundFill fill;
+    SrPpuBackgroundMotion motion;
+} SrPpuBackgroundCoordinateResult;
+
+#define SR_PPU_BACKGROUND_COORDINATE_RESULT_V2_SIZE                      \
+    ((uint32_t)(offsetof(SrPpuBackgroundCoordinateResult, motion) +       \
+                sizeof(((SrPpuBackgroundCoordinateResult *)0)->motion)))
 
 /* Caller-owned raster output. Each pixel is a host-native uint32_t whose
  * numeric value is 0xAARRGGBB; transparent source pixels are zero. The
@@ -252,6 +362,16 @@ typedef struct SrPpuFrameSnapshot {
 #define SR_PPU_PIXEL_FORMAT_ARGB8888_U32 1u
 #define SR_PPU_OBJ_PIXEL_FORMAT_ARGB8888_U32 \
     SR_PPU_PIXEL_FORMAT_ARGB8888_U32
+
+/* A resolved SNES OBJ part in screen coordinates. This is a value type: it
+ * contains no runner pointer and may be copied or retained by the caller. */
+typedef struct SrPpuObjPart {
+    int16_t x;
+    int16_t y;
+    uint16_t tile_attr;
+    uint8_t size;
+    uint8_t reserved;
+} SrPpuObjPart;
 
 typedef struct SrPpuObjRasterRequest {
     uint32_t struct_size;
@@ -266,7 +386,7 @@ typedef struct SrPpuObjRasterRequest {
     uint64_t pitch_bytes;
 } SrPpuObjRasterRequest;
 
-#define SR_PPU_OBJ_RASTER_REQUEST_V1_SIZE                                \
+#define SR_PPU_OBJ_RASTER_REQUEST_V2_SIZE                                \
     ((uint32_t)(offsetof(SrPpuObjRasterRequest, pitch_bytes) +            \
                 sizeof(((SrPpuObjRasterRequest *)0)->pitch_bytes)))
 
@@ -282,7 +402,7 @@ typedef struct SrPpuObjRasterResult {
     uint32_t height;
 } SrPpuObjRasterResult;
 
-#define SR_PPU_OBJ_RASTER_RESULT_V1_SIZE                                 \
+#define SR_PPU_OBJ_RASTER_RESULT_V2_SIZE                                 \
     ((uint32_t)(offsetof(SrPpuObjRasterResult, height) +                  \
                 sizeof(((SrPpuObjRasterResult *)0)->height)))
 
@@ -321,9 +441,111 @@ typedef struct SrPpuSurfaceSnapshot {
     SrPpuSurfaceView mode7;
 } SrPpuSurfaceSnapshot;
 
-#define SR_PPU_SURFACE_SNAPSHOT_V1_SIZE                                  \
+#define SR_PPU_SURFACE_SNAPSHOT_V2_SIZE                                  \
     ((uint32_t)(offsetof(SrPpuSurfaceSnapshot, mode7) +                    \
                 sizeof(((SrPpuSurfaceSnapshot *)0)->mode7)))
+
+/* Synchronous host-owned output bindings. The caller retains ownership of
+ * every supplied buffer and must keep it alive until it is unbound or the
+ * runner is destroyed. byte_size and height_pixels describe capacity rather
+ * than current PPU content; the runner validates them before retaining a
+ * pointer. Binding a null pointer unbinds that surface and requires all
+ * capacity fields to be zero. Priority bands inherit the base overlay pitch,
+ * so their request pitch must match the already-bound base surface. */
+typedef uint32_t SrPpuOutputKind;
+enum {
+    SR_PPU_OUTPUT_MAIN = 0u,
+    SR_PPU_OUTPUT_AUTHENTIC = 1u,
+    SR_PPU_OUTPUT_OVERLAY = 2u,
+    SR_PPU_OUTPUT_OVERLAY_PRIORITY = 3u,
+    SR_PPU_OUTPUT_MODE7 = 4u,
+    /* Clears all ordinary BG/OBJ sources, priority bands, and captures.
+     * The separately bound Mode-7 surface remains available. */
+    SR_PPU_OUTPUT_CLEAR_OVERLAY_SOURCES = 5u
+};
+
+#define SR_PPU_OUTPUT_REFERENCE_PIXEL_RENDERER UINT32_C(0x00000001)
+
+typedef struct SrPpuOutputBindingRequest {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t lifetime_generation;
+    SrPpuOutputKind kind;
+    uint32_t source;
+    uint32_t band;
+    uint32_t scale;
+    uint8_t *pixels;
+    uint64_t pixel_byte_size;
+    uint64_t pitch_bytes;
+    uint32_t height_pixels;
+    uint32_t reserved;
+} SrPpuOutputBindingRequest;
+
+#define SR_PPU_OUTPUT_BINDING_REQUEST_V2_SIZE                            \
+    ((uint32_t)(offsetof(SrPpuOutputBindingRequest, reserved) +           \
+                sizeof(((SrPpuOutputBindingRequest *)0)->reserved)))
+
+typedef uint32_t SrPpuHorizontalMarginMode;
+enum {
+    /* The configured budget is immediately available on both sides. */
+    SR_PPU_HORIZONTAL_MARGIN_AVAILABLE = 0u,
+    /* Keep the budget reserved while starting at the native-width centre. */
+    SR_PPU_HORIZONTAL_MARGIN_CENTERED = 1u
+};
+
+typedef struct SrPpuHorizontalMarginRequest {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t lifetime_generation;
+    SrPpuHorizontalMarginMode mode;
+    uint32_t budget_pixels;
+    uint32_t reserved[2];
+} SrPpuHorizontalMarginRequest;
+
+#define SR_PPU_HORIZONTAL_MARGIN_REQUEST_V2_SIZE                         \
+    ((uint32_t)(offsetof(SrPpuHorizontalMarginRequest, reserved) +        \
+                sizeof(((SrPpuHorizontalMarginRequest *)0)->reserved)))
+
+/* Atomic, synchronous claims for frame-scoped enhancement capture. Claims
+ * return SR_RESULT_BUSY when an earlier game/host policy already owns the
+ * source for this frame. They run on the emulation thread and retain no
+ * overlay-request pointer. A successful Mode-7 claim borrows pixels until
+ * captures are cleared; callers must keep that image alive for the frame. */
+typedef struct SrPpuOverlayCaptureRequest {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t lifetime_generation;
+    uint32_t source;
+    int32_t x;
+    int32_t y;
+    int32_t width;
+    int32_t height;
+    uint32_t reserved[2];
+} SrPpuOverlayCaptureRequest;
+
+#define SR_PPU_OVERLAY_CAPTURE_REQUEST_V2_SIZE                           \
+    ((uint32_t)(offsetof(SrPpuOverlayCaptureRequest, reserved) +          \
+                sizeof(((SrPpuOverlayCaptureRequest *)0)->reserved)))
+
+typedef struct SrPpuMode7OverrideRequest {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t lifetime_generation;
+    const uint32_t *pixels;
+    uint64_t pixel_byte_size;
+    uint32_t width_pixels;
+    uint32_t height_pixels;
+    int32_t canvas_x0;
+    int32_t canvas_y0;
+    int32_t canvas_x1;
+    int32_t canvas_y1;
+    uint32_t wrap;
+    uint32_t reserved;
+} SrPpuMode7OverrideRequest;
+
+#define SR_PPU_MODE7_OVERRIDE_REQUEST_V2_SIZE                            \
+    ((uint32_t)(offsetof(SrPpuMode7OverrideRequest, reserved) +           \
+                sizeof(((SrPpuMode7OverrideRequest *)0)->reserved)))
 
 /* Generated-code execution state. Names are immutable runner-owned strings;
  * the snapshot itself expires with the runner lifetime generation. The stack
@@ -362,7 +584,7 @@ typedef struct SrExecutionSnapshot {
     SrExecutionBlock history[SR_EXECUTION_HISTORY_CAPACITY];
 } SrExecutionSnapshot;
 
-#define SR_EXECUTION_SNAPSHOT_V1_SIZE                                    \
+#define SR_EXECUTION_SNAPSHOT_V2_SIZE                                    \
     ((uint32_t)(offsetof(SrExecutionSnapshot, history) +                  \
                 sizeof(((SrExecutionSnapshot *)0)->history)))
 
@@ -384,7 +606,7 @@ typedef uint64_t SrEventMask;
 #define SR_EVENT_MASK_FRAME UINT64_C(0x0000000000000080)
 #define SR_EVENT_MASK_INTERRUPT UINT64_C(0x0000000000000100)
 #define SR_EVENT_MASK_ERROR UINT64_C(0x0000000000000200)
-#define SR_EVENT_MASK_V1_SUPPORTED                                      \
+#define SR_EVENT_MASK_V2_SUPPORTED                                      \
     (SR_EVENT_MASK_EXECUTION_BLOCK | SR_EVENT_MASK_DYNAMIC_DISPATCH |    \
      SR_EVENT_MASK_MEMORY_WRITE | SR_EVENT_MASK_REGISTER_ACCESS |        \
      SR_EVENT_MASK_DMA | SR_EVENT_MASK_AUDIO | SR_EVENT_MASK_FRAME |      \
@@ -502,7 +724,7 @@ typedef struct SrRunnerEvent {
  * valid only during the callback and must not be retained; frame_counter is
  * zero for audio-thread events. */
 
-#define SR_RUNNER_EVENT_V1_SIZE                                          \
+#define SR_RUNNER_EVENT_V2_SIZE                                          \
     ((uint32_t)(offsetof(SrRunnerEvent, reserved_audio) +                 \
                 sizeof(((SrRunnerEvent *)0)->reserved_audio)))
 
@@ -527,7 +749,7 @@ typedef struct SrEventSubscription {
     void *user_data;
 } SrEventSubscription;
 
-#define SR_EVENT_SUBSCRIPTION_V1_SIZE                                    \
+#define SR_EVENT_SUBSCRIPTION_V2_SIZE                                    \
     ((uint32_t)(offsetof(SrEventSubscription, user_data) +                \
                 sizeof(((SrEventSubscription *)0)->user_data)))
 
@@ -562,7 +784,7 @@ typedef struct SrMutationCommand {
  * occupies bits 0-11 and controller 2 bits 12-23. Opposing directions are
  * normalized after the override. */
 
-#define SR_MUTATION_COMMAND_V1_SIZE                                      \
+#define SR_MUTATION_COMMAND_V2_SIZE                                      \
     ((uint32_t)(offsetof(SrMutationCommand, bytes) +                      \
                 sizeof(((SrMutationCommand *)0)->bytes)))
 
@@ -588,7 +810,7 @@ typedef struct SrMutationStatus {
 /* SR_MUTATION_QUERY_CONSUME releases terminal APPLIED/FAILED records after
  * copying them to out_status. QUEUED/APPLYING records are never consumed. */
 
-#define SR_MUTATION_STATUS_V1_SIZE                                       \
+#define SR_MUTATION_STATUS_V2_SIZE                                       \
     ((uint32_t)(offsetof(SrMutationStatus, applied_frame_counter) +       \
                 sizeof(((SrMutationStatus *)0)->applied_frame_counter)))
 
@@ -636,9 +858,28 @@ typedef struct SnesRunnerApi {
     SrResult (*query_mutation)(SrRunnerHandle *runner,
                                uint64_t command_id, uint32_t flags,
                                SrMutationStatus *out_status);
+    SrResult (*resolve_ppu_background_coordinate)(
+        SrRunnerHandle *runner,
+        const SrPpuBackgroundCoordinateRequest *request,
+        SrPpuBackgroundCoordinateResult *out_result);
+    SrResult (*bind_ppu_output_surface)(
+        SrRunnerHandle *runner, const SrPpuOutputBindingRequest *request);
+    SrResult (*configure_ppu_horizontal_margin)(
+        SrRunnerHandle *runner,
+        const SrPpuHorizontalMarginRequest *request);
+    SrResult (*claim_ppu_overlay_capture)(
+        SrRunnerHandle *runner,
+        const SrPpuOverlayCaptureRequest *request);
+    SrResult (*claim_ppu_mode7_override)(
+        SrRunnerHandle *runner,
+        const SrPpuMode7OverrideRequest *request);
+    SrResult (*query_cpu_math_state)(SrRunnerHandle *runner,
+                                     SrCpuMathState *out_state);
+    SrResult (*restore_cpu_math_state)(SrRunnerHandle *runner,
+                                       const SrCpuMathState *state);
 } SnesRunnerApi;
 
-#define SNES_RUNNER_API_V1_SIZE                                           \
+#define SNES_RUNNER_API_V2_BASE_SIZE                                           \
     ((uint32_t)(offsetof(SnesRunnerApi, borrow_is_valid) +                 \
                 sizeof(((SnesRunnerApi *)0)->borrow_is_valid)))
 
@@ -674,6 +915,24 @@ typedef struct SnesRunnerApi {
 #define SNES_RUNNER_API_SAFE_POINT_MUTATION_SIZE                          \
     ((uint32_t)(offsetof(SnesRunnerApi, query_mutation) +                  \
                 sizeof(((SnesRunnerApi *)0)->query_mutation)))
+
+#define SNES_RUNNER_API_PPU_BACKGROUND_COORDINATE_SIZE                    \
+    ((uint32_t)(offsetof(SnesRunnerApi, resolve_ppu_background_coordinate) + \
+                sizeof(((SnesRunnerApi *)0)                               \
+                           ->resolve_ppu_background_coordinate)))
+
+#define SNES_RUNNER_API_PPU_OUTPUT_CONTROL_SIZE                           \
+    ((uint32_t)(offsetof(SnesRunnerApi, configure_ppu_horizontal_margin) + \
+                sizeof(((SnesRunnerApi *)0)                               \
+                           ->configure_ppu_horizontal_margin)))
+
+#define SNES_RUNNER_API_PPU_CAPTURE_CONTROL_SIZE                          \
+    ((uint32_t)(offsetof(SnesRunnerApi, claim_ppu_mode7_override) +        \
+                sizeof(((SnesRunnerApi *)0)->claim_ppu_mode7_override)))
+
+#define SNES_RUNNER_API_CPU_MATH_STATE_SIZE                              \
+    ((uint32_t)(offsetof(SnesRunnerApi, restore_cpu_math_state) +         \
+                sizeof(((SnesRunnerApi *)0)->restore_cpu_math_state)))
 
 typedef struct SrRunnerDescriptor {
     uint32_t abi_version;

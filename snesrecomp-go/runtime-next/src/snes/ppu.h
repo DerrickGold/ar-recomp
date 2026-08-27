@@ -1,6 +1,7 @@
 #ifndef SNESRECOMP_NEXT_PPU_H
 #define SNESRECOMP_NEXT_PPU_H
 
+#include "../runner_next.h"
 #include "../types.h"
 #include "saveload.h"
 
@@ -221,11 +222,7 @@ typedef struct PpuNativeLineScratch {
     uint8_t bands[2][kPpuBufWidth];
 } PpuNativeLineScratch;
 
-typedef struct PpuObjPart {
-    int16_t x, y;
-    uint16_t tile_attr;
-    uint8_t size;
-} PpuObjPart;
+typedef SrPpuObjPart PpuObjPart;
 
 enum {
     kPpuRenderFlags_NewRenderer = 1,
@@ -329,6 +326,9 @@ struct Ppu {
     int16_t authenticObjOffsetX;
     uint8_t authenticHScrollMask;
     uint32_t overlayRenderPitch[kPpuOverlaySource_Count];
+    /* Optional host-declared capacity. Zero is retained for legacy internal
+     * bindings whose readable extent is still derived from capture policy. */
+    uint32_t overlayRenderHeight[kPpuOverlaySource_Count];
     uint8_t *overlayRenderBuffer[kPpuOverlaySource_Count];
     uint8_t *overlayRenderBands[kPpuOverlaySource_Count][3];
     uint8_t overlayRenderMaybeDirty[kPpuOverlaySource_Count];
@@ -408,6 +408,11 @@ static inline bool PpuMapWidescreenLayerX(const Ppu *ppu, uint8_t layer,
     if (out_policy != NULL) *out_policy = policy;
     return PpuMapWidescreenLayerXWithPolicy(ppu, layer, x, source_x, &policy);
 }
+
+bool PpuResolveBackgroundCoordinate(
+        Ppu *ppu, uint8_t layer, int screen_x, int screen_y,
+        int *source_x, int *sample_y,
+        PpuWidescreenLayerPolicy *out_policy, bool *out_mosaic);
 
 #define SPRITE_PRIO_TO_PRIO(prio, level6) (((prio) * 4 + 2) * 16 + 4 + ((level6) ? 2 : 0))
 #define SPRITE_PRIO_TO_PRIO_HI(prio) ((prio) * 4 + 2)
@@ -489,6 +494,8 @@ bool PpuAuthenticCameraFrameReady(const Ppu *, uint8_t);
 void PpuClearAuthenticCameraFrame(Ppu *);
 void PpuClearOverlayBindings(Ppu *);
 bool PpuBindOverlaySurface(Ppu *, PpuOverlaySource, uint8_t *, size_t);
+bool PpuBindOverlaySurfaceSized(Ppu *, PpuOverlaySource, uint8_t *, size_t,
+                                size_t);
 bool PpuBindOverlayPrioSurface(Ppu *, PpuOverlaySource, int, uint8_t *);
 bool PpuOverlaySurfaceHasContent(const Ppu *, PpuOverlaySource, int);
 void PpuClearOverlayCaptures(Ppu *);
@@ -507,6 +514,9 @@ void PpuSetExtraSpace(Ppu *, uint8_t);
 void PpuSetExtraSpaceCentered(Ppu *, uint8_t);
 void PpuSetExtraSideSpace(Ppu *, int, int, int);
 void PpuSetExtraVerticalSpace(Ppu *, int, int);
+/* Marks externally controlled geometry as changed without adding generation
+ * writes to the game's per-frame margin setters. */
+void PpuNoteSurfaceViewChange(Ppu *);
 void PpuSetVerticalMarginLayerClip(Ppu *, uint8_t, int, int);
 bool PpuSetVirtualTilemap(Ppu *, uint8_t, const PpuVirtualTilemapBinding *);
 void PpuClearVirtualTilemaps(Ppu *);

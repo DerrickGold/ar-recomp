@@ -577,7 +577,7 @@ static void TestResolvedPartOverflowFailsClosed(void) {
   SimRenderMetadata_Reset();
 
   Begin(kActRaiserWram_SimWorldRecords, true, 0xE71B, 0);
-  const PpuObjPart synthetic = {
+  const SrPpuObjPart synthetic = {
     .x = 258,
     .y = 112,
     .tile_attr = 2u << 12,
@@ -600,7 +600,7 @@ static void TestResolvedPartContractFailsClosed(void) {
   uint8 wram[kActRaiserWramSize] = {0};
   wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
   wram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Fillmore;
-  const PpuObjPart part = {
+  const SrPpuObjPart part = {
     .x = 258,
     .y = 112,
     .tile_attr = 2u << 12,
@@ -610,7 +610,7 @@ static void TestResolvedPartContractFailsClosed(void) {
   SimRenderMetadata_Reset();
   Begin(kActRaiserWram_SimWorldRecords, true, 0xE71B, 0);
   SimRenderMetadata_RecordPart(0, 2u << 12);
-  PpuObjPart wrong_priority = part;
+  SrPpuObjPart wrong_priority = part;
   wrong_priority.tile_attr = 3u << 12;
   SimRenderMetadata_RecordExactOamPart(&wrong_priority);
   SimRenderMetadata_EndRecord(4);

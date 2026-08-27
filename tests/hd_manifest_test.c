@@ -1,12 +1,11 @@
 /* Unit tests for the HD replacement manifest parser and gate evaluator.
- * Links hd_replacements.c against stub PPU/WRAM/settings state so no
- * renderer or SDL is required. */
+ * Links hd_replacements.c against a fake public runner ABI so no concrete
+ * PPU, renderer, or SDL dependency can leak back into the application. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "hd_replacements.h"
-#include "snes/ppu.h"
 #include "settings.h"
 
 static int g_failures;
@@ -20,9 +19,12 @@ static int g_failures;
 /* ---- stubs -------------------------------------------------------------- */
 
 uint8 g_ram[0x20000];
-static Ppu g_ppu_storage;
-Ppu *g_ppu = &g_ppu_storage;
 Settings g_settings;
+static uint8_t g_runner_storage;
+static SrPpuStateSnapshot g_ppu_state;
+static int g_ppu_query_calls;
+static bool g_overlay_busy[SR_PPU_OVERLAY_SOURCE_COUNT];
+static bool g_mode7_busy;
 
 static struct {
   int calls;
@@ -30,33 +32,67 @@ static struct {
   uint8_t flags;
 } g_capture_log;
 
-bool PpuSetOverlayCapture(Ppu *ppu, PpuOverlaySource source, int x, int y,
-                          int width, int height, uint8_t flags) {
-  (void)ppu;
-  g_capture_log.calls++;
-  g_capture_log.source = (int)source;
-  g_capture_log.x = x; g_capture_log.y = y;
-  g_capture_log.width = width; g_capture_log.height = height;
-  g_capture_log.flags = flags;
-  return true;
-}
-
 static struct {
   int calls;
   int width, height, x0, y0, x1, y1;
 } g_m7_log;
 
-bool PpuSetMode7Override(Ppu *ppu, const uint32_t *rgba, int width,
-                         int height, int canvas_x0, int canvas_y0,
-                         int canvas_x1, int canvas_y1, uint8_t wrap) {
-  (void)rgba;
-  (void)wrap;
+static SrResult QueryPpuState(
+    SrRunnerHandle *runner, SrPpuStateSnapshot *out_state) {
+  if (runner != (SrRunnerHandle *)&g_runner_storage || !out_state ||
+      out_state->struct_size < SR_PPU_STATE_SNAPSHOT_V2_SIZE)
+    return SR_RESULT_INVALID_ARGUMENT;
+  g_ppu_query_calls++;
+  *out_state = g_ppu_state;
+  out_state->struct_size = sizeof(*out_state);
+  return SR_RESULT_OK;
+}
+
+static SrResult ClaimOverlayCapture(
+    SrRunnerHandle *runner, const SrPpuOverlayCaptureRequest *request) {
+  if (runner != (SrRunnerHandle *)&g_runner_storage || !request ||
+      request->source >= SR_PPU_OVERLAY_SOURCE_COUNT)
+    return SR_RESULT_INVALID_ARGUMENT;
+  if (g_overlay_busy[request->source]) return SR_RESULT_BUSY;
+  g_overlay_busy[request->source] = true;
+  g_capture_log.calls++;
+  g_capture_log.source = (int)request->source;
+  g_capture_log.x = request->x;
+  g_capture_log.y = request->y;
+  g_capture_log.width = request->width;
+  g_capture_log.height = request->height;
+  g_capture_log.flags = (uint8_t)request->flags;
+  return SR_RESULT_OK;
+}
+
+static SrResult ClaimMode7Override(
+    SrRunnerHandle *runner, const SrPpuMode7OverrideRequest *request) {
+  if (runner != (SrRunnerHandle *)&g_runner_storage || !request)
+    return SR_RESULT_INVALID_ARGUMENT;
+  if (g_mode7_busy) return SR_RESULT_BUSY;
+  g_mode7_busy = true;
   g_m7_log.calls++;
-  g_m7_log.width = width; g_m7_log.height = height;
-  g_m7_log.x0 = canvas_x0; g_m7_log.y0 = canvas_y0;
-  g_m7_log.x1 = canvas_x1; g_m7_log.y1 = canvas_y1;
-  ppu->m7Override.rgba = rgba; /* mirror the engine's busy latch */
-  return true;
+  g_m7_log.width = (int)request->width_pixels;
+  g_m7_log.height = (int)request->height_pixels;
+  g_m7_log.x0 = request->canvas_x0;
+  g_m7_log.y0 = request->canvas_y0;
+  g_m7_log.x1 = request->canvas_x1;
+  g_m7_log.y1 = request->canvas_y1;
+  return SR_RESULT_OK;
+}
+
+static const SnesRunnerApi kRunnerApi = {
+    .abi_version = SR_RUNNER_ABI_VERSION,
+    .struct_size = sizeof(SnesRunnerApi),
+    .capabilities = SR_RUNNER_CAP_PPU_STATE |
+                    SR_RUNNER_CAP_PPU_CAPTURE_CONTROL,
+    .query_ppu_state = QueryPpuState,
+    .claim_ppu_overlay_capture = ClaimOverlayCapture,
+    .claim_ppu_mode7_override = ClaimMode7Override,
+};
+
+const SnesRunnerApi *sr_runner_get_api(uint32_t requested_abi_version) {
+  return requested_abi_version == SR_RUNNER_ABI_VERSION ? &kRunnerApi : NULL;
 }
 
 /* ---- helpers ------------------------------------------------------------ */
@@ -74,20 +110,27 @@ static const char *WriteManifest(const char *body) {
 
 static void ResetRuntime(void) {
   memset(g_ram, 0, sizeof(g_ram));
-  memset(&g_ppu_storage, 0, sizeof(g_ppu_storage));
+  memset(&g_ppu_state, 0, sizeof(g_ppu_state));
+  g_ppu_state.struct_size = sizeof(g_ppu_state);
+  g_ppu_state.lifetime_generation = 7u;
+  g_ppu_query_calls = 0;
+  memset(g_overlay_busy, 0, sizeof(g_overlay_busy));
+  g_mode7_busy = false;
   memset(&g_capture_log, 0, sizeof(g_capture_log));
+  memset(&g_m7_log, 0, sizeof(g_m7_log));
   memset(&g_settings, 0, sizeof(g_settings));
   g_settings.hd_replacements = true;
+  HdReplacements_BindRunner((SrRunnerHandle *)&g_runner_storage);
 }
 
 static void MakeTitleState(void) {
   g_ram[0x18] = 0x00;
   g_ram[0x19] = 0x00;
-  g_ppu->bgmode = 7;
-  g_ppu->m7matrix[0] = 0x0100;
-  g_ppu->m7matrix[1] = 0;
-  g_ppu->m7matrix[2] = 0;
-  g_ppu->m7matrix[3] = 0x0100;
+  g_ppu_state.bg_mode = 7;
+  g_ppu_state.mode7_matrix[0] = 0x0100;
+  g_ppu_state.mode7_matrix[1] = 0;
+  g_ppu_state.mode7_matrix[2] = 0;
+  g_ppu_state.mode7_matrix[3] = 0x0100;
 }
 
 static const char kTitleManifest[] =
@@ -107,7 +150,7 @@ static void TestParseTitleEntry(void) {
   const HdReplacement *e = &g_hd_replacements[0];
   CHECK(!strcmp(e->name, "title-logo"));
   CHECK(e->plane == kHdPlane_Screen);
-  CHECK(e->source == kPpuOverlaySource_Bg1);
+  CHECK(e->source == SR_PPU_OVERLAY_BG1);
   CHECK(e->x0 == 11 && e->y0 == 27 && e->x1 == 248 && e->y1 == 122);
   CHECK(strstr(e->image, "title-logo.png") != NULL);
   /* image resolves relative to the manifest directory */
@@ -201,7 +244,7 @@ static void TestMode7Entries(void) {
   CHECK(g_m7_log.calls == 0 && !g_hd_replacements[0].active);
 
   /* Mid-swirl matrix: override requested with the canvas rect. */
-  g_ppu->m7matrix[1] = 0x0123;
+  g_ppu_state.mode7_matrix[1] = 0x0123;
   HdReplacements_EvaluateFrame();
   CHECK(g_m7_log.calls == 1);
   CHECK(g_m7_log.x0 == 139 && g_m7_log.y0 == 156 &&
@@ -211,10 +254,12 @@ static void TestMode7Entries(void) {
 
   /* No art: never requests. */
   memset(&g_m7_log, 0, sizeof(g_m7_log));
-  g_ppu->m7Override.rgba = NULL;
+  g_mode7_busy = false;
   g_hd_replacements[0].pixels = NULL;
+  g_ppu_query_calls = 0;
   HdReplacements_EvaluateFrame();
-  CHECK(g_m7_log.calls == 0 && !g_hd_replacements[0].active);
+  CHECK(g_ppu_query_calls == 0 && g_m7_log.calls == 0 &&
+        !g_hd_replacements[0].active);
 }
 
 static void TestEvaluateGates(void) {
@@ -231,18 +276,18 @@ static void TestEvaluateGates(void) {
   /* All gates pass: capture requested with the entry rect + removal flag. */
   HdReplacements_EvaluateFrame();
   CHECK(g_capture_log.calls == 1);
-  CHECK(g_capture_log.source == kPpuOverlaySource_Bg1);
+  CHECK(g_capture_log.source == SR_PPU_OVERLAY_BG1);
   CHECK(g_capture_log.x == 11 && g_capture_log.y == 27);
   CHECK(g_capture_log.width == 237 && g_capture_log.height == 95);
-  CHECK(g_capture_log.flags == kPpuOverlayFlag_RemoveFromGame);
+  CHECK(g_capture_log.flags == SR_PPU_OVERLAY_REMOVE_FROM_GAME);
   CHECK(g_hd_replacements[0].active);
 
   /* Swirl (non-identity matrix): gate fails. */
-  g_ppu->m7matrix[1] = 0x0123;
+  g_ppu_state.mode7_matrix[1] = 0x0123;
   memset(&g_capture_log, 0, sizeof(g_capture_log));
   HdReplacements_EvaluateFrame();
   CHECK(g_capture_log.calls == 0 && !g_hd_replacements[0].active);
-  g_ppu->m7matrix[1] = 0;
+  g_ppu_state.mode7_matrix[1] = 0;
 
   /* Wrong map byte: gate fails. */
   g_ram[0x18] = 0x01;
@@ -257,8 +302,7 @@ static void TestEvaluateGates(void) {
   g_settings.hd_replacements = true;
 
   /* Source already claimed this frame (e.g. HUD split): entry skipped. */
-  g_ppu->overlayCaptures[kPpuOverlaySource_Bg1].x0 = 0;
-  g_ppu->overlayCaptures[kPpuOverlaySource_Bg1].x1 = 256;
+  g_overlay_busy[SR_PPU_OVERLAY_BG1] = true;
   HdReplacements_EvaluateFrame();
   CHECK(g_capture_log.calls == 0 && !g_hd_replacements[0].active);
 }

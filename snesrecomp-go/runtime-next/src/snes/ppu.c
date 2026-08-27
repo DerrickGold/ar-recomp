@@ -184,6 +184,7 @@ void ppu_reset(Ppu *ppu) {
     uint32_t authentic_pitch;
     uint8_t *overlays[kPpuOverlaySource_Count];
     uint32_t overlay_pitch[kPpuOverlaySource_Count];
+    uint32_t overlay_height[kPpuOverlaySource_Count];
     uint8_t *bands[kPpuOverlaySource_Count][3];
     uint8_t *m7;
     uint32_t m7_pitch;
@@ -197,6 +198,7 @@ void ppu_reset(Ppu *ppu) {
     authentic_pitch = ppu->authenticRenderPitch;
     memcpy(overlays, ppu->overlayRenderBuffer, sizeof(overlays));
     memcpy(overlay_pitch, ppu->overlayRenderPitch, sizeof(overlay_pitch));
+    memcpy(overlay_height, ppu->overlayRenderHeight, sizeof(overlay_height));
     memcpy(bands, ppu->overlayRenderBands, sizeof(bands));
     m7 = ppu->m7OverlayBuffer;
     m7_pitch = ppu->m7OverlayPitch;
@@ -210,6 +212,7 @@ void ppu_reset(Ppu *ppu) {
     ppu->authenticRenderPitch = authentic_pitch;
     memcpy(ppu->overlayRenderBuffer, overlays, sizeof(overlays));
     memcpy(ppu->overlayRenderPitch, overlay_pitch, sizeof(overlay_pitch));
+    memcpy(ppu->overlayRenderHeight, overlay_height, sizeof(overlay_height));
     memcpy(ppu->overlayRenderBands, bands, sizeof(bands));
     ppu->m7OverlayBuffer = m7;
     ppu->m7OverlayPitch = m7_pitch;
@@ -377,6 +380,7 @@ void PpuClearOverlayBindings(Ppu *ppu) {
     if (ppu == NULL) return;
     memset(ppu->overlayRenderBuffer, 0, sizeof(ppu->overlayRenderBuffer));
     memset(ppu->overlayRenderPitch, 0, sizeof(ppu->overlayRenderPitch));
+    memset(ppu->overlayRenderHeight, 0, sizeof(ppu->overlayRenderHeight));
     memset(ppu->overlayRenderBands, 0, sizeof(ppu->overlayRenderBands));
     memset(ppu->overlayRenderContentMask, 0,
            sizeof(ppu->overlayRenderContentMask));
@@ -386,11 +390,20 @@ void PpuClearOverlayBindings(Ppu *ppu) {
 
 bool PpuBindOverlaySurface(Ppu *ppu, PpuOverlaySource source,
                            uint8_t *pixels, size_t pitch) {
+    return PpuBindOverlaySurfaceSized(ppu, source, pixels, pitch, 0u);
+}
+
+bool PpuBindOverlaySurfaceSized(Ppu *ppu, PpuOverlaySource source,
+                                uint8_t *pixels, size_t pitch,
+                                size_t height) {
     if (ppu == NULL || (unsigned)source >= kPpuOverlaySource_Count ||
         (pixels != NULL && (pitch == 0u || pitch % 4u != 0u ||
-         pitch / 4u < kPpuXPixels || pitch / 4u > kPpuSurfaceWidth))) return false;
+         pitch / 4u < kPpuXPixels || pitch / 4u > kPpuSurfaceWidth ||
+         height > kPpuBufHeight)) ||
+        (pixels == NULL && height != 0u)) return false;
     ppu->overlayRenderBuffer[source] = pixels;
     ppu->overlayRenderPitch[source] = pixels != NULL ? (uint32_t)pitch : 0u;
+    ppu->overlayRenderHeight[source] = pixels != NULL ? (uint32_t)height : 0u;
     memset(ppu->overlayRenderBands[source], 0,
            sizeof(ppu->overlayRenderBands[source]));
     ppu->overlayRenderContentMask[source] = 0u;
@@ -762,6 +775,7 @@ bool PpuResolveObjSlot(Ppu *ppu, uint8_t slot, PpuObjPart *part) {
     part->y = (int16_t)obj_y(ppu, slot);
     part->tile_attr = ppu->oam[slot * 2u + 1u];
     part->size = (uint8_t)obj_size(ppu, slot);
+    part->reserved = 0u;
     return true;
 }
 
@@ -1127,6 +1141,30 @@ static bool layer_position(Ppu *ppu, int layer, int screen_x, int screen_y,
     }
     return PpuMapWidescreenLayerXWithPolicy(ppu, (uint8_t)layer,
                                             screen_x, source_x, &policy);
+}
+
+bool PpuResolveBackgroundCoordinate(
+        Ppu *ppu, uint8_t layer, int screen_x, int screen_y,
+        int *source_x, int *sample_y,
+        PpuWidescreenLayerPolicy *out_policy, bool *out_mosaic) {
+    int fetch_x = screen_x;
+    int fetch_y = screen_y + 1;
+    bool mosaic;
+    if (ppu == NULL || layer >= 4u || source_x == NULL || sample_y == NULL)
+        return false;
+    mosaic = PPU_mosaicEnabled(ppu, layer) && PPU_mosaicSize(ppu) > 1;
+    if (mosaic) {
+        int size = PPU_mosaicSize(ppu);
+        fetch_x -= ((fetch_x % size) + size) % size;
+        fetch_y -= ((fetch_y % size) + size) % size;
+    }
+    if (out_policy != NULL)
+        *out_policy = PpuResolveWidescreenLayerPolicy(
+            ppu, layer, screen_y);
+    if (out_mosaic != NULL) *out_mosaic = mosaic;
+    *sample_y = fetch_y;
+    return layer_position(
+        ppu, layer, fetch_x, screen_y, false, source_x);
 }
 
 static int mode7_clipped_scroll(int value) {
@@ -4519,4 +4557,8 @@ void ppu_write(Ppu *ppu, uint8_t address, uint8_t value) {
 
 int PpuGetCurrentRenderScale(Ppu *ppu, uint32_t render_flags) {
     (void)ppu; (void)render_flags; return 1;
+}
+
+void PpuNoteSurfaceViewChange(Ppu *ppu) {
+    if (ppu != NULL) note_surface_binding(ppu);
 }

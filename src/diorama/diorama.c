@@ -12,8 +12,8 @@
 #include "scene3d_math.h"
 #include "presentation_geometry.h"
 #include "presentation_upload_mirror.h"
+#include "runner_next.h"
 #include "settings.h"
-#include "snes/ppu.h"
 #include "user_data_dir.h"
 #include <limits.h>
 #include <math.h>
@@ -449,8 +449,8 @@ static bool EdgeAAEnabled(SDL_Renderer *renderer) {
  * must stay crisp). */
 static bool LayerGetsEdgeAA(int plane) {
   switch (plane) {
-    case kPpuOverlaySource_Bg1:
-    case kPpuOverlaySource_Bg2:
+    case SR_PPU_OVERLAY_BG1:
+    case SR_PPU_OVERLAY_BG2:
     case kDioramaPlane_Bg1Hi:
     case kDioramaPlane_Bg2Hi:
     case kDioramaPlane_Bg1Far:
@@ -525,7 +525,7 @@ static SDL_Texture *EnsureDioramaSupersampleTexture(SDL_Renderer *renderer,
   return g_diorama_ss_texture;
 }
 
-/* Renders `source` (a full kPpuBufWidth x snes_height layer texture, already
+/* Renders `source` (an ABI-max-width x snes_height layer texture, already
  * NEAREST-scaled) into the compact shared ×4 straight-alpha intermediate.
  * Returns NULL (caller falls back to `source`) if the intermediate couldn't
  * be (re)created.
@@ -536,7 +536,7 @@ static SDL_Texture *EnsureDioramaSupersampleTexture(SDL_Renderer *renderer,
  * interpolation shift active, so it wasn't the B1b UV-window bug. Root
  * cause: this used to blit the WHOLE source texture (`SDL_RenderTexture(...,
  * NULL, NULL)`) into the WHOLE intermediate, which faithfully copies
- * source's uninitialized tail (columns snes_width..kPpuBufWidth-1 — see the
+ * source's uninitialized tail (columns snes_width..surface-max-width-1 — see
  * B1b UV-window comment below for why that tail exists at all) into the
  * intermediate too. The final draw's LINEAR sample at the exact valid/
  * invalid boundary (u=uv_u1) then blends the last real texel against that
@@ -801,7 +801,7 @@ void Diorama_FlushSettingsIfDirty(void) {
 /* ── Layer table ─────────────────────────────────────────────────────── */
 
 typedef struct DioramaLayerDesc {
-  int plane;          /* kDioramaPlane_* / kPpuOverlaySource_* index */
+  int plane;          /* kDioramaPlane_* / SR_PPU_OVERLAY_* index */
   float z;
   SDL_FColor shade;
   bool *visible;
@@ -827,17 +827,17 @@ typedef struct DioramaLayerDesc {
 static const DioramaLayerDesc kDioramaLayers[] = {
   { kDioramaPlane_Backdrop, 0.00f, { 0.70f, 0.70f, 0.80f, 1.0f },
     &g_settings.diorama_layer_backdrop, false, false },
-  { kPpuOverlaySource_Obj,  0.51f, { 1.0f,  1.0f,  1.0f,  1.0f },   /* prio 0 */
+  { SR_PPU_OVERLAY_OBJ,  0.51f, { 1.0f,  1.0f,  1.0f,  1.0f },   /* prio 0 */
     &g_settings.diorama_layer_obj, true, true },
   { kDioramaPlane_Obj1,     0.51f, { 1.0f,  1.0f,  1.0f,  1.0f },
     &g_settings.diorama_layer_obj, true, true },
   { kDioramaPlane_Bg2Far,   0.05f, { 0.82f, 0.82f, 0.88f, 1.0f },
     &g_settings.diorama_layer_bg2, false, false },
-  { kPpuOverlaySource_Bg2,  0.20f, { 0.82f, 0.82f, 0.88f, 1.0f },   /* prio 0 */
+  { SR_PPU_OVERLAY_BG2,  0.20f, { 0.82f, 0.82f, 0.88f, 1.0f },   /* prio 0 */
     &g_settings.diorama_layer_bg2, false, false },
   { kDioramaPlane_Bg1Far,   0.35f, { 0.92f, 0.92f, 0.95f, 1.0f },
     &g_settings.diorama_layer_bg1, false, false },
-  { kPpuOverlaySource_Bg1,  0.50f, { 0.92f, 0.92f, 0.95f, 1.0f },   /* prio 0 */
+  { SR_PPU_OVERLAY_BG1,  0.50f, { 0.92f, 0.92f, 0.95f, 1.0f },   /* prio 0 */
     &g_settings.diorama_layer_bg1, false, false },
   { kDioramaPlane_Obj2,     0.51f, { 1.0f,  1.0f,  1.0f,  1.0f },
     &g_settings.diorama_layer_obj, true, true },
@@ -847,7 +847,7 @@ static const DioramaLayerDesc kDioramaLayers[] = {
     &g_settings.diorama_layer_bg1, false, false },
   { kDioramaPlane_Obj3,     0.52f, { 1.0f,  1.0f,  1.0f,  1.0f },
     &g_settings.diorama_layer_obj, true, true },
-  { kPpuOverlaySource_Bg3,  0.95f, { 1.0f,  1.0f,  1.0f,  1.0f },
+  { SR_PPU_OVERLAY_BG3,  0.95f, { 1.0f,  1.0f,  1.0f,  1.0f },
     &g_settings.diorama_layer_bg3, false, true },
 };
 /* An ENUM, not a `static const int`. In C a const object is not an integer
@@ -1450,9 +1450,9 @@ static void BuildFoldedOverflowMesh(
 static void RemapMeshToSupersampleTexture(SDL_Vertex *vertices, int count,
                                           int obj_apron,
                                           int snes_width, int snes_height) {
-  const float u_scale = (float)kPpuSurfaceWidth / (float)snes_width;
+  const float u_scale = (float)SR_PPU_SURFACE_MAX_WIDTH / (float)snes_width;
   const float u_bias = (float)obj_apron / (float)snes_width;
-  const float v_scale = (float)kPpuBufHeight / (float)snes_height;
+  const float v_scale = (float)SR_PPU_SURFACE_MAX_HEIGHT / (float)snes_height;
   for (int v = 0; v < count; v++) {
     vertices[v].tex_coord.x = vertices[v].tex_coord.x * u_scale - u_bias;
     vertices[v].tex_coord.y *= v_scale;
@@ -1598,14 +1598,15 @@ static PresentationOutcome DrawDioramaSkybox(SDL_Renderer *renderer,
   /* [obj_apron, obj_apron+snes_width) -- the DISPLAYED span, which sits in the
    * middle of an apron-wide surface. The valid spans arrive already in the same
    * surface-column space, so the margin-fix branch needs no apron term. */
-  float uv_u0_base = (float)obj_apron / (float)kPpuSurfaceWidth;
-  float uv_u1 = (float)(obj_apron + snes_width) / (float)kPpuSurfaceWidth;
+  float uv_u0_base = (float)obj_apron / (float)SR_PPU_SURFACE_MAX_WIDTH;
+  float uv_u1 =
+      (float)(obj_apron + snes_width) / (float)SR_PPU_SURFACE_MAX_WIDTH;
   /* Same live report: a visible lighter/garbage-colored strip appeared at
    * the screen's right edge. Root cause: the blur shader samples texels up
    * to `radius` away from each fragment (src/shaders/blur.frag.glsl) —
    * for fragments right at u=uv_u1 (this quad's edge, since
    * uv_u1 < 1.0 is the true boundary of what Diorama_Upload ever wrote,
-   * kPpuBufWidth vs the widescreen capture's max width — the same class of
+   * allocated width vs the widescreen capture's max width — the same class of
    * bug B1b's former UV-window clamp exposed for the tilted layers), the rightward
    * samples reach past uv_u1 into that same uninitialized texture memory.
    * Unlike B1b's interpolation shift (which the tilted layers' own address
@@ -1640,9 +1641,11 @@ static PresentationOutcome DrawDioramaSkybox(SDL_Renderer *renderer,
   bool blur_bound = false;
   if (blur_requested) {
     const float source_width = rom_source
-        ? (float)kDioramaRomBackdropPixels : (float)kPpuSurfaceWidth;
+        ? (float)kDioramaRomBackdropPixels
+        : (float)SR_PPU_SURFACE_MAX_WIDTH;
     const float source_height = rom_source
-        ? (float)kDioramaRomBackdropPixels : (float)kPpuBufHeight;
+        ? (float)kDioramaRomBackdropPixels
+        : (float)SR_PPU_SURFACE_MAX_HEIGHT;
     BlurUniforms u = {
       1.0f / source_width, 1.0f / source_height,
       blur_radius, 0.0f,
@@ -1691,10 +1694,12 @@ static PresentationOutcome DrawDioramaSkybox(SDL_Renderer *renderer,
       DioramaRomSkyboxUvRange(
           snes_width, kDioramaRomBackdropPixels, &u0, &u1);
     } else if (g_settings.diorama_margin_fix) {
-      DioramaSkyboxUvRange(kPpuSurfaceWidth, spans[i].x0, spans[i].x1,
+      DioramaSkyboxUvRange(SR_PPU_SURFACE_MAX_WIDTH,
+                           spans[i].x0, spans[i].x1,
                            blur_radius, &u0, &u1);
     } else {
-      float margin_u = (blur_radius + 1.0f) / (float)kPpuSurfaceWidth;
+      float margin_u =
+          (blur_radius + 1.0f) / (float)SR_PPU_SURFACE_MAX_WIDTH;
       u0 = uv_u0_base + margin_u;
       u1 = uv_u1 - margin_u;
       if (u1 < u0) u1 = u0;
@@ -1705,10 +1710,10 @@ static PresentationOutcome DrawDioramaSkybox(SDL_Renderer *renderer,
         (float)out_h * ((float)y1 / (float)snes_height);
     const float v0 = rom_source
         ? (float)y0 / (float)snes_height
-        : (float)y0 / (float)kPpuBufHeight;
+        : (float)y0 / (float)SR_PPU_SURFACE_MAX_HEIGHT;
     const float v1 = rom_source
         ? (float)y1 / (float)snes_height
-        : (float)y1 / (float)kPpuBufHeight;
+        : (float)y1 / (float)SR_PPU_SURFACE_MAX_HEIGHT;
     SDL_Vertex verts[4] = {
       { { 0.0f, draw_y0 },         tint, { u0, v0 } },
       { { (float)out_w, draw_y0 }, tint, { u1, v0 } },
@@ -1883,7 +1888,7 @@ static PresentationOutcome DrawDioramaShoebox(
  * tracking the table the moment a room override or a table edit moved BG1. */
 static float DioramaBg1ReferenceZ(void) {
   for (int i = 0; i < kDioramaLayerCount; i++)
-    if (kDioramaLayers[i].plane == kPpuOverlaySource_Bg1)
+    if (kDioramaLayers[i].plane == SR_PPU_OVERLAY_BG1)
       return kDioramaLayers[i].z;
   return 0.50f;
 }
@@ -2135,7 +2140,7 @@ PresentationOutcome Diorama_Composite(
   static const float kSkyboxBlurRadiusBoth = 3.0f;
   if (g_settings.diorama_skybox != kDioramaSky_Off) {
     bool both = g_settings.diorama_skybox == kDioramaSky_Both;
-    SDL_Texture *skybox_texture = textures[kPpuOverlaySource_Bg2];
+    SDL_Texture *skybox_texture = textures[SR_PPU_OVERLAY_BG2];
     bool rom_skybox = false;
     const int skybox_source =
         DioramaLayerOrder_SkyboxSource(resolved, resolved_count);
@@ -2172,7 +2177,7 @@ PresentationOutcome Diorama_Composite(
     /* Named ROM art is immutable and supplies its own current pixels. A decode
      * or upload failure falls back to captured BG2, retaining the established
      * current-frame guard so a stale live texture cannot leak into a scene. */
-    if (rom_skybox || pixels[kPpuOverlaySource_Bg2]) {
+    if (rom_skybox || pixels[SR_PPU_OVERLAY_BG2]) {
       if (rom_skybox &&
           !SDL_SetRenderTextureAddressMode(
               renderer, SDL_TEXTURE_ADDRESS_WRAP,
@@ -2200,15 +2205,15 @@ PresentationOutcome Diorama_Composite(
    * the whole surface: the apron carries resolve headroom, never extra world to
    * show. Sampling from column 0 dragged both empty apron bands into every
    * plane and widened the picture by 2*apron. */
-  float uv_u0 = (float)obj_apron / (float)kPpuSurfaceWidth;
+  float uv_u0 = (float)obj_apron / (float)SR_PPU_SURFACE_MAX_WIDTH;
   float uv_u1 =
-      (float)(obj_apron + snes_width) / (float)kPpuSurfaceWidth;
+      (float)(obj_apron + snes_width) / (float)SR_PPU_SURFACE_MAX_WIDTH;
   /* V now divides by the TEXTURE height the way U always divided by the
    * texture width. The old form (`1 - slack/tex_h`) silently assumed the
    * texture was exactly as tall as its content, which stopped being true once
-   * the planes were allocated at kPpuBufHeight to hold the vertical margin. */
+   * the planes use the ABI maximum height to hold the vertical margin. */
   float uv_v0 = 0.0f;
-  float uv_v1 = tex_h / (float)kPpuBufHeight;
+  float uv_v1 = tex_h / (float)SR_PPU_SURFACE_MAX_HEIGHT;
   /* World height is normalized against the AUTHENTIC 224 lines, not against
    * the captured height -- this is the whole point of the vertical extend.
    * Dividing by tex_h would make the taller capture span the same 1.0 world
@@ -2297,11 +2302,11 @@ PresentationOutcome Diorama_Composite(
      * that capture, so publish its origin once instead of making every
      * presentation overlay know the surface layout. */
     out_projection->texture_x_origin = obj_apron;
-    out_projection->texture_width = kPpuSurfaceWidth;
+    out_projection->texture_width = SR_PPU_SURFACE_MAX_WIDTH;
     /* The ALLOCATED height, matching texture_width's allocated width, because
      * Diorama_ProjectCapturedPoint divides a texture row by this to get V and
      * the uv_v window above is now expressed in the same allocated space. */
-    out_projection->texture_height = kPpuBufHeight;
+    out_projection->texture_height = SR_PPU_SURFACE_MAX_HEIGHT;
     out_projection->output_x = viewport.x;
     out_projection->output_y = viewport.y;
     out_projection->output_width = out_w;
@@ -2348,10 +2353,10 @@ PresentationOutcome Diorama_Composite(
         .rake = resolved[i].rake,
         .bow = resolved[i].bow,
       };
-      if (resolved[i].plane == kPpuOverlaySource_Bg1) {
+      if (resolved[i].plane == SR_PPU_OVERLAY_BG1) {
         out_projection->bg1_plane = plane;
       }
-      if (resolved[i].plane == kPpuOverlaySource_Bg2) {
+      if (resolved[i].plane == SR_PPU_OVERLAY_BG2) {
         out_projection->bg2_plane = plane;
       }
       if (resolved[i].plane == kDioramaPlane_Bg1Hi) {
@@ -2382,7 +2387,7 @@ PresentationOutcome Diorama_Composite(
       int plane_pass = 0;
       if (additive_plane_mask)
         plane_pass = additive ? 1
-            : plane == kPpuOverlaySource_Bg3 ? 2 : 0;
+            : plane == SR_PPU_OVERLAY_BG3 ? 2 : 0;
       if (plane_pass == blend_pass)
         draw_order[draw_count++] = i;
     }
@@ -2488,7 +2493,7 @@ PresentationOutcome Diorama_Composite(
         map_group == kActRaiserMapGroup_Aitos &&
         map_number >= 2 && map_number <= 3 &&
         layer_section == kDioramaLayerSection_AitosWaterfall &&
-        (layer->plane == kPpuOverlaySource_Bg2 ||
+        (layer->plane == SR_PPU_OVERLAY_BG2 ||
          layer->plane == kDioramaPlane_Bg2Hi ||
          layer->plane == kDioramaPlane_Bg2Far);
     float attached_lower_content_v_max = 0.0f;
@@ -2502,7 +2507,7 @@ PresentationOutcome Diorama_Composite(
       const float layer_v_span = layer_v1 - layer_v0;
       if (DioramaVerticalRepeatPlan_Build(
               authentic_y0, kActRaiserAuthenticHeight,
-              snes_height, kPpuBufHeight, &repeat) &&
+              snes_height, SR_PPU_SURFACE_MAX_HEIGHT, &repeat) &&
           layer_v_span > 0.0f) {
         /* Apply the same bounded sub-tick V shift as the host layer. The shift
          * cancels out of fold_t (geometry stays fixed) but keeps the repeated
@@ -2520,14 +2525,18 @@ PresentationOutcome Diorama_Composite(
          * rectangle's geometric end; otherwise vertical interpolation samples
          * across that hidden ownership boundary and exposes a colored line. */
         attached_lower_content_v_max =
-            (float)drawable_y1 / (float)kPpuBufHeight + layer_v_shift;
+            (float)drawable_y1 / (float)SR_PPU_SURFACE_MAX_HEIGHT +
+            layer_v_shift;
         log_drawable_y1 = drawable_y1;
         const float fold_v =
-            (float)repeat.fold_y / (float)kPpuBufHeight + layer_v_shift;
+            (float)repeat.fold_y / (float)SR_PPU_SURFACE_MAX_HEIGHT +
+            layer_v_shift;
         const float source_v0 =
-            (float)repeat.source_y0 / (float)kPpuBufHeight + layer_v_shift;
+            (float)repeat.source_y0 / (float)SR_PPU_SURFACE_MAX_HEIGHT +
+            layer_v_shift;
         const float source_v1 =
-            (float)repeat.source_y1 / (float)kPpuBufHeight + layer_v_shift;
+            (float)repeat.source_y1 / (float)SR_PPU_SURFACE_MAX_HEIGHT +
+            layer_v_shift;
         const float fold_t = (fold_v - layer_v0) / layer_v_span;
         const float extension_height =
             (float)repeat.repeat_height / (float)kActRaiserAuthenticHeight;
@@ -2574,7 +2583,7 @@ PresentationOutcome Diorama_Composite(
            * high-priority band uses identical geometry but must not overwrite
            * the atmosphere's established low-plane host. */
           if (extension_nv > 0 && out_projection &&
-              layer->plane == kPpuOverlaySource_Bg2 &&
+              layer->plane == SR_PPU_OVERLAY_BG2 &&
               out_projection->bg2_plane.valid) {
             DioramaPlaneProjection *plane = &out_projection->bg2_plane;
             plane->overflow_valid = true;
@@ -2588,7 +2597,7 @@ PresentationOutcome Diorama_Composite(
         }
       }
     }
-    if (layer->plane == kPpuOverlaySource_Bg2)
+    if (layer->plane == SR_PPU_OVERLAY_BG2)
       DioramaAitosWaterfallLog(map_group, map_number, layer_section,
                                aitos_waterfall_extension, extension_nv,
                                authentic_y0, snes_height, log_drawable_y1,
@@ -2703,7 +2712,7 @@ PresentationOutcome Diorama_Composite(
      * — see the section comment above kDioramaSupersample. */
     bool rim_light = layer->is_figure && RimLightEnabled(renderer);
     bool want_dof = !rim_light &&
-        layer->plane != kPpuOverlaySource_Bg3 &&
+        layer->plane != SR_PPU_OVERLAY_BG3 &&
         DofBlurEnabled(renderer);
     float dof_radius = want_dof ? DofRadiusForLayer(layer_z) : 0.0f;
     if (dof_radius < 0.05f) dof_radius = 0.0f;
@@ -2747,9 +2756,9 @@ PresentationOutcome Diorama_Composite(
     }
 
     /* Supersample targets contain only the active capture region, unlike the
-     * source textures whose allocation is kPpuBufWidth x kPpuBufHeight. Remap
+     * source textures whose allocation uses the ABI surface maxima. Remap
      * BOTH axes into the compact target so its right/bottom edges are 1.0
-     * instead of snes_width/kPpuBufWidth and snes_height/kPpuBufHeight. V used
+     * instead of the live width/height ratios. V used
      * to need no remap because the texture was exactly as tall as its content;
      * the vertical margin ended that. Stack/skirt draws above still use the
      * original source texture and therefore keep the original coordinates. */
@@ -2790,7 +2799,8 @@ PresentationOutcome Diorama_Composite(
       bool shadow_blur_bound = false;
       if (shadow_blur_requested) {
         BlurUniforms u = {
-          1.0f / (float)kPpuSurfaceWidth, 1.0f / (float)kPpuBufHeight, 3.0f, 0.0f,
+          1.0f / (float)SR_PPU_SURFACE_MAX_WIDTH,
+          1.0f / (float)SR_PPU_SURFACE_MAX_HEIGHT, 3.0f, 0.0f,
         };
         shadow_blur_bound = SDL_SetGPURenderStateFragmentUniforms(
                                 g_blur_state, 0, &u, sizeof(u)) &&
@@ -2822,7 +2832,8 @@ PresentationOutcome Diorama_Composite(
     bool layer_shader_bound = false;
     if (rim_light) {
       RimLightUniforms u = {
-        1.0f / (float)kPpuSurfaceWidth, 1.0f / (float)kPpuBufHeight, 0.33f, 0.0f,
+        1.0f / (float)SR_PPU_SURFACE_MAX_WIDTH,
+        1.0f / (float)SR_PPU_SURFACE_MAX_HEIGHT, 0.33f, 0.0f,
       };
       layer_shader_bound = SDL_SetGPURenderStateFragmentUniforms(
                                g_rim_light_state, 0, &u, sizeof(u)) &&
@@ -2831,7 +2842,8 @@ PresentationOutcome Diorama_Composite(
       /* Feed the shader the exact source window used by this mesh so edge
        * fading and geometry cannot disagree. */
       DofEdgeUniforms u = {
-        1.0f / (float)kPpuSurfaceWidth, 1.0f / (float)kPpuBufHeight, dof_radius,
+        1.0f / (float)SR_PPU_SURFACE_MAX_WIDTH,
+        1.0f / (float)SR_PPU_SURFACE_MAX_HEIGHT, dof_radius,
         layer_u0, layer_u1,
         layer_v0, layer_v1,
         want_edge ? 2.0f : 0.0f,

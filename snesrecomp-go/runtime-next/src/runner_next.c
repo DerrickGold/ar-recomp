@@ -12,18 +12,60 @@
 
 _Static_assert(SR_PPU_NATIVE_WIDTH == kPpuXPixels,
                "public ABI native width must match the PPU");
+_Static_assert(SR_PPU_NATIVE_HEIGHT == kPpuYPixels,
+               "public ABI native height must match the PPU");
+_Static_assert(SR_PPU_HORIZONTAL_MARGIN_MAX == kPpuExtraLeftRight &&
+                   SR_PPU_VERTICAL_MARGIN_MAX == kPpuExtraTopBottom,
+               "public ABI margin limits must match the PPU");
+_Static_assert(SR_PPU_SURFACE_MAX_WIDTH == kPpuSurfaceWidth &&
+                   SR_PPU_SURFACE_MAX_HEIGHT == kPpuBufHeight,
+               "public ABI surface limits must match the PPU");
+_Static_assert(SR_PPU_OBJ_APRON == kPpuObjApron,
+               "public ABI OBJ apron must match the PPU");
 _Static_assert(SR_PPU_OBJ_X_WRAP == kPpuObjXWrap,
                "public ABI OBJ X wrap must match the PPU");
 _Static_assert(SR_PPU_OBJ_Y_WRAP == kPpuObjYWrap,
                "public ABI OBJ Y wrap must match the PPU");
 _Static_assert(SR_PPU_OBJ_Y_NEGATIVE_FROM == kPpuObjYNegativeFrom,
                "public ABI OBJ negative-Y band must match the PPU");
+_Static_assert(SR_PPU_MODE7_CANVAS_EXTENT == kPpuMode7CanvasExtent,
+               "public ABI Mode-7 canvas extent must match the PPU");
 _Static_assert(SR_PPU_CGRAM_WORD_COUNT == kPpuCgramEntries,
                "public ABI CGRAM extent must match the PPU");
 _Static_assert(SR_PPU_TILE_ID_COUNT == kPpuObjTileIds,
                "public ABI tile-id extent must match the PPU");
 _Static_assert(SR_PPU_SURFACE_BAND_COUNT == 4u,
                "public ABI surface bands must cover primary plus 3 splits");
+_Static_assert(SR_PPU_OVERLAY_BG1 == kPpuOverlaySource_Bg1 &&
+                   SR_PPU_OVERLAY_BG2 == kPpuOverlaySource_Bg2 &&
+                   SR_PPU_OVERLAY_BG3 == kPpuOverlaySource_Bg3 &&
+                   SR_PPU_OVERLAY_BG4 == kPpuOverlaySource_Bg4 &&
+                   SR_PPU_OVERLAY_OBJ == kPpuOverlaySource_Obj &&
+                   SR_PPU_OVERLAY_SOURCE_COUNT == kPpuOverlaySource_Count,
+               "public ABI overlay IDs must match the PPU");
+_Static_assert(SR_PPU_OVERLAY_REMOVE_FROM_GAME ==
+                       kPpuOverlayFlag_RemoveFromGame &&
+                   SR_PPU_OVERLAY_MARK_OBJ_COLOR_MATH ==
+                       kPpuOverlayFlag_MarkObjColorMath &&
+                   SR_PPU_OVERLAY_MARK_BG_HALF_ADD ==
+                       kPpuOverlayFlag_MarkBgHalfAdd &&
+                   SR_PPU_OVERLAY_APPLY_BG_FIXED_COLOR_SUBTRACT ==
+                       kPpuOverlayFlag_ApplyBgFixedColorSubtract &&
+                   SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN ==
+                       kPpuOverlayFlag_MarkFullAddSubscreen &&
+                   SR_PPU_OVERLAY_MARK_MAIN_SCREEN_WINNER ==
+                       kPpuOverlayFlag_MarkMainScreenWinner &&
+                   SR_PPU_OVERLAY_MARK_OWNING_SCREEN_WINNER ==
+                       kPpuOverlayFlag_MarkOwningScreenWinner,
+               "public ABI overlay flags must match the PPU");
+_Static_assert(sizeof(SrPpuObjPart) == 8u,
+               "public ABI OBJ part must have a fixed layout");
+_Static_assert(offsetof(SrPpuObjPart, x) == 0u &&
+                   offsetof(SrPpuObjPart, y) == 2u &&
+                   offsetof(SrPpuObjPart, tile_attr) == 4u &&
+                   offsetof(SrPpuObjPart, size) == 6u &&
+                   offsetof(SrPpuObjPart, reserved) == 7u,
+               "public ABI OBJ part field offsets changed");
 
 static SrRunnerCpuStateProvider *s_cpu_state_provider;
 static const void *s_cpu_component;
@@ -124,9 +166,9 @@ static SrResult query_generations(
         SrRunnerHandle *runner, SrGenerationSnapshot *out_generations) {
     Snes *snes = runner_from_handle(runner);
     if (snes == NULL || out_generations == NULL ||
-        out_generations->struct_size < SR_GENERATION_SNAPSHOT_V1_SIZE)
+        out_generations->struct_size < SR_GENERATION_SNAPSHOT_V2_SIZE)
         return SR_RESULT_INVALID_ARGUMENT;
-    out_generations->struct_size = SR_GENERATION_SNAPSHOT_V1_SIZE;
+    out_generations->struct_size = SR_GENERATION_SNAPSHOT_V2_SIZE;
     out_generations->reserved = 0u;
     out_generations->lifetime_generation = snes->abiLifetimeGeneration;
     out_generations->tick_generation = snes->abiTickGeneration;
@@ -195,16 +237,16 @@ static SrResult borrow_memory(SrRunnerHandle *runner, SrMemoryRegion region,
     uint64_t byte_size = 0u;
     SrResult result;
     if (snes == NULL || out_span == NULL ||
-        out_span->struct_size < SR_BORROWED_SPAN_V1_SIZE)
+        out_span->struct_size < SR_BORROWED_SPAN_V2_SIZE)
         return SR_RESULT_INVALID_ARGUMENT;
     result = resolve_memory(snes, region, &data, &byte_size);
     if (result != SR_RESULT_OK) {
-        memset(out_span, 0, SR_BORROWED_SPAN_V1_SIZE);
-        out_span->struct_size = SR_BORROWED_SPAN_V1_SIZE;
+        memset(out_span, 0, SR_BORROWED_SPAN_V2_SIZE);
+        out_span->struct_size = SR_BORROWED_SPAN_V2_SIZE;
         out_span->region = region;
         return result;
     }
-    out_span->struct_size = SR_BORROWED_SPAN_V1_SIZE;
+    out_span->struct_size = SR_BORROWED_SPAN_V2_SIZE;
     out_span->region = region;
     out_span->data = data;
     out_span->byte_size = byte_size;
@@ -218,7 +260,7 @@ static uint32_t borrow_is_valid(SrRunnerHandle *runner,
     const uint8_t *data = NULL;
     uint64_t byte_size = 0u;
     if (snes == NULL || span == NULL ||
-        span->struct_size < SR_BORROWED_SPAN_V1_SIZE || span->data == NULL ||
+        span->struct_size < SR_BORROWED_SPAN_V2_SIZE || span->data == NULL ||
         span->lifetime_generation != snes->abiLifetimeGeneration)
         return 0u;
     if (resolve_memory(snes, span->region, &data, &byte_size) != SR_RESULT_OK)
@@ -265,16 +307,16 @@ static SrResult borrow_u16_memory(SrRunnerHandle *runner,
     uint64_t element_count = 0u;
     SrResult result;
     if (snes == NULL || out_span == NULL ||
-        out_span->struct_size < SR_BORROWED_U16_SPAN_V1_SIZE)
+        out_span->struct_size < SR_BORROWED_U16_SPAN_V2_SIZE)
         return SR_RESULT_INVALID_ARGUMENT;
     result = resolve_u16_memory(snes, region, &data, &element_count);
     if (result != SR_RESULT_OK) {
-        memset(out_span, 0, SR_BORROWED_U16_SPAN_V1_SIZE);
-        out_span->struct_size = SR_BORROWED_U16_SPAN_V1_SIZE;
+        memset(out_span, 0, SR_BORROWED_U16_SPAN_V2_SIZE);
+        out_span->struct_size = SR_BORROWED_U16_SPAN_V2_SIZE;
         out_span->region = region;
         return result;
     }
-    out_span->struct_size = SR_BORROWED_U16_SPAN_V1_SIZE;
+    out_span->struct_size = SR_BORROWED_U16_SPAN_V2_SIZE;
     out_span->region = region;
     out_span->data = data;
     out_span->element_count = element_count;
@@ -288,7 +330,7 @@ static uint32_t borrow_u16_is_valid(SrRunnerHandle *runner,
     const uint16_t *data = NULL;
     uint64_t element_count = 0u;
     if (snes == NULL || span == NULL ||
-        span->struct_size < SR_BORROWED_U16_SPAN_V1_SIZE ||
+        span->struct_size < SR_BORROWED_U16_SPAN_V2_SIZE ||
         span->data == NULL ||
         span->lifetime_generation != snes->abiLifetimeGeneration)
         return 0u;
@@ -302,10 +344,10 @@ static SrResult query_cpu_state(SrRunnerHandle *runner,
                                 SrCpuStateSnapshot *out_state) {
     Snes *snes = runner_from_handle(runner);
     if (snes == NULL || out_state == NULL ||
-        out_state->struct_size < SR_CPU_STATE_SNAPSHOT_V1_SIZE)
+        out_state->struct_size < SR_CPU_STATE_SNAPSHOT_V2_SIZE)
         return SR_RESULT_INVALID_ARGUMENT;
-    memset(out_state, 0, SR_CPU_STATE_SNAPSHOT_V1_SIZE);
-    out_state->struct_size = SR_CPU_STATE_SNAPSHOT_V1_SIZE;
+    memset(out_state, 0, SR_CPU_STATE_SNAPSHOT_V2_SIZE);
+    out_state->struct_size = SR_CPU_STATE_SNAPSHOT_V2_SIZE;
     out_state->lifetime_generation = snes->abiLifetimeGeneration;
     if (s_cpu_state_runner != snes || s_cpu_state_provider == NULL)
         return SR_RESULT_UNAVAILABLE;
@@ -316,10 +358,10 @@ static SrResult query_execution_state(
         SrRunnerHandle *runner, SrExecutionSnapshot *out_state) {
     Snes *snes = runner_from_handle(runner);
     if (snes == NULL || out_state == NULL ||
-        out_state->struct_size < SR_EXECUTION_SNAPSHOT_V1_SIZE)
+        out_state->struct_size < SR_EXECUTION_SNAPSHOT_V2_SIZE)
         return SR_RESULT_INVALID_ARGUMENT;
-    memset(out_state, 0, SR_EXECUTION_SNAPSHOT_V1_SIZE);
-    out_state->struct_size = SR_EXECUTION_SNAPSHOT_V1_SIZE;
+    memset(out_state, 0, SR_EXECUTION_SNAPSHOT_V2_SIZE);
+    out_state->struct_size = SR_EXECUTION_SNAPSHOT_V2_SIZE;
     out_state->lifetime_generation = snes->abiLifetimeGeneration;
     if (s_execution_state_runner != snes ||
         s_execution_state_provider == NULL)
@@ -344,10 +386,10 @@ static SrResult subscribe_events(
     unsigned index;
     if (out_subscription_id != NULL) *out_subscription_id = 0u;
     if (snes == NULL || subscription == NULL || out_subscription_id == NULL ||
-        subscription->struct_size < SR_EVENT_SUBSCRIPTION_V1_SIZE ||
+        subscription->struct_size < SR_EVENT_SUBSCRIPTION_V2_SIZE ||
         subscription->callback == NULL || subscription->event_mask == 0u)
         return SR_RESULT_INVALID_ARGUMENT;
-    if ((subscription->event_mask & ~SR_EVENT_MASK_V1_SUPPORTED) != 0u)
+    if ((subscription->event_mask & ~SR_EVENT_MASK_V2_SUPPORTED) != 0u)
         return SR_RESULT_UNSUPPORTED;
     if ((subscription->flags &
          ~(SR_EVENT_FILTER_PC_RANGE | SR_EVENT_FILTER_ADDRESS_RANGE |
@@ -386,7 +428,7 @@ static SrResult subscribe_events(
         if (slot->id != 0u) continue;
         slot->runner = snes;
         slot->subscription = *subscription;
-        slot->subscription.struct_size = SR_EVENT_SUBSCRIPTION_V1_SIZE;
+        slot->subscription.struct_size = SR_EVENT_SUBSCRIPTION_V2_SIZE;
         slot->id = s_next_event_observer_id++;
         if (slot->id == 0u) slot->id = s_next_event_observer_id++;
         *out_subscription_id = slot->id;
@@ -420,7 +462,7 @@ void sr_runner_emit_event(Snes *snes, SrEventMask event_mask,
         (g_sr_runner_event_mask & event_mask) == 0u)
         return;
     lock_event_dispatch();
-    event->struct_size = SR_RUNNER_EVENT_V1_SIZE;
+    event->struct_size = SR_RUNNER_EVENT_V2_SIZE;
     event->serial = ++s_event_serial;
     for (index = 0u; index < kEventObserverCapacity; ++index) {
         EventObserverSlot *slot = &s_event_observers[index];
@@ -593,7 +635,7 @@ static SrResult validate_mutation(Snes *snes,
     uint64_t region_size;
     SrResult result;
     if (snes == NULL || command == NULL ||
-        command->struct_size < SR_MUTATION_COMMAND_V1_SIZE)
+        command->struct_size < SR_MUTATION_COMMAND_V2_SIZE)
         return SR_RESULT_INVALID_ARGUMENT;
     if (command->flags != 0u) return SR_RESULT_UNSUPPORTED;
     switch (command->type) {
@@ -634,7 +676,7 @@ static SrResult queue_mutation(SrRunnerHandle *runner,
         if (slot->id != 0u) continue;
         slot->runner = snes;
         slot->command = *command;
-        slot->command.struct_size = SR_MUTATION_COMMAND_V1_SIZE;
+        slot->command.struct_size = SR_MUTATION_COMMAND_V2_SIZE;
         slot->id = s_next_mutation_id++;
         if (slot->id == 0u) slot->id = s_next_mutation_id++;
         slot->state = SR_MUTATION_STATE_QUEUED;
@@ -655,7 +697,7 @@ static SrResult query_mutation(SrRunnerHandle *runner, uint64_t command_id,
     Snes *snes = runner_from_handle(runner);
     unsigned index;
     if (snes == NULL || command_id == 0u || out_status == NULL ||
-        out_status->struct_size < SR_MUTATION_STATUS_V1_SIZE)
+        out_status->struct_size < SR_MUTATION_STATUS_V2_SIZE)
         return SR_RESULT_INVALID_ARGUMENT;
     if ((flags & ~SR_MUTATION_QUERY_CONSUME) != 0u)
         return SR_RESULT_UNSUPPORTED;
@@ -663,8 +705,8 @@ static SrResult query_mutation(SrRunnerHandle *runner, uint64_t command_id,
     for (index = 0u; index < kMutationCapacity; ++index) {
         MutationSlot *slot = &s_mutations[index];
         if (slot->runner != snes || slot->id != command_id) continue;
-        memset(out_status, 0, SR_MUTATION_STATUS_V1_SIZE);
-        out_status->struct_size = SR_MUTATION_STATUS_V1_SIZE;
+        memset(out_status, 0, SR_MUTATION_STATUS_V2_SIZE);
+        out_status->struct_size = SR_MUTATION_STATUS_V2_SIZE;
         out_status->state = slot->state;
         out_status->result = slot->result;
         out_status->command_id = slot->id;
@@ -861,10 +903,10 @@ static SrResult query_ppu_state(SrRunnerHandle *runner,
     Ppu *ppu;
     unsigned layer;
     if (snes == NULL || out_state == NULL ||
-        out_state->struct_size < SR_PPU_STATE_SNAPSHOT_V1_SIZE)
+        out_state->struct_size < SR_PPU_STATE_SNAPSHOT_V2_SIZE)
         return SR_RESULT_INVALID_ARGUMENT;
-    memset(out_state, 0, SR_PPU_STATE_SNAPSHOT_V1_SIZE);
-    out_state->struct_size = SR_PPU_STATE_SNAPSHOT_V1_SIZE;
+    memset(out_state, 0, SR_PPU_STATE_SNAPSHOT_V2_SIZE);
+    out_state->struct_size = SR_PPU_STATE_SNAPSHOT_V2_SIZE;
     out_state->lifetime_generation = snes->abiLifetimeGeneration;
     ppu = snes->ppu;
     if (ppu == NULL) return SR_RESULT_UNAVAILABLE;
@@ -908,6 +950,80 @@ static SrResult query_ppu_state(SrRunnerHandle *runner,
         background->bits_per_pixel = ppu_background_bpp(
             out_state->bg_mode, layer, out_state->flags);
     }
+    out_state->window_select = ppu->windowsel;
+    out_state->window_logic = ppu->wbgobjlog;
+    out_state->color_math_control = ppu->cgwsel;
+    out_state->color_math_designation = ppu->cgadsub;
+    for (layer = 0u; layer < 4u; ++layer)
+        out_state->background_tilemap_control[layer] = ppu->bgXsc[layer];
+    out_state->background_tile_base_control = ppu->bgTileAdr;
+    out_state->mode7_select = ppu->m7sel;
+    memcpy(out_state->mode7_matrix, ppu->m7matrix,
+           sizeof(out_state->mode7_matrix));
+    return SR_RESULT_OK;
+}
+
+static SrResult resolve_ppu_background_coordinate(
+        SrRunnerHandle *runner,
+        const SrPpuBackgroundCoordinateRequest *request,
+        SrPpuBackgroundCoordinateResult *out_result) {
+    Snes *snes = runner_from_handle(runner);
+    PpuWidescreenLayerPolicy policy;
+    int source_x = 0;
+    int sample_y = 0;
+    bool mapped;
+    bool mosaic = false;
+    if (snes == NULL || request == NULL || out_result == NULL ||
+        request->struct_size < SR_PPU_BACKGROUND_COORDINATE_REQUEST_V2_SIZE ||
+        out_result->struct_size <
+            SR_PPU_BACKGROUND_COORDINATE_RESULT_V2_SIZE ||
+        request->flags != 0u || request->layer >= 4u ||
+        request->screen_x < -(int32_t)SR_PPU_HORIZONTAL_MARGIN_MAX ||
+        request->screen_x >= (int32_t)(SR_PPU_NATIVE_WIDTH +
+                                       SR_PPU_HORIZONTAL_MARGIN_MAX) ||
+        request->screen_y < -(int32_t)SR_PPU_VERTICAL_MARGIN_MAX ||
+        request->screen_y >= (int32_t)(SR_PPU_NATIVE_HEIGHT +
+                                       SR_PPU_VERTICAL_MARGIN_MAX))
+        return SR_RESULT_INVALID_ARGUMENT;
+    memset(out_result, 0, SR_PPU_BACKGROUND_COORDINATE_RESULT_V2_SIZE);
+    out_result->struct_size =
+        SR_PPU_BACKGROUND_COORDINATE_RESULT_V2_SIZE;
+    out_result->lifetime_generation = snes->abiLifetimeGeneration;
+    if (request->lifetime_generation != snes->abiLifetimeGeneration)
+        return SR_RESULT_STALE_VIEW;
+    if (snes->ppu == NULL) return SR_RESULT_UNAVAILABLE;
+    mapped = PpuResolveBackgroundCoordinate(
+        snes->ppu, (uint8_t)request->layer, request->screen_x,
+        request->screen_y, &source_x, &sample_y, &policy, &mosaic);
+    _Static_assert(SR_PPU_BACKGROUND_FILL_INHERIT ==
+                       kPpuWidescreenBandFill_Inherit &&
+                   SR_PPU_BACKGROUND_FILL_TRANSPARENT ==
+                       kPpuWidescreenBandFill_Transparent &&
+                   SR_PPU_BACKGROUND_FILL_LIVE_WORLD ==
+                       kPpuWidescreenBandFill_LiveWorld &&
+                   SR_PPU_BACKGROUND_FILL_CLAMP ==
+                       kPpuWidescreenBandFill_Clamp &&
+                   SR_PPU_BACKGROUND_FILL_MIRROR ==
+                       kPpuWidescreenBandFill_Mirror &&
+                   SR_PPU_BACKGROUND_FILL_REPEAT ==
+                       kPpuWidescreenBandFill_Repeat &&
+                   SR_PPU_BACKGROUND_FILL_RAW_WRAP ==
+                       kPpuWidescreenBandFill_RawWrap,
+                   "ABI background fill values must match the PPU");
+    _Static_assert(SR_PPU_BACKGROUND_MOTION_FILL_RELATIVE ==
+                       kPpuWidescreenMotion_FillRelative &&
+                   SR_PPU_BACKGROUND_MOTION_NORMAL_SCROLL ==
+                       kPpuWidescreenMotion_NormalScroll,
+                   "ABI background motion values must match the PPU");
+    out_result->flags =
+        (mapped ? SR_PPU_BACKGROUND_COORDINATE_MAPPED : 0u) |
+        (policy.band_override
+             ? SR_PPU_BACKGROUND_COORDINATE_BAND_OVERRIDE : 0u) |
+        (mosaic ? SR_PPU_BACKGROUND_COORDINATE_MOSAIC : 0u);
+    out_result->source_x = source_x;
+    out_result->sample_y = sample_y;
+    out_result->fill = (SrPpuBackgroundFill)policy.fill;
+    out_result->motion = (SrPpuBackgroundMotion)policy.motion;
     return SR_RESULT_OK;
 }
 
@@ -956,10 +1072,10 @@ static SrResult query_ppu_frame_state(SrRunnerHandle *runner,
     Ppu *ppu;
     unsigned source;
     if (snes == NULL || out_state == NULL ||
-        out_state->struct_size < SR_PPU_FRAME_SNAPSHOT_V1_SIZE)
+        out_state->struct_size < SR_PPU_FRAME_SNAPSHOT_V2_SIZE)
         return SR_RESULT_INVALID_ARGUMENT;
-    memset(out_state, 0, SR_PPU_FRAME_SNAPSHOT_V1_SIZE);
-    out_state->struct_size = SR_PPU_FRAME_SNAPSHOT_V1_SIZE;
+    memset(out_state, 0, SR_PPU_FRAME_SNAPSHOT_V2_SIZE);
+    out_state->struct_size = SR_PPU_FRAME_SNAPSHOT_V2_SIZE;
     out_state->lifetime_generation = snes->abiLifetimeGeneration;
     ppu = snes->ppu;
     if (ppu == NULL) return SR_RESULT_UNAVAILABLE;
@@ -1047,10 +1163,10 @@ static SrResult query_ppu_surfaces(
     uint32_t rendered_height;
     unsigned source, band;
     if (snes == NULL || out_surfaces == NULL ||
-        out_surfaces->struct_size < SR_PPU_SURFACE_SNAPSHOT_V1_SIZE)
+        out_surfaces->struct_size < SR_PPU_SURFACE_SNAPSHOT_V2_SIZE)
         return SR_RESULT_INVALID_ARGUMENT;
-    memset(out_surfaces, 0, SR_PPU_SURFACE_SNAPSHOT_V1_SIZE);
-    out_surfaces->struct_size = SR_PPU_SURFACE_SNAPSHOT_V1_SIZE;
+    memset(out_surfaces, 0, SR_PPU_SURFACE_SNAPSHOT_V2_SIZE);
+    out_surfaces->struct_size = SR_PPU_SURFACE_SNAPSHOT_V2_SIZE;
     out_surfaces->lifetime_generation = snes->abiLifetimeGeneration;
     out_surfaces->overlay_count = SR_PPU_OVERLAY_SOURCE_COUNT;
     out_surfaces->band_count = SR_PPU_SURFACE_BAND_COUNT;
@@ -1071,7 +1187,9 @@ static SrResult query_ppu_surfaces(
         PpuVerticalOrigin(ppu), 1u, true);
     for (source = 0u; source < SR_PPU_OVERLAY_SOURCE_COUNT; ++source) {
         const PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
-        uint32_t height = ppu_overlay_surface_height(capture);
+        uint32_t height = ppu->overlayRenderHeight[source] != 0u
+            ? ppu->overlayRenderHeight[source]
+            : ppu_overlay_surface_height(capture);
         int32_t origin_y = capture->y0 < 0 ? -capture->y0 : 0;
         ppu_surface_view_init(
             &out_surfaces->overlays[source][0],
@@ -1112,10 +1230,252 @@ static uint32_t ppu_surface_snapshot_is_valid(
         SrRunnerHandle *runner, const SrPpuSurfaceSnapshot *surfaces) {
     Snes *snes = runner_from_handle(runner);
     return snes != NULL && snes->ppu != NULL && surfaces != NULL &&
-        surfaces->struct_size >= SR_PPU_SURFACE_SNAPSHOT_V1_SIZE &&
+        surfaces->struct_size >= SR_PPU_SURFACE_SNAPSHOT_V2_SIZE &&
         surfaces->lifetime_generation == snes->abiLifetimeGeneration &&
         surfaces->binding_generation ==
             snes->ppu->surfaceBindingGeneration;
+}
+
+static Ppu *ppu_output_control_target(Snes *snes) {
+    if (snes == NULL || snes->ppu == NULL || s_ppu_owner_runner != snes ||
+        s_owned_ppu != snes->ppu) return NULL;
+    return snes->ppu;
+}
+
+static SrResult validate_ppu_output_capacity(
+        const SrPpuOutputBindingRequest *request, uint64_t minimum_width,
+        uint64_t maximum_width, uint64_t maximum_height) {
+    uint64_t width;
+    if (request->pixels == NULL) {
+        return request->pixel_byte_size == 0u && request->pitch_bytes == 0u &&
+                       request->height_pixels == 0u
+            ? SR_RESULT_OK : SR_RESULT_INVALID_ARGUMENT;
+    }
+    if (((uintptr_t)request->pixels % _Alignof(uint32_t)) != 0u ||
+        request->pitch_bytes == 0u ||
+        request->pitch_bytes % sizeof(uint32_t) != 0u ||
+        request->pitch_bytes > (uint64_t)SIZE_MAX ||
+        request->height_pixels == 0u ||
+        request->height_pixels > maximum_height)
+        return SR_RESULT_INVALID_ARGUMENT;
+    width = request->pitch_bytes / sizeof(uint32_t);
+    if (width < minimum_width || width > maximum_width ||
+        request->pitch_bytes > UINT64_MAX / request->height_pixels ||
+        request->pixel_byte_size <
+            request->pitch_bytes * request->height_pixels)
+        return SR_RESULT_INVALID_ARGUMENT;
+    return SR_RESULT_OK;
+}
+
+static SrResult bind_ppu_output_surface(
+        SrRunnerHandle *runner, const SrPpuOutputBindingRequest *request) {
+    Snes *snes = runner_from_handle(runner);
+    Ppu *ppu;
+    SrResult capacity_result;
+    if (snes == NULL || request == NULL ||
+        request->struct_size < SR_PPU_OUTPUT_BINDING_REQUEST_V2_SIZE ||
+        request->reserved != 0u)
+        return SR_RESULT_INVALID_ARGUMENT;
+    if (request->lifetime_generation != snes->abiLifetimeGeneration)
+        return SR_RESULT_STALE_VIEW;
+    ppu = ppu_output_control_target(snes);
+    if (ppu == NULL) return SR_RESULT_UNAVAILABLE;
+    switch (request->kind) {
+        case SR_PPU_OUTPUT_MAIN: {
+            uint32_t render_flags = 0u;
+            if ((request->flags &
+                 ~SR_PPU_OUTPUT_REFERENCE_PIXEL_RENDERER) != 0u ||
+                request->source != 0u || request->band != 0u ||
+                request->scale != 0u)
+                return SR_RESULT_INVALID_ARGUMENT;
+            capacity_result = validate_ppu_output_capacity(
+                request, SR_PPU_NATIVE_WIDTH, SR_PPU_SURFACE_MAX_WIDTH,
+                SR_PPU_SURFACE_MAX_HEIGHT);
+            if (capacity_result != SR_RESULT_OK) return capacity_result;
+            if ((request->flags &
+                 SR_PPU_OUTPUT_REFERENCE_PIXEL_RENDERER) != 0u)
+                render_flags |= kPpuRenderFlags_ReferencePixelRenderer;
+            PpuBeginDrawing(ppu, request->pixels,
+                            (size_t)request->pitch_bytes, render_flags);
+            return SR_RESULT_OK;
+        }
+        case SR_PPU_OUTPUT_AUTHENTIC:
+            if (request->flags != 0u || request->source != 0u ||
+                request->band != 0u || request->scale != 0u)
+                return SR_RESULT_INVALID_ARGUMENT;
+            capacity_result = validate_ppu_output_capacity(
+                request, SR_PPU_NATIVE_WIDTH, SR_PPU_SURFACE_MAX_WIDTH,
+                SR_PPU_SURFACE_MAX_HEIGHT);
+            if (capacity_result != SR_RESULT_OK) return capacity_result;
+            return PpuBindAuthenticSurface(
+                       ppu, request->pixels, (size_t)request->pitch_bytes)
+                ? SR_RESULT_OK : SR_RESULT_INVALID_ARGUMENT;
+        case SR_PPU_OUTPUT_OVERLAY:
+            if (request->flags != 0u ||
+                request->source >= SR_PPU_OVERLAY_SOURCE_COUNT ||
+                request->band != 0u || request->scale != 0u)
+                return SR_RESULT_INVALID_ARGUMENT;
+            capacity_result = validate_ppu_output_capacity(
+                request, SR_PPU_NATIVE_WIDTH, SR_PPU_SURFACE_MAX_WIDTH,
+                SR_PPU_SURFACE_MAX_HEIGHT);
+            if (capacity_result != SR_RESULT_OK) return capacity_result;
+            return PpuBindOverlaySurfaceSized(
+                       ppu, (PpuOverlaySource)request->source,
+                       request->pixels, (size_t)request->pitch_bytes,
+                       request->height_pixels)
+                ? SR_RESULT_OK : SR_RESULT_INVALID_ARGUMENT;
+        case SR_PPU_OUTPUT_OVERLAY_PRIORITY:
+            if (request->flags != 0u ||
+                request->source >= SR_PPU_OVERLAY_SOURCE_COUNT ||
+                request->band == 0u ||
+                request->band >= SR_PPU_SURFACE_BAND_COUNT ||
+                request->scale != 0u)
+                return SR_RESULT_INVALID_ARGUMENT;
+            capacity_result = validate_ppu_output_capacity(
+                request, SR_PPU_NATIVE_WIDTH, SR_PPU_SURFACE_MAX_WIDTH,
+                SR_PPU_SURFACE_MAX_HEIGHT);
+            if (capacity_result != SR_RESULT_OK) return capacity_result;
+            if (request->pixels != NULL &&
+                request->pitch_bytes !=
+                    ppu->overlayRenderPitch[request->source])
+                return SR_RESULT_INVALID_ARGUMENT;
+            return PpuBindOverlayPrioSurface(
+                       ppu, (PpuOverlaySource)request->source,
+                       (int)request->band, request->pixels)
+                ? SR_RESULT_OK : SR_RESULT_INVALID_ARGUMENT;
+        case SR_PPU_OUTPUT_MODE7:
+            if (request->flags != 0u || request->source != 0u ||
+                request->band != 0u ||
+                (request->pixels == NULL ? request->scale != 0u
+                                         : (request->scale < 1u ||
+                                            request->scale > 4u)))
+                return SR_RESULT_INVALID_ARGUMENT;
+            capacity_result = validate_ppu_output_capacity(
+                request, (uint64_t)SR_PPU_NATIVE_WIDTH * request->scale,
+                (uint64_t)SR_PPU_SURFACE_MAX_WIDTH * request->scale,
+                (uint64_t)SR_PPU_SURFACE_MAX_HEIGHT * request->scale);
+            if (capacity_result != SR_RESULT_OK) return capacity_result;
+            return PpuBindMode7OverlaySurface(
+                       ppu, request->pixels, (size_t)request->pitch_bytes,
+                       (uint8_t)request->scale)
+                ? SR_RESULT_OK : SR_RESULT_INVALID_ARGUMENT;
+        case SR_PPU_OUTPUT_CLEAR_OVERLAY_SOURCES:
+            if (request->flags != 0u || request->source != 0u ||
+                request->band != 0u || request->scale != 0u ||
+                request->pixels != NULL || request->pixel_byte_size != 0u ||
+                request->pitch_bytes != 0u || request->height_pixels != 0u)
+                return SR_RESULT_INVALID_ARGUMENT;
+            PpuClearOverlayBindings(ppu);
+            return SR_RESULT_OK;
+        default:
+            return SR_RESULT_UNSUPPORTED;
+    }
+}
+
+static SrResult configure_ppu_horizontal_margin(
+        SrRunnerHandle *runner,
+        const SrPpuHorizontalMarginRequest *request) {
+    Snes *snes = runner_from_handle(runner);
+    Ppu *ppu;
+    uint8_t old_budget, old_left, old_right;
+    if (snes == NULL || request == NULL ||
+        request->struct_size < SR_PPU_HORIZONTAL_MARGIN_REQUEST_V2_SIZE ||
+        request->flags != 0u || request->budget_pixels >
+            SR_PPU_HORIZONTAL_MARGIN_MAX ||
+        request->reserved[0] != 0u || request->reserved[1] != 0u)
+        return SR_RESULT_INVALID_ARGUMENT;
+    if (request->lifetime_generation != snes->abiLifetimeGeneration)
+        return SR_RESULT_STALE_VIEW;
+    ppu = ppu_output_control_target(snes);
+    if (ppu == NULL) return SR_RESULT_UNAVAILABLE;
+    old_budget = ppu->extraLeftRight;
+    old_left = ppu->extraLeftCur;
+    old_right = ppu->extraRightCur;
+    switch (request->mode) {
+        case SR_PPU_HORIZONTAL_MARGIN_AVAILABLE:
+            PpuSetExtraSpace(ppu, (uint8_t)request->budget_pixels);
+            break;
+        case SR_PPU_HORIZONTAL_MARGIN_CENTERED:
+            PpuSetExtraSpaceCentered(ppu, (uint8_t)request->budget_pixels);
+            break;
+        default:
+            return SR_RESULT_UNSUPPORTED;
+    }
+    if (ppu->extraLeftRight != old_budget ||
+        ppu->extraLeftCur != old_left || ppu->extraRightCur != old_right)
+        PpuNoteSurfaceViewChange(ppu);
+    return SR_RESULT_OK;
+}
+
+static SrResult claim_ppu_overlay_capture(
+        SrRunnerHandle *runner,
+        const SrPpuOverlayCaptureRequest *request) {
+    Snes *snes = runner_from_handle(runner);
+    Ppu *ppu;
+    int64_t x1, y1;
+    if (snes == NULL || request == NULL ||
+        request->struct_size < SR_PPU_OVERLAY_CAPTURE_REQUEST_V2_SIZE ||
+        (request->flags & ~SR_PPU_OVERLAY_FLAGS_SUPPORTED) != 0u ||
+        request->source >= SR_PPU_OVERLAY_SOURCE_COUNT ||
+        request->width <= 0 || request->height <= 0 ||
+        request->reserved[0] != 0u || request->reserved[1] != 0u)
+        return SR_RESULT_INVALID_ARGUMENT;
+    if (request->lifetime_generation != snes->abiLifetimeGeneration)
+        return SR_RESULT_STALE_VIEW;
+    x1 = (int64_t)request->x + request->width;
+    y1 = (int64_t)request->y + request->height;
+    if (x1 < INT32_MIN || x1 > INT32_MAX ||
+        y1 < INT32_MIN || y1 > INT32_MAX)
+        return SR_RESULT_INVALID_ARGUMENT;
+    ppu = ppu_output_control_target(snes);
+    if (ppu == NULL) return SR_RESULT_UNAVAILABLE;
+    if (ppu->overlayCaptures[request->source].x1 >
+        ppu->overlayCaptures[request->source].x0)
+        return SR_RESULT_BUSY;
+    return PpuSetOverlayCapture(
+               ppu, (PpuOverlaySource)request->source,
+               request->x, request->y, request->width, request->height,
+               (uint8_t)request->flags)
+        ? SR_RESULT_OK : SR_RESULT_INVALID_ARGUMENT;
+}
+
+static SrResult claim_ppu_mode7_override(
+        SrRunnerHandle *runner,
+        const SrPpuMode7OverrideRequest *request) {
+    Snes *snes = runner_from_handle(runner);
+    Ppu *ppu;
+    uint64_t pixel_count;
+    if (snes == NULL || request == NULL ||
+        request->struct_size < SR_PPU_MODE7_OVERRIDE_REQUEST_V2_SIZE ||
+        request->flags != 0u || request->pixels == NULL ||
+        ((uintptr_t)request->pixels % _Alignof(uint32_t)) != 0u ||
+        request->width_pixels == 0u || request->height_pixels == 0u ||
+        request->width_pixels > INT32_MAX ||
+        request->height_pixels > INT32_MAX ||
+        request->canvas_x0 < 0 || request->canvas_y0 < 0 ||
+        request->canvas_x1 <= request->canvas_x0 ||
+        request->canvas_y1 <= request->canvas_y0 ||
+        request->canvas_x1 > (int32_t)SR_PPU_MODE7_CANVAS_EXTENT ||
+        request->canvas_y1 > (int32_t)SR_PPU_MODE7_CANVAS_EXTENT ||
+        request->wrap > 1u || request->reserved != 0u)
+        return SR_RESULT_INVALID_ARGUMENT;
+    if (request->lifetime_generation != snes->abiLifetimeGeneration)
+        return SR_RESULT_STALE_VIEW;
+    if (request->width_pixels > UINT64_MAX / request->height_pixels)
+        return SR_RESULT_INVALID_ARGUMENT;
+    pixel_count = (uint64_t)request->width_pixels * request->height_pixels;
+    if (pixel_count > UINT64_MAX / sizeof(uint32_t) ||
+        request->pixel_byte_size < pixel_count * sizeof(uint32_t))
+        return SR_RESULT_INVALID_ARGUMENT;
+    ppu = ppu_output_control_target(snes);
+    if (ppu == NULL) return SR_RESULT_UNAVAILABLE;
+    if (ppu->m7Override.rgba != NULL) return SR_RESULT_BUSY;
+    return PpuSetMode7Override(
+               ppu, request->pixels, (int)request->width_pixels,
+               (int)request->height_pixels, request->canvas_x0,
+               request->canvas_y0, request->canvas_x1, request->canvas_y1,
+               (uint8_t)request->wrap)
+        ? SR_RESULT_OK : SR_RESULT_UNAVAILABLE;
 }
 
 static SrResult rasterize_ppu_obj_range(
@@ -1123,11 +1483,11 @@ static SrResult rasterize_ppu_obj_range(
         SrPpuObjRasterResult *out_result) {
     Snes *snes = runner_from_handle(runner);
     if (snes == NULL || request == NULL || out_result == NULL ||
-        request->struct_size < SR_PPU_OBJ_RASTER_REQUEST_V1_SIZE ||
-        out_result->struct_size < SR_PPU_OBJ_RASTER_RESULT_V1_SIZE)
+        request->struct_size < SR_PPU_OBJ_RASTER_REQUEST_V2_SIZE ||
+        out_result->struct_size < SR_PPU_OBJ_RASTER_RESULT_V2_SIZE)
         return SR_RESULT_INVALID_ARGUMENT;
-    memset(out_result, 0, SR_PPU_OBJ_RASTER_RESULT_V1_SIZE);
-    out_result->struct_size = SR_PPU_OBJ_RASTER_RESULT_V1_SIZE;
+    memset(out_result, 0, SR_PPU_OBJ_RASTER_RESULT_V2_SIZE);
+    out_result->struct_size = SR_PPU_OBJ_RASTER_RESULT_V2_SIZE;
     out_result->lifetime_generation = snes->abiLifetimeGeneration;
     if (request->lifetime_generation != snes->abiLifetimeGeneration)
         return SR_RESULT_STALE_VIEW;
@@ -1136,6 +1496,11 @@ static SrResult rasterize_ppu_obj_range(
         return SR_RESULT_UNAVAILABLE;
     return s_ppu_obj_raster_provider(snes, request, out_result);
 }
+
+static SrResult query_cpu_math_state(SrRunnerHandle *runner,
+                                     SrCpuMathState *out_state);
+static SrResult restore_cpu_math_state(SrRunnerHandle *runner,
+                                       const SrCpuMathState *state);
 
 static const SnesRunnerApi k_runner_api = {
     SR_RUNNER_ABI_VERSION,
@@ -1151,7 +1516,11 @@ static const SnesRunnerApi k_runner_api = {
         SR_RUNNER_CAP_PPU_SURFACE_VIEWS |
         SR_RUNNER_CAP_EXECUTION_STATE |
         SR_RUNNER_CAP_EVENT_OBSERVERS |
-        SR_RUNNER_CAP_SAFE_POINT_MUTATIONS,
+        SR_RUNNER_CAP_SAFE_POINT_MUTATIONS |
+        SR_RUNNER_CAP_PPU_BACKGROUND_COORDINATE |
+        SR_RUNNER_CAP_PPU_OUTPUT_CONTROL |
+        SR_RUNNER_CAP_PPU_CAPTURE_CONTROL |
+        SR_RUNNER_CAP_CPU_MATH_STATE,
     get_component,
     query_generations,
     borrow_memory,
@@ -1169,6 +1538,13 @@ static const SnesRunnerApi k_runner_api = {
     unsubscribe_events,
     queue_mutation,
     query_mutation,
+    resolve_ppu_background_coordinate,
+    bind_ppu_output_surface,
+    configure_ppu_horizontal_margin,
+    claim_ppu_overlay_capture,
+    claim_ppu_mode7_override,
+    query_cpu_math_state,
+    restore_cpu_math_state,
 };
 
 /* Keep synchronized with the source boundary in runner.cmake. */
@@ -1188,7 +1564,11 @@ static const SrRunnerDescriptor k_runner = {
         SR_RUNNER_CAP_PPU_SURFACE_VIEWS |
         SR_RUNNER_CAP_EXECUTION_STATE |
         SR_RUNNER_CAP_EVENT_OBSERVERS |
-        SR_RUNNER_CAP_SAFE_POINT_MUTATIONS,
+        SR_RUNNER_CAP_SAFE_POINT_MUTATIONS |
+        SR_RUNNER_CAP_PPU_BACKGROUND_COORDINATE |
+        SR_RUNNER_CAP_PPU_OUTPUT_CONTROL |
+        SR_RUNNER_CAP_PPU_CAPTURE_CONTROL |
+        SR_RUNNER_CAP_CPU_MATH_STATE,
 };
 
 const SrRunnerDescriptor *sr_runner_descriptor(void) {
@@ -1253,4 +1633,38 @@ void sr_runner_note_mutation(Snes *snes) {
     if (snes == NULL) return;
     ++snes->abiMutationGeneration;
     invalidate_lifetime(snes);
+}
+
+static SrResult query_cpu_math_state(SrRunnerHandle *runner,
+                                     SrCpuMathState *out_state) {
+    Snes *snes = runner_from_handle(runner);
+    if (snes == NULL || out_state == NULL ||
+        out_state->struct_size < SR_CPU_MATH_STATE_V2_SIZE)
+        return SR_RESULT_INVALID_ARGUMENT;
+    memset(out_state, 0, SR_CPU_MATH_STATE_V2_SIZE);
+    out_state->struct_size = SR_CPU_MATH_STATE_V2_SIZE;
+    out_state->lifetime_generation = snes->abiLifetimeGeneration;
+    out_state->multiply_operand = snes->multiplyA;
+    out_state->multiply_or_remainder_result = snes->multiplyResult;
+    out_state->divide_dividend = snes->divideA;
+    out_state->divide_quotient = snes->divideResult;
+    return SR_RESULT_OK;
+}
+
+static SrResult restore_cpu_math_state(SrRunnerHandle *runner,
+                                       const SrCpuMathState *state) {
+    Snes *snes = runner_from_handle(runner);
+    if (snes == NULL || state == NULL ||
+        state->struct_size < SR_CPU_MATH_STATE_V2_SIZE ||
+        state->flags != 0u || state->reserved8 != 0u ||
+        state->reserved32 != 0u)
+        return SR_RESULT_INVALID_ARGUMENT;
+    if (state->lifetime_generation != snes->abiLifetimeGeneration)
+        return SR_RESULT_STALE_VIEW;
+    sr_runner_note_mutation(snes);
+    snes->multiplyA = state->multiply_operand;
+    snes->multiplyResult = state->multiply_or_remainder_result;
+    snes->divideA = state->divide_dividend;
+    snes->divideResult = state->divide_quotient;
+    return SR_RESULT_OK;
 }
