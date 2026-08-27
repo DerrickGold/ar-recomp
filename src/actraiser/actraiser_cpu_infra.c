@@ -3,6 +3,8 @@
 #include "ar_trace.h"
 #include "cpu_state.h"
 #include "hd_replacements.h"
+#include "native_audio_mixer.h"
+#include "native_audio_extension.h"
 #include "runner_next.h"
 #include "runner_next_internal.h"
 #include "sim/sim_world_map_build.h"
@@ -84,8 +86,11 @@ static SrResult ActRaiser_QueryExecutionState(
 }
 
 static void ActRaiser_BindRunnerAbi(Snes *snes, bool enabled) {
-  HdReplacements_BindRunner(enabled ? sr_runner_handle(snes) : NULL);
-  SimWorldMapBuild_BindRunner(enabled ? sr_runner_handle(snes) : NULL);
+  SrRunnerHandle *runner = enabled ? sr_runner_handle(snes) : NULL;
+  HdReplacements_BindRunner(runner);
+  SimWorldMapBuild_BindRunner(runner);
+  ActRaiser_SpcUploadBindRunner(runner);
+  NativeAudioMixer_BindRunner(runner);
   ar_trace_bind_runner(snes, enabled);
   sr_runner_bind_ppu_services(snes, enabled);
   sr_runner_set_cpu_state_provider(
@@ -108,6 +113,14 @@ const RtlGameInfo kActRaiserGameInfo = {
   .spc_upload_customize = &ActRaiser_SpcUploadCustomize,
   .spc_upload_commit = &ActRaiser_SpcUploadCommit,
   .spc_upload_stack_pop = &ActRaiser_SpcUploadStackPop,
+  .audio_dsp_write_routing = &NativeAudioMixer_RouteDspWrite,
+  .audio_state_loaded_routing = &NativeAudioMixer_RouteStateLoaded,
+  .audio_extension_dsp_write = &NativeAudioExtension_FilterDspWrite,
+  .audio_extension_spc_opcode = &NativeAudioExtension_PatchSpcOpcode,
+  .audio_extension_spc_cycle =
+      &NativeAudioExtension_AdjustSpcOpcodeCycles,
+  .audio_extension_save = &NativeAudioExtension_SaveState,
+  .audio_extension_upload = &NativeAudioExtension_OnSpcUpload,
   .bind_runner_abi = &ActRaiser_BindRunnerAbi,
 #endif
 };

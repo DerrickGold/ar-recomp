@@ -2,6 +2,7 @@
 
 #include "apu.h"
 #include "saveload.h"
+#include "runner_next_internal.h"
 
 #include <stddef.h>
 #include <stdlib.h>
@@ -22,7 +23,6 @@ static const uint8_t k_opcode_cycles[256] = {
     2,8,4,5,3,4,3,6,2,4,5,3,4,3,4,3, 2,8,4,5,4,5,5,6,3,4,5,4,2,2,4,3,
 };
 
-void (*g_spc_opcode_trace_hook)(Spc *, uint16_t);
 void (*g_spc_opcode_patch_hook)(Spc *, uint16_t);
 int (*g_spc_opcode_cycle_hook)(Spc *, uint16_t, int);
 
@@ -224,7 +224,10 @@ int spc_runOpcode(Spc *spc) {
     spc->cyclesUsed = 0u;
     if (spc->stopped) return 1;
     const uint16_t opcode_pc = spc->pc;
-    if (g_spc_opcode_trace_hook != NULL) g_spc_opcode_trace_hook(spc, opcode_pc);
+    if (sr_runner_audio_trace_enabled())
+        sr_runner_emit_audio_trace(
+            spc->apu, SR_AUDIO_TRACE_SPC_OPCODE, opcode_pc,
+            0u, 0u, 0u, snes_apu_cycle_count());
     if (g_spc_opcode_patch_hook != NULL) g_spc_opcode_patch_hook(spc, opcode_pc);
     const uint8_t opcode = fetch8(spc);
     int extra = 0;

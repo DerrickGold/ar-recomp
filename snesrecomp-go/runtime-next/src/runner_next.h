@@ -27,6 +27,9 @@ extern "C" {
 #define SR_RUNNER_CAP_PPU_OUTPUT_CONTROL UINT64_C(0x0000000000002000)
 #define SR_RUNNER_CAP_PPU_CAPTURE_CONTROL UINT64_C(0x0000000000004000)
 #define SR_RUNNER_CAP_CPU_MATH_STATE UINT64_C(0x0000000000008000)
+#define SR_RUNNER_CAP_AUDIO_TRACE_OBSERVERS UINT64_C(0x0000000000010000)
+#define SR_RUNNER_CAP_SPC_CONTROL UINT64_C(0x0000000000020000)
+#define SR_RUNNER_CAP_AUDIO_MIX_CONTROL UINT64_C(0x0000000000040000)
 
 typedef uint32_t SrResult;
 enum {
@@ -406,6 +409,65 @@ typedef struct SrPpuObjRasterResult {
     ((uint32_t)(offsetof(SrPpuObjRasterResult, height) +                  \
                 sizeof(((SrPpuObjRasterResult *)0)->height)))
 
+/* Resolve an OAM range once into caller-owned fixed-width parts. The result
+ * preserves the PPU's live rotation, exact-position, camera-relative, size,
+ * and priority rules without exposing any of their concrete storage. The
+ * returned parts are ordinary values and may be retained by the caller. */
+typedef struct SrPpuObjResolveRequest {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t lifetime_generation;
+    uint32_t first_sprite;
+    uint32_t sprite_count;
+    uint32_t priority;
+    uint32_t part_capacity;
+    SrPpuObjPart *parts;
+} SrPpuObjResolveRequest;
+
+#define SR_PPU_OBJ_RESOLVE_REQUEST_V2_SIZE                               \
+    ((uint32_t)(offsetof(SrPpuObjResolveRequest, parts) +                 \
+                sizeof(((SrPpuObjResolveRequest *)0)->parts)))
+
+typedef struct SrPpuObjResolveResult {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t lifetime_generation;
+    uint32_t part_count;
+    uint32_t reserved;
+    int32_t x0;
+    int32_t y0;
+    int32_t x1;
+    int32_t y1;
+} SrPpuObjResolveResult;
+
+#define SR_PPU_OBJ_RESOLVE_RESULT_V2_SIZE                                \
+    ((uint32_t)(offsetof(SrPpuObjResolveResult, y1) +                     \
+                sizeof(((SrPpuObjResolveResult *)0)->y1)))
+
+/* Rasterize caller-owned resolved or synthetic parts into caller-owned
+ * storage. The explicit bounds are also the crop rectangle, allowing a
+ * consumer to pack or band a composition without an intermediate image copy. */
+typedef struct SrPpuObjPartsRasterRequest {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t lifetime_generation;
+    const SrPpuObjPart *parts;
+    uint64_t part_count;
+    int32_t x0;
+    int32_t y0;
+    int32_t x1;
+    int32_t y1;
+    uint32_t pixel_format;
+    uint32_t reserved;
+    uint32_t *pixels;
+    uint64_t pixel_byte_size;
+    uint64_t pitch_bytes;
+} SrPpuObjPartsRasterRequest;
+
+#define SR_PPU_OBJ_PARTS_RASTER_REQUEST_V2_SIZE                          \
+    ((uint32_t)(offsetof(SrPpuObjPartsRasterRequest, pitch_bytes) +       \
+                sizeof(((SrPpuObjPartsRasterRequest *)0)->pitch_bytes)))
+
 /* Read-only views of the output surfaces currently bound to the PPU. The
  * storage remains host-owned. A snapshot is valid only until the next runner
  * lifetime invalidation or successful PPU surface rebind; callers can test
@@ -753,6 +815,115 @@ typedef struct SrEventSubscription {
     ((uint32_t)(offsetof(SrEventSubscription, user_data) +                \
                 sizeof(((SrEventSubscription *)0)->user_data)))
 
+/* Low-level, synchronous APU/SPC observation for diagnostics. The callback
+ * runs while the producing thread owns the APU lock, so the register values
+ * and ARAM view form one coherent observation. apu_ram is immutable through
+ * this interface and valid only for the callback; consumers must copy any
+ * bytes they retain. Install and remove observers only while audio production
+ * and runner execution are stopped. */
+#define SR_APU_RAM_BYTE_COUNT UINT64_C(0x10000)
+#define SR_APU_INPUT_PORT_COUNT 6u
+#define SR_APU_OUTPUT_PORT_COUNT 4u
+
+typedef uint32_t SrAudioTraceEventType;
+enum {
+    SR_AUDIO_TRACE_APU_PORT_APPLY = 1u,
+    SR_AUDIO_TRACE_SPC_PORT_READ = 2u,
+    SR_AUDIO_TRACE_SPC_OPCODE = 3u,
+    SR_AUDIO_TRACE_DSP_WRITE = 4u
+};
+
+typedef struct SrAudioTraceEvent {
+    uint32_t struct_size;
+    SrAudioTraceEventType type;
+    uint64_t cycle_count;
+    const uint8_t *apu_ram;
+    uint64_t apu_ram_byte_size;
+    uint16_t spc_pc;
+    uint8_t spc_a;
+    uint8_t spc_x;
+    uint8_t spc_y;
+    uint8_t spc_sp;
+    uint8_t apu_input_ports[SR_APU_INPUT_PORT_COUNT];
+    uint8_t apu_output_ports[SR_APU_OUTPUT_PORT_COUNT];
+    uint8_t port;
+    uint8_t value;
+    uint8_t dsp_address;
+    uint8_t reserved8;
+} SrAudioTraceEvent;
+
+#define SR_AUDIO_TRACE_EVENT_V2_SIZE                                     \
+    ((uint32_t)(offsetof(SrAudioTraceEvent, reserved8) +                  \
+                sizeof(((SrAudioTraceEvent *)0)->reserved8)))
+
+typedef void (*SrAudioTraceCallback)(void *user_data,
+                                     SrRunnerHandle *runner,
+                                     const SrAudioTraceEvent *event);
+
+typedef struct SrAudioTraceSubscription {
+    uint32_t struct_size;
+    uint32_t flags;
+    SrAudioTraceCallback callback;
+    void *user_data;
+} SrAudioTraceSubscription;
+
+#define SR_AUDIO_TRACE_SUBSCRIPTION_V2_SIZE                              \
+    ((uint32_t)(offsetof(SrAudioTraceSubscription, user_data) +           \
+                sizeof(((SrAudioTraceSubscription *)0)->user_data)))
+
+/* Synchronous, atomic SPC program-counter control for narrow game-adapter
+ * handshakes. The runner holds the APU lock while it compares the inclusive
+ * PC range and up to eight consecutive ARAM bytes, then applies the new PC
+ * only when every predicate matches. This is an emulation-thread service; it
+ * must not be called from an audio callback or audio-trace observer. */
+#define SR_SPC_PC_EXPECTED_ARAM_MAX 8u
+
+typedef struct SrSpcPcControlRequest {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint16_t expected_pc_low;
+    uint16_t expected_pc_high;
+    uint16_t replacement_pc;
+    uint16_t expected_aram_address;
+    uint8_t expected_aram_count;
+    uint8_t reserved8[3];
+    uint8_t expected_aram[SR_SPC_PC_EXPECTED_ARAM_MAX];
+} SrSpcPcControlRequest;
+
+#define SR_SPC_PC_CONTROL_REQUEST_V2_SIZE                                \
+    ((uint32_t)(offsetof(SrSpcPcControlRequest, expected_aram) +          \
+                sizeof(((SrSpcPcControlRequest *)0)->expected_aram)))
+
+#define SR_SPC_PC_CONTROL_MATCHED UINT32_C(0x00000001)
+#define SR_SPC_PC_CONTROL_WRITTEN UINT32_C(0x00000002)
+
+typedef struct SrSpcPcControlResult {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint16_t observed_pc;
+    uint16_t current_pc;
+    uint32_t reserved;
+} SrSpcPcControlResult;
+
+#define SR_SPC_PC_CONTROL_RESULT_V2_SIZE                                 \
+    ((uint32_t)(offsetof(SrSpcPcControlResult, reserved) +                \
+                sizeof(((SrSpcPcControlResult *)0)->reserved)))
+
+/* Synchronous host-mix policy. Percentages are inclusive 0..100 values and
+ * affect the runner's native DSP output buses; replacement-stream volume is a
+ * host concern and remains outside this request. */
+typedef struct SrAudioMixControl {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint32_t music_gain_percent;
+    uint32_t sfx_gain_percent;
+    uint32_t reserved[2];
+} SrAudioMixControl;
+
+#define SR_AUDIO_MIX_CONTROL_V2_SIZE                                     \
+    ((uint32_t)(offsetof(SrAudioMixControl, reserved) +                   \
+                sizeof(((SrAudioMixControl *)0)->reserved)))
+
 /* Small, copied commands applied at the beginning of a host frame before
  * emulation observes that frame's input or component state. Queueing is safe
  * from another host thread. The queue retains no caller pointer. */
@@ -841,6 +1012,13 @@ typedef struct SnesRunnerApi {
     SrResult (*rasterize_ppu_obj_range)(
         SrRunnerHandle *runner, const SrPpuObjRasterRequest *request,
         SrPpuObjRasterResult *out_result);
+    SrResult (*resolve_ppu_obj_range)(
+        SrRunnerHandle *runner, const SrPpuObjResolveRequest *request,
+        SrPpuObjResolveResult *out_result);
+    SrResult (*rasterize_ppu_obj_parts)(
+        SrRunnerHandle *runner,
+        const SrPpuObjPartsRasterRequest *request,
+        SrPpuObjRasterResult *out_result);
     SrResult (*query_ppu_surfaces)(SrRunnerHandle *runner,
                                    SrPpuSurfaceSnapshot *out_surfaces);
     uint32_t (*ppu_surface_snapshot_is_valid)(
@@ -877,6 +1055,17 @@ typedef struct SnesRunnerApi {
                                      SrCpuMathState *out_state);
     SrResult (*restore_cpu_math_state)(SrRunnerHandle *runner,
                                        const SrCpuMathState *state);
+    SrResult (*subscribe_audio_trace)(
+        SrRunnerHandle *runner,
+        const SrAudioTraceSubscription *subscription,
+        uint64_t *out_subscription_id);
+    SrResult (*unsubscribe_audio_trace)(SrRunnerHandle *runner,
+                                        uint64_t subscription_id);
+    SrResult (*compare_exchange_spc_pc)(
+        SrRunnerHandle *runner, const SrSpcPcControlRequest *request,
+        SrSpcPcControlResult *out_result);
+    SrResult (*configure_audio_mix)(SrRunnerHandle *runner,
+                                    const SrAudioMixControl *control);
 } SnesRunnerApi;
 
 #define SNES_RUNNER_API_V2_BASE_SIZE                                           \
@@ -898,6 +1087,10 @@ typedef struct SnesRunnerApi {
 #define SNES_RUNNER_API_PPU_OBJ_RASTER_SIZE                               \
     ((uint32_t)(offsetof(SnesRunnerApi, rasterize_ppu_obj_range) +         \
                 sizeof(((SnesRunnerApi *)0)->rasterize_ppu_obj_range)))
+
+#define SNES_RUNNER_API_PPU_OBJ_PARTS_SIZE                                \
+    ((uint32_t)(offsetof(SnesRunnerApi, rasterize_ppu_obj_parts) +         \
+                sizeof(((SnesRunnerApi *)0)->rasterize_ppu_obj_parts)))
 
 #define SNES_RUNNER_API_PPU_SURFACE_SIZE                                  \
     ((uint32_t)(offsetof(SnesRunnerApi, ppu_surface_snapshot_is_valid) +   \
@@ -933,6 +1126,18 @@ typedef struct SnesRunnerApi {
 #define SNES_RUNNER_API_CPU_MATH_STATE_SIZE                              \
     ((uint32_t)(offsetof(SnesRunnerApi, restore_cpu_math_state) +         \
                 sizeof(((SnesRunnerApi *)0)->restore_cpu_math_state)))
+
+#define SNES_RUNNER_API_AUDIO_TRACE_OBSERVER_SIZE                        \
+    ((uint32_t)(offsetof(SnesRunnerApi, unsubscribe_audio_trace) +        \
+                sizeof(((SnesRunnerApi *)0)->unsubscribe_audio_trace)))
+
+#define SNES_RUNNER_API_SPC_CONTROL_SIZE                                 \
+    ((uint32_t)(offsetof(SnesRunnerApi, compare_exchange_spc_pc) +        \
+                sizeof(((SnesRunnerApi *)0)->compare_exchange_spc_pc)))
+
+#define SNES_RUNNER_API_AUDIO_MIX_CONTROL_SIZE                           \
+    ((uint32_t)(offsetof(SnesRunnerApi, configure_audio_mix) +            \
+                sizeof(((SnesRunnerApi *)0)->configure_audio_mix)))
 
 typedef struct SrRunnerDescriptor {
     uint32_t abi_version;

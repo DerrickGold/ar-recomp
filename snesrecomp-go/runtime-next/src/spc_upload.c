@@ -32,7 +32,7 @@ bool sr_spc_upload_image(const uint8_t *rom, size_t rom_size,
         if (length == 0u) {
             result->entry_point = destination;
             result->block_count = (uint16_t)blocks;
-            result->script_offset = cursor - 1u;
+            result->script_offset = (uint64_t)(cursor - 1u);
             return true;
         }
         if (++blocks > SR_SPC_MAX_BLOCKS) return false;

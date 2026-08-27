@@ -1,13 +1,13 @@
 #ifndef SNESRECOMP_NEXT_COMMON_CPU_INFRA_H
 #define SNESRECOMP_NEXT_COMMON_CPU_INFRA_H
 
+#include "audio_adapter.h"
 #include "types.h"
 
 typedef struct Snes Snes;
 typedef struct Cpu Cpu;
 typedef struct CpuState CpuState;
-typedef struct Apu Apu;
-typedef struct SrSpcUploadResult SrSpcUploadResult;
+typedef struct SrSpcUploadContext SrSpcUploadContext;
 
 extern Snes *g_snes;
 extern Cpu *g_snes_cpu;
@@ -25,11 +25,24 @@ typedef int RdnmiReadHookFunc(Snes *snes);
 typedef bool DispatchMissRecoveryFunc(uint32 source_pc24, uint32 target_pc24);
 typedef bool RtlSpcUploadSourceFunc(CpuState *cpu, uint32 *source24);
 typedef bool RtlSpcUploadCustomizeFunc(CpuState *cpu,
-                                       const SrSpcUploadResult *upload,
+                                       const SrSpcUploadContext *upload,
                                        uint32 source24);
-typedef void RtlSpcUploadCommitFunc(Apu *apu, uint16 entry_point,
-                                    bool initial_upload);
+typedef void RtlSpcUploadCommitFunc(SrSpcUploadContext *upload);
 typedef int RtlSpcUploadStackPopFunc(const CpuState *cpu);
+typedef void RtlAudioDspWriteRoutingFunc(
+    const RtlAudioDspWriteContext *context,
+    RtlAudioDspWriteRouting *routing);
+typedef void RtlAudioStateLoadedRoutingFunc(
+    const RtlAudioStateLoadedContext *context,
+    RtlAudioStateLoadedRouting *routing);
+typedef bool RtlAudioExtensionDspWriteFunc(
+    RtlAudioExtensionContext *context, uint8_t address, uint8_t *value);
+typedef void RtlAudioExtensionSpcOpcodeFunc(
+    RtlAudioExtensionContext *context, uint16_t opcode_pc);
+typedef int RtlAudioExtensionSpcCycleFunc(uint16_t opcode_pc, int cycles);
+typedef void RtlAudioExtensionSaveFunc(RtlAudioSaveContext *context);
+typedef void RtlAudioExtensionUploadFunc(
+    RtlAudioExtensionContext *context, uint32_t source24);
 typedef void RunnerAbiBindFunc(Snes *snes, bool enabled);
 
 #ifndef AR_WATCHDOG
@@ -80,11 +93,24 @@ typedef struct RtlGameInfo {
     RtlSpcUploadCustomizeFunc *spc_upload_customize;
     RtlSpcUploadCommitFunc *spc_upload_commit;
     RtlSpcUploadStackPopFunc *spc_upload_stack_pop;
+    RtlAudioDspWriteRoutingFunc *audio_dsp_write_routing;
+    RtlAudioStateLoadedRoutingFunc *audio_state_loaded_routing;
+    RtlAudioExtensionDspWriteFunc *audio_extension_dsp_write;
+    RtlAudioExtensionSpcOpcodeFunc *audio_extension_spc_opcode;
+    RtlAudioExtensionSpcCycleFunc *audio_extension_spc_cycle;
+    RtlAudioExtensionSaveFunc *audio_extension_save;
+    RtlAudioExtensionUploadFunc *audio_extension_upload;
     /* Optional game adapter for authoritative recompiled-CPU state. */
     RunnerAbiBindFunc *bind_runner_abi;
 } RtlGameInfo;
 
 extern const RtlGameInfo *g_rtl_game_info;
 void RtlRegisterGame(const RtlGameInfo *info);
+/* Restart-class configuration. Disabled mode installs no hot audio-extension
+ * hooks; enabled callbacks run only at existing DSP/SPC/APU seams. */
+void RtlAudioExtensionConfigure(bool enabled);
+/* Called only from the runner's SPC-upload safe point while it owns the APU
+ * lock. The callback may therefore mutate its borrowed ARAM view directly. */
+void RtlAudioExtensionNotifyUploadLocked(uint32 source24);
 
 #endif

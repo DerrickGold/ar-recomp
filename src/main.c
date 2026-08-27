@@ -47,7 +47,6 @@
 #include "run_dir.h"
 #include "launcher.h"
 #include "util.h"
-#include "actraiser/actraiser_spc_player.h"
 #include "actraiser/actraiser_action_bg.h"
 #include "actraiser_game.h"
 #include "cpu_trace.h"
@@ -226,8 +225,6 @@ int g_ws_display_extra;
  * SR_PPU_VERTICAL_MARGIN_MAX. */
 int g_ws_extra_top;
 int g_ws_extra_bottom;
-
-struct SpcPlayer *g_spc_player;
 
 extern const RtlGameInfo kActRaiserGameInfo;
 
@@ -1330,9 +1327,6 @@ static void AppBoot_InstallSubsystems(AppBoot *app) {
 
   /* After music: the census chains the APU port seam music installs. */
   SfxCensus_Init();
-  NativeAudioTrace_Init();
-
-  g_spc_player = ActRaiserSpcPlayer_Create();
 }
 
 /* Register the game, bring up the SNES, apply the deterministic visual patches
@@ -1344,6 +1338,8 @@ static void AppBoot_StartGame(AppBoot *app) {
   if (!app->snes) Die("SnesInit failed");
   if (!RuntimeDiagnostics_Bind(sr_runner_handle(app->snes)))
     Die("runner diagnostics observer bind failed");
+  if (!NativeAudioTrace_Init(sr_runner_handle(app->snes)))
+    Die("native audio trace observer bind failed");
 
   /* Keep deterministic visual source-data adjustments below cart_load (which
    * copies rom_data) and above Randomizer_Init (which snapshots the live cart
@@ -2194,8 +2190,7 @@ static int AppShutdown(AppBoot *app, char **argv) {
   InputReplay_Shutdown();
   OracleTrace_Shutdown();
   HostAudio_Shutdown();
-  ActRaiserSpcPlayer_Destroy(g_spc_player);
-  g_spc_player = NULL;
+  NativeAudioTrace_Shutdown();
   HdReplacementHost_Shutdown();
   PresentRendererResources_Reset();
   DioramaFrameGeneration_Shutdown();

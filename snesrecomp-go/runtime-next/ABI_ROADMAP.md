@@ -499,6 +499,154 @@ regression was +0.01%. A GPU-backed enhanced Aitos replay also retained
 identical WRAM, SRAM, and dispatch artifacts while sustaining 142-145
 presentations per second in settled town rendering.
 
+## ABI v2 audio-trace observer checkpoint (2026-08-26)
+
+The final read-only audio diagnostic no longer includes or dereferences
+concrete APU/SPC layouts. A capability-gated observer publishes fixed-width SPC
+registers, port and DSP transactions, the APU cycle clock, and a coherent
+callback-lifetime ARAM view while the producing thread holds the APU lock.
+ActRaiser-specific driver offsets remain entirely in the application tracer.
+Subscriptions are explicitly removed after host audio stops and are also
+cleared during runner teardown.
+
+The four former nullable concrete trace hooks were retired. Each existing
+observation point now performs one unlikely observer-count check, preserving
+the disabled hot-path branch count and avoiding payload construction or memory
+copies. The exact concrete-header fence falls from 11 files to 10.
+
+The standalone ABI, APU, and SPC tests plus the application render-pipeline and
+native-audio model tests pass. A 240-frame trace-enabled replay wrote all four
+CSV reports with 454 DSP writes and valid SPC-PC provenance. Seven adjacent
+baseline/candidate pairs retained identical artifacts. Portable deltas were
+-0.03%, -0.33%, +0.40%, and +0.02% across the standard workload order; suite
+regression was +0.02%. Native-SIMD deltas were -0.06%, +0.12%, -0.12%, and
++0.10%; suite regression was +0.01%.
+
+## ABI v2 dead SPC-player cleanup checkpoint (2026-08-27)
+
+The application-side `SpcPlayer` was an unused compatibility adapter, not the
+live SNES APU. No repository caller invoked its upload callback, rendered its
+private DSP, or read its private port arrays; startup allocated the isolated
+DSP and reset only cleared it. The adapter, its runner-side compatibility
+header, and the redundant reset callback are removed instead of exposing dead
+behavior through ABI v2. Live SPC image/sample upload, native mixing, extended
+voices, replacement music, and audio tracing are unchanged. The exact
+concrete-header fence falls from 10 files to 9.
+
+All 92 application tests, including the three GPU tests, pass. The focused
+standalone contract, ABI, APU, SPC, DSP, and SPC-upload tests also pass. Seven
+adjacent baseline/candidate replay pairs retained identical artifacts.
+Portable elapsed-time deltas were -0.81%, -0.69%, +0.12%, and -0.70% in the
+standard workload order; the suite was 0.52% faster. Native-SIMD deltas were
++0.76%, +0.81%, +0.09%, and +0.51%; suite regression was +0.54%. Since the
+adapter had no per-frame caller, these opposing deltas are treated as link
+layout variation and both configurations remain inside the performance gate.
+
+## ABI v2 SPC-upload control checkpoint (2026-08-27)
+
+The live ActRaiser SPC upload adapter no longer imports or dereferences
+concrete `Apu`, `Spc`, or `Snes` layouts. The runner now supplies a versioned
+callback-lifetime transaction under its existing APU lock: immutable ROM, live
+ARAM, parsed upload metadata, and fixed-width SPC state. Adapter-requested
+bootstrap execution is bounded by an explicit cycle ceiling and two generic
+stop PCs, preserving synchronous upload timing without exposing component
+internals.
+
+The later resident-uploader resume uses a capability-gated public atomic
+compare-and-set. The runner checks an inclusive SPC-PC range and up to eight
+consecutive ARAM bytes under one APU lock, changes the PC only on a full match,
+and advances the controlled-mutation generation. The signature and addresses
+remain ActRaiser policy. Normal frames do no additional work; the public
+operation is attempted only while that upload completion is pending. The exact
+concrete-header fence falls from 9 files to 8.
+
+The full 92-test application suite, including all three GPU tests, passes. The
+focused standalone contract, ABI, APU, SPC, DSP, and upload tests pass, as do
+the C++17 public-header and x86-64 macOS cross-target syntax checks. Seven
+adjacent baseline/candidate pairs retained identical replay artifacts.
+Portable elapsed-time deltas were +0.90%, +0.40%, -0.09%, and +0.94% in the
+standard workload order; suite regression was +0.54%. Native-SIMD deltas were
+-1.03%, -0.53%, +0.17%, and -0.57%; the suite was 0.49% faster. Both remain
+inside the performance gate.
+
+## ABI v2 native mixer checkpoint (2026-08-27)
+
+The native Music/SFX mixer no longer imports concrete APU, SPC, or DSP layouts.
+The existing pre-write seam now supplies a fixed-width callback-lifetime view
+containing SPC X, the DSP address/value, and zero-copy read-only ARAM and
+voice-bus spans. The ActRaiser adapter returns at most two fixed-width label
+updates; the runner validates the complete result before applying either one.
+State-load reconstruction uses a separate cold full-label plan. ActRaiser
+addresses and classification rules remain outside the runner.
+
+Live native Music/SFX gains now use a capability-gated public control whose
+implementation owns APU locking. Replacement OGG volume remains host policy.
+The hot route adds no ARAM, DSP-state, or PCM copy and preserves one callback
+at the pre-existing DSP-write seam. The exact concrete-header fence falls from
+8 files to 7.
+
+All 92 application tests, including the three GPU tests, pass. Standalone
+contract, ABI, CPU-infrastructure, APU, SPC, and DSP tests pass; the CPU fixture
+drives the real game-adapter registration and validates both hot updates and a
+state-load plan. C++17 header and x86-64 macOS cross-target syntax checks pass.
+Seven adjacent pairs retained identical replay artifacts. Portable deltas were
++0.03%, -0.36%, +0.11%, and +0.18% in workload order; the suite was 0.01%
+faster. Native-SIMD deltas were +0.07%, +0.27%, +0.08%, and -0.08%; suite
+regression was +0.08%. Both remain inside the performance gate.
+
+## ABI v2 extended-audio checkpoint (2026-08-27)
+
+The final application audio integration seam no longer imports concrete APU,
+SPC, DSP, SNES, or save-state layouts. The runner now invokes fixed-width
+synchronous game-adapter callbacks for DSP writes, SPC opcodes and cycle
+suppression, save/load transfer, and the existing SPC-upload safe point.
+Callback-lifetime ARAM is mutable and zero-copy; DSP mutation is constrained to
+a small validated operation set owned by the runner. Extension save data uses
+canonical fixed-width value kinds for both portable and raw state formats.
+
+Extension configuration now belongs to the runner. Disabled builds install no
+hot-path callbacks, while enabled builds preserve the existing eight hardware
+and 32 extended voices without copying ARAM, DSP state, or audio buffers. The
+upload notification reuses the caller's existing APU lock rather than adding a
+lock/unlock pair. The exact concrete-header fence falls from 7 files to 6.
+
+All 92 application tests pass, including the three GPU tests. Focused native
+extension and runner bridge tests cover zero-copy ARAM, SPC register mutation,
+validated DSP operations, cycle suppression, canonical and raw save transfer,
+locked upload notification, and disabled configuration. C++17 header and
+x86-64 macOS cross-target syntax checks pass. Seven adjacent replay pairs
+retained identical artifacts. Portable deltas were -0.09%, -0.07%, +0.56%, and
+-0.67% in workload order; the suite was 0.07% faster. Native-SIMD deltas were
++0.64%, +0.77%, +0.18%, and +1.45%; suite regression was +0.76%. Both remain
+inside the performance gate.
+
+## ABI v2 OBJ-part raster checkpoint (2026-08-27)
+
+ABI v2 now exposes two complementary synchronous OBJ services. A live OAM
+range can be resolved once into caller-owned `SrPpuObjPart` values while the
+runner preserves its rotation, exact-position, camera-relative, size, and
+priority rules. Resolved or caller-supplied synthetic parts can then be
+rasterized into an explicit crop rectangle in caller-owned ARGB storage. The
+runner validates generations, descriptor extents, part geometry, alignment,
+pitch, and complete output capacity before touching pixels.
+
+The enhanced SIM atlas now consumes only the opaque runner handle. Its common
+path reuses exact parts already captured during sprite emission; incomplete
+metadata takes one bounded OAM resolve. Both raster directly into the final
+packed atlas rectangle, with no PPU snapshot, temporary image, or redundant
+pixel copy. This removes `sim/sim_render_atlas.c` from the concrete fence and
+leaves 5 frame-critical application exceptions.
+
+All 92 application tests pass, including the three GPU tests. Standalone ABI
+and contract tests cover unavailable providers, extent and capacity checks,
+resolved values and bounds, direct pixels, invalid parts, and stale-generation
+rejection. The public header passes C++17 syntax validation and the touched C
+sources pass an x86-64 macOS cross-target syntax build from the ARM64 host.
+Seven adjacent replay pairs retained identical artifacts. Portable deltas were
+-0.81%, -0.84%, -0.19%, and -0.02% in workload order; the suite was 0.47%
+faster. Native-SIMD deltas were +0.04%, -0.03%, +0.08%, and -0.04%; suite
+regression was +0.01%.
+
 ## Migration order
 
 1. [x] Add ABI layout, capability, lifetime, and generation-counter tests while
@@ -526,6 +674,8 @@ presentations per second in settled town rendering.
      lifecycle/error channels.
    - [x] Add final-mix audio observers; retain the raw sample diagnostic and
      mutating replacement mixer under their distinct contracts.
+   - [x] Add synchronous low-level audio trace observers and migrate native
+     provenance diagnostics without exposing APU/SPC layouts.
 4. [ ] Add safe-point mutation commands and versioned save-state serialization.
    - [x] Add a copied, ordered, queryable safe-point queue for bounded memory
      writes and one-frame input overrides.

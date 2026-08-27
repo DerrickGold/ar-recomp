@@ -1,8 +1,11 @@
 #ifndef AR_NATIVE_AUDIO_TRACE_H
 #define AR_NATIVE_AUDIO_TRACE_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+struct SrRunnerHandle;
 
 /* Behavior-neutral provenance trace for ActRaiser's native audio requests.
  *
@@ -187,7 +190,8 @@ const char *NativeAudioTrace_OutcomeName(NativeAudioRequestOutcome outcome);
 const char *NativeAudioTrace_SongEventName(NativeAudioSongEventKind kind);
 
 /* Runtime wrapper. Safe no-ops unless AR_NATIVE_AUDIO_TRACE is enabled. */
-void NativeAudioTrace_Init(void);
+bool NativeAudioTrace_Init(struct SrRunnerHandle *runner);
+void NativeAudioTrace_Shutdown(void);
 void NativeAudioTrace_Report(void);
 uint64_t NativeAudioTrace_OnCpuRequest(
     NativeAudioRequestKind kind, uint8_t id, int emitted,

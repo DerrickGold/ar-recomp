@@ -6,9 +6,8 @@
 #include "audio_trace.h"
 #include "common_rtl.h"
 #include "native_audio_extension.h"
+#include "runner_next.h"
 #include "run_dir.h"
-#include "snes/apu.h"
-#include "snes/spc.h"
 
 enum {
   kRuntimeRequestCapacity = 32768,
@@ -23,7 +22,9 @@ extern int snes_frame_counter;
 extern uint64_t snes_apu_cycle_count(void);
 
 static int s_enabled = -1;
-static uint16_t s_current_spc_pc;
+static const SnesRunnerApi *s_runner_api;
+static SrRunnerHandle *s_runner;
+static uint64_t s_audio_trace_subscription;
 
 static int TraceEnabled(void) {
   if (s_enabled < 0) {
@@ -39,33 +40,44 @@ static void OnCpuPortWrite(uint8_t port, uint8_t value) {
       snes_apu_cycle_count());
 }
 
-static void OnPortApply(Apu *apu, uint8_t port, uint8_t value) {
-  (void)apu;
-  NativeAudioTraceModel_PortApply(port, value, snes_apu_cycle_count());
-}
-
-static void OnSpcPortRead(Apu *apu, uint8_t port, uint8_t value) {
-  NativeAudioTraceModel_SpcPortRead(
-      port, value, apu->ram[0x35], snes_apu_cycle_count());
-}
-
-static void OnSpcOpcode(Spc *spc, uint16_t pc) {
-  s_current_spc_pc = pc;
-  NativeAudioTraceModel_SpcOpcode(
-      pc, spc->a, spc->x, spc->apu->ram[0x35], spc->apu->inPorts[3],
-      snes_apu_cycle_count());
-  if (!NativeAudioExtension_IsEnabled() &&
-      (pc == 0x04D0 || pc == 0x05B1 || pc == 0x080A)) {
-    NativeAudioTraceModel_MusicUpdateSuppressed(
-        pc, spc->x, spc->apu->ram[0x47], spc->apu->ram[0x1A],
-        snes_apu_cycle_count());
+static void OnRunnerAudioTrace(void *user_data, SrRunnerHandle *runner,
+                               const SrAudioTraceEvent *event) {
+  (void)user_data;
+  if (runner != s_runner || !event ||
+      event->struct_size < SR_AUDIO_TRACE_EVENT_V2_SIZE ||
+      !event->apu_ram || event->apu_ram_byte_size < SR_APU_RAM_BYTE_COUNT)
+    return;
+  switch (event->type) {
+    case SR_AUDIO_TRACE_APU_PORT_APPLY:
+      NativeAudioTraceModel_PortApply(
+          event->port, event->value, event->cycle_count);
+      break;
+    case SR_AUDIO_TRACE_SPC_PORT_READ:
+      NativeAudioTraceModel_SpcPortRead(
+          event->port, event->value, event->apu_ram[0x35],
+          event->cycle_count);
+      break;
+    case SR_AUDIO_TRACE_SPC_OPCODE:
+      NativeAudioTraceModel_SpcOpcode(
+          event->spc_pc, event->spc_a, event->spc_x,
+          event->apu_ram[0x35], event->apu_input_ports[3],
+          event->cycle_count);
+      if (!NativeAudioExtension_IsEnabled() &&
+          (event->spc_pc == 0x04D0 || event->spc_pc == 0x05B1 ||
+           event->spc_pc == 0x080A)) {
+        NativeAudioTraceModel_MusicUpdateSuppressed(
+            event->spc_pc, event->spc_x, event->apu_ram[0x47],
+            event->apu_ram[0x1A], event->cycle_count);
+      }
+      break;
+    case SR_AUDIO_TRACE_DSP_WRITE:
+      NativeAudioTraceModel_DspWrite(
+          event->spc_pc, event->spc_x, event->dsp_address, event->value,
+          event->apu_ram[0x47], event->apu_ram[0x1A], event->cycle_count);
+      break;
+    default:
+      break;
   }
-}
-
-static void OnSpcDspWrite(Apu *apu, uint8_t addr, uint8_t value) {
-  NativeAudioTraceModel_DspWrite(
-      s_current_spc_pc, apu->spc->x, addr, value,
-      apu->ram[0x47], apu->ram[0x1A], snes_apu_cycle_count());
 }
 
 static void OnSpcUpload(uint32_t image_src) {
@@ -102,15 +114,29 @@ static void OnExtendedCancel(uint64_t serial) {
   NativeAudioTraceModel_ExtendedCancel(serial, snes_apu_cycle_count());
 }
 
-void NativeAudioTrace_Init(void) {
-  if (!TraceEnabled()) return;
+bool NativeAudioTrace_Init(SrRunnerHandle *runner) {
+  SrAudioTraceSubscription subscription = {
+    .struct_size = sizeof(subscription),
+    .callback = OnRunnerAudioTrace,
+  };
+  if (!TraceEnabled()) return true;
+  NativeAudioTrace_Shutdown();
   NativeAudioTraceModel_Reset();
+  s_runner_api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+  s_runner = runner;
+  if (!s_runner_api || !s_runner ||
+      s_runner_api->struct_size < SNES_RUNNER_API_AUDIO_TRACE_OBSERVER_SIZE ||
+      !(s_runner_api->capabilities & SR_RUNNER_CAP_AUDIO_TRACE_OBSERVERS) ||
+      s_runner_api->subscribe_audio_trace(
+          s_runner, &subscription, &s_audio_trace_subscription) !=
+          SR_RESULT_OK) {
+    s_runner_api = NULL;
+    s_runner = NULL;
+    s_audio_trace_subscription = 0;
+    return false;
+  }
   g_rtl_apu_port_trace_hook = OnCpuPortWrite;
   g_rtl_spc_upload_trace_hook = OnSpcUpload;
-  g_apu_port_apply_trace_hook = OnPortApply;
-  g_apu_spc_port_read_trace_hook = OnSpcPortRead;
-  g_apu_spc_dsp_write_trace_hook = OnSpcDspWrite;
-  g_spc_opcode_trace_hook = OnSpcOpcode;
   g_native_audio_extension_trace_disposition_hook = OnExtendedDisposition;
   g_native_audio_extension_trace_start_hook = OnExtendedStart;
   g_native_audio_extension_trace_end_hook = OnExtendedEnd;
@@ -118,6 +144,29 @@ void NativeAudioTrace_Init(void) {
   fprintf(stderr,
           "[native-audio-trace] enabled — serial request/lane provenance "
           "will be written at shutdown\n");
+  return true;
+}
+
+void NativeAudioTrace_Shutdown(void) {
+  if (s_runner_api && s_runner && s_audio_trace_subscription) {
+    s_runner_api->unsubscribe_audio_trace(
+        s_runner, s_audio_trace_subscription);
+  }
+  s_audio_trace_subscription = 0;
+  s_runner = NULL;
+  s_runner_api = NULL;
+  if (g_rtl_apu_port_trace_hook == OnCpuPortWrite)
+    g_rtl_apu_port_trace_hook = NULL;
+  if (g_rtl_spc_upload_trace_hook == OnSpcUpload)
+    g_rtl_spc_upload_trace_hook = NULL;
+  if (g_native_audio_extension_trace_disposition_hook == OnExtendedDisposition)
+    g_native_audio_extension_trace_disposition_hook = NULL;
+  if (g_native_audio_extension_trace_start_hook == OnExtendedStart)
+    g_native_audio_extension_trace_start_hook = NULL;
+  if (g_native_audio_extension_trace_end_hook == OnExtendedEnd)
+    g_native_audio_extension_trace_end_hook = NULL;
+  if (g_native_audio_extension_trace_cancel_hook == OnExtendedCancel)
+    g_native_audio_extension_trace_cancel_hook = NULL;
 }
 
 uint64_t NativeAudioTrace_OnCpuRequest(

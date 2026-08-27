@@ -74,6 +74,10 @@ static SrRunnerExecutionStateProvider *s_execution_state_provider;
 static Snes *s_execution_state_runner;
 static SrRunnerPpuObjRasterProvider *s_ppu_obj_raster_provider;
 static Snes *s_ppu_obj_raster_runner;
+static SrRunnerPpuObjResolveProvider *s_ppu_obj_resolve_provider;
+static Snes *s_ppu_obj_resolve_runner;
+static SrRunnerPpuObjPartsRasterProvider *s_ppu_obj_parts_raster_provider;
+static Snes *s_ppu_obj_parts_raster_runner;
 static Snes *s_ppu_owner_runner;
 static Ppu *s_owned_ppu;
 
@@ -1497,6 +1501,45 @@ static SrResult rasterize_ppu_obj_range(
     return s_ppu_obj_raster_provider(snes, request, out_result);
 }
 
+static SrResult resolve_ppu_obj_range(
+        SrRunnerHandle *runner, const SrPpuObjResolveRequest *request,
+        SrPpuObjResolveResult *out_result) {
+    Snes *snes = runner_from_handle(runner);
+    if (snes == NULL || request == NULL || out_result == NULL ||
+        request->struct_size < SR_PPU_OBJ_RESOLVE_REQUEST_V2_SIZE ||
+        out_result->struct_size < SR_PPU_OBJ_RESOLVE_RESULT_V2_SIZE)
+        return SR_RESULT_INVALID_ARGUMENT;
+    memset(out_result, 0, SR_PPU_OBJ_RESOLVE_RESULT_V2_SIZE);
+    out_result->struct_size = SR_PPU_OBJ_RESOLVE_RESULT_V2_SIZE;
+    out_result->lifetime_generation = snes->abiLifetimeGeneration;
+    if (request->lifetime_generation != snes->abiLifetimeGeneration)
+        return SR_RESULT_STALE_VIEW;
+    if (s_ppu_obj_resolve_runner != snes ||
+        s_ppu_obj_resolve_provider == NULL)
+        return SR_RESULT_UNAVAILABLE;
+    return s_ppu_obj_resolve_provider(snes, request, out_result);
+}
+
+static SrResult rasterize_ppu_obj_parts(
+        SrRunnerHandle *runner,
+        const SrPpuObjPartsRasterRequest *request,
+        SrPpuObjRasterResult *out_result) {
+    Snes *snes = runner_from_handle(runner);
+    if (snes == NULL || request == NULL || out_result == NULL ||
+        request->struct_size < SR_PPU_OBJ_PARTS_RASTER_REQUEST_V2_SIZE ||
+        out_result->struct_size < SR_PPU_OBJ_RASTER_RESULT_V2_SIZE)
+        return SR_RESULT_INVALID_ARGUMENT;
+    memset(out_result, 0, SR_PPU_OBJ_RASTER_RESULT_V2_SIZE);
+    out_result->struct_size = SR_PPU_OBJ_RASTER_RESULT_V2_SIZE;
+    out_result->lifetime_generation = snes->abiLifetimeGeneration;
+    if (request->lifetime_generation != snes->abiLifetimeGeneration)
+        return SR_RESULT_STALE_VIEW;
+    if (s_ppu_obj_parts_raster_runner != snes ||
+        s_ppu_obj_parts_raster_provider == NULL)
+        return SR_RESULT_UNAVAILABLE;
+    return s_ppu_obj_parts_raster_provider(snes, request, out_result);
+}
+
 static SrResult query_cpu_math_state(SrRunnerHandle *runner,
                                      SrCpuMathState *out_state);
 static SrResult restore_cpu_math_state(SrRunnerHandle *runner,
@@ -1520,7 +1563,10 @@ static const SnesRunnerApi k_runner_api = {
         SR_RUNNER_CAP_PPU_BACKGROUND_COORDINATE |
         SR_RUNNER_CAP_PPU_OUTPUT_CONTROL |
         SR_RUNNER_CAP_PPU_CAPTURE_CONTROL |
-        SR_RUNNER_CAP_CPU_MATH_STATE,
+        SR_RUNNER_CAP_CPU_MATH_STATE |
+        SR_RUNNER_CAP_AUDIO_TRACE_OBSERVERS |
+        SR_RUNNER_CAP_SPC_CONTROL |
+        SR_RUNNER_CAP_AUDIO_MIX_CONTROL,
     get_component,
     query_generations,
     borrow_memory,
@@ -1531,6 +1577,8 @@ static const SnesRunnerApi k_runner_api = {
     borrow_u16_is_valid,
     query_ppu_frame_state,
     rasterize_ppu_obj_range,
+    resolve_ppu_obj_range,
+    rasterize_ppu_obj_parts,
     query_ppu_surfaces,
     ppu_surface_snapshot_is_valid,
     query_execution_state,
@@ -1545,6 +1593,10 @@ static const SnesRunnerApi k_runner_api = {
     claim_ppu_mode7_override,
     query_cpu_math_state,
     restore_cpu_math_state,
+    sr_runner_subscribe_audio_trace,
+    sr_runner_unsubscribe_audio_trace,
+    sr_runner_compare_exchange_spc_pc,
+    sr_runner_configure_audio_mix,
 };
 
 /* Keep synchronized with the source boundary in runner.cmake. */
@@ -1568,7 +1620,10 @@ static const SrRunnerDescriptor k_runner = {
         SR_RUNNER_CAP_PPU_BACKGROUND_COORDINATE |
         SR_RUNNER_CAP_PPU_OUTPUT_CONTROL |
         SR_RUNNER_CAP_PPU_CAPTURE_CONTROL |
-        SR_RUNNER_CAP_CPU_MATH_STATE,
+        SR_RUNNER_CAP_CPU_MATH_STATE |
+        SR_RUNNER_CAP_AUDIO_TRACE_OBSERVERS |
+        SR_RUNNER_CAP_SPC_CONTROL |
+        SR_RUNNER_CAP_AUDIO_MIX_CONTROL,
 };
 
 const SrRunnerDescriptor *sr_runner_descriptor(void) {
@@ -1605,6 +1660,20 @@ void sr_runner_set_ppu_obj_raster_provider(
     if (provider == NULL && s_ppu_obj_raster_runner != snes) return;
     s_ppu_obj_raster_runner = provider != NULL ? snes : NULL;
     s_ppu_obj_raster_provider = provider;
+}
+
+void sr_runner_set_ppu_obj_resolve_provider(
+        Snes *snes, SrRunnerPpuObjResolveProvider *provider) {
+    if (provider == NULL && s_ppu_obj_resolve_runner != snes) return;
+    s_ppu_obj_resolve_runner = provider != NULL ? snes : NULL;
+    s_ppu_obj_resolve_provider = provider;
+}
+
+void sr_runner_set_ppu_obj_parts_raster_provider(
+        Snes *snes, SrRunnerPpuObjPartsRasterProvider *provider) {
+    if (provider == NULL && s_ppu_obj_parts_raster_runner != snes) return;
+    s_ppu_obj_parts_raster_runner = provider != NULL ? snes : NULL;
+    s_ppu_obj_parts_raster_provider = provider;
 }
 
 static void invalidate_lifetime(Snes *snes) {

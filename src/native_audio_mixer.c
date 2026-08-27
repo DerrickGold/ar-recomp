@@ -3,13 +3,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "common_rtl.h"
-#include "host/host_audio.h"
 #include "music_replacements.h"
+#include "runner_next.h"
 #include "settings.h"
-#include "snes/apu.h"
-#include "snes/dsp.h"
-#include "snes/spc.h"
 
 enum {
   kActRaiserCurrentTrackMaskAddress = 0x47,
@@ -18,9 +14,8 @@ enum {
   kDspPerVoiceWritableRegisterCount = 8,
 };
 
-static void (*s_previous_dsp_write_hook)(Apu *, uint8_t, uint8_t);
-static void (*s_previous_state_loaded_hook)(Apu *);
 static bool s_bus_log;
+static SrRunnerHandle *s_runner;
 
 bool NativeAudioMixer_ClassifyDspWrite(
     uint8_t dsp_addr, uint8_t logical_track, uint8_t track_mask,
@@ -61,73 +56,134 @@ bool NativeAudioMixer_ClassifyDspWrite(
   return true;
 }
 
-static void ClassifyDspWrite(Apu *apu, uint8_t addr, uint8_t value) {
-  if (s_previous_dsp_write_hook)
-    s_previous_dsp_write_hook(apu, addr, value);
-  (void)value;
-  if (!apu || !apu->dsp) return;
-
+void NativeAudioMixer_RouteDspWrite(
+    const RtlAudioDspWriteContext *context,
+    RtlAudioDspWriteRouting *routing) {
   int voice = -1;
   NativeAudioVoiceClass voice_class = kNativeAudioVoice_Unclassified;
+  uint8_t bus;
+  int output_voice;
+  if (routing == NULL ||
+      routing->struct_size < RTL_AUDIO_DSP_WRITE_ROUTING_V2_SIZE)
+    return;
+  routing->update_count = 0u;
+  if (context == NULL ||
+      context->struct_size < RTL_AUDIO_DSP_WRITE_CONTEXT_V2_SIZE ||
+      context->flags != 0u || context->apu_ram == NULL ||
+      context->voice_bus == NULL ||
+      context->apu_ram_byte_size <= kActRaiserCurrentTrackMaskAddress ||
+      context->apu_ram_byte_size <= kActRaiserEffectOwnershipMaskAddress ||
+      context->voice_bus_count == 0u ||
+      context->voice_bus_count > RTL_AUDIO_ADAPTER_VOICE_MAX ||
+      context->extended_voices_enabled > 1u ||
+      (context->extended_voices_enabled == 0u &&
+       context->voice_bus_count != kDspVoiceCount) ||
+      (context->extended_voices_enabled != 0u &&
+       context->voice_bus_count != RTL_AUDIO_ADAPTER_VOICE_MAX))
+    return;
   if (!NativeAudioMixer_ClassifyDspWrite(
-          addr, apu->spc ? apu->spc->x : 0xff,
-          apu->ram[kActRaiserCurrentTrackMaskAddress],
-          apu->ram[kActRaiserEffectOwnershipMaskAddress],
+          context->dsp_address, context->spc_x,
+          context->apu_ram[kActRaiserCurrentTrackMaskAddress],
+          context->apu_ram[kActRaiserEffectOwnershipMaskAddress],
           &voice, &voice_class))
     return;
 
-  const DspVoiceBus bus = voice_class == kNativeAudioVoice_Sfx
-      ? kDspVoiceBus_Sfx : kDspVoiceBus_Music;
-  const int output_voice =
-      bus == kDspVoiceBus_Sfx && dsp_extendedVoicesEnabled() && voice >= 6
+  bus = voice_class == kNativeAudioVoice_Sfx
+      ? RTL_AUDIO_VOICE_BUS_SFX : RTL_AUDIO_VOICE_BUS_MUSIC;
+  output_voice =
+      bus == RTL_AUDIO_VOICE_BUS_SFX &&
+              context->extended_voices_enabled != 0u && voice >= 6
           ? voice + 2
           : voice;
-  if (s_bus_log && dsp_getVoiceBus(apu->dsp, output_voice) != bus) {
+  if (output_voice < 0 ||
+      (uint32_t)output_voice >= context->voice_bus_count)
+    return;
+  if (s_bus_log && context->voice_bus[output_voice] != bus) {
     fprintf(stderr,
             "[audio-bus] voice=%d -> %s x=%02x mask=%02x owner=%02x "
             "dsp=%02x%s\n",
-            output_voice, bus == kDspVoiceBus_Sfx ? "SFX" : "MUSIC",
-            apu->spc ? apu->spc->x : 0xff,
-            apu->ram[kActRaiserCurrentTrackMaskAddress],
-            apu->ram[kActRaiserEffectOwnershipMaskAddress], addr,
+            output_voice,
+            bus == RTL_AUDIO_VOICE_BUS_SFX ? "SFX" : "MUSIC",
+            context->spc_x,
+            context->apu_ram[kActRaiserCurrentTrackMaskAddress],
+            context->apu_ram[kActRaiserEffectOwnershipMaskAddress],
+            context->dsp_address,
             output_voice != voice ? " virtual" : "");
   }
-  dsp_setVoiceBus(apu->dsp, output_voice, bus);
-  if (output_voice != voice)
-    dsp_setVoiceBus(apu->dsp, voice, kDspVoiceBus_Music);
+  routing->update[0].voice = (uint8_t)output_voice;
+  routing->update[0].bus = bus;
+  routing->update_count = 1u;
+  if (output_voice != voice) {
+    routing->update[1].voice = (uint8_t)voice;
+    routing->update[1].bus = RTL_AUDIO_VOICE_BUS_MUSIC;
+    routing->update_count = 2u;
+  }
 }
 
-static void RestoreVoiceClasses(Apu *apu) {
-  if (s_previous_state_loaded_hook)
-    s_previous_state_loaded_hook(apu);
-  if (!apu || !apu->dsp) return;
-
+void NativeAudioMixer_RouteStateLoaded(
+    const RtlAudioStateLoadedContext *context,
+    RtlAudioStateLoadedRouting *routing) {
+  uint8_t ownership;
+  uint32_t voice;
+  if (routing == NULL ||
+      routing->struct_size < RTL_AUDIO_STATE_LOADED_ROUTING_V2_SIZE)
+    return;
+  routing->voice_bus_count = 0u;
+  if (context == NULL ||
+      context->struct_size < RTL_AUDIO_STATE_LOADED_CONTEXT_V2_SIZE ||
+      context->flags != 0u || context->apu_ram == NULL ||
+      context->apu_ram_byte_size <= kActRaiserEffectOwnershipMaskAddress ||
+      context->voice_bus_count < kDspVoiceCount ||
+      context->voice_bus_count > RTL_AUDIO_ADAPTER_VOICE_MAX ||
+      context->extended_voices_enabled > 1u ||
+      context->reserved8[0] != 0u || context->reserved8[1] != 0u ||
+      context->reserved8[2] != 0u ||
+      (context->extended_voices_enabled == 0u &&
+       context->voice_bus_count != kDspVoiceCount) ||
+      (context->extended_voices_enabled != 0u &&
+       context->voice_bus_count != RTL_AUDIO_ADAPTER_VOICE_MAX))
+    return;
   /* Voices 0-5 are always song tracks. Voices 6/7 are effects exactly while
    * their driver ownership bits are set; subsequent per-track DSP writes keep
    * the labels precise as playback advances after the load. */
-  const uint8_t ownership = apu->ram[kActRaiserEffectOwnershipMaskAddress];
-  for (int voice = 0; voice < kDspVoiceCount; voice++) {
+  ownership = context->apu_ram[kActRaiserEffectOwnershipMaskAddress];
+  for (voice = 0u; voice < kDspVoiceCount; ++voice) {
     const uint8_t mask = (uint8_t)(1u << voice);
-    dsp_setVoiceBus(apu->dsp, voice,
-                    (!dsp_extendedVoicesEnabled() && voice >= 6 &&
-                     (ownership & mask))
-                        ? kDspVoiceBus_Sfx
-                        : kDspVoiceBus_Music);
+    routing->voice_bus[voice] =
+        (context->extended_voices_enabled == 0u && voice >= 6u &&
+         (ownership & mask) != 0u)
+            ? RTL_AUDIO_VOICE_BUS_SFX
+            : RTL_AUDIO_VOICE_BUS_MUSIC;
   }
-  if (dsp_extendedVoicesEnabled()) {
-    for (int voice = kDspHardwareVoiceCount;
-         voice < kDspMaximumVoiceCount; voice++)
-      dsp_setVoiceBus(apu->dsp, voice, kDspVoiceBus_Sfx);
+  if (context->extended_voices_enabled != 0u) {
+    for (voice = kDspVoiceCount; voice < context->voice_bus_count; ++voice)
+      routing->voice_bus[voice] = RTL_AUDIO_VOICE_BUS_SFX;
   }
+  routing->voice_bus_count = context->voice_bus_count;
+}
+
+void NativeAudioMixer_BindRunner(SrRunnerHandle *runner) {
+  s_runner = runner;
+  if (runner != NULL) NativeAudioMixer_ApplySettings();
 }
 
 void NativeAudioMixer_ApplySettings(void) {
-  RtlApuLock();
-  dsp_setBusGains(g_settings.audio_music_volume,
-                  g_settings.audio_sfx_volume);
+  const SnesRunnerApi *api;
+  SrAudioMixControl control = {
+      .struct_size = SR_AUDIO_MIX_CONTROL_V2_SIZE,
+      .music_gain_percent = (uint32_t)g_settings.audio_music_volume,
+      .sfx_gain_percent = (uint32_t)g_settings.audio_sfx_volume,
+  };
+  if (s_runner != NULL) {
+    api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+    if (api != NULL &&
+        api->struct_size >= SNES_RUNNER_API_AUDIO_MIX_CONTROL_SIZE &&
+        (api->capabilities & SR_RUNNER_CAP_AUDIO_MIX_CONTROL) != 0u &&
+        api->configure_audio_mix != NULL)
+      (void)api->configure_audio_mix(s_runner, &control);
+  }
   MusicReplacements_SetMusicVolumePercent(
       g_settings.audio_music_volume);
-  RtlApuUnlock();
   if (s_bus_log)
     fprintf(stderr, "[audio-bus] gains music=%d%% sfx=%d%%\n",
             g_settings.audio_music_volume, g_settings.audio_sfx_volume);
@@ -136,9 +192,5 @@ void NativeAudioMixer_ApplySettings(void) {
 void NativeAudioMixer_Install(void) {
   const char *log = getenv("AR_AUDIO_BUSLOG");
   s_bus_log = log && log[0] && log[0] != '0';
-  s_previous_dsp_write_hook = g_apu_spc_dsp_write_hook;
-  g_apu_spc_dsp_write_hook = ClassifyDspWrite;
-  s_previous_state_loaded_hook = g_rtl_apu_state_loaded_hook;
-  g_rtl_apu_state_loaded_hook = RestoreVoiceClasses;
   NativeAudioMixer_ApplySettings();
 }

@@ -378,13 +378,15 @@ driver-decision/end events described below.
 Independent level control now uses the same logical-track evidence required by
 the extended-channel design:
 
-- `g_apu_spc_dsp_write_hook` runs before each applied DSP write. For ordinary
-  per-voice writes, SPC X directly identifies song tracks `$00-$0E` and effect
-  tracks `$10/$12`; ARAM `$47` proves the physical voice. Captured X=`$10`,
-  mask=`$40` effect writes sometimes see `$1A=0`, so ownership alone is not a
-  safe classifier. `$1A` remains the fallback when a shared helper has
-  repurposed X for a DSP register address; if that fallback is also clear, the
-  helper preserves the voice's last proven label instead of guessing Music.
+- The runner-owned pre-DSP-write seam supplies a fixed-width, callback-lifetime
+  game-adapter view. For ordinary per-voice writes, SPC X directly identifies
+  song tracks `$00-$0E` and effect tracks `$10/$12`; zero-copy ARAM `$47`
+  proves the physical voice. Captured X=`$10`, mask=`$40` effect writes
+  sometimes see `$1A=0`, so ownership alone is not a safe classifier. `$1A`
+  remains the fallback when a shared helper has repurposed X for a DSP register
+  address; if that fallback is also clear, the helper preserves the voice's
+  last proven label instead of guessing Music. The adapter returns at most two
+  validated bus-label updates and retains no runner pointer.
 - Each native DSP voice carries a presentation-only Music/SFX label. Music and
   SFX gains scale its dry contribution and echo send before the authentic
   per-voice clamp. The one hardware FIR/feedback echo stays shared, so an

@@ -3,7 +3,6 @@
 #include <string.h>
 
 #include "sim_render_metadata.h"
-#include "snes/ppu.h"
 
 enum { kAtlasPadding = 1 };
 
@@ -32,13 +31,51 @@ static void ClearPackedRegion(void) {
   s_dirty_width = s_dirty_height = 0;
 }
 
-bool SimRenderAtlas_Build(Ppu *ppu, uint16 camera_x, uint16 camera_y) {
+static bool PartBounds(const SrPpuObjPart *parts, uint32_t part_count,
+                       SrPpuObjResolveResult *bounds) {
+  int x0 = INT16_MAX;
+  int y0 = INT16_MAX;
+  int x1 = INT16_MIN;
+  int y1 = INT16_MIN;
+  if (!parts || !part_count || !bounds) return false;
+  for (uint32_t i = 0; i < part_count; i++) {
+    const SrPpuObjPart *part = &parts[i];
+    if (part->reserved || !part->size || part->size > 64u ||
+        (part->size & 7u))
+      return false;
+    if (part->x < x0) x0 = part->x;
+    if (part->y < y0) y0 = part->y;
+    if (part->x + part->size > x1) x1 = part->x + part->size;
+    if (part->y + part->size > y1) y1 = part->y + part->size;
+  }
+  if (x1 <= x0 || y1 <= y0 || x1 > INT16_MAX || y1 > INT16_MAX)
+    return false;
+  bounds->part_count = part_count;
+  bounds->x0 = x0;
+  bounds->y0 = y0;
+  bounds->x1 = x1;
+  bounds->y1 = y1;
+  return true;
+}
+
+bool SimRenderAtlas_Build(SrRunnerHandle *runner,
+                          uint16 camera_x, uint16 camera_y) {
+  const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+  SrGenerationSnapshot generations = {
+      .struct_size = SR_GENERATION_SNAPSHOT_V2_SIZE,
+  };
   SimAtlasBuildInput input;
   if (!SimRenderMetadata_CopyAtlasInput(&input))
     return false;
 
   ClearPackedRegion();
-  uint32_t failure = ppu ? 0 : kSimMetadataIntegrity_AtlasRasterFailure;
+  uint32_t failure = !api || !runner ||
+      api->struct_size < SNES_RUNNER_API_PPU_OBJ_PARTS_SIZE ||
+      (api->capabilities &
+       (SR_RUNNER_CAP_GENERATION_COUNTERS | SR_RUNNER_CAP_PPU_OBJ_RASTER)) !=
+          (SR_RUNNER_CAP_GENERATION_COUNTERS | SR_RUNNER_CAP_PPU_OBJ_RASTER) ||
+      api->query_generations(runner, &generations) != SR_RESULT_OK
+      ? kSimMetadataIntegrity_AtlasRasterFailure : 0;
   int cursor_x = kAtlasPadding;
   int cursor_y = kAtlasPadding;
   int row_height = 0;
@@ -62,10 +99,12 @@ bool SimRenderAtlas_Build(Ppu *ppu, uint16 camera_x, uint16 camera_y) {
    * no longer costs the frame. */
   for (uint16_t i = 0; !failure && i < input.object_count; i++) {
     SimRenderObject *object = &input.objects[i];
-    PpuObjPart oam_parts[128];
-    const PpuObjPart *parts = NULL;
-    int part_count = 0;
-    PpuObjRangeBounds bounds;
+    SrPpuObjPart oam_parts[128];
+    const SrPpuObjPart *parts = NULL;
+    uint32_t part_count = 0;
+    SrPpuObjResolveResult bounds = {
+        .struct_size = SR_PPU_OBJ_RESOLVE_RESULT_V2_SIZE,
+    };
     bool explicit_complete = object->part_count > 0 &&
         object->part_count ==
             object->oam_count + object->synthetic_part_count &&
@@ -73,15 +112,25 @@ bool SimRenderAtlas_Build(Ppu *ppu, uint16 camera_x, uint16 camera_y) {
     if (explicit_complete) {
       parts = &input.parts[object->part_first];
       part_count = object->part_count;
-    } else if (object->oam_count &&
-               PpuResolveObjSlots(
-                   ppu, (uint8_t)object->oam_first, object->oam_count,
-                   object->priority, oam_parts,
-                   (int)(sizeof(oam_parts) / sizeof(oam_parts[0])),
-                   &part_count)) {
-      parts = oam_parts;
+      if (!PartBounds(parts, part_count, &bounds)) parts = NULL;
+    } else if (object->oam_count) {
+      SrPpuObjResolveRequest request = {
+          .struct_size = SR_PPU_OBJ_RESOLVE_REQUEST_V2_SIZE,
+          .lifetime_generation = generations.lifetime_generation,
+          .first_sprite = object->oam_first,
+          .sprite_count = object->oam_count,
+          .priority = object->priority,
+          .part_capacity =
+              (uint32_t)(sizeof(oam_parts) / sizeof(oam_parts[0])),
+          .parts = oam_parts,
+      };
+      if (api->resolve_ppu_obj_range(runner, &request, &bounds) ==
+          SR_RESULT_OK) {
+        parts = oam_parts;
+        part_count = bounds.part_count;
+      }
     }
-    if (!parts || !PpuGetPartBounds(parts, part_count, &bounds)) {
+    if (!parts || !part_count) {
       ClearObjectAtlasFields(object);
       continue;
     }
@@ -127,8 +176,30 @@ bool SimRenderAtlas_Build(Ppu *ppu, uint16 camera_x, uint16 camera_y) {
 
     uint32_t *destination =
         &g_sim_obj_atlas_pixels[cursor_y * kSimObjAtlasWidth + cursor_x];
-    if (!PpuRasterizeParts(ppu, parts, part_count, &bounds, destination,
-                           width, height, kSimObjAtlasPitch)) {
+    SrPpuObjPartsRasterRequest raster = {
+        .struct_size = SR_PPU_OBJ_PARTS_RASTER_REQUEST_V2_SIZE,
+        .lifetime_generation = generations.lifetime_generation,
+        .parts = parts,
+        .part_count = part_count,
+        .x0 = bounds.x0,
+        .y0 = bounds.y0,
+        .x1 = bounds.x1,
+        .y1 = bounds.y1,
+        .pixel_format = SR_PPU_OBJ_PIXEL_FORMAT_ARGB8888_U32,
+        .pixels = destination,
+        .pixel_byte_size =
+            sizeof(g_sim_obj_atlas_pixels) -
+            (uint64_t)(destination - g_sim_obj_atlas_pixels) *
+                sizeof(*destination),
+        .pitch_bytes = kSimObjAtlasPitch,
+    };
+    SrPpuObjRasterResult raster_result = {
+        .struct_size = SR_PPU_OBJ_RASTER_RESULT_V2_SIZE,
+    };
+    if (api->rasterize_ppu_obj_parts(
+            runner, &raster, &raster_result) != SR_RESULT_OK ||
+        raster_result.width != (uint32_t)width ||
+        raster_result.height != (uint32_t)height) {
       ClearObjectAtlasFields(object);
       continue;
     }

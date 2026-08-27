@@ -60,7 +60,8 @@ if(BUILD_TESTING)
     add_test(NAME snesrecomp_runtime_next_saveload
         COMMAND snesrecomp_runtime_next_saveload_test)
 
-    add_executable(snesrecomp_runtime_next_contract_test tests/contract_test.c)
+    add_executable(snesrecomp_runtime_next_contract_test
+        tests/contract_test.c tests/apu_sync_stub.c)
     target_link_libraries(snesrecomp_runtime_next_contract_test PRIVATE
         snesrecomp_runtime_next_contract)
     add_test(NAME snesrecomp_runtime_next_contract
@@ -189,7 +190,7 @@ if(BUILD_TESTING)
         COMMAND snesrecomp_runtime_next_cpu_state_test)
 
     add_executable(snesrecomp_runtime_next_cpu_infra_test
-        tests/cpu_infra_test.c src/common_cpu_infra.c)
+        tests/cpu_infra_test.c src/common_cpu_infra.c src/snes/saveload.c)
     target_include_directories(snesrecomp_runtime_next_cpu_infra_test PRIVATE src)
     target_compile_definitions(snesrecomp_runtime_next_cpu_infra_test PRIVATE
         AR_WATCHDOG=0 SNESRECOMP_TRACE=0 SNESRECOMP_REVERSE_DEBUG=0)

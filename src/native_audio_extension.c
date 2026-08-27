@@ -4,13 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "common_cpu_infra.h"
 #include "common_rtl.h"
 #include "settings.h"
-#include "snes/apu.h"
-#include "snes/dsp.h"
-#include "snes/saveload.h"
-#include "snes/snes.h"
-#include "snes/spc.h"
 
 enum {
   kEventTrack = 0x10,
@@ -30,8 +26,8 @@ enum {
   kEffectEmptyReturn = 0x0e83,
   kEffectDriverEntry = 0x0da0,
   kEffectDriverReturn = 0x0e13,
-  kVirtualVoiceFirst = kDspHardwareVoiceCount,
-  kVirtualVoicePoolSize = kDspExtendedVoiceCount,
+  kVirtualVoiceFirst = RTL_AUDIO_ADAPTER_HARDWARE_VOICE_COUNT,
+  kVirtualVoicePoolSize = RTL_AUDIO_ADAPTER_EXTENDED_VOICE_COUNT,
   kRequestQueueCapacity = 128,
   kTrackStatePairCount = 29,
   kTrackStateBytes = kTrackStatePairCount * 2,
@@ -106,11 +102,6 @@ static const uint16_t kTrackStateBase[kTrackStatePairCount] = {
 
 static bool s_enabled;
 static bool s_log;
-static bool (*s_previous_filter)(Apu *, uint8_t, uint8_t *);
-static void (*s_previous_opcode_patch)(Spc *, uint16_t);
-static int (*s_previous_cycle_hook)(Spc *, uint16_t, int);
-static void (*s_previous_extra_saveload)(Apu *, SaveLoadInfo *);
-static void (*s_previous_upload_hook)(uint32_t);
 static NativeAudioExtensionState s_state;
 static uint8_t s_logged_routed_mask[0x80];
 static uint8_t s_logged_routed_value[0x80];
@@ -123,8 +114,58 @@ void (*g_native_audio_extension_trace_start_hook)(
 void (*g_native_audio_extension_trace_end_hook)(uint64_t, uint8_t) = NULL;
 void (*g_native_audio_extension_trace_cancel_hook)(uint64_t) = NULL;
 
-extern void (*g_rtl_spc_upload_hook)(uint32_t src);
-extern Snes *g_snes;
+
+static bool ExtensionContextValid(
+    const RtlAudioExtensionContext *context) {
+  return context != NULL &&
+      context->struct_size >= RTL_AUDIO_EXTENSION_CONTEXT_V2_SIZE &&
+      context->flags == 0u && context->apu_ram != NULL &&
+      context->apu_ram_byte_size == RTL_AUDIO_ADAPTER_APU_RAM_BYTE_COUNT &&
+      context->hardware_voice_count ==
+          RTL_AUDIO_ADAPTER_HARDWARE_VOICE_COUNT &&
+      context->extended_voice_count ==
+          RTL_AUDIO_ADAPTER_EXTENDED_VOICE_COUNT &&
+      context->service_context != NULL && context->dsp_operation != NULL;
+}
+
+static bool DspOperation(
+    RtlAudioExtensionContext *context, uint32_t operation,
+    uint32_t voice, uint8_t address, uint8_t value,
+    uint8_t update_mask) {
+  return ExtensionContextValid(context) &&
+      context->dsp_operation(context->service_context, operation, voice,
+                             address, value, update_mask);
+}
+
+static void SetVoiceBus(
+    RtlAudioExtensionContext *context, int voice, uint8_t bus) {
+  if (voice < 0) return;
+  (void)DspOperation(context, RTL_AUDIO_DSP_SET_VOICE_BUS,
+                     (uint32_t)voice, 0u, bus, 0u);
+}
+
+static void WriteVirtualVoiceRegister(
+    RtlAudioExtensionContext *context, int voice,
+    uint8_t address, uint8_t value) {
+  if (voice < 0) return;
+  (void)DspOperation(context, RTL_AUDIO_DSP_WRITE_VIRTUAL_REGISTER,
+                     (uint32_t)voice, address, value, 0u);
+}
+
+static void WriteVirtualVoiceControl(
+    RtlAudioExtensionContext *context, int voice,
+    uint8_t address, bool enabled) {
+  if (voice < 0) return;
+  (void)DspOperation(context, RTL_AUDIO_DSP_WRITE_VIRTUAL_CONTROL,
+                     (uint32_t)voice, address, enabled ? 1u : 0u, 0u);
+}
+
+static void WriteHardwareVoiceMask(
+    RtlAudioExtensionContext *context, uint8_t address,
+    uint8_t value, uint8_t update_mask) {
+  (void)DspOperation(context, RTL_AUDIO_DSP_WRITE_HARDWARE_MASK, 0u,
+                     address, value, update_mask);
+}
 
 static bool IsPerVoiceWritable(uint8_t addr) {
   return addr < 0x80 && (addr & 0x0f) < 8;
@@ -135,24 +176,25 @@ static bool IsVoiceMaskRegister(uint8_t addr) {
       addr == 0x4c || addr == 0x5c;
 }
 
-static void LoadTrackState(Apu *apu, const NativeAudioEffectInstance *instance) {
-  if (!apu || !instance) return;
+static void LoadTrackState(
+    uint8_t *ram, const NativeAudioEffectInstance *instance) {
+  if (!ram || !instance) return;
   for (int i = 0; i < kTrackStatePairCount; i++) {
     const uint16_t address =
         (uint16_t)(kTrackStateBase[i] + instance->lane_track);
-    apu->ram[address] = instance->state[i * 2];
-    apu->ram[(uint16_t)(address + 1)] = instance->state[i * 2 + 1];
+    ram[address] = instance->state[i * 2];
+    ram[(uint16_t)(address + 1)] = instance->state[i * 2 + 1];
   }
 }
 
-static void SaveTrackState(Apu *apu, NativeAudioEffectInstance *instance) {
-  if (!apu || !instance) return;
+static void SaveTrackState(
+    const uint8_t *ram, NativeAudioEffectInstance *instance) {
+  if (!ram || !instance) return;
   for (int i = 0; i < kTrackStatePairCount; i++) {
     const uint16_t address =
         (uint16_t)(kTrackStateBase[i] + instance->lane_track);
-    instance->state[i * 2] = apu->ram[address];
-    instance->state[i * 2 + 1] =
-        apu->ram[(uint16_t)(address + 1)];
+    instance->state[i * 2] = ram[address];
+    instance->state[i * 2 + 1] = ram[(uint16_t)(address + 1)];
   }
 }
 
@@ -334,16 +376,16 @@ bool NativeAudioExtension_ShouldBypassMusicSuppression(
   return track_mask == song_mask && (ownership_mask & song_mask) != 0;
 }
 
-static void ClearEffectScratchMasks(Apu *apu) {
-  if (!apu) return;
+static void ClearEffectScratchMasks(uint8_t *ram) {
+  if (!ram) return;
   const uint8_t keep = (uint8_t)~kEffectMask;
-  apu->ram[0x1a] &= keep;
-  apu->ram[0x36] &= keep;
-  apu->ram[0x37] &= keep;
-  apu->ram[0x45] &= keep; /* pending KON */
-  apu->ram[0x46] &= keep; /* pending KOF */
-  apu->ram[0x49] &= keep; /* noise mask */
-  apu->ram[0x5e] &= keep; /* voice-parameter dirty mask */
+  ram[0x1a] &= keep;
+  ram[0x36] &= keep;
+  ram[0x37] &= keep;
+  ram[0x45] &= keep; /* pending KON */
+  ram[0x46] &= keep; /* pending KOF */
+  ram[0x49] &= keep; /* noise mask */
+  ram[0x5e] &= keep; /* voice-parameter dirty mask */
 }
 
 static bool PairIsActive(uint64_t serial) {
@@ -366,34 +408,33 @@ static void SynchronizePairPhase(uint64_t serial, uint8_t phase) {
   }
 }
 
-static void InitializeTrackState(Apu *apu,
+static void InitializeTrackState(uint8_t *ram,
                                  NativeAudioEffectInstance *instance) {
   memset(instance->state, 0, sizeof(instance->state));
-  LoadTrackState(apu, instance);
+  LoadTrackState(ram, instance);
 
   uint8_t sequence = instance->id & 0x7f;
   if (sequence >= 0x27) sequence = 0x07;
   const uint16_t table = (uint16_t)(0x2400 + sequence * 2);
   const uint8_t x = instance->lane_track;
-  apu->ram[(uint16_t)(0x00d4 + x)] = apu->ram[table];
-  apu->ram[(uint16_t)(0x00d5 + x)] =
-      apu->ram[(uint16_t)(table + 1)];
-  apu->ram[(uint16_t)(0x0305 + x)] = 0xdc;
-  apu->ram[(uint16_t)(0x0369 + x)] = 0x0a;
-  apu->ram[(uint16_t)(0x0341 + x)] = 0x0a;
-  apu->ram[(uint16_t)(0x0340 + x)] = 0;
-  apu->ram[(uint16_t)(0x0215 + x)] = 0;
-  apu->ram[(uint16_t)(0x03a5 + x)] = 0;
-  apu->ram[(uint16_t)(0x02f0 + x)] = 0;
-  apu->ram[(uint16_t)(0x0264 + x)] = 0;
-  apu->ram[(uint16_t)(0x00ad + x)] = 0;
-  apu->ram[(uint16_t)(0x00c1 + x)] = 0;
-  apu->ram[(uint16_t)(0x03b8 + x)] = 0;
-  apu->ram[(uint16_t)(0x0084 + x)] = 0;
-  apu->ram[(uint16_t)(0x0085 + x)] = 0;
-  apu->ram[(uint16_t)(0x0070 + x)] =
+  ram[(uint16_t)(0x00d4 + x)] = ram[table];
+  ram[(uint16_t)(0x00d5 + x)] = ram[(uint16_t)(table + 1)];
+  ram[(uint16_t)(0x0305 + x)] = 0xdc;
+  ram[(uint16_t)(0x0369 + x)] = 0x0a;
+  ram[(uint16_t)(0x0341 + x)] = 0x0a;
+  ram[(uint16_t)(0x0340 + x)] = 0;
+  ram[(uint16_t)(0x0215 + x)] = 0;
+  ram[(uint16_t)(0x03a5 + x)] = 0;
+  ram[(uint16_t)(0x02f0 + x)] = 0;
+  ram[(uint16_t)(0x0264 + x)] = 0;
+  ram[(uint16_t)(0x00ad + x)] = 0;
+  ram[(uint16_t)(0x00c1 + x)] = 0;
+  ram[(uint16_t)(0x03b8 + x)] = 0;
+  ram[(uint16_t)(0x0084 + x)] = 0;
+  ram[(uint16_t)(0x0085 + x)] = 0;
+  ram[(uint16_t)(0x0070 + x)] =
       instance->paired && x == kOrdinarySfxTrack ? 3 : 2;
-  SaveTrackState(apu, instance);
+  SaveTrackState(ram, instance);
 }
 
 static int FindFreeInstanceSlot(int after) {
@@ -404,7 +445,7 @@ static int FindFreeInstanceSlot(int after) {
   return -1;
 }
 
-static void StartNewInstance(Apu *apu, int slot,
+static void StartNewInstance(RtlAudioExtensionContext *context, int slot,
                              const NativeAudioQueuedRequest *request,
                              uint8_t lane_track, bool paired) {
   NativeAudioEffectInstance *instance = &s_state.instance[slot];
@@ -424,11 +465,11 @@ static void StartNewInstance(Apu *apu, int slot,
   instance->event_request = request->event_request;
   instance->paired = paired;
   instance->start_kof_stage = 2;
-  InitializeTrackState(apu, instance);
-  dsp_setVoiceBus(apu->dsp, instance->voice, kDspVoiceBus_Sfx);
-  dsp_writeVirtualVoiceControl(apu->dsp, instance->voice, 0x2d, false);
-  dsp_writeVirtualVoiceControl(apu->dsp, instance->voice, 0x3d, false);
-  dsp_writeVirtualVoiceControl(apu->dsp, instance->voice, 0x4d, false);
+  InitializeTrackState(context->apu_ram, instance);
+  SetVoiceBus(context, instance->voice, RTL_AUDIO_VOICE_BUS_SFX);
+  WriteVirtualVoiceControl(context, instance->voice, 0x2d, false);
+  WriteVirtualVoiceControl(context, instance->voice, 0x3d, false);
+  WriteVirtualVoiceControl(context, instance->voice, 0x4d, false);
   if (g_native_audio_extension_trace_start_hook)
     g_native_audio_extension_trace_start_hook(
         instance->trace_serial,
@@ -442,14 +483,17 @@ static void StartNewInstance(Apu *apu, int slot,
             paired ? " paired" : "");
 }
 
-static bool AllocateFrontRequest(Apu *apu) {
-  if (!apu || !apu->dsp || s_state.queue_count == 0) return false;
+static bool AllocateFrontRequest(RtlAudioExtensionContext *context) {
+  uint8_t *ram;
+  if (!ExtensionContextValid(context) || s_state.queue_count == 0)
+    return false;
+  ram = context->apu_ram;
   NativeAudioQueuedRequest *request =
       &s_state.queue[s_state.queue_head % kRequestQueueCapacity];
   uint8_t sequence = request->id & 0x7f;
   if (sequence >= 0x27) sequence = 0x07;
   const uint16_t table = (uint16_t)(0x2400 + sequence * 2);
-  if ((apu->ram[table] | apu->ram[(uint16_t)(table + 1)]) == 0)
+  if ((ram[table] | ram[(uint16_t)(table + 1)]) == 0)
     return false; /* common effect image is not installed yet */
 
   const bool paired = request->event_request && (request->id & 0x80);
@@ -458,19 +502,19 @@ static bool AllocateFrontRequest(Apu *apu) {
   const int second = paired ? FindFreeInstanceSlot(first) : -1;
   if (paired && second < 0) return false;
 
-  StartNewInstance(apu, first, request,
+  StartNewInstance(context, first, request,
                    request->event_request ? kEventTrack : kOrdinarySfxTrack,
                    paired);
   if (paired)
-    StartNewInstance(apu, second, request, kOrdinarySfxTrack, true);
+    StartNewInstance(context, second, request, kOrdinarySfxTrack, true);
   s_state.queue_head =
       (s_state.queue_head + 1) % kRequestQueueCapacity;
   s_state.queue_count--;
   return true;
 }
 
-static void AllocateQueuedRequests(Apu *apu) {
-  while (AllocateFrontRequest(apu)) {}
+static void AllocateQueuedRequests(RtlAudioExtensionContext *context) {
+  while (AllocateFrontRequest(context)) {}
 }
 
 static int FirstScheduledSlot(void) {
@@ -482,19 +526,20 @@ static int FirstScheduledSlot(void) {
   return -1;
 }
 
-static void LoadScheduledInstance(Spc *spc, int slot) {
-  Apu *apu = spc->apu;
+static void LoadScheduledInstance(
+    RtlAudioExtensionContext *context, int slot) {
+  uint8_t *ram = context->apu_ram;
   NativeAudioEffectInstance *instance = &s_state.instance[slot];
-  LoadTrackState(apu, instance);
-  ClearEffectScratchMasks(apu);
-  apu->ram[kCurrentTrackMaskAddress] = instance->lane_mask;
-  apu->ram[0x34] = 0xff;
-  apu->ram[0x35] = PairIsActive(instance->serial) ? 0xff : 0;
-  apu->ram[0x3f] = instance->pair_phase;
+  LoadTrackState(ram, instance);
+  ClearEffectScratchMasks(ram);
+  ram[kCurrentTrackMaskAddress] = instance->lane_mask;
+  ram[0x34] = 0xff;
+  ram[0x35] = PairIsActive(instance->serial) ? 0xff : 0;
+  ram[0x3f] = instance->pair_phase;
   if (instance->noise_enabled)
-    apu->ram[0x49] |= instance->lane_mask;
-  spc->x = instance->lane_track;
-  spc->pc = kEffectUpdateEntry;
+    ram[0x49] |= instance->lane_mask;
+  context->spc_x = instance->lane_track;
+  context->spc_pc = kEffectUpdateEntry;
   s_state.scheduler_active = 1;
   s_state.current_slot = (uint8_t)slot;
   s_state.active_virtual_voice = instance->voice;
@@ -504,23 +549,24 @@ static void LoadScheduledInstance(Spc *spc, int slot) {
   s_state.charged_lane_mask |= lane_bit;
 }
 
-static void FinishScheduledInstance(Spc *spc, bool ended) {
-  Apu *apu = spc->apu;
+static void FinishScheduledInstance(
+    RtlAudioExtensionContext *context, bool ended) {
+  uint8_t *ram = context->apu_ram;
   const int slot = s_state.current_slot;
   if (slot < 0 || slot >= kVirtualVoicePoolSize) return;
   NativeAudioEffectInstance *instance = &s_state.instance[slot];
-  SaveTrackState(apu, instance);
+  SaveTrackState(ram, instance);
   instance->noise_enabled =
-      (apu->ram[0x49] & instance->lane_mask) != 0;
-  dsp_writeVirtualVoiceControl(apu->dsp, instance->voice, 0x3d,
-                               instance->noise_enabled != 0);
+      (ram[0x49] & instance->lane_mask) != 0;
+  WriteVirtualVoiceControl(context, instance->voice, 0x3d,
+                           instance->noise_enabled != 0);
 
-  if (apu->ram[0x45] & instance->lane_mask)
+  if (ram[0x45] & instance->lane_mask)
     instance->pending_kon = 1;
 
   if (instance->paired)
-    SynchronizePairPhase(instance->serial, apu->ram[0x3f]);
-  ClearEffectScratchMasks(apu);
+    SynchronizePairPhase(instance->serial, ram[0x3f]);
+  ClearEffectScratchMasks(ram);
   s_state.schedule_mask &= ~(1u << slot);
   if (ended) {
     if (s_log)
@@ -541,21 +587,21 @@ static void FinishScheduledInstance(Spc *spc, bool ended) {
 
   const int next = FirstScheduledSlot();
   if (next >= 0) {
-    LoadScheduledInstance(spc, next);
+    LoadScheduledInstance(context, next);
     return;
   }
   s_state.scheduler_active = 0;
   s_state.current_slot = 0xff;
   s_state.active_virtual_voice = 0xff;
-  apu->ram[0x34] = 0;
-  apu->ram[0x35] = 0;
-  apu->ram[kCurrentTrackMaskAddress] = 0;
-  ClearEffectScratchMasks(apu);
+  ram[0x34] = 0;
+  ram[0x35] = 0;
+  ram[kCurrentTrackMaskAddress] = 0;
+  ClearEffectScratchMasks(ram);
 }
 
-static void StartEffectScheduler(Spc *spc) {
-  Apu *apu = spc->apu;
-  AllocateQueuedRequests(apu);
+static void StartEffectScheduler(RtlAudioExtensionContext *context) {
+  uint8_t *ram = context->apu_ram;
+  AllocateQueuedRequests(context);
   /* Preserve one native SPC update cost for X=$10 and one for X=$12.
    * Additional instances of either lane are extension work and execute in
    * host time, so overlap cannot slow the song timer merely because the pool
@@ -568,40 +614,39 @@ static void StartEffectScheduler(Spc *spc) {
   }
   const int first = FirstScheduledSlot();
   if (first >= 0) {
-    LoadScheduledInstance(spc, first);
+    LoadScheduledInstance(context, first);
   } else {
-    ClearEffectScratchMasks(apu);
-    apu->ram[0x34] = 0;
-    apu->ram[0x35] = 0;
-    apu->ram[kCurrentTrackMaskAddress] = 0;
-    spc->pc = kEffectDriverReturn;
+    ClearEffectScratchMasks(ram);
+    ram[0x34] = 0;
+    ram[0x35] = 0;
+    ram[kCurrentTrackMaskAddress] = 0;
+    context->spc_pc = kEffectDriverReturn;
   }
 }
 
-static void FlushVirtualLifecycleControls(Apu *apu, uint8_t addr) {
-  if (!apu || !apu->dsp || (addr != 0x4c && addr != 0x5c)) return;
+static void FlushVirtualLifecycleControls(
+    RtlAudioExtensionContext *context, uint8_t addr) {
+  if (!ExtensionContextValid(context) ||
+      (addr != 0x4c && addr != 0x5c))
+    return;
   for (int i = 0; i < kVirtualVoicePoolSize; i++) {
     NativeAudioEffectInstance *instance = &s_state.instance[i];
     if (!instance->active) continue;
     if (addr == 0x5c) {
       if (instance->ending) {
         if (instance->end_kof_stage == 2) {
-          dsp_writeVirtualVoiceControl(
-              apu->dsp, instance->voice, 0x5c, true);
+          WriteVirtualVoiceControl(context, instance->voice, 0x5c, true);
           instance->end_kof_stage = 1;
         } else if (instance->end_kof_stage == 1) {
-          dsp_writeVirtualVoiceControl(
-              apu->dsp, instance->voice, 0x5c, false);
+          WriteVirtualVoiceControl(context, instance->voice, 0x5c, false);
           instance->end_kof_stage = 0;
           instance->release_after_kon = 1;
         }
       } else if (instance->start_kof_stage == 2) {
-        dsp_writeVirtualVoiceControl(
-            apu->dsp, instance->voice, 0x5c, true);
+        WriteVirtualVoiceControl(context, instance->voice, 0x5c, true);
         instance->start_kof_stage = 1;
       } else if (instance->start_kof_stage == 1) {
-        dsp_writeVirtualVoiceControl(
-            apu->dsp, instance->voice, 0x5c, false);
+        WriteVirtualVoiceControl(context, instance->voice, 0x5c, false);
         instance->start_kof_stage = 0;
       } else {
         /* A sequence's ordinary per-note KOF is routed immediately while its
@@ -611,13 +656,11 @@ static void FlushVirtualLifecycleControls(Apu *apu, uint8_t addr) {
          * so the ownership-based global router cannot see that later clear.
          * Mirror it for every live instance or KOF remains held after the
          * first note and multi-note effects collapse to a short click. */
-        dsp_writeVirtualVoiceControl(
-            apu->dsp, instance->voice, 0x5c, false);
+        WriteVirtualVoiceControl(context, instance->voice, 0x5c, false);
       }
     } else {
-      dsp_writeVirtualVoiceControl(
-          apu->dsp, instance->voice, 0x4c,
-          instance->pending_kon != 0);
+      WriteVirtualVoiceControl(context, instance->voice, 0x4c,
+                               instance->pending_kon != 0);
       instance->pending_kon = 0;
       if (instance->ending && instance->release_after_kon) {
         instance->active = 0;
@@ -638,17 +681,18 @@ static int RoutedVirtualVoice(uint8_t effect_mask, int phase1_voice) {
   return phase1_voice;
 }
 
-static bool RouteDspWrite(Apu *apu, uint8_t addr, uint8_t *value) {
-  if (s_previous_filter && !s_previous_filter(apu, addr, value))
-    return false;
-  if (!s_enabled || !apu || !apu->dsp || !apu->spc || !value)
+bool NativeAudioExtension_FilterDspWrite(
+    RtlAudioExtensionContext *context, uint8_t addr, uint8_t *value) {
+  uint8_t *ram;
+  if (!s_enabled || !ExtensionContextValid(context) || !value)
     return true;
+  ram = context->apu_ram;
 
-  const uint8_t logical_track = apu->spc->x;
-  const uint8_t track_mask = apu->ram[kCurrentTrackMaskAddress];
-  const uint8_t ownership = apu->ram[kEffectOwnershipMaskAddress];
+  const uint8_t logical_track = context->spc_x;
+  const uint8_t track_mask = ram[kCurrentTrackMaskAddress];
+  const uint8_t ownership = ram[kEffectOwnershipMaskAddress];
   if (track_mask == 0)
-    FlushVirtualLifecycleControls(apu, addr);
+    FlushVirtualLifecycleControls(context, addr);
   s_state.song_kon_pending_mask &= ownership;
   /* $080A still has the sequencer track in X. Its shared writer at $0834
    * replaces X with $64-$67/$74-$77 and can temporarily see $1A clear. Carry
@@ -664,9 +708,9 @@ static bool RouteDspWrite(Apu *apu, uint8_t addr, uint8_t *value) {
           addr, routed_track, track_mask, ownership,
           &hardware_voice, &virtual_voice)) {
     virtual_voice = RoutedVirtualVoice(track_mask, virtual_voice);
-    dsp_setVoiceBus(apu->dsp, hardware_voice, kDspVoiceBus_Music);
-    dsp_setVoiceBus(apu->dsp, virtual_voice, kDspVoiceBus_Sfx);
-    dsp_writeVirtualVoiceRegister(apu->dsp, virtual_voice, addr, *value);
+    SetVoiceBus(context, hardware_voice, RTL_AUDIO_VOICE_BUS_MUSIC);
+    SetVoiceBus(context, virtual_voice, RTL_AUDIO_VOICE_BUS_SFX);
+    WriteVirtualVoiceRegister(context, virtual_voice, addr, *value);
     if (s_log) {
       fprintf(stderr,
               "[audio-ext] voice-write dsp=%02x x=%02x mask=%02x "
@@ -684,18 +728,16 @@ static bool RouteDspWrite(Apu *apu, uint8_t addr, uint8_t *value) {
       if (route_mask & kEventMask) {
         const int voice = RoutedVirtualVoice(
             kEventMask, kEventVirtualVoice);
-        dsp_setVoiceBus(apu->dsp, voice, kDspVoiceBus_Sfx);
-        dsp_writeVirtualVoiceControl(
-            apu->dsp, voice, addr,
-            (*value & kEventMask) != 0);
+        SetVoiceBus(context, voice, RTL_AUDIO_VOICE_BUS_SFX);
+        WriteVirtualVoiceControl(
+            context, voice, addr, (*value & kEventMask) != 0);
       }
       if (route_mask & kOrdinarySfxMask) {
         const int voice = RoutedVirtualVoice(
             kOrdinarySfxMask, kOrdinarySfxVirtualVoice);
-        dsp_setVoiceBus(
-            apu->dsp, voice, kDspVoiceBus_Sfx);
-        dsp_writeVirtualVoiceControl(
-            apu->dsp, voice, addr,
+        SetVoiceBus(context, voice, RTL_AUDIO_VOICE_BUS_SFX);
+        WriteVirtualVoiceControl(
+            context, voice, addr,
             (*value & kOrdinarySfxMask) != 0);
       }
       uint8_t hardware_value = *value;
@@ -714,8 +756,8 @@ static bool RouteDspWrite(Apu *apu, uint8_t addr, uint8_t *value) {
             s_state.song_kon_pending_mask & route_mask;
         s_state.song_kon_pending_mask &= (uint8_t)~route_mask;
       }
-      dsp_writeHardwareVoiceMask(
-          apu->dsp, addr, hardware_value, hardware_update_mask);
+      WriteHardwareVoiceMask(
+          context, addr, hardware_value, hardware_update_mask);
       const uint8_t routed_value = *value & route_mask;
       if (s_log &&
           (!s_logged_routed_seen[addr] ||
@@ -736,14 +778,15 @@ static bool RouteDspWrite(Apu *apu, uint8_t addr, uint8_t *value) {
   return true;
 }
 
-static void PatchSpcOpcode(Spc *spc, uint16_t pc) {
+void NativeAudioExtension_PatchSpcOpcode(
+    RtlAudioExtensionContext *context, uint16_t pc) {
+  uint8_t *ram;
   s_state.current_opcode_free = s_enabled && s_state.scheduler_active &&
       s_state.current_update_free;
-  if (s_previous_opcode_patch)
-    s_previous_opcode_patch(spc, pc);
-  if (!s_enabled || !spc || !spc->apu) return;
+  if (!s_enabled || !ExtensionContextValid(context)) return;
+  ram = context->apu_ram;
   if (pc == kEffectDriverEntry) {
-    StartEffectScheduler(spc);
+    StartEffectScheduler(context);
     s_state.current_opcode_free =
         s_state.scheduler_active && s_state.current_update_free;
     return;
@@ -752,107 +795,137 @@ static void PatchSpcOpcode(Spc *spc, uint16_t pc) {
       (pc == kEffectUpdateReturn || pc == kEffectCleanupReturn ||
        pc == kEffectEmptyReturn)) {
     FinishScheduledInstance(
-        spc, pc == kEffectCleanupReturn || pc == kEffectEmptyReturn);
-    if (spc->pc == kEffectUpdateEntry)
+        context, pc == kEffectCleanupReturn || pc == kEffectEmptyReturn);
+    if (context->spc_pc == kEffectUpdateEntry)
       s_state.current_opcode_free =
           s_state.scheduler_active && s_state.current_update_free;
     return;
   }
   if (pc == 0x080a) {
-    s_state.sequence_track = spc->x;
-    s_state.sequence_mask = spc->apu->ram[kCurrentTrackMaskAddress];
+    s_state.sequence_track = context->spc_x;
+    s_state.sequence_mask = ram[kCurrentTrackMaskAddress];
   }
   if (NativeAudioExtension_ShouldBypassMusicSuppression(
-          pc, spc->x, spc->apu->ram[kCurrentTrackMaskAddress],
-          spc->apu->ram[kEffectOwnershipMaskAddress])) {
+          pc, context->spc_x, ram[kCurrentTrackMaskAddress],
+          ram[kEffectOwnershipMaskAddress])) {
     /* All three sites are BNE instructions whose Z flag was produced by
      * `$1A & $47`. Making only that proven branch fall through allows the
      * already-advancing song track to reach its normal DSP write. */
-    spc->z = true;
+    context->spc_z = 1u;
     if (pc == 0x04d4)
       s_state.song_kon_pending_mask |=
-          spc->apu->ram[kCurrentTrackMaskAddress];
+          ram[kCurrentTrackMaskAddress];
     if (s_log) {
       fprintf(stderr,
               "[audio-ext] preserved song update pc=%04x x=%02x "
               "mask=%02x owner=%02x\n",
-              pc, spc->x, spc->apu->ram[kCurrentTrackMaskAddress],
-              spc->apu->ram[kEffectOwnershipMaskAddress]);
+              pc, context->spc_x, ram[kCurrentTrackMaskAddress],
+              ram[kEffectOwnershipMaskAddress]);
     }
   }
 }
 
-static int AdjustSpcOpcodeCycles(Spc *spc, uint16_t pc, int cycles) {
-  if (s_previous_cycle_hook)
-    cycles = s_previous_cycle_hook(spc, pc, cycles);
+int NativeAudioExtension_AdjustSpcOpcodeCycles(
+    uint16_t pc, int cycles) {
+  (void)pc;
   return s_enabled && s_state.current_opcode_free ? 0 : cycles;
 }
 
-static void SaveLoadExtensionState(Apu *apu, SaveLoadInfo *sli) {
-  if (s_previous_extra_saveload)
-    s_previous_extra_saveload(apu, sli);
-  if (!s_enabled || !sli || !sli->func) return;
-#if SNESRECOMP_PORTABLE_SAVELOAD
-  if (!sli->portable) {
-    sli->func(sli, &s_state, sizeof(s_state));
+static bool SaveTransfer(
+    RtlAudioSaveContext *context, uint32_t kind,
+    void *values, uint64_t count) {
+  return context != NULL &&
+      context->struct_size >= RTL_AUDIO_SAVE_CONTEXT_V2_SIZE &&
+      context->flags == 0u && context->reserved8[0] == 0u &&
+      context->reserved8[1] == 0u && context->service_context != NULL &&
+      context->transfer != NULL &&
+      context->transfer(
+          context->service_context, kind, values, count);
+}
+
+void NativeAudioExtension_SaveState(RtlAudioSaveContext *context) {
+  if (!s_enabled || context == NULL || context->portable > 1u ||
+      context->saving > 1u)
+    return;
+  if (!context->portable) {
+    (void)SaveTransfer(
+        context, RTL_AUDIO_SAVE_BYTES, &s_state, sizeof(s_state));
     return;
   }
-  saveload_u64(sli, &s_state.next_serial);
+  (void)SaveTransfer(context, RTL_AUDIO_SAVE_U64, &s_state.next_serial, 1u);
   for (int i = 0; i < kRequestQueueCapacity; i++) {
     NativeAudioQueuedRequest *request = &s_state.queue[i];
-    saveload_u64(sli, &request->serial);
-    saveload_u64(sli, &request->trace_serial);
-    saveload_u32(sli, &request->caller_pc);
-    saveload_u32(sli, &request->game_frame);
-    saveload_u16(sli, &request->actor_x);
-    saveload_u16(sli, &request->actor_y);
-    saveload_u8(sli, &request->id);
-    saveload_u8(sli, &request->event_request);
+    (void)SaveTransfer(context, RTL_AUDIO_SAVE_U64, &request->serial, 1u);
+    (void)SaveTransfer(
+        context, RTL_AUDIO_SAVE_U64, &request->trace_serial, 1u);
+    (void)SaveTransfer(context, RTL_AUDIO_SAVE_U32, &request->caller_pc, 1u);
+    (void)SaveTransfer(context, RTL_AUDIO_SAVE_U32, &request->game_frame, 1u);
+    (void)SaveTransfer(context, RTL_AUDIO_SAVE_U16, &request->actor_x, 1u);
+    (void)SaveTransfer(context, RTL_AUDIO_SAVE_U16, &request->actor_y, 1u);
+    (void)SaveTransfer(context, RTL_AUDIO_SAVE_U8, &request->id, 1u);
+    (void)SaveTransfer(
+        context, RTL_AUDIO_SAVE_U8, &request->event_request, 1u);
   }
   for (int i = 0; i < kVirtualVoicePoolSize; i++) {
     NativeAudioEffectInstance *instance = &s_state.instance[i];
-    saveload_u64(sli, &instance->serial);
-    saveload_u64(sli, &instance->trace_serial);
-    saveload_u32(sli, &instance->caller_pc);
-    saveload_u32(sli, &instance->game_frame);
-    saveload_u16(sli, &instance->actor_x);
-    saveload_u16(sli, &instance->actor_y);
-    saveload_bytes(sli, instance->state, sizeof(instance->state));
-    saveload_u8(sli, &instance->id);
-    saveload_u8(sli, &instance->voice);
-    saveload_u8(sli, &instance->lane_track);
-    saveload_u8(sli, &instance->lane_mask);
-    saveload_u8(sli, &instance->active);
-    saveload_u8(sli, &instance->event_request);
-    saveload_u8(sli, &instance->paired);
-    saveload_u8(sli, &instance->pair_phase);
-    saveload_u8(sli, &instance->noise_enabled);
-    saveload_u8(sli, &instance->start_kof_stage);
-    saveload_u8(sli, &instance->pending_kon);
-    saveload_u8(sli, &instance->ending);
-    saveload_u8(sli, &instance->end_kof_stage);
-    saveload_u8(sli, &instance->release_after_kon);
+    (void)SaveTransfer(context, RTL_AUDIO_SAVE_U64, &instance->serial, 1u);
+    (void)SaveTransfer(
+        context, RTL_AUDIO_SAVE_U64, &instance->trace_serial, 1u);
+    (void)SaveTransfer(context, RTL_AUDIO_SAVE_U32, &instance->caller_pc, 1u);
+    (void)SaveTransfer(context, RTL_AUDIO_SAVE_U32, &instance->game_frame, 1u);
+    (void)SaveTransfer(context, RTL_AUDIO_SAVE_U16, &instance->actor_x, 1u);
+    (void)SaveTransfer(context, RTL_AUDIO_SAVE_U16, &instance->actor_y, 1u);
+    (void)SaveTransfer(
+        context, RTL_AUDIO_SAVE_BYTES, instance->state,
+        sizeof(instance->state));
+    (void)SaveTransfer(context, RTL_AUDIO_SAVE_U8, &instance->id, 1u);
+    (void)SaveTransfer(context, RTL_AUDIO_SAVE_U8, &instance->voice, 1u);
+    (void)SaveTransfer(
+        context, RTL_AUDIO_SAVE_U8, &instance->lane_track, 1u);
+    (void)SaveTransfer(
+        context, RTL_AUDIO_SAVE_U8, &instance->lane_mask, 1u);
+    (void)SaveTransfer(context, RTL_AUDIO_SAVE_U8, &instance->active, 1u);
+    (void)SaveTransfer(
+        context, RTL_AUDIO_SAVE_U8, &instance->event_request, 1u);
+    (void)SaveTransfer(context, RTL_AUDIO_SAVE_U8, &instance->paired, 1u);
+    (void)SaveTransfer(
+        context, RTL_AUDIO_SAVE_U8, &instance->pair_phase, 1u);
+    (void)SaveTransfer(
+        context, RTL_AUDIO_SAVE_U8, &instance->noise_enabled, 1u);
+    (void)SaveTransfer(
+        context, RTL_AUDIO_SAVE_U8, &instance->start_kof_stage, 1u);
+    (void)SaveTransfer(
+        context, RTL_AUDIO_SAVE_U8, &instance->pending_kon, 1u);
+    (void)SaveTransfer(context, RTL_AUDIO_SAVE_U8, &instance->ending, 1u);
+    (void)SaveTransfer(
+        context, RTL_AUDIO_SAVE_U8, &instance->end_kof_stage, 1u);
+    (void)SaveTransfer(
+        context, RTL_AUDIO_SAVE_U8, &instance->release_after_kon, 1u);
   }
-  saveload_u32(sli, &s_state.queue_head);
-  saveload_u32(sli, &s_state.queue_count);
-  saveload_u32(sli, &s_state.coalesced_count);
-  saveload_u32(sli, &s_state.overflow_count);
-  saveload_u32(sli, &s_state.schedule_mask);
-  saveload_u8(sli, &s_state.scheduler_active);
-  saveload_u8(sli, &s_state.current_slot);
-  saveload_u8(sli, &s_state.active_virtual_voice);
-  saveload_u8(sli, &s_state.charged_lane_mask);
-  saveload_u8(sli, &s_state.current_update_free);
-  saveload_u8(sli, &s_state.sequence_track);
-  saveload_u8(sli, &s_state.sequence_mask);
-  saveload_u8(sli, &s_state.song_kon_pending_mask);
-  saveload_u8(sli, &s_state.current_opcode_free);
-#else
-  sli->func(sli, &s_state, sizeof(s_state));
-#endif
+  (void)SaveTransfer(context, RTL_AUDIO_SAVE_U32, &s_state.queue_head, 1u);
+  (void)SaveTransfer(context, RTL_AUDIO_SAVE_U32, &s_state.queue_count, 1u);
+  (void)SaveTransfer(
+      context, RTL_AUDIO_SAVE_U32, &s_state.coalesced_count, 1u);
+  (void)SaveTransfer(context, RTL_AUDIO_SAVE_U32, &s_state.overflow_count, 1u);
+  (void)SaveTransfer(context, RTL_AUDIO_SAVE_U32, &s_state.schedule_mask, 1u);
+  (void)SaveTransfer(
+      context, RTL_AUDIO_SAVE_U8, &s_state.scheduler_active, 1u);
+  (void)SaveTransfer(context, RTL_AUDIO_SAVE_U8, &s_state.current_slot, 1u);
+  (void)SaveTransfer(
+      context, RTL_AUDIO_SAVE_U8, &s_state.active_virtual_voice, 1u);
+  (void)SaveTransfer(
+      context, RTL_AUDIO_SAVE_U8, &s_state.charged_lane_mask, 1u);
+  (void)SaveTransfer(
+      context, RTL_AUDIO_SAVE_U8, &s_state.current_update_free, 1u);
+  (void)SaveTransfer(context, RTL_AUDIO_SAVE_U8, &s_state.sequence_track, 1u);
+  (void)SaveTransfer(context, RTL_AUDIO_SAVE_U8, &s_state.sequence_mask, 1u);
+  (void)SaveTransfer(
+      context, RTL_AUDIO_SAVE_U8, &s_state.song_kon_pending_mask, 1u);
+  (void)SaveTransfer(
+      context, RTL_AUDIO_SAVE_U8, &s_state.current_opcode_free, 1u);
 }
 
-static void CancelAllEffectsLocked(Apu *apu) {
+static void CancelAllEffectsLocked(RtlAudioExtensionContext *context) {
   const uint64_t next_serial = s_state.next_serial;
   if (g_native_audio_extension_trace_cancel_hook) {
     for (uint32_t i = 0; i < s_state.queue_count; i++) {
@@ -862,11 +935,11 @@ static void CancelAllEffectsLocked(Apu *apu) {
           s_state.queue[index].trace_serial);
     }
   }
-  if (apu && apu->dsp) {
+  if (ExtensionContextValid(context)) {
     for (int i = 0; i < kVirtualVoicePoolSize; i++) {
       if (s_state.instance[i].active) {
-        dsp_writeVirtualVoiceControl(
-            apu->dsp, kVirtualVoiceFirst + i, 0x5c, true);
+        WriteVirtualVoiceControl(
+            context, kVirtualVoiceFirst + i, 0x5c, true);
         if (g_native_audio_extension_trace_cancel_hook)
           g_native_audio_extension_trace_cancel_hook(
               s_state.instance[i].trace_serial);
@@ -877,17 +950,14 @@ static void CancelAllEffectsLocked(Apu *apu) {
   s_state.next_serial = next_serial;
   s_state.current_slot = 0xff;
   s_state.active_virtual_voice = 0xff;
-  if (apu)
-    ClearEffectScratchMasks(apu);
+  if (ExtensionContextValid(context))
+    ClearEffectScratchMasks(context->apu_ram);
 }
 
-static void OnSpcUpload(uint32_t source) {
-  if (s_previous_upload_hook)
-    s_previous_upload_hook(source);
-  if (!s_enabled || !g_snes || !g_snes->apu) return;
-  RtlApuLock();
-  CancelAllEffectsLocked(g_snes->apu);
-  RtlApuUnlock();
+void NativeAudioExtension_OnSpcUpload(
+    RtlAudioExtensionContext *context, uint32_t source) {
+  if (!s_enabled || !ExtensionContextValid(context)) return;
+  CancelAllEffectsLocked(context);
   if (s_log)
     fprintf(stderr,
             "[audio-ext] canceled queued/active effects for SPC upload %06x\n",
@@ -903,27 +973,17 @@ void NativeAudioExtension_Install(void) {
   s_state.active_virtual_voice = 0xff;
   s_state.sequence_track = 0xff;
   memset(s_logged_routed_seen, 0, sizeof(s_logged_routed_seen));
-  dsp_setExtendedVoicesEnabled(s_enabled);
+  RtlAudioExtensionConfigure(s_enabled);
   if (!s_enabled) {
     fprintf(stderr,
             "[audio-ext] extended sound channels disabled "
             "(authentic 8 voices)\n");
     return;
   }
-  s_previous_filter = g_apu_spc_dsp_write_filter_hook;
-  g_apu_spc_dsp_write_filter_hook = RouteDspWrite;
-  s_previous_opcode_patch = g_spc_opcode_patch_hook;
-  g_spc_opcode_patch_hook = PatchSpcOpcode;
-  s_previous_cycle_hook = g_spc_opcode_cycle_hook;
-  g_spc_opcode_cycle_hook = AdjustSpcOpcodeCycles;
-  s_previous_extra_saveload = g_apu_extra_saveload_hook;
-  g_apu_extra_saveload_hook = SaveLoadExtensionState;
-  s_previous_upload_hook = g_rtl_spc_upload_hook;
-  g_rtl_spc_upload_hook = OnSpcUpload;
   fprintf(stderr,
           "[audio-ext] extended sound channels enabled "
           "(%d voices, %d effect lanes)\n",
-          kDspMaximumVoiceCount, kVirtualVoicePoolSize);
+          RTL_AUDIO_ADAPTER_VOICE_MAX, kVirtualVoicePoolSize);
 }
 
 bool NativeAudioExtension_IsEnabled(void) {

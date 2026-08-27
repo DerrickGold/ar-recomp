@@ -4,6 +4,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "audio_adapter.h"
+
+typedef struct SrRunnerHandle SrRunnerHandle;
+
 typedef enum NativeAudioVoiceClass {
   kNativeAudioVoice_Unclassified = 0,
   kNativeAudioVoice_Music,
@@ -21,9 +25,19 @@ bool NativeAudioMixer_ClassifyDspWrite(
     uint8_t ownership_mask,
     int *voice, NativeAudioVoiceClass *voice_class);
 
-/* Install the normal-play provenance observer and apply configured bus gains.
- * Safe before SnesInit: the gain values are presentation globals and the
- * observer begins classifying once the SPC starts writing registers. */
+/* Game-adapter callbacks. Both receive fixed-width callback-lifetime views;
+ * neither may retain the ARAM or bus-label pointers. */
+void NativeAudioMixer_RouteDspWrite(
+    const RtlAudioDspWriteContext *context,
+    RtlAudioDspWriteRouting *routing);
+void NativeAudioMixer_RouteStateLoaded(
+    const RtlAudioStateLoadedContext *context,
+    RtlAudioStateLoadedRouting *routing);
+
+void NativeAudioMixer_BindRunner(SrRunnerHandle *runner);
+
+/* Install logging policy and apply configured bus gains. Safe before SnesInit;
+ * the runner binding reapplies native gains as soon as an APU exists. */
 void NativeAudioMixer_Install(void);
 
 /* Live settings callback for native voices and replacement OGG music. */

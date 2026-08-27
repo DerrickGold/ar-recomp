@@ -39,7 +39,6 @@ void spc_reset(Spc *spc);
 int spc_runOpcode(Spc *spc);
 void spc_saveload(Spc *spc, SaveLoadInfo *info);
 
-extern void (*g_spc_opcode_trace_hook)(Spc *spc, uint16_t pc);
 extern void (*g_spc_opcode_patch_hook)(Spc *spc, uint16_t pc);
 extern int (*g_spc_opcode_cycle_hook)(Spc *spc, uint16_t pc, int cycles);
 
