@@ -48,6 +48,16 @@ const char *g_last_recomp_func;
 uint8_t g_ram[0x20000];
 int snes_frame_counter;
 
+uint16_t SwapInputBits(uint16_t value) {
+  value = (uint16_t)(((value & 0x5555u) << 1) |
+                     ((value >> 1) & 0x5555u));
+  value = (uint16_t)(((value & 0x3333u) << 2) |
+                     ((value >> 2) & 0x3333u));
+  value = (uint16_t)(((value & 0x0f0fu) << 4) |
+                     ((value >> 4) & 0x0f0fu));
+  return (uint16_t)((value << 8) | (value >> 8));
+}
+
 static int s_failures;
 #define CHECK(expr) do { \
   if (!(expr)) { \

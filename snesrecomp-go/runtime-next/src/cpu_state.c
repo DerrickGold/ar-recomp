@@ -3,6 +3,7 @@
 #include "common_cpu_infra.h"
 #include "common_rtl.h"
 #include "runner_next_internal.h"
+#include "runner_game_module_internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -237,9 +238,9 @@ static RecompReturn dispatch_once(CpuState *cpu, uint32 pc24,
     function = dispatch_lookup_mirrored(cpu, pc24, &mirrored);
     record_dispatch(pc24, source_pc24, cpu, function != NULL, mirrored);
 
-    if (function == NULL && g_rtl_game_info != NULL &&
-        g_rtl_game_info->recover_dispatch_miss != NULL &&
-        g_rtl_game_info->recover_dispatch_miss(source_pc24, pc24)) {
+    if (function == NULL && g_rtl_game_execution != NULL &&
+        g_rtl_game_execution->recover_dispatch_miss != NULL &&
+        g_rtl_game_execution->recover_dispatch_miss(source_pc24, pc24)) {
         uint8 bank = (uint8)(pc24 >> 16);
         uint16 address = (uint16)pc24;
         uint8 opcode = cpu_read8(cpu, bank, address);

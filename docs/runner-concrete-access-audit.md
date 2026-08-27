@@ -208,6 +208,40 @@ state and callback-lifetime, zero-copy surface views, so normal frames make one
 scanout ABI call without a per-line cross-boundary callback. The former
 `SimpleHdma` compatibility type and helpers are gone from common RTL.
 
+The RDNMI pacing slice also keeps the exception count at 1, but removes
+concrete `Snes *` layout from the game-specific `$4210` read callback. The SNES
+register model now publishes only a fixed-width, callback-lifetime flag word
+covering forced-NMI pacing, interrupt context, and NMI availability. ActRaiser
+can retain its verified coroutine-yield policy without observing or mutating
+runner-owned state. The hot path still performs exactly one indirect callback:
+there is no adapter bridge, allocation, snapshot, or copied component state.
+
+The game-frame lifecycle slice keeps the exception count at 1 while removing
+the adapter's direct reads and writes of `forceNmi`, `nmiAvail`, `nmiEnabled`,
+and `inNmi`. A public, capability-gated timing transaction gives external
+layers validated begin/complete operations plus distinct persistent-state and
+new-transition flags. The linked game uses the same semantics through a narrow
+direct singleton adapter, avoiding API-table lookup and repeated descriptor
+validation on its once-per-frame hot path. Cancellation always clears forced
+pacing, and only a newly entered, hardware-enabled NMI dispatches the game
+handler; stale persistent `inNmi` state cannot be mistaken for a transition.
+
+The PPU display-control slice also keeps the exception count at 1, but removes
+five scattered reads of concrete `inidisp`, `bgmode`, and main/sub-screen
+fields. External layers retain the coherent public PPU snapshot. The linked
+game's APU-halt pacing, force-blank animation gate, unbound-background fallback,
+and developer logs use one packed fixed-width accessor at synchronous safe
+points, avoiding a full snapshot or descriptor validation in the two hot
+consumers. A missing runner maps to the same safe all-zero display state those
+policies previously used.
+
+The input-state slice keeps the exception count at 1 while removing the last
+two direct controller-latch reads. ABI v2 now publishes a coherent copied
+snapshot containing both the runner's documented packed-button order and the
+SNES `$4218-$421B` auto-joypad order, with lifetime and frame identity. The
+frame logger and moon-jump policy query it only when their diagnostic or cheat
+is enabled, so normal frames gain no query or copy.
+
 All 92 application tests pass, including the three host-GPU tests. The runner
 ABI test covers multiword patch/restore, stale views, all-or-nothing
 contention, duplicate and unsorted addresses, unknown flags, and reserved
@@ -251,6 +285,46 @@ The portable suite changes by +0.05%, while native-SIMD improves by 0.95%.
 Eleven active Fillmore action frames plus final WRAM, SRAM, state, and dispatch
 artifacts match the frozen pre-scanout reference byte-for-byte.
 
+The RDNMI tests cover the hardware-to-flag mapping, descriptor size, direct
+game-hook registration, and fallback delegation contract. The SNES contract
+test now uses the real PPU and validates real VRAM DMA instead of linking a
+register-file PPU mock across the concrete runner boundary. All 92 application
+tests pass, including the three host-GPU tests; the focused SNES, CPU-infra,
+and concrete-boundary tests pass; and strict C11/C++17 ARM64 and x86-64 header
+checks pass. Seven adjacent replay pairs retain identical WRAM, SRAM, CPU-state,
+and dispatch artifacts. The portable suite is unchanged to two decimal places,
+while native-SIMD improves by 0.03%.
+
+The game-frame timing tests cover API extent and capability publication,
+undersized outputs, unknown flags, validation-before-mutation, begin/cancel,
+disabled and enabled NMI gates, stale interrupt state, and the direct linked
+adapter. All 92 application tests pass, including the three host-GPU tests;
+the focused ABI, SNES, CPU-infra, and concrete-boundary tests pass; and strict
+C11/C++17 ARM64 and x86-64 header checks pass. Seven adjacent replay pairs
+retain identical WRAM, SRAM, CPU-state, and dispatch artifacts. Portable
+regresses 0.24% at suite scale and native-SIMD regresses 0.29%, with no
+individual workload above 0.88%. A first implementation that sent the linked
+consumer through the fully validated public table was rejected after its
+portable action workloads regressed 3.60% and 1.70%; the direct adapter retains
+the external ABI while avoiding that unnecessary in-process cost.
+
+The PPU display adapter test covers exact byte packing/unpacking and the safe
+no-runner value using the real PPU layout rather than a one-field mock. All 92
+application tests pass, including the three host-GPU tests; the focused
+CPU-infra and concrete-boundary tests pass; and strict C11/C++17 ARM64 and
+x86-64 adapter-header checks pass. Seven adjacent replay pairs retain identical
+WRAM, SRAM, CPU-state, and dispatch artifacts. The portable suite improves by
+0.10% and native-SIMD regresses 0.20%; no workload regresses by more than 0.88%.
+
+The input-state ABI test covers descriptor extent, capability publication,
+undersized output rejection, exact two-controller packed and hardware latch
+values, zeroed reserved fields, lifetime identity, and frame identity. All 92
+application tests pass, including the three host-GPU tests; the focused ABI
+and concrete-boundary tests pass; and strict C11/C++17 ARM64 and x86-64 header
+checks pass. Seven adjacent replay pairs retain identical WRAM, SRAM, CPU-state,
+and dispatch artifacts. Portable improves by 0.37% at suite scale and
+native-SIMD regresses 0.08%; no workload regresses by more than 1.27%.
+
 ## Required seams
 
 ### Type leakage
@@ -284,9 +358,13 @@ They need synchronous game-adapter services at the emulation-thread safe point,
 using fixed-width requests and caller-owned buffers.  This preserves timing and
 lets the runner optimize the operation internally. The replacement-manifest,
 SIM separated-capture, Sky Palace margin mutation, widescreen OBJ metadata, and
-action-background paths are now migrated with this model. Native scanout is
-also runner-owned; only the other policies and lifecycle operations in the
-listed core ActRaiser adapter remain.
+action-background paths are now migrated with this model. Native scanout and
+game-frame timing are runner-owned, and RDNMI pacing receives only
+callback-lifetime flags. The central widescreen policy now uses a bounded
+BEGIN/FINALIZE transaction for horizontal/vertical margins, fill and motion
+masks, row bands, vertical clipping, capture padding, and HUD geometry. The
+remaining exception is capture/composition and developer-diagnostic work in
+the core ActRaiser adapter.
 
 ### APU, SPC, and DSP integration
 

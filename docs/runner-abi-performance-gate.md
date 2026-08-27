@@ -403,6 +403,122 @@ gf1100 through gf2100 and the final WRAM, SRAM, state, and dispatch log also
 match the frozen pre-scanout reference byte-for-byte. Paired records are
 `runner-abi-scanout-{portable,native}-final.json` outside the source tree.
 
+Replacing the game-specific RDNMI callback's concrete `Snes *` with an 8-byte
+fixed-width flag context retained the existing single indirect call. Seven
+alternating adjacent baseline/candidate pairs measured:
+
+| Workload | Portable | Native-SIMD |
+| --- | ---: | ---: |
+| `mode7_worldmap` | +0.11% | +0.15% |
+| `sim_actions` | +0.03% | +0.04% |
+| `aitos_wide` | -0.06% | +0.10% |
+| `death_heim_wide` | -0.09% | -0.41% |
+| **Suite geometric mean** | **+0.00%** | **-0.03%** |
+
+Every WRAM, SRAM, CPU-state, and dispatch artifact hash matches the frozen
+post-scanout reference. Both configurations are neutral at suite scale. Paired
+records are `runner-abi-rdnmi-{portable,native}-final.json` outside the source
+tree.
+
+Moving the recompiled game's frame/NMI lifecycle behind runner-owned timing
+control retained the fresh RDNMI token, cancellation cleanup, `$4200` hardware
+gate, and the distinction between persistent interrupt state and a newly
+entered NMI. External consumers receive a fully validated public transaction;
+the linked once-per-frame consumer uses a fixed direct adapter with the same
+semantics. Seven alternating adjacent baseline/candidate pairs measured:
+
+| Workload | Portable | Native-SIMD |
+| --- | ---: | ---: |
+| `mode7_worldmap` | -0.30% | -0.01% |
+| `sim_actions` | -0.13% | -0.24% |
+| `aitos_wide` | +0.49% | +0.53% |
+| `death_heim_wide` | +0.88% | +0.87% |
+| **Suite geometric mean** | **+0.24%** | **+0.29%** |
+
+Every WRAM, SRAM, CPU-state, and dispatch artifact hash matches the frozen
+RDNMI reference. The public path packs state flags branchlessly, and the hot
+linked path avoids descriptor validation; both configurations remain neutral
+at suite scale. Paired records are
+`runner-abi-game-timing-{portable,native}-final.json` outside the source tree.
+
+Replacing the linked game's scattered concrete PPU display-control reads with
+a packed fixed-width accessor retained force-blank load pacing, tile-animation
+gating, visible-layer fallback, and developer diagnostics. External consumers
+continue to use the full public PPU snapshot; the in-process hot seams copy only
+the four control bytes they need. Seven alternating adjacent
+baseline/candidate pairs measured:
+
+| Workload | Portable | Native-SIMD |
+| --- | ---: | ---: |
+| `mode7_worldmap` | -0.48% | -0.12% |
+| `sim_actions` | -0.20% | -0.28% |
+| `aitos_wide` | +0.21% | +0.32% |
+| `death_heim_wide` | +0.10% | +0.88% |
+| **Suite geometric mean** | **-0.10%** | **+0.20%** |
+
+Every WRAM, SRAM, CPU-state, and dispatch artifact hash matches the frozen
+game-timing reference. Both configurations remain neutral at suite scale.
+Paired records are `runner-abi-ppu-display-{portable,native}-final.json`
+outside the source tree.
+
+Publishing copied input state removed the game's final direct controller-latch
+reads and gives external tools both the runner-packed and SNES auto-joypad bit
+orders with coherent frame identity. The only application consumers are an
+explicit frame logger and an opt-in cheat, so normal frames do not invoke the
+query. Seven alternating adjacent baseline/candidate pairs measured:
+
+| Workload | Portable | Native-SIMD |
+| --- | ---: | ---: |
+| `mode7_worldmap` | +0.01% | +0.81% |
+| `sim_actions` | -0.26% | +1.27% |
+| `aitos_wide` | +0.16% | -0.73% |
+| `death_heim_wide` | -1.36% | -1.01% |
+| **Suite geometric mean** | **-0.37%** | **+0.08%** |
+
+Every WRAM, SRAM, CPU-state, and dispatch artifact hash matches the frozen PPU
+display-accessor reference. Both configurations remain neutral at suite scale.
+Paired records are `runner-abi-input-state-{portable,native}-final.json`
+outside the source tree.
+
+Replacing the linked game's unversioned callback bag with cached, versioned
+identity/lifecycle/execution/state/audio tables preserved all final artifacts.
+Registration and provider binding remain outside the frame hot path. Seven
+alternating adjacent baseline/candidate pairs against the frozen input-state
+checkpoint measured:
+
+| Workload | Portable | Native-SIMD |
+| --- | ---: | ---: |
+| `mode7_worldmap` | -0.83% | -0.11% |
+| `sim_actions` | -0.58% | +0.10% |
+| `aitos_wide` | -0.36% | +0.33% |
+| `death_heim_wide` | -0.64% | +0.69% |
+| **Suite geometric mean** | **-0.60%** | **+0.25%** |
+
+Both configurations remain neutral at suite scale. Machine-readable paired
+records are `runner-game-module-{portable,native}.json` outside the source
+tree.
+
+The bounded PPU frame-policy migration replaced ActRaiser's direct margin,
+fill, row-band, vertical-clip, capture-padding, and HUD setters with a validated
+BEGIN/publish/FINALIZE transaction. Seven alternating adjacent pairs against
+the frozen versioned game-module checkpoint measured:
+
+| Workload | Portable | Native-SIMD |
+| --- | ---: | ---: |
+| `mode7_worldmap` | +0.78% | -1.39% |
+| `sim_actions` | +0.86% | -1.24% |
+| `aitos_wide` | +0.24% | -0.45% |
+| `death_heim_wide` | +0.92% | -1.60% |
+| **Suite geometric mean** | **+0.70%** | **-1.17%** |
+
+Positive is slower. Every WRAM, SRAM, CPU-state, and dispatch artifact hash
+matches the frozen reference. The portable result remains below the 3% suite
+gate and every workload remains below 2%; native-SIMD records a small gain. The
+policy path avoids allocation, framebuffer copies, emulated-memory copies, and
+surface generation invalidation. Machine-readable paired records are
+`runner-abi-frame-policy-transaction-{portable,native}.json` outside the source
+tree.
+
 ## Phase acceptance
 
 The target is no measurable regression.  A phase is accepted automatically

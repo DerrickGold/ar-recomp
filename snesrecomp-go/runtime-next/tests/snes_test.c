@@ -1,5 +1,6 @@
 #include "snes/apu.h"
 #include "snes/cart.h"
+#include "snes/ppu.h"
 #include "snes/snes.h"
 
 #include <stddef.h>
@@ -7,8 +8,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-struct Ppu { uint8_t registers[0x40]; unsigned resets; };
 
 static int failures;
 static Snes *active_snes;
@@ -38,13 +37,6 @@ uint8_t apu_cpuRead(Apu *apu, uint16_t address) { return apu->ram[address]; }
 void apu_cpuWrite(Apu *apu, uint16_t address, uint8_t value) { apu->ram[address] = value; }
 void apu_saveload(Apu *apu, SaveLoadInfo *info) { (void)apu; (void)info; }
 
-Ppu *ppu_init(void) { return (Ppu *)calloc(1u, sizeof(Ppu)); }
-void ppu_free(Ppu *ppu) { free(ppu); }
-void ppu_reset(Ppu *ppu) { memset(ppu->registers, 0, sizeof(ppu->registers)); ++ppu->resets; }
-uint8_t ppu_read(Ppu *ppu, uint8_t address) { return ppu->registers[address & 0x3fu]; }
-void ppu_write(Ppu *ppu, uint8_t address, uint8_t value) { ppu->registers[address & 0x3fu] = value; }
-void ppu_saveload(Ppu *ppu, SaveLoadInfo *info) { (void)ppu; (void)info; }
-
 void RtlApuLock(void) { ++lock_depth; }
 void RtlApuUnlock(void) { --lock_depth; }
 void rtl_accumulate_apu_catchup(void) { ++accumulate_calls; }
@@ -67,7 +59,14 @@ static void observe_read(uint16_t address, uint8_t value) {
     (void)value;
     last_hardware_read = address;
 }
-static int override_rdnmi(Snes *snes) { (void)snes; return 0x91; }
+static bool rdnmi_context_valid;
+static int override_rdnmi(const RtlRdnmiReadContext *context) {
+    rdnmi_context_valid = context != NULL &&
+        context->struct_size == RTL_RDNMI_READ_CONTEXT_V2_SIZE &&
+        context->flags == (RTL_RDNMI_FORCE_NMI | RTL_RDNMI_IN_NMI |
+                           RTL_RDNMI_AVAILABLE);
+    return 0x91;
+}
 
 static void test_reset(Snes *snes, uint8_t *ram) {
     memset(ram, 0xa5, 0x20000u);
@@ -96,8 +95,12 @@ static void test_internal_registers(Snes *snes) {
     snes->inNmi = true;
     check(snes_readReg(snes, 0x4210u) == 0x82u && !snes->inNmi,
           "RDNMI reports and acknowledges NMI");
+    snes->forceNmi = true;
+    snes->inNmi = true;
+    snes->nmiAvail = true;
     g_snes_rdnmi_read_hook = override_rdnmi;
-    check(snes_readReg(snes, 0x4210u) == 0x91u, "game pacing RDNMI hook");
+    check(snes_readReg(snes, 0x4210u) == 0x91u && rdnmi_context_valid,
+          "game pacing RDNMI fixed-width context");
     g_snes_rdnmi_read_hook = NULL;
     snes->input1_currentState = 0x0001u;
     check(SwapInputBits(0x0001u) == 0x8000u && snes_readReg(snes, 0x4219u) == 0x80u,
@@ -115,9 +118,10 @@ static void test_bus(Snes *snes, uint8_t *ram) {
     snes_write(snes, 0x000123u, 0x77u);
     check(snes_read(snes, 0x800123u) == 0x77u, "low WRAM bank mirror");
 
-    snes_write(snes, 0x00210fu, 0x44u);
-    check(snes_read(snes, 0x00210fu) == 0x44u && last_register_write == 0x210fu &&
-          last_hardware_read == 0x210fu, "PPU B-bus routing and observers");
+    snes_write(snes, 0x002100u, 0x04u);
+    (void)snes_read(snes, 0x00213eu);
+    check(snes->ppu->inidisp == 0x04u && last_register_write == 0x2100u &&
+          last_hardware_read == 0x213eu, "PPU B-bus routing and observers");
 
     snes_writeBBus(snes, 0x81u, 0x34u);
     snes_writeBBus(snes, 0x82u, 0x12u);
@@ -143,6 +147,7 @@ static void test_apu_bus(Snes *snes) {
 static void test_synchronous_dma_register(Snes *snes, uint8_t *ram) {
     ram[0x1000u] = 0x5au;
     ram[0x1001u] = 0xa5u;
+    snes_writeBBus(snes, 0x15u, 0x80u);
     dma_write(snes->dma, 0x4300u, 0x01u);
     dma_write(snes->dma, 0x4301u, 0x18u);
     dma_write(snes->dma, 0x4302u, 0x00u);
@@ -151,8 +156,7 @@ static void test_synchronous_dma_register(Snes *snes, uint8_t *ram) {
     dma_write(snes->dma, 0x4305u, 2u);
     dma_write(snes->dma, 0x4306u, 0u);
     snes_writeReg(snes, 0x420bu, 1u);
-    check(snes->ppu->registers[0x18u] == 0x5au &&
-          snes->ppu->registers[0x19u] == 0xa5u,
+    check(snes->ppu->vram[0] == 0xa55au,
           "$420B drains PPU DMA synchronously");
     check(!snes->dma->dmaBusy && snes->dma->dmaTimer == 0u &&
           snes->dma->channel[0].aAdr == 0x1002u,

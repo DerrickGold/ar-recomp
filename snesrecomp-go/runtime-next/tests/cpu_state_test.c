@@ -109,10 +109,12 @@ static bool recover_test_dispatch(uint32 source_pc24, uint32 target_pc24) {
     return source_pc24 == 0x018900u;
 }
 
-static const RtlGameInfo test_game_info = {
-    .title = "cpu-state-test",
+static void run_test_frame(void) {}
+
+static const RtlGameExecutionApi test_game_execution = {
+    .struct_size = RTL_GAME_EXECUTION_API_V1_SIZE,
+    .run_frame = run_test_frame,
     .recover_dispatch_miss = recover_test_dispatch,
-    .save_name_prefix = "test",
 };
 
 const DispatchEntry g_dispatch_table[] = {
@@ -126,7 +128,7 @@ const DispatchEntry g_dispatch_table[] = {
 };
 const unsigned g_dispatch_table_count =
     sizeof(g_dispatch_table) / sizeof(g_dispatch_table[0]);
-const RtlGameInfo *g_rtl_game_info;
+const RtlGameExecutionApi *g_rtl_game_execution;
 
 uint8 ReadReg(uint16 reg) {
     last_register = reg;
@@ -285,7 +287,7 @@ static void test_recovered_branch_handlers(void) {
     cpu.m_flag = 0u;
     cpu.x_flag = 1u;
     cpu.S = 0x01e0u;
-    g_rtl_game_info = &test_game_info;
+    g_rtl_game_execution = &test_game_execution;
 
     *RomPtr(0x0183f0u) = 0x80u; /* BRA $8400 */
     *RomPtr(0x0183f1u) = 0x0eu;
@@ -303,7 +305,7 @@ static void test_recovered_branch_handlers(void) {
               RECOMP_RETURN_SKIP_2 && continuation_calls == 1u &&
               continuation_mx == 1u && cpu.S == 0x01e0u,
           "approved BRL handler resolves without consuming an RTS frame");
-    g_rtl_game_info = NULL;
+    g_rtl_game_execution = NULL;
 }
 
 static void test_recovered_handler_continuation(void) {
@@ -324,7 +326,7 @@ static void test_recovered_handler_continuation(void) {
     continuation_calls = 0u;
     continuation_mx = 0xffu;
     continuation_host_return_valid = 0xffu;
-    g_rtl_game_info = &test_game_info;
+    g_rtl_game_execution = &test_game_execution;
 
     check(cpu_dispatch_pc_from(&cpu, 0x018200u, 0x01f0u, 0x018900u) ==
               RECOMP_RETURN_SKIP_2,
@@ -333,7 +335,7 @@ static void test_recovered_handler_continuation(void) {
           "recovered continuation preserves runtime M/X variant");
     check(cpu.S == 0x01e2u && continuation_host_return_valid == 0u,
           "recovered continuation consumes handler frame and is unpaired");
-    g_rtl_game_info = NULL;
+    g_rtl_game_execution = NULL;
 }
 
 int main(void) {

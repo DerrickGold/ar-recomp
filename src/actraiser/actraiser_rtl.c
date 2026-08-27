@@ -78,17 +78,30 @@ enum {
   kRdnmiRepeatedReadWarningThreshold = 4096,
 };
 
-ActRaiserRomSetupResult ActRaiser_SetupLiveRom(Snes *snes) {
-  ActRaiserRomSetupResult result = {0};
-  if (!snes || !snes->cart || !snes->cart->rom || !snes->cart->romSize)
-    return result;
+static ActRaiserRomSetupResult s_rom_setup_result;
 
-  result.visual_patches_applied =
-      SimVisualPatches_Apply(snes->cart->rom, snes->cart->romSize);
-  result.randomizer_initialized =
-      Randomizer_Init(snes->cart->rom, snes->cart->romSize);
-  if (result.randomizer_initialized) Randomizer_Apply();
-  return result;
+bool ActRaiser_InitializeGame(
+    const RtlGameInitializeContext *context) {
+  s_rom_setup_result = (ActRaiserRomSetupResult){0};
+  if (!context ||
+      context->struct_size < RTL_GAME_INITIALIZE_CONTEXT_V1_SIZE)
+    return false;
+  if ((context->flags & RTL_GAME_INITIALIZE_HAS_ROM) == 0)
+    return true;
+  if (!context->rom_data || !context->rom_byte_size ||
+      context->rom_byte_size > SIZE_MAX)
+    return false;
+
+  s_rom_setup_result.visual_patches_applied = SimVisualPatches_Apply(
+      context->rom_data, (size_t)context->rom_byte_size);
+  s_rom_setup_result.randomizer_initialized = Randomizer_Init(
+      context->rom_data, (size_t)context->rom_byte_size);
+  if (s_rom_setup_result.randomizer_initialized) Randomizer_Apply();
+  return true;
+}
+
+ActRaiserRomSetupResult ActRaiser_LastRomSetupResult(void) {
+  return s_rom_setup_result;
 }
 
 /* Developer-only environment controls are immutable for a game process. Keep
@@ -544,11 +557,13 @@ static void ActRaiser_OnInidispWrite(uint8_t value) {
  * already elapsed. RtlApuWrite invokes this seam before taking the APU lock,
  * so releasing the collapsed-touch gate cannot race the audio callback. */
 static void ActRaiser_OnApuPortPace(uint8_t port, uint8_t value) {
-  extern Ppu *g_ppu;
+  const uint32_t ppu_display = RtlGamePpuDisplayState();
+  const uint8_t display_control =
+      RTL_GAME_PPU_DISPLAY_CONTROL(ppu_display);
   const ActionLoadPacingTriggerDecision decision =
       ActionLoadPacing_EvaluateTrigger(
           g_action_load_armed_frames,
-          g_ram[kActRaiserWram_MapGroup], g_ppu ? g_ppu->inidisp : 0,
+          g_ram[kActRaiserWram_MapGroup], display_control,
           port, value, g_ar_in_interrupt);
   if (decision == kActionLoadPacingTrigger_Ignore)
     return;
@@ -564,7 +579,7 @@ static void ActRaiser_OnApuPortPace(uint8_t port, uint8_t value) {
               "discarded stale arm before APU halt $F0\n",
               snes_frame_counter, g_ram[kActRaiserWram_MapGroup],
               g_ram[kActRaiserWram_CurrentMap],
-              g_ppu ? g_ppu->inidisp : 0);
+              display_control);
     }
     g_action_load_armed_frames = 0;
     g_action_load_one_shot_token = 0;
@@ -598,10 +613,17 @@ bool ActRaiser_RecoverDispatchMiss(uint32 source_pc24, uint32 target_pc24) {
 /* ActRaiser's inline RDNMI waits need coroutine pacing at a ROM-specific set
  * of basic blocks. Returning -1 delegates ordinary reads to the shared SNES
  * hardware model; a nonnegative result overrides the $4210 byte. */
-int ActRaiser_ReadRdnmi(Snes *snes) {
+int ActRaiser_ReadRdnmi(const RtlRdnmiReadContext *context) {
   extern uint32_t g_ar_blk_ring[];
   extern unsigned g_ar_blk_idx;
   static bool yielding;
+  if (!context || context->struct_size < RTL_RDNMI_READ_CONTEXT_V2_SIZE)
+    return -1;
+  const bool force_nmi =
+      (context->flags & RTL_RDNMI_FORCE_NMI) != 0u;
+  const bool in_nmi = (context->flags & RTL_RDNMI_IN_NMI) != 0u;
+  const bool nmi_available =
+      (context->flags & RTL_RDNMI_AVAILABLE) != 0u;
 
   /* If the same block reads $4210 thousands of times without another traced
    * block between reads, print the gate state once instead of leaving only a
@@ -619,9 +641,9 @@ int ActRaiser_ReadRdnmi(Snes *snes) {
                 "forceNmi=%d yielding=%d inNmi=%d nmiAvail=%d\n",
                 block, snes_frame_counter,
                 (unsigned)kRdnmiRepeatedReadWarningThreshold,
-                snes->forceNmi ? 1 : 0,
-                yielding ? 1 : 0, snes->inNmi ? 1 : 0,
-                snes->nmiAvail ? 1 : 0);
+                force_nmi ? 1 : 0,
+                yielding ? 1 : 0, in_nmi ? 1 : 0,
+                nmi_available ? 1 : 0);
         fflush(stderr);
       }
     } else {
@@ -634,7 +656,7 @@ int ActRaiser_ReadRdnmi(Snes *snes) {
   /* These verified spin blocks can also execute from an interrupt context,
    * where yielding is impossible. Report vblank immediately in that case so
    * the emulated handler cannot deadlock inside its own wait. */
-  if (!(snes->forceNmi && !yielding)) {
+  if (!(force_nmi && !yielding)) {
     static const uint32_t kSpinBlocksNoYield[] = {
       0x019293, 0x0192AA, 0x0287F3, 0x029AC4,
       0x02BEBF, 0x03B013, 0x03E535,
@@ -665,7 +687,7 @@ int ActRaiser_ReadRdnmi(Snes *snes) {
    * by ActRaiser_GetDeveloperEnvironment before the first emulated frame. */
   static int no_4210_yield = -1;
   if (no_4210_yield < 0) no_4210_yield = getenv("AR_NO4210YIELD") ? 1 : 0;
-  if (snes->forceNmi && !yielding && !no_4210_yield) {
+  if (force_nmi && !yielding && !no_4210_yield) {
     static const uint32_t kSpinBlocks[] = {
       0x019293, /* intro/menu/effect wait */
       0x0192AA, /* effect-loop wait */
@@ -682,19 +704,22 @@ int ActRaiser_ReadRdnmi(Snes *snes) {
         continue;
       if (ActRaiser_DeveloperFlagEnabled(
               kActRaiserDeveloperFlag_VblankLog)) {
-        extern Ppu *g_ppu;
         static int last_frame = -1;
         if (snes_frame_counter != last_frame) {
           last_frame = snes_frame_counter;
           extern uint16 ar_cpu_S(void);
           extern uint8 ar_cpu_PB(void);
+          const uint32_t ppu_display = RtlGamePpuDisplayState();
+          const uint8_t display_control =
+              RTL_GAME_PPU_DISPLAY_CONTROL(ppu_display);
           fprintf(stderr,
                   "[vbl] f=%d bright=%d fblank=%d bgmode=%02x main=%02x "
                   "$18=%02x $19=%02x time$E6=%02x%02x HP=%02x PB=%02x "
                   "S=%04x blk=%06X\n",
-                  snes_frame_counter, g_ppu->inidisp & 0xf,
-                  (g_ppu->inidisp & 0x80) ? 1 : 0, g_ppu->bgmode,
-                  g_ppu->screenEnabled[0],
+                  snes_frame_counter, display_control & 0xf,
+                  (display_control & 0x80) ? 1 : 0,
+                  RTL_GAME_PPU_BG_MODE_CONTROL(ppu_display),
+                  RTL_GAME_PPU_MAIN_SCREEN(ppu_display),
                   g_ram[kActRaiserWram_MapGroup],
                   g_ram[kActRaiserWram_CurrentMap],
                   g_ram[kActRaiserWram_ActionTimerHigh],
@@ -930,6 +955,20 @@ static void ActRaiser_WritePpuSnapshotMetadata(const char *prefix,
   fclose(file);
 }
 
+static bool ActRaiser_QueryInputState(SrInputStateSnapshot *state) {
+  const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+  if (!state || !api ||
+      api->struct_size < SNES_RUNNER_API_INPUT_STATE_SIZE ||
+      (api->capabilities & SR_RUNNER_CAP_INPUT_STATE) == 0u ||
+      !api->query_input_state)
+    return false;
+  *state = (SrInputStateSnapshot){
+    .struct_size = sizeof(*state),
+  };
+  return api->query_input_state(sr_runner_handle(g_snes), state) ==
+      SR_RESULT_OK;
+}
+
 /* Dump the full internal state (everything but the framebuffer, which the
  * caller writes as a .ppm) so an on-demand snapshot captures both the picture
  * AND the internals: WRAM, plus the PPU memory the WRAM dump can't see — VRAM
@@ -1043,7 +1082,6 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
    * flags, and the walking-cycle Crest/Boost counters ($08BC/$08C4). */
   if (ActRaiser_DeveloperFlagEnabled(kActRaiserDeveloperFlag_FrameLog)) {
     extern unsigned long g_recomp_push_count;
-    extern Snes *g_snes;
     static unsigned long last_push;
     /* return frame is at pre-pop S (we already did S+=2 above) */
     uint16 sp = (uint16)(cpu->S - 2);
@@ -1052,8 +1090,10 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
      * 2026-07-01 for the sim-mode freeze investigation: correlates whether
      * input is even reaching the frame against which per-frame path fires
      * (see AR_SIMTRACE in cpu_trace.h). */
-    uint16 joy_raw = g_snes->input1_currentState;
-    uint16 joy = SwapInputBits(joy_raw);
+    SrInputStateSnapshot input;
+    const bool input_valid = ActRaiser_QueryInputState(&input);
+    uint16 joy_raw = input_valid ? input.packed_buttons[0] : 0u;
+    uint16 joy = input_valid ? input.auto_joypad[0] : 0u;
     uint16 game_frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
     uint16 player_x = ActRaiser_ReadWram16(kActRaiserWram_PlayerPositionX);
     uint16 player_y = ActRaiser_ReadWram16(kActRaiserWram_PlayerPositionY);
@@ -1139,15 +1179,19 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
    * game running (no freeze) is usually forced-blank set, brightness 0, or all
    * main-screen layers disabled. */
   if (ActRaiser_DeveloperFlagEnabled(kActRaiserDeveloperFlag_PpuLog)) {
-    extern Ppu *g_ppu;
     static int lf = -1;
     if (snes_frame_counter != lf) {
       lf = snes_frame_counter;
       extern uint8 g_snesrecomp_last_hdmaen;
+      const uint32_t ppu_display = RtlGamePpuDisplayState();
+      const uint8_t display_control =
+          RTL_GAME_PPU_DISPLAY_CONTROL(ppu_display);
       fprintf(stderr, "[ppu] f=%d inidisp=%02x bright=%d fblank=%d bgmode=%02x main=%02x sub=%02x hdmaen=%02x\n",
-              snes_frame_counter, g_ppu->inidisp, g_ppu->inidisp & 0xf,
-              (g_ppu->inidisp & 0x80) ? 1 : 0, g_ppu->bgmode,
-              g_ppu->screenEnabled[0], g_ppu->screenEnabled[1],
+              snes_frame_counter, display_control, display_control & 0xf,
+              (display_control & 0x80) ? 1 : 0,
+              RTL_GAME_PPU_BG_MODE_CONTROL(ppu_display),
+              RTL_GAME_PPU_MAIN_SCREEN(ppu_display),
+              RTL_GAME_PPU_SUB_SCREEN(ppu_display),
               g_snesrecomp_last_hdmaen);
     }
   }
@@ -1202,7 +1246,8 @@ RecompReturn ActRaiser_TileAnimationTick(CpuState *cpu) {
   cpu_write_a_m(cpu, due);
   ActRaiser_TileAnimSetNz(cpu, due, entry_m_bits);
 
-  if (due != 0 || (g_ppu && PPU_forcedBlank(g_ppu))) {
+  if (due != 0 ||
+      (RTL_GAME_PPU_DISPLAY_CONTROL(RtlGamePpuDisplayState()) & 0x80u) != 0u) {
     cpu_mirrors_to_p(cpu);
     cpu->S = (uint16)(cpu->S + 3);  /* replaced RTL */
     return RECOMP_RETURN_NORMAL;
@@ -1272,7 +1317,7 @@ RecompReturn ActRaiser_TileAnimationTick(CpuState *cpu) {
  * much of the extra-column budget (g_ws_extra, set at startup from
  * ExtendedAspectRatio) is visible this frame. Phase 1: pillarbox everywhere
  * (authentic 256 columns centered); later phases widen per mode via
- * $18/$19 and clamp per camera/level bounds with PpuSetExtraSideSpace.
+ * $18/$19 and clamp per camera/level bounds in the frame-policy transaction.
  * Must run every frame: ppu_reset zeroes the PPU margin fields.
  * AR_WS_SURVEY=1 forces raw symmetric margins in EVERY mode — the Phase-2
  * artifact-survey knob (stale tiles/pop-in expected; not for normal play). */
@@ -1321,39 +1366,49 @@ static void ActRaiser_ProjectBgPresentationPolicy(
   }
 }
 
-static PpuWidescreenBandFill ActRaiser_PpuBandFill(
+static SrPpuBackgroundFill ActRaiser_PpuBandFill(
     ActionBgEdgeMode edge) {
   switch (edge) {
     case kActionBgEdge_Transparent:
-      return kPpuWidescreenBandFill_Transparent;
+      return SR_PPU_BACKGROUND_FILL_TRANSPARENT;
     case kActionBgEdge_LiveWorld:
-      return kPpuWidescreenBandFill_LiveWorld;
+      return SR_PPU_BACKGROUND_FILL_LIVE_WORLD;
     case kActionBgEdge_Clamp:
-      return kPpuWidescreenBandFill_Clamp;
+      return SR_PPU_BACKGROUND_FILL_CLAMP;
     case kActionBgEdge_Mirror:
-      return kPpuWidescreenBandFill_Mirror;
+      return SR_PPU_BACKGROUND_FILL_MIRROR;
     case kActionBgEdge_Repeat:
-      return kPpuWidescreenBandFill_Repeat;
+      return SR_PPU_BACKGROUND_FILL_REPEAT;
     case kActionBgEdge_RawWrap:
     default:
-      return kPpuWidescreenBandFill_RawWrap;
+      return SR_PPU_BACKGROUND_FILL_RAW_WRAP;
   }
 }
 
-static void ActRaiser_ApplyBgPresentationBands(
-    const ActionBgPresentationPolicy *policy) {
-  if (!policy) return;
-  PpuSetWidescreenLayerNormalScroll(
-      g_ppu, policy->normal_scroll_layers);
+static bool ActRaiser_ProjectBgPresentationBands(
+    const ActionBgPresentationPolicy *policy,
+    SrPpuFramePolicy *frame_policy,
+    SrPpuFramePolicyBand *bands, size_t band_capacity) {
+  if (!policy || !frame_policy ||
+      policy->band_count > band_capacity)
+    return false;
+  frame_policy->layer_normal_scroll_mask =
+      policy->normal_scroll_layers;
   for (unsigned i = 0; i < policy->band_count; i++) {
     const ActionBgPresentationBand *band = &policy->bands[i];
-    PpuSetWidescreenLayerBand(
-        g_ppu, band->layer, band->y0, band->y1,
-        ActRaiser_PpuBandFill(band->edge),
-        band->motion == kActionBgMotion_NormalScroll
-            ? kPpuWidescreenMotion_NormalScroll
-            : kPpuWidescreenMotion_FillRelative);
+    bands[i] = (SrPpuFramePolicyBand) {
+      .layer = band->layer,
+      .y0 = band->y0,
+      .y1 = band->y1,
+      .fill = ActRaiser_PpuBandFill(band->edge),
+      .motion = band->motion == kActionBgMotion_NormalScroll
+          ? SR_PPU_BACKGROUND_MOTION_NORMAL_SCROLL
+          : SR_PPU_BACKGROUND_MOTION_FILL_RELATIVE,
+    };
   }
+  frame_policy->bands = policy->band_count ? bands : NULL;
+  frame_policy->band_count = policy->band_count;
+  return true;
 }
 
 static uint32 ActRaiser_BgBandSignature(
@@ -1496,14 +1551,16 @@ static void ActRaiser_ClearWidescreenMarginGaps(bool bounded_world_margins) {
  * Action stages only. Simulation towns get their 3D treatment from sim3d.c and
  * the world map is Mode 7, whose per-scanline matrix cannot be extrapolated
  * past the visible band (see PpuDrawBackground_mode7). */
-static void ActRaiser_ApplyVerticalMarginPolicy(uint8_t map_group,
-                                                uint8_t map_number) {
+static void ActRaiser_ResolveVerticalMarginPolicy(
+    uint8_t map_group, uint8_t map_number,
+    SrPpuFramePolicy *frame_policy) {
   extern int g_ws_extra_top;
   extern int g_ws_extra_bottom;
   extern bool Diorama_IsActiveThisFrame(void);
 
   g_ws_extra_top = 0;
   g_ws_extra_bottom = 0;
+  if (!frame_policy) return;
 
   int budget = g_settings.diorama_vertical_extend;
   const int primary_layer =
@@ -1520,7 +1577,8 @@ static void ActRaiser_ApplyVerticalMarginPolicy(uint8_t map_group,
         ActRaiser_ReadWram16(kActRaiserWram_Bg1Height + layer_offset),
         budget, &g_ws_extra_top, &g_ws_extra_bottom);
   }
-  PpuSetExtraVerticalSpace(g_ppu, g_ws_extra_top, g_ws_extra_bottom);
+  frame_policy->margin_top_pixels = (uint32_t)g_ws_extra_top;
+  frame_policy->margin_bottom_pixels = (uint32_t)g_ws_extra_bottom;
   /* The role catalog chooses the primary plane that governs capture height,
    * but every layer has its OWN camera. Clip each layer independently
    * before its camera reaches row 0: otherwise a BG2 at Y=0 wraps negative
@@ -1535,8 +1593,10 @@ static void ActRaiser_ApplyVerticalMarginPolicy(uint8_t map_group,
           ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY + offset),
           ActRaiser_ReadWram16(kActRaiserWram_Bg1Height + offset),
           budget, &top_rows, &bottom_rows);
-      PpuSetVerticalMarginLayerClip(
-          g_ppu, (uint8_t)layer, top_rows, bottom_rows);
+      frame_policy->vertical_clip_layer_mask |= 1u << layer;
+      frame_policy->vertical_clip_top_rows[layer] = (uint32_t)top_rows;
+      frame_policy->vertical_clip_bottom_rows[layer] =
+          (uint32_t)bottom_rows;
     }
   }
 
@@ -1611,12 +1671,25 @@ static const DioramaRoomOverride *ActRaiser_CurrentVirtualLayerRoom(void) {
   return room;
 }
 
+static bool ActRaiser_CommitPpuFramePolicy(
+    const SrPpuFramePolicy *policy) {
+  const SrResult result = RtlGameApplyPpuFramePolicy(policy);
+  if (result == SR_RESULT_OK) return true;
+  SessionFatal_Request(
+      "The runner rejected ActRaiser's frame presentation policy "
+      "(error %u).", (unsigned)result);
+  return false;
+}
+
 static void ActRaiser_ApplyWidescreenPolicy(void) {
   extern bool g_ws_active;
   extern int g_ws_extra;
-  /* Virtual tilemaps are frame-scoped. Clear before the inactive early return
-   * so leaving widescreen cannot retain the prior action room's provider. */
-  PpuClearVirtualTilemaps(g_ppu);
+  SrPpuFramePolicyBand frame_bands[kActionBgPresentationBandMax];
+  SrPpuFramePolicy frame_policy = {
+    .struct_size = sizeof(frame_policy),
+    .horizontal_mode = SR_PPU_HORIZONTAL_MARGIN_CENTERED,
+    .margin_budget_pixels = (uint32_t)g_ws_extra,
+  };
   ActionBgTuner_BeginFrame();
   s_pending_action_bg_plan = ActRaiser_NativeBgPresentationPlan();
   s_pending_bg_capture_pad_to_budget = false;
@@ -1627,9 +1700,10 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
      * classification remains the authority for which layers may bind. The
      * legacy renderer cannot consume this host seam, so fail closed there. */
     extern bool g_new_ppu;
+    bool bind_plan = false;
+    ActionBgPlan plan;
     if (g_new_ppu &&
         ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
-      ActionBgPlan plan;
       ActionBgPresentationPolicy presentation;
       if (ActRaiser_ResolveActionBgPlan(
               g_ram[kActRaiserWram_MapGroup],
@@ -1641,11 +1715,19 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
          * as raw/live so a mirror decision cannot imply nonexistent padding. */
         ActRaiser_ProjectBgPresentationPolicy(
             &s_pending_action_bg_plan, 0, 0, 0, false);
-        ActRaiserActionBg_BindPlanWithVirtualLayers(
-            g_ram, kActRaiserWramSize, &plan,
-            ActRaiser_CurrentVirtualLayerRoom());
+        bind_plan = true;
       }
     }
+    /* Beginning the policy transaction clears any prior frame's virtual maps
+     * and layer extents before the optional authentic provider is republished. */
+    ActRaiser_ResolveVerticalMarginPolicy(
+        g_ram[kActRaiserWram_MapGroup],
+        g_ram[kActRaiserWram_CurrentMap], &frame_policy);
+    if (!ActRaiser_CommitPpuFramePolicy(&frame_policy)) return;
+    if (bind_plan)
+      ActRaiserActionBg_BindPlanWithVirtualLayers(
+          g_ram, kActRaiserWramSize, &plan,
+          ActRaiser_CurrentVirtualLayerRoom());
     return;
   }
   static int survey = -1;
@@ -1843,26 +1925,41 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     }
   }
 
-  /* The HUD split is persistent PPU policy state, unlike the layer-clamp
-   * arrays reset by PpuSetExtraSpace. Clear it explicitly on every mode flip
-   * path before optionally enabling this frame's prototype. */
-  PpuSetWidescreenHudSplit(g_ppu, 0, 0, 0, 0, 0);
+  frame_policy.horizontal_mode = wide
+      ? SR_PPU_HORIZONTAL_MARGIN_AVAILABLE
+      : SR_PPU_HORIZONTAL_MARGIN_CENTERED;
   if (wide) {
-    PpuSetExtraSpace(g_ppu, (uint8)g_ws_extra);
-    PpuSetWidescreenLayerClamp(g_ppu, clamp);
-    PpuSetWidescreenLayerMirror(g_ppu, mirror);
-    PpuSetWidescreenLayerRepeat(g_ppu, repeat);
+    frame_policy.margin_left_pixels = (uint32_t)g_ws_extra;
+    frame_policy.margin_right_pixels = (uint32_t)g_ws_extra;
+    frame_policy.layer_clamp_mask = clamp;
+    frame_policy.layer_mirror_mask = mirror;
+    frame_policy.layer_repeat_mask = repeat;
     /* Fix A (SPEC-backdrop-clip.md). Only meaningful in diorama mode, which is
      * the only thing that captures these layers; gating on the setting keeps
-     * this a live A/B and keeps flat output untouched either way. Must come
-     * after PpuSetExtraSpace above, which resets the per-frame policy bits. */
-    PpuSetWidescreenPadCapturedToBudget(
-        g_ppu, (uint8)(g_settings.diorama_mode &&
-                       g_settings.diorama_margin_fix));
-    if (hud_split_height)
-      PpuSetWidescreenHudSplit(g_ppu, hud_split_height,
-                               hud_split_left_end, hud_split_right_start,
-                               hud_player_row_y, hud_left_only_y);
+     * this a live A/B and keeps flat output untouched either way. */
+    if (g_settings.diorama_mode && g_settings.diorama_margin_fix)
+      frame_policy.flags |=
+          SR_PPU_FRAME_POLICY_PAD_CAPTURED_TO_BUDGET;
+    frame_policy.hud_split_height = hud_split_height;
+    frame_policy.hud_left_end_x = hud_split_left_end;
+    frame_policy.hud_right_start_x = hud_split_right_start;
+    frame_policy.hud_player_row_y = hud_player_row_y;
+    frame_policy.hud_left_only_y = hud_left_only_y;
+  }
+  /* Seed vertical geometry from the resolved game-owned plan before BEGIN so
+   * a stable extended frame does not momentarily collapse to 224 lines and
+   * invalidate surface views again during FINALIZE. Provider fallback may
+   * refine edge policy below, but it does not change the semantic owner used
+   * to derive vertical camera bounds. */
+  if (bg_plan_valid) s_pending_action_bg_plan = bg_plan;
+  ActRaiser_ResolveVerticalMarginPolicy(
+      map_group, map_number, &frame_policy);
+
+  /* Begin clears the previous frame's providers, extents, row bands and HUD
+   * state as one validated operation. Provider-dependent corrections are
+   * resolved below and published through the matching finalize transaction. */
+  if (!ActRaiser_CommitPpuFramePolicy(&frame_policy)) return;
+  if (wide) {
     if (hud_split_height)
       PpuSetOverlayCapture(g_ppu, SR_PPU_OVERLAY_BG3,
                            0, 0, kActRaiserAuthenticWidth, hud_split_height,
@@ -1875,16 +1972,18 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
        * authentic viewport instead of exposing stale/wrapped ring cells in
        * synthetic margins. Wide Raw never reaches this block. */
       uint8 visible_bg_layers = 0;
-      if (!(g_ppu->inidisp & 0x80) && (g_ppu->bgmode & 7u) == 1u) {
+      const uint32_t ppu_display = RtlGamePpuDisplayState();
+      if ((RTL_GAME_PPU_DISPLAY_CONTROL(ppu_display) & 0x80u) == 0u &&
+          (RTL_GAME_PPU_BG_MODE_CONTROL(ppu_display) & 7u) == 1u) {
         visible_bg_layers = (uint8)(
-            (g_ppu->screenEnabled[0] | g_ppu->screenEnabled[1]) &
+            (RTL_GAME_PPU_MAIN_SCREEN(ppu_display) |
+             RTL_GAME_PPU_SUB_SCREEN(ppu_display)) &
             ((1u << kActionBgPlanLayerCount) - 1u));
       }
       uint8 fallback_world_layers = ActionBgPlan_ClampUnboundWorldLayers(
           &bg_plan, bg_hle_bindings, visible_bg_layers);
       if (fallback_world_layers) {
         clamp |= fallback_world_layers;
-        PpuSetWidescreenLayerClamp(g_ppu, clamp);
         /* The failed world layer was atomically converted to a viewport Clamp
          * plan above. Recompile before the one band-application site so none
          * of its tuner-authored row overrides can bypass that safe fallback. */
@@ -1900,7 +1999,6 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
           (bg_hle_bindings & (uint8)(1u << canvas_layer)))
         bounded_world_margins = 1;
     }
-    ActRaiser_ApplyBgPresentationBands(&bg_presentation);
     if (bounded_world_margins) {
       /* Clamp each side to the catalogued playfield's real world space.
        * Simulation towns use BG1 and the fixed 512px world proven by
@@ -1908,12 +2006,22 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
       int margin_left = 0, margin_right = 0;
       if (ActRaiser_CalculateCanvasMargins(
               map_group, map_number, canvas_layer, g_ws_extra,
-              &margin_left, &margin_right))
-        PpuSetExtraSideSpace(g_ppu, margin_left, margin_right, 0);
+              &margin_left, &margin_right)) {
+        frame_policy.margin_left_pixels = (uint32_t)margin_left;
+        frame_policy.margin_right_pixels = (uint32_t)margin_right;
+      }
     }
-  } else {
-    PpuSetExtraSpaceCentered(g_ppu, (uint8)g_ws_extra);
-    PpuSetWidescreenLayerClamp(g_ppu, 0);
+  }
+  frame_policy.layer_clamp_mask = wide ? clamp : 0u;
+  frame_policy.layer_mirror_mask = wide ? mirror : 0u;
+  frame_policy.layer_repeat_mask = wide ? repeat : 0u;
+  if (!ActRaiser_ProjectBgPresentationBands(
+          &bg_presentation, &frame_policy, frame_bands,
+          sizeof(frame_bands) / sizeof(frame_bands[0]))) {
+    SessionFatal_Request(
+        "ActRaiser's background presentation exceeded the runner's "
+        "frame-policy capacity.");
+    return;
   }
   /* BH6 immutable handoff. In the ordinary action path the pure plan survives
    * unchanged, including Bloodpool/Death Heim row bands. Other scene types and
@@ -1930,9 +2038,12 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     s_pending_action_bg_plan.bound_canvas_to_world =
         bounded_world_margins;
   }
+  frame_policy.flags |= SR_PPU_FRAME_POLICY_FINALIZE;
+  if (!ActRaiser_CommitPpuFramePolicy(&frame_policy)) return;
   ActRaiserActionBg_ApplyPlanExtents(&s_pending_action_bg_plan);
   s_pending_bg_capture_pad_to_budget =
-      g_ppu->wsPadCapturedToBudget != 0;
+      (frame_policy.flags &
+       SR_PPU_FRAME_POLICY_PAD_CAPTURED_TO_BUDGET) != 0u;
   const uint32 bg_band_signature =
       ActRaiser_BgBandSignature(&bg_presentation);
   /* One line per policy flip — cheap, and makes "why isn't this screen
@@ -2764,11 +2875,6 @@ void ActRaiserDrawPpuFrame(void) {
     ActRaiser_MarkExactPositionOwner(kActRaiserExactPositionOwner_None);
   }
   ActRaiser_ApplyWidescreenPolicy();
-  /* Outside ApplyWidescreenPolicy, not inside it: that function early-returns
-   * when widescreen is off, and the vertical margin must be re-resolved (most
-   * often back to zero) on EVERY frame regardless -- a stale band would
-   * otherwise survive a mode change. */
-  ActRaiser_ApplyVerticalMarginPolicy(map_group, map_number);
   /* Stage D reconnaissance: read-only classification of objects that intersect
    * a live side margin but remain outside the authentic activation window. */
   ActRaiser_WidescreenSpriteActivationProbe();
@@ -3311,11 +3417,11 @@ void ActRaiserDrawPpuFrame(void) {
   /* Fix B (SPEC-backdrop-clip.md): latch the margin state the frame was ACTUALLY
    * rendered with, here, rather than letting FrameSlot_Capture read live g_ppu.
    * Between this function and the frame slot capture, main.c may call
-   * ActRaiser_RebindPpuOutputSurfaces(), which reaches PpuSetExtraSpaceCentered
-   * (hd_replacement_host.c) and ZEROES both live margins — reading g_ppu later
-   * would silently describe a different frame than the pixels came from. That
-   * The non-diorama rebind gate normally prevents this mismatch; latching at
-   * the producer boundary makes that safety independent of the gate. */
+   * ActRaiser_RebindPpuOutputSurfaces(), whose public margin configuration
+   * zeroes both live margins — reading g_ppu later would silently describe a
+   * different frame than the pixels came from. The non-diorama rebind gate
+   * normally prevents this mismatch; latching at the producer boundary makes
+   * that safety independent of the gate. */
   s_live_margin_top = scanout_status == SR_RESULT_OK
       ? (int)scanout_result.final_state.margin_top : 0;
   s_live_margin_bottom = scanout_status == SR_RESULT_OK
@@ -3699,8 +3805,9 @@ void ActRaiser_ApplyCheats(void) {
   {
     enum { kActRaiserJoypadJump = 0x8000 };  /* auto-joypad SNES B bit */
     if (g_settings.cheat_moonjump) {
-      extern Snes *g_snes;
-      uint16 buttons = SwapInputBits(g_snes->input1_currentState);
+      SrInputStateSnapshot input;
+      uint16 buttons = ActRaiser_QueryInputState(&input)
+          ? input.auto_joypad[0] : 0u;
       if (buttons & kActRaiserJoypadJump) {
         uint16 player_y =
             ActRaiser_ReadWram16(kActRaiserWram_PlayerPositionY);
@@ -3895,6 +4002,21 @@ void ActRaiser_DestroyGameCoroutine(void) {
   g_game_started = false;
 }
 
+static bool ActRaiser_ControlGameTiming(
+    bool begin, uint32_t flags,
+    uint32_t *out_transition_flags) {
+  const int result = begin ? RtlGameFrameBegin() : RtlGameFrameComplete(flags);
+  if (result < 0) {
+    SessionFatal_Request(
+        "The runner could not update the game timing state. Restart the "
+        "game; if this repeats, report the active runner build.");
+    return false;
+  }
+  if (out_transition_flags)
+    *out_transition_flags = (uint32_t)result;
+  return true;
+}
+
 void RunOneFrameOfGame(void) {
   if (!g_game_started) {
     /* config.ini and process environment layers are final by this point. */
@@ -3948,15 +4070,17 @@ void RunOneFrameOfGame(void) {
       return;
     }
   }
-  g_snes->forceNmi = true;
-  g_snes->nmiAvail = true;   /* fresh RDNMI ($4210 bit7) vblank token this frame */
+  if (!ActRaiser_ControlGameTiming(
+          true, 0u, NULL))
+    return;
   g_game_coroutine_executing = true;
 #ifdef _WIN32
   SwitchToFiber(g_game_fiber);
 #else
   if (swapcontext(&g_host_ctx, &g_game_ctx) != 0) {
     g_game_coroutine_executing = false;
-    g_snes->forceNmi = false;
+    (void)ActRaiser_ControlGameTiming(
+        false, 0u, NULL);
     SessionFatal_Request(
         "The operating system could not resume the emulation coroutine "
         "(%s). Restart the game; if this repeats, check virtual-memory and "
@@ -3967,11 +4091,13 @@ void RunOneFrameOfGame(void) {
 #endif
   g_game_coroutine_executing = false;
   if (SessionFatal_Requested()) {
-    g_snes->forceNmi = false;
+    (void)ActRaiser_ControlGameTiming(
+        false, 0u, NULL);
     return;
   }
   if (g_watchdog_tripped) {
-    g_snes->forceNmi = false;
+    (void)ActRaiser_ControlGameTiming(
+        false, 0u, NULL);
     SessionFatal_Request(
         "The emulated game stopped responding and the watchdog ended the "
         "session. Your latest battery save will be flushed before exit. "
@@ -3979,16 +4105,18 @@ void RunOneFrameOfGame(void) {
         "active gameplay settings.");
     return;
   }
-  g_snes->forceNmi = false;
-
-  /* $4200 bit 7 is the hardware NMI gate. This matters when a game-coroutine
-   * yield models CPU time rather than a vblank wait: the display and APU still
-   * advance, but the disabled NMI handler must not advance $0088 or game state.
-   * RDNMI's vblank token above remains available independently of this gate. */
-  if (!g_snes->nmiEnabled)
+  uint32_t timing_transition;
+  if (!ActRaiser_ControlGameTiming(
+          false, RTL_GAME_FRAME_DISPATCH_NMI_IF_ENABLED,
+          &timing_transition))
     return;
 
-  g_snes->inNmi = true;
+  /* $4200 bit 7 remains the hardware NMI gate. A coroutine yield may model
+   * CPU time rather than a vblank wait, so the runner reports whether it
+   * entered NMI while preserving RDNMI's independent fresh-frame token. */
+  if ((timing_transition & RTL_GAME_FRAME_NMI_ENTERED) == 0u)
+    return;
+
   /* NmiHandler ends in RTI, which pops a hardware interrupt frame
    * (P/PC/PB). Push the matching frame first — otherwise the RTI
    * over-pops the stack and loads garbage into cpu->P, corrupting the

@@ -17,10 +17,11 @@ typedef struct ActRaiserRomSetupResult {
   bool randomizer_initialized;
 } ActRaiserRomSetupResult;
 
-/* Game-adapter ownership of the loaded cartridge layout. This keeps host boot
- * policy outside the concrete runner while the randomizer's live-ROM mutation
- * contract remains intentionally internal to the ActRaiser adapter. */
-ActRaiserRomSetupResult ActRaiser_SetupLiveRom(Snes *snes);
+bool ActRaiser_InitializeGame(
+    const RtlGameInitializeContext *context);
+/* Result copied from the most recent lifecycle initialization callback. The
+ * mutable ROM view itself is callback-scoped and is never retained. */
+ActRaiserRomSetupResult ActRaiser_LastRomSetupResult(void);
 
 /* The apron geometry in force this frame, or {ws_extra, 0} when the apron is
  * not live. `apron == 0` is the disable lever the whole phase rides on: every
@@ -62,7 +63,7 @@ void RunOneFrameOfGame(void);
 /* Release the game coroutine's stack (guard-page mapping) / fiber at shutdown.
  * Safe to call when none was created. */
 void ActRaiser_DestroyGameCoroutine(void);
-int ActRaiser_ReadRdnmi(Snes *snes);
+int ActRaiser_ReadRdnmi(const RtlRdnmiReadContext *context);
 bool ActRaiser_RecoverDispatchMiss(uint32 source_pc24, uint32 target_pc24);
 void ActRaiser_SpcUploaderCompleteTick(void);
 void ActRaiser_SpcUploadBindRunner(SrRunnerHandle *runner);

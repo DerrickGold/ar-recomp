@@ -2,6 +2,7 @@
 #include "common_rtl.h"
 #include "runner_next.h"
 #include "runner_next_internal.h"
+#include "cpu_state.h"
 #include "snes/dma.h"
 #include "snes/dsp.h"
 #include "snes/ppu.h"
@@ -26,6 +27,12 @@ static void leave_loaded_state_unchanged(SaveLoadInfo *info, void *data,
 }
 
 static uint8_t s_cpu_component;
+
+/* The contract archive deliberately leaves the generated game's dispatch
+ * table unresolved. This ABI-only fixture exercises no generated blocks but
+ * supplies the required linked-game seam. */
+const DispatchEntry g_dispatch_table[] = {{0}};
+const unsigned g_dispatch_table_count = 0u;
 static uint8_t s_overlay_pixel;
 static uint32_t s_mode7_pixel;
 static uint32_t s_main_surface[384u * 253u];
@@ -110,8 +117,8 @@ static uint32_t test_virtual_tile_band_lookup(
 }
 
 static SrResult query_test_cpu_state(
-        Snes *snes, SrCpuStateSnapshot *out_state) {
-    (void)snes;
+        void *user_data, SrCpuStateSnapshot *out_state) {
+    if (user_data != &s_cpu_component) return SR_RESULT_INVALID_ARGUMENT;
     out_state->flags = SR_CPU_STATE_M_FLAG | SR_CPU_STATE_EMULATION |
                        SR_CPU_STATE_HOST_RETURN_VALID |
                        SR_CPU_STATE_EXECUTION_PC_VALID;
@@ -129,8 +136,8 @@ static SrResult query_test_cpu_state(
 }
 
 static SrResult query_test_execution_state(
-        Snes *snes, SrExecutionSnapshot *out_state) {
-    (void)snes;
+        void *user_data, SrExecutionSnapshot *out_state) {
+    if (user_data != &s_cpu_component) return SR_RESULT_INVALID_ARGUMENT;
     out_state->flags = SR_EXECUTION_CURRENT_BLOCK_VALID |
                        SR_EXECUTION_CURRENT_FUNCTION_VALID;
     out_state->block_serial = 91u;
@@ -490,6 +497,16 @@ int main(void) {
     SrPpuHorizontalMarginRequest margin_request = {
         .struct_size = sizeof(margin_request),
     };
+    SrPpuFramePolicyBand frame_policy_bands[2] = {0};
+    SrPpuFramePolicyRequest frame_policy_request = {
+        .struct_size = sizeof(frame_policy_request),
+        .policy = {
+            .struct_size = sizeof(SrPpuFramePolicy),
+            .horizontal_mode = SR_PPU_HORIZONTAL_MARGIN_AVAILABLE,
+            .bands = frame_policy_bands,
+            .band_count = 2u,
+        },
+    };
     SrPpuOverlayCaptureRequest capture_request = {
         .struct_size = sizeof(capture_request),
     };
@@ -783,6 +800,18 @@ int main(void) {
                         SNES_RUNNER_API_PPU_SCANOUT_SIZE <=
                             sizeof(SnesRunnerApi),
                     "PPU scanout extent exceeds structure");
+    failed |= check(SR_GAME_TIMING_REQUEST_V2_SIZE <=
+                            sizeof(SrGameTimingRequest) &&
+                        SR_GAME_TIMING_RESULT_V2_SIZE <=
+                            sizeof(SrGameTimingResult) &&
+                        SNES_RUNNER_API_GAME_TIMING_CONTROL_SIZE <=
+                            sizeof(SnesRunnerApi),
+                    "game timing control extent exceeds structure");
+    failed |= check(SR_INPUT_STATE_SNAPSHOT_V2_SIZE <=
+                            sizeof(SrInputStateSnapshot) &&
+                        SNES_RUNNER_API_INPUT_STATE_SIZE <=
+                            sizeof(SnesRunnerApi),
+                    "input state extent exceeds structure");
     failed |= check(SR_CPU_MATH_STATE_V2_SIZE <= sizeof(SrCpuMathState) &&
                         SNES_RUNNER_API_CPU_MATH_STATE_SIZE <=
                             sizeof(SnesRunnerApi),
@@ -884,6 +913,14 @@ int main(void) {
     failed |= check((api->capabilities & SR_RUNNER_CAP_DMA_STATE) != 0u,
                     "DMA state capability missing");
     failed |= check((api->capabilities &
+                     SR_RUNNER_CAP_GAME_TIMING_CONTROL) != 0u,
+                    "game timing control capability missing");
+    failed |= check((api->capabilities & SR_RUNNER_CAP_INPUT_STATE) != 0u,
+                    "input state capability missing");
+    failed |= check((api->capabilities &
+                     SR_RUNNER_CAP_PPU_FRAME_POLICY) != 0u,
+                    "PPU frame-policy capability missing");
+    failed |= check((api->capabilities &
                          (SR_RUNNER_CAP_EXECUTION_STATE |
                           SR_RUNNER_CAP_EVENT_OBSERVERS |
                           SR_RUNNER_CAP_SAFE_POINT_MUTATIONS)) ==
@@ -896,6 +933,128 @@ int main(void) {
     failed |= check(snes != NULL, "runner allocation failed");
     if (snes == NULL) return 1;
     runner = sr_runner_handle(snes);
+
+    {
+        SrInputStateSnapshot input = {
+            .struct_size = sizeof(input),
+        };
+        SrInputStateSnapshot small_input = {
+            .struct_size = sizeof(uint32_t),
+        };
+        snes->input1_currentState = 0x0123u;
+        snes->input2_currentState = 0x0a55u;
+        failed |= check(api->query_input_state(runner, &small_input) ==
+                            SR_RESULT_INVALID_ARGUMENT,
+                        "undersized input snapshot accepted");
+        failed |= check(api->query_input_state(runner, &input) ==
+                                SR_RESULT_OK &&
+                            input.struct_size ==
+                                SR_INPUT_STATE_SNAPSHOT_V2_SIZE &&
+                            input.flags == 0u && input.reserved == 0u &&
+                            input.lifetime_generation ==
+                                snes->abiLifetimeGeneration &&
+                            input.frame_counter == snes->abiFrameCounter &&
+                            input.packed_buttons[0] == 0x0123u &&
+                            input.packed_buttons[1] == 0x0a55u &&
+                            input.auto_joypad[0] == 0xc480u &&
+                            input.auto_joypad[1] == 0xaa50u,
+                        "input snapshot mismatch");
+    }
+
+    {
+        SrGameTimingRequest timing_request = {
+            .struct_size = sizeof(timing_request),
+            .operation = SR_GAME_TIMING_BEGIN_FRAME_SLICE,
+        };
+        SrGameTimingResult timing_result = {
+            .struct_size = sizeof(timing_result),
+        };
+        SrGameTimingResult small_timing_result = {
+            .struct_size = sizeof(uint32_t),
+        };
+        snes->forceNmi = false;
+        snes->nmiAvail = false;
+        snes->inNmi = false;
+        snes->nmiEnabled = false;
+        failed |= check(api->control_game_timing(
+                            runner, &timing_request,
+                            &small_timing_result) ==
+                                SR_RESULT_INVALID_ARGUMENT &&
+                            !snes->forceNmi && !snes->nmiAvail,
+                        "undersized timing result mutated state");
+        timing_request.flags = UINT32_C(0x80000000);
+        failed |= check(api->control_game_timing(
+                            runner, &timing_request, &timing_result) ==
+                                SR_RESULT_INVALID_ARGUMENT &&
+                            !snes->forceNmi && !snes->nmiAvail,
+                        "unknown timing flag mutated state");
+        timing_request.flags = SR_GAME_TIMING_DISPATCH_NMI_IF_ENABLED;
+        failed |= check(api->control_game_timing(
+                            runner, &timing_request, &timing_result) ==
+                                SR_RESULT_INVALID_ARGUMENT &&
+                            !snes->forceNmi && !snes->nmiAvail,
+                        "begin accepted completion-only timing flag");
+        timing_request.flags = 0u;
+        timing_request.reserved = 1u;
+        failed |= check(api->control_game_timing(
+                            runner, &timing_request, &timing_result) ==
+                                SR_RESULT_INVALID_ARGUMENT &&
+                            !snes->forceNmi && !snes->nmiAvail,
+                        "reserved timing field mutated state");
+        timing_request.reserved = 0u;
+        timing_request.operation = 0u;
+        failed |= check(api->control_game_timing(
+                            runner, &timing_request, &timing_result) ==
+                                SR_RESULT_INVALID_ARGUMENT &&
+                            !snes->forceNmi && !snes->nmiAvail,
+                        "unknown timing operation mutated state");
+        timing_request.operation = SR_GAME_TIMING_BEGIN_FRAME_SLICE;
+        failed |= check(api->control_game_timing(
+                            runner, &timing_request, &timing_result) ==
+                                SR_RESULT_OK &&
+                            snes->forceNmi && snes->nmiAvail &&
+                            timing_result.struct_size ==
+                                SR_GAME_TIMING_RESULT_V2_SIZE &&
+                            timing_result.state_flags ==
+                                (SR_GAME_TIMING_STATE_FORCE_NMI |
+                                 SR_GAME_TIMING_STATE_NMI_AVAILABLE) &&
+                            timing_result.transition_flags == 0u,
+                        "frame-slice begin timing state mismatch");
+        timing_request.operation = SR_GAME_TIMING_COMPLETE_FRAME_SLICE;
+        failed |= check(api->control_game_timing(
+                            runner, &timing_request, &timing_result) ==
+                                SR_RESULT_OK &&
+                            !snes->forceNmi && snes->nmiAvail &&
+                            !snes->inNmi &&
+                            timing_result.state_flags ==
+                                SR_GAME_TIMING_STATE_NMI_AVAILABLE &&
+                            timing_result.transition_flags == 0u,
+                        "frame-slice cancellation timing state mismatch");
+        snes->inNmi = true;
+        timing_request.flags = SR_GAME_TIMING_DISPATCH_NMI_IF_ENABLED;
+        failed |= check(api->control_game_timing(
+                            runner, &timing_request, &timing_result) ==
+                                SR_RESULT_OK &&
+                            snes->inNmi &&
+                            (timing_result.state_flags &
+                             SR_GAME_TIMING_STATE_IN_NMI) != 0u &&
+                            timing_result.transition_flags == 0u,
+                        "disabled NMI gate reported a new interrupt");
+        snes->nmiEnabled = true;
+        failed |= check(api->control_game_timing(
+                            runner, &timing_request, &timing_result) ==
+                                SR_RESULT_OK &&
+                            snes->inNmi &&
+                            timing_result.state_flags ==
+                                (SR_GAME_TIMING_STATE_NMI_AVAILABLE |
+                                 SR_GAME_TIMING_STATE_NMI_ENABLED |
+                                 SR_GAME_TIMING_STATE_IN_NMI) &&
+                            timing_result.transition_flags ==
+                                SR_GAME_TIMING_TRANSITION_NMI_ENTERED,
+                        "enabled NMI gate did not enter interrupt state");
+        snes->inNmi = false;
+        snes->nmiEnabled = false;
+    }
 
     snes->apu->ram[0x1a] = 0xa1u;
     snes->apu->ram[0x35] = 0xb2u;
@@ -1049,9 +1208,9 @@ int main(void) {
                     "PPU OBJ parts raster without a provider was available");
     cpu_state.struct_size = sizeof(cpu_state);
     sr_runner_set_cpu_state_provider(
-        snes, query_test_cpu_state, &s_cpu_component);
+        snes, query_test_cpu_state, &s_cpu_component, &s_cpu_component);
     sr_runner_set_execution_state_provider(
-        snes, query_test_execution_state);
+        snes, query_test_execution_state, &s_cpu_component);
     sr_runner_bind_ppu_services(snes, true);
 
     failed |= check_generation(api, runner, 0u, 0u, 0u, 0u, 0u);
@@ -1471,6 +1630,137 @@ int main(void) {
                         snes->ppu->extraLeftCur == 48u &&
                         snes->ppu->extraRightCur == 48u,
                     "available PPU margin configuration failed");
+
+    frame_policy_request.lifetime_generation =
+        snes->abiLifetimeGeneration;
+    frame_policy_request.policy.flags =
+        SR_PPU_FRAME_POLICY_PAD_CAPTURED_TO_BUDGET;
+    frame_policy_request.policy.margin_budget_pixels = 48u;
+    frame_policy_request.policy.margin_left_pixels = 31u;
+    frame_policy_request.policy.margin_right_pixels = 37u;
+    frame_policy_request.policy.margin_top_pixels = 8u;
+    frame_policy_request.policy.margin_bottom_pixels = 9u;
+    frame_policy_request.policy.layer_clamp_mask = 0x01u;
+    frame_policy_request.policy.layer_mirror_mask = 0x02u;
+    frame_policy_request.policy.layer_repeat_mask = 0x04u;
+    frame_policy_request.policy.layer_normal_scroll_mask = 0x08u;
+    frame_policy_request.policy.vertical_clip_layer_mask = 0x05u;
+    frame_policy_request.policy.vertical_clip_top_rows[0] = 3u;
+    frame_policy_request.policy.vertical_clip_bottom_rows[0] = 4u;
+    frame_policy_request.policy.vertical_clip_top_rows[2] = 5u;
+    frame_policy_request.policy.vertical_clip_bottom_rows[2] = 6u;
+    frame_policy_request.policy.hud_split_height = 32u;
+    frame_policy_request.policy.hud_left_end_x = 64u;
+    frame_policy_request.policy.hud_right_start_x = 192u;
+    frame_policy_request.policy.hud_player_row_y = 8u;
+    frame_policy_request.policy.hud_left_only_y = 16u;
+    frame_policy_bands[0] = (SrPpuFramePolicyBand) {
+        .layer = 1u,
+        .y0 = 20u,
+        .y1 = 30u,
+        .fill = SR_PPU_BACKGROUND_FILL_REPEAT,
+        .motion = SR_PPU_BACKGROUND_MOTION_FILL_RELATIVE,
+    };
+    frame_policy_bands[1] = (SrPpuFramePolicyBand) {
+        .layer = 0u,
+        .y0 = 40u,
+        .y1 = 44u,
+        .fill = SR_PPU_BACKGROUND_FILL_MIRROR,
+        .motion = SR_PPU_BACKGROUND_MOTION_NORMAL_SCROLL,
+    };
+    failed |= check(api->apply_ppu_frame_policy(
+                        runner, &frame_policy_request) == SR_RESULT_OK &&
+                        snes->ppu->extraLeftRight == 48u &&
+                        snes->ppu->extraLeftCur == 31u &&
+                        snes->ppu->extraRightCur == 37u &&
+                        snes->ppu->extraTopCur == 8u &&
+                        snes->ppu->extraBottomCur == 9u &&
+                        snes->ppu->wsLayerClamp == 0x01u &&
+                        snes->ppu->wsLayerMirror == 0x02u &&
+                        snes->ppu->wsLayerRepeat == 0x04u &&
+                        snes->ppu->wsLayerNormalScroll == 0x08u &&
+                        snes->ppu->wsPadCapturedToBudget == 1u &&
+                        snes->ppu->verticalMarginLayerClip == 0x05u &&
+                        snes->ppu->verticalMarginTopRows[2] == 5u &&
+                        snes->ppu->verticalMarginBottomRows[2] == 6u &&
+                        snes->ppu->wsHudSplitHeight == 32u &&
+                        snes->ppu->wsHudLeftEnd == 64u &&
+                        snes->ppu->wsHudRightStart == 192u &&
+                        snes->ppu->wsBandFill[1][29] ==
+                            kPpuWidescreenBandFill_Repeat &&
+                        snes->ppu->wsBandFill[0][40] ==
+                            kPpuWidescreenBandFill_Mirror &&
+                        snes->ppu->wsBandMotion[0][40] ==
+                            kPpuWidescreenMotion_NormalScroll,
+                    "atomic PPU frame policy mismatch");
+    snes->ppu->virtualTilemap[0].context = &s_virtual_context;
+    snes->ppu->wsLayerExtentLeftDefault[0] = 77u;
+    frame_policy_request.policy.flags |= SR_PPU_FRAME_POLICY_FINALIZE;
+    frame_policy_request.policy.margin_left_pixels = 30u;
+    frame_policy_request.policy.margin_right_pixels = 36u;
+    frame_policy_bands[0].fill = SR_PPU_BACKGROUND_FILL_CLAMP;
+    failed |= check(api->apply_ppu_frame_policy(
+                        runner, &frame_policy_request) == SR_RESULT_OK &&
+                        snes->ppu->extraLeftCur == 30u &&
+                        snes->ppu->extraRightCur == 36u &&
+                        snes->ppu->virtualTilemap[0].context ==
+                            &s_virtual_context &&
+                        snes->ppu->wsLayerExtentLeftDefault[0] == 77u &&
+                        snes->ppu->wsBandFill[1][20] ==
+                            kPpuWidescreenBandFill_Clamp,
+                    "PPU frame-policy finalize did not preserve providers");
+    frame_policy_request.policy.margin_budget_pixels = 47u;
+    failed |= check(api->apply_ppu_frame_policy(
+                        runner, &frame_policy_request) == SR_RESULT_BUSY &&
+                        snes->ppu->extraLeftCur == 30u &&
+                        snes->ppu->virtualTilemap[0].context ==
+                            &s_virtual_context,
+                    "mismatched PPU frame-policy finalize mutated state");
+    frame_policy_request.policy.margin_budget_pixels = 20u;
+    frame_policy_bands[1].y1 = SR_PPU_NATIVE_HEIGHT + 1u;
+    failed |= check(api->apply_ppu_frame_policy(
+                        runner, &frame_policy_request) ==
+                            SR_RESULT_INVALID_ARGUMENT &&
+                        snes->ppu->extraLeftRight == 48u &&
+                        snes->ppu->wsLayerMirror == 0x02u,
+                    "invalid PPU frame policy partially applied");
+    frame_policy_request.policy.margin_budget_pixels = 48u;
+    frame_policy_bands[1].y1 = 44u;
+    ++frame_policy_request.lifetime_generation;
+    failed |= check(api->apply_ppu_frame_policy(
+                        runner, &frame_policy_request) ==
+                            SR_RESULT_STALE_VIEW &&
+                        snes->ppu->extraLeftCur == 30u,
+                    "stale PPU frame policy applied");
+    --frame_policy_request.lifetime_generation;
+
+    frame_policy_request.policy = (SrPpuFramePolicy) {
+        .struct_size = sizeof(frame_policy_request.policy),
+        .horizontal_mode = SR_PPU_HORIZONTAL_MARGIN_CENTERED,
+        .margin_budget_pixels = 24u,
+    };
+    failed |= check(api->apply_ppu_frame_policy(
+                        runner, &frame_policy_request) == SR_RESULT_OK &&
+                        snes->ppu->extraLeftRight == 24u &&
+                        snes->ppu->extraLeftCur == 0u &&
+                        snes->ppu->extraRightCur == 0u,
+                    "centered PPU frame-policy begin failed");
+    snes->ppu->virtualTilemap[0].context = &s_virtual_context;
+    frame_policy_request.policy.flags = SR_PPU_FRAME_POLICY_FINALIZE;
+    failed |= check(api->apply_ppu_frame_policy(
+                        runner, &frame_policy_request) == SR_RESULT_OK &&
+                        snes->ppu->extraLeftRight == 24u &&
+                        snes->ppu->extraLeftCur == 0u &&
+                        snes->ppu->extraRightCur == 0u &&
+                        snes->ppu->virtualTilemap[0].context ==
+                            &s_virtual_context,
+                    "centered PPU frame-policy finalize changed geometry");
+    failed |= check(api->apply_ppu_frame_policy(
+                        runner, &frame_policy_request) == SR_RESULT_BUSY &&
+                        snes->ppu->extraLeftRight == 24u &&
+                        snes->ppu->virtualTilemap[0].context ==
+                            &s_virtual_context,
+                    "consumed PPU frame-policy finalize was reused");
 
     output_binding = (SrPpuOutputBindingRequest) {
         .struct_size = sizeof(output_binding),
@@ -2879,8 +3169,8 @@ int main(void) {
                     "PPU scanout result mismatch");
     failed |= check_generation(api, runner, 12u, 2u, 1u, 1u, 8u);
 
-    sr_runner_set_cpu_state_provider(snes, NULL, NULL);
-    sr_runner_set_execution_state_provider(snes, NULL);
+    sr_runner_set_cpu_state_provider(snes, NULL, NULL, NULL);
+    sr_runner_set_execution_state_provider(snes, NULL, NULL);
     sr_runner_bind_ppu_services(snes, false);
     snes_free(snes);
     memset(wram, 0, sizeof(wram));

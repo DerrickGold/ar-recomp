@@ -8,6 +8,7 @@
 #include "framedump.h"
 #include "recomp_hw.h"
 #include "runner_next_internal.h"
+#include "runner_game_module_internal.h"
 #include "spc_upload.h"
 #include "snes/apu.h"
 #include "snes/cart.h"
@@ -166,8 +167,8 @@ bool RtlRunFrame(uint32 inputs) {
             g_snes, SR_EVENT_FRAME_BEGIN | SR_EVENT_FRAME_VBLANK, "vblank");
     }
     WatchdogFrameStart();
-    if (g_rtl_game_info != NULL && g_rtl_game_info->run_frame != NULL)
-        g_rtl_game_info->run_frame();
+    if (g_rtl_game_execution != NULL)
+        g_rtl_game_execution->run_frame();
     WatchdogFrameEnd();
     if (sr_runner_event_enabled(SR_EVENT_MASK_FRAME)) {
         sr_runner_emit_frame_boundary(g_snes, SR_EVENT_FRAME_END,
@@ -242,9 +243,9 @@ void RtlSaveLoad(int command, int slot) {
     char filename[160];
     const char *title = "game";
     const char *prefix = NULL;
-    if (g_rtl_game_info != NULL) {
-        if (g_rtl_game_info->title != NULL) title = g_rtl_game_info->title;
-        prefix = g_rtl_game_info->save_name_prefix;
+    if (g_rtl_game_identity != NULL) {
+        title = g_rtl_game_identity->game_id;
+        prefix = g_rtl_game_identity->save_name_prefix;
     }
     if (prefix != NULL)
         snprintf(filename, sizeof(filename), "saves/%s%d.sav", prefix, slot);
@@ -541,9 +542,9 @@ static bool upload_spc_image(CpuState *cpu, bool update_result) {
     bool success;
     if (cpu == NULL || g_snes == NULL || g_snes->apu == NULL || g_rom == NULL)
         return false;
-    if (g_rtl_game_info == NULL ||
-        g_rtl_game_info->spc_upload_source == NULL ||
-        !g_rtl_game_info->spc_upload_source(cpu, &source24)) return false;
+    if (g_rtl_game_audio == NULL ||
+        g_rtl_game_audio->spc_upload_source == NULL ||
+        !g_rtl_game_audio->spc_upload_source(cpu, &source24)) return false;
     source_offset = (size_t)(RomPtr(source24) - g_rom);
 
     RtlApuLock();
@@ -562,8 +563,8 @@ static bool upload_spc_image(CpuState *cpu, bool update_result) {
     upload.script_offset = parsed.script_offset;
     upload.entry_point = parsed.entry_point;
     upload.block_count = parsed.block_count;
-    if (g_rtl_game_info->spc_upload_customize != NULL)
-        success = g_rtl_game_info->spc_upload_customize(
+    if (g_rtl_game_audio->spc_upload_customize != NULL)
+        success = g_rtl_game_audio->spc_upload_customize(
             cpu, &upload, source24);
     if (!success) {
         RtlApuUnlock();
@@ -588,8 +589,8 @@ static bool upload_spc_image(CpuState *cpu, bool update_result) {
     if (g_snes->apu->spc->stopped)
         upload.state_flags |= SR_SPC_UPLOAD_STATE_SPC_STOPPED;
     upload.spc_pc = g_snes->apu->spc->pc;
-    if (g_rtl_game_info->spc_upload_commit != NULL)
-        g_rtl_game_info->spc_upload_commit(&upload);
+    if (g_rtl_game_audio->spc_upload_commit != NULL)
+        g_rtl_game_audio->spc_upload_commit(&upload);
     success = apply_spc_upload_control(g_snes->apu, &upload);
     if (!success) {
         RtlApuUnlock();
@@ -616,9 +617,9 @@ static bool upload_spc_image(CpuState *cpu, bool update_result) {
 
 bool RtlUploadSpcImageFromDp(CpuState *cpu) {
     bool success = upload_spc_image(cpu, false);
-    int pop = g_rtl_game_info != NULL &&
-                      g_rtl_game_info->spc_upload_stack_pop != NULL ?
-                  g_rtl_game_info->spc_upload_stack_pop(cpu) : 0;
+    int pop = g_rtl_game_audio != NULL &&
+                      g_rtl_game_audio->spc_upload_stack_pop != NULL ?
+                  g_rtl_game_audio->spc_upload_stack_pop(cpu) : 0;
     if (cpu != NULL) cpu->S = (uint16)(cpu->S + pop);
     return success;
 }
@@ -703,8 +704,8 @@ void RtlMigrateLegacySram(const char *legacy_title) {
 void RtlReadSram(void) {
     FILE *file;
     if (g_sram == NULL || g_sram_size <= 0) return;
-    if (g_rtl_game_info != NULL)
-        RtlMigrateLegacySram(g_rtl_game_info->title);
+    if (g_rtl_game_identity != NULL)
+        RtlMigrateLegacySram(g_rtl_game_identity->game_id);
     file = fopen(RTL_SRAM_FILE, "rb");
     if (file == NULL) return;
     if (fread(g_sram, 1u, (size_t)g_sram_size, file) != (size_t)g_sram_size)

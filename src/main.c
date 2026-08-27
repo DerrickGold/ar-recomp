@@ -226,7 +226,7 @@ int g_ws_display_extra;
 int g_ws_extra_top;
 int g_ws_extra_bottom;
 
-extern const RtlGameInfo kActRaiserGameInfo;
+extern const RtlGameModule kActRaiserGameModule;
 
 bool g_new_ppu = true;
 
@@ -281,7 +281,7 @@ void NORETURN Die(const char *error) {
 }
 
 static void RtlDrawPpuFrame(void) {
-  g_rtl_game_info->draw_ppu_frame();
+  (void)RtlGameDrawPpuFrame();
 }
 
 /* One emulated tick: sample input, run the recompiled game logic, apply
@@ -1333,7 +1333,8 @@ static void AppBoot_InstallSubsystems(AppBoot *app) {
  * (which must sit between cart_load and Randomizer_Init), fill power-on WRAM and
  * battery SRAM, load the persisted save, and honour AR_LOADSTATE. */
 static void AppBoot_StartGame(AppBoot *app) {
-  RtlRegisterGame(&kActRaiserGameInfo);
+  if (RtlRegisterGame(&kActRaiserGameModule) != SR_RESULT_OK)
+    Die("The linked game module is incompatible with this runner.");
   app->snes = SnesInit(app->rom_data, (int)app->rom_size);
   if (!app->snes) Die("SnesInit failed");
   if (!RuntimeDiagnostics_Bind(sr_runner_handle(app->snes)))
@@ -1341,13 +1342,13 @@ static void AppBoot_StartGame(AppBoot *app) {
   if (!NativeAudioTrace_Init(sr_runner_handle(app->snes)))
     Die("native audio trace observer bind failed");
 
-  /* Keep deterministic visual source-data adjustments below cart_load (which
-   * copies rom_data) and above Randomizer_Init (which snapshots the live cart
-   * as its non-randomized restore baseline). A signature mismatch is safe but
-   * important: it means effects metadata and the running visual script would
-   * no longer share the investigated USA-ROM contract. */
+  /* Lifecycle initialization applies deterministic visual source-data
+   * adjustments after cartridge loading and before Randomizer_Init snapshots
+   * the live ROM. A signature mismatch is safe but important: it means effects
+   * metadata and the running visual script no longer share the investigated
+   * USA-ROM contract. */
   const ActRaiserRomSetupResult rom_setup =
-      ActRaiser_SetupLiveRom(app->snes);
+      ActRaiser_LastRomSetupResult();
   if (!rom_setup.visual_patches_applied)
     fprintf(stderr,
             "[sim-visuals] house-fire cadence patch skipped: "
@@ -1409,7 +1410,7 @@ static void AppBoot_StartGame(AppBoot *app) {
       save_ini[kHostPathCapacity];
   UserDataFile(saves_dir, sizeof saves_dir, "saves");
   mkdir(saves_dir, 0755);
-  RtlMigrateLegacySram(kActRaiserGameInfo.title);
+  RtlMigrateLegacySram(RtlGameIdentifier());
   {
     extern uint8 *g_sram; extern int g_sram_size;
     SaveError error = {{0}};

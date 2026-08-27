@@ -1,48 +1,47 @@
 #include "common_cpu_infra.h"
 #include "actraiser_action_bg.h"
 #include "actraiser_rtl.h"
-#include "ar_trace.h"
 #include "cpu_state.h"
 #include "hd_replacements.h"
 #include "native_audio_mixer.h"
 #include "native_audio_extension.h"
 #include "runner_next.h"
-#include "runner_next_internal.h"
 #include "sim/sim_world_map_build.h"
 
 static SrResult ActRaiser_QueryCpuState(
-    Snes *snes, SrCpuStateSnapshot *out_state) {
+    void *user_data, SrCpuStateSnapshot *out_state) {
+  const CpuState *cpu = (const CpuState *)user_data;
   uint32 execution_pc24 = 0u;
   int execution_count;
-  if (!snes || !out_state) return SR_RESULT_INVALID_ARGUMENT;
+  if (!cpu || !out_state) return SR_RESULT_INVALID_ARGUMENT;
   execution_count = ar_block_history(&execution_pc24, 1);
   out_state->frame_counter =
       snes_frame_counter >= 0 ? (uint64_t)snes_frame_counter : 0u;
   out_state->flags =
-      (g_cpu.m_flag ? SR_CPU_STATE_M_FLAG : 0u) |
-      (g_cpu.x_flag ? SR_CPU_STATE_X_FLAG : 0u) |
-      (g_cpu.emulation ? SR_CPU_STATE_EMULATION : 0u) |
-      (g_cpu.host_return_valid ? SR_CPU_STATE_HOST_RETURN_VALID : 0u) |
+      (cpu->m_flag ? SR_CPU_STATE_M_FLAG : 0u) |
+      (cpu->x_flag ? SR_CPU_STATE_X_FLAG : 0u) |
+      (cpu->emulation ? SR_CPU_STATE_EMULATION : 0u) |
+      (cpu->host_return_valid ? SR_CPU_STATE_HOST_RETURN_VALID : 0u) |
       (execution_count > 0 ? SR_CPU_STATE_EXECUTION_PC_VALID : 0u);
   out_state->execution_pc24 = execution_pc24 & 0x00ffffffu;
-  out_state->a = g_cpu.A;
-  out_state->x = g_cpu.X;
-  out_state->y = g_cpu.Y;
-  out_state->s = g_cpu.S;
-  out_state->d = g_cpu.D;
-  out_state->db = g_cpu.DB;
-  out_state->pb = g_cpu.PB;
-  out_state->p = g_cpu.P;
+  out_state->a = cpu->A;
+  out_state->x = cpu->X;
+  out_state->y = cpu->Y;
+  out_state->s = cpu->S;
+  out_state->d = cpu->D;
+  out_state->db = cpu->DB;
+  out_state->pb = cpu->PB;
+  out_state->p = cpu->P;
   return SR_RESULT_OK;
 }
 
 static SrResult ActRaiser_QueryExecutionState(
-    Snes *snes, SrExecutionSnapshot *out_state) {
+    void *user_data, SrExecutionSnapshot *out_state) {
   uint32_t depth;
   uint32_t frame;
   uint32_t history_count;
   uint32_t history_start;
-  if (!snes || !out_state) return SR_RESULT_INVALID_ARGUMENT;
+  if (user_data != &g_cpu || !out_state) return SR_RESULT_INVALID_ARGUMENT;
 
   out_state->block_serial = g_ar_blk_idx;
   if (g_ar_blk_idx > 0u) {
@@ -86,44 +85,74 @@ static SrResult ActRaiser_QueryExecutionState(
   return SR_RESULT_OK;
 }
 
-static void ActRaiser_BindRunnerAbi(Snes *snes, bool enabled) {
-  SrRunnerHandle *runner = enabled ? sr_runner_handle(snes) : NULL;
+static void ActRaiser_RunnerChanged(SrRunnerHandle *runner) {
   HdReplacements_BindRunner(runner);
   SimWorldMapBuild_BindRunner(runner);
   ActRaiser_SpcUploadBindRunner(runner);
   ActRaiserActionBg_BindRunner(runner);
   ActRaiser_WidescreenSpritesBindRunner(runner);
   NativeAudioMixer_BindRunner(runner);
-  ar_trace_bind_runner(snes, enabled);
-  sr_runner_bind_ppu_services(snes, enabled);
-  sr_runner_set_cpu_state_provider(
-      snes, enabled ? ActRaiser_QueryCpuState : NULL,
-      enabled ? &g_cpu : NULL);
-  sr_runner_set_execution_state_provider(
-      snes, enabled ? ActRaiser_QueryExecutionState : NULL);
 }
 
-const RtlGameInfo kActRaiserGameInfo = {
-  .title = "actraiser",
-  .initialize = NULL,
+static const RtlGameIdentity kActRaiserIdentity = {
+  .struct_size = RTL_GAME_IDENTITY_V1_SIZE,
+  .game_id = "actraiser",
+  .display_name = "ActRaiser",
+  .save_name_prefix = "save",
+};
+
+static const RtlGameLifecycleApi kActRaiserLifecycle = {
+  .struct_size = RTL_GAME_LIFECYCLE_API_V1_SIZE,
+  .initialize = &ActRaiser_InitializeGame,
+  .runner_changed = &ActRaiser_RunnerChanged,
+};
+
+static const RtlGameExecutionApi kActRaiserExecution = {
+  .struct_size = RTL_GAME_EXECUTION_API_V1_SIZE,
   .run_frame = &RunOneFrameOfGame,
   .draw_ppu_frame = &ActRaiserDrawPpuFrame,
   .read_rdnmi = &ActRaiser_ReadRdnmi,
   .recover_dispatch_miss = &ActRaiser_RecoverDispatchMiss,
-  .save_name_prefix = "save",
-#ifdef SNESRECOMP_NEXT_COMMON_CPU_INFRA_H
+};
+
+static const RtlGameStateProviderApi kActRaiserStateProviders = {
+  .struct_size = RTL_GAME_STATE_PROVIDER_API_V1_SIZE,
+  .user_data = &g_cpu,
+  .cpu_component_handle = &g_cpu,
+  .query_cpu_state = &ActRaiser_QueryCpuState,
+  .query_execution_state = &ActRaiser_QueryExecutionState,
+};
+
+static const RtlGameAudioApi kActRaiserAudio = {
+  .struct_size = RTL_GAME_AUDIO_API_V1_SIZE,
+  .capabilities = RTL_GAME_AUDIO_CAP_SPC_UPLOAD |
+                  RTL_GAME_AUDIO_CAP_VOICE_ROUTING |
+                  RTL_GAME_AUDIO_CAP_EXTENSION,
   .spc_upload_source = &ActRaiser_SpcUploadSource,
   .spc_upload_customize = &ActRaiser_SpcUploadCustomize,
   .spc_upload_commit = &ActRaiser_SpcUploadCommit,
   .spc_upload_stack_pop = &ActRaiser_SpcUploadStackPop,
-  .audio_dsp_write_routing = &NativeAudioMixer_RouteDspWrite,
-  .audio_state_loaded_routing = &NativeAudioMixer_RouteStateLoaded,
-  .audio_extension_dsp_write = &NativeAudioExtension_FilterDspWrite,
-  .audio_extension_spc_opcode = &NativeAudioExtension_PatchSpcOpcode,
-  .audio_extension_spc_cycle =
+  .dsp_write_routing = &NativeAudioMixer_RouteDspWrite,
+  .state_loaded_routing = &NativeAudioMixer_RouteStateLoaded,
+  .extension_dsp_write = &NativeAudioExtension_FilterDspWrite,
+  .extension_spc_opcode = &NativeAudioExtension_PatchSpcOpcode,
+  .extension_spc_cycle =
       &NativeAudioExtension_AdjustSpcOpcodeCycles,
-  .audio_extension_save = &NativeAudioExtension_SaveState,
-  .audio_extension_upload = &NativeAudioExtension_OnSpcUpload,
-  .bind_runner_abi = &ActRaiser_BindRunnerAbi,
-#endif
+  .extension_save = &NativeAudioExtension_SaveState,
+  .extension_upload = &NativeAudioExtension_OnSpcUpload,
+};
+
+const RtlGameModule kActRaiserGameModule = {
+  .abi_version = RTL_GAME_MODULE_ABI_VERSION,
+  .struct_size = RTL_GAME_MODULE_V1_SIZE,
+  .capabilities = RTL_GAME_MODULE_CAP_IDENTITY |
+                  RTL_GAME_MODULE_CAP_LIFECYCLE |
+                  RTL_GAME_MODULE_CAP_EXECUTION |
+                  RTL_GAME_MODULE_CAP_STATE_PROVIDERS |
+                  RTL_GAME_MODULE_CAP_AUDIO,
+  .identity = &kActRaiserIdentity,
+  .lifecycle = &kActRaiserLifecycle,
+  .execution = &kActRaiserExecution,
+  .state_providers = &kActRaiserStateProviders,
+  .audio = &kActRaiserAudio,
 };

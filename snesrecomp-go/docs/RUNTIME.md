@@ -23,26 +23,33 @@ The shared layer provides:
 - CMake source/include lists in `runtime-next/runner.cmake`.
 
 The per-game project provides the executable frontend, verified ROM loading,
-configuration/settings, `RtlGameInfo`, reset/frame/interrupt policy, HLE
-bodies, and all ROM-address-specific behavior. See
+configuration/settings, a versioned `RtlGameModule`, reset/frame/interrupt
+policy, HLE bodies, and all ROM-address-specific behavior. See
 `PROJECT_INTEGRATION.md`.
 
-## `RtlGameInfo`
+## Game module contract
 
-Register exactly one static `RtlGameInfo` before `SnesInit`:
+Register exactly one immutable `RtlGameModule` before `SnesInit`. The module
+has its own ABI version, byte size, and capabilities; optional nested tables
+must agree with their capability bits. Registration validates the complete
+descriptor once and returns `SR_RESULT_OK`, `SR_RESULT_UNSUPPORTED`,
+`SR_RESULT_INVALID_ARGUMENT`, or `SR_RESULT_BUSY`.
 
-- `title`: stable identifier used by diagnostics/default save names;
-- `initialize`: optional reset callback;
-- `run_frame`: required frame callback used by the shared loop;
-- `draw_ppu_frame`: optional drawing callback;
-- `read_rdnmi`: optional per-game `$4210` override, returning `-1` to
-  delegate;
-- `recover_dispatch_miss`: optional policy gate for verified
-  computed-dispatch recovery sites; and
-- `save_name_prefix`: optional `saves/<prefix>N.sav` prefix.
+- `RtlGameIdentity` owns stable IDs, display text, and save naming.
+- `RtlGameLifecycleApi` receives an opaque runner on bind/revoke and an
+  initialization context. Mutable ROM bytes are available only during the
+  initialization callback, after loading and before reset.
+- `RtlGameExecutionApi` owns the required frame callback and optional PPU
+  draw, `$4210`, and verified dispatch-recovery policy.
+- `RtlGameStateProviderApi` publishes generated CPU/execution snapshots using
+  module-owned context. The runner installs and revokes these providers.
+- `RtlGameAudioApi` groups privileged SPC-upload, voice-routing, and extended
+  audio safe-point callbacks behind separate audio capability bits.
 
-The callbacks isolate game policy from the SNES core. Shared runtime code must
-not add hard-coded ROM addresses or game-prefixed external symbols.
+The runner caches the validated nested tables, so the structure adds no
+allocation or repeated descriptor traversal on frame hot paths. Callbacks
+isolate game policy from the SNES core; shared runtime code must not add
+hard-coded ROM addresses or game-prefixed external symbols.
 
 ## MSU-1
 
@@ -92,4 +99,5 @@ runner game-specific.
   portable implementation.
 
 The post-cutover component-access and low-copy ABI plan is tracked in
-`../runtime-next/ABI_ROADMAP.md`.
+`../runtime-next/ABI_ROADMAP.md`. Cross-game integration pressure and the
+current Zelda 3-shaped audit are recorded in `GAME_SDK_EVALUATION.md`.

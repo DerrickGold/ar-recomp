@@ -59,6 +59,26 @@ _Static_assert(SR_PPU_OVERLAY_REMOVE_FROM_GAME ==
                    SR_PPU_OVERLAY_MARK_OWNING_SCREEN_WINNER ==
                        kPpuOverlayFlag_MarkOwningScreenWinner,
                "public ABI overlay flags must match the PPU");
+_Static_assert(SR_PPU_BACKGROUND_FILL_INHERIT ==
+                       kPpuWidescreenBandFill_Inherit &&
+                   SR_PPU_BACKGROUND_FILL_TRANSPARENT ==
+                       kPpuWidescreenBandFill_Transparent &&
+                   SR_PPU_BACKGROUND_FILL_LIVE_WORLD ==
+                       kPpuWidescreenBandFill_LiveWorld &&
+                   SR_PPU_BACKGROUND_FILL_CLAMP ==
+                       kPpuWidescreenBandFill_Clamp &&
+                   SR_PPU_BACKGROUND_FILL_MIRROR ==
+                       kPpuWidescreenBandFill_Mirror &&
+                   SR_PPU_BACKGROUND_FILL_REPEAT ==
+                       kPpuWidescreenBandFill_Repeat &&
+                   SR_PPU_BACKGROUND_FILL_RAW_WRAP ==
+                       kPpuWidescreenBandFill_RawWrap,
+               "public ABI background fills must match the PPU");
+_Static_assert(SR_PPU_BACKGROUND_MOTION_FILL_RELATIVE ==
+                       kPpuWidescreenMotion_FillRelative &&
+                   SR_PPU_BACKGROUND_MOTION_NORMAL_SCROLL ==
+                       kPpuWidescreenMotion_NormalScroll,
+               "public ABI background motion must match the PPU");
 _Static_assert(sizeof(SrPpuObjPart) == 8u,
                "public ABI OBJ part must have a fixed layout");
 _Static_assert(offsetof(SrPpuObjPart, x) == 0u &&
@@ -68,10 +88,12 @@ _Static_assert(offsetof(SrPpuObjPart, x) == 0u &&
                    offsetof(SrPpuObjPart, reserved) == 7u,
                "public ABI OBJ part field offsets changed");
 
-static SrRunnerCpuStateProvider *s_cpu_state_provider;
+static RtlGameCpuStateQueryFunc *s_cpu_state_provider;
+static void *s_cpu_state_user_data;
 static const void *s_cpu_component;
 static Snes *s_cpu_state_runner;
-static SrRunnerExecutionStateProvider *s_execution_state_provider;
+static RtlGameExecutionStateQueryFunc *s_execution_state_provider;
+static void *s_execution_state_user_data;
 static Snes *s_execution_state_runner;
 static SrRunnerPpuObjRasterProvider *s_ppu_obj_raster_provider;
 static Snes *s_ppu_obj_raster_runner;
@@ -358,7 +380,7 @@ static SrResult query_cpu_state(SrRunnerHandle *runner,
     out_state->lifetime_generation = snes->abiLifetimeGeneration;
     if (s_cpu_state_runner != snes || s_cpu_state_provider == NULL)
         return SR_RESULT_UNAVAILABLE;
-    return s_cpu_state_provider(snes, out_state);
+    return s_cpu_state_provider(s_cpu_state_user_data, out_state);
 }
 
 static SrResult query_execution_state(
@@ -373,7 +395,8 @@ static SrResult query_execution_state(
     if (s_execution_state_runner != snes ||
         s_execution_state_provider == NULL)
         return SR_RESULT_UNAVAILABLE;
-    return s_execution_state_provider(snes, out_state);
+    return s_execution_state_provider(
+        s_execution_state_user_data, out_state);
 }
 
 static void recompute_event_mask(void) {
@@ -1052,26 +1075,6 @@ static SrResult resolve_ppu_background_coordinate(
     mapped = PpuResolveBackgroundCoordinate(
         snes->ppu, (uint8_t)request->layer, request->screen_x,
         request->screen_y, &source_x, &sample_y, &policy, &mosaic);
-    _Static_assert(SR_PPU_BACKGROUND_FILL_INHERIT ==
-                       kPpuWidescreenBandFill_Inherit &&
-                   SR_PPU_BACKGROUND_FILL_TRANSPARENT ==
-                       kPpuWidescreenBandFill_Transparent &&
-                   SR_PPU_BACKGROUND_FILL_LIVE_WORLD ==
-                       kPpuWidescreenBandFill_LiveWorld &&
-                   SR_PPU_BACKGROUND_FILL_CLAMP ==
-                       kPpuWidescreenBandFill_Clamp &&
-                   SR_PPU_BACKGROUND_FILL_MIRROR ==
-                       kPpuWidescreenBandFill_Mirror &&
-                   SR_PPU_BACKGROUND_FILL_REPEAT ==
-                       kPpuWidescreenBandFill_Repeat &&
-                   SR_PPU_BACKGROUND_FILL_RAW_WRAP ==
-                       kPpuWidescreenBandFill_RawWrap,
-                   "ABI background fill values must match the PPU");
-    _Static_assert(SR_PPU_BACKGROUND_MOTION_FILL_RELATIVE ==
-                       kPpuWidescreenMotion_FillRelative &&
-                   SR_PPU_BACKGROUND_MOTION_NORMAL_SCROLL ==
-                       kPpuWidescreenMotion_NormalScroll,
-                   "ABI background motion values must match the PPU");
     out_result->flags =
         (mapped ? SR_PPU_BACKGROUND_COORDINATE_MAPPED : 0u) |
         (policy.band_override
@@ -2015,6 +2018,161 @@ static SrResult configure_ppu_horizontal_margin(
     return SR_RESULT_OK;
 }
 
+SrResult sr_runner_apply_ppu_frame_policy(
+        Snes *snes, const SrPpuFramePolicy *policy) {
+    Ppu *ppu;
+    uint32_t index;
+    if (snes == NULL || policy == NULL ||
+        policy->struct_size < SR_PPU_FRAME_POLICY_V2_SIZE ||
+        (policy->flags &
+         ~(SR_PPU_FRAME_POLICY_PAD_CAPTURED_TO_BUDGET |
+           SR_PPU_FRAME_POLICY_FINALIZE)) != 0u ||
+        policy->margin_budget_pixels > SR_PPU_HORIZONTAL_MARGIN_MAX ||
+        policy->margin_left_pixels > policy->margin_budget_pixels ||
+        policy->margin_right_pixels > policy->margin_budget_pixels ||
+        policy->margin_top_pixels > SR_PPU_VERTICAL_MARGIN_MAX ||
+        policy->margin_bottom_pixels > SR_PPU_VERTICAL_MARGIN_MAX ||
+        (policy->layer_clamp_mask & ~SR_PPU_FRAME_POLICY_LAYER_MASK) != 0u ||
+        (policy->layer_mirror_mask & ~SR_PPU_FRAME_POLICY_LAYER_MASK) != 0u ||
+        (policy->layer_repeat_mask & ~SR_PPU_FRAME_POLICY_LAYER_MASK) != 0u ||
+        (policy->layer_normal_scroll_mask &
+         ~SR_PPU_FRAME_POLICY_LAYER_MASK) != 0u ||
+        (policy->vertical_clip_layer_mask &
+         ~SR_PPU_FRAME_POLICY_LAYER_MASK) != 0u ||
+        policy->band_count > SR_PPU_FRAME_POLICY_BAND_MAX ||
+        (policy->band_count == 0u && policy->bands != NULL) ||
+        (policy->band_count != 0u && policy->bands == NULL) ||
+        (policy->bands != NULL &&
+         (uintptr_t)policy->bands % _Alignof(SrPpuFramePolicyBand) != 0u) ||
+        policy->reserved != 0u)
+        return SR_RESULT_INVALID_ARGUMENT;
+    if (policy->horizontal_mode == SR_PPU_HORIZONTAL_MARGIN_CENTERED) {
+        if (policy->margin_left_pixels != 0u ||
+            policy->margin_right_pixels != 0u)
+            return SR_RESULT_INVALID_ARGUMENT;
+    } else if (policy->horizontal_mode !=
+                   SR_PPU_HORIZONTAL_MARGIN_AVAILABLE) {
+        return SR_RESULT_UNSUPPORTED;
+    }
+    if (policy->hud_split_height == 0u) {
+        if (policy->hud_left_end_x != 0u ||
+            policy->hud_right_start_x != 0u ||
+            policy->hud_player_row_y != 0u ||
+            policy->hud_left_only_y != 0u)
+            return SR_RESULT_INVALID_ARGUMENT;
+    } else if (policy->hud_split_height > SR_PPU_NATIVE_HEIGHT ||
+               policy->hud_left_end_x == 0u ||
+               policy->hud_left_end_x > policy->hud_right_start_x ||
+               policy->hud_right_start_x >= SR_PPU_NATIVE_WIDTH ||
+               policy->hud_player_row_y > policy->hud_left_only_y ||
+               policy->hud_left_only_y > policy->hud_split_height) {
+        return SR_RESULT_INVALID_ARGUMENT;
+    }
+    for (index = 0u; index < 4u; ++index) {
+        uint32_t bit = 1u << index;
+        if (policy->vertical_clip_top_rows[index] >
+                SR_PPU_VERTICAL_MARGIN_MAX ||
+            policy->vertical_clip_bottom_rows[index] >
+                SR_PPU_VERTICAL_MARGIN_MAX ||
+            ((policy->vertical_clip_layer_mask & bit) == 0u &&
+             (policy->vertical_clip_top_rows[index] != 0u ||
+              policy->vertical_clip_bottom_rows[index] != 0u)))
+            return SR_RESULT_INVALID_ARGUMENT;
+    }
+    for (index = 0u; index < policy->band_count; ++index) {
+        const SrPpuFramePolicyBand *band = &policy->bands[index];
+        if (band->layer >= 4u || band->y0 >= band->y1 ||
+            band->y1 > SR_PPU_NATIVE_HEIGHT ||
+            band->fill < SR_PPU_BACKGROUND_FILL_TRANSPARENT ||
+            band->fill > SR_PPU_BACKGROUND_FILL_RAW_WRAP ||
+            band->motion > SR_PPU_BACKGROUND_MOTION_NORMAL_SCROLL)
+            return SR_RESULT_INVALID_ARGUMENT;
+    }
+
+    ppu = ppu_output_control_target(snes);
+    if (ppu == NULL) return SR_RESULT_UNAVAILABLE;
+    if ((policy->flags & SR_PPU_FRAME_POLICY_FINALIZE) != 0u &&
+        (!snes->abiPpuFramePolicyActive ||
+         snes->abiPpuFramePolicyGeneration !=
+             snes->abiLifetimeGeneration ||
+         policy->margin_budget_pixels != ppu->extraLeftRight))
+        return SR_RESULT_BUSY;
+    if ((policy->flags & SR_PPU_FRAME_POLICY_FINALIZE) != 0u) {
+        /* Centered mode encodes its exact sides as zero and BEGIN already
+         * established that geometry. Only AVAILABLE mode has exact sides to
+         * refine after provider publication. */
+        if (policy->horizontal_mode ==
+                SR_PPU_HORIZONTAL_MARGIN_AVAILABLE)
+            PpuSetExtraSideSpace(
+                ppu, (int)policy->margin_left_pixels,
+                (int)policy->margin_right_pixels, 0);
+        PpuClearWidescreenLayerBands(ppu);
+    } else if (policy->horizontal_mode ==
+                   SR_PPU_HORIZONTAL_MARGIN_CENTERED) {
+        PpuSetExtraSpaceCentered(ppu,
+                                 (uint8_t)policy->margin_budget_pixels);
+    } else {
+        PpuSetExtraSpace(ppu, (uint8_t)policy->margin_budget_pixels);
+        PpuSetExtraSideSpace(
+            ppu, (int)policy->margin_left_pixels,
+            (int)policy->margin_right_pixels, 0);
+    }
+    PpuSetWidescreenLayerClamp(
+        ppu, (uint8_t)policy->layer_clamp_mask);
+    PpuSetWidescreenLayerMirror(
+        ppu, (uint8_t)policy->layer_mirror_mask);
+    PpuSetWidescreenLayerRepeat(
+        ppu, (uint8_t)policy->layer_repeat_mask);
+    PpuSetWidescreenLayerNormalScroll(
+        ppu, (uint8_t)policy->layer_normal_scroll_mask);
+    PpuSetWidescreenPadCapturedToBudget(
+        ppu, (uint8_t)((policy->flags &
+            SR_PPU_FRAME_POLICY_PAD_CAPTURED_TO_BUDGET) != 0u));
+    PpuSetWidescreenHudSplit(
+        ppu, (uint8_t)policy->hud_split_height,
+        (uint8_t)policy->hud_left_end_x,
+        (uint8_t)policy->hud_right_start_x,
+        (uint8_t)policy->hud_player_row_y,
+        (uint8_t)policy->hud_left_only_y);
+    for (index = 0u; index < policy->band_count; ++index) {
+        const SrPpuFramePolicyBand *band = &policy->bands[index];
+        PpuSetWidescreenLayerBand(
+            ppu, (uint8_t)band->layer, (uint8_t)band->y0,
+            (uint8_t)band->y1, (PpuWidescreenBandFill)band->fill,
+            (PpuWidescreenMotion)band->motion);
+    }
+    PpuSetExtraVerticalSpace(
+        ppu, (int)policy->margin_top_pixels,
+        (int)policy->margin_bottom_pixels);
+    for (index = 0u; index < 4u; ++index) {
+        if ((policy->vertical_clip_layer_mask & (1u << index)) != 0u)
+            PpuSetVerticalMarginLayerClip(
+                ppu, (uint8_t)index,
+                (int)policy->vertical_clip_top_rows[index],
+                (int)policy->vertical_clip_bottom_rows[index]);
+    }
+    if ((policy->flags & SR_PPU_FRAME_POLICY_FINALIZE) != 0u) {
+        snes->abiPpuFramePolicyActive = false;
+    } else {
+        snes->abiPpuFramePolicyGeneration = snes->abiLifetimeGeneration;
+        snes->abiPpuFramePolicyActive = true;
+    }
+    return SR_RESULT_OK;
+}
+
+static SrResult apply_ppu_frame_policy(
+        SrRunnerHandle *runner,
+        const SrPpuFramePolicyRequest *request) {
+    Snes *snes = runner_from_handle(runner);
+    if (snes == NULL || request == NULL ||
+        request->struct_size < SR_PPU_FRAME_POLICY_REQUEST_V2_SIZE ||
+        request->flags != 0u)
+        return SR_RESULT_INVALID_ARGUMENT;
+    if (request->lifetime_generation != snes->abiLifetimeGeneration)
+        return SR_RESULT_STALE_VIEW;
+    return sr_runner_apply_ppu_frame_policy(snes, &request->policy);
+}
+
 static SrResult claim_ppu_overlay_capture(
         SrRunnerHandle *runner,
         const SrPpuOverlayCaptureRequest *request) {
@@ -2144,6 +2302,68 @@ static SrResult rasterize_ppu_obj_parts(
     return s_ppu_obj_parts_raster_provider(snes, request, out_result);
 }
 
+static uint32_t game_timing_state(const Snes *snes) {
+    return ((uint32_t)snes->forceNmi << 0) |
+        ((uint32_t)snes->nmiAvail << 1) |
+        ((uint32_t)snes->nmiEnabled << 2) |
+        ((uint32_t)snes->inNmi << 3);
+}
+
+static SrResult control_game_timing(
+        SrRunnerHandle *runner,
+        const SrGameTimingRequest *request,
+        SrGameTimingResult *out_result) {
+    Snes *snes = runner_from_handle(runner);
+    uint32_t transition_flags;
+    if (snes == NULL || request == NULL || out_result == NULL ||
+        request->struct_size < SR_GAME_TIMING_REQUEST_V2_SIZE ||
+        out_result->struct_size < SR_GAME_TIMING_RESULT_V2_SIZE ||
+        (request->flags & ~SR_GAME_TIMING_REQUEST_FLAGS_SUPPORTED) != 0u ||
+        request->reserved != 0u ||
+        (request->operation != SR_GAME_TIMING_BEGIN_FRAME_SLICE &&
+         request->operation != SR_GAME_TIMING_COMPLETE_FRAME_SLICE) ||
+        (request->operation == SR_GAME_TIMING_BEGIN_FRAME_SLICE &&
+         request->flags != 0u))
+        return SR_RESULT_INVALID_ARGUMENT;
+
+    if (request->operation == SR_GAME_TIMING_BEGIN_FRAME_SLICE) {
+        snes->forceNmi = true;
+        snes->nmiAvail = true;
+        transition_flags = 0u;
+    } else {
+        const bool enter_nmi =
+            (request->flags & SR_GAME_TIMING_DISPATCH_NMI_IF_ENABLED) != 0u &&
+            snes->nmiEnabled;
+        snes->forceNmi = false;
+        snes->inNmi = snes->inNmi || enter_nmi;
+        transition_flags = enter_nmi ?
+            SR_GAME_TIMING_TRANSITION_NMI_ENTERED : 0u;
+    }
+
+    memset(out_result, 0, SR_GAME_TIMING_RESULT_V2_SIZE);
+    out_result->struct_size = SR_GAME_TIMING_RESULT_V2_SIZE;
+    out_result->state_flags = game_timing_state(snes);
+    out_result->transition_flags = transition_flags;
+    return SR_RESULT_OK;
+}
+
+static SrResult query_input_state(
+        SrRunnerHandle *runner, SrInputStateSnapshot *out_state) {
+    Snes *snes = runner_from_handle(runner);
+    if (snes == NULL || out_state == NULL ||
+        out_state->struct_size < SR_INPUT_STATE_SNAPSHOT_V2_SIZE)
+        return SR_RESULT_INVALID_ARGUMENT;
+    memset(out_state, 0, SR_INPUT_STATE_SNAPSHOT_V2_SIZE);
+    out_state->struct_size = SR_INPUT_STATE_SNAPSHOT_V2_SIZE;
+    out_state->lifetime_generation = snes->abiLifetimeGeneration;
+    out_state->frame_counter = snes->abiFrameCounter;
+    out_state->packed_buttons[0] = snes->input1_currentState;
+    out_state->packed_buttons[1] = snes->input2_currentState;
+    out_state->auto_joypad[0] = SwapInputBits(snes->input1_currentState);
+    out_state->auto_joypad[1] = SwapInputBits(snes->input2_currentState);
+    return SR_RESULT_OK;
+}
+
 static SrResult query_cpu_math_state(SrRunnerHandle *runner,
                                      SrCpuMathState *out_state);
 static SrResult restore_cpu_math_state(SrRunnerHandle *runner,
@@ -2176,7 +2396,10 @@ static const SnesRunnerApi k_runner_api = {
         SR_RUNNER_CAP_PPU_OBJ_METADATA |
         SR_RUNNER_CAP_DMA_STATE |
         SR_RUNNER_CAP_PPU_BACKGROUND_POLICY |
-        SR_RUNNER_CAP_PPU_SCANOUT,
+        SR_RUNNER_CAP_PPU_SCANOUT |
+        SR_RUNNER_CAP_GAME_TIMING_CONTROL |
+        SR_RUNNER_CAP_INPUT_STATE |
+        SR_RUNNER_CAP_PPU_FRAME_POLICY,
     get_component,
     query_generations,
     borrow_memory,
@@ -2216,6 +2439,9 @@ static const SnesRunnerApi k_runner_api = {
     replace_ppu_virtual_tilemaps,
     update_ppu_authentic_camera,
     run_ppu_scanout,
+    control_game_timing,
+    query_input_state,
+    apply_ppu_frame_policy,
 };
 
 /* Keep synchronized with the source boundary in runner.cmake. */
@@ -2248,7 +2474,10 @@ static const SrRunnerDescriptor k_runner = {
         SR_RUNNER_CAP_PPU_OBJ_METADATA |
         SR_RUNNER_CAP_DMA_STATE |
         SR_RUNNER_CAP_PPU_BACKGROUND_POLICY |
-        SR_RUNNER_CAP_PPU_SCANOUT,
+        SR_RUNNER_CAP_PPU_SCANOUT |
+        SR_RUNNER_CAP_GAME_TIMING_CONTROL |
+        SR_RUNNER_CAP_INPUT_STATE |
+        SR_RUNNER_CAP_PPU_FRAME_POLICY,
 };
 
 const SrRunnerDescriptor *sr_runner_descriptor(void) {
@@ -2265,19 +2494,22 @@ SrRunnerHandle *sr_runner_handle(Snes *snes) {
 }
 
 void sr_runner_set_cpu_state_provider(
-        Snes *snes, SrRunnerCpuStateProvider *provider,
+        Snes *snes, RtlGameCpuStateQueryFunc *provider, void *user_data,
         const void *component_handle) {
     if (provider == NULL && s_cpu_state_runner != snes) return;
     s_cpu_state_runner = provider != NULL ? snes : NULL;
     s_cpu_state_provider = provider;
+    s_cpu_state_user_data = provider != NULL ? user_data : NULL;
     s_cpu_component = provider != NULL ? component_handle : NULL;
 }
 
 void sr_runner_set_execution_state_provider(
-        Snes *snes, SrRunnerExecutionStateProvider *provider) {
+        Snes *snes, RtlGameExecutionStateQueryFunc *provider,
+        void *user_data) {
     if (provider == NULL && s_execution_state_runner != snes) return;
     s_execution_state_runner = provider != NULL ? snes : NULL;
     s_execution_state_provider = provider;
+    s_execution_state_user_data = provider != NULL ? user_data : NULL;
 }
 
 void sr_runner_set_ppu_obj_raster_provider(
@@ -2309,7 +2541,9 @@ void sr_runner_set_ppu_scanout_provider(
 }
 
 static void invalidate_lifetime(Snes *snes) {
-    if (snes != NULL) ++snes->abiLifetimeGeneration;
+    if (snes == NULL) return;
+    ++snes->abiLifetimeGeneration;
+    snes->abiPpuFramePolicyActive = false;
 }
 
 void sr_runner_note_tick(Snes *snes) {

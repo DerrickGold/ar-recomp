@@ -4,6 +4,7 @@
 
 set(SNESRECOMP_RUNNER_SOURCES
     ${SNESRECOMP_RUNNER_ROOT}/src/runner_next.c
+    ${SNESRECOMP_RUNNER_ROOT}/src/runner_game_module.c
     ${SNESRECOMP_RUNNER_ROOT}/src/runner_next_audio_trace.c
     ${SNESRECOMP_RUNNER_ROOT}/src/runner_next_ppu_services.c
     ${SNESRECOMP_RUNNER_ROOT}/src/crc32.c
