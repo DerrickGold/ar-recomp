@@ -1,4 +1,5 @@
 #include "common_cpu_infra.h"
+#include "actraiser_action_bg.h"
 #include "actraiser_rtl.h"
 #include "ar_trace.h"
 #include "cpu_state.h"
@@ -90,6 +91,8 @@ static void ActRaiser_BindRunnerAbi(Snes *snes, bool enabled) {
   HdReplacements_BindRunner(runner);
   SimWorldMapBuild_BindRunner(runner);
   ActRaiser_SpcUploadBindRunner(runner);
+  ActRaiserActionBg_BindRunner(runner);
+  ActRaiser_WidescreenSpritesBindRunner(runner);
   NativeAudioMixer_BindRunner(runner);
   ar_trace_bind_runner(snes, enabled);
   sr_runner_bind_ppu_services(snes, enabled);

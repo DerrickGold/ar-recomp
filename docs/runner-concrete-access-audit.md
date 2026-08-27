@@ -154,6 +154,103 @@ synthetic parts directly into caller-owned cropped storage. The atlas uses its
 already captured parts on the normal path and the resolver only as a fallback;
 neither path takes a full PPU snapshot or copies an intermediate image.
 
+The SIM separated-capture slice removes `sim/sim3d.c` and leaves 4 temporary
+exceptions. A synchronous frame transaction supplies one coherent PPU state
+and frame snapshot, generation-matched zero-copy CGRAM/OAM borrows, and bounded
+writable views of the host-owned overlay surfaces. Fixed colour and raw
+transparent-fill policy are now public fixed-width values. SIM replaces all
+selected capture policies through one atomic compare/exchange, binds its
+caller-owned plane storage through the existing output service, and restores
+the exact prior geometry, flags, transparent-fill, and OAM-range values after
+scanout. The town-HUD handoff uses the public OBJ raster service and retains
+only its own host buffers beyond the callback. This removes repeated concrete
+field reads without adding an emulated-memory copy.
+
+The Sky Palace VRAM slice removes `actraiser/actraiser_widescreen_bg.c` and
+leaves 3 temporary exceptions. ABI v2 now accepts a bounded sparse list of
+VRAM word compare/exchanges: it validates every expected value and address
+before applying any replacement, rejects duplicate addresses, and can validate
+a caller-declared sorted list with a single adjacent comparison. Sky Palace
+builds that sorted list only for changed margin words and restores only values
+that still contain its replacement, so a later producer is never overwritten.
+This replaces the previous 4,096-word backup and two 8 KiB whole-tilemap copies
+per active frame with a synchronous, game-agnostic transaction.
+
+The widescreen OBJ-metadata slice removes
+`actraiser/actraiser_widescreen_sprites.c` and leaves 2 temporary exceptions.
+ABI v2 now publishes the resolved small/large OBJ dimensions in the coherent
+PPU snapshot and accepts a bounded batch of exact OBJ positions plus the
+camera-relative bit. The runner validates the complete batch before clearing
+or publishing anything, rejects duplicate slots, and treats the values as
+derived renderer metadata rather than emulated state. Action mode clears once,
+collects every admitted OAM position in caller-owned storage, and commits once
+after the scan. SIM mode reuses one coherent snapshot for the metadata build
+and commits at most one batch per source record. No emulated memory, surface,
+or intermediate raster is copied.
+
+The action-background slice removes `actraiser/actraiser_action_bg.c` and
+leaves 1 temporary exception. ABI v2 now publishes a fixed-width eight-channel
+DMA snapshot and the authentic-surface binding flag, accepts bounded batches of
+default or scanline-band layer extents, atomically replaces the two supported
+virtual background providers, and publishes the authentic BG1/BG2 per-line
+camera plus object offset. Provider callbacks retain caller-owned world
+descriptors but return tile spans zero-copy; the adapter borrows VRAM only for
+its existing preflight and never copies a tilemap or frame. Every request is
+validated in full before clearing or replacing live renderer policy.
+
+The synchronous scanout slice keeps the exception count at 1 because
+`actraiser/actraiser_rtl.c` still contains the remaining game/runner adapter,
+but removes its most timing-sensitive concrete loop. The runner now owns native
+line execution, all eight HDMA channels, hold-first/hold-last vertical margins,
+and vertical IRQ scheduling; the game supplies only its recompiled CPU IRQ
+handler. Optional diagnostic callbacks receive fixed-width per-line PPU/HDMA
+state and callback-lifetime, zero-copy surface views, so normal frames make one
+scanout ABI call without a per-line cross-boundary callback. The former
+`SimpleHdma` compatibility type and helpers are gone from common RTL.
+
+All 92 application tests pass, including the three host-GPU tests. The runner
+ABI test covers multiword patch/restore, stale views, all-or-nothing
+contention, duplicate and unsorted addresses, unknown flags, and reserved
+fields. C++17 header and x86-64 macOS cross-target syntax checks pass. The
+targeted wide replay executes the transaction from gf276 and at gf420 without
+a failed restore. Seven adjacent replay pairs retain identical artifacts;
+suite regressions are +0.30% portable and +0.43% native-SIMD. The focused
+active-Sky workload measures +2.15% portable and +0.79% native-SIMD, within the
+phase gate.
+
+The OBJ-metadata ABI test additionally covers clear/update batches, exact
+signed coordinates, camera-relative policy, stale generations, scanline-mask
+invalidation, incremental updates, clear-only requests, duplicate and invalid
+slots, unknown flags, reserved fields, and validation-before-clear. C++17 and
+x86-64 checks pass. Seven adjacent replay pairs retain identical terminal
+artifacts; the portable suite is 0.38% faster and native-SIMD is 0.37% faster.
+The projected-SIM checkpoint reproduces the frozen reference's existing camera
+fixture drift but matches all substantive metadata, separated-capture, and
+authentic-framebuffer metrics and both render hashes. A wide Aitos frame and 11
+Fillmore action-frame captures also match their frozen reference pixels
+exactly.
+
+The action-background ABI test covers all eight DMA channels, default and
+banded extents, stale generations, validation-before-apply, virtual scalar,
+span, and band lookups, invalid replacement preservation, authentic-camera
+publication, and clear operations. C11, C++17, ARM64, and x86-64 syntax checks
+pass. Seven adjacent replay pairs retain identical terminal artifacts; the
+portable suite is 0.39% faster and native-SIMD regresses 0.76%, with every
+individual movement at or below 1.17%. Eleven GPU-backed active Fillmore action
+frames and the final WRAM, SRAM, dispatch log, and complete state match the
+frozen reference byte-for-byte.
+
+The scanout ABI test covers the full 225-line before/after diagnostic contract,
+direct and indirect HDMA register writes, vertical IRQ rescheduling and `inIrq`
+handoff, zero-copy surface views, final PPU state, stale generations,
+undersized descriptors, unknown flags, and validation-before-mutation. All 92
+application tests pass, including the three host-GPU tests; the focused ABI and
+concrete boundary tests pass; and C11, C++17, ARM64, and x86-64 header syntax
+checks pass. Seven adjacent replay pairs retain identical terminal artifacts.
+The portable suite changes by +0.05%, while native-SIMD improves by 0.95%.
+Eleven active Fillmore action frames plus final WRAM, SRAM, state, and dispatch
+artifacts match the frozen pre-scanout reference byte-for-byte.
+
 ## Required seams
 
 ### Type leakage
@@ -180,17 +277,16 @@ and retained-surface operations.
 These paths alter SNES state or derived renderer state synchronously while a
 game frame is being produced:
 
-- `actraiser/actraiser_rtl.c`, `actraiser/actraiser_action_bg.c`,
-  `actraiser/actraiser_widescreen_bg.c`, and
-  `actraiser/actraiser_widescreen_sprites.c`
-- `sim/sim3d.c`
+- `actraiser/actraiser_rtl.c`
 
 Do not replace these with asynchronous commands or repeated full snapshots.
 They need synchronous game-adapter services at the emulation-thread safe point,
 using fixed-width requests and caller-owned buffers.  This preserves timing and
-lets the runner optimize the operation internally. The replacement-manifest
-mutation path is now migrated with this model; the listed enhancement modules
-remain.
+lets the runner optimize the operation internally. The replacement-manifest,
+SIM separated-capture, Sky Palace margin mutation, widescreen OBJ metadata, and
+action-background paths are now migrated with this model. Native scanout is
+also runner-owned; only the other policies and lifecycle operations in the
+listed core ActRaiser adapter remain.
 
 ### APU, SPC, and DSP integration
 

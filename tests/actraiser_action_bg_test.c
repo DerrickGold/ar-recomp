@@ -27,7 +27,9 @@ enum {
  * PPU seam is exercised end-to-end by ppu_render_pipeline_test; these bounded
  * stubs let this target pin ActRaiser's plan/decoder-to-binding decisions. */
 void PpuClearVirtualTilemaps(Ppu *ppu) {
-  if (ppu) memset(ppu->virtualTilemap, 0, sizeof(ppu->virtualTilemap));
+  if (!ppu) return;
+  memset(ppu->virtualTilemap, 0, sizeof(ppu->virtualTilemap));
+  memset(ppu->abiVirtualTilemap, 0, sizeof(ppu->abiVirtualTilemap));
 }
 
 bool PpuAuthenticSurfaceBound(const Ppu *ppu) {
@@ -89,6 +91,250 @@ void PpuSetWidescreenLayerExtentBand(Ppu *ppu, uint8_t layer,
     ppu->wsLayerExtentRight[layer][y] = right;
   }
 }
+
+static Ppu *s_fake_ppu;
+static int s_fake_runner_storage;
+
+static void SnapshotPpu(const Ppu *ppu, SrPpuStateSnapshot *state) {
+  memset(state, 0, sizeof(*state));
+  state->struct_size = sizeof(*state);
+  state->lifetime_generation = 1u;
+  if (!ppu) return;
+  state->flags = (ppu->inidisp & 0x80u) != 0u
+      ? SR_PPU_STATE_FORCED_BLANK : 0u;
+  state->display_control = ppu->inidisp;
+  state->bg_mode_control = ppu->bgmode;
+  state->bg_mode = ppu->bgmode & 7u;
+  state->mosaic_control = ppu->mosaic;
+  state->main_screen = ppu->screenEnabled[0];
+  state->sub_screen = ppu->screenEnabled[1];
+  state->main_windowed = ppu->screenWindowed[0];
+  state->sub_windowed = ppu->screenWindowed[1];
+  state->color_math_control = ppu->cgwsel;
+  state->color_math_designation = ppu->cgadsub;
+  state->renderer_flags = PpuAuthenticSurfaceBound(ppu)
+      ? SR_PPU_RENDERER_AUTHENTIC_SURFACE_BOUND : 0u;
+  for (unsigned layer = 0; layer < 4u; layer++) {
+    state->background_tilemap_control[layer] = ppu->bgXsc[layer];
+    state->backgrounds[layer].h_scroll = ppu->hScroll[layer];
+    state->backgrounds[layer].v_scroll = ppu->vScroll[layer];
+    state->backgrounds[layer].tilemap_base_word =
+        (uint16_t)((ppu->bgXsc[layer] & 0xfcu) << 8);
+  }
+}
+
+static SrResult FakeQueryPpuState(
+    SrRunnerHandle *runner, SrPpuStateSnapshot *state) {
+  (void)runner;
+  if (!state || state->struct_size < SR_PPU_STATE_SNAPSHOT_V2_SIZE ||
+      !s_fake_ppu)
+    return SR_RESULT_INVALID_ARGUMENT;
+  SnapshotPpu(s_fake_ppu, state);
+  return SR_RESULT_OK;
+}
+
+static SrResult FakeBorrowU16(
+    SrRunnerHandle *runner, SrMemoryRegion region,
+    SrBorrowedU16Span *span) {
+  (void)runner;
+  if (!span || span->struct_size < SR_BORROWED_U16_SPAN_V2_SIZE ||
+      !s_fake_ppu || region != SR_MEMORY_VRAM)
+    return SR_RESULT_INVALID_ARGUMENT;
+  *span = (SrBorrowedU16Span) {
+    .struct_size = sizeof(*span),
+    .region = region,
+    .data = s_fake_ppu->vram,
+    .element_count = kVramWords,
+    .lifetime_generation = 1u,
+  };
+  return SR_RESULT_OK;
+}
+
+static SrResult FakeQueryDmaState(
+    SrRunnerHandle *runner, SrDmaStateSnapshot *state) {
+  (void)runner;
+  if (!state || state->struct_size < SR_DMA_STATE_SNAPSHOT_V2_SIZE)
+    return SR_RESULT_INVALID_ARGUMENT;
+  *state = (SrDmaStateSnapshot) {
+    .struct_size = sizeof(*state),
+    .lifetime_generation = 1u,
+    .channel_count = SR_DMA_CHANNEL_COUNT,
+  };
+  return SR_RESULT_OK;
+}
+
+static SrResult FakeUpdateLayerExtents(
+    SrRunnerHandle *runner, const SrPpuLayerExtentRequest *request) {
+  (void)runner;
+  if (!s_fake_ppu || !request || request->lifetime_generation != 1u)
+    return SR_RESULT_INVALID_ARGUMENT;
+  for (uint32_t index = 0; index < request->update_count; index++) {
+    const SrPpuLayerExtentUpdate *update = &request->updates[index];
+    if (update->kind == SR_PPU_LAYER_EXTENT_DEFAULT) {
+      PpuSetWidescreenLayerExtent(
+          s_fake_ppu, (uint8_t)update->layer,
+          (uint16_t)update->left, (uint16_t)update->right,
+          (uint16_t)update->top, (uint16_t)update->bottom);
+    } else if (update->kind == SR_PPU_LAYER_EXTENT_HORIZONTAL_BAND) {
+      PpuSetWidescreenLayerExtentBand(
+          s_fake_ppu, (uint8_t)update->layer,
+          (uint8_t)update->y0, (uint8_t)update->y1,
+          (uint16_t)update->left, (uint16_t)update->right);
+    } else {
+      return SR_RESULT_INVALID_ARGUMENT;
+    }
+  }
+  return SR_RESULT_OK;
+}
+
+static bool FakeVirtualLookup(const void *context, int32_t tile_x,
+                              int32_t tile_y, uint16_t *entry) {
+  const SrPpuVirtualTilemapBinding *binding = context;
+  return binding && binding->lookup &&
+      binding->lookup(binding->user_data, tile_x, tile_y, entry) != 0u;
+}
+
+static size_t FakeVirtualSpan(
+    const void *context, int32_t tile_x, int32_t tile_y, int32_t tile_step,
+    size_t capacity, const uint16_t **entries, ptrdiff_t *entry_step) {
+  const SrPpuVirtualTilemapBinding *binding = context;
+  int64_t abi_step = 0;
+  if (!binding || !binding->lookup_span || capacity > UINT32_MAX)
+    return 0;
+  uint32_t count = binding->lookup_span(
+      binding->user_data, tile_x, tile_y, tile_step, (uint32_t)capacity,
+      entries, &abi_step);
+  *entry_step = (ptrdiff_t)abi_step;
+  return count;
+}
+
+static bool FakeVirtualBand(const void *context, int32_t tile_x,
+                            int32_t tile_y, uint16_t entry, uint8_t *band) {
+  const SrPpuVirtualTilemapBinding *binding = context;
+  return binding && binding->band_lookup &&
+      binding->band_lookup(
+          binding->user_data, tile_x, tile_y, entry, band) != 0u;
+}
+
+static SrResult FakeReplaceVirtualTilemaps(
+    SrRunnerHandle *runner, const SrPpuVirtualTilemapRequest *request) {
+  (void)runner;
+  if (!s_fake_ppu || !request || request->lifetime_generation != 1u ||
+      request->layer_mask > 3u)
+    return SR_RESULT_INVALID_ARGUMENT;
+  PpuClearVirtualTilemaps(s_fake_ppu);
+  for (unsigned layer = 0; layer < 2u; layer++) {
+    if ((request->layer_mask & (1u << layer)) == 0u) continue;
+    s_fake_ppu->abiVirtualTilemap[layer] = request->bindings[layer];
+    const SrPpuVirtualTilemapBinding *source =
+        &s_fake_ppu->abiVirtualTilemap[layer];
+    const PpuVirtualTilemapBinding binding = {
+      .lookup = FakeVirtualLookup,
+      .lookup_span = source->lookup_span ? FakeVirtualSpan : NULL,
+      .band_lookup = source->band_lookup ? FakeVirtualBand : NULL,
+      .context = source,
+      .camera_x = source->camera_x,
+      .camera_y = source->camera_y,
+      .hscroll_anchor = (uint16_t)source->hscroll_anchor,
+      .vscroll_anchor = (uint16_t)source->vscroll_anchor,
+      .flags = (uint8_t)source->flags,
+    };
+    if (!PpuSetVirtualTilemap(s_fake_ppu, (uint8_t)layer, &binding))
+      return SR_RESULT_INVALID_ARGUMENT;
+  }
+  return SR_RESULT_OK;
+}
+
+static SrResult FakeUpdateAuthenticCamera(
+    SrRunnerHandle *runner, const SrPpuAuthenticCameraRequest *request) {
+  (void)runner;
+  if (!s_fake_ppu || !request || request->lifetime_generation != 1u)
+    return SR_RESULT_INVALID_ARGUMENT;
+  if ((request->flags & SR_PPU_AUTHENTIC_CAMERA_CLEAR) != 0u)
+    PpuClearAuthenticCameraFrame(s_fake_ppu);
+  if (request->layer_mask != 0u && !PpuSetAuthenticCameraFrame(
+          s_fake_ppu, (uint8_t)request->layer_mask,
+          request->bg1_hscroll, request->bg2_hscroll,
+          request->object_offset_x))
+    return SR_RESULT_INVALID_ARGUMENT;
+  return SR_RESULT_OK;
+}
+
+static const SnesRunnerApi s_fake_api = {
+  .abi_version = SR_RUNNER_ABI_VERSION,
+  .struct_size = sizeof(SnesRunnerApi),
+  .capabilities = SR_RUNNER_CAP_PPU_STATE |
+      SR_RUNNER_CAP_BORROWED_U16_SPANS | SR_RUNNER_CAP_DMA_STATE |
+      SR_RUNNER_CAP_PPU_BACKGROUND_POLICY,
+  .query_ppu_state = FakeQueryPpuState,
+  .borrow_u16_memory = FakeBorrowU16,
+  .query_dma_state = FakeQueryDmaState,
+  .update_ppu_layer_extents = FakeUpdateLayerExtents,
+  .replace_ppu_virtual_tilemaps = FakeReplaceVirtualTilemaps,
+  .update_ppu_authentic_camera = FakeUpdateAuthenticCamera,
+};
+
+const SnesRunnerApi *sr_runner_get_api(uint32_t version) {
+  return version == SR_RUNNER_ABI_VERSION ? &s_fake_api : NULL;
+}
+
+static void BindFakePpu(Ppu *ppu) {
+  s_fake_ppu = ppu;
+  ActRaiserActionBg_BindRunner(
+      ppu ? (SrRunnerHandle *)(void *)&s_fake_runner_storage : NULL);
+}
+
+static bool TestBuildPlan(
+    const uint8_t *wram, size_t wram_size, Ppu *ppu,
+    bool padding, ActionBgPlan *plan, ActionBgPresentationPolicy *policy) {
+  SrPpuStateSnapshot snapshot;
+  SnapshotPpu(ppu, &snapshot);
+  return ActRaiserActionBg_BuildPlan(
+      wram, wram_size, ppu ? &snapshot : NULL, padding, plan, policy);
+}
+
+static bool TestCompareFrameLine(
+    const ActionRoomSceneFrameState *state, Ppu *ppu, unsigned output_y,
+    ActRaiserActionRoomSceneFrameCompareResult *result) {
+  SrPpuStateSnapshot snapshot;
+  SnapshotPpu(ppu, &snapshot);
+  return ActRaiserActionBg_CompareRoomSceneFrameLine(
+      state, ppu ? &snapshot : NULL, output_y, result);
+}
+
+static bool TestApplyPlanExtents(const ActionBgPlan *plan, Ppu *ppu) {
+  BindFakePpu(ppu);
+  return ActRaiserActionBg_ApplyPlanExtents(plan);
+}
+
+static uint8_t TestBindPlan(
+    const uint8_t *wram, size_t wram_size, const ActionBgPlan *plan,
+    Ppu *ppu) {
+  BindFakePpu(ppu);
+  return ActRaiserActionBg_BindPlan(wram, wram_size, plan);
+}
+
+static uint8_t TestBindPlanWithVirtualLayers(
+    const uint8_t *wram, size_t wram_size, const ActionBgPlan *plan,
+    const DioramaRoomOverride *room, Ppu *ppu) {
+  BindFakePpu(ppu);
+  return ActRaiserActionBg_BindPlanWithVirtualLayers(
+      wram, wram_size, plan, room);
+}
+
+static void TestObserveFrame(
+    const uint8_t *wram, size_t wram_size, Ppu *ppu) {
+  BindFakePpu(ppu);
+  ActRaiserActionBg_ObserveFrame(wram, wram_size);
+}
+
+#define ActRaiserActionBg_BuildPlan TestBuildPlan
+#define ActRaiserActionBg_CompareRoomSceneFrameLine TestCompareFrameLine
+#define ActRaiserActionBg_ApplyPlanExtents TestApplyPlanExtents
+#define ActRaiserActionBg_BindPlan TestBindPlan
+#define ActRaiserActionBg_BindPlanWithVirtualLayers \
+    TestBindPlanWithVirtualLayers
+#define ActRaiserActionBg_ObserveFrame TestObserveFrame
 
 static void ResetExtentStub(Ppu *ppu) {
   memset(ppu->wsLayerExtentLeftDefault, 0xff,

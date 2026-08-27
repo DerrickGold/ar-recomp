@@ -30,6 +30,12 @@ extern "C" {
 #define SR_RUNNER_CAP_AUDIO_TRACE_OBSERVERS UINT64_C(0x0000000000010000)
 #define SR_RUNNER_CAP_SPC_CONTROL UINT64_C(0x0000000000020000)
 #define SR_RUNNER_CAP_AUDIO_MIX_CONTROL UINT64_C(0x0000000000040000)
+#define SR_RUNNER_CAP_PPU_FRAME_TRANSACTIONS UINT64_C(0x0000000000080000)
+#define SR_RUNNER_CAP_PPU_VRAM_PATCH UINT64_C(0x0000000000100000)
+#define SR_RUNNER_CAP_PPU_OBJ_METADATA UINT64_C(0x0000000000200000)
+#define SR_RUNNER_CAP_DMA_STATE UINT64_C(0x0000000000400000)
+#define SR_RUNNER_CAP_PPU_BACKGROUND_POLICY UINT64_C(0x0000000000800000)
+#define SR_RUNNER_CAP_PPU_SCANOUT UINT64_C(0x0000000001000000)
 
 typedef uint32_t SrResult;
 enum {
@@ -84,6 +90,7 @@ enum {
 #define SR_PPU_MODE7_CANVAS_EXTENT 1024u
 #define SR_PPU_TILE_ID_COUNT 256u
 #define SR_PPU_SURFACE_BAND_COUNT 4u
+#define SR_DMA_CHANNEL_COUNT 8u
 enum {
     SR_PPU_OVERLAY_BG1 = 0u,
     SR_PPU_OVERLAY_BG2 = 1u,
@@ -213,6 +220,8 @@ typedef struct SrCpuMathState {
 #define SR_PPU_STATE_PSEUDO_HIRES UINT32_C(0x00000020)
 #define SR_PPU_STATE_MODE7_EXT_BG UINT32_C(0x00000040)
 
+#define SR_PPU_RENDERER_AUTHENTIC_SURFACE_BOUND UINT32_C(0x00000001)
+
 #define SR_PPU_MODE7_X_FLIP UINT8_C(0x01)
 #define SR_PPU_MODE7_Y_FLIP UINT8_C(0x02)
 #define SR_PPU_MODE7_LARGE_FIELD UINT8_C(0x40)
@@ -263,11 +272,64 @@ typedef struct SrPpuStateSnapshot {
     uint8_t mode7_select;
     uint8_t reserved8_2;
     int16_t mode7_matrix[8];
+    /* Raw BGR555 fixed colour used when CGWSEL selects fixed-colour math. */
+    uint16_t fixed_color;
+    uint16_t reserved16;
+    /* Resolved dimensions for the two OAM size-bit values under OBSEL. */
+    uint8_t object_small_size_pixels;
+    uint8_t object_large_size_pixels;
+    uint16_t reserved16_2;
+    /* Host-renderer availability, separate from emulated PPU flags. */
+    uint32_t renderer_flags;
 } SrPpuStateSnapshot;
 
 #define SR_PPU_STATE_SNAPSHOT_V2_SIZE                                    \
-    ((uint32_t)(offsetof(SrPpuStateSnapshot, mode7_matrix) +               \
-                sizeof(((SrPpuStateSnapshot *)0)->mode7_matrix)))
+    ((uint32_t)(offsetof(SrPpuStateSnapshot, renderer_flags) +             \
+                sizeof(((SrPpuStateSnapshot *)0)->renderer_flags)))
+
+#define SR_DMA_CHANNEL_DMA_ACTIVE UINT32_C(0x00000001)
+#define SR_DMA_CHANNEL_HDMA_ACTIVE UINT32_C(0x00000002)
+#define SR_DMA_CHANNEL_FIXED_A_BUS UINT32_C(0x00000004)
+#define SR_DMA_CHANNEL_DECREMENT_A_BUS UINT32_C(0x00000008)
+#define SR_DMA_CHANNEL_INDIRECT UINT32_C(0x00000010)
+#define SR_DMA_CHANNEL_FROM_B_BUS UINT32_C(0x00000020)
+#define SR_DMA_CHANNEL_TRANSFER_PENDING UINT32_C(0x00000040)
+#define SR_DMA_CHANNEL_TERMINATED UINT32_C(0x00000080)
+
+typedef struct SrDmaChannelState {
+    uint32_t flags;
+    uint16_t a_address;
+    uint16_t transfer_size;
+    uint16_t table_address;
+    uint8_t a_bank;
+    uint8_t b_address;
+    uint8_t indirect_bank;
+    uint8_t mode;
+    uint8_t repeat_count;
+    uint8_t reserved8[3];
+} SrDmaChannelState;
+
+typedef struct SrDmaStateSnapshot {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t lifetime_generation;
+    uint32_t timer;
+    uint32_t channel_count;
+    SrDmaChannelState channels[SR_DMA_CHANNEL_COUNT];
+} SrDmaStateSnapshot;
+
+#define SR_DMA_STATE_BUSY UINT32_C(0x00000001)
+
+#define SR_DMA_STATE_SNAPSHOT_V2_SIZE                                    \
+    ((uint32_t)(offsetof(SrDmaStateSnapshot, channels) +                  \
+                sizeof(((SrDmaStateSnapshot *)0)->channels)))
+
+typedef uint32_t SrPpuTransparentFillMode;
+enum {
+    SR_PPU_TRANSPARENT_FILL_NONE = 0u,
+    SR_PPU_TRANSPARENT_FILL_BLACK = 1u,
+    SR_PPU_TRANSPARENT_FILL_CGRAM = 2u
+};
 
 typedef struct SrPpuOverlayState {
     int16_t x0;
@@ -278,9 +340,11 @@ typedef struct SrPpuOverlayState {
     uint32_t content_band_mask;
     uint32_t transparent_fill_argb;
     uint8_t transparent_fill_configured;
+    uint8_t transparent_fill_mode;
+    uint8_t transparent_fill_cgram;
     uint8_t oam_first;
     uint8_t oam_count;
-    uint8_t reserved8;
+    uint8_t reserved8[3];
 } SrPpuOverlayState;
 
 typedef struct SrPpuFrameSnapshot {
@@ -588,6 +652,332 @@ typedef struct SrPpuOverlayCaptureRequest {
 #define SR_PPU_OVERLAY_CAPTURE_REQUEST_V2_SIZE                           \
     ((uint32_t)(offsetof(SrPpuOverlayCaptureRequest, reserved) +          \
                 sizeof(((SrPpuOverlayCaptureRequest *)0)->reserved)))
+
+/* Exact capture-policy value. Unlike SrPpuOverlayState this excludes derived
+ * content and resolved-colour fields, so it can be compared and restored
+ * without depending on pixels produced during scanout. */
+typedef struct SrPpuOverlayCaptureState {
+    int16_t x0;
+    int16_t x1;
+    int16_t y0;
+    int16_t y1;
+    uint32_t flags;
+    uint8_t transparent_fill_configured;
+    uint8_t transparent_fill_mode;
+    uint8_t transparent_fill_cgram;
+    uint8_t oam_first;
+    uint8_t oam_count;
+    uint8_t reserved8[3];
+} SrPpuOverlayCaptureState;
+
+/* Atomically replaces any selected capture policies only if every selected
+ * source still exactly matches the caller's expected value. No source is
+ * changed when a comparison or validation fails. This is intended for a
+ * frame-scoped enhancement which temporarily supersedes a known producer and
+ * restores it after scanout. */
+typedef struct SrPpuOverlayCaptureExchangeRequest {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t lifetime_generation;
+    uint32_t source_mask;
+    uint32_t reserved;
+    SrPpuOverlayCaptureState expected[SR_PPU_OVERLAY_SOURCE_COUNT];
+    SrPpuOverlayCaptureState replacement[SR_PPU_OVERLAY_SOURCE_COUNT];
+} SrPpuOverlayCaptureExchangeRequest;
+
+#define SR_PPU_OVERLAY_CAPTURE_EXCHANGE_REQUEST_V2_SIZE                  \
+    ((uint32_t)(offsetof(SrPpuOverlayCaptureExchangeRequest, replacement) + \
+                sizeof(((SrPpuOverlayCaptureExchangeRequest *)0)          \
+                           ->replacement)))
+
+/* Mutable access to a host-owned output surface. The runner never transfers
+ * ownership. Writes must stay within byte_size. The runner's binding/view
+ * guarantee ends when the callback returns; the host buffer's owner may keep
+ * using its own storage afterward and is responsible for its lifetime. */
+typedef struct SrPpuWritableSurfaceView {
+    uint32_t flags;
+    uint32_t pixel_format;
+    uint8_t *data;
+    uint64_t byte_size;
+    uint64_t pitch_bytes;
+    uint32_t width_pixels;
+    uint32_t height_pixels;
+    int32_t origin_x;
+    int32_t origin_y;
+    uint32_t scale;
+    uint32_t reserved;
+} SrPpuWritableSurfaceView;
+
+/* One coherent callback-lifetime view for frame-critical enhancement policy.
+ * It deliberately exposes values and bounded borrows rather than a concrete
+ * PPU layout. Nested synchronous PPU services may use lifetime_generation.
+ * Borrowed emulated-memory pointers may not be retained after the callback.
+ * A writable surface pointer may be retained only by the owner of that host
+ * buffer; it carries no runner validity or ownership after return. */
+typedef struct SrPpuFrameTransactionContext {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t lifetime_generation;
+    SrPpuStateSnapshot state;
+    SrPpuFrameSnapshot frame;
+    SrBorrowedU16Span cgram;
+    SrBorrowedU16Span oam;
+    SrBorrowedSpan high_oam;
+    SrPpuWritableSurfaceView
+        overlays[SR_PPU_OVERLAY_SOURCE_COUNT];
+} SrPpuFrameTransactionContext;
+
+#define SR_PPU_FRAME_TRANSACTION_CONTEXT_V2_SIZE                         \
+    ((uint32_t)(offsetof(SrPpuFrameTransactionContext, overlays) +        \
+                sizeof(((SrPpuFrameTransactionContext *)0)->overlays)))
+
+typedef SrResult (*SrPpuFrameTransactionCallback)(
+    void *user_data, SrRunnerHandle *runner,
+    const SrPpuFrameTransactionContext *context);
+
+typedef struct SrPpuFrameTransactionRequest {
+    uint32_t struct_size;
+    uint32_t flags;
+    SrPpuFrameTransactionCallback callback;
+    void *user_data;
+} SrPpuFrameTransactionRequest;
+
+#define SR_PPU_FRAME_TRANSACTION_REQUEST_V2_SIZE                         \
+    ((uint32_t)(offsetof(SrPpuFrameTransactionRequest, user_data) +       \
+                sizeof(((SrPpuFrameTransactionRequest *)0)->user_data)))
+
+/* One sparse, host-native VRAM word replacement. Transactions compare every
+ * expected value before applying any replacement, so a game-side producer
+ * cannot be partially overwritten. Word addresses use the SNES VRAM word
+ * convention (0..$7fff), not byte addresses. */
+typedef struct SrPpuVramWordPatch {
+    uint16_t word_address;
+    uint16_t expected;
+    uint16_t replacement;
+    uint16_t reserved;
+} SrPpuVramWordPatch;
+
+#define SR_PPU_VRAM_PATCH_MAX_WORDS 4096u
+/* Promise that word_address values are strictly increasing. The runner still
+ * validates the order, but can prove uniqueness without scratch initialization. */
+#define SR_PPU_VRAM_PATCH_ADDRESSES_SORTED UINT32_C(0x00000001)
+
+typedef struct SrPpuVramPatchRequest {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t lifetime_generation;
+    const SrPpuVramWordPatch *patches;
+    uint32_t patch_count;
+    uint32_t reserved;
+} SrPpuVramPatchRequest;
+
+#define SR_PPU_VRAM_PATCH_REQUEST_V2_SIZE                               \
+    ((uint32_t)(offsetof(SrPpuVramPatchRequest, reserved) +               \
+                sizeof(((SrPpuVramPatchRequest *)0)->reserved)))
+
+/* Exact screen coordinates supplement the lossy 9-bit/8-bit OAM encoding for
+ * renderers that expose pixels beyond the native viewport. Updates are
+ * synchronous derived-renderer metadata: they do not mutate emulated memory
+ * or advance the runner lifetime generation. Each request is validated in
+ * full before any clear or update is applied. */
+#define SR_PPU_OBJ_POSITION_CAMERA_RELATIVE UINT8_C(0x01)
+
+typedef struct SrPpuObjPositionUpdate {
+    int16_t x;
+    int16_t y;
+    uint8_t slot;
+    uint8_t flags;
+    uint16_t reserved;
+} SrPpuObjPositionUpdate;
+
+#define SR_PPU_OBJ_POSITION_UPDATE_MAX 128u
+#define SR_PPU_OBJ_METADATA_CLEAR_POSITIONS UINT32_C(0x00000001)
+#define SR_PPU_OBJ_METADATA_CLEAR_CAMERA_RELATIVE UINT32_C(0x00000002)
+
+typedef struct SrPpuObjMetadataRequest {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t lifetime_generation;
+    const SrPpuObjPositionUpdate *updates;
+    uint32_t update_count;
+    uint32_t reserved;
+} SrPpuObjMetadataRequest;
+
+#define SR_PPU_OBJ_METADATA_REQUEST_V2_SIZE                              \
+    ((uint32_t)(offsetof(SrPpuObjMetadataRequest, reserved) +             \
+                sizeof(((SrPpuObjMetadataRequest *)0)->reserved)))
+
+/* Frame-scoped background limits. DEFAULT replaces a layer's four default
+ * extents and seeds every visible row's horizontal values. HORIZONTAL_BAND
+ * replaces only [y0,y1) for that layer. The runner validates the complete
+ * ordered update list before applying any entry. */
+#define SR_PPU_LAYER_EXTENT_AVAILABLE UINT32_C(0x0000ffff)
+
+typedef uint32_t SrPpuLayerExtentKind;
+enum {
+    SR_PPU_LAYER_EXTENT_DEFAULT = 1u,
+    SR_PPU_LAYER_EXTENT_HORIZONTAL_BAND = 2u
+};
+
+typedef struct SrPpuLayerExtentUpdate {
+    SrPpuLayerExtentKind kind;
+    uint32_t layer;
+    uint32_t y0;
+    uint32_t y1;
+    uint32_t left;
+    uint32_t right;
+    uint32_t top;
+    uint32_t bottom;
+} SrPpuLayerExtentUpdate;
+
+#define SR_PPU_LAYER_EXTENT_UPDATE_MAX 32u
+
+typedef struct SrPpuLayerExtentRequest {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t lifetime_generation;
+    const SrPpuLayerExtentUpdate *updates;
+    uint32_t update_count;
+    uint32_t reserved;
+} SrPpuLayerExtentRequest;
+
+#define SR_PPU_LAYER_EXTENT_REQUEST_V2_SIZE                              \
+    ((uint32_t)(offsetof(SrPpuLayerExtentRequest, reserved) +             \
+                sizeof(((SrPpuLayerExtentRequest *)0)->reserved)))
+
+/* Finite-world tile providers are retained until the next replacement,
+ * runner reset, or lifetime invalidation. Callback output pointers are valid
+ * only until the provider's next span callback. Scalar lookup is mandatory;
+ * span and priority-band lookup are optional fast paths. */
+typedef uint32_t (*SrPpuVirtualTileLookup)(
+    void *user_data, int32_t tile_x, int32_t tile_y, uint16_t *entry);
+typedef uint32_t (*SrPpuVirtualTileSpanLookup)(
+    void *user_data, int32_t tile_x, int32_t tile_y, int32_t tile_step,
+    uint32_t capacity, const uint16_t **entries, int64_t *word_stride);
+typedef uint32_t (*SrPpuVirtualTileBandLookup)(
+    void *user_data, int32_t tile_x, int32_t tile_y, uint16_t entry,
+    uint8_t *band);
+
+#define SR_PPU_VIRTUAL_TILEMAP_INCLUDE_AUTHENTIC UINT32_C(0x00000001)
+
+typedef struct SrPpuVirtualTilemapBinding {
+    SrPpuVirtualTileLookup lookup;
+    SrPpuVirtualTileSpanLookup lookup_span;
+    SrPpuVirtualTileBandLookup band_lookup;
+    void *user_data;
+    int32_t camera_x;
+    int32_t camera_y;
+    uint32_t hscroll_anchor;
+    uint32_t vscroll_anchor;
+    uint32_t flags;
+    uint32_t reserved;
+} SrPpuVirtualTilemapBinding;
+
+typedef struct SrPpuVirtualTilemapRequest {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t lifetime_generation;
+    uint32_t layer_mask;
+    uint32_t reserved;
+    SrPpuVirtualTilemapBinding bindings[2];
+} SrPpuVirtualTilemapRequest;
+
+#define SR_PPU_VIRTUAL_TILEMAP_REQUEST_V2_SIZE                           \
+    ((uint32_t)(offsetof(SrPpuVirtualTilemapRequest, bindings) +          \
+                sizeof(((SrPpuVirtualTilemapRequest *)0)->bindings)))
+
+#define SR_PPU_AUTHENTIC_CAMERA_CLEAR UINT32_C(0x00000001)
+#define SR_PPU_AUTHENTIC_CAMERA_BG1 UINT32_C(0x00000001)
+#define SR_PPU_AUTHENTIC_CAMERA_BG2 UINT32_C(0x00000002)
+#define SR_PPU_AUTHENTIC_CAMERA_ALL                                     \
+    (SR_PPU_AUTHENTIC_CAMERA_BG1 | SR_PPU_AUTHENTIC_CAMERA_BG2)
+
+/* Selected horizontal-scroll arrays are copied synchronously. A clear-only
+ * request has layer_mask zero and null arrays. */
+typedef struct SrPpuAuthenticCameraRequest {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t lifetime_generation;
+    uint32_t layer_mask;
+    uint32_t row_count;
+    const uint16_t *bg1_hscroll;
+    const uint16_t *bg2_hscroll;
+    int32_t object_offset_x;
+    uint32_t reserved;
+} SrPpuAuthenticCameraRequest;
+
+#define SR_PPU_AUTHENTIC_CAMERA_REQUEST_V2_SIZE                          \
+    ((uint32_t)(offsetof(SrPpuAuthenticCameraRequest, reserved) +         \
+                sizeof(((SrPpuAuthenticCameraRequest *)0)->reserved)))
+
+/* Synchronous native scanout. The runner owns PPU line execution, HDMA
+ * advancement, margin hold-first/hold-last rendering, and vertical IRQ
+ * scheduling. irq_callback is required and owns only the recompiled CPU's IRQ
+ * handler. Optional line callbacks are for diagnostics and receive
+ * callback-lifetime, zero-copy surface views; normal frames should leave them
+ * null. */
+#define SR_PPU_SCANOUT_LINE_BEFORE UINT32_C(0x00000001)
+#define SR_PPU_SCANOUT_LINE_AFTER_HDMA UINT32_C(0x00000002)
+#define SR_PPU_SCANOUT_HDMA_ACTIVE UINT32_C(0x00000001)
+#define SR_PPU_SCANOUT_HDMA_INDIRECT UINT32_C(0x00000002)
+
+typedef struct SrPpuScanoutHdmaState {
+    uint32_t flags;
+    uint8_t repeat_count;
+    uint8_t mode;
+    uint8_t b_address;
+    uint8_t indirect_bank;
+} SrPpuScanoutHdmaState;
+
+typedef struct SrPpuScanoutLineContext {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t lifetime_generation;
+    uint32_t line;
+    uint32_t channel_count;
+    SrPpuStateSnapshot state;
+    SrPpuSurfaceView main_surface;
+    SrPpuSurfaceView authentic_surface;
+    SrPpuScanoutHdmaState channels[SR_DMA_CHANNEL_COUNT];
+} SrPpuScanoutLineContext;
+
+#define SR_PPU_SCANOUT_LINE_CONTEXT_V2_SIZE                              \
+    ((uint32_t)(offsetof(SrPpuScanoutLineContext, channels) +             \
+                sizeof(((SrPpuScanoutLineContext *)0)->channels)))
+
+typedef void (*SrPpuScanoutLineCallback)(
+    void *user_data, const SrPpuScanoutLineContext *context);
+typedef void (*SrPpuScanoutIrqCallback)(void *user_data, uint32_t line);
+
+typedef struct SrPpuScanoutRequest {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t lifetime_generation;
+    uint32_t hdma_channel_mask;
+    uint32_t reserved;
+    SrPpuScanoutLineCallback line_callback;
+    SrPpuScanoutIrqCallback irq_callback;
+    void *user_data;
+} SrPpuScanoutRequest;
+
+#define SR_PPU_SCANOUT_REQUEST_V2_SIZE                                   \
+    ((uint32_t)(offsetof(SrPpuScanoutRequest, user_data) +                \
+                sizeof(((SrPpuScanoutRequest *)0)->user_data)))
+
+#define SR_PPU_SCANOUT_AUTHENTIC_SURFACE_READY UINT32_C(0x00000001)
+#define SR_PPU_SCANOUT_AUTHENTIC_CAMERA_BG1 UINT32_C(0x00000002)
+#define SR_PPU_SCANOUT_AUTHENTIC_CAMERA_BG2 UINT32_C(0x00000004)
+
+typedef struct SrPpuScanoutResult {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t lifetime_generation;
+    SrPpuStateSnapshot final_state;
+} SrPpuScanoutResult;
+
+#define SR_PPU_SCANOUT_RESULT_V2_SIZE                                    \
+    ((uint32_t)(offsetof(SrPpuScanoutResult, final_state) +               \
+                sizeof(((SrPpuScanoutResult *)0)->final_state)))
 
 typedef struct SrPpuMode7OverrideRequest {
     uint32_t struct_size;
@@ -1066,6 +1456,33 @@ typedef struct SnesRunnerApi {
         SrSpcPcControlResult *out_result);
     SrResult (*configure_audio_mix)(SrRunnerHandle *runner,
                                     const SrAudioMixControl *control);
+    SrResult (*visit_ppu_frame_transaction)(
+        SrRunnerHandle *runner,
+        const SrPpuFrameTransactionRequest *request);
+    SrResult (*compare_exchange_ppu_overlay_captures)(
+        SrRunnerHandle *runner,
+        const SrPpuOverlayCaptureExchangeRequest *request);
+    SrResult (*compare_exchange_ppu_vram_words)(
+        SrRunnerHandle *runner,
+        const SrPpuVramPatchRequest *request);
+    SrResult (*update_ppu_obj_metadata)(
+        SrRunnerHandle *runner,
+        const SrPpuObjMetadataRequest *request);
+    SrResult (*query_dma_state)(SrRunnerHandle *runner,
+                                SrDmaStateSnapshot *out_state);
+    SrResult (*update_ppu_layer_extents)(
+        SrRunnerHandle *runner,
+        const SrPpuLayerExtentRequest *request);
+    SrResult (*replace_ppu_virtual_tilemaps)(
+        SrRunnerHandle *runner,
+        const SrPpuVirtualTilemapRequest *request);
+    SrResult (*update_ppu_authentic_camera)(
+        SrRunnerHandle *runner,
+        const SrPpuAuthenticCameraRequest *request);
+    SrResult (*run_ppu_scanout)(
+        SrRunnerHandle *runner,
+        const SrPpuScanoutRequest *request,
+        SrPpuScanoutResult *out_result);
 } SnesRunnerApi;
 
 #define SNES_RUNNER_API_V2_BASE_SIZE                                           \
@@ -1138,6 +1555,33 @@ typedef struct SnesRunnerApi {
 #define SNES_RUNNER_API_AUDIO_MIX_CONTROL_SIZE                           \
     ((uint32_t)(offsetof(SnesRunnerApi, configure_audio_mix) +            \
                 sizeof(((SnesRunnerApi *)0)->configure_audio_mix)))
+
+#define SNES_RUNNER_API_PPU_FRAME_TRANSACTION_SIZE                       \
+    ((uint32_t)(offsetof(SnesRunnerApi,                                  \
+                         compare_exchange_ppu_overlay_captures) +         \
+                sizeof(((SnesRunnerApi *)0)                              \
+                           ->compare_exchange_ppu_overlay_captures)))
+
+#define SNES_RUNNER_API_PPU_VRAM_PATCH_SIZE                              \
+    ((uint32_t)(offsetof(SnesRunnerApi, compare_exchange_ppu_vram_words) + \
+                sizeof(((SnesRunnerApi *)0)                              \
+                           ->compare_exchange_ppu_vram_words)))
+
+#define SNES_RUNNER_API_PPU_OBJ_METADATA_SIZE                            \
+    ((uint32_t)(offsetof(SnesRunnerApi, update_ppu_obj_metadata) +         \
+                sizeof(((SnesRunnerApi *)0)->update_ppu_obj_metadata)))
+
+#define SNES_RUNNER_API_DMA_STATE_SIZE                                   \
+    ((uint32_t)(offsetof(SnesRunnerApi, query_dma_state) +                \
+                sizeof(((SnesRunnerApi *)0)->query_dma_state)))
+
+#define SNES_RUNNER_API_PPU_BACKGROUND_POLICY_SIZE                       \
+    ((uint32_t)(offsetof(SnesRunnerApi, update_ppu_authentic_camera) +    \
+                sizeof(((SnesRunnerApi *)0)->update_ppu_authentic_camera)))
+
+#define SNES_RUNNER_API_PPU_SCANOUT_SIZE                                 \
+    ((uint32_t)(offsetof(SnesRunnerApi, run_ppu_scanout) +                \
+                sizeof(((SnesRunnerApi *)0)->run_ppu_scanout)))
 
 typedef struct SrRunnerDescriptor {
     uint32_t abi_version;

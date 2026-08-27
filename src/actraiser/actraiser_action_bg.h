@@ -7,9 +7,8 @@
 
 #include "action/action_bg_plan.h"
 #include "action/action_bg_world.h"
+#include "runner_next.h"
 
-struct Ppu;
-struct Dma;
 struct DioramaRoomOverride;
 struct ActionRoomScene;
 struct ActionRoomSceneFrameState;
@@ -172,15 +171,25 @@ void ActRaiserActionBg_ResolveVerticalMargins(
 /* Capture the complete action-background decision record and build its pure
  * plan plus the mechanical generic-PPU projection. No renderer state changes. */
 bool ActRaiserActionBg_BuildPlan(
-    const uint8_t *wram, size_t wram_size, const struct Ppu *ppu,
+    const uint8_t *wram, size_t wram_size,
+    const SrPpuStateSnapshot *ppu,
     bool decorative_padding_enabled, ActionBgPlan *plan,
     ActionBgPresentationPolicy *presentation);
 
-/* Resolve a validated plan's extent inheritance into the generic runtime PPU
- * caps. Call after PpuSetExtraSpace, which resets the frame-scoped caps.
- * Source selection and edge strategy remain separate seams. */
+/* Capture one coherent public PPU snapshot and build the same pure plan. */
+bool ActRaiserActionBg_BuildCurrentPlan(
+    const uint8_t *wram, size_t wram_size,
+    bool decorative_padding_enabled, ActionBgPlan *plan,
+    ActionBgPresentationPolicy *presentation);
+
+/* Resolve a validated plan's extent inheritance into generic renderer caps.
+ * Call after the frame's horizontal-margin reset. Source selection and edge
+ * strategy remain separate seams. */
 bool ActRaiserActionBg_ApplyPlanExtents(
-    const ActionBgPlan *plan, struct Ppu *ppu);
+    const ActionBgPlan *plan);
+
+/* Bind the opaque runner used by the frame-scoped adapter services. */
+void ActRaiserActionBg_BindRunner(SrRunnerHandle *runner);
 
 /* Production provider gate shared with presentation-aware camera policy.
  * Default-on; AR_ACTION_BG_HLE=0 is the exact native control. Keeping the
@@ -226,7 +235,8 @@ bool ActRaiserActionBg_UpdateWorldFromRoomScene(
  * registers that are about to render it. Row 0 additionally checks the stable
  * video-profile registers. This is pure and never changes PPU state. */
 bool ActRaiserActionBg_CompareRoomSceneFrameLine(
-    const struct ActionRoomSceneFrameState *state, const struct Ppu *ppu,
+    const struct ActionRoomSceneFrameState *state,
+    const SrPpuStateSnapshot *ppu,
     unsigned output_y,
     ActRaiserActionRoomSceneFrameCompareResult *result);
 
@@ -235,10 +245,10 @@ bool ActRaiserActionBg_CompareRoomSceneFrameLine(
  * before ppu_runLine(N + 1). Both calls are inert unless
  * AR_ACTION_ROOM_SCENE_COMPARE=1. */
 void ActRaiserActionBg_BeginRoomSceneFrame(
-    const uint8_t *wram, size_t wram_size, struct Ppu *ppu,
-    const struct Dma *dma);
+    const uint8_t *wram, size_t wram_size);
 void ActRaiserActionBg_ObserveRoomSceneFrameLine(
-    const struct Ppu *ppu, unsigned output_y);
+    const SrPpuStateSnapshot *ppu, unsigned output_y);
+bool ActRaiserActionBg_RoomSceneFrameObserverActive(void);
 
 /* Default-on BH7 renderer adapter. Unless `AR_ACTION_BG_HLE=0`, publish and
  * bind every plan layer whose source is a finite world map. The publication
@@ -250,8 +260,7 @@ void ActRaiserActionBg_ObserveRoomSceneFrameLine(
  * always clears prior bindings first, so a rejected or disabled frame fails
  * closed. */
 uint8_t ActRaiserActionBg_BindPlan(
-    const uint8_t *wram, size_t wram_size, const ActionBgPlan *plan,
-    struct Ppu *ppu);
+    const uint8_t *wram, size_t wram_size, const ActionBgPlan *plan);
 
 /* Diorama render-only variant. `virtual_room` is the base action-room record
  * authored by the standalone editor; NULL preserves the authentic priority
@@ -259,13 +268,12 @@ uint8_t ActRaiserActionBg_BindPlan(
  * the native PPU composition. */
 uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
     const uint8_t *wram, size_t wram_size, const ActionBgPlan *plan,
-    const struct DioramaRoomOverride *virtual_room, struct Ppu *ppu);
+    const struct DioramaRoomOverride *virtual_room);
 
 /* Default-off frame observer. `AR_ACTION_BG_HLE_COMPARE=1` enables it; it only
  * reads WRAM/PPU state and publishes into a private diagnostic world. It never
  * binds or republishes a renderer provider and never mutates emulated memory. */
-void ActRaiserActionBg_ObserveFrame(const uint8_t *wram, size_t wram_size,
-                                    const struct Ppu *ppu);
+void ActRaiserActionBg_ObserveFrame(const uint8_t *wram, size_t wram_size);
 void ActRaiserActionBg_Reset(void);
 void ActRaiserActionBg_Shutdown(void);
 const ActRaiserActionBgDiagnostics *ActRaiserActionBg_GetDiagnostics(void);

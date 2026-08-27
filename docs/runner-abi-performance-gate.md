@@ -11,6 +11,13 @@ inputs and measures four representative workload shapes:
 | `aitos_wide` | 4,000 | wide action mode, scrolling, and background HLE |
 | `death_heim_wide` | 4,000 | late-game action, effects, and wide margins |
 
+`sky_palace_wide` is an opt-in 1,200-frame workload for the active Sky Palace
+margin patch/restore path. It uses the same `fillmore-r1-natural.rec` replay
+with a 16:10 square-pixel framebuffer. It is deliberately not part of the
+default four-workload suite, preserving comparability with stored historical
+baselines; select it explicitly with `--workload sky_palace_wide` when a phase
+touches that seam.
+
 The primary gate is a release build with `SNESRECOMP_ENABLE_SIMD=OFF`.  This
 keeps an ABI change honest on platforms without a specialized implementation.
 A normal `ON` build is the secondary guardrail for the current host's shipping
@@ -292,6 +299,109 @@ adjacent baseline/candidate pairs measured:
 
 Paired records are `runner-abi-sim-atlas-portable.json` and
 `runner-abi-sim-atlas-native.json` outside the source tree.
+
+Migrating the separated SIM capture from retained concrete PPU access to one
+coherent callback-lifetime transaction retained every replay artifact hash.
+CGRAM and OAM stay zero-copy, caller-owned plane storage remains directly
+bound, and all selected capture policies are exchanged atomically and restored
+exactly after scanout. Seven adjacent baseline/candidate pairs measured:
+
+| Workload | Portable | Native-SIMD |
+| --- | ---: | ---: |
+| `mode7_worldmap` | +0.71% | -0.83% |
+| `sim_actions` | +0.46% | -0.50% |
+| `aitos_wide` | +0.18% | -0.68% |
+| `death_heim_wide` | +0.94% | -1.19% |
+| **Suite geometric mean** | **+0.57%** | **-0.80%** |
+
+The portable movement remains below 1% in every workload. The native result
+moves in the opposite direction across all four workloads, consistent with
+ordinary code-layout sensitivity around a small active-SIM transaction rather
+than broad per-frame overhead. Paired records are
+`runner-abi-sim-capture-portable-final.json` and
+`runner-abi-sim-capture-native-final.json` outside the source tree.
+
+Migrating the render-only Sky Palace repair to a bounded sparse VRAM
+compare/exchange retained every replay artifact hash. The service checks all
+expected values before writing any replacement, and the adapter restores only
+words that still hold its temporary value. Sorted-address validation avoids a
+per-transaction duplicate-detection clear. Seven adjacent baseline/candidate
+pairs measured:
+
+| Workload | Portable | Native-SIMD |
+| --- | ---: | ---: |
+| `mode7_worldmap` | -0.23% | +0.48% |
+| `sim_actions` | +0.22% | +0.00% |
+| `aitos_wide` | +0.49% | +0.56% |
+| `death_heim_wide` | +0.72% | +0.66% |
+| **Suite geometric mean** | **+0.30%** | **+0.43%** |
+
+The opt-in `sky_palace_wide` adjacent run, which executes the transaction from
+gf276 onward, measured +2.15% portable and +0.79% native-SIMD. That focused
+portable movement was already measured with the required adjacent A/B method
+and remains below the 3% suite threshold and 5% per-workload threshold. Paired
+records are `runner-abi-sky-vram-{portable,native}-final.json` and
+`runner-abi-sky-vram-targeted-{portable,native}.json` outside the source tree.
+
+Migrating widescreen exact-position and camera-relative OBJ metadata to a
+validated batched ABI retained every replay artifact hash. Action mode makes
+one clear and one bounded publish per object scan; SIM mode reuses its coherent
+PPU snapshot and publishes at most once per source record. Seven alternating
+adjacent baseline/candidate pairs measured:
+
+| Workload | Portable | Native-SIMD |
+| --- | ---: | ---: |
+| `mode7_worldmap` | -0.28% | -0.11% |
+| `sim_actions` | -0.25% | -0.25% |
+| `aitos_wide` | -0.76% | -0.84% |
+| `death_heim_wide` | -0.23% | -0.26% |
+| **Suite geometric mean** | **-0.38%** | **-0.37%** |
+
+All movements favor the candidate and every final WRAM, SRAM, CPU-state, and
+dispatch artifact hash matches. Paired records are
+`runner-abi-obj-metadata-{portable,native}-final.json` outside the source tree.
+
+Migrating action-background policy from concrete PPU/DMA access to fixed-width
+DMA snapshots, bounded extent batches, atomic virtual-provider replacement,
+and authentic-camera publication retained every replay artifact hash. Virtual
+tile spans and preflight VRAM remain zero-copy. Seven alternating adjacent
+baseline/candidate pairs measured:
+
+| Workload | Portable | Native-SIMD |
+| --- | ---: | ---: |
+| `mode7_worldmap` | -0.66% | +1.17% |
+| `sim_actions` | -0.90% | +0.75% |
+| `aitos_wide` | +0.60% | +0.19% |
+| `death_heim_wide` | -0.61% | +0.95% |
+| **Suite geometric mean** | **-0.39%** | **+0.76%** |
+
+The native movement is distributed across active and inactive workloads and
+never exceeds 1.17%, while the portable target improves overall. Eleven
+GPU-backed Fillmore frames from gf1100 through gf2100 match the frozen
+reference pixels exactly, as do final WRAM, SRAM, CPU state, and dispatch
+artifacts. Paired records are
+`runner-abi-action-bg-{portable,native}-final.json` outside the source tree.
+
+Moving synchronous PPU scanout into the runner retained the exact line order,
+all eight HDMA channels, hold-first/hold-last vertical margins, and vertical
+IRQ handoff while removing the game's concrete per-line loop. Optional
+diagnostics receive callback-lifetime state and zero-copy surface views; normal
+frames do not take the line callback. Seven alternating adjacent
+baseline/candidate pairs measured:
+
+| Workload | Portable | Native-SIMD |
+| --- | ---: | ---: |
+| `mode7_worldmap` | +0.41% | -1.26% |
+| `sim_actions` | +0.17% | -1.58% |
+| `aitos_wide` | -0.45% | -0.31% |
+| `death_heim_wide` | +0.08% | -0.64% |
+| **Suite geometric mean** | **+0.05%** | **-0.95%** |
+
+Every replay artifact hash matches. The portable result is neutral, while all
+four native-host workloads improve. Eleven GPU-backed Fillmore frames from
+gf1100 through gf2100 and the final WRAM, SRAM, state, and dispatch log also
+match the frozen pre-scanout reference byte-for-byte. Paired records are
+`runner-abi-scanout-{portable,native}-final.json` outside the source tree.
 
 ## Phase acceptance
 

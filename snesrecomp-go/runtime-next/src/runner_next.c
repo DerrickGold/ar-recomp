@@ -1,6 +1,7 @@
 #include "runner_next.h"
 
 #include "runner_next_internal.h"
+#include "runtime_constants.h"
 #include "snes/apu.h"
 #include "snes/cart.h"
 #include "snes/dma.h"
@@ -78,6 +79,8 @@ static SrRunnerPpuObjResolveProvider *s_ppu_obj_resolve_provider;
 static Snes *s_ppu_obj_resolve_runner;
 static SrRunnerPpuObjPartsRasterProvider *s_ppu_obj_parts_raster_provider;
 static Snes *s_ppu_obj_parts_raster_runner;
+static SrRunnerPpuScanoutProvider *s_ppu_scanout_provider;
+static Snes *s_ppu_scanout_runner;
 static Snes *s_ppu_owner_runner;
 static Ppu *s_owned_ppu;
 
@@ -939,6 +942,13 @@ static SrResult query_ppu_state(SrRunnerHandle *runner,
     out_state->margin_bottom = ppu->extraBottomCur;
     out_state->object_tile_base_1_word = (uint32_t)PPU_objTileAdr1(ppu);
     out_state->object_tile_base_2_word = (uint32_t)PPU_objTileAdr2(ppu);
+    out_state->object_small_size_pixels =
+        kPpuSpriteSizes[out_state->object_size_select][0];
+    out_state->object_large_size_pixels =
+        kPpuSpriteSizes[out_state->object_size_select][1];
+    out_state->renderer_flags =
+        PpuAuthenticSurfaceBound(ppu)
+            ? SR_PPU_RENDERER_AUTHENTIC_SURFACE_BOUND : 0u;
     for (layer = 0u; layer < 4u; ++layer) {
         SrPpuBackgroundState *background = &out_state->backgrounds[layer];
         background->h_scroll = ppu->hScroll[layer];
@@ -964,6 +974,49 @@ static SrResult query_ppu_state(SrRunnerHandle *runner,
     out_state->mode7_select = ppu->m7sel;
     memcpy(out_state->mode7_matrix, ppu->m7matrix,
            sizeof(out_state->mode7_matrix));
+    out_state->fixed_color = ppu->fixedColor;
+    return SR_RESULT_OK;
+}
+
+static SrResult query_dma_state(SrRunnerHandle *runner,
+                                SrDmaStateSnapshot *out_state) {
+    Snes *snes = runner_from_handle(runner);
+    Dma *dma;
+    unsigned channel;
+    if (snes == NULL || out_state == NULL ||
+        out_state->struct_size < SR_DMA_STATE_SNAPSHOT_V2_SIZE)
+        return SR_RESULT_INVALID_ARGUMENT;
+    memset(out_state, 0, SR_DMA_STATE_SNAPSHOT_V2_SIZE);
+    out_state->struct_size = SR_DMA_STATE_SNAPSHOT_V2_SIZE;
+    out_state->lifetime_generation = snes->abiLifetimeGeneration;
+    dma = snes->dma;
+    if (dma == NULL) return SR_RESULT_UNAVAILABLE;
+    out_state->flags = dma->dmaBusy ? SR_DMA_STATE_BUSY : 0u;
+    out_state->timer = dma->dmaTimer;
+    out_state->channel_count = SR_DMA_CHANNEL_COUNT;
+    _Static_assert(SR_DMA_CHANNEL_COUNT == kDmaChannelCount,
+                   "public ABI DMA channel count must match the runner");
+    for (channel = 0u; channel < SR_DMA_CHANNEL_COUNT; ++channel) {
+        const DmaChannel *source = &dma->channel[channel];
+        SrDmaChannelState *target = &out_state->channels[channel];
+        target->flags =
+            (source->dmaActive ? SR_DMA_CHANNEL_DMA_ACTIVE : 0u) |
+            (source->hdmaActive ? SR_DMA_CHANNEL_HDMA_ACTIVE : 0u) |
+            (source->fixed ? SR_DMA_CHANNEL_FIXED_A_BUS : 0u) |
+            (source->decrement ? SR_DMA_CHANNEL_DECREMENT_A_BUS : 0u) |
+            (source->indirect ? SR_DMA_CHANNEL_INDIRECT : 0u) |
+            (source->fromB ? SR_DMA_CHANNEL_FROM_B_BUS : 0u) |
+            (source->doTransfer ? SR_DMA_CHANNEL_TRANSFER_PENDING : 0u) |
+            (source->terminated ? SR_DMA_CHANNEL_TERMINATED : 0u);
+        target->a_address = source->aAdr;
+        target->transfer_size = source->size;
+        target->table_address = source->tableAdr;
+        target->a_bank = source->aBank;
+        target->b_address = source->bAdr;
+        target->indirect_bank = source->indBank;
+        target->mode = source->mode;
+        target->repeat_count = source->repCount;
+    }
     return SR_RESULT_OK;
 }
 
@@ -1123,6 +1176,8 @@ static SrResult query_ppu_frame_state(SrRunnerHandle *runner,
             ppu_overlay_fill_argb(ppu, capture);
         overlay->transparent_fill_configured =
             capture->transparentFillConfigured != 0u ? 1u : 0u;
+        overlay->transparent_fill_mode = capture->transparentFillMode;
+        overlay->transparent_fill_cgram = capture->transparentFillCgram;
         overlay->oam_first = capture->oamFirst;
         overlay->oam_count = capture->oamCount;
     }
@@ -1244,6 +1299,555 @@ static Ppu *ppu_output_control_target(Snes *snes) {
     if (snes == NULL || snes->ppu == NULL || s_ppu_owner_runner != snes ||
         s_owned_ppu != snes->ppu) return NULL;
     return snes->ppu;
+}
+
+static void ppu_writable_surface_view_init(
+        SrPpuWritableSurfaceView *view, uint8_t *data, uint32_t pitch,
+        uint32_t height, int32_t origin_x, int32_t origin_y,
+        bool has_content) {
+    if (view == NULL || data == NULL || pitch == 0u || height == 0u ||
+        pitch % sizeof(uint32_t) != 0u) return;
+    view->flags = SR_PPU_SURFACE_BOUND |
+        (has_content ? SR_PPU_SURFACE_HAS_CONTENT : 0u);
+    view->pixel_format = SR_PPU_PIXEL_FORMAT_ARGB8888_U32;
+    view->data = data;
+    view->byte_size = (uint64_t)pitch * height;
+    view->pitch_bytes = pitch;
+    view->width_pixels = pitch / (uint32_t)sizeof(uint32_t);
+    view->height_pixels = height;
+    view->origin_x = origin_x;
+    view->origin_y = origin_y;
+    view->scale = 1u;
+}
+
+static SrResult visit_ppu_frame_transaction(
+        SrRunnerHandle *runner,
+        const SrPpuFrameTransactionRequest *request) {
+    Snes *snes = runner_from_handle(runner);
+    SrPpuFrameTransactionContext context;
+    Ppu *ppu;
+    SrResult result;
+    unsigned source;
+    if (snes == NULL || request == NULL ||
+        request->struct_size < SR_PPU_FRAME_TRANSACTION_REQUEST_V2_SIZE ||
+        request->flags != 0u || request->callback == NULL)
+        return SR_RESULT_INVALID_ARGUMENT;
+    ppu = ppu_output_control_target(snes);
+    if (ppu == NULL) return SR_RESULT_UNAVAILABLE;
+
+    memset(&context, 0, sizeof(context));
+    context.struct_size = SR_PPU_FRAME_TRANSACTION_CONTEXT_V2_SIZE;
+    context.lifetime_generation = snes->abiLifetimeGeneration;
+    context.state.struct_size = SR_PPU_STATE_SNAPSHOT_V2_SIZE;
+    context.frame.struct_size = SR_PPU_FRAME_SNAPSHOT_V2_SIZE;
+    context.cgram.struct_size = SR_BORROWED_U16_SPAN_V2_SIZE;
+    context.oam.struct_size = SR_BORROWED_U16_SPAN_V2_SIZE;
+    context.high_oam.struct_size = SR_BORROWED_SPAN_V2_SIZE;
+    result = query_ppu_state(runner, &context.state);
+    if (result != SR_RESULT_OK) return result;
+    result = query_ppu_frame_state(runner, &context.frame);
+    if (result != SR_RESULT_OK) return result;
+    result = borrow_u16_memory(runner, SR_MEMORY_CGRAM, &context.cgram);
+    if (result != SR_RESULT_OK) return result;
+    result = borrow_u16_memory(runner, SR_MEMORY_OAM, &context.oam);
+    if (result != SR_RESULT_OK) return result;
+    result = borrow_memory(runner, SR_MEMORY_HIGH_OAM, &context.high_oam);
+    if (result != SR_RESULT_OK) return result;
+    for (source = 0u; source < SR_PPU_OVERLAY_SOURCE_COUNT; ++source) {
+        const PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
+        uint32_t height = ppu->overlayRenderHeight[source] != 0u
+            ? ppu->overlayRenderHeight[source]
+            : ppu_overlay_surface_height(capture);
+        int32_t origin_y = capture->y0 < 0 ? -capture->y0 : 0;
+        ppu_writable_surface_view_init(
+            &context.overlays[source], ppu->overlayRenderBuffer[source],
+            ppu->overlayRenderPitch[source], height,
+            PpuSurfaceApron(ppu, ppu->overlayRenderPitch[source]) +
+                ppu->extraLeftRight,
+            origin_y,
+            (ppu->overlayRenderContentMask[source] & 1u) != 0u);
+    }
+    return request->callback(request->user_data, runner, &context);
+}
+
+static bool ppu_capture_state_valid(
+        const SrPpuOverlayCaptureState *state, unsigned source) {
+    bool empty;
+    if (state == NULL || source >= SR_PPU_OVERLAY_SOURCE_COUNT)
+        return false;
+    empty = state->x0 == 0 && state->x1 == 0 &&
+        state->y0 == 0 && state->y1 == 0;
+    if (
+        (state->flags & ~SR_PPU_OVERLAY_FLAGS_SUPPORTED) != 0u ||
+        state->transparent_fill_configured > 1u ||
+        state->transparent_fill_mode > SR_PPU_TRANSPARENT_FILL_CGRAM ||
+        state->reserved8[0] != 0u || state->reserved8[1] != 0u ||
+        state->reserved8[2] != 0u)
+        return false;
+    if (!empty &&
+        (state->x1 <= state->x0 || state->y1 <= state->y0 ||
+         state->x0 < -(int32_t)SR_PPU_HORIZONTAL_MARGIN_MAX ||
+         state->x1 > (int32_t)(SR_PPU_NATIVE_WIDTH +
+                               SR_PPU_HORIZONTAL_MARGIN_MAX) ||
+         state->y0 < -(int32_t)SR_PPU_VERTICAL_MARGIN_MAX ||
+         state->y1 > (int32_t)(SR_PPU_NATIVE_HEIGHT +
+                               SR_PPU_VERTICAL_MARGIN_MAX)))
+        return false;
+    if (state->oam_count == 0u)
+        return state->oam_first == 0u;
+    return !empty && source == SR_PPU_OVERLAY_OBJ &&
+        state->oam_first < 128u && state->oam_count <=
+            128u - state->oam_first;
+}
+
+static void ppu_capture_state_from_internal(
+        SrPpuOverlayCaptureState *state,
+        const PpuOverlayCapture *capture) {
+    memset(state, 0, sizeof(*state));
+    state->x0 = capture->x0;
+    state->x1 = capture->x1;
+    state->y0 = capture->y0;
+    state->y1 = capture->y1;
+    state->flags = capture->flags;
+    state->transparent_fill_configured =
+        capture->transparentFillConfigured != 0u ? 1u : 0u;
+    state->transparent_fill_mode = capture->transparentFillMode;
+    state->transparent_fill_cgram = capture->transparentFillCgram;
+    state->oam_first = capture->oamFirst;
+    state->oam_count = capture->oamCount;
+}
+
+static bool ppu_capture_state_equal(
+        const SrPpuOverlayCaptureState *left,
+        const SrPpuOverlayCaptureState *right) {
+    return left->x0 == right->x0 && left->x1 == right->x1 &&
+        left->y0 == right->y0 && left->y1 == right->y1 &&
+        left->flags == right->flags &&
+        left->transparent_fill_configured ==
+            right->transparent_fill_configured &&
+        left->transparent_fill_mode == right->transparent_fill_mode &&
+        left->transparent_fill_cgram == right->transparent_fill_cgram &&
+        left->oam_first == right->oam_first &&
+        left->oam_count == right->oam_count;
+}
+
+static void ppu_capture_state_apply(
+        PpuOverlayCapture *capture,
+        const SrPpuOverlayCaptureState *state) {
+    capture->x0 = state->x0;
+    capture->x1 = state->x1;
+    capture->y0 = state->y0;
+    capture->y1 = state->y1;
+    capture->flags = (uint8_t)state->flags;
+    capture->transparentFillConfigured =
+        state->transparent_fill_configured;
+    capture->transparentFillMode = state->transparent_fill_mode;
+    capture->transparentFillCgram = state->transparent_fill_cgram;
+    capture->oamFirst = state->oam_first;
+    capture->oamCount = state->oam_count;
+}
+
+static SrResult compare_exchange_ppu_overlay_captures(
+        SrRunnerHandle *runner,
+        const SrPpuOverlayCaptureExchangeRequest *request) {
+    Snes *snes = runner_from_handle(runner);
+    Ppu *ppu;
+    const uint32_t valid_sources =
+        (UINT32_C(1) << SR_PPU_OVERLAY_SOURCE_COUNT) - 1u;
+    unsigned source;
+    if (snes == NULL || request == NULL ||
+        request->struct_size <
+            SR_PPU_OVERLAY_CAPTURE_EXCHANGE_REQUEST_V2_SIZE ||
+        request->flags != 0u || request->source_mask == 0u ||
+        (request->source_mask & ~valid_sources) != 0u ||
+        request->reserved != 0u)
+        return SR_RESULT_INVALID_ARGUMENT;
+    if (request->lifetime_generation != snes->abiLifetimeGeneration)
+        return SR_RESULT_STALE_VIEW;
+    ppu = ppu_output_control_target(snes);
+    if (ppu == NULL) return SR_RESULT_UNAVAILABLE;
+    _Static_assert(SR_PPU_TRANSPARENT_FILL_NONE ==
+                       kPpuOverlayTransparentFill_None &&
+                   SR_PPU_TRANSPARENT_FILL_BLACK ==
+                       kPpuOverlayTransparentFill_Black &&
+                   SR_PPU_TRANSPARENT_FILL_CGRAM ==
+                       kPpuOverlayTransparentFill_Cgram,
+                   "ABI transparent-fill values must match the PPU");
+    for (source = 0u; source < SR_PPU_OVERLAY_SOURCE_COUNT; ++source) {
+        SrPpuOverlayCaptureState current;
+        if ((request->source_mask & (UINT32_C(1) << source)) == 0u)
+            continue;
+        if (!ppu_capture_state_valid(&request->expected[source], source) ||
+            !ppu_capture_state_valid(&request->replacement[source], source))
+            return SR_RESULT_INVALID_ARGUMENT;
+        ppu_capture_state_from_internal(
+            &current, &ppu->overlayCaptures[source]);
+        if (!ppu_capture_state_equal(&current, &request->expected[source]))
+            return SR_RESULT_BUSY;
+    }
+    for (source = 0u; source < SR_PPU_OVERLAY_SOURCE_COUNT; ++source) {
+        if ((request->source_mask & (UINT32_C(1) << source)) != 0u)
+            ppu_capture_state_apply(
+                &ppu->overlayCaptures[source],
+                &request->replacement[source]);
+    }
+    return SR_RESULT_OK;
+}
+
+static SrResult compare_exchange_ppu_vram_words(
+        SrRunnerHandle *runner,
+        const SrPpuVramPatchRequest *request) {
+    Snes *snes = runner_from_handle(runner);
+    uint8_t seen[SR_PPU_VRAM_WORD_COUNT / 8u];
+    Ppu *ppu;
+    uint32_t index;
+    uint32_t previous_address = 0u;
+    bool addresses_sorted;
+    bool changed = false;
+    if (snes == NULL || request == NULL ||
+        request->struct_size < SR_PPU_VRAM_PATCH_REQUEST_V2_SIZE ||
+        (request->flags & ~SR_PPU_VRAM_PATCH_ADDRESSES_SORTED) != 0u ||
+        request->patches == NULL ||
+        request->patch_count == 0u ||
+        request->patch_count > SR_PPU_VRAM_PATCH_MAX_WORDS ||
+        request->reserved != 0u ||
+        ((uintptr_t)request->patches %
+         _Alignof(SrPpuVramWordPatch)) != 0u)
+        return SR_RESULT_INVALID_ARGUMENT;
+    if (request->lifetime_generation != snes->abiLifetimeGeneration)
+        return SR_RESULT_STALE_VIEW;
+    ppu = ppu_output_control_target(snes);
+    if (ppu == NULL) return SR_RESULT_UNAVAILABLE;
+
+    addresses_sorted =
+        (request->flags & SR_PPU_VRAM_PATCH_ADDRESSES_SORTED) != 0u;
+    if (!addresses_sorted) memset(seen, 0, sizeof(seen));
+    for (index = 0u; index < request->patch_count; ++index) {
+        const SrPpuVramWordPatch *patch = &request->patches[index];
+        uint32_t address = patch->word_address;
+        uint32_t byte = address >> 3;
+        uint8_t bit = (uint8_t)(1u << (address & 7u));
+        if (address >= SR_PPU_VRAM_WORD_COUNT || patch->reserved != 0u)
+            return SR_RESULT_INVALID_ARGUMENT;
+        if (addresses_sorted) {
+            if (index != 0u && address <= previous_address)
+                return SR_RESULT_INVALID_ARGUMENT;
+            previous_address = address;
+        } else {
+            if ((seen[byte] & bit) != 0u)
+                return SR_RESULT_INVALID_ARGUMENT;
+            seen[byte] |= bit;
+        }
+        if (ppu->vram[address] != patch->expected)
+            return SR_RESULT_BUSY;
+        changed |= patch->expected != patch->replacement;
+    }
+    if (!changed) return SR_RESULT_OK;
+
+    sr_runner_note_mutation(snes);
+    for (index = 0u; index < request->patch_count; ++index) {
+        const SrPpuVramWordPatch *patch = &request->patches[index];
+        uint32_t byte_address = (uint32_t)patch->word_address * 2u;
+        if (patch->expected == patch->replacement) continue;
+        ppu->vram[patch->word_address] = patch->replacement;
+        if (sr_runner_event_enabled(SR_EVENT_MASK_MEMORY_WRITE)) {
+            sr_runner_emit_memory_write(
+                snes, SR_MEMORY_VRAM, byte_address,
+                (uint8_t)patch->expected,
+                (uint8_t)patch->replacement, 1u);
+            sr_runner_emit_memory_write(
+                snes, SR_MEMORY_VRAM, byte_address + 1u,
+                (uint8_t)(patch->expected >> 8),
+                (uint8_t)(patch->replacement >> 8), 1u);
+        }
+    }
+    return SR_RESULT_OK;
+}
+
+static SrResult update_ppu_obj_metadata(
+        SrRunnerHandle *runner,
+        const SrPpuObjMetadataRequest *request) {
+    Snes *snes = runner_from_handle(runner);
+    uint8_t seen[SR_PPU_OBJ_POSITION_UPDATE_MAX / 8u] = {0};
+    const uint32_t supported_flags =
+        SR_PPU_OBJ_METADATA_CLEAR_POSITIONS |
+        SR_PPU_OBJ_METADATA_CLEAR_CAMERA_RELATIVE;
+    Ppu *ppu;
+    uint32_t index;
+    if (snes == NULL || request == NULL ||
+        request->struct_size < SR_PPU_OBJ_METADATA_REQUEST_V2_SIZE ||
+        (request->flags & ~supported_flags) != 0u ||
+        request->update_count > SR_PPU_OBJ_POSITION_UPDATE_MAX ||
+        (request->update_count == 0u && request->flags == 0u) ||
+        (request->update_count != 0u && request->updates == NULL) ||
+        (request->update_count == 0u && request->updates != NULL) ||
+        request->reserved != 0u ||
+        (request->updates != NULL &&
+         (uintptr_t)request->updates %
+             _Alignof(SrPpuObjPositionUpdate) != 0u))
+        return SR_RESULT_INVALID_ARGUMENT;
+    if (request->lifetime_generation != snes->abiLifetimeGeneration)
+        return SR_RESULT_STALE_VIEW;
+    ppu = ppu_output_control_target(snes);
+    if (ppu == NULL) return SR_RESULT_UNAVAILABLE;
+
+    /* Validate the entire batch before clears: malformed input cannot erase
+     * a prior producer's metadata or partially publish a replacement. */
+    for (index = 0u; index < request->update_count; ++index) {
+        const SrPpuObjPositionUpdate *update = &request->updates[index];
+        uint32_t byte;
+        uint8_t bit;
+        if (update->slot >= SR_PPU_OBJ_POSITION_UPDATE_MAX ||
+            (update->flags & ~SR_PPU_OBJ_POSITION_CAMERA_RELATIVE) != 0u ||
+            update->reserved != 0u)
+            return SR_RESULT_INVALID_ARGUMENT;
+        byte = update->slot >> 3;
+        bit = (uint8_t)(1u << (update->slot & 7u));
+        if ((seen[byte] & bit) != 0u)
+            return SR_RESULT_INVALID_ARGUMENT;
+        seen[byte] |= bit;
+    }
+
+    if ((request->flags & SR_PPU_OBJ_METADATA_CLEAR_POSITIONS) != 0u)
+        PpuClearObjExactPositions(ppu);
+    if ((request->flags &
+         SR_PPU_OBJ_METADATA_CLEAR_CAMERA_RELATIVE) != 0u)
+        PpuClearObjCameraRelative(ppu);
+    for (index = 0u; index < request->update_count; ++index) {
+        const SrPpuObjPositionUpdate *update = &request->updates[index];
+        PpuSetObjExactPosition(ppu, update->slot, update->x, update->y);
+        PpuSetObjCameraRelative(
+            ppu, update->slot,
+            (update->flags & SR_PPU_OBJ_POSITION_CAMERA_RELATIVE) != 0u);
+    }
+    return SR_RESULT_OK;
+}
+
+static SrResult update_ppu_layer_extents(
+        SrRunnerHandle *runner,
+        const SrPpuLayerExtentRequest *request) {
+    Snes *snes = runner_from_handle(runner);
+    Ppu *ppu;
+    uint32_t index;
+    uint8_t default_layers = 0u;
+    if (snes == NULL || request == NULL ||
+        request->struct_size < SR_PPU_LAYER_EXTENT_REQUEST_V2_SIZE ||
+        request->flags != 0u || request->updates == NULL ||
+        request->update_count == 0u ||
+        request->update_count > SR_PPU_LAYER_EXTENT_UPDATE_MAX ||
+        request->reserved != 0u ||
+        (uintptr_t)request->updates %
+            _Alignof(SrPpuLayerExtentUpdate) != 0u)
+        return SR_RESULT_INVALID_ARGUMENT;
+    if (request->lifetime_generation != snes->abiLifetimeGeneration)
+        return SR_RESULT_STALE_VIEW;
+    ppu = ppu_output_control_target(snes);
+    if (ppu == NULL) return SR_RESULT_UNAVAILABLE;
+
+    for (index = 0u; index < request->update_count; ++index) {
+        const SrPpuLayerExtentUpdate *update = &request->updates[index];
+        if (update->layer >= 4u ||
+            update->left > SR_PPU_LAYER_EXTENT_AVAILABLE ||
+            update->right > SR_PPU_LAYER_EXTENT_AVAILABLE ||
+            update->top > SR_PPU_LAYER_EXTENT_AVAILABLE ||
+            update->bottom > SR_PPU_LAYER_EXTENT_AVAILABLE)
+            return SR_RESULT_INVALID_ARGUMENT;
+        if (update->kind == SR_PPU_LAYER_EXTENT_DEFAULT) {
+            uint8_t bit = (uint8_t)(1u << update->layer);
+            if (update->y0 != 0u || update->y1 != 0u ||
+                (default_layers & bit) != 0u)
+                return SR_RESULT_INVALID_ARGUMENT;
+            default_layers |= bit;
+        } else if (update->kind ==
+                       SR_PPU_LAYER_EXTENT_HORIZONTAL_BAND) {
+            if (update->y0 >= update->y1 ||
+                update->y1 > SR_PPU_NATIVE_HEIGHT ||
+                update->top != 0u || update->bottom != 0u)
+                return SR_RESULT_INVALID_ARGUMENT;
+        } else {
+            return SR_RESULT_INVALID_ARGUMENT;
+        }
+    }
+    for (index = 0u; index < request->update_count; ++index) {
+        const SrPpuLayerExtentUpdate *update = &request->updates[index];
+        if (update->kind == SR_PPU_LAYER_EXTENT_DEFAULT) {
+            PpuSetWidescreenLayerExtent(
+                ppu, (uint8_t)update->layer,
+                (uint16_t)update->left, (uint16_t)update->right,
+                (uint16_t)update->top, (uint16_t)update->bottom);
+        } else {
+            PpuSetWidescreenLayerExtentBand(
+                ppu, (uint8_t)update->layer,
+                (uint8_t)update->y0, (uint8_t)update->y1,
+                (uint16_t)update->left, (uint16_t)update->right);
+        }
+    }
+    return SR_RESULT_OK;
+}
+
+static bool ppu_abi_virtual_lookup(const void *context, int32_t tile_x,
+                                   int32_t tile_y, uint16_t *entry) {
+    const SrPpuVirtualTilemapBinding *binding = context;
+    return binding != NULL && binding->lookup != NULL && entry != NULL &&
+        binding->lookup(binding->user_data, tile_x, tile_y, entry) != 0u;
+}
+
+static size_t ppu_abi_virtual_span_lookup(
+        const void *context, int32_t tile_x, int32_t tile_y,
+        int32_t tile_step, size_t capacity, const uint16_t **entries,
+        ptrdiff_t *word_stride) {
+    const SrPpuVirtualTilemapBinding *binding = context;
+    uint32_t abi_capacity;
+    uint32_t count;
+    int64_t abi_stride = 0;
+    if (entries != NULL) *entries = NULL;
+    if (word_stride != NULL) *word_stride = 0;
+    if (binding == NULL || binding->lookup_span == NULL || entries == NULL ||
+        word_stride == NULL || capacity == 0u)
+        return 0u;
+    abi_capacity = capacity > UINT32_MAX ? UINT32_MAX : (uint32_t)capacity;
+    count = binding->lookup_span(
+        binding->user_data, tile_x, tile_y, tile_step, abi_capacity,
+        entries, &abi_stride);
+    if (count > abi_capacity ||
+        (int64_t)(ptrdiff_t)abi_stride != abi_stride) {
+        *entries = NULL;
+        return 0u;
+    }
+    *word_stride = (ptrdiff_t)abi_stride;
+    return count;
+}
+
+static bool ppu_abi_virtual_band_lookup(
+        const void *context, int32_t tile_x, int32_t tile_y,
+        uint16_t entry, uint8_t *band) {
+    const SrPpuVirtualTilemapBinding *binding = context;
+    return binding != NULL && binding->band_lookup != NULL && band != NULL &&
+        binding->band_lookup(
+            binding->user_data, tile_x, tile_y, entry, band) != 0u;
+}
+
+static SrResult replace_ppu_virtual_tilemaps(
+        SrRunnerHandle *runner,
+        const SrPpuVirtualTilemapRequest *request) {
+    Snes *snes = runner_from_handle(runner);
+    Ppu *ppu;
+    uint32_t layer;
+    if (snes == NULL || request == NULL ||
+        request->struct_size < SR_PPU_VIRTUAL_TILEMAP_REQUEST_V2_SIZE ||
+        request->flags != 0u || request->layer_mask > 0x03u ||
+        request->reserved != 0u)
+        return SR_RESULT_INVALID_ARGUMENT;
+    if (request->lifetime_generation != snes->abiLifetimeGeneration)
+        return SR_RESULT_STALE_VIEW;
+    ppu = ppu_output_control_target(snes);
+    if (ppu == NULL) return SR_RESULT_UNAVAILABLE;
+    for (layer = 0u; layer < 2u; ++layer) {
+        const SrPpuVirtualTilemapBinding *binding =
+            &request->bindings[layer];
+        if ((request->layer_mask & (1u << layer)) == 0u) continue;
+        if (binding->lookup == NULL || binding->hscroll_anchor > 0x3ffu ||
+            binding->vscroll_anchor > 0x3ffu ||
+            (binding->flags &
+             ~SR_PPU_VIRTUAL_TILEMAP_INCLUDE_AUTHENTIC) != 0u ||
+            binding->reserved != 0u)
+            return SR_RESULT_INVALID_ARGUMENT;
+    }
+
+    PpuClearVirtualTilemaps(ppu);
+    memset(ppu->abiVirtualTilemap, 0, sizeof(ppu->abiVirtualTilemap));
+    for (layer = 0u; layer < 2u; ++layer) {
+        const SrPpuVirtualTilemapBinding *source;
+        PpuVirtualTilemapBinding binding;
+        if ((request->layer_mask & (1u << layer)) == 0u) continue;
+        source = &request->bindings[layer];
+        ppu->abiVirtualTilemap[layer] = *source;
+        binding = (PpuVirtualTilemapBinding) {
+            .lookup = ppu_abi_virtual_lookup,
+            .lookup_span = source->lookup_span != NULL
+                ? ppu_abi_virtual_span_lookup : NULL,
+            .band_lookup = source->band_lookup != NULL
+                ? ppu_abi_virtual_band_lookup : NULL,
+            .context = &ppu->abiVirtualTilemap[layer],
+            .camera_x = source->camera_x,
+            .camera_y = source->camera_y,
+            .hscroll_anchor = (uint16_t)source->hscroll_anchor,
+            .vscroll_anchor = (uint16_t)source->vscroll_anchor,
+            .flags = (uint8_t)source->flags,
+        };
+        if (!PpuSetVirtualTilemap(ppu, (uint8_t)layer, &binding)) {
+            PpuClearVirtualTilemaps(ppu);
+            memset(ppu->abiVirtualTilemap, 0,
+                   sizeof(ppu->abiVirtualTilemap));
+            return SR_RESULT_INVALID_ARGUMENT;
+        }
+    }
+    return SR_RESULT_OK;
+}
+
+static SrResult update_ppu_authentic_camera(
+        SrRunnerHandle *runner,
+        const SrPpuAuthenticCameraRequest *request) {
+    Snes *snes = runner_from_handle(runner);
+    Ppu *ppu;
+    const uint32_t layer_mask = request != NULL ? request->layer_mask : 0u;
+    if (snes == NULL || request == NULL ||
+        request->struct_size < SR_PPU_AUTHENTIC_CAMERA_REQUEST_V2_SIZE ||
+        (request->flags & ~SR_PPU_AUTHENTIC_CAMERA_CLEAR) != 0u ||
+        layer_mask > SR_PPU_AUTHENTIC_CAMERA_ALL ||
+        (request->flags == 0u && layer_mask == 0u) ||
+        (layer_mask == 0u && (request->row_count != 0u ||
+                             request->bg1_hscroll != NULL ||
+                             request->bg2_hscroll != NULL ||
+                             request->object_offset_x != 0)) ||
+        (layer_mask != 0u && request->row_count != SR_PPU_NATIVE_HEIGHT) ||
+        ((layer_mask & SR_PPU_AUTHENTIC_CAMERA_BG1) != 0u &&
+         request->bg1_hscroll == NULL) ||
+        ((layer_mask & SR_PPU_AUTHENTIC_CAMERA_BG1) == 0u &&
+         request->bg1_hscroll != NULL) ||
+        ((layer_mask & SR_PPU_AUTHENTIC_CAMERA_BG2) != 0u &&
+         request->bg2_hscroll == NULL) ||
+        ((layer_mask & SR_PPU_AUTHENTIC_CAMERA_BG2) == 0u &&
+         request->bg2_hscroll != NULL) ||
+        (request->bg1_hscroll != NULL &&
+         (uintptr_t)request->bg1_hscroll % _Alignof(uint16_t) != 0u) ||
+        (request->bg2_hscroll != NULL &&
+         (uintptr_t)request->bg2_hscroll % _Alignof(uint16_t) != 0u) ||
+        request->object_offset_x < INT16_MIN ||
+        request->object_offset_x > INT16_MAX || request->reserved != 0u)
+        return SR_RESULT_INVALID_ARGUMENT;
+    if (request->lifetime_generation != snes->abiLifetimeGeneration)
+        return SR_RESULT_STALE_VIEW;
+    ppu = ppu_output_control_target(snes);
+    if (ppu == NULL) return SR_RESULT_UNAVAILABLE;
+    if ((request->flags & SR_PPU_AUTHENTIC_CAMERA_CLEAR) != 0u)
+        PpuClearAuthenticCameraFrame(ppu);
+    if (layer_mask != 0u && !PpuSetAuthenticCameraFrame(
+            ppu, (uint8_t)layer_mask, request->bg1_hscroll,
+            request->bg2_hscroll, request->object_offset_x))
+        return SR_RESULT_INVALID_ARGUMENT;
+    return SR_RESULT_OK;
+}
+
+static SrResult run_ppu_scanout(
+        SrRunnerHandle *runner,
+        const SrPpuScanoutRequest *request,
+        SrPpuScanoutResult *out_result) {
+    Snes *snes = runner_from_handle(runner);
+    if (snes == NULL || request == NULL || out_result == NULL ||
+        request->struct_size < SR_PPU_SCANOUT_REQUEST_V2_SIZE ||
+        out_result->struct_size < SR_PPU_SCANOUT_RESULT_V2_SIZE ||
+        request->flags != 0u || request->hdma_channel_mask > 0xffu ||
+        request->reserved != 0u || request->irq_callback == NULL)
+        return SR_RESULT_INVALID_ARGUMENT;
+    if (request->lifetime_generation != snes->abiLifetimeGeneration)
+        return SR_RESULT_STALE_VIEW;
+    memset(out_result, 0, SR_PPU_SCANOUT_RESULT_V2_SIZE);
+    out_result->struct_size = SR_PPU_SCANOUT_RESULT_V2_SIZE;
+    out_result->lifetime_generation = snes->abiLifetimeGeneration;
+    if (s_ppu_scanout_runner != snes || s_ppu_scanout_provider == NULL)
+        return SR_RESULT_UNAVAILABLE;
+    return s_ppu_scanout_provider(snes, request, out_result);
 }
 
 static SrResult validate_ppu_output_capacity(
@@ -1566,7 +2170,13 @@ static const SnesRunnerApi k_runner_api = {
         SR_RUNNER_CAP_CPU_MATH_STATE |
         SR_RUNNER_CAP_AUDIO_TRACE_OBSERVERS |
         SR_RUNNER_CAP_SPC_CONTROL |
-        SR_RUNNER_CAP_AUDIO_MIX_CONTROL,
+        SR_RUNNER_CAP_AUDIO_MIX_CONTROL |
+        SR_RUNNER_CAP_PPU_FRAME_TRANSACTIONS |
+        SR_RUNNER_CAP_PPU_VRAM_PATCH |
+        SR_RUNNER_CAP_PPU_OBJ_METADATA |
+        SR_RUNNER_CAP_DMA_STATE |
+        SR_RUNNER_CAP_PPU_BACKGROUND_POLICY |
+        SR_RUNNER_CAP_PPU_SCANOUT,
     get_component,
     query_generations,
     borrow_memory,
@@ -1597,6 +2207,15 @@ static const SnesRunnerApi k_runner_api = {
     sr_runner_unsubscribe_audio_trace,
     sr_runner_compare_exchange_spc_pc,
     sr_runner_configure_audio_mix,
+    visit_ppu_frame_transaction,
+    compare_exchange_ppu_overlay_captures,
+    compare_exchange_ppu_vram_words,
+    update_ppu_obj_metadata,
+    query_dma_state,
+    update_ppu_layer_extents,
+    replace_ppu_virtual_tilemaps,
+    update_ppu_authentic_camera,
+    run_ppu_scanout,
 };
 
 /* Keep synchronized with the source boundary in runner.cmake. */
@@ -1623,7 +2242,13 @@ static const SrRunnerDescriptor k_runner = {
         SR_RUNNER_CAP_CPU_MATH_STATE |
         SR_RUNNER_CAP_AUDIO_TRACE_OBSERVERS |
         SR_RUNNER_CAP_SPC_CONTROL |
-        SR_RUNNER_CAP_AUDIO_MIX_CONTROL,
+        SR_RUNNER_CAP_AUDIO_MIX_CONTROL |
+        SR_RUNNER_CAP_PPU_FRAME_TRANSACTIONS |
+        SR_RUNNER_CAP_PPU_VRAM_PATCH |
+        SR_RUNNER_CAP_PPU_OBJ_METADATA |
+        SR_RUNNER_CAP_DMA_STATE |
+        SR_RUNNER_CAP_PPU_BACKGROUND_POLICY |
+        SR_RUNNER_CAP_PPU_SCANOUT,
 };
 
 const SrRunnerDescriptor *sr_runner_descriptor(void) {
@@ -1674,6 +2299,13 @@ void sr_runner_set_ppu_obj_parts_raster_provider(
     if (provider == NULL && s_ppu_obj_parts_raster_runner != snes) return;
     s_ppu_obj_parts_raster_runner = provider != NULL ? snes : NULL;
     s_ppu_obj_parts_raster_provider = provider;
+}
+
+void sr_runner_set_ppu_scanout_provider(
+        Snes *snes, SrRunnerPpuScanoutProvider *provider) {
+    if (provider == NULL && s_ppu_scanout_runner != snes) return;
+    s_ppu_scanout_runner = provider != NULL ? snes : NULL;
+    s_ppu_scanout_provider = provider;
 }
 
 static void invalidate_lifetime(Snes *snes) {

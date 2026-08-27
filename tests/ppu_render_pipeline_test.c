@@ -58,6 +58,24 @@ static int s_failures;
 
 enum { kW = 256, kH = 224 };
 
+/* Focused PPU tests still configure concrete hardware state as their fixture,
+ * then enter SIM through the same opaque ABI handle as production. */
+static SrRunnerHandle *TestRunnerForPpu(Ppu *ppu) {
+  static Snes runner;
+  if (runner.ppu != ppu) {
+    if (runner.ppu) {
+      sr_runner_bind_ppu_services(&runner, false);
+      sr_runner_bind_ppu_owner(&runner, runner.ppu, false);
+    }
+    memset(&runner, 0, sizeof(runner));
+    runner.ppu = ppu;
+    runner.abiLifetimeGeneration = 1u;
+  }
+  sr_runner_bind_ppu_owner(&runner, ppu, true);
+  sr_runner_bind_ppu_services(&runner, true);
+  return sr_runner_handle(&runner);
+}
+
 /* Build a BGR555 SNES color word (what CGRAM stores): 5 bits each, R low. */
 static uint16_t bgr555(int r5, int g5, int b5) {
   return (uint16_t)((r5 & 0x1f) | ((g5 & 0x1f) << 5) | ((b5 & 0x1f) << 10));
@@ -1006,7 +1024,7 @@ static void TestSim3DFlatCompositionDemand(void) {
    * testable and lets the host seam own the user-facing outcome. */
   Sim3D_BeginFrame();
   request.renderer_ready = false;
-  CHECK(!Sim3D_PrepareCapture(ppu, &request));
+  CHECK(!Sim3D_PrepareCapture(TestRunnerForPpu(ppu), &request));
   CHECK(Sim3D_GetCaptureContractFailure() ==
         kSim3DCaptureContract_RendererUnavailable);
   request.renderer_ready = true;
@@ -1014,7 +1032,7 @@ static void TestSim3DFlatCompositionDemand(void) {
   /* The projected profile has no flat-buffer reader. A sentinel proves the
    * finish path did not merely produce an equivalent-looking composite. */
   Sim3D_BeginFrame();
-  CHECK(Sim3D_PrepareCapture(ppu, &request));
+  CHECK(Sim3D_PrepareCapture(TestRunnerForPpu(ppu), &request));
   for (int plane = 0; plane < kSim3DPlane_Count; plane++)
     memset(g_sim3d_layer_pixels[plane], 0, width * sizeof(uint32_t));
   for (int x = 0; x < width; x++) g_sim3d_flat_pixels[x] = 0x5a5a5a5au;
@@ -1029,12 +1047,13 @@ static void TestSim3DFlatCompositionDemand(void) {
   /* Disabling ground projection selects the flat fallback, which must keep
    * rebuilding the exact same buffer for presentation. */
   request.requested_features = kSimFeature_SeparatedComposite;
-  CHECK(Sim3D_PrepareCapture(ppu, &request));
+  CHECK(Sim3D_PrepareCapture(TestRunnerForPpu(ppu), &request));
   for (int plane = 0; plane < kSim3DPlane_Count; plane++)
     memset(g_sim3d_layer_pixels[plane], 0, width * sizeof(uint32_t));
   Sim3D_FinishCapture((uint8_t *)authentic, width * (int)sizeof(uint32_t), 2);
   CHECK(g_sim3d_flat_pixels[0] != 0x5a5a5a5au);
-  CHECK(g_sim3d_flat_pixels[0] == ActRaiser_BackdropArgb(ppu));
+  CHECK(g_sim3d_flat_pixels[0] ==
+        ActRaiser_BackdropArgb(ppu->cgram[0], PPU_brightness(ppu)));
 
   Sim3D_BeginFrame();
   ppu_free(ppu);
@@ -1099,7 +1118,7 @@ static void TestSim3DRawObjCaptureFallbackContract(void) {
    * reader. OBJ is fully unbound before scanout, including every band and its
    * capture, while the six BG planes remain active. */
   Sim3D_BeginFrame();
-  CHECK(Sim3D_PrepareCapture(ppu, &request));
+  CHECK(Sim3D_PrepareCapture(TestRunnerForPpu(ppu), &request));
   CHECK(ppu->overlayRenderBuffer[kPpuOverlaySource_Bg1] != NULL);
   CHECK(ppu->overlayRenderBuffer[kPpuOverlaySource_Obj] == NULL);
   for (int band = 0; band < 3; band++)
@@ -1112,7 +1131,7 @@ static void TestSim3DRawObjCaptureFallbackContract(void) {
   /* The inspector consumes the exact ten-plane composition even though the
    * selected presentation profile uses billboards. */
   request.inspector_active = true;
-  CHECK(Sim3D_PrepareCapture(ppu, &request));
+  CHECK(Sim3D_PrepareCapture(TestRunnerForPpu(ppu), &request));
   CHECK(ppu->overlayRenderBuffer[kPpuOverlaySource_Obj] != NULL);
   for (int band = 0; band < 3; band++)
     CHECK(ppu->overlayRenderBands[kPpuOverlaySource_Obj][band] != NULL);
@@ -1124,7 +1143,7 @@ static void TestSim3DRawObjCaptureFallbackContract(void) {
   /* A current-frame metadata/atlas failure retains the raw fallback. */
   request.billboard_atlas_ready = false;
   SimRenderMetadata_Reset();
-  CHECK(Sim3D_PrepareCapture(ppu, &request));
+  CHECK(Sim3D_PrepareCapture(TestRunnerForPpu(ppu), &request));
   CHECK(ppu->overlayRenderBuffer[kPpuOverlaySource_Obj] != NULL);
   Sim3D_FinishCapture((uint8_t *)authentic,
                       kActRaiserAuthenticWidth * (int)sizeof(uint32_t), 1);
@@ -1155,7 +1174,7 @@ static void TestSim3DRawObjCaptureFallbackContract(void) {
   /* The GPU atlas is also part of the contract. Its absence retains raw OBJ
    * and removes billboards from the implemented feature set after finish. */
   request.billboard_renderer_ready = false;
-  CHECK(Sim3D_PrepareCapture(ppu, &request));
+  CHECK(Sim3D_PrepareCapture(TestRunnerForPpu(ppu), &request));
   CHECK(ppu->overlayRenderBuffer[kPpuOverlaySource_Obj] != NULL);
   Sim3D_FinishCapture((uint8_t *)authentic,
                       kActRaiserAuthenticWidth * (int)sizeof(uint32_t), 1);
@@ -1167,7 +1186,7 @@ static void TestSim3DRawObjCaptureFallbackContract(void) {
 
   /* Turning billboards off is the intentional raw-plane profile. */
   request.requested_features &= ~kSimFeature_ObjectBillboards;
-  CHECK(Sim3D_PrepareCapture(ppu, &request));
+  CHECK(Sim3D_PrepareCapture(TestRunnerForPpu(ppu), &request));
   CHECK(ppu->overlayRenderBuffer[kPpuOverlaySource_Obj] != NULL);
   CHECK(Sim3D_BeginFrame());
 
@@ -1270,7 +1289,7 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
     .height = kActRaiserAuthenticHeight,
   };
   Sim3D_BeginFrame();
-  CHECK(Sim3D_PrepareCapture(ppu, &request));
+  CHECK(Sim3D_PrepareCapture(TestRunnerForPpu(ppu), &request));
   const PpuOverlayCapture *bg3 =
       &ppu->overlayCaptures[kPpuOverlaySource_Bg3];
   const PpuOverlayCapture *obj =
@@ -1308,17 +1327,40 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
         kPpuOverlayFlag_RemoveFromGame));
     CHECK(PpuSetOverlayOamRange(
         ppu, kMenuHourglassFirst, kActRaiserHudObjOamCount));
+    CHECK(PpuSetOverlayTransparentFill(
+        ppu, kPpuOverlaySource_Bg3,
+        kPpuOverlayTransparentFill_Cgram, 0x21));
+    CHECK(PpuSetOverlayTransparentFill(
+        ppu, kPpuOverlaySource_Obj,
+        kPpuOverlayTransparentFill_Black, 0));
     request.requested_features = kSimFeature_SeparatedComposite |
         (suppress_raw ? kSimFeature_GroundProjection |
                             kSimFeature_ObjectBillboards
                       : 0);
     request.billboard_atlas_ready = suppress_raw;
     request.billboard_renderer_ready = suppress_raw;
-    CHECK(Sim3D_PrepareCapture(ppu, &request));
+    CHECK(Sim3D_PrepareCapture(TestRunnerForPpu(ppu), &request));
     CHECK((ppu->overlayRenderBuffer[kPpuOverlaySource_Obj] == NULL) ==
           (suppress_raw != 0));
     Sim3D_FinishCapture(
         (uint8_t *)authentic, width * (int)sizeof(uint32_t), 1);
+    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg3].x0 == 0);
+    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg3].x1 ==
+          kActRaiserAuthenticWidth);
+    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg3].flags ==
+          kPpuOverlayFlag_RemoveFromGame);
+    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg3]
+              .transparentFillConfigured == 1);
+    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg3]
+              .transparentFillMode == kPpuOverlayTransparentFill_Cgram);
+    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg3]
+              .transparentFillCgram == 0x21);
+    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Obj].oamFirst ==
+          kMenuHourglassFirst);
+    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Obj].oamCount ==
+          kActRaiserHudObjOamCount);
+    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Obj]
+              .transparentFillMode == kPpuOverlayTransparentFill_Black);
     CHECK(hud_obj[(size_t)kActRaiserHudObjUpperY * width +
                   extra + kActRaiserSimulationHourglassLeftX] != 0);
     if (!suppress_raw) {
@@ -1355,7 +1397,7 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
       kPpuOverlayFlag_RemoveFromGame));
   CHECK(PpuSetOverlayOamRange(
       ppu, kActRaiserHudObjOamFirst, kActRaiserHudObjOamCount));
-  CHECK(!Sim3D_PrepareCapture(ppu, &request));
+  CHECK(!Sim3D_PrepareCapture(TestRunnerForPpu(ppu), &request));
   CHECK(!Sim3D_BeginFrame());
 
   /* An unrelated layer capture still owns its source and must fail closed. */
@@ -1363,7 +1405,7 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
   CHECK(PpuSetOverlayCapture(
       ppu, kPpuOverlaySource_Bg1, 0, 0, 16, 16,
       kPpuOverlayFlag_RemoveFromGame));
-  CHECK(!Sim3D_PrepareCapture(ppu, &request));
+  CHECK(!Sim3D_PrepareCapture(TestRunnerForPpu(ppu), &request));
   CHECK(!Sim3D_BeginFrame());
   ppu_free(ppu);
 }

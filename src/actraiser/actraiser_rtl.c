@@ -293,26 +293,35 @@ static bool ActRaiser_PpuShapeTraceActive(unsigned gf) {
 }
 
 static void ActRaiser_PpuShapeCaptureRegisters(
-    const Ppu *ppu, ActRaiserPpuShapeRegisters *output) {
-  output->inidisp = ppu->inidisp;
-  output->bgmode = ppu->bgmode;
-  output->mosaic = ppu->mosaic;
-  output->m7sel = ppu->m7sel;
-  output->setini = ppu->setini;
-  memcpy(output->bg_xsc, ppu->bgXsc, sizeof(output->bg_xsc));
-  output->bg_tile_adr = ppu->bgTileAdr;
-  memcpy(output->hscroll, ppu->hScroll, sizeof(output->hscroll));
-  memcpy(output->vscroll, ppu->vScroll, sizeof(output->vscroll));
-  memcpy(output->m7matrix, ppu->m7matrix, sizeof(output->m7matrix));
-  memcpy(output->screen_enabled, ppu->screenEnabled,
-         sizeof(output->screen_enabled));
-  memcpy(output->screen_windowed, ppu->screenWindowed,
-         sizeof(output->screen_windowed));
-  output->windowsel = ppu->windowsel;
-  output->wbgobjlog = ppu->wbgobjlog;
-  output->fixed_color = ppu->fixedColor;
-  output->cgwsel = ppu->cgwsel;
-  output->cgadsub = ppu->cgadsub;
+    const SrPpuStateSnapshot *ppu, ActRaiserPpuShapeRegisters *output) {
+  memset(output, 0, sizeof(*output));
+  output->inidisp = ppu->display_control;
+  output->bgmode = ppu->bg_mode_control;
+  output->mosaic = ppu->mosaic_control;
+  output->m7sel = ppu->mode7_select;
+  output->setini =
+      ((ppu->flags & SR_PPU_STATE_INTERLACE) ? 0x01u : 0u) |
+      ((ppu->flags & SR_PPU_STATE_OBJ_INTERLACE) ? 0x02u : 0u) |
+      ((ppu->flags & SR_PPU_STATE_OVERSCAN) ? 0x04u : 0u) |
+      ((ppu->flags & SR_PPU_STATE_PSEUDO_HIRES) ? 0x08u : 0u) |
+      ((ppu->flags & SR_PPU_STATE_MODE7_EXT_BG) ? 0x40u : 0u);
+  memcpy(output->bg_xsc, ppu->background_tilemap_control,
+         sizeof(output->bg_xsc));
+  output->bg_tile_adr = ppu->background_tile_base_control;
+  for (unsigned layer = 0; layer < 4; layer++) {
+    output->hscroll[layer] = ppu->backgrounds[layer].h_scroll;
+    output->vscroll[layer] = ppu->backgrounds[layer].v_scroll;
+  }
+  memcpy(output->m7matrix, ppu->mode7_matrix, sizeof(output->m7matrix));
+  output->screen_enabled[0] = ppu->main_screen;
+  output->screen_enabled[1] = ppu->sub_screen;
+  output->screen_windowed[0] = ppu->main_windowed;
+  output->screen_windowed[1] = ppu->sub_windowed;
+  output->windowsel = ppu->window_select;
+  output->wbgobjlog = ppu->window_logic;
+  output->fixed_color = ppu->fixed_color;
+  output->cgwsel = ppu->color_math_control;
+  output->cgadsub = ppu->color_math_designation;
 }
 
 static uint64_t ActRaiser_PpuShapeHash(const void *data, size_t size) {
@@ -326,30 +335,31 @@ static uint64_t ActRaiser_PpuShapeHash(const void *data, size_t size) {
 }
 
 static uint64_t ActRaiser_PpuShapeRenderRangeHash(
-    const Ppu *ppu, int line, bool authentic, int left, int right) {
-  const uint8_t *buffer = authentic
-      ? ppu->authenticRenderBuffer : ppu->renderBuffer;
-  size_t pitch = authentic
-      ? ppu->authenticRenderPitch : ppu->renderPitch;
-  int row = line - 1 + ppu->extraTopCur;
-  int origin;
-  if (!buffer || !pitch || line <= 0 || row < 0 || row >= kPpuBufHeight ||
-      right <= left)
+    const SrPpuSurfaceView *surface, int line, int left, int right) {
+  if (!surface) return 0;
+  const int64_t row = (int64_t)line - 1 + surface->origin_y;
+  const int64_t column = (int64_t)surface->origin_x + left;
+  const int64_t end = (int64_t)surface->origin_x + right;
+  if ((surface->flags & SR_PPU_SURFACE_BOUND) == 0u ||
+      surface->pixel_format != SR_PPU_PIXEL_FORMAT_ARGB8888_U32 ||
+      !surface->data || !surface->pitch_bytes || line <= 0 ||
+      row < 0 || row >= surface->height_pixels ||
+      column < 0 || end > surface->width_pixels || right <= left)
     return 0;
-  origin = PpuSurfaceApron(ppu, pitch) + ppu->extraLeftRight;
   return ActRaiser_PpuShapeHash(
-      buffer + (size_t)row * pitch +
-          (size_t)(origin + left) * sizeof(uint32_t),
+      surface->data + (uint64_t)row * surface->pitch_bytes +
+          (uint64_t)column * sizeof(uint32_t),
       (size_t)(right - left) * sizeof(uint32_t));
 }
 
 static uint64_t ActRaiser_PpuShapeRenderHash(
-    const Ppu *ppu, int line, bool authentic) {
+    const SrPpuScanoutLineContext *context, int line, bool authentic) {
+  const SrPpuSurfaceView *surface = authentic
+      ? &context->authentic_surface : &context->main_surface;
   return ActRaiser_PpuShapeRenderRangeHash(
-      ppu, line, authentic,
-      authentic ? 0 : -(int)ppu->extraLeftCur,
+      surface, line, authentic ? 0 : -(int)context->state.margin_left,
       authentic ? kPpuXPixels
-                  : kPpuXPixels + (int)ppu->extraRightCur);
+                  : kPpuXPixels + (int)context->state.margin_right);
 }
 
 static void ActRaiser_PpuShapeWriteRegisters(
@@ -377,30 +387,33 @@ static void ActRaiser_PpuShapeWriteRegisters(
 
 static void ActRaiser_PpuShapeTraceLine(
     unsigned gf, int line, const ActRaiserPpuShapeRegisters *before,
-    const SimpleHdma hdma[kDmaChannelCount]) {
+    const SrPpuScanoutLineContext *context) {
   ActRaiserPpuShapeTrace *trace = &s_ppu_shape_trace;
   ActRaiserPpuShapeRegisters after;
   unsigned live = 0;
   if (!trace->file || trace->records >= trace->maximum_records)
     return;
-  ActRaiser_PpuShapeCaptureRegisters(g_ppu, &after);
+  ActRaiser_PpuShapeCaptureRegisters(&context->state, &after);
   fprintf(trace->file, "%u,%d,%d,", gf, snes_frame_counter, line);
   ActRaiser_PpuShapeWriteRegisters(trace->file, before);
   fprintf(trace->file, ",%016llx,%016llx,%016llx,%016llx,%016llx,",
-          (unsigned long long)ActRaiser_PpuShapeRenderHash(g_ppu, line, false),
+          (unsigned long long)ActRaiser_PpuShapeRenderHash(
+              context, line, false),
           (unsigned long long)ActRaiser_PpuShapeRenderRangeHash(
-              g_ppu, line, false, -(int)g_ppu->extraLeftCur, 0),
+              &context->main_surface, line,
+              -(int)context->state.margin_left, 0),
           (unsigned long long)ActRaiser_PpuShapeRenderRangeHash(
-              g_ppu, line, false, 0, kPpuXPixels),
+              &context->main_surface, line, 0, kPpuXPixels),
           (unsigned long long)ActRaiser_PpuShapeRenderRangeHash(
-              g_ppu, line, false, kPpuXPixels,
-              kPpuXPixels + (int)g_ppu->extraRightCur),
-          (unsigned long long)ActRaiser_PpuShapeRenderHash(g_ppu, line, true));
+              &context->main_surface, line, kPpuXPixels,
+              kPpuXPixels + (int)context->state.margin_right),
+          (unsigned long long)ActRaiser_PpuShapeRenderHash(
+              context, line, true));
   ActRaiser_PpuShapeWriteRegisters(trace->file, &after);
-  for (int ch = 0; ch < kDmaChannelCount; ch++) {
-    if (hdma[ch].table)
+  for (unsigned ch = 0; ch < context->channel_count; ch++) {
+    if ((context->channels[ch].flags & SR_PPU_SCANOUT_HDMA_ACTIVE) != 0u)
       live |= 1u << ch;
-    fprintf(trace->file, ",%02x", hdma[ch].rep_count);
+    fprintf(trace->file, ",%02x", context->channels[ch].repeat_count);
   }
   fprintf(trace->file, ",%02x\n", live);
   trace->records++;
@@ -1368,9 +1381,8 @@ static bool ActRaiser_ResolveActionBgPlan(
     uint8 map_group, uint8 map_number, bool apply_tuner_draft,
     ActionBgPlan *plan, ActionBgPresentationPolicy *presentation) {
   static bool reported_rejected_draft;
-  if (!plan || !presentation ||
-      !ActRaiserActionBg_BuildPlan(
-          g_ram, kActRaiserWramSize, g_ppu,
+  if (!plan || !presentation || !ActRaiserActionBg_BuildCurrentPlan(
+          g_ram, kActRaiserWramSize,
           g_settings.ws_bg2_padding, plan, presentation) ||
       !ActionBgTuner_ObservePlan(
           map_group, map_number, plan,
@@ -1451,7 +1463,8 @@ static void ActRaiser_ClearWidescreenMarginGaps(bool bounded_world_margins) {
      * colour when the accepted margin repair is active. */
     const uint32 gap_fill =
         (g_settings.diorama_mode && g_settings.diorama_margin_fix)
-            ? ActRaiser_BackdropArgb(g_ppu)
+            ? ActRaiser_BackdropArgb(
+                  g_ppu->cgram[0], (uint8_t)PPU_brightness(g_ppu))
             : 0u;
     ActRaiserFillMarginGaps(
         g_ppu->renderBuffer, g_ppu->renderPitch,
@@ -1630,7 +1643,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
             &s_pending_action_bg_plan, 0, 0, 0, false);
         ActRaiserActionBg_BindPlanWithVirtualLayers(
             g_ram, kActRaiserWramSize, &plan,
-            ActRaiser_CurrentVirtualLayerRoom(), g_ppu);
+            ActRaiser_CurrentVirtualLayerRoom());
       }
     }
     return;
@@ -1857,7 +1870,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     if (bg_hle_allowed && bg_plan_valid) {
       bg_hle_bindings = ActRaiserActionBg_BindPlanWithVirtualLayers(
           g_ram, kActRaiserWramSize, &bg_plan,
-          ActRaiser_CurrentVirtualLayerRoom(), g_ppu);
+          ActRaiser_CurrentVirtualLayerRoom());
       /* If any planned world layer cannot bind, clamp that layer to its
        * authentic viewport instead of exposing stale/wrapped ring cells in
        * synthetic margins. Wide Raw never reaches this block. */
@@ -1917,7 +1930,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     s_pending_action_bg_plan.bound_canvas_to_world =
         bounded_world_margins;
   }
-  ActRaiserActionBg_ApplyPlanExtents(&s_pending_action_bg_plan, g_ppu);
+  ActRaiserActionBg_ApplyPlanExtents(&s_pending_action_bg_plan);
   s_pending_bg_capture_pad_to_budget =
       g_ppu->wsPadCapturedToBudget != 0;
   const uint32 bg_band_signature =
@@ -2663,6 +2676,59 @@ static void ActRaiser_ReportSim3DCaptureContractFailure(void) {
   }
 }
 
+typedef struct ActRaiserPpuScanoutContext {
+  unsigned shape_game_frame;
+  bool shape_trace;
+  ActRaiserPpuShapeRegisters shape_before;
+} ActRaiserPpuScanoutContext;
+
+static void ActRaiser_PpuScanoutLineCallback(
+    void *user_data, const SrPpuScanoutLineContext *context) {
+  ActRaiserPpuScanoutContext *scanout = user_data;
+  if (!scanout || !context) return;
+  if ((context->flags & SR_PPU_SCANOUT_LINE_BEFORE) != 0u) {
+    if (context->line > 0u)
+      ActRaiserActionBg_ObserveRoomSceneFrameLine(
+          &context->state, context->line - 1u);
+    if (scanout->shape_trace)
+      ActRaiser_PpuShapeCaptureRegisters(
+          &context->state, &scanout->shape_before);
+  } else if ((context->flags & SR_PPU_SCANOUT_LINE_AFTER_HDMA) != 0u &&
+             scanout->shape_trace) {
+    ActRaiser_PpuShapeTraceLine(
+        scanout->shape_game_frame, (int)context->line,
+        &scanout->shape_before, context);
+  }
+}
+
+static void ActRaiser_PpuScanoutIrqCallback(
+    void *user_data, uint32_t line) {
+  CpuRegSnapshot snap;
+  const bool observe_interrupt =
+      sr_runner_event_enabled(SR_EVENT_MASK_INTERRUPT);
+  const uint32 interrupt_pc =
+      observe_interrupt ? ActRaiser_LastBlockPc() : 0u;
+  const uint16 interrupt_vector =
+      g_cpu.emulation ? 0xfffeu : 0xffeeu;
+  (void)user_data;
+  ActRaiser_SaveRegs(&g_cpu, &snap);
+  if (observe_interrupt) {
+    ActRaiser_EmitInterrupt(
+        SR_INTERRUPT_IRQ, SR_EVENT_INTERRUPT_ENTER, interrupt_pc,
+        interrupt_vector, (int32_t)line, "irq");
+  }
+  cpu_push_interrupt_frame(&g_cpu);
+  g_ar_in_interrupt = 1;
+  IrqHandler_M1X1(&g_cpu);
+  g_ar_in_interrupt = 0;
+  ActRaiser_RestoreRegs(&g_cpu, &snap);
+  if (observe_interrupt) {
+    ActRaiser_EmitInterrupt(
+        SR_INTERRUPT_IRQ, SR_EVENT_INTERRUPT_EXIT, interrupt_pc,
+        interrupt_vector, (int32_t)line, "irq");
+  }
+}
+
 void ActRaiserDrawPpuFrame(void) {
   const uint8_t map_group = g_ram[kActRaiserWram_MapGroup];
   const uint8_t map_number = g_ram[kActRaiserWram_CurrentMap];
@@ -2709,10 +2775,10 @@ void ActRaiserDrawPpuFrame(void) {
   /* SPEC-bg-hle BH2 differential observer. Default-off and read-only: even
    * when enabled it compares the pure WRAM world against the native ring but
    * never supplies a tile to scanout. */
-  ActRaiserActionBg_ObserveFrame(g_ram, kActRaiserWramSize, g_ppu);
+  ActRaiserActionBg_ObserveFrame(g_ram, kActRaiserWramSize);
   /* Sky Palace: synthesize only BG2's offscreen margin columns from its ROM
    * source page. The paired restore after scanout preserves UI staging. */
-  ActRaiser_WidescreenSkyPalacePrepare();
+  ActRaiser_WidescreenSkyPalacePrepare(sr_runner_handle(g_snes));
   ActRaiser_WidescreenHudObjPromote();
   /* Manifest-driven HD substitutions (game-assets/manifest.ini) — e.g. the
    * settled title logo. Runs after the HUD/OAM capture policies so a busy
@@ -3109,12 +3175,28 @@ void ActRaiserDrawPpuFrame(void) {
       .width = kActRaiserAuthenticWidth + 2 * g_ws_extra,
       .height = kActRaiserAuthenticHeight,
     };
-    Sim3D_PrepareCapture(g_ppu, &request);
+    Sim3D_PrepareCapture(sr_runner_handle(g_snes), &request);
     ActRaiser_ReportSim3DCaptureContractFailure();
   }
 
   /* AR_TILE_CENSUS=1: read-only HD tile-pack sizing survey (hd_tile_census.c). */
   HdTileCensus_Frame(sr_runner_handle(g_snes));
+  const SnesRunnerApi *scanout_api =
+      sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+  SrRunnerHandle *scanout_runner = sr_runner_handle(g_snes);
+  SrGenerationSnapshot scanout_generations = {
+      .struct_size = sizeof(scanout_generations),
+  };
+  SrPpuScanoutResult scanout_result = {
+      .struct_size = sizeof(scanout_result),
+  };
+  SrResult scanout_status = SR_RESULT_UNAVAILABLE;
+  const bool scanout_ready =
+      scanout_runner != NULL && scanout_api != NULL &&
+      scanout_api->struct_size >= SNES_RUNNER_API_PPU_SCANOUT_SIZE &&
+      (scanout_api->capabilities & SR_RUNNER_CAP_PPU_SCANOUT) != 0u &&
+      scanout_api->query_generations(
+          scanout_runner, &scanout_generations) == SR_RESULT_OK;
   /* AR_TITLELOG=1: per-frame title-screen PPU probe (map bytes, BG mode,
    * HDMAEN, Mode-7 matrix, INIDISP) for deriving/validating the settled-logo
    * gate above. Diagnostic only. */
@@ -3122,26 +3204,53 @@ void ActRaiserDrawPpuFrame(void) {
     static int last_gf = -1;
     int gf = (int)ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
     if (gf != last_gf) {
-      last_gf = gf;
-      fprintf(stderr, "[titlelog] gf=%d $18=%02x $19=%02x bgmode=%02x "
-              "hdmaen=%02x m7=[%04x %04x %04x %04x] inidisp=%02x\n",
-              gf, g_ram[kActRaiserWram_MapGroup],
-              g_ram[kActRaiserWram_CurrentMap],
-              g_ppu->bgmode, g_snesrecomp_last_hdmaen,
-              (uint16)g_ppu->m7matrix[0], (uint16)g_ppu->m7matrix[1],
-              (uint16)g_ppu->m7matrix[2], (uint16)g_ppu->m7matrix[3],
-              g_ppu->inidisp);
+      SrPpuStateSnapshot scanout_initial = {
+          .struct_size = sizeof(scanout_initial),
+      };
+      if (scanout_ready && scanout_api->query_ppu_state(
+              scanout_runner, &scanout_initial) == SR_RESULT_OK) {
+        last_gf = gf;
+        fprintf(stderr, "[titlelog] gf=%d $18=%02x $19=%02x bgmode=%02x "
+                "hdmaen=%02x m7=[%04x %04x %04x %04x] inidisp=%02x\n",
+                gf, g_ram[kActRaiserWram_MapGroup],
+                g_ram[kActRaiserWram_CurrentMap],
+                scanout_initial.bg_mode_control, g_snesrecomp_last_hdmaen,
+                (uint16)scanout_initial.mode7_matrix[0],
+                (uint16)scanout_initial.mode7_matrix[1],
+                (uint16)scanout_initial.mode7_matrix[2],
+                (uint16)scanout_initial.mode7_matrix[3],
+                scanout_initial.display_control);
+      }
     }
   }
-  /* Process ALL 8 HDMA channels, not a fixed subset. ActRaiser drives its
-   * per-scanline effects (e.g. the Mode-7 title matrix animation) on channels
-   * 2/3 — the old code only ran 5/6/7 (a stale assumption carried over from
-   * another game's port), so those HDMA tables were started by HDMAEN but
-   * never applied, leaving the title raster effect dead. SimpleHdma_Init
-   * early-returns on inactive channels, so iterating 0..7 is a safe no-op for
-   * channels the game isn't using this frame. */
-  SimpleHdma hdma_chans[kDmaChannelCount];
-  Dma *dma = g_dma;
+  /* The immutable action-room authority resolves the same persistent raster
+   * state from ROM + camera + frame clock. Its default-off shadow is prepared
+   * once here, then samples the live registers immediately before each visible
+   * line so HDMA timing remains part of the comparison. */
+  ActRaiserActionBg_BeginRoomSceneFrame(
+      g_ram, kActRaiserWramSize);
+  ActRaiserPpuScanoutContext scanout_context = {
+      .shape_game_frame =
+          (unsigned)ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
+  };
+  scanout_context.shape_trace =
+      ActRaiser_PpuShapeTraceActive(scanout_context.shape_game_frame);
+  const bool observe_lines =
+      scanout_context.shape_trace ||
+      ActRaiserActionBg_RoomSceneFrameObserverActive();
+  const SrPpuScanoutRequest scanout_request = {
+      .struct_size = sizeof(scanout_request),
+      .lifetime_generation = scanout_generations.lifetime_generation,
+      .hdma_channel_mask = g_snesrecomp_last_hdmaen,
+      .line_callback = observe_lines
+          ? ActRaiser_PpuScanoutLineCallback : NULL,
+      .irq_callback = ActRaiser_PpuScanoutIrqCallback,
+      .user_data = &scanout_context,
+  };
+
+  /* Resolve the stable OAM footprint before scanout; the live sprite evaluator
+   * writes the selected range to the HUD surface while each line is fetched. */
+  ActRaiser_DioramaHudObjPrepare();
 
   DioramaPerformance_End(producer_setup_performance);
   DioramaPerformanceScope scanout_performance = {0};
@@ -3149,95 +3258,28 @@ void ActRaiserDrawPpuFrame(void) {
     scanout_performance =
         DioramaPerformance_Begin(kDioramaPerformance_Scanout);
 
-  dma_startDma(dma, g_snesrecomp_last_hdmaen, true);
-
-  for (int ch = 0; ch < kDmaChannelCount; ch++)
-    SimpleHdma_Init(&hdma_chans[ch], &dma->channel[ch]);
-
-  /* The immutable action-room authority resolves the same persistent raster
-   * state from ROM + camera + frame clock. Its default-off shadow is prepared
-   * once here, then samples the live registers immediately before each visible
-   * line so HDMA timing remains part of the comparison. */
-  ActRaiserActionBg_BeginRoomSceneFrame(
-      g_ram, kActRaiserWramSize, g_ppu, dma);
-
-  int trigger = g_snes->vIrqEnabled ? g_snes->vTimer + 1 : -1;
-
-  /* Resolve the stable OAM footprint before scanout; the live sprite evaluator
-   * writes the selected range to the HUD surface while each line is fetched. */
-  ActRaiser_DioramaHudObjPrepare();
-
-  for (int i = 0; i <= kActRaiserAuthenticHeight; i++) {
-    const unsigned shape_gf =
-        (unsigned)ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
-    const bool shape_trace = ActRaiser_PpuShapeTraceActive(shape_gf);
-    ActRaiserPpuShapeRegisters shape_before;
-    if (shape_trace)
-      ActRaiser_PpuShapeCaptureRegisters(g_ppu, &shape_before);
-    if (i > 0)
-      ActRaiserActionBg_ObserveRoomSceneFrameLine(g_ppu, (unsigned)(i - 1));
-    ppu_runLine(g_ppu, i);
-    /* Vertical top margin (diorama). Placed HERE, not before the loop, for two
-     * reasons that both have to hold:
-     *
-     *  - ppu_runLine(0) is the frame's setup pass (mosaic table, sprite
-     *    overflow flags, the overlay content mask). Rendering an above-screen
-     *    scanline before it would use last frame's state.
-     *  - no HDMA channel has advanced yet, so these lines see the register
-     *    values the frame STARTED with. That is the hold-first policy: there is
-     *    no authentic per-scanline state above line 1 to reproduce, and holding
-     *    the first line's is the only choice that is stable frame to frame.
-     *
-     * Rendered top-down so the band reads in the same order as the screen. */
-    if (i == 0) {
-      for (int m = g_ppu->extraTopCur; m >= 1; m--)
-        ppu_runMarginLine(g_ppu, 1 - m);
-    }
-    for (int ch = 0; ch < kDmaChannelCount; ch++)
-      SimpleHdma_DoLine(&hdma_chans[ch]);
-    if (shape_trace)
-      ActRaiser_PpuShapeTraceLine(
-          shape_gf, i, &shape_before, hdma_chans);
-    if (i == trigger) {
-      g_snes->inIrq = true;
-      CpuRegSnapshot snap;
-      const bool observe_interrupt =
-          sr_runner_event_enabled(SR_EVENT_MASK_INTERRUPT);
-      const uint32 interrupt_pc =
-          observe_interrupt ? ActRaiser_LastBlockPc() : 0u;
-      const uint16 interrupt_vector =
-          g_cpu.emulation ? 0xfffeu : 0xffeeu;
-      ActRaiser_SaveRegs(&g_cpu, &snap);
-      if (observe_interrupt) {
-        ActRaiser_EmitInterrupt(
-            SR_INTERRUPT_IRQ, SR_EVENT_INTERRUPT_ENTER, interrupt_pc,
-            interrupt_vector, i, "irq");
-      }
-      cpu_push_interrupt_frame(&g_cpu);
-      g_ar_in_interrupt = 1;
-      IrqHandler_M1X1(&g_cpu);
-      g_ar_in_interrupt = 0;
-      ActRaiser_RestoreRegs(&g_cpu, &snap);
-      if (observe_interrupt) {
-        ActRaiser_EmitInterrupt(
-            SR_INTERRUPT_IRQ, SR_EVENT_INTERRUPT_EXIT, interrupt_pc,
-            interrupt_vector, i, "irq");
-      }
-      trigger = g_snes->vIrqEnabled ? g_snes->vTimer + 1 : -1;
-    }
+  if (scanout_ready) {
+    scanout_status = scanout_api->run_ppu_scanout(
+        scanout_runner, &scanout_request, &scanout_result);
   }
-  /* Bottom margin, after the authentic loop, so these lines see the registers
-   * the last visible scanline left behind (hold-last, the mirror of the
-   * hold-first policy above). Exact signed OBJ positions make these rows
-   * unambiguous even though the stored OAM Y byte itself wraps at 256. */
-  for (int m = 1; m <= g_ppu->extraBottomCur; m++)
-    ppu_runMarginLine(g_ppu, kActRaiserAuthenticHeight + m);
+  if (scanout_status != SR_RESULT_OK) {
+    SessionFatal_Request(
+        "The runner could not execute the PPU scanout ABI service. "
+        "Restart after rebuilding the game and runner together.");
+  }
+  const uint32_t authentic_camera_flags =
+      SR_PPU_SCANOUT_AUTHENTIC_CAMERA_BG1 |
+      SR_PPU_SCANOUT_AUTHENTIC_CAMERA_BG2;
   const bool authentic_frame_valid =
-      PpuAuthenticSurfaceReady(g_ppu) &&
-      (!action || (g_ppu->inidisp & 0x80u) ||
-       (g_ppu->bgmode & 7u) != 1u ||
-       PpuAuthenticCameraFrameReady(
-           g_ppu, kPpuAuthenticCameraLayer_All));
+      scanout_status == SR_RESULT_OK &&
+      (scanout_result.flags &
+       SR_PPU_SCANOUT_AUTHENTIC_SURFACE_READY) != 0u &&
+      (!action ||
+       (scanout_result.final_state.flags &
+        SR_PPU_STATE_FORCED_BLANK) != 0u ||
+       scanout_result.final_state.bg_mode != 1u ||
+       (scanout_result.flags & authentic_camera_flags) ==
+           authentic_camera_flags);
   ActRaiser_AuthenticCaptureFrameCompleted(authentic_frame_valid);
   DioramaPerformance_End(scanout_performance);
   DioramaPerformanceScope producer_finish_performance = {0};
@@ -3274,8 +3316,10 @@ void ActRaiserDrawPpuFrame(void) {
    * would silently describe a different frame than the pixels came from. That
    * The non-diorama rebind gate normally prevents this mismatch; latching at
    * the producer boundary makes that safety independent of the gate. */
-  s_live_margin_top = g_ppu->extraTopCur;
-  s_live_margin_bottom = g_ppu->extraBottomCur;
+  s_live_margin_top = scanout_status == SR_RESULT_OK
+      ? (int)scanout_result.final_state.margin_top : 0;
+  s_live_margin_bottom = scanout_status == SR_RESULT_OK
+      ? (int)scanout_result.final_state.margin_bottom : 0;
 
   if (ActRaiser_DeveloperFlagEnabled(
           kActRaiserDeveloperFlag_VerticalExtensionLog)) {
@@ -3313,12 +3357,14 @@ void ActRaiserDrawPpuFrame(void) {
             "bg2plane=[%d..%d] "
             "objs_unlocked=%u\n",
             ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
-            (int)g_ppu->extraTopCur, (int)g_ppu->extraBottomCur,
+            s_live_margin_top, s_live_margin_bottom,
             hud0, hud1, plane0, plane1,
             ActRaiser_TakeVextUnlockedObjects());
   }
-  s_live_margin_left = g_ppu->extraLeftCur;
-  s_live_margin_right = g_ppu->extraRightCur;
+  s_live_margin_left = scanout_status == SR_RESULT_OK
+      ? (int)scanout_result.final_state.margin_left : 0;
+  s_live_margin_right = scanout_status == SR_RESULT_OK
+      ? (int)scanout_result.final_state.margin_right : 0;
   s_live_action_bg_plan = s_pending_action_bg_plan;
   s_live_bg_capture_pad_to_budget =
       s_pending_bg_capture_pad_to_budget;
@@ -3327,7 +3373,7 @@ void ActRaiserDrawPpuFrame(void) {
    * here at the end. ActRaiserDrawPpuFrame has no early returns, so a pending
    * restore can never be stranded — keep it that way if you add control flow
    * above. */
-  ActRaiser_WidescreenSkyPalaceRestore();
+  ActRaiser_WidescreenSkyPalaceRestore(sr_runner_handle(g_snes));
   DioramaPerformance_End(producer_finish_performance);
 }
 

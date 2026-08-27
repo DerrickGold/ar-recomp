@@ -11,8 +11,6 @@
 #include "sim_render_metadata.h"
 #include "types.h"
 
-typedef struct Ppu Ppu;
-
 typedef struct Sim3DCaptureRequest {
   bool town;
   bool master_enabled;
@@ -45,7 +43,7 @@ typedef enum Sim3DCaptureContractFailure {
 } Sim3DCaptureContractFailure;
 
 enum {
-  kSim3DMaxWidth = 512,  /* kPpuBufWidth, asserted in sim3d.c */
+  kSim3DMaxWidth = 512,  /* Public PPU width ceiling, asserted in sim3d.c. */
   kSim3DMaxHeight = 240,
 };
 
@@ -84,7 +82,8 @@ bool Sim3D_BeginFrame(void);
  * before scanout. The known town-HUD BG3/OBJ captures are safely superseded by
  * the complete SIM planes; every other owner fails closed. SIM captures are
  * observational: the authentic PPU framebuffer is never removed or modified. */
-bool Sim3D_PrepareCapture(Ppu *ppu, const Sim3DCaptureRequest *request);
+bool Sim3D_PrepareCapture(
+    SrRunnerHandle *runner, const Sim3DCaptureRequest *request);
 
 Sim3DCaptureContractFailure Sim3D_GetCaptureContractFailure(void);
 
@@ -206,6 +205,6 @@ void Sim3D_ComposeFlatPixels(
  * expanded to 8 bits per channel through the PPU's brightness table. Shared so
  * the widescreen margin-gap fill (actraiser_ws_gap.h) and the sim-3D flat
  * composite cannot disagree about it. */
-uint32_t ActRaiser_BackdropArgb(const Ppu *ppu);
+uint32_t ActRaiser_BackdropArgb(uint16_t color, uint8_t brightness);
 
 #endif  /* SIM3D_H */

@@ -33,6 +33,8 @@ static uint32_t s_authentic_surface[384u * 253u];
 static uint32_t s_overlay_surface[384u * 232u];
 static uint32_t s_overlay_band_surface[384u * 232u];
 static uint32_t s_mode7_surface[768u * 506u];
+static uint16_t s_virtual_span_entries[4];
+static uint8_t s_virtual_context;
 
 typedef struct TestObserver {
     unsigned count;
@@ -51,6 +53,61 @@ typedef struct TestAudioTraceObserver {
     SrAudioTraceEvent events[4];
     uint8_t driver_bytes[4][3];
 } TestAudioTraceObserver;
+
+typedef struct TestPpuFrameTransactionObserver {
+    unsigned count;
+    int valid;
+    SrRunnerHandle *runner;
+} TestPpuFrameTransactionObserver;
+
+typedef struct TestPpuScanoutObserver {
+    Snes *snes;
+    unsigned before_count;
+    unsigned after_count;
+    unsigned irq_count;
+    uint32_t irq_line;
+    int valid;
+    int saw_hdma_before;
+    int saw_hdma_after;
+    int saw_indirect_before;
+    int saw_indirect_after;
+} TestPpuScanoutObserver;
+
+static uint32_t test_virtual_tile_lookup(
+        void *user_data, int32_t tile_x, int32_t tile_y,
+        uint16_t *entry) {
+    if (user_data != &s_virtual_context || entry == NULL) return 0u;
+    *entry = (uint16_t)((tile_x & 0xff) | ((tile_y & 0xff) << 8));
+    return 1u;
+}
+
+static uint32_t test_virtual_tile_span_lookup(
+        void *user_data, int32_t tile_x, int32_t tile_y,
+        int32_t tile_step, uint32_t capacity, const uint16_t **entries,
+        int64_t *word_stride) {
+    uint32_t count = capacity < 4u ? capacity : 4u;
+    uint32_t index;
+    if (user_data != &s_virtual_context || entries == NULL ||
+        word_stride == NULL || tile_step == 0)
+        return 0u;
+    for (index = 0u; index < count; ++index)
+        s_virtual_span_entries[index] = (uint16_t)(
+            ((tile_x + (int32_t)index * tile_step) & 0xff) |
+            ((tile_y & 0xff) << 8));
+    *entries = s_virtual_span_entries;
+    *word_stride = 1;
+    return count;
+}
+
+static uint32_t test_virtual_tile_band_lookup(
+        void *user_data, int32_t tile_x, int32_t tile_y,
+        uint16_t entry, uint8_t *band) {
+    (void)tile_x;
+    (void)tile_y;
+    if (user_data != &s_virtual_context || band == NULL) return 0u;
+    *band = (uint8_t)(entry & 3u);
+    return 1u;
+}
 
 static SrResult query_test_cpu_state(
         Snes *snes, SrCpuStateSnapshot *out_state) {
@@ -131,6 +188,90 @@ static void observe_test_audio_trace(void *user_data,
         observer->driver_bytes[index][2] = event->apu_ram[0x47];
     }
     observer->events[index].apu_ram = NULL;
+}
+
+static SrResult observe_test_ppu_frame_transaction(
+        void *user_data, SrRunnerHandle *runner,
+        const SrPpuFrameTransactionContext *context) {
+    TestPpuFrameTransactionObserver *observer =
+        (TestPpuFrameTransactionObserver *)user_data;
+    ++observer->count;
+    observer->runner = runner;
+    observer->valid = context != NULL &&
+        context->struct_size == SR_PPU_FRAME_TRANSACTION_CONTEXT_V2_SIZE &&
+        context->state.struct_size == SR_PPU_STATE_SNAPSHOT_V2_SIZE &&
+        context->frame.struct_size == SR_PPU_FRAME_SNAPSHOT_V2_SIZE &&
+        context->state.fixed_color == UINT16_C(0x3456) &&
+        context->frame.overlays[0].transparent_fill_mode ==
+            SR_PPU_TRANSPARENT_FILL_CGRAM &&
+        context->frame.overlays[0].transparent_fill_cgram == 8u &&
+        context->cgram.data != NULL &&
+        context->cgram.element_count == SR_PPU_CGRAM_WORD_COUNT &&
+        context->oam.data != NULL &&
+        context->oam.element_count == SR_PPU_OAM_WORD_COUNT &&
+        context->high_oam.data != NULL &&
+        context->high_oam.byte_size == SR_PPU_HIGH_OAM_BYTE_COUNT &&
+        context->overlays[0].data == (uint8_t *)s_overlay_surface &&
+        context->overlays[0].pitch_bytes == 384u * sizeof(uint32_t) &&
+        context->overlays[0].height_pixels == 232u;
+    return SR_RESULT_OK;
+}
+
+static void observe_test_ppu_scanout_line(
+        void *user_data, const SrPpuScanoutLineContext *context) {
+    TestPpuScanoutObserver *observer =
+        (TestPpuScanoutObserver *)user_data;
+    if (observer == NULL || context == NULL) return;
+    observer->valid &=
+        context->struct_size == SR_PPU_SCANOUT_LINE_CONTEXT_V2_SIZE &&
+        context->lifetime_generation ==
+            observer->snes->abiLifetimeGeneration &&
+        context->line <= SR_PPU_NATIVE_HEIGHT &&
+        context->channel_count == SR_DMA_CHANNEL_COUNT &&
+        context->state.struct_size == SR_PPU_STATE_SNAPSHOT_V2_SIZE &&
+        context->main_surface.data == (const uint8_t *)s_main_surface &&
+        context->authentic_surface.data ==
+            (const uint8_t *)s_authentic_surface;
+    if ((context->flags & SR_PPU_SCANOUT_LINE_BEFORE) != 0u) {
+        ++observer->before_count;
+        if (context->line == 0u &&
+            (context->channels[2].flags &
+             SR_PPU_SCANOUT_HDMA_ACTIVE) != 0u &&
+            context->channels[2].mode == 0u &&
+            context->channels[2].b_address == 0u)
+            observer->saw_hdma_before = 1;
+        if (context->line == 0u &&
+            context->channels[3].flags ==
+                (SR_PPU_SCANOUT_HDMA_ACTIVE |
+                 SR_PPU_SCANOUT_HDMA_INDIRECT) &&
+            context->channels[3].indirect_bank == 0x7eu)
+            observer->saw_indirect_before = 1;
+    } else if ((context->flags &
+                SR_PPU_SCANOUT_LINE_AFTER_HDMA) != 0u) {
+        ++observer->after_count;
+        if (context->line == 0u &&
+            context->state.display_control == 0x8fu &&
+            context->channels[2].repeat_count == 0u)
+            observer->saw_hdma_after = 1;
+        if (context->line == 0u &&
+            context->state.bg_mode_control == 0x09u &&
+            context->channels[3].repeat_count == 0u)
+            observer->saw_indirect_after = 1;
+    } else {
+        observer->valid = 0;
+    }
+}
+
+static void observe_test_ppu_scanout_irq(
+        void *user_data, uint32_t line) {
+    TestPpuScanoutObserver *observer =
+        (TestPpuScanoutObserver *)user_data;
+    if (observer == NULL || observer->snes == NULL) return;
+    ++observer->irq_count;
+    observer->irq_line = line;
+    observer->valid &= observer->snes->inIrq;
+    observer->snes->inIrq = false;
+    observer->snes->vIrqEnabled = false;
 }
 
 static void mix_test_audio(int16 *buffer, int frames) {
@@ -352,6 +493,79 @@ int main(void) {
     SrPpuOverlayCaptureRequest capture_request = {
         .struct_size = sizeof(capture_request),
     };
+    SrPpuOverlayCaptureExchangeRequest capture_exchange = {
+        .struct_size = sizeof(capture_exchange),
+    };
+    SrPpuVramWordPatch vram_patches[2] = {0};
+    SrPpuVramPatchRequest vram_patch_request = {
+        .struct_size = sizeof(vram_patch_request),
+        .patches = vram_patches,
+        .patch_count = 2u,
+    };
+    SrPpuObjPositionUpdate obj_position_updates[2] = {0};
+    SrPpuObjMetadataRequest obj_metadata_request = {
+        .struct_size = sizeof(obj_metadata_request),
+        .updates = obj_position_updates,
+        .update_count = 2u,
+    };
+    SrPpuObjMetadataRequest small_obj_metadata_request = {
+        .struct_size = sizeof(uint32_t),
+        .flags = SR_PPU_OBJ_METADATA_CLEAR_POSITIONS,
+    };
+    SrDmaStateSnapshot dma_state = {
+        .struct_size = sizeof(dma_state),
+    };
+    SrDmaStateSnapshot small_dma_state = {
+        .struct_size = sizeof(uint32_t),
+    };
+    SrPpuLayerExtentUpdate layer_extent_updates[2] = {0};
+    SrPpuLayerExtentRequest layer_extent_request = {
+        .struct_size = sizeof(layer_extent_request),
+        .updates = layer_extent_updates,
+        .update_count = 2u,
+    };
+    SrPpuVirtualTilemapRequest virtual_tilemap_request = {
+        .struct_size = sizeof(virtual_tilemap_request),
+    };
+    uint16_t authentic_bg1[SR_PPU_NATIVE_HEIGHT] = {0};
+    uint16_t authentic_bg2[SR_PPU_NATIVE_HEIGHT] = {0};
+    SrPpuAuthenticCameraRequest authentic_camera_request = {
+        .struct_size = sizeof(authentic_camera_request),
+    };
+    TestPpuScanoutObserver scanout_observer = {
+        .valid = 1,
+    };
+    SrPpuScanoutRequest scanout_request = {
+        .struct_size = sizeof(scanout_request),
+        .hdma_channel_mask = 0x0cu,
+        .line_callback = observe_test_ppu_scanout_line,
+        .irq_callback = observe_test_ppu_scanout_irq,
+        .user_data = &scanout_observer,
+    };
+    SrPpuScanoutRequest small_scanout_request = {
+        .struct_size = sizeof(uint32_t),
+        .irq_callback = observe_test_ppu_scanout_irq,
+    };
+    SrPpuScanoutResult scanout_result = {
+        .struct_size = sizeof(scanout_result),
+    };
+    SrPpuScanoutResult small_scanout_result = {
+        .struct_size = sizeof(uint32_t),
+    };
+    SrGenerationSnapshot ppu_generation = {
+        .struct_size = sizeof(ppu_generation),
+    };
+    TestPpuFrameTransactionObserver ppu_transaction_observer = {0};
+    SrPpuFrameTransactionRequest ppu_transaction_request = {
+        .struct_size = sizeof(ppu_transaction_request),
+        .callback = observe_test_ppu_frame_transaction,
+        .user_data = &ppu_transaction_observer,
+    };
+    SrPpuFrameTransactionRequest small_ppu_transaction_request = {
+        .struct_size = sizeof(uint32_t),
+        .callback = observe_test_ppu_frame_transaction,
+        .user_data = &ppu_transaction_observer,
+    };
     SrPpuMode7OverrideRequest mode7_override_request = {
         .struct_size = sizeof(mode7_override_request),
     };
@@ -525,6 +739,50 @@ int main(void) {
                         SNES_RUNNER_API_PPU_CAPTURE_CONTROL_SIZE <=
                             sizeof(SnesRunnerApi),
                     "PPU capture control extent exceeds structure");
+    failed |= check(SR_PPU_OVERLAY_CAPTURE_EXCHANGE_REQUEST_V2_SIZE <=
+                            sizeof(SrPpuOverlayCaptureExchangeRequest) &&
+                        SR_PPU_FRAME_TRANSACTION_CONTEXT_V2_SIZE <=
+                            sizeof(SrPpuFrameTransactionContext) &&
+                        SR_PPU_FRAME_TRANSACTION_REQUEST_V2_SIZE <=
+                            sizeof(SrPpuFrameTransactionRequest) &&
+                        SNES_RUNNER_API_PPU_FRAME_TRANSACTION_SIZE <=
+                            sizeof(SnesRunnerApi),
+                    "PPU frame transaction extent exceeds structure");
+    failed |= check(sizeof(SrPpuVramWordPatch) == 8u &&
+                        SR_PPU_VRAM_PATCH_REQUEST_V2_SIZE <=
+                            sizeof(SrPpuVramPatchRequest) &&
+                        SNES_RUNNER_API_PPU_VRAM_PATCH_SIZE <=
+                            sizeof(SnesRunnerApi),
+                    "PPU VRAM patch extent exceeds structure");
+    failed |= check(sizeof(SrPpuObjPositionUpdate) == 8u &&
+                        SR_PPU_OBJ_METADATA_REQUEST_V2_SIZE <=
+                            sizeof(SrPpuObjMetadataRequest) &&
+                        SNES_RUNNER_API_PPU_OBJ_METADATA_SIZE <=
+                            sizeof(SnesRunnerApi),
+                    "PPU OBJ metadata extent exceeds structure");
+    failed |= check(SR_DMA_STATE_SNAPSHOT_V2_SIZE <=
+                            sizeof(SrDmaStateSnapshot) &&
+                        SNES_RUNNER_API_DMA_STATE_SIZE <=
+                            sizeof(SnesRunnerApi),
+                    "DMA state extent exceeds structure");
+    failed |= check(SR_PPU_LAYER_EXTENT_REQUEST_V2_SIZE <=
+                            sizeof(SrPpuLayerExtentRequest) &&
+                        SR_PPU_VIRTUAL_TILEMAP_REQUEST_V2_SIZE <=
+                            sizeof(SrPpuVirtualTilemapRequest) &&
+                        SR_PPU_AUTHENTIC_CAMERA_REQUEST_V2_SIZE <=
+                            sizeof(SrPpuAuthenticCameraRequest) &&
+                        SNES_RUNNER_API_PPU_BACKGROUND_POLICY_SIZE <=
+                            sizeof(SnesRunnerApi),
+                    "PPU background policy extent exceeds structure");
+    failed |= check(SR_PPU_SCANOUT_LINE_CONTEXT_V2_SIZE <=
+                            sizeof(SrPpuScanoutLineContext) &&
+                        SR_PPU_SCANOUT_REQUEST_V2_SIZE <=
+                            sizeof(SrPpuScanoutRequest) &&
+                        SR_PPU_SCANOUT_RESULT_V2_SIZE <=
+                            sizeof(SrPpuScanoutResult) &&
+                        SNES_RUNNER_API_PPU_SCANOUT_SIZE <=
+                            sizeof(SnesRunnerApi),
+                    "PPU scanout extent exceeds structure");
     failed |= check(SR_CPU_MATH_STATE_V2_SIZE <= sizeof(SrCpuMathState) &&
                         SNES_RUNNER_API_CPU_MATH_STATE_SIZE <=
                             sizeof(SnesRunnerApi),
@@ -603,7 +861,12 @@ int main(void) {
                           SR_RUNNER_CAP_PPU_SURFACE_VIEWS |
                           SR_RUNNER_CAP_PPU_BACKGROUND_COORDINATE |
                           SR_RUNNER_CAP_PPU_OUTPUT_CONTROL |
-                          SR_RUNNER_CAP_PPU_CAPTURE_CONTROL)) ==
+                          SR_RUNNER_CAP_PPU_CAPTURE_CONTROL |
+                          SR_RUNNER_CAP_PPU_FRAME_TRANSACTIONS |
+                          SR_RUNNER_CAP_PPU_VRAM_PATCH |
+                          SR_RUNNER_CAP_PPU_OBJ_METADATA |
+                          SR_RUNNER_CAP_PPU_BACKGROUND_POLICY |
+                          SR_RUNNER_CAP_PPU_SCANOUT)) ==
                         (SR_RUNNER_CAP_PPU_STATE |
                          SR_RUNNER_CAP_BORROWED_U16_SPANS |
                          SR_RUNNER_CAP_PPU_FRAME_STATE |
@@ -611,8 +874,15 @@ int main(void) {
                          SR_RUNNER_CAP_PPU_SURFACE_VIEWS |
                          SR_RUNNER_CAP_PPU_BACKGROUND_COORDINATE |
                          SR_RUNNER_CAP_PPU_OUTPUT_CONTROL |
-                         SR_RUNNER_CAP_PPU_CAPTURE_CONTROL),
+                         SR_RUNNER_CAP_PPU_CAPTURE_CONTROL |
+                         SR_RUNNER_CAP_PPU_FRAME_TRANSACTIONS |
+                         SR_RUNNER_CAP_PPU_VRAM_PATCH |
+                         SR_RUNNER_CAP_PPU_OBJ_METADATA |
+                         SR_RUNNER_CAP_PPU_BACKGROUND_POLICY |
+                         SR_RUNNER_CAP_PPU_SCANOUT),
                     "PPU capabilities missing");
+    failed |= check((api->capabilities & SR_RUNNER_CAP_DMA_STATE) != 0u,
+                    "DMA state capability missing");
     failed |= check((api->capabilities &
                          (SR_RUNNER_CAP_EXECUTION_STATE |
                           SR_RUNNER_CAP_EVENT_OBSERVERS |
@@ -718,6 +988,7 @@ int main(void) {
     snes->ppu->wbgobjlog = 0x82u;
     snes->ppu->cgwsel = 0x73u;
     snes->ppu->cgadsub = 0x64u;
+    snes->ppu->fixedColor = 0x3456u;
     snes->ppu->hScroll[0] = 0x1234u;
     snes->ppu->vScroll[0] = 0x2345u;
     snes->ppu->screenEnabled[0] = 0x17u;
@@ -889,7 +1160,12 @@ int main(void) {
                         ppu_state.background_tile_base_control == 0x0005u &&
                         ppu_state.mode7_select == 0xc3u &&
                         ppu_state.mode7_matrix[0] == 0x1100 &&
-                        ppu_state.mode7_matrix[7] == 0x1107,
+                        ppu_state.mode7_matrix[7] == 0x1107 &&
+                        ppu_state.fixed_color == 0x3456u &&
+                        ppu_state.reserved16 == 0u &&
+                        ppu_state.object_small_size_pixels == 16u &&
+                        ppu_state.object_large_size_pixels == 32u &&
+                        ppu_state.reserved16_2 == 0u,
                     "PPU v2 raw-control snapshot mismatch");
     failed |= check(api->query_ppu_state(runner, &small_ppu_state) ==
                         SR_RESULT_INVALID_ARGUMENT,
@@ -920,6 +1196,9 @@ int main(void) {
                         ppu_frame.overlays[0].transparent_fill_argb ==
                             UINT32_C(0xff8f791c) &&
                         ppu_frame.overlays[0].transparent_fill_configured == 1u &&
+                        ppu_frame.overlays[0].transparent_fill_mode ==
+                            SR_PPU_TRANSPARENT_FILL_CGRAM &&
+                        ppu_frame.overlays[0].transparent_fill_cgram == 8u &&
                         ppu_frame.overlays[0].oam_first == 7u &&
                         ppu_frame.overlays[0].oam_count == 9u,
                     "PPU overlay snapshot mismatch");
@@ -1083,6 +1362,17 @@ int main(void) {
                          SR_PPU_SURFACE_HAS_CONTENT) != 0u &&
                         ppu_surfaces.overlays[1][0].data == NULL,
                     "overlay PPU surface mismatch");
+    failed |= check(api->visit_ppu_frame_transaction(
+                        runner, &small_ppu_transaction_request) ==
+                            SR_RESULT_INVALID_ARGUMENT &&
+                        ppu_transaction_observer.count == 0u,
+                    "undersized PPU frame transaction accepted");
+    failed |= check(api->visit_ppu_frame_transaction(
+                        runner, &ppu_transaction_request) == SR_RESULT_OK &&
+                        ppu_transaction_observer.count == 1u &&
+                        ppu_transaction_observer.runner == runner &&
+                        ppu_transaction_observer.valid,
+                    "coherent PPU frame transaction view mismatch");
     /* Presentation may restore a short HUD capture after a full separated
      * plane was rendered. The bound buffer capacity, not that later policy,
      * remains the readable surface extent. */
@@ -1225,6 +1515,85 @@ int main(void) {
                         runner, &capture_request) ==
                             SR_RESULT_INVALID_ARGUMENT,
                     "invalid PPU overlay capture flags accepted");
+
+    {
+        const SrPpuOverlayCaptureState original = {
+            .x0 = -8,
+            .x1 = 112,
+            .y0 = 4,
+            .y1 = 36,
+            .flags = SR_PPU_OVERLAY_REMOVE_FROM_GAME |
+                     SR_PPU_OVERLAY_MARK_MAIN_SCREEN_WINNER,
+            .transparent_fill_configured = 1u,
+            .transparent_fill_mode = SR_PPU_TRANSPARENT_FILL_CGRAM,
+            .transparent_fill_cgram = 0x36u,
+        };
+        const SrPpuOverlayCaptureState temporary = {
+            .x0 = -4,
+            .x1 = 124,
+            .y0 = 0,
+            .y1 = 48,
+            .flags = SR_PPU_OVERLAY_MARK_BG_HALF_ADD,
+            .transparent_fill_configured = 1u,
+            .transparent_fill_mode = SR_PPU_TRANSPARENT_FILL_BLACK,
+        };
+        failed |= check(PpuSetOverlayTransparentFill(
+                            snes->ppu, kPpuOverlaySource_Bg2,
+                            kPpuOverlayTransparentFill_Cgram, 0x36u),
+                        "PPU capture exchange fill fixture failed");
+        capture_exchange = (SrPpuOverlayCaptureExchangeRequest) {
+            .struct_size = sizeof(capture_exchange),
+            .source_mask = 1u << SR_PPU_OVERLAY_BG2,
+        };
+        capture_exchange.expected[SR_PPU_OVERLAY_BG2] = original;
+        capture_exchange.replacement[SR_PPU_OVERLAY_BG2] = temporary;
+        failed |= check(api->compare_exchange_ppu_overlay_captures(
+                            runner, &capture_exchange) == SR_RESULT_OK &&
+                            snes->ppu->overlayCaptures[
+                                SR_PPU_OVERLAY_BG2].x0 == -4 &&
+                            snes->ppu->overlayCaptures[
+                                SR_PPU_OVERLAY_BG2].x1 == 124 &&
+                            snes->ppu->overlayCaptures[
+                                SR_PPU_OVERLAY_BG2].flags ==
+                                SR_PPU_OVERLAY_MARK_BG_HALF_ADD &&
+                            snes->ppu->overlayCaptures[
+                                SR_PPU_OVERLAY_BG2]
+                                    .transparentFillConfigured == 1u &&
+                            snes->ppu->overlayCaptures[
+                                SR_PPU_OVERLAY_BG2].transparentFillMode ==
+                                kPpuOverlayTransparentFill_Black,
+                        "PPU capture compare/exchange failed");
+        failed |= check(api->compare_exchange_ppu_overlay_captures(
+                            runner, &capture_exchange) == SR_RESULT_BUSY &&
+                            snes->ppu->overlayCaptures[
+                                SR_PPU_OVERLAY_BG2].x0 == -4,
+                        "stale PPU capture expectation was accepted");
+        capture_exchange.expected[SR_PPU_OVERLAY_BG2] = temporary;
+        capture_exchange.replacement[SR_PPU_OVERLAY_BG2] = original;
+        failed |= check(api->compare_exchange_ppu_overlay_captures(
+                        runner, &capture_exchange) == SR_RESULT_OK &&
+                            snes->ppu->overlayCaptures[
+                                SR_PPU_OVERLAY_BG2].x0 == -8 &&
+                            snes->ppu->overlayCaptures[
+                                SR_PPU_OVERLAY_BG2].transparentFillMode ==
+                                kPpuOverlayTransparentFill_Cgram &&
+                            snes->ppu->overlayCaptures[
+                                SR_PPU_OVERLAY_BG2].transparentFillCgram ==
+                                0x36u,
+                        "PPU capture policy restore failed");
+        capture_exchange.lifetime_generation++;
+        failed |= check(api->compare_exchange_ppu_overlay_captures(
+                            runner, &capture_exchange) ==
+                                SR_RESULT_STALE_VIEW,
+                        "stale PPU capture exchange accepted");
+        capture_exchange.lifetime_generation--;
+        capture_exchange.replacement[
+            SR_PPU_OVERLAY_BG2].reserved8[0] = 1u;
+        failed |= check(api->compare_exchange_ppu_overlay_captures(
+                            runner, &capture_exchange) ==
+                                SR_RESULT_INVALID_ARGUMENT,
+                        "invalid PPU capture policy accepted");
+    }
 
     mode7_override_request = (SrPpuMode7OverrideRequest) {
         .struct_size = sizeof(mode7_override_request),
@@ -2029,6 +2398,486 @@ int main(void) {
                         "audio mix gains mismatch");
     }
     failed |= check_generation(api, runner, 10u, 2u, 1u, 1u, 6u);
+
+    snes->ppu->vram[0x0123u] = 0x1111u;
+    snes->ppu->vram[0x0456u] = 0x2222u;
+    vram_patches[0] = (SrPpuVramWordPatch) {
+        .word_address = 0x0123u,
+        .expected = 0x1111u,
+        .replacement = 0xaaaau,
+    };
+    vram_patches[1] = (SrPpuVramWordPatch) {
+        .word_address = 0x0456u,
+        .expected = 0x2222u,
+        .replacement = 0xbbbbu,
+    };
+    failed |= check(api->query_generations(runner, &ppu_generation) ==
+                        SR_RESULT_OK,
+                    "PPU VRAM patch generation query failed");
+    vram_patch_request.lifetime_generation =
+        ppu_generation.lifetime_generation;
+    failed |= check(api->compare_exchange_ppu_vram_words(
+                        runner, &vram_patch_request) == SR_RESULT_OK &&
+                        snes->ppu->vram[0x0123u] == 0xaaaau &&
+                        snes->ppu->vram[0x0456u] == 0xbbbbu,
+                    "atomic PPU VRAM patch failed");
+    failed |= check(api->compare_exchange_ppu_vram_words(
+                        runner, &vram_patch_request) ==
+                            SR_RESULT_STALE_VIEW,
+                    "stale PPU VRAM patch accepted");
+
+    failed |= check(api->query_generations(runner, &ppu_generation) ==
+                        SR_RESULT_OK,
+                    "PPU VRAM restore generation query failed");
+    vram_patch_request.lifetime_generation =
+        ppu_generation.lifetime_generation;
+    vram_patches[0].expected = 0xaaaau;
+    vram_patches[0].replacement = 0x1111u;
+    vram_patches[1].expected = 0xbbbbu;
+    vram_patches[1].replacement = 0x2222u;
+    failed |= check(api->compare_exchange_ppu_vram_words(
+                        runner, &vram_patch_request) == SR_RESULT_OK &&
+                        snes->ppu->vram[0x0123u] == 0x1111u &&
+                        snes->ppu->vram[0x0456u] == 0x2222u,
+                    "atomic PPU VRAM restore failed");
+
+    failed |= check(api->query_generations(runner, &ppu_generation) ==
+                        SR_RESULT_OK,
+                    "sorted PPU VRAM patch generation query failed");
+    vram_patch_request.flags = SR_PPU_VRAM_PATCH_ADDRESSES_SORTED;
+    vram_patch_request.lifetime_generation =
+        ppu_generation.lifetime_generation;
+    vram_patches[0].expected = vram_patches[0].replacement = 0x1111u;
+    vram_patches[1].expected = vram_patches[1].replacement = 0x2222u;
+    failed |= check(api->compare_exchange_ppu_vram_words(
+                        runner, &vram_patch_request) == SR_RESULT_OK,
+                    "sorted PPU VRAM no-op patch failed");
+    {
+        SrPpuVramWordPatch temporary = vram_patches[0];
+        vram_patches[0] = vram_patches[1];
+        vram_patches[1] = temporary;
+    }
+    failed |= check(api->compare_exchange_ppu_vram_words(
+                        runner, &vram_patch_request) ==
+                            SR_RESULT_INVALID_ARGUMENT,
+                    "unsorted PPU VRAM patch accepted as sorted");
+    {
+        SrPpuVramWordPatch temporary = vram_patches[0];
+        vram_patches[0] = vram_patches[1];
+        vram_patches[1] = temporary;
+    }
+    vram_patch_request.flags = 2u;
+    failed |= check(api->compare_exchange_ppu_vram_words(
+                        runner, &vram_patch_request) ==
+                            SR_RESULT_INVALID_ARGUMENT,
+                    "unknown PPU VRAM patch flag accepted");
+    vram_patch_request.flags = 0u;
+
+    failed |= check(api->query_generations(runner, &ppu_generation) ==
+                        SR_RESULT_OK,
+                    "PPU VRAM contention generation query failed");
+    vram_patch_request.lifetime_generation =
+        ppu_generation.lifetime_generation;
+    vram_patches[0].expected = 0x1111u;
+    vram_patches[0].replacement = 0x3333u;
+    vram_patches[1].expected = 0xffffu;
+    vram_patches[1].replacement = 0x4444u;
+    failed |= check(api->compare_exchange_ppu_vram_words(
+                        runner, &vram_patch_request) == SR_RESULT_BUSY &&
+                        snes->ppu->vram[0x0123u] == 0x1111u &&
+                        snes->ppu->vram[0x0456u] == 0x2222u,
+                    "contended PPU VRAM patch was partially applied");
+    vram_patches[1] = vram_patches[0];
+    failed |= check(api->compare_exchange_ppu_vram_words(
+                        runner, &vram_patch_request) ==
+                            SR_RESULT_INVALID_ARGUMENT,
+                    "duplicate PPU VRAM patch address accepted");
+    vram_patches[1].word_address = 0x0456u;
+    vram_patches[1].reserved = 1u;
+    failed |= check(api->compare_exchange_ppu_vram_words(
+                        runner, &vram_patch_request) ==
+                            SR_RESULT_INVALID_ARGUMENT,
+                    "reserved PPU VRAM patch field accepted");
+
+    PpuSetObjExactPosition(snes->ppu, 9u, 90, 91);
+    PpuSetObjCameraRelative(snes->ppu, 9u, true);
+    snes->ppu->objScanlineMasksValid = true;
+    obj_position_updates[0] = (SrPpuObjPositionUpdate) {
+        .x = -40,
+        .y = 230,
+        .slot = 3u,
+        .flags = SR_PPU_OBJ_POSITION_CAMERA_RELATIVE,
+    };
+    obj_position_updates[1] = (SrPpuObjPositionUpdate) {
+        .x = 300,
+        .y = -18,
+        .slot = 7u,
+    };
+    failed |= check(api->query_generations(runner, &ppu_generation) ==
+                        SR_RESULT_OK,
+                    "PPU OBJ metadata generation query failed");
+    obj_metadata_request.flags =
+        SR_PPU_OBJ_METADATA_CLEAR_POSITIONS |
+        SR_PPU_OBJ_METADATA_CLEAR_CAMERA_RELATIVE;
+    obj_metadata_request.lifetime_generation =
+        ppu_generation.lifetime_generation;
+    failed |= check(api->update_ppu_obj_metadata(
+                        runner, &obj_metadata_request) == SR_RESULT_OK &&
+                        snes->ppu->objPosValid[3] == 1u &&
+                        snes->ppu->objPosX[3] == -40 &&
+                        snes->ppu->objPosY[3] == 230 &&
+                        snes->ppu->objCameraRelative[3] &&
+                        snes->ppu->objPosValid[7] == 1u &&
+                        snes->ppu->objPosX[7] == 300 &&
+                        snes->ppu->objPosY[7] == -18 &&
+                        !snes->ppu->objCameraRelative[7] &&
+                        snes->ppu->objPosValid[9] == 0u &&
+                        !snes->ppu->objCameraRelative[9] &&
+                        !snes->ppu->objScanlineMasksValid,
+                    "batched PPU OBJ metadata update mismatch");
+    failed |= check_generation(api, runner, 12u, 2u, 1u, 1u, 8u);
+
+    obj_metadata_request.flags = 0u;
+    obj_metadata_request.update_count = 1u;
+    obj_position_updates[0] = (SrPpuObjPositionUpdate) {
+        .x = 41,
+        .y = 42,
+        .slot = 7u,
+    };
+    failed |= check(api->update_ppu_obj_metadata(
+                        runner, &obj_metadata_request) == SR_RESULT_OK &&
+                        snes->ppu->objPosValid[3] == 1u &&
+                        snes->ppu->objPosX[7] == 41 &&
+                        snes->ppu->objPosY[7] == 42 &&
+                        !snes->ppu->objCameraRelative[7],
+                    "incremental PPU OBJ metadata update mismatch");
+
+    obj_metadata_request.lifetime_generation++;
+    failed |= check(api->update_ppu_obj_metadata(
+                        runner, &obj_metadata_request) ==
+                            SR_RESULT_STALE_VIEW &&
+                        snes->ppu->objPosX[7] == 41,
+                    "stale PPU OBJ metadata update accepted");
+    obj_metadata_request.lifetime_generation--;
+
+    obj_metadata_request.flags =
+        SR_PPU_OBJ_METADATA_CLEAR_POSITIONS |
+        SR_PPU_OBJ_METADATA_CLEAR_CAMERA_RELATIVE;
+    obj_metadata_request.update_count = 2u;
+    obj_position_updates[0].slot = 3u;
+    obj_position_updates[1] = obj_position_updates[0];
+    obj_position_updates[1].x = 99;
+    failed |= check(api->update_ppu_obj_metadata(
+                        runner, &obj_metadata_request) ==
+                            SR_RESULT_INVALID_ARGUMENT &&
+                        snes->ppu->objPosValid[3] == 1u &&
+                        snes->ppu->objPosValid[7] == 1u,
+                    "invalid PPU OBJ batch cleared existing metadata");
+    obj_position_updates[1].slot = 128u;
+    failed |= check(api->update_ppu_obj_metadata(
+                        runner, &obj_metadata_request) ==
+                            SR_RESULT_INVALID_ARGUMENT,
+                    "out-of-range PPU OBJ slot accepted");
+    obj_position_updates[1].slot = 8u;
+    obj_position_updates[1].flags = 2u;
+    failed |= check(api->update_ppu_obj_metadata(
+                        runner, &obj_metadata_request) ==
+                            SR_RESULT_INVALID_ARGUMENT,
+                    "unknown PPU OBJ position flag accepted");
+    obj_position_updates[1].flags = 0u;
+    obj_position_updates[1].reserved = 1u;
+    failed |= check(api->update_ppu_obj_metadata(
+                        runner, &obj_metadata_request) ==
+                            SR_RESULT_INVALID_ARGUMENT,
+                    "reserved PPU OBJ position field accepted");
+    obj_position_updates[1].reserved = 0u;
+    obj_metadata_request.flags = 4u;
+    failed |= check(api->update_ppu_obj_metadata(
+                        runner, &obj_metadata_request) ==
+                            SR_RESULT_INVALID_ARGUMENT,
+                    "unknown PPU OBJ metadata request flag accepted");
+    obj_metadata_request.flags = SR_PPU_OBJ_METADATA_CLEAR_POSITIONS;
+    obj_metadata_request.updates = NULL;
+    obj_metadata_request.update_count = 0u;
+    failed |= check(api->update_ppu_obj_metadata(
+                        runner, &obj_metadata_request) == SR_RESULT_OK &&
+                        snes->ppu->objPosValid[3] == 0u &&
+                        snes->ppu->objPosValid[7] == 0u,
+                    "clear-only PPU OBJ metadata request failed");
+    failed |= check(api->update_ppu_obj_metadata(
+                        runner, &small_obj_metadata_request) ==
+                            SR_RESULT_INVALID_ARGUMENT,
+                    "undersized PPU OBJ metadata request accepted");
+
+    snes->dma->dmaBusy = true;
+    snes->dma->dmaTimer = 1234u;
+    snes->dma->channel[2].hdmaActive = true;
+    snes->dma->channel[2].indirect = true;
+    snes->dma->channel[2].mode = 2u;
+    snes->dma->channel[2].aAdr = 0x6800u;
+    snes->dma->channel[2].aBank = 0x7eu;
+    snes->dma->channel[2].bAdr = 0x0fu;
+    snes->dma->channel[2].tableAdr = 0x6812u;
+    snes->dma->channel[2].repCount = 0x82u;
+    failed |= check(api->query_dma_state(runner, &dma_state) ==
+                        SR_RESULT_OK &&
+                        dma_state.struct_size ==
+                            SR_DMA_STATE_SNAPSHOT_V2_SIZE &&
+                        dma_state.lifetime_generation ==
+                            snes->abiLifetimeGeneration &&
+                        dma_state.flags == SR_DMA_STATE_BUSY &&
+                        dma_state.timer == 1234u &&
+                        dma_state.channel_count == SR_DMA_CHANNEL_COUNT &&
+                        (dma_state.channels[2].flags &
+                         (SR_DMA_CHANNEL_HDMA_ACTIVE |
+                          SR_DMA_CHANNEL_INDIRECT)) ==
+                            (SR_DMA_CHANNEL_HDMA_ACTIVE |
+                             SR_DMA_CHANNEL_INDIRECT) &&
+                        dma_state.channels[2].mode == 2u &&
+                        dma_state.channels[2].a_address == 0x6800u &&
+                        dma_state.channels[2].a_bank == 0x7eu &&
+                        dma_state.channels[2].b_address == 0x0fu &&
+                        dma_state.channels[2].table_address == 0x6812u &&
+                        dma_state.channels[2].repeat_count == 0x82u,
+                    "DMA state snapshot mismatch");
+    failed |= check(api->query_dma_state(runner, &small_dma_state) ==
+                        SR_RESULT_INVALID_ARGUMENT,
+                    "undersized DMA state output accepted");
+
+    failed |= check(api->query_generations(runner, &ppu_generation) ==
+                        SR_RESULT_OK,
+                    "background-policy generation query failed");
+    layer_extent_request.lifetime_generation =
+        ppu_generation.lifetime_generation;
+    layer_extent_updates[0] = (SrPpuLayerExtentUpdate) {
+        .kind = SR_PPU_LAYER_EXTENT_DEFAULT,
+        .layer = 1u,
+        .left = 40u,
+        .right = 52u,
+        .top = 7u,
+        .bottom = 9u,
+    };
+    layer_extent_updates[1] = (SrPpuLayerExtentUpdate) {
+        .kind = SR_PPU_LAYER_EXTENT_HORIZONTAL_BAND,
+        .layer = 1u,
+        .y0 = 100u,
+        .y1 = 120u,
+        .left = SR_PPU_LAYER_EXTENT_AVAILABLE,
+        .right = 3u,
+    };
+    failed |= check(api->update_ppu_layer_extents(
+                        runner, &layer_extent_request) == SR_RESULT_OK &&
+                        snes->ppu->wsLayerExtentLeftDefault[1] == 40u &&
+                        snes->ppu->wsLayerExtentRightDefault[1] == 52u &&
+                        snes->ppu->wsLayerExtentTop[1] == 7u &&
+                        snes->ppu->wsLayerExtentBottom[1] == 9u &&
+                        snes->ppu->wsLayerExtentLeft[1][99] == 40u &&
+                        snes->ppu->wsLayerExtentLeft[1][100] == 0xffffu &&
+                        snes->ppu->wsLayerExtentRight[1][119] == 3u &&
+                        snes->ppu->wsLayerExtentRight[1][120] == 52u,
+                    "PPU layer-extent batch mismatch");
+    layer_extent_updates[0].left = 11u;
+    layer_extent_updates[1].y1 = SR_PPU_NATIVE_HEIGHT + 1u;
+    failed |= check(api->update_ppu_layer_extents(
+                        runner, &layer_extent_request) ==
+                            SR_RESULT_INVALID_ARGUMENT &&
+                        snes->ppu->wsLayerExtentLeftDefault[1] == 40u,
+                    "invalid PPU layer-extent batch partially applied");
+    layer_extent_updates[1].y1 = 120u;
+    layer_extent_request.lifetime_generation++;
+    failed |= check(api->update_ppu_layer_extents(
+                        runner, &layer_extent_request) ==
+                            SR_RESULT_STALE_VIEW,
+                    "stale PPU layer-extent batch accepted");
+    layer_extent_request.lifetime_generation--;
+
+    virtual_tilemap_request.lifetime_generation =
+        ppu_generation.lifetime_generation;
+    virtual_tilemap_request.layer_mask = 1u;
+    virtual_tilemap_request.bindings[0] =
+        (SrPpuVirtualTilemapBinding) {
+            .lookup = test_virtual_tile_lookup,
+            .lookup_span = test_virtual_tile_span_lookup,
+            .band_lookup = test_virtual_tile_band_lookup,
+            .user_data = &s_virtual_context,
+            .camera_x = -20,
+            .camera_y = 30,
+            .hscroll_anchor = 0x3ffu,
+            .vscroll_anchor = 0x123u,
+            .flags = SR_PPU_VIRTUAL_TILEMAP_INCLUDE_AUTHENTIC,
+        };
+    failed |= check(api->replace_ppu_virtual_tilemaps(
+                        runner, &virtual_tilemap_request) == SR_RESULT_OK &&
+                        snes->ppu->virtualTilemap[0].lookup != NULL &&
+                        snes->ppu->virtualTilemap[0].lookup_span != NULL &&
+                        snes->ppu->virtualTilemap[0].band_lookup != NULL &&
+                        snes->ppu->virtualTilemap[0].camera_x == -20 &&
+                        snes->ppu->virtualTilemap[0].camera_y == 30 &&
+                        snes->ppu->virtualTilemap[0].hscroll_anchor ==
+                            0x3ffu &&
+                        snes->ppu->virtualTilemap[1].lookup == NULL,
+                    "PPU virtual-tilemap replacement mismatch");
+    {
+        uint16_t entry = 0u;
+        uint8_t band = 0xffu;
+        const uint16_t *entries = NULL;
+        ptrdiff_t stride = 0;
+        const PpuVirtualTilemapBinding *binding =
+            &snes->ppu->virtualTilemap[0];
+        failed |= check(binding->lookup(
+                            binding->context, 5, 7, &entry) &&
+                            entry == 0x0705u &&
+                            binding->band_lookup(
+                                binding->context, 5, 7, entry, &band) &&
+                            band == 1u &&
+                            binding->lookup_span(
+                                binding->context, 8, 9, 1, 3u,
+                                &entries, &stride) == 3u &&
+                            entries == s_virtual_span_entries &&
+                            stride == 1 && entries[2] == 0x090au,
+                        "PPU virtual-tilemap callback bridge mismatch");
+    }
+    virtual_tilemap_request.layer_mask = 3u;
+    failed |= check(api->replace_ppu_virtual_tilemaps(
+                        runner, &virtual_tilemap_request) ==
+                            SR_RESULT_INVALID_ARGUMENT &&
+                        snes->ppu->virtualTilemap[0].lookup != NULL,
+                    "invalid PPU virtual-tilemap replacement cleared prior binding");
+    virtual_tilemap_request.layer_mask = 0u;
+    failed |= check(api->replace_ppu_virtual_tilemaps(
+                        runner, &virtual_tilemap_request) == SR_RESULT_OK &&
+                        snes->ppu->virtualTilemap[0].lookup == NULL,
+                    "PPU virtual-tilemap clear failed");
+
+    for (uint32_t row = 0u; row < SR_PPU_NATIVE_HEIGHT; ++row) {
+        authentic_bg1[row] = (uint16_t)(0x100u + row);
+        authentic_bg2[row] = (uint16_t)(0x200u + row);
+    }
+    authentic_camera_request.flags = SR_PPU_AUTHENTIC_CAMERA_CLEAR;
+    authentic_camera_request.lifetime_generation =
+        ppu_generation.lifetime_generation;
+    authentic_camera_request.layer_mask = SR_PPU_AUTHENTIC_CAMERA_ALL;
+    authentic_camera_request.row_count = SR_PPU_NATIVE_HEIGHT;
+    authentic_camera_request.bg1_hscroll = authentic_bg1;
+    authentic_camera_request.bg2_hscroll = authentic_bg2;
+    authentic_camera_request.object_offset_x = -77;
+    failed |= check(api->update_ppu_authentic_camera(
+                        runner, &authentic_camera_request) == SR_RESULT_OK &&
+                        snes->ppu->authenticHScrollMask ==
+                            SR_PPU_AUTHENTIC_CAMERA_ALL &&
+                        snes->ppu->authenticHScroll[0][0] == 0x100u &&
+                        snes->ppu->authenticHScroll[0][223] == 0x1dfu &&
+                        snes->ppu->authenticHScroll[1][17] == 0x211u &&
+                        snes->ppu->authenticObjOffsetX == -77,
+                    "PPU authentic-camera replacement mismatch");
+    authentic_camera_request.row_count--;
+    failed |= check(api->update_ppu_authentic_camera(
+                        runner, &authentic_camera_request) ==
+                            SR_RESULT_INVALID_ARGUMENT &&
+                        snes->ppu->authenticHScrollMask ==
+                            SR_PPU_AUTHENTIC_CAMERA_ALL,
+                    "invalid PPU authentic-camera request cleared prior state");
+    authentic_camera_request = (SrPpuAuthenticCameraRequest) {
+        .struct_size = sizeof(authentic_camera_request),
+        .flags = SR_PPU_AUTHENTIC_CAMERA_CLEAR,
+        .lifetime_generation = ppu_generation.lifetime_generation,
+    };
+    failed |= check(api->update_ppu_authentic_camera(
+                        runner, &authentic_camera_request) == SR_RESULT_OK &&
+                        snes->ppu->authenticHScrollMask == 0u &&
+                        snes->ppu->authenticObjOffsetX == 0,
+                    "PPU authentic-camera clear failed");
+
+    /* The synchronous scanout service owns the generic PPU/HDMA schedule.
+     * Use one-line direct and indirect tables to update INIDISP and BGMODE,
+     * then verify both callback phases and the recompiled CPU's IRQ seam. */
+    PpuSetExtraSpace(snes->ppu, 0u);
+    PpuSetExtraVerticalSpace(snes->ppu, 0, 0);
+    snes->ppu->inidisp = 0x80u;
+    dma_reset(snes->dma);
+    wram[0x0100u] = 1u;
+    wram[0x0101u] = 0x8fu;
+    wram[0x0102u] = 0u;
+    snes->dma->channel[2].aBank = 0x7eu;
+    snes->dma->channel[2].aAdr = 0x0100u;
+    snes->dma->channel[2].bAdr = 0u;
+    snes->dma->channel[2].mode = 0u;
+    snes->dma->channel[2].indirect = false;
+    wram[0x0110u] = 1u;
+    wram[0x0111u] = 0x20u;
+    wram[0x0112u] = 0x01u;
+    wram[0x0113u] = 0u;
+    wram[0x0120u] = 0x09u;
+    snes->dma->channel[3].aBank = 0x7eu;
+    snes->dma->channel[3].aAdr = 0x0110u;
+    snes->dma->channel[3].bAdr = 5u;
+    snes->dma->channel[3].mode = 0u;
+    snes->dma->channel[3].indirect = true;
+    snes->dma->channel[3].indBank = 0x7eu;
+    snes->vIrqEnabled = true;
+    snes->vTimer = 3u;
+    scanout_observer.snes = snes;
+    scanout_request.lifetime_generation = snes->abiLifetimeGeneration;
+    {
+        const bool even_frame = snes->ppu->evenFrame;
+        failed |= check(api->run_ppu_scanout(
+                            runner, &small_scanout_request,
+                            &scanout_result) == SR_RESULT_INVALID_ARGUMENT &&
+                            snes->ppu->evenFrame == even_frame,
+                        "undersized PPU scanout request mutated state");
+        failed |= check(api->run_ppu_scanout(
+                            runner, &scanout_request,
+                            &small_scanout_result) ==
+                                SR_RESULT_INVALID_ARGUMENT &&
+                            snes->ppu->evenFrame == even_frame,
+                        "undersized PPU scanout result mutated state");
+        ++scanout_request.lifetime_generation;
+        failed |= check(api->run_ppu_scanout(
+                            runner, &scanout_request,
+                            &scanout_result) == SR_RESULT_STALE_VIEW &&
+                            snes->ppu->evenFrame == even_frame,
+                        "stale PPU scanout request mutated state");
+        --scanout_request.lifetime_generation;
+        scanout_request.flags = 1u;
+        failed |= check(api->run_ppu_scanout(
+                            runner, &scanout_request,
+                            &scanout_result) == SR_RESULT_INVALID_ARGUMENT &&
+                            snes->ppu->evenFrame == even_frame,
+                        "unknown PPU scanout flag mutated state");
+        scanout_request.flags = 0u;
+    }
+    scanout_result.struct_size = sizeof(scanout_result);
+    failed |= check(api->run_ppu_scanout(
+                        runner, &scanout_request, &scanout_result) ==
+                            SR_RESULT_OK,
+                    "PPU scanout failed");
+    failed |= check(scanout_observer.valid &&
+                        scanout_observer.before_count ==
+                            SR_PPU_NATIVE_HEIGHT + 1u &&
+                        scanout_observer.after_count ==
+                            SR_PPU_NATIVE_HEIGHT + 1u &&
+                        scanout_observer.irq_count == 1u &&
+                        scanout_observer.irq_line == 4u &&
+                        scanout_observer.saw_hdma_before &&
+                        scanout_observer.saw_hdma_after &&
+                        scanout_observer.saw_indirect_before &&
+                        scanout_observer.saw_indirect_after,
+                    "PPU scanout callback schedule mismatch");
+    failed |= check(scanout_result.struct_size ==
+                            SR_PPU_SCANOUT_RESULT_V2_SIZE &&
+                        scanout_result.lifetime_generation ==
+                            snes->abiLifetimeGeneration &&
+                        (scanout_result.flags &
+                         SR_PPU_SCANOUT_AUTHENTIC_SURFACE_READY) != 0u &&
+                        scanout_result.final_state.struct_size ==
+                            SR_PPU_STATE_SNAPSHOT_V2_SIZE &&
+                        scanout_result.final_state.display_control == 0x8fu &&
+                        scanout_result.final_state.bg_mode_control == 0x09u &&
+                        (scanout_result.final_state.flags &
+                         SR_PPU_STATE_FORCED_BLANK) != 0u &&
+                        !snes->vIrqEnabled && !snes->inIrq,
+                    "PPU scanout result mismatch");
+    failed |= check_generation(api, runner, 12u, 2u, 1u, 1u, 8u);
 
     sr_runner_set_cpu_state_provider(snes, NULL, NULL);
     sr_runner_set_execution_state_provider(snes, NULL);

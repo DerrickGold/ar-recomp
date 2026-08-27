@@ -26,8 +26,6 @@
 
 extern bool g_ws_active;
 extern int g_ws_extra;
-extern struct Ppu *g_ppu;
-
 extern RecompReturn bank_02_B9D5_M0X0(CpuState *cpu);
 extern RecompReturn bank_02_BA0B_M0X0(CpuState *cpu);
 extern RecompReturn bank_00_A1B0_M0X0(CpuState *cpu);
@@ -75,8 +73,8 @@ static bool ActionCamera_ResolvePlayfield(ActionBgLayerPlan *playfield) {
    * until its exported values are transcribed into that catalogue. */
   ActionBgPlan plan;
   ActionBgPresentationPolicy presentation;
-  if (!ActRaiserActionBg_BuildPlan(
-          g_ram, kActRaiserWramSize, g_ppu,
+  if (!ActRaiserActionBg_BuildCurrentPlan(
+          g_ram, kActRaiserWramSize,
           g_settings.ws_bg2_padding, &plan, &presentation) ||
       ActionBgPlan_CanvasOwner(&plan) != 0)
     return false;
