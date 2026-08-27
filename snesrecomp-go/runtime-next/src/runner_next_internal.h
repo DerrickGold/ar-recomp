@@ -20,6 +20,9 @@ typedef SrResult SrRunnerPpuObjResolveProvider(
 typedef SrResult SrRunnerPpuObjPartsRasterProvider(
     Snes *snes, const SrPpuObjPartsRasterRequest *request,
     SrPpuObjRasterResult *out_result);
+typedef SrResult SrRunnerPpuScanoutProvider(
+    Snes *snes, const SrPpuScanoutRequest *request,
+    SrPpuScanoutResult *out_result);
 
 /* Temporary bridge for in-tree consumers while compatibility globals are
  * migrated. None of these functions exposes an internal layout through the
@@ -36,6 +39,8 @@ void sr_runner_set_ppu_obj_resolve_provider(
     Snes *snes, SrRunnerPpuObjResolveProvider *provider);
 void sr_runner_set_ppu_obj_parts_raster_provider(
     Snes *snes, SrRunnerPpuObjPartsRasterProvider *provider);
+void sr_runner_set_ppu_scanout_provider(
+    Snes *snes, SrRunnerPpuScanoutProvider *provider);
 void sr_runner_bind_ppu_services(Snes *snes, bool enabled);
 void sr_runner_note_tick(Snes *snes);
 void sr_runner_note_reset(Snes *snes);

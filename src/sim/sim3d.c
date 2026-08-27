@@ -14,9 +14,9 @@
 #include "constants.h"
 #include "deterministic_hash.h"
 #include "snes_bgr555.h"
-#include "snes/ppu.h"
 
-_Static_assert(kSim3DMaxWidth == kPpuBufWidth,
+_Static_assert(kSim3DMaxWidth ==
+                   SR_PPU_NATIVE_WIDTH + 2 * SR_PPU_HORIZONTAL_MARGIN_MAX,
                "SIM capture width must match the PPU buffer ceiling");
 _Static_assert(kSim3DPlane_Count <= 16,
                "SIM produced-plane mask must fit its frame payload");
@@ -44,8 +44,13 @@ typedef struct Sim3DCaptureState {
   int hud_obj_mask_width;
   int hud_obj_mask_x0, hud_obj_mask_y0;
   int hud_obj_mask_x1, hud_obj_mask_y1;
-  Ppu *ppu;
-  PpuOverlayCapture prior_captures[SR_PPU_OVERLAY_SOURCE_COUNT];
+  SrRunnerHandle *runner;
+  const SnesRunnerApi *api;
+  uint64_t lifetime_generation;
+  SrPpuOverlayCaptureState
+      prior_captures[SR_PPU_OVERLAY_SOURCE_COUNT];
+  SrPpuOverlayCaptureState
+      active_captures[SR_PPU_OVERLAY_SOURCE_COUNT];
   uint8_t *hud_bg_pixels;
   uint8_t *hud_obj_pixels;
   uint32_t hud_bg_pitch;
@@ -106,9 +111,7 @@ uint32_t Sim3D_PlaneTextureUploadMask(
  * rather than duplicated there: both want "the colour the authentic renderer
  * shows for an unrendered pixel", and two copies of the 5-bit expansion would
  * be free to drift. Declared in sim3d.h. */
-uint32_t ActRaiser_BackdropArgb(const Ppu *ppu) {
-  uint32_t color = ppu->cgram[0];
-  int brightness = PPU_brightness(ppu);
+uint32_t ActRaiser_BackdropArgb(uint16_t color, uint8_t brightness) {
   return 0xff000000u |
       (uint32_t)ExpandColor5(color & 0x1f, brightness) << 16 |
       (uint32_t)ExpandColor5((color >> 5) & 0x1f, brightness) << 8 |
@@ -127,48 +130,73 @@ static bool AllocatePlanes(uint32_t plane_mask) {
   return true;
 }
 
-static bool CaptureIsEmpty(const PpuOverlayCapture *capture) {
+static bool CaptureIsEmpty(const SrPpuOverlayCaptureState *capture) {
   return capture->x1 <= capture->x0 && capture->y1 <= capture->y0 &&
-      capture->oamCount == 0;
+      capture->oam_count == 0;
 }
 
-static bool StandardTownHudPolicyActive(const Ppu *ppu) {
-  return ppu->wsHudSplitHeight == kActRaiserSimulationHudHeight &&
-      ppu->wsHudLeftEnd == kActRaiserSimulationHudSplit &&
-      ppu->wsHudRightStart == kActRaiserSimulationHudSplit &&
-      ppu->wsHudPlayerRowY == kActRaiserSimulationHudHeight &&
-      ppu->wsHudLeftOnlyY == kActRaiserSimulationHudHeight;
+static void CaptureStateFromOverlay(
+    SrPpuOverlayCaptureState *capture,
+    const SrPpuOverlayState *overlay) {
+  memset(capture, 0, sizeof(*capture));
+  capture->x0 = overlay->x0;
+  capture->x1 = overlay->x1;
+  capture->y0 = overlay->y0;
+  capture->y1 = overlay->y1;
+  capture->flags = overlay->flags;
+  capture->transparent_fill_configured =
+      overlay->transparent_fill_configured;
+  capture->transparent_fill_mode = overlay->transparent_fill_mode;
+  capture->transparent_fill_cgram = overlay->transparent_fill_cgram;
+  capture->oam_first = overlay->oam_first;
+  capture->oam_count = overlay->oam_count;
 }
 
-static bool StandardTownHudCapture(const Ppu *ppu, int source,
-                                   const PpuOverlayCapture *capture) {
-  if (!StandardTownHudPolicyActive(ppu) ||
+static bool StandardTownHudPolicyActive(const SrPpuFrameSnapshot *frame) {
+  return frame->hud_split_height == kActRaiserSimulationHudHeight &&
+      frame->hud_left_end == kActRaiserSimulationHudSplit &&
+      frame->hud_right_start == kActRaiserSimulationHudSplit &&
+      frame->hud_player_row_y == kActRaiserSimulationHudHeight &&
+      frame->hud_left_only_y == kActRaiserSimulationHudHeight;
+}
+
+static bool StandardTownHudCapture(
+    const SrPpuFrameTransactionContext *context, int source,
+    const SrPpuOverlayCaptureState *capture) {
+  if (!StandardTownHudPolicyActive(&context->frame) ||
       (source != SR_PPU_OVERLAY_BG3 &&
        source != SR_PPU_OVERLAY_OBJ) ||
       capture->x0 != 0 || capture->x1 != kActRaiserAuthenticWidth ||
       capture->y0 != 0 || capture->y1 != kActRaiserSimulationHudHeight ||
-      capture->flags != kPpuOverlayFlag_RemoveFromGame)
+      capture->flags != SR_PPU_OVERLAY_REMOVE_FROM_GAME)
     return false;
   if (source == SR_PPU_OVERLAY_BG3)
-    return capture->oamCount == 0;
+    return capture->oam_count == 0;
   /* The town menu consumes the leading OAM entries, so the fixed-screen
    * hourglass moves from its ordinary slots 0-3 (observed at 11-14 in
    * runs/20260810-231616 and runs/20260811-145909). The widescreen HUD
    * promoter already discovers that range from the complete sprite signature;
    * validate against the same per-frame fact here instead of accidentally
    * treating a fixed screen position as a fixed OAM allocation. */
-  enum { kPpuOamSlots = kPpuOamWords / 2 };
+  if (context->oam.data == NULL ||
+      context->oam.element_count < SR_PPU_OAM_WORD_COUNT ||
+      context->high_oam.data == NULL ||
+      context->high_oam.byte_size < SR_PPU_HIGH_OAM_BYTE_COUNT)
+    return false;
+  enum { kPpuOamSlots = SR_PPU_OAM_WORD_COUNT / 2 };
   const int hourglass_first = ActRaiser_FindSimulationHourglass(
-      ppu->oam, ppu->highOam, kPpuOamSlots);
-  return hourglass_first >= 0 && capture->oamFirst == hourglass_first &&
-      capture->oamCount == kActRaiserHudObjOamCount;
+      context->oam.data, context->high_oam.data, kPpuOamSlots);
+  return hourglass_first >= 0 && capture->oam_first == hourglass_first &&
+      capture->oam_count == kActRaiserHudObjOamCount;
 }
 
-static bool OverlayPolicyConflicts(const Ppu *ppu) {
+static bool OverlayPolicyConflicts(
+    const SrPpuFrameTransactionContext *context) {
   for (int source = 0; source < SR_PPU_OVERLAY_SOURCE_COUNT; source++) {
-    const PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
-    if (!CaptureIsEmpty(capture) &&
-        !StandardTownHudCapture(ppu, source, capture))
+    SrPpuOverlayCaptureState capture;
+    CaptureStateFromOverlay(&capture, &context->frame.overlays[source]);
+    if (!CaptureIsEmpty(&capture) &&
+        !StandardTownHudCapture(context, source, &capture))
       return true;
   }
   return false;
@@ -191,25 +219,31 @@ static void ClearPriorHudObjMask(void) {
   g_sim3d.hud_obj_mask_x1 = g_sim3d.hud_obj_mask_y1 = 0;
 }
 
-static bool PrepareHudHandoff(Ppu *ppu, int width) {
-  const PpuOverlayCapture *bg3 =
-      &ppu->overlayCaptures[SR_PPU_OVERLAY_BG3];
-  const PpuOverlayCapture *obj =
-      &ppu->overlayCaptures[SR_PPU_OVERLAY_OBJ];
+static bool PrepareHudHandoff(
+    const SnesRunnerApi *api, SrRunnerHandle *runner,
+    const SrPpuFrameTransactionContext *context, int width) {
+  const SrPpuOverlayCaptureState *bg3 =
+      &g_sim3d.prior_captures[SR_PPU_OVERLAY_BG3];
+  const SrPpuOverlayCaptureState *obj =
+      &g_sim3d.prior_captures[SR_PPU_OVERLAY_OBJ];
   g_sim3d.hud_bg3 = !CaptureIsEmpty(bg3);
   g_sim3d.hud_obj = !CaptureIsEmpty(obj);
   g_sim3d.hud_handoff = g_sim3d.hud_bg3 || g_sim3d.hud_obj;
   if (!g_sim3d.hud_handoff) return true;
 
-  g_sim3d.ppu = ppu;
-  memcpy(g_sim3d.prior_captures, ppu->overlayCaptures,
-         sizeof(g_sim3d.prior_captures));
-  g_sim3d.hud_bg_pixels =
-      ppu->overlayRenderBuffer[SR_PPU_OVERLAY_BG3];
-  g_sim3d.hud_obj_pixels =
-      ppu->overlayRenderBuffer[SR_PPU_OVERLAY_OBJ];
-  g_sim3d.hud_bg_pitch = ppu->overlayRenderPitch[SR_PPU_OVERLAY_BG3];
-  g_sim3d.hud_obj_pitch = ppu->overlayRenderPitch[SR_PPU_OVERLAY_OBJ];
+  g_sim3d.runner = runner;
+  g_sim3d.api = api;
+  g_sim3d.lifetime_generation = context->lifetime_generation;
+  const SrPpuWritableSurfaceView *bg_surface =
+      &context->overlays[SR_PPU_OVERLAY_BG3];
+  const SrPpuWritableSurfaceView *obj_surface =
+      &context->overlays[SR_PPU_OVERLAY_OBJ];
+  g_sim3d.hud_bg_pixels = bg_surface->data;
+  g_sim3d.hud_obj_pixels = obj_surface->data;
+  g_sim3d.hud_bg_pitch = bg_surface->pitch_bytes <= UINT32_MAX
+      ? (uint32_t)bg_surface->pitch_bytes : 0u;
+  g_sim3d.hud_obj_pitch = obj_surface->pitch_bytes <= UINT32_MAX
+      ? (uint32_t)obj_surface->pitch_bytes : 0u;
   /* Only the prior frame's nontransparent raster can be dirty. Remember the
    * pitch it used because a display-mode change can alter `width` between
    * captures; clearing the entire 448x240 ceiling here used to write 430 KB
@@ -218,35 +252,47 @@ static bool PrepareHudHandoff(Ppu *ppu, int width) {
   g_sim3d.hud_obj_mask_width = width;
   if (!g_sim3d.hud_obj) return true;
 
-  int priority = (ppu->oam[obj->oamFirst * 2 + 1] >> 12) & 3;
-  PpuObjRangeBounds bounds;
-  if (!PpuGetObjRangeBounds(ppu, obj->oamFirst, obj->oamCount,
-                            (uint8_t)priority, &bounds))
+  if (obj->oam_count == 0u || context->oam.data == NULL ||
+      (uint64_t)obj->oam_first * 2u + 1u >= context->oam.element_count)
     return false;
-  int raster_width = bounds.x1 - bounds.x0;
-  int raster_height = bounds.y1 - bounds.y0;
+  int priority =
+      (context->oam.data[obj->oam_first * 2u + 1u] >> 12) & 3;
   enum { kHudRasterLimit = 128 };
+  uint32_t raster[kHudRasterLimit * kHudRasterLimit];
+  SrPpuObjRasterRequest raster_request = {
+    .struct_size = sizeof(raster_request),
+    .lifetime_generation = context->lifetime_generation,
+    .first_sprite = obj->oam_first,
+    .sprite_count = obj->oam_count,
+    .priority = (uint32_t)priority,
+    .pixel_format = SR_PPU_OBJ_PIXEL_FORMAT_ARGB8888_U32,
+    .pixels = raster,
+    .pixel_byte_size = sizeof(raster),
+    .pitch_bytes = kHudRasterLimit * sizeof(uint32_t),
+  };
+  SrPpuObjRasterResult raster_result = {
+    .struct_size = sizeof(raster_result),
+  };
+  if (api->rasterize_ppu_obj_range(
+          runner, &raster_request, &raster_result) != SR_RESULT_OK)
+    return false;
+  int raster_width = (int)raster_result.width;
+  int raster_height = (int)raster_result.height;
   if (raster_width <= 0 || raster_height <= 0 ||
       raster_width > kHudRasterLimit || raster_height > kHudRasterLimit)
-    return false;
-  uint32_t raster[kHudRasterLimit * kHudRasterLimit];
-  if (!PpuRasterizeObjRange(
-          ppu, obj->oamFirst, obj->oamCount, (uint8_t)priority,
-          &bounds, raster, raster_width, raster_height,
-          (size_t)raster_width * sizeof(uint32_t)))
     return false;
 
   int extra = (width - kActRaiserAuthenticWidth) / 2;
   int mask_x0 = width, mask_y0 = kSim3DMaxHeight;
   int mask_x1 = 0, mask_y1 = 0;
   for (int y = 0; y < raster_height; y++) {
-    int screen_y = bounds.y0 + y;
+    int screen_y = raster_result.y0 + y;
     if (screen_y < 0 || screen_y >= kSim3DMaxHeight) continue;
     for (int x = 0; x < raster_width; x++) {
-      int texture_x = bounds.x0 + x + extra;
+      int texture_x = raster_result.x0 + x + extra;
       if (texture_x < 0 || texture_x >= width) continue;
       uint32_t pixel = raster[
-          (size_t)y * (size_t)raster_width + (size_t)x];
+          (size_t)y * kHudRasterLimit + (size_t)x];
       if (!pixel) continue;
       g_sim3d_hud_obj_mask[
           (size_t)screen_y * (size_t)width + (size_t)texture_x] = pixel;
@@ -279,7 +325,9 @@ bool Sim3D_BeginFrame(void) {
   g_sim3d.hud_bg3 = false;
   g_sim3d.hud_obj = false;
   g_sim3d.object_half_add = false;
-  g_sim3d.ppu = NULL;
+  g_sim3d.runner = NULL;
+  g_sim3d.api = NULL;
+  g_sim3d.lifetime_generation = 0u;
   g_sim3d.status = kSim3DCapture_Inactive;
   g_sim3d.mismatch_pixels = 0;
   g_sim3d.separated_hash = 0;
@@ -287,8 +335,292 @@ bool Sim3D_BeginFrame(void) {
   return restore_bindings;
 }
 
-bool Sim3D_PrepareCapture(Ppu *ppu, const Sim3DCaptureRequest *request) {
-  if (!ppu || !request || !request->town) return false;
+static bool BindCaptureSurface(
+    const SnesRunnerApi *api, SrRunnerHandle *runner,
+    uint64_t lifetime_generation, SrPpuOutputKind kind,
+    uint32_t source, uint32_t band, uint8_t *pixels,
+    uint64_t pitch_bytes, uint32_t height_pixels) {
+  SrPpuOutputBindingRequest binding = {
+    .struct_size = sizeof(binding),
+    .lifetime_generation = lifetime_generation,
+    .kind = kind,
+    .source = source,
+    .band = band,
+    .pixels = pixels,
+    .pixel_byte_size = pixels
+        ? pitch_bytes * (uint64_t)height_pixels : 0u,
+    .pitch_bytes = pixels ? pitch_bytes : 0u,
+    .height_pixels = pixels ? height_pixels : 0u,
+  };
+  return api->bind_ppu_output_surface(runner, &binding) == SR_RESULT_OK;
+}
+
+static bool ExchangeCapturePolicy(
+    const SnesRunnerApi *api, SrRunnerHandle *runner,
+    uint64_t lifetime_generation,
+    const SrPpuOverlayCaptureState
+        expected[SR_PPU_OVERLAY_SOURCE_COUNT],
+    const SrPpuOverlayCaptureState
+        replacement[SR_PPU_OVERLAY_SOURCE_COUNT]) {
+  SrPpuOverlayCaptureExchangeRequest exchange = {
+    .struct_size = sizeof(exchange),
+    .lifetime_generation = lifetime_generation,
+    .source_mask = (1u << SR_PPU_OVERLAY_SOURCE_COUNT) - 1u,
+  };
+  memcpy(exchange.expected, expected, sizeof(exchange.expected));
+  memcpy(exchange.replacement, replacement, sizeof(exchange.replacement));
+  return api->compare_exchange_ppu_overlay_captures(
+      runner, &exchange) == SR_RESULT_OK;
+}
+
+typedef struct Sim3DPrepareTransaction {
+  const SnesRunnerApi *api;
+  const Sim3DCaptureRequest *request;
+  bool prepared;
+} Sim3DPrepareTransaction;
+
+static SrResult PrepareCaptureFromPpuView(
+    void *user_data, SrRunnerHandle *runner,
+    const SrPpuFrameTransactionContext *context) {
+  Sim3DPrepareTransaction *transaction = user_data;
+  const SnesRunnerApi *api = transaction->api;
+  const Sim3DCaptureRequest *request = transaction->request;
+  const SrPpuStateSnapshot *ppu = &context->state;
+  for (int source = 0; source < SR_PPU_OVERLAY_SOURCE_COUNT; source++)
+    CaptureStateFromOverlay(
+        &g_sim3d.prior_captures[source],
+        &context->frame.overlays[source]);
+
+  if (request->diorama_active || OverlayPolicyConflicts(context)) {
+    g_sim3d.status = kSim3DCapture_OverlayConflict;
+    return SR_RESULT_OK;
+  }
+  /* Recorded before any gate can reject, so a rejection reports the state
+   * that caused it rather than the last state that passed. */
+  g_sim3d.cgwsel = ppu->color_math_control;
+  g_sim3d.cgadsub = ppu->color_math_designation;
+  g_sim3d.fixed_color = ppu->fixed_color;
+  g_sim3d.screen_main = ppu->main_screen;
+  g_sim3d.screen_sub = ppu->sub_screen;
+  g_sim3d.brightness = ppu->brightness;
+
+  bool ordinary_screen =
+      (ppu->main_screen == 0x15 || ppu->main_screen == 0x17) &&
+      ppu->sub_screen == 0;
+  bool targeted_miracle_screen = ppu->main_screen == 0x15 &&
+      ppu->sub_screen == 0x01;
+  if (request->width < (int)SR_PPU_NATIVE_WIDTH ||
+      request->width > kSim3DMaxWidth ||
+      request->height <= 0 || request->height > kSim3DMaxHeight ||
+      ppu->bg_mode_control != 9 ||
+      (ppu->flags & SR_PPU_STATE_FORCED_BLANK) != 0u ||
+      (!ordinary_screen && !targeted_miracle_screen)) {
+    g_sim3d.status = kSim3DCapture_UnsupportedPpu;
+    return SR_RESULT_OK;
+  }
+  /* With fixed color zero, no half/subtract, no subscreen, and no color
+   * window clipping, the PPU's fast path proves color math is a no-op. */
+  bool no_op_color_math = ppu->color_math_control == 0 &&
+      ppu->fixed_color == 0 &&
+      (ppu->color_math_designation & 0xc0) == 0;
+
+  /* The sun miracle: a plain fixed-colour add, ramping, onto BG1 alone
+   * (measured cgwsel=$00 cgadsub=$01 fixed=$0001 screen=$15/$00). cgwsel zero
+   * is what makes it reproducible -- fixed colour rather than subscreen as the
+   * math source, math enabled over the whole screen, no main-screen-black
+   * region and no direct colour, so there is no window geometry to recover.
+   *
+   * Restricted to full brightness, conservatively rather than necessarily:
+   * the reproduction inverts the PPU's own brightness table to recover the
+   * 5-bit value it must add to, and while that table turns out to stay
+   * injective well below 15, only 15 has been verified against hardware
+   * output. A miracle running under a screen fade is a second effect on top
+   * of this one and deserves its own evidence before being admitted. */
+  bool fixed_color_add = ppu->color_math_control == 0 &&
+      (ppu->color_math_designation & 0xc0) == 0 &&
+      ppu->fixed_color != 0 &&
+      (ppu->color_math_designation & 0x3f) != 0 &&
+      ppu->brightness == 15;
+  /* Targeted miracles keep BG1 on the subscreen and half-add it beneath OBJ.
+   * BG1 + the identical BG1 subscreen is unchanged; OBJ palette groups 4-7
+   * become a 50/50 mix with BG1 while groups 0-3 (including the selector)
+   * stay opaque. Restrict this to the exact full-brightness state observed in
+   * all five recorded miracle confirmations so unknown math still fails
+   * closed. */
+  bool targeted_miracle_half_add = targeted_miracle_screen &&
+      ppu->color_math_control == 0x02 &&
+      ppu->color_math_designation == 0x51 &&
+      ppu->fixed_color == 0 && ppu->brightness == 15;
+  if ((!targeted_miracle_screen && !no_op_color_math && !fixed_color_add) ||
+      (targeted_miracle_screen && !targeted_miracle_half_add)) {
+    g_sim3d.status = kSim3DCapture_UnsupportedColorMath;
+    return SR_RESULT_OK;
+  }
+  if (context->cgram.data == NULL ||
+      context->cgram.element_count < SR_PPU_CGRAM_WORD_COUNT) {
+    g_sim3d.status = kSim3DCapture_UnsupportedPpu;
+    return SR_RESULT_OK;
+  }
+  g_sim3d.object_half_add = targeted_miracle_half_add;
+  g_sim3d.fixed_add_mask = fixed_color_add
+      ? (ppu->color_math_designation & 0x3f) : 0;
+  g_sim3d.fixed_add_r = (uint8_t)(ppu->fixed_color & 0x1f);
+  g_sim3d.fixed_add_g = (uint8_t)((ppu->fixed_color >> 5) & 0x1f);
+  g_sim3d.fixed_add_b = (uint8_t)((ppu->fixed_color >> 10) & 0x1f);
+  for (int value = 0; value < 32; value++)
+    g_sim3d.brightness_mult[value] =
+        (uint8_t)ExpandColor5(value, ppu->brightness);
+  /* Raw OBJ is redundant only when this exact frame has both a complete atlas
+   * and a renderer that can consume it. Diagnostics retain the raw planes so
+   * the inspector, D1 hash and one-shot D2 dump remain exact ten-plane views.
+   * Any failed prerequisite falls back before scanout, never after stale
+   * surfaces could already have been selected. */
+  bool diagnostics_armed = request->inspector_active ||
+      DemoArtifactsArmable() || SimRenderMetadata_TraceArmed();
+  bool billboards_requested =
+      (request->requested_features & kSimFeature_GroundProjection) &&
+      (request->requested_features & kSimFeature_ObjectBillboards);
+  g_sim3d.billboard_renderer_ready = request->billboard_renderer_ready;
+  g_sim3d.raw_obj_planes = diagnostics_armed || !billboards_requested ||
+      !request->billboard_atlas_ready || !request->billboard_renderer_ready;
+  uint32_t captured_plane_mask = kSim3DAllPlaneMask;
+  if (!g_sim3d.raw_obj_planes)
+    captured_plane_mask &= ~Sim3D_ObjPlaneMask();
+  if (!AllocatePlanes(captured_plane_mask)) {
+    g_sim3d.status = kSim3DCapture_AllocationFailure;
+    return SR_RESULT_OK;
+  }
+  if (!PrepareHudHandoff(api, runner, context, request->width)) {
+    g_sim3d.status = kSim3DCapture_OverlayConflict;
+    return SR_RESULT_OK;
+  }
+
+  const uint64_t pitch =
+      (uint64_t)(unsigned)request->width * sizeof(uint32_t);
+  const int extra =
+      (request->width - (int)SR_PPU_NATIVE_WIDTH) / 2;
+  /* PpuSetOverlayCapture replaces geometry/flags/OAM ownership but preserves
+   * a source's transparent-fill policy. Start from the exact prior values so
+   * the ABI path has identical semantics; BG4 remains wholly untouched. */
+  memcpy(g_sim3d.active_captures, g_sim3d.prior_captures,
+         sizeof(g_sim3d.active_captures));
+  for (int source = SR_PPU_OVERLAY_BG1;
+       source <= SR_PPU_OVERLAY_BG3; source++) {
+    SrPpuOverlayCaptureState *capture =
+        &g_sim3d.active_captures[source];
+    capture->x0 = (int16_t)-extra;
+    capture->x1 = (int16_t)(request->width - extra);
+    capture->y0 = 0;
+    capture->y1 = (int16_t)request->height;
+    capture->flags = 0u;
+    capture->oam_first = 0u;
+    capture->oam_count = 0u;
+  }
+  if (g_sim3d.raw_obj_planes) {
+    SrPpuOverlayCaptureState *capture =
+        &g_sim3d.active_captures[SR_PPU_OVERLAY_OBJ];
+    capture->x0 = (int16_t)-extra;
+    capture->x1 = (int16_t)(request->width - extra);
+    capture->y0 = 0;
+    capture->y1 = (int16_t)request->height;
+    capture->flags = targeted_miracle_half_add
+        ? SR_PPU_OVERLAY_MARK_OBJ_COLOR_MATH : 0u;
+    capture->oam_first = 0u;
+    capture->oam_count = 128u;
+  } else {
+    /* A null base binding clears the complete OBJ source family. */
+    memset(&g_sim3d.active_captures[SR_PPU_OVERLAY_OBJ], 0,
+           sizeof(g_sim3d.active_captures[SR_PPU_OVERLAY_OBJ]));
+  }
+  if (!ExchangeCapturePolicy(
+          api, runner, context->lifetime_generation,
+          g_sim3d.prior_captures, g_sim3d.active_captures)) {
+    g_sim3d.status = kSim3DCapture_OverlayConflict;
+    return SR_RESULT_OK;
+  }
+  /* Binding a primary surface replaces that source's complete priority-band
+   * family. Remember ownership before the first binding so a partial bind is
+   * repaired at the start of the next frame. */
+  g_sim3d.bindings_owned = true;
+  bool ok = true;
+  ok &= BindCaptureSurface(
+      api, runner, context->lifetime_generation, SR_PPU_OUTPUT_OVERLAY,
+      SR_PPU_OVERLAY_BG1, 0u,
+      (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg1Low], pitch,
+      kSim3DMaxHeight);
+  ok &= BindCaptureSurface(
+      api, runner, context->lifetime_generation,
+      SR_PPU_OUTPUT_OVERLAY_PRIORITY, SR_PPU_OVERLAY_BG1, 1u,
+      (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg1High], pitch,
+      kSim3DMaxHeight);
+  ok &= BindCaptureSurface(
+      api, runner, context->lifetime_generation, SR_PPU_OUTPUT_OVERLAY,
+      SR_PPU_OVERLAY_BG2, 0u,
+      (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg2Low], pitch,
+      kSim3DMaxHeight);
+  ok &= BindCaptureSurface(
+      api, runner, context->lifetime_generation,
+      SR_PPU_OUTPUT_OVERLAY_PRIORITY, SR_PPU_OVERLAY_BG2, 1u,
+      (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg2High], pitch,
+      kSim3DMaxHeight);
+  ok &= BindCaptureSurface(
+      api, runner, context->lifetime_generation, SR_PPU_OUTPUT_OVERLAY,
+      SR_PPU_OVERLAY_BG3, 0u,
+      (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg3Low], pitch,
+      kSim3DMaxHeight);
+  ok &= BindCaptureSurface(
+      api, runner, context->lifetime_generation,
+      SR_PPU_OUTPUT_OVERLAY_PRIORITY, SR_PPU_OVERLAY_BG3, 1u,
+      (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg3High], pitch,
+      kSim3DMaxHeight);
+  if (g_sim3d.raw_obj_planes) {
+    ok &= BindCaptureSurface(
+        api, runner, context->lifetime_generation, SR_PPU_OUTPUT_OVERLAY,
+        SR_PPU_OVERLAY_OBJ, 0u,
+        (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Obj0], pitch,
+        kSim3DMaxHeight);
+    for (uint32_t band = 1u; band <= 3u; band++)
+      ok &= BindCaptureSurface(
+          api, runner, context->lifetime_generation,
+          SR_PPU_OUTPUT_OVERLAY_PRIORITY, SR_PPU_OVERLAY_OBJ, band,
+          (uint8_t *)g_sim3d_layer_pixels[
+              Sim3D_ObjPlaneForPriority((int)band)],
+          pitch, kSim3DMaxHeight);
+  } else {
+    /* This also clears the source's capture and priority bindings, so the PPU
+     * skips its isolated OBJ scratch setup, four row clears and resolve pass. */
+    ok &= BindCaptureSurface(
+        api, runner, context->lifetime_generation, SR_PPU_OUTPUT_OVERLAY,
+        SR_PPU_OVERLAY_OBJ, 0u, NULL, 0u, 0u);
+  }
+  if (!ok) {
+    /* Keep a failed setup observational for the current authentic frame too;
+     * the next frame's host rebind repairs any partial surface ownership. */
+    (void)ExchangeCapturePolicy(
+        api, runner, context->lifetime_generation,
+        g_sim3d.active_captures, g_sim3d.prior_captures);
+    g_sim3d.status = kSim3DCapture_AllocationFailure;
+    return SR_RESULT_OK;
+  }
+
+  g_sim3d.active = true;
+  g_sim3d.status = kSim3DCapture_Capturing;
+  g_sim3d.width = request->width;
+  g_sim3d.height = request->height;
+  g_sim3d.live_x0 = extra - ppu->margin_left;
+  g_sim3d.live_x1 =
+      extra + (int)SR_PPU_NATIVE_WIDTH + ppu->margin_right;
+  g_sim3d.backdrop_argb =
+      ActRaiser_BackdropArgb(context->cgram.data[0], ppu->brightness);
+  g_sim3d.diagnostic_layer_mask = request->diagnostic_layer_mask;
+  g_sim3d.captured_plane_mask = captured_plane_mask;
+  transaction->prepared = true;
+  return SR_RESULT_OK;
+}
+
+bool Sim3D_PrepareCapture(
+    SrRunnerHandle *runner, const Sim3DCaptureRequest *request) {
+  if (!runner || !request || !request->town) return false;
   /* Retained for FinishCapture, which is where the diagnostic-only passes are
    * decided and which does not see the request. */
   g_sim3d.inspector_active = request->inspector_active;
@@ -320,173 +652,34 @@ bool Sim3D_PrepareCapture(Ppu *ppu, const Sim3DCaptureRequest *request) {
     g_sim3d.status = kSim3DCapture_NoRenderer;
     return false;
   }
-  if (request->diorama_active || OverlayPolicyConflicts(ppu)) {
-    g_sim3d.status = kSim3DCapture_OverlayConflict;
-    return false;
-  }
-  /* Recorded before any gate can reject, so a rejection reports the state
-   * that caused it rather than the last state that passed. */
-  g_sim3d.cgwsel = (uint8_t)ppu->cgwsel;
-  g_sim3d.cgadsub = (uint8_t)ppu->cgadsub;
-  g_sim3d.fixed_color = (uint16_t)ppu->fixedColor;
-  g_sim3d.screen_main = (uint8_t)ppu->screenEnabled[0];
-  g_sim3d.screen_sub = (uint8_t)ppu->screenEnabled[1];
-  g_sim3d.brightness = (uint8_t)PPU_brightness(ppu);
-
-  bool ordinary_screen =
-      (ppu->screenEnabled[0] == 0x15 || ppu->screenEnabled[0] == 0x17) &&
-      ppu->screenEnabled[1] == 0;
-  bool targeted_miracle_screen = ppu->screenEnabled[0] == 0x15 &&
-      ppu->screenEnabled[1] == 0x01;
-  if (request->width < kPpuXPixels || request->width > kSim3DMaxWidth ||
-      request->height <= 0 || request->height > kSim3DMaxHeight ||
-      ppu->bgmode != 9 || PPU_forcedBlank(ppu) ||
-      (!ordinary_screen && !targeted_miracle_screen)) {
+  const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+  if (!api ||
+      api->struct_size < SNES_RUNNER_API_PPU_FRAME_TRANSACTION_SIZE ||
+      (api->capabilities &
+       (SR_RUNNER_CAP_PPU_FRAME_TRANSACTIONS |
+        SR_RUNNER_CAP_PPU_OUTPUT_CONTROL |
+        SR_RUNNER_CAP_PPU_OBJ_RASTER)) !=
+          (SR_RUNNER_CAP_PPU_FRAME_TRANSACTIONS |
+           SR_RUNNER_CAP_PPU_OUTPUT_CONTROL |
+           SR_RUNNER_CAP_PPU_OBJ_RASTER)) {
     g_sim3d.status = kSim3DCapture_UnsupportedPpu;
     return false;
   }
-  /* With fixed color zero, no half/subtract, no subscreen, and no color
-   * window clipping, the PPU's fast path proves color math is a no-op. */
-  bool no_op_color_math = ppu->cgwsel == 0 && ppu->fixedColor == 0 &&
-      (ppu->cgadsub & 0xc0) == 0;
-
-  /* The sun miracle: a plain fixed-colour add, ramping, onto BG1 alone
-   * (measured cgwsel=$00 cgadsub=$01 fixed=$0001 screen=$15/$00). cgwsel zero
-   * is what makes it reproducible -- fixed colour rather than subscreen as the
-   * math source, math enabled over the whole screen, no main-screen-black
-   * region and no direct colour, so there is no window geometry to recover.
-   *
-   * Restricted to full brightness, conservatively rather than necessarily:
-   * the reproduction inverts the PPU's own brightness table to recover the
-   * 5-bit value it must add to, and while that table turns out to stay
-   * injective well below 15, only 15 has been verified against hardware
-   * output. A miracle running under a screen fade is a second effect on top
-   * of this one and deserves its own evidence before being admitted. */
-  bool fixed_color_add = ppu->cgwsel == 0 && (ppu->cgadsub & 0xc0) == 0 &&
-      ppu->fixedColor != 0 && (ppu->cgadsub & 0x3f) != 0 &&
-      PPU_brightness(ppu) == 15;
-  /* Targeted miracles keep BG1 on the subscreen and half-add it beneath OBJ.
-   * BG1 + the identical BG1 subscreen is unchanged; OBJ palette groups 4-7
-   * become a 50/50 mix with BG1 while groups 0-3 (including the selector)
-   * stay opaque. Restrict this to the exact full-brightness state observed in
-   * all five recorded miracle confirmations so unknown math still fails
-   * closed. */
-  bool targeted_miracle_half_add = targeted_miracle_screen &&
-      ppu->cgwsel == 0x02 && ppu->cgadsub == 0x51 &&
-      ppu->fixedColor == 0 && PPU_brightness(ppu) == 15;
-  if ((!targeted_miracle_screen && !no_op_color_math && !fixed_color_add) ||
-      (targeted_miracle_screen && !targeted_miracle_half_add)) {
-    g_sim3d.status = kSim3DCapture_UnsupportedColorMath;
+  Sim3DPrepareTransaction transaction = {
+    .api = api,
+    .request = request,
+  };
+  const SrPpuFrameTransactionRequest transaction_request = {
+    .struct_size = sizeof(transaction_request),
+    .callback = PrepareCaptureFromPpuView,
+    .user_data = &transaction,
+  };
+  if (api->visit_ppu_frame_transaction(
+          runner, &transaction_request) != SR_RESULT_OK) {
+    g_sim3d.status = kSim3DCapture_UnsupportedPpu;
     return false;
   }
-  g_sim3d.object_half_add = targeted_miracle_half_add;
-  g_sim3d.fixed_add_mask = fixed_color_add ? (ppu->cgadsub & 0x3f) : 0;
-  g_sim3d.fixed_add_r = (uint8_t)PPU_fixedColorR(ppu);
-  g_sim3d.fixed_add_g = (uint8_t)PPU_fixedColorG(ppu);
-  g_sim3d.fixed_add_b = (uint8_t)PPU_fixedColorB(ppu);
-  memcpy(g_sim3d.brightness_mult, ppu->brightnessMult,
-         sizeof(g_sim3d.brightness_mult));
-  /* Raw OBJ is redundant only when this exact frame has both a complete atlas
-   * and a renderer that can consume it. Diagnostics retain the raw planes so
-   * the inspector, D1 hash and one-shot D2 dump remain exact ten-plane views.
-   * Any failed prerequisite falls back before scanout, never after stale
-   * surfaces could already have been selected. */
-  bool diagnostics_armed = request->inspector_active ||
-      DemoArtifactsArmable() || SimRenderMetadata_TraceArmed();
-  bool billboards_requested =
-      (request->requested_features & kSimFeature_GroundProjection) &&
-      (request->requested_features & kSimFeature_ObjectBillboards);
-  g_sim3d.billboard_renderer_ready = request->billboard_renderer_ready;
-  g_sim3d.raw_obj_planes = diagnostics_armed || !billboards_requested ||
-      !request->billboard_atlas_ready || !request->billboard_renderer_ready;
-  uint32_t captured_plane_mask = kSim3DAllPlaneMask;
-  if (!g_sim3d.raw_obj_planes)
-    captured_plane_mask &= ~Sim3D_ObjPlaneMask();
-  if (!AllocatePlanes(captured_plane_mask)) {
-    g_sim3d.status = kSim3DCapture_AllocationFailure;
-    return false;
-  }
-  if (!PrepareHudHandoff(ppu, request->width)) {
-    g_sim3d.status = kSim3DCapture_OverlayConflict;
-    return false;
-  }
-
-  const size_t pitch = (size_t)request->width * sizeof(uint32_t);
-  /* Binding a primary surface replaces that source's complete priority-band
-   * family. Remember ownership before the first mutation so a partial bind or
-   * capture-policy failure is still repaired at the start of the next frame. */
-  g_sim3d.bindings_owned = true;
-  bool ok = true;
-  ok &= PpuBindOverlaySurfaceSized(
-      ppu, SR_PPU_OVERLAY_BG1,
-      (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg1Low], pitch,
-      kSim3DMaxHeight);
-  ok &= PpuBindOverlayPrioSurface(
-      ppu, SR_PPU_OVERLAY_BG1, 1,
-      (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg1High]);
-  ok &= PpuBindOverlaySurfaceSized(
-      ppu, SR_PPU_OVERLAY_BG2,
-      (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg2Low], pitch,
-      kSim3DMaxHeight);
-  ok &= PpuBindOverlayPrioSurface(
-      ppu, SR_PPU_OVERLAY_BG2, 1,
-      (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg2High]);
-  ok &= PpuBindOverlaySurfaceSized(
-      ppu, SR_PPU_OVERLAY_BG3,
-      (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg3Low], pitch,
-      kSim3DMaxHeight);
-  ok &= PpuBindOverlayPrioSurface(
-      ppu, SR_PPU_OVERLAY_BG3, 1,
-      (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg3High]);
-  if (g_sim3d.raw_obj_planes) {
-    ok &= PpuBindOverlaySurfaceSized(
-        ppu, SR_PPU_OVERLAY_OBJ,
-        (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Obj0], pitch,
-        kSim3DMaxHeight);
-    ok &= PpuBindOverlayPrioSurface(
-        ppu, SR_PPU_OVERLAY_OBJ, 1,
-        (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Obj1]);
-    ok &= PpuBindOverlayPrioSurface(
-        ppu, SR_PPU_OVERLAY_OBJ, 2,
-        (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Obj2]);
-    ok &= PpuBindOverlayPrioSurface(
-        ppu, SR_PPU_OVERLAY_OBJ, 3,
-        (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Obj3]);
-  } else {
-    /* This also clears the source's capture and priority bindings, so the PPU
-     * skips its isolated OBJ scratch setup, four row clears and resolve pass. */
-    ok &= PpuBindOverlaySurfaceSized(
-        ppu, SR_PPU_OVERLAY_OBJ, NULL, 0, 0);
-  }
-
-  int extra = (request->width - kPpuXPixels) / 2;
-  for (int source = SR_PPU_OVERLAY_BG1;
-       ok && source <= SR_PPU_OVERLAY_BG3; source++) {
-    ok &= PpuSetOverlayCapture(ppu, (PpuOverlaySource)source,
-                               -extra, 0, request->width, request->height, 0);
-  }
-  if (ok && g_sim3d.raw_obj_planes) {
-    ok &= PpuSetOverlayCapture(ppu, SR_PPU_OVERLAY_OBJ,
-                               -extra, 0, request->width, request->height,
-                               targeted_miracle_half_add
-                                   ? kPpuOverlayFlag_MarkObjColorMath : 0);
-    ok &= PpuSetOverlayOamRange(ppu, 0, 128);
-  }
-  if (!ok) {
-    g_sim3d.status = kSim3DCapture_AllocationFailure;
-    return false;
-  }
-
-  g_sim3d.active = true;
-  g_sim3d.status = kSim3DCapture_Capturing;
-  g_sim3d.width = request->width;
-  g_sim3d.height = request->height;
-  g_sim3d.live_x0 = extra - ppu->extraLeftCur;
-  g_sim3d.live_x1 = extra + kPpuXPixels + ppu->extraRightCur;
-  g_sim3d.backdrop_argb = ActRaiser_BackdropArgb(ppu);
-  g_sim3d.diagnostic_layer_mask = request->diagnostic_layer_mask;
-  g_sim3d.captured_plane_mask = captured_plane_mask;
-  return true;
+  return transaction.prepared;
 }
 
 static bool IsObjPlane(int plane) {
@@ -800,7 +993,7 @@ static void RestoreTownHudPixel(uint8_t *authentic_pixels,
 
 static void RestoreTownHudPolicy(uint8_t *authentic_pixels,
                                  int authentic_pitch) {
-  if (!g_sim3d.hud_handoff || !g_sim3d.ppu) return;
+  if (!g_sim3d.hud_handoff || !g_sim3d.runner) return;
 
   /* Recreate the two standard host HUD surfaces that the full-plane capture
    * temporarily superseded. BG3's two priority bands are mutually exclusive
@@ -808,7 +1001,7 @@ static void RestoreTownHudPolicy(uint8_t *authentic_pixels,
   if (g_sim3d.hud_bg_pixels && g_sim3d.hud_bg_pitch) {
     memset(g_sim3d.hud_bg_pixels, 0,
            (size_t)g_sim3d.hud_bg_pitch * kActRaiserSimulationHudHeight);
-    const PpuOverlayCapture *capture =
+    const SrPpuOverlayCaptureState *capture =
         &g_sim3d.prior_captures[SR_PPU_OVERLAY_BG3];
     for (int y = capture->y0; y < capture->y1; y++) {
       uint8_t *dst = g_sim3d.hud_bg_pixels +
@@ -849,7 +1042,7 @@ static void RestoreTownHudPolicy(uint8_t *authentic_pixels,
    * host overlay after either A/B profile has rendered. */
   int bg_x0 = 0, bg_y0 = 0, bg_x1 = 0, bg_y1 = 0;
   if (g_sim3d.hud_bg3) {
-    const PpuOverlayCapture *capture =
+    const SrPpuOverlayCaptureState *capture =
         &g_sim3d.prior_captures[SR_PPU_OVERLAY_BG3];
     int extra = (g_sim3d.width - kActRaiserAuthenticWidth) / 2;
     bg_x0 = capture->x0 + extra;
@@ -889,8 +1082,11 @@ static void RestoreTownHudPolicy(uint8_t *authentic_pixels,
     }
   }
 
-  memcpy(g_sim3d.ppu->overlayCaptures, g_sim3d.prior_captures,
-         sizeof(g_sim3d.prior_captures));
+  if (g_sim3d.api && g_sim3d.api->struct_size >=
+                         SNES_RUNNER_API_PPU_FRAME_TRANSACTION_SIZE)
+    (void)ExchangeCapturePolicy(
+        g_sim3d.api, g_sim3d.runner, g_sim3d.lifetime_generation,
+        g_sim3d.active_captures, g_sim3d.prior_captures);
 }
 
 /* Colour-math layer bit for a captured plane, matching CGADSUB's own layout

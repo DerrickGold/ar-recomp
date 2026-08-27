@@ -162,6 +162,7 @@ static void reset_layer_policy(Ppu *ppu) {
     memset(ppu->wsLayerExtentLeft, 0xff, sizeof(ppu->wsLayerExtentLeft));
     memset(ppu->wsLayerExtentRight, 0xff, sizeof(ppu->wsLayerExtentRight));
     memset(ppu->virtualTilemap, 0, sizeof(ppu->virtualTilemap));
+    memset(ppu->abiVirtualTilemap, 0, sizeof(ppu->abiVirtualTilemap));
 }
 
 Ppu *ppu_init(void) {

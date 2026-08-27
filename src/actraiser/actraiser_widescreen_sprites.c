@@ -23,15 +23,14 @@
 #include "action/action_obj_apron.h"
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
+#include "runner_next.h"
 #include "settings.h"
 #include "sim/sim_render_metadata.h"
-#include "snes/ppu.h"
 
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 
-extern Ppu *g_ppu;
 extern bool g_ws_active;
 extern int g_ws_extra;
 extern RecompReturn bank_00_923A_M0X0(CpuState *cpu);
@@ -114,6 +113,106 @@ _Static_assert(kSimOamBiasedWidth == kSimSpriteWindowBiasedWidth,
                "cull-lead window drifted from the emitter's x predicate");
 _Static_assert(kSimOamBiasedHeight == kSimSpriteWindowBiasedHeight,
                "cull-lead window drifted from the emitter's y predicate");
+
+static SrRunnerHandle *s_sprite_runner;
+static const SnesRunnerApi *s_sprite_runner_api;
+static SrPpuStateSnapshot s_action_ppu_state;
+static SrPpuStateSnapshot s_sim_ppu_state;
+static int s_action_ppu_state_valid;
+static int s_sim_ppu_state_valid;
+static SrPpuObjPositionUpdate
+    s_action_position_updates[SR_PPU_OBJ_POSITION_UPDATE_MAX];
+static uint32_t s_action_position_update_count;
+
+void ActRaiser_WidescreenSpritesBindRunner(SrRunnerHandle *runner) {
+  const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+  const uint64_t required =
+      SR_RUNNER_CAP_PPU_STATE | SR_RUNNER_CAP_PPU_OBJ_METADATA;
+  s_sprite_runner = runner;
+  s_sprite_runner_api =
+      runner && api &&
+          api->struct_size >= SNES_RUNNER_API_PPU_OBJ_METADATA_SIZE &&
+          (api->capabilities & required) == required
+      ? api : NULL;
+  s_action_ppu_state_valid = 0;
+  s_sim_ppu_state_valid = 0;
+  s_action_position_update_count = 0;
+}
+
+static int ws_query_ppu_state(SrPpuStateSnapshot *state) {
+  if (!state || !s_sprite_runner || !s_sprite_runner_api)
+    return 0;
+  *state = (SrPpuStateSnapshot){
+    .struct_size = sizeof(*state),
+  };
+  return s_sprite_runner_api->query_ppu_state(s_sprite_runner, state) ==
+      SR_RESULT_OK;
+}
+
+static SrResult ws_update_obj_metadata(
+    const SrPpuStateSnapshot *state, uint32_t flags,
+    const SrPpuObjPositionUpdate *updates, uint32_t update_count) {
+  if (!state || !s_sprite_runner || !s_sprite_runner_api)
+    return SR_RESULT_UNAVAILABLE;
+  const SrPpuObjMetadataRequest request = {
+    .struct_size = sizeof(request),
+    .flags = flags,
+    .lifetime_generation = state->lifetime_generation,
+    .updates = updates,
+    .update_count = update_count,
+  };
+  return s_sprite_runner_api->update_ppu_obj_metadata(
+      s_sprite_runner, &request);
+}
+
+static uint8_t ws_obj_size(const SrPpuStateSnapshot *state, int large) {
+  if (!state) return 0;
+  return large ? state->object_large_size_pixels
+               : state->object_small_size_pixels;
+}
+
+static int16_t ws_obj_position_i16(int value) {
+  if (value < INT16_MIN) return INT16_MIN;
+  if (value > INT16_MAX) return INT16_MAX;
+  return (int16_t)value;
+}
+
+static void ws_action_begin_obj_metadata(void) {
+  s_action_position_update_count = 0;
+  s_action_ppu_state_valid = ws_query_ppu_state(&s_action_ppu_state);
+  if (s_action_ppu_state_valid &&
+      ws_update_obj_metadata(
+          &s_action_ppu_state,
+          SR_PPU_OBJ_METADATA_CLEAR_POSITIONS |
+              SR_PPU_OBJ_METADATA_CLEAR_CAMERA_RELATIVE,
+          NULL, 0u) == SR_RESULT_OK) {
+    ActRaiser_MarkExactPositionOwner(kActRaiserExactPositionOwner_Action);
+  }
+}
+
+static void ws_action_record_obj_position(
+    uint8_t slot, int x, int y) {
+  if (!s_action_ppu_state_valid ||
+      s_action_position_update_count >=
+          SR_PPU_OBJ_POSITION_UPDATE_MAX)
+    return;
+  s_action_position_updates[s_action_position_update_count++] =
+      (SrPpuObjPositionUpdate) {
+        .x = ws_obj_position_i16(x),
+        .y = ws_obj_position_i16(y),
+        .slot = slot,
+        .flags = SR_PPU_OBJ_POSITION_CAMERA_RELATIVE,
+      };
+}
+
+static void ws_action_commit_obj_metadata(void) {
+  if (s_action_ppu_state_valid && s_action_position_update_count != 0u) {
+    (void)ws_update_obj_metadata(
+        &s_action_ppu_state, 0u, s_action_position_updates,
+        s_action_position_update_count);
+  }
+  s_action_position_update_count = 0;
+}
 
 static inline uint16 ws_dp16(CpuState *cpu, uint16 off) {
   uint16 a = (uint16)(cpu->D + off);
@@ -204,12 +303,13 @@ static int ws_axis_visible(uint16 pos, uint16 leading, uint16 trailing,
  * object logic, alter $0400, build OAM, or load graphics. */
 void ActRaiser_WidescreenSpriteActivationProbe(void) {
   static WsActivationCandidate prior[kActivationProbeObjectCount];
-  if (!ws_action_debug_enabled() || !g_ppu ||
+  SrPpuStateSnapshot ppu;
+  if (!ws_action_debug_enabled() || !ws_query_ppu_state(&ppu) ||
       !ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]))
     return;
 
-  int margin_left = g_ppu->extraLeftCur;
-  int margin_right = g_ppu->extraRightCur;
+  int margin_left = ppu.margin_left;
+  int margin_right = ppu.margin_right;
   if (!(margin_left | margin_right))
     return;
 
@@ -409,11 +509,7 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
    * keeps the $E0 park value, and an override left over from last frame would
    * make that stale position look authoritative. Clearing here means "no
    * override" and "not emitted" are the same statement. */
-  if (g_ppu) {
-    PpuClearObjExactPositions(g_ppu);
-    PpuClearObjCameraRelative(g_ppu);
-    ActRaiser_MarkExactPositionOwner(kActRaiserExactPositionOwner_Action);
-  }
+  ws_action_begin_obj_metadata();
 
   cpu->A = saved_stack_pointer;
   cpu->X = 0;
@@ -432,8 +528,10 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
     cpu->host_return_valid = 1;
     RecompReturn r = bank_00_923A_M0X0(cpu);
     cpu->S = call_s;
-    if (r != RECOMP_RETURN_NORMAL)
+    if (r != RECOMP_RETURN_NORMAL) {
+      ws_action_commit_obj_metadata();
       return r;
+    }
   }
 
   uint16 object_address = kActRaiserWram_ActionObjectTable;
@@ -441,10 +539,10 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
   uint16 terminal_status = 0;
   int oam_full = 0;
   int live_l = 0, live_r = 0;
-  if (g_ppu &&
+  if (s_action_ppu_state_valid &&
       ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
-    live_l = g_ppu->extraLeftCur;
-    live_r = g_ppu->extraRightCur;
+    live_l = s_action_ppu_state.margin_left;
+    live_r = s_action_ppu_state.margin_right;
   }
   /* The apron widens the DRAW window because this predicate gates whether the
    * sprite builder is called at all -- leaving it at the display margin would
@@ -473,9 +571,10 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
    * band.
    * AR_VEXT_OBJDRAW=0 disables it independently of ws_margin_objects. */
   int live_t = 0, live_b = 0;
-  if (g_ppu && ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
-    live_t = g_ppu->extraTopCur;
-    live_b = g_ppu->extraBottomCur;
+  if (s_action_ppu_state_valid &&
+      ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
+    live_t = s_action_ppu_state.margin_top;
+    live_b = s_action_ppu_state.margin_bottom;
   }
   static int vext_obj_draw = -1;
   if (vext_obj_draw < 0) {
@@ -592,8 +691,10 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
         cpu->host_return_valid = 1;
         RecompReturn r = ActRaiser_BuildObjectSprites(cpu);
         cpu->S = call_s;
-        if (r != RECOMP_RETURN_NORMAL)
+        if (r != RECOMP_RETURN_NORMAL) {
+          ws_action_commit_obj_metadata();
           return r;
+        }
         oam_offset = cpu->Y;
         if (cpu->_flag_C) {
           oam_full = 1;
@@ -682,6 +783,7 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
   /* Publish only after the HUD and every admitted object builder completed.
    * Either nested HLE can return abnormally above; such an aborted scan did
    * not produce the gameplay/OAM frame whose effect clocks this serial owns. */
+  ws_action_commit_obj_metadata();
   ActionEffectGameplayClock_CompletePass();
   return RECOMP_RETURN_NORMAL;
 }
@@ -760,12 +862,12 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
   int margin_right = 0;
   int margin_top = 0;
   int margin_bottom = 0;
-  if (ws_sprite_widen_enabled() && g_ppu &&
+  if (ws_sprite_widen_enabled() && s_action_ppu_state_valid &&
       ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
-    margin_left = g_ppu->extraLeftCur;
-    margin_right = g_ppu->extraRightCur;
-    margin_top = g_ppu->extraTopCur;
-    margin_bottom = g_ppu->extraBottomCur;
+    margin_left = s_action_ppu_state.margin_left;
+    margin_right = s_action_ppu_state.margin_right;
+    margin_top = s_action_ppu_state.margin_top;
+    margin_bottom = s_action_ppu_state.margin_bottom;
   }
 
   /* The RESOLVE window is the display window widened by the apron. It gates
@@ -866,12 +968,8 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
         const int exact_y =
             (int)(int16)ws_dp16(cpu, kSpriteDp_ScreenOriginY) +
             (int)component_offset_y - (kSpriteDrawBias + 1);
-        if (g_ppu) {
-          PpuSetObjExactPosition(
-              g_ppu, (uint8)(oam_offset >> 2), exact_x, exact_y);
-          PpuSetObjCameraRelative(
-              g_ppu, (uint8)(oam_offset >> 2), true);
-        }
+        ws_action_record_obj_position(
+            (uint8)(oam_offset >> 2), exact_x, exact_y);
         uint16 slots = (uint16)(
             ws_dp16(cpu, kSpriteDp_OamHighSlotsRemaining) - 1);
         ws_dp16w(cpu, kSpriteDp_OamHighSlotsRemaining, slots);
@@ -930,7 +1028,9 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
               (int)(int16)ws_dp16(cpu, kSpriteDp_ScreenOriginY) +
               (int)component_offset_y - (kSpriteDrawBias + 1);
           const uint8_t part_size =
-              (uint8_t)PpuObjSizeForSizeBit(g_ppu, part_large);
+              ws_obj_size(s_action_ppu_state_valid
+                              ? &s_action_ppu_state : NULL,
+                          part_large);
           (void)ActionApron_AddPart(
               &apron_geom, exact_x, exact_y, rendered_attributes,
               part_size);
@@ -1115,7 +1215,8 @@ static int ws_sim_catalog_enabled(void) {
 
 static void ws_sim_catalog_record(CpuState *cpu, uint16 record,
                                   int world_record, uint16 composition,
-                                  uint16 oam_before) {
+                                  uint16 oam_before,
+                                  const SrPpuStateSnapshot *ppu) {
   static SimCatalogSignature signatures[
       kActRaiserSimFixedRecordCount + kActRaiserSimWorldRecordCount];
   if (!ws_sim_catalog_enabled() ||
@@ -1153,9 +1254,9 @@ static void ws_sim_catalog_record(CpuState *cpu, uint16 record,
   *prior = next;
 
   unsigned game_frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
-  unsigned obj1 = g_ppu ? (unsigned)PPU_objTileAdr1(g_ppu) : 0;
-  unsigned obj2 = g_ppu ? (unsigned)PPU_objTileAdr2(g_ppu) : 0;
-  unsigned obsel = g_ppu ? g_ppu->obsel : 0;
+  unsigned obj1 = ppu ? ppu->object_tile_base_1_word : 0;
+  unsigned obj2 = ppu ? ppu->object_tile_base_2_word : 0;
+  unsigned obsel = ppu ? ppu->object_select : 0;
   if (world_record) {
     uint16 raw_state = cpu_read16(
         cpu, cpu->DB, (uint16)(record + kSimRecord_State));
@@ -1471,6 +1572,9 @@ RecompReturn ActRaiser_SimProjectileVisible(CpuState *cpu) {
 }
 
 static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
+  SrPpuObjPositionUpdate
+      position_updates[SR_PPU_OBJ_POSITION_UPDATE_MAX];
+  uint32_t position_update_count = 0;
   const uint16 record = cpu->X;
   const uint16 world_records_end = (uint16)(
       kActRaiserWram_SimWorldRecords +
@@ -1504,7 +1608,6 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
   uint16 part = cpu_read16(
       cpu, cpu->DB, (uint16)(record + kSimRecord_Composition));
   const uint16 oam_before = ws_dp16(cpu, 0x98);
-  ws_sim_catalog_record(cpu, record, world_record, part, oam_before);
   bool began_build = SimRenderMetadata_BeginRecord(
       record, world_record != 0, alternate_attr != 0, part,
       cpu_read16(cpu, cpu->DB, (uint16)(record + kSimRecord_WorldX)),
@@ -1516,11 +1619,22 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
           : 0,
       cpu_read16(cpu, cpu->DB, (uint16)(record + kSimRecord_Status)),
       oam_before);
-  if (began_build && g_ppu) {
-    PpuClearObjExactPositions(g_ppu);
-    PpuClearObjCameraRelative(g_ppu);
-    ActRaiser_MarkExactPositionOwner(kActRaiserExactPositionOwner_Sim);
+  if (began_build) {
+    s_sim_ppu_state_valid = ws_query_ppu_state(&s_sim_ppu_state);
+    if (s_sim_ppu_state_valid &&
+        ws_update_obj_metadata(
+            &s_sim_ppu_state,
+            SR_PPU_OBJ_METADATA_CLEAR_POSITIONS |
+                SR_PPU_OBJ_METADATA_CLEAR_CAMERA_RELATIVE,
+            NULL, 0u) == SR_RESULT_OK) {
+      ActRaiser_MarkExactPositionOwner(kActRaiserExactPositionOwner_Sim);
+    }
+  } else if (!s_sim_ppu_state_valid) {
+    s_sim_ppu_state_valid = ws_query_ppu_state(&s_sim_ppu_state);
   }
+  ws_sim_catalog_record(
+      cpu, record, world_record, part, oam_before,
+      s_sim_ppu_state_valid ? &s_sim_ppu_state : NULL);
   SimRenderMetadata_RecordWord06(cpu_read16(
       cpu, cpu->DB, (uint16)(record + kSimRecord_ActorFlags)));
   /* An eruption record. Gates two things below: the script walk, and the
@@ -1599,16 +1713,23 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
             : (uint16)(raw_attr | ws_dp16(cpu, 0x8F));
         cpu_write16(cpu, cpu->DB, (uint16)(0x0382 + oam), attr);
         SimRenderMetadata_RecordPart(oam, attr);
-        if (g_ppu) {
-          PpuObjPart resolved = {
+        if (s_sim_ppu_state_valid) {
+          SrPpuObjPart resolved = {
             .x = (int16_t)((int)(int16_t)x_biased - 0x10),
             .y = (int16_t)((int)(int16_t)y_biased - 0x11),
             .tile_attr = attr,
-            .size = (uint8_t)PpuObjSizeForSizeBit(
-                g_ppu, cpu_read8(cpu, cpu->DB, part) & 0x01),
+            .size = ws_obj_size(
+                &s_sim_ppu_state,
+                cpu_read8(cpu, cpu->DB, part) & 0x01),
           };
-          PpuSetObjExactPosition(g_ppu, (uint8_t)(oam / 4),
-                                 resolved.x, resolved.y);
+          if (position_update_count < SR_PPU_OBJ_POSITION_UPDATE_MAX) {
+            position_updates[position_update_count++] =
+                (SrPpuObjPositionUpdate) {
+                  .x = resolved.x,
+                  .y = resolved.y,
+                  .slot = (uint8_t)(oam / 4),
+                };
+          }
           SimRenderMetadata_RecordExactOamPart(&resolved);
         }
         final_a = attr;
@@ -1644,7 +1765,7 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
         /* The ROM has already touched x/high bits at this point, then parks
          * the unallocated low-table slot without advancing either cursor. */
         cpu_write16(cpu, cpu->DB, (uint16)(0x0380 + oam), 0xE000);
-        if (world_record && g_ppu &&
+        if (world_record && s_sim_ppu_state_valid &&
             (eruption_record ||
              ws_biased_in_window(y_biased, extended_top, extended_bottom,
                                  kSimOamBiasedHeight))) {
@@ -1653,12 +1774,13 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
           const uint16 attr = alternate_attr
               ? (uint16)((raw_attr & 0xF1FF) | 0x0600 | ws_dp16(cpu, 0x8F))
               : (uint16)(raw_attr | ws_dp16(cpu, 0x8F));
-          const PpuObjPart synthetic = {
+          const SrPpuObjPart synthetic = {
             .x = (int16_t)((int)(int16_t)x_biased - 0x10),
             .y = (int16_t)((int)(int16_t)y_biased - 0x11),
             .tile_attr = attr,
-            .size = (uint8_t)PpuObjSizeForSizeBit(
-                g_ppu, cpu_read8(cpu, cpu->DB, part) & 0x01),
+            .size = ws_obj_size(
+                &s_sim_ppu_state,
+                cpu_read8(cpu, cpu->DB, part) & 0x01),
           };
           SimRenderMetadata_RecordSyntheticPart(oam, &synthetic);
         } else {
@@ -1667,7 +1789,7 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
       }
     } else {
       cpu_write16(cpu, cpu->DB, (uint16)(0x0380 + oam), 0xE000);
-      if (world_record && g_ppu &&
+      if (world_record && s_sim_ppu_state_valid &&
           ws_biased_in_window(x_biased, extended_left, extended_right,
                               kSimOamBiasedWidth)) {
         if (eruption_record ||
@@ -1678,12 +1800,13 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
           const uint16 attr = alternate_attr
               ? (uint16)((raw_attr & 0xF1FF) | 0x0600 | ws_dp16(cpu, 0x8F))
               : (uint16)(raw_attr | ws_dp16(cpu, 0x8F));
-          const PpuObjPart synthetic = {
+          const SrPpuObjPart synthetic = {
             .x = (int16_t)((int)(int16_t)x_biased - 0x10),
             .y = (int16_t)((int)(int16_t)y_biased - 0x11),
             .tile_attr = attr,
-            .size = (uint8_t)PpuObjSizeForSizeBit(
-                g_ppu, cpu_read8(cpu, cpu->DB, part) & 0x01),
+            .size = ws_obj_size(
+                &s_sim_ppu_state,
+                cpu_read8(cpu, cpu->DB, part) & 0x01),
           };
           SimRenderMetadata_RecordSyntheticPart(oam, &synthetic);
         } else {
@@ -1723,6 +1846,10 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
    * question about the widescreen margin and is left alone. */
 
   SimRenderMetadata_EndRecord(oam);
+  if (s_sim_ppu_state_valid && position_update_count != 0u) {
+    (void)ws_update_obj_metadata(
+        &s_sim_ppu_state, 0u, position_updates, position_update_count);
+  }
   ws_dp16w(cpu, 0x98, oam);
   cpu->A = final_a;
   cpu->X = record;  /* PLX */

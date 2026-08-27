@@ -9,8 +9,7 @@
 #include "action/action_room_scene.h"
 #include "deterministic_hash.h"
 #include "diorama/diorama_layer_order.h"
-#include "snes/dma.h"
-#include "snes/ppu.h"
+#include "runner_next.h"
 
 enum {
   kActionBgLayerCount = 2,
@@ -97,10 +96,47 @@ static ActRaiserActionBgObserver s_observer = {
   .room_scene_compare_verbose = -1,
 };
 static ActRaiserActionBgProvider s_provider[kActionBgLayerCount];
+static SrRunnerHandle *s_runner;
+static const SnesRunnerApi *s_runner_api;
+
+void ActRaiserActionBg_BindRunner(SrRunnerHandle *runner) {
+  const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+  const uint64_t required =
+      SR_RUNNER_CAP_PPU_STATE | SR_RUNNER_CAP_BORROWED_U16_SPANS |
+      SR_RUNNER_CAP_DMA_STATE | SR_RUNNER_CAP_PPU_BACKGROUND_POLICY;
+  s_runner = runner;
+  s_runner_api =
+      runner && api &&
+          api->struct_size >= SNES_RUNNER_API_PPU_BACKGROUND_POLICY_SIZE &&
+          (api->capabilities & required) == required
+      ? api : NULL;
+}
+
+static bool QueryPpuState(SrPpuStateSnapshot *state) {
+  if (!state || !s_runner || !s_runner_api) return false;
+  *state = (SrPpuStateSnapshot){ .struct_size = sizeof(*state) };
+  return s_runner_api->query_ppu_state(s_runner, state) == SR_RESULT_OK;
+}
+
+static bool QueryDmaState(SrDmaStateSnapshot *state) {
+  if (!state || !s_runner || !s_runner_api) return false;
+  *state = (SrDmaStateSnapshot){ .struct_size = sizeof(*state) };
+  return s_runner_api->query_dma_state(s_runner, state) == SR_RESULT_OK;
+}
+
+static bool BorrowVram(uint64_t lifetime_generation,
+                       SrBorrowedU16Span *vram) {
+  if (!vram || !s_runner || !s_runner_api) return false;
+  *vram = (SrBorrowedU16Span){ .struct_size = sizeof(*vram) };
+  return s_runner_api->borrow_u16_memory(
+             s_runner, SR_MEMORY_VRAM, vram) == SR_RESULT_OK &&
+      vram->lifetime_generation == lifetime_generation &&
+      vram->data != NULL && vram->element_count == SR_PPU_VRAM_WORD_COUNT;
+}
 
 _Static_assert(kActionBgLayerCount == 2,
                "ActRaiser action HLE currently owns BG1/BG2 only");
-_Static_assert(kActionRoomSceneFrameHeight == kPpuYPixels,
+_Static_assert(kActionRoomSceneFrameHeight == SR_PPU_NATIVE_HEIGHT,
                "authentic camera frames must cover every PPU line");
 _Static_assert(kActRaiserBgLayerStateStride == 4,
                "background capture offsets assume a four-byte layer stride");
@@ -380,7 +416,8 @@ bool ActRaiserActionBg_CompareLayer(
 }
 
 bool ActRaiserActionBg_BuildPlan(
-    const uint8_t *wram, size_t wram_size, const struct Ppu *ppu,
+    const uint8_t *wram, size_t wram_size,
+    const SrPpuStateSnapshot *ppu,
     bool decorative_padding_enabled, ActionBgPlan *plan,
     ActionBgPresentationPolicy *presentation) {
   if (plan) memset(plan, 0, sizeof(*plan));
@@ -399,7 +436,8 @@ bool ActRaiserActionBg_BuildPlan(
   for (unsigned layer = 0; layer < kActionBgLayerCount; layer++) {
     ActRaiserActionBgLayerSnapshot snapshot;
     if (!ActRaiserActionBg_CaptureLayer(
-            wram, wram_size, layer, ppu->bgXsc[layer], &snapshot))
+            wram, wram_size, layer,
+            ppu->background_tilemap_control[layer], &snapshot))
       return false;
     state.layer[layer] = (ActionBgLayerState) {
       .camera_x = snapshot.camera_x,
@@ -419,9 +457,19 @@ bool ActRaiserActionBg_BuildPlan(
   return true;
 }
 
+bool ActRaiserActionBg_BuildCurrentPlan(
+    const uint8_t *wram, size_t wram_size,
+    bool decorative_padding_enabled, ActionBgPlan *plan,
+    ActionBgPresentationPolicy *presentation) {
+  SrPpuStateSnapshot ppu;
+  return QueryPpuState(&ppu) && ActRaiserActionBg_BuildPlan(
+      wram, wram_size, &ppu, decorative_padding_enabled,
+      plan, presentation);
+}
+
 static uint16_t PpuExtentCap(ActionBgExtentMode mode, uint16_t fixed) {
   return mode == kActionBgExtent_Fixed
-      ? fixed : kPpuWidescreenExtentAvailable;
+      ? fixed : (uint16_t)SR_PPU_LAYER_EXTENT_AVAILABLE;
 }
 
 static bool HorizontalExtentsEqual(const ActionBgHorizontalExtent *a,
@@ -429,8 +477,11 @@ static bool HorizontalExtentsEqual(const ActionBgHorizontalExtent *a,
   return a->mode == b->mode && a->left == b->left && a->right == b->right;
 }
 
-bool ActRaiserActionBg_ApplyPlanExtents(const ActionBgPlan *plan, Ppu *ppu) {
-  if (!ppu || !ActionBgPlan_Validate(plan)) return false;
+bool ActRaiserActionBg_ApplyPlanExtents(const ActionBgPlan *plan) {
+  SrPpuStateSnapshot ppu;
+  SrPpuLayerExtentUpdate updates[SR_PPU_LAYER_EXTENT_UPDATE_MAX];
+  uint32_t update_count = 0;
+  if (!ActionBgPlan_Validate(plan) || !QueryPpuState(&ppu)) return false;
   for (unsigned layer = 0; layer < kActionBgPlanLayerCount; layer++) {
     const ActionBgLayerPlan *layer_plan = &plan->layer[layer];
     const ActionBgHorizontalExtent *horizontal =
@@ -441,12 +492,15 @@ bool ActRaiserActionBg_ApplyPlanExtents(const ActionBgPlan *plan, Ppu *ppu) {
      * cap needs to seed the arrays before band overrides refine them. */
     if (horizontal->mode == kActionBgExtent_Fixed ||
         vertical->mode == kActionBgExtent_Fixed) {
-      PpuSetWidescreenLayerExtent(
-          ppu, (uint8_t)layer,
-          PpuExtentCap(horizontal->mode, horizontal->left),
-          PpuExtentCap(horizontal->mode, horizontal->right),
-          PpuExtentCap(vertical->mode, vertical->top),
-          PpuExtentCap(vertical->mode, vertical->bottom));
+      if (update_count >= SR_PPU_LAYER_EXTENT_UPDATE_MAX) return false;
+      updates[update_count++] = (SrPpuLayerExtentUpdate) {
+        .kind = SR_PPU_LAYER_EXTENT_DEFAULT,
+        .layer = layer,
+        .left = PpuExtentCap(horizontal->mode, horizontal->left),
+        .right = PpuExtentCap(horizontal->mode, horizontal->right),
+        .top = PpuExtentCap(vertical->mode, vertical->top),
+        .bottom = PpuExtentCap(vertical->mode, vertical->bottom),
+      };
     }
     /* Validation guarantees sorted, non-overlapping bands. Inherit requires
      * no write because the default has already seeded the row arrays (or the
@@ -461,16 +515,31 @@ bool ActRaiserActionBg_ApplyPlanExtents(const ActionBgPlan *plan, Ppu *ppu) {
       if (y0 >= y1) continue;
       if (band->horizontal_extent.mode != kActionBgExtent_Inherit &&
           !HorizontalExtentsEqual(horizontal, &band->horizontal_extent)) {
-        PpuSetWidescreenLayerExtentBand(
-            ppu, (uint8_t)layer, (uint8_t)y0, (uint8_t)y1,
-            PpuExtentCap(band->horizontal_extent.mode,
-                         band->horizontal_extent.left),
-            PpuExtentCap(band->horizontal_extent.mode,
-                         band->horizontal_extent.right));
+        if (update_count >= SR_PPU_LAYER_EXTENT_UPDATE_MAX) return false;
+        updates[update_count++] = (SrPpuLayerExtentUpdate) {
+          .kind = SR_PPU_LAYER_EXTENT_HORIZONTAL_BAND,
+          .layer = layer,
+          .y0 = (uint32_t)y0,
+          .y1 = (uint32_t)y1,
+          .left = PpuExtentCap(
+              band->horizontal_extent.mode,
+              band->horizontal_extent.left),
+          .right = PpuExtentCap(
+              band->horizontal_extent.mode,
+              band->horizontal_extent.right),
+        };
       }
     }
   }
-  return true;
+  if (update_count == 0u) return true;
+  const SrPpuLayerExtentRequest request = {
+    .struct_size = sizeof(request),
+    .lifetime_generation = ppu.lifetime_generation,
+    .updates = updates,
+    .update_count = update_count,
+  };
+  return s_runner_api->update_ppu_layer_extents(
+      s_runner, &request) == SR_RESULT_OK;
 }
 
 static const char *FallbackName(ActRaiserActionBgFallbackReason reason) {
@@ -788,7 +857,8 @@ static void CompareRoomFrameValue(
 }
 
 bool ActRaiserActionBg_CompareRoomSceneFrameLine(
-    const ActionRoomSceneFrameState *state, const Ppu *ppu,
+    const ActionRoomSceneFrameState *state,
+    const SrPpuStateSnapshot *ppu,
     unsigned output_y,
     ActRaiserActionRoomSceneFrameCompareResult *result) {
   if (result) {
@@ -804,48 +874,52 @@ bool ActRaiserActionBg_CompareRoomSceneFrameLine(
   };
   CompareRoomFrameValue(
       &built, kActRaiserActionRoomSceneFrameField_Bg1HScroll,
-      state->bg_hscroll[0][output_y], ppu->hScroll[0] & 0x03ffu);
+      state->bg_hscroll[0][output_y],
+      ppu->backgrounds[0].h_scroll & 0x03ffu);
   CompareRoomFrameValue(
       &built, kActRaiserActionRoomSceneFrameField_Bg1VScroll,
-      state->bg_vscroll[0][output_y], ppu->vScroll[0] & 0x03ffu);
+      state->bg_vscroll[0][output_y],
+      ppu->backgrounds[0].v_scroll & 0x03ffu);
   CompareRoomFrameValue(
       &built, kActRaiserActionRoomSceneFrameField_Bg2HScroll,
-      state->bg_hscroll[1][output_y], ppu->hScroll[1] & 0x03ffu);
+      state->bg_hscroll[1][output_y],
+      ppu->backgrounds[1].h_scroll & 0x03ffu);
   CompareRoomFrameValue(
       &built, kActRaiserActionRoomSceneFrameField_Bg2VScroll,
-      state->bg_vscroll[1][output_y], ppu->vScroll[1] & 0x03ffu);
+      state->bg_vscroll[1][output_y],
+      ppu->backgrounds[1].v_scroll & 0x03ffu);
   CompareRoomFrameValue(
       &built, kActRaiserActionRoomSceneFrameField_Mosaic,
-      state->mosaic[output_y], ppu->mosaic);
+      state->mosaic[output_y], ppu->mosaic_control);
 
   if (output_y == 0) {
     CompareRoomFrameValue(
         &built, kActRaiserActionRoomSceneFrameField_MainScreen,
-        state->screen_enabled[0], ppu->screenEnabled[0]);
+        state->screen_enabled[0], ppu->main_screen);
     CompareRoomFrameValue(
         &built, kActRaiserActionRoomSceneFrameField_SubScreen,
-        state->screen_enabled[1], ppu->screenEnabled[1]);
+        state->screen_enabled[1], ppu->sub_screen);
     CompareRoomFrameValue(
         &built, kActRaiserActionRoomSceneFrameField_MainWindow,
-        state->screen_windowed[0], ppu->screenWindowed[0]);
+        state->screen_windowed[0], ppu->main_windowed);
     CompareRoomFrameValue(
         &built, kActRaiserActionRoomSceneFrameField_SubWindow,
-        state->screen_windowed[1], ppu->screenWindowed[1]);
+        state->screen_windowed[1], ppu->sub_windowed);
     CompareRoomFrameValue(
         &built, kActRaiserActionRoomSceneFrameField_Cgwsel,
-        state->cgwsel, ppu->cgwsel);
+        state->cgwsel, ppu->color_math_control);
     CompareRoomFrameValue(
         &built, kActRaiserActionRoomSceneFrameField_Cgadsub,
-        state->cgadsub, ppu->cgadsub);
+        state->cgadsub, ppu->color_math_designation);
     CompareRoomFrameValue(
         &built, kActRaiserActionRoomSceneFrameField_Bgmode,
-        state->bgmode, ppu->bgmode);
+        state->bgmode, ppu->bg_mode_control);
     CompareRoomFrameValue(
         &built, kActRaiserActionRoomSceneFrameField_Bg1Sc,
-        state->bgsc[0], ppu->bgXsc[0]);
+        state->bgsc[0], ppu->background_tilemap_control[0]);
     CompareRoomFrameValue(
         &built, kActRaiserActionRoomSceneFrameField_Bg2Sc,
-        state->bgsc[1], ppu->bgXsc[1]);
+        state->bgsc[1], ppu->background_tilemap_control[1]);
   }
   *result = built;
   return true;
@@ -1005,20 +1079,29 @@ static uint16_t ResolveAuthenticActionCameraX(
 }
 
 void ActRaiserActionBg_BeginRoomSceneFrame(
-    const uint8_t *wram, size_t wram_size, Ppu *ppu,
-    const Dma *dma) {
+    const uint8_t *wram, size_t wram_size) {
+  SrPpuStateSnapshot ppu;
+  SrDmaStateSnapshot dma;
   s_observer.room_frame_valid = false;
   s_observer.room_frame_uses_previous = false;
   s_observer.room_frame_raster_matches_current = true;
-  if (ppu) PpuClearAuthenticCameraFrame(ppu);
+  if (!QueryPpuState(&ppu)) return;
+  const SrPpuAuthenticCameraRequest clear_request = {
+    .struct_size = sizeof(clear_request),
+    .flags = SR_PPU_AUTHENTIC_CAMERA_CLEAR,
+    .lifetime_generation = ppu.lifetime_generation,
+  };
+  (void)s_runner_api->update_ppu_authentic_camera(
+      s_runner, &clear_request);
   const bool compare_room_frame = RoomSceneCompareEnabled();
-  const bool capture_authentic = PpuAuthenticSurfaceBound(ppu);
+  const bool capture_authentic =
+      (ppu.renderer_flags & SR_PPU_RENDERER_AUTHENTIC_SURFACE_BOUND) != 0u;
   if (!capture_authentic) {
     s_observer.authentic_camera_valid = false;
     s_observer.capture_live_camera_valid = false;
   }
-  if ((!compare_room_frame && !capture_authentic) || !wram || !ppu ||
-      (ppu->inidisp & 0x80u) || (ppu->bgmode & 7u) != 1u ||
+  if ((!compare_room_frame && !capture_authentic) || !wram ||
+      (ppu.flags & SR_PPU_STATE_FORCED_BLANK) != 0u || ppu.bg_mode != 1u ||
       wram_size <= kActRaiserWram_Bg1CameraY + 1u ||
       !SyncFrameIdentity(wram, wram_size))
     return;
@@ -1052,13 +1135,13 @@ void ActRaiserActionBg_BeginRoomSceneFrame(
       map_number == kActRaiserDeathHeimMap_Hub &&
       wram[kActRaiserWram_DeathHeimProgress] >=
           kActRaiserDeathHeimProgress_FinalBossBeaten) {
-    if ((ppu->bgXsc[0] & 0xfcu) == 0x64u) {
+    if ((ppu.background_tilemap_control[0] & 0xfcu) == 0x64u) {
       request.bgsc_override_mask |= 1u << 0;
-      request.bgsc_override[0] = ppu->bgXsc[0];
+      request.bgsc_override[0] = ppu.background_tilemap_control[0];
     }
-    if ((ppu->bgXsc[1] & 0xfcu) == 0x74u) {
+    if ((ppu.background_tilemap_control[1] & 0xfcu) == 0x74u) {
       request.bgsc_override_mask |= 1u << 1;
-      request.bgsc_override[1] = ppu->bgXsc[1];
+      request.bgsc_override[1] = ppu.background_tilemap_control[1];
     }
   }
 
@@ -1090,7 +1173,7 @@ void ActRaiserActionBg_BeginRoomSceneFrame(
    * installed. This also pins the non-default R7 `$6800` and R9 `$7000` table
    * bases. */
   if (s_observer.room_scene->raster_effect != kActionRoomRaster_None) {
-    if (!dma) return;
+    if (!QueryDmaState(&dma)) return;
     uint16_t table = 0x6000;
     uint8_t target = 0x0f;
     uint8_t mode = 2;
@@ -1110,17 +1193,19 @@ void ActRaiserActionBg_BeginRoomSceneFrame(
         break;
       default: break;
     }
-    const DmaChannel *channel = &dma->channel[2];
-    if (!channel->hdmaActive || channel->indirect ||
-        channel->mode != mode || channel->bAdr != target ||
-        channel->aBank != 0x7e || channel->aAdr != table)
+    const SrDmaChannelState *channel = &dma.channels[2];
+    if ((channel->flags & SR_DMA_CHANNEL_HDMA_ACTIVE) == 0u ||
+        (channel->flags & SR_DMA_CHANNEL_INDIRECT) != 0u ||
+        channel->mode != mode || channel->b_address != target ||
+        channel->a_bank != 0x7e || channel->a_address != table)
       return;
     if (s_observer.room_scene->raster_effect ==
         kActionRoomRaster_DualBgOpposedWaves) {
-      channel = &dma->channel[3];
-      if (!channel->hdmaActive || channel->indirect ||
-          channel->mode != 2 || channel->bAdr != 0x0d ||
-          channel->aBank != 0x7e || channel->aAdr != 0x6800)
+      channel = &dma.channels[3];
+      if ((channel->flags & SR_DMA_CHANNEL_HDMA_ACTIVE) == 0u ||
+          (channel->flags & SR_DMA_CHANNEL_INDIRECT) != 0u ||
+          channel->mode != 2 || channel->b_address != 0x0d ||
+          channel->a_bank != 0x7e || channel->a_address != 0x6800)
         return;
     }
   }
@@ -1139,11 +1224,17 @@ void ActRaiserActionBg_BeginRoomSceneFrame(
     built_any = true;
   }
   if (capture_authentic && authentic_reference_ready) {
-    if (PpuSetAuthenticCameraFrame(
-            ppu, kPpuAuthenticCameraLayer_All,
-            s_observer.authentic_room_frame.bg_hscroll[0],
-            s_observer.authentic_room_frame.bg_hscroll[1],
-            object_delta)) {
+    const SrPpuAuthenticCameraRequest camera_request = {
+      .struct_size = sizeof(camera_request),
+      .lifetime_generation = ppu.lifetime_generation,
+      .layer_mask = SR_PPU_AUTHENTIC_CAMERA_ALL,
+      .row_count = SR_PPU_NATIVE_HEIGHT,
+      .bg1_hscroll = s_observer.authentic_room_frame.bg_hscroll[0],
+      .bg2_hscroll = s_observer.authentic_room_frame.bg_hscroll[1],
+      .object_offset_x = object_delta,
+    };
+    if (s_runner_api->update_ppu_authentic_camera(
+            s_runner, &camera_request) == SR_RESULT_OK) {
       s_observer.last_capture_live_camera_x = camera_x;
       s_observer.capture_live_camera_valid = true;
       s_observer.last_authentic_camera_x = authentic_camera_x;
@@ -1155,7 +1246,7 @@ void ActRaiserActionBg_BeginRoomSceneFrame(
 }
 
 void ActRaiserActionBg_ObserveRoomSceneFrameLine(
-    const Ppu *ppu, unsigned output_y) {
+    const SrPpuStateSnapshot *ppu, unsigned output_y) {
   if (!s_observer.room_frame_valid || !ppu) return;
   ActRaiserActionRoomSceneFrameCompareResult comparison;
   const ActionRoomSceneFrameState *compared_frame =
@@ -1254,8 +1345,12 @@ void ActRaiserActionBg_ObserveRoomSceneFrameLine(
   s_observer.room_scene_verbose_reports++;
 }
 
-static bool ProviderLookup(const void *context, int32_t tile_x,
-                           int32_t tile_y, uint16_t *entry) {
+bool ActRaiserActionBg_RoomSceneFrameObserverActive(void) {
+  return s_observer.room_frame_valid;
+}
+
+static uint32_t ProviderLookup(void *context, int32_t tile_x,
+                               int32_t tile_y, uint16_t *entry) {
   const ActRaiserActionBgProvider *provider = context;
   s_observer.diagnostics.provider_lookups++;
   const ActionBgLookupResult result = LookupWorldTile(
@@ -1270,21 +1365,20 @@ static bool ProviderLookup(const void *context, int32_t tile_x,
   return false;
 }
 
-static size_t ProviderLookupSpan(const void *context, int32_t tile_x,
-                                 int32_t tile_y, int32_t tile_step,
-                                 size_t capacity,
-                                 const uint16_t **entries,
-                                 ptrdiff_t *entry_step) {
+static uint32_t ProviderLookupSpan(
+    void *context, int32_t tile_x, int32_t tile_y, int32_t tile_step,
+    uint32_t capacity, const uint16_t **entries, int64_t *entry_step) {
   const ActRaiserActionBgProvider *provider = context;
   if (!provider || !provider->world || !entries || !entry_step || !capacity ||
       (tile_step != 1 && tile_step != -1))
     return 0;
 
   size_t filled = 0;
+  ptrdiff_t native_step = 0;
   if (!provider->wrap_world_x) {
     filled = ActionBgWorld_LookupSpan(
         provider->world, tile_x, tile_y, tile_step,
-        capacity, entries, entry_step);
+        capacity, entries, &native_step);
   } else {
     const unsigned width = ActionBgWorld_TileWidth(provider->world);
     if (!width) return 0;
@@ -1296,7 +1390,7 @@ static size_t ProviderLookupSpan(const void *context, int32_t tile_x,
     if (chunk > capacity) chunk = capacity;
     filled = ActionBgWorld_LookupSpan(
         provider->world, wrapped, tile_y, tile_step,
-        chunk, entries, entry_step);
+        chunk, entries, &native_step);
   }
 
   if (!filled) return 0;
@@ -1304,7 +1398,8 @@ static size_t ProviderLookupSpan(const void *context, int32_t tile_x,
   s_observer.diagnostics.provider_lookups += filled;
   if (*entries) s_observer.diagnostics.provider_tiles += filled;
   else s_observer.diagnostics.provider_outside_world += filled;
-  return filled;
+  *entry_step = native_step;
+  return (uint32_t)filled;
 }
 
 static uint64_t HashTileBandWord(uint64_t hash, uint16_t value) {
@@ -1449,9 +1544,9 @@ static bool CompileTileBandCache(ActRaiserActionBgProvider *provider) {
   return true;
 }
 
-static bool ProviderBandLookup(const void *context, int32_t tile_x,
-                               int32_t tile_y, uint16_t entry,
-                               uint8_t *band) {
+static uint32_t ProviderBandLookup(void *context, int32_t tile_x,
+                                   int32_t tile_y, uint16_t entry,
+                                   uint8_t *band) {
   const ActRaiserActionBgProvider *provider = context;
   (void)entry;
   if (!provider || !band || !provider->tile_band_cache_valid)
@@ -1504,25 +1599,34 @@ static void ReportComparison(
 }
 
 uint8_t ActRaiserActionBg_BindPlan(
-    const uint8_t *wram, size_t wram_size, const ActionBgPlan *plan,
-    struct Ppu *ppu) {
+    const uint8_t *wram, size_t wram_size, const ActionBgPlan *plan) {
   return ActRaiserActionBg_BindPlanWithVirtualLayers(
-      wram, wram_size, plan, NULL, ppu);
+      wram, wram_size, plan, NULL);
 }
 
 uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
     const uint8_t *wram, size_t wram_size, const ActionBgPlan *plan,
-    const struct DioramaRoomOverride *virtual_room, struct Ppu *ppu) {
-  PpuClearVirtualTilemaps(ppu);
+    const struct DioramaRoomOverride *virtual_room) {
+  SrPpuStateSnapshot ppu;
+  SrBorrowedU16Span vram;
+  SrPpuVirtualTilemapRequest binding_request;
+  if (!QueryPpuState(&ppu)) return 0;
+  binding_request = (SrPpuVirtualTilemapRequest) {
+    .struct_size = sizeof(binding_request),
+    .lifetime_generation = ppu.lifetime_generation,
+  };
+  if (s_runner_api->replace_ppu_virtual_tilemaps(
+          s_runner, &binding_request) != SR_RESULT_OK)
+    return 0;
   if (!ActRaiserActionBg_HleEnabled() ||
-      !wram || !ppu || !plan || !plan->valid ||
+      !wram || !plan || !plan->valid ||
       !SyncFrameIdentity(wram, wram_size))
     return 0;
   const uint8_t map_group = wram[kActRaiserWram_MapGroup];
   const uint8_t map_number = wram[kActRaiserWram_CurrentMap];
   if (!ActRaiser_IsActionMapGroup(map_group)) return 0;
   s_observer.diagnostics.provider_frames++;
-  if (ppu->inidisp & 0x80) {
+  if ((ppu.flags & SR_PPU_STATE_FORCED_BLANK) != 0u) {
     if (!s_observer.forced_blank) ResetWorlds();
     s_observer.forced_blank = true;
     for (unsigned layer = 0; layer < kActionBgLayerCount; layer++)
@@ -1532,16 +1636,17 @@ uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
     return 0;
   }
   s_observer.forced_blank = false;
-  if ((ppu->bgmode & 7u) != 1u) {
+  if (ppu.bg_mode != 1u) {
     for (unsigned layer = 0; layer < kActionBgLayerCount; layer++)
       if (plan->layer[layer].source == kActionBgSource_WorldMap)
         RecordProviderFallback(kActRaiserActionBgFallback_WrongMode, layer,
                                map_group, map_number, NULL);
     return 0;
   }
+  if (!BorrowVram(ppu.lifetime_generation, &vram)) return 0;
 
   uint8_t bound = 0;
-  const uint8_t enabled = ppu->screenEnabled[0] | ppu->screenEnabled[1];
+  const uint8_t enabled = ppu.main_screen | ppu.sub_screen;
   for (unsigned layer = 0; layer < kActionBgLayerCount; layer++) {
     const ActionBgLayerPlan *layer_plan = &plan->layer[layer];
     if (!layer_plan->valid ||
@@ -1549,7 +1654,8 @@ uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
       continue;
     ActRaiserActionBgLayerSnapshot snapshot;
     if (!ActRaiserActionBg_CaptureLayer(
-            wram, wram_size, layer, ppu->bgXsc[layer], &snapshot) ||
+            wram, wram_size, layer,
+            ppu.background_tilemap_control[layer], &snapshot) ||
         layer_plan->world_width != snapshot.decode.world_width ||
         layer_plan->world_height != snapshot.decode.world_height) {
       RecordProviderFallback(kActRaiserActionBgFallback_InvalidSource, layer,
@@ -1562,15 +1668,15 @@ uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
       continue;
     }
     if (!ActRaiserActionBg_WorldRingEligible(
-            &snapshot, sizeof(ppu->vram) / sizeof(ppu->vram[0]))) {
+            &snapshot, (size_t)vram.element_count)) {
       RecordProviderFallback(kActRaiserActionBgFallback_NativeTilemap, layer,
                              map_group, map_number, &snapshot);
       continue;
     }
     if ((snapshot.camera_x & 0x3ffu) !=
-            (ppu->hScroll[layer] & 0x3ffu) ||
+            (ppu.backgrounds[layer].h_scroll & 0x3ffu) ||
         (snapshot.camera_y & 0x3ffu) !=
-            (ppu->vScroll[layer] & 0x3ffu)) {
+            (ppu.backgrounds[layer].v_scroll & 0x3ffu)) {
       RecordProviderFallback(kActRaiserActionBgFallback_ScrollPhase, layer,
                              map_group, map_number, &snapshot);
       continue;
@@ -1615,8 +1721,7 @@ uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
       CompareRoomSceneWorld(layer, map_group, map_number, world);
     ActRaiserActionBgCompareResult comparison;
     if (!ActRaiserActionBg_CompareLayer(
-            world, &snapshot, ppu->vram,
-            sizeof(ppu->vram) / sizeof(ppu->vram[0]),
+            world, &snapshot, vram.data, (size_t)vram.element_count,
             layer_plan->wrap_world_x, &comparison)) {
       RecordProviderFallback(kActRaiserActionBgFallback_CompareFailure, layer,
                              map_group, map_number, &snapshot);
@@ -1663,49 +1768,54 @@ uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
               map_group, map_number, layer + 1u);
       s_provider[layer].reported_tile_band_cache_failure = true;
     }
-    const PpuVirtualTilemapBinding binding = {
+    const SrPpuVirtualTilemapBinding binding = {
       .lookup = ProviderLookup,
       .lookup_span = ProviderLookupSpan,
       .band_lookup = tile_band_cache_ready ? ProviderBandLookup : NULL,
-      .context = &s_provider[layer],
+      .user_data = &s_provider[layer],
       .camera_x = snapshot.camera_x,
       .camera_y = snapshot.camera_y,
-      .hscroll_anchor = (uint16_t)(ppu->hScroll[layer] & 0x3ff),
-      .vscroll_anchor = (uint16_t)(ppu->vScroll[layer] & 0x3ff),
+      .hscroll_anchor = ppu.backgrounds[layer].h_scroll & 0x3ffu,
+      .vscroll_anchor = ppu.backgrounds[layer].v_scroll & 0x3ffu,
       .flags = include_authentic
-          ? kPpuVirtualTilemapFlag_IncludeAuthentic : 0,
+          ? SR_PPU_VIRTUAL_TILEMAP_INCLUDE_AUTHENTIC : 0u,
     };
-    if (!PpuSetVirtualTilemap(ppu, (uint8_t)layer, &binding)) {
-      RecordProviderFallback(kActRaiserActionBgFallback_InvalidSource, layer,
-                             map_group, map_number, &snapshot);
-      continue;
-    }
+    binding_request.bindings[layer] = binding;
+    binding_request.layer_mask |= 1u << layer;
     bound |= (uint8_t)(1u << layer);
     s_observer.diagnostics.provider_layers++;
+  }
+  if (bound != 0u && s_runner_api->replace_ppu_virtual_tilemaps(
+          s_runner, &binding_request) != SR_RESULT_OK) {
+    binding_request.layer_mask = 0u;
+    (void)s_runner_api->replace_ppu_virtual_tilemaps(
+        s_runner, &binding_request);
+    return 0;
   }
   return bound;
 }
 
 static void ObserveLayer(const uint8_t *wram, size_t wram_size,
-                         const Ppu *ppu, unsigned layer,
+                         const SrPpuStateSnapshot *ppu,
+                         const SrBorrowedU16Span *vram, unsigned layer,
                          uint8_t map_group, uint8_t map_number,
                          bool wrap_world_x) {
   ActRaiserActionBgLayerSnapshot snapshot;
   if (!ActRaiserActionBg_CaptureLayer(
-          wram, wram_size, layer, ppu->bgXsc[layer], &snapshot)) {
+          wram, wram_size, layer,
+          ppu->background_tilemap_control[layer], &snapshot)) {
     RecordFallback(kActRaiserActionBgFallback_InvalidSource, layer,
                    map_group, map_number, NULL);
     return;
   }
-  const uint8_t enabled = ppu->screenEnabled[0] | ppu->screenEnabled[1];
+  const uint8_t enabled = ppu->main_screen | ppu->sub_screen;
   if (!(enabled & (1u << layer))) {
     RecordFallback(kActRaiserActionBgFallback_LayerDisabled, layer,
                    map_group, map_number, &snapshot);
     return;
   }
   if (!ActRaiserActionBg_WorldRingEligible(&snapshot,
-                                           sizeof(ppu->vram) /
-                                               sizeof(ppu->vram[0]))) {
+                                           (size_t)vram->element_count)) {
     RecordFallback(kActRaiserActionBgFallback_NativeTilemap, layer,
                    map_group, map_number, &snapshot);
     return;
@@ -1730,8 +1840,7 @@ static void ObserveLayer(const uint8_t *wram, size_t wram_size,
 
   ActRaiserActionBgCompareResult comparison;
   if (!ActRaiserActionBg_CompareLayer(
-          world, &snapshot, ppu->vram,
-          sizeof(ppu->vram) / sizeof(ppu->vram[0]),
+          world, &snapshot, vram->data, (size_t)vram->element_count,
           wrap_world_x, &comparison)) {
     RecordFallback(kActRaiserActionBgFallback_CompareFailure, layer,
                    map_group, map_number, &snapshot);
@@ -1747,18 +1856,21 @@ static void ObserveLayer(const uint8_t *wram, size_t wram_size,
       s_observer.comparison_reported_mismatch_serial);
 }
 
-void ActRaiserActionBg_ObserveFrame(const uint8_t *wram, size_t wram_size,
-                                    const struct Ppu *ppu) {
+void ActRaiserActionBg_ObserveFrame(const uint8_t *wram, size_t wram_size) {
+  SrPpuStateSnapshot ppu;
+  SrBorrowedU16Span vram;
   const bool compare_world = CompareEnabled();
   const bool compare_stage = RoomSceneStageCompareEnabled();
-  if ((!compare_world && !compare_stage) || !wram || !ppu ||
+  if ((!compare_world && !compare_stage) || !wram ||
+      !QueryPpuState(&ppu) ||
+      (compare_world && !BorrowVram(ppu.lifetime_generation, &vram)) ||
       !SyncFrameIdentity(wram, wram_size))
     return;
   const uint8_t map_group = wram[kActRaiserWram_MapGroup];
   const uint8_t map_number = wram[kActRaiserWram_CurrentMap];
   if (compare_world) s_observer.diagnostics.frames_observed++;
 
-  if (ppu->inidisp & 0x80) {
+  if ((ppu.flags & SR_PPU_STATE_FORCED_BLANK) != 0u) {
     if (!s_observer.forced_blank) ResetWorlds();
     s_observer.forced_blank = true;
     if (compare_world)
@@ -1768,7 +1880,7 @@ void ActRaiserActionBg_ObserveFrame(const uint8_t *wram, size_t wram_size,
     return;
   }
   s_observer.forced_blank = false;
-  if ((ppu->bgmode & 7u) != 1u) {
+  if (ppu.bg_mode != 1u) {
     if (compare_world)
       for (unsigned layer = 0; layer < kActionBgLayerCount; layer++)
         RecordFallback(kActRaiserActionBgFallback_WrongMode, layer,
@@ -1787,9 +1899,9 @@ void ActRaiserActionBg_ObserveFrame(const uint8_t *wram, size_t wram_size,
   ActionBgPlan plan;
   ActionBgPresentationPolicy presentation;
   const bool have_plan = ActRaiserActionBg_BuildPlan(
-      wram, wram_size, ppu, true, &plan, &presentation);
+      wram, wram_size, &ppu, true, &plan, &presentation);
   for (unsigned layer = 0; layer < kActionBgLayerCount; layer++)
-    ObserveLayer(wram, wram_size, ppu, layer, map_group, map_number,
+    ObserveLayer(wram, wram_size, &ppu, &vram, layer, map_group, map_number,
                  have_plan && plan.layer[layer].wrap_world_x);
 }
 

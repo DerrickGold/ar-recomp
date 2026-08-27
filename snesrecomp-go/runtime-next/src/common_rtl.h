@@ -3,7 +3,6 @@
 
 #include "apu_sync.h"
 #include "types.h"
-#include "snes/dma.h"
 
 #include <string.h>
 
@@ -15,15 +14,6 @@ typedef struct Apu Apu;
 typedef struct CpuState CpuState;
 typedef struct Dma Dma;
 typedef struct Ppu Ppu;
-
-typedef struct SimpleHdma {
-    const uint8 *table;
-    const uint8 *indir_ptr;
-    uint8 rep_count;
-    uint8 mode;
-    uint8 ppu_addr;
-    uint8 indir_bank;
-} SimpleHdma;
 
 extern uint8 g_ram[kSnesWramSize];
 extern uint8 *g_sram;
@@ -108,9 +98,6 @@ bool RtlLoadSnapshot(const char *filename);
 void RtlMigrateLegacySram(const char *legacy_title);
 void RtlReadSram(void);
 void RtlWriteSram(void);
-
-void SimpleHdma_Init(SimpleHdma *channel, DmaChannel *dma_channel);
-void SimpleHdma_DoLine(SimpleHdma *channel);
 
 int ApuProfEnabled(void);
 void ApuProfFrameReset(void);

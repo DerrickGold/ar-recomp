@@ -647,6 +647,123 @@ Seven adjacent replay pairs retained identical artifacts. Portable deltas were
 faster. Native-SIMD deltas were +0.04%, -0.03%, +0.08%, and -0.04%; suite
 regression was +0.01%.
 
+## ABI v2 SIM frame-transaction checkpoint (2026-08-27)
+
+ABI v2 now exposes one coherent synchronous PPU frame transaction for
+frame-critical enhancement policy. Its callback receives fixed-width state and
+frame values, generation-matched zero-copy CGRAM/OAM borrows, and bounded
+writable views of host-owned base overlay surfaces. A separate atomic
+compare/exchange replaces any selected capture policies only when every source
+still matches the caller's expected value. Fixed colour and the raw
+transparent-fill configuration are public values, so a temporary owner can
+restore capture policy exactly rather than reconstructing it from derived
+pixels.
+
+The enhanced SIM separated capture now consumes only the opaque runner handle.
+It validates the existing town-HUD owner from the coherent view, rasterizes the
+small promoted OBJ range through the public service, binds its caller-owned
+planes directly, and restores exact capture geometry, flags, fill policy, and
+OAM ownership after scanout. No emulated-memory or plane-buffer copy was added.
+This removes `sim/sim3d.c` from the concrete fence and leaves 4 frame-critical
+application exceptions.
+
+All 92 application tests pass, including the three GPU tests. Focused PPU and
+runner ABI tests cover coherent views, writable surface bounds, fixed colour,
+raw fill policy, successful exchange and restore, contention, invalid policy,
+and stale-generation rejection. The public header passes C++17 syntax
+validation and all touched C sources pass an x86-64 macOS cross-target syntax
+build from the ARM64 host. Seven adjacent replay pairs retained identical
+artifacts. Portable deltas were +0.71%, +0.46%, +0.18%, and +0.94% in workload
+order; suite regression was +0.57%. Native-SIMD deltas were -0.83%, -0.50%,
+-0.68%, and -1.19%; the suite was 0.80% faster.
+
+## ABI v2 sparse VRAM transaction checkpoint (2026-08-27)
+
+ABI v2 now exposes a bounded atomic compare/exchange for sparse PPU VRAM word
+sets. It validates the request extent, generation, alignment, reserved fields,
+addresses, uniqueness, and every expected word before applying any
+replacement. Callers that already produce ascending addresses can request the
+sorted fast path, which proves uniqueness with adjacent comparisons and avoids
+clearing the general-path 4 KiB seen-bitset. Memory-write observers receive the
+byte-granular events for successful changed words.
+
+The Sky Palace widescreen adapter now reads PPU state and borrows VRAM through
+ABI v2, constructs a sorted list containing only changed margin words, and
+restores each word only if it still contains the adapter's replacement. This
+removes its concrete PPU dependency and the prior pair of 8 KiB whole-tilemap
+copies per active frame. The exact concrete-header fence falls from 4 files to
+3.
+
+The ABI unit test covers successful multiword mutation and restore, stale
+generation rejection, all-or-nothing contention, duplicate and unsorted
+addresses, unknown flags, and reserved fields. The wide natural Fillmore replay
+exercises the Sky Palace transaction from gf276 and at the documented gf420
+scene without a failed restore. Seven adjacent replay pairs retained identical
+artifacts. Portable deltas were -0.23%, +0.22%, +0.49%, and +0.72% in workload
+order; suite regression was +0.30%. Native-SIMD deltas were +0.48%, +0.00%,
++0.56%, and +0.66%; suite regression was +0.43%. The focused active-Sky replay
+measured +2.15% portable and +0.79% native-SIMD, both inside the phase gate.
+
+## ABI v2 OBJ-metadata transaction checkpoint (2026-08-27)
+
+ABI v2 now publishes resolved small and large OBJ dimensions in the coherent
+PPU snapshot and exposes a synchronous, bounded metadata transaction for exact
+screen positions and camera-relative policy. The runner validates generation,
+extent, alignment, flags, reserved fields, slots, and duplicate entries for the
+entire batch before applying any requested clear or update. Because this is
+derived renderer metadata, successful publication invalidates the OBJ
+scanline-mask cache without advancing emulated-state or lifetime generations.
+
+The widescreen sprite adapter now consumes only the opaque runner handle.
+Action mode takes one snapshot, clears once, records accepted positions in a
+fixed 128-entry caller buffer, and publishes once after its object scan. SIM
+mode reuses one coherent snapshot for the metadata build and publishes at most
+one batch per source record. Resolved and synthetic parts use public
+`SrPpuObjPart` values and snapshot-derived sizes. This removes
+`actraiser/actraiser_widescreen_sprites.c` from the concrete fence and leaves 2
+frame-critical application exceptions.
+
+All 92 application tests pass, including the three host-GPU tests. The focused
+ABI test covers clear/update batches, exact signed positions, camera-relative
+policy, stale generations, incremental and clear-only requests, invalid and
+duplicate slots, unknown flags, reserved fields, scanline-mask invalidation,
+and validation-before-clear. C++17 and x86-64 macOS cross-target checks pass.
+Seven adjacent replay pairs retain identical artifacts; the suite is 0.38%
+faster portable and 0.37% faster native-SIMD. A wide Aitos capture and 11
+Fillmore action captures match frozen-reference pixels exactly. The established
+projected-SIM checkpoint also matches every substantive metadata, separated-
+capture, authentic-framebuffer, and render-hash result; its only failure is the
+same pre-existing camera expectation drift reproduced by the frozen reference.
+
+## ABI v2 action-background policy checkpoint (2026-08-27)
+
+ABI v2 now publishes a fixed-width snapshot of all eight DMA channels plus the
+authentic-surface binding flag. Three synchronous renderer-policy services
+accept bounded default/scanline-band layer extents, atomically replace both
+supported virtual background providers, and publish BG1/BG2 authentic-camera
+rows with the shared object offset. Requests validate their complete extent,
+generation, flags, reserved fields, callbacks, and ranges before changing live
+policy. Renderer reset clears retained provider contexts.
+
+The ActRaiser action-background adapter now consumes only the opaque runner
+handle. It builds plans from coherent public PPU state, borrows VRAM zero-copy
+for its existing finite-world preflight, publishes both layer providers in one
+replacement, and returns scalar or contiguous tile spans without copying. Its
+H-blank room authority uses one DMA snapshot, and its authentic-camera handoff
+copies only the already-required 224-row camera arrays. This removes
+`actraiser/actraiser_action_bg.c` from the concrete fence and leaves only the
+core `actraiser_rtl.c` adapter.
+
+All 92 application tests pass, including all three host-GPU tests. ABI and
+focused adapter tests cover eight-channel DMA state, extent batches,
+validation-before-apply, scalar/span/band virtual lookups, invalid replacement
+preservation, authentic-camera publication, clear operations, and stale
+generations. C11/C++17 public-header and x86-64 macOS cross-target checks pass.
+Seven adjacent replay pairs retain identical terminal artifacts; the portable
+suite is 0.39% faster and native-SIMD regresses 0.76%, with no workload above
+1.17%. Eleven active Fillmore action frames and final machine-state artifacts
+match the frozen reference byte-for-byte.
+
 ## Migration order
 
 1. [x] Add ABI layout, capability, lifetime, and generation-counter tests while

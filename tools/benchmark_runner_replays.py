@@ -44,11 +44,16 @@ class Workload:
     environment: dict[str, str] = field(default_factory=dict)
 
 
-WIDE_ACTION_ENV = {
+WIDE_DISPLAY_ENV = {
     "AR_WS_HEADLESS": "1",
     "AR_EXTENDED_ASPECT_RATIO": "16:10",
     "AR_ASPECT_PAR": "Square pixels",
     "AR_DISPLAY_MODE": "2",
+}
+
+
+WIDE_ACTION_ENV = {
+    **WIDE_DISPLAY_ENV,
     "AR_ACTION_BG_HLE": "1",
     "AR_DIORAMA": "0",
     "AR_SIM3D": "0",
@@ -63,6 +68,12 @@ WORKLOADS = {
         description="Repeated authentic-width Mode 7 and world-map transitions",
         replay="saves/fillmore-r1-natural.rec",
         frames=6000,
+    ),
+    "sky_palace_wide": Workload(
+        description="Wide Sky Palace margin patch and restore transaction",
+        replay="saves/fillmore-r1-natural.rec",
+        frames=1200,
+        environment=WIDE_DISPLAY_ENV,
     ),
     "sim_actions": Workload(
         description="Simulation-mode actions with the replay's pinned settings",
@@ -83,6 +94,16 @@ WORKLOADS = {
         environment=WIDE_ACTION_ENV,
     ),
 }
+
+
+# Preserve the established four-workload ABI gate and its stored baselines.
+# Targeted seams can opt into additional workloads with --workload.
+DEFAULT_WORKLOADS = (
+    "mode7_worldmap",
+    "sim_actions",
+    "aitos_wide",
+    "death_heim_wide",
+)
 
 
 def sha256(path: Path) -> str:
@@ -358,7 +379,7 @@ def main() -> int:
     if reference_binary is not None:
         required += (reference_binary,)
     missing = [str(path) for path in required if not path.is_file()]
-    selected = args.workload or list(WORKLOADS)
+    selected = args.workload or list(DEFAULT_WORKLOADS)
     missing.extend(
         str(ROOT / WORKLOADS[name].replay)
         for name in selected

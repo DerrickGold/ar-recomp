@@ -7,11 +7,7 @@ if(NOT DEFINED AR_SOURCE_ROOT)
 endif()
 
 set(_allowed
-  actraiser/actraiser_action_bg.c
   actraiser/actraiser_rtl.c
-  actraiser/actraiser_widescreen_bg.c
-  actraiser/actraiser_widescreen_sprites.c
-  sim/sim3d.c
 )
 list(SORT _allowed)
 

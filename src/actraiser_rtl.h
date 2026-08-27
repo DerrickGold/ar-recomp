@@ -66,6 +66,7 @@ int ActRaiser_ReadRdnmi(Snes *snes);
 bool ActRaiser_RecoverDispatchMiss(uint32 source_pc24, uint32 target_pc24);
 void ActRaiser_SpcUploaderCompleteTick(void);
 void ActRaiser_SpcUploadBindRunner(SrRunnerHandle *runner);
+void ActRaiser_WidescreenSpritesBindRunner(SrRunnerHandle *runner);
 #ifdef SNESRECOMP_NEXT_COMMON_CPU_INFRA_H
 bool ActRaiser_SpcUploadSource(CpuState *cpu, uint32 *source24);
 bool ActRaiser_SpcUploadCustomize(CpuState *cpu,
@@ -90,8 +91,8 @@ uint8 ActRaiser_SelectedMagic(void);
 /* BG-only widescreen presentation helpers. The Sky Palace pair temporarily
  * decodes a box-free source map into only BG2's margin columns, then restores
  * game VRAM. Action world margins use the bounded HLE provider. */
-void ActRaiser_WidescreenSkyPalacePrepare(void);
-void ActRaiser_WidescreenSkyPalaceRestore(void);
+void ActRaiser_WidescreenSkyPalacePrepare(SrRunnerHandle *runner);
+void ActRaiser_WidescreenSkyPalaceRestore(SrRunnerHandle *runner);
 void ActRaiser_WidescreenSpriteActivationProbe(void);
 
 #endif  // ACTRAISER_RTL_H
