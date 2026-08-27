@@ -12,16 +12,6 @@ becomes a standalone repository.
   title-specific policy in the runner.
 - [`RUNTIME.md`](RUNTIME.md) describes the runtime/game/host boundary and
   optional subsystems.
-- [`GAME_SDK_EVALUATION.md`](GAME_SDK_EVALUATION.md) records the cross-game
-  Super Mario World and Zelda 3 integration exercise.
-
-## Engineering records
-
-- [`ABI_ROADMAP.md`](ABI_ROADMAP.md) is the chronological record of completed
-  and deferred component-access work; it is not the normative API reference.
-- [`PERFORMANCE_ROADMAP.md`](PERFORMANCE_ROADMAP.md) is the historical record
-  of portable and architecture-specific performance investigations.
 
 The recompiler, `snesbuild`, generated-project layout, and full hermetic build
-pipeline are separate toolchain concerns. Their guide intentionally remains in
-[`../../docs/PROJECT_INTEGRATION.md`](../../docs/PROJECT_INTEGRATION.md).
+pipeline are separate toolchain concerns and are not part of this runtime SDK.

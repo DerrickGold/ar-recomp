@@ -1,10 +1,9 @@
-# Runner SDK API reference
+# Runner SDK API reference {#api_reference}
 
-This reference is the lookup companion to the broader toolchain's
-[`PROJECT_INTEGRATION.md`](../../docs/PROJECT_INTEGRATION.md) and
-[`GAME_ENHANCEMENT_INTEGRATION.md`](GAME_ENHANCEMENT_INTEGRATION.md). Those
-guides explain how to recover game semantics and structure a project; this
-document explains how to call the public C contracts safely.
+This reference is the lookup companion to
+[`GAME_ENHANCEMENT_INTEGRATION.md`](GAME_ENHANCEMENT_INTEGRATION.md). That
+guide explains how to recover game semantics and structure an enhancement;
+this document explains how to call the public C contracts safely.
 
 All supported headers are under `include/snesrecomp`. Nothing under `src` is
 an SDK contract.

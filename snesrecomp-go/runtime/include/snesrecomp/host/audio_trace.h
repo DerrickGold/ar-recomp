@@ -1,7 +1,16 @@
+/**
+ * @file audio_trace.h
+ * @brief Optional host-side PCM and APU event tracing.
+ * @ingroup sr_host
+ */
 #ifndef SNESRECOMP_HOST_AUDIO_TRACE_H
 #define SNESRECOMP_HOST_AUDIO_TRACE_H
 
 #include <stdint.h>
+
+/** @addtogroup sr_host
+ *  @{
+ */
 
 #define AUDIO_TRACE_PCM_RING (1u << 22)
 #define AUDIO_TRACE_EVENT_RING (1u << 19)
@@ -89,5 +98,7 @@ uint32_t audio_trace_copy_snaps(uint64_t first_index, uint32_t maximum,
                                 AudioTraceSnap *output, uint64_t *oldest);
 int audio_trace_dump_wav(const char *path, int64_t start_index, uint64_t count,
                          uint64_t *output_start, uint64_t *output_count);
+
+/** @} */
 
 #endif

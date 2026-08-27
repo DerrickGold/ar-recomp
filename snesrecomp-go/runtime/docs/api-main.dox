@@ -1,0 +1,91 @@
+/**
+@mainpage snesrecomp Runtime SDK
+
+@tableofcontents
+
+The runtime SDK is the portable C boundary between a recompiled SNES game,
+the hardware runner, optional enhancement code, and the host frontend. This
+reference is generated from the installed headers, so declarations and their
+ownership rules stay beside the code they describe.
+
+Start with these documents:
+
+- @ref api_reference "API usage, capabilities, ownership, and call sequences"
+- @ref game_enhancement_integration "Integrating widescreen graphics and enhanced audio"
+- @ref runtime_architecture "Runtime, game, and host boundaries"
+
+Most external enhancement and tooling code should acquire SnesRunnerApi with
+sr_runner_get_api(), verify the required capability and table extent, and use
+only opaque SrRunnerHandle values. The linked game module uses RtlGameModule
+plus the deliberately smaller synchronous helpers in game_runtime.h.
+
+Nothing under `src/` is an SDK contract. The headers under
+`snesrecomp/game/` support generated C and are intentionally omitted from this
+human integration index; they remain installed and compile-tested.
+*/
+
+/** @defgroup sr_runner Runner ABI
+ *  @brief Versioned, capability-gated inspection and enhancement services.
+ *
+ *  This is the normal surface for host code, tools, and optional enhancement
+ *  layers. Calls are synchronous unless a contract explicitly describes a
+ *  queued safe-point mutation.
+ */
+
+/** @defgroup sr_runner_core Core runner state
+ *  @ingroup sr_runner
+ *  @brief Results, handles, generations, borrowed memory, CPU state, timing,
+ *  and input state.
+ */
+
+/** @defgroup sr_runner_ppu PPU and presentation
+ *  @ingroup sr_runner
+ *  @brief Coherent PPU snapshots, widescreen policy, captures, rendering,
+ *  and scanout transactions.
+ */
+
+/** @defgroup sr_runner_events Events and diagnostics
+ *  @ingroup sr_runner
+ *  @brief Execution, memory, DMA, interrupt, frame, and audio observation.
+ */
+
+/** @defgroup sr_runner_audio Audio control
+ *  @ingroup sr_runner
+ *  @brief Bounded SPC handshakes and native DSP bus-mix policy.
+ */
+
+/** @defgroup sr_runner_mutation Safe-point mutation
+ *  @ingroup sr_runner
+ *  @brief Copied commands queued from host threads and applied at frame-safe
+ *  boundaries.
+ */
+
+/** @defgroup sr_runner_table API discovery and dispatch
+ *  @ingroup sr_runner
+ *  @brief Runtime descriptor, ABI discovery, and the SnesRunnerApi table.
+ */
+
+/** @defgroup sr_game Linked game module
+ *  @brief Contracts implemented by a recompiled game and registered before
+ *  runner creation.
+ */
+
+/** @defgroup sr_game_hotpath Linked-game hot path
+ *  @ingroup sr_game
+ *  @brief Low-overhead synchronous helpers reserved for the game linked into
+ *  the runner executable.
+ */
+
+/** @defgroup sr_game_audio Linked-game audio adaptation
+ *  @ingroup sr_game
+ *  @brief Safe-point audio routing, SPC upload, extension, and save-state
+ *  contracts implemented by game-aware adapters.
+ */
+
+/** @defgroup sr_host Host conveniences
+ *  @brief Optional launcher, tracing, frame-dump, and presentation helpers.
+ */
+
+/** @defgroup sr_support Stateless support
+ *  @brief Small portable helpers with no runner ownership or lifecycle.
+ */

@@ -1,3 +1,8 @@
+/**
+ * @file game.h
+ * @brief Versioned module implemented by a linked recompiled game.
+ * @ingroup sr_game
+ */
 #ifndef SNESRECOMP_GAME_H
 #define SNESRECOMP_GAME_H
 
@@ -13,6 +18,10 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/** @addtogroup sr_game
+ *  @{
+ */
 
 typedef struct CpuState CpuState;
 
@@ -48,7 +57,7 @@ typedef struct RtlGameIdentity {
 
 #define RTL_GAME_INITIALIZE_HAS_ROM UINT32_C(0x00000001)
 
-/* Callback-lifetime initialization state. A loaded ROM is mutable only inside
+/** Callback-lifetime initialization state. A loaded ROM is mutable only inside
  * this callback, which runs after cartridge loading and before the first reset.
  * This is the intended seam for verified per-game ROM transforms. The runner
  * handle may be retained; rom_data may not. */
@@ -66,7 +75,7 @@ typedef struct RtlGameInitializeContext {
 
 typedef bool RtlGameInitializeFunc(
     const RtlGameInitializeContext *context);
-/* Receives the active opaque runner, or NULL before that runner is destroyed.
+/** Receives the active opaque runner, or NULL before that runner is destroyed.
  * The module may bind long-lived host/game services but must not inspect a
  * concrete runner layout. */
 typedef void RtlGameRunnerChangedFunc(SrRunnerHandle *runner);
@@ -88,7 +97,7 @@ typedef bool RtlGameDispatchMissRecoveryFunc(
     uint32_t source_pc24, uint32_t target_pc24);
 typedef void RtlGamePpuDisplayControlWriteFunc(uint8_t value);
 
-/* Recompiled execution policy. run_frame is the sole required callback. The
+/** Recompiled execution policy. run_frame is the sole required callback. The
  * runner caches this table at registration, so nesting adds no frame-time
  * lookup or allocation. */
 typedef struct RtlGameExecutionApi {
@@ -111,7 +120,7 @@ typedef SrResult RtlGameCpuStateQueryFunc(
 typedef SrResult RtlGameExecutionStateQueryFunc(
     void *user_data, SrExecutionSnapshot *out_state);
 
-/* Optional generated-code observers. user_data and cpu_component_handle stay
+/** Optional generated-code observers. user_data and cpu_component_handle stay
  * module-owned. The latter is returned only as the opaque CPU component handle
  * and is never dereferenced by the generic runner. */
 typedef struct RtlGameStateProviderApi {
@@ -161,7 +170,7 @@ typedef void RtlGameAudioMixFunc(int16_t *stereo_buffer, int frames);
     (RTL_GAME_AUDIO_CAP_SPC_UPLOAD | RTL_GAME_AUDIO_CAP_VOICE_ROUTING | \
      RTL_GAME_AUDIO_CAP_EXTENSION | RTL_GAME_AUDIO_CAP_PRESENTATION)
 
-/* Privileged linked-game audio policy. This table deliberately remains
+/** Privileged linked-game audio policy. This table deliberately remains
  * separate from the public read-only audio observer API: its callbacks run at
  * existing APU/SPC/DSP safe points and may request bounded mutations. The
  * presentation callbacks support game-aware pacing, replacement-track state,
@@ -191,7 +200,7 @@ typedef struct RtlGameAudioApi {
     ((uint32_t)(offsetof(RtlGameAudioApi, mix_output) +                  \
                 sizeof(((RtlGameAudioApi *)0)->mix_output)))
 
-/* One immutable module is registered before runner creation and remains alive
+/** One immutable module is registered before runner creation and remains alive
  * until it is replaced while no runner exists. Optional table pointers must
  * agree exactly with their module capability bits. */
 typedef struct RtlGameModule {
@@ -208,6 +217,8 @@ typedef struct RtlGameModule {
 #define RTL_GAME_MODULE_V2_SIZE                                       \
     ((uint32_t)(offsetof(RtlGameModule, audio) +                        \
                 sizeof(((RtlGameModule *)0)->audio)))
+
+/** @} */
 
 #ifdef __cplusplus
 }

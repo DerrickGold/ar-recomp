@@ -1,4 +1,4 @@
-# Shared runtime
+# Shared runtime {#runtime_architecture}
 
 `runtime/` is the independently authored portable C execution
 environment for code emitted by `snesrecomp-go`. It remains C because
@@ -26,7 +26,7 @@ The shared layer provides:
 The per-game project provides the executable frontend, verified ROM loading,
 configuration/settings, a versioned `RtlGameModule`, reset/frame/interrupt
 policy, HLE bodies, and all ROM-address-specific behavior. See the broader
-toolchain's [`PROJECT_INTEGRATION.md`](../../docs/PROJECT_INTEGRATION.md).
+recompiler project for generated-project and build-tool integration.
 
 ## Game module contract
 
@@ -102,7 +102,10 @@ runner.
 - Optional SIMD is selected by compiler target macros and always retains the
   portable implementation.
 
-The post-cutover component-access and low-copy ABI plan is tracked in
-[`ABI_ROADMAP.md`](ABI_ROADMAP.md). Cross-game integration pressure and the
-current Zelda 3-shaped audit are recorded in `GAME_SDK_EVALUATION.md`.
-The human-facing operation and lifetime reference is `API_REFERENCE.md`.
+## Known SDK gap
+
+Gameplay save/load remains available to the linked game, but a generic
+frontend or external tool cannot yet request a versioned caller-owned save
+image or queue a load through the public safe-point boundary. This is the
+remaining concrete ABI integration gap. The human-facing operation and
+lifetime reference is `API_REFERENCE.md`.

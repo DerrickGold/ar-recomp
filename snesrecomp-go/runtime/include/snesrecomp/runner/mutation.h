@@ -1,3 +1,8 @@
+/**
+ * @file mutation.h
+ * @brief Host-thread commands applied at deterministic runner safe points.
+ * @ingroup sr_runner_mutation
+ */
 #pragma once
 
 #include "snesrecomp/runner/base.h"
@@ -6,7 +11,11 @@
 extern "C" {
 #endif
 
-/* Small, copied commands applied at the beginning of a host frame before
+/** @addtogroup sr_runner_mutation
+ *  @{
+ */
+
+/** Small, copied commands applied at the beginning of a host frame before
  * emulation observes that frame's input or component state. Queueing is safe
  * from another host thread. The queue retains no caller pointer. */
 #define SR_MUTATION_INLINE_BYTE_CAPACITY 16u
@@ -30,7 +39,7 @@ typedef struct SrMutationCommand {
     uint8_t bytes[SR_MUTATION_INLINE_BYTE_CAPACITY];
 } SrMutationCommand;
 
-/* WRITE_MEMORY addresses are byte offsets within WRAM, SRAM, VRAM, CGRAM,
+/** WRITE_MEMORY addresses are byte offsets within WRAM, SRAM, VRAM, CGRAM,
  * OAM, or high OAM. ROM, APU RAM, and DSP registers are rejected rather than
  * crossing an unsafe ownership boundary. SET_INPUT applies input_value under
  * input_mask to the packed controller word used by RtlRunFrame: controller 1
@@ -60,14 +69,15 @@ typedef struct SrMutationStatus {
     uint64_t applied_frame_counter;
 } SrMutationStatus;
 
-/* SR_MUTATION_QUERY_CONSUME releases terminal APPLIED/FAILED records after
+/** SR_MUTATION_QUERY_CONSUME releases terminal APPLIED/FAILED records after
  * copying them to out_status. QUEUED/APPLYING records are never consumed. */
 
 #define SR_MUTATION_STATUS_V2_SIZE                                       \
     ((uint32_t)(offsetof(SrMutationStatus, applied_frame_counter) +       \
                 sizeof(((SrMutationStatus *)0)->applied_frame_counter)))
 
+/** @} */
+
 #ifdef __cplusplus
 }
 #endif
-

@@ -1,3 +1,8 @@
+/**
+ * @file audio.h
+ * @brief Bounded SPC control and native SNES audio-mix policy.
+ * @ingroup sr_runner_audio
+ */
 #pragma once
 
 #include "snesrecomp/runner/base.h"
@@ -6,7 +11,11 @@
 extern "C" {
 #endif
 
-/* Synchronous, atomic SPC program-counter control for narrow game-adapter
+/** @addtogroup sr_runner_audio
+ *  @{
+ */
+
+/** Synchronous, atomic SPC program-counter control for narrow game-adapter
  * handshakes. The runner holds the APU lock while it compares the inclusive
  * PC range and up to eight consecutive ARAM bytes, then applies the new PC
  * only when every predicate matches. This is an emulation-thread service; it
@@ -44,7 +53,7 @@ typedef struct SrSpcPcControlResult {
     ((uint32_t)(offsetof(SrSpcPcControlResult, reserved) +                \
                 sizeof(((SrSpcPcControlResult *)0)->reserved)))
 
-/* Synchronous host-mix policy. Percentages are inclusive 0..100 values and
+/** Synchronous host-mix policy. Percentages are inclusive 0..100 values and
  * affect the runner's native DSP output buses; replacement-stream volume is a
  * host concern and remains outside this request. */
 typedef struct SrAudioMixControl {
@@ -59,7 +68,8 @@ typedef struct SrAudioMixControl {
     ((uint32_t)(offsetof(SrAudioMixControl, reserved) +                   \
                 sizeof(((SrAudioMixControl *)0)->reserved)))
 
+/** @} */
+
 #ifdef __cplusplus
 }
 #endif
-

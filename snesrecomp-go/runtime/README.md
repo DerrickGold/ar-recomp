@@ -122,17 +122,12 @@ grant covers this runner and its manifest. It does not cover ROMs, generated
 game code, or extracted media; see [`LICENSE`](LICENSE) and
 [`PROVENANCE.md`](PROVENANCE.md) for the precise boundary.
 
-The completed component-access and low-copy ABI work, plus explicitly deferred
-ideas, is recorded in [`docs/ABI_ROADMAP.md`](docs/ABI_ROADMAP.md). It keeps
-game semantics in adapters above the portable runner.
-
-New game projects should start with
-[`../docs/PROJECT_INTEGRATION.md`](../docs/PROJECT_INTEGRATION.md) and use the
-producer-oriented widescreen/audio workflow in
+New game projects should use the producer-oriented widescreen/audio workflow in
 [`docs/GAME_ENHANCEMENT_INTEGRATION.md`](docs/GAME_ENHANCEMENT_INTEGRATION.md).
 The capability matrix, result codes, lifetime rules, and common call sequences
 are in [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md). A compile-checked
 public-only integration starts in [`examples/minimal_game`](examples/minimal_game).
-
-Measured hotspots and the clean-room scanline optimization sequence are
-tracked in [`docs/PERFORMANCE_ROADMAP.md`](docs/PERFORMANCE_ROADMAP.md).
+The same public contracts can be browsed as generated, Javadoc-style HTML by
+configuring with `SNESRECOMP_BUILD_DOCS=ON` and building the
+`snesrecomp_runtime_docs` target. Doxygen is required only for that explicit
+documentation build.

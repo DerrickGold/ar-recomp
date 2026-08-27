@@ -486,9 +486,12 @@ install(FILES
     DESTINATION utils/snesrecomp-go/runtime)
 install(FILES ${SNESBUILD_MODULE_DIR}/runtime/BINARY_SDK.md
     DESTINATION utils/snesrecomp-go/runtime RENAME README.md)
-install(DIRECTORY ${SNESBUILD_MODULE_DIR}/runtime/docs/
-    DESTINATION utils/snesrecomp-go/runtime/docs
-    FILES_MATCHING PATTERN "*.md")
+install(FILES
+    ${SNESBUILD_MODULE_DIR}/runtime/docs/README.md
+    ${SNESBUILD_MODULE_DIR}/runtime/docs/API_REFERENCE.md
+    ${SNESBUILD_MODULE_DIR}/runtime/docs/GAME_ENHANCEMENT_INTEGRATION.md
+    ${SNESBUILD_MODULE_DIR}/runtime/docs/RUNTIME.md
+    DESTINATION utils/snesrecomp-go/runtime/docs)
 install(FILES ${_runtime_archive}
     DESTINATION utils/snesrecomp-go/runtime/lib/${_runtime_zig_target})
 

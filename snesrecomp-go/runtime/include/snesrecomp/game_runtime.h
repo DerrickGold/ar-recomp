@@ -1,3 +1,8 @@
+/**
+ * @file game_runtime.h
+ * @brief Low-overhead synchronous services for the linked game adapter.
+ * @ingroup sr_game_hotpath
+ */
 #ifndef SNESRECOMP_LINKED_GAME_RUNTIME_H
 #define SNESRECOMP_LINKED_GAME_RUNTIME_H
 
@@ -10,11 +15,15 @@
 extern "C" {
 #endif
 
+/** @addtogroup sr_game_hotpath
+ *  @{
+ */
+
 #define RTL_RDNMI_FORCE_NMI UINT32_C(0x00000001)
 #define RTL_RDNMI_IN_NMI UINT32_C(0x00000002)
 #define RTL_RDNMI_AVAILABLE UINT32_C(0x00000004)
 
-/* Callback-lifetime hardware state for a game-specific $4210 override. The
+/** Callback-lifetime hardware state for a game-specific $4210 override. The
  * runner retains ownership of its console layout and the callback returns -1
  * to delegate the read to the generic hardware model. */
 typedef struct RtlRdnmiReadContext {
@@ -26,7 +35,7 @@ typedef struct RtlRdnmiReadContext {
     ((uint32_t)(offsetof(RtlRdnmiReadContext, flags) +                   \
                 sizeof(((RtlRdnmiReadContext *)0)->flags)))
 
-/* The linked game adapter uses these direct singleton calls on its once-per-
+/** The linked game adapter uses these direct singleton calls on its once-per-
  * frame hot path. They preserve the same fixed semantics as the public runner
  * ABI without exposing Snes layout or repeating descriptor validation inside
  * the only in-process consumer. COMPLETE returns transition flags, or -1 when
@@ -36,7 +45,7 @@ typedef struct RtlRdnmiReadContext {
 int RtlGameFrameBegin(void);
 int RtlGameFrameComplete(uint32_t flags);
 
-/* Packed direct view of the four PPU display-control bytes needed by linked
+/** Packed direct view of the four PPU display-control bytes needed by linked
  * game policy at synchronous emulation safe points. External consumers use
  * SrPpuStateSnapshot; this accessor avoids a full snapshot and API-table
  * validation in existing per-write/per-animation hot seams. Zero is also the
@@ -50,24 +59,26 @@ int RtlGameFrameComplete(uint32_t flags);
     ((uint8_t)(((value) >> 24) & 0xffu))
 uint32_t RtlGamePpuDisplayState(void);
 
-/* Direct singleton form of the public frame-policy transaction for the linked
+/** Direct singleton form of the public frame-policy transaction for the linked
  * game. It avoids an API-table lookup and generation round trip while keeping
  * the same validated, all-or-nothing policy contract. */
 SrResult RtlGameApplyPpuFramePolicy(const SrPpuFramePolicy *policy);
 
-/* Opaque handle for the active linked runner. It is valid from the lifecycle
+/** Opaque handle for the active linked runner. It is valid from the lifecycle
  * `runner_changed` notification until the matching NULL notification. Game
  * enhancement code should use this instead of retaining or including the
  * runner's concrete Snes layout. */
 SrRunnerHandle *RtlGameRunner(void);
 
-/* Low-overhead event instrumentation for generated/game glue. Query before
+/** Low-overhead event instrumentation for generated/game glue. Query before
  * computing expensive diagnostic context; emission is synchronous and copies
  * the event before returning. */
 bool RtlGameEventEnabled(SrEventMask event_mask);
 void RtlGameEmitInterrupt(SrInterruptKind kind, uint32_t flags,
                           uint32_t pc24, uint16_t vector,
                           int32_t scanline, const char *label);
+
+/** @} */
 
 #ifdef __cplusplus
 }
