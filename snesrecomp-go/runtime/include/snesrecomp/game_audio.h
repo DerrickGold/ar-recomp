@@ -1,3 +1,8 @@
+/**
+ * @file game_audio.h
+ * @brief Linked-game audio routing, extension, and save-state contracts.
+ * @ingroup sr_game_audio
+ */
 #ifndef SNESRECOMP_GAME_AUDIO_H
 #define SNESRECOMP_GAME_AUDIO_H
 
@@ -9,7 +14,11 @@
 extern "C" {
 #endif
 
-/* Fixed-width, callback-lifetime views used by a game adapter while the SPC
+/** @addtogroup sr_game_audio
+ *  @{
+ */
+
+/** Fixed-width, callback-lifetime views used by a game adapter while the SPC
  * owns the live APU/DSP state. ARAM and the current bus labels are read-only;
  * the runner validates and applies the bounded routing result after the
  * callback returns. */
@@ -87,7 +96,7 @@ typedef struct RtlAudioStateLoadedRouting {
     ((uint32_t)(offsetof(RtlAudioStateLoadedRouting, voice_bus) +         \
                 sizeof(((RtlAudioStateLoadedRouting *)0)->voice_bus)))
 
-/* Synchronous game-extension access while the runner owns the live APU/DSP
+/** Synchronous game-extension access while the runner owns the live APU/DSP
  * state. ARAM is the SNES-visible memory region, not a concrete component
  * layout. It is mutable only for the duration of the callback. DSP mutations
  * go through the validated operation function, and the runner copies the
@@ -145,6 +154,8 @@ typedef struct RtlAudioSaveContext {
 #define RTL_AUDIO_SAVE_CONTEXT_V2_SIZE                                   \
     ((uint32_t)(offsetof(RtlAudioSaveContext, transfer) +                 \
                 sizeof(((RtlAudioSaveContext *)0)->transfer)))
+
+/** @} */
 
 #ifdef __cplusplus
 }

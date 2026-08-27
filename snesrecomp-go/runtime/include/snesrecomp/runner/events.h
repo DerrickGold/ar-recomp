@@ -1,3 +1,8 @@
+/**
+ * @file events.h
+ * @brief Synchronous runner, execution, and audio observation contracts.
+ * @ingroup sr_runner_events
+ */
 #pragma once
 
 #include "snesrecomp/runner/base.h"
@@ -6,7 +11,11 @@
 extern "C" {
 #endif
 
-/* Generated-code execution state. Names are immutable runner-owned strings;
+/** @addtogroup sr_runner_events
+ *  @{
+ */
+
+/** Generated-code execution state. Names are immutable runner-owned strings;
  * the snapshot itself expires with the runner lifetime generation. The stack
  * is ordered outermost first, matching actual host/recompiled nesting. */
 #define SR_EXECUTION_STACK_CAPACITY 64u
@@ -47,7 +56,7 @@ typedef struct SrExecutionSnapshot {
     ((uint32_t)(offsetof(SrExecutionSnapshot, history) +                  \
                 sizeof(((SrExecutionSnapshot *)0)->history)))
 
-/* Synchronous event observers. Event classes are checked before payload
+/** Synchronous event observers. Event classes are checked before payload
  * construction, and field filters are applied before callback dispatch.
  * Callbacks run on the producing runner or audio thread and are serialized
  * across producers. Install and remove subscriptions only while those
@@ -168,7 +177,7 @@ typedef struct SrRunnerEvent {
     uint32_t reserved_audio;
 } SrRunnerEvent;
 
-/* Memory-event addresses are zero-based byte offsets within memory_region.
+/** Memory-event addresses are zero-based byte offsets within memory_region.
  * Register-event addresses are the complete CPU-visible register addresses;
  * previous_value and memory_region are not defined for register events.
  * DMA_BEGIN address and dma_a_address24 are the initial A-bus address. For
@@ -212,7 +221,7 @@ typedef struct SrEventSubscription {
     ((uint32_t)(offsetof(SrEventSubscription, user_data) +                \
                 sizeof(((SrEventSubscription *)0)->user_data)))
 
-/* Low-level, synchronous APU/SPC observation for diagnostics. The callback
+/** Low-level, synchronous APU/SPC observation for diagnostics. The callback
  * runs while the producing thread owns the APU lock, so the register values
  * and ARAM view form one coherent observation. apu_ram is immutable through
  * this interface and valid only for the callback; consumers must copy any
@@ -273,7 +282,8 @@ typedef struct SrAudioTraceSubscription {
     ((uint32_t)(offsetof(SrAudioTraceSubscription, user_data) +           \
                 sizeof(((SrAudioTraceSubscription *)0)->user_data)))
 
+/** @} */
+
 #ifdef __cplusplus
 }
 #endif
-

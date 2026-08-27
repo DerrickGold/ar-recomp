@@ -1,4 +1,4 @@
-# Game enhancement integration
+# Game enhancement integration {#game_enhancement_integration}
 
 This guide is for a project that already runs recompiled SNES code and now
 wants game-aware widescreen rendering, separated graphics layers, enhanced

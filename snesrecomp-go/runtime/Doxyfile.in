@@ -1,0 +1,58 @@
+PROJECT_NAME           = "snesrecomp Runtime SDK"
+PROJECT_NUMBER         = "@PROJECT_VERSION@"
+PROJECT_BRIEF          = "Portable SNES recompiler runtime and game-integration SDK"
+OUTPUT_DIRECTORY       = "@CMAKE_CURRENT_BINARY_DIR@/api-docs"
+
+INPUT                  = "@CMAKE_CURRENT_SOURCE_DIR@/docs/api-main.dox" \
+                         "@CMAKE_CURRENT_SOURCE_DIR@/docs/API_REFERENCE.md" \
+                         "@CMAKE_CURRENT_SOURCE_DIR@/docs/GAME_ENHANCEMENT_INTEGRATION.md" \
+                         "@CMAKE_CURRENT_SOURCE_DIR@/docs/RUNTIME.md" \
+                         "@CMAKE_CURRENT_SOURCE_DIR@/include/snesrecomp/runner.h" \
+                         "@CMAKE_CURRENT_SOURCE_DIR@/include/snesrecomp/runner" \
+                         "@CMAKE_CURRENT_SOURCE_DIR@/include/snesrecomp/game.h" \
+                         "@CMAKE_CURRENT_SOURCE_DIR@/include/snesrecomp/game_runtime.h" \
+                         "@CMAKE_CURRENT_SOURCE_DIR@/include/snesrecomp/game_audio.h" \
+                         "@CMAKE_CURRENT_SOURCE_DIR@/include/snesrecomp/spc_upload.h" \
+                         "@CMAKE_CURRENT_SOURCE_DIR@/include/snesrecomp/host" \
+                         "@CMAKE_CURRENT_SOURCE_DIR@/include/snesrecomp/support"
+FILE_PATTERNS          = *.h *.dox *.md
+RECURSIVE              = YES
+
+OPTIMIZE_OUTPUT_FOR_C  = YES
+TYPEDEF_HIDES_STRUCT   = YES
+JAVADOC_AUTOBRIEF      = YES
+MARKDOWN_SUPPORT       = YES
+AUTOLINK_SUPPORT       = YES
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = NO
+HIDE_UNDOC_MEMBERS     = NO
+HIDE_UNDOC_CLASSES     = NO
+SHOW_INCLUDE_FILES     = YES
+SHOW_GROUPED_MEMB_INC  = YES
+SORT_MEMBER_DOCS       = NO
+SORT_BRIEF_DOCS        = NO
+
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = NO
+SKIP_FUNCTION_MACROS   = YES
+
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+GENERATE_TREEVIEW      = YES
+DISABLE_INDEX          = NO
+GENERATE_LATEX         = NO
+GENERATE_MAN           = NO
+GENERATE_XML           = NO
+
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+STRIP_FROM_PATH        = "@CMAKE_CURRENT_SOURCE_DIR@"
+FULL_PATH_NAMES        = YES
+
+QUIET                  = YES
+WARNINGS               = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_IF_UNDOCUMENTED   = NO
+WARN_AS_ERROR          = YES
+WARN_LOGFILE           = "@CMAKE_CURRENT_BINARY_DIR@/api-docs/doxygen-warnings.log"

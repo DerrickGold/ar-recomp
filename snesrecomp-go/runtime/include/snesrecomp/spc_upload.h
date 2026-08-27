@@ -1,3 +1,8 @@
+/**
+ * @file spc_upload.h
+ * @brief Portable IPL and sample-stream upload helpers for game adapters.
+ * @ingroup sr_game_audio
+ */
 #ifndef SNESRECOMP_SPC_UPLOAD_H
 #define SNESRECOMP_SPC_UPLOAD_H
 
@@ -9,13 +14,17 @@
 extern "C" {
 #endif
 
+/** @addtogroup sr_game_audio
+ *  @{
+ */
+
 typedef struct SrSpcUploadResult {
     uint16_t entry_point;
     uint16_t block_count;
     uint64_t script_offset;
 } SrSpcUploadResult;
 
-/* Callback-lifetime transaction used by a game adapter while the runner owns
+/** Callback-lifetime transaction used by a game adapter while the runner owns
  * the APU lock. ROM is immutable; ARAM is the live mutable 64 KiB image. The
  * callback requests narrow SPC control by setting control_flags and the
  * associated fields. The runner validates and applies those requests before
@@ -50,19 +59,33 @@ typedef struct SrSpcUploadContext {
     ((uint32_t)(offsetof(SrSpcUploadContext, reserved8) +                 \
                 sizeof(((SrSpcUploadContext *)0)->reserved8)))
 
-/* Parses the IPL block stream [length16, destination16, bytes...] followed by
- * [0, entry16]. ROM reads mirror at rom_size; ARAM writes wrap at 64 KiB. */
+/**
+ * @brief Parses an IPL block stream into ARAM.
+ * @param[in] rom Immutable ROM bytes; reads mirror at `rom_size`.
+ * @param[in] rom_size Number of ROM bytes; must be nonzero.
+ * @param[in] source_offset First `[length16, destination16, bytes...]` block.
+ * @param[out] aram Mutable 64 KiB ARAM image; writes wrap at 64 KiB.
+ * @param[out] result Parsed entry point and block metadata.
+ * @return `true` when a terminating `[0, entry16]` record was decoded.
+ */
 bool sr_spc_upload_image(const uint8_t *rom, size_t rom_size,
                          size_t source_offset, uint8_t aram[0x10000],
                          SrSpcUploadResult *result);
 
-/* Applies a second-stage length-prefixed sample stream. Script bytes select
- * chunks from pool_offset. Chunks are packed consecutively in ARAM. */
+/**
+ * @brief Applies a second-stage length-prefixed sample stream.
+ *
+ * Script bytes select chunks from `pool_offset`; decoded chunks are packed
+ * consecutively in ARAM.
+ * @return `true` when every selected chunk fits and decodes successfully.
+ */
 bool sr_spc_upload_samples(const uint8_t *rom, size_t rom_size,
                            size_t script_offset, uint8_t segment_count,
                            size_t pool_offset, uint16_t first_destination,
                            uint8_t aram[0x10000], uint16_t *last_destination,
                            uint16_t *last_length);
+
+/** @} */
 
 #ifdef __cplusplus
 }

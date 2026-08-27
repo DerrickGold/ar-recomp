@@ -1,3 +1,8 @@
+/**
+ * @file ppu.h
+ * @brief PPU snapshots, widescreen policy, captures, and scanout contracts.
+ * @ingroup sr_runner_ppu
+ */
 #pragma once
 
 #include "snesrecomp/runner/base.h"
@@ -5,6 +10,10 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/** @addtogroup sr_runner_ppu
+ *  @{
+ */
 
 #define SR_PPU_STATE_FORCED_BLANK UINT32_C(0x00000001)
 #define SR_PPU_STATE_BG3_PRIORITY UINT32_C(0x00000002)
@@ -924,7 +933,8 @@ typedef struct SrPpuMode7OverrideRequest {
     ((uint32_t)(offsetof(SrPpuMode7OverrideRequest, reserved) +           \
                 sizeof(((SrPpuMode7OverrideRequest *)0)->reserved)))
 
+/** @} */
+
 #ifdef __cplusplus
 }
 #endif
-

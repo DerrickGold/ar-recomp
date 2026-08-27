@@ -4,6 +4,9 @@ project(snesrecomp_runtime VERSION 2.0.0 LANGUAGES C)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
+option(SNESRECOMP_BUILD_DOCS
+    "Generate the browsable public API reference with Doxygen" OFF)
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 if(NOT MSVC)
@@ -51,13 +54,40 @@ install(FILES
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/snesrecomp-runtime)
 install(FILES LICENSE README.md PROVENANCE.md
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/snesrecomp-runtime)
-install(DIRECTORY docs/
-    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/snesrecomp-runtime/docs
-    FILES_MATCHING PATTERN "*.md")
+install(FILES
+    docs/README.md
+    docs/API_REFERENCE.md
+    docs/GAME_ENHANCEMENT_INTEGRATION.md
+    docs/RUNTIME.md
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/snesrecomp-runtime/docs)
 install(DIRECTORY examples/
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/snesrecomp-runtime/examples
     FILES_MATCHING PATTERN "*.c" PATTERN "*.h" PATTERN "*.md"
                    PATTERN "CMakeLists.txt")
+
+if(SNESRECOMP_BUILD_DOCS)
+    find_package(Doxygen 1.8.13 REQUIRED)
+    configure_file(Doxyfile.in ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile @ONLY)
+    file(GLOB_RECURSE SNESRECOMP_RUNTIME_DOCUMENTATION_INPUTS
+        CONFIGURE_DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/snesrecomp/*.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/docs/*.md
+        ${CMAKE_CURRENT_SOURCE_DIR}/docs/*.dox)
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/api-docs/html/index.html
+        COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
+        DEPENDS
+            ${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile.in
+            ${SNESRECOMP_RUNTIME_DOCUMENTATION_INPUTS}
+        COMMENT "Generating snesrecomp Runtime SDK API reference"
+        VERBATIM)
+    add_custom_target(snesrecomp_runtime_docs ALL
+        DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/api-docs/html/index.html)
+    install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/api-docs/html
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/snesrecomp-runtime/api
+        OPTIONAL)
+endif()
+
 if(MSVC)
     target_compile_options(snesrecomp_runtime PRIVATE /W4)
 else()

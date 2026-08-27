@@ -1,3 +1,8 @@
+/**
+ * @file base.h
+ * @brief Fundamental runner ABI values, snapshots, and opaque handles.
+ * @ingroup sr_runner_core
+ */
 #pragma once
 
 #include <stddef.h>
@@ -7,9 +12,13 @@
 extern "C" {
 #endif
 
+/** @addtogroup sr_runner_core
+ *  @{
+ */
+
 #define SR_RUNNER_ABI_VERSION 2u
 
-/* ABI features are additive. A caller must test a bit before using the
+/** ABI features are additive. A caller must test a bit before using the
  * corresponding table entry or data contract. */
 #define SR_RUNNER_CAP_COMPONENT_HANDLES UINT64_C(0x0000000000000001)
 #define SR_RUNNER_CAP_GENERATION_COUNTERS UINT64_C(0x0000000000000002)
@@ -121,7 +130,7 @@ enum {
      SR_PPU_OVERLAY_MARK_MAIN_SCREEN_WINNER |                            \
      SR_PPU_OVERLAY_MARK_OWNING_SCREEN_WINNER)
 
-/* Opaque identities for the runner and its independently implemented
+/** Opaque identities for the runner and its independently implemented
  * components. ABI consumers must never cast or dereference them. */
 typedef struct SrRunnerHandle SrRunnerHandle;
 typedef struct SrComponentHandle SrComponentHandle;
@@ -142,7 +151,7 @@ enum {
 #define SR_GAME_TIMING_STATE_IN_NMI UINT32_C(0x00000008)
 #define SR_GAME_TIMING_TRANSITION_NMI_ENTERED UINT32_C(0x00000001)
 
-/* Synchronous control for a recompiled game's host-resumable frame slice.
+/** Synchronous control for a recompiled game's host-resumable frame slice.
  * BEGIN publishes a fresh RDNMI token and enables forced pacing. COMPLETE
  * always disables forced pacing, then optionally enters NMI when the emulated
  * hardware gate is enabled. No runner generation changes: these are live
@@ -170,7 +179,7 @@ typedef struct SrGameTimingResult {
 
 #define SR_INPUT_CONTROLLER_COUNT 2u
 
-/* Coherent copied controller state at the current runner safe point.
+/** Coherent copied controller state at the current runner safe point.
  * packed_buttons uses the 12-bit-per-controller order accepted by RtlRunFrame
  * and SR_MUTATION_SET_INPUT. auto_joypad contains the SNES $4218-$421B bit
  * layout observed by the emulated game. */
@@ -188,7 +197,7 @@ typedef struct SrInputStateSnapshot {
     ((uint32_t)(offsetof(SrInputStateSnapshot, reserved) +               \
                 sizeof(((SrInputStateSnapshot *)0)->reserved)))
 
-/* A borrowed view is immutable through this API and thread-confined. It is
+/** A borrowed view is immutable through this API and thread-confined. It is
  * valid only while borrow_is_valid reports true: the next runner tick, reset,
  * successful state load, or controlled mutation invalidates it. Callers that
  * retain data beyond that point must copy only the bytes they need. */
@@ -204,7 +213,7 @@ typedef struct SrBorrowedSpan {
     ((uint32_t)(offsetof(SrBorrowedSpan, lifetime_generation) +            \
                 sizeof(((SrBorrowedSpan *)0)->lifetime_generation)))
 
-/* Host-native fixed-width values, not an encoded byte stream. This permits a
+/** Host-native fixed-width values, not an encoded byte stream. This permits a
  * zero-copy view on every target while keeping element width explicit. */
 typedef struct SrBorrowedU16Span {
     uint32_t struct_size;
@@ -279,7 +288,8 @@ typedef struct SrCpuMathState {
     ((uint32_t)(offsetof(SrCpuMathState, reserved32) +                    \
                 sizeof(((SrCpuMathState *)0)->reserved32)))
 
+/** @} */
+
 #ifdef __cplusplus
 }
 #endif
-
