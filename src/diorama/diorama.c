@@ -11,8 +11,7 @@
 #include "diorama_performance.h"
 #include "scene3d_math.h"
 #include "presentation_geometry.h"
-#include "presentation_upload_mirror.h"
-#include "platform/sdl/render_sdl.h"
+#include "diorama_upload.h"
 #include "snesrecomp/runner.h"
 #include "settings.h"
 #include "user_data_dir.h"
@@ -40,10 +39,6 @@ static size_t g_diorama_rom_size;
 static DioramaRomSkyboxCache g_rom_skybox = {
   .source = -1,
 };
-static PresentationUploadMirror
-    g_diorama_upload_mirrors[kDioramaPlane_Count];
-extern ArRenderDevice g_render_device;
-
 static void FailRomSkyboxResource(const char *operation) {
   if (g_rom_skybox.resource_failed) return;
   g_rom_skybox.resource_failed = true;
@@ -1468,54 +1463,6 @@ static void RemapMeshToSupersampleTexture(SDL_Vertex *vertices, int count,
  * and the producer snapshot explicit. The caller supplies the frame-snapshotted
  * request/content intersection; this function neither reads live settings nor
  * rescans producer-owned pixels. */
-DioramaUploadResult Diorama_Upload(
-    SDL_Texture *textures[], const uint8_t *const pixels[],
-    const size_t pitch_bytes[],
-    int snes_width, int snes_height, int obj_apron, uint32_t plane_mask) {
-  DioramaUploadResult upload = {0};
-  DioramaPerformanceScope performance =
-      DioramaPerformance_Begin(kDioramaPerformance_Upload);
-  /* `snes_width` is the FULL surface width (display + both aprons); the pitch
-   * is always that, because that is how the buffers are laid out. What varies
-   * is the destination RECT: a plane that can never hold apron content gets
-   * only its display columns uploaded, because the apron columns are known
-   * zeros and the textures were zero-filled at creation, so nothing ever
-   * changes there. Skipping them is ~47 MB/s at 60fps -- most of the apron's
-   * steady-state cost. */
-  if (!textures || !pixels || !pitch_bytes || snes_width <= 0 ||
-      snes_height <= 0 || obj_apron < 0 || obj_apron > snes_width / 2) {
-    DioramaPerformance_End(performance);
-    return upload;
-  }
-  for (int i = 0; i < kDioramaLayerCount; i++) {
-    int plane = kDioramaLayers[i].plane;
-    if (!(plane_mask & (1u << plane)) ||
-        !textures[plane] || !pixels[plane] ||
-        pitch_bytes[plane] > INT_MAX)
-      continue;
-    DioramaPlaneCaptureRegion region;
-    if (!DioramaPlaneCaptureRegion_Resolve(
-            plane, snes_width, snes_height, obj_apron, &region))
-      continue;
-    const uint8_t *src = pixels[plane] +
-        (size_t)region.x * sizeof(uint32_t);
-    PresentationUploadResult plane_upload = {0};
-    const bool synchronized = PresentationUploadMirror_UploadArgb8888(
-        &g_diorama_upload_mirrors[plane], &g_render_device,
-        ArSdlRenderBackend_BorrowTexture(textures[plane]), src,
-        region.width, region.height, (int)pitch_bytes[plane],
-        region.x, 0, &plane_upload);
-    DioramaPerformance_AddPlaneSync(
-        synchronized, synchronized && plane_upload.changed,
-        plane_upload.uploaded_bytes);
-    if (!synchronized) continue;
-    upload.synchronized_plane_mask |= 1u << plane;
-    if (plane_upload.changed) upload.changed_plane_mask |= 1u << plane;
-  }
-  DioramaPerformance_End(performance);
-  return upload;
-}
-
 static bool RenderDioramaGeometry(SDL_Renderer *renderer,
                                   SDL_Texture *texture,
                                   const SDL_Vertex *vertices,
@@ -2927,8 +2874,7 @@ static void DioramaReleaseRendererResources(SDL_Renderer *renderer) {
   g_diorama_ss_h = 0;
   g_diorama_ss_unavailable = false;
 
-  for (int plane = 0; plane < kDioramaPlane_Count; plane++)
-    PresentationUploadMirror_Reset(&g_diorama_upload_mirrors[plane]);
+  DioramaUpload_Reset();
 
   SDL_DestroyTexture(g_rom_skybox.texture);
   g_rom_skybox.texture = NULL;

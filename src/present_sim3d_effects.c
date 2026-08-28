@@ -18,6 +18,8 @@
 #include "present_internal.h"
 #include "present_sim3d_effects.h"
 #include "present_sim3d_project.h"
+#include "platform/sdl/render_sdl.h"
+#include "render/render_device.h"
 #include "sim/sim_render_atlas.h"
 #include "sim/sim3d.h"
 
@@ -26,7 +28,11 @@
 #endif
 
 extern SDL_Renderer *g_renderer;
-extern SDL_Texture *g_sim_obj_atlas_texture;
+extern ArRenderTexture g_sim_obj_atlas_texture;
+
+static SDL_Texture *NativeAtlasTexture(void) {
+  return ArSdlRenderBackend_UnwrapTexture(g_sim_obj_atlas_texture);
+}
 
 enum {
   kSimMaxParticlesPerEffect = 12,
@@ -621,14 +627,14 @@ static bool DrawSimFireballHeadFragment(
     /* Upright is the honest fallback, not a failure: each authored frame is
      * already drawn pointing the way its own phase travels, so an unturned
      * fireball is merely one that has not been leaned into its arc. */
-    SDL_RenderTexture(g_renderer, g_sim_obj_atlas_texture, &atlas,
+    SDL_RenderTexture(g_renderer, NativeAtlasTexture(), &atlas,
                       &destination);
     return true;
   }
   /* Every fragment turns about the SHARED anchor. Rotating each about its own
    * centre pulls a multi-tile composition apart as it turns. */
   SDL_FPoint centre = { anchor.x - destination.x, anchor.y - destination.y };
-  SDL_RenderTextureRotated(g_renderer, g_sim_obj_atlas_texture, &atlas,
+  SDL_RenderTextureRotated(g_renderer, NativeAtlasTexture(), &atlas,
                            &destination, degrees, &centre, SDL_FLIP_NONE);
   return true;
 }
@@ -637,7 +643,7 @@ void DrawSimEffectFireballHeads(
     const FrameSlot *slot, bool billboards, SDL_Rect source, SDL_Rect viewport,
     const Scene3DCamera *camera, const float matrix[16]) {
   if (!billboards || !slot->sim.effect_count || !slot->sim.atlas_valid ||
-      !g_sim_obj_atlas_texture)
+      !ArRenderTexture_IsValid(g_sim_obj_atlas_texture))
     return;
 
   /* Atlas state is set on the first fireball actually reached, not up front:
@@ -823,6 +829,6 @@ void DrawSimMapPlaneObject(const FrameSlot *slot,
     {{points[3].x, points[3].y}, white, {u1, v1}},
   };
   const int indices[] = { 0, 1, 3, 0, 3, 2 };
-  SDL_RenderGeometry(g_renderer, g_sim_obj_atlas_texture,
+  SDL_RenderGeometry(g_renderer, NativeAtlasTexture(),
                      vertices, 4, indices, 6);
 }

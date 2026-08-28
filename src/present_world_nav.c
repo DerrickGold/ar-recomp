@@ -33,11 +33,6 @@
 
 
 extern SDL_Renderer *g_renderer;
-extern SDL_Texture *g_diorama_textures[kDioramaPlane_Count];
-extern SDL_Texture *g_sim_obj_atlas_texture;
-
-extern SDL_Texture *g_sim3d_layer_textures[kSim3DPlane_Count];
-extern SDL_Texture *g_sim3d_flat_texture;
 #include "present_sim3d_internal.h"
 
 

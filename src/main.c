@@ -162,17 +162,17 @@ uint8_t g_action_bg2_mask_pixels[
 uint8_t *g_diorama_layer_pixels[kDioramaPlane_Count];
 bool g_diorama_dump_pending;
 bool g_diorama_frame_active;
-SDL_Texture *g_diorama_textures[kDioramaPlane_Count];
-SDL_Texture *g_sim_obj_atlas_texture;
-SDL_Texture *g_sim3d_layer_textures[kSim3DPlane_Count];
-SDL_Texture *g_sim3d_flat_texture;
+ArRenderTexture g_diorama_textures[kDioramaPlane_Count];
+ArRenderTexture g_sim_obj_atlas_texture;
+ArRenderTexture g_sim3d_layer_textures[kSim3DPlane_Count];
+ArRenderTexture g_sim3d_flat_texture;
 bool g_sim3d_textures_ready;
 bool g_sim3d_billboard_renderer_ready;
 
 static void DestroyDioramaTextures(void) {
   for (int i = 0; i < kDioramaPlane_Count; i++) {
-    SDL_DestroyTexture(g_diorama_textures[i]);
-    g_diorama_textures[i] = NULL;
+    ArRenderDevice_DestroyTexture(&g_render_device, g_diorama_textures[i]);
+    g_diorama_textures[i] = ArRenderTexture_Invalid();
   }
 }
 
@@ -189,18 +189,22 @@ static void CreateDioramaTextures(void) {
   for (int i = 0; i < kDioramaPlane_Count; i++) {
     if (i == SR_PPU_OVERLAY_BG4)
       continue;
-    g_diorama_textures[i] = SDL_CreateTexture(
-        g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-        SR_PPU_SURFACE_MAX_WIDTH, SR_PPU_SURFACE_MAX_HEIGHT);
-    if (!g_diorama_textures[i])
+    const ArRenderTextureDesc desc = {
+      .width = SR_PPU_SURFACE_MAX_WIDTH,
+      .height = SR_PPU_SURFACE_MAX_HEIGHT,
+      .format = kArRenderPixelFormat_Argb8888,
+      .usage = kArRenderTextureUsage_Streaming,
+      .filter = kArRenderFilter_Nearest,
+      .blend = i == kDioramaPlane_Backdrop
+          ? kArRenderBlendMode_Opaque : kArRenderBlendMode_Alpha,
+    };
+    if (!ArRenderDevice_CreateTexture(
+            &g_render_device, &desc, &g_diorama_textures[i]))
       continue;
-    SDL_SetTextureBlendMode(g_diorama_textures[i],
-        i == kDioramaPlane_Backdrop ? SDL_BLENDMODE_NONE
-                                    : SDL_BLENDMODE_BLEND);
-    SDL_SetTextureScaleMode(g_diorama_textures[i], SDL_SCALEMODE_NEAREST);
     if (zero_fill)
-      SDL_UpdateTexture(g_diorama_textures[i], NULL, zero_fill,
-                        SR_PPU_SURFACE_MAX_WIDTH * 4);
+      ArRenderDevice_UpdateTexture(
+          &g_render_device, g_diorama_textures[i], NULL, zero_fill,
+          SR_PPU_SURFACE_MAX_WIDTH * 4);
   }
   free(zero_fill);
 }
@@ -995,55 +999,71 @@ static void AppBoot_CreatePresentationTextures(void) {
   /* D1b semantic OBJ atlas. It is uploaded every supported SIM frame but is
    * not selected by the compositor until the later separated-composite
    * capability lands, keeping this checkpoint visually authentic. */
-  g_sim_obj_atlas_texture = SDL_CreateTexture(
-      g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-      kSimObjAtlasWidth, kSimObjAtlasHeight);
-  if (g_sim_obj_atlas_texture) {
-    SDL_SetTextureBlendMode(g_sim_obj_atlas_texture, SDL_BLENDMODE_BLEND);
-    SDL_SetTextureScaleMode(g_sim_obj_atlas_texture, SDL_SCALEMODE_NEAREST);
+  const ArRenderTextureDesc sim_atlas_texture = {
+    .width = kSimObjAtlasWidth,
+    .height = kSimObjAtlasHeight,
+    .format = kArRenderPixelFormat_Argb8888,
+    .usage = kArRenderTextureUsage_Streaming,
+    .filter = kArRenderFilter_Nearest,
+    .blend = kArRenderBlendMode_Alpha,
+  };
+  if (ArRenderDevice_CreateTexture(
+          &g_render_device, &sim_atlas_texture,
+          &g_sim_obj_atlas_texture)) {
     /* Static storage is zero-initialized before the game thread starts. */
-    SDL_UpdateTexture(g_sim_obj_atlas_texture, NULL,
-                      g_sim_obj_atlas_pixels, kSimObjAtlasPitch);
+    ArRenderDevice_UpdateTexture(
+        &g_render_device, g_sim_obj_atlas_texture, NULL,
+        g_sim_obj_atlas_pixels, kSimObjAtlasPitch);
   } else {
-    fprintf(stderr, "[sim3d-d1] semantic atlas texture unavailable: %s\n",
-            SDL_GetError());
+    fprintf(stderr,
+            "[sim3d-d1] semantic atlas texture unavailable: %s\n",
+            ArRenderDevice_LastError(&g_render_device));
   }
-  g_sim3d_billboard_renderer_ready = g_sim_obj_atlas_texture != NULL;
+  g_sim3d_billboard_renderer_ready =
+      ArRenderTexture_IsValid(g_sim_obj_atlas_texture);
 
   /* D2's observational Mode-1 capture family. Layer textures are retained
    * for inspector/future geometry use; the pitch-zero reference and its
    * absolute-difference image have dedicated opaque streaming textures. */
   g_sim3d_textures_ready = true;
+  const ArRenderTextureDesc sim_layer_texture = {
+    .width = kSim3DMaxWidth,
+    .height = kSim3DMaxHeight,
+    .format = kArRenderPixelFormat_Argb8888,
+    .usage = kArRenderTextureUsage_Streaming,
+    .filter = kArRenderFilter_Nearest,
+    .blend = kArRenderBlendMode_Alpha,
+  };
   for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
-    g_sim3d_layer_textures[plane] = SDL_CreateTexture(
-        g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-        kSim3DMaxWidth, kSim3DMaxHeight);
-    if (!g_sim3d_layer_textures[plane]) {
+    if (!ArRenderDevice_CreateTexture(
+            &g_render_device, &sim_layer_texture,
+            &g_sim3d_layer_textures[plane])) {
       g_sim3d_textures_ready = false;
       break;
     }
-    SDL_SetTextureBlendMode(g_sim3d_layer_textures[plane],
-                            SDL_BLENDMODE_BLEND);
-    SDL_SetTextureScaleMode(g_sim3d_layer_textures[plane],
-                            SDL_SCALEMODE_NEAREST);
   }
-  g_sim3d_flat_texture = SDL_CreateTexture(
-      g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-      kSim3DMaxWidth, kSim3DMaxHeight);
-  if (!g_sim3d_flat_texture)
+  const ArRenderTextureDesc sim_flat_texture = {
+    .width = kSim3DMaxWidth,
+    .height = kSim3DMaxHeight,
+    .format = kArRenderPixelFormat_Argb8888,
+    .usage = kArRenderTextureUsage_Streaming,
+    .filter = kArRenderFilter_Nearest,
+    .blend = kArRenderBlendMode_Opaque,
+  };
+  if (!ArRenderDevice_CreateTexture(
+          &g_render_device, &sim_flat_texture, &g_sim3d_flat_texture))
     g_sim3d_textures_ready = false;
-  if (g_sim3d_textures_ready) {
-    SDL_SetTextureBlendMode(g_sim3d_flat_texture, SDL_BLENDMODE_NONE);
-    SDL_SetTextureScaleMode(g_sim3d_flat_texture, SDL_SCALEMODE_NEAREST);
-  } else {
-    fprintf(stderr, "[sim3d-d2] capture textures unavailable: %s\n",
-            SDL_GetError());
+  if (!g_sim3d_textures_ready) {
+    fprintf(stderr,
+            "[sim3d-d2] capture textures unavailable: %s\n",
+            ArRenderDevice_LastError(&g_render_device));
     for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
-      SDL_DestroyTexture(g_sim3d_layer_textures[plane]);
-      g_sim3d_layer_textures[plane] = NULL;
+      ArRenderDevice_DestroyTexture(
+          &g_render_device, g_sim3d_layer_textures[plane]);
+      g_sim3d_layer_textures[plane] = ArRenderTexture_Invalid();
     }
-    SDL_DestroyTexture(g_sim3d_flat_texture);
-    g_sim3d_flat_texture = NULL;
+    ArRenderDevice_DestroyTexture(&g_render_device, g_sim3d_flat_texture);
+    g_sim3d_flat_texture = ArRenderTexture_Invalid();
   }
   if (g_settings.sim3d_mode && !g_sim3d_textures_ready) {
     Die("Simulation town 3D is enabled, but its core capture textures could "
@@ -2201,11 +2221,16 @@ static int AppShutdown(AppBoot *app, char **argv) {
   DioramaFrameGeneration_Shutdown();
   Diorama_Shutdown(g_renderer);
   DestroyDioramaTextures();
-  SDL_DestroyTexture(g_sim_obj_atlas_texture);
+  ArRenderDevice_DestroyTexture(&g_render_device, g_sim_obj_atlas_texture);
+  g_sim_obj_atlas_texture = ArRenderTexture_Invalid();
   g_sim3d_billboard_renderer_ready = false;
-  for (int plane = 0; plane < kSim3DPlane_Count; plane++)
-    SDL_DestroyTexture(g_sim3d_layer_textures[plane]);
-  SDL_DestroyTexture(g_sim3d_flat_texture);
+  for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
+    ArRenderDevice_DestroyTexture(
+        &g_render_device, g_sim3d_layer_textures[plane]);
+    g_sim3d_layer_textures[plane] = ArRenderTexture_Invalid();
+  }
+  ArRenderDevice_DestroyTexture(&g_render_device, g_sim3d_flat_texture);
+  g_sim3d_flat_texture = ArRenderTexture_Invalid();
   ManualReader_DestroyTextures();
   SettingsOverlay_Destroy();
   /* Release the game coroutine's stack mapping / fiber. Safe here: the game

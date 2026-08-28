@@ -33,6 +33,7 @@
 #include "settings.h"
 #include "present_internal.h"
 #include "render/render_device.h"
+#include "platform/sdl/render_sdl.h"
 
 #ifndef AR_SIM3D_TERRAIN_ELEVATION
 #define AR_SIM3D_TERRAIN_ELEVATION 0
@@ -42,11 +43,17 @@
 extern SDL_Renderer *g_renderer;
 extern ArRenderDevice g_render_device;
 extern ArRenderTexture g_texture;
-extern SDL_Texture *g_diorama_textures[kDioramaPlane_Count];
-extern SDL_Texture *g_sim_obj_atlas_texture;
+extern ArRenderTexture g_sim_obj_atlas_texture;
 
-extern SDL_Texture *g_sim3d_layer_textures[kSim3DPlane_Count];
-extern SDL_Texture *g_sim3d_flat_texture;
+extern ArRenderTexture g_sim3d_layer_textures[kSim3DPlane_Count];
+extern ArRenderTexture g_sim3d_flat_texture;
+
+/* Transitional SDL compositor bridge. Resource lifetime and uploads are
+ * backend-neutral now; these native draws move behind ArRenderDevice in the
+ * next geometry/state slice. */
+static SDL_Texture *NativeTexture(ArRenderTexture texture) {
+  return ArSdlRenderBackend_UnwrapTexture(texture);
+}
 
 
 
@@ -211,7 +218,9 @@ static void DrawSimObjectPriorityFiltered(
   bool depth_filter = filters->depth;
   float minimum_depth = filters->minimum_depth;
   float maximum_depth = filters->maximum_depth;
-  if (!g_sim_obj_atlas_texture || !slot->sim.atlas_valid) return;
+  if (!ArRenderTexture_IsValid(g_sim_obj_atlas_texture) ||
+      !slot->sim.atlas_valid)
+    return;
   /* W4-2: a rejected blend mode means this pass cannot draw correctly, so bail
    * rather than draw with whatever mode happened to be set. */
   if (!SimApplyAtlasBlendMode(SimBillboardPassBlend(pass))) return;
@@ -309,7 +318,8 @@ static void DrawSimObjectPriorityFiltered(
     if (object->hidden) continue;
     bool half_add = !pass && slot->sim.object_half_add &&
         object->color_math_eligible;
-    SDL_SetTextureAlphaMod(g_sim_obj_atlas_texture, half_add ? 128 : 255);
+    SDL_SetTextureAlphaMod(
+        NativeTexture(g_sim_obj_atlas_texture), half_add ? 128 : 255);
 
     int record_screen_x = (int16_t)(uint16_t)(
         object->world_x + object->offset_x - slot->sim.camera_x);
@@ -419,12 +429,12 @@ static void DrawSimObjectPriorityFiltered(
      * drawn instead at the head of its arc by DrawSimEffectFireballHeads,
      * which turns it there. Rotating in this pass as well would be a second
      * implementation of the same angle, reachable by nothing. */
-    if (SDL_RenderTexture(g_renderer, g_sim_obj_atlas_texture,
+    if (SDL_RenderTexture(g_renderer, NativeTexture(g_sim_obj_atlas_texture),
                           &atlas, &destination)) {
       Sim3DPerformance_AddDraw(0, 0);
     }
   }
-  SDL_SetTextureAlphaMod(g_sim_obj_atlas_texture, 255);
+  SDL_SetTextureAlphaMod(NativeTexture(g_sim_obj_atlas_texture), 255);
 }
 
 static void DrawSimObjectPriorityTerrain(
@@ -579,9 +589,10 @@ static bool RestoreTextureBlendAndAlpha(
 
 static bool RestoreSimAtlasState(
     SDL_BlendMode blend, Uint8 r, Uint8 g, Uint8 b, Uint8 alpha) {
-  bool restored = SDL_SetTextureColorMod(g_sim_obj_atlas_texture, r, g, b);
-  restored = SDL_SetTextureAlphaMod(g_sim_obj_atlas_texture, alpha) && restored;
-  restored = SDL_SetTextureBlendMode(g_sim_obj_atlas_texture, blend) && restored;
+  SDL_Texture *atlas = NativeTexture(g_sim_obj_atlas_texture);
+  bool restored = SDL_SetTextureColorMod(atlas, r, g, b);
+  restored = SDL_SetTextureAlphaMod(atlas, alpha) && restored;
+  restored = SDL_SetTextureBlendMode(atlas, blend) && restored;
   return restored;
 }
 
@@ -643,7 +654,9 @@ static SDL_BlendMode SimRimMaskBlend(void) {
  * than silently draw with whatever mode was set before — that would produce
  * exactly the untrimmed silhouette W4-1 fixed. */
 bool SimApplyAtlasBlendMode(SDL_BlendMode blend) {
-  if (SDL_SetTextureBlendMode(g_sim_obj_atlas_texture, blend)) return true;
+  if (SDL_SetTextureBlendMode(
+          NativeTexture(g_sim_obj_atlas_texture), blend))
+    return true;
   if (SDL_CompareAndSwapAtomicInt(&s_sim_rim_mask_supported, 1, 0)) {
     fprintf(stderr,
             "[sim3d-rim] this renderer rejected the rim mask blend mode (%s) — "
@@ -682,7 +695,8 @@ static PresentationOutcome DrawSimRimLight(
     const float matrix[16], SimObjectTerrainFilter terrain_filter) {
   if (!slot->sim.rim_strength_pct)
     return kPresentationOutcome_Complete;
-  if (!g_sim_obj_atlas_texture || !slot->sim.atlas_valid)
+  if (!ArRenderTexture_IsValid(g_sim_obj_atlas_texture) ||
+      !slot->sim.atlas_valid)
     return kPresentationOutcome_Complete;
   bool any_rim = false;
   for (size_t i = 0; i < slot->sim.object_count; i++) {
@@ -710,11 +724,12 @@ static PresentationOutcome DrawSimRimLight(
   SDL_BlendMode saved_atlas_blend = SDL_BLENDMODE_INVALID;
   Uint8 saved_atlas_r = 255, saved_atlas_g = 255, saved_atlas_b = 255;
   Uint8 saved_atlas_alpha = 255;
-  if (!SDL_GetTextureBlendMode(g_sim_obj_atlas_texture, &saved_atlas_blend) ||
+  SDL_Texture *atlas = NativeTexture(g_sim_obj_atlas_texture);
+  if (!SDL_GetTextureBlendMode(atlas, &saved_atlas_blend) ||
       !SDL_GetTextureColorMod(
-          g_sim_obj_atlas_texture, &saved_atlas_r, &saved_atlas_g,
+          atlas, &saved_atlas_r, &saved_atlas_g,
           &saved_atlas_b) ||
-      !SDL_GetTextureAlphaMod(g_sim_obj_atlas_texture, &saved_atlas_alpha))
+      !SDL_GetTextureAlphaMod(atlas, &saved_atlas_alpha))
     return kPresentationOutcome_OptionalOmitted;
   /*
    * Probe the custom mask blend before drawing the fill. If the renderer
@@ -722,7 +737,7 @@ static PresentationOutcome DrawSimRimLight(
    * unmasked fill for one priority band.
    */
   if (!SimApplyAtlasBlendMode(mask_blend)) {
-    if (!SDL_SetTextureBlendMode(g_sim_obj_atlas_texture, saved_atlas_blend))
+    if (!SDL_SetTextureBlendMode(atlas, saved_atlas_blend))
       return kPresentationOutcome_CoreFailure;
     return kPresentationOutcome_OptionalOmitted;
   }
@@ -745,7 +760,7 @@ static PresentationOutcome DrawSimRimLight(
       PresentationGeometry_BeginTarget(g_renderer, rim, &target_state);
   if (begin != kPresentationTargetBegin_Ready) {
     const bool atlas_restored =
-        SDL_SetTextureBlendMode(g_sim_obj_atlas_texture, saved_atlas_blend);
+        SDL_SetTextureBlendMode(atlas, saved_atlas_blend);
     if (begin == kPresentationTargetBegin_StateLost || !atlas_restored)
       return kPresentationOutcome_CoreFailure;
     return kPresentationOutcome_OptionalOmitted;
@@ -755,7 +770,7 @@ static PresentationOutcome DrawSimRimLight(
                        g_renderer, SDL_BLENDMODE_NONE) &&
       SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 0) &&
       SDL_RenderClear(g_renderer) &&
-      SDL_SetTextureColorMod(g_sim_obj_atlas_texture, kSimRimColor.r,
+      SDL_SetTextureColorMod(atlas, kSimRimColor.r,
                              kSimRimColor.g, kSimRimColor.b);
   if (rim_valid) {
     SDL_Rect local_viewport = { 0, 0, viewport.w, viewport.h };
@@ -1883,7 +1898,8 @@ static PresentationOutcome RenderSimProfile(
   }
   if (!ground) {
     SDL_FRect src = ToFRect(source), dst = ToFRect(viewport);
-    return SDL_RenderTexture(g_renderer, g_sim3d_flat_texture, &src, &dst)
+    return SDL_RenderTexture(
+               g_renderer, NativeTexture(g_sim3d_flat_texture), &src, &dst)
         ? outcome : kPresentationOutcome_CoreFailure;
   }
 
@@ -1954,9 +1970,11 @@ static PresentationOutcome RenderSimProfile(
      * extension is enabled. */
     bool live_ground_enabled = !background_voxels && (
         ((enabled_planes & (1u << kSim3DPlane_Bg1Low)) &&
-         g_sim3d_layer_textures[kSim3DPlane_Bg1Low]) ||
+         ArRenderTexture_IsValid(
+             g_sim3d_layer_textures[kSim3DPlane_Bg1Low])) ||
         ((enabled_planes & (1u << kSim3DPlane_Bg1High)) &&
-         g_sim3d_layer_textures[kSim3DPlane_Bg1High]));
+         ArRenderTexture_IsValid(
+             g_sim3d_layer_textures[kSim3DPlane_Bg1High])));
     SDL_FRect live_ground = ToFRect(source);
     Sim3DPerformanceScope performance =
         Sim3DPerformance_Begin(kSim3DPerformance_Terrain);
@@ -2066,7 +2084,7 @@ static PresentationOutcome RenderSimProfile(
       }
     }
     if (!(captured_planes & (1u << plane))) continue;
-    SDL_Texture *texture = g_sim3d_layer_textures[plane];
+    SDL_Texture *texture = NativeTexture(g_sim3d_layer_textures[plane]);
     if (!texture) continue;
     if (plane == kSim3DPlane_Bg1Low || plane == kSim3DPlane_Bg1High) {
       if (!background_voxels) {
@@ -2167,7 +2185,7 @@ static PresentationOutcome RenderSimProfile(
     }
     if (!SimPlaneIsMenu(plane)) continue;
     if (!(captured_planes & (1u << plane))) continue;
-    SDL_Texture *texture = g_sim3d_layer_textures[plane];
+    SDL_Texture *texture = NativeTexture(g_sim3d_layer_textures[plane]);
     if (texture) SDL_RenderTexture(g_renderer, texture, &src, &dst);
   }
 
