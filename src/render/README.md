@@ -47,7 +47,9 @@ temporary full-output callbacks, and restores the full viewport on finish or
 best-effort abort. Presentation paths share this policy instead of duplicating
 platform viewport choreography. `ArRenderOutput_ResolveAspectFit` exposes the
 same calculation without beginning a frame for effects that must first size
-and bind an intermediate target.
+and bind an intermediate target. `ArRenderOutput_UseFull` is the terminal
+overlay counterpart: it selects unclipped physical output coordinates without
+clearing or changing the current target.
 
 ## Current migration state
 

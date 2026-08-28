@@ -519,6 +519,16 @@ static void TestOutputFrameScope(void) {
 
   inset_backend.output_width = 1280;
   inset_backend.output_height = 720;
+  inset_backend.target_state.viewport_set = true;
+  inset_backend.target_state.clip_enabled = true;
+  int full_width = 0;
+  int full_height = 0;
+  assert(ArRenderOutput_UseFull(
+      &inset_device, &full_width, &full_height));
+  assert(full_width == 1280 && full_height == 720);
+  assert(!inset_backend.target_state.viewport_set);
+  assert(!inset_backend.target_state.clip_enabled);
+
   ArRenderRectI resolved_viewport = {0};
   int resolved_width = 0;
   int resolved_height = 0;

@@ -1867,14 +1867,12 @@ void PresentHostUi(const FrameSlot *slot, SDL_Rect viewport,
                    SDL_Point output_size,
                    double presentation_fps) {
   if (!slot || !g_renderer) return;
-  PresentationOutputState output_state;
-  if (!PresentationGeometry_PushFullOutput(g_renderer, &output_state)) return;
+  if (!ArRenderOutput_UseFull(&g_render_device, NULL, NULL)) return;
   PresentActionBgExtentGuides(slot, viewport);
   PresentSceneInspector(slot, viewport);
   PresentCheatBadge(slot, viewport);
   SettingsOverlay_Render(viewport);
   PresentFpsCounter(slot, output_size, presentation_fps);
-  PresentationGeometry_PopFullOutput(g_renderer, &output_state);
 }
 
 bool Present_SimRimMaskSupported(void) {
@@ -2346,8 +2344,7 @@ bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
       !ArRenderTexture_IsValid(g_authentic_texture) ||
       priority_viewport.w <= 0 || priority_viewport.h <= 0)
     return false;
-  PresentationOutputState output_state;
-  if (!PresentationGeometry_PushFullOutput(g_renderer, &output_state))
+  if (!ArRenderOutput_UseFull(&g_render_device, NULL, NULL))
     return false;
 
   enum { kPipWidthPercent = 31, kPipMarginPercent = 3 };
@@ -2368,7 +2365,7 @@ bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
   const int frame_size = kSettingsOverlayGlyphSize * frame_scale;
   int margin = priority_viewport.h * kPipMarginPercent / 100;
   if (margin < frame_size + 8) margin = frame_size + 8;
-  const SDL_FRect destination = {
+  const ArRenderRectF destination = {
     (float)(priority_viewport.x + priority_viewport.w - margin - width),
     (float)(priority_viewport.y + priority_viewport.h - margin - height),
     (float)width, (float)height,
@@ -2380,44 +2377,45 @@ bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
     height + frame_size * 2,
   };
   const int shadow_offset = frame_scale * 4;
-  const SDL_FRect shadow = {
+  const ArRenderRectF shadow = {
     (float)(frame.x + shadow_offset),
     (float)(frame.y + shadow_offset),
     (float)frame.w, (float)frame.h,
   };
   bool rendered =
-      SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND) &&
-      SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 150) &&
-      SDL_RenderFillRect(g_renderer, &shadow) &&
+      ArRenderDevice_DrawSolidRect(
+          &g_render_device, &shadow,
+          (ArRenderColorF){0.0f, 0.0f, 0.0f, 150.0f / 255.0f},
+          kArRenderBlendMode_Alpha) &&
       SettingsOverlay_DrawGameFrame(frame, frame_scale) &&
-      SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE) &&
-      SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255) &&
-      SDL_RenderFillRect(g_renderer, &destination);
-  const SDL_FRect source = {
+      ArRenderDevice_DrawSolidRect(
+          &g_render_device, &destination,
+          (ArRenderColorF){0.0f, 0.0f, 0.0f, 1.0f},
+          kArRenderBlendMode_Opaque);
+  const ArRenderRectF source = {
     (float)slot->authentic_x0, (float)slot->authentic_y0,
     (float)kFrameSlotAuthenticWidth, (float)kFrameSlotAuthenticHeight,
   };
   if (rendered)
     rendered = ArRenderDevice_DrawTexture(
-        &g_render_device, g_authentic_texture,
-        &(ArRenderRectF){source.x, source.y, source.w, source.h},
-        &(ArRenderRectF){destination.x, destination.y,
-                         destination.w, destination.h});
-  return PresentationGeometry_PopFullOutput(
-      g_renderer, &output_state) && rendered;
+        &g_render_device, g_authentic_texture, &source, &destination);
+  return rendered;
 }
 
 bool PresentComparisonTransitionOverlay(uint8_t alpha, const char *label) {
   if (!alpha) return true;
   if (!g_renderer) return false;
-  PresentationOutputState output_state;
-  if (!PresentationGeometry_PushFullOutput(g_renderer, &output_state))
-    return false;
   int width = 0, height = 0;
-  bool rendered = SDL_GetRenderOutputSize(g_renderer, &width, &height) &&
-      SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND) &&
-      SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, alpha) &&
-      SDL_RenderFillRect(g_renderer, NULL);
+  bool rendered = ArRenderOutput_UseFull(
+      &g_render_device, &width, &height);
+  const ArRenderRectF full_output = {
+    0.0f, 0.0f, (float)width, (float)height,
+  };
+  if (rendered)
+    rendered = ArRenderDevice_DrawSolidRect(
+        &g_render_device, &full_output,
+        (ArRenderColorF){0.0f, 0.0f, 0.0f, (float)alpha / 255.0f},
+        kArRenderBlendMode_Alpha);
   if (rendered && label && alpha >= 240 && width > 0 && height > 0) {
     int scale = height >= 1080 ? 6 : height >= 720 ? 5
         : height >= 480 ? 4 : height >= 240 ? 3 : 2;
@@ -2431,6 +2429,5 @@ bool PresentComparisonTransitionOverlay(uint8_t alpha, const char *label) {
         (height - kSettingsOverlayGlyphSize * scale) / 2,
         scale, 255, label);
   }
-  return PresentationGeometry_PopFullOutput(
-      g_renderer, &output_state) && rendered;
+  return rendered;
 }
