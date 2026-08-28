@@ -25,6 +25,7 @@
 #include "diorama/diorama.h"
 #include "diorama/diorama_frame_generation.h"
 #include "diorama/diorama_performance.h"
+#include "diorama/diorama_upload.h"
 #include "diorama/diorama_skybox_uv.h"
 #include "diorama/diorama_planes.h"
 #include "hd_replacement_host.h"
@@ -53,11 +54,11 @@ extern ArRenderTexture g_texture;
 extern ArRenderTexture g_authentic_texture;
 extern ArRenderTexture g_hud_bg_texture;
 extern ArRenderTexture g_hud_obj_texture;
-extern SDL_Texture *g_diorama_textures[kDioramaPlane_Count];
-extern SDL_Texture *g_sim_obj_atlas_texture;
+extern ArRenderTexture g_diorama_textures[kDioramaPlane_Count];
+extern ArRenderTexture g_sim_obj_atlas_texture;
 
-extern SDL_Texture *g_sim3d_layer_textures[kSim3DPlane_Count];
-extern SDL_Texture *g_sim3d_flat_texture;
+extern ArRenderTexture g_sim3d_layer_textures[kSim3DPlane_Count];
+extern ArRenderTexture g_sim3d_flat_texture;
 static uint32_t s_diorama_uploaded_plane_mask;
 static SDL_Texture *s_action_bg1_mask_texture;
 static SDL_Texture *s_action_bg2_mask_texture;
@@ -238,13 +239,13 @@ static bool UploadChangedSurface(
 }
 
 static bool UploadChangedSim3DSurface(
-    SDL_Texture *texture, int surface, const uint32_t *pixels,
+    ArRenderTexture texture, int surface, const uint32_t *pixels,
     int width, int height, int source_pitch_pixels) {
   if (surface < 0 || surface >= kSim3DUploadSurface_Count ||
       source_pitch_pixels > INT_MAX / (int)sizeof(uint32_t))
     return false;
   return UploadChangedSurface(
-      ArSdlRenderBackend_BorrowTexture(texture),
+      texture,
       &s_sim3d_upload_mirrors[surface],
       (const uint8_t *)pixels, width, height,
       source_pitch_pixels * (int)sizeof(uint32_t), 0, 0);
@@ -887,7 +888,7 @@ void PresentUpload(const FrameSlot *slot) {
     /* Row 0 is the top of the captured world band. Upload both sides; the
      * authentic frame begins at ws_extra_top and the lower band follows it. */
     const DioramaUploadResult upload = Diorama_Upload(
-        g_diorama_textures, pixels, pitch_bytes,
+        &g_render_device, g_diorama_textures, pixels, pitch_bytes,
         slot->snes_width + slot->obj_apron * 2,
         slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom,
         slot->obj_apron, upload_mask);
@@ -998,7 +999,8 @@ void PresentUpload(const FrameSlot *slot) {
   /* D1b: the raw atlas follows the same upload-before-release ownership as
    * every other frame pixel buffer. Only the packed used rectangle is copied;
    * all descriptors in this immutable slot are bounded by that rectangle. */
-  if (g_sim_obj_atlas_texture && slot->sim.town && slot->sim.atlas_valid &&
+  if (ArRenderTexture_IsValid(g_sim_obj_atlas_texture) &&
+      slot->sim.town && slot->sim.atlas_valid &&
       slot->sim.atlas_used_width && slot->sim.atlas_used_height) {
     SDL_Rect atlas = { 0, 0, slot->sim.atlas_used_width,
                       slot->sim.atlas_used_height };
@@ -1018,7 +1020,7 @@ void PresentUpload(const FrameSlot *slot) {
       const SrPpuSurfaceView *surface =
           BoundPpuSurface(Sim3DPpuSurface(slot, plane));
       if ((plane_upload_mask & (1u << plane)) &&
-          g_sim3d_layer_textures[plane] &&
+          ArRenderTexture_IsValid(g_sim3d_layer_textures[plane]) &&
           PpuSurfaceHolds(surface, frame.w, frame.h)) {
         UploadChangedSim3DSurface(
             g_sim3d_layer_textures[plane], plane,
@@ -1029,7 +1031,7 @@ void PresentUpload(const FrameSlot *slot) {
     }
     /* Ground projection samples the separated planes directly. Upload the
      * CPU flat composite only for the fallback stage that actually draws it. */
-    if (g_sim3d_flat_texture &&
+    if (ArRenderTexture_IsValid(g_sim3d_flat_texture) &&
         !(slot->sim.effective_features & kSimFeature_GroundProjection)) {
       UploadChangedSim3DSurface(
           g_sim3d_flat_texture, kSim3DUploadSurface_Flat,
@@ -2022,11 +2024,15 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
     for (int plane = 0; plane < kDioramaPlane_Count; plane++)
       if (!(s_diorama_uploaded_plane_mask & (1u << plane)))
         pixels[plane] = NULL;
+    SDL_Texture *current_textures[kDioramaPlane_Count];
     SDL_Texture *scene_textures[kDioramaPlane_Count];
+    for (int plane = 0; plane < kDioramaPlane_Count; plane++)
+      current_textures[plane] =
+          ArSdlRenderBackend_UnwrapTexture(g_diorama_textures[plane]);
     DioramaPerformanceScope frame_synthesis =
         DioramaPerformance_Begin(kDioramaPerformance_FrameSynthesis);
     (void)DioramaFrameGeneration_Prepare(
-        g_renderer, slot, alpha, g_diorama_textures,
+        g_renderer, slot, alpha, current_textures,
         s_diorama_uploaded_plane_mask, scene_textures);
     DioramaPerformance_End(frame_synthesis);
     /* The existing graphics setting now selects frame-space generation.

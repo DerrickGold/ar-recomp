@@ -19,6 +19,8 @@
 #include "present_sim3d_internal.h"
 #include "present_sim3d_project.h"
 #include "present_sim3d_shadows.h"
+#include "platform/sdl/render_sdl.h"
+#include "render/render_device.h"
 #include "sim/sim_render_atlas.h"
 #include "sim/sim3d.h"
 #include "sim/sim3d_performance.h"
@@ -29,7 +31,11 @@
 #endif
 
 extern SDL_Renderer *g_renderer;
-extern SDL_Texture *g_sim_obj_atlas_texture;
+extern ArRenderTexture g_sim_obj_atlas_texture;
+
+static SDL_Texture *NativeAtlasTexture(void) {
+  return ArSdlRenderBackend_UnwrapTexture(g_sim_obj_atlas_texture);
+}
 
 /* The ordinary D4 mask remains a screen-space target so overlapping casters
  * accumulate once and soft blur stays inexpensive. Elevated towns defer its
@@ -448,7 +454,8 @@ PresentationOutcome DrawSimShadowMask(
     const FrameSlot *slot, bool virtual_height, bool soft_shadows,
     bool terrain_depth_receiver, SDL_Rect source, SDL_Rect viewport,
     const float matrix[16]) {
-  if (!g_sim_obj_atlas_texture || !slot->sim.atlas_valid)
+  if (!ArRenderTexture_IsValid(g_sim_obj_atlas_texture) ||
+      !slot->sim.atlas_valid)
     return kPresentationOutcome_Complete;
   if (!slot->sim.shadow_opacity_pct)
     return kPresentationOutcome_Complete;
@@ -480,8 +487,9 @@ PresentationOutcome DrawSimShadowMask(
 
   SDL_BlendMode saved_atlas_blend = SDL_BLENDMODE_INVALID;
   Uint8 saved_atlas_alpha = 255;
-  if (!SDL_GetTextureBlendMode(g_sim_obj_atlas_texture, &saved_atlas_blend) ||
-      !SDL_GetTextureAlphaMod(g_sim_obj_atlas_texture, &saved_atlas_alpha))
+  SDL_Texture *atlas = NativeAtlasTexture();
+  if (!SDL_GetTextureBlendMode(atlas, &saved_atlas_blend) ||
+      !SDL_GetTextureAlphaMod(atlas, &saved_atlas_alpha))
     return kPresentationOutcome_OptionalOmitted;
 
   PresentationTargetState target_state;
@@ -495,9 +503,8 @@ PresentationOutcome DrawSimShadowMask(
       SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE) &&
       SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 0) &&
       SDL_RenderClear(g_renderer) &&
-      SDL_SetTextureBlendMode(
-          g_sim_obj_atlas_texture, SDL_BLENDMODE_BLEND) &&
-      SDL_SetTextureAlphaMod(g_sim_obj_atlas_texture, 255);
+      SDL_SetTextureBlendMode(atlas, SDL_BLENDMODE_BLEND) &&
+      SDL_SetTextureAlphaMod(atlas, 255);
 
   int vertex_count = 0;
   int index_count = 0;
@@ -604,7 +611,7 @@ PresentationOutcome DrawSimShadowMask(
 
   if (mask_valid && index_count) {
     mask_valid = SDL_RenderGeometry(
-        g_renderer, g_sim_obj_atlas_texture,
+        g_renderer, atlas,
         s_sim_shadow_vertices, vertex_count,
         s_sim_shadow_indices, index_count);
     if (mask_valid) {
@@ -632,7 +639,7 @@ PresentationOutcome DrawSimShadowMask(
   }
 
   const bool atlas_restored = RestoreShadowTextureState(
-      g_sim_obj_atlas_texture, saved_atlas_blend, saved_atlas_alpha);
+      atlas, saved_atlas_blend, saved_atlas_alpha);
   const bool target_restored =
       PresentationGeometry_EndTarget(g_renderer, &target_state);
   if (!atlas_restored || !target_restored ||

@@ -42,32 +42,6 @@ float Diorama_ZoomStep(void);
 bool Diorama_IsDragging(void);
 void Diorama_SetDragging(bool dragging);
 
-/* Draw the diorama scene, split into an upload phase (SDL_UpdateTexture only)
- * and a composite phase (SDL_RenderGeometry + camera projection), per M5's
- * buffer-ownership design: the caller can release pixel-buffer writers right
- * after Diorama_Upload returns, without waiting for Composite's vsync-bound
- * present. textures[]/pixels[] are kDioramaPlane_Count-sized, indexed by
- * kDioramaPlane_*; the caller fills [kDioramaPlane_Backdrop] with the
- * residual main framebuffer. Planes with a NULL texture or pixels are
- * skipped. `plane_mask` is the caller's immutable request/content
- * intersection (M5 D3 — present-time code must not re-derive live settings
- * state). `synchronized_plane_mask` carries every successfully synchronized
- * plane; `changed_plane_mask` is its subset whose pixels changed and required
- * an SDL upload. A failed upload is omitted so the compositor cannot resurface
- * stale texture contents. */
-/* `snes_width` is the FULL surface width including both aprons; `obj_apron` is
- * the per-side apron so planes that cannot hold apron content upload only their
- * display columns (see DioramaPlaneCanCarryApron). */
-typedef struct DioramaUploadResult {
-  uint32_t synchronized_plane_mask;
-  uint32_t changed_plane_mask;
-} DioramaUploadResult;
-
-DioramaUploadResult Diorama_Upload(
-    SDL_Texture *textures[], const uint8_t *const pixels[],
-    const size_t pitch_bytes[],
-    int snes_width, int snes_height, int obj_apron, uint32_t plane_mask);
-
 /* B4-split (followup doc): the camera pose Diorama_Composite renders with,
  * passed in by the caller instead of Composite reading producer-owned
  * g_diorama_cam directly. Free Cam mode: the caller passes the authored pose

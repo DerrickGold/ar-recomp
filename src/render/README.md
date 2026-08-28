@@ -33,26 +33,30 @@ custom shaders, texture wrapping, and optional blend modes.
 ## Current migration state
 
 The base and authentic SNES framebuffers, HUD planes and composite target,
-Mode 7 replacement surface, exact dirty-region uploader, and manifest-driven
-screen replacement textures use the neutral device. The SDL adapter preserves
-their existing formats, nearest filtering, blend/tint behavior, render-target
-semantics, and texture updates. A fake backend runs the same dirty-upload flow
-in tests without SDL.
+Mode 7 replacement surface, manifest-driven screen replacements, persistent
+separated-SIM atlas/layers, and persistent diorama planes are device-owned
+handles. Their creation, destruction, zero-fill, and exact dirty-region
+uploads use the neutral device. The SDL adapter preserves their existing
+formats, nearest filtering, blend/tint behavior, render-target semantics, and
+texture updates. A fake backend runs the same dirty-upload flow in tests
+without SDL.
 
-Presentation subsystems not yet migrated continue to use SDL through a small
-borrow/unwrap bridge in `src/platform/sdl/render_sdl.h`. That bridge is a
-transition aid, not part of the portable contract. New renderer-facing code
-should not add another borrowed native resource.
+The SIM and diorama compositors still unwrap those opaque resources through a
+small bridge in `src/platform/sdl/render_sdl.h` while their geometry and
+per-draw state are migrated. Diorama frame generation also retains private SDL
+endpoint/target textures. The bridge is a transition aid, not part of the
+portable contract. New renderer-facing code should not add another borrowed
+native resource.
 
 The remaining migration should proceed in independently testable slices:
 
-1. Move separated SIM and diorama layer textures to device-owned handles.
-2. Express the remaining enhanced composites as portable texture and geometry
+1. Express the remaining enhanced composites as portable texture and geometry
    batches, with explicit tint/blend state.
-3. Move render-target effects and enhanced SIM/diorama geometry behind device
+2. Move render-target effects, diorama frame generation, and enhanced
+   SIM/diorama geometry behind device
    capabilities while retaining a baseline path.
-4. Isolate custom shader/depth setup in optional backend extensions.
-5. Remove the SDL borrow/unwrap bridge, then expand the boundary check to the
+3. Isolate custom shader/depth setup in optional backend extensions.
+4. Remove the SDL borrow/unwrap bridge, then expand the boundary check to the
    complete presentation directory.
 
 Each slice should preserve the replay state hashes, pass synthetic and real-PPU
