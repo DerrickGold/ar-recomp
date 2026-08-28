@@ -15,6 +15,7 @@
  * geometry or the render device changes, so retaining a context is invalid. */
 typedef struct DevToolsContext {
   SDL_Renderer *renderer;
+  ArRenderDevice *render_device;
   ArRenderTexture hud_bg_texture;
   ArRenderTexture hud_obj_texture;
   SrRunnerHandle *runner;

@@ -41,12 +41,12 @@ int main(void) {
   assert(ArSdlRenderBackend_Bind(&device, &backend, renderer));
   assert(SDL_SetRenderLogicalPresentation(
       renderer, 8, 8, SDL_LOGICAL_PRESENTATION_LETTERBOX));
-  assert(ArRenderDevice_UseOutputCoordinates(&device));
   int output_width = 0;
   int output_height = 0;
   assert(ArRenderDevice_GetOutputSize(
       &device, &output_width, &output_height));
   assert(output_width == 16 && output_height == 16);
+  assert(ArRenderDevice_UseOutputCoordinates(&device));
   int logical_width = -1;
   int logical_height = -1;
   SDL_RendererLogicalPresentation logical_mode =

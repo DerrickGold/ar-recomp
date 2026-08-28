@@ -21,6 +21,8 @@ typedef struct ArRenderBackendOps {
   /* Select one render unit per physical pixel of the current output/target,
    * bypassing any host-side logical scaling left by an earlier path. */
   bool (*use_output_coordinates)(void *context);
+  /* Physical extent of the bound target, or the platform backbuffer when no
+   * target is bound. Logical presentation and viewport state do not affect it. */
   bool (*get_output_size)(void *context, int *width, int *height);
   bool (*set_viewport)(void *context, const ArRenderRectI *viewport);
   bool (*set_clip_rect)(void *context, const ArRenderRectI *clip);
@@ -72,9 +74,10 @@ bool ArRenderDevice_UpdateTexture(ArRenderDevice *device,
  * clip rectangles restore the complete target extent / disable clipping. */
 bool ArRenderDevice_SetRenderTarget(ArRenderDevice *device,
                                     ArRenderTexture target);
-/* Establish physical output-pixel coordinates before querying or drawing a
- * viewport. Backends without an implicit logical transform implement this as
- * a successful no-op. The reported size belongs to the current output/target. */
+/* Establish physical output-pixel coordinates before drawing a viewport.
+ * Backends without an implicit logical transform implement this as a
+ * successful no-op. Output-size queries are always physical and do not
+ * require this call first. */
 bool ArRenderDevice_UseOutputCoordinates(ArRenderDevice *device);
 bool ArRenderDevice_GetOutputSize(ArRenderDevice *device,
                                   int *width, int *height);

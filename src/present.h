@@ -3,7 +3,6 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <SDL3/SDL.h>
 #include "snesrecomp/game/types.h"
 #include "constants.h"
 #include "hd_replacements.h"
@@ -12,6 +11,7 @@
 #include "action/action_effects.h"
 #include "action/action_bg_plan.h"
 #include "presentation_frame_generation.h"
+#include "render/render_device.h"
 #include "snesrecomp/runner.h"
 
 /* FrameSlot is the sole game-state contract for presentation. FrameSlot_Capture
@@ -392,9 +392,9 @@ typedef struct HudProjectionInputs {
 
 typedef struct HudPresentationChunk {
   ArRenderTexture texture;
-  SDL_Rect texture_source;
-  SDL_Rect screen_source;
-  SDL_Rect output_destination;
+  ArRenderRectI texture_source;
+  ArRenderRectI screen_source;
+  ArRenderRectI output_destination;
   InspectorPresentationKind inspector_kind;
   int inspector_x_bias;
 } HudPresentationChunk;
@@ -403,18 +403,17 @@ typedef struct HudPresentationChunk {
  * pause text) + 1 (OBJ icon). */
 enum { kHudPresentationChunkCapacity = 8 };
 
-int BuildHudPresentationChunks(SDL_Rect viewport,
+int BuildHudPresentationChunks(ArRenderRectI viewport,
                                const HudProjectionInputs *inputs,
                                HudPresentationChunk *chunks);
 
-SDL_Rect ComputePresentationViewport(SDL_Renderer *renderer,
-                                     bool ignore_aspect_ratio,
-                                     int pixel_aspect, int visible_width,
-                                     int snes_height);
-SDL_Rect ComputePresentationViewportWithOutput(
-    SDL_Renderer *renderer, bool ignore_aspect_ratio,
+ArRenderRectI ComputePresentationViewport(
+    ArRenderDevice *device, bool ignore_aspect_ratio,
+    int pixel_aspect, int visible_width, int snes_height);
+ArRenderRectI ComputePresentationViewportWithOutput(
+    ArRenderDevice *device, bool ignore_aspect_ratio,
     int pixel_aspect, int visible_width, int snes_height,
-    SDL_Point *output_size);
+    ArRenderExtentI *output_size);
 
 /* Present-time entry points, called synchronously on the render/main thread.
  * Upload remains separate from composite so texture updates stay grouped ahead
@@ -433,16 +432,16 @@ uint64_t PresentAuthenticUploadedFrameSerial(void);
  * different phases (which is the whole point of the re-present). */
 /* Owns the complete draw order: scene target begin, mode-specific scene,
  * post-process resolve, then full-output host UI. The returned viewport is the
- * exact image rect selected by the resolve (SDL's logical rect where active,
- * otherwise the calculated fallback). SDL_RenderPresent remains caller-owned. */
-SDL_Rect PresentFrame(const FrameSlot *slot, float alpha,
-                      double presentation_fps);
+ * exact image rectangle selected by the post-process resolve. Backend present
+ * remains caller-owned. */
+ArRenderRectI PresentFrame(const FrameSlot *slot, float alpha,
+                           double presentation_fps);
 
 /* Drops renderer-owned present caches (HUD composite, sim shadow/rim targets,
  * town/world-navigation canvases, underlays and cloud fields) so the next
  * present rebuilds them.
  *
- * MUST be called from the SDL_EVENT_RENDER_TARGETS_RESET / _DEVICE_RESET arm.
+ * MUST be called from the platform render-target/device-reset handler.
  * Each of those textures is (re)written only when a GAME-side serial changes, or
  * once at creation — never in response to device state — so after a reset the
  * caches would short-circuit forever and keep presenting textures whose

@@ -10,6 +10,7 @@
 #include "settings.h"
 
 extern SDL_Renderer *g_renderer;
+extern ArRenderDevice g_render_device;
 extern ArRenderTexture g_hud_bg_texture;
 extern ArRenderTexture g_hud_obj_texture;
 extern uint8_t g_pixels[];
@@ -26,6 +27,7 @@ extern bool g_ws_active;
 static DevToolsContext CurrentContext(void) {
   DevToolsContext context = {
     .renderer = g_renderer,
+    .render_device = &g_render_device,
     .hud_bg_texture = g_hud_bg_texture,
     .hud_obj_texture = g_hud_obj_texture,
     .runner = RtlGameRunner(),

@@ -9,11 +9,9 @@
 #include "session_fatal.h"
 #include "settings.h"
 
-#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
-SDL_Renderer *g_renderer = (SDL_Renderer *)(uintptr_t)1;
 ArRenderDevice g_render_device;
 Settings g_settings;
 
@@ -23,12 +21,12 @@ static const FrameSlot *s_expected_slot;
 static float s_expected_alpha;
 static double s_expected_presentation_fps;
 static RenderComparisonView s_expected_view;
-static SDL_Rect s_expected_host_viewport;
+static ArRenderRectI s_expected_host_viewport;
 static uint8_t s_expected_transition_alpha;
 static int s_expected_stages;
 static uint64_t s_authentic_uploaded_serial;
-static const SDL_Rect kFallback = { 160, 0, 960, 720 };
-static const SDL_Rect kResolved = { 161, 1, 958, 718 };
+static const ArRenderRectI kFallback = {160, 0, 960, 720};
+static const ArRenderRectI kResolved = {161, 1, 958, 718};
 
 #define CHECK(expr) do { \
   if (!(expr)) { \
@@ -38,12 +36,26 @@ static const SDL_Rect kResolved = { 161, 1, 958, 718 };
   } \
 } while (0)
 
-SDL_Rect ComputePresentationViewportWithOutput(
-    SDL_Renderer *renderer, bool ignore_aspect_ratio,
+static bool RectsEqual(ArRenderRectI left, ArRenderRectI right) {
+  return left.x == right.x && left.y == right.y &&
+      left.w == right.w && left.h == right.h;
+}
+
+bool ArRenderDevice_IsReady(const ArRenderDevice *device) {
+  return device == &g_render_device;
+}
+
+const char *ArRenderDevice_LastError(const ArRenderDevice *device) {
+  CHECK(device == &g_render_device);
+  return "test renderer error";
+}
+
+ArRenderRectI ComputePresentationViewportWithOutput(
+    ArRenderDevice *device, bool ignore_aspect_ratio,
     int pixel_aspect, int visible_width, int snes_height,
-    SDL_Point *output_size) {
+    ArRenderExtentI *output_size) {
   CHECK(s_stage++ == 0);
-  CHECK(renderer == g_renderer);
+  CHECK(device == &g_render_device);
   CHECK(!ignore_aspect_ratio);
   if (s_expected_view == kRenderComparison_Authentic) {
     CHECK(pixel_aspect == kPixelAspect_Crt43);
@@ -55,7 +67,7 @@ SDL_Rect ComputePresentationViewportWithOutput(
     CHECK(snes_height == 224);
   }
   CHECK(output_size != NULL);
-  *output_size = (SDL_Point){1280, 720};
+  *output_size = (ArRenderExtentI){1280, 720};
   return kFallback;
 }
 
@@ -81,20 +93,20 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
   CHECK(alpha == s_expected_alpha);
 }
 
-bool PresentAuthenticScene(const FrameSlot *slot, SDL_Rect viewport) {
+bool PresentAuthenticScene(const FrameSlot *slot, ArRenderRectI viewport) {
   CHECK(s_stage++ == 2);
   CHECK(s_expected_view == kRenderComparison_Authentic);
   CHECK(slot == s_expected_slot);
-  CHECK(SDL_RectsEqual(&viewport, &kFallback));
+  CHECK(RectsEqual(viewport, kFallback));
   return true;
 }
 
 bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
-                                      SDL_Rect priority_viewport) {
+                                      ArRenderRectI priority_viewport) {
   CHECK(s_stage++ == 3);
   CHECK(s_expected_view == kRenderComparison_SideBySide);
   CHECK(slot == s_expected_slot);
-  CHECK(SDL_RectsEqual(&priority_viewport, &kFallback));
+  CHECK(RectsEqual(priority_viewport, kFallback));
   return true;
 }
 
@@ -122,24 +134,24 @@ ArRenderRectI CrtPost_End(ArRenderDevice *device,
   };
 }
 
-void PresentHostUi(const FrameSlot *slot, SDL_Rect viewport,
-                   SDL_Point output_size,
+void PresentHostUi(const FrameSlot *slot, ArRenderRectI viewport,
+                   ArRenderExtentI output_size,
                    double presentation_fps) {
   CHECK(s_stage++ == s_expected_stages - 1);
   CHECK(slot == s_expected_slot);
   /* The UI must receive End's authoritative rectangle, not the fallback that
    * was calculated before SDL resolved its per-target logical presentation. */
-  CHECK(SDL_RectsEqual(&viewport, &s_expected_host_viewport));
-  CHECK(output_size.x == 1280 && output_size.y == 720);
+  CHECK(RectsEqual(viewport, s_expected_host_viewport));
+  CHECK(output_size.width == 1280 && output_size.height == 720);
   CHECK(presentation_fps == s_expected_presentation_fps);
 }
 
 static void RunCase(FrameSlot *slot) {
   s_stage = 0;
-  SDL_Rect image = PresentFrame(
+  ArRenderRectI image = PresentFrame(
       slot, s_expected_alpha, s_expected_presentation_fps);
   CHECK(s_stage == s_expected_stages);
-  CHECK(SDL_RectsEqual(&image, &s_expected_host_viewport));
+  CHECK(RectsEqual(image, s_expected_host_viewport));
 }
 
 int main(void) {

@@ -13,7 +13,6 @@
 #ifndef AR_PRESENT_INTERNAL_H
 #define AR_PRESENT_INTERNAL_H
 
-#include <SDL3/SDL.h>
 #include <stdbool.h>
 
 #include "present.h"
@@ -34,16 +33,15 @@ typedef struct EffectBatch {
 /* ---- present.c helpers the sim renderer calls ----------------------------
  * These stay DEFINED in present.c and lost their `static` for this header.
  * ComputePresentationViewport is already public in present.h — not repeated. */
-SDL_FRect ToFRect(SDL_Rect r);
 void PresentHudOverlayComposited(
     const FrameSlot *slot, ArRenderRectI viewport);
 void PresentCompositeScene(const FrameSlot *slot, float alpha);
-bool PresentAuthenticScene(const FrameSlot *slot, SDL_Rect viewport);
+bool PresentAuthenticScene(const FrameSlot *slot, ArRenderRectI viewport);
 bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
-                                      SDL_Rect priority_viewport);
+                                      ArRenderRectI priority_viewport);
 bool PresentComparisonTransitionOverlay(uint8_t alpha, const char *label);
-void PresentHostUi(const FrameSlot *slot, SDL_Rect viewport,
-                   SDL_Point output_size,
+void PresentHostUi(const FrameSlot *slot, ArRenderRectI viewport,
+                   ArRenderExtentI output_size,
                    double presentation_fps);
 bool EffectRendererAvailable(void);
 void DisableEffectBlend(const char *operation);
