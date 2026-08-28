@@ -53,6 +53,11 @@ and bind an intermediate target. `ArRenderOutput_UseFull` is the terminal
 overlay counterpart: it selects unclipped physical output coordinates without
 clearing or changing the current target.
 
+`ArPresentationLayout_ResolveViewport` owns the platform-neutral aspect-fit
+calculation and logical content axes. The SDL adapter owns only SDL logical
+presentation plus its temporary full-output state; obsolete duplicate native
+render-target scoping has been removed in favor of `ArRenderDevice_BeginTarget`.
+
 ## Current migration state
 
 The base and authentic SNES framebuffers, HUD planes and composite target,

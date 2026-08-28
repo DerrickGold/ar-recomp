@@ -28,7 +28,7 @@
 #include "host_display_status.h"
 #include "present.h"
 #include "presentation_frame_generation.h"
-#include "presentation_geometry.h"
+#include "platform/sdl/presentation_geometry_sdl.h"
 #include "present_cadence_metrics.h"
 #include "snesrecomp/runner.h"
 #include "settings.h"
@@ -292,7 +292,7 @@ void HostDisplay_CalculateWindowSize(int scale, int *width, int *height) {
 
 void HostDisplay_RecomputeLogicalPresentation(void) {
   if (!g_window || !g_renderer) return;
-  PresentationGeometry_ApplyLogical(
+  ArSdlPresentation_ApplyLogical(
       g_renderer, Settings_IgnoreAspectRatio(),
       g_active_pixel_aspect == kPixelAspect_Crt43,
       Settings_VisibleWidth(), g_snes_height);

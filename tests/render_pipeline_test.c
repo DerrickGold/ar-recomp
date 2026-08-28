@@ -30,7 +30,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "presentation_geometry.h"
+#include "platform/sdl/presentation_geometry_sdl.h"
+#include "render/presentation_layout.h"
 
 static int s_failures;
 #define CHECK(expr) do { \
@@ -79,8 +80,8 @@ int main(void) {
     SDL_Rect clip = { 3, 4, 100, 80 };
     CHECK(SDL_SetRenderViewport(renderer, &viewport));
     CHECK(SDL_SetRenderClipRect(renderer, &clip));
-    PresentationOutputState state;
-    CHECK(PresentationGeometry_PushFullOutput(renderer, &state));
+    ArSdlPresentationOutputState state;
+    CHECK(ArSdlPresentation_PushFullOutput(renderer, &state));
     int logical_w = -1, logical_h = -1;
     SDL_RendererLogicalPresentation logical_mode =
         SDL_LOGICAL_PRESENTATION_LETTERBOX;
@@ -90,7 +91,7 @@ int main(void) {
     CHECK(logical_mode == SDL_LOGICAL_PRESENTATION_DISABLED);
     CHECK(!SDL_RenderViewportSet(renderer));
     CHECK(!SDL_RenderClipEnabled(renderer));
-    CHECK(PresentationGeometry_PopFullOutput(renderer, &state));
+    CHECK(ArSdlPresentation_PopFullOutput(renderer, &state));
     CHECK(SDL_GetRenderLogicalPresentation(
         renderer, &logical_w, &logical_h, &logical_mode));
     CHECK(logical_w == 1024 && logical_h == 768);
@@ -104,56 +105,6 @@ int main(void) {
     CHECK(SDL_RectsEqual(&restored, &clip));
     CHECK(SDL_SetRenderViewport(renderer, NULL));
     CHECK(SDL_SetRenderClipRect(renderer, NULL));
-  }
-
-  /* Temporary cosmetic targets must restore the exact caller-owned render
-   * state. A hard-coded backbuffer/CRT target would pass ordinary frames but
-   * escape any future outer capture or post-processing pass. */
-  {
-    SDL_Texture *offscreen = SDL_CreateTexture(
-        renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET,
-        64, 64);
-    CHECK(offscreen != NULL);
-    SDL_Rect viewport = { 30, 40, 320, 180 };
-    SDL_Rect clip = { 5, 6, 90, 70 };
-    CHECK(SDL_SetRenderViewport(renderer, &viewport));
-    CHECK(SDL_SetRenderClipRect(renderer, &clip));
-    CHECK(SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_ADD));
-    CHECK(SDL_SetRenderDrawColor(renderer, 11, 22, 33, 44));
-
-    PresentationTargetState state;
-    CHECK(PresentationGeometry_BeginTarget(renderer, offscreen, &state) ==
-          kPresentationTargetBegin_Ready);
-    CHECK(SDL_GetRenderTarget(renderer) == offscreen);
-    CHECK(!SDL_RenderViewportSet(renderer));
-    CHECK(!SDL_RenderClipEnabled(renderer));
-    CHECK(SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE));
-    CHECK(SDL_SetRenderDrawColor(renderer, 1, 2, 3, 4));
-    CHECK(PresentationGeometry_EndTarget(renderer, &state));
-
-    CHECK(SDL_GetRenderTarget(renderer) == NULL);
-    CHECK(SDL_RenderViewportSet(renderer));
-    SDL_Rect restored = {0};
-    CHECK(SDL_GetRenderViewport(renderer, &restored));
-    CHECK(SDL_RectsEqual(&restored, &viewport));
-    CHECK(SDL_RenderClipEnabled(renderer));
-    CHECK(SDL_GetRenderClipRect(renderer, &restored));
-    CHECK(SDL_RectsEqual(&restored, &clip));
-    SDL_BlendMode restored_blend = SDL_BLENDMODE_INVALID;
-    Uint8 r = 0, g = 0, b = 0, a = 0;
-    CHECK(SDL_GetRenderDrawBlendMode(renderer, &restored_blend));
-    CHECK(restored_blend == SDL_BLENDMODE_ADD);
-    CHECK(SDL_GetRenderDrawColor(renderer, &r, &g, &b, &a));
-    CHECK(r == 11 && g == 22 && b == 33 && a == 44);
-    CHECK(PresentationGeometry_BeginTarget(renderer, NULL, &state) ==
-          kPresentationTargetBegin_Omitted);
-    CHECK(SDL_GetRenderTarget(renderer) == NULL);
-
-    CHECK(SDL_SetRenderViewport(renderer, NULL));
-    CHECK(SDL_SetRenderClipRect(renderer, NULL));
-    CHECK(SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE));
-    CHECK(SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255));
-    SDL_DestroyTexture(offscreen);
   }
 
   /* Streaming texture at the full widescreen budget, like g_texture — created
@@ -191,7 +142,7 @@ int main(void) {
   /* Authentic 4:3 presentation is aspect-correct even when widescreen content
    * is inactive. This is the regression guard for resize/fullscreen stretching:
    * only the explicit Stretch setting may select SDL's stretch mode. */
-  CHECK(PresentationGeometry_ApplyLogical(
+  CHECK(ArSdlPresentation_ApplyLogical(
       renderer, false, true, kSnesW, kSnesH));
   {
     int logical_w = 0, logical_h = 0;
@@ -203,15 +154,15 @@ int main(void) {
     CHECK(logical_h == kSnesH * 6);
     CHECK(mode == SDL_LOGICAL_PRESENTATION_LETTERBOX);
 
-    SDL_Rect viewport = PresentationGeometry_CalculateViewport(
+    ArRenderRectI viewport = ArPresentationLayout_ResolveViewport(
         kWinW, kWinH, false, true, kSnesW, kSnesH);
     CHECK(viewport.x == 160 && viewport.y == 0);
     CHECK(viewport.w == 960 && viewport.h == 720);
-    SDL_Rect stretched = PresentationGeometry_CalculateViewport(
+    ArRenderRectI stretched = ArPresentationLayout_ResolveViewport(
         kWinW, kWinH, true, true, kSnesW, kSnesH);
     CHECK(stretched.x == 0 && stretched.y == 0);
     CHECK(stretched.w == kWinW && stretched.h == kWinH);
-    SDL_Rect letterboxed = PresentationGeometry_CalculateViewport(
+    ArRenderRectI letterboxed = ArPresentationLayout_ResolveViewport(
         800, 800, false, true, kSnesW, kSnesH);
     CHECK(letterboxed.x == 0 && letterboxed.y == 100);
     CHECK(letterboxed.w == 800 && letterboxed.h == 600);

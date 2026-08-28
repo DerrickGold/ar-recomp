@@ -1,7 +1,8 @@
 #include "render_output.h"
 
-#include <stdint.h>
 #include <string.h>
+
+#include "presentation_layout.h"
 
 static void ResetFrame(ArRenderOutputFrame *frame) {
   if (frame) memset(frame, 0, sizeof(*frame));
@@ -34,19 +35,8 @@ bool ArRenderOutput_ResolveAspectFit(
       width <= 0 || height <= 0)
     return false;
 
-  ArRenderRectI resolved = {0, 0, width, height};
-  if (!stretch &&
-      (int64_t)width * aspect_height !=
-          (int64_t)height * aspect_width) {
-    if ((int64_t)width * aspect_height >
-        (int64_t)height * aspect_width) {
-      resolved.w = (int)((int64_t)height * aspect_width / aspect_height);
-      resolved.x = (width - resolved.w) / 2;
-    } else {
-      resolved.h = (int)((int64_t)width * aspect_height / aspect_width);
-      resolved.y = (height - resolved.h) / 2;
-    }
-  }
+  const ArRenderRectI resolved = ArPresentationLayout_ResolveViewport(
+      width, height, stretch, false, aspect_width, aspect_height);
   *viewport = resolved;
   if (output_width) *output_width = width;
   if (output_height) *output_height = height;
