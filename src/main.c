@@ -2254,7 +2254,7 @@ static int AppShutdown(AppBoot *app, char **argv) {
   }
   /* Owns a full-window render target plus a GPU shader and render state, and
    * all three must go before the renderer that created them. */
-  CrtPost_Shutdown();
+  CrtPost_Shutdown(&g_render_device);
   SDL_DestroyRenderer(g_renderer);
   ArRenderDevice_Reset(&g_render_device);
   SDL_DestroyWindow(g_window);

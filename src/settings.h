@@ -575,9 +575,9 @@ typedef struct Settings {
    * "gpu" backend, so its rows gate on GpuShadersActive too.
    *
    * All knobs are x100 fixed point because the settings system is integer
-   * only; crt_post.c divides by 100 on the way to the shader. The defaults
-   * are the values that were tuned by eye against Fillmore Act 1 — treat
-   * them as the shipped look, not placeholders.
+   * only; frame orchestration converts them to semantic floats for the
+   * backend-neutral CRT contract. The defaults were tuned by eye against
+   * Fillmore Act 1 — treat them as the shipped look, not placeholders.
    *
    * Every knob except the master toggle is developer-only (Settings_IsDebugOnly
    * hides Int rows in this category): they are for authoring the look, not

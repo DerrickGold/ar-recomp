@@ -6,7 +6,7 @@
  * out of ordinary game builds.
  *
  * This header exists so the format-selection rule lives in exactly one place:
- * it is used by diorama.c, crt_post.c and tests/shader_blob_test.c, and the
+ * it is used by SDL effect backends and tests/shader_blob_test.c, and the
  * entrypoint detail below is the kind that fails loudly but confusingly if a
  * copy drifts. */
 #ifndef AR_GPU_SHADER_BLOB_H

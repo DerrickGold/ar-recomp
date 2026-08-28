@@ -28,7 +28,7 @@
  * normal case here (the 7:6 kPixelAspect_Crt43 stretch, plus a widescreen width
  * that varies with the window).
  *
- * The uniform block is all scalars, mirroring CrtUniforms in crt_post.c
+ * The uniform block is all scalars, mirroring CrtUniforms in the CRT backend
  * field-for-field. Packing any pair into a vec2 would shift every later member.
  *
  * SDL binding convention (SDL_gpu.h "Shader Resources"): fragment stage uses

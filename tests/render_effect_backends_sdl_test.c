@@ -2,8 +2,10 @@
 
 #include <stdio.h>
 
+#include "crt_post.h"
 #include "diorama/diorama_effect_backend.h"
 #include "platform/sdl/render_sdl.h"
+#include "session_fatal.h"
 #include "sim/sim_shadow_effect_backend.h"
 
 enum { kSkip = 77 };
@@ -103,6 +105,36 @@ static void TestSimShadowEffect(ArRenderDevice *device) {
   SimShadowEffectBackend_Reset(device);
 }
 
+static void TestCrtPost(ArRenderDevice *device) {
+  const CrtPostConfig config = {
+    .enabled = true,
+    .curvature = 0.12f,
+    .scanline_depth = 0.30f,
+    .mask_strength = 0.18f,
+    .aberration = 0.10f,
+    .bandwidth = 0.25f,
+    .vignette = 0.20f,
+    .brightness = 1.10f,
+  };
+  const ArRenderRectI image = {0, 0, 32, 32};
+
+  CHECK(CrtPost_Begin(device, &config));
+  CHECK(ArRenderTexture_IsValid(CrtPost_BaseTarget()));
+  CHECK(ArRenderDevice_Clear(
+      device, (ArRenderColorF){0.1f, 0.2f, 0.3f, 1.0f}));
+  ArRenderRectI resolved = CrtPost_End(device, 256, 224, image);
+  CHECK(resolved.x == image.x && resolved.y == image.y &&
+        resolved.w == image.w && resolved.h == image.h);
+  CHECK(!ArRenderTexture_IsValid(CrtPost_BaseTarget()));
+  CHECK(!SessionFatal_Requested());
+
+  CrtPost_Shutdown(device);
+  CHECK(CrtPost_Begin(device, &config));
+  (void)CrtPost_End(device, 256, 224, image);
+  CHECK(!SessionFatal_Requested());
+  CrtPost_Shutdown(device);
+}
+
 int main(void) {
   if (!SDL_Init(SDL_INIT_VIDEO)) {
     fprintf(stderr, "render_effect_backends_sdl_test: SKIP - %s\n",
@@ -127,6 +159,7 @@ int main(void) {
   CHECK(ArSdlRenderBackend_Bind(&device, &backend, renderer));
   TestDioramaEffects(&device);
   TestSimShadowEffect(&device);
+  TestCrtPost(&device);
 
   ArRenderDevice_Reset(&device);
   SDL_DestroyRenderer(renderer);
