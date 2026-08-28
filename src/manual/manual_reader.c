@@ -13,7 +13,7 @@
 #include "scene3d_math.h"
 #include "settings.h"
 /* For the game's own menu font: the overlay owns the atlases. */
-#include "settings_overlay.h"
+#include "settings_overlay_render.h"
 
 /* Declarations only. src/hd_replacement_host.c owns STB_IMAGE_IMPLEMENTATION
  * for the whole binary; this file must not define it again. JPEG support is one

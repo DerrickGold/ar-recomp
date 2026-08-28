@@ -7,6 +7,7 @@
 #include <SDL3/SDL.h>
 
 #include "render/render_device.h"
+#include "settings_overlay_render.h"
 
 /* Host-owned settings overlay. It consumes SDL input before the SNES joypad
  * path and renders through the portable device after the emulated framebuffer
@@ -84,36 +85,6 @@ typedef struct SettingsOverlayManualHooks {
 } SettingsOverlayManualHooks;
 void SettingsOverlay_SetManualHooks(const SettingsOverlayManualHooks *hooks);
 
-/* ── The game's menu font, for a nested mode to draw with ──────────────────
- *
- * The overlay owns the font atlases: they are built from the ROM's own dialog
- * glyphs, in the game's own menu colors. A nested mode that drew its text with
- * SDL_RenderDebugText instead would be an 8-pixel developer font sitting inside
- * a menu rendered from the game's -- which is what the manual reader did, and it
- * was illegible on a large window.
- *
- * Coordinates and sizes are in RENDERER OUTPUT PIXELS, not the overlay's own
- * scaled logical space, because a fullscreen mode is not laid out on the menu's
- * grid and should not have to pretend it is. `scale` multiplies the 8x8 glyph;
- * `alpha` fades the whole run and is what lets a hint line come and go without
- * the caller reaching into the atlas. */
-enum { kSettingsOverlayGlyphSize = 8 };
-
-/* Output-pixel width a run would occupy. Lets a caller centre or box it without
- * duplicating the glyph advance. */
-int SettingsOverlay_GameTextWidth(const char *text, int scale);
-
-/* Draw at output pixels. No-op before the atlases exist, so a caller does not
- * have to know the overlay's initialisation order. */
-void SettingsOverlay_DrawGameText(int x, int y, int scale, uint8_t alpha,
-                                  const char *text);
-
-/* Draw the ROM's native dialog-window frame at output-pixel coordinates.
- * `scale` is an integer multiple of its 8x8 tiles; rectangle dimensions must
- * therefore be divisible by 8*scale. Falls back to the overlay's host-drawn
- * blue frame when the ROM atlas was unavailable. */
-bool SettingsOverlay_DrawGameFrame(ArRenderRectI rect, int scale);
-
 bool SettingsOverlay_IsOpen(void);
 void SettingsOverlay_Open(void);
 void SettingsOverlay_Close(void);
@@ -171,19 +142,6 @@ bool SettingsOverlay_IsCapturing(void);
 bool SettingsOverlay_HandleCaptureEvent(const SDL_Event *event);
 /* Text events are accepted only while a descriptor is in direct-edit mode. */
 bool SettingsOverlay_HandleText(const char *text);
-/* game_viewport is used only to resolve the HUD's "Match game" scale when
- * editing that row. The settings presentation itself covers the complete
- * render output and follows the window aspect ratio. */
-void SettingsOverlay_Render(ArRenderRectI game_viewport);
-
-/* Compact, color-coded monospace panel used by read-only host debug tools
- * while the settings menu itself is closed. `text` may contain newlines. The
- * panel is initially placed on the half of the output opposite `avoid_point`.
- * Its frame remains the native ActRaiser dialog frame. The title strip moves
- * it; the lower-right grip uniformly rescales it. */
-void SettingsOverlay_RenderDebugPanel(const char *title, const char *text,
-                                      ArRenderPointI avoid_point);
-void SettingsOverlay_HideDebugPanel(void);
 /* These drag functions handle both title movement and corner rescaling. */
 bool SettingsOverlay_BeginDebugPanelDrag(int output_x, int output_y);
 void SettingsOverlay_DragDebugPanel(int output_x, int output_y);
