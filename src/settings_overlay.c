@@ -11,6 +11,7 @@
 #include "diorama/diorama_layer_editor.h"
 #include "action/action_bg_tuner.h"
 #include "host/host_display_status.h"
+#include "host/host_clock.h"
 #include "input_map.h"
 #include "quintet_lzss.h"
 #include "render/render_output.h"
@@ -460,7 +461,7 @@ static int s_visible_rows = 9;
 static int s_auto_menu_scale_percent = kPercentScale;
 static int s_match_game_scale_percent = kPercentScale;
 static char s_status[48];
-static Uint64 s_status_until;
+static uint64_t s_status_until;
 static bool s_editing;
 static char s_edit_buffer[512];
 /* Hold-to-accelerate stepping. A numeric row's value is nudged once on the
@@ -473,8 +474,8 @@ static char s_edit_buffer[512];
  * (s_hold_dirty) so a fast hold is not one disk write per frame. */
 static const SettingDesc *s_hold_desc;
 static int s_hold_dir;
-static Uint64 s_hold_start_ms;
-static Uint64 s_hold_next_ms;
+static uint64_t s_hold_start_ms;
+static uint64_t s_hold_next_ms;
 static SDL_Keycode s_hold_key;
 static bool s_hold_dirty;
 static SettingChangeResult s_hold_result;
@@ -482,7 +483,7 @@ static SettingChangeResult s_hold_result;
  * takes a second confirm press within a short window. The arm is cleared as
  * soon as navigation leaves the synthetic reset row. */
 static int s_reset_armed_section = -1;
-static Uint64 s_reset_armed_until;
+static uint64_t s_reset_armed_until;
 /* The keyboard key of the event currently being dispatched (0 for a pad), so a
  * hold started deep inside ApplyMenuNav knows which key release will end it. */
 static SDL_Keycode s_input_key;
@@ -1082,7 +1083,8 @@ static void DestroyFontTextures(void) {
 }
 
 static int CursorBlinkOffset(void) {
-  return (int)((SDL_GetTicks() / kCursorBlinkHalfPeriodMs) & 1u);
+  return (int)((HostClock_Milliseconds() /
+                kCursorBlinkHalfPeriodMs) & 1u);
 }
 
 static uint32_t DialogColor(const uint8_t *palette, unsigned index) {
@@ -1508,7 +1510,7 @@ static bool SelectedRowIsSectionReset(void) {
 
 static void SetStatus(const char *text) {
   snprintf(s_status, sizeof(s_status), "%s", text ? text : "");
-  s_status_until = SDL_GetTicks() + 2500;
+  s_status_until = HostClock_Milliseconds() + 2500;
 }
 
 /* Persist the current settings to disk and report the outcome. Split from the
@@ -1547,7 +1549,7 @@ static void SaveAcceptedChange(SettingChangeResult result) {
  * produces the shipped configuration rather than merely resetting what the
  * current menu happens to expose. */
 static void ConfirmOrResetActiveSection(void) {
-  Uint64 now = SDL_GetTicks();
+  uint64_t now = HostClock_Milliseconds();
   const MenuSection *section = ActiveSection();
   if (s_reset_armed_section != s_section || now > s_reset_armed_until) {
     s_reset_armed_section = s_section;
@@ -1604,15 +1606,15 @@ static long NiceStep(long value) {
  * direction has been held. Ramps from 1 (fine) to a range-proportional coarse
  * amount so a wide range crosses in ~1s of holding while a tap still nudges by
  * one. Pure function of the descriptor and elapsed time — unit-tested. */
-static long HoldStepMultiplier(const SettingDesc *desc, Uint64 held_ms) {
+static long HoldStepMultiplier(const SettingDesc *desc, uint64_t held_ms) {
   long base = desc->step > 0 ? desc->step : 1;
   long range = desc->maxval - desc->minval;
   if (range <= 0) return 1;
   long coarse_units = NiceStep(range / 24);
   long coarse_mult = coarse_units / base;
   if (coarse_mult < 1) coarse_mult = 1;
-  if (held_ms < (Uint64)kHoldInitialDelayMs + 700) return 1;
-  if (held_ms < (Uint64)kHoldInitialDelayMs + 1700) {
+  if (held_ms < (uint64_t)kHoldInitialDelayMs + 700) return 1;
+  if (held_ms < (uint64_t)kHoldInitialDelayMs + 1700) {
     long mid = coarse_mult / 4;
     return mid < 1 ? 1 : mid;
   }
@@ -1718,7 +1720,7 @@ static void BeginValueHold(const SettingDesc *desc, int direction,
   s_hold_desc = desc;
   s_hold_dir = direction;
   s_hold_key = key;
-  s_hold_start_ms = SDL_GetTicks();
+  s_hold_start_ms = HostClock_Milliseconds();
   s_hold_next_ms = s_hold_start_ms + kHoldInitialDelayMs;
   s_hold_dirty = false;
   s_hold_result = kSettingChange_Applied;
@@ -2303,7 +2305,7 @@ bool SettingsOverlay_GetTabState(int *active_tab, int *tab_count) {
  * difference. Ends the hold if the row it was moving is no longer the target
  * of a plain held direction (navigated away, started editing, went
  * unavailable), otherwise fires every due repeat with the ramped magnitude. */
-static void TickHold(Uint64 now_ms) {
+static void TickHold(uint64_t now_ms) {
   if (!s_open || !s_hold_desc) return;
   if (!s_submenu_open || s_editing || s_capture_desc ||
       SelectedDesc() != s_hold_desc || !Settings_IsAvailable(s_hold_desc)) {
@@ -2323,7 +2325,7 @@ static void TickHold(Uint64 now_ms) {
 }
 
 void SettingsOverlay_Tick(void) {
-  TickHold(SDL_GetTicks());
+  TickHold(HostClock_Milliseconds());
 }
 
 long SettingsOverlay_HoldStepForTest(const struct SettingDesc *desc,
@@ -2332,7 +2334,7 @@ long SettingsOverlay_HoldStepForTest(const struct SettingDesc *desc,
 }
 
 void SettingsOverlay_TickAtForTest(uint64_t now_ms) {
-  TickHold((Uint64)now_ms);
+  TickHold(now_ms);
 }
 
 /* Logical menu commands. Both the keyboard path and the gamepad path funnel
@@ -3585,7 +3587,7 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
       /* Blink so an armed row is unmistakable — on a Deck the status line at
        * the bottom of the panel is easy to miss mid-rebind. */
       snprintf(value, sizeof(value), "%s",
-               (SDL_GetTicks() / 300) & 1 ? "PRESS..." : "");
+               (HostClock_Milliseconds() / 300) & 1 ? "PRESS..." : "");
     } else if (selected && s_editing) {
       snprintf(value, sizeof(value), "%s", s_edit_buffer);
     } else if (desc->type == kSettingType_Binding) {
@@ -3912,9 +3914,9 @@ static void DrawMenu(const MenuLayout *layout) {
   const MenuSection *section = ActiveSection();
   SyncActiveTabPage();
 
-  /* SDL3 removed SDL_TICKS_PASSED; SDL_GetTicks is now 64-bit and never wraps
-   * in practice, so a direct comparison is exact. */
-  if (s_status[0] && SDL_GetTicks() >= s_status_until)
+  /* The host clock is monotonic and 64-bit, so a direct comparison is exact
+   * over any realistic session. */
+  if (s_status[0] && HostClock_Milliseconds() >= s_status_until)
     s_status[0] = 0;
 
   const bool custom_rows = ActiveSectionIsCustom();
