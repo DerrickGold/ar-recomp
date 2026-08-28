@@ -487,7 +487,7 @@ void Diorama_FlushSettingsIfDirty(void) {
 typedef struct DioramaLayerDesc {
   int plane;          /* kDioramaPlane_* / SR_PPU_OVERLAY_* index */
   float z;
-  SDL_FColor shade;
+  ArRenderColorF shade;
   bool *visible;
   bool is_figure;
   bool casts_shadow;  /* see the kDioramaLayers interaction policy below */
@@ -568,11 +568,12 @@ static const DioramaLayerDesc *DioramaDescForPlane(int plane) {
  * every visibility/resource gate here prevents a hidden or unuploaded plane
  * from remaining projectable to presentation effects. */
 static bool DioramaLayerIsDrawable(
-    const DioramaLayerDesc *layer, SDL_Texture *textures[],
+    const DioramaLayerDesc *layer, const ArRenderTexture textures[],
     const uint8_t *const pixels[]) {
   return layer && Diorama_PlaneEligible(
       layer->plane, !layer->visible || *layer->visible,
-      textures[layer->plane] != NULL, pixels[layer->plane] != NULL,
+      ArRenderTexture_IsValid(textures[layer->plane]),
+      pixels[layer->plane] != NULL,
       g_settings.diorama_hud_flat,
       g_settings.diorama_skybox == kDioramaSky_Only);
 }
@@ -582,7 +583,7 @@ static bool DioramaLayerIsDrawable(
  * contributed no final pixels. A content-bearing upload failure is filtered
  * by present.c before it reaches this predicate. */
 static bool DioramaLayerIsProjectable(
-    const DioramaLayerDesc *layer, SDL_Texture *textures[],
+    const DioramaLayerDesc *layer, const ArRenderTexture textures[],
     const uint8_t *const pixels[],
     uint8_t effect_obj_priority_mask, uint32_t effect_bg_plane_mask) {
   if (!layer) return false;
@@ -593,7 +594,8 @@ static bool DioramaLayerIsProjectable(
       (effect_bg_plane_mask & (1u << (unsigned)layer->plane)) != 0;
   return Diorama_PlaneProjectable(
       layer->plane, !layer->visible || *layer->visible,
-      textures[layer->plane] != NULL, pixels[layer->plane] != NULL,
+      ArRenderTexture_IsValid(textures[layer->plane]),
+      pixels[layer->plane] != NULL,
       has_obj_effect || has_bg_effect, g_settings.diorama_hud_flat,
       g_settings.diorama_skybox == kDioramaSky_Only);
 }
@@ -884,17 +886,17 @@ static void BuildViewProjection(const DioramaCamera *cam, int out_w, int out_h,
  * ~14% of cases — checked numerically before this refactor). */
 static bool ProjectWorldPoint(const float mvp[16], float x, float y, float z,
                               int screen_w, int screen_h,
-                              SDL_FPoint *out_point) {
+                              ArRenderPointF *out_point) {
   Scene3DPoint point;
   if (!Scene3D_ProjectWorldPoint(mvp, x, y, z, screen_w, screen_h,
                                  &point))
     return false;
-  *out_point = (SDL_FPoint){ point.x, point.y };
+  *out_point = (ArRenderPointF){ point.x, point.y };
   return true;
 }
 
 /* Split a regular vertex grid into two triangles per cell. */
-static void TriangulateGrid(int subdiv_u, int subdiv_v, int *out_indices,
+static void TriangulateGrid(int subdiv_u, int subdiv_v, int32_t *out_indices,
                             int *num_indices) {
   int ii = 0, cols = subdiv_u + 1;
   for (int row = 0; row < subdiv_v; row++) {
@@ -917,8 +919,8 @@ static void BuildLayerMesh(const float mvp[16], float z_world, float z_rake,
                            float u0, float v0, float u1, float v1,
                            float aspect_x, float height_scale,
                            int screen_w, int screen_h,
-                           SDL_FColor color,
-                           SDL_Vertex *out_verts, int *out_indices,
+                           ArRenderColorF color,
+                           ArRenderVertex2D *out_verts, int32_t *out_indices,
                            int *num_verts, int *num_indices) {
   DioramaPerformanceScope performance =
       DioramaPerformance_Begin(kDioramaPerformance_Mesh);
@@ -939,7 +941,7 @@ static void BuildLayerMesh(const float mvp[16], float z_world, float z_rake,
         DioramaPerformance_End(performance);
         return;
       }
-      out_verts[vi].tex_coord = (SDL_FPoint){ u0 + s * (u1 - u0),
+      out_verts[vi].tex_coord = (ArRenderPointF){ u0 + s * (u1 - u0),
                                               v0 + t * (v1 - v0) };
       out_verts[vi].color = color;
       vi++;
@@ -957,8 +959,9 @@ static void BuildLayerSkirtMesh(const float mvp[16], float z_world,
                                 float u0, float u1, float v_bottom,
                                 float aspect_x, float height_scale,
                                 int screen_w, int screen_h,
-                                SDL_FColor color,
-                                SDL_Vertex *out_verts, int *out_indices,
+                                ArRenderColorF color,
+                                ArRenderVertex2D *out_verts,
+                                int32_t *out_indices,
                                 int *num_verts, int *num_indices) {
   DioramaPerformanceScope performance =
       DioramaPerformance_Begin(kDioramaPerformance_Mesh);
@@ -984,8 +987,8 @@ static void BuildLayerSkirtMesh(const float mvp[16], float z_world,
         return;
       }
       /* Bottom source row, repeated down the whole skirt. */
-      out_verts[vi].tex_coord = (SDL_FPoint){ u0 + s * (u1 - u0), v_bottom };
-      SDL_FColor c = color;
+      out_verts[vi].tex_coord = (ArRenderPointF){ u0 + s * (u1 - u0), v_bottom };
+      ArRenderColorF c = color;
       c.r *= shade_mul;
       c.g *= shade_mul;
       c.b *= shade_mul;
@@ -1011,8 +1014,9 @@ static void BuildQuadMesh(const float mvp[16],
                           float edge_v_x, float edge_v_y, float edge_v_z,
                           float u0, float v0, float u1, float v1,
                           int subdiv_u, int subdiv_v,
-                          int screen_w, int screen_h, SDL_FColor color,
-                          SDL_Vertex *out_verts, int *out_indices,
+                          int screen_w, int screen_h, ArRenderColorF color,
+                          ArRenderVertex2D *out_verts,
+                          int32_t *out_indices,
                           int *num_verts, int *num_indices) {
   DioramaPerformanceScope performance =
       DioramaPerformance_Begin(kDioramaPerformance_Mesh);
@@ -1031,7 +1035,7 @@ static void BuildQuadMesh(const float mvp[16],
         DioramaPerformance_End(performance);
         return;
       }
-      out_verts[vi].tex_coord = (SDL_FPoint){ u0 + s * (u1 - u0),
+      out_verts[vi].tex_coord = (ArRenderPointF){ u0 + s * (u1 - u0),
                                               v0 + t * (v1 - v0) };
       out_verts[vi].color = color;
       vi++;
@@ -1087,8 +1091,8 @@ static void BuildFoldedOverflowMesh(
     float overflow_height, float overlap_t,
     float front_z, float front_drop,
     float u0, float v0, float u1, float v1,
-    float aspect_x, int screen_w, int screen_h, SDL_FColor color,
-    SDL_Vertex *out_verts, int *out_indices,
+    float aspect_x, int screen_w, int screen_h, ArRenderColorF color,
+    ArRenderVertex2D *out_verts, int32_t *out_indices,
     int *num_verts, int *num_indices) {
   DioramaPerformanceScope performance =
       DioramaPerformance_Begin(kDioramaPerformance_Mesh);
@@ -1111,7 +1115,7 @@ static void BuildFoldedOverflowMesh(
         DioramaPerformance_End(performance);
         return;
       }
-      out_verts[vi].tex_coord = (SDL_FPoint){
+      out_verts[vi].tex_coord = (ArRenderPointF){
         u0 + s * (u1 - u0), v0 + t * (v1 - v0),
       };
       out_verts[vi].color = color;
@@ -1131,7 +1135,7 @@ static void BuildFoldedOverflowMesh(
  * what lets auxiliary geometry such as the waterfall continuation use the
  * exact same resolved source as its host plane rather than silently falling
  * back to the raw texture. */
-static void RemapMeshToSupersampleTexture(SDL_Vertex *vertices, int count,
+static void RemapMeshToSupersampleTexture(ArRenderVertex2D *vertices, int count,
                                           int obj_apron,
                                           int snes_width, int snes_height) {
   const float u_scale = (float)SR_PPU_SURFACE_MAX_WIDTH / (float)snes_width;
@@ -1150,19 +1154,30 @@ static void RemapMeshToSupersampleTexture(SDL_Vertex *vertices, int count,
  * and the producer snapshot explicit. The caller supplies the frame-snapshotted
  * request/content intersection; this function neither reads live settings nor
  * rescans producer-owned pixels. */
-static bool RenderDioramaGeometry(SDL_Renderer *renderer,
-                                  SDL_Texture *texture,
-                                  const SDL_Vertex *vertices,
-                                  int num_vertices,
-                                  const int *indices,
-                                  int num_indices) {
+static bool SubmitDioramaGeometry(
+    ArRenderDevice *device, ArRenderTexture texture,
+    const ArRenderVertex2D *vertices, int num_vertices,
+    const int32_t *indices, int num_indices,
+    const ArRenderDrawState *state) {
   DioramaPerformanceScope performance =
       DioramaPerformance_Begin(kDioramaPerformance_Submit);
-  const bool succeeded = SDL_RenderGeometry(
-      renderer, texture, vertices, num_vertices, indices, num_indices);
+  const bool succeeded = ArRenderDevice_DrawGeometryWithState(
+      device, texture, vertices, num_vertices, indices, num_indices, state);
   DioramaPerformance_End(performance);
   DioramaPerformance_AddDraw(succeeded, num_vertices, num_indices);
   return succeeded;
+}
+
+static bool RenderDioramaGeometry(
+    ArRenderDevice *device, ArRenderTexture texture,
+    const ArRenderVertex2D *vertices, int num_vertices,
+    const int32_t *indices, int num_indices, ArRenderBlendMode blend) {
+  const ArRenderDrawState state = {
+    .flags = kArRenderDrawState_Blend,
+    .blend = blend,
+  };
+  return SubmitDioramaGeometry(
+      device, texture, vertices, num_vertices, indices, num_indices, &state);
 }
 
 static void RecordOptionalDioramaDraw(
@@ -1223,14 +1238,13 @@ static void RecordOptionalDioramaDraw(
  * there, so heavy blur reads as "the picture is broken," not atmosphere);
  * Plane+skybox wants the fuller blur since the in-box copy stays sharp and
  * the skybox is deliberately meant to read as unfocused backdrop. */
-static PresentationOutcome DrawDioramaSkybox(ArRenderDevice *device,
-                              SDL_Renderer *renderer,
-                              SDL_Texture *skybox_texture,
-                              int obj_apron, int snes_width, int snes_height,
-                              int out_w, int out_h, bool dim,
-                              float blur_radius, bool rom_source,
-                              const DioramaBgValidSpanPlan *valid_spans) {
-  if (!skybox_texture || snes_height <= 0)
+static PresentationOutcome DrawDioramaSkybox(
+    ArRenderDevice *device, ArRenderTexture skybox_texture,
+    int obj_apron, int snes_width, int snes_height,
+    int out_w, int out_h, bool dim,
+    float blur_radius, bool rom_source,
+    const DioramaBgValidSpanPlan *valid_spans) {
+  if (!ArRenderTexture_IsValid(skybox_texture) || snes_height <= 0)
     return kPresentationOutcome_CoreFailure;
   PresentationOutcome outcome = kPresentationOutcome_Complete;
   /* [obj_apron, obj_apron+snes_width) -- the DISPLAYED span, which sits in the
@@ -1259,21 +1273,22 @@ static PresentationOutcome DrawDioramaSkybox(ArRenderDevice *device,
    * Plane+skybox — the intent is a subtle cue that this is background, not
    * a heavy tint. Lightened substantially; still a touch cool/blue like the
    * rest of the per-layer shade table. */
-  static const SDL_FColor kSkyboxDim = { 0.78f, 0.78f, 0.85f, 1.0f };
-  static const SDL_FColor kSkyboxFull = { 1.0f, 1.0f, 1.0f, 1.0f };
-  SDL_FColor tint = dim ? kSkyboxDim : kSkyboxFull;
-  int indices[6] = { 0, 1, 2, 0, 2, 3 };
+  static const ArRenderColorF kSkyboxDim = { 0.78f, 0.78f, 0.85f, 1.0f };
+  static const ArRenderColorF kSkyboxFull = { 1.0f, 1.0f, 1.0f, 1.0f };
+  ArRenderColorF tint = dim ? kSkyboxDim : kSkyboxFull;
+  const int32_t indices[6] = { 0, 1, 2, 0, 2, 3 };
   /* Captured skyboxes are opaque resolved surfaces. A ROM composite may carry
    * authored transparent gaps when a scoped fill is explicitly Off, so keep
    * its alpha meaningful; opaque default/colour fills render identically. */
-  SDL_BlendMode saved_blend = SDL_BLENDMODE_INVALID;
-  if (!SDL_GetTextureBlendMode(skybox_texture, &saved_blend))
-    return kPresentationOutcome_CoreFailure;
-  if (!SDL_SetTextureBlendMode(
-          skybox_texture,
-          rom_source ? SDL_BLENDMODE_BLEND : SDL_BLENDMODE_NONE)) {
-    (void)SDL_SetTextureBlendMode(skybox_texture, saved_blend);
-    return kPresentationOutcome_CoreFailure;
+  ArRenderDrawState draw_state = {
+    .flags = kArRenderDrawState_Blend,
+    .blend = rom_source
+        ? kArRenderBlendMode_Alpha : kArRenderBlendMode_Opaque,
+  };
+  if (rom_source) {
+    draw_state.flags |= kArRenderDrawState_Address;
+    draw_state.address_u = kArRenderTextureAddressMode_Wrap;
+    draw_state.address_v = kArRenderTextureAddressMode_Clamp;
   }
   const bool blur_requested = SkyboxBlurEnabled(device);
   bool blur_bound = false;
@@ -1292,10 +1307,8 @@ static PresentationOutcome DrawDioramaSkybox(ArRenderDevice *device,
     blur_bound = DioramaEffectBackend_BindBlur(device, &params);
     if (!blur_bound) {
       outcome = kPresentationOutcome_OptionalOmitted;
-      if (!DioramaEffectBackend_Unbind(device)) {
-        (void)SDL_SetTextureBlendMode(skybox_texture, saved_blend);
+      if (!DioramaEffectBackend_Unbind(device))
         return kPresentationOutcome_CoreFailure;
-      }
     }
   }
 
@@ -1351,21 +1364,19 @@ static PresentationOutcome DrawDioramaSkybox(ArRenderDevice *device,
     const float v1 = rom_source
         ? (float)y1 / (float)snes_height
         : (float)y1 / (float)SR_PPU_SURFACE_MAX_HEIGHT;
-    SDL_Vertex verts[4] = {
+    ArRenderVertex2D verts[4] = {
       { { 0.0f, draw_y0 },         tint, { u0, v0 } },
       { { (float)out_w, draw_y0 }, tint, { u1, v0 } },
       { { (float)out_w, draw_y1 }, tint, { u1, v1 } },
       { { 0.0f, draw_y1 },         tint, { u0, v1 } },
     };
-    if (!RenderDioramaGeometry(
-            renderer, skybox_texture, verts, 4, indices, 6))
+    if (!SubmitDioramaGeometry(
+            device, skybox_texture, verts, 4, indices, 6, &draw_state))
       outcome = kPresentationOutcome_CoreFailure;
   }
   const bool shader_restored =
       !blur_bound || DioramaEffectBackend_Unbind(device);
-  const bool blend_restored =
-      SDL_SetTextureBlendMode(skybox_texture, saved_blend);
-  if (!shader_restored || !blend_restored)
+  if (!shader_restored)
     return kPresentationOutcome_CoreFailure;
   return outcome;
 }
@@ -1374,8 +1385,8 @@ static PresentationOutcome DrawDioramaSkybox(ArRenderDevice *device,
  * the backdrop's and HUD's z_world exactly (kDioramaLayers' z=0.00/0.95,
  * minus the 0.5 offset every layer's z_world applies) so the box lines up
  * with the layer stack's own depth range. Flat-shaded and untextured —
- * SDL_RenderGeometry accepts a NULL texture for vertex-color-only rendering
- * (doc's "start flat"; no wall art yet). Built via BuildQuadMesh (GEO) —
+ * The render-device contract accepts an invalid texture for vertex-colour-only
+ * geometry (doc's "start flat"; no wall art yet). Built via BuildQuadMesh —
  * floor/ceiling/walls each vary a different world-axis pair, which
  * BuildLayerMesh's hardcoded-z formula can't do (see GEO's comment). Must
  * be called AFTER the skybox (if any) and BEFORE the per-layer loop —
@@ -1396,7 +1407,7 @@ static const int kAitosWaterfallSeamTolerancePixels = 2 * 8;
 static const float kShoeboxWallFadeRange = 0.15f;
 
 static PresentationOutcome DrawDioramaShoebox(
-    SDL_Renderer *renderer, const float mvp[16],
+    ArRenderDevice *device, const float mvp[16],
     float aspect_x, float height_scale, float tilt_y,
     int out_w, int out_h) {
   /* Live report (2026-07-21): opaque walls read as a plain gray box,
@@ -1406,7 +1417,7 @@ static PresentationOutcome DrawDioramaShoebox(
    * straight through instead of needing to texture the walls separately.
    * 0.35 then read as too faint to actually define an edge at low tilt —
    * split the difference. */
-  static const SDL_FColor kShoeboxColor = { 0.15f, 0.15f, 0.20f, 0.55f };
+  static const ArRenderColorF kShoeboxColor = { 0.15f, 0.15f, 0.20f, 0.55f };
   /* Live report (2026-07-21): a box sized to match the layer stack exactly
    * (hx = 0.5*aspect_x, y=[-0.5,0.5]) can rotate its own corners into view
    * at extreme tilt/pan, revealing void past ITS edges — the same class of
@@ -1436,18 +1447,9 @@ static PresentationOutcome DrawDioramaShoebox(
   float hx = 0.5f * aspect_x * kShoeboxOverscan;
   float half_y = 0.5f * height_scale * kShoeboxOverscan;
   float z_span = kShoeboxZFront - kShoeboxZBack;
-  SDL_Vertex verts[4];
-  int indices[6];
+  ArRenderVertex2D verts[4];
+  int32_t indices[6];
   int nv, ni;
-
-  SDL_BlendMode saved_blend = SDL_BLENDMODE_INVALID;
-  if (!SDL_GetRenderDrawBlendMode(renderer, &saved_blend))
-    return kPresentationOutcome_OptionalOmitted;
-  if (!SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)) {
-    return SDL_SetRenderDrawBlendMode(renderer, saved_blend)
-        ? kPresentationOutcome_OptionalOmitted
-        : kPresentationOutcome_CoreFailure;
-  }
   PresentationOutcome outcome = kPresentationOutcome_Complete;
 
   /* Floor (y=-0.5) and ceiling (y=+0.5): always drawn — yaw doesn't bring
@@ -1462,7 +1464,9 @@ static PresentationOutcome DrawDioramaShoebox(
                verts, indices, &nv, &ni);
   RecordOptionalDioramaDraw(
       &outcome,
-      RenderDioramaGeometry(renderer, NULL, verts, nv, indices, ni));
+      RenderDioramaGeometry(
+          device, ArRenderTexture_Invalid(), verts, nv, indices, ni,
+          kArRenderBlendMode_Alpha));
 
   BuildQuadMesh(mvp, -hx, half_y, kShoeboxZBack,
                2.0f * hx, 0.0f, 0.0f,
@@ -1471,10 +1475,13 @@ static PresentationOutcome DrawDioramaShoebox(
                verts, indices, &nv, &ni);
   RecordOptionalDioramaDraw(
       &outcome,
-      RenderDioramaGeometry(renderer, NULL, verts, nv, indices, ni));
+      RenderDioramaGeometry(
+          device, ArRenderTexture_Invalid(), verts, nv, indices, ni,
+          kArRenderBlendMode_Alpha));
 
-  /* Side walls (x=±hx): SDL_RenderGeometry has no depth test, so a wall on
-   * the camera's near side would occlude the view straight into the box —
+  /* Side walls (x=±hx): the baseline 2D geometry contract has no depth test,
+   * so a wall on the camera's near side would occlude the view straight into
+   * the box —
    * the doc's rule is to draw only the FAR wall, using tilt_y's sign (no
    * dot product needed for a simple box). FIRST-PASS SIGN GUESS, same as
    * B4-vellean's pitch lean: positive tilt_y is assumed to put the +X wall
@@ -1488,7 +1495,7 @@ static PresentationOutcome DrawDioramaShoebox(
   float alpha_neg_x = 0.5f + 0.5f * t;  /* fades in as the -X wall goes far */
 
   if (alpha_neg_x > 0.01f) {
-    SDL_FColor c = kShoeboxColor;
+    ArRenderColorF c = kShoeboxColor;
     c.a *= alpha_neg_x;
     BuildQuadMesh(mvp, -hx, -half_y, kShoeboxZBack,
                  0.0f, 0.0f, z_span,
@@ -1497,10 +1504,12 @@ static PresentationOutcome DrawDioramaShoebox(
                  verts, indices, &nv, &ni);
     RecordOptionalDioramaDraw(
         &outcome,
-        RenderDioramaGeometry(renderer, NULL, verts, nv, indices, ni));
+        RenderDioramaGeometry(
+            device, ArRenderTexture_Invalid(), verts, nv, indices, ni,
+            kArRenderBlendMode_Alpha));
   }
   if (alpha_pos_x > 0.01f) {
-    SDL_FColor c = kShoeboxColor;
+    ArRenderColorF c = kShoeboxColor;
     c.a *= alpha_pos_x;
     BuildQuadMesh(mvp, hx, -half_y, kShoeboxZBack,
                  0.0f, 0.0f, z_span,
@@ -1509,10 +1518,10 @@ static PresentationOutcome DrawDioramaShoebox(
                  verts, indices, &nv, &ni);
     RecordOptionalDioramaDraw(
         &outcome,
-        RenderDioramaGeometry(renderer, NULL, verts, nv, indices, ni));
+        RenderDioramaGeometry(
+            device, ArRenderTexture_Invalid(), verts, nv, indices, ni,
+            kArRenderBlendMode_Alpha));
   }
-  if (!SDL_SetRenderDrawBlendMode(renderer, saved_blend))
-    return kPresentationOutcome_CoreFailure;
   return outcome;
 }
 
@@ -1698,10 +1707,10 @@ PresentationOutcome Diorama_Composite(
     output_viewport.x, output_viewport.y,
     output_viewport.w, output_viewport.h,
   };
-  SDL_Texture *textures[kDioramaPlane_Count];
+  ArRenderTexture textures[kDioramaPlane_Count];
   for (int plane = 0; plane < kDioramaPlane_Count; plane++)
-    textures[plane] = ArSdlRenderBackend_UnwrapTexture(
-        texture_handles ? texture_handles[plane] : ArRenderTexture_Invalid());
+    textures[plane] = texture_handles
+        ? texture_handles[plane] : ArRenderTexture_Invalid();
   if (out_projection) memset(out_projection, 0, sizeof(*out_projection));
   if (!renderer || !cam_pose || authentic_y0 < 0 ||
       authentic_y0 + kActRaiserAuthenticHeight > snes_height)
@@ -1786,7 +1795,7 @@ PresentationOutcome Diorama_Composite(
   static const float kSkyboxBlurRadiusBoth = 3.0f;
   if (g_settings.diorama_skybox != kDioramaSky_Off) {
     bool both = g_settings.diorama_skybox == kDioramaSky_Both;
-    SDL_Texture *skybox_texture = textures[SR_PPU_OVERLAY_BG2];
+    ArRenderTexture skybox_texture = textures[SR_PPU_OVERLAY_BG2];
     bool rom_skybox = false;
     const int skybox_source =
         DioramaLayerOrder_SkyboxSource(resolved, resolved_count);
@@ -1816,7 +1825,7 @@ PresentationOutcome Diorama_Composite(
         return DioramaCompositeCoreFailure(renderer, viewport_is_output);
       }
       if (ArRenderTexture_IsValid(named_handle)) {
-        skybox_texture = ArSdlRenderBackend_UnwrapTexture(named_handle);
+        skybox_texture = named_handle;
         rom_skybox = true;
       }
     }
@@ -1824,23 +1833,13 @@ PresentationOutcome Diorama_Composite(
      * or upload failure falls back to captured BG2, retaining the established
      * current-frame guard so a stale live texture cannot leak into a scene. */
     if (rom_skybox || pixels[SR_PPU_OVERLAY_BG2]) {
-      if (rom_skybox &&
-          !SDL_SetRenderTextureAddressMode(
-              renderer, SDL_TEXTURE_ADDRESS_WRAP,
-              SDL_TEXTURE_ADDRESS_CLAMP)) {
-        return DioramaCompositeCoreFailure(renderer, viewport_is_output);
-      }
       const PresentationOutcome skybox = DrawDioramaSkybox(
-          device, renderer, skybox_texture,
+          device, skybox_texture,
           obj_apron, snes_width, snes_height, out_w, out_h, both,
           both ? kSkyboxBlurRadiusBoth : kSkyboxBlurRadiusOnly,
           rom_skybox, bg2_valid_spans);
-      const bool address_restored = !rom_skybox ||
-          SDL_SetRenderTextureAddressMode(
-              renderer, SDL_TEXTURE_ADDRESS_AUTO,
-              SDL_TEXTURE_ADDRESS_AUTO);
       outcome = PresentationOutcome_Combine(outcome, skybox);
-      if (!address_restored || !PresentationOutcome_IsUsable(skybox)) {
+      if (!PresentationOutcome_IsUsable(skybox)) {
         return DioramaCompositeCoreFailure(renderer, viewport_is_output);
       }
     }
@@ -1963,7 +1962,7 @@ PresentationOutcome Diorama_Composite(
    * algorithm, the box surrounds the stack. */
   if (g_settings.diorama_shoebox) {
     const PresentationOutcome shoebox = DrawDioramaShoebox(
-        renderer, mvp, aspect_x, height_scale, cam.tilt_y, out_w, out_h);
+        device, mvp, aspect_x, height_scale, cam.tilt_y, out_w, out_h);
     outcome = PresentationOutcome_Combine(outcome, shoebox);
     if (!PresentationOutcome_IsUsable(shoebox)) {
       return DioramaCompositeCoreFailure(renderer, viewport_is_output);
@@ -1973,8 +1972,8 @@ PresentationOutcome Diorama_Composite(
   float shade_mix =
       (float)g_settings.diorama_depth_shade / (float)kPercentScale;
 
-  SDL_Vertex verts[DIORAMA_VERTS_PER_LAYER];
-  int indices[DIORAMA_INDICES_PER_LAYER];
+  ArRenderVertex2D verts[DIORAMA_VERTS_PER_LAYER];
+  int32_t indices[DIORAMA_INDICES_PER_LAYER];
   int nv, ni;
 
   /* Publish the exact authored shape/window of the effect-addressable BG
@@ -2075,7 +2074,7 @@ PresentationOutcome Diorama_Composite(
      * BG2's in-box copy is the main visual and backdrop still backstops any
      * gaps the way it always has. */
     bool is_backdrop = (layer->plane == kDioramaPlane_Backdrop);
-    SDL_Texture *texture = textures[layer->plane];
+    const ArRenderTexture texture = textures[layer->plane];
     if (!DioramaLayerIsDrawable(layer, textures, pixels)) {
       /* An isolated BG band can legitimately have no winning pixels at a
        * particular scroll position while an environmental effect remains
@@ -2095,7 +2094,7 @@ PresentationOutcome Diorama_Composite(
       continue;
     }
 
-    SDL_FColor shade = {
+    ArRenderColorF shade = {
       1.0f + (layer->shade.r - 1.0f) * shade_mix,
       1.0f + (layer->shade.g - 1.0f) * shade_mix,
       1.0f + (layer->shade.b - 1.0f) * shade_mix,
@@ -2120,8 +2119,8 @@ PresentationOutcome Diorama_Composite(
      * both are appended into this one ordered geometry submission below.
      * Extension primitives remain first so the authentic BG2 owns the hidden
      * coplanar overlap without relying on a second draw call. */
-    SDL_Vertex extension_verts[DIORAMA_ATTACHED_VERTS];
-    int extension_indices[DIORAMA_ATTACHED_INDICES];
+    ArRenderVertex2D extension_verts[DIORAMA_ATTACHED_VERTS];
+    int32_t extension_indices[DIORAMA_ATTACHED_INDICES];
     int extension_nv = 0, extension_ni = 0;
 
     /* The validated `$04/$02-$03:waterfall` token is published only when the
@@ -2280,8 +2279,8 @@ PresentationOutcome Diorama_Composite(
      * visual gain), and not the backdrop plane. */
     if (layer_stack > 0.0f && layer_stack_copies > 1 && !is_backdrop) {
       int stack_nv = 0, stack_ni = 0;
-      SDL_Vertex stack_verts[DIORAMA_VERTS_PER_LAYER];
-      int stack_indices[DIORAMA_INDICES_PER_LAYER];
+      ArRenderVertex2D stack_verts[DIORAMA_VERTS_PER_LAYER];
+      int32_t stack_indices[DIORAMA_INDICES_PER_LAYER];
       for (int c = layer_stack_copies - 1; c >= 0; c--) {
         /* Skip whichever copy coincides with the plane's own depth -- index 0 for
          * a one-sided fill, the middle one for an odd-count centred fill. The
@@ -2292,7 +2291,7 @@ PresentationOutcome Diorama_Composite(
         DioramaStackCopyShaped(c, layer_stack_copies, z_world, layer_stack,
                                layer_stack_dir, layer_stack_solid, &copy_z,
                                &copy_shade, &copy_alpha);
-        SDL_FColor copy_color = shade;
+        ArRenderColorF copy_color = shade;
         copy_color.r *= copy_shade;
         copy_color.g *= copy_shade;
         copy_color.b *= copy_shade;
@@ -2304,20 +2303,20 @@ PresentationOutcome Diorama_Composite(
                        out_w, out_h, copy_color,
                        stack_verts, stack_indices, &stack_nv, &stack_ni);
         if (stack_nv > 0) {
-          const bool configured = SDL_SetTextureBlendMode(
-              texture, is_additive ? SDL_BLENDMODE_ADD : SDL_BLENDMODE_BLEND);
           RecordOptionalDioramaDraw(
               &outcome,
-              configured && RenderDioramaGeometry(
-                  renderer, texture, stack_verts, stack_nv,
-                  stack_indices, stack_ni));
+              RenderDioramaGeometry(
+                  device, texture, stack_verts, stack_nv,
+                  stack_indices, stack_ni,
+                  is_additive ? kArRenderBlendMode_Add
+                              : kArRenderBlendMode_Alpha));
         }
       }
     }
 
     /* THICKNESS: the extruded near face, drawn BEFORE the plane itself.
      *
-     * Order matters and is not arbitrary. SDL_RenderGeometry has no depth test
+     * Order matters and is not arbitrary. Baseline geometry has no depth test
      * (see the shoebox comment), so this is painter's algorithm: drawing the
      * skirt first lets the plane's own bottom edge land on top of it, which
      * keeps the fold crisp. Drawn the other way the skirt's top row would
@@ -2336,20 +2335,20 @@ PresentationOutcome Diorama_Composite(
      * paint an opaque band across the scene. */
     if (layer_thickness > 0.0f && !is_backdrop) {
       int skirt_nv = 0, skirt_ni = 0;
-      SDL_Vertex skirt_verts[DIORAMA_VERTS_PER_LAYER];
-      int skirt_indices[DIORAMA_INDICES_PER_LAYER];
+      ArRenderVertex2D skirt_verts[DIORAMA_VERTS_PER_LAYER];
+      int32_t skirt_indices[DIORAMA_INDICES_PER_LAYER];
       BuildLayerSkirtMesh(mvp, z_world, layer_rake + layer_bow, layer_thickness,
                           layer_u0, layer_u1, layer_v1,
                           aspect_x, height_scale, out_w, out_h, shade,
                           skirt_verts, skirt_indices, &skirt_nv, &skirt_ni);
       if (skirt_nv > 0) {
-        const bool configured = SDL_SetTextureBlendMode(
-            texture, is_additive ? SDL_BLENDMODE_ADD : SDL_BLENDMODE_BLEND);
         RecordOptionalDioramaDraw(
             &outcome,
-            configured && RenderDioramaGeometry(
-                renderer, texture, skirt_verts, skirt_nv,
-                skirt_indices, skirt_ni));
+            RenderDioramaGeometry(
+                device, texture, skirt_verts, skirt_nv,
+                skirt_indices, skirt_ni,
+                is_additive ? kArRenderBlendMode_Add
+                            : kArRenderBlendMode_Alpha));
       }
     }
 
@@ -2368,14 +2367,11 @@ PresentationOutcome Diorama_Composite(
     bool dof_or_edge = !rim_light && (dof_radius > 0.0f || want_edge);
     bool use_shader = rim_light || dof_or_edge;
 
-    const SDL_BlendMode layer_blend = is_backdrop
-        ? SDL_BLENDMODE_NONE
-        : is_additive ? SDL_BLENDMODE_ADD : SDL_BLENDMODE_BLEND;
-    if (!SDL_SetTextureBlendMode(texture, layer_blend)) {
-      return DioramaCompositeCoreFailure(renderer, viewport_is_output);
-    }
+    const ArRenderBlendMode layer_blend = is_backdrop
+        ? kArRenderBlendMode_Opaque
+        : is_additive ? kArRenderBlendMode_Add : kArRenderBlendMode_Alpha;
 
-    SDL_Texture *draw_texture = texture;
+    ArRenderTexture draw_texture = texture;
     bool used_ss = false;
     if (!use_shader) {
       PresentationOutcome supersample_outcome =
@@ -2392,13 +2388,8 @@ PresentationOutcome Diorama_Composite(
         return DioramaCompositeCoreFailure(renderer, viewport_is_output);
       }
       if (ArRenderTexture_IsValid(ss)) {
-        draw_texture = ArSdlRenderBackend_UnwrapTexture(ss);
+        draw_texture = ss;
         used_ss = true;
-      }
-    }
-    if (used_ss) {
-      if (!SDL_SetTextureBlendMode(draw_texture, layer_blend)) {
-        return DioramaCompositeCoreFailure(renderer, viewport_is_output);
       }
     }
 
@@ -2409,8 +2400,8 @@ PresentationOutcome Diorama_Composite(
      * to need no remap because the texture was exactly as tall as its content;
      * the vertical margin ended that. Stack/skirt draws above still use the
      * original source texture and therefore keep the original coordinates. */
-    SDL_Vertex ss_verts[DIORAMA_VERTS_PER_LAYER];
-    SDL_Vertex *draw_verts = verts;
+    ArRenderVertex2D ss_verts[DIORAMA_VERTS_PER_LAYER];
+    ArRenderVertex2D *draw_verts = verts;
     if (used_ss) {
       memcpy(ss_verts, verts, (size_t)nv * sizeof(ss_verts[0]));
       /* U is a scale AND an offset now: the supersample target holds the
@@ -2430,12 +2421,12 @@ PresentationOutcome Diorama_Composite(
 
     if (!is_backdrop && layer->casts_shadow) {
       float off = (float)out_h * 0.004f;
-      SDL_Vertex shadow[DIORAMA_VERTS_PER_LAYER];
+      ArRenderVertex2D shadow[DIORAMA_VERTS_PER_LAYER];
       memcpy(shadow, draw_verts, (size_t)nv * sizeof(shadow[0]));
       for (int v = 0; v < nv; v++) {
         shadow[v].position.x += off;
         shadow[v].position.y += off;
-        shadow[v].color = (SDL_FColor){ 0.0f, 0.0f, 0.0f, 0.35f };
+        shadow[v].color = (ArRenderColorF){ 0.0f, 0.0f, 0.0f, 0.35f };
       }
       /* M8/AR_GPU_FX_SHADOW: soften the hard silhouette shadow with a GPU
        * blur. Independently toggleable — bind only for this one draw call,
@@ -2463,7 +2454,7 @@ PresentationOutcome Diorama_Composite(
       RecordOptionalDioramaDraw(
           &outcome,
           RenderDioramaGeometry(
-              renderer, draw_texture, shadow, nv, indices, ni));
+              device, draw_texture, shadow, nv, indices, ni, layer_blend));
       if (shadow_blur_bound && !DioramaEffectBackend_Unbind(device)) {
         return DioramaCompositeCoreFailure(renderer, viewport_is_output);
       }
@@ -2527,11 +2518,11 @@ PresentationOutcome Diorama_Composite(
       extension_nv += nv;
       extension_ni += ni;
       main_submitted = RenderDioramaGeometry(
-          renderer, draw_texture, extension_verts,
-          extension_nv, extension_indices, extension_ni);
+          device, draw_texture, extension_verts,
+          extension_nv, extension_indices, extension_ni, layer_blend);
     } else {
       main_submitted = RenderDioramaGeometry(
-          renderer, draw_texture, draw_verts, nv, indices, ni);
+          device, draw_texture, draw_verts, nv, indices, ni, layer_blend);
     }
     if (layer_shader_bound && !DioramaEffectBackend_Unbind(device)) {
       return DioramaCompositeCoreFailure(renderer, viewport_is_output);

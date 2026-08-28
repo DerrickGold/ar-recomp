@@ -232,10 +232,13 @@ static bool ApplyTextureAddressState(
   if (!(state->flags & kArRenderDrawState_Address)) return true;
   if (!SDL_GetRenderTextureAddressMode(renderer, &saved->u, &saved->v))
     return false;
+  const SDL_TextureAddressMode desired_u =
+      ToSdlTextureAddressMode(state->address_u);
+  const SDL_TextureAddressMode desired_v =
+      ToSdlTextureAddressMode(state->address_v);
+  if (saved->u == desired_u && saved->v == desired_v) return true;
   saved->saved = true;
-  return SDL_SetRenderTextureAddressMode(
-      renderer, ToSdlTextureAddressMode(state->address_u),
-      ToSdlTextureAddressMode(state->address_v));
+  return SDL_SetRenderTextureAddressMode(renderer, desired_u, desired_v);
 }
 
 static bool RestoreTextureAddressState(
@@ -252,19 +255,24 @@ static bool ApplyTextureDrawState(SDL_Texture *texture,
             texture, &saved->tint_r, &saved->tint_g, &saved->tint_b) ||
         !SDL_GetTextureAlphaModFloat(texture, &saved->tint_a))
       return false;
-    saved->tint_saved = true;
+    if (saved->tint_r != state->tint.r ||
+        saved->tint_g != state->tint.g ||
+        saved->tint_b != state->tint.b ||
+        saved->tint_a != state->tint.a)
+      saved->tint_saved = true;
   }
   if (state->flags & kArRenderDrawState_Blend) {
     if (!SDL_GetTextureBlendMode(texture, &saved->blend)) return false;
-    saved->blend_saved = true;
+    if (saved->blend != ToSdlBlendMode(state->blend))
+      saved->blend_saved = true;
   }
 
-  if ((state->flags & kArRenderDrawState_Tint) &&
+  if (saved->tint_saved &&
       (!SDL_SetTextureColorModFloat(
           texture, state->tint.r, state->tint.g, state->tint.b) ||
        !SDL_SetTextureAlphaModFloat(texture, state->tint.a)))
     return false;
-  if ((state->flags & kArRenderDrawState_Blend) &&
+  if (saved->blend_saved &&
       !SDL_SetTextureBlendMode(texture, ToSdlBlendMode(state->blend)))
     return false;
   return true;
@@ -339,13 +347,15 @@ static bool DrawGeometry(void *context, ArRenderTexture texture,
     SDL_BlendMode saved_blend = SDL_BLENDMODE_INVALID;
     const bool saved = SDL_GetRenderDrawBlendMode(
         backend->renderer, &saved_blend);
-    const bool applied = saved && SDL_SetRenderDrawBlendMode(
-        backend->renderer, ToSdlBlendMode(state->blend));
+    const SDL_BlendMode desired = ToSdlBlendMode(state->blend);
+    const bool changed = saved && saved_blend != desired;
+    const bool applied = saved && (!changed || SDL_SetRenderDrawBlendMode(
+        backend->renderer, desired));
     const bool rendered = applied && SDL_RenderGeometry(
         backend->renderer, NULL, (const SDL_Vertex *)vertices,
         vertex_count, (const int *)indices, index_count);
-    const bool restored = saved && SDL_SetRenderDrawBlendMode(
-        backend->renderer, saved_blend);
+    const bool restored = saved && (!changed || SDL_SetRenderDrawBlendMode(
+        backend->renderer, saved_blend));
     return rendered && restored;
   }
 

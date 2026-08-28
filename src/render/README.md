@@ -72,8 +72,11 @@ rectangles, and opaque texture handles. The current frame-generation
 implementation lives in `src/platform/sdl/diorama_frame_generation_sdl.c`;
 its private endpoint and target textures are deliberately backend-owned.
 
-The diorama compositor implementation still uses the SDL bridge internally,
-but its blur, rim-light, and combined depth-of-field/edge-AA effects now cross
+The diorama compositor still uses SDL for top-level output sizing, logical
+presentation, and viewport ownership, but no longer unwraps its texture handles
+or submits native mesh types. Layer, skybox, shoebox, stack, skirt, shadow, and
+overflow geometry now use portable vertices plus scoped per-batch blend/address
+state. Its blur, rim-light, and combined depth-of-field/edge-AA effects cross
 an SDL-free semantic contract in `diorama/diorama_effect_backend.h`. Their
 shader formats, native state, binding, and lifetime live in
 `platform/sdl/diorama_effect_backend_sdl.c`. SIM shadow blur follows the same
@@ -98,8 +101,8 @@ enhancements and retain their established fallbacks.
 
 The remaining migration should proceed in independently testable slices:
 
-1. Move the remaining diorama compositor implementation and transient effect
-   resource ownership under `src/platform/<backend>` while retaining a
+1. Move the diorama compositor's remaining output-size, logical-presentation,
+   and viewport orchestration behind a platform contract while retaining a
    capability-gated baseline path.
 2. Port the top-level presentation viewport/output contract and host UI/manual
    draws, then remove native types from the complete presentation directory.
