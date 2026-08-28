@@ -245,6 +245,10 @@ static SrResult run_ppu_scanout(
     unsigned channel;
     if (ppu == NULL || dma == NULL || api == NULL)
         return SR_RESULT_UNAVAILABLE;
+    if (!PpuOutputSurfacesFitGeometry(
+            ppu, ppu->extraLeftRight,
+            ppu->extraTopCur, ppu->extraBottomCur))
+        return SR_RESULT_INVALID_ARGUMENT;
 
     snes->diagnosticScanoutObserved = true;
     _Static_assert(SR_DMA_CHANNEL_COUNT == kDmaChannelCount,

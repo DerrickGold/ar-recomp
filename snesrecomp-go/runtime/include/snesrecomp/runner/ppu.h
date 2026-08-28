@@ -431,9 +431,13 @@ typedef struct SrPpuOutputBindingRequest {
 
 typedef uint32_t SrPpuHorizontalMarginMode;
 enum {
-    /* The configured budget is immediately available on both sides. */
+    /* Make the configured budget immediately rasterizable on both sides. Use
+     * this when ordinary PPU scanout should draw into horizontal margins. */
     SR_PPU_HORIZONTAL_MARGIN_AVAILABLE = 0u,
-    /* Keep the budget reserved while starting at the native-width centre. */
+    /* Reserve a wide output allocation while keeping live rasterization at the
+     * native 256-pixel width in its centre. A wide bound surface will therefore
+     * still show a centred 256-pixel image until later policy makes side pixels
+     * available; this is intentional, not missing background streaming. */
     SR_PPU_HORIZONTAL_MARGIN_CENTERED = 1u
 };
 
@@ -459,8 +463,9 @@ typedef struct SrPpuHorizontalMarginRequest {
  * it preserves those resources. The runner retains no request or band
  * pointer. Later bands win when ordered ranges overlap, matching normal
  * raster-policy composition. Per-frame geometry does not change host surface
- * bindings; borrowed surface snapshots still expire at the normal runner tick
- * boundary. */
+ * bindings. A policy is rejected atomically if its complete reserved width or
+ * rendered height exceeds a bound main/authentic surface's retained capacity.
+ * Geometry changes expire borrowed surface snapshots. */
 #define SR_PPU_FRAME_POLICY_PAD_CAPTURED_TO_BUDGET UINT32_C(0x00000001)
 /* Finalize a policy after frame-scoped virtual providers have been published.
  * The budget must match the active begin transaction. Finalize preserves
@@ -485,6 +490,11 @@ typedef struct SrPpuFramePolicy {
     uint32_t margin_budget_pixels;
     uint32_t margin_left_pixels;
     uint32_t margin_right_pixels;
+    /* Exact rasterized rows, not a reservation budget. Nonzero values cause
+     * run_ppu_scanout to render signed rows above and below the native viewport
+     * with the live PPU state at those points in scanout. Ordinary VRAM-backed
+     * layers need no additional publication; forced blank, zero brightness,
+     * layer masks, finite extents, and optional virtual providers still apply. */
     uint32_t margin_top_pixels;
     uint32_t margin_bottom_pixels;
     uint32_t layer_clamp_mask;

@@ -328,6 +328,8 @@ static SrResult query_ppu_surfaces(
     Snes *snes = runner_from_handle(runner);
     Ppu *ppu;
     uint32_t rendered_height;
+    uint32_t main_height;
+    uint32_t authentic_height;
     unsigned source, band;
     if (snes == NULL || out_surfaces == NULL ||
         out_surfaces->struct_size < SR_PPU_SURFACE_SNAPSHOT_V2_SIZE)
@@ -341,14 +343,18 @@ static SrResult query_ppu_surfaces(
     if (ppu == NULL) return SR_RESULT_UNAVAILABLE;
     out_surfaces->binding_generation = ppu->surfaceBindingGeneration;
     rendered_height = (uint32_t)PpuRenderedHeight(ppu);
+    main_height = rendered_height < ppu->renderHeight
+        ? rendered_height : ppu->renderHeight;
+    authentic_height = rendered_height < ppu->authenticRenderHeight
+        ? rendered_height : ppu->authenticRenderHeight;
     ppu_surface_view_init(
         &out_surfaces->main, ppu->renderBuffer, ppu->renderPitch,
-        rendered_height,
+        main_height,
         PpuSurfaceApron(ppu, ppu->renderPitch) + ppu->extraLeftRight,
         PpuVerticalOrigin(ppu), 1u, true);
     ppu_surface_view_init(
         &out_surfaces->authentic, ppu->authenticRenderBuffer,
-        ppu->authenticRenderPitch, rendered_height,
+        ppu->authenticRenderPitch, authentic_height,
         PpuSurfaceApron(ppu, ppu->authenticRenderPitch) +
             ppu->extraLeftRight,
         PpuVerticalOrigin(ppu), 1u, true);
@@ -1139,10 +1145,12 @@ static SrResult bind_ppu_output_surface(
             if ((request->flags &
                  SR_PPU_OUTPUT_REFERENCE_PIXEL_RENDERER) != 0u)
                 render_flags |= kPpuRenderFlags_ReferencePixelRenderer;
+            if (!PpuBeginDrawingSized(
+                    ppu, request->pixels, (size_t)request->pitch_bytes,
+                    request->height_pixels, render_flags))
+                return SR_RESULT_INVALID_ARGUMENT;
             if (request->pixels != NULL)
                 snes->diagnosticMainSurfaceBound = true;
-            PpuBeginDrawing(ppu, request->pixels,
-                            (size_t)request->pitch_bytes, render_flags);
             return SR_RESULT_OK;
         }
         case SR_PPU_OUTPUT_AUTHENTIC:
@@ -1153,8 +1161,9 @@ static SrResult bind_ppu_output_surface(
                 request, SR_PPU_NATIVE_WIDTH, SR_PPU_SURFACE_MAX_WIDTH,
                 SR_PPU_SURFACE_MAX_HEIGHT);
             if (capacity_result != SR_RESULT_OK) return capacity_result;
-            return PpuBindAuthenticSurface(
-                       ppu, request->pixels, (size_t)request->pitch_bytes)
+            return PpuBindAuthenticSurfaceSized(
+                       ppu, request->pixels, (size_t)request->pitch_bytes,
+                       request->height_pixels)
                 ? SR_RESULT_OK : SR_RESULT_INVALID_ARGUMENT;
         case SR_PPU_OUTPUT_OVERLAY:
             if (request->flags != 0u ||
@@ -1234,6 +1243,10 @@ static SrResult configure_ppu_horizontal_margin(
         return SR_RESULT_STALE_VIEW;
     ppu = ppu_output_control_target(snes);
     if (ppu == NULL) return SR_RESULT_UNAVAILABLE;
+    if (!PpuOutputSurfacesFitGeometry(
+            ppu, request->budget_pixels,
+            ppu->extraTopCur, ppu->extraBottomCur))
+        return SR_RESULT_INVALID_ARGUMENT;
     old_budget = ppu->extraLeftRight;
     old_left = ppu->extraLeftCur;
     old_right = ppu->extraRightCur;
@@ -1257,6 +1270,7 @@ SrResult sr_runner_apply_ppu_frame_policy(
         Snes *snes, const SrPpuFramePolicy *policy) {
     Ppu *ppu;
     uint32_t index;
+    uint8_t old_budget, old_left, old_right, old_top, old_bottom;
     if (snes == NULL || policy == NULL ||
         policy->struct_size < SR_PPU_FRAME_POLICY_V2_SIZE ||
         (policy->flags &
@@ -1332,6 +1346,15 @@ SrResult sr_runner_apply_ppu_frame_policy(
              snes->abiLifetimeGeneration ||
          policy->margin_budget_pixels != ppu->extraLeftRight))
         return SR_RESULT_BUSY;
+    if (!PpuOutputSurfacesFitGeometry(
+            ppu, policy->margin_budget_pixels,
+            policy->margin_top_pixels, policy->margin_bottom_pixels))
+        return SR_RESULT_INVALID_ARGUMENT;
+    old_budget = ppu->extraLeftRight;
+    old_left = ppu->extraLeftCur;
+    old_right = ppu->extraRightCur;
+    old_top = ppu->extraTopCur;
+    old_bottom = ppu->extraBottomCur;
     if ((policy->flags & SR_PPU_FRAME_POLICY_FINALIZE) != 0u) {
         /* Centered mode encodes its exact sides as zero and BEGIN already
          * established that geometry. Only AVAILABLE mode has exact sides to
@@ -1386,6 +1409,10 @@ SrResult sr_runner_apply_ppu_frame_policy(
                 (int)policy->vertical_clip_top_rows[index],
                 (int)policy->vertical_clip_bottom_rows[index]);
     }
+    if (ppu->extraLeftRight != old_budget ||
+        ppu->extraLeftCur != old_left || ppu->extraRightCur != old_right ||
+        ppu->extraTopCur != old_top || ppu->extraBottomCur != old_bottom)
+        PpuNoteSurfaceViewChange(ppu);
     if ((policy->flags & SR_PPU_FRAME_POLICY_FINALIZE) != 0u) {
         snes->abiPpuFramePolicyActive = false;
     } else {

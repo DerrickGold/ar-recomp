@@ -321,8 +321,10 @@ struct Ppu {
     uint8_t overlayObjRelocatedFirst, overlayObjRelocatedCount;
     PpuObjRangeCapture objRangeCapture;
     uint32_t renderPitch;
+    uint32_t renderHeight;
     uint8_t *renderBuffer;
     uint32_t authenticRenderPitch;
+    uint32_t authenticRenderHeight;
     uint8_t *authenticRenderBuffer;
     uint16_t authenticHScroll[2][kPpuYPixels];
     int16_t authenticObjOffsetX;
@@ -486,9 +488,12 @@ uint8_t ppu_read(Ppu *, uint8_t);
 void ppu_write(Ppu *, uint8_t, uint8_t);
 void ppu_saveload(Ppu *, SaveLoadInfo *);
 void PpuBeginDrawing(Ppu *, uint8_t *, size_t, uint32_t);
+bool PpuBeginDrawingSized(Ppu *, uint8_t *, size_t, uint32_t, uint32_t);
 bool PpuBindAuthenticSurface(Ppu *, uint8_t *, size_t);
+bool PpuBindAuthenticSurfaceSized(Ppu *, uint8_t *, size_t, uint32_t);
 bool PpuAuthenticSurfaceBound(const Ppu *);
 bool PpuAuthenticSurfaceReady(const Ppu *);
+bool PpuOutputSurfacesFitGeometry(const Ppu *, uint32_t, uint32_t, uint32_t);
 enum { kPpuAuthenticCameraLayer_Bg1 = 1, kPpuAuthenticCameraLayer_Bg2 = 2,
        kPpuAuthenticCameraLayer_All = 3 };
 bool PpuSetAuthenticCameraFrame(Ppu *, uint8_t, const uint16_t *,
