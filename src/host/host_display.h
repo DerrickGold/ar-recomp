@@ -67,7 +67,7 @@ bool HostDisplay_TryRepresentFrame(float alpha,
                                    bool diorama_frame_active,
                                    bool interpolation_enabled,
                                    bool redraw_pending);
-/* Rolling completed SDL_RenderPresent calls per second. */
+/* Rolling completed backend presents per second. */
 double HostDisplay_FramesPerSecond(void);
 
 /* Enforce the render-loop invariant that every iteration presents or yields,

@@ -1106,8 +1106,6 @@ static void AppBoot_CreatePresentationTextures(void) {
    * entire lifetime — every current and future consumer is safe without
    * needing its own clamp/inset workaround. */
   CreateDioramaTextures();
-
-  SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255);
 }
 
 /* SDL init, window, renderer, and every presentation texture. The window/renderer
