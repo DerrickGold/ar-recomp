@@ -61,9 +61,12 @@ static void test_register_memory_ports(Ppu *ppu) {
     ppu_write(ppu, 0x04, 0x56);
     CHECK(ppu->oam[3] == 0x5678u);
 
+    ppu_latchCounters(ppu, 0x0123u, 0x0101u);
     CHECK(ppu_read(ppu, 0x37) == 0u);
-    CHECK(ppu_read(ppu, 0x3d) == 0xc0u);
-    CHECK(ppu_read(ppu, 0x3d) == 0u);
+    CHECK(ppu_read(ppu, 0x3c) == 0x23u);
+    CHECK(ppu_read(ppu, 0x3c) == 1u);
+    CHECK(ppu_read(ppu, 0x3d) == 1u);
+    CHECK(ppu_read(ppu, 0x3d) == 1u);
     CHECK((ppu_read(ppu, 0x3f) & 0x40u) != 0u);
     CHECK(!ppu->countersLatched);
 }

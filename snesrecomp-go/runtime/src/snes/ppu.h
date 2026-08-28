@@ -481,6 +481,7 @@ bool ppu_checkOverscan(Ppu *);
 void ppu_handleVblank(Ppu *);
 void ppu_runLine(Ppu *, int);
 void ppu_runMarginLine(Ppu *, int);
+void ppu_latchCounters(Ppu *, uint16_t h_count, uint16_t v_count);
 uint8_t ppu_read(Ppu *, uint8_t);
 void ppu_write(Ppu *, uint8_t, uint8_t);
 void ppu_saveload(Ppu *, SaveLoadInfo *);

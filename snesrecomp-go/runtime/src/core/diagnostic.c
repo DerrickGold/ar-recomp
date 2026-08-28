@@ -436,10 +436,3 @@ void sr_vram_trace_raw(uint16 address, uint8 value, int port) {
     fprintf(stderr, "[vramraw] frame=%d port=%02X address=%04X value=%02X\n",
             snes_frame_counter, port & 0xff, address, value);
 }
-
-int sr_vram_watch(uint16 address, uint8 value) {
-    if (getenv("SNESRECOMP_VRAM_WATCH") == NULL) return 0;
-    fprintf(stderr, "[vramwatch] frame=%d address=%04X value=%02X\n",
-            snes_frame_counter, address, value);
-    return 0;
-}

@@ -127,7 +127,7 @@ the specific entry you call.
 | `SR_RUNNER_CAP_PPU_OBJ_METADATA` | `SNES_RUNNER_API_PPU_OBJ_METADATA_SIZE` | `update_ppu_obj_metadata` | Synchronous game-owned unwrapped positions |
 | `SR_RUNNER_CAP_DMA_STATE` | `SNES_RUNNER_API_DMA_STATE_SIZE` | `query_dma_state` | Copied coherent DMA/HDMA snapshot |
 | `SR_RUNNER_CAP_PPU_BACKGROUND_POLICY` | `SNES_RUNNER_API_PPU_BACKGROUND_POLICY_SIZE` | `update_ppu_layer_extents`, `replace_ppu_virtual_tilemaps`, `update_ppu_authentic_camera` | Frame/game-owned providers; observe each request's copy/retain rules |
-| `SR_RUNNER_CAP_PPU_SCANOUT` | `SNES_RUNNER_API_PPU_SCANOUT_SIZE` | `run_ppu_scanout` | Runner owns scanlines, HDMA, IRQ timing, and margin hold |
+| `SR_RUNNER_CAP_PPU_SCANOUT` | `SNES_RUNNER_API_PPU_SCANOUT_SIZE` | `run_ppu_scanout` | Runner owns scanlines, `$420C`-armed HDMA, IRQ timing, and margin hold; request suppression can only narrow HDMA |
 | `SR_RUNNER_CAP_GAME_TIMING_CONTROL` | `SNES_RUNNER_API_GAME_TIMING_CONTROL_SIZE` | `control_game_timing` | Synchronous recompiled frame-slice pacing |
 | `SR_RUNNER_CAP_INPUT_STATE` | `SNES_RUNNER_API_INPUT_STATE_SIZE` | `query_input_state` | Copied controller state |
 | `SR_RUNNER_CAP_PPU_FRAME_POLICY` | `SNES_RUNNER_API_PPU_FRAME_POLICY_SIZE` | `apply_ppu_frame_policy` | BEGIN clears prior frame providers; FINALIZE preserves newly published ones |
@@ -152,7 +152,9 @@ the specific entry you call.
 4. Apply FINALIZE only when fallback policy depends on accepted providers.
 5. Claim captures/configure OBJ capture.
 6. Compose through `visit_ppu_frame_transaction`.
-7. `run_ppu_scanout`.
+7. `run_ppu_scanout`. Leave `hdma_suppress_mask` zero for normal hardware
+   behavior. Set bits only when an enhancement intentionally suppresses
+   channels already armed through `$420C`; the request cannot arm channels.
 
 ### Observe and replace audio
 

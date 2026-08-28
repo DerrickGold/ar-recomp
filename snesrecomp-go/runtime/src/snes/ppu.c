@@ -4333,6 +4333,15 @@ void ppu_handleVblank(Ppu *ppu) {
     ppu->frameInterlace = PPU_interlace(ppu);
 }
 
+void ppu_latchCounters(Ppu *ppu, uint16_t h_count, uint16_t v_count) {
+    if (ppu == NULL) return;
+    ppu->hCount = h_count;
+    ppu->vCount = v_count;
+    ppu->hCountSecond = false;
+    ppu->vCountSecond = false;
+    ppu->countersLatched = true;
+}
+
 uint8_t ppu_read(Ppu *ppu, uint8_t address) {
     uint8_t result = 0u;
     if (ppu == NULL) return 0u;
@@ -4342,9 +4351,10 @@ uint8_t ppu_read(Ppu *ppu, uint8_t address) {
             return (uint8_t)(product >> ((address - 0x34) * 8));
         }
         case 0x37:
-            ppu->hCount = 0u; ppu->vCount = 0xc0u;
-            ppu->hCountSecond = ppu->vCountSecond = false;
-            ppu->countersLatched = true; return 0u;
+            /* The owning Snes advances and supplies the live beam position.
+             * A direct PPU-only caller re-latches the most recent position. */
+            ppu_latchCounters(ppu, ppu->hCount, ppu->vCount);
+            return 0u;
         case 0x38:
             if (ppu->oamInHigh) {
                 result = ppu->highOam[((ppu->oamAdr & 15u) << 1) |

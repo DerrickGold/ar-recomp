@@ -572,7 +572,7 @@ int main(void) {
     };
     SrPpuScanoutRequest scanout_request = {
         .struct_size = sizeof(scanout_request),
-        .hdma_channel_mask = 0x0cu,
+        .hdma_suppress_mask = 0u,
         .line_callback = observe_test_ppu_scanout_line,
         .irq_callback = observe_test_ppu_scanout_irq,
         .user_data = &scanout_observer,
@@ -3228,6 +3228,7 @@ int main(void) {
     snes->dma->channel[3].mode = 0u;
     snes->dma->channel[3].indirect = true;
     snes->dma->channel[3].indBank = 0x7eu;
+    snes_writeReg(snes, 0x420cu, 0x0cu);
     snes->vIrqEnabled = true;
     snes->vTimer = 3u;
     scanout_observer.snes = snes;
@@ -3289,9 +3290,36 @@ int main(void) {
                         scanout_result.final_state.bg_mode_control == 0x09u &&
                         (scanout_result.final_state.flags &
                          SR_PPU_STATE_FORCED_BLANK) != 0u &&
-                        !snes->vIrqEnabled && !snes->inIrq,
+                        !snes->vIrqEnabled && !snes->inIrq &&
+                        snes->dma->channel[2].hdmaActive &&
+                        snes->dma->channel[3].hdmaActive,
                     "PPU scanout result mismatch");
     failed |= check_generation(api, runner, 12u, 2u, 1u, 1u, 8u);
+
+    /* Scanout policy can suppress hardware-armed channels, but cannot mutate
+     * $420C state or arm a channel the game left disabled. */
+    scanout_request.line_callback = NULL;
+    scanout_request.user_data = NULL;
+    scanout_request.hdma_suppress_mask = 0x04u;
+    snes_writeReg(snes, 0x420cu, 0x04u);
+    snes->ppu->inidisp = 0x80u;
+    scanout_result.struct_size = sizeof(scanout_result);
+    failed |= check(api->run_ppu_scanout(
+                        runner, &scanout_request, &scanout_result) ==
+                            SR_RESULT_OK &&
+                        snes->ppu->inidisp == 0x80u &&
+                        snes->dma->channel[2].hdmaActive &&
+                        !snes->dma->channel[3].hdmaActive,
+                    "HDMA suppression changed hardware-owned channel state");
+    scanout_request.hdma_suppress_mask = 0u;
+    snes_writeReg(snes, 0x420cu, 0u);
+    scanout_result.struct_size = sizeof(scanout_result);
+    failed |= check(api->run_ppu_scanout(
+                        runner, &scanout_request, &scanout_result) ==
+                            SR_RESULT_OK &&
+                        snes->ppu->inidisp == 0x80u &&
+                        !snes->dma->channel[2].hdmaActive,
+                    "zero scanout request armed a hardware-disabled channel");
 
     sr_runner_set_cpu_state_provider(snes, NULL, NULL, NULL);
     sr_runner_set_execution_state_provider(snes, NULL, NULL);

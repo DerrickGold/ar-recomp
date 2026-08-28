@@ -244,13 +244,30 @@ the "symptom if missing" column is the one worth reading first.
 | Frame loop | `RtlRunFrame`, watchdog, frame counter | `RtlGameExecutionApi.run_frame` | registration rejected |
 | Reset / main loop | generated `ResetHandler` | call it, and **service tail calls** (below) | reset unwinds silently; NMI keeps firing against a game that never started |
 | NMI / IRQ | `RtlGameFrameComplete` reports `NMI_ENTERED` | push an interrupt frame, call `NmiHandler`, restore | `RTI` over-pops and corrupts `P`, so M/X widths of interrupted code go wrong |
-| Rendering (when video is requested) | per-line render, HDMA, margins via `run_ppu_scanout` | `draw_ppu_frame` that drives it once per frame | **nothing is ever rasterized**; frames advance over a black canvas |
+| Rendering (when video is requested) | per-line render, `$420C`-owned HDMA, margins via `run_ppu_scanout` | `draw_ppu_frame` that drives it once per frame | **nothing is ever rasterized**; frames advance over a black canvas |
 | Canvas (when video is requested) | writes into a host buffer | `bind_ppu_output_surface`, `SR_PPU_OUTPUT_MAIN`, `scale` **must be 0** | PPU has nowhere to draw; black canvas |
 | Canvas format | colour in the low 24 bits, **top byte left zero** | present as `XRGB8888`, not `ARGB8888` | every pixel is alpha 0 and blends away to black |
 | Input | `SwapInputBits` on register reads | 12 bits per controller in `RtlRunFrame` (player 2 at bits 12-23) | every button dead or mapped to the wrong function |
 | APU lock | calls `RtlApuLock`/`RtlApuUnlock` | define both (see `game/required_symbols.h`) | link error naming an unfamiliar symbol |
 | Audio | SPC, DSP, mixing | `RtlGameAudioApi` only for upload/routing/extension | silence, with no diagnostic |
-| Waits on hardware | nothing | HLE every spin on `$4210`, `$4212`, `$213C/D`, APU ports, or an NMI-set flag | infinite loop: the spin consumes no emulated time, so the condition never changes |
+| Hardware polling | deterministic progress for modeled status/counter registers and APU catch-up | HLE only a documented, title-specific timing dependency the shared model cannot express | a genuinely unmodeled spin can still consume no emulated time and hang |
+
+Hardware register state has exactly one owner. A `$420C` write arms the runner's
+DMA channels and `run_ppu_scanout` consumes that state directly. The
+zero-initialized `SrPpuScanoutRequest` preserves normal hardware behavior;
+`hdma_suppress_mask` may disable selected channels for explicit enhancement
+policy, but can never enable one or mutate the saved `$420C` state. Do not keep
+a game-side HDMAEN shadow or echo a register value into the scanout request.
+Use `query_dma_state` when diagnostics need to observe the current mask.
+
+The recompiler does not provide a cycle-exact CPU clock, but generic polling is
+still runner responsibility. `$4212` and SLHV/OPHCT/OPVCT share one saveloaded,
+deterministic beam model. Status reads advance it in bounded master-cycle steps;
+an SLHV latch advances one synthetic scanline so a loop waiting for the beam to
+leave a range makes progress. This is a liveness and ordering contract, not a
+promise of dot-accurate timing. If a title depends on tighter timing, put that
+ROM-address policy in a narrowly scoped HLE and document the unsupported timing
+assumption rather than replacing the generic register globally.
 
 Intentional headless runs may omit `draw_ppu_frame` and never call
 `RtlGameDrawPpuFrame`. Once a host requests video, however, a missing callback
@@ -317,8 +334,10 @@ usually exactly one decodes as sane code, and the other contains a read-modify-
 write to an implausible address. Pin the verified call site with
 `force_variant_at BBPPPP M X`.
 
-Pinning fixes dispatch, not semantics. If the routine polls hardware, it still
-needs an `hle_func` -- a correct decode of a spin loop is still a spin loop.
+Pinning fixes dispatch, not semantics. A routine that depends on hardware timing
+beyond the runner's documented deterministic model may still need an
+`hle_func`; a modeled generic register should not be replaced merely because an
+older constant implementation made its polling loop hang.
 
 ## Frame presentation policy
 

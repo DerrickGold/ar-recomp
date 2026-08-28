@@ -163,9 +163,12 @@ Perform enhancement work on the emulation thread at the draw safe point:
    VRAM/CGRAM/OAM borrows, and writable surfaces are coherent and valid only
    for the callback. Use bounded services such as OBJ resolve/raster and
    compare/exchange rather than casting a component handle.
-8. Call `run_ppu_scanout`. The runner owns scanline progression, HDMA effects,
-   margin hold behavior, and vertical IRQ scheduling. The game callback owns
-   only the recompiled CPU's IRQ handler.
+8. Call `run_ppu_scanout`. The runner owns scanline progression, `$420C` state,
+   HDMA effects, margin hold behavior, and vertical IRQ scheduling. Leave
+   `hdma_suppress_mask` zero for authentic behavior. Enhancement code may set
+   bits to suppress hardware-armed channels, but cannot arm a channel or mutate
+   the register state. The game callback owns only the recompiled CPU's IRQ
+   handler.
 
 Every request must check the required capability bit, API extent, return value,
 and generation. A borrowed pointer is not a cache. Persistent game-side source
@@ -256,6 +259,9 @@ variants; and an unknown track ID that falls back safely.
   smeared, or contextually wrong margin tiles.
 - **Using one frame-wide register snapshot for an HDMA scene:** breaks rows
   whose scroll/window/color state changes during scanout.
+- **Mirroring `$420C` into a scanout request:** duplicates hardware state in the
+  game layer and can drift across reset/load. The runner already owns it; use a
+  zero suppress mask and `query_dma_state` for diagnostics.
 - **Retaining transaction borrows:** becomes invalid after callback return or a
   generation-changing mutation.
 - **Publishing a provider before frame-policy BEGIN:** BEGIN intentionally

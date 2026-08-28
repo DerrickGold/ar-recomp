@@ -40,13 +40,24 @@ void sr_trace_reg(uint16_t a, uint8_t v) { (void)a; (void)v; }
 void sr_trace_vmadd(uint16_t a) { (void)a; }
 void sr_trace_vram(uint16_t a, uint16_t v) { (void)a; (void)v; }
 void sr_vram_trace_raw(uint16_t a, uint8_t v, int p) { (void)a; (void)v; (void)p; }
-int sr_vram_watch(uint16_t a, uint8_t v) { (void)a; (void)v; return 0; }
 void CpuDispatchLogWriteFile(const char *path) { (void)path; }
 unsigned g_sr_block_index;
 uint32_t g_sr_block_ring[256];
 const char *g_last_recomp_func;
 uint8_t g_ram[0x20000];
 int snes_frame_counter;
+
+void snes_setBeamPosition(
+    Snes *snes, uint16_t h_master_cycles, uint16_t v_line) {
+  if (!snes) return;
+  snes->hPos = h_master_cycles;
+  snes->vPos = v_line;
+  snes->inVblank = v_line >= 225u;
+}
+
+void snes_beginVblank(Snes *snes) {
+  snes_setBeamPosition(snes, 0u, 225u);
+}
 
 uint16_t SwapInputBits(uint16_t value) {
   value = (uint16_t)(((value & 0x5555u) << 1) |

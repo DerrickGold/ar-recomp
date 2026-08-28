@@ -49,7 +49,6 @@ int g_sram_size;
 const uint8 *g_rom;
 Ppu *g_ppu;
 Dma *g_dma;
-uint8 g_snesrecomp_last_hdmaen;
 
 uint64_t g_main_cpu_cycles_estimate;
 uint64_t g_apu_pace_cycles_estimate;
@@ -422,7 +421,6 @@ void WriteReg(uint16 reg, uint8 value) {
     } else if (reg >= 0x2180u && reg < 0x2184u) {
         snes_writeBBus(g_snes, (uint8)reg, value);
     } else if (reg >= 0x4200u && reg < 0x4220u) {
-        if (reg == 0x420cu) g_snesrecomp_last_hdmaen = value;
         recomp_write_internal_reg(reg, value);
     } else if (reg >= 0x4300u && reg < 0x4380u) {
         dma_write(g_dma, reg, value);
@@ -438,6 +436,7 @@ uint8 ReadReg(uint16 reg) {
         return value;
     }
     if (reg >= 0x2100u && reg < 0x2140u) {
+        if (reg == 0x2137u) snes_latchPpuCounters(g_snes);
         uint8 value = ppu_read(g_ppu, (uint8)reg);
         observe_register_access(false, reg, value);
         return value;

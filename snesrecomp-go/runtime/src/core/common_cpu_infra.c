@@ -485,6 +485,7 @@ bool RtlGameDrawPpuFrame(void) {
 
 int RtlGameFrameBegin(void) {
     if (g_snes == NULL) return -1;
+    snes_beginVblank(g_snes);
     g_snes->forceNmi = true;
     g_snes->nmiAvail = true;
     return 0;

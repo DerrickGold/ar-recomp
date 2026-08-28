@@ -137,8 +137,6 @@ int main(void) {
     test_xtrace_and_warnings();
     test_stack_trace_window();
     check(!sr_stack_trace_active(), "stack trace disabled by default");
-    check(sr_vram_watch(0x1234u, 0x56u) == 0,
-          "VRAM watcher disabled by default");
     if (failures != 0) return 1;
     puts("runtime diagnostic: PASS");
     return 0;

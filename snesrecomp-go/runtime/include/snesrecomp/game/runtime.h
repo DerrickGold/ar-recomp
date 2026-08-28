@@ -17,7 +17,6 @@ extern uint8 g_ram[kSnesWramSize];
 extern uint8 *g_sram;
 extern int g_sram_size;
 extern const uint8 *g_rom;
-extern uint8 g_snesrecomp_last_hdmaen;
 extern int snes_frame_counter;
 
 extern uint64_t g_main_cpu_cycles_estimate;
