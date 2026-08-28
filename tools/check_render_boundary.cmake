@@ -12,7 +12,13 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/hd_replacement_host.h"
     "${GAME_SOURCE_ROOT}/hd_replacements.h"
     "${GAME_SOURCE_ROOT}/diorama/diorama_upload.c"
-    "${GAME_SOURCE_ROOT}/diorama/diorama_upload.h")
+    "${GAME_SOURCE_ROOT}/diorama/diorama_upload.h"
+    # Action effect construction is game-side geometry generation. Keep its
+    # public contract and pure batch builder portable even while the diorama
+    # projection adapter still calls the native compositor implementation.
+    "${GAME_SOURCE_ROOT}/action/action_effect_render.c"
+    "${GAME_SOURCE_ROOT}/action/action_effect_render.h"
+    "${GAME_SOURCE_ROOT}/action/action_effect_projection.h")
 
 set(_violations "")
 foreach(_file IN LISTS _portable_render_files)

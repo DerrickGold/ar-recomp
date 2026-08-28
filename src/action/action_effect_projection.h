@@ -2,10 +2,11 @@
 #define ACTION_EFFECT_PROJECTION_H
 
 #include <stdint.h>
-#include <SDL3/SDL.h>
 
 #include "action_effects.h"
-#include "diorama/diorama.h"
+#include "render/render_types.h"
+
+typedef struct DioramaProjection DioramaProjection;
 
 /* Immutable presentation inputs needed to map an action-world effect point.
  * Keeping this smaller than FrameSlot makes the camera/widescreen/Diorama
@@ -19,7 +20,7 @@ typedef struct ActionEffectProjectionContext {
   int visible_x0;
   int visible_width;
   int snes_height;
-  SDL_Rect viewport;
+  ArRenderRectI viewport;
   const DioramaProjection *diorama_projection;
 } ActionEffectProjectionContext;
 
@@ -45,6 +46,6 @@ uint32_t ActionEffectProjection_RequiredBgPlaneMask(
  * owned by DioramaProjection. */
 bool ActionEffectProjection_ProjectPoint(
     void *userdata, const ActionEffectInstance *effect,
-    float local_x, float local_y, SDL_FPoint *point);
+    float local_x, float local_y, ArRenderPointF *point);
 
 #endif  /* ACTION_EFFECT_PROJECTION_H */

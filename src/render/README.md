@@ -55,11 +55,14 @@ through the device, as do the standard projected SIM ground mesh, ordinary
 object billboards, half-add billboards, promoted map-plane geometry, clip
 state, solid backdrops, additive lightning flashes, and shared SIM/action
 effect batches. SIM effects now generate portable vertices directly; action
-effects retain layout-compatible SDL vertex storage behind one temporary cast
-at their submission seam. The custom two-pass rim-light blend still uses the
-SDL bridge because the portable blend vocabulary cannot describe its
-source/destination factors yet. SIM underlay/terrain geometry and the diorama
-compositor also still unwrap opaque resources through
+effects and their public projection contract now generate portable vertices
+directly as well. The action-to-diorama projection implementation performs one
+point conversion at the still-native compositor boundary, and the private heat
+target retains one layout-compatible cast until render-target effects migrate.
+The custom two-pass rim-light blend still uses the SDL bridge because the
+portable blend vocabulary cannot describe its source/destination factors yet.
+SIM underlay/terrain geometry and the diorama compositor also still unwrap
+opaque resources through
 `src/platform/sdl/render_sdl.h` while those paths migrate. Diorama frame
 generation retains private SDL endpoint/target textures. The bridge is a
 transition aid, not part of the portable contract. New renderer-facing code

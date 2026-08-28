@@ -26,8 +26,8 @@
 typedef struct ActionEffectGlowStyle {
   float radius_x, radius_y;
   float ring_scale[kActionEffectGlowRings];  /* fraction of the outer radius */
-  SDL_FColor centre;
-  SDL_FColor ring[kActionEffectGlowRings];
+  ArRenderColorF centre;
+  ArRenderColorF ring[kActionEffectGlowRings];
   float flare;   /* outer-ring silhouette amplitude, fraction of radius */
   float rise;    /* aura offset along (lift_x,lift_y), fraction of radius */
   /* Unit vector for the ellipse's local +X. (1,0) leaves the body screen-
@@ -136,8 +136,8 @@ static float HashUnit(uint32_t value) {
  * the public batch only after the complete build succeeds, so any overflow
  * leaves a zero-count, fail-closed output. */
 typedef struct ActionEffectGeometryWriter {
-  SDL_Vertex *vertices;
-  int *indices;
+  ArRenderVertex2D *vertices;
+  int32_t *indices;
   int vertex_count;
   int index_count;
   int vertex_capacity;
@@ -145,8 +145,8 @@ typedef struct ActionEffectGeometryWriter {
 } ActionEffectGeometryWriter;
 
 static ActionEffectGeometryWriter GeometryWriter(
-    SDL_Vertex *vertices, int vertex_capacity,
-    int *indices, int index_capacity) {
+    ArRenderVertex2D *vertices, int vertex_capacity,
+    int32_t *indices, int index_capacity) {
   return (ActionEffectGeometryWriter) {
     .vertices = vertices,
     .indices = indices,
@@ -225,8 +225,8 @@ static float FlameSilhouette(unsigned seed, unsigned ticks, int segment) {
       0.17f * kCircle32[i3][0];
 }
 
-static SDL_FColor MixColor(SDL_FColor a, SDL_FColor b, float t) {
-  return (SDL_FColor){
+static ArRenderColorF MixColor(ArRenderColorF a, ArRenderColorF b, float t) {
+  return (ArRenderColorF){
     a.r + (b.r - a.r) * t,
     a.g + (b.g - a.g) * t,
     a.b + (b.b - a.b) * t,
@@ -238,7 +238,7 @@ static SDL_FColor MixColor(SDL_FColor a, SDL_FColor b, float t) {
  * A real flame is not one hue faded out: it runs white-gold where it is
  * hottest, through orange, to a deep ember red at the cool edge. Ramping HUE
  * outward rather than only alpha is most of what separates "a glow" from "a
- * fire" — under SDL_BLENDMODE_ADD the stack then genuinely bleaches toward
+ * fire" — under additive blending the stack then genuinely bleaches toward
  * white at the centre instead of merely getting more orange.
  *
  * Alphas are the tuning surface. The burst body and the part cores overlap by
@@ -313,9 +313,9 @@ static bool ActorHeading(const ActionEffectInstance *effect,
  * pale holy white-cyan) and have never been seen in motion. They are a
  * starting point to react to, not a finished look. */
 typedef struct SpellVisual {
-  SDL_FColor spill[1 + kActionEffectGlowRings];  /* centre, then rings */
-  SDL_FColor body[1 + kActionEffectGlowRings];
-  SDL_FColor ember_hot, ember_cool;
+  ArRenderColorF spill[1 + kActionEffectGlowRings];  /* centre, then rings */
+  ArRenderColorF body[1 + kActionEffectGlowRings];
+  ArRenderColorF ember_hot, ember_cool;
   float spill_scale_x, spill_scale_y;   /* multiples of the burst half-extent */
   float body_scale_x, body_scale_y;     /* multiples of the cluster extent */
   float flare, rise;
@@ -325,10 +325,10 @@ typedef struct SpellVisual {
 /* Tier 1 — light spill. Wide, dim, deep red: the fire's effect on the air
  * around it rather than the fire itself. Kept low because it covers the most
  * pixels and is the first thing to muddy the frame if overdone. */
-static const SDL_FColor kSpillCentre = { 1.00f, 0.45f, 0.14f, 0.13f };
-static const SDL_FColor kSpillInner  = { 1.00f, 0.30f, 0.06f, 0.10f };
-static const SDL_FColor kSpillBody   = { 0.90f, 0.15f, 0.01f, 0.05f };
-static const SDL_FColor kSpillAura   = { 0.60f, 0.04f, 0.00f, 0.00f };
+static const ArRenderColorF kSpillCentre = { 1.00f, 0.45f, 0.14f, 0.13f };
+static const ArRenderColorF kSpillInner  = { 1.00f, 0.30f, 0.06f, 0.10f };
+static const ArRenderColorF kSpillBody   = { 0.90f, 0.15f, 0.01f, 0.05f };
+static const ArRenderColorF kSpillAura   = { 0.60f, 0.04f, 0.00f, 0.00f };
 
 /* Tier 2 — the flame bodies, one per part. This is the fire proper, so it
  * carries the saturated orange and the strongest silhouette turbulence.
@@ -343,13 +343,13 @@ static const SDL_FColor kSpillAura   = { 0.60f, 0.04f, 0.00f, 0.00f };
  * space and read as a headlight between two lobes. Per-part cores instead
  * fuse vertically — the stacked pairs meet exactly at y 488 — giving one core
  * per wall, which is what the spell actually is. */
-static const SDL_FColor kFlameCentre = { 1.00f, 0.98f, 0.90f, 0.78f };
-static const SDL_FColor kFlameInner  = { 1.00f, 0.76f, 0.30f, 0.44f };
-static const SDL_FColor kFlameBody   = { 1.00f, 0.34f, 0.04f, 0.20f };
-static const SDL_FColor kFlameAura   = { 0.85f, 0.10f, 0.00f, 0.00f };
+static const ArRenderColorF kFlameCentre = { 1.00f, 0.98f, 0.90f, 0.78f };
+static const ArRenderColorF kFlameInner  = { 1.00f, 0.76f, 0.30f, 0.44f };
+static const ArRenderColorF kFlameBody   = { 1.00f, 0.34f, 0.04f, 0.20f };
+static const ArRenderColorF kFlameAura   = { 0.85f, 0.10f, 0.00f, 0.00f };
 
-static const SDL_FColor kEmberHot    = { 1.00f, 0.96f, 0.80f, 1.00f };
-static const SDL_FColor kEmberCool   = { 0.95f, 0.22f, 0.01f, 0.00f };
+static const ArRenderColorF kEmberHot    = { 1.00f, 0.96f, 0.80f, 1.00f };
+static const ArRenderColorF kEmberCool   = { 0.95f, 0.22f, 0.01f, 0.00f };
 
 static const SpellVisual kSpellVisuals[kActionEffect_KindCount] = {
   [kActionEffect_MagicalFire] = {
@@ -422,25 +422,25 @@ typedef struct PhaseModifier {
    * a stage that is materially a different substance (a star in flight is a
    * burning projectile, not the cold sparkle it detonates into) can restate
    * them without needing a whole second spell entry. */
-  const SDL_FColor *body;          /* 1 + kActionEffectGlowRings entries */
-  const SDL_FColor *ember_pair;    /* hot, then cool */
+  const ArRenderColorF *body;          /* 1 + kActionEffectGlowRings entries */
+  const ArRenderColorF *ember_pair;    /* hot, then cool */
 } PhaseModifier;
 
 /* Warm flame palette shared by any stage that should read as combustion
  * rather than as its spell's own element. */
-static const SDL_FColor kFlightBody[1 + kActionEffectGlowRings] = {
+static const ArRenderColorF kFlightBody[1 + kActionEffectGlowRings] = {
   { 1.00f, 0.96f, 0.82f, 0.76f },
   { 1.00f, 0.74f, 0.32f, 0.42f },
   { 1.00f, 0.38f, 0.06f, 0.18f },
   { 0.85f, 0.12f, 0.00f, 0.00f },
 };
-static const SDL_FColor kImpactBody[1 + kActionEffectGlowRings] = {
+static const ArRenderColorF kImpactBody[1 + kActionEffectGlowRings] = {
   { 1.00f, 0.98f, 0.90f, 0.70f },
   { 1.00f, 0.80f, 0.38f, 0.40f },
   { 1.00f, 0.40f, 0.07f, 0.17f },
   { 0.88f, 0.14f, 0.00f, 0.00f },
 };
-static const SDL_FColor kFlightEmbers[2] = {
+static const ArRenderColorF kFlightEmbers[2] = {
   { 1.00f, 0.90f, 0.62f, 0.95f },
   { 0.90f, 0.20f, 0.01f, 0.00f },
 };
@@ -527,9 +527,9 @@ static bool RectIsSane(const ActionEffectLocalRect *rect) {
 static bool ProjectWithScale(const ActionEffectInstance *effect,
                              ActionEffectProjectPointFn project_point,
                              void *userdata, float local_x, float local_y,
-                             SDL_FPoint *anchor,
+                             ArRenderPointF *anchor,
                              float *scale_x, float *scale_y) {
-  SDL_FPoint sample_x, sample_y;
+  ArRenderPointF sample_x, sample_y;
   if (!isfinite(local_x) || !isfinite(local_y) ||
       !project_point(userdata, effect, local_x, local_y, anchor) ||
       !project_point(userdata, effect, local_x + 1.0f, local_y, &sample_x) ||
@@ -554,7 +554,7 @@ static bool AppendGlow(ActionEffectGeometryWriter *writer,
     kSegments = kActionEffectGlowSegments,
     kRings = kActionEffectGlowRings,
   };
-  SDL_FPoint anchor;
+  ArRenderPointF anchor;
   float scale_x, scale_y;
   if (!ProjectWithScale(effect, project_point, userdata, local_x, local_y,
                         &anchor, &scale_x, &scale_y))
@@ -563,9 +563,9 @@ static bool AppendGlow(ActionEffectGeometryWriter *writer,
     return false;
 
   int centre = writer->vertex_count;
-  SDL_FColor centre_color = style->centre;
+  ArRenderColorF centre_color = style->centre;
   centre_color.a *= strength;
-  writer->vertices[writer->vertex_count++] = (SDL_Vertex){
+  writer->vertices[writer->vertex_count++] = (ArRenderVertex2D){
     anchor, centre_color, { 0.0f, 0.0f },
   };
 
@@ -575,7 +575,7 @@ static bool AppendGlow(ActionEffectGeometryWriter *writer,
   int ring_base[kRings];
   for (int r = 0; r < kRings; r++) {
     ring_base[r] = writer->vertex_count;
-    SDL_FColor color = style->ring[r];
+    ArRenderColorF color = style->ring[r];
     color.a *= strength;
     float scale = style->ring_scale[r];
     /* Only the outer rings writhe and lift. Perturbing the core would make
@@ -600,7 +600,7 @@ static bool AppendGlow(ActionEffectGeometryWriter *writer,
           EffectVisualTicks(effect, (unsigned)effect->pulse_ticks), s);
       float ux = kCircle32[s][0] * radius_x * scale * shape;
       float uy = kCircle32[s][1] * radius_y * scale * shape;
-      writer->vertices[writer->vertex_count++] = (SDL_Vertex){
+      writer->vertices[writer->vertex_count++] = (ArRenderVertex2D){
         { anchor.x + ux * ax - uy * ay + style->lift_x * lift,
           anchor.y + ux * ay + uy * ax + style->lift_y * lift },
         color, { 0.0f, 0.0f },
@@ -641,13 +641,13 @@ static bool AppendWaterfallMistCloud(
     ActionEffectGeometryWriter *writer,
     const ActionEffectInstance *effect,
     float local_x, float local_y, float local_radius_x, float local_radius_y,
-    SDL_FColor tint, float opacity, unsigned seed,
+    ArRenderColorF tint, float opacity, unsigned seed,
     ActionEffectProjectPointFn project_point, void *userdata) {
   enum {
     kSegments = kActionSceneEffectWaterfallMistCloudSegments,
     kRings = kActionEffectGlowRings,
   };
-  SDL_FPoint anchor;
+  ArRenderPointF anchor;
   float scale_x, scale_y;
   if (!ProjectWithScale(effect, project_point, userdata, local_x, local_y,
                         &anchor, &scale_x, &scale_y))
@@ -657,18 +657,18 @@ static bool AppendWaterfallMistCloud(
                kActionSceneEffectWaterfallMistCloudIndices))
     return false;
 
-  const SDL_FColor white = {1.0f, 1.0f, 1.0f, opacity};
-  SDL_FColor centre_color = MixColor(tint, white, 0.42f);
+  const ArRenderColorF white = {1.0f, 1.0f, 1.0f, opacity};
+  ArRenderColorF centre_color = MixColor(tint, white, 0.42f);
   centre_color.a = opacity;
   const int centre = writer->vertex_count;
-  writer->vertices[writer->vertex_count++] = (SDL_Vertex){
+  writer->vertices[writer->vertex_count++] = (ArRenderVertex2D){
     anchor, centre_color, {0.0f, 0.0f},
   };
 
   const float radius_x = fmaxf(4.0f, local_radius_x * scale_x);
   const float radius_y = fmaxf(3.0f, local_radius_y * scale_y);
   static const float kRingScale[kRings] = {0.24f, 0.70f, 1.0f};
-  SDL_FColor ring_color[kRings] = {
+  ArRenderColorF ring_color[kRings] = {
     MixColor(tint, white, 0.24f), tint, tint,
   };
   ring_color[0].a = opacity * 0.84f;
@@ -686,7 +686,7 @@ static bool AppendWaterfallMistCloud(
           segment * kActionEffectGlowSegments / kSegments;
       const float shape = 1.0f + wobble * FlameSilhouette(
           seed, ticks, silhouette_segment);
-      writer->vertices[writer->vertex_count++] = (SDL_Vertex){
+      writer->vertices[writer->vertex_count++] = (ArRenderVertex2D){
         {
           anchor.x + kMistCircle12[segment][0] * radius_x *
               kRingScale[ring] * shape,
@@ -735,7 +735,7 @@ static bool AppendWaterfallMistCloudVolume(
   static const float kTierRadiusY[kTiers] = {88.0f, 70.0f, 54.0f, 32.0f};
   static const float kTierOpacity[kTiers] = {0.090f, 0.115f, 0.135f, 0.205f};
   static const float kTierOffsetX[kTiers] = {0.0f, 28.0f, -20.0f, 12.0f};
-  static const SDL_FColor kTierTint[kTiers] = {
+  static const ArRenderColorF kTierTint[kTiers] = {
     {0.58f, 0.76f, 0.88f, 1.0f},
     {0.68f, 0.85f, 0.94f, 1.0f},
     {0.78f, 0.91f, 0.98f, 1.0f},
@@ -855,9 +855,9 @@ static bool AppendEmbers(ActionEffectGeometryWriter *writer,
     const PhaseModifier *flame_phase = ModifierFor(flame->phase);
     if (!flame_phase || flame_phase->embers <= 0.0f) continue;
     uint8_t mode = flame_phase->ember_mode;
-    SDL_FColor ember_hot = flame_phase->ember_pair ? flame_phase->ember_pair[0]
+    ArRenderColorF ember_hot = flame_phase->ember_pair ? flame_phase->ember_pair[0]
                                                    : visual->ember_hot;
-    SDL_FColor ember_cool = flame_phase->ember_pair ? flame_phase->ember_pair[1]
+    ArRenderColorF ember_cool = flame_phase->ember_pair ? flame_phase->ember_pair[1]
                                                     : visual->ember_cool;
     const ActionEffectLocalRect *part = &flame->rect;
     float span_x = part->x1 - part->x0;
@@ -924,7 +924,7 @@ static bool AppendEmbers(ActionEffectGeometryWriter *writer,
       EmberOffset(drift, fmaxf(0.0f, t - 0.12f), &prev_x, &prev_y);
     }
 
-    SDL_FPoint position, previous;
+    ArRenderPointF position, previous;
     float scale_x, scale_y;
     if (!ProjectWithScale(anchor, project_point, userdata, birth_x + ox,
                           birth_y + oy, &position, &scale_x, &scale_y) ||
@@ -955,7 +955,7 @@ static bool AppendEmbers(ActionEffectGeometryWriter *writer,
     float flicker = 0.65f + 0.35f * HashUnit(
         seed ^ (((unsigned)anchor->pulse_ticks / 2u + i) * 0x27D4EB2Du));
 
-    SDL_FColor color = MixColor(ember_hot, ember_cool, t);
+    ArRenderColorF color = MixColor(ember_hot, ember_cool, t);
     /* Fade in over the first few ticks of life. Without it an ember pops into
      * existence at full brightness inside the flame body, which reads as a
      * flicker artifact rather than as a spark being thrown. */
@@ -966,16 +966,16 @@ static bool AppendEmbers(ActionEffectGeometryWriter *writer,
     static const int kQuad[] = { 0, 1, 2, 0, 2, 3 };
     if (!Reserve(writer, 4, 6)) return false;
     int base = writer->vertex_count;
-    writer->vertices[writer->vertex_count++] = (SDL_Vertex){
+    writer->vertices[writer->vertex_count++] = (ArRenderVertex2D){
       { position.x + dir_x * reach, position.y + dir_y * reach },
       color, { 0.0f, 0.0f } };
-    writer->vertices[writer->vertex_count++] = (SDL_Vertex){
+    writer->vertices[writer->vertex_count++] = (ArRenderVertex2D){
       { position.x - dir_y * width, position.y + dir_x * width },
       color, { 0.0f, 0.0f } };
-    writer->vertices[writer->vertex_count++] = (SDL_Vertex){
+    writer->vertices[writer->vertex_count++] = (ArRenderVertex2D){
       { position.x - dir_x * reach, position.y - dir_y * reach },
       color, { 0.0f, 0.0f } };
-    writer->vertices[writer->vertex_count++] = (SDL_Vertex){
+    writer->vertices[writer->vertex_count++] = (ArRenderVertex2D){
       { position.x + dir_y * width, position.y - dir_x * width },
       color, { 0.0f, 0.0f } };
     for (int n = 0; n < 6; n++)
@@ -1139,7 +1139,7 @@ bool ActionEffectRender_Build(const ActionEffectFrame *frame,
       bool column = burst.flame[i].role == kActionEffectRole_Column;
       /* A stage may restate the spell's body colours (see PhaseModifier): a
        * star in flight burns, the burst it becomes does not. */
-      const SDL_FColor *body_palette =
+      const ArRenderColorF *body_palette =
           part_phase->body ? part_phase->body : visual->body;
       /* Orientation. Screen-aligned by default; a stage that travels turns
        * its body to its own heading so the glow agrees with art that is
@@ -1361,10 +1361,10 @@ static bool AppendSceneParticle(ActionEffectGeometryWriter *writer,
                                 const ActionEffectInstance *effect,
                                 float x, float y, float previous_x,
                                 float previous_y, float width, float reach,
-                                SDL_FColor color,
+                                ArRenderColorF color,
                                 ActionEffectProjectPointFn project_point,
                                 void *userdata) {
-  SDL_FPoint position, previous;
+  ArRenderPointF position, previous;
   float scale_x, scale_y;
   if (!ProjectWithScale(effect, project_point, userdata, x, y, &position,
                         &scale_x, &scale_y) ||
@@ -1385,13 +1385,13 @@ static bool AppendSceneParticle(ActionEffectGeometryWriter *writer,
   reach *= output_scale;
   if (!Reserve(writer, 4, 6)) return false;
   const int base = writer->vertex_count;
-  writer->vertices[writer->vertex_count++] = (SDL_Vertex){
+  writer->vertices[writer->vertex_count++] = (ArRenderVertex2D){
     {position.x + dx * reach, position.y + dy * reach}, color, {0.0f, 0.0f}};
-  writer->vertices[writer->vertex_count++] = (SDL_Vertex){
+  writer->vertices[writer->vertex_count++] = (ArRenderVertex2D){
     {position.x - dy * width, position.y + dx * width}, color, {0.0f, 0.0f}};
-  writer->vertices[writer->vertex_count++] = (SDL_Vertex){
+  writer->vertices[writer->vertex_count++] = (ArRenderVertex2D){
     {position.x - dx * reach, position.y - dy * reach}, color, {0.0f, 0.0f}};
-  writer->vertices[writer->vertex_count++] = (SDL_Vertex){
+  writer->vertices[writer->vertex_count++] = (ArRenderVertex2D){
     {position.x + dy * width, position.y - dx * width}, color, {0.0f, 0.0f}};
   static const int kQuad[6] = {0, 1, 2, 0, 2, 3};
   for (int i = 0; i < 6; i++)
@@ -1407,9 +1407,9 @@ static bool AppendSceneParticle(ActionEffectGeometryWriter *writer,
  * mode instead of leaving it screen-axis-aligned. */
 static bool AppendSceneStarParticle(
     ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
-    float local_x, float local_y, float size, SDL_FColor color,
+    float local_x, float local_y, float size, ArRenderColorF color,
     ActionEffectProjectPointFn project_point, void *userdata) {
-  SDL_FPoint centre, sample_x, sample_y;
+  ArRenderPointF centre, sample_x, sample_y;
   if (!project_point(userdata, effect, local_x, local_y, &centre) ||
       !project_point(userdata, effect, local_x + 1.0f, local_y, &sample_x) ||
       !project_point(userdata, effect, local_x, local_y + 1.0f, &sample_y))
@@ -1428,7 +1428,7 @@ static bool AppendSceneStarParticle(
   const float thin_y = fmaxf(0.45f, size * 0.23f * y_length);
   if (!Reserve(writer, 8, 12)) return false;
   const int base = writer->vertex_count;
-  const SDL_FPoint points[] = {
+  const ArRenderPointF points[] = {
     {centre.x + xx * long_x, centre.y + xy * long_x},
     {centre.x + yx * thin_y, centre.y + yy * thin_y},
     {centre.x - xx * long_x, centre.y - xy * long_x},
@@ -1440,7 +1440,7 @@ static bool AppendSceneStarParticle(
   };
   for (unsigned i = 0; i < 8; i++)
     writer->vertices[writer->vertex_count++] =
-        (SDL_Vertex){points[i], color, {0.0f, 0.0f}};
+        (ArRenderVertex2D){points[i], color, {0.0f, 0.0f}};
   static const int kDiamonds[12] = {
     0, 1, 2, 0, 2, 3,
     4, 5, 6, 4, 6, 7,
@@ -1518,9 +1518,9 @@ static bool BossLightningPathSample(const ActionEffectInstance *effect,
 }
 
 static bool AppendProjectedRibbonSegments(
-    ActionEffectGeometryWriter *writer, const SDL_FPoint *points,
+    ActionEffectGeometryWriter *writer, const ArRenderPointF *points,
     const float *scales, unsigned joint_count, float half_width,
-    SDL_FColor color) {
+    ArRenderColorF color) {
   if (!writer || !points || !scales || joint_count < 2u) return true;
   const unsigned segment_count = joint_count - 1u;
   if (!Reserve(writer, (int)segment_count * 4, (int)segment_count * 6))
@@ -1539,19 +1539,19 @@ static bool AppendProjectedRibbonSegments(
     const float width0 = half_width * scales[i] * taper0;
     const float width1 = half_width * scales[i + 1] * taper1;
     const int base = writer->vertex_count;
-    writer->vertices[writer->vertex_count++] = (SDL_Vertex){
+    writer->vertices[writer->vertex_count++] = (ArRenderVertex2D){
       {points[i].x - dy * width0, points[i].y + dx * width0},
       color, {0.0f, 0.0f},
     };
-    writer->vertices[writer->vertex_count++] = (SDL_Vertex){
+    writer->vertices[writer->vertex_count++] = (ArRenderVertex2D){
       {points[i].x + dy * width0, points[i].y - dx * width0},
       color, {0.0f, 0.0f},
     };
-    writer->vertices[writer->vertex_count++] = (SDL_Vertex){
+    writer->vertices[writer->vertex_count++] = (ArRenderVertex2D){
       {points[i + 1].x + dy * width1, points[i + 1].y - dx * width1},
       color, {0.0f, 0.0f},
     };
-    writer->vertices[writer->vertex_count++] = (SDL_Vertex){
+    writer->vertices[writer->vertex_count++] = (ArRenderVertex2D){
       {points[i + 1].x - dy * width1, points[i + 1].y + dx * width1},
       color, {0.0f, 0.0f},
     };
@@ -1564,10 +1564,10 @@ static bool AppendProjectedRibbonSegments(
 
 static bool AppendBossLightningRibbonLayer(
     ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
-    float half_width, SDL_FColor color,
+    float half_width, ArRenderColorF color,
     ActionEffectProjectPointFn project_point, void *userdata) {
   enum { kJoints = kActionSceneEffectLightningSegments + 1 };
-  SDL_FPoint points[kJoints];
+  ArRenderPointF points[kJoints];
   float scales[kJoints];
   unsigned joint_count = 0;
   if (!BossLightningPathFor(effect, NULL, &joint_count)) return true;
@@ -1588,8 +1588,8 @@ static bool AppendBossLightningRibbon(
     ActionEffectProjectPointFn project_point, void *userdata) {
   if (effect->phase != kActionEffectPhase_BossLightningStrike) return true;
   const float pulse = DeterministicPulse(effect);
-  SDL_FColor corona = {1.00f, 0.54f, 0.04f, 0.17f * pulse};
-  SDL_FColor filament = {1.00f, 0.98f, 0.68f, 0.88f * pulse};
+  ArRenderColorF corona = {1.00f, 0.54f, 0.04f, 0.17f * pulse};
+  ArRenderColorF filament = {1.00f, 0.98f, 0.68f, 0.88f * pulse};
   return AppendBossLightningRibbonLayer(
              writer, effect, 4.8f, corona, project_point, userdata) &&
       AppendBossLightningRibbonLayer(
@@ -1598,10 +1598,10 @@ static bool AppendBossLightningRibbon(
 
 static bool AppendMarahnaLightningRibbonLayer(
     ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
-    float half_width, SDL_FColor color,
+    float half_width, ArRenderColorF color,
     ActionEffectProjectPointFn project_point, void *userdata) {
   enum { kJoints = kActionSceneEffectMarahnaLightningSegments + 1 };
-  SDL_FPoint points[kJoints];
+  ArRenderPointF points[kJoints];
   float scales[kJoints];
   const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
   const bool horizontal = rect->x1 - rect->x0 >= rect->y1 - rect->y0;
@@ -1642,8 +1642,8 @@ static bool AppendMarahnaLightningRibbon(
       effect->phase != kActionEffectPhase_MarahnaLightningActive)
     return true;
   const float pulse = DeterministicPulse(effect);
-  const SDL_FColor corona = {0.24f, 0.34f, 1.00f, 0.24f * pulse};
-  const SDL_FColor filament = {0.90f, 0.98f, 1.00f, 0.94f * pulse};
+  const ArRenderColorF corona = {0.24f, 0.34f, 1.00f, 0.24f * pulse};
+  const ArRenderColorF filament = {0.90f, 0.98f, 1.00f, 0.94f * pulse};
   return AppendMarahnaLightningRibbonLayer(
              writer, effect, 4.0f, corona, project_point, userdata) &&
       AppendMarahnaLightningRibbonLayer(
@@ -1663,10 +1663,10 @@ static void MarahnaBossBoltEndpoints(const ActionEffectInstance *effect,
 
 static bool AppendMarahnaBossLightningRibbonLayer(
     ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
-    float half_width, SDL_FColor color,
+    float half_width, ArRenderColorF color,
     ActionEffectProjectPointFn project_point, void *userdata) {
   enum { kJoints = kActionSceneEffectMarahnaBossLightningSegments + 1 };
-  SDL_FPoint points[kJoints];
+  ArRenderPointF points[kJoints];
   float scales[kJoints];
   float x0, y0, x1, y1;
   MarahnaBossBoltEndpoints(effect, &x0, &y0, &x1, &y1);
@@ -1707,8 +1707,8 @@ static bool AppendMarahnaBossLightningRibbon(
       effect->phase != kActionEffectPhase_MarahnaBossLightningBolt)
     return true;
   const float pulse = DeterministicPulse(effect);
-  const SDL_FColor corona = {0.22f, 0.48f, 1.00f, 0.27f * pulse};
-  const SDL_FColor filament = {0.92f, 0.99f, 1.00f, 0.96f * pulse};
+  const ArRenderColorF corona = {0.22f, 0.48f, 1.00f, 0.27f * pulse};
+  const ArRenderColorF filament = {0.92f, 0.99f, 1.00f, 0.96f * pulse};
   return AppendMarahnaBossLightningRibbonLayer(
              writer, effect, 4.4f, corona, project_point, userdata) &&
       AppendMarahnaBossLightningRibbonLayer(
@@ -1718,7 +1718,7 @@ static bool AppendMarahnaBossLightningRibbon(
 static bool AppendSwordBeamTrailLayer(
     ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
     float length, float head_half_width, float tail_half_width,
-    SDL_FColor head_color, SDL_FColor tail_color,
+    ArRenderColorF head_color, ArRenderColorF tail_color,
     ActionEffectProjectPointFn project_point, void *userdata) {
   float hx = 1.0f, hy = 0.0f;
   if (!SceneActorHeading(effect, &hx, &hy)) return true;
@@ -1740,20 +1740,20 @@ static bool AppendSwordBeamTrailLayer(
     tail_y - py * tail_half_width,
     tail_y + py * tail_half_width,
   };
-  SDL_FPoint points[4];
+  ArRenderPointF points[4];
   for (unsigned i = 0; i < 4; i++)
     if (!project_point(userdata, effect, local_x[i], local_y[i], &points[i]))
       return true;
   if (!Reserve(writer, 4, 6)) return false;
   const int base = writer->vertex_count;
   writer->vertices[writer->vertex_count++] =
-      (SDL_Vertex){points[0], head_color, {0.0f, 0.0f}};
+      (ArRenderVertex2D){points[0], head_color, {0.0f, 0.0f}};
   writer->vertices[writer->vertex_count++] =
-      (SDL_Vertex){points[1], head_color, {0.0f, 0.0f}};
+      (ArRenderVertex2D){points[1], head_color, {0.0f, 0.0f}};
   writer->vertices[writer->vertex_count++] =
-      (SDL_Vertex){points[2], tail_color, {0.0f, 0.0f}};
+      (ArRenderVertex2D){points[2], tail_color, {0.0f, 0.0f}};
   writer->vertices[writer->vertex_count++] =
-      (SDL_Vertex){points[3], tail_color, {0.0f, 0.0f}};
+      (ArRenderVertex2D){points[3], tail_color, {0.0f, 0.0f}};
   static const int kQuad[6] = {0, 1, 2, 0, 2, 3};
   for (unsigned i = 0; i < 6; i++)
     writer->indices[writer->index_count++] = base + kQuad[i];
@@ -1767,10 +1767,10 @@ static bool AppendSwordBeamTrail(
       effect->phase != kActionEffectPhase_SwordBeamFlight)
     return true;
   const float pulse = DeterministicPulse(effect);
-  SDL_FColor outer_head = {0.32f, 0.78f, 1.00f, 0.19f * pulse};
-  SDL_FColor outer_tail = {0.05f, 0.22f, 0.82f, 0.00f};
-  SDL_FColor inner_head = {0.78f, 0.98f, 1.00f, 0.27f * pulse};
-  SDL_FColor inner_tail = {0.10f, 0.42f, 1.00f, 0.00f};
+  ArRenderColorF outer_head = {0.32f, 0.78f, 1.00f, 0.19f * pulse};
+  ArRenderColorF outer_tail = {0.05f, 0.22f, 0.82f, 0.00f};
+  ArRenderColorF inner_head = {0.78f, 0.98f, 1.00f, 0.27f * pulse};
+  ArRenderColorF inner_tail = {0.10f, 0.42f, 1.00f, 0.00f};
   const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
   const float crescent_half_height = (rect->y1 - rect->y0) * 0.5f;
   const float outer_head_width = fmaxf(6.0f, crescent_half_height * 0.95f);
@@ -1792,84 +1792,84 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
                                  ActionEffectProjectPointFn project_point,
                                  void *userdata) {
   unsigned count = 0;
-  SDL_FColor hot = {0}, cool = {0};
+  ArRenderColorF hot = {0}, cool = {0};
   switch (effect->kind) {
     case kActionEffect_WallTorch:
       count = 7;
-      hot = (SDL_FColor){1.00f, 0.92f, 0.55f, 0.88f};
-      cool = (SDL_FColor){0.95f, 0.18f, 0.01f, 0.00f};
+      hot = (ArRenderColorF){1.00f, 0.92f, 0.55f, 0.88f};
+      cool = (ArRenderColorF){0.95f, 0.18f, 0.01f, 0.00f};
       break;
     case kActionEffect_EnemyFireball:
     case kActionEffect_MarahnaFireball:
     case kActionEffect_AitosLavaFireball:
       count = kActionSceneEffectParticlesPerInstance;
-      hot = (SDL_FColor){1.00f, 0.97f, 0.78f, 0.96f};
-      cool = (SDL_FColor){1.00f, 0.10f, 0.00f, 0.00f};
+      hot = (ArRenderColorF){1.00f, 0.97f, 0.78f, 0.96f};
+      cool = (ArRenderColorF){1.00f, 0.10f, 0.00f, 0.00f};
       break;
     case kActionEffect_AitosStatueFire:
       count = kActionSceneEffectParticlesPerInstance;
-      hot = (SDL_FColor){1.00f, 0.96f, 0.62f, 0.96f};
-      cool = (SDL_FColor){0.98f, 0.08f, 0.00f, 0.00f};
+      hot = (ArRenderColorF){1.00f, 0.96f, 0.62f, 0.96f};
+      cool = (ArRenderColorF){0.98f, 0.08f, 0.00f, 0.00f};
       break;
     case kActionEffect_AitosLavaPit:
       count = kActionSceneEffectParticlesPerInstance;
-      hot = (SDL_FColor){1.00f, 0.91f, 0.38f, 0.92f};
-      cool = (SDL_FColor){0.90f, 0.06f, 0.00f, 0.00f};
+      hot = (ArRenderColorF){1.00f, 0.91f, 0.38f, 0.92f};
+      cool = (ArRenderColorF){0.90f, 0.06f, 0.00f, 0.00f};
       break;
     case kActionEffect_AitosLavaReservoir:
       count = kActionSceneEffectLavaReservoirParticleCount;
-      hot = (SDL_FColor){1.00f, 0.94f, 0.48f, 0.94f};
-      cool = (SDL_FColor){0.94f, 0.08f, 0.00f, 0.00f};
+      hot = (ArRenderColorF){1.00f, 0.94f, 0.48f, 0.94f};
+      cool = (ArRenderColorF){0.94f, 0.08f, 0.00f, 0.00f};
       break;
     case kActionEffect_AitosMoltenRock:
       count = kActionSceneEffectParticlesPerInstance;
-      hot = (SDL_FColor){1.00f, 0.92f, 0.48f, 0.86f};
-      cool = (SDL_FColor){0.94f, 0.12f, 0.00f, 0.00f};
+      hot = (ArRenderColorF){1.00f, 0.92f, 0.48f, 0.86f};
+      cool = (ArRenderColorF){0.94f, 0.12f, 0.00f, 0.00f};
       break;
     case kActionEffect_AitosWaterSplash:
       count = kActionSceneEffectParticlesPerInstance;
-      hot = (SDL_FColor){0.92f, 1.00f, 1.00f, 0.86f};
-      cool = (SDL_FColor){0.12f, 0.48f, 1.00f, 0.00f};
+      hot = (ArRenderColorF){0.92f, 1.00f, 1.00f, 0.86f};
+      cool = (ArRenderColorF){0.12f, 0.48f, 1.00f, 0.00f};
       break;
     case kActionEffect_AitosWaterfall:
       count = kActionSceneEffectWaterfallParticleCount;
-      hot = (SDL_FColor){0.82f, 0.98f, 1.00f, 0.46f};
-      cool = (SDL_FColor){0.08f, 0.42f, 0.82f, 0.00f};
+      hot = (ArRenderColorF){0.82f, 0.98f, 1.00f, 0.46f};
+      cool = (ArRenderColorF){0.08f, 0.42f, 0.82f, 0.00f};
       break;
     case kActionEffect_AitosWaterfallMist:
       count = kActionSceneEffectWaterfallMistParticleCount;
-      hot = (SDL_FColor){0.96f, 1.00f, 1.00f, 0.54f};
-      cool = (SDL_FColor){0.34f, 0.70f, 0.92f, 0.00f};
+      hot = (ArRenderColorF){0.96f, 1.00f, 1.00f, 0.54f};
+      cool = (ArRenderColorF){0.34f, 0.70f, 0.92f, 0.00f};
       break;
     case kActionEffect_SwordBeam:
       count = kActionSceneEffectSwordStarCount;
-      hot = (SDL_FColor){0.96f, 1.00f, 1.00f, 1.00f};
-      cool = (SDL_FColor){0.10f, 0.48f, 1.00f, 0.55f};
+      hot = (ArRenderColorF){0.96f, 1.00f, 1.00f, 1.00f};
+      cool = (ArRenderColorF){0.10f, 0.48f, 1.00f, 0.55f};
       break;
     case kActionEffect_LightningTrap:
       count = kActionSceneEffectParticlesPerInstance;
-      hot = (SDL_FColor){0.98f, 1.00f, 1.00f, 0.92f};
-      cool = (SDL_FColor){0.18f, 0.48f, 1.00f, 0.00f};
+      hot = (ArRenderColorF){0.98f, 1.00f, 1.00f, 0.92f};
+      cool = (ArRenderColorF){0.18f, 0.48f, 1.00f, 0.00f};
       break;
     case kActionEffect_MarahnaLightningLink:
       count = kActionSceneEffectParticlesPerInstance;
-      hot = (SDL_FColor){0.98f, 1.00f, 1.00f, 0.96f};
-      cool = (SDL_FColor){0.20f, 0.18f, 1.00f, 0.00f};
+      hot = (ArRenderColorF){0.98f, 1.00f, 1.00f, 0.96f};
+      cool = (ArRenderColorF){0.20f, 0.18f, 1.00f, 0.00f};
       break;
     case kActionEffect_MarahnaBossLightning:
       count = kActionSceneEffectParticlesPerInstance;
-      hot = (SDL_FColor){0.98f, 1.00f, 1.00f, 0.98f};
-      cool = (SDL_FColor){0.10f, 0.32f, 1.00f, 0.00f};
+      hot = (ArRenderColorF){0.98f, 1.00f, 1.00f, 0.98f};
+      cool = (ArRenderColorF){0.10f, 0.32f, 1.00f, 0.00f};
       break;
     case kActionEffect_BloodpoolBossLightning:
       count = kActionSceneEffectParticlesPerInstance;
-      hot = (SDL_FColor){1.00f, 1.00f, 0.82f, 0.98f};
-      cool = (SDL_FColor){1.00f, 0.34f, 0.01f, 0.00f};
+      hot = (ArRenderColorF){1.00f, 1.00f, 0.82f, 0.98f};
+      cool = (ArRenderColorF){1.00f, 0.34f, 0.01f, 0.00f};
       break;
     case kActionEffect_MinotaurAxe:
       count = kActionSceneEffectParticlesPerInstance;
-      hot = (SDL_FColor){1.00f, 1.00f, 0.90f, 0.92f};
-      cool = (SDL_FColor){1.00f, 0.48f, 0.06f, 0.00f};
+      hot = (ArRenderColorF){1.00f, 1.00f, 0.90f, 0.92f};
+      cool = (ArRenderColorF){1.00f, 0.48f, 0.06f, 0.00f};
       break;
     case kActionEffect_FlamingWheel:
       /* Transitional boss compositions do not contain the complete rim.
@@ -1877,23 +1877,23 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
        * authored in that frame. */
       count = FlamingWheelHasAuthoredFireballRing(effect)
           ? kActionSceneEffectParticlesPerInstance : 0;
-      hot = (SDL_FColor){1.00f, 0.96f, 0.58f, 0.96f};
-      cool = (SDL_FColor){0.96f, 0.08f, 0.00f, 0.00f};
+      hot = (ArRenderColorF){1.00f, 0.96f, 0.58f, 0.96f};
+      cool = (ArRenderColorF){0.96f, 0.08f, 0.00f, 0.00f};
       break;
     case kActionEffect_FlamingWheelProjectile:
       count = kActionSceneEffectParticlesPerInstance;
-      hot = (SDL_FColor){0.88f, 1.00f, 1.00f, 0.96f};
-      cool = (SDL_FColor){0.02f, 0.58f, 0.86f, 0.00f};
+      hot = (ArRenderColorF){0.88f, 1.00f, 1.00f, 0.96f};
+      cool = (ArRenderColorF){0.02f, 0.58f, 0.86f, 0.00f};
       break;
     case kActionEffect_IceDragonIceBall:
       count = kActionSceneEffectParticlesPerInstance;
-      hot = (SDL_FColor){0.96f, 1.00f, 1.00f, 0.94f};
-      cool = (SDL_FColor){0.10f, 0.55f, 1.00f, 0.00f};
+      hot = (ArRenderColorF){0.96f, 1.00f, 1.00f, 0.94f};
+      cool = (ArRenderColorF){0.10f, 0.55f, 1.00f, 0.00f};
       break;
     case kActionEffect_TanzaraProjectile:
       count = kActionSceneEffectParticlesPerInstance;
-      hot = (SDL_FColor){1.00f, 0.94f, 1.00f, 0.94f};
-      cool = (SDL_FColor){0.62f, 0.08f, 1.00f, 0.00f};
+      hot = (ArRenderColorF){1.00f, 0.94f, 1.00f, 0.94f};
+      cool = (ArRenderColorF){0.62f, 0.08f, 1.00f, 0.00f};
       break;
     default:
       return true;
@@ -2318,7 +2318,7 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
       reach = 2.0f + 2.8f * (1.0f - t);
     }
 
-    SDL_FColor color = MixColor(
+    ArRenderColorF color = MixColor(
         hot, cool, effect->kind == kActionEffect_SwordBeam ? sword_path_t : t);
     if (effect->kind == kActionEffect_SwordBeam) {
       float materialize = TriangleWave(visual_ticks + i * 7u, 18u);
@@ -2637,27 +2637,27 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
       SceneActorHeading(effect, &hx, &hy);
       const bool ice = effect->kind == kActionEffect_IceDragonIceBall;
       const bool axe = effect->kind == kActionEffect_MinotaurAxe;
-      const SDL_FColor spill_centre = ice
-          ? (SDL_FColor){0.42f, 0.84f, 1.00f, 0.22f}
-          : (axe ? (SDL_FColor){1.00f, 0.70f, 0.22f, 0.19f}
-                 : (SDL_FColor){0.76f, 0.28f, 1.00f, 0.22f});
-      const SDL_FColor spill_mid = ice
-          ? (SDL_FColor){0.18f, 0.55f, 1.00f, 0.13f}
-          : (axe ? (SDL_FColor){1.00f, 0.43f, 0.06f, 0.12f}
-                 : (SDL_FColor){0.54f, 0.12f, 1.00f, 0.14f});
-      const SDL_FColor body_mid = ice
-          ? (SDL_FColor){0.56f, 0.91f, 1.00f, 0.52f}
-          : (axe ? (SDL_FColor){1.00f, 0.78f, 0.31f, 0.48f}
-                 : (SDL_FColor){0.88f, 0.54f, 1.00f, 0.50f});
+      const ArRenderColorF spill_centre = ice
+          ? (ArRenderColorF){0.42f, 0.84f, 1.00f, 0.22f}
+          : (axe ? (ArRenderColorF){1.00f, 0.70f, 0.22f, 0.19f}
+                 : (ArRenderColorF){0.76f, 0.28f, 1.00f, 0.22f});
+      const ArRenderColorF spill_mid = ice
+          ? (ArRenderColorF){0.18f, 0.55f, 1.00f, 0.13f}
+          : (axe ? (ArRenderColorF){1.00f, 0.43f, 0.06f, 0.12f}
+                 : (ArRenderColorF){0.54f, 0.12f, 1.00f, 0.14f});
+      const ArRenderColorF body_mid = ice
+          ? (ArRenderColorF){0.56f, 0.91f, 1.00f, 0.52f}
+          : (axe ? (ArRenderColorF){1.00f, 0.78f, 0.31f, 0.48f}
+                 : (ArRenderColorF){0.88f, 0.54f, 1.00f, 0.50f});
       spill = (ActionEffectGlowStyle){
         .radius_x = ice ? 35.0f : 31.0f,
         .radius_y = ice ? 22.0f : 20.0f,
         .ring_scale = {0.24f, 0.68f, 1.0f},
         .centre = spill_centre,
         .ring = {spill_mid,
-                 ice ? (SDL_FColor){0.06f, 0.22f, 0.76f, 0.045f}
-                     : (axe ? (SDL_FColor){0.76f, 0.15f, 0.01f, 0.04f}
-                            : (SDL_FColor){0.28f, 0.04f, 0.70f, 0.05f}),
+                 ice ? (ArRenderColorF){0.06f, 0.22f, 0.76f, 0.045f}
+                     : (axe ? (ArRenderColorF){0.76f, 0.15f, 0.01f, 0.04f}
+                            : (ArRenderColorF){0.28f, 0.04f, 0.70f, 0.05f}),
                  {0.03f, 0.02f, 0.25f, 0.00f}},
         .flare = ice ? 0.07f : 0.12f, .rise = 0.06f,
         .axis_x = hx, .axis_y = hy,
@@ -2670,9 +2670,9 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
         .ring_scale = {0.17f, 0.60f, 1.0f},
         .centre = {1.00f, 1.00f, 1.00f, ice ? 0.86f : 0.78f},
         .ring = {body_mid,
-                 ice ? (SDL_FColor){0.15f, 0.55f, 1.00f, 0.17f}
-                     : (axe ? (SDL_FColor){1.00f, 0.30f, 0.03f, 0.15f}
-                            : (SDL_FColor){0.58f, 0.12f, 1.00f, 0.18f}),
+                 ice ? (ArRenderColorF){0.15f, 0.55f, 1.00f, 0.17f}
+                     : (axe ? (ArRenderColorF){1.00f, 0.30f, 0.03f, 0.15f}
+                            : (ArRenderColorF){0.58f, 0.12f, 1.00f, 0.18f}),
                  {0.05f, 0.02f, 0.30f, 0.00f}},
         .flare = ice ? 0.08f : 0.16f, .rise = 0.09f,
         .axis_x = hx, .axis_y = hy,
@@ -3160,7 +3160,7 @@ bool ActionSceneDecorationRender_Build(
       project_userdata, batch);
 }
 
-bool ActionHeatRender_Build(uint16_t game_frame, SDL_Rect output_viewport,
+bool ActionHeatRender_Build(uint16_t game_frame, ArRenderRectI output_viewport,
                             int target_width, int target_height,
                             int source_width,
                             ActionHeatRenderMesh *mesh) {
@@ -3187,7 +3187,7 @@ bool ActionHeatRender_Build(uint16_t game_frame, SDL_Rect output_viewport,
   const float amplitude = fminf(6.50f, fmaxf(0.75f,
       source_pixel_scale * 0.82f));
   const float phase = (float)game_frame * 0.117f;
-  const SDL_FColor white = {1.0f, 1.0f, 1.0f, 1.0f};
+  const ArRenderColorF white = {1.0f, 1.0f, 1.0f, 1.0f};
   for (int row = 0; row <= kActionHeatMeshRows; row++) {
     const float ny = (float)row / (float)kActionHeatMeshRows;
     const float y = (float)output_viewport.y +
@@ -3209,7 +3209,7 @@ bool ActionHeatRender_Build(uint16_t game_frame, SDL_Rect output_viewport,
           amplitude * target_x_per_output * envelope * wave;
       const float sample_y = (float)target_height * ny +
           amplitude * target_y_per_output * 0.24f * envelope * cross_wave;
-      mesh->vertices[mesh->vertex_count++] = (SDL_Vertex){
+      mesh->vertices[mesh->vertex_count++] = (ArRenderVertex2D){
         {x, y}, white,
         {sample_x / (float)target_width,
          sample_y / (float)target_height},

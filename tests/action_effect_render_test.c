@@ -45,10 +45,10 @@ static bool SceneBatchesEqual(const ActionSceneEffectRenderBatch *a,
 static bool IdentityProjection(void *userdata,
                                const ActionEffectInstance *effect,
                                float local_x, float local_y,
-                               SDL_FPoint *point) {
+                               ArRenderPointF *point) {
   (void)userdata;
   if (!effect || !point) return false;
-  *point = (SDL_FPoint){
+  *point = (ArRenderPointF){
     effect->world_x + local_x,
     effect->world_y + local_y,
   };
@@ -689,7 +689,7 @@ static void TestAitosSideLavaLightingAndHeatMesh(void) {
       IdentityProjection, NULL, &lighting));
   CHECK(lighting.vertex_count == 0 && lighting.index_count == 0);
 
-  const SDL_Rect viewport = {120, 40, 960, 840};
+  const ArRenderRectI viewport = {120, 40, 960, 840};
   ActionHeatRenderMesh heat, repeat, advanced;
   CHECK(ActionHeatRender_Build(5009, viewport, 960, 840, 256, &heat));
   CHECK(heat.vertex_count == kActionHeatMeshVertices);
@@ -719,14 +719,15 @@ static void TestAitosSideLavaLightingAndHeatMesh(void) {
     }
   }
   CHECK(!ActionHeatRender_Build(
-      1, (SDL_Rect){0, 0, 0, 100}, 100, 100, 256, &heat));
+      1, (ArRenderRectI){0, 0, 0, 100}, 100, 100, 256, &heat));
   CHECK(heat.vertex_count == 0 && heat.index_count == 0);
 
   /* A high-resolution host viewport still gets a perceptible displacement.
    * Capping this at the former 3.25 output pixels made the room haze look
    * intermittent because only especially sharp edges exposed it. */
   CHECK(ActionHeatRender_Build(
-      5009, (SDL_Rect){10, 10, 3400, 2100}, 3400, 2100, 432, &heat));
+      5009, (ArRenderRectI){10, 10, 3400, 2100},
+      3400, 2100, 432, &heat));
   float max_heat_offset = 0.0f;
   for (int i = 0; i < heat.vertex_count; i++) {
     const float source_x = heat.vertices[i].tex_coord.x * 3400.0f;
@@ -922,10 +923,11 @@ static void TestAitosUsesRakedDioramaSourcePlanes(void) {
   context.diorama_projection = NULL;
   context.visible_x0 = 10;
   context.visible_width = 400;
+  ArRenderPointF flat_expected;
   CHECK(ActionEffectProjection_ProjectPoint(
-      &context, &frame.effects[0], 0.0f, 0.0f, &expected));
-  CHECK(fabsf(expected.x - 48.6f) < 0.001f);
-  CHECK(fabsf(expected.y - (-1.0f)) < 0.001f);
+      &context, &frame.effects[0], 0.0f, 0.0f, &flat_expected));
+  CHECK(fabsf(flat_expected.x - 48.6f) < 0.001f);
+  CHECK(fabsf(flat_expected.y - (-1.0f)) < 0.001f);
 }
 
 static void TestCurrentActorEffectsRequestExactObjPlanes(void) {
@@ -1082,7 +1084,7 @@ static void TestDecorationLayerBuildsAreIndependent(void) {
        cloud < kActionSceneEffectWaterfallMistCloudCount; cloud++) {
     const int cloud_base =
         cloud * kActionSceneEffectWaterfallMistCloudVertices;
-    const SDL_Vertex *centre = &atmosphere.vertices[cloud_base];
+    const ArRenderVertex2D *centre = &atmosphere.vertices[cloud_base];
     if (centre->position.x < cloud_centre_min_x)
       cloud_centre_min_x = centre->position.x;
     if (centre->position.x > cloud_centre_max_x)
@@ -1099,7 +1101,7 @@ static void TestDecorationLayerBuildsAreIndependent(void) {
     float cloud_bottom = -10000.0f;
     for (int segment = 0;
          segment < kActionSceneEffectWaterfallMistCloudSegments; segment++) {
-      const SDL_Vertex *vertex =
+      const ArRenderVertex2D *vertex =
           &atmosphere.vertices[visible_ring + segment];
       CHECK(vertex->color.a > 0.02f);
       CHECK(atmosphere.vertices[transparent_ring + segment].color.a == 0.0f);
@@ -1188,7 +1190,7 @@ static void TestBossLightningFilamentAndStages(void) {
 
       const int first = 2 * kActionEffectGlowVertices;
       const int last = first + ((int)kSegments[visual] - 1) * 4;
-      SDL_FPoint first_centre = {0}, last_centre = {0};
+      ArRenderPointF first_centre = {0}, last_centre = {0};
       for (int i = 0; i < 4; i++) {
         first_centre.x += lighting.vertices[first + i].position.x * 0.25f;
         first_centre.y += lighting.vertices[first + i].position.y * 0.25f;
@@ -1248,7 +1250,7 @@ static void TestMarahnaLightningLinksAndOrientations(void) {
   CHECK(horizontal.index_count == 2 * kActionEffectGlowIndices +
       kActionSceneEffectMarahnaLightningSegments * 6 * 2);
   const int ribbon = 2 * kActionEffectGlowVertices;
-  SDL_FPoint first_centre = {0}, last_centre = {0};
+  ArRenderPointF first_centre = {0}, last_centre = {0};
   for (int i = 0; i < 4; i++) {
     first_centre.x += horizontal.vertices[ribbon + i].position.x * 0.25f;
     first_centre.y += horizontal.vertices[ribbon + i].position.y * 0.25f;
@@ -1282,8 +1284,8 @@ static void TestMarahnaLightningLinksAndOrientations(void) {
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, false, IdentityProjection, NULL, &vertical));
   CHECK(vertical.vertex_count == horizontal.vertex_count);
-  first_centre = (SDL_FPoint){0};
-  last_centre = (SDL_FPoint){0};
+  first_centre = (ArRenderPointF){0};
+  last_centre = (ArRenderPointF){0};
   for (int i = 0; i < 4; i++) {
     first_centre.x += vertical.vertices[ribbon + i].position.x * 0.25f;
     first_centre.y += vertical.vertices[ribbon + i].position.y * 0.25f;
@@ -1315,7 +1317,7 @@ static void TestMarahnaBossLightningStagesAndOrientations(void) {
       kActionSceneEffectMarahnaBossLightningSegments * 6 * 2);
 
   const int ribbon = 2 * kActionEffectGlowVertices;
-  SDL_FPoint first = {0}, last = {0};
+  ArRenderPointF first = {0}, last = {0};
   for (int i = 0; i < 4; i++) {
     first.x += left.vertices[ribbon + i].position.x * 0.25f;
     first.y += left.vertices[ribbon + i].position.y * 0.25f;
@@ -1337,8 +1339,8 @@ static void TestMarahnaBossLightningStagesAndOrientations(void) {
       (ActionEffectLocalRect){0.0f, 0.0f, 32.0f, 32.0f};
   CHECK(ActionSceneEffectRender_Build(
       &frame, true, false, IdentityProjection, NULL, &right));
-  first = (SDL_FPoint){0};
-  last = (SDL_FPoint){0};
+  first = (ArRenderPointF){0};
+  last = (ArRenderPointF){0};
   for (int i = 0; i < 4; i++) {
     first.x += right.vertices[ribbon + i].position.x * 0.25f;
     const int end = ribbon +

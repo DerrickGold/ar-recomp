@@ -1203,7 +1203,9 @@ static const ActionHeatRenderMesh *ActionHeatMeshFor(
     return &s_action_heat_mesh_cache.mesh;
   s_action_heat_mesh_cache.valid = false;
   if (!ActionHeatRender_Build(
-          game_frame, viewport, target_width, target_height,
+          game_frame,
+          (ArRenderRectI){viewport.x, viewport.y, viewport.w, viewport.h},
+          target_width, target_height,
           source_width, &s_action_heat_mesh_cache.mesh))
     return NULL;
   s_action_heat_mesh_cache.viewport = viewport;
@@ -1309,7 +1311,8 @@ static void EndActionHeat(const FrameSlot *slot, SDL_Rect viewport) {
       slot->action_scene_effects.game_frame, viewport,
       s_action_heat_w, s_action_heat_h, slot->visible_width) : NULL;
   const bool warped = mesh && SDL_RenderGeometry(
-      g_renderer, s_action_heat_target, mesh->vertices, mesh->vertex_count,
+      g_renderer, s_action_heat_target,
+      (const SDL_Vertex *)mesh->vertices, mesh->vertex_count,
       mesh->indices, mesh->index_count);
   bool fallback = false;
   if (resolved && !warped) {
@@ -1380,7 +1383,7 @@ static void DrawActionEffects(const FrameSlot *slot, SDL_Rect viewport,
     .visible_width = slot->visible_width,
     .snes_height = slot->snes_height,
     .diorama_projection = diorama_projection,
-    .viewport = viewport,
+    .viewport = {viewport.x, viewport.y, viewport.w, viewport.h},
   };
   ActionEffectRenderBatch *geometry = &s_action_effect_render_scratch.spell;
   ActionSceneEffectRenderBatch *scene_geometry =
@@ -1403,16 +1406,16 @@ static void DrawActionEffects(const FrameSlot *slot, SDL_Rect viewport,
   const int actor_index_count = scene_geometry->index_count;
 
   EffectBatch spell_batch = {
-    .vertices = (ArRenderVertex2D *)geometry->vertices,
-    .indices = (int32_t *)geometry->indices,
+    .vertices = geometry->vertices,
+    .indices = geometry->indices,
     .vertex_count = geometry->vertex_count,
     .index_count = geometry->index_count,
     .vertex_capacity = kActionEffectRenderMaxVertices,
     .index_capacity = kActionEffectRenderMaxIndices,
   };
   EffectBatch scene_batch = {
-    .vertices = (ArRenderVertex2D *)scene_geometry->vertices,
-    .indices = (int32_t *)scene_geometry->indices,
+    .vertices = scene_geometry->vertices,
+    .indices = scene_geometry->indices,
     .vertex_count = scene_geometry->vertex_count,
     .index_count = scene_geometry->index_count,
     .vertex_capacity = kActionSceneEffectRenderMaxVertices,
@@ -1514,7 +1517,10 @@ static void DrawActionDioramaPlaneEffect(
     .visible_width = slot->visible_width,
     .snes_height = slot->snes_height,
     .diorama_projection = diorama_projection,
-    .viewport = context->viewport,
+    .viewport = {
+      context->viewport.x, context->viewport.y,
+      context->viewport.w, context->viewport.h,
+    },
   };
   ActionSceneEffectRenderBatch *geometry =
       &s_action_effect_render_scratch.scene;
@@ -1524,8 +1530,8 @@ static void DrawActionDioramaPlaneEffect(
           ActionEffectProjection_ProjectPoint, &projection, geometry))
     return;
   EffectBatch batch = {
-    .vertices = (ArRenderVertex2D *)geometry->vertices,
-    .indices = (int32_t *)geometry->indices,
+    .vertices = geometry->vertices,
+    .indices = geometry->indices,
     .vertex_count = geometry->vertex_count,
     .index_count = geometry->index_count,
     .vertex_capacity = kActionSceneEffectRenderMaxVertices,
@@ -1667,8 +1673,8 @@ static void DrawActionPlaneEffectFlat(
   if (!target_ready)
     DisableActionPlaneEffect("effect-target clear");
   EffectBatch batch = {
-    .vertices = (ArRenderVertex2D *)geometry->vertices,
-    .indices = (int32_t *)geometry->indices,
+    .vertices = geometry->vertices,
+    .indices = geometry->indices,
     .vertex_count = geometry->vertex_count,
     .index_count = geometry->index_count,
     .vertex_capacity = kActionSceneEffectRenderMaxVertices,
