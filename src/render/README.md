@@ -48,13 +48,15 @@ texture updates. A fake backend runs the same dirty-upload flow in tests
 without SDL.
 
 Ordinary separated-SIM flat, world-layer, and menu-layer composites now submit
-through the device as well, as does the standard projected SIM ground mesh.
-SIM underlay/terrain/effect geometry and its object atlas, plus the diorama
-compositor, still unwrap opaque resources through a small bridge in
-`src/platform/sdl/render_sdl.h` while those geometry paths migrate. Diorama
-frame generation also retains private SDL endpoint/target textures. The bridge
-is a transition aid, not part of the portable contract. New renderer-facing
-code should not add another borrowed native resource.
+through the device, as do the standard projected SIM ground mesh, ordinary
+object billboards, half-add billboards, and promoted map-plane geometry. The
+custom two-pass rim-light blend still uses the SDL bridge because the portable
+blend vocabulary cannot describe its source/destination factors yet. SIM
+underlay/terrain/effect geometry and the diorama compositor also still unwrap
+opaque resources through `src/platform/sdl/render_sdl.h` while those paths
+migrate. Diorama frame generation retains private SDL endpoint/target
+textures. The bridge is a transition aid, not part of the portable contract.
+New renderer-facing code should not add another borrowed native resource.
 
 The remaining migration should proceed in independently testable slices:
 

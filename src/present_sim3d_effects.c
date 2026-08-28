@@ -28,6 +28,7 @@
 #endif
 
 extern SDL_Renderer *g_renderer;
+extern ArRenderDevice g_render_device;
 extern ArRenderTexture g_sim_obj_atlas_texture;
 
 static SDL_Texture *NativeAtlasTexture(void) {
@@ -821,14 +822,14 @@ void DrawSimMapPlaneObject(const FrameSlot *slot,
       (float)kSimObjAtlasWidth;
   float v1 = (object->atlas_y + object->atlas_h) /
       (float)kSimObjAtlasHeight;
-  const SDL_FColor white = { 1.0f, 1.0f, 1.0f, 1.0f };
-  SDL_Vertex vertices[] = {
+  const ArRenderColorF white = { 1.0f, 1.0f, 1.0f, 1.0f };
+  const ArRenderVertex2D vertices[] = {
     {{points[0].x, points[0].y}, white, {u0, v0}},
     {{points[1].x, points[1].y}, white, {u1, v0}},
     {{points[2].x, points[2].y}, white, {u0, v1}},
     {{points[3].x, points[3].y}, white, {u1, v1}},
   };
-  const int indices[] = { 0, 1, 3, 0, 3, 2 };
-  SDL_RenderGeometry(g_renderer, NativeAtlasTexture(),
-                     vertices, 4, indices, 6);
+  const int32_t indices[] = { 0, 1, 3, 0, 3, 2 };
+  ArRenderDevice_DrawGeometry(
+      &g_render_device, g_sim_obj_atlas_texture, vertices, 4, indices, 6);
 }

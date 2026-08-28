@@ -224,9 +224,14 @@ static void DrawSimObjectPriorityFiltered(
   if (!ArRenderTexture_IsValid(g_sim_obj_atlas_texture) ||
       !slot->sim.atlas_valid)
     return;
-  /* W4-2: a rejected blend mode means this pass cannot draw correctly, so bail
-   * rather than draw with whatever mode happened to be set. */
-  if (!SimApplyAtlasBlendMode(SimBillboardPassBlend(pass))) return;
+  /* Ordinary billboards use the atlas descriptor's alpha blend through the
+   * portable device. Rim passes still require the native custom mask mode;
+   * reject those rather than drawing with whatever mode happened to be set. */
+  if (pass &&
+      (!SimApplyAtlasBlendMode(SimBillboardPassBlend(pass)) ||
+       !SDL_SetTextureAlphaMod(
+           NativeTexture(g_sim_obj_atlas_texture), 255)))
+    return;
   float flat_scale_x = (float)viewport.w / source.w;
   float flat_scale_y = (float)viewport.h / source.h;
 
@@ -321,8 +326,6 @@ static void DrawSimObjectPriorityFiltered(
     if (object->hidden) continue;
     bool half_add = !pass && slot->sim.object_half_add &&
         object->color_math_eligible;
-    SDL_SetTextureAlphaMod(
-        NativeTexture(g_sim_obj_atlas_texture), half_add ? 128 : 255);
 
     int record_screen_x = (int16_t)(uint16_t)(
         object->world_x + object->offset_x - slot->sim.camera_x);
@@ -432,12 +435,31 @@ static void DrawSimObjectPriorityFiltered(
      * drawn instead at the head of its arc by DrawSimEffectFireballHeads,
      * which turns it there. Rotating in this pass as well would be a second
      * implementation of the same angle, reachable by nothing. */
-    if (SDL_RenderTexture(g_renderer, NativeTexture(g_sim_obj_atlas_texture),
-                          &atlas, &destination)) {
+    bool drawn = false;
+    if (pass) {
+      drawn = SDL_RenderTexture(
+          g_renderer, NativeTexture(g_sim_obj_atlas_texture),
+          &atlas, &destination);
+    } else {
+      const ArRenderRectF portable_atlas = {
+        atlas.x, atlas.y, atlas.w, atlas.h,
+      };
+      const ArRenderRectF portable_destination = {
+        destination.x, destination.y, destination.w, destination.h,
+      };
+      drawn = half_add
+          ? ArRenderDevice_DrawTextureTinted(
+                &g_render_device, g_sim_obj_atlas_texture,
+                &portable_atlas, &portable_destination,
+                (ArRenderColorF){1.0f, 1.0f, 1.0f, 128.0f / 255.0f})
+          : ArRenderDevice_DrawTexture(
+                &g_render_device, g_sim_obj_atlas_texture,
+                &portable_atlas, &portable_destination);
+    }
+    if (drawn) {
       Sim3DPerformance_AddDraw(0, 0);
     }
   }
-  SDL_SetTextureAlphaMod(NativeTexture(g_sim_obj_atlas_texture), 255);
 }
 
 static void DrawSimObjectPriorityTerrain(
