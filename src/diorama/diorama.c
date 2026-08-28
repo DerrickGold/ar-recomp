@@ -170,7 +170,7 @@ static SDL_Texture *RomSkyboxTexture(SDL_Renderer *renderer, int source,
   return g_rom_skybox.texture;
 }
 
-/* ── M8 (ar-recomp-threading-impl.md §7, optional GPU shader polish) ────
+/* ── Optional GPU shader polish ─────────────────────────────────────────
  *
  * Off by default; requires the "GPU shader effects" setting (main.c, switches
  * the renderer to SDL's "gpu" backend) AND each effect's own toggle, so every
@@ -1535,7 +1535,7 @@ static void RecordOptionalDioramaDraw(
         *outcome, kPresentationOutcome_OptionalOmitted);
 }
 
-/* Edge margin fix (SPEC-backdrop-clip.md; live report 2026-07-21, fixed
+/* Edge margin fix (live report 2026-07-21, fixed
  * 2026-07-26 behind the `diorama_margin_fix` setting / AR_DIORAMA_MARGIN_FIX).
  *
  * Symptom: near a level's start/end the captured BG2 content went black at the

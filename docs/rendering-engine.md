@@ -2,12 +2,10 @@
 
 Reference map of the game's drawing and streaming machinery. It records routine
 addresses, data layouts, and unknowns marked `?`. See [SEAMS.md](SEAMS.md) for
-conversion status, [widescreen-survey.md](widescreen-survey.md) for the evidence
-trail, and [ram-map.md](ram-map.md) for variables.
+conversion status and [ram-map.md](ram-map.md) for variables.
 
 This document owns the renderer's current mechanisms. Project acceptance lives
-in [progress.md](progress.md), and resolved defect narratives live in
-[bug-ledger.md](bug-ledger.md).
+in [progress.md](progress.md).
 
 Evidence basis: `saves/level1-action.rec` replay traces (faithful config,
 channels dma/vram/vmadd/wram), disassembly of `$02:ABF0-$C72B`, and the
@@ -339,7 +337,7 @@ magic/effect replacements; there is no per-enemy sheet allocator to exhaust.
 
 ## 9. OAM / sprite pipeline (action)
 
-See SEAMS.md "Action OAM pipeline" + widescreen-survey.md Phase 3.
+See SEAMS.md "Action OAM pipeline".
 - `$00:8C98` (HLE `ActRaiser_ObjectVisibilityScanWide`): shadow clear
   (x=$80/y=$E0 parked), high-table cursor reset (`$9A=$0580`), `$00:923A`
   HUD sprites (fixed positions from `$06:A800`), object walk (`$06A0`
@@ -371,7 +369,7 @@ produces native camera 0. The failed first gate therefore chose `[120,376)`
 instead of `[0,256)`: visuals remained wide, but `$0400` selected the wrong
 gameplay/script objects and the intro fade regressed. Corrected replay
 `runs/20260812-122927` reaches `$9832` at gf1185 with no second music
-stop/restart. See bug-ledger.md §58.
+stop/restart.
 
 ### 9a. Host action lighting and particles
 
@@ -1127,7 +1125,7 @@ bundled runtime's widescreen/PPU interfaces:
   requires OBSEL to resolve "large" to exactly 16, since the host projects this
   icon as a fixed 16x16 chunk. Until this was found, only Fire's quad was
   recognised, so the other three spells were never promoted and drew at their
-  authentic centre-screen X while the rest of the HUD moved — ledger §38.
+  authentic centre-screen X while the rest of the HUD moved.
   `AR_HUDICON=1` reports the scan outcome (slot and count, misses included).
 - **The game-over return requires capture inside the OBJ evaluator (revised
   2026-08-12).** `runs/20260812-122258/snapshots/snap_02_gf5705` proves the
@@ -1193,8 +1191,8 @@ comment for the full key/gate grammar. Planes are capability tiers:
 - `mode7` (live, 2026-07-15 — **FROZEN, do not extend**: correct for its one
   shipped consumer (the sprite-free title swirl) but built on paste
   composition, which cannot express priority. Its backend migrates into the
-  N-x RGBA pipeline (see [`nx-pipeline.md`](nx-pipeline.md)); the manifest
-  schema is backend-agnostic and survives unchanged. Do not add mode7
+  priority-aware RGBA pipeline; the manifest schema is backend-agnostic and
+  survives unchanged. Do not add mode7
   entries for scenes with sprites over the canvas, and do not build OBJ
   promotion — that was evaluated and rejected as a paste-path special
   case.): canvas-space texture override rendered through
@@ -1447,7 +1445,7 @@ clamp/mirror/repeat projection. That small inverse adapter is pure and tested;
 it preserves source/world metadata, rejects conflicting or malformed policy,
 and never reads PPU state. Focused live matrices cover Bloodpool, Aitos,
 Northwall, every raw Death Heim room, and both deliberately native-only Death
-Heim endpoints; see `docs/bg-hle-census.md` BH6.
+Heim endpoints.
 
 BH7 makes the provider the ordinary path: unset, empty, or nonzero
 `AR_ACTION_BG_HLE` enables it, while exact `AR_ACTION_BG_HLE=0` preserves the
@@ -1465,8 +1463,8 @@ Long natural Fillmore replays cover Full, Raw, and diorama-32 through game frame
 Same-frame redraw/rebind/reset, savestate load, fresh restart, and live Wide
 Full-to-4:3 geometry change are covered. A non-headless Cocoa diorama-32 A/B
 also matches all 14 ordinary-compositor artifacts. Debug/release builds and all
-41 tests pass. See `docs/bg-hle-census.md` BH7 for manifests, counters, and the
-remaining historical natural-transition evidence gaps.
+41 tests pass; historical natural-transition gaps remain explicitly tracked by
+the project acceptance matrix.
 
 The action-room scene authority is the accepted first-stage production source.
 The finite provider publishes from the cumulative immutable ROM scene by
@@ -1537,8 +1535,8 @@ as a 4x3 contact sheet. The historical manifest's embedded 43,999 total used
 the former `0..223` offline interval; its captured snapshots and runtime
 comparisons are unchanged. All twelve BG1 layers were eligible at entry; BG2
 split into six eligible layers, four explicit 32x32 decorative/native layers,
-and two disabled samples. See
-`docs/bg-hle-census.md` for the table and the later special-room closure.
+and two disabled samples. The later special-room closure uses the same
+eligibility boundary.
 
 The first special-room sweep adds an important boundary. Death Heim
 `$0702-$0707` has eligible BG1/native-32x32 BG2 and passes 1,032,404 more
@@ -2024,10 +2022,9 @@ mask and both layer attributes.
 
 ## 13b. Simulation-town 3D presentation (pointer, 2026-07-22)
 
-The enhanced town renderer is designed in `ar-recomp-sim-rendering-plan.md`
-rather than here, because it is a presentation layer built on top of §11's
-Mode-1 pipeline rather than a change to it. What matters when reading this
-document: town simulation is **ordinary PPU Mode 1, not Mode 7**, so the
+The enhanced town renderer is a presentation layer built on top of §11's
+Mode-1 pipeline rather than a change to it. Town simulation is **ordinary PPU
+Mode 1, not Mode 7**, so the
 projection is a host-side transform of captured Mode-1 planes plus a semantic
 OBJ atlas — the PPU/priority behaviour described above is unchanged, and the
 feature-off path is byte-identical.
@@ -2041,14 +2038,13 @@ correct because every sprite shares one plane; once the map is projected, two
 actors on different rows really are at different distances. The flat and
 feature-off paths are untouched.
 
-- Design, phases, and checkpoint results: `ar-recomp-sim-rendering-plan.md`
 - Object height/anchor policy and composition identities:
-  `docs/sim-object-catalog.md`
+  [sim-object-catalog.md](sim-object-catalog.md)
 - Host seams (classification, height easing, shadow mask, shadow blur, rim
   light, billboard depth order, tuning handoff, picker build switch, D1 trace):
-  `docs/SEAMS.md` "Sim 3D presentation seams"
-- Player-facing stage toggles and tuning dials: `docs/settings-system.md`
-  "Simulation 3D"
+  [SEAMS.md](SEAMS.md) "Sim 3D presentation seams"
+- Player-facing stage toggles and tuning dials:
+  [manual.md](manual.md) "Simulation 3D"
 - Ground extension beyond the captured window (world-map underlay, full-town
   canvas): §13c below
 
@@ -2126,7 +2122,7 @@ so the extended ground is permanently empty — and worse, an actor walking
 toward the edge simply stops being drawn while the ground under it is still
 bright, sharp and plainly visible. The cues below exist to make that boundary
 legible. They are presentation only; none of them changes what the emitter
-culls, which is fixed by hardware (see §13c and ledger §25).
+culls, which is fixed by hardware (see §13c).
 
 ### The invariant
 
@@ -2298,7 +2294,7 @@ exists to remove.
 
 The separated capture reproduces the frame from individual layers, so any PPU
 colour math has to be reproduced too or the byte-exact fidelity gate reports a
-mismatch on the frame (since ledger §31 it reports rather than drops — the
+mismatch on the frame (it reports rather than drops — the
 checkpoints are where that fails the build). Only states shown to be
 reproducible are accepted, and there are currently three:
 
@@ -2348,7 +2344,7 @@ second effect layered on this one and wants its own evidence.
 Benign by construction. If the reproduction is ever wrong the D2 gate sees a
 pixel mismatch and reports it, and the affected pixels render with the wrong
 colour-math result for those frames — a bounded, local error rather than a
-correctness risk. Since ledger §31 the gate no longer drops the frame to the
+correctness risk. The gate no longer drops the frame to the
 authentic view; the checkpoints, which assert zero mismatching pixels, are
 where a wrong reproduction is caught.
 
@@ -2735,7 +2731,7 @@ Measured, Fillmore act 2 at extend 32: band OBJ pixels 104 → 570, 0 → 466,
 104 → 735 on the frames where it fires, with the AUTHENTIC rows of all 32
 plane dumps byte-identical, attract frame and flat widescreen byte-identical.
 
-**Lifecycle (2026-08-05, expanded 2026-08-08; ledger §34): the sideband has
+**Lifecycle (2026-08-05, expanded 2026-08-08): the sideband has
 explicit action and simulation-town owners and must not outlive either
 emitter.** Action rebuilds it from scratch in every
 `ActRaiser_ObjectVisibilityScanWide` pass. The simulation composition pass now
@@ -2917,8 +2913,9 @@ Three separate consumers read apron-wide surfaces with the DISPLAY width and
 produced three distinct visible regressions in one commit (sheared HUD, black
 stripe down the backdrop, HUD icon loose in the scene). Use
 `ActionApron_SurfacePitch` / `ActionApron_DisplayOffset` /
-`ActionApron_SurfaceColumn` rather than open-coding it; the root-cause history
-and reusable lesson belong in [bug-ledger.md](bug-ledger.md) §36.
+`ActionApron_SurfaceColumn` rather than open-coding it. Keeping pitch and
+display width distinct prevents sheared HUD, backdrop stripes, and displaced
+HUD icons.
 
 ## 14. Open questions (all remaining, none blocks the §13 design)
 

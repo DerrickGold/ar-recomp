@@ -82,7 +82,7 @@ typedef struct TileRecord {
 
 /* Global CGRAM dynamics: classify every per-frame change of each 16-color
  * group by shape — the game-agnostic detector for how this game implements
- * fades, hit-flashes, and color cycling (docs/nx-pipeline.md). */
+ * fades, hit-flashes, and color cycling. */
 typedef struct GroupDynamics {
   uint32 change_frames;
   uint32 fade_like;   /* new ~= prev * k across all colors */
@@ -508,7 +508,7 @@ static void CensusDump(void) {
     if (record->palette_overflow)
       overflow_palette[class_]++;
     /* A recurring short-run variant beyond the first is the hit-flash /
-     * i-frame palette-swap fingerprint (docs/nx-pipeline.md). */
+     * i-frame palette-swap fingerprint. */
     int flash_suspect = 0;
     for (int v = 1; v < record->palette_variant_count; v++)
       if (record->palette_variants[v].max_run <= 3 &&

@@ -279,8 +279,8 @@ Go is CGO-free, so every platform cross-builds from one machine. Bundles are
 named `actraiser-recomp-<os>-<arch>.{tar.xz,zip}` and written to the repo's
 `release/`. They contain only generic tools, the project's own authored
 source, and redistributable third-party components — never a ROM, generated C,
-or media assets (the asset manifest ships as an empty template). See the game
-repository's `docs/BUILD_TOOLING.md` for the full bundle contract.
+or media assets (the asset manifest ships as an empty template). The packaging
+CMake install manifest is the authoritative bundle contract.
 
 ## Documentation
 

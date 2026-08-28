@@ -1,6 +1,7 @@
 # Action-background HLE evidence census
 
-Evidence ledger for `SPEC-bg-hle.md` BH1–BH8 and the later role/extent work.
+Evidence ledger for the bounded action-background provider and its later
+role/extent work.
 Sections preserve the dated evidence available at each checkpoint; later
 acceptance sections supersede earlier open questions without rewriting the
 historical measurements.

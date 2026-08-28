@@ -117,15 +117,10 @@ The project is ready for release when:
 
 ## Detailed technical references
 
-- [Widescreen survey](widescreen-survey.md)
-- [Action background coverage](bg-hle-census.md)
 - [Rendering engine and Diorama architecture](rendering-engine.md)
-- [Action room and editor architecture](action-room-loader-hle.md)
 - [Simulation architecture and integration seams](SEAMS.md)
-- [Effects implementation](effects-hook-investigation.md)
-- [Native audio channel architecture](snes-native-audio-channels.md)
-- [Settings system](settings-system.md)
+- [Player settings and asset replacement](manual.md)
 - [Save format](save-format.md)
-- [Build and packaging](BUILD_TOOLING.md)
+- [Game documentation index](README.md)
 - [ROM map](rom-map.md), [RAM map](ram-map.md), and
   [research symbols](research-symbol-map.md)

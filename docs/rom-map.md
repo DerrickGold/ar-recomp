@@ -154,7 +154,7 @@ important proof: types `$19-$1D` are zero, while `$1E-$27` resume with ten valid
 records; type `$21` points to record `$BB19` and exact handler `$BB25`.
 Tables `$A8F6-$E722` correspond to the six ordinary two-act kingdom regions.
 `$F39A` is Death Heim's distinct no-act boss-rush/final-boss table. Its `$19`
-layout (repaired + user-verified end-to-end 2026-07-14, bug-ledger #20): `$19=1` =
+layout, verified end-to-end on 2026-07-14, is: `$19=1` =
 teleport hub, whose spawn record `$F3C8` (handler `$F3D4`) stages the next boss
 via `$1A = $0347 + 2`; `$19=2..7` = the six boss arenas; `$19=8` = final boss.
 The rematch wrappers keep a Death Heim-local 12-byte spawn record in object

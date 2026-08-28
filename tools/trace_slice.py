@@ -132,7 +132,7 @@ def _meta_note(meta, tgt, m, x, sources=()):
             return [f"DO NOT REGISTER: ${addr} is the `ret:` continuation of an ACTIVE "
                     f"dispatch construct (bank{d['bank']}.cfg:{d['line']}: {d['text']}). "
                     f"The miss is the construct's benign host-unwind — registering it "
-                    f"causes nested re-entry per record (stack overflow; DEBUG.md §1 ⚠️). "
+                    f"causes nested re-entry per record (stack overflow). "
                     f"If m/x at the miss ({m},{x}) matches the loop width, nothing leaks."]
     # Heuristic for the same trap without a cfg marker: every miss source sits
     # inside the target's own web (within ±$200) → likely a mid-loop return.
@@ -142,7 +142,7 @@ def _meta_note(meta, tgt, m, x, sources=()):
         out.append(f"CAUTION: all miss sources sit within ±$200 of the target — "
                    f"possible mid-loop continuation (the B8C2 class). Verify the target is "
                    f"single-shot (runs to its own RTS / plain trampoline) BEFORE registering; "
-                   f"see DEBUG.md §1 ⚠️.")
+                   f"verify the dispatch registration shape.")
     variants = meta['functions'].get(tgt)
     want = f"_M{m}X{x}"
     if variants:
@@ -168,7 +168,7 @@ def _meta_note(meta, tgt, m, x, sources=()):
 def diagnose(ev, meta=None):
     """Correlate the root-event channels into a ranked hypothesis.
 
-    The m-leak decision tree, mechanized (DEBUG.md §1). Two independent root
+    The m-leak decision tree, mechanized. Two independent root
     classes, both handled first-class:
       (a) dispatch-miss (with or without a visible leak) — an RTS-trick
           continuation the recomp can't resume → register a cfg `func`. The

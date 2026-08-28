@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# cycle.sh — one-command debug loop for the ActRaiser recomp (DEBUG.md §1/§2).
+# cycle.sh — one-command debug loop for the ActRaiser recomp.
 #
 #   tools/cycle.sh              regen-if-needed -> build -> run -> auto-triage
 #   tools/cycle.sh --no-run     just regen-if-needed + build

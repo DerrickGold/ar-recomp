@@ -239,7 +239,7 @@ if(NOT MSVC)
         -Wno-unknown-pragmas
         -Wno-unused-parameter
         # A missing prototype is an error, not a warning. Every hand-written
-        # source passes; see docs/code-style.md "Verifying a change".
+        # source passes; render fixtures are intentionally built separately.
         -Werror=implicit-function-declaration
         -Werror=implicit-int)
     set_source_files_properties(
@@ -1420,7 +1420,7 @@ if(BUILD_TESTING)
         ENVIRONMENT "SDL_AUDIODRIVER=dummy"
         SKIP_RETURN_CODE 77)
 
-    # Fix C (SPEC-backdrop-clip.md): geometry of the framebuffer margin-gap
+    # Geometry of the framebuffer margin-gap
     # fill. Pure, so it needs neither SDL nor the PPU.
     add_executable(actraiser_ws_gap_test
         tests/actraiser_ws_gap_test.c
@@ -1432,7 +1432,7 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_ws_gap COMMAND actraiser_ws_gap_test)
 
-    # Fix B (SPEC-backdrop-clip.md): BG2 valid-span classification and the
+    # BG2 valid-span classification and the
     # skybox quad's UV range, including the no-op guarantee that a padded
     # margin reproduces the pre-fix UV values exactly.
     add_executable(actraiser_diorama_skybox_uv_test

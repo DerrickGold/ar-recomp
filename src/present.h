@@ -294,7 +294,7 @@ typedef struct FrameSlot {
   uint8_t hud_player_row_y;
   uint8_t hud_left_only_y;
   uint8_t extra_left_right;
-  /* Fix B (SPEC-backdrop-clip.md): the LIVE per-side margins the frame was
+  /* The LIVE per-side margins the frame was
    * rendered with (extra_left_right above is the fixed budget, which does not
    * narrow at a world bound). Latched by ActRaiser_LiveMargins rather than read
    * from g_ppu, which can be zeroed between the draw and this capture.

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """dis65.py — 65816 disassembler for the ActRaiser ROM (LoROM, headerless).
 
-Replaces the eyeball-hex-decode workflow (DEBUG.md toolbox). Tracks m/x through
+Replaces the eyeball-hex-decode workflow. Tracks m/x through
 SEP/REP, annotates call/branch targets, and marks gen_meta.json facts (function
 entries, decoder labels) inline so you can see registration state while reading.
 

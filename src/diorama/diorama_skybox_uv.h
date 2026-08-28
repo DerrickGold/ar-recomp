@@ -6,7 +6,7 @@
 
 #include "action/action_bg_plan.h"
 
-/* Fix B (SPEC-backdrop-clip.md): the skybox quad fills the viewport and maps its
+/* The skybox quad fills the viewport and maps its
  * U range over the FIXED capture span, but the PPU only ever renders within the
  * live per-side margin — which collapses to 0 as a finite world's camera reaches
  * its bound. The never-rendered columns are transparent, and the skybox draws

@@ -5,9 +5,8 @@
 #include "sim/sim_background_voxel_quality.h"
 #include "sim/sim_render_metadata.h"
 
-/* Live runtime settings — the first slice of the g_settings refactor described
- * in docs/settings-system.md (§3.1/§4). Existing cheat and widescreen behavior
- * gates are descriptor-backed here. Their enforcement was already per-frame,
+/* Live runtime settings. Existing cheat and widescreen behavior gates are
+ * descriptor-backed here. Their enforcement was already per-frame,
  * so the live fields replace cached getenv() values without moving the seams.
  *
  * Seeded once at boot from the same AR_* env vars the gates used to read, with
@@ -534,9 +533,9 @@ typedef struct Settings {
   /* 0-100, scales every reactive offset; 0 disables sway and holds the
    * baseline pose. */
   int diorama_reactive_strength;
-  /* B5 (followup doc): DioramaSkyMode selector — see the enum comment. */
+  /* DioramaSkyMode selector — see the enum comment. */
   int diorama_skybox;
-  /* Margin fix (SPEC-backdrop-clip.md): at a level's start/end the live
+  /* Widescreen edge-margin fix: at a level's start/end the live
    * widescreen margin collapses to 0, but every diorama consumer samples the
    * FIXED capture span — so the never-rendered columns showed as an opaque
    * black wedge at the screen edge. On: pad captured layers out to the full

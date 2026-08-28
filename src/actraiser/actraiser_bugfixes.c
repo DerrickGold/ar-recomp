@@ -1,8 +1,8 @@
 /* Optional bridge-limit enhancement. Completed bridges migrate from each
  * town's 128-record array into checksummed SRAM without losing support,
  * marks, rendering, or crossing state. The four HLE entry points below must
- * remain coordinated. Design, ROM mapping, and persistence details live in
- * docs/settings-system.md, docs/SEAMS.md, and docs/save-format.md. */
+ * remain coordinated. ROM mapping and persistence details live in
+ * docs/SEAMS.md and docs/save-format.md. */
 
 #include "actraiser_cell_map.h"
 #include "actraiser_town_metatile.h"

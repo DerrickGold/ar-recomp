@@ -2,8 +2,8 @@
  *
  * Shaders are authored once as GLSL in src/shaders/ and cross-compiled by
  * tools/build_shaders.py into committed headers carrying SPIR-V (Vulkan),
- * MSL (Metal), and DXIL (D3D12). See docs/BUILD_TOOLING.md "GPU shaders" for
- * why nothing compiles shaders at build time.
+ * MSL (Metal), and DXIL (D3D12). The checked-in blobs keep shader compilers
+ * out of ordinary game builds.
  *
  * This header exists so the format-selection rule lives in exactly one place:
  * it is used by diorama.c, crt_post.c and tests/shader_blob_test.c, and the

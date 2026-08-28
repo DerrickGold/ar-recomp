@@ -3,7 +3,7 @@ Scope
 
 This license covers the original source in this repository: the hand-written
 runtime (`src/*.c`/`*.h` outside `src/gen/`), the recompiler-directive files
-(`recomp/*.cfg`), tooling (`tools/`), and documentation (`docs/`, `DEBUG.md`,
+(`recomp/*.cfg`), tooling (`tools/`), and maintained documentation (`docs/`,
 `README.md`).
 
 It does **not** cover, and grants no rights to:

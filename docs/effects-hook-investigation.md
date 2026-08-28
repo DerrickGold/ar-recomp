@@ -492,8 +492,8 @@ pixel outside the authentic window — the ROM is using "just offscreen" to hide
 the Y range tops out at exactly the player's own screen line, so about 12% of casts start a
 star at the player's feet. Neither is visible on original hardware. At 446-wide with margin
 objects enabled the birth point is on screen, which reads as "stardust spawning in the ground".
-Accepted as authentic; see bug-ledger.md §33 for the full derivation, the measured/proven/
-predicted split, and why it is not OAM wrapping.
+This is accepted as authentic: the launch coordinates come directly from the
+handler and are not caused by OAM wrapping.
 
 Actors are also CREATED on the player with zero velocity before that handler relocates them,
 which is what "not retained at the player" above means. Presentation must distinguish the two

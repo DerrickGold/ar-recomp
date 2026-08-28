@@ -1,4 +1,4 @@
-/* Fix B (SPEC-backdrop-clip.md): BG2 valid-span classification and the skybox
+/* BG2 valid-span classification and the skybox
  * quad's UV range.
  *
  * The load-bearing assertion in here is the NO-OP one: wherever Fix A padded

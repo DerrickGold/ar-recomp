@@ -1,8 +1,7 @@
 # ActRaiser Recomp — Battery Save (SRAM) Format
 
 Map of ActRaiser's 8 KiB battery SRAM, for the save codec, persistence backend,
-and editing feature in [settings-system.md](settings-system.md) (`CAT_SAVE` /
-`APPLY_SAVE`). The
+and player-facing editor documented in [manual.md](manual.md#save-editor). The
 motivation is sim-mode testing: the `AR_WARP` path stages an act transition but
 **cannot reach sim-mode progress state** (population, per-region advancement,
 spells, lairs). Editing the save can.
@@ -24,7 +23,7 @@ authority: fields below also record our fixture, WRAM, or static-code evidence.
 
 Companion docs: [ram-map.md](ram-map.md) (the WRAM side — the game copies
 SRAM→WRAM on load; this is our best oracle for promoting fields to ✅),
-[settings-system.md](settings-system.md) (how editing is exposed),
+[manual.md](manual.md#save-editor) (how editing is exposed),
 [progress.md](progress.md) (region/act naming).
 
 **Legend:** ✅ Verified against our ROM and confirmed through in-game use.
@@ -414,9 +413,8 @@ Any write must be followed by a `SramChecksum()` recompute over the mutated
 buffer (§2). Skipping it means the game treats the save as corrupt.
 
 ### 5.3 Never edit mid-write
-Only mutate `g_sram` between frames (the single-threaded coroutine model in
-settings-system.md §7 guarantees this is safe) and never while the game is in
-the middle of its own save routine.
+Only mutate `g_sram` between frames, while the game-side coroutine is yielded,
+and never while the game is in the middle of its own save routine.
 
 ---
 

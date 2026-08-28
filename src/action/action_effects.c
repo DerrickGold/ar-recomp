@@ -302,7 +302,7 @@ static bool ReadActionObject(const uint8_t *wram, size_t wram_size,
      * bank | next<<8 ($3907 for live Magical Fire, not $0007), so the identity
      * test never matched and no spell was ever captured. Every other consumer
      * of this field already reads it 8-bit
-     * (actraiser_widescreen_sprites.c). See docs/bug-ledger.md §32. */
+     * (actraiser_widescreen_sprites.c). The animation bank is one byte. */
     .animation_bank = Read8(
         wram, wram_size, address + kActRaiserActionObject_AnimationBank),
     .animation_state = Read16(

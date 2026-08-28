@@ -2387,7 +2387,7 @@ static void TestMovingEdgePoliciesInVerticalMargins(void) {
   ppu_free(ppu);
 }
 
-/* Fix A (SPEC-backdrop-clip.md): a CAPTURED layer's synthesized mirror/repeat
+/* A CAPTURED layer's synthesized mirror/repeat
  * padding must reach the full centering budget, not stop at the live per-side
  * margin — otherwise a host that samples the whole fixed capture span reads
  * never-written (transparent) columns at a world bound.
