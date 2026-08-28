@@ -449,13 +449,16 @@ void PresentHudOverlayComposited(const FrameSlot *slot,
       &g_render_device, composite, NULL, &destination);
 }
 
-static void PresentMode7Composite(const FrameSlot *slot, SDL_Rect viewport) {
+static void PresentMode7Composite(const FrameSlot *slot,
+                                  ArRenderRectI viewport) {
   if (!ArRenderTexture_IsValid(g_m7_texture) || !slot->m7_active) return;
-  SDL_Rect src = { slot->visible_x0 * kHdMode7Scale, 0,
-                   slot->visible_width * kHdMode7Scale,
-                   slot->snes_height * kHdMode7Scale };
-  const ArRenderRectF source = ToRenderRectF(ToRenderRectI(src));
-  const ArRenderRectF destination = ToRenderRectF(ToRenderRectI(viewport));
+  const ArRenderRectI src = {
+    slot->visible_x0 * kHdMode7Scale, 0,
+    slot->visible_width * kHdMode7Scale,
+    slot->snes_height * kHdMode7Scale,
+  };
+  const ArRenderRectF source = ToRenderRectF(src);
+  const ArRenderRectF destination = ToRenderRectF(viewport);
   (void)ArRenderDevice_DrawTexture(
       &g_render_device, g_m7_texture, &source, &destination);
 }
@@ -463,7 +466,8 @@ static void PresentMode7Composite(const FrameSlot *slot, SDL_Rect viewport) {
 /* Draw every active HD replacement over the region its capture removed this
  * frame. Master brightness is resolved on the host texture so INIDISP fades
  * apply to the substituted art; forced blank suppresses it entirely. */
-static void PresentHdReplacements(const FrameSlot *slot, SDL_Rect viewport) {
+static void PresentHdReplacements(const FrameSlot *slot,
+                                  ArRenderRectI viewport) {
   if (slot->inidisp & 0x80) return;
 
   int vis_w = slot->visible_width;
@@ -484,28 +488,29 @@ static void PresentHdReplacements(const FrameSlot *slot, SDL_Rect viewport) {
     int dx1 = (int)((capture->x1 + extra - vis_x0) * scale_x + 0.5);
     int dy0 = (int)(capture->y0 * scale_y + 0.5);
     int dy1 = (int)(capture->y1 * scale_y + 0.5);
-    SDL_Rect dst = { viewport.x + dx0, viewport.y + dy0,
-                     dx1 - dx0, dy1 - dy0 };
+    const ArRenderRectI dst = {
+      viewport.x + dx0, viewport.y + dy0, dx1 - dx0, dy1 - dy0,
+    };
     if (dst.w <= 0 || dst.h <= 0) continue;
 
-    Uint8 mod = entry->brightness_mod
-        ? (Uint8)((slot->inidisp & 0xf) * 255 / 15) : 255;
+    const uint8_t mod = entry->brightness_mod
+        ? (uint8_t)((slot->inidisp & 0xf) * 255 / 15) : 255;
     const float modulation = (float)mod / 255.0f;
-    const ArRenderRectF destination = ToRenderRectF(ToRenderRectI(dst));
+    const ArRenderRectF destination = ToRenderRectF(dst);
     (void)ArRenderDevice_DrawTextureTinted(
         &g_render_device, entry->texture, NULL, &destination,
         (ArRenderColorF){modulation, modulation, modulation, 1.0f});
   }
 }
 
-static int InspectorScreenToOutputX(SDL_Rect viewport, double screen_x,
+static int InspectorScreenToOutputX(ArRenderRectI viewport, double screen_x,
                                     const FrameSlot *slot) {
   int visible_left = slot->visible_x0 - slot->ws_extra;
   return viewport.x + (int)((screen_x - visible_left) * viewport.w /
                             slot->visible_width + 0.5);
 }
 
-static int InspectorScreenToOutputY(SDL_Rect viewport, double screen_y,
+static int InspectorScreenToOutputY(ArRenderRectI viewport, double screen_y,
                                     const FrameSlot *slot) {
   return viewport.y + (int)(screen_y * viewport.h / slot->snes_height + 0.5);
 }
@@ -524,7 +529,7 @@ static int HudSourceToOutputY(const HudPresentationChunk *chunk, double source_y
 
 static bool HudHighlightToOutput(const HudPresentationChunk *chunk,
                                  int x0, int y0, int x1, int y1,
-                                 SDL_Rect *output) {
+                                 ArRenderRectI *output) {
   if (!chunk || !output) return false;
   x0 -= chunk->inspector_x_bias;
   x1 -= chunk->inspector_x_bias;
@@ -538,20 +543,21 @@ static bool HudHighlightToOutput(const HudPresentationChunk *chunk,
   int output_y0 = HudSourceToOutputY(chunk, y0);
   int output_x1 = HudSourceToOutputX(chunk, x1);
   int output_y1 = HudSourceToOutputY(chunk, y1);
-  *output = (SDL_Rect){
+  *output = (ArRenderRectI){
     output_x0, output_y0, output_x1 - output_x0, output_y1 - output_y0,
   };
   return output->w > 0 && output->h > 0;
 }
 
-static bool FindSelectedHudChunk(const FrameSlot *slot, SDL_Rect viewport,
+static bool FindSelectedHudChunk(const FrameSlot *slot,
+                                 ArRenderRectI viewport,
                                  HudPresentationChunk *selected) {
   if (slot->inspector_selection.kind == kInspectorPresentation_Base)
     return false;
   HudProjectionInputs in = BuildProjectionInputsFromSlot(slot);
   HudPresentationChunk chunks[kHudPresentationChunkCapacity];
   int count = ArHudLayout_BuildPresentationChunks(
-      ToRenderRectI(viewport), &in, chunks);
+      viewport, &in, chunks);
   for (int i = count - 1; i >= 0; i--) {
     const ArRenderRectI source = chunks[i].screen_source;
     if (chunks[i].inspector_kind != slot->inspector_selection.kind ||
@@ -566,7 +572,8 @@ static bool FindSelectedHudChunk(const FrameSlot *slot, SDL_Rect viewport,
   return false;
 }
 
-static void PresentSceneInspector(const FrameSlot *slot, SDL_Rect viewport) {
+static void PresentSceneInspector(const FrameSlot *slot,
+                                  ArRenderRectI viewport) {
   if (!slot->scene_inspector_enabled || !SceneInspector_HasSelection())
     return;
   int x = 0, y = 0;
@@ -614,11 +621,11 @@ static void PresentSceneInspector(const FrameSlot *slot, SDL_Rect viewport) {
 
   int x0, y0, x1, y1;
   if (SceneInspector_GetHighlight(&x0, &y0, &x1, &y1)) {
-    SDL_Rect rect;
+    ArRenderRectI rect;
     bool have_rect = hud_selection &&
         HudHighlightToOutput(&hud_chunk, x0, y0, x1, y1, &rect);
     if (!hud_selection) {
-      rect = (SDL_Rect){
+      rect = (ArRenderRectI){
         InspectorScreenToOutputX(viewport, x0, slot),
         InspectorScreenToOutputY(viewport, y0, slot),
         InspectorScreenToOutputX(viewport, x1, slot) -
@@ -654,7 +661,8 @@ static void PresentSceneInspector(const FrameSlot *slot, SDL_Rect viewport) {
     }
   }
   SettingsOverlay_RenderDebugPanel(
-      "SCENE INSPECTOR", SceneInspector_PanelText(), (SDL_Point){ px, py });
+      "SCENE INSPECTOR", SceneInspector_PanelText(),
+      (ArRenderPointI){ px, py });
 }
 
 static void UploadActionWinnerMask(ArRenderTexture *texture, int mirror,
@@ -1568,7 +1576,8 @@ static void DrawActionPlaneEffectFlat(
  * able to hide. Drawn last-but-one — above the game and the HUD, below the
  * settings overlay, in every presentation path — so it cannot be scrolled,
  * masked, or projected out of frame. */
-static void PresentCheatBadge(const FrameSlot *slot, SDL_Rect viewport) {
+static void PresentCheatBadge(const FrameSlot *slot,
+                              ArRenderRectI viewport) {
   if (!slot || !slot->magic_cycle_armed) return;
 
   static const char *const kSpells[] = {
@@ -1595,7 +1604,7 @@ static void PresentCheatBadge(const FrameSlot *slot, SDL_Rect viewport) {
  * mapping them here keeps the pure row/guide model independent of SDL and keeps
  * present.c isolated from the live tuner singleton. BG1 is cyan, BG2 orange. */
 static void PresentActionBgExtentGuides(const FrameSlot *slot,
-                                        SDL_Rect viewport) {
+                                        ArRenderRectI viewport) {
   if (!slot || !slot->action_bg_extent_guides || viewport.w <= 0 ||
       viewport.h <= 0 || slot->visible_width <= 0)
     return;
@@ -1698,13 +1707,10 @@ void PresentHostUi(const FrameSlot *slot, ArRenderRectI viewport,
                    double presentation_fps) {
   if (!slot || !ArRenderDevice_IsReady(&g_render_device)) return;
   if (!ArRenderOutput_UseFull(&g_render_device, NULL, NULL)) return;
-  const SDL_Rect native_viewport = {
-    viewport.x, viewport.y, viewport.w, viewport.h,
-  };
-  PresentActionBgExtentGuides(slot, native_viewport);
-  PresentSceneInspector(slot, native_viewport);
-  PresentCheatBadge(slot, native_viewport);
-  SettingsOverlay_Render(native_viewport);
+  PresentActionBgExtentGuides(slot, viewport);
+  PresentSceneInspector(slot, viewport);
+  PresentCheatBadge(slot, viewport);
+  SettingsOverlay_Render(viewport);
   PresentFpsCounter(slot, output_size, presentation_fps);
 }
 
@@ -2112,7 +2118,7 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
     return;
   }
 
-  PresentMode7Composite(slot, local_viewport);
+  PresentMode7Composite(slot, ToRenderRectI(local_viewport));
   DrawActionPlaneEffectFlat(
       slot, local_viewport, kActionEffectRenderLayer_Bg1Plane,
       slot->action_bg1_mask_valid, s_action_bg1_mask_texture,
@@ -2137,7 +2143,7 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
   EndActionHeat(slot, output_viewport);
   if (SessionFatal_Requested()) return;
   PresentHudOverlay(slot, ToRenderRectI(output_viewport));
-  PresentHdReplacements(slot, output_viewport);
+  PresentHdReplacements(slot, ToRenderRectI(output_viewport));
 }
 
 bool PresentAuthenticScene(const FrameSlot *slot, ArRenderRectI viewport) {
@@ -2204,7 +2210,7 @@ bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
     (float)(priority_viewport.y + priority_viewport.h - margin - height),
     (float)width, (float)height,
   };
-  const SDL_Rect frame = {
+  const ArRenderRectI frame = {
     (int)destination.x - frame_size,
     (int)destination.y - frame_size,
     width + frame_size * 2,

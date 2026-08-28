@@ -575,7 +575,7 @@ void SettingsOverlay_SetLayerPaletteProvider(
 
 /* Layout math stays integer (it also feeds the public panel-rect API), so
  * convert only at the portable draw call. */
-static ArRenderRectF ToRenderRect(SDL_Rect r) {
+static ArRenderRectF ToRenderRect(ArRenderRectI r) {
   return (ArRenderRectF){ (float)r.x, (float)r.y,
                           (float)r.w, (float)r.h };
 }
@@ -2715,15 +2715,15 @@ static int ScalePosition(int position, int scale_percent) {
       kPercentScale;
 }
 
-SDL_Rect LogicalRect(const MenuLayout *layout,
-                            int x, int y, int width, int height) {
+ArRenderRectI LogicalRect(const MenuLayout *layout,
+                          int x, int y, int width, int height) {
   int x0 = layout->origin_x + ScalePosition(x, layout->scale_percent);
   int y0 = layout->origin_y + ScalePosition(y, layout->scale_percent);
   int x1 = layout->origin_x +
            ScalePosition(x + width, layout->scale_percent);
   int y1 = layout->origin_y +
            ScalePosition(y + height, layout->scale_percent);
-  return (SDL_Rect){ x0, y0, x1 - x0, y1 - y0 };
+  return (ArRenderRectI){ x0, y0, x1 - x0, y1 - y0 };
 }
 
 static bool FillPixelRectChecked(int x, int y, int width, int height,
@@ -2749,13 +2749,13 @@ static void FillPixelRect(int x, int y, int width, int height,
 void FillLogicalRect(const MenuLayout *layout,
                             int x, int y, int width, int height,
                             uint32_t color) {
-  SDL_Rect rect = LogicalRect(layout, x, y, width, height);
+  ArRenderRectI rect = LogicalRect(layout, x, y, width, height);
   FillPixelRect(rect.x, rect.y, rect.w, rect.h, color);
 }
 
 static bool DrawDialogTileChecked(const MenuLayout *layout, int atlas_column,
                                   int atlas_row, int x, int y) {
-  SDL_Rect source = {
+  ArRenderRectI source = {
     atlas_column * kGlyphSize,
     atlas_row * kGlyphSize,
     kGlyphSize,
@@ -2772,10 +2772,10 @@ static bool DrawDialogPanelChecked(const MenuLayout *layout,
                                    int x, int y, int width, int height) {
   if (width < 16 || height < 16) return false;
   if (!ArRenderTexture_IsValid(s_dialog_frame_texture)) {
-    const SDL_Rect outer = LogicalRect(layout, x, y, width, height);
-    const SDL_Rect middle = LogicalRect(
+    const ArRenderRectI outer = LogicalRect(layout, x, y, width, height);
+    const ArRenderRectI middle = LogicalRect(
         layout, x + 2, y + 2, width - 4, height - 4);
-    const SDL_Rect inner = LogicalRect(
+    const ArRenderRectI inner = LogicalRect(
         layout, x + 4, y + 4, width - 8, height - 8);
     return FillPixelRectChecked(
                outer.x, outer.y, outer.w, outer.h, kFrameDark) &&
@@ -2785,7 +2785,7 @@ static bool DrawDialogPanelChecked(const MenuLayout *layout,
                inner.x, inner.y, inner.w, inner.h, kPanel);
   }
 
-  const SDL_Rect inner = LogicalRect(
+  const ArRenderRectI inner = LogicalRect(
       layout, x + kGlyphSize, y + kGlyphSize,
       width - kGlyphSize * 2, height - kGlyphSize * 2);
   if (!FillPixelRectChecked(
@@ -2820,7 +2820,7 @@ void DrawDialogPanel(const MenuLayout *layout,
   (void)DrawDialogPanelChecked(layout, x, y, width, height);
 }
 
-bool SettingsOverlay_DrawGameFrame(SDL_Rect rect, int scale) {
+bool SettingsOverlay_DrawGameFrame(ArRenderRectI rect, int scale) {
   if (!s_render_device || scale <= 0) return false;
   const int tile_size = kGlyphSize * scale;
   if (rect.w <= 0 || rect.h <= 0 ||
@@ -4014,7 +4014,7 @@ static void DrawLayerPalettePicker(const MenuLayout *layout) {
 }
 
 
-void SettingsOverlay_Render(SDL_Rect game_viewport) {
+void SettingsOverlay_Render(ArRenderRectI game_viewport) {
   if (!s_open || !s_render_device ||
       !ArRenderTexture_IsValid(s_font_textures[kText_Normal])) return;
   int output_width = 0;
@@ -4029,7 +4029,8 @@ void SettingsOverlay_Render(SDL_Rect game_viewport) {
    * suspended keeps getting one answer. Full output, not game_viewport: a page
    * of text wants the window, not the letterboxed 4:3 area the game sits in. */
   if (ManualIsOpen() && s_manual_hooks.render) {
-    s_manual_hooks.render((SDL_Rect){ 0, 0, output_width, output_height });
+    s_manual_hooks.render(
+        (ArRenderRectI){ 0, 0, output_width, output_height });
     return;
   }
 

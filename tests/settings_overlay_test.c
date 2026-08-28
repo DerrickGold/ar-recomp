@@ -743,7 +743,7 @@ int main(void) {
      * the checked draw seam with exact scaled-tile dimensions; it must render
      * both with a real ROM atlas and with the normal host-frame fallback used
      * by this test when AR_OVERLAY_TEST_ROM is absent. */
-    const SDL_Rect comparison_frame = { 80, 56, 176, 144 };
+    const ArRenderRectI comparison_frame = { 80, 56, 176, 144 };
     SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
     CHECK(SDL_RenderClear(renderer));
     CHECK(SettingsOverlay_DrawGameFrame(comparison_frame, 2));
@@ -787,7 +787,7 @@ int main(void) {
     SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
     SDL_RenderClear(renderer);
     SettingsOverlay_Render(
-        (SDL_Rect){0, 0, surface_width, surface_height});
+        (ArRenderRectI){0, 0, surface_width, surface_height});
     int logical_width = -1, logical_height = -1;
     SDL_RendererLogicalPresentation logical_mode =
         SDL_LOGICAL_PRESENTATION_LETTERBOX;
@@ -831,7 +831,8 @@ int main(void) {
       RowToKey("refresh_mode");
       SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
       SDL_RenderClear(renderer);
-      SettingsOverlay_Render((SDL_Rect){0, 0, surface_width, surface_height});
+      SettingsOverlay_Render(
+          (ArRenderRectI){0, 0, surface_width, surface_height});
       SDL_RenderPresent(renderer);
       CHECK(SDL_SaveBMP(surface, rpreview));
       CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
@@ -995,7 +996,7 @@ int main(void) {
     SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
     SDL_RenderClear(renderer);
     SettingsOverlay_Render(
-        (SDL_Rect){0, 0, surface_width, surface_height});
+        (ArRenderRectI){0, 0, surface_width, surface_height});
     SDL_RenderPresent(renderer);
     CHECK(SDL_SaveBMP(surface, reset_preview));
   }
@@ -1097,7 +1098,8 @@ int main(void) {
   if (renderer && controls_preview && controls_preview[0]) {
     SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
     SDL_RenderClear(renderer);
-    SettingsOverlay_Render((SDL_Rect){0, 0, surface_width, surface_height});
+    SettingsOverlay_Render(
+        (ArRenderRectI){0, 0, surface_width, surface_height});
     SDL_RenderPresent(renderer);
     CHECK(SDL_SaveBMP(surface, controls_preview));
   }
@@ -1171,7 +1173,7 @@ int main(void) {
     SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
     SDL_RenderClear(renderer);
     SettingsOverlay_Render(
-        (SDL_Rect){0, 0, surface_width, surface_height});
+        (ArRenderRectI){0, 0, surface_width, surface_height});
     SDL_RenderPresent(renderer);
     CHECK(SDL_SaveBMP(surface, save_preview));
   }
@@ -1230,7 +1232,7 @@ int main(void) {
   if (renderer) {
     int calls_before = s_inspector_info_calls;
     SettingsOverlay_Render(
-        (SDL_Rect){0, 0, surface_width, surface_height});
+        (ArRenderRectI){0, 0, surface_width, surface_height});
     CHECK(s_inspector_info_calls == calls_before + 1);
   }
   RowToKey("dump_scene_assets");
@@ -1333,7 +1335,8 @@ int main(void) {
   for (int section = 0; section < kDebugSectionCount; section++) {
     NavToSection(section);
     if (!renderer) continue;
-    SettingsOverlay_Render((SDL_Rect){0, 0, surface_width, surface_height});
+    SettingsOverlay_Render(
+        (ArRenderRectI){0, 0, surface_width, surface_height});
     int selected = -1, top = -1, visible = -1, total = -1;
     CHECK(SettingsOverlay_GetNavigationState(
         &selected, &top, &visible, &total));
@@ -1365,7 +1368,8 @@ int main(void) {
                preview_dir, section, tab);
       SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
       SDL_RenderClear(renderer);
-      SettingsOverlay_Render((SDL_Rect){0, 0, surface_width, surface_height});
+      SettingsOverlay_Render(
+          (ArRenderRectI){0, 0, surface_width, surface_height});
       SDL_RenderPresent(renderer);
       CHECK(SDL_SaveBMP(surface, path));
     }
@@ -1389,7 +1393,8 @@ int main(void) {
                  preview_dir, section, tab);
         SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
         SDL_RenderClear(renderer);
-        SettingsOverlay_Render((SDL_Rect){0, 0, surface_width, surface_height});
+        SettingsOverlay_Render(
+            (ArRenderRectI){0, 0, surface_width, surface_height});
         SDL_RenderPresent(renderer);
         CHECK(SDL_SaveBMP(surface, path));
       }
@@ -1426,12 +1431,12 @@ int main(void) {
         "OBJ#12 16X16 BASE$80 SUB$91 PAL4 PRI2 PIX7\n"
         "CANDIDATES; WINDOWS/COLOR MATH MAY MASK A LAYER\n"
         "LEFT CLICK INSPECT  RIGHT CLICK CLEAR  F3 DISABLE",
-        (SDL_Point){ surface_width / 2, surface_height - 1 });
+        (ArRenderPointI){ surface_width / 2, surface_height - 1 });
     SDL_RenderPresent(renderer);
     const char *debug_preview = getenv("AR_OVERLAY_DEBUG_TEST_BMP");
     if (debug_preview && debug_preview[0])
       CHECK(SDL_SaveBMP(surface, debug_preview));
-    SDL_Rect panel_before = {0};
+    ArRenderRectI panel_before = {0};
     CHECK(SettingsOverlay_GetDebugPanelRect(&panel_before));
     CHECK(panel_before.y < surface_height / 2);
     CHECK(panel_before.w < surface_width - 40);
@@ -1446,8 +1451,8 @@ int main(void) {
     CHECK(!SettingsOverlay_IsDebugPanelDragging());
     SettingsOverlay_RenderDebugPanel(
         "DEBUG", "FIRST LINE\nSECOND LINE",
-        (SDL_Point){ surface_width / 2, surface_height - 1 });
-    SDL_Rect panel_after = {0};
+        (ArRenderPointI){ surface_width / 2, surface_height - 1 });
+    ArRenderRectI panel_after = {0};
     CHECK(SettingsOverlay_GetDebugPanelRect(&panel_after));
     CHECK(panel_after.y != panel_before.y);
     CHECK(SettingsOverlay_BeginDebugPanelDrag(
@@ -1460,8 +1465,8 @@ int main(void) {
     SettingsOverlay_EndDebugPanelDrag();
     SettingsOverlay_RenderDebugPanel(
         "DEBUG", "FIRST LINE\nSECOND LINE",
-        (SDL_Point){ surface_width / 2, surface_height - 1 });
-    SDL_Rect panel_resized = {0};
+        (ArRenderPointI){ surface_width / 2, surface_height - 1 });
+    ArRenderRectI panel_resized = {0};
     CHECK(SettingsOverlay_GetDebugPanelRect(&panel_resized));
     CHECK(panel_resized.w < panel_after.w);
     CHECK(panel_resized.h < panel_after.h);

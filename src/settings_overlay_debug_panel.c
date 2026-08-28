@@ -38,9 +38,9 @@ static int ClampDebugPanelScale(int scale_percent) {
   return scale_percent;
 }
 
-static SDL_Rect s_debug_panel_rect;
-static SDL_Rect s_debug_panel_drag_rect;
-static SDL_Rect s_debug_panel_resize_rect;
+static ArRenderRectI s_debug_panel_rect;
+static ArRenderRectI s_debug_panel_drag_rect;
+static ArRenderRectI s_debug_panel_resize_rect;
 static bool s_debug_panel_visible;
 static bool s_debug_panel_dragging;
 static bool s_debug_panel_resizing;
@@ -67,7 +67,7 @@ void SettingsOverlayDebugPanel_Reset(void) {
 }
 
 void SettingsOverlay_RenderDebugPanel(const char *title, const char *text,
-                                      SDL_Point avoid_point) {
+                                      ArRenderPointI avoid_point) {
   if (!s_render_device || !ArRenderTexture_IsValid(s_debug_font_texture) ||
       !text || !text[0])
     return;
@@ -292,7 +292,7 @@ bool SettingsOverlay_IsDebugPanelDragging(void) {
   return s_debug_panel_dragging || s_debug_panel_resizing;
 }
 
-bool SettingsOverlay_GetDebugPanelRect(SDL_Rect *rect) {
+bool SettingsOverlay_GetDebugPanelRect(ArRenderRectI *rect) {
   if (!s_debug_panel_visible || !rect) return false;
   *rect = s_debug_panel_rect;
   return true;
