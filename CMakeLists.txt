@@ -1172,6 +1172,27 @@ if(BUILD_TESTING)
     set_tests_properties(actraiser_shader_blob PROPERTIES
         ENVIRONMENT "SDL_AUDIODRIVER=dummy")
 
+    # Game-facing semantic parameters must cross the backend boundary without
+    # exposing native shader state. Exercise the live SDL adapter's complete
+    # lazy-create/bind/unbind/reset/recreate lifecycle on a real GPU renderer.
+    add_executable(actraiser_diorama_effect_backend_sdl_test
+        tests/diorama_effect_backend_sdl_test.c
+        src/platform/sdl/diorama_effect_backend_sdl.c
+        src/platform/sdl/render_sdl.c
+        src/render/render_device.c
+    )
+    target_include_directories(actraiser_diorama_effect_backend_sdl_test
+        PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_diorama_effect_backend_sdl_test PRIVATE
+        SDL3::SDL3
+        actraiser_math
+    )
+    add_test(NAME actraiser_diorama_effect_backend_sdl
+        COMMAND actraiser_diorama_effect_backend_sdl_test)
+    set_tests_properties(actraiser_diorama_effect_backend_sdl PROPERTIES
+        ENVIRONMENT "SDL_AUDIODRIVER=dummy"
+        SKIP_RETURN_CODE 77)
+
     # Verify that the SDL render sequence stays on the SDL_Init thread. The
     # dummy driver and software renderer keep the test headless and ROM-free.
     add_executable(actraiser_main_thread_boot_test

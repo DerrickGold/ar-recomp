@@ -11,9 +11,10 @@
  * texel), edge_feather <= 0 skips the fade. So this one shader correctly
  * serves DOF-only, edge-AA-only, both, or neither.
  *
- * The uniform block is all scalars on purpose: it mirrors DofEdgeUniforms in
- * diorama.c field-for-field, so the std140 offsets and the C struct offsets
- * agree. Packing a pair into a vec2 here would shift every later member.
+ * The uniform block is all scalars on purpose: it mirrors the private upload
+ * block in platform/sdl/diorama_effect_backend_sdl.c field-for-field, so the
+ * std140 offsets and C offsets agree. Packing a pair into a vec2 here would
+ * shift every later member.
  *
  * SDL binding convention (SDL_gpu.h "Shader Resources"): fragment stage uses
  * set 2 for sampled textures and set 3 for uniform buffers; SDL's render
