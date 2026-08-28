@@ -6,8 +6,8 @@ static bool HasRequiredOps(const ArRenderBackendOps *ops) {
   return ops && ops->struct_size >= sizeof(*ops) &&
       ops->create_texture && ops->destroy_texture && ops->update_texture &&
       ops->set_render_target && ops->set_viewport && ops->set_clip_rect &&
-      ops->clear && ops->draw_texture && ops->draw_texture_tinted &&
-      ops->draw_geometry && ops->present && ops->last_error;
+      ops->clear && ops->draw_texture && ops->draw_geometry &&
+      ops->present && ops->last_error;
 }
 
 bool ArRenderDevice_Init(ArRenderDevice *device,
@@ -89,10 +89,8 @@ bool ArRenderDevice_DrawTexture(ArRenderDevice *device,
                                 ArRenderTexture texture,
                                 const ArRenderRectF *source,
                                 const ArRenderRectF *destination) {
-  return ArRenderDevice_IsReady(device) &&
-      ArRenderTexture_IsValid(texture) &&
-      device->ops->draw_texture(
-          device->context, texture, source, destination);
+  return ArRenderDevice_DrawTextureWithState(
+      device, texture, source, destination, NULL);
 }
 
 static bool NormalizedColor(ArRenderColorF color) {
@@ -102,15 +100,46 @@ static bool NormalizedColor(ArRenderColorF color) {
       color.a >= 0.0f && color.a <= 1.0f;
 }
 
+static bool ValidBlend(ArRenderBlendMode blend) {
+  return blend >= kArRenderBlendMode_Opaque &&
+      blend <= kArRenderBlendMode_Multiply;
+}
+
+static bool ValidDrawState(const ArRenderDrawState *state,
+                           bool geometry) {
+  if (!state) return true;
+  const ArRenderDrawStateFlags known =
+      kArRenderDrawState_Tint | kArRenderDrawState_Blend;
+  if (state->flags & ~known) return false;
+  if (geometry && (state->flags & kArRenderDrawState_Tint)) return false;
+  if ((state->flags & kArRenderDrawState_Tint) &&
+      !NormalizedColor(state->tint))
+    return false;
+  return !(state->flags & kArRenderDrawState_Blend) ||
+      ValidBlend(state->blend);
+}
+
+bool ArRenderDevice_DrawTextureWithState(
+    ArRenderDevice *device, ArRenderTexture texture,
+    const ArRenderRectF *source, const ArRenderRectF *destination,
+    const ArRenderDrawState *state) {
+  return ArRenderDevice_IsReady(device) &&
+      ArRenderTexture_IsValid(texture) && ValidDrawState(state, false) &&
+      device->ops->draw_texture(
+          device->context, texture, source, destination, state);
+}
+
 bool ArRenderDevice_DrawTextureTinted(ArRenderDevice *device,
                                       ArRenderTexture texture,
                                       const ArRenderRectF *source,
                                       const ArRenderRectF *destination,
                                       ArRenderColorF tint) {
-  return ArRenderDevice_IsReady(device) &&
-      ArRenderTexture_IsValid(texture) && NormalizedColor(tint) &&
-      device->ops->draw_texture_tinted(
-          device->context, texture, source, destination, tint);
+  const ArRenderDrawState state = {
+    .flags = kArRenderDrawState_Tint,
+    .tint = tint,
+  };
+  return ArRenderDevice_DrawTextureWithState(
+      device, texture, source, destination, &state);
 }
 
 bool ArRenderDevice_DrawGeometry(ArRenderDevice *device,
@@ -119,10 +148,19 @@ bool ArRenderDevice_DrawGeometry(ArRenderDevice *device,
                                  int vertex_count,
                                  const int32_t *indices,
                                  int index_count) {
+  return ArRenderDevice_DrawGeometryWithState(
+      device, texture, vertices, vertex_count, indices, index_count, NULL);
+}
+
+bool ArRenderDevice_DrawGeometryWithState(
+    ArRenderDevice *device, ArRenderTexture texture,
+    const ArRenderVertex2D *vertices, int vertex_count,
+    const int32_t *indices, int index_count,
+    const ArRenderDrawState *state) {
   return ArRenderDevice_IsReady(device) && vertices && vertex_count > 0 &&
-      indices && index_count > 0 &&
+      indices && index_count > 0 && ValidDrawState(state, true) &&
       device->ops->draw_geometry(device->context, texture, vertices,
-                                 vertex_count, indices, index_count);
+                                 vertex_count, indices, index_count, state);
 }
 
 bool ArRenderDevice_Present(ArRenderDevice *device) {

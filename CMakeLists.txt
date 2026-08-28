@@ -416,6 +416,21 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_render_device COMMAND actraiser_render_device_test)
 
+    add_executable(actraiser_render_sdl_state_test
+        tests/render_sdl_state_test.c
+        src/render/render_device.c
+        src/platform/sdl/render_sdl.c
+    )
+    target_include_directories(actraiser_render_sdl_state_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    target_link_libraries(actraiser_render_sdl_state_test PRIVATE
+        SDL3::SDL3
+        actraiser_math
+    )
+    add_test(NAME actraiser_render_sdl_state
+        COMMAND actraiser_render_sdl_state_test)
+
     add_executable(actraiser_camera_orbit_test
         tests/camera_orbit_test.c
         src/camera_orbit.c

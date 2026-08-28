@@ -11,14 +11,14 @@ typedef struct FakeBackend {
   int destroy_count;
   int update_count;
   int draw_texture_count;
-  int draw_texture_tinted_count;
   int draw_geometry_count;
   int set_render_target_count;
   int present_count;
   ArRenderTextureDesc last_desc;
   ArRenderRectI last_update;
   ArRenderTexture last_texture;
-  ArRenderColorF last_tint;
+  ArRenderDrawState last_draw_state;
+  bool last_draw_state_present;
 } FakeBackend;
 
 static bool CreateTexture(void *context, const ArRenderTextureDesc *desc,
@@ -76,36 +76,29 @@ static bool Clear(void *context, ArRenderColorF color) {
 
 static bool DrawTexture(void *context, ArRenderTexture texture,
                         const ArRenderRectF *source,
-                        const ArRenderRectF *destination) {
+                        const ArRenderRectF *destination,
+                        const ArRenderDrawState *state) {
   FakeBackend *backend = context;
   (void)source;
   (void)destination;
   backend->draw_texture_count++;
   backend->last_texture = texture;
+  backend->last_draw_state_present = state != NULL;
+  if (state) backend->last_draw_state = *state;
   return true;
 }
 
 static bool DrawGeometry(void *context, ArRenderTexture texture,
                          const ArRenderVertex2D *vertices, int vertex_count,
-                         const int32_t *indices, int index_count) {
+                         const int32_t *indices, int index_count,
+                         const ArRenderDrawState *state) {
   FakeBackend *backend = context;
   assert(vertices && vertex_count == 3);
   assert(indices && index_count == 3);
   backend->draw_geometry_count++;
   backend->last_texture = texture;
-  return true;
-}
-
-static bool DrawTextureTinted(void *context, ArRenderTexture texture,
-                              const ArRenderRectF *source,
-                              const ArRenderRectF *destination,
-                              ArRenderColorF tint) {
-  FakeBackend *backend = context;
-  (void)source;
-  (void)destination;
-  backend->draw_texture_tinted_count++;
-  backend->last_texture = texture;
-  backend->last_tint = tint;
+  backend->last_draw_state_present = state != NULL;
+  if (state) backend->last_draw_state = *state;
   return true;
 }
 
@@ -130,7 +123,6 @@ static const ArRenderBackendOps kFakeOps = {
   .set_clip_rect = SetClipRect,
   .clear = Clear,
   .draw_texture = DrawTexture,
-  .draw_texture_tinted = DrawTextureTinted,
   .draw_geometry = DrawGeometry,
   .present = Present,
   .last_error = LastError,
@@ -175,12 +167,37 @@ static void TestDeviceDispatchAndCapabilities(void) {
   assert(ArRenderDevice_DrawTexture(
       &device, texture, &source, NULL));
   assert(backend.draw_texture_count == 1);
+  assert(!backend.last_draw_state_present);
 
   const ArRenderColorF tint = {0.25f, 0.5f, 0.75f, 1.0f};
   assert(ArRenderDevice_DrawTextureTinted(
       &device, texture, &source, NULL, tint));
-  assert(backend.draw_texture_tinted_count == 1);
-  assert(memcmp(&backend.last_tint, &tint, sizeof(tint)) == 0);
+  assert(backend.draw_texture_count == 2);
+  assert(backend.last_draw_state_present);
+  assert(backend.last_draw_state.flags == kArRenderDrawState_Tint);
+  assert(memcmp(&backend.last_draw_state.tint, &tint, sizeof(tint)) == 0);
+
+  const ArRenderDrawState blend_state = {
+    .flags = kArRenderDrawState_Blend,
+    .blend = kArRenderBlendMode_Add,
+  };
+  assert(ArRenderDevice_DrawTextureWithState(
+      &device, texture, &source, NULL, &blend_state));
+  assert(backend.draw_texture_count == 3);
+  assert(backend.last_draw_state_present);
+  assert(backend.last_draw_state.flags == kArRenderDrawState_Blend);
+  assert(backend.last_draw_state.blend == kArRenderBlendMode_Add);
+
+  ArRenderDrawState invalid_state = {
+    .flags = kArRenderDrawState_Tint,
+    .tint = {1.01f, 1.0f, 1.0f, 1.0f},
+  };
+  assert(!ArRenderDevice_DrawTextureWithState(
+      &device, texture, &source, NULL, &invalid_state));
+  invalid_state = (ArRenderDrawState){.flags = UINT32_C(1) << 31};
+  assert(!ArRenderDevice_DrawTextureWithState(
+      &device, texture, &source, NULL, &invalid_state));
+  assert(backend.draw_texture_count == 3);
 
   const ArRenderTextureDesc target_desc = {
     .width = 640,
@@ -207,6 +224,19 @@ static void TestDeviceDispatchAndCapabilities(void) {
   assert(ArRenderDevice_DrawGeometry(
       &device, texture, vertices, 3, indices, 3));
   assert(backend.draw_geometry_count == 1);
+  assert(!backend.last_draw_state_present);
+  assert(ArRenderDevice_DrawGeometryWithState(
+      &device, texture, vertices, 3, indices, 3, &blend_state));
+  assert(backend.draw_geometry_count == 2);
+  assert(backend.last_draw_state_present);
+  assert(backend.last_draw_state.flags == kArRenderDrawState_Blend);
+  invalid_state = (ArRenderDrawState){
+    .flags = kArRenderDrawState_Tint,
+    .tint = {1.0f, 1.0f, 1.0f, 1.0f},
+  };
+  assert(!ArRenderDevice_DrawGeometryWithState(
+      &device, texture, vertices, 3, indices, 3, &invalid_state));
+  assert(backend.draw_geometry_count == 2);
   assert(ArRenderDevice_Present(&device));
   assert(backend.present_count == 1);
 
