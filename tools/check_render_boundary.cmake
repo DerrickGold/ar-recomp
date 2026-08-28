@@ -46,13 +46,14 @@ set(_resource_owner_files
     "${GAME_SOURCE_ROOT}/main.c"
     "${GAME_SOURCE_ROOT}/present.c"
     "${GAME_SOURCE_ROOT}/present_sim3d.c"
+    "${GAME_SOURCE_ROOT}/present_sim3d_internal.h"
     "${GAME_SOURCE_ROOT}/present_sim3d_effects.c"
     "${GAME_SOURCE_ROOT}/present_sim3d_shadows.c")
 set(_native_resource_violations "")
 foreach(_file IN LISTS _resource_owner_files)
     file(READ "${_file}" _contents)
     if(_contents MATCHES
-       "SDL_Texture[ \t]*\\*[ \t]*g_(diorama_textures|sim_obj_atlas_texture|sim3d_layer_textures|sim3d_flat_texture)")
+       "SDL_Texture[ \t]*\\*[ \t]*(g_(diorama_textures|sim_obj_atlas_texture|sim3d_layer_textures|sim3d_flat_texture)|s_sim_(underlay_texture|underlay_blur_texture|canvas_texture))")
         list(APPEND _native_resource_violations "${_file}")
     endif()
 endforeach()
@@ -61,4 +62,15 @@ if(_native_resource_violations)
     message(FATAL_ERROR
         "Persistent presentation resources regressed to SDL ownership:\n  "
         "${_formatted}\nUse ArRenderTexture and keep native access in the adapter bridge.")
+endif()
+
+# Shared presentation helpers are part of the game-side seam even while their
+# implementation translation units still contain transitional SDL paths.
+file(READ "${GAME_SOURCE_ROOT}/present_sim3d_internal.h"
+     _sim3d_internal_contents)
+if(_sim3d_internal_contents MATCHES
+   "SDL_Texture[ 	]*\\*[ 	]*(EnsureSimUnderlayTexture|SimUnderlayBlurTexture)")
+    message(FATAL_ERROR
+        "SIM underlay helpers regressed to native texture handles; "
+        "keep ArRenderTexture in the shared presentation contract.")
 endif()

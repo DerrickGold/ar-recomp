@@ -55,15 +55,19 @@ through the device, as do the standard projected SIM ground mesh, ordinary
 object billboards, half-add billboards, promoted map-plane geometry, clip
 state, solid backdrops, additive lightning flashes, and shared SIM/action
 effect batches. The shared SIM/world-navigation sky gradient now builds and
-submits one portable geometry batch. SIM effects generate portable vertices
-directly; action effects and their public projection contract do as well. The
-action-to-diorama projection implementation performs one point conversion at
-the still-native compositor boundary, and the private heat target retains one
-layout-compatible cast until render-target effects migrate.
+submits one portable geometry batch. The persistent world-map underlay, its
+downsampled blur, and the full-town canvas are device-owned textures whose CPU
+images upload without native texture mappings. Their projected extension
+meshes submit portable geometry, as do the world-navigation ground, active
+region haze, light treatment, and master fade. SIM effects generate portable
+vertices directly; action effects and their public projection contract do as
+well. The action-to-diorama projection implementation performs one point
+conversion at the still-native compositor boundary, and the private heat
+target retains one layout-compatible cast until render-target effects migrate.
 The custom two-pass rim-light blend still uses the SDL bridge because the
 portable blend vocabulary cannot describe its source/destination factors yet.
-SIM underlay/terrain geometry and the diorama compositor also still unwrap
-opaque resources through
+The background-voxel terrain/depth path and the diorama compositor still
+unwrap opaque resources through
 `src/platform/sdl/render_sdl.h` while those paths migrate. Diorama frame
 generation retains private SDL endpoint/target textures. The bridge is a
 transition aid, not part of the portable contract. New renderer-facing code

@@ -892,17 +892,20 @@ enum {
 };
 
 
-static SDL_Texture *s_sim_underlay_texture;
+static ArRenderTexture s_sim_underlay_texture;
 /* Downsampled copy of the same bake, upscaled with linear filtering to stand
  * in for a blur. The far field is out of focus rather than merely dim: a
  * distant thing that is sharp reads as a small thing nearby, which is exactly
  * the wrong statement about ground the camera can never reach. */
-static SDL_Texture *s_sim_underlay_blur_texture;
+static ArRenderTexture s_sim_underlay_blur_texture;
+static uint32_t
+    s_sim_underlay_blur_pixels[kSimUnderlayBlurPixels *
+                               kSimUnderlayBlurPixels];
 static uint32_t s_sim_underlay_serial;
 static uint32_t s_sim_underlay_blur_serial;
 static bool s_sim_underlay_alloc_failed;
 static bool s_sim_underlay_blur_unavailable;
-static SDL_Texture *s_sim_canvas_texture;
+static ArRenderTexture s_sim_canvas_texture;
 static uint32_t s_sim_canvas_uploaded_serial;
 typedef enum SimCanvasUploadState {
   kSimCanvasUpload_Uninitialized,
@@ -914,27 +917,31 @@ typedef enum SimCanvasUploadState {
 static SimCanvasUploadState s_sim_canvas_upload_state;
 
 static void DisableSimUnderlayBlur(void) {
-  SDL_DestroyTexture(s_sim_underlay_blur_texture);
-  s_sim_underlay_blur_texture = NULL;
+  ArRenderDevice_DestroyTexture(
+      &g_render_device, s_sim_underlay_blur_texture);
+  s_sim_underlay_blur_texture = ArRenderTexture_Invalid();
   s_sim_underlay_blur_serial = 0;
   s_sim_underlay_blur_unavailable = true;
 }
 
 static void RefreshSimUnderlayBlur(uint32_t serial) {
-  if (!s_sim_underlay_blur_texture || !serial) return;
-  void *pixels = NULL;
-  int pitch = 0;
-  const bool locked = SDL_LockTexture(
-      s_sim_underlay_blur_texture, NULL, &pixels, &pitch);
-  const bool refreshed = locked && pitch > 0 &&
-      SimWorldMap_Downsample(
-          (uint32_t *)pixels, pitch / (int)sizeof(uint32_t),
-          kSimUnderlayBlurDivisor);
-  if (locked) SDL_UnlockTexture(s_sim_underlay_blur_texture);
-  if (refreshed)
+  if (!ArRenderTexture_IsValid(s_sim_underlay_blur_texture) || !serial)
+    return;
+  const bool downsampled = SimWorldMap_Downsample(
+      s_sim_underlay_blur_pixels, kSimUnderlayBlurPixels,
+      kSimUnderlayBlurDivisor);
+  const bool refreshed = downsampled && ArRenderDevice_UpdateTexture(
+      &g_render_device, s_sim_underlay_blur_texture, NULL,
+      s_sim_underlay_blur_pixels,
+      kSimUnderlayBlurPixels * (int)sizeof(uint32_t));
+  if (refreshed) {
     s_sim_underlay_blur_serial = serial;
-  else
+    Sim3DPerformance_AddUpload(
+        (uint64_t)kSimUnderlayBlurPixels * kSimUnderlayBlurPixels *
+        sizeof(uint32_t));
+  } else {
     DisableSimUnderlayBlur();
+  }
 }
 
 typedef enum SimGroundMeshCacheKind {
@@ -960,8 +967,8 @@ typedef struct SimGroundMeshCache {
   bool has_exclude;
   SDL_FRect exclude;
   int vertex_count, index_count;
-  SDL_Vertex vertices[kSimUnderlayVertexCount];
-  int indices[kSimUnderlayIndexCount];
+  ArRenderVertex2D vertices[kSimUnderlayVertexCount];
+  int32_t indices[kSimUnderlayIndexCount];
 } SimGroundMeshCache;
 
 static SimGroundMeshCache s_sim_ground_mesh_cache[kSimGroundMeshCache_Count];
@@ -1032,28 +1039,20 @@ void UploadSimTownCanvas(void) {
   if (!serial ||
       s_sim_canvas_upload_state == kSimCanvasUpload_Unavailable)
     return;
-  if (!s_sim_canvas_texture) {
-    s_sim_canvas_texture = SDL_CreateTexture(
-        g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-        kSimTownCanvasPixels, kSimTownCanvasPixels);
-    if (!s_sim_canvas_texture) {
+  if (!ArRenderTexture_IsValid(s_sim_canvas_texture)) {
+    const ArRenderTextureDesc desc = {
+      .width = kSimTownCanvasPixels,
+      .height = kSimTownCanvasPixels,
+      .format = kArRenderPixelFormat_Argb8888,
+      .usage = kArRenderTextureUsage_Streaming,
+      .filter = kArRenderFilter_Linear,
+      .blend = kArRenderBlendMode_Alpha,
+    };
+    if (!ArRenderDevice_CreateTexture(
+            &g_render_device, &desc, &s_sim_canvas_texture)) {
       s_sim_canvas_upload_state = kSimCanvasUpload_Unavailable;
       fprintf(stderr, "[sim3d-canvas] town canvas texture unavailable: %s\n",
-              SDL_GetError());
-      return;
-    }
-    /* Matches the ground mesh's own sampling: this is the same captured
-     * pixels, just held in town space instead of screen space. */
-    if (!SDL_SetTextureBlendMode(
-            s_sim_canvas_texture, SDL_BLENDMODE_BLEND) ||
-        !SDL_SetTextureScaleMode(
-            s_sim_canvas_texture, SDL_SCALEMODE_LINEAR)) {
-      fprintf(stderr,
-              "[sim3d-canvas] town canvas texture setup failed: %s\n",
-              SDL_GetError());
-      SDL_DestroyTexture(s_sim_canvas_texture);
-      s_sim_canvas_texture = NULL;
-      s_sim_canvas_upload_state = kSimCanvasUpload_Unavailable;
+              ArRenderDevice_LastError(&g_render_device));
       return;
     }
     /* A new streaming texture holds uninitialized memory, and from here on
@@ -1061,9 +1060,10 @@ void UploadSimTownCanvas(void) {
      * covers would keep whatever garbage the driver allocated (it showed as
      * magenta). Publish the complete current canvas once, then consume the
      * already-covered dirty regions so the first frame is not uploaded twice. */
-    if (SDL_UpdateTexture(s_sim_canvas_texture, NULL,
-                          SimTownCanvas_Pixels(),
-                          kSimTownCanvasPixels * (int)sizeof(uint32_t))) {
+    if (ArRenderDevice_UpdateTexture(
+            &g_render_device, s_sim_canvas_texture, NULL,
+            SimTownCanvas_Pixels(),
+            kSimTownCanvasPixels * (int)sizeof(uint32_t))) {
       Sim3DPerformance_AddUpload(
           (uint64_t)kSimTownCanvasPixels * kSimTownCanvasPixels *
           sizeof(uint32_t));
@@ -1078,15 +1078,17 @@ void UploadSimTownCanvas(void) {
     return;
   }
   if (s_sim_canvas_upload_state == kSimCanvasUpload_RetryFull) {
-    if (!SDL_UpdateTexture(s_sim_canvas_texture, NULL,
-                           SimTownCanvas_Pixels(),
-                           kSimTownCanvasPixels * (int)sizeof(uint32_t))) {
+    if (!ArRenderDevice_UpdateTexture(
+            &g_render_device, s_sim_canvas_texture, NULL,
+            SimTownCanvas_Pixels(),
+            kSimTownCanvasPixels * (int)sizeof(uint32_t))) {
       fprintf(stderr,
               "[sim3d-canvas] full canvas retry failed; disabling the "
               "optional town extension for this renderer: %s\n",
-              SDL_GetError());
-      SDL_DestroyTexture(s_sim_canvas_texture);
-      s_sim_canvas_texture = NULL;
+              ArRenderDevice_LastError(&g_render_device));
+      ArRenderDevice_DestroyTexture(
+          &g_render_device, s_sim_canvas_texture);
+      s_sim_canvas_texture = ArRenderTexture_Invalid();
       s_sim_canvas_uploaded_serial = 0;
       s_sim_canvas_upload_state = kSimCanvasUpload_Unavailable;
       return;
@@ -1103,8 +1105,9 @@ void UploadSimTownCanvas(void) {
   int x = 0, y = 0, w = 0, h = 0;
   const uint32_t *pixels = SimTownCanvas_Pixels();
   while (SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h)) {
-    if (!SDL_UpdateTexture(
-            s_sim_canvas_texture, &(SDL_Rect){ x, y, w, h },
+    const ArRenderRectI destination = {x, y, w, h};
+    if (!ArRenderDevice_UpdateTexture(
+            &g_render_device, s_sim_canvas_texture, &destination,
             pixels + (size_t)y * kSimTownCanvasPixels + (size_t)x,
             kSimTownCanvasPixels * (int)sizeof(uint32_t))) {
       /* Some earlier dirty rectangles may already have landed. Suppress the
@@ -1123,50 +1126,47 @@ void UploadSimTownCanvas(void) {
 /* Rebuilt only when the baked image would differ, which the serial reports.
  * The image is town-independent — only where it is sampled changes when the
  * player moves between towns — so a town change costs nothing here. */
-SDL_Texture *EnsureSimUnderlayTexture(const FrameSlot *slot) {
-  const bool sharp_current = s_sim_underlay_texture &&
+ArRenderTexture EnsureSimUnderlayTexture(const FrameSlot *slot) {
+  const bool sharp_current =
+      ArRenderTexture_IsValid(s_sim_underlay_texture) &&
       s_sim_underlay_serial == slot->sim.underlay_serial;
-  const bool blur_current = !s_sim_underlay_blur_texture ||
+  const bool blur_current =
+      !ArRenderTexture_IsValid(s_sim_underlay_blur_texture) ||
       s_sim_underlay_blur_serial == slot->sim.underlay_serial;
   if (sharp_current && blur_current)
     return s_sim_underlay_texture;
-  if (s_sim_underlay_alloc_failed) return NULL;
+  if (s_sim_underlay_alloc_failed) return ArRenderTexture_Invalid();
 
-  if (!s_sim_underlay_texture) {
-    s_sim_underlay_texture = SDL_CreateTexture(
-        g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-        kSimWorldMapPixels, kSimWorldMapPixels);
-    if (!s_sim_underlay_texture) {
+  if (!ArRenderTexture_IsValid(s_sim_underlay_texture)) {
+    const ArRenderTextureDesc desc = {
+      .width = kSimWorldMapPixels,
+      .height = kSimWorldMapPixels,
+      .format = kArRenderPixelFormat_Argb8888,
+      .usage = kArRenderTextureUsage_Streaming,
+      .filter = kArRenderFilter_Nearest,
+      .blend = kArRenderBlendMode_Alpha,
+    };
+    if (!ArRenderDevice_CreateTexture(
+            &g_render_device, &desc, &s_sim_underlay_texture)) {
       s_sim_underlay_alloc_failed = true;
       fprintf(stderr, "[sim3d-underlay] world map texture unavailable: %s\n",
-              SDL_GetError());
-      return NULL;
-    }
-    /* Nearest keeps the world map's own 8x8 tile grid crisp under the 2x
-     * upscale, which reads as a deliberate lower-detail layer rather than a
-     * blurred copy of the town. */
-    if (!SDL_SetTextureBlendMode(
-            s_sim_underlay_texture, SDL_BLENDMODE_BLEND) ||
-        !SDL_SetTextureScaleMode(
-            s_sim_underlay_texture, SDL_SCALEMODE_NEAREST)) {
-      fprintf(stderr, "[sim3d-underlay] world map texture setup failed: %s\n",
-              SDL_GetError());
-      SDL_DestroyTexture(s_sim_underlay_texture);
-      s_sim_underlay_texture = NULL;
-      s_sim_underlay_alloc_failed = true;
-      return NULL;
+              ArRenderDevice_LastError(&g_render_device));
+      return ArRenderTexture_Invalid();
     }
   }
 
-  if (!s_sim_underlay_blur_texture && !s_sim_underlay_blur_unavailable) {
-    s_sim_underlay_blur_texture = SDL_CreateTexture(
-        g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-        kSimUnderlayBlurPixels, kSimUnderlayBlurPixels);
-    if (s_sim_underlay_blur_texture &&
-        SDL_SetTextureBlendMode(
-            s_sim_underlay_blur_texture, SDL_BLENDMODE_BLEND) &&
-        SDL_SetTextureScaleMode(
-            s_sim_underlay_blur_texture, SDL_SCALEMODE_LINEAR)) {
+  if (!ArRenderTexture_IsValid(s_sim_underlay_blur_texture) &&
+      !s_sim_underlay_blur_unavailable) {
+    const ArRenderTextureDesc desc = {
+      .width = kSimUnderlayBlurPixels,
+      .height = kSimUnderlayBlurPixels,
+      .format = kArRenderPixelFormat_Argb8888,
+      .usage = kArRenderTextureUsage_Streaming,
+      .filter = kArRenderFilter_Linear,
+      .blend = kArRenderBlendMode_Alpha,
+    };
+    if (ArRenderDevice_CreateTexture(
+            &g_render_device, &desc, &s_sim_underlay_blur_texture)) {
       /* Linear is the whole trick: the box-downsampled image scaled back up
        * with bilinear filtering is a cheap, stable blur, and it costs one
        * texture rather than a multi-tap pass over the full 1024 square. */
@@ -1182,41 +1182,22 @@ SDL_Texture *EnsureSimUnderlayTexture(const FrameSlot *slot) {
     return s_sim_underlay_texture;
   }
 
-  void *pixels = NULL;
-  int pitch = 0;
-  if (!SDL_LockTexture(s_sim_underlay_texture, NULL, &pixels, &pitch))
-    return NULL;
-  bool baked = SimWorldMap_Bake((uint32_t *)pixels,
-                                pitch / (int)sizeof(uint32_t));
-  /* Unlock BEFORE touching the blur texture. The previous version kept this
-   * lock open and read the just-baked pixels back out of it to build the mip,
-   * which is a documented contract violation twice over: SDL_LockTexture is
-   * WRITE-ONLY ("the pixels made available for editing don't necessarily
-   * contain the old texture data", SDL_render.h), and two streaming locks were
-   * held at once with the inner one released first.
-   *
-   * It worked on macOS and garbled on Steam Deck for the reason that class of
-   * bug always does: Metal hands back a persistently-mapped buffer that reads
-   * back fine, while a Vulkan/Mesa backend can hand back write-combined or
-   * staging memory whose reads return unpredictable content — so the mip was
-   * built from partly-garbage source and the upscaled blur smeared it across
-   * the top of the 1024 square. Same hazard as finding O2 (the town canvas
-   * bake), in the read direction rather than the write direction.
-   *
-   * The mip now comes from SimWorldMap_Downsample, which reads the module's own
-   * persistent CPU image. That costs no extra memory: the image already exists
-   * and is what this lock was a copy OF. */
-  SDL_UnlockTexture(s_sim_underlay_texture);
-  if (!baked) return NULL;
+  const uint32_t *pixels = SimWorldMap_BakedPixels();
+  if (!pixels || !ArRenderDevice_UpdateTexture(
+          &g_render_device, s_sim_underlay_texture, NULL, pixels,
+          kSimWorldMapPixels * (int)sizeof(uint32_t)))
+    return ArRenderTexture_Invalid();
+  Sim3DPerformance_AddUpload(
+      (uint64_t)kSimWorldMapPixels * kSimWorldMapPixels * sizeof(uint32_t));
   RefreshSimUnderlayBlur(slot->sim.underlay_serial);
   s_sim_underlay_serial = slot->sim.underlay_serial;
   return s_sim_underlay_texture;
 }
 
-SDL_Texture *SimUnderlayBlurTexture(uint32_t serial) {
+ArRenderTexture SimUnderlayBlurTexture(uint32_t serial) {
   return serial && s_sim_underlay_blur_serial == serial
       ? s_sim_underlay_blur_texture
-      : NULL;
+      : ArRenderTexture_Invalid();
 }
 
 /* Draws one texture as an extension of the ground plane. `texture_x_at_zero`
@@ -1229,7 +1210,7 @@ SDL_Texture *SimUnderlayBlurTexture(uint32_t serial) {
  * are omitted only where an alpha mask is active: drawing both layers there
  * would apply the same feather twice, while omitting the fully opaque backing
  * would expose the underlay through transparent BG1 priority pixels. */
-static void DrawSimGroundExtension(SDL_Texture *texture,
+static void DrawSimGroundExtension(ArRenderTexture texture,
                                    float texture_x_at_zero,
                                    float texture_y_at_zero, float span,
                                    uint8_t alpha, SDL_Rect source,
@@ -1237,15 +1218,17 @@ static void DrawSimGroundExtension(SDL_Texture *texture,
                                    const SimCullFade *fade,
                                    const SDL_FRect *exclude,
                                    SimGroundMeshCacheKind cache_kind) {
-  if (!texture || !alpha || source.w <= 0 || source.h <= 0) return;
+  if (!ArRenderTexture_IsValid(texture) || !alpha ||
+      source.w <= 0 || source.h <= 0)
+    return;
   if (cache_kind < 0 || cache_kind >= kSimGroundMeshCache_Count) return;
   SimGroundMeshCache *cache = &s_sim_ground_mesh_cache[cache_kind];
   if (SimGroundMeshCacheMatches(
           cache, texture_x_at_zero, texture_y_at_zero, span, alpha,
           source, viewport, matrix, fade, exclude)) {
-    if (SDL_RenderGeometry(g_renderer, texture, cache->vertices,
-                           cache->vertex_count, cache->indices,
-                           cache->index_count)) {
+    if (ArRenderDevice_DrawGeometry(
+            &g_render_device, texture, cache->vertices,
+            cache->vertex_count, cache->indices, cache->index_count)) {
       Sim3DPerformance_AddDraw((uint64_t)cache->vertex_count,
                                (uint64_t)cache->index_count);
     }
@@ -1294,8 +1277,8 @@ static void DrawSimGroundExtension(SDL_Texture *texture,
   y1 = source.y + (0.5f - world_y1) * source.h;
 
   float base_alpha = (float)alpha / 255.0f;
-  SDL_Vertex *vertices = cache->vertices;
-  int *indices = cache->indices;
+  ArRenderVertex2D *vertices = cache->vertices;
+  int32_t *indices = cache->indices;
   int vertex_count = 0, index_count = 0;
   float x_coordinates[kSimUnderlayMaxColumns + 1];
   float y_coordinates[kSimUnderlayMaxRows + 1];
@@ -1335,12 +1318,12 @@ static void DrawSimGroundExtension(SDL_Texture *texture,
        * holds rather than mixing it with a colour of its own. That is the
        * difference the fade could not express. */
       float bright = fade ? 1.0f - away * fade->dim : 1.0f;
-      SDL_FColor tint = {
+      ArRenderColorF tint = {
         bright, bright, bright,
         base_alpha * (fade ? 1.0f - away * fade->fade : 1.0f) *
             extent_alpha,
       };
-      vertices[vertex_count++] = (SDL_Vertex){
+      vertices[vertex_count++] = (ArRenderVertex2D){
         { projected.x, projected.y }, tint,
         { (texture_x - texture_x_at_zero) / span,
           (texture_y - texture_y_at_zero) / span },
@@ -1378,8 +1361,9 @@ static void DrawSimGroundExtension(SDL_Texture *texture,
   SimGroundMeshCacheSetKey(
       cache, texture_x_at_zero, texture_y_at_zero, span, alpha,
       source, viewport, matrix, fade, exclude);
-  if (SDL_RenderGeometry(g_renderer, texture, vertices, vertex_count,
-                         indices, index_count)) {
+  if (ArRenderDevice_DrawGeometry(
+          &g_render_device, texture, vertices, vertex_count,
+          indices, index_count)) {
     Sim3DPerformance_AddDraw(
         (uint64_t)vertex_count, (uint64_t)index_count);
   }
@@ -1605,8 +1589,8 @@ static void DrawSimWorldUnderlay(const FrameSlot *slot, SDL_Rect source,
   if (!slot->sim.underlay_serial ||
       slot->sim.underlay_haze_pct >= kPercentScale)
     return;
-  SDL_Texture *texture = EnsureSimUnderlayTexture(slot);
-  if (!texture) return;
+  ArRenderTexture texture = EnsureSimUnderlayTexture(slot);
+  if (!ArRenderTexture_IsValid(texture)) return;
   /* Two captured pixels per world-map pixel: the world map is the town at
    * half linear resolution. */
   float origin_x = (float)slot->sim.underlay_origin_tile_x *
@@ -1653,8 +1637,8 @@ static void DrawSimWorldUnderlay(const FrameSlot *slot, SDL_Rect source,
    * to and the far field would go transparent instead of dark. */
   SimCullFade blurred_dim = focus;
   blurred_dim.fade = 0.0f;
-  SDL_Texture *blur = SimUnderlayBlurTexture(slot->sim.underlay_serial);
-  bool defocus = blur &&
+  ArRenderTexture blur = SimUnderlayBlurTexture(slot->sim.underlay_serial);
+  bool defocus = ArRenderTexture_IsValid(blur) &&
       slot->sim.underlay_defocus_pct != 0 &&
       (slot->sim.effective_features & kSimFeature_CullHaze) != 0;
   if (defocus) {
@@ -1685,18 +1669,21 @@ static void DrawSimTownCanvas(const FrameSlot *slot, SDL_Rect source,
                               const SDL_FRect *exclude,
                               bool background_voxels) {
   if (!slot->sim.town_canvas_serial) return;
-  SDL_Texture *canvas = NULL;
+  ArRenderTexture canvas = ArRenderTexture_Invalid();
+  SDL_Texture *native_terrain_canvas = NULL;
   if (background_voxels) {
-    canvas = SimBackgroundVoxelRenderer_GroundTexture(
+    native_terrain_canvas = SimBackgroundVoxelRenderer_GroundTexture(
         slot->sim.background_voxel_serial);
+    if (native_terrain_canvas)
+      canvas = ArSdlRenderBackend_BorrowTexture(native_terrain_canvas);
   } else {
-    if (!s_sim_canvas_texture ||
+    if (!ArRenderTexture_IsValid(s_sim_canvas_texture) ||
         s_sim_canvas_upload_state != kSimCanvasUpload_Valid ||
         s_sim_canvas_uploaded_serial != slot->sim.town_canvas_serial)
       return;
     canvas = s_sim_canvas_texture;
   }
-  if (!canvas) return;
+  if (!ArRenderTexture_IsValid(canvas)) return;
   float extent_x0 =
       (float)slot->sim.underlay_screen_x0 - (float)slot->sim.camera_x;
   float extent_y0 = -(float)slot->sim.camera_y;
@@ -1727,7 +1714,8 @@ static void DrawSimTownCanvas(const FrameSlot *slot, SDL_Rect source,
    * background-voxel canvas.  The stock canvas path remains the control, and
    * an unexpected live-plane exclusion falls back instead of drawing twice. */
   if (background_voxels && !exclude && DrawSimTownTerrain(
-          canvas, slot, extent_x0, extent_y0, source, viewport, matrix,
+          native_terrain_canvas, slot, extent_x0, extent_y0, source,
+          viewport, matrix,
           &fade))
     return;
 #endif
@@ -2239,17 +2227,17 @@ void PresentSim3D_ResetResources(void) {
   s_sim_rim_w = s_sim_rim_h = 0;
   s_sim_rim_unavailable = false;
   SDL_SetAtomicInt(&s_sim_rim_mask_supported, 1);
-  if (s_sim_underlay_texture) SDL_DestroyTexture(s_sim_underlay_texture);
-  s_sim_underlay_texture = NULL;
-  if (s_sim_underlay_blur_texture)
-    SDL_DestroyTexture(s_sim_underlay_blur_texture);
-  s_sim_underlay_blur_texture = NULL;
+  ArRenderDevice_DestroyTexture(&g_render_device, s_sim_underlay_texture);
+  s_sim_underlay_texture = ArRenderTexture_Invalid();
+  ArRenderDevice_DestroyTexture(
+      &g_render_device, s_sim_underlay_blur_texture);
+  s_sim_underlay_blur_texture = ArRenderTexture_Invalid();
   s_sim_underlay_serial = 0;
   s_sim_underlay_blur_serial = 0;
   s_sim_underlay_alloc_failed = false;
   s_sim_underlay_blur_unavailable = false;
-  if (s_sim_canvas_texture) SDL_DestroyTexture(s_sim_canvas_texture);
-  s_sim_canvas_texture = NULL;
+  ArRenderDevice_DestroyTexture(&g_render_device, s_sim_canvas_texture);
+  s_sim_canvas_texture = ArRenderTexture_Invalid();
   s_sim_canvas_uploaded_serial = 0;
   s_sim_canvas_upload_state = kSimCanvasUpload_Uninitialized;
   memset(s_sim_ground_mesh_cache, 0, sizeof(s_sim_ground_mesh_cache));

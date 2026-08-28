@@ -226,6 +226,12 @@ bool SimWorldMap_Bake(uint32_t *pixels, int pitch_pixels) {
   return true;
 }
 
+const uint32_t *SimWorldMap_BakedPixels(void) {
+  if (!g_world.available) return NULL;
+  RefreshPersistentImage();
+  return g_world.pixels;
+}
+
 bool SimWorldMap_Downsample(uint32_t *pixels, int pitch_pixels, int divisor) {
   if (!g_world.available || !pixels || divisor < 1) return false;
   if (kSimWorldMapPixels % divisor != 0) return false;
