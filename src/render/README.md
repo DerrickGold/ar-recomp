@@ -110,6 +110,8 @@ frame, Mode 7 replacement, action effects, and forced-blank clear. Heat
 refraction sizes its intermediate target from the portable aspect-fit query
 and restores it through the scoped target/output contracts without capturing
 native draw state or relying on logical-presentation transforms.
+The diorama's flat HUD reconstruction target is likewise scoped through the
+device and restores the actual caller target instead of assuming a CRT target.
 Action heat refraction is a portable mesh warp rather than a custom shader; its
 viewport-sized texture is now device-owned and uses the scoped-target contract
 plus portable geometry for both its warped and fallback resolves. CRT still
