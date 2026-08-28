@@ -5,7 +5,6 @@
  * The noise and the layer table are shared with the world-map sky through
  * present_sim3d_internal.h, so the two skies cannot drift apart in look. */
 
-#include <SDL3/SDL.h>
 #include "present_sim3d_clouds.h"
 #include "present_sim3d_internal.h"
 #include "present_sim3d_project.h"
@@ -13,6 +12,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "host/host_clock.h"
 #include "sim/sim_world_map.h"
 #include "sim/sim3d.h"
 #include "sim/sim3d_performance.h"
@@ -164,8 +164,8 @@ static ArRenderTexture EnsureSimCloudTexture(void) {
   return s_sim_cloud_texture;
 }
 
-void DrawSimCloudShroud(const FrameSlot *slot, SDL_Rect source,
-                               SDL_Rect viewport, const float matrix[16]) {
+void DrawSimCloudShroud(const FrameSlot *slot, ArRenderRectI source,
+                        ArRenderRectI viewport, const float matrix[16]) {
   if (!slot->sim.underlay_serial || !slot->sim.cloud_opacity_pct ||
       source.w <= 0 || source.h <= 0)
     return;
@@ -238,9 +238,9 @@ void DrawSimCloudShroud(const FrameSlot *slot, SDL_Rect source,
    *
    * There is deliberately no untextured floor pass. One used to sit at the
    * end, weighted by cover^3, to force the far field opaque where the banks
-   * failed to meet -- an SDL_RenderGeometry call with a NULL texture, which
-   * is solid white modulated only by vertex alpha. It did what it said and
-   * whited out the view, and the premise was wrong anyway: guaranteeing
+   * failed to meet -- an untextured solid-white geometry pass modulated only
+   * by vertex alpha. It did what it said and whited out the view, and the
+   * premise was wrong anyway: guaranteeing
    * opacity is no longer this pass's job. Per-record cover hides what the
    * sprite window takes away, and the cull haze marks the boundary
    * continuously, so the banks here are free to be thin and gappy. */
@@ -256,7 +256,7 @@ void DrawSimCloudShroud(const FrameSlot *slot, SDL_Rect source,
    * anything, it keeps moving through a pause, and game_frame is a 16-bit
    * counter that would jump the whole sky every eighteen minutes when it
    * wrapped. */
-  uint64_t elapsed_ms = SDL_GetTicks();
+  uint64_t elapsed_ms = HostClock_Milliseconds();
   float drift = (float)slot->sim.cloud_drift_pct / (float)kPercentScale;
 
   static ArRenderVertex2D vertices[kSimCloudVertexCount];

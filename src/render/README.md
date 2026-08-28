@@ -105,8 +105,11 @@ through the host clock boundary. Its coordinates stay local to the selected
 game viewport, so platform adapters do not need an SDL-style logical
 presentation transform.
 The enhanced SIM-town frame owner now uses that same viewport-local scope and
-portable full-output master fade. Its remaining native dependencies are
-internal effect targets and meshes rather than window/output orchestration.
+portable full-output master fade. Its stage contracts use portable rectangle
+types, opaque texture handles, and the host clock; they do not expose SDL
+headers or native geometry to effects, projection, terrain, cloud, shadow, or
+frame-orchestration code. GPU-only depth and shader adapters remain isolated
+behind platform operations.
 The ordinary flat/action frame owner now uses the same scope for its base PPU
 frame, Mode 7 replacement, action effects, and forced-blank clear. Heat
 refraction sizes its intermediate target from the portable aspect-fit query
@@ -156,9 +159,10 @@ enhancements and retain their established fallbacks.
 
 The remaining migration should proceed in independently testable slices:
 
-1. Port the remaining SIM 3D rim, shadow, and sprite-effect resources and
-   draws, keeping GPU-only depth/shader implementations behind platform ops.
-2. Remove native rectangle types from presentation-facing interfaces.
+1. Remove native rectangle types from the remaining flat/action and host-UI
+   presentation-facing interfaces.
+2. Move viewport calculation and presentation utilities to their appropriate
+   portable or platform-owned boundary.
 3. Remove the SDL borrow/unwrap bridge after its final platform consumer is
    gone.
 

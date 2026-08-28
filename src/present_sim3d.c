@@ -9,7 +9,6 @@
  * present_internal.h is the present.c<->present_sim3d.c boundary; it exposes
  * present.c internals to this file, never live game state. */
 
-#include <SDL3/SDL.h>
 #include "present_sim3d_internal.h"
 #include "present_sim3d_clouds.h"
 #include "present_sim3d_effects.h"
@@ -17,9 +16,11 @@
 #include "present_sim3d_terrain.h"
 
 #include <math.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "host/host_clock.h"
 #include "render_capabilities.h"
 #include "sim/sim_backdrop_render.h"
 #include "sim/sim_background_voxels.h"
@@ -47,7 +48,7 @@ extern ArRenderTexture g_sim_obj_atlas_texture;
 extern ArRenderTexture g_sim3d_layer_textures[kSim3DPlane_Count];
 extern ArRenderTexture g_sim3d_flat_texture;
 
-static ArRenderRectF PortableRect(SDL_Rect rectangle) {
+static ArRenderRectF PortableRect(ArRenderRectI rectangle) {
   return (ArRenderRectF){
     (float)rectangle.x, (float)rectangle.y,
     (float)rectangle.w, (float)rectangle.h,
@@ -112,7 +113,7 @@ typedef enum SimObjectSelectionFilter {
 
 static float SimObjectGroundDepth(
     const FrameSlot *slot, const SimRenderObject *object,
-    SDL_Rect source, SDL_Rect viewport, const float matrix[16]) {
+    ArRenderRectI source, ArRenderRectI viewport, const float matrix[16]) {
   int world_x, world_y;
   SimObjectDrawnWorld(object, &world_x, &world_y);
   float depth_map_y = (float)world_y;
@@ -169,8 +170,8 @@ static bool SimObjectOnMountainTerrain(const SimRenderObject *object) {
  * choosing. */
 typedef struct SimObjectDrawScene {
   const FrameSlot *slot;
-  SDL_Rect source;
-  SDL_Rect viewport;
+  ArRenderRectI source;
+  ArRenderRectI viewport;
   const Scene3DCamera *camera;
   const float *matrix;
   bool project_world;
@@ -191,7 +192,7 @@ static bool DrawSimObjectPriorityFiltered(
     const SimObjectDrawFilters *filters,
     const SimBillboardPass *pass) {
   const FrameSlot *slot = scene->slot;
-  SDL_Rect source = scene->source, viewport = scene->viewport;
+  ArRenderRectI source = scene->source, viewport = scene->viewport;
   const Scene3DCamera *camera = scene->camera;
   const float *matrix = scene->matrix;
   bool project_world = scene->project_world;
@@ -389,11 +390,11 @@ static bool DrawSimObjectPriorityFiltered(
           (texture_anchor_y - source.y) * flat_scale_y;
     }
 
-    SDL_FRect atlas = {
+    ArRenderRectF atlas = {
       object->atlas_x, object->atlas_y,
       object->atlas_w, object->atlas_h,
     };
-    SDL_FRect destination = {
+    ArRenderRectF destination = {
       anchor.x + (object->local_x0 - foot_dx) * scale_x,
       anchor.y + (object->local_y0 - foot_dy) * scale_y,
       (object->local_x1 - object->local_x0) * scale_x,
@@ -412,12 +413,6 @@ static bool DrawSimObjectPriorityFiltered(
      * implementation of the same angle, reachable by nothing. */
     bool drawn = false;
     if (pass) {
-      const ArRenderRectF portable_atlas = {
-        atlas.x, atlas.y, atlas.w, atlas.h,
-      };
-      const ArRenderRectF portable_destination = {
-        destination.x, destination.y, destination.w, destination.h,
-      };
       const ArRenderDrawState pass_state = {
         .flags = kArRenderDrawState_Tint | kArRenderDrawState_Blend,
         .tint = pass->tint,
@@ -425,22 +420,16 @@ static bool DrawSimObjectPriorityFiltered(
       };
       drawn = ArRenderDevice_DrawTextureWithState(
           &g_render_device, g_sim_obj_atlas_texture,
-          &portable_atlas, &portable_destination, &pass_state);
+          &atlas, &destination, &pass_state);
     } else {
-      const ArRenderRectF portable_atlas = {
-        atlas.x, atlas.y, atlas.w, atlas.h,
-      };
-      const ArRenderRectF portable_destination = {
-        destination.x, destination.y, destination.w, destination.h,
-      };
       drawn = half_add
           ? ArRenderDevice_DrawTextureTinted(
                 &g_render_device, g_sim_obj_atlas_texture,
-                &portable_atlas, &portable_destination,
+                &atlas, &destination,
                 (ArRenderColorF){1.0f, 1.0f, 1.0f, 128.0f / 255.0f})
           : ArRenderDevice_DrawTexture(
                 &g_render_device, g_sim_obj_atlas_texture,
-                &portable_atlas, &portable_destination);
+                &atlas, &destination);
     }
     if (drawn) {
       Sim3DPerformance_AddDraw(0, 0);
@@ -455,7 +444,7 @@ static bool DrawSimObjectPriorityTerrain(
     const FrameSlot *slot, int priority, SimObjectTierFilter tier_filter,
     SimObjectTerrainFilter terrain_filter,
     bool project_world,
-    bool virtual_height, SDL_Rect source, SDL_Rect viewport,
+    bool virtual_height, ArRenderRectI source, ArRenderRectI viewport,
     const Scene3DCamera *camera, const float matrix[16],
     const SimBillboardPass *pass) {
   SimObjectDrawScene scene = {
@@ -471,7 +460,7 @@ static bool DrawSimObjectPriorityTerrain(
 static void DrawSimObjectPriority(
     const FrameSlot *slot, int priority, SimObjectTierFilter tier_filter,
     bool project_world,
-    bool virtual_height, SDL_Rect source, SDL_Rect viewport,
+    bool virtual_height, ArRenderRectI source, ArRenderRectI viewport,
     const Scene3DCamera *camera, const float matrix[16],
     const SimBillboardPass *pass) {
   DrawSimObjectPriorityTerrain(
@@ -490,7 +479,8 @@ typedef struct SimVoxelBillboardLayerContext {
 
 static PresentationOutcome DrawSimRimLight(
     const FrameSlot *slot, int priority, bool virtual_height,
-    SDL_Rect source, SDL_Rect viewport, const Scene3DCamera *camera,
+    ArRenderRectI source, ArRenderRectI viewport,
+    const Scene3DCamera *camera,
     const float matrix[16], SimObjectTerrainFilter terrain_filter);
 
 static void DrawSimVoxelBillboardLayer(
@@ -509,11 +499,11 @@ static void DrawSimVoxelBillboardLayer(
       : (band == kSimBackgroundVoxelActorBand_Mountain
              ? kSimObjectTerrain_MountainOnly
              : kSimObjectTerrain_GroundOnly);
-  const SDL_Rect source = {
+  const ArRenderRectI source = {
     params->source.x, params->source.y,
     params->source.w, params->source.h,
   };
-  const SDL_Rect viewport = {
+  const ArRenderRectI viewport = {
     params->viewport.x, params->viewport.y,
     params->viewport.w, params->viewport.h,
   };
@@ -547,7 +537,7 @@ static void DrawSimVoxelBillboardLayer(
  * and can still cover a selector with an actual UI panel. */
 static void DrawSimSelectionOverlays(
     const FrameSlot *slot, bool virtual_height,
-    SDL_Rect source, SDL_Rect viewport,
+    ArRenderRectI source, ArRenderRectI viewport,
     const Scene3DCamera *camera, const float matrix[16]) {
   static const SimObjectTierFilter tiers[] = {
     kSimTierFilter_World,
@@ -600,7 +590,12 @@ static int s_sim_rim_w, s_sim_rim_h;
 static bool s_sim_rim_unavailable;
 /* Reads true until a set actually fails. Settings sees this only through the
  * atomic, read-only capability accessor below. */
-SDL_AtomicInt s_sim_rim_mask_supported = { .value = 1 };
+static atomic_int s_sim_rim_mask_supported = ATOMIC_VAR_INIT(1);
+
+bool Present_SimRimMaskSupported(void) {
+  return atomic_load_explicit(
+      &s_sim_rim_mask_supported, memory_order_relaxed) != 0;
+}
 
 static const ArRenderColorF kSimRimColor = {
   1.0f, 244.0f / 255.0f, 214.0f / 255.0f, 1.0f,
@@ -663,7 +658,8 @@ static void SimRimOffset(const FrameSlot *slot, float distance,
  * painter order. */
 static PresentationOutcome DrawSimRimLight(
     const FrameSlot *slot, int priority, bool virtual_height,
-    SDL_Rect source, SDL_Rect viewport, const Scene3DCamera *camera,
+    ArRenderRectI source, ArRenderRectI viewport,
+    const Scene3DCamera *camera,
     const float matrix[16], SimObjectTerrainFilter terrain_filter) {
   if (!slot->sim.rim_strength_pct)
     return kPresentationOutcome_Complete;
@@ -726,15 +722,17 @@ static PresentationOutcome DrawSimRimLight(
   bool rim_valid = ArRenderDevice_Clear(
       &g_render_device, (ArRenderColorF){0.0f, 0.0f, 0.0f, 0.0f});
   if (rim_valid) {
-    const SDL_Rect local_viewport = { 0, 0, viewport.w, viewport.h };
+    const ArRenderRectI local_viewport = {0, 0, viewport.w, viewport.h};
     rim_valid = DrawSimObjectPriorityTerrain(
         slot, priority, kSimTierFilter_World, terrain_filter,
         true, virtual_height, source, local_viewport, camera, matrix, &fill);
     const bool masked = rim_valid && DrawSimObjectPriorityTerrain(
         slot, priority, kSimTierFilter_World, terrain_filter,
         true, virtual_height, source, local_viewport, camera, matrix, &mask);
-    if (rim_valid && !masked && SDL_CompareAndSwapAtomicInt(
-            &s_sim_rim_mask_supported, 1, 0)) {
+    int supported = 1;
+    if (rim_valid && !masked && atomic_compare_exchange_strong_explicit(
+            &s_sim_rim_mask_supported, &supported, 0,
+            memory_order_relaxed, memory_order_relaxed)) {
       fprintf(stderr,
               "[sim3d-rim] backend rejected destination-alpha mask (%s) — "
               "rim light disabled\n",
@@ -778,9 +776,9 @@ static PresentationOutcome DrawSimRimLight(
  * ground mesh uses. Alignment therefore cannot drift from the town: both are
  * driven by the same camera and the same transform. */
 enum {
-  /* The extension is much larger than the unit ground quad, and
-   * SDL_RenderGeometry interpolates UVs affinely, so it needs a finer mesh
-   * than the ground's 8x6 to keep the perspective foreshortening honest. */
+  /* The extension is much larger than the unit ground quad, and the portable
+   * geometry contract interpolates UVs affinely, so it needs a finer mesh than
+   * the ground's 8x6 to keep the perspective foreshortening honest. */
   /* kSimUnderlayMarginPixels and kSimUnderlayColumns/Rows are in
    * present_sim3d_project.h: the cloud shroud covers this same trapezoid,
    * reaches as far, and must not be coarser. */
@@ -874,12 +872,12 @@ typedef struct SimGroundMeshCache {
   bool valid;
   float texture_x_at_zero, texture_y_at_zero, span;
   uint8_t alpha;
-  SDL_Rect source, viewport;
+  ArRenderRectI source, viewport;
   float matrix[16];
   bool has_fade;
   SimCullFade fade;
   bool has_exclude;
-  SDL_FRect exclude;
+  ArRenderRectF exclude;
   int vertex_count, index_count;
   ArRenderVertex2D vertices[kSimUnderlayVertexCount];
   int32_t indices[kSimUnderlayIndexCount];
@@ -904,9 +902,9 @@ static bool SimCullFadeEquals(const SimCullFade *a, const SimCullFade *b) {
 static bool SimGroundMeshCacheMatches(
     const SimGroundMeshCache *cache,
     float texture_x_at_zero, float texture_y_at_zero, float span,
-    uint8_t alpha, SDL_Rect source, SDL_Rect viewport,
+    uint8_t alpha, ArRenderRectI source, ArRenderRectI viewport,
     const float matrix[16], const SimCullFade *fade,
-    const SDL_FRect *exclude) {
+    const ArRenderRectF *exclude) {
   if (!cache->valid || cache->texture_x_at_zero != texture_x_at_zero ||
       cache->texture_y_at_zero != texture_y_at_zero ||
       cache->span != span || cache->alpha != alpha ||
@@ -928,9 +926,9 @@ static bool SimGroundMeshCacheMatches(
 static void SimGroundMeshCacheSetKey(
     SimGroundMeshCache *cache,
     float texture_x_at_zero, float texture_y_at_zero, float span,
-    uint8_t alpha, SDL_Rect source, SDL_Rect viewport,
+    uint8_t alpha, ArRenderRectI source, ArRenderRectI viewport,
     const float matrix[16], const SimCullFade *fade,
-    const SDL_FRect *exclude) {
+    const ArRenderRectF *exclude) {
   cache->texture_x_at_zero = texture_x_at_zero;
   cache->texture_y_at_zero = texture_y_at_zero;
   cache->span = span;
@@ -1127,10 +1125,11 @@ ArRenderTexture SimUnderlayBlurTexture(uint32_t serial) {
 static void DrawSimGroundExtension(ArRenderTexture texture,
                                    float texture_x_at_zero,
                                    float texture_y_at_zero, float span,
-                                   uint8_t alpha, SDL_Rect source,
-                                   SDL_Rect viewport, const float matrix[16],
+                                   uint8_t alpha, ArRenderRectI source,
+                                   ArRenderRectI viewport,
+                                   const float matrix[16],
                                    const SimCullFade *fade,
-                                   const SDL_FRect *exclude,
+                                   const ArRenderRectF *exclude,
                                    SimGroundMeshCacheKind cache_kind) {
   if (!ArRenderTexture_IsValid(texture) || !alpha ||
       source.w <= 0 || source.h <= 0)
@@ -1334,7 +1333,7 @@ static void ApplySimDynamicCamera(const FrameSlot *slot,
   bool mode_changed = previous_mode != slot->sim_camera_mode;
   previous_mode = slot->sim_camera_mode;
 
-  uint64_t now_ns = SDL_GetTicksNS();
+  uint64_t now_ns = HostClock_Nanoseconds();
   float dt = 0.0f;
   if (g_sim_dyncam.last_ns != 0) {
     dt = (float)(now_ns - g_sim_dyncam.last_ns) / 1e9f;
@@ -1447,8 +1446,8 @@ static bool SimCullMarkersEnabled(void) {
   return enabled != 0;
 }
 
-static void DrawSimCullMarkers(const FrameSlot *slot, SDL_Rect source,
-                               SDL_Rect viewport, const float matrix[16],
+static void DrawSimCullMarkers(const FrameSlot *slot, ArRenderRectI source,
+                               ArRenderRectI viewport, const float matrix[16],
                                int lift_inset) {
   if (!SimCullMarkersEnabled() || !slot->sim.metadata_valid) return;
   int lead = slot->sim.cull_lead_px ? slot->sim.cull_lead_px
@@ -1497,8 +1496,9 @@ static void DrawSimCullMarkers(const FrameSlot *slot, SDL_Rect source,
   }
 }
 
-static void DrawSimWorldUnderlay(const FrameSlot *slot, SDL_Rect source,
-                                 SDL_Rect viewport, const float matrix[16],
+static void DrawSimWorldUnderlay(const FrameSlot *slot, ArRenderRectI source,
+                                 ArRenderRectI viewport,
+                                 const float matrix[16],
                                  int lift_inset) {
   if (!slot->sim.underlay_serial ||
       slot->sim.underlay_haze_pct >= kPercentScale)
@@ -1577,10 +1577,10 @@ static void DrawSimWorldUnderlay(const FrameSlot *slot, SDL_Rect source,
 /* The full-town ground, drawn over the underlay at full resolution. Where an
  * alpha handoff is active, the live captured rectangle is omitted below so
  * this canvas extends BG1 rather than feathering underneath it a second time. */
-static void DrawSimTownCanvas(const FrameSlot *slot, SDL_Rect source,
-                              SDL_Rect viewport, const float matrix[16],
+static void DrawSimTownCanvas(const FrameSlot *slot, ArRenderRectI source,
+                              ArRenderRectI viewport, const float matrix[16],
                               bool cull_fade, int lift_inset,
-                              const SDL_FRect *exclude,
+                              const ArRenderRectF *exclude,
                               bool background_voxels) {
   if (!slot->sim.town_canvas_serial) return;
   ArRenderTexture canvas = ArRenderTexture_Invalid();
@@ -1697,12 +1697,9 @@ static void PublishSimCraterAnchor(const FrameSlot *slot) {
 
 static PresentationOutcome RenderSimProfile(
     const FrameSlot *slot, SimRenderFeatureMask features,
-    SDL_Rect source, SDL_Rect viewport, const SDL_Rect *clip) {
-  const ArRenderRectI portable_clip = clip
-      ? (ArRenderRectI){clip->x, clip->y, clip->w, clip->h}
-      : (ArRenderRectI){0};
-  if (!ArRenderDevice_SetClipRect(
-          &g_render_device, clip ? &portable_clip : NULL))
+    ArRenderRectI source, ArRenderRectI viewport,
+    const ArRenderRectI *clip) {
+  if (!ArRenderDevice_SetClipRect(&g_render_device, clip))
     return kPresentationOutcome_CoreFailure;
   PresentationOutcome outcome = kPresentationOutcome_Complete;
   bool separated = (features & kSimFeature_SeparatedComposite) != 0;
@@ -1830,7 +1827,7 @@ static PresentationOutcome RenderSimProfile(
         ((enabled_planes & (1u << kSim3DPlane_Bg1High)) &&
          ArRenderTexture_IsValid(
              g_sim3d_layer_textures[kSim3DPlane_Bg1High])));
-    SDL_FRect live_ground = ToFRect(source);
+    ArRenderRectF live_ground = PortableRect(source);
     Sim3DPerformanceScope performance =
         Sim3DPerformance_Begin(kSim3DPerformance_Terrain);
     DrawSimTownCanvas(slot, source, viewport, matrix, cull_haze, lift_inset,
@@ -2114,11 +2111,12 @@ PresentationOutcome PresentSim3D(const FrameSlot *slot) {
     Sim3DPerformance_EndPresentation();
     return kPresentationOutcome_CoreFailure;
   }
-  SDL_Rect viewport = {
+  ArRenderRectI viewport = {
     0, 0, output_frame.viewport.w, output_frame.viewport.h,
   };
-  SDL_Rect source = { slot->visible_x0, 0,
-                      slot->visible_width, slot->snes_height };
+  ArRenderRectI source = {
+    slot->visible_x0, 0, slot->visible_width, slot->snes_height,
+  };
 
   PresentationOutcome outcome = RenderSimProfile(
       slot, slot->sim.effective_features, source, viewport, &viewport);
@@ -2156,7 +2154,8 @@ void PresentSim3D_ResetResources(void) {
   s_sim_rim_texture = ArRenderTexture_Invalid();
   s_sim_rim_w = s_sim_rim_h = 0;
   s_sim_rim_unavailable = false;
-  SDL_SetAtomicInt(&s_sim_rim_mask_supported, 1);
+  atomic_store_explicit(
+      &s_sim_rim_mask_supported, 1, memory_order_relaxed);
   ArRenderDevice_DestroyTexture(&g_render_device, s_sim_underlay_texture);
   s_sim_underlay_texture = ArRenderTexture_Invalid();
   ArRenderDevice_DestroyTexture(

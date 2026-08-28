@@ -578,7 +578,7 @@ static ArRenderTexture EnsureHudCompositeTexture(int w, int h) {
 }
 
 void PresentHudOverlayComposited(const FrameSlot *slot,
-                                        SDL_Rect viewport) {
+                                 ArRenderRectI viewport) {
   ArRenderTexture composite = EnsureHudCompositeTexture(
       viewport.w, viewport.h);
   if (!ArRenderTexture_IsValid(composite)) return;
@@ -619,7 +619,9 @@ void PresentHudOverlayComposited(const FrameSlot *slot,
   }
   if (!target_ready) return;
 
-  const ArRenderRectF destination = ToRenderRectF(viewport);
+  const ArRenderRectF destination = {
+    viewport.x, viewport.y, viewport.w, viewport.h,
+  };
   (void)ArRenderDevice_DrawTexture(
       &g_render_device, composite, NULL, &destination);
 }
@@ -1879,10 +1881,6 @@ void PresentHostUi(const FrameSlot *slot, SDL_Rect viewport,
   PresentFpsCounter(slot, output_size, presentation_fps);
 }
 
-bool Present_SimRimMaskSupported(void) {
-  return SDL_GetAtomicInt(&s_sim_rim_mask_supported) != 0;
-}
-
 /* Called from the SDL_EVENT_RENDER_TARGETS_RESET / _DEVICE_RESET arm and once
  * during orderly shutdown.
  *
@@ -2235,7 +2233,11 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
      * per-layer loop above — skip the anchored overlay entirely here so the
      * two don't both draw a HUD. */
     if (slot->diorama_hud_flat)
-      PresentHudOverlayComposited(slot, output_viewport);
+      PresentHudOverlayComposited(
+          slot, (ArRenderRectI){
+            output_viewport.x, output_viewport.y,
+            output_viewport.w, output_viewport.h,
+          });
     DioramaPerformance_End(presentation_performance);
     DioramaPerformance_PresentCompleted();
     return;

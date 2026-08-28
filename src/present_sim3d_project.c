@@ -8,8 +8,6 @@
  * here rather than re-deriving the mapping, which is what keeps an actor's
  * feet, its shadow and the ground under it agreeing. */
 
-#include <SDL3/SDL.h>
-
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,7 +30,7 @@ extern ArRenderDevice g_render_device;
  * the emitter's biased coordinates keeps the visual boundary identical to the
  * cull predicate instead of maintaining a second approximation of it. */
 float SimCullProximityAt(const SimCullFade *fade, float texture_x,
-                                float texture_y, SDL_Rect source) {
+                                float texture_y, ArRenderRectI source) {
   if (!fade) return 0.0f;
   int16_t biased_x = (int16_t)(texture_x - (float)fade->screen_x0 + 16.0f);
   int16_t biased_y = (int16_t)(texture_y - (float)source.y + 17.0f);
@@ -89,8 +87,8 @@ enum {
   kSimGroundIndexCount = kSimGroundColumns * kSimGroundRows * 6,
 };
 
-void DrawSimGroundPlane(ArRenderTexture texture, SDL_Rect source,
-                        SDL_Rect viewport, const float matrix[16],
+void DrawSimGroundPlane(ArRenderTexture texture, ArRenderRectI source,
+                        ArRenderRectI viewport, const float matrix[16],
                         const SimCullFade *fade) {
   if (!ArRenderTexture_IsValid(texture) ||
       source.w <= 0 || source.h <= 0 ||
@@ -152,7 +150,7 @@ void DrawSimGroundPlane(ArRenderTexture texture, SDL_Rect source,
  * captured rows, so a D3c virtual height in authentic SNES pixels converts to
  * world units with the same scale the flat view uses for sprite size. Lifting
  * along +Z leaves the ground anchor (z = 0) available to the D4 shadow pass. */
-float SimHeightWorldUnits(SDL_Rect source, int virtual_height,
+float SimHeightWorldUnits(ArRenderRectI source, int virtual_height,
                                  unsigned height_scale_x100) {
   if (source.h <= 0 || !virtual_height) return 0.0f;
   return (float)virtual_height * (float)height_scale_x100 /
@@ -160,7 +158,7 @@ float SimHeightWorldUnits(SDL_Rect source, int virtual_height,
 }
 
 SimBackgroundVoxelRenderParams SimVoxelRenderParams(
-    const FrameSlot *slot, SDL_Rect source, SDL_Rect viewport,
+    const FrameSlot *slot, ArRenderRectI source, ArRenderRectI viewport,
     const float matrix[16]) {
   return (SimBackgroundVoxelRenderParams){
     .serial = slot->sim.background_voxel_serial,
@@ -187,7 +185,7 @@ SimBackgroundVoxelRenderParams SimVoxelRenderParams(
 }
 
 float SimTerrainGroundHeightWorld(
-    const FrameSlot *slot, SDL_Rect source, float map_x, float map_y) {
+    const FrameSlot *slot, ArRenderRectI source, float map_x, float map_y) {
 #if AR_SIM3D_TERRAIN_ELEVATION
   if (!slot || source.h <= 0 || !slot->sim.background_voxel_enabled ||
       !SimBackgroundVoxelRenderer_Ready(slot->sim.background_voxel_serial))
@@ -202,7 +200,7 @@ float SimTerrainGroundHeightWorld(
 }
 
 float SimTerrainMaximumHeightWorld(
-    const FrameSlot *slot, SDL_Rect source) {
+    const FrameSlot *slot, ArRenderRectI source) {
 #if AR_SIM3D_TERRAIN_ELEVATION
   if (!slot || source.h <= 0 || !slot->sim.background_voxel_enabled ||
       !SimBackgroundVoxelRenderer_Ready(slot->sim.background_voxel_serial))
@@ -222,7 +220,7 @@ float SimTerrainMaximumHeightWorld(
  * actor upward. */
 float SimObjectAltitudeBaseWorld(
     const FrameSlot *slot, const SimRenderObject *object,
-    SDL_Rect source, float map_x, float map_y) {
+    ArRenderRectI source, float map_x, float map_y) {
   SimHeightClass height_class = (SimHeightClass)object->height_class;
   if (Sim3D_HeightClassStandsOnTerrain(height_class))
     return SimTerrainGroundHeightWorld(slot, source, map_x, map_y);
@@ -240,7 +238,7 @@ float SimObjectAltitudeBaseWorld(
  * still converges onto the authentic landing cell. */
 static float SimEffectAltitudeBaseWorld(
     const FrameSlot *slot, const SimEffectInstance *effect,
-    SDL_Rect source, float map_x, float map_y) {
+    ArRenderRectI source, float map_x, float map_y) {
   if (!effect) return 0.0f;
   if (effect->kind == kSimEffect_RedDemonFire)
     return SimTerrainMaximumHeightWorld(slot, source);
@@ -248,7 +246,7 @@ static float SimEffectAltitudeBaseWorld(
 }
 
 bool ProjectSimTexturePoint(
-    const float matrix[16], SDL_Rect source, SDL_Rect viewport,
+    const float matrix[16], ArRenderRectI source, ArRenderRectI viewport,
     float texture_x, float texture_y, float height_world,
     Scene3DPoint *out_point) {
   float fx = (texture_x - source.x) / source.w;
@@ -266,7 +264,7 @@ bool ProjectSimTexturePoint(
 }
 
 static float SimTexturePointDepthScale(
-    const float matrix[16], SDL_Rect source, SDL_Rect viewport,
+    const float matrix[16], ArRenderRectI source, ArRenderRectI viewport,
     float texture_x, float texture_y, float height_world,
     float reference_depth) {
   float fx = (texture_x - source.x) / source.w;
@@ -278,7 +276,7 @@ static float SimTexturePointDepthScale(
 }
 
 bool ProjectSimAnchorAndScale(
-    const float matrix[16], SDL_Rect source, SDL_Rect viewport,
+    const float matrix[16], ArRenderRectI source, ArRenderRectI viewport,
     float texture_x, float texture_y, float height_world,
     float reference_depth, Scene3DPoint *anchor,
     float *scale_x, float *scale_y) {
@@ -300,7 +298,8 @@ bool ProjectSimAnchorAndScale(
 bool ProjectSimEffectPointAt(
     const FrameSlot *slot, const SimEffectInstance *effect,
     uint16_t world_x, uint16_t world_y,
-    const SimEffectLocalPoint *local, SDL_Rect source, SDL_Rect viewport,
+    const SimEffectLocalPoint *local, ArRenderRectI source,
+    ArRenderRectI viewport,
     const Scene3DCamera *camera, const float matrix[16],
     Scene3DPoint *point, float *scale_x, float *scale_y) {
   if (!local || effect->geometry.kind != kSimEffectGeometry_Point) return false;
@@ -364,7 +363,8 @@ bool ProjectSimEffectPointAt(
 
 bool ProjectSimEffectPoint(
     const FrameSlot *slot, const SimEffectInstance *effect,
-    const SimEffectLocalPoint *local, SDL_Rect source, SDL_Rect viewport,
+    const SimEffectLocalPoint *local, ArRenderRectI source,
+    ArRenderRectI viewport,
     const Scene3DCamera *camera, const float matrix[16],
     Scene3DPoint *point, float *scale_x, float *scale_y) {
   return ProjectSimEffectPointAt(

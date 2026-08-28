@@ -7,8 +7,6 @@
  * corner field and the one baked hard-edge mask, which is what stops a cliff
  * from being a wall in one pass and a slope in the other. */
 
-#include <SDL3/SDL.h>
-
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -79,16 +77,17 @@ static SimTerrainRenderCell *SimTerrainCachedCell(int x, int y) {
 static int CompareSimTerrainCells(const void *left, const void *right) {
   const SimTerrainCellOrder *a = (const SimTerrainCellOrder *)left;
   const SimTerrainCellOrder *b = (const SimTerrainCellOrder *)right;
-  /* SDL_RenderGeometry has no depth buffer. Submit far geometry first so the
-   * later, near cell wins at every projected overlap. `depth` is clip W, the
-   * camera-space distance used by the perspective divide. */
+  /* The portable 2D geometry path has no depth buffer. Submit far geometry
+   * first so the later, near cell wins at every projected overlap. `depth` is
+   * clip W, the camera-space distance used by the perspective divide. */
   if (a->depth < b->depth) return 1;
   if (a->depth > b->depth) return -1;
   return (int)a->y * kSimTownTerrainCells + a->x -
       ((int)b->y * kSimTownTerrainCells + b->x);
 }
 
-static float SimTerrainHeightWorld(const FrameSlot *slot, SDL_Rect source,
+static float SimTerrainHeightWorld(const FrameSlot *slot,
+                                   ArRenderRectI source,
                                    float height_units) {
   if (source.h <= 0) return 0.0f;
   return SimTownTerrain_ScaledHeightPixels(
@@ -184,7 +183,7 @@ static void PrepareSimTerrainRenderCache(
 }
 
 static const SimTerrainCellOrder *PrepareSimTerrainCellOrder(
-    const FrameSlot *slot, SDL_Rect source, SDL_Rect viewport,
+    const FrameSlot *slot, ArRenderRectI source, ArRenderRectI viewport,
     const float matrix[16]) {
   SimTerrainRenderCache *cache = &s_sim_terrain_render_cache;
   const float aspect = (float)viewport.w / (float)viewport.h;
@@ -255,7 +254,7 @@ static bool AddSimTerrainQuad(
     int32_t *indices, int *index_count,
     const float texture_xy[4][2], const float height_units[4],
     const float uv[4][2], const float shade[4], const FrameSlot *slot,
-    SDL_Rect source, SDL_Rect viewport, const float matrix[16],
+    ArRenderRectI source, ArRenderRectI viewport, const float matrix[16],
     const SimCullFade *fade) {
   if (*vertex_count + 4 > kSimTerrainMaxVertices ||
       *index_count + 6 > kSimTerrainMaxIndices)
@@ -293,7 +292,7 @@ static bool AddSimTerrainSkirt(
     const float endpoint_xy[2][2], const float current_height[2],
     const float neighbour_height[2], const float endpoint_shade[2],
     const float side_uv[4][2], const FrameSlot *slot,
-    SDL_Rect source, SDL_Rect viewport, const float matrix[16],
+    ArRenderRectI source, ArRenderRectI viewport, const float matrix[16],
     const SimCullFade *fade) {
   float t0, t1;
   if (!SimTownTerrain_ClipVisibleHigherEdge(
@@ -357,7 +356,8 @@ static void SimTerrainCliffUv(int x, int y, int nx, int ny,
 
 bool DrawSimTownTerrain(
     ArRenderDevice *device, ArRenderTexture texture, const FrameSlot *slot,
-    float extent_x0, float extent_y0, SDL_Rect source, SDL_Rect viewport,
+    float extent_x0, float extent_y0, ArRenderRectI source,
+    ArRenderRectI viewport,
     const float matrix[16], const SimCullFade *fade) {
   if (!ArRenderDevice_IsReady(device) || !ArRenderTexture_IsValid(texture) ||
       !slot || slot->sim.town < 1 ||

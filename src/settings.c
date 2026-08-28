@@ -783,16 +783,16 @@ static bool Sim3DSoftShadowsAvailable(void) {
 static bool Sim3DSoftShadowsEnabled(void) {
   return Sim3DSoftShadowsAvailable() && g_settings.sim3d_soft_shadows;
 }
-/* W4-2: the rim mask needs a CUSTOM blend mode, and
- * SDL_ComposeCustomBlendMode cannot report whether the backend supports one —
- * only the eventual SDL_SetTextureBlendMode can. present.c latches the answer
- * on the first failed set, so this reflects real runtime capability rather than
- * an assumption, exactly as GpuShadersActive does for the shader effects. Grey
+/* W4-2: the rim mask needs a destination-alpha blend mode, and capability
+ * flags alone cannot prove that a backend can create and submit it. The
+ * presenter latches the first rejected resource or draw, so this reflects
+ * real runtime capability rather than an assumption, exactly as
+ * GpuShadersActive does for the shader effects. Grey
  * the row out rather than offering a toggle that cannot do anything: an option
  * that silently does nothing is the dishonesty findings R8 and R13 were about.
  *
  * The read-only accessor is stubbed by ROM-free tests. It defaults to true in
- * present.c and atomically latches false when a backend rejects the mode. */
+ * present_sim3d.c and atomically latches false when a backend rejects it. */
 /* The standard effect path verifies additive blending and untextured geometry
  * independently. A backend failure in either half greys both rows because both
  * current stages use the same batched pass; future shader/target capabilities
