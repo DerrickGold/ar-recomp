@@ -19,6 +19,9 @@ typedef struct FakeBackend {
   ArRenderTexture last_texture;
   ArRenderDrawState last_draw_state;
   bool last_draw_state_present;
+  int last_vertex_count;
+  int last_index_count;
+  ArRenderVertex2D last_vertices[4];
 } FakeBackend;
 
 static bool CreateTexture(void *context, const ArRenderTextureDesc *desc,
@@ -93,10 +96,14 @@ static bool DrawGeometry(void *context, ArRenderTexture texture,
                          const int32_t *indices, int index_count,
                          const ArRenderDrawState *state) {
   FakeBackend *backend = context;
-  assert(vertices && vertex_count == 3);
-  assert(indices && index_count == 3);
+  assert(vertices && vertex_count > 0 && vertex_count <= 4);
+  assert(indices && index_count > 0);
   backend->draw_geometry_count++;
   backend->last_texture = texture;
+  backend->last_vertex_count = vertex_count;
+  backend->last_index_count = index_count;
+  memcpy(backend->last_vertices, vertices,
+         (size_t)vertex_count * sizeof(vertices[0]));
   backend->last_draw_state_present = state != NULL;
   if (state) backend->last_draw_state = *state;
   return true;
@@ -237,6 +244,29 @@ static void TestDeviceDispatchAndCapabilities(void) {
   assert(!ArRenderDevice_DrawGeometryWithState(
       &device, texture, vertices, 3, indices, 3, &invalid_state));
   assert(backend.draw_geometry_count == 2);
+
+  const ArRenderRectF rectangle = {10.0f, 20.0f, 30.0f, 40.0f};
+  const ArRenderColorF color = {0.25f, 0.5f, 0.75f, 0.8f};
+  assert(ArRenderDevice_DrawSolidRect(
+      &device, &rectangle, color, kArRenderBlendMode_Alpha));
+  assert(backend.draw_geometry_count == 3);
+  assert(!ArRenderTexture_IsValid(backend.last_texture));
+  assert(backend.last_vertex_count == 4 && backend.last_index_count == 6);
+  assert(backend.last_draw_state_present);
+  assert(backend.last_draw_state.flags == kArRenderDrawState_Blend);
+  assert(backend.last_draw_state.blend == kArRenderBlendMode_Alpha);
+  assert(backend.last_vertices[0].position.x == 10.0f &&
+         backend.last_vertices[0].position.y == 20.0f);
+  assert(backend.last_vertices[2].position.x == 40.0f &&
+         backend.last_vertices[2].position.y == 60.0f);
+  assert(memcmp(&backend.last_vertices[0].color, &color, sizeof(color)) == 0);
+  assert(!ArRenderDevice_DrawSolidRect(
+      &device, &(ArRenderRectF){0.0f, 0.0f, 0.0f, 1.0f}, color,
+      kArRenderBlendMode_Alpha));
+  assert(!ArRenderDevice_DrawSolidRect(
+      &device, &rectangle, (ArRenderColorF){1.0f, 1.0f, 1.0f, 1.1f},
+      kArRenderBlendMode_Alpha));
+  assert(backend.draw_geometry_count == 3);
   assert(ArRenderDevice_Present(&device));
   assert(backend.present_count == 1);
 
