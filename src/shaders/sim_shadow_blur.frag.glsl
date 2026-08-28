@@ -3,6 +3,8 @@
 /* One axis of the SIM shadow's established seven-tap box blur. The legacy
  * fallback draws the same texture seven times with 36/255 alpha; this shader
  * keeps that exact kernel and normalization in one full-target draw.
+ * Its uniform block mirrors the private upload layout in
+ * platform/sdl/sim_shadow_effect_backend_sdl.c.
  *
  * SDL binding convention: fragment sampled textures are set 2 and fragment
  * uniform buffers are set 3. */

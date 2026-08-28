@@ -13,7 +13,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "gpu_shader_blob.h"
 #include "present_internal.h"
 #include "presentation_geometry.h"
 #include "present_sim3d_internal.h"
@@ -24,7 +23,7 @@
 #include "sim/sim_render_atlas.h"
 #include "sim/sim3d.h"
 #include "sim/sim3d_performance.h"
-#include "shaders/sim_shadow_blur_frag.h"
+#include "sim/sim_shadow_effect_backend.h"
 
 #ifndef AR_SIM3D_TERRAIN_ELEVATION
 #define AR_SIM3D_TERRAIN_ELEVATION 0
@@ -57,22 +56,6 @@ static void DisableSimShadowTargets(void) {
   s_sim_shadow_unavailable = true;
   s_sim_shadow_scratch_alloc_failed = true;
 }
-
-typedef struct SimShadowBlurUniforms {
-  float texel_x, texel_y;
-  float radius;
-  float pad0;
-} SimShadowBlurUniforms;
-
-static const GpuShaderBlobs kSimShadowBlurBlobs = {
-  kSimShadowBlurFragMSL, kSimShadowBlurFragMSLSize,
-  kSimShadowBlurFragSPV, kSimShadowBlurFragSPVSize,
-  kSimShadowBlurFragDXIL, kSimShadowBlurFragDXILSize,
-};
-static SDL_GPUDevice *s_sim_shadow_blur_device;
-static SDL_GPUShader *s_sim_shadow_blur_shader;
-static SDL_GPURenderState *s_sim_shadow_blur_state;
-static bool s_sim_shadow_blur_attempted;
 
 enum {
   kSimShadowVerticesPerCaster = 4,
@@ -211,35 +194,6 @@ enum {
   kSimShadowMaxTargetPixels = 4 * 1024 * 1024,
 };
 
-static bool EnsureSimShadowBlurShader(void) {
-  if (s_sim_shadow_blur_attempted)
-    return s_sim_shadow_blur_state != NULL;
-  s_sim_shadow_blur_attempted = true;
-
-  SDL_PropertiesID props = SDL_GetRendererProperties(g_renderer);
-  SDL_GPUDevice *device = (SDL_GPUDevice *)SDL_GetPointerProperty(
-      props, SDL_PROP_RENDERER_GPU_DEVICE_POINTER, NULL);
-  if (!device) return false;
-  s_sim_shadow_blur_device = device;
-  s_sim_shadow_blur_shader = GpuShaderBlob_CreateFragment(
-      device, &kSimShadowBlurBlobs, "SIM shadow blur", 1, 1);
-  if (!s_sim_shadow_blur_shader) return false;
-
-  SDL_GPURenderStateCreateInfo state_info;
-  SDL_zero(state_info);
-  state_info.fragment_shader = s_sim_shadow_blur_shader;
-  s_sim_shadow_blur_state = SDL_CreateGPURenderState(
-      g_renderer, &state_info);
-  if (!s_sim_shadow_blur_state) {
-    fprintf(stderr, "[sim3d-d4] shadow blur render state failed: %s\n",
-            SDL_GetError());
-    SDL_ReleaseGPUShader(device, s_sim_shadow_blur_shader);
-    s_sim_shadow_blur_shader = NULL;
-    return false;
-  }
-  return true;
-}
-
 static SDL_BlendMode SimShadowAccumulateBlend(void) {
   static SDL_BlendMode mode = SDL_BLENDMODE_INVALID;
   if (mode == SDL_BLENDMODE_INVALID)
@@ -291,20 +245,16 @@ static SimShadowAxisResult BlurSimShadowAxis(
       SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 0) &&
       SDL_RenderClear(g_renderer);
 
-  if (valid && EnsureSimShadowBlurShader()) {
-    SimShadowBlurUniforms uniforms = {
-      horizontal ? 1.0f / (float)w : 0.0f,
-      horizontal ? 0.0f : 1.0f / (float)h,
-      radius,
-      0.0f,
+  if (valid && SimShadowEffectBackend_IsAvailable(&g_render_device)) {
+    const SimShadowBlurEffectParams params = {
+      .texel_x = horizontal ? 1.0f / (float)w : 0.0f,
+      .texel_y = horizontal ? 0.0f : 1.0f / (float)h,
+      .radius = radius,
     };
     const bool source_configured = SDL_SetTextureAlphaMod(source, 255) &&
         SDL_SetTextureBlendMode(source, SDL_BLENDMODE_NONE);
     const bool bound = source_configured &&
-        SDL_SetGPURenderStateFragmentUniforms(
-            s_sim_shadow_blur_state, 0, &uniforms,
-            (Uint32)sizeof(uniforms)) &&
-        SDL_SetGPURenderState(g_renderer, s_sim_shadow_blur_state);
+        SimShadowEffectBackend_BindBlur(&g_render_device, &params);
     if (bound) {
       /* Once submitted, do not run the fallback on an SDL draw error: a
        * backend may already have recorded the draw, and repeating it would
@@ -313,7 +263,7 @@ static SimShadowAxisResult BlurSimShadowAxis(
       if (valid)
         Sim3DPerformance_AddDraw(0, 0);
       const bool gpu_state_restored =
-          SDL_SetGPURenderState(g_renderer, NULL);
+          SimShadowEffectBackend_Unbind(&g_render_device);
       const bool source_restored = RestoreShadowTextureState(
           source, saved_source_blend, saved_source_alpha);
       const bool target_restored =
@@ -333,20 +283,26 @@ static SimShadowAxisResult BlurSimShadowAxis(
       return result;
     }
     const bool gpu_state_restored =
-        SDL_SetGPURenderState(g_renderer, NULL);
+        SimShadowEffectBackend_Unbind(&g_render_device);
     const bool source_restored = RestoreShadowTextureState(
         source, saved_source_blend, saved_source_alpha);
-    const bool target_restored =
-        PresentationGeometry_EndTarget(g_renderer, &target_state);
-    if (!gpu_state_restored || !target_restored) {
+    if (!gpu_state_restored) {
+      (void)PresentationGeometry_EndTarget(g_renderer, &target_state);
       result.outcome = kPresentationOutcome_CoreFailure;
       return result;
     }
     if (!source_restored) {
-      result.outcome = kPresentationOutcome_OptionalOmitted;
+      result.outcome = PresentationGeometry_EndTarget(
+                           g_renderer, &target_state)
+          ? kPresentationOutcome_OptionalOmitted
+          : kPresentationOutcome_CoreFailure;
       result.resources_invalid = true;
       return result;
     }
+    /* Binding failed before a draw was submitted. Keep the temporary target
+     * active and run the established multi-draw fallback into it; ending the
+     * scope here would redirect the fallback to the caller and then restore
+     * the same target a second time below. */
   }
 
   SDL_BlendMode accumulate = valid
@@ -696,23 +652,7 @@ PresentationOutcome DrawSimShadowMask(
 }
 
 void PresentSim3DShadows_ResetResources(void) {
-  if (g_renderer) SDL_SetGPURenderState(g_renderer, NULL);
-  SDL_GPUDevice *current_device = NULL;
-  if (g_renderer) {
-    current_device = (SDL_GPUDevice *)SDL_GetPointerProperty(
-        SDL_GetRendererProperties(g_renderer),
-        SDL_PROP_RENDERER_GPU_DEVICE_POINTER, NULL);
-  }
-  const bool same_shadow_device = !s_sim_shadow_blur_device ||
-      current_device == s_sim_shadow_blur_device;
-  if (same_shadow_device && s_sim_shadow_blur_state)
-    SDL_DestroyGPURenderState(s_sim_shadow_blur_state);
-  if (same_shadow_device && current_device && s_sim_shadow_blur_shader)
-    SDL_ReleaseGPUShader(current_device, s_sim_shadow_blur_shader);
-  s_sim_shadow_blur_state = NULL;
-  s_sim_shadow_blur_shader = NULL;
-  s_sim_shadow_blur_device = NULL;
-  s_sim_shadow_blur_attempted = false;
+  SimShadowEffectBackend_Reset(&g_render_device);
   if (s_sim_shadow_texture) SDL_DestroyTexture(s_sim_shadow_texture);
   s_sim_shadow_texture = NULL;
   if (s_sim_shadow_scratch) SDL_DestroyTexture(s_sim_shadow_scratch);
