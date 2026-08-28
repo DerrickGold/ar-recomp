@@ -60,6 +60,10 @@ SrResult ExampleBeginAuthenticFrame(void) {
         .struct_size = SR_PPU_FRAME_POLICY_REQUEST_V2_SIZE,
         .policy = {
             .struct_size = SR_PPU_FRAME_POLICY_V2_SIZE,
+            /* Intentional: this example establishes authentic-width scanout.
+             * CENTERED may reserve a future wide allocation, but it does not
+             * make side pixels rasterizable. Widescreen producers that want
+             * ordinary PPU content in the margins use AVAILABLE instead. */
             .horizontal_mode = SR_PPU_HORIZONTAL_MARGIN_CENTERED,
         },
     };

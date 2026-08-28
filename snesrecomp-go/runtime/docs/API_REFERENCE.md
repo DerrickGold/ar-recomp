@@ -147,7 +147,11 @@ the specific entry you call.
 ### Publish widescreen state
 
 1. `reset_ppu_frame_state`.
-2. Apply frame policy BEGIN.
+2. Apply frame policy BEGIN. `SR_PPU_HORIZONTAL_MARGIN_CENTERED` reserves the
+   configured wide allocation but keeps a native 256-pixel raster centred in
+   it. A wide surface containing only that centred image is the expected mode
+   result. Use `SR_PPU_HORIZONTAL_MARGIN_AVAILABLE` when normal PPU scanout
+   should rasterize into the side margins.
 3. Publish virtual tilemaps, finite extents, authentic cameras, and OBJ metadata.
 4. Apply FINALIZE only when fallback policy depends on accepted providers.
 5. Claim captures/configure OBJ capture.
@@ -155,6 +159,15 @@ the specific entry you call.
 7. `run_ppu_scanout`. Leave `hdma_suppress_mask` zero for normal hardware
    behavior. Set bits only when an enhancement intentionally suppresses
    channels already armed through `$420C`; the request cannot arm channels.
+
+`margin_top_pixels` and `margin_bottom_pixels` are exact live raster rows; there
+is no reserved vertical mode. Scanout renders them above and below the native
+224 rows using the PPU state live at those points. Resident VRAM tilemaps work
+without another provider. Forced blank, brightness, enabled layers, finite
+extents, and any published virtual tilemaps apply normally. The bound main and
+authentic surfaces must have room for `224 + top + bottom` rows and for the full
+reserved horizontal width. Binding or policy application fails atomically when
+that capacity is insufficient.
 
 ### Observe and replace audio
 

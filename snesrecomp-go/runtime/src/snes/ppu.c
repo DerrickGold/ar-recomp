@@ -179,9 +179,9 @@ void ppu_free(Ppu *ppu) { free(ppu); }
 
 void ppu_reset(Ppu *ppu) {
     uint8_t *render;
-    uint32_t render_pitch, flags;
+    uint32_t render_pitch, render_height, flags;
     uint8_t *authentic;
-    uint32_t authentic_pitch;
+    uint32_t authentic_pitch, authentic_height;
     uint8_t *overlays[kPpuOverlaySource_Count];
     uint32_t overlay_pitch[kPpuOverlaySource_Count];
     uint32_t overlay_height[kPpuOverlaySource_Count];
@@ -193,9 +193,11 @@ void ppu_reset(Ppu *ppu) {
     if (ppu == NULL) return;
     render = ppu->renderBuffer;
     render_pitch = ppu->renderPitch;
+    render_height = ppu->renderHeight;
     flags = ppu->renderFlags;
     authentic = ppu->authenticRenderBuffer;
     authentic_pitch = ppu->authenticRenderPitch;
+    authentic_height = ppu->authenticRenderHeight;
     memcpy(overlays, ppu->overlayRenderBuffer, sizeof(overlays));
     memcpy(overlay_pitch, ppu->overlayRenderPitch, sizeof(overlay_pitch));
     memcpy(overlay_height, ppu->overlayRenderHeight, sizeof(overlay_height));
@@ -207,9 +209,11 @@ void ppu_reset(Ppu *ppu) {
     memset(ppu, 0, sizeof(*ppu));
     ppu->renderBuffer = render;
     ppu->renderPitch = render_pitch;
+    ppu->renderHeight = render_height;
     ppu->renderFlags = flags;
     ppu->authenticRenderBuffer = authentic;
     ppu->authenticRenderPitch = authentic_pitch;
+    ppu->authenticRenderHeight = authentic_height;
     memcpy(ppu->overlayRenderBuffer, overlays, sizeof(overlays));
     memcpy(ppu->overlayRenderPitch, overlay_pitch, sizeof(overlay_pitch));
     memcpy(ppu->overlayRenderHeight, overlay_height, sizeof(overlay_height));
@@ -313,34 +317,85 @@ void ppu_saveload(Ppu *ppu, SaveLoadInfo *info) {
     ppu->cgramRgbValid = false;
 }
 
-void PpuBeginDrawing(Ppu *ppu, uint8_t *pixels, size_t pitch,
-                     uint32_t render_flags) {
-    if (ppu == NULL) return;
+static bool output_surface_fits_geometry(
+        const uint8_t *pixels, uint32_t pitch, uint32_t height,
+        uint32_t horizontal_budget, uint32_t top, uint32_t bottom) {
+    uint64_t required_width;
+    uint64_t required_height;
+    if (pixels == NULL) return pitch == 0u && height == 0u;
+    required_width = (uint64_t)kPpuXPixels + horizontal_budget * 2u;
+    required_height = (uint64_t)kPpuYPixels + top + bottom;
+    return pitch != 0u && pitch % sizeof(uint32_t) == 0u &&
+        pitch / sizeof(uint32_t) >= required_width &&
+        height >= required_height && height <= kPpuBufHeight;
+}
+
+bool PpuOutputSurfacesFitGeometry(
+        const Ppu *ppu, uint32_t horizontal_budget,
+        uint32_t top, uint32_t bottom) {
+    if (ppu == NULL || horizontal_budget > kPpuExtraLeftRight ||
+        top > kPpuExtraTopBottom || bottom > kPpuExtraTopBottom)
+        return false;
+    return output_surface_fits_geometry(
+               ppu->renderBuffer, ppu->renderPitch, ppu->renderHeight,
+               horizontal_budget, top, bottom) &&
+        output_surface_fits_geometry(
+               ppu->authenticRenderBuffer, ppu->authenticRenderPitch,
+               ppu->authenticRenderHeight, horizontal_budget, top, bottom);
+}
+
+bool PpuBeginDrawingSized(Ppu *ppu, uint8_t *pixels, size_t pitch,
+                          uint32_t height, uint32_t render_flags) {
+    if (ppu == NULL || pitch > UINT32_MAX ||
+        !output_surface_fits_geometry(
+            pixels, (uint32_t)pitch, height, ppu->extraLeftRight,
+            ppu->extraTopCur, ppu->extraBottomCur))
+        return false;
     ppu->renderBuffer = pixels;
-    ppu->renderPitch = (uint32_t)pitch;
+    ppu->renderPitch = pixels != NULL ? (uint32_t)pitch : 0u;
+    ppu->renderHeight = pixels != NULL ? height : 0u;
     ppu->renderFlags = render_flags;
     note_surface_binding(ppu);
     /* The struct remains intentionally inspectable to host enhancements.
      * Refresh the derived palette at output binding so direct CGRAM edits are
      * visible without a write barrier in the scanline hot path. */
     ppu->cgramRgbValid = false;
+    return true;
 }
 
-bool PpuBindAuthenticSurface(Ppu *ppu, uint8_t *pixels, size_t pitch) {
+void PpuBeginDrawing(Ppu *ppu, uint8_t *pixels, size_t pitch,
+                     uint32_t render_flags) {
+    (void)PpuBeginDrawingSized(
+        ppu, pixels, pitch, pixels != NULL ? kPpuBufHeight : 0u,
+        render_flags);
+}
+
+bool PpuBindAuthenticSurfaceSized(
+        Ppu *ppu, uint8_t *pixels, size_t pitch, uint32_t height) {
     size_t minimum;
     if (ppu == NULL) return false;
     minimum = kPpuXPixels + (size_t)ppu->extraLeftRight * 2u;
     if (pixels != NULL && (pitch == 0u || pitch % 4u != 0u ||
-        pitch / 4u < minimum || pitch / 4u > kPpuSurfaceWidth)) return false;
+        pitch / 4u < minimum || pitch / 4u > kPpuSurfaceWidth ||
+        height < (uint32_t)PpuRenderedHeight(ppu) ||
+        height > kPpuBufHeight)) return false;
+    if (pixels == NULL && (pitch != 0u || height != 0u)) return false;
     ppu->authenticRenderBuffer = pixels;
     ppu->authenticRenderPitch = pixels != NULL ? (uint32_t)pitch : 0u;
+    ppu->authenticRenderHeight = pixels != NULL ? height : 0u;
     note_surface_binding(ppu);
     return true;
 }
 
+bool PpuBindAuthenticSurface(Ppu *ppu, uint8_t *pixels, size_t pitch) {
+    return PpuBindAuthenticSurfaceSized(
+        ppu, pixels, pitch, pixels != NULL ? kPpuBufHeight : 0u);
+}
+
 bool PpuAuthenticSurfaceBound(const Ppu *ppu) {
     return ppu != NULL && ppu->authenticRenderBuffer != NULL &&
-           ppu->authenticRenderPitch != 0u;
+           ppu->authenticRenderPitch != 0u &&
+           ppu->authenticRenderHeight != 0u;
 }
 
 bool PpuAuthenticSurfaceReady(const Ppu *ppu) {
@@ -348,7 +403,8 @@ bool PpuAuthenticSurfaceReady(const Ppu *ppu) {
     if (!PpuAuthenticSurfaceBound(ppu)) return false;
     width = ppu->authenticRenderPitch / 4u;
     required = kPpuXPixels + (size_t)ppu->extraLeftRight * 2u;
-    return width >= required && width <= kPpuSurfaceWidth;
+    return width >= required && width <= kPpuSurfaceWidth &&
+        ppu->authenticRenderHeight >= (uint32_t)PpuRenderedHeight(ppu);
 }
 
 bool PpuSetAuthenticCameraFrame(Ppu *ppu, uint8_t mask,
@@ -4109,7 +4165,9 @@ static void post_capture_masks(Ppu *ppu, int x, int y,
 }
 
 static bool authentic_sampling_matches(const Ppu *ppu, int screen_y) {
-    if (!PpuAuthenticSurfaceReady(ppu) || screen_y < 0 ||
+    int row_index = output_row(ppu, screen_y);
+    if (!PpuAuthenticSurfaceReady(ppu) || row_index < 0 ||
+        row_index >= (int)ppu->authenticRenderHeight || screen_y < 0 ||
         screen_y >= kPpuYPixels || ppu->authenticObjOffsetX != 0)
         return false;
     for (int layer = 0; layer < 2; ++layer) {
@@ -4121,7 +4179,8 @@ static bool authentic_sampling_matches(const Ppu *ppu, int screen_y) {
 }
 
 static bool render_line_to(Ppu *ppu, int screen_y, uint8_t *buffer,
-                           size_t pitch, bool capture, bool authentic) {
+                           size_t pitch, uint32_t height,
+                           bool capture, bool authentic) {
     int origin = surface_origin_x(ppu, pitch);
     int row_index = output_row(ppu, screen_y);
     uint32_t *row;
@@ -4134,7 +4193,8 @@ static bool render_line_to(Ppu *ppu, int screen_y, uint8_t *buffer,
     int left = authentic ? 0 : -ppu->extraLeftCur;
     int right = authentic ? kPpuXPixels : kPpuXPixels + ppu->extraRightCur;
     bool native_center = false;
-    if (buffer == NULL || pitch == 0u || row_index < 0 || row_index >= kPpuBufHeight)
+    if (buffer == NULL || pitch == 0u || row_index < 0 ||
+        row_index >= (int)height || row_index >= kPpuBufHeight)
         return false;
     row = (uint32_t *)(buffer + (size_t)row_index * pitch);
     if (PPU_forcedBlank(ppu) || origin + left > 0 ||
@@ -4235,7 +4295,8 @@ static void render_authentic(Ppu *ppu, int screen_y) {
         ppu->hScroll[1] = ppu->authenticHScroll[1][screen_y];
     ppu->extraLeftCur = ppu->extraRightCur = 0u;
     (void)render_line_to(ppu, screen_y, ppu->authenticRenderBuffer,
-                         ppu->authenticRenderPitch, false, true);
+                         ppu->authenticRenderPitch,
+                         ppu->authenticRenderHeight, false, true);
     ppu->hScroll[0] = saved_h0; ppu->hScroll[1] = saved_h1;
     ppu->extraLeftCur = saved_left; ppu->extraRightCur = saved_right;
     ppu->extraLeftRight = saved_budget;
@@ -4257,7 +4318,8 @@ static void render_line(Ppu *ppu, int line) {
                (size_t)screen_y * ppu->objRangeCapture.pitch, 0,
                ppu->objRangeCapture.pitch);
     bool authentic_done = render_line_to(
-        ppu, screen_y, ppu->renderBuffer, ppu->renderPitch, true, false);
+        ppu, screen_y, ppu->renderBuffer, ppu->renderPitch,
+        ppu->renderHeight, true, false);
     /* Captured synthesized padding may extend beyond the live game margin. */
     if (ppu->wsPadCapturedToBudget) {
         for (int source = 0; source < 4; ++source) {

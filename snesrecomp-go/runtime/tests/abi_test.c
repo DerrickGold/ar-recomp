@@ -325,6 +325,159 @@ static void set_solid_4bpp_tile(Ppu *ppu, unsigned tile, unsigned color) {
     }
 }
 
+static int test_public_vertical_margin_scanout(
+        const SnesRunnerApi *api, SrRunnerHandle *runner, Snes *snes) {
+    enum {
+        kPitchPixels = 384,
+        kCapacityRows = 253,
+        kTop = 8,
+        kBottom = 8,
+        kRenderedRows = SR_PPU_NATIVE_HEIGHT + kTop + kBottom,
+    };
+    const uint32_t sentinel = UINT32_C(0x005aa55a);
+    SrGenerationSnapshot generation = {
+        .struct_size = sizeof(generation),
+    };
+    SrPpuFrameResetRequest reset = {
+        .struct_size = sizeof(reset),
+    };
+    SrPpuFramePolicyRequest policy = {
+        .struct_size = sizeof(policy),
+        .policy = {
+            .struct_size = sizeof(policy.policy),
+            .horizontal_mode = SR_PPU_HORIZONTAL_MARGIN_AVAILABLE,
+            .margin_top_pixels = kTop,
+            .margin_bottom_pixels = kBottom,
+        },
+    };
+    SrPpuOutputBindingRequest binding = {
+        .struct_size = sizeof(binding),
+        .kind = SR_PPU_OUTPUT_MAIN,
+        .pixels = (uint8_t *)s_main_surface,
+        .pixel_byte_size = sizeof(s_main_surface),
+        .pitch_bytes = kPitchPixels * sizeof(uint32_t),
+        .height_pixels = kCapacityRows,
+    };
+    SrPpuScanoutRequest scanout = {
+        .struct_size = sizeof(scanout),
+        .irq_callback = observe_test_ppu_scanout_irq,
+    };
+    SrPpuScanoutResult result = {
+        .struct_size = sizeof(result),
+    };
+    SrPpuSurfaceSnapshot surfaces = {
+        .struct_size = sizeof(surfaces),
+    };
+    uint32_t first_top;
+    uint32_t first_native;
+    uint32_t first_bottom;
+    int failed = 0;
+    unsigned row;
+    unsigned column;
+
+    ppu_reset(snes->ppu);
+    dma_reset(snes->dma);
+    snes_writeReg(snes, 0x420cu, 0u);
+    snes->vIrqEnabled = false;
+    snes->inIrq = false;
+    snes->ppu->inidisp = 0x0fu;
+    snes->ppu->bgmode = 1u;
+    snes->ppu->screenEnabled[0] = 1u;
+    snes->ppu->screenEnabled[1] = 0u;
+    snes->ppu->bgTileAdr = 0u;
+    snes->ppu->bgXsc[0] = 0x20u;
+    snes->ppu->hScroll[0] = 0u;
+    snes->ppu->cgram[0x11] = 0x001fu; /* red */
+    snes->ppu->cgram[0x21] = 0x7c00u; /* blue */
+    snes->ppu->cgram[0x31] = 0x03e0u; /* green */
+    snes->ppu->cgram[0x41] = 0x03ffu; /* yellow */
+    snes->ppu->cgram[0x51] = 0x7c1fu; /* magenta */
+    for (unsigned tile = 1u; tile <= 5u; ++tile)
+        set_solid_4bpp_tile(snes->ppu, tile, 1u);
+    for (row = 0u; row < 32u; ++row) {
+        unsigned tile = 1u;
+        unsigned palette = 1u;
+        if (row == 1u) tile = palette = 2u;
+        else if (row == 2u) tile = palette = 3u;
+        else if (row == 29u) tile = palette = 4u;
+        else if (row == 30u) tile = palette = 5u;
+        for (column = 0u; column < 32u; ++column)
+            snes->ppu->vram[0x2000u + row * 32u + column] =
+                (uint16_t)(tile | (palette << 10));
+    }
+
+    failed |= check(api->query_generations(runner, &generation) == SR_RESULT_OK,
+                    "vertical-margin generation query failed");
+    reset.lifetime_generation = generation.lifetime_generation;
+    policy.lifetime_generation = generation.lifetime_generation;
+    binding.lifetime_generation = generation.lifetime_generation;
+    scanout.lifetime_generation = generation.lifetime_generation;
+    failed |= check(api->reset_ppu_frame_state(runner, &reset) == SR_RESULT_OK,
+                    "vertical-margin frame reset failed");
+    failed |= check(api->bind_ppu_output_surface(runner, &binding) == SR_RESULT_OK,
+                    "vertical-margin main surface bind failed");
+    failed |= check(api->apply_ppu_frame_policy(runner, &policy) == SR_RESULT_OK,
+                    "vertical-margin frame policy failed");
+    surfaces.struct_size = sizeof(surfaces);
+    failed |= check(api->query_ppu_surfaces(runner, &surfaces) == SR_RESULT_OK &&
+                        surfaces.main.origin_x == 64 &&
+                        surfaces.main.origin_y == kTop &&
+                        surfaces.main.height_pixels == kRenderedRows,
+                    "vertical-margin public surface geometry mismatch");
+
+    for (row = 0u; row < kPitchPixels * kCapacityRows; ++row)
+        s_main_surface[row] = sentinel;
+    snes->ppu->vScroll[0] = 8u;
+    result.struct_size = sizeof(result);
+    failed |= check(api->run_ppu_scanout(runner, &scanout, &result) == SR_RESULT_OK,
+                    "vertical-margin first public scanout failed");
+    for (row = 0u; row < kRenderedRows; ++row) {
+        for (column = 0u; column < kPitchPixels; ++column) {
+            if (s_main_surface[row * kPitchPixels + column] == sentinel) {
+                failed |= check(0, "vertical-margin scanout left a sentinel pixel");
+                row = kRenderedRows;
+                break;
+            }
+        }
+    }
+    for (row = kRenderedRows; row < kCapacityRows; ++row) {
+        for (column = 0u; column < kPitchPixels; ++column)
+            failed |= check(
+                s_main_surface[row * kPitchPixels + column] == sentinel,
+                "vertical-margin scanout exceeded rendered height");
+    }
+    first_top = s_main_surface[64u];
+    first_native = s_main_surface[kTop * kPitchPixels + 64u];
+    first_bottom =
+        s_main_surface[(kTop + SR_PPU_NATIVE_HEIGHT) * kPitchPixels + 64u];
+    failed |= check(first_top == UINT32_C(0x00ff0000) &&
+                        first_native == UINT32_C(0x000000ff) &&
+                        first_bottom == UINT32_C(0x00ffff00),
+                    "vertical-margin first-frame content mismatch");
+
+    for (row = 0u; row < kPitchPixels * kCapacityRows; ++row)
+        s_main_surface[row] = sentinel;
+    failed |= check(api->reset_ppu_frame_state(runner, &reset) == SR_RESULT_OK &&
+                        api->apply_ppu_frame_policy(runner, &policy) == SR_RESULT_OK,
+                    "vertical-margin moving-camera policy failed");
+    snes->ppu->vScroll[0] = 16u;
+    result.struct_size = sizeof(result);
+    failed |= check(api->run_ppu_scanout(runner, &scanout, &result) == SR_RESULT_OK,
+                    "vertical-margin moving-camera scanout failed");
+    failed |= check(s_main_surface[64u] == UINT32_C(0x000000ff) &&
+                        s_main_surface[kTop * kPitchPixels + 64u] ==
+                            UINT32_C(0x0000ff00) &&
+                        s_main_surface[(kTop + SR_PPU_NATIVE_HEIGHT) *
+                                           kPitchPixels + 64u] ==
+                            UINT32_C(0x00ff00ff) &&
+                        s_main_surface[64u] != first_top &&
+                        s_main_surface[kTop * kPitchPixels + 64u] != first_native &&
+                        s_main_surface[(kTop + SR_PPU_NATIVE_HEIGHT) *
+                                           kPitchPixels + 64u] != first_bottom,
+                    "vertical-margin rows did not follow the moving camera");
+    return failed;
+}
+
 static int check_generation(const SnesRunnerApi *api, SrRunnerHandle *runner,
                             uint64_t lifetime, uint64_t tick, uint64_t reset,
                             uint64_t load, uint64_t mutation) {
@@ -1504,6 +1657,14 @@ int main(void) {
                         snes->ppu->renderFlags ==
                             kPpuRenderFlags_ReferencePixelRenderer,
                     "main output surface bind failed");
+    output_binding.height_pixels = 252u;
+    output_binding.pixel_byte_size =
+        output_binding.pitch_bytes * output_binding.height_pixels;
+    failed |= check(api->bind_ppu_output_surface(
+                        runner, &output_binding) ==
+                            SR_RESULT_INVALID_ARGUMENT &&
+                        snes->ppu->renderHeight == 253u,
+                    "short main output capacity replaced a valid binding");
     output_binding = (SrPpuOutputBindingRequest) {
         .struct_size = sizeof(output_binding),
         .kind = SR_PPU_OUTPUT_AUTHENTIC,
@@ -1706,6 +1867,13 @@ int main(void) {
                         runner, &margin_request) ==
                             SR_RESULT_INVALID_ARGUMENT,
                     "out-of-range PPU margin accepted");
+    margin_request.budget_pixels = 65u;
+    failed |= check(api->configure_ppu_horizontal_margin(
+                        runner, &margin_request) ==
+                            SR_RESULT_INVALID_ARGUMENT &&
+                        snes->ppu->extraLeftRight == 64u &&
+                        snes->ppu->extraLeftCur == 0u,
+                    "PPU margin exceeded bound surface width");
     margin_request.budget_pixels = 48u;
     margin_request.mode = SR_PPU_HORIZONTAL_MARGIN_AVAILABLE;
     failed |= check(api->configure_ppu_horizontal_margin(
@@ -1714,6 +1882,12 @@ int main(void) {
                         snes->ppu->extraLeftCur == 48u &&
                         snes->ppu->extraRightCur == 48u,
                     "available PPU margin configuration failed");
+    rebound_surfaces.struct_size = sizeof(rebound_surfaces);
+    failed |= check(api->query_ppu_surfaces(
+                        runner, &rebound_surfaces) == SR_RESULT_OK &&
+                        api->ppu_surface_snapshot_is_valid(
+                            runner, &rebound_surfaces),
+                    "PPU surface snapshot before frame policy failed");
 
     frame_policy_request.lifetime_generation =
         snes->abiLifetimeGeneration;
@@ -1752,6 +1926,16 @@ int main(void) {
         .fill = SR_PPU_BACKGROUND_FILL_MIRROR,
         .motion = SR_PPU_BACKGROUND_MOTION_NORMAL_SCROLL,
     };
+    frame_policy_request.policy.margin_top_pixels = 64u;
+    frame_policy_request.policy.margin_bottom_pixels = 64u;
+    failed |= check(api->apply_ppu_frame_policy(
+                        runner, &frame_policy_request) ==
+                            SR_RESULT_INVALID_ARGUMENT &&
+                        snes->ppu->extraTopCur == 14u &&
+                        snes->ppu->extraBottomCur == 15u,
+                    "PPU frame policy exceeded bound surface height");
+    frame_policy_request.policy.margin_top_pixels = 8u;
+    frame_policy_request.policy.margin_bottom_pixels = 9u;
     failed |= check(api->apply_ppu_frame_policy(
                         runner, &frame_policy_request) == SR_RESULT_OK &&
                         snes->ppu->extraLeftRight == 48u &&
@@ -1777,6 +1961,9 @@ int main(void) {
                         snes->ppu->wsBandMotion[0][40] ==
                             kPpuWidescreenMotion_NormalScroll,
                     "atomic PPU frame policy mismatch");
+    failed |= check(!api->ppu_surface_snapshot_is_valid(
+                        runner, &rebound_surfaces),
+                    "frame-policy geometry retained a stale surface snapshot");
     snes->ppu->virtualTilemap[0].context = &s_virtual_context;
     snes->ppu->wsLayerExtentLeftDefault[0] = 77u;
     frame_policy_request.policy.flags |= SR_PPU_FRAME_POLICY_FINALIZE;
@@ -3201,6 +3388,8 @@ int main(void) {
                         snes->ppu->authenticHScrollMask == 0u &&
                         snes->ppu->authenticObjOffsetX == 0,
                     "PPU authentic-camera clear failed");
+
+    failed |= test_public_vertical_margin_scanout(api, runner, snes);
 
     /* The synchronous scanout service owns the generic PPU/HDMA schedule.
      * Use one-line direct and indirect tables to update INIDISP and BGMODE,

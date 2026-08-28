@@ -170,6 +170,21 @@ Perform enhancement work on the emulation thread at the draw safe point:
    the register state. The game callback owns only the recompiled CPU's IRQ
    handler.
 
+Horizontal margin modes answer different questions. `CENTERED` reserves the
+configured wide allocation while keeping native-width rasterization centred;
+the characteristic result is a wide canvas with a 256-pixel image in its
+middle. `AVAILABLE` exposes the requested side pixels to ordinary rasterization.
+Vertical margins have no reservation mode: nonzero top/bottom fields are exact
+rows that scanout renders with live PPU state. They do not require a virtual
+provider for resident VRAM content, but remain subject to forced blank,
+brightness, layer enables, and finite extents.
+
+For margin diagnostics, initialize the entire bound capacity to a distinctive
+non-black sentinel before the target frame. First prove every expected output
+row changed; then compare exact content while moving the camera so stale rows
+cannot pass as correct. Gate any logging on an explicit steady-state predicate
+or target frame range, never on the first N occurrences after boot.
+
 Every request must check the required capability bit, API extent, return value,
 and generation. A borrowed pointer is not a cache. Persistent game-side source
 maps and provider `user_data` remain game-owned and must outlive the frame in
@@ -262,6 +277,12 @@ variants; and an unknown track ID that falls back safely.
 - **Mirroring `$420C` into a scanout request:** duplicates hardware state in the
   game layer and can drift across reset/load. The runner already owns it; use a
   zero suppress mask and `query_dma_state` for diagnostics.
+- **Treating `CENTERED` as available scenery:** produces a correctly wide
+  allocation with a native-width image in its centre. Select `AVAILABLE` when
+  the normal rasterizer should own those side pixels.
+- **Measuring only non-black occupancy:** confuses untouched storage, written
+  black, correct content, and stale content. Use a sentinel, exact expected
+  pixels, and a camera change on the steady-state frame.
 - **Retaining transaction borrows:** becomes invalid after callback return or a
   generation-changing mutation.
 - **Publishing a provider before frame-policy BEGIN:** BEGIN intentionally

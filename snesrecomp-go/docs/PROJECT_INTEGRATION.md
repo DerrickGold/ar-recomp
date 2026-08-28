@@ -348,6 +348,12 @@ padding, and HUD split state while clearing the previous frame's retained
 virtual providers and layer extents. Publish any provider/extent resources only
 after BEGIN.
 
+`CENTERED` reserves the horizontal allocation while retaining a centred native
+256-pixel raster; `AVAILABLE` makes requested side pixels rasterizable. Vertical
+top/bottom fields are already exact live rows and have no reservation mode.
+Policy application fails when bound main/authentic surface capacity cannot hold
+the full reserved width or `224 + top + bottom` rendered rows.
+
 If exact margins or fallback masks depend on whether those resources were
 accepted, apply the same policy again with `SR_PPU_FRAME_POLICY_FINALIZE`.
 FINALIZE requires the active margin budget to match and preserves providers and
