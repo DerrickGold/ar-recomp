@@ -54,11 +54,12 @@ Ordinary separated-SIM flat, world-layer, and menu-layer composites now submit
 through the device, as do the standard projected SIM ground mesh, ordinary
 object billboards, half-add billboards, promoted map-plane geometry, clip
 state, solid backdrops, additive lightning flashes, and shared SIM/action
-effect batches. SIM effects now generate portable vertices directly; action
-effects and their public projection contract now generate portable vertices
-directly as well. The action-to-diorama projection implementation performs one
-point conversion at the still-native compositor boundary, and the private heat
-target retains one layout-compatible cast until render-target effects migrate.
+effect batches. The shared SIM/world-navigation sky gradient now builds and
+submits one portable geometry batch. SIM effects generate portable vertices
+directly; action effects and their public projection contract do as well. The
+action-to-diorama projection implementation performs one point conversion at
+the still-native compositor boundary, and the private heat target retains one
+layout-compatible cast until render-target effects migrate.
 The custom two-pass rim-light blend still uses the SDL bridge because the
 portable blend vocabulary cannot describe its source/destination factors yet.
 SIM underlay/terrain geometry and the diorama compositor also still unwrap

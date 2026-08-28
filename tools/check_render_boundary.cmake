@@ -18,7 +18,9 @@ list(APPEND _portable_render_files
     # projection adapter still calls the native compositor implementation.
     "${GAME_SOURCE_ROOT}/action/action_effect_render.c"
     "${GAME_SOURCE_ROOT}/action/action_effect_render.h"
-    "${GAME_SOURCE_ROOT}/action/action_effect_projection.h")
+    "${GAME_SOURCE_ROOT}/action/action_effect_projection.h"
+    "${GAME_SOURCE_ROOT}/sim/sim_backdrop_render.c"
+    "${GAME_SOURCE_ROOT}/sim/sim_backdrop_render.h")
 
 set(_violations "")
 foreach(_file IN LISTS _portable_render_files)
