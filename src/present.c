@@ -65,13 +65,13 @@ static SDL_Texture *s_action_bg2_mask_texture;
 static SDL_Texture *s_action_plane_effect_target;
 static int s_action_plane_effect_w, s_action_plane_effect_h;
 static bool s_action_plane_blend_supported = true;
-static SDL_Texture *s_action_heat_target;
+static ArRenderTexture s_action_heat_target;
 static int s_action_heat_w, s_action_heat_h;
 static bool s_action_heat_supported = true;
 static bool s_action_heat_engaged;
 
 typedef struct ActionHeatPassState {
-  SDL_Texture *target;
+  ArRenderTargetState target_state;
   SDL_BlendMode blend;
   Uint8 r, g, b, a;
   bool valid;
@@ -1136,6 +1136,15 @@ static void DisableActionHeat(const char *operation) {
           operation ? operation : "unknown operation", SDL_GetError());
 }
 
+static void FailActionHeatTargetState(const char *operation) {
+  DisableActionHeat(operation);
+  SessionFatal_Request(
+      "The action heat-refraction pass could not restore the active render "
+      "target (%s). Restart the game; if this repeats, update your graphics "
+      "driver or disable action particles.",
+      ArRenderDevice_LastError(&g_render_device));
+}
+
 static bool FrameUsesActionHeat(const FrameSlot *slot) {
   if (!slot || !slot->action_effect_particles ||
       (slot->diorama_active && !slot->diorama_hud_flat))
@@ -1148,22 +1157,27 @@ static bool FrameUsesActionHeat(const FrameSlot *slot) {
       slot->diorama_map_group, slot->diorama_map_number);
 }
 
-static SDL_Texture *EnsureActionHeatTarget(int width, int height) {
-  if (!s_action_heat_supported || width <= 0 || height <= 0) return NULL;
-  if (s_action_heat_target && s_action_heat_w == width &&
+static ArRenderTexture EnsureActionHeatTarget(int width, int height) {
+  if (!s_action_heat_supported || width <= 0 || height <= 0)
+    return ArRenderTexture_Invalid();
+  if (ArRenderTexture_IsValid(s_action_heat_target) &&
+      s_action_heat_w == width &&
       s_action_heat_h == height)
     return s_action_heat_target;
-  SDL_DestroyTexture(s_action_heat_target);
-  s_action_heat_target = SDL_CreateTexture(
-      g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET,
-      width, height);
+  ArRenderDevice_DestroyTexture(&g_render_device, s_action_heat_target);
+  s_action_heat_target = ArRenderTexture_Invalid();
   s_action_heat_w = width;
   s_action_heat_h = height;
-  if (!s_action_heat_target ||
-      !SDL_SetTextureScaleMode(s_action_heat_target, SDL_SCALEMODE_LINEAR) ||
-      !SDL_SetTextureBlendMode(s_action_heat_target, SDL_BLENDMODE_NONE)) {
-    SDL_DestroyTexture(s_action_heat_target);
-    s_action_heat_target = NULL;
+  const ArRenderTextureDesc desc = {
+    .width = width,
+    .height = height,
+    .format = kArRenderPixelFormat_Argb8888,
+    .usage = kArRenderTextureUsage_Target,
+    .filter = kArRenderFilter_Linear,
+    .blend = kArRenderBlendMode_Opaque,
+  };
+  if (!ArRenderDevice_CreateTexture(
+          &g_render_device, &desc, &s_action_heat_target)) {
     s_action_heat_w = s_action_heat_h = 0;
     DisableActionHeat("target creation");
   }
@@ -1236,10 +1250,10 @@ static bool BeginActionHeat(const FrameSlot *slot, SDL_Rect viewport) {
     DisableActionHeat("output-size query");
     return false;
   }
-  SDL_Texture *target = EnsureActionHeatTarget(viewport.w, viewport.h);
-  if (!target) return false;
+  const ArRenderTexture target = EnsureActionHeatTarget(
+      viewport.w, viewport.h);
+  if (!ArRenderTexture_IsValid(target)) return false;
   ActionHeatPassState saved = {
-    .target = SDL_GetRenderTarget(g_renderer),
     .blend = SDL_BLENDMODE_INVALID,
   };
   if (!SDL_GetRenderDrawBlendMode(g_renderer, &saved.blend) ||
@@ -1248,23 +1262,33 @@ static bool BeginActionHeat(const FrameSlot *slot, SDL_Rect viewport) {
     DisableActionHeat("render-state capture");
     return false;
   }
+  const ArRenderTargetBeginResult begin = ArRenderDevice_BeginTarget(
+      &g_render_device, target, &saved.target_state);
+  if (begin != kArRenderTargetBegin_Ready) {
+    if (begin == kArRenderTargetBegin_StateLost)
+      FailActionHeatTargetState("failed-begin state restore");
+    else
+      DisableActionHeat("target bind");
+    return false;
+  }
   saved.valid = true;
   s_action_heat_saved_state = saved;
-  if (!SDL_SetRenderTarget(g_renderer, target) ||
-      !SDL_SetRenderLogicalPresentation(
+  if (!SDL_SetRenderLogicalPresentation(
           g_renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED) ||
-      !SDL_SetRenderViewport(g_renderer, NULL) ||
-      !SDL_SetRenderClipRect(g_renderer, NULL) ||
       !SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE) ||
       !SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255) ||
-      !SDL_RenderClear(g_renderer)) {
+      !ArRenderDevice_Clear(
+          &g_render_device, (ArRenderColorF){0.0f, 0.0f, 0.0f, 1.0f})) {
     const bool target_restored =
-        SDL_SetRenderTarget(g_renderer, saved.target);
+        ArRenderDevice_EndTarget(&g_render_device, &saved.target_state);
     const bool draw_state_restored = RestoreActionHeatDrawState(&saved);
     ClearActionHeatSavedState();
-    DisableActionHeat(
-        target_restored && draw_state_restored
-            ? "target bind/clear" : "failed-begin state restore");
+    if (!target_restored)
+      FailActionHeatTargetState("failed-begin state restore");
+    else
+      DisableActionHeat(draw_state_restored
+                            ? "target bind/clear"
+                            : "failed-begin draw-state restore");
     return false;
   }
   s_action_heat_engaged = true;
@@ -1280,12 +1304,15 @@ static void CancelActionHeat(void) {
   if (!s_action_heat_engaged) return;
   const ActionHeatPassState saved = s_action_heat_saved_state;
   const bool target_restored =
-      saved.valid && SDL_SetRenderTarget(g_renderer, saved.target);
+      saved.valid && ArRenderDevice_EndTarget(
+          &g_render_device, &saved.target_state);
   const bool draw_state_restored = RestoreActionHeatDrawState(&saved);
   ClearActionHeatSavedState();
   s_action_heat_engaged = false;
-  if (!target_restored || !draw_state_restored)
-    DisableActionHeat("cancel state restore");
+  if (!target_restored)
+    FailActionHeatTargetState("cancel state restore");
+  else if (!draw_state_restored)
+    DisableActionHeat("cancel draw-state restore");
 }
 
 static void EndActionHeat(const FrameSlot *slot, SDL_Rect viewport) {
@@ -1293,9 +1320,10 @@ static void EndActionHeat(const FrameSlot *slot, SDL_Rect viewport) {
   const ActionHeatPassState saved = s_action_heat_saved_state;
   ClearActionHeatSavedState();
   s_action_heat_engaged = false;
-  if (!saved.valid || !SDL_SetRenderTarget(g_renderer, saved.target)) {
+  if (!saved.valid || !ArRenderDevice_EndTarget(
+          &g_render_device, &saved.target_state)) {
     (void)RestoreActionHeatDrawState(&saved);
-    DisableActionHeat("target restore");
+    FailActionHeatTargetState("target restore");
     return;
   }
 
@@ -1311,22 +1339,33 @@ static void EndActionHeat(const FrameSlot *slot, SDL_Rect viewport) {
   const ActionHeatRenderMesh *mesh = resolved ? ActionHeatMeshFor(
       slot->action_scene_effects.game_frame, viewport,
       s_action_heat_w, s_action_heat_h, slot->visible_width) : NULL;
-  const bool warped = mesh && SDL_RenderGeometry(
-      g_renderer, s_action_heat_target,
-      (const SDL_Vertex *)mesh->vertices, mesh->vertex_count,
+  const bool warped = mesh && ArRenderDevice_DrawGeometry(
+      &g_render_device, s_action_heat_target,
+      mesh->vertices, mesh->vertex_count,
       mesh->indices, mesh->index_count);
   bool fallback = false;
   if (resolved && !warped) {
     /* A runtime geometry rejection must drop only the enhancement, not the
      * already-rendered world. Resolve the captured scene without refraction
      * for this frame, then disable future heat attempts. */
-    const SDL_FRect destination = ToFRect(viewport);
-    fallback = SDL_RenderTexture(
-        g_renderer, s_action_heat_target, NULL, &destination);
+    const ArRenderRectF destination = {
+      (float)viewport.x, (float)viewport.y,
+      (float)viewport.w, (float)viewport.h,
+    };
+    fallback = ArRenderDevice_DrawTexture(
+        &g_render_device, s_action_heat_target, NULL, &destination);
   }
-  PresentationGeometry_PopFullOutput(g_renderer, &output_state);
+  const bool output_state_restored =
+      PresentationGeometry_PopFullOutput(g_renderer, &output_state);
   const bool draw_state_restored = RestoreActionHeatDrawState(&saved);
-  if (!draw_state_restored)
+  if (!output_state_restored) {
+    DisableActionHeat("output-state restore");
+    SessionFatal_Request(
+        "The action heat-refraction pass could not restore the output "
+        "viewport and clip state (%s). Restart the game; if this repeats, "
+        "update your graphics driver or disable action particles.",
+        SDL_GetError());
+  } else if (!draw_state_restored)
     DisableActionHeat("draw-state restore");
   else if (!resolved)
     DisableActionHeat("scene resolve");
@@ -1904,13 +1943,13 @@ void PresentRendererResources_Reset(void) {
   SDL_DestroyTexture(s_action_bg1_mask_texture);
   SDL_DestroyTexture(s_action_bg2_mask_texture);
   SDL_DestroyTexture(s_action_plane_effect_target);
-  SDL_DestroyTexture(s_action_heat_target);
+  ArRenderDevice_DestroyTexture(&g_render_device, s_action_heat_target);
   s_action_bg1_mask_texture = NULL;
   s_action_bg2_mask_texture = NULL;
   s_action_plane_effect_target = NULL;
   s_action_plane_effect_w = s_action_plane_effect_h = 0;
   s_action_plane_blend_supported = true;
-  s_action_heat_target = NULL;
+  s_action_heat_target = ArRenderTexture_Invalid();
   ClearActionHeatSavedState();
   s_action_heat_mesh_cache = (ActionHeatMeshCache){0};
   s_action_heat_w = s_action_heat_h = 0;
