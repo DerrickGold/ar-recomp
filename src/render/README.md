@@ -43,12 +43,12 @@ blend behavior without expanding the minimum adapter surface.
 
 The base and authentic SNES framebuffers, HUD planes and composite target,
 Mode 7 replacement surface, manifest-driven screen replacements, persistent
-separated-SIM atlas/layers, and persistent diorama planes are device-owned
-handles. Their creation, destruction, zero-fill, and exact dirty-region
-uploads use the neutral device. The SDL adapter preserves their existing
-formats, nearest filtering, blend/tint behavior, render-target semantics, and
-texture updates. A fake backend runs the same dirty-upload flow in tests
-without SDL.
+separated-SIM atlas/layers, persistent world-navigation resources, background-
+voxel ground, and persistent diorama planes are device-owned handles. Their
+creation, destruction, zero-fill, and exact dirty-region uploads use the
+neutral device. The SDL adapter preserves their existing formats, filtering,
+blend/tint/address behavior, render-target semantics, and texture updates. A
+fake backend runs the same dirty-upload flow in tests without SDL.
 
 Ordinary separated-SIM flat, world-layer, and menu-layer composites now submit
 through the device, as do the standard projected SIM ground mesh, ordinary
@@ -56,33 +56,39 @@ object billboards, half-add billboards, promoted map-plane geometry, clip
 state, solid backdrops, additive lightning flashes, and shared SIM/action
 effect batches. The shared SIM/world-navigation sky gradient now builds and
 submits one portable geometry batch. The persistent world-map underlay, its
-downsampled blur, and the full-town canvas are device-owned textures whose CPU
-images upload without native texture mappings. Their projected extension
-meshes submit portable geometry, as do the world-navigation ground, active
-region haze, light treatment, and master fade. SIM effects generate portable
-vertices directly; action effects and their public projection contract do as
-well. The action-to-diorama projection implementation performs one point
-conversion at the still-native compositor boundary, and the private heat
-target retains one layout-compatible cast until render-target effects migrate.
-The custom two-pass rim-light blend still uses the SDL bridge because the
-portable blend vocabulary cannot describe its source/destination factors yet.
-The background-voxel terrain/depth path and the diorama compositor still
-unwrap opaque resources through
-`src/platform/sdl/render_sdl.h` while those paths migrate. Diorama frame
-generation retains private SDL endpoint/target textures. The bridge is a
-transition aid, not part of the portable contract. New renderer-facing code
-should not add another borrowed native resource.
+downsampled blur, the full-town canvas, navigation cloud, and town cloud are
+device-owned textures whose CPU images upload without native texture mappings.
+Their projected extension meshes submit portable geometry, as do world-
+navigation ground, active-region haze, light treatment, master fade, terrain,
+mountains, voxel models, and terrain-clipped shadows. SIM effects generate
+portable vertices directly; action effects and the diorama projection contract
+do as well.
+
+The SIM D32 contract is SDL-free and its current custom-GPU implementation is
+isolated in `src/platform/sdl/sim3d_depth_pass_sdl.c`. Diorama composite and
+frame-generation callers likewise exchange only `ArRenderDevice`, portable
+rectangles, and opaque texture handles. The current frame-generation
+implementation lives in `src/platform/sdl/diorama_frame_generation_sdl.c`;
+its private endpoint and target textures are deliberately backend-owned.
+
+The diorama compositor implementation and the custom two-pass rim-light,
+shadow-blur, heat-haze, and CRT targets still use the SDL bridge internally.
+Those paths need render-target/custom-effect extension contracts before a
+non-SDL backend can implement them without carrying SDL. The bridge is a
+transition aid, not part of a game-facing contract. New renderer-facing code
+must not add another borrowed native resource.
 
 The remaining migration should proceed in independently testable slices:
 
-1. Express the remaining enhanced composites as portable texture and geometry
-   batches, with explicit tint/blend state.
-2. Move render-target effects, diorama frame generation, and enhanced
-   SIM/diorama geometry behind device
-   capabilities while retaining a baseline path.
-3. Isolate custom shader/depth setup in optional backend extensions.
-4. Remove the SDL borrow/unwrap bridge, then expand the boundary check to the
-   complete presentation directory.
+1. Define optional render-target/custom-effect extension contracts for the
+   diorama compositor, rim light, shadow blur, heat haze, and CRT postprocess.
+2. Move the remaining diorama compositor implementation and transient effect
+   resource ownership under `src/platform/<backend>` while retaining a
+   capability-gated baseline path.
+3. Port the top-level presentation viewport/output contract and host UI/manual
+   draws, then remove native types from the complete presentation directory.
+4. Remove the SDL borrow/unwrap bridge after its final internal consumer is
+   gone.
 
 Each slice should preserve the replay state hashes, pass synthetic and real-PPU
 render tests, and be measured against the checked-in replay performance gate.

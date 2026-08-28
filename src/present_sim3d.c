@@ -521,8 +521,16 @@ static void DrawSimVoxelBillboardLayer(
       : (band == kSimBackgroundVoxelActorBand_Mountain
              ? kSimObjectTerrain_MountainOnly
              : kSimObjectTerrain_GroundOnly);
+  const SDL_Rect source = {
+    params->source.x, params->source.y,
+    params->source.w, params->source.h,
+  };
+  const SDL_Rect viewport = {
+    params->viewport.x, params->viewport.y,
+    params->viewport.w, params->viewport.h,
+  };
   SimObjectDrawScene scene = {
-    context->slot, params->source, params->viewport, context->camera,
+    context->slot, source, viewport, context->camera,
     params->matrix, true, context->virtual_height,
   };
   SimObjectDrawFilters filters = {
@@ -539,7 +547,7 @@ static void DrawSimVoxelBillboardLayer(
         context->outcome,
         DrawSimRimLight(
             context->slot, context->priority, context->virtual_height,
-            params->source, params->viewport, context->camera,
+            source, viewport, context->camera,
             params->matrix, terrain));
   Sim3DPerformance_End(performance);
 }

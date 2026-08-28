@@ -44,7 +44,7 @@ static DioramaProjection Projection(void) {
 
 static void TestRegisteredProjectionAndScale(void) {
   DioramaProjection projection = Projection();
-  SDL_FPoint point;
+  ArRenderPointF point;
   float scale_x = 0.0f, scale_y = 0.0f;
   CHECK(Diorama_ProjectCapturedPoint(
       &projection, 50.0f, 25.0f, 0, &point, &scale_x, &scale_y));
@@ -60,7 +60,7 @@ static void TestPriorityPlaneShapeIsApplied(void) {
   projection.object_planes[0].rake = 0.5f;
   projection.object_planes[1] = projection.object_planes[0];
   projection.object_planes[1].rake = 0.0f;
-  SDL_FPoint raked, flat;
+  ArRenderPointF raked, flat;
   CHECK(Diorama_ProjectCapturedPoint(
       &projection, 50.0f, 50.0f, 0, &raked, NULL, NULL));
   CHECK(Diorama_ProjectCapturedPoint(
@@ -79,7 +79,7 @@ static void TestOutputViewportOriginIsApplied(void) {
   DioramaProjection projection = Projection();
   projection.output_x = 120;
   projection.output_y = 40;
-  SDL_FPoint point;
+  ArRenderPointF point;
   float scale_x = 0.0f, scale_y = 0.0f;
   CHECK(Diorama_ProjectCapturedPoint(
       &projection, 50.0f, 25.0f, 0, &point, &scale_x, &scale_y));
@@ -98,7 +98,7 @@ static void TestCapturedTextureOriginIsApplied(void) {
   projection.texture_x_origin = 20;
   projection.object_planes[0].u0 = 0.20f;
   projection.object_planes[0].u1 = 0.80f;
-  SDL_FPoint point;
+  ArRenderPointF point;
   float scale_x = 0.0f, scale_y = 0.0f;
   CHECK(Diorama_ProjectCapturedPoint(
       &projection, 30.0f, 25.0f, 0, &point, &scale_x, &scale_y));
@@ -114,7 +114,7 @@ static void TestBg1PlaneShapeIsIndependent(void) {
   projection.bg1_plane.z_world = 0.40f;
   projection.bg1_plane.rake = 0.20f;
   projection.object_planes[0].z_world = 0.0f;
-  SDL_FPoint wall, object;
+  ArRenderPointF wall, object;
   CHECK(Diorama_ProjectCapturedBg1Point(
       &projection, 50.0f, 25.0f, &wall, NULL, NULL));
   CHECK(Diorama_ProjectCapturedPoint(
@@ -136,7 +136,7 @@ static void TestBg2PlaneShapeAndWindowAreIndependent(void) {
   projection.bg2_plane.rake = 0.10f;
   projection.bg2_plane.u0 = 0.20f;
   projection.bg2_plane.u1 = 0.80f;
-  SDL_FPoint backdrop, playfield;
+  ArRenderPointF backdrop, playfield;
   CHECK(Diorama_ProjectCapturedBg2Point(
       &projection, 50.0f, 25.0f, &backdrop, NULL, NULL));
   CHECK(Diorama_ProjectCapturedBg1Point(
@@ -163,7 +163,7 @@ static void TestBg2FoldedOverflowProjection(void) {
   /* capture y=56.25 maps to plane t=1.125, hence overflow t=0.625.
    * This is the same halfway-bend point pinned by the pure geometry test:
    * world y=-0.4825 and z=0.075 for this y_top=0 variant. */
-  SDL_FPoint folded;
+  ArRenderPointF folded;
   CHECK(Diorama_ProjectCapturedBg2Point(
       &projection, 50.0f, 56.25f, &folded, NULL, NULL));
   CHECK(Near(folded.x, 53.75f));
@@ -173,7 +173,7 @@ static void TestBg2FoldedOverflowProjection(void) {
    * guards the production seam used by the waterfall veil and mist, not only
    * the mesh arithmetic. */
   projection.bg2_plane.overflow_valid = false;
-  SDL_FPoint flat;
+  ArRenderPointF flat;
   CHECK(Diorama_ProjectCapturedBg2Point(
       &projection, 50.0f, 56.25f, &flat, NULL, NULL));
   CHECK(!Near(folded.x, flat.x));
@@ -182,7 +182,7 @@ static void TestBg2FoldedOverflowProjection(void) {
 
 static void TestInvalidInputsFailClosed(void) {
   DioramaProjection projection = Projection();
-  SDL_FPoint point = { 17.0f, 29.0f };
+  ArRenderPointF point = { 17.0f, 29.0f };
   CHECK(!Diorama_ProjectCapturedPoint(
       &projection, 0.0f, 0.0f, 1, &point, NULL, NULL));
   CHECK(point.x == 17.0f && point.y == 29.0f);

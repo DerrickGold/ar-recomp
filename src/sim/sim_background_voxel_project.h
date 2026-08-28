@@ -1,7 +1,6 @@
 #ifndef SIM_BACKGROUND_VOXEL_PROJECT_H
 #define SIM_BACKGROUND_VOXEL_PROJECT_H
 
-#include <SDL3/SDL.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -26,8 +25,8 @@
  * units are built on. */
 
 enum {
-  /* Staging for the shadow mask, the one path that still batches through
-   * SDL_RenderGeometry rather than the depth pass. Sized to hold a real
+  /* Staging for the shadow mask, the one path that still batches through the
+   * portable 2D geometry path rather than the depth pass. Sized to hold a real
    * town's casters in a single draw - Bloodpool's 168 objects come to about
    * 1200 quads - and to flush cleanly rather than truncate beyond that. */
   kSimBackgroundBatchMaxQuads = 2048,

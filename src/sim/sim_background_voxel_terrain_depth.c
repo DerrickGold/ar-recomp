@@ -38,8 +38,8 @@ typedef struct SimTerrainProjectionKey {
   uint16_t landscape_height_pct;
   uint16_t camera_x, camera_y;
   uint16_t town_screen_x0;
-  SDL_Rect source;
-  SDL_Rect viewport;
+  ArRenderRectI source;
+  ArRenderRectI viewport;
   float matrix[16];
 } SimTerrainProjectionKey;
 

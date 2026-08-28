@@ -1583,7 +1583,7 @@ static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
         case SDL_EVENT_RENDER_TARGETS_RESET:
         case SDL_EVENT_RENDER_DEVICE_RESET:
           if (event.type == SDL_EVENT_RENDER_DEVICE_RESET) {
-            Diorama_ResetRendererResources(g_renderer);
+            Diorama_ResetRendererResources(&g_render_device);
             DestroyDioramaTextures();
             CreateDioramaTextures();
           }
@@ -2219,7 +2219,7 @@ static int AppShutdown(AppBoot *app, char **argv) {
   HdReplacementHost_Shutdown();
   PresentRendererResources_Reset();
   DioramaFrameGeneration_Shutdown();
-  Diorama_Shutdown(g_renderer);
+  Diorama_Shutdown(&g_render_device);
   DestroyDioramaTextures();
   ArRenderDevice_DestroyTexture(&g_render_device, g_sim_obj_atlas_texture);
   g_sim_obj_atlas_texture = ArRenderTexture_Invalid();

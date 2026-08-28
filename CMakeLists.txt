@@ -1421,9 +1421,11 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_diorama_frame_generation_test
         tests/diorama_frame_generation_test.c
-        src/diorama/diorama_frame_generation.c
+        src/platform/sdl/diorama_frame_generation_sdl.c
         src/presentation_frame_generation.c
         src/presentation_geometry.c
+        src/render/render_device.c
+        src/platform/sdl/render_sdl.c
     )
     target_include_directories(actraiser_diorama_frame_generation_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src

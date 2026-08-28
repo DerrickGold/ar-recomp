@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "diorama/diorama_frame_generation.h"
+#include "platform/sdl/render_sdl.h"
 #include "present.h"
 
 static int failures;
@@ -95,6 +96,8 @@ int main(void) {
   SDL_Renderer *renderer = NULL;
   SDL_Texture *current = NULL;
   SDL_Texture *scene = NULL;
+  ArRenderDevice render_device = {0};
+  ArSdlRenderBackend render_backend = {0};
   DioramaPlaneCaptureRegion region;
   CHECK(DioramaPlaneCaptureRegion_Resolve(
       kDioramaPlane_Backdrop, kSurfaceWidth, kHeight, kApron, &region));
@@ -125,10 +128,12 @@ int main(void) {
   }
   CHECK(renderer != NULL);
   if (!renderer) goto done;
-  SDL_GPUDevice *device = SDL_GetGPURendererDevice(renderer);
+  SDL_GPUDevice *gpu_device = SDL_GetGPURendererDevice(renderer);
   printf("diorama frame-generation renderer=%s gpu=%s\n",
          SDL_GetRendererName(renderer),
-         device ? SDL_GetGPUDeviceDriver(device) : "fallback");
+         gpu_device ? SDL_GetGPUDeviceDriver(gpu_device) : "fallback");
+  CHECK(ArSdlRenderBackend_Bind(
+      &render_device, &render_backend, renderer));
 
   current = SDL_CreateTexture(
       renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
@@ -161,13 +166,13 @@ int main(void) {
   slot.diorama_plane_content_mask = slot.diorama_plane_request_mask;
   slot.timestamp_ns = 1000000;
   DioramaFrameGeneration_Capture(
-      renderer, &slot, planes, plane_pitches,
+      &render_device, &slot, planes, plane_pitches,
       1u << kDioramaPlane_Backdrop);
 
   planes[kDioramaPlane_Backdrop] = (uint8_t *)current_pixels;
   slot.timestamp_ns += 16666667;
   DioramaFrameGeneration_Capture(
-      renderer, &slot, planes, plane_pitches,
+      &render_device, &slot, planes, plane_pitches,
       1u << kDioramaPlane_Backdrop);
   SDL_Rect endpoint_rect = {kApron, 0, kDisplayWidth, kHeight};
   CHECK(SDL_UpdateTexture(
@@ -183,14 +188,16 @@ int main(void) {
   CHECK(SDL_SetRenderClipRect(renderer, &clip));
   CHECK(SDL_SetRenderDrawColor(renderer, 11, 22, 33, 44));
 
-  SDL_Texture *raw[kDioramaPlane_Count] = {0};
-  SDL_Texture *resolved[kDioramaPlane_Count] = {0};
-  raw[kDioramaPlane_Backdrop] = current;
+  ArRenderTexture raw[kDioramaPlane_Count] = {0};
+  ArRenderTexture resolved[kDioramaPlane_Count] = {0};
+  raw[kDioramaPlane_Backdrop] =
+      ArSdlRenderBackend_BorrowTexture(current);
   const uint32_t generated = DioramaFrameGeneration_Prepare(
-      renderer, &slot, 0.5f, raw,
+      &render_device, &slot, 0.5f, raw,
       1u << kDioramaPlane_Backdrop, resolved);
   CHECK(generated == (1u << kDioramaPlane_Backdrop));
-  CHECK(resolved[kDioramaPlane_Backdrop] != current);
+  CHECK(!ArRenderTexture_Equals(
+      resolved[kDioramaPlane_Backdrop], raw[kDioramaPlane_Backdrop]));
 
   CHECK(SDL_GetRenderTarget(renderer) == scene);
   int logical_width = 0, logical_height = 0;
@@ -212,7 +219,9 @@ int main(void) {
   /* At phase 0.5 the nearer (current) endpoint warps back by one pixel. The
    * marker therefore lands at x=10 as exact opaque blue. Drawing/blending the
    * farther red endpoint would turn this purple and recreate sprite ghosting. */
-  CHECK(SDL_SetRenderTarget(renderer, resolved[kDioramaPlane_Backdrop]));
+  CHECK(SDL_SetRenderTarget(
+      renderer, ArSdlRenderBackend_UnwrapTexture(
+                    resolved[kDioramaPlane_Backdrop])));
   CHECK(SDL_SetRenderLogicalPresentation(
       renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED));
   CHECK(SDL_SetRenderViewport(renderer, NULL));
@@ -258,35 +267,39 @@ int main(void) {
 
   memset(resolved, 0, sizeof(resolved));
   CHECK(DioramaFrameGeneration_Prepare(
-      renderer, &slot, kPresentationFrameGenerationPhaseNone, raw,
+      &render_device, &slot, kPresentationFrameGenerationPhaseNone, raw,
       1u << kDioramaPlane_Backdrop, resolved) == 0);
-  CHECK(resolved[kDioramaPlane_Backdrop] == current);
+  CHECK(ArRenderTexture_Equals(
+      resolved[kDioramaPlane_Backdrop], raw[kDioramaPlane_Backdrop]));
 
   /* A synchronized but byte-identical raw endpoint is already authoritative.
    * It must not create a redundant private pair or generated plane. */
   slot.timestamp_ns += 16666667;
   DioramaFrameGeneration_Capture(
-      renderer, &slot, planes, plane_pitches, 0);
+      &render_device, &slot, planes, plane_pitches, 0);
   memset(resolved, 0, sizeof(resolved));
   CHECK(DioramaFrameGeneration_Prepare(
-      renderer, &slot, 0.5f, raw,
+      &render_device, &slot, 0.5f, raw,
       1u << kDioramaPlane_Backdrop, resolved) == 0);
-  CHECK(resolved[kDioramaPlane_Backdrop] == current);
+  CHECK(ArRenderTexture_Equals(
+      resolved[kDioramaPlane_Backdrop], raw[kDioramaPlane_Backdrop]));
 
   /* A room-key discontinuity seeds a new endpoint but never blends across the
    * transition. */
   slot.timestamp_ns += 16666667;
   slot.diorama_map_number++;
   DioramaFrameGeneration_Capture(
-      renderer, &slot, planes, plane_pitches, 0);
+      &render_device, &slot, planes, plane_pitches, 0);
   memset(resolved, 0, sizeof(resolved));
   CHECK(DioramaFrameGeneration_Prepare(
-      renderer, &slot, 0.5f, raw,
+      &render_device, &slot, 0.5f, raw,
       1u << kDioramaPlane_Backdrop, resolved) == 0);
-  CHECK(resolved[kDioramaPlane_Backdrop] == current);
+  CHECK(ArRenderTexture_Equals(
+      resolved[kDioramaPlane_Backdrop], raw[kDioramaPlane_Backdrop]));
 
 done:
   DioramaFrameGeneration_Shutdown();
+  ArRenderDevice_Reset(&render_device);
   SDL_DestroyTexture(scene);
   SDL_DestroyTexture(current);
   SDL_DestroyRenderer(renderer);

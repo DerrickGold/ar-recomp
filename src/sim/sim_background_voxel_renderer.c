@@ -144,7 +144,7 @@ void SimBackgroundVoxelRenderer_Upload(ArRenderDevice *device) {
             device, SimBackgroundVoxels_AtlasPixels(),
             kSimTownCanvasPixels, kSimTownCanvasPixels, pitch)) {
       fprintf(stderr, "[sim-bg-voxels] GPU mountain atlas upload failed: %s\n",
-              SDL_GetError());
+              Sim3DDepthPass_LastError());
       g_renderer_state.allocation_failed = true;
       return;
     }
@@ -862,7 +862,7 @@ static bool BeginDepthTarget(
   if (params->viewport.w > INT_MAX / output_scale ||
       params->viewport.h > INT_MAX / output_scale)
     return false;
-  draw_params->viewport = (SDL_Rect){
+  draw_params->viewport = (ArRenderRectI){
     0, 0,
     params->viewport.w * output_scale,
     params->viewport.h * output_scale,

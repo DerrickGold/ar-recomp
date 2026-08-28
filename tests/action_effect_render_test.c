@@ -846,7 +846,7 @@ static void TestAitosUsesRakedDioramaSourcePlanes(void) {
   };
   ActionSceneEffectFrame frame = {.effect_count = 1, .visible_count = 1};
   static ActionSceneEffectRenderBatch pit, fireball;
-  SDL_FPoint expected;
+  ArRenderPointF expected;
 
   /* camera-relative (-30,-7), plus display margins (60,32), produces the
    * captured anchor (30,25). This exercises the production adapter rather

@@ -93,7 +93,7 @@ bool ActionEffectProjection_ProjectPoint(
     /* Texture row zero represents screen y=-ws_extra_top. Flat mode keeps
      * authentic screen Y and therefore intentionally ignores this margin. */
     const float texture_y = capture_y + (float)context->ws_extra_top;
-    SDL_FPoint projected;
+    ArRenderPointF projected;
     bool valid;
     if (effect->projection_plane == kActionEffectProjectionPlane_Bg1)
       valid = Diorama_ProjectCapturedBg1Point(
@@ -112,7 +112,7 @@ bool ActionEffectProjection_ProjectPoint(
       valid = Diorama_ProjectCapturedPoint(
           context->diorama_projection, capture_x, texture_y,
           effect->obj_priority, &projected, NULL, NULL);
-    if (valid) *point = (ArRenderPointF){projected.x, projected.y};
+    if (valid) *point = projected;
     return valid;
   }
 

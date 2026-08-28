@@ -902,7 +902,8 @@ void PresentUpload(const FrameSlot *slot) {
     DioramaPerformanceScope frame_analysis =
         DioramaPerformance_Begin(kDioramaPerformance_FrameAnalysis);
     DioramaFrameGeneration_Capture(
-        g_renderer, slot, pixels, pitch_bytes, upload.changed_plane_mask);
+        &g_render_device, slot, pixels, pitch_bytes,
+        upload.changed_plane_mask);
     DioramaPerformance_End(frame_analysis);
   } else {
     s_diorama_uploaded_plane_mask = 0;
@@ -1980,15 +1981,14 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
     for (int plane = 0; plane < kDioramaPlane_Count; plane++)
       if (!(s_diorama_uploaded_plane_mask & (1u << plane)))
         pixels[plane] = NULL;
-    SDL_Texture *current_textures[kDioramaPlane_Count];
-    SDL_Texture *scene_textures[kDioramaPlane_Count];
+    ArRenderTexture current_textures[kDioramaPlane_Count];
+    ArRenderTexture scene_textures[kDioramaPlane_Count];
     for (int plane = 0; plane < kDioramaPlane_Count; plane++)
-      current_textures[plane] =
-          ArSdlRenderBackend_UnwrapTexture(g_diorama_textures[plane]);
+      current_textures[plane] = g_diorama_textures[plane];
     DioramaPerformanceScope frame_synthesis =
         DioramaPerformance_Begin(kDioramaPerformance_FrameSynthesis);
     (void)DioramaFrameGeneration_Prepare(
-        g_renderer, slot, alpha, current_textures,
+        &g_render_device, slot, alpha, current_textures,
         s_diorama_uploaded_plane_mask, scene_textures);
     DioramaPerformance_End(frame_synthesis);
     /* The existing graphics setting now selects frame-space generation.
@@ -2164,14 +2164,17 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
             s_diorama_uploaded_plane_mask);
     (void)BeginActionHeat(slot, output_viewport);
     const SDL_Rect viewport = ActionHeatSceneViewport(output_viewport);
+    const ArRenderRectI diorama_viewport = {
+      viewport.x, viewport.y, viewport.w, viewport.h,
+    };
     ActionDioramaPlaneEffectContext plane_effect = {slot, viewport};
     SDL_ClearError();
     const PresentationOutcome diorama = Diorama_Composite(
-        g_renderer, slot->snes_width,
+        &g_render_device, slot->snes_width,
         slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom,
         slot->ws_extra_top, slot->obj_apron,
         slot->pixel_aspect, slot->ignore_aspect_ratio,
-        slot->visible_width, viewport, scene_textures, pixels,
+        slot->visible_width, diorama_viewport, scene_textures, pixels,
         slot->diorama_bg_transparent_fill_configured,
         slot->diorama_bg_transparent_fill_argb,
         &final_cam, distance_scale,

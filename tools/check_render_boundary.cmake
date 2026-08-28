@@ -23,7 +23,20 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/sim/sim_backdrop_render.h"
     # The enhanced SIM scene's depth contract is game-side; its current GPU
     # implementation belongs to the SDL platform adapter.
-    "${GAME_SOURCE_ROOT}/sim/sim3d_depth_pass.h")
+    "${GAME_SOURCE_ROOT}/sim/sim3d_depth_pass.h"
+    "${GAME_SOURCE_ROOT}/sim/sim_background_mountain_render.c"
+    "${GAME_SOURCE_ROOT}/sim/sim_background_mountain_render.h"
+    "${GAME_SOURCE_ROOT}/sim/sim_background_voxel_renderer.c"
+    "${GAME_SOURCE_ROOT}/sim/sim_background_voxel_renderer.h"
+    "${GAME_SOURCE_ROOT}/sim/sim_background_voxel_project.c"
+    "${GAME_SOURCE_ROOT}/sim/sim_background_voxel_project.h"
+    "${GAME_SOURCE_ROOT}/sim/sim_background_voxel_terrain_depth.c"
+    "${GAME_SOURCE_ROOT}/sim/sim_background_voxel_terrain_depth.h"
+    # Diorama callers share only opaque texture handles and portable geometry;
+    # the current compositor/synthesis implementation is an SDL adapter.
+    "${GAME_SOURCE_ROOT}/diorama/diorama.h"
+    "${GAME_SOURCE_ROOT}/diorama/diorama_frame_generation.h"
+    "${GAME_SOURCE_ROOT}/diorama/diorama_projection.c")
 
 set(_violations "")
 foreach(_file IN LISTS _portable_render_files)

@@ -3,10 +3,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <SDL3/SDL.h>
 #include "diorama_planes.h"
 #include "diorama_skybox_uv.h"
 #include "presentation_outcome.h"
+#include "render/render_device.h"
 
 /* The per-room ($18,$19) layer override table the editor edits and the draw
  * loop reads. Never NULL. Empty means "every room draws as built". */
@@ -148,7 +148,7 @@ uint32_t Diorama_FilterBgEffectProjectionMask(
  * plane. scale_x/scale_y are the projected lengths of one captured pixel. */
 bool Diorama_ProjectCapturedPoint(const DioramaProjection *projection,
                                   float capture_x, float capture_y,
-                                  unsigned obj_priority, SDL_FPoint *point,
+                                  unsigned obj_priority, ArRenderPointF *point,
                                   float *scale_x, float *scale_y);
 
 /* Same mapping, using the resolved BG1-low plane. Environmental lights such
@@ -156,13 +156,13 @@ bool Diorama_ProjectCapturedPoint(const DioramaProjection *projection,
  * floating at an arbitrary OBJ depth. */
 bool Diorama_ProjectCapturedBg1Point(const DioramaProjection *projection,
                                      float capture_x, float capture_y,
-                                     SDL_FPoint *point,
+                                     ArRenderPointF *point,
                                      float *scale_x, float *scale_y);
 
 /* Same mapping for BG1's priority-1 tile band. */
 bool Diorama_ProjectCapturedBg1HighPoint(
     const DioramaProjection *projection,
-    float capture_x, float capture_y, SDL_FPoint *point,
+    float capture_x, float capture_y, ArRenderPointF *point,
     float *scale_x, float *scale_y);
 
 /* Same mapping, using the resolved BG2-low backdrop plane. Waterfall accents
@@ -170,7 +170,7 @@ bool Diorama_ProjectCapturedBg1HighPoint(
  * BG1's playfield shape. */
 bool Diorama_ProjectCapturedBg2Point(const DioramaProjection *projection,
                                      float capture_x, float capture_y,
-                                     SDL_FPoint *point,
+                                     ArRenderPointF *point,
                                      float *scale_x, float *scale_y);
 
 /* B4-kick (followup doc): boost's "zoom-punch" multiplies the RESOLVED
@@ -215,11 +215,11 @@ bool Diorama_ProjectCapturedBg2Point(const DioramaProjection *projection,
  * Complete and OptionalOmitted both mean the selected scene is usable;
  * CoreFailure means the caller must stop rather than present a partial view. */
 PresentationOutcome Diorama_Composite(
-    SDL_Renderer *renderer, int snes_width, int snes_height,
+    ArRenderDevice *device, int snes_width, int snes_height,
     int authentic_y0, int obj_apron,
     int active_pixel_aspect, bool ignore_aspect_ratio,
-    int visible_width, SDL_Rect viewport,
-    SDL_Texture *textures[], const uint8_t *const pixels[],
+    int visible_width, ArRenderRectI viewport,
+    const ArRenderTexture textures[], const uint8_t *const pixels[],
     const bool bg_transparent_fill_configured[2],
     const uint32_t bg_transparent_fill_argb[2],
     const DioramaCameraPose *cam_pose, float distance_scale,
@@ -230,13 +230,13 @@ PresentationOutcome Diorama_Composite(
     DioramaPlaneEffectFn plane_effect, void *plane_effect_userdata,
     DioramaProjection *out_projection);
 
-/* Drops renderer-owned targets/effects after SDL_EVENT_RENDER_DEVICE_RESET so
- * they are lazily recreated against the current device. */
-void Diorama_ResetRendererResources(SDL_Renderer *renderer);
+/* Drops backend-owned targets/effects after a render-device reset so they are
+ * lazily recreated against the current device. */
+void Diorama_ResetRendererResources(ArRenderDevice *device);
 
-/* Releases renderer-owned supersample and optional GPU-effect resources.
- * Call before destroying the renderer. */
-void Diorama_Shutdown(SDL_Renderer *renderer);
+/* Releases backend-owned supersample and optional GPU-effect resources.
+ * Call before destroying the render device. */
+void Diorama_Shutdown(ArRenderDevice *device);
 
 void Diorama_FlushSettingsIfDirty(void);
 
