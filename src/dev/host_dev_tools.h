@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdio.h>
 
-#include <SDL3/SDL.h>
+#include "render/render_types.h"
 
 void HostDevTools_FormatInspectorInfo(char *buffer, size_t buffer_size);
 bool HostDevTools_DumpSceneAssets(void);
@@ -13,6 +13,6 @@ void HostDevTools_TakeFullSnapshot(void);
 void HostDevTools_AdjustHudOutputScale(int delta_percent);
 bool HostDevTools_InspectWindowPoint(int window_x, int window_y);
 void HostDevTools_DumpDioramaLayers(void);
-SDL_Point HostDevTools_WriteFramebufferPpm(FILE *file);
+ArRenderExtentI HostDevTools_WriteFramebufferPpm(FILE *file);
 
 #endif /* HOST_DEV_TOOLS_H */

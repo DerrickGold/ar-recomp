@@ -581,14 +581,14 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
     if (want) {
       FILE *pf = fopen(fname, "wb");
       if (pf) {
-        const SDL_Point shot_size =
+        const ArRenderExtentI shot_size =
             HostDevTools_WriteFramebufferPpm(pf);
         fclose(pf);
         int margin_left = 0;
         int margin_right = 0;
         ActRaiser_LiveMargins(&margin_left, &margin_right);
         fprintf(stderr, "[shot] wrote %s at gf=%u (%dx%d) margins=%d/%d mode=%s\n",
-                fname, gf, shot_size.x, shot_size.y,
+                fname, gf, shot_size.width, shot_size.height,
                 margin_left, margin_right,
                 Settings_DisplayModeName(g_settings.display_mode));
       }
