@@ -72,12 +72,14 @@ rectangles, and opaque texture handles. The current frame-generation
 implementation lives in `src/platform/sdl/diorama_frame_generation_sdl.c`;
 its private endpoint and target textures are deliberately backend-owned.
 
-The diorama compositor implementation and the custom two-pass rim-light,
-shadow-blur, heat-haze, and CRT targets still use the SDL bridge internally.
-Those paths need render-target/custom-effect extension contracts before a
-non-SDL backend can implement them without carrying SDL. The bridge is a
-transition aid, not part of a game-facing contract. New renderer-facing code
-must not add another borrowed native resource.
+The diorama compositor implementation still uses the SDL bridge internally,
+but its blur, rim-light, and combined depth-of-field/edge-AA effects now cross
+an SDL-free semantic contract in `diorama/diorama_effect_backend.h`. Their
+shader formats, native state, binding, and lifetime live in
+`platform/sdl/diorama_effect_backend_sdl.c`. SIM shadow blur, heat haze, and
+CRT still need equivalent backend boundaries. The bridge is a transition aid,
+not part of a game-facing contract. New renderer-facing code must not add
+another borrowed native resource.
 
 Temporary target composition now has a portable scoped-target extension. It
 captures and restores the caller's target, viewport, and clip, and reports a
@@ -88,9 +90,9 @@ established fallbacks.
 
 The remaining migration should proceed in independently testable slices:
 
-1. Extend the scoped render-target contract with backend custom-effect passes
-   for the diorama compositor, rim light, shadow blur, heat haze, and CRT
-   postprocess.
+1. Extend backend custom-effect ownership to SIM shadow blur, heat haze, and
+   CRT postprocess, using the diorama effect boundary as the established
+   pattern.
 2. Move the remaining diorama compositor implementation and transient effect
    resource ownership under `src/platform/<backend>` while retaining a
    capability-gated baseline path.

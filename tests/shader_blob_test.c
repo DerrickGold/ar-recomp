@@ -55,7 +55,8 @@ static int s_failures;
 } while (0)
 
 /* Every shader the game ships. Adding a .frag.glsl without adding it here
- * would leave it unguarded, so keep this list in step with diorama.c's. */
+ * would leave it unguarded, so keep this list in step with the platform effect
+ * implementations. */
 static const struct {
   const char *name;
   GpuShaderBlobs blobs;
@@ -97,8 +98,8 @@ static const struct {
 };
 static const int kShaderCount = (int)(sizeof(kShaders) / sizeof(kShaders[0]));
 
-/* Mirrors diorama.c's CreateFragmentShaderFromBlobs. `entrypoint` is a
- * parameter here only so the test can feed it a deliberately wrong name. */
+/* Mirrors GpuShaderBlob_Create. `entrypoint` is a parameter here only so the
+ * test can feed it a deliberately wrong name. */
 static SDL_GPUShader *CreateFrom(SDL_GPUDevice *device,
                                  const GpuShaderBlobs *blobs,
                                  const char *entrypoint,
