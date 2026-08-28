@@ -466,6 +466,19 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_sim_town_terrain
         COMMAND actraiser_sim_town_terrain_test)
 
+    add_executable(actraiser_sim_backdrop_render_test
+        tests/sim_backdrop_render_test.c
+        src/sim/sim_backdrop_render.c
+        src/scene3d_math.c
+    )
+    target_include_directories(actraiser_sim_backdrop_render_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    target_link_libraries(actraiser_sim_backdrop_render_test PRIVATE
+        actraiser_math)
+    add_test(NAME actraiser_sim_backdrop_render
+        COMMAND actraiser_sim_backdrop_render_test)
+
     add_executable(actraiser_sim_background_voxels_test
         tests/sim_background_voxels_test.c
         src/sim/sim_town_layout.c

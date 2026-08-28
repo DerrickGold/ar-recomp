@@ -22,6 +22,7 @@
 #include <string.h>
 #include "presentation_geometry.h"
 #include "render_capabilities.h"
+#include "sim/sim_backdrop_render.h"
 #include "sim/sim_background_voxels.h"
 #include "sim/sim3d.h"
 #include "sim/sim3d_camera_limits.h"
@@ -1503,117 +1504,27 @@ static void ClampSimCameraPitch(Scene3DCamera *camera) {
   if (camera->tilt_x > maximum) camera->tilt_x = maximum;
 }
 
-/* The finite ground reveals this gradient only where no opaque geometry was
- * drawn. Supported camera pitches keep the real vanishing line off-screen, so
- * a synthetic horizon anchors the gradient unless the real one becomes
- * visible. Strength zero must remain the exact flat-backdrop baseline. */
-static const SDL_FColor kSimSkyHorizon = { 0.60f, 0.74f, 0.90f, 1.0f };
-static const SDL_FColor kSimSkyZenith = { 0.16f, 0.33f, 0.66f, 1.0f };
-
-enum {
-  /* Percent, at full strength: how far each end is taken toward its sky
-   * colour. Asymmetric because the horizon is the readable half -- the zenith
-   * mostly needs to not compete with it. */
-  kSimBackdropHorizonMixPct = 82,
-  kSimBackdropZenithMixPct = 62,
-};
-
-/* Gradient position at a screen row: 0 at the anchor and below it, 1 a full
- * span above. Pure so the degenerate anchors are checkable without a camera. */
-static float SimBackdropGradientAt(float screen_y, float horizon_y,
-                                   float span) {
-  if (span <= 0.0f) return 0.0f;
-  float t = (horizon_y - screen_y) / span;
-  return t < 0.0f ? 0.0f : t > 1.0f ? 1.0f : t;
-}
-
 void DrawSimBackdrop(const FrameSlot *slot, SDL_Rect viewport,
-                            const float matrix[16]) {
-  uint32_t backdrop = slot->sim.separated_backdrop_argb;
-  float base_r = (float)((backdrop >> 16) & 0xFF) / 255.0f;
-  float base_g = (float)((backdrop >> 8) & 0xFF) / 255.0f;
-  float base_b = (float)(backdrop & 0xFF) / 255.0f;
-
-  float strength =
-      (float)slot->sim.backdrop_strength_pct / (float)kPercentScale;
-  float horizon_mix =
-      (float)kSimBackdropHorizonMixPct / (float)kPercentScale * strength;
-  float zenith_mix =
-      (float)kSimBackdropZenithMixPct / (float)kPercentScale * strength;
-
-  SDL_FColor horizon = {
-    base_r + (kSimSkyHorizon.r - base_r) * horizon_mix,
-    base_g + (kSimSkyHorizon.g - base_g) * horizon_mix,
-    base_b + (kSimSkyHorizon.b - base_b) * horizon_mix,
-    1.0f,
+                     const float matrix[16]) {
+  const SimBackdropRenderInput input = {
+    .backdrop_argb = slot->sim.separated_backdrop_argb,
+    .strength_pct = slot->sim.backdrop_strength_pct,
+    .horizon_pct = slot->sim.backdrop_horizon_pct,
+    .viewport = {viewport.x, viewport.y, viewport.w, viewport.h},
+    .matrix = matrix,
   };
-  SDL_FColor zenith = {
-    base_r + (kSimSkyZenith.r - base_r) * zenith_mix,
-    base_g + (kSimSkyZenith.g - base_g) * zenith_mix,
-    base_b + (kSimSkyZenith.b - base_b) * zenith_mix,
-    1.0f,
+  SimBackdropRenderBatch batch;
+  const ArRenderDrawState state = {
+    .flags = kArRenderDrawState_Blend,
+    .blend = kArRenderBlendMode_Opaque,
   };
-
-  float top = (float)viewport.y;
-  float bottom = (float)(viewport.y + viewport.h);
-
-  /* Anchor the gradient's zero -- its brightest, most distant-looking end --
-   * at the real horizon when it is on screen, and at the synthetic one for
-   * configured pitches where the real horizon falls outside the viewport. */
-  float horizon_y = 0.0f;
-  bool horizon_visible = matrix &&
-      Scene3D_GroundHorizonScreenY(matrix, viewport.h, &horizon_y) &&
-      (horizon_y += (float)viewport.y, horizon_y > top && horizon_y < bottom);
-  float anchor = horizon_visible
-      ? horizon_y
-      : top + (float)viewport.h *
-            (float)slot->sim.backdrop_horizon_pct / (float)kPercentScale;
-
-  /* A vertex at the anchor when it falls inside, because SDL_RenderGeometry
-   * interpolates linearly and the gradient bends there. */
-  float rows[3];
-  int row_count = 0;
-  rows[row_count++] = top;
-  if (anchor > top && anchor < bottom) rows[row_count++] = anchor;
-  rows[row_count++] = bottom;
-
-  /* The gradient completes exactly at the top of the viewport rather than over
-   * a fixed distance, so moving the anchor restretches it instead of leaving
-   * a band of flat zenith above wherever it happened to run out. */
-  float span = anchor - top;
-  if (span < 1.0f) span = 1.0f;
-  float left = (float)viewport.x;
-  float right = (float)(viewport.x + viewport.w);
-
-  SDL_Vertex vertices[6];
-  int indices[12];
-  int vertex_count = 0, index_count = 0;
-  for (int row = 0; row < row_count; row++) {
-    float t = SimBackdropGradientAt(rows[row], anchor, span);
-    SDL_FColor color = {
-      horizon.r + (zenith.r - horizon.r) * t,
-      horizon.g + (zenith.g - horizon.g) * t,
-      horizon.b + (zenith.b - horizon.b) * t,
-      1.0f,
-    };
-    vertices[vertex_count++] =
-        (SDL_Vertex){ { left, rows[row] }, color, { 0.0f, 0.0f } };
-    vertices[vertex_count++] =
-        (SDL_Vertex){ { right, rows[row] }, color, { 0.0f, 0.0f } };
-  }
-  for (int row = 0; row + 1 < row_count; row++) {
-    int top_left = row * 2;
-    indices[index_count++] = top_left;
-    indices[index_count++] = top_left + 1;
-    indices[index_count++] = top_left + 3;
-    indices[index_count++] = top_left;
-    indices[index_count++] = top_left + 3;
-    indices[index_count++] = top_left + 2;
-  }
-  if (SDL_RenderGeometry(g_renderer, NULL, vertices, vertex_count, indices,
-                         index_count)) {
+  if (SimBackdropRender_Build(&input, &batch) &&
+      ArRenderDevice_DrawGeometryWithState(
+          &g_render_device, ArRenderTexture_Invalid(),
+          batch.vertices, batch.vertex_count,
+          batch.indices, batch.index_count, &state)) {
     Sim3DPerformance_AddDraw(
-        (uint64_t)vertex_count, (uint64_t)index_count);
+        (uint64_t)batch.vertex_count, (uint64_t)batch.index_count);
   }
 }
 
