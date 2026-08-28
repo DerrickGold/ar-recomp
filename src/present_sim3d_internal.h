@@ -16,6 +16,7 @@
 #include <stdint.h>
 
 #include "present.h"
+#include "render/render_types.h"
 
 /* ---- shared cloud model ---------------------------------------------------
  * The world-map sky reuses the town's cloud layers and noise so the two skies
@@ -38,10 +39,10 @@ extern const float kPi;
 int InsertSimGroundCoordinate(float *coordinates, int count, int capacity,
                               float coordinate);
 void SimShadowLight(const FrameSlot *slot, float *light_x, float *light_y);
-SDL_Texture *EnsureSimUnderlayTexture(const FrameSlot *slot);
+ArRenderTexture EnsureSimUnderlayTexture(const FrameSlot *slot);
 /* Returns the optional blur only when it represents the requested world-map
  * revision. Consumers must never infer freshness from allocation alone. */
-SDL_Texture *SimUnderlayBlurTexture(uint32_t serial);
+ArRenderTexture SimUnderlayBlurTexture(uint32_t serial);
 void DrawSimBackdrop(const FrameSlot *slot, SDL_Rect viewport,
                      const float matrix[16]);
 

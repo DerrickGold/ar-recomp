@@ -126,6 +126,7 @@ static void TestUnavailableRom(void) {
   CHECK(!SimWorldMap_DevelopedAvailable());
   CHECK(SimWorldMap_Serial() == 0);
   CHECK(SimWorldMap_Baseline() == NULL);
+  CHECK(SimWorldMap_BakedPixels() == NULL);
   CHECK(SimWorldMap_PublishBuiltTilemap(tiny) == 0);
   int x = -1, y = -1;
   /* The window table is static data, so it still answers without a ROM. */
@@ -243,6 +244,10 @@ static void TestDirtyTrackingMatchesFullBake(void) {
 
   memset(baked, 0xAA, count * 4);
   CHECK(SimWorldMap_Bake(baked, kSimWorldMapPixels));
+  const uint32_t *persistent = SimWorldMap_BakedPixels();
+  CHECK(persistent != NULL);
+  CHECK(persistent &&
+        memcmp(persistent, baked, (size_t)count * sizeof(uint32_t)) == 0);
   ReferenceFullBake(expected, reference);
   CHECK(memcmp(baked, reference, count * 4) == 0);
 

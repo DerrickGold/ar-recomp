@@ -98,6 +98,15 @@ const uint8_t *SimWorldMap_Baseline(void);
  * of the town is the correct stand-in for territory that is off-screen. */
 bool SimWorldMap_Bake(uint32_t *pixels, int pitch_pixels);
 
+/* Returns the persistent, tightly packed ARGB8888 bake after applying every
+ * pending dirty tile, or NULL when the world map is unavailable. The pointer
+ * remains owned by this module and is valid until SimWorldMap_Shutdown.
+ *
+ * Render backends that accept an ordinary upload pointer should prefer this
+ * over allocating or mapping a native streaming texture merely to give Bake a
+ * destination. Callers must treat the returned pixels as immutable. */
+const uint32_t *SimWorldMap_BakedPixels(void);
+
 /* Box-downsamples the baked image by `divisor` into `pixels`, which must be
  * (kSimWorldMapPixels / divisor) square. `divisor` must be >= 1 and divide
  * kSimWorldMapPixels exactly; anything else returns false.

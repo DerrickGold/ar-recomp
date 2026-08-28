@@ -1,12 +1,10 @@
 /* The world-map navigation renderer: the 3D sky/ground/weather treatment shown
  * while travelling between towns, split verbatim out of present_sim3d.c.
  *
- * Split out for isolation rather than for size. This is the one renderer in the
- * present family with NO automated render coverage -- no sim3d checkpoint sets
- * AR_SIM3D_WORLD_NAV and no staged replay in saves/ reaches world-map travel --
- * so keeping it in its own translation unit makes that gap structural and
- * visible instead of a footnote. Staging a world-map SRAM seed + replay and
- * adding a checkpoint is the missing regression asset.
+ * Split out for isolation rather than for size. saves/sim-actions.rec crosses
+ * this path during GPU smoke runs, but it does not yet have a dedicated,
+ * pixel-stable checkpoint. Keeping the renderer in its own translation unit
+ * makes that remaining regression-asset gap structural and visible.
  *
  * The D6 no-live-globals invariant holds here as everywhere in the present
  * family: no g_ppu, no g_settings, no Settings_Visible*(). State arrives via
@@ -21,6 +19,7 @@
 #include "constants.h"
 #include "snesrecomp/game/types.h"
 #include "diorama/diorama.h"
+#include "render/render_device.h"
 #include "scene3d_math.h"
 #include "sim/sim_world_map.h"
 #include "sim/sim_world_navigation_capture.h"
@@ -33,6 +32,7 @@
 
 
 extern SDL_Renderer *g_renderer;
+extern ArRenderDevice g_render_device;
 #include "present_sim3d_internal.h"
 
 
@@ -161,14 +161,15 @@ static SDL_FPoint WorldNavigationAuthenticToOutput(
 }
 
 static bool DrawWorldNavigationGround(
-    const FrameSlot *slot, SDL_Rect viewport, SDL_Texture *texture) {
+    const FrameSlot *slot, SDL_Rect viewport, ArRenderTexture texture) {
   const SimWorldNavigationScene *scene =
       &slot->sim.world_navigation_scene;
-  if (!texture || !scene->valid || slot->visible_width <= 0 ||
+  if (!ArRenderTexture_IsValid(texture) || !scene->valid ||
+      slot->visible_width <= 0 ||
       slot->snes_height <= 0)
     return false;
 
-  SDL_Vertex vertices[4];
+  ArRenderVertex2D vertices[4];
   for (int i = 0; i < 4; i++) {
     float authentic_x = 0.0f, authentic_y = 0.0f;
     const float source_x =
@@ -178,19 +179,19 @@ static bool DrawWorldNavigationGround(
     if (!SimWorldNavigationScene_ProjectSource(
             scene, source_x, source_y, &authentic_x, &authentic_y))
       return false;
-    vertices[i] = (SDL_Vertex){
-      WorldNavigationAuthenticToOutput(
-          slot, viewport, authentic_x, authentic_y),
+    const SDL_FPoint output = WorldNavigationAuthenticToOutput(
+        slot, viewport, authentic_x, authentic_y);
+    vertices[i] = (ArRenderVertex2D){
+      {output.x, output.y},
       {1.0f, 1.0f, 1.0f, 1.0f},
       {scene->ground[i].texture_u, scene->ground[i].texture_v},
     };
   }
-  static const int indices[6] = {0, 1, 2, 0, 2, 3};
-  SDL_SetTextureColorMod(texture, 255, 255, 255);
-  SDL_SetTextureAlphaMod(texture, 255);
-  if (!SDL_RenderGeometry(g_renderer, texture, vertices, 4, indices, 6)) {
+  static const int32_t indices[6] = {0, 1, 2, 0, 2, 3};
+  if (!ArRenderDevice_DrawGeometry(
+          &g_render_device, texture, vertices, 4, indices, 6)) {
     fprintf(stderr, "[world-navigation] ground draw failed: %s\n",
-            SDL_GetError());
+            ArRenderDevice_LastError(&g_render_device));
     return false;
   }
   return true;
@@ -208,13 +209,20 @@ static bool DrawWorldNavigationLightTreatment(
    * term is necessarily uniform. A restrained warm dusk grade makes that
    * physically honest limitation visible without pretending the painted map
    * has per-pixel normals. Azimuth remains meaningful for cloud shadows. */
-  const Uint8 alpha = (Uint8)(low_sun * 72.0f + 0.5f);
-  SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND);
-  SDL_SetRenderDrawColor(g_renderer, 42, 24, 12, alpha);
-  const SDL_FRect area = ToFRect(viewport);
-  const bool ok = SDL_RenderFillRect(g_renderer, &area);
-  SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE);
-  return ok;
+  /* Preserve the original byte quantization before crossing the portable
+   * float-color boundary. Otherwise every non-integral value would subtly
+   * change the dusk treatment. */
+  const uint8_t alpha_byte = (uint8_t)(low_sun * 72.0f + 0.5f);
+  const float alpha = alpha_byte / 255.0f;
+  const ArRenderRectF area = {
+    (float)viewport.x, (float)viewport.y,
+    (float)viewport.w, (float)viewport.h,
+  };
+  return ArRenderDevice_DrawSolidRect(
+      &g_render_device, &area,
+      (ArRenderColorF){42.0f / 255.0f, 24.0f / 255.0f,
+                       12.0f / 255.0f, alpha},
+      kArRenderBlendMode_Alpha);
 }
 
 /* The original label selector owns the clear 256x256 region. Outside it, the
@@ -271,8 +279,8 @@ static bool DrawWorldNavigationActiveRegionHaze(
     ny = InsertSimGroundCoordinate(ys, ny, kMaxAxis, y1 + lead);
   }
 
-  SDL_Vertex vertices[kMaxVertices];
-  int indices[kMaxIndices];
+  ArRenderVertex2D vertices[kMaxVertices];
+  int32_t indices[kMaxIndices];
   int vertex_count = 0, index_count = 0;
   for (int row = 0; row < ny; row++) {
     for (int column = 0; column < nx; column++) {
@@ -283,9 +291,10 @@ static bool DrawWorldNavigationActiveRegionHaze(
       const float haze =
           SimWorldNavigationScene_LocationHaze(
               scene, xs[column], ys[row], lead);
-      vertices[vertex_count++] = (SDL_Vertex){
-        WorldNavigationAuthenticToOutput(
-            slot, viewport, authentic_x, authentic_y),
+      const SDL_FPoint output = WorldNavigationAuthenticToOutput(
+          slot, viewport, authentic_x, authentic_y);
+      vertices[vertex_count++] = (ArRenderVertex2D){
+        {output.x, output.y},
         {1.0f, 1.0f, 1.0f,
          haze * (float)slot->sim.underlay_defocus_pct / (float)kPercentScale},
         {xs[column] / (float)kSimWorldMapPixels,
@@ -305,12 +314,12 @@ static bool DrawWorldNavigationActiveRegionHaze(
     }
   }
 
-  SDL_Texture *blur = SimUnderlayBlurTexture(slot->sim.underlay_serial);
-  if (slot->sim.underlay_defocus_pct && blur) {
-    SDL_SetTextureColorMod(blur, 255, 255, 255);
-    SDL_SetTextureAlphaMod(blur, 255);
-    if (!SDL_RenderGeometry(
-            g_renderer, blur, vertices, vertex_count,
+  ArRenderTexture blur = SimUnderlayBlurTexture(
+      slot->sim.underlay_serial);
+  if (slot->sim.underlay_defocus_pct &&
+      ArRenderTexture_IsValid(blur)) {
+    if (!ArRenderDevice_DrawGeometry(
+            &g_render_device, blur, vertices, vertex_count,
             indices, index_count))
       return false;
   }
@@ -324,15 +333,18 @@ static bool DrawWorldNavigationActiveRegionHaze(
       const float haze = SimWorldNavigationScene_LocationHaze(
           scene, vertices[i].tex_coord.x * kSimWorldMapPixels,
           vertices[i].tex_coord.y * kSimWorldMapPixels, lead);
-      vertices[i].color = (SDL_FColor){
+      vertices[i].color = (ArRenderColorF){
         r, g, b,
         haze * (float)slot->sim.underlay_haze_pct / (float)kPercentScale,
       };
     }
-    SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND);
-    const bool ok = SDL_RenderGeometry(
-        g_renderer, NULL, vertices, vertex_count, indices, index_count);
-    SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE);
+    const ArRenderDrawState state = {
+      .flags = kArRenderDrawState_Blend,
+      .blend = kArRenderBlendMode_Alpha,
+    };
+    const bool ok = ArRenderDevice_DrawGeometryWithState(
+        &g_render_device, ArRenderTexture_Invalid(), vertices, vertex_count,
+        indices, index_count, &state);
     if (!ok) return false;
   }
   return true;
@@ -507,13 +519,14 @@ static bool DrawWorldNavigationMasterFade(
   const uint8_t alpha = SimWorldNavigationScene_MasterFadeAlpha(
       slot->sim.world_navigation_brightness);
   if (!alpha) return true;
-  SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND);
-  SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, alpha);
-  const bool ok = SDL_RenderFillRect(g_renderer, &(SDL_FRect){
-      (float)viewport.x, (float)viewport.y,
-      (float)viewport.w, (float)viewport.h});
-  SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE);
-  return ok;
+  const ArRenderRectF area = {
+    (float)viewport.x, (float)viewport.y,
+    (float)viewport.w, (float)viewport.h,
+  };
+  return ArRenderDevice_DrawSolidRect(
+      &g_render_device, &area,
+      (ArRenderColorF){0.0f, 0.0f, 0.0f, alpha / 255.0f},
+      kArRenderBlendMode_Alpha);
 }
 
 PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
@@ -524,8 +537,9 @@ PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
   if (!scene->valid || !composition->valid ||
       !s_world_navigation_composition_upload_valid)
     return kPresentationOutcome_CoreFailure;
-  SDL_Texture *world = EnsureSimUnderlayTexture(slot);
-  if (!world) return kPresentationOutcome_CoreFailure;
+  ArRenderTexture world = EnsureSimUnderlayTexture(slot);
+  if (!ArRenderTexture_IsValid(world))
+    return kPresentationOutcome_CoreFailure;
   if (!composition->empty_animation &&
       (!s_world_navigation_palace_texture ||
        !s_world_navigation_ui_texture))
