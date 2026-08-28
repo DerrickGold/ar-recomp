@@ -12,8 +12,8 @@
 #include "action/action_bg_tuner.h"
 #include "host/host_display_status.h"
 #include "input_map.h"
-#include "presentation_geometry.h"
 #include "quintet_lzss.h"
+#include "render/render_output.h"
 #include "settings.h"
 #include "snes_bgr555.h"
 #include "user_data_dir.h"
@@ -77,13 +77,13 @@ static const uint32_t kMutedText = ARGB(255, 120, 140, 158);
 
 /* The scene inspector is a host debugger, not an in-game dialog. Keep its
  * information hierarchy legible independently of the ROM font palette. */
-static const SDL_Color kDebugTextColors[kDebugTextStyle_Count] = {
-  { 218, 229, 238, 255 }, /* ordinary punctuation/text */
-  {  92, 196, 255, 255 }, /* field names */
-  { 255, 207,  92, 255 }, /* addresses and numeric values */
-  { 105, 232, 157, 255 }, /* BG/OBJ targets and source policies */
-  { 255, 145,  76, 255 }, /* missing candidates and warnings */
-  { 119, 139, 154, 255 }, /* controls and explanatory notes */
+static const uint32_t kDebugTextColors[kDebugTextStyle_Count] = {
+  ARGB(255, 218, 229, 238), /* ordinary punctuation/text */
+  ARGB(255,  92, 196, 255), /* field names */
+  ARGB(255, 255, 207,  92), /* addresses and numeric values */
+  ARGB(255, 105, 232, 157), /* BG/OBJ targets and source policies */
+  ARGB(255, 255, 145,  76), /* missing candidates and warnings */
+  ARGB(255, 119, 139, 154), /* controls and explanatory notes */
 };
 
 typedef enum TextStyle {
@@ -430,10 +430,11 @@ static const char kSectionResetKey[] = "reset_section_defaults";
  * compare against 8 rather than either of these. */
 enum { kOverlayTileIds = 256, kOverlayCharCodes = 256 };
 
-SDL_Renderer *s_renderer;  /* extern in settings_overlay_internal.h (panel reads it) */
-static SDL_Texture *s_font_textures[kTextStyle_Count];
-SDL_Texture *s_debug_font_texture;  /* extern in settings_overlay_internal.h */
-static SDL_Texture *s_dialog_frame_texture;
+ArRenderDevice *s_render_device;  /* extern: debug panel shares the device */
+static SDL_Window *s_window;      /* SDL input service only; never renders */
+static ArRenderTexture s_font_textures[kTextStyle_Count];
+ArRenderTexture s_debug_font_texture;  /* extern: shared with debug panel */
+static ArRenderTexture s_dialog_frame_texture;
 static uint8_t s_font_tiles[kFontTileBytes];
 /* One flag per VRAM tile id the glyph cache can occupy; 256 because the id is
  * a byte in the tilemap entry. */
@@ -517,7 +518,7 @@ static bool s_layer_palette_open;
 static uint8_t s_layer_palette_cursor;
 static uint16_t s_layer_palette[kSettingsOverlayLayerPaletteEntries];
 static DioramaEditorRow s_layer_palette_row;
-static SDL_Texture *s_layer_palette_texture;
+static ArRenderTexture s_layer_palette_texture;
 
 enum {
   kLayerPaletteCell = 9,
@@ -567,22 +568,31 @@ void SettingsOverlay_SetLayerPaletteProvider(
   s_layer_palette_provider = provider;
   if (!provider) {
     s_layer_palette_open = false;
-    SDL_DestroyTexture(s_layer_palette_texture);
-    s_layer_palette_texture = NULL;
+    ArRenderDevice_DestroyTexture(s_render_device, s_layer_palette_texture);
+    s_layer_palette_texture = ArRenderTexture_Invalid();
   }
 }
 
-/* SDL3 render primitives take float rects. Layout math stays integer (it also
- * feeds the public panel-rect API), so convert only at the draw call. */
-static SDL_FRect ToFRect(SDL_Rect r) {
-  return (SDL_FRect){ (float)r.x, (float)r.y, (float)r.w, (float)r.h };
+/* Layout math stays integer (it also feeds the public panel-rect API), so
+ * convert only at the portable draw call. */
+static ArRenderRectF ToRenderRect(SDL_Rect r) {
+  return (ArRenderRectF){ (float)r.x, (float)r.y,
+                          (float)r.w, (float)r.h };
 }
 
-/* SDL3 SDL_StartTextInput/SDL_StopTextInput require the target window. The
- * overlay only holds a renderer; recover the window from it. A headless
- * software renderer (unit tests) has no window, so these become no-ops. */
+static ArRenderColorF RenderColor(uint32_t color) {
+  return (ArRenderColorF){
+    .r = (float)((color >> 16) & 0xff) / 255.0f,
+    .g = (float)((color >> 8) & 0xff) / 255.0f,
+    .b = (float)(color & 0xff) / 255.0f,
+    .a = (float)(color >> 24) / 255.0f,
+  };
+}
+
+/* SDL3 SDL_StartTextInput/SDL_StopTextInput require the target window. A
+ * headless or non-SDL presentation host supplies none, so these become no-ops. */
 static SDL_Window *OverlayWindow(void) {
-  return s_renderer ? SDL_GetRenderWindow(s_renderer) : NULL;
+  return s_window;
 }
 
 static bool DecodeFontAsset(const uint8_t *rom_data, size_t rom_size) {
@@ -903,7 +913,7 @@ _Static_assert((int)(sizeof(kSectionIconMaps) / sizeof(kSectionIconMaps[0]))
                    == kSectionCount,
                "one nav icon per menu section");
 
-static SDL_Texture *s_icon_texture;
+static ArRenderTexture s_icon_texture;
 
 static uint32_t ScaleColor(uint32_t color, int percent) {
   unsigned r = ((color >> 16) & 0xff) * (unsigned)percent /
@@ -915,10 +925,31 @@ static uint32_t ScaleColor(uint32_t color, int percent) {
   return ARGB(255, r, g, b);
 }
 
-static SDL_Texture *CreateIconAtlas(void) {
+static ArRenderTexture CreateStaticAtlas(int width, int height,
+                                         const uint32_t *pixels) {
+  ArRenderTexture texture = ArRenderTexture_Invalid();
+  const ArRenderTextureDesc desc = {
+    .width = width,
+    .height = height,
+    .format = kArRenderPixelFormat_Argb8888,
+    .usage = kArRenderTextureUsage_Static,
+    .filter = kArRenderFilter_Nearest,
+    .blend = kArRenderBlendMode_Alpha,
+  };
+  if (!ArRenderDevice_CreateTexture(s_render_device, &desc, &texture) ||
+      !ArRenderDevice_UpdateTexture(
+          s_render_device, texture, NULL, pixels,
+          width * (int)sizeof(*pixels))) {
+    ArRenderDevice_DestroyTexture(s_render_device, texture);
+    return ArRenderTexture_Invalid();
+  }
+  return texture;
+}
+
+static ArRenderTexture CreateIconAtlas(void) {
   uint32_t *pixels = (uint32_t *)calloc(
       (size_t)kIconAtlasWidth * kIconAtlasHeight, sizeof(uint32_t));
-  if (!pixels) return NULL;
+  if (!pixels) return ArRenderTexture_Invalid();
 
   /* Row 0 = grey (unselected), row 1 = colored (selected), each icon straight
    * through the game palette so the colors are the game's own. */
@@ -937,20 +968,9 @@ static SDL_Texture *CreateIconAtlas(void) {
     }
   }
 
-  SDL_Texture *texture = SDL_CreateTexture(
-      s_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC,
-      kIconAtlasWidth, kIconAtlasHeight);
-  if (texture &&
-      !SDL_UpdateTexture(texture, NULL, pixels,
-                         kIconAtlasWidth * (int)sizeof(uint32_t))) {
-    SDL_DestroyTexture(texture);
-    texture = NULL;
-  }
+  const ArRenderTexture texture = CreateStaticAtlas(
+      kIconAtlasWidth, kIconAtlasHeight, pixels);
   free(pixels);
-  if (texture) {
-    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
-    SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
-  }
   return texture;
 }
 
@@ -993,10 +1013,10 @@ static unsigned FontPixel(unsigned tile, int x, int y) {
   return plane0 | (plane1 << 1);
 }
 
-static SDL_Texture *CreateFontAtlas(TextStyle style) {
+static ArRenderTexture CreateFontAtlas(TextStyle style) {
   uint32_t *pixels = (uint32_t *)calloc(
       (size_t)kFontAtlasWidth * kFontAtlasHeight, sizeof(uint32_t));
-  if (!pixels) return NULL;
+  if (!pixels) return ArRenderTexture_Invalid();
 
   for (unsigned tile = 0; tile < kOverlayTileIds; tile++) {
     int tile_x = (int)(tile & 15) * kGlyphSize;
@@ -1010,30 +1030,17 @@ static SDL_Texture *CreateFontAtlas(TextStyle style) {
     }
   }
 
-  SDL_Texture *texture = SDL_CreateTexture(
-      s_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC,
-      kFontAtlasWidth, kFontAtlasHeight);
-  if (texture &&
-      !SDL_UpdateTexture(texture, NULL, pixels,
-                         kFontAtlasWidth * (int)sizeof(uint32_t))) {
-    SDL_DestroyTexture(texture);
-    texture = NULL;
-  }
+  const ArRenderTexture texture = CreateStaticAtlas(
+      kFontAtlasWidth, kFontAtlasHeight, pixels);
   free(pixels);
-  if (texture) {
-    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
-    /* SDL3 textures default to linear filtering; the pixel-art atlases must
-     * sample nearest so glyph edges stay crisp at every scale. */
-    SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
-  }
   return texture;
 }
 
-static SDL_Texture *CreateDebugFontAtlas(void) {
+static ArRenderTexture CreateDebugFontAtlas(void) {
   uint32_t *pixels = (uint32_t *)calloc(
       (size_t)kDebugFontAtlasWidth * kDebugFontAtlasHeight,
       sizeof(uint32_t));
-  if (!pixels) return NULL;
+  if (!pixels) return ArRenderTexture_Invalid();
 
   for (unsigned ch = 0; ch < kOverlayCharCodes; ch++) {
     unsigned source_ch = ch;
@@ -1059,32 +1066,19 @@ static SDL_Texture *CreateDebugFontAtlas(void) {
     }
   }
 
-  SDL_Texture *texture = SDL_CreateTexture(
-      s_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC,
-      kDebugFontAtlasWidth, kDebugFontAtlasHeight);
-  if (texture &&
-      !SDL_UpdateTexture(texture, NULL, pixels,
-                         kDebugFontAtlasWidth * (int)sizeof(uint32_t))) {
-    SDL_DestroyTexture(texture);
-    texture = NULL;
-  }
+  const ArRenderTexture texture = CreateStaticAtlas(
+      kDebugFontAtlasWidth, kDebugFontAtlasHeight, pixels);
   free(pixels);
-  if (texture) {
-    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
-    /* SDL3 textures default to linear filtering; the pixel-art atlases must
-     * sample nearest so glyph edges stay crisp at every scale. */
-    SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
-  }
   return texture;
 }
 
 static void DestroyFontTextures(void) {
   for (int i = 0; i < kTextStyle_Count; i++) {
-    SDL_DestroyTexture(s_font_textures[i]);
-    s_font_textures[i] = NULL;
+    ArRenderDevice_DestroyTexture(s_render_device, s_font_textures[i]);
+    s_font_textures[i] = ArRenderTexture_Invalid();
   }
-  SDL_DestroyTexture(s_debug_font_texture);
-  s_debug_font_texture = NULL;
+  ArRenderDevice_DestroyTexture(s_render_device, s_debug_font_texture);
+  s_debug_font_texture = ArRenderTexture_Invalid();
 }
 
 static int CursorBlinkOffset(void) {
@@ -1135,8 +1129,8 @@ static void DecodeDialogAtlasTile(uint32_t *pixels, int atlas_column,
  *
  * $FF is the opaque black center. Palette index zero remains transparent so
  * the beveled corner cutouts and gutters show the paused game underneath. */
-static SDL_Texture *CreateDialogFrameTexture(const uint8_t *rom_data,
-                                             size_t rom_size) {
+static ArRenderTexture CreateDialogFrameTexture(const uint8_t *rom_data,
+                                                size_t rom_size) {
   size_t character_end =
       (size_t)kDialogCharAssetOffset + (size_t)(0xff + 1) * 32;
   size_t palette_end = (size_t)kDialogPaletteAssetOffset + 32;
@@ -1144,7 +1138,7 @@ static SDL_Texture *CreateDialogFrameTexture(const uint8_t *rom_data,
     fprintf(stderr,
             "[settings-menu] native dialog frame unavailable; "
             "using host frame fallback\n");
-    return NULL;
+    return ArRenderTexture_Invalid();
   }
 
   const uint8_t *characters = rom_data + kDialogCharAssetOffset;
@@ -1161,18 +1155,9 @@ static SDL_Texture *CreateDialogFrameTexture(const uint8_t *rom_data,
   DecodeDialogAtlasTile(pixels, 1, 2, characters, palette, 0xee, false);
   DecodeDialogAtlasTile(pixels, 2, 2, characters, palette, 0xcf, true);
 
-  SDL_Texture *texture = SDL_CreateTexture(
-      s_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC,
-      kDialogAtlasWidth, kDialogAtlasHeight);
-  if (texture &&
-      !SDL_UpdateTexture(texture, NULL, pixels,
-                         kDialogAtlasWidth * (int)sizeof(uint32_t))) {
-    SDL_DestroyTexture(texture);
-    texture = NULL;
-  }
-  if (texture) {
-    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
-    SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
+  const ArRenderTexture texture = CreateStaticAtlas(
+      kDialogAtlasWidth, kDialogAtlasHeight, pixels);
+  if (ArRenderTexture_IsValid(texture)) {
     fprintf(stderr,
             "[settings-menu] decoded native dialog frame: "
             "chars ROM $%06X, palette ROM $%06X\n",
@@ -1800,9 +1785,9 @@ static bool LayerOpenPalette(const DioramaEditorRow *row) {
   /* Snapshot CGRAM once when the modal opens. The game is suspended while the
    * menu owns input, so rebuilding this immutable atlas on cursor movement (or
    * issuing 256 rectangle draws every frame) would only duplicate work. */
-  SDL_DestroyTexture(s_layer_palette_texture);
-  s_layer_palette_texture = NULL;
-  if (s_renderer) (void)RebuildLayerPaletteTexture();
+  ArRenderDevice_DestroyTexture(s_render_device, s_layer_palette_texture);
+  s_layer_palette_texture = ArRenderTexture_Invalid();
+  if (s_render_device) (void)RebuildLayerPaletteTexture();
   s_layer_palette_open = true;
   return true;
 }
@@ -2160,19 +2145,19 @@ static void EnterSection(void) {
 static bool CreateOverlayTextures(const uint8_t *rom_data, size_t rom_size) {
   for (int i = 0; i < kTextStyle_Count; i++) {
     s_font_textures[i] = CreateFontAtlas((TextStyle)i);
-    if (!s_font_textures[i]) {
+    if (!ArRenderTexture_IsValid(s_font_textures[i])) {
       DestroyFontTextures();
       return false;
     }
   }
   s_debug_font_texture = CreateDebugFontAtlas();
-  if (!s_debug_font_texture) {
+  if (!ArRenderTexture_IsValid(s_debug_font_texture)) {
     DestroyFontTextures();
     return false;
   }
   /* Host-authored section icons, independent of which text font loaded. */
   s_icon_texture = CreateIconAtlas();
-  if (!s_icon_texture) {
+  if (!ArRenderTexture_IsValid(s_icon_texture)) {
     DestroyFontTextures();
     return false;
   }
@@ -2181,10 +2166,12 @@ static bool CreateOverlayTextures(const uint8_t *rom_data, size_t rom_size) {
   return true;
 }
 
-bool SettingsOverlay_Init(SDL_Renderer *renderer,
+bool SettingsOverlay_Init(ArRenderDevice *render_device, SDL_Window *window,
                           const uint8_t *rom_data, size_t rom_size) {
-  s_renderer = renderer;
-  if (!renderer) return true;
+  s_render_device = ArRenderDevice_IsReady(render_device)
+      ? render_device : NULL;
+  s_window = window;
+  if (!s_render_device) return true;
 
   bool rom_font = DecodeFontAsset(rom_data, rom_size);
   if (rom_font) PrepareRomFont();
@@ -2194,14 +2181,14 @@ bool SettingsOverlay_Init(SDL_Renderer *renderer,
 }
 
 bool SettingsOverlay_ReloadTextures(const uint8_t *rom_data, size_t rom_size) {
-  if (!s_renderer) return true;
+  if (!s_render_device) return true;
   DestroyFontTextures();
-  SDL_DestroyTexture(s_icon_texture);
-  s_icon_texture = NULL;
-  SDL_DestroyTexture(s_dialog_frame_texture);
-  s_dialog_frame_texture = NULL;
-  SDL_DestroyTexture(s_layer_palette_texture);
-  s_layer_palette_texture = NULL;
+  ArRenderDevice_DestroyTexture(s_render_device, s_icon_texture);
+  s_icon_texture = ArRenderTexture_Invalid();
+  ArRenderDevice_DestroyTexture(s_render_device, s_dialog_frame_texture);
+  s_dialog_frame_texture = ArRenderTexture_Invalid();
+  ArRenderDevice_DestroyTexture(s_render_device, s_layer_palette_texture);
+  s_layer_palette_texture = ArRenderTexture_Invalid();
   /* The decoded font tiles (s_font_tiles/s_glyph_defined) are CPU-side and
    * survive the reset; only the GPU-side atlases need rebuilding. */
   return CreateOverlayTextures(rom_data, rom_size);
@@ -2210,13 +2197,14 @@ bool SettingsOverlay_ReloadTextures(const uint8_t *rom_data, size_t rom_size) {
 void SettingsOverlay_Destroy(void) {
   StopEditing();
   DestroyFontTextures();
-  SDL_DestroyTexture(s_icon_texture);
-  s_icon_texture = NULL;
-  SDL_DestroyTexture(s_dialog_frame_texture);
-  s_dialog_frame_texture = NULL;
-  SDL_DestroyTexture(s_layer_palette_texture);
-  s_layer_palette_texture = NULL;
-  s_renderer = NULL;
+  ArRenderDevice_DestroyTexture(s_render_device, s_icon_texture);
+  s_icon_texture = ArRenderTexture_Invalid();
+  ArRenderDevice_DestroyTexture(s_render_device, s_dialog_frame_texture);
+  s_dialog_frame_texture = ArRenderTexture_Invalid();
+  ArRenderDevice_DestroyTexture(s_render_device, s_layer_palette_texture);
+  s_layer_palette_texture = ArRenderTexture_Invalid();
+  s_render_device = NULL;
+  s_window = NULL;
   s_open = false;
   s_submenu_open = false;
   SettingsOverlayDebugPanel_Reset();
@@ -2738,30 +2726,24 @@ SDL_Rect LogicalRect(const MenuLayout *layout,
   return (SDL_Rect){ x0, y0, x1 - x0, y1 - y0 };
 }
 
-static void SetDrawColor(uint32_t color) {
-  SDL_SetRenderDrawColor(s_renderer,
-      (Uint8)(color >> 16), (Uint8)(color >> 8),
-      (Uint8)color, (Uint8)(color >> 24));
-}
-
 static bool FillPixelRectChecked(int x, int y, int width, int height,
                                  uint32_t color) {
   if (width <= 0 || height <= 0) return true;
-  const SDL_FRect rect = {
+  const ArRenderRectF rect = {
     (float)x, (float)y, (float)width, (float)height,
   };
-  return SDL_SetRenderDrawColor(
-             s_renderer, (Uint8)(color >> 16), (Uint8)(color >> 8),
-             (Uint8)color, (Uint8)(color >> 24)) &&
-      SDL_RenderFillRect(s_renderer, &rect);
+  return ArRenderDevice_DrawSolidRect(
+      s_render_device, &rect, RenderColor(color), kArRenderBlendMode_Alpha);
 }
 
 static void FillPixelRect(int x, int y, int width, int height,
                           uint32_t color) {
   if (width <= 0 || height <= 0) return;
-  SDL_FRect rect = { (float)x, (float)y, (float)width, (float)height };
-  SetDrawColor(color);
-  SDL_RenderFillRect(s_renderer, &rect);
+  const ArRenderRectF rect = {
+    (float)x, (float)y, (float)width, (float)height,
+  };
+  (void)ArRenderDevice_DrawSolidRect(
+      s_render_device, &rect, RenderColor(color), kArRenderBlendMode_Alpha);
 }
 
 void FillLogicalRect(const MenuLayout *layout,
@@ -2779,17 +2761,17 @@ static bool DrawDialogTileChecked(const MenuLayout *layout, int atlas_column,
     kGlyphSize,
     kGlyphSize,
   };
-  SDL_FRect destination =
-      ToFRect(LogicalRect(layout, x, y, kGlyphSize, kGlyphSize));
-  SDL_FRect source_f = ToFRect(source);
-  return SDL_RenderTexture(s_renderer, s_dialog_frame_texture,
-                           &source_f, &destination);
+  const ArRenderRectF destination =
+      ToRenderRect(LogicalRect(layout, x, y, kGlyphSize, kGlyphSize));
+  const ArRenderRectF source_f = ToRenderRect(source);
+  return ArRenderDevice_DrawTexture(
+      s_render_device, s_dialog_frame_texture, &source_f, &destination);
 }
 
 static bool DrawDialogPanelChecked(const MenuLayout *layout,
                                    int x, int y, int width, int height) {
   if (width < 16 || height < 16) return false;
-  if (!s_dialog_frame_texture) {
+  if (!ArRenderTexture_IsValid(s_dialog_frame_texture)) {
     const SDL_Rect outer = LogicalRect(layout, x, y, width, height);
     const SDL_Rect middle = LogicalRect(
         layout, x + 2, y + 2, width - 4, height - 4);
@@ -2839,7 +2821,7 @@ void DrawDialogPanel(const MenuLayout *layout,
 }
 
 bool SettingsOverlay_DrawGameFrame(SDL_Rect rect, int scale) {
-  if (!s_renderer || scale <= 0) return false;
+  if (!s_render_device || scale <= 0) return false;
   const int tile_size = kGlyphSize * scale;
   if (rect.w <= 0 || rect.h <= 0 ||
       rect.w % tile_size != 0 || rect.h % tile_size != 0)
@@ -2862,17 +2844,18 @@ static void DrawGlyph(const MenuLayout *layout, int x, int y,
   if (ch == ' ') return;
   if (!s_glyph_defined[ch]) ch = '?';
   if (!s_glyph_defined[ch]) return;
-  SDL_Texture *texture = s_font_textures[style];
-  if (!texture) return;
-  SDL_FRect source = {
+  const ArRenderTexture texture = s_font_textures[style];
+  if (!ArRenderTexture_IsValid(texture)) return;
+  const ArRenderRectF source = {
     (float)((ch & 15) * kGlyphSize),
     (float)((ch >> 4) * kGlyphSize),
     (float)kGlyphSize,
     (float)kGlyphSize,
   };
-  SDL_FRect destination = ToFRect(LogicalRect(
+  const ArRenderRectF destination = ToRenderRect(LogicalRect(
       layout, x, y, kGlyphSize, kGlyphSize));
-  SDL_RenderTexture(s_renderer, texture, &source, &destination);
+  (void)ArRenderDevice_DrawTexture(
+      s_render_device, texture, &source, &destination);
 }
 
 static void DrawTextN(const MenuLayout *layout, int x, int y,
@@ -2903,10 +2886,10 @@ void SettingsOverlay_DrawGameText(int x, int y, int scale, uint8_t alpha,
     kIndicesPerGlyph = 6,
   };
   if (!text || scale <= 0 || alpha == 0) return;
-  SDL_Texture *texture = s_font_textures[kText_Normal];
-  if (!s_renderer || !texture) return;
+  const ArRenderTexture texture = s_font_textures[kText_Normal];
+  if (!s_render_device || !ArRenderTexture_IsValid(texture)) return;
 
-  static int indices[
+  static int32_t indices[
       kGameTextGlyphBatchCapacity * kIndicesPerGlyph];
   static bool indices_initialized;
   if (!indices_initialized) {
@@ -2923,13 +2906,18 @@ void SettingsOverlay_DrawGameText(int x, int y, int scale, uint8_t alpha,
     indices_initialized = true;
   }
 
-  SDL_Vertex vertices[
+  ArRenderVertex2D vertices[
       kGameTextGlyphBatchCapacity * kVerticesPerGlyph];
   int glyph_count = 0;
   const float uv_cell = 1.0f / (float)kFontAtlasCellsPerAxis;
   const float glyph_pixels = (float)(kGlyphSize * scale);
-  const SDL_FColor white = {1.0f, 1.0f, 1.0f, 1.0f};
-  SDL_SetTextureAlphaMod(texture, alpha);
+  const ArRenderColorF white = {
+    1.0f, 1.0f, 1.0f, (float)alpha / 255.0f,
+  };
+  const ArRenderDrawState draw_state = {
+    .flags = kArRenderDrawState_Blend,
+    .blend = kArRenderBlendMode_Alpha,
+  };
   for (int i = 0; text[i]; i++) {
     unsigned char ch = (unsigned char)text[i];
     if (ch == ' ') continue;
@@ -2937,10 +2925,10 @@ void SettingsOverlay_DrawGameText(int x, int y, int scale, uint8_t alpha,
     if (!s_glyph_defined[ch]) continue;
 
     if (glyph_count == kGameTextGlyphBatchCapacity) {
-      SDL_RenderGeometry(
-          s_renderer, texture, vertices,
+      (void)ArRenderDevice_DrawGeometryWithState(
+          s_render_device, texture, vertices,
           glyph_count * kVerticesPerGlyph, indices,
-          glyph_count * kIndicesPerGlyph);
+          glyph_count * kIndicesPerGlyph, &draw_state);
       glyph_count = 0;
     }
 
@@ -2952,21 +2940,18 @@ void SettingsOverlay_DrawGameText(int x, int y, int scale, uint8_t alpha,
     const float v0 = (float)(ch >> 4) * uv_cell;
     const float u1 = u0 + uv_cell;
     const float v1 = v0 + uv_cell;
-    SDL_Vertex *quad = &vertices[glyph_count * kVerticesPerGlyph];
-    quad[0] = (SDL_Vertex){{x0, y0}, white, {u0, v0}};
-    quad[1] = (SDL_Vertex){{x1, y0}, white, {u1, v0}};
-    quad[2] = (SDL_Vertex){{x1, y1}, white, {u1, v1}};
-    quad[3] = (SDL_Vertex){{x0, y1}, white, {u0, v1}};
+    ArRenderVertex2D *quad = &vertices[glyph_count * kVerticesPerGlyph];
+    quad[0] = (ArRenderVertex2D){{x0, y0}, white, {u0, v0}};
+    quad[1] = (ArRenderVertex2D){{x1, y0}, white, {u1, v0}};
+    quad[2] = (ArRenderVertex2D){{x1, y1}, white, {u1, v1}};
+    quad[3] = (ArRenderVertex2D){{x0, y1}, white, {u0, v1}};
     glyph_count++;
   }
   if (glyph_count > 0)
-    SDL_RenderGeometry(
-        s_renderer, texture, vertices,
+    (void)ArRenderDevice_DrawGeometryWithState(
+        s_render_device, texture, vertices,
         glyph_count * kVerticesPerGlyph, indices,
-        glyph_count * kIndicesPerGlyph);
-  /* Restored: the atlas is shared with the menu's own drawing, which does not
-   * set an alpha of its own and would inherit this one. */
-  SDL_SetTextureAlphaMod(texture, 255);
+        glyph_count * kIndicesPerGlyph, &draw_state);
 }
 
 static int CappedTextLength(const char *text, int max_chars) {
@@ -2993,28 +2978,28 @@ static void DrawTextRight(const MenuLayout *layout, int right, int y,
  * panel fits roughly a third more text per line at a size that still reads
  * comfortably at couch distance. */
 static void DrawSmallGlyph(const MenuLayout *layout, int x, int y,
-                           unsigned char ch) {
-  if (ch == ' ' || !s_debug_font_texture) return;
-  SDL_FRect source = {
+                           unsigned char ch, uint32_t color) {
+  if (ch == ' ' || !ArRenderTexture_IsValid(s_debug_font_texture)) return;
+  const ArRenderRectF source = {
     (float)((ch & 15) * kDebugGlyphWidth),
     (float)((ch >> 4) * kDebugGlyphHeight),
     (float)kDebugGlyphWidth,
     (float)kDebugGlyphHeight,
   };
-  SDL_FRect destination = ToFRect(LogicalRect(
+  const ArRenderRectF destination = ToRenderRect(LogicalRect(
       layout, x, y, kDebugGlyphWidth, kDebugGlyphHeight));
-  SDL_RenderTexture(s_renderer, s_debug_font_texture, &source, &destination);
+  (void)ArRenderDevice_DrawTextureTinted(
+      s_render_device, s_debug_font_texture, &source, &destination,
+      RenderColor(color));
 }
 
 static void DrawSmallTextN(const MenuLayout *layout, int x, int y,
                            const char *text, int max_chars, uint32_t color) {
-  if (!text || max_chars <= 0 || !s_debug_font_texture) return;
-  SDL_SetTextureColorMod(s_debug_font_texture, (Uint8)(color >> 16),
-                         (Uint8)(color >> 8), (Uint8)color);
-  SDL_SetTextureAlphaMod(s_debug_font_texture, (Uint8)(color >> 24));
+  if (!text || max_chars <= 0 ||
+      !ArRenderTexture_IsValid(s_debug_font_texture)) return;
   for (int i = 0; text[i] && i < max_chars; i++)
     DrawSmallGlyph(layout, x + i * kDebugGlyphWidth, y,
-                   (unsigned char)text[i]);
+                   (unsigned char)text[i], color);
 }
 
 static void DrawSmallText(const MenuLayout *layout, int x, int y,
@@ -3032,15 +3017,17 @@ static int SmallTextWidth(const char *text) {
  * fades an unselected, un-focused nav row so it reads as recessive. */
 static void DrawSectionIcon(const MenuLayout *layout, int x, int y, int size,
                             int section, bool selected, int alpha) {
-  if (!s_icon_texture || section < 0 || section >= kSectionCount) return;
-  SDL_SetTextureColorMod(s_icon_texture, 255, 255, 255);
-  SDL_SetTextureAlphaMod(s_icon_texture, (Uint8)alpha);
-  SDL_FRect source = {
+  if (!ArRenderTexture_IsValid(s_icon_texture) ||
+      section < 0 || section >= kSectionCount) return;
+  const ArRenderRectF source = {
     (float)(section * kIconSize), selected ? (float)kIconSize : 0.0f,
     (float)kIconSize, (float)kIconSize,
   };
-  SDL_FRect destination = ToFRect(LogicalRect(layout, x, y, size, size));
-  SDL_RenderTexture(s_renderer, s_icon_texture, &source, &destination);
+  const ArRenderRectF destination = ToRenderRect(
+      LogicalRect(layout, x, y, size, size));
+  (void)ArRenderDevice_DrawTextureTinted(
+      s_render_device, s_icon_texture, &source, &destination,
+      (ArRenderColorF){1.0f, 1.0f, 1.0f, (float)alpha / 255.0f});
 }
 
 /* A slim track with a proportional thumb, drawn in the panel's inner gutter.
@@ -3062,23 +3049,22 @@ static void DrawScrollBar(const MenuLayout *layout, int x, int y, int height,
 
 static void DrawDebugGlyph(const MenuLayout *layout, int x, int y,
                            unsigned char ch, DebugTextStyle style) {
-  if (ch == ' ' || !s_debug_font_texture) return;
+  if (ch == ' ' || !ArRenderTexture_IsValid(s_debug_font_texture)) return;
   if (ch >= 128 || !FallbackGlyphDefined(ch)) {
     if (ch >= 'a' && ch <= 'z') ch = (unsigned char)(ch - 'a' + 'A');
     else ch = '?';
   }
-  const SDL_Color color = kDebugTextColors[style];
-  SDL_SetTextureColorMod(s_debug_font_texture, color.r, color.g, color.b);
-  SDL_SetTextureAlphaMod(s_debug_font_texture, color.a);
-  SDL_FRect source = {
+  const ArRenderRectF source = {
     (float)((ch & 15) * kDebugGlyphWidth),
     (float)((ch >> 4) * kDebugGlyphHeight),
     (float)kDebugGlyphWidth,
     (float)kDebugGlyphHeight,
   };
-  SDL_FRect destination = ToFRect(LogicalRect(
+  const ArRenderRectF destination = ToRenderRect(LogicalRect(
       layout, x, y, kDebugGlyphWidth, kDebugGlyphHeight));
-  SDL_RenderTexture(s_renderer, s_debug_font_texture, &source, &destination);
+  (void)ArRenderDevice_DrawTextureTinted(
+      s_render_device, s_debug_font_texture, &source, &destination,
+      RenderColor(kDebugTextColors[style]));
 }
 
 void DrawDebugTextN(const MenuLayout *layout, int x, int y,
@@ -3947,7 +3933,7 @@ static uint32_t LayerPaletteColor(uint16_t bgr555) {
 }
 
 static bool RebuildLayerPaletteTexture(void) {
-  if (!s_renderer) return false;
+  if (!s_render_device) return false;
   uint32_t *pixels = calloc(
       (size_t)kLayerPaletteGridPixels * kLayerPaletteGridPixels,
       sizeof(*pixels));
@@ -3961,17 +3947,11 @@ static bool RebuildLayerPaletteTexture(void) {
         pixels[(size_t)(y0 + y) * kLayerPaletteGridPixels + x0 + x] = color;
   }
 
-  SDL_Texture *texture = SDL_CreateTexture(
-      s_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC,
-      kLayerPaletteGridPixels, kLayerPaletteGridPixels);
-  const bool ready = texture &&
-      SDL_UpdateTexture(texture, NULL, pixels,
-                        kLayerPaletteGridPixels * (int)sizeof(*pixels)) &&
-      SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND) &&
-      SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
+  const ArRenderTexture texture = CreateStaticAtlas(
+      kLayerPaletteGridPixels, kLayerPaletteGridPixels, pixels);
+  const bool ready = ArRenderTexture_IsValid(texture);
   free(pixels);
   if (!ready) {
-    SDL_DestroyTexture(texture);
     return false;
   }
   s_layer_palette_texture = texture;
@@ -3992,13 +3972,14 @@ static void DrawLayerPalettePicker(const MenuLayout *layout) {
   DrawSmallText(layout, x + 14, y + 11, "LIVE CGRAM BACKDROP FILL",
                 kSteelBlue);
 
-  if (!s_layer_palette_texture) (void)RebuildLayerPaletteTexture();
-  if (s_layer_palette_texture) {
-    const SDL_FRect destination = ToFRect(LogicalRect(
+  if (!ArRenderTexture_IsValid(s_layer_palette_texture))
+    (void)RebuildLayerPaletteTexture();
+  if (ArRenderTexture_IsValid(s_layer_palette_texture)) {
+    const ArRenderRectF destination = ToRenderRect(LogicalRect(
         layout, x + kPickerGridX, y + kPickerGridY,
         kLayerPaletteGridPixels, kLayerPaletteGridPixels));
-    SDL_RenderTexture(
-        s_renderer, s_layer_palette_texture, NULL, &destination);
+    (void)ArRenderDevice_DrawTexture(
+        s_render_device, s_layer_palette_texture, NULL, &destination);
   } else {
     /* Texture creation failure should not make the editor unusable. This slow
      * fallback is exceptional; the normal path submits the entire grid once. */
@@ -4034,18 +4015,13 @@ static void DrawLayerPalettePicker(const MenuLayout *layout) {
 
 
 void SettingsOverlay_Render(SDL_Rect game_viewport) {
-  if (!s_open || !s_renderer || !s_font_textures[kText_Normal]) return;
+  if (!s_open || !s_render_device ||
+      !ArRenderTexture_IsValid(s_font_textures[kText_Normal])) return;
   int output_width = 0;
   int output_height = 0;
-  if (!SDL_GetRenderOutputSize(
-          s_renderer, &output_width, &output_height) ||
-      output_width <= 0 || output_height <= 0)
+  if (!ArRenderOutput_UseFull(
+          s_render_device, &output_width, &output_height))
     return;
-
-  /* Direct callers get the same full-output behavior as the final host-UI
-   * pass, without inheriting or leaking the game's renderer view state. */
-  PresentationOutputState output_state;
-  if (!PresentationGeometry_PushFullOutput(s_renderer, &output_state)) return;
 
   /* THE MANUAL SUPERSEDES THE MENU, and draws instead of it rather than over it.
    * The reader is a mode this overlay is in, not a peer of it -- s_open stays
@@ -4054,7 +4030,6 @@ void SettingsOverlay_Render(SDL_Rect game_viewport) {
    * of text wants the window, not the letterboxed 4:3 area the game sits in. */
   if (ManualIsOpen() && s_manual_hooks.render) {
     s_manual_hooks.render((SDL_Rect){ 0, 0, output_width, output_height });
-    PresentationGeometry_PopFullOutput(s_renderer, &output_state);
     return;
   }
 
@@ -4068,17 +4043,7 @@ void SettingsOverlay_Render(SDL_Rect game_viewport) {
   if (s_match_game_scale_percent > kMatchGameMaximumScalePercent)
     s_match_game_scale_percent = kMatchGameMaximumScalePercent;
 
-  SDL_BlendMode old_blend_mode = SDL_BLENDMODE_NONE;
-  Uint8 old_r = 0, old_g = 0, old_b = 0, old_a = 0;
-  SDL_GetRenderDrawBlendMode(s_renderer, &old_blend_mode);
-  SDL_GetRenderDrawColor(s_renderer, &old_r, &old_g, &old_b, &old_a);
-  SDL_SetRenderDrawBlendMode(s_renderer, SDL_BLENDMODE_BLEND);
-
   MenuLayout layout = BuildLayout(output_width, output_height);
   DrawMenu(&layout);
   DrawLayerPalettePicker(&layout);
-
-  SDL_SetRenderDrawBlendMode(s_renderer, old_blend_mode);
-  SDL_SetRenderDrawColor(s_renderer, old_r, old_g, old_b, old_a);
-  PresentationGeometry_PopFullOutput(s_renderer, &output_state);
 }

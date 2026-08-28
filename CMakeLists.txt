@@ -996,8 +996,10 @@ if(BUILD_TESTING)
         src/randomizer.c
         src/settings_overlay.c
         src/settings_overlay_debug_panel.c
+        src/render/render_device.c
+        src/render/render_output.c
+        src/platform/sdl/render_sdl.c
         src/host/host_display_status.c
-        src/presentation_geometry.c
         src/input_map.c
         src/user_data_dir.c
         # The layer editor's row model. Pure, so it adds no SDL/PPU closure to
