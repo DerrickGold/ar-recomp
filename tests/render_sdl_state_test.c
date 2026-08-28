@@ -88,6 +88,14 @@ int main(void) {
       &device, texture, NULL, &destination, &state));
   AssertTextureState(
       native, 0.8f, 0.7f, 0.6f, 0.5f, SDL_BLENDMODE_BLEND);
+  const ArRenderDrawState mask_state = {
+    .flags = kArRenderDrawState_Blend,
+    .blend = kArRenderBlendMode_DestinationAlphaMask,
+  };
+  assert(ArRenderDevice_DrawTextureWithState(
+      &device, texture, NULL, &destination, &mask_state));
+  AssertTextureState(
+      native, 0.8f, 0.7f, 0.6f, 0.5f, SDL_BLENDMODE_BLEND);
 
   const ArRenderVertex2D vertices[3] = {
     {{0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
