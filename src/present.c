@@ -44,10 +44,12 @@
 #include "session_fatal.h"
 #include "presentation_geometry.h"
 #include "presentation_upload_mirror.h"
+#include "platform/sdl/render_sdl.h"
 
 
 extern SDL_Renderer *g_renderer;
-extern SDL_Texture *g_texture;
+extern ArRenderDevice g_render_device;
+extern ArRenderTexture g_texture;
 extern SDL_Texture *g_authentic_texture;
 extern SDL_Texture *g_hud_bg_texture;
 extern SDL_Texture *g_hud_obj_texture;
@@ -223,12 +225,12 @@ uint64_t PresentAuthenticUploadedFrameSerial(void) {
 }
 
 static bool UploadChangedSurface(
-    SDL_Texture *texture, PresentationUploadMirror *mirror,
+    ArRenderTexture texture, PresentationUploadMirror *mirror,
     const uint8_t *pixels, int width, int height, int source_pitch,
     int destination_x, int destination_y) {
   PresentationUploadResult result;
   const bool uploaded = PresentationUploadMirror_UploadArgb8888(
-      mirror, texture, pixels, width, height, source_pitch,
+      mirror, &g_render_device, texture, pixels, width, height, source_pitch,
       destination_x, destination_y, &result);
   if (uploaded && result.uploaded_bytes)
     Sim3DPerformance_AddUpload(result.uploaded_bytes);
@@ -242,7 +244,8 @@ static bool UploadChangedSim3DSurface(
       source_pitch_pixels > INT_MAX / (int)sizeof(uint32_t))
     return false;
   return UploadChangedSurface(
-      texture, &s_sim3d_upload_mirrors[surface],
+      ArSdlRenderBackend_BorrowTexture(texture),
+      &s_sim3d_upload_mirrors[surface],
       (const uint8_t *)pixels, width, height,
       source_pitch_pixels * (int)sizeof(uint32_t), 0, 0);
 }
@@ -617,7 +620,7 @@ static void PresentHdReplacements(const FrameSlot *slot, SDL_Rect viewport) {
 
   for (int i = 0; i < slot->hd_entry_count; i++) {
     const FrameSlotHdEntry *entry = &slot->hd_entries[i];
-    if (!entry->active || !entry->texture) continue;
+    if (!entry->active || !ArRenderTexture_IsValid(entry->texture)) continue;
     const FrameSlotOverlayCapture *capture =
         &slot->overlay_captures[entry->source];
     if (capture->x1 <= capture->x0 || capture->y1 <= capture->y0 ||
@@ -631,7 +634,7 @@ static void PresentHdReplacements(const FrameSlot *slot, SDL_Rect viewport) {
                      dx1 - dx0, dy1 - dy0 };
     if (dst.w <= 0 || dst.h <= 0) continue;
 
-    SDL_Texture *texture = (SDL_Texture *)entry->texture;
+    SDL_Texture *texture = ArSdlRenderBackend_UnwrapTexture(entry->texture);
     Uint8 mod = entry->brightness_mod
         ? (Uint8)((slot->inidisp & 0xf) * 255 / 15) : 255;
     SDL_SetTextureColorMod(texture, mod, mod, mod);
@@ -797,14 +800,15 @@ static void UploadActionWinnerMask(SDL_Texture **texture, int mirror,
   if (*texture) {
     const SDL_Rect mask = {0, 0, slot->snes_width, slot->snes_height};
     UploadChangedSurface(
-        *texture, &s_action_upload_mirrors[mirror], pixels,
+        ArSdlRenderBackend_BorrowTexture(*texture),
+        &s_action_upload_mirrors[mirror], pixels,
         mask.w, mask.h, pitch_bytes,
         mask.x, mask.y);
   }
 }
 
 void PresentUpload(const FrameSlot *slot) {
-  if (!g_renderer || !g_texture) return;
+  if (!g_renderer || !ArRenderTexture_IsValid(g_texture)) return;
   Sim3DPerformanceScope performance = {0};
   if (slot->sim.view == kSimView_Enhanced)
     performance = Sim3DPerformance_Begin(kSim3DPerformance_Upload);
@@ -817,7 +821,7 @@ void PresentUpload(const FrameSlot *slot) {
     const uint8_t *pixels = PpuSurfaceRegion(
         surface, 0, 0, slot->snes_width, authentic_height);
     if (pixels && UploadChangedSurface(
-        g_authentic_texture,
+        ArSdlRenderBackend_BorrowTexture(g_authentic_texture),
         &s_action_upload_mirrors[kActionUploadSurface_Authentic],
         pixels, slot->snes_width, authentic_height,
         (int)surface->pitch_bytes, 0, 0)) {
@@ -912,7 +916,7 @@ void PresentUpload(const FrameSlot *slot) {
             &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG3][0]);
       if (PpuSurfaceHolds(surface, hud.w, hud.h))
         UploadChangedSurface(
-            g_hud_bg_texture,
+            ArSdlRenderBackend_BorrowTexture(g_hud_bg_texture),
             &s_action_upload_mirrors[kActionUploadSurface_HudBg],
             surface->data, hud.w, hud.h,
             (int)surface->pitch_bytes, hud.x, hud.y);
@@ -928,7 +932,7 @@ void PresentUpload(const FrameSlot *slot) {
             &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][0]);
       if (PpuSurfaceHolds(surface, hud.w, hud.h))
         UploadChangedSurface(
-            g_hud_obj_texture,
+            ArSdlRenderBackend_BorrowTexture(g_hud_obj_texture),
             &s_action_upload_mirrors[kActionUploadSurface_HudObj],
             surface->data, hud.w, hud.h,
             (int)surface->pitch_bytes, hud.x, hud.y);
@@ -1920,7 +1924,7 @@ void PresentRendererResources_Reset(void) {
 }
 
 void PresentCompositeScene(const FrameSlot *slot, float alpha) {
-  if (!g_renderer || !g_texture) return;
+  if (!g_renderer || !ArRenderTexture_IsValid(g_texture)) return;
 
   /* The action map group becomes live while the world-to-action transition
    * is still holding the SNES in hardware forced blank. That makes Diorama's
@@ -2223,8 +2227,11 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
   SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255);
   SDL_RenderClear(g_renderer);
   SDL_Rect src = { slot->visible_x0, 0, slot->visible_width, slot->snes_height };
-  SDL_FRect src_f = ToFRect(src);
-  SDL_RenderTexture(g_renderer, g_texture, &src_f, NULL);
+  ArRenderRectF source = {
+    (float)src.x, (float)src.y, (float)src.w, (float)src.h,
+  };
+  (void)ArRenderDevice_DrawTexture(
+      &g_render_device, g_texture, &source, NULL);
 
   SDL_SetRenderLogicalPresentation(g_renderer, 0, 0,
                                    SDL_LOGICAL_PRESENTATION_DISABLED);

@@ -2,6 +2,7 @@
 #define HD_REPLACEMENTS_H
 
 #include <stdbool.h>
+#include "render/render_types.h"
 #include "snesrecomp/runner.h"
 #include "snesrecomp/game/types.h"
 
@@ -75,10 +76,10 @@ typedef struct HdReplacement {
   HdCondition conditions[kHdMaxConditions];
   int condition_count;
 
-  /* Host-owned art. Screen plane: SDL_Texture* in `texture`. Mode7 plane:
-   * malloc'd ARGB words in `pixels` (consumed by the engine sampler, not
-   * SDL). Entries with neither stay fully inert (authentic rendering). */
-  void *texture;
+  /* Host-owned art. Screen-plane resources use an opaque renderer handle.
+   * Mode7 plane art is malloc'd ARGB words in `pixels` and consumed by the
+   * engine sampler. Entries with neither stay fully inert. */
+  ArRenderTexture texture;
   void *pixels;
   int pixels_width, pixels_height;
   /* Game-policy result, rebuilt every emulated frame. */

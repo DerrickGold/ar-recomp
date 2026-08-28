@@ -81,6 +81,7 @@
 #include "sim/sim_world_map.h"
 #include "sim/sim3d.h"
 #include "constants.h"
+#include "platform/sdl/render_sdl.h"
 
 static const char kWindowTitle[] = "ActRaiser (Recompiled)";
 enum {
@@ -101,12 +102,14 @@ enum {
  * g_ppu/g_settings state boundary D6 fences off. */
 SDL_Window *g_window;
 SDL_Renderer *g_renderer;
+ArRenderDevice g_render_device;
+static ArSdlRenderBackend g_sdl_render_backend;
 /* The SDL GPU renderer is the presentation backend. Individual optional
  * shader effects still check their own AR_GPU_FX_* toggles; this flag reports
  * that the mandatory GPU device and renderer were created successfully. */
 bool g_gpu_shaders_requested;
 bool g_gpu_shaders_active;
-SDL_Texture *g_texture;
+ArRenderTexture g_texture;
 SDL_Texture *g_authentic_texture;
 SDL_Texture *g_hud_bg_texture;
 SDL_Texture *g_hud_obj_texture;
@@ -942,21 +945,26 @@ static void AppBoot_ArmDiagnostics(void) {
  * AppBoot_CreateVideo, which otherwise carried SDL init, window creation and
  * renderer configuration in the same 300 lines. */
 static void AppBoot_CreatePresentationTextures(void) {
-  g_texture = SDL_CreateTexture(g_renderer,
-    SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-    SR_PPU_SURFACE_MAX_WIDTH, g_snes_height);
-  if (!g_texture) Die("SDL_CreateTexture failed");
+  const ArRenderTextureDesc base_texture = {
+    .width = SR_PPU_SURFACE_MAX_WIDTH,
+    .height = g_snes_height,
+    .format = kArRenderPixelFormat_Argb8888,
+    .usage = kArRenderTextureUsage_Streaming,
+    .filter = kArRenderFilter_Nearest,
+    .blend = kArRenderBlendMode_Opaque,
+  };
+  if (!ArRenderDevice_CreateTexture(
+          &g_render_device, &base_texture, &g_texture))
+    Die(ArRenderDevice_LastError(&g_render_device));
   /* The base framebuffer is opaque: the PPU writes RGB with the alpha byte
    * left 0 (see ppu_old.c). SDL2 defaulted new textures to BLENDMODE_NONE so
    * that alpha was ignored, but SDL3 defaults them to BLENDMODE_BLEND — which
    * would blend those alpha-0 pixels to fully transparent and present a BLACK
-   * screen. Force NONE to restore the SDL2 opaque blit. (The HUD/overlay
-   * textures below deliberately keep BLEND; they carry real alpha.) */
-  SDL_SetTextureBlendMode(g_texture, SDL_BLENDMODE_NONE);
+   * screen. The descriptor's opaque blend mode preserves that behavior. (The
+   * HUD/overlay textures below deliberately use alpha; they carry real alpha.) */
   /* SDL3 textures default to linear filtering; the SDL2 build set the global
-   * SDL_HINT_RENDER_SCALE_QUALITY=0 (nearest). Set nearest per-texture so
-   * the pixel-art framebuffer and HUD planes upscale crisply. */
-  SDL_SetTextureScaleMode(g_texture, SDL_SCALEMODE_NEAREST);
+   * SDL_HINT_RENDER_SCALE_QUALITY=0 (nearest). The descriptor pins nearest
+   * filtering so the pixel-art framebuffer upscales crisply. */
 
   g_authentic_texture = SDL_CreateTexture(
       g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
@@ -1209,6 +1217,9 @@ static int AppBoot_CreateVideo(AppBoot *app) {
       SDL_DestroyProperties(renderer_props);
     }
     if (!g_renderer) Die("SDL GPU renderer creation failed");
+    if (!ArSdlRenderBackend_Bind(
+            &g_render_device, &g_sdl_render_backend, g_renderer))
+      Die("SDL render backend binding failed");
     if (!Sim3DDepthPass_Require(g_renderer))
       Die(Sim3DDepthPass_LastError());
     g_gpu_shaders_active = true;
@@ -2205,7 +2216,8 @@ static int AppShutdown(AppBoot *app, char **argv) {
   SDL_DestroyTexture(g_hud_obj_texture);
   SDL_DestroyTexture(g_hud_bg_texture);
   SDL_DestroyTexture(g_authentic_texture);
-  SDL_DestroyTexture(g_texture);
+  ArRenderDevice_DestroyTexture(&g_render_device, g_texture);
+  g_texture = ArRenderTexture_Invalid();
   for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
     free(g_diorama_layer_pixels[plane]);
     g_diorama_layer_pixels[plane] = NULL;
@@ -2214,6 +2226,7 @@ static int AppShutdown(AppBoot *app, char **argv) {
    * all three must go before the renderer that created them. */
   CrtPost_Shutdown();
   SDL_DestroyRenderer(g_renderer);
+  ArRenderDevice_Reset(&g_render_device);
   SDL_DestroyWindow(g_window);
   if (fatal_session) {
     char message[1536];

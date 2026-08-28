@@ -79,11 +79,11 @@ typedef struct FrameSlotHdEntry {
   bool active;
   int source;
   bool brightness_mod;
-  /* SDL_Texture*, valid for a synchronous present. Texture reloads and render
-   * target resets invalidate retained slots, so their handlers must call
+  /* Opaque host texture, valid for a synchronous present. Texture reloads and
+   * render-target resets invalidate retained slots, so their handlers must call
    * HostDisplay_InvalidatePresentHistory(). Any new FrameSlot retention site
    * needs the same invalidation. */
-  void *texture;
+  ArRenderTexture texture;
 } FrameSlotHdEntry;
 
 /* Scene-inspector click anchor shared by the renderer and the input hit-test.

@@ -1,10 +1,10 @@
 #ifndef AR_PRESENTATION_UPLOAD_MIRROR_H
 #define AR_PRESENTATION_UPLOAD_MIRROR_H
 
-#include <SDL3/SDL.h>
-
 #include <stdbool.h>
 #include <stdint.h>
+
+#include "render/render_device.h"
 
 /* Exact render-thread-owned mirror for a rectangular ARGB8888 texture region.
  * Texture identity and destination placement are part of the key: matching
@@ -12,14 +12,14 @@
  * surface. */
 typedef struct PresentationUploadMirror {
   uint8_t *pixels;
-  SDL_Texture *texture;
+  ArRenderTexture texture;
   int width, height;
   int destination_x, destination_y;
   bool valid;
 } PresentationUploadMirror;
 
 typedef struct PresentationUploadResult {
-  SDL_Rect destination;
+  ArRenderRectI destination;
   uint64_t uploaded_bytes;
   bool changed;
 } PresentationUploadResult;
@@ -33,14 +33,15 @@ void PresentationUploadMirror_Reset(PresentationUploadMirror *mirror);
 bool PresentationUploadMirror_FindDirtyRect(
     const uint8_t *current, int current_pitch,
     const uint8_t *previous, int previous_pitch,
-    int width, int height, SDL_Rect *dirty);
+    int width, int height, ArRenderRectI *dirty);
 
 /* Uploads only the exact dirty rectangle. A mirror allocation failure falls
- * back to a complete upload; an SDL failure invalidates the mirror so the next
- * call retries the complete region. Returning true includes the no-change
- * case, where result.changed is false and no SDL call was made. */
+ * back to a complete upload; a backend failure invalidates the mirror so the
+ * next call retries the complete region. Returning true includes the no-change
+ * case, where result.changed is false and no backend call was made. */
 bool PresentationUploadMirror_UploadArgb8888(
-    PresentationUploadMirror *mirror, SDL_Texture *texture,
+    PresentationUploadMirror *mirror, ArRenderDevice *device,
+    ArRenderTexture texture,
     const uint8_t *source, int width, int height, int source_pitch,
     int destination_x, int destination_y, PresentationUploadResult *result);
 

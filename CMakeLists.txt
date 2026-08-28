@@ -27,6 +27,10 @@ if(BUILD_TESTING)
             -DGAME_SOURCE_ROOT=${CMAKE_SOURCE_DIR}/src
             -DSNESRECOMP_RUNNER_PRIVATE_ROOT=${CMAKE_SOURCE_DIR}/snesrecomp-go/runtime/src
             -P ${CMAKE_SOURCE_DIR}/tools/check_runner_boundary.cmake)
+    add_test(NAME actraiser_render_backend_boundary
+        COMMAND ${CMAKE_COMMAND}
+            -DGAME_SOURCE_ROOT=${CMAKE_SOURCE_DIR}/src
+            -P ${CMAKE_SOURCE_DIR}/tools/check_render_boundary.cmake)
 endif()
 
 # Configure the ROM-free test tier without requiring generated ROM banks. This
@@ -394,15 +398,23 @@ if(BUILD_TESTING)
     add_executable(actraiser_presentation_upload_mirror_test
         tests/presentation_upload_mirror_test.c
         src/presentation_upload_mirror.c
+        src/render/render_device.c
     )
     target_include_directories(actraiser_presentation_upload_mirror_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
     )
-    target_link_libraries(actraiser_presentation_upload_mirror_test PRIVATE
-        SDL3::SDL3
-    )
     add_test(NAME actraiser_presentation_upload_mirror
         COMMAND actraiser_presentation_upload_mirror_test)
+
+    add_executable(actraiser_render_device_test
+        tests/render_device_test.c
+        src/presentation_upload_mirror.c
+        src/render/render_device.c
+    )
+    target_include_directories(actraiser_render_device_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    add_test(NAME actraiser_render_device COMMAND actraiser_render_device_test)
 
     add_executable(actraiser_camera_orbit_test
         tests/camera_orbit_test.c

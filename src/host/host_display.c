@@ -34,10 +34,11 @@
 #include "settings.h"
 #include "constants.h"
 #include "snesrecomp/host/widescreen.h"
+#include "render/render_types.h"
 
 extern SDL_Window *g_window;
 extern SDL_Renderer *g_renderer;
-extern SDL_Texture *g_texture;
+extern ArRenderTexture g_texture;
 extern int g_snes_width;
 extern int g_snes_height;
 extern bool g_new_ppu;
@@ -599,7 +600,8 @@ static bool PresentPerformanceEnabled(void) {
 }
 
 bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha) {
-  if (mode == kHostDisplayPresent_None || !g_renderer || !g_texture)
+  if (mode == kHostDisplayPresent_None || !g_renderer ||
+      !ArRenderTexture_IsValid(g_texture))
     return false;
 
   const bool performance_enabled = PresentPerformanceEnabled();
@@ -635,7 +637,8 @@ bool HostDisplay_TryRepresentFrame(float alpha,
                                    bool redraw_pending) {
   const bool use_interpolation =
       diorama_frame_active && interpolation_enabled;
-  if (!s_retained_frame.valid || !g_renderer || !g_texture ||
+  if (!s_retained_frame.valid || !g_renderer ||
+      !ArRenderTexture_IsValid(g_texture) ||
       !HostDisplayPacing_ShouldRepresentFrame(
           (RefreshMode)g_settings.refresh_mode, redraw_pending)) {
     return false;

@@ -12,6 +12,7 @@
 #include "scene3d_math.h"
 #include "presentation_geometry.h"
 #include "presentation_upload_mirror.h"
+#include "platform/sdl/render_sdl.h"
 #include "snesrecomp/runner.h"
 #include "settings.h"
 #include "user_data_dir.h"
@@ -41,6 +42,7 @@ static DioramaRomSkyboxCache g_rom_skybox = {
 };
 static PresentationUploadMirror
     g_diorama_upload_mirrors[kDioramaPlane_Count];
+extern ArRenderDevice g_render_device;
 
 static void FailRomSkyboxResource(const char *operation) {
   if (g_rom_skybox.resource_failed) return;
@@ -1499,7 +1501,8 @@ DioramaUploadResult Diorama_Upload(
         (size_t)region.x * sizeof(uint32_t);
     PresentationUploadResult plane_upload = {0};
     const bool synchronized = PresentationUploadMirror_UploadArgb8888(
-        &g_diorama_upload_mirrors[plane], textures[plane], src,
+        &g_diorama_upload_mirrors[plane], &g_render_device,
+        ArSdlRenderBackend_BorrowTexture(textures[plane]), src,
         region.width, region.height, (int)pitch_bytes[plane],
         region.x, 0, &plane_upload);
     DioramaPerformance_AddPlaneSync(

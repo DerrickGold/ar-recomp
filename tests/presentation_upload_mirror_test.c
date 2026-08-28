@@ -9,7 +9,7 @@ static void TestIdenticalRegionIsClean(void) {
   uint32_t current[12];
   uint32_t previous[12];
   for (unsigned i = 0; i < 12; i++) current[i] = previous[i] = i;
-  SDL_Rect dirty = {-1, -1, -1, -1};
+  ArRenderRectI dirty = {-1, -1, -1, -1};
   assert(!PresentationUploadMirror_FindDirtyRect(
       (const uint8_t *)current, 4 * (int)sizeof(uint32_t),
       (const uint8_t *)previous, 4 * (int)sizeof(uint32_t),
@@ -24,7 +24,7 @@ static void TestDirtyBoundsSpanEveryChangedPixel(void) {
   current[1] = 0x11223344u;
   current[3 * 5 + 3] = 0x55667788u;
   current[4] = 0xffffffffu; /* Pitch padding must not widen the result. */
-  SDL_Rect dirty = {0};
+  ArRenderRectI dirty = {0};
   assert(PresentationUploadMirror_FindDirtyRect(
       (const uint8_t *)current, 5 * (int)sizeof(uint32_t),
       (const uint8_t *)previous, 5 * (int)sizeof(uint32_t),
@@ -36,7 +36,7 @@ static void TestSingleChangedByteStillUploadsWholePixel(void) {
   uint8_t current[12] = {0};
   uint8_t previous[12] = {0};
   current[6] = 1;
-  SDL_Rect dirty = {0};
+  ArRenderRectI dirty = {0};
   assert(PresentationUploadMirror_FindDirtyRect(
       current, 12, previous, 12, 3, 1, &dirty));
   assert(dirty.x == 1 && dirty.y == 0 && dirty.w == 1 && dirty.h == 1);

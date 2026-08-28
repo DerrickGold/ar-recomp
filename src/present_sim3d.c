@@ -32,6 +32,7 @@
  * constants (not live state) — fine to pull in just for those. */
 #include "settings.h"
 #include "present_internal.h"
+#include "render/render_device.h"
 
 #ifndef AR_SIM3D_TERRAIN_ELEVATION
 #define AR_SIM3D_TERRAIN_ELEVATION 0
@@ -39,7 +40,8 @@
 
 
 extern SDL_Renderer *g_renderer;
-extern SDL_Texture *g_texture;
+extern ArRenderDevice g_render_device;
+extern ArRenderTexture g_texture;
 extern SDL_Texture *g_hud_bg_texture;
 extern SDL_Texture *g_hud_obj_texture;
 extern SDL_Texture *g_diorama_textures[kDioramaPlane_Count];
@@ -1870,8 +1872,15 @@ static PresentationOutcome RenderSimProfile(
   int lift_inset = (slot->sim.cull_lift_inset && virtual_height)
       ? Sim3D_MaxDrawLift(slot->sim.height_scale_x100) : 0;
   if (!separated) {
-    SDL_FRect src = ToFRect(source), dst = ToFRect(viewport);
-    return SDL_RenderTexture(g_renderer, g_texture, &src, &dst)
+    const ArRenderRectF src = {
+      (float)source.x, (float)source.y, (float)source.w, (float)source.h,
+    };
+    const ArRenderRectF dst = {
+      (float)viewport.x, (float)viewport.y,
+      (float)viewport.w, (float)viewport.h,
+    };
+    return ArRenderDevice_DrawTexture(
+               &g_render_device, g_texture, &src, &dst)
         ? outcome : kPresentationOutcome_CoreFailure;
   }
   if (!ground) {
