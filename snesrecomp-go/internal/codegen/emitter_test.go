@@ -54,6 +54,55 @@ func TestStaticStackWidthsAvoidRuntimeBranch(t *testing.T) {
 	}
 }
 
+func TestExactDirectCallMXEmitsSingleCompiledVariant(t *testing.T) {
+	context := NewContext()
+	context.ExactDirectCallMX = true
+	context.ValidVariants[0x008200] = map[[2]uint8]struct{}{{0, 1}: {}}
+	source, target := uint32(0x008000), uint32(0x008200)
+	lines, err := EmitOperation(context, ir.Call{
+		Target: &target, EntryM: 0, EntryX: 1, SourcePC: &source,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated := strings.Join(lines, "\n")
+	if !strings.Contains(generated, "bank_00_8200_M0X1(cpu);  /* exact live M/X direct call */") {
+		t.Fatalf("exact direct call missing from:\n%s", generated)
+	}
+	if strings.Contains(generated, "switch (((cpu->m_flag") {
+		t.Fatalf("exact direct call retained runtime variant switch:\n%s", generated)
+	}
+	if len(context.Demands) != 1 {
+		t.Fatalf("exact direct call demands = %+v, want one variant", context.Demands)
+	}
+}
+
+func TestForcedDirectCallPreservesHardwareCallEnvelope(t *testing.T) {
+	context := NewContext()
+	context.CurrentName = "Caller_M0X0"
+	context.CurrentSite = 0x00b543
+	context.ForceVariantAt[context.CurrentSite] = [2]uint8{1, 0}
+	source, target := uint32(0x00b543), uint32(0x0086ef)
+	lines, err := EmitOperation(context, ir.Call{
+		Target: &target, EntryM: 0, EntryX: 0, SourcePC: &source,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated := strings.Join(lines, "\n")
+	for _, wanted := range []string{
+		"uint16 _call_s = cpu->S;",
+		"JSR return frame -> cpu->S",
+		"sr_call_mx_check(cpu, 1, 0",
+		"bank_00_86EF_M1X0(cpu);  /* cfg force_variant_at $00B543",
+		"cpu->S = _call_s;  /* stack-neutrality restore",
+	} {
+		if !strings.Contains(generated, wanted) {
+			t.Fatalf("forced call missing %q from:\n%s", wanted, generated)
+		}
+	}
+}
+
 func value(id int) *ir.Value {
 	v := ir.Value{ID: id}
 	return &v

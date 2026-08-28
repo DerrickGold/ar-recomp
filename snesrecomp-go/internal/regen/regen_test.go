@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/DerrickGold/snesrecomp-go/internal/analysis"
 	"github.com/DerrickGold/snesrecomp-go/internal/codegen"
+	"github.com/DerrickGold/snesrecomp-go/internal/cpu65816"
 	"github.com/DerrickGold/snesrecomp-go/internal/decoder"
 	"github.com/DerrickGold/snesrecomp-go/internal/rom"
 )
@@ -70,6 +72,53 @@ func TestUnresolvedStubsFollowEmittedDemands(t *testing.T) {
 	}
 }
 
+func TestProvenDispatchDiscoveryDemandsOnlyExactPostSEPMX(t *testing.T) {
+	key := decoder.DecodeKey{PC: 0x008000, M: 0, X: 0}
+	instruction := &cpu65816.Instruction{
+		Address: 0x008000, M: 0, X: 0,
+		DispatchEntries:  []uint32{0x008200},
+		DispatchKind:     "short",
+		DispatchSEP:      0x20,
+		DispatchMXProven: true,
+	}
+	graph := &decoder.Graph{Instructions: map[decoder.DecodeKey]*decoder.DecodedInstruction{
+		key: {Key: key, Instruction: instruction},
+	}}
+	demands := discoverGraphDemands(graph, nil, false, nil)
+	want := codegen.Variant{Address: 0x008200, M: 1, X: 0}
+	if len(demands) != 1 {
+		t.Fatalf("proven dispatch demands = %#v, want one exact target variant", demands)
+	}
+	if _, found := demands[want]; !found {
+		t.Fatalf("proven dispatch demands = %#v, missing %#v", demands, want)
+	}
+
+	instruction.DispatchMXProven = false
+	demands = discoverGraphDemands(graph, nil, false, nil)
+	if len(demands) != 4 {
+		t.Fatalf("ordinary dynamic dispatch demands = %#v, want all four variants", demands)
+	}
+}
+
+func TestExperimentalDirectCallDiscoveryDemandsOnlyLiveMX(t *testing.T) {
+	key := decoder.DecodeKey{PC: 0x008000, M: 0, X: 1}
+	instruction := &cpu65816.Instruction{
+		Address: 0x008000, Mnemonic: "JSR", Mode: cpu65816.ABS,
+		Operand: 0x8200, M: 0, X: 1,
+	}
+	graph := &decoder.Graph{Instructions: map[decoder.DecodeKey]*decoder.DecodedInstruction{
+		key: {Key: key, Instruction: instruction},
+	}}
+	demands := discoverGraphDemands(graph, nil, true, nil)
+	want := codegen.Variant{Address: 0x008200, M: 0, X: 1}
+	if len(demands) != 1 {
+		t.Fatalf("exact direct call demands = %+v, want one variant", demands)
+	}
+	if _, found := demands[want]; !found {
+		t.Fatalf("exact direct call demands = %+v, missing %+v", demands, want)
+	}
+}
+
 func TestInvalidDiscoveredDirectCallTrapsInlineWithoutDeadStub(t *testing.T) {
 	root := t.TempDir()
 	romPath := filepath.Join(root, "game.sfc")
@@ -113,5 +162,79 @@ func TestInvalidDiscoveredDirectCallTrapsInlineWithoutDeadStub(t *testing.T) {
 	}
 	if strings.Contains(string(stubs), "bank_00_1234_M") {
 		t.Fatalf("inline invalid call produced unreferenced stubs:\n%s", stubs)
+	}
+}
+
+func TestProvenAnalysisOverlayEmitsPHARTSDispatchWithoutWritingConfig(t *testing.T) {
+	root := t.TempDir()
+	romPath := filepath.Join(root, "game.sfc")
+	cfgDir := filepath.Join(root, "recomp")
+	outputDir := filepath.Join(root, "gen")
+	image := make([]byte, 0x8000)
+	copy(image[0x0000:], []byte{
+		0xBD, 0x00, 0x81, // LDA $8100,X
+		0xA0, 0x08, 0x80, // LDY #$8008
+		0x5A, // PHY
+		0x48, // PHA at $8007
+		0x60, // original dispatching RTS
+		0x60, // continuation $8009
+	})
+	image[0x0100], image[0x0101] = 0xFF, 0x81 // handler-1 -> $8200
+	image[0x0200] = 0x60
+	if err := os.WriteFile(romPath, image, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(cfgDir, "bank00.cfg")
+	configText := "bank = 00\nfunc Entry 8000 entry_mx:0,0\nfunc Continue 8009 entry_mx:0,0\nfunc Handler 8200 entry_mx:0,0\n"
+	if err := os.WriteFile(configPath, []byte(configText), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	returnPC := uint32(0x008009)
+	fact := analysis.DispatchFact{
+		SitePC: 0x008007, Mnemonic: "PHA", AddressingMode: "imp",
+		LiveMX: []analysis.MXState{{M: 0, X: 0}}, Transfer: analysis.TransferCall,
+		TargetEntryKind: analysis.EntryComputed, Targets: []uint32{0x008200}, TargetSetClosed: true,
+		IndexRegister: "A", TableBases: []uint32{0x008100}, ReturnPC: &returnPC,
+		Evidence: []analysis.Evidence{{Source: "static.fixture", Confidence: analysis.ConfidenceProven}},
+	}
+	report, err := Run(Options{
+		ROMPath: romPath, ConfigDir: cfgDir, OutputDir: outputDir, Jobs: 1,
+		AllowStubs: true, ProvenDispatchFacts: []analysis.DispatchFact{fact},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.AnalysisFactsApplied != 1 {
+		t.Fatalf("applied analysis facts = %d, want 1", report.AnalysisFactsApplied)
+	}
+	if report.FinalEntries != report.InitialEntries {
+		t.Fatalf("proven exact M/X dispatch grew variants: %d -> %d", report.InitialEntries, report.FinalEntries)
+	}
+	configAfter, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(configAfter) != configText {
+		t.Fatalf("analysis overlay rewrote authored config:\n%s", configAfter)
+	}
+	generated, err := os.ReadFile(filepath.Join(outputDir, "bank00_v2.c"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, wanted := range []string{
+		"PHA/RTS jump-table call", "case 0x81ff", "Handler",
+		"#if SNESRECOMP_SEMANTIC_DISPATCH_TRACE",
+		"cpu_trace_resolved_dispatch(cpu, 0x008200u, 0x008008u)",
+		"goto L_8009_M0X0;",
+	} {
+		if !strings.Contains(string(generated), wanted) {
+			t.Fatalf("generated overlay output missing %q:\n%s", wanted, generated)
+		}
+	}
+	if strings.Contains(string(generated), "dispatch-ret tail-call: $8009 is registered func") {
+		t.Fatalf("internal continuation resumed through a new C activation:\n%s", generated)
 	}
 }

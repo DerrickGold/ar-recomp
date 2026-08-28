@@ -60,8 +60,13 @@ type Instruction struct {
 	DispatchTerminal  bool
 	DispatchReturn    *uint16
 	DispatchSEP       byte
-	ConstantZFold     bool
-	ConstantZDeadPC   *uint32
+	DispatchMXProven  bool
+	// DispatchTransferPC is the instruction that performs the runtime control
+	// transfer. It differs from Address for collapsed PHA/.../RTS constructs,
+	// whose dispatch metadata is attached to the address-taken PHA.
+	DispatchTransferPC uint32
+	ConstantZFold      bool
+	ConstantZDeadPC    *uint32
 }
 
 func (instruction Instruction) String() string {

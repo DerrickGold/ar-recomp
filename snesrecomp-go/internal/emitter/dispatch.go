@@ -23,6 +23,21 @@ func demandAllVariants(context *codegen.Context, address uint32) {
 	}
 }
 
+func dispatchTransferPC(instruction *cpu65816.Instruction) uint32 {
+	if instruction.DispatchTransferPC != 0 {
+		return instruction.DispatchTransferPC & 0xffffff
+	}
+	return instruction.Address & 0xffffff
+}
+
+func resolvedDispatchTrace(indent string, instruction *cpu65816.Instruction, target uint32) []string {
+	return []string{
+		indent + "#if SNESRECOMP_SEMANTIC_DISPATCH_TRACE",
+		fmt.Sprintf("%scpu_trace_resolved_dispatch(cpu, 0x%06xu, 0x%06xu);", indent, target&0xffffff, dispatchTransferPC(instruction)),
+		indent + "#endif",
+	}
+}
+
 func pbCallEnvelope(targetBank byte, callee string) []string {
 	return []string{
 		"uint8 _saved_pb = cpu->PB;",
@@ -68,6 +83,7 @@ func emitJSLDispatch(context *codegen.Context, instruction *cpu65816.Instruction
 		context.Demands[codegen.Variant{Address: address, M: 1, X: 1}] = struct{}{}
 		name := dispatchBaseName(context, address) + "_M1X1"
 		lines = append(lines, fmt.Sprintf("    case %d: {", index))
+		lines = append(lines, resolvedDispatchTrace("      ", instruction, address)...)
 		for _, statement := range pbCallEnvelope(byte(address>>16), name) {
 			lines = append(lines, "      "+statement)
 		}
@@ -130,7 +146,9 @@ func emitIndirectDispatch(context *codegen.Context, instruction *cpu65816.Instru
 		seen[caseValue] = struct{}{}
 		baseName := dispatchBaseName(context, address)
 		demandAllVariants(context, address)
-		lines = append(lines, fmt.Sprintf("    case 0x%04x: {  /* -> %s */", caseValue, baseName), "      uint8 _saved_pb = cpu->PB;", fmt.Sprintf("      cpu_trace_pb_change(cpu, 0, _saved_pb, 0x%02x, CPU_TR_JSL);", byte(address>>16)), fmt.Sprintf("      cpu->PB = 0x%02x;", byte(address>>16)), "      RecompReturn _r;", "      switch (((cpu->m_flag & 1) << 1) | (cpu->x_flag & 1)) {")
+		lines = append(lines, fmt.Sprintf("    case 0x%04x: {  /* -> %s */", caseValue, baseName))
+		lines = append(lines, resolvedDispatchTrace("      ", instruction, address)...)
+		lines = append(lines, "      uint8 _saved_pb = cpu->PB;", fmt.Sprintf("      cpu_trace_pb_change(cpu, 0, _saved_pb, 0x%02x, CPU_TR_JSL);", byte(address>>16)), fmt.Sprintf("      cpu->PB = 0x%02x;", byte(address>>16)), "      RecompReturn _r;", "      switch (((cpu->m_flag & 1) << 1) | (cpu->x_flag & 1)) {")
 		preCall := ""
 		if !isJSRLike {
 			preCall = "cpu_tailcall_inherit_return_context(_entry_s, _hrv); "
@@ -240,7 +258,7 @@ func emitIndexedIndirectDispatch(context *codegen.Context, instruction *cpu65816
 			seen[caseValue] = struct{}{}
 			base := dispatchBaseName(context, address)
 			lines = append(lines, fmt.Sprintf("    case 0x%04x: {", caseValue))
-			lines = append(lines, dispatchCaseBody(context, address, base, isJSRLike, instruction.DispatchTerminal, m, x, "      ")...)
+			lines = append(lines, dispatchCaseBody(context, instruction, address, base, isJSRLike, instruction.DispatchTerminal, m, x, "      ")...)
 			if isJSRLike {
 				lines = append(lines, "      break;")
 			} else {
@@ -300,7 +318,7 @@ func emitIndexedIndirectDispatch(context *codegen.Context, instruction *cpu65816
 		address := entry & 0xffffff
 		base := dispatchBaseName(context, address)
 		lines = append(lines, fmt.Sprintf("    case %d: {", index))
-		lines = append(lines, dispatchCaseBody(context, address, base, isJSRLike, instruction.DispatchTerminal, m, x, "      ")...)
+		lines = append(lines, dispatchCaseBody(context, instruction, address, base, isJSRLike, instruction.DispatchTerminal, m, x, "      ")...)
 		if isJSRLike {
 			lines = append(lines, "      break;")
 		} else {
@@ -323,11 +341,12 @@ func sepDispatchLines(indent string, mask byte) []string {
 	return []string{indent + "{", indent + "  uint8 _old_p = cpu->P;", indent + "  cpu_mirrors_to_p(cpu);", fmt.Sprintf("%s  cpu->P = (uint8)(cpu->P | 0x%02x);", indent, mask), indent + "  cpu_p_to_mirrors(cpu);", indent + "  cpu_trace_px_record(cpu, 0, 1 /*SEP*/, _old_p, cpu->P);", indent + "}"}
 }
 
-func dispatchCaseBody(context *codegen.Context, address uint32, base string, isJSRLike, terminal bool, m, x uint8, indent string) []string {
+func dispatchCaseBody(context *codegen.Context, instruction *cpu65816.Instruction, address uint32, base string, isJSRLike, terminal bool, m, x uint8, indent string) []string {
 	if terminal {
 		context.Demands[codegen.Variant{Address: address, M: m & 1, X: x & 1}] = struct{}{}
 		name := fmt.Sprintf("%s_M%dX%d", base, m&1, x&1)
-		lines := []string{indent + "uint8 _saved_pb = cpu->PB;", fmt.Sprintf("%scpu_trace_pb_change(cpu, 0, _saved_pb, 0x%02x, CPU_TR_JSL);", indent, byte(address>>16)), fmt.Sprintf("%scpu->PB = 0x%02x;", indent, byte(address>>16))}
+		lines := resolvedDispatchTrace(indent, instruction, address)
+		lines = append(lines, indent+"uint8 _saved_pb = cpu->PB;", fmt.Sprintf("%scpu_trace_pb_change(cpu, 0, _saved_pb, 0x%02x, CPU_TR_JSL);", indent, byte(address>>16)), fmt.Sprintf("%scpu->PB = 0x%02x;", indent, byte(address>>16)))
 		if !isJSRLike {
 			lines = append(lines, indent+"cpu_tailcall_inherit_return_context(_entry_s, _hrv);")
 		}
@@ -335,7 +354,8 @@ func dispatchCaseBody(context *codegen.Context, address uint32, base string, isJ
 		return lines
 	}
 	demandAllVariants(context, address)
-	lines := []string{indent + "uint8 _saved_pb = cpu->PB;", fmt.Sprintf("%scpu_trace_pb_change(cpu, 0, _saved_pb, 0x%02x, CPU_TR_JSL);", indent, byte(address>>16)), fmt.Sprintf("%scpu->PB = 0x%02x;", indent, byte(address>>16)), indent + "RecompReturn _r;", indent + "switch (((cpu->m_flag & 1) << 1) | (cpu->x_flag & 1)) {"}
+	lines := resolvedDispatchTrace(indent, instruction, address)
+	lines = append(lines, indent+"uint8 _saved_pb = cpu->PB;", fmt.Sprintf("%scpu_trace_pb_change(cpu, 0, _saved_pb, 0x%02x, CPU_TR_JSL);", indent, byte(address>>16)), fmt.Sprintf("%scpu->PB = 0x%02x;", indent, byte(address>>16)), indent+"RecompReturn _r;", indent+"switch (((cpu->m_flag & 1) << 1) | (cpu->x_flag & 1)) {")
 	pre := ""
 	if !isJSRLike {
 		pre = "cpu_tailcall_inherit_return_context(_entry_s, _hrv); "

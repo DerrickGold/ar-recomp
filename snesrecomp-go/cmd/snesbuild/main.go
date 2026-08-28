@@ -11,10 +11,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/DerrickGold/snesrecomp-go/internal/project"
 	"github.com/DerrickGold/snesrecomp-go/internal/toolchain"
+	"github.com/DerrickGold/snesrecomp-go/internal/tooling"
 )
 
 var version = "dev"
@@ -37,6 +39,10 @@ func run(args []string) error {
 	switch args[0] {
 	case "regen":
 		return runRegen(args[1:])
+	case "analyze":
+		return runAnalyze(args[1:])
+	case "dispatch-census":
+		return runDispatchCensus(args[1:])
 	case "configure":
 		return runConfigure(args[1:])
 	case "build":
@@ -72,6 +78,9 @@ func usage() {
 
 Commands:
   regen       Regenerate C and all generated sidecars
+  analyze     Compare inferred control-flow facts with authored cfg (read-only)
+  dispatch-census
+              Summarize observed runtime targets without editing authored cfg
   configure   Configure the native game build with CMake
   build       Configure (by default) and compile the native game
               (--hermetic compiles with the pinned Zig toolchain, no CMake)
@@ -220,6 +229,96 @@ func runRegen(args []string) error {
 	}
 	_, err := project.Regenerate(values.options())
 	return err
+}
+
+func runAnalyze(args []string) error {
+	flags := flag.NewFlagSet("analyze", flag.ContinueOnError)
+	root := flags.String("root", ".", "game project root")
+	romPath := flags.String("rom", "game.sfc", "ROM path, relative to project root")
+	cfgDir := flags.String("cfg-dir", "recomp", "bank config directory, relative to project root")
+	jobs := flags.Int("jobs", runtime.NumCPU(), "parallel decode workers")
+	bankValue := flags.String("bank", "", "optional hexadecimal bank")
+	format := flags.String("format", "text", "report format: text or json")
+	verbose := flags.Bool("verbose", false, "show all comparisons, callers, and decode issues")
+	flags.BoolVar(verbose, "v", false, "show all comparisons, callers, and decode issues")
+	strict := flags.Bool("strict", false, "fail after reporting independently proven semantic conflicts")
+	compareAuthored := flags.Bool("compare-authored", true, "compare inferred facts with authored cfg declarations")
+	noWrite := flags.Bool("no-write", true, "require analysis to remain read-only")
+	dryRun := flags.Bool("dry-run", true, "require analysis to remain read-only")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if !*compareAuthored {
+		return errors.New("analyze currently requires --compare-authored")
+	}
+	if !*noWrite || !*dryRun {
+		return errors.New("analyze is intentionally read-only; disabling --no-write or --dry-run is not supported")
+	}
+	paths := project.DefaultPaths(*root)
+	paths.ROM, paths.ConfigDir = *romPath, *cfgDir
+	resolved, err := paths.Resolve()
+	if err != nil {
+		return err
+	}
+	var onlyBank *byte
+	if strings.TrimSpace(*bankValue) != "" {
+		value, err := strconv.ParseUint(strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(*bankValue), "0x"), "0X"), 16, 8)
+		if err != nil {
+			return fmt.Errorf("parse --bank: %w", err)
+		}
+		bank := byte(value)
+		onlyBank = &bank
+	}
+	report, err := tooling.AnalyzeAuthoredShadow(tooling.ShadowAnalysisOptions{
+		ROMPath: resolved.ROM, CFGDir: resolved.ConfigDir, Jobs: *jobs, OnlyBank: onlyBank,
+	})
+	if err != nil {
+		return err
+	}
+	if err := tooling.WriteShadowReport(os.Stdout, report, *format, *verbose); err != nil {
+		return err
+	}
+	if *strict && report.Summary.Conflicts > 0 {
+		return fmt.Errorf("shadow analysis found %d semantic conflict(s)", report.Summary.Conflicts)
+	}
+	return nil
+}
+
+func runDispatchCensus(args []string) error {
+	flags := flag.NewFlagSet("dispatch-census", flag.ContinueOnError)
+	root := flags.String("root", ".", "game project root")
+	tracePath := flags.String("trace", "", "runtime JSONL captured with SNESRECOMP_TRACE_CHANNELS=dispatch")
+	romPath := flags.String("rom", "", "optional ROM path, relative to project root")
+	format := flags.String("format", "text", "report format: text or json")
+	suggest := flags.Bool("suggest", true, "include candidate cfg func lines for missing generated bodies")
+	outPath := flags.String("out-analysis", "", "optional deterministic JSON evidence path, relative to project root")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*tracePath) == "" {
+		return errors.New("dispatch-census requires --trace <runtime.jsonl>")
+	}
+	resolve := func(path string) string {
+		if path == "" || filepath.IsAbs(path) {
+			return path
+		}
+		return filepath.Join(*root, path)
+	}
+	report, err := tooling.LoadDispatchCensus(resolve(*tracePath), resolve(*romPath))
+	if err != nil {
+		return err
+	}
+	if err := tooling.WriteDispatchCensus(os.Stdout, report, *format, *suggest); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*outPath) != "" {
+		resolved := resolve(*outPath)
+		if err := tooling.WriteDispatchCensusFile(resolved, report); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "dispatch-census: wrote observed evidence to %s (authored cfg unchanged)\n", resolved)
+	}
+	return nil
 }
 
 func runConfigure(args []string) error {

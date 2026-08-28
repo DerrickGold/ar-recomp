@@ -112,8 +112,14 @@ type DispatchAuth struct {
 	TableBases []uint16
 	ReturnPC   *uint16
 	SEPMask    byte
-	RTSTrick   bool
-	Targets    []uint16
+	// Transfer is empty for legacy declarations whose semantics are inferred
+	// from the opcode and (for collapsed PHA/RTS constructs) ReturnPC.
+	Transfer string
+	RTSTrick bool
+	Targets  []uint16
+	// TargetMXProven is set only by an ephemeral static-analysis overlay.
+	// Authored declarations keep conservative live-state multi-variant routing.
+	TargetMXProven bool
 }
 
 type DataRegion struct {
@@ -132,6 +138,10 @@ type Options struct {
 	CalleeExitMX       map[Variant]MX
 	CalleeExitModes    map[Variant][]MX
 	SiblingEntryPCs    map[uint16]struct{}
+	// InternalResumePCs are address-taken continuation blocks that remain
+	// registered as external entries, but must be decoded into an active
+	// caller region when reached by an internal control-flow edge.
+	InternalResumePCs map[uint16]struct{}
 }
 
 func Address24(bank byte, pc uint16) uint32 { return uint32(bank)<<16 | uint32(pc) }

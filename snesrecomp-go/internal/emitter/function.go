@@ -578,7 +578,13 @@ func emitRTSDispatchGuard(instruction *cpu65816.Instruction, local map[decoder.D
 			if !found {
 				continue
 			}
-			lines = append(lines, fmt.Sprintf("      if (_rts_mx == %d) { cpu->S = (uint16)(_rts_s + 2); goto %s; }", mx, label(key)))
+			lines = append(lines,
+				fmt.Sprintf("      if (_rts_mx == %d) {", mx),
+				"        #if SNESRECOMP_SEMANTIC_DISPATCH_TRACE",
+				fmt.Sprintf("        cpu_trace_resolved_dispatch(cpu, 0x%06xu, 0x%06xu);", targetPC&0xffffff, dispatchTransferPC(instruction)),
+				"        #endif",
+				fmt.Sprintf("        cpu->S = (uint16)(_rts_s + 2); goto %s;", label(key)),
+				"      }")
 		}
 		lines = append(lines,
 			"      if (getenv(\"AR_RTSDISP_MISS\"))",

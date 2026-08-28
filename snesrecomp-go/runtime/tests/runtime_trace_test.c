@@ -28,9 +28,10 @@ static void check(bool condition, const char *message) {
 int main(void) {
     Snes runner = {0};
     SrRunnerEvent dma_event = {0};
+    SrRunnerEvent dispatch_event = {0};
     const int channels = SR_TRACE_CHANNEL_FUNC | SR_TRACE_CHANNEL_REG | SR_TRACE_CHANNEL_DMA | SR_TRACE_CHANNEL_WRAM |
                          SR_TRACE_CHANNEL_STACK | SR_TRACE_CHANNEL_FRAME | SR_TRACE_CHANNEL_PPUMEM |
-                         SR_TRACE_CHANNEL_DISPMISS;
+                         SR_TRACE_CHANNEL_DISPMISS | SR_TRACE_CHANNEL_DISPATCH;
     sr_trace_bind_runner(&runner, 1);
     check(sr_trace_open_file(RUNTIME_TRACE_TEST_PATH, channels, 7, 7) == 1,
           "open explicit trace file");
@@ -53,10 +54,12 @@ int main(void) {
     check((g_sr_runner_event_mask &
            (SR_EVENT_MASK_MEMORY_WRITE | SR_EVENT_MASK_REGISTER_ACCESS |
             SR_EVENT_MASK_DMA | SR_EVENT_MASK_FRAME |
-            SR_EVENT_MASK_INTERRUPT | SR_EVENT_MASK_ERROR)) ==
+            SR_EVENT_MASK_INTERRUPT | SR_EVENT_MASK_ERROR |
+            SR_EVENT_MASK_DYNAMIC_DISPATCH)) ==
               (SR_EVENT_MASK_MEMORY_WRITE | SR_EVENT_MASK_REGISTER_ACCESS |
                SR_EVENT_MASK_DMA | SR_EVENT_MASK_FRAME |
-               SR_EVENT_MASK_INTERRUPT | SR_EVENT_MASK_ERROR),
+               SR_EVENT_MASK_INTERRUPT | SR_EVENT_MASK_ERROR |
+               SR_EVENT_MASK_DYNAMIC_DISPATCH),
           "trace observer subscriptions");
     sr_trace_func(0x029abcu, "entry", 1, 0, 1, 0);
     sr_runner_emit_register_access(&runner, true, 0x2100u, 0x8fu, 1u);
@@ -80,6 +83,14 @@ int main(void) {
     sr_runner_emit_error(
         &runner, SR_RUNNER_ERROR_DISPATCH_MISS, SR_EVENT_ERROR_RECOVERABLE,
         0x345678u, 0x123456u, "dispatch-miss");
+    dispatch_event.type = SR_EVENT_DYNAMIC_DISPATCH;
+    dispatch_event.source_pc24 = 0x05db84u;
+    dispatch_event.pc24 = 0x05c123u;
+    dispatch_event.cpu_flags = SR_CPU_STATE_X_FLAG;
+    sr_runner_emit_event(&runner, SR_EVENT_MASK_DYNAMIC_DISPATCH,
+                         &dispatch_event);
+    sr_runner_emit_event(&runner, SR_EVENT_MASK_DYNAMIC_DISPATCH,
+                         &dispatch_event);
     sr_trace_close();
     check(g_sr_runner_event_mask == 0u, "trace observer cleanup");
 
@@ -100,7 +111,10 @@ int main(void) {
           strstr(contents, "\"ch\":\"wram\"") != NULL &&
           strstr(contents, "\"ch\":\"ppumem\"") != NULL &&
           strstr(contents, "\"ch\":\"frame\"") != NULL &&
-          strstr(contents, "\"ch\":\"dispmiss\"") != NULL,
+          strstr(contents, "\"ch\":\"dispmiss\"") != NULL &&
+          strstr(contents, "\"ch\":\"dispatch\"") != NULL &&
+          strstr(contents, "\"site\":\"05DB84\"") != NULL &&
+          strstr(contents, "\"hits\":2,\"final\":1") != NULL,
           "selected channels emit correlated JSONL records");
     check(remove(RUNTIME_TRACE_TEST_PATH) == 0, "remove trace fixture");
     if (failures != 0) {

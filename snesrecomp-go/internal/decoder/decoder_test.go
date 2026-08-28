@@ -1,8 +1,10 @@
 package decoder
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/DerrickGold/snesrecomp-go/internal/cpu65816"
 	"github.com/DerrickGold/snesrecomp-go/internal/rom"
 )
 
@@ -21,6 +23,31 @@ func mustDecode(t *testing.T, image rom.Image, start uint16, m, x uint8) *Graph 
 		t.Fatalf("DecodeFunction: %v", err)
 	}
 	return graph
+}
+
+func TestExplicitDispatchTransferMustMatchInstruction(t *testing.T) {
+	tests := []struct {
+		name        string
+		instruction cpu65816.Instruction
+		auth        DispatchAuth
+		wantError   string
+	}{
+		{name: "jmp tail", instruction: cpu65816.Instruction{Address: 0x008498, Mnemonic: "JMP"}, auth: DispatchAuth{Transfer: "tail"}},
+		{name: "jmp call", instruction: cpu65816.Instruction{Address: 0x008498, Mnemonic: "JMP"}, auth: DispatchAuth{Transfer: "call"}, wantError: "incompatible with JMP"},
+		{name: "jsr call", instruction: cpu65816.Instruction{Address: 0x008498, Mnemonic: "JSR"}, auth: DispatchAuth{Transfer: "call"}},
+		{name: "pha call needs return", instruction: cpu65816.Instruction{Address: 0x008498, Mnemonic: "PHA"}, auth: DispatchAuth{Transfer: "call"}, wantError: "needs ret:<pc>"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateDispatchTransfer(&test.instruction, test.auth)
+			if test.wantError == "" && err != nil {
+				t.Fatalf("validateDispatchTransfer: %v", err)
+			}
+			if test.wantError != "" && (err == nil || !strings.Contains(err.Error(), test.wantError)) {
+				t.Fatalf("validateDispatchTransfer error = %v, want %q", err, test.wantError)
+			}
+		})
+	}
 }
 
 func TestModeSplitPreservesBothStates(t *testing.T) {
@@ -57,6 +84,47 @@ func TestPHPPLPRestoresMode(t *testing.T) {
 	rts := DecodeKey{PC: 0x8004, M: 0, X: 0}
 	if graph.Instructions[rts] == nil {
 		t.Fatalf("missing RTS with PLP-restored M0X0: keys=%v", graph.Order)
+	}
+}
+
+func TestInterproceduralPHPPLPRestoreDoesNotLeakCalleeWidth(t *testing.T) {
+	image := bank0(map[uint16][]byte{
+		// PHP; REP #$30; JSR balanced; JSR neutral; JSR target; PLP; RTS.
+		0x8000: {0x08, 0xC2, 0x30, 0x20, 0x00, 0x81, 0x20, 0x00, 0x82, 0x20, 0x00, 0x83, 0x28, 0x60},
+		// PHP; SEP #$30; PLP; RTS. The temporary M1X1 state must not escape.
+		0x8100: {0x08, 0xE2, 0x30, 0x28, 0x60},
+		0x8200: {0xEA, 0x60},
+		0x8300: {0xEA, 0x60},
+	})
+
+	exits := make(map[Variant]MX)
+	for _, address := range []uint16{0x8100, 0x8200, 0x8300} {
+		graph, err := DecodeFunction(image, 0, address, 0, 0, Options{})
+		if err != nil {
+			t.Fatalf("DecodeFunction($%04X): %v", address, err)
+		}
+		exit := AnalyzeExitMX(graph, nil)
+		if exit != (MX{M: 0, X: 0}) {
+			t.Fatalf("exit M/X for $%04X = %+v, want M0X0", address, exit)
+		}
+		exits[Variant{Address: uint32(address), M: 0, X: 0}] = exit
+	}
+
+	caller, err := DecodeFunction(image, 0, 0x8000, 1, 1, Options{CalleeExitMX: exits})
+	if err != nil {
+		t.Fatalf("DecodeFunction(caller): %v", err)
+	}
+	call := DecodeKey{PC: 0x8009, M: 0, X: 0, PStack: 3, PDepth: 1}
+	if caller.Instructions[call] == nil {
+		t.Fatalf("third call did not retain M0X0 and outer PHP state: keys=%v", caller.Order)
+	}
+	plp := DecodeKey{PC: 0x800C, M: 0, X: 0, PStack: 3, PDepth: 1}
+	if caller.Instructions[plp] == nil {
+		t.Fatalf("PLP did not receive M0X0 after balanced callees: keys=%v", caller.Order)
+	}
+	rts := DecodeKey{PC: 0x800D, M: 1, X: 1}
+	if caller.Instructions[rts] == nil {
+		t.Fatalf("outer PLP did not restore entry M1X1: keys=%v", caller.Order)
 	}
 }
 
@@ -107,5 +175,29 @@ func TestDecodeOrderIsRepeatable(t *testing.T) {
 				t.Fatalf("iteration %d key %d = %v, want %v", iteration, index, got[index], first[index])
 			}
 		}
+	}
+}
+
+func TestInternalResumePCDecodesThroughSiblingEntryBoundary(t *testing.T) {
+	image := bank0(map[uint16][]byte{
+		0x8000: {0x80, 0x0E}, // BRA $8010
+		0x8010: {0xEA, 0x60}, // NOP; RTS
+	})
+	options := Options{SiblingEntryPCs: map[uint16]struct{}{0x8010: {}}}
+	graph, err := DecodeFunction(image, 0, 0x8000, 1, 1, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keys := graph.KeysAtPC(0x8010); len(keys) != 0 {
+		t.Fatalf("ordinary sibling entry was decoded into parent region: %v", keys)
+	}
+
+	options.InternalResumePCs = map[uint16]struct{}{0x8010: {}}
+	graph, err = DecodeFunction(image, 0, 0x8000, 1, 1, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keys := graph.KeysAtPC(0x8010); len(keys) != 1 {
+		t.Fatalf("internal resume entry keys = %v, want one local block", keys)
 	}
 }

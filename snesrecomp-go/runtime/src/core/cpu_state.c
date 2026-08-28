@@ -204,15 +204,23 @@ static RecompReturn (*dispatch_lookup_mirrored(CpuState *cpu, uint32 pc24,
 }
 
 static void record_dispatch(uint32 pc24, uint32 source_pc24, CpuState *cpu,
-                            int found, int mirrored) {
+                            int found, int mirrored, const char *label) {
     if (sr_runner_event_enabled(SR_EVENT_MASK_DYNAMIC_DISPATCH)) {
         SrRunnerEvent runner_event = {0};
+        int continuation = 0;
+        if ((source_pc24 & 0x00ffffffu) != 0x00ffffffu) {
+            uint8 source_bank = (uint8)(source_pc24 >> 16);
+            uint8 source_opcode = cpu_read8(
+                cpu, source_bank, (uint16)source_pc24);
+            continuation = source_opcode == 0x60u || source_opcode == 0x6bu;
+        }
         runner_event.type = SR_EVENT_DYNAMIC_DISPATCH;
         runner_event.frame_counter = snes_frame_counter >= 0
             ? (uint64)snes_frame_counter : 0u;
         runner_event.flags =
             (found ? SR_EVENT_DISPATCH_FOUND : 0u) |
-            (mirrored ? SR_EVENT_DISPATCH_MIRRORED : 0u);
+            (mirrored ? SR_EVENT_DISPATCH_MIRRORED : 0u) |
+            (continuation ? SR_EVENT_DISPATCH_CONTINUATION : 0u);
         runner_event.cpu_flags =
             (cpu->m_flag ? SR_CPU_STATE_M_FLAG : 0u) |
             (cpu->x_flag ? SR_CPU_STATE_X_FLAG : 0u) |
@@ -222,10 +230,16 @@ static void record_dispatch(uint32 pc24, uint32 source_pc24, CpuState *cpu,
         runner_event.source_pc24 = source_pc24 & 0x00ffffffu;
         runner_event.register_x = cpu->X;
         runner_event.stack_pointer = cpu->S;
-        runner_event.label = g_last_recomp_func;
+        runner_event.label = label;
         sr_runner_emit_event(g_snes, SR_EVENT_MASK_DYNAMIC_DISPATCH,
                              &runner_event);
     }
+}
+
+void cpu_trace_resolved_dispatch(CpuState *cpu, uint32 pc24,
+                                 uint32 source_pc24) {
+    record_dispatch(pc24 & 0xffffffu, source_pc24 & 0xffffffu, cpu, 1, 0,
+                    NULL);
 }
 
 static RecompReturn dispatch_once(CpuState *cpu, uint32 pc24,
@@ -238,7 +252,10 @@ static RecompReturn dispatch_once(CpuState *cpu, uint32 pc24,
     pc24 &= 0xffffffu;
     source_pc24 &= 0xffffffu;
     function = dispatch_lookup_mirrored(cpu, pc24, &mirrored);
-    record_dispatch(pc24, source_pc24, cpu, function != NULL, mirrored);
+#if !SNESRECOMP_SEMANTIC_DISPATCH_TRACE
+    record_dispatch(pc24, source_pc24, cpu, function != NULL, mirrored,
+                    g_last_recomp_func);
+#endif
 
     if (function == NULL && g_rtl_game_execution != NULL &&
         g_rtl_game_execution->recover_dispatch_miss != NULL &&

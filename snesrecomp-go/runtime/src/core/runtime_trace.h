@@ -19,6 +19,7 @@ typedef struct Snes Snes;
 #define SR_TRACE_CHANNEL_HWREAD 0x800
 #define SR_TRACE_CHANNEL_PPUMEM 0x1000
 #define SR_TRACE_CHANNEL_FRAME 0x2000
+#define SR_TRACE_CHANNEL_DISPATCH 0x4000
 
 int sr_trace_active(void);
 int sr_trace_channel_enabled(int channel_bit);

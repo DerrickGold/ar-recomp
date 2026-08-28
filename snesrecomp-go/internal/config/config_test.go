@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -13,7 +14,7 @@ bank = 1
 auto_vectors
 func Foo 8123 end:8234 entry_mx:0,1 exit_mx:1,0 tail_call:9000 entry_s_offset:-2
 name 018999 NamedTarget
-indirect_dispatch B8C0 26 idx:A tables:B8D0 ret:B8C2 sep:20
+indirect_dispatch B8C0 26 idx:A tables:B8D0 transfer:call ret:B8C2 sep:20
 rts_dispatch 9000 9010 9020
 hle_func 8123 HostFoo
 hle_func_if 8234 HostConditional HostConditionalEnabled
@@ -36,7 +37,7 @@ exclude_range B000 B100
 	if entry.Name != "Foo" || entry.Start != 0x8123 || entry.End == nil || *entry.End != 0x8234 || entry.EntryMX != (MX{M: 0, X: 1}) {
 		t.Fatalf("entry mismatch: %#v", entry)
 	}
-	if len(cfg.IndirectDispatch) != 1 || cfg.IndirectDispatch[0].IndexReg != "A" || cfg.IndirectDispatch[0].SEPMask != 0x20 {
+	if len(cfg.IndirectDispatch) != 1 || cfg.IndirectDispatch[0].IndexReg != "A" || cfg.IndirectDispatch[0].SEPMask != 0x20 || cfg.IndirectDispatch[0].Transfer != IndirectTransferCall {
 		t.Fatalf("indirect dispatch mismatch: %#v", cfg.IndirectDispatch)
 	}
 	if len(cfg.RTSDispatch) != 1 || len(cfg.RTSDispatch[0].Targets) != 2 {
@@ -45,5 +46,16 @@ exclude_range B000 B100
 	conditional := cfg.HLEFunctionsIf[0x8234]
 	if conditional.Function != "HostConditional" || conditional.Predicate != "HostConditionalEnabled" {
 		t.Fatalf("conditional HLE mismatch: %#v", conditional)
+	}
+}
+
+func TestIndirectDispatchRejectsContradictoryTransferAndReturn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bank00.cfg")
+	if err := os.WriteFile(path, []byte("bank = 00\nindirect_dispatch 8498 19 idx:X tables:849B transfer:tail ret:849B\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "transfer:tail cannot have ret:<pc>") {
+		t.Fatalf("Load error = %v, want contradictory transfer/return diagnostic", err)
 	}
 }
