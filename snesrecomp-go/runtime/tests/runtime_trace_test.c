@@ -87,6 +87,7 @@ int main(void) {
     dispatch_event.source_pc24 = 0x05db84u;
     dispatch_event.pc24 = 0x05c123u;
     dispatch_event.cpu_flags = SR_CPU_STATE_X_FLAG;
+    dispatch_event.flags = SR_EVENT_DISPATCH_TRAPPED;
     sr_runner_emit_event(&runner, SR_EVENT_MASK_DYNAMIC_DISPATCH,
                          &dispatch_event);
     sr_runner_emit_event(&runner, SR_EVENT_MASK_DYNAMIC_DISPATCH,
@@ -114,6 +115,7 @@ int main(void) {
           strstr(contents, "\"ch\":\"dispmiss\"") != NULL &&
           strstr(contents, "\"ch\":\"dispatch\"") != NULL &&
           strstr(contents, "\"site\":\"05DB84\"") != NULL &&
+          strstr(contents, "\"trapped\":1") != NULL &&
           strstr(contents, "\"hits\":2,\"final\":1") != NULL,
           "selected channels emit correlated JSONL records");
     check(remove(RUNTIME_TRACE_TEST_PATH) == 0, "remove trace fixture");

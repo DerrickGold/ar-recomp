@@ -237,7 +237,16 @@ func emitIndexedIndirectDispatch(context *codegen.Context, instruction *cpu65816
 
 	// Absolute-indirect single pointer: switch on the loaded pointer value.
 	if instruction.Mode == cpu65816.INDIR && len(instruction.DispatchTableBase) == 1 {
-		lines = append(lines, fmt.Sprintf("  uint16 _target = cpu_read16(cpu, cpu->PB, (uint16)0x%04x);  /* absolute indirect dispatch: switch on the loaded pointer */", uint16(instruction.Operand)))
+		if instruction.Opcode == 0xdc {
+			lines = append(lines,
+				fmt.Sprintf("  uint16 _pointer = (uint16)0x%04x;", uint16(instruction.Operand)),
+				"  uint16 _target_address = cpu_read16(cpu, 0x00, _pointer);",
+				"  uint8 _target_bank = cpu_read8(cpu, 0x00, (uint16)(_pointer + 2u));",
+				"  uint32 _target = ((uint32)_target_bank << 16) | (uint32)_target_address;  /* JML [abs]: 24-bit pointer in bank zero */",
+			)
+		} else {
+			lines = append(lines, fmt.Sprintf("  uint16 _target = cpu_read16(cpu, 0x00, (uint16)0x%04x);  /* JMP (abs): pointer in bank zero; destination remains in PB */", uint16(instruction.Operand)))
+		}
 		if instruction.DispatchTerminal {
 			lines = append(lines, sepDispatchLines("  ", 0x30)...)
 		}

@@ -344,7 +344,7 @@ static void trace_dispatch(const SrRunnerEvent *event) {
     const uint32_t target = event->pc24 & UINT32_C(0x00ffffff);
     const uint32_t event_flags = event->flags &
         (SR_EVENT_DISPATCH_FOUND | SR_EVENT_DISPATCH_MIRRORED |
-         SR_EVENT_DISPATCH_CONTINUATION);
+         SR_EVENT_DISPATCH_CONTINUATION | SR_EVENT_DISPATCH_TRAPPED);
     const uint32_t cpu_flags = event->cpu_flags &
         (SR_CPU_STATE_M_FLAG | SR_CPU_STATE_X_FLAG | SR_CPU_STATE_EMULATION);
     unsigned slot = dispatch_census_hash(source, target, event_flags,
@@ -388,7 +388,7 @@ static void trace_dispatch(const SrRunnerEvent *event) {
             "dispatch",
             ",\"site\":\"%06X\",\"target\":\"%06X\","
             "\"m\":%u,\"x\":%u,\"e\":%u,\"found\":%u,"
-            "\"mirrored\":%u,\"continuation\":%u,"
+            "\"mirrored\":%u,\"continuation\":%u,\"trapped\":%u,"
             "\"hits\":%llu,\"final\":0}\n",
             source, target,
             (cpu_flags & SR_CPU_STATE_M_FLAG) != 0u,
@@ -397,6 +397,7 @@ static void trace_dispatch(const SrRunnerEvent *event) {
             (event_flags & SR_EVENT_DISPATCH_FOUND) != 0u,
             (event_flags & SR_EVENT_DISPATCH_MIRRORED) != 0u,
             (event_flags & SR_EVENT_DISPATCH_CONTINUATION) != 0u,
+            (event_flags & SR_EVENT_DISPATCH_TRAPPED) != 0u,
             (unsigned long long)entry->hits);
     }
 }
@@ -435,7 +436,7 @@ static void flush_dispatch_census(void) {
             "dispatch",
             ",\"site\":\"%06X\",\"target\":\"%06X\","
             "\"m\":%u,\"x\":%u,\"e\":%u,\"found\":%u,"
-            "\"mirrored\":%u,\"continuation\":%u,"
+            "\"mirrored\":%u,\"continuation\":%u,\"trapped\":%u,"
             "\"hits\":%llu,\"final\":1}\n",
             entry->source_pc24, entry->target_pc24,
             (entry->cpu_flags & SR_CPU_STATE_M_FLAG) != 0u,
@@ -444,6 +445,7 @@ static void flush_dispatch_census(void) {
             (entry->event_flags & SR_EVENT_DISPATCH_FOUND) != 0u,
             (entry->event_flags & SR_EVENT_DISPATCH_MIRRORED) != 0u,
             (entry->event_flags & SR_EVENT_DISPATCH_CONTINUATION) != 0u,
+            (entry->event_flags & SR_EVENT_DISPATCH_TRAPPED) != 0u,
             (unsigned long long)entry->hits);
     }
     free(ordered);

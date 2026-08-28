@@ -258,6 +258,10 @@ int cpu_dispatch_has_entry(CpuState *cpu, uint32 pc24);
  * validation observes an edge independently of its lowering strategy. */
 void cpu_trace_resolved_dispatch(CpuState *cpu, uint32 pc24,
                                  uint32 source_pc24);
+/* Records the computed target of an unresolved indirect edge without
+ * executing it. Generated code calls this immediately before its hard trap. */
+void cpu_trace_trapped_dispatch(CpuState *cpu, uint32 pc24,
+                                uint32 source_pc24);
 void dbg_rts_trace(CpuState *cpu, uint32 source_pc, uint16 entry_stack,
                    uint16 return_stack, uint32 popped_pc, uint8 hrv);
 void dbg_oam_block_trace(CpuState *cpu, uint32 pc24);

@@ -206,6 +206,65 @@ rts_dispatch 8040 8050
 	}
 }
 
+func TestAnalyzeAuthoredShadowPrioritizesTaggedStreamHandlerDispatch(t *testing.T) {
+	root := t.TempDir()
+	image := make([]byte, 0x8000)
+	copy(image[0x0000:], []byte{
+		0xAC, 0x34, 0x12, // LDY $1234 -- variable stream pointer
+		0xB9, 0x00, 0x00, // LDA $0000,Y -- tagged stream word
+		0x10, 0x07, // BPL $800F -- non-negative word takes data path
+		0x85, 0x98, // STA $98 -- stage handler address
+		0x20, 0x20, 0x80, // JSR $8020 -- trampoline
+		0x80, 0xF1, // BRA $8000
+		0x60, // data-path return
+	})
+	copy(image[0x0020:], []byte{0x6C, 0x98, 0x00}) // JMP ($0098)
+	image[0x003F] = 0x60
+	copy(image[0x0040:], []byte{0xA9, 0x01, 0x00, 0x8D, 0x34, 0x12, 0x60})
+	image[0x004F] = 0x6B
+	copy(image[0x0050:], []byte{0xA9, 0x02, 0x00, 0x9D, 0x34, 0x12, 0x60})
+	romPath := filepath.Join(root, "fixture.sfc")
+	if err := os.WriteFile(romPath, image, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgDir := filepath.Join(root, "recomp")
+	writeTestFile(t, filepath.Join(cfgDir, "bank00.cfg"), "bank = 00\nfunc Interpreter 8000 entry_mx:0,0\n")
+
+	report, err := AnalyzeAuthoredShadow(ShadowAnalysisOptions{ROMPath: romPath, CFGDir: cfgDir, Jobs: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Summary.UniqueUnresolvedSites != 1 || report.Summary.LikelyBlockingUnresolvedSites != 1 || len(report.Unresolved) != 1 {
+		t.Fatalf("unexpected unresolved summary: %+v sites=%+v", report.Summary, report.Unresolved)
+	}
+	site := report.Unresolved[0]
+	if site.SitePC != 0x008020 || site.Classification != shadowUnresolvedTaggedStreamDispatch || site.Priority != shadowPriorityLikelyBlocker || site.StreamDispatch == nil {
+		t.Fatalf("unresolved site = %+v", site)
+	}
+	pattern := site.StreamDispatch
+	if pattern.InterpreterEntryPC != 0x008000 || pattern.StreamPointer != 0x1234 || pattern.TargetSlot != 0x98 || pattern.StreamWordLoadPC != 0x008003 || pattern.SignTestPC != 0x008006 || pattern.TargetSlotStorePC != 0x008008 || pattern.TrampolineCallPC != 0x00800A {
+		t.Fatalf("stream pattern = %+v", pattern)
+	}
+	wantCandidates := []uint32{0x008040, 0x008050}
+	if len(site.StructuralHandlerCandidates) != len(wantCandidates) {
+		t.Fatalf("structural candidates = %v, want %v", site.StructuralHandlerCandidates, wantCandidates)
+	}
+	for index, want := range wantCandidates {
+		if site.StructuralHandlerCandidates[index] != want {
+			t.Fatalf("structural candidates = %v, want %v", site.StructuralHandlerCandidates, wantCandidates)
+		}
+	}
+	var output bytes.Buffer
+	if err := WriteShadowReport(&output, report, "text", true); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"likely bring-up blockers=1", "class=tagged_stream_handler_dispatch", "$00:8040", "confirm with dispatch census"} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("verbose report missing %q:\n%s", want, output.String())
+		}
+	}
+}
+
 func TestSelectStaticProvenAutomaticDispatchFactsRejectsOpenAndObservedFacts(t *testing.T) {
 	proven := analysis.DispatchFact{
 		SitePC: 0x008100, Mnemonic: "RTS", Transfer: analysis.TransferResume,

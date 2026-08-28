@@ -125,6 +125,12 @@ snesrecomp-go/build/snesbuild dispatch-census --root . \
   --out-analysis saves/dispatch-analysis.json
 ```
 
+All three relative file paths in this command are resolved from `--root`.
+Still-unresolved indirect jumps record their computed target immediately before
+the existing hard trap, so the census can identify a bootstrap target without
+requiring a pre-existing `hle_dispatch`; these records are labeled as trapped
+and do not claim that the target executed.
+
 The evidence file is deterministic and separate from authored cfg. Candidate
 `func` lines in the text report are an escape hatch, not an automatic claim
 that the target is a normal routine; entry/continuation semantics still need

@@ -32,14 +32,14 @@ static uint8 continuation_host_return_valid;
 static unsigned runner_error_count;
 static SrRunnerErrorCode runner_error_code;
 static uint32_t runner_error_pc;
-static SrRunnerEvent dispatch_events[2];
+static SrRunnerEvent dispatch_events[3];
 static unsigned dispatch_event_count;
 
 void sr_runner_emit_event(Snes *snes, SrEventMask event_mask,
                           SrRunnerEvent *event) {
     (void)snes;
     if (event_mask == SR_EVENT_MASK_DYNAMIC_DISPATCH && event != NULL &&
-        dispatch_event_count < 2u) {
+        dispatch_event_count < 3u) {
         dispatch_events[dispatch_event_count++] = *event;
     }
 }
@@ -322,6 +322,46 @@ static void test_resolved_dispatch_trace_matches_registry(void) {
     g_sr_runner_event_mask = 0u;
 }
 
+static void test_trapped_dispatch_trace_queries_registry_without_execution(void) {
+    CpuState cpu;
+    cpu_state_init(&cpu, g_ram);
+    cpu.emulation = 0u;
+    cpu.m_flag = 0u;
+    cpu.x_flag = 1u;
+    cpu.X = 0x4567u;
+    cpu.S = 0x01d0u;
+    snes_frame_counter = 91;
+    dispatch_event_count = 0u;
+    handler_calls = 0u;
+    memset(dispatch_events, 0, sizeof(dispatch_events));
+    g_sr_runner_event_mask = SR_EVENT_MASK_DYNAMIC_DISPATCH;
+
+    cpu_trace_trapped_dispatch(&cpu, 0x018000u, 0x05db84u);
+    cpu_trace_trapped_dispatch(&cpu, 0x018111u, 0x05db84u);
+    cpu_trace_trapped_dispatch(&cpu, 0x818000u, 0x05db84u);
+
+    check(dispatch_event_count == 3u && handler_calls == 0u,
+          "trapped dispatch records registry evidence without executing");
+    if (dispatch_event_count == 3u) {
+        check(dispatch_events[0].flags ==
+                  (SR_EVENT_DISPATCH_FOUND | SR_EVENT_DISPATCH_TRAPPED),
+              "trapped generated target is marked found");
+        check(dispatch_events[1].flags == SR_EVENT_DISPATCH_TRAPPED,
+              "trapped missing target remains observable");
+        check(dispatch_events[2].flags ==
+                  (SR_EVENT_DISPATCH_FOUND | SR_EVENT_DISPATCH_MIRRORED |
+                   SR_EVENT_DISPATCH_TRAPPED),
+              "trapped mirrored target reports registry resolution");
+        check(dispatch_events[1].pc24 == 0x018111u &&
+                  dispatch_events[1].source_pc24 == 0x05db84u &&
+                  dispatch_events[1].register_x == 0x4567u &&
+                  dispatch_events[1].stack_pointer == 0x01d0u &&
+                  dispatch_events[1].frame_counter == 91u,
+              "trapped dispatch preserves target, site, and live state");
+    }
+    g_sr_runner_event_mask = 0u;
+}
+
 static void test_recovered_branch_handlers(void) {
     CpuState cpu;
     cpu_state_init(&cpu, g_ram);
@@ -386,6 +426,7 @@ int main(void) {
     test_stack_and_dispatch();
     test_dispatch_mx_variants();
     test_resolved_dispatch_trace_matches_registry();
+    test_trapped_dispatch_trace_queries_registry_without_execution();
     test_recovered_branch_handlers();
     test_recovered_handler_continuation();
     return failures == 0 ? 0 : 1;

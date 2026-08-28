@@ -287,7 +287,7 @@ func runAnalyze(args []string) error {
 func runDispatchCensus(args []string) error {
 	flags := flag.NewFlagSet("dispatch-census", flag.ContinueOnError)
 	root := flags.String("root", ".", "game project root")
-	tracePath := flags.String("trace", "", "runtime JSONL captured with SNESRECOMP_TRACE_CHANNELS=dispatch")
+	tracePath := flags.String("trace", "", "runtime JSONL captured with SNESRECOMP_TRACE_CHANNELS=dispatch, relative to --root unless absolute")
 	romPath := flags.String("rom", "", "optional ROM path, relative to project root")
 	format := flags.String("format", "text", "report format: text or json")
 	suggest := flags.Bool("suggest", true, "include candidate cfg func lines for missing generated bodies")
