@@ -11,6 +11,7 @@
 #include "action/action_effects.h"
 #include "action/action_bg_plan.h"
 #include "presentation_frame_generation.h"
+#include "render/hud_layout.h"
 #include "render/render_device.h"
 #include "snesrecomp/runner.h"
 
@@ -85,14 +86,6 @@ typedef struct FrameSlotHdEntry {
    * needs the same invalidation. */
   ArRenderTexture texture;
 } FrameSlotHdEntry;
-
-/* Scene-inspector click anchor shared by the renderer and the input hit-test.
- * It lives here so both sides use one type without exposing live game state. */
-typedef enum InspectorPresentationKind {
-  kInspectorPresentation_Base,
-  kInspectorPresentation_HudBg,
-  kInspectorPresentation_HudObj,
-} InspectorPresentationKind;
 
 typedef struct InspectorPresentationSelection {
   InspectorPresentationKind kind;
@@ -361,51 +354,6 @@ typedef struct FrameSlot {
  * main.c (it legitimately reads live g_ppu/g_settings — it IS the boundary,
  * not a present.c function). */
 void FrameSlot_Capture(FrameSlot *dst);
-
-/* --- Shared pure geometry (D4): no global reads, so either the present
- * thread (fed from a FrameSlot) or dev_tools.c's game-thread mouse hit-test
- * (fed from live state) can call these with the same
- * math and get the same answer for the same inputs. Defined in present.c. */
-
-typedef struct HudProjectionInputs {
-  ArRenderTexture hud_bg_texture;
-  ArRenderTexture hud_obj_texture;
-  int hud_scale_percent;   /* g_settings.hud_scale_percent */
-  int pixel_aspect;        /* g_active_pixel_aspect */
-  int snes_width;
-  int snes_height;
-  int visible_width;
-  uint8_t hud_split_height, hud_left_end, hud_right_start;
-  uint8_t hud_player_row_y, hud_left_only_y, extra_left_right;
-  /* Bottom row (exclusive) of the BG3 capture when it extends BELOW
-   * hud_split_height — diorama mode captures the whole authentic height so
-   * the act-title card and pause text (same layer as the HUD, just further
-   * down the screen) can be drawn as a flat overlay instead of vanishing
-   * behind the tilted scene planes. 0 (or <= hud_split_height) means the
-   * capture is the status bar only, as in flat mode. */
-  uint8_t hud_body_y1;
-  /* Resolved OBJ HUD-icon slot (computed by the caller from oam/highOam —
-   * see DevTools_InspectWindowPoint / FrameSlot's oam[]/high_oam[]). */
-  bool obj_icon_valid;
-  int obj_icon_x, obj_icon_y;
-} HudProjectionInputs;
-
-typedef struct HudPresentationChunk {
-  ArRenderTexture texture;
-  ArRenderRectI texture_source;
-  ArRenderRectI screen_source;
-  ArRenderRectI output_destination;
-  InspectorPresentationKind inspector_kind;
-  int inspector_x_bias;
-} HudPresentationChunk;
-
-/* 3 (top band) + 2 (player row) + 1 (enemy row) + 1 (BG3 body: act title /
- * pause text) + 1 (OBJ icon). */
-enum { kHudPresentationChunkCapacity = 8 };
-
-int BuildHudPresentationChunks(ArRenderRectI viewport,
-                               const HudProjectionInputs *inputs,
-                               HudPresentationChunk *chunks);
 
 ArRenderRectI ComputePresentationViewport(
     ArRenderDevice *device, bool ignore_aspect_ratio,

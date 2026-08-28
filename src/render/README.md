@@ -60,6 +60,9 @@ render-target scoping has been removed in favor of `ArRenderDevice_BeginTarget`.
 The terminal frame orchestrator and its public HUD/viewport contracts now use
 only render-device rectangles and extents; platform present remains owned by
 the host display layer.
+HUD projection is a pure `render/hud_layout` module shared by drawing and
+inspector hit-testing. Its inputs state authentic width and CRT pixel-aspect
+policy explicitly, so the reusable math has no game globals or SDL vocabulary.
 
 ## Current migration state
 

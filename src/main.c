@@ -113,9 +113,9 @@ ArRenderTexture g_texture;
 ArRenderTexture g_authentic_texture;
 ArRenderTexture g_hud_bg_texture;
 ArRenderTexture g_hud_obj_texture;
-/* InspectorPresentationKind/InspectorPresentationSelection now live in
- * present.h (D4) — shared between this file's InspectWindowPoint (live
- * hit-test) and present.c's renderer (fed from the FrameSlot snapshot). */
+/* InspectorPresentationKind comes from the portable HUD-layout contract;
+ * InspectorPresentationSelection lives in present.h. Both are shared by the
+ * live hit-test and the FrameSlot-fed renderer. */
 /* external: read by FrameSlot_Capture (frame_slot.c) */
 InspectorPresentationSelection g_scene_inspector_presentation;
 static bool g_window_hidden;  /* true while MINIMIZED or HIDDEN: skip present */

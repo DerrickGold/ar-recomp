@@ -418,6 +418,15 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_render_device COMMAND actraiser_render_device_test)
 
+    add_executable(actraiser_hud_layout_test
+        tests/hud_layout_test.c
+        src/render/hud_layout.c
+    )
+    target_include_directories(actraiser_hud_layout_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    add_test(NAME actraiser_hud_layout COMMAND actraiser_hud_layout_test)
+
     add_executable(actraiser_present_world_nav_test
         tests/present_world_nav_test.c
         src/present_world_nav.c
