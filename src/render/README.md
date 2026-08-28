@@ -125,8 +125,12 @@ and text batches through the device. SDL remains at that boundary solely for
 host events and the optional text-input window.
 Action heat refraction is a portable mesh warp rather than a custom shader; its
 viewport-sized texture is now device-owned and uses the scoped-target contract
-plus portable geometry for both its warped and fallback resolves. CRT still
-uses the SDL-free semantic contract in `crt_post.h`; frame orchestration owns
+plus portable geometry for both its warped and fallback resolves.
+Flat action-plane decorations now use device-owned streaming winner masks and
+a scoped effect target. The blend vocabulary carries their premultiplied-add
+resolve explicitly, so unsupported backends can reject that optional effect at
+resource creation without exposing a native texture or draw-state probe. CRT
+still uses the SDL-free semantic contract in `crt_post.h`; frame orchestration owns
 player policy while `platform/sdl/crt_post_sdl.c` owns the preferred-format
 scene target, shader formats, render state, and target-local presentation
 plumbing. The scene target is exposed to composition only as an opaque handle.
@@ -142,9 +146,10 @@ enhancements and retain their established fallbacks.
 
 The remaining migration should proceed in independently testable slices:
 
-1. Port the top-level presentation viewport/output contract and host UI/manual
-   draws, then remove native types from the complete presentation directory.
-2. Remove the SDL borrow/unwrap bridge after its final internal consumer is
+1. Port the remaining SIM 3D rim, shadow, and sprite-effect resources and
+   draws, keeping GPU-only depth/shader implementations behind platform ops.
+2. Remove native rectangle types from presentation-facing interfaces.
+3. Remove the SDL borrow/unwrap bridge after its final platform consumer is
    gone.
 
 Each slice should preserve the replay state hashes, pass synthetic and real-PPU

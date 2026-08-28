@@ -88,6 +88,9 @@ typedef enum ArRenderBlendMode {
   kArRenderBlendMode_Opaque,
   kArRenderBlendMode_Alpha,
   kArRenderBlendMode_Add,
+  /* Source is already multiplied by source alpha. Useful for accumulating an
+   * alpha-bearing effect target without dimming its RGB a second time. */
+  kArRenderBlendMode_AddPremultiplied,
   kArRenderBlendMode_Modulate,
   kArRenderBlendMode_Multiply,
 } ArRenderBlendMode;
