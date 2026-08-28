@@ -34,6 +34,7 @@
 #include "settings.h"
 #include "present_internal.h"
 #include "render/render_device.h"
+#include "render/render_output.h"
 #include "platform/sdl/render_sdl.h"
 
 #ifndef AR_SIM3D_TERRAIN_ELEVATION
@@ -2161,18 +2162,26 @@ static PresentationOutcome RenderSimProfile(
  * every game-owned pixel disappears together. This overlay is intentionally
  * additional for authentic pixels during intermediate steps: complete coverage
  * is more important than leaving bright host effects behind a hardware-exact
- * curve. NULL fills the complete current render target, including any projected
- * content outside the authentic 256x224 image and the aspect-ratio margins. */
-static void DrawSimMasterFade(const FrameSlot *slot) {
+ * curve. The temporary full-output scope covers the complete current target,
+ * including projected content outside the authentic image and its margins. */
+static bool DrawSimMasterFade(const FrameSlot *slot,
+                              ArRenderOutputFrame *output_frame) {
   uint8_t alpha = (slot->inidisp & 0x80)
       ? UINT8_MAX
       : SimWorldNavigationScene_MasterFadeAlpha(slot->inidisp & 0x0F);
-  if (!alpha) return;
-  SDL_SetRenderClipRect(g_renderer, NULL);
-  SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND);
-  SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, alpha);
-  SDL_RenderFillRect(g_renderer, NULL);
-  SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE);
+  if (!alpha) return true;
+  if (!ArRenderOutputFrame_EnterFullOutput(output_frame)) return false;
+  const ArRenderRectF area = {
+    0.0f, 0.0f,
+    (float)output_frame->output_width,
+    (float)output_frame->output_height,
+  };
+  const bool drawn = ArRenderDevice_DrawSolidRect(
+      &g_render_device, &area,
+      (ArRenderColorF){0.0f, 0.0f, 0.0f, alpha / 255.0f},
+      kArRenderBlendMode_Alpha);
+  const bool restored = ArRenderOutputFrame_RestoreViewport(output_frame);
+  return drawn && restored;
 }
 
 PresentationOutcome PresentSim3D(const FrameSlot *slot) {
@@ -2188,16 +2197,21 @@ PresentationOutcome PresentSim3D(const FrameSlot *slot) {
             (unsigned)slot->sim.projection_distance_x100);
   }
 
-  if (!SDL_SetRenderLogicalPresentation(
-          g_renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED) ||
-      !SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255) ||
-      !SDL_RenderClear(g_renderer)) {
+  const int aspect_width = slot->visible_width *
+      (slot->pixel_aspect == kPixelAspect_Crt43 ? 7 : 1);
+  const int aspect_height = slot->snes_height *
+      (slot->pixel_aspect == kPixelAspect_Crt43 ? 6 : 1);
+  const ArRenderColorF black = {0.0f, 0.0f, 0.0f, 1.0f};
+  ArRenderOutputFrame output_frame;
+  if (!ArRenderOutputFrame_BeginAspectFit(
+          &g_render_device, slot->ignore_aspect_ratio,
+          aspect_width, aspect_height, black, black, &output_frame)) {
     Sim3DPerformance_EndPresentation();
     return kPresentationOutcome_CoreFailure;
   }
-  SDL_Rect viewport = ComputePresentationViewport(
-      g_renderer, slot->ignore_aspect_ratio,
-      slot->pixel_aspect, slot->visible_width, slot->snes_height);
+  SDL_Rect viewport = {
+    0, 0, output_frame.viewport.w, output_frame.viewport.h,
+  };
   SDL_Rect source = { slot->visible_x0, 0,
                       slot->visible_width, slot->snes_height };
 
@@ -2206,6 +2220,7 @@ PresentationOutcome PresentSim3D(const FrameSlot *slot) {
   if (!ArRenderDevice_SetClipRect(&g_render_device, NULL))
     outcome = kPresentationOutcome_CoreFailure;
   if (!PresentationOutcome_IsUsable(outcome)) {
+    ArRenderOutputFrame_Abort(&output_frame);
     Sim3DPerformance_EndPresentation();
     return outcome;
   }
@@ -2218,9 +2233,11 @@ PresentationOutcome PresentSim3D(const FrameSlot *slot) {
   Sim3DPerformanceScope host_ui_performance =
       Sim3DPerformance_Begin(kSim3DPerformance_HostUi);
   PresentHudOverlayComposited(slot, viewport);
-  DrawSimMasterFade(slot);
+  if (!DrawSimMasterFade(slot, &output_frame))
+    outcome = kPresentationOutcome_CoreFailure;
   Sim3DPerformance_End(host_ui_performance);
-  ApplyLogicalPresentation(slot);
+  if (!ArRenderOutputFrame_Finish(&output_frame))
+    outcome = kPresentationOutcome_CoreFailure;
   Sim3DPerformance_EndPresentation();
   return outcome;
 }

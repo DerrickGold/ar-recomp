@@ -240,7 +240,8 @@ static void TestAspectFitAndLocalGeometry(void) {
   assert(backend.use_output_coordinates_count == 1);
   assert(backend.get_output_size_count == 1);
   assert(backend.clear_count == 1);
-  assert(backend.draw_geometry_count == 2);
+  /* Equal black margin/scene colours require only the ground draw. */
+  assert(backend.draw_geometry_count == 1);
   assert(backend.set_viewport_count == 3);
   assert(!backend.viewport_set);
   assert(backend.viewport.x == 160 && backend.viewport.y == 0);
@@ -255,7 +256,7 @@ static void TestFailureRestoresFullOutput(void) {
   FakeBackend backend = {
     .output_width = 1280,
     .output_height = 720,
-    .fail_geometry_call = 2,
+    .fail_geometry_call = 1,
   };
   assert(ArRenderDevice_Init(
       &g_render_device, &kFakeOps, &backend,
