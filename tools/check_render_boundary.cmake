@@ -73,7 +73,7 @@ set(_native_resource_violations "")
 foreach(_file IN LISTS _resource_owner_files)
     file(READ "${_file}" _contents)
     if(_contents MATCHES
-       "SDL_Texture[ \t]*\\*[ \t]*(g_(diorama_textures|sim_obj_atlas_texture|sim3d_layer_textures|sim3d_flat_texture)|s_sim_(underlay_texture|underlay_blur_texture|canvas_texture))")
+       "SDL_Texture[ \t]*\\*[ \t]*(g_(diorama_textures|sim_obj_atlas_texture|sim3d_layer_textures|sim3d_flat_texture)|s_sim_(underlay_texture|underlay_blur_texture|canvas_texture)|s_action_heat_target)")
         list(APPEND _native_resource_violations "${_file}")
     endif()
 endforeach()

@@ -79,21 +79,24 @@ shader formats, native state, binding, and lifetime live in
 `platform/sdl/diorama_effect_backend_sdl.c`. SIM shadow blur follows the same
 pattern through `sim/sim_shadow_effect_backend.h`; its separable seven-tap SDL
 implementation is isolated in `platform/sdl/sim_shadow_effect_backend_sdl.c`.
-Heat haze and CRT still need equivalent backend boundaries. The bridge is a
-transition aid, not part of a game-facing contract. New renderer-facing code
-must not add another borrowed native resource.
+Action heat refraction is a portable mesh warp rather than a custom shader; its
+viewport-sized texture is now device-owned and uses the scoped-target contract
+plus portable geometry for both its warped and fallback resolves. CRT still
+needs an equivalent effect boundary. The bridge is a transition aid, not part
+of a game-facing contract. New renderer-facing code must not add another
+borrowed native resource.
 
 Temporary target composition now has a portable scoped-target extension. It
 captures and restores the caller's target, viewport, and clip, and reports a
 distinct state-loss result when restoration fails. The ROM skybox fill pass is
-the first consumer, followed by the diorama crisp-AA supersample pass; backends
-without the optional capability omit these enhancements and retain their
-established fallbacks.
+the first consumer, followed by the diorama crisp-AA supersample and action
+heat-refraction passes; backends without the optional capability omit these
+enhancements and retain their established fallbacks.
 
 The remaining migration should proceed in independently testable slices:
 
-1. Extend backend custom-effect ownership to heat haze and CRT postprocess,
-   using the diorama and SIM shadow effect boundaries as established patterns.
+1. Move CRT shader and target ownership behind a backend postprocess contract,
+   using the established effect and scoped-target boundaries.
 2. Move the remaining diorama compositor implementation and transient effect
    resource ownership under `src/platform/<backend>` while retaining a
    capability-gated baseline path.
