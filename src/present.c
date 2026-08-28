@@ -45,7 +45,6 @@
 #include "session_fatal.h"
 #include "presentation_geometry.h"
 #include "presentation_upload_mirror.h"
-#include "platform/sdl/render_sdl.h"
 #include "render/render_output.h"
 
 
@@ -61,9 +60,9 @@ extern ArRenderTexture g_sim_obj_atlas_texture;
 extern ArRenderTexture g_sim3d_layer_textures[kSim3DPlane_Count];
 extern ArRenderTexture g_sim3d_flat_texture;
 static uint32_t s_diorama_uploaded_plane_mask;
-static SDL_Texture *s_action_bg1_mask_texture;
-static SDL_Texture *s_action_bg2_mask_texture;
-static SDL_Texture *s_action_plane_effect_target;
+static ArRenderTexture s_action_bg1_mask_texture;
+static ArRenderTexture s_action_bg2_mask_texture;
+static ArRenderTexture s_action_plane_effect_target;
 static int s_action_plane_effect_w, s_action_plane_effect_h;
 static bool s_action_plane_blend_supported = true;
 static ArRenderTexture s_action_heat_target;
@@ -256,7 +255,8 @@ static void DisableActionPlaneEffect(const char *operation) {
   fprintf(stderr,
           "[action-fx] flat BG-local effect unavailable at %s (%s); "
           "disabled\n",
-          operation ? operation : "unknown operation", SDL_GetError());
+          operation ? operation : "unknown operation",
+          ArRenderDevice_LastError(&g_render_device));
 }
 
 SDL_FRect ToFRect(SDL_Rect r) {
@@ -831,27 +831,29 @@ static void PresentSceneInspector(const FrameSlot *slot, SDL_Rect viewport) {
       "SCENE INSPECTOR", SceneInspector_PanelText(), (SDL_Point){ px, py });
 }
 
-static void UploadActionWinnerMask(SDL_Texture **texture, int mirror,
+static void UploadActionWinnerMask(ArRenderTexture *texture, int mirror,
                                    const uint8_t *pixels,
                                    int pitch_bytes,
                                    const FrameSlot *slot) {
   if (!texture || !pixels || !slot || mirror < 0 ||
       mirror >= kActionUploadSurface_Count || pitch_bytes <= 0)
     return;
-  if (!*texture) {
-    *texture = SDL_CreateTexture(
-        g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-        kFrameSlotLayerTextureWidth, kFrameSlotAuthenticHeight);
-    if (*texture) {
-      SDL_SetTextureScaleMode(*texture, SDL_SCALEMODE_NEAREST);
-      SDL_SetTextureBlendMode(*texture, SDL_BLENDMODE_MUL);
-    }
+  if (!ArRenderTexture_IsValid(*texture)) {
+    const ArRenderTextureDesc desc = {
+      .width = kFrameSlotLayerTextureWidth,
+      .height = kFrameSlotAuthenticHeight,
+      .format = kArRenderPixelFormat_Argb8888,
+      .usage = kArRenderTextureUsage_Streaming,
+      .filter = kArRenderFilter_Nearest,
+      .blend = kArRenderBlendMode_Multiply,
+    };
+    (void)ArRenderDevice_CreateTexture(
+        &g_render_device, &desc, texture);
   }
-  if (*texture) {
+  if (ArRenderTexture_IsValid(*texture)) {
     const SDL_Rect mask = {0, 0, slot->snes_width, slot->snes_height};
     UploadChangedSurface(
-        ArSdlRenderBackend_BorrowTexture(*texture),
-        &s_action_upload_mirrors[mirror], pixels,
+        *texture, &s_action_upload_mirrors[mirror], pixels,
         mask.w, mask.h, pitch_bytes,
         mask.x, mask.y);
   }
@@ -1610,39 +1612,40 @@ static void DrawActionDioramaPlaneEffect(
   }
 }
 
-static SDL_Texture *EnsureActionPlaneEffectTarget(int w, int h) {
-  if (!g_renderer || w <= 0 || h <= 0) return NULL;
-  if (s_action_plane_effect_target && s_action_plane_effect_w == w &&
+static ArRenderTexture EnsureActionPlaneEffectTarget(int w, int h) {
+  if (!ArRenderDevice_IsReady(&g_render_device) || w <= 0 || h <= 0)
+    return ArRenderTexture_Invalid();
+  if (ArRenderTexture_IsValid(s_action_plane_effect_target) &&
+      s_action_plane_effect_w == w &&
       s_action_plane_effect_h == h)
     return s_action_plane_effect_target;
-  SDL_DestroyTexture(s_action_plane_effect_target);
-  s_action_plane_effect_target = SDL_CreateTexture(
-      g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET, w, h);
+  ArRenderDevice_DestroyTexture(
+      &g_render_device, s_action_plane_effect_target);
+  s_action_plane_effect_target = ArRenderTexture_Invalid();
   s_action_plane_effect_w = w;
   s_action_plane_effect_h = h;
-  if (s_action_plane_effect_target) {
-    SDL_SetTextureScaleMode(
-        s_action_plane_effect_target, SDL_SCALEMODE_NEAREST);
-    SDL_BlendMode applied = SDL_BLENDMODE_INVALID;
-    if (!SDL_SetTextureBlendMode(
-            s_action_plane_effect_target,
-            SDL_BLENDMODE_ADD_PREMULTIPLIED) ||
-        !SDL_GetTextureBlendMode(s_action_plane_effect_target, &applied) ||
-        applied != SDL_BLENDMODE_ADD_PREMULTIPLIED) {
-      SDL_DestroyTexture(s_action_plane_effect_target);
-      s_action_plane_effect_target = NULL;
-      DisableActionPlaneEffect("premultiplied blend verification");
-    }
+  const ArRenderTextureDesc desc = {
+    .width = w,
+    .height = h,
+    .format = kArRenderPixelFormat_Argb8888,
+    .usage = kArRenderTextureUsage_Target,
+    .filter = kArRenderFilter_Nearest,
+    .blend = kArRenderBlendMode_AddPremultiplied,
+  };
+  if (!ArRenderDevice_CreateTexture(
+          &g_render_device, &desc, &s_action_plane_effect_target)) {
+    DisableActionPlaneEffect("premultiplied target creation");
   }
   return s_action_plane_effect_target;
 }
 
 static void DrawActionPlaneEffectFlat(
     const FrameSlot *slot, SDL_Rect viewport, uint8_t render_layer,
-    bool mask_valid, SDL_Texture *mask_texture, const char *label) {
+    bool mask_valid, ArRenderTexture mask_texture, const char *label) {
   if (!slot || !mask_valid ||
       !slot->action_scene_effects.decoration_visible_count ||
-      !mask_texture || !s_action_plane_blend_supported ||
+      !ArRenderTexture_IsValid(mask_texture) ||
+      !s_action_plane_blend_supported ||
       !EffectRendererAvailable())
     return;
   ActionEffectProjectionContext projection = {
@@ -1667,27 +1670,19 @@ static void DrawActionPlaneEffectFlat(
           ActionEffectProjection_ProjectPoint, &projection, geometry) ||
       !geometry->index_count)
     return;
-  SDL_Texture *target =
+  const ArRenderTexture target =
       EnsureActionPlaneEffectTarget(viewport.w, viewport.h);
-  if (!target) return;
+  if (!ArRenderTexture_IsValid(target)) return;
 
-  SDL_Texture *saved_target = SDL_GetRenderTarget(g_renderer);
-  SDL_BlendMode saved_blend = SDL_BLENDMODE_INVALID;
-  Uint8 saved_r = 0, saved_g = 0, saved_b = 0, saved_a = 0;
-  if (!SDL_GetRenderDrawBlendMode(g_renderer, &saved_blend) ||
-      !SDL_GetRenderDrawColor(
-          g_renderer, &saved_r, &saved_g, &saved_b, &saved_a)) {
-    DisableActionPlaneEffect("render-state capture");
-    return;
-  }
-  if (!SDL_SetRenderTarget(g_renderer, target)) {
+  ArRenderTargetState target_state = {0};
+  const ArRenderTargetBeginResult begin = ArRenderDevice_BeginTarget(
+      &g_render_device, target, &target_state);
+  if (begin != kArRenderTargetBegin_Ready) {
     DisableActionPlaneEffect("effect-target bind");
     return;
   }
-  bool target_ready =
-      SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE) &&
-      SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 0) &&
-      SDL_RenderClear(g_renderer);
+  const bool target_ready = ArRenderDevice_Clear(
+      &g_render_device, (ArRenderColorF){0.0f, 0.0f, 0.0f, 0.0f});
   if (!target_ready)
     DisableActionPlaneEffect("effect-target clear");
   EffectBatch batch = {
@@ -1703,38 +1698,30 @@ static void DrawActionPlaneEffectFlat(
   if (target_ready)
     submitted = SubmitEffectBatch(&batch, kArRenderBlendMode_Add);
   if (submitted && s_action_plane_blend_supported) {
-    SDL_BlendMode applied = SDL_BLENDMODE_INVALID;
-    if (!SDL_SetTextureBlendMode(
-            mask_texture, SDL_BLENDMODE_MUL) ||
-        !SDL_GetTextureBlendMode(mask_texture, &applied) ||
-        applied != SDL_BLENDMODE_MUL) {
-      DisableActionPlaneEffect("multiply blend verification");
-    } else {
-      const SDL_FRect src = {
-        (float)slot->visible_x0, 0.0f,
-        (float)slot->visible_width, (float)slot->snes_height,
-      };
-      const SDL_FRect dst = {
-        0.0f, 0.0f, (float)viewport.w, (float)viewport.h,
-      };
-      masked = SDL_RenderTexture(
-          g_renderer, mask_texture, &src, &dst);
-      if (!masked) DisableActionPlaneEffect("winner-mask draw");
-    }
+    const ArRenderRectF src = {
+      (float)slot->visible_x0, 0.0f,
+      (float)slot->visible_width, (float)slot->snes_height,
+    };
+    const ArRenderRectF dst = {
+      0.0f, 0.0f, (float)viewport.w, (float)viewport.h,
+    };
+    const ArRenderDrawState mask_state = {
+      .flags = kArRenderDrawState_Blend,
+      .blend = kArRenderBlendMode_Multiply,
+    };
+    masked = ArRenderDevice_DrawTextureWithState(
+        &g_render_device, mask_texture, &src, &dst, &mask_state);
+    if (!masked) DisableActionPlaneEffect("winner-mask draw");
   }
-  const bool target_restored = SDL_SetRenderTarget(g_renderer, saved_target);
-  const bool blend_restored =
-      SDL_SetRenderDrawBlendMode(g_renderer, saved_blend);
-  const bool color_restored = SDL_SetRenderDrawColor(
-      g_renderer, saved_r, saved_g, saved_b, saved_a);
-  if (!target_restored || !blend_restored || !color_restored) {
+  if (!ArRenderDevice_EndTarget(&g_render_device, &target_state)) {
     DisableActionPlaneEffect("render-state restore");
     return;
   }
   bool composited = false;
   if (masked && s_action_plane_blend_supported) {
-    const SDL_FRect dst = ToFRect(viewport);
-    composited = SDL_RenderTexture(g_renderer, target, NULL, &dst);
+    const ArRenderRectF dst = ToRenderRectF(viewport);
+    composited = ArRenderDevice_DrawTexture(
+        &g_render_device, target, NULL, &dst);
     if (!composited) DisableActionPlaneEffect("masked-target composite");
   }
   static bool announced[kActionEffectRenderLayer_Count];
@@ -1920,13 +1907,14 @@ void PresentRendererResources_Reset(void) {
   ArRenderDevice_DestroyTexture(&g_render_device, s_hud_composite_texture);
   s_hud_composite_texture = ArRenderTexture_Invalid();
   s_hud_composite_w = s_hud_composite_h = 0;
-  SDL_DestroyTexture(s_action_bg1_mask_texture);
-  SDL_DestroyTexture(s_action_bg2_mask_texture);
-  SDL_DestroyTexture(s_action_plane_effect_target);
+  ArRenderDevice_DestroyTexture(&g_render_device, s_action_bg1_mask_texture);
+  ArRenderDevice_DestroyTexture(&g_render_device, s_action_bg2_mask_texture);
+  ArRenderDevice_DestroyTexture(
+      &g_render_device, s_action_plane_effect_target);
   ArRenderDevice_DestroyTexture(&g_render_device, s_action_heat_target);
-  s_action_bg1_mask_texture = NULL;
-  s_action_bg2_mask_texture = NULL;
-  s_action_plane_effect_target = NULL;
+  s_action_bg1_mask_texture = ArRenderTexture_Invalid();
+  s_action_bg2_mask_texture = ArRenderTexture_Invalid();
+  s_action_plane_effect_target = ArRenderTexture_Invalid();
   s_action_plane_effect_w = s_action_plane_effect_h = 0;
   s_action_plane_blend_supported = true;
   s_action_heat_target = ArRenderTexture_Invalid();

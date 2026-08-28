@@ -138,6 +138,14 @@ int main(void) {
   };
   ArRenderTexture target = ArRenderTexture_Invalid();
   assert(ArRenderDevice_CreateTexture(&device, &target_desc, &target));
+  ArRenderTextureDesc premultiplied_desc = target_desc;
+  premultiplied_desc.blend = kArRenderBlendMode_AddPremultiplied;
+  ArRenderTexture premultiplied_target = ArRenderTexture_Invalid();
+  assert(ArRenderDevice_CreateTexture(
+      &device, &premultiplied_desc, &premultiplied_target));
+  AssertTextureState(
+      ArSdlRenderBackend_UnwrapTexture(premultiplied_target),
+      1.0f, 1.0f, 1.0f, 1.0f, SDL_BLENDMODE_ADD_PREMULTIPLIED);
   const SDL_Rect saved_viewport = {1, 2, 12, 11};
   const SDL_Rect saved_clip = {3, 4, 6, 5};
   assert(SDL_SetRenderViewport(renderer, &saved_viewport));
@@ -173,6 +181,7 @@ int main(void) {
   assert(!memcmp(&restored, &saved_clip, sizeof(restored)));
 
   ArRenderDevice_DestroyTexture(&device, target);
+  ArRenderDevice_DestroyTexture(&device, premultiplied_target);
   ArRenderDevice_DestroyTexture(&device, texture);
   ArRenderDevice_Reset(&device);
   SDL_DestroyRenderer(renderer);
