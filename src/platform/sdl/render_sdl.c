@@ -446,6 +446,10 @@ bool ArSdlRenderBackend_Bind(ArRenderDevice *device,
                              ArSdlRenderBackend *backend,
                              SDL_Renderer *renderer) {
   if (!device || !backend || !renderer) return false;
+  if (ArRenderDevice_IsReady(device)) {
+    SDL_SetError("render device already has a backend");
+    return false;
+  }
   memset(backend, 0, sizeof(*backend));
   backend->renderer = renderer;
 
@@ -493,6 +497,10 @@ bool ArSdlRenderBackend_CreateForWindow(ArRenderDevice *device,
     SDL_SetError("invalid SDL render backend creation request");
     return false;
   }
+  if (ArRenderDevice_IsReady(device)) {
+    SDL_SetError("render device already has a backend");
+    return false;
+  }
 
   ArSdlRenderBackend *backend = calloc(1, sizeof(*backend));
   if (!backend) {
@@ -535,8 +543,10 @@ bool ArSdlRenderBackend_CreateForWindow(ArRenderDevice *device,
 }
 
 void ArSdlRenderBackend_Destroy(ArRenderDevice *device) {
-  if (!device || device->ops != &kSdlRenderOps || !device->context) {
-    ArRenderDevice_Reset(device);
+  if (!device) return;
+  if (device->ops != &kSdlRenderOps || !device->context) {
+    if (ArRenderDevice_IsReady(device))
+      SDL_SetError("render device is not owned by the SDL backend");
     return;
   }
   ArSdlRenderBackend *backend = device->context;

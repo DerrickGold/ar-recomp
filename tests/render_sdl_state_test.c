@@ -39,6 +39,13 @@ int main(void) {
   ArSdlRenderBackend backend = {0};
   ArRenderDevice device = {0};
   assert(ArSdlRenderBackend_Bind(&device, &backend, renderer));
+  ArSdlRenderBackend duplicate_backend = {0};
+  const ArRenderBackendOps *bound_ops = device.ops;
+  void *bound_context = device.context;
+  assert(!ArSdlRenderBackend_Bind(
+      &device, &duplicate_backend, renderer));
+  assert(device.ops == bound_ops && device.context == bound_context);
+  assert(duplicate_backend.renderer == NULL);
   assert(SDL_SetRenderLogicalPresentation(
       renderer, 8, 8, SDL_LOGICAL_PRESENTATION_LETTERBOX));
   int output_width = 0;
@@ -224,7 +231,11 @@ int main(void) {
   ArRenderDevice_DestroyTexture(&device, target);
   ArRenderDevice_DestroyTexture(&device, premultiplied_target);
   ArRenderDevice_DestroyTexture(&device, texture);
-  ArRenderDevice_Reset(&device);
+  ArSdlRenderBackend_Destroy(&device);
+  assert(!ArRenderDevice_IsReady(&device));
+  /* Bind borrows focused-test renderers; destroying the adapter must leave the
+   * externally owned renderer alive. */
+  assert(SDL_SetRenderDrawColor(renderer, 1, 2, 3, 255));
   SDL_DestroyRenderer(renderer);
   SDL_DestroySurface(surface);
   puts("render_sdl_state_test: ok");
