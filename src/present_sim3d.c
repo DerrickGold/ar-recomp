@@ -91,19 +91,9 @@ typedef struct SimBillboardPass {
    * rely on that). A caller that set a mode and then called in had it silently
    * overwritten before anything was drawn — which is exactly how the rim-light
    * mask pass lost its blend mode and stopped trimming the rim. */
-  SDL_BlendMode blend;
+  ArRenderBlendMode blend;
+  ArRenderColorF tint;
 } SimBillboardPass;
-
-/* Defined with the rim-light code below, since the capability it latches belongs
- * to that effect; declared here because the billboard draw is the only caller. */
-/* Single source of truth for "what blend mode does this draw use", so the
- * caller-side pass setup and the callee-side set cannot disagree. A NULL pass is
- * the ordinary coloured draw. */
-static SDL_BlendMode SimBillboardPassBlend(const SimBillboardPass *pass) {
-  return (pass && pass->blend != SDL_BLENDMODE_INVALID)
-      ? pass->blend
-      : SDL_BLENDMODE_BLEND;
-}
 
 /* Strict "a must be drawn after b" for the in-band painter sort. Strict, not
  * "greater or equal": returning true for equal keys would make the insertion
@@ -206,7 +196,7 @@ typedef struct SimObjectDrawFilters {
   float minimum_depth, maximum_depth;
 } SimObjectDrawFilters;
 
-static void DrawSimObjectPriorityFiltered(
+static bool DrawSimObjectPriorityFiltered(
     const SimObjectDrawScene *scene, int priority,
     const SimObjectDrawFilters *filters,
     const SimBillboardPass *pass) {
@@ -225,15 +215,8 @@ static void DrawSimObjectPriorityFiltered(
   float maximum_depth = filters->maximum_depth;
   if (!ArRenderTexture_IsValid(g_sim_obj_atlas_texture) ||
       !slot->sim.atlas_valid)
-    return;
-  /* Ordinary billboards use the atlas descriptor's alpha blend through the
-   * portable device. Rim passes still require the native custom mask mode;
-   * reject those rather than drawing with whatever mode happened to be set. */
-  if (pass &&
-      (!SimApplyAtlasBlendMode(SimBillboardPassBlend(pass)) ||
-       !SDL_SetTextureAlphaMod(
-           NativeTexture(g_sim_obj_atlas_texture), 255)))
-    return;
+    return false;
+  bool success = true;
   float flat_scale_x = (float)viewport.w / source.w;
   float flat_scale_y = (float)viewport.h / source.h;
 
@@ -439,9 +422,20 @@ static void DrawSimObjectPriorityFiltered(
      * implementation of the same angle, reachable by nothing. */
     bool drawn = false;
     if (pass) {
-      drawn = SDL_RenderTexture(
-          g_renderer, NativeTexture(g_sim_obj_atlas_texture),
-          &atlas, &destination);
+      const ArRenderRectF portable_atlas = {
+        atlas.x, atlas.y, atlas.w, atlas.h,
+      };
+      const ArRenderRectF portable_destination = {
+        destination.x, destination.y, destination.w, destination.h,
+      };
+      const ArRenderDrawState pass_state = {
+        .flags = kArRenderDrawState_Tint | kArRenderDrawState_Blend,
+        .tint = pass->tint,
+        .blend = pass->blend,
+      };
+      drawn = ArRenderDevice_DrawTextureWithState(
+          &g_render_device, g_sim_obj_atlas_texture,
+          &portable_atlas, &portable_destination, &pass_state);
     } else {
       const ArRenderRectF portable_atlas = {
         atlas.x, atlas.y, atlas.w, atlas.h,
@@ -460,11 +454,14 @@ static void DrawSimObjectPriorityFiltered(
     }
     if (drawn) {
       Sim3DPerformance_AddDraw(0, 0);
+    } else {
+      success = false;
     }
   }
+  return success;
 }
 
-static void DrawSimObjectPriorityTerrain(
+static bool DrawSimObjectPriorityTerrain(
     const FrameSlot *slot, int priority, SimObjectTierFilter tier_filter,
     SimObjectTerrainFilter terrain_filter,
     bool project_world,
@@ -478,7 +475,7 @@ static void DrawSimObjectPriorityTerrain(
     tier_filter, kSimObjectOverhead_All, kSimObjectSelection_Exclude,
     terrain_filter, false, 0.0f, 0.0f,
   };
-  DrawSimObjectPriorityFiltered(&scene, priority, &filters, pass);
+  return DrawSimObjectPriorityFiltered(&scene, priority, &filters, pass);
 }
 
 static void DrawSimObjectPriority(
@@ -608,86 +605,50 @@ static void DrawSimSelectionOverlays(
  * Restricted to world billboards by construction: the pass loop skips
  * map-plane art, and the band is composited immediately after its own priority
  * band, so it can never light the ground, the HUD, or a later band's sprite. */
-static SDL_Texture *s_sim_rim_texture;
+static ArRenderTexture s_sim_rim_texture;
 static int s_sim_rim_w, s_sim_rim_h;
 static bool s_sim_rim_unavailable;
 /* Reads true until a set actually fails. Settings sees this only through the
  * atomic, read-only capability accessor below. */
 SDL_AtomicInt s_sim_rim_mask_supported = { .value = 1 };
 
-static bool RestoreTextureBlendAndAlpha(
-    SDL_Texture *texture, SDL_BlendMode blend, Uint8 alpha) {
-  bool restored = SDL_SetTextureAlphaMod(texture, alpha);
-  restored = SDL_SetTextureBlendMode(texture, blend) && restored;
-  return restored;
-}
+static const ArRenderColorF kSimRimColor = {
+  1.0f, 244.0f / 255.0f, 214.0f / 255.0f, 1.0f,
+};
 
-static bool RestoreSimAtlasState(
-    SDL_BlendMode blend, Uint8 r, Uint8 g, Uint8 b, Uint8 alpha) {
-  SDL_Texture *atlas = NativeTexture(g_sim_obj_atlas_texture);
-  bool restored = SDL_SetTextureColorMod(atlas, r, g, b);
-  restored = SDL_SetTextureAlphaMod(atlas, alpha) && restored;
-  restored = SDL_SetTextureBlendMode(atlas, blend) && restored;
-  return restored;
-}
-
-static void DisableSimRimTexture(void) {
-  SDL_DestroyTexture(s_sim_rim_texture);
-  s_sim_rim_texture = NULL;
-  s_sim_rim_w = s_sim_rim_h = 0;
-  s_sim_rim_unavailable = true;
-  SDL_SetAtomicInt(&s_sim_rim_mask_supported, 0);
-}
-
-static const SDL_Color kSimRimColor = { 255, 244, 214, 255 };
-
-static SDL_Texture *EnsureSimRimTexture(int w, int h) {
-  if (!g_renderer || w <= 0 || h <= 0) return NULL;
-  if (s_sim_rim_texture && s_sim_rim_w == w && s_sim_rim_h == h)
+static ArRenderTexture EnsureSimRimTexture(int w, int h) {
+  if (!ArRenderDevice_IsReady(&g_render_device) || w <= 0 || h <= 0)
+    return ArRenderTexture_Invalid();
+  if (ArRenderTexture_IsValid(s_sim_rim_texture) &&
+      s_sim_rim_w == w && s_sim_rim_h == h)
     return s_sim_rim_texture;
-  if (s_sim_rim_unavailable) return NULL;
-  if (s_sim_rim_texture) SDL_DestroyTexture(s_sim_rim_texture);
-  s_sim_rim_texture = CreateSimShadowTarget(w, h);
+  if (s_sim_rim_unavailable) return ArRenderTexture_Invalid();
+  ArRenderDevice_DestroyTexture(&g_render_device, s_sim_rim_texture);
+  s_sim_rim_texture = ArRenderTexture_Invalid();
+  const ArRenderTextureDesc desc = {
+    .width = w,
+    .height = h,
+    .format = kArRenderPixelFormat_Argb8888,
+    .usage = kArRenderTextureUsage_Target,
+    .filter = kArRenderFilter_Linear,
+    .blend = kArRenderBlendMode_Alpha,
+  };
+  (void)ArRenderDevice_CreateTexture(
+      &g_render_device, &desc, &s_sim_rim_texture);
   s_sim_rim_w = w;
   s_sim_rim_h = h;
-  if (!s_sim_rim_texture) {
+  if (!ArRenderTexture_IsValid(s_sim_rim_texture)) {
     s_sim_rim_unavailable = true;
     fprintf(stderr,
             "[sim3d-rim] rim target unavailable; optional rim light disabled "
             "for this renderer: %s\n",
-            SDL_GetError());
+            ArRenderDevice_LastError(&g_render_device));
   }
   return s_sim_rim_texture;
 }
 
-/* Multiplies destination alpha by source alpha while leaving destination
- * colour, i.e. keeps only the overlap. Applied to the offset silhouette with
- * the sprite at its true position, this trims the rim band back inside the
- * sprite so it can never touch a background pixel.
- *
- * W4-2: SDL_ComposeCustomBlendMode only COMPOSES a value — SDL_blendmode.h
- * documents that "not all renderers support" custom modes and directs callers to
- * the per-renderer support notes, and the composing call itself cannot report
- * that. Support is discovered only when the mode is handed to
- * SDL_SetTextureBlendMode, whose bool return we must therefore check. Until that
- * happens the mode is "composed but unproven", which is why this returns
- * SDL_BLENDMODE_INVALID once a set has actually failed rather than optimistically
- * forever. */
-static SDL_BlendMode SimRimMaskBlend(void) {
-  if (!Present_SimRimMaskSupported()) return SDL_BLENDMODE_INVALID;
-  static SDL_BlendMode mode = SDL_BLENDMODE_INVALID;
-  if (mode == SDL_BLENDMODE_INVALID)
-    mode = SDL_ComposeCustomBlendMode(
-        SDL_BLENDFACTOR_ZERO, SDL_BLENDFACTOR_ONE, SDL_BLENDOPERATION_ADD,
-        SDL_BLENDFACTOR_ZERO, SDL_BLENDFACTOR_SRC_ALPHA,
-        SDL_BLENDOPERATION_ADD);
-  return mode;
-}
-
-/* Applies a pass's blend mode and reports whether the renderer accepted it.
- * A custom mode that the backend cannot honour must disable the effect rather
- * than silently draw with whatever mode was set before — that would produce
- * exactly the untrimmed silhouette W4-1 fixed. */
+/* Transitional native state helper used only by the remaining rotated SIM
+ * effect sprites. Rim billboards submit scoped portable blend state now. */
 bool SimApplyAtlasBlendMode(SDL_BlendMode blend) {
   if (SDL_SetTextureBlendMode(
           NativeTexture(g_sim_obj_atlas_texture), blend))
@@ -751,31 +712,11 @@ static PresentationOutcome DrawSimRimLight(
    * full-output target anyway; three of four bands were empty on every frame
    * in the representative replay. */
   if (!any_rim) return kPresentationOutcome_Complete;
-  SDL_Texture *rim = EnsureSimRimTexture(viewport.w, viewport.h);
-  SDL_BlendMode mask_blend = SimRimMaskBlend();
-  if (!rim || mask_blend == SDL_BLENDMODE_INVALID)
+  if (!Present_SimRimMaskSupported())
     return kPresentationOutcome_OptionalOmitted;
-
-  SDL_BlendMode saved_atlas_blend = SDL_BLENDMODE_INVALID;
-  Uint8 saved_atlas_r = 255, saved_atlas_g = 255, saved_atlas_b = 255;
-  Uint8 saved_atlas_alpha = 255;
-  SDL_Texture *atlas = NativeTexture(g_sim_obj_atlas_texture);
-  if (!SDL_GetTextureBlendMode(atlas, &saved_atlas_blend) ||
-      !SDL_GetTextureColorMod(
-          atlas, &saved_atlas_r, &saved_atlas_g,
-          &saved_atlas_b) ||
-      !SDL_GetTextureAlphaMod(atlas, &saved_atlas_alpha))
+  const ArRenderTexture rim = EnsureSimRimTexture(viewport.w, viewport.h);
+  if (!ArRenderTexture_IsValid(rim))
     return kPresentationOutcome_OptionalOmitted;
-  /*
-   * Probe the custom mask blend before drawing the fill. If the renderer
-   * rejects it, compositing after the mask pass would otherwise expose the
-   * unmasked fill for one priority band.
-   */
-  if (!SimApplyAtlasBlendMode(mask_blend)) {
-    if (!SDL_SetTextureBlendMode(atlas, saved_atlas_blend))
-      return kPresentationOutcome_CoreFailure;
-    return kPresentationOutcome_OptionalOmitted;
-  }
 
   /* Band width scales with the output so the rim does not thin out to nothing
    * as the window grows. */
@@ -785,74 +726,62 @@ static PresentationOutcome DrawSimRimLight(
    * which is what makes it read as a rim rather than a drop shadow in reverse.
    * W4-1: each pass carries its own blend mode, because the callee sets the
    * atlas mode on entry and would otherwise overwrite one set here. */
-  SimBillboardPass fill = { kSimBillboardPass_Fill, 0.0f, 0.0f,
-                            SDL_BLENDMODE_BLEND };
+  SimBillboardPass fill = {
+    .kind = kSimBillboardPass_Fill,
+    .blend = kArRenderBlendMode_Alpha,
+    .tint = kSimRimColor,
+  };
   SimRimOffset(slot, distance, &fill.offset_x, &fill.offset_y);
-  SimBillboardPass mask = { kSimBillboardPass_Mask, 0.0f, 0.0f, mask_blend };
+  const SimBillboardPass mask = {
+    .kind = kSimBillboardPass_Mask,
+    .blend = kArRenderBlendMode_DestinationAlphaMask,
+    .tint = kSimRimColor,
+  };
 
-  PresentationTargetState target_state;
-  const PresentationTargetBeginResult begin =
-      PresentationGeometry_BeginTarget(g_renderer, rim, &target_state);
-  if (begin != kPresentationTargetBegin_Ready) {
-    const bool atlas_restored =
-        SDL_SetTextureBlendMode(atlas, saved_atlas_blend);
-    if (begin == kPresentationTargetBegin_StateLost || !atlas_restored)
+  ArRenderTargetState target_state = {0};
+  const ArRenderTargetBeginResult begin = ArRenderDevice_BeginTarget(
+      &g_render_device, rim, &target_state);
+  if (begin != kArRenderTargetBegin_Ready) {
+    if (begin == kArRenderTargetBegin_StateLost)
       return kPresentationOutcome_CoreFailure;
     return kPresentationOutcome_OptionalOmitted;
   }
 
-  bool rim_valid = SDL_SetRenderDrawBlendMode(
-                       g_renderer, SDL_BLENDMODE_NONE) &&
-      SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 0) &&
-      SDL_RenderClear(g_renderer) &&
-      SDL_SetTextureColorMod(atlas, kSimRimColor.r,
-                             kSimRimColor.g, kSimRimColor.b);
+  bool rim_valid = ArRenderDevice_Clear(
+      &g_render_device, (ArRenderColorF){0.0f, 0.0f, 0.0f, 0.0f});
   if (rim_valid) {
-    SDL_Rect local_viewport = { 0, 0, viewport.w, viewport.h };
-    DrawSimObjectPriorityTerrain(slot, priority, kSimTierFilter_World,
-                                 terrain_filter, true, virtual_height, source,
-                                 local_viewport, camera, matrix, &fill);
-    DrawSimObjectPriorityTerrain(slot, priority, kSimTierFilter_World,
-                                 terrain_filter, true, virtual_height, source,
-                                 local_viewport, camera, matrix, &mask);
+    const SDL_Rect local_viewport = { 0, 0, viewport.w, viewport.h };
+    rim_valid = DrawSimObjectPriorityTerrain(
+        slot, priority, kSimTierFilter_World, terrain_filter,
+        true, virtual_height, source, local_viewport, camera, matrix, &fill);
+    const bool masked = rim_valid && DrawSimObjectPriorityTerrain(
+        slot, priority, kSimTierFilter_World, terrain_filter,
+        true, virtual_height, source, local_viewport, camera, matrix, &mask);
+    if (rim_valid && !masked && SDL_CompareAndSwapAtomicInt(
+            &s_sim_rim_mask_supported, 1, 0)) {
+      fprintf(stderr,
+              "[sim3d-rim] backend rejected destination-alpha mask (%s) — "
+              "rim light disabled\n",
+              ArRenderDevice_LastError(&g_render_device));
+    }
+    rim_valid = rim_valid && masked;
   }
-  /* Restore the shared atlas state this function borrowed. The blend mode is
-   * left at the ordinary draw mode rather than whatever the mask pass used. */
-  const bool atlas_restored = RestoreSimAtlasState(
-      saved_atlas_blend, saved_atlas_r, saved_atlas_g, saved_atlas_b,
-      saved_atlas_alpha);
-  const bool target_restored =
-      PresentationGeometry_EndTarget(g_renderer, &target_state);
-  if (!atlas_restored || !target_restored)
+  if (!ArRenderDevice_EndTarget(&g_render_device, &target_state))
     return kPresentationOutcome_CoreFailure;
   if (!rim_valid) return kPresentationOutcome_OptionalOmitted;
 
-  SDL_BlendMode saved_rim_blend = SDL_BLENDMODE_INVALID;
-  Uint8 saved_rim_alpha = 255;
-  if (!SDL_GetTextureBlendMode(rim, &saved_rim_blend) ||
-      !SDL_GetTextureAlphaMod(rim, &saved_rim_alpha))
-    return kPresentationOutcome_OptionalOmitted;
-  const bool rim_configured =
-      SDL_SetTextureBlendMode(rim, SDL_BLENDMODE_ADD) &&
-      SDL_SetTextureAlphaMod(
-          rim, (Uint8)(slot->sim.rim_strength_pct * 255 / kPercentScale));
-  if (!rim_configured) {
-    const bool restored = RestoreTextureBlendAndAlpha(
-        rim, saved_rim_blend, saved_rim_alpha);
-    if (!restored) DisableSimRimTexture();
-    return kPresentationOutcome_OptionalOmitted;
-  }
-  SDL_FRect destination = ToFRect(viewport);
-  const bool composited =
-      SDL_RenderTexture(g_renderer, rim, NULL, &destination);
+  const uint8_t rim_alpha = (uint8_t)(
+      slot->sim.rim_strength_pct * 255 / kPercentScale);
+  const ArRenderDrawState composite_state = {
+    .flags = kArRenderDrawState_Tint | kArRenderDrawState_Blend,
+    .tint = {1.0f, 1.0f, 1.0f, (float)rim_alpha / 255.0f},
+    .blend = kArRenderBlendMode_Add,
+  };
+  const ArRenderRectF destination = PortableRect(viewport);
+  const bool composited = ArRenderDevice_DrawTextureWithState(
+      &g_render_device, rim, NULL, &destination, &composite_state);
   if (composited)
     Sim3DPerformance_AddDraw(0, 0);
-  const bool rim_state_restored = RestoreTextureBlendAndAlpha(
-      rim, saved_rim_blend, saved_rim_alpha);
-  if (!rim_state_restored) {
-    DisableSimRimTexture();
-    return kPresentationOutcome_OptionalOmitted;
-  }
   return composited
       ? kPresentationOutcome_Complete
       : kPresentationOutcome_OptionalOmitted;
@@ -2247,8 +2176,8 @@ PresentationOutcome PresentSim3D(const FrameSlot *slot) {
  * use. See the comment on PresentRendererResources_Reset for why this exists. */
 void PresentSim3D_ResetResources(void) {
   PresentSim3DShadows_ResetResources();
-  if (s_sim_rim_texture) SDL_DestroyTexture(s_sim_rim_texture);
-  s_sim_rim_texture = NULL;
+  ArRenderDevice_DestroyTexture(&g_render_device, s_sim_rim_texture);
+  s_sim_rim_texture = ArRenderTexture_Invalid();
   s_sim_rim_w = s_sim_rim_h = 0;
   s_sim_rim_unavailable = false;
   SDL_SetAtomicInt(&s_sim_rim_mask_supported, 1);

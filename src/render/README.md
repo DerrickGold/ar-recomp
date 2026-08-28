@@ -129,9 +129,12 @@ plus portable geometry for both its warped and fallback resolves.
 Flat action-plane decorations now use device-owned streaming winner masks and
 a scoped effect target. The blend vocabulary carries their premultiplied-add
 resolve explicitly, so unsupported backends can reject that optional effect at
-resource creation without exposing a native texture or draw-state probe. CRT
-still uses the SDL-free semantic contract in `crt_post.h`; frame orchestration owns
-player policy while `platform/sdl/crt_post_sdl.c` owns the preferred-format
+resource creation without exposing a native texture or draw-state probe. SIM
+3D rim lighting likewise owns a portable linear target and expresses its
+silhouette intersection as a destination-alpha mask blend; its atlas tint,
+fill, mask, and additive resolve no longer borrow native texture state. CRT
+still uses the SDL-free semantic contract in `crt_post.h`; frame orchestration
+owns player policy while `platform/sdl/crt_post_sdl.c` owns the preferred-format
 scene target, shader formats, render state, and target-local presentation
 plumbing. The scene target is exposed to composition only as an opaque handle.
 The bridge is a transition aid, not part of a game-facing contract. New
