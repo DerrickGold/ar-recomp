@@ -21,11 +21,12 @@
  * HUD is theirs to draw need no edits at all, and cannot disagree with each
  * other about a third state. The reader is a mode the overlay is in, not a peer.
  *
- * The main thread owns the reader's input, view state, textures, and rendering.
- * Keep every SDL renderer call inside ManualReader_Render or its resource
- * helpers so renderer ownership remains obvious. In particular, do not preload
- * a page from an input handler: loading/indexing is renderer-free, while page
- * decoding and texture creation are lazy presentation work.
+ * The main thread owns the reader's input, view state, portable texture handles,
+ * and rendering. Page resources and mesh draws go through the active render
+ * device; SDL remains here only for the host input event vocabulary. In
+ * particular, do not preload a page from an input handler: loading/indexing is
+ * renderer-free, while page decoding and texture creation are lazy
+ * presentation work.
  */
 
 /* Load and index the manual. Safe to call repeatedly; the work happens once.
