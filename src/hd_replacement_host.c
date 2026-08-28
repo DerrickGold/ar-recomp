@@ -10,6 +10,7 @@
 #include "snesrecomp/game_runtime.h"
 #include "hd_replacements.h"
 #include "host/host_display.h"
+#include "render/render_device.h"
 #include "snesrecomp/runner.h"
 #include "settings.h"
 
@@ -33,6 +34,7 @@ enum {
 };
 
 extern SDL_Renderer *g_renderer;
+extern ArRenderDevice g_render_device;
 extern SDL_Texture *g_hud_bg_texture;
 extern SDL_Texture *g_hud_obj_texture;
 extern int g_snes_width;
@@ -181,21 +183,27 @@ void HdReplacementHost_LoadTextures(void) {
     }
 
     /* ABGR8888 matches stb's little-endian R,G,B,A byte order directly. */
-    SDL_Texture *texture = SDL_CreateTexture(
-        g_renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STATIC,
-        width, height);
-    if (texture && SDL_UpdateTexture(
-            texture, NULL, rgba, width * kArgbBytesPerPixel)) {
-      SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
-      SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
+    const ArRenderTextureDesc desc = {
+      .width = width,
+      .height = height,
+      .format = kArRenderPixelFormat_Abgr8888,
+      .usage = kArRenderTextureUsage_Static,
+      .filter = kArRenderFilter_Nearest,
+      .blend = kArRenderBlendMode_Alpha,
+    };
+    ArRenderTexture texture = ArRenderTexture_Invalid();
+    if (ArRenderDevice_CreateTexture(&g_render_device, &desc, &texture) &&
+        ArRenderDevice_UpdateTexture(
+            &g_render_device, texture, NULL, rgba,
+            width * kArgbBytesPerPixel)) {
       entry->texture = texture;
       loaded_art_count++;
       fprintf(stderr, "[hd-manifest] [replace:%s] %s (%dx%d)\n",
               entry->name, entry->image, width, height);
     } else {
-      if (texture) SDL_DestroyTexture(texture);
+      ArRenderDevice_DestroyTexture(&g_render_device, texture);
       fprintf(stderr, "[hd-manifest] [replace:%s] texture upload failed: %s\n",
-              entry->name, SDL_GetError());
+              entry->name, ArRenderDevice_LastError(&g_render_device));
     }
     stbi_image_free(rgba);
   }
@@ -243,7 +251,9 @@ void HdReplacementHost_BindSurfaces(void) {
       }
       continue;
     }
-    if (entry->plane != kHdPlane_Screen || !entry->texture) continue;
+    if (entry->plane != kHdPlane_Screen ||
+        !ArRenderTexture_IsValid(entry->texture))
+      continue;
 
     const int source = entry->source;
     if (source < 0 || source >= SR_PPU_OVERLAY_SOURCE_COUNT) continue;
@@ -267,9 +277,10 @@ void HdReplacementHost_BindSurfaces(void) {
 
 void HdReplacementHost_ReloadTextures(void) {
   for (int i = 0; i < g_hd_replacement_count; i++) {
-    if (g_hd_replacements[i].texture) {
-      SDL_DestroyTexture((SDL_Texture *)g_hd_replacements[i].texture);
-      g_hd_replacements[i].texture = NULL;
+    if (ArRenderTexture_IsValid(g_hd_replacements[i].texture)) {
+      ArRenderDevice_DestroyTexture(
+          &g_render_device, g_hd_replacements[i].texture);
+      g_hd_replacements[i].texture = ArRenderTexture_Invalid();
     }
     free(g_hd_replacements[i].pixels);
     g_hd_replacements[i].pixels = NULL;
@@ -420,9 +431,9 @@ void ActRaiser_RebindPpuOutputSurfaces(void) {
 void HdReplacementHost_Shutdown(void) {
   Settings_SetHdReplacementsAvailable(false);
   for (int i = 0; i < g_hd_replacement_count; i++) {
-    if (g_hd_replacements[i].texture)
-      SDL_DestroyTexture((SDL_Texture *)g_hd_replacements[i].texture);
-    g_hd_replacements[i].texture = NULL;
+    ArRenderDevice_DestroyTexture(
+        &g_render_device, g_hd_replacements[i].texture);
+    g_hd_replacements[i].texture = ArRenderTexture_Invalid();
     free(g_hd_replacements[i].pixels);
     g_hd_replacements[i].pixels = NULL;
   }

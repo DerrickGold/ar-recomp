@@ -277,7 +277,7 @@ bool HdManifest_ConditionPasses(const HdCondition *cond) {
 
 static bool EntryHasLoadedArt(const HdReplacement *entry) {
   if (entry->plane == kHdPlane_Screen)
-    return entry->texture != NULL;
+    return ArRenderTexture_IsValid(entry->texture);
   if (entry->plane == kHdPlane_Mode7)
     return entry->pixels != NULL;
   return false;

@@ -212,7 +212,7 @@ static void TestReservedPlanesParseButStayInert(void) {
       "when = wram[0018]==0x00\n")) == 1);
   ResetRuntime();
   MakeTitleState();
-  g_hd_replacements[0].texture = (void *)0x1; /* even with art bound */
+  g_hd_replacements[0].texture = (ArRenderTexture){1}; /* even with art bound */
   g_hd_replacements[0].pixels = (void *)0x1;
   HdReplacements_EvaluateFrame();
   CHECK(g_capture_log.calls == 0 && g_m7_log.calls == 0);
@@ -271,7 +271,7 @@ static void TestEvaluateGates(void) {
   HdReplacements_EvaluateFrame();
   CHECK(g_capture_log.calls == 0 && !g_hd_replacements[0].active);
 
-  g_hd_replacements[0].texture = (void *)0x1;
+  g_hd_replacements[0].texture = (ArRenderTexture){1};
 
   /* All gates pass: capture requested with the entry rect + removal flag. */
   HdReplacements_EvaluateFrame();

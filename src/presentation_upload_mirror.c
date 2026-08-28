@@ -23,10 +23,10 @@ static bool ValidRegion(const uint8_t *pixels, int pitch,
 bool PresentationUploadMirror_FindDirtyRect(
     const uint8_t *current, int current_pitch,
     const uint8_t *previous, int previous_pitch,
-    int width, int height, SDL_Rect *dirty) {
+    int width, int height, ArRenderRectI *dirty) {
   if (!dirty) return false;
-  *dirty = (SDL_Rect){0, 0, width > 0 ? width : 0,
-                     height > 0 ? height : 0};
+  *dirty = (ArRenderRectI){0, 0, width > 0 ? width : 0,
+                          height > 0 ? height : 0};
   if (!ValidRegion(current, current_pitch, width, height) ||
       !ValidRegion(previous, previous_pitch, width, height))
     return width > 0 && height > 0;
@@ -62,10 +62,10 @@ bool PresentationUploadMirror_FindDirtyRect(
     y1 = y + 1;
   }
   if (x0 == width) {
-    *dirty = (SDL_Rect){0};
+    *dirty = (ArRenderRectI){0};
     return false;
   }
-  *dirty = (SDL_Rect){x0, y0, x1 - x0, y1 - y0};
+  *dirty = (ArRenderRectI){x0, y0, x1 - x0, y1 - y0};
   return true;
 }
 
@@ -87,17 +87,19 @@ static bool EnsureStorage(PresentationUploadMirror *mirror,
 }
 
 bool PresentationUploadMirror_UploadArgb8888(
-    PresentationUploadMirror *mirror, SDL_Texture *texture,
+    PresentationUploadMirror *mirror, ArRenderDevice *device,
+    ArRenderTexture texture,
     const uint8_t *source, int width, int height, int source_pitch,
     int destination_x, int destination_y, PresentationUploadResult *result) {
   if (result) *result = (PresentationUploadResult){0};
-  if (!mirror || !texture ||
+  if (!mirror || !ArRenderDevice_IsReady(device) ||
+      !ArRenderTexture_IsValid(texture) ||
       !ValidRegion(source, source_pitch, width, height) ||
       destination_x < 0 || destination_y < 0 ||
       destination_x > INT_MAX - width || destination_y > INT_MAX - height)
     return false;
 
-  if (mirror->texture != texture ||
+  if (!ArRenderTexture_Equals(mirror->texture, texture) ||
       mirror->destination_x != destination_x ||
       mirror->destination_y != destination_y) {
     mirror->texture = texture;
@@ -107,7 +109,7 @@ bool PresentationUploadMirror_UploadArgb8888(
   }
 
   const bool have_storage = EnsureStorage(mirror, width, height);
-  SDL_Rect dirty = {0, 0, width, height};
+  ArRenderRectI dirty = {0, 0, width, height};
   const int mirror_pitch = width * kArgb8888BytesPerPixel;
   if (have_storage && mirror->valid &&
       !PresentationUploadMirror_FindDirtyRect(
@@ -115,7 +117,7 @@ bool PresentationUploadMirror_UploadArgb8888(
           width, height, &dirty))
     return true;
 
-  SDL_Rect destination = {
+  ArRenderRectI destination = {
     destination_x + dirty.x,
     destination_y + dirty.y,
     dirty.w,
@@ -128,7 +130,8 @@ bool PresentationUploadMirror_UploadArgb8888(
     result->destination = destination;
     result->changed = true;
   }
-  if (!SDL_UpdateTexture(texture, &destination, dirty_source, source_pitch)) {
+  if (!ArRenderDevice_UpdateTexture(
+          device, texture, &destination, dirty_source, source_pitch)) {
     mirror->valid = false;
     return false;
   }

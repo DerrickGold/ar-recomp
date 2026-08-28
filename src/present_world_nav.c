@@ -33,7 +33,6 @@
 
 
 extern SDL_Renderer *g_renderer;
-extern SDL_Texture *g_texture;
 extern SDL_Texture *g_hud_bg_texture;
 extern SDL_Texture *g_hud_obj_texture;
 extern SDL_Texture *g_diorama_textures[kDioramaPlane_Count];
