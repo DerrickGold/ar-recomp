@@ -11,6 +11,7 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/hd_replacement_host.c"
     "${GAME_SOURCE_ROOT}/hd_replacement_host.h"
     "${GAME_SOURCE_ROOT}/hd_replacements.h"
+    "${GAME_SOURCE_ROOT}/crt_post.h"
     "${GAME_SOURCE_ROOT}/diorama/diorama_upload.c"
     "${GAME_SOURCE_ROOT}/diorama/diorama_upload.h"
     "${GAME_SOURCE_ROOT}/diorama/diorama_rom_skybox_resource.c"
@@ -98,6 +99,20 @@ if(_sim_shadow_contents MATCHES
    "SDL_GPU(Shader|RenderState|Device)|SDL_SetGPURenderState")
     list(APPEND _native_resource_violations
         "${GAME_SOURCE_ROOT}/present_sim3d_shadows.c (native effect state)")
+endif()
+
+# Fullscreen post-processing exposes only semantic parameters and opaque
+# textures. Native shader/target ownership belongs to the selected adapter;
+# player settings remain frame-orchestration policy.
+if(EXISTS "${GAME_SOURCE_ROOT}/crt_post.c")
+    list(APPEND _native_resource_violations
+        "${GAME_SOURCE_ROOT}/crt_post.c (CRT implementation outside adapter)")
+endif()
+file(READ "${GAME_SOURCE_ROOT}/platform/sdl/crt_post_sdl.c"
+     _crt_sdl_contents)
+if(_crt_sdl_contents MATCHES "g_settings|#[ \t]*include[ \t]*[<\"]settings.h")
+    list(APPEND _native_resource_violations
+        "${GAME_SOURCE_ROOT}/platform/sdl/crt_post_sdl.c (player policy in adapter)")
 endif()
 if(_native_resource_violations)
     list(JOIN _native_resource_violations "\n  " _formatted)

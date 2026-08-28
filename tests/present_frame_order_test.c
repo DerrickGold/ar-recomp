@@ -14,6 +14,8 @@
 #include <string.h>
 
 SDL_Renderer *g_renderer = (SDL_Renderer *)(uintptr_t)1;
+ArRenderDevice g_render_device;
+Settings g_settings;
 
 static int s_failures;
 static int s_stage;
@@ -57,9 +59,15 @@ SDL_Rect ComputePresentationViewportWithOutput(
   return kFallback;
 }
 
-bool CrtPost_Begin(SDL_Renderer *renderer) {
+bool CrtPost_Begin(ArRenderDevice *device, const CrtPostConfig *config) {
   CHECK(s_stage++ == 1);
-  CHECK(renderer == g_renderer);
+  CHECK(device == &g_render_device);
+  CHECK(config != NULL);
+  CHECK(config->enabled);
+  CHECK(config->curvature == 0.25f);
+  CHECK(config->scanline_depth == 0.5f);
+  CHECK(config->mask_strength == 0.75f);
+  CHECK(config->brightness == 1.25f);
   return true;
 }
 
@@ -98,16 +106,20 @@ bool PresentComparisonTransitionOverlay(uint8_t alpha, const char *label) {
   return true;
 }
 
-SDL_Rect CrtPost_End(SDL_Renderer *renderer,
-                     int scan_columns, int scan_lines, SDL_Rect image) {
+ArRenderRectI CrtPost_End(ArRenderDevice *device,
+                          int scan_columns, int scan_lines,
+                          ArRenderRectI image) {
   const int expected_stage =
       s_expected_view == kRenderComparison_SideBySide ? 4 : 3;
   CHECK(s_stage++ == expected_stage);
-  CHECK(renderer == g_renderer);
+  CHECK(device == &g_render_device);
   CHECK(scan_columns == 256);
   CHECK(scan_lines == 224);
-  CHECK(SDL_RectsEqual(&image, &kFallback));
-  return kResolved;
+  CHECK(image.x == kFallback.x && image.y == kFallback.y &&
+        image.w == kFallback.w && image.h == kFallback.h);
+  return (ArRenderRectI){
+    kResolved.x, kResolved.y, kResolved.w, kResolved.h,
+  };
 }
 
 void PresentHostUi(const FrameSlot *slot, SDL_Rect viewport,
@@ -131,6 +143,14 @@ static void RunCase(FrameSlot *slot) {
 }
 
 int main(void) {
+  g_settings.crt_enabled = true;
+  g_settings.crt_curvature_x100 = 25;
+  g_settings.crt_scanline_x100 = 50;
+  g_settings.crt_mask_x100 = 75;
+  g_settings.crt_aberration_x100 = 10;
+  g_settings.crt_bandwidth_x100 = 20;
+  g_settings.crt_vignette_x100 = 30;
+  g_settings.crt_brightness_x100 = 125;
   FrameSlot slot = {0};
   slot.ignore_aspect_ratio = false;
   slot.pixel_aspect = 7;

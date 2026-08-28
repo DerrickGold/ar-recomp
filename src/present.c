@@ -618,8 +618,7 @@ void PresentHudOverlayComposited(const FrameSlot *slot,
                      chunks[i].output_destination);
   }
   if (!ArRenderDevice_SetRenderTarget(
-          &g_render_device,
-          ArSdlRenderBackend_BorrowTexture(CrtPost_BaseTarget()))) {
+          &g_render_device, CrtPost_BaseTarget())) {
     SessionFatal_Request(
         "The renderer could not restore its scene target after composing the "
         "HUD (%s). Restart the game; if this repeats, update your graphics "
@@ -1973,7 +1972,14 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
    * the captured example). Treat forced blank as the master output gate it is
    * on hardware and return before drawing any host-owned layer or overlay. */
   if (slot->diorama_active && (slot->inidisp & 0x80)) {
-    SDL_SetRenderTarget(g_renderer, CrtPost_BaseTarget());
+    if (!ArRenderDevice_SetRenderTarget(
+            &g_render_device, CrtPost_BaseTarget())) {
+      SessionFatal_Request(
+          "The renderer could not select its scene target for forced blank "
+          "(%s). Restart the game; if this repeats, update your graphics "
+          "driver.", ArRenderDevice_LastError(&g_render_device));
+      return;
+    }
     SDL_SetRenderLogicalPresentation(g_renderer, 0, 0,
                                      SDL_LOGICAL_PRESENTATION_DISABLED);
     SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255);

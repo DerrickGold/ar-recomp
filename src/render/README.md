@@ -82,9 +82,12 @@ implementation is isolated in `platform/sdl/sim_shadow_effect_backend_sdl.c`.
 Action heat refraction is a portable mesh warp rather than a custom shader; its
 viewport-sized texture is now device-owned and uses the scoped-target contract
 plus portable geometry for both its warped and fallback resolves. CRT still
-needs an equivalent effect boundary. The bridge is a transition aid, not part
-of a game-facing contract. New renderer-facing code must not add another
-borrowed native resource.
+uses the SDL-free semantic contract in `crt_post.h`; frame orchestration owns
+player policy while `platform/sdl/crt_post_sdl.c` owns the preferred-format
+scene target, shader formats, render state, and target-local presentation
+plumbing. The scene target is exposed to composition only as an opaque handle.
+The bridge is a transition aid, not part of a game-facing contract. New
+renderer-facing code must not add another borrowed native resource.
 
 Temporary target composition now has a portable scoped-target extension. It
 captures and restores the caller's target, viewport, and clip, and reports a
@@ -95,14 +98,12 @@ enhancements and retain their established fallbacks.
 
 The remaining migration should proceed in independently testable slices:
 
-1. Move CRT shader and target ownership behind a backend postprocess contract,
-   using the established effect and scoped-target boundaries.
-2. Move the remaining diorama compositor implementation and transient effect
+1. Move the remaining diorama compositor implementation and transient effect
    resource ownership under `src/platform/<backend>` while retaining a
    capability-gated baseline path.
-3. Port the top-level presentation viewport/output contract and host UI/manual
+2. Port the top-level presentation viewport/output contract and host UI/manual
    draws, then remove native types from the complete presentation directory.
-4. Remove the SDL borrow/unwrap bridge after its final internal consumer is
+3. Remove the SDL borrow/unwrap bridge after its final internal consumer is
    gone.
 
 Each slice should preserve the replay state hashes, pass synthetic and real-PPU

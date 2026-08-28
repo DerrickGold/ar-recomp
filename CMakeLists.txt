@@ -1173,14 +1173,17 @@ if(BUILD_TESTING)
         ENVIRONMENT "SDL_AUDIODRIVER=dummy")
 
     # Game-facing semantic parameters must cross effect backend boundaries
-    # without exposing native shader state. Exercise each live SDL adapter's
-    # lazy-create/bind/unbind/reset/recreate lifecycle on a real GPU renderer.
+    # without exposing native shader state. Exercise CRT, diorama, and SIM
+    # adapters through lazy-create/bind/unbind/reset/recreate lifecycles on a
+    # real GPU renderer.
     add_executable(actraiser_render_effect_backends_sdl_test
         tests/render_effect_backends_sdl_test.c
+        src/platform/sdl/crt_post_sdl.c
         src/platform/sdl/diorama_effect_backend_sdl.c
         src/platform/sdl/sim_shadow_effect_backend_sdl.c
         src/platform/sdl/render_sdl.c
         src/render/render_device.c
+        src/session_fatal.c
     )
     target_include_directories(actraiser_render_effect_backends_sdl_test
         PRIVATE ${CMAKE_SOURCE_DIR}/src)
