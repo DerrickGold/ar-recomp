@@ -1243,7 +1243,7 @@ static int AppBoot_CreateVideo(AppBoot *app) {
     if (!ArSdlRenderBackend_Bind(
             &g_render_device, &g_sdl_render_backend, g_renderer))
       Die("SDL render backend binding failed");
-    if (!Sim3DDepthPass_Require(g_renderer))
+    if (!Sim3DDepthPass_Require(&g_render_device))
       Die(Sim3DDepthPass_LastError());
     g_gpu_shaders_active = true;
     /* Apply the selected refresh policy after renderer creation. Hidden-video

@@ -13,6 +13,7 @@
 #include <SDL3/SDL.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "present.h"
 #include "action/action_effect_render.h"
@@ -36,27 +37,29 @@ extern ArRenderDevice g_render_device;
 #include "present_sim3d_internal.h"
 
 
-static SDL_Texture *s_world_navigation_palace_texture;
-static SDL_Texture *s_world_navigation_ui_texture;
+static ArRenderTexture s_world_navigation_palace_texture;
+static ArRenderTexture s_world_navigation_ui_texture;
 static bool s_world_navigation_composition_upload_valid;
 static bool s_world_navigation_cloud_unavailable;
 static bool s_world_navigation_weather_failure_reported;
 
-static SDL_Texture *EnsureWorldNavigationCompositionTexture(
-    SDL_Texture **texture) {
-  if (*texture) return *texture;
-  *texture = SDL_CreateTexture(
-      g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-      kSimWorldNavigationCompositionWidth,
-      kSimWorldNavigationCompositionHeight);
-  if (!*texture) {
+static ArRenderTexture EnsureWorldNavigationCompositionTexture(
+    ArRenderTexture *texture) {
+  if (ArRenderTexture_IsValid(*texture)) return *texture;
+  const ArRenderTextureDesc desc = {
+    .width = kSimWorldNavigationCompositionWidth,
+    .height = kSimWorldNavigationCompositionHeight,
+    .format = kArRenderPixelFormat_Argb8888,
+    .usage = kArRenderTextureUsage_Streaming,
+    .filter = kArRenderFilter_Nearest,
+    .blend = kArRenderBlendMode_Alpha,
+  };
+  if (!ArRenderDevice_CreateTexture(&g_render_device, &desc, texture)) {
     fprintf(stderr,
             "[world-navigation] composition texture unavailable: %s\n",
-            SDL_GetError());
-    return NULL;
+            ArRenderDevice_LastError(&g_render_device));
+    return ArRenderTexture_Invalid();
   }
-  SDL_SetTextureBlendMode(*texture, SDL_BLENDMODE_BLEND);
-  SDL_SetTextureScaleMode(*texture, SDL_SCALEMODE_NEAREST);
   return *texture;
 }
 
@@ -71,71 +74,88 @@ void UploadWorldNavigationComposition(const FrameSlot *slot) {
     return;
   }
 
-  SDL_Texture *palace = EnsureWorldNavigationCompositionTexture(
+  ArRenderTexture palace = EnsureWorldNavigationCompositionTexture(
       &s_world_navigation_palace_texture);
-  SDL_Texture *ui = EnsureWorldNavigationCompositionTexture(
+  ArRenderTexture ui = EnsureWorldNavigationCompositionTexture(
       &s_world_navigation_ui_texture);
-  if (!palace || !ui) return;
-  SDL_Rect palace_rect = {
+  if (!ArRenderTexture_IsValid(palace) ||
+      !ArRenderTexture_IsValid(ui))
+    return;
+  ArRenderRectI palace_rect = {
     0, 0, composition->palace.width, composition->palace.height,
   };
-  SDL_Rect ui_rect = {
+  ArRenderRectI ui_rect = {
     0, 0, composition->ui.width, composition->ui.height,
   };
-  if (!SDL_UpdateTexture(
-          palace, &palace_rect, g_sim_world_navigation_palace_pixels,
+  if (!ArRenderDevice_UpdateTexture(
+          &g_render_device, palace, &palace_rect,
+          g_sim_world_navigation_palace_pixels,
           kSimWorldNavigationCompositionPitch) ||
-      !SDL_UpdateTexture(
-          ui, &ui_rect, g_sim_world_navigation_ui_pixels,
+      !ArRenderDevice_UpdateTexture(
+          &g_render_device, ui, &ui_rect,
+          g_sim_world_navigation_ui_pixels,
           kSimWorldNavigationCompositionPitch))
     return;
   s_world_navigation_composition_upload_valid = true;
 }
-static SDL_Texture *s_world_navigation_cloud_texture;
+static ArRenderTexture s_world_navigation_cloud_texture;
 
-static SDL_Texture *EnsureWorldNavigationCloudTexture(void) {
+static ArRenderTexture EnsureWorldNavigationCloudTexture(void) {
   enum {
     kPaddedPixels = kSimCloudTexturePixels * 2,
   };
-  if (s_world_navigation_cloud_texture)
+  if (ArRenderTexture_IsValid(s_world_navigation_cloud_texture))
     return s_world_navigation_cloud_texture;
   /* A texture-allocation or lock failure makes clouds unavailable only for
    * this renderer generation.  They are optional atmosphere, so keep the
    * complete ground/composition path and re-probe after a renderer reset. */
-  if (s_world_navigation_cloud_unavailable) return NULL;
-  s_world_navigation_cloud_texture = SDL_CreateTexture(
-      g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-      kPaddedPixels, kPaddedPixels);
-  if (!s_world_navigation_cloud_texture) {
+  if (s_world_navigation_cloud_unavailable)
+    return ArRenderTexture_Invalid();
+  const ArRenderTextureDesc desc = {
+    .width = kPaddedPixels,
+    .height = kPaddedPixels,
+    .format = kArRenderPixelFormat_Argb8888,
+    .usage = kArRenderTextureUsage_Streaming,
+    .filter = kArRenderFilter_Linear,
+    .blend = kArRenderBlendMode_Alpha,
+  };
+  if (!ArRenderDevice_CreateTexture(
+          &g_render_device, &desc, &s_world_navigation_cloud_texture)) {
     s_world_navigation_cloud_unavailable = true;
     fprintf(stderr,
             "[world-navigation] cloud texture unavailable: %s\n",
-            SDL_GetError());
-    return NULL;
+            ArRenderDevice_LastError(&g_render_device));
+    return ArRenderTexture_Invalid();
   }
-  SDL_SetTextureBlendMode(s_world_navigation_cloud_texture,
-                          SDL_BLENDMODE_BLEND);
-  SDL_SetTextureScaleMode(s_world_navigation_cloud_texture,
-                          SDL_SCALEMODE_LINEAR);
-  void *pixels = NULL;
-  int pitch = 0;
-  if (!SDL_LockTexture(
-          s_world_navigation_cloud_texture, NULL, &pixels, &pitch)) {
-    SDL_DestroyTexture(s_world_navigation_cloud_texture);
-    s_world_navigation_cloud_texture = NULL;
+  uint32_t *pixels = malloc(
+      (size_t)kPaddedPixels * kPaddedPixels * sizeof(*pixels));
+  if (!pixels) {
+    ArRenderDevice_DestroyTexture(
+        &g_render_device, s_world_navigation_cloud_texture);
+    s_world_navigation_cloud_texture = ArRenderTexture_Invalid();
     s_world_navigation_cloud_unavailable = true;
     fprintf(stderr,
-            "[world-navigation] cloud texture lock unavailable: %s\n",
-            SDL_GetError());
-    return NULL;
+            "[world-navigation] cloud upload staging unavailable\n");
+    return ArRenderTexture_Invalid();
   }
   for (int y = 0; y < kPaddedPixels; y++) {
-    uint32_t *row = (uint32_t *)((uint8_t *)pixels + (size_t)y * pitch);
+    uint32_t *row = pixels + (size_t)y * kPaddedPixels;
     for (int x = 0; x < kPaddedPixels; x++)
       row[x] = SimCloudTexel(
           x % kSimCloudTexturePixels, y % kSimCloudTexturePixels);
   }
-  SDL_UnlockTexture(s_world_navigation_cloud_texture);
+  const bool uploaded = ArRenderDevice_UpdateTexture(
+      &g_render_device, s_world_navigation_cloud_texture, NULL, pixels,
+      kPaddedPixels * (int)sizeof(*pixels));
+  free(pixels);
+  if (!uploaded) {
+    fprintf(stderr, "[world-navigation] cloud upload failed: %s\n",
+            ArRenderDevice_LastError(&g_render_device));
+    ArRenderDevice_DestroyTexture(
+        &g_render_device, s_world_navigation_cloud_texture);
+    s_world_navigation_cloud_texture = ArRenderTexture_Invalid();
+    s_world_navigation_cloud_unavailable = true;
+  }
   return s_world_navigation_cloud_texture;
 }
 
@@ -351,9 +371,9 @@ static bool DrawWorldNavigationActiveRegionHaze(
 }
 
 static bool DrawWorldNavigationCloudLayer(
-    const FrameSlot *slot, SDL_Rect viewport, SDL_Texture *texture,
-    const SimCloudLayer *layer, Uint64 elapsed_ms, float drift,
-    float source_offset_x, float source_offset_y, SDL_FColor colour) {
+    const FrameSlot *slot, SDL_Rect viewport, ArRenderTexture texture,
+    const SimCloudLayer *layer, uint64_t elapsed_ms, float drift,
+    float source_offset_x, float source_offset_y, ArRenderColorF colour) {
   if (!layer) return false;
   const SimWorldNavigationScene *scene =
       &slot->sim.world_navigation_scene;
@@ -383,7 +403,7 @@ static bool DrawWorldNavigationCloudLayer(
        kSimCloudTexturePixels - 0.5f) / kPaddedPixels;
   const float u[4] = {u0, u1, u1, u0};
   const float v[4] = {v0, v0, v1, v1};
-  SDL_Vertex vertices[4];
+  ArRenderVertex2D vertices[4];
   for (int i = 0; i < 4; i++) {
     const float source_x =
         (float)scene->ground[i].tile_x * kSimWorldMapTilePixels;
@@ -394,15 +414,17 @@ static bool DrawWorldNavigationCloudLayer(
             scene, source_x + source_offset_x,
             source_y + source_offset_y, &authentic_x, &authentic_y))
       return false;
-    vertices[i] = (SDL_Vertex){
-      WorldNavigationAuthenticToOutput(
-          slot, viewport, authentic_x, authentic_y),
+    const SDL_FPoint output = WorldNavigationAuthenticToOutput(
+        slot, viewport, authentic_x, authentic_y);
+    vertices[i] = (ArRenderVertex2D){
+      {output.x, output.y},
       colour,
       {u[i], v[i]},
     };
   }
-  static const int indices[6] = {0, 1, 2, 0, 2, 3};
-  return SDL_RenderGeometry(g_renderer, texture, vertices, 4, indices, 6);
+  static const int32_t indices[6] = {0, 1, 2, 0, 2, 3};
+  return ArRenderDevice_DrawGeometry(
+      &g_render_device, texture, vertices, 4, indices, 6);
 }
 
 static PresentationOutcome OmitWorldNavigationWeather(const char *reason) {
@@ -419,8 +441,10 @@ static PresentationOutcome DrawWorldNavigationWeather(
   if (!slot->sim.world_navigation_clouds ||
       !slot->sim.cloud_opacity_pct)
     return kPresentationOutcome_Complete;
-  SDL_Texture *texture = EnsureWorldNavigationCloudTexture();
-  if (!texture) return OmitWorldNavigationWeather(SDL_GetError());
+  ArRenderTexture texture = EnsureWorldNavigationCloudTexture();
+  if (!ArRenderTexture_IsValid(texture))
+    return OmitWorldNavigationWeather(
+        ArRenderDevice_LastError(&g_render_device));
 
   const float opacity =
       (float)slot->sim.cloud_opacity_pct / (float)kPercentScale;
@@ -429,9 +453,7 @@ static PresentationOutcome DrawWorldNavigationWeather(
       slot->sim.cloud_altitude_px);
   const float drift =
       (float)slot->sim.cloud_drift_pct / (float)kPercentScale;
-  const Uint64 elapsed_ms = SDL_GetTicks();
-  SDL_SetTextureColorMod(texture, 255, 255, 255);
-  SDL_SetTextureAlphaMod(texture, 255);
+  const uint64_t elapsed_ms = SDL_GetTicks();
 
   /* A cloud's altitude is invisible to an orthographic top-down camera until
    * it casts a displaced shadow. Reuse the town light's world-space shear so
@@ -470,8 +492,9 @@ static PresentationOutcome DrawWorldNavigationWeather(
                 slot, viewport, texture, layer, elapsed_ms, drift,
                 shadow_x + perpendicular_x * spread,
                 shadow_y + perpendicular_y * spread,
-                (SDL_FColor){0.0f, 0.0f, 0.0f, alpha}))
-          return OmitWorldNavigationWeather(SDL_GetError());
+                (ArRenderColorF){0.0f, 0.0f, 0.0f, alpha}))
+          return OmitWorldNavigationWeather(
+              ArRenderDevice_LastError(&g_render_device));
       }
     }
   }
@@ -483,11 +506,12 @@ static PresentationOutcome DrawWorldNavigationWeather(
       const SimCloudLayer *layer = &kSimCloudLayers[layer_index];
       if (!DrawWorldNavigationCloudLayer(
               slot, viewport, texture, layer, elapsed_ms, drift, 0.0f, 0.0f,
-              (SDL_FColor){
+              (ArRenderColorF){
                 1.0f, 1.0f, 1.0f,
                 opacity * layer->weight * body_visibility,
               })) {
-        return OmitWorldNavigationWeather(SDL_GetError());
+        return OmitWorldNavigationWeather(
+            ArRenderDevice_LastError(&g_render_device));
       }
     }
   }
@@ -497,21 +521,24 @@ static PresentationOutcome DrawWorldNavigationWeather(
 static bool DrawWorldNavigationCompositionLayer(
     const FrameSlot *slot, SDL_Rect viewport,
     const SimWorldNavigationCompositionLayer *layer,
-    SDL_Texture *texture) {
+    ArRenderTexture texture) {
   if (!layer || !layer->visible) return true;
-  if (!texture || !layer->width || !layer->height) return false;
+  if (!ArRenderTexture_IsValid(texture) ||
+      !layer->width || !layer->height)
+    return false;
   const SDL_FPoint top_left = WorldNavigationAuthenticToOutput(
       slot, viewport, layer->screen_x, layer->screen_y);
   const SDL_FPoint bottom_right = WorldNavigationAuthenticToOutput(
       slot, viewport, layer->screen_x + layer->width,
       layer->screen_y + layer->height);
-  SDL_FRect source = {0.0f, 0.0f, layer->width, layer->height};
-  SDL_FRect destination = {
+  ArRenderRectF source = {0.0f, 0.0f, layer->width, layer->height};
+  ArRenderRectF destination = {
     top_left.x, top_left.y,
     bottom_right.x - top_left.x,
     bottom_right.y - top_left.y,
   };
-  return SDL_RenderTexture(g_renderer, texture, &source, &destination);
+  return ArRenderDevice_DrawTexture(
+      &g_render_device, texture, &source, &destination);
 }
 
 static bool DrawWorldNavigationMasterFade(
@@ -541,8 +568,8 @@ PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
   if (!ArRenderTexture_IsValid(world))
     return kPresentationOutcome_CoreFailure;
   if (!composition->empty_animation &&
-      (!s_world_navigation_palace_texture ||
-       !s_world_navigation_ui_texture))
+      (!ArRenderTexture_IsValid(s_world_navigation_palace_texture) ||
+       !ArRenderTexture_IsValid(s_world_navigation_ui_texture)))
     return kPresentationOutcome_CoreFailure;
 
   SDL_Rect viewport = ComputePresentationViewport(
@@ -550,23 +577,28 @@ PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
       slot->pixel_aspect, slot->visible_width, slot->snes_height);
   SDL_SetRenderLogicalPresentation(g_renderer, 0, 0,
                                    SDL_LOGICAL_PRESENTATION_DISABLED);
-  SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255);
-  SDL_RenderClear(g_renderer);
-  SDL_SetRenderClipRect(g_renderer, &viewport);
+  if (!ArRenderDevice_Clear(
+          &g_render_device, (ArRenderColorF){0.0f, 0.0f, 0.0f, 1.0f}) ||
+      !ArRenderDevice_SetClipRect(
+          &g_render_device, &(ArRenderRectI){
+              viewport.x, viewport.y, viewport.w, viewport.h})) {
+    ApplyLogicalPresentation(slot);
+    return kPresentationOutcome_CoreFailure;
+  }
   if (slot->sim.world_navigation_backdrop)
     DrawSimBackdrop(slot, viewport, NULL);
   if (!DrawWorldNavigationGround(slot, viewport, world)) {
-    SDL_SetRenderClipRect(g_renderer, NULL);
+    ArRenderDevice_SetClipRect(&g_render_device, NULL);
     ApplyLogicalPresentation(slot);
     return kPresentationOutcome_CoreFailure;
   }
   if (!DrawWorldNavigationLightTreatment(slot, viewport)) {
-    SDL_SetRenderClipRect(g_renderer, NULL);
+    ArRenderDevice_SetClipRect(&g_render_device, NULL);
     ApplyLogicalPresentation(slot);
     return kPresentationOutcome_CoreFailure;
   }
   if (!DrawWorldNavigationActiveRegionHaze(slot, viewport)) {
-    SDL_SetRenderClipRect(g_renderer, NULL);
+    ArRenderDevice_SetClipRect(&g_render_device, NULL);
     ApplyLogicalPresentation(slot);
     return kPresentationOutcome_CoreFailure;
   }
@@ -582,7 +614,7 @@ PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
    * Palace/UI captures are drawn afterward because PpuRasterizeObjRange has
    * already applied this frame's brightness to their pixels. */
   if (!DrawWorldNavigationMasterFade(slot, viewport)) {
-    SDL_SetRenderClipRect(g_renderer, NULL);
+    ArRenderDevice_SetClipRect(&g_render_device, NULL);
     ApplyLogicalPresentation(slot);
     return kPresentationOutcome_CoreFailure;
   }
@@ -593,11 +625,11 @@ PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
        !DrawWorldNavigationCompositionLayer(
            slot, viewport, &composition->ui,
            s_world_navigation_ui_texture))) {
-    SDL_SetRenderClipRect(g_renderer, NULL);
+    ArRenderDevice_SetClipRect(&g_render_device, NULL);
     ApplyLogicalPresentation(slot);
     return kPresentationOutcome_CoreFailure;
   }
-  SDL_SetRenderClipRect(g_renderer, NULL);
+  ArRenderDevice_SetClipRect(&g_render_device, NULL);
   ApplyLogicalPresentation(slot);
   return outcome;
 }
@@ -606,15 +638,15 @@ PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
  * keeps the town half and calls this; see the comment on
  * PresentRendererResources_Reset in present.c for why any of it exists. */
 void PresentWorldNav_ResetResources(void) {
-  if (s_world_navigation_cloud_texture)
-    SDL_DestroyTexture(s_world_navigation_cloud_texture);
-  s_world_navigation_cloud_texture = NULL;
-  if (s_world_navigation_palace_texture)
-    SDL_DestroyTexture(s_world_navigation_palace_texture);
-  s_world_navigation_palace_texture = NULL;
-  if (s_world_navigation_ui_texture)
-    SDL_DestroyTexture(s_world_navigation_ui_texture);
-  s_world_navigation_ui_texture = NULL;
+  ArRenderDevice_DestroyTexture(
+      &g_render_device, s_world_navigation_cloud_texture);
+  s_world_navigation_cloud_texture = ArRenderTexture_Invalid();
+  ArRenderDevice_DestroyTexture(
+      &g_render_device, s_world_navigation_palace_texture);
+  s_world_navigation_palace_texture = ArRenderTexture_Invalid();
+  ArRenderDevice_DestroyTexture(
+      &g_render_device, s_world_navigation_ui_texture);
+  s_world_navigation_ui_texture = ArRenderTexture_Invalid();
   s_world_navigation_composition_upload_valid = false;
   s_world_navigation_cloud_unavailable = false;
   s_world_navigation_weather_failure_reported = false;

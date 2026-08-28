@@ -5,6 +5,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "render/render_device.h"
+
 typedef struct SimBackgroundVoxelRenderParams {
   uint32_t serial;
   uint8_t detail;
@@ -33,7 +35,7 @@ typedef struct SimBackgroundVoxelRenderParams {
   /* Optional screen-space shadow mask. In an elevated town the renderer
    * samples this only on depth-visible terrain tops, so a projected shadow
    * cannot paint a cliff face or ground hidden behind one. */
-  SDL_Texture *shadow_mask;
+  ArRenderTexture shadow_mask;
   uint8_t shadow_opacity_pct;
 } SimBackgroundVoxelRenderParams;
 
@@ -60,26 +62,26 @@ typedef void (*SimBackgroundVoxelDepthLayerCallback)(
 /* Render-thread half of sim_background_voxels. Texture ownership, projected
  * geometry and D32 visibility live here; the general SIM compositor owns only
  * the ground base and intentionally promoted actor/selection overlays. */
-void SimBackgroundVoxelRenderer_Upload(SDL_Renderer *renderer);
+void SimBackgroundVoxelRenderer_Upload(ArRenderDevice *device);
 bool SimBackgroundVoxelRenderer_Ready(uint32_t serial);
-SDL_Texture *SimBackgroundVoxelRenderer_GroundTexture(uint32_t serial);
+ArRenderTexture SimBackgroundVoxelRenderer_GroundTexture(uint32_t serial);
 void SimBackgroundVoxelRenderer_Draw(
-    SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params);
+    ArRenderDevice *device, const SimBackgroundVoxelRenderParams *params);
 /* Depth-clips the accumulated D4 mask to visible terrain tops and composites
  * it at the caller's current ground rank. Kept separate from Draw/Interleaved
  * so the shadow cannot darken actor ranks between ground and buildings. */
 void SimBackgroundVoxelRenderer_DrawTerrainShadow(
-    SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params);
+    ArRenderDevice *device, const SimBackgroundVoxelRenderParams *params);
 /* Invokes the caller for ground actors, draws the depth-tested background
  * composite over them, then invokes it again for mountain-standing and
  * overhead actors. */
 void SimBackgroundVoxelRenderer_DrawInterleaved(
-    SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params,
+    ArRenderDevice *device, const SimBackgroundVoxelRenderParams *params,
     SimBackgroundVoxelDepthLayerCallback callback, void *userdata);
 /* Adds solid-model contact/directional silhouettes to the caller's active
  * SIM shadow-mask target. The caller owns mask allocation, blur and opacity. */
 void SimBackgroundVoxelRenderer_DrawShadowMask(
-    SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params,
+    ArRenderDevice *device, const SimBackgroundVoxelRenderParams *params,
     float light_x, float light_y);
 /* Where the volcano's crater mouth was drawn on the frame just rendered, in
  * the mountain models' own local space: the exact point the crater glow ring
@@ -104,6 +106,6 @@ typedef struct SimBackgroundCraterAnchor {
 
 bool SimBackgroundVoxelRenderer_CraterAnchor(SimBackgroundCraterAnchor *out);
 
-void SimBackgroundVoxelRenderer_Reset(void);
+void SimBackgroundVoxelRenderer_Reset(ArRenderDevice *device);
 
 #endif  /* SIM_BACKGROUND_VOXEL_RENDERER_H */

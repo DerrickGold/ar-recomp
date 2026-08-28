@@ -154,14 +154,15 @@ static void EmitTerrainDepthQuad(
     };
   }
   Sim3DDepthPass_AppendQuad(kSim3DDepthPass_DepthOccluder, vertices);
-  if (!quad->receives_shadow || !params->shadow_mask ||
+  if (!quad->receives_shadow ||
+      !ArRenderTexture_IsValid(params->shadow_mask) ||
       !params->shadow_opacity_pct)
     return;
   const float alpha =
       params->shadow_opacity_pct / (float)kPercentScale;
   for (int point = 0; point < 4; point++) {
-    vertices[point].color = (SDL_FColor){1.0f, 1.0f, 1.0f, alpha};
-    vertices[point].uv = (SDL_FPoint){
+    vertices[point].color = (ArRenderColorF){1.0f, 1.0f, 1.0f, alpha};
+    vertices[point].uv = (ArRenderPointF){
       quad->points[point].x / params->viewport.w,
       quad->points[point].y / params->viewport.h,
     };

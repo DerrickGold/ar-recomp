@@ -36,8 +36,8 @@ enum {
 };
 
 typedef struct SimBackgroundGeometryBatch {
-  SDL_Vertex vertices[kSimBackgroundBatchMaxVertices];
-  int indices[kSimBackgroundBatchMaxIndices];
+  ArRenderVertex2D vertices[kSimBackgroundBatchMaxVertices];
+  int32_t indices[kSimBackgroundBatchMaxIndices];
   int vertex_count, index_count;
 } SimBackgroundGeometryBatch;
 
@@ -158,7 +158,7 @@ bool SimBackgroundVoxelProject_GroundedPoint(
     Scene3DPoint *out, float *clip_depth);
 
 void SimBackgroundVoxelProject_FlushBatch(
-    SDL_Renderer *renderer, SimBackgroundGeometryBatch *batch);
+    ArRenderDevice *device, SimBackgroundGeometryBatch *batch);
 
 /* Submits one material-shaded quad to the shared solid depth layer. */
 void SimBackgroundVoxelProject_AppendFace(

@@ -181,7 +181,7 @@ SimBackgroundVoxelRenderParams SimVoxelRenderParams(
     .source = source,
     .viewport = viewport,
     .matrix = matrix,
-    .shadow_mask = NULL,
+    .shadow_mask = {0},
     .shadow_opacity_pct = slot->sim.shadow_opacity_pct,
   };
 }

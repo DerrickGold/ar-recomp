@@ -92,6 +92,13 @@ typedef enum ArRenderBlendMode {
   kArRenderBlendMode_Multiply,
 } ArRenderBlendMode;
 
+typedef enum ArRenderTextureAddressMode {
+  /* Use the backend's ordinary sampling rule for the texture. */
+  kArRenderTextureAddressMode_Auto,
+  kArRenderTextureAddressMode_Clamp,
+  kArRenderTextureAddressMode_Wrap,
+} ArRenderTextureAddressMode;
+
 typedef uint32_t ArRenderDrawStateFlags;
 enum {
   /* Multiply sampled texture color/alpha for this draw only. Geometry already
@@ -100,12 +107,18 @@ enum {
   kArRenderDrawState_Tint = UINT32_C(1) << 0,
   /* Override the texture's descriptor blend mode for this draw only. */
   kArRenderDrawState_Blend = UINT32_C(1) << 1,
+  /* Override U/V sampling outside [0, 1] for this draw only. Addressing is
+   * meaningful only for textured submissions and requires TextureWrap when
+   * either axis selects Wrap. */
+  kArRenderDrawState_Address = UINT32_C(1) << 2,
 };
 
 typedef struct ArRenderDrawState {
   ArRenderDrawStateFlags flags;
   ArRenderColorF tint;
   ArRenderBlendMode blend;
+  ArRenderTextureAddressMode address_u;
+  ArRenderTextureAddressMode address_v;
 } ArRenderDrawState;
 
 typedef struct ArRenderTextureDesc {

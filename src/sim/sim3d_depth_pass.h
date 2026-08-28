@@ -1,8 +1,9 @@
 #ifndef SIM3D_DEPTH_PASS_H
 #define SIM3D_DEPTH_PASS_H
 
-#include <SDL3/SDL.h>
 #include <stdbool.h>
+
+#include "render/render_device.h"
 
 typedef enum Sim3DDepthPassLayer {
   /* Invisible terrain geometry is submitted first and writes only depth.  The
@@ -25,35 +26,36 @@ typedef enum Sim3DDepthPassLayer {
 typedef struct Sim3DDepthVertex {
   float x, y;
   float depth;
-  SDL_FColor color;
-  SDL_FPoint uv;
+  ArRenderColorF color;
+  ArRenderPointF uv;
 } Sim3DDepthVertex;
 
 /* Creates the shaders/pipeline and verifies D32 support. Call during video
  * startup so an unsupported backend is a launch error, never a missing-scene
  * fallback discovered after entering SIM mode. */
-bool Sim3DDepthPass_Require(SDL_Renderer *renderer);
+bool Sim3DDepthPass_Require(ArRenderDevice *device);
 
 /* A viewport-sized, transparent color target paired with a real D32 depth
  * attachment. Geometry is collected by material so texture changes cost a
  * handful of draws; draw order inside and between those groups is resolved by
- * the GPU depth test, not by SDL_RenderGeometry painter ordering. */
-bool Sim3DDepthPass_Begin(SDL_Renderer *renderer, int width, int height,
-                          SDL_ScaleMode output_scale_mode);
-/* SDL streaming textures are renderer-owned staging resources and are not a
- * portable sampling contract for direct SDL_GPU command buffers. Upload the
- * immutable mountain cutout atlas into pass-owned GPU storage instead. */
-bool Sim3DDepthPass_UploadMountainAtlas(SDL_Renderer *renderer,
+ * the GPU depth test, not by backend painter ordering. */
+bool Sim3DDepthPass_Begin(ArRenderDevice *device, int width, int height,
+                          ArRenderFilter output_filter);
+/* Ordinary backend textures are not necessarily valid sampling resources for
+ * a backend's custom depth pipeline. Upload the immutable mountain cutout
+ * atlas into pass-owned storage instead. */
+bool Sim3DDepthPass_UploadMountainAtlas(ArRenderDevice *device,
                                         const uint32_t *argb_pixels,
                                         int width, int height, int pitch);
 bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer,
                                const Sim3DDepthVertex vertices[4]);
 /* Submits all collected layers. shadow_texture is required only when a
- * ShadowReceiver quad was appended; pass NULL for the ordinary solid pass. */
-SDL_Texture *Sim3DDepthPass_Submit(SDL_Renderer *renderer,
-                                   SDL_Texture *shadow_texture);
+ * ShadowReceiver quad was appended; pass an invalid handle for the ordinary
+ * solid pass. */
+ArRenderTexture Sim3DDepthPass_Submit(
+    ArRenderDevice *device, ArRenderTexture shadow_texture);
 bool Sim3DDepthPass_IsCollecting(void);
 const char *Sim3DDepthPass_LastError(void);
-void Sim3DDepthPass_Reset(void);
+void Sim3DDepthPass_Reset(ArRenderDevice *device);
 
 #endif  /* SIM3D_DEPTH_PASS_H */

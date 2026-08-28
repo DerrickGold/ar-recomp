@@ -1040,7 +1040,7 @@ void PresentUpload(const FrameSlot *slot) {
     }
   }
   UploadSimTownCanvas();
-  SimBackgroundVoxelRenderer_Upload(g_renderer);
+  SimBackgroundVoxelRenderer_Upload(&g_render_device);
   UploadWorldNavigationComposition(slot);
   Sim3DPerformance_End(performance);
 }

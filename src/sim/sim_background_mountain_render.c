@@ -35,7 +35,7 @@ static const float kVolcanoHeightScale = 1.12f;
 typedef struct ProjectedMountainReliefFace {
   Scene3DPoint points[4];
   float gpu_depth[4];
-  SDL_FPoint uv[4];
+  ArRenderPointF uv[4];
   uint8_t brightness[4];
   uint8_t alpha[4];
 } ProjectedMountainReliefFace;
@@ -86,7 +86,7 @@ static void AddProjectedMountainReliefFace(
     const SimBackgroundProjectionAxis *axis,
     float origin_x, float origin_y,
     const float local_x[4], const float local_y[4],
-    const float local_z[4], const SDL_FPoint uv[4],
+    const float local_z[4], const ArRenderPointF uv[4],
     const uint8_t brightness[4], const uint8_t alpha[4],
     int *count) {
   if (*count >= kMaxMountainReliefFaces) return;
@@ -113,11 +113,11 @@ static void AppendProjectedSolidEffectFace(
     const SimBackgroundProjectionAxis *axis,
     float origin_x, float origin_y,
     const float local_x[4], const float local_y[4],
-    const float local_z[4], SDL_FColor color) {
+    const float local_z[4], ArRenderColorF color) {
   if (!Sim3DDepthPass_IsCollecting()) return;
   Scene3DPoint points[4];
   Sim3DDepthVertex vertices[4];
-  static const SDL_FPoint uv[4] = {
+  static const ArRenderPointF uv[4] = {
     {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
   };
   for (int point = 0; point < 4; point++) {
@@ -147,7 +147,7 @@ static void AppendProjectedSolidEffectBox(
     float origin_x, float origin_y,
     float x0, float y0, float z0,
     float x1, float y1, float z1,
-    SDL_FColor color) {
+    ArRenderColorF color) {
   static const uint8_t face[5][4] = {
     {4, 5, 6, 7},  /* top */
     {1, 0, 4, 5},  /* north */
@@ -160,7 +160,7 @@ static void AppendProjectedSolidEffectBox(
   const float z[8] = {z0, z0, z0, z0, z1, z1, z1, z1};
   for (int side = 0; side < 5; side++) {
     float face_x[4], face_y[4], face_z[4];
-    SDL_FColor shaded = color;
+    ArRenderColorF shaded = color;
     if (side) {
       float shade = side == 3 ? 0.92f : side == 2 ? 0.84f : 0.76f;
       shaded.r *= shade;
@@ -255,7 +255,7 @@ static void AppendCraterGlowRing(
     const SimBackgroundProjectionAxis *axis,
     float origin_x, float origin_y,
     float centre_x, float centre_y, float z,
-    float radius_x, float radius_y, SDL_FColor colour) {
+    float radius_x, float radius_y, ArRenderColorF colour) {
   static const float unit[8][2] = {
     {0.0f, -1.0f}, {0.7071f, -0.7071f}, {1.0f, 0.0f},
     {0.7071f, 0.7071f}, {0.0f, 1.0f}, {-0.7071f, 0.7071f},
@@ -343,11 +343,11 @@ static void AppendVolcanoEffects(
     AppendCraterGlowRing(
         params, axis, origin_x, origin_y, crater_x, crater_y,
         crater_z + 0.35f, (float)kCraterSourceRadiusX, radius_y,
-        (SDL_FColor){1.0f, 0.20f, 0.02f, 0.36f});
+        (ArRenderColorF){1.0f, 0.20f, 0.02f, 0.36f});
     AppendCraterGlowRing(
         params, axis, origin_x, origin_y, crater_x, crater_y,
         crater_z + 0.55f, kCraterSourceRadiusX * 0.55f, radius_y * 0.55f,
-        (SDL_FColor){1.0f, 0.56f, 0.08f, 0.84f});
+        (ArRenderColorF){1.0f, 0.56f, 0.08f, 0.84f});
   }
 
   if (params->detail < kSimBackgroundVoxelDetail_High ||
@@ -363,7 +363,7 @@ static void AppendVolcanoEffects(
     float drift_y = -age_fraction * 4.0f;
     float z0 = crater_z + 2.0f + age_fraction * 17.0f;
     float opacity = 0.72f - age_fraction * 0.34f;
-    SDL_FColor smoke = {
+    ArRenderColorF smoke = {
       0.66f + age_fraction * 0.10f,
       0.63f + age_fraction * 0.10f,
       0.58f + age_fraction * 0.10f,
@@ -513,7 +513,7 @@ static void AddMountainStackTile(
   /* Every layer retains the exact front silhouette orientation. Flipping only
    * the rear copy moves off-centre tip pixels across their tile and turns one
    * peak into two visible horns, so the mapping does not vary by layer. */
-  const SDL_FPoint uv[4] = {
+  const ArRenderPointF uv[4] = {
     {mirror_x ? u1 : u0, v0},
     {mirror_x ? u0 : u1, v0},
     {mirror_x ? u0 : u1, v1},
@@ -830,7 +830,7 @@ static void AddMountainSkirtTile(
       (float)kSimTownCanvasPixels;
   float v1 = (cell_v + profile->last_row + 0.5f) /
       (float)kSimTownCanvasPixels;
-  SDL_FPoint uv[4] = {
+  ArRenderPointF uv[4] = {
     {(cell_u + profile->outer_first + 0.5f) / kSimTownCanvasPixels, v0},
     {(cell_u + profile->outer_last + 0.5f) / kSimTownCanvasPixels, v1},
     {(cell_u + profile->inner_last + 0.5f) / kSimTownCanvasPixels, v1},

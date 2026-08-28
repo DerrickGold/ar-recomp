@@ -1448,7 +1448,9 @@ if(BUILD_TESTING)
     # their native shader blob and synchronization path.
     add_executable(actraiser_sim3d_depth_pass_gpu_test
         tests/sim3d_depth_pass_gpu_test.c
-        src/sim/sim3d_depth_pass.c
+        src/render/render_device.c
+        src/platform/sdl/render_sdl.c
+        src/platform/sdl/sim3d_depth_pass_sdl.c
     )
     target_include_directories(actraiser_sim3d_depth_pass_gpu_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src)

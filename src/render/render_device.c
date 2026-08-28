@@ -105,18 +105,38 @@ static bool ValidBlend(ArRenderBlendMode blend) {
       blend <= kArRenderBlendMode_Multiply;
 }
 
+static bool ValidAddress(ArRenderTextureAddressMode address) {
+  return address >= kArRenderTextureAddressMode_Auto &&
+      address <= kArRenderTextureAddressMode_Wrap;
+}
+
 static bool ValidDrawState(const ArRenderDrawState *state,
-                           bool geometry) {
+                           bool geometry, bool textured,
+                           const ArRenderCapabilities *capabilities) {
   if (!state) return true;
   const ArRenderDrawStateFlags known =
-      kArRenderDrawState_Tint | kArRenderDrawState_Blend;
+      kArRenderDrawState_Tint | kArRenderDrawState_Blend |
+      kArRenderDrawState_Address;
   if (state->flags & ~known) return false;
   if (geometry && (state->flags & kArRenderDrawState_Tint)) return false;
   if ((state->flags & kArRenderDrawState_Tint) &&
       !NormalizedColor(state->tint))
     return false;
-  return !(state->flags & kArRenderDrawState_Blend) ||
-      ValidBlend(state->blend);
+  if ((state->flags & kArRenderDrawState_Blend) &&
+      !ValidBlend(state->blend))
+    return false;
+  if (state->flags & kArRenderDrawState_Address) {
+    if (!textured || !ValidAddress(state->address_u) ||
+        !ValidAddress(state->address_v))
+      return false;
+    const bool needs_wrap =
+        state->address_u == kArRenderTextureAddressMode_Wrap ||
+        state->address_v == kArRenderTextureAddressMode_Wrap;
+    if (needs_wrap && !ArRenderCapabilities_Has(
+            capabilities, kArRenderCapability_TextureWrap))
+      return false;
+  }
+  return true;
 }
 
 bool ArRenderDevice_DrawTextureWithState(
@@ -124,7 +144,8 @@ bool ArRenderDevice_DrawTextureWithState(
     const ArRenderRectF *source, const ArRenderRectF *destination,
     const ArRenderDrawState *state) {
   return ArRenderDevice_IsReady(device) &&
-      ArRenderTexture_IsValid(texture) && ValidDrawState(state, false) &&
+      ArRenderTexture_IsValid(texture) &&
+      ValidDrawState(state, false, true, &device->capabilities) &&
       device->ops->draw_texture(
           device->context, texture, source, destination, state);
 }
@@ -158,7 +179,9 @@ bool ArRenderDevice_DrawGeometryWithState(
     const int32_t *indices, int index_count,
     const ArRenderDrawState *state) {
   return ArRenderDevice_IsReady(device) && vertices && vertex_count > 0 &&
-      indices && index_count > 0 && ValidDrawState(state, true) &&
+      indices && index_count > 0 &&
+      ValidDrawState(state, true, ArRenderTexture_IsValid(texture),
+                     &device->capabilities) &&
       device->ops->draw_geometry(device->context, texture, vertices,
                                  vertex_count, indices, index_count, state);
 }

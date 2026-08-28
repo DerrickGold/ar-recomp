@@ -89,8 +89,9 @@ bool ArRenderDevice_DrawGeometry(ArRenderDevice *device,
                                  int vertex_count,
                                  const int32_t *indices,
                                  int index_count);
-/* `state` may be NULL; any blend override is scoped to this submission.
- * Geometry tint is rejected because vertex colours own its modulation. */
+/* `state` may be NULL; blend and texture-address overrides are scoped to this
+ * submission. Geometry tint is rejected because vertex colours own its
+ * modulation. Addressing is rejected for untextured geometry. */
 bool ArRenderDevice_DrawGeometryWithState(
     ArRenderDevice *device, ArRenderTexture texture,
     const ArRenderVertex2D *vertices, int vertex_count,

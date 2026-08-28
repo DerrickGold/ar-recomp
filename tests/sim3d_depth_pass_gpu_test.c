@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "platform/sdl/render_sdl.h"
 #include "sim/sim3d_depth_pass.h"
 
 enum {
@@ -48,7 +49,7 @@ static SDL_Renderer *CreateProductionRenderer(SDL_Window *window) {
 
 static bool AppendRect(Sim3DDepthPassLayer layer,
                        float x0, float y0, float x1, float y1,
-                       float depth, SDL_FColor color) {
+                       float depth, ArRenderColorF color) {
   const Sim3DDepthVertex vertices[4] = {
     {x0, y0, depth, color, {0.0f, 0.0f}},
     {x1, y0, depth, color, {1.0f, 0.0f}},
@@ -95,9 +96,13 @@ int main(void) {
          device ? SDL_GetGPUDeviceDriver(device) : "none",
          device ? (unsigned)SDL_GetGPUShaderFormats(device) : 0u);
 
-  CHECK(Sim3DDepthPass_Require(renderer));
+  ArRenderDevice render_device = {0};
+  ArSdlRenderBackend render_backend = {0};
+  CHECK(ArSdlRenderBackend_Bind(
+      &render_device, &render_backend, renderer));
+  CHECK(Sim3DDepthPass_Require(&render_device));
   CHECK(Sim3DDepthPass_Begin(
-      renderer, kTestWidth, kTestHeight, SDL_SCALEMODE_NEAREST));
+      &render_device, kTestWidth, kTestHeight, kArRenderFilter_Nearest));
   /* The invisible near quad writes only depth over the left half. The farther
    * red solid should survive on the right and be rejected on the left. This
    * exercises pipeline creation, transfer buffers, D32 comparison, resource
@@ -105,12 +110,14 @@ int main(void) {
   CHECK(AppendRect(
       kSim3DDepthPass_DepthOccluder,
       0.0f, 0.0f, kTestWidth / 2.0f, (float)kTestHeight,
-      0.25f, (SDL_FColor){1.0f, 1.0f, 1.0f, 1.0f}));
+      0.25f, (ArRenderColorF){1.0f, 1.0f, 1.0f, 1.0f}));
   CHECK(AppendRect(
       kSim3DDepthPass_Solid,
       0.0f, 0.0f, (float)kTestWidth, (float)kTestHeight,
-      0.75f, (SDL_FColor){1.0f, 0.0f, 0.0f, 1.0f}));
-  SDL_Texture *output = Sim3DDepthPass_Submit(renderer, NULL);
+      0.75f, (ArRenderColorF){1.0f, 0.0f, 0.0f, 1.0f}));
+  ArRenderTexture output_handle = Sim3DDepthPass_Submit(
+      &render_device, ArRenderTexture_Invalid());
+  SDL_Texture *output = ArSdlRenderBackend_UnwrapTexture(output_handle);
   CHECK(output != NULL);
 
   SDL_Surface *readback = NULL;
@@ -137,7 +144,8 @@ int main(void) {
   SDL_DestroySurface(argb);
   SDL_DestroySurface(readback);
   CHECK(SDL_SetRenderTarget(renderer, NULL));
-  Sim3DDepthPass_Reset();
+  Sim3DDepthPass_Reset(&render_device);
+  ArRenderDevice_Reset(&render_device);
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
   SDL_Quit();

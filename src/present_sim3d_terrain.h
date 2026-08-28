@@ -5,6 +5,7 @@
 
 #include "present.h"
 #include "present_sim3d_project.h"
+#include "render/render_device.h"
 
 #if AR_SIM3D_TERRAIN_ELEVATION
 
@@ -12,7 +13,8 @@
  * lighting cached by town and landscape height, a painter order cached across
  * ordinary panning, and one top plus its exposed skirts per cell. */
 bool DrawSimTownTerrain(
-    SDL_Texture *texture, const FrameSlot *slot, float extent_x0,
+    ArRenderDevice *device, ArRenderTexture texture,
+    const FrameSlot *slot, float extent_x0,
     float extent_y0, SDL_Rect source, SDL_Rect viewport,
     const float matrix[16], const SimCullFade *fade);
 

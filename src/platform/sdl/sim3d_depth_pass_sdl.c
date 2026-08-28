@@ -1,6 +1,7 @@
-#include "sim3d_depth_pass.h"
-#include "sim3d_performance.h"
+#include "sim/sim3d_depth_pass.h"
+#include "sim/sim3d_performance.h"
 
+#include <SDL3/SDL.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -8,6 +9,7 @@
 #include <string.h>
 
 #include "gpu_shader_blob.h"
+#include "platform/sdl/render_sdl.h"
 #include "shaders/sim3d_depth_frag.h"
 #include "shaders/sim3d_depth_vert.h"
 
@@ -363,7 +365,7 @@ static bool EnsureInitialized(SDL_Renderer *renderer) {
   if (g_depth_pass.failed) return false;
   if (g_depth_pass.renderer == renderer && g_depth_pass.pipeline) return true;
   if (g_depth_pass.renderer && g_depth_pass.renderer != renderer)
-    Sim3DDepthPass_Reset();
+    Sim3DDepthPass_Reset(NULL);
 
   SDL_PropertiesID props = SDL_GetRendererProperties(renderer);
   g_depth_pass.device = props ? SDL_GetPointerProperty(
@@ -401,8 +403,14 @@ static bool EnsureInitialized(SDL_Renderer *renderer) {
   return true;
 }
 
-bool Sim3DDepthPass_Require(SDL_Renderer *renderer) {
-  return renderer && EnsureInitialized(renderer);
+bool Sim3DDepthPass_Require(ArRenderDevice *device) {
+  const ArRenderCapabilities *capabilities =
+      ArRenderDevice_Capabilities(device);
+  SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
+  return renderer && ArRenderCapabilities_Has(
+      capabilities, kArRenderCapability_Depth |
+                        kArRenderCapability_CustomShaders) &&
+      EnsureInitialized(renderer);
 }
 
 const char *Sim3DDepthPass_LastError(void) {
@@ -410,9 +418,10 @@ const char *Sim3DDepthPass_LastError(void) {
   return error && error[0] ? error : "required SDL_GPU depth pass unavailable";
 }
 
-bool Sim3DDepthPass_UploadMountainAtlas(SDL_Renderer *renderer,
+bool Sim3DDepthPass_UploadMountainAtlas(ArRenderDevice *device,
                                         const uint32_t *argb_pixels,
                                         int width, int height, int pitch) {
+  SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
   if (!renderer || !argb_pixels || width <= 0 || height <= 0 || pitch <= 0)
     return false;
   if ((size_t)width > SIZE_MAX / sizeof(uint32_t)) return false;
@@ -557,8 +566,12 @@ static bool ReserveList(Sim3DDepthList *list, Uint32 additional) {
   return true;
 }
 
-bool Sim3DDepthPass_Begin(SDL_Renderer *renderer, int width, int height,
-                          SDL_ScaleMode output_scale_mode) {
+bool Sim3DDepthPass_Begin(ArRenderDevice *device, int width, int height,
+                          ArRenderFilter output_filter) {
+  SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
+  const SDL_ScaleMode output_scale_mode =
+      output_filter == kArRenderFilter_Linear
+          ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST;
   if (!renderer || width <= 0 || height <= 0 ||
       !EnsureInitialized(renderer) ||
       !CreateTargets(renderer, width, height, output_scale_mode))
@@ -750,32 +763,35 @@ static SDL_GPUSampler *SamplerForLayer(Sim3DDepthPassLayer layer) {
       ? g_depth_pass.linear_sampler : g_depth_pass.nearest_sampler;
 }
 
-SDL_Texture *Sim3DDepthPass_Submit(SDL_Renderer *renderer,
-                                   SDL_Texture *shadow_texture) {
+ArRenderTexture Sim3DDepthPass_Submit(
+    ArRenderDevice *device, ArRenderTexture shadow_texture) {
+  SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
+  SDL_Texture *native_shadow =
+      ArSdlRenderBackend_UnwrapTexture(shadow_texture);
   if (!g_depth_pass.collecting || renderer != g_depth_pass.renderer)
-    return NULL;
+    return ArRenderTexture_Invalid();
   g_depth_pass.collecting = false;
   if (g_depth_pass.geometry_failed) {
     fprintf(stderr, "[sim3d-depth] CPU geometry staging allocation failed\n");
-    return NULL;
+    return ArRenderTexture_Invalid();
   }
   Uint32 total = 0;
   for (int i = 0; i < kSim3DDepthPassLayerCount; i++) {
     if (g_depth_pass.lists[i].count > UINT32_MAX - total) {
       fprintf(stderr, "[sim3d-depth] geometry vertex count overflow\n");
-      return NULL;
+      return ArRenderTexture_Invalid();
     }
     total += g_depth_pass.lists[i].count;
   }
   if (!total || total % kSim3DDepthVerticesPerQuad != 0 ||
       !EnsureGpuBuffers(total))
-    return NULL;
+    return ArRenderTexture_Invalid();
   for (int i = 0; i < kSim3DDepthPassLayerCount; i++) {
     if (!g_depth_pass.lists[i].count) continue;
-    if (!TextureForLayer((Sim3DDepthPassLayer)i, shadow_texture)) {
+    if (!TextureForLayer((Sim3DDepthPassLayer)i, native_shadow)) {
       fprintf(stderr, "[sim3d-depth] material layer %d has no GPU texture\n",
               i);
-      return NULL;
+      return ArRenderTexture_Invalid();
     }
   }
 
@@ -784,7 +800,7 @@ SDL_Texture *Sim3DDepthPass_Submit(SDL_Renderer *renderer,
   if (!mapped) {
     fprintf(stderr, "[sim3d-depth] geometry upload map failed: %s\n",
             SDL_GetError());
-    return NULL;
+    return ArRenderTexture_Invalid();
   }
   Uint32 first[kSim3DDepthPassLayerCount];
   Uint32 at = 0;
@@ -800,14 +816,14 @@ SDL_Texture *Sim3DDepthPass_Submit(SDL_Renderer *renderer,
   /* SDL_Renderer and SDL_GPU share this device. Flush is the explicit API
    * boundary that submits queued 2D work and invalidates SDL's cached GPU
    * state before this command buffer writes the shared target. */
-  if (!SDL_FlushRenderer(renderer)) return NULL;
+  if (!SDL_FlushRenderer(renderer)) return ArRenderTexture_Invalid();
   SDL_GPUCommandBuffer *commands = SDL_AcquireGPUCommandBuffer(
       g_depth_pass.device);
-  if (!commands) return NULL;
+  if (!commands) return ArRenderTexture_Invalid();
   SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(commands);
   if (!copy) {
     SDL_CancelGPUCommandBuffer(commands);
-    return NULL;
+    return ArRenderTexture_Invalid();
   }
   SDL_GPUTransferBufferLocation source = {
     .transfer_buffer = g_depth_pass.transfer_buffer,
@@ -854,7 +870,7 @@ SDL_Texture *Sim3DDepthPass_Submit(SDL_Renderer *renderer,
       commands, &color, 1, &depth);
   if (!pass) {
     SDL_CancelGPUCommandBuffer(commands);
-    return NULL;
+    return ArRenderTexture_Invalid();
   }
   SDL_GPUBufferBinding vertex_binding = {
     .buffer = g_depth_pass.vertex_buffer,
@@ -878,7 +894,7 @@ SDL_Texture *Sim3DDepthPass_Submit(SDL_Renderer *renderer,
       bound = pipeline;
     }
     SDL_GPUTexture *texture = TextureForLayer(
-        (Sim3DDepthPassLayer)i, shadow_texture);
+        (Sim3DDepthPassLayer)i, native_shadow);
     SDL_GPUTextureSamplerBinding texture_binding = {
       .texture = texture,
       .sampler = SamplerForLayer((Sim3DDepthPassLayer)i),
@@ -894,7 +910,7 @@ SDL_Texture *Sim3DDepthPass_Submit(SDL_Renderer *renderer,
   if (!SDL_SubmitGPUCommandBuffer(commands)) {
     fprintf(stderr, "[sim3d-depth] command submission failed: %s\n",
             SDL_GetError());
-    return NULL;
+    return ArRenderTexture_Invalid();
   }
   for (int i = 0; i < kSim3DDepthPassLayerCount; i++) {
     if (!g_depth_pass.lists[i].count) continue;
@@ -904,14 +920,15 @@ SDL_Texture *Sim3DDepthPass_Submit(SDL_Renderer *renderer,
             kSim3DDepthIndicesPerQuad);
   }
   g_depth_pass.index_upload_required = false;
-  return g_depth_pass.output_texture;
+  return ArSdlRenderBackend_BorrowTexture(g_depth_pass.output_texture);
 }
 
 bool Sim3DDepthPass_IsCollecting(void) {
   return g_depth_pass.collecting;
 }
 
-void Sim3DDepthPass_Reset(void) {
+void Sim3DDepthPass_Reset(ArRenderDevice *device) {
+  (void)device;
   g_depth_pass.collecting = false;
   ReleaseTargets();
   if (g_depth_pass.pipeline)

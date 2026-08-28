@@ -87,6 +87,22 @@ int main(void) {
   AssertTextureState(
       native, 0.8f, 0.7f, 0.6f, 0.5f, SDL_BLENDMODE_BLEND);
 
+  assert(SDL_SetRenderTextureAddressMode(
+      renderer, SDL_TEXTURE_ADDRESS_AUTO, SDL_TEXTURE_ADDRESS_AUTO));
+  const ArRenderDrawState address_state = {
+    .flags = kArRenderDrawState_Address,
+    .address_u = kArRenderTextureAddressMode_Wrap,
+    .address_v = kArRenderTextureAddressMode_Clamp,
+  };
+  assert(ArRenderDevice_DrawGeometryWithState(
+      &device, texture, vertices, 3, indices, 3, &address_state));
+  SDL_TextureAddressMode address_u = SDL_TEXTURE_ADDRESS_INVALID;
+  SDL_TextureAddressMode address_v = SDL_TEXTURE_ADDRESS_INVALID;
+  assert(SDL_GetRenderTextureAddressMode(
+      renderer, &address_u, &address_v));
+  assert(address_u == SDL_TEXTURE_ADDRESS_AUTO);
+  assert(address_v == SDL_TEXTURE_ADDRESS_AUTO);
+
   assert(SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND));
   assert(ArRenderDevice_DrawGeometryWithState(
       &device, ArRenderTexture_Invalid(),
