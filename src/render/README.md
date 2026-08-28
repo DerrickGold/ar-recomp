@@ -45,7 +45,9 @@ selects physical coordinates, validates the requested aspect-fit viewport,
 clears margins and scene colours without leaking backend state, supports
 temporary full-output callbacks, and restores the full viewport on finish or
 best-effort abort. Presentation paths share this policy instead of duplicating
-platform viewport choreography.
+platform viewport choreography. `ArRenderOutput_ResolveAspectFit` exposes the
+same calculation without beginning a frame for effects that must first size
+and bind an intermediate target.
 
 ## Current migration state
 
@@ -101,6 +103,11 @@ presentation transform.
 The enhanced SIM-town frame owner now uses that same viewport-local scope and
 portable full-output master fade. Its remaining native dependencies are
 internal effect targets and meshes rather than window/output orchestration.
+The ordinary flat/action frame owner now uses the same scope for its base PPU
+frame, Mode 7 replacement, action effects, and forced-blank clear. Heat
+refraction sizes its intermediate target from the portable aspect-fit query
+and restores it through the scoped target/output contracts without capturing
+native draw state or relying on logical-presentation transforms.
 Action heat refraction is a portable mesh warp rather than a custom shader; its
 viewport-sized texture is now device-owned and uses the scoped-target contract
 plus portable geometry for both its warped and fallback resolves. CRT still

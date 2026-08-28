@@ -73,8 +73,6 @@ static bool s_action_heat_engaged;
 
 typedef struct ActionHeatPassState {
   ArRenderTargetState target_state;
-  SDL_BlendMode blend;
-  Uint8 r, g, b, a;
   bool valid;
 } ActionHeatPassState;
 
@@ -1188,15 +1186,6 @@ static void ClearActionHeatSavedState(void) {
   s_action_heat_saved_state = (ActionHeatPassState){0};
 }
 
-static bool RestoreActionHeatDrawState(const ActionHeatPassState *state) {
-  if (!state || !state->valid) return false;
-  const bool blend_restored =
-      SDL_SetRenderDrawBlendMode(g_renderer, state->blend);
-  const bool color_restored = SDL_SetRenderDrawColor(
-      g_renderer, state->r, state->g, state->b, state->a);
-  return blend_restored && color_restored;
-}
-
 static bool ActionHeatMeshMatches(
     const ActionHeatMeshCache *cache, uint16_t game_frame,
     SDL_Rect viewport, int target_width, int target_height,
@@ -1241,27 +1230,14 @@ static bool BeginActionHeat(const FrameSlot *slot, SDL_Rect viewport) {
   if (s_action_heat_engaged || !FrameUsesActionHeat(slot) ||
       !EffectRendererAvailable() || !s_action_heat_supported)
     return false;
-  int output_width = 0, output_height = 0;
-  if (!SDL_GetRenderOutputSize(
-          g_renderer, &output_width, &output_height) ||
-      viewport.x < 0 || viewport.y < 0 || viewport.w <= 0 ||
-      viewport.h <= 0 || viewport.x > output_width - viewport.w ||
-      viewport.y > output_height - viewport.h) {
-    DisableActionHeat("output-size query");
+  if (viewport.w <= 0 || viewport.h <= 0) {
+    DisableActionHeat("invalid viewport");
     return false;
   }
   const ArRenderTexture target = EnsureActionHeatTarget(
       viewport.w, viewport.h);
   if (!ArRenderTexture_IsValid(target)) return false;
-  ActionHeatPassState saved = {
-    .blend = SDL_BLENDMODE_INVALID,
-  };
-  if (!SDL_GetRenderDrawBlendMode(g_renderer, &saved.blend) ||
-      !SDL_GetRenderDrawColor(
-          g_renderer, &saved.r, &saved.g, &saved.b, &saved.a)) {
-    DisableActionHeat("render-state capture");
-    return false;
-  }
+  ActionHeatPassState saved = {0};
   const ArRenderTargetBeginResult begin = ArRenderDevice_BeginTarget(
       &g_render_device, target, &saved.target_state);
   if (begin != kArRenderTargetBegin_Ready) {
@@ -1273,24 +1249,6 @@ static bool BeginActionHeat(const FrameSlot *slot, SDL_Rect viewport) {
   }
   saved.valid = true;
   s_action_heat_saved_state = saved;
-  if (!SDL_SetRenderLogicalPresentation(
-          g_renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED) ||
-      !SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE) ||
-      !SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255) ||
-      !ArRenderDevice_Clear(
-          &g_render_device, (ArRenderColorF){0.0f, 0.0f, 0.0f, 1.0f})) {
-    const bool target_restored =
-        ArRenderDevice_EndTarget(&g_render_device, &saved.target_state);
-    const bool draw_state_restored = RestoreActionHeatDrawState(&saved);
-    ClearActionHeatSavedState();
-    if (!target_restored)
-      FailActionHeatTargetState("failed-begin state restore");
-    else
-      DisableActionHeat(draw_state_restored
-                            ? "target bind/clear"
-                            : "failed-begin draw-state restore");
-    return false;
-  }
   s_action_heat_engaged = true;
   return true;
 }
@@ -1300,19 +1258,34 @@ static SDL_Rect ActionHeatSceneViewport(SDL_Rect output_viewport) {
   return (SDL_Rect){0, 0, output_viewport.w, output_viewport.h};
 }
 
+static bool ResolveFrameOutputViewport(
+    const FrameSlot *slot, SDL_Rect *viewport) {
+  if (!slot || !viewport) return false;
+  const int aspect_width = slot->visible_width *
+      (slot->pixel_aspect == kPixelAspect_Crt43 ? 7 : 1);
+  const int aspect_height = slot->snes_height *
+      (slot->pixel_aspect == kPixelAspect_Crt43 ? 6 : 1);
+  ArRenderRectI resolved;
+  if (!ArRenderOutput_ResolveAspectFit(
+          &g_render_device, slot->ignore_aspect_ratio,
+          aspect_width, aspect_height, &resolved, NULL, NULL))
+    return false;
+  *viewport = (SDL_Rect){
+    resolved.x, resolved.y, resolved.w, resolved.h,
+  };
+  return true;
+}
+
 static void CancelActionHeat(void) {
   if (!s_action_heat_engaged) return;
   const ActionHeatPassState saved = s_action_heat_saved_state;
   const bool target_restored =
       saved.valid && ArRenderDevice_EndTarget(
           &g_render_device, &saved.target_state);
-  const bool draw_state_restored = RestoreActionHeatDrawState(&saved);
   ClearActionHeatSavedState();
   s_action_heat_engaged = false;
   if (!target_restored)
     FailActionHeatTargetState("cancel state restore");
-  else if (!draw_state_restored)
-    DisableActionHeat("cancel draw-state restore");
 }
 
 static void EndActionHeat(const FrameSlot *slot, SDL_Rect viewport) {
@@ -1322,54 +1295,46 @@ static void EndActionHeat(const FrameSlot *slot, SDL_Rect viewport) {
   s_action_heat_engaged = false;
   if (!saved.valid || !ArRenderDevice_EndTarget(
           &g_render_device, &saved.target_state)) {
-    (void)RestoreActionHeatDrawState(&saved);
     FailActionHeatTargetState("target restore");
     return;
   }
 
-  PresentationOutputState output_state;
-  if (!PresentationGeometry_PushFullOutput(g_renderer, &output_state)) {
-    (void)RestoreActionHeatDrawState(&saved);
-    DisableActionHeat("output-state capture");
+  const ArRenderColorF black = {0.0f, 0.0f, 0.0f, 1.0f};
+  ArRenderOutputFrame output_frame;
+  if (!ArRenderOutputFrame_Begin(
+          &g_render_device,
+          (ArRenderRectI){viewport.x, viewport.y, viewport.w, viewport.h},
+          black, black, &output_frame)) {
+    DisableActionHeat("scene resolve scope");
     return;
   }
-  bool resolved = SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE) &&
-      SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255) &&
-      SDL_RenderClear(g_renderer);
-  const ActionHeatRenderMesh *mesh = resolved ? ActionHeatMeshFor(
-      slot->action_scene_effects.game_frame, viewport,
-      s_action_heat_w, s_action_heat_h, slot->visible_width) : NULL;
+  const SDL_Rect local_viewport = {0, 0, viewport.w, viewport.h};
+  const ActionHeatRenderMesh *mesh = ActionHeatMeshFor(
+      slot->action_scene_effects.game_frame, local_viewport,
+      s_action_heat_w, s_action_heat_h, slot->visible_width);
   const bool warped = mesh && ArRenderDevice_DrawGeometry(
       &g_render_device, s_action_heat_target,
       mesh->vertices, mesh->vertex_count,
       mesh->indices, mesh->index_count);
   bool fallback = false;
-  if (resolved && !warped) {
+  if (!warped) {
     /* A runtime geometry rejection must drop only the enhancement, not the
      * already-rendered world. Resolve the captured scene without refraction
      * for this frame, then disable future heat attempts. */
     const ArRenderRectF destination = {
-      (float)viewport.x, (float)viewport.y,
-      (float)viewport.w, (float)viewport.h,
+      0.0f, 0.0f, (float)viewport.w, (float)viewport.h,
     };
     fallback = ArRenderDevice_DrawTexture(
         &g_render_device, s_action_heat_target, NULL, &destination);
   }
-  const bool output_state_restored =
-      PresentationGeometry_PopFullOutput(g_renderer, &output_state);
-  const bool draw_state_restored = RestoreActionHeatDrawState(&saved);
-  if (!output_state_restored) {
+  if (!ArRenderOutputFrame_Finish(&output_frame)) {
     DisableActionHeat("output-state restore");
     SessionFatal_Request(
         "The action heat-refraction pass could not restore the output "
         "viewport and clip state (%s). Restart the game; if this repeats, "
         "update your graphics driver or disable action particles.",
-        SDL_GetError());
-  } else if (!draw_state_restored)
-    DisableActionHeat("draw-state restore");
-  else if (!resolved)
-    DisableActionHeat("scene resolve");
-  else if (!warped)
+        ArRenderDevice_LastError(&g_render_device));
+  } else if (!warped)
     DisableActionHeat(fallback ? "refraction mesh" : "fallback resolve");
 }
 
@@ -1973,18 +1938,19 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
    * the captured example). Treat forced blank as the master output gate it is
    * on hardware and return before drawing any host-owned layer or overlay. */
   if (slot->diorama_active && (slot->inidisp & 0x80)) {
+    const ArRenderColorF black = {0.0f, 0.0f, 0.0f, 1.0f};
     if (!ArRenderDevice_SetRenderTarget(
-            &g_render_device, CrtPost_BaseTarget())) {
+            &g_render_device, CrtPost_BaseTarget()) ||
+        !ArRenderDevice_UseOutputCoordinates(&g_render_device) ||
+        !ArRenderDevice_SetViewport(&g_render_device, NULL) ||
+        !ArRenderDevice_SetClipRect(&g_render_device, NULL) ||
+        !ArRenderDevice_Clear(&g_render_device, black)) {
       SessionFatal_Request(
-          "The renderer could not select its scene target for forced blank "
+          "The renderer could not clear its scene target for forced blank "
           "(%s). Restart the game; if this repeats, update your graphics "
           "driver.", ArRenderDevice_LastError(&g_render_device));
       return;
     }
-    SDL_SetRenderLogicalPresentation(g_renderer, 0, 0,
-                                     SDL_LOGICAL_PRESENTATION_DISABLED);
-    SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255);
-    SDL_RenderClear(g_renderer);
     return;
   }
 
@@ -2182,9 +2148,16 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
         slot->ws_extra_top,
         slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom,
         kFrameSlotLayerTextureWidth, &bg2_valid_spans);
-    SDL_Rect output_viewport = ComputePresentationViewport(
-        g_renderer, slot->ignore_aspect_ratio, slot->pixel_aspect,
-        slot->visible_width, slot->snes_height);
+    SDL_Rect output_viewport;
+    if (!ResolveFrameOutputViewport(slot, &output_viewport)) {
+      DioramaPerformance_End(presentation_performance);
+      DioramaPerformance_PresentCompleted();
+      SessionFatal_Request(
+          "The renderer could not resolve the Diorama output viewport (%s). "
+          "Restart the game; if this repeats, update your graphics driver.",
+          ArRenderDevice_LastError(&g_render_device));
+      return;
+    }
     DioramaProjection action_projection;
     const uint8_t required_effect_obj_priorities =
         (slot->action_effect_lighting || slot->action_effect_particles)
@@ -2265,47 +2238,74 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
     return;
   }
 
-  const SDL_Rect output_viewport = ComputePresentationViewport(
-      g_renderer, slot->ignore_aspect_ratio,
-      slot->pixel_aspect, slot->visible_width, slot->snes_height);
+  SDL_Rect output_viewport;
+  if (!ResolveFrameOutputViewport(slot, &output_viewport)) {
+    SessionFatal_Request(
+        "The renderer could not resolve the game output viewport (%s). "
+        "Restart the game; if this repeats, update your graphics driver.",
+        ArRenderDevice_LastError(&g_render_device));
+    return;
+  }
   (void)BeginActionHeat(slot, output_viewport);
   const SDL_Rect viewport = ActionHeatSceneViewport(output_viewport);
-  if (s_action_heat_engaged)
-    SDL_SetRenderLogicalPresentation(
-        g_renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED);
-  else
-    ApplyLogicalPresentation(slot);
-  SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255);
-  SDL_RenderClear(g_renderer);
+  const ArRenderColorF black = {0.0f, 0.0f, 0.0f, 1.0f};
+  ArRenderOutputFrame output_frame;
+  if (!ArRenderOutputFrame_Begin(
+          &g_render_device,
+          (ArRenderRectI){viewport.x, viewport.y, viewport.w, viewport.h},
+          black, black, &output_frame)) {
+    CancelActionHeat();
+    SessionFatal_Request(
+        "The renderer could not begin the game scene output (%s). Restart "
+        "the game; if this repeats, update your graphics driver.",
+        ArRenderDevice_LastError(&g_render_device));
+    return;
+  }
+  const SDL_Rect local_viewport = {0, 0, viewport.w, viewport.h};
   SDL_Rect src = { slot->visible_x0, 0, slot->visible_width, slot->snes_height };
   ArRenderRectF source = {
     (float)src.x, (float)src.y, (float)src.w, (float)src.h,
   };
-  (void)ArRenderDevice_DrawTexture(
-      &g_render_device, g_texture, &source, NULL);
+  const ArRenderRectF destination = {
+    0.0f, 0.0f, (float)viewport.w, (float)viewport.h,
+  };
+  if (!ArRenderDevice_DrawTexture(
+          &g_render_device, g_texture, &source, &destination)) {
+    ArRenderOutputFrame_Abort(&output_frame);
+    CancelActionHeat();
+    SessionFatal_Request(
+        "The renderer rejected the base game framebuffer (%s). Restart the "
+        "game; if this repeats, update your graphics driver.",
+        ArRenderDevice_LastError(&g_render_device));
+    return;
+  }
 
-  SDL_SetRenderLogicalPresentation(g_renderer, 0, 0,
-                                   SDL_LOGICAL_PRESENTATION_DISABLED);
-  PresentMode7Composite(slot, viewport);
+  PresentMode7Composite(slot, local_viewport);
   DrawActionPlaneEffectFlat(
-      slot, viewport, kActionEffectRenderLayer_Bg1Plane,
+      slot, local_viewport, kActionEffectRenderLayer_Bg1Plane,
       slot->action_bg1_mask_valid, s_action_bg1_mask_texture,
       "BG1-local decoration");
   DrawActionPlaneEffectFlat(
-      slot, viewport, kActionEffectRenderLayer_Bg1HighPlane,
+      slot, local_viewport, kActionEffectRenderLayer_Bg1HighPlane,
       slot->action_bg1_mask_valid, s_action_bg1_mask_texture,
       "BG1-high lava decoration");
   DrawActionPlaneEffectFlat(
-      slot, viewport, kActionEffectRenderLayer_Bg2Plane,
+      slot, local_viewport, kActionEffectRenderLayer_Bg2Plane,
       slot->action_bg2_mask_valid, s_action_bg2_mask_texture,
       "BG2-local waterfall");
-  DrawActionEffects(slot, viewport, NULL);
+  DrawActionEffects(slot, local_viewport, NULL);
+  if (!ArRenderOutputFrame_Finish(&output_frame)) {
+    CancelActionHeat();
+    SessionFatal_Request(
+        "The renderer could not restore the output after drawing the game "
+        "scene (%s). Restart the game; if this repeats, update your graphics "
+        "driver.", ArRenderDevice_LastError(&g_render_device));
+    return;
+  }
   EndActionHeat(slot, output_viewport);
-  SDL_SetRenderLogicalPresentation(g_renderer, 0, 0,
-                                   SDL_LOGICAL_PRESENTATION_DISABLED);
+  if (SessionFatal_Requested()) return;
   PresentHudOverlay(slot, output_viewport);
   PresentHdReplacements(slot, output_viewport);
-  ApplyLogicalPresentation(slot);
 }
 
 bool PresentAuthenticScene(const FrameSlot *slot, SDL_Rect viewport) {

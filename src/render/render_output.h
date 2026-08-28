@@ -17,6 +17,16 @@ typedef struct ArRenderOutputFrame {
   bool active;
 } ArRenderOutputFrame;
 
+/* Resolve the viewport selected by the shared aspect-fit policy without
+ * beginning a frame. This is useful when presentation must size and bind an
+ * intermediate target before it can enter the ordinary output-frame scope.
+ * The returned rectangle is expressed in the current target's physical
+ * coordinates. */
+bool ArRenderOutput_ResolveAspectFit(
+    ArRenderDevice *device, bool stretch,
+    int aspect_width, int aspect_height,
+    ArRenderRectI *viewport, int *output_width, int *output_height);
+
 bool ArRenderOutputFrame_Begin(
     ArRenderDevice *device, ArRenderRectI viewport,
     ArRenderColorF margin_color, ArRenderColorF scene_color,
