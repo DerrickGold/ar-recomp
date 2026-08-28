@@ -92,6 +92,12 @@ shader formats, native state, binding, and lifetime live in
 `platform/sdl/diorama_effect_backend_sdl.c`. SIM shadow blur follows the same
 pattern through `sim/sim_shadow_effect_backend.h`; its separable seven-tap SDL
 implementation is isolated in `platform/sdl/sim_shadow_effect_backend_sdl.c`.
+Enhanced world navigation is also SDL-free. It uses the aspect-fit output
+scope directly, submits its map, haze, weather, backdrop, fade, and captured
+UI through portable textures and geometry, and reads monotonic animation time
+through the host clock boundary. Its coordinates stay local to the selected
+game viewport, so platform adapters do not need an SDL-style logical
+presentation transform.
 Action heat refraction is a portable mesh warp rather than a custom shader; its
 viewport-sized texture is now device-owned and uses the scoped-target contract
 plus portable geometry for both its warped and fallback resolves. CRT still

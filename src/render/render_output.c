@@ -1,5 +1,6 @@
 #include "render_output.h"
 
+#include <stdint.h>
 #include <string.h>
 
 static void ResetFrame(ArRenderOutputFrame *frame) {
@@ -15,18 +16,12 @@ static bool ValidViewport(ArRenderRectI viewport,
       viewport.y <= output_height - viewport.h;
 }
 
-bool ArRenderOutputFrame_Begin(
+static bool BeginResolvedFrame(
     ArRenderDevice *device, ArRenderRectI viewport,
+    int output_width, int output_height,
     ArRenderColorF margin_color, ArRenderColorF scene_color,
     ArRenderOutputFrame *frame) {
-  if (!frame) return false;
-  ResetFrame(frame);
-  int output_width = 0;
-  int output_height = 0;
-  if (!ArRenderDevice_UseOutputCoordinates(device) ||
-      !ArRenderDevice_GetOutputSize(
-          device, &output_width, &output_height) ||
-      !ValidViewport(viewport, output_width, output_height))
+  if (!frame || !ValidViewport(viewport, output_width, output_height))
     return false;
 
   const bool viewport_is_output =
@@ -61,6 +56,58 @@ bool ArRenderOutputFrame_Begin(
     .active = true,
   };
   return true;
+}
+
+bool ArRenderOutputFrame_Begin(
+    ArRenderDevice *device, ArRenderRectI viewport,
+    ArRenderColorF margin_color, ArRenderColorF scene_color,
+    ArRenderOutputFrame *frame) {
+  if (!frame) return false;
+  ResetFrame(frame);
+  int output_width = 0;
+  int output_height = 0;
+  if (!ArRenderDevice_UseOutputCoordinates(device) ||
+      !ArRenderDevice_GetOutputSize(
+          device, &output_width, &output_height))
+    return false;
+  return BeginResolvedFrame(
+      device, viewport, output_width, output_height,
+      margin_color, scene_color, frame);
+}
+
+bool ArRenderOutputFrame_BeginAspectFit(
+    ArRenderDevice *device, bool stretch,
+    int aspect_width, int aspect_height,
+    ArRenderColorF margin_color, ArRenderColorF scene_color,
+    ArRenderOutputFrame *frame) {
+  if (!frame) return false;
+  ResetFrame(frame);
+  int output_width = 0;
+  int output_height = 0;
+  if (aspect_width <= 0 || aspect_height <= 0 ||
+      !ArRenderDevice_UseOutputCoordinates(device) ||
+      !ArRenderDevice_GetOutputSize(
+          device, &output_width, &output_height))
+    return false;
+
+  ArRenderRectI viewport = {0, 0, output_width, output_height};
+  if (!stretch &&
+      (int64_t)output_width * aspect_height !=
+          (int64_t)output_height * aspect_width) {
+    if ((int64_t)output_width * aspect_height >
+        (int64_t)output_height * aspect_width) {
+      viewport.w = (int)((int64_t)output_height * aspect_width /
+                         aspect_height);
+      viewport.x = (output_width - viewport.w) / 2;
+    } else {
+      viewport.h = (int)((int64_t)output_width * aspect_height /
+                         aspect_width);
+      viewport.y = (output_height - viewport.h) / 2;
+    }
+  }
+  return BeginResolvedFrame(
+      device, viewport, output_width, output_height,
+      margin_color, scene_color, frame);
 }
 
 bool ArRenderOutputFrame_EnterFullOutput(ArRenderOutputFrame *frame) {

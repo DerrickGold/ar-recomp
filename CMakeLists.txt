@@ -417,6 +417,25 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_render_device COMMAND actraiser_render_device_test)
 
+    add_executable(actraiser_present_world_nav_test
+        tests/present_world_nav_test.c
+        src/present_world_nav.c
+        src/render/render_device.c
+        src/render/render_output.c
+        src/scene3d_math.c
+        src/sim/sim_world_navigation_scene.c
+    )
+    target_include_directories(actraiser_present_world_nav_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
+    )
+    target_link_libraries(actraiser_present_world_nav_test PRIVATE
+        SDL3::SDL3
+        actraiser_math
+    )
+    add_test(NAME actraiser_present_world_nav
+        COMMAND actraiser_present_world_nav_test)
+
     add_executable(actraiser_render_sdl_state_test
         tests/render_sdl_state_test.c
         src/render/render_device.c

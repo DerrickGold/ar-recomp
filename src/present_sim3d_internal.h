@@ -11,7 +11,6 @@
 #ifndef AR_PRESENT_SIM3D_INTERNAL_H
 #define AR_PRESENT_SIM3D_INTERNAL_H
 
-#include <SDL3/SDL.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -43,7 +42,7 @@ ArRenderTexture EnsureSimUnderlayTexture(const FrameSlot *slot);
 /* Returns the optional blur only when it represents the requested world-map
  * revision. Consumers must never infer freshness from allocation alone. */
 ArRenderTexture SimUnderlayBlurTexture(uint32_t serial);
-void DrawSimBackdrop(const FrameSlot *slot, SDL_Rect viewport,
+void DrawSimBackdrop(const FrameSlot *slot, ArRenderRectI viewport,
                      const float matrix[16]);
 
 /* ---- world-map entry points ----------------------------------------------
