@@ -55,9 +55,12 @@ static SDL_Texture *NativeTexture(ArRenderTexture texture) {
   return ArSdlRenderBackend_UnwrapTexture(texture);
 }
 
-
-
-
+static ArRenderRectF PortableRect(SDL_Rect rectangle) {
+  return (ArRenderRectF){
+    (float)rectangle.x, (float)rectangle.y,
+    (float)rectangle.w, (float)rectangle.h,
+  };
+}
 
 /* D4c draws the same billboards a second and third time to build a rim band,
  * so the geometry lives in one loop rather than being re-derived. A NULL pass
@@ -1897,9 +1900,10 @@ static PresentationOutcome RenderSimProfile(
         ? outcome : kPresentationOutcome_CoreFailure;
   }
   if (!ground) {
-    SDL_FRect src = ToFRect(source), dst = ToFRect(viewport);
-    return SDL_RenderTexture(
-               g_renderer, NativeTexture(g_sim3d_flat_texture), &src, &dst)
+    const ArRenderRectF src = PortableRect(source);
+    const ArRenderRectF dst = PortableRect(viewport);
+    return ArRenderDevice_DrawTexture(
+               &g_render_device, g_sim3d_flat_texture, &src, &dst)
         ? outcome : kPresentationOutcome_CoreFailure;
   }
 
@@ -1984,7 +1988,8 @@ static PresentationOutcome RenderSimProfile(
     Sim3DPerformance_End(performance);
   }
 
-  SDL_FRect src = ToFRect(source), dst = ToFRect(viewport);
+  const ArRenderRectF portable_source = PortableRect(source);
+  const ArRenderRectF portable_destination = PortableRect(viewport);
   float town_extent_x0 =
       (float)slot->sim.underlay_screen_x0 - (float)slot->sim.camera_x;
   float town_extent_y0 = -(float)slot->sim.camera_y;
@@ -2084,13 +2089,13 @@ static PresentationOutcome RenderSimProfile(
       }
     }
     if (!(captured_planes & (1u << plane))) continue;
-    SDL_Texture *texture = NativeTexture(g_sim3d_layer_textures[plane]);
-    if (!texture) continue;
+    ArRenderTexture texture = g_sim3d_layer_textures[plane];
+    if (!ArRenderTexture_IsValid(texture)) continue;
     if (plane == kSim3DPlane_Bg1Low || plane == kSim3DPlane_Bg1High) {
       if (!background_voxels) {
         Sim3DPerformanceScope performance =
             Sim3DPerformance_Begin(kSim3DPerformance_Terrain);
-        DrawSimGroundPlane(texture, source, viewport, matrix,
+        DrawSimGroundPlane(NativeTexture(texture), source, viewport, matrix,
                            (fade_ground_planes || underlay)
                                ? &ground_fade : NULL);
         Sim3DPerformance_End(performance);
@@ -2111,8 +2116,12 @@ static PresentationOutcome RenderSimProfile(
         Sim3DPerformance_End(performance);
         if (!PresentationOutcome_IsUsable(outcome)) return outcome;
       }
-    } else
-      SDL_RenderTexture(g_renderer, texture, &src, &dst);
+    } else {
+      if (!ArRenderDevice_DrawTexture(
+              &g_render_device, texture,
+              &portable_source, &portable_destination))
+        return kPresentationOutcome_CoreFailure;
+    }
   }
 
   /* Scene flash intentionally reaches the completed world; sparks are
@@ -2185,8 +2194,13 @@ static PresentationOutcome RenderSimProfile(
     }
     if (!SimPlaneIsMenu(plane)) continue;
     if (!(captured_planes & (1u << plane))) continue;
-    SDL_Texture *texture = NativeTexture(g_sim3d_layer_textures[plane]);
-    if (texture) SDL_RenderTexture(g_renderer, texture, &src, &dst);
+    ArRenderTexture texture = g_sim3d_layer_textures[plane];
+    if (ArRenderTexture_IsValid(texture)) {
+      if (!ArRenderDevice_DrawTexture(
+              &g_render_device, texture,
+              &portable_source, &portable_destination))
+        return kPresentationOutcome_CoreFailure;
+    }
   }
 
   /* Over the shroud deliberately: the question the markers answer is whether

@@ -30,6 +30,12 @@ and present. Backends translate formats, filtering, and blend modes once per
 resource or batch. Capability flags cover enhanced facilities such as depth,
 custom shaders, texture wrapping, and optional blend modes.
 
+Texture and geometry submissions may carry an `ArRenderDrawState`. Tint and
+blend overrides apply to that submission only; an adapter must restore any
+native resource state before returning. A draw without state takes the direct
+backend path with no state queries or mutations. Geometry uses per-vertex
+colour, so texture tint is intentionally limited to textured quads.
+
 ## Current migration state
 
 The base and authentic SNES framebuffers, HUD planes and composite target,
@@ -41,12 +47,13 @@ formats, nearest filtering, blend/tint behavior, render-target semantics, and
 texture updates. A fake backend runs the same dirty-upload flow in tests
 without SDL.
 
-The SIM and diorama compositors still unwrap those opaque resources through a
-small bridge in `src/platform/sdl/render_sdl.h` while their geometry and
-per-draw state are migrated. Diorama frame generation also retains private SDL
-endpoint/target textures. The bridge is a transition aid, not part of the
-portable contract. New renderer-facing code should not add another borrowed
-native resource.
+Ordinary separated-SIM flat, world-layer, and menu-layer composites now submit
+through the device as well. Projected SIM ground geometry and its object atlas,
+plus the diorama compositor, still unwrap opaque resources through a small
+bridge in `src/platform/sdl/render_sdl.h` while those geometry paths migrate.
+Diorama frame generation also retains private SDL endpoint/target textures.
+The bridge is a transition aid, not part of the portable contract. New
+renderer-facing code should not add another borrowed native resource.
 
 The remaining migration should proceed in independently testable slices:
 

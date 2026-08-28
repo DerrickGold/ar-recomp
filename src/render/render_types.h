@@ -92,6 +92,22 @@ typedef enum ArRenderBlendMode {
   kArRenderBlendMode_Multiply,
 } ArRenderBlendMode;
 
+typedef uint32_t ArRenderDrawStateFlags;
+enum {
+  /* Multiply sampled texture color/alpha for this draw only. Geometry already
+   * carries per-vertex color, so texture modulation is valid only for texture
+   * quad draws. */
+  kArRenderDrawState_Tint = UINT32_C(1) << 0,
+  /* Override the texture's descriptor blend mode for this draw only. */
+  kArRenderDrawState_Blend = UINT32_C(1) << 1,
+};
+
+typedef struct ArRenderDrawState {
+  ArRenderDrawStateFlags flags;
+  ArRenderColorF tint;
+  ArRenderBlendMode blend;
+} ArRenderDrawState;
+
 typedef struct ArRenderTextureDesc {
   int width;
   int height;

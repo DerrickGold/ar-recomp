@@ -23,14 +23,12 @@ typedef struct ArRenderBackendOps {
   bool (*clear)(void *context, ArRenderColorF color);
   bool (*draw_texture)(void *context, ArRenderTexture texture,
                        const ArRenderRectF *source,
-                       const ArRenderRectF *destination);
-  bool (*draw_texture_tinted)(void *context, ArRenderTexture texture,
-                              const ArRenderRectF *source,
-                              const ArRenderRectF *destination,
-                              ArRenderColorF tint);
+                       const ArRenderRectF *destination,
+                       const ArRenderDrawState *state);
   bool (*draw_geometry)(void *context, ArRenderTexture texture,
                         const ArRenderVertex2D *vertices, int vertex_count,
-                        const int32_t *indices, int index_count);
+                        const int32_t *indices, int index_count,
+                        const ArRenderDrawState *state);
   bool (*present)(void *context);
   const char *(*last_error)(void *context);
 } ArRenderBackendOps;
@@ -75,17 +73,29 @@ bool ArRenderDevice_DrawTexture(ArRenderDevice *device,
                                 ArRenderTexture texture,
                                 const ArRenderRectF *source,
                                 const ArRenderRectF *destination);
+bool ArRenderDevice_DrawTextureWithState(
+    ArRenderDevice *device, ArRenderTexture texture,
+    const ArRenderRectF *source, const ArRenderRectF *destination,
+    const ArRenderDrawState *state);
 bool ArRenderDevice_DrawTextureTinted(ArRenderDevice *device,
                                       ArRenderTexture texture,
                                       const ArRenderRectF *source,
                                       const ArRenderRectF *destination,
                                       ArRenderColorF tint);
+/* An invalid geometry texture selects untextured per-vertex colour. */
 bool ArRenderDevice_DrawGeometry(ArRenderDevice *device,
                                  ArRenderTexture texture,
                                  const ArRenderVertex2D *vertices,
                                  int vertex_count,
                                  const int32_t *indices,
                                  int index_count);
+/* `state` may be NULL; any blend override is scoped to this submission.
+ * Geometry tint is rejected because vertex colours own its modulation. */
+bool ArRenderDevice_DrawGeometryWithState(
+    ArRenderDevice *device, ArRenderTexture texture,
+    const ArRenderVertex2D *vertices, int vertex_count,
+    const int32_t *indices, int index_count,
+    const ArRenderDrawState *state);
 bool ArRenderDevice_Present(ArRenderDevice *device);
 const char *ArRenderDevice_LastError(const ArRenderDevice *device);
 

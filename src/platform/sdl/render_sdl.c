@@ -150,10 +150,63 @@ static bool Clear(void *context, ArRenderColorF color) {
       SDL_RenderClear(backend->renderer);
 }
 
+typedef struct SavedTextureDrawState {
+  SDL_BlendMode blend;
+  float tint_r;
+  float tint_g;
+  float tint_b;
+  float tint_a;
+  bool blend_saved;
+  bool tint_saved;
+} SavedTextureDrawState;
+
+static bool ApplyTextureDrawState(SDL_Texture *texture,
+                                  const ArRenderDrawState *state,
+                                  SavedTextureDrawState *saved) {
+  if (state->flags & kArRenderDrawState_Tint) {
+    if (!SDL_GetTextureColorModFloat(
+            texture, &saved->tint_r, &saved->tint_g, &saved->tint_b) ||
+        !SDL_GetTextureAlphaModFloat(texture, &saved->tint_a))
+      return false;
+    saved->tint_saved = true;
+  }
+  if (state->flags & kArRenderDrawState_Blend) {
+    if (!SDL_GetTextureBlendMode(texture, &saved->blend)) return false;
+    saved->blend_saved = true;
+  }
+
+  if ((state->flags & kArRenderDrawState_Tint) &&
+      (!SDL_SetTextureColorModFloat(
+          texture, state->tint.r, state->tint.g, state->tint.b) ||
+       !SDL_SetTextureAlphaModFloat(texture, state->tint.a)))
+    return false;
+  if ((state->flags & kArRenderDrawState_Blend) &&
+      !SDL_SetTextureBlendMode(texture, ToSdlBlendMode(state->blend)))
+    return false;
+  return true;
+}
+
+static bool RestoreTextureDrawState(SDL_Texture *texture,
+                                    const SavedTextureDrawState *saved) {
+  bool success = true;
+  if (saved->tint_saved) {
+    if (!SDL_SetTextureColorModFloat(
+            texture, saved->tint_r, saved->tint_g, saved->tint_b))
+      success = false;
+    if (!SDL_SetTextureAlphaModFloat(texture, saved->tint_a)) success = false;
+  }
+  if (saved->blend_saved &&
+      !SDL_SetTextureBlendMode(texture, saved->blend))
+    success = false;
+  return success;
+}
+
 static bool DrawTexture(void *context, ArRenderTexture texture,
                         const ArRenderRectF *source,
-                        const ArRenderRectF *destination) {
+                        const ArRenderRectF *destination,
+                        const ArRenderDrawState *state) {
   ArSdlRenderBackend *backend = context;
+  SDL_Texture *native_texture = ArSdlRenderBackend_UnwrapTexture(texture);
   SDL_FRect converted_source;
   SDL_FRect converted_destination;
   const SDL_FRect *source_rect = NULL;
@@ -167,31 +220,53 @@ static bool DrawTexture(void *context, ArRenderTexture texture,
                                        destination->w, destination->h};
     destination_rect = &converted_destination;
   }
-  return SDL_RenderTexture(
-      backend->renderer, ArSdlRenderBackend_UnwrapTexture(texture),
-      source_rect, destination_rect);
-}
+  if (!state || state->flags == 0)
+    return SDL_RenderTexture(
+        backend->renderer, native_texture, source_rect, destination_rect);
 
-static bool DrawTextureTinted(void *context, ArRenderTexture texture,
-                              const ArRenderRectF *source,
-                              const ArRenderRectF *destination,
-                              ArRenderColorF tint) {
-  SDL_Texture *native_texture = ArSdlRenderBackend_UnwrapTexture(texture);
-  if (!SDL_SetTextureColorModFloat(
-          native_texture, tint.r, tint.g, tint.b) ||
-      !SDL_SetTextureAlphaModFloat(native_texture, tint.a))
-    return false;
-  return DrawTexture(context, texture, source, destination);
+  SavedTextureDrawState saved = {0};
+  const bool applied = ApplyTextureDrawState(native_texture, state, &saved);
+  const bool rendered = applied && SDL_RenderTexture(
+      backend->renderer, native_texture, source_rect, destination_rect);
+  const bool restored = RestoreTextureDrawState(native_texture, &saved);
+  return rendered && restored;
 }
 
 static bool DrawGeometry(void *context, ArRenderTexture texture,
                          const ArRenderVertex2D *vertices, int vertex_count,
-                         const int32_t *indices, int index_count) {
+                         const int32_t *indices, int index_count,
+                         const ArRenderDrawState *state) {
   ArSdlRenderBackend *backend = context;
-  return SDL_RenderGeometry(
-      backend->renderer, ArSdlRenderBackend_UnwrapTexture(texture),
-      (const SDL_Vertex *)vertices, vertex_count,
-      (const int *)indices, index_count);
+  SDL_Texture *native_texture = ArSdlRenderBackend_UnwrapTexture(texture);
+  if (!state || state->flags == 0)
+    return SDL_RenderGeometry(
+        backend->renderer, native_texture, (const SDL_Vertex *)vertices,
+        vertex_count, (const int *)indices, index_count);
+
+  /* SDL sources untextured-geometry blending from renderer draw state and
+   * textured-geometry blending from the texture. Preserve the appropriate
+   * native owner so the portable per-batch contract works for both forms. */
+  if (!native_texture) {
+    SDL_BlendMode saved_blend = SDL_BLENDMODE_INVALID;
+    const bool saved = SDL_GetRenderDrawBlendMode(
+        backend->renderer, &saved_blend);
+    const bool applied = saved && SDL_SetRenderDrawBlendMode(
+        backend->renderer, ToSdlBlendMode(state->blend));
+    const bool rendered = applied && SDL_RenderGeometry(
+        backend->renderer, NULL, (const SDL_Vertex *)vertices,
+        vertex_count, (const int *)indices, index_count);
+    const bool restored = saved && SDL_SetRenderDrawBlendMode(
+        backend->renderer, saved_blend);
+    return rendered && restored;
+  }
+
+  SavedTextureDrawState saved = {0};
+  const bool applied = ApplyTextureDrawState(native_texture, state, &saved);
+  const bool rendered = applied && SDL_RenderGeometry(
+      backend->renderer, native_texture, (const SDL_Vertex *)vertices,
+      vertex_count, (const int *)indices, index_count);
+  const bool restored = RestoreTextureDrawState(native_texture, &saved);
+  return rendered && restored;
 }
 
 static bool Present(void *context) {
@@ -214,7 +289,6 @@ static const ArRenderBackendOps kSdlRenderOps = {
   .set_clip_rect = SetClipRect,
   .clear = Clear,
   .draw_texture = DrawTexture,
-  .draw_texture_tinted = DrawTextureTinted,
   .draw_geometry = DrawGeometry,
   .present = Present,
   .last_error = LastError,
