@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
-"""Repeatable headless replay benchmarks for runner/ABI changes.
+"""Repeatable headless replay benchmarks for runner/ABI/rendering changes.
 
 The suite runs outside the repository with run-directory diagnostics disabled,
-pins every gameplay-affecting input, and hashes the final machine state.  This
-keeps timing data useful without allowing a faster-but-wrong candidate through.
+copies an immutable save seed into each temporary run, pins every gameplay-
+affecting input, and hashes the final machine state. Named action workloads
+also require their recorded action-entry marker. This keeps timing data useful
+without silently benchmarking a menu or allowing a faster-but-wrong candidate
+through.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import hashlib
 import json
 import math
@@ -41,6 +46,8 @@ class Workload:
     replay: str
     frames: int
     settings: str | None = None
+    save_seed: str | None = None
+    required_output: tuple[str, ...] = ()
     environment: dict[str, str] = field(default_factory=dict)
 
 
@@ -68,11 +75,13 @@ WORKLOADS = {
         description="Repeated authentic-width Mode 7 and world-map transitions",
         replay="saves/fillmore-r1-natural.rec",
         frames=6000,
+        save_seed="tests/fixtures/benchmark/fillmore-natural-seed.srm.b64",
     ),
     "sky_palace_wide": Workload(
         description="Wide Sky Palace margin patch and restore transaction",
         replay="saves/fillmore-r1-natural.rec",
         frames=1200,
+        save_seed="tests/fixtures/benchmark/fillmore-natural-seed.srm.b64",
         environment=WIDE_DISPLAY_ENV,
     ),
     "sim_actions": Workload(
@@ -80,17 +89,22 @@ WORKLOADS = {
         replay="saves/sim-actions.rec",
         frames=6000,
         settings="tests/fixtures/sim3d/sim-actions-settings.ini",
+        save_seed="tests/fixtures/sim3d/sim-actions-seed.srm.b64",
     ),
     "aitos_wide": Workload(
         description="Wide action-mode traversal with background HLE enabled",
         replay="saves/aitos-r4-natural.rec",
         frames=4000,
+        save_seed="tests/fixtures/benchmark/action-routes-seed.srm.b64",
+        required_output=("[act-enter] $18=04 $19=04",),
         environment=WIDE_ACTION_ENV,
     ),
     "death_heim_wide": Workload(
         description="Wide late-game action and effects workload",
         replay="saves/death-heim-r8-r10-natural.rec",
         frames=4000,
+        save_seed="tests/fixtures/benchmark/action-routes-seed.srm.b64",
+        required_output=("[act-enter] $18=07 $19=01",),
         environment=WIDE_ACTION_ENV,
     ),
 }
@@ -112,6 +126,26 @@ def sha256(path: Path) -> str:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def save_seed_path(workload: Workload, fallback: Path) -> Path:
+    return ROOT / workload.save_seed if workload.save_seed else fallback
+
+
+def load_save_seed(path: Path) -> bytes:
+    encoded = path.read_bytes()
+    try:
+        image = (
+            base64.b64decode(b"".join(encoded.split()), validate=True)
+            if path.suffix == ".b64" else encoded
+        )
+    except (binascii.Error, ValueError) as error:
+        raise RuntimeError(f"invalid base64 save seed {path}: {error}") from error
+    if len(image) != 8192:
+        raise RuntimeError(
+            f"save seed {path} decoded to {len(image)} bytes; expected 8192"
+        )
+    return image
 
 
 def git_output(*args: str) -> str:
@@ -173,7 +207,6 @@ def run_once(
         {
             "AR_INPUT_REPLAY": str(replay),
             "AR_QUIT_FRAMES": str(workload.frames),
-            "AR_SAVE_NATIVE_PATH": str(save),
         }
     )
     if workload.settings:
@@ -182,6 +215,11 @@ def run_once(
     with tempfile.TemporaryDirectory(prefix="actraiser-runner-bench-") as temp:
         workdir = Path(temp)
         (workdir / "saves").mkdir()
+        isolated_save = workdir / "benchmark-seed.srm"
+        isolated_save.write_bytes(
+            load_save_seed(save_seed_path(workload, save))
+        )
+        environment["AR_SAVE_NATIVE_PATH"] = str(isolated_save)
         command = (str(binary), str(rom), "--config", str(config))
         started = time.perf_counter_ns()
         result = subprocess.run(
@@ -198,6 +236,16 @@ def run_once(
             raise RuntimeError(
                 f"runner exited {result.returncode}\n--- runner output ---\n"
                 f"{result.stdout[-12000:]}"
+            )
+        missing_output = [
+            marker for marker in workload.required_output
+            if marker not in result.stdout
+        ]
+        if missing_output:
+            raise RuntimeError(
+                "runner did not reach required workload state: "
+                + ", ".join(missing_output)
+                + f"\n--- runner output ---\n{result.stdout[-12000:]}"
             )
 
         artifact_paths = {name: workdir / "saves" / name for name in ARTIFACTS}
@@ -224,8 +272,10 @@ def file_identity(path: Path) -> dict[str, Any]:
     }
 
 
-def workload_identity(workload: Workload) -> dict[str, Any]:
+def workload_identity(workload: Workload, fallback_save: Path) -> dict[str, Any]:
     replay = ROOT / workload.replay
+    seed_path = save_seed_path(workload, fallback_save)
+    seed_image = load_save_seed(seed_path)
     identity: dict[str, Any] = {
         "description": workload.description,
         "frames": workload.frames,
@@ -233,6 +283,12 @@ def workload_identity(workload: Workload) -> dict[str, Any]:
         "settings": file_identity(ROOT / workload.settings)
         if workload.settings
         else None,
+        "save_seed": {
+            **file_identity(seed_path),
+            "decoded_bytes": len(seed_image),
+            "decoded_sha256": hashlib.sha256(seed_image).hexdigest(),
+        },
+        "required_output": list(workload.required_output),
         "environment": dict(sorted(workload.environment.items())),
     }
     return identity
@@ -340,7 +396,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--rom", type=Path, default=ROOT / "ar.sfc")
     parser.add_argument("--config", type=Path, default=ROOT / "config.ini")
-    parser.add_argument("--save", type=Path, default=ROOT / "saves/save.srm")
+    parser.add_argument(
+        "--save", type=Path, default=ROOT / "saves/save.srm",
+        help="fallback seed for a workload without its own immutable save fixture",
+    )
     parser.add_argument("--runs", type=int, default=7)
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument(
@@ -384,6 +443,11 @@ def main() -> int:
         str(ROOT / WORKLOADS[name].replay)
         for name in selected
         if not (ROOT / WORKLOADS[name].replay).is_file()
+    )
+    missing.extend(
+        str(save_seed_path(WORKLOADS[name], save))
+        for name in selected
+        if not save_seed_path(WORKLOADS[name], save).is_file()
     )
     if missing:
         print("Missing benchmark input(s):\n  " + "\n  ".join(missing), file=sys.stderr)
@@ -511,7 +575,7 @@ def main() -> int:
     }
     for name in selected:
         results["workloads"][name] = {
-            "input": workload_identity(WORKLOADS[name]),
+            "input": workload_identity(WORKLOADS[name], save),
             "performance": summarize(durations[name], WORKLOADS[name].frames),
             "final_artifact_sha256": artifact_hashes[name],
         }
