@@ -2095,7 +2095,7 @@ static PresentationOutcome RenderSimProfile(
       if (!background_voxels) {
         Sim3DPerformanceScope performance =
             Sim3DPerformance_Begin(kSim3DPerformance_Terrain);
-        DrawSimGroundPlane(NativeTexture(texture), source, viewport, matrix,
+        DrawSimGroundPlane(texture, source, viewport, matrix,
                            (fade_ground_planes || underlay)
                                ? &ground_fade : NULL);
         Sim3DPerformance_End(performance);

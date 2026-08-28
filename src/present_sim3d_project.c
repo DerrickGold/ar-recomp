@@ -17,6 +17,7 @@
 #include "present_sim3d_internal.h"
 #include "present_sim3d_project.h"
 #include "present_sim3d_shadows.h"
+#include "render/render_device.h"
 #include "sim/sim_town_terrain.h"
 #include "sim/sim3d.h"
 
@@ -24,7 +25,7 @@
 #define AR_SIM3D_TERRAIN_ELEVATION 0
 #endif
 
-extern SDL_Renderer *g_renderer;
+extern ArRenderDevice g_render_device;
 
 
 /* Cull proximity at a captured-texture point, 0..1. The conversion back to
@@ -88,11 +89,11 @@ enum {
   kSimGroundIndexCount = kSimGroundColumns * kSimGroundRows * 6,
 };
 
-void DrawSimGroundPlane(SDL_Texture *texture, SDL_Rect source,
-                               SDL_Rect viewport,
-                               const float matrix[16],
-                               const SimCullFade *fade) {
-  if (!texture || source.w <= 0 || source.h <= 0 ||
+void DrawSimGroundPlane(ArRenderTexture texture, SDL_Rect source,
+                        SDL_Rect viewport, const float matrix[16],
+                        const SimCullFade *fade) {
+  if (!ArRenderTexture_IsValid(texture) ||
+      source.w <= 0 || source.h <= 0 ||
       viewport.w <= 0 || viewport.h <= 0)
     return;
 
@@ -100,8 +101,8 @@ void DrawSimGroundPlane(SDL_Texture *texture, SDL_Rect source,
   /* Reused by the synchronous presentation path; together these are too large
    * for a routine stack allocation at the density the rounded boundary
    * requires. */
-  static SDL_Vertex vertices[kSimGroundVertexCount];
-  static int indices[kSimGroundIndexCount];
+  static ArRenderVertex2D vertices[kSimGroundVertexCount];
+  static int32_t indices[kSimGroundIndexCount];
   int vertex_count = 0, index_count = 0;
 
   for (int row = 0; row <= kSimGroundRows; row++) {
@@ -119,11 +120,11 @@ void DrawSimGroundPlane(SDL_Texture *texture, SDL_Rect source,
       float bright = fade ? 1.0f - away * fade->dim : 1.0f;
       float extent_alpha =
           SimGroundExtentAlphaAt(fade, texture_x, texture_y);
-      SDL_FColor tint = {
+      ArRenderColorF tint = {
         bright, bright, bright,
         (fade ? 1.0f - away * fade->fade : 1.0f) * extent_alpha,
       };
-      vertices[vertex_count++] = (SDL_Vertex){
+      vertices[vertex_count++] = (ArRenderVertex2D){
         { viewport.x + projected.x, viewport.y + projected.y }, tint,
         { texture_x / (float)kSim3DMaxWidth,
           texture_y / (float)kSim3DMaxHeight },
@@ -142,9 +143,9 @@ void DrawSimGroundPlane(SDL_Texture *texture, SDL_Rect source,
       indices[index_count++] = bottom_left;
     }
   }
-  SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
-  SDL_RenderGeometry(g_renderer, texture, vertices, vertex_count,
-                     indices, index_count);
+  (void)ArRenderDevice_DrawGeometry(
+      &g_render_device, texture, vertices, vertex_count,
+      indices, index_count);
 }
 
 /* The ground quad spans exactly one world unit vertically over `source.h`
