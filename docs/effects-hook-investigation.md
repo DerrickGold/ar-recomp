@@ -645,14 +645,14 @@ The enhanced simulation effects follow the minimum contract above without adding
   lifecycle generation, pulse generation, kind, and particle index. Style is mapped from semantic
   phase in the renderer; no brightness or particle-count policy leaks into the capture layer.
   Neither effect advances on presentation-only frames or reads live WRAM during rendering.
-- All implemented action and simulation stages use SDL's renderer-provided additive blend and
+- All implemented action and simulation stages use the portable render device's additive blend and
   untextured geometry rather than a
   platform shader. That keeps the core path common to Metal, Vulkan, Direct3D, software, and
   headless renderers without claiming pixel-identical rasterization. Ground light, scene flash,
   and particles are separate ordered passes, and each geometry class is submitted as one batch.
-  The renderer verifies the blend mode SDL actually applied, restores all state after each pass,
-  and latches additive-blend and geometry failures as separate capabilities so both stages fail
-  closed.
+  The device scopes backend-native draw state for each submission, and the
+  presentation layer latches additive-blend and geometry failures separately
+  so both stages fail closed.
 - Fixed direction vectors and lifecycle-relative integer hashes avoid platform math-library drift.
   Metadata capacity is explicit; overflow invalidates only effect metadata for that frame and
   suppresses both enhanced stages instead of drawing a partial, misleading result.

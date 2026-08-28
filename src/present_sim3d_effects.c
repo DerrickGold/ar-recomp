@@ -18,7 +18,6 @@
 #include "present_internal.h"
 #include "present_sim3d_effects.h"
 #include "present_sim3d_project.h"
-#include "platform/sdl/render_sdl.h"
 #include "render/render_device.h"
 #include "sim/sim_render_atlas.h"
 #include "sim/sim3d.h"
@@ -27,13 +26,8 @@
 #define AR_SIM3D_TERRAIN_ELEVATION 0
 #endif
 
-extern SDL_Renderer *g_renderer;
 extern ArRenderDevice g_render_device;
 extern ArRenderTexture g_sim_obj_atlas_texture;
-
-static SDL_Texture *NativeAtlasTexture(void) {
-  return ArSdlRenderBackend_UnwrapTexture(g_sim_obj_atlas_texture);
-}
 
 enum {
   kSimMaxParticlesPerEffect = 12,
@@ -617,10 +611,10 @@ static double SimFireballArtHeadingDegrees(uint8_t phase) {
 static bool DrawSimFireballHeadFragment(
     const SimRenderObject *object, Scene3DPoint anchor,
     float scale_x, float scale_y, bool rotate, double degrees) {
-  SDL_FRect atlas = {
+  const ArRenderRectF atlas = {
     object->atlas_x, object->atlas_y, object->atlas_w, object->atlas_h,
   };
-  SDL_FRect destination = {
+  const ArRenderRectF destination = {
     anchor.x + object->local_x0 * scale_x,
     anchor.y + object->local_y0 * scale_y,
     (object->local_x1 - object->local_x0) * scale_x,
@@ -631,16 +625,55 @@ static bool DrawSimFireballHeadFragment(
     /* Upright is the honest fallback, not a failure: each authored frame is
      * already drawn pointing the way its own phase travels, so an unturned
      * fireball is merely one that has not been leaned into its arc. */
-    SDL_RenderTexture(g_renderer, NativeAtlasTexture(), &atlas,
-                      &destination);
-    return true;
+    const ArRenderDrawState state = {
+      .flags = kArRenderDrawState_Blend,
+      .blend = kArRenderBlendMode_Alpha,
+    };
+    return ArRenderDevice_DrawTextureWithState(
+        &g_render_device, g_sim_obj_atlas_texture,
+        &atlas, &destination, &state);
   }
   /* Every fragment turns about the SHARED anchor. Rotating each about its own
    * centre pulls a multi-tile composition apart as it turns. */
-  SDL_FPoint centre = { anchor.x - destination.x, anchor.y - destination.y };
-  SDL_RenderTextureRotated(g_renderer, NativeAtlasTexture(), &atlas,
-                           &destination, degrees, &centre, SDL_FLIP_NONE);
-  return true;
+  const double radians = degrees * 0.017453292519943295;
+  const float cosine = (float)cos(radians);
+  const float sine = (float)sin(radians);
+  const ArRenderPointF unrotated[4] = {
+    {destination.x, destination.y},
+    {destination.x + destination.w, destination.y},
+    {destination.x, destination.y + destination.h},
+    {destination.x + destination.w, destination.y + destination.h},
+  };
+  ArRenderPointF rotated[4];
+  for (int point = 0; point < 4; point++) {
+    const float dx = unrotated[point].x - anchor.x;
+    const float dy = unrotated[point].y - anchor.y;
+    rotated[point] = (ArRenderPointF){
+      anchor.x + dx * cosine - dy * sine,
+      anchor.y + dx * sine + dy * cosine,
+    };
+  }
+  const float u0 = object->atlas_x / (float)kSimObjAtlasWidth;
+  const float v0 = object->atlas_y / (float)kSimObjAtlasHeight;
+  const float u1 = (object->atlas_x + object->atlas_w) /
+      (float)kSimObjAtlasWidth;
+  const float v1 = (object->atlas_y + object->atlas_h) /
+      (float)kSimObjAtlasHeight;
+  const ArRenderColorF white = {1.0f, 1.0f, 1.0f, 1.0f};
+  const ArRenderVertex2D vertices[4] = {
+    {rotated[0], white, {u0, v0}},
+    {rotated[1], white, {u1, v0}},
+    {rotated[2], white, {u0, v1}},
+    {rotated[3], white, {u1, v1}},
+  };
+  const int32_t indices[6] = {0, 1, 3, 0, 3, 2};
+  const ArRenderDrawState state = {
+    .flags = kArRenderDrawState_Blend,
+    .blend = kArRenderBlendMode_Alpha,
+  };
+  return ArRenderDevice_DrawGeometryWithState(
+      &g_render_device, g_sim_obj_atlas_texture,
+      vertices, 4, indices, 6, &state);
 }
 
 void DrawSimEffectFireballHeads(
@@ -650,19 +683,10 @@ void DrawSimEffectFireballHeads(
       !ArRenderTexture_IsValid(g_sim_obj_atlas_texture))
     return;
 
-  /* Atlas state is set on the first fireball actually reached, not up front:
-   * most towns have effects and no eruption, and this pass should cost them
-   * nothing but the walk that finds that out. */
-  bool blend_ready = false;
   for (uint8_t i = 0; i < slot->sim.effect_count; i++) {
     const SimEffectInstance *effect = &slot->sim.effects[i];
     if (effect->kind != kSimEffect_VolcanoFireball) continue;
     if (effect->geometry.kind != kSimEffectGeometry_Point) continue;
-    if (!blend_ready) {
-      if (!SimApplyAtlasBlendMode(SDL_BLENDMODE_BLEND)) return;
-      blend_ready = true;
-    }
-
     /* The RECORD ORIGIN at the arc's altitude, not the effect's own point:
      * the classified point is already offset to the middle of the art, and
      * the atlas rectangles below are placed relative to the origin. Adding
