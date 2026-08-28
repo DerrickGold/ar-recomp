@@ -34,10 +34,11 @@
 #include "settings.h"
 #include "constants.h"
 #include "snesrecomp/host/widescreen.h"
-#include "render/render_types.h"
+#include "render/render_device.h"
 
 extern SDL_Window *g_window;
 extern SDL_Renderer *g_renderer;
+extern ArRenderDevice g_render_device;
 extern ArRenderTexture g_texture;
 extern int g_snes_width;
 extern int g_snes_height;
@@ -148,8 +149,8 @@ bool HostDisplay_WindowPointToOutput(int window_x, int window_y,
   int output_width = 0;
   int output_height = 0;
   SDL_GetWindowSize(g_window, &window_width, &window_height);
-  if (!SDL_GetRenderOutputSize(
-          g_renderer, &output_width, &output_height) ||
+  if (!ArRenderDevice_GetOutputSize(
+          &g_render_device, &output_width, &output_height) ||
       window_width <= 0 || window_height <= 0 ||
       output_width <= 0 || output_height <= 0)
     return false;
@@ -225,16 +226,16 @@ static uint64_t PresentIntervalNs(HostDisplayPresentMode mode) {
 }
 
 /* The two frame-production paths must agree on what a completed present is.
- * In particular, a rejected SDL_RenderPresent is neither an FPS sample nor a
+ * In particular, a rejected backend present is neither an FPS sample nor a
  * reason for the outer loop to skip its anti-spin yield. Sampling is dormant
  * while the overlay is hidden, and restarts across cadence changes so the
  * first visible result cannot mix menu/paused/old-refresh timing. */
 static bool CompletePresent(HostDisplayPresentMode mode) {
   ThrottlePresent(PresentIntervalNs(mode));
-  if (!SDL_RenderPresent(g_renderer)) {
+  if (!ArRenderDevice_Present(&g_render_device)) {
     if (!s_present_failure_reported) {
-      fprintf(stderr, "[display] SDL_RenderPresent failed: %s\n",
-              SDL_GetError());
+      fprintf(stderr, "[display] frame present failed: %s\n",
+              ArRenderDevice_LastError(&g_render_device));
       s_present_failure_reported = true;
     }
     return false;
