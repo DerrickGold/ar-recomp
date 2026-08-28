@@ -17,6 +17,10 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/diorama/diorama_rom_skybox_resource.c"
     "${GAME_SOURCE_ROOT}/diorama/diorama_rom_skybox_resource.h"
     "${GAME_SOURCE_ROOT}/diorama/diorama_effect_backend.h"
+    "${GAME_SOURCE_ROOT}/diorama/diorama.c"
+    "${GAME_SOURCE_ROOT}/diorama/diorama_performance.c"
+    "${GAME_SOURCE_ROOT}/diorama/diorama_performance.h"
+    "${GAME_SOURCE_ROOT}/host/host_clock.h"
     # Action effect construction is game-side geometry generation. Keep its
     # public contract and pure batch builder portable even while the diorama
     # projection adapter still calls the native compositor implementation.
@@ -37,8 +41,9 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/sim/sim_background_voxel_project.h"
     "${GAME_SOURCE_ROOT}/sim/sim_background_voxel_terrain_depth.c"
     "${GAME_SOURCE_ROOT}/sim/sim_background_voxel_terrain_depth.h"
-    # Diorama callers share only opaque texture handles and portable geometry;
-    # the current compositor/synthesis implementation is an SDL adapter.
+    # Diorama callers and the compositor share only opaque texture handles,
+    # portable geometry, and render-device output/viewport operations. Frame
+    # synthesis remains a separate optional platform adapter.
     "${GAME_SOURCE_ROOT}/diorama/diorama.h"
     "${GAME_SOURCE_ROOT}/diorama/diorama_frame_generation.h"
     "${GAME_SOURCE_ROOT}/diorama/diorama_projection.c")
@@ -60,9 +65,9 @@ if(_violations)
 endif()
 
 # Persistent game-facing presentation resources must not regress from opaque
-# handles merely because their current compositor still has an SDL migration
-# bridge. Private effect/render-target textures are intentionally out of scope
-# until those subsystems move behind backend operations.
+# handles while the surrounding presentation code is migrated incrementally.
+# Private effect/render-target textures are intentionally out of scope until
+# those subsystems move behind backend operations.
 set(_resource_owner_files
     "${GAME_SOURCE_ROOT}/main.c"
     "${GAME_SOURCE_ROOT}/present.c"
@@ -79,8 +84,8 @@ foreach(_file IN LISTS _resource_owner_files)
     endif()
 endforeach()
 
-# The authored ROM skybox cache is now device-owned even while the surrounding
-# diorama compositor remains a transitional SDL implementation.
+# The authored ROM skybox cache and compositor are device-owned/portable; keep
+# the focused checks below as explicit diagnostics for common regressions.
 file(READ "${GAME_SOURCE_ROOT}/diorama/diorama.c" _diorama_contents)
 if(_diorama_contents MATCHES
    "SDL_GPU(Shader|RenderState|Device)|SDL_SetGPURenderState")

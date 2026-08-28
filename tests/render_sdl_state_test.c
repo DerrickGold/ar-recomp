@@ -39,6 +39,22 @@ int main(void) {
   ArSdlRenderBackend backend = {0};
   ArRenderDevice device = {0};
   assert(ArSdlRenderBackend_Bind(&device, &backend, renderer));
+  assert(SDL_SetRenderLogicalPresentation(
+      renderer, 8, 8, SDL_LOGICAL_PRESENTATION_LETTERBOX));
+  assert(ArRenderDevice_UseOutputCoordinates(&device));
+  int output_width = 0;
+  int output_height = 0;
+  assert(ArRenderDevice_GetOutputSize(
+      &device, &output_width, &output_height));
+  assert(output_width == 16 && output_height == 16);
+  int logical_width = -1;
+  int logical_height = -1;
+  SDL_RendererLogicalPresentation logical_mode =
+      SDL_LOGICAL_PRESENTATION_LETTERBOX;
+  assert(SDL_GetRenderLogicalPresentation(
+      renderer, &logical_width, &logical_height, &logical_mode));
+  assert(logical_width == 0 && logical_height == 0);
+  assert(logical_mode == SDL_LOGICAL_PRESENTATION_DISABLED);
 
   const ArRenderTextureDesc desc = {
     .width = 2,

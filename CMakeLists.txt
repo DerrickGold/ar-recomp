@@ -410,6 +410,7 @@ if(BUILD_TESTING)
         tests/render_device_test.c
         src/presentation_upload_mirror.c
         src/render/render_device.c
+        src/render/render_output.c
     )
     target_include_directories(actraiser_render_device_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src

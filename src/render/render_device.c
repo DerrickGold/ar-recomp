@@ -5,9 +5,10 @@
 static bool HasRequiredOps(const ArRenderBackendOps *ops) {
   return ops && ops->struct_size >= sizeof(*ops) &&
       ops->create_texture && ops->destroy_texture && ops->update_texture &&
-      ops->set_render_target && ops->set_viewport && ops->set_clip_rect &&
-      ops->clear && ops->draw_texture && ops->draw_geometry &&
-      ops->present && ops->last_error;
+      ops->set_render_target && ops->use_output_coordinates &&
+      ops->get_output_size && ops->set_viewport && ops->set_clip_rect &&
+      ops->clear && ops->draw_texture && ops->draw_geometry && ops->present &&
+      ops->last_error;
 }
 
 bool ArRenderDevice_Init(ArRenderDevice *device,
@@ -68,6 +69,27 @@ bool ArRenderDevice_SetRenderTarget(ArRenderDevice *device,
       device->ops->set_render_target(device->context, target);
 }
 
+bool ArRenderDevice_UseOutputCoordinates(ArRenderDevice *device) {
+  return ArRenderDevice_IsReady(device) &&
+      device->ops->use_output_coordinates(device->context);
+}
+
+bool ArRenderDevice_GetOutputSize(ArRenderDevice *device,
+                                  int *width, int *height) {
+  if (width) *width = 0;
+  if (height) *height = 0;
+  if (!ArRenderDevice_IsReady(device) || !width || !height) return false;
+  int resolved_width = 0;
+  int resolved_height = 0;
+  if (!device->ops->get_output_size(
+          device->context, &resolved_width, &resolved_height) ||
+      resolved_width <= 0 || resolved_height <= 0)
+    return false;
+  *width = resolved_width;
+  *height = resolved_height;
+  return true;
+}
+
 bool ArRenderDevice_SetViewport(ArRenderDevice *device,
                                 const ArRenderRectI *viewport) {
   return ArRenderDevice_IsReady(device) &&
@@ -120,8 +142,16 @@ bool ArRenderDevice_EndTarget(ArRenderDevice *device,
       device->ops->restore_render_target_state(device->context, state);
 }
 
+static bool NormalizedColor(ArRenderColorF color) {
+  return color.r >= 0.0f && color.r <= 1.0f &&
+      color.g >= 0.0f && color.g <= 1.0f &&
+      color.b >= 0.0f && color.b <= 1.0f &&
+      color.a >= 0.0f && color.a <= 1.0f;
+}
+
 bool ArRenderDevice_Clear(ArRenderDevice *device, ArRenderColorF color) {
   return ArRenderDevice_IsReady(device) &&
+      NormalizedColor(color) &&
       device->ops->clear(device->context, color);
 }
 
@@ -131,13 +161,6 @@ bool ArRenderDevice_DrawTexture(ArRenderDevice *device,
                                 const ArRenderRectF *destination) {
   return ArRenderDevice_DrawTextureWithState(
       device, texture, source, destination, NULL);
-}
-
-static bool NormalizedColor(ArRenderColorF color) {
-  return color.r >= 0.0f && color.r <= 1.0f &&
-      color.g >= 0.0f && color.g <= 1.0f &&
-      color.b >= 0.0f && color.b <= 1.0f &&
-      color.a >= 0.0f && color.a <= 1.0f;
 }
 
 static bool ValidBlend(ArRenderBlendMode blend) {

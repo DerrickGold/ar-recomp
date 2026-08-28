@@ -1,4 +1,5 @@
 #include "render/render_device.h"
+#include "render/render_output.h"
 #include "presentation_upload_mirror.h"
 
 #include <assert.h>
@@ -13,6 +14,10 @@ typedef struct FakeBackend {
   int draw_texture_count;
   int draw_geometry_count;
   int set_render_target_count;
+  int set_viewport_count;
+  int clear_count;
+  int use_output_coordinates_count;
+  int get_output_size_count;
   int capture_target_state_count;
   int restore_target_state_count;
   int present_count;
@@ -25,9 +30,14 @@ typedef struct FakeBackend {
   int last_index_count;
   ArRenderVertex2D last_vertices[4];
   ArRenderTargetState target_state;
+  ArRenderColorF last_clear_color;
   bool fail_capture_target_state;
   bool fail_set_viewport;
   bool fail_restore_target_state;
+  bool fail_clear;
+  bool fail_draw_geometry;
+  int output_width;
+  int output_height;
 } FakeBackend;
 
 static bool CreateTexture(void *context, const ArRenderTextureDesc *desc,
@@ -66,8 +76,23 @@ static bool SetRenderTarget(void *context, ArRenderTexture target) {
   return true;
 }
 
+static bool UseOutputCoordinates(void *context) {
+  FakeBackend *backend = context;
+  backend->use_output_coordinates_count++;
+  return true;
+}
+
+static bool GetOutputSize(void *context, int *width, int *height) {
+  FakeBackend *backend = context;
+  backend->get_output_size_count++;
+  *width = backend->output_width;
+  *height = backend->output_height;
+  return true;
+}
+
 static bool SetViewport(void *context, const ArRenderRectI *viewport) {
   FakeBackend *backend = context;
+  backend->set_viewport_count++;
   if (backend->fail_set_viewport) return false;
   backend->target_state.viewport_set = viewport != NULL;
   if (viewport) backend->target_state.viewport = *viewport;
@@ -101,9 +126,10 @@ static bool RestoreRenderTargetState(
 }
 
 static bool Clear(void *context, ArRenderColorF color) {
-  (void)context;
-  (void)color;
-  return true;
+  FakeBackend *backend = context;
+  backend->clear_count++;
+  backend->last_clear_color = color;
+  return !backend->fail_clear;
 }
 
 static bool DrawTexture(void *context, ArRenderTexture texture,
@@ -127,6 +153,7 @@ static bool DrawGeometry(void *context, ArRenderTexture texture,
   FakeBackend *backend = context;
   assert(vertices && vertex_count > 0 && vertex_count <= 4);
   assert(indices && index_count > 0);
+  if (backend->fail_draw_geometry) return false;
   backend->draw_geometry_count++;
   backend->last_texture = texture;
   backend->last_vertex_count = vertex_count;
@@ -155,6 +182,8 @@ static const ArRenderBackendOps kFakeOps = {
   .destroy_texture = DestroyTexture,
   .update_texture = UpdateTexture,
   .set_render_target = SetRenderTarget,
+  .use_output_coordinates = UseOutputCoordinates,
+  .get_output_size = GetOutputSize,
   .set_viewport = SetViewport,
   .set_clip_rect = SetClipRect,
   .capture_render_target_state = CaptureRenderTargetState,
@@ -167,7 +196,10 @@ static const ArRenderBackendOps kFakeOps = {
 };
 
 static void TestDeviceDispatchAndCapabilities(void) {
-  FakeBackend backend = {0};
+  FakeBackend backend = {
+    .output_width = 1280,
+    .output_height = 720,
+  };
   ArRenderDevice device = {0};
   const ArRenderCapabilities capabilities = {
     .flags = kArRenderCapability_StreamingTextures |
@@ -272,6 +304,25 @@ static void TestDeviceDispatchAndCapabilities(void) {
   assert(backend.set_render_target_count == 2 &&
          !ArRenderTexture_IsValid(backend.last_texture));
 
+  assert(ArRenderDevice_UseOutputCoordinates(&device));
+  assert(backend.use_output_coordinates_count == 1);
+  int output_width = 0;
+  int output_height = 0;
+  assert(ArRenderDevice_GetOutputSize(
+      &device, &output_width, &output_height));
+  assert(output_width == 1280 && output_height == 720);
+  assert(backend.get_output_size_count == 1);
+  assert(!ArRenderDevice_GetOutputSize(&device, NULL, &output_height));
+  backend.output_width = 0;
+  assert(!ArRenderDevice_GetOutputSize(
+      &device, &output_width, &output_height));
+  assert(output_width == 0 && output_height == 0);
+  backend.output_width = 1280;
+
+  assert(!ArRenderDevice_Clear(
+      &device, (ArRenderColorF){0.0f, 0.0f, 0.0f, 1.1f}));
+  assert(backend.clear_count == 0);
+
   const ArRenderRectI viewport = {7, 8, 320, 240};
   const ArRenderRectI clip = {9, 10, 100, 80};
   assert(ArRenderDevice_SetViewport(&device, &viewport));
@@ -375,6 +426,88 @@ static void TestIncompleteBackendIsRejected(void) {
   assert(!ArRenderDevice_Init(
       &device, &incomplete, &backend, (ArRenderCapabilities){0}));
   assert(!ArRenderDevice_IsReady(&device));
+  incomplete = kFakeOps;
+  incomplete.use_output_coordinates = NULL;
+  assert(!ArRenderDevice_Init(
+      &device, &incomplete, &backend, (ArRenderCapabilities){0}));
+  assert(!ArRenderDevice_IsReady(&device));
+}
+
+static void TestOutputFrameScope(void) {
+  const ArRenderColorF black = {0.0f, 0.0f, 0.0f, 1.0f};
+  const ArRenderColorF navy = {0.1f, 0.1f, 0.2f, 1.0f};
+
+  FakeBackend full_backend = {
+    .output_width = 640,
+    .output_height = 480,
+  };
+  ArRenderDevice full_device = {0};
+  assert(ArRenderDevice_Init(
+      &full_device, &kFakeOps, &full_backend,
+      (ArRenderCapabilities){0}));
+  ArRenderOutputFrame frame = {0};
+  assert(ArRenderOutputFrame_Begin(
+      &full_device, (ArRenderRectI){0, 0, 640, 480},
+      black, navy, &frame));
+  assert(frame.active && frame.viewport_is_output);
+  assert(frame.output_width == 640 && frame.output_height == 480);
+  assert(full_backend.use_output_coordinates_count == 1);
+  assert(full_backend.get_output_size_count == 1);
+  assert(full_backend.clear_count == 1);
+  assert(!memcmp(&full_backend.last_clear_color, &navy, sizeof(navy)));
+  assert(full_backend.set_viewport_count == 1);
+  assert(full_backend.draw_geometry_count == 0);
+  assert(ArRenderOutputFrame_EnterFullOutput(&frame));
+  assert(ArRenderOutputFrame_RestoreViewport(&frame));
+  assert(ArRenderOutputFrame_Finish(&frame));
+  assert(!frame.active && full_backend.set_viewport_count == 1);
+
+  FakeBackend inset_backend = {
+    .output_width = 640,
+    .output_height = 480,
+  };
+  ArRenderDevice inset_device = {0};
+  assert(ArRenderDevice_Init(
+      &inset_device, &kFakeOps, &inset_backend,
+      (ArRenderCapabilities){0}));
+  const ArRenderRectI viewport = {80, 0, 480, 480};
+  assert(ArRenderOutputFrame_Begin(
+      &inset_device, viewport, black, navy, &frame));
+  assert(frame.active && !frame.viewport_is_output);
+  assert(inset_backend.clear_count == 1);
+  assert(!memcmp(&inset_backend.last_clear_color, &black, sizeof(black)));
+  assert(inset_backend.set_viewport_count == 2);
+  assert(inset_backend.target_state.viewport_set);
+  assert(!memcmp(
+      &inset_backend.target_state.viewport, &viewport, sizeof(viewport)));
+  assert(inset_backend.draw_geometry_count == 1);
+  assert(inset_backend.last_draw_state.blend == kArRenderBlendMode_Opaque);
+  assert(!memcmp(&inset_backend.last_vertices[0].color,
+                 &navy, sizeof(navy)));
+  assert(inset_backend.last_vertices[2].position.x == 480.0f);
+  assert(inset_backend.last_vertices[2].position.y == 480.0f);
+  assert(ArRenderOutputFrame_EnterFullOutput(&frame));
+  assert(!inset_backend.target_state.viewport_set);
+  assert(ArRenderOutputFrame_RestoreViewport(&frame));
+  assert(inset_backend.target_state.viewport_set);
+  assert(ArRenderOutputFrame_Finish(&frame));
+  assert(!inset_backend.target_state.viewport_set);
+  assert(inset_backend.set_viewport_count == 5);
+
+  assert(!ArRenderOutputFrame_Begin(
+      &inset_device, (ArRenderRectI){600, 0, 80, 480},
+      black, navy, &frame));
+  assert(!frame.active);
+  assert(inset_backend.clear_count == 1);
+
+  inset_backend.fail_draw_geometry = true;
+  const int viewport_calls_before_failure = inset_backend.set_viewport_count;
+  assert(!ArRenderOutputFrame_Begin(
+      &inset_device, viewport, black, navy, &frame));
+  assert(!frame.active);
+  assert(!inset_backend.target_state.viewport_set);
+  assert(inset_backend.set_viewport_count ==
+         viewport_calls_before_failure + 3);
 }
 
 static void TestDirtyUploadWorksWithoutANativeRenderer(void) {
@@ -416,6 +549,7 @@ static void TestDirtyUploadWorksWithoutANativeRenderer(void) {
 int main(void) {
   TestDeviceDispatchAndCapabilities();
   TestIncompleteBackendIsRejected();
+  TestOutputFrameScope();
   TestDirtyUploadWorksWithoutANativeRenderer();
   puts("render_device_test: ok");
   return 0;
