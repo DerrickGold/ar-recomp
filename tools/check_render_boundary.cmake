@@ -27,6 +27,7 @@ list(APPEND _portable_render_files
     # The enhanced SIM scene's depth contract is game-side; its current GPU
     # implementation belongs to the SDL platform adapter.
     "${GAME_SOURCE_ROOT}/sim/sim3d_depth_pass.h"
+    "${GAME_SOURCE_ROOT}/sim/sim_shadow_effect_backend.h"
     "${GAME_SOURCE_ROOT}/sim/sim_background_mountain_render.c"
     "${GAME_SOURCE_ROOT}/sim/sim_background_mountain_render.h"
     "${GAME_SOURCE_ROOT}/sim/sim_background_voxel_renderer.c"
@@ -89,6 +90,14 @@ if(_diorama_contents MATCHES
    "SDL_Texture[ \t]*\\*[ \t]*(art_texture|target_texture|g_diorama_ss_texture)")
     list(APPEND _native_resource_violations
         "${GAME_SOURCE_ROOT}/diorama/diorama.c (ROM skybox cache)")
+endif()
+
+file(READ "${GAME_SOURCE_ROOT}/present_sim3d_shadows.c"
+     _sim_shadow_contents)
+if(_sim_shadow_contents MATCHES
+   "SDL_GPU(Shader|RenderState|Device)|SDL_SetGPURenderState")
+    list(APPEND _native_resource_violations
+        "${GAME_SOURCE_ROOT}/present_sim3d_shadows.c (native effect state)")
 endif()
 if(_native_resource_violations)
     list(JOIN _native_resource_violations "\n  " _formatted)
