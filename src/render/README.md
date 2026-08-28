@@ -72,6 +72,9 @@ host-facing menu header retains only its window and input integration surface.
 Its sole `FrameSlot` producer is enforced by the same boundary and timestamps
 snapshots through the host clock contract, so retained-frame inputs do not
 inherit a platform timer dependency.
+Enhanced-SIM camera persistence and opt-in stage profiling use that clock
+contract as well; neither scene behavior nor renderer instrumentation imports
+the selected window system.
 Host cadence submits completed frames and queries physical output extent through
 `ArRenderDevice`; swapchain configuration, display events, and window scaling
 remain responsibilities of the selected platform host.

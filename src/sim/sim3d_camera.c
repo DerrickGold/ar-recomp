@@ -3,11 +3,10 @@
 #include <stddef.h>
 #include <stdio.h>
 
-#include <SDL3/SDL.h>
-
 #include "actraiser_game.h"
 #include "camera_orbit.h"
 #include "constants.h"
+#include "host/host_clock.h"
 #include "scene3d_math.h"
 #include "settings.h"
 #include "sim3d_camera_limits.h"
@@ -80,7 +79,7 @@ static float ClampFloat(float value, float minimum, float maximum) {
 
 static void MarkSettingsDirty(void) {
   s_settings_dirty = true;
-  s_settings_dirty_at_ms = SDL_GetTicks();
+  s_settings_dirty_at_ms = HostClock_Milliseconds();
 }
 
 void Sim3DCamera_Adjust(float yaw_delta, float pitch_delta,
@@ -197,7 +196,7 @@ void Sim3DCamera_SetDragging(bool dragging) {
 
 void Sim3DCamera_FlushSettingsIfDirty(void) {
   if (!s_settings_dirty || s_dragging ||
-      SDL_GetTicks() - s_settings_dirty_at_ms <=
+      HostClock_Milliseconds() - s_settings_dirty_at_ms <=
           kSim3DCameraSettingsSaveDelayMs)
     return;
 

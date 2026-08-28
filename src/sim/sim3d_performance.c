@@ -1,11 +1,11 @@
 #include "sim3d_performance.h"
 
-#include <SDL3/SDL.h>
-
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "host/host_clock.h"
 
 enum {
   kNoPerformanceStage = -1,
@@ -54,7 +54,7 @@ Sim3DPerformanceScope Sim3DPerformance_Begin(
   if (!Sim3DPerformance_Enabled() || stage < 0 ||
       stage >= kSim3DPerformanceStage_Count)
     return scope;
-  scope.started_ns = SDL_GetTicksNS();
+  scope.started_ns = HostClock_Nanoseconds();
   scope.active = true;
   s_current_stage = (int)stage;
   return scope;
@@ -62,7 +62,7 @@ Sim3DPerformanceScope Sim3DPerformance_Begin(
 
 void Sim3DPerformance_End(Sim3DPerformanceScope scope) {
   if (!scope.active) return;
-  uint64_t now_ns = SDL_GetTicksNS();
+  uint64_t now_ns = HostClock_Nanoseconds();
   Sim3DPerformanceCounters *counter = &s_counters[scope.stage];
   counter->elapsed_ns += now_ns - scope.started_ns;
   counter->calls++;
@@ -133,7 +133,7 @@ static void ReportPerformance(uint64_t window_ns) {
 
 void Sim3DPerformance_EndPresentation(void) {
   if (!Sim3DPerformance_Enabled()) return;
-  uint64_t now_ns = SDL_GetTicksNS();
+  uint64_t now_ns = HostClock_Nanoseconds();
   if (!s_window_started_ns) s_window_started_ns = now_ns;
   s_presentations++;
   uint64_t window_ns = now_ns - s_window_started_ns;
