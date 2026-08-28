@@ -9,9 +9,9 @@
  * render/main thread. PPU-bound output surfaces arrive through FrameSlot's
  * runner-ABI snapshot. */
 
-#include <SDL3/SDL.h>
 #include <limits.h>
 #include <math.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,7 +29,8 @@
 #include "diorama/diorama_skybox_uv.h"
 #include "diorama/diorama_planes.h"
 #include "hd_replacement_host.h"
-#include "settings_overlay.h"
+#include "host/host_clock.h"
+#include "settings_overlay_render.h"
 #include "dev/scene_inspector.h"
 #include "render_capabilities.h"
 #include "sim/sim_render_atlas.h"
@@ -48,7 +49,6 @@
 #include "render/render_output.h"
 
 
-extern SDL_Renderer *g_renderer;
 extern ArRenderDevice g_render_device;
 extern ArRenderTexture g_texture;
 extern ArRenderTexture g_authentic_texture;
@@ -77,7 +77,7 @@ typedef struct ActionHeatPassState {
 
 typedef struct ActionHeatMeshCache {
   ActionHeatRenderMesh mesh;
-  SDL_Rect viewport;
+  ArRenderRectI viewport;
   int target_width, target_height, source_width;
   uint16_t game_frame;
   bool valid;
@@ -174,7 +174,7 @@ static void CaptureDioramaPpuSurfaces(
  * so one reusable workspace covers actor and every depth-ordered decoration
  * pass. Keep these large bounded arrays out of automatic storage: the scene
  * batch alone is roughly half a MiB and can exhaust default Windows/custom
- * thread stacks before SDL or a backend driver gets its own frame. */
+ * thread stacks before a backend driver gets its own frame. */
 typedef struct ActionEffectRenderScratch {
   ActionEffectRenderBatch spell;
   ActionSceneEffectRenderBatch scene;
@@ -263,12 +263,6 @@ static ArRenderRectF ToRenderRectF(ArRenderRectI rectangle) {
   return (ArRenderRectF){
     (float)rectangle.x, (float)rectangle.y,
     (float)rectangle.w, (float)rectangle.h,
-  };
-}
-
-static ArRenderRectI ToRenderRectI(SDL_Rect rectangle) {
-  return (ArRenderRectI){
-    rectangle.x, rectangle.y, rectangle.w, rectangle.h,
   };
 }
 
@@ -685,7 +679,9 @@ static void UploadActionWinnerMask(ArRenderTexture *texture, int mirror,
         &g_render_device, &desc, texture);
   }
   if (ArRenderTexture_IsValid(*texture)) {
-    const SDL_Rect mask = {0, 0, slot->snes_width, slot->snes_height};
+    const ArRenderRectI mask = {
+      0, 0, slot->snes_width, slot->snes_height,
+    };
     UploadChangedSurface(
         *texture, &s_action_upload_mirrors[mirror], pixels,
         mask.w, mask.h, pitch_bytes,
@@ -694,7 +690,8 @@ static void UploadActionWinnerMask(ArRenderTexture *texture, int mirror,
 }
 
 void PresentUpload(const FrameSlot *slot) {
-  if (!g_renderer || !ArRenderTexture_IsValid(g_texture)) return;
+  if (!ArRenderDevice_IsReady(&g_render_device) ||
+      !ArRenderTexture_IsValid(g_texture)) return;
   Sim3DPerformanceScope performance = {0};
   if (slot->sim.view == kSimView_Enhanced)
     performance = Sim3DPerformance_Begin(kSim3DPerformance_Upload);
@@ -716,12 +713,11 @@ void PresentUpload(const FrameSlot *slot) {
     } else {
       s_authentic_uploaded_frame_serial = 0;
       if (RenderComparison_RequiresAuthenticFrame()) {
-        const char *sdl_error = SDL_GetError();
         SessionFatal_Request(
             "Authentic comparison could not upload its current native frame "
             "(%s). Restart the game; if this repeats, update your graphics "
-            "driver or select a different SDL renderer.",
-            sdl_error[0] ? sdl_error : "texture upload failed");
+            "driver or select a different renderer.",
+            ArRenderDevice_LastError(&g_render_device));
       }
     }
   }
@@ -754,7 +750,9 @@ void PresentUpload(const FrameSlot *slot) {
     DioramaPerformance_End(frame_analysis);
   } else {
     s_diorama_uploaded_plane_mask = 0;
-    SDL_Rect upload = { 0, 0, slot->snes_width, slot->snes_height };
+    ArRenderRectI upload = {
+      0, 0, slot->snes_width, slot->snes_height,
+    };
     const SrPpuSurfaceView *surface =
         BoundPpuSurface(&slot->ppu_surfaces.main);
     /* The main view reports the physical column for screen x=0. Upload starts
@@ -796,7 +794,7 @@ void PresentUpload(const FrameSlot *slot) {
     if (ArRenderTexture_IsValid(g_hud_bg_texture)) {
       int rows = slot->overlay_captures[kFrameSlotOverlay_Bg3].y1;
       if (rows < split_rows) rows = split_rows;
-      SDL_Rect hud = { 0, 0, slot->snes_width, rows };
+      const ArRenderRectI hud = {0, 0, slot->snes_width, rows};
       const SrPpuSurfaceView *surface = BoundPpuSurface(
           &slot->sim3d_output_surfaces.hud_bg);
       if (!surface)
@@ -812,7 +810,7 @@ void PresentUpload(const FrameSlot *slot) {
     if (ArRenderTexture_IsValid(g_hud_obj_texture)) {
       int rows = slot->overlay_captures[kFrameSlotOverlay_Obj].y1;
       if (rows < split_rows) rows = split_rows;
-      SDL_Rect hud = { 0, 0, slot->snes_width, rows };
+      const ArRenderRectI hud = {0, 0, slot->snes_width, rows};
       const SrPpuSurfaceView *surface = BoundPpuSurface(
           &slot->sim3d_output_surfaces.hud_obj);
       if (!surface)
@@ -828,9 +826,11 @@ void PresentUpload(const FrameSlot *slot) {
   }
 
   if (ArRenderTexture_IsValid(g_m7_texture) && slot->m7_active) {
-    SDL_Rect src = { slot->visible_x0 * kHdMode7Scale, 0,
-                     slot->visible_width * kHdMode7Scale,
-                     slot->snes_height * kHdMode7Scale };
+    const ArRenderRectI src = {
+      slot->visible_x0 * kHdMode7Scale, 0,
+      slot->visible_width * kHdMode7Scale,
+      slot->snes_height * kHdMode7Scale,
+    };
     const SrPpuSurfaceView *surface =
         BoundPpuSurface(&slot->ppu_surfaces.mode7);
     const uint8_t *pixels =
@@ -850,8 +850,9 @@ void PresentUpload(const FrameSlot *slot) {
   if (ArRenderTexture_IsValid(g_sim_obj_atlas_texture) &&
       slot->sim.town && slot->sim.atlas_valid &&
       slot->sim.atlas_used_width && slot->sim.atlas_used_height) {
-    SDL_Rect atlas = { 0, 0, slot->sim.atlas_used_width,
-                      slot->sim.atlas_used_height };
+    const ArRenderRectI atlas = {
+      0, 0, slot->sim.atlas_used_width, slot->sim.atlas_used_height,
+    };
     UploadChangedSim3DSurface(
         g_sim_obj_atlas_texture, kSim3DUploadSurface_Atlas,
         g_sim_obj_atlas_pixels, atlas.w, atlas.h,
@@ -859,7 +860,9 @@ void PresentUpload(const FrameSlot *slot) {
   }
 
   if (slot->sim.separated_valid) {
-    SDL_Rect frame = { 0, 0, slot->snes_width, slot->snes_height };
+    const ArRenderRectI frame = {
+      0, 0, slot->snes_width, slot->snes_height,
+    };
     uint32_t plane_upload_mask =
         Sim3D_PlaneTextureUploadMask(
             slot->sim.effective_features,
@@ -939,35 +942,41 @@ static const float kDioramaKickTau = 0.20f;    /* seconds, wall-clock exp decay 
  * modes and untextured geometry, not a backend shader. Those are portable
  * API paths,
  * but not a promise of pixel-identical rasterization across Metal, Vulkan,
- * Direct3D and software. Capability is verified at the point of use: SDL may
- * legally substitute the closest blend mode, so a successful set is followed
- * by a get-and-compare. Any rejection or substitution fails the stages closed. */
-static SDL_AtomicInt s_effect_blend_supported = { .value = 1 };
-static SDL_AtomicInt s_effect_geometry_supported = { .value = 1 };
+ * Direct3D and software. Capability is verified at the point of use: a backend
+ * may legally substitute the closest blend mode, so a successful set is
+ * followed by a get-and-compare. Any rejection or substitution fails closed. */
+static atomic_int s_effect_blend_supported = ATOMIC_VAR_INIT(1);
+static atomic_int s_effect_geometry_supported = ATOMIC_VAR_INIT(1);
 
 void DisableEffectBlend(const char *operation) {
-  if (!SDL_CompareAndSwapAtomicInt(
-          &s_effect_blend_supported, 1, 0))
+  int expected = 1;
+  if (!atomic_compare_exchange_strong_explicit(
+          &s_effect_blend_supported, &expected, 0,
+          memory_order_acq_rel, memory_order_acquire))
     return;
   fprintf(stderr,
           "[host-effects] effect blend pass unavailable at %s (%s) — "
           "effect lighting and particles disabled\n",
-          operation, SDL_GetError());
+          operation, ArRenderDevice_LastError(&g_render_device));
 }
 
 static void DisableEffectGeometry(const char *operation) {
-  if (!SDL_CompareAndSwapAtomicInt(
-          &s_effect_geometry_supported, 1, 0))
+  int expected = 1;
+  if (!atomic_compare_exchange_strong_explicit(
+          &s_effect_geometry_supported, &expected, 0,
+          memory_order_acq_rel, memory_order_acquire))
     return;
   fprintf(stderr,
           "[host-effects] geometry pass unavailable at %s (%s) — "
           "effect lighting and particles disabled\n",
-          operation, SDL_GetError());
+          operation, ArRenderDevice_LastError(&g_render_device));
 }
 
 bool EffectRendererAvailable(void) {
-  return SDL_GetAtomicInt(&s_effect_blend_supported) != 0 &&
-      SDL_GetAtomicInt(&s_effect_geometry_supported) != 0;
+  return atomic_load_explicit(
+             &s_effect_blend_supported, memory_order_acquire) != 0 &&
+      atomic_load_explicit(
+             &s_effect_geometry_supported, memory_order_acquire) != 0;
 }
 
 bool Present_EffectRendererSupported(void) {
@@ -980,7 +989,8 @@ static void DisableActionHeat(const char *operation) {
   fprintf(stderr,
           "[action-fx] lava heat refraction unavailable at %s (%s); "
           "disabled\n",
-          operation ? operation : "unknown operation", SDL_GetError());
+          operation ? operation : "unknown operation",
+          ArRenderDevice_LastError(&g_render_device));
 }
 
 static void FailActionHeatTargetState(const char *operation) {
@@ -1037,7 +1047,7 @@ static void ClearActionHeatSavedState(void) {
 
 static bool ActionHeatMeshMatches(
     const ActionHeatMeshCache *cache, uint16_t game_frame,
-    SDL_Rect viewport, int target_width, int target_height,
+    ArRenderRectI viewport, int target_width, int target_height,
     int source_width) {
   return cache && cache->valid && cache->game_frame == game_frame &&
       cache->viewport.x == viewport.x && cache->viewport.y == viewport.y &&
@@ -1048,7 +1058,7 @@ static bool ActionHeatMeshMatches(
 }
 
 static const ActionHeatRenderMesh *ActionHeatMeshFor(
-    uint16_t game_frame, SDL_Rect viewport,
+    uint16_t game_frame, ArRenderRectI viewport,
     int target_width, int target_height, int source_width) {
   if (ActionHeatMeshMatches(
           &s_action_heat_mesh_cache, game_frame, viewport,
@@ -1057,7 +1067,7 @@ static const ActionHeatRenderMesh *ActionHeatMeshFor(
   s_action_heat_mesh_cache.valid = false;
   if (!ActionHeatRender_Build(
           game_frame,
-          (ArRenderRectI){viewport.x, viewport.y, viewport.w, viewport.h},
+          viewport,
           target_width, target_height,
           source_width, &s_action_heat_mesh_cache.mesh))
     return NULL;
@@ -1075,7 +1085,7 @@ static const ActionHeatRenderMesh *ActionHeatMeshFor(
  * heat pass cannot display. The matching end pass clears the real output once
  * and resolves this texture with one subtly UV-warped mesh; HUD and host
  * overlays are intentionally drawn afterward. */
-static bool BeginActionHeat(const FrameSlot *slot, SDL_Rect viewport) {
+static bool BeginActionHeat(const FrameSlot *slot, ArRenderRectI viewport) {
   if (s_action_heat_engaged || !FrameUsesActionHeat(slot) ||
       !EffectRendererAvailable() || !s_action_heat_supported)
     return false;
@@ -1102,13 +1112,13 @@ static bool BeginActionHeat(const FrameSlot *slot, SDL_Rect viewport) {
   return true;
 }
 
-static SDL_Rect ActionHeatSceneViewport(SDL_Rect output_viewport) {
+static ArRenderRectI ActionHeatSceneViewport(ArRenderRectI output_viewport) {
   if (!s_action_heat_engaged) return output_viewport;
-  return (SDL_Rect){0, 0, output_viewport.w, output_viewport.h};
+  return (ArRenderRectI){0, 0, output_viewport.w, output_viewport.h};
 }
 
 static bool ResolveFrameOutputViewport(
-    const FrameSlot *slot, SDL_Rect *viewport) {
+    const FrameSlot *slot, ArRenderRectI *viewport) {
   if (!slot || !viewport) return false;
   const int aspect_width = slot->visible_width *
       (slot->pixel_aspect == kPixelAspect_Crt43 ? 7 : 1);
@@ -1119,9 +1129,7 @@ static bool ResolveFrameOutputViewport(
           &g_render_device, slot->ignore_aspect_ratio,
           aspect_width, aspect_height, &resolved, NULL, NULL))
     return false;
-  *viewport = (SDL_Rect){
-    resolved.x, resolved.y, resolved.w, resolved.h,
-  };
+  *viewport = resolved;
   return true;
 }
 
@@ -1137,7 +1145,7 @@ static void CancelActionHeat(void) {
     FailActionHeatTargetState("cancel state restore");
 }
 
-static void EndActionHeat(const FrameSlot *slot, SDL_Rect viewport) {
+static void EndActionHeat(const FrameSlot *slot, ArRenderRectI viewport) {
   if (!s_action_heat_engaged) return;
   const ActionHeatPassState saved = s_action_heat_saved_state;
   ClearActionHeatSavedState();
@@ -1152,12 +1160,12 @@ static void EndActionHeat(const FrameSlot *slot, SDL_Rect viewport) {
   ArRenderOutputFrame output_frame;
   if (!ArRenderOutputFrame_Begin(
           &g_render_device,
-          (ArRenderRectI){viewport.x, viewport.y, viewport.w, viewport.h},
+          viewport,
           black, black, &output_frame)) {
     DisableActionHeat("scene resolve scope");
     return;
   }
-  const SDL_Rect local_viewport = {0, 0, viewport.w, viewport.h};
+  const ArRenderRectI local_viewport = {0, 0, viewport.w, viewport.h};
   const ActionHeatRenderMesh *mesh = ActionHeatMeshFor(
       slot->action_scene_effects.game_frame, local_viewport,
       s_action_heat_w, s_action_heat_h, slot->visible_width);
@@ -1217,7 +1225,7 @@ _Static_assert(kActionEffectObjPriorityCount ==
                    kDioramaObjectPriorityCount,
                "action effects and diorama must agree on OBJ bands");
 
-static void DrawActionEffects(const FrameSlot *slot, SDL_Rect viewport,
+static void DrawActionEffects(const FrameSlot *slot, ArRenderRectI viewport,
                               const DioramaProjection *diorama_projection) {
   if (!slot || (!slot->action_effects.visible_count &&
                 !slot->action_scene_effects.visible_count &&
@@ -1335,7 +1343,7 @@ static void DrawActionEffects(const FrameSlot *slot, SDL_Rect viewport,
 
 typedef struct ActionDioramaPlaneEffectContext {
   const FrameSlot *slot;
-  SDL_Rect viewport;
+  ArRenderRectI viewport;
 } ActionDioramaPlaneEffectContext;
 
 static void DrawActionDioramaPlaneEffect(
@@ -1474,7 +1482,7 @@ static ArRenderTexture EnsureActionPlaneEffectTarget(int w, int h) {
 }
 
 static void DrawActionPlaneEffectFlat(
-    const FrameSlot *slot, SDL_Rect viewport, uint8_t render_layer,
+    const FrameSlot *slot, ArRenderRectI viewport, uint8_t render_layer,
     bool mask_valid, ArRenderTexture mask_texture, const char *label) {
   if (!slot || !mask_valid ||
       !slot->action_scene_effects.decoration_visible_count ||
@@ -1553,7 +1561,7 @@ static void DrawActionPlaneEffectFlat(
   }
   bool composited = false;
   if (masked && s_action_plane_blend_supported) {
-    const ArRenderRectF dst = ToRenderRectF(ToRenderRectI(viewport));
+    const ArRenderRectF dst = ToRenderRectF(viewport);
     composited = ArRenderDevice_DrawTexture(
         &g_render_device, target, NULL, &dst);
     if (!composited) DisableActionPlaneEffect("masked-target composite");
@@ -1585,8 +1593,8 @@ static void PresentCheatBadge(const FrameSlot *slot,
   };
   char text[64];
   uint8_t selected = slot->magic_cycle_selected;
-  SDL_snprintf(text, sizeof(text), "CHEAT: SPELL CYCLE %s",
-               selected <= 4 ? kSpells[selected] : "NONE");
+  snprintf(text, sizeof(text), "CHEAT: SPELL CYCLE %s",
+           selected <= 4 ? kSpells[selected] : "NONE");
 
   /* One glyph of inset from the viewport's top-left, at whatever scale keeps
    * the run legible on this output without ever exceeding the viewport. */
@@ -1601,7 +1609,7 @@ static void PresentCheatBadge(const FrameSlot *slot,
 
 /* Developer authoring overlay for Settings > Layers > BG Extents. Segments
  * arrive in authentic-screen coordinates from the immutable plan in FrameSlot;
- * mapping them here keeps the pure row/guide model independent of SDL and keeps
+ * mapping them here keeps the pure row/guide model backend-neutral and keeps
  * present.c isolated from the live tuner singleton. BG1 is cyan, BG2 orange. */
 static void PresentActionBgExtentGuides(const FrameSlot *slot,
                                         ArRenderRectI viewport) {
@@ -1676,10 +1684,10 @@ static void PresentFpsCounter(const FrameSlot *slot, ArRenderExtentI output_size
       cache.frames_per_second != presentation_fps;
   if (text_changed) {
     if (presentation_fps > 0.0)
-      SDL_snprintf(
+      snprintf(
           cache.text, sizeof(cache.text), "FPS %.1f", presentation_fps);
     else
-      SDL_snprintf(cache.text, sizeof(cache.text), "FPS --.-");
+      snprintf(cache.text, sizeof(cache.text), "FPS --.-");
     cache.frames_per_second = presentation_fps;
   }
   if (!cache.initialized || text_changed ||
@@ -1714,11 +1722,9 @@ void PresentHostUi(const FrameSlot *slot, ArRenderRectI viewport,
   PresentFpsCounter(slot, output_size, presentation_fps);
 }
 
-/* Called from the SDL_EVENT_RENDER_TARGETS_RESET / _DEVICE_RESET arm and once
- * during orderly shutdown.
- *
- * SDL_events.h documents _DEVICE_RESET as "The device has been reset and all
- * textures need to be recreated". This includes the size-keyed render targets
+/* Called from the host render-target/device-reset event handlers and once
+ * during orderly shutdown. A device reset invalidates every texture, including
+ * the size-keyed render targets
  * above as well as resources written only when a game-side serial changes
  * (underlay/canvas) or exactly once at creation (cloud noise). None of those
  * cache keys has any dependence on GPU device state, so without this call the
@@ -1731,7 +1737,7 @@ void PresentHostUi(const FrameSlot *slot, ArRenderRectI viewport,
  * UploadSimTownCanvas below ("it showed as magenta"): freshly reallocated
  * STREAMING storage is uninitialized. Never reproducible on macOS/Metal, which
  * does not emit _DEVICE_RESET at all — this is a Windows-D3D and
- * Vulkan/SDL_GPU (Steam Deck) bug. */
+ * Vulkan-backed (Steam Deck) bug. */
 void PresentRendererResources_Reset(void) {
   ResetSim3DUploadMirrors();
   ResetActionUploadMirrors();
@@ -1754,14 +1760,17 @@ void PresentRendererResources_Reset(void) {
   s_action_heat_w = s_action_heat_h = 0;
   s_action_heat_supported = true;
   s_action_heat_engaged = false;
-  SDL_SetAtomicInt(&s_effect_blend_supported, 1);
-  SDL_SetAtomicInt(&s_effect_geometry_supported, 1);
+  atomic_store_explicit(
+      &s_effect_blend_supported, 1, memory_order_release);
+  atomic_store_explicit(
+      &s_effect_geometry_supported, 1, memory_order_release);
   DioramaFrameGeneration_Reset();
   PresentSim3D_ResetResources();
 }
 
 void PresentCompositeScene(const FrameSlot *slot, float alpha) {
-  if (!g_renderer || !ArRenderTexture_IsValid(g_texture)) return;
+  if (!ArRenderDevice_IsReady(&g_render_device) ||
+      !ArRenderTexture_IsValid(g_texture)) return;
 
   /* The action map group becomes live while the world-to-action transition
    * is still holding the SNES in hardware forced blank. That makes Diorama's
@@ -1789,28 +1798,24 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
   }
 
   if (slot->sim.view == kSimView_Enhanced && slot->sim.separated_valid) {
-    SDL_ClearError();
     const PresentationOutcome sim = PresentSim3D(slot);
     if (!PresentationOutcome_IsUsable(sim)) {
-      const char *sdl_error = SDL_GetError();
       SessionFatal_Request(
           "The enhanced SIM renderer lost its active frame state (%s). "
           "Restart the game. If this happens again, update your graphics "
-          "driver or select a different SDL renderer.",
-          sdl_error[0] ? sdl_error : "renderer target/state restore failed");
+          "driver or select a different renderer.",
+          ArRenderDevice_LastError(&g_render_device));
     }
     return;
   }
   if (slot->sim.view == kSimView_WorldNavigation) {
-    SDL_ClearError();
     const PresentationOutcome navigation = PresentWorldNavigation3D(slot);
     if (PresentationOutcome_IsUsable(navigation)) return;
-    const char *sdl_error = SDL_GetError();
     SessionFatal_Request(
         "The enhanced world-navigation renderer failed while it was active "
         "(%s). Restart the game. If this happens again, update your graphics "
         "driver or disable enhanced world navigation before entering the map.",
-        sdl_error[0] ? sdl_error : "invalid renderer frame state");
+        ArRenderDevice_LastError(&g_render_device));
     return;
   }
 
@@ -1870,7 +1875,7 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
      * from wherever Free Cam was left. */
     bool mode_changed = g_diorama_render_cam_mode != slot->diorama_camera_mode;
     g_diorama_render_cam_mode = slot->diorama_camera_mode;
-    uint64_t now_ns = SDL_GetTicksNS();
+    uint64_t now_ns = HostClock_Nanoseconds();
     float dt = 0.0f;
     if (g_diorama_render_cam_last_ns != 0) {
       dt = (float)(now_ns - g_diorama_render_cam_last_ns) / 1e9f;
@@ -1982,7 +1987,7 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
         slot->ws_extra_top,
         slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom,
         kFrameSlotLayerTextureWidth, &bg2_valid_spans);
-    SDL_Rect output_viewport;
+    ArRenderRectI output_viewport;
     if (!ResolveFrameOutputViewport(slot, &output_viewport)) {
       DioramaPerformance_End(presentation_performance);
       DioramaPerformance_PresentCompleted();
@@ -2016,18 +2021,14 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
             slot->diorama_plane_content_mask,
             s_diorama_uploaded_plane_mask);
     (void)BeginActionHeat(slot, output_viewport);
-    const SDL_Rect viewport = ActionHeatSceneViewport(output_viewport);
-    const ArRenderRectI diorama_viewport = {
-      viewport.x, viewport.y, viewport.w, viewport.h,
-    };
+    const ArRenderRectI viewport = ActionHeatSceneViewport(output_viewport);
     ActionDioramaPlaneEffectContext plane_effect = {slot, viewport};
-    SDL_ClearError();
     const PresentationOutcome diorama = Diorama_Composite(
         &g_render_device, slot->snes_width,
         slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom,
         slot->ws_extra_top, slot->obj_apron,
         slot->pixel_aspect, slot->ignore_aspect_ratio,
-        slot->visible_width, diorama_viewport, scene_textures, pixels,
+        slot->visible_width, viewport, scene_textures, pixels,
         slot->diorama_bg_transparent_fill_configured,
         slot->diorama_bg_transparent_fill_argb,
         &final_cam, distance_scale,
@@ -2037,8 +2038,6 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
         slot->diorama_layer_section, &bg2_valid_spans,
         DrawActionDioramaPlaneEffect, &plane_effect, &action_projection);
     if (!PresentationOutcome_IsUsable(diorama)) {
-      char renderer_error[256];
-      snprintf(renderer_error, sizeof(renderer_error), "%s", SDL_GetError());
       CancelActionHeat();
       DioramaPerformance_End(presentation_performance);
       DioramaPerformance_PresentCompleted();
@@ -2046,8 +2045,7 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
           "The selected Diorama renderer could not complete its core scene "
           "(%s). Restart the game. If this happens again, update your "
           "graphics driver or disable Diorama mode before entering the room.",
-          renderer_error[0] ? renderer_error
-                            : "invalid renderer frame state");
+          ArRenderDevice_LastError(&g_render_device));
       return;
     }
     DioramaPerformanceScope callback_performance =
@@ -2076,7 +2074,7 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
     return;
   }
 
-  SDL_Rect output_viewport;
+  ArRenderRectI output_viewport;
   if (!ResolveFrameOutputViewport(slot, &output_viewport)) {
     SessionFatal_Request(
         "The renderer could not resolve the game output viewport (%s). "
@@ -2085,12 +2083,12 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
     return;
   }
   (void)BeginActionHeat(slot, output_viewport);
-  const SDL_Rect viewport = ActionHeatSceneViewport(output_viewport);
+  const ArRenderRectI viewport = ActionHeatSceneViewport(output_viewport);
   const ArRenderColorF black = {0.0f, 0.0f, 0.0f, 1.0f};
   ArRenderOutputFrame output_frame;
   if (!ArRenderOutputFrame_Begin(
           &g_render_device,
-          (ArRenderRectI){viewport.x, viewport.y, viewport.w, viewport.h},
+          viewport,
           black, black, &output_frame)) {
     CancelActionHeat();
     SessionFatal_Request(
@@ -2099,8 +2097,10 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
         ArRenderDevice_LastError(&g_render_device));
     return;
   }
-  const SDL_Rect local_viewport = {0, 0, viewport.w, viewport.h};
-  SDL_Rect src = { slot->visible_x0, 0, slot->visible_width, slot->snes_height };
+  const ArRenderRectI local_viewport = {0, 0, viewport.w, viewport.h};
+  const ArRenderRectI src = {
+    slot->visible_x0, 0, slot->visible_width, slot->snes_height,
+  };
   ArRenderRectF source = {
     (float)src.x, (float)src.y, (float)src.w, (float)src.h,
   };
@@ -2118,7 +2118,7 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
     return;
   }
 
-  PresentMode7Composite(slot, ToRenderRectI(local_viewport));
+  PresentMode7Composite(slot, local_viewport);
   DrawActionPlaneEffectFlat(
       slot, local_viewport, kActionEffectRenderLayer_Bg1Plane,
       slot->action_bg1_mask_valid, s_action_bg1_mask_texture,
@@ -2142,8 +2142,8 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
   }
   EndActionHeat(slot, output_viewport);
   if (SessionFatal_Requested()) return;
-  PresentHudOverlay(slot, ToRenderRectI(output_viewport));
-  PresentHdReplacements(slot, ToRenderRectI(output_viewport));
+  PresentHudOverlay(slot, output_viewport);
+  PresentHdReplacements(slot, output_viewport);
 }
 
 bool PresentAuthenticScene(const FrameSlot *slot, ArRenderRectI viewport) {

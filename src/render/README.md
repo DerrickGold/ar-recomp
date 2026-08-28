@@ -66,6 +66,9 @@ policy explicitly, so the reusable math has no game globals or SDL vocabulary.
 Settings, manual, comparison-frame, and debug-panel rendering contracts also
 use portable rectangles and points. Their SDL window and event handling stays
 host-owned and is independent of the geometry handed to a renderer backend.
+The central `present.c` compositor is now part of the enforced SDL-free source
+boundary and consumes the overlay through `settings_overlay_render.h`; the
+host-facing menu header retains only its window and input integration surface.
 
 ## Current migration state
 

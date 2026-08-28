@@ -22,6 +22,7 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/diorama/diorama_performance.h"
     "${GAME_SOURCE_ROOT}/host/host_clock.h"
     "${GAME_SOURCE_ROOT}/present.h"
+    "${GAME_SOURCE_ROOT}/present.c"
     "${GAME_SOURCE_ROOT}/present_frame.c"
     "${GAME_SOURCE_ROOT}/present_internal.h"
     "${GAME_SOURCE_ROOT}/present_world_nav.c"
@@ -37,6 +38,7 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/present_sim3d_shadows.h"
     "${GAME_SOURCE_ROOT}/present_sim3d_terrain.c"
     "${GAME_SOURCE_ROOT}/present_sim3d_terrain.h"
+    "${GAME_SOURCE_ROOT}/settings_overlay_render.h"
     # Action effect construction is game-side geometry generation. Keep its
     # public contract and pure batch builder portable even while the diorama
     # projection adapter still calls the native compositor implementation.
