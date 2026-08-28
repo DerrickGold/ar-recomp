@@ -53,14 +53,17 @@ without SDL.
 Ordinary separated-SIM flat, world-layer, and menu-layer composites now submit
 through the device, as do the standard projected SIM ground mesh, ordinary
 object billboards, half-add billboards, promoted map-plane geometry, clip
-state, solid backdrops, and additive lightning flashes. The custom two-pass
-rim-light blend still uses the SDL bridge because the portable blend
-vocabulary cannot describe its source/destination factors yet. SIM
-underlay/terrain/effect geometry and the diorama compositor also still unwrap
-opaque resources through `src/platform/sdl/render_sdl.h` while those paths
-migrate. Diorama frame generation retains private SDL endpoint/target
-textures. The bridge is a transition aid, not part of the portable contract.
-New renderer-facing code should not add another borrowed native resource.
+state, solid backdrops, additive lightning flashes, and shared SIM/action
+effect batches. SIM effects now generate portable vertices directly; action
+effects retain layout-compatible SDL vertex storage behind one temporary cast
+at their submission seam. The custom two-pass rim-light blend still uses the
+SDL bridge because the portable blend vocabulary cannot describe its
+source/destination factors yet. SIM underlay/terrain geometry and the diorama
+compositor also still unwrap opaque resources through
+`src/platform/sdl/render_sdl.h` while those paths migrate. Diorama frame
+generation retains private SDL endpoint/target textures. The bridge is a
+transition aid, not part of the portable contract. New renderer-facing code
+should not add another borrowed native resource.
 
 The remaining migration should proceed in independently testable slices:
 
