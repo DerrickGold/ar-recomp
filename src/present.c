@@ -50,9 +50,9 @@
 extern SDL_Renderer *g_renderer;
 extern ArRenderDevice g_render_device;
 extern ArRenderTexture g_texture;
-extern SDL_Texture *g_authentic_texture;
-extern SDL_Texture *g_hud_bg_texture;
-extern SDL_Texture *g_hud_obj_texture;
+extern ArRenderTexture g_authentic_texture;
+extern ArRenderTexture g_hud_bg_texture;
+extern ArRenderTexture g_hud_obj_texture;
 extern SDL_Texture *g_diorama_textures[kDioramaPlane_Count];
 extern SDL_Texture *g_sim_obj_atlas_texture;
 
@@ -263,27 +263,38 @@ SDL_FRect ToFRect(SDL_Rect r) {
   return (SDL_FRect){ (float)r.x, (float)r.y, (float)r.w, (float)r.h };
 }
 
+static ArRenderRectF ToRenderRectF(SDL_Rect rectangle) {
+  return (ArRenderRectF){
+    (float)rectangle.x, (float)rectangle.y,
+    (float)rectangle.w, (float)rectangle.h,
+  };
+}
+
 static int ScaledHudPixels(int pixels, double scale) {
   int result = (int)(pixels * scale + 0.5);
   return result > 0 ? result : 1;
 }
 
-static void RenderHudChunk(SDL_Texture *texture, SDL_Rect src, SDL_Rect dst) {
-  if (!texture || src.w <= 0 || src.h <= 0 || dst.w <= 0 || dst.h <= 0)
+static void RenderHudChunk(ArRenderTexture texture, SDL_Rect src, SDL_Rect dst) {
+  if (!ArRenderTexture_IsValid(texture) ||
+      src.w <= 0 || src.h <= 0 || dst.w <= 0 || dst.h <= 0)
     return;
-  SDL_FRect src_f = ToFRect(src), dst_f = ToFRect(dst);
-  SDL_RenderTexture(g_renderer, texture, &src_f, &dst_f);
+  const ArRenderRectF source = ToRenderRectF(src);
+  const ArRenderRectF destination = ToRenderRectF(dst);
+  (void)ArRenderDevice_DrawTexture(
+      &g_render_device, texture, &source, &destination);
 }
 
 static void AddHudPresentationChunk(HudPresentationChunk *chunks, int *count,
-                                    SDL_Texture *texture,
+                                    ArRenderTexture texture,
                                     SDL_Rect texture_source,
                                     SDL_Rect screen_source,
                                     SDL_Rect output_destination,
                                     InspectorPresentationKind kind,
                                     int inspector_x_bias) {
   if (!chunks || !count || *count >= kHudPresentationChunkCapacity ||
-      !texture || texture_source.w <= 0 || texture_source.h <= 0 ||
+      !ArRenderTexture_IsValid(texture) ||
+      texture_source.w <= 0 || texture_source.h <= 0 ||
       screen_source.w <= 0 || screen_source.h <= 0 ||
       output_destination.w <= 0 || output_destination.h <= 0)
     return;
@@ -299,7 +310,9 @@ static void AddHudPresentationChunk(HudPresentationChunk *chunks, int *count,
 int BuildHudPresentationChunks(SDL_Rect viewport,
                                const HudProjectionInputs *in,
                                HudPresentationChunk *chunks) {
-  if (!in->hud_bg_texture || !in->hud_split_height) return 0;
+  if (!ArRenderTexture_IsValid(in->hud_bg_texture) ||
+      !in->hud_split_height)
+    return 0;
 
   int count = 0;
   double scale_y, scale_x;
@@ -433,7 +446,8 @@ int BuildHudPresentationChunks(SDL_Rect viewport,
    * already resolved, so this function stays free of oam[]/highOam[] entirely.
    * Every one of those signatures covers the same 16x16 footprint, which is why
    * the slot COUNT never reaches this far and one chunk size serves them all. */
-  if (in->hud_obj_texture && in->obj_icon_valid && in->obj_icon_x < kFrameSlotAuthenticWidth) {
+  if (ArRenderTexture_IsValid(in->hud_obj_texture) && in->obj_icon_valid &&
+      in->obj_icon_x < kFrameSlotAuthenticWidth) {
     int x = in->obj_icon_x, y = in->obj_icon_y;
     int icon_w = 16, icon_h = 16;
     SDL_Rect obj_src = { tex_extra + x, y, icon_w, icon_h };
@@ -553,30 +567,38 @@ static void PresentHudOverlay(const FrameSlot *slot, SDL_Rect viewport) {
  * that single texture as a plain, undistorted screen overlay — same
  * screen-space blit as the flat branch, just one draw call instead of up to
  * kHudPresentationChunkCapacity. */
-static SDL_Texture *s_hud_composite_texture;
+static ArRenderTexture s_hud_composite_texture;
 static int s_hud_composite_w, s_hud_composite_h;
 
-static SDL_Texture *EnsureHudCompositeTexture(int w, int h) {
-  if (!g_renderer || w <= 0 || h <= 0) return NULL;
-  if (s_hud_composite_texture && s_hud_composite_w == w &&
+static ArRenderTexture EnsureHudCompositeTexture(int w, int h) {
+  if (!ArRenderDevice_IsReady(&g_render_device) || w <= 0 || h <= 0)
+    return ArRenderTexture_Invalid();
+  if (ArRenderTexture_IsValid(s_hud_composite_texture) &&
+      s_hud_composite_w == w &&
       s_hud_composite_h == h)
     return s_hud_composite_texture;
-  if (s_hud_composite_texture) SDL_DestroyTexture(s_hud_composite_texture);
-  s_hud_composite_texture = SDL_CreateTexture(
-      g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET, w, h);
+  ArRenderDevice_DestroyTexture(&g_render_device, s_hud_composite_texture);
+  s_hud_composite_texture = ArRenderTexture_Invalid();
   s_hud_composite_w = w;
   s_hud_composite_h = h;
-  if (s_hud_composite_texture) {
-    SDL_SetTextureBlendMode(s_hud_composite_texture, SDL_BLENDMODE_BLEND);
-    SDL_SetTextureScaleMode(s_hud_composite_texture, SDL_SCALEMODE_NEAREST);
-  }
+  const ArRenderTextureDesc desc = {
+    .width = w,
+    .height = h,
+    .format = kArRenderPixelFormat_Argb8888,
+    .usage = kArRenderTextureUsage_Target,
+    .filter = kArRenderFilter_Nearest,
+    .blend = kArRenderBlendMode_Alpha,
+  };
+  (void)ArRenderDevice_CreateTexture(
+      &g_render_device, &desc, &s_hud_composite_texture);
   return s_hud_composite_texture;
 }
 
 void PresentHudOverlayComposited(const FrameSlot *slot,
                                         SDL_Rect viewport) {
-  SDL_Texture *composite = EnsureHudCompositeTexture(viewport.w, viewport.h);
-  if (!composite) return;
+  ArRenderTexture composite = EnsureHudCompositeTexture(
+      viewport.w, viewport.h);
+  if (!ArRenderTexture_IsValid(composite)) return;
 
   HudProjectionInputs in = BuildProjectionInputsFromSlot(slot);
   HudPresentationChunk chunks[kHudPresentationChunkCapacity];
@@ -584,26 +606,41 @@ void PresentHudOverlayComposited(const FrameSlot *slot,
   int count = BuildHudPresentationChunks(local_viewport, &in, chunks);
   if (count <= 0) return;
 
-  SDL_SetRenderTarget(g_renderer, composite);
-  SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE);
-  SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 0);
-  SDL_RenderClear(g_renderer);
-  for (int i = 0; i < count; i++)
-    RenderHudChunk(chunks[i].texture, chunks[i].texture_source,
-                   chunks[i].output_destination);
-  SDL_SetRenderTarget(g_renderer, CrtPost_BaseTarget());
+  if (!ArRenderDevice_SetRenderTarget(&g_render_device, composite)) return;
+  const bool target_ready =
+      SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE) &&
+      SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 0) &&
+      SDL_RenderClear(g_renderer);
+  if (target_ready) {
+    for (int i = 0; i < count; i++)
+      RenderHudChunk(chunks[i].texture, chunks[i].texture_source,
+                     chunks[i].output_destination);
+  }
+  if (!ArRenderDevice_SetRenderTarget(
+          &g_render_device,
+          ArSdlRenderBackend_BorrowTexture(CrtPost_BaseTarget()))) {
+    SessionFatal_Request(
+        "The renderer could not restore its scene target after composing the "
+        "HUD (%s). Restart the game; if this repeats, update your graphics "
+        "driver.", ArRenderDevice_LastError(&g_render_device));
+    return;
+  }
+  if (!target_ready) return;
 
-  SDL_FRect dst = ToFRect(viewport);
-  SDL_RenderTexture(g_renderer, composite, NULL, &dst);
+  const ArRenderRectF destination = ToRenderRectF(viewport);
+  (void)ArRenderDevice_DrawTexture(
+      &g_render_device, composite, NULL, &destination);
 }
 
 static void PresentMode7Composite(const FrameSlot *slot, SDL_Rect viewport) {
-  if (!g_m7_texture || !slot->m7_active) return;
+  if (!ArRenderTexture_IsValid(g_m7_texture) || !slot->m7_active) return;
   SDL_Rect src = { slot->visible_x0 * kHdMode7Scale, 0,
                    slot->visible_width * kHdMode7Scale,
                    slot->snes_height * kHdMode7Scale };
-  SDL_FRect src_f = ToFRect(src), viewport_f = ToFRect(viewport);
-  SDL_RenderTexture(g_renderer, g_m7_texture, &src_f, &viewport_f);
+  const ArRenderRectF source = ToRenderRectF(src);
+  const ArRenderRectF destination = ToRenderRectF(viewport);
+  (void)ArRenderDevice_DrawTexture(
+      &g_render_device, g_m7_texture, &source, &destination);
 }
 
 /* Draw every active HD replacement over the region its capture removed this
@@ -634,12 +671,13 @@ static void PresentHdReplacements(const FrameSlot *slot, SDL_Rect viewport) {
                      dx1 - dx0, dy1 - dy0 };
     if (dst.w <= 0 || dst.h <= 0) continue;
 
-    SDL_Texture *texture = ArSdlRenderBackend_UnwrapTexture(entry->texture);
     Uint8 mod = entry->brightness_mod
         ? (Uint8)((slot->inidisp & 0xf) * 255 / 15) : 255;
-    SDL_SetTextureColorMod(texture, mod, mod, mod);
-    SDL_FRect dst_f = ToFRect(dst);
-    SDL_RenderTexture(g_renderer, texture, NULL, &dst_f);
+    const float modulation = (float)mod / 255.0f;
+    const ArRenderRectF destination = ToRenderRectF(dst);
+    (void)ArRenderDevice_DrawTextureTinted(
+        &g_render_device, entry->texture, NULL, &destination,
+        (ArRenderColorF){modulation, modulation, modulation, 1.0f});
   }
 }
 
@@ -813,7 +851,8 @@ void PresentUpload(const FrameSlot *slot) {
   if (slot->sim.view == kSimView_Enhanced)
     performance = Sim3DPerformance_Begin(kSim3DPerformance_Upload);
 
-  if (g_authentic_texture && slot->authentic_frame_serial) {
+  if (ArRenderTexture_IsValid(g_authentic_texture) &&
+      slot->authentic_frame_serial) {
     const int authentic_height = slot->snes_height + slot->ws_extra_top +
                                  slot->ws_extra_bottom;
     const SrPpuSurfaceView *surface =
@@ -821,7 +860,7 @@ void PresentUpload(const FrameSlot *slot) {
     const uint8_t *pixels = PpuSurfaceRegion(
         surface, 0, 0, slot->snes_width, authentic_height);
     if (pixels && UploadChangedSurface(
-        ArSdlRenderBackend_BorrowTexture(g_authentic_texture),
+        g_authentic_texture,
         &s_action_upload_mirrors[kActionUploadSurface_Authentic],
         pixels, slot->snes_width, authentic_height,
         (int)surface->pitch_bytes, 0, 0)) {
@@ -905,7 +944,7 @@ void PresentUpload(const FrameSlot *slot) {
    * stale pixels with the current frame's split geometry. */
   if (slot->hud_split_height) {
     int split_rows = slot->hud_split_height;
-    if (g_hud_bg_texture) {
+    if (ArRenderTexture_IsValid(g_hud_bg_texture)) {
       int rows = slot->overlay_captures[kFrameSlotOverlay_Bg3].y1;
       if (rows < split_rows) rows = split_rows;
       SDL_Rect hud = { 0, 0, slot->snes_width, rows };
@@ -916,12 +955,12 @@ void PresentUpload(const FrameSlot *slot) {
             &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG3][0]);
       if (PpuSurfaceHolds(surface, hud.w, hud.h))
         UploadChangedSurface(
-            ArSdlRenderBackend_BorrowTexture(g_hud_bg_texture),
+            g_hud_bg_texture,
             &s_action_upload_mirrors[kActionUploadSurface_HudBg],
             surface->data, hud.w, hud.h,
             (int)surface->pitch_bytes, hud.x, hud.y);
     }
-    if (g_hud_obj_texture) {
+    if (ArRenderTexture_IsValid(g_hud_obj_texture)) {
       int rows = slot->overlay_captures[kFrameSlotOverlay_Obj].y1;
       if (rows < split_rows) rows = split_rows;
       SDL_Rect hud = { 0, 0, slot->snes_width, rows };
@@ -932,14 +971,14 @@ void PresentUpload(const FrameSlot *slot) {
             &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][0]);
       if (PpuSurfaceHolds(surface, hud.w, hud.h))
         UploadChangedSurface(
-            ArSdlRenderBackend_BorrowTexture(g_hud_obj_texture),
+            g_hud_obj_texture,
             &s_action_upload_mirrors[kActionUploadSurface_HudObj],
             surface->data, hud.w, hud.h,
             (int)surface->pitch_bytes, hud.x, hud.y);
     }
   }
 
-  if (g_m7_texture && slot->m7_active) {
+  if (ArRenderTexture_IsValid(g_m7_texture) && slot->m7_active) {
     SDL_Rect src = { slot->visible_x0 * kHdMode7Scale, 0,
                      slot->visible_width * kHdMode7Scale,
                      slot->snes_height * kHdMode7Scale };
@@ -947,8 +986,10 @@ void PresentUpload(const FrameSlot *slot) {
         BoundPpuSurface(&slot->ppu_surfaces.mode7);
     const uint8_t *pixels =
         PpuSurfaceRegion(surface, src.x, src.y, src.w, src.h);
-    if (pixels && SDL_UpdateTexture(
-            g_m7_texture, &src, pixels, (int)surface->pitch_bytes)) {
+    const ArRenderRectI destination = {src.x, src.y, src.w, src.h};
+    if (pixels && ArRenderDevice_UpdateTexture(
+            &g_render_device, g_m7_texture, &destination, pixels,
+            (int)surface->pitch_bytes)) {
       Sim3DPerformance_AddUpload(
           (uint64_t)src.w * (uint64_t)src.h * sizeof(uint32_t));
     }
@@ -1898,9 +1939,8 @@ bool Present_SimRimMaskSupported(void) {
 void PresentRendererResources_Reset(void) {
   ResetSim3DUploadMirrors();
   ResetActionUploadMirrors();
-  if (s_hud_composite_texture)
-    SDL_DestroyTexture(s_hud_composite_texture);
-  s_hud_composite_texture = NULL;
+  ArRenderDevice_DestroyTexture(&g_render_device, s_hud_composite_texture);
+  s_hud_composite_texture = ArRenderTexture_Invalid();
   s_hud_composite_w = s_hud_composite_h = 0;
   SDL_DestroyTexture(s_action_bg1_mask_texture);
   SDL_DestroyTexture(s_action_bg2_mask_texture);
@@ -2258,7 +2298,8 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
 }
 
 bool PresentAuthenticScene(const FrameSlot *slot, SDL_Rect viewport) {
-  if (!slot || !g_renderer || !g_authentic_texture ||
+  if (!slot || !g_renderer ||
+      !ArRenderTexture_IsValid(g_authentic_texture) ||
       viewport.w <= 0 || viewport.h <= 0)
     return false;
   /* The orchestrator owns the current target: this may be either the window
@@ -2272,18 +2313,19 @@ bool PresentAuthenticScene(const FrameSlot *slot, SDL_Rect viewport) {
       !SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255) ||
       !SDL_RenderClear(g_renderer))
     return false;
-  const SDL_FRect source = {
+  const ArRenderRectF source = {
     (float)slot->authentic_x0, (float)slot->authentic_y0,
     (float)kFrameSlotAuthenticWidth, (float)kFrameSlotAuthenticHeight,
   };
-  const SDL_FRect destination = ToFRect(viewport);
-  return SDL_RenderTexture(
-      g_renderer, g_authentic_texture, &source, &destination);
+  const ArRenderRectF destination = ToRenderRectF(viewport);
+  return ArRenderDevice_DrawTexture(
+      &g_render_device, g_authentic_texture, &source, &destination);
 }
 
 bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
                                       SDL_Rect priority_viewport) {
-  if (!slot || !g_renderer || !g_authentic_texture ||
+  if (!slot || !g_renderer ||
+      !ArRenderTexture_IsValid(g_authentic_texture) ||
       priority_viewport.w <= 0 || priority_viewport.h <= 0)
     return false;
   PresentationOutputState output_state;
@@ -2338,8 +2380,11 @@ bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
     (float)kFrameSlotAuthenticWidth, (float)kFrameSlotAuthenticHeight,
   };
   if (rendered)
-    rendered = SDL_RenderTexture(
-        g_renderer, g_authentic_texture, &source, &destination);
+    rendered = ArRenderDevice_DrawTexture(
+        &g_render_device, g_authentic_texture,
+        &(ArRenderRectF){source.x, source.y, source.w, source.h},
+        &(ArRenderRectF){destination.x, destination.y,
+                         destination.w, destination.h});
   return PresentationGeometry_PopFullOutput(
       g_renderer, &output_state) && rendered;
 }

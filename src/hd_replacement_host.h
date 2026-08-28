@@ -4,14 +4,14 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <SDL3/SDL.h>
+#include "render/render_types.h"
 
 enum { kHdMode7Scale = 4 };
 
 /* Present-time Mode-7 resources. They are host-created and synchronously
  * consumed by present.c; emulated state never owns these allocations. */
 extern uint8_t *g_m7_overlay_pixels;
-extern SDL_Texture *g_m7_texture;
+extern ArRenderTexture g_m7_texture;
 
 void HdReplacementHost_LoadTextures(void);
 void HdReplacementHost_BindSurfaces(void);

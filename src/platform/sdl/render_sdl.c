@@ -172,6 +172,18 @@ static bool DrawTexture(void *context, ArRenderTexture texture,
       source_rect, destination_rect);
 }
 
+static bool DrawTextureTinted(void *context, ArRenderTexture texture,
+                              const ArRenderRectF *source,
+                              const ArRenderRectF *destination,
+                              ArRenderColorF tint) {
+  SDL_Texture *native_texture = ArSdlRenderBackend_UnwrapTexture(texture);
+  if (!SDL_SetTextureColorModFloat(
+          native_texture, tint.r, tint.g, tint.b) ||
+      !SDL_SetTextureAlphaModFloat(native_texture, tint.a))
+    return false;
+  return DrawTexture(context, texture, source, destination);
+}
+
 static bool DrawGeometry(void *context, ArRenderTexture texture,
                          const ArRenderVertex2D *vertices, int vertex_count,
                          const int32_t *indices, int index_count) {
@@ -202,6 +214,7 @@ static const ArRenderBackendOps kSdlRenderOps = {
   .set_clip_rect = SetClipRect,
   .clear = Clear,
   .draw_texture = DrawTexture,
+  .draw_texture_tinted = DrawTextureTinted,
   .draw_geometry = DrawGeometry,
   .present = Present,
   .last_error = LastError,

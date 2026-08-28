@@ -32,10 +32,12 @@ custom shaders, texture wrapping, and optional blend modes.
 
 ## Current migration state
 
-The base SNES framebuffer, exact dirty-region uploader, and manifest-driven
+The base and authentic SNES framebuffers, HUD planes and composite target,
+Mode 7 replacement surface, exact dirty-region uploader, and manifest-driven
 screen replacement textures use the neutral device. The SDL adapter preserves
-their existing formats, nearest filtering, alpha behavior, and texture-update
-semantics. A fake backend runs the same dirty-upload flow in tests without SDL.
+their existing formats, nearest filtering, blend/tint behavior, render-target
+semantics, and texture updates. A fake backend runs the same dirty-upload flow
+in tests without SDL.
 
 Presentation subsystems not yet migrated continue to use SDL through a small
 borrow/unwrap bridge in `src/platform/sdl/render_sdl.h`. That bridge is a
@@ -44,9 +46,8 @@ should not add another borrowed native resource.
 
 The remaining migration should proceed in independently testable slices:
 
-1. Move HUD, authentic comparison, Mode 7, and separated-layer textures to
-   device-owned handles.
-2. Express flat and enhanced composites as portable texture and geometry
+1. Move separated SIM and diorama layer textures to device-owned handles.
+2. Express the remaining enhanced composites as portable texture and geometry
    batches, with explicit tint/blend state.
 3. Move render-target effects and enhanced SIM/diorama geometry behind device
    capabilities while retaining a baseline path.

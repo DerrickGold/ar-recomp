@@ -6,8 +6,8 @@ static bool HasRequiredOps(const ArRenderBackendOps *ops) {
   return ops && ops->struct_size >= sizeof(*ops) &&
       ops->create_texture && ops->destroy_texture && ops->update_texture &&
       ops->set_render_target && ops->set_viewport && ops->set_clip_rect &&
-      ops->clear && ops->draw_texture && ops->draw_geometry && ops->present &&
-      ops->last_error;
+      ops->clear && ops->draw_texture && ops->draw_texture_tinted &&
+      ops->draw_geometry && ops->present && ops->last_error;
 }
 
 bool ArRenderDevice_Init(ArRenderDevice *device,
@@ -93,6 +93,24 @@ bool ArRenderDevice_DrawTexture(ArRenderDevice *device,
       ArRenderTexture_IsValid(texture) &&
       device->ops->draw_texture(
           device->context, texture, source, destination);
+}
+
+static bool NormalizedColor(ArRenderColorF color) {
+  return color.r >= 0.0f && color.r <= 1.0f &&
+      color.g >= 0.0f && color.g <= 1.0f &&
+      color.b >= 0.0f && color.b <= 1.0f &&
+      color.a >= 0.0f && color.a <= 1.0f;
+}
+
+bool ArRenderDevice_DrawTextureTinted(ArRenderDevice *device,
+                                      ArRenderTexture texture,
+                                      const ArRenderRectF *source,
+                                      const ArRenderRectF *destination,
+                                      ArRenderColorF tint) {
+  return ArRenderDevice_IsReady(device) &&
+      ArRenderTexture_IsValid(texture) && NormalizedColor(tint) &&
+      device->ops->draw_texture_tinted(
+          device->context, texture, source, destination, tint);
 }
 
 bool ArRenderDevice_DrawGeometry(ArRenderDevice *device,
