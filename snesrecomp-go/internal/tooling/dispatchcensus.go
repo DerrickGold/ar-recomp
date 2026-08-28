@@ -15,7 +15,7 @@ import (
 	"strings"
 )
 
-const dispatchCensusVersion = 1
+const dispatchCensusVersion = 2
 
 // DispatchObservation is runtime evidence for one source/target/M/X tuple.
 // Found records whether the sparse generated registry contained a body at the
@@ -29,6 +29,7 @@ type DispatchObservation struct {
 	Found            bool   `json:"generated_body"`
 	Mirrored         bool   `json:"mirrored"`
 	Continuation     bool   `json:"continuation"`
+	Trapped          bool   `json:"trapped_before_dispatch"`
 	ObservationCount uint64 `json:"observation_count"`
 }
 
@@ -41,6 +42,7 @@ type DispatchCensusReport struct {
 	Overflow      bool                  `json:"overflow"`
 	Observations  []DispatchObservation `json:"observations"`
 	MissingBodies int                   `json:"missing_generated_bodies"`
+	TrappedSites  int                   `json:"unique_trapped_sites"`
 }
 
 type dispatchTraceRecord struct {
@@ -53,6 +55,7 @@ type dispatchTraceRecord struct {
 	Found    uint8           `json:"found"`
 	Mirrored uint8           `json:"mirrored"`
 	Continue uint8           `json:"continuation"`
+	Trapped  uint8           `json:"trapped"`
 	Hits     uint64          `json:"hits"`
 	Overflow uint8           `json:"overflow"`
 }
@@ -63,6 +66,7 @@ type dispatchObservationKey struct {
 	Emulation        bool
 	Found, Mirrored  bool
 	Continuation     bool
+	Trapped          bool
 }
 
 func LoadDispatchCensus(tracePath, romPath string) (DispatchCensusReport, error) {
@@ -90,7 +94,7 @@ func LoadDispatchCensus(tracePath, romPath string) (DispatchCensusReport, error)
 func ParseDispatchCensus(input io.Reader) (DispatchCensusReport, error) {
 	report := DispatchCensusReport{
 		Version:    dispatchCensusVersion,
-		Provenance: "snesrecomp-runtime-dispatch-census-v1",
+		Provenance: "snesrecomp-runtime-dispatch-census-v2",
 	}
 	observations := make(map[dispatchObservationKey]uint64)
 	scanner := bufio.NewScanner(input)
@@ -125,6 +129,7 @@ func ParseDispatchCensus(input io.Reader) (DispatchCensusReport, error) {
 			M: record.M & 1, X: record.X & 1, Emulation: record.E != 0,
 			Found: record.Found != 0, Mirrored: record.Mirrored != 0,
 			Continuation: record.Continue != 0,
+			Trapped:      record.Trapped != 0,
 		}
 		// Runtime milestones are cumulative powers of two followed by a final
 		// count. Taking the maximum makes clean and interrupted traces equivalent
@@ -137,17 +142,23 @@ func ParseDispatchCensus(input io.Reader) (DispatchCensusReport, error) {
 		return DispatchCensusReport{}, fmt.Errorf("read dispatch trace: %w", err)
 	}
 	missingBodies := make(map[[3]uint32]struct{})
+	trappedSites := make(map[uint32]struct{})
 	for key, hits := range observations {
 		report.Observations = append(report.Observations, DispatchObservation{
 			SitePC: key.SitePC, TargetPC: key.TargetPC, M: key.M, X: key.X,
 			Emulation: key.Emulation, Found: key.Found, Mirrored: key.Mirrored,
 			Continuation:     key.Continuation,
+			Trapped:          key.Trapped,
 			ObservationCount: hits,
 		})
+		if key.Trapped {
+			trappedSites[key.SitePC] = struct{}{}
+		}
 		if !key.Found && !key.Continuation {
 			missingBodies[[3]uint32{key.TargetPC, uint32(key.M), uint32(key.X)}] = struct{}{}
 		}
 	}
+	report.TrappedSites = len(trappedSites)
 	report.MissingBodies = len(missingBodies)
 	sort.Slice(report.Observations, func(i, j int) bool {
 		left, right := report.Observations[i], report.Observations[j]
@@ -171,6 +182,9 @@ func ParseDispatchCensus(input io.Reader) (DispatchCensusReport, error) {
 		}
 		if left.Continuation != right.Continuation {
 			return !left.Continuation
+		}
+		if left.Trapped != right.Trapped {
+			return !left.Trapped
 		}
 		return !left.Mirrored && right.Mirrored
 	})
@@ -207,12 +221,20 @@ func WriteDispatchCensus(output io.Writer, report DispatchCensusReport, format s
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(report)
 	case "", "text":
-		fmt.Fprintf(output, "dispatch census: %d unique edge/state observation(s), %d missing generated body/bodies\n",
-			len(report.Observations), report.MissingBodies)
+		fmt.Fprintf(output, "dispatch census: %d unique edge/state observation(s), %d unique trapped source site(s), %d missing generated body/bodies\n",
+			len(report.Observations), report.TrappedSites, report.MissingBodies)
 		if report.Overflow {
 			fmt.Fprintln(output, "warning: runtime census capacity overflowed; report is incomplete")
 		}
 		for _, observation := range report.Observations {
+			if observation.Continuation {
+				status := "continuation/return guard"
+				fmt.Fprintf(output, "  $%02X:%04X -> $%02X:%04X M%dX%d x%d %s\n",
+					byte(observation.SitePC>>16), uint16(observation.SitePC),
+					byte(observation.TargetPC>>16), uint16(observation.TargetPC),
+					observation.M, observation.X, observation.ObservationCount, status)
+				continue
+			}
 			status := "generated"
 			if !observation.Found {
 				status = "MISSING"
@@ -220,8 +242,8 @@ func WriteDispatchCensus(output io.Writer, report DispatchCensusReport, format s
 			if observation.Mirrored {
 				status += ", mirrored"
 			}
-			if observation.Continuation {
-				status = "continuation/return guard"
+			if observation.Trapped {
+				status = "TRAPPED before dispatch, " + status
 			}
 			fmt.Fprintf(output, "  $%02X:%04X -> $%02X:%04X M%dX%d x%d %s\n",
 				byte(observation.SitePC>>16), uint16(observation.SitePC),
@@ -267,6 +289,12 @@ func writeDispatchSuggestions(output io.Writer, observations []DispatchObservati
 		return keys[i].X < keys[j].X
 	})
 	fmt.Fprintln(output, "\n# Observed candidates only: verify routine/handler/continuation semantics before authoring.")
+	for _, observation := range observations {
+		if observation.Trapped && !observation.Found && !observation.Continuation {
+			fmt.Fprintln(output, "# A TRAPPED candidate also needs an explicit route at its source site; adding func alone does not execute the edge.")
+			break
+		}
+	}
 	for _, key := range keys {
 		fmt.Fprintf(output, "# observed x%d\nfunc Observed_%02X_%04X_M%dX%d %04X entry_mx:%d,%d\n",
 			suggestions[key], byte(key.Target>>16), uint16(key.Target), key.M, key.X,

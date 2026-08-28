@@ -20,7 +20,14 @@ import (
 	romimage "github.com/DerrickGold/snesrecomp-go/internal/rom"
 )
 
-const shadowReportVersion = 2
+const shadowReportVersion = 3
+
+const (
+	shadowUnresolvedGeneric              = "generic_dynamic_target"
+	shadowUnresolvedTaggedStreamDispatch = "tagged_stream_handler_dispatch"
+	shadowPriorityNormal                 = "normal"
+	shadowPriorityLikelyBlocker          = "likely_bringup_blocker"
+)
 
 type ShadowAnalysisOptions struct {
 	ROMPath  string
@@ -37,12 +44,13 @@ type ShadowROM struct {
 
 type ShadowSummary struct {
 	analysis.ComparisonSummary
-	InitialVariants        int `json:"initial_variants"`
-	FinalVariants          int `json:"final_variants"`
-	VariantPasses          int `json:"variant_passes"`
-	RawUnresolvedEmissions int `json:"raw_unresolved_emissions"`
-	UniqueUnresolvedSites  int `json:"unique_unresolved_sites"`
-	DecodeIssues           int `json:"decode_issues"`
+	InitialVariants               int `json:"initial_variants"`
+	FinalVariants                 int `json:"final_variants"`
+	VariantPasses                 int `json:"variant_passes"`
+	RawUnresolvedEmissions        int `json:"raw_unresolved_emissions"`
+	UniqueUnresolvedSites         int `json:"unique_unresolved_sites"`
+	LikelyBlockingUnresolvedSites int `json:"likely_blocking_unresolved_sites"`
+	DecodeIssues                  int `json:"decode_issues"`
 }
 
 type ShadowCaller struct {
@@ -51,14 +59,32 @@ type ShadowCaller struct {
 }
 
 type ShadowUnresolvedSite struct {
-	SitePC           uint32         `json:"site_pc"`
-	InstructionBytes string         `json:"instruction_bytes"`
-	Mnemonic         string         `json:"mnemonic"`
-	AddressingMode   string         `json:"addressing_mode"`
-	Operand          uint32         `json:"operand"`
-	Reason           string         `json:"reason"`
-	Reachability     string         `json:"reachability"`
-	Callers          []ShadowCaller `json:"callers"`
+	SitePC                      uint32                       `json:"site_pc"`
+	InstructionBytes            string                       `json:"instruction_bytes"`
+	Mnemonic                    string                       `json:"mnemonic"`
+	AddressingMode              string                       `json:"addressing_mode"`
+	Operand                     uint32                       `json:"operand"`
+	Reason                      string                       `json:"reason"`
+	Reachability                string                       `json:"reachability"`
+	Classification              string                       `json:"classification"`
+	Priority                    string                       `json:"priority"`
+	StreamDispatch              *ShadowStreamDispatchPattern `json:"stream_dispatch,omitempty"`
+	StructuralHandlerCandidates []uint32                     `json:"structural_handler_candidates,omitempty"`
+	Callers                     []ShadowCaller               `json:"callers"`
+}
+
+// ShadowStreamDispatchPattern records structural evidence for a common script
+// interpreter without claiming that the stream-derived target set is closed.
+// Every PC is a ROM address in the dispatch site's bank.
+type ShadowStreamDispatchPattern struct {
+	InterpreterEntryPC  uint32 `json:"interpreter_entry_pc,omitempty"`
+	StreamPointerLoadPC uint32 `json:"stream_pointer_load_pc"`
+	StreamPointer       uint16 `json:"stream_pointer"`
+	StreamWordLoadPC    uint32 `json:"stream_word_load_pc"`
+	SignTestPC          uint32 `json:"sign_test_pc"`
+	TargetSlotStorePC   uint32 `json:"target_slot_store_pc"`
+	TargetSlot          uint8  `json:"target_slot"`
+	TrampolineCallPC    uint32 `json:"trampoline_call_pc"`
 }
 
 type ShadowDecodeIssue struct {
@@ -183,13 +209,14 @@ func AnalyzeAuthoredShadow(options ShadowAnalysisOptions) (ShadowReport, error) 
 		NoWrite: true,
 		ROM:     ShadowROM{SHA256: hex.EncodeToString(hash[:]), Size: len(image), Mapper: "lorom"},
 		Summary: ShadowSummary{
-			ComparisonSummary:      comparisonSummary,
-			InitialVariants:        inferenceStats.initialVariants,
-			FinalVariants:          inferenceStats.finalVariants,
-			VariantPasses:          inferenceStats.passes,
-			RawUnresolvedEmissions: rawUnresolved,
-			UniqueUnresolvedSites:  len(unresolved),
-			DecodeIssues:           len(issues),
+			ComparisonSummary:             comparisonSummary,
+			InitialVariants:               inferenceStats.initialVariants,
+			FinalVariants:                 inferenceStats.finalVariants,
+			VariantPasses:                 inferenceStats.passes,
+			RawUnresolvedEmissions:        rawUnresolved,
+			UniqueUnresolvedSites:         len(unresolved),
+			LikelyBlockingUnresolvedSites: countLikelyBlockingUnresolved(unresolved),
+			DecodeIssues:                  len(issues),
 		},
 		Comparisons:  comparisons,
 		Unresolved:   unresolved,
@@ -199,6 +226,7 @@ func AnalyzeAuthoredShadow(options ShadowAnalysisOptions) (ShadowReport, error) 
 			"an open table is a partial match until value/bounds provenance proves its complete target set",
 			"a compatible guard proves safe coverage of inferred continuations, not that every guarded edge executes",
 			"an authored-only result means unproven, not disproven or runtime-reachable",
+			"tagged-stream handler classification and structural handler candidates are heuristic triage evidence, not a closed target set",
 			"the current ROM reader is explicitly LoROM; mapper generalization is a later milestone",
 		},
 	}
@@ -774,6 +802,7 @@ func shadowInDataRegion(regions []decoder.DataRegion, bank byte, pc uint16) bool
 func summarizeShadowResults(image romimage.Image, results []shadowDecodeResult) ([]analysis.DispatchFact, int, []ShadowUnresolvedSite, []ShadowDecodeIssue) {
 	factMap := make(map[uint32]analysis.DispatchFact)
 	interiorOwners := make(map[uint32][]shadowDecodedSpan)
+	instructionOwners := make(map[uint32][]shadowDecodedSpan)
 	unresolvedMap := make(map[uint32]*ShadowUnresolvedSite)
 	rawUnresolved := 0
 	var issues []ShadowDecodeIssue
@@ -786,6 +815,7 @@ func summarizeShadowResults(image romimage.Image, results []shadowDecodeResult) 
 			mergeShadowFact(factMap, fact)
 		}
 		for _, span := range result.spans {
+			instructionOwners[span.PC&0xffffff] = append(instructionOwners[span.PC&0xffffff], span)
 			for offset := uint8(1); offset < span.Length; offset++ {
 				address := (span.PC & 0xff0000) | uint32(uint16(span.PC)+uint16(offset))
 				interiorOwners[address] = append(interiorOwners[address], span)
@@ -800,6 +830,7 @@ func summarizeShadowResults(image romimage.Image, results []shadowDecodeResult) 
 				record = &ShadowUnresolvedSite{
 					SitePC: site, Mnemonic: unresolved.Mnemonic, AddressingMode: unresolved.Mode.String(), Operand: unresolved.Operand,
 					Reason: "runtime target has no finite statically proven set", Reachability: "configuration_or_static_call_rooted",
+					Classification: shadowUnresolvedGeneric, Priority: shadowPriorityNormal,
 				}
 				if instruction != nil {
 					record.InstructionBytes = shadowInstructionBytes(image, byte(site>>16), uint16(site), instruction.Length)
@@ -808,6 +839,24 @@ func summarizeShadowResults(image romimage.Image, results []shadowDecodeResult) 
 			}
 			record.Callers = append(record.Callers, ShadowCaller{FunctionEntry: unresolved.FunctionEntry & 0xffffff, LiveMX: analysis.MXState{M: unresolved.EntryM & 1, X: unresolved.EntryX & 1}})
 		}
+	}
+	for _, record := range unresolvedMap {
+		classifyShadowUnresolved(image, record)
+		if record.StreamDispatch == nil {
+			continue
+		}
+		owners := instructionOwners[record.StreamDispatch.StreamPointerLoadPC&0xffffff]
+		if len(owners) == 0 {
+			continue
+		}
+		interpreterEntry := owners[0].FunctionEntry & 0xffffff
+		for _, owner := range owners[1:] {
+			if candidate := owner.FunctionEntry & 0xffffff; candidate < interpreterEntry {
+				interpreterEntry = candidate
+			}
+		}
+		record.StreamDispatch.InterpreterEntryPC = interpreterEntry
+		record.StructuralHandlerCandidates = removeShadowAddress(record.StructuralHandlerCandidates, interpreterEntry)
 	}
 	facts := make([]analysis.DispatchFact, 0, len(factMap))
 	for _, fact := range factMap {
@@ -841,6 +890,183 @@ func summarizeShadowResults(image romimage.Image, results []shadowDecodeResult) 
 		return issues[i].EntryMX.X < issues[j].EntryMX.X
 	})
 	return facts, rawUnresolved, unresolved, issues
+}
+
+func removeShadowAddress(addresses []uint32, remove uint32) []uint32 {
+	result := addresses[:0]
+	for _, address := range addresses {
+		if address&0xffffff != remove&0xffffff {
+			result = append(result, address)
+		}
+	}
+	return result
+}
+
+func countLikelyBlockingUnresolved(unresolved []ShadowUnresolvedSite) int {
+	count := 0
+	for _, site := range unresolved {
+		if site.Priority == shadowPriorityLikelyBlocker {
+			count++
+		}
+	}
+	return count
+}
+
+// classifyShadowUnresolved recognizes report-only shapes that deserve earlier
+// bring-up attention. It deliberately does not create a DispatchFact: handler
+// words loaded from mutable script data do not prove a finite target set.
+func classifyShadowUnresolved(image romimage.Image, site *ShadowUnresolvedSite) {
+	if site.Mnemonic != "JMP" || site.AddressingMode != cpu65816.INDIR.String() || site.Operand > 0xff {
+		return
+	}
+	pattern, ok := detectTaggedStreamDispatch(image, byte(site.SitePC>>16), uint16(site.SitePC), uint8(site.Operand))
+	if !ok {
+		return
+	}
+	site.Classification = shadowUnresolvedTaggedStreamDispatch
+	site.Priority = shadowPriorityLikelyBlocker
+	site.Reason = "sign-tagged stream word is staged in a direct-page slot and reached through a JSR/JMP trampoline; an unresolved handler can prevent stream advancement"
+	site.StreamDispatch = &pattern
+	site.StructuralHandlerCandidates = enumerateStructuralStreamHandlers(image, byte(site.SitePC>>16), pattern.StreamPointer)
+}
+
+// detectTaggedStreamDispatch searches the short straight-line window before a
+// JMP (dp) trampoline for this value-provenance skeleton:
+//
+//	LDY memory; LDA abs,Y; BPL data; ...; STA dp; JSR trampoline
+//
+// The intervening comparison/terminator checks are intentionally allowed. The
+// result is triage evidence only, so false negatives are preferable to turning
+// arbitrary data into generated code.
+func detectTaggedStreamDispatch(image romimage.Image, bank byte, site uint16, slot uint8) (ShadowStreamDispatchPattern, bool) {
+	bankOffset := int(bank&0x7f) * 0x8000
+	if bankOffset >= len(image) {
+		return ShadowStreamDispatchPattern{}, false
+	}
+	bankBytes, err := image.Slice(bank, 0x8000, min(0x8000, len(image)-bankOffset))
+	if err != nil || site < 0x8000 {
+		return ShadowStreamDispatchPattern{}, false
+	}
+	siteOffset := int(site - 0x8000)
+	if siteOffset < 0 || siteOffset+2 >= len(bankBytes) || bankBytes[siteOffset] != 0x6c || bankBytes[siteOffset+1] != slot || bankBytes[siteOffset+2] != 0x00 {
+		return ShadowStreamDispatchPattern{}, false
+	}
+	windowStart := max(0, siteOffset-64)
+	for callOffset := siteOffset - 3; callOffset >= windowStart; callOffset-- {
+		if callOffset+2 >= len(bankBytes) || bankBytes[callOffset] != 0x20 || uint16(bankBytes[callOffset+1])|uint16(bankBytes[callOffset+2])<<8 != site {
+			continue
+		}
+		storeOffset := findBackwardBytes(bankBytes, callOffset, max(windowStart, callOffset-24), []byte{0x85, slot})
+		if storeOffset < 0 {
+			continue
+		}
+		signOffset := findBackwardOpcode(bankBytes, storeOffset, max(windowStart, storeOffset-24), 0x10)
+		if signOffset < 0 || signOffset+1 >= len(bankBytes) {
+			continue
+		}
+		branchTarget := signOffset + 2 + int(int8(bankBytes[signOffset+1]))
+		if branchTarget <= callOffset {
+			continue
+		}
+		wordLoadOffset := findBackwardOpcode(bankBytes, signOffset, max(windowStart, signOffset-16), 0xb9)
+		if wordLoadOffset < 0 || wordLoadOffset+2 >= len(bankBytes) {
+			continue
+		}
+		pointerLoadOffset, pointer, ok := findVariableYLoad(bankBytes, wordLoadOffset, max(windowStart, wordLoadOffset-16))
+		if !ok {
+			continue
+		}
+		return ShadowStreamDispatchPattern{
+			StreamPointerLoadPC: decoder.Address24(bank, uint16(pointerLoadOffset+0x8000)),
+			StreamPointer:       pointer,
+			StreamWordLoadPC:    decoder.Address24(bank, uint16(wordLoadOffset+0x8000)),
+			SignTestPC:          decoder.Address24(bank, uint16(signOffset+0x8000)),
+			TargetSlotStorePC:   decoder.Address24(bank, uint16(storeOffset+0x8000)),
+			TargetSlot:          slot,
+			TrampolineCallPC:    decoder.Address24(bank, uint16(callOffset+0x8000)),
+		}, true
+	}
+	return ShadowStreamDispatchPattern{}, false
+}
+
+func findBackwardBytes(data []byte, before, lower int, pattern []byte) int {
+	for offset := before - len(pattern); offset >= lower; offset-- {
+		if offset+len(pattern) > len(data) {
+			continue
+		}
+		match := true
+		for index, value := range pattern {
+			if data[offset+index] != value {
+				match = false
+				break
+			}
+		}
+		if match {
+			return offset
+		}
+	}
+	return -1
+}
+
+func findBackwardOpcode(data []byte, before, lower int, opcode byte) int {
+	for offset := before - 1; offset >= lower; offset-- {
+		if data[offset] == opcode {
+			return offset
+		}
+	}
+	return -1
+}
+
+func findVariableYLoad(data []byte, before, lower int) (int, uint16, bool) {
+	for offset := before - 3; offset >= lower; offset-- {
+		if offset+2 >= len(data) {
+			continue
+		}
+		switch data[offset] {
+		case 0xac, 0xbc: // LDY abs / LDY abs,X; immediate LDY is deliberately excluded.
+			return offset, uint16(data[offset+1]) | uint16(data[offset+2])<<8, true
+		}
+	}
+	return 0, 0, false
+}
+
+// enumerateStructuralStreamHandlers implements the cheap first half of the
+// recovery workflow: stores to the interpreter's stream-pointer field imply a
+// handler boundary after the preceding RTS/RTL. Shared advance code and shared
+// stores necessarily under-count, so these addresses remain suggestions.
+func enumerateStructuralStreamHandlers(image romimage.Image, bank byte, streamPointer uint16) []uint32 {
+	bankOffset := int(bank&0x7f) * 0x8000
+	if bankOffset >= len(image) {
+		return nil
+	}
+	bankBytes := image[bankOffset:min(len(image), bankOffset+0x8000)]
+	candidates := make(map[uint32]struct{})
+	for offset := 0; offset+2 < len(bankBytes); offset++ {
+		opcode := bankBytes[offset]
+		if opcode != 0x8d && opcode != 0x9d && opcode != 0x99 { // STA abs / abs,X / abs,Y
+			continue
+		}
+		operand := uint16(bankBytes[offset+1]) | uint16(bankBytes[offset+2])<<8
+		if operand != streamPointer {
+			continue
+		}
+		for previous := offset - 1; previous >= 0; previous-- {
+			if bankBytes[previous] != 0x60 && bankBytes[previous] != 0x6b {
+				continue
+			}
+			candidate := previous + 1
+			if candidate < len(bankBytes) && bankBytes[candidate] != 0x00 && bankBytes[candidate] != 0xff {
+				candidates[decoder.Address24(bank, uint16(candidate+0x8000))] = struct{}{}
+			}
+			break
+		}
+	}
+	result := make([]uint32, 0, len(candidates))
+	for candidate := range candidates {
+		result = append(result, candidate)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+	return result
 }
 
 func classifyShadowFactOwnership(fact *analysis.DispatchFact, owners []shadowDecodedSpan) {
@@ -1981,8 +2207,8 @@ func writeShadowText(output io.Writer, report ShadowReport, verbose bool) {
 		summary.AuthoredFacts, summary.InferredFacts, summary.ExactMatches, summary.Compatible, summary.PartialMatches, summary.Conflicts, summary.AuthoredOnly, summary.Automatic, summary.GarbageOnly)
 	fmt.Fprintf(output, "read-only variant discovery: %d configured -> %d analyzed variants in %d passes\n",
 		summary.InitialVariants, summary.FinalVariants, summary.VariantPasses)
-	fmt.Fprintf(output, "shadow-root unresolved dynamic edges: %d raw emissions -> %d unique source sites; decode issues=%d\n",
-		summary.RawUnresolvedEmissions, summary.UniqueUnresolvedSites, summary.DecodeIssues)
+	fmt.Fprintf(output, "shadow-root unresolved dynamic edges: %d raw emissions -> %d unique source sites; likely bring-up blockers=%d; decode issues=%d\n",
+		summary.RawUnresolvedEmissions, summary.UniqueUnresolvedSites, summary.LikelyBlockingUnresolvedSites, summary.DecodeIssues)
 	for _, comparison := range report.Comparisons {
 		if !verbose && comparison.Status != analysis.ComparisonConflict && comparison.Status != analysis.ComparisonPartial {
 			continue
@@ -2008,8 +2234,13 @@ func writeShadowText(output io.Writer, report ShadowReport, verbose bool) {
 	}
 	if verbose {
 		for _, unresolved := range report.Unresolved {
-			fmt.Fprintf(output, "[UNRESOLVED] %s %s %s %s operand=$%X reason=%s callers=%d\n",
-				shadowAddress(unresolved.SitePC), unresolved.InstructionBytes, unresolved.Mnemonic, unresolved.AddressingMode, unresolved.Operand, unresolved.Reason, len(unresolved.Callers))
+			fmt.Fprintf(output, "[UNRESOLVED] %s %s %s %s operand=$%X class=%s priority=%s reason=%s callers=%d\n",
+				shadowAddress(unresolved.SitePC), unresolved.InstructionBytes, unresolved.Mnemonic, unresolved.AddressingMode, unresolved.Operand, unresolved.Classification, unresolved.Priority, unresolved.Reason, len(unresolved.Callers))
+			if pattern := unresolved.StreamDispatch; pattern != nil {
+				fmt.Fprintf(output, "  stream-pattern: interpreter=%s pointer-load=%s pointer=$%04X word-load=%s sign-test=%s slot-store=%s slot=$%02X trampoline-call=%s\n",
+					shadowOptionalPatternAddress(pattern.InterpreterEntryPC), shadowAddress(pattern.StreamPointerLoadPC), pattern.StreamPointer, shadowAddress(pattern.StreamWordLoadPC), shadowAddress(pattern.SignTestPC), shadowAddress(pattern.TargetSlotStorePC), pattern.TargetSlot, shadowAddress(pattern.TrampolineCallPC))
+				fmt.Fprintf(output, "  structural-handler-candidates=%s (incomplete heuristic; confirm with dispatch census)\n", shadowAddresses(unresolved.StructuralHandlerCandidates))
+			}
 			for _, caller := range unresolved.Callers {
 				fmt.Fprintf(output, "  caller=%s M%dX%d reachability=%s\n", shadowAddress(caller.FunctionEntry), caller.LiveMX.M, caller.LiveMX.X, unresolved.Reachability)
 			}
@@ -2024,6 +2255,13 @@ func writeShadowText(output io.Writer, report ShadowReport, verbose bool) {
 
 func shadowAddress(address uint32) string {
 	return fmt.Sprintf("$%02X:%04X", byte(address>>16), uint16(address))
+}
+
+func shadowOptionalPatternAddress(address uint32) string {
+	if address == 0 {
+		return "unknown"
+	}
+	return shadowAddress(address)
 }
 
 func shadowAddresses(addresses []uint32) string {

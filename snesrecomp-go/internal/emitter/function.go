@@ -311,7 +311,7 @@ func EmitFunction(image rom.Image, bank byte, start uint16, entryM, entryX uint8
 					} else if helper := options.HLEDispatch[uint16(instruction.Address)]; helper != "" {
 						lines = append(lines, fmt.Sprintf("{ extern RecompReturn %s(CpuState *cpu); RecompReturn _r = %s(cpu); RecompStackPop(); return _r; } /* hle_dispatch $%06X — host-side dispatcher */", helper, helper, instruction.Address&0xffffff))
 					} else {
-						lines = append(lines, fmt.Sprintf("return cpu_trace_unresolved_indirect_jump(cpu, 0x%06x); /* unresolved IndirectGoto — declare a target set or route with hle_dispatch */", instruction.Address&0xffffff))
+						lines = append(lines, emitTrappedIndirectJump(instruction)...)
 					}
 					terminated = true
 				case ir.PushReg:
@@ -435,6 +435,45 @@ func EmitFunction(image rom.Image, bank byte, start uint16, entryM, entryX uint8
 		result.Source = emitHLEStub(name, options.HLEFunction, entryPC)
 	}
 	return result, nil
+}
+
+// emitTrappedIndirectJump records the architectural target before preserving
+// the existing hard unresolved-indirect diagnostic. This is deliberately not
+// an interpreter or production fallback: it only makes an already-failing
+// edge visible to trace census builds.
+func emitTrappedIndirectJump(instruction *cpu65816.Instruction) []string {
+	site := instruction.Address & 0xffffff
+	operand := uint16(instruction.Operand)
+	lines := []string{"{ /* unresolved IndirectGoto — census target, then preserve the hard diagnostic */"}
+	switch instruction.Opcode {
+	case 0x6c: // JMP (abs): pointer is in bank zero; destination remains in PB.
+		lines = append(lines,
+			fmt.Sprintf("  uint16 _trap_address = cpu_read16(cpu, 0x00, (uint16)0x%04xu);", operand),
+			"  uint32 _trap_target = ((uint32)cpu->PB << 16) | (uint32)_trap_address;",
+		)
+	case 0x7c: // JMP (abs,X): X indexes the pointer in PB, wrapping at 16 bits.
+		lines = append(lines,
+			fmt.Sprintf("  uint16 _trap_pointer = (uint16)(0x%04xu + cpu->X);", operand),
+			"  uint16 _trap_address = cpu_read16(cpu, cpu->PB, _trap_pointer);",
+			"  uint32 _trap_target = ((uint32)cpu->PB << 16) | (uint32)_trap_address;",
+		)
+	case 0xdc: // JML [abs]: 24-bit pointer is read from bank zero.
+		lines = append(lines,
+			fmt.Sprintf("  uint16 _trap_pointer = (uint16)0x%04xu;", operand),
+			"  uint16 _trap_address = cpu_read16(cpu, 0x00, _trap_pointer);",
+			"  uint8 _trap_bank = cpu_read8(cpu, 0x00, (uint16)(_trap_pointer + 2u));",
+			"  uint32 _trap_target = ((uint32)_trap_bank << 16) | (uint32)_trap_address;",
+		)
+	default:
+		// IndirectGoto is currently produced only for the three opcodes above.
+		// Keep a loud target if that lowering contract changes.
+		lines = append(lines, "  uint32 _trap_target = 0x00ffffffu;")
+	}
+	return append(lines,
+		fmt.Sprintf("  cpu_trace_trapped_dispatch(cpu, _trap_target, 0x%06xu);", site),
+		fmt.Sprintf("  return cpu_trace_unresolved_indirect_jump(cpu, 0x%06x);", site),
+		"}",
+	)
 }
 
 func depthFirstOrder(graph *cfg.Graph) []decoder.DecodeKey {

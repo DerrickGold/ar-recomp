@@ -130,15 +130,81 @@ func TestUnresolvedIndirectJumpUsesItsOwnDiagnostic(t *testing.T) {
 	// JMP ($1234) has no statically declared target set in this fixture.
 	source := emitTestFunction(t, []byte{0x6c, 0x34, 0x12},
 		FunctionOptions{Name: "Indirect", UnresolvedAllowed: true})
-	if !strings.Contains(source,
-		"cpu_trace_unresolved_indirect_jump(cpu, 0x008000)") {
-		t.Fatalf("unresolved indirect jump did not use its dedicated trap:\n%s",
-			source)
+	for _, fragment := range []string{
+		"uint16 _trap_address = cpu_read16(cpu, 0x00, (uint16)0x1234u);",
+		"uint32 _trap_target = ((uint32)cpu->PB << 16) | (uint32)_trap_address;",
+		"cpu_trace_trapped_dispatch(cpu, _trap_target, 0x008000u);",
+		"cpu_trace_unresolved_indirect_jump(cpu, 0x008000)",
+	} {
+		if !strings.Contains(source, fragment) {
+			t.Fatalf("unresolved JMP (abs) is missing %q:\n%s", fragment, source)
+		}
 	}
 	if strings.Contains(source, "0xFFFF") ||
 		strings.Contains(source, "cpu_trace_dispatch_oob") {
 		t.Fatalf("unresolved indirect jump still masquerades as dispatch OOB:\n%s",
 			source)
+	}
+}
+
+func TestUnresolvedIndexedIndirectJumpCensusUsesLiveX(t *testing.T) {
+	source := emitTestFunction(t, []byte{0x7c, 0x34, 0x12},
+		FunctionOptions{Name: "IndirectX", UnresolvedAllowed: true})
+	for _, fragment := range []string{
+		"uint16 _trap_pointer = (uint16)(0x1234u + cpu->X);",
+		"uint16 _trap_address = cpu_read16(cpu, cpu->PB, _trap_pointer);",
+		"uint32 _trap_target = ((uint32)cpu->PB << 16) | (uint32)_trap_address;",
+		"cpu_trace_trapped_dispatch(cpu, _trap_target, 0x008000u);",
+	} {
+		if !strings.Contains(source, fragment) {
+			t.Fatalf("unresolved JMP (abs,X) is missing %q:\n%s", fragment, source)
+		}
+	}
+}
+
+func TestUnresolvedLongIndirectJumpCensusReadsBankZeroPointer(t *testing.T) {
+	source := emitTestFunction(t, []byte{0xdc, 0x34, 0x12},
+		FunctionOptions{Name: "IndirectLong", UnresolvedAllowed: true})
+	for _, fragment := range []string{
+		"uint16 _trap_pointer = (uint16)0x1234u;",
+		"uint16 _trap_address = cpu_read16(cpu, 0x00, _trap_pointer);",
+		"uint8 _trap_bank = cpu_read8(cpu, 0x00, (uint16)(_trap_pointer + 2u));",
+		"uint32 _trap_target = ((uint32)_trap_bank << 16) | (uint32)_trap_address;",
+		"cpu_trace_trapped_dispatch(cpu, _trap_target, 0x008000u);",
+	} {
+		if !strings.Contains(source, fragment) {
+			t.Fatalf("unresolved JML [abs] is missing %q:\n%s", fragment, source)
+		}
+	}
+}
+
+func TestConfiguredAbsoluteIndirectDispatchUsesArchitecturalPointerBanks(t *testing.T) {
+	context := codegen.NewContext()
+	jump := &cpu65816.Instruction{
+		Address: 0x058000, Opcode: 0x6c, Mnemonic: "JMP", Mode: cpu65816.INDIR,
+		Operand: 0x0098, DispatchEntries: []uint32{0x05c123},
+		DispatchTableBase: []uint16{0x0098}, DispatchIndexReg: "X",
+	}
+	jumpSource := strings.Join(emitIndexedIndirectDispatch(context, jump, nil), "\n")
+	if !strings.Contains(jumpSource, "uint16 _target = cpu_read16(cpu, 0x00, (uint16)0x0098);") {
+		t.Fatalf("configured JMP (abs) did not read its pointer from bank zero:\n%s", jumpSource)
+	}
+
+	longJump := &cpu65816.Instruction{
+		Address: 0x038000, Opcode: 0xdc, Mnemonic: "JMP", Mode: cpu65816.INDIR,
+		Operand: 0x1234, DispatchKind: "long", DispatchEntries: []uint32{0x12a000},
+		DispatchTableBase: []uint16{0x1234}, DispatchIndexReg: "X",
+	}
+	longSource := strings.Join(emitIndexedIndirectDispatch(context, longJump, nil), "\n")
+	for _, fragment := range []string{
+		"uint16 _target_address = cpu_read16(cpu, 0x00, _pointer);",
+		"uint8 _target_bank = cpu_read8(cpu, 0x00, (uint16)(_pointer + 2u));",
+		"uint32 _target = ((uint32)_target_bank << 16) | (uint32)_target_address;",
+		"case 0x12a000:",
+	} {
+		if !strings.Contains(longSource, fragment) {
+			t.Fatalf("configured JML [abs] is missing %q:\n%s", fragment, longSource)
+		}
 	}
 }
 

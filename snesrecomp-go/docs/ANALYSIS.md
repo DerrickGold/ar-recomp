@@ -146,6 +146,39 @@ runtime evidence imports, persistent evidence, and mapper generalization remain
 later milestones. The report identifies those gaps instead of treating
 speculation as proof.
 
+## Unresolved stream-interpreter triage
+
+An unresolved indirect edge is not automatically reachable or important. The
+shadow report nevertheless prioritizes a common sign-tagged stream-interpreter
+shape because leaving it unresolved can wedge the interpreter before its stream
+pointer advances:
+
+```text
+LDY <variable stream pointer>
+LDA $0000,Y
+BPL <ordinary data path>
+...
+STA <direct-page target slot>
+JSR <trampoline>
+...
+<trampoline>: JMP (<direct-page target slot>)
+```
+
+On a LoROM bank, a negative word can encode a same-bank address at or above
+`$8000`. The analyzer reports this as
+`tagged_stream_handler_dispatch` with priority `likely_bringup_blocker` and
+records the PCs for the pointer load, stream-word load, sign test, target-slot
+store, and trampoline call. This is pattern evidence, not proof that every
+negative word is executable or that the target set is finite.
+
+As a fast first pass, the report also scans for stores to the identified stream
+pointer and suggests the byte following the preceding RTS/RTL as a structural
+handler candidate. This deliberately remains report-only. It under-counts when
+a handler advances through shared code, and two handlers sharing one advance
+site can collapse to one candidate. Raw opcode-like bytes in data can also
+produce false candidates. Confirm entries and completeness with the runtime
+dispatch census rather than feeding this list directly into generation.
+
 ## Runtime dispatch census
 
 For data-derived targets that static analysis cannot see, trace builds can
@@ -171,6 +204,16 @@ million-line trace. Edges emitted by RTS/RTL are classified as continuation or
 return guards even when their target has no standalone registry body; they are
 reported separately and never turned into missing-handler suggestions.
 
+An unresolved `JMP (abs)`, `JMP (abs,X)`, or `JML [abs]` no longer needs an
+authored `hle_dispatch` merely to become visible to the census. Before executing
+the existing hard diagnostic, generated code calculates the architectural
+target (including the live X register and the 24-bit bank-zero pointer for
+`JML [abs]`, plus the bank-zero pointer used by `JMP (abs)`) and emits a record
+marked `trapped`. It does not execute the target
+or provide an interpreter fallback. A trapped missing target therefore needs
+both an appropriately classified generated entry and an explicit route at the
+source site until generic target dispatch is enabled.
+
 Summarize it from the game project root with:
 
 ```sh
@@ -178,9 +221,15 @@ snesbuild dispatch-census --root . --trace saves/dispatch.jsonl \
   --rom game.sfc --out-analysis saves/dispatch-analysis.json
 ```
 
+Relative `--trace`, `--rom`, and `--out-analysis` paths are resolved from
+`--root`, not from the shell's working directory. Use absolute paths when the
+trace or evidence directory is outside the game project.
+
 The text report identifies missing generated bodies and prints candidate `func`
 lines with the observed entry M/X. Those lines remain suggestions: before
 authoring one, classify the target as a routine, computed handler, tail target,
 or continuation. Registering a continuation as an ordinary routine can change
 host-stack semantics. The optional JSON output contains the ROM hash, trace
 hash, provenance, and observation counts; authored cfg is never modified.
+The report preserves whether an observation was trapped before dispatch, so
+such evidence cannot be mistaken for an executed handler edge.

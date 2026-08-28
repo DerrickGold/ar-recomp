@@ -80,7 +80,7 @@ func addressExpression(segment ir.SegRef) (string, string, error) {
 		effective := fmt.Sprintf("(((uint32)(%s) << 16) + (uint32)(%s) + (uint32)%s)", pointerBank, pointerLow, indexRegister)
 		return fmt.Sprintf("(uint8)((%s) >> 16)", effective), fmt.Sprintf("(uint16)(%s)", effective), nil
 	case ir.AbsoluteIndirect:
-		return "cpu->PB", fmt.Sprintf("cpu_read16(cpu, cpu->PB, (uint16)0x%04x)", segment.Offset), nil
+		return "cpu->PB", fmt.Sprintf("cpu_read16(cpu, 0x00, (uint16)0x%04x)", segment.Offset), nil
 	case ir.AbsoluteIndirectX:
 		return "cpu->PB", fmt.Sprintf("cpu_read16(cpu, cpu->PB, (uint16)(0x%04x + cpu->X))", segment.Offset), nil
 	case ir.AbsoluteIndirectLong:

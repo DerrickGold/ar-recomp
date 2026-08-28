@@ -204,7 +204,8 @@ static RecompReturn (*dispatch_lookup_mirrored(CpuState *cpu, uint32 pc24,
 }
 
 static void record_dispatch(uint32 pc24, uint32 source_pc24, CpuState *cpu,
-                            int found, int mirrored, const char *label) {
+                            int found, int mirrored, int trapped,
+                            const char *label) {
     if (sr_runner_event_enabled(SR_EVENT_MASK_DYNAMIC_DISPATCH)) {
         SrRunnerEvent runner_event = {0};
         int continuation = 0;
@@ -220,7 +221,8 @@ static void record_dispatch(uint32 pc24, uint32 source_pc24, CpuState *cpu,
         runner_event.flags =
             (found ? SR_EVENT_DISPATCH_FOUND : 0u) |
             (mirrored ? SR_EVENT_DISPATCH_MIRRORED : 0u) |
-            (continuation ? SR_EVENT_DISPATCH_CONTINUATION : 0u);
+            (continuation ? SR_EVENT_DISPATCH_CONTINUATION : 0u) |
+            (trapped ? SR_EVENT_DISPATCH_TRAPPED : 0u);
         runner_event.cpu_flags =
             (cpu->m_flag ? SR_CPU_STATE_M_FLAG : 0u) |
             (cpu->x_flag ? SR_CPU_STATE_X_FLAG : 0u) |
@@ -239,7 +241,18 @@ static void record_dispatch(uint32 pc24, uint32 source_pc24, CpuState *cpu,
 void cpu_trace_resolved_dispatch(CpuState *cpu, uint32 pc24,
                                  uint32 source_pc24) {
     record_dispatch(pc24 & 0xffffffu, source_pc24 & 0xffffffu, cpu, 1, 0,
-                    NULL);
+                    0, NULL);
+}
+
+void cpu_trace_trapped_dispatch(CpuState *cpu, uint32 pc24,
+                                uint32 source_pc24) {
+    RecompReturn (*function)(CpuState *);
+    int mirrored;
+    if (!sr_runner_event_enabled(SR_EVENT_MASK_DYNAMIC_DISPATCH)) return;
+    pc24 &= 0xffffffu;
+    function = dispatch_lookup_mirrored(cpu, pc24, &mirrored);
+    record_dispatch(pc24, source_pc24 & 0xffffffu, cpu,
+                    function != NULL, mirrored, 1, NULL);
 }
 
 static RecompReturn dispatch_once(CpuState *cpu, uint32 pc24,
@@ -254,7 +267,7 @@ static RecompReturn dispatch_once(CpuState *cpu, uint32 pc24,
     function = dispatch_lookup_mirrored(cpu, pc24, &mirrored);
 #if !SNESRECOMP_SEMANTIC_DISPATCH_TRACE
     record_dispatch(pc24, source_pc24, cpu, function != NULL, mirrored,
-                    g_last_recomp_func);
+                    0, g_last_recomp_func);
 #endif
 
     if (function == NULL && g_rtl_game_execution != NULL &&
