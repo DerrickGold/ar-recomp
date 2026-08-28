@@ -107,6 +107,33 @@ static void test_internal_registers(Snes *snes) {
           "joypad bit order");
 }
 
+static void test_synthetic_beam(Snes *snes) {
+    uint16_t latched_v;
+    snes_beginVblank(snes);
+    check(snes->hPos == 0u && snes->vPos == 225u && snes->inVblank,
+          "frame timing enters deterministic vblank");
+
+    (void)snes_readBBus(snes, 0x37u);
+    latched_v = (uint16_t)snes_readBBus(snes, 0x3du);
+    latched_v |= (uint16_t)snes_readBBus(snes, 0x3du) << 8;
+    check(latched_v == 226u, "SLHV latches the shared beam position");
+    for (unsigned read = 0u; read < 15u; ++read) {
+        (void)snes_readBBus(snes, 0x37u);
+        latched_v = (uint16_t)snes_readBBus(snes, 0x3du);
+    }
+    check(latched_v == 241u,
+          "repeated SLHV latches advance out of a vblank polling range");
+
+    snes_setBeamPosition(snes, 1340u, 224u);
+    check((snes_readReg(snes, 0x4212u) & 0x80u) != 0u &&
+              snes->vPos == 225u,
+          "$4212 observes the same beam entering vblank");
+    snes_setBeamPosition(snes, 1340u, 261u);
+    check((snes_readReg(snes, 0x4212u) & 0x80u) == 0u &&
+              snes->vPos == 0u,
+          "$4212 advances the shared beam into the next frame");
+}
+
 static void test_bus(Snes *snes, uint8_t *ram) {
     g_snes_wram_write_hook = observe_wram;
     g_snes_register_write_hook = observe_register;
@@ -194,6 +221,7 @@ int main(void) {
     active_snes = snes;
     test_reset(snes, ram);
     test_internal_registers(snes);
+    test_synthetic_beam(snes);
     test_bus(snes, ram);
     test_apu_bus(snes);
     test_synchronous_dma_register(snes, ram);

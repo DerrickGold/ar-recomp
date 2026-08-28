@@ -48,6 +48,7 @@ static unsigned g_scanouts;
 static const SnesRunnerApi *g_runner_api;
 static SrRunnerHandle *g_runner;
 static SrResult g_scanout_result = SR_RESULT_UNAVAILABLE;
+static uint8_t g_scanout_display_control;
 
 static void ConformanceIrq(void *user_data, uint32_t line) {
     (void)user_data;
@@ -76,7 +77,10 @@ static void ConformanceDrawFrame(void) {
         request.lifetime_generation = generations.lifetime_generation;
         g_scanout_result =
             g_runner_api->run_ppu_scanout(g_runner, &request, &result);
-        if (g_scanout_result == SR_RESULT_OK) ++g_scanouts;
+        if (g_scanout_result == SR_RESULT_OK) {
+            ++g_scanouts;
+            g_scanout_display_control = result.final_state.display_control;
+        }
     }
 }
 
@@ -149,6 +153,9 @@ int main(void) {
     SrInputStateSnapshot input = {
         .struct_size = SR_INPUT_STATE_SNAPSHOT_V2_SIZE,
     };
+    SrDmaStateSnapshot dma = {
+        .struct_size = SR_DMA_STATE_SNAPSHOT_V2_SIZE,
+    };
     int failed = 0;
 
     failed |= check(strcmp(sr_result_string(SR_RESULT_OK), "ok") == 0,
@@ -212,6 +219,18 @@ int main(void) {
     }
 
     failed |= check(g_frames_run > 0u, "RtlRunFrame never invoked run_frame");
+
+    /* The zero-initialized scanout request follows $420C. The request does
+     * not need to mirror hardware state back into the runner. */
+    g_ram[0x0100u] = 1u;
+    g_ram[0x0101u] = 0x0fu;
+    g_ram[0x0102u] = 0u;
+    WriteReg(0x4300u, 0u);
+    WriteReg(0x4301u, 0u);
+    WriteReg(0x4302u, 0u);
+    WriteReg(0x4303u, 1u);
+    WriteReg(0x4304u, 0x7eu);
+    WriteReg(0x420cu, 1u);
     failed |= check(RtlGameDrawPpuFrame(), "RtlGameDrawPpuFrame reported no "
                                            "draw_ppu_frame callback");
     failed |= check(g_draws > 0u, "draw_ppu_frame was not invoked");
@@ -220,6 +239,12 @@ int main(void) {
                 sr_result_string(g_scanout_result));
     failed |= check(g_scanouts > 0u,
                     "draw_ppu_frame did not drive PPU scanout");
+    failed |= check(g_scanout_display_control == 0x0fu,
+                    "zero-initialized scanout ignored hardware-armed HDMA");
+    failed |= check(api->query_dma_state(runner, &dma) == SR_RESULT_OK &&
+                        (dma.channels[0].flags &
+                         SR_DMA_CHANNEL_HDMA_ACTIVE) != 0u,
+                    "scanout mutated the hardware-owned $420C state");
 
     SnesShutdown();
     return failed;

@@ -846,10 +846,12 @@ typedef struct SrPpuAuthenticCameraRequest {
 
 /* Synchronous native scanout. The runner owns PPU line execution, HDMA
  * advancement, margin hold-first/hold-last rendering, and vertical IRQ
- * scheduling. irq_callback is required and owns only the recompiled CPU's IRQ
- * handler. Optional line callbacks are for diagnostics and receive
- * callback-lifetime, zero-copy surface views; normal frames should leave them
- * null. */
+ * scheduling. HDMA starts from the runner-owned $420C state; a request may
+ * suppress channels for enhancement policy, but it cannot arm one. The
+ * zero-initialized request therefore preserves normal hardware behavior.
+ * irq_callback is required and owns only the recompiled CPU's IRQ handler.
+ * Optional line callbacks are for diagnostics and receive callback-lifetime,
+ * zero-copy surface views; normal frames should leave them null. */
 #define SR_PPU_SCANOUT_LINE_BEFORE UINT32_C(0x00000001)
 #define SR_PPU_SCANOUT_LINE_AFTER_HDMA UINT32_C(0x00000002)
 #define SR_PPU_SCANOUT_HDMA_ACTIVE UINT32_C(0x00000001)
@@ -887,7 +889,9 @@ typedef struct SrPpuScanoutRequest {
     uint32_t struct_size;
     uint32_t flags;
     uint64_t lifetime_generation;
-    uint32_t hdma_channel_mask;
+    /* Bits set here suppress the corresponding channel after applying the
+     * game's $420C enable state. Zero preserves every hardware-armed channel. */
+    uint32_t hdma_suppress_mask;
     uint32_t reserved;
     SrPpuScanoutLineCallback line_callback;
     SrPpuScanoutIrqCallback irq_callback;

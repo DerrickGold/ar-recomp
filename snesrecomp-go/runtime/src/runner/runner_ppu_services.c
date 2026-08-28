@@ -142,14 +142,16 @@ static void scanout_hdma_line(Snes *snes, PpuScanoutHdma *channel) {
 }
 
 static void scanout_start_hdma(
-        Snes *snes, Dma *dma, uint8_t channel_mask) {
+        Snes *snes, Dma *dma, uint8_t suppress_mask,
+        PpuScanoutHdma scanout[SR_DMA_CHANNEL_COUNT]) {
     unsigned index;
-    if (snes == NULL || dma == NULL) return;
+    if (snes == NULL || dma == NULL || scanout == NULL) return;
     for (index = 0u; index < SR_DMA_CHANNEL_COUNT; ++index) {
         DmaChannel *channel = &dma->channel[index];
-        const bool selected =
-            (channel_mask & (uint8_t)(1u << index)) != 0u;
-        channel->hdmaActive = selected;
+        const bool selected = channel->hdmaActive &&
+            (suppress_mask & (uint8_t)(1u << index)) == 0u;
+        memset(&scanout[index], 0, sizeof(scanout[index]));
+        if (selected) scanout_hdma_init(snes, &scanout[index], channel);
         if (selected && sr_runner_event_enabled(SR_EVENT_MASK_DMA)) {
             SrRunnerEvent event = {0};
             event.type = SR_EVENT_DMA_BEGIN;
@@ -245,14 +247,14 @@ static SrResult run_ppu_scanout(
         return SR_RESULT_UNAVAILABLE;
 
     snes->diagnosticScanoutObserved = true;
-    scanout_start_hdma(snes, dma, (uint8_t)request->hdma_channel_mask);
     _Static_assert(SR_DMA_CHANNEL_COUNT == kDmaChannelCount,
                    "scanout HDMA channel count must match the runner");
-    for (channel = 0u; channel < SR_DMA_CHANNEL_COUNT; ++channel)
-        scanout_hdma_init(snes, &hdma[channel], &dma->channel[channel]);
+    scanout_start_hdma(
+        snes, dma, (uint8_t)request->hdma_suppress_mask, hdma);
 
     trigger = snes->vIrqEnabled ? (int)snes->vTimer + 1 : -1;
     for (line = 0; line <= (int)SR_PPU_NATIVE_HEIGHT; ++line) {
+        snes_setBeamPosition(snes, 0u, (uint16_t)line);
         if (request->line_callback != NULL) {
             SrPpuScanoutLineContext context;
             scanout_line_context_init(
@@ -283,6 +285,7 @@ static SrResult run_ppu_scanout(
     }
     for (line = 1; line <= ppu->extraBottomCur; ++line)
         ppu_runMarginLine(ppu, (int)SR_PPU_NATIVE_HEIGHT + line);
+    snes_beginVblank(snes);
 
     out_result->final_state.struct_size = sizeof(out_result->final_state);
     (void)api->query_ppu_state(

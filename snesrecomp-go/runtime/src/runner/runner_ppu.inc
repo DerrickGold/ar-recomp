@@ -1073,7 +1073,7 @@ static SrResult run_ppu_scanout(
     if (snes == NULL || request == NULL || out_result == NULL ||
         request->struct_size < SR_PPU_SCANOUT_REQUEST_V2_SIZE ||
         out_result->struct_size < SR_PPU_SCANOUT_RESULT_V2_SIZE ||
-        request->flags != 0u || request->hdma_channel_mask > 0xffu ||
+        request->flags != 0u || request->hdma_suppress_mask > 0xffu ||
         request->reserved != 0u || request->irq_callback == NULL)
         return SR_RESULT_INVALID_ARGUMENT;
     if (request->lifetime_generation != snes->abiLifetimeGeneration)

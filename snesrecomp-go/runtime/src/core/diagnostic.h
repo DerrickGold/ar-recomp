@@ -49,7 +49,6 @@ extern uint32 *g_stack_pusher;
 extern unsigned *g_stack_pusher_frame;
 int sr_stack_provenance_enabled(void);
 void sr_vram_trace_raw(uint16 address, uint8 value, int port);
-int sr_vram_watch(uint16 address, uint8 value);
 
 /* Deterministic inspection hooks for tests and host diagnostics. */
 void sr_diagnostic_reset(void);

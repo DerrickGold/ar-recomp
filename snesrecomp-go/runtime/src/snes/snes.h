@@ -97,6 +97,10 @@ uint8_t snes_read(Snes *snes, uint32_t address);
 void snes_write(Snes *snes, uint32_t address, uint8_t value);
 uint8_t snes_readReg(Snes *snes, uint16_t address);
 void snes_writeReg(Snes *snes, uint16_t address, uint8_t value);
+void snes_setBeamPosition(Snes *snes, uint16_t h_master_cycles,
+                          uint16_t v_line);
+void snes_beginVblank(Snes *snes);
+void snes_latchPpuCounters(Snes *snes);
 uint16_t SwapInputBits(uint16_t value);
 bool snes_loadRom(Snes *snes, const uint8_t *data, int length);
 void snes_saveload(Snes *snes, SaveLoadInfo *info);

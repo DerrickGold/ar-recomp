@@ -97,6 +97,26 @@ static bool ActRaiser_QueryPpuState(SrPpuStateSnapshot *state) {
   return s_runner_api->query_ppu_state(s_runner, state) == SR_RESULT_OK;
 }
 
+static uint8_t ActRaiser_QueryHdmaActiveMask(void) {
+  SrDmaStateSnapshot state = {
+    .struct_size = sizeof(state),
+  };
+  uint8_t mask = 0u;
+  if (!s_runner || !s_runner_api ||
+      s_runner_api->struct_size < SNES_RUNNER_API_DMA_STATE_SIZE ||
+      (s_runner_api->capabilities & SR_RUNNER_CAP_DMA_STATE) == 0u ||
+      !s_runner_api->query_dma_state ||
+      s_runner_api->query_dma_state(s_runner, &state) != SR_RESULT_OK)
+    return 0u;
+  for (uint32_t channel = 0u;
+       channel < state.channel_count && channel < SR_DMA_CHANNEL_COUNT;
+       ++channel) {
+    if ((state.channels[channel].flags & SR_DMA_CHANNEL_HDMA_ACTIVE) != 0u)
+      mask |= (uint8_t)(1u << channel);
+  }
+  return mask;
+}
+
 static bool ActRaiser_ResetPpuFrameCaptures(void) {
   SrPpuStateSnapshot ppu;
   if (!ActRaiser_QueryPpuState(&ppu) || !s_runner_api ||
@@ -1255,7 +1275,6 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
     static int lf = -1;
     if (snes_frame_counter != lf) {
       lf = snes_frame_counter;
-      extern uint8 g_snesrecomp_last_hdmaen;
       const uint32_t ppu_display = RtlGamePpuDisplayState();
       const uint8_t display_control =
           RTL_GAME_PPU_DISPLAY_CONTROL(ppu_display);
@@ -1265,7 +1284,7 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
               RTL_GAME_PPU_BG_MODE_CONTROL(ppu_display),
               RTL_GAME_PPU_MAIN_SCREEN(ppu_display),
               RTL_GAME_PPU_SUB_SCREEN(ppu_display),
-              g_snesrecomp_last_hdmaen);
+              ActRaiser_QueryHdmaActiveMask());
     }
   }
 
@@ -3772,6 +3791,7 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
       (scanout_api->capabilities & SR_RUNNER_CAP_PPU_SCANOUT) != 0u &&
       scanout_api->query_generations(
           scanout_runner, &scanout_generations) == SR_RESULT_OK;
+  const uint8_t hdma_active_mask = ActRaiser_QueryHdmaActiveMask();
   /* AR_TITLELOG=1: per-frame title-screen PPU probe (map bytes, BG mode,
    * HDMAEN, Mode-7 matrix, INIDISP) for deriving/validating the settled-logo
    * gate above. Diagnostic only. */
@@ -3789,7 +3809,7 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
                 "hdmaen=%02x m7=[%04x %04x %04x %04x] inidisp=%02x\n",
                 gf, g_ram[kActRaiserWram_MapGroup],
                 g_ram[kActRaiserWram_CurrentMap],
-                scanout_initial.bg_mode_control, g_snesrecomp_last_hdmaen,
+                scanout_initial.bg_mode_control, hdma_active_mask,
                 (uint16)scanout_initial.mode7_matrix[0],
                 (uint16)scanout_initial.mode7_matrix[1],
                 (uint16)scanout_initial.mode7_matrix[2],
@@ -3816,7 +3836,7 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
   const SrPpuScanoutRequest scanout_request = {
       .struct_size = sizeof(scanout_request),
       .lifetime_generation = scanout_generations.lifetime_generation,
-      .hdma_channel_mask = g_snesrecomp_last_hdmaen,
+      .hdma_suppress_mask = 0u,
       .line_callback = observe_lines
           ? ActRaiser_PpuScanoutLineCallback : NULL,
       .irq_callback = ActRaiser_PpuScanoutIrqCallback,

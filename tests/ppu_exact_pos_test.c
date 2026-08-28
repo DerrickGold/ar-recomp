@@ -32,7 +32,6 @@ void sr_trace_reg(uint16_t a, uint8_t v) { (void)a; (void)v; }
 void sr_trace_vmadd(uint16_t a) { (void)a; }
 void sr_trace_vram(uint16_t a, uint16_t v) { (void)a; (void)v; }
 void sr_vram_trace_raw(uint16_t a, uint8_t v, int p) { (void)a; (void)v; (void)p; }
-int sr_vram_watch(uint16_t a, uint8_t v) { (void)a; (void)v; return 0; }
 void debug_server_on_oam_render(void) {}
 void CpuDispatchLogWriteFile(const char *path) { (void)path; }
 unsigned g_sr_block_index;

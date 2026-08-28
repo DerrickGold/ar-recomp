@@ -196,6 +196,12 @@ void snes_free(Snes *snes) {
 void snes_reset(Snes *snes, bool hard) {
     (void)snes; (void)hard; ++reset_count;
 }
+void snes_beginVblank(Snes *snes) {
+    if (snes == NULL) return;
+    snes->hPos = 0u;
+    snes->vPos = 225u;
+    snes->inVblank = true;
+}
 void ppu_reset(Ppu *ppu) { (void)ppu; ++ppu_reset_count; }
 void dma_reset(Dma *dma) { (void)dma; ++dma_reset_count; }
 void msu1_init(void) { ++msu_init_count; }
@@ -494,7 +500,8 @@ static void test_registration_and_initialization(void) {
           !test_cpu.xf && test_cpu.i, "native-mode bootstrap");
 
     check(RtlGameFrameBegin() == 0 && test_snes.forceNmi &&
-              test_snes.nmiAvail,
+              test_snes.nmiAvail && test_snes.vPos == 225u &&
+              test_snes.inVblank,
           "direct game-frame begin adapter");
     check(RtlGameFrameComplete(UINT32_C(0x80000000)) == -1 &&
               test_snes.forceNmi,

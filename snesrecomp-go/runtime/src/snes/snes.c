@@ -16,7 +16,10 @@
 
 enum {
     SNES_SCANLINE_MASTER_CYCLES = 1364,
+    SNES_FRAME_SCANLINES = 262,
     SNES_HBLANK_START = 1024,
+    SNES_VBLANK_START = 225,
+    SNES_OVERSCAN_VBLANK_START = 240,
     SNES_STATUS_READ_STEP = 64,
     SNES_APU_CATCHUP_LIMIT = 10000
 };
@@ -204,10 +207,49 @@ static void write_wram(Snes *snes, uint32_t offset, uint8_t value) {
     }
 }
 
+static uint16_t snes_vblank_start(const Snes *snes) {
+    return snes != NULL && snes->ppu != NULL && snes->ppu->frameOverscan
+        ? SNES_OVERSCAN_VBLANK_START : SNES_VBLANK_START;
+}
+
+void snes_setBeamPosition(
+        Snes *snes, uint16_t h_master_cycles, uint16_t v_line) {
+    if (snes == NULL) return;
+    snes->hPos = (uint16_t)(h_master_cycles % SNES_SCANLINE_MASTER_CYCLES);
+    snes->vPos = (uint16_t)(v_line % SNES_FRAME_SCANLINES);
+    snes->inVblank = snes->vPos >= snes_vblank_start(snes);
+}
+
+void snes_beginVblank(Snes *snes) {
+    if (snes == NULL) return;
+    snes_setBeamPosition(snes, 0u, snes_vblank_start(snes));
+}
+
+static void snes_advanceBeam(Snes *snes, uint32_t master_cycles) {
+    uint32_t total;
+    uint32_t lines;
+    if (snes == NULL) return;
+    total = (uint32_t)snes->hPos + master_cycles;
+    lines = total / SNES_SCANLINE_MASTER_CYCLES;
+    snes_setBeamPosition(
+        snes, (uint16_t)(total % SNES_SCANLINE_MASTER_CYCLES),
+        (uint16_t)(((uint32_t)snes->vPos + lines) % SNES_FRAME_SCANLINES));
+}
+
+void snes_latchPpuCounters(Snes *snes) {
+    if (snes == NULL || snes->ppu == NULL) return;
+    /* Recompiled instructions do not consume a cycle-exact clock. Advancing
+     * one scanline per explicit latch keeps polling live and deterministic,
+     * while sharing the same beam state used by $4212 and scanout. */
+    snes_advanceBeam(snes, SNES_SCANLINE_MASTER_CYCLES);
+    ppu_latchCounters(snes->ppu, (uint16_t)(snes->hPos / 4u), snes->vPos);
+}
+
 uint8_t snes_readBBus(Snes *snes, uint8_t address) {
     uint8_t value = 0u;
     if (snes == NULL) return value;
     if (address < 0x40u) {
+        if (address == 0x37u) snes_latchPpuCounters(snes);
         value = ppu_read(snes->ppu, address);
     } else if (address < 0x80u) {
         RtlApuLock();
@@ -296,8 +338,7 @@ uint8_t snes_readReg(Snes *snes, uint16_t address) {
             snes->inIrq = false;
             break;
         case 0x4212u:
-            snes->hPos = (uint16_t)((snes->hPos + SNES_STATUS_READ_STEP) %
-                                    SNES_SCANLINE_MASTER_CYCLES);
+            snes_advanceBeam(snes, SNES_STATUS_READ_STEP);
             value = (uint8_t)((snes->autoJoyTimer != 0u ? 1u : 0u) |
                               (snes->hPos >= SNES_HBLANK_START ? 0x40u : 0u) |
                               (snes->inVblank ? 0x80u : 0u));
@@ -340,7 +381,7 @@ void snes_writeReg(Snes *snes, uint16_t address, uint8_t value) {
             break;
         case 0x4201u:
             if ((value & 0x80u) == 0u && snes->ppuLatch) {
-                (void)ppu_read(snes->ppu, 0x37u);
+                snes_latchPpuCounters(snes);
             }
             snes->ppuLatch = (value & 0x80u) != 0u;
             break;
