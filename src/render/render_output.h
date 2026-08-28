@@ -27,6 +27,13 @@ bool ArRenderOutput_ResolveAspectFit(
     int aspect_width, int aspect_height,
     ArRenderRectI *viewport, int *output_width, int *output_height);
 
+/* Select complete physical-output coordinates for a terminal overlay pass.
+ * This deliberately leaves that state active: callers use it after scene
+ * composition, and the next frame owner establishes its own coordinates.
+ * The current target is unchanged. */
+bool ArRenderOutput_UseFull(
+    ArRenderDevice *device, int *output_width, int *output_height);
+
 bool ArRenderOutputFrame_Begin(
     ArRenderDevice *device, ArRenderRectI viewport,
     ArRenderColorF margin_color, ArRenderColorF scene_color,

@@ -53,6 +53,20 @@ bool ArRenderOutput_ResolveAspectFit(
   return true;
 }
 
+bool ArRenderOutput_UseFull(
+    ArRenderDevice *device, int *output_width, int *output_height) {
+  int width = 0;
+  int height = 0;
+  if (!ArRenderDevice_UseOutputCoordinates(device) ||
+      !ArRenderDevice_SetViewport(device, NULL) ||
+      !ArRenderDevice_SetClipRect(device, NULL) ||
+      !ArRenderDevice_GetOutputSize(device, &width, &height))
+    return false;
+  if (output_width) *output_width = width;
+  if (output_height) *output_height = height;
+  return true;
+}
+
 static bool BeginResolvedFrame(
     ArRenderDevice *device, ArRenderRectI viewport,
     int output_width, int output_height,
@@ -64,15 +78,15 @@ static bool BeginResolvedFrame(
   const bool viewport_is_output =
       viewport.x == 0 && viewport.y == 0 &&
       viewport.w == output_width && viewport.h == output_height;
-  bool prepared = false;
+  bool prepared = ArRenderDevice_SetClipRect(device, NULL);
   if (viewport_is_output) {
-    prepared = ArRenderDevice_SetViewport(device, NULL) &&
+    prepared = prepared && ArRenderDevice_SetViewport(device, NULL) &&
         ArRenderDevice_Clear(device, scene_color);
   } else {
     const ArRenderRectF scene_rectangle = {
       0.0f, 0.0f, (float)viewport.w, (float)viewport.h,
     };
-    prepared = ArRenderDevice_SetViewport(device, NULL) &&
+    prepared = prepared && ArRenderDevice_SetViewport(device, NULL) &&
         ArRenderDevice_Clear(device, margin_color) &&
         ArRenderDevice_SetViewport(device, &viewport) &&
         (ColorsEqual(margin_color, scene_color) ||
@@ -104,8 +118,7 @@ bool ArRenderOutputFrame_Begin(
   ResetFrame(frame);
   int output_width = 0;
   int output_height = 0;
-  if (!ArRenderDevice_UseOutputCoordinates(device) ||
-      !ArRenderDevice_GetOutputSize(
+  if (!ArRenderOutput_UseFull(
           device, &output_width, &output_height))
     return false;
   return BeginResolvedFrame(
