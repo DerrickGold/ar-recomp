@@ -508,6 +508,33 @@ static void TestOutputFrameScope(void) {
   assert(!inset_backend.target_state.viewport_set);
   assert(inset_backend.set_viewport_count ==
          viewport_calls_before_failure + 3);
+
+  inset_backend.fail_draw_geometry = false;
+  assert(ArRenderOutputFrame_BeginAspectFit(
+      &inset_device, false, 4, 3, black, navy, &frame));
+  assert(frame.viewport.x == 0 && frame.viewport.y == 0);
+  assert(frame.viewport.w == 640 && frame.viewport.h == 480);
+  assert(frame.viewport_is_output);
+  assert(ArRenderOutputFrame_Finish(&frame));
+
+  inset_backend.output_width = 1280;
+  inset_backend.output_height = 720;
+  assert(ArRenderOutputFrame_BeginAspectFit(
+      &inset_device, false, 4, 3, black, navy, &frame));
+  assert(frame.viewport.x == 160 && frame.viewport.y == 0);
+  assert(frame.viewport.w == 960 && frame.viewport.h == 720);
+  assert(!frame.viewport_is_output);
+  assert(ArRenderOutputFrame_Finish(&frame));
+
+  assert(ArRenderOutputFrame_BeginAspectFit(
+      &inset_device, true, 4, 3, black, navy, &frame));
+  assert(frame.viewport.x == 0 && frame.viewport.y == 0);
+  assert(frame.viewport.w == 1280 && frame.viewport.h == 720);
+  assert(frame.viewport_is_output);
+  assert(ArRenderOutputFrame_Finish(&frame));
+  assert(!ArRenderOutputFrame_BeginAspectFit(
+      &inset_device, false, 0, 3, black, navy, &frame));
+  assert(!frame.active);
 }
 
 static void TestDirtyUploadWorksWithoutANativeRenderer(void) {

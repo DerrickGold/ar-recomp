@@ -10,7 +10,6 @@
  * family: no g_ppu, no g_settings, no Settings_Visible*(). State arrives via
  * the `const FrameSlot *`. */
 
-#include <SDL3/SDL.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,7 +19,10 @@
 #include "constants.h"
 #include "snesrecomp/game/types.h"
 #include "diorama/diorama.h"
+#include "host/host_clock.h"
+#include "presentation_outcome.h"
 #include "render/render_device.h"
+#include "render/render_output.h"
 #include "scene3d_math.h"
 #include "sim/sim_world_map.h"
 #include "sim/sim_world_navigation_capture.h"
@@ -29,10 +31,6 @@
 /* kPixelAspect_Crt43 and kDioramaCam_Free/kDioramaCam_Dynamic are plain enum
  * constants (not live state) — fine to pull in just for those. */
 #include "settings.h"
-#include "present_internal.h"
-
-
-extern SDL_Renderer *g_renderer;
 extern ArRenderDevice g_render_device;
 #include "present_sim3d_internal.h"
 
@@ -164,14 +162,14 @@ static ArRenderTexture EnsureWorldNavigationCloudTexture(void) {
  * Navigation uses the same developed texture cache as the town underlay, but
  * none of the underlay geometry: the complete map is the primary plane and
  * its captured Mode-7 matrix is already an affine top-down camera. */
-static SDL_FPoint WorldNavigationAuthenticToOutput(
-    const FrameSlot *slot, SDL_Rect viewport,
+static ArRenderPointF WorldNavigationAuthenticToOutput(
+    const FrameSlot *slot, ArRenderRectI viewport,
     float authentic_x, float authentic_y) {
   const float authentic_x0 =
       ((float)slot->snes_width -
        (float)kSimWorldNavigationCompositionWidth) * 0.5f;
   const float captured_x = authentic_x0 + authentic_x;
-  return (SDL_FPoint){
+  return (ArRenderPointF){
     (float)viewport.x +
         (captured_x - (float)slot->visible_x0) *
             (float)viewport.w / (float)slot->visible_width,
@@ -181,7 +179,7 @@ static SDL_FPoint WorldNavigationAuthenticToOutput(
 }
 
 static bool DrawWorldNavigationGround(
-    const FrameSlot *slot, SDL_Rect viewport, ArRenderTexture texture) {
+    const FrameSlot *slot, ArRenderRectI viewport, ArRenderTexture texture) {
   const SimWorldNavigationScene *scene =
       &slot->sim.world_navigation_scene;
   if (!ArRenderTexture_IsValid(texture) || !scene->valid ||
@@ -199,7 +197,7 @@ static bool DrawWorldNavigationGround(
     if (!SimWorldNavigationScene_ProjectSource(
             scene, source_x, source_y, &authentic_x, &authentic_y))
       return false;
-    const SDL_FPoint output = WorldNavigationAuthenticToOutput(
+    const ArRenderPointF output = WorldNavigationAuthenticToOutput(
         slot, viewport, authentic_x, authentic_y);
     vertices[i] = (ArRenderVertex2D){
       {output.x, output.y},
@@ -218,7 +216,7 @@ static bool DrawWorldNavigationGround(
 }
 
 static bool DrawWorldNavigationLightTreatment(
-    const FrameSlot *slot, SDL_Rect viewport) {
+    const FrameSlot *slot, ArRenderRectI viewport) {
   if (!slot->sim.world_navigation_lighting) return true;
   const float elevation =
       (float)slot->sim.light_elevation_deg * kPi / 180.0f;
@@ -250,7 +248,7 @@ static bool DrawWorldNavigationLightTreatment(
  * setting mixes the terrain toward the live scene backdrop. Both passes use
  * one affine mesh, so the boundary follows the scripted zoom and rotation. */
 static bool DrawWorldNavigationActiveRegionHaze(
-    const FrameSlot *slot, SDL_Rect viewport) {
+    const FrameSlot *slot, ArRenderRectI viewport) {
   const SimWorldNavigationScene *scene =
       &slot->sim.world_navigation_scene;
   if (!slot->sim.world_navigation_haze ||
@@ -311,7 +309,7 @@ static bool DrawWorldNavigationActiveRegionHaze(
       const float haze =
           SimWorldNavigationScene_LocationHaze(
               scene, xs[column], ys[row], lead);
-      const SDL_FPoint output = WorldNavigationAuthenticToOutput(
+      const ArRenderPointF output = WorldNavigationAuthenticToOutput(
           slot, viewport, authentic_x, authentic_y);
       vertices[vertex_count++] = (ArRenderVertex2D){
         {output.x, output.y},
@@ -371,7 +369,7 @@ static bool DrawWorldNavigationActiveRegionHaze(
 }
 
 static bool DrawWorldNavigationCloudLayer(
-    const FrameSlot *slot, SDL_Rect viewport, ArRenderTexture texture,
+    const FrameSlot *slot, ArRenderRectI viewport, ArRenderTexture texture,
     const SimCloudLayer *layer, uint64_t elapsed_ms, float drift,
     float source_offset_x, float source_offset_y, ArRenderColorF colour) {
   if (!layer) return false;
@@ -389,7 +387,7 @@ static bool DrawWorldNavigationCloudLayer(
   /* The texture contains two exact copies of the proven town cloud field in
    * each axis. Sample one complete copy through a single world quad and slide
    * the window through the padded copy. This retains wraparound drift on
-   * backends that cannot wrap SDL_RenderGeometry UVs, without introducing
+   * backends that cannot wrap geometry UVs, without introducing
    * any manually tiled geometry edges. */
   const float u0 =
       (phase_u * kSimCloudTexturePixels + 0.5f) / kPaddedPixels;
@@ -414,7 +412,7 @@ static bool DrawWorldNavigationCloudLayer(
             scene, source_x + source_offset_x,
             source_y + source_offset_y, &authentic_x, &authentic_y))
       return false;
-    const SDL_FPoint output = WorldNavigationAuthenticToOutput(
+    const ArRenderPointF output = WorldNavigationAuthenticToOutput(
         slot, viewport, authentic_x, authentic_y);
     vertices[i] = (ArRenderVertex2D){
       {output.x, output.y},
@@ -437,7 +435,7 @@ static PresentationOutcome OmitWorldNavigationWeather(const char *reason) {
 }
 
 static PresentationOutcome DrawWorldNavigationWeather(
-    const FrameSlot *slot, SDL_Rect viewport) {
+    const FrameSlot *slot, ArRenderRectI viewport) {
   if (!slot->sim.world_navigation_clouds ||
       !slot->sim.cloud_opacity_pct)
     return kPresentationOutcome_Complete;
@@ -453,7 +451,7 @@ static PresentationOutcome DrawWorldNavigationWeather(
       slot->sim.cloud_altitude_px);
   const float drift =
       (float)slot->sim.cloud_drift_pct / (float)kPercentScale;
-  const uint64_t elapsed_ms = SDL_GetTicks();
+  const uint64_t elapsed_ms = HostClock_Milliseconds();
 
   /* A cloud's altitude is invisible to an orthographic top-down camera until
    * it casts a displaced shadow. Reuse the town light's world-space shear so
@@ -519,16 +517,16 @@ static PresentationOutcome DrawWorldNavigationWeather(
 }
 
 static bool DrawWorldNavigationCompositionLayer(
-    const FrameSlot *slot, SDL_Rect viewport,
+    const FrameSlot *slot, ArRenderRectI viewport,
     const SimWorldNavigationCompositionLayer *layer,
     ArRenderTexture texture) {
   if (!layer || !layer->visible) return true;
   if (!ArRenderTexture_IsValid(texture) ||
       !layer->width || !layer->height)
     return false;
-  const SDL_FPoint top_left = WorldNavigationAuthenticToOutput(
+  const ArRenderPointF top_left = WorldNavigationAuthenticToOutput(
       slot, viewport, layer->screen_x, layer->screen_y);
-  const SDL_FPoint bottom_right = WorldNavigationAuthenticToOutput(
+  const ArRenderPointF bottom_right = WorldNavigationAuthenticToOutput(
       slot, viewport, layer->screen_x + layer->width,
       layer->screen_y + layer->height);
   ArRenderRectF source = {0.0f, 0.0f, layer->width, layer->height};
@@ -542,7 +540,7 @@ static bool DrawWorldNavigationCompositionLayer(
 }
 
 static bool DrawWorldNavigationMasterFade(
-    const FrameSlot *slot, SDL_Rect viewport) {
+    const FrameSlot *slot, ArRenderRectI viewport) {
   const uint8_t alpha = SimWorldNavigationScene_MasterFadeAlpha(
       slot->sim.world_navigation_brightness);
   if (!alpha) return true;
@@ -572,34 +570,31 @@ PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
        !ArRenderTexture_IsValid(s_world_navigation_ui_texture)))
     return kPresentationOutcome_CoreFailure;
 
-  SDL_Rect viewport = ComputePresentationViewport(
-      g_renderer, slot->ignore_aspect_ratio,
-      slot->pixel_aspect, slot->visible_width, slot->snes_height);
-  SDL_SetRenderLogicalPresentation(g_renderer, 0, 0,
-                                   SDL_LOGICAL_PRESENTATION_DISABLED);
-  if (!ArRenderDevice_Clear(
-          &g_render_device, (ArRenderColorF){0.0f, 0.0f, 0.0f, 1.0f}) ||
-      !ArRenderDevice_SetClipRect(
-          &g_render_device, &(ArRenderRectI){
-              viewport.x, viewport.y, viewport.w, viewport.h})) {
-    ApplyLogicalPresentation(slot);
+  const int aspect_width = slot->visible_width *
+      (slot->pixel_aspect == kPixelAspect_Crt43 ? 7 : 1);
+  const int aspect_height = slot->snes_height *
+      (slot->pixel_aspect == kPixelAspect_Crt43 ? 6 : 1);
+  const ArRenderColorF black = {0.0f, 0.0f, 0.0f, 1.0f};
+  ArRenderOutputFrame output_frame;
+  if (!ArRenderOutputFrame_BeginAspectFit(
+          &g_render_device, slot->ignore_aspect_ratio,
+          aspect_width, aspect_height, black, black, &output_frame))
     return kPresentationOutcome_CoreFailure;
-  }
+  const ArRenderRectI viewport = {
+    0, 0, output_frame.viewport.w, output_frame.viewport.h,
+  };
   if (slot->sim.world_navigation_backdrop)
     DrawSimBackdrop(slot, viewport, NULL);
   if (!DrawWorldNavigationGround(slot, viewport, world)) {
-    ArRenderDevice_SetClipRect(&g_render_device, NULL);
-    ApplyLogicalPresentation(slot);
+    ArRenderOutputFrame_Abort(&output_frame);
     return kPresentationOutcome_CoreFailure;
   }
   if (!DrawWorldNavigationLightTreatment(slot, viewport)) {
-    ArRenderDevice_SetClipRect(&g_render_device, NULL);
-    ApplyLogicalPresentation(slot);
+    ArRenderOutputFrame_Abort(&output_frame);
     return kPresentationOutcome_CoreFailure;
   }
   if (!DrawWorldNavigationActiveRegionHaze(slot, viewport)) {
-    ArRenderDevice_SetClipRect(&g_render_device, NULL);
-    ApplyLogicalPresentation(slot);
+    ArRenderOutputFrame_Abort(&output_frame);
     return kPresentationOutcome_CoreFailure;
   }
 
@@ -614,8 +609,7 @@ PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
    * Palace/UI captures are drawn afterward because PpuRasterizeObjRange has
    * already applied this frame's brightness to their pixels. */
   if (!DrawWorldNavigationMasterFade(slot, viewport)) {
-    ArRenderDevice_SetClipRect(&g_render_device, NULL);
-    ApplyLogicalPresentation(slot);
+    ArRenderOutputFrame_Abort(&output_frame);
     return kPresentationOutcome_CoreFailure;
   }
   if (!composition->empty_animation &&
@@ -625,12 +619,11 @@ PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
        !DrawWorldNavigationCompositionLayer(
            slot, viewport, &composition->ui,
            s_world_navigation_ui_texture))) {
-    ArRenderDevice_SetClipRect(&g_render_device, NULL);
-    ApplyLogicalPresentation(slot);
+    ArRenderOutputFrame_Abort(&output_frame);
     return kPresentationOutcome_CoreFailure;
   }
-  ArRenderDevice_SetClipRect(&g_render_device, NULL);
-  ApplyLogicalPresentation(slot);
+  if (!ArRenderOutputFrame_Finish(&output_frame))
+    return kPresentationOutcome_CoreFailure;
   return outcome;
 }
 

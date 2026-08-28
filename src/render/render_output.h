@@ -21,6 +21,16 @@ bool ArRenderOutputFrame_Begin(
     ArRenderColorF margin_color, ArRenderColorF scene_color,
     ArRenderOutputFrame *frame);
 
+/* Resolve an aspect-fit viewport from the current physical output and begin
+ * the same scoped frame in one query. `aspect_width` and `aspect_height`
+ * describe display geometry rather than source texture dimensions. Stretch
+ * selects the complete output while retaining viewport-local coordinates. */
+bool ArRenderOutputFrame_BeginAspectFit(
+    ArRenderDevice *device, bool stretch,
+    int aspect_width, int aspect_height,
+    ArRenderColorF margin_color, ArRenderColorF scene_color,
+    ArRenderOutputFrame *frame);
+
 /* Temporarily switch a viewport-local frame to full-output coordinates. These
  * are separate operations so a caller can omit a callback when entry fails,
  * yet treat a failed restoration after the callback as fatal. */

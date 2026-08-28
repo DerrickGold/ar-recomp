@@ -1496,7 +1496,7 @@ static void ClampSimCameraPitch(Scene3DCamera *camera) {
   if (camera->tilt_x > maximum) camera->tilt_x = maximum;
 }
 
-void DrawSimBackdrop(const FrameSlot *slot, SDL_Rect viewport,
+void DrawSimBackdrop(const FrameSlot *slot, ArRenderRectI viewport,
                      const float matrix[16]) {
   const SimBackdropRenderInput input = {
     .backdrop_argb = slot->sim.separated_backdrop_argb,
@@ -1896,7 +1896,10 @@ static PresentationOutcome RenderSimProfile(
   if (atmospheric_backdrop) {
     Sim3DPerformanceScope performance =
         Sim3DPerformance_Begin(kSim3DPerformance_Backdrop);
-    DrawSimBackdrop(slot, viewport, matrix);
+    DrawSimBackdrop(
+        slot,
+        (ArRenderRectI){viewport.x, viewport.y, viewport.w, viewport.h},
+        matrix);
     Sim3DPerformance_End(performance);
   }
 
