@@ -123,6 +123,17 @@ static bool SetRenderTarget(void *context, ArRenderTexture target) {
       backend->renderer, ArSdlRenderBackend_UnwrapTexture(target));
 }
 
+static bool UseOutputCoordinates(void *context) {
+  ArSdlRenderBackend *backend = context;
+  return SDL_SetRenderLogicalPresentation(
+      backend->renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED);
+}
+
+static bool GetOutputSize(void *context, int *width, int *height) {
+  ArSdlRenderBackend *backend = context;
+  return SDL_GetRenderOutputSize(backend->renderer, width, height);
+}
+
 static bool SetViewport(void *context, const ArRenderRectI *viewport) {
   ArSdlRenderBackend *backend = context;
   SDL_Rect converted;
@@ -390,6 +401,8 @@ static const ArRenderBackendOps kSdlRenderOps = {
   .destroy_texture = DestroyTexture,
   .update_texture = UpdateTexture,
   .set_render_target = SetRenderTarget,
+  .use_output_coordinates = UseOutputCoordinates,
+  .get_output_size = GetOutputSize,
   .set_viewport = SetViewport,
   .set_clip_rect = SetClipRect,
   .capture_render_target_state = CaptureRenderTargetState,

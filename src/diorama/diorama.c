@@ -1,5 +1,4 @@
 #include "diorama.h"
-#include <SDL3/SDL.h>
 #include "actraiser_game.h"
 #include "constants.h"
 #include "atomic_replace.h"
@@ -12,10 +11,9 @@
 #include "diorama_depth_shapes.h" /* rake/bow/thick/stack/voxel arithmetic */
 #include "diorama_performance.h"
 #include "scene3d_math.h"
-#include "presentation_geometry.h"
-#include "platform/sdl/render_sdl.h"
+#include "host/host_clock.h"
+#include "render/render_output.h"
 #include "diorama_upload.h"
-#include "snesrecomp/runner.h"
 #include "settings.h"
 #include "user_data_dir.h"
 #include <limits.h>
@@ -99,7 +97,7 @@ static bool RimLightEnabled(ArRenderDevice *device) {
 /* ── Depth of field + parallax-aware edge AA, COMBINED ───────────────────
  * Doc §7.2's DOF blur and "parallax-aware anti-aliasing at layer edges."
  * These two target the SAME layer set (BG1/BG2 + their priority-split
- * halves), and SDL only allows ONE custom fragment shader bound per draw
+ * halves), and the baseline backend binds one custom fragment shader per draw
  * call — an earlier version of this code picked edge AA over DOF whenever
  * both were enabled for a layer, which (since both default on) meant DOF
  * silently never rendered at all (confirmed live). Fixed by doing both in
@@ -140,7 +138,7 @@ static bool LayerGetsEdgeAA(int plane) {
 }
 
 /* ── B1b-crisp: ×4 supersample + premultiplied-LINEAR AA ─────────────────
- * The diorama layer textures are SDL_SCALEMODE_NEAREST (main.c ~2528) and
+ * The diorama layer textures use nearest filtering and
  * the tilted quads sample them through an arbitrary perspective warp, so
  * high-contrast pixel-art edges step/shimmer as the camera moves — even
  * with interpolation off, this is plain NEAREST minification/magnification
@@ -225,8 +223,8 @@ static ArRenderTexture EnsureDioramaSupersampleTexture(
  * at the diorama's right edge whenever a layer used this path (most
  * noticeable on the near-fullscreen backdrop plane) — present even with NO
  * interpolation shift active, so it wasn't the B1b UV-window bug. Root
- * cause: this used to blit the WHOLE source texture (`SDL_RenderTexture(...,
- * NULL, NULL)`) into the WHOLE intermediate, which faithfully copies
+ * cause: this used to blit the whole source texture into the whole
+ * intermediate, which faithfully copies
  * source's uninitialized tail (columns snes_width..surface-max-width-1 — see
  * B1b UV-window comment below for why that tail exists at all) into the
  * intermediate too. The final draw's LINEAR sample at the exact valid/
@@ -403,7 +401,7 @@ void Diorama_AdjustCamera(float d_yaw, float d_pitch, float d_zoom) {
     g_settings.diorama_dyncam_baseline_distance_x100 =
         (int)(distance * (float)kPercentScale);
     g_diorama_settings_dirty = true;
-    g_diorama_settings_dirty_at = SDL_GetTicks();
+    g_diorama_settings_dirty_at = HostClock_Milliseconds();
     return;
   }
 
@@ -424,7 +422,7 @@ void Diorama_AdjustCamera(float d_yaw, float d_pitch, float d_zoom) {
   g_settings.diorama_distance_x100 =
       (int)(g_diorama_cam.distance * (float)kPercentScale);
   g_diorama_settings_dirty = true;
-  g_diorama_settings_dirty_at = SDL_GetTicks();
+  g_diorama_settings_dirty_at = HostClock_Milliseconds();
 }
 
 bool Diorama_UpdateDynamicCamera(float elapsed_seconds, bool orbit_held) {
@@ -468,12 +466,12 @@ void Diorama_ResetCamera(void) {
   CameraOrbit_Reset(&s_diorama_dynamic_orbit);
   Diorama_SeedCameraFromSettings();
   g_diorama_settings_dirty = true;
-  g_diorama_settings_dirty_at = SDL_GetTicks();
+  g_diorama_settings_dirty_at = HostClock_Milliseconds();
 }
 
 void Diorama_FlushSettingsIfDirty(void) {
   if (g_diorama_settings_dirty && !s_diorama_dragging &&
-      SDL_GetTicks() - g_diorama_settings_dirty_at > 500) {
+      HostClock_Milliseconds() - g_diorama_settings_dirty_at > 500) {
     g_diorama_settings_dirty = false;
     char settings_path[kHostPathCapacity];
     UserDataFile(settings_path, sizeof settings_path, "settings.ini");
@@ -1195,7 +1193,7 @@ static void RecordOptionalDioramaDraw(
  * Cause: ActRaiser_ApplyWidescreenPolicy narrows the LIVE per-side margin as the
  * camera reaches a finite world's bound, but every diorama consumer samples the
  * FIXED capture span, and the never-rendered columns are transparent — which
- * this quad's SDL_BLENDMODE_NONE turns into opaque black.
+ * an opaque draw turns those samples into black.
  *
  * An earlier revision of this comment claimed there was "no cheap fix" and that
  * the only options were a per-layer numeric ceiling in PpuLayerExtra or a second
@@ -1661,29 +1659,26 @@ static float DioramaVerticalShift(const float mvp[16], float height_scale,
 }
 
 static PresentationOutcome DioramaSubmitPlaneEffect(
-    SDL_Renderer *renderer, DioramaPlaneEffectFn plane_effect,
+    ArRenderOutputFrame *output_frame,
+    DioramaPlaneEffectFn plane_effect,
     void *plane_effect_userdata, int plane,
-    const DioramaProjection *projection, bool viewport_is_output,
-    const SDL_Rect *viewport) {
-  if (!renderer || !plane_effect || !projection || !projection->valid ||
-      !viewport)
+    const DioramaProjection *projection) {
+  if (!output_frame || !plane_effect || !projection || !projection->valid)
     return kPresentationOutcome_Complete;
-  if (!viewport_is_output && !SDL_SetRenderViewport(renderer, NULL))
+  if (!ArRenderOutputFrame_EnterFullOutput(output_frame))
     return kPresentationOutcome_OptionalOmitted;
   DioramaPerformanceScope callback_performance =
       DioramaPerformance_Begin(kDioramaPerformance_Callback);
   plane_effect(plane_effect_userdata, plane, projection);
   DioramaPerformance_End(callback_performance);
-  if (!viewport_is_output &&
-      !SDL_SetRenderViewport(renderer, viewport))
+  if (!ArRenderOutputFrame_RestoreViewport(output_frame))
     return kPresentationOutcome_CoreFailure;
   return kPresentationOutcome_Complete;
 }
 
 static PresentationOutcome DioramaCompositeCoreFailure(
-    SDL_Renderer *renderer, bool viewport_is_output) {
-  if (!viewport_is_output)
-    (void)SDL_SetRenderViewport(renderer, NULL);
+    ArRenderOutputFrame *output_frame) {
+  ArRenderOutputFrame_Abort(output_frame);
   return kPresentationOutcome_CoreFailure;
 }
 
@@ -1702,53 +1697,33 @@ PresentationOutcome Diorama_Composite(
     const DioramaBgValidSpanPlan *bg2_valid_spans,
     DioramaPlaneEffectFn plane_effect, void *plane_effect_userdata,
     DioramaProjection *out_projection) {
-  SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
-  const SDL_Rect viewport = {
-    output_viewport.x, output_viewport.y,
-    output_viewport.w, output_viewport.h,
-  };
+  const ArRenderRectI viewport = output_viewport;
   ArRenderTexture textures[kDioramaPlane_Count];
   for (int plane = 0; plane < kDioramaPlane_Count; plane++)
     textures[plane] = texture_handles
         ? texture_handles[plane] : ArRenderTexture_Invalid();
   if (out_projection) memset(out_projection, 0, sizeof(*out_projection));
-  if (!renderer || !cam_pose || authentic_y0 < 0 ||
+  if (!ArRenderDevice_IsReady(device) || !cam_pose || authentic_y0 < 0 ||
       authentic_y0 + kActRaiserAuthenticHeight > snes_height)
     return kPresentationOutcome_CoreFailure;
 
-  if (!SDL_SetRenderLogicalPresentation(
-          renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED))
-    return kPresentationOutcome_CoreFailure;
-  int out_w = 0, out_h = 0;
-  if (!SDL_GetRenderOutputSize(renderer, &out_w, &out_h) ||
-      out_w <= 0 || out_h <= 0 || viewport.x < 0 || viewport.y < 0 ||
-      viewport.w <= 0 || viewport.h <= 0 ||
-      viewport.x + viewport.w > out_w || viewport.y + viewport.h > out_h)
+  const ArRenderColorF black = {0.0f, 0.0f, 0.0f, 1.0f};
+  const ArRenderColorF navy = {
+    20.0f / 255.0f, 20.0f / 255.0f, 30.0f / 255.0f, 1.0f,
+  };
+  ArRenderOutputFrame output_frame;
+  if (!ArRenderOutputFrame_Begin(
+          device, viewport, black, navy, &output_frame))
     return kPresentationOutcome_CoreFailure;
 
   PresentationOutcome outcome = kPresentationOutcome_Complete;
 
   /* The 3D compositor works in coordinates local to the game viewport. This
-   * keeps the same projection math at any window size while SDL offsets and
-   * clips the result into the aspect-fit rectangle. RenderClear deliberately
-   * ignores SDL's viewport, so clear the full target to black first when bars
-   * are needed, then fill only the game area with Diorama's navy backdrop. */
-  const bool viewport_is_output =
-      viewport.x == 0 && viewport.y == 0 &&
-      viewport.w == out_w && viewport.h == out_h;
-  if (!viewport_is_output) {
-    if (!SDL_SetRenderViewport(renderer, NULL) ||
-        !SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255) ||
-        !SDL_RenderClear(renderer) ||
-        !SDL_SetRenderViewport(renderer, &viewport) ||
-        !SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE) ||
-        !SDL_SetRenderDrawColor(renderer, 20, 20, 30, 255) ||
-        !SDL_RenderFillRect(renderer, &(SDL_FRect){
-            0.0f, 0.0f, (float)viewport.w, (float)viewport.h}))
-      return kPresentationOutcome_CoreFailure;
-  }
-  out_w = viewport.w;
-  out_h = viewport.h;
+   * keeps the same projection math at any window size while the backend
+   * offsets and clips the result into the aspect-fit rectangle. The scoped
+   * output frame owns margin/scene clears and full-output restoration. */
+  const int out_w = viewport.w;
+  const int out_h = viewport.h;
 
   /* Resolve this room's authored overrides before the far-background pass.
    * The Backdrop record carries the skybox source as room-scoped metadata, so
@@ -1774,12 +1749,6 @@ PresentationOutcome Diorama_Composite(
     resolved_count = DioramaLayerOrder_ResolveSection(
         &g_layer_overrides, map_group, map_number, layer_section,
         defaults, kDioramaLayerCount, resolved, kDioramaLayerCount);
-  }
-
-  if (viewport_is_output) {
-    if (!SDL_SetRenderDrawColor(renderer, 20, 20, 30, 255) ||
-        !SDL_RenderClear(renderer))
-      return kPresentationOutcome_CoreFailure;
   }
 
   /* B5 (followup doc): drawn before the per-layer loop below — painter's
@@ -1822,7 +1791,7 @@ PresentationOutcome Diorama_Composite(
        * rest of the frame to the cache target or through stale clip/viewport
        * state, producing backend-specific corruption. */
       if (skybox_state_restore_failed) {
-        return DioramaCompositeCoreFailure(renderer, viewport_is_output);
+        return DioramaCompositeCoreFailure(&output_frame);
       }
       if (ArRenderTexture_IsValid(named_handle)) {
         skybox_texture = named_handle;
@@ -1840,7 +1809,7 @@ PresentationOutcome Diorama_Composite(
           rom_skybox, bg2_valid_spans);
       outcome = PresentationOutcome_Combine(outcome, skybox);
       if (!PresentationOutcome_IsUsable(skybox)) {
-        return DioramaCompositeCoreFailure(renderer, viewport_is_output);
+        return DioramaCompositeCoreFailure(&output_frame);
       }
     }
   }
@@ -1965,7 +1934,7 @@ PresentationOutcome Diorama_Composite(
         device, mvp, aspect_x, height_scale, cam.tilt_y, out_w, out_h);
     outcome = PresentationOutcome_Combine(outcome, shoebox);
     if (!PresentationOutcome_IsUsable(shoebox)) {
-      return DioramaCompositeCoreFailure(renderer, viewport_is_output);
+      return DioramaCompositeCoreFailure(&output_frame);
     }
   }
 
@@ -2084,11 +2053,11 @@ PresentationOutcome Diorama_Composite(
               layer, textures, pixels, effect_obj_priority_mask,
               effect_bg_plane_mask)) {
         const PresentationOutcome effect = DioramaSubmitPlaneEffect(
-            renderer, plane_effect, plane_effect_userdata, layer->plane,
-            out_projection, viewport_is_output, &viewport);
+            &output_frame, plane_effect, plane_effect_userdata,
+            layer->plane, out_projection);
         outcome = PresentationOutcome_Combine(outcome, effect);
         if (!PresentationOutcome_IsUsable(effect)) {
-          return DioramaCompositeCoreFailure(renderer, viewport_is_output);
+          return DioramaCompositeCoreFailure(&output_frame);
         }
       }
       continue;
@@ -2385,7 +2354,7 @@ PresentationOutcome Diorama_Composite(
       DioramaPerformance_End(supersample_performance);
       outcome = PresentationOutcome_Combine(outcome, supersample_outcome);
       if (!PresentationOutcome_IsUsable(supersample_outcome)) {
-        return DioramaCompositeCoreFailure(renderer, viewport_is_output);
+        return DioramaCompositeCoreFailure(&output_frame);
       }
       if (ArRenderTexture_IsValid(ss)) {
         draw_texture = ss;
@@ -2446,8 +2415,7 @@ PresentationOutcome Diorama_Composite(
           outcome = PresentationOutcome_Combine(
               outcome, kPresentationOutcome_OptionalOmitted);
           if (!DioramaEffectBackend_Unbind(device)) {
-            return DioramaCompositeCoreFailure(
-                renderer, viewport_is_output);
+            return DioramaCompositeCoreFailure(&output_frame);
           }
         }
       }
@@ -2456,7 +2424,7 @@ PresentationOutcome Diorama_Composite(
           RenderDioramaGeometry(
               device, draw_texture, shadow, nv, indices, ni, layer_blend));
       if (shadow_blur_bound && !DioramaEffectBackend_Unbind(device)) {
-        return DioramaCompositeCoreFailure(renderer, viewport_is_output);
+        return DioramaCompositeCoreFailure(&output_frame);
       }
     }
 
@@ -2499,7 +2467,7 @@ PresentationOutcome Diorama_Composite(
       outcome = PresentationOutcome_Combine(
           outcome, kPresentationOutcome_OptionalOmitted);
       if (!DioramaEffectBackend_Unbind(device)) {
-        return DioramaCompositeCoreFailure(renderer, viewport_is_output);
+        return DioramaCompositeCoreFailure(&output_frame);
       }
     }
     /* Submit the attached waterfall and BG2 as one ordered geometry batch.
@@ -2525,21 +2493,21 @@ PresentationOutcome Diorama_Composite(
           device, draw_texture, draw_verts, nv, indices, ni, layer_blend);
     }
     if (layer_shader_bound && !DioramaEffectBackend_Unbind(device)) {
-      return DioramaCompositeCoreFailure(renderer, viewport_is_output);
+      return DioramaCompositeCoreFailure(&output_frame);
     }
     if (!main_submitted) {
-      return DioramaCompositeCoreFailure(renderer, viewport_is_output);
+      return DioramaCompositeCoreFailure(&output_frame);
     }
     const PresentationOutcome effect = DioramaSubmitPlaneEffect(
-        renderer, plane_effect, plane_effect_userdata, layer->plane,
-        out_projection, viewport_is_output, &viewport);
+        &output_frame, plane_effect, plane_effect_userdata,
+        layer->plane, out_projection);
     outcome = PresentationOutcome_Combine(outcome, effect);
     if (!PresentationOutcome_IsUsable(effect)) {
-      return DioramaCompositeCoreFailure(renderer, viewport_is_output);
+      return DioramaCompositeCoreFailure(&output_frame);
     }
   }
 
-  if (!viewport_is_output && !SDL_SetRenderViewport(renderer, NULL))
+  if (!ArRenderOutputFrame_Finish(&output_frame))
     return kPresentationOutcome_CoreFailure;
 
   return outcome;

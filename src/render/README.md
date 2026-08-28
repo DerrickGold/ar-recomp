@@ -25,10 +25,11 @@ compositing game presentation into a platform window or native framebuffer.
   synchronous present, but do not extend resource lifetime.
 
 The mandatory baseline operations cover texture lifetime and uploads, render
-targets, viewport and clip state, clears, textured quads, indexed geometry,
-and present. Backends translate formats, filtering, and blend modes once per
-resource or batch. Capability flags cover enhanced facilities such as depth,
-custom shaders, texture wrapping, and optional blend modes.
+targets, physical output coordinates and extent, viewport and clip state,
+clears, textured quads, indexed geometry, and present. Backends translate
+formats, filtering, and blend modes once per resource or batch. Capability
+flags cover enhanced facilities such as depth, custom shaders, texture
+wrapping, and optional blend modes.
 
 Texture and geometry submissions may carry an `ArRenderDrawState`. Tint and
 blend overrides apply to that submission only; an adapter must restore any
@@ -38,6 +39,13 @@ colour, so texture tint is intentionally limited to textured quads.
 `ArRenderDevice_DrawSolidRect` is a convenience geometry batch rather than an
 additional backend callback; it gives UI, backdrop, and overlay code explicit
 blend behavior without expanding the minimum adapter surface.
+
+`ArRenderOutputFrame` is the corresponding frame-orchestration scope. It
+selects physical coordinates, validates the requested aspect-fit viewport,
+clears margins and scene colours without leaking backend state, supports
+temporary full-output callbacks, and restores the full viewport on finish or
+best-effort abort. Presentation paths share this policy instead of duplicating
+platform viewport choreography.
 
 ## Current migration state
 
@@ -72,12 +80,14 @@ rectangles, and opaque texture handles. The current frame-generation
 implementation lives in `src/platform/sdl/diorama_frame_generation_sdl.c`;
 its private endpoint and target textures are deliberately backend-owned.
 
-The diorama compositor still uses SDL for top-level output sizing, logical
-presentation, and viewport ownership, but no longer unwraps its texture handles
-or submits native mesh types. Layer, skybox, shoebox, stack, skirt, shadow, and
-overflow geometry now use portable vertices plus scoped per-batch blend/address
-state. Its blur, rim-light, and combined depth-of-field/edge-AA effects cross
-an SDL-free semantic contract in `diorama/diorama_effect_backend.h`. Their
+The diorama compositor is now SDL-free. It requests physical output
+coordinates and extent through `ArRenderDevice`, owns viewport-local scene
+orchestration through portable viewport/clear/solid-rectangle operations, and
+restores the full output viewport before callbacks or return. Layer, skybox,
+shoebox, stack, skirt, shadow, and overflow geometry use portable vertices plus
+scoped per-batch blend/address state. Its blur, rim-light, and combined
+depth-of-field/edge-AA effects cross an SDL-free semantic contract in
+`diorama/diorama_effect_backend.h`. Their
 shader formats, native state, binding, and lifetime live in
 `platform/sdl/diorama_effect_backend_sdl.c`. SIM shadow blur follows the same
 pattern through `sim/sim_shadow_effect_backend.h`; its separable seven-tap SDL
@@ -101,12 +111,9 @@ enhancements and retain their established fallbacks.
 
 The remaining migration should proceed in independently testable slices:
 
-1. Move the diorama compositor's remaining output-size, logical-presentation,
-   and viewport orchestration behind a platform contract while retaining a
-   capability-gated baseline path.
-2. Port the top-level presentation viewport/output contract and host UI/manual
+1. Port the top-level presentation viewport/output contract and host UI/manual
    draws, then remove native types from the complete presentation directory.
-3. Remove the SDL borrow/unwrap bridge after its final internal consumer is
+2. Remove the SDL borrow/unwrap bridge after its final internal consumer is
    gone.
 
 Each slice should preserve the replay state hashes, pass synthetic and real-PPU
@@ -121,7 +128,9 @@ adapter with `ArRenderDevice_Init`. The adapter owns native objects created for
 opaque handles but not the application window unless its platform boot layer
 explicitly transfers that ownership. Validate the baseline format and blend
 mapping first, then add only the optional capabilities the native API actually
-supports.
+supports. `use_output_coordinates` must select one render unit per physical
+pixel (or succeed as a no-op when that is already the native convention), and
+`get_output_size` reports the current output or render-target extent.
 
 The SDL-free `actraiser_render_device` test is the reference contract test.
 Run it together with the dependency guard and upload test:

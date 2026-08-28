@@ -1,11 +1,12 @@
 #include "diorama_performance.h"
 
-#include <SDL3/SDL.h>
-
 #include <inttypes.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "host/host_clock.h"
 
 enum { kDioramaPerformanceWindowNs = 1000000000 };
 
@@ -29,7 +30,17 @@ typedef struct DioramaPerformanceData {
 } DioramaPerformanceData;
 
 static DioramaPerformanceData s_data;
-static SDL_SpinLock s_data_lock;
+static atomic_flag s_data_lock = ATOMIC_FLAG_INIT;
+static atomic_int s_enabled_state;
+
+static void LockPerformanceData(void) {
+  while (atomic_flag_test_and_set_explicit(
+      &s_data_lock, memory_order_acquire)) {}
+}
+
+static void UnlockPerformanceData(void) {
+  atomic_flag_clear_explicit(&s_data_lock, memory_order_release);
+}
 
 static const char *const kDioramaStageNames[] = {
   "total", "upload", "frame-analysis", "producer-setup", "scanout",
@@ -42,17 +53,21 @@ _Static_assert(
     "every Diorama performance stage needs a report label");
 
 bool DioramaPerformance_Enabled(void) {
-  static SDL_InitState initialized;
-  static bool enabled;
-  if (SDL_ShouldInit(&initialized)) {
-    enabled = getenv("AR_PERF") || getenv("AR_ACTION_PERF");
-    SDL_SetInitialized(&initialized, true);
-  }
-  return enabled;
+  enum { kUnknown, kDisabled, kEnabled };
+  int state = atomic_load_explicit(&s_enabled_state, memory_order_acquire);
+  if (state != kUnknown) return state == kEnabled;
+  const int resolved = getenv("AR_PERF") || getenv("AR_ACTION_PERF")
+      ? kEnabled : kDisabled;
+  int expected = kUnknown;
+  (void)atomic_compare_exchange_strong_explicit(
+      &s_enabled_state, &expected, resolved,
+      memory_order_release, memory_order_acquire);
+  return atomic_load_explicit(
+      &s_enabled_state, memory_order_acquire) == kEnabled;
 }
 
 static uint64_t DioramaPerformanceNow(void) {
-  return SDL_GetTicksNS();
+  return HostClock_Nanoseconds();
 }
 
 DioramaPerformanceScope DioramaPerformance_Begin(
@@ -68,18 +83,19 @@ DioramaPerformanceScope DioramaPerformance_Begin(
 
 void DioramaPerformance_End(DioramaPerformanceScope scope) {
   if (!scope.active) return;
-  const uint64_t elapsed_ns = SDL_GetTicksNS() - scope.started_ns;
-  SDL_LockSpinlock(&s_data_lock);
+  const uint64_t elapsed_ns =
+      HostClock_Nanoseconds() - scope.started_ns;
+  LockPerformanceData();
   DioramaPerformanceCounter *counter = &s_data.counters[scope.stage];
   counter->elapsed_ns += elapsed_ns;
   counter->calls++;
-  SDL_UnlockSpinlock(&s_data_lock);
+  UnlockPerformanceData();
 }
 
 void DioramaPerformance_AddPlaneSync(bool succeeded, bool uploaded,
                                      uint64_t uploaded_bytes) {
   if (!DioramaPerformance_Enabled()) return;
-  SDL_LockSpinlock(&s_data_lock);
+  LockPerformanceData();
   s_data.plane_syncs++;
   if (!succeeded) {
     s_data.plane_sync_failures++;
@@ -87,12 +103,12 @@ void DioramaPerformance_AddPlaneSync(bool succeeded, bool uploaded,
     s_data.texture_uploads++;
     s_data.upload_bytes += uploaded_bytes;
   }
-  SDL_UnlockSpinlock(&s_data_lock);
+  UnlockPerformanceData();
 }
 
 void DioramaPerformance_AddDraw(bool succeeded, int vertices, int indices) {
   if (!DioramaPerformance_Enabled()) return;
-  SDL_LockSpinlock(&s_data_lock);
+  LockPerformanceData();
   s_data.draws++;
   if (!succeeded) {
     s_data.draw_failures++;
@@ -100,7 +116,7 @@ void DioramaPerformance_AddDraw(bool succeeded, int vertices, int indices) {
     if (vertices > 0) s_data.vertices += (uint64_t)vertices;
     if (indices > 0) s_data.indices += (uint64_t)indices;
   }
-  SDL_UnlockSpinlock(&s_data_lock);
+  UnlockPerformanceData();
 }
 
 static void DioramaPerformanceReport(const DioramaPerformanceData *data,
@@ -148,7 +164,7 @@ void DioramaPerformance_PresentCompleted(void) {
   DioramaPerformanceData snapshot;
   bool report = false;
 
-  SDL_LockSpinlock(&s_data_lock);
+  LockPerformanceData();
   if (!s_data.window_started_ns) s_data.window_started_ns = now;
   s_data.presentations++;
   const uint64_t window_ns = now - s_data.window_started_ns;
@@ -158,7 +174,7 @@ void DioramaPerformance_PresentCompleted(void) {
     s_data.window_started_ns = now;
     report = true;
   }
-  SDL_UnlockSpinlock(&s_data_lock);
+  UnlockPerformanceData();
 
   if (report) DioramaPerformanceReport(&snapshot, window_ns);
 }
