@@ -1672,13 +1672,19 @@ static void DrawSimCullMarkers(const FrameSlot *slot, SDL_Rect source,
       continue;
 
     float half = 3.0f + 5.0f * cover;
-    SDL_FRect box = { centre.x - half, centre.y - half, half * 2, half * 2 };
-    bool clipping = record->clipped_parts != 0;
-    SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND);
-    SDL_SetRenderDrawColor(g_renderer, clipping ? 255 : 40,
-                           clipping ? 48 : 220, 40,
-                           (Uint8)(80.0f + 175.0f * cover));
-    SDL_RenderFillRect(g_renderer, &box);
+    const ArRenderRectF box = {
+      centre.x - half, centre.y - half, half * 2.0f, half * 2.0f,
+    };
+    const bool clipping = record->clipped_parts != 0;
+    const uint8_t alpha = (uint8_t)(80.0f + 175.0f * cover);
+    (void)ArRenderDevice_DrawSolidRect(
+        &g_render_device, &box,
+        (ArRenderColorF){
+          (clipping ? 255 : 40) / 255.0f,
+          (clipping ? 48 : 220) / 255.0f,
+          40.0f / 255.0f, alpha / 255.0f,
+        },
+        kArRenderBlendMode_Alpha);
   }
 }
 
@@ -1882,7 +1888,11 @@ static void PublishSimCraterAnchor(const FrameSlot *slot) {
 static PresentationOutcome RenderSimProfile(
     const FrameSlot *slot, SimRenderFeatureMask features,
     SDL_Rect source, SDL_Rect viewport, const SDL_Rect *clip) {
-  if (!SDL_SetRenderClipRect(g_renderer, clip))
+  const ArRenderRectI portable_clip = clip
+      ? (ArRenderRectI){clip->x, clip->y, clip->w, clip->h}
+      : (ArRenderRectI){0};
+  if (!ArRenderDevice_SetClipRect(
+          &g_render_device, clip ? &portable_clip : NULL))
     return kPresentationOutcome_CoreFailure;
   PresentationOutcome outcome = kPresentationOutcome_Complete;
   bool separated = (features & kSimFeature_SeparatedComposite) != 0;
@@ -1930,12 +1940,18 @@ static PresentationOutcome RenderSimProfile(
   }
 
   uint32_t backdrop = slot->sim.separated_backdrop_argb;
-  if (!SDL_SetRenderDrawColor(g_renderer, (backdrop >> 16) & 0xff,
-                              (backdrop >> 8) & 0xff,
-                              backdrop & 0xff, 255) ||
-      !SDL_RenderFillRect(g_renderer, &(SDL_FRect){
-          (float)viewport.x, (float)viewport.y,
-          (float)viewport.w, (float)viewport.h }))
+  const ArRenderRectF backdrop_rect = {
+    (float)viewport.x, (float)viewport.y,
+    (float)viewport.w, (float)viewport.h,
+  };
+  if (!ArRenderDevice_DrawSolidRect(
+          &g_render_device, &backdrop_rect,
+          (ArRenderColorF){
+            ((backdrop >> 16) & 0xff) / 255.0f,
+            ((backdrop >> 8) & 0xff) / 255.0f,
+            (backdrop & 0xff) / 255.0f, 1.0f,
+          },
+          kArRenderBlendMode_Opaque))
     return kPresentationOutcome_CoreFailure;
 
   Scene3DCamera camera = {
@@ -2280,7 +2296,7 @@ PresentationOutcome PresentSim3D(const FrameSlot *slot) {
 
   PresentationOutcome outcome = RenderSimProfile(
       slot, slot->sim.effective_features, source, viewport, &viewport);
-  if (!SDL_SetRenderClipRect(g_renderer, NULL))
+  if (!ArRenderDevice_SetClipRect(&g_render_device, NULL))
     outcome = kPresentationOutcome_CoreFailure;
   if (!PresentationOutcome_IsUsable(outcome)) {
     Sim3DPerformance_EndPresentation();

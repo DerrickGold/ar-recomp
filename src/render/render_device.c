@@ -163,6 +163,30 @@ bool ArRenderDevice_DrawGeometryWithState(
                                  vertex_count, indices, index_count, state);
 }
 
+bool ArRenderDevice_DrawSolidRect(ArRenderDevice *device,
+                                  const ArRenderRectF *rectangle,
+                                  ArRenderColorF color,
+                                  ArRenderBlendMode blend) {
+  if (!rectangle || rectangle->w <= 0.0f || rectangle->h <= 0.0f ||
+      !NormalizedColor(color) || !ValidBlend(blend))
+    return false;
+  const float x1 = rectangle->x + rectangle->w;
+  const float y1 = rectangle->y + rectangle->h;
+  const ArRenderVertex2D vertices[] = {
+    {{rectangle->x, rectangle->y}, color, {0.0f, 0.0f}},
+    {{x1, rectangle->y}, color, {0.0f, 0.0f}},
+    {{x1, y1}, color, {0.0f, 0.0f}},
+    {{rectangle->x, y1}, color, {0.0f, 0.0f}},
+  };
+  const int32_t indices[] = {0, 1, 2, 0, 2, 3};
+  const ArRenderDrawState state = {
+    .flags = kArRenderDrawState_Blend,
+    .blend = blend,
+  };
+  return ArRenderDevice_DrawGeometryWithState(
+      device, ArRenderTexture_Invalid(), vertices, 4, indices, 6, &state);
+}
+
 bool ArRenderDevice_Present(ArRenderDevice *device) {
   return ArRenderDevice_IsReady(device) &&
       device->ops->present(device->context);

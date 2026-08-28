@@ -549,18 +549,24 @@ void DrawSimEffectSceneFlash(const FrameSlot *slot, bool lighting,
       strongest_style = style;
   }
   if (strongest_style.strength <= 0.0f) return;
-  EffectRenderState state;
-  if (!BeginEffectAdd(&state)) return;
-  bool color_ok = SDL_SetRenderDrawColor(
-      g_renderer,
-      (Uint8)(strongest_style.flash_color.r * 255.0f),
-      (Uint8)(strongest_style.flash_color.g * 255.0f),
-      (Uint8)(strongest_style.flash_color.b * 255.0f),
-      (Uint8)(strongest_style.strength * 12.0f));
-  SDL_FRect flash = ToFRect(viewport);
-  bool fill_ok = color_ok && SDL_RenderFillRect(g_renderer, &flash);
-  if (!fill_ok) DisableEffectBlend("scene flash");
-  EndEffectBlend(&state);
+  const uint8_t red =
+      (uint8_t)(strongest_style.flash_color.r * 255.0f);
+  const uint8_t green =
+      (uint8_t)(strongest_style.flash_color.g * 255.0f);
+  const uint8_t blue =
+      (uint8_t)(strongest_style.flash_color.b * 255.0f);
+  const uint8_t alpha = (uint8_t)(strongest_style.strength * 12.0f);
+  const ArRenderRectF flash = {
+    (float)viewport.x, (float)viewport.y,
+    (float)viewport.w, (float)viewport.h,
+  };
+  if (!ArRenderDevice_DrawSolidRect(
+          &g_render_device, &flash,
+          (ArRenderColorF){
+            red / 255.0f, green / 255.0f, blue / 255.0f, alpha / 255.0f,
+          },
+          kArRenderBlendMode_Add))
+    DisableEffectBlend("scene flash");
 }
 
 

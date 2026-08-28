@@ -96,6 +96,12 @@ bool ArRenderDevice_DrawGeometryWithState(
     const ArRenderVertex2D *vertices, int vertex_count,
     const int32_t *indices, int index_count,
     const ArRenderDrawState *state);
+/* Convenience batch for a uniformly coloured, untextured rectangle. The
+ * explicit blend keeps this draw independent of backend-global state. */
+bool ArRenderDevice_DrawSolidRect(ArRenderDevice *device,
+                                  const ArRenderRectF *rectangle,
+                                  ArRenderColorF color,
+                                  ArRenderBlendMode blend);
 bool ArRenderDevice_Present(ArRenderDevice *device);
 const char *ArRenderDevice_LastError(const ArRenderDevice *device);
 

@@ -35,6 +35,9 @@ blend overrides apply to that submission only; an adapter must restore any
 native resource state before returning. A draw without state takes the direct
 backend path with no state queries or mutations. Geometry uses per-vertex
 colour, so texture tint is intentionally limited to textured quads.
+`ArRenderDevice_DrawSolidRect` is a convenience geometry batch rather than an
+additional backend callback; it gives UI, backdrop, and overlay code explicit
+blend behavior without expanding the minimum adapter surface.
 
 ## Current migration state
 
@@ -49,9 +52,10 @@ without SDL.
 
 Ordinary separated-SIM flat, world-layer, and menu-layer composites now submit
 through the device, as do the standard projected SIM ground mesh, ordinary
-object billboards, half-add billboards, and promoted map-plane geometry. The
-custom two-pass rim-light blend still uses the SDL bridge because the portable
-blend vocabulary cannot describe its source/destination factors yet. SIM
+object billboards, half-add billboards, promoted map-plane geometry, clip
+state, solid backdrops, and additive lightning flashes. The custom two-pass
+rim-light blend still uses the SDL bridge because the portable blend
+vocabulary cannot describe its source/destination factors yet. SIM
 underlay/terrain/effect geometry and the diorama compositor also still unwrap
 opaque resources through `src/platform/sdl/render_sdl.h` while those paths
 migrate. Diorama frame generation retains private SDL endpoint/target
