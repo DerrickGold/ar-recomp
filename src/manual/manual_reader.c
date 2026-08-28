@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "host/host_display.h"
+#include "host/host_clock.h"
 #include "input_map.h"
 #include "manual_input.h"
 #include "manual_pages.h"
@@ -641,7 +642,7 @@ enum {
  * of losing the race is that the hint fades one frame late. */
 static uint64_t s_hint_shown_ns;
 
-static void BumpHint(void) { s_hint_shown_ns = SDL_GetTicksNS(); }
+static void BumpHint(void) { s_hint_shown_ns = HostClock_Nanoseconds(); }
 
 static uint8_t HintAlpha(uint64_t now) {
   const uint64_t shown = s_hint_shown_ns;
@@ -720,7 +721,7 @@ void ManualReader_Render(ArRenderRectI viewport) {
 
   /* Advance from the presentation clock so page turns follow displayed frames
    * rather than game-tick cadence. */
-  const uint64_t now = SDL_GetTicksNS();
+  const uint64_t now = HostClock_Nanoseconds();
   if (s_reader.last_tick_ns != 0) {
     const float elapsed = (float)((double)(now - s_reader.last_tick_ns) / 1e9);
     /* Clamped: a frame that took longer than a turn -- a stall, a breakpoint,

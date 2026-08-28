@@ -145,7 +145,8 @@ the render device. Its remaining SDL vocabulary is input-only.
 The settings menu and draggable diagnostic panel likewise own only portable
 atlas handles and submit all frames, fills, glyphs, icons, palette previews,
 and text batches through the device. SDL remains at that boundary solely for
-host events and the optional text-input window.
+host events and the optional text-input window; cursor, status, and manual-hint
+timing use the monotonic host clock contract.
 Action heat refraction is a portable mesh warp rather than a custom shader; its
 viewport-sized texture is now device-owned and uses the scoped-target contract
 plus portable geometry for both its warped and fallback resolves.
