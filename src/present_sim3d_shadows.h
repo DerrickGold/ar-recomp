@@ -21,10 +21,6 @@ float SimBillboardHeightPop(
 void SimObjectDrawnWorld(
     const SimRenderObject *object, int *world_x, int *world_y);
 
-/* A render target with the accumulate blend the caster mask needs. Exposed
- * because the rim light builds its mask the same way. */
-SDL_Texture *CreateSimShadowTarget(int w, int h);
-
 /* Accumulates every classified caster into the screen-space mask, blurs it,
  * and composites it -- or, in an elevated town, hands it to the shared depth
  * pass to be sampled by visible terrain tops only. */

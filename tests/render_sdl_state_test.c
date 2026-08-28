@@ -96,6 +96,14 @@ int main(void) {
       &device, texture, NULL, &destination, &mask_state));
   AssertTextureState(
       native, 0.8f, 0.7f, 0.6f, 0.5f, SDL_BLENDMODE_BLEND);
+  const ArRenderDrawState accumulate_state = {
+    .flags = kArRenderDrawState_Blend,
+    .blend = kArRenderBlendMode_AlphaAccumulate,
+  };
+  assert(ArRenderDevice_DrawTextureWithState(
+      &device, texture, NULL, &destination, &accumulate_state));
+  AssertTextureState(
+      native, 0.8f, 0.7f, 0.6f, 0.5f, SDL_BLENDMODE_BLEND);
 
   const ArRenderVertex2D vertices[3] = {
     {{0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
@@ -177,6 +185,31 @@ int main(void) {
   assert(SDL_GetRenderDrawColor(
       renderer, &draw_r, &draw_g, &draw_b, &draw_a));
   assert(draw_r == 17 && draw_g == 34 && draw_b == 51 && draw_a == 68);
+
+  /* The shadow fallback depends on adding weighted source alpha while leaving
+   * the mask's colour untouched. Exercise the composed blend numerically, not
+   * just its temporary texture-state restoration. */
+  assert(ArRenderDevice_Clear(
+      &device, (ArRenderColorF){0.0f, 0.0f, 0.0f, 0.0f}));
+  const ArRenderDrawState weighted_accumulate = {
+    .flags = kArRenderDrawState_Tint | kArRenderDrawState_Blend,
+    .tint = {1.0f, 1.0f, 1.0f, 64.0f / 255.0f},
+    .blend = kArRenderBlendMode_AlphaAccumulate,
+  };
+  assert(ArRenderDevice_DrawTextureWithState(
+      &device, texture, NULL, &destination, &weighted_accumulate));
+  assert(ArRenderDevice_DrawTextureWithState(
+      &device, texture, NULL, &destination, &weighted_accumulate));
+  SDL_Surface *accumulated = SDL_RenderReadPixels(renderer, NULL);
+  assert(accumulated);
+  Uint8 accumulated_r = 255, accumulated_g = 255;
+  Uint8 accumulated_b = 255, accumulated_a = 0;
+  assert(SDL_ReadSurfacePixel(
+      accumulated, 0, 0, &accumulated_r, &accumulated_g,
+      &accumulated_b, &accumulated_a));
+  assert(accumulated_r == 0 && accumulated_g == 0 && accumulated_b == 0);
+  assert(accumulated_a == 128);
+  SDL_DestroySurface(accumulated);
 
   assert(ArRenderDevice_EndTarget(&device, &target_state));
   assert(SDL_GetRenderTarget(renderer) == NULL);
