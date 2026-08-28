@@ -6,7 +6,8 @@
 typedef struct SDL_Window SDL_Window;
 
 /* Create the production SDL GPU renderer and bind it to the portable device.
- * The backend owns the native renderer until Destroy. */
+ * Platform builds select one backend implementation; it is created once at
+ * video boot and owns the native renderer until shutdown-time Destroy. */
 bool ArSdlRenderBackend_CreateForWindow(ArRenderDevice *device,
                                         SDL_Window *window);
 void ArSdlRenderBackend_Destroy(ArRenderDevice *device);
