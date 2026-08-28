@@ -55,6 +55,9 @@ list(APPEND _portable_render_files
     # The enhanced SIM scene's depth contract is game-side; its current GPU
     # implementation belongs to the SDL platform adapter.
     "${GAME_SOURCE_ROOT}/sim/sim3d_depth_pass.h"
+    "${GAME_SOURCE_ROOT}/sim/sim3d_camera.c"
+    "${GAME_SOURCE_ROOT}/sim/sim3d_performance.c"
+    "${GAME_SOURCE_ROOT}/sim/sim3d_performance.h"
     "${GAME_SOURCE_ROOT}/sim/sim_shadow_effect_backend.h"
     "${GAME_SOURCE_ROOT}/sim/sim_background_mountain_render.c"
     "${GAME_SOURCE_ROOT}/sim/sim_background_mountain_render.h"
