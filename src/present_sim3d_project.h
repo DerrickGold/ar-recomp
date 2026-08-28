@@ -111,10 +111,4 @@ bool ProjectSimEffectPoint(
     const Scene3DCamera *camera, const float matrix[16], Scene3DPoint *point,
     float *scale_x, float *scale_y);
 
-/* DEFINED IN present_sim3d.c, not here: the capability it latches belongs to
- * the rim-light effect, which stays with the composite. Declared in this
- * header because the effect and billboard stages are its other callers, and
- * the file already carries that pattern for the billboard pass blend. */
-bool SimApplyAtlasBlendMode(SDL_BlendMode blend);
-
 #endif /* AR_PRESENT_SIM3D_PROJECT_H */

@@ -20,7 +20,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "presentation_geometry.h"
 #include "render_capabilities.h"
 #include "sim/sim_backdrop_render.h"
 #include "sim/sim_background_voxels.h"
@@ -35,27 +34,18 @@
 #include "present_internal.h"
 #include "render/render_device.h"
 #include "render/render_output.h"
-#include "platform/sdl/render_sdl.h"
 
 #ifndef AR_SIM3D_TERRAIN_ELEVATION
 #define AR_SIM3D_TERRAIN_ELEVATION 0
 #endif
 
 
-extern SDL_Renderer *g_renderer;
 extern ArRenderDevice g_render_device;
 extern ArRenderTexture g_texture;
 extern ArRenderTexture g_sim_obj_atlas_texture;
 
 extern ArRenderTexture g_sim3d_layer_textures[kSim3DPlane_Count];
 extern ArRenderTexture g_sim3d_flat_texture;
-
-/* Transitional SDL compositor bridge. Resource lifetime and uploads are
- * backend-neutral now; these native draws move behind ArRenderDevice in the
- * next geometry/state slice. */
-static SDL_Texture *NativeTexture(ArRenderTexture texture) {
-  return ArSdlRenderBackend_UnwrapTexture(texture);
-}
 
 static ArRenderRectF PortableRect(SDL_Rect rectangle) {
   return (ArRenderRectF){
@@ -645,20 +635,6 @@ static ArRenderTexture EnsureSimRimTexture(int w, int h) {
             ArRenderDevice_LastError(&g_render_device));
   }
   return s_sim_rim_texture;
-}
-
-/* Transitional native state helper used only by the remaining rotated SIM
- * effect sprites. Rim billboards submit scoped portable blend state now. */
-bool SimApplyAtlasBlendMode(SDL_BlendMode blend) {
-  if (SDL_SetTextureBlendMode(
-          NativeTexture(g_sim_obj_atlas_texture), blend))
-    return true;
-  if (SDL_CompareAndSwapAtomicInt(&s_sim_rim_mask_supported, 1, 0)) {
-    fprintf(stderr,
-            "[sim3d-rim] this renderer rejected the rim mask blend mode (%s) — "
-            "rim light disabled\n", SDL_GetError());
-  }
-  return false;
 }
 
 /* Screen-space direction the rim sits on. The lateral part is the opposite of

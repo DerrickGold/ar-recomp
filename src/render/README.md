@@ -136,7 +136,10 @@ fill, mask, and additive resolve no longer borrow native texture state. SIM
 shadows now use the same device-owned target model for caster geometry,
 separable blur ping-pong, terrain-depth handoff, and final opacity. The
 portable alpha-accumulate blend preserves the shader-free blur fallback
-without exposing atlas or mask state. CRT
+without exposing atlas or mask state. The last native SIM sprite draw is also
+gone: eruption fireball fragments keep their shared-anchor rotation in scene
+geometry and submit textured quads through the device, while upright fallback
+fragments use the ordinary portable texture path. CRT
 still uses the SDL-free semantic contract in `crt_post.h`; frame orchestration
 owns player policy while `platform/sdl/crt_post_sdl.c` owns the preferred-format
 scene target, shader formats, render state, and target-local presentation
