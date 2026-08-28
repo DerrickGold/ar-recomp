@@ -4,6 +4,7 @@
 #include "dev_tools.h"
 #include "snesrecomp/game_runtime.h"
 #include "host/host_input.h"
+#include "platform/sdl/dev_tools_readback_sdl.h"
 #include "present.h"
 #include "snesrecomp/runner.h"
 #include "scene_inspector.h"
@@ -26,7 +27,10 @@ extern bool g_ws_active;
 
 static DevToolsContext CurrentContext(void) {
   DevToolsContext context = {
-    .renderer = g_renderer,
+    .readback = {
+      .capture_rgb24 = ArSdlDevTools_CaptureRgb24,
+      .context = g_renderer,
+    },
     .render_device = &g_render_device,
     .hud_bg_texture = g_hud_bg_texture,
     .hud_obj_texture = g_hud_obj_texture,
@@ -118,7 +122,7 @@ void HostDevTools_DumpDioramaLayers(void) {
   DevTools_DumpDioramaLayers(&context);
 }
 
-SDL_Point HostDevTools_WriteFramebufferPpm(FILE *file) {
+ArRenderExtentI HostDevTools_WriteFramebufferPpm(FILE *file) {
   const DevToolsContext context = CurrentContext();
   return DevTools_WriteFramebufferPpm(file, &context);
 }

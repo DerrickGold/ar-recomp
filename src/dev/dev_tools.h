@@ -5,8 +5,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include <SDL3/SDL.h>
-
+#include "dev_tools_readback.h"
 #include "present.h"
 #include "snesrecomp/runner.h"
 
@@ -14,7 +13,7 @@
  * Keep this value snapshot explicit: these resources are recreated when video
  * geometry or the render device changes, so retaining a context is invalid. */
 typedef struct DevToolsContext {
-  SDL_Renderer *renderer;
+  DevToolsReadbackProvider readback;
   ArRenderDevice *render_device;
   ArRenderTexture hud_bg_texture;
   ArRenderTexture hud_obj_texture;
@@ -49,8 +48,8 @@ typedef struct DevToolsContext {
 void DevTools_FormatInspectorInfo(const DevToolsContext *context,
                                   char *buffer, size_t buffer_size);
 bool DevTools_DumpSceneAssets(const DevToolsContext *context);
-SDL_Point DevTools_WriteFramebufferPpm(FILE *file,
-                                       const DevToolsContext *context);
+ArRenderExtentI DevTools_WriteFramebufferPpm(
+    FILE *file, const DevToolsContext *context);
 void DevTools_TakeFullSnapshot(const DevToolsContext *context);
 void DevTools_DumpDioramaLayers(const DevToolsContext *context);
 void DevTools_AdjustHudOutputScale(const DevToolsContext *context,

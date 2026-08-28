@@ -133,17 +133,17 @@ bool DevTools_DumpSceneAssets(const DevToolsContext *context) {
 }
 
 /* Write the live framebuffer to an open PPM, cropped to the active display
- * rectangle. When a renderer exists, capture the actual host composite so an
- * independently scaled HUD is represented exactly. */
-SDL_Point DevTools_WriteFramebufferPpm(FILE *file,
-                                       const DevToolsContext *context) {
+ * rectangle. When a host readback provider exists, capture the actual
+ * composite so an independently scaled HUD is represented exactly. */
+ArRenderExtentI DevTools_WriteFramebufferPpm(
+    FILE *file, const DevToolsContext *context) {
   if (!file || !context)
-    return (SDL_Point){0, 0};
+    return (ArRenderExtentI){0, 0};
 
   FrameSlot frame_slot;
   bool have_composite = false;
-  SDL_Surface *argb = NULL;
-  if (context->renderer &&
+  DevToolsRgb24Capture capture = {0};
+  if (context->readback.capture_rgb24 &&
       ArRenderTexture_IsValid(context->hud_bg_texture)) {
     FrameSlot_Capture(&frame_slot);
     PresentUpload(&frame_slot);
@@ -153,32 +153,22 @@ SDL_Point DevTools_WriteFramebufferPpm(FILE *file,
                  HostDisplay_FramesPerSecond());
     have_composite = true;
   }
-  if (have_composite) {
-    /* SDL3 returns a newly allocated surface in the renderer's native format.
-     * Convert it so byte extraction below is backend-independent. */
-    SDL_Surface *raw = SDL_RenderReadPixels(context->renderer, NULL);
-    argb = raw
-        ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888)
-        : NULL;
-    if (raw) SDL_DestroySurface(raw);
-  }
-  if (argb) {
-    const int output_width = argb->w;
-    const int output_height = argb->h;
+  if (have_composite && context->readback.capture_rgb24(
+          context->readback.context, &capture) &&
+      capture.pixels && capture.width > 0 && capture.height > 0 &&
+      capture.pitch_bytes >= capture.width * 3) {
+    const int output_width = capture.width;
+    const int output_height = capture.height;
     fprintf(file, "P6\n%d %d\n255\n", output_width, output_height);
     for (int y = 0; y < output_height; y++) {
       const uint8_t *row =
-          (const uint8_t *)argb->pixels +
-          (size_t)y * (size_t)argb->pitch;
-      for (int x = 0; x < output_width; x++) {
-        fputc(row[x * kArgbBytesPerPixel + 2], file);
-        fputc(row[x * kArgbBytesPerPixel + 1], file);
-        fputc(row[x * kArgbBytesPerPixel + 0], file);
-      }
+          capture.pixels + (size_t)y * (size_t)capture.pitch_bytes;
+      fwrite(row, 3, (size_t)output_width, file);
     }
-    SDL_DestroySurface(argb);
-    return (SDL_Point){output_width, output_height};
+    if (capture.release) capture.release(capture.owner);
+    return (ArRenderExtentI){output_width, output_height};
   }
+  if (capture.release) capture.release(capture.owner);
 
   const int visible_x = Settings_VisibleX0();
   const int visible_width = Settings_VisibleWidth();
@@ -193,7 +183,7 @@ SDL_Point DevTools_WriteFramebufferPpm(FILE *file,
       fputc(row[x * kArgbBytesPerPixel + 0], file);
     }
   }
-  return (SDL_Point){visible_width, context->snes_height};
+  return (ArRenderExtentI){visible_width, context->snes_height};
 }
 
 void DevTools_TakeFullSnapshot(const DevToolsContext *context) {

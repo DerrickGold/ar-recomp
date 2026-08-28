@@ -180,9 +180,10 @@ heat-refraction passes; backends without the optional capability omit these
 enhancements and retain their established fallbacks.
 
 All current game-side frame composition, layout, viewport, effect geometry,
-resource ownership, and present submission paths now cross portable contracts.
-Remaining native rendering work is platform-owned: developer screenshot/
-readback still belongs in an SDL host adapter, while optional SDL GPU effects
+resource ownership, present submission, and developer snapshot orchestration
+now cross portable contracts. Developer output capture requests row-pitched
+RGB24 data; `platform/sdl/dev_tools_readback_sdl.c` owns native readback,
+format conversion, and temporary-surface lifetime. Optional SDL GPU effects
 and frame generation intentionally retain internal native-resource interop.
 Future backends can omit those enhancements or implement their corresponding
 semantic adapter contracts without exposing native handles to the game.
