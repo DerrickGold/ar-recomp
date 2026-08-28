@@ -9,6 +9,7 @@
 #include "input_map.h"
 #include "manual_input.h"
 #include "manual_pages.h"
+#include "render/render_device.h"
 #include "scene3d_math.h"
 #include "settings.h"
 /* For the game's own menu font: the overlay owns the atlases. */
@@ -20,7 +21,7 @@
  * allowlist, so the manual costs a #define rather than a dependency. */
 #include "stb_image.h"
 
-extern SDL_Renderer *g_renderer;
+extern ArRenderDevice g_render_device;
 
 enum {
   /* Only three pages are ever on screen at once -- the settled page, the leaf,
@@ -41,7 +42,7 @@ enum {
 static const char kManualPath[] = "game-assets/manual.pdf";
 
 typedef struct PageTexture {
-  SDL_Texture *texture;
+  ArRenderTexture texture;
   int page;
   uint64_t used_at;
 } PageTexture;
@@ -62,8 +63,8 @@ static struct {
   uint64_t last_tick_ns;
   int failed[kMaxFailures];
   int failed_count;
-  SDL_Vertex verts[kPageMaxVerts];
-  int indices[kPageMaxIndices];
+  ArRenderVertex2D verts[kPageMaxVerts];
+  int32_t indices[kPageMaxIndices];
 } s_reader;
 
 /* Re-shows the hint line. Defined with the drawing it belongs to; declared here
@@ -219,8 +220,9 @@ void ManualReader_Close(void) {
 
 void ManualReader_DestroyTextures(void) {
   for (int i = 0; i < kCacheSlots; i++) {
-    if (s_reader.cache[i].texture) SDL_DestroyTexture(s_reader.cache[i].texture);
-    s_reader.cache[i].texture = NULL;
+    ArRenderDevice_DestroyTexture(
+        &g_render_device, s_reader.cache[i].texture);
+    s_reader.cache[i].texture = ArRenderTexture_Invalid();
     s_reader.cache[i].page = -1;
     s_reader.cache[i].used_at = 0;
   }
@@ -436,7 +438,8 @@ static bool AlreadyFailed(int page) {
 
 static PageTexture *FindCached(int page) {
   for (int i = 0; i < kCacheSlots; i++)
-    if (s_reader.cache[i].texture && s_reader.cache[i].page == page) {
+    if (ArRenderTexture_IsValid(s_reader.cache[i].texture) &&
+        s_reader.cache[i].page == page) {
       s_reader.cache[i].used_at = ++s_reader.clock;
       return &s_reader.cache[i];
     }
@@ -449,7 +452,8 @@ static bool CachedProbe(int page, void *user) {
    * probe that also counted as a use would make the LRU order depend on how
    * often the budget looked rather than on what was drawn. */
   for (int i = 0; i < kCacheSlots; i++)
-    if (s_reader.cache[i].texture && s_reader.cache[i].page == page) return true;
+    if (ArRenderTexture_IsValid(s_reader.cache[i].texture) &&
+        s_reader.cache[i].page == page) return true;
   /* A page that cannot be decoded counts as resident, or the budget retries it
    * every frame forever and never spends the frame's decode on a page that
    * could actually succeed. */
@@ -462,7 +466,10 @@ static PageTexture *DecodePage(int page) {
 
   PageTexture *slot = NULL;
   for (int i = 0; i < kCacheSlots; i++) {
-    if (!s_reader.cache[i].texture) { slot = &s_reader.cache[i]; break; }
+    if (!ArRenderTexture_IsValid(s_reader.cache[i].texture)) {
+      slot = &s_reader.cache[i];
+      break;
+    }
   }
   if (!slot) {
     slot = &s_reader.cache[0];
@@ -483,29 +490,36 @@ static PageTexture *DecodePage(int page) {
     return NULL;
   }
 
-  SDL_Texture *texture = SDL_CreateTexture(g_renderer, SDL_PIXELFORMAT_ABGR8888,
-                                           SDL_TEXTUREACCESS_STATIC, w, h);
-  if (!texture) {
+  const ArRenderTextureDesc desc = {
+    .width = w,
+    .height = h,
+    .format = kArRenderPixelFormat_Abgr8888,
+    .usage = kArRenderTextureUsage_Static,
+    .filter = kArRenderFilter_Linear,
+    .blend = kArRenderBlendMode_Alpha,
+  };
+  ArRenderTexture texture = ArRenderTexture_Invalid();
+  if (!ArRenderDevice_CreateTexture(&g_render_device, &desc, &texture)) {
     fprintf(stderr, "[manual] page %d: texture failed (%s)\n", page + 1,
-            SDL_GetError());
+            ArRenderDevice_LastError(&g_render_device));
     if (s_reader.failed_count < kMaxFailures)
       s_reader.failed[s_reader.failed_count++] = page;
     stbi_image_free(pixels);
     return NULL;
   }
-  if (!SDL_UpdateTexture(texture, NULL, pixels, w * 4)) {
+  if (!ArRenderDevice_UpdateTexture(
+          &g_render_device, texture, NULL, pixels, w * 4)) {
     fprintf(stderr, "[manual] page %d: texture upload failed (%s)\n", page + 1,
-            SDL_GetError());
+            ArRenderDevice_LastError(&g_render_device));
     if (s_reader.failed_count < kMaxFailures)
       s_reader.failed[s_reader.failed_count++] = page;
-    SDL_DestroyTexture(texture);
+    ArRenderDevice_DestroyTexture(&g_render_device, texture);
     stbi_image_free(pixels);
     return NULL;
   }
-  SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_LINEAR);
   stbi_image_free(pixels);
 
-  if (slot->texture) SDL_DestroyTexture(slot->texture);
+  ArRenderDevice_DestroyTexture(&g_render_device, slot->texture);
   slot->texture = texture;
   slot->page = page;
   slot->used_at = ++s_reader.clock;
@@ -514,11 +528,11 @@ static PageTexture *DecodePage(int page) {
 
 /* ── Draw ──────────────────────────────────────────────────────────────────
  *
- * Drawn in one fixed order for a renderer with no depth test or backface culling:
- * SDL_RenderGeometry has no depth test and no backface culling, so correctness
- * comes from ONE fixed draw order -- backdrop, settled pages, shadow, leaf --
- * which is only valid because the turning leaf never dips behind a settled page.
- * manual_pages.c guarantees that and its test asserts it across the whole turn.
+ * Drawn in one fixed order for the baseline 2D contract, which has no depth
+ * test or backface culling. Correctness comes from ONE fixed draw order --
+ * backdrop, settled pages, shadow, leaf -- which is only valid because the
+ * turning leaf never dips behind a settled page. manual_pages.c guarantees
+ * that and its test asserts it across the whole turn.
  */
 
 static void BuildIndices(const ManualMesh *density, int *out_verts,
@@ -562,7 +576,8 @@ static bool BuildFlatPage(const ManualMesh *density, const float matrix[16],
       s_reader.verts[v].position.y = screen.y;
       s_reader.verts[v].tex_coord.x = u;
       s_reader.verts[v].tex_coord.y = t;
-      s_reader.verts[v].color = (SDL_FColor){ 1.0f, 1.0f, 1.0f, 1.0f };
+      s_reader.verts[v].color =
+          (ArRenderColorF){1.0f, 1.0f, 1.0f, 1.0f};
       v++;
     }
   }
@@ -596,7 +611,8 @@ static bool BuildLeaf(const ManualMesh *density, float turn,
       s_reader.verts[v].position.y = screen.y;
       s_reader.verts[v].tex_coord.x = mirrored ? 1.0f - u : u;
       s_reader.verts[v].tex_coord.y = t;
-      s_reader.verts[v].color = (SDL_FColor){ shade, shade, shade, alpha };
+      s_reader.verts[v].color =
+          (ArRenderColorF){shade, shade, shade, alpha};
       v++;
     }
   }
@@ -662,11 +678,15 @@ static void DrawHint(SDL_Rect viewport, uint64_t now, bool spread) {
   /* The backing plate fades with the text; a bar that outlived it would be a
    * black stripe across the page for no reason. Alpha is scaled rather than
    * fixed so the plate never survives the words it exists to make readable. */
-  SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND);
-  SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, (Uint8)(alpha * 150 / 255));
-  SDL_RenderFillRect(g_renderer, &(SDL_FRect){
-      (float)viewport.x, (float)(viewport.y + viewport.h - bar_h),
-      (float)viewport.w, (float)bar_h });
+  const ArRenderRectF backing = {
+    (float)viewport.x, (float)(viewport.y + viewport.h - bar_h),
+    (float)viewport.w, (float)bar_h,
+  };
+  (void)ArRenderDevice_DrawSolidRect(
+      &g_render_device, &backing,
+      (ArRenderColorF){0.0f, 0.0f, 0.0f,
+                       (float)(alpha * 150 / 255) / 255.0f},
+      kArRenderBlendMode_Alpha);
   SettingsOverlay_DrawGameText(x, y, scale, alpha, hint);
 }
 
@@ -682,8 +702,13 @@ static void DrawSheet(int page, const ManualMesh *density,
   if (!BuildFlatPage(density, matrix, view_w, view_h, x0, x1, half_y, pan_x,
                      pan_y, &verts, &indices))
     return;
-  SDL_RenderGeometry(g_renderer, texture->texture, s_reader.verts, verts,
-                     s_reader.indices, indices);
+  const ArRenderDrawState state = {
+    .flags = kArRenderDrawState_Blend,
+    .blend = kArRenderBlendMode_Alpha,
+  };
+  (void)ArRenderDevice_DrawGeometryWithState(
+      &g_render_device, texture->texture, s_reader.verts, verts,
+      s_reader.indices, indices, &state);
 }
 
 void ManualReader_Render(SDL_Rect viewport) {
@@ -720,13 +745,15 @@ void ManualReader_Render(SDL_Rect viewport) {
 
   /* The backdrop is opaque: the reader is a fullscreen mode, and letting the
    * paused game show through behind a page of text makes both unreadable. */
-  SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE);
-  SDL_SetRenderDrawColor(g_renderer, 18, 16, 22, 255);
-  SDL_RenderFillRect(g_renderer, &(SDL_FRect){ (float)viewport.x,
-                                               (float)viewport.y,
-                                               (float)viewport.w,
-                                               (float)viewport.h });
-  SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND);
+  const ArRenderRectF backdrop = {
+    (float)viewport.x, (float)viewport.y,
+    (float)viewport.w, (float)viewport.h,
+  };
+  (void)ArRenderDevice_DrawSolidRect(
+      &g_render_device, &backdrop,
+      (ArRenderColorF){18.0f / 255.0f, 16.0f / 255.0f,
+                       22.0f / 255.0f, 1.0f},
+      kArRenderBlendMode_Opaque);
 
   const bool spread = SpreadMode();
   ManualTurnFrame frame;
@@ -815,16 +842,29 @@ void ManualReader_Render(SDL_Rect viewport) {
         for (int i = 0; i < verts; i++) {
           s_reader.verts[i].position.x += dx;
           s_reader.verts[i].position.y += dy;
-          s_reader.verts[i].color = (SDL_FColor){ 0.0f, 0.0f, 0.0f, 0.30f };
+          s_reader.verts[i].color =
+              (ArRenderColorF){0.0f, 0.0f, 0.0f, 0.30f};
         }
-        SDL_RenderGeometry(g_renderer, NULL, s_reader.verts, verts,
-                           s_reader.indices, indices);
+        const ArRenderDrawState shadow_state = {
+          .flags = kArRenderDrawState_Blend,
+          .blend = kArRenderBlendMode_Alpha,
+        };
+        (void)ArRenderDevice_DrawGeometryWithState(
+            &g_render_device, ArRenderTexture_Invalid(),
+            s_reader.verts, verts, s_reader.indices, indices,
+            &shadow_state);
       }
-      if (BuildLeaf(&density, s_reader.view.turn, matrix, view_w, view_h, &sheet,
-                    pan_world_x, pan_world_y, frame.leaf_mirrored, 1.0f, &verts,
-                    &indices))
-        SDL_RenderGeometry(g_renderer, leaf->texture, s_reader.verts, verts,
-                           s_reader.indices, indices);
+      if (BuildLeaf(&density, s_reader.view.turn, matrix, view_w, view_h,
+                    &sheet, pan_world_x, pan_world_y, frame.leaf_mirrored,
+                    1.0f, &verts, &indices)) {
+        const ArRenderDrawState leaf_state = {
+          .flags = kArRenderDrawState_Blend,
+          .blend = kArRenderBlendMode_Alpha,
+        };
+        (void)ArRenderDevice_DrawGeometryWithState(
+            &g_render_device, leaf->texture, s_reader.verts, verts,
+            s_reader.indices, indices, &leaf_state);
+      }
     }
   }
 

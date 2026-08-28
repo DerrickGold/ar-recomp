@@ -116,6 +116,9 @@ The diorama's flat HUD reconstruction target is likewise scoped through the
 device and restores the actual caller target instead of assuming a CRT target.
 Scene-inspector markers and action background-authoring guides now submit
 portable line geometry and do not capture or mutate native draw state.
+The in-game manual owns portable linear-filtered page textures and submits its
+settled sheets, turning leaf, shadow, backdrop, and fading hint plate through
+the render device. Its remaining SDL vocabulary is input-only.
 Action heat refraction is a portable mesh warp rather than a custom shader; its
 viewport-sized texture is now device-owned and uses the scoped-target contract
 plus portable geometry for both its warped and fallback resolves. CRT still
