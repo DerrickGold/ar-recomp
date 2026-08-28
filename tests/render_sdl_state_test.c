@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 
 static bool NearlyEqual(float left, float right) {
   return fabsf(left - right) < 0.001f;
@@ -111,6 +112,47 @@ int main(void) {
   assert(SDL_GetRenderDrawBlendMode(renderer, &renderer_blend));
   assert(renderer_blend == SDL_BLENDMODE_BLEND);
 
+  const ArRenderTextureDesc target_desc = {
+    .width = 8,
+    .height = 8,
+    .format = kArRenderPixelFormat_Argb8888,
+    .usage = kArRenderTextureUsage_Target,
+    .filter = kArRenderFilter_Nearest,
+    .blend = kArRenderBlendMode_Alpha,
+  };
+  ArRenderTexture target = ArRenderTexture_Invalid();
+  assert(ArRenderDevice_CreateTexture(&device, &target_desc, &target));
+  const SDL_Rect saved_viewport = {1, 2, 12, 11};
+  const SDL_Rect saved_clip = {3, 4, 6, 5};
+  assert(SDL_SetRenderViewport(renderer, &saved_viewport));
+  assert(SDL_SetRenderClipRect(renderer, &saved_clip));
+  assert(SDL_SetRenderDrawColor(renderer, 17, 34, 51, 68));
+
+  ArRenderTargetState target_state = {0};
+  assert(ArRenderDevice_BeginTarget(&device, target, &target_state) ==
+         kArRenderTargetBegin_Ready);
+  assert(SDL_GetRenderTarget(renderer) ==
+         ArSdlRenderBackend_UnwrapTexture(target));
+  assert(!SDL_RenderViewportSet(renderer));
+  assert(!SDL_RenderClipEnabled(renderer));
+  assert(ArRenderDevice_Clear(
+      &device, (ArRenderColorF){0.5f, 0.25f, 0.75f, 1.0f}));
+  Uint8 draw_r = 0, draw_g = 0, draw_b = 0, draw_a = 0;
+  assert(SDL_GetRenderDrawColor(
+      renderer, &draw_r, &draw_g, &draw_b, &draw_a));
+  assert(draw_r == 17 && draw_g == 34 && draw_b == 51 && draw_a == 68);
+
+  assert(ArRenderDevice_EndTarget(&device, &target_state));
+  assert(SDL_GetRenderTarget(renderer) == NULL);
+  SDL_Rect restored = {0};
+  assert(SDL_RenderViewportSet(renderer));
+  assert(SDL_GetRenderViewport(renderer, &restored));
+  assert(!memcmp(&restored, &saved_viewport, sizeof(restored)));
+  assert(SDL_RenderClipEnabled(renderer));
+  assert(SDL_GetRenderClipRect(renderer, &restored));
+  assert(!memcmp(&restored, &saved_clip, sizeof(restored)));
+
+  ArRenderDevice_DestroyTexture(&device, target);
   ArRenderDevice_DestroyTexture(&device, texture);
   ArRenderDevice_Reset(&device);
   SDL_DestroyRenderer(renderer);

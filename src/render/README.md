@@ -44,7 +44,8 @@ blend behavior without expanding the minimum adapter surface.
 The base and authentic SNES framebuffers, HUD planes and composite target,
 Mode 7 replacement surface, manifest-driven screen replacements, persistent
 separated-SIM atlas/layers, persistent world-navigation resources, background-
-voxel ground, and persistent diorama planes are device-owned handles. Their
+voxel ground, persistent diorama planes, and the decoded/authored ROM skybox
+cache and diorama supersample target are device-owned handles. Their
 creation, destruction, zero-fill, and exact dirty-region uploads use the
 neutral device. The SDL adapter preserves their existing formats, filtering,
 blend/tint/address behavior, render-target semantics, and texture updates. A
@@ -78,10 +79,18 @@ non-SDL backend can implement them without carrying SDL. The bridge is a
 transition aid, not part of a game-facing contract. New renderer-facing code
 must not add another borrowed native resource.
 
+Temporary target composition now has a portable scoped-target extension. It
+captures and restores the caller's target, viewport, and clip, and reports a
+distinct state-loss result when restoration fails. The ROM skybox fill pass is
+the first consumer, followed by the diorama crisp-AA supersample pass; backends
+without the optional capability omit these enhancements and retain their
+established fallbacks.
+
 The remaining migration should proceed in independently testable slices:
 
-1. Define optional render-target/custom-effect extension contracts for the
-   diorama compositor, rim light, shadow blur, heat haze, and CRT postprocess.
+1. Extend the scoped render-target contract with backend custom-effect passes
+   for the diorama compositor, rim light, shadow blur, heat haze, and CRT
+   postprocess.
 2. Move the remaining diorama compositor implementation and transient effect
    resource ownership under `src/platform/<backend>` while retaining a
    capability-gated baseline path.

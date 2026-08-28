@@ -130,6 +130,28 @@ typedef struct ArRenderTextureDesc {
   ArRenderBlendMode blend;
 } ArRenderTextureDesc;
 
+/* Portable state needed to enter a temporary render target without leaking
+ * its viewport or clip into the caller. Backends capture native state into
+ * these values and remain responsible for any target-specific details that do
+ * not appear in the public contract. */
+typedef struct ArRenderTargetState {
+  ArRenderTexture target;
+  ArRenderRectI viewport;
+  ArRenderRectI clip;
+  bool viewport_set;
+  bool clip_enabled;
+  bool valid;
+} ArRenderTargetState;
+
+typedef enum ArRenderTargetBeginResult {
+  /* The target is bound with its full extent and clipping disabled. */
+  kArRenderTargetBegin_Ready,
+  /* State capture or target binding failed without losing caller state. */
+  kArRenderTargetBegin_Omitted,
+  /* Entering the target failed and the prior state could not be restored. */
+  kArRenderTargetBegin_StateLost,
+} ArRenderTargetBeginResult;
+
 typedef uint64_t ArRenderCapabilityFlags;
 enum {
   kArRenderCapability_StreamingTextures = UINT64_C(1) << 0,
@@ -141,6 +163,9 @@ enum {
   kArRenderCapability_BlendAdd = UINT64_C(1) << 6,
   kArRenderCapability_BlendModulate = UINT64_C(1) << 7,
   kArRenderCapability_BlendMultiply = UINT64_C(1) << 8,
+  /* Capture and restore a temporary render target together with its viewport
+   * and clip. This is optional even when ordinary render targets exist. */
+  kArRenderCapability_ScopedRenderTargets = UINT64_C(1) << 9,
 };
 
 typedef struct ArRenderCapabilities {

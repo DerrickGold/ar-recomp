@@ -80,6 +80,46 @@ bool ArRenderDevice_SetClipRect(ArRenderDevice *device,
       device->ops->set_clip_rect(device->context, clip);
 }
 
+ArRenderTargetBeginResult ArRenderDevice_BeginTarget(
+    ArRenderDevice *device, ArRenderTexture target,
+    ArRenderTargetState *state) {
+  if (state) memset(state, 0, sizeof(*state));
+  if (!ArRenderDevice_IsReady(device) || !state ||
+      !ArRenderTexture_IsValid(target) ||
+      !ArRenderCapabilities_Has(
+          &device->capabilities,
+          kArRenderCapability_RenderTargets |
+              kArRenderCapability_ScopedRenderTargets) ||
+      !device->ops->capture_render_target_state ||
+      !device->ops->restore_render_target_state)
+    return kArRenderTargetBegin_Omitted;
+  if (!device->ops->capture_render_target_state(device->context, state)) {
+    memset(state, 0, sizeof(*state));
+    return kArRenderTargetBegin_Omitted;
+  }
+  state->valid = true;
+  if (!device->ops->set_render_target(device->context, target)) {
+    memset(state, 0, sizeof(*state));
+    return kArRenderTargetBegin_Omitted;
+  }
+  if (device->ops->set_viewport(device->context, NULL) &&
+      device->ops->set_clip_rect(device->context, NULL))
+    return kArRenderTargetBegin_Ready;
+
+  const bool restored = device->ops->restore_render_target_state(
+      device->context, state);
+  memset(state, 0, sizeof(*state));
+  return restored ? kArRenderTargetBegin_Omitted
+                  : kArRenderTargetBegin_StateLost;
+}
+
+bool ArRenderDevice_EndTarget(ArRenderDevice *device,
+                              const ArRenderTargetState *state) {
+  return ArRenderDevice_IsReady(device) && state && state->valid &&
+      device->ops->restore_render_target_state &&
+      device->ops->restore_render_target_state(device->context, state);
+}
+
 bool ArRenderDevice_Clear(ArRenderDevice *device, ArRenderColorF color) {
   return ArRenderDevice_IsReady(device) &&
       device->ops->clear(device->context, color);
