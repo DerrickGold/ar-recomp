@@ -162,12 +162,12 @@ func CensusRTSWebs(options RTSCensusOptions) (RTSCensusReport, error) {
 				if score1 >= score0 {
 					entryM = 1
 				}
-				fmt.Fprintf(options.Output, "   func bank_%02X_%04X %04X entry_mx:%d,0   # push @%02x:%04x; decode m1=%d m0=%d; VERIFY single-shot shape (DEBUG.md §1 ⚠️) before applying\n", bank, push.Target, push.Target, entryM, bank, push.PC, score1, score0)
+				fmt.Fprintf(options.Output, "   func bank_%02X_%04X %04X entry_mx:%d,0   # push @%02x:%04x; decode m1=%d m0=%d; VERIFY single-shot shape before applying\n", bank, push.Target, push.Target, entryM, bank, push.PC, score1, score0)
 			}
 		}
 	}
 	fmt.Fprintf(options.Output, "\nTOTAL uncovered: %d continuation pushes, %d PHA;RTS sites\n", report.UncoveredPushes, report.UncoveredSites)
-	fmt.Fprintln(options.Output, "Triage: a push whose continuation does PLA/PLX/PLY of loop state needs rts_dispatch (NOT func); a PHA;RTS site needs rts_dispatch <site> <targets> or indirect_dispatch. See DEBUG.md s7.13.")
+	fmt.Fprintln(options.Output, "Triage: a push whose continuation does PLA/PLX/PLY of loop state needs rts_dispatch (NOT func); a PHA;RTS site needs rts_dispatch <site> <targets> or indirect_dispatch.")
 	return report, nil
 }
 

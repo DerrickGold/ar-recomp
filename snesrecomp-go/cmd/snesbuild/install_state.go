@@ -179,8 +179,8 @@ func measureSlimBytes(root string) int64 {
 // isSlimmableBundle reports whether `root` is a shipped bundle's utils/ directory
 // rather than a developer's source checkout.
 //
-// This guard is mandatory. docs/BUILD_TOOLING.md documents
-// `snesbuild gui --root .` for a checkout, where the cleanup allowlist names
+// This guard is mandatory: `snesbuild gui --root .` may target a checkout,
+// where the cleanup allowlist names
 // tracked source. A permissive check would delete that source; an audit fixture
 // reproduced exactly that failure.
 //

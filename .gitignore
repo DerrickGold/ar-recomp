@@ -114,6 +114,10 @@ runs/
 # authored-but-unimplemented specs). See archive/README.md. Anchored so it
 # cannot match a nested directory the way the old unanchored `build*/` did.
 /archive/
+# Local game engineering journals, retired specifications, debugging notes,
+# and release-work records. Durable player and reverse-engineering references
+# belong in /docs instead.
+/development/
 # Local runner engineering journals, benchmark notes, and retired design
 # audits. Maintained SDK documentation belongs in runtime/docs instead.
 /snesrecomp-go/runtime/development/

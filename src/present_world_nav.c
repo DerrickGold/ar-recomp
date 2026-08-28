@@ -6,7 +6,7 @@
  * AR_SIM3D_WORLD_NAV and no staged replay in saves/ reaches world-map travel --
  * so keeping it in its own translation unit makes that gap structural and
  * visible instead of a footnote. Staging a world-map SRAM seed + replay and
- * adding a checkpoint is the missing regression asset; see docs/code-style.md.
+ * adding a checkpoint is the missing regression asset.
  *
  * The D6 no-live-globals invariant holds here as everywhere in the present
  * family: no g_ppu, no g_settings, no Settings_Visible*(). State arrives via

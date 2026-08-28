@@ -76,7 +76,7 @@ static void TestChecksumAndFields(void) {
 #ifdef ACTRAISER_SOURCE_DIR
   /* A real battery save, as a sanity check that the codec agrees with the
    * game's own writer. These fixtures live in test-saves/ and are gitignored
-   * (*.srm is ROM-derived; see docs/contributing.md), so a fresh clone
+   * (*.srm is ROM-derived and intentionally untracked), so a fresh clone
    * legitimately has none — that is a skip, not a failure. Only a fixture
    * that exists and fails to load or checksum is a real defect. */
   char fixture_path[1024];

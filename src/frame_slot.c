@@ -333,7 +333,7 @@ void FrameSlot_SetPendingAnnotatedSim(const SimFrameData *sim) {
   s_pending_annotated_sim = sim;
 }
 
-/* M5 (ar-recomp-threading-impl.md Appendix D5): the sole FrameSlot writer.
+/* The sole FrameSlot writer.
  * Reads the coherent ABI PPU view, g_settings, g_snes_width/height,
  * g_scene_inspector_presentation, g_hd_replacements: legitimate here (this
  * runs on the game thread, immediately after RtlDrawPpuFrame() returns,
@@ -404,8 +404,8 @@ void FrameSlot_Capture(FrameSlot *dst) {
    * submitted". Together the two lines localise any future silence: neither
    * means no spell was ever identified in WRAM, capture-only means the
    * identification works but the renderer never drew it. Chasing that
-   * distinction by hand is what cost a session when the animation-bank read
-   * was the wrong width (docs/bug-ledger.md §32). */
+   * distinction by hand is what exposed an incorrectly wide animation-bank
+   * read. */
   if (dst->action_effects.effect_count) {
     static bool announced;
     if (!announced) {

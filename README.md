@@ -16,8 +16,8 @@ GPU effects, replacement art and music, re-bindable controls, save states, and
 an in-game settings menu.
 
 **[Quick start](#quick-start)** · **[Features](#features)** ·
-**[Manual](docs/manual.md)** · **[Contributing](docs/contributing.md)** ·
-**[Reliability policy](docs/reliability-policy.md)** · **[Status](#current-status)**
+**[Manual](docs/manual.md)** · **[Game documentation](docs/README.md)** ·
+**[Status](#current-status)**
 
 ---
 
@@ -153,9 +153,9 @@ the bundle again.
 <details>
 <summary>Building from a source checkout instead</summary>
 
-If you want to change the code, see
-[docs/contributing.md](docs/contributing.md#building-from-source). The short
-version is `make dev` with Go, CMake, a C11 compiler, and SDL3 installed.
+If you want to change the code, run `make dev` from a source checkout with Go,
+CMake, a C11 compiler, and SDL3 installed. `make help` lists the available
+developer, test, and packaging targets.
 
 </details>
 
@@ -325,30 +325,22 @@ Full reference for every one of these: **[docs/manual.md](docs/manual.md)**.
 is only an overview. [`docs/progress.md`](docs/progress.md) is the authoritative
 tracker for stage, town, subsystem, and platform status.
 
-Open investigations live in [`DEBUG.md`](DEBUG.md). The code-derived status of
-each design spec lives in [`specs/README.md`](specs/README.md).
-
 ## Documentation
 
 | Document | What it is |
 |---|---|
+| [`docs/README.md`](docs/README.md) | Curated game-documentation index |
 | [`docs/manual.md`](docs/manual.md) | Player and power-user reference |
-| [`docs/contributing.md`](docs/contributing.md) | Source builds, repository layout, and contribution rules |
-| [`DEBUG.md`](DEBUG.md) | Debugging workflow, tools, and open issues |
-| [`docs/bug-ledger.md`](docs/bug-ledger.md) | Resolved defects and reusable engineering lessons |
 | [`docs/SEAMS.md`](docs/SEAMS.md) | Logic↔hardware boundary and architecture map |
 | [`docs/progress.md`](docs/progress.md) | Stage, town, and subsystem status |
 | [`docs/rendering-engine.md`](docs/rendering-engine.md) | Rendering, streaming, and OAM architecture |
-| [`docs/BUILD_TOOLING.md`](docs/BUILD_TOOLING.md) | Build driver, hermetic builds, and distribution bundles |
-| [`specs/README.md`](specs/README.md) | Design-spec index and current status |
 
 ## License
 
 This repo's original source (runtime, tooling, `recomp/*.cfg`, docs) is
 [MIT-licensed](LICENSE). That license explicitly does **not** cover the
-ActRaiser ROM or anything derived from it — see the LICENSE file's Scope
-section, and
-[what can and can't be committed](docs/contributing.md#what-can-and-cant-be-committed-here).
+ActRaiser ROM or anything derived from it; see the LICENSE file's Scope
+section for the exact boundary.
 
 The original Go implementation, tooling, tests, and documentation under
 `snesrecomp-go/`, including its independently authored portable C runner, have

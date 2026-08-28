@@ -3,7 +3,7 @@
 
 Works on saves/snapshots/*.wram.bin (F2) and saves/dump_wram.bin (exit dump),
 with docs/ram-map.md as the symbol table. Replaces the ad-hoc python heredocs
-of the bracket-snapshot protocol (DEBUG.md §2).
+of the bracket-snapshot protocol.
 
 Commands:
   get   <file...> <addr|sym...>     read named bytes/words across files

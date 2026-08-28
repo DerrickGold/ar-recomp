@@ -1,8 +1,8 @@
 # ActRaiser — Logic ↔ Hardware Seams (HAL inventory)
 
 This is the **living inventory of boundaries between game logic and SNES hardware** — the seams
-we will eventually widen into a platform interface (HAL) to allow enhanced/custom graphics and
-audio that exceed SNES limits. See `DEBUG.md` and the §"future" discussion for the rationale.
+we can widen into a platform interface (HAL) for enhanced/custom graphics and
+audio that exceed SNES limits.
 
 This document owns the boundary inventory and the current semantic contract at
 each boundary. Detailed renderer design, validation evidence, resolved-bug
@@ -59,15 +59,11 @@ APU port apply, SPC port read, pre-fetch SPC700 PC, and DSP writes. The observer
 exposes fixed registers and a synchronous, read-only ARAM view while the APU
 lock is held; ActRaiser-specific driver offsets stay in the tracer. Disabled
 observation is one unlikely check at each existing seam and no state is
-serialized. See
-[snes-native-audio-channels.md](snes-native-audio-channels.md#implemented-baseline-instrumentation)
-for the request/outcome CSV contract. With the serial trace enabled,
+serialized. The tracer emits request/outcome CSV records. With the serial trace enabled,
 `AR_NATIVE_AUDIO_PCM=1` additionally writes the retained native-rate PCM ring
 as `native_audio_pcm.wav` for waveform parity checks.
 
 > Audio is the highest-payoff first HAL target: the `$035A`/`$035B` events are already ID-based.
-> Found while fixing the boss-music handshake and the silent-DSP bug (memory:
-> `spc-upload-dp-pointer-fix`, `cop-syscall-hook-fix`, `post-boss-four-issues`; bug ledger §11).
 
 ### APU port-0 command protocol (decoded 2026-07-16 for music replacement)
 
@@ -157,10 +153,8 @@ values and nonzero port-2 ids to catch them in play.
 3. **SFX-level replacement.** Already the cleanest seam: `$035B` (BRK hook) carries the SFX id
    before any APU involvement. Map id → modern sample in the hook, suppress the port write.
 
-   The request-to-key-on census and its classification limits are documented in
-   [snes-native-audio-channels.md](snes-native-audio-channels.md), which owns
-   native voice allocation, effect-lane collisions, and future extended-channel
-   design.
+   The request-to-key-on trace distinguishes overwrite, rejection, and
+   physical-voice stealing from successful playback.
 4. **Output-quality tier.** All mixed audio funnels through the continuous
    `dsp_getSamplesResampled` boundary inside `RtlRenderAudio` (44.1 kHz stereo
    S16 by default; the settings registry offers restart-class
@@ -184,12 +178,11 @@ values and nonzero port-2 ids to catch them in play.
    serialized DSP voices 8-39. Physical voices 0-7 remain music-only. The same
    bus labels and shared echo mixer cover all 40 voices; authentic-off remains
    the original eight-voice loop. The serial trace distinguishes native loss,
-   extended duplicate coalescing/FIFO overflow, and intentional song swaps. See
-   `settings-system.md`, "Audio control seams".
+   extended duplicate coalescing/FIFO overflow, and intentional song swaps.
 
-The verified common sample directory, effect sequence catalogue, loss taxonomy,
-and audio-specific instrumentation now live only in
-[snes-native-audio-channels.md](snes-native-audio-channels.md).
+The verified common sample directory, effect sequence identities, and external
+audio seams are summarized in this section; scheduler diagnostics remain
+implementation-only.
 
 ---
 
@@ -209,22 +202,22 @@ and audio-specific instrumentation now live only in
 | Sprite (OAM) build | object loop `$8915` → OAM | OAM | "place object's sprite" | `$06A0` object struct (X/Y/handler) | 🟡 |
 | **Action OAM draw/activation split** | `$00:8C98` visibility scan → `$00:8D68` sprite build; exact signed positions use `PpuSetObjExactPosition` | action objects and OAM | "widen drawing without activating margin actors before gameplay begins" | independent draw and activation policies plus player-arrival lifecycle | 🟢 Drawing and activation are independent, arrival uses the reconstructed native camera for activation, and exact positions preserve off-screen identity; see `rendering-engine.md` §6/§9. |
 | **Presentation-aware action camera bounds** | `$02:B030` request → `ActRaiser_UpdateActionCamera` / `ActionCameraAxisBounds_Resolve` | action camera and finite BG1 world | "fit horizontal presentation to finite playfield edges without changing vertical gameplay" | provider-backed playfield plan and native vertical camera | 🟢 Horizontal fitting is implemented behind the finite-world policy; vertical tracking remains native. See `rendering-engine.md` §6. |
-| **Action BG streaming** | `$02:B030/$B091` camera → `$02:B127` strip dispatch → `$02:B158/$B1AF` builders → NMI upload | VRAM BG1/BG2 tilemap rings | "keep the authentic resident rings current while a finite host world supplies enhanced presentation" | section map/metatile identity plus `ActionBgWorld` / `ActionBgPlan` | 🟢 Native streamers remain the gameplay oracle; the bounded provider owns eligible presentation. Current design is in `rendering-engine.md`; acceptance evidence is in `bg-hle-census.md`. |
-| **Immutable action-room scene authority** | `ActionRoomScene_Load` / `BuildFrameState` / `RenderNativeFrame` | immutable ROM assets plus host-owned frame state | "load and render a stable action room without depending on mutable visit history" | 49 room profiles and action-editor schema | 🟡 Stable BG1/BG2 authority and editor parity are implemented; BG3, OBJ, fades, and gameplay-driven windows remain outside this contract. See `action-room-loader-hle.md`. |
-| **Action BG plan → immutable presentation handoff** | `ActionBgPlan` → scanout latch → `FrameSlot.action_bg_plan` → Diorama span plan | host value records | "present the exact per-layer edge policy that produced the captured frame" | source, fill, motion, extents, bands, and capture margins | 🟢 Producer-owned policy reaches the compositor without live PPU reads; see `rendering-engine.md` §13.3 and `SPEC-bg-hle.md`. |
-| **Action BG semantic roles and extents** | `ActionBgPlan_Build` → canvas owner / primary layer → PPU and Diorama consumers | host presentation policy | "grow playable worlds without repeating finite landmark backdrops" | per-room playfield/scene/backdrop roles and per-layer/band extents | 🟢 One canonical room-policy table owns the promoted extents; authoring and precedence are specified in `SPEC-bg-layer-extents.md`. |
+| **Action BG streaming** | `$02:B030/$B091` camera → `$02:B127` strip dispatch → `$02:B158/$B1AF` builders → NMI upload | VRAM BG1/BG2 tilemap rings | "keep the authentic resident rings current while a finite host world supplies enhanced presentation" | section map/metatile identity plus `ActionBgWorld` / `ActionBgPlan` | 🟢 Native streamers remain the gameplay oracle; the bounded provider owns eligible presentation. Current design is in `rendering-engine.md`. |
+| **Immutable action-room scene authority** | `ActionRoomScene_Load` / `BuildFrameState` / `RenderNativeFrame` | immutable ROM assets plus host-owned frame state | "load and render a stable action room without depending on mutable visit history" | 49 room profiles and action-editor schema | 🟡 Stable BG1/BG2 authority and editor parity are implemented; BG3, OBJ, fades, and gameplay-driven windows remain outside this contract. |
+| **Action BG plan → immutable presentation handoff** | `ActionBgPlan` → scanout latch → `FrameSlot.action_bg_plan` → Diorama span plan | host value records | "present the exact per-layer edge policy that produced the captured frame" | source, fill, motion, extents, bands, and capture margins | 🟢 Producer-owned policy reaches the compositor without live PPU reads; see `rendering-engine.md` §13.3. |
+| **Action BG semantic roles and extents** | `ActionBgPlan_Build` → canvas owner / primary layer → PPU and Diorama consumers | host presentation policy | "grow playable worlds without repeating finite landmark backdrops" | per-room playfield/scene/backdrop roles and per-layer/band extents | 🟢 One canonical room-policy table owns the promoted extents; authoring and precedence are recorded in `rendering-engine.md` §13.3. |
 | **Action Diorama main/subscreen colour math** | TM/TS and CGWSEL/CGADSUB → separated main/additive planes → immutable `FrameSlot` masks | native PPU winner and colour-math state | "preserve visible art supplied through either screen operand" | source membership, resolved winners, and supported full-add topology | 🟢 The measured Marahna topology is preserved in Diorama; unsupported math fails closed. See `rendering-engine.md` §13.4. |
 | UI/dialog tilemap compose+upload (sim engine) | `$02:BF60` dispatches message text into BG3 buffer `$7F:B000` → `$02:AEEB`, while the visible box frame and offscreen work boxes remain BG2; whole-map BG refreshes use `$02:B727`/`$B825` record mega-bursts and `$02:ADA8` as a 64B DMA helper. Sky Palace setup at `$02:B6F8-$B726` conditionally copies ROM `$07:D0A0` to `$7E:C200`. | BG3 text plus WRAM/VRAM BG2 map state | "draw the active UI while retaining offscreen work pages" | message-type IDs via `$14` (see Save/persistence note on `$14` reuse) | 🟡 major paths separated. Live `$B825` decode reproduced staging (`runs/20260712-232230`); narrow raw-edge reflection produced broken columns; center reflection copied the BG2 box (11:36 PM capture). Current render transaction reads `$07:D0A0`, reconstructs the box-covered rows per column class (row-major quadrants; shaft continuation; seam base halves at meta cols 0/15; floor top 2 rows under the box bottom; `$41/$49` flare + `$40/$48`/`$42/$4A` skirts at shaft columns — base art exists only in the metatile table), expands via `$7E:2900`, patches only margin BG2 columns, then restores VRAM. ✅ Validated 2026-07-13: byte-identical to the game's boot colonnade (scratch cols 56-63 rows 18-31); user-confirmed clean in dialogue + submenu states. |
 | **Native dialog presentation assets (verified 2026-07-16)** | compressed BG3 font at ROM `$17:ECFB` (file `$0BECFB`) → `$02:C5C9` decode → `$1000` bytes; Sky Palace BG char bank at ROM `$0D:C000` (file `$06C000`, `$4000` bytes); palette 7 at ROM `$1C:BF73` (file `$0E3F73`) | BG3 font / BG1+BG2 chars / CGRAM | "render ActRaiser's text and beveled dialog frame" | font tile index = character code; frame chars `$CE/$CF` corners, `$DE/$DF` sides, `$EE` horizontal edge, `$FF` black fill | 🟢 F2 captures `runs/20260716-072558/snapshots/snap_00_gf460` and `snap_01_gf668` supplied byte-exact VRAM/CGRAM identity. The reusable frame is an 8×8 nine-slice: vertical flips produce the top edge/lower corners. Do not reuse 16×16 metatiles `$4E/$4F`; each includes palette-1 Sky Palace scenery tile `$18` beside the real corner. Host settings decode only immutable ROM assets and never sample live scene VRAM. |
 | BG mode / layers + colour math | `$2105` BGMODE; `$212C/$212D` TM/TS; `$212E/$212F` TMW/TSW; `$2130/$2131` CGWSEL/CGADSUB; scroll regs | PPU | "select each main/subscreen source, resolve two priority winners, then optionally add/subtract them" | source bits BG1/BG2/BG3/BG4/OBJ = `$01/$02/$04/$08/$10` | 🟢 for the action-Diorama forms catalogued in rendering-engine.md §13.4; other game-wide register writers remain to map |
 | HDMA (raster fx, HBlank) | HDMAEN `$420C`; ActRaiser drives ch 2/3 (and others) | HDMA | "per-scanline effect" | HDMA tables | 🔴 |
-| **Mode 7 world navigation** | native focus/matrix/zoom/location state → immutable world scene | PPU Mode 7 plus host full-plane renderer | "move, zoom, spin, select a destination, and enter an action stage" | developed map, focus, affine matrix, Palace/UI, water, and active location | 🟢 The current forced-top-down 3D presentation and its movement, destination, fade, and action-entry behavior are confirmed complete. See `rendering-engine.md` §13h and `SPEC-world-navigation-3d.md`. |
+| **Mode 7 world navigation** | native focus/matrix/zoom/location state → immutable world scene | PPU Mode 7 plus host full-plane renderer | "move, zoom, spin, select a destination, and enter an action stage" | developed map, focus, affine matrix, Palace/UI, water, and active location | 🟢 The current forced-top-down 3D presentation and its movement, destination, fade, and action-entry behavior are confirmed complete. See `rendering-engine.md` §13h. |
 | Brightness / forced blank | `$2100` INIDISP | PPU | "fade in/out, blank during build" | 4-bit master brightness + forced-blank bit | 🟡 World navigation now remains enhanced for every non-forced-blank brightness step: host layers receive one exact black overlay `(15-brightness)*17`, then already-brightness-adjusted Palace/UI captures are drawn. Forced blank still fails closed to authentic black. Other presentation modes remain to audit. |
 | Palette load | CGRAM writes | CGRAM (15-bit ×256) | "set palette N" | **palette id / table TBD** | 🔴→🟡 |
 | **Action OBJ atlas + effect overlays** | `$02:BC9E`: ROM `$07:8000-$07:9FFF` → VRAM `$2000-$2FFF`, palette `$07:D040-$D09F` → CGRAM `$C0-$EF`, then 256 bytes from `$06:A400 + (selected_magic-1)*$80` → VRAM `$2D40`. `$00:96C3-$96F5`: only for an object with `+$30 & $0040` and an idle descriptor, `(object.+38 & $FF)` selects 128 bytes at `$06:A000+n*$80` → VRAM `$2D80`. | VRAM/CGRAM | "load the shared action atlas and replace reserved effect tiles" | common atlas plus selected-magic window; dynamic `+38` is polymorphic and **not** a universal spell ID (the spell handlers use it as repeat counts) | 🟡 selected-magic mapping and all four spell composition/animation banks are catalogued; unrelated dynamic-overlay values remain to classify |
-| **Action presentation gameplay clock** | completed `$00:8C98` pass → `ActionEffectGameplayClock` → immutable frame capture | host-only monotonic serial | "advance presentation effects only when action gameplay produced a frame" | shared bounded elapsed-tick value | 🟢 Pause, multi-pass, clamp, reset, and abnormal-return behavior are covered in `action_effect_clock.c`; effect details live in `effects-hook-investigation.md`. |
-| **Action spell host presentation** | `ActionEffects_CaptureFrame` → immutable effect frame → `ActionEffectRender_Build` | host additive geometry aligned to authentic OBJ planes | "enhance positively identified spell actors without changing gameplay or source art" | data-driven controller/cohort rules for Fire, Stardust, Aura, and Light | 🟢 All four spells and their enhanced effects are confirmed working. Lifecycle and composition details live in `effects-hook-investigation.md`. |
-| **Action scene lighting and particles** | `ActionSceneEffects_CaptureFrame` → immutable actor/decoration lists → bounded flat/Diorama render passes | read-only action objects and BG-map observations | "attach portable effects to exact authored actors and scenery while preserving layer occlusion" | validated room/source/lifecycle identities in `ram-map.md` and `effects-hook-investigation.md` | 🟡 Original-room and Death Heim rematch coverage is implemented. Aitos and Death Heim are accepted; Bloodpool, the sword beam, and Marahna/Viper retain final visual acceptance. |
+| **Action presentation gameplay clock** | completed `$00:8C98` pass → `ActionEffectGameplayClock` → immutable frame capture | host-only monotonic serial | "advance presentation effects only when action gameplay produced a frame" | shared bounded elapsed-tick value | 🟢 Pause, multi-pass, clamp, reset, and abnormal-return behavior are covered in `action_effect_clock.c`. |
+| **Action spell host presentation** | `ActionEffects_CaptureFrame` → immutable effect frame → `ActionEffectRender_Build` | host additive geometry aligned to authentic OBJ planes | "enhance positively identified spell actors without changing gameplay or source art" | data-driven controller/cohort rules for Fire, Stardust, Aura, and Light | 🟢 All four spells and their enhanced effects are confirmed working; original identities are recorded in the ROM/RAM maps. |
+| **Action scene lighting and particles** | `ActionSceneEffects_CaptureFrame` → immutable actor/decoration lists → bounded flat/Diorama render passes | read-only action objects and BG-map observations | "attach portable effects to exact authored actors and scenery while preserving layer occlusion" | validated room/source/lifecycle identities in `ram-map.md` and `rom-map.md` | 🟡 Original-room and Death Heim rematch coverage is implemented. Aitos and Death Heim are accepted; Bloodpool, the sword beam, and Marahna/Viper retain final visual acceptance. |
 | **Scoped Diorama skybox source / ROM BG catalogue** | room/section scope → Backdrop source → read-only stock-ROM decode → skybox | immutable ROM assets and host scope metadata | "select any stock action BG as a room- or section-specific skybox" | `captured` or `rom-GG-MM-bgN` across 49 maps × two BGs | 🟢 Source inheritance, editor resolution, fallback, and the Aitos waterfall scope are implemented and accepted; see `rendering-engine.md` §13.5. |
 | **Fixed-screen HUD OBJ icon promotion** | validated OAM signature → `FrameSlot` range → fixed HUD overlay | OAM capture and host overlay | "keep action, simulation, and Sky Palace icons attached to the widescreen HUD" | capture-owned icon signatures, never fixed slot assumptions | 🟡 Promotion and anchoring are implemented with regression coverage; post-fix visual confirmation remains. See `rendering-engine.md` §13.1. |
 | Sim-mode object sprite/behavior identity | ROM tables `$01:E099` (behavior/anim data ptrs) + `$01:E7D9` (sprite-frame ptrs), one 16-bit entry per object type — see "Sim-mode object/sprite spawn & OAM-build system" below | not VRAM directly — feeds world record `+00`/`+08`, which downstream OAM code (`ADAD`/`AE6F`) reads | "this object type's behavior and frame-composition asset" | **located 2026-07-01; bases corrected 2026-07-02** | 🟡 identity/assigner/emitter chain mapped; ROM character-upload identity remains to be catalogued |
@@ -232,9 +225,7 @@ and audio-specific instrumentation now live only in
 
 Death Heim's detailed room policies, hub focus/eye composition, boss-rematch
 identity, and action-effect layer ordering are maintained in
-[rendering-engine.md](rendering-engine.md),
-[effects-hook-investigation.md](effects-hook-investigation.md),
-[bg-hle-census.md](bg-hle-census.md), and the ROM/RAM maps. The table above
+[rendering-engine.md](rendering-engine.md) and the ROM/RAM maps. The table above
 records only the reusable boundary contracts.
 
 ### Main/subscreen colour-math seam (host, mapped 2026-08-11)
@@ -360,7 +351,7 @@ dropped rather than toward a hole.
 > index is the logical sprite/tileset identity. For **sim-mode objects** the type→behavior/frame
 > tables are located. Action mode instead has a shared resident atlas plus small reserved effect
 > overlays; the object definition pointer identifies the composition inside that atlas. F2
-> snapshots dump VRAM/CGRAM/OAM when correlating logical identities with pixels — see `DEBUG.md` §9.
+> snapshots dump VRAM/CGRAM/OAM when correlating logical identities with pixels.
 
 ---
 
@@ -385,7 +376,7 @@ $008125  PLB; BRL $8059                ; back to the main loop (re-yields at the
 
 **Both `BCS $8125` gates are ruled out as corruption sources** (`AR_SIMTRACE` confirmed the
 sim-mode update runs to completion; `$0019` matched the oracle). The 2026-07-01 corruption they
-were checked for was the `$03:F5BE` per-town handler subsystem, since fixed — bug ledger §13.
+were checked for was the `$03:F5BE` per-town handler subsystem, since fixed.
 
 **`$01:8000`** (bank 1) is the sim-mode building/icon updater itself. Its own entry does a similar
 region-gated early-exit (`LDA $19; CMP #7`/`#8` at the top decides whether to even enter the deep
@@ -393,7 +384,7 @@ body at `$018170`), then a further gate at `$018010-$018024` (checks DP `$347`, 
 address `$7F9750` — meaning ALL THREE must be in specific states to reach the deep body) before
 finally running `JSL $1B1C7` and the actual per-building update logic. This function ALSO drives
 the `$2920`/`$208E`/`$B420` `JSR (abs,X)` tables marked `Call indirect SUPPRESSED` in generated C
-(`rg -n 'Call indirect SUPPRESSED' src/gen`; see `DEBUG.md` §7.9) — `$B420` is a genuine static
+(`rg -n 'Call indirect SUPPRESSED' src/gen`) — `$B420` is a genuine static
 ROM table (5 real entries, confirmed by reading the
 bytes), but `$2920`/`$208E` resolve to SNES hardware-register space (`$2000-$5FFF`) under LoROM,
 meaning either they're populated at runtime via DMA (not yet confirmed) or the `JSR (abs,X)`
@@ -604,18 +595,18 @@ and writes only host presentation metadata.
 
 | Seam | Where | Contract |
 |---|---|---|
-| Live-area clipping | `ComposeFlatPixelsPolicy` **and** `RestoreTownHudPolicy` (`src/sim/sim3d.c`) | Columns outside `live_x0/live_x1` are black below the promoted-HUD rows, for the base fill **and** for every composited plane. An OBJ with a wrapped-negative X rasterizes into the margin, so omitting the plane clip breaks D2 byte-equality at a map edge (ledger §23) |
+| Live-area clipping | `ComposeFlatPixelsPolicy` **and** `RestoreTownHudPolicy` (`src/sim/sim3d.c`) | Columns outside `live_x0/live_x1` are black below the promoted-HUD rows, for the base fill **and** for every composited plane. An OBJ with a wrapped-negative X rasterizes into the margin, so omitting the plane clip breaks D2 byte-equality at a map edge. |
 | Semantic record metadata | `SimRenderMetadata_BeginRecord/RecordPart/EndRecord`, called from the `$01:ADAD`/`$AE6F` HLE leaves | Records the OAM range each source record emits, split when parts cross priority bands or OBJ colour-math eligibility. Producer state is game-thread only |
 | Semantic effect metadata | `CaptureEffectInstances` (`src/sim/sim_render_metadata.c`) | Converts immutable fixed/world record snapshots into kind/phase/geometry/colour-family plus lifecycle, pulse, and generation ages. Lightning miracle uses its authentic user/posted outer lifecycle; Blue Dragon and Red Demon use class/state lifecycles; ground fire is composition-owned across the observed record-class transitions; scripted burning houses require packed world identity `$0A01` plus exact `$DD2D/$DD33/$DD39`; the two new-town creation strikes are world process `$000E` records whose polymorphic raw `+$06` retains script base `$A8BB`, plus exact `$01:A8BB` phases including `$E527` as a nonvisible continuity gap. Fixed and world slots occupy disjoint tracker indices. The producer also captures each source's raw `+$06` and emitted OBJ-palette mask because runtime-built `$E6CA/$E6D0/$E6D6` art is red on palette 1 and blue on palette 2. Presentation-only frames never tick it, invalid source metadata clears its trackers, ambiguous palettes fail closed, and overflow invalidates only the effect layer for that frame |
 | Portable effect rendering | `DrawSimEffectLocalLighting`, `DrawSimEffectSceneFlash`, and `DrawSimEffectParticles` (`src/present.c`) | One style lookup maps semantic phase to light/particle policy. Semantic geometry remains the attachment/ground-contact point; style may independently lift screen-upright glow and particle origins when tall art would otherwise place them beneath its silhouette (house fire `(8,16)` contact to `(8,12)` presentation). The stages use SDL's renderer-provided additive blend and untextured geometry—not a platform shader—batch each geometry class, verify the applied blend, restore renderer state, and independently latch unsupported blend/geometry paths closed. Feature-off captures remain exact and the authentic framebuffer is never modified A third particle motion, `kSimEffectParticle_Trail`, lays flame and smoke along an effect's own retained path instead of around a fixed point, so a lobbed fireball's tail follows the authentic arc rather than a heading guessed from one frame; puff jitter is keyed on each sample's world position, never on the array index, because a sample slides one slot further back every tick and index-keyed noise would make the plume crawl forward through itself. The particle batch is cut to whichever of the point and trail budgets is larger. |
 | Scripted-house-fire cadence | `SimVisualPatches_Apply` (`src/sim/sim_visual_patches.c`), called after cart load and before `Randomizer_Init` | Run `20260803-130945` proves three world `$0A01` actors use `$01:A838`: one-tick `$DD2D/$DD33/$DD39` then `FE 01`. The patch validates that entire signature before changing only the three duration bytes to four (15 source fps); mismatch and undersized images remain untouched. Applying before the randomizer snapshot makes later option re-application deterministic and prevents visual patches from leaking into renderer/game-state callbacks |
 | Volcanic eruption effects | `ClassifyEffectSource` + `Sim3D_ClassifyObject` (`src/sim/sim_render_metadata.c`), styled by `SimEffectStyleFor` (`src/present_sim3d_effects.c`) | The end-of-region eruption, measured in run `20260818-070141`. Packed world identity `$0E01` plus one of three exact authored compositions; the identity alone and the composition alone both fail closed, and the bytes between two compositions are part records rather than further frames. `$E7D0` (script `$01:A853`) and `$E7A6` (`$01:A857`) are the airborne fireball on the `flying_projectile` plane, so terrain neither raises nor hides them and their record-origin-centred art keeps the ROM's own placement. `$DD9F/$DDA5/$DDAB` (`$01:A85B`) is the ground fire, and it is **not new art**: those are tiles `$086/$088/$08A` in palette 1, the exact frames the burning house uses, so they classify into the same `HouseFireA/B/C` phase family and reach the identical lighting ramp. Only the contact point differs — `(0,16)` for the centre-anchored eruption frames against `(8,16)` for the corner-anchored house. A separate kind keeps traces honest without forking the style. |
-| Eruption fireball pathing | `SimEruptionScript_ResolveFlight` → `UpdateProjectileArc` / `ApplyProjectileArc` | projected simulation-town effect path | "present the ROM's staged climb/wait/fall as one continuous crater-to-impact arc" | script-derived crater, destination, frames-to-landing, live crater anchor, and unchanged ground-fire handoff | 🟢 The renderer owns only the airborne visual; records and gameplay remain native. Current terrain integration is in `sim-town-terrain.md`; resolved design history is in bug-ledger entries 67–69. |
+| Eruption fireball pathing | `SimEruptionScript_ResolveFlight` → `UpdateProjectileArc` / `ApplyProjectileArc` | projected simulation-town effect path | "present the ROM's staged climb/wait/fall as one continuous crater-to-impact arc" | script-derived crater, destination, frames-to-landing, live crater anchor, and unchanged ground-fire handoff | 🟢 The renderer owns only the airborne visual; records and gameplay remain native. Current terrain integration is in `sim-town-terrain.md`. |
 | Effect path retention | `SimEffectLifetime::trail` → `SimEffectInstance::trail` (`src/sim/sim_render_metadata.c`) | The only place the metadata layer remembers where an effect used to be. Bounded to `kSimEffectTrailSamples` published world positions plus the altitude each was taken at, newest first. <br><br>**Retention starts LATE, and how late is rolled per throw.** Every fireball in the fountain launches from the same crater mouth, and a path's oldest samples carry its biggest, most spread-out puffs — so eight throws bury the one pixel the volcano is supposed to be erupting out of. Nothing is retained for the first `kSimEffectTrailLaunchDelay` builds plus a per-throw jitter, which starts each path a little way along its own arc and at a different radius, so the eight do not draw a clean ring. Measured over the captured eruption: tails start 41–143 authentic pixels up and 4–107 along, across 79 distinct values. It moves only the smoke — the fireball is drawn from the effect's live position and still leaves the crater. The jitter is hashed from the effect's generation, which is one throw's identity: deterministic within a flight (a delay that moved under one would make the tail crawl through its own smoke) and touching no shared RNG, so the presentation still cannot perturb the game. <br><br>**The head is live every build; the array only shifts every `kSimEffectTrailStride` builds.** Those are different requirements and one sample a build cannot serve both: the flame end has to sit exactly on the thing it is trailing, while the smoke behind it has to reach back far enough to show the trajectory, and the longest eruption throw is about 130 producer builds. 32 samples at stride 4 spans 128 — measured over the captured eruption, a full trail covers 83–180 map pixels of ground, most of each throw. Index *n* is therefore about *n × stride* ticks old and index 0 is now; a repeated capture of one immutable build never lengthens it. <br><br>Only kinds that actually travel populate it (`EffectKindTravels`); everything else publishes `trail_count == 0` rather than a pile of identical points. The path lives beside the generation that validates it and is cleared in the same branch that starts a new one, so a reused record slot can never inherit a stranger's trajectory — the fireball landing changes kind, which breaks continuity and drops the flight path with it. <br><br>Renderer side: age is normalised against the CAPACITY, not against how much of it is filled, or a puff would slide back toward "young" as the trail lengthened behind it and the whole plume would brighten while the fireball flew. Opacity holds through `1 - t²` and spends its fade at the far end, because a linear fade over a path this long makes the middle of the trajectory — the part that shows where the fireball went — the faintest thing on screen. The particle batch is `static`, not automatic: a trail this long puts the worst case near a third of a megabyte, and sizing the visual to fit a render thread's stack frame is the wrong trade. |
 | Object classification | `Sim3D_ClassifyObject` (`src/sim/sim_render_metadata.c`) | Pure function of `(tier, class +$0E, state +$12, record address, composition +$08)` → presentation plane, virtual height, anchor/shadow traits. **Record semantics first, composition override second.** Adding a rule here is the supported way to fix a mis-anchored object; never add a height test in the renderer |
 | Height easing | `ApplyHeightSlew` inside `SimRenderMetadata_CaptureFrame` | Per-world-record ramp (4px/frame) toward the classified plane, folded into the immutable frame copy. Cleared whenever the SIM 3D master is off, a picker is active, or the frame falls back, so re-enabling never replays a stale ramp. Contact-exact classes bypass it entirely |
 | Picker view policy | `AR_SIM3D_PICKER_TOPDOWN` (CMake option, default `OFF`) | Build-time choice between the authentic flat picker view and keeping the projected view. Guards exactly two sites: the view classification in `SimRenderMetadata_CaptureFrame` and the capture gate in `Sim3D_PrepareCapture`. Gameplay, `$7F:9215`, D-pad targeting, and the selected cell are identical either way |
-| Promoted town-HUD handoff | `StandardTownHudCapture` / `PrepareHudHandoff` (`src/sim/sim3d.c`) | The only pre-existing captures enhanced SIM accepts are the standard BG3 HUD rectangle and the promoted four-sprite hourglass OBJ rectangle. The hourglass range is per-frame data: menus move it from OAM 0-3 to 11-14, so validation rescans the complete signature with `ActRaiser_FindSimulationHourglass` and requires `capture.oamFirst` to equal the discovered range. Never replace that with `kActRaiserHudObjOamFirst`; fixed screen position does not imply fixed allocator ownership (ledger §47) |
+| Promoted town-HUD handoff | `StandardTownHudCapture` / `PrepareHudHandoff` (`src/sim/sim3d.c`) | The only pre-existing captures enhanced SIM accepts are the standard BG3 HUD rectangle and the promoted four-sprite hourglass OBJ rectangle. The hourglass range is per-frame data: menus move it from OAM 0-3 to 11-14, so validation rescans the complete signature with `ActRaiser_FindSimulationHourglass` and requires `capture.oamFirst` to equal the discovered range. Never replace that with `kActRaiserHudObjOamFirst`; fixed screen position does not imply fixed allocator ownership. |
 | Shadow caster selection | `Sim3D_ObjectCastsShadow` (`src/sim/sim_render_metadata.c`) | Pure predicate over the classified descriptor: world tier, valid atlas art, and neither `MapPlane` nor `NoShadow`. Height is deliberately **not** an input — grounded actors cast too. To stop something casting, mark it `NoShadow` in the classifier, never special-case it in the shadow pass |
 | Ground shadow mask | `DrawSimShadowMask` (`src/present_sim3d_shadows.c`) | Builds silhouettes into one transparent working target, so overlapping casters cannot double-darken. Flat terrain composites it after the BG1-low ground draw; elevated terrain instead hands it to the shared D32 pass, whose terrain-top receiver depth-tests the mask against cliffs and solid models before writing colour. The working dimensions are halved together until they fit `kSimShadowMaxTargetPixels` (roughly 1440p), then linearly sampled at viewport size; 1080p/1440p remain native while 4K+ memory and fill cost stay bounded. Reads only the immutable `FrameSlot`; allocation failure drops and logs only the shadow stage |
 | Shadow blur | `BlurSimShadowMask` (`src/present_sim3d_shadows.c`) | Separable seven-tap box blur over the mask target, two full-target passes ping-ponging through one lazily allocated scratch target. The primary path is the same generated fragment shader contract on Metal/SPIR-V/DXIL; a renderer without that GPU state falls back to ordinary blended taps with a custom add-alpha mode. Missing scratch or blend support degrades to the hard mask and never disables geometry or the base shadow pass |
@@ -668,8 +659,8 @@ An earlier attempt split the composite into two colour attachments so ground act
 | Sim camera mode | `Sim3D_ActivePose` (`src/main.c`) | Free and Dynamic each own a pose — Free the player-authored `sim3d_tilt_*`/`distance`, Dynamic the dedicated `sim3d_dyncam_baseline_*`. Resolved **once** on the game thread and published through `sim.projection_*`, because two `Sim3DTuning` sites read it. A single shared pose would make Dynamic sway around wherever the last manual drag left the camera. The right-drag is gated to Free (in Dynamic it would edit a pose nothing is built from), "Reset camera" restores the active mode's pose, and a mode change snaps rather than eases |
 | Sim dynamic camera | `ApplySimDynamicCamera` (`src/present.c`) + `CaptureSimDynamicCamera` (`src/main.c`) | Same split as the diorama reactive camera: the game thread owns the WRAM reads, the running averages and the edge detection; present.c owns the formula. Signal is the **angel record's `+$1A/+$1C` planar velocities**, not `PlayerVelocity` (an action-stage concept). Hit is an **HP decrease**, not the invuln flag, which lags damage by ~10 frames. Lean magnitudes are roughly half the diorama's because a near-overhead camera turns the same angle into ground-swim. Applied **before** `Scene3D_BuildViewProjection` so every stage shares one camera. Reset to neutral outside a town, and the first town frame only seeds the HP baseline so arrival is not read as a hit |
 | Menu deferral | `SimPlaneIsMenu` + `SimObjectTierFilter` (`src/present.c`) | The sim menu is three layers: text (`Bg3Low/High`), box frame and fill (`Bg2High`), and icons/cursors (**fixed-tier OBJ**, which rank above `Bg2High`). All are held out of the painter-order loop and drawn after every atmospheric effect, walking the **full hardware rank** so order within the group is unchanged and only its depth moves. Deferring BG3 alone left clouds inside the panels; adding `Bg2High` without the OBJ buried the icons under its own fill. Fixed-tier OBJ are deferred **by tier, not by plane**, because they share OBJ ranks with world billboards that must stay under the shroud — hence each band drawing twice. **`Bg2Low` is excluded**: the painter order places it behind the projected ground as a background layer. Safe for BG3 **only because** the town HUD's BG3 pixels are already removed by the `sim3d.c` overlay handoff |
-| Atlas overflow policy | `SimRenderAtlas_Build` + `SimRenderMetadata_CommitAtlas` | Per-object failures purge only that object and remain visible to the D1 census; broken frame contracts still fail the build. Current mechanics live in `rendering-engine.md`; the policy change is bug-ledger §24. |
-| Metadata-failure scope | `Sim3D_ResolveFeatureMask` (`src/sim/sim_render_metadata.c`) | `metadata_valid == false` clears **only** the object stages (billboards, height, shadows, soft shadows, rim). The separated composite, ground projection and world underlay come from captured plane pixels and the camera, none of which the semantic record pass supplies. Dropping the whole view instead paid for a sprite problem with a full-screen perspective change (ledger §24) |
+| Atlas overflow policy | `SimRenderAtlas_Build` + `SimRenderMetadata_CommitAtlas` | Per-object failures purge only that object and remain visible to the D1 census; broken frame contracts still fail the build. Current mechanics live in `rendering-engine.md`. |
+| Metadata-failure scope | `Sim3D_ResolveFeatureMask` (`src/sim/sim_render_metadata.c`) | `metadata_valid == false` clears **only** the object stages (billboards, height, shadows, soft shadows, rim). The separated composite, ground projection and world underlay come from captured plane pixels and the camera, none of which the semantic record pass supplies. Dropping the whole view instead pays for a sprite problem with a full-screen perspective change. |
 | Deterministic evidence | `AR_SIM3D_D1_TRACE=<file>` | Per-frame JSONL carrying view, `picker_flag`, the compiled `picker_topdown`, feature masks, atlas rects, and per-object `height_class`/`classified_height`/`virtual_height`. `tools/sim3d_demo.py` validates against it and asserts the picker contract that the binary actually shipped |
 
 Three traps worth knowing before touching the table:
@@ -687,14 +678,12 @@ Three traps worth knowing before touching the table:
   silhouette flat about the caster's foot (`kSimShadowFootprintDepth`) and
   shears the whole quad by the caster's height instead.
 
-The resolved sim-mode bring-up forensics are summarized once in the
-[bug ledger](bug-ledger.md).
-
 ## Sim-mode town architecture — the full map (2026-07-02, root-caused + FIXED the corruption+freeze)
 
 The complete town simulation decomposes into FOUR cooperating subsystems. This is the most
 completely-mapped gameplay system in the project and the natural starting template for a full
-decomp of sim mode. (Forensic trail: `DEBUG.md` #18-25; confirmed fixed in-game 2026-07-02.)
+decomp of sim mode. The corrected architecture was confirmed in-game on
+2026-07-02.
 
 **Bug-hunt note for future readers:** the F5BE fix below (#2) was necessary but NOT sufficient
 — it fixed the lair-mask/event dispatcher, but the actual actor corruption/freeze needed a
@@ -810,7 +799,7 @@ routes by type to a class handler -> the class handler's one-time latch (`D063`)
 `D04E`-dispatched battery routine -> the battery calls `D072` to actually populate the record.
 Skip ANY link in this chain (as the recomp did, for months, at `B8C0`/`D04E`/their targets) and
 a record gets its type field only, never its position/script/sprite -> permanently-garbage
-sprite. See `DEBUG.md` #18-25 for the full bug-hunt trail; `$01:B898`/`B8C0` also appear in
+sprite. `$01:B898`/`B8C0` also appear in
 "Function roles discovered" below with the specific PHX/PLX index-model bug that hid this for
 an extra round.
 
@@ -838,7 +827,7 @@ two tiers as structs). The ROM data tables (`$03:F5ED+` handler lists, `$01:A227
 
 ### 5. The development cycle (hourglass → town growth), mapped 2026-07-04
 
-The whole chain, from timer to tiles (bug ledger §13 has the debugging story):
+The whole chain, from timer to tiles:
 
 1. **Attempt** — each hourglass expiry, the consumer loop in the `$8Fxx` scan pushes
    continuation `$9315` + a handler-1 word planted in WRAM `$7C45/$7C47` (by `$91AE/$91BC`)
@@ -869,7 +858,7 @@ The whole chain, from timer to tiles (bug ledger §13 has the debugging story):
 are the complete "town growth ruleset" — a `development.c` with the step tables as data.
 The population thresholds at `$021C` and the step table at `$03:8A7E` are the obvious
 balance/mod knobs. Every layer of this is pushed-continuation RTS dispatch — cfg model
-notes (why `rts_dispatch`, not `func`) live in bank03.cfg comments + bug ledger §13.
+notes explaining why `rts_dispatch`, not `func`, live in bank03.cfg comments.
 
 ### 6. Town actor behavior + animation system (bank $01, mapped 2026-07-04)
 
@@ -890,7 +879,7 @@ data-driven VM:
   install delays, spawn OAM, etc. A `$7F` byte is the segment-end command.
 - **cfg:** the `$CD6F` dispatch needs `indirect_dispatch CD6A 18 idx:A tables:CD6F ret:CD6C`
   (bank01.cfg). Without it the handlers are undecoded and the actor spawns but never advances
-  its state → frozen sprite. See bug ledger §14.
+  its state → frozen sprite.
 - **Decomp seam:** table `$CD6F` = the "actor script opcode table"; the `$7F` byte streams are
   the per-actor animation programs. A future editor edits the streams; the 18 handlers are the
   opcode implementations (`actor_vm.c`).
@@ -979,8 +968,8 @@ blades. The Wind miracle queues record action 6; `$03:A1F4` arms variant 2, clea
 `AND #$BF` and re-queues action 1, and the blades turn again. Houses tell the same story from
 the art side — variants `$00` and `$10` share both scaffold frames and differ only in the
 finished metatile they land on (`$02` vs `$03`). Presentation must therefore read the frame the
-step machine is drawing, never this bit; see ledger §61 for the enhanced-view bug that came of
-reading it as construction.
+step machine is drawing, never this bit; interpreting it as construction
+produces an invalid enhanced view.
 
 For the record, the class-6 (windmill) frames are `$04`/`$06`/`$14` scaffold and
 `$24`/`$26`/`$16` the three blade positions 30 degrees apart in the wheel's 90-degree period,
@@ -1252,7 +1241,7 @@ underlays continue the same cycle from `$88` because town `$D7` belongs to the
 WRAM-buffered animation above. This keeps both the full-world navigation plane
 and the half-resolution terrain outside a 3D town animated.
 
-**Lair-seal corruption — ROOT-CAUSED (bug ledger §15; fixed by registering the
+**Lair-seal corruption — ROOT-CAUSED (fixed by registering the
 `$03:9D8E` loop continuation):** it was not a
 graphics-pipeline bug at all — `bank_03_8053` ran its `LDA #$6000; STA $2116` at m=1 (an exit-mx
 leak from `$9D4D`), so the tilemap upload's VMADD truncated to `$0000` and dumped tilemap indices
@@ -1265,7 +1254,7 @@ before suspecting the buffers.
 ## Story-event system — the `$03:F921` event VM (mapped 2026-07-06, the rock-zap/fire arc)
 
 The sim-mode scripted events (rock zap, house fires, quakes, town-specific story beats) run
-through one table-driven dispatcher. Fully mapped and registered (bug ledger §16); this is
+through one table-driven dispatcher. Fully mapped and registered; this is
 both a decomp target (`event_vm.c`) and a clean mod seam (the record table is pure data).
 
 **Dispatcher `$03:F921`:** `PHP; PHB; REP #$20; LDA #$007F; JSL $008519` (DB←`$7F`), computes the
@@ -1303,13 +1292,13 @@ whichever event first walks into one will `[dispatch-oob]` loudly. Closing this 
 WRITERS traced once (who stores to `$6E20`/`$7920`), then a cfg/indirect-vector authorization —
 it cannot be closed statically.
 
-**Resolved thread (2026-07-07):** the one-of-N cutscene actor sprites (bug ledger §17 —
+**Resolved dispatch shape (2026-07-07):** the one-of-N cutscene actor sprites —
 lair-seal attackers, Bloodpool lightning pair) were fixed by registering the **`$9220`
 trampoline family**, NOT the `$9FCD` dispatcher family (which remains statically
 censused but symptom-free). A trampoline does
 `LDA #<continuation-1>; PHA; LDA $9220; PHA; RTS` and a caller stores the callee-1 into
-`$9220`. CE57 was found by tools/resolve_miss.py's first run, closing bug-ledger #13's
-untraced `$CE56`.
+`$9220`. CE57 was found by tools/resolve_miss.py's first run, closing the
+untraced `$CE56` path.
 
 **Corrected 2026-08-17 — `$9220` holds the CALLEE, not a resume address.** The two halves
 were previously conflated. `$7F:9220` is a *late-bound subroutine pointer*: it selects which
@@ -1366,7 +1355,7 @@ BCS $EFFA`) therefore skips the whole horse cutscene — dialogue, spawn and
 
 ---
 
-## Sim-mode REWARD-GRANT web — `$01:9C6F` (mapped 2026-07-07, the lost-scroll arc, bug ledger §18b)
+## Sim-mode REWARD-GRANT web — `$01:9C6F` (mapped 2026-07-07)
 
 All sim rewards (scroll grants, extra-life/max-stat gifts, town offerings' effects) go through
 one RTS-trick dispatcher — a clean `rewards.c` decomp target and the model example of the
@@ -1381,7 +1370,7 @@ handlers single-execute; proven by `$0295`=01 after one grant):
   (`INC long $0295` persistent + `INC long $0021` working + message `LDY #$8994; JSR $93A8`
   + sound + BRK syscall $0D).
 
-**MP/scroll persistence model (bug ledger §18b):** `$0295` (in the `$0290` save-stats block:
+**MP/scroll persistence model:** `$0295` (in the `$0290` save-stats block:
 $0291 level, $0293 HP, $0295 MP, $0297 next-level pop, $0299+ HAVE flags, $02A2+ items,
 $02AB lives) is the PERSISTENT count; `$21` is the act-mode WORKING copy, loaded at
 `$02:84E0` (`LDA $0295; STA $21`) — MP refills to the persistent max each act by design.
@@ -1391,7 +1380,7 @@ long addressing (grep lesson; `tools/romxref.py` handles this).
 
 ---
 
-## Magic system — full wiring map (2026-07-07, the "magic dead" arc, bug ledger §18)
+## Magic system — full wiring map (2026-07-07)
 
 End-to-end seam map for casting; every stage verified. Decomp target: `magic.c`.
 
@@ -1399,14 +1388,14 @@ End-to-end seam map for casting; every stage verified. Decomp target: `magic.c`.
 > is a 24-bit animation pointer (addr16 + bank8) and `+19` is a separate field, so a 16-bit
 > read of `+18` returns `bank | next<<8`. A host observer that got this wrong rejected every
 > spell it was written to decorate and drew nothing at all, silently, for as long as the
-> feature existed (bug-ledger.md §32). `$00:95F0` copies spawn-record bytes into `$18`/`$28`
+> feature existed. `$00:95F0` copies spawn-record bytes into `$18`/`$28`
 > byte-wise and is the corroborating reference. When adding a reader, grep for existing
 > consumers of the field before choosing a width.
 >
 > **Widescreen reveals ROM spawn-hiding.** Magical Stardust's right-edge launch births a star
 > at screen x 256 — one pixel outside the authentic window — and as low as the player's own
 > screen line. With margin objects enabled at 446 wide that birth is on screen, which reads as
-> a star spawning in the ground. Authentic, accepted, documented in bug-ledger.md §33. Expect
+> a star spawning in the ground. This authentic behavior is accepted. Expect
 > other actors parked "just offscreen" to surface the same way.
 
 1. **Unlock**: HAVE flags `$0299-$029C` = 01/02/03/04 (Fire/Stardust/Aura/Light), granted by
@@ -1433,7 +1422,7 @@ End-to-end seam map for casting; every stage verified. Decomp target: `magic.c`.
    four mirrored sweeping objects; Stardust is four staggered, four-launch actors; Aura is four
    moving mirrored orbs; Light is one centre flare plus two full-height beam columns. Exact
    slots, timings, animation states, composition geometry, miracle lifecycles, and enemy attack
-   reuse are mapped in [effects-hook-investigation.md](effects-hook-investigation.md).
+   reuse are mapped in the ROM/RAM references.
 
 ---
 
@@ -1441,7 +1430,7 @@ End-to-end seam map for casting; every stage verified. Decomp target: `magic.c`.
 
 | Seam | Routine / address | Hardware | Intent | Notes | Status |
 |---|---|---|---|---|---|
-| VBlank wait | `$00:8418`, `$02:A85E` (HLE → `ActRaiser_WaitForVblank`); inline 3-read spins (`$01:9284` et al) | RDNMI `$4210` | "wait one frame" | Three-tier model (`snes.c`): HLE'd routines yield; the 7 statically-whitelisted inline spin blocks (`kSpinBlocks`, from `find_yield_points.py`) yield once per read in the coroutine; in NON-yieldable contexts (NMI/IRQ — e.g. the mode-`$85` story-event wait chain `$01:9270→8C43→9284`) whitelisted spins FAST-EXIT bit7=1, unpaced (a hang there is otherwise unbreakable — bug ledger §16); `[4210-wedge]` tripwire names the refusing gate if a spin ever sticks 4096 reads | 🟢 |
+| VBlank wait | `$00:8418`, `$02:A85E` (HLE → `ActRaiser_WaitForVblank`); inline 3-read spins (`$01:9284` et al) | RDNMI `$4210` | "wait one frame" | Three-tier model (`snes.c`): HLE'd routines yield; the 7 statically-whitelisted inline spin blocks (`kSpinBlocks`, from `find_yield_points.py`) yield once per read in the coroutine; in NON-yieldable contexts (NMI/IRQ — e.g. the mode-`$85` story-event wait chain `$01:9270→8C43→9284`) whitelisted spins FAST-EXIT bit7=1, unpaced; `[4210-wedge]` tripwire names the refusing gate if a spin ever sticks 4096 reads | 🟢 |
 | NMI handler | `$8520` (`NmiHandler`) | NMI | "per-frame vblank service" | game frame `$0088` bumped here | 🟢 |
 | Frame coroutine | `RunOneFrameOfGame` (`actraiser_rtl.c`) | — | host frame ↔ game frame mapping | Normally resumes the coroutine to its vblank wait and then runs NMI. The action-load pacing seam starts at the exact `$00843E` force-blank write, before the collapsed loader's APU polls, and can consume up to 315 host frames with display/audio advancing while NMI is disabled and `$0088` remains fixed. While a live consumer drains audio, redundant main-CPU touch catch-up is suppressed until the matching `$F0`; no-consumer/headless runs retain accelerated handshake progress. That oracle value is the authentic upper bound; the exact enhanced one-shot latched at the transition may release it early only after natural completion. | 🟢 |
 
@@ -1467,7 +1456,7 @@ which runs until its next vblank-wait, then NMI services the frame. The `SNESREC
 channel marks the edges (`vblank` = host frame boundary, `nmi` = logic tick serviced); a run of
 `vblank` markers without `nmi` is expected only for the calibrated action load. Use the pairing to
 *verify the tick cadence is clean* before building on it (a mode that yields N times per tick —
-the 1/N-speed pacing-bug class, bug ledger §12/§13 — would break a naïve accumulator; those must
+the 1/N-speed pacing-bug class would break a naïve accumulator; those must
 be fixed first).
 
 **Implemented presentation architecture.** The earlier OAM/BG-register strategy was removed: it
@@ -1604,7 +1593,7 @@ boss, and the return transition on 2026-07-14.
 | `$1D` | player HP |
 | `$E6`/`$E7` | action-stage timer (BCD) |
 | `$0088`/`$0089` | game-frame counter (16-bit) |
-| `$06A0` +stride `$40` | object table (≥64 slots; fields in `DEBUG.md` §11) |
+| `$06A0` +stride `$40` | object table (80 slots; fields below) |
 | `$08A0` | player object (slot 8) |
 | `$7D1B` | saved stack ptr (act→sim transition stack relocation) |
 | `$0014`-`$0017` | **SHARED DP SCRATCH — not a fixed-meaning anchor.** Used as a 16-bit ADD/XOR
@@ -1622,7 +1611,7 @@ checksum accumulator by `$00:84F3` (save-data validity check) AND as a message-t
 
 ---
 
-## Object & spawn-handler model (moved from DEBUG.md §11, 2026-07-06)
+## Object & spawn-handler model (2026-07-06)
 
 The most common in-level crash/freeze class (§7.6) comes from this system, so it's worth knowing.
 
@@ -1662,7 +1651,7 @@ The most common in-level crash/freeze class (§7.6) comes from this system, so i
   return frame into `+$3E`; the shared `$F7C9` handler later re-pushes it and its `$F807` RTS
   dispatches there — so every `JSR $F778` site+3 is an RTS-dispatch entry too (the Death Heim
   boss-stub family `$F6DF/$F6F7/$F70F/$F727/$F73F/$F775/$F82D`).
-- **Coverage guard (2026-07-14, bug ledger §20):** chain-walking from known handler seeds
+- **Coverage guard (2026-07-14):** chain-walking from known handler seeds
   (`find_handler_chain.py --all-yields`) CANNOT reach a handler whose address only enters `$12`
   via spawn-record **data words** (`$FE89` was stored by `$F6D4/F6EC/…` records and hid two
   soft-lock continuations that way). `tools/find_yield_helpers.py` closes the class from the
@@ -1685,7 +1674,7 @@ The most common in-level crash/freeze class (§7.6) comes from this system, so i
   Its `$19` sub-flow is now mapped (full rush user-verified end-to-end 2026-07-14): `$19=1` =
   hub (spawn record `$F3C8`/handler `$F3D4` stages the next boss from progress
   counter `$0347`), `$19=2..7` = boss arenas, `$19=8` = final boss — see
-  docs/rom-map.md and bug ledger §20. `$00` is a
+  docs/rom-map.md. `$00` is a
   separate dispatcher case, not Fillmore.
 
   `$19` chooses the act/map/sub-flow but does **not** participate in the `$95DD`
@@ -2411,7 +2400,7 @@ establishes or changes a semantic identity.
 | `$03:B99C` | **lair monster spawner** — gates on population + free world record + respawn countdown, then writes `(cellX*16+$18, cellY*16+8)` and the monster type into the record |
 | `$03:B3D4` | **level-up** — `$0291`+1, max HP `$1E`+1 capped at 24, Angel max/current HP `$0287`/`$0286`+1 |
 | `$03:9156` | **act→sim transition handler dispatcher** (relocates stack to `$1FFF`, RTS-trick chain through `$9B22`/`$9B4A`/`$9195`) |
-| `$03:8053` | **enter-sim SETUP** (runs on ANY entry to `$18=00`, incl. act→sim AND a warp to `$18=00`). Sequence of `JSR`s (`$9156`, `$AC8E`, …) → `$8193` → `$C147` → `$B20C`/`$B21F`. The 2026-06-26 act→sim hang in this cascade was a 1-byte SNES-stack leak per call in `$01:B898`'s jump-table RTS-trick, fixed via `indirect_dispatch B8C0 … ret:B8C2` (bank01.cfg) — see the `$01:B898` row below and bug ledger §7. |
+| `$03:8053` | **enter-sim SETUP** (runs on ANY entry to `$18=00`, incl. act→sim AND a warp to `$18=00`). Sequence of `JSR`s (`$9156`, `$AC8E`, …) → `$8193` → `$C147` → `$B20C`/`$B21F`. The 2026-06-26 act→sim hang in this cascade was a 1-byte SNES-stack leak per call in `$01:B898`'s jump-table RTS-trick, fixed via `indirect_dispatch B8C0 … ret:B8C2` (bank01.cfg); see the `$01:B898` row below. |
 | `$01:B898` | **per-record per-type dispatcher, called once per active actor record every frame** (from the `$8193` master loop — see the sim-mode town architecture section above for the full chain into the spawn battery). `$B8C0` PHA-dispatches through the handler table at `$01:B8D0` keyed by object type, returns to `$B8C2`. History of THREE separate bugs found at this one site, in order: (1) a 1-byte SNES-stack leak that hung the act→sim transition (fixed 2026-06-26, see `$03:8053` above); (2) the table's `count` was left capped at 16 as a workaround for a since-fixed label-emission bug, but town actor types are 18/19 — above the cap, so their class handlers never dispatched (fixed 2026-07-02: bumped to the real bound, 26); (3) even at count=26, `idx:X` was wrong AT THIS SITE specifically — the ROM wraps the table read in `PHX($B8AE)/PLX($B8BB)`, so by the `PHA/RTS` dispatch X has been restored to the RECORD POINTER, not the type index (fixed 2026-07-02: switched to the value-keyed `idx:A` form, which reads the PHA'd table word instead of a register). This is the site responsible for the later sim-mode actor-spawn corruption/freeze — not the earlier stack-leak hang at the same address. |
 | `$03:AC8E` | transition state-machine step (counter loop, calls `$97B0`) |
 | `$00:80E5` (label inside `ResetHandler`) | **sim-mode per-frame dispatch entry** — reached when `$18==0`; see "Sim-mode dispatch structure" above. |
@@ -2420,7 +2409,7 @@ establishes or changes a semantic identity.
 | `$00:8241` | called twice per main-loop iteration (`$008056` and `$00805C`, sandwiching the `$8418` vblank wait) — role not yet traced. |
 | `$02:A622` | **title-screen continue/new-game state machine.** Calls the save checksum (`$02:A88D`) at `$02A70A`, branches on the result (`$02A70D: BCC $A72F`) to one of two dialog flows, and owns selection byte `$0336`. Phase-5 host evidence captured the interactive menu at gf821 with `$18/$19=00/00`, `$0300/$0302=0100/0110`, `$92=0C`, and `$0336<=2`. These remain useful renderer-state observations, but the settings overlay no longer depends on them: Escape/F1 is intercepted globally before emulated input dispatch — see "Save / persistence" below. |
 | `$02:A88D` | **save-data validity checksum.** Computes a 16-bit ADD-sum and a 16-bit XOR-sum over SRAM `$700000-$701FEB` (calls `$00:84F3` to do the accumulation), compares against stored expected values at `$701FEC`/`$701FEE`. Returns pass/fail via carry (`CLC`=pass, `SEC`=fail). Confirmed correct 2026-07-01 (`AR_SAVECHECK`) — passes cleanly against a real mid-game save. |
-| `$00:84F3` | **checksum accumulator loop + whole-body HLE** — native body: `LDX #0; loop: LDA $700000,X; ADC $14; STA $14; EOR $16; STA $16; INX INX; CPX #$1FEC; BNE loop`. The HLE reuses the tested `Save_ComputeChecksum` host core and reconstructs `$14/$16`, `A/X/Y`, `P`, and RTL behavior; its separate decimal-mode path preserves the native routine's lack of `CLD`. `$14`/`$16` are shared scratch — see the DP-scratch-reuse gotcha in `DEBUG.md` §0. |
+| `$00:84F3` | **checksum accumulator loop + whole-body HLE** — native body: `LDX #0; loop: LDA $700000,X; ADC $14; STA $14; EOR $16; STA $16; INX INX; CPX #$1FEC; BNE loop`. The HLE reuses the tested `Save_ComputeChecksum` host core and reconstructs `$14/$16`, `A/X/Y`, `P`, and RTL behavior; its separate decimal-mode path preserves the native routine's lack of `CLD`. `$14`/`$16` are shared scratch and must be interpreted in the executing routine's context. |
 | `$02:BF60` | **dialog/message-box draw dispatcher.** Takes a message-type ID via `A` (stored into the SAME `$14` DP scratch the checksum uses), branches on ID (`CMP #0/1/6/8/9/$B`) to different message-rendering sub-routines. Called by both `$02:A622` branches with different message sets. |
 | `$01:ACD9` | **per-frame sim OAM rebuild driver** (called from `$01:9284`). Hide-fills `$0380-$057F`, initializes `$98/$9A/$9C`, scans 48 fixed `$12`-byte records at `$06A0` and 44 world `$26`-byte records at `$0A00`, then selects `ADAD` or `AE6F`. See the detailed sim OAM section above. |
 | `$01:ADAD` | **normal per-record composition emitter.** Count comes from byte 0 of the frame definition at record `+08`; each five-byte part writes one OAM component. Saves the advanced shared cursor to `$98`; cursor hand-off is verified correct. |

@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Fix C (SPEC-backdrop-clip.md): the compositor writes only the ACTIVE window,
+/* The compositor writes only the ACTIVE window,
  * so a finite world whose camera has reached its bound leaves unwritten strips
  * at both framebuffer edges — the difference between the fixed centering budget
  * and the narrowed live margin. Those strips must be filled every frame; left

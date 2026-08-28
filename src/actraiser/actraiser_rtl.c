@@ -2275,7 +2275,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     frame_policy.layer_clamp_mask = clamp;
     frame_policy.layer_mirror_mask = mirror;
     frame_policy.layer_repeat_mask = repeat;
-    /* Fix A (SPEC-backdrop-clip.md). Only meaningful in diorama mode, which is
+    /* Captured-layer padding. Only meaningful in diorama mode, which is
      * the only thing that captures these layers; gating on the setting keeps
      * this a live A/B and keeps flat output untouched either way. */
     if (g_settings.diorama_mode && g_settings.diorama_margin_fix)
@@ -3148,7 +3148,7 @@ static void ActRaiser_DioramaApronFinish(const ActionApronGeometry *geom) {
   }
 }
 
-/* Fix B (SPEC-backdrop-clip.md): margin geometry of the last rendered frame,
+/* Margin geometry of the last rendered frame,
  * latched at the end of ActRaiserDrawPpuFrame. See ActRaiser_LiveMargins. */
 static int s_live_margin_left;
 static int s_live_margin_right;
@@ -3883,7 +3883,7 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
     const ActionApronGeometry apron_geom = ActRaiser_ObjApronGeometry();
     ActRaiser_DioramaApronFinish(&apron_geom);
   }
-  /* Fix B (SPEC-backdrop-clip.md): latch the margin state the frame was ACTUALLY
+  /* Latch the margin state the frame was ACTUALLY
    * rendered with, here, rather than letting FrameSlot_Capture read live g_ppu.
    * Between this function and the frame slot capture, main.c may call
    * ActRaiser_RebindPpuOutputSurfaces(), whose public margin configuration
@@ -4151,9 +4151,8 @@ void ActRaiser_ApplyCheats(void) {
   /* AR_ALL_MAGIC=1: unlock all four spells. HAVE flags $0299-$029C = 01/02/03/04
    * (cheat-map values, docs/ram-map.md). Pinned in ALL modes so the sim-mode
    * equip menu lists them; SELECTING one still goes through the menu (the equip
-   * routine $01:915D derives $02AC from these). docs/bug-ledger.md §18 has the
-   * resolved cheat interaction; docs/SEAMS.md has the full
-   * magic wiring map. */
+   * routine $01:915D derives $02AC from these). docs/SEAMS.md has the full
+   * magic wiring map and cast-gate interaction. */
   {
     if (g_settings.cheat_all_magic) {
       g_ram[kActRaiserWram_MagicInventory + 0] = 0x01; /* Magical Fire */
@@ -4169,8 +4168,8 @@ void ActRaiser_ApplyCheats(void) {
 
   /* AR_INF_MP: infinite magic scrolls. =1 -> pin the WORKING count $21 to 10
    * (PAR 7E00210A); =<n> -> pin to n. Deliberately does NOT touch the
-   * PERSISTENT count $0295 (docs/bug-ledger.md §18b: $21 is the act-mode working copy,
-   * loaded from $0295 at $02:84E0) so the cheat never bakes into save.srm. */
+   * PERSISTENT count $0295; $21 is the act-mode working copy loaded from
+   * $0295 at $02:84E0, so the cheat never bakes into save.srm. */
   if (g_settings.cheat_inf_mp)
     g_ram[kActRaiserWram_WorkingMagicPoints] =
         (uint8)g_settings.cheat_inf_mp;
@@ -4339,7 +4338,7 @@ void ActRaiser_ApplyCheats(void) {
     if (mode) {
       if (mode == 1) {
         g_ram[kActRaiserWram_PlayerInvulnerabilityTimer] = 0xFF;
-        /* MAGIC EXCEPTION (2026-07-07, docs/bug-ledger.md §18): the cast gate ($00:9843 ->
+        /* MAGIC EXCEPTION: the cast gate ($00:9843 ->
          * $00:9DE1) does BIT #$2008 on player state $08D0 and refuses to cast
          * while the invuln flag ($2000) is set -- pinning it unconditionally made
          * magic permanently dead. Lift the pin ONLY when a cast will actually

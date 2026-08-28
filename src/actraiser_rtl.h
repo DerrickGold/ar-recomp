@@ -34,7 +34,7 @@ ActRaiserRomSetupResult ActRaiser_LastRomSetupResult(void);
  * never samples the columns the apron would fill. */
 ActionApronGeometry ActRaiser_ObjApronGeometry(void);
 
-/* Fix B (SPEC-backdrop-clip.md): the widescreen margin geometry the most recent
+/* The widescreen margin geometry the most recent
  * frame was actually RENDERED with, latched at the end of ActRaiserDrawPpuFrame.
  * A consumer of that frame's captured pixels must use this rather than reading
  * g_ppu->extraLeftCur/extraRightCur, which can be zeroed between the draw and

@@ -7,7 +7,7 @@ metatile table, then rasterises it with the snapshot's VRAM char data and CGRAM.
 The emulator is not in the loop. Written to answer "is the whole level really
 resident, or just a window around the camera?" -- if the output is coherent from
 end to end while the camera sits in one place, it is resident. See
-specs/SPEC-bg-hle.md 1.1.
+docs/bg-hle-census.md.
 
 Caveat: CHRBASE is assumed 0 (correct for the Fillmore acts, where BG1 ids are
 <$100 and BG2 $100-$1FF in one shared 4bpp region). Read BG12NBA if a level

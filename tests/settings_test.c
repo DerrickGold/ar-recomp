@@ -90,7 +90,7 @@ static void TestDefaultsAndMetadata(void) {
    * that, Controls added eight device/tuning rows plus 42 binding rows: 18
    * actions x keyboard+gamepad (12 SNES buttons and 6 analog camera axes),
    * plus 6 gamepad-only host actions. Presentation then gained the diorama
-   * edge-margin-fix A/B toggle (SPEC-backdrop-clip.md), and navigation gained
+   * edge-margin-fix A/B toggle, and navigation gained
    * its separate off-by-default 3D scene switch. The in-game manual then added
    * two: the action that opens the reader, and its spreads/single-page choice.
    * The content randomizer then added eleven: master, seed and reroll on Seed;

@@ -133,5 +133,5 @@ for reg, (lo, hi) in [("$4210 RDNMI", (0x10, 0x42)), ("$4212 HVBJOY", (0x12, 0x4
               f" {', '.join(cpu_addr(o) for o in spins)}")
         print("  -> every other live site above must NEVER yield; if one appears"
               " in [vbl] output, the spin detector is false-pairing again"
-              " (DEBUG.md pacing-bug symptom row).\n")
+              " (possible pacing bug).\n")
 sys.exit(exit_code)

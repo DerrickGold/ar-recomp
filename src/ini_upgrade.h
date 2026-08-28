@@ -6,8 +6,8 @@
 
 /* Conservative, pure merging of shipped defaults into user-owned INI files.
  * Existing content is preserved; namespace sections receive missing keys,
- * while record sections receive only wholly absent records. See
- * docs/ini-upgrade.md for the archive layout and merge rationale. */
+ * while record sections receive only wholly absent records. This keeps bundle
+ * upgrades from overwriting user-authored settings or asset records. */
 
 typedef enum {
   kIniUpgrade_Namespaces = 0, /* config.ini: sections are key namespaces */

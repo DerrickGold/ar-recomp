@@ -1704,7 +1704,7 @@ const SettingDesc g_setting_descs[] = {
     kDioramaSky_Off, kDioramaSky_Both, 1, false,
     kDioramaSkyModeLabels, kDioramaSky_Count, Diorama_ModeIsOn, NULL,
     NULL, NULL },
-  /* One switch for all three parts of the margin fix (SPEC-backdrop-clip.md),
+  /* One switch for all three parts of the widescreen margin fix,
    * so the black wedge at a level bound can be A/B'd live: stand at the level
    * start and toggle. Default on; Off restores every pre-fix path byte for
    * byte, which is what makes it a usable comparison rather than a
@@ -1774,7 +1774,7 @@ const SettingDesc g_setting_descs[] = {
               kSettingCat_Presentation, 100, 0, 100, NULL, Diorama_ModeIsOn),
   /* Default off: the backdrop plane is a finite quad drawn behind everything,
    * and at a level bound the never-written margin columns read as an opaque
-   * black seam over the scene (SPEC-backdrop-clip.md contributor 3). With the
+   * black seam over the scene. With the
    * plane hidden the skybox/clear shows through instead, which is what the
    * tilted box wants in every mode. Turn it on to get the flat backdrop
    * colour back. */

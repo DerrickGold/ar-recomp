@@ -1,4 +1,4 @@
-/* Fix C (SPEC-backdrop-clip.md): geometry of the framebuffer margin-gap fill.
+/* Geometry of the framebuffer margin-gap fill.
  *
  * Every case is checked against a SENTINEL-filled buffer, so a test can tell
  * "wrote the fill colour", "left the pixel alone", and "wrote something else"

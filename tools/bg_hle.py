@@ -6,8 +6,7 @@ against live VRAM.
 Reads <prefix>.wram.bin + <prefix>.vram.bin and rebuilds every tilemap cell the
 snapshot's view displays, straight from WRAM, with no emulator in the loop. This
 is the oracle for SPEC-bg-hle: a disagreement is either an HLE error or a
-streaming bug (see docs/bug-ledger.md §37 for a case where it was the latter,
-and docs/rendering-engine.md §12b for the addressing it implements).
+streaming bug; docs/rendering-engine.md §12b records the addressing contract.
 
 HLE of $02:B8A0 -> $02:B95A, derived from disassembly. The level map is NOT in
 ROM: level entry expands it into WRAM bank $7E as a flat array of 256-byte

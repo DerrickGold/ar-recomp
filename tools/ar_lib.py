@@ -6,7 +6,7 @@ trace_slice.py). One canonical place for:
   - gen_meta.json sidecar loading (static decode facts)
   - docs/ram-map.md symbol table parsing (WRAM names)
   - a full 65816 disassembler with m/x width tracking
-  - the paired-return / construct-ret cfg-hazard guards (bug ledger §17 / DEBUG.md §1)
+  - paired-return and constructed-return cfg-hazard guards
 
 Address conventions: pc24 as int 0xBBAAAA or string "BBAAAA"; user-facing
 accepts "BB:AAAA", "BBAAAA", "$BB:AAAA", "AAAA" (bank required unless 24-bit).

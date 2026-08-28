@@ -107,7 +107,7 @@ uint32_t Sim3D_PlaneTextureUploadMask(
   return mask;
 }
 
-/* Shared with actraiser_rtl.c's margin-gap fill (Fix C, SPEC-backdrop-clip.md)
+/* Shared with actraiser_rtl.c's widescreen margin-gap fill
  * rather than duplicated there: both want "the colour the authentic renderer
  * shows for an unrendered pixel", and two copies of the 5-bit expansion would
  * be free to drift. Declared in sim3d.h. */
@@ -1169,8 +1169,7 @@ static void ApplyFixedColorAdd(void) {
 }
 
 /* With the gate no longer vetoing, a mismatch produces no view transition and
- * would otherwise be silent -- and `[sim3d-view]` was the whole first step of
- * the DEBUG.md playbook for this symptom. Report the edges only: mismatching
+ * would otherwise be silent. Report the edges only: mismatching
  * frames tend to arrive in runs, and one line per frame would bury the console
  * exactly when something is wrong. */
 static void ReportFidelityChange(uint32_t mismatch, uint16_t game_frame) {

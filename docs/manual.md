@@ -2,8 +2,8 @@
 
 This is the player and power-user reference for launching, configuration,
 controls, settings, developer tools, cheats, and asset replacement. For a first
-run, use the [quick start](../README.md#quick-start); the in-game settings
-overlay (`Esc`/`F1`) also explains each selected row.
+run, use the quick-start instructions beside the build launcher; the in-game
+settings overlay (`Esc`/`F1`) also explains each selected row.
 
 **Contents**
 
@@ -325,8 +325,9 @@ channels retain that same classification and mixer. BRK/COP requests enter a
 effect interpreter advances an isolated sequencer context for each allocated
 virtual voice. Voices 8-39 therefore carry overlapping effects while physical
 voices 0-7 remain dedicated to music. Exact duplicate posts from the same
-producer in one game frame are deliberately coalesced. See
-[`settings-system.md`](settings-system.md), "Audio control seams".
+producer in one game frame are deliberately coalesced. The game-facing audio
+identities and controls are catalogued in
+[`SEAMS.md`](SEAMS.md#audio--closest-to-a-clean-interface--start-here).
 
 Custom music (OGG streaming in place of SPC songs) is covered in
 [Asset replacement](#asset-replacement-hd-art--music) below.
@@ -465,10 +466,9 @@ Set the target before launch, enter a transition-capable state, then press
 inherit timing/object state; reproduce suspicious gameplay behavior through
 natural progression before classifying it as a game or widescreen regression.
 
-Everything else in `dev-config.ini`'s `[Debug]` section is diagnostic
-instrumentation for active bug-hunting, documented in
-[`DEBUG.md`](../DEBUG.md) — not gameplay-relevant, off by default, and safe to
-ignore unless you're debugging.
+Everything else in `dev-config.ini`'s `[Debug]` section is internal diagnostic
+instrumentation for active bug-hunting. It is not gameplay-relevant, is off by
+default, and is safe to ignore unless you are debugging the source checkout.
 
 ## Asset replacement (HD art & music)
 
@@ -534,8 +534,8 @@ ids, mix peaks). Full key reference: the manifest header and
 
 Note the licensing angle before sharing packs: files ripped from the original
 game (its soundtrack, its art) are copyrighted content and belong in the
-gitignored asset directories only — see
-[what can and can't be committed](contributing.md#what-can-and-cant-be-committed-here).
+gitignored asset directories only. The accompanying game license defines the
+boundary between original project material and ROM-derived content.
 
 ## Manual page-turn geometry
 

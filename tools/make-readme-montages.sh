@@ -33,7 +33,7 @@ echo "==> builder-stages.webp (the builder, three moments)"
 #
 # NOT dechrome'd, unlike every montage below. The browser chrome is the POINT
 # here: a visible 127.0.0.1 address bar is the fastest proof of the "nothing is
-# uploaded" claim (assets/SHOTLIST.md). Only the drop-shadow border comes off.
+# uploaded" claim. Only the drop-shadow border comes off.
 #
 # WEBP, also unlike the rest. These are UI captures over a smooth sky gradient,
 # which is close to the worst case for PNG: truecolour costs 7.8 MB, and

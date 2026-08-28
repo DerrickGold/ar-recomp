@@ -474,6 +474,27 @@ install(DIRECTORY ${GAME_ROOT}/src/ DESTINATION utils/src
     PATTERN ".DS_Store" EXCLUDE)
 install(DIRECTORY ${GAME_ROOT}/third_party/stb/ DESTINATION utils/third_party/stb
     PATTERN ".DS_Store" EXCLUDE)
+
+# Curated game documentation. This is an allowlist by design: public progress,
+# player guidance, and durable reverse-engineering knowledge ship with the
+# buildable source, while research ledgers, implementation plans, debugging
+# journals, and retired specifications remain outside the bundle.
+install(FILES ${GAME_ROOT}/LICENSE
+    DESTINATION utils/docs RENAME GAME-LICENSE.txt)
+install(FILES
+    ${GAME_ROOT}/docs/README.md
+    ${GAME_ROOT}/docs/manual.md
+    ${GAME_ROOT}/docs/progress.md
+    ${GAME_ROOT}/docs/SEAMS.md
+    ${GAME_ROOT}/docs/ram-map.md
+    ${GAME_ROOT}/docs/rom-map.md
+    ${GAME_ROOT}/docs/research-symbol-map.md
+    ${GAME_ROOT}/docs/rendering-engine.md
+    ${GAME_ROOT}/docs/save-format.md
+    ${GAME_ROOT}/docs/sim-object-catalog.md
+    ${GAME_ROOT}/docs/sim-town-terrain.md
+    ${GAME_ROOT}/docs/diorama-depth-shapes.md
+    DESTINATION utils/docs)
 # Vended runner SDK: generated/game sources compile against public headers and
 # link this target-matched archive. Private headers, implementation sources,
 # tests, examples, and source-build manifests intentionally do not ship.

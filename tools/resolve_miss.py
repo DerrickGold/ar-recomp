@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """resolve_miss.py — automated dispatch-miss triage -> cfg patch proposals.
 
-The mechanized DEBUG.md §1 registration decision tree. Feed it SNESRECOMP_TRACE_WATCH_FILE
+Mechanized dispatch-miss registration analysis. Feed it SNESRECOMP_TRACE_WATCH_FILE
 anomaly dumps (saves/anom_*.jsonl) and/or saves/dump_dispatch_log.json; for
 every missed target it runs the full hazard-class analysis and emits either a
 ready-to-paste cfg line with evidence, or a DO-NOT verdict:
