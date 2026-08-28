@@ -183,6 +183,8 @@ Native texture wrapping and renderer access are private to
 `platform/sdl/render_sdl_internal.h`. SDL-owned CRT, depth, shader, and frame-
 generation adapters may use that interop; game-side code and ordinary backend
 clients include only `render_sdl.h` and cannot unwrap opaque resources.
+Shared SDL shader-format selection also lives under `platform/sdl`; the game
+root exposes semantic effect contracts, not native GPU shader construction.
 
 Temporary target composition now has a portable scoped-target extension. It
 captures and restores the caller's target, viewport, and clip, and reports a
