@@ -486,23 +486,6 @@ SDL_Rect ComputePresentationViewportWithOutput(
       pixel_aspect == kPixelAspect_Crt43, visible_width, snes_height);
 }
 
-void ApplyLogicalPresentation(const FrameSlot *slot) {
-  if (!g_renderer) return;
-  /* The explicit Stretch path draws directly in output coordinates, and must
-   * leave logical presentation disabled so readback and host-owned overlays
-   * continue to use physical output pixels. Aspect-fit mode needs SDL's
-   * letterbox transform for the base framebuffer. */
-  if (slot->ignore_aspect_ratio) {
-    SDL_SetRenderLogicalPresentation(g_renderer, 0, 0,
-                                     SDL_LOGICAL_PRESENTATION_DISABLED);
-    return;
-  }
-  PresentationGeometry_ApplyLogical(
-      g_renderer, false,
-      slot->pixel_aspect == kPixelAspect_Crt43,
-      slot->visible_width, slot->snes_height);
-}
-
 static HudProjectionInputs BuildProjectionInputsFromSlot(const FrameSlot *slot) {
   HudProjectionInputs in = {0};
   in.hud_bg_texture = g_hud_bg_texture;
@@ -606,18 +589,28 @@ void PresentHudOverlayComposited(const FrameSlot *slot,
   int count = BuildHudPresentationChunks(local_viewport, &in, chunks);
   if (count <= 0) return;
 
-  if (!ArRenderDevice_SetRenderTarget(&g_render_device, composite)) return;
+  ArRenderTargetState target_state;
+  const ArRenderTargetBeginResult begin = ArRenderDevice_BeginTarget(
+      &g_render_device, composite, &target_state);
+  if (begin != kArRenderTargetBegin_Ready) {
+    if (begin == kArRenderTargetBegin_StateLost)
+      SessionFatal_Request(
+          "The renderer lost its scene target while beginning HUD composition "
+          "(%s). Restart the game; if this repeats, update your graphics "
+          "driver.", ArRenderDevice_LastError(&g_render_device));
+    return;
+  }
   const bool target_ready =
-      SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE) &&
-      SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 0) &&
-      SDL_RenderClear(g_renderer);
+      ArRenderDevice_UseOutputCoordinates(&g_render_device) &&
+      ArRenderDevice_Clear(
+          &g_render_device,
+          (ArRenderColorF){0.0f, 0.0f, 0.0f, 0.0f});
   if (target_ready) {
     for (int i = 0; i < count; i++)
       RenderHudChunk(chunks[i].texture, chunks[i].texture_source,
                      chunks[i].output_destination);
   }
-  if (!ArRenderDevice_SetRenderTarget(
-          &g_render_device, CrtPost_BaseTarget())) {
+  if (!ArRenderDevice_EndTarget(&g_render_device, &target_state)) {
     SessionFatal_Request(
         "The renderer could not restore its scene target after composing the "
         "HUD (%s). Restart the game; if this repeats, update your graphics "

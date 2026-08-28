@@ -35,7 +35,6 @@ typedef struct EffectBatch {
  * These stay DEFINED in present.c and lost their `static` for this header.
  * ComputePresentationViewport is already public in present.h — not repeated. */
 SDL_FRect ToFRect(SDL_Rect r);
-void ApplyLogicalPresentation(const FrameSlot *slot);
 void PresentHudOverlayComposited(const FrameSlot *slot, SDL_Rect viewport);
 void PresentCompositeScene(const FrameSlot *slot, float alpha);
 bool PresentAuthenticScene(const FrameSlot *slot, SDL_Rect viewport);
