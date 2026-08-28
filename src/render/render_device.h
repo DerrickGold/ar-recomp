@@ -127,6 +127,15 @@ bool ArRenderDevice_DrawSolidRect(ArRenderDevice *device,
                                   const ArRenderRectF *rectangle,
                                   ArRenderColorF color,
                                   ArRenderBlendMode blend);
+/* Convenience geometry for host guides and debug overlays. The segment is a
+ * screen-space quad of `thickness` pixels, so every backend gets the same
+ * behavior without growing the mandatory operation table with line drawing. */
+bool ArRenderDevice_DrawLine(ArRenderDevice *device,
+                             ArRenderPointF start,
+                             ArRenderPointF end,
+                             float thickness,
+                             ArRenderColorF color,
+                             ArRenderBlendMode blend);
 bool ArRenderDevice_Present(ArRenderDevice *device);
 const char *ArRenderDevice_LastError(const ArRenderDevice *device);
 

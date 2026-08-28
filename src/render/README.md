@@ -39,6 +39,8 @@ colour, so texture tint is intentionally limited to textured quads.
 `ArRenderDevice_DrawSolidRect` is a convenience geometry batch rather than an
 additional backend callback; it gives UI, backdrop, and overlay code explicit
 blend behavior without expanding the minimum adapter surface.
+`ArRenderDevice_DrawLine` follows the same rule for host guides and debug
+overlays, generating one screen-space quad so backends need no native line API.
 
 `ArRenderOutputFrame` is the corresponding frame-orchestration scope. It
 selects physical coordinates, validates the requested aspect-fit viewport,
@@ -112,6 +114,8 @@ and restores it through the scoped target/output contracts without capturing
 native draw state or relying on logical-presentation transforms.
 The diorama's flat HUD reconstruction target is likewise scoped through the
 device and restores the actual caller target instead of assuming a CRT target.
+Scene-inspector markers and action background-authoring guides now submit
+portable line geometry and do not capture or mutate native draw state.
 Action heat refraction is a portable mesh warp rather than a custom shader; its
 viewport-sized texture is now device-owned and uses the scoped-target contract
 plus portable geometry for both its warped and fallback resolves. CRT still

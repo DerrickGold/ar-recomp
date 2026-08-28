@@ -754,7 +754,8 @@ static void PresentSceneInspector(const FrameSlot *slot, SDL_Rect viewport) {
       ? HudSourceToOutputY(&hud_chunk, slot->inspector_selection.source_y)
       : InspectorScreenToOutputY(viewport, slot->inspector_selection.source_y, slot);
   int output_width = 0, output_height = 0;
-  SDL_GetRenderOutputSize(g_renderer, &output_width, &output_height);
+  (void)ArRenderDevice_GetOutputSize(
+      &g_render_device, &output_width, &output_height);
   bool same_output = output_width == slot->inspector_selection.output_width &&
                      output_height == slot->inspector_selection.output_height;
   int px = same_output ? slot->inspector_selection.output_x : projected_px;
@@ -762,12 +763,9 @@ static void PresentSceneInspector(const FrameSlot *slot, SDL_Rect viewport) {
   int anchor_dx = px - projected_px;
   int anchor_dy = py - projected_py;
 
-  SDL_BlendMode old_blend = SDL_BLENDMODE_NONE;
-  Uint8 old_r = 0, old_g = 0, old_b = 0, old_a = 0;
-  SDL_GetRenderDrawBlendMode(g_renderer, &old_blend);
-  SDL_GetRenderDrawColor(g_renderer, &old_r, &old_g, &old_b, &old_a);
-  SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND);
-  SDL_SetRenderDrawColor(g_renderer, 255, 192, 32, 255);
+  const ArRenderColorF gold = {
+    1.0f, 192.0f / 255.0f, 32.0f / 255.0f, 1.0f,
+  };
   /* Crosshair arms scale with the output (7 SNES pixels' worth at the
    * current viewport scale, min the historical 7px) — a fixed 7 output
    * pixels is near-invisible at 4K/high-density output. */
@@ -779,8 +777,14 @@ static void PresentSceneInspector(const FrameSlot *slot, SDL_Rect viewport) {
       : kInspectorCrosshairMinimumArmPixels;
   if (arm < kInspectorCrosshairMinimumArmPixels)
     arm = kInspectorCrosshairMinimumArmPixels;
-  SDL_RenderLine(g_renderer, (float)(px - arm), (float)py, (float)(px + arm), (float)py);
-  SDL_RenderLine(g_renderer, (float)px, (float)(py - arm), (float)px, (float)(py + arm));
+  (void)ArRenderDevice_DrawLine(
+      &g_render_device, (ArRenderPointF){(float)(px - arm), (float)py},
+      (ArRenderPointF){(float)(px + arm), (float)py},
+      1.0f, gold, kArRenderBlendMode_Alpha);
+  (void)ArRenderDevice_DrawLine(
+      &g_render_device, (ArRenderPointF){(float)px, (float)(py - arm)},
+      (ArRenderPointF){(float)px, (float)(py + arm)},
+      1.0f, gold, kArRenderBlendMode_Alpha);
 
   int x0, y0, x1, y1;
   if (SceneInspector_GetHighlight(&x0, &y0, &x1, &y1)) {
@@ -801,12 +805,28 @@ static void PresentSceneInspector(const FrameSlot *slot, SDL_Rect viewport) {
     if (have_rect) {
       rect.x += anchor_dx;
       rect.y += anchor_dy;
-      SDL_FRect rect_f = ToFRect(rect);
-      SDL_RenderRect(g_renderer, &rect_f);
+      const float x0f = (float)rect.x;
+      const float y0f = (float)rect.y;
+      const float x1f = (float)(rect.x + rect.w);
+      const float y1f = (float)(rect.y + rect.h);
+      (void)ArRenderDevice_DrawLine(
+          &g_render_device, (ArRenderPointF){x0f, y0f},
+          (ArRenderPointF){x1f, y0f}, 1.0f, gold,
+          kArRenderBlendMode_Alpha);
+      (void)ArRenderDevice_DrawLine(
+          &g_render_device, (ArRenderPointF){x1f, y0f},
+          (ArRenderPointF){x1f, y1f}, 1.0f, gold,
+          kArRenderBlendMode_Alpha);
+      (void)ArRenderDevice_DrawLine(
+          &g_render_device, (ArRenderPointF){x1f, y1f},
+          (ArRenderPointF){x0f, y1f}, 1.0f, gold,
+          kArRenderBlendMode_Alpha);
+      (void)ArRenderDevice_DrawLine(
+          &g_render_device, (ArRenderPointF){x0f, y1f},
+          (ArRenderPointF){x0f, y0f}, 1.0f, gold,
+          kArRenderBlendMode_Alpha);
     }
   }
-  SDL_SetRenderDrawBlendMode(g_renderer, old_blend);
-  SDL_SetRenderDrawColor(g_renderer, old_r, old_g, old_b, old_a);
   SettingsOverlay_RenderDebugPanel(
       "SCENE INSPECTOR", SceneInspector_PanelText(), (SDL_Point){ px, py });
 }
@@ -1771,11 +1791,6 @@ static void PresentActionBgExtentGuides(const FrameSlot *slot,
       &slot->action_bg_plan, guides, kActionBgTunerGuideMax);
   if (!count) return;
 
-  SDL_BlendMode old_blend = SDL_BLENDMODE_NONE;
-  Uint8 old_r = 0, old_g = 0, old_b = 0, old_a = 0;
-  SDL_GetRenderDrawBlendMode(g_renderer, &old_blend);
-  SDL_GetRenderDrawColor(g_renderer, &old_r, &old_g, &old_b, &old_a);
-  SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND);
   const float scale_x = (float)viewport.w / (float)slot->visible_width;
   const float scale_y =
       (float)viewport.h / (float)kFrameSlotAuthenticHeight;
@@ -1783,23 +1798,31 @@ static void PresentActionBgExtentGuides(const FrameSlot *slot,
       ((float)slot->visible_width - (float)kFrameSlotAuthenticWidth) * 0.5f;
   for (int i = 0; i < count; i++) {
     const ActionBgTunerGuide *guide = &guides[i];
-    if (guide->layer == 0)
-      SDL_SetRenderDrawColor(g_renderer, 48, 220, 255, 220);
-    else
-      SDL_SetRenderDrawColor(g_renderer, 255, 96, 48, 220);
+    const ArRenderColorF color = guide->layer == 0
+        ? (ArRenderColorF){48.0f / 255.0f, 220.0f / 255.0f,
+                           1.0f, 220.0f / 255.0f}
+        : (ArRenderColorF){1.0f, 96.0f / 255.0f,
+                           48.0f / 255.0f, 220.0f / 255.0f};
     float x0 = viewport.x + (authentic_x0 + guide->x0) * scale_x;
     float x1 = viewport.x + (authentic_x0 + guide->x1) * scale_x;
     float y0 = viewport.y + guide->y0 * scale_y;
     float y1 = viewport.y + guide->y1 * scale_y;
-    SDL_RenderLine(g_renderer, x0, y0, x1, y1);
+    (void)ArRenderDevice_DrawLine(
+        &g_render_device, (ArRenderPointF){x0, y0},
+        (ArRenderPointF){x1, y1}, 1.0f, color,
+        kArRenderBlendMode_Alpha);
     /* One adjacent line remains legible over both bright and dark pixel art. */
     if (guide->x0 == guide->x1)
-      SDL_RenderLine(g_renderer, x0 + 1.0f, y0, x1 + 1.0f, y1);
+      (void)ArRenderDevice_DrawLine(
+          &g_render_device, (ArRenderPointF){x0 + 1.0f, y0},
+          (ArRenderPointF){x1 + 1.0f, y1}, 1.0f, color,
+          kArRenderBlendMode_Alpha);
     else
-      SDL_RenderLine(g_renderer, x0, y0 + 1.0f, x1, y1 + 1.0f);
+      (void)ArRenderDevice_DrawLine(
+          &g_render_device, (ArRenderPointF){x0, y0 + 1.0f},
+          (ArRenderPointF){x1, y1 + 1.0f}, 1.0f, color,
+          kArRenderBlendMode_Alpha);
   }
-  SDL_SetRenderDrawColor(g_renderer, old_r, old_g, old_b, old_a);
-  SDL_SetRenderDrawBlendMode(g_renderer, old_blend);
 }
 
 static void PresentFpsCounter(const FrameSlot *slot, SDL_Point output_size,
