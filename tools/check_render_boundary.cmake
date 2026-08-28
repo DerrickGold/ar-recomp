@@ -92,6 +92,11 @@ if(_diorama_contents MATCHES
     list(APPEND _native_resource_violations
         "${GAME_SOURCE_ROOT}/diorama/diorama.c (ROM skybox cache)")
 endif()
+if(_diorama_contents MATCHES
+   "SDL_(Texture|Vertex|FColor|FPoint)|SDL_RenderGeometry|SDL_(Get|Set)TextureBlendMode|SDL_SetRenderTextureAddressMode|ArSdlRenderBackend_(Borrow|Unwrap)Texture")
+    list(APPEND _native_resource_violations
+        "${GAME_SOURCE_ROOT}/diorama/diorama.c (native mesh/resource submission)")
+endif()
 
 file(READ "${GAME_SOURCE_ROOT}/present_sim3d_shadows.c"
      _sim_shadow_contents)
