@@ -3,6 +3,7 @@
 #include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 _Static_assert(sizeof(int32_t) == sizeof(int),
@@ -487,15 +488,23 @@ bool ArSdlRenderBackend_Bind(ArRenderDevice *device,
 }
 
 bool ArSdlRenderBackend_CreateForWindow(ArRenderDevice *device,
-                                        ArSdlRenderBackend *backend,
                                         SDL_Window *window) {
-  if (!device || !backend || !window) {
+  if (!device || !window) {
     SDL_SetError("invalid SDL render backend creation request");
     return false;
   }
 
+  ArSdlRenderBackend *backend = calloc(1, sizeof(*backend));
+  if (!backend) {
+    SDL_SetError("out of memory creating SDL render backend");
+    return false;
+  }
+
   SDL_PropertiesID properties = SDL_CreateProperties();
-  if (!properties) return false;
+  if (!properties) {
+    free(backend);
+    return false;
+  }
   bool configured =
       SDL_SetStringProperty(properties,
           SDL_PROP_RENDERER_CREATE_NAME_STRING, SDL_GPU_RENDERER) &&
@@ -510,27 +519,34 @@ bool ArSdlRenderBackend_CreateForWindow(ArRenderDevice *device,
   SDL_Renderer *renderer =
       configured ? SDL_CreateRendererWithProperties(properties) : NULL;
   SDL_DestroyProperties(properties);
-  if (!renderer) return false;
+  if (!renderer) {
+    free(backend);
+    return false;
+  }
 
   if (!ArSdlRenderBackend_Bind(device, backend, renderer)) {
     SDL_DestroyRenderer(renderer);
+    free(backend);
     return false;
   }
   backend->owns_renderer = true;
+  backend->owns_context = true;
   return true;
 }
 
-void ArSdlRenderBackend_Destroy(ArRenderDevice *device,
-                                ArSdlRenderBackend *backend) {
-  if (!backend) {
+void ArSdlRenderBackend_Destroy(ArRenderDevice *device) {
+  if (!device || device->ops != &kSdlRenderOps || !device->context) {
     ArRenderDevice_Reset(device);
     return;
   }
+  ArSdlRenderBackend *backend = device->context;
   SDL_Renderer *renderer = backend->renderer;
   const bool owns_renderer = backend->owns_renderer;
+  const bool owns_context = backend->owns_context;
   ArRenderDevice_Reset(device);
   memset(backend, 0, sizeof(*backend));
   if (owns_renderer) SDL_DestroyRenderer(renderer);
+  if (owns_context) free(backend);
 }
 
 bool ArSdlRenderBackend_SetVSync(ArRenderDevice *device, int requested,
