@@ -2,9 +2,10 @@
 #define ACTION_EFFECT_RENDER_H
 
 #include <stdbool.h>
-#include <SDL3/SDL.h>
+#include <stdint.h>
 
 #include "action_effects.h"
+#include "render/render_types.h"
 
 enum {
   kActionEffectGlowSegments = 32,
@@ -14,7 +15,7 @@ enum {
   /* Each glow is one multi-ring gradient mesh, not a stack of overlapping
    * discs: a hot core ring, a body ring, and a transparent aura ring, joined
    * by triangle strips. Overlapping discs would double-blend along every
-   * shared edge under SDL_BLENDMODE_ADD and band visibly; a single mesh gives
+   * shared edge under additive blending and band visibly; a single mesh gives
    * a continuous falloff with one colour stop per ring. */
   kActionEffectGlowRings = 3,
   kActionEffectGlowVertices =
@@ -238,27 +239,27 @@ enum {
 
 typedef bool (*ActionEffectProjectPointFn)(
     void *userdata, const ActionEffectInstance *effect,
-    float local_x, float local_y, SDL_FPoint *point);
+    float local_x, float local_y, ArRenderPointF *point);
 
 /* Renderer-independent output. The game-specific module owns spell styles,
  * clocks and geometry while present.c owns only the backend submission. */
 typedef struct ActionEffectRenderBatch {
-  SDL_Vertex vertices[kActionEffectRenderMaxVertices];
-  int indices[kActionEffectRenderMaxIndices];
+  ArRenderVertex2D vertices[kActionEffectRenderMaxVertices];
+  int32_t indices[kActionEffectRenderMaxIndices];
   int vertex_count;
   int index_count;
 } ActionEffectRenderBatch;
 
 typedef struct ActionSceneEffectRenderBatch {
-  SDL_Vertex vertices[kActionSceneEffectRenderMaxVertices];
-  int indices[kActionSceneEffectRenderMaxIndices];
+  ArRenderVertex2D vertices[kActionSceneEffectRenderMaxVertices];
+  int32_t indices[kActionSceneEffectRenderMaxIndices];
   int vertex_count;
   int index_count;
 } ActionSceneEffectRenderBatch;
 
 typedef struct ActionHeatRenderMesh {
-  SDL_Vertex vertices[kActionHeatMeshVertices];
-  int indices[kActionHeatMeshIndices];
+  ArRenderVertex2D vertices[kActionHeatMeshVertices];
+  int32_t indices[kActionHeatMeshIndices];
   int vertex_count;
   int index_count;
 } ActionHeatRenderMesh;
@@ -294,7 +295,8 @@ bool ActionSceneDecorationRender_Build(
  * source texture for subtle lower-screen heat refraction. The outer edge is
  * pinned exactly, so the mesh cannot sample beyond the scene target or pull
  * letterbox pixels into the game image. */
-bool ActionHeatRender_Build(uint16_t game_frame, SDL_Rect output_viewport,
+bool ActionHeatRender_Build(uint16_t game_frame,
+                            ArRenderRectI output_viewport,
                             int target_width, int target_height,
                             int source_width,
                             ActionHeatRenderMesh *mesh);

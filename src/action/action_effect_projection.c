@@ -1,5 +1,7 @@
 #include "action_effect_projection.h"
 
+#include "diorama/diorama.h"
+
 static void AddRequiredObjPriorities(
     uint8_t *mask, const ActionEffectInstance *effects, uint8_t count,
     uint8_t capacity, bool overflow) {
@@ -70,7 +72,7 @@ uint32_t ActionEffectProjection_RequiredBgPlaneMask(
 
 bool ActionEffectProjection_ProjectPoint(
     void *userdata, const ActionEffectInstance *effect,
-    float local_x, float local_y, SDL_FPoint *point) {
+    float local_x, float local_y, ArRenderPointF *point) {
   const ActionEffectProjectionContext *context = userdata;
   if (!context || !effect || !point) return false;
 
@@ -91,21 +93,27 @@ bool ActionEffectProjection_ProjectPoint(
     /* Texture row zero represents screen y=-ws_extra_top. Flat mode keeps
      * authentic screen Y and therefore intentionally ignores this margin. */
     const float texture_y = capture_y + (float)context->ws_extra_top;
+    SDL_FPoint projected;
+    bool valid;
     if (effect->projection_plane == kActionEffectProjectionPlane_Bg1)
-      return Diorama_ProjectCapturedBg1Point(
+      valid = Diorama_ProjectCapturedBg1Point(
           context->diorama_projection, capture_x, texture_y,
-          point, NULL, NULL);
-    if (effect->projection_plane == kActionEffectProjectionPlane_Bg2)
-      return Diorama_ProjectCapturedBg2Point(
+          &projected, NULL, NULL);
+    else if (effect->projection_plane == kActionEffectProjectionPlane_Bg2)
+      valid = Diorama_ProjectCapturedBg2Point(
           context->diorama_projection, capture_x, texture_y,
-          point, NULL, NULL);
-    if (effect->projection_plane == kActionEffectProjectionPlane_Bg1High)
-      return Diorama_ProjectCapturedBg1HighPoint(
+          &projected, NULL, NULL);
+    else if (effect->projection_plane ==
+             kActionEffectProjectionPlane_Bg1High)
+      valid = Diorama_ProjectCapturedBg1HighPoint(
           context->diorama_projection, capture_x, texture_y,
-          point, NULL, NULL);
-    return Diorama_ProjectCapturedPoint(
-        context->diorama_projection, capture_x, texture_y,
-        effect->obj_priority, point, NULL, NULL);
+          &projected, NULL, NULL);
+    else
+      valid = Diorama_ProjectCapturedPoint(
+          context->diorama_projection, capture_x, texture_y,
+          effect->obj_priority, &projected, NULL, NULL);
+    if (valid) *point = (ArRenderPointF){projected.x, projected.y};
+    return valid;
   }
 
   if (context->visible_width <= 0 || context->snes_height <= 0 ||
