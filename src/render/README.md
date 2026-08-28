@@ -81,6 +81,8 @@ remain responsibilities of the selected platform host.
 The SDL backend also owns creation and destruction of its native renderer.
 Its concrete context is private and backend-allocated; application boot stores
 only the portable `ArRenderDevice` rather than embedding an SDL backend struct.
+Backend creation rejects an already-bound device, and SDL teardown refuses to
+clear a foreign backend; callers must destroy the active owner before swapping.
 Host display policy applies logical presentation, vsync, and allowed frames in
 flight through device-scoped SDL adapter operations; native renderer and GPU
 device pointers are no longer process globals. Developer readback resolves the
