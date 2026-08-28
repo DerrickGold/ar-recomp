@@ -6,7 +6,7 @@
 
 #include "constants.h"
 #include "gpu_shader_blob.h"
-#include "platform/sdl/render_sdl.h"
+#include "platform/sdl/render_sdl_internal.h"
 #include "session_fatal.h"
 #include "shaders/crt_frag.h"
 

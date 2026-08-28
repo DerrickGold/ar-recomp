@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "platform/sdl/render_sdl.h"
+#include "platform/sdl/render_sdl_internal.h"
 #include "sim/sim3d_depth_pass.h"
 
 enum {

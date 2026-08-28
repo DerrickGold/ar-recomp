@@ -5,7 +5,7 @@
 #include <string.h>
 
 #include "gpu_shader_blob.h"
-#include "platform/sdl/render_sdl.h"
+#include "platform/sdl/render_sdl_internal.h"
 #include "shaders/sim_shadow_blur_frag.h"
 
 static const GpuShaderBlobs kSimShadowBlurBlobs = {

@@ -1,4 +1,4 @@
-#include "platform/sdl/render_sdl.h"
+#include "platform/sdl/render_sdl_internal.h"
 
 #include <SDL3/SDL.h>
 #include <assert.h>

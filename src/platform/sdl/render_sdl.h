@@ -15,15 +15,4 @@ bool ArSdlRenderBackend_Bind(ArRenderDevice *device,
                              ArSdlRenderBackend *backend,
                              SDL_Renderer *renderer);
 
-/* Platform services implemented alongside this adapter use the bound native
- * renderer without exposing it to game-side rendering contracts. Returns
- * NULL for a device owned by another backend. */
-SDL_Renderer *ArSdlRenderBackend_Renderer(const ArRenderDevice *device);
-
-/* Temporary migration bridge for SDL textures not yet owned by the portable
- * render device. It is intentionally confined to the SDL platform header and
- * disappears as each presentation subsystem moves behind the device. */
-ArRenderTexture ArSdlRenderBackend_BorrowTexture(SDL_Texture *texture);
-SDL_Texture *ArSdlRenderBackend_UnwrapTexture(ArRenderTexture texture);
-
 #endif /* AR_PLATFORM_SDL_RENDER_SDL_H */

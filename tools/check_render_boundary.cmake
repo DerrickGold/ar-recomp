@@ -82,6 +82,31 @@ if(_violations)
         "Move native types and calls behind src/platform/sdl/.")
 endif()
 
+# Native renderer/texture access is an implementation detail of SDL-owned
+# adapters. Focused tests may include the internal header, but no game or host
+# source outside platform/sdl may acquire a native graphics handle.
+file(GLOB_RECURSE _game_source_files
+    "${GAME_SOURCE_ROOT}/*.c"
+    "${GAME_SOURCE_ROOT}/*.h")
+set(_sdl_internal_violations "")
+foreach(_file IN LISTS _game_source_files)
+    if(_file MATCHES "/platform/sdl/")
+        continue()
+    endif()
+    file(READ "${_file}" _contents)
+    if(_contents MATCHES "platform/sdl/render_sdl_internal.h" OR
+       _contents MATCHES "ArSdlRenderBackend_(Borrow|Unwrap)Texture" OR
+       _contents MATCHES "ArSdlRenderBackend_Renderer")
+        list(APPEND _sdl_internal_violations "${_file}")
+    endif()
+endforeach()
+if(_sdl_internal_violations)
+    list(JOIN _sdl_internal_violations "\n  " _formatted)
+    message(FATAL_ERROR
+        "Game/host source reached into SDL-native render interop:\n  "
+        "${_formatted}\nKeep native handles inside src/platform/sdl/.")
+endif()
+
 # Persistent game-facing presentation resources must not regress from opaque
 # handles while the surrounding presentation code is migrated incrementally.
 # Private effect/render-target textures are intentionally out of scope until

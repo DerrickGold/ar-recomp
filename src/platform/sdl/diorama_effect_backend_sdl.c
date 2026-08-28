@@ -6,7 +6,7 @@
 #include <string.h>
 
 #include "gpu_shader_blob.h"
-#include "platform/sdl/render_sdl.h"
+#include "platform/sdl/render_sdl_internal.h"
 #include "shaders/blur_frag.h"
 #include "shaders/dof_edge_frag.h"
 #include "shaders/rim_frag.h"
