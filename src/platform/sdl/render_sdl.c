@@ -1,4 +1,4 @@
-#include "render_sdl.h"
+#include "render_sdl_internal.h"
 
 #include <limits.h>
 #include <stddef.h>

@@ -7,7 +7,7 @@
 
 #include "present.h"
 #include "platform/sdl/presentation_geometry_sdl.h"
-#include "platform/sdl/render_sdl.h"
+#include "platform/sdl/render_sdl_internal.h"
 #include "presentation_frame_generation.h"
 
 enum {

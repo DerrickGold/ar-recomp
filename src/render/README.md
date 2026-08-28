@@ -167,8 +167,10 @@ still uses the SDL-free semantic contract in `crt_post.h`; frame orchestration
 owns player policy while `platform/sdl/crt_post_sdl.c` owns the preferred-format
 scene target, shader formats, render state, and target-local presentation
 plumbing. The scene target is exposed to composition only as an opaque handle.
-The bridge is a transition aid, not part of a game-facing contract. New
-renderer-facing code must not add another borrowed native resource.
+Native texture wrapping and renderer access are private to
+`platform/sdl/render_sdl_internal.h`. SDL-owned CRT, depth, shader, and frame-
+generation adapters may use that interop; game-side code and ordinary backend
+clients include only `render_sdl.h` and cannot unwrap opaque resources.
 
 Temporary target composition now has a portable scoped-target extension. It
 captures and restores the caller's target, viewport, and clip, and reports a
@@ -177,14 +179,13 @@ the first consumer, followed by the diorama crisp-AA supersample and action
 heat-refraction passes; backends without the optional capability omit these
 enhancements and retain their established fallbacks.
 
-The remaining migration should proceed in independently testable slices:
-
-1. Remove native rectangle types from the remaining flat/action and host-UI
-   presentation-facing interfaces.
-2. Move viewport calculation and presentation utilities to their appropriate
-   portable or platform-owned boundary.
-3. Remove the SDL borrow/unwrap bridge after its final platform consumer is
-   gone.
+All current game-side frame composition, layout, viewport, effect geometry,
+resource ownership, and present submission paths now cross portable contracts.
+Remaining native rendering work is platform-owned: developer screenshot/
+readback still belongs in an SDL host adapter, while optional SDL GPU effects
+and frame generation intentionally retain internal native-resource interop.
+Future backends can omit those enhancements or implement their corresponding
+semantic adapter contracts without exposing native handles to the game.
 
 Each slice should preserve the replay state hashes, pass synthetic and real-PPU
 render tests, and be measured against the checked-in replay performance gate.

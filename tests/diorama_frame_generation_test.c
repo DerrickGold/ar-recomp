@@ -4,7 +4,7 @@
 #include <string.h>
 
 #include "diorama/diorama_frame_generation.h"
-#include "platform/sdl/render_sdl.h"
+#include "platform/sdl/render_sdl_internal.h"
 #include "present.h"
 
 static int failures;
