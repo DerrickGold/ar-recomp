@@ -466,9 +466,19 @@ const char *RtlGameIdentifier(void) {
 }
 
 bool RtlGameDrawPpuFrame(void) {
+    if (g_snes != NULL) g_snes->diagnosticDrawRequested = true;
     if (g_rtl_game_execution == NULL ||
-        g_rtl_game_execution->draw_ppu_frame == NULL)
+        g_rtl_game_execution->draw_ppu_frame == NULL) {
+        if (g_snes != NULL && !g_snes->diagnosticMissingDrawReported) {
+            g_snes->diagnosticMissingDrawReported = true;
+            fprintf(stderr,
+                    "[runner] the host requested a PPU frame, but the game "
+                    "registered no draw_ppu_frame callback.\n"
+                    "[runner] Set RtlGameExecutionApi.draw_ppu_frame, or do "
+                    "not request video for an intentional headless run.\n");
+        }
         return false;
+    }
     g_rtl_game_execution->draw_ppu_frame();
     return true;
 }

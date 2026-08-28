@@ -39,6 +39,16 @@ ARTIFACTS = (
     "dump_dispatch_log.json",
 )
 
+# These are recovery paths, not ordinary diagnostics. The runner deliberately
+# reports them once and returns so an initial port remains inspectable, which
+# means exit status alone cannot keep a mature game's replay gate honest.
+HARD_RUNTIME_DIAGNOSTICS = (
+    "[dispatch-oob]",
+    "[indirect-unresolved]",
+    "[unresolved-stub]",
+    "[unresolved-goto]",
+)
+
 
 @dataclass(frozen=True)
 class Workload:
@@ -236,6 +246,16 @@ def run_once(
             raise RuntimeError(
                 f"runner exited {result.returncode}\n--- runner output ---\n"
                 f"{result.stdout[-12000:]}"
+            )
+        hard_diagnostics = [
+            line for line in result.stdout.splitlines()
+            if any(marker in line for marker in HARD_RUNTIME_DIAGNOSTICS)
+        ]
+        if hard_diagnostics:
+            raise RuntimeError(
+                "runner reached a hard recompiler diagnostic:\n  "
+                + "\n  ".join(hard_diagnostics)
+                + f"\n--- runner output ---\n{result.stdout[-12000:]}"
             )
         missing_output = [
             marker for marker in workload.required_output

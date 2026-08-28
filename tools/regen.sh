@@ -22,16 +22,22 @@ if [ -n "${SNESBUILD:-}" ]; then
   exec "$SNESBUILD" "${DRIVER_ARGS[@]}"
 fi
 
+# This is a developer/source-checkout compatibility wrapper, so prefer the
+# checked-out Go implementation when it is available. A bundled host driver
+# can legitimately lag local source edits and would otherwise appear to
+# regenerate successfully with yesterday's generator. Release automation that
+# intentionally selects a downloaded binary invokes it directly (or sets
+# SNESBUILD above).
+GO_COMMAND="${GO:-$(command -v go || true)}"
+if [ -n "$GO_COMMAND" ]; then
+  exec "$GO_COMMAND" -C "$ROOT/snesrecomp-go" run ./cmd/snesbuild "${DRIVER_ARGS[@]}"
+fi
+
 HOST_DRIVER="$ROOT/snesrecomp-go/build/snesbuild"
 if [ -x "$HOST_DRIVER" ]; then
   exec "$HOST_DRIVER" "${DRIVER_ARGS[@]}"
 fi
 
-GO_COMMAND="${GO:-$(command -v go || true)}"
-if [ -z "$GO_COMMAND" ]; then
-  echo "regen.sh: no snesbuild binary or Go toolchain found" >&2
-  echo "Download snesbuild for this platform or set SNESBUILD=/path/to/snesbuild." >&2
-  exit 1
-fi
-
-exec "$GO_COMMAND" -C "$ROOT/snesrecomp-go" run ./cmd/snesbuild "${DRIVER_ARGS[@]}"
+echo "regen.sh: no snesbuild binary or Go toolchain found" >&2
+echo "Download snesbuild for this platform or set SNESBUILD=/path/to/snesbuild." >&2
+exit 1

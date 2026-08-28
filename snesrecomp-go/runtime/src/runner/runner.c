@@ -170,3 +170,15 @@ static const SrComponentHandle *component_handle(const void *component) {
 #include "runner_ppu.inc"
 #include "runner_state.inc"
 
+const char *sr_result_string(SrResult result) {
+    switch (result) {
+        case SR_RESULT_OK: return "ok";
+        case SR_RESULT_INVALID_ARGUMENT: return "invalid-argument";
+        case SR_RESULT_UNSUPPORTED: return "unsupported";
+        case SR_RESULT_UNAVAILABLE: return "unavailable";
+        case SR_RESULT_STALE_VIEW: return "stale-view";
+        case SR_RESULT_PENDING: return "pending";
+        case SR_RESULT_BUSY: return "busy";
+        default: return "unknown";
+    }
+}

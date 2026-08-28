@@ -1,9 +1,15 @@
 #include "example_game.h"
 
 #include "snesrecomp/game/bootstrap.h"
+#include "snesrecomp/game/required_symbols.h"
 #include "snesrecomp/game_runtime.h"
 
 #include <stdbool.h>
+
+/* These no-ops are valid only while every APU path is confined to the
+ * emulation thread. A frontend with an audio thread must use its real lock. */
+void RtlApuLock(void) {}
+void RtlApuUnlock(void) {}
 
 static void ExampleRunFrame(void) {
     /* Enter the recompiled game's host-resumable frame loop here. */

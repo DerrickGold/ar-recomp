@@ -80,7 +80,25 @@ static void test_xtrace_and_warnings(void) {
     check(sr_dispatch_oob_warn(&cpu, 0x018123u, 9u) ==
               RECOMP_RETURN_NORMAL,
           "dispatch OOB remains a soft diagnostic");
+    check(sr_unresolved_indirect_jump(&cpu, 0x018200u) ==
+              RECOMP_RETURN_NORMAL,
+          "unresolved indirect jump remains a soft diagnostic");
+    check(sr_unresolved_indirect_jump(&cpu, 0x018200u) ==
+              RECOMP_RETURN_NORMAL,
+          "repeated unresolved indirect jump remains soft");
+    check(sr_unresolved_stub_warn(&cpu, 0x011234u, "stub") ==
+              RECOMP_RETURN_NORMAL,
+          "unresolved stub remains a soft diagnostic");
+    check(sr_unresolved_goto_warn(&cpu, 0x018300u, 0x018400u,
+                                  "source", "target") ==
+              RECOMP_RETURN_NORMAL,
+          "unresolved goto remains a soft diagnostic");
+    check(sr_diagnostic_trap_warning_count() == 3u,
+          "unresolved diagnostics deduplicate sites and targets");
     sr_garbage_variant_trap(&cpu, "bad-variant", 0x018123u);
+    sr_diagnostic_reset();
+    check(sr_diagnostic_trap_warning_count() == 0u,
+          "diagnostic reset clears once-per-site traps");
 }
 
 static void test_stack_trace_window(void) {

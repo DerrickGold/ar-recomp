@@ -6,6 +6,7 @@ import (
 
 	"github.com/DerrickGold/snesrecomp-go/internal/codegen"
 	"github.com/DerrickGold/snesrecomp-go/internal/config"
+	"github.com/DerrickGold/snesrecomp-go/internal/cpu65816"
 	"github.com/DerrickGold/snesrecomp-go/internal/rom"
 )
 
@@ -122,4 +123,47 @@ func TestEquivalentVariantCoverageIsCollected(t *testing.T) {
 		}
 	}
 	t.Fatalf("missing M-only equivalence %#v in %#v", want, result.Equivalences)
+}
+
+func TestUnresolvedIndirectJumpUsesItsOwnDiagnostic(t *testing.T) {
+	// JMP ($1234) has no statically declared target set in this fixture.
+	source := emitTestFunction(t, []byte{0x6c, 0x34, 0x12},
+		FunctionOptions{Name: "Indirect", UnresolvedAllowed: true})
+	if !strings.Contains(source,
+		"cpu_trace_unresolved_indirect_jump(cpu, 0x008000)") {
+		t.Fatalf("unresolved indirect jump did not use its dedicated trap:\n%s",
+			source)
+	}
+	if strings.Contains(source, "0xFFFF") ||
+		strings.Contains(source, "cpu_trace_dispatch_oob") {
+		t.Fatalf("unresolved indirect jump still masquerades as dispatch OOB:\n%s",
+			source)
+	}
+}
+
+func TestCfgDispatchInvalidTargetStillCreatesEmittedDemand(t *testing.T) {
+	context := codegen.NewContext()
+	instruction := &cpu65816.Instruction{
+		Address:         0x008000,
+		DispatchKind:    "long",
+		DispatchEntries: []uint32{0x001234},
+	}
+	source := strings.Join(emitJSLDispatch(context, instruction), "\n")
+	want := codegen.Variant{Address: 0x001234, M: 1, X: 1}
+	if _, found := context.Demands[want]; !found {
+		t.Fatalf("cfg dispatch target did not create emitted demand: %#v", want)
+	}
+	if !strings.Contains(source, "bank_00_1234_M1X1(cpu)") {
+		t.Fatalf("cfg dispatch target call was not emitted:\n%s", source)
+	}
+}
+
+func TestInvalidCrossBankLongJumpUsesLoudTrap(t *testing.T) {
+	// JML $00:1234 is outside the supported static LoROM code window.
+	source := emitTestFunction(t, []byte{0x5c, 0x34, 0x12, 0x00},
+		FunctionOptions{Name: "LongJump", UnresolvedAllowed: true})
+	if !strings.Contains(source,
+		"cpu_trace_unresolved_stub_trap(cpu, 0x001234") {
+		t.Fatalf("invalid cross-bank JML remained silent:\n%s", source)
+	}
 }

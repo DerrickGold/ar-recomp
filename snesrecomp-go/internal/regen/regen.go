@@ -155,13 +155,7 @@ func Run(options Options) (Report, error) {
 	for _, bankResults := range results {
 		report.Functions += len(bankResults)
 	}
-	for _, context := range contexts {
-		for demand := range context.Demands {
-			if repo.byBank[canonicalBank(repo.byBank, byte(demand.Address>>16))] == nil {
-				repo.unresolved[demand] = struct{}{}
-			}
-		}
-	}
+	repo.recordUnresolvedEmittedDemands(contexts)
 
 	files, changed, unresolved, err := repo.writeOutputs(options, results)
 	if err != nil {
@@ -484,13 +478,17 @@ func (repo *repository) applyDemands(demands map[codegen.Variant]struct{}) int {
 	for _, demand := range keys {
 		address := demand.Address & 0xffffff
 		pc := uint16(address)
-		if pc < 0x8000 || int(byte(address>>16)&0x7f)*0x8000+int(pc-0x8000) >= len(repo.image) {
+		offset, offsetErr := rom.LoROMOffset(byte(address>>16), pc)
+		if offsetErr != nil || offset < 0 || offset >= len(repo.image) {
+			// The ordinary direct-call emitter diagnoses invalid LoROM
+			// operands inline. Do not create an unreferenced external stub
+			// merely because the decoder discovered one; symbolic emitted
+			// demands are classified after emission below.
 			continue
 		}
 		bankID := canonicalBank(repo.byBank, byte(address>>16))
 		bank := repo.byBank[bankID]
 		if bank == nil {
-			repo.unresolved[demand] = struct{}{}
 			continue
 		}
 		if repo.inDataRegion(bankID, pc) {
@@ -525,6 +523,31 @@ func (repo *repository) applyDemands(demands map[codegen.Variant]struct{}) int {
 		repo.rebuildNames()
 	}
 	return added
+}
+
+// recordUnresolvedEmittedDemands is deliberately driven by emission, not by
+// decoder discovery. Direct calls to invalid LoROM operands diagnose inline
+// and therefore need no external body; cfg-authorized dispatch paths still
+// emit symbolic calls and do. A valid address inside an explicit data_region
+// is also unemittable and must use the same trap body if an authored dispatch
+// refers to it.
+func (repo *repository) recordUnresolvedEmittedDemands(
+	contexts []*codegen.Context) {
+	for _, context := range contexts {
+		if context == nil {
+			continue
+		}
+		for demand := range context.Demands {
+			address := demand.Address & 0xffffff
+			pc := uint16(address)
+			offset, offsetErr := rom.LoROMOffset(byte(address>>16), pc)
+			bankID := canonicalBank(repo.byBank, byte(address>>16))
+			if offsetErr != nil || offset < 0 || offset >= len(repo.image) ||
+				repo.byBank[bankID] == nil || repo.inDataRegion(bankID, pc) {
+				repo.unresolved[demand] = struct{}{}
+			}
+		}
+	}
 }
 
 func canonicalBank(banks map[byte]*bankState, bank byte) byte {

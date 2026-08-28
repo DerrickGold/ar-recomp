@@ -29,6 +29,13 @@ void sr_garbage_variant_trap(CpuState *cpu, const char *function_name,
                              uint32 pc24);
 RecompReturn sr_dispatch_oob_warn(CpuState *cpu, uint32 site_pc24,
                                   uint16 index);
+RecompReturn sr_unresolved_indirect_jump(CpuState *cpu, uint32 site_pc24);
+RecompReturn sr_unresolved_stub_warn(CpuState *cpu, uint32 target_pc24,
+                                     const char *function_name);
+RecompReturn sr_unresolved_goto_warn(CpuState *cpu, uint32 source_pc24,
+                                     uint32 target_pc24,
+                                     const char *function_name,
+                                     const char *target_label);
 int sr_block_history_with_aux(uint32 *pc, uint32 *aux, int maximum);
 int sr_block_history_with_stack(uint32 *pc, uint32 *aux, uint16 *stack, int maximum);
 int sr_x_transition_trace_enabled(void);
@@ -48,6 +55,7 @@ int sr_vram_watch(uint16 address, uint8 value);
 void sr_diagnostic_reset(void);
 uint32 sr_mx_history_count(uint32 pc24, int m, int x);
 unsigned sr_x_transition_trace_count(void);
+unsigned sr_diagnostic_trap_warning_count(void);
 
 #ifdef __cplusplus
 }

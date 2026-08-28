@@ -285,7 +285,10 @@ func EmitFunction(image rom.Image, bank byte, start uint16, entryM, entryX uint8
 						targetAddress := instruction.Operand & 0xffffff
 						targetName := context.Names[targetAddress]
 						if targetName == "" && !validLoROMCodeAddress(image, targetAddress) {
-							lines = append(lines, fmt.Sprintf("return RECOMP_RETURN_NORMAL; /* cross-bank JML to $%06X skipped — not a valid LoROM code address (decoder followed garbage operand past an RTS) */", targetAddress))
+							lines = append(lines, fmt.Sprintf(
+								"return cpu_trace_unresolved_stub_trap(cpu, 0x%06x, \"bank_%02X_%04X\"); /* cross-bank JML target is outside the static LoROM code domain */",
+								targetAddress, byte(targetAddress>>16),
+								uint16(targetAddress)))
 							terminated = true
 							break
 						}
@@ -308,7 +311,7 @@ func EmitFunction(image rom.Image, bank byte, start uint16, entryM, entryX uint8
 					} else if helper := options.HLEDispatch[uint16(instruction.Address)]; helper != "" {
 						lines = append(lines, fmt.Sprintf("{ extern RecompReturn %s(CpuState *cpu); RecompReturn _r = %s(cpu); RecompStackPop(); return _r; } /* hle_dispatch $%06X — host-side dispatcher */", helper, helper, instruction.Address&0xffffff))
 					} else {
-						lines = append(lines, fmt.Sprintf("return cpu_trace_dispatch_oob(cpu, 0x%06x, 0xFFFF); /* unresolved IndirectGoto — HLE pending */", instruction.Address&0xffffff))
+						lines = append(lines, fmt.Sprintf("return cpu_trace_unresolved_indirect_jump(cpu, 0x%06x); /* unresolved IndirectGoto — declare a target set or route with hle_dispatch */", instruction.Address&0xffffff))
 					}
 					terminated = true
 				case ir.PushReg:

@@ -155,7 +155,11 @@ func emitCall(context *Context, op ir.Call) []string {
 	address := *op.Target & 0xffffff
 	if invalidLoROMTarget(context, address) {
 		context.Rejected[address] = struct{}{}
-		return []string{fmt.Sprintf("/* Call: target $%06X not a valid LoROM code address and no cfg name — skipped (decoder followed garbage operand past an RTS) */", address)}
+		name := fmt.Sprintf("bank_%02X_%04X", byte(address>>16),
+			uint16(address))
+		return []string{fmt.Sprintf(
+			"(void)cpu_trace_unresolved_stub_trap(cpu, 0x%06x, \"%s\"); /* direct call target is outside the static LoROM code domain */",
+			address, name)}
 	}
 	baseName := context.Names[address]
 	if baseName == "" {

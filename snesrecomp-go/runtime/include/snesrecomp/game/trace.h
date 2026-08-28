@@ -84,6 +84,22 @@ enum {
  * heavyweight trace runtime. */
 void cpu_trace_block(CpuState *cpu, uint32 pc24);
 
+/* Recompiler traps report once per site (or unresolved target for shared stub
+ * bodies) in EVERY build. These used to be
+ * silent no-ops unless SNESRECOMP_TRACE was on, which meant a trap firing
+ * during ordinary bring-up produced nothing and the failure only showed up
+ * later as corruption or a hang. Each message names the cfg directive that
+ * resolves it. */
+RecompReturn sr_unresolved_indirect_jump(CpuState *cpu, uint32 site_pc24);
+RecompReturn sr_unresolved_stub_warn(CpuState *cpu, uint32 target_pc24,
+                                     const char *function_name);
+RecompReturn sr_unresolved_goto_warn(CpuState *cpu, uint32 source_pc24,
+                                     uint32 target_pc24,
+                                     const char *function_name,
+                                     const char *target_label);
+RecompReturn sr_dispatch_oob_warn(CpuState *cpu, uint32 site_pc24,
+                                  uint16 index);
+
 #if SNESRECOMP_TRACE
 uint64 cpu_trace_init(void);
 uint64 boundary_audit_init(void);
@@ -111,6 +127,8 @@ RecompReturn cpu_trace_unresolved_stub_trap(
     CpuState *cpu, uint32 target_pc24, const char *function_name);
 RecompReturn cpu_trace_dispatch_oob(CpuState *cpu, uint32 site_pc24,
                                     uint16 index);
+RecompReturn cpu_trace_unresolved_indirect_jump(
+    CpuState *cpu, uint32 site_pc24);
 #else
 static inline uint64 cpu_trace_init(void) { return 0u; }
 static inline uint64 boundary_audit_init(void) { return 0u; }
@@ -157,20 +175,20 @@ static inline void cpu_trace_offrails(const char *tag, uint32 hint) {
     (void)tag; (void)hint;
 }
 static inline int cpu_trace_offrails_count(void) { return 0; }
+static inline RecompReturn cpu_trace_unresolved_indirect_jump(
+    CpuState *cpu, uint32 site_pc24) {
+    return sr_unresolved_indirect_jump(cpu, site_pc24);
+}
 static inline RecompReturn cpu_trace_unresolved_goto_trap(
     CpuState *cpu, uint32 source_pc24, uint32 target_pc24,
     const char *function_name, const char *target_label) {
-    (void)cpu; (void)source_pc24; (void)target_pc24;
-    (void)function_name; (void)target_label;
-    return RECOMP_RETURN_NORMAL;
+    return sr_unresolved_goto_warn(cpu, source_pc24, target_pc24,
+                                   function_name, target_label);
 }
 static inline RecompReturn cpu_trace_unresolved_stub_trap(
     CpuState *cpu, uint32 target_pc24, const char *function_name) {
-    (void)cpu; (void)target_pc24; (void)function_name;
-    return RECOMP_RETURN_NORMAL;
+    return sr_unresolved_stub_warn(cpu, target_pc24, function_name);
 }
-RecompReturn sr_dispatch_oob_warn(CpuState *cpu, uint32 site_pc24,
-                                  uint16 index);
 static inline RecompReturn cpu_trace_dispatch_oob(CpuState *cpu,
                                                    uint32 site_pc24,
                                                    uint16 index) {

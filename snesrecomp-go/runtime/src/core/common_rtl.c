@@ -202,6 +202,10 @@ void RtlSetAudioOutputRate(int hz) {
 
 int RtlGetAudioOutputRate(void) { return g_audio_output_rate; }
 
+/* Late enough that a legitimate black boot sequence has finished, early
+ * enough to be the first thing a developer sees. */
+enum { kSrSilentCanvasFrameLimit = 120 };
+
 bool RtlRunFrame(uint32 inputs) {
     if (g_snes != NULL) {
         g_snes->abiFrameCounter = snes_frame_counter >= 0
@@ -235,6 +239,37 @@ bool RtlRunFrame(uint32 inputs) {
     if (g_framedump_callback != NULL)
         g_framedump_callback((uint32)snes_frame_counter, g_ram);
     ++snes_frame_counter;
+    /*
+     * A game can run correctly and still show nothing, because the runner owns
+     * per-line rendering but never starts it on its own: the frame is
+     * host-resumable, so the game decides when the picture is produced. With
+     * Once a host has requested video, a callback that never drives scanout or
+     * binds a surface advances forever over a black canvas. Say it once, well
+     * after any legitimate black boot sequence. Missing callbacks are reported
+     * immediately by RtlGameDrawPpuFrame instead.
+     */
+    if (snes_frame_counter >= kSrSilentCanvasFrameLimit && g_snes != NULL &&
+        g_snes->diagnosticDrawRequested &&
+        !g_snes->diagnosticVideoWarningReported &&
+        g_rtl_game_execution != NULL &&
+        g_rtl_game_execution->draw_ppu_frame != NULL) {
+        g_snes->diagnosticVideoWarningReported = true;
+        if (!g_snes->diagnosticScanoutObserved) {
+            fprintf(stderr,
+                    "[runner] %d frames have run but PPU scanout never has, "
+                    "so no SNES picture has been rasterized.\n"
+                    "[runner] Set RtlGameExecutionApi.draw_ppu_frame and drive "
+                    "run_ppu_scanout once per frame.\n",
+                    snes_frame_counter);
+        }
+        if (!g_snes->diagnosticMainSurfaceBound) {
+            fprintf(stderr,
+                    "[runner] No main output surface has been bound, so the "
+                    "PPU has nowhere to draw.\n"
+                    "[runner] Call bind_ppu_output_surface with kind "
+                    "SR_PPU_OUTPUT_MAIN (scale must be 0).\n");
+        }
+    }
     return false;
 }
 

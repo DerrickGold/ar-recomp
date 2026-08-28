@@ -3,7 +3,9 @@
 `game_module.c` is a compile-checked example of the smallest valid linked game:
 immutable identity and execution tables, registration before runner creation,
 opaque runner access, capability/extent checks, generation acquisition, and an
-authentic-width begin-frame policy.
+authentic-width begin-frame policy. It also defines the two symbols marked in
+`snesrecomp/game/required_symbols.h`; the example lock pair is valid only for a
+single-threaded APU and must be replaced when a frontend mixes audio elsewhere.
 
 Replace `ExampleRunFrame` with the recompiled game's frame entry point. Add
 lifecycle, state-provider, and audio tables only when the project implements
@@ -13,4 +15,6 @@ their corresponding module capability. Widescreen projects should extend
 
 The standalone runtime build compiles this source using only the public include
 root. It intentionally does not link or run because a real example executable
-also needs generated game code and a user-supplied ROM.
+also needs generated dispatch/code and a user-supplied ROM. The runtime
+conformance test supplies those pieces synthetically and exercises the linked
+contract without copyrighted game data.

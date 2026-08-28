@@ -520,7 +520,8 @@ func runDoctor(args []string) error {
 		fmt.Printf("zig            ok (%s, %s, via %s)\n", zig.Version, zig.Path, zig.Source)
 	}
 	manifestPath := filepath.Join(resolved.Root, project.ManifestFileName)
-	if manifest, manifestErr := project.LoadManifest(manifestPath); manifestErr != nil {
+	manifest, manifestErr := project.LoadManifest(manifestPath)
+	if manifestErr != nil {
 		fmt.Printf("%-15s not found (%s; hermetic builds need it)\n", "snesbuild.ini", manifestPath)
 	} else {
 		fmt.Printf("%-15s ok (%d game sources, target %s)\n", "snesbuild.ini", len(manifest.Sources), manifest.Name)
@@ -528,10 +529,28 @@ func runDoctor(args []string) error {
 			fmt.Printf("%-15s WARNING %s\n", "snesbuild.ini", warning)
 		}
 	}
+	// Report symbols the project appears to owe before leaving the linker to
+	// name an unfamiliar symbol. The checker fails only for identifiers absent
+	// from authored build sources; unusual macro-authored definitions remain a
+	// warning because the native linker is the final authority.
+	var manifestSources []string
+	if manifestErr == nil {
+		manifestSources = manifest.Sources
+	}
+	contractMissing, contractErr := reportGameContract(
+		os.Stdout, resolved.Root, resolved.ConfigDir, resolved.GeneratedDir,
+		filepath.Join(runtimeDir, "include", "snesrecomp", "game",
+			"required_symbols.h"), manifestSources)
+	if contractErr != nil {
+		fmt.Printf("%-15s SKIPPED (%v)\n", "game contract", contractErr)
+	}
 	if regenMissing {
 		return errors.New("regeneration inputs are incomplete")
 	}
 	fmt.Println("doctor: regeneration inputs are ready")
+	if contractMissing {
+		return errors.New("the project does not define every symbol the runner requires")
+	}
 	if buildMissing {
 		if *requireBuild {
 			return errors.New("native build inputs are incomplete")

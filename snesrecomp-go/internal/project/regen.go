@@ -39,7 +39,7 @@ type StubGateError struct {
 }
 
 func (err *StubGateError) Error() string {
-	return fmt.Sprintf("hard stub gate failed: %d raw marker(s), %d logical trap site(s)", err.RawMarkers, err.LogicalSites)
+	return fmt.Sprintf("hard stub gate failed: %d raw marker(s), %d logical trap(s)", err.RawMarkers, err.LogicalSites)
 }
 
 func Regenerate(options RegenOptions) (RegenReport, error) {
@@ -125,7 +125,7 @@ func Regenerate(options RegenOptions) (RegenReport, error) {
 		}
 	}
 
-	logicalSites := stubs.LogicalGotos + stubs.LogicalDispatches
+	logicalSites := stubs.LogicalTotal()
 	if !options.AllowStubs && (generation.StubHits > 0 || logicalSites > 0) {
 		return report, &StubGateError{RawMarkers: generation.StubHits, LogicalSites: logicalSites}
 	}
