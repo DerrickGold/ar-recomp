@@ -43,8 +43,8 @@
 #include "present_internal.h"
 #include "render_comparison.h"
 #include "session_fatal.h"
-#include "presentation_geometry.h"
 #include "presentation_upload_mirror.h"
+#include "render/presentation_layout.h"
 #include "render/render_output.h"
 
 
@@ -481,9 +481,10 @@ SDL_Rect ComputePresentationViewportWithOutput(
   int out_w = 0, out_h = 0;
   SDL_GetRenderOutputSize(renderer, &out_w, &out_h);
   if (output_size) *output_size = (SDL_Point){out_w, out_h};
-  return PresentationGeometry_CalculateViewport(
+  const ArRenderRectI viewport = ArPresentationLayout_ResolveViewport(
       out_w, out_h, ignore_aspect_ratio,
       pixel_aspect == kPixelAspect_Crt43, visible_width, snes_height);
+  return (SDL_Rect){viewport.x, viewport.y, viewport.w, viewport.h};
 }
 
 static HudProjectionInputs BuildProjectionInputsFromSlot(const FrameSlot *slot) {

@@ -6,8 +6,8 @@
 #include <string.h>
 
 #include "present.h"
+#include "platform/sdl/presentation_geometry_sdl.h"
 #include "platform/sdl/render_sdl.h"
-#include "presentation_geometry.h"
 #include "presentation_frame_generation.h"
 
 enum {
@@ -482,12 +482,12 @@ uint32_t DioramaFrameGeneration_Prepare(
 
   const float phase = PresentationFrameGeneration_PairPhase(
       alpha, slot->capture_ticks);
-  PresentationOutputState output_state;
-  if (!PresentationGeometry_PushFullOutput(renderer, &output_state)) return 0;
+  ArSdlPresentationOutputState output_state;
+  if (!ArSdlPresentation_PushFullOutput(renderer, &output_state)) return 0;
   SDL_Texture *old_target = SDL_GetRenderTarget(renderer);
   Uint8 old_r = 0, old_g = 0, old_b = 0, old_a = 0;
   if (!SDL_GetRenderDrawColor(renderer, &old_r, &old_g, &old_b, &old_a)) {
-    PresentationGeometry_PopFullOutput(renderer, &output_state);
+    ArSdlPresentation_PopFullOutput(renderer, &output_state);
     return 0;
   }
   uint32_t generated_mask = 0;
@@ -508,6 +508,6 @@ uint32_t DioramaFrameGeneration_Prepare(
     }
   }
   SDL_SetRenderDrawColor(renderer, old_r, old_g, old_b, old_a);
-  PresentationGeometry_PopFullOutput(renderer, &output_state);
+  ArSdlPresentation_PopFullOutput(renderer, &output_state);
   return generated_mask;
 }

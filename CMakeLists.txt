@@ -410,6 +410,7 @@ if(BUILD_TESTING)
         tests/render_device_test.c
         src/presentation_upload_mirror.c
         src/render/render_device.c
+        src/render/presentation_layout.c
         src/render/render_output.c
     )
     target_include_directories(actraiser_render_device_test PRIVATE
@@ -421,6 +422,7 @@ if(BUILD_TESTING)
         tests/present_world_nav_test.c
         src/present_world_nav.c
         src/render/render_device.c
+        src/render/presentation_layout.c
         src/render/render_output.c
         src/scene3d_math.c
         src/sim/sim_world_navigation_scene.c
@@ -997,6 +999,7 @@ if(BUILD_TESTING)
         src/settings_overlay.c
         src/settings_overlay_debug_panel.c
         src/render/render_device.c
+        src/render/presentation_layout.c
         src/render/render_output.c
         src/platform/sdl/render_sdl.c
         src/host/host_display_status.c
@@ -1050,7 +1053,8 @@ if(BUILD_TESTING)
     # asserts the read-back frame is not black (the prior SDL3 attempt's bug).
     add_executable(actraiser_render_pipeline_test
         tests/render_pipeline_test.c
-        src/presentation_geometry.c
+        src/render/presentation_layout.c
+        src/platform/sdl/presentation_geometry_sdl.c
     )
     target_include_directories(actraiser_render_pipeline_test PRIVATE src)
     target_link_libraries(actraiser_render_pipeline_test PRIVATE
@@ -1470,8 +1474,9 @@ if(BUILD_TESTING)
         tests/diorama_frame_generation_test.c
         src/platform/sdl/diorama_frame_generation_sdl.c
         src/presentation_frame_generation.c
-        src/presentation_geometry.c
+        src/platform/sdl/presentation_geometry_sdl.c
         src/render/render_device.c
+        src/render/presentation_layout.c
         src/platform/sdl/render_sdl.c
     )
     target_include_directories(actraiser_diorama_frame_generation_test PRIVATE
