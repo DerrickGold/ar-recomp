@@ -1330,50 +1330,7 @@ static void EndActionHeat(const FrameSlot *slot, SDL_Rect viewport) {
     DisableActionHeat(fallback ? "refraction mesh" : "fallback resolve");
 }
 
-static bool BeginEffectBlendMode(EffectRenderState *state,
-                                 SDL_BlendMode requested,
-                                 const char *operation) {
-  if (!state || !EffectRendererAvailable()) return false;
-  if (!SDL_GetRenderDrawBlendMode(g_renderer, &state->blend) ||
-      !SDL_GetRenderDrawColor(g_renderer, &state->r, &state->g,
-                              &state->b, &state->a)) {
-    DisableEffectBlend("state capture");
-    return false;
-  }
-  if (!SDL_SetRenderDrawBlendMode(g_renderer, requested)) {
-    SDL_SetRenderDrawBlendMode(g_renderer, state->blend);
-    DisableEffectBlend(operation);
-    return false;
-  }
-  SDL_BlendMode applied = SDL_BLENDMODE_INVALID;
-  if (!SDL_GetRenderDrawBlendMode(g_renderer, &applied) ||
-      applied != requested) {
-    SDL_SetRenderDrawBlendMode(g_renderer, state->blend);
-    DisableEffectBlend(operation);
-    return false;
-  }
-  return true;
-}
-
-bool BeginEffectAdd(EffectRenderState *state) {
-  return BeginEffectBlendMode(
-      state, SDL_BLENDMODE_ADD, "additive blend verification");
-}
-
-static bool BeginEffectAlpha(EffectRenderState *state) {
-  return BeginEffectBlendMode(
-      state, SDL_BLENDMODE_BLEND, "alpha blend verification");
-}
-
-void EndEffectBlend(const EffectRenderState *state) {
-  if (!state) return;
-  bool color_ok = SDL_SetRenderDrawColor(
-      g_renderer, state->r, state->g, state->b, state->a);
-  bool blend_ok = SDL_SetRenderDrawBlendMode(g_renderer, state->blend);
-  if (!color_ok || !blend_ok) DisableEffectBlend("state restore");
-}
-
-bool SubmitEffectBatch(EffectBatch *batch) {
+bool SubmitEffectBatch(EffectBatch *batch, ArRenderBlendMode blend) {
   if (!batch || batch->overflow) {
     static bool logged;
     if (!logged) {
@@ -1385,9 +1342,13 @@ bool SubmitEffectBatch(EffectBatch *batch) {
     return false;
   }
   if (!batch->index_count) return true;
-  if (SDL_RenderGeometry(g_renderer, NULL, batch->vertices,
-                         batch->vertex_count, batch->indices,
-                         batch->index_count))
+  const ArRenderDrawState state = {
+    .flags = kArRenderDrawState_Blend,
+    .blend = blend,
+  };
+  if (ArRenderDevice_DrawGeometryWithState(
+          &g_render_device, ArRenderTexture_Invalid(), batch->vertices,
+          batch->vertex_count, batch->indices, batch->index_count, &state))
     return true;
   DisableEffectGeometry("geometry submit");
   return false;
@@ -1442,29 +1403,28 @@ static void DrawActionEffects(const FrameSlot *slot, SDL_Rect viewport,
   const int actor_index_count = scene_geometry->index_count;
 
   EffectBatch spell_batch = {
-    .vertices = geometry->vertices,
-    .indices = geometry->indices,
+    .vertices = (ArRenderVertex2D *)geometry->vertices,
+    .indices = (int32_t *)geometry->indices,
     .vertex_count = geometry->vertex_count,
     .index_count = geometry->index_count,
     .vertex_capacity = kActionEffectRenderMaxVertices,
     .index_capacity = kActionEffectRenderMaxIndices,
   };
   EffectBatch scene_batch = {
-    .vertices = scene_geometry->vertices,
-    .indices = scene_geometry->indices,
+    .vertices = (ArRenderVertex2D *)scene_geometry->vertices,
+    .indices = (int32_t *)scene_geometry->indices,
     .vertex_count = scene_geometry->vertex_count,
     .index_count = scene_geometry->index_count,
     .vertex_capacity = kActionSceneEffectRenderMaxVertices,
     .index_capacity = kActionSceneEffectRenderMaxIndices,
   };
-  EffectRenderState state;
   bool spell_submitted = true;
   bool scene_submitted = true;
   if (spell_batch.index_count || scene_batch.index_count) {
-    if (!BeginEffectAdd(&state)) return;
-    spell_submitted = SubmitEffectBatch(&spell_batch);
-    scene_submitted = SubmitEffectBatch(&scene_batch);
-    EndEffectBlend(&state);
+    spell_submitted = SubmitEffectBatch(
+        &spell_batch, kArRenderBlendMode_Add);
+    scene_submitted = SubmitEffectBatch(
+        &scene_batch, kArRenderBlendMode_Add);
   }
 
   /* Map-derived world decorations own a separate captured list and reuse the
@@ -1481,10 +1441,8 @@ static void DrawActionEffects(const FrameSlot *slot, SDL_Rect viewport,
           scene_geometry) && scene_geometry->index_count) {
     scene_batch.vertex_count = scene_geometry->vertex_count;
     scene_batch.index_count = scene_geometry->index_count;
-    if (BeginEffectAdd(&state)) {
-      decoration_submitted = SubmitEffectBatch(&scene_batch);
-      EndEffectBlend(&state);
-    }
+    decoration_submitted = SubmitEffectBatch(
+        &scene_batch, kArRenderBlendMode_Add);
   }
   /* One line, once per process: the whole path (WRAM identity -> capture ->
    * projection -> geometry submit) either produced pixels or it did not, and
@@ -1566,19 +1524,15 @@ static void DrawActionDioramaPlaneEffect(
           ActionEffectProjection_ProjectPoint, &projection, geometry))
     return;
   EffectBatch batch = {
-    .vertices = geometry->vertices,
-    .indices = geometry->indices,
+    .vertices = (ArRenderVertex2D *)geometry->vertices,
+    .indices = (int32_t *)geometry->indices,
     .vertex_count = geometry->vertex_count,
     .index_count = geometry->index_count,
     .vertex_capacity = kActionSceneEffectRenderMaxVertices,
     .index_capacity = kActionSceneEffectRenderMaxIndices,
   };
-  EffectRenderState state;
-  bool submitted = false;
-  if (geometry->index_count && BeginEffectAdd(&state)) {
-    submitted = SubmitEffectBatch(&batch);
-    EndEffectBlend(&state);
-  }
+  const bool submitted = geometry->index_count && SubmitEffectBatch(
+      &batch, kArRenderBlendMode_Add);
   static bool announced_bg1;
   if (!announced_bg1 && submitted &&
       render_layer == kActionEffectRenderLayer_Bg1Plane) {
@@ -1621,9 +1575,8 @@ static void DrawActionDioramaPlaneEffect(
    * brighten both sides of it. Standard source-alpha blending lets the
    * staggered zero-alpha rims feather that boundary; the ordinary waterfall
    * veil and all luminous effects remain additive. */
-  if (!BeginEffectAlpha(&state)) return;
-  const bool atmosphere_submitted = SubmitEffectBatch(&batch);
-  EndEffectBlend(&state);
+  const bool atmosphere_submitted = SubmitEffectBatch(
+      &batch, kArRenderBlendMode_Alpha);
   static bool announced_atmosphere;
   if (!announced_atmosphere && atmosphere_submitted) {
     announced_atmosphere = true;
@@ -1714,20 +1667,17 @@ static void DrawActionPlaneEffectFlat(
   if (!target_ready)
     DisableActionPlaneEffect("effect-target clear");
   EffectBatch batch = {
-    .vertices = geometry->vertices,
-    .indices = geometry->indices,
+    .vertices = (ArRenderVertex2D *)geometry->vertices,
+    .indices = (int32_t *)geometry->indices,
     .vertex_count = geometry->vertex_count,
     .index_count = geometry->index_count,
     .vertex_capacity = kActionSceneEffectRenderMaxVertices,
     .index_capacity = kActionSceneEffectRenderMaxIndices,
   };
-  EffectRenderState state;
   bool submitted = false;
   bool masked = false;
-  if (target_ready && BeginEffectAdd(&state)) {
-    submitted = SubmitEffectBatch(&batch);
-    EndEffectBlend(&state);
-  }
+  if (target_ready)
+    submitted = SubmitEffectBatch(&batch, kArRenderBlendMode_Add);
   if (submitted && s_action_plane_blend_supported) {
     SDL_BlendMode applied = SDL_BLENDMODE_INVALID;
     if (!SDL_SetTextureBlendMode(

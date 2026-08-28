@@ -59,10 +59,10 @@ typedef enum SimEffectParticleMotion {
 
 typedef struct SimEffectStyle {
   float strength;
-  SDL_FColor glow_center;
-  SDL_FColor glow_edge;
-  SDL_FColor particle_color;
-  SDL_FColor flash_color;
+  ArRenderColorF glow_center;
+  ArRenderColorF glow_edge;
+  ArRenderColorF particle_color;
+  ArRenderColorF flash_color;
   float glow_radius_x;
   float glow_radius_y;
   /* Screen-upright visual offset from the semantic contact point. The
@@ -82,7 +82,7 @@ typedef struct SimEffectStyle {
    * The tail fades from flame to smoke along the retained path: samples up to
    * trail_flame_samples old keep particle_color, older ones cross into
    * trail_smoke_color, and every puff grows as it cools. */
-  SDL_FColor trail_smoke_color;
+  ArRenderColorF trail_smoke_color;
   float trail_flame_samples;
   float trail_puff_radius;
   float trail_spread;
@@ -290,9 +290,9 @@ static bool AppendSimEffectGlow(
   strike.y -= style->glow_origin_lift * scale_y;
 
   int base_vertex = batch->vertex_count;
-  SDL_FColor center = style->glow_center;
+  ArRenderColorF center = style->glow_center;
   center.a *= style->strength;
-  batch->vertices[batch->vertex_count++] = (SDL_Vertex){
+  batch->vertices[batch->vertex_count++] = (ArRenderVertex2D){
     { strike.x, strike.y },
     center,
     { 0.0f, 0.0f },
@@ -302,7 +302,7 @@ static bool AppendSimEffectGlow(
   if (radius_x < 3.0f) radius_x = 3.0f;
   if (radius_y < 2.0f) radius_y = 2.0f;
   for (int i = 0; i < kSegments; i++) {
-    batch->vertices[batch->vertex_count++] = (SDL_Vertex){
+    batch->vertices[batch->vertex_count++] = (ArRenderVertex2D){
       { strike.x + kEffectCircle32[i][0] * radius_x,
         strike.y + kEffectCircle32[i][1] * radius_y },
       style->glow_edge,
@@ -317,15 +317,15 @@ static bool AppendSimEffectGlow(
 }
 
 static void AppendEffectQuad(EffectBatch *batch, float x, float y,
-                             float size, SDL_FColor color) {
+                             float size, ArRenderColorF color) {
   int base_vertex = batch->vertex_count;
-  batch->vertices[batch->vertex_count++] = (SDL_Vertex){
+  batch->vertices[batch->vertex_count++] = (ArRenderVertex2D){
     { x, y - size }, color, { 0.0f, 0.0f } };
-  batch->vertices[batch->vertex_count++] = (SDL_Vertex){
+  batch->vertices[batch->vertex_count++] = (ArRenderVertex2D){
     { x + size, y }, color, { 0.0f, 0.0f } };
-  batch->vertices[batch->vertex_count++] = (SDL_Vertex){
+  batch->vertices[batch->vertex_count++] = (ArRenderVertex2D){
     { x, y + size }, color, { 0.0f, 0.0f } };
-  batch->vertices[batch->vertex_count++] = (SDL_Vertex){
+  batch->vertices[batch->vertex_count++] = (ArRenderVertex2D){
     { x - size, y }, color, { 0.0f, 0.0f } };
   static const int diamond[] = { 0, 1, 2, 0, 2, 3 };
   for (int n = 0; n < 6; n++)
@@ -391,7 +391,7 @@ static bool AppendSimEffectTrail(
         ? (float)i / style->trail_flame_samples : 1.0f;
     if (cool > 1.0f) cool = 1.0f;
 
-    SDL_FColor color;
+    ArRenderColorF color;
     color.r = style->particle_color.r +
         (style->trail_smoke_color.r - style->particle_color.r) * cool;
     color.g = style->particle_color.g +
@@ -495,7 +495,7 @@ static bool AppendSimEffectParticles(
       size = (1.8f - 1.15f * t) * output_scale;
     }
     if (size < 0.75f) size = 0.75f;
-    SDL_FColor color = style->particle_color;
+    ArRenderColorF color = style->particle_color;
     color.a *= (1.0f - t) * style->strength;
     AppendEffectQuad(batch, x, y, size, color);
   }
@@ -512,8 +512,8 @@ void DrawSimEffectLocalLighting(
     kVertices = kSimMaxEffectInstances * 33,
     kIndices = kSimMaxEffectInstances * 32 * 3,
   };
-  SDL_Vertex vertices[kVertices];
-  int indices[kIndices];
+  ArRenderVertex2D vertices[kVertices];
+  int32_t indices[kIndices];
   EffectBatch batch = {
     .vertices = vertices, .indices = indices,
     .vertex_capacity = kVertices, .index_capacity = kIndices,
@@ -529,10 +529,7 @@ void DrawSimEffectLocalLighting(
       break;
   }
   if (!batch.index_count && !batch.overflow) return;
-  EffectRenderState state;
-  if (!BeginEffectAdd(&state)) return;
-  SubmitEffectBatch(&batch);
-  EndEffectBlend(&state);
+  SubmitEffectBatch(&batch, kArRenderBlendMode_Add);
 }
 
 void DrawSimEffectSceneFlash(const FrameSlot *slot, bool lighting,
@@ -760,8 +757,8 @@ void DrawSimEffectParticles(
    * thread's stack should be asked for -- and sizing the visual to fit a
    * stack frame is the wrong trade. Safe because this runs only on the
    * present thread, once per frame, and the batch does not outlive the call. */
-  static SDL_Vertex vertices[kVertices];
-  static int indices[kIndices];
+  static ArRenderVertex2D vertices[kVertices];
+  static int32_t indices[kIndices];
   EffectBatch batch = {
     .vertices = vertices, .indices = indices,
     .vertex_capacity = kVertices, .index_capacity = kIndices,
@@ -775,10 +772,7 @@ void DrawSimEffectParticles(
       break;
   }
   if (!batch.index_count && !batch.overflow) return;
-  EffectRenderState state;
-  if (!BeginEffectAdd(&state)) return;
-  SubmitEffectBatch(&batch);
-  EndEffectBlend(&state);
+  SubmitEffectBatch(&batch, kArRenderBlendMode_Add);
 }
 
 bool SimObjectIsPromotedHud(const FrameSlot *slot,

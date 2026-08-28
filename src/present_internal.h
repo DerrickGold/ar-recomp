@@ -18,18 +18,14 @@
 
 #include "present.h"
 #include "presentation_outcome.h"
+#include "render/render_types.h"
 
 /* ---- shared effect types -------------------------------------------------
  * Both translation units need these by value / by field, so the definitions
  * live here rather than in either .c. Moved verbatim out of present.c. */
-typedef struct EffectRenderState {
-  SDL_BlendMode blend;
-  Uint8 r, g, b, a;
-} EffectRenderState;
-
 typedef struct EffectBatch {
-  SDL_Vertex *vertices;
-  int *indices;
+  ArRenderVertex2D *vertices;
+  int32_t *indices;
   int vertex_count, index_count;
   int vertex_capacity, index_capacity;
   bool overflow;
@@ -51,9 +47,7 @@ void PresentHostUi(const FrameSlot *slot, SDL_Rect viewport,
                    double presentation_fps);
 bool EffectRendererAvailable(void);
 void DisableEffectBlend(const char *operation);
-bool BeginEffectAdd(EffectRenderState *state);
-void EndEffectBlend(const EffectRenderState *state);
-bool SubmitEffectBatch(EffectBatch *batch);
+bool SubmitEffectBatch(EffectBatch *batch, ArRenderBlendMode blend);
 
 /* ---- sim entry points present.c calls back into --------------------------
  * Defined in present_sim3d.c. PresentSim3D requires entry without a custom GPU
