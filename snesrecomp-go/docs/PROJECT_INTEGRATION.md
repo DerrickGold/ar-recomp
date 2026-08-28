@@ -71,6 +71,9 @@ build/v2regen stub-census --gen-dir src/gen
 `unresolved_stubs_v2.c`. It converges cross-bank discovery and variant routing
 before replacing output, preserves deterministic source order across workers,
 and removes stale bank parts when the translation-unit split changes.
+`stub-census` covers unresolved gotos, dispatch bounds, unresolved indirect
+jumps, inline invalid-target traps, and target bodies in
+`unresolved_stubs_v2.c`; it collapses M/X variants to logical sites/targets.
 
 Use strict `regen` and `stub-census` in CI. During initial bring-up,
 `regen --allow-stubs` writes all output while reporting unresolved control flow;
@@ -172,10 +175,15 @@ does not supply a complete application. A game project owns:
    process lifetime. Registration is rejected while a runner exists.
 5. **Frame/interrupt policy.** Supply `run_frame`, optional `draw_ppu_frame`,
    reset entry, NMI/IRQ invocation, and any coroutine/yield policy.
-6. **HLE hooks.** Every C symbol named by `hle_func`, `hle_func_if`, or
-   `hle_dispatch` in a cfg must be implemented by the game project with the
-   generated `CpuState *` ABI. An `hle_func_if` predicate returns `bool` and
-   must not mutate CPU or emulated state.
+6. **HLE hooks and required symbols.** Every C symbol named by `hle_func`,
+   `hle_func_if`, or `hle_dispatch` in a cfg must be implemented by the game
+   project with the generated `CpuState *` ABI. `snesrecomp/game/required_symbols.h`
+   collects the non-cfg symbols the runner references but does not define
+   (currently `RtlApuLock`/`RtlApuUnlock`); `snesbuild doctor` checks both. An
+   `hle_func_if` predicate returns `bool` and must not mutate CPU or emulated
+   state. Doctor uses `snesbuild.ini`'s actual source list. Ordinary definitions
+   are verified; unusual macro-authored definitions are reported as unverified
+   and left to the native linker instead of being rejected heuristically.
 7. **Game-specific hardware workarounds.** Put ROM-address policy in the game
    layer. `RtlGameExecutionApi.read_rdnmi` may override a `$4210` read (return
    `-1` for shared behavior), and `recover_dispatch_miss` may opt verified
@@ -224,6 +232,93 @@ mutable ROM bytes for verified game patches. The runner installs state
 providers and revokes them at shutdown; game code does not call private runner
 binding functions. Audio sub-capabilities independently opt into SPC upload,
 voice classification, and extended-audio safe points.
+
+## Ownership matrix
+
+The runner implements SNES hardware. It does not implement an application, and
+several of the gaps are silent rather than loud. This table is the contract;
+the "symptom if missing" column is the one worth reading first.
+
+| Area | Runner provides | Game must provide | Symptom if missing |
+| --- | --- | --- | --- |
+| Frame loop | `RtlRunFrame`, watchdog, frame counter | `RtlGameExecutionApi.run_frame` | registration rejected |
+| Reset / main loop | generated `ResetHandler` | call it, and **service tail calls** (below) | reset unwinds silently; NMI keeps firing against a game that never started |
+| NMI / IRQ | `RtlGameFrameComplete` reports `NMI_ENTERED` | push an interrupt frame, call `NmiHandler`, restore | `RTI` over-pops and corrupts `P`, so M/X widths of interrupted code go wrong |
+| Rendering (when video is requested) | per-line render, HDMA, margins via `run_ppu_scanout` | `draw_ppu_frame` that drives it once per frame | **nothing is ever rasterized**; frames advance over a black canvas |
+| Canvas (when video is requested) | writes into a host buffer | `bind_ppu_output_surface`, `SR_PPU_OUTPUT_MAIN`, `scale` **must be 0** | PPU has nowhere to draw; black canvas |
+| Canvas format | colour in the low 24 bits, **top byte left zero** | present as `XRGB8888`, not `ARGB8888` | every pixel is alpha 0 and blends away to black |
+| Input | `SwapInputBits` on register reads | 12 bits per controller in `RtlRunFrame` (player 2 at bits 12-23) | every button dead or mapped to the wrong function |
+| APU lock | calls `RtlApuLock`/`RtlApuUnlock` | define both (see `game/required_symbols.h`) | link error naming an unfamiliar symbol |
+| Audio | SPC, DSP, mixing | `RtlGameAudioApi` only for upload/routing/extension | silence, with no diagnostic |
+| Waits on hardware | nothing | HLE every spin on `$4210`, `$4212`, `$213C/D`, APU ports, or an NMI-set flag | infinite loop: the spin consumes no emulated time, so the condition never changes |
+
+Intentional headless runs may omit `draw_ppu_frame` and never call
+`RtlGameDrawPpuFrame`. Once a host requests video, however, a missing callback
+is reported immediately. If the callback exists but no scanout or main surface
+has been observed after 120 emulated frames, those omissions are reported once.
+The diagnostic state belongs to the runner instance; it is neither public ABI
+nor savestate data.
+
+Input packing deserves spelling out, because the obvious guess is wrong. The
+`kJoypadL_*` / `kJoypadH_*` constants in `game/runtime.h` describe the
+**hardware** `$4218`/`$4219` bytes you read back. They are not the format
+`RtlRunFrame` accepts. The runner stores its argument verbatim and reverses all
+16 bits on each register read, so argument bit *N* becomes joypad bit *15-N*:
+
+```text
+bit  0  B      bit  4  Up      bit  8  A
+bit  1  Y      bit  5  Down    bit  9  X
+bit  2  Select bit  6  Left    bit 10  L
+bit  3  Start  bit  7  Right   bit 11  R
+```
+
+`RtlRunFrame`'s `bool` return is vestigial: it is unconditionally `false` and
+carries no success information. Ignore it.
+
+## Servicing tail calls
+
+A recompiled function that ends in a jump to another entry (`JMP` to a declared
+`func`, or a decode that runs past an `end:` boundary) has two emitted forms.
+When the caller supplied a host return context it dispatches inline. When it did
+not -- which is exactly the top-level call a frontend makes -- it records a
+pending tail call and returns `RECOMP_RETURN_TAILCALL` for the host to service.
+
+A frontend that calls `ResetHandler` and treats any return as "the game
+finished" will therefore appear to boot, run frames, and dispatch NMI forever
+against a game that never entered its main loop. The screen stays on whatever
+the boot left behind. Service the request instead:
+
+```c
+RecompReturn result = ResetHandler_M1X1(&g_cpu);
+while (result == RECOMP_RETURN_TAILCALL) {
+    const uint32 target = g_tailcall_pc24;
+    result = cpu_dispatch_pc_from(&g_cpu, target, g_tailcall_miss_s,
+                                  g_tailcall_src24);
+}
+/* The main loop never returns. Reaching here is an invariant violation --
+ * report it rather than parking silently. */
+```
+
+This only applies to entries the host calls directly. Generated call sites carry
+a return context and resolve tail calls themselves.
+
+## M/X variants and `force_variant_at`
+
+Every function is emitted in up to four variants for the accumulator/index
+widths at entry, and call sites dispatch on the live `m`/`x` flags. When width
+propagation is wrong, the failure is not a clean crash: the same bytes decode
+into a *different but coherent-looking* instruction stream, which can run real
+instructions with the wrong operand sizes and fall through into an adjacent
+routine entirely.
+
+The signature to watch for is a routine that appears to hang or corrupt memory
+inside code it should never have reached. Disassemble the entry at both widths:
+usually exactly one decodes as sane code, and the other contains a read-modify-
+write to an implausible address. Pin the verified call site with
+`force_variant_at BBPPPP M X`.
+
+Pinning fixes dispatch, not semantics. If the routine polls hardware, it still
+needs an `hle_func` -- a correct decode of a spin loop is still a spin loop.
 
 ## Frame presentation policy
 

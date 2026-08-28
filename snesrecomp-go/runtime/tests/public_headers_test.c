@@ -3,6 +3,7 @@
 #include "snesrecomp/game/bootstrap.h"
 #include "snesrecomp/game/cpu.h"
 #include "snesrecomp/game/generated_support.h"
+#include "snesrecomp/game/required_symbols.h"
 #include "snesrecomp/game/runtime.h"
 #include "snesrecomp/game/runtime_constants.h"
 #include "snesrecomp/game/snes_regs.h"

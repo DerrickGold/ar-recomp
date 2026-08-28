@@ -228,22 +228,21 @@ RecompReturn cpu_trace_unresolved_goto_trap(
     const char *function_name, const char *target_label) {
     cpu_trace_event(cpu, source_pc24, CPU_TR_NLR_DETECT,
                     (uint8)hash_string(function_name), (uint16)target_pc24);
-    fprintf(stderr, "[unresolved-goto] %s $%06X -> %s/$%06X\n",
-            function_name != NULL ? function_name : "?",
-            source_pc24 & 0xffffffu,
-            target_label != NULL ? target_label : "?",
-            target_pc24 & 0xffffffu);
-    return RECOMP_RETURN_NORMAL;
+    return sr_unresolved_goto_warn(cpu, source_pc24, target_pc24,
+                                   function_name, target_label);
 }
 
 RecompReturn cpu_trace_unresolved_stub_trap(
     CpuState *cpu, uint32 target_pc24, const char *function_name) {
     cpu_trace_event(cpu, target_pc24, CPU_TR_NLR_DETECT,
                     (uint8)hash_string(function_name), 0u);
-    fprintf(stderr, "[unresolved-stub] %s $%06X\n",
-            function_name != NULL ? function_name : "?",
-            target_pc24 & 0xffffffu);
-    return RECOMP_RETURN_NORMAL;
+    return sr_unresolved_stub_warn(cpu, target_pc24, function_name);
+}
+
+RecompReturn cpu_trace_unresolved_indirect_jump(
+    CpuState *cpu, uint32 site_pc24) {
+    cpu_trace_event(cpu, site_pc24, CPU_TR_NLR_DETECT, 0u, 0u);
+    return sr_unresolved_indirect_jump(cpu, site_pc24);
 }
 
 RecompReturn cpu_trace_dispatch_oob(CpuState *cpu, uint32 site_pc24,

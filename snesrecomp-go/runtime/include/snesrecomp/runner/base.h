@@ -62,6 +62,11 @@ enum {
     SR_RESULT_BUSY = 6u
 };
 
+/** Stable lower-case name for a result code, for diagnostics. Never NULL;
+ * unknown values render as "unknown". Hosts printing a bare integer is a
+ * recurring source of unnecessary debugging. */
+const char *sr_result_string(SrResult result);
+
 typedef uint32_t SrComponentKind;
 enum {
     SR_COMPONENT_RUNNER = 0u,

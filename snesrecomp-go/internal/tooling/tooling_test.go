@@ -103,13 +103,18 @@ func TestCensusRTSWebs(t *testing.T) {
 
 func TestCensusStubsCollapsesVariants(t *testing.T) {
 	root := t.TempDir()
-	writeTestFile(t, filepath.Join(root, "bank00_v2.c"), "return cpu_trace_unresolved_goto_trap(cpu, 0x008000, 0x008100, \"Fn_M0X0\", \"L\");\nreturn cpu_trace_unresolved_goto_trap(cpu, 0x008000, 0x008100, \"Fn_M1X1\", \"L\");\nreturn cpu_trace_dispatch_oob(cpu, 0x008200, 0xffff);\n")
+	writeTestFile(t, filepath.Join(root, "bank00_v2.c"), "return cpu_trace_unresolved_goto_trap(cpu, 0x008000, 0x008100, \"Fn_M0X0\", \"L\");\nreturn cpu_trace_unresolved_goto_trap(cpu, 0x008000, 0x008100, \"Fn_M1X1\", \"L\");\nreturn cpu_trace_dispatch_oob(cpu, 0x008200, 0xffff);\n(void)cpu_trace_unresolved_stub_trap(cpu, 0x001234, \"bad\");\nreturn cpu_trace_unresolved_indirect_jump(cpu, 0x008300);\n")
+	writeTestFile(t, filepath.Join(root, "unresolved_stubs_v2.c"), "return cpu_trace_unresolved_stub_trap(cpu, 0x011234, \"Stub_M0X0\");\nreturn cpu_trace_unresolved_stub_trap(cpu, 0x011234, \"Stub_M1X1\");\n")
 	var output bytes.Buffer
 	report, err := CensusStubs(root, true, &output)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.LogicalGotos != 1 || report.GotoEmissions != 2 || report.LogicalDispatches != 1 || report.DispatchEmissions != 1 {
+	if report.LogicalGotos != 1 || report.GotoEmissions != 2 ||
+		report.LogicalDispatches != 1 || report.DispatchEmissions != 1 ||
+		report.LogicalTargets != 2 || report.TargetEmissions != 3 ||
+		report.LogicalIndirects != 1 || report.IndirectEmissions != 1 ||
+		report.LogicalTotal() != 5 {
 		t.Fatalf("unexpected report: %+v", report)
 	}
 }

@@ -1139,6 +1139,8 @@ static SrResult bind_ppu_output_surface(
             if ((request->flags &
                  SR_PPU_OUTPUT_REFERENCE_PIXEL_RENDERER) != 0u)
                 render_flags |= kPpuRenderFlags_ReferencePixelRenderer;
+            if (request->pixels != NULL)
+                snes->diagnosticMainSurfaceBound = true;
             PpuBeginDrawing(ppu, request->pixels,
                             (size_t)request->pitch_bytes, render_flags);
             return SR_RESULT_OK;
@@ -1534,4 +1536,3 @@ static SrResult rasterize_ppu_obj_parts(
         return SR_RESULT_UNAVAILABLE;
     return s_ppu_obj_parts_raster_provider(snes, request, out_result);
 }
-

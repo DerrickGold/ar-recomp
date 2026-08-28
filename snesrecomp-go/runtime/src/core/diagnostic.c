@@ -50,6 +50,15 @@ static XTraceEntry g_xtrace[kXTraceCapacity];
 static unsigned g_xtrace_index;
 static WarningKey g_oob_warning[kWarningCapacity];
 static unsigned g_oob_warning_count;
+/* Recompiler traps report once per site, or once per unresolved target for a
+ * shared stub body. They are deliberately compiled unconditionally: before,
+ * the stub and cross-function goto traps existed only under SNESRECOMP_TRACE
+ * and were silent no-ops in an ordinary build, so a trap that fired during
+ * bring-up produced no output at all and the failure surfaced later as
+ * unexplained corruption or a hang. */
+static WarningKey g_trap_warning[kWarningCapacity];
+static unsigned g_trap_warning_count;
+
 static bool g_trapfn_fired;
 static int g_strace_enabled = -1;
 static uint32 g_strace_low;
@@ -86,12 +95,18 @@ void sr_diagnostic_reset(void) {
     memset(g_mx_history, 0, sizeof(g_mx_history));
     memset(g_xtrace, 0, sizeof(g_xtrace));
     memset(g_oob_warning, 0, sizeof(g_oob_warning));
+    memset(g_trap_warning, 0, sizeof(g_trap_warning));
     g_xtrace_index = 0u;
     g_oob_warning_count = 0u;
+    g_trap_warning_count = 0u;
     g_trapfn_fired = false;
     g_strace_enabled = -1;
     g_strace_low = g_strace_high = 0u;
     g_strace_count = 0u;
+}
+
+unsigned sr_diagnostic_trap_warning_count(void) {
+    return g_trap_warning_count;
 }
 
 void sr_mx_history_record(uint32 pc24, int m, int x) {
@@ -132,6 +147,22 @@ void sr_mx_history_dump(void) {
                 entry->count[0], entry->count[1], entry->count[2],
                 entry->count[3]);
     }
+}
+
+/* Returns true the first time a (site, detail) pair is seen. */
+static bool trap_should_report(uint32 site_pc24, uint32 detail) {
+    unsigned index;
+    for (index = 0u; index < g_trap_warning_count; ++index) {
+        if (g_trap_warning[index].first == (site_pc24 & 0xffffffu) &&
+            g_trap_warning[index].second == detail) {
+            return false;
+        }
+    }
+    if (g_trap_warning_count >= kWarningCapacity) return false;
+    g_trap_warning[g_trap_warning_count].first = site_pc24 & 0xffffffu;
+    g_trap_warning[g_trap_warning_count].second = detail;
+    ++g_trap_warning_count;
+    return true;
 }
 
 static void print_cpu(const char *tag, CpuState *cpu, const char *name,
@@ -213,7 +244,73 @@ RecompReturn sr_dispatch_oob_warn(CpuState *cpu, uint32 site_pc24,
         g_oob_warning[g_oob_warning_count].second = index_value;
         ++g_oob_warning_count;
         print_cpu("dispatch-oob", cpu, g_last_recomp_func, site_pc24);
-        fprintf(stderr, "[dispatch-oob] index=%u\n", index_value);
+        fprintf(stderr,
+                "[dispatch-oob] index=%u is outside the table declared for "
+                "this site.\n"
+                "[dispatch-oob] Check the COUNT and tables: base on the "
+                "indirect_dispatch directive for $%06X.\n",
+                index_value, site_pc24 & 0xffffffu);
+    }
+    return RECOMP_RETURN_NORMAL;
+}
+
+/*
+ * An indirect jump the recompiler could not resolve to a target set. This is a
+ * distinct condition from a genuine out-of-range table index, and it used to
+ * be reported as one: the emitter passed a hardcoded 0xFFFF placeholder to the
+ * out-of-bounds path, so the message read "index=65535" and invited a hunt for
+ * a bad index that did not exist. Say what it actually is and name the
+ * directive that fixes it.
+ */
+RecompReturn sr_unresolved_indirect_jump(CpuState *cpu, uint32 site_pc24) {
+    if (trap_should_report(site_pc24, 0u)) {
+        print_cpu("indirect-unresolved", cpu, g_last_recomp_func, site_pc24);
+        fprintf(stderr,
+                "[indirect-unresolved] $%06X is an indirect jump with no "
+                "resolved target set.\n"
+                "[indirect-unresolved] If the targets are a static table, "
+                "declare it with indirect_dispatch or rts_dispatch. If they "
+                "come from data the game interprets at run time, route the "
+                "site with hle_dispatch and resolve it in the game layer.\n",
+                site_pc24 & 0xffffffu);
+    }
+    return RECOMP_RETURN_NORMAL;
+}
+
+RecompReturn sr_unresolved_stub_warn(CpuState *cpu, uint32 target_pc24,
+                                     const char *function_name) {
+    if (trap_should_report(target_pc24, 1u)) {
+        print_cpu("unresolved-stub", cpu, function_name, target_pc24);
+        fprintf(stderr,
+                "[unresolved-stub] called $%06X, which has no generated "
+                "body.\n"
+                "[unresolved-stub] A target below $8000 or past the image is "
+                "outside the static LoROM code domain. It often means data "
+                "was decoded as code, so check the caller's M/X widths and "
+                "data_region coverage. If the game intentionally executes "
+                "RAM or generated code, route that site through an HLE. A "
+                "target inside data_region is intentionally not code; any "
+                "other valid ROM target means its bank is absent from the "
+                "cfg set.\n",
+                target_pc24 & 0xffffffu);
+    }
+    return RECOMP_RETURN_NORMAL;
+}
+
+RecompReturn sr_unresolved_goto_warn(CpuState *cpu, uint32 source_pc24,
+                                     uint32 target_pc24,
+                                     const char *function_name,
+                                     const char *target_label) {
+    if (trap_should_report(source_pc24, 2u)) {
+        print_cpu("unresolved-goto", cpu, function_name, source_pc24);
+        fprintf(stderr,
+                "[unresolved-goto] $%06X jumps to $%06X (%s), which is not a "
+                "block in this function and has no entry of its own.\n"
+                "[unresolved-goto] Declare the target with func, or bound the "
+                "current function with end: so the jump becomes a tail "
+                "call.\n",
+                source_pc24 & 0xffffffu, target_pc24 & 0xffffffu,
+                target_label != NULL ? target_label : "unknown");
     }
     return RECOMP_RETURN_NORMAL;
 }

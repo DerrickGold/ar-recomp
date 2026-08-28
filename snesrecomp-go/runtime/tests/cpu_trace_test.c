@@ -15,6 +15,25 @@ RecompReturn sr_dispatch_oob_warn(CpuState *cpu, uint32 pc24, uint16 index) {
     return RECOMP_RETURN_SKIP_1;
 }
 
+static unsigned unresolved_calls;
+RecompReturn sr_unresolved_indirect_jump(CpuState *cpu, uint32 pc24) {
+    (void)cpu; (void)pc24; ++unresolved_calls;
+    return RECOMP_RETURN_NORMAL;
+}
+RecompReturn sr_unresolved_stub_warn(CpuState *cpu, uint32 pc24,
+                                     const char *name) {
+    (void)cpu; (void)pc24; (void)name; ++unresolved_calls;
+    return RECOMP_RETURN_NORMAL;
+}
+RecompReturn sr_unresolved_goto_warn(CpuState *cpu, uint32 source_pc24,
+                                     uint32 target_pc24,
+                                     const char *function_name,
+                                     const char *target_label) {
+    (void)cpu; (void)source_pc24; (void)target_pc24;
+    (void)function_name; (void)target_label; ++unresolved_calls;
+    return RECOMP_RETURN_NORMAL;
+}
+
 static int failures;
 static void check(int condition, const char *message) {
     if (condition) return;
@@ -74,6 +93,11 @@ static void test_boundaries_and_faults(void) {
     check(cpu_trace_unresolved_stub_trap(&cpu, 3u, "stub") ==
               RECOMP_RETURN_NORMAL,
           "unresolved stub soft trap");
+    check(cpu_trace_unresolved_indirect_jump(&cpu, 6u) ==
+              RECOMP_RETURN_NORMAL,
+          "unresolved indirect jump soft trap");
+    check(unresolved_calls == 3u,
+          "trace build delegates unresolved diagnostics to once-per-site core");
     check(cpu_trace_dispatch_oob(&cpu, 4u, 5u) == RECOMP_RETURN_SKIP_1,
           "dispatch OOB delegation");
 }

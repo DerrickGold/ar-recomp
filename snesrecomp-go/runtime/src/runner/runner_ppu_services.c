@@ -244,6 +244,7 @@ static SrResult run_ppu_scanout(
     if (ppu == NULL || dma == NULL || api == NULL)
         return SR_RESULT_UNAVAILABLE;
 
+    snes->diagnosticScanoutObserved = true;
     scanout_start_hdma(snes, dma, (uint8_t)request->hdma_channel_mask);
     _Static_assert(SR_DMA_CHANNEL_COUNT == kDmaChannelCount,
                    "scanout HDMA channel count must match the runner");

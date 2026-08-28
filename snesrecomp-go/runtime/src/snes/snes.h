@@ -44,6 +44,14 @@ struct Snes {
     uint64_t abiAudioFrameCounter;
     uint64_t abiPpuFramePolicyGeneration;
     bool abiPpuFramePolicyActive;
+    /* Runner-lifetime observations used only for actionable integration
+     * diagnostics. They deliberately remain outside the public ABI and the
+     * savestate tail. */
+    bool diagnosticDrawRequested;
+    bool diagnosticMissingDrawReported;
+    bool diagnosticVideoWarningReported;
+    bool diagnosticScanoutObserved;
+    bool diagnosticMainSurfaceBound;
     uint16_t hPos;
     uint16_t vPos;
     double apuCatchupCycles;

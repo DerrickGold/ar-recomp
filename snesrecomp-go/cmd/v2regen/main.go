@@ -213,7 +213,7 @@ func censusStubs(args []string) error {
 	if err != nil {
 		return err
 	}
-	if report.LogicalGotos+report.LogicalDispatches > 0 {
+	if report.LogicalTotal() > 0 {
 		return errors.New("stub census failed")
 	}
 	return nil

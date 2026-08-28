@@ -155,6 +155,17 @@ if(BUILD_TESTING)
     add_test(NAME snesrecomp_runtime_contract
         COMMAND snesrecomp_runtime_contract_test)
 
+    # Links and runs the whole linked-game contract against a synthetic ROM:
+    # registration, init, surface binding, the frame and draw callbacks, and
+    # the input bit mapping. Every assertion is a mistake that previously cost
+    # a build-run-diagnose cycle on a real port.
+    add_executable(snesrecomp_runtime_conformance_test
+        tests/conformance_test.c)
+    target_link_libraries(snesrecomp_runtime_conformance_test PRIVATE
+        snesrecomp_runtime)
+    add_test(NAME snesrecomp_runtime_conformance
+        COMMAND snesrecomp_runtime_conformance_test)
+
     add_executable(snesrecomp_runtime_abi_test tests/abi_test.c)
     target_link_libraries(snesrecomp_runtime_abi_test PRIVATE
         snesrecomp_runtime)
