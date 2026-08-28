@@ -10,8 +10,8 @@
 #include "settings.h"
 
 extern SDL_Renderer *g_renderer;
-extern SDL_Texture *g_hud_bg_texture;
-extern SDL_Texture *g_hud_obj_texture;
+extern ArRenderTexture g_hud_bg_texture;
+extern ArRenderTexture g_hud_obj_texture;
 extern uint8_t g_pixels[];
 extern uint8_t g_hud_bg_pixels[];
 extern uint8_t g_hud_obj_pixels[];

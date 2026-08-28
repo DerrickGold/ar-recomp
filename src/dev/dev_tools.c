@@ -143,7 +143,8 @@ SDL_Point DevTools_WriteFramebufferPpm(FILE *file,
   FrameSlot frame_slot;
   bool have_composite = false;
   SDL_Surface *argb = NULL;
-  if (context->renderer && context->hud_bg_texture) {
+  if (context->renderer &&
+      ArRenderTexture_IsValid(context->hud_bg_texture)) {
     FrameSlot_Capture(&frame_slot);
     PresentUpload(&frame_slot);
     /* The same scene -> CRT resolve -> host-UI function used by the live

@@ -110,9 +110,9 @@ static ArSdlRenderBackend g_sdl_render_backend;
 bool g_gpu_shaders_requested;
 bool g_gpu_shaders_active;
 ArRenderTexture g_texture;
-SDL_Texture *g_authentic_texture;
-SDL_Texture *g_hud_bg_texture;
-SDL_Texture *g_hud_obj_texture;
+ArRenderTexture g_authentic_texture;
+ArRenderTexture g_hud_bg_texture;
+ArRenderTexture g_hud_obj_texture;
 /* InspectorPresentationKind/InspectorPresentationSelection now live in
  * present.h (D4) — shared between this file's InspectWindowPoint (live
  * hit-test) and present.c's renderer (fed from the FrameSlot snapshot). */
@@ -966,28 +966,31 @@ static void AppBoot_CreatePresentationTextures(void) {
    * SDL_HINT_RENDER_SCALE_QUALITY=0 (nearest). The descriptor pins nearest
    * filtering so the pixel-art framebuffer upscales crisply. */
 
-  g_authentic_texture = SDL_CreateTexture(
-      g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-      SR_PPU_SURFACE_MAX_WIDTH, SR_PPU_SURFACE_MAX_HEIGHT);
-  if (!g_authentic_texture)
-    Die("SDL_CreateTexture for authentic comparison failed");
-  SDL_SetTextureBlendMode(g_authentic_texture, SDL_BLENDMODE_NONE);
-  SDL_SetTextureScaleMode(g_authentic_texture, SDL_SCALEMODE_NEAREST);
+  const ArRenderTextureDesc authentic_texture = {
+    .width = SR_PPU_SURFACE_MAX_WIDTH,
+    .height = SR_PPU_SURFACE_MAX_HEIGHT,
+    .format = kArRenderPixelFormat_Argb8888,
+    .usage = kArRenderTextureUsage_Streaming,
+    .filter = kArRenderFilter_Nearest,
+    .blend = kArRenderBlendMode_Opaque,
+  };
+  if (!ArRenderDevice_CreateTexture(
+          &g_render_device, &authentic_texture, &g_authentic_texture))
+    Die(ArRenderDevice_LastError(&g_render_device));
 
-  g_hud_bg_texture = SDL_CreateTexture(g_renderer,
-    SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-    SR_PPU_SURFACE_MAX_WIDTH, g_snes_height);
-  g_hud_obj_texture = SDL_CreateTexture(g_renderer,
-    SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-    SR_PPU_SURFACE_MAX_WIDTH, g_snes_height);
-  if (!g_hud_bg_texture || !g_hud_obj_texture)
-    Die("SDL_CreateTexture for HUD overlay failed");
-  SDL_SetTextureBlendMode(g_hud_bg_texture, SDL_BLENDMODE_BLEND);
-  SDL_SetTextureBlendMode(g_hud_obj_texture, SDL_BLENDMODE_BLEND);
-  /* Nearest filtering (see g_texture above; the global scale-quality hint
-   * SDL2 relied on is gone in SDL3). */
-  SDL_SetTextureScaleMode(g_hud_bg_texture, SDL_SCALEMODE_NEAREST);
-  SDL_SetTextureScaleMode(g_hud_obj_texture, SDL_SCALEMODE_NEAREST);
+  const ArRenderTextureDesc hud_texture = {
+    .width = SR_PPU_SURFACE_MAX_WIDTH,
+    .height = g_snes_height,
+    .format = kArRenderPixelFormat_Argb8888,
+    .usage = kArRenderTextureUsage_Streaming,
+    .filter = kArRenderFilter_Nearest,
+    .blend = kArRenderBlendMode_Alpha,
+  };
+  if (!ArRenderDevice_CreateTexture(
+          &g_render_device, &hud_texture, &g_hud_bg_texture) ||
+      !ArRenderDevice_CreateTexture(
+          &g_render_device, &hud_texture, &g_hud_obj_texture))
+    Die(ArRenderDevice_LastError(&g_render_device));
 
   /* D1b semantic OBJ atlas. It is uploaded every supported SIM frame but is
    * not selected by the compositor until the later separated-composite
@@ -1582,13 +1585,12 @@ static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
            * the underlay serial). Drop them so the next present re-bakes. */
           PresentRendererResources_Reset();
           HostInput_RequestPausedRedraw();
-          /* R17/C2: the retained re-present slot copies hd_entries[].texture
-           * as raw SDL_Texture* (present.h). The host reload just destroyed
-           * and recreated every one of them, so those copies are
-           * now dangling — re-compositing the retained slot would be a
-           * use-after-free. Drop it; the next tick present retains a fresh
-           * one. This also makes retained-frame upload skipping
-           * safe: the textures it relies on are never stale-by-reset. */
+          /* R17/C2: the retained re-present slot copies opaque HD texture
+           * handles. The host reload just destroyed and recreated every one,
+           * so those copies are now stale even though their native pointer
+           * representation is hidden. Drop the slot; the next tick retains a
+           * fresh one. This also keeps retained-frame upload skipping from
+           * relying on resources invalidated by the reset. */
           HostDisplay_InvalidatePresentHistory();
           break;
         case SDL_EVENT_RENDER_DEVICE_LOST:
@@ -2213,9 +2215,12 @@ static int AppShutdown(AppBoot *app, char **argv) {
   InputMap_Shutdown();
   RuntimeDiagnostics_Unbind();
   SnesShutdown();
-  SDL_DestroyTexture(g_hud_obj_texture);
-  SDL_DestroyTexture(g_hud_bg_texture);
-  SDL_DestroyTexture(g_authentic_texture);
+  ArRenderDevice_DestroyTexture(&g_render_device, g_hud_obj_texture);
+  ArRenderDevice_DestroyTexture(&g_render_device, g_hud_bg_texture);
+  ArRenderDevice_DestroyTexture(&g_render_device, g_authentic_texture);
+  g_hud_obj_texture = ArRenderTexture_Invalid();
+  g_hud_bg_texture = ArRenderTexture_Invalid();
+  g_authentic_texture = ArRenderTexture_Invalid();
   ArRenderDevice_DestroyTexture(&g_render_device, g_texture);
   g_texture = ArRenderTexture_Invalid();
   for (int plane = 0; plane < kDioramaPlane_Count; plane++) {

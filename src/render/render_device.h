@@ -24,6 +24,10 @@ typedef struct ArRenderBackendOps {
   bool (*draw_texture)(void *context, ArRenderTexture texture,
                        const ArRenderRectF *source,
                        const ArRenderRectF *destination);
+  bool (*draw_texture_tinted)(void *context, ArRenderTexture texture,
+                              const ArRenderRectF *source,
+                              const ArRenderRectF *destination,
+                              ArRenderColorF tint);
   bool (*draw_geometry)(void *context, ArRenderTexture texture,
                         const ArRenderVertex2D *vertices, int vertex_count,
                         const int32_t *indices, int index_count);
@@ -71,6 +75,11 @@ bool ArRenderDevice_DrawTexture(ArRenderDevice *device,
                                 ArRenderTexture texture,
                                 const ArRenderRectF *source,
                                 const ArRenderRectF *destination);
+bool ArRenderDevice_DrawTextureTinted(ArRenderDevice *device,
+                                      ArRenderTexture texture,
+                                      const ArRenderRectF *source,
+                                      const ArRenderRectF *destination,
+                                      ArRenderColorF tint);
 bool ArRenderDevice_DrawGeometry(ArRenderDevice *device,
                                  ArRenderTexture texture,
                                  const ArRenderVertex2D *vertices,

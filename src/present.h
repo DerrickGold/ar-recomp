@@ -368,8 +368,8 @@ void FrameSlot_Capture(FrameSlot *dst);
  * math and get the same answer for the same inputs. Defined in present.c. */
 
 typedef struct HudProjectionInputs {
-  SDL_Texture *hud_bg_texture;
-  SDL_Texture *hud_obj_texture;
+  ArRenderTexture hud_bg_texture;
+  ArRenderTexture hud_obj_texture;
   int hud_scale_percent;   /* g_settings.hud_scale_percent */
   int pixel_aspect;        /* g_active_pixel_aspect */
   int snes_width;
@@ -391,7 +391,7 @@ typedef struct HudProjectionInputs {
 } HudProjectionInputs;
 
 typedef struct HudPresentationChunk {
-  SDL_Texture *texture;
+  ArRenderTexture texture;
   SDL_Rect texture_source;
   SDL_Rect screen_source;
   SDL_Rect output_destination;

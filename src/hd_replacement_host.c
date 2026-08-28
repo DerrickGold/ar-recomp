@@ -33,10 +33,9 @@ enum {
   kArgbBytesPerPixel = 4,
 };
 
-extern SDL_Renderer *g_renderer;
 extern ArRenderDevice g_render_device;
-extern SDL_Texture *g_hud_bg_texture;
-extern SDL_Texture *g_hud_obj_texture;
+extern ArRenderTexture g_hud_bg_texture;
+extern ArRenderTexture g_hud_obj_texture;
 extern int g_snes_width;
 extern int g_snes_height;
 extern uint8_t g_pixels[
@@ -64,7 +63,7 @@ static uint64_t s_authentic_frame_serial;
 static uint64_t s_authentic_next_frame_serial;
 
 uint8_t *g_m7_overlay_pixels;
-SDL_Texture *g_m7_texture;
+ArRenderTexture g_m7_texture;
 
 typedef struct PpuOutputControl {
   const SnesRunnerApi *api;
@@ -218,7 +217,7 @@ void HdReplacementHost_BindSurfaces(void) {
   for (int i = 0; i < g_hd_replacement_count; i++) {
     const HdReplacement *entry = &g_hd_replacements[i];
     if (entry->plane == kHdPlane_Mode7 && entry->pixels &&
-        !g_m7_overlay_pixels && g_renderer) {
+        !g_m7_overlay_pixels && ArRenderDevice_IsReady(&g_render_device)) {
       const size_t capacity_pitch =
           (size_t)SR_PPU_SURFACE_MAX_WIDTH * kHdMode7Scale *
           kArgbBytesPerPixel;
@@ -228,26 +227,30 @@ void HdReplacementHost_BindSurfaces(void) {
           capacity_pitch * kActRaiserAuthenticHeight * kHdMode7Scale;
       g_m7_overlay_pixels = calloc(
           1, capacity_bytes);
-      g_m7_texture = SDL_CreateTexture(
-          g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-          SR_PPU_SURFACE_MAX_WIDTH * kHdMode7Scale,
-          g_snes_height * kHdMode7Scale);
-      if (g_m7_overlay_pixels && g_m7_texture) {
-        SDL_SetTextureBlendMode(g_m7_texture, SDL_BLENDMODE_BLEND);
-        SDL_SetTextureScaleMode(g_m7_texture, SDL_SCALEMODE_NEAREST);
+      const ArRenderTextureDesc texture_desc = {
+        .width = SR_PPU_SURFACE_MAX_WIDTH * kHdMode7Scale,
+        .height = g_snes_height * kHdMode7Scale,
+        .format = kArRenderPixelFormat_Argb8888,
+        .usage = kArRenderTextureUsage_Streaming,
+        .filter = kArRenderFilter_Nearest,
+        .blend = kArRenderBlendMode_Alpha,
+      };
+      (void)ArRenderDevice_CreateTexture(
+          &g_render_device, &texture_desc, &g_m7_texture);
+      if (g_m7_overlay_pixels && ArRenderTexture_IsValid(g_m7_texture)) {
         if (output_available)
           (void)PpuOutputControl_Bind(
               &output, SR_PPU_OUTPUT_MODE7, 0u, 0u, kHdMode7Scale,
               g_m7_overlay_pixels, capacity_bytes, active_pitch,
               kActRaiserAuthenticHeight * kHdMode7Scale, 0u);
       } else {
-        SDL_DestroyTexture(g_m7_texture);
-        g_m7_texture = NULL;
+        ArRenderDevice_DestroyTexture(&g_render_device, g_m7_texture);
+        g_m7_texture = ArRenderTexture_Invalid();
         free(g_m7_overlay_pixels);
         g_m7_overlay_pixels = NULL;
         fprintf(stderr,
                 "[hd-manifest] mode7 host-surface allocation failed: %s\n",
-                SDL_GetError());
+                ArRenderDevice_LastError(&g_render_device));
       }
       continue;
     }
@@ -376,16 +379,18 @@ void ActRaiser_RebindPpuOutputSurfaces(void) {
       NULL, 0u, 0u, 0u, 0u);
   (void)PpuOutputControl_Bind(
       &output, SR_PPU_OUTPUT_OVERLAY, SR_PPU_OVERLAY_BG3, 0u, 0u,
-      g_hud_bg_texture ? g_hud_bg_pixels : NULL,
-      g_hud_bg_texture ? sizeof(g_hud_bg_pixels) : 0u,
-      g_hud_bg_texture ? pitch : 0u,
-      g_hud_bg_texture ? kHostDisplayFramebufferHeight : 0u, 0u);
+      ArRenderTexture_IsValid(g_hud_bg_texture) ? g_hud_bg_pixels : NULL,
+      ArRenderTexture_IsValid(g_hud_bg_texture) ? sizeof(g_hud_bg_pixels) : 0u,
+      ArRenderTexture_IsValid(g_hud_bg_texture) ? pitch : 0u,
+      ArRenderTexture_IsValid(g_hud_bg_texture)
+          ? kHostDisplayFramebufferHeight : 0u, 0u);
   (void)PpuOutputControl_Bind(
       &output, SR_PPU_OUTPUT_OVERLAY, SR_PPU_OVERLAY_OBJ, 0u, 0u,
-      g_hud_obj_texture ? g_hud_obj_pixels : NULL,
-      g_hud_obj_texture ? sizeof(g_hud_obj_pixels) : 0u,
-      g_hud_obj_texture ? pitch : 0u,
-      g_hud_obj_texture ? kHostDisplayFramebufferHeight : 0u, 0u);
+      ArRenderTexture_IsValid(g_hud_obj_texture) ? g_hud_obj_pixels : NULL,
+      ArRenderTexture_IsValid(g_hud_obj_texture) ? sizeof(g_hud_obj_pixels) : 0u,
+      ArRenderTexture_IsValid(g_hud_obj_texture) ? pitch : 0u,
+      ArRenderTexture_IsValid(g_hud_obj_texture)
+          ? kHostDisplayFramebufferHeight : 0u, 0u);
   for (int source = 0; source < SR_PPU_OVERLAY_SOURCE_COUNT; source++) {
     if (source == SR_PPU_OVERLAY_BG3 ||
         source == SR_PPU_OVERLAY_OBJ ||
@@ -437,8 +442,8 @@ void HdReplacementHost_Shutdown(void) {
     free(g_hd_replacements[i].pixels);
     g_hd_replacements[i].pixels = NULL;
   }
-  SDL_DestroyTexture(g_m7_texture);
-  g_m7_texture = NULL;
+  ArRenderDevice_DestroyTexture(&g_render_device, g_m7_texture);
+  g_m7_texture = ArRenderTexture_Invalid();
   free(g_m7_overlay_pixels);
   g_m7_overlay_pixels = NULL;
   for (int source = 0; source < SR_PPU_OVERLAY_SOURCE_COUNT; source++) {

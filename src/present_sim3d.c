@@ -42,8 +42,6 @@
 extern SDL_Renderer *g_renderer;
 extern ArRenderDevice g_render_device;
 extern ArRenderTexture g_texture;
-extern SDL_Texture *g_hud_bg_texture;
-extern SDL_Texture *g_hud_obj_texture;
 extern SDL_Texture *g_diorama_textures[kDioramaPlane_Count];
 extern SDL_Texture *g_sim_obj_atlas_texture;
 
