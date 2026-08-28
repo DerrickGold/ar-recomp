@@ -69,6 +69,9 @@ host-owned and is independent of the geometry handed to a renderer backend.
 The central `present.c` compositor is now part of the enforced SDL-free source
 boundary and consumes the overlay through `settings_overlay_render.h`; the
 host-facing menu header retains only its window and input integration surface.
+Its sole `FrameSlot` producer is enforced by the same boundary and timestamps
+snapshots through the host clock contract, so retained-frame inputs do not
+inherit a platform timer dependency.
 Host cadence submits completed frames and queries physical output extent through
 `ArRenderDevice`; swapchain configuration, display events, and window scaling
 remain responsibilities of the selected platform host.

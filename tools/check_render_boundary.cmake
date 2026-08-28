@@ -24,6 +24,8 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/dev/dev_tools.c"
     "${GAME_SOURCE_ROOT}/dev/dev_tools.h"
     "${GAME_SOURCE_ROOT}/dev/dev_tools_readback.h"
+    "${GAME_SOURCE_ROOT}/frame_slot.c"
+    "${GAME_SOURCE_ROOT}/frame_slot.h"
     "${GAME_SOURCE_ROOT}/present.h"
     "${GAME_SOURCE_ROOT}/present.c"
     "${GAME_SOURCE_ROOT}/present_frame.c"

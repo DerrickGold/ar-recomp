@@ -2,11 +2,12 @@
  * RtlDrawPpuFrame, snapshots live game state, and hands presentation an
  * isolated value copy. */
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <SDL3/SDL.h>
 
 #include "frame_slot.h"
+#include "host/host_clock.h"
 #include "present.h"
 #include "snesrecomp/game/types.h"
 #include "settings.h"
@@ -565,7 +566,7 @@ void FrameSlot_Capture(FrameSlot *dst) {
   }
 
   /* Pair timestamp and feature gates for presentation-time frame generation. */
-  dst->timestamp_ns = SDL_GetTicksNS();
+  dst->timestamp_ns = HostClock_Nanoseconds();
   dst->turbo_active = g_turbo != 0;
   dst->interp_setting_enabled = g_settings.gpu_interp_enabled;
   dst->diorama_hud_flat = g_settings.diorama_hud_flat;
