@@ -519,6 +519,22 @@ static void TestOutputFrameScope(void) {
 
   inset_backend.output_width = 1280;
   inset_backend.output_height = 720;
+  ArRenderRectI resolved_viewport = {0};
+  int resolved_width = 0;
+  int resolved_height = 0;
+  assert(ArRenderOutput_ResolveAspectFit(
+      &inset_device, false, 4, 3, &resolved_viewport,
+      &resolved_width, &resolved_height));
+  assert(resolved_viewport.x == 160 && resolved_viewport.y == 0);
+  assert(resolved_viewport.w == 960 && resolved_viewport.h == 720);
+  assert(resolved_width == 1280 && resolved_height == 720);
+  assert(ArRenderOutput_ResolveAspectFit(
+      &inset_device, true, 4, 3, &resolved_viewport, NULL, NULL));
+  assert(resolved_viewport.x == 0 && resolved_viewport.y == 0);
+  assert(resolved_viewport.w == 1280 && resolved_viewport.h == 720);
+  assert(!ArRenderOutput_ResolveAspectFit(
+      &inset_device, false, 0, 3, &resolved_viewport, NULL, NULL));
+
   assert(ArRenderOutputFrame_BeginAspectFit(
       &inset_device, false, 4, 3, black, navy, &frame));
   assert(frame.viewport.x == 160 && frame.viewport.y == 0);

@@ -21,6 +21,38 @@ static bool ColorsEqual(ArRenderColorF left, ArRenderColorF right) {
       left.b == right.b && left.a == right.a;
 }
 
+bool ArRenderOutput_ResolveAspectFit(
+    ArRenderDevice *device, bool stretch,
+    int aspect_width, int aspect_height,
+    ArRenderRectI *viewport, int *output_width, int *output_height) {
+  if (!viewport || aspect_width <= 0 || aspect_height <= 0)
+    return false;
+  int width = 0;
+  int height = 0;
+  if (!ArRenderDevice_UseOutputCoordinates(device) ||
+      !ArRenderDevice_GetOutputSize(device, &width, &height) ||
+      width <= 0 || height <= 0)
+    return false;
+
+  ArRenderRectI resolved = {0, 0, width, height};
+  if (!stretch &&
+      (int64_t)width * aspect_height !=
+          (int64_t)height * aspect_width) {
+    if ((int64_t)width * aspect_height >
+        (int64_t)height * aspect_width) {
+      resolved.w = (int)((int64_t)height * aspect_width / aspect_height);
+      resolved.x = (width - resolved.w) / 2;
+    } else {
+      resolved.h = (int)((int64_t)width * aspect_height / aspect_width);
+      resolved.y = (height - resolved.h) / 2;
+    }
+  }
+  *viewport = resolved;
+  if (output_width) *output_width = width;
+  if (output_height) *output_height = height;
+  return true;
+}
+
 static bool BeginResolvedFrame(
     ArRenderDevice *device, ArRenderRectI viewport,
     int output_width, int output_height,
@@ -90,27 +122,11 @@ bool ArRenderOutputFrame_BeginAspectFit(
   ResetFrame(frame);
   int output_width = 0;
   int output_height = 0;
-  if (aspect_width <= 0 || aspect_height <= 0 ||
-      !ArRenderDevice_UseOutputCoordinates(device) ||
-      !ArRenderDevice_GetOutputSize(
-          device, &output_width, &output_height))
+  ArRenderRectI viewport;
+  if (!ArRenderOutput_ResolveAspectFit(
+          device, stretch, aspect_width, aspect_height,
+          &viewport, &output_width, &output_height))
     return false;
-
-  ArRenderRectI viewport = {0, 0, output_width, output_height};
-  if (!stretch &&
-      (int64_t)output_width * aspect_height !=
-          (int64_t)output_height * aspect_width) {
-    if ((int64_t)output_width * aspect_height >
-        (int64_t)output_height * aspect_width) {
-      viewport.w = (int)((int64_t)output_height * aspect_width /
-                         aspect_height);
-      viewport.x = (output_width - viewport.w) / 2;
-    } else {
-      viewport.h = (int)((int64_t)output_width * aspect_height /
-                         aspect_width);
-      viewport.y = (output_height - viewport.h) / 2;
-    }
-  }
   return BeginResolvedFrame(
       device, viewport, output_width, output_height,
       margin_color, scene_color, frame);
