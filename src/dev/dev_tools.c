@@ -367,10 +367,12 @@ static void FillLiveHudProjectionInputs(const DevToolsContext *context,
   inputs->hud_obj_texture = context->hud_obj_texture;
   inputs->hud_scale_percent =
       Settings_ScalePercentToOutput(g_settings.hud_scale_percent);
-  inputs->pixel_aspect = context->pixel_aspect;
+  inputs->crt_pixel_aspect =
+      context->pixel_aspect == kPixelAspect_Crt43;
   inputs->snes_width = context->snes_width;
   inputs->snes_height = context->snes_height;
   inputs->visible_width = Settings_VisibleWidth();
+  inputs->authentic_width = kFrameSlotAuthenticWidth;
   if (!context->ppu_snapshot_valid) return;
 
   inputs->hud_split_height = context->ppu_frame.hud_split_height;
@@ -432,7 +434,7 @@ bool DevTools_InspectWindowPoint(const DevToolsContext *context,
   FillLiveHudProjectionInputs(context, &hud_inputs);
   HudPresentationChunk chunks[kHudPresentationChunkCapacity];
   const int chunk_count =
-      BuildHudPresentationChunks(viewport, &hud_inputs, chunks);
+      ArHudLayout_BuildPresentationChunks(viewport, &hud_inputs, chunks);
   bool selected = false;
   for (int i = chunk_count - 1; i >= 0 && !selected; i--) {
     const HudPresentationChunk *chunk = &chunks[i];

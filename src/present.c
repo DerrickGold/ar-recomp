@@ -272,11 +272,6 @@ static ArRenderRectI ToRenderRectI(SDL_Rect rectangle) {
   };
 }
 
-static int ScaledHudPixels(int pixels, double scale) {
-  int result = (int)(pixels * scale + 0.5);
-  return result > 0 ? result : 1;
-}
-
 static void RenderHudChunk(ArRenderTexture texture,
                            ArRenderRectI src, ArRenderRectI dst) {
   if (!ArRenderTexture_IsValid(texture) ||
@@ -286,193 +281,6 @@ static void RenderHudChunk(ArRenderTexture texture,
   const ArRenderRectF destination = ToRenderRectF(dst);
   (void)ArRenderDevice_DrawTexture(
       &g_render_device, texture, &source, &destination);
-}
-
-static void AddHudPresentationChunk(HudPresentationChunk *chunks, int *count,
-                                    ArRenderTexture texture,
-                                    ArRenderRectI texture_source,
-                                    ArRenderRectI screen_source,
-                                    ArRenderRectI output_destination,
-                                    InspectorPresentationKind kind,
-                                    int inspector_x_bias) {
-  if (!chunks || !count || *count >= kHudPresentationChunkCapacity ||
-      !ArRenderTexture_IsValid(texture) ||
-      texture_source.w <= 0 || texture_source.h <= 0 ||
-      screen_source.w <= 0 || screen_source.h <= 0 ||
-      output_destination.w <= 0 || output_destination.h <= 0)
-    return;
-  chunks[(*count)++] = (HudPresentationChunk){
-    texture, texture_source, screen_source, output_destination,
-    kind, inspector_x_bias,
-  };
-}
-
-/* One pure geometry description drives both compositing and hit-testing.
- * Presentation supplies FrameSlot-derived inputs; DevTools_InspectWindowPoint
- * supplies a live snapshot. */
-int BuildHudPresentationChunks(ArRenderRectI viewport,
-                               const HudProjectionInputs *in,
-                               HudPresentationChunk *chunks) {
-  if (!ArRenderTexture_IsValid(in->hud_bg_texture) ||
-      !in->hud_split_height)
-    return 0;
-
-  int count = 0;
-  double scale_y, scale_x;
-  if (in->hud_scale_percent == 0) {
-    /* Auto: derived from the viewport, so already in physical output pixels. */
-    scale_y = (double)viewport.h / in->snes_height;
-    scale_x = (double)viewport.w / in->visible_width;
-  } else {
-    /* Pinned: the percentage is SNES-pixels-per-OUTPUT-pixel, and the output is
-     * physical under SDL_WINDOW_HIGH_PIXEL_DENSITY. The FrameSlot already
-     * carries the density-corrected value (D6 — no live settings read here). */
-    scale_y = in->hud_scale_percent / (double)kPercentScale;
-    scale_x = scale_y * (in->pixel_aspect == kPixelAspect_Crt43 ? 7.0 / 6.0 : 1.0);
-  }
-
-  int tex_extra = (in->snes_width - kFrameSlotAuthenticWidth) / 2;
-  int height = in->hud_split_height;
-  int player_y = in->hud_player_row_y;
-  int enemy_y = in->hud_left_only_y;
-  if (player_y > height) player_y = height;
-  if (enemy_y > height) enemy_y = height;
-  if (player_y > enemy_y) player_y = enemy_y;
-
-  /* Band 1: top row (ACT/TIME/SCORE) — 3-way left/center/right split. */
-  int upper_h = player_y;
-  int upper_dh = ScaledHudPixels(upper_h, scale_y);
-
-  ArRenderRectI src = {tex_extra, 0, in->hud_left_end, upper_h};
-  ArRenderRectI dst = {
-    viewport.x, viewport.y,
-    ScaledHudPixels(src.w, scale_x), upper_dh,
-  };
-  AddHudPresentationChunk(
-      chunks, &count, in->hud_bg_texture, src,
-      (ArRenderRectI){0, 0, src.w, src.h}, dst,
-      kInspectorPresentation_HudBg, -in->extra_left_right);
-
-  if (in->hud_left_end < in->hud_right_start) {
-    src.x = tex_extra + in->hud_left_end;
-    src.w = in->hud_right_start - in->hud_left_end;
-    dst.w = ScaledHudPixels(src.w, scale_x);
-    dst.x = viewport.x + (viewport.w - dst.w) / 2;
-    AddHudPresentationChunk(
-        chunks, &count, in->hud_bg_texture, src,
-        (ArRenderRectI){in->hud_left_end, 0, src.w, src.h}, dst,
-        kInspectorPresentation_HudBg, 0);
-  }
-
-  int right_source_w = kFrameSlotAuthenticWidth - in->hud_right_start;
-  int right_dest_w = ScaledHudPixels(right_source_w, scale_x);
-  src.x = tex_extra + in->hud_right_start;
-  src.w = right_source_w;
-  dst.x = viewport.x + viewport.w - right_dest_w;
-  dst.w = right_dest_w;
-  AddHudPresentationChunk(
-      chunks, &count, in->hud_bg_texture, src,
-      (ArRenderRectI){in->hud_right_start, 0, src.w, src.h}, dst,
-      kInspectorPresentation_HudBg, in->extra_left_right);
-
-  /* Band 2: player row (PLAYER health + magic-scroll) — left+right split
-   * at hud_right_start so health pips stay left-anchored and scroll tiles
-   * stay right-anchored regardless of HP level. */
-  if (player_y < enemy_y) {
-    int mid_h = enemy_y - player_y;
-    int mid_dh = ScaledHudPixels(mid_h, scale_y);
-    int mid_dy = viewport.y + ScaledHudPixels(player_y, scale_y);
-
-    src.x = tex_extra;
-    src.y = player_y;
-    src.w = in->hud_right_start;
-    src.h = mid_h;
-    dst.x = viewport.x;
-    dst.y = mid_dy;
-    dst.w = ScaledHudPixels(src.w, scale_x);
-    dst.h = mid_dh;
-    AddHudPresentationChunk(
-        chunks, &count, in->hud_bg_texture, src,
-        (ArRenderRectI){0, player_y, src.w, src.h}, dst,
-        kInspectorPresentation_HudBg, -in->extra_left_right);
-
-    src.x = tex_extra + in->hud_right_start;
-    src.w = kFrameSlotAuthenticWidth - in->hud_right_start;
-    dst.x = viewport.x + viewport.w - ScaledHudPixels(src.w, scale_x);
-    dst.w = ScaledHudPixels(src.w, scale_x);
-    AddHudPresentationChunk(
-        chunks, &count, in->hud_bg_texture, src,
-        (ArRenderRectI){in->hud_right_start, player_y, src.w, src.h}, dst,
-        kInspectorPresentation_HudBg, in->extra_left_right);
-  }
-
-  /* Band 3: enemy row — full-width left-anchored (boss health spans the
-   * entire screen). */
-  if (enemy_y < height) {
-    int low_h = height - enemy_y;
-    src.x = tex_extra;
-    src.y = enemy_y;
-    src.w = kFrameSlotAuthenticWidth;
-    src.h = low_h;
-    dst.x = viewport.x;
-    dst.y = viewport.y + ScaledHudPixels(enemy_y, scale_y);
-    dst.w = ScaledHudPixels(src.w, scale_x);
-    dst.h = ScaledHudPixels(low_h, scale_y);
-    AddHudPresentationChunk(
-        chunks, &count, in->hud_bg_texture, src,
-        (ArRenderRectI){0, enemy_y, src.w, src.h}, dst,
-        kInspectorPresentation_HudBg, -in->extra_left_right);
-  }
-
-  /* Band 4 (diorama): everything on BG3 BELOW the status bar — the act-title
-   * card and the pause text. Unlike the bands above, this content is authored
-   * for the authentic 256px screen and has no left/right anchor semantics, so
-   * it is drawn as a single centered chunk at its authentic Y. Only present
-   * when the capture side extended BG3's rectangle past the split (diorama +
-   * diorama_hud_flat); in flat mode these rows are still drawn by the game
-   * into the framebuffer and hud_body_y1 stays 0. */
-  if (in->hud_body_y1 > height) {
-    int body_h = in->hud_body_y1 - height;
-    int body_dw = ScaledHudPixels(kFrameSlotAuthenticWidth, scale_x);
-    ArRenderRectI body_src = {
-      tex_extra, height, kFrameSlotAuthenticWidth, body_h,
-    };
-    ArRenderRectI body_dst = {
-      viewport.x + (viewport.w - body_dw) / 2,
-      viewport.y + ScaledHudPixels(height, scale_y),
-      body_dw, ScaledHudPixels(body_h, scale_y),
-    };
-    AddHudPresentationChunk(
-        chunks, &count, in->hud_bg_texture, body_src,
-        (ArRenderRectI){0, height, kFrameSlotAuthenticWidth, body_h},
-        body_dst,
-        kInspectorPresentation_HudBg, 0);
-  }
-
-  /* Action's selected-magic icon (4 OAM), simulation's hourglass (4 OAM), and
-   * Sky Palace's magic icon (4 OAM for Magical Fire, 1 for the other three
-   * spells) are separately validated OAM signatures; the caller resolves the
-   * icon x/y (from live oam/highOam or the FrameSlot snapshot) and passes it in
-   * already resolved, so this function stays free of oam[]/highOam[] entirely.
-   * Every one of those signatures covers the same 16x16 footprint, which is why
-   * the slot COUNT never reaches this far and one chunk size serves them all. */
-  if (ArRenderTexture_IsValid(in->hud_obj_texture) && in->obj_icon_valid &&
-      in->obj_icon_x < kFrameSlotAuthenticWidth) {
-    int x = in->obj_icon_x, y = in->obj_icon_y;
-    int icon_w = 16, icon_h = 16;
-    ArRenderRectI obj_src = {tex_extra + x, y, icon_w, icon_h};
-    ArRenderRectI obj_dst = {
-      viewport.x + viewport.w - right_dest_w - ScaledHudPixels(20, scale_x),
-      viewport.y + ScaledHudPixels(y, scale_y),
-      ScaledHudPixels(icon_w, scale_x),
-      ScaledHudPixels(icon_h, scale_y),
-    };
-    AddHudPresentationChunk(
-        chunks, &count, in->hud_obj_texture, obj_src,
-        (ArRenderRectI){x, y, icon_w, icon_h}, obj_dst,
-        kInspectorPresentation_HudObj, 0);
-  }
-  return count;
 }
 
 ArRenderRectI ComputePresentationViewport(
@@ -504,10 +312,11 @@ static HudProjectionInputs BuildProjectionInputsFromSlot(const FrameSlot *slot) 
   in.hud_bg_texture = g_hud_bg_texture;
   in.hud_obj_texture = g_hud_obj_texture;
   in.hud_scale_percent = slot->hud_scale_percent;
-  in.pixel_aspect = slot->pixel_aspect;
+  in.crt_pixel_aspect = slot->pixel_aspect == kPixelAspect_Crt43;
   in.snes_width = slot->snes_width;
   in.snes_height = slot->snes_height;
   in.visible_width = slot->visible_width;
+  in.authentic_width = kFrameSlotAuthenticWidth;
   in.hud_split_height = slot->hud_split_height;
   in.hud_left_end = slot->hud_left_end;
   in.hud_right_start = slot->hud_right_start;
@@ -544,7 +353,7 @@ static HudProjectionInputs BuildProjectionInputsFromSlot(const FrameSlot *slot) 
 static void PresentHudOverlay(const FrameSlot *slot, ArRenderRectI viewport) {
   HudProjectionInputs in = BuildProjectionInputsFromSlot(slot);
   HudPresentationChunk chunks[kHudPresentationChunkCapacity];
-  int count = BuildHudPresentationChunks(viewport, &in, chunks);
+  int count = ArHudLayout_BuildPresentationChunks(viewport, &in, chunks);
   for (int i = 0; i < count; i++)
     RenderHudChunk(chunks[i].texture, chunks[i].texture_source,
                    chunks[i].output_destination);
@@ -599,7 +408,8 @@ void PresentHudOverlayComposited(const FrameSlot *slot,
   HudProjectionInputs in = BuildProjectionInputsFromSlot(slot);
   HudPresentationChunk chunks[kHudPresentationChunkCapacity];
   ArRenderRectI local_viewport = {0, 0, viewport.w, viewport.h};
-  int count = BuildHudPresentationChunks(local_viewport, &in, chunks);
+  int count = ArHudLayout_BuildPresentationChunks(
+      local_viewport, &in, chunks);
   if (count <= 0) return;
 
   ArRenderTargetState target_state;
@@ -740,7 +550,8 @@ static bool FindSelectedHudChunk(const FrameSlot *slot, SDL_Rect viewport,
     return false;
   HudProjectionInputs in = BuildProjectionInputsFromSlot(slot);
   HudPresentationChunk chunks[kHudPresentationChunkCapacity];
-  int count = BuildHudPresentationChunks(ToRenderRectI(viewport), &in, chunks);
+  int count = ArHudLayout_BuildPresentationChunks(
+      ToRenderRectI(viewport), &in, chunks);
   for (int i = count - 1; i >= 0; i--) {
     const ArRenderRectI source = chunks[i].screen_source;
     if (chunks[i].inspector_kind != slot->inspector_selection.kind ||
