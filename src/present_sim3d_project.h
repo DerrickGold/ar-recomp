@@ -6,7 +6,6 @@
 #ifndef AR_PRESENT_SIM3D_PROJECT_H
 #define AR_PRESENT_SIM3D_PROJECT_H
 
-#include <SDL3/SDL.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -61,37 +60,39 @@ typedef struct SimCullFade {
 } SimCullFade;
 
 float SimCullProximityAt(
-    const SimCullFade *fade, float texture_x, float texture_y, SDL_Rect source);
+    const SimCullFade *fade, float texture_x, float texture_y,
+    ArRenderRectI source);
 float SimGroundExtentAlphaAt(
     const SimCullFade *fade, float texture_x, float texture_y);
 void DrawSimGroundPlane(
-    ArRenderTexture texture, SDL_Rect source, SDL_Rect viewport,
+    ArRenderTexture texture, ArRenderRectI source, ArRenderRectI viewport,
     const float matrix[16], const SimCullFade *fade);
 
 /* Height conversions. A virtual height is authored in source pixels; world
  * units are what the projection consumes. */
 float SimHeightWorldUnits(
-    SDL_Rect source, int virtual_height, unsigned height_scale_x100);
+    ArRenderRectI source, int virtual_height, unsigned height_scale_x100);
 float SimTerrainGroundHeightWorld(
-    const FrameSlot *slot, SDL_Rect source, float map_x, float map_y);
+    const FrameSlot *slot, ArRenderRectI source, float map_x, float map_y);
 float SimTerrainMaximumHeightWorld(
-    const FrameSlot *slot, SDL_Rect source);
+    const FrameSlot *slot, ArRenderRectI source);
 /* The altitude an object's own height is measured from: local terrain for a
  * grounded object, the stable town maximum for a flyer. */
 float SimObjectAltitudeBaseWorld(
-    const FrameSlot *slot, const SimRenderObject *object, SDL_Rect source,
+    const FrameSlot *slot, const SimRenderObject *object,
+    ArRenderRectI source,
     float map_x, float map_y);
 
 SimBackgroundVoxelRenderParams SimVoxelRenderParams(
-    const FrameSlot *slot, SDL_Rect source, SDL_Rect viewport,
+    const FrameSlot *slot, ArRenderRectI source, ArRenderRectI viewport,
     const float matrix[16]);
 
 bool ProjectSimTexturePoint(
-    const float matrix[16], SDL_Rect source, SDL_Rect viewport,
+    const float matrix[16], ArRenderRectI source, ArRenderRectI viewport,
     float texture_x, float texture_y, float height_world,
     Scene3DPoint *out_point);
 bool ProjectSimAnchorAndScale(
-    const float matrix[16], SDL_Rect source, SDL_Rect viewport,
+    const float matrix[16], ArRenderRectI source, ArRenderRectI viewport,
     float texture_x, float texture_y, float height_world,
     float reference_depth, Scene3DPoint *anchor, float *scale_x,
     float *scale_y);
@@ -101,13 +102,15 @@ bool ProjectSimAnchorAndScale(
 bool ProjectSimEffectPointAt(
     const FrameSlot *slot, const SimEffectInstance *effect,
     uint16_t world_x, uint16_t world_y,
-    const SimEffectLocalPoint *local, SDL_Rect source, SDL_Rect viewport,
+    const SimEffectLocalPoint *local, ArRenderRectI source,
+    ArRenderRectI viewport,
     const Scene3DCamera *camera, const float matrix[16],
     Scene3DPoint *point, float *scale_x, float *scale_y);
 
 bool ProjectSimEffectPoint(
     const FrameSlot *slot, const SimEffectInstance *effect,
-    const SimEffectLocalPoint *local, SDL_Rect source, SDL_Rect viewport,
+    const SimEffectLocalPoint *local, ArRenderRectI source,
+    ArRenderRectI viewport,
     const Scene3DCamera *camera, const float matrix[16], Scene3DPoint *point,
     float *scale_x, float *scale_y);
 

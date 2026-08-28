@@ -1,9 +1,8 @@
 #ifndef AR_PRESENT_SIM3D_TERRAIN_H
 #define AR_PRESENT_SIM3D_TERRAIN_H
 
-#include <SDL3/SDL.h>
-
 #include "present.h"
+#include "render/render_types.h"
 #include "present_sim3d_project.h"
 #include "render/render_device.h"
 
@@ -15,7 +14,7 @@
 bool DrawSimTownTerrain(
     ArRenderDevice *device, ArRenderTexture texture,
     const FrameSlot *slot, float extent_x0,
-    float extent_y0, SDL_Rect source, SDL_Rect viewport,
+    float extent_y0, ArRenderRectI source, ArRenderRectI viewport,
     const float matrix[16], const SimCullFade *fade);
 
 #endif /* AR_SIM3D_TERRAIN_ELEVATION */

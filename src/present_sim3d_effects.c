@@ -7,8 +7,6 @@
  * authored policy in it -- one style row per effect family -- which is why it
  * is a unit of its own rather than part of the composite. */
 
-#include <SDL3/SDL.h>
-
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -270,7 +268,8 @@ static const float kEffectCircle32[32][2] = {
 static bool AppendSimEffectGlow(
     EffectBatch *batch, const FrameSlot *slot,
     const SimEffectInstance *effect, const SimEffectStyle *style,
-    SDL_Rect source, SDL_Rect viewport, const Scene3DCamera *camera,
+    ArRenderRectI source, ArRenderRectI viewport,
+    const Scene3DCamera *camera,
     const float matrix[16]) {
   enum { kSegments = 32 };
   if (!EffectBatchReserve(batch, kSegments + 1, kSegments * 3))
@@ -343,7 +342,8 @@ static void AppendEffectQuad(EffectBatch *batch, float x, float y,
 static bool AppendSimEffectTrail(
     EffectBatch *batch, const FrameSlot *slot,
     const SimEffectInstance *effect, const SimEffectStyle *style,
-    SDL_Rect source, SDL_Rect viewport, const Scene3DCamera *camera,
+    ArRenderRectI source, ArRenderRectI viewport,
+    const Scene3DCamera *camera,
     const float matrix[16]) {
   if (effect->trail_count < 2) return true;
   unsigned puffs = style->trail_puffs_per_sample;
@@ -431,7 +431,8 @@ static bool AppendSimEffectTrail(
 static bool AppendSimEffectParticles(
     EffectBatch *batch, const FrameSlot *slot,
     const SimEffectInstance *effect, const SimEffectStyle *style,
-    SDL_Rect source, SDL_Rect viewport, const Scene3DCamera *camera,
+    ArRenderRectI source, ArRenderRectI viewport,
+    const Scene3DCamera *camera,
     const float matrix[16]) {
   if (!effect->pulse_generation || effect->ticks_since_visible > 5) return true;
   if (style->particle_motion == kSimEffectParticle_Trail)
@@ -497,7 +498,8 @@ static bool AppendSimEffectParticles(
 }
 
 void DrawSimEffectLocalLighting(
-    const FrameSlot *slot, bool lighting, SDL_Rect source, SDL_Rect viewport,
+    const FrameSlot *slot, bool lighting, ArRenderRectI source,
+    ArRenderRectI viewport,
     const Scene3DCamera *camera, const float matrix[16]) {
   if (!lighting || !slot->sim.effect_visible_count ||
       !EffectRendererAvailable())
@@ -527,7 +529,7 @@ void DrawSimEffectLocalLighting(
 }
 
 void DrawSimEffectSceneFlash(const FrameSlot *slot, bool lighting,
-                                    SDL_Rect viewport) {
+                             ArRenderRectI viewport) {
   if (!lighting || !slot->sim.effect_visible_count ||
       !EffectRendererAvailable())
     return;
@@ -677,7 +679,8 @@ static bool DrawSimFireballHeadFragment(
 }
 
 void DrawSimEffectFireballHeads(
-    const FrameSlot *slot, bool billboards, SDL_Rect source, SDL_Rect viewport,
+    const FrameSlot *slot, bool billboards, ArRenderRectI source,
+    ArRenderRectI viewport,
     const Scene3DCamera *camera, const float matrix[16]) {
   if (!billboards || !slot->sim.effect_count || !slot->sim.atlas_valid ||
       !ArRenderTexture_IsValid(g_sim_obj_atlas_texture))
@@ -767,7 +770,8 @@ void DrawSimEffectFireballHeads(
 }
 
 void DrawSimEffectParticles(
-    const FrameSlot *slot, bool particles, SDL_Rect source, SDL_Rect viewport,
+    const FrameSlot *slot, bool particles, ArRenderRectI source,
+    ArRenderRectI viewport,
     const Scene3DCamera *camera, const float matrix[16]) {
   if (!particles || !slot->sim.effect_count ||
       !EffectRendererAvailable())
@@ -812,7 +816,8 @@ bool SimObjectIsPromotedHud(const FrameSlot *slot,
 void DrawSimMapPlaneObject(const FrameSlot *slot,
                                   const SimRenderObject *object,
                                   int screen_origin_x, int screen_origin_y,
-                                  SDL_Rect source, SDL_Rect viewport,
+                                  ArRenderRectI source,
+                                  ArRenderRectI viewport,
                                   const float matrix[16]) {
   float x0 = (float)(object->local_x0 + screen_origin_x);
   float y0 = (float)(object->local_y0 + screen_origin_y);

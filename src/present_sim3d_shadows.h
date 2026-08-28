@@ -1,10 +1,9 @@
 #ifndef AR_PRESENT_SIM3D_SHADOWS_H
 #define AR_PRESENT_SIM3D_SHADOWS_H
 
-#include <SDL3/SDL.h>
-
 #include "present.h"
 #include "presentation_outcome.h"
+#include "render/render_types.h"
 #include "sim/sim_render_metadata.h"
 
 /* SimShadowLight is declared in present_sim3d_internal.h: the world-map
@@ -14,7 +13,7 @@
  * Paired with the shadow's footprint shrink, a rising actor grows while its
  * shadow shrinks, which is what reads as height -- so the two live together. */
 float SimBillboardHeightPop(
-    SDL_Rect source, float height_world, unsigned height_pop_pct);
+    ArRenderRectI source, float height_world, unsigned height_pop_pct);
 
 /* Where an object is actually drawn in world units, which is what its shadow
  * has to be cast from. */
@@ -26,7 +25,8 @@ void SimObjectDrawnWorld(
  * pass to be sampled by visible terrain tops only. */
 PresentationOutcome DrawSimShadowMask(
     const FrameSlot *slot, bool virtual_height, bool soft_shadows,
-    bool terrain_depth_receiver, SDL_Rect source, SDL_Rect viewport,
+    bool terrain_depth_receiver, ArRenderRectI source,
+    ArRenderRectI viewport,
     const float matrix[16]);
 
 void PresentSim3DShadows_ResetResources(void);

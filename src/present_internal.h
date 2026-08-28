@@ -35,7 +35,8 @@ typedef struct EffectBatch {
  * These stay DEFINED in present.c and lost their `static` for this header.
  * ComputePresentationViewport is already public in present.h — not repeated. */
 SDL_FRect ToFRect(SDL_Rect r);
-void PresentHudOverlayComposited(const FrameSlot *slot, SDL_Rect viewport);
+void PresentHudOverlayComposited(
+    const FrameSlot *slot, ArRenderRectI viewport);
 void PresentCompositeScene(const FrameSlot *slot, float alpha);
 bool PresentAuthenticScene(const FrameSlot *slot, SDL_Rect viewport);
 bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
@@ -61,10 +62,5 @@ void UploadWorldNavigationComposition(const FrameSlot *slot);
 /* The sim half of PresentRendererResources_Reset (which stays in present.c and
  * calls this). See its comment there for why the reset exists at all. */
 void PresentSim3D_ResetResources(void);
-
-/* Owned by present_sim3d.c: cleared by the reset above, cleared to 0 by the rim
- * blend path when a blend-mode set actually fails, and read by the public
- * Present_SimRimMaskSupported() accessor that stays in present.c. */
-extern SDL_AtomicInt s_sim_rim_mask_supported;
 
 #endif /* AR_PRESENT_INTERNAL_H */

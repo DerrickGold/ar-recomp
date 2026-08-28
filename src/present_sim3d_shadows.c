@@ -7,8 +7,6 @@
  * it is sampled only by visible terrain-top geometry -- so this unit owns both
  * paths and the choice between them. */
 
-#include <SDL3/SDL.h>
-
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -111,7 +109,7 @@ static const float kSimShadowHeightShrink = 6.0f;
  * distance setting), and shrinking grounded actors alone breaks their
  * footprint against the map tiles they stand on. A flyer has no such fixed
  * reference, so it is the cheap place to put the difference. */
-float SimBillboardHeightPop(SDL_Rect source, float height_world,
+float SimBillboardHeightPop(ArRenderRectI source, float height_world,
                                    unsigned height_pop_pct) {
   if (height_world <= 0.0f || !height_pop_pct || source.h <= 0) return 1.0f;
   float reference = (float)kSimVirtualHeight_Flying / (float)source.h;
@@ -340,7 +338,8 @@ void SimObjectDrawnWorld(const SimRenderObject *object,
  * can never touch sky, dialogs, HUD, or settings. */
 PresentationOutcome DrawSimShadowMask(
     const FrameSlot *slot, bool virtual_height, bool soft_shadows,
-    bool terrain_depth_receiver, SDL_Rect source, SDL_Rect viewport,
+    bool terrain_depth_receiver, ArRenderRectI source,
+    ArRenderRectI viewport,
     const float matrix[16]) {
   if (!ArRenderTexture_IsValid(g_sim_obj_atlas_texture) ||
       !slot->sim.atlas_valid)
@@ -368,7 +367,7 @@ PresentationOutcome DrawSimShadowMask(
   if (!ArRenderTexture_IsValid(mask))
     return kPresentationOutcome_OptionalOmitted;
 
-  SDL_Rect local_viewport = { 0, 0, shadow_w, shadow_h };
+  ArRenderRectI local_viewport = { 0, 0, shadow_w, shadow_h };
   float unit_x = ((float)shadow_w / (float)shadow_h) / (float)source.w;
   float unit_y = 1.0f / (float)source.h;
   float light_x, light_y;
