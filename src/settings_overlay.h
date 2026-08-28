@@ -76,7 +76,7 @@ typedef struct SettingsOverlayManualHooks {
   bool (*available)(void);
   bool (*is_open)(void);
   void (*close)(void);
-  void (*render)(SDL_Rect viewport);
+  void (*render)(ArRenderRectI viewport);
   /* Return true to consume. The reader MUST decline the keys that close the
    * menu outright, so a reader that fails to draw can never trap the player. */
   bool (*handle_key)(SDL_Keycode key, bool pressed, bool repeat);
@@ -112,7 +112,7 @@ void SettingsOverlay_DrawGameText(int x, int y, int scale, uint8_t alpha,
  * `scale` is an integer multiple of its 8x8 tiles; rectangle dimensions must
  * therefore be divisible by 8*scale. Falls back to the overlay's host-drawn
  * blue frame when the ROM atlas was unavailable. */
-bool SettingsOverlay_DrawGameFrame(SDL_Rect rect, int scale);
+bool SettingsOverlay_DrawGameFrame(ArRenderRectI rect, int scale);
 
 bool SettingsOverlay_IsOpen(void);
 void SettingsOverlay_Open(void);
@@ -174,7 +174,7 @@ bool SettingsOverlay_HandleText(const char *text);
 /* game_viewport is used only to resolve the HUD's "Match game" scale when
  * editing that row. The settings presentation itself covers the complete
  * render output and follows the window aspect ratio. */
-void SettingsOverlay_Render(SDL_Rect game_viewport);
+void SettingsOverlay_Render(ArRenderRectI game_viewport);
 
 /* Compact, color-coded monospace panel used by read-only host debug tools
  * while the settings menu itself is closed. `text` may contain newlines. The
@@ -182,13 +182,13 @@ void SettingsOverlay_Render(SDL_Rect game_viewport);
  * Its frame remains the native ActRaiser dialog frame. The title strip moves
  * it; the lower-right grip uniformly rescales it. */
 void SettingsOverlay_RenderDebugPanel(const char *title, const char *text,
-                                      SDL_Point avoid_point);
+                                      ArRenderPointI avoid_point);
 void SettingsOverlay_HideDebugPanel(void);
 /* These drag functions handle both title movement and corner rescaling. */
 bool SettingsOverlay_BeginDebugPanelDrag(int output_x, int output_y);
 void SettingsOverlay_DragDebugPanel(int output_x, int output_y);
 void SettingsOverlay_EndDebugPanelDrag(void);
 bool SettingsOverlay_IsDebugPanelDragging(void);
-bool SettingsOverlay_GetDebugPanelRect(SDL_Rect *rect);
+bool SettingsOverlay_GetDebugPanelRect(ArRenderRectI *rect);
 
 #endif  /* SETTINGS_OVERLAY_H */

@@ -2,6 +2,8 @@
 #define MANUAL_READER_H
 
 #include <SDL3/SDL.h>
+
+#include "render/render_types.h"
 #include <stdbool.h>
 
 /* Input policy and the decode budget: pure, and tested on their own. */
@@ -76,6 +78,6 @@ bool ManualReader_HandleMouse(const SDL_Event *event);
  *
  * Draws the reader over `viewport` on the main renderer thread and advances the
  * page turn from the presentation clock. */
-void ManualReader_Render(SDL_Rect viewport);
+void ManualReader_Render(ArRenderRectI viewport);
 
 #endif  /* MANUAL_READER_H */

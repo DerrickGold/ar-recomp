@@ -63,6 +63,9 @@ the host display layer.
 HUD projection is a pure `render/hud_layout` module shared by drawing and
 inspector hit-testing. Its inputs state authentic width and CRT pixel-aspect
 policy explicitly, so the reusable math has no game globals or SDL vocabulary.
+Settings, manual, comparison-frame, and debug-panel rendering contracts also
+use portable rectangles and points. Their SDL window and event handling stays
+host-owned and is independent of the geometry handed to a renderer backend.
 
 ## Current migration state
 

@@ -59,8 +59,8 @@ extern ArRenderTexture s_debug_font_texture;
 MenuLayout BuildLayout(int output_width, int output_height);
 MenuLayout BuildLayoutAtScale(int output_width, int output_height, int scale);
 int SnappedFitScale(int output_width, int output_height);
-SDL_Rect LogicalRect(const MenuLayout *layout,
-                     int x, int y, int width, int height);
+ArRenderRectI LogicalRect(const MenuLayout *layout,
+                          int x, int y, int width, int height);
 void FillLogicalRect(const MenuLayout *layout,
                      int x, int y, int width, int height, uint32_t color);
 void DrawDialogPanel(const MenuLayout *layout,

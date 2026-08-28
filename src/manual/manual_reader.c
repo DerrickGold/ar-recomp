@@ -243,7 +243,7 @@ static void LayoutDimensions(int *out_w, int *out_h) {
   *out_h = h;
 }
 
-static void ApplyIntent(ManualIntent intent, SDL_Rect viewport) {
+static void ApplyIntent(ManualIntent intent, ArRenderRectI viewport) {
   /* ANY input brings the hint back, whatever it was -- someone reaching for a
    * control is exactly who needs to be told what the controls are. One place,
    * so keyboard, pad and mouse cannot drift apart. */
@@ -296,7 +296,7 @@ static void ApplyIntent(ManualIntent intent, SDL_Rect viewport) {
  * with no viewport of its own, and the zoom and pan clamps are meaningless
  * without one; taking the drawn rectangle keeps the clamps agreeing with what is
  * on screen. Stale by at most one frame, and only after a resize. */
-static SDL_Rect s_last_viewport = { 0, 0, 640, 480 };
+static ArRenderRectI s_last_viewport = { 0, 0, 640, 480 };
 
 static bool Zoomed(void) { return s_reader.view.zoom > 1.001f; }
 
@@ -362,7 +362,7 @@ bool ManualReader_HandleMouse(const SDL_Event *event) {
   /* The mouse shares the keyboard's line: same sitting-at-a-desk case, and the
    * click and drag hints only make sense beside the key ones. */
   s_hint_device = kManualHintDevice_Keyboard;
-  const SDL_Rect viewport = s_last_viewport;
+  const ArRenderRectI viewport = s_last_viewport;
 
   /* Window units to renderer-output pixels. Not the same thing on a high-DPI
    * display, and the reader's geometry is all in output pixels. */
@@ -653,7 +653,7 @@ static uint8_t HintAlpha(uint64_t now) {
   return (uint8_t)(255.0 * (1.0 - faded / (double)kHintFadeMs));
 }
 
-static void DrawHint(SDL_Rect viewport, uint64_t now, bool spread) {
+static void DrawHint(ArRenderRectI viewport, uint64_t now, bool spread) {
   const uint8_t alpha = HintAlpha(now);
   if (alpha == 0) return;
 
@@ -711,7 +711,7 @@ static void DrawSheet(int page, const ManualMesh *density,
       s_reader.indices, indices, &state);
 }
 
-void ManualReader_Render(SDL_Rect viewport) {
+void ManualReader_Render(ArRenderRectI viewport) {
   if (!s_reader.open) return;
   s_last_viewport = viewport;
 

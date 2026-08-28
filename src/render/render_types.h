@@ -40,6 +40,11 @@ typedef struct ArRenderExtentI {
   int height;
 } ArRenderExtentI;
 
+typedef struct ArRenderPointI {
+  int x;
+  int y;
+} ArRenderPointI;
+
 typedef struct ArRenderRectF {
   float x;
   float y;
