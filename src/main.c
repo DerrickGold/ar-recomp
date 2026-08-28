@@ -101,7 +101,6 @@ enum {
  * pointers or used synchronously on the main thread — not part of the
  * g_ppu/g_settings state boundary D6 fences off. */
 SDL_Window *g_window;
-SDL_Renderer *g_renderer;
 ArRenderDevice g_render_device;
 static ArSdlRenderBackend g_sdl_render_backend;
 /* The SDL GPU renderer is the presentation backend. Individual optional
@@ -1222,25 +1221,9 @@ static int AppBoot_CreateVideo(AppBoot *app) {
      * sorting. */
     g_gpu_shaders_requested = true;
     g_settings.gpu_shaders_enabled = true;  /* legacy config/UI mirror */
-    SDL_PropertiesID renderer_props = SDL_CreateProperties();
-    if (renderer_props) {
-      SDL_SetStringProperty(renderer_props,
-          SDL_PROP_RENDERER_CREATE_NAME_STRING, SDL_GPU_RENDERER);
-      SDL_SetPointerProperty(renderer_props,
-          SDL_PROP_RENDERER_CREATE_WINDOW_POINTER, g_window);
-      SDL_SetBooleanProperty(renderer_props,
-          SDL_PROP_RENDERER_CREATE_GPU_SHADERS_SPIRV_BOOLEAN, true);
-      SDL_SetBooleanProperty(renderer_props,
-          SDL_PROP_RENDERER_CREATE_GPU_SHADERS_DXIL_BOOLEAN, true);
-      SDL_SetBooleanProperty(renderer_props,
-          SDL_PROP_RENDERER_CREATE_GPU_SHADERS_MSL_BOOLEAN, true);
-      g_renderer = SDL_CreateRendererWithProperties(renderer_props);
-      SDL_DestroyProperties(renderer_props);
-    }
-    if (!g_renderer) Die("SDL GPU renderer creation failed");
-    if (!ArSdlRenderBackend_Bind(
-            &g_render_device, &g_sdl_render_backend, g_renderer))
-      Die("SDL render backend binding failed");
+    if (!ArSdlRenderBackend_CreateForWindow(
+            &g_render_device, &g_sdl_render_backend, g_window))
+      Die("SDL GPU render backend creation failed");
     if (!Sim3DDepthPass_Require(&g_render_device))
       Die(Sim3DDepthPass_LastError());
     g_gpu_shaders_active = true;
@@ -2254,8 +2237,7 @@ static int AppShutdown(AppBoot *app, char **argv) {
   /* Owns a full-window render target plus a GPU shader and render state, and
    * all three must go before the renderer that created them. */
   CrtPost_Shutdown(&g_render_device);
-  SDL_DestroyRenderer(g_renderer);
-  ArRenderDevice_Reset(&g_render_device);
+  ArSdlRenderBackend_Destroy(&g_render_device, &g_sdl_render_backend);
   SDL_DestroyWindow(g_window);
   if (fatal_session) {
     char message[1536];

@@ -72,6 +72,11 @@ host-facing menu header retains only its window and input integration surface.
 Host cadence submits completed frames and queries physical output extent through
 `ArRenderDevice`; swapchain configuration, display events, and window scaling
 remain responsibilities of the selected platform host.
+The SDL backend also owns creation and destruction of its native renderer.
+Host display policy applies logical presentation, vsync, and allowed frames in
+flight through device-scoped SDL adapter operations; native renderer and GPU
+device pointers are no longer process globals. Developer readback resolves the
+same backend context from the portable device instead of borrowing native state.
 
 ## Current migration state
 

@@ -8,7 +8,7 @@
 #include "settings.h"
 #include "randomizer.h"
 #include "settings_overlay.h"
-#include "platform/sdl/render_sdl.h"
+#include "platform/sdl/render_sdl_internal.h"
 #include "sim/sim_town_terrain.h"
 
 #include <SDL3/SDL.h>

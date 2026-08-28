@@ -1,14 +1,18 @@
 #include "dev_tools_readback_sdl.h"
 
+#include <SDL3/SDL.h>
 #include <string.h>
+
+#include "platform/sdl/render_sdl_internal.h"
 
 static void ReleaseSurface(void *owner) {
   SDL_DestroySurface((SDL_Surface *)owner);
 }
 
 bool ArSdlDevTools_CaptureRgb24(
-    void *renderer_context, DevToolsRgb24Capture *capture) {
-  SDL_Renderer *renderer = (SDL_Renderer *)renderer_context;
+    void *device_context, DevToolsRgb24Capture *capture) {
+  SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(
+      (ArRenderDevice *)device_context);
   if (!renderer || !capture) return false;
   memset(capture, 0, sizeof(*capture));
 

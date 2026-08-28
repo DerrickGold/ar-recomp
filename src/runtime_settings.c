@@ -26,7 +26,6 @@
 static RuntimeLifecycleRequest s_lifecycle_request;
 
 extern SDL_Window *g_window;
-extern SDL_Renderer *g_renderer;
 extern bool g_new_ppu;
 extern bool g_ws_active;
 extern bool g_sim3d_textures_ready;
@@ -265,7 +264,7 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
     HostDisplay_ApplyWindowScale();
   }
   if ((desc->field == &g_settings.refresh_mode ||
-       desc->field == &g_settings.uncapped_framerate) && g_renderer)
+       desc->field == &g_settings.uncapped_framerate) && g_window)
     HostDisplay_ApplyRefreshVsync();
   if (desc->field == &g_settings.extended_aspect ||
       desc->field == &g_settings.pixel_aspect ||

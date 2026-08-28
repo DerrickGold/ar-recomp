@@ -3,6 +3,7 @@
 #include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 _Static_assert(sizeof(int32_t) == sizeof(int),
                "SDL geometry indices require 32-bit int");
@@ -444,6 +445,7 @@ bool ArSdlRenderBackend_Bind(ArRenderDevice *device,
                              ArSdlRenderBackend *backend,
                              SDL_Renderer *renderer) {
   if (!device || !backend || !renderer) return false;
+  memset(backend, 0, sizeof(*backend));
   backend->renderer = renderer;
 
   SDL_PropertiesID properties = SDL_GetRendererProperties(renderer);
@@ -472,6 +474,7 @@ bool ArSdlRenderBackend_Bind(ArRenderDevice *device,
 
   SDL_GPUDevice *gpu = properties ? SDL_GetPointerProperty(
       properties, SDL_PROP_RENDERER_GPU_DEVICE_POINTER, NULL) : NULL;
+  backend->gpu_device = gpu;
   if (gpu) {
     capabilities.flags |= kArRenderCapability_CustomShaders;
     if (SDL_GPUTextureSupportsFormat(
@@ -481,4 +484,90 @@ bool ArSdlRenderBackend_Bind(ArRenderDevice *device,
   }
   return ArRenderDevice_Init(
       device, &kSdlRenderOps, backend, capabilities);
+}
+
+bool ArSdlRenderBackend_CreateForWindow(ArRenderDevice *device,
+                                        ArSdlRenderBackend *backend,
+                                        SDL_Window *window) {
+  if (!device || !backend || !window) {
+    SDL_SetError("invalid SDL render backend creation request");
+    return false;
+  }
+
+  SDL_PropertiesID properties = SDL_CreateProperties();
+  if (!properties) return false;
+  bool configured =
+      SDL_SetStringProperty(properties,
+          SDL_PROP_RENDERER_CREATE_NAME_STRING, SDL_GPU_RENDERER) &&
+      SDL_SetPointerProperty(properties,
+          SDL_PROP_RENDERER_CREATE_WINDOW_POINTER, window) &&
+      SDL_SetBooleanProperty(properties,
+          SDL_PROP_RENDERER_CREATE_GPU_SHADERS_SPIRV_BOOLEAN, true) &&
+      SDL_SetBooleanProperty(properties,
+          SDL_PROP_RENDERER_CREATE_GPU_SHADERS_DXIL_BOOLEAN, true) &&
+      SDL_SetBooleanProperty(properties,
+          SDL_PROP_RENDERER_CREATE_GPU_SHADERS_MSL_BOOLEAN, true);
+  SDL_Renderer *renderer =
+      configured ? SDL_CreateRendererWithProperties(properties) : NULL;
+  SDL_DestroyProperties(properties);
+  if (!renderer) return false;
+
+  if (!ArSdlRenderBackend_Bind(device, backend, renderer)) {
+    SDL_DestroyRenderer(renderer);
+    return false;
+  }
+  backend->owns_renderer = true;
+  return true;
+}
+
+void ArSdlRenderBackend_Destroy(ArRenderDevice *device,
+                                ArSdlRenderBackend *backend) {
+  if (!backend) {
+    ArRenderDevice_Reset(device);
+    return;
+  }
+  SDL_Renderer *renderer = backend->renderer;
+  const bool owns_renderer = backend->owns_renderer;
+  ArRenderDevice_Reset(device);
+  memset(backend, 0, sizeof(*backend));
+  if (owns_renderer) SDL_DestroyRenderer(renderer);
+}
+
+bool ArSdlRenderBackend_SetVSync(ArRenderDevice *device, int requested,
+                                 bool *active) {
+  SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
+  if (active) *active = false;
+  if (!renderer) {
+    SDL_SetError("SDL render backend is not ready");
+    return false;
+  }
+  const bool applied = SDL_SetRenderVSync(renderer, requested);
+  int actual = 0;
+  const bool queried = SDL_GetRenderVSync(renderer, &actual);
+  if (active) *active = queried && actual != 0;
+  return applied && queried;
+}
+
+bool ArSdlRenderBackend_SetAllowedFramesInFlight(ArRenderDevice *device,
+                                                 uint32_t requested,
+                                                 bool *changed) {
+  if (changed) *changed = false;
+  if (!device || device->ops != &kSdlRenderOps || !device->context) {
+    SDL_SetError("SDL render backend is not ready");
+    return false;
+  }
+  ArSdlRenderBackend *backend = device->context;
+  if (!backend->gpu_device) {
+    SDL_SetError("SDL GPU renderer did not expose its device");
+    return false;
+  }
+  if (backend->frames_in_flight_applied &&
+      backend->applied_frames_in_flight == requested)
+    return true;
+  if (!SDL_SetGPUAllowedFramesInFlight(backend->gpu_device, requested))
+    return false;
+  backend->applied_frames_in_flight = requested;
+  backend->frames_in_flight_applied = true;
+  if (changed) *changed = true;
+  return true;
 }
