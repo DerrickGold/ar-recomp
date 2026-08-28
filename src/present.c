@@ -1876,9 +1876,10 @@ static void PresentFpsCounter(const FrameSlot *slot, SDL_Point output_size,
       cache.x, cache.y, cache.scale, 255, cache.text);
 }
 
-/* Terminal host UI is deliberately outside the CRT scene. One scoped physical
- * output coordinate space covers the inspector marker/panel, cheat disclosure,
- * manual and settings menu, then restores the backbuffer state for callers. */
+/* Terminal host UI is deliberately outside the CRT scene. One physical-output
+ * coordinate space covers the inspector marker/panel, cheat disclosure,
+ * manual, settings menu, and FPS counter. The next frame establishes its own
+ * scene coordinates, so terminal UI deliberately leaves this scope active. */
 void PresentHostUi(const FrameSlot *slot, SDL_Rect viewport,
                    SDL_Point output_size,
                    double presentation_fps) {

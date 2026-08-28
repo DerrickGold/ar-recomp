@@ -119,6 +119,10 @@ portable line geometry and do not capture or mutate native draw state.
 The in-game manual owns portable linear-filtered page textures and submits its
 settled sheets, turning leaf, shadow, backdrop, and fading hint plate through
 the render device. Its remaining SDL vocabulary is input-only.
+The settings menu and draggable diagnostic panel likewise own only portable
+atlas handles and submit all frames, fills, glyphs, icons, palette previews,
+and text batches through the device. SDL remains at that boundary solely for
+host events and the optional text-input window.
 Action heat refraction is a portable mesh warp rather than a custom shader; its
 viewport-sized texture is now device-owned and uses the scoped-target contract
 plus portable geometry for both its warped and fallback resolves. CRT still

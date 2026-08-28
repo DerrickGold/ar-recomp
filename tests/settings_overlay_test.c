@@ -8,6 +8,7 @@
 #include "settings.h"
 #include "randomizer.h"
 #include "settings_overlay.h"
+#include "platform/sdl/render_sdl.h"
 #include "sim/sim_town_terrain.h"
 
 #include <SDL3/SDL.h>
@@ -700,9 +701,13 @@ int main(void) {
   CHECK(surface != NULL);
   SDL_Renderer *renderer = surface ? SDL_CreateSoftwareRenderer(surface) : NULL;
   CHECK(renderer != NULL);
+  ArRenderDevice render_device = {0};
+  ArSdlRenderBackend render_backend = {0};
+  CHECK(ArSdlRenderBackend_Bind(
+      &render_device, &render_backend, renderer));
   size_t rom_size = 0;
   uint8_t *rom_data = ReadOptionalRom(&rom_size);
-  CHECK(SettingsOverlay_Init(renderer, rom_data, rom_size));
+  CHECK(SettingsOverlay_Init(&render_device, NULL, rom_data, rom_size));
   SettingsOverlay_SetManualHooks(&kFakeManualHooks);
   /* Device-reset recovery: rebuild every atlas in place. All rendering below
    * runs against the REBUILT textures, so a broken reload shows up in the
@@ -772,24 +777,13 @@ int main(void) {
   CheckManualSectionAvailability();
   if (renderer) {
     /* Fullscreen 4:3 leaves SDL's game presentation pillarboxed on a wide
-     * output. A direct overlay call must temporarily discard that coordinate
-     * space and game-local clip, draw into the bars, then restore both. */
+     * output. The overlay is terminal host UI: it discards that coordinate
+     * space and game-local clip, draws into the bars, and deliberately leaves
+     * full-output coordinates active for the host UI that follows it. */
     CHECK(SDL_SetRenderLogicalPresentation(
         renderer, 1024, 768, SDL_LOGICAL_PRESENTATION_LETTERBOX));
     SDL_Rect game_clip = { 0, 0, 1024, 768 };
     CHECK(SDL_SetRenderClipRect(renderer, &game_clip));
-    int expected_logical_width = -1, expected_logical_height = -1;
-    SDL_RendererLogicalPresentation expected_logical_mode =
-        SDL_LOGICAL_PRESENTATION_DISABLED;
-    CHECK(SDL_GetRenderLogicalPresentation(
-        renderer, &expected_logical_width, &expected_logical_height,
-        &expected_logical_mode));
-    const bool expected_viewport_set = SDL_RenderViewportSet(renderer);
-    SDL_Rect expected_viewport = {0};
-    CHECK(SDL_GetRenderViewport(renderer, &expected_viewport));
-    const bool expected_clip_enabled = SDL_RenderClipEnabled(renderer);
-    SDL_Rect expected_clip = {0};
-    CHECK(SDL_GetRenderClipRect(renderer, &expected_clip));
     SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
     SDL_RenderClear(renderer);
     SettingsOverlay_Render(
@@ -799,17 +793,14 @@ int main(void) {
         SDL_LOGICAL_PRESENTATION_LETTERBOX;
     CHECK(SDL_GetRenderLogicalPresentation(
         renderer, &logical_width, &logical_height, &logical_mode));
-    CHECK(logical_width == expected_logical_width &&
-          logical_height == expected_logical_height);
-    CHECK(logical_mode == expected_logical_mode);
-    CHECK(SDL_RenderViewportSet(renderer) == expected_viewport_set);
+    CHECK(logical_width == 0 && logical_height == 0);
+    CHECK(logical_mode == SDL_LOGICAL_PRESENTATION_DISABLED);
+    CHECK(!SDL_RenderViewportSet(renderer));
     SDL_Rect overlay_viewport = { -1, -1, -1, -1 };
     CHECK(SDL_GetRenderViewport(renderer, &overlay_viewport));
-    CHECK(SDL_RectsEqual(&overlay_viewport, &expected_viewport));
-    CHECK(SDL_RenderClipEnabled(renderer) == expected_clip_enabled);
-    SDL_Rect overlay_clip = {0};
-    CHECK(SDL_GetRenderClipRect(renderer, &overlay_clip));
-    CHECK(SDL_RectsEqual(&overlay_clip, &expected_clip));
+    const SDL_Rect full_output = {0, 0, surface_width, surface_height};
+    CHECK(SDL_RectsEqual(&overlay_viewport, &full_output));
+    CHECK(!SDL_RenderClipEnabled(renderer));
     SDL_RenderPresent(renderer);
     /* On a wide target, surviving pixels in the left pillar prove this was a
      * real full-output draw rather than state bookkeeping alone. */
@@ -1481,6 +1472,7 @@ int main(void) {
 
   SettingsOverlay_SetManualHooks(NULL);
   SettingsOverlay_Destroy();
+  ArRenderDevice_Reset(&render_device);
   Settings_SetActionObserver(NULL);
   SDL_DestroyRenderer(renderer);
   SDL_DestroySurface(surface);

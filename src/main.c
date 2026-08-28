@@ -1290,8 +1290,9 @@ static int AppBoot_CreateVideo(AppBoot *app) {
  * manual), input, and music. Injection rather than direct calls is what keeps
  * settings_overlay.c testable with no renderer at all -- see settings_overlay.h. */
 static void AppBoot_InstallSubsystems(AppBoot *app) {
-  if (!SettingsOverlay_Init(g_renderer, app->rom_data, app->rom_size))
-    Die("SDL font atlas creation for settings overlay failed");
+  if (!SettingsOverlay_Init(&g_render_device, g_window,
+                            app->rom_data, app->rom_size))
+    Die("font atlas creation for settings overlay failed");
   /* The world-map image and pure development-builder tables are immutable ROM
    * data. Failure is not fatal: consumers retain the authentic presentation. */
   if (SimWorldMap_Init(app->rom_data, app->rom_size))

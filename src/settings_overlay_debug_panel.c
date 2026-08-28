@@ -1,6 +1,7 @@
 #include "settings_overlay.h"
 #include "settings_overlay_internal.h"
 #include "constants.h"
+#include "render/render_output.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -8,9 +9,10 @@
 
 /* The draggable, resizable F-key diagnostic panel (scene inspector output,
  * live report text). A distinct feature from the settings menu, sharing only
- * the overlay renderer, debug font, layout math and low-level draw primitives
- * declared in settings_overlay_internal.h. Split out of settings_overlay.c so
- * the menu core is not 3900 lines. State below is private to the panel. */
+ * the overlay render device, debug font, layout math and low-level draw
+ * primitives declared in settings_overlay_internal.h. Split out of
+ * settings_overlay.c so the menu core is not 3900 lines. State below is private
+ * to the panel. */
 
 enum {
   kDebugPanelMinimumScalePercent = 50,
@@ -66,18 +68,13 @@ void SettingsOverlayDebugPanel_Reset(void) {
 
 void SettingsOverlay_RenderDebugPanel(const char *title, const char *text,
                                       SDL_Point avoid_point) {
-  if (!s_renderer || !s_debug_font_texture || !text || !text[0])
+  if (!s_render_device || !ArRenderTexture_IsValid(s_debug_font_texture) ||
+      !text || !text[0])
     return;
   int output_width = 0, output_height = 0;
-  if (!SDL_GetRenderOutputSize(s_renderer, &output_width, &output_height) ||
-      output_width <= 0 || output_height <= 0)
+  if (!ArRenderOutput_UseFull(
+          s_render_device, &output_width, &output_height))
     return;
-
-  SDL_BlendMode old_blend_mode = SDL_BLENDMODE_NONE;
-  Uint8 old_r = 0, old_g = 0, old_b = 0, old_a = 0;
-  SDL_GetRenderDrawBlendMode(s_renderer, &old_blend_mode);
-  SDL_GetRenderDrawColor(s_renderer, &old_r, &old_g, &old_b, &old_a);
-  SDL_SetRenderDrawBlendMode(s_renderer, SDL_BLENDMODE_BLEND);
 
   MenuLayout layout = BuildLayout(output_width, output_height);
   /* Debug reports should remain information-dense even when the settings
@@ -195,8 +192,6 @@ void SettingsOverlay_RenderDebugPanel(const char *title, const char *text,
     s_debug_panel_output_y = s_debug_panel_rect.y;
   }
 
-  SDL_SetRenderDrawBlendMode(s_renderer, old_blend_mode);
-  SDL_SetRenderDrawColor(s_renderer, old_r, old_g, old_b, old_a);
 }
 
 void SettingsOverlay_HideDebugPanel(void) {
@@ -238,7 +233,8 @@ bool SettingsOverlay_BeginDebugPanelDrag(int output_x, int output_y) {
 }
 
 void SettingsOverlay_DragDebugPanel(int output_x, int output_y) {
-  if ((!s_debug_panel_dragging && !s_debug_panel_resizing) || !s_renderer)
+  if ((!s_debug_panel_dragging && !s_debug_panel_resizing) ||
+      !s_render_device)
     return;
   if (s_debug_panel_resizing) {
     int dx = output_x - s_debug_panel_resize_start_x;
@@ -261,7 +257,8 @@ void SettingsOverlay_DragDebugPanel(int output_x, int output_y) {
     return;
   }
   int output_width = 0, output_height = 0;
-  if (!SDL_GetRenderOutputSize(s_renderer, &output_width, &output_height) ||
+  if (!ArRenderDevice_GetOutputSize(
+          s_render_device, &output_width, &output_height) ||
       output_width <= 0 || output_height <= 0)
     return;
   int x = output_x - s_debug_panel_drag_offset_x;

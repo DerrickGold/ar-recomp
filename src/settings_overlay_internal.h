@@ -11,6 +11,8 @@
 #include <stdint.h>
 #include <SDL3/SDL.h>
 
+#include "render/render_device.h"
+
 /* ARGB pixel packing, shared by both translation units' colour constants. */
 #define ARGB(a, r, g, b) \
   ((uint32_t)(a) << 24 | (uint32_t)(r) << 16 | \
@@ -49,8 +51,8 @@ typedef struct MenuLayout {
 /* Presentation resources owned by settings_overlay.c (created in
  * SettingsOverlay_Init). The panel reads these; it does not create or free
  * them. */
-extern SDL_Renderer *s_renderer;
-extern SDL_Texture *s_debug_font_texture;
+extern ArRenderDevice *s_render_device;
+extern ArRenderTexture s_debug_font_texture;
 
 /* Layout + draw primitives defined in settings_overlay.c, reused by the panel
  * so both surfaces scale and render text identically. */

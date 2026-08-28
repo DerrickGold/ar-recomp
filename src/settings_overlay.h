@@ -6,16 +6,20 @@
 #include <stdint.h>
 #include <SDL3/SDL.h>
 
+#include "render/render_device.h"
+
 /* Host-owned settings overlay. It consumes SDL input before the SNES joypad
- * path and renders after the emulated framebuffer has been composited. */
-bool SettingsOverlay_Init(SDL_Renderer *renderer,
+ * path and renders through the portable device after the emulated framebuffer
+ * has been composited. `window` is retained only for SDL text-input control and
+ * may be NULL for headless or non-windowed hosts. */
+bool SettingsOverlay_Init(ArRenderDevice *render_device, SDL_Window *window,
                           const uint8_t *rom_data, size_t rom_size);
 void SettingsOverlay_Destroy(void);
 
-/* RENDER_TARGETS_RESET/DEVICE_RESET recovery: the overlay's atlases are
- * SDL_TEXTUREACCESS_STATIC (uploaded once at Init) so the driver empties them
- * on a reset. Rebuilds them from the persisted decoded font tiles + the ROM
- * dialog assets; UI/navigation state is untouched. No-op without a renderer. */
+/* Render-target/device-reset recovery: the overlay's static atlases are
+ * uploaded once at Init, so a backend reset may empty them. Rebuilds them from
+ * the persisted decoded font tiles + the ROM dialog assets; UI/navigation
+ * state is untouched. No-op without a ready render device. */
 bool SettingsOverlay_ReloadTextures(const uint8_t *rom_data, size_t rom_size);
 
 /* Optional live, read-only text shown below the Inspector controls. The
@@ -58,8 +62,8 @@ void SettingsOverlay_SetLayerPaletteProvider(
 
 /* The in-game manual, injected for the same reason the layer editor is: the
  * reader owns textures and an image decoder, and calling it directly from here
- * would drag both into every target that links this file -- including
- * tests/settings_overlay_test.c, which has no renderer at all.
+ * would drag both into every target that links this file -- including the
+ * focused overlay test, which supplies only a minimal render-device adapter.
  *
  * The reader is a MODE THIS OVERLAY IS IN, not a peer of it. While it is open
  * SettingsOverlay_IsOpen() stays true, so nothing else in the host has to learn
@@ -169,7 +173,7 @@ bool SettingsOverlay_HandleCaptureEvent(const SDL_Event *event);
 bool SettingsOverlay_HandleText(const char *text);
 /* game_viewport is used only to resolve the HUD's "Match game" scale when
  * editing that row. The settings presentation itself covers the complete
- * renderer output and follows the window aspect ratio. */
+ * render output and follows the window aspect ratio. */
 void SettingsOverlay_Render(SDL_Rect game_viewport);
 
 /* Compact, color-coded monospace panel used by read-only host debug tools
