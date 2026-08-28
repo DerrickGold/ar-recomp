@@ -46,6 +46,7 @@
 #include "presentation_geometry.h"
 #include "presentation_upload_mirror.h"
 #include "platform/sdl/render_sdl.h"
+#include "render/render_output.h"
 
 
 extern SDL_Renderer *g_renderer;
@@ -2308,28 +2309,35 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
 }
 
 bool PresentAuthenticScene(const FrameSlot *slot, SDL_Rect viewport) {
-  if (!slot || !g_renderer ||
+  if (!slot || !ArRenderDevice_IsReady(&g_render_device) ||
       !ArRenderTexture_IsValid(g_authentic_texture) ||
       viewport.w <= 0 || viewport.h <= 0)
     return false;
   /* The orchestrator owns the current target: this may be either the window
    * backbuffer or the CRT scene target. Authentic comparison changes the game
    * image, not the player's independent display treatment. */
-  if (!SDL_SetRenderLogicalPresentation(
-          g_renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED) ||
-      !SDL_SetRenderViewport(g_renderer, NULL) ||
-      !SDL_SetRenderClipRect(g_renderer, NULL) ||
-      !SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE) ||
-      !SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255) ||
-      !SDL_RenderClear(g_renderer))
+  if (!ArRenderDevice_SetClipRect(&g_render_device, NULL))
+    return false;
+  const ArRenderColorF black = {0.0f, 0.0f, 0.0f, 1.0f};
+  ArRenderOutputFrame output_frame;
+  if (!ArRenderOutputFrame_Begin(
+          &g_render_device,
+          (ArRenderRectI){viewport.x, viewport.y, viewport.w, viewport.h},
+          black, black, &output_frame))
     return false;
   const ArRenderRectF source = {
     (float)slot->authentic_x0, (float)slot->authentic_y0,
     (float)kFrameSlotAuthenticWidth, (float)kFrameSlotAuthenticHeight,
   };
-  const ArRenderRectF destination = ToRenderRectF(viewport);
-  return ArRenderDevice_DrawTexture(
-      &g_render_device, g_authentic_texture, &source, &destination);
+  const ArRenderRectF destination = {
+    0.0f, 0.0f, (float)viewport.w, (float)viewport.h,
+  };
+  if (!ArRenderDevice_DrawTexture(
+          &g_render_device, g_authentic_texture, &source, &destination)) {
+    ArRenderOutputFrame_Abort(&output_frame);
+    return false;
+  }
+  return ArRenderOutputFrame_Finish(&output_frame);
 }
 
 bool PresentAuthenticPictureInPicture(const FrameSlot *slot,

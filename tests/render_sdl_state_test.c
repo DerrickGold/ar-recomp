@@ -151,6 +151,10 @@ int main(void) {
          ArSdlRenderBackend_UnwrapTexture(target));
   assert(!SDL_RenderViewportSet(renderer));
   assert(!SDL_RenderClipEnabled(renderer));
+  assert(ArRenderDevice_UseOutputCoordinates(&device));
+  assert(ArRenderDevice_GetOutputSize(
+      &device, &output_width, &output_height));
+  assert(output_width == 8 && output_height == 8);
   assert(ArRenderDevice_Clear(
       &device, (ArRenderColorF){0.5f, 0.25f, 0.75f, 1.0f}));
   Uint8 draw_r = 0, draw_g = 0, draw_b = 0, draw_a = 0;

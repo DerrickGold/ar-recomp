@@ -131,7 +131,7 @@ static bool UseOutputCoordinates(void *context) {
 
 static bool GetOutputSize(void *context, int *width, int *height) {
   ArSdlRenderBackend *backend = context;
-  return SDL_GetRenderOutputSize(backend->renderer, width, height);
+  return SDL_GetCurrentRenderOutputSize(backend->renderer, width, height);
 }
 
 static bool SetViewport(void *context, const ArRenderRectI *viewport) {
