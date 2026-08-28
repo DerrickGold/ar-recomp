@@ -42,7 +42,7 @@ static const float kContactLiftPixels = 0.06f;
 static const float kObjectCullMarginPixels = 24.0f;
 
 static struct {
-  SDL_Texture *ground;
+  ArRenderTexture ground;
   uint32_t uploaded_serial;
   uint32_t uploaded_ground_serial;
   uint32_t uploaded_atlas_serial;
@@ -55,35 +55,35 @@ static struct {
   SimBackgroundGeometryBatch batch;
 } g_renderer_state;
 
-static SDL_Texture *CreateCanvasTexture(
-    SDL_Renderer *renderer, SDL_ScaleMode scale_mode) {
-  SDL_Texture *texture = SDL_CreateTexture(
-      renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-      kSimTownCanvasPixels, kSimTownCanvasPixels);
-  if (!texture) return NULL;
-  if (!SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND) ||
-      !SDL_SetTextureScaleMode(texture, scale_mode)) {
-    SDL_DestroyTexture(texture);
-    return NULL;
-  }
+static ArRenderTexture CreateGroundTexture(ArRenderDevice *device) {
+  const ArRenderTextureDesc desc = {
+    .width = kSimTownCanvasPixels,
+    .height = kSimTownCanvasPixels,
+    .format = kArRenderPixelFormat_Argb8888,
+    .usage = kArRenderTextureUsage_Streaming,
+    .filter = kArRenderFilter_Linear,
+    .blend = kArRenderBlendMode_Alpha,
+  };
+  ArRenderTexture texture = ArRenderTexture_Invalid();
+  (void)ArRenderDevice_CreateTexture(device, &desc, &texture);
   return texture;
 }
 
-void SimBackgroundVoxelRenderer_Upload(SDL_Renderer *renderer) {
+void SimBackgroundVoxelRenderer_Upload(ArRenderDevice *device) {
   uint32_t serial = SimBackgroundVoxels_Serial();
-  if (!renderer || !serial || serial == g_renderer_state.uploaded_serial ||
+  if (!ArRenderDevice_IsReady(device) || !serial ||
+      serial == g_renderer_state.uploaded_serial ||
       g_renderer_state.allocation_failed)
     return;
   bool created_ground = false;
-  if (!g_renderer_state.ground) {
-    g_renderer_state.ground = CreateCanvasTexture(
-        renderer, SDL_SCALEMODE_LINEAR);
-    created_ground = g_renderer_state.ground != NULL;
+  if (!ArRenderTexture_IsValid(g_renderer_state.ground)) {
+    g_renderer_state.ground = CreateGroundTexture(device);
+    created_ground = ArRenderTexture_IsValid(g_renderer_state.ground);
   }
-  if (!g_renderer_state.ground) {
+  if (!ArRenderTexture_IsValid(g_renderer_state.ground)) {
     g_renderer_state.allocation_failed = true;
     fprintf(stderr, "[sim-bg-voxels] texture allocation failed: %s\n",
-            SDL_GetError());
+            ArRenderDevice_LastError(device));
     return;
   }
   int pitch = kSimTownCanvasPixels * (int)sizeof(uint32_t);
@@ -98,9 +98,9 @@ void SimBackgroundVoxelRenderer_Upload(SDL_Renderer *renderer) {
       while (SimBackgroundVoxels_TakeGroundDirtyRect(
                  &x, &y, &width, &height)) {
         uploaded_region = true;
-        SDL_Rect dirty = {x, y, width, height};
-        if (!SDL_UpdateTexture(
-                g_renderer_state.ground, &dirty,
+        ArRenderRectI dirty = {x, y, width, height};
+        if (!ArRenderDevice_UpdateTexture(
+                device, g_renderer_state.ground, &dirty,
                 ground + (size_t)y * kSimTownCanvasPixels + x, pitch)) {
           upload_ok = false;
           break;
@@ -114,8 +114,8 @@ void SimBackgroundVoxelRenderer_Upload(SDL_Renderer *renderer) {
      * cursor; recover with one complete publication. */
     if (created_ground || !g_renderer_state.uploaded_ground_serial ||
         !uploaded_region) {
-      upload_ok = SDL_UpdateTexture(
-          g_renderer_state.ground, NULL, ground, pitch);
+      upload_ok = ArRenderDevice_UpdateTexture(
+          device, g_renderer_state.ground, NULL, ground, pitch);
       if (upload_ok) {
         Sim3DPerformance_AddUpload(
             (uint64_t)kSimTownCanvasPixels * kSimTownCanvasPixels *
@@ -128,7 +128,7 @@ void SimBackgroundVoxelRenderer_Upload(SDL_Renderer *renderer) {
     if (!upload_ok) {
       g_renderer_state.uploaded_ground_serial = 0;
       fprintf(stderr, "[sim-bg-voxels] texture upload failed: %s\n",
-              SDL_GetError());
+              ArRenderDevice_LastError(device));
       return;
     }
     g_renderer_state.uploaded_ground_serial = ground_serial;
@@ -141,7 +141,7 @@ void SimBackgroundVoxelRenderer_Upload(SDL_Renderer *renderer) {
       (!g_renderer_state.mountain_atlas_ready ||
        atlas_serial != g_renderer_state.uploaded_atlas_serial)) {
     if (!Sim3DDepthPass_UploadMountainAtlas(
-            renderer, SimBackgroundVoxels_AtlasPixels(),
+            device, SimBackgroundVoxels_AtlasPixels(),
             kSimTownCanvasPixels, kSimTownCanvasPixels, pitch)) {
       fprintf(stderr, "[sim-bg-voxels] GPU mountain atlas upload failed: %s\n",
               SDL_GetError());
@@ -166,12 +166,12 @@ void SimBackgroundVoxelRenderer_Upload(SDL_Renderer *renderer) {
 
 bool SimBackgroundVoxelRenderer_Ready(uint32_t serial) {
   return serial && serial == g_renderer_state.uploaded_serial &&
-      g_renderer_state.ground;
+      ArRenderTexture_IsValid(g_renderer_state.ground);
 }
 
-SDL_Texture *SimBackgroundVoxelRenderer_GroundTexture(uint32_t serial) {
+ArRenderTexture SimBackgroundVoxelRenderer_GroundTexture(uint32_t serial) {
   return SimBackgroundVoxelRenderer_Ready(serial) ? g_renderer_state.ground
-                                                   : NULL;
+                                                   : ArRenderTexture_Invalid();
 }
 
 static float ObjectOriginX(const SimBackgroundVoxelObject *object) {
@@ -762,8 +762,9 @@ typedef struct SimBackgroundVisibleModelList {
 } SimBackgroundVisibleModelList;
 
 static bool RenderParamsValid(
-    SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params) {
-  if (!renderer || !params || !params->matrix || params->source.w <= 0 ||
+    ArRenderDevice *device, const SimBackgroundVoxelRenderParams *params) {
+  if (!ArRenderDevice_IsReady(device) || !params || !params->matrix ||
+      params->source.w <= 0 ||
       params->source.h <= 0 || params->viewport.w <= 0 ||
       params->viewport.h <= 0 ||
       !SimBackgroundVoxelRenderer_Ready(params->serial))
@@ -846,9 +847,9 @@ static void GroundDepthRange(
 }
 
 static bool BeginDepthTarget(
-    SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params,
+    ArRenderDevice *device, const SimBackgroundVoxelRenderParams *params,
     SimBackgroundVoxelRenderParams *draw_params) {
-  if (!RenderParamsValid(renderer, params) || !draw_params) return false;
+  if (!RenderParamsValid(device, params) || !draw_params) return false;
   *draw_params = *params;
   int output_scale = params->render_scale ==
           kSimBackgroundVoxelRenderScale_2x &&
@@ -867,31 +868,32 @@ static bool BeginDepthTarget(
     params->viewport.h * output_scale,
   };
   SimBackgroundVoxelProject_Prepare(draw_params);
-  SDL_ScaleMode scale_mode =
+  ArRenderFilter output_filter =
       params->render_scale == kSimBackgroundVoxelRenderScale_PixelClean
-          ? SDL_SCALEMODE_NEAREST : SDL_SCALEMODE_LINEAR;
+          ? kArRenderFilter_Nearest : kArRenderFilter_Linear;
   return Sim3DDepthPass_Begin(
-      renderer, draw_params->viewport.w, draw_params->viewport.h, scale_mode);
+      device, draw_params->viewport.w, draw_params->viewport.h,
+      output_filter);
 }
 
 static void CompositeDepthTarget(
-    SDL_Renderer *renderer, SDL_Texture *texture,
+    ArRenderDevice *device, ArRenderTexture texture,
     const SimBackgroundVoxelRenderParams *params) {
-  if (!texture) return;
-  SDL_FRect destination = {
+  if (!ArRenderTexture_IsValid(texture)) return;
+  ArRenderRectF destination = {
     (float)params->viewport.x, (float)params->viewport.y,
     (float)params->viewport.w, (float)params->viewport.h,
   };
-  if (SDL_RenderTexture(renderer, texture, NULL, &destination))
+  if (ArRenderDevice_DrawTexture(device, texture, NULL, &destination))
     Sim3DPerformance_AddDraw(0, 0);
 }
 
 static void DrawDepthLayers(
-    SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params,
+    ArRenderDevice *device, const SimBackgroundVoxelRenderParams *params,
     SimBackgroundVoxelDepthLayerCallback callback, void *userdata,
     bool interleaved) {
   SimBackgroundVoxelRenderParams draw_params;
-  if (!BeginDepthTarget(renderer, params, &draw_params)) return;
+  if (!BeginDepthTarget(device, params, &draw_params)) return;
 
   g_renderer_state.cache_stamp++;
   if (!g_renderer_state.cache_stamp) g_renderer_state.cache_stamp = 1;
@@ -914,7 +916,8 @@ static void DrawDepthLayers(
   Sim3DPerformance_End(project_performance);
   Sim3DPerformanceScope submit_performance =
       Sim3DPerformance_Begin(kSim3DPerformance_DepthSubmit);
-  SDL_Texture *depth_composite = Sim3DDepthPass_Submit(renderer, NULL);
+  ArRenderTexture depth_composite = Sim3DDepthPass_Submit(
+      device, ArRenderTexture_Invalid());
   Sim3DPerformance_End(submit_performance);
   /* Actors standing on ordinary ground go UNDER the composite, so the town's
    * own geometry hides them: a villager behind a peak or behind a house is
@@ -927,7 +930,7 @@ static void DrawDepthLayers(
   if (callback && interleaved)
     callback(userdata, params, visible_minimum, visible_maximum,
              kSimBackgroundVoxelActorBand_Ground);
-  CompositeDepthTarget(renderer, depth_composite, params);
+  CompositeDepthTarget(device, depth_composite, params);
   if (callback && interleaved) {
     callback(userdata, params, visible_minimum, visible_maximum,
              kSimBackgroundVoxelActorBand_Mountain);
@@ -937,33 +940,35 @@ static void DrawDepthLayers(
 }
 
 void SimBackgroundVoxelRenderer_DrawTerrainShadow(
-    SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params) {
+    ArRenderDevice *device, const SimBackgroundVoxelRenderParams *params) {
 #if AR_SIM3D_TERRAIN_ELEVATION
-  if (!params || !params->shadow_mask || !params->shadow_opacity_pct) return;
+  if (!params || !ArRenderTexture_IsValid(params->shadow_mask) ||
+      !params->shadow_opacity_pct)
+    return;
   SimBackgroundVoxelRenderParams draw_params;
-  if (!BeginDepthTarget(renderer, params, &draw_params)) return;
+  if (!BeginDepthTarget(device, params, &draw_params)) return;
   /* This pass deliberately contains no model geometry. It runs at BG1Low so
    * the clipped mask darkens only the ground; later actor/model ranks retain
    * the authentic painter relationship and cover it normally. */
   SimBackgroundVoxelTerrainDepth_Append(&draw_params);
-  SDL_Texture *shadow_composite = Sim3DDepthPass_Submit(
-      renderer, draw_params.shadow_mask);
-  CompositeDepthTarget(renderer, shadow_composite, params);
+  ArRenderTexture shadow_composite = Sim3DDepthPass_Submit(
+      device, draw_params.shadow_mask);
+  CompositeDepthTarget(device, shadow_composite, params);
 #else
-  (void)renderer;
+  (void)device;
   (void)params;
 #endif
 }
 
 void SimBackgroundVoxelRenderer_Draw(
-    SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params) {
-  DrawDepthLayers(renderer, params, NULL, NULL, false);
+    ArRenderDevice *device, const SimBackgroundVoxelRenderParams *params) {
+  DrawDepthLayers(device, params, NULL, NULL, false);
 }
 
 void SimBackgroundVoxelRenderer_DrawInterleaved(
-    SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params,
+    ArRenderDevice *device, const SimBackgroundVoxelRenderParams *params,
     SimBackgroundVoxelDepthLayerCallback callback, void *userdata) {
-  DrawDepthLayers(renderer, params, callback, userdata, true);
+  DrawDepthLayers(device, params, callback, userdata, true);
 }
 
 static void AppendSolidQuad(SimBackgroundGeometryBatch *batch,
@@ -971,11 +976,11 @@ static void AppendSolidQuad(SimBackgroundGeometryBatch *batch,
   if (batch->vertex_count + 4 > kSimBackgroundBatchMaxVertices ||
       batch->index_count + 6 > kSimBackgroundBatchMaxIndices)
     return;
-  const SDL_FColor black = {0.0f, 0.0f, 0.0f, 1.0f};
+  const ArRenderColorF black = {0.0f, 0.0f, 0.0f, 1.0f};
   int base = batch->vertex_count;
   for (int i = 0; i < 4; i++)
     batch->vertices[batch->vertex_count++] =
-        (SDL_Vertex){{points[i].x, points[i].y}, black, {0, 0}};
+        (ArRenderVertex2D){{points[i].x, points[i].y}, black, {0, 0}};
   static const int indices[] = {0, 1, 2, 0, 2, 3};
   for (int i = 0; i < 6; i++)
     batch->indices[batch->index_count++] = base + indices[i];
@@ -1130,9 +1135,9 @@ static void AppendShadowVolume(
 }
 
 void SimBackgroundVoxelRenderer_DrawShadowMask(
-    SDL_Renderer *renderer, const SimBackgroundVoxelRenderParams *params,
+    ArRenderDevice *device, const SimBackgroundVoxelRenderParams *params,
     float light_x, float light_y) {
-  if (!RenderParamsValid(renderer, params)) return;
+  if (!RenderParamsValid(device, params)) return;
   SimBackgroundVoxelRenderParams prepared_params = *params;
   SimBackgroundVoxelProject_Prepare(&prepared_params);
   params = &prepared_params;
@@ -1164,19 +1169,19 @@ void SimBackgroundVoxelRenderer_DrawShadowMask(
             kSimBackgroundBatchMaxVertices ||
         batch->index_count + kMaxShadowQuadsPerObject * 6 >
             kSimBackgroundBatchMaxIndices)
-      SimBackgroundVoxelProject_FlushBatch(renderer, batch);
+      SimBackgroundVoxelProject_FlushBatch(device, batch);
     for (int volume = 0; volume < volume_count; volume++)
       AppendShadowVolume(batch, params, object, bounds[volume],
                          axis->height_scale,
                          light_x, light_y);
   }
-  SimBackgroundVoxelProject_FlushBatch(renderer, batch);
+  SimBackgroundVoxelProject_FlushBatch(device, batch);
 }
 
-void SimBackgroundVoxelRenderer_Reset(void) {
-  if (g_renderer_state.ground) SDL_DestroyTexture(g_renderer_state.ground);
-  Sim3DDepthPass_Reset();
-  g_renderer_state.ground = NULL;
+void SimBackgroundVoxelRenderer_Reset(ArRenderDevice *device) {
+  ArRenderDevice_DestroyTexture(device, g_renderer_state.ground);
+  Sim3DDepthPass_Reset(device);
+  g_renderer_state.ground = ArRenderTexture_Invalid();
   g_renderer_state.uploaded_serial = 0;
   g_renderer_state.uploaded_ground_serial = 0;
   g_renderer_state.uploaded_atlas_serial = 0;

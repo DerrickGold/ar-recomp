@@ -31,6 +31,7 @@
 #endif
 
 extern SDL_Renderer *g_renderer;
+extern ArRenderDevice g_render_device;
 extern ArRenderTexture g_sim_obj_atlas_texture;
 
 static SDL_Texture *NativeAtlasTexture(void) {
@@ -624,7 +625,7 @@ PresentationOutcome DrawSimShadowMask(
     SimBackgroundVoxelRenderParams voxel_params =
         SimVoxelRenderParams(slot, source, local_viewport, matrix);
     SimBackgroundVoxelRenderer_DrawShadowMask(
-        g_renderer, &voxel_params, light_x, light_y);
+        &g_render_device, &voxel_params, light_x, light_y);
   }
 
   PresentationOutcome outcome = mask_valid
@@ -663,9 +664,9 @@ PresentationOutcome DrawSimShadowMask(
     }
     SimBackgroundVoxelRenderParams voxel_params =
         SimVoxelRenderParams(slot, source, viewport, matrix);
-    voxel_params.shadow_mask = mask;
+    voxel_params.shadow_mask = ArSdlRenderBackend_BorrowTexture(mask);
     SimBackgroundVoxelRenderer_DrawTerrainShadow(
-        g_renderer, &voxel_params);
+        &g_render_device, &voxel_params);
     if (!SDL_SetTextureAlphaMod(mask, saved_mask_alpha)) {
       DisableSimShadowTargets();
       return kPresentationOutcome_OptionalOmitted;

@@ -13,18 +13,18 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include "sim/sim_world_map.h"
 #include "sim/sim3d.h"
 #include "sim/sim3d_performance.h"
+#include "render/render_device.h"
 
 #ifndef AR_SIM3D_TERRAIN_ELEVATION
 #define AR_SIM3D_TERRAIN_ELEVATION 0
 #endif
 
-extern SDL_Renderer *g_renderer;
+extern ArRenderDevice g_render_device;
 
-static SDL_Texture *s_sim_cloud_texture;
+static ArRenderTexture s_sim_cloud_texture;
 static bool s_sim_cloud_alloc_failed;
 
 /* Cloud shroud.
@@ -115,56 +115,52 @@ uint32_t SimCloudTexel(int x, int y) {
   return (alpha << 24) | (tint << 16) | (tint << 8) | 255u;
 }
 
-static SDL_Texture *EnsureSimCloudTexture(void) {
-  if (s_sim_cloud_texture || s_sim_cloud_alloc_failed)
+static ArRenderTexture EnsureSimCloudTexture(void) {
+  if (ArRenderTexture_IsValid(s_sim_cloud_texture) ||
+      s_sim_cloud_alloc_failed)
     return s_sim_cloud_texture;
-  s_sim_cloud_texture = SDL_CreateTexture(
-      g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-      kSimCloudTexturePixels, kSimCloudTexturePixels);
-  if (!s_sim_cloud_texture) {
+  const ArRenderTextureDesc desc = {
+    .width = kSimCloudTexturePixels,
+    .height = kSimCloudTexturePixels,
+    .format = kArRenderPixelFormat_Argb8888,
+    .usage = kArRenderTextureUsage_Streaming,
+    .filter = kArRenderFilter_Linear,
+    .blend = kArRenderBlendMode_Alpha,
+  };
+  if (!ArRenderDevice_CreateTexture(
+          &g_render_device, &desc, &s_sim_cloud_texture)) {
     s_sim_cloud_alloc_failed = true;
     fprintf(stderr, "[sim3d-cloud] shroud texture unavailable: %s\n",
-            SDL_GetError());
-    return NULL;
-  }
-  if (!SDL_SetTextureBlendMode(
-          s_sim_cloud_texture, SDL_BLENDMODE_BLEND) ||
-      !SDL_SetTextureScaleMode(
-          s_sim_cloud_texture, SDL_SCALEMODE_LINEAR)) {
-    fprintf(stderr, "[sim3d-cloud] shroud texture setup failed: %s\n",
-            SDL_GetError());
-    SDL_DestroyTexture(s_sim_cloud_texture);
-    s_sim_cloud_texture = NULL;
-    s_sim_cloud_alloc_failed = true;
-    return NULL;
+            ArRenderDevice_LastError(&g_render_device));
+    return ArRenderTexture_Invalid();
   }
 
-  void *pixels = NULL;
-  int pitch = 0;
-  if (!SDL_LockTexture(s_sim_cloud_texture, NULL, &pixels, &pitch)) {
-    SDL_DestroyTexture(s_sim_cloud_texture);
-    s_sim_cloud_texture = NULL;
+  uint32_t *pixels = malloc(
+      (size_t)kSimCloudTexturePixels * kSimCloudTexturePixels *
+      sizeof(*pixels));
+  if (!pixels) {
+    ArRenderDevice_DestroyTexture(&g_render_device, s_sim_cloud_texture);
+    s_sim_cloud_texture = ArRenderTexture_Invalid();
     s_sim_cloud_alloc_failed = true;
-    return NULL;
-  }
-  if (pitch <= 0) {
-    SDL_UnlockTexture(s_sim_cloud_texture);
-    SDL_DestroyTexture(s_sim_cloud_texture);
-    s_sim_cloud_texture = NULL;
-    s_sim_cloud_alloc_failed = true;
-    return NULL;
+    return ArRenderTexture_Invalid();
   }
   for (int y = 0; y < kSimCloudTexturePixels; y++) {
-    uint8_t *row = (uint8_t *)pixels + (size_t)y * (size_t)pitch;
+    uint32_t *row = pixels + (size_t)y * kSimCloudTexturePixels;
     for (int x = 0; x < kSimCloudTexturePixels; x++) {
-      const uint32_t texel = SimCloudTexel(x, y);
-      /* SDL documents the lock's byte pitch but does not promise uint32_t
-       * alignment for every backend staging pointer. memcpy preserves the
-       * ARGB8888 word without an alignment assumption on ARM or Vulkan. */
-      memcpy(row + (size_t)x * sizeof(texel), &texel, sizeof(texel));
+      row[x] = SimCloudTexel(x, y);
     }
   }
-  SDL_UnlockTexture(s_sim_cloud_texture);
+  const bool uploaded = ArRenderDevice_UpdateTexture(
+      &g_render_device, s_sim_cloud_texture, NULL, pixels,
+      kSimCloudTexturePixels * (int)sizeof(*pixels));
+  free(pixels);
+  if (!uploaded) {
+    fprintf(stderr, "[sim3d-cloud] shroud upload failed: %s\n",
+            ArRenderDevice_LastError(&g_render_device));
+    ArRenderDevice_DestroyTexture(&g_render_device, s_sim_cloud_texture);
+    s_sim_cloud_texture = ArRenderTexture_Invalid();
+    s_sim_cloud_alloc_failed = true;
+  }
   return s_sim_cloud_texture;
 }
 
@@ -173,8 +169,8 @@ void DrawSimCloudShroud(const FrameSlot *slot, SDL_Rect source,
   if (!slot->sim.underlay_serial || !slot->sim.cloud_opacity_pct ||
       source.w <= 0 || source.h <= 0)
     return;
-  SDL_Texture *texture = EnsureSimCloudTexture();
-  if (!texture) return;
+  ArRenderTexture texture = EnsureSimCloudTexture();
+  if (!ArRenderTexture_IsValid(texture)) return;
 
   /* Same town-space mapping as the underlay, so a cloud stays over the ground
    * it covers when the camera moves. */
@@ -260,11 +256,11 @@ void DrawSimCloudShroud(const FrameSlot *slot, SDL_Rect source,
    * anything, it keeps moving through a pause, and game_frame is a 16-bit
    * counter that would jump the whole sky every eighteen minutes when it
    * wrapped. */
-  Uint64 elapsed_ms = SDL_GetTicks();
+  uint64_t elapsed_ms = SDL_GetTicks();
   float drift = (float)slot->sim.cloud_drift_pct / (float)kPercentScale;
 
-  static SDL_Vertex vertices[kSimCloudVertexCount];
-  static int indices[kSimCloudIndexCount];
+  static ArRenderVertex2D vertices[kSimCloudVertexCount];
+  static int32_t indices[kSimCloudIndexCount];
   int index_count = 0;
   for (int row = 0; row < kSimCloudRows; row++) {
     for (int column = 0; column < kSimCloudColumns; column++) {
@@ -279,8 +275,11 @@ void DrawSimCloudShroud(const FrameSlot *slot, SDL_Rect source,
     }
   }
 
-  SDL_SetRenderTextureAddressMode(g_renderer, SDL_TEXTURE_ADDRESS_WRAP,
-                                  SDL_TEXTURE_ADDRESS_WRAP);
+  const ArRenderDrawState draw_state = {
+    .flags = kArRenderDrawState_Address,
+    .address_u = kArRenderTextureAddressMode_Wrap,
+    .address_v = kArRenderTextureAddressMode_Wrap,
+  };
   for (unsigned layer = 0;
        layer < sizeof(kSimCloudLayers) / sizeof(kSimCloudLayers[0]); layer++) {
     float scale = kSimCloudLayers[layer].scale;
@@ -311,7 +310,7 @@ void DrawSimCloudShroud(const FrameSlot *slot, SDL_Rect source,
             kSimCloudLayers[layer].offset_y +
             Scene3D_WrappedTextureOffset(
                 elapsed_ms, kSimCloudLayers[layer].drift_y, drift);
-        vertices[vertex_count++] = (SDL_Vertex){
+        vertices[vertex_count++] = (ArRenderVertex2D){
           { projected.x, projected.y },
           { 1.0f, 1.0f, 1.0f, cover * opacity * weight },
           { u, v },
@@ -320,18 +319,17 @@ void DrawSimCloudShroud(const FrameSlot *slot, SDL_Rect source,
       if (!vertex_count) break;
     }
     if (!any_cover || !vertex_count) continue;
-    if (SDL_RenderGeometry(g_renderer, texture, vertices, vertex_count,
-                           indices, index_count)) {
+    if (ArRenderDevice_DrawGeometryWithState(
+            &g_render_device, texture, vertices, vertex_count,
+            indices, index_count, &draw_state)) {
       Sim3DPerformance_AddDraw(
           (uint64_t)vertex_count, (uint64_t)index_count);
     }
   }
-  SDL_SetRenderTextureAddressMode(g_renderer, SDL_TEXTURE_ADDRESS_AUTO,
-                                  SDL_TEXTURE_ADDRESS_AUTO);
 }
 
 void PresentSim3DClouds_ResetResources(void) {
-  if (s_sim_cloud_texture) SDL_DestroyTexture(s_sim_cloud_texture);
-  s_sim_cloud_texture = NULL;
+  ArRenderDevice_DestroyTexture(&g_render_device, s_sim_cloud_texture);
+  s_sim_cloud_texture = ArRenderTexture_Invalid();
   s_sim_cloud_alloc_failed = false;
 }

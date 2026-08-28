@@ -64,6 +64,16 @@ static SDL_BlendMode ToSdlBlendMode(ArRenderBlendMode blend) {
   return SDL_BLENDMODE_INVALID;
 }
 
+static SDL_TextureAddressMode ToSdlTextureAddressMode(
+    ArRenderTextureAddressMode address) {
+  switch (address) {
+    case kArRenderTextureAddressMode_Auto: return SDL_TEXTURE_ADDRESS_AUTO;
+    case kArRenderTextureAddressMode_Clamp: return SDL_TEXTURE_ADDRESS_CLAMP;
+    case kArRenderTextureAddressMode_Wrap: return SDL_TEXTURE_ADDRESS_WRAP;
+  }
+  return SDL_TEXTURE_ADDRESS_INVALID;
+}
+
 static bool CreateTexture(void *context, const ArRenderTextureDesc *desc,
                           ArRenderTexture *out_texture) {
   ArSdlRenderBackend *backend = context;
@@ -160,6 +170,30 @@ typedef struct SavedTextureDrawState {
   bool tint_saved;
 } SavedTextureDrawState;
 
+typedef struct SavedTextureAddressState {
+  SDL_TextureAddressMode u;
+  SDL_TextureAddressMode v;
+  bool saved;
+} SavedTextureAddressState;
+
+static bool ApplyTextureAddressState(
+    SDL_Renderer *renderer, const ArRenderDrawState *state,
+    SavedTextureAddressState *saved) {
+  if (!(state->flags & kArRenderDrawState_Address)) return true;
+  if (!SDL_GetRenderTextureAddressMode(renderer, &saved->u, &saved->v))
+    return false;
+  saved->saved = true;
+  return SDL_SetRenderTextureAddressMode(
+      renderer, ToSdlTextureAddressMode(state->address_u),
+      ToSdlTextureAddressMode(state->address_v));
+}
+
+static bool RestoreTextureAddressState(
+    SDL_Renderer *renderer, const SavedTextureAddressState *saved) {
+  return !saved->saved ||
+      SDL_SetRenderTextureAddressMode(renderer, saved->u, saved->v);
+}
+
 static bool ApplyTextureDrawState(SDL_Texture *texture,
                                   const ArRenderDrawState *state,
                                   SavedTextureDrawState *saved) {
@@ -223,13 +257,18 @@ static bool DrawTexture(void *context, ArRenderTexture texture,
   if (!state || state->flags == 0)
     return SDL_RenderTexture(
         backend->renderer, native_texture, source_rect, destination_rect);
-
+  SavedTextureAddressState saved_address = {0};
   SavedTextureDrawState saved = {0};
-  const bool applied = ApplyTextureDrawState(native_texture, state, &saved);
+  const bool address_applied = ApplyTextureAddressState(
+      backend->renderer, state, &saved_address);
+  const bool applied = address_applied &&
+      ApplyTextureDrawState(native_texture, state, &saved);
   const bool rendered = applied && SDL_RenderTexture(
       backend->renderer, native_texture, source_rect, destination_rect);
   const bool restored = RestoreTextureDrawState(native_texture, &saved);
-  return rendered && restored;
+  const bool address_restored = RestoreTextureAddressState(
+      backend->renderer, &saved_address);
+  return rendered && restored && address_restored;
 }
 
 static bool DrawGeometry(void *context, ArRenderTexture texture,
@@ -260,13 +299,19 @@ static bool DrawGeometry(void *context, ArRenderTexture texture,
     return rendered && restored;
   }
 
+  SavedTextureAddressState saved_address = {0};
   SavedTextureDrawState saved = {0};
-  const bool applied = ApplyTextureDrawState(native_texture, state, &saved);
+  const bool address_applied = ApplyTextureAddressState(
+      backend->renderer, state, &saved_address);
+  const bool applied = address_applied &&
+      ApplyTextureDrawState(native_texture, state, &saved);
   const bool rendered = applied && SDL_RenderGeometry(
       backend->renderer, native_texture, (const SDL_Vertex *)vertices,
       vertex_count, (const int *)indices, index_count);
   const bool restored = RestoreTextureDrawState(native_texture, &saved);
-  return rendered && restored;
+  const bool address_restored = RestoreTextureAddressState(
+      backend->renderer, &saved_address);
+  return rendered && restored && address_restored;
 }
 
 static bool Present(void *context) {
@@ -293,6 +338,12 @@ static const ArRenderBackendOps kSdlRenderOps = {
   .present = Present,
   .last_error = LastError,
 };
+
+SDL_Renderer *ArSdlRenderBackend_Renderer(const ArRenderDevice *device) {
+  if (!device || device->ops != &kSdlRenderOps || !device->context)
+    return NULL;
+  return ((ArSdlRenderBackend *)device->context)->renderer;
+}
 
 bool ArSdlRenderBackend_Bind(ArRenderDevice *device,
                              ArSdlRenderBackend *backend,

@@ -1670,12 +1670,9 @@ static void DrawSimTownCanvas(const FrameSlot *slot, SDL_Rect source,
                               bool background_voxels) {
   if (!slot->sim.town_canvas_serial) return;
   ArRenderTexture canvas = ArRenderTexture_Invalid();
-  SDL_Texture *native_terrain_canvas = NULL;
   if (background_voxels) {
-    native_terrain_canvas = SimBackgroundVoxelRenderer_GroundTexture(
+    canvas = SimBackgroundVoxelRenderer_GroundTexture(
         slot->sim.background_voxel_serial);
-    if (native_terrain_canvas)
-      canvas = ArSdlRenderBackend_BorrowTexture(native_terrain_canvas);
   } else {
     if (!ArRenderTexture_IsValid(s_sim_canvas_texture) ||
         s_sim_canvas_upload_state != kSimCanvasUpload_Valid ||
@@ -1714,7 +1711,7 @@ static void DrawSimTownCanvas(const FrameSlot *slot, SDL_Rect source,
    * background-voxel canvas.  The stock canvas path remains the control, and
    * an unexpected live-plane exclusion falls back instead of drawing twice. */
   if (background_voxels && !exclude && DrawSimTownTerrain(
-          native_terrain_canvas, slot, extent_x0, extent_y0, source,
+          &g_render_device, canvas, slot, extent_x0, extent_y0, source,
           viewport, matrix,
           &fade))
     return;
@@ -1974,7 +1971,7 @@ static PresentationOutcome RenderSimProfile(
       Sim3DPerformanceScope performance =
           Sim3DPerformance_Begin(kSim3DPerformance_DepthVoxel);
       SimBackgroundVoxelRenderer_Draw(
-          g_renderer, &voxel_params);
+          &g_render_device, &voxel_params);
       Sim3DPerformance_End(performance);
     }
     if (!(enabled_planes & (1u << plane))) continue;
@@ -2001,7 +1998,7 @@ static PresentationOutcome RenderSimProfile(
           Sim3DPerformanceScope performance =
               Sim3DPerformance_Begin(kSim3DPerformance_DepthVoxel);
           SimBackgroundVoxelRenderer_DrawInterleaved(
-              g_renderer, &voxel_params,
+              &g_render_device, &voxel_params,
               DrawSimVoxelBillboardLayer, &context);
           Sim3DPerformance_End(performance);
           outcome = PresentationOutcome_Combine(outcome, context.outcome);
@@ -2241,7 +2238,7 @@ void PresentSim3D_ResetResources(void) {
   s_sim_canvas_uploaded_serial = 0;
   s_sim_canvas_upload_state = kSimCanvasUpload_Uninitialized;
   memset(s_sim_ground_mesh_cache, 0, sizeof(s_sim_ground_mesh_cache));
-  SimBackgroundVoxelRenderer_Reset();
+  SimBackgroundVoxelRenderer_Reset(&g_render_device);
   PresentSim3DClouds_ResetResources();
   PresentWorldNav_ResetResources();
 }

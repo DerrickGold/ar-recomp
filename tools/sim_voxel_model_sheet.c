@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "platform/sdl/render_sdl.h"
 #include "scene3d_math.h"
 #include "sim/sim3d_depth_pass.h"
 #include "sim/sim_background_bridge.h"
@@ -30,6 +31,9 @@ enum {
   kRenderHeight = 360,
   kSourcePixels = 52,
 };
+
+static ArRenderDevice g_render_device;
+static ArSdlRenderBackend g_render_backend;
 
 static const float kContactLiftPixels = 0.06f;
 
@@ -244,7 +248,9 @@ static bool AppendModel(const SimBackgroundVoxelObject *object,
 }
 
 static bool SaveCurrentPass(SDL_Renderer *renderer, const char *path) {
-  SDL_Texture *output = Sim3DDepthPass_Submit(renderer, NULL);
+  ArRenderTexture output_handle = Sim3DDepthPass_Submit(
+      &g_render_device, ArRenderTexture_Invalid());
+  SDL_Texture *output = ArSdlRenderBackend_UnwrapTexture(output_handle);
   if (!output || !SDL_SetRenderTarget(renderer, output)) return false;
   SDL_Surface *readback = SDL_RenderReadPixels(renderer, NULL);
   if (!readback) return false;
@@ -307,7 +313,8 @@ static bool RenderEntry(SDL_Renderer *renderer,
   params.town = entry->object.town;
   SimBackgroundVoxelProject_Prepare(&params);
   if (!Sim3DDepthPass_Begin(
-          renderer, kRenderWidth, kRenderHeight, SDL_SCALEMODE_NEAREST)) {
+          &g_render_device, kRenderWidth, kRenderHeight,
+          kArRenderFilter_Nearest)) {
     fprintf(stderr, "depth begin failed: %s\n",
             Sim3DDepthPass_LastError());
     return false;
@@ -555,7 +562,15 @@ int main(int argc, char **argv) {
     SDL_Quit();
     return 1;
   }
-  if (!Sim3DDepthPass_Require(renderer)) {
+  if (!ArSdlRenderBackend_Bind(
+          &g_render_device, &g_render_backend, renderer)) {
+    fprintf(stderr, "render-device binding failed: %s\n", SDL_GetError());
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+    return 1;
+  }
+  if (!Sim3DDepthPass_Require(&g_render_device)) {
     fprintf(stderr, "D32 pass unavailable: %s\n",
             Sim3DDepthPass_LastError());
     SDL_DestroyRenderer(renderer);
@@ -580,7 +595,8 @@ int main(int argc, char **argv) {
   fclose(manifest);
 
   SimBackgroundVoxelModelCache_Reset();
-  Sim3DDepthPass_Reset();
+  Sim3DDepthPass_Reset(&g_render_device);
+  ArRenderDevice_Reset(&g_render_device);
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
   SDL_Quit();

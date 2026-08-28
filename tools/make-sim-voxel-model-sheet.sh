@@ -20,7 +20,9 @@ mkdir -p "$render_dir" "$card_dir" "$section_dir" \
 cc -std=c11 -O2 -Isrc -Isrc/sim -I/opt/homebrew/include \
   tools/sim_voxel_model_sheet.c \
   src/scene3d_math.c \
-  src/sim/sim3d_depth_pass.c \
+  src/render/render_device.c \
+  src/platform/sdl/render_sdl.c \
+  src/platform/sdl/sim3d_depth_pass_sdl.c \
   src/sim/sim_background_voxel_biome.c \
   src/sim/sim_background_voxel_lighting.c \
   src/sim/sim_background_voxel_model_cache.c \

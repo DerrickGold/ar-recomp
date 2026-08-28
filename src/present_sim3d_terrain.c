@@ -22,8 +22,6 @@
 #define AR_SIM3D_TERRAIN_ELEVATION 0
 #endif
 
-extern SDL_Renderer *g_renderer;
-
 #if AR_SIM3D_TERRAIN_ELEVATION
 
 enum {
@@ -253,7 +251,8 @@ static const SimTerrainCellOrder *PrepareSimTerrainCellOrder(
 }
 
 static bool AddSimTerrainQuad(
-    SDL_Vertex *vertices, int *vertex_count, int *indices, int *index_count,
+    ArRenderVertex2D *vertices, int *vertex_count,
+    int32_t *indices, int *index_count,
     const float texture_xy[4][2], const float height_units[4],
     const float uv[4][2], const float shade[4], const FrameSlot *slot,
     SDL_Rect source, SDL_Rect viewport, const float matrix[16],
@@ -273,7 +272,7 @@ static bool AddSimTerrainQuad(
     float brightness = (1.0f - away * fade->dim) * shade[i];
     float alpha = (1.0f - away * fade->fade) *
         SimGroundExtentAlphaAt(fade, texture_xy[i][0], texture_xy[i][1]);
-    vertices[(*vertex_count)++] = (SDL_Vertex){
+    vertices[(*vertex_count)++] = (ArRenderVertex2D){
       {point.x, point.y},
       {brightness, brightness, brightness, alpha},
       {uv[i][0], uv[i][1]},
@@ -289,7 +288,8 @@ static bool AddSimTerrainQuad(
 }
 
 static bool AddSimTerrainSkirt(
-    SDL_Vertex *vertices, int *vertex_count, int *indices, int *index_count,
+    ArRenderVertex2D *vertices, int *vertex_count,
+    int32_t *indices, int *index_count,
     const float endpoint_xy[2][2], const float current_height[2],
     const float neighbour_height[2], const float endpoint_shade[2],
     const float side_uv[4][2], const FrameSlot *slot,
@@ -356,10 +356,11 @@ static void SimTerrainCliffUv(int x, int y, int nx, int ny,
 }
 
 bool DrawSimTownTerrain(
-    SDL_Texture *texture, const FrameSlot *slot,
+    ArRenderDevice *device, ArRenderTexture texture, const FrameSlot *slot,
     float extent_x0, float extent_y0, SDL_Rect source, SDL_Rect viewport,
     const float matrix[16], const SimCullFade *fade) {
-  if (!texture || !slot || slot->sim.town < 1 ||
+  if (!ArRenderDevice_IsReady(device) || !ArRenderTexture_IsValid(texture) ||
+      !slot || slot->sim.town < 1 ||
       slot->sim.town > kSimTownTerrainTownCount || source.w <= 0 ||
       source.h <= 0 || viewport.w <= 0 || viewport.h <= 0)
     return false;
@@ -367,8 +368,8 @@ bool DrawSimTownTerrain(
   PrepareSimTerrainRenderCache(
       slot->sim.town, slot->sim.landscape_height_pct);
 
-  static SDL_Vertex vertices[kSimTerrainMaxVertices];
-  static int indices[kSimTerrainMaxIndices];
+  static ArRenderVertex2D vertices[kSimTerrainMaxVertices];
+  static int32_t indices[kSimTerrainMaxIndices];
   const SimTerrainCellOrder *order = PrepareSimTerrainCellOrder(
       slot, source, viewport, matrix);
 
@@ -478,8 +479,8 @@ bool DrawSimTownTerrain(
                            top_xy,h,top_uv,light,slot,source,viewport,matrix,fade))
       return false;
   }
-  if (!SDL_RenderGeometry(g_renderer, texture, vertices, vertex_count,
-                          indices, index_count))
+  if (!ArRenderDevice_DrawGeometry(
+          device, texture, vertices, vertex_count, indices, index_count))
     return false;
   Sim3DPerformance_AddDraw((uint64_t)vertex_count, (uint64_t)index_count);
   return true;

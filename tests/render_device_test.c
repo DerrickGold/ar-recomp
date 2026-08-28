@@ -140,7 +140,8 @@ static void TestDeviceDispatchAndCapabilities(void) {
   ArRenderDevice device = {0};
   const ArRenderCapabilities capabilities = {
     .flags = kArRenderCapability_StreamingTextures |
-             kArRenderCapability_Geometry,
+             kArRenderCapability_Geometry |
+             kArRenderCapability_TextureWrap,
     .maximum_texture_width = 1024,
     .maximum_texture_height = 1024,
   };
@@ -195,6 +196,19 @@ static void TestDeviceDispatchAndCapabilities(void) {
   assert(backend.last_draw_state.flags == kArRenderDrawState_Blend);
   assert(backend.last_draw_state.blend == kArRenderBlendMode_Add);
 
+  const ArRenderDrawState address_state = {
+    .flags = kArRenderDrawState_Address,
+    .address_u = kArRenderTextureAddressMode_Wrap,
+    .address_v = kArRenderTextureAddressMode_Clamp,
+  };
+  assert(ArRenderDevice_DrawTextureWithState(
+      &device, texture, &source, NULL, &address_state));
+  assert(backend.draw_texture_count == 4);
+  assert(backend.last_draw_state.address_u ==
+         kArRenderTextureAddressMode_Wrap);
+  assert(backend.last_draw_state.address_v ==
+         kArRenderTextureAddressMode_Clamp);
+
   ArRenderDrawState invalid_state = {
     .flags = kArRenderDrawState_Tint,
     .tint = {1.01f, 1.0f, 1.0f, 1.0f},
@@ -204,7 +218,7 @@ static void TestDeviceDispatchAndCapabilities(void) {
   invalid_state = (ArRenderDrawState){.flags = UINT32_C(1) << 31};
   assert(!ArRenderDevice_DrawTextureWithState(
       &device, texture, &source, NULL, &invalid_state));
-  assert(backend.draw_texture_count == 3);
+  assert(backend.draw_texture_count == 4);
 
   const ArRenderTextureDesc target_desc = {
     .width = 640,
@@ -243,6 +257,10 @@ static void TestDeviceDispatchAndCapabilities(void) {
   };
   assert(!ArRenderDevice_DrawGeometryWithState(
       &device, texture, vertices, 3, indices, 3, &invalid_state));
+  assert(backend.draw_geometry_count == 2);
+  assert(!ArRenderDevice_DrawGeometryWithState(
+      &device, ArRenderTexture_Invalid(), vertices, 3, indices, 3,
+      &address_state));
   assert(backend.draw_geometry_count == 2);
 
   const ArRenderRectF rectangle = {10.0f, 20.0f, 30.0f, 40.0f};

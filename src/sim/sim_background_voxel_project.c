@@ -394,9 +394,9 @@ bool SimBackgroundVoxelProject_GroundedPoint(
   return true;
 }
 
-static SDL_FColor VertexColour(uint32_t argb, uint8_t brightness) {
+static ArRenderColorF VertexColour(uint32_t argb, uint8_t brightness) {
   float shade = brightness / 255.0f;
-  return (SDL_FColor){
+  return (ArRenderColorF){
     ((argb >> 16) & 0xFF) / 255.0f * shade,
     ((argb >> 8) & 0xFF) / 255.0f * shade,
     (argb & 0xFF) / 255.0f * shade,
@@ -404,19 +404,20 @@ static SDL_FColor VertexColour(uint32_t argb, uint8_t brightness) {
   };
 }
 
-static void FlushBatchTexture(SDL_Renderer *renderer,
+static void FlushBatchTexture(ArRenderDevice *device,
                               SimBackgroundGeometryBatch *batch,
-                              SDL_Texture *texture) {
+                              ArRenderTexture texture) {
   if (!batch->index_count) return;
-  SDL_RenderGeometry(renderer, texture, batch->vertices, batch->vertex_count,
-                     batch->indices, batch->index_count);
+  ArRenderDevice_DrawGeometry(
+      device, texture, batch->vertices, batch->vertex_count,
+      batch->indices, batch->index_count);
   batch->vertex_count = 0;
   batch->index_count = 0;
 }
 
-void SimBackgroundVoxelProject_FlushBatch(SDL_Renderer *renderer,
+void SimBackgroundVoxelProject_FlushBatch(ArRenderDevice *device,
                        SimBackgroundGeometryBatch *batch) {
-  FlushBatchTexture(renderer, batch, NULL);
+  FlushBatchTexture(device, batch, ArRenderTexture_Invalid());
 }
 
 void SimBackgroundVoxelProject_AppendFace(

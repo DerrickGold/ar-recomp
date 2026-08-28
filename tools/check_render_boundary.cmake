@@ -20,7 +20,10 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/action/action_effect_render.h"
     "${GAME_SOURCE_ROOT}/action/action_effect_projection.h"
     "${GAME_SOURCE_ROOT}/sim/sim_backdrop_render.c"
-    "${GAME_SOURCE_ROOT}/sim/sim_backdrop_render.h")
+    "${GAME_SOURCE_ROOT}/sim/sim_backdrop_render.h"
+    # The enhanced SIM scene's depth contract is game-side; its current GPU
+    # implementation belongs to the SDL platform adapter.
+    "${GAME_SOURCE_ROOT}/sim/sim3d_depth_pass.h")
 
 set(_violations "")
 foreach(_file IN LISTS _portable_render_files)
