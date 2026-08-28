@@ -102,7 +102,6 @@ enum {
  * g_ppu/g_settings state boundary D6 fences off. */
 SDL_Window *g_window;
 ArRenderDevice g_render_device;
-static ArSdlRenderBackend g_sdl_render_backend;
 /* The SDL GPU renderer is the presentation backend. Individual optional
  * shader effects still check their own AR_GPU_FX_* toggles; this flag reports
  * that the mandatory GPU device and renderer were created successfully. */
@@ -1222,7 +1221,7 @@ static int AppBoot_CreateVideo(AppBoot *app) {
     g_gpu_shaders_requested = true;
     g_settings.gpu_shaders_enabled = true;  /* legacy config/UI mirror */
     if (!ArSdlRenderBackend_CreateForWindow(
-            &g_render_device, &g_sdl_render_backend, g_window))
+            &g_render_device, g_window))
       Die("SDL GPU render backend creation failed");
     if (!Sim3DDepthPass_Require(&g_render_device))
       Die(Sim3DDepthPass_LastError());
@@ -2237,7 +2236,7 @@ static int AppShutdown(AppBoot *app, char **argv) {
   /* Owns a full-window render target plus a GPU shader and render state, and
    * all three must go before the renderer that created them. */
   CrtPost_Shutdown(&g_render_device);
-  ArSdlRenderBackend_Destroy(&g_render_device, &g_sdl_render_backend);
+  ArSdlRenderBackend_Destroy(&g_render_device);
   SDL_DestroyWindow(g_window);
   if (fatal_session) {
     char message[1536];

@@ -79,6 +79,8 @@ Host cadence submits completed frames and queries physical output extent through
 `ArRenderDevice`; swapchain configuration, display events, and window scaling
 remain responsibilities of the selected platform host.
 The SDL backend also owns creation and destruction of its native renderer.
+Its concrete context is private and backend-allocated; application boot stores
+only the portable `ArRenderDevice` rather than embedding an SDL backend struct.
 Host display policy applies logical presentation, vsync, and allowed frames in
 flight through device-scoped SDL adapter operations; native renderer and GPU
 device pointers are no longer process globals. Developer readback resolves the
