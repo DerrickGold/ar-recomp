@@ -1,7 +1,6 @@
 #ifndef SIM_BACKGROUND_VOXEL_RENDERER_H
 #define SIM_BACKGROUND_VOXEL_RENDERER_H
 
-#include <SDL3/SDL.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -22,8 +21,8 @@ typedef struct SimBackgroundVoxelRenderParams {
   uint16_t town_screen_x0;
   uint16_t light_azimuth_deg;
   uint8_t light_elevation_deg;
-  SDL_Rect source;
-  SDL_Rect viewport;
+  ArRenderRectI source;
+  ArRenderRectI viewport;
   const float *matrix;
   /* Prepared by the render entry point after its final target viewport is
    * known. Rows are clip X/Y/Z/W; columns are authored texture X/Y/height/1.

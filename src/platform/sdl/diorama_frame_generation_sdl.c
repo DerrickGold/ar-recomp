@@ -1,10 +1,12 @@
-#include "diorama_frame_generation.h"
+#include "diorama/diorama_frame_generation.h"
 
+#include <SDL3/SDL.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "present.h"
+#include "platform/sdl/render_sdl.h"
 #include "presentation_geometry.h"
 #include "presentation_frame_generation.h"
 
@@ -191,10 +193,11 @@ static void CopySurfaceRegion(
 }
 
 void DioramaFrameGeneration_Capture(
-    SDL_Renderer *renderer, const FrameSlot *slot,
+    ArRenderDevice *device, const FrameSlot *slot,
     const uint8_t *const pixels[kDioramaPlane_Count],
     const size_t pitch_bytes[kDioramaPlane_Count],
     uint32_t changed_plane_mask) {
+  SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
   s_pair_timestamp_ns = 0;
   s_pair_mask = 0;
   if (!renderer || !slot || !pixels || !pitch_bytes ||
@@ -459,13 +462,18 @@ static bool GeneratePlane(
 }
 
 uint32_t DioramaFrameGeneration_Prepare(
-    SDL_Renderer *renderer, const FrameSlot *slot, float alpha,
-    SDL_Texture *const current_textures[kDioramaPlane_Count],
+    ArRenderDevice *device, const FrameSlot *slot, float alpha,
+    const ArRenderTexture current_textures[kDioramaPlane_Count],
     uint32_t current_plane_mask,
-    SDL_Texture *resolved_textures[kDioramaPlane_Count]) {
+    ArRenderTexture resolved_textures[kDioramaPlane_Count]) {
   if (!resolved_textures || !current_textures) return 0;
   memcpy(resolved_textures, current_textures,
-         sizeof(SDL_Texture *) * kDioramaPlane_Count);
+         sizeof(ArRenderTexture) * kDioramaPlane_Count);
+  SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
+  SDL_Texture *native_current_textures[kDioramaPlane_Count];
+  for (int plane = 0; plane < kDioramaPlane_Count; plane++)
+    native_current_textures[plane] =
+        ArSdlRenderBackend_UnwrapTexture(current_textures[plane]);
   if (!renderer || !slot || !slot->diorama_active ||
       !slot->interp_setting_enabled ||
       alpha < 0.0f ||
@@ -485,7 +493,7 @@ uint32_t DioramaFrameGeneration_Prepare(
   uint32_t generated_mask = 0;
   for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
     if (!((s_pair_mask & current_plane_mask) & (1u << plane)) ||
-        !current_textures[plane])
+        !native_current_textures[plane])
       continue;
     const bool generated = GeneratePlane(
         renderer, plane, old_target, phase);
@@ -494,7 +502,8 @@ uint32_t DioramaFrameGeneration_Prepare(
       break;
     }
     if (generated) {
-      resolved_textures[plane] = s_planes[plane].generated_texture;
+      resolved_textures[plane] = ArSdlRenderBackend_BorrowTexture(
+          s_planes[plane].generated_texture);
       generated_mask |= 1u << plane;
     }
   }

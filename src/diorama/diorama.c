@@ -1,4 +1,5 @@
 #include "diorama.h"
+#include <SDL3/SDL.h>
 #include "gpu_shader_blob.h"
 #include "actraiser_game.h"
 #include "constants.h"
@@ -11,6 +12,7 @@
 #include "diorama_performance.h"
 #include "scene3d_math.h"
 #include "presentation_geometry.h"
+#include "platform/sdl/render_sdl.h"
 #include "diorama_upload.h"
 #include "snesrecomp/runner.h"
 #include "settings.h"
@@ -1992,11 +1994,11 @@ static PresentationOutcome DioramaCompositeCoreFailure(
 }
 
 PresentationOutcome Diorama_Composite(
-    SDL_Renderer *renderer, int snes_width, int snes_height,
+    ArRenderDevice *device, int snes_width, int snes_height,
     int authentic_y0, int obj_apron,
     int active_pixel_aspect, bool ignore_aspect_ratio,
-    int visible_width, SDL_Rect viewport,
-    SDL_Texture *textures[], const uint8_t *const pixels[],
+    int visible_width, ArRenderRectI output_viewport,
+    const ArRenderTexture texture_handles[], const uint8_t *const pixels[],
     const bool bg_transparent_fill_configured[2],
     const uint32_t bg_transparent_fill_argb[2],
     const DioramaCameraPose *cam_pose, float distance_scale,
@@ -2006,6 +2008,15 @@ PresentationOutcome Diorama_Composite(
     const DioramaBgValidSpanPlan *bg2_valid_spans,
     DioramaPlaneEffectFn plane_effect, void *plane_effect_userdata,
     DioramaProjection *out_projection) {
+  SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
+  const SDL_Rect viewport = {
+    output_viewport.x, output_viewport.y,
+    output_viewport.w, output_viewport.h,
+  };
+  SDL_Texture *textures[kDioramaPlane_Count];
+  for (int plane = 0; plane < kDioramaPlane_Count; plane++)
+    textures[plane] = ArSdlRenderBackend_UnwrapTexture(
+        texture_handles ? texture_handles[plane] : ArRenderTexture_Invalid());
   if (out_projection) memset(out_projection, 0, sizeof(*out_projection));
   if (!renderer || !cam_pose || authentic_y0 < 0 ||
       authentic_y0 + kActRaiserAuthenticHeight > snes_height)
@@ -2919,10 +2930,10 @@ static void DioramaReleaseRendererResources(SDL_Renderer *renderer) {
   g_dofedge_init_attempted = false;
 }
 
-void Diorama_ResetRendererResources(SDL_Renderer *renderer) {
-  DioramaReleaseRendererResources(renderer);
+void Diorama_ResetRendererResources(ArRenderDevice *device) {
+  DioramaReleaseRendererResources(ArSdlRenderBackend_Renderer(device));
 }
 
-void Diorama_Shutdown(SDL_Renderer *renderer) {
-  DioramaReleaseRendererResources(renderer);
+void Diorama_Shutdown(ArRenderDevice *device) {
+  DioramaReleaseRendererResources(ArSdlRenderBackend_Renderer(device));
 }

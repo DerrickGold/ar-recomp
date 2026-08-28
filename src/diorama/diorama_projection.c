@@ -66,7 +66,7 @@ uint32_t Diorama_FilterBgEffectProjectionMask(
 
 static bool ProjectCapturedPlanePoint(
     const DioramaProjection *projection, float capture_x, float capture_y,
-    const DioramaPlaneProjection *plane, SDL_FPoint *point,
+    const DioramaPlaneProjection *plane, ArRenderPointF *point,
     float *scale_x, float *scale_y) {
   /* A published valid projection already guarantees non-zero texture/output
    * dimensions; public entry points own pointer validation once per call. */
@@ -76,7 +76,7 @@ static bool ProjectCapturedPlanePoint(
   float dv = plane->v1 - plane->v0;
   if (du == 0.0f || dv == 0.0f) return false;
 
-  SDL_FPoint projected[3];
+  ArRenderPointF projected[3];
   int sample_count = (scale_x || scale_y) ? 3 : 1;
   for (int sample = 0; sample < sample_count; sample++) {
     float x = capture_x + (sample == 1 ? 1.0f : 0.0f);
@@ -112,7 +112,7 @@ static bool ProjectCapturedPlanePoint(
             projection->output_width, projection->output_height,
             &projected_point))
       return false;
-    projected[sample] = (SDL_FPoint){
+    projected[sample] = (ArRenderPointF){
       (float)projection->output_x + projected_point.x,
       (float)projection->output_y + projected_point.y,
     };
@@ -129,7 +129,7 @@ static bool ProjectCapturedPlanePoint(
 
 bool Diorama_ProjectCapturedPoint(const DioramaProjection *projection,
                                   float capture_x, float capture_y,
-                                  unsigned obj_priority, SDL_FPoint *point,
+                                  unsigned obj_priority, ArRenderPointF *point,
                                   float *scale_x, float *scale_y) {
   if (!projection || !point ||
       obj_priority >= kDioramaObjectPriorityCount) return false;
@@ -140,7 +140,7 @@ bool Diorama_ProjectCapturedPoint(const DioramaProjection *projection,
 
 bool Diorama_ProjectCapturedBg1Point(const DioramaProjection *projection,
                                      float capture_x, float capture_y,
-                                     SDL_FPoint *point,
+                                     ArRenderPointF *point,
                                      float *scale_x, float *scale_y) {
   if (!projection || !point) return false;
   return ProjectCapturedPlanePoint(
@@ -150,7 +150,7 @@ bool Diorama_ProjectCapturedBg1Point(const DioramaProjection *projection,
 
 bool Diorama_ProjectCapturedBg1HighPoint(
     const DioramaProjection *projection,
-    float capture_x, float capture_y, SDL_FPoint *point,
+    float capture_x, float capture_y, ArRenderPointF *point,
     float *scale_x, float *scale_y) {
   if (!projection || !point) return false;
   return ProjectCapturedPlanePoint(
@@ -160,7 +160,7 @@ bool Diorama_ProjectCapturedBg1HighPoint(
 
 bool Diorama_ProjectCapturedBg2Point(const DioramaProjection *projection,
                                      float capture_x, float capture_y,
-                                     SDL_FPoint *point,
+                                     ArRenderPointF *point,
                                      float *scale_x, float *scale_y) {
   if (!projection || !point) return false;
   return ProjectCapturedPlanePoint(
