@@ -308,9 +308,9 @@ void DevTools_AdjustHudOutputScale(const DevToolsContext *context,
   if (!descriptor) return;
 
   int current_percent = g_settings.hud_scale_percent;
-  if (!current_percent && context->renderer) {
-    const SDL_Rect viewport = ComputePresentationViewport(
-        context->renderer, context->ignore_aspect_ratio,
+  if (!current_percent && context->render_device) {
+    const ArRenderRectI viewport = ComputePresentationViewport(
+        context->render_device, context->ignore_aspect_ratio,
         context->pixel_aspect,
         Settings_VisibleWidth(), context->snes_height);
     current_percent =
@@ -336,7 +336,7 @@ void DevTools_AdjustHudOutputScale(const DevToolsContext *context,
           formatted, Settings_ChangeResultName(result));
 }
 
-static bool PointInRect(int x, int y, SDL_Rect rectangle) {
+static bool PointInRect(int x, int y, ArRenderRectI rectangle) {
   return x >= rectangle.x && x < rectangle.x + rectangle.w &&
          y >= rectangle.y && y < rectangle.y + rectangle.h;
 }
@@ -409,7 +409,9 @@ static void FillLiveHudProjectionInputs(const DevToolsContext *context,
 
 bool DevTools_InspectWindowPoint(const DevToolsContext *context,
                                  int window_x, int window_y) {
-  if (!context || !context->inspector_presentation) return false;
+  if (!context || !context->render_device ||
+      !context->inspector_presentation)
+    return false;
 
   int output_x = 0;
   int output_y = 0;
@@ -417,14 +419,14 @@ bool DevTools_InspectWindowPoint(const DevToolsContext *context,
           window_x, window_y, &output_x, &output_y))
     return false;
 
-  const SDL_Rect viewport = ComputePresentationViewport(
-      context->renderer, context->ignore_aspect_ratio,
+  const ArRenderRectI viewport = ComputePresentationViewport(
+      context->render_device, context->ignore_aspect_ratio,
       context->pixel_aspect,
       Settings_VisibleWidth(), context->snes_height);
   int output_width = 0;
   int output_height = 0;
-  SDL_GetRenderOutputSize(
-      context->renderer, &output_width, &output_height);
+  (void)ArRenderDevice_GetOutputSize(
+      context->render_device, &output_width, &output_height);
 
   HudProjectionInputs hud_inputs;
   FillLiveHudProjectionInputs(context, &hud_inputs);

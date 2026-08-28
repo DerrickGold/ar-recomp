@@ -259,14 +259,16 @@ static void DisableActionPlaneEffect(const char *operation) {
           ArRenderDevice_LastError(&g_render_device));
 }
 
-SDL_FRect ToFRect(SDL_Rect r) {
-  return (SDL_FRect){ (float)r.x, (float)r.y, (float)r.w, (float)r.h };
-}
-
-static ArRenderRectF ToRenderRectF(SDL_Rect rectangle) {
+static ArRenderRectF ToRenderRectF(ArRenderRectI rectangle) {
   return (ArRenderRectF){
     (float)rectangle.x, (float)rectangle.y,
     (float)rectangle.w, (float)rectangle.h,
+  };
+}
+
+static ArRenderRectI ToRenderRectI(SDL_Rect rectangle) {
+  return (ArRenderRectI){
+    rectangle.x, rectangle.y, rectangle.w, rectangle.h,
   };
 }
 
@@ -275,7 +277,8 @@ static int ScaledHudPixels(int pixels, double scale) {
   return result > 0 ? result : 1;
 }
 
-static void RenderHudChunk(ArRenderTexture texture, SDL_Rect src, SDL_Rect dst) {
+static void RenderHudChunk(ArRenderTexture texture,
+                           ArRenderRectI src, ArRenderRectI dst) {
   if (!ArRenderTexture_IsValid(texture) ||
       src.w <= 0 || src.h <= 0 || dst.w <= 0 || dst.h <= 0)
     return;
@@ -287,9 +290,9 @@ static void RenderHudChunk(ArRenderTexture texture, SDL_Rect src, SDL_Rect dst) 
 
 static void AddHudPresentationChunk(HudPresentationChunk *chunks, int *count,
                                     ArRenderTexture texture,
-                                    SDL_Rect texture_source,
-                                    SDL_Rect screen_source,
-                                    SDL_Rect output_destination,
+                                    ArRenderRectI texture_source,
+                                    ArRenderRectI screen_source,
+                                    ArRenderRectI output_destination,
                                     InspectorPresentationKind kind,
                                     int inspector_x_bias) {
   if (!chunks || !count || *count >= kHudPresentationChunkCapacity ||
@@ -307,7 +310,7 @@ static void AddHudPresentationChunk(HudPresentationChunk *chunks, int *count,
 /* One pure geometry description drives both compositing and hit-testing.
  * Presentation supplies FrameSlot-derived inputs; DevTools_InspectWindowPoint
  * supplies a live snapshot. */
-int BuildHudPresentationChunks(SDL_Rect viewport,
+int BuildHudPresentationChunks(ArRenderRectI viewport,
                                const HudProjectionInputs *in,
                                HudPresentationChunk *chunks) {
   if (!ArRenderTexture_IsValid(in->hud_bg_texture) ||
@@ -340,12 +343,14 @@ int BuildHudPresentationChunks(SDL_Rect viewport,
   int upper_h = player_y;
   int upper_dh = ScaledHudPixels(upper_h, scale_y);
 
-  SDL_Rect src = { tex_extra, 0, in->hud_left_end, upper_h };
-  SDL_Rect dst = { viewport.x, viewport.y,
-                   ScaledHudPixels(src.w, scale_x), upper_dh };
+  ArRenderRectI src = {tex_extra, 0, in->hud_left_end, upper_h};
+  ArRenderRectI dst = {
+    viewport.x, viewport.y,
+    ScaledHudPixels(src.w, scale_x), upper_dh,
+  };
   AddHudPresentationChunk(
       chunks, &count, in->hud_bg_texture, src,
-      (SDL_Rect){ 0, 0, src.w, src.h }, dst,
+      (ArRenderRectI){0, 0, src.w, src.h}, dst,
       kInspectorPresentation_HudBg, -in->extra_left_right);
 
   if (in->hud_left_end < in->hud_right_start) {
@@ -355,7 +360,7 @@ int BuildHudPresentationChunks(SDL_Rect viewport,
     dst.x = viewport.x + (viewport.w - dst.w) / 2;
     AddHudPresentationChunk(
         chunks, &count, in->hud_bg_texture, src,
-        (SDL_Rect){ in->hud_left_end, 0, src.w, src.h }, dst,
+        (ArRenderRectI){in->hud_left_end, 0, src.w, src.h}, dst,
         kInspectorPresentation_HudBg, 0);
   }
 
@@ -367,7 +372,7 @@ int BuildHudPresentationChunks(SDL_Rect viewport,
   dst.w = right_dest_w;
   AddHudPresentationChunk(
       chunks, &count, in->hud_bg_texture, src,
-      (SDL_Rect){ in->hud_right_start, 0, src.w, src.h }, dst,
+      (ArRenderRectI){in->hud_right_start, 0, src.w, src.h}, dst,
       kInspectorPresentation_HudBg, in->extra_left_right);
 
   /* Band 2: player row (PLAYER health + magic-scroll) — left+right split
@@ -388,7 +393,7 @@ int BuildHudPresentationChunks(SDL_Rect viewport,
     dst.h = mid_dh;
     AddHudPresentationChunk(
         chunks, &count, in->hud_bg_texture, src,
-        (SDL_Rect){ 0, player_y, src.w, src.h }, dst,
+        (ArRenderRectI){0, player_y, src.w, src.h}, dst,
         kInspectorPresentation_HudBg, -in->extra_left_right);
 
     src.x = tex_extra + in->hud_right_start;
@@ -397,7 +402,7 @@ int BuildHudPresentationChunks(SDL_Rect viewport,
     dst.w = ScaledHudPixels(src.w, scale_x);
     AddHudPresentationChunk(
         chunks, &count, in->hud_bg_texture, src,
-        (SDL_Rect){ in->hud_right_start, player_y, src.w, src.h }, dst,
+        (ArRenderRectI){in->hud_right_start, player_y, src.w, src.h}, dst,
         kInspectorPresentation_HudBg, in->extra_left_right);
   }
 
@@ -415,7 +420,7 @@ int BuildHudPresentationChunks(SDL_Rect viewport,
     dst.h = ScaledHudPixels(low_h, scale_y);
     AddHudPresentationChunk(
         chunks, &count, in->hud_bg_texture, src,
-        (SDL_Rect){ 0, enemy_y, src.w, src.h }, dst,
+        (ArRenderRectI){0, enemy_y, src.w, src.h}, dst,
         kInspectorPresentation_HudBg, -in->extra_left_right);
   }
 
@@ -429,13 +434,18 @@ int BuildHudPresentationChunks(SDL_Rect viewport,
   if (in->hud_body_y1 > height) {
     int body_h = in->hud_body_y1 - height;
     int body_dw = ScaledHudPixels(kFrameSlotAuthenticWidth, scale_x);
-    SDL_Rect body_src = { tex_extra, height, kFrameSlotAuthenticWidth, body_h };
-    SDL_Rect body_dst = { viewport.x + (viewport.w - body_dw) / 2,
-                          viewport.y + ScaledHudPixels(height, scale_y),
-                          body_dw, ScaledHudPixels(body_h, scale_y) };
+    ArRenderRectI body_src = {
+      tex_extra, height, kFrameSlotAuthenticWidth, body_h,
+    };
+    ArRenderRectI body_dst = {
+      viewport.x + (viewport.w - body_dw) / 2,
+      viewport.y + ScaledHudPixels(height, scale_y),
+      body_dw, ScaledHudPixels(body_h, scale_y),
+    };
     AddHudPresentationChunk(
         chunks, &count, in->hud_bg_texture, body_src,
-        (SDL_Rect){ 0, height, kFrameSlotAuthenticWidth, body_h }, body_dst,
+        (ArRenderRectI){0, height, kFrameSlotAuthenticWidth, body_h},
+        body_dst,
         kInspectorPresentation_HudBg, 0);
   }
 
@@ -450,8 +460,8 @@ int BuildHudPresentationChunks(SDL_Rect viewport,
       in->obj_icon_x < kFrameSlotAuthenticWidth) {
     int x = in->obj_icon_x, y = in->obj_icon_y;
     int icon_w = 16, icon_h = 16;
-    SDL_Rect obj_src = { tex_extra + x, y, icon_w, icon_h };
-    SDL_Rect obj_dst = {
+    ArRenderRectI obj_src = {tex_extra + x, y, icon_w, icon_h};
+    ArRenderRectI obj_dst = {
       viewport.x + viewport.w - right_dest_w - ScaledHudPixels(20, scale_x),
       viewport.y + ScaledHudPixels(y, scale_y),
       ScaledHudPixels(icon_w, scale_x),
@@ -459,32 +469,34 @@ int BuildHudPresentationChunks(SDL_Rect viewport,
     };
     AddHudPresentationChunk(
         chunks, &count, in->hud_obj_texture, obj_src,
-        (SDL_Rect){ x, y, icon_w, icon_h }, obj_dst,
+        (ArRenderRectI){x, y, icon_w, icon_h}, obj_dst,
         kInspectorPresentation_HudObj, 0);
   }
   return count;
 }
 
-SDL_Rect ComputePresentationViewport(SDL_Renderer *renderer,
-                                     bool ignore_aspect_ratio,
-                                     int pixel_aspect, int visible_width,
-                                     int snes_height) {
+ArRenderRectI ComputePresentationViewport(
+    ArRenderDevice *device, bool ignore_aspect_ratio,
+    int pixel_aspect, int visible_width, int snes_height) {
   return ComputePresentationViewportWithOutput(
-      renderer, ignore_aspect_ratio, pixel_aspect, visible_width,
+      device, ignore_aspect_ratio, pixel_aspect, visible_width,
       snes_height, NULL);
 }
 
-SDL_Rect ComputePresentationViewportWithOutput(
-    SDL_Renderer *renderer, bool ignore_aspect_ratio,
+ArRenderRectI ComputePresentationViewportWithOutput(
+    ArRenderDevice *device, bool ignore_aspect_ratio,
     int pixel_aspect, int visible_width, int snes_height,
-    SDL_Point *output_size) {
+    ArRenderExtentI *output_size) {
   int out_w = 0, out_h = 0;
-  SDL_GetRenderOutputSize(renderer, &out_w, &out_h);
-  if (output_size) *output_size = (SDL_Point){out_w, out_h};
-  const ArRenderRectI viewport = ArPresentationLayout_ResolveViewport(
+  if (!ArRenderDevice_GetOutputSize(device, &out_w, &out_h)) {
+    if (output_size) *output_size = (ArRenderExtentI){0};
+    return (ArRenderRectI){0};
+  }
+  if (output_size)
+    *output_size = (ArRenderExtentI){out_w, out_h};
+  return ArPresentationLayout_ResolveViewport(
       out_w, out_h, ignore_aspect_ratio,
       pixel_aspect == kPixelAspect_Crt43, visible_width, snes_height);
-  return (SDL_Rect){viewport.x, viewport.y, viewport.w, viewport.h};
 }
 
 static HudProjectionInputs BuildProjectionInputsFromSlot(const FrameSlot *slot) {
@@ -529,7 +541,7 @@ static HudProjectionInputs BuildProjectionInputsFromSlot(const FrameSlot *slot) 
   return in;
 }
 
-static void PresentHudOverlay(const FrameSlot *slot, SDL_Rect viewport) {
+static void PresentHudOverlay(const FrameSlot *slot, ArRenderRectI viewport) {
   HudProjectionInputs in = BuildProjectionInputsFromSlot(slot);
   HudPresentationChunk chunks[kHudPresentationChunkCapacity];
   int count = BuildHudPresentationChunks(viewport, &in, chunks);
@@ -586,7 +598,7 @@ void PresentHudOverlayComposited(const FrameSlot *slot,
 
   HudProjectionInputs in = BuildProjectionInputsFromSlot(slot);
   HudPresentationChunk chunks[kHudPresentationChunkCapacity];
-  SDL_Rect local_viewport = { 0, 0, viewport.w, viewport.h };
+  ArRenderRectI local_viewport = {0, 0, viewport.w, viewport.h};
   int count = BuildHudPresentationChunks(local_viewport, &in, chunks);
   if (count <= 0) return;
 
@@ -632,8 +644,8 @@ static void PresentMode7Composite(const FrameSlot *slot, SDL_Rect viewport) {
   SDL_Rect src = { slot->visible_x0 * kHdMode7Scale, 0,
                    slot->visible_width * kHdMode7Scale,
                    slot->snes_height * kHdMode7Scale };
-  const ArRenderRectF source = ToRenderRectF(src);
-  const ArRenderRectF destination = ToRenderRectF(viewport);
+  const ArRenderRectF source = ToRenderRectF(ToRenderRectI(src));
+  const ArRenderRectF destination = ToRenderRectF(ToRenderRectI(viewport));
   (void)ArRenderDevice_DrawTexture(
       &g_render_device, g_m7_texture, &source, &destination);
 }
@@ -669,7 +681,7 @@ static void PresentHdReplacements(const FrameSlot *slot, SDL_Rect viewport) {
     Uint8 mod = entry->brightness_mod
         ? (Uint8)((slot->inidisp & 0xf) * 255 / 15) : 255;
     const float modulation = (float)mod / 255.0f;
-    const ArRenderRectF destination = ToRenderRectF(dst);
+    const ArRenderRectF destination = ToRenderRectF(ToRenderRectI(dst));
     (void)ArRenderDevice_DrawTextureTinted(
         &g_render_device, entry->texture, NULL, &destination,
         (ArRenderColorF){modulation, modulation, modulation, 1.0f});
@@ -706,7 +718,7 @@ static bool HudHighlightToOutput(const HudPresentationChunk *chunk,
   if (!chunk || !output) return false;
   x0 -= chunk->inspector_x_bias;
   x1 -= chunk->inspector_x_bias;
-  const SDL_Rect source = chunk->screen_source;
+  const ArRenderRectI source = chunk->screen_source;
   if (x0 < source.x) x0 = source.x;
   if (y0 < source.y) y0 = source.y;
   if (x1 > source.x + source.w) x1 = source.x + source.w;
@@ -728,9 +740,9 @@ static bool FindSelectedHudChunk(const FrameSlot *slot, SDL_Rect viewport,
     return false;
   HudProjectionInputs in = BuildProjectionInputsFromSlot(slot);
   HudPresentationChunk chunks[kHudPresentationChunkCapacity];
-  int count = BuildHudPresentationChunks(viewport, &in, chunks);
+  int count = BuildHudPresentationChunks(ToRenderRectI(viewport), &in, chunks);
   for (int i = count - 1; i >= 0; i--) {
-    const SDL_Rect source = chunks[i].screen_source;
+    const ArRenderRectI source = chunks[i].screen_source;
     if (chunks[i].inspector_kind != slot->inspector_selection.kind ||
         slot->inspector_selection.source_x < source.x ||
         slot->inspector_selection.source_x >= source.x + source.w ||
@@ -1722,7 +1734,7 @@ static void DrawActionPlaneEffectFlat(
   }
   bool composited = false;
   if (masked && s_action_plane_blend_supported) {
-    const ArRenderRectF dst = ToRenderRectF(viewport);
+    const ArRenderRectF dst = ToRenderRectF(ToRenderRectI(viewport));
     composited = ArRenderDevice_DrawTexture(
         &g_render_device, target, NULL, &dst);
     if (!composited) DisableActionPlaneEffect("masked-target composite");
@@ -1815,7 +1827,7 @@ static void PresentActionBgExtentGuides(const FrameSlot *slot,
   }
 }
 
-static void PresentFpsCounter(const FrameSlot *slot, SDL_Point output_size,
+static void PresentFpsCounter(const FrameSlot *slot, ArRenderExtentI output_size,
                               double presentation_fps) {
   enum {
     kFpsTextCapacity = 32,
@@ -1834,11 +1846,11 @@ static void PresentFpsCounter(const FrameSlot *slot, SDL_Point output_size,
   } FpsOverlayCache;
   static FpsOverlayCache cache;
   if (!slot || !slot->show_fps) return;
-  if (output_size.x <= 0 || output_size.y <= 0)
+  if (output_size.width <= 0 || output_size.height <= 0)
     return;
 
-  const int scale = output_size.y >= kFpsScale3OutputHeight ? 3
-      : output_size.y >= kFpsScale2OutputHeight ? 2
+  const int scale = output_size.height >= kFpsScale3OutputHeight ? 3
+      : output_size.height >= kFpsScale2OutputHeight ? 2
       : 1;
   const bool text_changed = !cache.initialized ||
       cache.frames_per_second != presentation_fps;
@@ -1851,13 +1863,13 @@ static void PresentFpsCounter(const FrameSlot *slot, SDL_Point output_size,
     cache.frames_per_second = presentation_fps;
   }
   if (!cache.initialized || text_changed ||
-      cache.output_width != output_size.x ||
-      cache.output_height != output_size.y || cache.scale != scale) {
+      cache.output_width != output_size.width ||
+      cache.output_height != output_size.height || cache.scale != scale) {
     const int margin = kSettingsOverlayGlyphSize * scale;
-    cache.output_width = output_size.x;
-    cache.output_height = output_size.y;
+    cache.output_width = output_size.width;
+    cache.output_height = output_size.height;
     cache.scale = scale;
-    cache.x = output_size.x - margin -
+    cache.x = output_size.width - margin -
         SettingsOverlay_GameTextWidth(cache.text, scale);
     cache.y = margin;
     cache.initialized = true;
@@ -1870,15 +1882,18 @@ static void PresentFpsCounter(const FrameSlot *slot, SDL_Point output_size,
  * coordinate space covers the inspector marker/panel, cheat disclosure,
  * manual, settings menu, and FPS counter. The next frame establishes its own
  * scene coordinates, so terminal UI deliberately leaves this scope active. */
-void PresentHostUi(const FrameSlot *slot, SDL_Rect viewport,
-                   SDL_Point output_size,
+void PresentHostUi(const FrameSlot *slot, ArRenderRectI viewport,
+                   ArRenderExtentI output_size,
                    double presentation_fps) {
-  if (!slot || !g_renderer) return;
+  if (!slot || !ArRenderDevice_IsReady(&g_render_device)) return;
   if (!ArRenderOutput_UseFull(&g_render_device, NULL, NULL)) return;
-  PresentActionBgExtentGuides(slot, viewport);
-  PresentSceneInspector(slot, viewport);
-  PresentCheatBadge(slot, viewport);
-  SettingsOverlay_Render(viewport);
+  const SDL_Rect native_viewport = {
+    viewport.x, viewport.y, viewport.w, viewport.h,
+  };
+  PresentActionBgExtentGuides(slot, native_viewport);
+  PresentSceneInspector(slot, native_viewport);
+  PresentCheatBadge(slot, native_viewport);
+  SettingsOverlay_Render(native_viewport);
   PresentFpsCounter(slot, output_size, presentation_fps);
 }
 
@@ -2310,11 +2325,11 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
   }
   EndActionHeat(slot, output_viewport);
   if (SessionFatal_Requested()) return;
-  PresentHudOverlay(slot, output_viewport);
+  PresentHudOverlay(slot, ToRenderRectI(output_viewport));
   PresentHdReplacements(slot, output_viewport);
 }
 
-bool PresentAuthenticScene(const FrameSlot *slot, SDL_Rect viewport) {
+bool PresentAuthenticScene(const FrameSlot *slot, ArRenderRectI viewport) {
   if (!slot || !ArRenderDevice_IsReady(&g_render_device) ||
       !ArRenderTexture_IsValid(g_authentic_texture) ||
       viewport.w <= 0 || viewport.h <= 0)
@@ -2328,7 +2343,7 @@ bool PresentAuthenticScene(const FrameSlot *slot, SDL_Rect viewport) {
   ArRenderOutputFrame output_frame;
   if (!ArRenderOutputFrame_Begin(
           &g_render_device,
-          (ArRenderRectI){viewport.x, viewport.y, viewport.w, viewport.h},
+          viewport,
           black, black, &output_frame))
     return false;
   const ArRenderRectF source = {
@@ -2347,8 +2362,8 @@ bool PresentAuthenticScene(const FrameSlot *slot, SDL_Rect viewport) {
 }
 
 bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
-                                      SDL_Rect priority_viewport) {
-  if (!slot || !g_renderer ||
+                                      ArRenderRectI priority_viewport) {
+  if (!slot || !ArRenderDevice_IsReady(&g_render_device) ||
       !ArRenderTexture_IsValid(g_authentic_texture) ||
       priority_viewport.w <= 0 || priority_viewport.h <= 0)
     return false;
@@ -2412,7 +2427,7 @@ bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
 
 bool PresentComparisonTransitionOverlay(uint8_t alpha, const char *label) {
   if (!alpha) return true;
-  if (!g_renderer) return false;
+  if (!ArRenderDevice_IsReady(&g_render_device)) return false;
   int width = 0, height = 0;
   bool rendered = ArRenderOutput_UseFull(
       &g_render_device, &width, &height);

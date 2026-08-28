@@ -10,7 +10,6 @@
 #include "session_fatal.h"
 #include "settings.h"
 
-extern SDL_Renderer *g_renderer;
 extern ArRenderDevice g_render_device;
 
 static CrtPostConfig CurrentCrtConfig(void) {
@@ -32,12 +31,10 @@ static bool BeginCrtPost(void) {
   return CrtPost_Begin(&g_render_device, &config);
 }
 
-static SDL_Rect EndCrtPost(int scan_columns, int scan_lines,
-                           SDL_Rect image) {
-  ArRenderRectI resolved = CrtPost_End(
-      &g_render_device, scan_columns, scan_lines,
-      (ArRenderRectI){image.x, image.y, image.w, image.h});
-  return (SDL_Rect){resolved.x, resolved.y, resolved.w, resolved.h};
+static ArRenderRectI EndCrtPost(int scan_columns, int scan_lines,
+                                ArRenderRectI image) {
+  return CrtPost_End(
+      &g_render_device, scan_columns, scan_lines, image);
 }
 
 static bool AuthenticFrameSynchronized(const FrameSlot *slot) {
@@ -46,20 +43,21 @@ static bool AuthenticFrameSynchronized(const FrameSlot *slot) {
 }
 
 static void RequestComparisonDrawFailure(const char *stage) {
-  const char *sdl_error = SDL_GetError();
+  const char *render_error = ArRenderDevice_LastError(&g_render_device);
   SessionFatal_Request(
       "Authentic comparison failed while drawing its %s (%s). Restart the "
       "game; if this repeats, update your graphics driver or select a "
-      "different SDL renderer.",
-      stage, sdl_error[0] ? sdl_error : "renderer rejected the draw");
+      "different renderer.",
+      stage, render_error && render_error[0]
+          ? render_error : "renderer rejected the draw");
 }
 
-SDL_Rect PresentFrame(const FrameSlot *slot, float alpha,
-                      double presentation_fps) {
-  SDL_Rect image = {0};
-  if (!slot || !g_renderer) return image;
+ArRenderRectI PresentFrame(const FrameSlot *slot, float alpha,
+                           double presentation_fps) {
+  ArRenderRectI image = {0};
+  if (!slot || !ArRenderDevice_IsReady(&g_render_device)) return image;
 
-  SDL_Point output_size = {0};
+  ArRenderExtentI output_size = {0};
   const RenderComparisonView view = RenderComparison_PresentView();
   if (view != kRenderComparison_Enhanced &&
       !AuthenticFrameSynchronized(slot)) {
@@ -74,7 +72,7 @@ SDL_Rect PresentFrame(const FrameSlot *slot, float alpha,
      * 256x224 content with the SNES 4:3 pixel aspect. User window size and
      * independent output treatments and non-visual host UI remain intact. */
     image = ComputePresentationViewportWithOutput(
-        g_renderer, false, kPixelAspect_Crt43,
+        &g_render_device, false, kPixelAspect_Crt43,
         kFrameSlotAuthenticWidth, kFrameSlotAuthenticHeight, &output_size);
     (void)BeginCrtPost();
     if (SessionFatal_Requested()) return image;
@@ -88,7 +86,7 @@ SDL_Rect PresentFrame(const FrameSlot *slot, float alpha,
         kFrameSlotAuthenticWidth, kFrameSlotAuthenticHeight, image);
   } else {
     image = ComputePresentationViewportWithOutput(
-        g_renderer, slot->ignore_aspect_ratio,
+        &g_render_device, slot->ignore_aspect_ratio,
         slot->pixel_aspect, slot->visible_width, slot->snes_height,
         &output_size);
     (void)BeginCrtPost();

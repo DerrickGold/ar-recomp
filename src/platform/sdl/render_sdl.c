@@ -143,7 +143,15 @@ static bool UseOutputCoordinates(void *context) {
 
 static bool GetOutputSize(void *context, int *width, int *height) {
   ArSdlRenderBackend *backend = context;
-  return SDL_GetCurrentRenderOutputSize(backend->renderer, width, height);
+  SDL_Texture *target = SDL_GetRenderTarget(backend->renderer);
+  if (!target)
+    return SDL_GetRenderOutputSize(backend->renderer, width, height);
+  float target_width = 0.0f;
+  float target_height = 0.0f;
+  if (!SDL_GetTextureSize(target, &target_width, &target_height)) return false;
+  *width = (int)target_width;
+  *height = (int)target_height;
+  return *width > 0 && *height > 0;
 }
 
 static bool SetViewport(void *context, const ArRenderRectI *viewport) {

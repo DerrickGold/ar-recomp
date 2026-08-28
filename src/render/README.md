@@ -57,6 +57,9 @@ clearing or changing the current target.
 calculation and logical content axes. The SDL adapter owns only SDL logical
 presentation plus its temporary full-output state; obsolete duplicate native
 render-target scoping has been removed in favor of `ArRenderDevice_BeginTarget`.
+The terminal frame orchestrator and its public HUD/viewport contracts now use
+only render-device rectangles and extents; platform present remains owned by
+the host display layer.
 
 ## Current migration state
 
