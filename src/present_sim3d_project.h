@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "present.h"
+#include "render/render_types.h"
 #include "scene3d_math.h"
 #include "sim/sim_background_voxel_renderer.h"
 #include "sim/sim_render_metadata.h"
@@ -64,7 +65,7 @@ float SimCullProximityAt(
 float SimGroundExtentAlphaAt(
     const SimCullFade *fade, float texture_x, float texture_y);
 void DrawSimGroundPlane(
-    SDL_Texture *texture, SDL_Rect source, SDL_Rect viewport,
+    ArRenderTexture texture, SDL_Rect source, SDL_Rect viewport,
     const float matrix[16], const SimCullFade *fade);
 
 /* Height conversions. A virtual height is authored in source pixels; world
