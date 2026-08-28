@@ -98,6 +98,9 @@ UI through portable textures and geometry, and reads monotonic animation time
 through the host clock boundary. Its coordinates stay local to the selected
 game viewport, so platform adapters do not need an SDL-style logical
 presentation transform.
+The enhanced SIM-town frame owner now uses that same viewport-local scope and
+portable full-output master fade. Its remaining native dependencies are
+internal effect targets and meshes rather than window/output orchestration.
 Action heat refraction is a portable mesh warp rather than a custom shader; its
 viewport-sized texture is now device-owned and uses the scoped-target contract
 plus portable geometry for both its warped and fallback resolves. CRT still

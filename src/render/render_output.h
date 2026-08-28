@@ -5,7 +5,8 @@
 
 /* Scoped physical-output frame used by presentation paths that render into an
  * aspect-fit viewport. Begin clears margins when present, selects
- * viewport-local coordinates, and clears that area to `scene_color`. Finish
+ * viewport-local coordinates, and clears that area to `scene_color`. Equal
+ * margin and scene colours collapse to one complete-output clear. Finish
  * restores the complete output viewport. */
 typedef struct ArRenderOutputFrame {
   ArRenderDevice *device;

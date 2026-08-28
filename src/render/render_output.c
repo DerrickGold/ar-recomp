@@ -16,6 +16,11 @@ static bool ValidViewport(ArRenderRectI viewport,
       viewport.y <= output_height - viewport.h;
 }
 
+static bool ColorsEqual(ArRenderColorF left, ArRenderColorF right) {
+  return left.r == right.r && left.g == right.g &&
+      left.b == right.b && left.a == right.a;
+}
+
 static bool BeginResolvedFrame(
     ArRenderDevice *device, ArRenderRectI viewport,
     int output_width, int output_height,
@@ -38,9 +43,10 @@ static bool BeginResolvedFrame(
     prepared = ArRenderDevice_SetViewport(device, NULL) &&
         ArRenderDevice_Clear(device, margin_color) &&
         ArRenderDevice_SetViewport(device, &viewport) &&
-        ArRenderDevice_DrawSolidRect(
-            device, &scene_rectangle, scene_color,
-            kArRenderBlendMode_Opaque);
+        (ColorsEqual(margin_color, scene_color) ||
+         ArRenderDevice_DrawSolidRect(
+             device, &scene_rectangle, scene_color,
+             kArRenderBlendMode_Opaque));
   }
   if (!prepared) {
     (void)ArRenderDevice_SetViewport(device, NULL);
