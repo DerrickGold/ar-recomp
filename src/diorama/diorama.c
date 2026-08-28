@@ -6,6 +6,7 @@
 #include "atomic_replace.h"
 #include "diorama_layer_order.h"
 #include "diorama_rom_backdrop.h"
+#include "diorama_rom_skybox_resource.h"
 #include "diorama_skybox_uv.h"
 #include "camera_orbit.h"
 #include "diorama_depth_shapes.h" /* rake/bow/thick/stack/voxel arithmetic */
@@ -23,150 +24,8 @@
 #include <string.h>
 #include <stdlib.h>
 
-typedef struct DioramaRomSkyboxCache {
-  uint32_t pixels[kDioramaRomBackdropPixels * kDioramaRomBackdropPixels];
-  SDL_Texture *art_texture;
-  SDL_Texture *texture;
-  int source;
-  uint32_t default_fill_argb;
-  uint32_t transparent_fill_argb;
-  bool transparent_fill_configured;
-  bool composite_valid;
-  bool resource_failed;
-  bool available;
-} DioramaRomSkyboxCache;
-
-static const uint8_t *g_diorama_rom_data;
-static size_t g_diorama_rom_size;
-static DioramaRomSkyboxCache g_rom_skybox = {
-  .source = -1,
-};
-static void FailRomSkyboxResource(const char *operation) {
-  if (g_rom_skybox.resource_failed) return;
-  g_rom_skybox.resource_failed = true;
-  fprintf(stderr,
-          "[diorama] ROM skybox %s failed (%s); using captured fallback\n",
-          operation ? operation : "resource", SDL_GetError());
-}
-
 bool Diorama_InitRomBackdrops(const uint8_t *rom_data, size_t rom_size) {
-  g_diorama_rom_data = rom_data;
-  g_diorama_rom_size = rom_size;
-  g_rom_skybox.available = false;
-  g_rom_skybox.source = -1;
-  return rom_data && rom_size > 0;
-}
-
-static SDL_Texture *RomSkyboxTexture(SDL_Renderer *renderer, int source,
-                                     bool transparent_fill_configured,
-                                     uint32_t transparent_fill_argb,
-                                     bool *state_restore_failed) {
-  if (state_restore_failed) *state_restore_failed = false;
-  if (!renderer || !g_diorama_rom_data ||
-      !DioramaLayerOrder_SourceIsValid(source) ||
-      source == kDioramaLayerSource_Captured)
-    return NULL;
-  if (g_rom_skybox.source != source) {
-    uint8_t group = 0, map = 0, bg = 0;
-    g_rom_skybox.available =
-        DioramaLayerOrder_DecodeActionBgSource(
-            source, &group, &map, &bg) &&
-        DioramaRomBackdrop_LoadActionBgSparse(
-            g_diorama_rom_data, g_diorama_rom_size, group, map, bg,
-            g_rom_skybox.pixels,
-            sizeof(g_rom_skybox.pixels) /
-                sizeof(g_rom_skybox.pixels[0]),
-            &g_rom_skybox.default_fill_argb);
-    g_rom_skybox.source = source;
-    g_rom_skybox.composite_valid = false;
-    g_rom_skybox.resource_failed = false;
-    SDL_DestroyTexture(g_rom_skybox.art_texture);
-    g_rom_skybox.art_texture = NULL;
-    SDL_DestroyTexture(g_rom_skybox.texture);
-    g_rom_skybox.texture = NULL;
-    fprintf(stderr,
-            "[diorama] ROM skybox source=%s decoded=%d\n",
-            DioramaLayerOrder_SourceToken(source),
-            g_rom_skybox.available ? 1 : 0);
-  }
-  if (!g_rom_skybox.available || g_rom_skybox.resource_failed) return NULL;
-  if (!g_rom_skybox.art_texture) {
-    g_rom_skybox.art_texture = SDL_CreateTexture(
-        renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC,
-        kDioramaRomBackdropPixels, kDioramaRomBackdropPixels);
-    if (!g_rom_skybox.art_texture ||
-        !SDL_UpdateTexture(g_rom_skybox.art_texture, NULL,
-                           g_rom_skybox.pixels,
-                           kDioramaRomBackdropPixels *
-                               (int)sizeof(g_rom_skybox.pixels[0])) ||
-        !SDL_SetTextureScaleMode(
-            g_rom_skybox.art_texture, SDL_SCALEMODE_NEAREST) ||
-        !SDL_SetTextureBlendMode(
-            g_rom_skybox.art_texture, SDL_BLENDMODE_BLEND)) {
-      SDL_DestroyTexture(g_rom_skybox.art_texture);
-      g_rom_skybox.art_texture = NULL;
-      FailRomSkyboxResource("art upload");
-      return NULL;
-    }
-  }
-  if (!g_rom_skybox.texture) {
-    g_rom_skybox.texture = SDL_CreateTexture(
-        renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET,
-        kDioramaRomBackdropPixels, kDioramaRomBackdropPixels);
-    if (!g_rom_skybox.texture ||
-        !SDL_SetTextureScaleMode(
-            g_rom_skybox.texture, SDL_SCALEMODE_NEAREST) ||
-        !SDL_SetTextureBlendMode(
-            g_rom_skybox.texture, SDL_BLENDMODE_BLEND)) {
-      SDL_DestroyTexture(g_rom_skybox.texture);
-      g_rom_skybox.texture = NULL;
-      FailRomSkyboxResource("composite target creation");
-      return NULL;
-    }
-    g_rom_skybox.composite_valid = false;
-  }
-
-  const uint32_t fill_argb = transparent_fill_configured
-      ? transparent_fill_argb : g_rom_skybox.default_fill_argb;
-  if (!g_rom_skybox.composite_valid ||
-      g_rom_skybox.transparent_fill_configured !=
-          transparent_fill_configured ||
-      g_rom_skybox.transparent_fill_argb != fill_argb) {
-    PresentationTargetState target_state;
-    const PresentationTargetBeginResult begin =
-        PresentationGeometry_BeginTarget(
-            renderer, g_rom_skybox.texture, &target_state);
-    if (begin != kPresentationTargetBegin_Ready) {
-      FailRomSkyboxResource("composite target bind");
-      if (state_restore_failed)
-        *state_restore_failed =
-            begin == kPresentationTargetBegin_StateLost;
-      return NULL;
-    }
-    bool composed =
-        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE) &&
-        SDL_SetRenderDrawColor(
-            renderer, (Uint8)(fill_argb >> 16), (Uint8)(fill_argb >> 8),
-            (Uint8)fill_argb, (Uint8)(fill_argb >> 24)) &&
-        SDL_RenderClear(renderer) &&
-        SDL_RenderTexture(renderer, g_rom_skybox.art_texture, NULL, NULL);
-    const bool state_restored =
-        PresentationGeometry_EndTarget(renderer, &target_state);
-    if (!state_restored) {
-      FailRomSkyboxResource("render-state restore");
-      if (state_restore_failed) *state_restore_failed = true;
-      return NULL;
-    }
-    if (!composed) {
-      FailRomSkyboxResource("fill composition");
-      return NULL;
-    }
-    g_rom_skybox.transparent_fill_configured =
-        transparent_fill_configured;
-    g_rom_skybox.transparent_fill_argb = fill_argb;
-    g_rom_skybox.composite_valid = true;
-  }
-  return g_rom_skybox.texture;
+  return DioramaRomSkyboxResource_Init(rom_data, rom_size);
 }
 
 /* ── Optional GPU shader polish ─────────────────────────────────────────
@@ -472,9 +331,9 @@ static bool LayerGetsEdgeAA(int plane) {
  * whole texels per source texel, so LINEAR there interpolates smoothly
  * instead of stepping.
  *
- * The intermediate keeps straight alpha and uses ordinary
- * SDL_BLENDMODE_BLEND for the final draw. SDL exposes premultiplied blending,
- * but it is not implemented reliably by every renderer: a backend can accept
+ * The intermediate keeps straight alpha and uses ordinary alpha blending for
+ * the final draw. Some APIs expose premultiplied blending, but it is not
+ * implemented reliably by every renderer: a backend can accept
  * the mode yet draw the transparent part of a target texture as opaque black.
  * Keeping the widely supported blend path is more important than the small
  * fringe reduction premultiplication can provide on antialiased edge texels.
@@ -488,36 +347,49 @@ static bool LayerGetsEdgeAA(int plane) {
  * other, never both. */
 enum { kDioramaSupersample = 4 };
 
-static SDL_Texture *g_diorama_ss_texture;
+static ArRenderTexture g_diorama_ss_texture;
 static int g_diorama_ss_w, g_diorama_ss_h;
 static bool g_diorama_ss_unavailable;
 
-static void DisableDioramaSupersample(void) {
-  SDL_DestroyTexture(g_diorama_ss_texture);
-  g_diorama_ss_texture = NULL;
+static void ResetDioramaSupersample(ArRenderDevice *device) {
+  ArRenderDevice_DestroyTexture(device, g_diorama_ss_texture);
+  g_diorama_ss_texture = ArRenderTexture_Invalid();
   g_diorama_ss_w = 0;
   g_diorama_ss_h = 0;
+  g_diorama_ss_unavailable = false;
+}
+
+static void DisableDioramaSupersample(ArRenderDevice *device) {
+  ResetDioramaSupersample(device);
   g_diorama_ss_unavailable = true;
 }
 
-static SDL_Texture *EnsureDioramaSupersampleTexture(SDL_Renderer *renderer,
-                                                     int w, int h) {
-  if (!renderer || w <= 0 || h <= 0) return NULL;
-  if (g_diorama_ss_texture && g_diorama_ss_w == w && g_diorama_ss_h == h)
+static ArRenderTexture EnsureDioramaSupersampleTexture(
+    ArRenderDevice *device, int w, int h) {
+  if (!ArRenderDevice_IsReady(device) || w <= 0 || h <= 0)
+    return ArRenderTexture_Invalid();
+  if (ArRenderTexture_IsValid(g_diorama_ss_texture) &&
+      g_diorama_ss_w == w && g_diorama_ss_h == h)
     return g_diorama_ss_texture;
-  if (g_diorama_ss_unavailable) return NULL;
-  SDL_DestroyTexture(g_diorama_ss_texture);
-  g_diorama_ss_texture = NULL;
-  g_diorama_ss_texture = SDL_CreateTexture(
-      renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET, w, h);
-  if (!g_diorama_ss_texture ||
-      !SDL_SetTextureScaleMode(g_diorama_ss_texture, SDL_SCALEMODE_LINEAR)) {
+  if (g_diorama_ss_unavailable) return ArRenderTexture_Invalid();
+  ArRenderDevice_DestroyTexture(device, g_diorama_ss_texture);
+  g_diorama_ss_texture = ArRenderTexture_Invalid();
+  const ArRenderTextureDesc desc = {
+    .width = w,
+    .height = h,
+    .format = kArRenderPixelFormat_Argb8888,
+    .usage = kArRenderTextureUsage_Target,
+    .filter = kArRenderFilter_Linear,
+    .blend = kArRenderBlendMode_Alpha,
+  };
+  if (!ArRenderDevice_CreateTexture(
+          device, &desc, &g_diorama_ss_texture)) {
     fprintf(stderr,
             "[diorama] supersample target unavailable; optional crisp AA "
             "disabled for this renderer: %s\n",
-            SDL_GetError());
-    DisableDioramaSupersample();
-    return NULL;
+            ArRenderDevice_LastError(device));
+    DisableDioramaSupersample(device);
+    return ArRenderTexture_Invalid();
   }
   g_diorama_ss_w = w;
   g_diorama_ss_h = h;
@@ -526,8 +398,8 @@ static SDL_Texture *EnsureDioramaSupersampleTexture(SDL_Renderer *renderer,
 
 /* Renders `source` (an ABI-max-width x snes_height layer texture, already
  * NEAREST-scaled) into the compact shared ×4 straight-alpha intermediate.
- * Returns NULL (caller falls back to `source`) if the intermediate couldn't
- * be (re)created.
+ * Returns an invalid handle (caller falls back to `source`) if the
+ * intermediate couldn't be (re)created.
  *
  * Live report (2026-07-21): a thin magenta/garbage-colored line was visible
  * at the diorama's right edge whenever a layer used this path (most
@@ -544,79 +416,72 @@ static SDL_Texture *EnsureDioramaSupersampleTexture(SDL_Renderer *renderer,
  * never sampled softly) to LINEAR, which is what actually exposed it. Fixed
  * by blitting only the VALID `{0,0,snes_width,snes_height}` source sub-rect
  * into an intermediate sized to that exact active region. */
-static SDL_Texture *BuildDioramaSupersample(SDL_Renderer *renderer,
-                                            SDL_Texture *source, int obj_apron,
-                                            int snes_width, int snes_height,
-                                            PresentationOutcome *outcome) {
+static ArRenderTexture BuildDioramaSupersample(
+    ArRenderDevice *device, ArRenderTexture source, int obj_apron,
+    int snes_width, int snes_height, PresentationOutcome *outcome) {
   if (outcome) *outcome = kPresentationOutcome_Complete;
-  if (!renderer || !source || obj_apron < 0 || snes_width <= 0 ||
+  if (!ArRenderDevice_IsReady(device) ||
+      !ArRenderTexture_IsValid(source) || obj_apron < 0 || snes_width <= 0 ||
       snes_height <= 0 || snes_width > INT_MAX / kDioramaSupersample ||
       snes_height > INT_MAX / kDioramaSupersample) {
     if (outcome) *outcome = kPresentationOutcome_CoreFailure;
-    return NULL;
+    return ArRenderTexture_Invalid();
   }
-  SDL_Texture *ss = EnsureDioramaSupersampleTexture(
-      renderer, snes_width * kDioramaSupersample,
+  const ArRenderTexture ss = EnsureDioramaSupersampleTexture(
+      device, snes_width * kDioramaSupersample,
       snes_height * kDioramaSupersample);
-  if (!ss) {
+  if (!ArRenderTexture_IsValid(ss)) {
     if (outcome) *outcome = kPresentationOutcome_OptionalOmitted;
-    return NULL;
+    return ArRenderTexture_Invalid();
   }
-  PresentationTargetState target_state;
-  const PresentationTargetBeginResult begin =
-      PresentationGeometry_BeginTarget(renderer, ss, &target_state);
-  if (begin != kPresentationTargetBegin_Ready) {
+  ArRenderTargetState target_state;
+  const ArRenderTargetBeginResult begin = ArRenderDevice_BeginTarget(
+      device, ss, &target_state);
+  if (begin != kArRenderTargetBegin_Ready) {
     if (outcome) {
-      *outcome = begin == kPresentationTargetBegin_StateLost
+      *outcome = begin == kArRenderTargetBegin_StateLost
           ? kPresentationOutcome_CoreFailure
           : kPresentationOutcome_OptionalOmitted;
     }
-    if (begin == kPresentationTargetBegin_Omitted)
-      DisableDioramaSupersample();
-    return NULL;
+    if (begin == kArRenderTargetBegin_Omitted)
+      DisableDioramaSupersample(device);
+    return ArRenderTexture_Invalid();
   }
-  bool success =
-      SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE) &&
-      SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0) &&
-      SDL_RenderClear(renderer);
+  bool success = ArRenderDevice_Clear(
+      device, (ArRenderColorF){0.0f, 0.0f, 0.0f, 0.0f});
   /* Starts at the APRON, not at column 0: the displayed span is the MIDDLE of
    * an apron-wide surface. Blitting from 0 copied the empty left apron in and
    * pushed the content right -- which on the backdrop (the one BLENDMODE_NONE
    * layer, so transparent reads as black) showed as a permanent black stripe
    * down the left edge, fixed in place regardless of level progression. */
-  SDL_FRect src = { (float)obj_apron, 0.0f, (float)snes_width,
-                    (float)snes_height };
-  SDL_FRect dst = { 0.0f, 0.0f, (float)(snes_width * kDioramaSupersample),
-                    (float)(snes_height * kDioramaSupersample) };
-  SDL_BlendMode old_blend = SDL_BLENDMODE_BLEND;
-  bool have_old_blend = false;
+  const ArRenderRectF src = {
+    (float)obj_apron, 0.0f, (float)snes_width, (float)snes_height,
+  };
+  const ArRenderRectF dst = {
+    0.0f, 0.0f, (float)(snes_width * kDioramaSupersample),
+    (float)(snes_height * kDioramaSupersample),
+  };
   if (success) {
-    have_old_blend = SDL_GetTextureBlendMode(source, &old_blend);
-    success = have_old_blend &&
-        SDL_SetTextureBlendMode(source, SDL_BLENDMODE_NONE) &&
-        SDL_RenderTexture(renderer, source, &src, &dst);
-  }
-  bool state_restore_failed = false;
-  if (have_old_blend && !SDL_SetTextureBlendMode(source, old_blend)) {
-    success = false;
-    state_restore_failed = true;
+    const ArRenderDrawState draw_state = {
+      .flags = kArRenderDrawState_Blend,
+      .blend = kArRenderBlendMode_Opaque,
+    };
+    success = ArRenderDevice_DrawTextureWithState(
+        device, source, &src, &dst, &draw_state);
   }
   /* Restore the caller's target, not an assumed CRT target. Presentation can
    * deliberately wrap the complete scene in another render pass (heat haze,
    * capture, accessibility filters); hard-coding the boot target silently
    * escaped all of those wrappers whenever this crisp path was active. */
-  if (!PresentationGeometry_EndTarget(renderer, &target_state)) {
-    state_restore_failed = true;
-  }
-  if (state_restore_failed) {
+  if (!ArRenderDevice_EndTarget(device, &target_state)) {
     if (outcome) *outcome = kPresentationOutcome_CoreFailure;
-    return NULL;
+    return ArRenderTexture_Invalid();
   }
   if (!success && outcome)
     *outcome = kPresentationOutcome_OptionalOmitted;
   if (!success)
-    DisableDioramaSupersample();
-  return success ? ss : NULL;
+    DisableDioramaSupersample(device);
+  return success ? ss : ArRenderTexture_Invalid();
 }
 
 /* ── Camera constants (§5.6) ─────────────────────────────────────────── */
@@ -2119,10 +1984,10 @@ PresentationOutcome Diorama_Composite(
             bg_transparent_fill_argb[source_bg - 1];
       }
       bool skybox_state_restore_failed = false;
-      SDL_Texture *named = RomSkyboxTexture(
-          renderer, skybox_source, transparent_fill_configured,
-          transparent_fill_argb,
-          &skybox_state_restore_failed);
+      const ArRenderTexture named_handle =
+          DioramaRomSkyboxResource_Resolve(
+              device, skybox_source, transparent_fill_configured,
+              transparent_fill_argb, &skybox_state_restore_failed);
       /* A missing/invalid ROM backdrop can safely fall back to captured BG2.
        * A failed renderer-state restore cannot: continuing could submit the
        * rest of the frame to the cache target or through stale clip/viewport
@@ -2130,8 +1995,8 @@ PresentationOutcome Diorama_Composite(
       if (skybox_state_restore_failed) {
         return DioramaCompositeCoreFailure(renderer, viewport_is_output);
       }
-      if (named) {
-        skybox_texture = named;
+      if (ArRenderTexture_IsValid(named_handle)) {
+        skybox_texture = ArSdlRenderBackend_UnwrapTexture(named_handle);
         rom_skybox = true;
       }
     }
@@ -2697,16 +2562,17 @@ PresentationOutcome Diorama_Composite(
           kPresentationOutcome_Complete;
       DioramaPerformanceScope supersample_performance =
           DioramaPerformance_Begin(kDioramaPerformance_Supersample);
-      SDL_Texture *ss = BuildDioramaSupersample(
-          renderer, texture, obj_apron, snes_width, snes_height,
+      const ArRenderTexture ss = BuildDioramaSupersample(
+          device, texture_handles[layer->plane], obj_apron,
+          snes_width, snes_height,
           &supersample_outcome);
       DioramaPerformance_End(supersample_performance);
       outcome = PresentationOutcome_Combine(outcome, supersample_outcome);
       if (!PresentationOutcome_IsUsable(supersample_outcome)) {
         return DioramaCompositeCoreFailure(renderer, viewport_is_output);
       }
-      if (ss) {
-        draw_texture = ss;
+      if (ArRenderTexture_IsValid(ss)) {
+        draw_texture = ArSdlRenderBackend_UnwrapTexture(ss);
         used_ss = true;
       }
     }
@@ -2879,20 +2745,7 @@ static void DioramaReleaseRendererResources(SDL_Renderer *renderer) {
   if (renderer)
     SDL_SetGPURenderState(renderer, NULL);
 
-  SDL_DestroyTexture(g_diorama_ss_texture);
-  g_diorama_ss_texture = NULL;
-  g_diorama_ss_w = 0;
-  g_diorama_ss_h = 0;
-  g_diorama_ss_unavailable = false;
-
   DioramaUpload_Reset();
-
-  SDL_DestroyTexture(g_rom_skybox.texture);
-  g_rom_skybox.texture = NULL;
-  SDL_DestroyTexture(g_rom_skybox.art_texture);
-  g_rom_skybox.art_texture = NULL;
-  g_rom_skybox.composite_valid = false;
-  g_rom_skybox.resource_failed = false;
 
   SDL_GPUDevice *current_device = DioramaRendererGpuDevice(renderer);
   bool same_device = !g_diorama_shader_device ||
@@ -2931,9 +2784,13 @@ static void DioramaReleaseRendererResources(SDL_Renderer *renderer) {
 }
 
 void Diorama_ResetRendererResources(ArRenderDevice *device) {
+  DioramaRomSkyboxResource_Reset(device);
+  ResetDioramaSupersample(device);
   DioramaReleaseRendererResources(ArSdlRenderBackend_Renderer(device));
 }
 
 void Diorama_Shutdown(ArRenderDevice *device) {
+  DioramaRomSkyboxResource_Reset(device);
+  ResetDioramaSupersample(device);
   DioramaReleaseRendererResources(ArSdlRenderBackend_Renderer(device));
 }

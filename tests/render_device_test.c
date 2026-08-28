@@ -13,6 +13,8 @@ typedef struct FakeBackend {
   int draw_texture_count;
   int draw_geometry_count;
   int set_render_target_count;
+  int capture_target_state_count;
+  int restore_target_state_count;
   int present_count;
   ArRenderTextureDesc last_desc;
   ArRenderRectI last_update;
@@ -22,6 +24,10 @@ typedef struct FakeBackend {
   int last_vertex_count;
   int last_index_count;
   ArRenderVertex2D last_vertices[4];
+  ArRenderTargetState target_state;
+  bool fail_capture_target_state;
+  bool fail_set_viewport;
+  bool fail_restore_target_state;
 } FakeBackend;
 
 static bool CreateTexture(void *context, const ArRenderTextureDesc *desc,
@@ -56,18 +62,41 @@ static bool SetRenderTarget(void *context, ArRenderTexture target) {
   FakeBackend *backend = context;
   backend->set_render_target_count++;
   backend->last_texture = target;
+  backend->target_state.target = target;
   return true;
 }
 
 static bool SetViewport(void *context, const ArRenderRectI *viewport) {
-  (void)context;
-  (void)viewport;
+  FakeBackend *backend = context;
+  if (backend->fail_set_viewport) return false;
+  backend->target_state.viewport_set = viewport != NULL;
+  if (viewport) backend->target_state.viewport = *viewport;
   return true;
 }
 
 static bool SetClipRect(void *context, const ArRenderRectI *clip) {
-  (void)context;
-  (void)clip;
+  FakeBackend *backend = context;
+  backend->target_state.clip_enabled = clip != NULL;
+  if (clip) backend->target_state.clip = *clip;
+  return true;
+}
+
+static bool CaptureRenderTargetState(void *context,
+                                     ArRenderTargetState *state) {
+  FakeBackend *backend = context;
+  backend->capture_target_state_count++;
+  if (backend->fail_capture_target_state) return false;
+  *state = backend->target_state;
+  state->valid = true;
+  return true;
+}
+
+static bool RestoreRenderTargetState(
+    void *context, const ArRenderTargetState *state) {
+  FakeBackend *backend = context;
+  backend->restore_target_state_count++;
+  if (backend->fail_restore_target_state) return false;
+  backend->target_state = *state;
   return true;
 }
 
@@ -128,6 +157,8 @@ static const ArRenderBackendOps kFakeOps = {
   .set_render_target = SetRenderTarget,
   .set_viewport = SetViewport,
   .set_clip_rect = SetClipRect,
+  .capture_render_target_state = CaptureRenderTargetState,
+  .restore_render_target_state = RestoreRenderTargetState,
   .clear = Clear,
   .draw_texture = DrawTexture,
   .draw_geometry = DrawGeometry,
@@ -140,6 +171,8 @@ static void TestDeviceDispatchAndCapabilities(void) {
   ArRenderDevice device = {0};
   const ArRenderCapabilities capabilities = {
     .flags = kArRenderCapability_StreamingTextures |
+             kArRenderCapability_RenderTargets |
+             kArRenderCapability_ScopedRenderTargets |
              kArRenderCapability_Geometry |
              kArRenderCapability_TextureWrap,
     .maximum_texture_width = 1024,
@@ -238,6 +271,45 @@ static void TestDeviceDispatchAndCapabilities(void) {
       &device, ArRenderTexture_Invalid()));
   assert(backend.set_render_target_count == 2 &&
          !ArRenderTexture_IsValid(backend.last_texture));
+
+  const ArRenderRectI viewport = {7, 8, 320, 240};
+  const ArRenderRectI clip = {9, 10, 100, 80};
+  assert(ArRenderDevice_SetViewport(&device, &viewport));
+  assert(ArRenderDevice_SetClipRect(&device, &clip));
+  ArRenderTargetState target_state = {0};
+  assert(ArRenderDevice_BeginTarget(&device, target, &target_state) ==
+         kArRenderTargetBegin_Ready);
+  assert(target_state.valid);
+  assert(backend.capture_target_state_count == 1);
+  assert(ArRenderTexture_Equals(backend.target_state.target, target));
+  assert(!backend.target_state.viewport_set);
+  assert(!backend.target_state.clip_enabled);
+  assert(ArRenderDevice_EndTarget(&device, &target_state));
+  assert(backend.restore_target_state_count == 1);
+  assert(!ArRenderTexture_IsValid(backend.target_state.target));
+  assert(backend.target_state.viewport_set);
+  assert(memcmp(&backend.target_state.viewport, &viewport,
+                sizeof(viewport)) == 0);
+  assert(backend.target_state.clip_enabled);
+  assert(memcmp(&backend.target_state.clip, &clip, sizeof(clip)) == 0);
+
+  backend.fail_capture_target_state = true;
+  assert(ArRenderDevice_BeginTarget(&device, target, &target_state) ==
+         kArRenderTargetBegin_Omitted);
+  assert(!target_state.valid);
+  backend.fail_capture_target_state = false;
+
+  backend.fail_set_viewport = true;
+  assert(ArRenderDevice_BeginTarget(&device, target, &target_state) ==
+         kArRenderTargetBegin_Omitted);
+  assert(!target_state.valid);
+  assert(backend.restore_target_state_count == 2);
+  backend.fail_restore_target_state = true;
+  assert(ArRenderDevice_BeginTarget(&device, target, &target_state) ==
+         kArRenderTargetBegin_StateLost);
+  assert(!target_state.valid);
+  backend.fail_set_viewport = false;
+  backend.fail_restore_target_state = false;
   ArRenderDevice_DestroyTexture(&device, target);
 
   const ArRenderVertex2D vertices[3] = {0};

@@ -13,6 +13,8 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/hd_replacements.h"
     "${GAME_SOURCE_ROOT}/diorama/diorama_upload.c"
     "${GAME_SOURCE_ROOT}/diorama/diorama_upload.h"
+    "${GAME_SOURCE_ROOT}/diorama/diorama_rom_skybox_resource.c"
+    "${GAME_SOURCE_ROOT}/diorama/diorama_rom_skybox_resource.h"
     # Action effect construction is game-side geometry generation. Keep its
     # public contract and pure batch builder portable even while the diorama
     # projection adapter still calls the native compositor implementation.
@@ -73,6 +75,15 @@ foreach(_file IN LISTS _resource_owner_files)
         list(APPEND _native_resource_violations "${_file}")
     endif()
 endforeach()
+
+# The authored ROM skybox cache is now device-owned even while the surrounding
+# diorama compositor remains a transitional SDL implementation.
+file(READ "${GAME_SOURCE_ROOT}/diorama/diorama.c" _diorama_contents)
+if(_diorama_contents MATCHES
+   "SDL_Texture[ \t]*\\*[ \t]*(art_texture|target_texture|g_diorama_ss_texture)")
+    list(APPEND _native_resource_violations
+        "${GAME_SOURCE_ROOT}/diorama/diorama.c (ROM skybox cache)")
+endif()
 if(_native_resource_violations)
     list(JOIN _native_resource_violations "\n  " _formatted)
     message(FATAL_ERROR

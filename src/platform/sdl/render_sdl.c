@@ -146,6 +146,48 @@ static bool SetClipRect(void *context, const ArRenderRectI *clip) {
   return SDL_SetRenderClipRect(backend->renderer, rect);
 }
 
+static bool CaptureRenderTargetState(void *context,
+                                     ArRenderTargetState *state) {
+  ArSdlRenderBackend *backend = context;
+  if (!backend || !backend->renderer || !state) return false;
+  SDL_Rect viewport;
+  if (!SDL_GetRenderViewport(backend->renderer, &viewport)) return false;
+  *state = (ArRenderTargetState){
+    .target = ArSdlRenderBackend_BorrowTexture(
+        SDL_GetRenderTarget(backend->renderer)),
+    .viewport = {viewport.x, viewport.y, viewport.w, viewport.h},
+    .viewport_set = SDL_RenderViewportSet(backend->renderer),
+    .clip_enabled = SDL_RenderClipEnabled(backend->renderer),
+    .valid = true,
+  };
+  if (state->clip_enabled) {
+    SDL_Rect clip;
+    if (!SDL_GetRenderClipRect(backend->renderer, &clip)) return false;
+    state->clip = (ArRenderRectI){clip.x, clip.y, clip.w, clip.h};
+  }
+  return true;
+}
+
+static bool RestoreRenderTargetState(
+    void *context, const ArRenderTargetState *state) {
+  ArSdlRenderBackend *backend = context;
+  if (!backend || !backend->renderer || !state || !state->valid) return false;
+  const SDL_Rect viewport = {
+    state->viewport.x, state->viewport.y,
+    state->viewport.w, state->viewport.h,
+  };
+  const SDL_Rect clip = {
+    state->clip.x, state->clip.y, state->clip.w, state->clip.h,
+  };
+  bool restored = SDL_SetRenderTarget(
+      backend->renderer, ArSdlRenderBackend_UnwrapTexture(state->target));
+  restored = SDL_SetRenderViewport(
+      backend->renderer, state->viewport_set ? &viewport : NULL) && restored;
+  restored = SDL_SetRenderClipRect(
+      backend->renderer, state->clip_enabled ? &clip : NULL) && restored;
+  return restored;
+}
+
 static uint8_t ColorChannel(float value) {
   if (value <= 0.0f) return 0;
   if (value >= 1.0f) return UINT8_MAX;
@@ -154,10 +196,18 @@ static uint8_t ColorChannel(float value) {
 
 static bool Clear(void *context, ArRenderColorF color) {
   ArSdlRenderBackend *backend = context;
-  return SDL_SetRenderDrawColor(
-             backend->renderer, ColorChannel(color.r), ColorChannel(color.g),
-             ColorChannel(color.b), ColorChannel(color.a)) &&
+  Uint8 old_r = 0, old_g = 0, old_b = 0, old_a = 0;
+  if (!SDL_GetRenderDrawColor(
+          backend->renderer, &old_r, &old_g, &old_b, &old_a))
+    return false;
+  const bool cleared = SDL_SetRenderDrawColor(
+                           backend->renderer,
+                           ColorChannel(color.r), ColorChannel(color.g),
+                           ColorChannel(color.b), ColorChannel(color.a)) &&
       SDL_RenderClear(backend->renderer);
+  const bool restored = SDL_SetRenderDrawColor(
+      backend->renderer, old_r, old_g, old_b, old_a);
+  return cleared && restored;
 }
 
 typedef struct SavedTextureDrawState {
@@ -332,6 +382,8 @@ static const ArRenderBackendOps kSdlRenderOps = {
   .set_render_target = SetRenderTarget,
   .set_viewport = SetViewport,
   .set_clip_rect = SetClipRect,
+  .capture_render_target_state = CaptureRenderTargetState,
+  .restore_render_target_state = RestoreRenderTargetState,
   .clear = Clear,
   .draw_texture = DrawTexture,
   .draw_geometry = DrawGeometry,
@@ -361,6 +413,7 @@ bool ArSdlRenderBackend_Bind(ArRenderDevice *device,
   ArRenderCapabilities capabilities = {
     .flags = kArRenderCapability_StreamingTextures |
              kArRenderCapability_RenderTargets |
+             kArRenderCapability_ScopedRenderTargets |
              kArRenderCapability_Geometry |
              kArRenderCapability_BlendAdd |
              kArRenderCapability_BlendModulate |

@@ -20,6 +20,10 @@ typedef struct ArRenderBackendOps {
   bool (*set_render_target)(void *context, ArRenderTexture target);
   bool (*set_viewport)(void *context, const ArRenderRectI *viewport);
   bool (*set_clip_rect)(void *context, const ArRenderRectI *clip);
+  bool (*capture_render_target_state)(void *context,
+                                      ArRenderTargetState *state);
+  bool (*restore_render_target_state)(void *context,
+                                      const ArRenderTargetState *state);
   bool (*clear)(void *context, ArRenderColorF color);
   bool (*draw_texture)(void *context, ArRenderTexture texture,
                        const ArRenderRectF *source,
@@ -68,6 +72,16 @@ bool ArRenderDevice_SetViewport(ArRenderDevice *device,
                                 const ArRenderRectI *viewport);
 bool ArRenderDevice_SetClipRect(ArRenderDevice *device,
                                 const ArRenderRectI *clip);
+/* Scoped target entry is an optional extension. Begin captures the caller's
+ * target/viewport/clip, binds `target`, selects its full viewport, and disables
+ * clipping. Omitted guarantees that the caller state is intact; StateLost is
+ * fatal to the current frame because subsequent draw ownership is unknown.
+ * A Ready begin must be paired with EndTarget exactly once. */
+ArRenderTargetBeginResult ArRenderDevice_BeginTarget(
+    ArRenderDevice *device, ArRenderTexture target,
+    ArRenderTargetState *state);
+bool ArRenderDevice_EndTarget(ArRenderDevice *device,
+                              const ArRenderTargetState *state);
 bool ArRenderDevice_Clear(ArRenderDevice *device, ArRenderColorF color);
 bool ArRenderDevice_DrawTexture(ArRenderDevice *device,
                                 ArRenderTexture texture,
