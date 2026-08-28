@@ -408,6 +408,20 @@ static void TestDeviceDispatchAndCapabilities(void) {
       &device, &rectangle, (ArRenderColorF){1.0f, 1.0f, 1.0f, 1.1f},
       kArRenderBlendMode_Alpha));
   assert(backend.draw_geometry_count == 3);
+  assert(ArRenderDevice_DrawLine(
+      &device, (ArRenderPointF){2.0f, 4.0f},
+      (ArRenderPointF){10.0f, 4.0f}, 2.0f, color,
+      kArRenderBlendMode_Alpha));
+  assert(backend.draw_geometry_count == 4);
+  assert(backend.last_vertices[0].position.x == 2.0f &&
+         backend.last_vertices[0].position.y == 5.0f);
+  assert(backend.last_vertices[2].position.x == 10.0f &&
+         backend.last_vertices[2].position.y == 3.0f);
+  assert(!ArRenderDevice_DrawLine(
+      &device, (ArRenderPointF){2.0f, 4.0f},
+      (ArRenderPointF){2.0f, 4.0f}, 1.0f, color,
+      kArRenderBlendMode_Alpha));
+  assert(backend.draw_geometry_count == 4);
   assert(ArRenderDevice_Present(&device));
   assert(backend.present_count == 1);
 

@@ -1,5 +1,6 @@
 #include "render_device.h"
 
+#include <math.h>
 #include <string.h>
 
 static bool HasRequiredOps(const ArRenderBackendOps *ops) {
@@ -263,6 +264,36 @@ bool ArRenderDevice_DrawSolidRect(ArRenderDevice *device,
     {{x1, rectangle->y}, color, {0.0f, 0.0f}},
     {{x1, y1}, color, {0.0f, 0.0f}},
     {{rectangle->x, y1}, color, {0.0f, 0.0f}},
+  };
+  const int32_t indices[] = {0, 1, 2, 0, 2, 3};
+  const ArRenderDrawState state = {
+    .flags = kArRenderDrawState_Blend,
+    .blend = blend,
+  };
+  return ArRenderDevice_DrawGeometryWithState(
+      device, ArRenderTexture_Invalid(), vertices, 4, indices, 6, &state);
+}
+
+bool ArRenderDevice_DrawLine(ArRenderDevice *device,
+                             ArRenderPointF start,
+                             ArRenderPointF end,
+                             float thickness,
+                             ArRenderColorF color,
+                             ArRenderBlendMode blend) {
+  const float dx = end.x - start.x;
+  const float dy = end.y - start.y;
+  const float length = sqrtf(dx * dx + dy * dy);
+  if (length <= 0.0f || thickness <= 0.0f ||
+      !NormalizedColor(color) || !ValidBlend(blend))
+    return false;
+  const float scale = thickness * 0.5f / length;
+  const float nx = -dy * scale;
+  const float ny = dx * scale;
+  const ArRenderVertex2D vertices[] = {
+    {{start.x + nx, start.y + ny}, color, {0.0f, 0.0f}},
+    {{end.x + nx, end.y + ny}, color, {0.0f, 0.0f}},
+    {{end.x - nx, end.y - ny}, color, {0.0f, 0.0f}},
+    {{start.x - nx, start.y - ny}, color, {0.0f, 0.0f}},
   };
   const int32_t indices[] = {0, 1, 2, 0, 2, 3};
   const ArRenderDrawState state = {
