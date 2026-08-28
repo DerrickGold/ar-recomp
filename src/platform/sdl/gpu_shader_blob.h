@@ -1,12 +1,13 @@
-/* Shared handling for the generated shader blobs.
+/* SDL GPU handling for the generated shader blobs.
  *
  * Shaders are authored once as GLSL in src/shaders/ and cross-compiled by
  * tools/build_shaders.py into committed headers carrying SPIR-V (Vulkan),
  * MSL (Metal), and DXIL (D3D12). The checked-in blobs keep shader compilers
  * out of ordinary game builds.
  *
- * This header exists so the format-selection rule lives in exactly one place:
- * it is used by SDL effect backends and tests/shader_blob_test.c, and the
+ * This header lives with the SDL adapters so the format-selection rule and
+ * native GPU types cannot leak into portable rendering code. It is used by
+ * SDL effect backends and mirrored by tests/shader_blob_test.c; the
  * entrypoint detail below is the kind that fails loudly but confusingly if a
  * copy drifts. */
 #ifndef AR_GPU_SHADER_BLOB_H
