@@ -10,7 +10,6 @@
 #include "scene_inspector.h"
 #include "settings.h"
 
-extern SDL_Renderer *g_renderer;
 extern ArRenderDevice g_render_device;
 extern ArRenderTexture g_hud_bg_texture;
 extern ArRenderTexture g_hud_obj_texture;
@@ -29,7 +28,7 @@ static DevToolsContext CurrentContext(void) {
   DevToolsContext context = {
     .readback = {
       .capture_rgb24 = ArSdlDevTools_CaptureRgb24,
-      .context = g_renderer,
+      .context = &g_render_device,
     },
     .render_device = &g_render_device,
     .hud_bg_texture = g_hud_bg_texture,

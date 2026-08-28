@@ -4,7 +4,7 @@
 
 #include "crt_post.h"
 #include "diorama/diorama_effect_backend.h"
-#include "platform/sdl/render_sdl.h"
+#include "platform/sdl/render_sdl_internal.h"
 #include "session_fatal.h"
 #include "sim/sim_shadow_effect_backend.h"
 

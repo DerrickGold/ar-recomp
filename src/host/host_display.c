@@ -28,7 +28,9 @@
 #include "host_display_status.h"
 #include "present.h"
 #include "presentation_frame_generation.h"
+#include "platform/sdl/presentation_device_sdl.h"
 #include "platform/sdl/presentation_geometry_sdl.h"
+#include "platform/sdl/render_sdl.h"
 #include "present_cadence_metrics.h"
 #include "snesrecomp/runner.h"
 #include "settings.h"
@@ -37,7 +39,6 @@
 #include "render/render_device.h"
 
 extern SDL_Window *g_window;
-extern SDL_Renderer *g_renderer;
 extern ArRenderDevice g_render_device;
 extern ArRenderTexture g_texture;
 extern int g_snes_width;
@@ -84,8 +85,6 @@ static int s_active_aspect_y;
 static bool s_widescreen_runtime_allowed;
 static HostDisplayRefreshCache s_display_refresh_cache;
 static SDL_DisplayID s_active_display_id;
-static SDL_GPUDevice *s_frames_in_flight_device;
-static uint32_t s_applied_frames_in_flight;
 
 /* Refresh only the presentation-owned camera portion of a retained SIM frame.
  * The captured game/PPU snapshot, timestamp, interpolation pair, textures, and
@@ -142,7 +141,7 @@ static bool RunningUnderGamescope(void) {
 
 bool HostDisplay_WindowPointToOutput(int window_x, int window_y,
                                     int *output_x, int *output_y) {
-  if (!g_window || !g_renderer) return false;
+  if (!g_window || !ArRenderDevice_IsReady(&g_render_device)) return false;
 
   int window_width = 0;
   int window_height = 0;
@@ -292,15 +291,15 @@ void HostDisplay_CalculateWindowSize(int scale, int *width, int *height) {
 }
 
 void HostDisplay_RecomputeLogicalPresentation(void) {
-  if (!g_window || !g_renderer) return;
-  ArSdlPresentation_ApplyLogical(
-      g_renderer, Settings_IgnoreAspectRatio(),
+  if (!g_window || !ArRenderDevice_IsReady(&g_render_device)) return;
+  ArSdlPresentationDevice_ApplyLogical(
+      &g_render_device, Settings_IgnoreAspectRatio(),
       g_active_pixel_aspect == kPixelAspect_Crt43,
       Settings_VisibleWidth(), g_snes_height);
 }
 
 void HostDisplay_ApplyWindowScale(void) {
-  if (!g_window || !g_renderer) return;
+  if (!g_window || !ArRenderDevice_IsReady(&g_render_device)) return;
   const int configured_scale =
       g_settings.window_scale ? g_settings.window_scale : 3;
   const int point_scale = WindowScaleInPoints(configured_scale);
@@ -495,39 +494,28 @@ void HostDisplay_DisplayRemoved(uint32_t display_id) {
 }
 
 static void SetRenderVsync(int requested) {
-  if (!g_renderer) return;
-  if (!SDL_SetRenderVSync(g_renderer, requested)) {
-    fprintf(stderr, "[display] SDL_SetRenderVSync(%d) rejected: %s\n",
+  if (!ArRenderDevice_IsReady(&g_render_device)) return;
+  bool active = false;
+  if (!ArSdlRenderBackend_SetVSync(
+          &g_render_device, requested, &active)) {
+    fprintf(stderr, "[display] vsync request %d rejected: %s\n",
             requested, SDL_GetError());
   }
-  int actual = 0;
-  HostDisplayStatus_SetVsyncActive(
-      SDL_GetRenderVSync(g_renderer, &actual) && actual != 0);
+  HostDisplayStatus_SetVsyncActive(active);
 }
 
 static void SetAllowedFramesInFlight(uint32_t requested) {
-  if (!g_renderer) return;
-  SDL_PropertiesID props = SDL_GetRendererProperties(g_renderer);
-  SDL_GPUDevice *device = props ? (SDL_GPUDevice *)SDL_GetPointerProperty(
-      props, SDL_PROP_RENDERER_GPU_DEVICE_POINTER, NULL) : NULL;
-  if (!device) {
-    fprintf(stderr,
-            "[display] GPU renderer did not expose its device; "
-            "could not set frames in flight\n");
-    return;
-  }
-  if (device == s_frames_in_flight_device &&
-      requested == s_applied_frames_in_flight)
-    return;
-  if (!SDL_SetGPUAllowedFramesInFlight(device, requested)) {
+  if (!ArRenderDevice_IsReady(&g_render_device)) return;
+  bool changed = false;
+  if (!ArSdlRenderBackend_SetAllowedFramesInFlight(
+          &g_render_device, requested, &changed)) {
     fprintf(stderr,
             "[display] SDL_SetGPUAllowedFramesInFlight(%" PRIu32
             ") rejected: %s\n",
             requested, SDL_GetError());
     return;
   }
-  s_frames_in_flight_device = device;
-  s_applied_frames_in_flight = requested;
+  if (!changed) return;
   fprintf(stderr, "[display] GPU frames in flight: %" PRIu32 "\n",
           requested);
 }
@@ -601,7 +589,8 @@ static bool PresentPerformanceEnabled(void) {
 }
 
 bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha) {
-  if (mode == kHostDisplayPresent_None || !g_renderer ||
+  if (mode == kHostDisplayPresent_None ||
+      !ArRenderDevice_IsReady(&g_render_device) ||
       !ArRenderTexture_IsValid(g_texture))
     return false;
 
@@ -638,7 +627,8 @@ bool HostDisplay_TryRepresentFrame(float alpha,
                                    bool redraw_pending) {
   const bool use_interpolation =
       diorama_frame_active && interpolation_enabled;
-  if (!s_retained_frame.valid || !g_renderer ||
+  if (!s_retained_frame.valid ||
+      !ArRenderDevice_IsReady(&g_render_device) ||
       !ArRenderTexture_IsValid(g_texture) ||
       !HostDisplayPacing_ShouldRepresentFrame(
           (RefreshMode)g_settings.refresh_mode, redraw_pending)) {
