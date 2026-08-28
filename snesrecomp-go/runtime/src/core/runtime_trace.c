@@ -19,8 +19,18 @@ enum {
     kDefaultChannels = 0x3fff & ~(SR_TRACE_CHANNEL_WRAM | SR_TRACE_CHANNEL_STACK),
     kLineCapacity = 768,
     kDefaultRingLines = 4096,
-    kMaximumDedupeKeys = 512
+    kMaximumDedupeKeys = 512,
+    kDispatchCensusCapacity = 2048
 };
+
+typedef struct DispatchCensusEntry {
+    uint32_t source_pc24;
+    uint32_t target_pc24;
+    uint32_t event_flags;
+    uint32_t cpu_flags;
+    uint64_t hits;
+    bool used;
+} DispatchCensusEntry;
 
 static bool s_initialized;
 static FILE *s_file;
@@ -53,6 +63,10 @@ static uint64_t s_memory_subscription;
 static uint64_t s_register_subscription;
 static uint64_t s_dma_subscription;
 static uint64_t s_lifecycle_subscription;
+static DispatchCensusEntry s_dispatch_census[kDispatchCensusCapacity];
+static bool s_dispatch_census_overflow;
+
+static void flush_dispatch_census(void);
 
 static void unsubscribe_runner(void) {
     if (s_runner_api != NULL && s_runner != NULL) {
@@ -95,6 +109,7 @@ static void escape_json(const char *source, char *destination,
 }
 
 void sr_trace_close(void) {
+    flush_dispatch_census();
     unsubscribe_runner();
     if (s_file != NULL) fclose(s_file);
     if (s_capture != NULL) fclose(s_capture);
@@ -109,6 +124,8 @@ void sr_trace_close(void) {
     s_sequence = 0u;
     s_dedupe_count = 0u;
     s_pending_anomaly = NULL;
+    memset(s_dispatch_census, 0, sizeof(s_dispatch_census));
+    s_dispatch_census_overflow = false;
 }
 
 int sr_trace_open_file(const char *path, int channel_mask,
@@ -134,7 +151,7 @@ static void add_channel_name(const char *name) {
         {"dispmiss", SR_TRACE_CHANNEL_DISPMISS}, {"garbage", SR_TRACE_CHANNEL_GARBAGE},
         {"wram", SR_TRACE_CHANNEL_WRAM}, {"stack", SR_TRACE_CHANNEL_STACK},
         {"hwread", SR_TRACE_CHANNEL_HWREAD}, {"ppumem", SR_TRACE_CHANNEL_PPUMEM},
-        {"frame", SR_TRACE_CHANNEL_FRAME}
+        {"frame", SR_TRACE_CHANNEL_FRAME}, {"dispatch", SR_TRACE_CHANNEL_DISPATCH}
     };
     for (unsigned index = 0; index < sizeof(entries) / sizeof(entries[0]);
          ++index) {
@@ -310,6 +327,131 @@ static void write_event(const char *channel, const char *format, ...) {
     output_line(line);
 }
 
+static uint32_t dispatch_census_hash(uint32_t source_pc24,
+                                     uint32_t target_pc24,
+                                     uint32_t event_flags,
+                                     uint32_t cpu_flags) {
+    uint32_t value = source_pc24 * UINT32_C(0x9e3779b1);
+    value ^= target_pc24 * UINT32_C(0x85ebca6b);
+    value ^= event_flags * UINT32_C(0xc2b2ae35);
+    value ^= cpu_flags * UINT32_C(0x27d4eb2f);
+    value ^= value >> 16;
+    return value;
+}
+
+static void trace_dispatch(const SrRunnerEvent *event) {
+    const uint32_t source = event->source_pc24 & UINT32_C(0x00ffffff);
+    const uint32_t target = event->pc24 & UINT32_C(0x00ffffff);
+    const uint32_t event_flags = event->flags &
+        (SR_EVENT_DISPATCH_FOUND | SR_EVENT_DISPATCH_MIRRORED |
+         SR_EVENT_DISPATCH_CONTINUATION);
+    const uint32_t cpu_flags = event->cpu_flags &
+        (SR_CPU_STATE_M_FLAG | SR_CPU_STATE_X_FLAG | SR_CPU_STATE_EMULATION);
+    unsigned slot = dispatch_census_hash(source, target, event_flags,
+                                         cpu_flags) &
+                    (kDispatchCensusCapacity - 1u);
+    DispatchCensusEntry *entry = NULL;
+    unsigned probe;
+    if (!sr_trace_active() ||
+        !sr_trace_channel_enabled(SR_TRACE_CHANNEL_DISPATCH)) return;
+    for (probe = 0u; probe < kDispatchCensusCapacity; ++probe) {
+        DispatchCensusEntry *candidate = &s_dispatch_census[slot];
+        if (!candidate->used ||
+            (candidate->source_pc24 == source &&
+             candidate->target_pc24 == target &&
+             candidate->event_flags == event_flags &&
+             candidate->cpu_flags == cpu_flags)) {
+            entry = candidate;
+            break;
+        }
+        slot = (slot + 1u) & (kDispatchCensusCapacity - 1u);
+    }
+    if (entry == NULL) {
+        if (!s_dispatch_census_overflow) {
+            s_dispatch_census_overflow = true;
+            write_event("dispatch", ",\"overflow\":1}\n");
+        }
+        return;
+    }
+    if (!entry->used) {
+        entry->used = true;
+        entry->source_pc24 = source;
+        entry->target_pc24 = target;
+        entry->event_flags = event_flags;
+        entry->cpu_flags = cpu_flags;
+    }
+    ++entry->hits;
+    /* Emit logarithmic progress so a wedged interpreter still leaves a useful
+     * hit count without producing millions of identical trace records. */
+    if ((entry->hits & (entry->hits - 1u)) == 0u) {
+        write_event(
+            "dispatch",
+            ",\"site\":\"%06X\",\"target\":\"%06X\","
+            "\"m\":%u,\"x\":%u,\"e\":%u,\"found\":%u,"
+            "\"mirrored\":%u,\"continuation\":%u,"
+            "\"hits\":%llu,\"final\":0}\n",
+            source, target,
+            (cpu_flags & SR_CPU_STATE_M_FLAG) != 0u,
+            (cpu_flags & SR_CPU_STATE_X_FLAG) != 0u,
+            (cpu_flags & SR_CPU_STATE_EMULATION) != 0u,
+            (event_flags & SR_EVENT_DISPATCH_FOUND) != 0u,
+            (event_flags & SR_EVENT_DISPATCH_MIRRORED) != 0u,
+            (event_flags & SR_EVENT_DISPATCH_CONTINUATION) != 0u,
+            (unsigned long long)entry->hits);
+    }
+}
+
+static int compare_dispatch_census_entries(const void *left,
+                                           const void *right) {
+    const DispatchCensusEntry *a = left;
+    const DispatchCensusEntry *b = right;
+    if (a->source_pc24 != b->source_pc24)
+        return a->source_pc24 < b->source_pc24 ? -1 : 1;
+    if (a->target_pc24 != b->target_pc24)
+        return a->target_pc24 < b->target_pc24 ? -1 : 1;
+    if (a->cpu_flags != b->cpu_flags)
+        return a->cpu_flags < b->cpu_flags ? -1 : 1;
+    if (a->event_flags != b->event_flags)
+        return a->event_flags < b->event_flags ? -1 : 1;
+    return 0;
+}
+
+static void flush_dispatch_census(void) {
+    DispatchCensusEntry *ordered;
+    unsigned count = 0u;
+    unsigned index;
+    if (s_file == NULL ||
+        !sr_trace_channel_enabled(SR_TRACE_CHANNEL_DISPATCH)) return;
+    ordered = malloc(sizeof(s_dispatch_census));
+    if (ordered == NULL) return;
+    for (index = 0u; index < kDispatchCensusCapacity; ++index) {
+        if (s_dispatch_census[index].used)
+            ordered[count++] = s_dispatch_census[index];
+    }
+    qsort(ordered, count, sizeof(*ordered), compare_dispatch_census_entries);
+    for (index = 0u; index < count; ++index) {
+        const DispatchCensusEntry *entry = &ordered[index];
+        write_event(
+            "dispatch",
+            ",\"site\":\"%06X\",\"target\":\"%06X\","
+            "\"m\":%u,\"x\":%u,\"e\":%u,\"found\":%u,"
+            "\"mirrored\":%u,\"continuation\":%u,"
+            "\"hits\":%llu,\"final\":1}\n",
+            entry->source_pc24, entry->target_pc24,
+            (entry->cpu_flags & SR_CPU_STATE_M_FLAG) != 0u,
+            (entry->cpu_flags & SR_CPU_STATE_X_FLAG) != 0u,
+            (entry->cpu_flags & SR_CPU_STATE_EMULATION) != 0u,
+            (entry->event_flags & SR_EVENT_DISPATCH_FOUND) != 0u,
+            (entry->event_flags & SR_EVENT_DISPATCH_MIRRORED) != 0u,
+            (entry->event_flags & SR_EVENT_DISPATCH_CONTINUATION) != 0u,
+            (unsigned long long)entry->hits);
+    }
+    free(ordered);
+    fflush(s_file);
+    memset(s_dispatch_census, 0, sizeof(s_dispatch_census));
+    s_dispatch_census_overflow = false;
+}
+
 static bool function_matches(const char *name) {
     return s_function_filter[0] == '\0' ||
            (name != NULL && strstr(name, s_function_filter) != NULL);
@@ -476,12 +618,15 @@ static void observe_runner_event(void *user_data, SrRunnerHandle *runner,
     } else if (event->type == SR_EVENT_ERROR &&
                event->error_code == SR_RUNNER_ERROR_DISPATCH_MISS) {
         sr_trace_dispmiss(event->source_pc24, event->pc24);
+    } else if (event->type == SR_EVENT_DYNAMIC_DISPATCH) {
+        trace_dispatch(event);
     }
 }
 
 void sr_trace_bind_runner(Snes *runner, int enabled) {
     SrEventSubscription subscription = {0};
     const SnesRunnerApi *api;
+    if (!enabled) flush_dispatch_census();
     unsubscribe_runner();
     if (!enabled || runner == NULL) return;
     if (!s_initialized) initialize_from_environment();
@@ -515,13 +660,16 @@ void sr_trace_bind_runner(Snes *runner, int enabled) {
                                   &s_dma_subscription) != SR_RESULT_OK)
             s_dma_subscription = 0u;
     }
-    if ((s_channels & (SR_TRACE_CHANNEL_FRAME | SR_TRACE_CHANNEL_DISPMISS)) != 0) {
+    if ((s_channels & (SR_TRACE_CHANNEL_FRAME | SR_TRACE_CHANNEL_DISPMISS |
+                       SR_TRACE_CHANNEL_DISPATCH)) != 0) {
         subscription.event_mask = 0u;
         if ((s_channels & SR_TRACE_CHANNEL_FRAME) != 0)
             subscription.event_mask |=
                 SR_EVENT_MASK_FRAME | SR_EVENT_MASK_INTERRUPT;
         if ((s_channels & SR_TRACE_CHANNEL_DISPMISS) != 0)
             subscription.event_mask |= SR_EVENT_MASK_ERROR;
+        if ((s_channels & SR_TRACE_CHANNEL_DISPATCH) != 0)
+            subscription.event_mask |= SR_EVENT_MASK_DYNAMIC_DISPATCH;
         if (api->subscribe_events(s_runner, &subscription,
                                   &s_lifecycle_subscription) != SR_RESULT_OK)
             s_lifecycle_subscription = 0u;

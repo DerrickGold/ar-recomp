@@ -8,6 +8,12 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/DerrickGold/snesrecomp-go/internal/analysis"
+	"github.com/DerrickGold/snesrecomp-go/internal/config"
+	"github.com/DerrickGold/snesrecomp-go/internal/cpu65816"
+	"github.com/DerrickGold/snesrecomp-go/internal/decoder"
+	romimage "github.com/DerrickGold/snesrecomp-go/internal/rom"
 )
 
 func writeTestFile(t *testing.T, path, content string) {
@@ -116,5 +122,248 @@ func TestCensusStubsCollapsesVariants(t *testing.T) {
 		report.LogicalIndirects != 1 || report.IndirectEmissions != 1 ||
 		report.LogicalTotal() != 5 {
 		t.Fatalf("unexpected report: %+v", report)
+	}
+}
+
+func TestAnalyzeAuthoredShadowIsReadOnlyAndClassifiesComparisons(t *testing.T) {
+	root := t.TempDir()
+	image := make([]byte, 0x8000)
+	copy(image[0x0000:], []byte{
+		0xBD, 0x00, 0x81, // LDA $8100,X
+		0xA0, 0x08, 0x80, // LDY #$8008 (RTS returns to $8009)
+		0x5A, // PHY
+		0x48, // PHA -- authored indirect site $8007
+		0x60, // RTS
+	})
+	copy(image[0x0010:], []byte{0xA9, 0x1F, 0x80, 0x48, 0x60}) // push $801F; RTS at $8014 -> $8020
+	copy(image[0x0030:], []byte{0x6C, 0x00, 0x20})             // unresolved JMP ($2000)
+	image[0x0040] = 0x60                                       // authored-only RTS site
+	image[0x0100], image[0x0101] = 0xFF, 0x81                  // handler-1 -> $8200
+	romPath := filepath.Join(root, "fixture.sfc")
+	if err := os.WriteFile(romPath, image, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgDir := filepath.Join(root, "recomp")
+	configText := `bank = 00
+func PHAEntry 8000 entry_mx:0,0
+func ImmediateEntry 8010 entry_mx:0,0
+func UnresolvedEntry 8030 entry_mx:0,0
+func PlainRTS 8040 entry_mx:0,0
+indirect_dispatch 8007 1 idx:A tables:8100 ret:8009
+rts_dispatch 8014 8020
+rts_dispatch 8040 8050
+`
+	configPath := filepath.Join(cfgDir, "bank00.cfg")
+	writeTestFile(t, configPath, configText)
+	before, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := AnalyzeAuthoredShadow(ShadowAnalysisOptions{ROMPath: romPath, CFGDir: cfgDir, Jobs: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.NoWrite || report.Summary.AuthoredFacts != 3 || report.Summary.InferredFacts != 2 ||
+		report.Summary.ExactMatches != 1 || report.Summary.PartialMatches != 1 ||
+		report.Summary.AuthoredOnly != 1 || report.Summary.Conflicts != 0 {
+		t.Fatalf("unexpected shadow summary: %+v", report.Summary)
+	}
+	if report.Summary.RawUnresolvedEmissions != 1 || report.Summary.UniqueUnresolvedSites != 1 {
+		t.Fatalf("unexpected unresolved summary: %+v", report.Summary)
+	}
+	after, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("shadow analysis modified authored configuration")
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 { // fixture.sfc and recomp/
+		t.Fatalf("shadow analysis created output files: %v", entries)
+	}
+	var output bytes.Buffer
+	if err := WriteShadowReport(&output, report, "json", false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), `"mode": "compare_authored"`) || !strings.Contains(output.String(), `"no_write": true`) {
+		t.Fatalf("unexpected JSON report:\n%s", output.String())
+	}
+	second, err := AnalyzeAuthoredShadow(ShadowAnalysisOptions{ROMPath: romPath, CFGDir: cfgDir, Jobs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var secondOutput bytes.Buffer
+	if err := WriteShadowReport(&secondOutput, second, "json", false); err != nil {
+		t.Fatal(err)
+	}
+	if output.String() != secondOutput.String() {
+		t.Fatalf("JSON report changed with worker count:\njobs=2:\n%s\njobs=1:\n%s", output.String(), secondOutput.String())
+	}
+}
+
+func TestSelectStaticProvenAutomaticDispatchFactsRejectsOpenAndObservedFacts(t *testing.T) {
+	proven := analysis.DispatchFact{
+		SitePC: 0x008100, Mnemonic: "RTS", Transfer: analysis.TransferResume,
+		TargetEntryKind: analysis.EntryContinuation, Targets: []uint32{0x008200}, TargetSetClosed: true,
+		Evidence: []analysis.Evidence{{Source: "static.fixture", Confidence: analysis.ConfidenceProven}},
+	}
+	open := analysis.DispatchFact{
+		SitePC: 0x008110, Mnemonic: "JMP", Transfer: analysis.TransferTail,
+		TargetEntryKind: analysis.EntryComputed, TargetCandidates: []uint32{0x008300},
+		UnknownFields: []string{"targets"},
+		Evidence:      []analysis.Evidence{{Source: "static.fixture", Confidence: analysis.ConfidenceProbable}},
+	}
+	observed := analysis.DispatchFact{
+		SitePC: 0x008120, Mnemonic: "RTS", Transfer: analysis.TransferResume,
+		TargetEntryKind: analysis.EntryContinuation, Targets: []uint32{0x008400}, TargetSetClosed: true,
+		Evidence: []analysis.Evidence{{Source: "replay.fixture", Confidence: analysis.ConfidenceObserved}},
+	}
+	misclassifiedProfile := analysis.DispatchFact{
+		SitePC: 0x008130, Mnemonic: "RTS", Transfer: analysis.TransferResume,
+		TargetEntryKind: analysis.EntryContinuation, Targets: []uint32{0x008500}, TargetSetClosed: true,
+		Evidence: []analysis.Evidence{{Source: "profile.fixture", Confidence: analysis.ConfidenceProven}},
+	}
+	report := ShadowReport{Comparisons: []analysis.Comparison{
+		{SitePC: proven.SitePC, Status: analysis.ComparisonAutomatic, Inferred: &proven},
+		{SitePC: open.SitePC, Status: analysis.ComparisonAutomatic, Inferred: &open},
+		{SitePC: observed.SitePC, Status: analysis.ComparisonAutomatic, Inferred: &observed},
+		{SitePC: misclassifiedProfile.SitePC, Status: analysis.ComparisonAutomatic, Inferred: &misclassifiedProfile},
+	}}
+	selected, rejected := SelectStaticProvenAutomaticDispatchFacts(report)
+	if len(selected) != 1 || selected[0].SitePC != proven.SitePC || rejected != 3 {
+		t.Fatalf("selection = %#v, rejected=%d; want only proven static fact", selected, rejected)
+	}
+}
+
+func TestAuthoredTransferUsesOpcodeBeforeLegacyReturnMetadata(t *testing.T) {
+	returnPC := uint16(0x849b)
+	dispatch := config.IndirectDispatch{ReturnPC: &returnPC}
+	jmp := &cpu65816.Instruction{Mnemonic: "JMP"}
+	if got := authoredTransferForInstruction(jmp, dispatch); got != analysis.TransferTail {
+		t.Fatalf("JMP transfer = %s, want tail", got)
+	}
+	pha := &cpu65816.Instruction{Mnemonic: "PHA"}
+	if got := authoredTransferForInstruction(pha, dispatch); got != analysis.TransferCall {
+		t.Fatalf("PHA/RTS transfer = %s, want call", got)
+	}
+	dispatch.Transfer = config.IndirectTransferTail
+	if got := authoredTransferForInstruction(pha, dispatch); got != analysis.TransferTail {
+		t.Fatalf("explicit PHA transfer = %s, want tail", got)
+	}
+}
+
+func TestFormatShadowConflictsNamesSitesAndReasons(t *testing.T) {
+	authored := analysis.DispatchFact{SitePC: 0x008498, InstructionBytes: "7C 9B 84", Mnemonic: "JMP"}
+	report := ShadowReport{Comparisons: []analysis.Comparison{
+		{
+			SitePC: 0x008498, Status: analysis.ComparisonConflict, Authored: &authored,
+			Differences: []string{"return PC differs: authored=$00849B inferred=none"},
+		},
+	}}
+	got := FormatShadowConflicts(report)
+	for _, wanted := range []string{"$00:8498", "7C 9B 84 JMP", "return PC differs"} {
+		if !strings.Contains(got, wanted) {
+			t.Fatalf("conflict summary %q missing %q", got, wanted)
+		}
+	}
+}
+
+func TestAnalyzeAuthoredShadowReproducesWRAMRTSContinuation(t *testing.T) {
+	root := t.TempDir()
+	image := make([]byte, 0x8000)
+	copy(image[0x0000:], []byte{
+		0xA9, 0x1F, 0x80, // LDA #$801F (handler minus one)
+		0x8D, 0x45, 0x7C, // STA $7C45
+		0xA9, 0x0F, 0x80, // LDA #$800F (continuation minus one)
+		0x48,             // PHA
+		0xAD, 0x45, 0x7C, // LDA $7C45
+		0x48, // PHA
+		0x60, // RTS dispatcher at $800E
+		0xEA, // padding
+		0x60, // continuation at $8010
+	})
+	image[0x0020] = 0x60 // handler exits to $8010
+	romPath := filepath.Join(root, "fixture.sfc")
+	if err := os.WriteFile(romPath, image, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgDir := filepath.Join(root, "recomp")
+	writeTestFile(t, filepath.Join(cfgDir, "bank00.cfg"), `bank = 00
+func Root 8000 entry_mx:0,0
+rts_dispatch 800E 8020
+rts_dispatch 8020 8010
+`)
+	report, err := AnalyzeAuthoredShadow(ShadowAnalysisOptions{ROMPath: romPath, CFGDir: cfgDir, Jobs: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Summary.ExactMatches != 2 || report.Summary.Conflicts != 0 || report.Summary.AuthoredOnly != 0 {
+		t.Fatalf("unexpected shadow summary: %+v", report.Summary)
+	}
+}
+
+func TestShadowSummaryClassifiesOpenOverlappingDispatchAsGarbageOnly(t *testing.T) {
+	fact := analysis.DispatchFact{
+		SitePC: 0x008001, FunctionEntries: []uint32{0x008100},
+		Mnemonic: "JMP", Transfer: analysis.TransferTail,
+		TargetEntryKind: analysis.EntryComputed, UnknownFields: []string{"targets"},
+		Evidence: []analysis.Evidence{{
+			Source: "static.decoder.auto_dispatch", Confidence: analysis.ConfidenceProbable,
+		}},
+	}
+	results := []shadowDecodeResult{{
+		facts: []analysis.DispatchFact{fact},
+		spans: []shadowDecodedSpan{{PC: 0x008000, FunctionEntry: 0x008200, Length: 3}},
+	}}
+	facts, _, _, _ := summarizeShadowResults(make(romimage.Image, 0x8000), results)
+	if len(facts) != 1 || facts[0].CodeOwnership != analysis.OwnershipGarbageOnly {
+		t.Fatalf("facts = %+v, want garbage-only ownership", facts)
+	}
+	comparisons, summary := analysis.CompareDispatchFacts(nil, facts)
+	if summary.Automatic != 0 || summary.GarbageOnly != 1 || comparisons[0].Status != analysis.ComparisonGarbageOnly {
+		t.Fatalf("summary=%+v comparisons=%+v", summary, comparisons)
+	}
+}
+
+func TestShadowDirectCallDemandPreservesExactLiveMX(t *testing.T) {
+	key := decoder.DecodeKey{PC: 0x008000, M: 0, X: 1}
+	instruction := &cpu65816.Instruction{
+		Address: 0x008000, Mnemonic: "JSR", Mode: cpu65816.ABS,
+		Operand: 0x8200, M: 0, X: 1,
+	}
+	graph := &decoder.Graph{Instructions: map[decoder.DecodeKey]*decoder.DecodedInstruction{
+		key: {Key: key, Instruction: instruction},
+	}}
+	demands := discoverShadowDemands(0, graph, nil)
+	want := decoder.Variant{Address: 0x008200, M: 0, X: 1}
+	if len(demands) != 1 {
+		t.Fatalf("direct call demands = %+v, want one exact M/X variant", demands)
+	}
+	if _, found := demands[want]; !found {
+		t.Fatalf("direct call demands = %+v, missing %+v", demands, want)
+	}
+}
+
+func TestRecoverSelfDelimitedWordTable(t *testing.T) {
+	image := make(romimage.Image, 0x8000)
+	// Outer pointers at $8100 end exactly at their earliest referenced list.
+	image[0x0100], image[0x0101] = 0x04, 0x81
+	image[0x0102], image[0x0103] = 0x08, 0x81
+	pointers, ok := recoverSelfDelimitedWordTable(image, 0, 0x8100, false)
+	if !ok || len(pointers) != 2 || pointers[0] != 0x008104 || pointers[1] != 0x008108 {
+		t.Fatalf("outer table = %v, %t", pointers, ok)
+	}
+	// The packed inner list stores handler-minus-one and an $FFFF terminator;
+	// its first handler at $8108 proves the two-word bound.
+	image[0x0104], image[0x0105] = 0x07, 0x81
+	image[0x0106], image[0x0107] = 0xFF, 0xFF
+	targets, ok := recoverSelfDelimitedWordTable(image, 0, 0x8104, true)
+	if !ok || len(targets) != 2 || targets[0] != 0x008108 || targets[1] != 0 {
+		t.Fatalf("inner table = %v, %t", targets, ok)
 	}
 }

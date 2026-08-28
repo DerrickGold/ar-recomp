@@ -7,6 +7,10 @@
 extern "C" {
 #endif
 
+#ifndef SNESRECOMP_SEMANTIC_DISPATCH_TRACE
+#define SNESRECOMP_SEMANTIC_DISPATCH_TRACE 0
+#endif
+
 typedef struct CpuState {
     uint16 A;
     uint16 X;
@@ -249,6 +253,11 @@ RecompReturn cpu_dispatch_pc_from(CpuState *cpu, uint32 pc24,
                                   uint16 miss_restore_stack,
                                   uint32 source_pc24);
 int cpu_dispatch_has_entry(CpuState *cpu, uint32 pc24);
+/* Generated direct dispatches call this only in semantic-trace builds. The
+ * implementation shares the generic registry dispatch event constructor so
+ * validation observes an edge independently of its lowering strategy. */
+void cpu_trace_resolved_dispatch(CpuState *cpu, uint32 pc24,
+                                 uint32 source_pc24);
 void dbg_rts_trace(CpuState *cpu, uint32 source_pc, uint16 entry_stack,
                    uint16 return_stack, uint32 popped_pc, uint8 hrv);
 void dbg_oam_block_trace(CpuState *cpu, uint32 pc24);

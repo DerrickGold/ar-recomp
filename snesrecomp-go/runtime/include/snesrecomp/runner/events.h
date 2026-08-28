@@ -98,6 +98,9 @@ enum {
 
 #define SR_EVENT_DISPATCH_FOUND UINT32_C(0x00000001)
 #define SR_EVENT_DISPATCH_MIRRORED UINT32_C(0x00000002)
+/* The source instruction is RTS/RTL, so a registry miss names an internal
+ * continuation or ordinary hardware return rather than a missing handler. */
+#define SR_EVENT_DISPATCH_CONTINUATION UINT32_C(0x00000004)
 #define SR_EVENT_DMA_HDMA UINT32_C(0x00000001)
 #define SR_EVENT_DMA_FROM_B_BUS UINT32_C(0x00000002)
 #define SR_EVENT_DMA_FIXED_A_BUS UINT32_C(0x00000004)

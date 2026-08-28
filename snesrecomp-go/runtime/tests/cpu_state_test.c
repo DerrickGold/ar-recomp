@@ -32,12 +32,16 @@ static uint8 continuation_host_return_valid;
 static unsigned runner_error_count;
 static SrRunnerErrorCode runner_error_code;
 static uint32_t runner_error_pc;
+static SrRunnerEvent dispatch_events[2];
+static unsigned dispatch_event_count;
 
 void sr_runner_emit_event(Snes *snes, SrEventMask event_mask,
                           SrRunnerEvent *event) {
     (void)snes;
-    (void)event_mask;
-    (void)event;
+    if (event_mask == SR_EVENT_MASK_DYNAMIC_DISPATCH && event != NULL &&
+        dispatch_event_count < 2u) {
+        dispatch_events[dispatch_event_count++] = *event;
+    }
 }
 
 void sr_runner_emit_memory_write(Snes *snes, SrMemoryRegion region,
@@ -281,6 +285,43 @@ static void test_dispatch_mx_variants(void) {
     }
 }
 
+static void test_resolved_dispatch_trace_matches_registry(void) {
+    CpuState cpu;
+    cpu_state_init(&cpu, g_ram);
+    cpu.emulation = 0u;
+    cpu.m_flag = 1u;
+    cpu.x_flag = 0u;
+    cpu.X = 0x1234u;
+    cpu.S = 0x01e0u;
+    snes_frame_counter = 47;
+    dispatch_event_count = 0u;
+    memset(dispatch_events, 0, sizeof(dispatch_events));
+    g_sr_runner_event_mask = SR_EVENT_MASK_DYNAMIC_DISPATCH;
+
+    cpu_trace_resolved_dispatch(&cpu, 0x018000u, 0x018900u);
+    check(cpu_dispatch_pc_from(&cpu, 0x018000u, 0x01f0u, 0x018900u) ==
+              RECOMP_RETURN_SKIP_1,
+          "registry dispatch used for semantic trace comparison");
+    check(dispatch_event_count == 2u,
+          "direct and registry dispatch each emit one semantic event");
+    if (dispatch_event_count == 2u) {
+        const SrRunnerEvent *direct = &dispatch_events[0];
+        const SrRunnerEvent *registry = &dispatch_events[1];
+        check(direct->type == registry->type &&
+                  direct->frame_counter == registry->frame_counter &&
+                  direct->flags == registry->flags &&
+                  direct->cpu_flags == registry->cpu_flags &&
+                  direct->pc24 == registry->pc24 &&
+                  direct->source_pc24 == registry->source_pc24 &&
+                  direct->register_x == registry->register_x &&
+                  direct->stack_pointer == registry->stack_pointer,
+              "direct and registry dispatch event payloads match");
+        check(direct->label == NULL && registry->label == g_last_recomp_func,
+              "semantic edge omits lowering-dependent function label");
+    }
+    g_sr_runner_event_mask = 0u;
+}
+
 static void test_recovered_branch_handlers(void) {
     CpuState cpu;
     cpu_state_init(&cpu, g_ram);
@@ -344,6 +385,7 @@ int main(void) {
     test_memory();
     test_stack_and_dispatch();
     test_dispatch_mx_variants();
+    test_resolved_dispatch_trace_matches_registry();
     test_recovered_branch_handlers();
     test_recovered_handler_continuation();
     return failures == 0 ? 0 : 1;

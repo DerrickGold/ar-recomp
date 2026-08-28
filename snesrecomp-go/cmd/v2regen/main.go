@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DerrickGold/snesrecomp-go/internal/analysis"
 	"github.com/DerrickGold/snesrecomp-go/internal/artifact"
 	"github.com/DerrickGold/snesrecomp-go/internal/codegen"
 	"github.com/DerrickGold/snesrecomp-go/internal/config"
@@ -54,6 +55,8 @@ func run(args []string) error {
 	switch args[0] {
 	case "regen":
 		return regenerate(args[1:])
+	case "analyze":
+		return analyze(args[1:])
 	case "sync-funcs":
 		return syncFuncs(args[1:])
 	case "metadata":
@@ -62,6 +65,8 @@ func run(args []string) error {
 		return censusRTSWebs(args[1:])
 	case "stub-census":
 		return censusStubs(args[1:])
+	case "dispatch-census":
+		return censusDispatch(args[1:])
 	case "inspect":
 		return inspect(args[1:])
 	case "emit-function":
@@ -86,10 +91,12 @@ func usage() {
 
 Commands:
   regen              Regenerate all C banks with the concurrent Go pipeline
+  analyze            Compare independent static facts with authored cfg (no-write)
   sync-funcs         Regenerate recomp/funcs.h from bank cfg declarations
   metadata           Refresh the generated-code metadata sidecar
   rts-webs           Census pushed-continuation RTS dispatch patterns
   stub-census        Report unresolved control-flow traps in generated C
+  dispatch-census    Summarize runtime dynamic targets and missing entries
   inspect            Parse ROM/cfg inputs and show concurrent shard balance
   emit-function      Emit one function with the standalone Go pipeline
   opcode-diff        Differential-test opcode semantics with Harte vectors
@@ -98,6 +105,80 @@ Commands:
   baseline verify    Compare a generated directory with a saved snapshot
 
 These commands replace every tool in the normal tools/regen.sh pipeline.`)
+}
+
+func censusDispatch(args []string) error {
+	flags := flag.NewFlagSet("dispatch-census", flag.ContinueOnError)
+	tracePath := flags.String("trace", "", "runtime JSONL captured with SNESRECOMP_TRACE_CHANNELS=dispatch")
+	romPath := flags.String("rom", "", "optional ROM whose SHA-256 is stored with the evidence")
+	format := flags.String("format", "text", "report format: text or json")
+	suggest := flags.Bool("suggest", true, "include candidate cfg func lines for missing generated bodies")
+	outPath := flags.String("out-analysis", "", "optional deterministic JSON evidence output (never edits cfg)")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*tracePath) == "" {
+		return errors.New("dispatch-census requires --trace <runtime.jsonl>")
+	}
+	report, err := tooling.LoadDispatchCensus(*tracePath, *romPath)
+	if err != nil {
+		return err
+	}
+	if err := tooling.WriteDispatchCensus(os.Stdout, report, *format, *suggest); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*outPath) != "" {
+		if err := tooling.WriteDispatchCensusFile(*outPath, report); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "dispatch-census: wrote observed evidence to %s (authored cfg unchanged)\n", *outPath)
+	}
+	return nil
+}
+
+func analyze(args []string) error {
+	flags := flag.NewFlagSet("analyze", flag.ContinueOnError)
+	romPath := flags.String("rom", "game.sfc", "headered or headerless LoROM image")
+	cfgDir := flags.String("cfg-dir", "recomp", "directory containing bankXX.cfg")
+	jobs := flags.Int("jobs", runtime.NumCPU(), "parallel decode workers")
+	bankValue := flags.String("bank", "", "optional hexadecimal bank")
+	format := flags.String("format", "text", "report format: text or json")
+	verbose := flags.Bool("verbose", false, "show all comparisons, callers, and decode issues")
+	flags.BoolVar(verbose, "v", false, "show all comparisons, callers, and decode issues")
+	strict := flags.Bool("strict", false, "fail after reporting independently proven semantic conflicts")
+	compareAuthored := flags.Bool("compare-authored", true, "compare inferred facts with authored cfg declarations")
+	noWrite := flags.Bool("no-write", true, "require analysis to remain read-only")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if !*compareAuthored {
+		return errors.New("analyze currently requires --compare-authored")
+	}
+	if !*noWrite {
+		return errors.New("analyze is intentionally read-only; --no-write=false is not supported")
+	}
+	var onlyBank *byte
+	if strings.TrimSpace(*bankValue) != "" {
+		value, err := strconv.ParseUint(strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(*bankValue), "0x"), "0X"), 16, 8)
+		if err != nil {
+			return fmt.Errorf("parse --bank: %w", err)
+		}
+		bank := byte(value)
+		onlyBank = &bank
+	}
+	report, err := tooling.AnalyzeAuthoredShadow(tooling.ShadowAnalysisOptions{
+		ROMPath: *romPath, CFGDir: *cfgDir, Jobs: *jobs, OnlyBank: onlyBank,
+	})
+	if err != nil {
+		return err
+	}
+	if err := tooling.WriteShadowReport(os.Stdout, report, *format, *verbose); err != nil {
+		return err
+	}
+	if *strict && report.Summary.Conflicts > 0 {
+		return fmt.Errorf("shadow analysis found %d semantic conflict(s)", report.Summary.Conflicts)
+	}
+	return nil
 }
 
 func opcodeDiff(args []string) error {
@@ -229,6 +310,7 @@ func regenerate(args []string) error {
 	chunkThreshold := flags.Int("bank-chunk-threshold-kib", 4096, "split banks at or above this generated size")
 	chunkSpan := flags.Int("bank-chunk-pc-span", 0x800, "stable PC span per split translation unit")
 	allowStubs := flags.Bool("allow-stubs", false, "write complete output and report stubs without failing this command")
+	provenAnalysis := flags.Bool("experimental-proven-analysis", false, "apply closed static dispatch facts and exact direct-call M/X in memory (requires an isolated --out-dir)")
 	_ = flags.String("prefix", "", "deprecated compatibility option")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -244,11 +326,35 @@ func regenerate(args []string) error {
 			only[byte(value)] = struct{}{}
 		}
 	}
+	var provenFacts []analysis.DispatchFact
+	if *provenAnalysis {
+		requestedOutput, pathErr := filepath.Abs(*outDir)
+		if pathErr != nil {
+			return fmt.Errorf("resolve --out-dir: %w", pathErr)
+		}
+		if filepath.Base(requestedOutput) == "gen" && filepath.Base(filepath.Dir(requestedOutput)) == "src" {
+			return errors.New("--experimental-proven-analysis requires an isolated --out-dir; refusing to replace src/gen")
+		}
+		shadow, analyzeErr := tooling.AnalyzeAuthoredShadow(tooling.ShadowAnalysisOptions{
+			ROMPath: *romPath, CFGDir: *cfgDir, Jobs: *jobs,
+		})
+		if analyzeErr != nil {
+			return fmt.Errorf("experimental proven analysis: %w", analyzeErr)
+		}
+		if shadow.Summary.Conflicts > 0 {
+			return fmt.Errorf("experimental proven analysis found %d authored conflict(s):\n%s\nrun `v2regen analyze --rom <rom> --cfg-dir <cfg> --verbose` for the complete comparison", shadow.Summary.Conflicts, tooling.FormatShadowConflicts(shadow))
+		}
+		var rejected int
+		provenFacts, rejected = tooling.SelectStaticProvenAutomaticDispatchFacts(shadow)
+		fmt.Printf("v2regen: experimental analysis selected %d proven automatic fact(s); kept %d open/probable fact(s) report-only\n", len(provenFacts), rejected)
+	}
 	report, err := regen.Run(regen.Options{
 		ROMPath: *romPath, ConfigDir: *cfgDir, OutputDir: *outDir, Jobs: *jobs,
 		ChunkThresholdBytes: max(0, *chunkThreshold) * 1024, ChunkPCSpan: max(0, *chunkSpan), OnlyBanks: only,
-		AllowStubs: *allowStubs,
-		Progress:   func(format string, values ...any) { fmt.Printf("v2regen: "+format+"\n", values...) },
+		AllowStubs:                    *allowStubs,
+		ProvenDispatchFacts:           provenFacts,
+		ExperimentalExactDirectCallMX: *provenAnalysis,
+		Progress:                      func(format string, values ...any) { fmt.Printf("v2regen: "+format+"\n", values...) },
 	})
 	fmt.Printf("v2regen: %d banks, %d -> %d variants, %d files (%d changed), %s\n", report.Banks, report.InitialEntries, report.FinalEntries, report.Files, report.ChangedFiles, report.Elapsed.Round(time.Millisecond))
 	if report.UnresolvedIndirects > 0 {

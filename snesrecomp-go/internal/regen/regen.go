@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/DerrickGold/snesrecomp-go/internal/analysis"
 	"github.com/DerrickGold/snesrecomp-go/internal/codegen"
 	"github.com/DerrickGold/snesrecomp-go/internal/config"
 	"github.com/DerrickGold/snesrecomp-go/internal/cpu65816"
@@ -28,6 +29,8 @@ type Options struct {
 	ChunkPCSpan                   int
 	OnlyBanks                     map[byte]struct{}
 	AllowStubs                    bool
+	ProvenDispatchFacts           []analysis.DispatchFact
+	ExperimentalExactDirectCallMX bool
 	Progress                      func(string, ...any)
 }
 
@@ -36,6 +39,7 @@ type Report struct {
 	Functions, Files, ChangedFiles      int
 	Passes, ExitMXRoutes                int
 	UnresolvedIndirects, StubHits       int
+	AnalysisFactsApplied                int
 	Elapsed                             time.Duration
 }
 
@@ -46,21 +50,24 @@ type bankState struct {
 }
 
 type repository struct {
-	image            rom.Image
-	banks            []*bankState
-	byBank           map[byte]*bankState
-	names            map[uint32]string
-	canonical        map[uint32]map[[2]uint8]struct{}
-	dispatchHelpers  map[uint32]string
-	exitMX           map[decoder.Variant]decoder.MX
-	allDataRegions   []decoder.DataRegion
-	forceVariants    map[uint32][2]uint8
-	validVariants    map[uint32]map[[2]uint8]struct{}
-	provenEquivalent map[uint32]map[[2]uint8]map[[2]uint8]struct{}
-	unresolved       map[codegen.Variant]struct{}
-	cumulativeDirty  map[codegen.Variant]struct{}
-	cumulativeEmit   map[codegen.Variant]struct{}
-	cumulativePrune  map[codegen.Variant]struct{}
+	image             rom.Image
+	banks             []*bankState
+	byBank            map[byte]*bankState
+	names             map[uint32]string
+	canonical         map[uint32]map[[2]uint8]struct{}
+	dispatchHelpers   map[uint32]string
+	provenDispatchMX  map[uint32]struct{}
+	provenResumePCs   map[uint32]struct{}
+	exactDirectCallMX bool
+	exitMX            map[decoder.Variant]decoder.MX
+	allDataRegions    []decoder.DataRegion
+	forceVariants     map[uint32][2]uint8
+	validVariants     map[uint32]map[[2]uint8]struct{}
+	provenEquivalent  map[uint32]map[[2]uint8]map[[2]uint8]struct{}
+	unresolved        map[codegen.Variant]struct{}
+	cumulativeDirty   map[codegen.Variant]struct{}
+	cumulativeEmit    map[codegen.Variant]struct{}
+	cumulativePrune   map[codegen.Variant]struct{}
 }
 
 var bankConfigRE = regexp.MustCompile(`(?i)^bank([0-9a-f]+)\.cfg$`)
@@ -95,7 +102,16 @@ func Run(options Options) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
+	if len(options.ProvenDispatchFacts) > 0 {
+		reportCount, applyErr := repo.applyProvenDispatchFacts(options.ProvenDispatchFacts)
+		if applyErr != nil {
+			return Report{}, applyErr
+		}
+		logf("experimental analysis overlay: applied %d statically proven dispatch facts", reportCount)
+	}
+	repo.exactDirectCallMX = options.ExperimentalExactDirectCallMX
 	report := Report{Banks: len(repo.banks)}
+	report.AnalysisFactsApplied = len(options.ProvenDispatchFacts)
 	for _, bank := range repo.banks {
 		report.InitialEntries += len(bank.Config.Entries)
 	}
@@ -195,7 +211,9 @@ func loadRepository(romPath, configDir string) (*repository, error) {
 	repo := &repository{
 		image: image, byBank: make(map[byte]*bankState), names: make(map[uint32]string),
 		canonical: make(map[uint32]map[[2]uint8]struct{}), dispatchHelpers: make(map[uint32]string),
-		exitMX: make(map[decoder.Variant]decoder.MX), forceVariants: make(map[uint32][2]uint8),
+		provenDispatchMX: make(map[uint32]struct{}),
+		provenResumePCs:  make(map[uint32]struct{}),
+		exitMX:           make(map[decoder.Variant]decoder.MX), forceVariants: make(map[uint32][2]uint8),
 		validVariants: make(map[uint32]map[[2]uint8]struct{}), unresolved: make(map[codegen.Variant]struct{}),
 		provenEquivalent: make(map[uint32]map[[2]uint8]map[[2]uint8]struct{}),
 		cumulativeDirty:  make(map[codegen.Variant]struct{}), cumulativeEmit: make(map[codegen.Variant]struct{}),
@@ -386,7 +404,7 @@ func (repo *repository) discoverVariants(jobs int) (int, error) {
 			for _, sibling := range bank.Config.Entries {
 				starts[sibling.Start] = struct{}{}
 			}
-			local := discoverGraphDemands(graph, starts)
+			local := discoverGraphDemands(graph, starts, repo.exactDirectCallMX, repo.forceVariants)
 			lock.Lock()
 			for demand := range local {
 				demands[demand] = struct{}{}
@@ -409,7 +427,7 @@ func (repo *repository) discoverVariants(jobs int) (int, error) {
 		"variant discovery exceeded %d rounds", variantDiscoveryRoundLimit)
 }
 
-func discoverGraphDemands(graph *decoder.Graph, siblingStarts map[uint16]struct{}) map[codegen.Variant]struct{} {
+func discoverGraphDemands(graph *decoder.Graph, siblingStarts map[uint16]struct{}, exactDirectCallMX bool, forceVariants map[uint32][2]uint8) map[codegen.Variant]struct{} {
 	result := make(map[codegen.Variant]struct{})
 	all := func(address uint32) {
 		for m := uint8(0); m < 2; m++ {
@@ -431,7 +449,10 @@ func discoverGraphDemands(graph *decoder.Graph, siblingStarts map[uint16]struct{
 				if ins.DispatchKind != "long" {
 					target = uint32(byte(ins.Address>>16))<<16 | target&0xffff
 				}
-				if (ins.Mnemonic == "JSL" || (ins.Mnemonic == "JMP" && ins.Mode == cpu65816.LONG)) && ins.DispatchIndexReg == "" {
+				if ins.DispatchMXProven {
+					m, x := dispatchTargetMX(ins)
+					result[codegen.Variant{Address: target, M: m, X: x}] = struct{}{}
+				} else if (ins.Mnemonic == "JSL" || (ins.Mnemonic == "JMP" && ins.Mode == cpu65816.LONG)) && ins.DispatchIndexReg == "" {
 					result[codegen.Variant{Address: target, M: 1, X: 1}] = struct{}{}
 				} else {
 					all(target)
@@ -441,11 +462,28 @@ func discoverGraphDemands(graph *decoder.Graph, siblingStarts map[uint16]struct{
 		}
 		switch {
 		case ins.Mnemonic == "JSR" && ins.Mode == cpu65816.ABS:
-			all(uint32(byte(ins.Address>>16))<<16 | ins.Operand&0xffff)
+			address := uint32(byte(ins.Address>>16))<<16 | ins.Operand&0xffff
+			if forced, found := forceVariants[ins.Address&0xffffff]; found {
+				result[codegen.Variant{Address: address, M: forced[0] & 1, X: forced[1] & 1}] = struct{}{}
+			} else if exactDirectCallMX {
+				result[codegen.Variant{Address: address, M: ins.M & 1, X: ins.X & 1}] = struct{}{}
+			} else {
+				all(address)
+			}
 		case ins.Mnemonic == "JSL":
-			all(ins.Operand)
+			if forced, found := forceVariants[ins.Address&0xffffff]; found {
+				result[codegen.Variant{Address: ins.Operand & 0xffffff, M: forced[0] & 1, X: forced[1] & 1}] = struct{}{}
+			} else if exactDirectCallMX {
+				result[codegen.Variant{Address: ins.Operand & 0xffffff, M: ins.M & 1, X: ins.X & 1}] = struct{}{}
+			} else {
+				all(ins.Operand)
+			}
 		case ins.Mnemonic == "JMP" && ins.Mode == cpu65816.LONG:
-			all(ins.Operand)
+			if exactDirectCallMX {
+				result[codegen.Variant{Address: ins.Operand & 0xffffff, M: ins.M & 1, X: ins.X & 1}] = struct{}{}
+			} else {
+				all(ins.Operand)
+			}
 		}
 		for _, successor := range decoded.Successors {
 			if _, known := siblingStarts[uint16(successor.PC)]; !known {
@@ -458,6 +496,20 @@ func discoverGraphDemands(graph *decoder.Graph, siblingStarts map[uint16]struct{
 		}
 	}
 	return result
+}
+
+func dispatchTargetMX(instruction *cpu65816.Instruction) (uint8, uint8) {
+	m, x := instruction.M&1, instruction.X&1
+	if instruction.DispatchTerminal {
+		return 1, 1
+	}
+	if instruction.DispatchSEP&0x20 != 0 {
+		m = 1
+	}
+	if instruction.DispatchSEP&0x10 != 0 {
+		x = 1
+	}
+	return m, x
 }
 
 func (repo *repository) applyDemands(demands map[codegen.Variant]struct{}) int {
@@ -643,13 +695,25 @@ func exitMapsEqual(a, b map[decoder.Variant]decoder.MX) bool {
 
 func (repo *repository) decodeOptions(bank *bankState, start uint16) decoder.Options {
 	options := emitter.DecodeOptionsFromConfig(bank.ID, bank.Config)
+	for site := range repo.provenDispatchMX {
+		if auth, found := options.IndirectDispatch[site]; found {
+			auth.TargetMXProven = true
+			options.IndirectDispatch[site] = auth
+		}
+	}
 	options.DispatchHelpers = repo.dispatchHelpers
 	options.DataRegions = repo.allDataRegions
 	options.CalleeExitMX = repo.exitMX
 	options.SiblingEntryPCs = make(map[uint16]struct{})
+	options.InternalResumePCs = make(map[uint16]struct{})
 	for _, entry := range bank.Config.Entries {
 		if entry.Start != start {
 			options.SiblingEntryPCs[entry.Start] = struct{}{}
+		}
+	}
+	for address := range repo.provenResumePCs {
+		if byte(address>>16) == bank.ID {
+			options.InternalResumePCs[uint16(address)] = struct{}{}
 		}
 	}
 	return options
@@ -707,6 +771,7 @@ func (repo *repository) emitFunctions(jobs int, only map[byte]struct{}) (map[byt
 		context.CanonicalVariants, context.ForceVariantAt = repo.canonical, repo.forceVariants
 		context.ValidVariants = repo.validVariants
 		context.ProvenEquivalent = repo.provenEquivalent
+		context.ExactDirectCallMX = repo.exactDirectCallMX
 		options := repo.decodeOptions(bank, entry.Start)
 		excludes := make([][2]uint16, 0, len(bank.Config.ExcludeRanges))
 		for _, r := range bank.Config.ExcludeRanges {

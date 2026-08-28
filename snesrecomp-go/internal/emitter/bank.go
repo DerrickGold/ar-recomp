@@ -177,7 +177,7 @@ func DecodeOptionsFromConfig(bank byte, bankConfig *config.Config) decoder.Optio
 		options.DataRegions = append(options.DataRegions, decoder.DataRegion{Bank: region.Bank, Start: region.Start, End: region.End})
 	}
 	for _, dispatch := range bankConfig.IndirectDispatch {
-		options.IndirectDispatch[decoder.Address24(bank, dispatch.SitePC)] = decoder.DispatchAuth{Count: dispatch.Count, IndexReg: dispatch.IndexReg, TableBases: append([]uint16(nil), dispatch.TableBases...), ReturnPC: dispatch.ReturnPC, SEPMask: dispatch.SEPMask}
+		options.IndirectDispatch[decoder.Address24(bank, dispatch.SitePC)] = decoder.DispatchAuth{Count: dispatch.Count, IndexReg: dispatch.IndexReg, TableBases: append([]uint16(nil), dispatch.TableBases...), ReturnPC: dispatch.ReturnPC, SEPMask: dispatch.SEPMask, Transfer: string(dispatch.Transfer)}
 	}
 	for _, dispatch := range bankConfig.RTSDispatch {
 		options.IndirectDispatch[decoder.Address24(bank, dispatch.SitePC)] = decoder.DispatchAuth{RTSTrick: true, Targets: append([]uint16(nil), dispatch.Targets...)}

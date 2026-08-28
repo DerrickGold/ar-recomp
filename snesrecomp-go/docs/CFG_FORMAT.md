@@ -87,12 +87,19 @@ Describes a `JSR (abs,X)`-style table that static analysis cannot safely infer.
 Optional fields are:
 
 - `tables:BASE[,BASE...]`: one to three 16-bit table bases;
-- `ret:PPPP`: known continuation PC; and
+- `transfer:call|tail`: explicit host-stack/control-transfer intent;
+- `ret:PPPP`: known continuation PC for a call-shaped PHA/RTS construct; and
 - `sep:NN`: SEP mask applied by the dispatch shape.
 
 ```text
-indirect_dispatch B8C0 26 idx:A tables:B8D0 ret:B8C2 sep:20
+indirect_dispatch B8C0 26 idx:A tables:B8D0 transfer:call ret:B8C2 sep:20
 ```
+
+Use `transfer:tail` for `JMP` dispatches and `transfer:call` for `JSR` or
+PHA/RTS call constructs. `transfer:tail` and `ret:` are contradictory and are
+rejected. For compatibility, `transfer:` may be omitted: `JMP` and `JSR`
+retain their architectural meanings, while a PHA/RTS declaration with `ret:`
+is treated as a call and one without `ret:` as a terminal tail dispatch.
 
 ### `rts_dispatch SITE TARGET...`
 

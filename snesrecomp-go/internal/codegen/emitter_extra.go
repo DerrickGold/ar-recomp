@@ -165,29 +165,62 @@ func emitCall(context *Context, op ir.Call) []string {
 	if baseName == "" {
 		baseName = fmt.Sprintf("bank_%02X_%04X", byte(address>>16), uint16(address))
 	}
-	for _, pair := range context.variantsAt(address) {
-		context.Demands[Variant{address, pair[0], pair[1]}] = struct{}{}
-	}
-	if pinned, found := context.ForceVariantAt[context.CurrentSite&0xffffff]; found {
-		name := fmt.Sprintf("%s_M%dX%d", baseName, pinned[0]&1, pinned[1]&1)
-		lines := []string{"{"}
-		if op.Long {
-			lines = append(lines, "  uint8 _saved_pb = cpu->PB;", fmt.Sprintf("  cpu_trace_pb_change(cpu, 0, _saved_pb, 0x%02x, CPU_TR_JSL);", byte(address>>16)), fmt.Sprintf("  cpu->PB = 0x%02x;", byte(address>>16)))
+	pinned, forcePinned := context.ForceVariantAt[context.CurrentSite&0xffffff]
+	if context.ExactDirectCallMX {
+		requested := [2]uint8{op.EntryM & 1, op.EntryX & 1}
+		if forcePinned {
+			requested = [2]uint8{pinned[0] & 1, pinned[1] & 1}
 		}
-		lines = append(lines, fmt.Sprintf("  RecompReturn _r = %s(cpu);  /* cfg force_variant_at $%06X -> M%dX%d */", name, context.CurrentSite&0xffffff, pinned[0]&1, pinned[1]&1))
-		if op.Long {
-			lines = append(lines, "  cpu_trace_pb_change(cpu, 0, cpu->PB, _saved_pb, CPU_TR_RTL);", "  cpu->PB = _saved_pb;")
+		survivors := context.variantsAt(address)
+		target := requested
+		found := false
+		for _, survivor := range survivors {
+			if survivor == requested {
+				found = true
+				break
+			}
 		}
-		return append(lines, "  if (_r != RECOMP_RETURN_NORMAL) {", "    cpu_trace_event(cpu, 0, CPU_TR_NLR_PROPAGATE, (uint8)_r, 0);", "    cpu_trace_mark_nlr_exit(BD_EXIT_KIND_SKIP_PROPAGATION);", "    return (_r == RECOMP_RETURN_TAILCALL ? _r : (RecompReturn)((int)_r - 1));", "  }", "}")
+		if !found {
+			target = context.routeVariant(address, survivors, requested[0], requested[1])
+		}
+		context.Demands[Variant{address, target[0], target[1]}] = struct{}{}
+	} else {
+		for _, pair := range context.variantsAt(address) {
+			context.Demands[Variant{address, pair[0], pair[1]}] = struct{}{}
+		}
 	}
 	lines := []string{"{", "  uint16 _call_s = cpu->S;"}
 	lines = append(lines, emitReturnFramePush(op)...)
 	if op.Long {
 		lines = append(lines, "  uint8 _saved_pb = cpu->PB;", fmt.Sprintf("  cpu_trace_pb_change(cpu, 0, _saved_pb, 0x%02x, CPU_TR_JSL);", byte(address>>16)), fmt.Sprintf("  cpu->PB = 0x%02x;", byte(address>>16)))
 	}
-	lines = append(lines, fmt.Sprintf("  sr_call_mx_check(cpu, %d, %d, \"%s\", 0x%06xu);", op.EntryM&1, op.EntryX&1, context.CurrentName, context.CurrentSite&0xffffff), "  RecompReturn _r;", "  switch (((cpu->m_flag & 1) << 1) | (cpu->x_flag & 1)) {")
-	lines = append(lines, VariantDispatchCases(context, address, baseName, "    ", "")...)
-	lines = append(lines, "  }")
+	expectedM, expectedX := op.EntryM&1, op.EntryX&1
+	if forcePinned {
+		expectedM, expectedX = pinned[0]&1, pinned[1]&1
+	}
+	lines = append(lines, fmt.Sprintf("  sr_call_mx_check(cpu, %d, %d, \"%s\", 0x%06xu);", expectedM, expectedX, context.CurrentName, context.CurrentSite&0xffffff))
+	if forcePinned {
+		name := fmt.Sprintf("%s_M%dX%d", baseName, pinned[0]&1, pinned[1]&1)
+		lines = append(lines, fmt.Sprintf("  RecompReturn _r = %s(cpu);  /* cfg force_variant_at $%06X -> M%dX%d */", name, context.CurrentSite&0xffffff, pinned[0]&1, pinned[1]&1))
+	} else if context.ExactDirectCallMX {
+		survivors := context.variantsAt(address)
+		target := [2]uint8{op.EntryM & 1, op.EntryX & 1}
+		found := false
+		for _, survivor := range survivors {
+			if survivor == target {
+				found = true
+				break
+			}
+		}
+		if !found {
+			target = context.routeVariant(address, survivors, target[0], target[1])
+		}
+		lines = append(lines, fmt.Sprintf("  RecompReturn _r = %s_M%dX%d(cpu);  /* exact live M/X direct call */", baseName, target[0], target[1]))
+	} else {
+		lines = append(lines, "  RecompReturn _r;", "  switch (((cpu->m_flag & 1) << 1) | (cpu->x_flag & 1)) {")
+		lines = append(lines, VariantDispatchCases(context, address, baseName, "    ", "")...)
+		lines = append(lines, "  }")
+	}
 	if op.Long {
 		lines = append(lines, "  cpu_trace_pb_change(cpu, 0, cpu->PB, _saved_pb, CPU_TR_RTL);", "  cpu->PB = _saved_pb;")
 	}
@@ -250,6 +283,9 @@ func emitReturn(context *Context, op ir.Return) []string {
 	lines = append(lines,
 		"  uint32 _rpc = (uint32)((((_rpch << 8) | _rpcl) + 1) & 0xFFFFu);",
 		"  uint32 _rpc24 = ((uint32)_rpb << 16) | _rpc;",
+		"#if SNESRECOMP_SEMANTIC_DISPATCH_TRACE",
+		fmt.Sprintf("  cpu_trace_resolved_dispatch(cpu, _rpc24, 0x%06xu);", source),
+		"#endif",
 		"#if SNESRECOMP_TRACE",
 		fmt.Sprintf("  dbg_rts_trace(cpu, 0x%06xu, _entry_s, _ret_s, _rpc24, (uint8)_hrv);", source),
 		"#endif",

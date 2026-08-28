@@ -47,6 +47,7 @@ func TestLinearFunction(t *testing.T) {
 		"L_8000_M1X1:",
 		"uint8 _v1 = 0x5;",
 		"cpu_write8",
+		"cpu_trace_resolved_dispatch(cpu, _rpc24, 0x008004u);",
 		"/* RTS host return */",
 	} {
 		if !strings.Contains(source, fragment) {

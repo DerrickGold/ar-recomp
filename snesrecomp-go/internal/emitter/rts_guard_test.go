@@ -32,8 +32,11 @@ func TestRTSGuardSelectsRuntimeVariant(t *testing.T) {
 	src := strings.Join(buildGuard([][2]uint8{{0, 0}, {1, 0}}), "\n")
 	for _, want := range []string{
 		"case 0x9EF4:",
-		"if (_rts_mx == 0) { cpu->S = (uint16)(_rts_s + 2); goto L_9EF4_M0X0; }",
-		"if (_rts_mx == 2) { cpu->S = (uint16)(_rts_s + 2); goto L_9EF4_M1X0; }",
+		"if (_rts_mx == 0) {",
+		"cpu->S = (uint16)(_rts_s + 2); goto L_9EF4_M0X0;",
+		"if (_rts_mx == 2) {",
+		"cpu->S = (uint16)(_rts_s + 2); goto L_9EF4_M1X0;",
+		"cpu_trace_resolved_dispatch(cpu, 0x039ef4u, 0x03a119u);",
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("guard missing %q:\n%s", want, src)
@@ -51,7 +54,8 @@ func TestRTSGuardSelectsRuntimeVariant(t *testing.T) {
 // jump into the M0X0 body — it falls through to the width-refusal return.
 func TestRTSGuardRefusesWrongWidth(t *testing.T) {
 	src := strings.Join(buildGuard([][2]uint8{{0, 0}}), "\n")
-	if !strings.Contains(src, "if (_rts_mx == 0) { cpu->S = (uint16)(_rts_s + 2); goto L_9EF4_M0X0; }") {
+	if !strings.Contains(src, "if (_rts_mx == 0) {") ||
+		!strings.Contains(src, "cpu->S = (uint16)(_rts_s + 2); goto L_9EF4_M0X0;") {
 		t.Errorf("guard should still jump for the decoded M0X0 case:\n%s", src)
 	}
 	if strings.Contains(src, "_rts_mx == 2") {

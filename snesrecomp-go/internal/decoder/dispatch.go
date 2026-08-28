@@ -208,6 +208,13 @@ func resolveDispatch(image rom.Image, bank byte, instruction *cpu65816.Instructi
 	return entries, true
 }
 
+// ResolveDispatchTargets applies the same table-reading semantics used by
+// code generation.  Read-only analysis uses it to normalize authored facts
+// after inference has run with those facts withheld.
+func ResolveDispatchTargets(image rom.Image, bank byte, instruction *cpu65816.Instruction, auth DispatchAuth) ([]uint32, bool) {
+	return resolveDispatch(image, bank, instruction, auth)
+}
+
 func autorecoverXTable(image rom.Image, bank byte, instruction *cpu65816.Instruction, regions []DataRegion, functionStart uint16) []uint32 {
 	base := uint16(instruction.Operand)
 	entrySize := 2

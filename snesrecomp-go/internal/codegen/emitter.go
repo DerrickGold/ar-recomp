@@ -19,6 +19,7 @@ type Context struct {
 	CurrentSite       uint32
 	CurrentExitM      *uint8
 	CurrentExitX      *uint8
+	ExactDirectCallMX bool
 	Demands           map[Variant]struct{}
 	Rejected          map[uint32]struct{}
 }

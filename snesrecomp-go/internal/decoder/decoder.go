@@ -36,7 +36,9 @@ func DecodeFunction(image rom.Image, bank byte, start uint16, entryM, entryX uin
 		}
 		if item.Kind == "jump" {
 			if _, sibling := options.SiblingEntryPCs[pc]; sibling {
-				continue
+				if _, resume := options.InternalResumePCs[pc]; !resume {
+					continue
+				}
 			}
 		}
 		if pc < 0x8000 {
@@ -180,6 +182,31 @@ func decodeDispatchHelper(image rom.Image, bank byte, start, pc uint16, key Deco
 	return true, nil
 }
 
+func validateDispatchTransfer(instruction *cpu65816.Instruction, auth DispatchAuth) error {
+	if auth.Transfer == "" {
+		return nil
+	}
+	if auth.Transfer != "call" && auth.Transfer != "tail" {
+		return fmt.Errorf("indirect dispatch $%02X:%04X has unknown transfer:%s", byte(instruction.Address>>16), uint16(instruction.Address), auth.Transfer)
+	}
+	want := "tail"
+	if instruction.Mnemonic == "JSR" {
+		want = "call"
+	} else if instruction.Mnemonic == "PHA" {
+		want = auth.Transfer
+		if auth.Transfer == "call" && auth.ReturnPC == nil {
+			return fmt.Errorf("indirect dispatch $%02X:%04X transfer:call needs ret:<pc> for a PHA/RTS continuation", byte(instruction.Address>>16), uint16(instruction.Address))
+		}
+		if auth.Transfer == "tail" && auth.ReturnPC != nil {
+			return fmt.Errorf("indirect dispatch $%02X:%04X transfer:tail cannot have ret:<pc>", byte(instruction.Address>>16), uint16(instruction.Address))
+		}
+	}
+	if auth.Transfer != want {
+		return fmt.Errorf("indirect dispatch $%02X:%04X transfer:%s is incompatible with %s; want transfer:%s", byte(instruction.Address>>16), uint16(instruction.Address), auth.Transfer, instruction.Mnemonic, want)
+	}
+	return nil
+}
+
 func decodeIndirectJump(image rom.Image, bank byte, start, pc uint16, key DecodeKey, instruction *cpu65816.Instruction, graph *Graph, worklist *[]workItem, options Options) (bool, error) {
 	if instruction.Mnemonic != "JMP" || (instruction.Mode != cpu65816.INDIR && instruction.Mode != cpu65816.INDIRX) {
 		return false, nil
@@ -217,6 +244,9 @@ func decodeIndirectJump(image rom.Image, bank byte, start, pc uint16, key Decode
 		}
 	}
 	if authorized {
+		if err := validateDispatchTransfer(instruction, auth); err != nil {
+			return true, err
+		}
 		entries, ok := resolveDispatch(image, bank, instruction, auth)
 		if ok {
 			instruction.DispatchEntries = entries
@@ -226,6 +256,8 @@ func decodeIndirectJump(image rom.Image, bank byte, start, pc uint16, key Decode
 			}
 			instruction.DispatchIndexReg = auth.IndexReg
 			instruction.DispatchTableBase = append([]uint16(nil), auth.TableBases...)
+			instruction.DispatchMXProven = auth.TargetMXProven
+			instruction.DispatchTransferPC = instruction.Address & 0xffffff
 			successors := dispatchSuccessors(bank, entries, instruction.M, instruction.X)
 			storeAndQueue(key, instruction, successors, graph, worklist, pc)
 			return true, nil
@@ -245,6 +277,9 @@ func decodePHADispatch(image rom.Image, bank byte, pc uint16, key DecodeKey, ins
 	auth, found := options.IndirectDispatch[Address24(bank, pc)]
 	if !found || auth.RTSTrick {
 		return false, nil
+	}
+	if err := validateDispatchTransfer(instruction, auth); err != nil {
+		return true, err
 	}
 	entries, ok := resolveDispatch(image, bank, instruction, auth)
 	if !ok {
@@ -266,6 +301,8 @@ func decodePHADispatch(image rom.Image, bank byte, pc uint16, key DecodeKey, ins
 	instruction.DispatchIndexReg = auth.IndexReg
 	instruction.DispatchTableBase = append([]uint16(nil), auth.TableBases...)
 	instruction.DispatchSEP = auth.SEPMask
+	instruction.DispatchMXProven = auth.TargetMXProven
+	instruction.DispatchTransferPC = phaDispatchTransferPC(image, bank, pc, instruction.M, instruction.X)
 	instruction.DispatchReturn = auth.ReturnPC
 	instruction.DispatchTerminal = auth.ReturnPC == nil
 	m, x := instruction.M&1, instruction.X&1
@@ -283,6 +320,48 @@ func decodePHADispatch(image rom.Image, bank byte, pc uint16, key DecodeKey, ins
 	return true, nil
 }
 
+// phaDispatchTransferPC identifies the RTS that consumes an address-taken PHA.
+// Keeping this distinct from the configured PHA site lets validation builds
+// report the same semantic source edge as the generic RTS dispatcher.
+func phaDispatchTransferPC(image rom.Image, bank byte, pc uint16, m, x uint8) uint32 {
+	transfer := Address24(bank, pc)
+	offset, err := rom.LoROMOffset(bank, pc)
+	if err != nil || offset >= len(image) {
+		return transfer
+	}
+	pha, err := cpu65816.Decode(image, offset, pc, bank, m, x)
+	if err != nil || pha == nil {
+		return transfer
+	}
+	pc += uint16(pha.Length)
+	for steps := 0; steps < 8; steps++ {
+		offset, err = rom.LoROMOffset(bank, pc)
+		if err != nil || offset >= len(image) {
+			return transfer
+		}
+		instruction, decodeErr := cpu65816.Decode(image, offset, pc, bank, m, x)
+		if decodeErr != nil || instruction == nil {
+			return transfer
+		}
+		switch instruction.Mnemonic {
+		case "RTS":
+			return Address24(bank, pc)
+		case "SEP":
+			if instruction.Operand&0x20 != 0 {
+				m = 1
+			}
+			if instruction.Operand&0x10 != 0 {
+				x = 1
+			}
+		case "NOP", "LDX", "LDY":
+		default:
+			return transfer
+		}
+		pc += uint16(instruction.Length)
+	}
+	return transfer
+}
+
 func decodeIndirectJSR(image rom.Image, bank byte, start, pc uint16, key DecodeKey, instruction *cpu65816.Instruction, graph *Graph, worklist *[]workItem, options Options) (bool, error) {
 	if instruction.Mnemonic != "JSR" || instruction.Mode != cpu65816.INDIRX {
 		return false, nil
@@ -296,6 +375,9 @@ func decodeIndirectJSR(image rom.Image, bank byte, start, pc uint16, key DecodeK
 		}
 	}
 	if authorized {
+		if err := validateDispatchTransfer(instruction, auth); err != nil {
+			return true, err
+		}
 		if entries, ok := resolveDispatch(image, bank, instruction, auth); ok {
 			instruction.DispatchEntries = entries
 			instruction.DispatchKind = "short"
@@ -304,6 +386,8 @@ func decodeIndirectJSR(image rom.Image, bank byte, start, pc uint16, key DecodeK
 			}
 			instruction.DispatchIndexReg = auth.IndexReg
 			instruction.DispatchTableBase = append([]uint16(nil), auth.TableBases...)
+			instruction.DispatchMXProven = auth.TargetMXProven
+			instruction.DispatchTransferPC = instruction.Address & 0xffffff
 			successors := labeledSuccessors(image, instruction, key, bank, options)
 			successors = append(successors, dispatchSuccessors(bank, entries, instruction.M, instruction.X)...)
 			storeAndQueue(key, instruction, successors, graph, worklist, pc)
@@ -355,6 +439,7 @@ func decodeRTSTrick(bank byte, pc uint16, key DecodeKey, instruction *cpu65816.I
 	}
 	instruction.DispatchKind = "rts_trick"
 	instruction.DispatchTerminal = true
+	instruction.DispatchTransferPC = instruction.Address & 0xffffff
 	var successors []labeledSuccessor
 	for _, target := range auth.Targets {
 		instruction.DispatchEntries = append(instruction.DispatchEntries, Address24(bank, target))

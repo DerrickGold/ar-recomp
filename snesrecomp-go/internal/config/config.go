@@ -46,13 +46,21 @@ type ExitMXAt struct {
 	Exit    MX     `json:"exit"`
 }
 
+type IndirectTransfer string
+
+const (
+	IndirectTransferCall IndirectTransfer = "call"
+	IndirectTransferTail IndirectTransfer = "tail"
+)
+
 type IndirectDispatch struct {
-	SitePC     uint16   `json:"site_pc"`
-	Count      int      `json:"count"`
-	IndexReg   string   `json:"index_reg"`
-	TableBases []uint16 `json:"table_bases,omitempty"`
-	ReturnPC   *uint16  `json:"return_pc,omitempty"`
-	SEPMask    byte     `json:"sep_mask,omitempty"`
+	SitePC     uint16           `json:"site_pc"`
+	Count      int              `json:"count"`
+	IndexReg   string           `json:"index_reg"`
+	TableBases []uint16         `json:"table_bases,omitempty"`
+	ReturnPC   *uint16          `json:"return_pc,omitempty"`
+	SEPMask    byte             `json:"sep_mask,omitempty"`
+	Transfer   IndirectTransfer `json:"transfer,omitempty"`
 }
 
 type RTSDispatch struct {
@@ -373,6 +381,11 @@ func parseIndirectDispatch(fields []string) (IndirectDispatch, error) {
 				return IndirectDispatch{}, fmt.Errorf("indirect_dispatch bad SEP mask %q: %w", value, parseErr)
 			}
 			directive.SEPMask = byte(mask)
+		case "transfer":
+			directive.Transfer = IndirectTransfer(strings.ToLower(value))
+			if directive.Transfer != IndirectTransferCall && directive.Transfer != IndirectTransferTail {
+				return IndirectDispatch{}, fmt.Errorf("indirect_dispatch transfer must be call or tail")
+			}
 		default:
 			return IndirectDispatch{}, fmt.Errorf("indirect_dispatch unknown option %q", option)
 		}
@@ -382,6 +395,9 @@ func parseIndirectDispatch(fields []string) (IndirectDispatch, error) {
 	}
 	if directive.IndexReg == "A" && len(directive.TableBases) == 0 {
 		return IndirectDispatch{}, fmt.Errorf("indirect_dispatch idx:A needs tables:<base>")
+	}
+	if directive.Transfer == IndirectTransferTail && directive.ReturnPC != nil {
+		return IndirectDispatch{}, fmt.Errorf("indirect_dispatch transfer:tail cannot have ret:<pc>")
 	}
 	return directive, nil
 }

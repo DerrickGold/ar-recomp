@@ -101,6 +101,49 @@ snesrecomp-go/build/v2regen sync-funcs \
 snesrecomp-go/build/v2regen stub-census --gen-dir src/gen
 ```
 
+Before changing generated output, compare independently inferred dispatch
+facts with authored cfg in a read-only shadow pass:
+
+```sh
+snesrecomp-go/build/snesbuild analyze --root . --rom game.sfc
+# or: v2regen analyze --rom game.sfc --cfg-dir recomp --format json
+```
+
+See [`docs/ANALYSIS.md`](docs/ANALYSIS.md) for comparison semantics, the
+entry/continuation model, and the cfg-removal validation gate.
+
+When a handler address comes from script or object data rather than a ROM code
+reference, a trace build can capture a compact runtime census and report the
+missing generated entries without game-specific logging:
+
+```sh
+SNESRECOMP_TRACE_FILE=saves/dispatch.jsonl \
+SNESRECOMP_TRACE_CHANNELS=dispatch ./build/MyGame game.sfc --frames 2400
+
+snesrecomp-go/build/snesbuild dispatch-census --root . \
+  --trace saves/dispatch.jsonl --rom game.sfc \
+  --out-analysis saves/dispatch-analysis.json
+```
+
+The evidence file is deterministic and separate from authored cfg. Candidate
+`func` lines in the text report are an escape hatch, not an automatic claim
+that the target is a normal routine; entry/continuation semantics still need
+classification. Build census runs without
+`SNESRECOMP_SEMANTIC_DISPATCH_TRACE`, which is reserved for lowering-neutral
+A/B edge hashes.
+
+To build an isolated runtime candidate from only closed, statically proven
+automatic facts, use the explicit experimental overlay. It refuses the normal
+`src/gen` path and never edits cfg. The same validation mode propagates exact
+live M/X state across direct calls, avoiding speculative callee variants:
+
+```sh
+snesrecomp-go/build/v2regen regen \
+  --rom game.sfc --cfg-dir recomp \
+  --out-dir build/proven-analysis-candidate \
+  --experimental-proven-analysis
+```
+
 `regen` fails when hard stubs remain. `--allow-stubs` is available during an
 initial port so the complete output can be inspected, but release/CI pipelines
 should omit it.
@@ -196,6 +239,9 @@ All commands accept explicit paths and can be run from the game project root:
 
 ```sh
 v2regen regen --rom game.sfc --cfg-dir recomp --out-dir src/gen --jobs 8
+v2regen regen --rom game.sfc --cfg-dir recomp \
+  --out-dir build/proven-analysis-candidate --experimental-proven-analysis
+v2regen analyze --rom game.sfc --cfg-dir recomp --jobs 8
 v2regen sync-funcs --cfg-dir recomp --out recomp/funcs.h
 v2regen metadata --gen-dir src/gen --cfg-dir recomp --out build/gen_meta.json
 v2regen rts-webs --rom game.sfc --cfg-dir recomp --suggest
