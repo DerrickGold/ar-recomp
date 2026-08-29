@@ -1835,6 +1835,16 @@ static bool source_visible_on_screen(const Ppu *ppu, int source, bool sub,
             !window_inside(ppu, source, x));
 }
 
+/* The packed capture path resolves MarkFullAddSubscreen itself (see the
+ * full-add export in render_native_capture_line), so such a line no longer has
+ * to be handed to the per-pixel reference sampler.  The two winner-mask
+ * policies still need the reference screen resolves. */
+static bool capture_needs_reference_sampler(
+        const PpuOverlayCapture *capture) {
+    return (capture->flags & (kPpuOverlayFlag_MarkMainScreenWinner |
+                              kPpuOverlayFlag_MarkOwningScreenWinner)) != 0u;
+}
+
 static bool capture_is_deferred(const PpuOverlayCapture *capture) {
     return (capture->flags & (kPpuOverlayFlag_MarkFullAddSubscreen |
                               kPpuOverlayFlag_MarkMainScreenWinner |
@@ -2247,7 +2257,7 @@ static bool native_fast_eligible(const Ppu *ppu, int screen_y,
             &ppu->overlayCaptures[source];
         if (capture_surface_bound(ppu, source) &&
             native_capture_intersects(capture_policy, screen_y) &&
-            capture_is_deferred(capture_policy))
+            capture_needs_reference_sampler(capture_policy))
             return false;
     }
     return true;
@@ -3372,7 +3382,14 @@ static void native_merge_packed_span(
         uint16_t *SR_RESTRICT main_pixels,
         uint16_t *SR_RESTRICT sub_pixels,
         const uint16_t *SR_RESTRICT source_main,
-        const uint16_t *SR_RESTRICT source_sub, int count) {
+        const uint16_t *SR_RESTRICT source_sub, int count,
+        bool merge_sub) {
+    if (!merge_sub) {
+        for (int offset = 0; offset < count; ++offset)
+            if (source_main[offset] > main_pixels[offset])
+                main_pixels[offset] = source_main[offset];
+        return;
+    }
     for (int offset = 0; offset < count; ++offset) {
         if (source_main[offset] > main_pixels[offset])
             main_pixels[offset] = source_main[offset];
@@ -3622,9 +3639,18 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
     uint8_t source_mask = (uint8_t)(1u << kPpuOverlaySource_Obj);
     NativeOverlayLinePlan overlay_plans[kPpuOverlaySource_Count];
     uint16_t backdrop = native_pack_pixel(0u, 1u, 5u);
-    bool want_sub = ppu->screenEnabled[1] != 0u ||
-        PPU_addSubscreen(ppu) || PPU_pseudoHires(ppu) ||
+    /* The composed subscreen is read only where colour math or a hires mode
+     * can consume it.  A single source additionally needs its own subscreen
+     * rendering when the overlay capture owns it there: Marahna authors BG1
+     * subscreen-only and adds it to main-screen BG2 with colour math, so the
+     * capture contract cannot equate "capture" with "the main pass" (see the
+     * owner_sub export below).  Tracking that need per source keeps ordinary
+     * main-only layers on the single-store path across a line where one other
+     * source is subscreen-owned. */
+    bool output_needs_sub = PPU_addSubscreen(ppu) || PPU_pseudoHires(ppu) ||
         PPU_mode(ppu) == 5 || PPU_mode(ppu) == 6;
+    bool source_needs_sub[kPpuOverlaySource_Count];
+    uint8_t full_add_mask = 0u;
     int obj_offset = authentic ? ppu->authenticObjOffsetX : 0;
     int left = authentic ? 0 : -ppu->extraLeftCur;
     int right = authentic ? kPpuXPixels
@@ -3644,9 +3670,33 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
                 source_mask |= (uint8_t)(1u << layer);
     }
     for (int source = 0; source < kPpuOverlaySource_Count; ++source) {
+        const PpuOverlayCapture *source_capture =
+            &ppu->overlayCaptures[source];
+        bool source_capture_line = capture_surface_bound(ppu, source) &&
+            source_capture->x1 > source_capture->x0 &&
+            screen_y >= source_capture->y0 &&
+            screen_y < source_capture->y1 &&
+            (source != kPpuOverlaySource_Obj ||
+             source_capture->oamCount != 0u);
+        bool source_owner_sub =
+            (ppu->screenEnabled[0] & (1u << source)) == 0u;
+        source_needs_sub[source] = output_needs_sub ||
+            (source_capture_line && source_owner_sub);
+        if (source_capture_line && (source_capture->flags &
+                kPpuOverlayFlag_MarkFullAddSubscreen) != 0u)
+            full_add_mask |= (uint8_t)(1u << source);
+    }
+    /* The full-add export compares the complete pre-removal subscreen winner
+     * against the main-screen winner, so every source on such a line needs its
+     * subscreen plane resolved regardless of what composition will read. */
+    if (full_add_mask != 0u)
+        for (int source = 0; source < kPpuOverlaySource_Count; ++source)
+            source_needs_sub[source] = true;
+    for (int source = 0; source < kPpuOverlaySource_Count; ++source) {
         if ((source_mask & (1u << source)) == 0u) continue;
         memset(layer_main[source], 0, sizeof(layer_main[source]));
-        memset(layer_sub[source], 0, sizeof(layer_sub[source]));
+        if (source_needs_sub[source])
+            memset(layer_sub[source], 0, sizeof(layer_sub[source]));
     }
     memset(bands, 0xff, sizeof(scratch->bands));
     if (!ppu->cgramRgbValid) rebuild_cgram_rgb(ppu);
@@ -3654,18 +3704,19 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
         native_overlay_line_plan(
             ppu, source, screen_y, &overlay_plans[source]);
     native_layer_window_plan(
-        ppu, kPpuOverlaySource_Obj, want_sub, &obj_visibility);
+        ppu, kPpuOverlaySource_Obj,
+        source_needs_sub[kPpuOverlaySource_Obj], &obj_visibility);
     if (PPU_mode(ppu) == 7) {
         bg_active[0] = true;
         resolved_span[0] = true;
         native_resolve_mode7_layer_span(
-            ppu, 0, screen_y, want_sub, left, right,
+            ppu, 0, screen_y, source_needs_sub[0], left, right,
             kPpuExtraLeftRight, layer_main[0], layer_sub[0]);
         if (PPU_m7extBg(ppu)) {
             bg_active[1] = true;
             resolved_span[1] = true;
             native_resolve_mode7_layer_span(
-                ppu, 1, screen_y, want_sub, left, right,
+                ppu, 1, screen_y, source_needs_sub[1], left, right,
                 kPpuExtraLeftRight, layer_main[1], layer_sub[1]);
         }
     } else {
@@ -3674,7 +3725,8 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
             bg_active[layer] = true;
             if (native_virtual_bg_span_eligible(ppu, layer)) {
                 native_resolve_virtual_bg_span(
-                    ppu, layer, screen_y, want_sub, left, right,
+                    ppu, layer, screen_y, source_needs_sub[layer],
+                    left, right,
                     kPpuExtraLeftRight, layer_main[layer], layer_sub[layer],
                     layer < 2 ? bands[layer] : NULL);
                 resolved_span[layer] = true;
@@ -3683,23 +3735,25 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
                     PPU_mosaicSize(ppu) > 1;
                 if (authentic_y) {
                     native_resolve_bg(
-                        ppu, layer, screen_y, want_sub,
+                        ppu, layer, screen_y, source_needs_sub[layer],
                         layer_main[layer] + kPpuExtraLeftRight,
                         layer_sub[layer] + kPpuExtraLeftRight,
                         layer < 2 ? bands[layer] + kPpuExtraLeftRight : NULL);
                     if (!mosaic) {
                         native_resolve_vram_bg_span(
-                            ppu, layer, screen_y, want_sub, left, 0,
+                            ppu, layer, screen_y, source_needs_sub[layer],
+                            left, 0,
                             kPpuExtraLeftRight, layer_main[layer],
                             layer_sub[layer]);
                         native_resolve_vram_bg_span(
-                            ppu, layer, screen_y, want_sub,
+                            ppu, layer, screen_y, source_needs_sub[layer],
                             kPpuXPixels, right, kPpuExtraLeftRight,
                             layer_main[layer], layer_sub[layer]);
                     }
                 } else if (!mosaic) {
                     native_resolve_vram_bg_span(
-                        ppu, layer, screen_y, want_sub, left, right,
+                        ppu, layer, screen_y, source_needs_sub[layer],
+                        left, right,
                         kPpuExtraLeftRight, layer_main[layer],
                         layer_sub[layer]);
                 }
@@ -3710,7 +3764,7 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
                 resolved_span[layer] = !mosaic;
             } else if (authentic_y) {
                 native_resolve_bg(
-                    ppu, layer, screen_y, want_sub,
+                    ppu, layer, screen_y, source_needs_sub[layer],
                     layer_main[layer] + kPpuExtraLeftRight,
                     layer_sub[layer] + kPpuExtraLeftRight,
                     layer < 2 ? bands[layer] + kPpuExtraLeftRight : NULL);
@@ -3718,7 +3772,8 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
         }
     }
     if (authentic_y) {
-        native_resolve_obj(ppu, screen_y, obj_offset, want_sub,
+        native_resolve_obj(ppu, screen_y, obj_offset,
+                           source_needs_sub[kPpuOverlaySource_Obj],
                            layer_main[kPpuOverlaySource_Obj] +
                                kPpuExtraLeftRight,
                            layer_sub[kPpuOverlaySource_Obj] +
@@ -3756,7 +3811,8 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
                         if (source_visible_on_screen(
                                 ppu, layer, false, x))
                             layer_main[layer][index] = packed;
-                        if (want_sub && source_visible_on_screen(
+                        if (source_needs_sub[layer] &&
+                            source_visible_on_screen(
                                 ppu, layer, true, x))
                             layer_sub[layer][index] = packed;
                         if (layer < 2) bands[layer][index] = pixel.band;
@@ -3812,10 +3868,11 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
                     obj_capture->oamFirst, obj_capture->oamCount);
         }
     }
-    for (int x = left; x < right; ++x) {
-        int index = x + kPpuExtraLeftRight;
-        main_pixels[index] = backdrop;
-        sub_pixels[index] = backdrop;
+    for (int x = left; x < right; ++x)
+        main_pixels[x + kPpuExtraLeftRight] = backdrop;
+    if (output_needs_sub) {
+        for (int x = left; x < right; ++x)
+            sub_pixels[x + kPpuExtraLeftRight] = backdrop;
     }
     for (int layer = 0; layer < kPpuOverlaySource_Obj; ++layer) {
         PpuOverlayCapture *capture;
@@ -3838,19 +3895,22 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
 #define MERGE_NATIVE_BG_PIXEL(x_) do {                                    \
             int merge_index = (x_) + kPpuExtraLeftRight;                  \
             uint16_t merge_main = layer_main[layer][merge_index];         \
-            uint16_t merge_sub = layer_sub[layer][merge_index];           \
             if (merge_main > main_pixels[merge_index])                    \
                 main_pixels[merge_index] = merge_main;                    \
-            if (merge_sub > sub_pixels[merge_index])                      \
-                sub_pixels[merge_index] = merge_sub;                      \
+            if (output_needs_sub) {                                       \
+                uint16_t merge_sub = layer_sub[layer][merge_index];       \
+                if (merge_sub > sub_pixels[merge_index])                  \
+                    sub_pixels[merge_index] = merge_sub;                  \
+            }                                                             \
         } while (0)
         for (int x = left; x < capture_left; ++x)
             MERGE_NATIVE_BG_PIXEL(x);
         for (int x = capture_left; x < capture_right; ++x) {
             int index = x + kPpuExtraLeftRight;
             uint16_t source_main = layer_main[layer][index];
-            uint16_t source_sub = layer_sub[layer][index];
-            {
+            uint16_t source_sub = source_needs_sub[layer]
+                ? layer_sub[layer][index] : 0u;
+            if ((full_add_mask & (1u << layer)) == 0u) {
                 uint16_t captured = owner_sub ? source_sub : source_main;
                 if (captured != 0u)
                     native_write_overlay_packed(
@@ -3861,7 +3921,7 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
             if (!remove) {
                 if (source_main > main_pixels[index])
                     main_pixels[index] = source_main;
-                if (source_sub > sub_pixels[index])
+                if (output_needs_sub && source_sub > sub_pixels[index])
                     sub_pixels[index] = source_sub;
             }
         }
@@ -3886,12 +3946,13 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
             native_merge_packed_span(
                 main_pixels + index, sub_pixels + index,
                 layer_main[layer] + index, layer_sub[layer] + index,
-                right - left);
+                right - left, output_needs_sub);
         } else {
             for (int x = left; x < right; ++x) {
                 int index = x + kPpuExtraLeftRight;
                 uint16_t source_main = layer_main[layer][index];
-                uint16_t source_sub = layer_sub[layer][index];
+                uint16_t source_sub = source_needs_sub[layer]
+                    ? layer_sub[layer][index] : 0u;
                 if (x >= capture->x0 && x < capture->x1) {
                     bool inside = native_window_plan_inside(
                         &obj_capture_visibility, x);
@@ -3903,7 +3964,8 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
                         (obj_capture_visibility.sub_mode == 2u && !inside);
                     uint16_t captured = (owner_sub ? show_sub : show_main)
                         ? native_obj_cache_pixel(obj_capture_cache, x) : 0u;
-                    if (captured != 0u)
+                    if (captured != 0u &&
+                        (full_add_mask & (1u << layer)) == 0u)
                         native_write_overlay_packed(
                             ppu, layer, x, captured, 0xffu,
                             &overlay_plans[layer]);
@@ -3921,27 +3983,90 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
                 }
                 if (source_main > main_pixels[index])
                     main_pixels[index] = source_main;
-                if (source_sub > sub_pixels[index])
+                if (output_needs_sub && source_sub > sub_pixels[index])
                     sub_pixels[index] = source_sub;
             }
+        }
+    }
+    /* MarkFullAddSubscreen: export whichever source wins the COMPLETE
+     * pre-removal subscreen, wherever the main-screen winner is a
+     * math-bearing layer.  This is the same rule the reference sampler
+     * applies in post_capture_masks, but read off the packed per-source
+     * planes this line already resolved instead of re-sampling every pixel
+     * through resolve_screen.  BG3 is excluded from the main winner inside
+     * its own capture rect: it is a separately reinserted foreground plane,
+     * and leaving it in punches HUD-glyph-shaped holes out of the addend.
+     * The subscreen winner excludes relocated OBJ slots for the same reason
+     * the reference pass does. */
+    if (full_add_mask != 0u) {
+        unsigned math_enabled = PPU_mathEnabled(ppu);
+        const PpuOverlayCapture *bg3_capture =
+            &ppu->overlayCaptures[kPpuOverlaySource_Bg3];
+        bool bg3_bound = capture_surface_bound(ppu, kPpuOverlaySource_Bg3);
+        bool obj_sub_enabled =
+            (ppu->screenEnabled[1] & (1u << kPpuOverlaySource_Obj)) != 0u;
+        PpuObjSampleCache *sub_obj_cache = obj_sub_enabled
+            ? get_obj_sample_cache(
+                  ppu, screen_y, 0, 0, 0,
+                  ppu->overlayObjRelocatedCount != 0u
+                      ? ppu->overlayObjRelocatedFirst : 0u,
+                  ppu->overlayObjRelocatedCount)
+            : NULL;
+        for (int x = left; x < right; ++x) {
+            int index = x + kPpuExtraLeftRight;
+            uint16_t full_main = backdrop;
+            uint16_t full_sub = backdrop;
+            unsigned main_layer, sub_layer;
+            bool exclude_bg3 = bg3_bound &&
+                capture_active(bg3_capture, x, screen_y);
+            for (int layer = 0; layer < kPpuOverlaySource_Obj; ++layer) {
+                if (exclude_bg3 && layer == kPpuOverlaySource_Bg3) continue;
+                if (layer_main[layer][index] > full_main)
+                    full_main = layer_main[layer][index];
+            }
+            if (layer_main[kPpuOverlaySource_Obj][index] > full_main)
+                full_main = layer_main[kPpuOverlaySource_Obj][index];
+            main_layer = native_pixel_layer(full_main);
+            if (main_layer >= 5u ||
+                (math_enabled & (1u << main_layer)) == 0u) continue;
+            for (int layer = 0; layer < kPpuOverlaySource_Obj; ++layer)
+                if (layer_sub[layer][index] > full_sub)
+                    full_sub = layer_sub[layer][index];
+            if (sub_obj_cache != NULL &&
+                source_visible_on_screen(
+                    ppu, kPpuOverlaySource_Obj, true, x)) {
+                uint16_t obj = native_obj_cache_pixel(sub_obj_cache, x);
+                if (obj > full_sub) full_sub = obj;
+            }
+            sub_layer = native_pixel_layer(full_sub);
+            if (sub_layer >= (unsigned)kPpuOverlaySource_Count ||
+                (full_add_mask & (1u << sub_layer)) == 0u) continue;
+            if (!capture_active(&ppu->overlayCaptures[sub_layer], x,
+                                screen_y)) continue;
+            native_write_overlay_packed(
+                ppu, (int)sub_layer, x, full_sub,
+                sub_layer < 2u ? bands[sub_layer][index] : 0xffu,
+                &overlay_plans[sub_layer]);
         }
     }
     if (dual_authentic) {
         for (int x = 0; x < kPpuXPixels; ++x) {
             int index = x + kPpuExtraLeftRight;
             original_main[index] = backdrop;
-            original_sub[index] = backdrop;
+            if (output_needs_sub) original_sub[index] = backdrop;
         }
         for (int source = 0; source < kPpuOverlaySource_Count; ++source) {
             if ((source_mask & (1u << source)) == 0u) continue;
             for (int x = 0; x < kPpuXPixels; ++x) {
                 int index = x + kPpuExtraLeftRight;
                 uint16_t source_main = layer_main[source][index];
-                uint16_t source_sub = layer_sub[source][index];
                 if (source_main > original_main[index])
                     original_main[index] = source_main;
-                if (source_sub > original_sub[index])
-                    original_sub[index] = source_sub;
+                if (output_needs_sub) {
+                    uint16_t source_sub = layer_sub[source][index];
+                    if (source_sub > original_sub[index])
+                        original_sub[index] = source_sub;
+                }
             }
         }
     }
