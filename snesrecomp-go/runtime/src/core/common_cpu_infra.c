@@ -585,6 +585,14 @@ void cpu_trace_block(CpuState *cpu, uint32 pc24) {
 #endif
 }
 
+int sr_block_history_available(void) {
+    unsigned available = g_sr_block_index;
+    if (available > kRuntimeBlockTraceRingCapacity) {
+        available = kRuntimeBlockTraceRingCapacity;
+    }
+    return (int)available;
+}
+
 int sr_block_history(uint32 *output, int maximum) {
     unsigned available;
     int count;
@@ -593,7 +601,7 @@ int sr_block_history(uint32 *output, int maximum) {
     if (maximum > kRuntimeBlockTraceRingCapacity) {
         maximum = kRuntimeBlockTraceRingCapacity;
     }
-    available = g_sr_block_index;
+    available = (unsigned)sr_block_history_available();
     count = available < (unsigned)maximum ? (int)available : maximum;
     for (index = 0; index < count; ++index) {
         output[index] = g_sr_block_ring[

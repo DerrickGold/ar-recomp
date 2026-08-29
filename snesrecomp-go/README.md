@@ -112,6 +112,14 @@ snesrecomp-go/build/snesbuild analyze --root . --rom game.sfc
 See [`docs/ANALYSIS.md`](docs/ANALYSIS.md) for comparison semantics, the
 entry/continuation model, and the cfg-removal validation gate.
 
+For memory-producer investigation, use the same decoded instruction index
+rather than scanning raw ROM bytes:
+
+```sh
+snesrecomp-go/build/snesbuild xref '$1C' --root . --rom game.sfc
+snesrecomp-go/build/snesbuild xref '$00:C210' --root . --rom game.sfc
+```
+
 When a handler address comes from script or object data rather than a ROM code
 reference, a trace build can capture a compact runtime census and report the
 missing generated entries without game-specific logging:
@@ -123,6 +131,9 @@ SNESRECOMP_TRACE_CHANNELS=dispatch ./build/MyGame game.sfc --frames 2400
 snesrecomp-go/build/snesbuild dispatch-census --root . \
   --trace saves/dispatch.jsonl --rom game.sfc \
   --out-analysis saves/dispatch-analysis.json
+
+snesrecomp-go/build/snesbuild analyze --root . --rom game.sfc \
+  --dispatch-analysis saves/dispatch-analysis.json
 ```
 
 All three relative file paths in this command are resolved from `--root`.

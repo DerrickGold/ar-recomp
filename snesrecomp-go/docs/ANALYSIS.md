@@ -49,6 +49,42 @@ sites. Each unique site records instruction bytes, mnemonic, addressing mode,
 operand, live M/X state, and configuration-rooted callers. A configuration root
 is not labeled gameplay-reachable.
 
+## Decoded-instruction cross references
+
+Use the compiler's decoded instruction index instead of searching ROM bytes for
+opcode/operand patterns:
+
+```sh
+snesbuild xref '$1C' --root . --rom game.sfc
+v2regen xref '$00:C210' --rom game.sfc --cfg-dir recomp --format json
+```
+
+Address width is intentional. `$1C` searches direct-page and stack-relative
+operand offsets, `$001C` searches 16-bit operands, and `$00:001C` searches only
+references whose architectural bank is known. Results contain the instruction
+PC and bytes, access kind, addressing mode, live M/X, and every containing
+configuration/static-call-rooted function. Indexed results identify a base;
+they do not claim the runtime index or effective address is known. Absolute
+data operands are DB-relative and direct-page operands are D-relative, which
+is stated explicitly in the result rather than silently assuming DB=D=0.
+
+The index contains only instruction boundaries reached by the shadow decoder.
+It therefore avoids byte-pattern matches inside operands and tables. It does
+not claim that every configured root is gameplay-reachable or that current
+code/data ownership is globally complete.
+
+## Dispatch-table ownership
+
+The JSON report includes `table_spans`. An authored closed dispatch or a closed
+static proof produces `confirmed_data`; a heuristic open table produces
+`candidate_data`. Every span records its owning dispatch site, start and
+exclusive end, entry count/width, confidence, and provenance.
+
+Confirmed spans are suitable evidence for the future shared code/data
+ownership model. Candidate spans remain report-only: they do not suppress
+decoding, change generated C, or write `data_region` directives. This prevents
+a plausible table prefix from hiding real code before its bound is proven.
+
 ## Experimental isolated regeneration
 
 The low-level generator can consume the safest automatic facts without
@@ -220,6 +256,20 @@ Summarize it from the game project root with:
 snesbuild dispatch-census --root . --trace saves/dispatch.jsonl \
   --rom game.sfc --out-analysis saves/dispatch-analysis.json
 ```
+
+Merge that evidence back into the read-only static report with:
+
+```sh
+snesbuild analyze --root . --rom game.sfc \
+  --dispatch-analysis saves/dispatch-analysis.json
+```
+
+The ROM hash must match. The report ranks observed trapped/missing sites first,
+then other observed unresolved sites, likely blocking unobserved interpreter
+patterns, and remaining unobserved static sites. It preserves exact targets,
+M/X, hit counts, generated-body status, continuation classification, and
+whether the observation occurred immediately before a hard trap. An overflowed
+census remains visibly incomplete.
 
 Relative `--trace`, `--rom`, and `--out-analysis` paths are resolved from
 `--root`, not from the shell's working directory. Use absolute paths when the

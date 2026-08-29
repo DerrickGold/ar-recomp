@@ -687,11 +687,22 @@ static void test_block_history(void) {
     cpu.x_flag = 0u;
     cpu_trace_block(&cpu, 0x123456u);
     cpu_trace_block(&cpu, 0x234567u);
+    check(sr_block_history_available() == 2,
+          "block history available count");
     check(sr_block_history(output, 4) == 2, "block history count");
     check(output[0] == 0x123456u && output[1] == 0x234567u,
           "block history order");
+    check(sr_block_history(output, 1) == 1 &&
+              sr_block_history_available() == 2,
+          "block history reports truncated copy");
+    check(output[0] == 0x234567u,
+          "truncated block history keeps newest window");
     check(g_sr_block_aux[0] == 0x14567u && g_sr_block_stack[0] == 0x01e0u,
           "block register metadata");
+    g_sr_block_index = kRuntimeBlockTraceRingCapacity + 7u;
+    check(sr_block_history_available() == kRuntimeBlockTraceRingCapacity,
+          "block history available count caps at ring capacity");
+    g_sr_block_index = 2u;
 }
 
 static void test_stack_and_tailcalls(void) {

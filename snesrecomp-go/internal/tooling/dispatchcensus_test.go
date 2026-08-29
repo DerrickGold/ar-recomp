@@ -2,6 +2,8 @@ package tooling
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -40,6 +42,55 @@ func TestDispatchCensusUsesCumulativeMilestoneMaximum(t *testing.T) {
 		if !strings.Contains(output.String(), wanted) {
 			t.Fatalf("text report missing %q:\n%s", wanted, output.String())
 		}
+	}
+}
+
+func TestShadowDispatchEvidenceRanksObservedUnresolvedSites(t *testing.T) {
+	report := ShadowReport{
+		ROM: ShadowROM{SHA256: strings.Repeat("a", 64)},
+		Unresolved: []ShadowUnresolvedSite{
+			{SitePC: 0x008100, Classification: shadowUnresolvedGeneric, Priority: shadowPriorityNormal},
+			{SitePC: 0x008200, Classification: shadowUnresolvedTaggedStreamDispatch, Priority: shadowPriorityLikelyBlocker},
+			{SitePC: 0x008300, Classification: shadowUnresolvedGeneric, Priority: shadowPriorityNormal},
+		},
+	}
+	evidence := DispatchCensusReport{
+		Version: 2, ROMHash: report.ROM.SHA256, TraceHash: strings.Repeat("b", 64),
+		Provenance: "snesrecomp-runtime-dispatch-census-v2",
+		Observations: []DispatchObservation{
+			{SitePC: 0x008300, TargetPC: 0x009000, Found: true, ObservationCount: 10},
+			{SitePC: 0x008100, TargetPC: 0x009100, Trapped: true, ObservationCount: 1000},
+		},
+	}
+	if err := applyShadowDispatchEvidence(&report, evidence); err != nil {
+		t.Fatal(err)
+	}
+	if report.Summary.ObservedUnresolvedSites != 2 || report.Summary.UnobservedUnresolvedSites != 1 || report.DispatchEvidence == nil {
+		t.Fatalf("summary=%+v evidence=%+v", report.Summary, report.DispatchEvidence)
+	}
+	if report.Unresolved[0].SitePC != 0x008100 || report.Unresolved[0].RuntimeStatus != shadowRuntimeObservedTrappedMissing || report.Unresolved[0].RuntimeObservationCount != 1000 {
+		t.Fatalf("first ranked site = %+v", report.Unresolved[0])
+	}
+	if report.Unresolved[1].SitePC != 0x008300 || report.Unresolved[1].RuntimeStatus != shadowRuntimeObservedResolved {
+		t.Fatalf("second ranked site = %+v", report.Unresolved[1])
+	}
+	if report.Unresolved[2].SitePC != 0x008200 || report.Unresolved[2].RuntimeStatus != shadowRuntimeUnobserved {
+		t.Fatalf("third ranked site = %+v", report.Unresolved[2])
+	}
+	var output bytes.Buffer
+	writeShadowText(&output, report, false)
+	if !strings.Contains(output.String(), "[RUNTIME-UNRESOLVED] $00:8100 status=observed_trapped_missing_body hits=1000") {
+		t.Fatalf("runtime triage missing from compact output:\n%s", output.String())
+	}
+}
+
+func TestLoadDispatchCensusFileValidatesProvenance(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dispatch.json")
+	if err := os.WriteFile(path, []byte(`{"version":1,"provenance":"unknown"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadDispatchCensusFile(path); err == nil || !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("LoadDispatchCensusFile error = %v, want unsupported evidence", err)
 	}
 }
 
