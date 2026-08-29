@@ -13,8 +13,8 @@
 /* ── Spell rule table ──────────────────────────────────────────────────────
  *
  * Every spell is declared as data rather than as code. The shape comes from
- * docs/effects-hook-investigation.md "Spell catalogue", which statically maps
- * all four casts: $00:9F13 dispatches controller +$38 (the spell ID) to
+ * docs/rendering-engine.md section 9a, which records the four mapped casts:
+ * $00:9F13 dispatches controller +$38 (the spell ID) to
  * $9F25/$9F71/$9FBB/$9FFA, and the cohort slots $06A0-$0820 are the emitter
  * instances for whichever one is running.
  *
@@ -630,7 +630,7 @@ void ActionEffects_CaptureFrame(ActionEffectObserver *observer,
 /* Exact action-scene identities. These signatures intentionally combine
  * control flow, animation, composition, and relationship fields because the
  * object record is polymorphic. Capture evidence and rejected lookalikes are
- * documented in docs/effects-hook-investigation.md. */
+ * documented in docs/rendering-engine.md section 9a and the RAM/symbol maps. */
 enum {
   kEnemyFireballHandler = 0xBDF0,
   kEnemyFireballResume = 0xBDD9,

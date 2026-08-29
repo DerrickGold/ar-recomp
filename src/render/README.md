@@ -166,7 +166,11 @@ host events and the optional text-input window; cursor, status, and manual-hint
 timing use the monotonic host clock contract.
 Action heat refraction is a portable mesh warp rather than a custom shader; its
 viewport-sized texture is now device-owned and uses the scoped-target contract
-plus portable geometry for both its warped and fallback resolves.
+plus portable geometry for both its warped and fallback resolves. The pass is
+flat-presentation-only and is engaged only while a captured semantic lava
+reservoir intersects the visible source rectangle. Diorama instead keeps lava
+lighting and particles attached to the finite published BG1-high plane, so it
+does not pay for or misapply a full-screen warp around tilted world geometry.
 Flat action-plane decorations now use device-owned streaming winner masks and
 a scoped effect target. The blend vocabulary carries their premultiplied-add
 resolve explicitly, so unsupported backends can reject that optional effect at

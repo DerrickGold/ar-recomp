@@ -48,4 +48,12 @@ bool ActionEffectProjection_ProjectPoint(
     void *userdata, const ActionEffectInstance *effect,
     float local_x, float local_y, ArRenderPointF *point);
 
+/* Reports whether a visible rect-backed effect overlaps the source rectangle
+ * shown by flat action presentation. This is useful for optional full-scene
+ * passes whose cost and appearance should be tied to semantic source content,
+ * rather than merely to the current room id. */
+bool ActionEffectProjection_IntersectsFlatViewport(
+    const ActionEffectProjectionContext *context,
+    const ActionEffectInstance *effect);
+
 #endif  /* ACTION_EFFECT_PROJECTION_H */
