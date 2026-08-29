@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "diorama_planes.h"
+#include "diorama_coverage.h"
 #include "render/render_device.h"
 
 /* Synchronize the requested captured planes into persistent backend textures.
@@ -18,6 +19,7 @@
 typedef struct DioramaUploadResult {
   uint32_t synchronized_plane_mask;
   uint32_t changed_plane_mask;
+  DioramaCoverageMask coverage_masks[kDioramaPlane_Count];
 } DioramaUploadResult;
 
 DioramaUploadResult Diorama_Upload(

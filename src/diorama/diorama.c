@@ -7,6 +7,7 @@
 #include "diorama_rom_backdrop.h"
 #include "diorama_rom_skybox_resource.h"
 #include "diorama_skybox_uv.h"
+#include "diorama_stack_group.h"
 #include "camera_orbit.h"
 #include "diorama_depth_shapes.h" /* rake/bow/thick/stack/voxel arithmetic */
 #include "diorama_performance.h"
@@ -168,6 +169,9 @@ enum { kDioramaSupersample = 4 };
 static ArRenderTexture g_diorama_ss_texture;
 static int g_diorama_ss_w, g_diorama_ss_h;
 static bool g_diorama_ss_unavailable;
+static ArRenderTexture g_diorama_stack_group_texture;
+static int g_diorama_stack_group_w, g_diorama_stack_group_h;
+static bool g_diorama_stack_group_unavailable;
 
 static void ResetDioramaSupersample(ArRenderDevice *device) {
   ArRenderDevice_DestroyTexture(device, g_diorama_ss_texture);
@@ -180,6 +184,62 @@ static void ResetDioramaSupersample(ArRenderDevice *device) {
 static void DisableDioramaSupersample(ArRenderDevice *device) {
   ResetDioramaSupersample(device);
   g_diorama_ss_unavailable = true;
+}
+
+static void ResetDioramaStackGroup(ArRenderDevice *device) {
+  ArRenderDevice_DestroyTexture(device, g_diorama_stack_group_texture);
+  g_diorama_stack_group_texture = ArRenderTexture_Invalid();
+  g_diorama_stack_group_w = 0;
+  g_diorama_stack_group_h = 0;
+  g_diorama_stack_group_unavailable = false;
+}
+
+static void DisableDioramaStackGroup(ArRenderDevice *device) {
+  ResetDioramaStackGroup(device);
+  g_diorama_stack_group_unavailable = true;
+}
+
+static ArRenderTexture EnsureDioramaStackGroupTexture(
+    ArRenderDevice *device, int width, int height) {
+  if (!ArRenderDevice_IsReady(device) || width <= 0 || height <= 0 ||
+      g_diorama_stack_group_unavailable)
+    return ArRenderTexture_Invalid();
+  if (ArRenderTexture_IsValid(g_diorama_stack_group_texture) &&
+      g_diorama_stack_group_w == width &&
+      g_diorama_stack_group_h == height)
+    return g_diorama_stack_group_texture;
+  ArRenderDevice_DestroyTexture(device, g_diorama_stack_group_texture);
+  g_diorama_stack_group_texture = ArRenderTexture_Invalid();
+  const ArRenderTextureDesc desc = {
+    .width = width,
+    .height = height,
+    .format = kArRenderPixelFormat_Argb8888,
+    .usage = kArRenderTextureUsage_Target,
+    .filter = kArRenderFilter_Linear,
+    .blend = kArRenderBlendMode_AlphaPremultiplied,
+  };
+  if (!ArRenderDevice_CreateTexture(
+          device, &desc, &g_diorama_stack_group_texture)) {
+    fprintf(stderr,
+            "[diorama] stack-group target unavailable; using direct stack "
+            "draws: %s\n", ArRenderDevice_LastError(device));
+    DisableDioramaStackGroup(device);
+    return ArRenderTexture_Invalid();
+  }
+  g_diorama_stack_group_w = width;
+  g_diorama_stack_group_h = height;
+  return g_diorama_stack_group_texture;
+}
+
+/* Default-on implementation toggle retained for controlled A/B captures. The
+ * authored manifest stays untouched; 0 selects the exact direct batch. */
+static bool DioramaStackGroupingEnabled(void) {
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *value = getenv("AR_DIORAMA_STACK_GROUP");
+    enabled = !value || !value[0] || value[0] != '0';
+  }
+  return enabled != 0;
 }
 
 static ArRenderTexture EnsureDioramaSupersampleTexture(
@@ -866,6 +926,17 @@ bool Diorama_SaveLayerManifest(void) {
 #define DIORAMA_ATTACHED_INDICES \
   (DIORAMA_OVERFLOW_INDICES + DIORAMA_INDICES_PER_LAYER)
 
+/* Presentation is synchronous on one render thread. Keep the largest voxel
+ * batch out of automatic storage: 24 copies are roughly 75 KiB of vertices
+ * and indices before the scaled target copy. */
+static ArRenderVertex2D
+    s_diorama_stack_vertices[kDioramaVoxelMax * DIORAMA_VERTS_PER_LAYER];
+static ArRenderVertex2D
+    s_diorama_stack_target_vertices[
+        kDioramaVoxelMax * DIORAMA_VERTS_PER_LAYER];
+static int32_t
+    s_diorama_stack_indices[kDioramaVoxelMax * DIORAMA_INDICES_PER_LAYER];
+
 static void BuildViewProjection(const DioramaCamera *cam, int out_w, int out_h,
                                 float out_mat[16]) {
   Scene3D_BuildViewProjection(cam, out_w, out_h, out_mat);
@@ -1162,7 +1233,10 @@ static bool SubmitDioramaGeometry(
   const bool succeeded = ArRenderDevice_DrawGeometryWithState(
       device, texture, vertices, num_vertices, indices, num_indices, state);
   DioramaPerformance_End(performance);
-  DioramaPerformance_AddDraw(succeeded, num_vertices, num_indices);
+  DioramaPerformance_AddDraw(
+      succeeded, vertices, num_vertices, indices, num_indices,
+      state && (state->flags & kArRenderDrawState_Blend)
+          ? state->blend : kArRenderBlendMode_Alpha);
   return succeeded;
 }
 
@@ -1183,6 +1257,109 @@ static void RecordOptionalDioramaDraw(
   if (outcome && !succeeded)
     *outcome = PresentationOutcome_Combine(
         *outcome, kPresentationOutcome_OptionalOmitted);
+}
+
+/* Submit every non-redundant copy as one ordered geometry batch. Where the
+ * projected cost justifies it, preserve that exact batch inside a reusable
+ * half-output target and composite its premultiplied result once. The normal
+ * front plane remains outside this group so its rim/DOF/supersample treatment
+ * and crisp source resolution are unchanged. */
+static PresentationOutcome RenderDioramaStackBatch(
+    ArRenderDevice *device, ArRenderTexture source,
+    const ArRenderVertex2D *vertices, int vertex_count,
+    const int32_t *indices, int index_count,
+    ArRenderBlendMode blend, const DioramaStackGroupPlan *plan,
+    int output_width, int output_height) {
+  if (!vertices || vertex_count <= 0 || !indices || index_count <= 0)
+    return kPresentationOutcome_Complete;
+
+  const bool use_group = DioramaStackGroupingEnabled() && plan &&
+      plan->use_intermediate;
+  if (!use_group) {
+    return RenderDioramaGeometry(
+               device, source, vertices, vertex_count, indices, index_count,
+               blend)
+        ? kPresentationOutcome_Complete
+        : kPresentationOutcome_OptionalOmitted;
+  }
+
+  const ArRenderTexture target = EnsureDioramaStackGroupTexture(
+      device, plan->target_width, plan->target_height);
+  if (!ArRenderTexture_IsValid(target)) {
+    return RenderDioramaGeometry(
+               device, source, vertices, vertex_count, indices, index_count,
+               blend)
+        ? kPresentationOutcome_Complete
+        : kPresentationOutcome_OptionalOmitted;
+  }
+
+  ArRenderTargetState target_state;
+  const ArRenderTargetBeginResult begin =
+      ArRenderDevice_BeginTarget(device, target, &target_state);
+  if (begin == kArRenderTargetBegin_StateLost)
+    return kPresentationOutcome_CoreFailure;
+  if (begin == kArRenderTargetBegin_Omitted) {
+    DisableDioramaStackGroup(device);
+    return RenderDioramaGeometry(
+               device, source, vertices, vertex_count, indices, index_count,
+               blend)
+        ? kPresentationOutcome_Complete
+        : kPresentationOutcome_OptionalOmitted;
+  }
+
+  memcpy(s_diorama_stack_target_vertices, vertices,
+         (size_t)vertex_count * sizeof(vertices[0]));
+  for (int i = 0; i < vertex_count; i++) {
+    s_diorama_stack_target_vertices[i].position.x *= plan->scale_x;
+    s_diorama_stack_target_vertices[i].position.y *= plan->scale_y;
+  }
+  DioramaPerformance_SetRasterViewport(
+      plan->target_width, plan->target_height);
+  bool target_ready = ArRenderDevice_Clear(
+      device, (ArRenderColorF){0.0f, 0.0f, 0.0f, 0.0f});
+  if (target_ready) {
+    target_ready = RenderDioramaGeometry(
+        device, source, s_diorama_stack_target_vertices, vertex_count,
+        indices, index_count, blend);
+  }
+  const bool restored = ArRenderDevice_EndTarget(device, &target_state);
+  DioramaPerformance_SetRasterViewport(output_width, output_height);
+  if (!restored) return kPresentationOutcome_CoreFailure;
+  if (!target_ready) {
+    DisableDioramaStackGroup(device);
+    return RenderDioramaGeometry(
+               device, source, vertices, vertex_count, indices, index_count,
+               blend)
+        ? kPresentationOutcome_Complete
+        : kPresentationOutcome_OptionalOmitted;
+  }
+
+  const ArRenderRectI bounds = plan->output_bounds;
+  const float x0 = (float)bounds.x;
+  const float y0 = (float)bounds.y;
+  const float x1 = (float)(bounds.x + bounds.w);
+  const float y1 = (float)(bounds.y + bounds.h);
+  const float u0 = x0 / (float)output_width;
+  const float v0 = y0 / (float)output_height;
+  const float u1 = x1 / (float)output_width;
+  const float v1 = y1 / (float)output_height;
+  const ArRenderColorF white = {1.0f, 1.0f, 1.0f, 1.0f};
+  const ArRenderVertex2D composite_vertices[] = {
+    {{x0, y0}, white, {u0, v0}},
+    {{x1, y0}, white, {u1, v0}},
+    {{x1, y1}, white, {u1, v1}},
+    {{x0, y1}, white, {u0, v1}},
+  };
+  const int32_t composite_indices[] = {0, 1, 2, 0, 2, 3};
+  const ArRenderBlendMode composite_blend =
+      blend == kArRenderBlendMode_Add
+          ? kArRenderBlendMode_AddPremultiplied
+          : kArRenderBlendMode_AlphaPremultiplied;
+  return RenderDioramaGeometry(
+             device, target, composite_vertices, 4,
+             composite_indices, 6, composite_blend)
+      ? kPresentationOutcome_Complete
+      : kPresentationOutcome_OptionalOmitted;
 }
 
 /* Edge margin fix (live report 2026-07-21, fixed
@@ -1692,6 +1869,7 @@ PresentationOutcome Diorama_Composite(
     const uint32_t bg_transparent_fill_argb[2],
     const DioramaCameraPose *cam_pose, float distance_scale,
     uint32_t additive_plane_mask,
+    const DioramaCoverageMask coverage_masks[kDioramaPlane_Count],
     uint8_t effect_obj_priority_mask, uint32_t effect_bg_plane_mask,
     uint8_t map_group, uint8_t map_number, uint8_t layer_section,
     const DioramaBgValidSpanPlan *bg2_valid_spans,
@@ -1724,6 +1902,7 @@ PresentationOutcome Diorama_Composite(
    * output frame owns margin/scene clears and full-output restoration. */
   const int out_w = viewport.w;
   const int out_h = viewport.h;
+  DioramaPerformance_SetViewport(out_w, out_h);
 
   /* Resolve this room's authored overrides before the far-background pass.
    * The Backdrop record carries the skybox source as room-scoped metadata, so
@@ -1763,6 +1942,7 @@ PresentationOutcome Diorama_Composite(
   static const float kSkyboxBlurRadiusOnly = 1.0f;
   static const float kSkyboxBlurRadiusBoth = 3.0f;
   if (g_settings.diorama_skybox != kDioramaSky_Off) {
+    DioramaPerformance_SetPlane(SR_PPU_OVERLAY_BG2);
     bool both = g_settings.diorama_skybox == kDioramaSky_Both;
     ArRenderTexture skybox_texture = textures[SR_PPU_OVERLAY_BG2];
     bool rom_skybox = false;
@@ -1930,6 +2110,7 @@ PresentationOutcome Diorama_Composite(
   /* B6 (followup doc): drawn before the per-layer loop below — painter's
    * algorithm, the box surrounds the stack. */
   if (g_settings.diorama_shoebox) {
+    DioramaPerformance_SetPlane(-1);
     const PresentationOutcome shoebox = DrawDioramaShoebox(
         device, mvp, aspect_x, height_scale, cam.tilt_y, out_w, out_h);
     outcome = PresentationOutcome_Combine(outcome, shoebox);
@@ -2011,6 +2192,7 @@ PresentationOutcome Diorama_Composite(
     if (resolved[i].alpha == 0) continue;
     const DioramaLayerDesc *layer = DioramaDescForPlane(resolved[i].plane);
     if (!layer) continue;
+    DioramaPerformance_SetPlane(layer->plane);
     const bool is_additive =
         (additive_plane_mask & (1u << (unsigned)layer->plane)) != 0;
     const float layer_z = resolved[i].z;
@@ -2083,6 +2265,11 @@ PresentationOutcome Diorama_Composite(
                    layer_u1, layer_v1,
                    aspect_x, height_scale, out_w, out_h, shade,
                    verts, indices, &nv, &ni);
+    if (coverage_masks && DioramaPlaneIsObjectPriority(layer->plane)) {
+      const DioramaCoverageMask coverage = coverage_masks[layer->plane];
+      if (coverage && coverage != DioramaCoverage_FullMask())
+        ni = DioramaCoverage_FilterGridIndices(indices, ni, coverage);
+    }
 
     /* Sized for the extension plus the host: when the extension is present,
      * both are appended into this one ordered geometry submission below.
@@ -2247,9 +2434,9 @@ PresentationOutcome Diorama_Composite(
      * (they key off a single depth and would be recomputed per copy for no
      * visual gain), and not the backdrop plane. */
     if (layer_stack > 0.0f && layer_stack_copies > 1 && !is_backdrop) {
-      int stack_nv = 0, stack_ni = 0;
-      ArRenderVertex2D stack_verts[DIORAMA_VERTS_PER_LAYER];
-      int32_t stack_indices[DIORAMA_INDICES_PER_LAYER];
+      int stack_batch_nv = 0, stack_batch_ni = 0;
+      DioramaStackGroupBounds copy_bounds[kDioramaVoxelMax];
+      int copy_bound_count = 0;
       for (int c = layer_stack_copies - 1; c >= 0; c--) {
         /* Skip whichever copy coincides with the plane's own depth -- index 0 for
          * a one-sided fill, the middle one for an odd-count centred fill. The
@@ -2267,19 +2454,47 @@ PresentationOutcome Diorama_Composite(
         copy_color.a *= copy_alpha;
         /* Rake is passed through so a room authoring both keeps every copy on
          * the same tilt rather than mixing tilted and flat slices. */
+        ArRenderVertex2D *copy_vertices =
+            &s_diorama_stack_vertices[stack_batch_nv];
+        int32_t *copy_indices =
+            &s_diorama_stack_indices[stack_batch_ni];
+        int copy_nv = 0, copy_ni = 0;
         BuildLayerMesh(mvp, copy_z, layer_rake, layer_bow, layer_u0, layer_v0,
                        layer_u1, layer_v1, aspect_x, height_scale,
                        out_w, out_h, copy_color,
-                       stack_verts, stack_indices, &stack_nv, &stack_ni);
-        if (stack_nv > 0) {
-          RecordOptionalDioramaDraw(
-              &outcome,
-              RenderDioramaGeometry(
-                  device, texture, stack_verts, stack_nv,
-                  stack_indices, stack_ni,
-                  is_additive ? kArRenderBlendMode_Add
-                              : kArRenderBlendMode_Alpha));
+                       copy_vertices, copy_indices, &copy_nv, &copy_ni);
+        if (coverage_masks && DioramaPlaneIsObjectPriority(layer->plane)) {
+          const DioramaCoverageMask coverage = coverage_masks[layer->plane];
+          if (coverage && coverage != DioramaCoverage_FullMask())
+            copy_ni = DioramaCoverage_FilterGridIndices(
+                copy_indices, copy_ni, coverage);
         }
+        if (copy_nv <= 0 || copy_ni <= 0) continue;
+        if (copy_bound_count < kDioramaVoxelMax &&
+            DioramaStackGroupBounds_FromGeometry(
+                copy_vertices, copy_nv, copy_indices, copy_ni,
+                &copy_bounds[copy_bound_count]))
+          copy_bound_count++;
+        for (int index = 0; index < copy_ni; index++)
+          copy_indices[index] += stack_batch_nv;
+        stack_batch_nv += copy_nv;
+        stack_batch_ni += copy_ni;
+      }
+      if (stack_batch_nv > 0 && stack_batch_ni > 0) {
+        const DioramaStackGroupPlan stack_plan =
+            DioramaStackGroupPlan_Build(
+                out_w, out_h, snes_width, snes_height,
+                copy_bounds, copy_bound_count);
+        const PresentationOutcome stack_outcome = RenderDioramaStackBatch(
+            device, texture,
+            s_diorama_stack_vertices, stack_batch_nv,
+            s_diorama_stack_indices, stack_batch_ni,
+            is_additive ? kArRenderBlendMode_Add
+                        : kArRenderBlendMode_Alpha,
+            &stack_plan, out_w, out_h);
+        outcome = PresentationOutcome_Combine(outcome, stack_outcome);
+        if (!PresentationOutcome_IsUsable(stack_outcome))
+          return DioramaCompositeCoreFailure(&output_frame);
       }
     }
 
@@ -2516,6 +2731,7 @@ PresentationOutcome Diorama_Composite(
 void Diorama_ResetRendererResources(ArRenderDevice *device) {
   DioramaRomSkyboxResource_Reset(device);
   ResetDioramaSupersample(device);
+  ResetDioramaStackGroup(device);
   DioramaUpload_Reset();
   DioramaEffectBackend_Reset(device);
 }
@@ -2523,6 +2739,7 @@ void Diorama_ResetRendererResources(ArRenderDevice *device) {
 void Diorama_Shutdown(ArRenderDevice *device) {
   DioramaRomSkyboxResource_Reset(device);
   ResetDioramaSupersample(device);
+  ResetDioramaStackGroup(device);
   DioramaUpload_Reset();
   DioramaEffectBackend_Reset(device);
 }

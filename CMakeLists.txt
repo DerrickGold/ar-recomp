@@ -1585,6 +1585,30 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_diorama_capture_blend
         COMMAND actraiser_diorama_capture_blend_test)
 
+    # Coarse alpha-occupancy mesh filtering for sparse diorama object planes.
+    # Pure -- verifies pitch handling, conservative dilation, and the grid's
+    # six-indices-per-cell compaction contract.
+    add_executable(actraiser_diorama_coverage_test
+        tests/diorama_coverage_test.c
+    )
+    target_include_directories(actraiser_diorama_coverage_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    add_test(NAME actraiser_diorama_coverage
+        COMMAND actraiser_diorama_coverage_test)
+
+    # Adaptive grouping policy for authored stack/voxel copies. Pure -- pins
+    # indexed bounds, source-resolution gating, and the raster-cost threshold.
+    add_executable(actraiser_diorama_stack_group_test
+        tests/diorama_stack_group_test.c
+        src/diorama/diorama_stack_group.c
+    )
+    target_include_directories(actraiser_diorama_stack_group_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    add_test(NAME actraiser_diorama_stack_group
+        COMMAND actraiser_diorama_stack_group_test)
+
     # F3/F4 (handback 2026-07-26): per-room ($18,$19) layer z/alpha overrides.
     # Pure -- no SDL, no PPU, no file I/O.
     add_executable(actraiser_diorama_layer_order_test

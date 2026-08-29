@@ -52,6 +52,19 @@ DioramaUploadResult Diorama_Upload(
     if (!synchronized) continue;
     upload.synchronized_plane_mask |= 1u << plane;
     if (plane_upload.changed) upload.changed_plane_mask |= 1u << plane;
+    upload.coverage_masks[plane] = DioramaCoverage_FullMask();
+    if (DioramaPlaneIsObjectPriority(plane)) {
+      const int displayed_width = snes_width - obj_apron * 2;
+      const uint8_t *displayed = pixels[plane] +
+          (size_t)obj_apron * sizeof(uint32_t);
+      const DioramaCoverageMask coverage = DioramaCoverage_FromArgb8888(
+          displayed, pitch_bytes[plane], displayed_width, snes_height);
+      /* A content-bearing plane whose winners all lie in the resolve apron is
+       * invisible to the ordinary layer mesh. Keep the established full draw
+       * as a fail-safe instead of turning its required submission into an
+       * empty-index failure; ordinary visible sprite bands take the cull. */
+      if (coverage) upload.coverage_masks[plane] = coverage;
+    }
   }
   DioramaPerformance_End(performance);
   return upload;

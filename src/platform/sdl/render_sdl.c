@@ -59,6 +59,11 @@ static SDL_BlendMode ToSdlBlendMode(ArRenderBlendMode blend) {
   switch (blend) {
     case kArRenderBlendMode_Opaque: return SDL_BLENDMODE_NONE;
     case kArRenderBlendMode_Alpha: return SDL_BLENDMODE_BLEND;
+    case kArRenderBlendMode_AlphaPremultiplied:
+      return SDL_ComposeCustomBlendMode(
+          SDL_BLENDFACTOR_ONE, SDL_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+          SDL_BLENDOPERATION_ADD, SDL_BLENDFACTOR_ONE,
+          SDL_BLENDFACTOR_ONE_MINUS_SRC_ALPHA, SDL_BLENDOPERATION_ADD);
     case kArRenderBlendMode_Add: return SDL_BLENDMODE_ADD;
     case kArRenderBlendMode_AddPremultiplied:
       return SDL_BLENDMODE_ADD_PREMULTIPLIED;
