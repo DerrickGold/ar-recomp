@@ -23,8 +23,8 @@ func TestPinTableCoversSupportedPlatforms(t *testing.T) {
 			t.Errorf("missing pin for %s", platform)
 			continue
 		}
-		if !strings.Contains(entry.Archive, PinnedZigVersion) {
-			t.Errorf("%s: archive %q does not carry pinned version %s", platform, entry.Archive, PinnedZigVersion)
+		if entry.Version == "" || !strings.Contains(entry.Archive, entry.Version) {
+			t.Errorf("%s: archive %q does not carry pinned version %s", platform, entry.Archive, entry.Version)
 		}
 		if len(entry.SHA256) != 64 {
 			t.Errorf("%s: malformed sha256 %q", platform, entry.SHA256)
@@ -59,6 +59,16 @@ func TestPinForCrossTargets(t *testing.T) {
 	}
 	if !strings.HasSuffix(url, archive) || len(sha) != 64 {
 		t.Fatalf("url %s sha %s", url, sha)
+	}
+	armURL, armSHA, armArchive, err := Pin("windows", "arm64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(armArchive, pinnedWindowsARM64ZigVersion) ||
+		!strings.HasPrefix(armURL, "https://pkg.hexops.org/zig/") ||
+		len(armSHA) != 64 {
+		t.Fatalf("windows/arm64 pin: url=%q archive=%q sha=%q",
+			armURL, armArchive, armSHA)
 	}
 	if _, _, _, err := Pin("plan9", "mips"); err == nil {
 		t.Fatal("expected error for unsupported target")
@@ -142,17 +152,22 @@ func TestSDL3PinReturnsRedistributables(t *testing.T) {
 			t.Fatalf("darwin/%s: sha=%q url=%q", arch, sha, url)
 		}
 	}
-	_, _, _, kind, err := SDL3Pin("windows", "amd64")
-	if err != nil || kind != "mingw" {
-		t.Fatalf("windows/amd64: kind=%q err=%v", kind, err)
+	for _, test := range []struct{ arch, kind string }{
+		{"amd64", "mingw"},
+		{"arm64", "vc"},
+	} {
+		_, sha, archive, kind, err := SDL3Pin("windows", test.arch)
+		if err != nil || kind != test.kind || len(sha) != 64 || !strings.Contains(archive, PinnedSDL3Version) {
+			t.Fatalf("windows/%s: archive=%q sha=%q kind=%q err=%v", test.arch, archive, sha, kind, err)
+		}
 	}
 }
 
 func TestSDL3PinErrorsWithoutRedistributable(t *testing.T) {
-	// Linux and windows-arm64 have no official redistributable; the packaging
-	// script must fall back to a system SDL3, so the pin must error (not panic).
+	// Generic Linux has no official redistributable used by this packaging
+	// path; it must fall back to a system SDL3, so the pin must error.
 	for _, p := range []struct{ goos, goarch string }{
-		{"linux", "amd64"}, {"linux", "arm64"}, {"windows", "arm64"},
+		{"linux", "amd64"}, {"linux", "arm64"},
 	} {
 		if _, _, _, _, err := SDL3Pin(p.goos, p.goarch); err == nil {
 			t.Fatalf("%s/%s: expected error, got nil", p.goos, p.goarch)

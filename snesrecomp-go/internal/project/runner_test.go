@@ -141,3 +141,23 @@ func TestRuntimeArchiveFlagsAreGameIndependentAndSanitized(t *testing.T) {
 		t.Fatal("game-specific define leaked into the runner build")
 	}
 }
+
+func TestRuntimeArchiveUsesStableWindowsDebugObjectNames(t *testing.T) {
+	runtimeDir := filepath.FromSlash("/checkout/snesrecomp-go/runtime")
+	source := filepath.FromSlash("/checkout/snesrecomp-go/runtime/src/runner/runner.c")
+	args := runtimeDebugObjectArgs(runtimeDir, "x86_64-windows-gnu", source)
+	want := []string{
+		"-Xclang", "-object-file-name",
+		"-Xclang", "snesrecomp-runtime/src_runner_runner.c.obj",
+	}
+	if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("Windows debug object args = %#v, want %#v", args, want)
+	}
+	joined := strings.Join(args, "\x00")
+	if strings.Contains(joined, "/checkout/") || strings.Contains(joined, `C:\\`) {
+		t.Fatalf("Windows debug object name contains a host path: %#v", args)
+	}
+	if got := runtimeDebugObjectArgs(runtimeDir, "x86_64-linux-gnu", source); len(got) != 0 {
+		t.Fatalf("non-Windows debug object args = %#v, want none", got)
+	}
+}

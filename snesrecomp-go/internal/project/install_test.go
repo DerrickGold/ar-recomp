@@ -81,3 +81,21 @@ func TestInstallPlayableRejectsPathsOutsideDestination(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+func TestWindowsLauncherPreservesSDLDiagnostics(t *testing.T) {
+	name, contents := launcherForOS(
+		"windows", "TestGame.exe", "utils/build/hermetic", "utils/user-rom.sfc")
+	if name != "run-game.bat" {
+		t.Fatalf("launcher name = %q", name)
+	}
+	for _, want := range []string{
+		`if not defined SDL_LOGGING set "SDL_LOGGING=*=warn"`,
+		`if not errorlevel 1 exit /b 0`,
+		`The game exited with an error.`,
+		`pause`,
+	} {
+		if !strings.Contains(contents, want) {
+			t.Fatalf("launcher does not contain %q:\n%s", want, contents)
+		}
+	}
+}
