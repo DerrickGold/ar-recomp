@@ -1003,15 +1003,34 @@ static void FailActionHeatTargetState(const char *operation) {
 }
 
 static bool FrameUsesActionHeat(const FrameSlot *slot) {
-  if (!slot || !slot->action_effect_particles ||
-      (slot->diorama_active && !slot->diorama_hud_flat))
+  if (!slot || !slot->action_effect_particles || slot->diorama_active ||
+      !ActionEffects_IsAitosAct2LavaRoom(
+          slot->diorama_map_group, slot->diorama_map_number) ||
+      slot->action_scene_effects.decoration_overflow ||
+      slot->action_scene_effects.decoration_count >
+          kActionSceneDecorationMaxInstances)
     return false;
-  /* The haze is volcanic-room atmosphere, not reservoir geometry. Keying it
-   * to the bounded visible-map scan made the post-process blink off whenever
-   * the camera crossed a window where no complete bank-to-bank lake signature
-   * fit, even though lava remained plainly visible. */
-  return ActionEffects_IsAitosAct2LavaRoom(
-      slot->diorama_map_group, slot->diorama_map_number);
+  const ActionEffectProjectionContext projection = {
+    .bg1_camera_x = slot->bg1_camera_x,
+    .bg1_camera_y = slot->bg1_camera_y,
+    .bg2_camera_x = slot->bg2_camera_x,
+    .bg2_camera_y = slot->bg2_camera_y,
+    .ws_extra = slot->ws_extra,
+    .visible_x0 = slot->visible_x0,
+    .visible_width = slot->visible_width,
+    .snes_height = slot->snes_height,
+  };
+  for (uint8_t i = 0;
+       i < slot->action_scene_effects.decoration_count; i++) {
+    const ActionEffectInstance *effect =
+        &slot->action_scene_effects.decorations[i];
+    if (effect->kind == kActionEffect_AitosLavaReservoir &&
+        effect->phase == kActionEffectPhase_AitosLavaReservoir &&
+        ActionEffectProjection_IntersectsFlatViewport(
+            &projection, effect))
+      return true;
+  }
+  return false;
 }
 
 static ArRenderTexture EnsureActionHeatTarget(int width, int height) {

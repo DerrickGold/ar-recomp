@@ -2096,7 +2096,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   }
   const uint8 map_group = g_ram[kActRaiserWram_MapGroup];
   const uint8 map_number = g_ram[kActRaiserWram_CurrentMap];
-  /* Per-mode widescreen policy (docs/widescreen-survey.md). Two knobs per
+  /* Per-mode widescreen policy (docs/rendering-engine.md section 13). Two knobs per
    * mode: (1) does it use the wide view at all, and (2) a per-layer clamp
    * mask (bit L keeps BG(L+1) at 256) for scenes that mix wide world layers
    * with 256-wide UI/dialog layers whose offscreen tilemap data must not tile

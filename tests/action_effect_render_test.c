@@ -84,6 +84,17 @@ static DioramaProjection RakedApronProjection(void) {
     .u0 = 0.20f, .v0 = 0.0f, .u1 = 0.80f, .v1 = 1.0f,
     .z_world = -0.30f,
     .rake = 0.04f,
+    /* Production waterfall rooms publish a folded continuation below BG2.
+     * A zero-height test fold retains the simple expected projection while
+     * still exercising the continuation eligibility contract. */
+    .overflow_valid = true,
+  };
+  projection.bg1_high_plane = (DioramaPlaneProjection){
+    .valid = true,
+    .u0 = 0.20f, .v0 = 0.0f, .u1 = 0.80f, .v1 = 1.0f,
+    .z_world = 0.45f,
+    .rake = 0.22f,
+    .bow = 0.08f,
   };
   projection.object_planes[0] = (DioramaPlaneProjection){
     .valid = true,
@@ -915,6 +926,30 @@ static void TestAitosUsesRakedDioramaSourcePlanes(void) {
       &expected, NULL, NULL));
   CHECK(fabsf(pit.vertices[0].position.x - expected.x) < 0.001f);
   CHECK(fabsf(pit.vertices[0].position.y - expected.y) < 0.001f);
+
+  /* Finite plane transforms must not extrapolate attached effects into the
+   * surrounding Diorama void. A broad reservoir entirely left of BG1-high's
+   * published source window produces no GPU geometry; moving it into that
+   * window restores the same authored effect. */
+  decorations.decorations[0] =
+      SceneEffect(kActionEffect_AitosLavaReservoir, 400);
+  decorations.decorations[0].world_y = 500;
+  CHECK(ActionSceneDecorationRender_Build(
+      &decorations, kActionEffectRenderLayer_Bg1HighPlane, true, true,
+      ActionEffectProjection_ProjectPoint, &context, &pit));
+  CHECK(pit.vertex_count == 0);
+  CHECK(pit.index_count == 0);
+  CHECK(!ActionEffectProjection_IntersectsFlatViewport(
+      &context, &decorations.decorations[0]));
+
+  decorations.decorations[0].world_x = 970;
+  CHECK(ActionSceneDecorationRender_Build(
+      &decorations, kActionEffectRenderLayer_Bg1HighPlane, true, true,
+      ActionEffectProjection_ProjectPoint, &context, &pit));
+  CHECK(pit.vertex_count > 0);
+  CHECK(pit.index_count > 0);
+  CHECK(ActionEffectProjection_IntersectsFlatViewport(
+      &context, &decorations.decorations[0]));
 
   /* The same production helper owns flat viewport placement. Vertical
    * extension is a Diorama texture concern and intentionally drops out here. */

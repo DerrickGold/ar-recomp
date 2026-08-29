@@ -22,6 +22,8 @@ histories, and retired specifications are intentionally excluded.
 - [Rendering engine](rendering-engine.md) — original drawing, streaming, OAM,
   and presentation behavior.
 - [Save format](save-format.md) — SRAM layout, checksum, and field encodings.
+- [SNES native audio channels](snes-native-audio-channels.md) — original SPC
+  driver channel ownership, request paths, and effect sequence evidence.
 - [Simulation object catalogue](sim-object-catalog.md) — simulation-mode
   records and visual identities.
 - [Simulation terrain](sim-town-terrain.md) — town-cell elevation and sampling
@@ -29,6 +31,7 @@ histories, and retired specifications are intentionally excluded.
 - [Diorama depth shapes](diorama-depth-shapes.md) — stable authoring and geometry
   vocabulary used by enhanced presentation.
 
-Research ledgers that still combine original-game findings with implementation
-history remain source-tree material until the reusable findings are promoted
-into the maintained references above.
+Dated implementation ledgers, parity matrices, debugging journals, and retired
+surveys live in the ignored `../development/` tree. Reusable findings must be
+promoted into the maintained references above before they become a public
+contract.

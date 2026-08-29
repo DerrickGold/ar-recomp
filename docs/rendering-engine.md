@@ -529,17 +529,16 @@ side-view surface while a shallow low-alpha spill rises into the cave; 32
 deterministic sparks are distributed over the whole reservoir instead of
 forming a torch plume.
 
-When an Aitos Act-2 lava room (`0404-0406`) is active and Action Effect
-Particles is enabled, the
-already-composited world is resolved through a fixed 16×14 textured geometry
-grid before the HUD. The gate follows room identity rather than the bounded
-reservoir scan, so crossing a camera window without a complete bank-to-bank
-signature cannot blink the atmosphere off. Interior UVs scale to less than one
-authentic pixel and cap at 6.5 output pixels (the former 3.25px cap was nearly
-invisible at 3420px output), weighted toward the lower room; every outer vertex
-is pinned. This gives flat and Diorama paths visible but restrained heat
-refraction without per-pixel CPU work or backend-specific shader binaries.
-Tilted-HUD mode fails the pass closed so interface art is never distorted.
+In flat presentation, an Aitos Act-2 lava room (`0404-0406`) with Action Effect
+Particles enabled resolves the already-composited world through a fixed 16×14
+textured geometry grid before the HUD, but only while a validated semantic lava
+reservoir intersects the visible source rectangle. Interior UVs scale to less
+than one authentic pixel and cap at 6.5 output pixels (the former 3.25px cap was
+nearly invisible at 3420px output), weighted toward the lower room; every outer
+vertex is pinned. Diorama never applies this full-screen warp. Its lava lighting
+and sparks are attached to and culled by the finite published BG1-high source
+window, while explicitly unbounded atmosphere and authored BG2 folded overflow
+keep their separate projection contracts.
 
 Run `20260812-000613` adds two deliberately separate Aitos styles. Volcano
 rocks are `$CEEC/$CF16` actors with exact `$8661/$27`, `$2B/$4D2D`, 8px extents,

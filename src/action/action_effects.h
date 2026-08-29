@@ -48,7 +48,7 @@ typedef enum ActionEffectKind {
 /* One entry per authored visual stage a style may want to distinguish. These
  * are presentation phases, not ROM animation states: several map from a state
  * number, others from a visual range where the state is shared (see
- * docs/effects-hook-investigation.md "Spell catalogue"). */
+ * docs/rendering-engine.md section 9a). */
 typedef enum ActionEffectPhase {
   kActionEffectPhase_None = 0,
   kActionEffectPhase_FireIgnition,
