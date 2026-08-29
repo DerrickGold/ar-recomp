@@ -619,8 +619,17 @@ static void test_native_fast_path_parity(void) {
         7u, 0u, false, false, false, 5u, 0x03u);
 }
 
+/* sub_owned_layer selects a BG that is captured while enabled only on the
+ * subscreen (Marahna's BG1 shape); -1 keeps every source on both screens.
+ * color_math clears CGWSEL's add-subscreen bit so the composed subscreen is
+ * unreadable, which is the combination that lets a source need its subscreen
+ * rendering purely for capture ownership. */
 static void compare_native_capture_path(bool deferred, uint8_t mode,
-                                        uint8_t mosaic_size) {
+                                        uint8_t mosaic_size,
+                                        int sub_owned_layer,
+                                        bool color_math,
+                                        bool full_add_only,
+                                        int math_layers) {
     enum { kRows = 48, kPlanes = 4 };
     const size_t pixel_count = (size_t)kPpuXPixels * kRows;
     Ppu *fast = ppu_init();
@@ -646,6 +655,25 @@ static void compare_native_capture_path(bool deferred, uint8_t mode,
     if (mosaic_size > 1u) {
         fast->mosaic = reference->mosaic =
             (uint8_t)(((mosaic_size - 1u) << 4) | 0x03u);
+    }
+    if (sub_owned_layer >= 0) {
+        const uint8_t bit = (uint8_t)(1u << sub_owned_layer);
+        fast->screenEnabled[0] &= (uint8_t)~bit;
+        reference->screenEnabled[0] &= (uint8_t)~bit;
+        fast->screenEnabled[1] |= bit;
+        reference->screenEnabled[1] |= bit;
+    }
+    if (!color_math) {
+        fast->cgwsel &= (uint8_t)~0x02u;
+        reference->cgwsel &= (uint8_t)~0x02u;
+    }
+    /* math_layers >= 0 restricts CGADSUB's per-layer math mask. The full-add
+     * export only fires where the main-screen winner is a math-bearing layer,
+     * so a fixture with math on every layer cannot tell that gate apart from
+     * no gate at all. */
+    if (math_layers >= 0) {
+        fast->cgadsub = reference->cgadsub =
+            (uint8_t)((fast->cgadsub & 0xc0u) | (unsigned)math_layers);
     }
     for (int source = 0; source < kPpuOverlaySource_Count; ++source) {
         for (int plane = 0; plane < kPlanes; ++plane) {
@@ -681,8 +709,22 @@ static void compare_native_capture_path(bool deferred, uint8_t mode,
         int x = source == kPpuOverlaySource_Bg3 ? 19 : 0;
         int width = source == kPpuOverlaySource_Bg3
             ? 181 : kPpuXPixels;
+        /* Narrow one full-add source so the export's per-pixel rect test is
+         * load-bearing; a full-width rect cannot distinguish it from none. */
+        if (full_add_only && source == kPpuOverlaySource_Bg2) {
+            x = 31;
+            width = 150;
+        }
         uint8_t flags = kPpuOverlayFlag_RemoveFromGame;
-        if (deferred) {
+        /* The shape the game actually produces: MarkFullAddSubscreen with no
+         * winner-mask policy anywhere on the line, so the packed capture path
+         * owns the export instead of handing the line to the reference
+         * sampler. */
+        if (full_add_only) {
+            if (source == kPpuOverlaySource_Bg2 ||
+                source == kPpuOverlaySource_Obj)
+                flags |= kPpuOverlayFlag_MarkFullAddSubscreen;
+        } else if (deferred) {
             if (source == kPpuOverlaySource_Bg2 ||
                 source == kPpuOverlaySource_Obj)
                 flags |= kPpuOverlayFlag_MarkFullAddSubscreen;
@@ -706,7 +748,7 @@ static void compare_native_capture_path(bool deferred, uint8_t mode,
     }
     CHECK(PpuSetOverlayOamRange(fast, 0u, 128u));
     CHECK(PpuSetOverlayOamRange(reference, 0u, 128u));
-    if (deferred) {
+    if (deferred || full_add_only) {
         CHECK(PpuSetOverlayRelocatedOamRange(fast, 0u, 2u));
         CHECK(PpuSetOverlayRelocatedOamRange(reference, 0u, 2u));
     }
@@ -788,11 +830,33 @@ cleanup:
 }
 
 static void test_native_capture_path_parity(void) {
-    compare_native_capture_path(false, 1u, 1u);
-    compare_native_capture_path(true, 1u, 1u);
-    compare_native_capture_path(false, 7u, 1u);
-    compare_native_capture_path(false, 1u, 5u);
-    compare_native_capture_path(false, 3u, 16u);
+    compare_native_capture_path(false, 1u, 1u, -1, true, false, -1);
+    compare_native_capture_path(true, 1u, 1u, -1, true, false, -1);
+    compare_native_capture_path(false, 7u, 1u, -1, true, false, -1);
+    compare_native_capture_path(false, 1u, 5u, -1, true, false, -1);
+    compare_native_capture_path(false, 3u, 16u, -1, true, false, -1);
+    /* Per-source subscreen need: a captured, subscreen-owned BG must still
+     * resolve its subscreen when no colour operation can read the composed
+     * one, while its main-only siblings skip that work. */
+    compare_native_capture_path(false, 1u, 1u, 0, false, false, -1);
+    compare_native_capture_path(true, 1u, 1u, 0, false, false, -1);
+    compare_native_capture_path(false, 1u, 1u, 1, false, false, -1);
+    compare_native_capture_path(false, 3u, 1u, 0, false, false, -1);
+    compare_native_capture_path(false, 1u, 1u, 0, true, false, -1);
+    compare_native_capture_path(false, 1u, 1u, -1, false, false, -1);
+    /* Full-add-subscreen resolved by the packed capture path itself. These
+     * are the cases that keep such a line off the reference sampler, so they
+     * are the oracle for that export. */
+    compare_native_capture_path(false, 1u, 1u, -1, true, true, -1);
+    compare_native_capture_path(false, 3u, 1u, -1, true, true, -1);
+    compare_native_capture_path(false, 7u, 1u, -1, true, true, -1);
+    compare_native_capture_path(false, 1u, 1u, 1, true, true, -1);
+    compare_native_capture_path(false, 1u, 5u, -1, true, true, -1);
+    /* Partial and empty CGADSUB masks pin the math-bearing-winner gate. */
+    compare_native_capture_path(false, 1u, 1u, -1, true, true, 0x02);
+    compare_native_capture_path(false, 1u, 1u, -1, true, true, 0x01);
+    compare_native_capture_path(false, 1u, 1u, -1, true, true, 0x00);
+    compare_native_capture_path(false, 1u, 1u, -1, true, true, 0x10);
 }
 
 static void test_unbound_capture_fails_open(void) {
