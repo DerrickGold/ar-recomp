@@ -181,6 +181,15 @@ snesbuild toolchain fetch                # pinned Zig, checksum-verified
 snesbuild build --hermetic --root .      # zig cc + link, no CMake
 ```
 
+Windows ARM64 uses a native AArch64 Zig development snapshot rather than the
+stable 0.16.0 binary. The stable binary was itself miscompiled by an upstream
+LLVM ARM64 COFF TLS bug and crashes on every compile; the replacement is the
+exact fixed snapshot verified in
+[`kaappi#1613`](https://github.com/kaappi/kaappi/issues/1613), authenticated
+with the Zig Software Foundation minisign key, and pinned by SHA-256. Other
+platforms remain on stable Zig 0.16.0. Replace this exception when a stable Zig
+release containing the LLVM fix becomes available.
+
 It is driven by a `snesbuild.ini` manifest at the project root; see
 [`docs/PROJECT_INTEGRATION.md`](docs/PROJECT_INTEGRATION.md).
 

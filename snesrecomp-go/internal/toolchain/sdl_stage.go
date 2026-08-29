@@ -65,7 +65,7 @@ func StageSDL3(target, cacheDir, stageDir string, stdout io.Writer) error {
 	// blocked in some build environments -- see packaging/scripts). macOS is
 	// also the one platform a developer on a Mac can already build natively,
 	// so the cost of carrying that path here buys nothing.
-	if kind != "mingw" {
+	if kind != "mingw" && kind != "vc" {
 		return fmt.Errorf("staging the %s SDL3 redistributable for %s is not supported here; "+
 			"build natively for macOS, or pass --sdl-include/--sdl-lib", kind, target)
 	}
@@ -93,27 +93,43 @@ func StageSDL3(target, cacheDir, stageDir string, stdout io.Writer) error {
 	if err := extract(archivePath, unpacked); err != nil {
 		return err
 	}
-	// The mingw tarball holds one per-ABI subtree per architecture; take the
-	// one matching the target rather than assuming a single directory.
-	abi := map[string]string{"amd64": "x86_64-w64-mingw32", "arm64": "aarch64-w64-mingw32"}[goarch]
-	root := filepath.Join(unpacked, "SDL3-"+PinnedSDL3Version, abi)
-	if !fsutil.DirectoryExists(root) {
-		return fmt.Errorf("%s has no %s subtree (looked in %s)", archive, abi, root)
+	root := filepath.Join(unpacked, "SDL3-"+PinnedSDL3Version)
+	headerRoot := filepath.Join(root, "include", "SDL3")
+	type stagedFile struct{ from, to string }
+	var files []stagedFile
+	switch kind {
+	case "mingw":
+		// The MinGW archive currently contains x86 and x86_64 GNU ABI
+		// subtrees. Keep the target mapping explicit rather than guessing one.
+		abi := map[string]string{"amd64": "x86_64-w64-mingw32", "arm64": "aarch64-w64-mingw32"}[goarch]
+		root = filepath.Join(root, abi)
+		headerRoot = filepath.Join(root, "include", "SDL3")
+		files = []stagedFile{
+			{filepath.Join(root, "lib", "libSDL3.dll.a"), filepath.Join(stageDir, "lib", "libSDL3.dll.a")},
+			{filepath.Join(root, "bin", "SDL3.dll"), filepath.Join(stageDir, "lib", "SDL3.dll")},
+		}
+	case "vc":
+		arch := map[string]string{"amd64": "x64", "arm64": "arm64"}[goarch]
+		libRoot := filepath.Join(root, "lib", arch)
+		files = []stagedFile{
+			{filepath.Join(libRoot, "SDL3.lib"), filepath.Join(stageDir, "lib", "SDL3.lib")},
+			{filepath.Join(libRoot, "SDL3.dll"), filepath.Join(stageDir, "lib", "SDL3.dll")},
+		}
+	}
+	if !fsutil.DirectoryExists(headerRoot) {
+		return fmt.Errorf("%s has no SDL3 headers for %s (looked in %s)", archive, target, headerRoot)
 	}
 	if err := os.RemoveAll(stageDir); err != nil {
 		return err
 	}
-	if err := copyTree(filepath.Join(root, "include", "SDL3"),
+	if err := copyTree(headerRoot,
 		filepath.Join(stageDir, "include", "SDL3")); err != nil {
 		return err
 	}
-	// Both files land in lib/: lld resolves -lSDL3 through the import library,
-	// and hermetic's copySDLRuntime globs the DLL from the same directory to
-	// place it beside the built binary.
-	for _, item := range []struct{ from, to string }{
-		{filepath.Join(root, "lib", "libSDL3.dll.a"), filepath.Join(stageDir, "lib", "libSDL3.dll.a")},
-		{filepath.Join(root, "bin", "SDL3.dll"), filepath.Join(stageDir, "lib", "SDL3.dll")},
-	} {
+	// Both files land in lib/: lld resolves -lSDL3 through either GNU's
+	// libSDL3.dll.a or VC's SDL3.lib, and copySDLRuntime places the DLL beside
+	// the built game.
+	for _, item := range files {
 		if err := copyFile(item.from, item.to); err != nil {
 			return err
 		}

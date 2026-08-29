@@ -151,18 +151,26 @@ func copyRegularFile(source, destination string, mode os.FileMode) (resultErr er
 }
 
 func launcher(binaryName, projectRelative, romRelative string) (string, string) {
-	if runtime.GOOS == "windows" {
+	return launcherForOS(runtime.GOOS, binaryName, projectRelative, romRelative)
+}
+
+func launcherForOS(targetOS, binaryName, projectRelative, romRelative string) (string, string) {
+	if targetOS == "windows" {
 		projectPath := strings.ReplaceAll(projectRelative, "/", `\`)
 		romPath := strings.ReplaceAll(romRelative, "/", `\`)
 		return "run-game.bat", fmt.Sprintf(
-			"@echo off\r\nrem Runs the locally built game.\r\n"+
-				"cd /d \"%%~dp0%s\"\r\n\"%%~dp0%s\" \"%%~dp0%s\" --config config.ini\r\n",
+			"@echo off\r\nrem Runs the locally built game.\r\nsetlocal\r\n"+
+				"if not defined SDL_LOGGING set \"SDL_LOGGING=*=warn\"\r\n"+
+				"cd /d \"%%~dp0%s\"\r\n\"%%~dp0%s\" \"%%~dp0%s\" --config config.ini\r\n"+
+				"if not errorlevel 1 exit /b 0\r\n"+
+				"echo.\r\necho The game exited with an error. Share the messages above when asking for help.\r\n"+
+				"pause\r\nexit /b 1\r\n",
 			projectPath, binaryName, romPath)
 	}
 	projectPath := filepath.ToSlash(projectRelative)
 	romPath := filepath.ToSlash(romRelative)
 	name := "run-game.sh"
-	if runtime.GOOS == "darwin" {
+	if targetOS == "darwin" {
 		name = "run-game.command"
 	}
 	return name, fmt.Sprintf(

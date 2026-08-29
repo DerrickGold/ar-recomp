@@ -8,6 +8,9 @@
 set(_leak_patterns "@SNESBUILD_LEAK_PATTERNS@")
 set(_allowed_toplevel "@SNESBUILD_ALLOWED_TOPLEVEL@")
 set(_scan_exempt "@SNESBUILD_SCAN_EXEMPT_DIRS@")
+set(_runtime_archive_relative "@SNESBUILD_RUNTIME_ARCHIVE_RELATIVE@")
+set(_runtime_source_paths "@SNESBUILD_RUNTIME_SOURCE_PATHS@")
+set(_required_sdl_runtime "@SNESBUILD_REQUIRED_SDL_RUNTIME@")
 
 foreach(_package IN LISTS CPACK_PACKAGE_FILES)
     get_filename_component(_package "${_package}" ABSOLUTE)
@@ -29,6 +32,30 @@ foreach(_package IN LISTS CPACK_PACKAGE_FILES)
         message(FATAL_ERROR "leak check: expected one root directory in ${_package}")
     endif()
     list(GET _roots 0 _root)
+
+    # Distribution bundles consume the runner as a target-keyed binary SDK.
+    # Shipping implementation sources would silently restore the slower,
+    # host-dependent source fallback and make cross-target releases differ.
+    if(NOT EXISTS "${_root}/${_runtime_archive_relative}")
+        message(FATAL_ERROR
+            "runner SDK check: ${_package} is missing ${_runtime_archive_relative}")
+    endif()
+    file(SIZE "${_root}/${_runtime_archive_relative}" _runtime_archive_size)
+    if(_runtime_archive_size EQUAL 0)
+        message(FATAL_ERROR
+            "runner SDK check: ${_runtime_archive_relative} is empty in ${_package}")
+    endif()
+    foreach(_source_path IN LISTS _runtime_source_paths)
+        if(EXISTS "${_root}/${_source_path}")
+            message(FATAL_ERROR
+                "runner SDK check: source-build payload ${_source_path} leaked into ${_package}")
+        endif()
+    endforeach()
+    if(NOT _required_sdl_runtime STREQUAL "" AND
+       NOT EXISTS "${_root}/${_required_sdl_runtime}")
+        message(FATAL_ERROR
+            "bundled SDL check: ${_package} is missing ${_required_sdl_runtime}")
+    endif()
 
     file(GLOB _entries LIST_DIRECTORIES true RELATIVE "${_root}" "${_root}/*")
     foreach(_entry IN LISTS _entries)

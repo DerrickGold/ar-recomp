@@ -15,6 +15,8 @@ import (
 	"time"
 )
 
+const runtimeArchiveObjectCacheVersion = "2"
+
 // RuntimeArchiveOptions builds the source runner into the same target-keyed
 // static-library artifact consumed by source-free hermetic distributions.
 type RuntimeArchiveOptions struct {
@@ -82,6 +84,22 @@ func runtimeCompileArgs(runtimeDir, zigPath, target, optimize string, simd bool,
 	return args
 }
 
+// runtimeDebugObjectArgs replaces Zig's temporary COFF object name with a
+// stable SDK-relative name. Zig cc compiles Windows objects through a private
+// cache path and otherwise records that absolute path in CodeView's S_OBJNAME
+// record. Prefix maps do not apply to S_OBJNAME, so the path would leak the
+// packaging machine's home directory and make the archive non-reproducible.
+func runtimeDebugObjectArgs(runtimeDir, target, source string) []string {
+	if TargetOS(target) != "windows" {
+		return nil
+	}
+	object := strings.TrimSuffix(objectName(runtimeDir, source), ".o") + ".obj"
+	return []string{
+		"-Xclang", "-object-file-name",
+		"-Xclang", "snesrecomp-runtime/" + object,
+	}
+}
+
 // BuildRuntimeArchive creates a deterministic, reusable runner library. It
 // retains an object cache beside the archive so packaging several times does
 // not need to rebuild unchanged translation units.
@@ -135,7 +153,8 @@ func BuildRuntimeArchive(options RuntimeArchiveOptions) (string, error) {
 	compileArgs := runtimeCompileArgs(
 		runtimeDir, options.ZigPath, options.Target, options.Optimize,
 		options.SIMD, manifest)
-	flagsDigest := sha256.Sum256([]byte(options.ZigPath + "\x00" +
+	flagsDigest := sha256.Sum256([]byte(runtimeArchiveObjectCacheVersion + "\x00" +
+		options.ZigPath + "\x00" +
 		strings.Join(compileArgs, "\x00")))
 	flagsHash := hex.EncodeToString(flagsDigest[:])
 	objectDir := filepath.Join(filepath.Dir(outputPath), ".runtime-obj")
@@ -190,8 +209,9 @@ func BuildRuntimeArchive(options RuntimeArchiveOptions) (string, error) {
 			if options.Verbose {
 				fmt.Fprintf(options.Stdout, "  cc %s\n", item.source)
 			}
-			args := append(append([]string(nil), compileArgs...),
-				"-c", item.source, "-o", item.object)
+			args := append([]string(nil), compileArgs...)
+			args = append(args, runtimeDebugObjectArgs(runtimeDir, options.Target, item.source)...)
+			args = append(args, "-c", item.source, "-o", item.object)
 			command := exec.Command(options.ZigPath, args...)
 			command.Dir = runtimeDir
 			output, err := command.CombinedOutput()

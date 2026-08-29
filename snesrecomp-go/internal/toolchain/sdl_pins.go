@@ -15,7 +15,8 @@ const (
 
 // sdlPin is one bundled SDL3 redistributable: the download file name (under the
 // SDL release URL), its SHA256, and the archive kind that tells the packaging
-// script how to unpack it ("dmg" on macOS, "mingw" for the Windows tarball).
+// script how to unpack it ("dmg" on macOS, "mingw" for the GNU Windows
+// tarball, and "vc" for the Windows ARM64 development ZIP).
 type sdlPin struct {
 	Archive string
 	SHA256  string
@@ -24,13 +25,16 @@ type sdlPin struct {
 
 // pinnedSDL3 maps GOOS/GOARCH to the official SDL3 redistributable, keyed the
 // same way as pinnedZig. Only platforms with an official prebuilt binary are
-// present: the macOS universal .dmg (one file serves both arches) and the
-// Windows x86_64 mingw tarball. Everything else falls back to a system SDL3, so
-// it has no pin here and SDL3Pin returns an error for it.
+// present: the macOS universal .dmg (one file serves both arches), the Windows
+// x86_64 MinGW tarball, and the Windows ARM64 VC development archive. Zig/lld
+// accepts the latter's COFF import library when targeting aarch64-windows-gnu.
+// Everything else falls back to a system SDL3, so it has no pin here and
+// SDL3Pin returns an error for it.
 var pinnedSDL3 = map[string]sdlPin{
 	"darwin/arm64":  {"SDL3-" + PinnedSDL3Version + ".dmg", "c77d36d9393bb5481e38d222b75a1a63ab16274457b3d18c63fef90aaf5fc93b", "dmg"},
 	"darwin/amd64":  {"SDL3-" + PinnedSDL3Version + ".dmg", "c77d36d9393bb5481e38d222b75a1a63ab16274457b3d18c63fef90aaf5fc93b", "dmg"},
 	"windows/amd64": {"SDL3-devel-" + PinnedSDL3Version + "-mingw.tar.gz", "ea8071241b934e1feec0337f7d78807a5004de9a500dba1942aaf615a988d7a2", "mingw"},
+	"windows/arm64": {"SDL3-devel-" + PinnedSDL3Version + "-VC.zip", "8793a153c7eba93b1eb8022fd2356383ec446b2584e43724a72ef68d682813ab", "vc"},
 }
 
 // SDL3Pin returns the bundled SDL3 redistributable pin for a target platform:

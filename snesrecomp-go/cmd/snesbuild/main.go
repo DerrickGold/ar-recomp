@@ -505,7 +505,11 @@ func runToolchain(args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("pinned Zig      %s\n", toolchain.PinnedZigVersion)
+		pinnedVersion, err := toolchain.PinnedVersion()
+		if err != nil {
+			return err
+		}
+		fmt.Printf("pinned Zig      %s\n", pinnedVersion)
 		fmt.Printf("release         %s\n", url)
 		fmt.Printf("sha256          %s\n", sha)
 		located, err := toolchain.Locate(cache)
@@ -514,8 +518,8 @@ func runToolchain(args []string) error {
 			return err
 		}
 		fmt.Printf("local zig       %s (%s, via %s)\n", located.Version, located.Path, located.Source)
-		if located.Version != toolchain.PinnedZigVersion {
-			fmt.Printf("note            local version differs from the pin; hermetic release builds should use %s\n", toolchain.PinnedZigVersion)
+		if located.Version != pinnedVersion {
+			fmt.Printf("note            local version differs from the pin; hermetic release builds should use %s\n", pinnedVersion)
 		}
 		return nil
 	case "fetch":

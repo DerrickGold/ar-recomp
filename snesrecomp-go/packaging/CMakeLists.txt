@@ -175,7 +175,7 @@ add_custom_command(
         --cache-dir ${CMAKE_CURRENT_SOURCE_DIR}/build/host-toolchain
         --optimize=-O2
     DEPENDS ${_runtime_archive_inputs}
-    COMMENT "Building runner SDK archive for ${_runtime_zig_target}"
+    COMMENT "Cross-building runner SDK archive for ${_runtime_zig_target} with packaging-host Zig"
     VERBATIM)
 add_custom_target(runtime_archive ALL DEPENDS ${_runtime_archive})
 
@@ -191,6 +191,8 @@ separate_arguments(_zig_pin_fields UNIX_COMMAND "${_zig_pin}")
 list(GET _zig_pin_fields 0 _zig_url)
 list(GET _zig_pin_fields 1 _zig_sha)
 list(GET _zig_pin_fields 2 _zig_archive)
+message(STATUS
+    "Bundle target compiler for ${SNESBUILD_GOOS}/${SNESBUILD_GOARCH}: ${_zig_archive}")
 file(DOWNLOAD ${_zig_url} ${_cache_dir}/${_zig_archive}
     EXPECTED_HASH SHA256=${_zig_sha} SHOW_PROGRESS)
 string(REGEX REPLACE "\\.(tar\\.xz|zip)$" "" _zig_release "${_zig_archive}")
@@ -216,8 +218,7 @@ set(SNESBUILD_SDL3_BUNDLED FALSE)
 # sdl_pins.go), the same pattern as the Zig pin above, so no SHA256 is
 # hardcoded here. Only query the official redistributable pin on platforms
 # where one is required; generic Linux intentionally uses the system SDL.
-if(SNESBUILD_GOOS STREQUAL "darwin" OR
-   (SNESBUILD_GOOS STREQUAL "windows" AND SNESBUILD_GOARCH STREQUAL "amd64"))
+if(SNESBUILD_GOOS STREQUAL "darwin" OR SNESBUILD_GOOS STREQUAL "windows")
     execute_process(
         COMMAND ${GO_EXECUTABLE} -C ${SNESBUILD_MODULE_DIR} run ./cmd/snesbuild
             toolchain pin --sdl --goos ${SNESBUILD_GOOS} --goarch ${SNESBUILD_GOARCH}
@@ -228,7 +229,10 @@ if(SNESBUILD_GOOS STREQUAL "darwin" OR
             "could not resolve the SDL3 pin for ${SNESBUILD_GOOS}/${SNESBUILD_GOARCH}")
     endif()
     separate_arguments(_sdl_pin_fields UNIX_COMMAND "${_sdl_pin}")
+    list(GET _sdl_pin_fields 0 _sdl_url)
     list(GET _sdl_pin_fields 1 _sdl_src_sha)
+    list(GET _sdl_pin_fields 2 _sdl_archive)
+    list(GET _sdl_pin_fields 3 _sdl_kind)
 endif()
 
 if(SNESBUILD_GOOS STREQUAL "darwin")
@@ -371,14 +375,35 @@ elseif(SNESBUILD_STEAM_DECK)
         file(WRITE ${_deck_sdl_pin_stamp} "${_deck_sdl_expected_pin}")
     endif()
     set(SNESBUILD_SDL3_BUNDLED TRUE)
+elseif(SNESBUILD_GOOS STREQUAL "windows" AND SNESBUILD_GOARCH STREQUAL "arm64")
+    if(NOT _sdl_kind STREQUAL "vc")
+        message(FATAL_ERROR "Expected the VC SDL3 archive for Windows ARM64, got ${_sdl_kind}")
+    endif()
+    file(DOWNLOAD ${_sdl_url} ${_cache_dir}/${_sdl_archive}
+        EXPECTED_HASH SHA256=${_sdl_src_sha})
+    if(NOT EXISTS ${_sdl_stage}/lib/SDL3.dll OR
+       NOT EXISTS ${_sdl_stage}/lib/SDL3.lib)
+        file(REMOVE_RECURSE ${_sdl_stage} ${CMAKE_BINARY_DIR}/deps/vc)
+        file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/deps/vc)
+        execute_process(COMMAND ${CMAKE_COMMAND} -E tar xf ${_cache_dir}/${_sdl_archive}
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/deps/vc COMMAND_ERROR_IS_FATAL ANY)
+        set(_vc_root ${CMAKE_BINARY_DIR}/deps/vc/SDL3-${SNESBUILD_SDL3_VERSION})
+        file(MAKE_DIRECTORY ${_sdl_stage}/lib)
+        file(COPY ${_vc_root}/include/SDL3/ DESTINATION ${_sdl_stage}/include/SDL3)
+        file(COPY_FILE ${_vc_root}/lib/arm64/SDL3.lib ${_sdl_stage}/lib/SDL3.lib)
+        file(COPY_FILE ${_vc_root}/lib/arm64/SDL3.dll ${_sdl_stage}/lib/SDL3.dll)
+    endif()
+    set(SNESBUILD_SDL3_BUNDLED TRUE)
 elseif(SNESBUILD_GOOS STREQUAL "windows" AND SNESBUILD_GOARCH STREQUAL "amd64")
-    set(_sdl_mingw SDL3-devel-${SNESBUILD_SDL3_VERSION}-mingw.tar.gz)
-    file(DOWNLOAD ${_sdl_base}/${_sdl_mingw} ${_cache_dir}/${_sdl_mingw}
+    if(NOT _sdl_kind STREQUAL "mingw")
+        message(FATAL_ERROR "Expected the MinGW SDL3 archive for Windows x86_64, got ${_sdl_kind}")
+    endif()
+    file(DOWNLOAD ${_sdl_url} ${_cache_dir}/${_sdl_archive}
         EXPECTED_HASH SHA256=${_sdl_src_sha})
     if(NOT EXISTS ${_sdl_stage}/lib/SDL3.dll)
         file(REMOVE_RECURSE ${_sdl_stage} ${CMAKE_BINARY_DIR}/deps/mingw)
         file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/deps/mingw)
-        execute_process(COMMAND ${CMAKE_COMMAND} -E tar xf ${_cache_dir}/${_sdl_mingw}
+        execute_process(COMMAND ${CMAKE_COMMAND} -E tar xf ${_cache_dir}/${_sdl_archive}
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/deps/mingw COMMAND_ERROR_IS_FATAL ANY)
         set(_mingw_root ${CMAKE_BINARY_DIR}/deps/mingw/SDL3-${SNESBUILD_SDL3_VERSION}/x86_64-w64-mingw32)
         file(MAKE_DIRECTORY ${_sdl_stage}/lib)
@@ -542,6 +567,25 @@ endif()
 # the string scan.
 set(SNESBUILD_ALLOWED_TOPLEVEL "${_run_script_name}" README.txt utils)
 set(SNESBUILD_SCAN_EXEMPT_DIRS utils/tools/toolchain utils/tools/sdl3 utils/third_party)
+set(SNESBUILD_RUNTIME_ARCHIVE_RELATIVE
+    "utils/snesrecomp-go/runtime/lib/${_runtime_zig_target}/${_runtime_archive_name}")
+set(SNESBUILD_RUNTIME_SOURCE_PATHS
+    utils/snesrecomp-go/runtime/src
+    utils/snesrecomp-go/runtime/runner.cmake
+    utils/snesrecomp-go/runtime/sources.cmake
+    utils/snesrecomp-go/runtime/CMakeLists.txt
+    utils/snesrecomp-go/runtime/tests
+    utils/snesrecomp-go/runtime/examples)
+set(SNESBUILD_REQUIRED_SDL_RUNTIME "")
+if(SNESBUILD_SDL3_BUNDLED)
+    if(SNESBUILD_GOOS STREQUAL "windows")
+        set(SNESBUILD_REQUIRED_SDL_RUNTIME utils/tools/sdl3/lib/SDL3.dll)
+    elseif(SNESBUILD_GOOS STREQUAL "darwin")
+        set(SNESBUILD_REQUIRED_SDL_RUNTIME utils/tools/sdl3/lib/libSDL3.dylib)
+    elseif(SNESBUILD_STEAM_DECK)
+        set(SNESBUILD_REQUIRED_SDL_RUNTIME utils/tools/sdl3/lib/libSDL3.so)
+    endif()
+endif()
 set(_leak_paths "${CMAKE_CURRENT_SOURCE_DIR}" "${GAME_ROOT}")
 if(DEFINED ENV{HOME} AND NOT "$ENV{HOME}" STREQUAL "")
     list(APPEND _leak_paths "$ENV{HOME}")

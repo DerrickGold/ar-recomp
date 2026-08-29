@@ -21,23 +21,62 @@ import (
 	"time"
 )
 
-// PinnedZigVersion is the single Zig release every platform bundle carries.
+// PinnedZigVersion is the stable Zig release used by platforms without a
+// platform-specific override below.
 const PinnedZigVersion = "0.16.0"
 
+// Windows ARM64 cannot use the official Zig 0.16.0 binary: that binary was
+// itself miscompiled by LLVM and access-violates as soon as it compiles any
+// input. This exact development build was verified on native Windows ARM64
+// hardware after the LLVM COFF TLS fix landed. Keep it pinned until a stable
+// Zig release containing the fix is available.
+//
+// Upstream reproducer and root cause:
+//
+//	https://github.com/kaappi/kaappi/issues/1613
+//	https://codeberg.org/ziglang/zig/issues/31865
+const pinnedWindowsARM64ZigVersion = "0.17.0-dev.1413+addc3c3b8"
+
 type pin struct {
+	Version string
 	Archive string // release archive file name
 	SHA256  string
+	URL     string // empty uses ziglang.org/download/<version>/<archive>
 }
 
-// Pinned archives for ziglang.org/download/<version>/<archive>, keyed by
-// GOOS/GOARCH. Checksums come from the official release index.
+func stablePin(archive, sha256 string) pin {
+	return pin{Version: PinnedZigVersion, Archive: archive, SHA256: sha256}
+}
+
+// Pinned archives keyed by GOOS/GOARCH. Stable-release checksums come from the
+// official release index; an override documents its independently verified
+// provenance at the entry.
 var pinnedZig = map[string]pin{
-	"darwin/arm64":  {"zig-aarch64-macos-0.16.0.tar.xz", "b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489"},
-	"darwin/amd64":  {"zig-x86_64-macos-0.16.0.tar.xz", "0387557ed1877bc6a2e1802c8391953baddba76081876301c522f52977b52ba7"},
-	"linux/amd64":   {"zig-x86_64-linux-0.16.0.tar.xz", "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00"},
-	"linux/arm64":   {"zig-aarch64-linux-0.16.0.tar.xz", "ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17"},
-	"windows/amd64": {"zig-x86_64-windows-0.16.0.zip", "68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e"},
-	"windows/arm64": {"zig-aarch64-windows-0.16.0.zip", "aee38316ee4111717900f45dd3130145c39289e105541d737eb8c5ed653c78ef"},
+	"darwin/arm64": stablePin(
+		"zig-aarch64-macos-0.16.0.tar.xz",
+		"b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489"),
+	"darwin/amd64": stablePin(
+		"zig-x86_64-macos-0.16.0.tar.xz",
+		"0387557ed1877bc6a2e1802c8391953baddba76081876301c522f52977b52ba7"),
+	"linux/amd64": stablePin(
+		"zig-x86_64-linux-0.16.0.tar.xz",
+		"70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00"),
+	"linux/arm64": stablePin(
+		"zig-aarch64-linux-0.16.0.tar.xz",
+		"ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17"),
+	"windows/amd64": stablePin(
+		"zig-x86_64-windows-0.16.0.zip",
+		"68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e"),
+	"windows/arm64": {
+		Version: pinnedWindowsARM64ZigVersion,
+		Archive: "zig-aarch64-windows-" + pinnedWindowsARM64ZigVersion + ".zip",
+		SHA256:  "8d8b09e42859db38b148ab576392e3c723070f8ab57240bba182857a32e24f6e",
+		// pkg.hexops.org is listed by ziglang.org as a community mirror.
+		// The archive and trusted filename were verified with the ZSF
+		// minisign public key before recording this checksum.
+		URL: "https://pkg.hexops.org/zig/zig-aarch64-windows-" +
+			pinnedWindowsARM64ZigVersion + ".zip?source=snesrecomp-go",
+	},
 }
 
 // Zig describes a usable compiler and where it came from.
@@ -71,7 +110,7 @@ func Pin(goos, goarch string) (url, sha, archive string, err error) {
 	if err != nil {
 		return "", "", "", err
 	}
-	return "https://ziglang.org/download/" + PinnedZigVersion + "/" + entry.Archive, entry.SHA256, entry.Archive, nil
+	return pinURL(entry), entry.SHA256, entry.Archive, nil
 }
 
 // PinnedURL returns the download URL and checksum for the current host.
@@ -80,7 +119,23 @@ func PinnedURL() (url, sha string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	return "https://ziglang.org/download/" + PinnedZigVersion + "/" + entry.Archive, entry.SHA256, nil
+	return pinURL(entry), entry.SHA256, nil
+}
+
+// PinnedVersion returns the toolchain version selected for the current host.
+func PinnedVersion() (string, error) {
+	entry, err := hostPin()
+	if err != nil {
+		return "", err
+	}
+	return entry.Version, nil
+}
+
+func pinURL(entry pin) string {
+	if entry.URL != "" {
+		return entry.URL
+	}
+	return "https://ziglang.org/download/" + entry.Version + "/" + entry.Archive
 }
 
 func zigExecutableName() string {
