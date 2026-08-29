@@ -166,14 +166,14 @@ static void TestAppendedKeyCarriesItsSectionHeader(void) {
   /* The new key belongs to [Graphics], but [Sound] is the last section in the
    * live file -- so an append without a header would land in [Sound]. */
   const char *shipped =
-      "[Graphics]\nWindowScale = 3\nNewRenderer = 1\n"
+      "[Graphics]\nWindowScale = 3\nAspectPAR = 4:3\n"
       "[Sound]\nEnableAudio = 1\n";
 
   int added = 0;
   char *out = Merge(live, shipped, &added);
   if (!out) return;
   CHECK(added == 1);
-  const char *key = strstr(out, "NewRenderer");
+  const char *key = strstr(out, "AspectPAR");
   CHECK(key != NULL);
   if (key) {
     /* Walk back to the nearest '[' line before the key and check which it is. */
@@ -386,7 +386,7 @@ static void TestRealisticConfigUpgrade(void) {
       "[Graphics]\n"
       "WindowScale = 3\n"
       "Fullscreen = 0\n"
-      "NewRenderer = 1\n"          /* the new setting this version adds */
+      "AspectPAR = 4:3\n"         /* the new setting this version adds */
       "\n"
       "[KeyMap]\n"
       "Fullscreen = Alt+Return\n";
@@ -397,7 +397,7 @@ static void TestRealisticConfigUpgrade(void) {
   CHECK(added == 1);                                 /* exactly the one */
   CHECK(strstr(out, "WindowScale = 4") != NULL);      /* user's scale kept */
   CHECK(strstr(out, "Autosave = 1") != NULL);         /* user's autosave kept */
-  CHECK(strstr(out, "NewRenderer = 1") != NULL);      /* new setting arrived */
+  CHECK(strstr(out, "AspectPAR = 4:3") != NULL);      /* new setting arrived */
   CHECK(strstr(out, "Alt+Return") != NULL);           /* binding untouched */
   free(out);
 }

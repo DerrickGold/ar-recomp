@@ -44,6 +44,51 @@ type HermeticOptions struct {
 	Stderr  io.Writer
 }
 
+// toolLog forwards a subprocess's own output to the build log. Zig's
+// diagnostics are the ONLY thing that can explain a failed compile or link, and
+// they used to reach nowhere a reader could get at: captured and dropped on
+// success, and on failure folded into an error string whose caller has a
+// one-line status field to show twenty lines of linker output in. They belong
+// in the log the reader is already watching.
+//
+// Everything is compiled with -w, so a healthy unit is silent and this costs
+// nothing on a normal build -- but the linker is NOT silenced, and its "note:
+// referenced by" lines are precisely what an undefined-symbol failure needs.
+//
+// Output is captured per command and emitted as a whole rather than streamed:
+// up to Jobs compiles run at once, and interleaving their raw streams would
+// shred every multi-line diagnostic into unreadable fragments. The mutex keeps
+// one command's block contiguous.
+type toolLog struct {
+	mu     sync.Mutex
+	writer io.Writer
+}
+
+func (log *toolLog) printf(format string, args ...any) {
+	log.mu.Lock()
+	defer log.mu.Unlock()
+	fmt.Fprintf(log.writer, format, args...)
+}
+
+// block writes one command's output under a heading naming what produced it,
+// indented so it reads as subordinate detail and, just as importantly, so no
+// diagnostic line can imitate one of the "hermetic:"/"cc " status lines the
+// progress model reads out of this same log.
+func (log *toolLog) block(heading string, output []byte) {
+	body := strings.TrimRight(string(output), "\n\r \t")
+	if body == "" {
+		return
+	}
+	var builder strings.Builder
+	fmt.Fprintf(&builder, "  -- %s --\n", heading)
+	for _, line := range strings.Split(body, "\n") {
+		builder.WriteString("  | " + strings.TrimRight(line, "\r") + "\n")
+	}
+	log.mu.Lock()
+	defer log.mu.Unlock()
+	_, _ = io.WriteString(log.writer, builder.String())
+}
+
 // TargetOS maps a Zig target triple to the GOOS-style name the rest of this
 // file switches on, so link flags follow the target rather than the host.
 // An empty target means the host.
@@ -269,6 +314,7 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 		len(sources), cached, len(jobs), options.Jobs)
 
 	started := time.Now()
+	tools := &toolLog{writer: options.Stdout}
 	var failed atomic.Bool
 	var firstError error
 	var errorOnce sync.Once
@@ -287,7 +333,7 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 				return
 			}
 			if options.Verbose {
-				fmt.Fprintf(options.Stdout, "  cc %s\n", item.source)
+				tools.printf("  cc %s\n", item.source)
 			}
 			args := compileArgs
 			if item.runner {
@@ -295,10 +341,14 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 			}
 			command := exec.Command(options.ZigPath, append(append([]string(nil), args...), "-c", item.source, "-o", item.object)...)
 			output, err := command.CombinedOutput()
+			// Emitted whether or not the unit failed -- -w keeps a healthy
+			// compile silent, so anything a tool does say here is worth reading.
+			tools.block("cc "+item.source, output)
 			if err != nil {
 				failed.Store(true)
 				errorOnce.Do(func() {
-					firstError = fmt.Errorf("compile %s: %w\n%s", item.source, err, strings.TrimSpace(string(output)))
+					firstError = fmt.Errorf("compile %s: %w (its output is in the build log above)",
+						item.source, err)
 				})
 			}
 		}(item)
@@ -378,8 +428,9 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	linkArgs = append(linkArgs, manifest.Link...)
 	command := exec.Command(options.ZigPath, linkArgs...)
 	output, err := command.CombinedOutput()
+	tools.block("link "+filepath.Base(binary), output)
 	if err != nil {
-		return "", fmt.Errorf("link %s: %w\n%s", binary, err, strings.TrimSpace(string(output)))
+		return "", fmt.Errorf("link %s: %w (its output is in the build log above)", binary, err)
 	}
 	if sdlBundled {
 		copied, copyErr := copySDLRuntime(targetOS, options.SDLLibDir, filepath.Dir(binary))

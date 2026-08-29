@@ -25,7 +25,6 @@
 #include "runner_internal.h"
 
 /* Externs the PPU references; only fire under instrumentation. */
-bool g_new_ppu = true;
 int sr_trace_active(void) { return 0; }
 void sr_trace_ppumem(uint16_t a, uint8_t v) { (void)a; (void)v; }
 void sr_trace_reg(uint16_t a, uint8_t v) { (void)a; (void)v; }

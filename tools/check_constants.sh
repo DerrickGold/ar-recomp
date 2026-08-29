@@ -58,6 +58,32 @@ check_forbidden \
   '#define[[:space:]]+(MUSIC_MUTE_SRCN_MIN|SFX_SRCN_MAX)\b' \
   src --glob '*.[ch]' --glob '!gen/**'
 
+# The vended default ships to every install. It is a TEMPLATE rather than the
+# developer's live config.ini precisely so an afternoon's debugging cannot reach
+# a release -- this check is the other half of that: the template itself must
+# stay stock. AR_MOONJUMP, AR_NO_KNOCKBACK and AR_RANGED_SWORD were all enabled
+# in a shipped default before the two were separated. Comment settings out
+# rather than deleting them; only uncommented assignments are flagged.
+check_vended_config_is_stock() {
+  file=$1
+  [ -f "$file" ] || return 0
+  violations=$(awk '
+    /^[[:space:]]*\[/ { section = $0; sub(/^[[:space:]]*/, "", section); next }
+    /^[[:space:]]*[#;]/ { next }
+    /^[[:space:]]*$/ { next }
+    (section == "[Cheats]" || section == "[Debug]") {
+      printf "%s:%d: %s\n", FILENAME, FNR, $0
+    }
+  ' "$file")
+  if [ -n "$violations" ]; then
+    printf '%s\n' "vended-config violation: $file must ship with no cheat or debug setting enabled" >&2
+    printf '%s\n' "$violations" >&2
+    status=1
+  fi
+}
+
+check_vended_config_is_stock snesrecomp-go/packaging/templates/config.ini
+
 if [ "$status" -eq 0 ]; then
   printf '%s\n' "Canonical constant checks passed."
 fi

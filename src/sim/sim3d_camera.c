@@ -35,8 +35,7 @@ static bool ProfileUsesGround(SimRenderFeatureMask features) {
 }
 
 bool Sim3DCamera_ControlsAvailable(bool textures_ready) {
-  if (!g_settings.sim3d_mode || !Diorama_NewPpuCapable() ||
-      !textures_ready ||
+  if (!g_settings.sim3d_mode || !textures_ready ||
       !(Sim3D_ImplementedFeatures() & kSimFeature_GroundProjection) ||
       !ActRaiser_IsSimulationTown(g_ram[kActRaiserWram_MapGroup],
                                   g_ram[kActRaiserWram_CurrentMap]) ||

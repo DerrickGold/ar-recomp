@@ -17,10 +17,12 @@ extern uint8_t g_pixels[];
 extern uint8_t g_hud_bg_pixels[];
 extern uint8_t g_hud_obj_pixels[];
 
-/* The single diorama gate: capture and rendering both call this definition,
- * so mode, renderer capability, and map-group policy cannot drift apart. */
+/* The single diorama gate: capture and rendering both call this definition, so
+ * mode and map-group policy cannot drift apart. The renderer capability that
+ * used to be a third term here is gone: the PPU has one path now, so it was
+ * always true. */
 bool Diorama_IsActiveThisFrame(void) {
-  return g_settings.diorama_mode && Diorama_NewPpuCapable() &&
+  return g_settings.diorama_mode &&
          ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]);
 }
 

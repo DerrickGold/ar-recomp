@@ -108,6 +108,12 @@ func buildFromGUI(
 		Paths:   paths,
 		ZigPath: zig.Path, Jobs: values.jobs,
 		Optimize: values.optimize, Stdout: output, Stderr: output,
+		// Per-unit "cc <source>" lines. The compile is by far the longest and
+		// quietest stretch of a build, and the progress model counts exactly
+		// these lines to measure it (buildgui/progress.go) -- without them the
+		// bar cannot report anything for the phase the reader waits on most.
+		// ~350 lines against a 2 MiB log cap.
+		Verbose: true,
 	})
 	if err != nil {
 		return buildgui.Result{}, err

@@ -28,7 +28,9 @@ void ParseConfigFile(const char *path) {
        * Borderless (1); 0 stays Windowed (0). */
       Settings_StageConfigValue("window_mode", atoi(val) ? "1" : "0");
     } else if (application_section && strcmp(key, "NewRenderer") == 0) {
-      Settings_StageConfigValue("new_renderer", val);
+      /* Removed setting, still parsed so an existing config.ini does not trip
+       * over it. The legacy renderer it selected between no longer exists --
+       * the PPU has one path -- so there was nothing left to choose. */
     } else if (application_section && strcmp(key, "NoSpriteLimits") == 0) {
       /* Parsed compatibility leftover, no runtime consumer (docs/manual.md). */
     } else if (application_section && strcmp(key, "AudioFreq") == 0) {

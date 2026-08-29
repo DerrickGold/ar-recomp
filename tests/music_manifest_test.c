@@ -197,6 +197,70 @@ static void TestSelection(void) {
   CHECK(MusicReplacements_Select(0x1A94B8, 1) == NULL);
 }
 
+
+/* Selection is by specificity, not position. Position deciding on its own made
+ * a manifest depend on an invariant nothing enforced: an ungated catch-all
+ * written above a gated variant shadowed it completely, and the builder GUI
+ * rewrites its [music:song-NN] entry wherever that section already sits -- so a
+ * correct hand-authored split could stop applying the first time someone
+ * dropped a file into the catch-all slot, with no diagnostic either way. */
+static void TestGatedVariantsBeatAnUngatedEntryInAnyOrder(void) {
+  const char *catch_all_first =
+      "[music:song-09]\nsrc = 0E:F69F\nfile = audio/act2.ogg\n"
+      "[music:act2-fillmore]\nsrc = 0E:F69F\nwhen = wram[0018]==0x01\n"
+      "file = audio/act2-fillmore.ogg\n"
+      "[music:act2-kasandora]\nsrc = 0E:F69F\nwhen = wram[0018]==0x03\n"
+      "file = audio/act2-kasandora.ogg\n";
+  const char *catch_all_last =
+      "[music:act2-fillmore]\nsrc = 0E:F69F\nwhen = wram[0018]==0x01\n"
+      "file = audio/act2-fillmore.ogg\n"
+      "[music:act2-kasandora]\nsrc = 0E:F69F\nwhen = wram[0018]==0x03\n"
+      "file = audio/act2-kasandora.ogg\n"
+      "[music:song-09]\nsrc = 0E:F69F\nfile = audio/act2.ogg\n";
+
+  for (int variant = 0; variant < 2; variant++) {
+    const char *body = variant ? catch_all_last : catch_all_first;
+    CHECK(MusicReplacements_Load(WriteManifest(body)) == 3);
+    memset(g_ram, 0, sizeof(g_ram));
+    memset(&g_settings, 0, sizeof(g_settings));
+    g_settings.music_replacements = true;
+    for (int i = 0; i < g_music_replacement_count; i++)
+      g_music_replacements[i].has_audio = true;
+
+    /* The act spans several rooms; only the region byte gates the variant. */
+    for (int map = 1; map <= 8; map++) {
+      g_ram[0x19] = (uint8)map;
+      g_ram[0x18] = 0x01;
+      CHECK(!strcmp(MusicReplacements_Select(0x0EF69F, 1)->name, "act2-fillmore"));
+      g_ram[0x18] = 0x03;
+      CHECK(!strcmp(MusicReplacements_Select(0x0EF69F, 1)->name, "act2-kasandora"));
+    }
+    /* Any other region falls through to the catch-all. */
+    g_ram[0x18] = 0x05;
+    CHECK(!strcmp(MusicReplacements_Select(0x0EF69F, 1)->name, "song-09"));
+
+    /* A gated entry whose file is absent must not shadow the catch-all: it is
+     * more specific, but there is nothing to play. */
+    g_ram[0x18] = 0x01;
+    for (int i = 0; i < g_music_replacement_count; i++)
+      if (!strcmp(g_music_replacements[i].name, "act2-fillmore"))
+        g_music_replacements[i].has_audio = false;
+    CHECK(!strcmp(MusicReplacements_Select(0x0EF69F, 1)->name, "song-09"));
+  }
+
+  /* Overlapping gates are the one case position still decides, because
+   * specificity cannot separate them. */
+  CHECK(MusicReplacements_Load(WriteManifest(
+      "[music:broad]\nsrc = 0E:F69F\nwhen = wram[0018]==0x01\nfile = a.ogg\n"
+      "[music:narrow]\nsrc = 0E:F69F\nwhen = wram[0018]==0x01, wram[0019]==0x02\n"
+      "file = b.ogg\n")) == 2);
+  for (int i = 0; i < g_music_replacement_count; i++)
+    g_music_replacements[i].has_audio = true;
+  g_ram[0x18] = 0x01;
+  g_ram[0x19] = 0x02;
+  CHECK(!strcmp(MusicReplacements_Select(0x0EF69F, 1)->name, "broad"));
+}
+
 static void TestLoopSlicing(void) {
   bool hit;
 
@@ -422,6 +486,7 @@ int main(void) {
   TestParseRejections();
   TestSharedManifestHdSideIgnoresMusic();
   TestSelection();
+  TestGatedVariantsBeatAnUngatedEntryInAnyOrder();
   TestLoopSlicing();
   TestRedundantRestartGuard();
   TestTriggerStateMachine();

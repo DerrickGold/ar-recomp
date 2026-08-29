@@ -60,7 +60,18 @@ CLEAN_RELEASE    := release
 check-constants:
 	@sh tools/check_constants.sh
 
-dev:
+# config.ini is gitignored -- it is the developer's live config, and the stock
+# copy that ships is the packaging template. Seed it once so a fresh clone runs
+# with the project's tuned base settings instead of the built-in fallbacks (a
+# missing --config file is a silent no-op in ParseConfigFile). Never
+# overwrites: this file is yours the moment it exists.
+CONFIG_TEMPLATE := $(PACKAGING)/templates/config.ini
+
+config.ini:
+	@cp $(CONFIG_TEMPLATE) $@
+	@echo "seeded $@ from $(CONFIG_TEMPLATE)"
+
+dev: config.ini
 	@if [ -z "$$(ls src/gen/*.c 2>/dev/null)" ]; then \
 	  echo "=== regenerating (src/gen is empty) ==="; \
 	  go -C snesrecomp-go run ./cmd/snesbuild regen --root .. --rom $(ROM) --allow-stubs; \

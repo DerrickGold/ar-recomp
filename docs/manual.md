@@ -57,7 +57,6 @@ have no effect: `Autosave`, `DisableFrameDelay`, `SkipLauncher`,
 |---|---|
 | `WindowScale` | integer window scale factor |
 | `Fullscreen` | desktop-fullscreen window mode; live changes are supported by the settings registry |
-| `NewRenderer` | use the newer rendering path; live, though widescreen always forces it on |
 | `ExtendedAspectRatio` | live screen ratio: `4:3`/legacy `off`, `16:9`, or `16:10` |
 | `AspectPAR` | live pixel shape: `4:3` for SNES pixel-aspect correction or `square` |
 | `IgnoreAspectRatio` | disable logical-size aspect correction and stretch to the window |
@@ -158,7 +157,7 @@ Keyboard only, not re-bindable:
 ## The settings overlay
 
 The overlay is available from every game state. Its navigation column contains
-Video, Diorama, Town 3D, Audio, Controls, Cheats, Save, and System. Enabling
+Video, Action 3D, Town 3D, Audio, Controls, Cheats, Save, and System. Enabling
 *Show debug settings* adds the developer-only Layers section.
 
 | Context | Controls |
@@ -472,9 +471,14 @@ default, and is safe to ignore unless you are debugging the source checkout.
 
 ## Asset replacement (HD art & music)
 
-Both systems use the tracked `game-assets/manifest.ini`. A replacement activates
-only when its named file exists; asset files are gitignored. Missing files are
-inert, so a fresh clone keeps the authentic graphics and audio.
+Both systems use `game-assets/manifest.ini`. That file is LIVE and yours: the
+builder writes to it, you can hand-edit it, and it is gitignored along with the
+asset files. It is seeded from a tracked template
+(`snesrecomp-go/internal/buildgui/assets/manifest.ini`, embedded in snesbuild
+and vended as the release default) the first time the builder runs, and never
+overwritten afterwards — so an upgrade cannot discard entries you added. A
+replacement activates only when its named file exists; missing files are inert,
+so a fresh clone keeps the authentic graphics and audio.
 
 In a downloaded bundle, the same folder is `utils/game-assets/`.
 
@@ -496,13 +500,18 @@ Streams OGG Vorbis files in place of the SPC driver's songs — sound effects
 stay authentic (the SPC driver keeps running; only its per-song instrument
 voices are muted at the DSP). All 17 songs of the ROM's song table ship as
 inert manifest entries (`audio/title.ogg` is the title theme). The builder's
-**Assets** tab lists all 17 images, including entries whose names have not been
-identified yet. Those appear as **Unidentified track NN** with their exact
-`[music:song-NN]` manifest identity and ROM source, so their extracted preview
-can be auditioned and tagged without first encountering the music in-game.
-Browse to an Ogg Vorbis file and Save copies it into the game's working
-directory and updates that manifest record without discarding authored gain,
-loop, or gate keys.
+**Assets** tab lists all 17 images, including entries whose titles have not been
+established yet. Those appear as **Track NN**, after their song-table slot, with
+their exact `[music:song-NN]` manifest identity and ROM source, so their
+extracted preview can be auditioned and tagged without first encountering the
+music in-game.
+Browse to an Ogg Vorbis file and Save copies it to the path that slot's manifest
+record already names — the same path the "drop a file with the matching name"
+route uses, so the two ways of managing a replacement stay interchangeable and a
+re-upload overwrites in place rather than leaving the previous copy behind. The
+record itself is left alone, gain, loop and gate keys included, unless it names
+no file yet. **Use original** deletes that file and keeps the record, so
+dropping a file back at the same path re-engages the slot.
 
 For side-by-side comparison, first supply the ROM on the **Build** tab, then
 choose **Extract original-audio previews** on **Assets**. The builder's bundled
@@ -526,8 +535,12 @@ sample-accurate: set `LOOPSTART`/`LOOPLENGTH` Vorbis comment tags in the file
 (the RPG Maker convention, so existing tagging tools work), or
 `loop_start`/`loop_end` keys in the manifest entry; untagged files loop whole.
 Per-entry `when =` gates (same grammar as the HD art entries) select
-game-state-dependent variants of the same song — first matching entry wins,
-an ungated entry is the fallback. Toggled live by `music_replacements` /
+game-state-dependent variants of the same song. Selection is by specificity,
+not file order: a gated entry beats an ungated one wherever each appears, and
+an entry with no `when` is that song's catch-all. Order decides only between
+two gated entries whose conditions overlap. The gate is sampled once, at song
+start, so gate on state that holds for the whole song — `$18` (region) is
+stable across an act, while `$19` (room) advances within one. Toggled live by `music_replacements` /
 `AR_MUSIC_REPLACEMENTS`; `AR_MUSICLOG=1` adds verbose tracing (uploads, event
 ids, mix peaks). Full key reference: the manifest header and
 [`SEAMS.md`](SEAMS.md) "Audio".

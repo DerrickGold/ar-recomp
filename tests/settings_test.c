@@ -106,8 +106,10 @@ static void TestDefaultsAndMetadata(void) {
    * 30-to-60 Hz validation cadence. The runtime-only render comparison adds
    * one keyboard and one gamepad binding row, but deliberately no persisted
    * mode setting. The native-audio work then added one restart-class extended
-   * channel toggle. */
-  CHECK(g_setting_desc_count == 275);
+   * channel toggle. Removing the renderer selector took one Display row back
+   * off: the PPU has a single path, so the setting selected between a modern
+   * renderer and a legacy one that no longer exists. */
+  CHECK(g_setting_desc_count == 274);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -133,8 +135,7 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(g_settings.extended_aspect == 0);
   CHECK(g_settings.pixel_aspect == kPixelAspect_Crt43);
   CHECK(g_settings.window_scale == 3);
-  CHECK(g_settings.window_mode == kWindowMode_Windowed &&
-        g_settings.new_renderer);
+  CHECK(g_settings.window_mode == kWindowMode_Windowed);
   CHECK(g_settings.refresh_mode == kRefreshMode_Vsync);
   CHECK(g_settings.gpu_interp_source_rate == kInterpolationSource_Native);
   {
@@ -402,6 +403,16 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(Settings_IsDebugOnly(Settings_Find("diorama_layer_bg2")));
   CHECK(Settings_IsDebugOnly(Settings_Find("scene_inspector")));
   CHECK(Settings_IsDebugOnly(Settings_Find("dump_scene_assets")));
+  /* The CRT knobs are the exception to the "numeric dial = developer" rule:
+   * how much curvature or scanline depth reads right is taste and depends on
+   * the display, so every row on that tab is player-facing. */
+  for (int i = 0; i < g_setting_desc_count; i++) {
+    const SettingDesc *crt = &g_setting_descs[i];
+    if (crt->category != kSettingCat_Crt) continue;
+    CHECK(!Settings_IsDebugOnly(crt));
+  }
+  CHECK(!Settings_IsDebugOnly(Settings_Find("crt_curvature_x100")));
+  CHECK(!Settings_IsDebugOnly(Settings_Find("crt_brightness_x100")));
   CHECK(!Settings_IsDebugOnly(Settings_Find("sim3d_mode")));
   CHECK(!Settings_IsDebugOnly(Settings_Find("sim_view_range")));
   CHECK(!Settings_IsDebugOnly(Settings_Find("sim3d_world_navigation")));
@@ -824,9 +835,9 @@ static void TestMutationApi(void) {
   CHECK(Settings_SetText(warp, "garbage") == kSettingChange_Rejected);
   CHECK(g_settings.warp_target == 0x0303);
 
-  const SettingDesc *renderer = Settings_Find("new_renderer");
-  CHECK(Settings_SetLong(renderer, 0) == kSettingChange_Applied);
-  CHECK(!g_settings.new_renderer);
+  /* The renderer choice is gone: the PPU has one path, so there was nothing
+   * left to select between and the key must no longer resolve. */
+  CHECK(Settings_Find("new_renderer") == NULL);
   const SettingDesc *aspect = Settings_Find("extended_aspect");
   CHECK(Settings_SetText(aspect, "16:9") == kSettingChange_Applied);
   Settings_FormatValue(aspect, value, sizeof(value));

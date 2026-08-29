@@ -58,7 +58,7 @@ func TestAssetsTabHasTitleToggleAndIdentifiedTrackPickers(t *testing.T) {
 		`name="track-song-03"`, `name="track-song-06"`,
 		`name="track-song-12"`, `name="track-song-15"`,
 		`name="track-song-08"`, `name="track-song-16"`,
-		`Unidentified track 03`, `Manifest [music:song-03]`,
+		`Track 03`, `Manifest [music:song-03]`,
 		`accept=".ogg,.oga,audio/ogg"`,
 	} {
 		if !strings.Contains(body, want) {
@@ -68,11 +68,64 @@ func TestAssetsTabHasTitleToggleAndIdentifiedTrackPickers(t *testing.T) {
 	if !strings.Contains(body, `fetch("assets",{method:"POST",body:new FormData(assetForm)})`) {
 		t.Error("Assets form is not wired to the save endpoint")
 	}
-	if !strings.Contains(body, `fetch("audio-previews",{method:"POST"})`) {
+	if !strings.Contains(body, `fetch(
+      force?"audio-previews?force=1":"audio-previews",{method:"POST"})`) {
 		t.Error("original-audio extraction is not wired to the preview endpoint")
 	}
 	if !strings.Contains(body, `URL.createObjectURL(input.files[0])`) {
 		t.Error("selected replacement files do not get local browser playback")
+	}
+}
+
+// Saving must be reachable from the top of a seventeen-row list, and it must be
+// possible to take a replacement back off a slot. A file input can be filled but
+// never emptied by a page, so the revert needs a control and a companion field
+// of its own -- without the hidden field the button press is lost on submit.
+func TestAssetsTabCanSaveFromTheTopAndRevertASlot(t *testing.T) {
+	body := renderPage(t)
+	for _, want := range []string{
+		`id="asset-bar"`, `id="save-assets-top"`, `id="discard-assets"`,
+		`id="asset-bar-note"`, `class="asset-bar"`,
+		`class="asset-clear"`, `name="track-remove-song-00"`,
+		`name="track-remove-title-theme"`, `id="regenerate-previews"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("Assets tab is missing %s", want)
+		}
+	}
+	// The toolbar is only useful if it follows the reader down the list.
+	if !strings.Contains(body, ".asset-bar {\n  position:sticky; top:0;") {
+		t.Error("the asset toolbar is not sticky")
+	}
+	for _, id := range []string{"song-00", "song-16", "title-theme"} {
+		if !strings.Contains(body, `name="track-remove-`+id+`" type="hidden" value="0"`) {
+			t.Errorf("%s has no revert field", id)
+		}
+	}
+}
+
+// The colonnade frames the WINDOW. Sized to the document it became a bare shaft
+// sliding past on a long page, with its capital and plinth screens away.
+func TestColonnadeIsPinnedToTheViewport(t *testing.T) {
+	body := renderPage(t)
+	if !strings.Contains(body, ".colonnade { position:fixed; top:0; bottom:0;") {
+		t.Error("the colonnade should be fixed to the viewport, not the document")
+	}
+}
+
+// The dock is fixed over the content, so the runway reserved beneath the page
+// has to match its REAL height -- a fixed guess is too small once its text
+// wraps, and build output disappears underneath it.
+func TestDockClearanceIsMeasuredNotGuessed(t *testing.T) {
+	body := renderPage(t)
+	if !strings.Contains(body, "padding-bottom:calc(var(--dock-h) + 28px)") {
+		t.Error("the page does not reserve a gap beneath the dock")
+	}
+	if !strings.Contains(body, `setProperty("--dock-h",dock.offsetHeight+"px")`) {
+		t.Error("the dock's height is never measured")
+	}
+	if !strings.Contains(body, "new ResizeObserver(syncDockHeight).observe(dock)") {
+		t.Error("the reserved height is not refreshed when the dock reflows")
 	}
 }
 

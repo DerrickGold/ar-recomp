@@ -43,7 +43,6 @@ extern ArRenderDevice g_render_device;
 extern ArRenderTexture g_texture;
 extern int g_snes_width;
 extern int g_snes_height;
-extern bool g_new_ppu;
 extern bool g_ws_active;
 extern int g_ws_extra;
 extern int g_ws_display_extra;
@@ -346,7 +345,6 @@ void HostDisplay_ResolveVideoGeometry(bool apply_runtime_changes) {
   g_ws_active = extra_columns > 0;
   g_snes_width =
       kActRaiserAuthenticWidth + 2 * extra_columns;
-  g_new_ppu = g_settings.new_renderer || g_ws_active;
 
   if (apply_runtime_changes) {
     /* Aspect/PAR changes alter the framebuffer budget, not the selected HLE
@@ -363,7 +361,7 @@ void HostDisplay_ResolveVideoGeometry(bool apply_runtime_changes) {
 
   fprintf(stderr,
           "[video-geometry] %s %s -> %d extra columns/side "
-          "(render width %d, %s PPU)\n",
+          "(render width %d)\n",
           s_active_aspect_x
               ? (s_active_aspect_y == 9 ? "16:9" : "16:10")
               : "4:3",
@@ -371,8 +369,7 @@ void HostDisplay_ResolveVideoGeometry(bool apply_runtime_changes) {
               ? "4:3-PAR"
               : "square-PAR",
           g_ws_extra,
-          g_snes_width,
-          g_new_ppu ? "new" : "legacy");
+          g_snes_width);
 }
 
 void HostDisplay_ApplyWindowMode(void) {

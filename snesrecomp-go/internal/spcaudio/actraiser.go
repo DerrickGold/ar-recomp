@@ -10,20 +10,27 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"time"
 )
 
 const (
-	actRaiserROMSize   = 1 << 20
-	actRaiserCRC32     = 0xeac3358d
-	bootImageSource    = 0x029acd
-	commonImageSource  = 0x06ac00
-	brrPoolSource      = 0x088000
-	bootEntry          = 0x0400
-	bootIdle0          = 0x0460
-	bootIdle1          = 0x0462
-	bootCycleLimit     = 131072
-	previewCacheFormat = 1
+	actRaiserROMSize  = 1 << 20
+	actRaiserCRC32    = 0xeac3358d
+	bootImageSource   = 0x029acd
+	commonImageSource = 0x06ac00
+	brrPoolSource     = 0x088000
+	bootEntry         = 0x0400
+	bootIdle0         = 0x0460
+	bootIdle1         = 0x0462
+	bootCycleLimit    = 131072
+	// previewCacheFormat MUST be bumped whenever anything that changes rendered
+	// samples changes: the SPC700 core, the DSP, the image loader, or the fade.
+	// Cache entries are keyed by ROM and duration only, so without a bump a
+	// machine that has already rendered keeps serving the OLD renderer's audio
+	// forever while a fresh machine renders the new one -- the two disagree and
+	// only the stale side sounds wrong.
+	previewCacheFormat = 2
 )
 
 // Track identifies one uploaded ActRaiser song image and the command used to
@@ -209,6 +216,52 @@ func prepareBaseAPU(rom []byte) (*apu, uint16, error) {
 	return a, common.nextBRR, nil
 }
 
+// previewFrames is the exact stereo frame count a preview of this duration
+// holds. Shared by the renderer and the cache validator so a cached file is
+// checked against the same length the renderer would have produced.
+func previewFrames(duration time.Duration) int {
+	return int(duration.Seconds() * SampleRate)
+}
+
+// PreviewCacheDirectory reports where one ROM's previews of a given duration
+// are cached, so a caller can discard them and force a fresh render.
+func PreviewCacheDirectory(outputDirectory, fingerprint string, duration time.Duration) string {
+	return filepath.Join(outputDirectory, fingerprint, previewCacheVariant(duration))
+}
+
+func previewCacheVariant(duration time.Duration) string {
+	return fmt.Sprintf("v%d-%dms", previewCacheFormat, duration.Milliseconds())
+}
+
+var previewCacheVariantPattern = regexp.MustCompile(`^v(\d+)-\d+ms$`)
+
+// pruneSupersededPreviews removes this ROM's caches from EARLIER renderer
+// generations. Bumping previewCacheFormat is what stops old audio being served,
+// but on its own it only strands the previous generation on disk -- a full set
+// is ~65 MB, and nothing would ever come back for it. Only lower format numbers
+// are removed: a directory from the current generation is live whatever its
+// duration, and anything that does not parse is left alone.
+func pruneSupersededPreviews(romDirectory string) {
+	entries, err := os.ReadDir(romDirectory)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		match := previewCacheVariantPattern.FindStringSubmatch(entry.Name())
+		if match == nil {
+			continue
+		}
+		format, convertErr := strconv.Atoi(match[1])
+		if convertErr != nil || format >= previewCacheFormat {
+			continue
+		}
+		_ = os.RemoveAll(filepath.Join(romDirectory, entry.Name()))
+	}
+}
+
 func renderTrack(ctx context.Context, base *apu, nextBRR uint16, rom []byte,
 	track Track, duration time.Duration) ([]int16, error) {
 	if duration <= 0 || duration > 10*time.Minute {
@@ -222,7 +275,7 @@ func renderTrack(ctx context.Context, base *apu, nextBRR uint16, rom []byte,
 	// song images have been installed. Port writes remain authentic APU input;
 	// only the 65816-side upload handshake is replaced by the direct loader.
 	a.inPorts[0] = track.Song
-	frames := int(duration.Seconds() * SampleRate)
+	frames := previewFrames(duration)
 	result := make([]int16, 0, frames*2)
 	for len(result) < frames*2 {
 		select {
@@ -278,11 +331,12 @@ func RenderActRaiserPreviews(ctx context.Context, romPath, outputDirectory strin
 	// Include both the requested duration and an explicit renderer-format
 	// generation. A WAV from an older approximation or a shorter CLI smoke test
 	// must never masquerade as the current GUI's 30-second preview.
-	cacheVariant := fmt.Sprintf("v%d-%dms", previewCacheFormat, duration.Milliseconds())
-	cacheDirectory := filepath.Join(outputDirectory, fingerprint, cacheVariant)
+	romDirectory := filepath.Join(outputDirectory, fingerprint)
+	cacheDirectory := filepath.Join(romDirectory, previewCacheVariant(duration))
 	if err := os.MkdirAll(cacheDirectory, 0o700); err != nil {
 		return nil, fingerprint, fmt.Errorf("create audio preview cache: %w", err)
 	}
+	pruneSupersededPreviews(romDirectory)
 	base, nextBRR, err := prepareBaseAPU(rom)
 	if err != nil {
 		return nil, fingerprint, err
@@ -295,7 +349,7 @@ func RenderActRaiserPreviews(ctx context.Context, romPath, outputDirectory strin
 		default:
 		}
 		path := filepath.Join(cacheDirectory, track.ID+".wav")
-		reused := validWAVFile(path)
+		reused := validWAVFile(path, previewFrames(duration))
 		if !reused {
 			samples, renderErr := renderTrack(ctx, base, nextBRR, rom, track, duration)
 			if renderErr != nil {

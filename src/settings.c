@@ -615,10 +615,6 @@ static const char *const kSaveItemLabels[] = {
  * greyed out rather than silently ignored (§D15). */
 bool Diorama_ModeIsOn(void) { return g_settings.diorama_mode; }
 bool Sim3D_ModeIsOn(void) { return g_settings.sim3d_mode; }
-bool Diorama_NewPpuCapable(void) {
-  return g_settings.new_renderer || g_ws_active;
-}
-
 /* Screen ratio owns stretching. Keep the old bool as a load-only alias so
  * existing config.ini/settings.ini files still migrate cleanly, but never let
  * runtime code acquire a second source of truth. A legacy true enables the
@@ -1111,11 +1107,6 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Int, kApply_Callback, kSettingCat_Display,
     &g_settings.window_scale, 3, 1, 8, 1, false, NULL, 0,
     WindowScaleAvailable, NULL, NULL, NULL, .modern_env = true },
-  { "new_renderer", "AR_NEW_RENDERER", "New renderer",
-    "Use the modern PPU renderer; widescreen always requires this renderer.",
-    kSettingType_Bool, kApply_Callback, kSettingCat_Display,
-    &g_settings.new_renderer, 1, 0, 1, 1, false, NULL, 0,
-    NULL, NULL, NULL, NULL, .modern_env = true },
   { "ignore_aspect_ratio", "AR_IGNORE_ASPECT_RATIO", "Stretch to window",
     "Legacy compatibility alias for Screen ratio > Stretch.",
     kSettingType_Bool, kApply_Callback, kSettingCat_Display,
@@ -1143,7 +1134,7 @@ const SettingDesc g_setting_descs[] = {
                "Tilt the simulation-town map into a projected ground plane. "
                "Map pickers stay in the tilted space too (build with "
                "AR_SIM3D_PICKER_TOPDOWN=1 to restore the flat picker view).",
-               kSettingCat_Simulation, 0, false, Diorama_NewPpuCapable,
+               kSettingCat_Simulation, 0, false, NULL,
                NULL),
   { "sim_view_range", "AR_SIM_VIEW_RANGE", "Extended actor range",
     "Gameplay-affecting. Keep simulation actors and projectiles alive and "
@@ -1158,7 +1149,7 @@ const SettingDesc g_setting_descs[] = {
                "World navigation 3D",
                "Render inter-town Sky Palace navigation as a full-world 3D "
                "scene with a forced top-down camera.",
-               kSettingCat_Simulation, 0, false, Diorama_NewPpuCapable,
+               kSettingCat_Simulation, 0, false, NULL,
                NULL),
   BOOL_SETTING_MODERN(sim3d_world_navigation_lighting,
                "AR_SIM3D_WORLD_NAV_LIGHTING",
@@ -1654,7 +1645,7 @@ const SettingDesc g_setting_descs[] = {
                      "Return the camera mode in use to its default pitch, yaw, and distance."),
   BOOL_SETTING(diorama_mode, NULL, "Diorama 3D",
                "Render action-stage layers as tilted 3D planes (action stages only; needs the new renderer).",
-               kSettingCat_Presentation, 0, false, Diorama_NewPpuCapable,
+               kSettingCat_Presentation, 0, false, NULL,
                DioramaModeChanged),
   /* Free and Dynamic cameras own independent poses. Dynamic applies velocity
    * lean and event kicks around its baseline; switching modes restores the
@@ -1864,9 +1855,10 @@ const SettingDesc g_setting_descs[] = {
   /* CRT post-process (kSettingCat_Crt). One fullscreen pass at the end of
    * presentation, so unlike the diorama-only gpu_fx_* rows above it covers
    * every render mode at once. Needs the same "gpu" backend, hence the shared
-   * GpuShadersActive gate; the numeric rows below are developer-only
-   * (Settings_IsDebugOnly) because they author the look rather than trade it
-   * off against performance. Defaults are the tuned-by-eye values. */
+   * GpuShadersActive gate. The numeric rows below are player-facing: what a
+   * tube should look like is taste, not a correct value, so each is a named
+   * bounded control rather than a developer dial. Defaults are the
+   * tuned-by-eye values, which is what the effect is meant to look like. */
   BOOL_SETTING(crt_enabled, "AR_CRT", "CRT effect",
                "Simulate a curved colour CRT: barrel glass, scanlines, "
                "phosphor mask and corner falloff. Applies to every mode "
@@ -2825,13 +2817,16 @@ bool Settings_IsDebugOnly(const SettingDesc *desc) {
       (desc->type == kSettingType_Int || desc->type == kSettingType_Mask))
     return true;
 
-  /* Same reasoning for the CRT tab: the master toggle is the player control,
-   * while the seven numeric knobs behind it author the look. Their defaults
-   * were tuned by eye and are what the effect is meant to look like, so a
-   * player has no reason to move them — but a developer adjusting the tube
-   * wants them all on one panel. */
-  if (desc->category == kSettingCat_Crt && desc->type == kSettingType_Int)
-    return true;
+  /* The CRT knobs are deliberately NOT here. The 3D dials above are geometry:
+   * a camera pose in milliradians has one correct value and moving it breaks
+   * the projection. A tube's look has no correct value — how much curvature,
+   * scanline depth or phosphor mask reads right depends on the display it is
+   * shown on and on what the player remembers a CRT looking like. Each row is
+   * a named, bounded, tuned-by-eye control, which is a taste setting, so they
+   * ship visible under the master toggle.
+   *
+   * If the CRT tab ever grows a genuine internal A/B, list its key below
+   * rather than re-hiding the category by type. */
 
   /* A few Bool rows in those same categories are internal A/B or plumbing
    * toggles rather than real user-facing effects: the separated compositor
@@ -2844,9 +2839,6 @@ bool Settings_IsDebugOnly(const SettingDesc *desc) {
     "sim3d_ground_projection", "sim3d_object_billboards", "sim3d_virtual_height",
     "diorama_layer_bg1", "diorama_layer_bg2", "diorama_layer_bg3",
     "diorama_layer_obj", "diorama_layer_backdrop", "diorama_hud_flat",
-    /* The modern renderer is required for widescreen and every 3D mode; there
-     * is no reason for a player to disable it. */
-    "new_renderer",
   };
   for (size_t i = 0; i < sizeof(kDebugKeys) / sizeof(kDebugKeys[0]); i++)
     if (!strcmp(desc->key, kDebugKeys[i])) return true;

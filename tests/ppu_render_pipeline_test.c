@@ -29,7 +29,6 @@
 #include "snes/snes.h"
 
 /* main.c owns this global; the PPU line renderer reads it to pick new/old path. */
-bool g_new_ppu = false;
 
 /* Trace/debug hooks the PPU references but that only fire under instrumentation
  * (SNESRECOMP_TRACE / debug server). Stub them so this standalone harness links
@@ -221,8 +220,6 @@ static void fill_virtual_native_ring(Ppu *ppu, uint16_t even_entry,
 static void TestVirtualTilemapMargins(void) {
   enum { kExtra = 8, kWidth = kW + kExtra * 2 };
   const int bg1 = kActRaiserPpuLayer_Bg1;
-  const bool saved_new_ppu = g_new_ppu;
-  g_new_ppu = true;
   Ppu *ppu = ppu_init();
   CHECK(ppu != NULL);
   if (!ppu) return;
@@ -309,15 +306,12 @@ static void TestVirtualTilemapMargins(void) {
   CHECK(ppu->virtualTilemap[bg1].lookup == NULL);
 
   ppu_free(ppu);
-  g_new_ppu = saved_new_ppu;
 }
 
 static void TestVirtualTilemapEffects(void) {
   enum { kExtra = 8, kWidth = kW + kExtra * 2 };
   const int bg1 = kActRaiserPpuLayer_Bg1;
   const int bg2 = kActRaiserPpuLayer_Bg2;
-  const bool saved_new_ppu = g_new_ppu;
-  g_new_ppu = true;
   Ppu *ppu = ppu_init();
   CHECK(ppu != NULL);
   if (!ppu) return;
@@ -437,15 +431,12 @@ static void TestVirtualTilemapEffects(void) {
   CHECK(row[7] == rgb555(0, 0, 31));
 
   ppu_free(ppu);
-  g_new_ppu = saved_new_ppu;
 }
 
 static void TestVirtualTilemapAuthenticParity(void) {
   const int bg1 = kActRaiserPpuLayer_Bg1;
-  const bool saved_new_ppu = g_new_ppu;
   const uint16_t even_entry = (uint16_t)(2 | (2 << 10));
   const uint16_t odd_entry = (uint16_t)(3 | (3 << 10) | 0x2000);
-  g_new_ppu = true;
   Ppu *ppu = ppu_init();
   CHECK(ppu != NULL);
   if (!ppu) return;
@@ -513,13 +504,10 @@ static void TestVirtualTilemapAuthenticParity(void) {
                native_priority, sizeof(native_priority)) == 0);
 
   ppu_free(ppu);
-  g_new_ppu = saved_new_ppu;
 }
 
 static void TestVirtualTilemapPresentationBandsPreserveFlatOutput(void) {
   const int bg1 = kActRaiserPpuLayer_Bg1;
-  const bool saved_new_ppu = g_new_ppu;
-  g_new_ppu = true;
   Ppu *ppu = ppu_init();
   CHECK(ppu != NULL);
   if (!ppu) return;
@@ -574,14 +562,11 @@ static void TestVirtualTilemapPresentationBandsPreserveFlatOutput(void) {
   CHECK(memcmp(fb, baseline, sizeof(baseline)) == 0);
 
   ppu_free(ppu);
-  g_new_ppu = saved_new_ppu;
 }
 
 static void TestVirtualTilemapVerticalMargin(void) {
   enum { kTop = 8, kRows = kTop + 1 };
   const int bg1 = kActRaiserPpuLayer_Bg1;
-  const bool saved_new_ppu = g_new_ppu;
-  g_new_ppu = true;
   Ppu *ppu = ppu_init();
   CHECK(ppu != NULL);
   if (!ppu) return;
@@ -628,7 +613,6 @@ static void TestVirtualTilemapVerticalMargin(void) {
   CHECK(map.first_y == 0 && map.last_y == 0);
 
   ppu_free(ppu);
-  g_new_ppu = saved_new_ppu;
 }
 
 static void TestObjRangeRaster(void) {
@@ -696,8 +680,6 @@ static void TestObjRangeRaster(void) {
 }
 
 static void TestObjRangeScanoutCapture(void) {
-  const bool saved_new_ppu = g_new_ppu;
-  g_new_ppu = true;
   Ppu *ppu = ppu_init();
   CHECK(ppu != NULL);
   if (!ppu) return;
@@ -743,7 +725,6 @@ static void TestObjRangeScanoutCapture(void) {
   PpuClearOverlayCaptures(ppu);
   CHECK(ppu->objRangeCapture.count == 0);
   ppu_free(ppu);
-  g_new_ppu = saved_new_ppu;
 }
 
 static void TestWorldNavigationPartialBrightnessCapture(void) {
@@ -1432,8 +1413,6 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
 }
 
 static void TestDioramaFixedColorSubtractCapture(void) {
-  const bool saved_new_ppu = g_new_ppu;
-  g_new_ppu = true;
   Ppu *ppu = ppu_init();
   CHECK(ppu != NULL);
   if (!ppu) return;
@@ -1461,7 +1440,6 @@ static void TestDioramaFixedColorSubtractCapture(void) {
   CHECK((capture[0] & 0x00ffffffu) == (flat_pixel & 0x00ffffffu));
 
   PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1, NULL, 0);
-  g_new_ppu = saved_new_ppu;
   ppu_free(ppu);
 }
 
@@ -1471,8 +1449,6 @@ static void TestDioramaFixedColorSubtractCapture(void) {
  * keeps BG1 off main and proves the generic PPU exporter still produces the
  * isolated plane. */
 static void TestSubscreenOnlyOverlayCapture(void) {
-  const bool saved_new_ppu = g_new_ppu;
-  g_new_ppu = true;
   Ppu *ppu = ppu_init();
   CHECK(ppu != NULL);
   if (!ppu) return;
@@ -1545,7 +1521,6 @@ static void TestSubscreenOnlyOverlayCapture(void) {
   CHECK(PpuOverlaySurfaceHasContent(ppu, kPpuOverlaySource_Obj, 0));
 
   PpuBindOverlaySurface(ppu, kPpuOverlaySource_Obj, NULL, 0);
-  g_new_ppu = saved_new_ppu;
   ppu_free(ppu);
 }
 
@@ -1555,8 +1530,6 @@ static void TestSubscreenOnlyOverlayCapture(void) {
  * the winning TS source at each pixel so drawing all of them additively cannot
  * double-add an overlapping BG and sprite. */
 static void TestFullAddSubscreenWinnerCapture(void) {
-  const bool saved_new_ppu = g_new_ppu;
-  g_new_ppu = true;
   Ppu *ppu = ppu_init();
   CHECK(ppu != NULL);
   if (!ppu) return;
@@ -1687,7 +1660,6 @@ static void TestFullAddSubscreenWinnerCapture(void) {
   PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
   PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg3, NULL, 0);
   PpuBindOverlaySurface(ppu, kPpuOverlaySource_Obj, NULL, 0);
-  g_new_ppu = saved_new_ppu;
   ppu_free(ppu);
 }
 
@@ -1696,8 +1668,6 @@ static void TestFullAddSubscreenWinnerCapture(void) {
  * the exported mask is white only where BG2 remains drawable; its untouched
  * region is opaque black so SDL_BLENDMODE_MUL actually erases effect RGB. */
 static void TestMainScreenWinnerMask(void) {
-  const bool saved_new_ppu = g_new_ppu;
-  g_new_ppu = true;
   Ppu *ppu = ppu_init();
   CHECK(ppu != NULL);
   if (!ppu) return;
@@ -1749,7 +1719,6 @@ static void TestMainScreenWinnerMask(void) {
   CHECK(mask[128] == 0xff000000u);
   CHECK(mask[255] == 0xff000000u);
   PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
-  g_new_ppu = saved_new_ppu;
   ppu_free(ppu);
 }
 
@@ -1766,8 +1735,6 @@ static void TestOverlayContentMetadata(void) {
   memset(primary, 0, sizeof(primary));
   memset(high, 0, sizeof(high));
 
-  const bool saved_new_ppu = g_new_ppu;
-  g_new_ppu = true;
   ppu->inidisp = 0x0f;
   ppu->bgmode = 1;
   ppu->screenEnabled[0] = 1u << kActRaiserPpuLayer_Bg2;
@@ -1872,7 +1839,6 @@ static void TestOverlayContentMetadata(void) {
   CHECK(PpuOverlayTransparentFillColor(
             ppu, kPpuOverlaySource_Bg2) == 0);
 
-  g_new_ppu = saved_new_ppu;
   ppu_free(ppu);
 }
 
@@ -1891,8 +1857,6 @@ static void TestVerticalMarginLayerClip(void) {
   CHECK(ppu != NULL);
   if (!ppu) return;
 
-  const bool saved_new_ppu = g_new_ppu;
-  g_new_ppu = true;
   static uint8_t fb[kW * kRows * 4];
   static uint32_t bg1_capture[kW * kRows];
   static uint32_t bg2_capture[kW * kRows];
@@ -1986,7 +1950,6 @@ static void TestVerticalMarginLayerClip(void) {
     PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
   }
 
-  g_new_ppu = saved_new_ppu;
   ppu_free(ppu);
 }
 
@@ -2000,8 +1963,6 @@ static void TestVerticalMarginBottomLayerClip(void) {
   CHECK(ppu != NULL);
   if (!ppu) return;
 
-  const bool saved_new_ppu = g_new_ppu;
-  g_new_ppu = true;
   static uint8_t fb[kW * (kPpuYPixels + kBottom) * 4];
   static uint32_t capture[kW * (kPpuYPixels + kBottom)];
 
@@ -2049,7 +2010,6 @@ static void TestVerticalMarginBottomLayerClip(void) {
     PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
   }
 
-  g_new_ppu = saved_new_ppu;
   ppu_free(ppu);
 }
 
@@ -2062,8 +2022,6 @@ static void TestVerticalMarginExactObj(void) {
   CHECK(ppu != NULL);
   if (!ppu) return;
 
-  const bool saved_new_ppu = g_new_ppu;
-  g_new_ppu = true;
   static uint8_t fb[kW * (kPpuYPixels + kBottom) * 4];
   static uint32_t capture[kW * (kPpuYPixels + kBottom)];
   ppu_reset(ppu);
@@ -2095,7 +2053,6 @@ static void TestVerticalMarginExactObj(void) {
   CHECK(capture[kSpriteY * kW + 24] == 0);
 
   PpuBindOverlaySurface(ppu, kPpuOverlaySource_Obj, NULL, 0);
-  g_new_ppu = saved_new_ppu;
   ppu_free(ppu);
 }
 
@@ -2109,8 +2066,6 @@ static void TestLayerPresentationExtents(void) {
   CHECK(ppu != NULL);
   if (!ppu) return;
 
-  const bool saved_new_ppu = g_new_ppu;
-  g_new_ppu = true;
   static uint8_t fb[kWidth * 5 * 4];
   static uint32_t capture[kWidth * 3];
 
@@ -2215,7 +2170,6 @@ static void TestLayerPresentationExtents(void) {
   CHECK(bottom_capture[(bottom_y0 + 3) * kW] == 0);
 
   PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
-  g_new_ppu = saved_new_ppu;
   ppu_free(ppu);
 }
 
@@ -2236,8 +2190,6 @@ static void TestMovingEdgePoliciesInVerticalMargins(void) {
   CHECK(ppu != NULL);
   if (!ppu) return;
 
-  const bool saved_new_ppu = g_new_ppu;
-  g_new_ppu = true;
   static uint8_t fb[kWidth * kRows * 4];
   static uint32_t capture[kWidth * kRows];
   ppu_reset(ppu);
@@ -2394,7 +2346,6 @@ static void TestMovingEdgePoliciesInVerticalMargins(void) {
   CHECK(top_row[kBudget + kW] != top_row[kBudget + 254]);
 
   PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
-  g_new_ppu = saved_new_ppu;
   ppu_free(ppu);
 }
 
@@ -2417,11 +2368,7 @@ static void TestCapturedPaddingReachesBudget(void) {
   if (!ppu) return;
 
   /* The overlay-capture and widescreen-padding paths live in PpuDrawWholeLine,
-   * which ppu_runLine only reaches when g_new_ppu is set; the old path ignores
-   * both. Diorama mode always implies the new renderer (Diorama_NewPpuCapable),
-   * so this matches the only configuration the fix can run in. */
-  const bool saved_new_ppu = g_new_ppu;
-  g_new_ppu = true;
+   * which is the only path ppu_runLine has. */
 
   static uint32_t capture[kCaptureWidth * 4];
   static uint8_t fb[kCaptureWidth * 4 * 4];
@@ -2657,11 +2604,9 @@ static void TestCapturedPaddingReachesBudget(void) {
     CHECK((row[kCaptureWidth - 2] & 0xffffffu) != 0);
   }
 
-  g_new_ppu = saved_new_ppu;
 }
 
 static void TestAuthenticComparisonSurface(void) {
-  const bool saved_new_ppu = g_new_ppu;
   Ppu *ppu = ppu_init();
   CHECK(ppu != NULL);
   if (!ppu) return;
@@ -2673,7 +2618,6 @@ static void TestAuthenticComparisonSurface(void) {
   /* The enhanced diorama path removes BG1 from the ordinary framebuffer. The
    * parallel authentic pass must independently render the complete native
    * winner, not merely copy the presentation framebuffer after extraction. */
-  g_new_ppu = true;
   setup_virtual_bg(ppu, 0, fb, sizeof(fb));
   memset(authentic, 0, sizeof(authentic));
   memset(isolated_bg1, 0, sizeof(isolated_bg1));
@@ -2691,9 +2635,8 @@ static void TestAuthenticComparisonSurface(void) {
   CHECK((authentic[0] & 0x00ffffffu) == rgb555(31, 0, 0));
   CHECK((authentic[0] & 0xff000000u) == 0);
 
-  /* Configurations using the legacy renderer have no extracted layers; their
-   * complete scanout is mirrored byte-for-byte into the same surface. */
-  g_new_ppu = false;
+  /* With no layer extracted, the complete scanout is mirrored byte-for-byte
+   * into the same surface. */
   ppu_reset(ppu);
   memset(fb, 0, sizeof(fb));
   memset(authentic, 0x5a, sizeof(authentic));
@@ -2705,14 +2648,11 @@ static void TestAuthenticComparisonSurface(void) {
   render_first_line(ppu);
   CHECK(memcmp(fb, authentic, sizeof(fb)) == 0);
 
-  g_new_ppu = saved_new_ppu;
   ppu_free(ppu);
 }
 
 static void TestAuthenticCameraAndSurfaceContract(void) {
   enum { kExtra = 8, kWidth = kW + kExtra * 2, kGuard = 8 };
-  const bool saved_new_ppu = g_new_ppu;
-  g_new_ppu = true;
   Ppu *ppu = ppu_init();
   CHECK(ppu != NULL);
   if (!ppu) return;
@@ -2856,7 +2796,6 @@ static void TestAuthenticCameraAndSurfaceContract(void) {
   CHECK(!PpuBindAuthenticSurface(
       ppu, (uint8_t *)guarded.pixels, sizeof(guarded.pixels)));
 
-  g_new_ppu = saved_new_ppu;
   ppu_free(ppu);
 }
 

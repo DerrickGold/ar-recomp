@@ -177,3 +177,74 @@ func max(a, b int) int {
 	}
 	return b
 }
+
+// The manifest the release vends is the TEMPLATE, not whatever the working copy
+// happens to hold. It must carry every hook, since a fresh install's entire
+// "drop a file with the matching name" workflow depends on the records being
+// there and inert.
+func TestAssetManifestTemplateCarriesEveryHook(t *testing.T) {
+	template := string(assetManifestTemplate)
+	for _, track := range assetTracks {
+		section := "[music:" + track.ID + "]"
+		if !strings.Contains(template, section) {
+			t.Errorf("template has no %s", section)
+		}
+	}
+	// Exactly the song-table slots: a split or a personal experiment leaking
+	// into the template is the thing this file exists to prevent.
+	if got := strings.Count(template, "\n[music:"); got != len(assetTracks) {
+		t.Errorf("template has %d music records, want the %d song-table slots",
+			got, len(assetTracks))
+	}
+	for _, hook := range []string{"[replace:title-logo]", "[replace:title-swirl]"} {
+		if !strings.Contains(template, hook) {
+			t.Errorf("template has no %s", hook)
+		}
+	}
+	// Every record must name a file, or the loader drops it outright.
+	if strings.Count(template, "\nfile = ") < len(assetTracks) {
+		t.Error("a music record in the template names no file")
+	}
+}
+
+// A fresh checkout or install gets the template; one that already has a
+// manifest keeps every entry in it, because that file holds the player's own
+// work and the builder's saves.
+func TestAssetManifestIsSeededButNeverOverwritten(t *testing.T) {
+	root := t.TempDir()
+	if err := materializeAssetManifest(root); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "game-assets", "manifest.ini")
+	seeded, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(seeded, assetManifestTemplate) {
+		t.Fatalf("seeded %d bytes, want the %d-byte template",
+			len(seeded), len(assetManifestTemplate))
+	}
+	// The seeded file must be usable by the builder straight away.
+	configuration, err := loadAssetConfiguration(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(configuration.Tracks) != len(assetTracks) {
+		t.Errorf("seeded manifest yields %d slots", len(configuration.Tracks))
+	}
+
+	const mine = "[music:song-00]\nsrc = 18:947F\nfile = audio/mine.ogg\n"
+	if err := os.WriteFile(path, []byte(mine), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := materializeAssetManifest(root); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != mine {
+		t.Errorf("an existing manifest was overwritten:\n%s", after)
+	}
+}
