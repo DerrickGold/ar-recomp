@@ -27,11 +27,18 @@ typedef struct DioramaPerformanceData {
   uint64_t draw_failures;
   uint64_t vertices;
   uint64_t indices;
+  uint64_t viewport_pixels;
+  uint64_t fragment_pixels[kArRenderBlendMode_Multiply + 1];
+  uint64_t plane_fragment_pixels[32];
+  uint64_t plane_draws[32];
 } DioramaPerformanceData;
 
 static DioramaPerformanceData s_data;
 static atomic_flag s_data_lock = ATOMIC_FLAG_INIT;
 static atomic_int s_enabled_state;
+static atomic_int s_viewport_width;
+static atomic_int s_viewport_height;
+static atomic_int s_current_plane;
 
 static void LockPerformanceData(void) {
   while (atomic_flag_test_and_set_explicit(
@@ -106,15 +113,147 @@ void DioramaPerformance_AddPlaneSync(bool succeeded, bool uploaded,
   UnlockPerformanceData();
 }
 
-void DioramaPerformance_AddDraw(bool succeeded, int vertices, int indices) {
+void DioramaPerformance_SetRasterViewport(int width, int height) {
   if (!DioramaPerformance_Enabled()) return;
+  if (width < 0) width = 0;
+  if (height < 0) height = 0;
+  atomic_store_explicit(&s_viewport_width, width, memory_order_release);
+  atomic_store_explicit(&s_viewport_height, height, memory_order_release);
+}
+
+void DioramaPerformance_SetViewport(int width, int height) {
+  if (!DioramaPerformance_Enabled()) return;
+  DioramaPerformance_SetRasterViewport(width, height);
+  LockPerformanceData();
+  if (width > 0 && height > 0)
+    s_data.viewport_pixels += (uint64_t)width * (uint64_t)height;
+  UnlockPerformanceData();
+}
+
+void DioramaPerformance_SetPlane(int plane) {
+  if (!DioramaPerformance_Enabled()) return;
+  atomic_store_explicit(&s_current_plane, plane, memory_order_release);
+}
+
+typedef struct DioramaCoveragePoint {
+  double x, y;
+} DioramaCoveragePoint;
+
+static int ClipCoverageEdge(
+    const DioramaCoveragePoint *input, int input_count,
+    DioramaCoveragePoint *output, int axis, double boundary,
+    bool keep_greater) {
+  if (input_count <= 0) return 0;
+  int output_count = 0;
+  DioramaCoveragePoint previous = input[input_count - 1];
+  double previous_value = axis ? previous.y : previous.x;
+  bool previous_inside = keep_greater
+      ? previous_value >= boundary : previous_value <= boundary;
+  for (int i = 0; i < input_count; i++) {
+    const DioramaCoveragePoint current = input[i];
+    const double current_value = axis ? current.y : current.x;
+    const bool current_inside = keep_greater
+        ? current_value >= boundary : current_value <= boundary;
+    if (current_inside != previous_inside) {
+      const double span = current_value - previous_value;
+      const double t = span != 0.0
+          ? (boundary - previous_value) / span : 0.0;
+      output[output_count++] = (DioramaCoveragePoint){
+        previous.x + (current.x - previous.x) * t,
+        previous.y + (current.y - previous.y) * t,
+      };
+    }
+    if (current_inside) output[output_count++] = current;
+    previous = current;
+    previous_value = current_value;
+    previous_inside = current_inside;
+  }
+  return output_count;
+}
+
+static double ClippedTriangleArea(
+    const ArRenderVertex2D *a, const ArRenderVertex2D *b,
+    const ArRenderVertex2D *c, int width, int height) {
+  DioramaCoveragePoint buffers[2][8] = {
+    {
+      {(double)a->position.x, (double)a->position.y},
+      {(double)b->position.x, (double)b->position.y},
+      {(double)c->position.x, (double)c->position.y},
+    },
+  };
+  int count = 3;
+  int source = 0;
+  static const struct {
+    int axis;
+    bool keep_greater;
+  } edges[] = {
+    {0, true}, {0, false}, {1, true}, {1, false},
+  };
+  for (int edge = 0; edge < 4 && count > 0; edge++) {
+    const double boundary = edge == 1 ? (double)width
+        : edge == 3 ? (double)height : 0.0;
+    count = ClipCoverageEdge(
+        buffers[source], count, buffers[1 - source],
+        edges[edge].axis, boundary, edges[edge].keep_greater);
+    source = 1 - source;
+  }
+  double twice_area = 0.0;
+  for (int i = 0; i < count; i++) {
+    const DioramaCoveragePoint p = buffers[source][i];
+    const DioramaCoveragePoint q = buffers[source][(i + 1) % count];
+    twice_area += p.x * q.y - q.x * p.y;
+  }
+  return twice_area < 0.0 ? -0.5 * twice_area : 0.5 * twice_area;
+}
+
+static uint64_t DrawCoveragePixels(
+    const ArRenderVertex2D *vertices, int vertex_count,
+    const int32_t *indices, int index_count, int width, int height) {
+  if (!vertices || vertex_count <= 0 || !indices || index_count < 3 ||
+      width <= 0 || height <= 0)
+    return 0;
+  double area = 0.0;
+  for (int i = 0; i + 2 < index_count; i += 3) {
+    const int32_t ia = indices[i];
+    const int32_t ib = indices[i + 1];
+    const int32_t ic = indices[i + 2];
+    if (ia < 0 || ib < 0 || ic < 0 ||
+        ia >= vertex_count || ib >= vertex_count || ic >= vertex_count)
+      continue;
+    area += ClippedTriangleArea(
+        &vertices[ia], &vertices[ib], &vertices[ic], width, height);
+  }
+  return area > 0.0 ? (uint64_t)(area + 0.5) : 0;
+}
+
+void DioramaPerformance_AddDraw(
+    bool succeeded, const ArRenderVertex2D *vertices, int vertex_count,
+    const int32_t *indices, int index_count, ArRenderBlendMode blend) {
+  if (!DioramaPerformance_Enabled()) return;
+  const int width = atomic_load_explicit(
+      &s_viewport_width, memory_order_acquire);
+  const int height = atomic_load_explicit(
+      &s_viewport_height, memory_order_acquire);
+  const int plane = atomic_load_explicit(
+      &s_current_plane, memory_order_acquire);
+  const uint64_t coverage = succeeded
+      ? DrawCoveragePixels(
+            vertices, vertex_count, indices, index_count, width, height)
+      : 0;
   LockPerformanceData();
   s_data.draws++;
   if (!succeeded) {
     s_data.draw_failures++;
   } else {
-    if (vertices > 0) s_data.vertices += (uint64_t)vertices;
-    if (indices > 0) s_data.indices += (uint64_t)indices;
+    if (vertex_count > 0) s_data.vertices += (uint64_t)vertex_count;
+    if (index_count > 0) s_data.indices += (uint64_t)index_count;
+    if (blend >= kArRenderBlendMode_Opaque &&
+        blend <= kArRenderBlendMode_Multiply)
+      s_data.fragment_pixels[blend] += coverage;
+    if (plane >= 0 && plane < 32) {
+      s_data.plane_fragment_pixels[plane] += coverage;
+      s_data.plane_draws[plane]++;
+    }
   }
   UnlockPerformanceData();
 }
@@ -144,6 +283,12 @@ static void DioramaPerformanceReport(const DioramaPerformanceData *data,
   fprintf(stderr, " other=%.3fms\n",
           (double)other_ns / 1000000.0 / presentations);
 
+  const uint64_t alpha_fragments =
+      data->fragment_pixels[kArRenderBlendMode_Alpha] +
+      data->fragment_pixels[kArRenderBlendMode_AlphaPremultiplied];
+  const uint64_t add_fragments =
+      data->fragment_pixels[kArRenderBlendMode_Add] +
+      data->fragment_pixels[kArRenderBlendMode_AddPremultiplied];
   fprintf(stderr,
           "[diorama-work] sync/present=%.1f uploads/present=%.1f "
           "upload-KiB/present=%.1f draws/present=%.1f "
@@ -156,6 +301,32 @@ static void DioramaPerformanceReport(const DioramaPerformanceData *data,
           (double)data->vertices / presentations,
           (double)data->indices / presentations,
           data->plane_sync_failures, data->draw_failures);
+
+  const double viewport_pixels = data->viewport_pixels
+      ? (double)data->viewport_pixels : 1.0;
+  uint64_t total_fragments = 0;
+  for (int blend = kArRenderBlendMode_Opaque;
+       blend <= kArRenderBlendMode_Multiply; blend++)
+    total_fragments += data->fragment_pixels[blend];
+  fprintf(stderr,
+          "[diorama-fill] screen-layers=%.2fx fragments/present=%.2fM "
+          "opaque=%.2fM alpha=%.2fM add=%.2fM\n",
+          (double)total_fragments / viewport_pixels,
+          (double)total_fragments / presentations / 1000000.0,
+          (double)data->fragment_pixels[kArRenderBlendMode_Opaque] /
+              presentations / 1000000.0,
+          (double)alpha_fragments / presentations / 1000000.0,
+          (double)add_fragments / presentations / 1000000.0);
+  for (int plane = 0; plane < 32; plane++) {
+    if (!data->plane_draws[plane]) continue;
+    fprintf(stderr,
+            "  plane %2d: draws/present=%.1f screen-layers=%.2fx "
+            "fragments/present=%.2fM\n",
+            plane, (double)data->plane_draws[plane] / presentations,
+            (double)data->plane_fragment_pixels[plane] / viewport_pixels,
+            (double)data->plane_fragment_pixels[plane] /
+                presentations / 1000000.0);
+  }
 }
 
 void DioramaPerformance_PresentCompleted(void) {

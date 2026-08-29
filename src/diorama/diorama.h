@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "diorama_coverage.h"
 #include "diorama_planes.h"
 #include "diorama_skybox_uv.h"
 #include "presentation_outcome.h"
@@ -225,6 +226,7 @@ PresentationOutcome Diorama_Composite(
     const uint32_t bg_transparent_fill_argb[2],
     const DioramaCameraPose *cam_pose, float distance_scale,
     uint32_t additive_plane_mask,
+    const DioramaCoverageMask coverage_masks[kDioramaPlane_Count],
     uint8_t effect_obj_priority_mask, uint32_t effect_bg_plane_mask,
     uint8_t map_group, uint8_t map_number, uint8_t layer_section,
     const DioramaBgValidSpanPlan *bg2_valid_spans,

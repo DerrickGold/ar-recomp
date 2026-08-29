@@ -60,6 +60,8 @@ extern ArRenderTexture g_sim_obj_atlas_texture;
 extern ArRenderTexture g_sim3d_layer_textures[kSim3DPlane_Count];
 extern ArRenderTexture g_sim3d_flat_texture;
 static uint32_t s_diorama_uploaded_plane_mask;
+static DioramaCoverageMask
+    s_diorama_coverage_masks[kDioramaPlane_Count];
 static ArRenderTexture s_action_bg1_mask_texture;
 static ArRenderTexture s_action_bg2_mask_texture;
 static ArRenderTexture s_action_plane_effect_target;
@@ -167,6 +169,62 @@ static void CaptureDioramaPpuSurfaces(
     pixels[plane] = surface->data;
     if (pitch_bytes)
       pitch_bytes[plane] = (size_t)surface->pitch_bytes;
+  }
+}
+
+/* AR_PLANESTAT=1: report the alpha-bearing fraction and content bounding box
+ * of each plane that actually synchronized for presentation. This runs while
+ * the borrowed producer surfaces are still owned by PresentUpload; retained
+ * re-presents must not rescan pointers that a later game tick can rewrite. */
+static void PlaneStatCensus(
+    const uint8_t *pixels[kDioramaPlane_Count],
+    const size_t pitch_bytes[kDioramaPlane_Count],
+    int width, int height, uint32_t plane_mask) {
+  static int enabled = -1;
+  static unsigned long frames;
+  static double covered_sum[kDioramaPlane_Count];
+  static double bbox_sum[kDioramaPlane_Count];
+  static unsigned long present_count[kDioramaPlane_Count];
+  if (enabled < 0) {
+    const char *value = getenv("AR_PLANESTAT");
+    enabled = value && value[0] && value[0] != '0';
+  }
+  if (!enabled || width <= 0 || height <= 0) return;
+  frames++;
+  for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
+    if (!(plane_mask & (1u << plane)) ||
+        !pixels[plane] || !pitch_bytes[plane])
+      continue;
+    long covered = 0;
+    int x0 = width, x1 = -1, y0 = height, y1 = -1;
+    for (int y = 0; y < height; y++) {
+      const uint32_t *row = (const uint32_t *)(
+          pixels[plane] + (size_t)y * pitch_bytes[plane]);
+      for (int x = 0; x < width; x++) {
+        if ((row[x] >> 24) == 0u) continue;
+        covered++;
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+    present_count[plane]++;
+    const double area = (double)width * (double)height;
+    covered_sum[plane] += (double)covered / area;
+    bbox_sum[plane] += x1 < 0 ? 0.0
+        : (double)(x1 - x0 + 1) * (double)(y1 - y0 + 1) / area;
+  }
+  if (frames % 300u != 0u) return;
+  fprintf(stderr, "[planestat] after %lu frames (%dx%d)\n",
+          frames, width, height);
+  for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
+    if (!present_count[plane]) continue;
+    fprintf(stderr,
+            "  plane %2d: present %5.1f%% covered %5.1f%% bbox %5.1f%%\n",
+            plane, 100.0 * (double)present_count[plane] / (double)frames,
+            100.0 * covered_sum[plane] / (double)present_count[plane],
+            100.0 * bbox_sum[plane] / (double)present_count[plane]);
   }
 }
 
@@ -736,6 +794,13 @@ void PresentUpload(const FrameSlot *slot) {
         slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom,
         slot->obj_apron, upload_mask);
     s_diorama_uploaded_plane_mask = upload.synchronized_plane_mask;
+    memcpy(s_diorama_coverage_masks, upload.coverage_masks,
+           sizeof(s_diorama_coverage_masks));
+    PlaneStatCensus(
+        pixels, pitch_bytes,
+        slot->snes_width + slot->obj_apron * 2,
+        slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom,
+        s_diorama_uploaded_plane_mask);
     /* A failed raw upload cannot be a valid endpoint: exclude it before
      * retaining/analyzing the pair so generation never interpolates from an
      * image that was not actually presentable. */
@@ -750,6 +815,7 @@ void PresentUpload(const FrameSlot *slot) {
     DioramaPerformance_End(frame_analysis);
   } else {
     s_diorama_uploaded_plane_mask = 0;
+    memset(s_diorama_coverage_masks, 0, sizeof(s_diorama_coverage_masks));
     ArRenderRectI upload = {
       0, 0, slot->snes_width, slot->snes_height,
     };
@@ -2052,6 +2118,7 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
         slot->diorama_bg_transparent_fill_argb,
         &final_cam, distance_scale,
         slot->diorama_plane_additive_mask & s_diorama_uploaded_plane_mask,
+        slot->interp_setting_enabled ? NULL : s_diorama_coverage_masks,
         effect_obj_priority_mask, effect_bg_plane_mask,
         slot->diorama_map_group, slot->diorama_map_number,
         slot->diorama_layer_section, &bg2_valid_spans,

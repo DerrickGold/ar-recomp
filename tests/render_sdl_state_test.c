@@ -4,10 +4,15 @@
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static bool NearlyEqual(float left, float right) {
   return fabsf(left - right) < 0.001f;
+}
+
+static bool ByteNear(Uint8 left, Uint8 right) {
+  return abs((int)left - (int)right) <= 2;
 }
 
 static void AssertTextureState(SDL_Texture *texture,
@@ -169,6 +174,18 @@ int main(void) {
   AssertTextureState(
       ArSdlRenderBackend_UnwrapTexture(premultiplied_target),
       1.0f, 1.0f, 1.0f, 1.0f, SDL_BLENDMODE_ADD_PREMULTIPLIED);
+  ArRenderTextureDesc alpha_premultiplied_desc = target_desc;
+  alpha_premultiplied_desc.blend = kArRenderBlendMode_AlphaPremultiplied;
+  ArRenderTexture alpha_premultiplied_target = ArRenderTexture_Invalid();
+  assert(ArRenderDevice_CreateTexture(
+      &device, &alpha_premultiplied_desc, &alpha_premultiplied_target));
+  const SDL_BlendMode alpha_premultiplied = SDL_ComposeCustomBlendMode(
+      SDL_BLENDFACTOR_ONE, SDL_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+      SDL_BLENDOPERATION_ADD, SDL_BLENDFACTOR_ONE,
+      SDL_BLENDFACTOR_ONE_MINUS_SRC_ALPHA, SDL_BLENDOPERATION_ADD);
+  AssertTextureState(
+      ArSdlRenderBackend_UnwrapTexture(alpha_premultiplied_target),
+      1.0f, 1.0f, 1.0f, 1.0f, alpha_premultiplied);
   const SDL_Rect saved_viewport = {1, 2, 12, 11};
   const SDL_Rect saved_clip = {3, 4, 6, 5};
   assert(SDL_SetRenderViewport(renderer, &saved_viewport));
@@ -218,11 +235,49 @@ int main(void) {
   assert(accumulated_a == 128);
   SDL_DestroySurface(accumulated);
 
+  /* A stack group is rendered over transparent with ordinary alpha, which
+   * leaves premultiplied RGB in its target. Compositing that target once with
+   * premultiplied-alpha-over must match the original ordered direct draws. */
+  assert(ArRenderDevice_Clear(
+      &device, (ArRenderColorF){0.0f, 0.0f, 0.0f, 0.0f}));
+  const ArRenderRectF group_rect = {0.0f, 0.0f, 8.0f, 8.0f};
+  const ArRenderColorF group_red = {1.0f, 0.0f, 0.0f, 0.5f};
+  const ArRenderColorF group_blue = {0.0f, 0.0f, 1.0f, 0.25f};
+  assert(ArRenderDevice_DrawSolidRect(
+      &device, &group_rect, group_red, kArRenderBlendMode_Alpha));
+  assert(ArRenderDevice_DrawSolidRect(
+      &device, &group_rect, group_blue, kArRenderBlendMode_Alpha));
+
   assert(ArRenderDevice_EndTarget(&device, &target_state));
   assert(SDL_GetRenderTarget(renderer) == NULL);
   SDL_Rect restored = {0};
   assert(SDL_RenderViewportSet(renderer));
   assert(SDL_GetRenderViewport(renderer, &restored));
+
+  const ArRenderColorF group_background = {0.0f, 0.75f, 0.0f, 1.0f};
+  assert(ArRenderDevice_Clear(&device, group_background));
+  const ArRenderDrawState premultiplied_over_state = {
+    .flags = kArRenderDrawState_Blend,
+    .blend = kArRenderBlendMode_AlphaPremultiplied,
+  };
+  assert(ArRenderDevice_DrawTextureWithState(
+      &device, target, NULL, &group_rect, &premultiplied_over_state));
+  Uint8 grouped_r = 0, grouped_g = 0, grouped_b = 0, grouped_a = 0;
+  assert(SDL_ReadSurfacePixel(
+      surface, 1, 2, &grouped_r, &grouped_g, &grouped_b, &grouped_a));
+
+  assert(ArRenderDevice_Clear(&device, group_background));
+  assert(ArRenderDevice_DrawSolidRect(
+      &device, &group_rect, group_red, kArRenderBlendMode_Alpha));
+  assert(ArRenderDevice_DrawSolidRect(
+      &device, &group_rect, group_blue, kArRenderBlendMode_Alpha));
+  Uint8 direct_r = 0, direct_g = 0, direct_b = 0, direct_a = 0;
+  assert(SDL_ReadSurfacePixel(
+      surface, 1, 2, &direct_r, &direct_g, &direct_b, &direct_a));
+  assert(ByteNear(grouped_r, direct_r));
+  assert(ByteNear(grouped_g, direct_g));
+  assert(ByteNear(grouped_b, direct_b));
+  assert(ByteNear(grouped_a, direct_a));
   assert(!memcmp(&restored, &saved_viewport, sizeof(restored)));
   assert(SDL_RenderClipEnabled(renderer));
   assert(SDL_GetRenderClipRect(renderer, &restored));
@@ -230,6 +285,7 @@ int main(void) {
 
   ArRenderDevice_DestroyTexture(&device, target);
   ArRenderDevice_DestroyTexture(&device, premultiplied_target);
+  ArRenderDevice_DestroyTexture(&device, alpha_premultiplied_target);
   ArRenderDevice_DestroyTexture(&device, texture);
   ArSdlRenderBackend_Destroy(&device);
   assert(!ArRenderDevice_IsReady(&device));

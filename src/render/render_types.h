@@ -97,6 +97,10 @@ typedef enum ArRenderFilter {
 typedef enum ArRenderBlendMode {
   kArRenderBlendMode_Opaque,
   kArRenderBlendMode_Alpha,
+  /* Source RGB is already multiplied by source alpha; composite it over the
+   * destination without multiplying it a second time. Render-target groups
+   * produced by ordinary alpha blending use this representation. */
+  kArRenderBlendMode_AlphaPremultiplied,
   kArRenderBlendMode_Add,
   /* Source is already multiplied by source alpha. Useful for accumulating an
    * alpha-bearing effect target without dimming its RGB a second time. */
