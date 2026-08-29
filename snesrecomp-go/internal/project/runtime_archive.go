@@ -192,6 +192,7 @@ func BuildRuntimeArchive(options RuntimeArchiveOptions) (string, error) {
 	var failed atomic.Bool
 	var firstError error
 	var errorOnce sync.Once
+	tools := &toolLog{writer: options.Stdout}
 	semaphore := make(chan struct{}, options.Jobs)
 	var waitGroup sync.WaitGroup
 	for _, item := range jobs {
@@ -207,7 +208,7 @@ func BuildRuntimeArchive(options RuntimeArchiveOptions) (string, error) {
 				return
 			}
 			if options.Verbose {
-				fmt.Fprintf(options.Stdout, "  cc %s\n", item.source)
+				tools.printf("  cc %s\n", item.source)
 			}
 			args := append([]string(nil), compileArgs...)
 			args = append(args, runtimeDebugObjectArgs(runtimeDir, options.Target, item.source)...)
@@ -215,11 +216,14 @@ func BuildRuntimeArchive(options RuntimeArchiveOptions) (string, error) {
 			command := exec.Command(options.ZigPath, args...)
 			command.Dir = runtimeDir
 			output, err := command.CombinedOutput()
+			// The runner also compiles with -w, so this is silent on a healthy
+			// unit and carries the diagnostic on a broken one.
+			tools.block("cc "+item.source, output)
 			if err != nil {
 				failed.Store(true)
 				errorOnce.Do(func() {
-					firstError = fmt.Errorf("compile %s: %w\n%s", item.source,
-						err, strings.TrimSpace(string(output)))
+					firstError = fmt.Errorf("compile %s: %w (its output is in the build log above)",
+						item.source, err)
 				})
 			}
 		}(item)

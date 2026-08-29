@@ -289,7 +289,6 @@ typedef struct Settings {
   int pixel_aspect;
   int window_scale;         /* windowed client-size multiple */
   int window_mode;          /* WindowMode: windowed / borderless / exclusive */
-  bool new_renderer;
   /* Load-only compatibility alias. Runtime code must use
    * Settings_IgnoreAspectRatio(), derived from extended_aspect. */
   bool ignore_aspect_ratio;
@@ -694,7 +693,6 @@ int Settings_VisibleWidth(void);
 /* Diorama availability predicates, shared by the descriptor table and the
  * host render/hotkey paths so the gate has exactly one spelling (§D14). */
 bool Diorama_ModeIsOn(void);
-bool Diorama_NewPpuCapable(void);
 bool Sim3D_ModeIsOn(void);
 int Settings_ExtendedAspectX(void);
 int Settings_ExtendedAspectY(void);

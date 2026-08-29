@@ -274,17 +274,47 @@ bool MusicPlay_IsRedundantRestart(const MusicReplacement *live,
   return live != NULL && live == selected && stream_open;
 }
 
+static bool EntryPlaysSong(const MusicReplacement *entry, uint32 src, int song) {
+  if (entry->src != src || !entry->has_audio) return false;
+  return entry->song == kMusicSongAny || entry->song == song;
+}
+
+static bool EntryGatePasses(const MusicReplacement *entry) {
+  for (int c = 0; c < entry->condition_count; c++)
+    if (!HdManifest_ConditionPasses(&entry->conditions[c])) return false;
+  return true;
+}
+
+/* Selection is by SPECIFICITY first, position second. A `when` clause is a
+ * claim to one particular context; an entry without one is the catch-all for
+ * that song, so a gated variant wins over an ungated entry no matter which of
+ * them the file happens to list first.
+ *
+ * Position used to decide on its own, which made a working manifest depend on
+ * an invariant nothing enforced: an ungated entry written above a gated one
+ * shadowed it completely, and the builder GUI writes its [music:song-NN] entry
+ * wherever that section already sits. A hand-authored split could therefore be
+ * correct, ship, and then silently stop applying the first time someone dropped
+ * a file into the catch-all slot -- with no diagnostic, because both entries are
+ * individually valid.
+ *
+ * Order still resolves the one case where specificity cannot: two gated entries
+ * whose conditions overlap. There the file is the only place the tie-break can
+ * be expressed, so the earlier entry wins, and gates are evaluated top-down. */
 const MusicReplacement *MusicReplacements_Select(uint32 src, int song) {
+  const MusicReplacement *fallback = NULL;
   for (int i = 0; i < g_music_replacement_count; i++) {
     const MusicReplacement *entry = &g_music_replacements[i];
-    if (entry->src != src || !entry->has_audio) continue;
-    if (entry->song != kMusicSongAny && entry->song != song) continue;
-    bool pass = true;
-    for (int c = 0; c < entry->condition_count && pass; c++)
-      pass = HdManifest_ConditionPasses(&entry->conditions[c]);
-    if (pass) return entry;
+    if (!EntryPlaysSong(entry, src, song)) continue;
+    if (!entry->condition_count) {
+      /* Ungated: remembered, not taken. Among equally unspecific entries the
+       * first still wins, so an existing single-entry manifest is unaffected. */
+      if (!fallback) fallback = entry;
+      continue;
+    }
+    if (EntryGatePasses(entry)) return entry;
   }
-  return NULL;
+  return fallback;
 }
 
 /* ---- loop-region slicing (pure) ----------------------------------------- */

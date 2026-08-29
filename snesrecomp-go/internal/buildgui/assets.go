@@ -43,6 +43,21 @@ var manualPDF []byte
 //go:embed assets/title-logo.png
 var titleLogoPNG []byte
 
+// The asset-replacement manifest TEMPLATE: every known hook, active but inert
+// until its file exists, plus the reference documentation for the format.
+//
+// It lives here rather than at game-assets/manifest.ini because those are two
+// different things that were one file. game-assets/manifest.ini is a LIVE,
+// user-edited file -- the builder writes to it, players hand-edit it, and a
+// developer's own experiments accumulate in it. Vending that same file as the
+// release default shipped whatever happened to be in the working copy. This
+// copy is the one the release vends and the one a fresh install starts from;
+// the live file is materialized from it and thereafter belongs to the user,
+// exactly like every other file under game-assets.
+//
+//go:embed assets/manifest.ini
+var assetManifestTemplate []byte
+
 // materializeBundledManual makes the builder's copy available to the game at
 // the runtime path it already reads. The live game-assets directory survives a
 // "keep just the game" cleanup, so this is a one-time handoff rather than a
@@ -52,7 +67,21 @@ var titleLogoPNG []byte
 // album by hand; later it is the seam where the builder's converted user manual
 // will land without this fallback overwriting it on the next launch.
 func materializeBundledManual(root string) error {
-	destination := filepath.Join(root, "game-assets", "manual.pdf")
+	return materializeBundledFile(
+		filepath.Join(root, "game-assets", "manual.pdf"), manualPDF, "manual")
+}
+
+// materializeAssetManifest seeds the live manifest from the template on a
+// checkout or install that has none. Same never-overwrite rule as the manual,
+// and for a stronger reason: this file accumulates a player's own entries and
+// the builder's saves, so re-seeding an existing one would discard their work.
+func materializeAssetManifest(root string) error {
+	return materializeBundledFile(
+		filepath.Join(root, "game-assets", "manifest.ini"),
+		assetManifestTemplate, "asset manifest")
+}
+
+func materializeBundledFile(destination string, content []byte, label string) error {
 	if info, err := os.Stat(destination); err == nil {
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("%s exists but is not a regular file", destination)
@@ -64,11 +93,11 @@ func materializeBundledManual(root string) error {
 
 	directory := filepath.Dir(destination)
 	if err := os.MkdirAll(directory, 0o755); err != nil {
-		return fmt.Errorf("create manual asset directory: %w", err)
+		return fmt.Errorf("create %s directory: %w", label, err)
 	}
-	temporary, err := os.CreateTemp(directory, ".manual-*")
+	temporary, err := os.CreateTemp(directory, ".bundled-*")
 	if err != nil {
-		return fmt.Errorf("create temporary manual: %w", err)
+		return fmt.Errorf("create temporary %s: %w", label, err)
 	}
 	temporaryPath := temporary.Name()
 	defer func() {
@@ -78,19 +107,19 @@ func materializeBundledManual(root string) error {
 		_ = os.Remove(temporaryPath)
 	}()
 	if err := temporary.Chmod(0o644); err != nil {
-		return fmt.Errorf("set manual permissions: %w", err)
+		return fmt.Errorf("set %s permissions: %w", label, err)
 	}
-	if _, err := temporary.Write(manualPDF); err != nil {
-		return fmt.Errorf("write bundled manual: %w", err)
+	if _, err := temporary.Write(content); err != nil {
+		return fmt.Errorf("write bundled %s: %w", label, err)
 	}
 	if err := temporary.Sync(); err != nil {
-		return fmt.Errorf("flush bundled manual: %w", err)
+		return fmt.Errorf("flush bundled %s: %w", label, err)
 	}
 	if err := temporary.Close(); err != nil {
-		return fmt.Errorf("close bundled manual: %w", err)
+		return fmt.Errorf("close bundled %s: %w", label, err)
 	}
 	if err := os.Rename(temporaryPath, destination); err != nil {
-		return fmt.Errorf("install bundled manual: %w", err)
+		return fmt.Errorf("install bundled %s: %w", label, err)
 	}
 	return nil
 }

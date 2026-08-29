@@ -3,8 +3,11 @@ package spcaudio
 import (
 	"bytes"
 	"encoding/binary"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func runProgram(t *testing.T, program ...byte) *apu {
@@ -160,5 +163,70 @@ func TestActRaiserROMValidationRejectsWrongImage(t *testing.T) {
 	_, err := normalizeActRaiserROM(make([]byte, actRaiserROMSize))
 	if err == nil || !strings.Contains(err.Error(), "CRC32") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// A cache entry is reused verbatim, so accepting one that is merely "a RIFF
+// file" means a truncated write, a leftover from a different preview length, or
+// a WAV an older renderer produced is served as this renderer's output forever.
+func TestValidWAVFileRejectsAnythingButACompletePreview(t *testing.T) {
+	directory := t.TempDir()
+	const frames = 64
+	write := func(name string, content []byte) string {
+		path := filepath.Join(directory, name)
+		if err := os.WriteFile(path, content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	var complete bytes.Buffer
+	if err := writeWAV(&complete, make([]int16, frames*2)); err != nil {
+		t.Fatal(err)
+	}
+	good := write("good.wav", complete.Bytes())
+	if !validWAVFile(good, frames) {
+		t.Error("a complete preview was rejected")
+	}
+	if validWAVFile(good, frames*2) {
+		t.Error("a preview of the wrong duration was accepted")
+	}
+	body := complete.Bytes()
+	for name, content := range map[string][]byte{
+		"truncated.wav": body[:len(body)-8],
+		"padded.wav":    append(append([]byte{}, body...), 0, 0, 0, 0),
+		"prefix.wav":    []byte("RIFF\x00\x00\x00\x00WAVEpreview"),
+	} {
+		if path := write(name, content); validWAVFile(path, frames) {
+			t.Errorf("%s was accepted as a complete preview", name)
+		}
+	}
+	if validWAVFile(filepath.Join(directory, "absent.wav"), frames) {
+		t.Error("a missing cache entry was reported valid")
+	}
+}
+
+// Bumping the renderer generation stops old audio being served, but on its own
+// it strands the previous generation's WAVs on disk with nothing to reclaim
+// them. Only OLDER generations go: a current-generation directory is live
+// whatever its duration, and an unrecognised name is left alone.
+func TestPruneSupersededPreviewsKeepsOnlyTheCurrentGeneration(t *testing.T) {
+	romDirectory := t.TempDir()
+	current := previewCacheVariant(30 * time.Second)
+	names := []string{current, "v1-30000ms", "v1-5000ms", "v99-30000ms", "notes"}
+	for _, name := range names {
+		if err := os.MkdirAll(filepath.Join(romDirectory, name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pruneSupersededPreviews(romDirectory)
+	survives := map[string]bool{current: true, "v99-30000ms": true, "notes": true}
+	for _, name := range names {
+		_, err := os.Stat(filepath.Join(romDirectory, name))
+		if survives[name] && err != nil {
+			t.Errorf("%s should have been kept: %v", name, err)
+		}
+		if !survives[name] && err == nil {
+			t.Errorf("%s should have been pruned", name)
+		}
 	}
 }

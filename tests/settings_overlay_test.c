@@ -77,7 +77,7 @@ static void InspectorInfo(char *buffer, size_t buffer_size) {
  * under test. */
 enum {
   kSection_Video = 0,
-  kSection_Diorama,
+  kSection_Action3D,
   kSection_Town3D,
   kSection_Audio,
   kSection_Controls,

@@ -2,8 +2,20 @@
 # imagery only). The manifest itself IS tracked as a template of discovered
 # replacement hooks — see docs/rendering-engine.md §13.1.1 and docs/SEAMS.md
 # "Audio".
+# config.ini is the developer's LIVE config: cheats, window size and debug
+# switches accumulate in it during normal work. The tracked copy is the stock
+# template at snesrecomp-go/packaging/templates/config.ini, which is what a
+# release vends and what `make dev` seeds this file from.
+#
+# Anchored: an unanchored "config.ini" matches at ANY depth and would swallow
+# the template itself.
+/config.ini
+
 game-assets/*
-!game-assets/manifest.ini
+# manifest.ini is LIVE and user-edited: the builder writes to it, players
+# hand-edit it, and local experiments accumulate in it. The tracked copy is the
+# template at snesrecomp-go/internal/buildgui/assets/manifest.ini, which is what
+# a release vends and what seeds a fresh checkout on first builder run.
 !game-assets/hd/
 game-assets/hd/*
 !game-assets/audio/

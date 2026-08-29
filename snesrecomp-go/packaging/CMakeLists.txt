@@ -484,11 +484,27 @@ install(FILES
 # The paths matter: utils/ is the game's working directory (the launcher cd's into
 # it), so the LIVE files must resolve there -- config.ini is passed as a bare
 # `--config config.ini` and diorama-layers.ini via UserDataFile's bare leaf.
+# config.ini ships from the TEMPLATE for the same reason the manifest does: the
+# file at ${GAME_ROOT}/config.ini is the developer's own live config, and
+# whatever was switched on in it at release time went out to every install --
+# which is how AR_MOONJUMP, AR_NO_KNOCKBACK and AR_RANGED_SWORD came to be
+# enabled in a shipped default. `make check-constants` holds the template stock.
 install(FILES
-    ${GAME_ROOT}/config.ini
+    ${CMAKE_CURRENT_SOURCE_DIR}/templates/config.ini
+    DESTINATION utils/defaults)
+# diorama-layers.ini is authored CONTENT, not personal settings: its per-room
+# overrides are the project's work and are meant to ship as they are.
+install(FILES
     ${GAME_ROOT}/diorama-layers.ini
     DESTINATION utils/defaults)
-install(FILES ${GAME_ROOT}/game-assets/manifest.ini
+# The manifest ships from the TEMPLATE, not from the working copy at
+# ${GAME_ROOT}/game-assets/manifest.ini. That file is live and user-edited --
+# the builder writes to it, players hand-edit it, and a developer's own
+# experiments accumulate in it -- so vending it shipped whatever happened to be
+# checked out at release time. The template lives beside the builder's other
+# embedded assets because `go:embed` cannot reach outside its own package, and
+# the same bytes seed a fresh install from inside snesbuild.
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../internal/buildgui/assets/manifest.ini
     DESTINATION utils/defaults/game-assets)
 
 # Buildable project source (authored input only; generated C is excluded and
@@ -544,9 +560,9 @@ install(FILES ${_runtime_archive}
 # game-assets: initially empty HD/music folders. The bundled manual and optional
 # HD title are already embedded in snesbuild; the manual is materialized when the
 # builder starts, while the title is installed only from the Assets-tab toggle.
-# manifest.ini itself is user-editable and ships under
+# manifest.ini itself is user-editable and ships as a template under
 # utils/defaults/game-assets/ above, so an upgrade cannot overwrite the entries
-# a user added.
+# a user added; snesbuild materializes the live copy when there is none.
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/templates/audio-README.txt
     DESTINATION utils/game-assets/audio RENAME README.txt)
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/templates/hd-README.txt

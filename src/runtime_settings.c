@@ -26,7 +26,6 @@
 static RuntimeLifecycleRequest s_lifecycle_request;
 
 extern SDL_Window *g_window;
-extern bool g_new_ppu;
 extern bool g_ws_active;
 extern bool g_sim3d_textures_ready;
 extern bool g_sim3d_billboard_renderer_ready;
@@ -277,10 +276,6 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
       desc->field == &g_settings.diorama_tilt_y_mrad ||
       desc->field == &g_settings.diorama_distance_x100)
     Diorama_SeedCameraFromSettings();
-  if (desc->field == &g_settings.new_renderer) {
-    g_new_ppu = g_settings.new_renderer || g_ws_active;
-    HostInput_RequestPausedRedraw();
-  }
   if (g_settings.sim3d_mode &&
       (desc->field == &g_settings.sim3d_mode ||
        desc->field == &g_settings.sim3d_object_billboards)) {

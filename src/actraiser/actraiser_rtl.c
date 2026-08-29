@@ -2056,13 +2056,10 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     /* BH5 owns eligible authentic world layers independently of presentation
      * width. Keep the native 4:3 path in the same default-off provider census;
      * decorative policy is irrelevant without margins, but its source
-     * classification remains the authority for which layers may bind. The
-     * legacy renderer cannot consume this host seam, so fail closed there. */
-    extern bool g_new_ppu;
+     * classification remains the authority for which layers may bind. */
     bool bind_plan = false;
     ActionBgPlan plan;
-    if (g_new_ppu &&
-        ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
+    if (ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
       ActionBgPresentationPolicy presentation;
       if (ActRaiser_ResolveActionBgPlan(
               g_ram[kActRaiserWram_MapGroup],

@@ -374,7 +374,12 @@ _Static_assert((int)(sizeof(kTabsLayers) / sizeof(kTabsLayers[0])) ==
 static const MenuSection kSections[] = {
   SECTION("Video", "Window, aspect, shader effects and widescreen behavior.",
           kTabsVideo),
-  SECTION("Diorama", "Tilt the action stages into a layered 3D diorama.",
+  /* Both 3D sections are named for the MODE they apply to, not the technique
+     they apply. "Diorama" is the technique; a player looking for the action
+     stages' visuals has no reason to guess that word, and it left the pair
+     reading as unrelated features when they are the same idea per mode. Named
+     this way the blurbs carry the technique instead. */
+  SECTION("Action 3D", "Tilt the action stages into a layered 3D diorama.",
           kTabsDiorama),
   SECTION("Town 3D", "Project the simulation town onto a 3D ground plane.",
           kTabsTown),
@@ -717,7 +722,7 @@ static const IconIndexMap kSectionIconMaps[] = {
     {14,11,11,11,11,11,11,11,11,11,11,11,11,11,11,14},
     {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
   },
-  { /* Diorama <- game icon #12 */
+  { /* Action 3D <- game icon #12 */
     {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
     {14, 7, 7, 7, 7, 7, 7, 7, 7,14, 7, 7,14, 7, 7,14},
     {14, 7,14,14,14,14,14,14,14,14, 7,10,14,14, 7,14},

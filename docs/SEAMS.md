@@ -103,8 +103,11 @@ values and nonzero port-2 ids to catch them in play.
 
 1. **Track-level replacement (stream swap) — IMPLEMENTED** as
    `src/music_replacements.c` + `[music:<name>]` sections of
-   `game-assets/manifest.ini` (all 17 table songs enumerated; the tracked
-   manifest ships them inert until their .ogg exists). Identity = the stage-1
+   `game-assets/manifest.ini` (all 17 table songs enumerated; the manifest
+   TEMPLATE ships them inert until their .ogg exists). The live manifest is
+   gitignored and seeded from that template — embedded in snesbuild at
+   `internal/buildgui/assets/manifest.ini` — so a developer's own entries never
+   reach a release. Identity = the stage-1
    image source address delivered by
    `RtlGameAudioApi.spc_upload_completed`; start/stop keyed off the port-0
    protocol above via `RtlGameAudioApi.apu_port_write`; OGG Vorbis streaming
@@ -133,8 +136,13 @@ values and nonzero port-2 ids to catch them in play.
    upload therefore always wins the `$11FF` ordering, and song voices remain
    at srcn `$0C+`.
    Per-entry `when =` gates (shared HD gate
-   grammar, sampled at song start) select level/state-dependent variants;
-   first matching entry wins, ungated entry = fallback. `music_replacements`
+   grammar, sampled at song start) select level/state-dependent variants.
+   Selection is by SPECIFICITY, not file order: a gated entry outranks an
+   ungated one wherever each sits, an ungated entry is that song's catch-all,
+   and order breaks ties only between overlapping gates. Position deciding on
+   its own made a manifest depend on an invariant nothing enforced — the
+   builder GUI rewrites `[music:song-NN]` in place, so a catch-all sitting
+   above a hand-authored split silently shadowed it. `music_replacements`
    setting / `AR_MUSIC_REPLACEMENTS` toggles live; `AR_MUSICLOG=1` traces.
    The transport contract is event parity, not sample-position parity: native
    `$F0`/`$F2`/play commands are mirrored, and a host pause gates the whole SDL

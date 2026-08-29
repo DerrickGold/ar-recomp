@@ -232,7 +232,6 @@ int g_ws_extra_bottom;
 
 extern const RtlGameModule kActRaiserGameModule;
 
-bool g_new_ppu = true;
 
 static bool SettingsOverlayLiveCgram(
     uint16_t out_cgram[kSettingsOverlayLayerPaletteEntries]) {

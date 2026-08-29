@@ -16,12 +16,17 @@ the original. See docs/SEAMS.md "Content / randomizer seams".
   --assets   per-map asset script ($05:8000, VM at $02:B1F7): which compressed
              animation blob each map loads into $7E:4000 / $7E:5000. Add
              --script to dump every command with its operands.
+  --songs    which song image each map declares, and the inverse: for every
+             song source, the regions that reference it. Read from the same
+             per-map script (its bit-1 command is the $02:B63B song change),
+             so it is derived from the ROM rather than observed by playing.
 
 Examples:
   tools/act_content.py --tables
   tools/act_content.py --levels | less
   tools/act_content.py --census
   tools/act_content.py --lairs
+  tools/act_content.py --songs
 """
 import argparse
 import collections
@@ -359,6 +364,92 @@ def cmd_assets(rom, verbose=False):
         print(f"  {REGION.get(m, '?')} map {s}: ${o:06X}")
 
 
+# The 17 pointer-table songs ($02:C7E5), under the ids the builder GUI and
+# game-assets/manifest.ini use for them. Songs reached only through inline
+# script pointers are not in that table and print as "(unlisted)".
+SONG_IDS = {
+    '1A:94B8': 'title-theme', '18:947F': 'song-00', '1C:A988': 'song-01',
+    '18:DDCC': 'song-02', '1A:E9E2': 'song-03', '1C:A5FB': 'song-04',
+    '1B:8554': 'song-05', '1B:9470': 'song-06', '1C:A7CC': 'song-08',
+    '0E:F69F': 'song-09', '1B:ABED': 'song-10', '1C:AFEB': 'song-11',
+    '19:FA4B': 'song-12', '17:C027': 'song-13', '18:D4FA': 'song-14',
+    '1C:9F3D': 'song-15', '1A:EF63': 'song-16',
+}
+
+
+# First $19 of act 2 per region; act 1 is every lower map. Same boundaries the
+# verified AR_WARP table in docs/manual.md lists as each region's act-2 entry
+# (0102 / 0202 / 0303 / 0404 / 0504 / 0605). Death Heim has no acts -- it is the
+# boss-rush hub -- so it is absent.
+ACT2_FIRST_MAP = {1: 2, 2: 2, 3: 3, 4: 4, 5: 4, 6: 5}
+
+
+def acts_for(mode, maps):
+    """Which acts of one region a set of $19 maps covers."""
+    boundary = ACT2_FIRST_MAP.get(mode)
+    if boundary is None:
+        return set()
+    return {1 if m < boundary else 2 for m in maps}
+
+
+def iter_song_commands(rom):
+    """Yield (mode, sub, 'BB:AAAA', song_number, slot) per declared song.
+
+    The map script's bit-1 command is the $02:B63B song change: two leading
+    bytes then a 24-bit LINEAR pointer to the song's SPC image, which is the
+    same value the upload HLE reports as the track identity. Reading it here
+    is why the level/song map needs no playthrough."""
+    for mode, sub, cmds in iter_script(rom):
+        for c, ops in cmds:
+            if high_bit(c) != 1 or len(ops) != 5:
+                continue
+            linear = ops[2] | (ops[3] << 8) | (ops[4] << 16)
+            bank, addr = linear_to_snes(linear)
+            yield mode, sub, f'{bank:02X}:{addr:04X}', ops[0], ops[1]
+
+
+def cmd_songs(rom):
+    print('Song image declared by each map, from the per-map script $05:8000')
+    print('(bit-1 command = the $02:B63B song change; pointer is the SPC image '
+          'source,\nwhich is the identity a [music:] manifest entry names).\n')
+    per_map = collections.OrderedDict()
+    for mode, sub, src, number, slot in iter_song_commands(rom):
+        per_map.setdefault((mode, sub), []).append((src, number, slot))
+    for (mode, sub), songs in per_map.items():
+        listed = ', '.join(
+            f'{src} {SONG_IDS.get(src, "(unlisted)")} song=${number:02X} slot=${slot:02X}'
+            for src, number, slot in songs)
+        print(f'  $18=${mode:02X} $19=${sub:02X}  {REGION.get(mode, "?"):<14} {listed}')
+
+    maps_by_src = collections.defaultdict(lambda: collections.defaultdict(set))
+    for (mode, sub), songs in per_map.items():
+        for src, _, _ in songs:
+            maps_by_src[src][mode].add(sub)
+    print('\nSong source -> the regions and ACTS that declare it. $00 is the '
+          'non-action\ngroup (sim/world map/title), so a song listed only '
+          'there has no action region.\n')
+    for src in sorted(maps_by_src, key=lambda k: (SONG_IDS.get(k, 'zz~'), k)):
+        by_region = maps_by_src[src]
+        parts = []
+        table = []
+        for mode in sorted(by_region):
+            maps = sorted(by_region[mode])
+            acts = sorted(acts_for(mode, maps))
+            where = REGION.get(mode, '?')
+            if acts:
+                where += ' act ' + '+'.join(str(a) for a in acts)
+            parts.append(f'${mode:02X} {where} (maps '
+                         + ','.join(str(m) for m in maps) + ')')
+            if mode != 0:
+                mask = sum(1 << (a - 1) for a in acts)
+                table.append(f'{{0x{mode:02X}, 0b{mask:02b}}}')
+        print(f'  {src} {SONG_IDS.get(src, "(unlisted)"):<12} '
+              + '; '.join(parts))
+        if SONG_IDS.get(src) and table:
+            print(f'{"":18}Regions: []trackRegion{{'
+                  + ', '.join(table) + '}')
+
+
 def cmd_lairs(rom):
     b3 = Bank(rom, 0x03)
     base = 0xB825
@@ -385,6 +476,8 @@ def main():
     ap.add_argument('--tables', action='store_true')
     ap.add_argument('--levels', action='store_true')
     ap.add_argument('--census', action='store_true')
+    ap.add_argument('--songs', action='store_true',
+                    help='per-map song image + the region list per song source')
     ap.add_argument('--assets', action='store_true',
                     help='per-map asset script ($05:8000) + animation blobs')
     ap.add_argument('--script', action='store_true',
@@ -393,7 +486,7 @@ def main():
     ap.add_argument('--rom', help='ROM path (default ar.sfc / $AR_ROM)')
     args = ap.parse_args()
     if not (args.tables or args.levels or args.census or args.lairs
-            or args.assets):
+            or args.assets or args.songs):
         ap.print_help()
         return 1
     rom = load_rom(args.rom)
@@ -403,6 +496,8 @@ def main():
         cmd_levels(rom)
     if args.census:
         cmd_census(rom)
+    if args.songs:
+        cmd_songs(rom)
     if args.assets:
         cmd_assets(rom, args.script)
     if args.lairs:

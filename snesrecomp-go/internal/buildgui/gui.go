@@ -111,6 +111,11 @@ func Run(ctx context.Context, options Options) error {
 	if err := materializeBundledManual(root); err != nil {
 		return fmt.Errorf("prepare bundled manual: %w", err)
 	}
+	// Same handoff for the manifest: an install with none gets the template,
+	// and one that already has a manifest keeps every entry in it.
+	if err := materializeAssetManifest(root); err != nil {
+		return fmt.Errorf("prepare asset manifest: %w", err)
+	}
 	options.ProjectRoot = root
 	if options.Title == "" {
 		options.Title = "snesbuild"
@@ -365,6 +370,7 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 			html.EscapeString(app.options.Title), 1)
 		page = strings.Replace(page, "{{STEPS}}", renderStepList(), 1)
 		page = strings.Replace(page, "{{ASSET_TRACKS}}", renderAssetTrackRows(), 1)
+		page = strings.Replace(page, "{{ASSET_ROW_PROTOTYPE}}", renderAssetRowPrototype(), 1)
 		_, _ = io.WriteString(response, page)
 	case endpoint == "boxart.webp" && request.Method == http.MethodGet:
 		serveBoxArt(response, request)
@@ -379,7 +385,10 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 	case endpoint == "audio-previews" && request.Method == http.MethodGet:
 		app.writeAudioPreviewStatus(response)
 	case endpoint == "audio-previews" && request.Method == http.MethodPost:
-		app.startAudioPreviews(response)
+		app.startAudioPreviews(response, request)
+	case strings.HasPrefix(endpoint, "asset-audio/") && request.Method == http.MethodGet:
+		app.serveInstalledAudio(response, request,
+			strings.TrimPrefix(endpoint, "asset-audio/"))
 	case strings.HasPrefix(endpoint, "audio-preview/") && request.Method == http.MethodGet:
 		app.serveAudioPreview(response, request,
 			strings.TrimPrefix(endpoint, "audio-preview/"))
@@ -499,11 +508,20 @@ func (app *application) startBuild(response http.ResponseWriter, request *http.R
 	writeJSON(response, http.StatusAccepted, map[string]string{"state": "building"})
 
 	go func() {
-		result, buildErr := app.options.Build(app.ctx, romPath, &lockedLogWriter{app: app})
+		logWriter := &lockedLogWriter{app: app}
+		result, buildErr := app.options.Build(app.ctx, romPath, logWriter)
+		if buildErr != nil {
+			// The failure text goes to the LOG, in full. The status line and
+			// the dock get only its first line: an error carrying a compiler's
+			// output is many lines long, and both of those are single-line
+			// elements that would show a fragment of it and hide the rest with
+			// no way to read the remainder anywhere on the page.
+			fmt.Fprintf(logWriter, "\n=== Build failed ===\n%s\n", buildErr.Error())
+		}
 		app.mu.Lock()
 		if buildErr != nil {
 			app.state = "failed"
-			app.errorMessage = buildErr.Error()
+			app.errorMessage = firstLine(buildErr.Error())
 			app.mu.Unlock()
 			return
 		}
@@ -516,6 +534,17 @@ func (app *application) startBuild(response http.ResponseWriter, request *http.R
 		app.remeasureSlim()
 		app.refreshState()
 	}()
+}
+
+// firstLine is what a one-line element can honestly show of a multi-line error.
+// The full text is always in the build log; this is the headline that tells the
+// reader which step died, so they know what they are looking at down there.
+func firstLine(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if index := strings.IndexByte(trimmed, '\n'); index >= 0 {
+		return strings.TrimSpace(trimmed[:index]) + " — see the build log below"
+	}
+	return trimmed
 }
 
 func (app *application) rejectBuild(response http.ResponseWriter, message string) {
@@ -747,11 +776,22 @@ const pageHTML = `<!doctype html>
   --sky-high:#1d3f78; --sky-mid:#4b7bb5; --sky-low:#b8d4e6; --sky-haze:#e9d9b6;
   --panel:#10192bd9; --line:#31456b;
   --ok:#8fd6a6; --bad:#f0938a;
-  --dock-h:64px;
+  /* Reserved runway under the content so the fixed build dock can never cover
+   * the last line of it. This is a FALLBACK: the dock's true height depends on
+   * its text wrapping, which at narrow widths is well over the 64px this used
+   * to reserve -- which is exactly how build output ended up underneath it. The
+   * page measures the dock and overwrites this (see syncDockHeight). */
+  --dock-h:104px;
 }
 * { box-sizing:border-box; }
-html,body { height:100%; }
+/* html is pinned to the viewport so a short page still fills it; body is only
+ * given a MINIMUM. With a fixed body height the runway reserved below is placed
+ * at the 100%-of-viewport mark and content that overflows simply runs past it,
+ * so the dock covered the tail of a long build log no matter how much padding
+ * was reserved -- the reserve has to follow the content, not the viewport. */
+html { height:100%; }
 body {
+  min-height:100%;
   margin:0; color:var(--ink);
   font:16px/1.55 "Iowan Old Style",Palatino,Georgia,serif;
   /* Sky: deep at the zenith, warm haze at the horizon. */
@@ -761,8 +801,9 @@ body {
       var(--sky-low) 74%, var(--sky-haze) 92%, #cbb388 100%);
   background-color:var(--sky-high);
   background-attachment:fixed;
-  /* Leave room for the dock so it can never cover the last line of content. */
-  padding-bottom:var(--dock-h);
+  /* Leave room for the dock so it can never cover the last line of content,
+   * plus a gap so the last line does not sit flush against it either. */
+  padding-bottom:calc(var(--dock-h) + 28px);
 }
 /* Clouds: layered soft radial gradients that drift very slowly. Two bands at
  * different speeds/scales give parallax without any image or canvas. */
@@ -800,12 +841,14 @@ body {
   #bar.indeterminate { animation:none; }
 }
 
-/* Sky Palace colonnade. The shafts are ABSOLUTE, not fixed, and sized to the
- * document, so each column stands on a plinth at the page's base instead of
- * running off both edges of the viewport like a pipe -- and content no longer
- * slides behind a floating shaft while scrolling. Hidden on narrow viewports
+/* Sky Palace colonnade. The shafts are FIXED to the viewport and span its full
+ * height, so a column meets the top and bottom edges of the window and stays
+ * there while the page scrolls. Sizing them to the DOCUMENT instead put the
+ * capital and the plinth at the extremes of a very long page: on the assets tab
+ * both ends were several screens away, so what the reader actually saw was a
+ * bare shaft sliding past -- a pipe, not a column. Hidden on narrow viewports
  * where they would crowd the content rather than frame it. */
-.colonnade { position:absolute; top:0; bottom:0; width:78px; z-index:1; pointer-events:none; }
+.colonnade { position:fixed; top:0; bottom:0; width:78px; z-index:1; pointer-events:none; }
 .colonnade.left { left:max(0px,calc(50% - 610px)); }
 .colonnade.right { right:max(0px,calc(50% - 610px)); }
 .shaft {
@@ -909,6 +952,41 @@ input[type=file]::file-selector-button {
 }
 .asset-intro { margin:0 0 18px; color:#e4dece; font-size:.9rem;
   font-family:system-ui,-apple-system,sans-serif; }
+
+/* ASSET TOOLBAR. Sticky to the top of the viewport for the whole tab. The music
+ * list is seventeen rows long, so a Save that lives only beneath the last row
+ * is several screens away from whatever the reader just changed -- they had to
+ * scroll back down past everything to commit a single checkbox. It also states
+ * whether anything is actually pending: a Save button that is always live on a
+ * page with no unsaved change teaches the reader to ignore it, so it is
+ * disabled and quiet until there is something to save, and announces itself
+ * when there is. */
+.asset-bar {
+  position:sticky; top:0; z-index:4;
+  display:flex; align-items:center; flex-wrap:wrap; gap:14px;
+  margin:-24px -24px 20px; padding:14px 24px;
+  border-bottom:1px solid var(--line);
+  background:#0e1a30f2; backdrop-filter:blur(9px);
+  transition:border-color .2s, box-shadow .2s;
+}
+.asset-bar-text { min-width:0; flex:1; font-family:system-ui,-apple-system,sans-serif; }
+#asset-bar-title { display:block; color:#fff3d6; font-size:.95rem; font-weight:600;
+  font-family:"Iowan Old Style",Palatino,Georgia,serif; }
+#asset-bar-note { display:block; color:var(--muted); font-size:.78rem; }
+.asset-bar-actions { display:flex; align-items:center; gap:8px; flex:none; }
+.asset-bar-actions button { padding:9px 17px; font-size:.92rem; }
+.asset-bar[data-dirty=true] {
+  border-bottom-color:var(--gold-deep); box-shadow:0 8px 24px #0509158c;
+}
+.asset-bar[data-dirty=true] #asset-bar-note { color:var(--gold); font-weight:700; }
+.asset-bar[data-dirty=true] .asset-bar-actions { animation:bar-in .32s ease-out; }
+@keyframes bar-in { from { transform:translateY(-5px); opacity:.35; } }
+@media (prefers-reduced-motion:reduce) { .asset-bar[data-dirty=true] .asset-bar-actions { animation:none; } }
+@media (max-width:560px) {
+  .asset-bar { align-items:flex-start; }
+  .asset-bar-actions { width:100%; }
+  .asset-bar-actions button { flex:1; }
+}
 .asset-title-card {
   display:grid; grid-template-columns:minmax(180px,280px) 1fr; gap:20px;
   align-items:center; margin-bottom:24px; padding:16px; border:1px solid var(--line);
@@ -926,14 +1004,80 @@ input[type=file]::file-selector-button {
 .asset-music { border-top:1px solid var(--line); padding-top:20px; }
 .asset-rows { margin-top:14px; border-top:1px solid #2b3d60; }
 .asset-row { display:grid; grid-template-columns:minmax(170px,.72fr) minmax(280px,1.28fr);
-  gap:18px; align-items:center; padding:13px 0; border-bottom:1px solid #2b3d60; }
+  gap:18px; align-items:center; padding:13px 12px; border-bottom:1px solid #2b3d60;
+  border-radius:3px; }
+/* Per-song wash. Applied as a background IMAGE so the identity tint and any
+ * state background-color (a queued removal) compose instead of one replacing
+ * the other. --tint-h is set per row by the server and inherited by a slot's
+ * variant rows, so a split always reads as part of the song above it. */
+.asset-row {
+  background-image:linear-gradient(hsl(var(--tint-h,210) 65% 55% / .075),
+                                   hsl(var(--tint-h,210) 65% 55% / .075));
+}
 .asset-copy label { margin:0; color:#f6edda; }
 .asset-copy span, .asset-current { display:block; color:var(--muted); font-size:.72rem;
   font-family:system-ui,-apple-system,sans-serif; }
 .asset-picker input[type=file] { padding:8px; }
 .asset-picker input[type=file]::file-selector-button { padding:5px 10px; }
-.asset-current { margin-top:4px; }
+.asset-current { margin-top:0; }
 .asset-current[data-configured=true] { color:var(--ok); }
+.asset-current[data-configured=pending] { color:var(--gold); }
+.asset-current[data-configured=removed] { color:var(--bad); }
+/* Revert control. A page can fill a file input but never empty one, so
+ * "no replacement" needs a control of its own -- otherwise an installed track
+ * can only ever be swapped for another file, never returned to the ROM's own
+ * music. */
+.asset-row-foot { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:6px; }
+.asset-row-foot .asset-current { flex:1; min-width:120px; }
+button.asset-clear {
+  flex:none; padding:4px 11px; font-size:.72rem; font-weight:600; letter-spacing:.02em;
+  font-family:system-ui,-apple-system,sans-serif;
+  color:var(--ink); background:linear-gradient(180deg,#22304d,#16223a);
+  border-color:#3d5480; box-shadow:0 1px 0 #0d1526;
+}
+button.asset-clear[hidden] { display:none; }
+.asset-row[data-pending=removed] { background-color:#f0938a1a; }
+
+/* Gated variants sit UNDER the slot they belong to, indented and rule-marked,
+ * because that is the relationship: they are alternates of the same ROM song,
+ * chosen by a condition. Listing them as peers would say the game has more
+ * songs than it does. */
+.asset-variants { margin:0 0 0 18px;
+  border-left:2px solid hsl(var(--tint-h,210) 55% 60% / .45); }
+.asset-variants:empty { display:none; }
+.asset-row.asset-variant { padding-left:16px; border-bottom:0; }
+.asset-row[data-pending-split=true] { box-shadow:inset 3px 0 0 var(--gold); }
+.asset-variants .asset-row:not(:last-child) { border-bottom:1px solid #22314d; }
+.variant-gate { display:block; margin-top:3px; color:#9fb0d0;
+  font:.7rem/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;
+  word-break:break-word; }
+/* A variant has no separate original to A/B against -- the slot above it owns
+ * that player -- so its compare grid carries one column. */
+.asset-row.asset-variant .audio-compare { grid-template-columns:1fr; }
+.asset-row.asset-variant .audio-compare > div:first-child { display:none; }
+
+/* Split panel. Collapsed until asked for: seventeen always-open region lists
+ * would bury the seventeen rows they belong to. */
+button.split-toggle {
+  flex:none; padding:4px 11px; font-size:.72rem; font-weight:600; letter-spacing:.02em;
+  font-family:system-ui,-apple-system,sans-serif;
+  color:var(--muted); background:none; border-color:#3d5480; box-shadow:none;
+}
+button.split-toggle:hover:not(:disabled) { color:var(--ink); background:#16223a; }
+button.split-toggle[aria-expanded=true] { color:#0f1a2e; background:linear-gradient(180deg,#f0d795,var(--gold)); border-color:var(--gold-deep); }
+.asset-split { margin-top:10px; padding:12px 14px; border:1px solid #2b3d60;
+  border-radius:3px; background:#0c142759; }
+.asset-split[hidden] { display:none; }
+.split-note { margin:0 0 10px; color:var(--muted); font-size:.74rem; line-height:1.5;
+  font-family:system-ui,-apple-system,sans-serif; max-width:60ch; }
+.split-regions { display:grid; gap:6px 16px;
+  grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
+.split-region { display:flex; align-items:center; gap:8px; }
+.split-region input { width:16px; height:16px; flex:none; accent-color:var(--gold); }
+.split-region label { display:inline; margin:0; cursor:pointer; font-weight:500;
+  font-size:.82rem; font-family:system-ui,-apple-system,sans-serif; }
+.split-region code { color:#9fb0d0; font-size:.68rem;
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
 .preview-tools { display:flex; align-items:center; gap:12px; flex-wrap:wrap;
   margin:14px 0 4px; padding:12px; border:1px solid #2b3d60; border-radius:3px;
   background:#0c142759; }
@@ -1230,6 +1374,16 @@ pre {
 
   <section class="panel" id="panel-assets" role="tabpanel" aria-labelledby="tab-assets" hidden>
     <form id="assets-form">
+      <div class="asset-bar" id="asset-bar" data-dirty="false">
+        <div class="asset-bar-text">
+          <strong id="asset-bar-title">Asset replacements</strong>
+          <span id="asset-bar-note">Loading the current configuration&hellip;</span>
+        </div>
+        <div class="asset-bar-actions">
+          <button type="button" id="discard-assets" class="quiet" disabled>Discard</button>
+          <button type="submit" id="save-assets-top" disabled>Save changes</button>
+        </div>
+      </div>
       <p class="asset-intro">Choose optional replacements, then save. Files are copied into
       <strong>game-assets</strong> in the game's working directory and the shared manifest is
       updated for you. Existing custom sections and loop settings are preserved.</p>
@@ -1251,13 +1405,20 @@ pre {
 
       <div class="asset-music">
         <h2>Music replacements</h2>
-        <p>All 17 ROM song images are listed below. Unknown names remain labeled by their
-        song-table slot so you can extract, listen, and identify them without finding each
-        one during play. Select an Ogg Vorbis replacement for any slot; untouched tracks and
-        hand-authored manifest settings stay as they are.</p>
+        <p>All 17 ROM song images are listed below. A track whose title is not established is
+        listed by its song-table slot, so you can extract, listen, and identify it without
+        finding it during play. Select an Ogg Vorbis replacement for any slot; untouched
+        tracks and hand-authored manifest settings stay as they are.</p>
         <div class="preview-tools">
           <button id="generate-previews" class="secondary" type="button" disabled>
             Extract original-audio previews
+          </button>
+          <!-- Previews are cached per ROM, and the renderer is deterministic, so
+               re-running it changes nothing until the cached file is gone. This
+               discards them first: the escape hatch for a preview that sounds
+               wrong without asking anyone to find a cache directory by hand. -->
+          <button id="regenerate-previews" class="quiet" type="button" hidden>
+            Discard and re-render
           </button>
           <span id="preview-state" role="status">
             Supply a ROM on the Build tab to enable original-audio comparisons.
@@ -1266,8 +1427,11 @@ pre {
         <div class="asset-rows">{{ASSET_TRACKS}}</div>
       </div>
 
+      <template id="asset-row-prototype">{{ASSET_ROW_PROTOTYPE}}</template>
+
+
       <div class="actions">
-        <button id="save-assets" type="submit">Save assets</button>
+        <button id="save-assets" type="submit" disabled>Save assets</button>
       </div>
       <div id="asset-state" role="status">Open this tab to load the current configuration.</div>
       <p class="privacy">Replacement files stay on this computer and are never uploaded.
@@ -1324,7 +1488,14 @@ const buildTab=document.querySelector("#tab-build");
 const assetTab=document.querySelector("#tab-assets"), assetForm=document.querySelector("#assets-form");
 const titleToggle=document.querySelector("#title-toggle"), titleChange=document.querySelector("#title-change");
 const saveAssets=document.querySelector("#save-assets"), assetState=document.querySelector("#asset-state");
+const saveAssetsTop=document.querySelector("#save-assets-top"), discardAssets=document.querySelector("#discard-assets");
+const assetBar=document.querySelector("#asset-bar"), assetBarNote=document.querySelector("#asset-bar-note");
+const rowPrototype=document.querySelector("#asset-row-prototype");
+/* Mutable: variant rows are built from the manifest when the configuration
+ * loads, and every loop over the list must see them too. */
+let assetRows=[...document.querySelectorAll(".asset-row")];
 const generatePreviews=document.querySelector("#generate-previews"), previewState=document.querySelector("#preview-state");
+const regeneratePreviews=document.querySelector("#regenerate-previews");
 let polling=false;
 let assetsLoaded=false;
 let previewPolling=false, previewTimer=0;
@@ -1345,7 +1516,11 @@ function selectTab(tab){
     if(!frame.getAttribute("src")) frame.setAttribute("src","manual.pdf");
   }
   if(tab===assetTab){
-    if(!assetsLoaded) loadAssetConfiguration();
+    /* Re-read on EVERY visit, not just the first. The manifest can change under
+       a long-lived builder -- edited by hand, or saved from a second tab -- and
+       a configuration read once at page load would quietly disagree with it.
+       Skipped while there are unsaved changes, which a reload would discard. */
+    if(!assetsLoaded || assetBar.dataset.dirty!=="true") loadAssetConfiguration();
     loadAudioPreviewStatus();
   }
   if(tab===buildTab) buildTab.removeAttribute("data-badge");
@@ -1364,20 +1539,183 @@ document.querySelector(".tabs").addEventListener("keydown",event=>{
 
 function show(kind,text){ state.dataset.kind=kind; state.textContent=text; }
 
+/* The runway reserved under the page has to match the dock's REAL height, which
+ * depends on how its phase line and detail wrap -- at narrow widths that is well
+ * over the fixed 64px the stylesheet used to reserve, which is how the last
+ * lines of build output ended up underneath it. Measured rather than guessed,
+ * and re-measured whenever the dock reflows. */
+function syncDockHeight(){
+  document.documentElement.style.setProperty("--dock-h",dock.offsetHeight+"px");
+}
+if(window.ResizeObserver) new ResizeObserver(syncDockHeight).observe(dock);
+else window.addEventListener("resize",syncDockHeight);
+syncDockHeight();
+
 /* ASSETS. File inputs cannot be populated by a web page, so each row carries a
  * separate installed-file label. Choosing a file only changes that slot after
  * Save; the title's dirty bit similarly prevents an unrelated music save from
- * changing a pre-existing custom title mapping. */
+ * changing a pre-existing custom title mapping.
+ *
+ * Each row is one of four states, and the label and the revert button are both
+ * derived from it rather than set at each call site -- the states are reachable
+ * in any order (pick a file, undo it, revert the installed one, undo THAT), and
+ * writing the label independently at every transition is how those paths
+ * disagree:
+ *   none      no replacement, nothing pending
+ *   installed a saved replacement is in the manifest
+ *   pending   a file is chosen but not yet saved
+ *   removed   a saved replacement is queued for removal
+ */
+function rowState(row){
+  if(row.querySelector("input[type=file]").files.length) return "pending";
+  if(row.querySelector(".asset-remove").value==="1") return "removed";
+  return row.dataset.installed==="true" ? "installed" : "none";
+}
+
+/* The row's player follows the row's STATE. It used to be driven only by the
+ * file input's change event, which meant a replacement could be heard exactly
+ * once -- in the session that uploaded it. Re-opening the builder showed
+ * "Installed: ..." beside a player with no source, and the only way to hear
+ * what was actually installed was to upload the file again. An installed
+ * replacement is served back from game-assets instead. */
+function paintRowAudio(row,state){
+  const audio=row.querySelector(".replacement-audio");
+  const caption=row.querySelector(".replacement-caption");
+  if(state==="pending"){
+    caption.textContent="Selected replacement";
+    audio.hidden=false;   /* src is the object URL the change handler made */
+    return;
+  }
+  const url=(state==="installed")?(row.dataset.installedUrl||""):"";
+  /* "Selected" is the prospective label for a slot with nothing in it -- it
+     names where a pick would appear. Only a slot that HAS one says installed. */
+  caption.textContent=url?"Installed replacement":"Selected replacement";
+  if(!url){
+    audio.pause();
+    audio.hidden=true;
+    audio.removeAttribute("src");
+    return;
+  }
+  if(audio.getAttribute("src")!==url){
+    audio.setAttribute("src",url);
+    audio.load();
+  }
+  audio.hidden=false;
+}
+
+function paintRow(row){
+  const state=rowState(row), label=row.querySelector(".asset-current");
+  const clear=row.querySelector(".asset-clear");
+  row.dataset.pending=(state==="pending"||state==="removed")?state:"";
+  paintRowAudio(row,state);
+  if(state==="pending"){
+    label.dataset.configured="pending";
+    label.textContent="Selected: "+row.querySelector("input[type=file]").files[0].name;
+    clear.hidden=false; clear.textContent="Cancel";
+  } else if(state==="removed"){
+    label.dataset.configured="removed";
+    label.textContent="Reverting to the original game music on save";
+    clear.hidden=false; clear.textContent="Keep replacement";
+  } else if(state==="installed"){
+    label.dataset.configured="true";
+    label.textContent="Installed: "+(row.dataset.installedFile||"replacement");
+    clear.hidden=false; clear.textContent="Use original";
+  } else if(row.dataset.pendingSplit==="true"){
+    label.dataset.configured="pending";
+    label.textContent="New \u2014 choose a file; the entry is written when you save";
+    clear.hidden=true;
+  } else {
+    label.dataset.configured="false";
+    label.textContent="Using original game music";
+    clear.hidden=true;
+  }
+}
+
+/* One place decides whether there is anything to save, so the two Save buttons,
+ * Discard, and the toolbar's own wording can never disagree about it. */
+function refreshAssetDirtyState(){
+  let changes=0;
+  if(titleChange.value==="1") changes++;
+  assetRows.forEach(row=>{
+    if(row.dataset.pending) changes++;
+    const split=row.querySelector(".split-change");
+    if(split&&split.value==="1") changes++;
+  });
+  const dirty=changes>0;
+  assetBar.dataset.dirty=String(dirty);
+  saveAssets.disabled=!dirty;
+  saveAssetsTop.disabled=!dirty;
+  discardAssets.disabled=!dirty;
+  assetBarNote.textContent=dirty
+    ? changes+(changes===1?" unsaved change":" unsaved changes")
+    : "No unsaved changes";
+}
+
+/* Discarding drops every pending edit without touching what is installed: the
+ * file inputs and the revert flags are page state, so clearing them is enough
+ * and no request is needed. */
+function discardAssetChanges(){
+  titleChange.value="0";
+  titleToggle.checked=assetBaseline.title;
+  assetRows.forEach(row=>{
+    clearRowSelection(row);
+    row.querySelector(".asset-remove").value="0";
+    const split=row.querySelector(".split-change");
+    if(split&&split.value==="1"){
+      split.value="0";
+      row.querySelectorAll(".split-region input").forEach(box=>{
+        box.checked=box.dataset.enabled==="true";
+      });
+    }
+    paintRow(row);
+  });
+  refreshAssetDirtyState();
+}
+
+/* Drops the PENDING selection only. The player is left to paintRow, which will
+ * put the installed replacement back if the row still has one -- clearing a
+ * pick should reveal what is installed, not blank the row. */
+function clearRowSelection(row){
+  const input=row.querySelector("input[type=file]"), audio=row.querySelector(".replacement-audio");
+  input.value="";
+  if(audio.dataset.objectUrl){
+    URL.revokeObjectURL(audio.dataset.objectUrl);
+    delete audio.dataset.objectUrl;
+  }
+  audio.pause();
+  audio.removeAttribute("src");
+}
+
+let assetBaseline={title:false};
+/* The configuration the page is currently showing. Kept because a split
+ * checkbox has to rebuild that slot's rows without asking the server again --
+ * the record it would create is already described in this payload. */
+let lastAssetConfig={tracks:[]};
+
 function paintAssetConfiguration(config){
   titleToggle.checked=!!(config.title&&config.title.enabled);
   titleChange.value="0";
-  const statuses=new Map((config.tracks||[]).map(track=>[track.id,track]));
-  document.querySelectorAll(".asset-row").forEach(row=>{
-    const current=statuses.get(row.dataset.track), label=row.querySelector(".asset-current");
-    const configured=!!(current&&current.configured);
-    label.dataset.configured=String(configured);
-    label.textContent=configured ? "Installed: "+current.file : "Using original game music";
+  assetBaseline={title:titleToggle.checked};
+  lastAssetConfig=config;
+  (config.tracks||[]).forEach(track=>{
+    const row=document.querySelector('.asset-row[data-track="'+track.id+'"]');
+    if(row) syncSplitPanel(row,track);
   });
+  syncVariantRows(config.tracks||[]);
+  const statuses=new Map((config.tracks||[]).map(track=>[track.id,track]));
+  assetRows.forEach(row=>{
+    /* Variant rows carry their own installed state from the manifest, set when
+       they were built; only slot rows are looked up by track id. */
+    if(!row.dataset.variant){
+      const current=statuses.get(row.dataset.track);
+      row.dataset.installed=String(!!(current&&current.configured));
+      row.dataset.installedFile=(current&&current.file)||"";
+      row.dataset.installedUrl=(current&&current.url)||"";
+    }
+    row.querySelector(".asset-remove").value="0";
+    paintRow(row);
+  });
+  refreshAssetDirtyState();
 }
 
 async function loadAssetConfiguration(){
@@ -1414,13 +1752,25 @@ function paintAudioPreviewStatus(status){
     previewState.dataset.kind="idle";
     previewState.textContent="ROM ready — extract 30-second WAV previews for side-by-side listening.";
   }
+  /* Re-rendering is only meaningful once something has been rendered, and never
+     while a render is running. */
+  regeneratePreviews.hidden=!(status.romAvailable&&(status.state==="ready"||status.state==="failed"));
+  regeneratePreviews.disabled=generating;
   const tracks=new Map((status.tracks||[]).map(track=>[track.id,track]));
-  document.querySelectorAll(".asset-row").forEach(row=>{
+  assetRows.forEach(row=>{
     const track=tracks.get(row.dataset.track), audio=row.querySelector(".original-audio");
+    if(row.dataset.variant){ audio.hidden=true; audio.removeAttribute("src"); return; }
     if(track&&track.ready&&track.url){
-      if(audio.getAttribute("src")!==track.url) audio.setAttribute("src",track.url);
+      /* The URL carries the rendered file's identity, so a re-render always
+         arrives here as a NEW src. load() is what makes the element drop the
+         bytes it already buffered for the old one. */
+      if(audio.getAttribute("src")!==track.url){
+        audio.setAttribute("src",track.url);
+        audio.load();
+      }
       audio.hidden=false;
     } else {
+      audio.pause();
       audio.hidden=true;
       audio.removeAttribute("src");
     }
@@ -1441,12 +1791,16 @@ async function loadAudioPreviewStatus(){
   if(previewPolling) previewTimer=setTimeout(loadAudioPreviewStatus,500);
 }
 
-generatePreviews.addEventListener("click",async()=>{
+async function startAudioPreviews(force){
   generatePreviews.disabled=true;
+  regeneratePreviews.disabled=true;
   previewState.dataset.kind="loading";
-  previewState.textContent="Starting the pure-Go audio renderer…";
+  previewState.textContent=force
+    ? "Discarding the cached previews and re-rendering…"
+    : "Starting the pure-Go audio renderer…";
   try {
-    const status=await responseJSON(await fetch("audio-previews",{method:"POST"}));
+    const status=await responseJSON(await fetch(
+      force?"audio-previews?force=1":"audio-previews",{method:"POST"}));
     paintAudioPreviewStatus(status);
     previewPolling=true;
     previewTimer=setTimeout(loadAudioPreviewStatus,250);
@@ -1454,31 +1808,232 @@ generatePreviews.addEventListener("click",async()=>{
     previewState.dataset.kind="failed";
     previewState.textContent=error.message;
     generatePreviews.disabled=false;
+    regeneratePreviews.disabled=false;
   }
+}
+generatePreviews.addEventListener("click",()=>startAudioPreviews(false));
+regeneratePreviews.addEventListener("click",()=>startAudioPreviews(true));
+
+titleToggle.addEventListener("change",()=>{
+  /* Compared against the loaded value rather than latched: toggling twice
+   * leaves the manifest as it was, and saving that would rewrite a
+   * hand-authored title mapping for no reason. */
+  titleChange.value=(titleToggle.checked===assetBaseline.title)?"0":"1";
+  refreshAssetDirtyState();
 });
 
-titleToggle.addEventListener("change",()=>{ titleChange.value="1"; });
-document.querySelectorAll(".asset-row input[type=file]").forEach(input=>{
+function wireAssetRow(row){
+  const input=row.querySelector("input[type=file]"), remove=row.querySelector(".asset-remove");
   input.addEventListener("change",()=>{
-    const row=input.closest(".asset-row"), label=row.querySelector(".asset-current");
     const audio=row.querySelector(".replacement-audio");
     if(audio.dataset.objectUrl){
       URL.revokeObjectURL(audio.dataset.objectUrl);
       delete audio.dataset.objectUrl;
     }
     if(input.files.length){
-      label.dataset.configured="pending";
-      label.textContent="Selected: "+input.files[0].name;
+      /* Choosing a file supersedes a queued revert -- the server reads the
+         removal flag only when no upload accompanies it, and the row must say
+         the same thing the save will do. */
+      remove.value="0";
       const objectUrl=URL.createObjectURL(input.files[0]);
       audio.dataset.objectUrl=objectUrl;
       audio.src=objectUrl;
-      audio.hidden=false;
     } else {
-      audio.hidden=true;
+      audio.pause();
       audio.removeAttribute("src");
     }
+    paintRow(row);
+    refreshAssetDirtyState();
   });
-});
+  const toggle=row.querySelector(".split-toggle");
+  if(toggle){
+    const panel=row.querySelector(".asset-split");
+    toggle.addEventListener("click",()=>{
+      const open=panel.hidden;
+      panel.hidden=!open;
+      toggle.setAttribute("aria-expanded",String(open));
+    });
+    row.querySelector(".split-regions").addEventListener("change",()=>{
+      /* Compared against the loaded state rather than latched, so ticking a box
+         and unticking it again leaves the manifest alone. */
+      const boxes=[...row.querySelectorAll(".split-region input")];
+      const moved=boxes.some(box=>String(box.checked)!==box.dataset.enabled);
+      row.querySelector(".split-change").value=moved?"1":"0";
+      const track=(lastAssetConfig.tracks||[])
+        .find(item=>item.id===row.dataset.track);
+      if(track) reconcileVariantRows(track);
+      refreshAssetDirtyState();
+    });
+  }
+  row.querySelector(".asset-clear").addEventListener("click",()=>{
+    const state=rowState(row);
+    if(state==="pending") clearRowSelection(row);
+    else if(state==="removed") remove.value="0";
+    else if(state==="installed") remove.value="1";
+    paintRow(row);
+    refreshAssetDirtyState();
+  });
+}
+assetRows.forEach(wireAssetRow);
+
+/* Built by cloning the server-rendered prototype and rewriting it through the
+ * DOM, never by pasting strings: a manifest section name and its gate are the
+ * author's text, not this page's, and setAttribute/textContent cannot be
+ * talked into being markup.
+ *
+ * The clone keeps class "asset-row", so every part of the row state machine --
+ * rowState, paintRow, the dirty count, discard -- applies to a variant without
+ * knowing it is one. Only the field names differ, because the server manages a
+ * variant by placing its FILE rather than by rewriting its record. */
+/* A variant row carries its own installed state, so it has to be refreshed
+ * whenever the descriptor behind it changes -- including on a row that was
+ * REUSED rather than rebuilt. A save turns a pending split into a real record,
+ * and a row that kept its old dataset would go on offering to create something
+ * that already exists. */
+function applyVariantState(row,variant){
+  row.dataset.installed=String(!!variant.configured);
+  row.dataset.installedFile=variant.file||"";
+  row.dataset.installedUrl=variant.url||"";
+  if(variant.pendingSplit) row.dataset.pendingSplit="true";
+  else delete row.dataset.pendingSplit;
+}
+
+function buildVariantRow(variant){
+  const row=rowPrototype.content.firstElementChild.cloneNode(true);
+  const input=row.querySelector("input[type=file]");
+  row.classList.add("asset-variant");
+  row.style.removeProperty("--tint-h");   /* inherit the slot's, via the host */
+  /* The prototype is rendered as a slot row, so the clone arrives carrying the
+     placeholder track id. Left in place it makes a variant answer to a slot
+     selector and pollutes any query over the slot list. */
+  delete row.dataset.track;
+  row.dataset.variant=variant.name;
+  applyVariantState(row,variant);
+  input.id="variant-"+variant.name;
+  input.name="variant-"+variant.name;
+  const label=row.querySelector("label");
+  label.setAttribute("for",input.id);
+  label.textContent=variant.name;
+  const caption=row.querySelector(".asset-copy span");
+  caption.textContent="Plays instead when its condition holds \u00b7 "+(variant.file||"");
+  const gate=document.createElement("code");
+  gate.className="variant-gate";
+  gate.textContent=variant.when?("when = "+variant.when):"no condition — always eligible";
+  row.querySelector(".asset-copy").appendChild(gate);
+  row.querySelector(".asset-current").id="variant-state-"+variant.name;
+  row.querySelector(".asset-remove").name="variant-remove-"+variant.name;
+  /* A variant is already the split of a slot; there is nothing left to divide
+     it by, so the prototype's split controls are REMOVED rather than hidden --
+     left in place they would also post a stray split-change field carrying the
+     prototype's placeholder id. Removed before wiring, so no handler is
+     attached to a control that does not exist. */
+  row.querySelectorAll(".split-toggle,.asset-split,.split-change")
+     .forEach(node=>node.remove());
+  wireAssetRow(row);
+  return row;
+}
+
+/* The region list comes from the server, which reads the map-group table the
+ * game itself defines -- the page never invents a level or a WRAM address. Each
+ * box remembers the state it loaded in, so unticking something back to how it
+ * started stops counting as a change. */
+function syncSplitPanel(row,track){
+  const host=row.querySelector(".split-regions");
+  if(!host) return;
+  const splits=track.splits||[];
+  host.replaceChildren(...splits.map(split=>{
+    const item=document.createElement("div");
+    item.className="split-region";
+    const box=document.createElement("input");
+    box.type="checkbox";
+    box.name="split-"+track.id;
+    box.value=split.slug;
+    box.id="split-"+track.id+"-"+split.slug;
+    box.checked=!!split.enabled;
+    box.dataset.enabled=String(!!split.enabled);
+    const label=document.createElement("label");
+    label.setAttribute("for",box.id);
+    label.textContent=split.label;
+    item.append(box,label);
+    return item;
+  }));
+  row.querySelector(".asset-split").hidden=true;
+  const toggle=row.querySelector(".split-toggle");
+  if(toggle){
+    toggle.setAttribute("aria-expanded","false");
+    toggle.hidden=splits.length===0;
+  }
+  row.querySelector(".split-change").value="0";
+}
+
+/* The rows a slot should be showing: the variants the manifest already has,
+ * plus one for every region ticked in the split panel that has no record yet.
+ * A ticked region shows its row IMMEDIATELY -- the record and the file it needs
+ * are created by the same save, so making the reader save once to reveal the
+ * picker and again to fill it would be a round trip for nothing. Unticking
+ * takes the row away again, which is what the save will do to the record. */
+function variantDescriptors(track){
+  const existing=new Map((track.variants||[]).map(v=>[v.name,v]));
+  const parent=document.querySelector('.asset-row[data-track="'+track.id+'"]');
+  const wanted=[];
+  for(const variant of track.variants||[]) wanted.push(variant);
+  for(const split of track.splits||[]){
+    if(existing.has(split.name)) continue;
+    const box=parent&&parent.querySelector("#split-"+track.id+"-"+split.slug);
+    if(!box||!box.checked) continue;
+    wanted.push({name:split.name, when:split.gate, file:split.file,
+                 configured:false, url:"", pendingSplit:true});
+  }
+  /* A ticked-then-unticked record that DOES exist is dropped by the save, so
+     drop its row too rather than leaving a row for something being removed. */
+  const dropped=new Set();
+  for(const split of track.splits||[]){
+    if(!split.enabled) continue;
+    const box=parent&&parent.querySelector("#split-"+track.id+"-"+split.slug);
+    if(box&&!box.checked) dropped.add(split.name);
+  }
+  return wanted.filter(v=>!dropped.has(v.name));
+}
+
+/* Reconciled rather than rebuilt: a row already on the page may hold a file the
+ * reader has picked but not saved, and replacing the node would silently throw
+ * that away. Rows are matched by record name and only missing ones are built. */
+function reconcileVariantRows(track){
+  const parent=document.querySelector('.asset-row[data-track="'+track.id+'"]');
+  if(!parent) return;
+  let host=parent.nextElementSibling;
+  if(!host||!host.classList.contains("asset-variants")){
+    host=document.createElement("div");
+    host.className="asset-variants";
+    parent.after(host);
+  }
+  /* Inherited, not recomputed: a custom property set on the host reaches every
+     row inside it, so a split is always the same colour as the song it splits. */
+  host.style.setProperty("--tint-h",
+    parent.style.getPropertyValue("--tint-h")||"210");
+  const existing=new Map(
+    [...host.children].map(row=>[row.dataset.variant,row]));
+  const rows=variantDescriptors(track).map(variant=>{
+    const row=existing.get(variant.name);
+    if(!row) return buildVariantRow(variant);
+    applyVariantState(row,variant);
+    return row;
+  });
+  host.replaceChildren(...rows);
+  assetRows=[...document.querySelectorAll(".asset-row")];
+  /* A row built here has never been through paintRow, so it would sit showing
+     the prototype's own placeholder text. Painting is derived from row state
+     and idempotent, so re-painting the reused rows costs nothing and keeps one
+     path responsible for what a row says. */
+  rows.forEach(paintRow);
+}
+
+function syncVariantRows(tracks){
+  for(const track of tracks) reconcileVariantRows(track);
+  assetRows=[...document.querySelectorAll(".asset-row")];
+}
+
+discardAssets.addEventListener("click",discardAssetChanges);
 
 /* A/B means one source at a time; starting either side pauses every other
  * preview so overlapping tracks cannot make the comparison misleading. */
@@ -1491,20 +2046,24 @@ document.addEventListener("play",event=>{
 
 assetForm.addEventListener("submit",async event=>{
   event.preventDefault();
-  saveAssets.disabled=true;
+  saveAssets.disabled=true; saveAssetsTop.disabled=true; discardAssets.disabled=true;
+  assetBarNote.textContent="Saving…";
   assetState.dataset.kind="loading";
   assetState.textContent="Copying assets and updating the manifest…";
   try {
     const result=await responseJSON(await fetch("assets",{method:"POST",body:new FormData(assetForm)}));
+    /* Clear the pickers BEFORE repainting: paintAssetConfiguration derives each
+       row from what is still selected, and a file left in an input would make a
+       saved row read as pending again. */
+    assetRows.forEach(clearRowSelection);
     paintAssetConfiguration(result.config);
-    assetForm.querySelectorAll("input[type=file]").forEach(input=>{ input.value=""; });
     assetState.dataset.kind="succeeded";
     assetState.textContent=result.message||"Assets saved.";
   } catch(error){
     assetState.dataset.kind="failed";
     assetState.textContent=error.message;
   }
-  saveAssets.disabled=false;
+  refreshAssetDirtyState();
 });
 
 /* MODE. The server decides which shape the page takes (buildgui/install.go), so
