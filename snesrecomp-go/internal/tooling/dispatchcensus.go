@@ -317,3 +317,18 @@ func WriteDispatchCensusFile(path string, report DispatchCensusReport) error {
 	}
 	return nil
 }
+
+func LoadDispatchCensusFile(path string) (DispatchCensusReport, error) {
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return DispatchCensusReport{}, fmt.Errorf("read dispatch census evidence: %w", err)
+	}
+	var report DispatchCensusReport
+	if err := json.Unmarshal(contents, &report); err != nil {
+		return DispatchCensusReport{}, fmt.Errorf("parse dispatch census evidence: %w", err)
+	}
+	if report.Version != dispatchCensusVersion || report.Provenance != "snesrecomp-runtime-dispatch-census-v2" {
+		return DispatchCensusReport{}, fmt.Errorf("unsupported dispatch census evidence version/provenance: version=%d provenance=%q", report.Version, report.Provenance)
+	}
+	return report, nil
+}

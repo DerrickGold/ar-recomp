@@ -129,6 +129,8 @@ func compareFact(authored, inferred DispatchFact) (ComparisonStatus, []string) {
 		fmt.Sprintf("index register differs: authored=%s inferred=%s", authored.IndexRegister, inferred.IndexRegister))
 	compareKnown("table_bases", slices.Equal(authored.TableBases, inferred.TableBases),
 		fmt.Sprintf("table bases differ: authored=%v inferred=%v", authored.TableBases, inferred.TableBases))
+	compareKnown("table_entry_bytes", authored.TableEntryBytes == inferred.TableEntryBytes,
+		fmt.Sprintf("table entry width differs: authored=%d inferred=%d bytes", authored.TableEntryBytes, inferred.TableEntryBytes))
 	compareKnown("return_pc", equalOptionalAddress(authored.ReturnPC, inferred.ReturnPC),
 		fmt.Sprintf("return PC differs: authored=%s inferred=%s", optionalAddress(authored.ReturnPC), optionalAddress(inferred.ReturnPC)))
 	compareKnown("sep_mask", authored.SEPMask == inferred.SEPMask,

@@ -41,6 +41,8 @@ func run(args []string) error {
 		return runRegen(args[1:])
 	case "analyze":
 		return runAnalyze(args[1:])
+	case "xref":
+		return runXref(args[1:])
 	case "dispatch-census":
 		return runDispatchCensus(args[1:])
 	case "configure":
@@ -79,6 +81,7 @@ func usage() {
 Commands:
   regen       Regenerate C and all generated sidecars
   analyze     Compare inferred control-flow facts with authored cfg (read-only)
+  xref        Find decoded instruction references to an address (read-only)
   dispatch-census
               Summarize observed runtime targets without editing authored cfg
   configure   Configure the native game build with CMake
@@ -242,6 +245,7 @@ func runAnalyze(args []string) error {
 	verbose := flags.Bool("verbose", false, "show all comparisons, callers, and decode issues")
 	flags.BoolVar(verbose, "v", false, "show all comparisons, callers, and decode issues")
 	strict := flags.Bool("strict", false, "fail after reporting independently proven semantic conflicts")
+	dispatchAnalysis := flags.String("dispatch-analysis", "", "optional dispatch-census JSON evidence, relative to project root")
 	compareAuthored := flags.Bool("compare-authored", true, "compare inferred facts with authored cfg declarations")
 	noWrite := flags.Bool("no-write", true, "require analysis to remain read-only")
 	dryRun := flags.Bool("dry-run", true, "require analysis to remain read-only")
@@ -271,6 +275,7 @@ func runAnalyze(args []string) error {
 	}
 	report, err := tooling.AnalyzeAuthoredShadow(tooling.ShadowAnalysisOptions{
 		ROMPath: resolved.ROM, CFGDir: resolved.ConfigDir, Jobs: *jobs, OnlyBank: onlyBank,
+		DispatchAnalysisPath: resolveProjectOptional(resolved.Root, *dispatchAnalysis),
 	})
 	if err != nil {
 		return err
@@ -282,6 +287,65 @@ func runAnalyze(args []string) error {
 		return fmt.Errorf("shadow analysis found %d semantic conflict(s)", report.Summary.Conflicts)
 	}
 	return nil
+}
+
+func resolveProjectOptional(root, path string) string {
+	if strings.TrimSpace(path) == "" || filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(root, path)
+}
+
+func runXref(args []string) error {
+	address := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		address, args = args[0], args[1:]
+	}
+	flags := flag.NewFlagSet("xref", flag.ContinueOnError)
+	root := flags.String("root", ".", "game project root")
+	romPath := flags.String("rom", "game.sfc", "ROM path, relative to project root")
+	cfgDir := flags.String("cfg-dir", "recomp", "bank config directory, relative to project root")
+	jobs := flags.Int("jobs", runtime.NumCPU(), "parallel decode workers")
+	bankValue := flags.String("bank", "", "optional hexadecimal source bank")
+	format := flags.String("format", "text", "report format: text or json")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if address == "" && flags.NArg() == 1 {
+		address = flags.Arg(0)
+	} else if flags.NArg() != 0 {
+		return errors.New("xref needs exactly one address")
+	}
+	if strings.TrimSpace(address) == "" {
+		return errors.New("xref needs an address such as $1C, $C210, or $00:C210")
+	}
+	query, err := tooling.ParseXrefQuery(address)
+	if err != nil {
+		return err
+	}
+	paths := project.DefaultPaths(*root)
+	paths.ROM, paths.ConfigDir = *romPath, *cfgDir
+	resolved, err := paths.Resolve()
+	if err != nil {
+		return err
+	}
+	var onlyBank *byte
+	if strings.TrimSpace(*bankValue) != "" {
+		value, parseErr := strconv.ParseUint(strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(*bankValue), "0x"), "0X"), 16, 8)
+		if parseErr != nil {
+			return fmt.Errorf("parse --bank: %w", parseErr)
+		}
+		bank := byte(value)
+		onlyBank = &bank
+	}
+	report, err := tooling.BuildXref(tooling.XrefOptions{
+		ROMPath: resolved.ROM, CFGDir: resolved.ConfigDir, Jobs: *jobs,
+		OnlyBank: onlyBank, Query: query,
+	})
+	if err != nil {
+		return err
+	}
+	return tooling.WriteXrefReport(os.Stdout, report, *format)
 }
 
 func runDispatchCensus(args []string) error {

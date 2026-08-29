@@ -190,6 +190,38 @@ and generation. A borrowed pointer is not a cache. Persistent game-side source
 maps and provider `user_data` remain game-owned and must outlive the frame in
 which they are published.
 
+`query_ppu_state` samples the live registers at the instant of the call. A
+between-frame query commonly observes the VBlank configuration (including
+forced blank or DMA-oriented layer enables); it does not describe the register
+timeline that produced the preceding image. Use runner-owned scanout and
+frame-transaction state for composition. Diagnose raster effects with
+scanline/HDMA/IRQ evidence rather than interpreting one snapshot as a whole
+frame.
+
+OAM uses two deliberately different storage views: `SR_MEMORY_OAM` is 256
+host-native words from `borrow_u16_memory`, while `SR_MEMORY_HIGH_OAM` is 32
+bytes from `borrow_memory`. Always check `SrResult`; the wrong API/region pair
+returns `SR_RESULT_UNSUPPORTED` and a cleared output descriptor. Prefer
+`visit_ppu_frame_transaction` when both tables are needed—the transaction
+already supplies coherent `oam` and `high_oam` views together. Sprite X bit 8
+and size come from high OAM, so inspecting the low table alone is incomplete.
+
+## Diagnosing frame progress
+
+For deterministic speed or frame-slip bugs, count NMI enter events with an
+`SR_EVENT_MASK_INTERRUPT` observer and count the game's main-loop/frame-gate
+release at the recovered producer. Report both cumulative counts and their
+ratio over an explicit steady-state frame range. A stable ratio such as exactly
+one release per two NMIs is evidence of a game-state gate, whereas elapsed host
+time alone cannot distinguish that from performance. The runner can count NMI
+events, but the meaning and address of a frame-gate variable remain game-owned;
+do not put those addresses in shared runtime code.
+
+When inspecting recent generated blocks directly, call
+`sr_block_history_available()` before `sr_block_history()`. The latter returns
+the number copied into the caller's bounded buffer; the former reports how many
+entries the 1024-entry ring currently retains, making truncation explicit.
+
 ## Implementing a virtual tile provider
 
 `SrPpuVirtualTilemapBinding.lookup` is the correctness path. Given signed world
@@ -274,6 +306,8 @@ variants; and an unknown track ID that falls back safely.
   smeared, or contextually wrong margin tiles.
 - **Using one frame-wide register snapshot for an HDMA scene:** breaks rows
   whose scroll/window/color state changes during scanout.
+- **Ignoring a borrow result:** turns an explicit `SR_RESULT_UNSUPPORTED`
+  width/region mismatch into an apparently empty OAM census.
 - **Mirroring `$420C` into a scanout request:** duplicates hardware state in the
   game layer and can drift across reset/load. The runner already owns it; use a
   zero suppress mask and `query_dma_state` for diagnostics.

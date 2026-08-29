@@ -33,6 +33,10 @@ extern int g_recomp_stack_top;
 extern uint16_t g_cpu_entry_s[];
 extern uint8_t g_cpu_entry_hrv[];
 int cpu_resolve_ancestor_skip(uint16_t return_stack);
+/** Number of valid entries currently retained by the block-history ring.
+ * This can exceed the count copied by sr_block_history when the caller's
+ * output buffer is shorter than the retained history. */
+int sr_block_history_available(void);
 int sr_block_history(uint32 *output, int maximum);
 extern uint32 g_sr_block_ring[kRuntimeBlockTraceRingCapacity];
 extern uint32 g_sr_block_aux[kRuntimeBlockTraceRingCapacity];

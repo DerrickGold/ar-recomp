@@ -107,7 +107,7 @@ the specific entry you call.
 | `SR_RUNNER_CAP_GENERATION_COUNTERS` | `SNES_RUNNER_API_V2_BASE_SIZE` | `query_generations` | Copied, synchronous |
 | `SR_RUNNER_CAP_BORROWED_BYTE_SPANS` | `SNES_RUNNER_API_V2_BASE_SIZE` | `borrow_memory`, `borrow_is_valid` | Emulation-thread, thread-confined borrow |
 | `SR_RUNNER_CAP_CPU_STATE` | `SNES_RUNNER_API_CPU_STATE_SIZE` | `query_cpu_state` | Copied snapshot |
-| `SR_RUNNER_CAP_PPU_STATE` | `SNES_RUNNER_API_PPU_STATE_SIZE` | `query_ppu_state` | Copied coherent PPU controls |
+| `SR_RUNNER_CAP_PPU_STATE` | `SNES_RUNNER_API_PPU_STATE_SIZE` | `query_ppu_state` | Instantaneous call-time controls; not an already-composited frame timeline |
 | `SR_RUNNER_CAP_BORROWED_U16_SPANS` | `SNES_RUNNER_API_PPU_STATE_SIZE` | `borrow_u16_memory`, `borrow_u16_is_valid` | Host-native VRAM/CGRAM/OAM words |
 | `SR_RUNNER_CAP_PPU_FRAME_STATE` | `SNES_RUNNER_API_PPU_FRAME_STATE_SIZE` | `query_ppu_frame_state` | Copied frame-derived policy/capture state |
 | `SR_RUNNER_CAP_PPU_OBJ_RASTER` | `SNES_RUNNER_API_PPU_OBJ_RASTER_SIZE`, `...OBJ_RESOLVE_SIZE`, or `...OBJ_PARTS_SIZE` | `rasterize_ppu_obj_range`, `resolve_ppu_obj_range`, `rasterize_ppu_obj_parts` | Caller-owned output buffers; emulation-thread |

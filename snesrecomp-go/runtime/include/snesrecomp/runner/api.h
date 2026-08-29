@@ -52,7 +52,8 @@ typedef struct SnesRunnerApi {
     /** Copy the recompiled 65816 register and execution state. */
     SrResult (*query_cpu_state)(SrRunnerHandle *runner,
                                 SrCpuStateSnapshot *out_state);
-    /** Copy coherent PPU controls and derived layer state. */
+    /** Copy coherent controls at the instant of the call. This is not the
+     * per-scanline state used to composite an already completed frame. */
     SrResult (*query_ppu_state)(SrRunnerHandle *runner,
                                 SrPpuStateSnapshot *out_state);
     /** Borrow host-native 16-bit VRAM, CGRAM, or OAM elements. */

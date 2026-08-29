@@ -74,6 +74,7 @@ type DispatchFact struct {
 	TargetSetClosed  bool          `json:"target_set_closed"`
 	IndexRegister    string        `json:"index_register,omitempty"`
 	TableBases       []uint32      `json:"table_bases,omitempty"`
+	TableEntryBytes  uint8         `json:"table_entry_bytes,omitempty"`
 	ReturnPC         *uint32       `json:"return_pc,omitempty"`
 	SEPMask          byte          `json:"sep_mask,omitempty"`
 	UnknownFields    []string      `json:"unknown_fields,omitempty"`

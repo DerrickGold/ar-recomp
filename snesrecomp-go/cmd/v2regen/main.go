@@ -57,6 +57,8 @@ func run(args []string) error {
 		return regenerate(args[1:])
 	case "analyze":
 		return analyze(args[1:])
+	case "xref":
+		return crossReference(args[1:])
 	case "sync-funcs":
 		return syncFuncs(args[1:])
 	case "metadata":
@@ -92,6 +94,7 @@ func usage() {
 Commands:
   regen              Regenerate all C banks with the concurrent Go pipeline
   analyze            Compare independent static facts with authored cfg (no-write)
+  xref               Find decoded instruction references to an address (no-write)
   sync-funcs         Regenerate recomp/funcs.h from bank cfg declarations
   metadata           Refresh the generated-code metadata sidecar
   rts-webs           Census pushed-continuation RTS dispatch patterns
@@ -105,6 +108,50 @@ Commands:
   baseline verify    Compare a generated directory with a saved snapshot
 
 These commands replace every tool in the normal tools/regen.sh pipeline.`)
+}
+
+func crossReference(args []string) error {
+	address := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		address, args = args[0], args[1:]
+	}
+	flags := flag.NewFlagSet("xref", flag.ContinueOnError)
+	romPath := flags.String("rom", "game.sfc", "headered or headerless LoROM image")
+	cfgDir := flags.String("cfg-dir", "recomp", "directory containing bankXX.cfg")
+	jobs := flags.Int("jobs", runtime.NumCPU(), "parallel decode workers")
+	bankValue := flags.String("bank", "", "optional hexadecimal source bank")
+	format := flags.String("format", "text", "report format: text or json")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if address == "" && flags.NArg() == 1 {
+		address = flags.Arg(0)
+	} else if flags.NArg() != 0 {
+		return errors.New("xref needs exactly one address")
+	}
+	if strings.TrimSpace(address) == "" {
+		return errors.New("xref needs an address such as $1C, $C210, or $00:C210")
+	}
+	query, err := tooling.ParseXrefQuery(address)
+	if err != nil {
+		return err
+	}
+	var onlyBank *byte
+	if strings.TrimSpace(*bankValue) != "" {
+		value, parseErr := strconv.ParseUint(strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(*bankValue), "0x"), "0X"), 16, 8)
+		if parseErr != nil {
+			return fmt.Errorf("parse --bank: %w", parseErr)
+		}
+		bank := byte(value)
+		onlyBank = &bank
+	}
+	report, err := tooling.BuildXref(tooling.XrefOptions{
+		ROMPath: *romPath, CFGDir: *cfgDir, Jobs: *jobs, OnlyBank: onlyBank, Query: query,
+	})
+	if err != nil {
+		return err
+	}
+	return tooling.WriteXrefReport(os.Stdout, report, *format)
 }
 
 func censusDispatch(args []string) error {
@@ -146,6 +193,7 @@ func analyze(args []string) error {
 	verbose := flags.Bool("verbose", false, "show all comparisons, callers, and decode issues")
 	flags.BoolVar(verbose, "v", false, "show all comparisons, callers, and decode issues")
 	strict := flags.Bool("strict", false, "fail after reporting independently proven semantic conflicts")
+	dispatchAnalysis := flags.String("dispatch-analysis", "", "optional dispatch-census JSON evidence used to rank unresolved sites")
 	compareAuthored := flags.Bool("compare-authored", true, "compare inferred facts with authored cfg declarations")
 	noWrite := flags.Bool("no-write", true, "require analysis to remain read-only")
 	if err := flags.Parse(args); err != nil {
@@ -168,6 +216,7 @@ func analyze(args []string) error {
 	}
 	report, err := tooling.AnalyzeAuthoredShadow(tooling.ShadowAnalysisOptions{
 		ROMPath: *romPath, CFGDir: *cfgDir, Jobs: *jobs, OnlyBank: onlyBank,
+		DispatchAnalysisPath: *dispatchAnalysis,
 	})
 	if err != nil {
 		return err
