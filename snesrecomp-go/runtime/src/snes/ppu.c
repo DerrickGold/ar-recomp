@@ -3997,7 +3997,10 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
      * its own capture rect: it is a separately reinserted foreground plane,
      * and leaving it in punches HUD-glyph-shaped holes out of the addend.
      * The subscreen winner excludes relocated OBJ slots for the same reason
-     * the reference pass does. */
+     * the reference pass does.  Only sources in source_mask are considered:
+     * a plane outside it was neither cleared nor resolved on this line and
+     * still holds whatever the last line that did use it left behind, which a
+     * mid-frame BG-mode change makes reachable. */
     if (full_add_mask != 0u) {
         unsigned math_enabled = PPU_mathEnabled(ppu);
         const PpuOverlayCapture *bg3_capture =
@@ -4020,6 +4023,7 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
             bool exclude_bg3 = bg3_bound &&
                 capture_active(bg3_capture, x, screen_y);
             for (int layer = 0; layer < kPpuOverlaySource_Obj; ++layer) {
+                if ((source_mask & (1u << layer)) == 0u) continue;
                 if (exclude_bg3 && layer == kPpuOverlaySource_Bg3) continue;
                 if (layer_main[layer][index] > full_main)
                     full_main = layer_main[layer][index];
@@ -4029,9 +4033,11 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
             main_layer = native_pixel_layer(full_main);
             if (main_layer >= 5u ||
                 (math_enabled & (1u << main_layer)) == 0u) continue;
-            for (int layer = 0; layer < kPpuOverlaySource_Obj; ++layer)
+            for (int layer = 0; layer < kPpuOverlaySource_Obj; ++layer) {
+                if ((source_mask & (1u << layer)) == 0u) continue;
                 if (layer_sub[layer][index] > full_sub)
                     full_sub = layer_sub[layer][index];
+            }
             if (sub_obj_cache != NULL &&
                 source_visible_on_screen(
                     ppu, kPpuOverlaySource_Obj, true, x)) {
