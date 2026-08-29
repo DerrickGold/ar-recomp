@@ -20,6 +20,7 @@ game-assets/*
 game-assets/hd/*
 !game-assets/audio/
 game-assets/audio/*
+game-assets/manifest.ini
 
 # ROM files (user must supply their own)
 *.sfc
