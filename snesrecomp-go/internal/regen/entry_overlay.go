@@ -10,67 +10,194 @@ import (
 	"github.com/DerrickGold/snesrecomp-go/internal/decoder"
 )
 
-// applyProvenEntryFacts withholds exact configured variants from the initial
-// decode-root set while retaining their authored metadata templates in place.
-// Static variant discovery must independently demand every withheld variant
-// before emission is allowed to proceed.
-func (repo *repository) applyProvenEntryFacts(facts []analysis.EntryFact) (int, error) {
+type entryOverlayCounts struct {
+	routineRoots  int
+	continuations int
+}
+
+// applyProvenEntryFacts applies two deliberately separate entry semantics.
+// Routine facts withhold exact configured roots and require static call
+// discovery to recreate them. Continuation facts retain their external entry
+// and only open the sibling boundary in the exact named parent region.
+func (repo *repository) applyProvenEntryFacts(facts []analysis.EntryFact) (entryOverlayCounts, error) {
+	var counts entryOverlayCounts
+	seen := make(map[decoder.Variant]analysis.EntryKind)
 	for _, original := range facts {
 		fact := original
 		fact.Normalize()
-		if fact.Kind != analysis.EntryRoutine {
-			return 0, fmt.Errorf("experimental entry fact $%06X has kind %q; only ordinary routines may be withheld", fact.PC, fact.Kind)
-		}
 		if len(fact.Evidence) == 0 {
-			return 0, fmt.Errorf("experimental entry fact $%06X has no static proof evidence", fact.PC)
-		}
-		for _, evidence := range fact.Evidence {
-			if evidence.Confidence != analysis.ConfidenceProven || !strings.HasPrefix(evidence.Source, "static.direct_js") {
-				return 0, fmt.Errorf("experimental entry fact $%06X has non-call proof evidence %q (%s)", fact.PC, evidence.Source, evidence.Confidence)
-			}
+			return counts, fmt.Errorf("experimental entry fact $%06X has no static proof evidence", fact.PC)
 		}
 		bankID := canonicalBank(repo.byBank, byte(fact.PC>>16))
 		bank := repo.byBank[bankID]
 		if bank == nil {
-			return 0, fmt.Errorf("experimental entry fact $%06X has no configured bank", fact.PC)
+			return counts, fmt.Errorf("experimental entry fact $%06X has no configured bank", fact.PC)
 		}
 		variant := decoder.Variant{
 			Address: decoder.Address24(bankID, uint16(fact.PC)),
 			M:       fact.EntryMX.M & 1,
 			X:       fact.EntryMX.X & 1,
 		}
-		found := false
-		for index := range bank.Config.Entries {
-			entry := &bank.Config.Entries[index]
-			if entryVariant(bankID, *entry) == variant {
-				if obligations := entryHLEObligations(bank.Config, entry.Start); len(obligations) != 0 {
-					return 0, fmt.Errorf("experimental entry fact $%06X M%dX%d has authored HLE obligations (%s); refusing to withhold it", variant.Address, variant.M, variant.X, strings.Join(obligations, ", "))
-				}
-				if fact.TemplateFree {
-					if blockers := entryTemplateBlockers(bankID, bank.Config, *entry); len(blockers) != 0 {
-						return 0, fmt.Errorf("experimental template-free entry fact $%06X M%dX%d has authored metadata blockers (%s)", variant.Address, variant.M, variant.X, strings.Join(blockers, ", "))
-					}
-					*entry = config.Entry{Start: entry.Start, EntryMX: entry.EntryMX}
-					repo.removeCanonicalEntryVariant(variant)
-					repo.templateFreeEntryRoots[variant] = struct{}{}
-					repo.templateFreeEntryFacts++
-				}
-				found = true
-				break
+		if previous, duplicate := seen[variant]; duplicate {
+			return counts, fmt.Errorf("duplicate experimental entry fact $%06X M%dX%d (%s and %s)", variant.Address, variant.M, variant.X, previous, fact.Kind)
+		}
+		seen[variant] = fact.Kind
+
+		switch fact.Kind {
+		case analysis.EntryRoutine:
+			if err := repo.applyProvenRoutineEntryFact(bankID, bank, variant, fact); err != nil {
+				return counts, err
 			}
+			counts.routineRoots++
+		case analysis.EntryContinuation:
+			if err := repo.applyProvenContinuationEntryFact(bankID, bank, variant, fact); err != nil {
+				return counts, err
+			}
+			counts.continuations++
+		default:
+			return counts, fmt.Errorf("experimental entry fact $%06X has unsupported kind %q", fact.PC, fact.Kind)
 		}
-		if !found {
-			return 0, fmt.Errorf("experimental entry fact $%06X M%dX%d has no exact authored declaration", variant.Address, variant.M, variant.X)
-		}
-		if _, duplicate := repo.dormantEntryRoots[variant]; duplicate {
-			return 0, fmt.Errorf("duplicate experimental entry fact $%06X M%dX%d", variant.Address, variant.M, variant.X)
-		}
-		repo.dormantEntryRoots[variant] = struct{}{}
 	}
 	if repo.templateFreeEntryFacts > 0 {
 		repo.rebuildNames()
 	}
-	return len(facts), nil
+	return counts, nil
+}
+
+func (repo *repository) applyProvenRoutineEntryFact(bankID byte, bank *bankState, variant decoder.Variant, fact analysis.EntryFact) error {
+	for _, evidence := range fact.Evidence {
+		if evidence.Confidence != analysis.ConfidenceProven || !strings.HasPrefix(evidence.Source, "static.direct_js") {
+			return fmt.Errorf("experimental routine entry fact $%06X has non-call proof evidence %q (%s)", fact.PC, evidence.Source, evidence.Confidence)
+		}
+	}
+	if len(fact.RegionOwners) != 0 {
+		return fmt.Errorf("experimental routine entry fact $%06X unexpectedly names region owners", fact.PC)
+	}
+	found := false
+	for index := range bank.Config.Entries {
+		entry := &bank.Config.Entries[index]
+		if entryVariant(bankID, *entry) == variant {
+			if obligations := entryHLEObligations(bank.Config, entry.Start); len(obligations) != 0 {
+				return fmt.Errorf("experimental entry fact $%06X M%dX%d has authored HLE obligations (%s); refusing to withhold it", variant.Address, variant.M, variant.X, strings.Join(obligations, ", "))
+			}
+			if fact.TemplateFree {
+				if blockers := entryTemplateBlockers(bankID, bank.Config, *entry); len(blockers) != 0 {
+					return fmt.Errorf("experimental template-free entry fact $%06X M%dX%d has authored metadata blockers (%s)", variant.Address, variant.M, variant.X, strings.Join(blockers, ", "))
+				}
+				*entry = config.Entry{Start: entry.Start, EntryMX: entry.EntryMX}
+				repo.removeCanonicalEntryVariant(variant)
+				repo.templateFreeEntryRoots[variant] = struct{}{}
+				repo.templateFreeEntryFacts++
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("experimental entry fact $%06X M%dX%d has no exact authored declaration", variant.Address, variant.M, variant.X)
+	}
+	if _, duplicate := repo.dormantEntryRoots[variant]; duplicate {
+		return fmt.Errorf("duplicate experimental entry fact $%06X M%dX%d", variant.Address, variant.M, variant.X)
+	}
+	repo.dormantEntryRoots[variant] = struct{}{}
+	return nil
+}
+
+func (repo *repository) applyProvenContinuationEntryFact(bankID byte, bank *bankState, target decoder.Variant, fact analysis.EntryFact) error {
+	for _, evidence := range fact.Evidence {
+		if evidence.Confidence != analysis.ConfidenceProven || evidence.Source != "static.sibling_boundary_edge" {
+			return fmt.Errorf("experimental continuation fact $%06X has incompatible proof evidence %q (%s)", fact.PC, evidence.Source, evidence.Confidence)
+		}
+	}
+	if !fact.TemplateFree {
+		return fmt.Errorf("experimental continuation fact $%06X M%dX%d is not metadata-free", target.Address, target.M, target.X)
+	}
+	var targetEntry *config.Entry
+	for index := range bank.Config.Entries {
+		entry := &bank.Config.Entries[index]
+		if entryVariant(bankID, *entry) == target {
+			targetEntry = entry
+			break
+		}
+	}
+	if targetEntry == nil {
+		return fmt.Errorf("experimental continuation fact $%06X M%dX%d has no exact authored declaration", target.Address, target.M, target.X)
+	}
+	if blockers := entryTemplateBlockers(bankID, bank.Config, *targetEntry); len(blockers) != 0 {
+		return fmt.Errorf("experimental continuation fact $%06X M%dX%d has authored metadata blockers (%s)", target.Address, target.M, target.X, strings.Join(blockers, ", "))
+	}
+	if len(fact.RegionOwners) != 1 {
+		return fmt.Errorf("experimental continuation fact $%06X M%dX%d has %d owning regions; exact region merging currently requires one", target.Address, target.M, target.X, len(fact.RegionOwners))
+	}
+	if len(fact.ResumeEdges) == 0 {
+		return fmt.Errorf("experimental continuation fact $%06X M%dX%d has no exact resume edge", target.Address, target.M, target.X)
+	}
+	for _, ownerFact := range fact.RegionOwners {
+		ownerBank := canonicalBank(repo.byBank, byte(ownerFact.PC>>16))
+		if ownerBank != bankID {
+			return fmt.Errorf("experimental continuation fact $%06X owner $%06X is not in the same canonical bank", target.Address, ownerFact.PC)
+		}
+		owner := decoder.Variant{
+			Address: decoder.Address24(ownerBank, uint16(ownerFact.PC)),
+			M:       ownerFact.EntryMX.M & 1, X: ownerFact.EntryMX.X & 1,
+		}
+		ownerFound := false
+		var ownerEntry config.Entry
+		for _, entry := range bank.Config.Entries {
+			if entryVariant(bankID, entry) == owner && !repo.entryRootDormant(bankID, entry) {
+				ownerFound = true
+				ownerEntry = entry
+				break
+			}
+		}
+		if !ownerFound {
+			return fmt.Errorf("experimental continuation fact $%06X owner $%06X M%dX%d has no active authored entry", target.Address, owner.Address, owner.M, owner.X)
+		}
+		if repo.provenResumeEdges[owner] == nil {
+			repo.provenResumeEdges[owner] = make(map[decoder.ResumeEdge]struct{})
+		}
+		for _, factEdge := range fact.ResumeEdges {
+			sourceBank := canonicalBank(repo.byBank, byte(factEdge.Source.PC>>16))
+			targetBank := canonicalBank(repo.byBank, byte(factEdge.Target.PC>>16))
+			edge := decoder.ResumeEdge{
+				Source: decoder.Variant{
+					Address: decoder.Address24(sourceBank, uint16(factEdge.Source.PC)),
+					M:       factEdge.Source.EntryMX.M & 1, X: factEdge.Source.EntryMX.X & 1,
+				},
+				Target: decoder.Variant{
+					Address: decoder.Address24(targetBank, uint16(factEdge.Target.PC)),
+					M:       factEdge.Target.EntryMX.M & 1, X: factEdge.Target.EntryMX.X & 1,
+				},
+			}
+			if sourceBank != bankID || targetBank != bankID || edge.Target != target {
+				return fmt.Errorf("experimental continuation fact $%06X has incompatible resume edge $%06X M%dX%d -> $%06X M%dX%d", target.Address, edge.Source.Address, edge.Source.M, edge.Source.X, edge.Target.Address, edge.Target.M, edge.Target.X)
+			}
+			if err := repo.validateProvenResumeEdge(bank, ownerEntry, edge); err != nil {
+				return fmt.Errorf("experimental continuation fact $%06X owner $%06X M%dX%d: %w", target.Address, owner.Address, owner.M, owner.X, err)
+			}
+			repo.provenResumeEdges[owner][edge] = struct{}{}
+		}
+	}
+	return nil
+}
+
+func (repo *repository) validateProvenResumeEdge(bank *bankState, owner config.Entry, edge decoder.ResumeEdge) error {
+	options := repo.decodeOptions(bank, owner)
+	graph, err := decoder.DecodeFunction(repo.image, bank.ID, owner.Start, owner.EntryMX.M, owner.EntryMX.X, options)
+	if err != nil {
+		return fmt.Errorf("decode owning region: %w", err)
+	}
+	for key, decoded := range graph.Instructions {
+		if key.PC&0xffffff != edge.Source.Address || key.M&1 != edge.Source.M || key.X&1 != edge.Source.X {
+			continue
+		}
+		for _, successor := range decoded.Successors {
+			if successor.PC&0xffffff == edge.Target.Address && successor.M&1 == edge.Target.M && successor.X&1 == edge.Target.X {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("resume edge $%06X M%dX%d -> $%06X M%dX%d is not present in the closed owner graph", edge.Source.Address, edge.Source.M, edge.Source.X, edge.Target.Address, edge.Target.M, edge.Target.X)
 }
 
 func entryHLEObligations(cfg *config.Config, pc uint16) []string {

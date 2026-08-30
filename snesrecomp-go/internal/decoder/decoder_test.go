@@ -249,3 +249,34 @@ func TestInternalResumePCDecodesThroughSiblingEntryBoundary(t *testing.T) {
 		t.Fatalf("internal resume entry keys = %v, want one local block", keys)
 	}
 }
+
+func TestInternalResumeVariantRequiresExactLiveMX(t *testing.T) {
+	image := bank0(map[uint16][]byte{
+		0x8000: {0x80, 0x0E}, // BRA $8010
+		0x8010: {0xEA, 0x60}, // NOP; RTS
+	})
+	options := Options{
+		SiblingEntryPCs: map[uint16]struct{}{0x8010: {}},
+		InternalResumeEdges: map[ResumeEdge]struct{}{
+			{
+				Source: Variant{Address: 0x008000, M: 0, X: 1},
+				Target: Variant{Address: 0x008010, M: 0, X: 1},
+			}: {},
+		},
+	}
+	graph, err := DecodeFunction(image, 0, 0x8000, 1, 1, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keys := graph.KeysAtPC(0x8010); len(keys) != 0 {
+		t.Fatalf("wrong-width continuation entered parent region: %v", keys)
+	}
+
+	graph, err = DecodeFunction(image, 0, 0x8000, 0, 1, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keys := graph.KeysAtPC(0x8010); len(keys) != 1 || keys[0].M != 0 || keys[0].X != 1 {
+		t.Fatalf("exact-width continuation keys = %v, want M0X1 local block", keys)
+	}
+}

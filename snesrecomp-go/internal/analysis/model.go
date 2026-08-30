@@ -51,6 +51,22 @@ type MXState struct {
 	X uint8 `json:"x"`
 }
 
+// EntryVariant identifies one exact generated entry. Continuation facts use
+// RegionOwners to state which active generated regions may resume at the
+// continuation without creating another host activation frame.
+type EntryVariant struct {
+	PC      uint32  `json:"pc"`
+	EntryMX MXState `json:"entry_mx"`
+}
+
+// EntryEdge identifies one exact live-width control-flow edge. ResumeEdges
+// preserve the boundary crossing independently of whether generation lowers
+// it through the registry or as an in-region goto.
+type EntryEdge struct {
+	Source EntryVariant `json:"source"`
+	Target EntryVariant `json:"target"`
+}
+
 type Evidence struct {
 	Source     string     `json:"source"`
 	Confidence Confidence `json:"confidence"`
@@ -62,18 +78,63 @@ type Evidence struct {
 // does not by itself make the variant a decode root: generation may withhold
 // the root and require an independently decoded edge to demand it.
 type EntryFact struct {
-	PC                uint32     `json:"pc"`
-	EntryMX           MXState    `json:"entry_mx"`
-	Kind              EntryKind  `json:"kind"`
-	TemplateFree      bool       `json:"template_free,omitempty"`
-	CanonicalPromoted bool       `json:"canonical_promoted,omitempty"`
-	Evidence          []Evidence `json:"evidence,omitempty"`
+	PC                uint32         `json:"pc"`
+	EntryMX           MXState        `json:"entry_mx"`
+	Kind              EntryKind      `json:"kind"`
+	TemplateFree      bool           `json:"template_free,omitempty"`
+	CanonicalPromoted bool           `json:"canonical_promoted,omitempty"`
+	RegionOwners      []EntryVariant `json:"region_owners,omitempty"`
+	ResumeEdges       []EntryEdge    `json:"resume_edges,omitempty"`
+	Evidence          []Evidence     `json:"evidence,omitempty"`
 }
 
 func (fact *EntryFact) Normalize() {
 	fact.PC &= 0xffffff
 	fact.EntryMX.M &= 1
 	fact.EntryMX.X &= 1
+	for index := range fact.RegionOwners {
+		fact.RegionOwners[index].PC &= 0xffffff
+		fact.RegionOwners[index].EntryMX.M &= 1
+		fact.RegionOwners[index].EntryMX.X &= 1
+	}
+	sort.Slice(fact.RegionOwners, func(i, j int) bool {
+		if fact.RegionOwners[i].PC != fact.RegionOwners[j].PC {
+			return fact.RegionOwners[i].PC < fact.RegionOwners[j].PC
+		}
+		if fact.RegionOwners[i].EntryMX.M != fact.RegionOwners[j].EntryMX.M {
+			return fact.RegionOwners[i].EntryMX.M < fact.RegionOwners[j].EntryMX.M
+		}
+		return fact.RegionOwners[i].EntryMX.X < fact.RegionOwners[j].EntryMX.X
+	})
+	fact.RegionOwners = dedupeOrdered(fact.RegionOwners)
+	for index := range fact.ResumeEdges {
+		fact.ResumeEdges[index].Source.PC &= 0xffffff
+		fact.ResumeEdges[index].Source.EntryMX.M &= 1
+		fact.ResumeEdges[index].Source.EntryMX.X &= 1
+		fact.ResumeEdges[index].Target.PC &= 0xffffff
+		fact.ResumeEdges[index].Target.EntryMX.M &= 1
+		fact.ResumeEdges[index].Target.EntryMX.X &= 1
+	}
+	sort.Slice(fact.ResumeEdges, func(i, j int) bool {
+		left, right := fact.ResumeEdges[i], fact.ResumeEdges[j]
+		if left.Source.PC != right.Source.PC {
+			return left.Source.PC < right.Source.PC
+		}
+		if left.Source.EntryMX.M != right.Source.EntryMX.M {
+			return left.Source.EntryMX.M < right.Source.EntryMX.M
+		}
+		if left.Source.EntryMX.X != right.Source.EntryMX.X {
+			return left.Source.EntryMX.X < right.Source.EntryMX.X
+		}
+		if left.Target.PC != right.Target.PC {
+			return left.Target.PC < right.Target.PC
+		}
+		if left.Target.EntryMX.M != right.Target.EntryMX.M {
+			return left.Target.EntryMX.M < right.Target.EntryMX.M
+		}
+		return left.Target.EntryMX.X < right.Target.EntryMX.X
+	})
+	fact.ResumeEdges = dedupeOrdered(fact.ResumeEdges)
 	sort.Slice(fact.Evidence, func(i, j int) bool {
 		if fact.Evidence[i].Source != fact.Evidence[j].Source {
 			return fact.Evidence[i].Source < fact.Evidence[j].Source

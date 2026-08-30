@@ -538,7 +538,7 @@ func BuildReplayBenchmark(options ReplayBenchmarkOptions, progress ioWriter) (Re
 			}
 			candidate, reference := observations["candidate"], observations["reference"]
 			if !equalReplayArtifacts(candidate.Artifacts, reference.Artifacts) {
-				return ReplayBenchmarkResult{}, false, fmt.Errorf("workload %s candidate/reference artifacts differ", workload.Name)
+				return ReplayBenchmarkResult{}, false, fmt.Errorf("workload %s candidate/reference artifacts differ: %s", workload.Name, describeReplayArtifactDifferences(candidate.Artifacts, reference.Artifacts))
 			}
 			if previous := artifacts[workload.Name]; previous != nil && !equalReplayArtifacts(previous, candidate.Artifacts) {
 				return ReplayBenchmarkResult{}, false, fmt.Errorf("workload %s candidate artifacts changed between runs", workload.Name)
@@ -633,6 +633,42 @@ func BuildReplayBenchmark(options ReplayBenchmarkOptions, progress ioWriter) (Re
 		}
 	}
 	return result, passed, nil
+}
+
+func describeReplayArtifactDifferences(candidate, reference map[string]string) string {
+	keys := make(map[string]struct{}, len(candidate)+len(reference))
+	for key := range candidate {
+		keys[key] = struct{}{}
+	}
+	for key := range reference {
+		keys[key] = struct{}{}
+	}
+	ordered := make([]string, 0, len(keys))
+	for key := range keys {
+		ordered = append(ordered, key)
+	}
+	sort.Strings(ordered)
+	var differences []string
+	for _, key := range ordered {
+		left, leftFound := candidate[key]
+		right, rightFound := reference[key]
+		if leftFound && rightFound && left == right {
+			continue
+		}
+		if !leftFound {
+			differences = append(differences, fmt.Sprintf("%s missing from candidate", key))
+			continue
+		}
+		if !rightFound {
+			differences = append(differences, fmt.Sprintf("%s missing from reference", key))
+			continue
+		}
+		differences = append(differences, fmt.Sprintf("%s candidate=%s reference=%s", key, left, right))
+	}
+	if len(differences) == 0 {
+		return "unknown difference"
+	}
+	return strings.Join(differences, "; ")
 }
 
 // ioWriter is the small common surface used for optional live progress.

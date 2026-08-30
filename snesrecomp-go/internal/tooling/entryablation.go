@@ -20,27 +20,30 @@ const (
 // ShadowEntryAblationSummary describes a report-only dependency-graph audit.
 // Counts are authored declarations unless explicitly named variants or edges.
 type ShadowEntryAblationSummary struct {
-	AuthoredDeclarations       int `json:"authored_declarations"`
-	UniqueAuthoredVariants     int `json:"unique_authored_variants"`
-	StaticDependencyEdges      int `json:"static_dependency_edges"`
-	VectorCoveredDeclarations  int `json:"vector_covered_declarations"`
-	IndividuallyRecoverable    int `json:"individually_recoverable"`
-	BatchRecoverable           int `json:"batch_recoverable"`
-	RetainedRootDeclarations   int `json:"retained_root_declarations"`
-	RetainedUniqueRootVariants int `json:"retained_unique_root_variants"`
-	BatchRoutineTargets        int `json:"batch_routine_targets"`
-	BatchTemplateFreeRoutines  int `json:"batch_template_free_routines"`
-	BatchTailTargets           int `json:"batch_tail_targets"`
-	BatchComputedTargets       int `json:"batch_computed_targets"`
-	BatchInternalContinuations int `json:"batch_internal_continuations"`
-	AuthoredHLEObligations     int `json:"authored_hle_obligations"`
-	HLEOnlyObligations         int `json:"hle_only_obligations"`
+	AuthoredDeclarations             int `json:"authored_declarations"`
+	UniqueAuthoredVariants           int `json:"unique_authored_variants"`
+	StaticDependencyEdges            int `json:"static_dependency_edges"`
+	VectorCoveredDeclarations        int `json:"vector_covered_declarations"`
+	IndividuallyRecoverable          int `json:"individually_recoverable"`
+	BatchRecoverable                 int `json:"batch_recoverable"`
+	RetainedRootDeclarations         int `json:"retained_root_declarations"`
+	RetainedUniqueRootVariants       int `json:"retained_unique_root_variants"`
+	BatchRoutineTargets              int `json:"batch_routine_targets"`
+	BatchTemplateFreeRoutines        int `json:"batch_template_free_routines"`
+	BatchTailTargets                 int `json:"batch_tail_targets"`
+	BatchComputedTargets             int `json:"batch_computed_targets"`
+	BatchInternalContinuations       int `json:"batch_internal_continuations"`
+	BatchSingleOwnerContinuations    int `json:"batch_single_owner_continuations"`
+	BatchRegionEligibleContinuations int `json:"batch_region_eligible_continuations"`
+	AuthoredHLEObligations           int `json:"authored_hle_obligations"`
+	HLEOnlyObligations               int `json:"hle_only_obligations"`
 }
 
 type ShadowEntryAblationSource struct {
-	PC      uint32           `json:"pc"`
-	EntryMX analysis.MXState `json:"entry_mx"`
-	Kinds   []string         `json:"kinds"`
+	PC      uint32               `json:"pc"`
+	EntryMX analysis.MXState     `json:"entry_mx"`
+	Kinds   []string             `json:"kinds"`
+	Edges   []analysis.EntryEdge `json:"edges,omitempty"`
 }
 
 type ShadowEntryAblationRecord struct {
@@ -51,6 +54,7 @@ type ShadowEntryAblationRecord struct {
 	TemplateBlockers        []string                    `json:"template_blockers,omitempty"`
 	Status                  string                      `json:"status"`
 	EntryKindHint           string                      `json:"entry_kind_hint"`
+	DecodedInstructions     int                         `json:"decoded_instructions"`
 	IndividuallyRecoverable bool                        `json:"individually_recoverable"`
 	Incoming                []ShadowEntryAblationSource `json:"incoming,omitempty"`
 	Reason                  string                      `json:"reason"`
@@ -123,6 +127,72 @@ func SelectStaticProvenRoutineEntryFacts(report ShadowReport) []analysis.EntryFa
 	return facts
 }
 
+// SelectStaticProvenContinuationEntryFacts returns exact sibling-only entry
+// ownership facts. Unlike routine facts these declarations remain active and
+// externally dispatchable; the fact only permits the named parent variants to
+// decode a matching continuation as a local block. Special entry metadata and
+// HLE policy are excluded because a local edge would bypass their prologues.
+const maxStaticContinuationRegionInstructions = 8
+
+func SelectStaticProvenContinuationEntryFacts(report ShadowReport) []analysis.EntryFact {
+	var facts []analysis.EntryFact
+	for _, record := range report.EntryAblation.Entries {
+		if fact, valid := staticProvenContinuationEntryFact(record); valid {
+			facts = append(facts, fact)
+		}
+	}
+	sort.Slice(facts, func(i, j int) bool {
+		if facts[i].PC != facts[j].PC {
+			return facts[i].PC < facts[j].PC
+		}
+		if facts[i].EntryMX.M != facts[j].EntryMX.M {
+			return facts[i].EntryMX.M < facts[j].EntryMX.M
+		}
+		return facts[i].EntryMX.X < facts[j].EntryMX.X
+	})
+	return facts
+}
+
+func staticProvenContinuationEntryFact(record ShadowEntryAblationRecord) (analysis.EntryFact, bool) {
+	if record.Status != shadowEntryAblationRecoverable ||
+		record.EntryKindHint != "internal_continuation" ||
+		len(record.AuthoredHLE) != 0 || len(record.TemplateBlockers) != 0 ||
+		len(record.Incoming) != 1 || record.DecodedInstructions <= 0 ||
+		record.DecodedInstructions > maxStaticContinuationRegionInstructions {
+		return analysis.EntryFact{}, false
+	}
+	incoming := record.Incoming[0]
+	if byte(incoming.PC>>16) != byte(record.PC>>16) || len(incoming.Kinds) == 0 || len(incoming.Edges) == 0 {
+		return analysis.EntryFact{}, false
+	}
+	for _, kind := range incoming.Kinds {
+		if kind != "sibling_boundary_edge" {
+			return analysis.EntryFact{}, false
+		}
+	}
+	fact := analysis.EntryFact{
+		PC: record.PC, EntryMX: record.AuthoredMX,
+		Kind: analysis.EntryContinuation, TemplateFree: true,
+		RegionOwners: []analysis.EntryVariant{{
+			PC: incoming.PC, EntryMX: incoming.EntryMX,
+		}},
+		Evidence: []analysis.Evidence{{
+			Source: "static.sibling_boundary_edge", Confidence: analysis.ConfidenceProven,
+			Detail: fmt.Sprintf("$%02X:%04X M%dX%d", byte(incoming.PC>>16), uint16(incoming.PC), incoming.EntryMX.M&1, incoming.EntryMX.X&1),
+		}},
+		ResumeEdges: append([]analysis.EntryEdge(nil), incoming.Edges...),
+	}
+	for _, edge := range fact.ResumeEdges {
+		if edge.Target.PC&0xffffff != record.PC&0xffffff ||
+			edge.Target.EntryMX.M&1 != record.AuthoredMX.M&1 ||
+			edge.Target.EntryMX.X&1 != record.AuthoredMX.X&1 {
+			return analysis.EntryFact{}, false
+		}
+	}
+	fact.Normalize()
+	return fact, true
+}
+
 func analyzeShadowEntryAblation(image romimage.Image, banks []shadowBank, results []shadowDecodeResult) ShadowEntryAblationReport {
 	bankConfigs := make(map[byte]*config.Config, len(banks))
 	var declarations []shadowEntryAblationDeclaration
@@ -160,10 +230,15 @@ func analyzeShadowEntryAblation(image romimage.Image, banks []shadowBank, result
 
 	graph := make(map[decoder.Variant]map[decoder.Variant]struct{})
 	reverse := make(map[decoder.Variant]map[decoder.Variant][]string)
+	reverseEdges := make(map[decoder.Variant]map[decoder.Variant][]analysis.EntryEdge)
+	decodedInstructions := make(map[decoder.Variant]int)
 	for _, result := range results {
 		source, valid := canonicalShadowAblationVariant(result.entry, bankConfigs)
 		if !valid {
 			continue
+		}
+		if len(result.instructions) > decodedInstructions[source] {
+			decodedInstructions[source] = len(result.instructions)
 		}
 		if graph[source] == nil {
 			graph[source] = make(map[decoder.Variant]struct{})
@@ -185,6 +260,23 @@ func analyzeShadowEntryAblation(image romimage.Image, banks []shadowBank, result
 				reverse[target][source] = appendUniqueShadowString(reverse[target][source], kind)
 			}
 			sort.Strings(reverse[target][source])
+			if len(result.resumeEdges[demand]) != 0 {
+				if reverseEdges[target] == nil {
+					reverseEdges[target] = make(map[decoder.Variant][]analysis.EntryEdge)
+				}
+				for _, edge := range result.resumeEdges[demand] {
+					found := false
+					for _, existing := range reverseEdges[target][source] {
+						if existing == edge {
+							found = true
+							break
+						}
+					}
+					if !found {
+						reverseEdges[target][source] = append(reverseEdges[target][source], edge)
+					}
+				}
+			}
 		}
 	}
 
@@ -260,8 +352,9 @@ func analyzeShadowEntryAblation(image romimage.Image, banks []shadowBank, result
 	for index, declaration := range declarations {
 		uniqueAuthored[declaration.node] = struct{}{}
 		record := declaration.record
+		record.DecodedInstructions = decodedInstructions[declaration.node]
 		record.IndividuallyRecoverable = individuallyRecoverable[index]
-		record.Incoming = shadowEntryAblationIncoming(reverse[declaration.node])
+		record.Incoming = shadowEntryAblationIncoming(reverse[declaration.node], reverseEdges[declaration.node])
 		record.EntryKindHint = shadowEntryAblationKindHint(declaration.node, record.Incoming, vectorRoots)
 		switch {
 		case vectorReachable[declaration.node]:
@@ -289,6 +382,14 @@ func analyzeShadowEntryAblation(image romimage.Image, banks []shadowBank, result
 				report.Summary.BatchComputedTargets++
 			case "internal_continuation":
 				report.Summary.BatchInternalContinuations++
+			}
+		}
+		if record.Status == shadowEntryAblationRecoverable && record.EntryKindHint == "internal_continuation" {
+			if len(record.Incoming) == 1 {
+				report.Summary.BatchSingleOwnerContinuations++
+			}
+			if _, eligible := staticProvenContinuationEntryFact(record); eligible {
+				report.Summary.BatchRegionEligibleContinuations++
 			}
 		}
 		if record.IndividuallyRecoverable {
@@ -476,13 +577,14 @@ func cloneShadowEntryAblationRoots(values map[decoder.Variant]int) map[decoder.V
 	return result
 }
 
-func shadowEntryAblationIncoming(values map[decoder.Variant][]string) []ShadowEntryAblationSource {
+func shadowEntryAblationIncoming(values map[decoder.Variant][]string, edges map[decoder.Variant][]analysis.EntryEdge) []ShadowEntryAblationSource {
 	result := make([]ShadowEntryAblationSource, 0, len(values))
 	for value, kinds := range values {
 		result = append(result, ShadowEntryAblationSource{
 			PC:      value.Address & 0xffffff,
 			EntryMX: analysis.MXState{M: value.M & 1, X: value.X & 1},
 			Kinds:   append([]string(nil), kinds...),
+			Edges:   append([]analysis.EntryEdge(nil), edges[value]...),
 		})
 	}
 	sort.Slice(result, func(i, j int) bool {

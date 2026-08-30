@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -53,5 +54,24 @@ func TestReplayBenchmarkManifestAndArtifactGate(t *testing.T) {
 	right := map[string]any{"replay": map[string]any{"path": "/checkout-b/replay.rec", "bytes": float64(3), "sha256": "same"}}
 	if !equalReplayInputValue(left, right) {
 		t.Fatal("relocated but identical benchmark input should compare equal")
+	}
+}
+
+func TestDescribeReplayArtifactDifferencesNamesEveryArtifact(t *testing.T) {
+	description := describeReplayArtifactDifferences(
+		map[string]string{"same": "a", "changed": "candidate", "candidate-only": "x"},
+		map[string]string{"same": "a", "changed": "reference", "reference-only": "y"},
+	)
+	for _, wanted := range []string{
+		"candidate-only missing from reference",
+		"changed candidate=candidate reference=reference",
+		"reference-only missing from candidate",
+	} {
+		if !strings.Contains(description, wanted) {
+			t.Fatalf("artifact difference %q missing %q", description, wanted)
+		}
+	}
+	if strings.Contains(description, "same") {
+		t.Fatalf("unchanged artifact leaked into difference: %q", description)
 	}
 }

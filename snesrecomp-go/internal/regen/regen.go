@@ -42,6 +42,7 @@ type Report struct {
 	UnresolvedIndirects, StubHits       int
 	AnalysisFactsApplied                int
 	AnalysisEntryFactsApplied           int
+	AnalysisContinuationFactsApplied    int
 	AnalysisEntryFactsRediscovered      int
 	AnalysisEntryTemplatesSynthesized   int
 	StaticEntryDiscoveries              []analysis.EntryFact
@@ -65,6 +66,7 @@ type repository struct {
 	dispatchHelpers         map[uint32]string
 	provenDispatchMX        map[uint32]struct{}
 	provenResumePCs         map[uint32]struct{}
+	provenResumeEdges       map[decoder.Variant]map[decoder.ResumeEdge]struct{}
 	dormantEntryRoots       map[decoder.Variant]struct{}
 	templateFreeEntryRoots  map[decoder.Variant]struct{}
 	templateFreeEntryFacts  int
@@ -121,20 +123,24 @@ func Run(options Options) (Report, error) {
 		}
 		logf("experimental analysis overlay: applied %d statically proven dispatch facts", reportCount)
 	}
-	entryFactCount, err := repo.applyProvenEntryFacts(options.ProvenEntryFacts)
+	entryFactCounts, err := repo.applyProvenEntryFacts(options.ProvenEntryFacts)
 	if err != nil {
 		return Report{}, err
 	}
-	if entryFactCount > 0 {
-		logf("experimental analysis overlay: withheld %d statically derivable routine root(s)", entryFactCount)
+	if entryFactCounts.routineRoots > 0 {
+		logf("experimental analysis overlay: withheld %d statically derivable routine root(s)", entryFactCounts.routineRoots)
 		if repo.templateFreeEntryFacts > 0 {
 			logf("experimental analysis overlay: stripped authored metadata from %d canonical routine template(s)", repo.templateFreeEntryFacts)
 		}
 	}
+	if entryFactCounts.continuations > 0 {
+		logf("experimental analysis overlay: made %d exact continuation variant(s) locally resumable in their proven owning regions", entryFactCounts.continuations)
+	}
 	repo.exactDirectCallMX = options.ExperimentalExactDirectCallMX
 	report := Report{Banks: len(repo.banks)}
 	report.AnalysisFactsApplied = len(options.ProvenDispatchFacts)
-	report.AnalysisEntryFactsApplied = entryFactCount
+	report.AnalysisEntryFactsApplied = entryFactCounts.routineRoots
+	report.AnalysisContinuationFactsApplied = entryFactCounts.continuations
 	for _, bank := range repo.banks {
 		report.InitialEntries += len(bank.Config.Entries)
 	}
@@ -163,7 +169,7 @@ func Run(options Options) (Report, error) {
 				variantFixpointPassLimit)
 		}
 	}
-	report.AnalysisEntryFactsRediscovered = entryFactCount - len(repo.dormantEntryRoots)
+	report.AnalysisEntryFactsRediscovered = entryFactCounts.routineRoots - len(repo.dormantEntryRoots)
 	report.AnalysisEntryTemplatesSynthesized = repo.templateFreeSynthesized
 	if len(repo.dormantEntryRoots) > 0 {
 		return report, repo.unrecoveredProvenEntryFactsError()
@@ -171,8 +177,8 @@ func Run(options Options) (Report, error) {
 	if repo.templateFreeSynthesized != repo.templateFreeEntryFacts {
 		return report, fmt.Errorf("experimental static entry analysis synthesized %d/%d stripped routine template(s)", repo.templateFreeSynthesized, repo.templateFreeEntryFacts)
 	}
-	if entryFactCount > 0 {
-		logf("experimental analysis overlay: rediscovered %d/%d withheld routine root(s)", report.AnalysisEntryFactsRediscovered, entryFactCount)
+	if entryFactCounts.routineRoots > 0 {
+		logf("experimental analysis overlay: rediscovered %d/%d withheld routine root(s)", report.AnalysisEntryFactsRediscovered, entryFactCounts.routineRoots)
 		if repo.templateFreeEntryFacts > 0 {
 			logf("experimental analysis overlay: synthesized %d/%d canonical routine template(s)", repo.templateFreeSynthesized, repo.templateFreeEntryFacts)
 		}
@@ -265,6 +271,7 @@ func loadRepository(romPath, configDir string) (*repository, error) {
 		canonical: make(map[uint32]map[[2]uint8]struct{}), dispatchHelpers: make(map[uint32]string),
 		provenDispatchMX:       make(map[uint32]struct{}),
 		provenResumePCs:        make(map[uint32]struct{}),
+		provenResumeEdges:      make(map[decoder.Variant]map[decoder.ResumeEdge]struct{}),
 		dormantEntryRoots:      make(map[decoder.Variant]struct{}),
 		templateFreeEntryRoots: make(map[decoder.Variant]struct{}),
 		staticEntryDiscoveries: make(map[decoder.Variant]analysis.EntryFact),
@@ -413,7 +420,7 @@ func (repo *repository) discoverDispatchHelpers(jobs int, logf func(string, ...a
 	targets := make(map[uint32]struct{})
 	var lock sync.Mutex
 	repo.parallelEntries(jobs, nil, func(bank *bankState, entry config.Entry) {
-		options := repo.decodeOptions(bank, entry.Start)
+		options := repo.decodeOptions(bank, entry)
 		options.DispatchHelpers = nil
 		graph, err := decoder.DecodeFunction(repo.image, bank.ID, entry.Start, entry.EntryMX.M, entry.EntryMX.X, options)
 		if err != nil {
@@ -481,7 +488,7 @@ func (repo *repository) discoverVariants(jobs int) (int, error) {
 		var lock sync.Mutex
 		var firstErr error
 		repo.parallelEntries(jobs, nil, func(bank *bankState, entry config.Entry) {
-			options := repo.decodeOptions(bank, entry.Start)
+			options := repo.decodeOptions(bank, entry)
 			graph, err := decoder.DecodeFunction(repo.image, bank.ID, entry.Start, entry.EntryMX.M, entry.EntryMX.X, options)
 			if err != nil {
 				return
@@ -771,7 +778,7 @@ func (repo *repository) inferExitMX(jobs int) (bool, int) {
 			if _, fixed := manual[key]; fixed {
 				return
 			}
-			options := repo.decodeOptions(bank, entry.Start)
+			options := repo.decodeOptions(bank, entry)
 			options.CalleeExitMX = current
 			graph, err := decoder.DecodeFunction(repo.image, bank.ID, entry.Start, entry.EntryMX.M, entry.EntryMX.X, options)
 			if err != nil {
@@ -818,7 +825,7 @@ func exitMapsEqual(a, b map[decoder.Variant]decoder.MX) bool {
 	return true
 }
 
-func (repo *repository) decodeOptions(bank *bankState, start uint16) decoder.Options {
+func (repo *repository) decodeOptions(bank *bankState, current config.Entry) decoder.Options {
 	options := emitter.DecodeOptionsFromConfig(bank.ID, bank.Config)
 	for site := range repo.provenDispatchMX {
 		if auth, found := options.IndirectDispatch[site]; found {
@@ -831,15 +838,20 @@ func (repo *repository) decodeOptions(bank *bankState, start uint16) decoder.Opt
 	options.CalleeExitMX = repo.exitMX
 	options.SiblingEntryPCs = make(map[uint16]struct{})
 	options.InternalResumePCs = make(map[uint16]struct{})
-	for _, entry := range bank.Config.Entries {
-		if entry.Start != start && repo.activeSiblingAddress(bank.ID, entry.Start) {
-			options.SiblingEntryPCs[entry.Start] = struct{}{}
+	options.InternalResumeEdges = make(map[decoder.ResumeEdge]struct{})
+	for _, sibling := range bank.Config.Entries {
+		if sibling.Start != current.Start && repo.activeSiblingAddress(bank.ID, sibling.Start) {
+			options.SiblingEntryPCs[sibling.Start] = struct{}{}
 		}
 	}
 	for address := range repo.provenResumePCs {
 		if byte(address>>16) == bank.ID {
 			options.InternalResumePCs[uint16(address)] = struct{}{}
 		}
+	}
+	owner := entryVariant(bank.ID, current)
+	for edge := range repo.provenResumeEdges[owner] {
+		options.InternalResumeEdges[edge] = struct{}{}
 	}
 	return options
 }
@@ -900,7 +912,7 @@ func (repo *repository) emitFunctions(jobs int, only map[byte]struct{}) (map[byt
 		context.ValidVariants = repo.validVariants
 		context.ProvenEquivalent = repo.provenEquivalent
 		context.ExactDirectCallMX = repo.exactDirectCallMX
-		options := repo.decodeOptions(bank, entry.Start)
+		options := repo.decodeOptions(bank, entry)
 		excludes := make([][2]uint16, 0, len(bank.Config.ExcludeRanges))
 		for _, r := range bank.Config.ExcludeRanges {
 			excludes = append(excludes, [2]uint16{r.Start, r.End})

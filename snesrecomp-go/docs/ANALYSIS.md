@@ -226,11 +226,11 @@ kind hint rather than flattening every recovered address back into `func`:
 - a target recovered only because decoding stopped at an authored sibling is
   an `internal_continuation`.
 
-That final category is not a callable-function removal candidate until larger
-generated regions can resume at internal blocks without adding a host stack
-frame. The summary counts batch-recoverable declarations by these kinds so a
-large number of sibling-only edges cannot be mistaken for immediately safe cfg
-deletions.
+That final category is not a callable-function removal candidate. The summary
+counts batch-recoverable declarations by these kinds so a large number of
+sibling-only edges cannot be mistaken for immediately safe cfg deletions.
+Each record includes its standalone `decoded_instructions` cost and the exact
+live-width predecessor edges that stopped at the sibling boundary.
 
 Inclusion-minimal does not mean globally minimum cardinality. More
 importantly, dependency reachability does not yet prove that removing a cfg
@@ -238,8 +238,8 @@ line preserves generated-region boundaries or external entry semantics. The
 graph is collected while all authored sibling boundaries are present, so this
 full root set remains report-only. It identifies high-value ablation batches
 and cyclic root groups for isolated regeneration; it never edits
-configuration or feeds continuation/tail/computed candidates into production
-generation.
+configuration or feeds the unrestricted continuation/tail/computed sets into
+production generation.
 
 There is one deliberately narrow experimental consumer. A
 `batch_recoverable` entry classified as `routine` and supported by an exact
@@ -264,6 +264,25 @@ directive even when there is no explicit `func` at that PC; `authored_entry`
 distinguishes attached and HLE-only policy. This is intentional because a
 common configuration style relies on static call discovery to create the
 entry and keeps only the HLE directive authored.
+
+A second experimental consumer validates a bounded resumable-region contract.
+It selects only a metadata-free `internal_continuation` with exactly one owning
+entry variant, one or more exact sibling-boundary edges, and at most eight
+decoded instructions. The continuation remains a standalone generated and
+registry-visible entry. Only its proven predecessor `(PC,M,X)` edges may enter
+the block with an in-region `goto`; other callers and widths still use the
+external entry. Generation re-decodes the closed owner graph and rejects a fact
+whose claimed edge is absent. This prevents a function-level ownership claim
+from opening unrelated loops or sibling callers.
+
+The eight-instruction limit is an explicit source-growth guard, not a semantic
+threshold. Eagerly duplicating every externally addressable continuation into
+every possible owner can inflate generated output even when every edge is
+correct. `batch_single_owner_continuations` and
+`batch_region_eligible_continuations` separate the broader analysis result from
+the cost-bounded overlay subset. Larger or multi-owner regions remain
+report-only until generation can share one resumable region body instead of
+duplicating it.
 
 ## Table-first unknown target discovery
 
@@ -396,7 +415,10 @@ dispatches and generic registry dispatches emit the same semantic
 source-PC/target-PC event, while lowering-dependent registry events are
 suppressed. Dispatch hashes can therefore be compared directly instead of
 accepting a difference caused only by replacing a registry lookup with a
-compiled switch.
+compiled switch. Raw non-semantic dispatch logs can also differ when an
+authored sibling boundary that formerly required an implementation-only
+registry tail transfer becomes a local goto; that artificial edge is omitted
+from both semantic builds.
 
 ## Entry and transfer invariants
 
@@ -413,11 +435,11 @@ Entry classification and transfer behavior are separate axes:
 Transfers are `call`, `tail`, `resume`, or `interrupt`. In particular, a
 continuation reached by `resume` must not execute a routine-entry prologue,
 create a duplicate C activation, or establish a new stack baseline. This model
-is metadata in the shadow phase. The experimental overlay also uses proven
-PHA/RTS return PCs as internal resume points: the containing generated region
-decodes the continuation and reaches it with a local `goto`, while a separate
-registered entry remains available for genuinely external dispatch. Ordinary
-sibling entries still stop region growth.
+is metadata in the shadow phase. The experimental overlay uses both proven
+PHA/RTS return PCs and the narrow exact sibling-edge contract above as internal
+resume points. The containing generated region reaches the continuation with a
+local `goto`, while a separate registered entry remains available for genuinely
+external dispatch. Ordinary sibling entries still stop region growth.
 
 This distinction is behaviorally significant even when final machine state
 converges. Re-entering a continuation through the sparse registry creates a

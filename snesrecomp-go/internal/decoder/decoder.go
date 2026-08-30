@@ -8,9 +8,10 @@ import (
 )
 
 type workItem struct {
-	Key         DecodeKey
-	Kind        string
-	Predecessor int
+	Key            DecodeKey
+	Kind           string
+	Predecessor    DecodeKey
+	HasPredecessor bool
 }
 
 // DecodeFunction performs worklist-driven decoding keyed by PC/M/X/PHP state.
@@ -20,7 +21,7 @@ func DecodeFunction(image rom.Image, bank byte, start uint16, entryM, entryX uin
 	}
 	entry := DecodeKey{PC: Address24(bank, start), M: entryM & 1, X: entryX & 1}
 	graph := &Graph{Entry: entry, Instructions: make(map[DecodeKey]*DecodedInstruction)}
-	worklist := []workItem{{entry, "entry", -1}}
+	worklist := []workItem{{Key: entry, Kind: "entry"}}
 	for len(worklist) > 0 {
 		if len(graph.Instructions) >= options.MaxInstructions {
 			return nil, fmt.Errorf("v2 decoder exceeded max_insns=%d at function $%06X", options.MaxInstructions, Address24(bank, start))
@@ -31,12 +32,17 @@ func DecodeFunction(image rom.Image, bank byte, start uint16, entryM, entryX uin
 			continue
 		}
 		pc := uint16(item.Key.PC)
-		if options.End != nil && pc >= *options.End && item.Kind == "fall" && item.Predecessor >= 0 && item.Predecessor < int(*options.End) {
+		if options.End != nil && pc >= *options.End && item.Kind == "fall" && item.HasPredecessor && uint16(item.Predecessor.PC) < *options.End {
 			continue
 		}
 		if item.Kind == "jump" {
 			if _, sibling := options.SiblingEntryPCs[pc]; sibling {
-				if _, resume := options.InternalResumePCs[pc]; !resume {
+				_, resumePC := options.InternalResumePCs[pc]
+				_, resumeEdge := options.InternalResumeEdges[ResumeEdge{
+					Source: Variant{Address: item.Predecessor.PC & 0xffffff, M: item.Predecessor.M & 1, X: item.Predecessor.X & 1},
+					Target: Variant{Address: item.Key.PC & 0xffffff, M: item.Key.M & 1, X: item.Key.X & 1},
+				}]
+				if !resumePC && (!item.HasPredecessor || !resumeEdge) {
 					continue
 				}
 			}
@@ -91,13 +97,13 @@ func DecodeFunction(image rom.Image, bank byte, start uint16, entryM, entryX uin
 			if successor.Kind == "fall_brk" {
 				if brkContinuationLooksValid(image, byte(successor.Key.PC>>16), uint16(successor.Key.PC), successor.Key.M, successor.Key.X) {
 					if _, done := graph.Instructions[successor.Key]; !done {
-						worklist = append(worklist, workItem{successor.Key, successor.Kind, int(pc)})
+						worklist = append(worklist, workItem{Key: successor.Key, Kind: successor.Kind, Predecessor: item.Key, HasPredecessor: true})
 					}
 				}
 				continue
 			}
 			if _, done := graph.Instructions[successor.Key]; !done {
-				worklist = append(worklist, workItem{successor.Key, successor.Kind, int(pc)})
+				worklist = append(worklist, workItem{Key: successor.Key, Kind: successor.Kind, Predecessor: item.Key, HasPredecessor: true})
 			}
 		}
 	}
@@ -265,7 +271,7 @@ func decodeIndirectJump(image rom.Image, bank byte, start, pc uint16, key Decode
 			instruction.DispatchBound = automaticBound
 			instruction.DispatchTransferPC = instruction.Address & 0xffffff
 			successors := dispatchSuccessors(bank, entries, instruction.M, instruction.X)
-			storeAndQueue(key, instruction, successors, graph, worklist, pc)
+			storeAndQueue(key, instruction, successors, graph, worklist)
 			return true, nil
 		}
 	}
@@ -322,7 +328,7 @@ func decodePHADispatch(image rom.Image, bank byte, pc uint16, key DecodeKey, ins
 	if auth.ReturnPC != nil && *auth.ReturnPC >= 0x8000 {
 		successors = append(successors, labeledSuccessor{DecodeKey{PC: Address24(bank, *auth.ReturnPC), M: m, X: x}, "jump"})
 	}
-	storeAndQueue(key, instruction, successors, graph, worklist, pc)
+	storeAndQueue(key, instruction, successors, graph, worklist)
 	return true, nil
 }
 
@@ -402,7 +408,7 @@ func decodeIndirectJSR(image rom.Image, bank byte, start, pc uint16, key DecodeK
 			instruction.DispatchTransferPC = instruction.Address & 0xffffff
 			successors := labeledSuccessors(image, instruction, key, bank, options)
 			successors = append(successors, dispatchSuccessors(bank, entries, instruction.M, instruction.X)...)
-			storeAndQueue(key, instruction, successors, graph, worklist, pc)
+			storeAndQueue(key, instruction, successors, graph, worklist)
 			return true, nil
 		}
 	}
@@ -433,7 +439,7 @@ func decodeIndirectJSR(image rom.Image, bank byte, start, pc uint16, key DecodeK
 		instruction.DispatchEntries, instruction.DispatchKind = entries, legacy.Kind
 		successors := labeledSuccessors(image, instruction, key, bank, options)
 		successors = append(successors, dispatchSuccessors(bank, entries, instruction.M, instruction.X)...)
-		storeAndQueue(key, instruction, successors, graph, worklist, pc)
+		storeAndQueue(key, instruction, successors, graph, worklist)
 		return true, nil
 	}
 	graph.record(&DecodedInstruction{Key: key, Instruction: instruction})
@@ -459,7 +465,7 @@ func decodeRTSTrick(bank byte, pc uint16, key DecodeKey, instruction *cpu65816.I
 			successors = append(successors, labeledSuccessor{DecodeKey{PC: Address24(bank, target), M: key.M, X: key.X}, "jump"})
 		}
 	}
-	storeAndQueue(key, instruction, successors, graph, worklist, pc)
+	storeAndQueue(key, instruction, successors, graph, worklist)
 	return true
 }
 
@@ -478,7 +484,7 @@ func dispatchSuccessors(bank byte, entries []uint32, m, x uint8) []labeledSucces
 	return successors
 }
 
-func storeAndQueue(key DecodeKey, instruction *cpu65816.Instruction, successors []labeledSuccessor, graph *Graph, worklist *[]workItem, pc uint16) {
+func storeAndQueue(key DecodeKey, instruction *cpu65816.Instruction, successors []labeledSuccessor, graph *Graph, worklist *[]workItem) {
 	keys := make([]DecodeKey, len(successors))
 	for index, successor := range successors {
 		keys[index] = successor.Key
@@ -486,7 +492,7 @@ func storeAndQueue(key DecodeKey, instruction *cpu65816.Instruction, successors 
 	graph.record(&DecodedInstruction{Key: key, Instruction: instruction, Successors: keys})
 	for _, successor := range successors {
 		if _, done := graph.Instructions[successor.Key]; !done {
-			*worklist = append(*worklist, workItem{successor.Key, successor.Kind, int(pc)})
+			*worklist = append(*worklist, workItem{Key: successor.Key, Kind: successor.Kind, Predecessor: key, HasPredecessor: true})
 		}
 	}
 }

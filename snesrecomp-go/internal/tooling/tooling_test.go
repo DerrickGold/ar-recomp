@@ -1033,8 +1033,13 @@ func TestSelectStaticProvenRoutineEntryFactsExcludesContinuationAndRetainedRoots
 		{
 			PC: 0x008200, AuthoredMX: analysis.MXState{M: 0, X: 1},
 			Status: shadowEntryAblationRecoverable, EntryKindHint: "internal_continuation",
+			DecodedInstructions: 2,
 			Incoming: []ShadowEntryAblationSource{{
 				PC: 0x008100, EntryMX: analysis.MXState{M: 0, X: 1}, Kinds: []string{"sibling_boundary_edge"},
+				Edges: []analysis.EntryEdge{{
+					Source: analysis.EntryVariant{PC: 0x008110, EntryMX: analysis.MXState{M: 0, X: 1}},
+					Target: analysis.EntryVariant{PC: 0x008200, EntryMX: analysis.MXState{M: 0, X: 1}},
+				}},
 			}},
 		},
 		{
@@ -1062,6 +1067,60 @@ func TestSelectStaticProvenRoutineEntryFactsExcludesContinuationAndRetainedRoots
 		facts[0].Evidence[0].Source != "static.direct_jsr" ||
 		facts[0].Evidence[0].Confidence != analysis.ConfidenceProven {
 		t.Fatalf("selected entry fact lacks normalized static proof: %+v", facts[0])
+	}
+}
+
+func TestSelectStaticProvenContinuationEntryFactsRequiresPlainSiblingOnlyEntry(t *testing.T) {
+	report := ShadowReport{EntryAblation: ShadowEntryAblationReport{Entries: []ShadowEntryAblationRecord{
+		{
+			PC: 0x008200, AuthoredMX: analysis.MXState{M: 0, X: 1},
+			Status: shadowEntryAblationRecoverable, EntryKindHint: "internal_continuation",
+			DecodedInstructions: 2,
+			Incoming: []ShadowEntryAblationSource{{
+				PC: 0x008100, EntryMX: analysis.MXState{M: 0, X: 1}, Kinds: []string{"sibling_boundary_edge"},
+				Edges: []analysis.EntryEdge{{
+					Source: analysis.EntryVariant{PC: 0x008110, EntryMX: analysis.MXState{M: 0, X: 1}},
+					Target: analysis.EntryVariant{PC: 0x008200, EntryMX: analysis.MXState{M: 0, X: 1}},
+				}},
+			}},
+		},
+		{
+			PC: 0x008300, AuthoredMX: analysis.MXState{M: 0, X: 1},
+			Status: shadowEntryAblationRecoverable, EntryKindHint: "internal_continuation",
+			DecodedInstructions: 2,
+			TemplateBlockers:    []string{"hle_func"},
+			Incoming: []ShadowEntryAblationSource{{
+				PC: 0x008100, EntryMX: analysis.MXState{M: 0, X: 1}, Kinds: []string{"sibling_boundary_edge"},
+			}},
+		},
+		{
+			PC: 0x018400, AuthoredMX: analysis.MXState{M: 0, X: 1},
+			Status: shadowEntryAblationRecoverable, EntryKindHint: "internal_continuation",
+			DecodedInstructions: 2,
+			Incoming: []ShadowEntryAblationSource{{
+				PC: 0x008100, EntryMX: analysis.MXState{M: 0, X: 1}, Kinds: []string{"sibling_boundary_edge"},
+			}},
+		},
+		{
+			PC: 0x008500, AuthoredMX: analysis.MXState{M: 0, X: 1},
+			Status: shadowEntryAblationRecoverable, EntryKindHint: "internal_continuation",
+			DecodedInstructions: maxStaticContinuationRegionInstructions + 1,
+			Incoming: []ShadowEntryAblationSource{{
+				PC: 0x008100, EntryMX: analysis.MXState{M: 0, X: 1}, Kinds: []string{"sibling_boundary_edge"},
+			}},
+		},
+	}}}
+	facts := SelectStaticProvenContinuationEntryFacts(report)
+	if len(facts) != 1 {
+		t.Fatalf("continuation facts = %+v, want one plain same-bank fact", facts)
+	}
+	fact := facts[0]
+	if fact.PC != 0x008200 || fact.Kind != analysis.EntryContinuation || !fact.TemplateFree ||
+		len(fact.RegionOwners) != 1 || fact.RegionOwners[0] != (analysis.EntryVariant{
+		PC: 0x008100, EntryMX: analysis.MXState{M: 0, X: 1},
+	}) || len(fact.ResumeEdges) != 1 || fact.ResumeEdges[0].Source.PC != 0x008110 ||
+		len(fact.Evidence) != 1 || fact.Evidence[0].Source != "static.sibling_boundary_edge" {
+		t.Fatalf("continuation fact = %+v", fact)
 	}
 }
 

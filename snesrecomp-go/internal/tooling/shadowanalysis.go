@@ -20,7 +20,7 @@ import (
 	romimage "github.com/DerrickGold/snesrecomp-go/internal/rom"
 )
 
-const shadowReportVersion = 11
+const shadowReportVersion = 12
 
 const (
 	shadowUnresolvedGeneric              = "generic_dynamic_target"
@@ -231,6 +231,7 @@ type shadowDecodeResult struct {
 	unresolved     []decoder.UnresolvedIndirect
 	demands        map[decoder.Variant]struct{}
 	demandEvidence map[decoder.Variant][]string
+	resumeEdges    map[decoder.Variant][]analysis.EntryEdge
 	seedReach      []shadowContinuationReach
 	spans          []shadowDecodedSpan
 	instructions   []shadowDecodedInstruction
@@ -644,11 +645,13 @@ func runShadowDecodePass(image romimage.Image, banks []shadowBank, entries map[b
 				}
 				facts := inferredFactsFromGraph(image, item.bank.ID, item.entry.Start, graph)
 				demandEvidence := discoverShadowDemandEvidence(item.bank.ID, graph, item.siblings)
+				resumeEdges := discoverShadowSiblingBoundaryEdges(item.bank.ID, graph, item.siblings)
 				output <- shadowDecodeResult{
 					entry: entryVariant,
 					facts: facts, unresolved: graph.UnresolvedIndirects,
 					demands:        shadowDemandEvidenceSet(demandEvidence),
 					demandEvidence: demandEvidence,
+					resumeEdges:    resumeEdges,
 					seedReach:      discoverShadowContinuationReaches(item.bank.ID, graph),
 					spans:          shadowDecodedSpans(item.bank.ID, item.entry.Start, graph),
 					instructions:   shadowDecodedInstructions(item.bank.ID, item.entry.Start, graph),
@@ -793,6 +796,65 @@ func discoverShadowDemandEvidence(bank byte, graph *decoder.Graph, siblingStarts
 	}
 	for variant := range result {
 		sort.Strings(result[variant])
+	}
+	return result
+}
+
+func discoverShadowSiblingBoundaryEdges(bank byte, graph *decoder.Graph, siblingStarts map[uint16]struct{}) map[decoder.Variant][]analysis.EntryEdge {
+	result := make(map[decoder.Variant][]analysis.EntryEdge)
+	if graph == nil {
+		return result
+	}
+	for _, key := range graph.Order {
+		decoded := graph.Instructions[key]
+		if decoded == nil || decoded.Instruction == nil {
+			continue
+		}
+		instruction := decoded.Instruction
+		for _, successor := range decoded.Successors {
+			if byte(successor.PC>>16) != bank {
+				continue
+			}
+			if _, known := siblingStarts[uint16(successor.PC)]; !known || graph.Instructions[successor] != nil {
+				continue
+			}
+			if instruction.Mnemonic == "JMP" && instruction.Mode == cpu65816.ABS {
+				continue
+			}
+			target := decoder.Variant{Address: successor.PC & 0xffffff, M: successor.M & 1, X: successor.X & 1}
+			edge := analysis.EntryEdge{
+				Source: analysis.EntryVariant{
+					PC:      key.PC & 0xffffff,
+					EntryMX: analysis.MXState{M: key.M & 1, X: key.X & 1},
+				},
+				Target: analysis.EntryVariant{
+					PC:      successor.PC & 0xffffff,
+					EntryMX: analysis.MXState{M: successor.M & 1, X: successor.X & 1},
+				},
+			}
+			found := false
+			for _, existing := range result[target] {
+				if existing == edge {
+					found = true
+					break
+				}
+			}
+			if !found {
+				result[target] = append(result[target], edge)
+			}
+		}
+	}
+	for target := range result {
+		sort.Slice(result[target], func(i, j int) bool {
+			left, right := result[target][i], result[target][j]
+			if left.Source.PC != right.Source.PC {
+				return left.Source.PC < right.Source.PC
+			}
+			if left.Source.EntryMX.M != right.Source.EntryMX.M {
+				return left.Source.EntryMX.M < right.Source.EntryMX.M
+			}
+			return left.Source.EntryMX.X < right.Source.EntryMX.X
+		})
 	}
 	return result
 }

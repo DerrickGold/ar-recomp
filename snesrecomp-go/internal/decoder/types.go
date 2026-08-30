@@ -98,6 +98,11 @@ type Variant struct {
 	Address uint32
 	M, X    uint8
 }
+
+type ResumeEdge struct {
+	Source Variant
+	Target Variant
+}
 type MX struct{ M, X int8 }
 
 type IndirectCallTable struct {
@@ -140,8 +145,14 @@ type Options struct {
 	SiblingEntryPCs    map[uint16]struct{}
 	// InternalResumePCs are address-taken continuation blocks that remain
 	// registered as external entries, but must be decoded into an active
-	// caller region when reached by an internal control-flow edge.
+	// caller region when reached by an internal control-flow edge. This
+	// address-wide form is reserved for dispatch constructs whose continuation
+	// is part of the construct itself.
 	InternalResumePCs map[uint16]struct{}
+	// InternalResumeEdges is the exact predecessor/target form used by static
+	// entry ownership facts. It opens only the proven sibling-boundary edge and
+	// leaves later loops or other callers unchanged.
+	InternalResumeEdges map[ResumeEdge]struct{}
 }
 
 func Address24(bank byte, pc uint16) uint32 { return uint32(bank)<<16 | uint32(pc) }

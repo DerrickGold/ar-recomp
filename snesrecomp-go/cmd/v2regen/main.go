@@ -807,7 +807,7 @@ func regenerate(args []string) error {
 	chunkThreshold := flags.Int("bank-chunk-threshold-kib", 4096, "split banks at or above this generated size")
 	chunkSpan := flags.Int("bank-chunk-pc-span", 0x800, "stable PC span per split translation unit")
 	allowStubs := flags.Bool("allow-stubs", false, "write complete output and report stubs without failing this command")
-	provenAnalysis := flags.Bool("experimental-proven-analysis", false, "apply closed static dispatch facts and exact direct-call M/X in memory (requires an isolated --out-dir)")
+	provenAnalysis := flags.Bool("experimental-proven-analysis", false, "apply closed static dispatch facts, exact direct-call M/X, and bounded continuation regions in memory (requires an isolated --out-dir)")
 	_ = flags.String("prefix", "", "deprecated compatibility option")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -846,7 +846,9 @@ func regenerate(args []string) error {
 		provenFacts, rejected = tooling.SelectStaticProvenAutomaticDispatchFacts(shadow)
 		fmt.Printf("v2regen: experimental analysis selected %d proven automatic fact(s); kept %d open/probable fact(s) report-only\n", len(provenFacts), rejected)
 		provenEntryFacts = tooling.SelectStaticProvenRoutineEntryFacts(shadow)
-		fmt.Printf("v2regen: experimental analysis selected %d statically derivable routine root(s); continuations and other entry kinds remain report-only\n", len(provenEntryFacts))
+		continuationFacts := tooling.SelectStaticProvenContinuationEntryFacts(shadow)
+		fmt.Printf("v2regen: experimental analysis selected %d statically derivable routine root(s) and %d exact continuation ownership fact(s); other entry kinds remain report-only\n", len(provenEntryFacts), len(continuationFacts))
+		provenEntryFacts = append(provenEntryFacts, continuationFacts...)
 	}
 	report, err := regen.Run(regen.Options{
 		ROMPath: *romPath, ConfigDir: *cfgDir, OutputDir: *outDir, Jobs: *jobs,
