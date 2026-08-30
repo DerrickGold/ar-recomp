@@ -247,6 +247,11 @@ void dsp_writeHardwareVoiceMask(Dsp *dsp, uint8_t address, uint8_t value,
 }
 void RtlApuLock(void) { ++apu_lock_count; }
 void RtlApuUnlock(void) { ++apu_unlock_count; }
+int RtlCaptureApuAudit(const char *prefix) {
+    (void)prefix;
+    return 1;
+}
+void audio_trace_reset(void) {}
 
 uint8 *RomPtr(uint32 address) {
     return &test_rom[address & (sizeof(test_rom) - 1u)];

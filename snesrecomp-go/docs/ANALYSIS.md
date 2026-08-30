@@ -112,6 +112,43 @@ proving a target set. Confirm a candidate with dispatch-census or an external
 trace before adding it to configuration; the analyzer never feeds a code-island
 finding into the proven-analysis overlay.
 
+## Boundary landing sweep
+
+The broader JSON report also includes `landing_candidates`, and verbose text
+prints `[LANDING-CANDIDATE]` records. This pass generalizes the dispatch-only
+gap check without reverse-disassembling variable-length 65816 instructions:
+
+1. confirmed function entries provide forward landing boundaries;
+2. the analyzer seeks backwards at most 256 bytes for an unclaimed byte after
+   a decoded `RTS`, `RTL`, `RTI`, `BRA`, `BRL`, `JMP`, or `JML`;
+3. it decodes forwards from that candidate under all four entry M/X states;
+4. it retains only graphs whose every path stays in the candidate range and
+   either reaches the confirmed boundary or terminates with a return.
+
+Acceptance is intentionally stricter than plausible linear disassembly. The
+candidate must contain at least two instructions, have consistent instruction
+boundaries, avoid all decoded code, declared data, and confirmed table spans,
+and contain no unresolved transfer, `BRK`, `COP`, `WAI`, `STP`, or unmodeled
+`XCE`. General stack depth is propagated across the graph; underflow,
+conflicting join depths, an unbalanced return/tail join, or an unmodeled
+`TCS`/`TXS` rejects the candidate. PHP/PLP M/X restoration continues to use
+the main decoder's abstract status stack.
+
+Each finding reports the candidate range, the next confirmed anchor, viable
+entry M/X states, predecessor terminator, termination shape, and instruction
+count. A candidate already reported with the stronger closed-dispatch context
+is omitted from this list. Stack-consistent regions with a stronger structural
+shape are `probable`; a two-instruction return with neither a call nor an
+explicit edge to the anchor remains visible as `speculative`. Both are
+code-ownership evidence, not proof of a caller or runtime reachability, and
+neither is ever added to generated code or the experimental proven-analysis
+overlay. Overlap with a merely candidate table span is reported as
+`candidate_table_conflict` and downgraded to speculative instead of letting
+one heuristic silently suppress another. Raw pointer clusters,
+base-plus-offset references, and iterative promotion are later landing-sweep
+seed strategies; this first phase keeps its post-terminator seed independently
+testable.
+
 ## Experimental isolated regeneration
 
 The low-level generator can consume the safest automatic facts without
@@ -316,3 +353,43 @@ host-stack semantics. The optional JSON output contains the ROM hash, trace
 hash, provenance, and observation counts; authored cfg is never modified.
 The report preserves whether an observation was trapped before dispatch, so
 such evidence cannot be mistaken for an executed handler edge.
+
+## APU sample and port audit
+
+Set `SNESRECOMP_APU_AUDIT_PREFIX` before runner initialization to enable the
+otherwise-inert audio evidence recorder and byte-level ARAM write bitmap. A
+clean teardown, or an explicit `RtlCaptureApuAudit`, produces four files:
+
+- `.aram`: the coherent final 64 KiB ARAM image;
+- `.dsp`: the 128-byte visible DSP register image;
+- `.written`: one bit per ARAM byte written by the SPC, the shared HLE upload
+  helpers, or a value-changing upload customization;
+- `.audio.jsonl`: canonical chronological DSP writes and CPU/APU port events,
+  with host PCM scheduling events omitted, plus overflow metadata and CPU
+  source-block/function provenance.
+
+`snesbuild apu-audit --prefix <prefix>` selects evidence only from currently
+audible non-noise voices, observed key-ons, or explicit `--sources`. It never
+interprets stale SRCN registers from a silent snapshot as a successful test.
+For each source it reads the live DIR entry, follows nine-byte blocks with the
+DSP's wrapping 16-bit ARAM semantics, requires an end block before the address
+sequence cycles, validates an enabled loop as a visited block address, and
+checks every consumed byte against the write bitmap. A later directory entry
+does not terminate the walk: SNES sound drivers may deliberately share BRR
+suffixes. With no bitmap, a structurally sound sample is reported as
+inconclusive rather than fully valid.
+
+The same report reconstructs CPU-to-APU handshakes. A different applied value
+before an SPC read produces `PORT-OVERWRITE`, including the replacement's
+source block, function, frame range, and hit count. Same-value rewrites are
+counted separately because they can be intentional protocol markers without
+proving that a different command was lost. While capture is enabled, the
+runtime prints the first and base-16 changed-value hit milestones so a frozen
+or collapsed protocol is visible before shutdown. Overwrites are evidence,
+not automatically defects: a title may intentionally coalesce port values.
+
+Historical key-ons are compared with the final ARAM snapshot. If a game swaps
+sample banks, capture near the failure or take multiple explicit snapshots.
+Direct customization writes of the same byte already present in ARAM are not
+distinguishable from no write; shared upload helpers provide exact declared
+destination coverage and are preferred.

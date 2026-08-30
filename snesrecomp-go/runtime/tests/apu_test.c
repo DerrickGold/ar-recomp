@@ -9,6 +9,7 @@
 #include <string.h>
 
 uint64_t g_apu_timer0_total_ticks;
+int snes_frame_counter;
 extern uint64_t g_spc_write_counts[0x100];
 extern uint64_t g_spc_pc_histogram[0x10000];
 extern int g_spc_pc_max_seen;
@@ -184,6 +185,21 @@ static void test_diagnostic_counter_gate(Apu *apu) {
     apu->diagnosticCountersEnabled = false;
 }
 
+static void test_aram_write_coverage(Apu *apu) {
+    apu_reset(apu);
+    apu->auditWritesEnabled = true;
+    apu_cpuWrite(apu, 0x2345u, 0xa5u);
+    check((apu->ramWritten[0x2345u >> 3] &
+           (uint8_t)(1u << (0x2345u & 7u))) != 0u &&
+          (apu->ramWritten[0x2344u >> 3] &
+           (uint8_t)(1u << (0x2344u & 7u))) == 0u,
+          "SPC writes publish byte-precise ARAM coverage");
+    apu_reset(apu);
+    check(apu->ramWritten[0x2345u >> 3] == 0u,
+          "ARAM write coverage resets with APU state");
+    apu->auditWritesEnabled = false;
+}
+
 static void test_saveload(Apu *apu) {
     SaveLoadInfo info = {capture_save};
     g_apu_extra_saveload_hook = capture_extra;
@@ -232,6 +248,7 @@ int main(void) {
     test_queue_and_cycles(apu);
     test_timers(apu);
     test_diagnostic_counter_gate(apu);
+    test_aram_write_coverage(apu);
     test_saveload(apu);
     test_portable_timeline_saveload(apu);
     apu_free(apu);

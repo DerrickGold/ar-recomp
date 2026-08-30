@@ -7,6 +7,35 @@ enum {
     SR_SPC_MAX_POOL_SCAN = 0x60000
 };
 
+#if defined(_MSC_VER)
+#define SR_UPLOAD_THREAD_LOCAL __declspec(thread)
+#else
+#define SR_UPLOAD_THREAD_LOCAL _Thread_local
+#endif
+static SR_UPLOAD_THREAD_LOCAL uint8_t *s_write_bitmap;
+static SR_UPLOAD_THREAD_LOCAL size_t s_write_bitmap_bytes;
+
+void sr_spc_upload_begin_write_tracking(uint8_t *bitmap,
+                                        size_t bitmap_byte_size) {
+    s_write_bitmap = bitmap;
+    s_write_bitmap_bytes = bitmap_byte_size;
+}
+
+void sr_spc_upload_end_write_tracking(void) {
+    s_write_bitmap = NULL;
+    s_write_bitmap_bytes = 0u;
+}
+
+static void track_write(uint16_t destination, size_t length) {
+    size_t index;
+    if (s_write_bitmap == NULL || s_write_bitmap_bytes < 0x2000u) return;
+    for (index = 0u; index < length; ++index) {
+        const uint16_t address = (uint16_t)(destination + index);
+        s_write_bitmap[address >> 3] |=
+            (uint8_t)(1u << (address & 7u));
+    }
+}
+
 static uint8_t rom_byte(const uint8_t *rom, size_t size, size_t offset) {
     return rom[offset % size];
 }
@@ -36,6 +65,7 @@ bool sr_spc_upload_image(const uint8_t *rom, size_t rom_size,
             return true;
         }
         if (++blocks > SR_SPC_MAX_BLOCKS) return false;
+        track_write(destination, length);
         for (uint32_t index = 0u; index < length; ++index) {
             aram[(uint16_t)(destination + index)] =
                 rom_byte(rom, rom_size, cursor + index);
@@ -69,6 +99,7 @@ bool sr_spc_upload_samples(const uint8_t *rom, size_t rom_size,
         uint16_t length = rom_word(rom, rom_size, chunk);
         chunk += 2u;
         destination = (uint16_t)(destination + previous_length);
+        track_write(destination, length);
         for (uint32_t index = 0u; index < length; ++index) {
             aram[(uint16_t)(destination + index)] =
                 rom_byte(rom, rom_size, chunk + index);

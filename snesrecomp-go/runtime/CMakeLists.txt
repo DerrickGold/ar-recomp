@@ -206,7 +206,8 @@ if(BUILD_TESTING)
     add_test(NAME snesrecomp_runtime_snes
         COMMAND snesrecomp_runtime_snes_test)
 
-    add_executable(snesrecomp_runtime_apu_test tests/apu_test.c)
+    add_executable(snesrecomp_runtime_apu_test
+        tests/apu_test.c tests/apu_sync_stub.c)
     target_link_libraries(snesrecomp_runtime_apu_test PRIVATE
         snesrecomp_runtime)
     add_test(NAME snesrecomp_runtime_apu
@@ -255,7 +256,8 @@ if(BUILD_TESTING)
     add_executable(snesrecomp_runtime_audio_trace_test
         tests/audio_trace_test.c)
     target_compile_definitions(snesrecomp_runtime_audio_trace_test PRIVATE
-        AUDIO_TRACE_TEST_WAV="${CMAKE_CURRENT_BINARY_DIR}/runtime-audio-trace.wav")
+        AUDIO_TRACE_TEST_WAV="${CMAKE_CURRENT_BINARY_DIR}/runtime-audio-trace.wav"
+        AUDIO_TRACE_TEST_JSONL="${CMAKE_CURRENT_BINARY_DIR}/runtime-audio-trace.jsonl")
     target_link_libraries(snesrecomp_runtime_audio_trace_test PRIVATE
         snesrecomp_runtime)
     add_test(NAME snesrecomp_runtime_audio_trace

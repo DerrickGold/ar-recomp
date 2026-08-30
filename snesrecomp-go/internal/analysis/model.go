@@ -31,10 +31,11 @@ const (
 type Confidence string
 
 const (
-	ConfidenceObserved Confidence = "observed"
-	ConfidenceProven   Confidence = "proven"
-	ConfidenceProbable Confidence = "probable"
-	ConfidenceAuthored Confidence = "authored_override"
+	ConfidenceObserved    Confidence = "observed"
+	ConfidenceProven      Confidence = "proven"
+	ConfidenceProbable    Confidence = "probable"
+	ConfidenceSpeculative Confidence = "speculative"
+	ConfidenceAuthored    Confidence = "authored_override"
 )
 
 // CodeOwnership classifies the decode path that produced a fact. An empty

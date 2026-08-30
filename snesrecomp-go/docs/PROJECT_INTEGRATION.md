@@ -282,6 +282,25 @@ with decoded reads, and checks those synchronization candidates for polling
 loops. The report names the interrupt roots and writer PCs; it does not assume
 that every interrupt-written value is a frame gate or authorize an HLE.
 
+Once the first scene with audible output is reachable, capture an APU audit
+before diagnosing game-specific audio policy:
+
+```sh
+SNESRECOMP_APU_AUDIT_PREFIX=saves/first-audio ./build/MyGame game.sfc
+snesbuild apu-audit --root . --prefix saves/first-audio --strict
+```
+
+The prefix must be present before `SnesInit`; it gates the otherwise-inert ARAM
+write bitmap and audio event ring. Exit normally, or call
+`RtlCaptureApuAudit` at a safe emulation-thread point. Treat a silent capture
+as inconclusive. Every live or observed SRCN should reach a BRR end under
+16-bit ARAM wrapping, have a valid loop target, and have complete write
+coverage. Review every changed-value port overwrite; same-value rewrites are
+reported separately. Some protocols intentionally coalesce values, but a
+marker replaced before an SPC read is exactly the failure mode produced by an
+instantaneous HLE upload.
+Capture near the failure if the title swaps sample banks while running.
+
 ## Recovering the game frame schedule
 
 The console timeline is cyclic, so adjacent phases can be grouped into a host
