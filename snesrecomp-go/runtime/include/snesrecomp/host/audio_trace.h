@@ -63,8 +63,12 @@ typedef struct AudioTraceStats {
     uint32_t occupancy_highwater;
     uint64_t event_count;
     uint64_t snap_count;
+    /* Legacy wall-baseline counter. Deterministic target-clock runtimes leave
+     * this at zero; retained so existing trace readers keep their layout. */
     uint64_t pace_baseline_cycles;
     uint64_t pace_accumulate_calls;
+    /* True when audio demand had advanced the semantic APU clock beyond the
+     * serialized game-tick target at the most recent port-sync observation. */
     uint32_t pace_consumer_active;
     uint64_t cpu_port_writes;
     uint64_t spc_port_reads_seen;

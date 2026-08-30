@@ -313,6 +313,20 @@ offline tool: it may run the portable audio core and emit WAV files, but the
 browser/UI does not need an SPC player and the runtime ABI does not need to
 expose live SPC layout.
 
+Extended voices are numbered as a natural continuation of the native bank:
+8..15, 16..23, 24..31, and 32..39. Each group is a hardware-shaped eight-voice
+bank, so pitch modulation never crosses a group boundary. Global timing/noise
+state is mirrored from the visible native bank, and all enabled extended echo
+sends feed the one native echo-memory pass. Route registers and KON/KOFF/EON
+through the bounded operations; the implementation preserves the same
+slot-level timing and serializes every bank.
+
+The runtime owns APU progress once per game tick. `RtlRunFrame` advances a
+17,088-slot target after the game slice, while `RtlRenderAudio` may satisfy some
+or all of that target first. A headless frontend does not need to render and
+discard PCM merely to keep the SPC alive. Do not add wall-clock catch-up or
+call `RtlAdvanceApuTimeline` in addition to `RtlRunFrame`.
+
 Validate audio with original-only, replacement-only, and mixed output; rapid
 track changes; save/load during a note and fade; pause/turbo; all known upload
 variants; and an unknown track ID that falls back safely.

@@ -55,6 +55,7 @@ typedef struct DspChannel {
 struct Dsp {
     uint8_t *apu_ram;
     void *shadow;
+    void *accuracy;
     uint8_t voiceBus[kDspMaximumVoiceCount];
     uint8_t ram[0x80];
     DspChannel channel[kDspMaximumVoiceCount];
@@ -87,7 +88,11 @@ struct Dsp {
 Dsp *dsp_init(uint8_t *ram);
 void dsp_free(Dsp *dsp);
 void dsp_reset(Dsp *dsp);
+/* One hardware DSP slot. The APU calls this once per master APU cycle. */
+void dsp_clock(Dsp *dsp);
+/* Test/offline convenience: advances exactly one 32-slot sample. */
 void dsp_cycle(Dsp *dsp);
+uint8_t dsp_currentSlot(const Dsp *dsp);
 uint8_t dsp_read(Dsp *dsp, uint8_t address);
 void dsp_write(Dsp *dsp, uint8_t address, uint8_t value);
 void dsp_getSamples(Dsp *dsp, int16_t *samples, int sample_count);

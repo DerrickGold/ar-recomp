@@ -3,19 +3,18 @@
 #include "snes/dsp_shadow.h"
 #include "snes/saveload.h"
 
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
-/* Runtime diagnostics/enhancement seams are inert in this focused DSP test. */
 int snes_frame_counter;
 DspShadow *dsp_shadow_create(void) { return NULL; }
 void dsp_shadow_free(DspShadow *shadow) { (void)shadow; }
 void dsp_shadow_process(DspShadow *shadow, Dsp *dsp, int canon_l, int canon_r,
                         int *out_l, int *out_r) {
-  (void)shadow;
-  (void)dsp;
-  *out_l = canon_l;
-  *out_r = canon_r;
+  (void)shadow; (void)dsp;
+  *out_l = canon_l; *out_r = canon_r;
 }
 void audio_trace_on_sample(int16_t l, int16_t r, int dropped,
                            uint32_t ring_fill) {
@@ -37,239 +36,155 @@ static int s_failures;
   } \
 } while (0)
 
-static void ConfigureVoice(Dsp *dsp, int voice, DspVoiceBus bus,
-                           bool echo) {
-  DspChannel *channel = &dsp->channel[voice];
-  channel->useNoise = true;
-  channel->useGain = true;
-  channel->directGain = true;
-  channel->gainValue = 0x7f0;
-  channel->volumeL = 64;
-  channel->volumeR = 64;
-  channel->echoEnable = echo;
-  dsp_setVoiceBus(dsp, voice, bus);
+static void InstallBrr(uint8_t *ram) {
+  static const uint8_t payload[8] = {
+    0x01, 0x23, 0x45, 0x67, 0x01, 0x23, 0x45, 0x67
+  };
+  ram[0x0208] = 0x00; ram[0x0209] = 0x03;
+  ram[0x020a] = 0x00; ram[0x020b] = 0x03;
+  ram[0x0300] = 0xc3;
+  memcpy(ram + 0x0301, payload, sizeof(payload));
 }
 
 static Dsp *NewDsp(uint8_t *ram) {
   memset(ram, 0, 0x10000);
+  InstallBrr(ram);
   Dsp *dsp = dsp_init(ram);
+  CHECK(dsp != NULL);
+  if (!dsp) return NULL;
   dsp_reset(dsp);
-  dsp->reset = false;
-  dsp->mute = false;
-  dsp->masterVolumeL = 127;
-  dsp->masterVolumeR = 127;
-  dsp->noiseSample = 10000;
+  dsp_write(dsp, 0x0c, 127);
+  dsp_write(dsp, 0x1c, 127);
+  dsp_write(dsp, 0x5d, 2);
+  dsp_write(dsp, 0x6c, 0x20);
   return dsp;
 }
 
-static void TestUnityIsLabelNeutral(void) {
-  uint8_t reference_ram[0x10000], tagged_ram[0x10000];
-  Dsp *reference = NewDsp(reference_ram);
+static void WriteVoice(Dsp *dsp, int voice, uint8_t reg, uint8_t value) {
+  if (voice < 8)
+    dsp_write(dsp, (uint8_t)(voice * 0x10 + reg), value);
+  else
+    dsp_writeVirtualVoiceRegister(
+      dsp, voice, (uint8_t)((voice & 7) * 0x10 + reg), value);
+}
+
+static void ControlVoice(Dsp *dsp, int voice, uint8_t reg, bool enabled) {
+  if (voice < 8) {
+    const uint8_t bit = (uint8_t)(1u << voice);
+    dsp_writeHardwareVoiceMask(dsp, reg, enabled ? bit : 0, bit);
+  } else {
+    dsp_writeVirtualVoiceControl(dsp, voice, reg, enabled);
+  }
+}
+
+static void ConfigureVoice(Dsp *dsp, int voice, DspVoiceBus bus,
+                           bool echo) {
+  WriteVoice(dsp, voice, 0, 83);
+  WriteVoice(dsp, voice, 1, (uint8_t)-37);
+  WriteVoice(dsp, voice, 2, 0);
+  WriteVoice(dsp, voice, 3, 0x10);
+  WriteVoice(dsp, voice, 4, 2);
+  WriteVoice(dsp, voice, 5, 0);
+  WriteVoice(dsp, voice, 6, 0);
+  WriteVoice(dsp, voice, 7, 0x7f);
+  ControlVoice(dsp, voice, 0x4d, echo);
+  ControlVoice(dsp, voice, 0x4c, true);
+  dsp_setVoiceBus(dsp, voice, bus);
+}
+
+static void Run(Dsp *dsp, int samples) {
+  while (samples-- > 0) dsp_cycle(dsp);
+}
+
+static void TestUnityAndIndependentGains(void) {
+  uint8_t ref_ram[0x10000], tagged_ram[0x10000], muted_ram[0x10000];
+  Dsp *reference = NewDsp(ref_ram);
   Dsp *tagged = NewDsp(tagged_ram);
+  Dsp *muted = NewDsp(muted_ram);
+  if (!reference || !tagged || !muted) goto done;
   ConfigureVoice(reference, 0, kDspVoiceBus_Unclassified, false);
-  ConfigureVoice(reference, 1, kDspVoiceBus_Unclassified, false);
-  ConfigureVoice(tagged, 0, kDspVoiceBus_Music, false);
-  ConfigureVoice(tagged, 1, kDspVoiceBus_Sfx, false);
+  ConfigureVoice(tagged, 0, kDspVoiceBus_Sfx, false);
+  ConfigureVoice(muted, 0, kDspVoiceBus_Music, false);
 
   dsp_setMusicBusMuted(false);
   dsp_setBusGains(100, 100);
-  dsp_cycle(reference);
-  dsp_cycle(tagged);
-  CHECK(reference->sampleWrite == 1 && tagged->sampleWrite == 1);
-  CHECK(reference->sampleBuffer[0] == tagged->sampleBuffer[0]);
-  CHECK(reference->sampleBuffer[1] == tagged->sampleBuffer[1]);
-  CHECK(reference->sampleBuffer[0] != 0);
-
-  dsp_free(reference);
-  dsp_free(tagged);
-}
-
-static void TestIndependentDryGains(void) {
-  uint8_t both_ram[0x10000], sfx_ram[0x10000], music_ram[0x10000];
-  Dsp *both_muted = NewDsp(both_ram);
-  Dsp *sfx_only = NewDsp(sfx_ram);
-  Dsp *music_only = NewDsp(music_ram);
-  Dsp *mixers[] = { both_muted, sfx_only, music_only };
-  for (int i = 0; i < 3; i++) {
-    ConfigureVoice(mixers[i], 0, kDspVoiceBus_Music, false);
-    ConfigureVoice(mixers[i], 1, kDspVoiceBus_Sfx, false);
-  }
-
-  dsp_setBusGains(0, 0);
-  dsp_cycle(both_muted);
-  CHECK(both_muted->sampleBuffer[0] == 0);
+  Run(reference, 16);
+  Run(tagged, 16);
+  CHECK(memcmp(reference->sampleBuffer, tagged->sampleBuffer,
+               16 * 2 * sizeof(int16_t)) == 0);
+  CHECK(reference->sampleBuffer[10 * 2] != 0);
 
   dsp_setBusGains(0, 100);
-  dsp_cycle(sfx_only);
-  CHECK(sfx_only->sampleBuffer[0] != 0);
-
-  dsp_setBusGains(100, 0);
-  dsp_cycle(music_only);
-  CHECK(music_only->sampleBuffer[0] == sfx_only->sampleBuffer[0]);
-
-  for (int i = 0; i < 3; i++) dsp_free(mixers[i]);
-}
-
-static void TestEchoSendFollowsBus(void) {
-  uint8_t muted_ram[0x10000], live_ram[0x10000];
-  Dsp *muted = NewDsp(muted_ram);
-  Dsp *live = NewDsp(live_ram);
-  ConfigureVoice(muted, 0, kDspVoiceBus_Sfx, true);
-  ConfigureVoice(live, 0, kDspVoiceBus_Sfx, true);
-  muted->echoWrites = live->echoWrites = true;
-
-  dsp_setBusGains(100, 0);
-  dsp_cycle(muted);
-  CHECK(muted_ram[0] == 0 && muted_ram[1] == 0 &&
-        muted_ram[2] == 0 && muted_ram[3] == 0);
-
+  Run(muted, 16);
+  CHECK(muted->sampleBuffer[10 * 2] == 0);
+done:
+  dsp_free(reference); dsp_free(tagged); dsp_free(muted);
   dsp_setBusGains(100, 100);
-  dsp_cycle(live);
-  CHECK(live_ram[0] != 0 || live_ram[1] != 0 ||
-        live_ram[2] != 0 || live_ram[3] != 0);
-
-  dsp_free(muted);
-  dsp_free(live);
 }
 
-static void TestExtendedVoiceIsMixedAndIndependentlyControlled(void) {
-  uint8_t live_ram[0x10000], muted_ram[0x10000];
+static void TestExtendedControlAndPcmParity(void) {
+  uint8_t hardware_ram[0x10000], virtual_ram[0x10000];
+  Dsp *hardware = NewDsp(hardware_ram);
+  Dsp *virtual_dsp = NewDsp(virtual_ram);
+  if (!hardware || !virtual_dsp) goto done;
   dsp_setExtendedVoicesEnabled(true);
-  CHECK(dsp_activeVoiceCount() == kDspMaximumVoiceCount);
+  /* Channel 8 is lane 0 of the first parallel bank, so channel 0 is its
+   * cycle-for-cycle hardware counterpart. */
+  ConfigureVoice(hardware, 0, kDspVoiceBus_Sfx, false);
+  ConfigureVoice(virtual_dsp, 8, kDspVoiceBus_Sfx, false);
+  Run(hardware, 256);
+  Run(virtual_dsp, 256);
+  CHECK(memcmp(hardware->sampleBuffer, virtual_dsp->sampleBuffer,
+               256 * 2 * sizeof(int16_t)) == 0);
+  CHECK(hardware->sampleBuffer[128 * 2] != 0);
+
+  dsp_writeHardwareVoiceMask(virtual_dsp, 0x4c, 0x40, 0x40);
+  dsp_writeVirtualVoiceControl(virtual_dsp, 8, 0x4c, true);
+  dsp_writeHardwareVoiceMask(virtual_dsp, 0x4c, 0x40, 0xbf);
+  CHECK(virtual_dsp->channel[6].keyOn);
+  CHECK(virtual_dsp->channel[8].keyOn);
+  CHECK((dsp_read(virtual_dsp, 0x4c) & 0x40) != 0);
+done:
+  dsp_free(hardware); dsp_free(virtual_dsp);
+  dsp_setExtendedVoicesEnabled(false);
+}
+
+static bool EchoRegionNonzero(const uint8_t *ram) {
+  for (unsigned i = 0x4000; i < 0x4200; ++i)
+    if (ram[i] != 0) return true;
+  return false;
+}
+
+static void TestVirtualEchoUsesSharedUnitAndBusGain(void) {
+  uint8_t live_ram[0x10000], muted_ram[0x10000];
   Dsp *live = NewDsp(live_ram);
   Dsp *muted = NewDsp(muted_ram);
+  if (!live || !muted) goto done;
+  dsp_setExtendedVoicesEnabled(true);
+  dsp_write(live, 0x6c, 0x00);
+  dsp_write(muted, 0x6c, 0x00);
+  dsp_write(live, 0x6d, 0x40);
+  dsp_write(muted, 0x6d, 0x40);
+  dsp_write(live, 0x7d, 1);
+  dsp_write(muted, 0x7d, 1);
   ConfigureVoice(live, 8, kDspVoiceBus_Sfx, true);
   ConfigureVoice(muted, 8, kDspVoiceBus_Sfx, true);
-  live->echoWrites = muted->echoWrites = true;
 
   dsp_setBusGains(100, 100);
-  dsp_cycle(live);
-  CHECK(live->sampleBuffer[0] != 0);
-  CHECK(live_ram[0] != 0 || live_ram[1] != 0 ||
-        live_ram[2] != 0 || live_ram[3] != 0);
-
+  Run(live, 32);
+  CHECK(EchoRegionNonzero(live_ram));
   dsp_setBusGains(100, 0);
-  dsp_cycle(muted);
-  CHECK(muted->sampleBuffer[0] == 0);
-  CHECK(muted_ram[0] == 0 && muted_ram[1] == 0 &&
-        muted_ram[2] == 0 && muted_ram[3] == 0);
-
-  /* A split effect mask updates the unowned native bits only. Voice 6 keeps
-   * its song KON latch while virtual voice 8 receives the effect KON. */
-  live->channel[6].keyOn = true;
-  dsp_writeVirtualVoiceControl(live, 8, 0x4c, true);
-  dsp_writeHardwareVoiceMask(live, 0x4c, 0x40, 0xbf);
-  CHECK(live->channel[6].keyOn);
-  CHECK(live->channel[8].keyOn);
-
-  dsp_free(live);
-  dsp_free(muted);
-  dsp_setExtendedVoicesEnabled(false);
-  CHECK(dsp_activeVoiceCount() == 8);
-}
-
-static void TestReleasedVirtualVoiceSleepsAndWakesOnKeyOn(void) {
-  uint8_t ram[0x10000];
-  dsp_setExtendedVoicesEnabled(true);
-  Dsp *dsp = NewDsp(ram);
-  ConfigureVoice(dsp, 8, kDspVoiceBus_Sfx, false);
-  DspChannel *voice = &dsp->channel[8];
-  voice->adsrState = 4;
-  voice->gain = 0;
-  voice->pitch = 0x1000;
-  voice->pitchCounter = 0x0123;
-
-  dsp_cycle(dsp);
-  CHECK(voice->pitchCounter == 0x0123);
-  CHECK(voice->sampleOut == 0);
-
-  voice->keyOn = true;
-  dsp->evenCycle = true;
-  dsp_cycle(dsp);
-  CHECK(!voice->keyOn);
-  CHECK(voice->pitchCounter != 0x0123);
-  CHECK(voice->gain == voice->gainValue);
-  CHECK(voice->sampleOut != 0);
-
-  dsp_free(dsp);
-  dsp_setExtendedVoicesEnabled(false);
-}
-
-static void ConfigureParityVoice(Dsp *dsp, uint8_t *ram, int voice) {
-  /* One looping BRR block with an asymmetric stereo pan. The echo tail is
-   * shared/global while the effect itself has EON clear, matching the static
-   * audit of all 38 ActRaiser effect sequences. */
-  dsp->dirPage = 0x0200;
-  ram[0x0200] = 0x00;
-  ram[0x0201] = 0x03;
-  ram[0x0202] = 0x00;
-  ram[0x0203] = 0x03;
-  ram[0x0300] = 0x03; /* loop + end, shift 0, filter 0 */
-  const uint8_t brr[8] = {
-    0x71, 0xe2, 0x63, 0xd4, 0x55, 0xc6, 0x37, 0xa8,
-  };
-  memcpy(ram + 0x0301, brr, sizeof(brr));
-
-  DspChannel *channel = &dsp->channel[voice];
-  channel->srcn = 0;
-  channel->pitch = 0x1000;
-  channel->useGain = true;
-  channel->directGain = true;
-  channel->gainValue = 0x7f0;
-  channel->volumeL = 83;
-  channel->volumeR = -37;
-  channel->echoEnable = false;
-  channel->keyOn = true;
-  dsp_setVoiceBus(dsp, voice, kDspVoiceBus_Sfx);
-
-  dsp->echoWrites = true;
-  dsp->echoVolumeL = 32;
-  dsp->echoVolumeR = -24;
-  dsp->feedbackVolume = 20;
-  dsp->echoBufferAdr = 0x4000;
-  dsp->echoDelay = 32;
-  dsp->echoRemain = 32;
-  dsp->firValues[7] = 64;
-  ram[0x4000] = 0x00;
-  ram[0x4001] = 0x20;
-  ram[0x4002] = 0x00;
-  ram[0x4003] = 0xf0;
-}
-
-static void TestPhysicalAndVirtualVoicePcmParity(void) {
-  uint8_t authentic_ram[0x10000], extended_ram[0x10000];
-  dsp_setExtendedVoicesEnabled(false);
-  Dsp *authentic = NewDsp(authentic_ram);
-  Dsp *extended = NewDsp(extended_ram);
-  ConfigureParityVoice(authentic, authentic_ram, 7);
-  ConfigureParityVoice(extended, extended_ram, 8);
+  Run(muted, 32);
+  CHECK(!EchoRegionNonzero(muted_ram));
+done:
+  dsp_free(live); dsp_free(muted);
   dsp_setBusGains(100, 100);
-
-  for (int i = 0; i < 512; i++)
-    dsp_cycle(authentic);
-  dsp_setExtendedVoicesEnabled(true);
-  for (int i = 0; i < 512; i++)
-    dsp_cycle(extended);
-
-  CHECK(authentic->sampleWrite == 512 && extended->sampleWrite == 512);
-  CHECK(memcmp(authentic->sampleBuffer, extended->sampleBuffer,
-               512 * 2 * sizeof(authentic->sampleBuffer[0])) == 0);
-  CHECK(memcmp(&authentic->channel[7], &extended->channel[8],
-               sizeof(DspChannel)) == 0);
-  CHECK(memcmp(authentic_ram + 0x4000, extended_ram + 0x4000,
-               512) == 0);
-  CHECK(authentic->sampleBuffer[128 * 2] != 0);
-  CHECK(authentic->sampleBuffer[128 * 2] !=
-        authentic->sampleBuffer[128 * 2 + 1]);
-
-  dsp_free(authentic);
-  dsp_free(extended);
   dsp_setExtendedVoicesEnabled(false);
 }
 
 typedef struct MemoryState {
   SaveLoadInfo sli;
-  uint8_t bytes[sizeof(Dsp)];
+  uint8_t bytes[131072];
   size_t offset;
   bool loading;
 } MemoryState;
@@ -277,7 +192,10 @@ typedef struct MemoryState {
 static void TransferMemoryState(SaveLoadInfo *sli, void *data, size_t size) {
   MemoryState *state = (MemoryState *)sli;
   CHECK(state->offset + size <= sizeof(state->bytes));
-  if (state->offset + size > sizeof(state->bytes)) return;
+  if (state->offset + size > sizeof(state->bytes)) {
+    sli->failed = true;
+    return;
+  }
   if (state->loading)
     memcpy(data, state->bytes + state->offset, size);
   else
@@ -287,29 +205,34 @@ static void TransferMemoryState(SaveLoadInfo *sli, void *data, size_t size) {
 
 static void TestExtendedVoiceStateIsSerialized(void) {
   uint8_t ram[0x10000];
-  dsp_setExtendedVoicesEnabled(true);
+  int16_t expected[32], actual[32];
   Dsp *dsp = NewDsp(ram);
-  dsp->channel[8].srcn = 0x0a;
-  dsp->channel[8].pitch = 0x2345;
-  dsp->channel[8].decodeOffset = 0x4567;
-  dsp->channel[8].gain = 0x321;
-  dsp->channel[8].keyOn = true;
+  if (!dsp) return;
+  dsp_setExtendedVoicesEnabled(true);
+  ConfigureVoice(dsp, 8, kDspVoiceBus_Sfx, false);
+  Run(dsp, 24);
 
   MemoryState state;
   memset(&state, 0, sizeof(state));
   state.sli.func = TransferMemoryState;
+  state.sli.saving = true;
+  state.sli.portable = true;
+  const uint32_t cursor = dsp->sampleWrite;
   dsp_saveload(dsp, &state.sli);
-  CHECK(state.offset > 0);
+  CHECK(!state.sli.failed && state.offset > sizeof(dsp->sampleBuffer));
+  Run(dsp, 16);
+  memcpy(expected, dsp->sampleBuffer +
+         (cursor & (DSP_SAMPLE_RING - 1u)) * 2, sizeof(expected));
 
-  memset(&dsp->channel[8], 0, sizeof(dsp->channel[8]));
   state.offset = 0;
   state.loading = true;
+  state.sli.saving = false;
   dsp_saveload(dsp, &state.sli);
-  CHECK(dsp->channel[8].srcn == 0x0a);
-  CHECK(dsp->channel[8].pitch == 0x2345);
-  CHECK(dsp->channel[8].decodeOffset == 0x4567);
-  CHECK(dsp->channel[8].gain == 0x321);
-  CHECK(dsp->channel[8].keyOn);
+  CHECK(!state.sli.failed && dsp->sampleWrite == cursor);
+  Run(dsp, 16);
+  memcpy(actual, dsp->sampleBuffer +
+         (cursor & (DSP_SAMPLE_RING - 1u)) * 2, sizeof(actual));
+  CHECK(memcmp(expected, actual, sizeof(actual)) == 0);
 
   dsp_free(dsp);
   dsp_setExtendedVoicesEnabled(false);
@@ -317,12 +240,10 @@ static void TestExtendedVoiceStateIsSerialized(void) {
 
 int main(void) {
   dsp_setExtendedVoicesEnabled(false);
-  TestUnityIsLabelNeutral();
-  TestIndependentDryGains();
-  TestEchoSendFollowsBus();
-  TestExtendedVoiceIsMixedAndIndependentlyControlled();
-  TestReleasedVirtualVoiceSleepsAndWakesOnKeyOn();
-  TestPhysicalAndVirtualVoicePcmParity();
+  dsp_setMusicBusMuted(false);
+  TestUnityAndIndependentGains();
+  TestExtendedControlAndPcmParity();
+  TestVirtualEchoUsesSharedUnitAndBusGain();
   TestExtendedVoiceStateIsSerialized();
   if (s_failures) {
     fprintf(stderr, "dsp_bus_mix_test: %d failure(s)\n", s_failures);

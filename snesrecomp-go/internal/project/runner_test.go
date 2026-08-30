@@ -142,6 +142,24 @@ func TestRuntimeArchiveFlagsAreGameIndependentAndSanitized(t *testing.T) {
 	}
 }
 
+func TestRuntimeArchiveSelectsCxx20ForAccuracySources(t *testing.T) {
+	base := runtimeCompileArgs(filepath.FromSlash("/sdk/runtime"),
+		filepath.FromSlash("/tools/zig/zig"), "x86_64-linux-gnu", "-O2",
+		true, RunnerManifest{})
+	c := strings.Join(runtimeSourceCompileArgs(base, "src/snes/dsp.c"), "\x00")
+	cxx := strings.Join(runtimeSourceCompileArgs(
+		base, "src/snes/accuracy/dsp.cpp"), "\x00")
+	if !strings.HasPrefix(c, "cc\x00") || !strings.Contains(c, "-std=gnu11") {
+		t.Fatalf("C runner compile arguments changed language: %q", c)
+	}
+	if !strings.HasPrefix(cxx, "c++\x00") ||
+		!strings.Contains(cxx, "-std=c++20") ||
+		!strings.Contains(cxx, "-fno-exceptions") ||
+		strings.Contains(cxx, "-std=gnu11") {
+		t.Fatalf("C++ accuracy compile arguments are incomplete: %q", cxx)
+	}
+}
+
 func TestRuntimeArchiveUsesStableWindowsDebugObjectNames(t *testing.T) {
 	runtimeDir := filepath.FromSlash("/checkout/snesrecomp-go/runtime")
 	source := filepath.FromSlash("/checkout/snesrecomp-go/runtime/src/runner/runner.c")

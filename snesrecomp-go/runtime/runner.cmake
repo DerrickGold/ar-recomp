@@ -4,6 +4,9 @@ set(SNESRECOMP_RUNNER_ROOT ${CMAKE_CURRENT_LIST_DIR})
 set(SNESRECOMP_RUNNER_DEVICE_ROOT ${SNESRECOMP_RUNNER_ROOT})
 set(SNESRECOMP_RUNNER_CRC32_SOURCE ${SNESRECOMP_RUNNER_ROOT}/src/support/crc32.c)
 set(SNESRECOMP_RUNNER_DSP_SOURCE ${SNESRECOMP_RUNNER_ROOT}/src/snes/dsp.c)
+set(SNESRECOMP_RUNNER_DSP_ACCURACY_SOURCES
+    ${SNESRECOMP_RUNNER_ROOT}/src/snes/dsp_accuracy_bridge.cpp
+    ${SNESRECOMP_RUNNER_ROOT}/src/snes/accuracy/dsp.cpp)
 set(SNESRECOMP_RUNNER_SAVELOAD_SOURCE ${SNESRECOMP_RUNNER_ROOT}/src/snes/saveload.c)
 
 include(${SNESRECOMP_RUNNER_ROOT}/sources.cmake)
@@ -34,6 +37,7 @@ set(SNESRECOMP_RUNNER_PRIVATE_INCLUDE_DIRS
     ${SNESRECOMP_RUNNER_ROOT}/src/core
     ${SNESRECOMP_RUNNER_ROOT}/src/runner
     ${SNESRECOMP_RUNNER_ROOT}/src/support
+    ${SNESRECOMP_RUNNER_ROOT}/src/snes/accuracy/include
 )
 
 # Configure a target that compiles runner implementation sources. Consumers
@@ -46,6 +50,12 @@ function(snesrecomp_configure_runtime_target target)
         set(_snesrecomp_install_include include)
     endif()
     target_compile_features(${target} PUBLIC c_std_11)
+    target_compile_features(${target} PRIVATE cxx_std_20)
+    if(NOT MSVC)
+        target_compile_options(${target} PRIVATE
+            $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>
+            $<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>)
+    endif()
     target_include_directories(${target}
         PUBLIC
             $<BUILD_INTERFACE:${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}>

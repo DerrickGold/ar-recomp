@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(snesrecomp_runtime VERSION 2.0.0 LANGUAGES C)
+project(snesrecomp_runtime VERSION 2.0.0 LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -9,6 +9,9 @@ option(SNESRECOMP_BUILD_DOCS
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 if(NOT MSVC)
     add_compile_options(-fno-common)
 endif()
@@ -54,6 +57,9 @@ install(FILES
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/snesrecomp-runtime)
 install(FILES LICENSE README.md PROVENANCE.md
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/snesrecomp-runtime)
+install(FILES src/snes/accuracy/LICENSE
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/snesrecomp-runtime/licenses
+    RENAME Snaggletooth-LICENSE.txt)
 install(FILES
     docs/README.md
     docs/API_REFERENCE.md
@@ -171,6 +177,8 @@ if(BUILD_TESTING)
         snesrecomp_runtime)
     add_test(NAME snesrecomp_runtime_abi
         COMMAND snesrecomp_runtime_abi_test)
+    set_tests_properties(snesrecomp_runtime_abi PROPERTIES
+        ENVIRONMENT "SNESRECOMP_APU_PROFILE=1")
 
     add_executable(snesrecomp_runtime_cart_test
         tests/cart_test.c tests/runner_event_stub.c)

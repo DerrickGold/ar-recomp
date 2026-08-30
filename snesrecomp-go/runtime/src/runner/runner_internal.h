@@ -3,6 +3,7 @@
 /* Private runner implementation contract. Never include from game code. */
 
 #include <stdbool.h>
+#include <stdatomic.h>
 
 #include "snesrecomp/game.h"
 #include "snesrecomp/runner.h"
@@ -93,14 +94,17 @@ void sr_runner_emit_error(Snes *snes, SrRunnerErrorCode code,
                           uint32_t source_pc24, const char *label);
 /* Disabled audio observation retains the single predictable branch that the
  * former concrete trace-hook pointer occupied at each existing seam. */
-extern uint32_t g_sr_runner_audio_trace_observer_count;
+extern _Atomic(SrAudioTraceMask) g_sr_runner_audio_trace_mask;
 #if defined(__GNUC__) || defined(__clang__)
-static inline bool sr_runner_audio_trace_enabled(void) {
-    return __builtin_expect(g_sr_runner_audio_trace_observer_count != 0u, 0);
+static inline bool sr_runner_audio_trace_enabled(SrAudioTraceMask mask) {
+    return __builtin_expect(
+        (atomic_load_explicit(&g_sr_runner_audio_trace_mask,
+                              memory_order_relaxed) & mask) != 0u, 0);
 }
 #else
-static inline bool sr_runner_audio_trace_enabled(void) {
-    return g_sr_runner_audio_trace_observer_count != 0u;
+static inline bool sr_runner_audio_trace_enabled(SrAudioTraceMask mask) {
+    return (atomic_load_explicit(&g_sr_runner_audio_trace_mask,
+                                 memory_order_relaxed) & mask) != 0u;
 }
 #endif
 void sr_runner_emit_audio_trace(Apu *apu, SrAudioTraceEventType type,
@@ -124,5 +128,11 @@ SrResult sr_runner_compare_exchange_spc_pc(
     SrSpcPcControlResult *out_result);
 SrResult sr_runner_configure_audio_mix(
     SrRunnerHandle *runner, const SrAudioMixControl *control);
+SrResult sr_runner_query_apu_state(
+    SrRunnerHandle *runner, const SrApuStateQuery *query,
+    SrApuStateSnapshot *out_state);
+void sr_runner_audio_production_begin(void);
+void sr_runner_audio_production_end(void);
+bool sr_runner_audio_query_forbidden(void);
 SrResult sr_runner_apply_ppu_frame_policy(
     Snes *snes, const SrPpuFramePolicy *policy);

@@ -34,15 +34,26 @@ void audio_trace_on_consume(uint64_t read_idx, uint32_t count,
 }
 
 static void ConfigureNoiseVoice(Dsp *dsp, int voice) {
-  DspChannel *channel = &dsp->channel[voice];
-  channel->useNoise = true;
-  channel->useGain = true;
-  channel->directGain = true;
-  channel->gainValue = 0x7f0;
-  channel->gain = channel->gainValue;
-  channel->adsrState = 2;
-  channel->volumeL = 64;
-  channel->volumeR = -48;
+  const int bank_voice = voice & 7;
+  const uint8_t bit = (uint8_t)(1u << bank_voice);
+  const uint8_t base = (uint8_t)(bank_voice * 0x10);
+  const uint8_t values[8] = {
+      64u, (uint8_t)-48, 0u, 0x10u, 0u, 0u, 0u, 0x7fu,
+  };
+  for (uint8_t reg = 0; reg < 8u; ++reg) {
+    if (voice < kDspHardwareVoiceCount)
+      dsp_write(dsp, (uint8_t)(base + reg), values[reg]);
+    else
+      dsp_writeVirtualVoiceRegister(
+          dsp, voice, (uint8_t)(base + reg), values[reg]);
+  }
+  if (voice < kDspHardwareVoiceCount) {
+    dsp_writeHardwareVoiceMask(dsp, 0x3du, bit, bit);
+    dsp_writeHardwareVoiceMask(dsp, 0x4cu, bit, bit);
+  } else {
+    dsp_writeVirtualVoiceControl(dsp, voice, 0x3du, true);
+    dsp_writeVirtualVoiceControl(dsp, voice, 0x4cu, true);
+  }
   dsp_setVoiceBus(dsp, voice,
                   voice < 8 ? kDspVoiceBus_Music : kDspVoiceBus_Sfx);
 }
@@ -61,13 +72,9 @@ static void RunCase(const char *name, bool extended, int active_voices,
     exit(1);
   }
   dsp_reset(dsp);
-  dsp->reset = false;
-  dsp->mute = false;
-  dsp->masterVolumeL = 127;
-  dsp->masterVolumeR = 127;
-  dsp->noiseSample = 10000;
-  for (int voice = 0; voice < kDspMaximumVoiceCount; voice++)
-    dsp->channel[voice].adsrState = 4;
+  dsp_write(dsp, 0x0cu, 0x7fu);
+  dsp_write(dsp, 0x1cu, 0x7fu);
+  dsp_write(dsp, 0x6cu, 0x20u);
   dsp_setExtendedVoicesEnabled(extended);
   dsp_setBusGains(100, 100);
   for (int voice = 0; voice < active_voices; voice++)

@@ -73,6 +73,12 @@ bool RtlRunFrame(uint32 inputs);
 void RtlSetAudioOutputRate(int hz);
 int RtlGetAudioOutputRate(void);
 void RtlRenderAudio(int16 *audio_buffer, int samples, int channels);
+#define RTL_APU_TIMELINE_FRAMES_PER_TICK UINT32_C(534)
+#define RTL_APU_TIMELINE_CYCLES_PER_TICK UINT32_C(17088)
+/* Advance the serialized 60 Hz APU target by one game tick. One APU cycle is
+ * one S-DSP slot, so 17,088 cycles complete 534 native stereo frames. The
+ * operation executes only cycles not already produced by an audio consumer. */
+void RtlAdvanceApuTimeline(void);
 void RtlSetApuCatchupSuppressed(bool suppressed);
 bool RtlUploadSpcImageFromDp(CpuState *cpu);
 bool RtlHandleSpcUpload(CpuState *cpu);
@@ -85,22 +91,40 @@ void RtlMigrateLegacySram(const char *legacy_title);
 void RtlReadSram(void);
 void RtlWriteSram(void);
 
+/** Delta counters since RtlApuProfileReset. Total cycles come from the
+ * serialized semantic APU clock. The four attributed cycle categories plus
+ * unattributed equal total unless RTL_APU_PROFILE_INCONSISTENT is set. */
 typedef struct RtlApuProfile {
     uint32_t struct_size;
     uint32_t flags;
     uint64_t lock_wait_ns;
-    uint64_t catchup_ns;
-    uint64_t catchup_cycles;
+    uint64_t port_sync_ns;
+    uint64_t apu_cycles_total;
+    uint64_t apu_cycles_audio_demand;
+    uint64_t apu_cycles_port_sync;
+    uint64_t apu_cycles_upload_control;
+    uint64_t apu_cycles_timeline;
+    uint64_t apu_cycles_unattributed;
     uint64_t hook_ns;
     uint64_t upload_ns;
     uint64_t scheduled_latency_max;
     uint64_t audio_wait_max_ns;
-    uint32_t catchup_calls;
+    uint32_t port_sync_calls;
     uint32_t port_reads;
     uint32_t port_writes;
     uint32_t reserved32;
     const char *last_port_function;
 } RtlApuProfile;
+
+#define RTL_APU_PROFILE_INCONSISTENT UINT32_C(0x00000001)
+
+typedef uint32_t RtlApuCycleSource;
+enum {
+    RTL_APU_CYCLE_AUDIO_DEMAND = 1u,
+    RTL_APU_CYCLE_PORT_SYNC = 2u,
+    RTL_APU_CYCLE_UPLOAD_CONTROL = 3u,
+    RTL_APU_CYCLE_TIMELINE = 4u
+};
 
 #define RTL_APU_PROFILE_V2_SIZE                                        \
     ((uint32_t)(offsetof(RtlApuProfile, last_port_function) +           \
@@ -110,6 +134,8 @@ bool RtlApuProfileIsEnabled(void);
 void RtlApuProfileReset(void);
 void RtlApuProfileRead(RtlApuProfile *out_profile);
 void RtlApuProfileRecordHostWait(uint64_t wait_ns, bool lock_wait);
+void RtlApuProfileRecordCycles(RtlApuCycleSource source, uint64_t cycles,
+                               uint64_t elapsed_ns);
 uint64_t RtlApuProfileTakeAudioWaitMax(void);
 
 enum {

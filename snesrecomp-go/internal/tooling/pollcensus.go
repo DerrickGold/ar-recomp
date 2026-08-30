@@ -14,7 +14,15 @@ import (
 	romimage "github.com/DerrickGold/snesrecomp-go/internal/rom"
 )
 
-const pollCensusVersion = 1
+const pollCensusVersion = 2
+
+type PollHLECoverage string
+
+const (
+	PollHLECoverageNone        PollHLECoverage = "none"
+	PollHLECoverageConditional PollHLECoverage = "conditional"
+	PollHLECoverageWholeBody   PollHLECoverage = "whole_body"
+)
 
 type PollCensusOptions struct {
 	ROMPath, CFGDir string
@@ -35,7 +43,7 @@ type PollSite struct {
 	BranchTarget     *uint32          `json:"branch_target,omitempty"`
 	LiveMX           analysis.MXState `json:"live_mx"`
 	FunctionEntries  []uint32         `json:"function_entries"`
-	HLECovered       bool             `json:"hle_covered"`
+	HLECoverage      PollHLECoverage  `json:"hle_coverage"`
 	Reachability     string           `json:"reachability"`
 }
 
@@ -46,7 +54,8 @@ type PollCensusSummary struct {
 	ClearReads      int `json:"clear_reads"`
 	PostReads       int `json:"post_reads"`
 	SingleReads     int `json:"single_reads"`
-	HLECovered      int `json:"hle_covered"`
+	HLEConditional  int `json:"hle_conditional"`
+	HLEWholeBody    int `json:"hle_whole_body"`
 	InitialVariants int `json:"initial_variants"`
 	FinalVariants   int `json:"final_variants"`
 	VariantPasses   int `json:"variant_passes"`
@@ -100,13 +109,19 @@ func BuildPollCensus(options PollCensusOptions) (PollCensusReport, error) {
 	if err != nil {
 		return PollCensusReport{}, err
 	}
-	hleFunctions := make(map[uint32]struct{})
+	hleCoverage := make(map[uint32]PollHLECoverage)
 	for _, bank := range banks {
 		for pc := range bank.Config.HLEFunctions {
-			hleFunctions[uint32(bank.ID)<<16|uint32(pc)] = struct{}{}
+			hleCoverage[uint32(bank.ID)<<16|uint32(pc)] =
+				PollHLECoverageWholeBody
 		}
 		for pc := range bank.Config.HLEFunctionsIf {
-			hleFunctions[uint32(bank.ID)<<16|uint32(pc)] = struct{}{}
+			hleCoverage[uint32(bank.ID)<<16|uint32(pc)] =
+				PollHLECoverageConditional
+		}
+		for _, pc := range bank.Config.HLESPCUpload {
+			hleCoverage[uint32(bank.ID)<<16|uint32(pc)] =
+				PollHLECoverageWholeBody
 		}
 	}
 	accumulators := make(map[pollSiteKey]*pollSiteAccumulator)
@@ -116,12 +131,29 @@ func BuildPollCensus(options PollCensusOptions) (PollCensusReport, error) {
 			issues = append(issues, *result.issue)
 			continue
 		}
-		classifyPollResult(result, registers, hleFunctions, accumulators)
+		classifyPollResult(result, registers, accumulators)
 	}
 	var sites []PollSite
 	for _, accumulator := range accumulators {
+		allWholeBody := len(accumulator.Owners) != 0
+		anyCovered := false
 		for owner := range accumulator.Owners {
 			accumulator.Site.FunctionEntries = append(accumulator.Site.FunctionEntries, owner)
+			coverage := hleCoverage[owner]
+			if coverage != PollHLECoverageWholeBody {
+				allWholeBody = false
+			}
+			if coverage != "" && coverage != PollHLECoverageNone {
+				anyCovered = true
+			}
+		}
+		switch {
+		case allWholeBody:
+			accumulator.Site.HLECoverage = PollHLECoverageWholeBody
+		case anyCovered:
+			accumulator.Site.HLECoverage = PollHLECoverageConditional
+		default:
+			accumulator.Site.HLECoverage = PollHLECoverageNone
 		}
 		sort.Slice(accumulator.Site.FunctionEntries, func(i, j int) bool { return accumulator.Site.FunctionEntries[i] < accumulator.Site.FunctionEntries[j] })
 		sites = append(sites, accumulator.Site)
@@ -153,7 +185,7 @@ func BuildPollCensus(options PollCensusOptions) (PollCensusReport, error) {
 		switch site.Classification {
 		case "poll_loop":
 			report.Summary.PollLoops++
-			if !site.HLECovered {
+			if site.HLECoverage != PollHLECoverageWholeBody {
 				report.Summary.LivePollLoops++
 			}
 		case "clear_read":
@@ -163,14 +195,17 @@ func BuildPollCensus(options PollCensusOptions) (PollCensusReport, error) {
 		default:
 			report.Summary.SingleReads++
 		}
-		if site.HLECovered {
-			report.Summary.HLECovered++
+		switch site.HLECoverage {
+		case PollHLECoverageConditional:
+			report.Summary.HLEConditional++
+		case PollHLECoverageWholeBody:
+			report.Summary.HLEWholeBody++
 		}
 	}
 	return report, nil
 }
 
-func classifyPollResult(result shadowDecodeResult, registers map[uint16]struct{}, hleFunctions map[uint32]struct{}, accumulators map[pollSiteKey]*pollSiteAccumulator) {
+func classifyPollResult(result shadowDecodeResult, registers map[uint16]struct{}, accumulators map[pollSiteKey]*pollSiteAccumulator) {
 	byPC := make(map[uint32][]shadowDecodedInstruction)
 	readRegister := make(map[uint32]uint16)
 	for _, decoded := range result.instructions {
@@ -218,12 +253,11 @@ func classifyPollResult(result shadowDecodeResult, registers map[uint16]struct{}
 		key := pollSiteKey{PC: pc, Register: register, M: decoded.M & 1, X: decoded.X & 1}
 		accumulator := accumulators[key]
 		if accumulator == nil {
-			_, hle := hleFunctions[decoded.FunctionEntry&0xffffff]
 			accumulator = &pollSiteAccumulator{Site: PollSite{
 				PC: pc, Register: register,
 				InstructionBytes: "", Mnemonic: decoded.Instruction.Mnemonic, AddressingMode: decoded.Instruction.Mode.String(),
 				Resolution: resolution, Classification: classification, BranchPC: branchPC, BranchTarget: branchTarget,
-				LiveMX: analysis.MXState{M: decoded.M & 1, X: decoded.X & 1}, HLECovered: hle,
+				LiveMX:       analysis.MXState{M: decoded.M & 1, X: decoded.X & 1},
 				Reachability: "configuration_or_static_call_rooted",
 			}, Owners: make(map[uint32]struct{})}
 			accumulators[key] = accumulator
@@ -301,14 +335,12 @@ func WritePollCensus(output io.Writer, report PollCensusReport, format string) e
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(report)
 	case "", "text":
-		fmt.Fprintf(output, "poll census v%d: %d read site(s), poll=%d (live=%d) clear=%d post=%d single=%d HLE-covered=%d\n",
+		fmt.Fprintf(output, "poll census v%d: %d read site(s), poll=%d (live=%d) clear=%d post=%d single=%d HLE-conditional=%d HLE-whole=%d\n",
 			report.Version, report.Summary.Sites, report.Summary.PollLoops, report.Summary.LivePollLoops,
-			report.Summary.ClearReads, report.Summary.PostReads, report.Summary.SingleReads, report.Summary.HLECovered)
+			report.Summary.ClearReads, report.Summary.PostReads, report.Summary.SingleReads,
+			report.Summary.HLEConditional, report.Summary.HLEWholeBody)
 		for _, site := range report.Sites {
-			hle := ""
-			if site.HLECovered {
-				hle = " HLE-covered"
-			}
+			hle := " HLE=" + string(site.HLECoverage)
 			detail := ""
 			if site.BranchPC != nil && site.BranchTarget != nil {
 				detail = fmt.Sprintf(" branch=$%02X:%04X->$%02X:%04X", byte(*site.BranchPC>>16), uint16(*site.BranchPC), byte(*site.BranchTarget>>16), uint16(*site.BranchTarget))

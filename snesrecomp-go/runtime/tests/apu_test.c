@@ -15,6 +15,13 @@ static unsigned dsp_observer_calls;
 static unsigned save_calls;
 static unsigned extra_save_calls;
 
+typedef struct MemoryState {
+    SaveLoadInfo info;
+    uint8_t bytes[131072];
+    size_t offset;
+    bool loading;
+} MemoryState;
+
 static void check(int condition, const char *message) {
     if (!condition) {
         fprintf(stderr, "runtime APU contract failed: %s\n", message);
@@ -40,6 +47,10 @@ Dsp *dsp_init(uint8_t *ram) { (void)ram; return (Dsp *)calloc(1u, sizeof(Dsp)); 
 void dsp_free(Dsp *dsp) { free(dsp); }
 void dsp_reset(Dsp *dsp) { memset(dsp, 0, sizeof(*dsp)); }
 void dsp_cycle(Dsp *dsp) { ++dsp->sampleWrite; }
+void dsp_clock(Dsp *dsp) {
+    dsp->firBufferIndex = (uint8_t)((dsp->firBufferIndex + 1u) & 31u);
+    if (dsp->firBufferIndex == 0u) ++dsp->sampleWrite;
+}
 uint8_t dsp_read(Dsp *dsp, uint8_t address) { return dsp->ram[address]; }
 void dsp_write(Dsp *dsp, uint8_t address, uint8_t value) { dsp->ram[address] = value; }
 void dsp_saveload(Dsp *dsp, SaveLoadInfo *info) { (void)dsp; (void)info; }
@@ -60,6 +71,17 @@ static void capture_save(SaveLoadInfo *info, void *data, size_t size) {
 static void capture_extra(Apu *apu, SaveLoadInfo *info) {
     (void)apu; (void)info;
     ++extra_save_calls;
+}
+
+static void transfer_state(SaveLoadInfo *info, void *data, size_t size) {
+    MemoryState *state = (MemoryState *)info;
+    if (state->offset + size > sizeof(state->bytes)) {
+        info->failed = true;
+        return;
+    }
+    if (state->loading) memcpy(data, state->bytes + state->offset, size);
+    else memcpy(state->bytes + state->offset, data, size);
+    state->offset += size;
 }
 
 static void test_reset_and_io(Apu *apu) {
@@ -92,13 +114,17 @@ static void test_queue_and_cycles(Apu *apu) {
     apu_reset(apu);
     apu_schedulePortWrite(apu, 2u, 0x33u, 1u);
     apu_cycle(apu);
-    check(apu->inPorts[2] == 0u && apu->sampleClock == 1u,
-          "future write waits through first sample boundary");
-    for (unsigned index = 0; index < 32u; ++index) apu_cycle(apu);
+    check(apu->inPorts[2] == 0u && apu->sampleClock == 0u,
+          "future write waits while the first sample is in flight");
+    for (unsigned index = 1; index < 32u; ++index) apu_cycle(apu);
+    check(apu->sampleClock == 1u && apu->inPorts[2] == 0u,
+          "DSP publishes a sample after exactly 32 slots");
+    apu_cycle(apu);
     check(apu->inPorts[2] == 0x33u,
           "queued write applies on produced-sample clock");
-    check(((Dsp *)apu->dsp)->sampleWrite == 2u && opcode_runs != 0u,
-          "DSP and SPC advance on their clocks");
+    check(((Dsp *)apu->dsp)->sampleWrite == 1u && opcode_runs != 0u &&
+              apu_cycle_count(apu) == 33u,
+          "DSP, SPC, and semantic APU clock advance together");
 
     apu_clearPortQueue(apu);
     for (unsigned index = 0; index <= APU_PORT_QUEUE_LEN; ++index) {
@@ -127,8 +153,39 @@ static void test_saveload(Apu *apu) {
     SaveLoadInfo info = {capture_save};
     g_apu_extra_saveload_hook = capture_extra;
     apu_saveload(apu, &info);
-    check(save_calls == 10u && extra_save_calls == 1u,
+    check(save_calls == 12u && extra_save_calls == 1u,
           "APU core and scheduler save spans plus extension hook");
+}
+
+static void test_portable_timeline_saveload(Apu *apu) {
+    MemoryState state = {0};
+    g_apu_extra_saveload_hook = NULL;
+    apu_reset(apu);
+    apu->cycleClock = UINT64_C(0x1122334455667788);
+    apu->timelineTargetCycles = UINT64_C(0x2233445566778899);
+    apu->sampleClock = UINT64_C(0x33445566778899aa);
+    apu_schedulePortWrite(apu, 3u, 0x5au,
+                          UINT64_C(0x445566778899aabb));
+    state.info.func = transfer_state;
+    state.info.saving = true;
+    state.info.portable = true;
+    apu_saveload(apu, &state.info);
+    check(!state.info.failed, "portable APU timeline save");
+
+    apu_reset(apu);
+    state.offset = 0u;
+    state.loading = true;
+    state.info.saving = false;
+    apu_saveload(apu, &state.info);
+    check(!state.info.failed &&
+              apu_cycle_count(apu) == UINT64_C(0x1122334455667788) &&
+              apu->timelineTargetCycles == UINT64_C(0x2233445566778899) &&
+              apu->sampleClock == UINT64_C(0x33445566778899aa) &&
+              apu->portQTail - apu->portQHead == 1u &&
+              apu->portQueue[apu->portQHead &
+                  (APU_PORT_QUEUE_LEN - 1u)].target_sample ==
+                      UINT64_C(0x445566778899aabb),
+          "portable APU timeline and scheduled writes restore exactly");
 }
 
 int main(void) {
@@ -140,6 +197,7 @@ int main(void) {
     test_queue_and_cycles(apu);
     test_timers(apu);
     test_saveload(apu);
+    test_portable_timeline_saveload(apu);
     apu_free(apu);
     return failures == 0 ? 0 : 1;
 }

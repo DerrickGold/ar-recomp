@@ -35,6 +35,7 @@ SnesApuPortReadHook *g_snes_apu_port_read_hook;
 
 static uint64_t s_catchup_calls;
 static uint64_t s_catchup_cycles;
+void (*g_snes_apu_catchup_profile_hook)(bool, uint64_t);
 
 Snes *snes_init(uint8_t *ram) {
     if (ram == NULL) {
@@ -172,6 +173,8 @@ void snes_catchupApu(Snes *snes) {
     if (cycles < 0) {
         cycles = 0;
     }
+    if (g_snes_apu_catchup_profile_hook != NULL)
+        g_snes_apu_catchup_profile_hook(true, 0u);
     for (int index = 0; index < cycles; ++index) {
         apu_cycle(snes->apu);
     }
@@ -181,6 +184,8 @@ void snes_catchupApu(Snes *snes) {
     }
     ++s_catchup_calls;
     s_catchup_cycles += (uint64_t)cycles;
+    if (g_snes_apu_catchup_profile_hook != NULL)
+        g_snes_apu_catchup_profile_hook(false, (uint64_t)cycles);
 }
 
 void snes_catchup_stats(uint64_t *calls, uint64_t *cycles) {

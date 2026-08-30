@@ -197,6 +197,12 @@ typedef struct SnesRunnerApi {
     /** Configure frame-scoped object capture into caller-owned storage. */
     SrResult (*configure_ppu_obj_capture)(
         SrRunnerHandle *runner, const SrPpuObjCaptureRequest *request);
+    /** Copy ARAM, visible DSP registers, and scalar APU state under one APU
+     * lock acquisition. Returns busy from audio-production and audio-trace
+     * callbacks. */
+    SrResult (*query_apu_state)(
+        SrRunnerHandle *runner, const SrApuStateQuery *query,
+        SrApuStateSnapshot *out_state);
 } SnesRunnerApi;
 
 #define SNES_RUNNER_API_V2_BASE_SIZE                                           \
@@ -320,6 +326,10 @@ typedef struct SnesRunnerApi {
 #define SNES_RUNNER_API_PPU_OBJ_CAPTURE_SIZE                            \
     ((uint32_t)(offsetof(SnesRunnerApi, configure_ppu_obj_capture) +      \
                 sizeof(((SnesRunnerApi *)0)->configure_ppu_obj_capture)))
+
+#define SNES_RUNNER_API_APU_STATE_SNAPSHOT_SIZE                         \
+    ((uint32_t)(offsetof(SnesRunnerApi, query_apu_state) +               \
+                sizeof(((SnesRunnerApi *)0)->query_apu_state)))
 
 /** @brief Stable description of the linked runner implementation. */
 typedef struct SrRunnerDescriptor {

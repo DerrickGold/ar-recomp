@@ -15,8 +15,9 @@ Current status:
   views. Supported headers live under `include/snesrecomp`; hardware layouts
   and singleton state remain private under `src`.
 - `cmake -S . -B <build-dir>` from this directory produces the standalone
-  `snesrecomp::runtime` static library from independently authored MIT sources
-  and runs without SDL, a ROM, or generated game code.
+  `snesrecomp::runtime` static library from MIT-licensed sources and runs
+  without SDL, a ROM, or generated game code. The public/generated-code ABI is
+  C11; the private attributed S-DSP accuracy device is compiled as C++20.
 
 Repository-ready layout:
 
@@ -45,7 +46,7 @@ cmake --install build --prefix /path/to/sdk
 The build artifact is `libsnesrecomp_runtime.a` on Unix-like targets and
 `snesrecomp_runtime.lib` on Windows. The install tree contains only the static
 library, public headers, CMake package metadata, documentation, provenance,
-and the MIT license—not implementation sources or private headers.
+and the applicable MIT licenses—not implementation sources or private headers.
 
 An installed consumer uses the exported target:
 
@@ -65,7 +66,7 @@ Hermetic distributions use this source-free SDK layout:
 runtime/
 ├── include/snesrecomp/...
 ├── lib/<zig-target>/libsnesrecomp_runtime.a
-└── LICENSE, PROVENANCE.md, README.md
+└── LICENSE, licenses/Snaggletooth-LICENSE.txt, PROVENANCE.md, README.md
 ```
 
 Windows uses `snesrecomp_runtime.lib`. The driver creates the artifact with
@@ -76,8 +77,9 @@ binary SDK distribution.
 
 Design requirements for every replacement subsystem:
 
-- portable C11 at the core, with fixed-width public ABI types and no compiler,
-  operating-system, graphics, or audio-library types in core headers;
+- a portable C11 public/core ABI with a private C++20 S-DSP accuracy unit,
+  fixed-width public types, and no compiler, operating-system, graphics, or
+  audio-library types in core headers;
 - host integration through narrow adapters rather than platform conditionals
   spread through emulation code;
 - no allocation, locking, or mutable one-time initialization in hot paths;
@@ -93,7 +95,7 @@ cmake --build --preset play
 ```
 
 Supported build targets use their compile-time SIMD implementation by default.
-The portable C11 paths remain complete and can be selected explicitly for
+Portable SIMD fallbacks remain complete and can be selected explicitly for
 portability checks and performance A/B tests:
 
 ```sh
