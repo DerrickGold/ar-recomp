@@ -43,6 +43,10 @@ type Report struct {
 	AnalysisFactsApplied                int
 	AnalysisEntryFactsApplied           int
 	AnalysisEntryFactsRediscovered      int
+	AnalysisEntryTemplatesSynthesized   int
+	StaticEntryDiscoveries              []analysis.EntryFact
+	StaticCanonicalPromotions           int
+	SemanticSourceSHA256                string
 	Elapsed                             time.Duration
 }
 
@@ -53,25 +57,29 @@ type bankState struct {
 }
 
 type repository struct {
-	image             rom.Image
-	banks             []*bankState
-	byBank            map[byte]*bankState
-	names             map[uint32]string
-	canonical         map[uint32]map[[2]uint8]struct{}
-	dispatchHelpers   map[uint32]string
-	provenDispatchMX  map[uint32]struct{}
-	provenResumePCs   map[uint32]struct{}
-	dormantEntryRoots map[decoder.Variant]struct{}
-	exactDirectCallMX bool
-	exitMX            map[decoder.Variant]decoder.MX
-	allDataRegions    []decoder.DataRegion
-	forceVariants     map[uint32][2]uint8
-	validVariants     map[uint32]map[[2]uint8]struct{}
-	provenEquivalent  map[uint32]map[[2]uint8]map[[2]uint8]struct{}
-	unresolved        map[codegen.Variant]struct{}
-	cumulativeDirty   map[codegen.Variant]struct{}
-	cumulativeEmit    map[codegen.Variant]struct{}
-	cumulativePrune   map[codegen.Variant]struct{}
+	image                   rom.Image
+	banks                   []*bankState
+	byBank                  map[byte]*bankState
+	names                   map[uint32]string
+	canonical               map[uint32]map[[2]uint8]struct{}
+	dispatchHelpers         map[uint32]string
+	provenDispatchMX        map[uint32]struct{}
+	provenResumePCs         map[uint32]struct{}
+	dormantEntryRoots       map[decoder.Variant]struct{}
+	templateFreeEntryRoots  map[decoder.Variant]struct{}
+	templateFreeEntryFacts  int
+	templateFreeSynthesized int
+	staticEntryDiscoveries  map[decoder.Variant]analysis.EntryFact
+	exactDirectCallMX       bool
+	exitMX                  map[decoder.Variant]decoder.MX
+	allDataRegions          []decoder.DataRegion
+	forceVariants           map[uint32][2]uint8
+	validVariants           map[uint32]map[[2]uint8]struct{}
+	provenEquivalent        map[uint32]map[[2]uint8]map[[2]uint8]struct{}
+	unresolved              map[codegen.Variant]struct{}
+	cumulativeDirty         map[codegen.Variant]struct{}
+	cumulativeEmit          map[codegen.Variant]struct{}
+	cumulativePrune         map[codegen.Variant]struct{}
 }
 
 var bankConfigRE = regexp.MustCompile(`(?i)^bank([0-9a-f]+)\.cfg$`)
@@ -119,6 +127,9 @@ func Run(options Options) (Report, error) {
 	}
 	if entryFactCount > 0 {
 		logf("experimental analysis overlay: withheld %d statically derivable routine root(s)", entryFactCount)
+		if repo.templateFreeEntryFacts > 0 {
+			logf("experimental analysis overlay: stripped authored metadata from %d canonical routine template(s)", repo.templateFreeEntryFacts)
+		}
 	}
 	repo.exactDirectCallMX = options.ExperimentalExactDirectCallMX
 	report := Report{Banks: len(repo.banks)}
@@ -153,11 +164,28 @@ func Run(options Options) (Report, error) {
 		}
 	}
 	report.AnalysisEntryFactsRediscovered = entryFactCount - len(repo.dormantEntryRoots)
+	report.AnalysisEntryTemplatesSynthesized = repo.templateFreeSynthesized
 	if len(repo.dormantEntryRoots) > 0 {
 		return report, repo.unrecoveredProvenEntryFactsError()
 	}
+	if repo.templateFreeSynthesized != repo.templateFreeEntryFacts {
+		return report, fmt.Errorf("experimental static entry analysis synthesized %d/%d stripped routine template(s)", repo.templateFreeSynthesized, repo.templateFreeEntryFacts)
+	}
 	if entryFactCount > 0 {
 		logf("experimental analysis overlay: rediscovered %d/%d withheld routine root(s)", report.AnalysisEntryFactsRediscovered, entryFactCount)
+		if repo.templateFreeEntryFacts > 0 {
+			logf("experimental analysis overlay: synthesized %d/%d canonical routine template(s)", repo.templateFreeSynthesized, repo.templateFreeEntryFacts)
+		}
+	}
+	repo.finalizeStaticEntryDiscoveries()
+	report.StaticEntryDiscoveries = repo.sortedStaticEntryDiscoveries()
+	for _, discovery := range report.StaticEntryDiscoveries {
+		if discovery.CanonicalPromoted {
+			report.StaticCanonicalPromotions++
+		}
+	}
+	if len(report.StaticEntryDiscoveries) > 0 {
+		logf("static variant discovery: synthesized %d exact entry variant(s) without authored declarations; %d singleton canonical promotion(s)", len(report.StaticEntryDiscoveries), report.StaticCanonicalPromotions)
 	}
 
 	for _, bank := range repo.banks {
@@ -191,6 +219,11 @@ func Run(options Options) (Report, error) {
 		report.Functions += len(bankResults)
 	}
 	repo.recordUnresolvedEmittedDemands(contexts)
+	report.SemanticSourceSHA256, err = repo.semanticSourceSHA256(results)
+	if err != nil {
+		return report, err
+	}
+	logf("generated semantic source sha256 %s", report.SemanticSourceSHA256)
 
 	files, changed, unresolved, err := repo.writeOutputs(options, results)
 	if err != nil {
@@ -230,10 +263,12 @@ func loadRepository(romPath, configDir string) (*repository, error) {
 	repo := &repository{
 		image: image, byBank: make(map[byte]*bankState), names: make(map[uint32]string),
 		canonical: make(map[uint32]map[[2]uint8]struct{}), dispatchHelpers: make(map[uint32]string),
-		provenDispatchMX:  make(map[uint32]struct{}),
-		provenResumePCs:   make(map[uint32]struct{}),
-		dormantEntryRoots: make(map[decoder.Variant]struct{}),
-		exitMX:            make(map[decoder.Variant]decoder.MX), forceVariants: make(map[uint32][2]uint8),
+		provenDispatchMX:       make(map[uint32]struct{}),
+		provenResumePCs:        make(map[uint32]struct{}),
+		dormantEntryRoots:      make(map[decoder.Variant]struct{}),
+		templateFreeEntryRoots: make(map[decoder.Variant]struct{}),
+		staticEntryDiscoveries: make(map[decoder.Variant]analysis.EntryFact),
+		exitMX:                 make(map[decoder.Variant]decoder.MX), forceVariants: make(map[uint32][2]uint8),
 		validVariants: make(map[uint32]map[[2]uint8]struct{}), unresolved: make(map[codegen.Variant]struct{}),
 		provenEquivalent: make(map[uint32]map[[2]uint8]map[[2]uint8]struct{}),
 		cumulativeDirty:  make(map[codegen.Variant]struct{}), cumulativeEmit: make(map[codegen.Variant]struct{}),
@@ -408,10 +443,41 @@ func (repo *repository) discoverDispatchHelpers(jobs int, logf func(string, ...a
 	logf("dispatch helpers: %d short, %d long (%d call targets scanned)", short, long, len(targets))
 }
 
+type variantDemandEvidence struct {
+	Canonical bool
+	Static    bool
+	Kind      analysis.EntryKind
+	Sources   []string
+}
+
+func mergeVariantDemand(left, right variantDemandEvidence) variantDemandEvidence {
+	left.Canonical = left.Canonical || right.Canonical
+	left.Static = left.Static || right.Static
+	if left.Kind == "" {
+		left.Kind = right.Kind
+	} else if right.Kind != "" && left.Kind != right.Kind {
+		left.Kind = ""
+	}
+	for _, source := range right.Sources {
+		found := false
+		for _, existing := range left.Sources {
+			if existing == source {
+				found = true
+				break
+			}
+		}
+		if !found {
+			left.Sources = append(left.Sources, source)
+		}
+	}
+	sort.Strings(left.Sources)
+	return left
+}
+
 func (repo *repository) discoverVariants(jobs int) (int, error) {
 	totalAdded := 0
 	for round := 0; round < variantDiscoveryRoundLimit; round++ {
-		demands := make(map[codegen.Variant]struct{})
+		demands := make(map[codegen.Variant]variantDemandEvidence)
 		var lock sync.Mutex
 		var firstErr error
 		repo.parallelEntries(jobs, nil, func(bank *bankState, entry config.Entry) {
@@ -424,10 +490,10 @@ func (repo *repository) discoverVariants(jobs int) (int, error) {
 			for _, sibling := range bank.Config.Entries {
 				starts[sibling.Start] = struct{}{}
 			}
-			local := discoverGraphDemands(graph, starts, repo.exactDirectCallMX, repo.forceVariants)
+			local := discoverGraphDemandEvidence(graph, starts, repo.exactDirectCallMX, repo.forceVariants)
 			lock.Lock()
-			for demand := range local {
-				demands[demand] = struct{}{}
+			for demand, evidence := range local {
+				demands[demand] = mergeVariantDemand(demands[demand], evidence)
 			}
 			if err != nil && firstErr == nil {
 				firstErr = err
@@ -447,12 +513,18 @@ func (repo *repository) discoverVariants(jobs int) (int, error) {
 		"variant discovery exceeded %d rounds", variantDiscoveryRoundLimit)
 }
 
-func discoverGraphDemands(graph *decoder.Graph, siblingStarts map[uint16]struct{}, exactDirectCallMX bool, forceVariants map[uint32][2]uint8) map[codegen.Variant]struct{} {
-	result := make(map[codegen.Variant]struct{})
+func discoverGraphDemandEvidence(graph *decoder.Graph, siblingStarts map[uint16]struct{}, exactDirectCallMX bool, forceVariants map[uint32][2]uint8) map[codegen.Variant]variantDemandEvidence {
+	result := make(map[codegen.Variant]variantDemandEvidence)
+	add := func(variant codegen.Variant, evidence variantDemandEvidence) {
+		variant.Address &= 0xffffff
+		variant.M &= 1
+		variant.X &= 1
+		result[variant] = mergeVariantDemand(result[variant], evidence)
+	}
 	all := func(address uint32) {
 		for m := uint8(0); m < 2; m++ {
 			for x := uint8(0); x < 2; x++ {
-				result[codegen.Variant{Address: address & 0xffffff, M: m, X: x}] = struct{}{}
+				add(codegen.Variant{Address: address, M: m, X: x}, variantDemandEvidence{})
 			}
 		}
 	}
@@ -471,9 +543,12 @@ func discoverGraphDemands(graph *decoder.Graph, siblingStarts map[uint16]struct{
 				}
 				if ins.DispatchMXProven {
 					m, x := dispatchTargetMX(ins)
-					result[codegen.Variant{Address: target, M: m, X: x}] = struct{}{}
+					add(codegen.Variant{Address: target, M: m, X: x}, variantDemandEvidence{
+						Canonical: true, Static: true, Kind: analysis.EntryComputed,
+						Sources: []string{"static.proven_dispatch"},
+					})
 				} else if (ins.Mnemonic == "JSL" || (ins.Mnemonic == "JMP" && ins.Mode == cpu65816.LONG)) && ins.DispatchIndexReg == "" {
-					result[codegen.Variant{Address: target, M: 1, X: 1}] = struct{}{}
+					add(codegen.Variant{Address: target, M: 1, X: 1}, variantDemandEvidence{})
 				} else {
 					all(target)
 				}
@@ -484,23 +559,36 @@ func discoverGraphDemands(graph *decoder.Graph, siblingStarts map[uint16]struct{
 		case ins.Mnemonic == "JSR" && ins.Mode == cpu65816.ABS:
 			address := uint32(byte(ins.Address>>16))<<16 | ins.Operand&0xffff
 			if forced, found := forceVariants[ins.Address&0xffffff]; found {
-				result[codegen.Variant{Address: address, M: forced[0] & 1, X: forced[1] & 1}] = struct{}{}
+				add(codegen.Variant{Address: address, M: forced[0], X: forced[1]}, variantDemandEvidence{
+					Canonical: true, Kind: analysis.EntryRoutine, Sources: []string{"authored.force_variant"},
+				})
 			} else if exactDirectCallMX {
-				result[codegen.Variant{Address: address, M: ins.M & 1, X: ins.X & 1}] = struct{}{}
+				add(codegen.Variant{Address: address, M: ins.M, X: ins.X}, variantDemandEvidence{
+					Canonical: true, Static: true, Kind: analysis.EntryRoutine,
+					Sources: []string{"static.direct_jsr"},
+				})
 			} else {
 				all(address)
 			}
 		case ins.Mnemonic == "JSL":
 			if forced, found := forceVariants[ins.Address&0xffffff]; found {
-				result[codegen.Variant{Address: ins.Operand & 0xffffff, M: forced[0] & 1, X: forced[1] & 1}] = struct{}{}
+				add(codegen.Variant{Address: ins.Operand, M: forced[0], X: forced[1]}, variantDemandEvidence{
+					Canonical: true, Kind: analysis.EntryRoutine, Sources: []string{"authored.force_variant"},
+				})
 			} else if exactDirectCallMX {
-				result[codegen.Variant{Address: ins.Operand & 0xffffff, M: ins.M & 1, X: ins.X & 1}] = struct{}{}
+				add(codegen.Variant{Address: ins.Operand, M: ins.M, X: ins.X}, variantDemandEvidence{
+					Canonical: true, Static: true, Kind: analysis.EntryRoutine,
+					Sources: []string{"static.direct_jsl"},
+				})
 			} else {
 				all(ins.Operand)
 			}
 		case ins.Mnemonic == "JMP" && ins.Mode == cpu65816.LONG:
 			if exactDirectCallMX {
-				result[codegen.Variant{Address: ins.Operand & 0xffffff, M: ins.M & 1, X: ins.X & 1}] = struct{}{}
+				add(codegen.Variant{Address: ins.Operand, M: ins.M, X: ins.X}, variantDemandEvidence{
+					Canonical: true, Static: true, Kind: analysis.EntryTailTarget,
+					Sources: []string{"static.direct_long_jump"},
+				})
 			} else {
 				all(ins.Operand)
 			}
@@ -512,8 +600,17 @@ func discoverGraphDemands(graph *decoder.Graph, siblingStarts map[uint16]struct{
 			if graph.Instructions[successor] != nil {
 				continue
 			}
-			result[codegen.Variant{Address: successor.PC & 0xffffff, M: successor.M & 1, X: successor.X & 1}] = struct{}{}
+			add(codegen.Variant{Address: successor.PC, M: successor.M, X: successor.X}, variantDemandEvidence{})
 		}
+	}
+	return result
+}
+
+func discoverGraphDemands(graph *decoder.Graph, siblingStarts map[uint16]struct{}, exactDirectCallMX bool, forceVariants map[uint32][2]uint8) map[codegen.Variant]struct{} {
+	evidence := discoverGraphDemandEvidence(graph, siblingStarts, exactDirectCallMX, forceVariants)
+	result := make(map[codegen.Variant]struct{}, len(evidence))
+	for demand := range evidence {
+		result[demand] = struct{}{}
 	}
 	return result
 }
@@ -532,7 +629,7 @@ func dispatchTargetMX(instruction *cpu65816.Instruction) (uint8, uint8) {
 	return m, x
 }
 
-func (repo *repository) applyDemands(demands map[codegen.Variant]struct{}) int {
+func (repo *repository) applyDemands(demands map[codegen.Variant]variantDemandEvidence) int {
 	keys := make([]codegen.Variant, 0, len(demands))
 	for demand := range demands {
 		keys = append(keys, demand)
@@ -548,6 +645,7 @@ func (repo *repository) applyDemands(demands map[codegen.Variant]struct{}) int {
 	})
 	added := 0
 	for _, demand := range keys {
+		evidence := demands[demand]
 		address := demand.Address & 0xffffff
 		pc := uint16(address)
 		offset, offsetErr := rom.LoROMOffset(byte(address>>16), pc)
@@ -566,6 +664,7 @@ func (repo *repository) applyDemands(demands map[codegen.Variant]struct{}) int {
 		if repo.inDataRegion(bankID, pc) {
 			continue
 		}
+		variant := decoder.Variant{Address: decoder.Address24(bankID, pc), M: demand.M & 1, X: demand.X & 1}
 		found, base := false, (*config.Entry)(nil)
 		for index := range bank.Config.Entries {
 			entry := &bank.Config.Entries[index]
@@ -576,9 +675,7 @@ func (repo *repository) applyDemands(demands map[codegen.Variant]struct{}) int {
 				base = entry
 			}
 			if entry.EntryMX.M&1 == demand.M&1 && entry.EntryMX.X&1 == demand.X&1 {
-				if repo.activateDemandedEntryRoot(decoder.Variant{
-					Address: decoder.Address24(bankID, pc), M: demand.M & 1, X: demand.X & 1,
-				}) {
+				if repo.activateDemandedEntryRoot(bankID, entry) {
 					added++
 				}
 				found = true
@@ -594,6 +691,9 @@ func (repo *repository) applyDemands(demands map[codegen.Variant]struct{}) int {
 			entry.EntryMX = config.MX{M: demand.M & 1, X: demand.X & 1}
 		}
 		bank.Config.Entries = append(bank.Config.Entries, entry)
+		if evidence.Static {
+			repo.recordStaticEntryDiscovery(variant, evidence)
+		}
 		added++
 	}
 	if added > 0 {

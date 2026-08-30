@@ -62,10 +62,12 @@ type Evidence struct {
 // does not by itself make the variant a decode root: generation may withhold
 // the root and require an independently decoded edge to demand it.
 type EntryFact struct {
-	PC       uint32     `json:"pc"`
-	EntryMX  MXState    `json:"entry_mx"`
-	Kind     EntryKind  `json:"kind"`
-	Evidence []Evidence `json:"evidence,omitempty"`
+	PC                uint32     `json:"pc"`
+	EntryMX           MXState    `json:"entry_mx"`
+	Kind              EntryKind  `json:"kind"`
+	TemplateFree      bool       `json:"template_free,omitempty"`
+	CanonicalPromoted bool       `json:"canonical_promoted,omitempty"`
+	Evidence          []Evidence `json:"evidence,omitempty"`
 }
 
 func (fact *EntryFact) Normalize() {

@@ -117,6 +117,11 @@ func TestExperimentalDirectCallDiscoveryDemandsOnlyLiveMX(t *testing.T) {
 	if _, found := demands[want]; !found {
 		t.Fatalf("exact direct call demands = %+v, missing %+v", demands, want)
 	}
+	evidence := discoverGraphDemandEvidence(graph, nil, true, nil)[want]
+	if !evidence.Canonical || !evidence.Static || evidence.Kind != analysis.EntryRoutine ||
+		len(evidence.Sources) != 1 || evidence.Sources[0] != "static.direct_jsr" {
+		t.Fatalf("exact direct call evidence = %+v", evidence)
+	}
 }
 
 func TestInvalidDiscoveredDirectCallTrapsInlineWithoutDeadStub(t *testing.T) {
@@ -257,8 +262,8 @@ func TestProvenRoutineRootsAreRediscoveredWithByteIdenticalOutput(t *testing.T) 
 	}
 	configText := "bank = 00\n" +
 		"func Root 8000 entry_mx:1,1\n" +
-		"func RoutineA 8100 entry_mx:1,1\n" +
-		"func RoutineB 8200 entry_mx:1,1\n"
+		"func bank_00_8100 8100 entry_mx:1,1\n" +
+		"func bank_00_8200 8200 entry_mx:1,1\n"
 	if err := os.WriteFile(filepath.Join(cfgDir, "bank00.cfg"), []byte(configText), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +279,7 @@ func TestProvenRoutineRootsAreRediscoveredWithByteIdenticalOutput(t *testing.T) 
 	}
 	fact := func(pc uint32, caller string) analysis.EntryFact {
 		return analysis.EntryFact{
-			PC: pc, EntryMX: analysis.MXState{M: 1, X: 1}, Kind: analysis.EntryRoutine,
+			PC: pc, EntryMX: analysis.MXState{M: 1, X: 1}, Kind: analysis.EntryRoutine, TemplateFree: true,
 			Evidence: []analysis.Evidence{{
 				Source: "static.direct_jsr", Confidence: analysis.ConfidenceProven, Detail: caller,
 			}},
@@ -293,11 +298,97 @@ func TestProvenRoutineRootsAreRediscoveredWithByteIdenticalOutput(t *testing.T) 
 		t.Fatalf("entry overlay applied/rediscovered = %d/%d, want 2/2",
 			overlay.AnalysisEntryFactsApplied, overlay.AnalysisEntryFactsRediscovered)
 	}
+	if overlay.AnalysisEntryTemplatesSynthesized != 2 {
+		t.Fatalf("synthesized entry templates = %d, want 2", overlay.AnalysisEntryTemplatesSynthesized)
+	}
 	if normal.FinalEntries != overlay.FinalEntries || normal.Functions != overlay.Functions {
 		t.Fatalf("normal entries/functions %d/%d, overlay %d/%d",
 			normal.FinalEntries, normal.Functions, overlay.FinalEntries, overlay.Functions)
 	}
 	assertGeneratedDirectoriesEqual(t, normalDir, overlayDir)
+}
+
+func TestExactStaticCallSynthesizesConfigFreeCanonicalHLERoutine(t *testing.T) {
+	root := t.TempDir()
+	romPath := filepath.Join(root, "game.sfc")
+	controlCfg := filepath.Join(root, "control-cfg")
+	prunedCfg := filepath.Join(root, "pruned-cfg")
+	controlOut := filepath.Join(root, "control-gen")
+	prunedOut := filepath.Join(root, "pruned-gen")
+	image := make([]byte, 0x8000)
+	copy(image[0x0000:], []byte{0x20, 0x00, 0x82, 0x60}) // $8000: JSR $8200; RTS, M0X0
+	image[0x0200] = 0x60
+	if err := os.WriteFile(romPath, image, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	write := func(directory, source string) {
+		t.Helper()
+		if err := os.MkdirAll(directory, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(directory, "bank00.cfg"), []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Put the target before the caller so removing it necessarily changes raw
+	// function order when discovery appends the synthesized entry.
+	write(controlCfg, "bank = 00\nfunc bank_00_8200 8200 entry_mx:0,0\nfunc Root 8000 entry_mx:0,0\nhle_func 8200 HostRoutine\n")
+	write(prunedCfg, "bank = 00\nfunc Root 8000 entry_mx:0,0\nhle_func 8200 HostRoutine\n")
+	run := func(cfg, output string) Report {
+		t.Helper()
+		report, err := Run(Options{
+			ROMPath: romPath, ConfigDir: cfg, OutputDir: output, Jobs: 1,
+			AllowStubs: true, ExperimentalExactDirectCallMX: true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return report
+	}
+	control := run(controlCfg, controlOut)
+	pruned := run(prunedCfg, prunedOut)
+	if len(control.StaticEntryDiscoveries) != 0 {
+		t.Fatalf("authored control discoveries = %+v", control.StaticEntryDiscoveries)
+	}
+	if len(pruned.StaticEntryDiscoveries) != 1 {
+		t.Fatalf("config-free discoveries = %+v", pruned.StaticEntryDiscoveries)
+	}
+	discovery := pruned.StaticEntryDiscoveries[0]
+	if discovery.PC != 0x008200 || discovery.EntryMX != (analysis.MXState{M: 0, X: 0}) ||
+		discovery.Kind != analysis.EntryRoutine || !discovery.CanonicalPromoted || len(discovery.Evidence) != 1 ||
+		discovery.Evidence[0].Source != "static.direct_jsr" {
+		t.Fatalf("config-free discovery = %+v", discovery)
+	}
+	if control.SemanticSourceSHA256 == "" || control.SemanticSourceSHA256 != pruned.SemanticSourceSHA256 {
+		t.Fatalf("semantic hashes control=%s pruned=%s", control.SemanticSourceSHA256, pruned.SemanticSourceSHA256)
+	}
+	controlBank, err := os.ReadFile(filepath.Join(controlOut, "bank00_v2.c"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prunedBank, err := os.ReadFile(filepath.Join(prunedOut, "bank00_v2.c"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(controlBank) == string(prunedBank) {
+		t.Fatal("raw generated bank unexpectedly retained authored ordering")
+	}
+	for _, source := range []string{string(controlBank), string(prunedBank)} {
+		if !strings.Contains(source, "HostRoutine(cpu)") || !strings.Contains(source, "bank_00_8200_M0X0") {
+			t.Fatalf("generated HLE routine was not preserved:\n%s", source)
+		}
+	}
+	controlDispatch, err := os.ReadFile(filepath.Join(controlOut, "dispatch_v2.c"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prunedDispatch, err := os.ReadFile(filepath.Join(prunedOut, "dispatch_v2.c"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(controlDispatch) != string(prunedDispatch) {
+		t.Fatalf("config-free canonical dispatch registry differs:\n%s\n---\n%s", controlDispatch, prunedDispatch)
+	}
 }
 
 func TestProvenRoutineRootFailsClosedWhenNotStaticallyRediscovered(t *testing.T) {
@@ -388,6 +479,36 @@ func TestProvenRoutineRootRefusesAuthoredHLEObligations(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "authored HLE obligations") ||
 		!strings.Contains(err.Error(), "hle_func:HostRoutine") {
 		t.Fatalf("HLE root suppression error = %v", err)
+	}
+}
+
+func TestTemplateFreeRoutineRootRefusesCustomMetadata(t *testing.T) {
+	root := t.TempDir()
+	romPath := filepath.Join(root, "game.sfc")
+	cfgDir := filepath.Join(root, "recomp")
+	image := make([]byte, 0x8000)
+	copy(image[0x0000:], []byte{0x20, 0x00, 0x82, 0x60})
+	image[0x0200] = 0x60
+	if err := os.WriteFile(romPath, image, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "bank00.cfg"), []byte(
+		"bank = 00\nfunc Root 8000 entry_mx:1,1\nfunc MeaningfulName 8200 entry_mx:1,1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Run(Options{
+		ROMPath: romPath, ConfigDir: cfgDir, OutputDir: filepath.Join(root, "gen"), Jobs: 1,
+		AllowStubs: true, ExperimentalExactDirectCallMX: true,
+		ProvenEntryFacts: []analysis.EntryFact{{
+			PC: 0x008200, EntryMX: analysis.MXState{M: 1, X: 1}, Kind: analysis.EntryRoutine, TemplateFree: true,
+			Evidence: []analysis.Evidence{{Source: "static.direct_jsr", Confidence: analysis.ConfidenceProven}},
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "metadata blockers (custom_name)") {
+		t.Fatalf("custom metadata ablation error = %v", err)
 	}
 }
 

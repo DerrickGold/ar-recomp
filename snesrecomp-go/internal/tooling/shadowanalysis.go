@@ -20,7 +20,7 @@ import (
 	romimage "github.com/DerrickGold/snesrecomp-go/internal/rom"
 )
 
-const shadowReportVersion = 10
+const shadowReportVersion = 11
 
 const (
 	shadowUnresolvedGeneric              = "generic_dynamic_target"
@@ -2956,10 +2956,10 @@ func writeShadowText(output io.Writer, report ShadowReport, verbose bool) {
 	fmt.Fprintf(output, "authored-entry ROM pointer clusters: %d declaration(s), %d probable; %d are otherwise not recovered (corroboration-only)\n",
 		entrySummary.EntriesWithPointerClusters, entrySummary.ProbablePointerClusterEntries, entrySummary.NotRecoveredWithPointerClusters)
 	ablationSummary := report.EntryAblation.Summary
-	fmt.Fprintf(output, "static entry ablation: %d declaration(s)/%d unique variant(s), %d dependency edge(s); individually recoverable=%d; inclusion-minimal roots=%d declaration(s)/%d variant(s), batch-recoverable=%d (routine=%d tail=%d computed=%d internal-continuation=%d), vector-covered=%d (report-only)\n",
+	fmt.Fprintf(output, "static entry ablation: %d declaration(s)/%d unique variant(s), %d dependency edge(s); individually recoverable=%d; inclusion-minimal roots=%d declaration(s)/%d variant(s), batch-recoverable=%d (routine=%d template-free-routine=%d tail=%d computed=%d internal-continuation=%d), vector-covered=%d (report-only)\n",
 		ablationSummary.AuthoredDeclarations, ablationSummary.UniqueAuthoredVariants, ablationSummary.StaticDependencyEdges,
 		ablationSummary.IndividuallyRecoverable, ablationSummary.RetainedRootDeclarations, ablationSummary.RetainedUniqueRootVariants,
-		ablationSummary.BatchRecoverable, ablationSummary.BatchRoutineTargets, ablationSummary.BatchTailTargets,
+		ablationSummary.BatchRecoverable, ablationSummary.BatchRoutineTargets, ablationSummary.BatchTemplateFreeRoutines, ablationSummary.BatchTailTargets,
 		ablationSummary.BatchComputedTargets, ablationSummary.BatchInternalContinuations, ablationSummary.VectorCoveredDeclarations)
 	fmt.Fprintf(output, "authored HLE obligations: %d declaration(s), %d without an explicit func entry (preserved independently of root ablation)\n",
 		ablationSummary.AuthoredHLEObligations, ablationSummary.HLEOnlyObligations)
@@ -3081,9 +3081,9 @@ func writeShadowText(output io.Writer, report ShadowReport, verbose bool) {
 			if entry.Status == shadowEntryAblationRecoverable && entry.IndividuallyRecoverable {
 				continue
 			}
-			fmt.Fprintf(output, "[ABLATION-%s] %s name=%s authored=M%dX%d entry_kind=%s individually_recoverable=%t incoming=%d hle=%s reason=%s\n",
+			fmt.Fprintf(output, "[ABLATION-%s] %s name=%s authored=M%dX%d entry_kind=%s individually_recoverable=%t incoming=%d hle=%s template_blockers=%s reason=%s\n",
 				strings.ToUpper(strings.ReplaceAll(entry.Status, "_", "-")), shadowAddress(entry.PC), entry.Name,
-				entry.AuthoredMX.M, entry.AuthoredMX.X, entry.EntryKindHint, entry.IndividuallyRecoverable, len(entry.Incoming), shadowStringsOrNone(entry.AuthoredHLE), entry.Reason)
+				entry.AuthoredMX.M, entry.AuthoredMX.X, entry.EntryKindHint, entry.IndividuallyRecoverable, len(entry.Incoming), shadowStringsOrNone(entry.AuthoredHLE), shadowStringsOrNone(entry.TemplateBlockers), entry.Reason)
 			for _, incoming := range entry.Incoming {
 				fmt.Fprintf(output, "  incoming=%s M%dX%d kinds=%s\n", shadowAddress(incoming.PC), incoming.EntryMX.M, incoming.EntryMX.X, strings.Join(incoming.Kinds, ","))
 			}
