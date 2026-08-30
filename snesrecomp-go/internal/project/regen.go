@@ -19,12 +19,13 @@ import (
 
 type RegenOptions struct {
 	Paths
-	Jobs       int
-	AllowStubs bool
-	RunTests   bool
-	GoCommand  string
-	Stdout     io.Writer
-	Stderr     io.Writer
+	AnalysisDBPath string
+	Jobs           int
+	AllowStubs     bool
+	RunTests       bool
+	GoCommand      string
+	Stdout         io.Writer
+	Stderr         io.Writer
 }
 
 type RegenReport struct {
@@ -68,11 +69,25 @@ func Regenerate(options RegenOptions) (RegenReport, error) {
 		}
 		return RegenReport{}, fmt.Errorf("ROM %s is unavailable: %w", paths.ROM, statErr)
 	}
+	var database tooling.StaticAnalysisDatabase
+	if strings.TrimSpace(options.AnalysisDBPath) != "" {
+		analysisPath := resolveUnder(paths.Root, options.AnalysisDBPath)
+		database, err = tooling.LoadStaticAnalysisDatabaseFile(analysisPath, paths.ROM)
+		if err != nil {
+			return RegenReport{}, err
+		}
+		fmt.Fprintf(stdout, "analysis-db: loaded %d dispatch and %d entry fact(s) from %s\n",
+			len(database.DispatchFacts), len(database.EntryFacts), displayPath(paths.Root, analysisPath))
+	}
 
 	step(stdout, fmt.Sprintf("Regenerating banks (%d workers)", options.Jobs))
 	generation, err := regen.Run(regen.Options{
 		ROMPath: paths.ROM, ConfigDir: paths.ConfigDir, OutputDir: paths.GeneratedDir,
 		Jobs: options.Jobs, AllowStubs: true,
+		ProvenDispatchFacts: database.DispatchFacts, ProvenEntryFacts: database.EntryFacts,
+		ProvenEntryTemplates:          database.EntryTemplates,
+		AllowMatchingAuthoredFacts:    strings.TrimSpace(options.AnalysisDBPath) != "",
+		ExperimentalExactDirectCallMX: strings.TrimSpace(options.AnalysisDBPath) != "",
 		Progress: func(format string, values ...any) {
 			fmt.Fprintf(stdout, "v2regen: "+format+"\n", values...)
 		},
@@ -91,7 +106,7 @@ func Regenerate(options RegenOptions) (RegenReport, error) {
 	}
 
 	step(stdout, "Syncing funcs.h")
-	functionCount, err := tooling.SyncFuncs(paths.ConfigDir, paths.FuncsHeader)
+	functionCount, err := tooling.SyncFuncsWithEntryFacts(paths.ConfigDir, paths.FuncsHeader, database.EntryFacts)
 	if err != nil {
 		return RegenReport{Generation: generation}, err
 	}

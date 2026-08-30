@@ -31,6 +31,8 @@ type Options struct {
 	AllowStubs                    bool
 	ProvenDispatchFacts           []analysis.DispatchFact
 	ProvenEntryFacts              []analysis.EntryFact
+	ProvenEntryTemplates          []analysis.EntryTemplatePlacement
+	AllowMatchingAuthoredFacts    bool
 	ExperimentalExactDirectCallMX bool
 	Progress                      func(string, ...any)
 }
@@ -43,6 +45,7 @@ type Report struct {
 	AnalysisFactsApplied                int
 	AnalysisEntryFactsApplied           int
 	AnalysisContinuationFactsApplied    int
+	AnalysisEntryTemplatesSeeded        int
 	AnalysisEntryFactsRediscovered      int
 	AnalysisEntryTemplatesSynthesized   int
 	SharedRegionBodies                  int
@@ -131,13 +134,13 @@ func Run(options Options) (Report, error) {
 		return Report{}, err
 	}
 	if len(options.ProvenDispatchFacts) > 0 {
-		reportCount, applyErr := repo.applyProvenDispatchFacts(options.ProvenDispatchFacts)
+		reportCount, applyErr := repo.applyProvenDispatchFacts(options.ProvenDispatchFacts, options.AllowMatchingAuthoredFacts)
 		if applyErr != nil {
 			return Report{}, applyErr
 		}
 		logf("experimental analysis overlay: applied %d statically proven dispatch facts", reportCount)
 	}
-	entryFactCounts, err := repo.applyProvenEntryFacts(options.ProvenEntryFacts)
+	entryFactCounts, err := repo.applyProvenEntryFacts(options.ProvenEntryFacts, options.ProvenEntryTemplates)
 	if err != nil {
 		return Report{}, err
 	}
@@ -150,11 +153,15 @@ func Run(options Options) (Report, error) {
 	if entryFactCounts.continuations > 0 {
 		logf("experimental analysis overlay: made %d exact continuation variant(s) resumable without duplicate activations", entryFactCounts.continuations)
 	}
+	if entryFactCounts.seeded > 0 {
+		logf("experimental analysis overlay: seeded %d canonical entry template(s) absent from authored cfg", entryFactCounts.seeded)
+	}
 	repo.exactDirectCallMX = options.ExperimentalExactDirectCallMX
 	report := Report{Banks: len(repo.banks)}
 	report.AnalysisFactsApplied = len(options.ProvenDispatchFacts)
 	report.AnalysisEntryFactsApplied = entryFactCounts.routineRoots
 	report.AnalysisContinuationFactsApplied = entryFactCounts.continuations
+	report.AnalysisEntryTemplatesSeeded = entryFactCounts.seeded
 	for _, bank := range repo.banks {
 		report.InitialEntries += len(bank.Config.Entries)
 	}

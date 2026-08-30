@@ -1021,6 +1021,27 @@ func TestSelectStaticProvenAutomaticDispatchFactsRejectsOpenAndObservedFacts(t *
 	}
 }
 
+func TestSelectStaticProvenDatabaseDispatchFactsIncludesExactAuthoredReplacement(t *testing.T) {
+	automatic := analysis.DispatchFact{
+		SitePC: 0x008100, Mnemonic: "RTS", Transfer: analysis.TransferResume,
+		TargetEntryKind: analysis.EntryContinuation, Targets: []uint32{0x008200}, TargetSetClosed: true,
+		Evidence: []analysis.Evidence{{Source: "static.fixture", Confidence: analysis.ConfidenceProven}},
+	}
+	exact := automatic
+	exact.SitePC = 0x008110
+	compatible := automatic
+	compatible.SitePC = 0x008120
+	report := ShadowReport{Comparisons: []analysis.Comparison{
+		{SitePC: automatic.SitePC, Status: analysis.ComparisonAutomatic, Inferred: &automatic},
+		{SitePC: exact.SitePC, Status: analysis.ComparisonExact, Inferred: &exact},
+		{SitePC: compatible.SitePC, Status: analysis.ComparisonCompatible, Inferred: &compatible},
+	}}
+	selected, rejected := SelectStaticProvenDatabaseDispatchFacts(report)
+	if rejected != 0 || len(selected) != 2 || selected[0].SitePC != automatic.SitePC || selected[1].SitePC != exact.SitePC {
+		t.Fatalf("database selection = %+v rejected=%d, want automatic plus exact", selected, rejected)
+	}
+}
+
 func TestSelectStaticProvenRoutineEntryFactsExcludesContinuationAndRetainedRoots(t *testing.T) {
 	report := ShadowReport{EntryAblation: ShadowEntryAblationReport{Entries: []ShadowEntryAblationRecord{
 		{

@@ -16,7 +16,7 @@ import (
 // applyProvenDispatchFacts adds an ephemeral dispatch overlay to the loaded
 // configs. It never serializes the overlay, and validates every fact against
 // the exact ROM bytes before allowing it to affect generated code.
-func (repo *repository) applyProvenDispatchFacts(facts []analysis.DispatchFact) (int, error) {
+func (repo *repository) applyProvenDispatchFacts(facts []analysis.DispatchFact, allowMatchingAuthored bool) (int, error) {
 	ordered := append([]analysis.DispatchFact(nil), facts...)
 	for index := range ordered {
 		ordered[index].Normalize()
@@ -38,13 +38,24 @@ func (repo *repository) applyProvenDispatchFacts(facts []analysis.DispatchFact) 
 		if err := validateProvenFact(fact); err != nil {
 			return applied, fmt.Errorf("analysis fact $%02X:%04X: %w", byte(fact.SitePC>>16), uint16(fact.SitePC), err)
 		}
-		if _, found := existing[fact.SitePC&0xffffff]; found {
-			return applied, fmt.Errorf("analysis fact $%02X:%04X collides with an authored dispatch declaration", byte(fact.SitePC>>16), uint16(fact.SitePC))
-		}
 		bankID := byte(fact.SitePC >> 16)
 		bank := repo.byBank[bankID]
 		if bank == nil {
 			return applied, fmt.Errorf("analysis fact $%02X:%04X has no matching bank config", bankID, uint16(fact.SitePC))
+		}
+		if _, found := existing[fact.SitePC&0xffffff]; found {
+			if !allowMatchingAuthored {
+				return applied, fmt.Errorf("analysis fact $%02X:%04X collides with an authored dispatch declaration", byte(fact.SitePC>>16), uint16(fact.SitePC))
+			}
+			matches, matchErr := repo.authoredDispatchMatchesFact(bankID, bank, fact)
+			if matchErr != nil {
+				return applied, fmt.Errorf("analysis fact $%02X:%04X: %w", bankID, uint16(fact.SitePC), matchErr)
+			}
+			if !matches {
+				return applied, fmt.Errorf("analysis fact $%02X:%04X conflicts with the current authored dispatch declaration", bankID, uint16(fact.SitePC))
+			}
+			removeAuthoredDispatchSite(bank.Config, uint16(fact.SitePC))
+			delete(existing, fact.SitePC&0xffffff)
 		}
 		switch fact.Mnemonic {
 		case "RTS":
@@ -64,16 +75,7 @@ func (repo *repository) applyProvenDispatchFacts(facts []analysis.DispatchFact) 
 				return applied, fmt.Errorf("analysis fact $%02X:%04X: %w", bankID, uint16(fact.SitePC), err)
 			}
 			bank.Config.IndirectDispatch = append(bank.Config.IndirectDispatch, directive)
-			if repo.provenDispatchMX == nil {
-				repo.provenDispatchMX = make(map[uint32]struct{})
-			}
-			repo.provenDispatchMX[fact.SitePC&0xffffff] = struct{}{}
-			if fact.Mnemonic == "PHA" && fact.ReturnPC != nil {
-				if repo.provenResumePCs == nil {
-					repo.provenResumePCs = make(map[uint32]struct{})
-				}
-				repo.provenResumePCs[*fact.ReturnPC&0xffffff] = struct{}{}
-			}
+			repo.recordProvenDispatchSemantics(fact)
 		default:
 			return applied, fmt.Errorf("analysis fact $%02X:%04X uses unsupported instruction %s", bankID, uint16(fact.SitePC), fact.Mnemonic)
 		}
@@ -81,6 +83,110 @@ func (repo *repository) applyProvenDispatchFacts(facts []analysis.DispatchFact) 
 		applied++
 	}
 	return applied, nil
+}
+
+func removeAuthoredDispatchSite(cfg *config.Config, site uint16) {
+	indirect := cfg.IndirectDispatch[:0]
+	for _, dispatch := range cfg.IndirectDispatch {
+		if dispatch.SitePC != site {
+			indirect = append(indirect, dispatch)
+		}
+	}
+	cfg.IndirectDispatch = indirect
+	rts := cfg.RTSDispatch[:0]
+	for _, dispatch := range cfg.RTSDispatch {
+		if dispatch.SitePC != site {
+			rts = append(rts, dispatch)
+		}
+	}
+	cfg.RTSDispatch = rts
+}
+
+func (repo *repository) recordProvenDispatchSemantics(fact analysis.DispatchFact) {
+	if fact.Mnemonic != "PHA" && fact.Mnemonic != "JMP" && fact.Mnemonic != "JSR" {
+		return
+	}
+	if repo.provenDispatchMX == nil {
+		repo.provenDispatchMX = make(map[uint32]struct{})
+	}
+	repo.provenDispatchMX[fact.SitePC&0xffffff] = struct{}{}
+	if fact.Mnemonic == "PHA" && fact.ReturnPC != nil {
+		if repo.provenResumePCs == nil {
+			repo.provenResumePCs = make(map[uint32]struct{})
+		}
+		repo.provenResumePCs[*fact.ReturnPC&0xffffff] = struct{}{}
+	}
+}
+
+func (repo *repository) authoredDispatchMatchesFact(bankID byte, bank *bankState, fact analysis.DispatchFact) (bool, error) {
+	switch fact.Mnemonic {
+	case "RTS":
+		if err := repo.validateFactInstruction(bankID, fact); err != nil {
+			return false, err
+		}
+		targets, err := sameBankPCs(bankID, fact.Targets, "target")
+		if err != nil {
+			return false, err
+		}
+		matches := 0
+		for _, authored := range bank.Config.IndirectDispatch {
+			if authored.SitePC == uint16(fact.SitePC) {
+				return false, nil
+			}
+		}
+		for _, authored := range bank.Config.RTSDispatch {
+			authoredTargets := append([]uint16(nil), authored.Targets...)
+			slices.Sort(authoredTargets)
+			authoredTargets = slices.Compact(authoredTargets)
+			expectedTargets := append([]uint16(nil), targets...)
+			slices.Sort(expectedTargets)
+			expectedTargets = slices.Compact(expectedTargets)
+			if authored.SitePC == uint16(fact.SitePC) && slices.Equal(authoredTargets, expectedTargets) {
+				matches++
+			}
+		}
+		return matches == 1, nil
+	case "PHA", "JMP", "JSR":
+		expected, err := repo.provenIndirectDirective(bankID, fact)
+		if err != nil {
+			return false, err
+		}
+		matches := 0
+		for _, authored := range bank.Config.RTSDispatch {
+			if authored.SitePC == uint16(fact.SitePC) {
+				return false, nil
+			}
+		}
+		for _, authored := range bank.Config.IndirectDispatch {
+			if indirectDispatchEqual(authored, expected) {
+				matches++
+			}
+		}
+		return matches == 1, nil
+	default:
+		return false, fmt.Errorf("unsupported authored dispatch instruction %s", fact.Mnemonic)
+	}
+}
+
+func indirectDispatchEqual(left, right config.IndirectDispatch) bool {
+	leftTransfer := left.Transfer
+	if leftTransfer == "" {
+		if left.ReturnPC != nil {
+			leftTransfer = config.IndirectTransferCall
+		} else {
+			leftTransfer = right.Transfer
+		}
+	}
+	return left.SitePC == right.SitePC && left.Count == right.Count && left.IndexReg == right.IndexReg &&
+		slices.Equal(left.TableBases, right.TableBases) && equalOptionalPC(left.ReturnPC, right.ReturnPC) &&
+		left.SEPMask == right.SEPMask && leftTransfer == right.Transfer
+}
+
+func equalOptionalPC(left, right *uint16) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }
 
 func validateProvenFact(fact analysis.DispatchFact) error {

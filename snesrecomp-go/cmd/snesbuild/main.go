@@ -152,6 +152,7 @@ authored portable runner.`)
 
 type regenFlags struct {
 	root, rom, cfgDir, genDir, funcs, metadata, rtsReport, rtsPrevious string
+	analysisDB                                                         string
 	toolchainDir, goCommand                                            string
 	jobs                                                               int
 	allowStubs, runTests, noTests                                      bool
@@ -167,6 +168,7 @@ func addRegenFlags(flags *flag.FlagSet) *regenFlags {
 	flags.StringVar(&values.metadata, "metadata-out", "saves/gen_meta.json", "generated metadata sidecar")
 	flags.StringVar(&values.rtsReport, "rts-report", "saves/rts_webs.txt", "current RTS-web census")
 	flags.StringVar(&values.rtsPrevious, "rts-previous", "saves/rts_webs.prev.txt", "previous RTS-web census")
+	flags.StringVar(&values.analysisDB, "analysis-db", "", "ROM-hashed static-analysis database, relative to project root")
 	flags.StringVar(&values.toolchainDir, "toolchain-dir", "snesrecomp-go", "snesrecomp-go module directory")
 	flags.StringVar(&values.goCommand, "go-command", "go", "Go executable used only with --run-tests")
 	flags.IntVar(&values.jobs, "jobs", runtime.NumCPU(), "parallel generation workers")
@@ -184,7 +186,8 @@ func (values *regenFlags) options() project.RegenOptions {
 	paths.ToolchainDir = values.toolchainDir
 	return project.RegenOptions{
 		Paths: paths, Jobs: values.jobs, AllowStubs: values.allowStubs,
-		RunTests: values.runTests && !values.noTests, GoCommand: values.goCommand,
+		AnalysisDBPath: values.analysisDB,
+		RunTests:       values.runTests && !values.noTests, GoCommand: values.goCommand,
 		Stdout: os.Stdout, Stderr: os.Stderr,
 	}
 }
@@ -291,6 +294,7 @@ func runAnalyze(args []string) error {
 	flags.BoolVar(verbose, "v", false, "show all comparisons, callers, and decode issues")
 	strict := flags.Bool("strict", false, "fail after reporting independently proven semantic conflicts")
 	dispatchAnalysis := flags.String("dispatch-analysis", "", "optional dispatch-census JSON evidence, relative to project root")
+	outAnalysis := flags.String("out-analysis", "", "write a deterministic proven-fact database, relative to project root")
 	compareAuthored := flags.Bool("compare-authored", true, "compare inferred facts with authored cfg declarations")
 	noWrite := flags.Bool("no-write", true, "require analysis to remain read-only")
 	dryRun := flags.Bool("dry-run", true, "require analysis to remain read-only")
@@ -302,6 +306,9 @@ func runAnalyze(args []string) error {
 	}
 	if !*noWrite || !*dryRun {
 		return errors.New("analyze is intentionally read-only; disabling --no-write or --dry-run is not supported")
+	}
+	if strings.TrimSpace(*bankValue) != "" && strings.TrimSpace(*outAnalysis) != "" {
+		return errors.New("--out-analysis requires a whole-ROM analysis; omit --bank")
 	}
 	paths := project.DefaultPaths(*root)
 	paths.ROM, paths.ConfigDir = *romPath, *cfgDir
@@ -327,6 +334,18 @@ func runAnalyze(args []string) error {
 	}
 	if err := tooling.WriteShadowReport(os.Stdout, report, *format, *verbose); err != nil {
 		return err
+	}
+	if strings.TrimSpace(*outAnalysis) != "" {
+		database, buildErr := tooling.BuildStaticAnalysisDatabase(report)
+		if buildErr != nil {
+			return buildErr
+		}
+		outputPath := resolveProjectOptional(resolved.Root, *outAnalysis)
+		if writeErr := tooling.WriteStaticAnalysisDatabaseFile(outputPath, database); writeErr != nil {
+			return writeErr
+		}
+		fmt.Fprintf(os.Stderr, "snesbuild: wrote %d dispatch and %d entry fact(s) to %s\n",
+			len(database.DispatchFacts), len(database.EntryFacts), outputPath)
 	}
 	if *strict && report.Summary.Conflicts > 0 {
 		return fmt.Errorf("shadow analysis found %d semantic conflict(s)", report.Summary.Conflicts)

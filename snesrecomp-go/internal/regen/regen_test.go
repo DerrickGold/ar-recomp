@@ -244,6 +244,112 @@ func TestProvenAnalysisOverlayEmitsPHARTSDispatchWithoutWritingConfig(t *testing
 	}
 }
 
+func TestAnalysisDatabaseNormalizesMatchingAuthoredIndirectDispatch(t *testing.T) {
+	root := t.TempDir()
+	romPath := filepath.Join(root, "game.sfc")
+	fullCfg := filepath.Join(root, "full-cfg")
+	prunedCfg := filepath.Join(root, "pruned-cfg")
+	image := make([]byte, 0x8000)
+	copy(image[0x0000:], []byte{
+		0xBD, 0x00, 0x81, // LDA $8100,X
+		0xA0, 0x08, 0x80, // LDY #$8008
+		0x5A, // PHY
+		0x48, // PHA at $8007
+		0x60, // dispatching RTS
+		0x60, // continuation $8009
+	})
+	image[0x0100], image[0x0101] = 0xFF, 0x81 // $8200-1
+	image[0x0200] = 0x60
+	if err := os.WriteFile(romPath, image, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	write := func(directory, extra string) {
+		t.Helper()
+		if err := os.MkdirAll(directory, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		source := "bank = 00\nfunc Entry 8000 entry_mx:0,0\nfunc Continue 8009 entry_mx:0,0\nfunc Handler 8200 entry_mx:0,0\n" + extra
+		if err := os.WriteFile(filepath.Join(directory, "bank00.cfg"), []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(fullCfg, "indirect_dispatch 8007 1 idx:A tables:8100 ret:8009\n")
+	write(prunedCfg, "")
+	returnPC := uint32(0x008009)
+	fact := analysis.DispatchFact{
+		SitePC: 0x008007, Mnemonic: "PHA", AddressingMode: "imp",
+		LiveMX: []analysis.MXState{{M: 0, X: 0}}, Transfer: analysis.TransferCall,
+		TargetEntryKind: analysis.EntryComputed, Targets: []uint32{0x008200}, TargetSetClosed: true,
+		IndexRegister: "A", TableBases: []uint32{0x008100}, ReturnPC: &returnPC,
+		Evidence: []analysis.Evidence{{Source: "static.fixture", Confidence: analysis.ConfidenceProven}},
+	}
+	run := func(cfg, output string) Report {
+		t.Helper()
+		report, err := Run(Options{
+			ROMPath: romPath, ConfigDir: cfg, OutputDir: output, Jobs: 1, AllowStubs: true,
+			ProvenDispatchFacts: []analysis.DispatchFact{fact}, AllowMatchingAuthoredFacts: true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return report
+	}
+	fullOut, prunedOut := filepath.Join(root, "full-gen"), filepath.Join(root, "pruned-gen")
+	full, pruned := run(fullCfg, fullOut), run(prunedCfg, prunedOut)
+	if full.AnalysisFactsApplied != 1 || pruned.AnalysisFactsApplied != 1 ||
+		full.FinalEntries != pruned.FinalEntries || full.SemanticSourceSHA256 != pruned.SemanticSourceSHA256 {
+		t.Fatalf("full/pruned reports differ: full=%+v pruned=%+v", full, pruned)
+	}
+	assertGeneratedDirectoriesEqual(t, fullOut, prunedOut)
+}
+
+func TestAnalysisDatabaseAcceptsMatchingAuthoredDispatchAndRejectsDrift(t *testing.T) {
+	root := t.TempDir()
+	romPath := filepath.Join(root, "game.sfc")
+	cfgDir := filepath.Join(root, "recomp")
+	image := make([]byte, 0x8000)
+	image[0x0000] = 0x60 // $8000: dispatching RTS
+	image[0x0010] = 0x60 // $8010: continuation
+	if err := os.WriteFile(romPath, image, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(cfgDir, "bank00.cfg")
+	write := func(target string) {
+		t.Helper()
+		source := "bank = 00\nfunc Root 8000 entry_mx:1,1\nfunc Continue 8010 entry_mx:1,1\nrts_dispatch 8000 " + target + "\n"
+		if err := os.WriteFile(configPath, []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("8010")
+	fact := analysis.DispatchFact{
+		SitePC: 0x008000, Mnemonic: "RTS", Transfer: analysis.TransferResume,
+		TargetEntryKind: analysis.EntryContinuation, Targets: []uint32{0x008010}, TargetSetClosed: true,
+		Evidence: []analysis.Evidence{{Source: "static.fixture", Confidence: analysis.ConfidenceProven}},
+	}
+	report, err := Run(Options{
+		ROMPath: romPath, ConfigDir: cfgDir, OutputDir: filepath.Join(root, "matching"), Jobs: 1,
+		AllowStubs: true, ProvenDispatchFacts: []analysis.DispatchFact{fact}, AllowMatchingAuthoredFacts: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.AnalysisFactsApplied != 1 {
+		t.Fatalf("accepted analysis facts = %d, want 1", report.AnalysisFactsApplied)
+	}
+	write("8020")
+	_, err = Run(Options{
+		ROMPath: romPath, ConfigDir: cfgDir, OutputDir: filepath.Join(root, "drifted"), Jobs: 1,
+		AllowStubs: true, ProvenDispatchFacts: []analysis.DispatchFact{fact}, AllowMatchingAuthoredFacts: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "conflicts with the current authored dispatch") {
+		t.Fatalf("authored drift error = %v", err)
+	}
+}
+
 func TestProvenContinuationMergesExactParentRegionAndRetainsExternalEntry(t *testing.T) {
 	root := t.TempDir()
 	romPath := filepath.Join(root, "game.sfc")
@@ -350,6 +456,79 @@ func TestProvenContinuationMergesExactParentRegionAndRetainsExternalEntry(t *tes
 	if string(controlDispatch) != string(overlayDispatch) {
 		t.Fatalf("continuation overlay changed external registry:\n%s\n---\n%s", controlDispatch, overlayDispatch)
 	}
+}
+
+func TestProvenContinuationSeedsMissingCanonicalTemplateWithEquivalentSemantics(t *testing.T) {
+	root := t.TempDir()
+	romPath := filepath.Join(root, "game.sfc")
+	controlCfg := filepath.Join(root, "control-cfg")
+	prunedCfg := filepath.Join(root, "pruned-cfg")
+	image := make([]byte, 0x8000)
+	copy(image[0x0000:], []byte{0x80, 0x0E}) // $8000: BRA $8010
+	copy(image[0x0010:], []byte{0xEA, 0x60}) // $8010: NOP; RTS
+	if err := os.WriteFile(romPath, image, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeCfg := func(directory, source string) {
+		t.Helper()
+		if err := os.MkdirAll(directory, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(directory, "bank00.cfg"), []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeCfg(controlCfg, "bank = 00\nfunc bank_00_8010 8010 entry_mx:1,1\nfunc Root 8000 entry_mx:1,1\n")
+	prunedSource := "bank = 00\nfunc Root 8000 entry_mx:1,1\n"
+	writeCfg(prunedCfg, prunedSource)
+	fact := analysis.EntryFact{
+		PC: 0x008010, EntryMX: analysis.MXState{M: 1, X: 1},
+		Kind: analysis.EntryContinuation, TemplateFree: true,
+		RegionOwners: []analysis.EntryVariant{{
+			PC: 0x008000, EntryMX: analysis.MXState{M: 1, X: 1},
+		}},
+		ResumeEdges: []analysis.EntryEdge{{
+			Source: analysis.EntryVariant{PC: 0x008000, EntryMX: analysis.MXState{M: 1, X: 1}},
+			Target: analysis.EntryVariant{PC: 0x008010, EntryMX: analysis.MXState{M: 1, X: 1}},
+		}},
+		Evidence: []analysis.Evidence{{
+			Source: "static.sibling_boundary_edge", Confidence: analysis.ConfidenceProven,
+		}},
+	}
+	run := func(cfg, output string) Report {
+		t.Helper()
+		report, err := Run(Options{
+			ROMPath: romPath, ConfigDir: cfg, OutputDir: output, Jobs: 1,
+			AllowStubs: true, ProvenEntryFacts: []analysis.EntryFact{fact},
+			ProvenEntryTemplates: []analysis.EntryTemplatePlacement{{
+				EntryVariant: analysis.EntryVariant{PC: fact.PC, EntryMX: fact.EntryMX}, BankOrdinal: 0,
+			}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return report
+	}
+	control := run(controlCfg, filepath.Join(root, "control-gen"))
+	pruned := run(prunedCfg, filepath.Join(root, "pruned-gen"))
+	if control.AnalysisEntryTemplatesSeeded != 0 || pruned.AnalysisEntryTemplatesSeeded != 1 {
+		t.Fatalf("control/pruned seeded templates = %d/%d, want 0/1",
+			control.AnalysisEntryTemplatesSeeded, pruned.AnalysisEntryTemplatesSeeded)
+	}
+	if control.FinalEntries != 2 || pruned.FinalEntries != 2 ||
+		control.Functions != pruned.Functions || control.SemanticSourceSHA256 != pruned.SemanticSourceSHA256 {
+		t.Fatalf("control/pruned entries=%d/%d functions=%d/%d hashes=%s/%s",
+			control.FinalEntries, pruned.FinalEntries, control.Functions, pruned.Functions,
+			control.SemanticSourceSHA256, pruned.SemanticSourceSHA256)
+	}
+	after, err := os.ReadFile(filepath.Join(prunedCfg, "bank00.cfg"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != prunedSource {
+		t.Fatalf("analysis database overlay rewrote pruned cfg:\n%s", after)
+	}
+	assertGeneratedDirectoriesEqual(t, filepath.Join(root, "control-gen"), filepath.Join(root, "pruned-gen"))
 }
 
 func TestProvenContinuationRetainsStandaloneBodyWhenExternalClosureDiffers(t *testing.T) {

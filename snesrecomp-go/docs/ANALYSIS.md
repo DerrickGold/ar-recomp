@@ -4,7 +4,9 @@
 workflow. It runs static inference without supplying authored
 `indirect_dispatch` or `rts_dispatch` declarations to the decoder, normalizes
 the independently inferred facts, and only then compares them with the cfg.
-It does not generate C, update configuration, or create an analysis database.
+It does not generate C or update configuration. By default it writes nothing;
+an explicit `--out-analysis` path exports the proven subset as a deterministic
+analysis database.
 
 From a game project root:
 
@@ -18,12 +20,33 @@ The low-level equivalent is:
 v2regen analyze --rom game.sfc --cfg-dir recomp --jobs 8
 ```
 
+To persist only facts that are safe for the AOT overlay:
+
+```sh
+snesbuild analyze --root . --rom game.sfc \
+  --out-analysis saves/static-analysis.json
+# low-level equivalent:
+v2regen analyze --rom game.sfc --cfg-dir recomp \
+  --out-analysis build/static-analysis.json
+```
+
 Both commands are unconditionally read-only. `--dry-run=false` and
 `--no-write=false` are rejected by `snesbuild analyze`; `v2regen analyze`
 likewise rejects `--no-write=false`. Use `--format json` for the complete,
 deterministically ordered machine-readable report and `--verbose` for every
 text record. `--strict` reports everything and then returns nonzero only when
 independent evidence proves a semantic conflict.
+
+The fact database has no timestamp or build-machine path. It records its
+schema and inference-report versions, provenance, the headerless ROM SHA-256,
+ROM size, mapper, and normalized static evidence. Runtime observations,
+probable findings, open target sets, partial matches, compatible broad safety
+guards, and garbage-only decodes are excluded. Exact authored dispatch matches
+are retained as replacement facts so their cfg directives can be removed
+later. Generation rejects an unknown schema, non-static evidence, a different
+ROM, changed authored dispatch semantics, invalid instruction bytes, invalid
+target tables, or an ownership edge that no longer decodes exactly. A
+single-bank analysis cannot be exported as a whole-ROM database.
 
 ## Comparison meanings
 
@@ -382,6 +405,24 @@ generator then validates each selected instruction and target table against
 the exact ROM bytes before applying an in-memory overlay. No `.cfg` file is
 written.
 
+The persisted equivalent avoids rerunning inference during a hermetic build:
+
+```sh
+v2regen regen --rom game.sfc --cfg-dir recomp \
+  --out-dir build/proven-analysis-candidate \
+  --analysis-db build/static-analysis.json
+```
+
+`--analysis-db` and `--experimental-proven-analysis` are mutually exclusive.
+The low-level command keeps the same isolated-output guard. The project driver
+also accepts `snesbuild regen --analysis-db saves/static-analysis.json`; it
+adds database-supplied canonical entries to `funcs.h` after their redundant
+`func` declarations are removed. Matching authored dispatch declarations may
+remain during migration, but they must exactly match the persisted fact. They
+are normalized to that fact in memory, including exact live-M/X routing, so
+removing one does not change database-mode generated C. A changed authored
+directive fails closed instead of silently overriding the snapshot.
+
 For proven dispatch sites, variant discovery requests the exact target M/X
 state established by the current decode and any modeled SEP. It does not add
 all four speculative handler variants. Authored or uncertain dispatches keep
@@ -420,6 +461,17 @@ has one M/X variant. Multi-variant addresses are still generated and reported,
 but retain the existing conservative routing policy until the complete state
 set is proven. Regeneration reports both the exact discoveries and the subset
 receiving singleton canonical promotion.
+
+Metadata-free routine and continuation facts can also supply a canonical entry
+template that is already absent from cfg. The database records its original
+bank-local ordinal so pruning does not perturb function or translation-unit
+layout. All missing templates are seeded in memory before ownership validation,
+so nested and cyclic continuation regions do not depend on fact order.
+Continuations remain externally dispatchable;
+routine templates are withheld and must still be rediscovered by an exact
+static call. HLE directives remain authored policy and are never synthesized
+or discarded. Any HLE obligation or special entry metadata at a supposedly
+template-free PC makes generation fail closed.
 
 Every regeneration computes a `generated semantic source` SHA-256 over sorted
 function bodies, effective void-alias targets, the dispatch registry, and
