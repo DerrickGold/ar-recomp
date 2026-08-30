@@ -1,0 +1,112 @@
+{
+  "version": 1,
+  "command": ["{binary}", "{rom}", "--config", "{config}"],
+  "clean_environment_prefixes": ["AR_", "SNESRECOMP_", "SNESREF_"],
+  "environment": {
+    "LC_ALL": "C",
+    "SDL_AUDIODRIVER": "dummy",
+    "SDL_VIDEODRIVER": "dummy",
+    "AR_NO_RUN_DIR": "1",
+    "AR_HEADLESS": "1",
+    "AR_SAVE_EDIT": "0",
+    "AR_MUSIC_REPLACEMENTS": "0",
+    "AR_HD_REPLACEMENTS": "0",
+    "AR_DIORAMA": "0",
+    "AR_SIM3D": "0"
+  },
+  "artifacts": [
+    "saves/dump_wram.bin",
+    "saves/dump_sram.bin",
+    "saves/dump_state.txt",
+    "saves/dump_dispatch_log.json"
+  ],
+  "hard_diagnostics": [
+    "[dispatch-oob]",
+    "[indirect-unresolved]",
+    "[unresolved-stub]",
+    "[unresolved-goto]"
+  ],
+  "save_environment": "AR_SAVE_NATIVE_PATH",
+  "replay_environment": "AR_INPUT_REPLAY",
+  "quit_frames_environment": "AR_QUIT_FRAMES",
+  "settings_environment": "AR_SETTINGS_PATH",
+  "final_frame_artifact": "saves/dump_state.txt",
+  "final_frame_pattern": "(?m)^frame=(\\d+)\\b",
+  "timeout_seconds": 300,
+  "default_workloads": [
+    "mode7_worldmap",
+    "sim_actions",
+    "aitos_wide",
+    "death_heim_wide"
+  ],
+  "workloads": [
+    {
+      "name": "mode7_worldmap",
+      "description": "Repeated authentic-width Mode 7 and world-map transitions",
+      "replay": "saves/fillmore-r1-natural.rec",
+      "frames": 6000,
+      "save_seed": "tests/fixtures/benchmark/fillmore-natural-seed.srm.b64"
+    },
+    {
+      "name": "sky_palace_wide",
+      "description": "Wide Sky Palace margin patch and restore transaction",
+      "replay": "saves/fillmore-r1-natural.rec",
+      "frames": 1200,
+      "save_seed": "tests/fixtures/benchmark/fillmore-natural-seed.srm.b64",
+      "environment": {
+        "AR_WS_HEADLESS": "1",
+        "AR_EXTENDED_ASPECT_RATIO": "16:10",
+        "AR_ASPECT_PAR": "Square pixels",
+        "AR_DISPLAY_MODE": "2"
+      }
+    },
+    {
+      "name": "sim_actions",
+      "description": "Simulation-mode actions with the replay's pinned settings",
+      "replay": "saves/sim-actions.rec",
+      "frames": 6000,
+      "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
+      "save_seed": "tests/fixtures/sim3d/sim-actions-seed.srm.b64"
+    },
+    {
+      "name": "aitos_wide",
+      "description": "Wide action-mode traversal with background HLE enabled",
+      "replay": "saves/aitos-r4-natural.rec",
+      "frames": 4000,
+      "save_seed": "tests/fixtures/benchmark/action-routes-seed.srm.b64",
+      "required_output": ["[act-enter] $18=04 $19=04"],
+      "environment": {
+        "AR_WS_HEADLESS": "1",
+        "AR_EXTENDED_ASPECT_RATIO": "16:10",
+        "AR_ASPECT_PAR": "Square pixels",
+        "AR_DISPLAY_MODE": "2",
+        "AR_ACTION_BG_HLE": "1",
+        "AR_DIORAMA": "0",
+        "AR_SIM3D": "0",
+        "AR_MOONJUMP": "1",
+        "AR_NO_KNOCKBACK": "1",
+        "AR_RANGED_SWORD": "1"
+      }
+    },
+    {
+      "name": "death_heim_wide",
+      "description": "Wide late-game action and effects workload",
+      "replay": "saves/death-heim-r8-r10-natural.rec",
+      "frames": 4000,
+      "save_seed": "tests/fixtures/benchmark/action-routes-seed.srm.b64",
+      "required_output": ["[act-enter] $18=07 $19=01"],
+      "environment": {
+        "AR_WS_HEADLESS": "1",
+        "AR_EXTENDED_ASPECT_RATIO": "16:10",
+        "AR_ASPECT_PAR": "Square pixels",
+        "AR_DISPLAY_MODE": "2",
+        "AR_ACTION_BG_HLE": "1",
+        "AR_DIORAMA": "0",
+        "AR_SIM3D": "0",
+        "AR_MOONJUMP": "1",
+        "AR_NO_KNOCKBACK": "1",
+        "AR_RANGED_SWORD": "1"
+      }
+    }
+  ]
+}

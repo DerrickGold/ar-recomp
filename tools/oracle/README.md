@@ -12,7 +12,7 @@ the downstream symptom.
 - `snes9x_libretro.dylib` — the reference core (arm64, from buildbot.libretro.com).
 - recomp side — `AR_WRAM_TRACE` in `src/main.c` registers a per-frame
   `g_framedump_callback` emitting the identical JSONL shape.
-- `diff_trace.py` — compares the two traces.
+- `snesbuild trace-diff` — compares the two traces without requiring Python.
 
 ## Run
 
@@ -26,8 +26,18 @@ cd ../..
 AR_HEADLESS=1 AR_QUIT_FRAMES=240 AR_WRAM_TRACE=recomp_trace.jsonl \
   ./build/ActRaiserRecomp ar.sfc
 
-# 3. Diff
-python3 tools/oracle/diff_trace.py tools/oracle/oracle_trace.jsonl recomp_trace.jsonl
+# 3. Diff final written state
+./snesrecomp-go/bin/snesbuild trace-diff final \
+  tools/oracle/oracle_trace.jsonl recomp_trace.jsonl
+
+# Timing-independent per-address value sequences
+./snesrecomp-go/bin/snesbuild trace-diff sequence \
+  tools/oracle/oracle_trace.jsonl recomp_trace.jsonl --skip-zp
+
+# Align by the game's WRAM frame clock (ActRaiser uses $88/$89)
+./snesrecomp-go/bin/snesbuild trace-diff aligned \
+  tools/oracle/oracle_trace.jsonl recomp_trace.jsonl \
+  --clock-low 0x88 --clock-high 0x89
 ```
 
 To reproduce an input-triggered bug, drive both sides deterministically:
@@ -51,6 +61,6 @@ hold the B button from frame N.
   (via the WRAM it eventually corrupts).
 - The two emulators don't boot frame-for-frame identically (our coroutine
   batches boot into "frame 1"), and start from different power-on RAM, so
-  `diff_trace.py` compares cumulative **written-value** state over commonly
+  `snesbuild trace-diff final` compares cumulative **written-value** state over commonly
   written addresses rather than raw byte images. Absolute frame numbers align
   only after boot.

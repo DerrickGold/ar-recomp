@@ -17,11 +17,14 @@ from __future__ import annotations
 import argparse
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
+import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
 
-from dis_spc700 import ROM_BLOCK_OFFSET, TEMPLATES, operand_length
-
-
+ROOT = Path(__file__).resolve().parents[1]
+ROM_BLOCK_OFFSET = 0x011ACD
 COMMON_AUDIO_OFFSET = 0x032C00
 FIRST_EFFECT_ID = 0x01
 LAST_EFFECT_ID = 0x26
@@ -138,29 +141,42 @@ def audit_sequence(
     return result
 
 
+def find_snesbuild(explicit: Path | None) -> Path:
+    candidates = [
+        explicit,
+        Path(os.environ["SNESBUILD"]) if os.environ.get("SNESBUILD") else None,
+        ROOT / "snesrecomp-go" / "build" / "snesbuild",
+        Path(found) if (found := shutil.which("snesbuild")) else None,
+    ]
+    for candidate in candidates:
+        if candidate and candidate.is_file():
+            return candidate.resolve()
+    raise RuntimeError(
+        "snesbuild not found; build snesrecomp-go/cmd/snesbuild or pass "
+        "--snesbuild (the generic SPC700 decoder now lives in Go)"
+    )
+
+
 def direct_page_references(
-    resident_target: int, resident: bytes, address: int,
+    snesbuild: Path, rom_path: Path, resident_target: int,
+    resident: bytes, address: int,
 ) -> list[int]:
-    """Return decoded instruction PCs with a literal reference to one DP byte."""
-    refs: list[int] = []
-    pc = resident_target
-    end = resident_target + len(resident)
-    while pc < end:
-        opcode = resident[pc - resident_target]
-        template = TEMPLATES[opcode]
-        size = 1 + operand_length(template)
-        raw = resident[pc - resident_target:pc - resident_target + size]
-        if len(raw) != size:
-            break
-        operands: set[int] = set()
-        if "{b2}" in template:
-            operands.update((raw[1], raw[2]))
-        elif "{b}" in template:
-            operands.add(raw[1])
-        if address in operands:
-            refs.append(pc)
-        pc += size
-    return refs
+    """Use the shared Go SPC700 decoder to find one literal DP reference."""
+    command = [
+        str(snesbuild), "spc-disasm", f"0x{resident_target:04X}",
+        f"0x{resident_target + len(resident):04X}", "--input", str(rom_path),
+        "--upload-block", hex(ROM_BLOCK_OFFSET), "--find-ref", hex(address),
+        "--format", "json",
+    ]
+    result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"snesbuild SPC reference scan failed ({result.returncode}):\n"
+            f"{result.stdout}{result.stderr}"
+        )
+    report = json.loads(result.stdout)
+    return [int(instruction["pc"])
+            for instruction in (report.get("instructions") or [])]
 
 
 def format_command(command: int) -> str:
@@ -171,6 +187,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--rom", type=Path, default=Path("ar.sfc"))
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--snesbuild", type=Path,
+                        help="compiled snesbuild containing spc-disasm")
     args = parser.parse_args()
 
     rom = args.rom.read_bytes()
@@ -242,7 +260,10 @@ def main() -> None:
         + (" ".join(format_command(command) for command in echo_commands)
            if echo_commands else "none")
     )
-    pmon_refs = direct_page_references(resident_target, resident, 0x4B)
+    pmon_refs = direct_page_references(
+        find_snesbuild(args.snesbuild), args.rom.resolve(),
+        resident_target, resident, 0x4B,
+    )
     print(
         "PMON source $4B literal instruction references: "
         + (" ".join(f"${pc:04X}" for pc in pmon_refs) if pmon_refs else "none")

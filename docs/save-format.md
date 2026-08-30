@@ -431,7 +431,9 @@ Load a save, take an `F2` full snapshot (already dumps WRAM + SRAM), and match
 known WRAM values back to SRAM offsets. Because we know what `$0286/87` *means*,
 finding the SRAM bytes that feed it settles the angel-HP/SP/MP block directly —
 without trusting the third-party offsets at all. The alternative (static) route
-is to find the SRAM→WRAM load routine in the ROM via `tools/romxref.py`.
+is to find the SRAM→WRAM load routine in the ROM via
+`snesbuild xref 0286 --root . --kind write --wram-mirrors` (or the
+corresponding read query).
 
 ### 6.2 Known-state diffing (best for §3.4)
 Diff labelled saves at known checkpoints (`save.sim-blank` → `save.sim-bloodpool-start`

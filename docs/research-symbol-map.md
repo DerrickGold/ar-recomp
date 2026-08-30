@@ -51,7 +51,7 @@ Rules:
 | `$00:8241` | `MainLoopUnknown8241` | Observed | Called twice around the `$8418` vblank wait; role remains unknown. | [SEAMS function roles](SEAMS.md#function-roles-discovered-decomp-groundwork) |
 | `$00:8059` | `MainLoop_Top` | Verified | Main-loop re-entry point; also the ending presenter's exit target — one of the ROM's only two RTL-long-jump destinations. | [rom map](rom-map.md) |
 | `$02:AC4E` | `Nmi_ReadHeldButtons` | Verified | Per-frame NMI input read: `$00A0 = $4218 & $F4` (A/X/L/R held byte, masked by the input-enable byte `$F4`). | [SEAMS magic wiring](SEAMS.md#magic-system--full-wiring-map-2026-07-07) |
-| `$01:9293/$01:92AA/$02:87F3/$02:9AC4/$02:BEBF/$03:B013/$03:E535` | `WaitForVblank_SpinSites` | Verified | The complete census of RDNMI (`$4210`) busy-spin yield points beyond `$8418`/`$A85E`; derived by `tools/find_yield_points.py` (includes long `AF`-form reads) and mirrored in the runtime's spin whitelist. | [SEAMS frame/timing](SEAMS.md#frame--timing--mostly-already-hled--the-model-is-understood) |
+| `$01:9293/$01:92AA/$02:87F3/$02:9AC4/$02:BEBF/$03:B013/$03:E535` | `WaitForVblank_SpinSites` | Verified | The complete census of RDNMI (`$4210`) busy-spin yield points beyond `$8418`/`$A85E`; now reproduced by `snesbuild poll-census --registers 4210` from rooted decoded code (including long `AF`-form reads) and mirrored in the runtime's spin whitelist. | [SEAMS frame/timing](SEAMS.md#frame--timing--mostly-already-hled--the-model-is-understood) |
 | `$01:93CB` | `Nmi_AckReenableBracket` | Verified | Single `LDA $004210` ack plus `$4200=#$A1` re-enable bracket; legitimately called twice per frame by sim effect paths, so it is **not** a vblank spin. | [SEAMS frame/timing](SEAMS.md#frame--timing--mostly-already-hled--the-model-is-understood) |
 
 ### Action objects, sprites, and HUD
@@ -129,8 +129,8 @@ calls a yield helper, which captures a continuation into an object field and
 returns to the object loop. Every `JSR <helper>` return site is therefore a
 dispatch entry the recompiler must register — this family caused the
 action-freeze, bridge, and Death Heim bug classes.
-`tools/find_yield_helpers.py` derives the helper list from the ROM by shape;
-run it after any bank00.cfg handler work.
+`snesbuild rts-webs --yield-helpers --bank 00` derives the helper list from the
+ROM by shape; run it after any bank00.cfg handler work.
 
 | Address | Candidate symbol | Status | Contract / observation | Evidence |
 |---|---|---|---|---|
@@ -293,7 +293,7 @@ run it after any bank00.cfg handler work.
 | `$01:CEE5` | `Sfx_Request_Id0C` | Observed | Posts SFX id `$0C` (7 requests). srcn `08`, voice 7, fixed pitch `$102A`, constant centered volume `47/47`. | same |
 | `$01:BF67` | `Sfx_Request_Id1E` | Observed | Posts SFX id `$1E` (3 requests). srcn `0B`, voice 7, fixed pitch `$1123`. | same |
 | `$01:BC06` | `Sfx_Request_Id24` | Observed | Posts SFX id `$24` (6 requests). srcn `06`/`09`, voice 7. | same |
-| `$0334` | `Wram_CurrentSongId` | Verified | Currently-loaded song id; compared by `Audio_ScriptSongChange` to skip redundant reloads, zeroed by the transition stop at `$00:83F2`. | dis65 of `$02:B64B`, romxref `$0334` |
+| `$0334` | `Wram_CurrentSongId` | Verified | Currently-loaded song id; compared by `Audio_ScriptSongChange` to skip redundant reloads, zeroed by the transition stop at `$00:83F2`. | `snesbuild disasm 02:B64B`; `snesbuild xref 0334 --kind access` |
 
 ## Data and table candidates
 

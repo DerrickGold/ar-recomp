@@ -47,7 +47,7 @@ type MetadataReport struct {
 }
 
 // GenerateMetadata scrapes generated C and raw cfg directives into the static
-// sidecar consumed by trace_slice.py and resolve_miss.py.
+// sidecar consumed by the compiled disassembly and trace-inspection tools.
 func GenerateMetadata(genDir, cfgDir, outputPath string, now time.Time) (MetadataReport, error) {
 	functionSets := make(map[string][]string)
 	labelSets := make(map[string]map[string]struct{})

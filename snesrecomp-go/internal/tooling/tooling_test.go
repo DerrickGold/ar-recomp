@@ -107,6 +107,30 @@ func TestCensusRTSWebs(t *testing.T) {
 	}
 }
 
+func TestCensusRTSWebsFindsStackCapturedJSRContinuation(t *testing.T) {
+	root := t.TempDir()
+	image := make([]byte, 0x8000)
+	image[0], image[1], image[2] = 0x20, 0x00, 0x81 // JSR $8100.
+	copy(image[0x100:], []byte{0xA3, 0x01, 0x1A, 0x9D, 0x12, 0x00, 0x60})
+	romPath := filepath.Join(root, "test.sfc")
+	if err := os.WriteFile(romPath, image, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgDir := filepath.Join(root, "recomp")
+	writeTestFile(t, filepath.Join(cfgDir, "bank00.cfg"), "bank = 00\n")
+	var output bytes.Buffer
+	report, err := CensusRTSWebs(RTSCensusOptions{ROMPath: romPath, CFGDir: cfgDir, YieldHelpers: true, Suggest: true, Output: &output})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.YieldHelpers != 1 || report.YieldContinuations != 1 || report.UncoveredContinuations != 1 {
+		t.Fatalf("unexpected report: %+v\n%s", report, output.String())
+	}
+	if !strings.Contains(output.String(), "helper 00:8100") || !strings.Contains(output.String(), "continuation 00:8003 [UNCOVERED]") {
+		t.Fatalf("unexpected output:\n%s", output.String())
+	}
+}
+
 func TestCensusStubsCollapsesVariants(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, filepath.Join(root, "bank00_v2.c"), "return cpu_trace_unresolved_goto_trap(cpu, 0x008000, 0x008100, \"Fn_M0X0\", \"L\");\nreturn cpu_trace_unresolved_goto_trap(cpu, 0x008000, 0x008100, \"Fn_M1X1\", \"L\");\nreturn cpu_trace_dispatch_oob(cpu, 0x008200, 0xffff);\n(void)cpu_trace_unresolved_stub_trap(cpu, 0x001234, \"bad\");\nreturn cpu_trace_unresolved_indirect_jump(cpu, 0x008300);\n")

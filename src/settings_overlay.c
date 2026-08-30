@@ -664,7 +664,7 @@ static void WriteFallbackGlyph(unsigned tile, unsigned source_ch) {
 
 /* ── Section nav icons ──────────────────────────────────────────────────
  * Real ActRaiser menu icons, lifted from a Sky Palace status-screen VRAM
- * snapshot (tools/dump_snapshot_chr.py + icon_picker_sheet.py). Each is a
+ * snapshot (`snesbuild chr-render snapshot` + `chr-render icons`). Each is a
  * 16x16 4bpp index map — the game stores these as framed item/magic/status
  * glyphs — rendered through the game's OWN menu CGRAM palettes: the grey slot
  * palette (pal 14) for an unselected section, and the colored "selected slot"
