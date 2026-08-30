@@ -100,7 +100,10 @@ typedef struct RtlAudioStateLoadedRouting {
  * state. ARAM is the SNES-visible memory region, not a concrete component
  * layout. It is mutable only for the duration of the callback. DSP mutations
  * go through the validated operation function, and the runner copies the
- * fixed-width SPC register values back after an opcode callback returns. */
+ * fixed-width SPC register values back after an opcode callback returns.
+ * Extended voices are four additional hardware-shaped eight-voice banks;
+ * voice numbers 8..39 select bank/voice in order. Pitch modulation is local
+ * to each bank, while global timing and the native echo-memory pass are shared. */
 typedef enum RtlAudioDspOperation {
     RTL_AUDIO_DSP_SET_VOICE_BUS = 1,
     RTL_AUDIO_DSP_WRITE_VIRTUAL_REGISTER = 2,

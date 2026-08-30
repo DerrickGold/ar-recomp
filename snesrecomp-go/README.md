@@ -256,8 +256,10 @@ cmake --build build/runtime
 ctest --test-dir build/runtime --output-on-failure
 ```
 
-Core code is portable C11 and must keep OS, SDL, graphics API, and audio API
-types behind host adapters. Hermetic objects live under `build/hermetic/`.
+The generated-code and public runner ABI is portable C11. The private S-DSP
+accuracy unit is C++20 behind a C bridge; OS, SDL, graphics API, and audio API
+types remain behind host adapters. Hermetic objects live under
+`build/hermetic/`.
 
 ## Commands
 
@@ -298,6 +300,12 @@ v2regen inspect --rom game.sfc --cfg-dir recomp --jobs 8
 v2regen emit-function --rom game.sfc --cfg-dir recomp \
   --bank 00 --start 8000 --m 1 --x 1
 ```
+
+`poll-census --registers` accepts any comma-separated hexadecimal hardware
+register addresses; `$4210` and `$4212` are defaults, not a fixed allow-list.
+Coverage reports distinguish conditional HLE fallbacks from whole-body
+replacement. Only whole-body coverage removes a poll from the potentially
+live count.
 
 The packaged `snesbuild` binary exposes the same `disasm` and `xref` commands
 with paths relative to `--root`. Decoded xrefs come only from rooted instruction

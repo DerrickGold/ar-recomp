@@ -106,6 +106,8 @@ bool snes_loadRom(Snes *snes, const uint8_t *data, int length);
 void snes_saveload(Snes *snes, SaveLoadInfo *info);
 void snes_catchupApu(Snes *snes);
 void snes_catchup_stats(uint64_t *calls, uint64_t *cycles);
+extern void (*g_snes_apu_catchup_profile_hook)(bool begin,
+                                                uint64_t cycles);
 
 extern int snes_frame_counter;
 extern uint64_t g_apu_timer0_total_ticks;

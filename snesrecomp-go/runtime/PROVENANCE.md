@@ -3,7 +3,7 @@
 `runtime` is an independently authored portable runner started in August
 2026. Its source is covered by the MIT grant in [`LICENSE`](LICENSE).
 
-Except for the compatible component called out below, the code in this
+Except for the compatible components called out below, the code in this
 directory was written against the public interfaces emitted by `snesrecomp-go`
 and the behavioral contracts exercised by this repository's tests. No code
 from the retired, restrictively licensed comparison runner was copied here.
@@ -35,11 +35,20 @@ The SPC700 core is a C implementation of the complete opcode contract first
 implemented independently in this repository's MIT-licensed pure-Go audio
 preview package. It does not derive from the inherited C runner.
 
-The S-DSP is likewise based on the repository's MIT pure-Go preview device and
-the public S-DSP register, BRR, envelope, noise, and echo contracts. The C
-implementation adds the project's documented music/SFX buses, optional virtual
-voices, continuous output resampling, and host observation seams without using
-the inherited C implementation.
+The slot-accurate S-DSP core in `src/snes/accuracy/dsp.cpp` and its associated
+header/generated tables are adapted from Eric Tomasso's Snaggletooth
+`ci/snes-ipl-an` source at exact commit
+`65668997ed58fe78cfcef1e53c0020bd92d0d287`. That source is MIT licensed; its
+copyright and grant are retained verbatim in `src/snes/accuracy/LICENSE` and
+installed as `licenses/Snaggletooth-LICENSE.txt`.
+
+The C ABI bridge, five-bank extended-voice topology, music/SFX gain routing,
+shared echo injection, portable serialization, PCM ring, resampling, and host
+observation seams were implemented in this repository. Bank zero remains the
+SNES-visible eight-voice device. Four additional eight-voice banks reuse the
+same BRR, Gaussian, envelope, noise, and 32-slot execution rules, then join at
+a bounded output/echo boundary. They are an explicitly documented extension,
+not a claim that original hardware contained a monolithic 40-voice mixer.
 
 The engine-neutral shadow-verifier design is derived from Jrickey's reusable
 recomp verifier under its MIT OR Apache-2.0 grant; its attribution is retained

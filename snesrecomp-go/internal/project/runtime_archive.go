@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const runtimeArchiveObjectCacheVersion = "2"
+const runtimeArchiveObjectCacheVersion = "3"
 
 // RuntimeArchiveOptions builds the source runner into the same target-keyed
 // static-library artifact consumed by source-free hermetic distributions.
@@ -81,6 +81,32 @@ func runtimeCompileArgs(runtimeDir, zigPath, target, optimize string, simd bool,
 	for _, include := range manifest.PrivateIncludes {
 		args = append(args, "-I"+include)
 	}
+	return args
+}
+
+func isCxxSource(source string) bool {
+	switch strings.ToLower(filepath.Ext(source)) {
+	case ".cc", ".cpp", ".cxx":
+		return true
+	default:
+		return false
+	}
+}
+
+// runtimeSourceCompileArgs keeps the public/game side C11 while compiling the
+// private accuracy device as C++20. The resulting archive retains a C ABI.
+func runtimeSourceCompileArgs(base []string, source string) []string {
+	args := append([]string(nil), base...)
+	if !isCxxSource(source) {
+		return args
+	}
+	args[0] = "c++"
+	for index, arg := range args {
+		if arg == "-std=gnu11" {
+			args[index] = "-std=c++20"
+		}
+	}
+	args = append(args, "-fno-exceptions", "-fno-rtti")
 	return args
 }
 
@@ -210,7 +236,7 @@ func BuildRuntimeArchive(options RuntimeArchiveOptions) (string, error) {
 			if options.Verbose {
 				tools.printf("  cc %s\n", item.source)
 			}
-			args := append([]string(nil), compileArgs...)
+			args := runtimeSourceCompileArgs(compileArgs, item.source)
 			args = append(args, runtimeDebugObjectArgs(runtimeDir, options.Target, item.source)...)
 			args = append(args, "-c", item.source, "-o", item.object)
 			command := exec.Command(options.ZigPath, args...)

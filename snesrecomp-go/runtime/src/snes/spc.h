@@ -31,6 +31,9 @@ struct Spc {
     bool b;
     bool stopped;
     uint8_t cyclesUsed;
+    /* Diagnostic identity for the instruction currently consuming cycles.
+     * It is not hardware state and is reconstructed at reset/load. */
+    uint16_t instructionPc;
 };
 
 Spc *spc_init(Apu *apu);

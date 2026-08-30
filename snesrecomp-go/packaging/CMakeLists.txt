@@ -158,7 +158,9 @@ set(_runtime_archive
 file(GLOB_RECURSE _runtime_archive_inputs CONFIGURE_DEPENDS
     ${SNESBUILD_MODULE_DIR}/runtime/include/*.h
     ${SNESBUILD_MODULE_DIR}/runtime/src/*.c
+    ${SNESBUILD_MODULE_DIR}/runtime/src/*.cpp
     ${SNESBUILD_MODULE_DIR}/runtime/src/*.h
+    ${SNESBUILD_MODULE_DIR}/runtime/src/*.inc
     ${SNESBUILD_MODULE_DIR}/cmd/snesbuild/*.go
     ${SNESBUILD_MODULE_DIR}/internal/project/*.go
     ${SNESBUILD_MODULE_DIR}/internal/toolchain/*.go)
@@ -546,6 +548,9 @@ install(FILES
     ${SNESBUILD_MODULE_DIR}/runtime/LICENSE
     ${SNESBUILD_MODULE_DIR}/runtime/PROVENANCE.md
     DESTINATION utils/snesrecomp-go/runtime)
+install(FILES ${SNESBUILD_MODULE_DIR}/runtime/src/snes/accuracy/LICENSE
+    DESTINATION utils/snesrecomp-go/runtime/licenses
+    RENAME Snaggletooth-LICENSE.txt)
 install(FILES ${SNESBUILD_MODULE_DIR}/runtime/BINARY_SDK.md
     DESTINATION utils/snesrecomp-go/runtime RENAME README.md)
 install(FILES

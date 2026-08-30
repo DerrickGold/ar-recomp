@@ -585,9 +585,10 @@ void ActRaiser_OnInidispWrite(uint8_t value) {
    * host call. Converting their synthetic touch credit into SPC cycles fills
    * the DSP ring and drops roughly five seconds of authentic Advent audio
    * before the host can present it. Begin the calibrated hold at force blank,
-   * before those polls: the audio thread advances the sequencer and makes its
-   * acknowledgement ready while the black frame is being presented. The
-   * loader then resumes without double-advancing the SPC. */
+   * before those polls: each yielded frame's runner-owned APU target (or an
+   * audio consumer that reaches it first) advances the sequencer and makes its
+   * acknowledgement ready while black is presented. The loader then resumes
+   * without double-advancing the SPC. */
   RtlSetApuCatchupSuppressed(true);
   bool one_shot_completed = false;
   const uint64_t one_shot_token =

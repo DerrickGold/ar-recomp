@@ -41,7 +41,7 @@ typedef struct SpcWriteRec { uint8_t adr; uint8_t val; } SpcWriteRec;
 SpcWriteRec g_spc_recent_outport_writes[32];
 int g_spc_recent_outport_idx;
 
-static uint64_t s_apu_cycle_count;
+static Apu *s_active_apu;
 
 _Static_assert((APU_PORT_QUEUE_LEN & (APU_PORT_QUEUE_LEN - 1u)) == 0u,
                "APU port queue length must be a power of two");
@@ -55,12 +55,14 @@ Apu *apu_init(void) {
         apu_free(apu);
         return NULL;
     }
+    s_active_apu = apu;
     apu_clearPortQueue(apu);
     return apu;
 }
 
 void apu_free(Apu *apu) {
     if (apu == NULL) return;
+    if (s_active_apu == apu) s_active_apu = NULL;
     spc_free(apu->spc);
     dsp_free(apu->dsp);
     free(apu);
@@ -87,10 +89,13 @@ void apu_reset(Apu *apu) {
     apu->dspAdr = 0u;
     apu->cycles = 0u;
     apu->sampleClock = 0u;
+    apu->cycleClock = 0u;
+    apu->timelineTargetCycles = 0u;
     memset(apu->inPorts, 0, sizeof(apu->inPorts));
     memset(apu->outPorts, 0, sizeof(apu->outPorts));
     memset(apu->timer, 0, sizeof(apu->timer));
     apu->cpuCyclesLeft = 7u;
+    apu->dspSlot = 0u;
     memset(apu->pad, 0, sizeof(apu->pad));
     apu_clearPortQueue(apu);
 }
@@ -98,10 +103,10 @@ void apu_reset(Apu *apu) {
 static void apply_port_write(Apu *apu, const ApuPortWrite *write) {
     const uint8_t port = (uint8_t)(write->port & 3u);
     apu->inPorts[port] = write->val;
-    if (sr_runner_audio_trace_enabled())
+    if (sr_runner_audio_trace_enabled(SR_AUDIO_TRACE_MASK_APU_PORT_APPLY))
         sr_runner_emit_audio_trace(
             apu, SR_AUDIO_TRACE_APU_PORT_APPLY, 0u, port, 0u,
-            write->val, s_apu_cycle_count, 0u, 0u, NULL);
+            write->val, apu->cycleClock, 0u, 0u, NULL);
 }
 
 void apu_schedulePortWrite(Apu *apu, uint8_t port, uint8_t value,
@@ -142,6 +147,9 @@ void apu_saveload(Apu *apu, SaveLoadInfo *info) {
         info->func(info, &apu->portQHead, sizeof(apu->portQHead));
         info->func(info, &apu->portQTail, sizeof(apu->portQTail));
         info->func(info, &apu->sampleClock, sizeof(apu->sampleClock));
+        info->func(info, &apu->cycleClock, sizeof(apu->cycleClock));
+        info->func(info, &apu->timelineTargetCycles,
+                   sizeof(apu->timelineTargetCycles));
         info->func(info, &apu->portClock, sizeof(apu->portClock));
         info->func(info, &apu->portClockNs, sizeof(apu->portClockNs));
         info->func(info, apu->portLastTarget, sizeof(apu->portLastTarget));
@@ -166,6 +174,7 @@ void apu_saveload(Apu *apu, SaveLoadInfo *info) {
         saveload_bool(info, &timer->enabled);
     }
     saveload_u8(info, &apu->cpuCyclesLeft);
+    saveload_u8(info, &apu->dspSlot);
     saveload_bytes(info, apu->pad, sizeof(apu->pad));
     dsp_saveload(apu->dsp, info);
     spc_saveload(apu->spc, info);
@@ -177,6 +186,8 @@ void apu_saveload(Apu *apu, SaveLoadInfo *info) {
     saveload_u32(info, &apu->portQHead);
     saveload_u32(info, &apu->portQTail);
     saveload_u64(info, &apu->sampleClock);
+    saveload_u64(info, &apu->cycleClock);
+    saveload_u64(info, &apu->timelineTargetCycles);
     saveload_u64(info, &apu->portClock);
     saveload_u64(info, &apu->portClockNs);
     for (unsigned index = 0; index < 4u; ++index)
@@ -187,12 +198,16 @@ void apu_saveload(Apu *apu, SaveLoadInfo *info) {
 }
 
 uint64_t snes_apu_cycle_count(void) {
-    return s_apu_cycle_count;
+    return apu_cycle_count(s_active_apu);
+}
+
+uint64_t apu_cycle_count(const Apu *apu) {
+    return apu != NULL ? apu->cycleClock : 0u;
 }
 
 void apu_cycle(Apu *apu) {
     if (apu == NULL) return;
-    ++s_apu_cycle_count;
+    ++apu->cycleClock;
     if (apu->cpuCyclesLeft == 0u) {
         unsigned guard = 0u;
         do {
@@ -206,11 +221,12 @@ void apu_cycle(Apu *apu) {
     }
     --apu->cpuCyclesLeft;
 
-    if ((apu->cycles & 0x1fu) == 0u) {
+    if (apu->dspSlot == 0u)
         drain_port_queue(apu);
-        dsp_cycle(apu->dsp);
+    dsp_clock(apu->dsp);
+    apu->dspSlot = (uint8_t)((apu->dspSlot + 1u) & 0x1fu);
+    if (apu->dspSlot == 0u)
         ++apu->sampleClock;
-    }
 
     for (unsigned index = 0; index < 3u; ++index) {
         Timer *timer = &apu->timer[index];
@@ -246,10 +262,11 @@ uint8_t apu_cpuRead(Apu *apu, uint16_t address) {
         case 0xf7u: {
             const uint8_t port = (uint8_t)(address - 0xf4u);
             const uint8_t value = apu->inPorts[port];
-            if (sr_runner_audio_trace_enabled())
+            if (sr_runner_audio_trace_enabled(
+                    SR_AUDIO_TRACE_MASK_SPC_PORT_READ))
                 sr_runner_emit_audio_trace(
                     apu, SR_AUDIO_TRACE_SPC_PORT_READ, 0u, port, 0u,
-                    value, s_apu_cycle_count, 0u, 0u, NULL);
+                    value, apu->cycleClock, 0u, 0u, NULL);
             return value;
         }
         case 0xf8u:
@@ -309,10 +326,11 @@ void apu_cpuWrite(Apu *apu, uint16_t address, uint8_t value) {
                 const uint8_t original = value;
                 if (g_apu_spc_dsp_write_hook != NULL)
                     g_apu_spc_dsp_write_hook(apu, apu->dspAdr, original);
-                if (sr_runner_audio_trace_enabled())
+                if (sr_runner_audio_trace_enabled(
+                        SR_AUDIO_TRACE_MASK_DSP_WRITE))
                     sr_runner_emit_audio_trace(
                         apu, SR_AUDIO_TRACE_DSP_WRITE, 0u, 0u,
-                        apu->dspAdr, original, s_apu_cycle_count,
+                        apu->dspAdr, original, apu->cycleClock,
                         0u, 0u, NULL);
                 if (g_apu_spc_dsp_write_filter_hook == NULL ||
                     g_apu_spc_dsp_write_filter_hook(apu, apu->dspAdr, &value)) {

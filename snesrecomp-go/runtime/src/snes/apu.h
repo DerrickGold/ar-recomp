@@ -43,11 +43,16 @@ struct Apu {
     uint8_t outPorts[4];
     Timer timer[3];
     uint8_t cpuCyclesLeft;
+    uint8_t dspSlot;
     uint8_t pad[6];
     ApuPortWrite portQueue[APU_PORT_QUEUE_LEN];
     uint32_t portQHead;
     uint32_t portQTail;
     uint64_t sampleClock;
+    /* Monotonic semantic clocks. cycleClock counts individual S-DSP slots;
+     * timelineTargetCycles is the runner-owned game-tick target. */
+    uint64_t cycleClock;
+    uint64_t timelineTargetCycles;
     uint64_t portClock;
     uint64_t portClockNs;
     uint64_t portLastTarget[4];
@@ -71,6 +76,7 @@ extern void (*g_apu_spc_dsp_write_hook)(Apu *, uint8_t, uint8_t);
 extern bool (*g_apu_spc_dsp_write_filter_hook)(Apu *, uint8_t, uint8_t *);
 extern void (*g_apu_extra_saveload_hook)(Apu *, SaveLoadInfo *);
 uint64_t snes_apu_cycle_count(void);
+uint64_t apu_cycle_count(const Apu *apu);
 
 #ifdef __cplusplus
 }

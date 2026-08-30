@@ -229,8 +229,9 @@ static void OnVoiceKeyOn(int ch, uint8_t srcn, uint16_t decodeOffset,
 
 void SfxCensus_Init(void) {
   SrAudioTraceSubscription subscription = {
-    .struct_size = SR_AUDIO_TRACE_SUBSCRIPTION_V2_SIZE,
+    .struct_size = SR_AUDIO_TRACE_SUBSCRIPTION_V3_SIZE,
     .callback = &OnAudioTrace,
+    .event_mask = SR_AUDIO_TRACE_MASK_CPU_PORT_WRITE,
   };
   if (!CensusEnabled()) return;
   s_runner_api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);

@@ -271,6 +271,7 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	runnerFlagsChanged := false
 	if runnerSourceCount > 0 {
 		runnerFlagsDigest := sha256.Sum256([]byte(options.ZigPath + "\x00" +
+			runtimeArchiveObjectCacheVersion + "\x00" +
 			strings.Join(runnerCompileArgs, "\x00")))
 		runnerFlagsHash = hex.EncodeToString(runnerFlagsDigest[:])
 		previousRunnerFlags, _ := os.ReadFile(runnerFlagsPath)
@@ -337,7 +338,7 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 			}
 			args := compileArgs
 			if item.runner {
-				args = runnerCompileArgs
+				args = runtimeSourceCompileArgs(runnerCompileArgs, item.source)
 			}
 			command := exec.Command(options.ZigPath, append(append([]string(nil), args...), "-c", item.source, "-o", item.object)...)
 			output, err := command.CombinedOutput()
@@ -399,6 +400,8 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	}
 	defer cleanupArchive()
 
+	// The private C++20 device is built without exceptions/RTTI and exports a
+	// C ABI with no C++ support-runtime dependency, so the game link stays C.
 	linkArgs := []string{"cc"}
 	if options.Target != "" {
 		linkArgs = append(linkArgs, "-target", options.Target)

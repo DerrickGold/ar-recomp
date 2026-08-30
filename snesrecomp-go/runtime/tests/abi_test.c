@@ -45,6 +45,10 @@ static uint32_t s_overlay_band_surface[384u * 232u];
 static uint32_t s_mode7_surface[768u * 506u];
 static uint16_t s_virtual_span_entries[4];
 static uint8_t s_virtual_context;
+static uint8_t s_apu_snapshot_ram[SR_APU_RAM_BYTE_COUNT];
+static uint8_t s_dsp_snapshot_registers[SR_DSP_REGISTER_BYTE_COUNT];
+static int16_t s_discard_audio[
+    RTL_APU_TIMELINE_FRAMES_PER_TICK * 2u];
 
 typedef struct TestObserver {
     unsigned count;
@@ -68,6 +72,14 @@ typedef struct TestAudioTraceObserver {
     SrAudioTraceEvent events[6];
     uint8_t driver_bytes[6][3];
 } TestAudioTraceObserver;
+
+typedef struct TestAudioSnapshotReentryObserver {
+    const SnesRunnerApi *api;
+    SrApuStateQuery *query;
+    SrApuStateSnapshot *state;
+    SrResult result;
+    unsigned count;
+} TestAudioSnapshotReentryObserver;
 
 typedef struct TestPpuFrameTransactionObserver {
     unsigned count;
@@ -218,6 +230,17 @@ static void observe_test_audio_trace(void *user_data,
         observer->driver_bytes[index][2] = event->apu_ram[0x47];
     }
     observer->events[index].apu_ram = NULL;
+}
+
+static void observe_test_audio_snapshot_reentry(
+        void *user_data, SrRunnerHandle *runner,
+        const SrAudioTraceEvent *event) {
+    TestAudioSnapshotReentryObserver *observer =
+        (TestAudioSnapshotReentryObserver *)user_data;
+    (void)event;
+    ++observer->count;
+    observer->result = observer->api->query_apu_state(
+        runner, observer->query, observer->state);
 }
 
 static SrResult observe_test_ppu_frame_transaction(
@@ -815,11 +838,59 @@ int main(void) {
         .struct_size = sizeof(audio_trace_subscription),
         .callback = observe_test_audio_trace,
         .user_data = &audio_trace_observer,
+        .event_mask = SR_AUDIO_TRACE_MASK_ALL,
     };
     SrAudioTraceSubscription small_audio_trace_subscription = {
         .struct_size = sizeof(uint32_t),
         .callback = observe_test_audio_trace,
         .user_data = &audio_trace_observer,
+    };
+    SrAudioTraceSubscription filtered_audio_trace_subscription = {
+        .struct_size = sizeof(filtered_audio_trace_subscription),
+        .callback = observe_test_audio_trace,
+        .user_data = &audio_trace_observer,
+        .event_mask = SR_AUDIO_TRACE_MASK_DSP_WRITE,
+    };
+    SrAudioTraceSubscription zero_mask_audio_trace_subscription = {
+        .struct_size = sizeof(zero_mask_audio_trace_subscription),
+        .callback = observe_test_audio_trace,
+        .user_data = &audio_trace_observer,
+    };
+    SrAudioTraceSubscription legacy_audio_trace_subscription = {
+        .struct_size = SR_AUDIO_TRACE_SUBSCRIPTION_V2_SIZE,
+        .callback = observe_test_audio_trace,
+        .user_data = &audio_trace_observer,
+    };
+    SrApuStateQuery apu_state_query = {
+        .struct_size = sizeof(apu_state_query),
+        .apu_ram = s_apu_snapshot_ram,
+        .apu_ram_capacity = sizeof(s_apu_snapshot_ram),
+        .dsp_registers = s_dsp_snapshot_registers,
+        .dsp_register_capacity = sizeof(s_dsp_snapshot_registers),
+    };
+    SrApuStateQuery small_apu_state_query = {
+        .struct_size = sizeof(uint32_t),
+    };
+    SrApuStateSnapshot apu_state = {
+        .struct_size = sizeof(apu_state),
+    };
+    SrApuStateSnapshot small_apu_state = {
+        .struct_size = sizeof(uint32_t),
+    };
+    RtlApuProfile apu_profile = {
+        .struct_size = RTL_APU_PROFILE_V2_SIZE,
+    };
+    TestAudioSnapshotReentryObserver snapshot_reentry_observer = {
+        .api = api,
+        .query = &apu_state_query,
+        .state = &apu_state,
+        .result = SR_RESULT_OK,
+    };
+    SrAudioTraceSubscription snapshot_reentry_subscription = {
+        .struct_size = sizeof(snapshot_reentry_subscription),
+        .callback = observe_test_audio_snapshot_reentry,
+        .user_data = &snapshot_reentry_observer,
+        .event_mask = SR_AUDIO_TRACE_MASK_DSP_WRITE,
     };
     SrSpcPcControlRequest spc_control_request = {
         .struct_size = sizeof(spc_control_request),
@@ -1046,7 +1117,11 @@ int main(void) {
                     "event observer API extent exceeds structure");
     failed |= check(SR_AUDIO_TRACE_EVENT_V2_SIZE <=
                             sizeof(SrAudioTraceEvent) &&
+                        SR_AUDIO_TRACE_EVENT_V3_SIZE <=
+                            sizeof(SrAudioTraceEvent) &&
                         SR_AUDIO_TRACE_SUBSCRIPTION_V2_SIZE <=
+                            sizeof(SrAudioTraceSubscription) &&
+                        SR_AUDIO_TRACE_SUBSCRIPTION_V3_SIZE <=
                             sizeof(SrAudioTraceSubscription) &&
                         SNES_RUNNER_API_AUDIO_TRACE_OBSERVER_SIZE <=
                             sizeof(SnesRunnerApi),
@@ -1063,6 +1138,13 @@ int main(void) {
                         SNES_RUNNER_API_AUDIO_MIX_CONTROL_SIZE <=
                             sizeof(SnesRunnerApi),
                     "audio mix control extent exceeds structure");
+    failed |= check(SR_APU_STATE_QUERY_V2_SIZE <=
+                            sizeof(SrApuStateQuery) &&
+                        SR_APU_STATE_SNAPSHOT_V2_SIZE <=
+                            sizeof(SrApuStateSnapshot) &&
+                        SNES_RUNNER_API_APU_STATE_SNAPSHOT_SIZE <=
+                            sizeof(SnesRunnerApi),
+                    "APU state snapshot extent exceeds structure");
     failed |= check(SR_MUTATION_COMMAND_V2_SIZE <=
                         sizeof(SrMutationCommand) &&
                         SR_MUTATION_STATUS_V2_SIZE <=
@@ -1100,6 +1182,9 @@ int main(void) {
     failed |= check((api->capabilities &
                      SR_RUNNER_CAP_AUDIO_MIX_CONTROL) != 0u,
                     "audio mix control capability missing");
+    failed |= check((api->capabilities &
+                     SR_RUNNER_CAP_APU_STATE_SNAPSHOT) != 0u,
+                    "APU state snapshot capability missing");
     failed |= check((api->capabilities &
                          (SR_RUNNER_CAP_PPU_STATE |
                           SR_RUNNER_CAP_BORROWED_U16_SPANS |
@@ -1340,6 +1425,205 @@ int main(void) {
         snes->nmiEnabled = false;
     }
 
+    dsp_setExtendedVoicesEnabled(false);
+    snes->apu->ram[0x1234u] = 0x5au;
+    dsp_write(snes->apu->dsp, 0x5du, 0x6eu);
+    dsp_write(snes->apu->dsp, 0x6cu, 0x40u);
+    snes->apu->dsp->sampleRead = 11u;
+    snes->apu->dsp->sampleWrite = 17u;
+    snes->apu->sampleClock = 29u;
+    snes->apu->cycles = 35u;
+    snes->apu->cycleClock = 35u;
+    snes->apu->dspSlot = 3u;
+    snes->apu->dspAdr = 0x5du;
+    snes->apu->romReadable = true;
+    snes->apu->inPorts[0] = 0x10u;
+    snes->apu->inPorts[4] = 0x14u;
+    snes->apu->inPorts[5] = 0x15u;
+    snes->apu->outPorts[3] = 0x23u;
+    snes->apu->timer[1].enabled = true;
+    snes->apu->timer[1].target = 0x31u;
+    snes->apu->timer[1].counter = 0x07u;
+    snes->apu->spc->pc = 0x3456u;
+    snes->apu->spc->a = 0x16u;
+    snes->apu->spc->x = 0x27u;
+    snes->apu->spc->y = 0x38u;
+    snes->apu->spc->sp = 0x49u;
+    snes->apu->spc->c = true;
+    snes->apu->spc->z = true;
+    apu_clearPortQueue(snes->apu);
+    apu_schedulePortWrite(snes->apu, 2u, 0x7fu, 100u);
+    failed |= check(api->query_apu_state(
+                        runner, &small_apu_state_query, &apu_state) ==
+                            SR_RESULT_INVALID_ARGUMENT &&
+                        api->query_apu_state(
+                            runner, &apu_state_query, &small_apu_state) ==
+                            SR_RESULT_INVALID_ARGUMENT,
+                    "undersized APU state query accepted");
+    failed |= check(api->query_apu_state(
+                        runner, &apu_state_query, &apu_state) ==
+                            SR_RESULT_OK &&
+                        s_apu_snapshot_ram[0x1234u] == 0x5au &&
+                        s_dsp_snapshot_registers[0x5du] == 0x6eu &&
+                        apu_state.apu_ram_bytes_written ==
+                            SR_APU_RAM_BYTE_COUNT &&
+                        apu_state.dsp_register_bytes_written ==
+                            SR_DSP_REGISTER_BYTE_COUNT &&
+                        apu_state.apu_cycles == 35u &&
+                        apu_state.dsp_frames_completed == 29u &&
+                        apu_state.pcm_read_cursor == 11u &&
+                        apu_state.pcm_write_cursor == 17u &&
+                        apu_state.pcm_ring_fill_frames == 6u &&
+                        apu_state.scheduled_port_write_count == 1u &&
+                        apu_state.spc_pc == 0x3456u &&
+                        apu_state.spc_psw == 0x03u &&
+                        apu_state.dsp_slot == 3u &&
+                        apu_state.current_dsp_address == 0x5du &&
+                        apu_state.cpu_to_apu_ports[0] == 0x10u &&
+                        apu_state.apu_aux_ports[0] == 0x14u &&
+                        apu_state.apu_aux_ports[1] == 0x15u &&
+                        apu_state.apu_to_cpu_ports[3] == 0x23u &&
+                        apu_state.timer_enabled_mask == 0x02u &&
+                        apu_state.timer_targets[1] == 0x31u &&
+                        apu_state.timer_outputs[1] == 0x07u &&
+                        apu_state.hardware_voice_count == 8u &&
+                        apu_state.extended_voice_count == 0u &&
+                        (apu_state.flags &
+                         (SR_APU_STATE_DSP_MUTED |
+                          SR_APU_STATE_BOOT_ROM_VISIBLE)) ==
+                            (SR_APU_STATE_DSP_MUTED |
+                             SR_APU_STATE_BOOT_ROM_VISIBLE),
+                    "coherent APU state snapshot mismatch");
+    sr_runner_audio_production_begin();
+    failed |= check(api->query_apu_state(
+                        runner, &apu_state_query, &apu_state) ==
+                            SR_RESULT_BUSY,
+                    "APU state query allowed during audio production");
+    sr_runner_audio_production_end();
+
+    RtlApuProfileReset();
+    snes->apuCatchupCycles = 5.0;
+    snes_catchupApu(snes);
+    for (unsigned index = 0u; index < 3u; ++index)
+        apu_cycle(snes->apu);
+    RtlApuProfileRecordCycles(RTL_APU_CYCLE_AUDIO_DEMAND, 3u, 0u);
+    for (unsigned index = 0u; index < 4u; ++index)
+        apu_cycle(snes->apu);
+    RtlApuProfileRecordCycles(RTL_APU_CYCLE_UPLOAD_CONTROL, 4u, 0u);
+    for (unsigned index = 0u; index < 2u; ++index)
+        apu_cycle(snes->apu);
+    RtlApuProfileRecordCycles(RTL_APU_CYCLE_TIMELINE, 2u, 0u);
+    RtlApuProfileRead(&apu_profile);
+    failed |= check(apu_profile.flags == 0u &&
+                        apu_profile.apu_cycles_total == 14u &&
+                        apu_profile.apu_cycles_port_sync == 5u &&
+                        apu_profile.apu_cycles_audio_demand == 3u &&
+                        apu_profile.apu_cycles_upload_control == 4u &&
+                        apu_profile.apu_cycles_timeline == 2u &&
+                        apu_profile.apu_cycles_unattributed == 0u &&
+                        apu_profile.port_sync_calls == 1u,
+                    "APU profile attribution mismatch");
+
+    g_snes = snes;
+    apu_reset(snes->apu);
+    RtlApuProfileReset();
+    RtlAdvanceApuTimeline();
+    RtlApuProfileRead(&apu_profile);
+    failed |= check(
+        apu_cycle_count(snes->apu) == RTL_APU_TIMELINE_CYCLES_PER_TICK &&
+            snes->apu->timelineTargetCycles ==
+                RTL_APU_TIMELINE_CYCLES_PER_TICK &&
+            snes->apu->sampleClock == RTL_APU_TIMELINE_FRAMES_PER_TICK &&
+            apu_profile.apu_cycles_total ==
+                RTL_APU_TIMELINE_CYCLES_PER_TICK &&
+            apu_profile.apu_cycles_timeline ==
+                RTL_APU_TIMELINE_CYCLES_PER_TICK &&
+            apu_profile.apu_cycles_unattributed == 0u,
+        "headless APU timeline tick mismatch");
+
+    apu_reset(snes->apu);
+    RtlApuProfileReset();
+    for (uint32_t index = 0u;
+         index < RTL_APU_TIMELINE_CYCLES_PER_TICK + 96u; ++index)
+        apu_cycle(snes->apu);
+    RtlApuProfileRecordCycles(
+        RTL_APU_CYCLE_AUDIO_DEMAND,
+        RTL_APU_TIMELINE_CYCLES_PER_TICK + 96u, 0u);
+    RtlAdvanceApuTimeline();
+    failed |= check(
+        apu_cycle_count(snes->apu) ==
+                RTL_APU_TIMELINE_CYCLES_PER_TICK + 96u &&
+            snes->apu->timelineTargetCycles ==
+                RTL_APU_TIMELINE_CYCLES_PER_TICK,
+        "timeline double-advanced an APU already ahead from audio demand");
+    RtlAdvanceApuTimeline();
+    RtlApuProfileRead(&apu_profile);
+    failed |= check(
+        apu_cycle_count(snes->apu) ==
+                2u * RTL_APU_TIMELINE_CYCLES_PER_TICK &&
+            snes->apu->sampleClock ==
+                2u * RTL_APU_TIMELINE_FRAMES_PER_TICK &&
+            apu_profile.apu_cycles_audio_demand ==
+                RTL_APU_TIMELINE_CYCLES_PER_TICK + 96u &&
+            apu_profile.apu_cycles_timeline ==
+                RTL_APU_TIMELINE_CYCLES_PER_TICK - 96u &&
+            apu_profile.apu_cycles_unattributed == 0u,
+        "timeline did not deterministically rejoin an ahead audio consumer");
+
+    apu_reset(snes->apu);
+    RtlSetAudioOutputRate(32040);
+    RtlApuProfileReset();
+    RtlRenderAudio(s_discard_audio, RTL_APU_TIMELINE_FRAMES_PER_TICK, 2);
+    RtlAdvanceApuTimeline();
+    failed |= check(
+        apu_cycle_count(snes->apu) ==
+                RTL_APU_TIMELINE_CYCLES_PER_TICK + 64u &&
+            snes->apu->timelineTargetCycles ==
+                RTL_APU_TIMELINE_CYCLES_PER_TICK &&
+            snes->apu->sampleClock ==
+                RTL_APU_TIMELINE_FRAMES_PER_TICK + 2u,
+        "discard-pumped audio was double-advanced by the timeline");
+    RtlAdvanceApuTimeline();
+    RtlApuProfileRead(&apu_profile);
+    failed |= check(
+        apu_cycle_count(snes->apu) ==
+                2u * RTL_APU_TIMELINE_CYCLES_PER_TICK &&
+            snes->apu->sampleClock ==
+                2u * RTL_APU_TIMELINE_FRAMES_PER_TICK &&
+            apu_profile.apu_cycles_audio_demand ==
+                RTL_APU_TIMELINE_CYCLES_PER_TICK + 64u &&
+            apu_profile.apu_cycles_timeline ==
+                RTL_APU_TIMELINE_CYCLES_PER_TICK - 64u &&
+            apu_profile.apu_cycles_unattributed == 0u,
+        "discard-pumped audio did not deterministically rejoin the timeline");
+    snes->abiAudioFrameCounter = 0u;
+
+    apu_reset(snes->apu);
+    apu_cycle(snes->apu);
+    RtlApuProfileReset();
+    apu_reset(snes->apu);
+    RtlApuProfileRead(&apu_profile);
+    failed |= check(
+        apu_profile.apu_cycles_total == 0u &&
+            (apu_profile.flags & RTL_APU_PROFILE_INCONSISTENT) != 0u,
+        "APU profile clock rollback wrapped its cycle delta");
+
+    apu_reset(snes->apu);
+    g_apu_pace_cycles_estimate = 0u;
+    g_apu_last_sync_cycles = 0u;
+    RtlApuWrite(0x2140u, 0x11u);
+    RtlApuWrite(0x2140u, 0x22u);
+    RtlApuWrite(0x2140u, 0x22u);
+    failed |= check(
+        snes->apu->portQTail - snes->apu->portQHead == 3u &&
+            snes->apu->portQueue[0].target_sample == 0u &&
+            snes->apu->portQueue[1].target_sample == APU_PORT_MIN_DWELL &&
+            snes->apu->portQueue[2].target_sample == APU_PORT_MIN_DWELL &&
+            snes->apu->portClockNs == 0u,
+        "CPU-to-APU port scheduling depends on non-emulated time");
+    RtlApuProfileReset();
+    g_snes = NULL;
+
     snes->apu->ram[0x1a] = 0xa1u;
     snes->apu->ram[0x35] = 0xb2u;
     snes->apu->ram[0x47] = 0xc3u;
@@ -1360,7 +1644,7 @@ int main(void) {
                         &audio_trace_subscription_id) == SR_RESULT_OK &&
                         audio_trace_subscription_id != 0u,
                     "audio trace subscription failed");
-    failed |= check(sr_runner_audio_trace_enabled(),
+    failed |= check(sr_runner_audio_trace_enabled(SR_AUDIO_TRACE_MASK_ALL),
                     "audio trace observation did not become active");
     snes->apu->spc->pc = 0x3456u;
     snes->apu->spc->stopped = false;
@@ -1370,6 +1654,7 @@ int main(void) {
     apu_cpuWrite(snes->apu, 0xf3u, 0x6eu);
     apu_clearPortQueue(snes->apu);
     snes->apu->cycles = 0u;
+    snes->apu->dspSlot = 0u;
     snes->apu->cpuCyclesLeft = 1u;
     apu_schedulePortWrite(snes->apu, 2u, 0x7fu, 0u);
     apu_cycle(snes->apu);
@@ -1395,7 +1680,11 @@ int main(void) {
                     "SPC opcode trace payload mismatch");
     failed |= check(audio_trace_observer.events[1].type ==
                             SR_AUDIO_TRACE_DSP_WRITE &&
-                        audio_trace_observer.events[1].spc_pc == 0x3456u &&
+                        audio_trace_observer.events[1].struct_size ==
+                            SR_AUDIO_TRACE_EVENT_V3_SIZE &&
+                        audio_trace_observer.events[1].spc_pc == 0x3457u &&
+                        audio_trace_observer.events[1].spc_instruction_pc ==
+                            0x3456u &&
                         audio_trace_observer.events[1].dsp_address == 0x5du &&
                         audio_trace_observer.events[1].value == 0x6eu,
                     "DSP trace payload mismatch");
@@ -1433,8 +1722,67 @@ int main(void) {
     failed |= check(api->unsubscribe_audio_trace(
                         runner, audio_trace_subscription_id) ==
                             SR_RESULT_OK &&
-                        !sr_runner_audio_trace_enabled(),
+                        !sr_runner_audio_trace_enabled(
+                            SR_AUDIO_TRACE_MASK_ALL),
                     "audio trace unsubscribe remained active");
+    audio_trace_subscription_id = 0u;
+
+    failed |= check(api->subscribe_audio_trace(
+                        runner, &zero_mask_audio_trace_subscription,
+                        &audio_trace_subscription_id) ==
+                            SR_RESULT_INVALID_ARGUMENT &&
+                        audio_trace_subscription_id == 0u,
+                    "zero audio trace mask accepted");
+    memset(&audio_trace_observer, 0, sizeof(audio_trace_observer));
+    failed |= check(api->subscribe_audio_trace(
+                        runner, &filtered_audio_trace_subscription,
+                        &audio_trace_subscription_id) == SR_RESULT_OK &&
+                        sr_runner_audio_trace_enabled(
+                            SR_AUDIO_TRACE_MASK_DSP_WRITE) &&
+                        !sr_runner_audio_trace_enabled(
+                            SR_AUDIO_TRACE_MASK_SPC_OPCODE),
+                    "filtered audio trace mask was not installed");
+    snes->apu->spc->pc = 0x3456u;
+    snes->apu->ram[0x3456u] = 0x00u;
+    (void)spc_runOpcode(snes->apu->spc);
+    apu_cpuWrite(snes->apu, 0xf2u, 0x2cu);
+    apu_cpuWrite(snes->apu, 0xf3u, 0x55u);
+    failed |= check(audio_trace_observer.count == 1u &&
+                        audio_trace_observer.events[0].type ==
+                            SR_AUDIO_TRACE_DSP_WRITE,
+                    "filtered tracing dispatched an unrequested event");
+    failed |= check(api->unsubscribe_audio_trace(
+                        runner, audio_trace_subscription_id) ==
+                            SR_RESULT_OK,
+                    "filtered audio trace unsubscribe failed");
+    audio_trace_subscription_id = 0u;
+
+    failed |= check(api->subscribe_audio_trace(
+                        runner, &snapshot_reentry_subscription,
+                        &audio_trace_subscription_id) == SR_RESULT_OK,
+                    "snapshot re-entry observer subscription failed");
+    apu_cpuWrite(snes->apu, 0xf2u, 0x3cu);
+    apu_cpuWrite(snes->apu, 0xf3u, 0x44u);
+    failed |= check(snapshot_reentry_observer.count == 1u &&
+                        snapshot_reentry_observer.result == SR_RESULT_BUSY,
+                    "APU snapshot allowed from an audio trace callback");
+    failed |= check(api->unsubscribe_audio_trace(
+                        runner, audio_trace_subscription_id) ==
+                            SR_RESULT_OK,
+                    "snapshot re-entry observer unsubscribe failed");
+    audio_trace_subscription_id = 0u;
+
+    memset(&audio_trace_observer, 0, sizeof(audio_trace_observer));
+    failed |= check(api->subscribe_audio_trace(
+                        runner, &legacy_audio_trace_subscription,
+                        &audio_trace_subscription_id) == SR_RESULT_OK &&
+                        sr_runner_audio_trace_enabled(
+                            SR_AUDIO_TRACE_MASK_ALL),
+                    "legacy audio trace subscription lost all-event behavior");
+    failed |= check(api->unsubscribe_audio_trace(
+                        runner, audio_trace_subscription_id) ==
+                            SR_RESULT_OK,
+                    "legacy audio trace unsubscribe failed");
     audio_trace_subscription_id = 0u;
 
     snes->ppu->inidisp = 0x8du;

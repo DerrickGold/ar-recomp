@@ -246,10 +246,6 @@ typedef struct SrEventSubscription {
  * this interface and valid only for the callback; consumers must copy any
  * bytes they retain. Install and remove observers only while audio production
  * and runner execution are stopped. */
-#define SR_APU_RAM_BYTE_COUNT UINT64_C(0x10000)
-#define SR_APU_INPUT_PORT_COUNT 6u
-#define SR_APU_OUTPUT_PORT_COUNT 4u
-
 typedef uint32_t SrAudioTraceEventType;
 enum {
     SR_AUDIO_TRACE_APU_PORT_APPLY = 1u,
@@ -259,6 +255,19 @@ enum {
     SR_AUDIO_TRACE_CPU_PORT_WRITE = 5u,
     SR_AUDIO_TRACE_SPC_UPLOAD = 6u
 };
+
+typedef uint64_t SrAudioTraceMask;
+#define SR_AUDIO_TRACE_MASK_APU_PORT_APPLY UINT64_C(0x0000000000000001)
+#define SR_AUDIO_TRACE_MASK_SPC_PORT_READ UINT64_C(0x0000000000000002)
+#define SR_AUDIO_TRACE_MASK_SPC_OPCODE UINT64_C(0x0000000000000004)
+#define SR_AUDIO_TRACE_MASK_DSP_WRITE UINT64_C(0x0000000000000008)
+#define SR_AUDIO_TRACE_MASK_CPU_PORT_WRITE UINT64_C(0x0000000000000010)
+#define SR_AUDIO_TRACE_MASK_SPC_UPLOAD UINT64_C(0x0000000000000020)
+#define SR_AUDIO_TRACE_MASK_ALL                                         \
+    (SR_AUDIO_TRACE_MASK_APU_PORT_APPLY |                               \
+     SR_AUDIO_TRACE_MASK_SPC_PORT_READ |                                \
+     SR_AUDIO_TRACE_MASK_SPC_OPCODE | SR_AUDIO_TRACE_MASK_DSP_WRITE |   \
+     SR_AUDIO_TRACE_MASK_CPU_PORT_WRITE | SR_AUDIO_TRACE_MASK_SPC_UPLOAD)
 
 typedef struct SrAudioTraceEvent {
     uint32_t struct_size;
@@ -280,11 +289,19 @@ typedef struct SrAudioTraceEvent {
     uint32_t source_address;
     uint32_t frame_counter;
     const char *function_name;
+    uint16_t spc_instruction_pc;
+    uint8_t spc_instruction_cycle;
+    uint8_t dsp_slot;
+    uint32_t reserved32;
 } SrAudioTraceEvent;
 
 #define SR_AUDIO_TRACE_EVENT_V2_SIZE                                     \
     ((uint32_t)(offsetof(SrAudioTraceEvent, function_name) +              \
                 sizeof(((SrAudioTraceEvent *)0)->function_name)))
+
+#define SR_AUDIO_TRACE_EVENT_V3_SIZE                                    \
+    ((uint32_t)(offsetof(SrAudioTraceEvent, reserved32) +                \
+                sizeof(((SrAudioTraceEvent *)0)->reserved32)))
 
 typedef void (*SrAudioTraceCallback)(void *user_data,
                                      SrRunnerHandle *runner,
@@ -295,11 +312,17 @@ typedef struct SrAudioTraceSubscription {
     uint32_t flags;
     SrAudioTraceCallback callback;
     void *user_data;
+    SrAudioTraceMask event_mask;
+    uint64_t reserved;
 } SrAudioTraceSubscription;
 
 #define SR_AUDIO_TRACE_SUBSCRIPTION_V2_SIZE                              \
     ((uint32_t)(offsetof(SrAudioTraceSubscription, user_data) +           \
                 sizeof(((SrAudioTraceSubscription *)0)->user_data)))
+
+#define SR_AUDIO_TRACE_SUBSCRIPTION_V3_SIZE                             \
+    ((uint32_t)(offsetof(SrAudioTraceSubscription, reserved) +           \
+                sizeof(((SrAudioTraceSubscription *)0)->reserved)))
 
 /** @} */
 

@@ -1,5 +1,6 @@
 #include "dsp.h"
 
+#include "dsp_accuracy_bridge.h"
 #include "snesrecomp/host/audio_trace.h"
 #include "simd.h"
 #include "dsp_shadow.h"
@@ -16,8 +17,6 @@
 #include <emmintrin.h>
 #endif
 
-/* These optional services are supplied by the complete runner. Focused tests
- * provide inert definitions, keeping the device core independent of a host. */
 enum {
     kEnvelopeAttack = 0,
     kEnvelopeDecay = 1,
@@ -40,12 +39,6 @@ static bool s_music_muted;
 int g_dsp_voice_mute_srcn_min = -1;
 void (*g_dsp_voice_kon_hook)(int, uint8_t, uint16_t, int, int, uint16_t);
 
-static int clamp16(int value) {
-    if (value < -32768) return -32768;
-    if (value > 32767) return 32767;
-    return value;
-}
-
 static int clamp_percent(int value) {
     if (value < 0) return 0;
     if (value > 100) return 100;
@@ -55,16 +48,6 @@ static int clamp_percent(int value) {
 static uint16_t read_u16(const uint8_t *ram, uint16_t address) {
     return (uint16_t)(ram[address] |
                       ((uint16_t)ram[(uint16_t)(address + 1u)] << 8));
-}
-
-static int16_t read_s16(const uint8_t *ram, uint16_t address) {
-    return (int16_t)read_u16(ram, address);
-}
-
-static void write_s16(uint8_t *ram, uint16_t address, int value) {
-    const uint16_t result = (uint16_t)(int16_t)clamp16(value);
-    ram[address] = (uint8_t)result;
-    ram[(uint16_t)(address + 1u)] = (uint8_t)(result >> 8);
 }
 
 void dsp_setExtendedVoicesEnabled(bool enabled) {
@@ -82,16 +65,14 @@ int dsp_activeVoiceCount(void) {
 
 void dsp_setVoiceBus(Dsp *dsp, int channel, DspVoiceBus bus) {
     if (dsp == NULL || channel < 0 || channel >= kDspMaximumVoiceCount) return;
-    if (bus < kDspVoiceBus_Unclassified || bus > kDspVoiceBus_Sfx) {
+    if (bus < kDspVoiceBus_Unclassified || bus > kDspVoiceBus_Sfx)
         bus = kDspVoiceBus_Unclassified;
-    }
     dsp->voiceBus[channel] = (uint8_t)bus;
 }
 
 DspVoiceBus dsp_getVoiceBus(const Dsp *dsp, int channel) {
-    if (dsp == NULL || channel < 0 || channel >= kDspMaximumVoiceCount) {
+    if (dsp == NULL || channel < 0 || channel >= kDspMaximumVoiceCount)
         return kDspVoiceBus_Unclassified;
-    }
     return (DspVoiceBus)dsp->voiceBus[channel];
 }
 
@@ -109,14 +90,6 @@ void dsp_setMusicBusMuted(bool muted) {
     s_music_muted = muted;
 }
 
-static bool voice_is_muted(const Dsp *dsp, int channel) {
-    const DspVoiceBus bus = dsp_getVoiceBus(dsp, channel);
-    if (s_music_muted && bus == kDspVoiceBus_Music) return true;
-    return bus == kDspVoiceBus_Unclassified &&
-           g_dsp_voice_mute_srcn_min >= 0 &&
-           dsp->channel[channel].srcn >= g_dsp_voice_mute_srcn_min;
-}
-
 static int voice_bus_gain(const Dsp *dsp, int channel) {
     switch (dsp_getVoiceBus(dsp, channel)) {
         case kDspVoiceBus_Music: return s_music_gain_percent;
@@ -125,124 +98,20 @@ static int voice_bus_gain(const Dsp *dsp, int channel) {
     }
 }
 
-static int scale_for_bus(const Dsp *dsp, int channel, int sample) {
-    const int gain = voice_bus_gain(dsp, channel);
-    return gain == 100 ? sample : sample * gain / 100;
+static bool voice_is_muted(const Dsp *dsp, int channel) {
+    const DspVoiceBus bus = dsp_getVoiceBus(dsp, channel);
+    if (s_music_muted && bus == kDspVoiceBus_Music) return true;
+    return bus == kDspVoiceBus_Unclassified &&
+           g_dsp_voice_mute_srcn_min >= 0 &&
+           dsp->channel[channel].srcn >= g_dsp_voice_mute_srcn_min;
 }
 
-static bool virtual_voice_is_sleeping(const Dsp *dsp, int channel) {
-    const DspChannel *voice = &dsp->channel[channel];
-    return channel >= kDspHardwareVoiceCount && voice->gain == 0u &&
-           voice->adsrState == kEnvelopeRelease && !voice->keyOn &&
-           !voice->keyOff && !dsp->reset;
-}
-
-Dsp *dsp_init(uint8_t *ram) {
-    if (ram == NULL) return NULL;
-    Dsp *dsp = (Dsp *)calloc(1u, sizeof(*dsp));
-    if (dsp == NULL) return NULL;
-    dsp->apu_ram = ram;
-    dsp->shadow = dsp_shadow_create();
-    return dsp;
-}
-
-void dsp_free(Dsp *dsp) {
-    if (dsp == NULL) return;
-    dsp_shadow_free((DspShadow *)dsp->shadow);
-    free(dsp);
-}
-
-void dsp_reset(Dsp *dsp) {
-    if (dsp == NULL) return;
-    uint8_t *apu_ram = dsp->apu_ram;
-    void *shadow = dsp->shadow;
-    memset(dsp, 0, sizeof(*dsp));
-    dsp->apu_ram = apu_ram;
-    dsp->shadow = shadow;
-    dsp->ram[0x7c] = 0xffu;
-    dsp->mute = true;
-    dsp->reset = true;
-    dsp->noiseSample = -0x4000;
-    dsp->echoDelay = 1u;
-    dsp->echoRemain = 1u;
-}
-
-void dsp_saveload(Dsp *dsp, SaveLoadInfo *info) {
-    if (dsp == NULL || info == NULL || info->func == NULL) return;
-    if (!info->portable) {
-        info->func(info, &dsp->ram, sizeof(*dsp) - offsetof(Dsp, ram));
-        return;
-    }
-    saveload_bytes(info, dsp->ram, sizeof(dsp->ram));
-    for (unsigned index = 0; index < kDspMaximumVoiceCount; ++index) {
-        DspChannel *voice = &dsp->channel[index];
-        saveload_u16(info, &voice->pitch);
-        saveload_u16(info, &voice->pitchCounter);
-        saveload_bool(info, &voice->pitchModulation);
-        saveload_i16_array(info, voice->decodeBuffer,
-                           sizeof(voice->decodeBuffer) /
-                               sizeof(voice->decodeBuffer[0]));
-        saveload_u8(info, &voice->srcn);
-        saveload_u16(info, &voice->decodeOffset);
-        saveload_u8(info, &voice->previousFlags);
-        saveload_i16(info, &voice->old);
-        saveload_i16(info, &voice->older);
-        saveload_bool(info, &voice->useNoise);
-        saveload_u16_array(info, voice->adsrRates,
-                           sizeof(voice->adsrRates) /
-                               sizeof(voice->adsrRates[0]));
-        saveload_u16(info, &voice->rateCounter);
-        saveload_u8(info, &voice->adsrState);
-        saveload_u16(info, &voice->sustainLevel);
-        saveload_bool(info, &voice->useGain);
-        saveload_u8(info, &voice->gainMode);
-        saveload_bool(info, &voice->directGain);
-        saveload_u16(info, &voice->gainValue);
-        saveload_u16(info, &voice->gain);
-        saveload_bool(info, &voice->keyOn);
-        saveload_bool(info, &voice->keyOff);
-        saveload_i16(info, &voice->sampleOut);
-        saveload_i8(info, &voice->volumeL);
-        saveload_i8(info, &voice->volumeR);
-        saveload_bool(info, &voice->echoEnable);
-    }
-    saveload_u16(info, &dsp->dirPage);
-    saveload_bool(info, &dsp->evenCycle);
-    saveload_bool(info, &dsp->mute);
-    saveload_bool(info, &dsp->reset);
-    saveload_i8(info, &dsp->masterVolumeL);
-    saveload_i8(info, &dsp->masterVolumeR);
-    saveload_i16(info, &dsp->noiseSample);
-    saveload_u16(info, &dsp->noiseRate);
-    saveload_u16(info, &dsp->noiseCounter);
-    saveload_bool(info, &dsp->echoWrites);
-    saveload_i8(info, &dsp->echoVolumeL);
-    saveload_i8(info, &dsp->echoVolumeR);
-    saveload_i8(info, &dsp->feedbackVolume);
-    saveload_u16(info, &dsp->echoBufferAdr);
-    saveload_u16(info, &dsp->echoDelay);
-    saveload_u16(info, &dsp->echoRemain);
-    saveload_u16(info, &dsp->echoBufferIndex);
-    saveload_u8(info, &dsp->firBufferIndex);
-    saveload_bytes(info, dsp->firValues, sizeof(dsp->firValues));
-    saveload_i16_array(info, dsp->firBufferL,
-                       sizeof(dsp->firBufferL) / sizeof(dsp->firBufferL[0]));
-    saveload_i16_array(info, dsp->firBufferR,
-                       sizeof(dsp->firBufferR) / sizeof(dsp->firBufferR[0]));
-    saveload_i16_array(info, dsp->sampleBuffer,
-                       sizeof(dsp->sampleBuffer) /
-                           sizeof(dsp->sampleBuffer[0]));
-    saveload_u32(info, &dsp->sampleWrite);
-    saveload_u32(info, &dsp->sampleRead);
-}
-
-static void apply_voice_register(Dsp *dsp, int channel, uint8_t reg,
-                                 uint8_t value) {
+static void mirror_voice_register(Dsp *dsp, int channel, uint8_t reg,
+                                  uint8_t value) {
+    DspChannel *voice;
     if (dsp == NULL || channel < 0 || channel >= kDspMaximumVoiceCount ||
-        reg > 7u) {
-        return;
-    }
-    DspChannel *voice = &dsp->channel[channel];
+        reg > 7u) return;
+    voice = &dsp->channel[channel];
     switch (reg) {
         case 0: voice->volumeL = (int8_t)value; break;
         case 1: voice->volumeR = (int8_t)value; break;
@@ -250,8 +119,8 @@ static void apply_voice_register(Dsp *dsp, int channel, uint8_t reg,
             voice->pitch = (uint16_t)((voice->pitch & 0x3f00u) | value);
             break;
         case 3:
-            voice->pitch = (uint16_t)(((uint16_t)value << 8 |
-                                       (voice->pitch & 0xffu)) & 0x3fffu);
+            voice->pitch = (uint16_t)((((uint16_t)value << 8) |
+                                      (voice->pitch & 0xffu)) & 0x3fffu);
             break;
         case 4: voice->srcn = value; break;
         case 5:
@@ -265,25 +134,25 @@ static void apply_voice_register(Dsp *dsp, int channel, uint8_t reg,
             break;
         case 7:
             voice->directGain = (value & 0x80u) == 0u;
-            if (voice->directGain) {
-                voice->gainValue = (uint16_t)((value & 0x7fu) << 4);
-            } else {
-                voice->gainMode = (uint8_t)((value >> 5) & 3u);
-                voice->adsrRates[3] = kRatePeriods[value & 0x1fu];
-            }
+            voice->gainValue = voice->directGain
+                ? (uint16_t)((value & 0x7fu) << 4) : voice->gainValue;
+            voice->gainMode = (uint8_t)((value >> 5) & 3u);
+            voice->adsrRates[3] = kRatePeriods[value & 0x1fu];
             break;
         default: break;
     }
 }
 
-static void apply_hardware_mask(Dsp *dsp, uint8_t address, uint8_t value,
-                                uint8_t update_mask) {
-    if (dsp == NULL) return;
-    for (int channel = 0; channel < kDspHardwareVoiceCount; ++channel) {
+static void mirror_hardware_mask(Dsp *dsp, uint8_t address, uint8_t value,
+                                 uint8_t update_mask) {
+    int channel;
+    for (channel = 0; channel < kDspHardwareVoiceCount; ++channel) {
         const uint8_t bit = (uint8_t)(1u << channel);
+        DspChannel *voice;
+        bool enabled;
         if ((update_mask & bit) == 0u) continue;
-        const bool enabled = (value & bit) != 0u;
-        DspChannel *voice = &dsp->channel[channel];
+        voice = &dsp->channel[channel];
+        enabled = (value & bit) != 0u;
         switch (address) {
             case 0x2d: voice->pitchModulation = enabled; break;
             case 0x3d: voice->useNoise = enabled; break;
@@ -293,26 +162,159 @@ static void apply_hardware_mask(Dsp *dsp, uint8_t address, uint8_t value,
             default: return;
         }
     }
-    dsp->ram[address] = (uint8_t)((dsp->ram[address] & ~update_mask) |
-                                  (value & update_mask));
+}
+
+static void sync_accuracy_register_mirrors(Dsp *dsp) {
+    if (dsp == NULL || dsp->accuracy == NULL) return;
+    sr_dsp_accuracy_copy_registers((const SrDspAccuracy *)dsp->accuracy,
+                                   dsp->ram);
+    dsp->masterVolumeL = (int8_t)dsp->ram[0x0c];
+    dsp->masterVolumeR = (int8_t)dsp->ram[0x1c];
+    dsp->echoVolumeL = (int8_t)dsp->ram[0x2c];
+    dsp->echoVolumeR = (int8_t)dsp->ram[0x3c];
+    dsp->feedbackVolume = (int8_t)dsp->ram[0x0d];
+    dsp->dirPage = (uint16_t)dsp->ram[0x5d] << 8;
+    dsp->reset = (dsp->ram[0x6c] & 0x80u) != 0u;
+    dsp->mute = (dsp->ram[0x6c] & 0x40u) != 0u;
+    dsp->echoWrites = (dsp->ram[0x6c] & 0x20u) == 0u;
+    dsp->noiseRate = kRatePeriods[dsp->ram[0x6c] & 0x1fu];
+    dsp->echoBufferAdr = (uint16_t)dsp->ram[0x6d] << 8;
+    dsp->echoDelay = (uint16_t)((dsp->ram[0x7d] & 0x0fu) * 512u);
+    if (dsp->echoDelay == 0u) dsp->echoDelay = 1u;
+}
+
+static void sync_accuracy_voice_mirrors(Dsp *dsp) {
+    int channel;
+    if (dsp == NULL || dsp->accuracy == NULL) return;
+    for (channel = 0; channel < kDspMaximumVoiceCount; ++channel) {
+        SrDspAccuracyVoice source;
+        DspChannel *voice = &dsp->channel[channel];
+        sr_dsp_accuracy_get_voice((const SrDspAccuracy *)dsp->accuracy,
+                                  channel, &source);
+        voice->pitchCounter = source.pitch_counter;
+        voice->gain = source.envelope;
+        voice->sampleOut = source.amplitude;
+        voice->decodeOffset = source.brr_address;
+        voice->srcn = source.source_number;
+        voice->adsrState = source.phase == 3u
+            ? kEnvelopeRelease : source.phase;
+    }
+}
+
+static void sync_accuracy_mirrors(Dsp *dsp) {
+    sync_accuracy_register_mirrors(dsp);
+    sync_accuracy_voice_mirrors(dsp);
+}
+
+Dsp *dsp_init(uint8_t *ram) {
+    Dsp *dsp;
+    if (ram == NULL) return NULL;
+    dsp = (Dsp *)calloc(1u, sizeof(*dsp));
+    if (dsp == NULL) return NULL;
+    dsp->apu_ram = ram;
+    dsp->accuracy = sr_dsp_accuracy_create();
+    dsp->shadow = dsp_shadow_create();
+    if (dsp->accuracy == NULL) {
+        dsp_shadow_free((DspShadow *)dsp->shadow);
+        free(dsp);
+        return NULL;
+    }
+    sync_accuracy_mirrors(dsp);
+    return dsp;
+}
+
+void dsp_free(Dsp *dsp) {
+    if (dsp == NULL) return;
+    sr_dsp_accuracy_destroy((SrDspAccuracy *)dsp->accuracy);
+    dsp_shadow_free((DspShadow *)dsp->shadow);
+    free(dsp);
+}
+
+void dsp_reset(Dsp *dsp) {
+    uint8_t *apu_ram;
+    void *shadow;
+    void *accuracy;
+    if (dsp == NULL) return;
+    apu_ram = dsp->apu_ram;
+    shadow = dsp->shadow;
+    accuracy = dsp->accuracy;
+    memset(dsp, 0, sizeof(*dsp));
+    dsp->apu_ram = apu_ram;
+    dsp->shadow = shadow;
+    dsp->accuracy = accuracy;
+    sr_dsp_accuracy_reset((SrDspAccuracy *)accuracy);
+    sync_accuracy_mirrors(dsp);
+    dsp->noiseSample = -0x4000;
+}
+
+void dsp_saveload(Dsp *dsp, SaveLoadInfo *info) {
+    unsigned index;
+    if (dsp == NULL || info == NULL || info->func == NULL) return;
+    sr_dsp_accuracy_saveload((SrDspAccuracy *)dsp->accuracy, info);
+    saveload_bytes(info, dsp->voiceBus, sizeof(dsp->voiceBus));
+    for (index = 0; index < kDspMaximumVoiceCount; ++index) {
+        DspChannel *voice = &dsp->channel[index];
+        saveload_u16(info, &voice->pitch);
+        saveload_bool(info, &voice->pitchModulation);
+        saveload_u8(info, &voice->srcn);
+        saveload_bool(info, &voice->useNoise);
+        saveload_bool(info, &voice->useGain);
+        saveload_bool(info, &voice->directGain);
+        saveload_u16(info, &voice->gainValue);
+        saveload_i8(info, &voice->volumeL);
+        saveload_i8(info, &voice->volumeR);
+        saveload_bool(info, &voice->echoEnable);
+    }
+    saveload_i16_array(info, dsp->sampleBuffer,
+                       sizeof(dsp->sampleBuffer) /
+                           sizeof(dsp->sampleBuffer[0]));
+    saveload_u32(info, &dsp->sampleWrite);
+    saveload_u32(info, &dsp->sampleRead);
+    if (!info->saving && !info->failed) sync_accuracy_mirrors(dsp);
+}
+
+static void notify_voice_key_on(Dsp *dsp, int channel) {
+    uint16_t directory;
+    uint16_t start;
+    DspChannel *voice;
+    if (g_dsp_voice_kon_hook == NULL || dsp == NULL || channel < 0 ||
+        channel >= kDspMaximumVoiceCount) return;
+    voice = &dsp->channel[channel];
+    directory = (uint16_t)(dsp->dirPage + 4u * voice->srcn);
+    start = read_u16(dsp->apu_ram, directory);
+    g_dsp_voice_kon_hook(channel, voice->srcn, start,
+                         voice->volumeL, voice->volumeR, voice->pitch);
+}
+
+static void notify_key_on(Dsp *dsp, uint8_t bits) {
+    int channel;
+    if (g_dsp_voice_kon_hook == NULL || dsp == NULL) return;
+    for (channel = 0; channel < kDspHardwareVoiceCount; ++channel) {
+        const uint8_t bit = (uint8_t)(1u << channel);
+        if ((bits & bit) == 0u) continue;
+        notify_voice_key_on(dsp, channel);
+    }
 }
 
 void dsp_writeVirtualVoiceRegister(Dsp *dsp, int channel,
                                    uint8_t source_address, uint8_t value) {
-    if (channel < kDspHardwareVoiceCount || channel >= kDspMaximumVoiceCount) {
-        return;
-    }
+    if (dsp == NULL || channel < kDspHardwareVoiceCount ||
+        channel >= kDspMaximumVoiceCount) return;
     audio_trace_on_reg_write(source_address, value);
-    apply_voice_register(dsp, channel, (uint8_t)(source_address & 0x0fu), value);
+    sr_dsp_accuracy_write_virtual_register(
+        (SrDspAccuracy *)dsp->accuracy, channel, source_address, value);
+    mirror_voice_register(dsp, channel, (uint8_t)(source_address & 0x0fu),
+                          value);
 }
 
 void dsp_writeVirtualVoiceControl(Dsp *dsp, int channel,
                                   uint8_t global_address, bool enabled) {
+    DspChannel *voice;
     if (dsp == NULL || channel < kDspHardwareVoiceCount ||
-        channel >= kDspMaximumVoiceCount) {
-        return;
-    }
-    DspChannel *voice = &dsp->channel[channel];
+        channel >= kDspMaximumVoiceCount) return;
+    sr_dsp_accuracy_write_virtual_control(
+        (SrDspAccuracy *)dsp->accuracy, channel, global_address, enabled);
+    voice = &dsp->channel[channel];
     switch (global_address) {
         case 0x2d: voice->pitchModulation = enabled; break;
         case 0x3d: voice->useNoise = enabled; break;
@@ -321,332 +323,92 @@ void dsp_writeVirtualVoiceControl(Dsp *dsp, int channel,
         case 0x4d: voice->echoEnable = enabled; break;
         default: break;
     }
+    if ((global_address & 0x7fu) == 0x4cu && enabled)
+        notify_voice_key_on(dsp, channel);
 }
 
 void dsp_writeHardwareVoiceMask(Dsp *dsp, uint8_t address, uint8_t value,
                                 uint8_t update_mask) {
-    if (address != 0x2du && address != 0x3du && address != 0x4cu &&
-        address != 0x5cu && address != 0x4du) {
-        return;
-    }
+    if (dsp == NULL || (address != 0x2du && address != 0x3du &&
+        address != 0x4cu && address != 0x5cu && address != 0x4du)) return;
     audio_trace_on_reg_write(address, value);
-    apply_hardware_mask(dsp, address, value, update_mask);
+    sr_dsp_accuracy_write_hardware_mask(
+        (SrDspAccuracy *)dsp->accuracy, address, value, update_mask);
+    mirror_hardware_mask(dsp, address, value, update_mask);
+    sync_accuracy_mirrors(dsp);
+    if (address == 0x4cu) notify_key_on(dsp, (uint8_t)(value & update_mask));
 }
 
 uint8_t dsp_read(Dsp *dsp, uint8_t address) {
-    return dsp == NULL ? 0u : dsp->ram[address & 0x7fu];
+    if (dsp == NULL) return 0u;
+    return sr_dsp_accuracy_read((const SrDspAccuracy *)dsp->accuracy,
+                                (uint8_t)(address & 0x7fu));
 }
 
 void dsp_write(Dsp *dsp, uint8_t address, uint8_t value) {
+    int channel;
     if (dsp == NULL) return;
     address &= 0x7fu;
     audio_trace_on_reg_write(address, value);
-    const int channel = address >> 4;
-    if (channel < kDspHardwareVoiceCount && (address & 0x0fu) <= 7u) {
-        apply_voice_register(dsp, channel, (uint8_t)(address & 0x0fu), value);
-        dsp->ram[address] = value;
-        return;
-    }
+    sr_dsp_accuracy_write((SrDspAccuracy *)dsp->accuracy, address, value);
+    channel = address >> 4;
+    if (channel < kDspHardwareVoiceCount && (address & 0x0fu) <= 7u)
+        mirror_voice_register(dsp, channel, (uint8_t)(address & 0x0fu), value);
     switch (address) {
-        case 0x0c: dsp->masterVolumeL = (int8_t)value; break;
-        case 0x1c: dsp->masterVolumeR = (int8_t)value; break;
-        case 0x2c: dsp->echoVolumeL = (int8_t)value; break;
-        case 0x3c: dsp->echoVolumeR = (int8_t)value; break;
-        case 0x0d: dsp->feedbackVolume = (int8_t)value; break;
         case 0x2d:
         case 0x3d:
         case 0x4c:
         case 0x4d:
         case 0x5c:
-            apply_hardware_mask(dsp, address, value, 0xffu);
-            return;
-        case 0x5d: dsp->dirPage = (uint16_t)value << 8; break;
-        case 0x6c:
-            dsp->reset = (value & 0x80u) != 0u;
-            dsp->mute = (value & 0x40u) != 0u;
-            dsp->echoWrites = (value & 0x20u) == 0u;
-            dsp->noiseRate = kRatePeriods[value & 0x1fu];
-            break;
-        case 0x6d: dsp->echoBufferAdr = (uint16_t)value << 8; break;
-        case 0x7c: value = 0u; break;
-        case 0x7d:
-            dsp->echoDelay = (uint16_t)((value & 0x0fu) * 512u);
-            if (dsp->echoDelay == 0u) dsp->echoDelay = 1u;
-            break;
-        case 0x0f: case 0x1f: case 0x2f: case 0x3f:
-        case 0x4f: case 0x5f: case 0x6f: case 0x7f:
-            dsp->firValues[channel] = (int8_t)value;
+            mirror_hardware_mask(dsp, address, value, 0xffu);
             break;
         default: break;
     }
-    dsp->ram[address] = value;
+    sync_accuracy_mirrors(dsp);
+    if (address == 0x4cu) notify_key_on(dsp, value);
 }
 
-static void decode_brr(Dsp *dsp, int channel) {
-    DspChannel *voice = &dsp->channel[channel];
-    voice->decodeBuffer[0] = voice->decodeBuffer[16];
-    voice->decodeBuffer[1] = voice->decodeBuffer[17];
-    voice->decodeBuffer[2] = voice->decodeBuffer[18];
-
-    if ((voice->previousFlags & 1u) != 0u) {
-        const uint16_t pointer = (uint16_t)(dsp->dirPage + 4u * voice->srcn);
-        dsp->ram[0x7c] |= channel < kDspHardwareVoiceCount
-                              ? (uint8_t)(1u << channel) : 0u;
-        if ((voice->previousFlags & 2u) != 0u) {
-            voice->decodeOffset = read_u16(dsp->apu_ram,
-                                           (uint16_t)(pointer + 2u));
-        } else {
-            voice->adsrState = kEnvelopeRelease;
-            voice->gain = 0u;
-        }
-    }
-
-    const uint8_t header = dsp->apu_ram[voice->decodeOffset++];
-    const unsigned shift = header >> 4;
-    const unsigned filter = (header >> 2) & 3u;
-    voice->previousFlags = header & 3u;
-    int older = voice->older;
-    int old = voice->old;
-    for (unsigned index = 0; index < 16u; ++index) {
-        const uint8_t packed = dsp->apu_ram[
-            (uint16_t)(voice->decodeOffset + index / 2u)];
-        int nibble = (index & 1u) != 0u ? packed & 0x0f : packed >> 4;
-        if (nibble >= 8) nibble -= 16;
-        int sample;
-        if (shift <= 12u) {
-            sample = nibble * (1 << shift);
-        } else {
-            sample = nibble < 0 ? -2048 : 0;
-        }
-        switch (filter) {
-            case 1: sample += old * 15 / 16; break;
-            case 2: sample += old * 61 / 32 - older * 15 / 16; break;
-            case 3: sample += old * 115 / 64 - older * 13 / 16; break;
-            default: break;
-        }
-        sample = clamp16(sample) & ~1;
-        voice->decodeBuffer[index + 3u] = (int16_t)sample;
-        older = old;
-        old = sample;
-    }
-    voice->decodeOffset = (uint16_t)(voice->decodeOffset + 8u);
-    voice->older = (int16_t)older;
-    voice->old = (int16_t)old;
+uint8_t dsp_currentSlot(const Dsp *dsp) {
+    return dsp == NULL ? 0u :
+        sr_dsp_accuracy_slot((const SrDspAccuracy *)dsp->accuracy);
 }
 
-static void key_on(Dsp *dsp, int channel) {
-    DspChannel *voice = &dsp->channel[channel];
-    const uint16_t pointer = (uint16_t)(dsp->dirPage + 4u * voice->srcn);
-    voice->decodeOffset = read_u16(dsp->apu_ram, pointer);
-    const uint16_t brr_address = voice->decodeOffset;
-    voice->previousFlags = 0u;
-    voice->pitchCounter = 0u;
-    voice->old = 0;
-    voice->older = 0;
-    memset(voice->decodeBuffer, 0, sizeof(voice->decodeBuffer));
-    voice->gain = 0u;
-    voice->rateCounter = 0u;
-    voice->adsrState = kEnvelopeAttack;
-    voice->keyOn = false;
-    if (channel < kDspHardwareVoiceCount) {
-        dsp->ram[0x7c] &= (uint8_t)~(1u << channel);
+void dsp_clock(Dsp *dsp) {
+    uint8_t gains[kDspMaximumVoiceCount] = {0};
+    uint8_t muted[kDspMaximumVoiceCount] = {0};
+    SrDspAccuracyFrame frame;
+    uint32_t fill;
+    int channel;
+    int dropped;
+    if (dsp == NULL) return;
+    for (channel = 0; channel < dsp_activeVoiceCount(); ++channel) {
+        gains[channel] = (uint8_t)voice_bus_gain(dsp, channel);
+        muted[channel] = voice_is_muted(dsp, channel) ? 1u : 0u;
     }
-    decode_brr(dsp, channel);
-    if (g_dsp_voice_kon_hook != NULL) {
-        g_dsp_voice_kon_hook(channel, voice->srcn, brr_address,
-                             voice->volumeL, voice->volumeR, voice->pitch);
+    frame = sr_dsp_accuracy_clock(
+        (SrDspAccuracy *)dsp->accuracy, dsp->apu_ram,
+        s_extended_voices_enabled, gains, muted);
+    sync_accuracy_register_mirrors(dsp);
+    if (!frame.delivered) return;
+    sync_accuracy_voice_mirrors(dsp);
+
+    fill = dsp->sampleWrite - dsp->sampleRead;
+    dropped = fill >= DSP_SAMPLE_RING;
+    if (!dropped) {
+        const uint32_t index = dsp->sampleWrite & (DSP_SAMPLE_RING - 1u);
+        dsp->sampleBuffer[index * 2u] = frame.left;
+        dsp->sampleBuffer[index * 2u + 1u] = frame.right;
+        ++dsp->sampleWrite;
     }
-}
-
-static void update_envelope(DspChannel *voice) {
-    if (voice->adsrState == kEnvelopeRelease) {
-        voice->gain = voice->gain > 8u ? (uint16_t)(voice->gain - 8u) : 0u;
-        return;
-    }
-
-    const bool live_gain = voice->useGain;
-    const bool direct = live_gain && voice->directGain;
-    if (direct) {
-        voice->gain = voice->gainValue;
-        return;
-    }
-
-    unsigned stage = voice->adsrState;
-    if (stage > kEnvelopeSustain) stage = kEnvelopeSustain;
-    const uint16_t period = live_gain ? voice->adsrRates[3]
-                                      : voice->adsrRates[stage];
-    if (period == 0u || ++voice->rateCounter < period) return;
-    voice->rateCounter = 0u;
-
-    int gain = voice->gain;
-    if (live_gain) {
-        switch (voice->gainMode) {
-            case 0: gain -= 32; break;
-            case 1: gain -= ((gain - 1) >> 8) + 1; break;
-            case 2: gain += 32; break;
-            case 3: gain += gain < 0x600 ? 32 : 8; break;
-            default: break;
-        }
-    } else if (stage == kEnvelopeAttack) {
-        gain += period == 1u ? 1024 : 32;
-    } else {
-        gain -= ((gain - 1) >> 8) + 1;
-    }
-    if (gain < 0) gain = 0;
-    if (gain > 0x7ff) gain = 0x7ff;
-    voice->gain = (uint16_t)gain;
-
-    if (voice->adsrState == kEnvelopeAttack && gain >= 0x7e0) {
-        voice->adsrState = kEnvelopeDecay;
-    } else if (voice->adsrState == kEnvelopeDecay &&
-               gain <= voice->sustainLevel) {
-        voice->adsrState = kEnvelopeSustain;
-    }
-}
-
-static int interpolate_voice(const DspChannel *voice) {
-    const unsigned index = voice->pitchCounter >> 12;
-    const unsigned next_index = index < 15u ? index + 1u : index;
-    const int current = voice->decodeBuffer[index + 3u];
-    const int next = voice->decodeBuffer[next_index + 3u];
-    const int fraction = voice->pitchCounter & 0x0fffu;
-    return current + (next - current) * fraction / 0x1000;
-}
-
-static void cycle_voice(Dsp *dsp, int channel) {
-    DspChannel *voice = &dsp->channel[channel];
-    if (dsp->evenCycle) {
-        if (voice->keyOff) {
-            voice->adsrState = kEnvelopeRelease;
-        } else if (voice->keyOn) {
-            key_on(dsp, channel);
-        }
-    }
-    if (dsp->reset) {
-        voice->adsrState = kEnvelopeRelease;
-        voice->gain = 0u;
-    }
-
-    uint32_t pitch = voice->pitch;
-    if (channel > 0 && voice->pitchModulation) {
-        int predecessor = channel - 1;
-        if (channel == kDspHardwareVoiceCount) predecessor = 5;
-        int adjusted = (int)pitch +
-                       (dsp->channel[predecessor].sampleOut * (int)pitch >> 15);
-        if (adjusted < 0) adjusted = 0;
-        if (adjusted > 0x3fff) adjusted = 0x3fff;
-        pitch = (uint32_t)adjusted;
-    }
-
-    int sample = voice->useNoise ? dsp->noiseSample : interpolate_voice(voice);
-    update_envelope(voice);
-    sample = sample * voice->gain / 0x800;
-    voice->sampleOut = (int16_t)clamp16(sample);
-    if (channel < kDspHardwareVoiceCount) {
-        dsp->ram[(channel << 4) | 8] = (uint8_t)(voice->gain >> 4);
-        dsp->ram[(channel << 4) | 9] =
-            (uint8_t)(int8_t)(voice->sampleOut >> 8);
-    }
-
-    const uint32_t position = voice->pitchCounter + pitch;
-    if (position >= 0x10000u) decode_brr(dsp, channel);
-    voice->pitchCounter = (uint16_t)position;
-}
-
-static void update_noise(Dsp *dsp) {
-    if (dsp->noiseRate == 0u || ++dsp->noiseCounter < dsp->noiseRate) return;
-    dsp->noiseCounter = 0u;
-    const unsigned feedback = ((uint16_t)dsp->noiseSample ^
-                               ((uint16_t)dsp->noiseSample >> 1)) & 1u;
-    uint16_t noise = (uint16_t)(((uint16_t)dsp->noiseSample >> 1) |
-                                (feedback << 14));
-    if ((noise & 0x4000u) != 0u) noise |= 0x8000u;
-    dsp->noiseSample = (int16_t)noise;
-}
-
-static void handle_echo(Dsp *dsp, int echo_input_left, int echo_input_right,
-                        int *output_left, int *output_right) {
-    const uint16_t address = (uint16_t)(dsp->echoBufferAdr +
-                                        dsp->echoBufferIndex * 4u);
-    dsp->firBufferL[dsp->firBufferIndex] = read_s16(dsp->apu_ram, address);
-    dsp->firBufferR[dsp->firBufferIndex] =
-        read_s16(dsp->apu_ram, (uint16_t)(address + 2u));
-
-    int filtered_left = 0;
-    int filtered_right = 0;
-    for (unsigned tap = 0; tap < 8u; ++tap) {
-        const unsigned position = (dsp->firBufferIndex - tap) & 7u;
-        filtered_left += dsp->firBufferL[position] * dsp->firValues[tap] / 128;
-        filtered_right += dsp->firBufferR[position] * dsp->firValues[tap] / 128;
-    }
-    filtered_left = clamp16(filtered_left);
-    filtered_right = clamp16(filtered_right);
-    *output_left = clamp16(*output_left +
-                           filtered_left * dsp->echoVolumeL / 128);
-    *output_right = clamp16(*output_right +
-                            filtered_right * dsp->echoVolumeR / 128);
-
-    if (dsp->echoWrites) {
-        write_s16(dsp->apu_ram, address,
-                  echo_input_left + filtered_left * dsp->feedbackVolume / 128);
-        write_s16(dsp->apu_ram, (uint16_t)(address + 2u),
-                  echo_input_right + filtered_right * dsp->feedbackVolume / 128);
-    }
-    dsp->firBufferIndex = (uint8_t)((dsp->firBufferIndex + 1u) & 7u);
-    if (++dsp->echoBufferIndex >= dsp->echoDelay) dsp->echoBufferIndex = 0u;
-    dsp->echoRemain = (uint16_t)(dsp->echoDelay - dsp->echoBufferIndex);
+    audio_trace_on_sample(frame.left, frame.right, dropped,
+                          dropped ? fill : fill + 1u);
+    dsp->evenCycle = !dsp->evenCycle;
 }
 
 void dsp_cycle(Dsp *dsp) {
+    int slot;
     if (dsp == NULL) return;
-    int dry_left = 0;
-    int dry_right = 0;
-    int echo_left = 0;
-    int echo_right = 0;
-    const int voices = dsp_activeVoiceCount();
-    for (int channel = 0; channel < voices; ++channel) {
-        DspChannel *voice = &dsp->channel[channel];
-        if (virtual_voice_is_sleeping(dsp, channel)) {
-            voice->sampleOut = 0;
-            continue;
-        }
-        cycle_voice(dsp, channel);
-        if (voice_is_muted(dsp, channel)) continue;
-        const int left = scale_for_bus(
-            dsp, channel, voice->sampleOut * voice->volumeL / 64);
-        const int right = scale_for_bus(
-            dsp, channel, voice->sampleOut * voice->volumeR / 64);
-        dry_left = clamp16(dry_left + left);
-        dry_right = clamp16(dry_right + right);
-        if (voice->echoEnable) {
-            echo_left = clamp16(echo_left + left);
-            echo_right = clamp16(echo_right + right);
-        }
-    }
-
-    int output_left = clamp16(dry_left * dsp->masterVolumeL / 128);
-    int output_right = clamp16(dry_right * dsp->masterVolumeR / 128);
-    if (dsp->shadow != NULL && !s_extended_voices_enabled &&
-        s_music_gain_percent == 100 && s_sfx_gain_percent == 100 &&
-        !s_music_muted && g_dsp_voice_mute_srcn_min < 0) {
-        dsp_shadow_process((DspShadow *)dsp->shadow, dsp, output_left,
-                           output_right, &output_left, &output_right);
-    }
-    handle_echo(dsp, echo_left, echo_right, &output_left, &output_right);
-    if (dsp->mute) output_left = output_right = 0;
-    update_noise(dsp);
-
-    const uint32_t fill = dsp->sampleWrite - dsp->sampleRead;
-    const int dropped = fill >= DSP_SAMPLE_RING;
-    if (!dropped) {
-        const uint32_t index = dsp->sampleWrite & (DSP_SAMPLE_RING - 1u);
-        dsp->sampleBuffer[index * 2u] = (int16_t)output_left;
-        dsp->sampleBuffer[index * 2u + 1u] = (int16_t)output_right;
-        ++dsp->sampleWrite;
-    }
-    audio_trace_on_sample((int16_t)output_left, (int16_t)output_right, dropped,
-                          dropped ? fill : fill + 1u);
-    dsp->evenCycle = !dsp->evenCycle;
+    for (slot = 0; slot < 32; ++slot) dsp_clock(dsp);
 }
 
 void dsp_getSamples(Dsp *dsp, int16_t *samples, int sample_count) {

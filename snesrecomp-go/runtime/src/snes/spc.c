@@ -196,11 +196,13 @@ void spc_reset(Spc *spc) {
     spc->i = spc->h = spc->p = spc->b = false;
     spc->stopped = false; spc->cyclesUsed = 0u;
     spc->pc = (uint16_t)(read8(spc, 0xfffeu) | ((uint16_t)read8(spc, 0xffffu) << 8));
+    spc->instructionPc = spc->pc;
 }
 void spc_saveload(Spc *spc, SaveLoadInfo *info) {
     if (spc == NULL || info == NULL || info->func == NULL) return;
     if (!info->portable) {
         info->func(info, &spc->a, offsetof(Spc, cyclesUsed) - offsetof(Spc, a));
+        if (!info->saving) spc->instructionPc = spc->pc;
         return;
     }
     saveload_u8(info, &spc->a);
@@ -217,6 +219,7 @@ void spc_saveload(Spc *spc, SaveLoadInfo *info) {
     saveload_bool(info, &spc->p);
     saveload_bool(info, &spc->b);
     saveload_bool(info, &spc->stopped);
+    if (!info->saving) spc->instructionPc = spc->pc;
 }
 
 int spc_runOpcode(Spc *spc) {
@@ -224,7 +227,8 @@ int spc_runOpcode(Spc *spc) {
     spc->cyclesUsed = 0u;
     if (spc->stopped) return 1;
     const uint16_t opcode_pc = spc->pc;
-    if (sr_runner_audio_trace_enabled())
+    spc->instructionPc = opcode_pc;
+    if (sr_runner_audio_trace_enabled(SR_AUDIO_TRACE_MASK_SPC_OPCODE))
         sr_runner_emit_audio_trace(
             spc->apu, SR_AUDIO_TRACE_SPC_OPCODE, opcode_pc,
             0u, 0u, 0u, snes_apu_cycle_count(), 0u, 0u, NULL);

@@ -371,16 +371,24 @@ static void RunOneEmulatedTick(bool *stop_running) {
           (double)kNanosecondsPerMillisecond;
       fprintf(stderr,
               "[apuprof] gf=%u dt=%.1fms lockwait=%.2fms "
-              "catchup=%.2fms/%llucyc/%uc reads=%u writes=%u "
+              "portsync=%.2fms/%llucyc/%uc apu=%llu "
+              "audio=%llu uploadctl=%llu timeline=%llu other=%llu "
+              "reads=%u writes=%u "
               "hook=%.2fms upload=%.2fms schedlat=%llusmp pushes=%lu "
               "loops=%llu audiowait-max=%.2fms last=%s\n",
               gf, dt_ns / (double)kNanosecondsPerMillisecond,
               profile.lock_wait_ns /
                   (double)kNanosecondsPerMillisecond,
-              profile.catchup_ns /
+              profile.port_sync_ns /
                   (double)kNanosecondsPerMillisecond,
-              (unsigned long long)profile.catchup_cycles,
-              profile.catchup_calls, profile.port_reads,
+              (unsigned long long)profile.apu_cycles_port_sync,
+              profile.port_sync_calls,
+              (unsigned long long)profile.apu_cycles_total,
+              (unsigned long long)profile.apu_cycles_audio_demand,
+              (unsigned long long)profile.apu_cycles_upload_control,
+              (unsigned long long)profile.apu_cycles_timeline,
+              (unsigned long long)profile.apu_cycles_unattributed,
+              profile.port_reads,
               profile.port_writes,
               profile.hook_ns / (double)kNanosecondsPerMillisecond,
               profile.upload_ns /
@@ -2021,10 +2029,10 @@ static void AppRunMainLoop(AppBoot *app) {
                           kPresentationFrameGenerationPhaseNone);
 
       if (DevTools_ShouldAutoQuit()) running = false;
-      /* AR_PACE=1: throttle headless to ~60fps so the emulated SPC (advanced
-       * in real time by the audio thread) stays in sync with the game thread —
-       * a faithful reproduction of normal play, vs. the default headless turbo
-       * which runs the game thread uncapped and confounds APU-handshake timing. */
+      /* AR_PACE=1: throttle headless to ~60fps for real-time listening and
+       * observation. The default turbo path advances the serialized APU target
+       * with each game tick, so handshake timing remains emulated-time
+       * deterministic even when those ticks run faster than wall time. */
       static int pace = kUninitializedEnvironmentOption;
       if (pace == kUninitializedEnvironmentOption)
         pace = getenv("AR_PACE") ? 1 : 0;

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(ActRaiserRecomp C)
+project(ActRaiserRecomp LANGUAGES C CXX)
 
 # A bare configure (no preset, no -DCMAKE_BUILD_TYPE) would otherwise build
 # with NO optimization and no -g. Default to the optimized play config; the
@@ -1173,22 +1173,26 @@ if(BUILD_TESTING)
     add_executable(actraiser_dsp_bus_mix_test
         tests/dsp_bus_mix_test.c
         ${SNESRECOMP_RUNNER_DSP_SOURCE}
+        ${SNESRECOMP_RUNNER_DSP_ACCURACY_SOURCES}
         ${SNESRECOMP_RUNNER_SAVELOAD_SOURCE}
     )
     target_include_directories(actraiser_dsp_bus_mix_test PRIVATE
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
         ${SNESRECOMP_RUNNER_PRIVATE_INCLUDE_DIRS})
+    target_compile_features(actraiser_dsp_bus_mix_test PRIVATE cxx_std_20)
     add_test(NAME actraiser_dsp_bus_mix
         COMMAND actraiser_dsp_bus_mix_test)
 
     add_executable(actraiser_dsp_voice_benchmark
         tools/benchmark_dsp_voices.c
         ${SNESRECOMP_RUNNER_DSP_SOURCE}
+        ${SNESRECOMP_RUNNER_DSP_ACCURACY_SOURCES}
         ${SNESRECOMP_RUNNER_SAVELOAD_SOURCE}
     )
     target_include_directories(actraiser_dsp_voice_benchmark PRIVATE
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
         ${SNESRECOMP_RUNNER_PRIVATE_INCLUDE_DIRS})
+    target_compile_features(actraiser_dsp_voice_benchmark PRIVATE cxx_std_20)
 
     # Generated-shader distribution guard: asserts the COMMITTED shader blobs
     # (src/shaders/*_frag.h, produced by tools/build_shaders.py) are accepted by

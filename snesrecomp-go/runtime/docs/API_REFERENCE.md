@@ -133,6 +133,24 @@ the specific entry you call.
 | `SR_RUNNER_CAP_PPU_FRAME_POLICY` | `SNES_RUNNER_API_PPU_FRAME_POLICY_SIZE` | `apply_ppu_frame_policy` | BEGIN clears prior frame providers; FINALIZE preserves newly published ones |
 | `SR_RUNNER_CAP_PPU_FRAME_RESET` | `SNES_RUNNER_API_PPU_FRAME_RESET_SIZE` | `reset_ppu_frame_state` | Begin-frame clear of derived capture/override state; persistent surfaces remain bound |
 | `SR_RUNNER_CAP_PPU_OBJ_CAPTURE` | `SNES_RUNNER_API_PPU_OBJ_CAPTURE_SIZE` | `configure_ppu_obj_capture` | Frame-scoped; caller surface must survive scanout |
+| `SR_RUNNER_CAP_APU_STATE_SNAPSHOT` | `SNES_RUNNER_API_APU_STATE_SNAPSHOT_SIZE` | `query_apu_state` | Copies coherent ARAM, visible DSP registers, and scalar timing under the APU lock; returns `BUSY` from audio/trace callbacks |
+
+## Memory-region operation matrix
+
+`SrMemoryRegion` identifies storage across several APIs; it does not promise
+that every region is borrowable through every accessor.
+
+| Region | `borrow_memory` | `borrow_u16_memory` | Coherent copied access |
+| --- | --- | --- | --- |
+| `SR_MEMORY_WRAM` | Supported | Unsupported | Not required |
+| `SR_MEMORY_SRAM` | Supported | Unsupported | Not required |
+| `SR_MEMORY_ROM` | Supported | Unsupported | Not required |
+| `SR_MEMORY_APU_RAM` | Unsupported | Unsupported | `query_apu_state` |
+| `SR_MEMORY_DSP_REGISTERS` | Unsupported | Unsupported | `query_apu_state` |
+| `SR_MEMORY_VRAM` | Unsupported | Supported | PPU frame transaction |
+| `SR_MEMORY_CGRAM` | Unsupported | Supported | PPU frame transaction |
+| `SR_MEMORY_OAM` | Unsupported | Supported | PPU frame transaction |
+| `SR_MEMORY_HIGH_OAM` | Supported | Unsupported | PPU frame transaction |
 
 ## Common call sequences
 
@@ -204,6 +222,64 @@ that capacity is insufficient.
 4. Apply original music/SFX bus gains through `configure_audio_mix`.
 5. Keep file decoding, replacement streams, track names, and manifests in the
    game/frontend layer.
+
+`SrAudioTraceSubscription.event_mask` is required for a V3-sized
+subscription. Use only the event classes needed by the diagnostic; opcode
+events are the highest-volume class. A legacy V2-sized subscription receives
+all event classes. A zero V3 mask is invalid. Every event carries the live SPC
+PC, current DSP slot, and the instruction PC responsible for an in-flight bus
+operation. The ARAM pointer is immutable and callback-lifetime only.
+
+For event-independent inspection, allocate 64 KiB of ARAM storage and 128
+bytes of DSP-register storage, then call `query_apu_state`. The DSP bytes are
+the SNES-visible register image; pending pipeline values are intentionally not
+part of the ABI. Do not call the snapshot operation from audio production or
+an audio-trace callback.
+
+The native DSP bank follows one 32-slot schedule and exposes voices 0..7.
+When a game opts into extended voices, voices 8..39 are four parallel
+eight-voice banks running the same BRR decode, Gaussian interpolation,
+envelope, noise, key timing, and register-slot rules. Pitch modulation remains
+bank-local. Native global registers and noise phase are shared; extended echo
+sends enter the one native echo-memory/FIR pass. Each bank applies native-style
+master-volume saturation before the five dry outputs are combined. This makes
+the extension hardware-shaped and deterministic without pretending it is a
+single 40-voice physical S-DSP. Save states serialize all five banks.
+
+### APU timing ownership and profiling
+
+`RtlRunFrame` advances a serialized APU target by
+`RTL_APU_TIMELINE_CYCLES_PER_TICK` (17,088 slots, or 534 native stereo frames)
+once per 60 Hz game tick. `RtlRenderAudio` may advance the same APU first when
+an active consumer needs PCM. Timeline advancement executes only the positive
+gap between the target and the actual semantic APU clock, so it never repeats
+consumer work. With no consumer, the game tick owns the full gap; headless and
+windowed execution therefore use the same target clock. Host wall time and
+audio callback block size do not enter emulated port scheduling. The target,
+actual cycle clock, DSP slot, and scheduled writes are save-state data.
+
+`RtlAdvanceApuTimeline` is exposed for a custom loop that intentionally bypasses
+`RtlRunFrame`; normal integrations must not call both for the same tick.
+
+`RtlApuProfileReset` establishes a synchronized measurement baseline and does
+not mutate emulated clocks. `RtlApuProfileRead` reports:
+
+| Field | Exact meaning |
+| --- | --- |
+| `apu_cycles_total` | Semantic APU slots elapsed since the baseline |
+| `apu_cycles_audio_demand` | Slots executed to satisfy `RtlRenderAudio` |
+| `apu_cycles_port_sync` | Slots executed at CPU/APU port synchronization |
+| `apu_cycles_upload_control` | Slots executed by bounded SPC-upload control |
+| `apu_cycles_timeline` | Missing target-clock slots executed at game-tick end |
+| `apu_cycles_unattributed` | Total minus the four attributed categories |
+| `port_sync_calls` / `port_sync_ns` | Count and host cost of port-sync batches only |
+| `lock_wait_ns` / `audio_wait_max_ns` | Host synchronization waits, not emulated time |
+| `hook_ns` / `upload_ns` | Host cost of game audio hooks and upload processing |
+| `scheduled_latency_max` | Largest scheduled CPU-to-APU port latency, in native frames |
+| `port_reads` / `port_writes` | CPU-side APU port operations in the interval |
+
+An attribution sum larger than total sets `RTL_APU_PROFILE_INCONSISTENT`
+instead of wrapping `apu_cycles_unattributed`.
 
 ## Threading and callbacks
 

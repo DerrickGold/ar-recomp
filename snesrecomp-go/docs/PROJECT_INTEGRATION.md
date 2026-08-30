@@ -93,11 +93,13 @@ build/v2regen rts-webs --rom game.sfc --cfg-dir recomp --suggest
 `runtime/runner.cmake` exports a source list, two include classifications, and
 a target configuration helper:
 
-- `SNESRECOMP_RUNNER_SOURCES`: shared C runtime and SNES hardware sources.
+- `SNESRECOMP_RUNNER_SOURCES`: shared C11 runtime sources plus the private
+  C++20 S-DSP accuracy translation units.
 - `SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS`: supported namespaced SDK headers.
 - `SNESRECOMP_RUNNER_PRIVATE_INCLUDE_DIRS`: runner implementation headers.
 - `snesrecomp_configure_runtime_target(target)`: applies the public/private
-  boundary, C11 requirement, SIMD selection, and bitset configuration.
+  boundary, public C11/private C++20 requirements, SIMD selection, and bitset
+  configuration.
 
 The manifest defines `SNESRECOMP_ENABLE_TRACE`. The trace option compiles local
 trace rings and a link stub; the historical TCP debug server was intentionally
@@ -105,7 +107,7 @@ not carried into the independent runner.
 
 ```cmake
 cmake_minimum_required(VERSION 3.16)
-project(MyGameRecomp C)
+project(MyGameRecomp LANGUAGES C CXX)
 set(CMAKE_C_STANDARD 11)
 
 set(SNESRECOMP_GO_ROOT "${CMAKE_SOURCE_DIR}/snesrecomp-go")

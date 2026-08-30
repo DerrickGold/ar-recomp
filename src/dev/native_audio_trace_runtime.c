@@ -74,7 +74,9 @@ static void OnRunnerAudioTrace(void *user_data, SrRunnerHandle *runner,
       break;
     case SR_AUDIO_TRACE_DSP_WRITE:
       NativeAudioTraceModel_DspWrite(
-          event->spc_pc, event->spc_x, event->dsp_address, event->value,
+          event->struct_size >= SR_AUDIO_TRACE_EVENT_V3_SIZE
+              ? event->spc_instruction_pc : event->spc_pc,
+          event->spc_x, event->dsp_address, event->value,
           event->apu_ram[0x47], event->apu_ram[0x1A], event->cycle_count);
       break;
     default:
@@ -109,6 +111,7 @@ bool NativeAudioTrace_Init(SrRunnerHandle *runner) {
   SrAudioTraceSubscription subscription = {
     .struct_size = sizeof(subscription),
     .callback = OnRunnerAudioTrace,
+    .event_mask = SR_AUDIO_TRACE_MASK_ALL,
   };
   if (!TraceEnabled()) return true;
   NativeAudioTrace_Shutdown();

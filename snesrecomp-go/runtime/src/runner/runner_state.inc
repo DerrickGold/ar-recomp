@@ -129,7 +129,8 @@ static const SnesRunnerApi k_runner_api = {
         SR_RUNNER_CAP_INPUT_STATE |
         SR_RUNNER_CAP_PPU_FRAME_POLICY |
         SR_RUNNER_CAP_PPU_FRAME_RESET |
-        SR_RUNNER_CAP_PPU_OBJ_CAPTURE,
+        SR_RUNNER_CAP_PPU_OBJ_CAPTURE |
+        SR_RUNNER_CAP_APU_STATE_SNAPSHOT,
     get_component,
     query_generations,
     borrow_memory,
@@ -174,6 +175,7 @@ static const SnesRunnerApi k_runner_api = {
     apply_ppu_frame_policy,
     reset_ppu_frame_state,
     configure_ppu_obj_capture,
+    sr_runner_query_apu_state,
 };
 
 /* Keep synchronized with the source boundary in runner.cmake. */
@@ -209,7 +211,8 @@ static const SrRunnerDescriptor k_runner = {
         SR_RUNNER_CAP_INPUT_STATE |
         SR_RUNNER_CAP_PPU_FRAME_POLICY |
         SR_RUNNER_CAP_PPU_FRAME_RESET |
-        SR_RUNNER_CAP_PPU_OBJ_CAPTURE,
+        SR_RUNNER_CAP_PPU_OBJ_CAPTURE |
+        SR_RUNNER_CAP_APU_STATE_SNAPSHOT,
     .implementation = "portable",
 };
 

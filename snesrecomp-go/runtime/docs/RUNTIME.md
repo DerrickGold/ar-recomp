@@ -1,9 +1,9 @@
 # Shared runtime {#runtime_architecture}
 
-`runtime/` is the independently authored portable C execution
-environment for code emitted by `snesrecomp-go`. It remains C because
-generated functions link directly against its ABI. Go is needed for
-regeneration, not at game runtime.
+`runtime/` is the portable execution environment for code emitted by
+`snesrecomp-go`. Generated functions and every public entry point retain a C11
+ABI. The private attributed S-DSP accuracy unit is C++20 and is hidden behind a
+C bridge. Go is needed for regeneration, not at game runtime.
 
 The historical comparison runner was retired after parity validation. There is
 one runtime manifest and no source, include, or build fallback to that retired
@@ -94,7 +94,8 @@ runner.
 
 ## Portability contract
 
-- Core code is portable C11 with fixed-width public ABI types.
+- Public/core ABI code is portable C11 with fixed-width types; the private
+  attributed DSP device is C++20 behind a C bridge.
 - OS, SDL, graphics, and audio-library types stay behind host adapters.
 - Hot read paths do not allocate.
 - Native, forced-portable, standalone subsystem, root-project, and Zig

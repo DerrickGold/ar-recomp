@@ -15,5 +15,7 @@ final game link. Runner implementation sources and private headers are not
 needed and are deliberately absent from this distribution.
 
 Public ABI behavior, ownership rules, and integration workflows are described
-under `docs/`. Redistribution terms and the clean-room boundary are recorded
-in `LICENSE` and `PROVENANCE.md`.
+under `docs/`. Redistribution terms and provenance are recorded in `LICENSE`,
+`licenses/Snaggletooth-LICENSE.txt`, and `PROVENANCE.md`. The private C++20 DSP
+unit exposes only the runner's C ABI and is built without exceptions or RTTI;
+game translation units remain C11.
