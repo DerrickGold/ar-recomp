@@ -56,6 +56,10 @@ unsigned ActRaiser_TakeVextUnlockedObjects(void);
  * 0..127 scene claim, so reading the range back from there silently loses the
  * icon exactly when the diorama is on. Either pointer may be NULL. */
 bool ActRaiser_HudObjIconRange(uint8_t *first, uint8_t *count);
+/* Publish the host-owned pixel surface containing that promoted icon. The
+ * capture owner supplies its format, pitch, dimensions, and lifetime contract;
+ * presentation must not reconstruct those details from the backing buffer. */
+bool ActRaiser_HudObjSurfaceView(SrPpuSurfaceView *surface);
 /* True when the most recently rendered frame moved Death Heim 0701's face
  * band into its focal virtual plane after native capture. The PPU content mask
  * cannot observe host-side postprocessing, so FrameSlot uses this latch to
