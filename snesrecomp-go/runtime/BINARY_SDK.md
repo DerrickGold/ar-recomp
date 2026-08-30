@@ -16,7 +16,8 @@ needed and are deliberately absent from this distribution.
 
 Public ABI behavior, ownership rules, and integration workflows are described
 under `docs/`. Redistribution terms and provenance are recorded in `LICENSE`,
-`licenses/Snaggletooth-LICENSE.txt`, and `PROVENANCE.md`. The private C++20 DSP
+`NOTICE.md`, `licenses/Snaggletooth-LICENSE.txt`, and `PROVENANCE.md`. The
+private C++20 DSP
 accuracy core and bridge compile as one optimization unit, expose only the
 runner's C ABI, and are built without exceptions or RTTI; game translation
 units remain C11.

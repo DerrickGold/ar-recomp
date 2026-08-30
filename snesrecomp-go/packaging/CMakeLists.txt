@@ -463,7 +463,9 @@ install(FILES ${CMAKE_BINARY_DIR}/README.txt DESTINATION .)
 # which returns the bare leaf.
 install(FILES
     ${SNESBUILD_MODULE_DIR}/LICENSE
+    ${SNESBUILD_MODULE_DIR}/LICENSE_SCOPE.md
     ${SNESBUILD_MODULE_DIR}/ATTRIBUTION.md
+    ${SNESBUILD_MODULE_DIR}/THIRD_PARTY_NOTICES.md
     ${GAME_ROOT}/snesbuild.ini
     DESTINATION utils)
 
@@ -546,11 +548,12 @@ install(DIRECTORY ${SNESBUILD_MODULE_DIR}/runtime/include/
     PATTERN ".DS_Store" EXCLUDE)
 install(FILES
     ${SNESBUILD_MODULE_DIR}/runtime/LICENSE
+    ${SNESBUILD_MODULE_DIR}/runtime/NOTICE.md
     ${SNESBUILD_MODULE_DIR}/runtime/PROVENANCE.md
     DESTINATION utils/snesrecomp-go/runtime)
-install(FILES ${SNESBUILD_MODULE_DIR}/runtime/src/snes/accuracy/LICENSE
+install(FILES ${SNESBUILD_MODULE_DIR}/runtime/licenses/Snaggletooth-LICENSE.txt
     DESTINATION utils/snesrecomp-go/runtime/licenses
-    RENAME Snaggletooth-LICENSE.txt)
+)
 install(FILES ${SNESBUILD_MODULE_DIR}/runtime/BINARY_SDK.md
     DESTINATION utils/snesrecomp-go/runtime RENAME README.md)
 install(FILES

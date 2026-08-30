@@ -1,15 +1,4 @@
-Scope
------
-
-This license covers the independently authored portable runner, its public
-headers, build files, tests, examples, and documentation in this directory.
-
-It does **not** cover, and grants no rights to, a game ROM, generated or
-recompiled ROM code, extracted media, game-specific assets, or third-party
-components carrying their own notices.
-
 MIT License
------------
 
 Copyright (c) 2026 Derrick Gold
 

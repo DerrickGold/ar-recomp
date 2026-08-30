@@ -55,11 +55,11 @@ install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/snesrecomp-runtime-config.cmake
     ${CMAKE_CURRENT_BINARY_DIR}/snesrecomp-runtime-config-version.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/snesrecomp-runtime)
-install(FILES LICENSE README.md PROVENANCE.md
+install(FILES LICENSE NOTICE.md README.md PROVENANCE.md
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/snesrecomp-runtime)
-install(FILES src/snes/accuracy/LICENSE
+install(FILES licenses/Snaggletooth-LICENSE.txt
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/snesrecomp-runtime/licenses
-    RENAME Snaggletooth-LICENSE.txt)
+)
 install(FILES
     docs/README.md
     docs/API_REFERENCE.md

@@ -1,4 +1,5 @@
-# Manifest for the independently authored portable runner.
+# Manifest for the project-owned portable replacement runner. Attributed
+# third-party components and their compatible licenses are listed in NOTICE.md.
 
 set(SNESRECOMP_RUNNER_ROOT ${CMAKE_CURRENT_LIST_DIR})
 set(SNESRECOMP_RUNNER_DEVICE_ROOT ${SNESRECOMP_RUNNER_ROOT})

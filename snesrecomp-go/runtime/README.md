@@ -1,7 +1,9 @@
 # Portable runner
 
-This directory contains the independently authored portable C runner. It is the
-sole runtime used by project, hermetic, and distribution builds.
+This directory contains the project-owned portable C replacement runner. It is
+the sole runtime used by project, hermetic, and distribution builds. The
+project-authored sources are MIT licensed; the attributed Snaggletooth S-DSP
+portions retain their compatible upstream MIT notice.
 
 Current status:
 
@@ -66,7 +68,7 @@ Hermetic distributions use this source-free SDK layout:
 runtime/
 ├── include/snesrecomp/...
 ├── lib/<zig-target>/libsnesrecomp_runtime.a
-└── LICENSE, licenses/Snaggletooth-LICENSE.txt, PROVENANCE.md, README.md
+└── LICENSE, NOTICE.md, licenses/Snaggletooth-LICENSE.txt, PROVENANCE.md, README.md
 ```
 
 Windows uses `snesrecomp_runtime.lib`. The driver creates the artifact with
@@ -125,10 +127,10 @@ cmake -S . -B <build-dir> \
 
 `auto` is the default; the other accepted values are `32` and `64`.
 
-The historical comparison runner was retired after parity validation. The MIT
-grant covers this runner and its manifest. It does not cover ROMs, generated
-game code, or extracted media; see [`LICENSE`](LICENSE) and
-[`PROVENANCE.md`](PROVENANCE.md) for the precise boundary.
+The historical comparison runner was retired after parity validation. No part
+of it is present here. The complete replacement runner is redistributable under
+MIT-compatible terms; see [`LICENSE`](LICENSE), [`NOTICE.md`](NOTICE.md), and
+[`PROVENANCE.md`](PROVENANCE.md) for the precise authorship boundary.
 
 New game projects should use the producer-oriented widescreen/audio workflow in
 [`docs/GAME_ENHANCEMENT_INTEGRATION.md`](docs/GAME_ENHANCEMENT_INTEGRATION.md).

@@ -3,8 +3,8 @@
 ## Python source
 
 `snesrecomp-go` is a Go reimplementation of the Python SNES static recompiler.
-Its current C runner is an independent implementation; the source lineage used
-for the recompiler port is:
+Its current C runner has no source lineage from the retired comparison runner;
+the separate source lineage used for the recompiler port is:
 
 - Original project: [`mstan/snesrecomp`](https://github.com/mstan/snesrecomp),
   created and primarily developed by Matthew Stanley.
@@ -62,13 +62,23 @@ recompiler ecosystem from which this port grew:
 ## License status
 
 The independently maintained Go module, tooling, tests, and documentation are
-provided under the MIT terms in [`LICENSE`](LICENSE). This includes the pure-Go
-audio-preview emulator and the independently authored portable C runner.
+provided under the MIT terms in [`LICENSE`](LICENSE). The precise grant and
+content exclusions are recorded separately in
+[`LICENSE_SCOPE.md`](LICENSE_SCOPE.md), so the standard license text remains
+machine-recognizable.
 
-The runner sources live in [`runtime/`](runtime/). The historical
-runner used during parity development was retired before this cutover and is
-not distributed. Generated/recompiled game code and game assets remain outside
-the runner grant as described below.
+The complete portable runner under [`runtime/`](runtime/) is redistributable
+under MIT-compatible terms. Its project-authored implementation is covered by
+this module's MIT grant. The slot-accurate S-DSP component contains adaptations
+from Eric Tomasso's
+[`etroimcasso/Snaggletooth`](https://github.com/etroimcasso/Snaggletooth) at
+commit
+[`65668997ed58fe78cfcef1e53c0020bd92d0d287`](https://github.com/etroimcasso/Snaggletooth/commit/65668997ed58fe78cfcef1e53c0020bd92d0d287),
+also under MIT. The upstream copyright, exact affected files, and verbatim
+license are retained in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and
+[`runtime/licenses/Snaggletooth-LICENSE.txt`](runtime/licenses/Snaggletooth-LICENSE.txt).
+The historical comparison runner used during parity development was retired
+before this cutover and is not distributed or covered by this grant.
 
 No game ROM, translated ROM code, extracted audio, or captured memory/gameplay
 data is included here. Those works are outside the toolchain's license and must
