@@ -1,4 +1,5 @@
 #include "snesrecomp/runner.h"
+#include "snesrecomp/runner/ppu_diagnostics.h"
 
 static_assert(SR_RUNNER_ABI_VERSION == 2u, "unexpected runner ABI");
 

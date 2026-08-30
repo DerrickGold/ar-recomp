@@ -214,6 +214,14 @@ authentic surfaces must have room for `224 + top + bottom` rows and for the full
 reserved horizontal width. Binding or policy application fails atomically when
 that capacity is insufficient.
 
+Virtual scalar providers return one of `SR_PPU_VIRTUAL_TILE_FOUND`,
+`SR_PPU_VIRTUAL_TILE_TRANSPARENT`, or
+`SR_PPU_VIRTUAL_TILE_FALLBACK_AUTHENTIC`. A provider binding owns every
+coordinate for which it is consulted; transparent does not implicitly fall
+through to VRAM. Use the explicit fallback result for partial coverage. A span
+with null entries is likewise transparent; return a zero-length span at a
+mixed-coverage boundary to defer that coordinate to scalar lookup.
+
 ### Observe and replace audio
 
 1. Recover semantic track/SFX events in the game adapter.

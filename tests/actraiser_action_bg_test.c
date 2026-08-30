@@ -187,11 +187,18 @@ static SrResult FakeUpdateLayerExtents(
   return SR_RESULT_OK;
 }
 
-static bool FakeVirtualLookup(const void *context, int32_t tile_x,
-                              int32_t tile_y, uint16_t *entry) {
+static PpuVirtualTilemapLookupResult FakeVirtualLookup(
+    const void *context, int32_t tile_x, int32_t tile_y, uint16_t *entry) {
   const SrPpuVirtualTilemapBinding *binding = context;
-  return binding && binding->lookup &&
-      binding->lookup(binding->user_data, tile_x, tile_y, entry) != 0u;
+  if (!binding || !binding->lookup)
+    return kPpuVirtualTilemapLookup_Transparent;
+  const uint32_t result =
+      binding->lookup(binding->user_data, tile_x, tile_y, entry);
+  if (result == SR_PPU_VIRTUAL_TILE_FOUND)
+    return kPpuVirtualTilemapLookup_Found;
+  if (result == SR_PPU_VIRTUAL_TILE_FALLBACK_AUTHENTIC)
+    return kPpuVirtualTilemapLookup_FallbackAuthentic;
+  return kPpuVirtualTilemapLookup_Transparent;
 }
 
 static size_t FakeVirtualSpan(

@@ -1317,10 +1317,39 @@ static bool sample_mode7(Ppu *ppu, int layer, int x, int y, SrPpuPixel *out) {
     return true;
 }
 
+static void sample_bg_vram_tile(Ppu *ppu, int layer, int source_x,
+                                int sample_y, uint16_t *entry,
+                                int *in_x, int *in_y) {
+    int world_x = source_x + ppu->hScroll[layer];
+    int world_y = sample_y + ppu->vScroll[layer];
+    int tile_size = PPU_bigTiles(ppu, layer) ? 16 : 8;
+    int map_x, map_y;
+    int map_address;
+    if (world_x >= 0 && world_y >= 0) {
+        int shift = tile_size == 16 ? 4 : 3;
+        map_x = world_x >> shift;
+        map_y = world_y >> shift;
+        *in_x = world_x & (tile_size - 1);
+        *in_y = world_y & (tile_size - 1);
+    } else {
+        map_x = floor_div8(world_x) / (tile_size / 8);
+        map_y = floor_div8(world_y) / (tile_size / 8);
+        *in_x = ((world_x % tile_size) + tile_size) % tile_size;
+        *in_y = ((world_y % tile_size) + tile_size) % tile_size;
+    }
+    map_address = PPU_bgTilemapAdr(ppu, layer) + (map_x & 31) +
+                  ((map_y & 31) << 5);
+    if ((map_x & 32) != 0 && PPU_bgTilemapWider(ppu, layer))
+        map_address += 0x400;
+    if ((map_y & 32) != 0 && PPU_bgTilemapHigher(ppu, layer))
+        map_address += PPU_bgTilemapWider(ppu, layer) ? 0x800 : 0x400;
+    *entry = ppu->vram[map_address & 0x7fff];
+}
+
 static bool sample_bg(Ppu *ppu, int layer, int screen_x, int screen_y,
                       bool overlay_padding, SrPpuPixel *out) {
     int source_x, bpp, tile_size, map_x, map_y, in_x, in_y;
-    int map_address, tile_address, pixel, palette;
+    int tile_address, pixel, palette;
     uint16_t entry;
     PpuVirtualTilemapBinding *binding;
     bool use_virtual, padding_from_authentic;
@@ -1367,6 +1396,7 @@ static bool sample_bg(Ppu *ppu, int layer, int screen_x, int screen_y,
          (binding->flags & kPpuVirtualTilemapFlag_IncludeAuthentic) != 0u);
     if (use_virtual) {
         PpuVirtualSampleCache *cache = &ppu->virtualSampleCache[layer];
+        PpuVirtualTilemapLookupResult result;
         bool cache_enabled =
             (ppu->renderFlags &
              kPpuRenderFlags_ReferencePixelRenderer) == 0u;
@@ -1383,22 +1413,20 @@ static bool sample_bg(Ppu *ppu, int layer, int screen_x, int screen_y,
         in_x = world_x - map_x * 8; in_y = world_y - map_y * 8;
         if (cache_enabled && cache->valid &&
             cache->tile_x == map_x && cache->tile_y == map_y) {
-            if (!cache->found) return false;
+            result = cache->result;
             entry = cache->entry;
             band = cache->band;
         } else {
-            bool found = binding->lookup(
+            result = binding->lookup(
                 binding->context, map_x, map_y, &entry);
             if (cache_enabled) {
                 cache->tile_x = map_x;
                 cache->tile_y = map_y;
-                cache->found = found;
+                cache->result = (uint8_t)result;
                 cache->valid = true;
             }
-            if (!found) {
-                return false;
-            }
-            if (binding->band_lookup != NULL)
+            if (result == kPpuVirtualTilemapLookup_Found &&
+                binding->band_lookup != NULL)
                 (void)binding->band_lookup(
                     binding->context, map_x, map_y, entry, &band);
             if (cache_enabled) {
@@ -1406,29 +1434,18 @@ static bool sample_bg(Ppu *ppu, int layer, int screen_x, int screen_y,
                 cache->band = band;
             }
         }
-    } else {
-        int world_x = source_x + ppu->hScroll[layer];
-        int world_y = sample_y + ppu->vScroll[layer];
-        tile_size = PPU_bigTiles(ppu, layer) ? 16 : 8;
-        if (world_x >= 0 && world_y >= 0) {
-            int shift = tile_size == 16 ? 4 : 3;
-            map_x = world_x >> shift;
-            map_y = world_y >> shift;
-            in_x = world_x & (tile_size - 1);
-            in_y = world_y & (tile_size - 1);
-        } else {
-            map_x = floor_div8(world_x) / (tile_size / 8);
-            map_y = floor_div8(world_y) / (tile_size / 8);
-            in_x = ((world_x % tile_size) + tile_size) % tile_size;
-            in_y = ((world_y % tile_size) + tile_size) % tile_size;
+        if (result == kPpuVirtualTilemapLookup_Transparent)
+            return false;
+        if (result == kPpuVirtualTilemapLookup_FallbackAuthentic) {
+            sample_bg_vram_tile(
+                ppu, layer, source_x, sample_y, &entry, &in_x, &in_y);
+            band = 0xffu;
+        } else if (result != kPpuVirtualTilemapLookup_Found) {
+            return false;
         }
-        map_address = PPU_bgTilemapAdr(ppu, layer) + (map_x & 31) +
-                      ((map_y & 31) << 5);
-        if ((map_x & 32) != 0 && PPU_bgTilemapWider(ppu, layer))
-            map_address += 0x400;
-        if ((map_y & 32) != 0 && PPU_bgTilemapHigher(ppu, layer))
-            map_address += PPU_bgTilemapWider(ppu, layer) ? 0x800 : 0x400;
-        entry = ppu->vram[map_address & 0x7fff];
+    } else {
+        sample_bg_vram_tile(
+            ppu, layer, source_x, sample_y, &entry, &in_x, &in_y);
     }
     tile_size = PPU_bigTiles(ppu, layer) ? 16 : 8;
     if ((entry & 0x4000u) != 0u) in_x = tile_size - 1 - in_x;
@@ -2301,6 +2318,11 @@ static bool native_window_plan_inside(NativeLayerWindowPlan *plan, int x) {
     return plan->runs.inside[plan->run] != 0u;
 }
 
+static void native_resolve_vram_bg_span(Ppu *SR_RESTRICT ppu, int layer,
+        int screen_y, bool want_sub, int left, int right, int origin,
+        uint16_t *SR_RESTRICT main_pixels,
+        uint16_t *SR_RESTRICT sub_pixels);
+
 /* Virtual Mode-1 maps expose one 8x8 tile word at a time.  Resolve a complete
  * tile span into the packed scanline just like the VRAM-backed tiled path;
  * calling the general pixel sampler here would throw away both the provider's
@@ -2382,7 +2404,8 @@ static void native_resolve_virtual_bg_span(Ppu *SR_RESTRICT ppu, int layer,
         int run = step > 0 ? 8 - fine_x : fine_x + 1;
         uint16_t entry = 0u;
         uint8_t band = 0xffu;
-        bool found = false;
+        PpuVirtualTilemapLookupResult result =
+            kPpuVirtualTilemapLookup_Transparent;
         bool batched = false;
         if (run > segment_right - x) run = segment_right - x;
         /* Normal-scroll mirror subtracts twice the live H scroll modulo 256.
@@ -2416,7 +2439,7 @@ static void native_resolve_virtual_bg_span(Ppu *SR_RESTRICT ppu, int layer,
             if (batch_remaining != 0u) {
                 if (batch_entries != NULL) {
                     entry = *batch_entries;
-                    found = true;
+                    result = kPpuVirtualTilemapLookup_Found;
                     if (batch_remaining > 1u)
                         batch_entries += batch_entry_step;
                 }
@@ -2425,10 +2448,17 @@ static void native_resolve_virtual_bg_span(Ppu *SR_RESTRICT ppu, int layer,
             }
         }
         if (!batched) {
-            found = binding->lookup(
+            result = binding->lookup(
                 binding->context, tile_x, tile_y, &entry);
         }
-        if (!found) {
+        if (result == kPpuVirtualTilemapLookup_FallbackAuthentic) {
+            native_resolve_vram_bg_span(
+                ppu, layer, screen_y, want_sub, x, x + run, origin,
+                main_pixels, sub_pixels);
+            x += run;
+            continue;
+        }
+        if (result != kPpuVirtualTilemapLookup_Found) {
             x += run;
             continue;
         }
