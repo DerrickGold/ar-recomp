@@ -121,7 +121,7 @@ the specific entry you call.
 | `SR_RUNNER_CAP_CPU_MATH_STATE` | `SNES_RUNNER_API_CPU_MATH_STATE_SIZE` | `query_cpu_math_state`, `restore_cpu_math_state` | Restore only at an emulation-thread safe point |
 | `SR_RUNNER_CAP_AUDIO_TRACE_OBSERVERS` | `SNES_RUNNER_API_AUDIO_TRACE_OBSERVER_SIZE` | `subscribe_audio_trace`, `unsubscribe_audio_trace` | Callback may run under APU lock; never call mutating audio services from it |
 | `SR_RUNNER_CAP_SPC_CONTROL` | `SNES_RUNNER_API_SPC_CONTROL_SIZE` | `compare_exchange_spc_pc` | Atomic APU-locked compare/exchange; not from audio callback |
-| `SR_RUNNER_CAP_AUDIO_MIX_CONTROL` | `SNES_RUNNER_API_AUDIO_MIX_CONTROL_SIZE` | `configure_audio_mix` | Synchronous native music/SFX gain policy |
+| `SR_RUNNER_CAP_AUDIO_MIX_CONTROL` | `SNES_RUNNER_API_AUDIO_MIX_CONTROL_SIZE` | `configure_audio_mix` | Synchronous native bus gain, mute, and unclassified fallback policy |
 | `SR_RUNNER_CAP_PPU_FRAME_TRANSACTIONS` | `SNES_RUNNER_API_PPU_FRAME_TRANSACTION_SIZE` | `visit_ppu_frame_transaction`, `compare_exchange_ppu_overlay_captures` | Coherent callback-lifetime frame state and atomic capture replacement |
 | `SR_RUNNER_CAP_PPU_VRAM_PATCH` | `SNES_RUNNER_API_PPU_VRAM_PATCH_SIZE` | `compare_exchange_ppu_vram_words` | Atomic sorted sparse patch; no partial write |
 | `SR_RUNNER_CAP_PPU_OBJ_METADATA` | `SNES_RUNNER_API_PPU_OBJ_METADATA_SIZE` | `update_ppu_obj_metadata` | Synchronous game-owned unwrapped positions |
@@ -219,16 +219,25 @@ that capacity is insufficient.
 1. Recover semantic track/SFX events in the game adapter.
 2. Use audio-trace observers only for coherent hardware observation.
 3. Route linked-game voices through `RtlGameAudioApi` safe points.
-4. Apply original music/SFX bus gains through `configure_audio_mix`.
+4. Apply original music/SFX bus gains, music replacement muting, and any
+   unclassified-source startup fallback through `configure_audio_mix`.
 5. Keep file decoding, replacement streams, track names, and manifests in the
    game/frontend layer.
 
-`SrAudioTraceSubscription.event_mask` is required for a V3-sized
-subscription. Use only the event classes needed by the diagnostic; opcode
-events are the highest-volume class. A legacy V2-sized subscription receives
-all event classes. A zero V3 mask is invalid. Every event carries the live SPC
-PC, current DSP slot, and the instruction PC responsible for an in-flight bus
-operation. The ARAM pointer is immutable and callback-lifetime only.
+`SrAudioTraceSubscription.event_mask` is required in V2. Use only the event
+classes needed by the diagnostic; opcode events are the highest-volume class,
+and a zero mask is invalid. Every event carries the live SPC PC, current DSP
+slot, and the instruction PC responsible for an in-flight bus operation.
+`SR_AUDIO_TRACE_DSP_KEY_ON` additionally carries the continued voice number
+(hardware 0..7 or extended 8..39), source number, resolved BRR address, pitch,
+and signed left/right volumes. The ARAM pointer is immutable and
+callback-lifetime only.
+
+`SrAudioMixControl.flags` can mute the original music bus while a replacement
+stream is active. Its optional source-number partition applies only to voices
+that remain unclassified; it is a startup fallback, not a replacement for the
+game adapter's explicit voice routing. Clearing the flags restores ordinary
+bus routing without reaching into DSP state.
 
 For event-independent inspection, allocate 64 KiB of ARAM storage and 128
 bytes of DSP-register storage, then call `query_apu_state`. The DSP bytes are
@@ -268,6 +277,9 @@ actual cycle clock, DSP slot, and scheduled writes are save-state data.
 
 `RtlAdvanceApuTimeline` is exposed for a custom loop that intentionally bypasses
 `RtlRunFrame`; normal integrations must not call both for the same tick.
+`RtlApuCycleCount` provides a lock-safe observation of the same semantic clock
+for game-side diagnostics. Reset or state load may move that value backwards;
+an audio-trace callback must use its event's `cycle_count` instead.
 
 `RtlApuProfileReset` establishes a synchronized measurement baseline and does
 not mutate emulated clocks. `RtlApuProfileRead` reports:

@@ -9,6 +9,7 @@ extern "C" {
 #endif
 
 typedef struct SaveLoadInfo SaveLoadInfo;
+typedef struct Apu Apu;
 typedef struct Dsp Dsp;
 
 typedef enum DspVoiceBus {
@@ -54,6 +55,7 @@ typedef struct DspChannel {
 
 struct Dsp {
     uint8_t *apu_ram;
+    Apu *apu;
     void *shadow;
     void *accuracy;
     uint8_t voiceBus[kDspMaximumVoiceCount];
@@ -111,6 +113,7 @@ DspVoiceBus dsp_getVoiceBus(const Dsp *dsp, int channel);
 void dsp_setBusGains(int music_percent, int sfx_percent);
 void dsp_getBusGains(int *music_percent, int *sfx_percent);
 void dsp_setMusicBusMuted(bool muted);
+void dsp_setUnclassifiedMusicSourceMinimum(int source_number);
 void dsp_setExtendedVoicesEnabled(bool enabled);
 bool dsp_extendedVoicesEnabled(void);
 int dsp_activeVoiceCount(void);
@@ -126,11 +129,7 @@ void dsp_writeHardwareVoiceMask(Dsp *dsp, uint8_t address, uint8_t value,
 void dsp_refreshMixControls(Dsp *dsp);
 void dsp_syncAccuracyMirrors(Dsp *dsp);
 
-extern int g_dsp_voice_mute_srcn_min;
 extern bool g_dsp_extended_voices_enabled;
-extern void (*g_dsp_voice_kon_hook)(int channel, uint8_t source_number,
-                                    uint16_t brr_address, int volume_left,
-                                    int volume_right, uint16_t pitch);
 
 #ifdef __cplusplus
 }

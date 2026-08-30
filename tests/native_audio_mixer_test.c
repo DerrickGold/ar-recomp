@@ -1,5 +1,6 @@
 #include "native_audio_mixer.h"
 
+#include "constants.h"
 #include "snesrecomp/runner.h"
 #include "settings.h"
 
@@ -12,6 +13,8 @@ static int s_configure_calls;
 static int s_music_gain = -1;
 static int s_sfx_gain = -1;
 static int s_replacement_music_gain = -1;
+static uint32_t s_mix_flags;
+static uint32_t s_unclassified_music_source_min;
 
 static SrResult ConfigureAudioMix(
     SrRunnerHandle *runner, const SrAudioMixControl *control) {
@@ -21,6 +24,9 @@ static SrResult ConfigureAudioMix(
   ++s_configure_calls;
   s_music_gain = (int)control->music_gain_percent;
   s_sfx_gain = (int)control->sfx_gain_percent;
+  s_mix_flags = control->flags;
+  s_unclassified_music_source_min =
+      control->unclassified_music_source_min;
   return SR_RESULT_OK;
 }
 
@@ -155,7 +161,17 @@ static void TestInstallAndGains(void) {
   NativeAudioMixer_BindRunner(runner);
   CHECK(s_configure_calls == 1);
   CHECK(s_music_gain == 65 && s_sfx_gain == 35);
+  CHECK(s_mix_flags == 0u && s_unclassified_music_source_min == 0u);
   CHECK(s_replacement_music_gain == 65);
+  NativeAudioMixer_SetMusicReplacementActive(true);
+  CHECK(s_configure_calls == 2);
+  CHECK(s_mix_flags ==
+      (SR_AUDIO_MIX_MUTE_MUSIC |
+       SR_AUDIO_MIX_PARTITION_UNCLASSIFIED_BY_SOURCE));
+  CHECK(s_unclassified_music_source_min ==
+        kActRaiserSpcMusicSourceMinimum);
+  NativeAudioMixer_SetMusicReplacementActive(false);
+  CHECK(s_configure_calls == 3 && s_mix_flags == 0u);
   NativeAudioMixer_BindRunner(NULL);
 }
 

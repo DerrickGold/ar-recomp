@@ -14,9 +14,6 @@ static unsigned trace_writes;
 static unsigned trace_samples;
 static unsigned trace_drops;
 static unsigned trace_consumes;
-static unsigned key_on_calls;
-static uint16_t keyed_brr;
-static int keyed_channel = -1;
 
 DspShadow *dsp_shadow_create(void) { return NULL; }
 void dsp_shadow_free(DspShadow *shadow) { (void)shadow; }
@@ -117,17 +114,6 @@ static void run_samples(Dsp *dsp, unsigned count) {
     while (count-- != 0u) dsp_cycle(dsp);
 }
 
-static void on_key_on(int channel, uint8_t source, uint16_t brr,
-                      int left, int right, uint16_t pitch) {
-    (void)source;
-    (void)left;
-    (void)right;
-    (void)pitch;
-    ++key_on_calls;
-    keyed_brr = brr;
-    keyed_channel = channel;
-}
-
 static void test_reference_primitives(void) {
     const uint8_t ramp[9] = {
         0xc0u, 0x01u, 0x23u, 0x45u, 0x67u,
@@ -154,12 +140,7 @@ static void test_registers_keying_and_startup(void) {
     if (dsp == NULL) return;
     install_looping_brr(ram, 2u, 0x0300u);
     dsp_write(dsp, 0x5du, 0x02u);
-    g_dsp_voice_kon_hook = on_key_on;
     configure_voice(dsp, 0, kDspVoiceBus_Unclassified, false);
-    g_dsp_voice_kon_hook = NULL;
-
-    check(key_on_calls == 1u && keyed_brr == 0x0300u,
-          "KON callback reports resolved BRR start");
     run_samples(dsp, 4u);
     check(dsp->sampleBuffer[3u * 2u] == 0,
           "hardware key-on startup remains silent");
@@ -198,11 +179,7 @@ static void test_buses_and_parallel_virtual_bank(void) {
     configure_voice(music, 0, kDspVoiceBus_Music, false);
     configure_voice(sfx, 0, kDspVoiceBus_Sfx, false);
     configure_voice(virtual_dsp, 8, kDspVoiceBus_Sfx, false);
-    g_dsp_voice_kon_hook = on_key_on;
     control_voice(virtual_dsp, 8, 0x4cu, true);
-    g_dsp_voice_kon_hook = NULL;
-    check(keyed_channel == 8 && keyed_brr == 0x0300u,
-          "extended KON callback preserves continued voice numbering");
 
     dsp_setBusGains(0, 100);
     dsp_setExtendedVoicesEnabled(true);

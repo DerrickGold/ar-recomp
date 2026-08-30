@@ -46,6 +46,8 @@ static SrAudioTraceMask audio_trace_mask_for_type(
             return SR_AUDIO_TRACE_MASK_CPU_PORT_WRITE;
         case SR_AUDIO_TRACE_SPC_UPLOAD:
             return SR_AUDIO_TRACE_MASK_SPC_UPLOAD;
+        case SR_AUDIO_TRACE_DSP_KEY_ON:
+            return SR_AUDIO_TRACE_MASK_DSP_KEY_ON;
         default:
             return 0u;
     }
@@ -73,7 +75,7 @@ static void populate_audio_trace_event(Apu *apu,
                                        uint64_t cycle_count,
                                        SrAudioTraceEvent *event) {
     memset(event, 0, sizeof(*event));
-    event->struct_size = SR_AUDIO_TRACE_EVENT_V3_SIZE;
+    event->struct_size = SR_AUDIO_TRACE_EVENT_V2_SIZE;
     event->type = type;
     event->cycle_count = cycle_count;
     if (apu == NULL) return;
@@ -98,6 +100,24 @@ static void populate_audio_trace_event(Apu *apu,
     event->dsp_slot = apu->dspSlot;
 }
 
+static void dispatch_audio_trace_event(Apu *apu,
+                                       SrAudioTraceMask event_mask,
+                                       const SrAudioTraceEvent *event) {
+    unsigned index;
+    for (index = 0u; index < kAudioTraceObserverCapacity; ++index) {
+        AudioTraceObserverSlot *slot = &s_audio_trace_observers[index];
+        Snes *snes = slot->runner;
+        if (slot->id == 0u || snes == NULL || snes->apu != apu ||
+            (slot->subscription.event_mask & event_mask) == 0u)
+            continue;
+        ++s_audio_trace_callback_depth;
+        slot->subscription.callback(
+            slot->subscription.user_data,
+            (SrRunnerHandle *)(void *)snes, event);
+        --s_audio_trace_callback_depth;
+    }
+}
+
 void sr_runner_emit_audio_trace(Apu *apu, SrAudioTraceEventType type,
                                 uint16_t opcode_pc, uint8_t port,
                                 uint8_t dsp_address, uint8_t value,
@@ -107,7 +127,6 @@ void sr_runner_emit_audio_trace(Apu *apu, SrAudioTraceEventType type,
                                 const char *function_name) {
     SrAudioTraceEvent event;
     const SrAudioTraceMask event_mask = audio_trace_mask_for_type(type);
-    unsigned index;
     if (event_mask == 0u || !sr_runner_audio_trace_enabled(event_mask))
         return;
     populate_audio_trace_event(apu, type, cycle_count, &event);
@@ -117,23 +136,34 @@ void sr_runner_emit_audio_trace(Apu *apu, SrAudioTraceEventType type,
     event.source_address = source_address;
     event.frame_counter = frame_counter;
     event.function_name = function_name;
-    for (index = 0u; index < kAudioTraceObserverCapacity; ++index) {
-        AudioTraceObserverSlot *slot = &s_audio_trace_observers[index];
-        Snes *snes = slot->runner;
-        if (slot->id == 0u || snes == NULL || snes->apu != apu ||
-            (slot->subscription.event_mask & event_mask) == 0u)
-            continue;
-        if (type == SR_AUDIO_TRACE_SPC_OPCODE) {
-            event.spc_pc = opcode_pc;
-            event.spc_instruction_pc = opcode_pc;
-            event.spc_instruction_cycle = 0u;
-        }
-        ++s_audio_trace_callback_depth;
-        slot->subscription.callback(
-            slot->subscription.user_data,
-            (SrRunnerHandle *)(void *)snes, &event);
-        --s_audio_trace_callback_depth;
+    if (type == SR_AUDIO_TRACE_SPC_OPCODE) {
+        event.spc_pc = opcode_pc;
+        event.spc_instruction_pc = opcode_pc;
+        event.spc_instruction_cycle = 0u;
     }
+    dispatch_audio_trace_event(apu, event_mask, &event);
+}
+
+void sr_runner_emit_audio_key_on(Apu *apu, uint8_t voice_index,
+                                 uint8_t source_number,
+                                 uint16_t brr_address,
+                                 int16_t volume_left,
+                                 int16_t volume_right,
+                                 uint16_t pitch) {
+    SrAudioTraceEvent event;
+    if (!sr_runner_audio_trace_enabled(SR_AUDIO_TRACE_MASK_DSP_KEY_ON))
+        return;
+    populate_audio_trace_event(
+        apu, SR_AUDIO_TRACE_DSP_KEY_ON,
+        apu != NULL ? apu->cycleClock : 0u, &event);
+    event.voice_index = voice_index;
+    event.voice_source_number = source_number;
+    event.voice_brr_address = brr_address;
+    event.voice_volume_left = volume_left;
+    event.voice_volume_right = volume_right;
+    event.voice_pitch = pitch;
+    dispatch_audio_trace_event(
+        apu, SR_AUDIO_TRACE_MASK_DSP_KEY_ON, &event);
 }
 
 static void recompute_audio_trace_mask(void) {
@@ -160,21 +190,17 @@ SrResult sr_runner_subscribe_audio_trace(
         subscription->callback == NULL)
         return SR_RESULT_INVALID_ARGUMENT;
     if (subscription->flags != 0u) return SR_RESULT_UNSUPPORTED;
-    if (subscription->struct_size >= SR_AUDIO_TRACE_SUBSCRIPTION_V3_SIZE) {
-        event_mask = subscription->event_mask;
-        if (subscription->reserved != 0u || event_mask == 0u)
-            return SR_RESULT_INVALID_ARGUMENT;
-        if ((event_mask & ~SR_AUDIO_TRACE_MASK_ALL) != 0u)
-            return SR_RESULT_UNSUPPORTED;
-    } else {
-        event_mask = SR_AUDIO_TRACE_MASK_ALL;
-    }
+    event_mask = subscription->event_mask;
+    if (subscription->reserved != 0u || event_mask == 0u)
+        return SR_RESULT_INVALID_ARGUMENT;
+    if ((event_mask & ~SR_AUDIO_TRACE_MASK_ALL) != 0u)
+        return SR_RESULT_UNSUPPORTED;
     for (index = 0u; index < kAudioTraceObserverCapacity; ++index) {
         AudioTraceObserverSlot *slot = &s_audio_trace_observers[index];
         if (slot->id != 0u) continue;
         slot->runner = snes;
         memset(&slot->subscription, 0, sizeof(slot->subscription));
-        slot->subscription.struct_size = SR_AUDIO_TRACE_SUBSCRIPTION_V3_SIZE;
+        slot->subscription.struct_size = SR_AUDIO_TRACE_SUBSCRIPTION_V2_SIZE;
         slot->subscription.flags = subscription->flags;
         slot->subscription.callback = subscription->callback;
         slot->subscription.user_data = subscription->user_data;

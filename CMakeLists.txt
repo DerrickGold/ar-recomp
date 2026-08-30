@@ -1172,6 +1172,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_dsp_bus_mix_test
         tests/dsp_bus_mix_test.c
+        tests/runner_audio_trace_stub.c
         ${SNESRECOMP_RUNNER_DSP_SOURCE}
         ${SNESRECOMP_RUNNER_DSP_ACCURACY_SOURCES}
         ${SNESRECOMP_RUNNER_SAVELOAD_SOURCE}
@@ -1185,6 +1186,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_dsp_voice_benchmark
         tools/benchmark_dsp_voices.c
+        tests/runner_audio_trace_stub.c
         ${SNESRECOMP_RUNNER_DSP_SOURCE}
         ${SNESRECOMP_RUNNER_DSP_ACCURACY_SOURCES}
         ${SNESRECOMP_RUNNER_SAVELOAD_SOURCE}

@@ -33,9 +33,10 @@ const SnesRunnerApi *sr_runner_get_api(uint32_t requested_abi_version) {
 void RtlApuLock(void) {}
 void RtlApuUnlock(void) {}
 int RtlGetAudioOutputRate(void) { return 44100; }
-int g_dsp_voice_mute_srcn_min = -1;
-static bool s_music_bus_muted;
-void dsp_setMusicBusMuted(bool muted) { s_music_bus_muted = muted; }
+static bool s_music_replacement_active;
+void NativeAudioMixer_SetMusicReplacementActive(bool active) {
+  s_music_replacement_active = active;
+}
 
 /* ---- helpers ------------------------------------------------------------ */
 
@@ -311,8 +312,7 @@ static void TestTriggerStateMachine(void) {
   MusicReplacements_OnApuPortWrite(0, 0xF0); /* halt */
   MusicReplacements_OnApuPortWrite(0, 0xFF); /* upload */
   MusicReplacements_OnApuPortWrite(0, 0x01); /* play song 1: no audio -> authentic */
-  CHECK(g_dsp_voice_mute_srcn_min == -1);
-  CHECK(!s_music_bus_muted);
+  CHECK(!s_music_replacement_active);
   MusicReplacements_FormatPlaybackStatus(status, sizeof(status));
   CHECK(strstr(status, "MUSIC tune $01 AUTH") != NULL);
 
@@ -342,18 +342,17 @@ static void TestTriggerStateMachine(void) {
   g_music_replacements[0].file_rate = 44100;
   g_music_replacements[0].file_frames = 44100;
   MusicReplacements_OnApuPortWrite(0, 0x01);
-  CHECK(g_dsp_voice_mute_srcn_min == -1);
-  CHECK(!s_music_bus_muted);
+  CHECK(!s_music_replacement_active);
 
   /* The menu callback may toggle either direction while the game is paused.
    * With this deliberately missing fixture both paths stay authentic, but
    * they still exercise adoption of the remembered current song. */
   g_settings.music_replacements = false;
   MusicReplacements_ApplySetting();
-  CHECK(g_dsp_voice_mute_srcn_min == -1);
+  CHECK(!s_music_replacement_active);
   g_settings.music_replacements = true;
   MusicReplacements_ApplySetting();
-  CHECK(g_dsp_voice_mute_srcn_min == -1);
+  CHECK(!s_music_replacement_active);
 
   /* Mix hook without a session: must not touch the buffer. */
   int16_t buf[64];

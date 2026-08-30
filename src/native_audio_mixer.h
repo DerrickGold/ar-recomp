@@ -36,6 +36,11 @@ void NativeAudioMixer_RouteStateLoaded(
 
 void NativeAudioMixer_BindRunner(SrRunnerHandle *runner);
 
+/* Apply or release the authentic-DSP mute associated with a replacement music
+ * session. The mixer combines this with the current user gain settings before
+ * issuing one public runner request. */
+void NativeAudioMixer_SetMusicReplacementActive(bool active);
+
 /* Install logging policy and apply configured bus gains. Safe before SnesInit;
  * the runner binding reapplies native gains as soon as an APU exists. */
 void NativeAudioMixer_Install(void);

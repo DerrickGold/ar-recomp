@@ -161,15 +161,25 @@ SrResult sr_runner_configure_audio_mix(
     Snes *snes = runner_from_handle(runner);
     if (snes == NULL || control == NULL ||
         control->struct_size < SR_AUDIO_MIX_CONTROL_V2_SIZE ||
-        control->flags != 0u || control->music_gain_percent > 100u ||
-        control->sfx_gain_percent > 100u || control->reserved[0] != 0u ||
-        control->reserved[1] != 0u)
+        (control->flags & ~SR_AUDIO_MIX_FLAGS_SUPPORTED) != 0u ||
+        control->music_gain_percent > 100u ||
+        control->sfx_gain_percent > 100u || control->reserved != 0u ||
+        ((control->flags &
+          SR_AUDIO_MIX_PARTITION_UNCLASSIFIED_BY_SOURCE) != 0u
+             ? control->unclassified_music_source_min > UINT8_MAX
+             : control->unclassified_music_source_min != 0u))
         return SR_RESULT_INVALID_ARGUMENT;
     if (snes->apu == NULL || snes->apu->dsp == NULL)
         return SR_RESULT_UNAVAILABLE;
     RtlApuLock();
     dsp_setBusGains((int)control->music_gain_percent,
                     (int)control->sfx_gain_percent);
+    dsp_setMusicBusMuted(
+        (control->flags & SR_AUDIO_MIX_MUTE_MUSIC) != 0u);
+    dsp_setUnclassifiedMusicSourceMinimum(
+        (control->flags &
+         SR_AUDIO_MIX_PARTITION_UNCLASSIFIED_BY_SOURCE) != 0u
+            ? (int)control->unclassified_music_source_min : -1);
     RtlApuUnlock();
     return SR_RESULT_OK;
 }

@@ -114,6 +114,12 @@ void sr_runner_emit_audio_trace(Apu *apu, SrAudioTraceEventType type,
                                 uint32_t source_address,
                                 uint32_t frame_counter,
                                 const char *function_name);
+void sr_runner_emit_audio_key_on(Apu *apu, uint8_t voice_index,
+                                 uint8_t source_number,
+                                 uint16_t brr_address,
+                                 int16_t volume_left,
+                                 int16_t volume_right,
+                                 uint16_t pitch);
 SrResult sr_runner_subscribe_audio_trace(
     SrRunnerHandle *runner,
     const SrAudioTraceSubscription *subscription,
@@ -136,3 +142,13 @@ void sr_runner_audio_production_end(void);
 bool sr_runner_audio_query_forbidden(void);
 SrResult sr_runner_apply_ppu_frame_policy(
     Snes *snes, const SrPpuFramePolicy *policy);
+
+typedef uint32_t SrApuProfileCycleSource;
+enum {
+    SR_APU_PROFILE_CYCLE_AUDIO_DEMAND = 1u,
+    SR_APU_PROFILE_CYCLE_PORT_SYNC = 2u,
+    SR_APU_PROFILE_CYCLE_UPLOAD_CONTROL = 3u,
+    SR_APU_PROFILE_CYCLE_TIMELINE = 4u
+};
+void sr_runner_record_apu_profile_cycles(
+    SrApuProfileCycleSource source, uint64_t cycles, uint64_t elapsed_ns);

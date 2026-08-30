@@ -1,6 +1,8 @@
 #include "dsp.h"
 
+#include "apu.h"
 #include "dsp_accuracy_bridge.h"
+#include "runner_internal.h"
 #include "snesrecomp/host/audio_trace.h"
 #include "simd.h"
 #include "dsp_shadow.h"
@@ -35,9 +37,7 @@ bool g_dsp_extended_voices_enabled;
 static int s_music_gain_percent = 100;
 static int s_sfx_gain_percent = 100;
 static bool s_music_muted;
-
-int g_dsp_voice_mute_srcn_min = -1;
-void (*g_dsp_voice_kon_hook)(int, uint8_t, uint16_t, int, int, uint16_t);
+static int s_unclassified_music_source_min = -1;
 
 static int clamp_percent(int value) {
     if (value < 0) return 0;
@@ -90,6 +90,12 @@ void dsp_setMusicBusMuted(bool muted) {
     s_music_muted = muted;
 }
 
+void dsp_setUnclassifiedMusicSourceMinimum(int source_number) {
+    s_unclassified_music_source_min =
+        source_number >= 0 && source_number <= UINT8_MAX
+            ? source_number : -1;
+}
+
 static int voice_bus_gain(const Dsp *dsp, int channel) {
     switch (dsp_getVoiceBus(dsp, channel)) {
         case kDspVoiceBus_Music: return s_music_gain_percent;
@@ -102,15 +108,16 @@ static bool voice_is_muted(const Dsp *dsp, int channel) {
     const DspVoiceBus bus = dsp_getVoiceBus(dsp, channel);
     if (s_music_muted && bus == kDspVoiceBus_Music) return true;
     return bus == kDspVoiceBus_Unclassified &&
-           g_dsp_voice_mute_srcn_min >= 0 &&
-           dsp->channel[channel].srcn >= g_dsp_voice_mute_srcn_min;
+           s_unclassified_music_source_min >= 0 &&
+           dsp->channel[channel].srcn >=
+               s_unclassified_music_source_min;
 }
 
 void dsp_refreshMixControls(Dsp *dsp) {
     int channel;
     dsp->mixControlsUnity = s_music_gain_percent == 100 &&
         s_sfx_gain_percent == 100 && !s_music_muted &&
-        g_dsp_voice_mute_srcn_min < 0;
+        s_unclassified_music_source_min < 0;
     if (dsp->mixControlsUnity) return;
     for (channel = 0; channel < kDspMaximumVoiceCount; ++channel) {
         dsp->voiceGainPercent[channel] =
@@ -246,14 +253,17 @@ void dsp_free(Dsp *dsp) {
 
 void dsp_reset(Dsp *dsp) {
     uint8_t *apu_ram;
+    Apu *apu;
     void *shadow;
     void *accuracy;
     if (dsp == NULL) return;
     apu_ram = dsp->apu_ram;
+    apu = dsp->apu;
     shadow = dsp->shadow;
     accuracy = dsp->accuracy;
     memset(dsp, 0, sizeof(*dsp));
     dsp->apu_ram = apu_ram;
+    dsp->apu = apu;
     dsp->shadow = shadow;
     dsp->accuracy = accuracy;
     sr_dsp_accuracy_reset((SrDspAccuracy *)accuracy);
@@ -295,18 +305,23 @@ static void notify_voice_key_on(Dsp *dsp, int channel) {
     uint16_t directory;
     uint16_t start;
     DspChannel *voice;
-    if (g_dsp_voice_kon_hook == NULL || dsp == NULL || channel < 0 ||
-        channel >= kDspMaximumVoiceCount) return;
+    if (dsp == NULL || dsp->apu == NULL || channel < 0 ||
+        channel >= kDspMaximumVoiceCount ||
+        !sr_runner_audio_trace_enabled(SR_AUDIO_TRACE_MASK_DSP_KEY_ON))
+        return;
     voice = &dsp->channel[channel];
     directory = (uint16_t)(dsp->dirPage + 4u * voice->srcn);
     start = read_u16(dsp->apu_ram, directory);
-    g_dsp_voice_kon_hook(channel, voice->srcn, start,
-                         voice->volumeL, voice->volumeR, voice->pitch);
+    sr_runner_emit_audio_key_on(
+        dsp->apu, (uint8_t)channel, voice->srcn, start,
+        voice->volumeL, voice->volumeR, voice->pitch);
 }
 
 static void notify_key_on(Dsp *dsp, uint8_t bits) {
     int channel;
-    if (g_dsp_voice_kon_hook == NULL || dsp == NULL) return;
+    if (dsp == NULL || dsp->apu == NULL ||
+        !sr_runner_audio_trace_enabled(SR_AUDIO_TRACE_MASK_DSP_KEY_ON))
+        return;
     for (channel = 0; channel < kDspHardwareVoiceCount; ++channel) {
         const uint8_t bit = (uint8_t)(1u << channel);
         if ((bits & bit) == 0u) continue;
