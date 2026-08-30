@@ -119,4 +119,6 @@ WHAT THE FOLDERS ARE
                   never overwrites yours. Do not edit these; edit the copies in
                   utils/ instead.
 
-Licensing and credits are in utils/LICENSE and utils/ATTRIBUTION.md.
+Licensing and credits are in utils/LICENSE, utils/LICENSE_SCOPE.md,
+utils/ATTRIBUTION.md, and utils/THIRD_PARTY_NOTICES.md. The vended runner's
+notices are also under utils/snesrecomp-go/runtime/.

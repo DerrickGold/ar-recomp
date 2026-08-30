@@ -11,6 +11,15 @@ set(_scan_exempt "@SNESBUILD_SCAN_EXEMPT_DIRS@")
 set(_runtime_archive_relative "@SNESBUILD_RUNTIME_ARCHIVE_RELATIVE@")
 set(_runtime_source_paths "@SNESBUILD_RUNTIME_SOURCE_PATHS@")
 set(_required_sdl_runtime "@SNESBUILD_REQUIRED_SDL_RUNTIME@")
+set(_required_license_files
+    "utils/LICENSE"
+    "utils/LICENSE_SCOPE.md"
+    "utils/ATTRIBUTION.md"
+    "utils/THIRD_PARTY_NOTICES.md"
+    "utils/snesrecomp-go/runtime/LICENSE"
+    "utils/snesrecomp-go/runtime/NOTICE.md"
+    "utils/snesrecomp-go/runtime/PROVENANCE.md"
+    "utils/snesrecomp-go/runtime/licenses/Snaggletooth-LICENSE.txt")
 
 foreach(_package IN LISTS CPACK_PACKAGE_FILES)
     get_filename_component(_package "${_package}" ABSOLUTE)
@@ -56,6 +65,12 @@ foreach(_package IN LISTS CPACK_PACKAGE_FILES)
         message(FATAL_ERROR
             "bundled SDL check: ${_package} is missing ${_required_sdl_runtime}")
     endif()
+    foreach(_license_file IN LISTS _required_license_files)
+        if(NOT EXISTS "${_root}/${_license_file}")
+            message(FATAL_ERROR
+                "license check: ${_package} is missing ${_license_file}")
+        endif()
+    endforeach()
 
     file(GLOB _entries LIST_DIRECTORIES true RELATIVE "${_root}" "${_root}/*")
     foreach(_entry IN LISTS _entries)

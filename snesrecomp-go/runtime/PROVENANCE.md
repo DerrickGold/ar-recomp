@@ -1,7 +1,9 @@
 # Provenance
 
-`runtime` is an independently authored portable runner started in August
-2026. Its source is covered by the MIT grant in [`LICENSE`](LICENSE).
+`runtime` is the project-owned portable replacement runner started in August
+2026. Project-authored source is covered by the MIT grant in
+[`LICENSE`](LICENSE); compatible third-party portions are identified in
+[`NOTICE.md`](NOTICE.md).
 
 Except for the compatible components called out below, the code in this
 directory was written against the public interfaces emitted by `snesrecomp-go`
@@ -36,11 +38,11 @@ implemented independently in this repository's MIT-licensed pure-Go audio
 preview package. It does not derive from the inherited C runner.
 
 The slot-accurate S-DSP core in `src/snes/accuracy/dsp.cpp` and its associated
-header/generated tables are adapted from Eric Tomasso's Snaggletooth
-`ci/snes-ipl-an` source at exact commit
+header/generated tables are adapted from Eric Tomasso's Snaggletooth source at
+exact commit
 `65668997ed58fe78cfcef1e53c0020bd92d0d287`. That source is MIT licensed; its
-copyright and grant are retained verbatim in `src/snes/accuracy/LICENSE` and
-installed as `licenses/Snaggletooth-LICENSE.txt`.
+copyright and grant are retained verbatim in
+`licenses/Snaggletooth-LICENSE.txt` and installed with every runner SDK.
 
 The C ABI bridge, five-bank extended-voice topology, music/SFX gain routing,
 shared echo injection, portable serialization, PCM ring, resampling, and host

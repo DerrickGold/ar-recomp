@@ -1,5 +1,10 @@
 #pragma once
 
+// Adapted from Snaggletooth include/snaggletooth/apu/dsp.h at commit
+// 65668997ed58fe78cfcef1e53c0020bd92d0d287.
+// Copyright (c) 2026 Eric Tomasso. SPDX-License-Identifier: MIT.
+// See runtime/licenses/Snaggletooth-LICENSE.txt.
+
 // The S-DSP — the sound chip the SPC700 drives through the DSPADDR/DSPDATA
 // registers. This header carries the DSP's state as a value and the voice
 // sample pipeline's pure mechanisms: BRR sample decode (turning a 9-byte

@@ -1,23 +1,4 @@
-Scope
------
-
-This license covers the original Go implementation, the independently authored
-C sources under `runtime/`, build and packaging tooling, tests, and
-documentation in this module.
-
-It does **not** cover, and grants no rights to:
-
-- Retail/manual/cover media under `internal/buildgui/assets/`, or any other
-  third-party game artwork. The Go code which embeds or serves those files is
-  covered; the media itself is not relicensed.
-- A game ROM, generated/recompiled ROM code, extracted audio, or other content
-  derived from a ROM. Those inputs and outputs remain subject to the rights in
-  the original game and are not distributed by this module.
-- Third-party components carrying their own license notices. Those notices
-  continue to govern their respective components.
-
 MIT License
------------
 
 Copyright (c) 2026 Derrick Gold
 

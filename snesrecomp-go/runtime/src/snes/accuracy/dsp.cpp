@@ -1,3 +1,8 @@
+// Portions adapted from Snaggletooth src/dsp.cpp at commit
+// 65668997ed58fe78cfcef1e53c0020bd92d0d287.
+// Copyright (c) 2026 Eric Tomasso. SPDX-License-Identifier: MIT.
+// See runtime/licenses/Snaggletooth-LICENSE.txt.
+
 #include "snaggletooth/apu/dsp.h"
 
 namespace snaggletooth {

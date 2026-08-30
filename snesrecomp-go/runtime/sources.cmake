@@ -1,4 +1,6 @@
-# Canonical source list for the independently authored portable runner.
+# Canonical source list for the project-owned portable replacement runner.
+# Attributed third-party components and their compatible licenses are listed in
+# NOTICE.md.
 # Keep target-specific adapters (for example trace stubs) in the consuming
 # build description rather than duplicating the core list.
 

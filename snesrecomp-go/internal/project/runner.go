@@ -10,8 +10,9 @@ import (
 
 const RunnerName = "portable"
 
-// RunnerDirectory is the single independently authored runtime shipped by the
-// toolchain. The legacy runner was retired after the parity cutover.
+// RunnerDirectory is the single project-owned replacement runtime shipped by
+// the toolchain. Its attributed third-party components are recorded in the
+// runtime notice. The legacy runner was retired after the parity cutover.
 func RunnerDirectory(toolchainDir string) string {
 	return filepath.Join(toolchainDir, "runtime")
 }

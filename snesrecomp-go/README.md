@@ -17,9 +17,11 @@ baseline snapshots ignored in each game project.
 
 The recompiler is a Go port of the Python `snesrecomp` project created by
 Matthew Stanley and subsequently developed by its contributors. The bundled C
-runner is now an independently authored implementation under `runtime/`; the
-historical comparison runner is not distributed. Exact repositories, the
-source snapshot used for the Go port, contributor credit, prior-project
+runner under `runtime/` is the project-owned replacement for the retired
+comparison runner, which is not distributed. Its S-DSP accuracy core includes
+an attributed MIT-licensed adaptation from Snaggletooth; the rest of that
+boundary is explicit rather than implied. Exact repositories, the source
+snapshot used for the Go port, contributor credit, prior-project
 acknowledgements, and licensing boundaries are recorded in
 [`ATTRIBUTION.md`](ATTRIBUTION.md) and
 [`runtime/PROVENANCE.md`](runtime/PROVENANCE.md).
@@ -409,13 +411,20 @@ CMake install manifest is the authoritative bundle contract.
   features, and current limitations.
 - [`ATTRIBUTION.md`](ATTRIBUTION.md): Python-source provenance, prior work,
   contributor credit, and licensing status.
+- [`LICENSE_SCOPE.md`](LICENSE_SCOPE.md): the original-code grant, explicit
+  inclusion of the replacement runner, and game-content exclusions.
+- [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md): compatible third-party
+  components, including the Snaggletooth S-DSP attribution.
 
 ## Licensing
 
-The original Go implementation, tooling, tests, and documentation in this
-module, including the independently authored portable C runner, are
-[MIT-licensed](LICENSE). See [`ATTRIBUTION.md`](ATTRIBUTION.md) for historical
-project lineage and third-party acknowledgements.
+The original Go implementation, tooling, tests, documentation, and
+project-authored portable runner sources are [MIT-licensed](LICENSE). The
+complete runner is redistributable under MIT-compatible terms: its attributed
+Snaggletooth S-DSP portions retain Eric Tomasso's upstream MIT notice. See
+[`LICENSE_SCOPE.md`](LICENSE_SCOPE.md) for the exact grant and
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for retained third-party
+credits.
 
 Game ROMs, generated/recompiled ROM code, extracted previews, and embedded
 retail media are not relicensed under MIT.
