@@ -241,7 +241,7 @@ void saveloadBank(SaveLoadInfo *info, DspState& state) {
 
 struct SrDspAccuracy {
   std::array<DspState, kBankCount> banks{};
-  std::array<bool, kBankCount> bankActive{};
+  std::uint8_t activeBankMask = 1u;
   bool extendedWasEnabled = false;
 };
 
@@ -262,8 +262,7 @@ extern "C" void sr_dsp_accuracy_destroy(SrDspAccuracy *accuracy) {
 extern "C" void sr_dsp_accuracy_reset(SrDspAccuracy *accuracy) {
   if (accuracy == nullptr) return;
   for (auto& bank : accuracy->banks) resetBank(bank);
-  accuracy->bankActive.fill(false);
-  accuracy->bankActive[0] = true;
+  accuracy->activeBankMask = 1u;
   accuracy->extendedWasEnabled = false;
 }
 
@@ -332,10 +331,12 @@ extern "C" void sr_dsp_accuracy_write_virtual_control(
     else
       state.internalKon &= static_cast<std::uint8_t>(~bit);
   }
-  if (global_address == kDspKon && enabled && !accuracy->bankActive[bank]) {
+  const std::uint8_t bankBit = static_cast<std::uint8_t>(1u << bank);
+  if (global_address == kDspKon && enabled &&
+      (accuracy->activeBankMask & bankBit) == 0) {
     syncVirtualTimeline(state, accuracy->banks[0]);
     state.internalKon |= bit;
-    accuracy->bankActive[bank] = true;
+    accuracy->activeBankMask |= bankBit;
   }
 }
 
@@ -350,21 +351,23 @@ extern "C" SrDspAccuracyFrame sr_dsp_accuracy_clock(
 
   DspState& native = accuracy->banks[0];
   const std::uint8_t slot = native.slotCursor;
+  const std::uint8_t virtualBankMask = extended_enabled
+      ? static_cast<std::uint8_t>(accuracy->activeBankMask & ~1u) : 0u;
   std::array<SlotResult, kBankCount> result{};
   std::span<std::uint8_t, 65536> writable(apu_ram, 65536);
   std::span<const std::uint8_t, 65536> readonly(apu_ram, 65536);
 
   if (extended_enabled && !accuracy->extendedWasEnabled) {
     for (int bank = 1; bank < kBankCount; ++bank) {
-      if (accuracy->bankActive[bank])
+      if ((accuracy->activeBankMask & (1u << bank)) != 0)
         syncVirtualTimeline(accuracy->banks[bank], native);
     }
   }
   accuracy->extendedWasEnabled = extended_enabled;
 
-  if (extended_enabled) {
+  if (virtualBankMask != 0) {
     for (int bank = 1; bank < kBankCount; ++bank) {
-      if (!accuracy->bankActive[bank]) continue;
+      if ((virtualBankMask & (1u << bank)) == 0) continue;
       DspState& virtualBank = accuracy->banks[bank];
       VolumeHold hold;
       hold.count = 0;
@@ -376,9 +379,9 @@ extern "C" SrDspAccuracyFrame sr_dsp_accuracy_clock(
     }
   }
 
-  if (slot == 24 && extended_enabled) {
+  if (slot == 24 && virtualBankMask != 0) {
     for (int bank = 1; bank < kBankCount; ++bank) {
-      if (!accuracy->bankActive[bank]) continue;
+      if ((virtualBankMask & (1u << bank)) == 0) continue;
       native.echoSendLeft = clamp16(
           native.echoSendLeft + accuracy->banks[bank].echoSendLeft);
       native.echoSendRight = clamp16(
@@ -396,16 +399,16 @@ extern "C" SrDspAccuracyFrame sr_dsp_accuracy_clock(
   if (!result[0].delivered) return output;
   int left = result[0].frame.left;
   int right = result[0].frame.right;
-  output.active_bank_mask = 1u;
-  if (extended_enabled) {
+  output.active_bank_mask = static_cast<std::uint8_t>(1u | virtualBankMask);
+  if (virtualBankMask != 0) {
     for (int bank = 1; bank < kBankCount; ++bank) {
-      if (!accuracy->bankActive[bank]) continue;
-      output.active_bank_mask |= static_cast<std::uint8_t>(1u << bank);
+      const std::uint8_t bankBit = static_cast<std::uint8_t>(1u << bank);
+      if ((virtualBankMask & bankBit) == 0) continue;
       left = clamp16(left + result[bank].frame.left);
       right = clamp16(right + result[bank].frame.right);
       if (bankIsQuiescent(accuracy->banks[bank])) {
         accuracy->banks[bank].preparedEndx = 0;
-        accuracy->bankActive[bank] = false;
+        accuracy->activeBankMask &= static_cast<std::uint8_t>(~bankBit);
       }
     }
   }
@@ -496,11 +499,12 @@ extern "C" void sr_dsp_accuracy_saveload(SrDspAccuracy *accuracy,
   if (accuracy == nullptr || info == nullptr || info->func == nullptr) return;
   for (auto& bank : accuracy->banks) saveloadBank(info, bank);
   if (!info->saving && !info->failed) {
-    accuracy->bankActive[0] = true;
+    accuracy->activeBankMask = 1u;
     for (int bank = 1; bank < kBankCount; ++bank) {
       accuracy->banks[bank].regs[0x2C] = 0;
       accuracy->banks[bank].regs[0x3C] = 0;
-      accuracy->bankActive[bank] = !bankIsQuiescent(accuracy->banks[bank]);
+      if (!bankIsQuiescent(accuracy->banks[bank]))
+        accuracy->activeBankMask |= static_cast<std::uint8_t>(1u << bank);
     }
   }
 }

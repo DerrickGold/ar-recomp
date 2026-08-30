@@ -71,18 +71,6 @@ static void SDLCALL AudioCallback(void *userdata, SDL_AudioStream *stream,
   uint8_t audio_chunk[
       kAudioCallbackChunkFrameCapacity * kAudioBytesPerFrame];
 
-  /* This outer acquire is the one that can block. RtlRenderAudio's nested
-   * RtlApuLock calls are recursive re-entries on the same audio thread. */
-  if (RtlApuProfileIsEnabled()) {
-    const uint64_t wait_start_ns = audio_trace_wall_ns();
-    SDL_LockMutex(s_audio_mutex);
-    const uint64_t wait_duration_ns =
-        audio_trace_wall_ns() - wait_start_ns;
-    RtlApuProfileRecordHostWait(wait_duration_ns, false);
-  } else {
-    SDL_LockMutex(s_audio_mutex);
-  }
-
   const int volume_percent =
       SDL_GetAtomicInt(&s_master_volume_percent);
   const bool output_enabled = SDL_GetAtomicInt(&s_output_enabled) != 0;
@@ -113,7 +101,6 @@ static void SDLCALL AudioCallback(void *userdata, SDL_AudioStream *stream,
       SDL_AddAtomicInt(&s_rejected_chunk_count, 1);
     remaining_bytes -= chunk_bytes;
   }
-  SDL_UnlockMutex(s_audio_mutex);
 }
 
 static bool OpenAudioStream(void) {

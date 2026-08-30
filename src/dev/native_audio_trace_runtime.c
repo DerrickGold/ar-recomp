@@ -113,6 +113,10 @@ bool NativeAudioTrace_Init(SrRunnerHandle *runner) {
     .callback = OnRunnerAudioTrace,
     .event_mask = SR_AUDIO_TRACE_MASK_ALL,
   };
+  {
+    const char *pcm = getenv("AR_NATIVE_AUDIO_PCM");
+    if (pcm && pcm[0] && pcm[0] != '0') audio_trace_set_enabled(1);
+  }
   if (!TraceEnabled()) return true;
   NativeAudioTrace_Shutdown();
   NativeAudioTraceModel_Reset();

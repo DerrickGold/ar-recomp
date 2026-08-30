@@ -9,6 +9,10 @@
 
 static int s_failures;
 static SDL_AtomicInt s_render_calls;
+static SDL_AtomicInt s_lock_probe_requested;
+static SDL_AtomicInt s_lock_probe_entered;
+static SDL_AtomicInt s_lock_probe_hold;
+static SDL_AtomicInt s_lock_probe_acquired;
 
 #define CHECK(expression) do { \
   if (!(expression)) { \
@@ -30,6 +34,32 @@ void RtlSetAudioOutputRate(int rate) { (void)rate; }
 void RtlRenderAudio(int16 *buffer, int frames, int channels) {
   memset(buffer, 0, (size_t)frames * (size_t)channels * sizeof(*buffer));
   SDL_AddAtomicInt(&s_render_calls, 1);
+  if (SDL_GetAtomicInt(&s_lock_probe_requested) != 0) {
+    /* Match the real renderer's bounded ownership: it releases its own lock
+     * before host gain/mute processing and SDL submission. */
+    RtlApuLock();
+    RtlApuUnlock();
+    SDL_SetAtomicInt(&s_lock_probe_entered, 1);
+    while (SDL_GetAtomicInt(&s_lock_probe_hold) != 0) SDL_Delay(1);
+    SDL_SetAtomicInt(&s_lock_probe_requested, 0);
+  }
+}
+
+static int SDLCALL AcquireApuLock(void *unused) {
+  (void)unused;
+  RtlApuLock();
+  SDL_SetAtomicInt(&s_lock_probe_acquired, 1);
+  RtlApuUnlock();
+  return 0;
+}
+
+static bool WaitForAtomicNonzero(SDL_AtomicInt *value, uint32_t timeout_ms) {
+  const uint64_t deadline = SDL_GetTicks() + timeout_ms;
+  while (SDL_GetTicks() < deadline) {
+    if (SDL_GetAtomicInt(value) != 0) return true;
+    SDL_Delay(1);
+  }
+  return SDL_GetAtomicInt(value) != 0;
 }
 
 static bool WaitForRenderAfter(int baseline, uint32_t timeout_ms) {
@@ -55,6 +85,23 @@ int main(void) {
   CHECK(HostAudio_Init(44100, 256, 100, true));
 
   CHECK(WaitForRenderAfter(0, 1000));
+
+  /* The callback must not retain an outer APU lock after RtlRenderAudio has
+   * released its bounded region. Otherwise the game thread is excluded during
+   * host-only gain/mute work and SDL stream submission. */
+  SDL_SetAtomicInt(&s_lock_probe_hold, 1);
+  SDL_SetAtomicInt(&s_lock_probe_requested, 1);
+  CHECK(WaitForAtomicNonzero(&s_lock_probe_entered, 1000));
+  SDL_Thread *lock_thread =
+      SDL_CreateThread(AcquireApuLock, "audio-lock-probe", NULL);
+  CHECK(lock_thread != NULL);
+  if (lock_thread != NULL) {
+    CHECK(WaitForAtomicNonzero(&s_lock_probe_acquired, 1000));
+    SDL_SetAtomicInt(&s_lock_probe_hold, 0);
+    SDL_WaitThread(lock_thread, NULL);
+  } else {
+    SDL_SetAtomicInt(&s_lock_probe_hold, 0);
+  }
 
   HostAudio_SetHostPaused(true);
   CheckRenderCallsStayStopped();

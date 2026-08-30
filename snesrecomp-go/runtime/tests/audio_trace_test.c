@@ -100,10 +100,30 @@ static void test_wav_dump(void) {
     check(remove(AUDIO_TRACE_TEST_WAV) == 0, "remove WAV fixture");
 }
 
+static void test_disabled_fast_path(void) {
+    AudioTraceStats before, after;
+    audio_trace_get_stats(&before);
+    audio_trace_set_enabled(0);
+    audio_trace_set_producer(AUDIO_TRACE_PRODUCER_AUDIO);
+    audio_trace_on_sample(400, -400, 1, 4u);
+    audio_trace_on_reg_write(0x4cu, 1u);
+    audio_trace_on_consume(3u, 32u, 0u);
+    audio_trace_on_pace(0, 9u);
+    audio_trace_on_cpu_port_write(0u, 1u);
+    audio_trace_on_cpu_port_apply(0u, 1u);
+    audio_trace_on_spc_port_read(0u, 1u);
+    audio_trace_on_spc_port_write(0u, 1u);
+    audio_trace_on_cpu_port_read(0u, 1u);
+    audio_trace_get_stats(&after);
+    check(memcmp(&before, &after, sizeof(before)) == 0,
+          "disabled recorder leaves all trace state untouched");
+}
+
 int main(void) {
     test_samples_and_events();
     test_port_gating();
     test_wav_dump();
+    test_disabled_fast_path();
     check(lock_depth == 0u, "query locks remain balanced");
     if (failures != 0) {
         fprintf(stderr, "runtime audio trace: %d failure(s)\n", failures);
