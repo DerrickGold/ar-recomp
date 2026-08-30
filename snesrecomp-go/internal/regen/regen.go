@@ -48,6 +48,9 @@ type Report struct {
 	SharedRegionBodies                  int
 	SharedRegionContinuationWrappers    int
 	SharedRegionContinuationFallbacks   int
+	SharedContinuationBodies            int
+	SharedContinuationEdges             int
+	SharedContinuationCalls             int
 	StaticEntryDiscoveries              []analysis.EntryFact
 	StaticCanonicalPromotions           int
 	SemanticSourceSHA256                string
@@ -61,34 +64,38 @@ type bankState struct {
 }
 
 type repository struct {
-	image                   rom.Image
-	banks                   []*bankState
-	byBank                  map[byte]*bankState
-	names                   map[uint32]string
-	canonical               map[uint32]map[[2]uint8]struct{}
-	dispatchHelpers         map[uint32]string
-	provenDispatchMX        map[uint32]struct{}
-	provenResumePCs         map[uint32]struct{}
-	provenResumeEdges       map[decoder.Variant]map[decoder.ResumeEdge]struct{}
-	flattenedResumeEdges    map[decoder.Variant]map[decoder.ResumeEdge]struct{}
-	dormantEntryRoots       map[decoder.Variant]struct{}
-	templateFreeEntryRoots  map[decoder.Variant]struct{}
-	templateFreeEntryFacts  int
-	templateFreeSynthesized int
-	staticEntryDiscoveries  map[decoder.Variant]analysis.EntryFact
-	sharedRegionBodies      int
-	sharedRegionWrappers    int
-	sharedRegionFallbacks   int
-	exactDirectCallMX       bool
-	exitMX                  map[decoder.Variant]decoder.MX
-	allDataRegions          []decoder.DataRegion
-	forceVariants           map[uint32][2]uint8
-	validVariants           map[uint32]map[[2]uint8]struct{}
-	provenEquivalent        map[uint32]map[[2]uint8]map[[2]uint8]struct{}
-	unresolved              map[codegen.Variant]struct{}
-	cumulativeDirty         map[codegen.Variant]struct{}
-	cumulativeEmit          map[codegen.Variant]struct{}
-	cumulativePrune         map[codegen.Variant]struct{}
+	image                    rom.Image
+	banks                    []*bankState
+	byBank                   map[byte]*bankState
+	names                    map[uint32]string
+	canonical                map[uint32]map[[2]uint8]struct{}
+	dispatchHelpers          map[uint32]string
+	provenDispatchMX         map[uint32]struct{}
+	provenResumePCs          map[uint32]struct{}
+	provenResumeEdges        map[decoder.Variant]map[decoder.ResumeEdge]struct{}
+	provenContinuationCalls  map[decoder.Variant]map[decoder.ResumeEdge]decoder.Variant
+	flattenedResumeEdges     map[decoder.Variant]map[decoder.ResumeEdge]struct{}
+	dormantEntryRoots        map[decoder.Variant]struct{}
+	templateFreeEntryRoots   map[decoder.Variant]struct{}
+	templateFreeEntryFacts   int
+	templateFreeSynthesized  int
+	staticEntryDiscoveries   map[decoder.Variant]analysis.EntryFact
+	sharedRegionBodies       int
+	sharedRegionWrappers     int
+	sharedRegionFallbacks    int
+	sharedContinuationBodies int
+	sharedContinuationEdges  int
+	sharedContinuationCalls  int
+	exactDirectCallMX        bool
+	exitMX                   map[decoder.Variant]decoder.MX
+	allDataRegions           []decoder.DataRegion
+	forceVariants            map[uint32][2]uint8
+	validVariants            map[uint32]map[[2]uint8]struct{}
+	provenEquivalent         map[uint32]map[[2]uint8]map[[2]uint8]struct{}
+	unresolved               map[codegen.Variant]struct{}
+	cumulativeDirty          map[codegen.Variant]struct{}
+	cumulativeEmit           map[codegen.Variant]struct{}
+	cumulativePrune          map[codegen.Variant]struct{}
 }
 
 var bankConfigRE = regexp.MustCompile(`(?i)^bank([0-9a-f]+)\.cfg$`)
@@ -141,7 +148,7 @@ func Run(options Options) (Report, error) {
 		}
 	}
 	if entryFactCounts.continuations > 0 {
-		logf("experimental analysis overlay: made %d exact continuation variant(s) locally resumable in their proven owning regions", entryFactCounts.continuations)
+		logf("experimental analysis overlay: made %d exact continuation variant(s) resumable without duplicate activations", entryFactCounts.continuations)
 	}
 	repo.exactDirectCallMX = options.ExperimentalExactDirectCallMX
 	report := Report{Banks: len(repo.banks)}
@@ -234,8 +241,14 @@ func Run(options Options) (Report, error) {
 	report.SharedRegionBodies = repo.sharedRegionBodies
 	report.SharedRegionContinuationWrappers = repo.sharedRegionWrappers
 	report.SharedRegionContinuationFallbacks = repo.sharedRegionFallbacks
+	report.SharedContinuationBodies = repo.sharedContinuationBodies
+	report.SharedContinuationEdges = repo.sharedContinuationEdges
+	report.SharedContinuationCalls = repo.sharedContinuationCalls
 	if report.SharedRegionBodies > 0 || report.SharedRegionContinuationFallbacks > 0 {
 		logf("resumable regions: emitted %d shared body/bodies with %d external continuation wrapper(s); %d exact continuation(s) retained standalone fallback bodies", report.SharedRegionBodies, report.SharedRegionContinuationWrappers, report.SharedRegionContinuationFallbacks)
+	}
+	if report.SharedContinuationBodies > 0 {
+		logf("multi-owner continuations: emitted %d shared body/bodies; %d proven edge(s) produced %d exact no-activation call site(s)", report.SharedContinuationBodies, report.SharedContinuationEdges, report.SharedContinuationCalls)
 	}
 	repo.recordUnresolvedEmittedDemands(contexts)
 	report.SemanticSourceSHA256, err = repo.semanticSourceSHA256(results)
@@ -282,14 +295,15 @@ func loadRepository(romPath, configDir string) (*repository, error) {
 	repo := &repository{
 		image: image, byBank: make(map[byte]*bankState), names: make(map[uint32]string),
 		canonical: make(map[uint32]map[[2]uint8]struct{}), dispatchHelpers: make(map[uint32]string),
-		provenDispatchMX:       make(map[uint32]struct{}),
-		provenResumePCs:        make(map[uint32]struct{}),
-		provenResumeEdges:      make(map[decoder.Variant]map[decoder.ResumeEdge]struct{}),
-		flattenedResumeEdges:   make(map[decoder.Variant]map[decoder.ResumeEdge]struct{}),
-		dormantEntryRoots:      make(map[decoder.Variant]struct{}),
-		templateFreeEntryRoots: make(map[decoder.Variant]struct{}),
-		staticEntryDiscoveries: make(map[decoder.Variant]analysis.EntryFact),
-		exitMX:                 make(map[decoder.Variant]decoder.MX), forceVariants: make(map[uint32][2]uint8),
+		provenDispatchMX:        make(map[uint32]struct{}),
+		provenResumePCs:         make(map[uint32]struct{}),
+		provenResumeEdges:       make(map[decoder.Variant]map[decoder.ResumeEdge]struct{}),
+		provenContinuationCalls: make(map[decoder.Variant]map[decoder.ResumeEdge]decoder.Variant),
+		flattenedResumeEdges:    make(map[decoder.Variant]map[decoder.ResumeEdge]struct{}),
+		dormantEntryRoots:       make(map[decoder.Variant]struct{}),
+		templateFreeEntryRoots:  make(map[decoder.Variant]struct{}),
+		staticEntryDiscoveries:  make(map[decoder.Variant]analysis.EntryFact),
+		exitMX:                  make(map[decoder.Variant]decoder.MX), forceVariants: make(map[uint32][2]uint8),
 		validVariants: make(map[uint32]map[[2]uint8]struct{}), unresolved: make(map[codegen.Variant]struct{}),
 		provenEquivalent: make(map[uint32]map[[2]uint8]map[[2]uint8]struct{}),
 		cumulativeDirty:  make(map[codegen.Variant]struct{}), cumulativeEmit: make(map[codegen.Variant]struct{}),
@@ -919,6 +933,18 @@ func (repo *repository) emitFunctions(jobs int, only map[byte]struct{}) (map[byt
 	repo.sharedRegionBodies = len(regionBodies)
 	repo.sharedRegionWrappers = len(regionWrappers)
 	repo.sharedRegionFallbacks = countResumeTargets(repo.provenResumeEdges) - len(regionWrappers)
+	continuationBodies, continuationCalls, err := repo.sharedContinuationEmissionPlans(only)
+	if err != nil {
+		return nil, nil, err
+	}
+	for target, body := range continuationBodies {
+		if regionBodies[target] != nil || regionWrappers[target] != nil {
+			return nil, nil, fmt.Errorf("continuation $%06X M%dX%d has conflicting local-region and multi-owner body plans", target.Address, target.M, target.X)
+		}
+		regionBodies[target] = body
+	}
+	repo.sharedContinuationBodies = len(continuationBodies)
+	repo.sharedContinuationEdges = countRegionCalls(continuationCalls)
 	results := make(map[byte][]*emitter.FunctionResult)
 	for _, bank := range repo.banks {
 		if only == nil || containsBank(only, bank.ID) {
@@ -955,6 +981,7 @@ func (repo *repository) emitFunctions(jobs int, only map[byte]struct{}) (map[byt
 			HLEFunctionIf: bank.Config.HLEFunctionsIf[entry.Start],
 			ExitMX:        exit, UnresolvedAllowed: true,
 			RegionBody: regionBodies[variant], RegionWrapper: regionWrappers[variant],
+			RegionCalls: continuationCalls[variant],
 		})
 		lock.Lock()
 		defer lock.Unlock()
@@ -973,6 +1000,14 @@ func (repo *repository) emitFunctions(jobs int, only map[byte]struct{}) (map[byt
 		results[bank.ID][index] = result
 		contexts = append(contexts, context)
 	})
+	repo.sharedContinuationCalls = 0
+	for _, bankResults := range results {
+		for _, result := range bankResults {
+			if result != nil {
+				repo.sharedContinuationCalls += result.RegionCallsEmitted
+			}
+		}
+	}
 	return results, contexts, firstErr
 }
 
@@ -1085,6 +1120,41 @@ func (repo *repository) sharedRegionEmissionPlans(only map[byte]struct{}) (map[d
 	return bodies, wrappers, nil
 }
 
+// sharedContinuationEmissionPlans gives an isolated multi-owner continuation
+// one externally linked body. Each exact owner edge calls that body while
+// retaining its current _entry_s/_hrv activation context; the registry-visible
+// public target wrapper is the only path that establishes a new activation.
+func (repo *repository) sharedContinuationEmissionPlans(only map[byte]struct{}) (map[decoder.Variant]*emitter.RegionBodyOptions, map[decoder.Variant]map[decoder.ResumeEdge]string, error) {
+	bodies := make(map[decoder.Variant]*emitter.RegionBodyOptions)
+	calls := make(map[decoder.Variant]map[decoder.ResumeEdge]string)
+	for owner, edges := range repo.provenContinuationCalls {
+		bankID := byte(owner.Address >> 16)
+		if only != nil && !containsBank(only, bankID) {
+			continue
+		}
+		if _, _, found := repo.activeEntryForVariant(owner); !found {
+			return nil, nil, fmt.Errorf("multi-owner continuation call owner $%06X M%dX%d has no active entry", owner.Address, owner.M, owner.X)
+		}
+		for edge, target := range edges {
+			targetBank, targetEntry, found := repo.activeEntryForVariant(target)
+			if !found || targetBank.ID != bankID {
+				return nil, nil, fmt.Errorf("multi-owner continuation target $%06X M%dX%d has no active same-bank entry", target.Address, target.M, target.X)
+			}
+			helper := fmt.Sprintf("sr_continuation_%02X_%04X_M%dX%d", bankID, targetEntry.Start, target.M&1, target.X&1)
+			if calls[owner] == nil {
+				calls[owner] = make(map[decoder.ResumeEdge]string)
+			}
+			calls[owner][edge] = helper
+			if bodies[target] == nil {
+				bodies[target] = &emitter.RegionBodyOptions{
+					HelperName: helper, OwnerPC: targetEntry.Start, ExternalLinkage: true,
+				}
+			}
+		}
+	}
+	return bodies, calls, nil
+}
+
 func (repo *repository) singleOwnerRegionTree(root decoder.Variant, targetOwners map[decoder.Variant]map[decoder.Variant]struct{}) (map[decoder.Variant]struct{}, map[decoder.Variant]struct{}, bool) {
 	nodes := make(map[decoder.Variant]struct{})
 	targets := make(map[decoder.Variant]struct{})
@@ -1191,6 +1261,14 @@ func countResumeTargets(edges map[decoder.Variant]map[decoder.ResumeEdge]struct{
 		}
 	}
 	return len(targets)
+}
+
+func countRegionCalls(calls map[decoder.Variant]map[decoder.ResumeEdge]string) int {
+	total := 0
+	for _, edges := range calls {
+		total += len(edges)
+	}
+	return total
 }
 
 func uint16SliceContains(values []uint16, wanted uint16) bool {

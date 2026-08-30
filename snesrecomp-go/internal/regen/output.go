@@ -14,12 +14,13 @@ import (
 )
 
 var (
-	topLevelFunctionRE = regexp.MustCompile(`(?m)^(?:RecompReturn|void)\s+([A-Za-z_]\w*)\(CpuState \*cpu\) \{`)
-	variantCallRE      = regexp.MustCompile(`\b([A-Za-z_]\w*_M[01]X[01])\(cpu\)`)
-	variantSuffixRE    = regexp.MustCompile(`_M[01]X[01]$`)
-	syntheticNameRE    = regexp.MustCompile(`^bank_([0-9A-Fa-f]{2})_([0-9A-Fa-f]{4})$`)
-	regionHelperCallRE = regexp.MustCompile(`\b(sr_region_[A-Za-z0-9_]+)\(cpu,\s*_entry_s,\s*_hrv,`)
-	regionOwnerPCRE    = regexp.MustCompile(`/\*\s*resumable-region owner_pc:\$([0-9A-Fa-f]{4})\s*\*/`)
+	topLevelFunctionRE       = regexp.MustCompile(`(?m)^(?:RecompReturn|void)\s+([A-Za-z_]\w*)\(CpuState \*cpu\) \{`)
+	variantCallRE            = regexp.MustCompile(`\b([A-Za-z_]\w*_M[01]X[01])\(cpu\)`)
+	variantSuffixRE          = regexp.MustCompile(`_M[01]X[01]$`)
+	syntheticNameRE          = regexp.MustCompile(`^bank_([0-9A-Fa-f]{2})_([0-9A-Fa-f]{4})$`)
+	regionHelperCallRE       = regexp.MustCompile(`\b(sr_region_[A-Za-z0-9_]+)\(cpu,\s*_entry_s,\s*_hrv,`)
+	continuationHelperCallRE = regexp.MustCompile(`\b(sr_continuation_[A-Za-z0-9_]+)\(cpu,\s*_entry_s,\s*_hrv,`)
+	regionOwnerPCRE          = regexp.MustCompile(`/\*\s*resumable-region owner_pc:\$([0-9A-Fa-f]{4})\s*\*/`)
 )
 
 const forwardMarker = "/* Forward declarations for in-bank entries. */"
@@ -201,7 +202,7 @@ func declareReferencedVariants(source string) string {
 }
 
 func referencedDeclarations(source string) string {
-	return referencedVariantDeclarations(source) + referencedRegionHelperDeclarations(source)
+	return referencedVariantDeclarations(source) + referencedRegionHelperDeclarations(source) + referencedContinuationHelperDeclarations(source)
 }
 
 func referencedVariantDeclarations(source string) string {
@@ -234,6 +235,23 @@ func referencedRegionHelperDeclarations(source string) string {
 	var declarations strings.Builder
 	for _, ref := range refs {
 		fmt.Fprintf(&declarations, "static inline RecompReturn %s(CpuState *cpu, uint16 _entry_s, uint8 _hrv, uint16 _region_entry);\n", ref)
+	}
+	return declarations.String()
+}
+
+func referencedContinuationHelperDeclarations(source string) string {
+	refsSet := make(map[string]struct{})
+	for _, match := range continuationHelperCallRE.FindAllStringSubmatch(source, -1) {
+		refsSet[match[1]] = struct{}{}
+	}
+	refs := make([]string, 0, len(refsSet))
+	for ref := range refsSet {
+		refs = append(refs, ref)
+	}
+	sort.Strings(refs)
+	var declarations strings.Builder
+	for _, ref := range refs {
+		fmt.Fprintf(&declarations, "RecompReturn %s(CpuState *cpu, uint16 _entry_s, uint8 _hrv, uint16 _region_entry);\n", ref)
 	}
 	return declarations.String()
 }

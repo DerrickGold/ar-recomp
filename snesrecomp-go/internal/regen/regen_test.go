@@ -479,6 +479,102 @@ func TestProvenContinuationFlattensNestedSingleOwnerTree(t *testing.T) {
 	}
 }
 
+func TestProvenMultiOwnerContinuationUsesOneNoActivationBody(t *testing.T) {
+	root := t.TempDir()
+	romPath := filepath.Join(root, "game.sfc")
+	cfgDir := filepath.Join(root, "recomp")
+	controlDir := filepath.Join(root, "control")
+	overlayDir := filepath.Join(root, "overlay")
+	image := make([]byte, 0x8000)
+	copy(image[0x0000:], []byte{0x80, 0x1E}) // $8000: BRA $8020
+	copy(image[0x0010:], []byte{0x80, 0x0E}) // $8010: BRA $8020
+	image[0x0020] = 0x60                     // $8020: RTS
+	if err := os.WriteFile(romPath, image, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "bank00.cfg"), []byte(
+		"bank = 00\nfunc RootA 8000 entry_mx:1,1\nfunc RootB 8010 entry_mx:1,1\nfunc bank_00_8020 8020 entry_mx:1,1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	control, err := Run(Options{
+		ROMPath: romPath, ConfigDir: cfgDir, OutputDir: controlDir, Jobs: 1, AllowStubs: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerA := analysis.EntryVariant{PC: 0x008000, EntryMX: analysis.MXState{M: 1, X: 1}}
+	ownerB := analysis.EntryVariant{PC: 0x008010, EntryMX: analysis.MXState{M: 1, X: 1}}
+	target := analysis.EntryVariant{PC: 0x008020, EntryMX: analysis.MXState{M: 1, X: 1}}
+	fact := analysis.EntryFact{
+		PC: target.PC, EntryMX: target.EntryMX,
+		Kind: analysis.EntryContinuation, TemplateFree: true,
+		RegionOwners: []analysis.EntryVariant{ownerA, ownerB},
+		ResumeEdges: []analysis.EntryEdge{
+			{Source: ownerA, Target: target, RegionOwner: &ownerA},
+			{Source: ownerB, Target: target, RegionOwner: &ownerB},
+		},
+		Evidence: []analysis.Evidence{{
+			Source: "static.sibling_boundary_edge", Confidence: analysis.ConfidenceProven,
+		}},
+	}
+	overlay, err := Run(Options{
+		ROMPath: romPath, ConfigDir: cfgDir, OutputDir: overlayDir, Jobs: 1,
+		AllowStubs: true, ProvenEntryFacts: []analysis.EntryFact{fact},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if overlay.AnalysisContinuationFactsApplied != 1 || overlay.SharedContinuationBodies != 1 ||
+		overlay.SharedContinuationCalls != 2 || overlay.SharedRegionBodies != 0 {
+		t.Fatalf("continuation facts/shared bodies/calls/local bodies = %d/%d/%d/%d, want 1/1/2/0",
+			overlay.AnalysisContinuationFactsApplied, overlay.SharedContinuationBodies,
+			overlay.SharedContinuationCalls, overlay.SharedRegionBodies)
+	}
+	if control.FinalEntries != overlay.FinalEntries || control.Functions != overlay.Functions {
+		t.Fatalf("multi-owner overlay changed external entries/functions: control %d/%d overlay %d/%d",
+			control.FinalEntries, control.Functions, overlay.FinalEntries, overlay.Functions)
+	}
+	generated, err := os.ReadFile(filepath.Join(overlayDir, "bank00_v2.c"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{
+		"RecompReturn sr_continuation_00_8020_M1X1(CpuState *cpu, uint16 _entry_s, uint8 _hrv, uint16 _region_entry) {",
+		"exact shared continuation; helper owns the active-frame pop",
+		"return sr_continuation_00_8020_M1X1(cpu, _entry_s, _hrv, 0);",
+	} {
+		if !strings.Contains(string(generated), fragment) {
+			t.Fatalf("multi-owner continuation output is missing %q:\n%s", fragment, generated)
+		}
+	}
+	if strings.Count(string(generated), "cpu_trace_block(cpu, 0x008020);") != 1 ||
+		strings.Count(string(generated), "RecompStackPush(\"bank_00_8020_M1X1\")") != 1 {
+		t.Fatalf("multi-owner target body or activation prologue was duplicated:\n%s", generated)
+	}
+	controlDispatch, err := os.ReadFile(filepath.Join(controlDir, "dispatch_v2.c"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	overlayDispatch, err := os.ReadFile(filepath.Join(overlayDir, "dispatch_v2.c"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(controlDispatch) != string(overlayDispatch) {
+		t.Fatalf("multi-owner continuation changed external registry:\n%s\n---\n%s", controlDispatch, overlayDispatch)
+	}
+	fact.ResumeEdges[0].RegionOwner = nil
+	_, err = Run(Options{
+		ROMPath: romPath, ConfigDir: cfgDir, OutputDir: filepath.Join(root, "missing-owner"), Jobs: 1,
+		AllowStubs: true, ProvenEntryFacts: []analysis.EntryFact{fact},
+	})
+	if err == nil || !strings.Contains(err.Error(), "resume edge without region_owner") {
+		t.Fatalf("missing multi-owner edge attribution error = %v", err)
+	}
+}
+
 func TestProvenContinuationFailsClosedOnSpecialEntryOrWrongOwner(t *testing.T) {
 	root := t.TempDir()
 	romPath := filepath.Join(root, "game.sfc")

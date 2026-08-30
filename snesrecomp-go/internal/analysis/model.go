@@ -61,10 +61,12 @@ type EntryVariant struct {
 
 // EntryEdge identifies one exact live-width control-flow edge. ResumeEdges
 // preserve the boundary crossing independently of whether generation lowers
-// it through the registry or as an in-region goto.
+// it through the registry, an in-region goto, or a shared no-activation body.
+// RegionOwner is required when one continuation has multiple owners.
 type EntryEdge struct {
-	Source EntryVariant `json:"source"`
-	Target EntryVariant `json:"target"`
+	Source      EntryVariant  `json:"source"`
+	Target      EntryVariant  `json:"target"`
+	RegionOwner *EntryVariant `json:"region_owner,omitempty"`
 }
 
 type Evidence struct {
@@ -108,6 +110,11 @@ func (fact *EntryFact) Normalize() {
 	})
 	fact.RegionOwners = dedupeOrdered(fact.RegionOwners)
 	for index := range fact.ResumeEdges {
+		if fact.ResumeEdges[index].RegionOwner != nil {
+			fact.ResumeEdges[index].RegionOwner.PC &= 0xffffff
+			fact.ResumeEdges[index].RegionOwner.EntryMX.M &= 1
+			fact.ResumeEdges[index].RegionOwner.EntryMX.X &= 1
+		}
 		fact.ResumeEdges[index].Source.PC &= 0xffffff
 		fact.ResumeEdges[index].Source.EntryMX.M &= 1
 		fact.ResumeEdges[index].Source.EntryMX.X &= 1
@@ -117,6 +124,9 @@ func (fact *EntryFact) Normalize() {
 	}
 	sort.Slice(fact.ResumeEdges, func(i, j int) bool {
 		left, right := fact.ResumeEdges[i], fact.ResumeEdges[j]
+		if compared := compareOptionalEntryVariant(left.RegionOwner, right.RegionOwner); compared != 0 {
+			return compared < 0
+		}
 		if left.Source.PC != right.Source.PC {
 			return left.Source.PC < right.Source.PC
 		}
@@ -134,7 +144,13 @@ func (fact *EntryFact) Normalize() {
 		}
 		return left.Target.EntryMX.X < right.Target.EntryMX.X
 	})
-	fact.ResumeEdges = dedupeOrdered(fact.ResumeEdges)
+	dedupedEdges := fact.ResumeEdges[:0]
+	for _, edge := range fact.ResumeEdges {
+		if len(dedupedEdges) == 0 || !entryEdgesEqual(dedupedEdges[len(dedupedEdges)-1], edge) {
+			dedupedEdges = append(dedupedEdges, edge)
+		}
+	}
+	fact.ResumeEdges = dedupedEdges
 	sort.Slice(fact.Evidence, func(i, j int) bool {
 		if fact.Evidence[i].Source != fact.Evidence[j].Source {
 			return fact.Evidence[i].Source < fact.Evidence[j].Source
@@ -145,6 +161,42 @@ func (fact *EntryFact) Normalize() {
 		return fact.Evidence[i].Detail < fact.Evidence[j].Detail
 	})
 	fact.Evidence = dedupeOrdered(fact.Evidence)
+}
+
+func compareOptionalEntryVariant(left, right *EntryVariant) int {
+	if left == nil {
+		if right == nil {
+			return 0
+		}
+		return -1
+	}
+	if right == nil {
+		return 1
+	}
+	if left.PC != right.PC {
+		if left.PC < right.PC {
+			return -1
+		}
+		return 1
+	}
+	if left.EntryMX.M != right.EntryMX.M {
+		if left.EntryMX.M < right.EntryMX.M {
+			return -1
+		}
+		return 1
+	}
+	if left.EntryMX.X != right.EntryMX.X {
+		if left.EntryMX.X < right.EntryMX.X {
+			return -1
+		}
+		return 1
+	}
+	return 0
+}
+
+func entryEdgesEqual(left, right EntryEdge) bool {
+	return compareOptionalEntryVariant(left.RegionOwner, right.RegionOwner) == 0 &&
+		left.Source == right.Source && left.Target == right.Target
 }
 
 // DispatchFact is a normalized statement about one runtime-target site.

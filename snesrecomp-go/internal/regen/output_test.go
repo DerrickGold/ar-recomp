@@ -70,6 +70,7 @@ RecompReturn Root_M1X1(CpuState *cpu) {
   /* resumable-region owner_pc:$8000 */
   return sr_region_00_8000_M1X1(cpu, _entry_s, _hrv, 0);
 }
+
 static inline RecompReturn sr_region_00_8000_M1X1(CpuState *cpu, uint16 _entry_s, uint8 _hrv, uint16 _region_entry) {
   return RECOMP_RETURN_NORMAL;
 }
@@ -104,5 +105,43 @@ RecompReturn Other_M1X1(CpuState *cpu) {
 		strings.Contains(otherChunk, "Continuation_M1X1") ||
 		strings.Contains(otherChunk, "sr_region_00_8000_M1X1") {
 		t.Fatalf("unrelated chunk contains resumable-region material:\n%s", otherChunk)
+	}
+}
+
+func TestSplitBankDeclaresMultiOwnerContinuationHelperAcrossChunks(t *testing.T) {
+	source := `/* header */
+
+/* Forward declarations for in-bank entries. */
+RecompReturn Root_M1X1(CpuState *cpu);
+RecompReturn Target_M1X1(CpuState *cpu);
+
+RecompReturn Root_M1X1(CpuState *cpu) {
+  return sr_continuation_00_9000_M1X1(cpu, _entry_s, _hrv, 0);
+}
+
+RecompReturn Target_M1X1(CpuState *cpu) {
+  /* resumable-region owner_pc:$9000 */
+  return sr_continuation_00_9000_M1X1(cpu, _entry_s, _hrv, 0);
+}
+RecompReturn sr_continuation_00_9000_M1X1(CpuState *cpu, uint16 _entry_s, uint8 _hrv, uint16 _region_entry) {
+  return RECOMP_RETURN_NORMAL;
+}
+`
+	outputs, err := splitBank(source, 0x00, []config.Entry{
+		{Name: "Root", Start: 0x8000},
+		{Name: "Target", Start: 0x9000},
+	}, 1, 0x800)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declaration := "RecompReturn sr_continuation_00_9000_M1X1(CpuState *cpu, uint16 _entry_s, uint8 _hrv, uint16 _region_entry);"
+	rootChunk := outputs["bank00_part00_v2.c"]
+	if !strings.Contains(rootChunk, declaration) || strings.Contains(rootChunk, declaration[:len(declaration)-1]+" {") {
+		t.Fatalf("owner chunk lacks a declaration-only continuation helper:\n%s", rootChunk)
+	}
+	targetChunk := outputs["bank00_part02_v2.c"]
+	if !strings.Contains(targetChunk, declaration) ||
+		!strings.Contains(targetChunk, "RecompReturn sr_continuation_00_9000_M1X1(CpuState *cpu, uint16 _entry_s, uint8 _hrv, uint16 _region_entry) {") {
+		t.Fatalf("target chunk lacks continuation helper declaration/definition:\n%s", targetChunk)
 	}
 }

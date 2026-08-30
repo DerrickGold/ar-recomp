@@ -284,8 +284,17 @@ remains valid but the standalone body is retained; regeneration reports this
 as a resumable-region fallback so source cost is visible. `batch_single_owner_continuations` and
 `batch_region_eligible_continuations` describe the statically selectable set;
 the regeneration summary separately reports shared wrappers and fallbacks.
-Multi-owner regions remain report-only until their ownership and activation
-contracts can be flattened without duplicating code.
+
+An isolated multi-owner continuation uses a different shared-body ABI. Its
+registry-visible public wrapper establishes a new activation for a true
+external entry, but each exact owner edge calls the same generated body with
+the owner's live `_entry_s` and host-return context. That call does not push a
+second recompiler activation, and the shared body owns the existing frame's
+return/pop path. The report separates statically proven edges from emitted C
+call sites because multiple proofs can collapse onto one decoded site. A
+multi-owner target or owner that overlaps another continuation graph remains
+report-only until the combined graph can be flattened without recursion or
+ambiguous activation ownership.
 
 ## Table-first unknown target discovery
 

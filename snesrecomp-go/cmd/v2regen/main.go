@@ -807,7 +807,7 @@ func regenerate(args []string) error {
 	chunkThreshold := flags.Int("bank-chunk-threshold-kib", 4096, "split banks at or above this generated size")
 	chunkSpan := flags.Int("bank-chunk-pc-span", 0x800, "stable PC span per split translation unit")
 	allowStubs := flags.Bool("allow-stubs", false, "write complete output and report stubs without failing this command")
-	provenAnalysis := flags.Bool("experimental-proven-analysis", false, "apply closed static dispatch facts, exact direct-call M/X, and exact single-owner continuation regions in memory (requires an isolated --out-dir)")
+	provenAnalysis := flags.Bool("experimental-proven-analysis", false, "apply closed static dispatch facts, exact direct-call M/X, and exact continuation regions in memory (requires an isolated --out-dir)")
 	_ = flags.String("prefix", "", "deprecated compatibility option")
 	if err := flags.Parse(args); err != nil {
 		return err
