@@ -80,8 +80,8 @@ static void apuprof_catchup_hook(bool begin, uint64_t cycles) {
         s_apuprof_port_sync_start_ns = audio_trace_wall_ns();
         return;
     }
-    RtlApuProfileRecordCycles(
-        RTL_APU_CYCLE_PORT_SYNC, cycles,
+    sr_runner_record_apu_profile_cycles(
+        SR_APU_PROFILE_CYCLE_PORT_SYNC, cycles,
         s_apuprof_port_sync_start_ns != 0u
             ? audio_trace_wall_ns() - s_apuprof_port_sync_start_ns : 0u);
     s_apuprof_port_sync_start_ns = 0u;
@@ -225,25 +225,26 @@ void RtlApuProfileRecordHostWait(uint64_t wait_ns, bool lock_wait) {
     }
 }
 
-void RtlApuProfileRecordCycles(RtlApuCycleSource source, uint64_t cycles,
-                               uint64_t elapsed_ns) {
+void sr_runner_record_apu_profile_cycles(
+        SrApuProfileCycleSource source, uint64_t cycles,
+        uint64_t elapsed_ns) {
     _Atomic uint64_t *counter = NULL;
     if (!RtlApuProfileIsEnabled()) return;
     switch (source) {
-        case RTL_APU_CYCLE_AUDIO_DEMAND:
+        case SR_APU_PROFILE_CYCLE_AUDIO_DEMAND:
             counter = &s_apuprof_audio_cycles;
             break;
-        case RTL_APU_CYCLE_PORT_SYNC:
+        case SR_APU_PROFILE_CYCLE_PORT_SYNC:
             counter = &s_apuprof_port_sync_cycles;
             atomic_fetch_add_explicit(&s_apuprof_port_sync_ns, elapsed_ns,
                                       memory_order_relaxed);
             atomic_fetch_add_explicit(&s_apuprof_port_sync_calls, 1u,
                                       memory_order_relaxed);
             break;
-        case RTL_APU_CYCLE_UPLOAD_CONTROL:
+        case SR_APU_PROFILE_CYCLE_UPLOAD_CONTROL:
             counter = &s_apuprof_upload_control_cycles;
             break;
-        case RTL_APU_CYCLE_TIMELINE:
+        case SR_APU_PROFILE_CYCLE_TIMELINE:
             counter = &s_apuprof_timeline_cycles;
             break;
         default:
@@ -620,8 +621,17 @@ void RtlAdvanceApuTimeline(void) {
     audio_trace_set_producer(AUDIO_TRACE_PRODUCER_CPU);
     for (uint64_t index = 0u; index < cycles; ++index) apu_cycle(apu);
     audio_trace_set_producer(AUDIO_TRACE_PRODUCER_UNKNOWN);
-    RtlApuProfileRecordCycles(RTL_APU_CYCLE_TIMELINE, cycles, 0u);
+    sr_runner_record_apu_profile_cycles(
+        SR_APU_PROFILE_CYCLE_TIMELINE, cycles, 0u);
     RtlApuUnlock();
+}
+
+uint64_t RtlApuCycleCount(void) {
+    uint64_t cycles;
+    RtlApuLock();
+    cycles = snes_apu_cycle_count();
+    RtlApuUnlock();
+    return cycles;
 }
 
 void RtlSetApuCatchupSuppressed(bool suppressed) {
@@ -725,7 +735,8 @@ static bool apply_spc_upload_control(
         apu_cycle(apu);
     }
     audio_trace_set_producer(AUDIO_TRACE_PRODUCER_UNKNOWN);
-    RtlApuProfileRecordCycles(RTL_APU_CYCLE_UPLOAD_CONTROL, cycles, 0u);
+    sr_runner_record_apu_profile_cycles(
+        SR_APU_PROFILE_CYCLE_UPLOAD_CONTROL, cycles, 0u);
     return true;
 }
 
@@ -860,8 +871,8 @@ void RtlRenderAudio(int16 *audio_buffer, int samples, int channels) {
                        dsp->sampleWrite - dsp->sampleRead < needed)
                     apu_cycle(g_snes->apu);
                 audio_trace_set_producer(AUDIO_TRACE_PRODUCER_UNKNOWN);
-                RtlApuProfileRecordCycles(
-                    RTL_APU_CYCLE_AUDIO_DEMAND,
+                sr_runner_record_apu_profile_cycles(
+                    SR_APU_PROFILE_CYCLE_AUDIO_DEMAND,
                     snes_apu_cycle_count() - cycle_start, 0u);
                 available = dsp->sampleWrite - dsp->sampleRead;
             }

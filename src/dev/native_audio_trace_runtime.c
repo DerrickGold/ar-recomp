@@ -17,8 +17,6 @@ enum {
   kRuntimePathCapacity = 512,
 };
 
-extern uint64_t snes_apu_cycle_count(void);
-
 static int s_enabled = -1;
 static const SnesRunnerApi *s_runner_api;
 static SrRunnerHandle *s_runner;
@@ -74,8 +72,7 @@ static void OnRunnerAudioTrace(void *user_data, SrRunnerHandle *runner,
       break;
     case SR_AUDIO_TRACE_DSP_WRITE:
       NativeAudioTraceModel_DspWrite(
-          event->struct_size >= SR_AUDIO_TRACE_EVENT_V3_SIZE
-              ? event->spc_instruction_pc : event->spc_pc,
+          event->spc_instruction_pc,
           event->spc_x, event->dsp_address, event->value,
           event->apu_ram[0x47], event->apu_ram[0x1A], event->cycle_count);
       break;
@@ -89,29 +86,34 @@ static void OnExtendedDisposition(
     bool coalesced, bool overflow) {
   NativeAudioTraceModel_ExtendedDisposition(
       serial, existing_serial, coalesced, overflow,
-      snes_apu_cycle_count());
+      RtlApuCycleCount());
 }
 
 static void OnExtendedStart(
     uint64_t serial, uint8_t lane, uint8_t virtual_voice) {
   NativeAudioTraceModel_ExtendedSequenceStart(
-      serial, lane, virtual_voice, snes_apu_cycle_count());
+      serial, lane, virtual_voice, RtlApuCycleCount());
 }
 
 static void OnExtendedEnd(uint64_t serial, uint8_t lane) {
   NativeAudioTraceModel_ExtendedSequenceEnd(
-      serial, lane, snes_apu_cycle_count());
+      serial, lane, RtlApuCycleCount());
 }
 
 static void OnExtendedCancel(uint64_t serial) {
-  NativeAudioTraceModel_ExtendedCancel(serial, snes_apu_cycle_count());
+  NativeAudioTraceModel_ExtendedCancel(serial, RtlApuCycleCount());
 }
 
 bool NativeAudioTrace_Init(SrRunnerHandle *runner) {
   SrAudioTraceSubscription subscription = {
     .struct_size = sizeof(subscription),
     .callback = OnRunnerAudioTrace,
-    .event_mask = SR_AUDIO_TRACE_MASK_ALL,
+    .event_mask = SR_AUDIO_TRACE_MASK_CPU_PORT_WRITE |
+                  SR_AUDIO_TRACE_MASK_SPC_UPLOAD |
+                  SR_AUDIO_TRACE_MASK_APU_PORT_APPLY |
+                  SR_AUDIO_TRACE_MASK_SPC_PORT_READ |
+                  SR_AUDIO_TRACE_MASK_SPC_OPCODE |
+                  SR_AUDIO_TRACE_MASK_DSP_WRITE,
   };
   {
     const char *pcm = getenv("AR_NATIVE_AUDIO_PCM");
@@ -170,10 +172,10 @@ uint64_t NativeAudioTrace_OnCpuRequest(
   const uint64_t serial = emitted && NativeAudioExtension_IsEnabled()
       ? NativeAudioTraceModel_PostExtendedRequest(
             kind, id, caller, site, game_frame, cpu_x, cpu_y,
-            snes_apu_cycle_count())
+            RtlApuCycleCount())
       : NativeAudioTraceModel_PostRequest(
             kind, id, emitted, caller, site, game_frame, cpu_x, cpu_y,
-            snes_apu_cycle_count());
+            RtlApuCycleCount());
   RtlApuUnlock();
   return serial;
 }

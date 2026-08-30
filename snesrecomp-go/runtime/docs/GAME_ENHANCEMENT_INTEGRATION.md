@@ -307,11 +307,14 @@ The usual discovery workflow is:
    asset path. The runner should not contain title-specific track names.
 
 Replacement playback should subscribe to those recovered semantic events and
-apply music/SFX bus gains through `configure_audio_mix`. Preserve a portable
-fallback through the original SPC/DSP path. Preview extraction is a separate
-offline tool: it may run the portable audio core and emit WAV files, but the
-browser/UI does not need an SPC player and the runtime ABI does not need to
-expose live SPC layout.
+apply music/SFX bus gains, original-music muting, and any unclassified-source
+startup fallback through `configure_audio_mix`. Preserve a portable fallback
+through the original SPC/DSP path. Diagnostics that need resolved KON evidence
+should subscribe to `SR_AUDIO_TRACE_DSP_KEY_ON`; do not install a DSP callback
+or read the runner's private APU clock. Preview extraction is a separate offline
+tool: it may run the portable audio core and emit WAV files, but the browser/UI
+does not need an SPC player and the runtime ABI does not need to expose live SPC
+layout.
 
 Extended voices are numbered as a natural continuation of the native bank:
 8..15, 16..23, 24..31, and 32..39. Each group is a hardware-shaped eight-voice

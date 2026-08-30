@@ -55,13 +55,22 @@ typedef struct SrSpcPcControlResult {
 
 /** Synchronous host-mix policy. Percentages are inclusive 0..100 values and
  * affect the runner's native DSP output buses; replacement-stream volume is a
- * host concern and remains outside this request. */
+ * host concern and remains outside this request. The optional unclassified
+ * source partition is a startup fallback for voices that have not yet received
+ * a game-provided bus label. */
+#define SR_AUDIO_MIX_MUTE_MUSIC UINT32_C(0x00000001)
+#define SR_AUDIO_MIX_PARTITION_UNCLASSIFIED_BY_SOURCE UINT32_C(0x00000002)
+#define SR_AUDIO_MIX_FLAGS_SUPPORTED                                    \
+    (SR_AUDIO_MIX_MUTE_MUSIC |                                          \
+     SR_AUDIO_MIX_PARTITION_UNCLASSIFIED_BY_SOURCE)
+
 typedef struct SrAudioMixControl {
     uint32_t struct_size;
     uint32_t flags;
     uint32_t music_gain_percent;
     uint32_t sfx_gain_percent;
-    uint32_t reserved[2];
+    uint32_t unclassified_music_source_min;
+    uint32_t reserved;
 } SrAudioMixControl;
 
 #define SR_AUDIO_MIX_CONTROL_V2_SIZE                                     \

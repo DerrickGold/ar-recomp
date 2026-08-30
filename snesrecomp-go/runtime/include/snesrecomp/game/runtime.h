@@ -79,6 +79,11 @@ void RtlRenderAudio(int16 *audio_buffer, int samples, int channels);
  * one S-DSP slot, so 17,088 cycles complete 534 native stereo frames. The
  * operation executes only cycles not already produced by an audio consumer. */
 void RtlAdvanceApuTimeline(void);
+/* Read the monotonic semantic APU clock under the runner's audio lock. This
+ * is an observation only; loading or resetting emulated state may move the
+ * value backwards between calls. Audio-trace callbacks must use the event's
+ * cycle_count instead of re-entering this service. */
+uint64_t RtlApuCycleCount(void);
 void RtlSetApuCatchupSuppressed(bool suppressed);
 bool RtlUploadSpcImageFromDp(CpuState *cpu);
 bool RtlHandleSpcUpload(CpuState *cpu);
@@ -118,14 +123,6 @@ typedef struct RtlApuProfile {
 
 #define RTL_APU_PROFILE_INCONSISTENT UINT32_C(0x00000001)
 
-typedef uint32_t RtlApuCycleSource;
-enum {
-    RTL_APU_CYCLE_AUDIO_DEMAND = 1u,
-    RTL_APU_CYCLE_PORT_SYNC = 2u,
-    RTL_APU_CYCLE_UPLOAD_CONTROL = 3u,
-    RTL_APU_CYCLE_TIMELINE = 4u
-};
-
 #define RTL_APU_PROFILE_V2_SIZE                                        \
     ((uint32_t)(offsetof(RtlApuProfile, last_port_function) +           \
                 sizeof(((RtlApuProfile *)0)->last_port_function)))
@@ -134,8 +131,6 @@ bool RtlApuProfileIsEnabled(void);
 void RtlApuProfileReset(void);
 void RtlApuProfileRead(RtlApuProfile *out_profile);
 void RtlApuProfileRecordHostWait(uint64_t wait_ns, bool lock_wait);
-void RtlApuProfileRecordCycles(RtlApuCycleSource source, uint64_t cycles,
-                               uint64_t elapsed_ns);
 uint64_t RtlApuProfileTakeAudioWaitMax(void);
 
 enum {

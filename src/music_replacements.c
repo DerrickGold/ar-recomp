@@ -7,6 +7,7 @@
 #include "constants.h"
 #include "host/host_audio.h"
 #include "manifest_utils.h"
+#include "native_audio_mixer.h"
 #include "settings.h"
 
 #define STB_VORBIS_HEADER_ONLY
@@ -21,8 +22,6 @@ enum { kMusicManifestLineCapacity = 1024 };
 /* Engine seams (snesrecomp-go/runtime). The APU mutex is recursive (SDL), so the
  * handlers below may take it even when the caller already holds it. */
 extern int RtlGetAudioOutputRate(void);
-extern int g_dsp_voice_mute_srcn_min;
-extern void dsp_setMusicBusMuted(bool muted);
 
 /* ActRaiser's SPC driver: per-song instruments occupy srcn 0x0C and up; the
  * common sample bank (srcn 0x00-0x0B, uploaded once from 06:AC00) carries the
@@ -342,17 +341,14 @@ static void EndSession(const char *why) {
     fprintf(stderr, "[music] stop [music:%s] (%s)\n", s.session->name, why);
     if (s.v) stb_vorbis_close(s.v);
     memset(&s, 0, sizeof(s));
-    dsp_setMusicBusMuted(false);
-    g_dsp_voice_mute_srcn_min = -1;
+    NativeAudioMixer_SetMusicReplacementActive(false);
   }
   RtlApuUnlock();
 }
 
 static void ApplyVoiceMutePolicyLocked(void) {
   const bool muted = s.session && !s_session_bypassed;
-  dsp_setMusicBusMuted(muted);
-  g_dsp_voice_mute_srcn_min = muted
-      ? kActRaiserSpcMusicSourceMinimum : -1;
+  NativeAudioMixer_SetMusicReplacementActive(muted);
 }
 
 static void StartSession(const MusicReplacement *entry, int song) {
@@ -365,8 +361,7 @@ static void StartSession(const MusicReplacement *entry, int song) {
     fprintf(stderr, "[music] [music:%s] open failed at play time (%d) — "
             "authentic\n", entry->name, error);
     if (s.session) {
-      dsp_setMusicBusMuted(false);
-      g_dsp_voice_mute_srcn_min = -1;
+      NativeAudioMixer_SetMusicReplacementActive(false);
     }
     memset(&s, 0, sizeof(s));
     RtlApuUnlock();
@@ -628,6 +623,7 @@ void MusicReplacements_InstallHooks(void) {
   s_host_paused = false;
   s_session_bypassed = false;
   s_next_session_token = 0;
+  NativeAudioMixer_SetMusicReplacementActive(false);
 }
 
 void MusicReplacements_ApplySetting(void) {

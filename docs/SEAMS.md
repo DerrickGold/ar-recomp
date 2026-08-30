@@ -41,7 +41,7 @@ identity are the perishable, expensive-to-rederive parts.
 | Sample directory (DSP `DIR`) | uploaded as image blocks targeting ARAM `$2C00` (`DIR` page = `$2C`) | DSP `$5D` | "sample N lives at ARAM addr X, loops at Y" | 4-byte entries `{start16, loop16}` per srcn; common srcn `00-0B`, per-song `0C+` (block target `$2C30`) | 🟢 |
 | Final PCM out | `RtlRenderAudio` (common_rtl.c) → continuous `dsp_getSamplesResampled` + MSU-1/OGG mix → SDL `AudioCallback` | host audio | "the mixed stereo stream" | native DSP stays 32.04 kHz; actual SDL rate controls time-based resampling, so frequency/buffer changes preserve pitch; native voices are tagged Music/SFX before summation, replacement OGG joins Music, `audio_master_volume` applies atomic post-mix gain, and `audio_enabled` applies an atomic post-mix mute without stopping any cursor | 🟢 |
 | Raw APU port write | `RtlApuWrite` (`$2140-$2143`) | APU I/O | low-level handshake / param | — | 🔴 |
-| **Voice key-on observation** | `g_dsp_voice_kon_hook` (dsp.c, fires once per applied key-on) | DSP `KON` | "voice C started sample S" | `(ch, srcn, decodeOffset, volL, volR, pitch)`; NULL by default; installed by `sfx_census.c`. Called on whichever thread is cycling the APU, APU lock held. Must be invoked **after** `decodeOffset` is resolved from the directory — earlier and it reports the previous note's advancing decode cursor | 🟢 |
+| **Voice key-on observation** | `SR_AUDIO_TRACE_DSP_KEY_ON` (public filtered runner trace event) | DSP `KON` | "voice C started sample S" | `(voice_index, voice_source_number, voice_brr_address, voice_volume_left/right, voice_pitch)` for native voices 0..7 and extended voices 8..39. Called on whichever thread is cycling the APU with the APU lock held, after the BRR start is resolved from `DIR` | 🟢 |
 
 The immutable `RtlGameAudioApi` now owns the game-side seams for this
 subsystem. Its presentation callbacks deliver completed SPC uploads, every
@@ -49,17 +49,15 @@ CPU `$2140-43` write, pacing notifications, and final replacement mixing.
 Voice/state routing and bounded audio-extension callbacks occupy the same
 module table behind separate capability bits. Registration validates and
 caches the table once, so there is no mutable global hook installation,
-callback chaining, or initialization-order dependency. The DSP-internal
-`g_dsp_voice_kon_hook` remains a private diagnostic seam used only by the SFX
-census.
+callback chaining, or initialization-order dependency.
 
 The opt-in serial provenance tracer and SFX census subscribe to the public
 runner audio-trace observer. It reports CPU port writes, completed SPC uploads,
-APU port apply, SPC port read, pre-fetch SPC700 PC, and DSP writes. The observer
-exposes fixed registers and a synchronous, read-only ARAM view while the APU
-lock is held; ActRaiser-specific driver offsets stay in the tracer. Disabled
-observation is one unlikely check at each existing seam and no state is
-serialized. The tracer emits request/outcome CSV records. With the serial trace enabled,
+APU port apply, SPC port read, pre-fetch SPC700 PC, DSP writes, and resolved
+DSP key-ons. The observer exposes fixed registers and a synchronous, read-only
+ARAM view while the APU lock is held; ActRaiser-specific driver offsets stay in
+the tracer. Disabled observation is one unlikely check at each existing seam
+and no state is serialized. The tracer emits request/outcome CSV records. With the serial trace enabled,
 `AR_NATIVE_AUDIO_PCM=1` additionally writes the retained native-rate PCM ring
 as `native_audio_pcm.wav` for waveform parity checks.
 
@@ -117,9 +115,10 @@ values and nonzero port-2 ids to catch them in play.
    `RtlRenderAudio`'s locked region via `RtlGameAudioApi.mix_output`,
    msu1-style.
    Muting: every handshake/port write stays authentic (zero soft-lock risk);
-   instead the DSP excludes provenance-tagged Music voices from the dry mix
-   and echo input. `g_dsp_voice_mute_srcn_min` remains only as a startup
-   fallback before a voice receives its first classified write.
+   instead `configure_audio_mix` asks the DSP to exclude provenance-tagged
+   Music voices from the dry mix and echo input. The same request carries
+   SRCN `$0C+` as an optional startup fallback before a voice receives its
+   first classified write; no game code reaches into DSP globals.
    The apparent counterexample captured on 2026-07-21 (music keying srcn
    `00`-`06` intermittently across several songs) was resolved on 2026-07-25:
    it was a bootstrap/upload ordering race, not intentional shared-bank music.

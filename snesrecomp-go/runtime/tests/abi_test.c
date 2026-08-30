@@ -856,10 +856,11 @@ int main(void) {
         .callback = observe_test_audio_trace,
         .user_data = &audio_trace_observer,
     };
-    SrAudioTraceSubscription legacy_audio_trace_subscription = {
-        .struct_size = SR_AUDIO_TRACE_SUBSCRIPTION_V2_SIZE,
+    SrAudioTraceSubscription key_on_audio_trace_subscription = {
+        .struct_size = sizeof(key_on_audio_trace_subscription),
         .callback = observe_test_audio_trace,
         .user_data = &audio_trace_observer,
+        .event_mask = SR_AUDIO_TRACE_MASK_DSP_KEY_ON,
     };
     SrApuStateQuery apu_state_query = {
         .struct_size = sizeof(apu_state_query),
@@ -1117,11 +1118,7 @@ int main(void) {
                     "event observer API extent exceeds structure");
     failed |= check(SR_AUDIO_TRACE_EVENT_V2_SIZE <=
                             sizeof(SrAudioTraceEvent) &&
-                        SR_AUDIO_TRACE_EVENT_V3_SIZE <=
-                            sizeof(SrAudioTraceEvent) &&
                         SR_AUDIO_TRACE_SUBSCRIPTION_V2_SIZE <=
-                            sizeof(SrAudioTraceSubscription) &&
-                        SR_AUDIO_TRACE_SUBSCRIPTION_V3_SIZE <=
                             sizeof(SrAudioTraceSubscription) &&
                         SNES_RUNNER_API_AUDIO_TRACE_OBSERVER_SIZE <=
                             sizeof(SnesRunnerApi),
@@ -1506,13 +1503,16 @@ int main(void) {
     snes_catchupApu(snes);
     for (unsigned index = 0u; index < 3u; ++index)
         apu_cycle(snes->apu);
-    RtlApuProfileRecordCycles(RTL_APU_CYCLE_AUDIO_DEMAND, 3u, 0u);
+    sr_runner_record_apu_profile_cycles(
+        SR_APU_PROFILE_CYCLE_AUDIO_DEMAND, 3u, 0u);
     for (unsigned index = 0u; index < 4u; ++index)
         apu_cycle(snes->apu);
-    RtlApuProfileRecordCycles(RTL_APU_CYCLE_UPLOAD_CONTROL, 4u, 0u);
+    sr_runner_record_apu_profile_cycles(
+        SR_APU_PROFILE_CYCLE_UPLOAD_CONTROL, 4u, 0u);
     for (unsigned index = 0u; index < 2u; ++index)
         apu_cycle(snes->apu);
-    RtlApuProfileRecordCycles(RTL_APU_CYCLE_TIMELINE, 2u, 0u);
+    sr_runner_record_apu_profile_cycles(
+        SR_APU_PROFILE_CYCLE_TIMELINE, 2u, 0u);
     RtlApuProfileRead(&apu_profile);
     failed |= check(apu_profile.flags == 0u &&
                         apu_profile.apu_cycles_total == 14u &&
@@ -1546,8 +1546,8 @@ int main(void) {
     for (uint32_t index = 0u;
          index < RTL_APU_TIMELINE_CYCLES_PER_TICK + 96u; ++index)
         apu_cycle(snes->apu);
-    RtlApuProfileRecordCycles(
-        RTL_APU_CYCLE_AUDIO_DEMAND,
+    sr_runner_record_apu_profile_cycles(
+        SR_APU_PROFILE_CYCLE_AUDIO_DEMAND,
         RTL_APU_TIMELINE_CYCLES_PER_TICK + 96u, 0u);
     RtlAdvanceApuTimeline();
     failed |= check(
@@ -1681,7 +1681,7 @@ int main(void) {
     failed |= check(audio_trace_observer.events[1].type ==
                             SR_AUDIO_TRACE_DSP_WRITE &&
                         audio_trace_observer.events[1].struct_size ==
-                            SR_AUDIO_TRACE_EVENT_V3_SIZE &&
+                            SR_AUDIO_TRACE_EVENT_V2_SIZE &&
                         audio_trace_observer.events[1].spc_pc == 0x3457u &&
                         audio_trace_observer.events[1].spc_instruction_pc ==
                             0x3456u &&
@@ -1757,6 +1757,58 @@ int main(void) {
                     "filtered audio trace unsubscribe failed");
     audio_trace_subscription_id = 0u;
 
+    memset(&audio_trace_observer, 0, sizeof(audio_trace_observer));
+    failed |= check(api->subscribe_audio_trace(
+                        runner, &key_on_audio_trace_subscription,
+                        &audio_trace_subscription_id) == SR_RESULT_OK &&
+                        sr_runner_audio_trace_enabled(
+                            SR_AUDIO_TRACE_MASK_DSP_KEY_ON) &&
+                        !sr_runner_audio_trace_enabled(
+                            SR_AUDIO_TRACE_MASK_DSP_WRITE),
+                    "DSP key-on trace mask was not installed");
+    dsp_write(snes->apu->dsp, 0x5du, 0x02u);
+    dsp_write(snes->apu->dsp, 0x00u, 0x81u);
+    dsp_write(snes->apu->dsp, 0x01u, 0x7eu);
+    dsp_write(snes->apu->dsp, 0x02u, 0x34u);
+    dsp_write(snes->apu->dsp, 0x03u, 0x12u);
+    dsp_write(snes->apu->dsp, 0x04u, 0x0bu);
+    snes->apu->ram[0x022cu] = 0x78u;
+    snes->apu->ram[0x022du] = 0x56u;
+    snes->apu->cycleClock = 4321u;
+    dsp_write(snes->apu->dsp, 0x4cu, 0x01u);
+    dsp_writeVirtualVoiceRegister(snes->apu->dsp, 8, 0x00u, 0x80u);
+    dsp_writeVirtualVoiceRegister(snes->apu->dsp, 8, 0x01u, 0x7fu);
+    dsp_writeVirtualVoiceRegister(snes->apu->dsp, 8, 0x02u, 0xcdu);
+    dsp_writeVirtualVoiceRegister(snes->apu->dsp, 8, 0x03u, 0x2au);
+    dsp_writeVirtualVoiceRegister(snes->apu->dsp, 8, 0x04u, 0x02u);
+    snes->apu->ram[0x0208u] = 0x00u;
+    snes->apu->ram[0x0209u] = 0x03u;
+    snes->apu->cycleClock = 4322u;
+    dsp_writeVirtualVoiceControl(snes->apu->dsp, 8, 0x4cu, true);
+    failed |= check(
+        RtlApuCycleCount() == 4322u &&
+            audio_trace_observer.count == 2u &&
+            audio_trace_observer.events[0].type ==
+                SR_AUDIO_TRACE_DSP_KEY_ON &&
+            audio_trace_observer.events[0].cycle_count == 4321u &&
+            audio_trace_observer.events[0].voice_index == 0u &&
+            audio_trace_observer.events[0].voice_source_number == 0x0bu &&
+            audio_trace_observer.events[0].voice_brr_address == 0x5678u &&
+            audio_trace_observer.events[0].voice_volume_left == -127 &&
+            audio_trace_observer.events[0].voice_volume_right == 126 &&
+            audio_trace_observer.events[0].voice_pitch == 0x1234u &&
+            audio_trace_observer.events[1].cycle_count == 4322u &&
+            audio_trace_observer.events[1].voice_index == 8u &&
+            audio_trace_observer.events[1].voice_source_number == 0x02u &&
+            audio_trace_observer.events[1].voice_brr_address == 0x0300u &&
+            audio_trace_observer.events[1].voice_pitch == 0x2acdu,
+        "DSP key-on trace payload mismatch");
+    failed |= check(api->unsubscribe_audio_trace(
+                        runner, audio_trace_subscription_id) ==
+                            SR_RESULT_OK,
+                    "DSP key-on trace unsubscribe failed");
+    audio_trace_subscription_id = 0u;
+
     failed |= check(api->subscribe_audio_trace(
                         runner, &snapshot_reentry_subscription,
                         &audio_trace_subscription_id) == SR_RESULT_OK,
@@ -1770,19 +1822,6 @@ int main(void) {
                         runner, audio_trace_subscription_id) ==
                             SR_RESULT_OK,
                     "snapshot re-entry observer unsubscribe failed");
-    audio_trace_subscription_id = 0u;
-
-    memset(&audio_trace_observer, 0, sizeof(audio_trace_observer));
-    failed |= check(api->subscribe_audio_trace(
-                        runner, &legacy_audio_trace_subscription,
-                        &audio_trace_subscription_id) == SR_RESULT_OK &&
-                        sr_runner_audio_trace_enabled(
-                            SR_AUDIO_TRACE_MASK_ALL),
-                    "legacy audio trace subscription lost all-event behavior");
-    failed |= check(api->unsubscribe_audio_trace(
-                        runner, audio_trace_subscription_id) ==
-                            SR_RESULT_OK,
-                    "legacy audio trace unsubscribe failed");
     audio_trace_subscription_id = 0u;
 
     snes->ppu->inidisp = 0x8du;
@@ -3440,6 +3479,12 @@ int main(void) {
                         SR_RESULT_INVALID_ARGUMENT,
                     "out-of-range audio mix gain accepted");
     audio_mix_control.music_gain_percent = 65u;
+    audio_mix_control.unclassified_music_source_min = 12u;
+    failed |= check(api->configure_audio_mix(runner, &audio_mix_control) ==
+                        SR_RESULT_INVALID_ARGUMENT,
+                    "unrequested audio source partition accepted");
+    audio_mix_control.flags = SR_AUDIO_MIX_MUTE_MUSIC |
+                              SR_AUDIO_MIX_PARTITION_UNCLASSIFIED_BY_SOURCE;
     failed |= check(api->configure_audio_mix(runner, &audio_mix_control) ==
                         SR_RESULT_OK,
                     "audio mix control failed");
@@ -3447,9 +3492,20 @@ int main(void) {
         int music_gain = -1;
         int sfx_gain = -1;
         dsp_getBusGains(&music_gain, &sfx_gain);
-        failed |= check(music_gain == 65 && sfx_gain == 35,
-                        "audio mix gains mismatch");
+        dsp_setVoiceBus(snes->apu->dsp, 0, kDspVoiceBus_Music);
+        dsp_setVoiceBus(snes->apu->dsp, 1, kDspVoiceBus_Unclassified);
+        snes->apu->dsp->channel[1].srcn = 12u;
+        dsp_refreshMixControls(snes->apu->dsp);
+        failed |= check(music_gain == 65 && sfx_gain == 35 &&
+                            snes->apu->dsp->voiceMuted[0] == 1u &&
+                            snes->apu->dsp->voiceMuted[1] == 1u,
+                        "audio mix mute/source-partition mismatch");
     }
+    audio_mix_control.flags = 0u;
+    audio_mix_control.unclassified_music_source_min = 0u;
+    failed |= check(api->configure_audio_mix(runner, &audio_mix_control) ==
+                        SR_RESULT_OK,
+                    "audio mix policy reset failed");
     failed |= check_generation(api, runner, 10u, 2u, 1u, 1u, 6u);
 
     snes->ppu->vram[0x0123u] = 0x1111u;

@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "constants.h"
 #include "music_replacements.h"
 #include "snesrecomp/runner.h"
 #include "settings.h"
@@ -16,6 +17,7 @@ enum {
 
 static bool s_bus_log;
 static SrRunnerHandle *s_runner;
+static bool s_music_replacement_active;
 
 bool NativeAudioMixer_ClassifyDspWrite(
     uint8_t dsp_addr, uint8_t logical_track, uint8_t track_mask,
@@ -167,12 +169,24 @@ void NativeAudioMixer_BindRunner(SrRunnerHandle *runner) {
   if (runner != NULL) NativeAudioMixer_ApplySettings();
 }
 
+void NativeAudioMixer_SetMusicReplacementActive(bool active) {
+  if (s_music_replacement_active == active) return;
+  s_music_replacement_active = active;
+  NativeAudioMixer_ApplySettings();
+}
+
 void NativeAudioMixer_ApplySettings(void) {
   const SnesRunnerApi *api;
   SrAudioMixControl control = {
       .struct_size = SR_AUDIO_MIX_CONTROL_V2_SIZE,
+      .flags = s_music_replacement_active
+          ? SR_AUDIO_MIX_MUTE_MUSIC |
+                SR_AUDIO_MIX_PARTITION_UNCLASSIFIED_BY_SOURCE
+          : 0u,
       .music_gain_percent = (uint32_t)g_settings.audio_music_volume,
       .sfx_gain_percent = (uint32_t)g_settings.audio_sfx_volume,
+      .unclassified_music_source_min = s_music_replacement_active
+          ? kActRaiserSpcMusicSourceMinimum : 0u,
   };
   if (s_runner != NULL) {
     api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
@@ -185,8 +199,10 @@ void NativeAudioMixer_ApplySettings(void) {
   MusicReplacements_SetMusicVolumePercent(
       g_settings.audio_music_volume);
   if (s_bus_log)
-    fprintf(stderr, "[audio-bus] gains music=%d%% sfx=%d%%\n",
-            g_settings.audio_music_volume, g_settings.audio_sfx_volume);
+    fprintf(stderr,
+            "[audio-bus] gains music=%d%% sfx=%d%% replacement=%s\n",
+            g_settings.audio_music_volume, g_settings.audio_sfx_volume,
+            s_music_replacement_active ? "active" : "inactive");
 }
 
 void NativeAudioMixer_Install(void) {

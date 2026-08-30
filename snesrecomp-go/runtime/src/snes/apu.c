@@ -59,6 +59,7 @@ Apu *apu_init(void) {
         apu_free(apu);
         return NULL;
     }
+    apu->dsp->apu = apu;
     s_active_apu = apu;
     apu_clearPortQueue(apu);
     return apu;
