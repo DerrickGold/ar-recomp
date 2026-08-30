@@ -178,7 +178,9 @@ Capture close to the failure when a game replaces sample banks dynamically.
 To build an isolated runtime candidate from only closed, statically proven
 automatic facts, use the explicit experimental overlay. It refuses the normal
 `src/gen` path and never edits cfg. The same validation mode propagates exact
-live M/X state across direct calls, avoiding speculative callee variants:
+live M/X state across direct calls, avoiding speculative callee variants. It
+also validates small, metadata-free, single-owner continuation blocks as exact
+resumable-region edges while retaining their standalone registry entries:
 
 ```sh
 snesrecomp-go/build/v2regen regen \
