@@ -1089,7 +1089,9 @@ static SrResult run_ppu_scanout(
     if (snes == NULL || request == NULL || out_result == NULL ||
         request->struct_size < SR_PPU_SCANOUT_REQUEST_V2_SIZE ||
         out_result->struct_size < SR_PPU_SCANOUT_RESULT_V2_SIZE ||
-        request->flags != 0u || request->hdma_suppress_mask > 0xffu ||
+        (request->flags &
+         ~SR_PPU_SCANOUT_CAPTURE_PRESENTATION_DIGEST) != 0u ||
+        request->hdma_suppress_mask > 0xffu ||
         request->reserved != 0u || request->irq_callback == NULL)
         return SR_RESULT_INVALID_ARGUMENT;
     if (request->lifetime_generation != snes->abiLifetimeGeneration)
@@ -1159,6 +1161,7 @@ static SrResult bind_ppu_output_surface(
                     ppu, request->pixels, (size_t)request->pitch_bytes,
                     request->height_pixels, render_flags))
                 return SR_RESULT_INVALID_ARGUMENT;
+            snes->abiScanoutAvailable = false;
             if (request->pixels != NULL)
                 snes->diagnosticMainSurfaceBound = true;
             return SR_RESULT_OK;

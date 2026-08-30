@@ -16,10 +16,12 @@
 #include "snesrecomp/host/launcher.h"
 #include "snesrecomp/host/widescreen.h"
 #include "snesrecomp/runner.h"
+#include "snesrecomp/runner/determinism.h"
 #include "snesrecomp/runner/ppu_diagnostics.h"
 #include "snesrecomp/spc_upload.h"
 #include "snesrecomp/support/crc32.h"
 #include "snesrecomp/support/file.h"
+#include "snesrecomp/support/input_replay.h"
 
 int main(void) {
     return SR_RUNNER_ABI_VERSION == 2u &&

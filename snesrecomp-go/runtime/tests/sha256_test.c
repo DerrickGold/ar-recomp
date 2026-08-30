@@ -23,6 +23,26 @@ static int check_vector(const char *message, const uint8_t *data, size_t length,
     return 1;
 }
 
+static int check_incremental(void) {
+    static const uint8_t value[] = "abc";
+    static const uint8_t expected[32] = {
+        0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea,
+        0x41, 0x41, 0x40, 0xde, 0x5d, 0xae, 0x22, 0x23,
+        0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c,
+        0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad,
+    };
+    Sha256Context context;
+    uint8_t digest[32];
+    sha256_init(&context);
+    sha256_update(&context, value, 1u);
+    sha256_update(&context, value + 1u, 1u);
+    sha256_update(&context, value + 2u, 1u);
+    sha256_final(&context, digest);
+    if (memcmp(digest, expected, sizeof(digest)) == 0) return 0;
+    fprintf(stderr, "runtime SHA-256 failed for incremental updates\n");
+    return 1;
+}
+
 int main(void) {
     static const uint8_t abc[] = "abc";
     static const uint8_t two_blocks[] =
@@ -37,5 +57,6 @@ int main(void) {
     failed |= check_vector(
         "two-block padding", two_blocks, sizeof(two_blocks) - 1u,
         "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
+    failed |= check_incremental();
     return failed;
 }

@@ -312,9 +312,12 @@ void ppu_saveload(Ppu *ppu, SaveLoadInfo *info) {
         saveload_u16_array(info, ppu->vram,
                            sizeof(ppu->vram) / sizeof(ppu->vram[0]));
     }
-    /* Derived geometry is deliberately outside the serialized contract. */
-    ppu->objScanlineMasksValid = false;
-    ppu->cgramRgbValid = false;
+    /* Derived geometry is deliberately outside the serialized contract. A
+     * save is observational and must not invalidate live caches. */
+    if (!info->saving) {
+        ppu->objScanlineMasksValid = false;
+        ppu->cgramRgbValid = false;
+    }
 }
 
 static bool output_surface_fits_geometry(

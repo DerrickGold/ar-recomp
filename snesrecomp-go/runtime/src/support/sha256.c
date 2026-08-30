@@ -88,39 +88,81 @@ static void compress(uint32_t state[8], const uint8_t block[64]) {
     state[7] += h;
 }
 
-void sha256_compute(const uint8_t *data, size_t length, uint8_t digest[32]) {
-    uint32_t state[8] = {
+void sha256_init(Sha256Context *context) {
+    static const uint32_t initial_state[8] = {
         0x6A09E667u, 0xBB67AE85u, 0x3C6EF372u, 0xA54FF53Au,
         0x510E527Fu, 0x9B05688Cu, 0x1F83D9ABu, 0x5BE0CD19u,
     };
+    if (context == NULL) return;
+    memcpy(context->state, initial_state, sizeof(initial_state));
+    context->byte_count = 0u;
+    context->block_used = 0u;
+}
 
-    size_t offset = 0u;
-    while (length - offset >= 64u) {
-        compress(state, data + offset);
-        offset += 64u;
+void sha256_update(Sha256Context *context, const uint8_t *data,
+                   size_t length) {
+    size_t consumed = 0u;
+    if (context == NULL || (data == NULL && length != 0u)) return;
+    context->byte_count += length;
+    if (context->block_used != 0u) {
+        size_t available = sizeof(context->block) - context->block_used;
+        size_t take = length < available ? length : available;
+        if (take != 0u)
+            memcpy(context->block + context->block_used, data, take);
+        context->block_used += take;
+        consumed += take;
+        if (context->block_used == sizeof(context->block)) {
+            compress(context->state, context->block);
+            context->block_used = 0u;
+        }
     }
+    while (length - consumed >= 64u) {
+        compress(context->state, data + consumed);
+        consumed += 64u;
+    }
+    if (consumed != length) {
+        context->block_used = length - consumed;
+        memcpy(context->block, data + consumed, context->block_used);
+    }
+}
 
+void sha256_final(Sha256Context *context, uint8_t digest[32]) {
     uint8_t final_blocks[128] = {0};
-    const size_t remaining = length - offset;
+    size_t remaining;
+    size_t final_size;
+    uint64_t bit_length;
+    unsigned index;
+    if (context == NULL || digest == NULL) return;
+    remaining = context->block_used;
     if (remaining != 0u) {
-        memcpy(final_blocks, data + offset, remaining);
+        memcpy(final_blocks, context->block, remaining);
     }
     final_blocks[remaining] = 0x80u;
-    const size_t final_size = remaining < 56u ? 64u : 128u;
-    const uint64_t bit_length = (uint64_t)length * 8u;
-    for (unsigned index = 0; index < 8u; ++index) {
+    final_size = remaining < 56u ? 64u : 128u;
+    bit_length = context->byte_count * 8u;
+    for (index = 0u; index < 8u; ++index) {
         final_blocks[final_size - 1u - index] =
             (uint8_t)(bit_length >> (index * 8u));
     }
-    compress(state, final_blocks);
+    compress(context->state, final_blocks);
     if (final_size == 128u) {
-        compress(state, final_blocks + 64u);
+        compress(context->state, final_blocks + 64u);
     }
 
-    for (unsigned index = 0; index < 8u; ++index) {
-        digest[index * 4u] = (uint8_t)(state[index] >> 24u);
-        digest[index * 4u + 1u] = (uint8_t)(state[index] >> 16u);
-        digest[index * 4u + 2u] = (uint8_t)(state[index] >> 8u);
-        digest[index * 4u + 3u] = (uint8_t)state[index];
+    for (index = 0u; index < 8u; ++index) {
+        digest[index * 4u] = (uint8_t)(context->state[index] >> 24u);
+        digest[index * 4u + 1u] =
+            (uint8_t)(context->state[index] >> 16u);
+        digest[index * 4u + 2u] =
+            (uint8_t)(context->state[index] >> 8u);
+        digest[index * 4u + 3u] = (uint8_t)context->state[index];
     }
+    memset(context, 0, sizeof(*context));
+}
+
+void sha256_compute(const uint8_t *data, size_t length, uint8_t digest[32]) {
+    Sha256Context context;
+    sha256_init(&context);
+    sha256_update(&context, data, length);
+    sha256_final(&context, digest);
 }

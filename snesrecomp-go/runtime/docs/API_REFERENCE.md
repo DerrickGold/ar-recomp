@@ -17,7 +17,7 @@ an SDK contract.
 | Enhancement, tool, or host layer | `snesrecomp/runner.h`, or a narrow `snesrecomp/runner/*.h` domain header | Versioned, capability-gated access through `SnesRunnerApi` |
 | Generated C | `snesrecomp/game/*.h` | 65816 register, dispatch, tracing, and generated-support ABI |
 | Host conveniences | `snesrecomp/host/*.h` | ROM/path launch helpers, frame/audio tracing, and presentation support |
-| Stateless utilities | `snesrecomp/support/*.h` | File loading and CRC32 |
+| Stateless utilities | `snesrecomp/support/*.h` | File loading, CRC32, and canonical input replay streams |
 
 Use the linked-game helpers only inside the executable linked to this runtime.
 External tools and optional enhancement layers should use `SnesRunnerApi` so
@@ -38,7 +38,7 @@ final executable link; the game module supplies those symbols.
 
 `snesrecomp/runner.h` is the stable umbrella. Consumers that need a smaller
 surface may include `runner/base.h`, `ppu.h`, `events.h`, `audio.h`,
-`mutation.h`, or `api.h`; each domain header is independently compile-tested
+`mutation.h`, `determinism.h`, or `api.h`; each domain header is independently compile-tested
 in C11 and the umbrella is compile-tested in C++17.
 
 ## Acquiring and checking the API
@@ -72,7 +72,7 @@ fields remain zero.
 | `SR_RESULT_OK` | Operation completed | Consume the output |
 | `SR_RESULT_INVALID_ARGUMENT` | Bad size, range, flags, pointer, or combination | Fix the request; no partial mutation is performed |
 | `SR_RESULT_UNSUPPORTED` | Capability, version, memory region, or operation is not implemented | Disable that optional feature or use the portable fallback |
-| `SR_RESULT_UNAVAILABLE` | Valid service, but no active runner/resource/provider exists | Retry only after the required lifecycle step |
+| `SR_RESULT_UNAVAILABLE` | Valid service, but its required resource/producer/sample does not exist yet | Retry only after the required lifecycle step; do not reinterpret it as an empty sample |
 | `SR_RESULT_STALE_VIEW` | Supplied lifetime generation no longer matches | Re-query generations/snapshot and rebuild the request |
 | `SR_RESULT_PENDING` | Queued mutation has not reached its safe point | Query it later |
 | `SR_RESULT_BUSY` | A frame resource is already claimed or registration is unsafe now | Respect current ownership or retry in the next lifecycle/frame |
@@ -94,6 +94,13 @@ fields remain zero.
 Borrowed memory is immutable through the SDK. Do not cast away `const`. Use a
 validated safe-point mutation or a purpose-built compare/exchange operation
 when state must change.
+
+For observational APIs, current state and retrospective samples are different
+contracts. A current-state query may return `OK` with every value zero when
+zero is the real initialized hardware state. A retrospective query returns
+`UNAVAILABLE` until its producer has actually completed; it must not fabricate
+an all-zero “sample.” Validity flags, rather than digest contents or numeric
+values, distinguish present data from absent data.
 
 ## Capability matrix
 
@@ -134,6 +141,7 @@ the specific entry you call.
 | `SR_RUNNER_CAP_PPU_FRAME_RESET` | `SNES_RUNNER_API_PPU_FRAME_RESET_SIZE` | `reset_ppu_frame_state` | Begin-frame clear of derived capture/override state; persistent surfaces remain bound |
 | `SR_RUNNER_CAP_PPU_OBJ_CAPTURE` | `SNES_RUNNER_API_PPU_OBJ_CAPTURE_SIZE` | `configure_ppu_obj_capture` | Frame-scoped; caller surface must survive scanout |
 | `SR_RUNNER_CAP_APU_STATE_SNAPSHOT` | `SNES_RUNNER_API_APU_STATE_SNAPSHOT_SIZE` | `query_apu_state` | Copies coherent ARAM, visible DSP registers, and scalar timing under the APU lock; returns `BUSY` from audio/trace callbacks |
+| `SR_RUNNER_CAP_DETERMINISM_DIGEST` | `SNES_RUNNER_API_DETERMINISM_DIGEST_SIZE` | `query_determinism_digest` | Canonical current semantic state and/or last completed logical canvas; semantic hashing takes the APU lock and returns `BUSY` from audio/trace callbacks |
 
 ## Memory-region operation matrix
 
@@ -161,6 +169,53 @@ that every region is borrowable through every accessor.
 3. Borrow only the memory region needed.
 4. Finish synchronously or copy the small subset retained later.
 5. Call `borrow_is_valid` before reusing a previous borrow.
+
+### Record and verify an input replay
+
+`snesrecomp/support/input_replay.h` defines a versioned little-endian artifact,
+not filesystem policy. Supply exact-read/exact-write callbacks for a file,
+memory buffer, network object, or test fixture.
+
+1. At the chosen safe point, record the ROM SHA-256 and an initial semantic
+   digest in `SrInputReplayHeader` when available.
+2. Append exactly one `SrInputReplayFrame` per host tick. Ordinals must be
+   contiguous; record the effective two-controller packed input exposed by
+   `query_input_state`, not raw frontend events.
+3. Optionally append a digest checkpoint for the frame just written.
+4. Finish the writer. A reader reports `UNAVAILABLE` only after validating the
+   footer; transport EOF before the footer is a malformed/truncated artifact.
+5. During replay, feed the recorded packed buttons into the matching host tick
+   and disable live input mutations. Treat ordinal or checkpoint mismatch as a
+   desynchronization, not as a reason to silently resynchronize.
+
+The container deliberately uses host-frame ordinals. A title's WRAM “game
+frame” counter may stall, skip, or update at a different phase and belongs in
+title-owned diagnostics rather than the generic stream format.
+
+### Compare deterministic state and presentation
+
+Request `SR_DETERMINISM_DIGEST_SEMANTIC` at an emulation-thread safe point.
+Schema 1 hashes an explicit recompiled 65816 snapshot, current packed input,
+and a semantic variant of the runner's canonical portable serialization of
+CPU/APU/DMA/PPU/SRAM and WRAM state. It excludes pointers, ABI lifetime
+counters, host clocks, the generated DSP PCM ring/read cursor, and presentation
+storage padding. APU/SPC/DSP hardware state and ARAM remain included.
+
+Set `SR_PPU_SCANOUT_CAPTURE_PRESENTATION_DIGEST` on the scanout request for a
+frame that needs a checkpoint, then request
+`SR_DETERMINISM_DIGEST_PRESENTATION` after `run_ppu_scanout` completes. The
+runner captures this digest before returning from successful scanout, so later
+reuse of the caller-owned surface cannot change it; scanouts without the flag
+pay no hashing cost and leave presentation unavailable. Schema 1 hashes the
+scanout frame ordinal, XRGB8888 format, logical canvas geometry/margins, and
+row-major logical pixels encoded little-endian.
+Surface pitch padding, centered apron, unused capacity rows, and other bound
+surfaces are excluded. Rebinding the main surface or beginning the next runner
+tick makes the prior presentation unavailable until another scanout completes.
+
+When both flags are requested, `OK` means both were produced. On
+`UNAVAILABLE`, inspect `valid_flags` only for diagnostics and repeat separate
+queries if the caller must handle the two lifecycles independently.
 
 ### Integrate a recompiled frame loop
 

@@ -87,7 +87,7 @@ void snes_saveload(Snes *snes, SaveLoadInfo *info) {
         info->func(info, &snes->hPos, sizeof(*snes) - offsetof(Snes, hPos));
         info->func(info, snes->ram, kSnesWramSize);
         info->func(info, &snes->ramAdr, sizeof(snes->ramAdr));
-        snes->cpu->e = false;
+        if (!info->saving) snes->cpu->e = false;
         if (!info->saving && !info->failed) sr_runner_note_load(snes);
         return;
     }
@@ -119,7 +119,7 @@ void snes_saveload(Snes *snes, SaveLoadInfo *info) {
     saveload_u16(info, &snes->divideResult);
     saveload_bytes(info, snes->ram, kSnesWramSize);
     saveload_u32(info, &snes->ramAdr);
-    snes->cpu->e = false;
+    if (!info->saving) snes->cpu->e = false;
     if (!info->saving && !info->failed) sr_runner_note_load(snes);
 }
 

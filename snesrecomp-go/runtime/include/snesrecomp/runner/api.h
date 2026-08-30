@@ -6,6 +6,7 @@
 #pragma once
 
 #include "snesrecomp/runner/audio.h"
+#include "snesrecomp/runner/determinism.h"
 #include "snesrecomp/runner/events.h"
 #include "snesrecomp/runner/mutation.h"
 #include "snesrecomp/runner/ppu.h"
@@ -203,6 +204,11 @@ typedef struct SnesRunnerApi {
     SrResult (*query_apu_state)(
         SrRunnerHandle *runner, const SrApuStateQuery *query,
         SrApuStateSnapshot *out_state);
+    /** Produce canonical hashes for current semantic state and/or the most
+     * recently completed runner-owned presentation. */
+    SrResult (*query_determinism_digest)(
+        SrRunnerHandle *runner, const SrDeterminismDigestRequest *request,
+        SrDeterminismDigestResult *out_result);
 } SnesRunnerApi;
 
 #define SNES_RUNNER_API_V2_BASE_SIZE                                           \
@@ -330,6 +336,10 @@ typedef struct SnesRunnerApi {
 #define SNES_RUNNER_API_APU_STATE_SNAPSHOT_SIZE                         \
     ((uint32_t)(offsetof(SnesRunnerApi, query_apu_state) +               \
                 sizeof(((SnesRunnerApi *)0)->query_apu_state)))
+
+#define SNES_RUNNER_API_DETERMINISM_DIGEST_SIZE                         \
+    ((uint32_t)(offsetof(SnesRunnerApi, query_determinism_digest) +       \
+                sizeof(((SnesRunnerApi *)0)->query_determinism_digest)))
 
 /** @brief Stable description of the linked runner implementation. */
 typedef struct SrRunnerDescriptor {

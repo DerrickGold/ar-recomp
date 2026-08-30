@@ -901,6 +901,8 @@ typedef struct SrPpuAuthenticCameraRequest {
 #define SR_PPU_SCANOUT_LINE_AFTER_HDMA UINT32_C(0x00000002)
 #define SR_PPU_SCANOUT_HDMA_ACTIVE UINT32_C(0x00000001)
 #define SR_PPU_SCANOUT_HDMA_INDIRECT UINT32_C(0x00000002)
+/** Capture the completed logical main canvas for a later determinism query. */
+#define SR_PPU_SCANOUT_CAPTURE_PRESENTATION_DIGEST UINT32_C(0x00000001)
 
 typedef struct SrPpuScanoutHdmaState {
     uint32_t flags;
@@ -932,6 +934,8 @@ typedef void (*SrPpuScanoutIrqCallback)(void *user_data, uint32_t line);
 
 typedef struct SrPpuScanoutRequest {
     uint32_t struct_size;
+    /* Set SR_PPU_SCANOUT_CAPTURE_PRESENTATION_DIGEST only on frames that need
+     * a canonical checkpoint; ordinary scanout pays no hashing cost. */
     uint32_t flags;
     uint64_t lifetime_generation;
     /* Bits set here suppress the corresponding channel after applying the

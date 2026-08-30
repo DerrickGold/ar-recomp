@@ -256,6 +256,7 @@ static SrResult run_ppu_scanout(
             "scanout-begin");
     }
     snes->diagnosticScanoutObserved = true;
+    snes->abiScanoutAvailable = false;
     _Static_assert(SR_DMA_CHANNEL_COUNT == kDmaChannelCount,
                    "scanout HDMA channel count must match the runner");
     scanout_start_hdma(
@@ -333,6 +334,9 @@ static SrResult run_ppu_scanout(
                 SR_EVENT_FRAME_SCANOUT,
             "scanout-end");
     }
+    if ((request->flags &
+         SR_PPU_SCANOUT_CAPTURE_PRESENTATION_DIGEST) != 0u)
+        sr_runner_capture_presentation_digest(snes);
     return SR_RESULT_OK;
 }
 

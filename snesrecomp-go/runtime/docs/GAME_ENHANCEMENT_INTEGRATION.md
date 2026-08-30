@@ -402,3 +402,13 @@ Replay-based A/B gates should consume the complete recording by default. A
 prefix can miss later rooms, streaming phases, or camera states and must require
 an explicit truncation option. Every detector needs a negative control, and
 every diagnostic must fail distinctly when its target path never executed.
+
+Use the shared `snesrecomp/support/input_replay.h` container for new recordings
+and `query_determinism_digest` for canonical checkpoints. The replay container
+owns host-tick ordinals and effective packed controller inputs; a game may add
+its own logical-frame counters to adjacent diagnostics but must not substitute
+them for the generic ordinal. Request presentation capture through
+`SR_PPU_SCANOUT_CAPTURE_PRESENTATION_DIGEST` only on checkpoint frames; the
+digest is unavailable until that scanout completes. A valid all-black canvas
+still produces an `OK` digest—absence and black output are not the same
+condition.

@@ -16,7 +16,8 @@ The shared layer provides:
 - `CpuState`, generated call/return/dispatch support, LoROM and WRAM access;
 - PPU, APU, SPC700, DSP, DMA, cartridge, SRAM, and joypad primitives;
 - frame/audio pacing helpers, save-state primitives, checksums, and keybinds;
-- unresolved-control-flow traps and optional trace rings;
+- unresolved-control-flow traps, runtime-selectable observation, and optional
+  deep trace rings;
 - MSU-1 register/data/audio support;
 - host-overlay extraction hooks in the PPU;
 - optional shadow audio and display color-LUT modules; and
@@ -80,11 +81,18 @@ or re-established each frame. Composition uses a coherent
 
 ## Trace and debug status
 
-`SNESRECOMP_ENABLE_TRACE=ON` compiles local CPU, dispatch, and watchdog
-instrumentation. The runtime provides entry/call/exit M/X assertions,
-stack-balance checks, garbage-variant traps, dispatch-miss logging, and
-unresolved-stub traps. The retired TCP debug server was intentionally not
-carried into the independent runner.
+Cheap observation does not require a rebuild. Runner event subscriptions,
+audio-trace subscriptions, and JSONL runtime channels selected through
+`SNESRECOMP_TRACE_FILE`/`SNESRECOMP_TRACE_CHANNELS` are compiled into ordinary
+optimized builds and are inactive until selected at run time.
+
+`SNESRECOMP_ENABLE_TRACE=ON` additionally compiles deep generated-CPU
+instrumentation: per-opcode/boundary paths, local execution rings, and the
+generated trace link stub. Use that build only when the always-available event
+and JSONL channels cannot answer the question. Entry/call/exit M/X assertions,
+stack-balance checks, garbage-variant traps, dispatch-miss diagnostics, and
+unresolved-stub traps remain actionable in ordinary builds. The retired TCP
+debug server was intentionally not carried into the independent runner.
 
 Generated/runtime diagnostic symbols use the `sr_` namespace. Generic process
 controls use descriptive `SNESRECOMP_*` names such as
@@ -104,6 +112,34 @@ runner.
   cross-target builds provide the validation gates.
 - Optional SIMD is selected by compiler target macros and always retains the
   portable implementation.
+
+## Determinism contract
+
+For one linked runner build and host target, identical ROM bytes, initial
+serialized semantic state, game module, emulation-affecting configuration,
+host-frame input sequence, adapter schedule, and APU production schedule
+produce the same schema-versioned semantic digest at equivalent safe points.
+The canonical stream fixes integer byte order and excludes host pointers,
+wall-clock time, presentation allocation padding, and the generated DSP PCM
+transport ring/read cursor.
+
+Presentation determinism additionally requires the same frame policy,
+published enhancement resources, scanout schedule, and renderer selection.
+The digest covers the completed logical canvas, including active margins, but
+not unused surface storage. Fast/reference renderer parity remains a validation
+gate; it is not implied merely because both implementations share a digest
+schema.
+
+The guarantee does not cross digest schema versions, runner behavior changes,
+different game-generated code, nondeterministic game/host callbacks, live input
+or mutation races, or external enhancement resources that differ. Canonical
+encoding makes digests comparable across machines, but cross-architecture and
+cross-optimization execution equivalence remains a conformance result, not an
+ABI guarantee. Unconstrained audio callback demand can advance the emulated APU
+ahead of its game-tick timeline; deterministic tests must use headless timeline
+pacing or reproduce the same audio production schedule. Record build
+provenance in the surrounding test report while the ABI is still evolving—the
+digest is deliberately not a source-revision identifier.
 
 ## Known SDK gap
 
