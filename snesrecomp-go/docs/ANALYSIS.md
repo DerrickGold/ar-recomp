@@ -266,14 +266,14 @@ common configuration style relies on static call discovery to create the
 entry and keeps only the HLE directive authored.
 
 A second experimental consumer validates an exact resumable-region contract.
-It selects only a metadata-free `internal_continuation` with exactly one owning
-entry variant and one or more exact sibling-boundary edges. Region size is not
-a semantic criterion. The continuation remains registry-visible through a
-public wrapper, while the owner and continuation share one private generated
-body whenever the continuation's standalone decode closure exactly matches the
-owner subgraph. The wrapper performs the continuation's entry M/X check and
-establishes one recompiler activation; an internal edge remains an in-region
-`goto` and therefore creates no recursive or duplicate activation.
+It selects only a metadata-free `internal_continuation` with one or more exact
+sibling-boundary owners and edges. Region size is not a semantic criterion. A
+single-owner continuation remains registry-visible through a public wrapper,
+while the owner and continuation share one private generated body whenever the
+continuation's standalone decode closure exactly matches the owner subgraph.
+The wrapper performs the continuation's entry M/X check and establishes one
+recompiler activation; an internal edge remains an in-region `goto` and
+therefore creates no recursive or duplicate activation.
 
 Generation re-decodes the closed owner graph and rejects a fact whose claimed
 edge is absent. It also checks exact decoded closure before replacing a
@@ -281,20 +281,27 @@ standalone body with a wrapper. Nested single-owner continuation trees are
 flattened into one body so they do not add helper activations. If sharing is
 still unavailable because the external closure differs, the exact local edge
 remains valid but the standalone body is retained; regeneration reports this
-as a resumable-region fallback so source cost is visible. `batch_single_owner_continuations` and
+as a resumable-region fallback so source cost is visible.
+`batch_single_owner_continuations`, `batch_multi_owner_continuations`, and
 `batch_region_eligible_continuations` describe the statically selectable set;
 the regeneration summary separately reports shared wrappers and fallbacks.
 
-An isolated multi-owner continuation uses a different shared-body ABI. Its
+An acyclic multi-owner continuation uses a different shared-body ABI. Its
 registry-visible public wrapper establishes a new activation for a true
 external entry, but each exact owner edge calls the same generated body with
 the owner's live `_entry_s` and host-return context. That call does not push a
 second recompiler activation, and the shared body owns the existing frame's
 return/pop path. The report separates statically proven edges from emitted C
-call sites because multiple proofs can collapse onto one decoded site. A
-multi-owner target or owner that overlaps another continuation graph remains
-report-only until the combined graph can be flattened without recursion or
-ambiguous activation ownership.
+call sites because multiple proofs can collapse onto one decoded site. If an
+owner is itself a single-owner continuation, the exact call is routed through
+every generated ancestor body that contains it. If the multi-owner target owns
+a single-owner region, that region's body is reused with external linkage.
+
+The ownership graph is checked before either lowering. An overlap is eligible
+only when the multi-owner target cannot reach back to any of its owners.
+`batch_acyclic_continuation_overlaps` counts the newly lowerable overlap shape;
+`batch_cyclic_continuation_overlaps` remains report-only because a direct
+helper lowering would recurse or make activation ownership ambiguous.
 
 ## Table-first unknown target discovery
 

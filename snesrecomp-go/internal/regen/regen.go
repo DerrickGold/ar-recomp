@@ -937,14 +937,26 @@ func (repo *repository) emitFunctions(jobs int, only map[byte]struct{}) (map[byt
 	if err != nil {
 		return nil, nil, err
 	}
+	repo.sharedContinuationEdges = countProvenContinuationCalls(repo.provenContinuationCalls)
+	repo.routeContinuationCallsThroughResumeOwners(continuationCalls)
 	for target, body := range continuationBodies {
-		if regionBodies[target] != nil || regionWrappers[target] != nil {
-			return nil, nil, fmt.Errorf("continuation $%06X M%dX%d has conflicting local-region and multi-owner body plans", target.Address, target.M, target.X)
+		if regionWrappers[target] != nil {
+			return nil, nil, fmt.Errorf("continuation $%06X M%dX%d is both a local-region wrapper and a multi-owner body", target.Address, target.M, target.X)
+		}
+		if localBody := regionBodies[target]; localBody != nil {
+			oldHelper := localBody.HelperName
+			localBody.HelperName = body.HelperName
+			localBody.ExternalLinkage = true
+			for _, wrapper := range regionWrappers {
+				if wrapper.HelperName == oldHelper {
+					wrapper.HelperName = body.HelperName
+				}
+			}
+			continue
 		}
 		regionBodies[target] = body
 	}
 	repo.sharedContinuationBodies = len(continuationBodies)
-	repo.sharedContinuationEdges = countRegionCalls(continuationCalls)
 	results := make(map[byte][]*emitter.FunctionResult)
 	for _, bank := range repo.banks {
 		if only == nil || containsBank(only, bank.ID) {
@@ -974,6 +986,12 @@ func (repo *repository) emitFunctions(jobs int, only map[byte]struct{}) (map[byt
 			exit = &copy
 		}
 		variant := entryVariant(bank.ID, entry)
+		regionCalls := continuationCalls[variant]
+		if regionWrappers[variant] != nil {
+			// The decoded body is discarded for a public region wrapper. Its
+			// containing owner/helper carries any exact internal call sites.
+			regionCalls = nil
+		}
 		result, err := emitter.EmitFunction(repo.image, bank.ID, entry.Start, entry.EntryMX.M, entry.EntryMX.X, emitter.FunctionOptions{
 			Name: entry.Name, End: entry.End, EntrySOffset: entry.EntrySOffset, Decode: options, Codegen: context,
 			ExcludeRanges: excludes, TailCallPC: entry.TailCallPC, HLESPCUpload: hleSPC,
@@ -981,7 +999,7 @@ func (repo *repository) emitFunctions(jobs int, only map[byte]struct{}) (map[byt
 			HLEFunctionIf: bank.Config.HLEFunctionsIf[entry.Start],
 			ExitMX:        exit, UnresolvedAllowed: true,
 			RegionBody: regionBodies[variant], RegionWrapper: regionWrappers[variant],
-			RegionCalls: continuationCalls[variant],
+			RegionCalls: regionCalls,
 		})
 		lock.Lock()
 		defer lock.Unlock()
@@ -1009,6 +1027,53 @@ func (repo *repository) emitFunctions(jobs int, only map[byte]struct{}) (map[byt
 		}
 	}
 	return results, contexts, firstErr
+}
+
+// routeContinuationCallsThroughResumeOwners mirrors an exact multi-owner call
+// into every single-owner ancestor that decodes the source continuation as an
+// internal block. Shared-region wrappers do not emit that block themselves;
+// their root helper does. When closure sharing is unavailable both the child
+// and ancestor retain generated copies, and both copies need the exact call.
+func (repo *repository) routeContinuationCallsThroughResumeOwners(calls map[decoder.Variant]map[decoder.ResumeEdge]string) {
+	reverse := make(map[decoder.Variant]map[decoder.Variant]struct{})
+	for owner, edges := range repo.provenResumeEdges {
+		for edge := range edges {
+			if reverse[edge.Target] == nil {
+				reverse[edge.Target] = make(map[decoder.Variant]struct{})
+			}
+			reverse[edge.Target][owner] = struct{}{}
+		}
+	}
+	type routedCall struct {
+		owner  decoder.Variant
+		edge   decoder.ResumeEdge
+		helper string
+	}
+	var original []routedCall
+	for owner, edges := range calls {
+		for edge, helper := range edges {
+			original = append(original, routedCall{owner: owner, edge: edge, helper: helper})
+		}
+	}
+	for _, call := range original {
+		visited := map[decoder.Variant]struct{}{call.owner: {}}
+		queue := []decoder.Variant{call.owner}
+		for len(queue) != 0 {
+			child := queue[0]
+			queue = queue[1:]
+			for parent := range reverse[child] {
+				if _, seen := visited[parent]; seen {
+					continue
+				}
+				visited[parent] = struct{}{}
+				if calls[parent] == nil {
+					calls[parent] = make(map[decoder.ResumeEdge]string)
+				}
+				calls[parent][call.edge] = call.helper
+				queue = append(queue, parent)
+			}
+		}
+	}
 }
 
 // sharedRegionEmissionPlans selects only ownership trees whose externally
@@ -1263,12 +1328,12 @@ func countResumeTargets(edges map[decoder.Variant]map[decoder.ResumeEdge]struct{
 	return len(targets)
 }
 
-func countRegionCalls(calls map[decoder.Variant]map[decoder.ResumeEdge]string) int {
-	total := 0
+func countProvenContinuationCalls(calls map[decoder.Variant]map[decoder.ResumeEdge]decoder.Variant) int {
+	count := 0
 	for _, edges := range calls {
-		total += len(edges)
+		count += len(edges)
 	}
-	return total
+	return count
 }
 
 func uint16SliceContains(values []uint16, wanted uint16) bool {

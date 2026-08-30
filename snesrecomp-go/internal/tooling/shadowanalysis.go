@@ -20,7 +20,7 @@ import (
 	romimage "github.com/DerrickGold/snesrecomp-go/internal/rom"
 )
 
-const shadowReportVersion = 14
+const shadowReportVersion = 15
 
 const (
 	shadowUnresolvedGeneric              = "generic_dynamic_target"
@@ -3023,6 +3023,10 @@ func writeShadowText(output io.Writer, report ShadowReport, verbose bool) {
 		ablationSummary.IndividuallyRecoverable, ablationSummary.RetainedRootDeclarations, ablationSummary.RetainedUniqueRootVariants,
 		ablationSummary.BatchRecoverable, ablationSummary.BatchRoutineTargets, ablationSummary.BatchTemplateFreeRoutines, ablationSummary.BatchTailTargets,
 		ablationSummary.BatchComputedTargets, ablationSummary.BatchInternalContinuations, ablationSummary.VectorCoveredDeclarations)
+	fmt.Fprintf(output, "continuation region eligibility: single-owner=%d multi-owner=%d, acyclic-overlaps=%d cyclic-overlaps=%d, selected=%d\n",
+		ablationSummary.BatchSingleOwnerContinuations, ablationSummary.BatchMultiOwnerContinuations,
+		ablationSummary.BatchAcyclicContinuationOverlaps, ablationSummary.BatchCyclicContinuationOverlaps,
+		ablationSummary.BatchRegionEligibleContinuations)
 	fmt.Fprintf(output, "authored HLE obligations: %d declaration(s), %d without an explicit func entry (preserved independently of root ablation)\n",
 		ablationSummary.AuthoredHLEObligations, ablationSummary.HLEOnlyObligations)
 	fmt.Fprintf(output, "shadow-root unresolved dynamic edges: %d raw emissions -> %d unique source sites; likely bring-up blockers=%d; decode issues=%d\n",
