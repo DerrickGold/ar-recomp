@@ -263,6 +263,8 @@ static SrResult query_ppu_frame_state(SrRunnerHandle *runner,
                    "ABI overlay flags must match the PPU");
     out_state->display_control = ppu->inidisp;
     out_state->bg_mode = (uint8_t)PPU_mode(ppu);
+    out_state->flags = ppu->wsHudSplitHeight != 0u
+        ? SR_PPU_FRAME_HUD_POLICY_CONFIGURED : 0u;
     out_state->hud_split_height = ppu->wsHudSplitHeight;
     out_state->hud_left_end = ppu->wsHudLeftEnd;
     out_state->hud_right_start = ppu->wsHudRightStart;
@@ -927,11 +929,19 @@ static SrResult update_ppu_layer_extents(
     return SR_RESULT_OK;
 }
 
-static bool ppu_abi_virtual_lookup(const void *context, int32_t tile_x,
-                                   int32_t tile_y, uint16_t *entry) {
+static PpuVirtualTilemapLookupResult ppu_abi_virtual_lookup(
+        const void *context, int32_t tile_x, int32_t tile_y,
+        uint16_t *entry) {
     const SrPpuVirtualTilemapBinding *binding = context;
-    return binding != NULL && binding->lookup != NULL && entry != NULL &&
-        binding->lookup(binding->user_data, tile_x, tile_y, entry) != 0u;
+    uint32_t result;
+    if (binding == NULL || binding->lookup == NULL || entry == NULL)
+        return kPpuVirtualTilemapLookup_Transparent;
+    result = binding->lookup(binding->user_data, tile_x, tile_y, entry);
+    if (result == SR_PPU_VIRTUAL_TILE_FOUND)
+        return kPpuVirtualTilemapLookup_Found;
+    if (result == SR_PPU_VIRTUAL_TILE_FALLBACK_AUTHENTIC)
+        return kPpuVirtualTilemapLookup_FallbackAuthentic;
+    return kPpuVirtualTilemapLookup_Transparent;
 }
 
 static size_t ppu_abi_virtual_span_lookup(

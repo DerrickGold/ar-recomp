@@ -204,8 +204,9 @@ typedef struct VirtualPaddingFixture {
     uint16_t entry;
 } VirtualPaddingFixture;
 
-static bool virtual_padding_lookup(const void *context, int32_t tile_x,
-                                   int32_t tile_y, uint16_t *entry) {
+static PpuVirtualTilemapLookupResult virtual_padding_lookup(
+        const void *context, int32_t tile_x, int32_t tile_y,
+        uint16_t *entry) {
     VirtualPaddingFixture *fixture = (VirtualPaddingFixture *)context;
     (void)tile_x;
     (void)tile_y;
@@ -277,14 +278,138 @@ static void test_virtual_provider_lookup_is_tile_shaped(Ppu *ppu) {
     CHECK(fixture.lookups == kPpuXPixels / 8u);
 }
 
+typedef struct VirtualFallbackFixture {
+    unsigned found;
+    unsigned transparent;
+    unsigned fallback;
+} VirtualFallbackFixture;
+
+static PpuVirtualTilemapLookupResult virtual_partial_lookup(
+        const void *context, int32_t tile_x, int32_t tile_y,
+        uint16_t *entry) {
+    VirtualFallbackFixture *fixture = (VirtualFallbackFixture *)context;
+    (void)tile_y;
+    if (tile_x < 8) {
+        ++fixture->found;
+        *entry = 2u;
+        return kPpuVirtualTilemapLookup_Found;
+    }
+    if (tile_x < 16) {
+        ++fixture->transparent;
+        return kPpuVirtualTilemapLookup_Transparent;
+    }
+    ++fixture->fallback;
+    return kPpuVirtualTilemapLookup_FallbackAuthentic;
+}
+
+static void test_virtual_provider_partial_authentic_fallback(void) {
+    Ppu *fast = ppu_init();
+    Ppu *reference = ppu_init();
+    Ppu *targets[2] = {fast, reference};
+    uint32_t fast_pixels[kPpuXPixels] = {0};
+    uint32_t reference_pixels[kPpuXPixels] = {0};
+    uint32_t *pixels[2] = {fast_pixels, reference_pixels};
+    VirtualFallbackFixture fixtures[2] = {{0}, {0}};
+    CHECK(fast != NULL && reference != NULL);
+    if (fast == NULL || reference == NULL) goto cleanup;
+    for (unsigned index = 0u; index < 2u; ++index) {
+        Ppu *target = targets[index];
+        PpuVirtualTilemapBinding binding = {
+            .lookup = virtual_partial_lookup,
+            .context = &fixtures[index],
+            .flags = kPpuVirtualTilemapFlag_IncludeAuthentic,
+        };
+        target->inidisp = 0x0fu;
+        target->bgmode = 1u;
+        target->screenEnabled[0] = 1u;
+        target->bgXsc[0] = 0x20u;
+        target->cgram[1] = 0x001fu;
+        target->cgram[2] = 0x7c00u;
+        fill_solid_4bpp_tile(target, 1, 1u);
+        fill_solid_4bpp_tile(target, 2, 2u);
+        for (int word = 0; word < 0x400; ++word)
+            target->vram[0x2000 + word] = 1u;
+        CHECK(PpuSetVirtualTilemap(target, 0u, &binding));
+        PpuBeginDrawing(
+            target, (uint8_t *)pixels[index], sizeof(fast_pixels),
+            index == 0u ? 0u : kPpuRenderFlags_ReferencePixelRenderer);
+        ppu_runLine(target, 0);
+        ppu_runLine(target, 1);
+    }
+    CHECK(memcmp(fast_pixels, reference_pixels, sizeof(fast_pixels)) == 0);
+    for (int x = 0; x < 64; ++x)
+        CHECK(fast_pixels[x] == fixture_color_rgb(0x7c00u));
+    for (int x = 64; x < 128; ++x)
+        CHECK(fast_pixels[x] == 0u);
+    for (int x = 128; x < kPpuXPixels; ++x)
+        CHECK(fast_pixels[x] == fixture_color_rgb(0x001fu));
+    for (unsigned index = 0u; index < 2u; ++index)
+        CHECK(fixtures[index].found != 0u &&
+              fixtures[index].transparent != 0u &&
+              fixtures[index].fallback != 0u);
+cleanup:
+    ppu_free(fast);
+    ppu_free(reference);
+}
+
+static void test_virtual_provider_margin_authentic_fallback(void) {
+    enum { kExtra = 8, kWidth = kPpuXPixels + kExtra * 2 };
+    Ppu *fast = ppu_init();
+    Ppu *reference = ppu_init();
+    Ppu *targets[2] = {fast, reference};
+    uint32_t fast_pixels[kWidth] = {0};
+    uint32_t reference_pixels[kWidth] = {0};
+    uint32_t *pixels[2] = {fast_pixels, reference_pixels};
+    VirtualFallbackFixture fixtures[2] = {{0}, {0}};
+    CHECK(fast != NULL && reference != NULL);
+    if (fast == NULL || reference == NULL) goto cleanup;
+    for (unsigned index = 0u; index < 2u; ++index) {
+        Ppu *target = targets[index];
+        PpuVirtualTilemapBinding binding = {
+            .lookup = virtual_partial_lookup,
+            .context = &fixtures[index],
+        };
+        target->inidisp = 0x0fu;
+        target->bgmode = 1u;
+        target->screenEnabled[0] = 1u;
+        target->bgXsc[0] = 0x20u;
+        target->cgram[1] = 0x001fu;
+        target->cgram[2] = 0x7c00u;
+        fill_solid_4bpp_tile(target, 1, 1u);
+        fill_solid_4bpp_tile(target, 2, 2u);
+        for (int word = 0; word < 0x400; ++word)
+            target->vram[0x2000 + word] = 1u;
+        PpuSetExtraSpace(target, kExtra);
+        CHECK(PpuSetVirtualTilemap(target, 0u, &binding));
+        PpuBeginDrawing(
+            target, (uint8_t *)pixels[index], sizeof(fast_pixels),
+            index == 0u ? 0u : kPpuRenderFlags_ReferencePixelRenderer);
+        ppu_runLine(target, 0);
+        ppu_runLine(target, 1);
+    }
+    CHECK(memcmp(fast_pixels, reference_pixels, sizeof(fast_pixels)) == 0);
+    for (int x = 0; x < kExtra; ++x)
+        CHECK(fast_pixels[x] == fixture_color_rgb(0x7c00u));
+    for (int x = kExtra; x < kWidth; ++x)
+        CHECK(fast_pixels[x] == fixture_color_rgb(0x001fu));
+    for (unsigned index = 0u; index < 2u; ++index)
+        CHECK(fixtures[index].found != 0u &&
+              fixtures[index].transparent == 0u &&
+              fixtures[index].fallback != 0u);
+cleanup:
+    ppu_free(fast);
+    ppu_free(reference);
+}
+
 typedef struct VirtualVerticalFixture {
     unsigned lookups;
     int32_t first_tile_y;
     int32_t last_tile_y;
 } VirtualVerticalFixture;
 
-static bool virtual_vertical_lookup(const void *context, int32_t tile_x,
-                                    int32_t tile_y, uint16_t *entry) {
+static PpuVirtualTilemapLookupResult virtual_vertical_lookup(
+        const void *context, int32_t tile_x, int32_t tile_y,
+        uint16_t *entry) {
     VirtualVerticalFixture *fixture = (VirtualVerticalFixture *)context;
     (void)tile_x;
     if (fixture->lookups == 0u) fixture->first_tile_y = tile_y;
@@ -923,8 +1048,9 @@ typedef struct VirtualParityFixture {
     uint16_t span_entries[kPpuSurfaceWidth / 8 + 2];
 } VirtualParityFixture;
 
-static bool virtual_parity_lookup(const void *context, int32_t tile_x,
-                                  int32_t tile_y, uint16_t *entry) {
+static PpuVirtualTilemapLookupResult virtual_parity_lookup(
+        const void *context, int32_t tile_x, int32_t tile_y,
+        uint16_t *entry) {
     const VirtualParityFixture *fixture = context;
     uint32_t value = (uint32_t)tile_x * 17u +
         (uint32_t)tile_y * 29u + fixture->salt;
@@ -985,8 +1111,9 @@ typedef struct VirtualFastFixture {
     uint16_t span_entries[kPpuSurfaceWidth / 8 + 2];
 } VirtualFastFixture;
 
-static bool virtual_fast_lookup(const void *context, int32_t tile_x,
-                                int32_t tile_y, uint16_t *entry) {
+static PpuVirtualTilemapLookupResult virtual_fast_lookup(
+        const void *context, int32_t tile_x, int32_t tile_y,
+        uint16_t *entry) {
     VirtualFastFixture *fixture = (VirtualFastFixture *)context;
     uint32_t value = (uint32_t)tile_x * 17u +
         (uint32_t)tile_y * 29u + fixture->salt;
@@ -1383,6 +1510,8 @@ int main(void) {
         test_tilemap_screen_wrapping(ppu);
         test_virtual_provider_does_not_own_padding(ppu);
         test_virtual_provider_lookup_is_tile_shaped(ppu);
+        test_virtual_provider_partial_authentic_fallback();
+        test_virtual_provider_margin_authentic_fallback();
         test_virtual_provider_vertical_margin_continues_world(ppu);
         test_hud_split_does_not_widen_bg3(ppu);
         test_mode7_hardware_origin(ppu);

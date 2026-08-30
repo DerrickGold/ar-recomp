@@ -79,6 +79,13 @@ _Static_assert(SR_PPU_BACKGROUND_MOTION_FILL_RELATIVE ==
                    SR_PPU_BACKGROUND_MOTION_NORMAL_SCROLL ==
                        kPpuWidescreenMotion_NormalScroll,
                "public ABI background motion must match the PPU");
+_Static_assert(SR_PPU_VIRTUAL_TILE_TRANSPARENT ==
+                       kPpuVirtualTilemapLookup_Transparent &&
+                   SR_PPU_VIRTUAL_TILE_FOUND ==
+                       kPpuVirtualTilemapLookup_Found &&
+                   SR_PPU_VIRTUAL_TILE_FALLBACK_AUTHENTIC ==
+                       kPpuVirtualTilemapLookup_FallbackAuthentic,
+               "public ABI virtual lookup results must match the PPU");
 _Static_assert(sizeof(SrPpuObjPart) == 8u,
                "public ABI OBJ part must have a fixed layout");
 _Static_assert(offsetof(SrPpuObjPart, x) == 0u &&

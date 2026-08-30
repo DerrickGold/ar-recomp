@@ -16,6 +16,7 @@
 #include "snesrecomp/host/launcher.h"
 #include "snesrecomp/host/widescreen.h"
 #include "snesrecomp/runner.h"
+#include "snesrecomp/runner/ppu_diagnostics.h"
 #include "snesrecomp/spc_upload.h"
 #include "snesrecomp/support/crc32.h"
 #include "snesrecomp/support/file.h"

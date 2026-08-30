@@ -177,6 +177,13 @@ if(BUILD_TESTING)
         snesrecomp_runtime)
     add_test(NAME snesrecomp_runtime_abi
         COMMAND snesrecomp_runtime_abi_test)
+
+    add_executable(snesrecomp_runtime_ppu_diagnostics_test
+        tests/ppu_diagnostics_test.c)
+    target_link_libraries(snesrecomp_runtime_ppu_diagnostics_test PRIVATE
+        snesrecomp_runtime)
+    add_test(NAME snesrecomp_runtime_ppu_diagnostics
+        COMMAND snesrecomp_runtime_ppu_diagnostics_test)
     set_tests_properties(snesrecomp_runtime_abi PROPERTIES
         ENVIRONMENT "SNESRECOMP_APU_PROFILE=1")
 

@@ -136,8 +136,8 @@ typedef struct VirtualTilemapFixture {
   int first_y, last_y;
 } VirtualTilemapFixture;
 
-static bool lookup_virtual_tile(const void *context, int32_t tile_x,
-                                int32_t tile_y, uint16_t *entry) {
+static PpuVirtualTilemapLookupResult lookup_virtual_tile(
+    const void *context, int32_t tile_x, int32_t tile_y, uint16_t *entry) {
   VirtualTilemapFixture *map = (VirtualTilemapFixture *)context;
   if (!map || !entry) return false;
   if (!map->calls) {

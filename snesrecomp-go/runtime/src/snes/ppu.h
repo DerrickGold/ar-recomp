@@ -11,8 +11,14 @@
 
 typedef struct Ppu Ppu;
 
-typedef bool (*PpuVirtualTilemapLookup)(const void *, int32_t, int32_t,
-                                        uint16_t *);
+typedef uint32_t PpuVirtualTilemapLookupResult;
+enum {
+    kPpuVirtualTilemapLookup_Transparent = 0u,
+    kPpuVirtualTilemapLookup_Found = 1u,
+    kPpuVirtualTilemapLookup_FallbackAuthentic = 2u
+};
+typedef PpuVirtualTilemapLookupResult (*PpuVirtualTilemapLookup)(
+    const void *, int32_t, int32_t, uint16_t *);
 /* Optional zero-copy scanline companion to lookup.  A provider exposes up to
  * capacity consecutive tile coordinates (tile_x + i * tile_step) through a
  * borrowed pointer and word stride.  A NULL entries result is a finite-world
@@ -123,7 +129,7 @@ typedef struct PpuVirtualSampleCache {
     int32_t tile_x, tile_y;
     uint16_t entry;
     uint8_t band;
-    bool found;
+    uint8_t result;
     bool valid;
 } PpuVirtualSampleCache;
 

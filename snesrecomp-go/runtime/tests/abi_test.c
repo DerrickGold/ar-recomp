@@ -110,8 +110,10 @@ static uint32_t test_virtual_tile_lookup(
         void *user_data, int32_t tile_x, int32_t tile_y,
         uint16_t *entry) {
     if (user_data != &s_virtual_context || entry == NULL) return 0u;
+    if (tile_x == -1) return SR_PPU_VIRTUAL_TILE_FALLBACK_AUTHENTIC;
+    if (tile_x == -2) return UINT32_MAX;
     *entry = (uint16_t)((tile_x & 0xff) | ((tile_y & 0xff) << 8));
-    return 1u;
+    return SR_PPU_VIRTUAL_TILE_FOUND;
 }
 
 static uint32_t test_virtual_tile_span_lookup(
@@ -2049,6 +2051,8 @@ int main(void) {
                         SR_RESULT_OK,
                     "PPU frame query failed");
     failed |= check(ppu_frame.display_control == 0x8du &&
+                        ppu_frame.flags ==
+                            SR_PPU_FRAME_HUD_POLICY_CONFIGURED &&
                         ppu_frame.bg_mode == 1u &&
                         ppu_frame.hud_split_height == 32u &&
                         ppu_frame.hud_left_end == 64u &&
@@ -3845,6 +3849,13 @@ int main(void) {
                             entries == s_virtual_span_entries &&
                             stride == 1 && entries[2] == 0x090au,
                         "PPU virtual-tilemap callback bridge mismatch");
+        failed |= check(binding->lookup(
+                            binding->context, -1, 7, &entry) ==
+                                kPpuVirtualTilemapLookup_FallbackAuthentic &&
+                            binding->lookup(
+                                binding->context, -2, 7, &entry) ==
+                                kPpuVirtualTilemapLookup_Transparent,
+                        "PPU virtual-tilemap lookup result bridge mismatch");
     }
     virtual_tilemap_request.layer_mask = 3u;
     failed |= check(api->replace_ppu_virtual_tilemaps(

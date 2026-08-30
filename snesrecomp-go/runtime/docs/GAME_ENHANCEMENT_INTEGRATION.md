@@ -242,15 +242,34 @@ entries the 1024-entry ring currently retains, making truncation explicit.
 ## Implementing a virtual tile provider
 
 `SrPpuVirtualTilemapBinding.lookup` is the correctness path. Given signed world
-tile coordinates, return the exact SNES tilemap word that the original producer
-would have placed in VRAM, or report that the coordinate has no tile. Keep
-metatile decoding and room-specific semantics in the game project.
+tile coordinates, return `SR_PPU_VIRTUAL_TILE_FOUND` with the exact SNES
+tilemap word that the original producer would have placed in VRAM,
+`SR_PPU_VIRTUAL_TILE_TRANSPARENT` for an intentional finite-world gap, or
+`SR_PPU_VIRTUAL_TILE_FALLBACK_AUTHENTIC` to sample the resident VRAM tilemap
+for that displayed point. Existing boolean callbacks retain their old meaning:
+false is transparent and true supplies a tile. Keep metatile decoding and
+room-specific semantics in the game project.
 
 Once correct, implement `lookup_span`. Scanout commonly asks for adjacent
 tiles, so returning a contiguous or fixed-stride run avoids a callback for each
 pixel/tile. `band_lookup` is an optional fast path for priority/depth grouping;
 it must agree with the scalar result. Never make the scalar callback a slow
-framebuffer search—it should index already-decoded game data.
+framebuffer search—it should index already-decoded game data. A nonzero span
+with null entries is transparent. At a boundary requiring authentic fallback,
+return zero so scalar lookup decides that coordinate.
+
+Publish finite extents from known world data independently of provider hit
+counts. BEGIN leaves unpublished extents available; clamping an extent until a
+provider has already served a tile creates a caller-side bootstrap cycle. Leave
+the extent available, or publish an intentionally broad diagnostic bound, while
+calibrating a new provider.
+
+`snesrecomp/runner/ppu_diagnostics.h` provides an optional caller-side census
+for scalar providers. Reset it on the explicit target frame, record each lookup
+result, and require `sr_ppu_virtual_tile_census_finish` to return
+`SR_RESULT_OK`; `SR_RESULT_UNAVAILABLE` means the diagnostic did not run. The
+reported minima and maxima are observed request coordinates, not a semantic
+camera or authored world bound.
 
 Useful validation for every provider:
 
@@ -357,6 +376,11 @@ variants; and an unknown track ID that falls back safely.
   generation-changing mutation.
 - **Publishing a provider before frame-policy BEGIN:** BEGIN intentionally
   clears previous-frame providers and extents.
+- **Deriving finite extents from provider hits:** can prevent the first lookup
+  that was supposed to prove the extent. Publish known bounds independently or
+  leave them available during calibration.
+- **Treating a silent provider census as success:** zero requests means the
+  diagnostic did not run. Finish the census and handle `SR_RESULT_UNAVAILABLE`.
 - **Wrapping sprite X before publishing metadata:** loses the world position
   needed to place an object in a margin.
 - **Treating every DSP voice as music:** suppresses or replaces sound effects.
@@ -373,3 +397,8 @@ and audio semantics are game-owned; widescreen covers finite, repeating,
 HDMA-heavy, Mode-7, HUD, and sprite scenes found in the title; save/load and
 replay artifacts remain deterministic; and portable plus native performance
 stay within the project's measured gates.
+
+Replay-based A/B gates should consume the complete recording by default. A
+prefix can miss later rooms, streaming phases, or camera states and must require
+an explicit truncation option. Every detector needs a negative control, and
+every diagnostic must fail distinctly when its target path never executed.

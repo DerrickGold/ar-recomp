@@ -1358,11 +1358,11 @@ static uint32_t ProviderLookup(void *context, int32_t tile_x,
       provider && provider->wrap_world_x, tile_x, tile_y, entry);
   if (result == kActionBgLookup_Tile) {
     s_observer.diagnostics.provider_tiles++;
-    return true;
+    return SR_PPU_VIRTUAL_TILE_FOUND;
   }
   if (result == kActionBgLookup_OutsideWorld)
     s_observer.diagnostics.provider_outside_world++;
-  return false;
+  return SR_PPU_VIRTUAL_TILE_TRANSPARENT;
 }
 
 static uint32_t ProviderLookupSpan(

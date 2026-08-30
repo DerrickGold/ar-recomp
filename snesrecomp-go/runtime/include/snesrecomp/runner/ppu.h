@@ -41,6 +41,10 @@ typedef struct SrPpuBackgroundState {
     uint8_t bits_per_pixel;
 } SrPpuBackgroundState;
 
+/* Instantaneous live PPU controls at the call or callback phase that produced
+ * the snapshot. These values are not a semantic world camera and do not
+ * reconstruct the per-scanline register timeline of a completed frame. A
+ * zero scroll value is valid when the game or HDMA has not written it yet. */
 typedef struct SrPpuStateSnapshot {
     uint32_t struct_size;
     uint32_t flags;
@@ -165,6 +169,11 @@ typedef struct SrPpuOverlayState {
     uint8_t reserved8[3];
 } SrPpuOverlayState;
 
+#define SR_PPU_FRAME_HUD_POLICY_CONFIGURED UINT32_C(0x00000001)
+
+/* Frame-derived runner policy and capture state. HUD fields echo the policy
+ * published by the integration; the runner does not infer HUD geometry from
+ * pixels, tilemaps, or hardware registers. */
 typedef struct SrPpuFrameSnapshot {
     uint32_t struct_size;
     uint32_t flags;
@@ -194,6 +203,11 @@ enum {
     SR_PPU_BACKGROUND_FILL_LIVE_WORLD = 2u,
     SR_PPU_BACKGROUND_FILL_CLAMP = 3u,
     SR_PPU_BACKGROUND_FILL_MIRROR = 4u,
+    /* Repeat the native 256-pixel span into horizontal margins. On a
+     * VRAM-backed 32-tile-wide BG, LIVE_WORLD and REPEAT can render identical
+     * pixels because their source coordinates differ by one complete tilemap
+     * period. Use resolve_ppu_background_coordinate to verify which policy was
+     * selected instead of relying on visual inspection alone. */
     SR_PPU_BACKGROUND_FILL_REPEAT = 5u,
     SR_PPU_BACKGROUND_FILL_RAW_WRAP = 6u
 };
@@ -501,6 +515,8 @@ typedef struct SrPpuFramePolicy {
     uint32_t layer_mirror_mask;
     uint32_t layer_repeat_mask;
     uint32_t layer_normal_scroll_mask;
+    /* Per-layer limits for the exact extra rows above and below the native
+     * viewport. They do not crop native rows or horizontal side margins. */
     uint32_t vertical_clip_layer_mask;
     uint32_t vertical_clip_top_rows[4];
     uint32_t vertical_clip_bottom_rows[4];
@@ -789,11 +805,26 @@ typedef struct SrPpuLayerExtentRequest {
     ((uint32_t)(offsetof(SrPpuLayerExtentRequest, reserved) +             \
                 sizeof(((SrPpuLayerExtentRequest *)0)->reserved)))
 
+/* Scalar provider result. Existing boolean providers remain compatible:
+ * zero is an intentional transparent gap and one supplies *entry. Authentic
+ * fallback samples the resident VRAM tilemap for the same displayed point;
+ * it is distinct from a transparent finite-world boundary. Other values are
+ * reserved and currently fail closed as transparent. */
+typedef uint32_t SrPpuVirtualTileLookupResult;
+enum {
+    SR_PPU_VIRTUAL_TILE_TRANSPARENT = 0u,
+    SR_PPU_VIRTUAL_TILE_FOUND = 1u,
+    SR_PPU_VIRTUAL_TILE_FALLBACK_AUTHENTIC = 2u
+};
+
 /* Finite-world tile providers are retained until the next replacement,
- * runner reset, or lifetime invalidation. Callback output pointers are valid
- * only until the provider's next span callback. Scalar lookup is mandatory;
- * span and priority-band lookup are optional fast paths. */
-typedef uint32_t (*SrPpuVirtualTileLookup)(
+ * runner reset, or lifetime invalidation. Scalar lookup is the mandatory
+ * correctness path. Span and priority-band lookup are optional fast paths.
+ * Span output pointers remain valid only until the provider's next span call.
+ * A nonzero span with a null entries pointer is an intentional transparent
+ * gap. Return zero at a mixed-coverage boundary to request scalar lookup,
+ * including when that coordinate needs authentic fallback. */
+typedef SrPpuVirtualTileLookupResult (*SrPpuVirtualTileLookup)(
     void *user_data, int32_t tile_x, int32_t tile_y, uint16_t *entry);
 typedef uint32_t (*SrPpuVirtualTileSpanLookup)(
     void *user_data, int32_t tile_x, int32_t tile_y, int32_t tile_step,
@@ -802,6 +833,8 @@ typedef uint32_t (*SrPpuVirtualTileBandLookup)(
     void *user_data, int32_t tile_x, int32_t tile_y, uint16_t entry,
     uint8_t *band);
 
+/* Consult the provider inside the native viewport as well as synthetic
+ * margins. Without this flag the resident VRAM path retains authentic pixels. */
 #define SR_PPU_VIRTUAL_TILEMAP_INCLUDE_AUTHENTIC UINT32_C(0x00000001)
 
 typedef struct SrPpuVirtualTilemapBinding {
