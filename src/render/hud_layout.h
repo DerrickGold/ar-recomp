@@ -40,7 +40,8 @@ typedef struct HudPresentationChunk {
 } HudPresentationChunk;
 
 /* Three top-band chunks, two player-row chunks, one enemy row, one optional
- * lower BG3 body, and one optional OBJ icon. */
+ * lower BG3 body, and one optional OBJ icon. A native unsplit capture uses at
+ * most one BG3 chunk and one OBJ icon chunk. */
 enum { kHudPresentationChunkCapacity = 8 };
 
 /* Pure projection shared by rendering and inspector hit-testing. */

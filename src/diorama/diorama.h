@@ -208,6 +208,11 @@ bool Diorama_ProjectCapturedBg2Point(const DioramaProjection *projection,
  * required by current captured effects. An effect is current projection
  * content even if its isolated band has no final winning pixels.
  *
+ * bg2_content_revision changes whenever the raw captured BG2 texture changes.
+ * bg2_content_dynamic is true when frame generation has replaced it with a
+ * presentation-local result. Together they let the skybox prefilter reuse an
+ * immutable image without retaining stale captured/interpolated pixels.
+ *
  * The caller must enter without a custom GPU render state bound. This
  * compositor owns and unbinds every state it binds; the baseline shader
  * extension deliberately exposes no inherited native-state query. An outer
@@ -227,6 +232,7 @@ PresentationOutcome Diorama_Composite(
     const DioramaCameraPose *cam_pose, float distance_scale,
     uint32_t additive_plane_mask,
     const DioramaCoverageMask coverage_masks[kDioramaPlane_Count],
+    uint64_t bg2_content_revision, bool bg2_content_dynamic,
     uint8_t effect_obj_priority_mask, uint32_t effect_bg_plane_mask,
     uint8_t map_group, uint8_t map_number, uint8_t layer_section,
     const DioramaBgValidSpanPlan *bg2_valid_spans,

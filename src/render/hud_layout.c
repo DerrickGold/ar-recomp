@@ -7,6 +7,10 @@ static int ScaledPixels(int pixels, double scale) {
   return result > 0 ? result : 1;
 }
 
+static int ScaledCoordinate(int pixels, double scale) {
+  return (int)(pixels * scale + 0.5);
+}
+
 static void AddChunk(HudPresentationChunk *chunks, int *count,
                      ArRenderTexture texture,
                      ArRenderRectI texture_source,
@@ -30,12 +34,64 @@ int ArHudLayout_BuildPresentationChunks(
     ArRenderRectI viewport, const HudProjectionInputs *in,
     HudPresentationChunk *chunks) {
   if (!in || !ArRenderTexture_IsValid(in->hud_bg_texture) ||
-      !in->hud_split_height || in->snes_width <= 0 ||
+      (!in->hud_split_height && !in->hud_body_y1) ||
+      in->snes_width <= 0 ||
       in->snes_height <= 0 || in->visible_width <= 0 ||
       in->authentic_width <= 0)
     return 0;
 
   int count = 0;
+  const int texture_extra = (in->snes_width - in->authentic_width) / 2;
+
+  /* An intentionally unsplit mode such as Wide Raw can still ask Diorama's
+   * flat-HUD path to capture BG3 so it does not inherit scene perspective.
+   * That fallback retains the native 256x224 layout as one full-width chunk. */
+  if (!in->hud_split_height) {
+    int body_height = in->hud_body_y1;
+    if (body_height > in->snes_height) body_height = in->snes_height;
+    const double native_scale_x = (double)viewport.w / in->visible_width;
+    const double native_scale_y = (double)viewport.h / in->snes_height;
+    const int native_width =
+        ScaledPixels(in->authentic_width, native_scale_x);
+    const int native_x = viewport.x + (viewport.w - native_width) / 2;
+    AddChunk(
+        chunks, &count, in->hud_bg_texture,
+        (ArRenderRectI){
+          texture_extra, 0, in->authentic_width, body_height,
+        },
+        (ArRenderRectI){0, 0, in->authentic_width, body_height},
+        (ArRenderRectI){
+          native_x, viewport.y, native_width,
+          ScaledPixels(body_height, native_scale_y),
+        },
+        kInspectorPresentation_HudBg, 0);
+
+    /* The selected-magic icon is OBJ, not BG3. In native layout it keeps its
+     * authored screen coordinate instead of moving beside the widescreen
+     * right-hand group. */
+    if (ArRenderTexture_IsValid(in->hud_obj_texture) &&
+        in->obj_icon_valid && in->obj_icon_x < in->authentic_width) {
+      enum { kIconSize = 16 };
+      AddChunk(
+          chunks, &count, in->hud_obj_texture,
+          (ArRenderRectI){
+            texture_extra + in->obj_icon_x, in->obj_icon_y,
+            kIconSize, kIconSize,
+          },
+          (ArRenderRectI){
+            in->obj_icon_x, in->obj_icon_y, kIconSize, kIconSize,
+          },
+          (ArRenderRectI){
+            native_x + ScaledCoordinate(in->obj_icon_x, native_scale_x),
+            viewport.y + ScaledCoordinate(in->obj_icon_y, native_scale_y),
+            ScaledPixels(kIconSize, native_scale_x),
+            ScaledPixels(kIconSize, native_scale_y),
+          },
+          kInspectorPresentation_HudObj, 0);
+    }
+    return count;
+  }
+
   double scale_y, scale_x;
   if (in->hud_scale_percent == 0) {
     scale_y = (double)viewport.h / in->snes_height;
@@ -45,7 +101,6 @@ int ArHudLayout_BuildPresentationChunks(
     scale_x = scale_y * (in->crt_pixel_aspect ? 7.0 / 6.0 : 1.0);
   }
 
-  const int texture_extra = (in->snes_width - in->authentic_width) / 2;
   const int height = in->hud_split_height;
   int player_y = in->hud_player_row_y;
   int enemy_y = in->hud_left_only_y;

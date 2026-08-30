@@ -862,8 +862,23 @@ int main(void) {
    * only then do Up/Down select rows and Left/Right edit values. */
   NavToTab(0);
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  RowToKey("hud_scale_percent");
+  const SettingDesc *hud_scale = Settings_Find("hud_scale_percent");
+  CHECK(hud_scale != NULL);
+  if (hud_scale) {
+    CHECK(hud_scale->maxval == 400);
+    CHECK(Settings_SetLong(hud_scale, hud_scale->maxval) >=
+          kSettingChange_Unchanged);
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+    CHECK(g_settings.hud_scale_percent == 0);
+    SettingsOverlay_TickAtForTest(SDL_GetTicks() + 5000);
+    CHECK(g_settings.hud_scale_percent == 0);  /* held Right stops at wrap */
+    char formatted[32];
+    CHECK(Settings_FormatValue(hud_scale, formatted, sizeof(formatted)) > 0);
+    CHECK(!strcmp(formatted, "Match game"));
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, false, false));
+  }
+  RowToKey("menu_scale_percent");
   CHECK(!strcmp(SettingsOverlay_SelectedKey(), "menu_scale_percent"));
   /* menu_scale is an Int row: the press applies the step live, and releasing
    * the key flushes the deferred settings.ini write (numeric rows no longer

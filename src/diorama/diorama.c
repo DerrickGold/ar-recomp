@@ -3,6 +3,8 @@
 #include "constants.h"
 #include "atomic_replace.h"
 #include "diorama_effect_backend.h"
+#include "diorama_aperture.h"
+#include "diorama_edge_aa.h"
 #include "diorama_layer_order.h"
 #include "diorama_rom_backdrop.h"
 #include "diorama_rom_skybox_resource.h"
@@ -95,17 +97,14 @@ static bool RimLightEnabled(ArRenderDevice *device) {
       DioramaEffectBackend_IsAvailable(device, kDioramaEffect_RimLight);
 }
 
-/* ── Depth of field + parallax-aware edge AA, COMBINED ───────────────────
- * Doc §7.2's DOF blur and "parallax-aware anti-aliasing at layer edges."
- * These two target the SAME layer set (BG1/BG2 + their priority-split
- * halves), and the baseline backend binds one custom fragment shader per draw
- * call — an earlier version of this code picked edge AA over DOF whenever
- * both were enabled for a layer, which (since both default on) meant DOF
- * silently never rendered at all (confirmed live). Fixed by doing both in
- * one shader pass: blur_radius=0 makes the box-blur a no-op (all 9 taps
- * land on the same texel), edge_feather<=0 skips the edge fade — either
- * knob independently zeroable, so this one shader correctly serves
- * DOF-only, edge-AA-only, both together, or (both zero) neither. */
+/* ── Depth of field + screen-space edge coverage ─────────────────────────
+ * DOF remains a fragment effect. Edge AA is deliberately geometry now: an
+ * earlier shader faded two SOURCE texels inward from every rectangular edge.
+ * Perspective could magnify that into a many-pixel translucent band which
+ * exposed differently colored layers underneath. The coverage fringe keeps
+ * the true layer opaque and fades only a one-output-pixel outward ring. It
+ * also means an edge-only plane no longer binds a nine-tap blur shader whose
+ * radius is zero. */
 
 /* kSettingCat_Graphics "Depth of field" row (§7.2). */
 static bool DofBlurEnabled(ArRenderDevice *device) {
@@ -113,11 +112,9 @@ static bool DofBlurEnabled(ArRenderDevice *device) {
       DioramaEffectBackend_IsAvailable(device, kDioramaEffect_DofEdge);
 }
 
-/* kSettingCat_Graphics "Edge anti-aliasing" row. */
-static bool EdgeAAEnabled(ArRenderDevice *device) {
-  return g_settings.gpu_fx_edgeaa &&
-      DioramaEffectBackend_IsAvailable(device, kDioramaEffect_DofEdge);
-}
+/* kSettingCat_Graphics "Edge anti-aliasing" row. Backend-neutral geometry
+ * needs no custom-shader capability gate. */
+static bool EdgeAAEnabled(void) { return g_settings.gpu_fx_edgeaa; }
 
 /* Which layers get edge AA: the BG planes whose rectangular boundary is the
  * visible "shadowbox wall" (BG1/BG2 and their priority-split halves). Not
@@ -125,6 +122,25 @@ static bool EdgeAAEnabled(ArRenderDevice *device) {
  * billboards — rim light already treats their edges), not the HUD (BG3,
  * must stay crisp). */
 static bool LayerGetsEdgeAA(int plane) {
+  switch (plane) {
+    case SR_PPU_OVERLAY_BG1:
+    case SR_PPU_OVERLAY_BG2:
+    case kDioramaPlane_Bg1Hi:
+    case kDioramaPlane_Bg2Hi:
+    case kDioramaPlane_Bg1Far:
+    case kDioramaPlane_Bg2Far:
+      return true;
+    default:
+      return false;
+  }
+}
+
+/* Background planes authored in front of BG1 retain their internal parallax,
+ * but they must not enlarge the rectangular scene aperture. Their transparent
+ * pixels are priority holes that reveal the already/later composited stack;
+ * exposing the auxiliary plane's own projected boundary turns its edge texels
+ * into dark/light strips at oblique camera angles. */
+static bool LayerUsesFocalAperture(int plane) {
   switch (plane) {
     case SR_PPU_OVERLAY_BG1:
     case SR_PPU_OVERLAY_BG2:
@@ -157,21 +173,29 @@ static bool LayerGetsEdgeAA(int plane) {
  * Keeping the widely supported blend path is more important than the small
  * fringe reduction premultiplication can provide on antialiased edge texels.
  *
- * Scoped to layers that DON'T have an M8 custom GPU shader bound (rim
- * light / DOF / edge-AA, all opt-in and off by default): those shaders do
- * their own straight-alpha math (box-blurring texel.rgb, edge-fading via
- * vertex alpha) that assumes a straight-alpha source and BLENDMODE_BLEND —
- * feeding them a premultiplied source would need reworking that math too,
- * out of scope for this AA-only pass. A layer gets one polish path or the
- * other, never both. */
+ * Scoped to layers that DON'T have a rim-light or nonzero-DOF shader bound.
+ * Edge coverage is ordinary geometry and can share this filtered source. A
+ * layer gets one texture-filtering path or the other, never both. */
 enum { kDioramaSupersample = 4 };
 
 static ArRenderTexture g_diorama_ss_texture;
 static int g_diorama_ss_w, g_diorama_ss_h;
 static bool g_diorama_ss_unavailable;
+static ArRenderTexture g_diorama_dof_source_texture;
+static int g_diorama_dof_source_w, g_diorama_dof_source_h;
+static bool g_diorama_dof_source_unavailable;
 static ArRenderTexture g_diorama_stack_group_texture;
 static int g_diorama_stack_group_w, g_diorama_stack_group_h;
 static bool g_diorama_stack_group_unavailable;
+static ArRenderTexture g_diorama_skybox_prefilter_texture;
+static int g_diorama_skybox_prefilter_w, g_diorama_skybox_prefilter_h;
+static bool g_diorama_skybox_prefilter_unavailable;
+static bool g_diorama_skybox_prefilter_valid;
+static ArRenderTexture g_diorama_skybox_prefilter_source;
+static uint64_t g_diorama_skybox_prefilter_revision;
+static float g_diorama_skybox_prefilter_radius;
+static ArRenderColorF g_diorama_skybox_prefilter_tint;
+static bool g_diorama_skybox_prefilter_rom_source;
 
 static void ResetDioramaSupersample(ArRenderDevice *device) {
   ArRenderDevice_DestroyTexture(device, g_diorama_ss_texture);
@@ -186,6 +210,19 @@ static void DisableDioramaSupersample(ArRenderDevice *device) {
   g_diorama_ss_unavailable = true;
 }
 
+static void ResetDioramaDofSource(ArRenderDevice *device) {
+  ArRenderDevice_DestroyTexture(device, g_diorama_dof_source_texture);
+  g_diorama_dof_source_texture = ArRenderTexture_Invalid();
+  g_diorama_dof_source_w = 0;
+  g_diorama_dof_source_h = 0;
+  g_diorama_dof_source_unavailable = false;
+}
+
+static void DisableDioramaDofSource(ArRenderDevice *device) {
+  ResetDioramaDofSource(device);
+  g_diorama_dof_source_unavailable = true;
+}
+
 static void ResetDioramaStackGroup(ArRenderDevice *device) {
   ArRenderDevice_DestroyTexture(device, g_diorama_stack_group_texture);
   g_diorama_stack_group_texture = ArRenderTexture_Invalid();
@@ -197,6 +234,60 @@ static void ResetDioramaStackGroup(ArRenderDevice *device) {
 static void DisableDioramaStackGroup(ArRenderDevice *device) {
   ResetDioramaStackGroup(device);
   g_diorama_stack_group_unavailable = true;
+}
+
+static void ResetDioramaSkyboxPrefilter(ArRenderDevice *device) {
+  ArRenderDevice_DestroyTexture(
+      device, g_diorama_skybox_prefilter_texture);
+  g_diorama_skybox_prefilter_texture = ArRenderTexture_Invalid();
+  g_diorama_skybox_prefilter_w = 0;
+  g_diorama_skybox_prefilter_h = 0;
+  g_diorama_skybox_prefilter_unavailable = false;
+  g_diorama_skybox_prefilter_valid = false;
+  g_diorama_skybox_prefilter_source = ArRenderTexture_Invalid();
+  g_diorama_skybox_prefilter_revision = 0;
+  g_diorama_skybox_prefilter_radius = 0.0f;
+  g_diorama_skybox_prefilter_tint = (ArRenderColorF){0};
+  g_diorama_skybox_prefilter_rom_source = false;
+}
+
+static void DisableDioramaSkyboxPrefilter(ArRenderDevice *device) {
+  ResetDioramaSkyboxPrefilter(device);
+  g_diorama_skybox_prefilter_unavailable = true;
+}
+
+static ArRenderTexture EnsureDioramaSkyboxPrefilterTexture(
+    ArRenderDevice *device, int width, int height) {
+  if (!ArRenderDevice_IsReady(device) || width <= 0 || height <= 0 ||
+      g_diorama_skybox_prefilter_unavailable)
+    return ArRenderTexture_Invalid();
+  if (ArRenderTexture_IsValid(g_diorama_skybox_prefilter_texture) &&
+      g_diorama_skybox_prefilter_w == width &&
+      g_diorama_skybox_prefilter_h == height)
+    return g_diorama_skybox_prefilter_texture;
+  ArRenderDevice_DestroyTexture(
+      device, g_diorama_skybox_prefilter_texture);
+  g_diorama_skybox_prefilter_texture = ArRenderTexture_Invalid();
+  g_diorama_skybox_prefilter_valid = false;
+  const ArRenderTextureDesc desc = {
+    .width = width,
+    .height = height,
+    .format = kArRenderPixelFormat_Argb8888,
+    .usage = kArRenderTextureUsage_Target,
+    .filter = kArRenderFilter_Nearest,
+    .blend = kArRenderBlendMode_Alpha,
+  };
+  if (!ArRenderDevice_CreateTexture(
+          device, &desc, &g_diorama_skybox_prefilter_texture)) {
+    fprintf(stderr,
+            "[diorama] skybox prefilter target unavailable; using direct "
+            "full-resolution blur: %s\n", ArRenderDevice_LastError(device));
+    DisableDioramaSkyboxPrefilter(device);
+    return ArRenderTexture_Invalid();
+  }
+  g_diorama_skybox_prefilter_w = width;
+  g_diorama_skybox_prefilter_h = height;
+  return g_diorama_skybox_prefilter_texture;
 }
 
 static ArRenderTexture EnsureDioramaStackGroupTexture(
@@ -242,6 +333,31 @@ static bool DioramaStackGroupingEnabled(void) {
   return enabled != 0;
 }
 
+/* Keep OBJ occupancy culling unconditional: it is the established baseline.
+ * The new BG priority/far extension retains a private A/B gate so framebuffer
+ * captures can compare both paths without changing authored room data. */
+static bool DioramaSparseCoverageEnabledForPlane(int plane) {
+  if (DioramaPlaneIsObjectPriority(plane)) return true;
+  if (!DioramaPlaneUsesSparseCoverage(plane)) return false;
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *value = getenv("AR_DIORAMA_SPARSE_COVERAGE");
+    enabled = !value || !value[0] || value[0] != '0';
+  }
+  return enabled != 0;
+}
+
+/* Default-on implementation gate retained for deterministic A/B captures.
+ * The fallback is the established full-output blur path. */
+static bool DioramaSkyboxPrefilterEnabled(void) {
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *value = getenv("AR_DIORAMA_SKYBOX_PREFILTER");
+    enabled = !value || !value[0] || value[0] != '0';
+  }
+  return enabled != 0;
+}
+
 static ArRenderTexture EnsureDioramaSupersampleTexture(
     ArRenderDevice *device, int w, int h) {
   if (!ArRenderDevice_IsReady(device) || w <= 0 || h <= 0)
@@ -272,6 +388,38 @@ static ArRenderTexture EnsureDioramaSupersampleTexture(
   g_diorama_ss_w = w;
   g_diorama_ss_h = h;
   return g_diorama_ss_texture;
+}
+
+static ArRenderTexture EnsureDioramaDofSourceTexture(
+    ArRenderDevice *device, int width, int height) {
+  if (!ArRenderDevice_IsReady(device) || width <= 0 || height <= 0 ||
+      g_diorama_dof_source_unavailable)
+    return ArRenderTexture_Invalid();
+  if (ArRenderTexture_IsValid(g_diorama_dof_source_texture) &&
+      g_diorama_dof_source_w == width &&
+      g_diorama_dof_source_h == height)
+    return g_diorama_dof_source_texture;
+  ArRenderDevice_DestroyTexture(device, g_diorama_dof_source_texture);
+  g_diorama_dof_source_texture = ArRenderTexture_Invalid();
+  const ArRenderTextureDesc desc = {
+    .width = width,
+    .height = height,
+    .format = kArRenderPixelFormat_Argb8888,
+    .usage = kArRenderTextureUsage_Target,
+    .filter = kArRenderFilter_Nearest,
+    .blend = kArRenderBlendMode_Alpha,
+  };
+  if (!ArRenderDevice_CreateTexture(
+          device, &desc, &g_diorama_dof_source_texture)) {
+    fprintf(stderr,
+            "[diorama] compact DOF source unavailable; using crisp layer "
+            "fallback: %s\n", ArRenderDevice_LastError(device));
+    DisableDioramaDofSource(device);
+    return ArRenderTexture_Invalid();
+  }
+  g_diorama_dof_source_w = width;
+  g_diorama_dof_source_h = height;
+  return g_diorama_dof_source_texture;
 }
 
 /* Renders `source` (an ABI-max-width x snes_height layer texture, already
@@ -360,6 +508,67 @@ static ArRenderTexture BuildDioramaSupersample(
   if (!success)
     DisableDioramaSupersample(device);
   return success ? ss : ArRenderTexture_Invalid();
+}
+
+/* Copies only the active capture into a source-resolution target. The custom
+ * DOF sampler clamps to the ACTUAL texture edge there, rather than to the edge
+ * of the persistent 640x352 allocation whose unused tail is transparent. That
+ * gives every blur tap the correct border condition without cropping or
+ * stretching the layer's visible texels. */
+static ArRenderTexture BuildDioramaDofSource(
+    ArRenderDevice *device, ArRenderTexture source, int obj_apron,
+    int snes_width, int snes_height, PresentationOutcome *outcome) {
+  if (outcome) *outcome = kPresentationOutcome_Complete;
+  if (!ArRenderDevice_IsReady(device) ||
+      !ArRenderTexture_IsValid(source) || obj_apron < 0 || snes_width <= 0 ||
+      snes_height <= 0) {
+    if (outcome) *outcome = kPresentationOutcome_CoreFailure;
+    return ArRenderTexture_Invalid();
+  }
+  const ArRenderTexture compact = EnsureDioramaDofSourceTexture(
+      device, snes_width, snes_height);
+  if (!ArRenderTexture_IsValid(compact)) {
+    if (outcome) *outcome = kPresentationOutcome_OptionalOmitted;
+    return ArRenderTexture_Invalid();
+  }
+  ArRenderTargetState target_state;
+  const ArRenderTargetBeginResult begin = ArRenderDevice_BeginTarget(
+      device, compact, &target_state);
+  if (begin != kArRenderTargetBegin_Ready) {
+    if (outcome) {
+      *outcome = begin == kArRenderTargetBegin_StateLost
+          ? kPresentationOutcome_CoreFailure
+          : kPresentationOutcome_OptionalOmitted;
+    }
+    if (begin == kArRenderTargetBegin_Omitted)
+      DisableDioramaDofSource(device);
+    return ArRenderTexture_Invalid();
+  }
+  bool success = ArRenderDevice_Clear(
+      device, (ArRenderColorF){0.0f, 0.0f, 0.0f, 0.0f});
+  const ArRenderRectF src = {
+    (float)obj_apron, 0.0f, (float)snes_width, (float)snes_height,
+  };
+  const ArRenderRectF dst = {
+    0.0f, 0.0f, (float)snes_width, (float)snes_height,
+  };
+  if (success) {
+    const ArRenderDrawState draw_state = {
+      .flags = kArRenderDrawState_Blend,
+      .blend = kArRenderBlendMode_Opaque,
+    };
+    success = ArRenderDevice_DrawTextureWithState(
+        device, source, &src, &dst, &draw_state);
+  }
+  if (!ArRenderDevice_EndTarget(device, &target_state)) {
+    if (outcome) *outcome = kPresentationOutcome_CoreFailure;
+    return ArRenderTexture_Invalid();
+  }
+  if (!success && outcome)
+    *outcome = kPresentationOutcome_OptionalOmitted;
+  if (!success)
+    DisableDioramaDofSource(device);
+  return success ? compact : ArRenderTexture_Invalid();
 }
 
 /* ── Camera constants (§5.6) ─────────────────────────────────────────── */
@@ -914,6 +1123,14 @@ bool Diorama_SaveLayerManifest(void) {
 #define DIORAMA_SUBDIV_Y 6
 #define DIORAMA_VERTS_PER_LAYER ((DIORAMA_SUBDIV_X + 1) * (DIORAMA_SUBDIV_Y + 1))
 #define DIORAMA_INDICES_PER_LAYER (DIORAMA_SUBDIV_X * DIORAMA_SUBDIV_Y * 6)
+#define DIORAMA_EDGE_BOUNDARY_POINTS \
+  (2 * (DIORAMA_SUBDIV_X + DIORAMA_SUBDIV_Y))
+#define DIORAMA_EDGE_FRINGE_VERTS (2 * DIORAMA_EDGE_BOUNDARY_POINTS)
+#define DIORAMA_EDGE_FRINGE_INDICES (6 * DIORAMA_EDGE_BOUNDARY_POINTS)
+#define DIORAMA_AA_VERTS \
+  (DIORAMA_VERTS_PER_LAYER + DIORAMA_EDGE_FRINGE_VERTS)
+#define DIORAMA_AA_INDICES \
+  (DIORAMA_INDICES_PER_LAYER + DIORAMA_EDGE_FRINGE_INDICES)
 /* One extra interval gives the curved continuation a dedicated row at its
  * non-uniform handoff, while retaining six intervals for the visible bend. */
 #define DIORAMA_OVERFLOW_SUBDIV_Y (DIORAMA_SUBDIV_Y + 1)
@@ -925,6 +1142,10 @@ bool Diorama_SaveLayerManifest(void) {
   (DIORAMA_OVERFLOW_VERTS + DIORAMA_VERTS_PER_LAYER)
 #define DIORAMA_ATTACHED_INDICES \
   (DIORAMA_OVERFLOW_INDICES + DIORAMA_INDICES_PER_LAYER)
+#define DIORAMA_ATTACHED_AA_VERTS \
+  (DIORAMA_ATTACHED_VERTS + DIORAMA_EDGE_FRINGE_VERTS)
+#define DIORAMA_ATTACHED_AA_INDICES \
+  (DIORAMA_ATTACHED_INDICES + DIORAMA_EDGE_FRINGE_INDICES)
 
 /* Presentation is synchronous on one render thread. Keep the largest voxel
  * batch out of automatic storage: 24 copies are roughly 75 KiB of vertices
@@ -1204,9 +1425,9 @@ static void BuildFoldedOverflowMesh(
  * what lets auxiliary geometry such as the waterfall continuation use the
  * exact same resolved source as its host plane rather than silently falling
  * back to the raw texture. */
-static void RemapMeshToSupersampleTexture(ArRenderVertex2D *vertices, int count,
-                                          int obj_apron,
-                                          int snes_width, int snes_height) {
+static void RemapMeshToCompactTexture(ArRenderVertex2D *vertices, int count,
+                                      int obj_apron,
+                                      int snes_width, int snes_height) {
   const float u_scale = (float)SR_PPU_SURFACE_MAX_WIDTH / (float)snes_width;
   const float u_bias = (float)obj_apron / (float)snes_width;
   const float v_scale = (float)SR_PPU_SURFACE_MAX_HEIGHT / (float)snes_height;
@@ -1214,6 +1435,36 @@ static void RemapMeshToSupersampleTexture(ArRenderVertex2D *vertices, int count,
     vertices[v].tex_coord.x = vertices[v].tex_coord.x * u_scale - u_bias;
     vertices[v].tex_coord.y *= v_scale;
   }
+}
+
+static bool AppendDioramaEdgeFringe(
+    const ArRenderVertex2D *grid, float width_pixels,
+    DioramaEdgeAaMask edge_mask,
+    float u_min, float u_max, float v_min, float v_max,
+    float texel_width, float texel_height,
+    ArRenderVertex2D *vertices, int vertex_capacity, int *vertex_count,
+    int32_t *indices, int index_capacity, int *index_count) {
+  if (!grid || !vertices || !vertex_count || !indices || !index_count ||
+      *vertex_count < 0 || *index_count < 0 ||
+      *vertex_count > vertex_capacity || *index_count > index_capacity)
+    return false;
+  const int vertex_base = *vertex_count;
+  const int index_base = *index_count;
+  int fringe_vertices = 0;
+  int fringe_indices = 0;
+  if (!DioramaEdgeAa_BuildFringe(
+          grid, DIORAMA_SUBDIV_X, DIORAMA_SUBDIV_Y,
+          width_pixels, edge_mask,
+          u_min, u_max, v_min, v_max, texel_width, texel_height,
+          &vertices[vertex_base], vertex_capacity - vertex_base,
+          &indices[index_base], index_capacity - index_base,
+          &fringe_vertices, &fringe_indices))
+    return false;
+  for (int index = 0; index < fringe_indices; index++)
+    indices[index_base + index] += vertex_base;
+  *vertex_count += fringe_vertices;
+  *index_count += fringe_indices;
+  return true;
 }
 
 /* ── Render ───────────────────────────────────────────────────────────── */
@@ -1245,8 +1496,12 @@ static bool RenderDioramaGeometry(
     const ArRenderVertex2D *vertices, int num_vertices,
     const int32_t *indices, int num_indices, ArRenderBlendMode blend) {
   const ArRenderDrawState state = {
-    .flags = kArRenderDrawState_Blend,
+    .flags = kArRenderDrawState_Blend |
+        (ArRenderTexture_IsValid(texture)
+            ? kArRenderDrawState_Address : 0),
     .blend = blend,
+    .address_u = kArRenderTextureAddressMode_Clamp,
+    .address_v = kArRenderTextureAddressMode_Clamp,
   };
   return SubmitDioramaGeometry(
       device, texture, vertices, num_vertices, indices, num_indices, &state);
@@ -1388,9 +1643,8 @@ static PresentationOutcome RenderDioramaStackBatch(
  * slight sky stretch for the wedge. The framebuffer's own gap strips are filled
  * with the scene backdrop rather than black (Fix C, actraiser_rtl.c).
  *
- * Still open: the DOF/edge-AA feather below anchors to the fixed span, so the
- * real content edge gets no feather when the span is cropped. Cosmetic, and only
- * on the GPU-shader path. */
+ * Edge coverage no longer depends on this UV span: the compositor adds its
+ * one-pixel fringe to the projected boundary after any crop is resolved. */
 
 /* B5 (followup doc): draws BG2 as a viewport-FILLING screen-space quad —
  * deliberately NOT run through the camera MVP (BuildQuadMesh/
@@ -1413,11 +1667,127 @@ static PresentationOutcome RenderDioramaStackBatch(
  * there, so heavy blur reads as "the picture is broken," not atmosphere);
  * Plane+skybox wants the fuller blur since the in-box copy stays sharp and
  * the skybox is deliberately meant to read as unfocused backdrop. */
+static bool DioramaSkyboxPrefilterColorEquals(
+    ArRenderColorF left, ArRenderColorF right) {
+  return left.r == right.r && left.g == right.g &&
+      left.b == right.b && left.a == right.a;
+}
+
+/* Evaluate the nine-tap skybox blur once per source texel, then let the final
+ * viewport-filling draw sample that result with one ordinary texture lookup.
+ * With a 256x256 ROM backdrop this moves the expensive shader from millions
+ * of output fragments to 65K source fragments. Immutable/raw sources retain
+ * the target until their revision changes; frame-generated interpolation is
+ * explicitly dynamic and rebuilds it for each distinct host presentation. */
+static ArRenderTexture BuildDioramaSkyboxPrefilter(
+    ArRenderDevice *device, ArRenderTexture source,
+    int source_width, int source_height,
+    int output_width, int output_height,
+    ArRenderColorF tint, float blur_radius, bool rom_source,
+    uint64_t source_revision, bool source_dynamic,
+    PresentationOutcome *outcome) {
+  if (outcome) *outcome = kPresentationOutcome_Complete;
+  if (!ArRenderDevice_IsReady(device) ||
+      !ArRenderTexture_IsValid(source) ||
+      source_width <= 0 || source_height <= 0 ||
+      output_width <= 0 || output_height <= 0) {
+    if (outcome) *outcome = kPresentationOutcome_CoreFailure;
+    return ArRenderTexture_Invalid();
+  }
+  const ArRenderTexture target = EnsureDioramaSkyboxPrefilterTexture(
+      device, source_width, source_height);
+  if (!ArRenderTexture_IsValid(target)) {
+    if (outcome) *outcome = kPresentationOutcome_OptionalOmitted;
+    return ArRenderTexture_Invalid();
+  }
+  if (!source_dynamic && g_diorama_skybox_prefilter_valid &&
+      ArRenderTexture_Equals(source, g_diorama_skybox_prefilter_source) &&
+      source_revision == g_diorama_skybox_prefilter_revision &&
+      blur_radius == g_diorama_skybox_prefilter_radius &&
+      rom_source == g_diorama_skybox_prefilter_rom_source &&
+      DioramaSkyboxPrefilterColorEquals(
+          tint, g_diorama_skybox_prefilter_tint))
+    return target;
+
+  ArRenderTargetState target_state;
+  const ArRenderTargetBeginResult begin =
+      ArRenderDevice_BeginTarget(device, target, &target_state);
+  if (begin == kArRenderTargetBegin_StateLost) {
+    if (outcome) *outcome = kPresentationOutcome_CoreFailure;
+    return ArRenderTexture_Invalid();
+  }
+  if (begin == kArRenderTargetBegin_Omitted) {
+    DisableDioramaSkyboxPrefilter(device);
+    if (outcome) *outcome = kPresentationOutcome_OptionalOmitted;
+    return ArRenderTexture_Invalid();
+  }
+
+  DioramaPerformance_SetRasterViewport(source_width, source_height);
+  bool prefiltered = ArRenderDevice_Clear(
+      device, (ArRenderColorF){0.0f, 0.0f, 0.0f, 0.0f});
+  bool shader_bound = false;
+  bool shader_restored = true;
+  if (prefiltered) {
+    const DioramaBlurEffectParams params = {
+      .texel_width = 1.0f / (float)source_width,
+      .texel_height = 1.0f / (float)source_height,
+      .radius = blur_radius,
+    };
+    shader_bound = DioramaEffectBackend_BindBlur(device, &params);
+    prefiltered = shader_bound;
+    if (!shader_bound)
+      shader_restored = DioramaEffectBackend_Unbind(device);
+  }
+  if (prefiltered) {
+    const int32_t indices[] = {0, 1, 2, 0, 2, 3};
+    const ArRenderVertex2D vertices[] = {
+      {{0.0f, 0.0f}, tint, {0.0f, 0.0f}},
+      {{(float)source_width, 0.0f}, tint, {1.0f, 0.0f}},
+      {{(float)source_width, (float)source_height}, tint, {1.0f, 1.0f}},
+      {{0.0f, (float)source_height}, tint, {0.0f, 1.0f}},
+    };
+    ArRenderDrawState draw_state = {
+      .flags = kArRenderDrawState_Blend,
+      .blend = kArRenderBlendMode_Opaque,
+    };
+    if (rom_source) {
+      draw_state.flags |= kArRenderDrawState_Address;
+      draw_state.address_u = kArRenderTextureAddressMode_Wrap;
+      draw_state.address_v = kArRenderTextureAddressMode_Clamp;
+    }
+    prefiltered = SubmitDioramaGeometry(
+        device, source, vertices, 4, indices, 6, &draw_state);
+  }
+  if (shader_bound)
+    shader_restored = DioramaEffectBackend_Unbind(device);
+  const bool target_restored =
+      ArRenderDevice_EndTarget(device, &target_state);
+  DioramaPerformance_SetRasterViewport(output_width, output_height);
+  if (!shader_restored || !target_restored) {
+    if (outcome) *outcome = kPresentationOutcome_CoreFailure;
+    return ArRenderTexture_Invalid();
+  }
+  if (!prefiltered) {
+    DisableDioramaSkyboxPrefilter(device);
+    if (outcome) *outcome = kPresentationOutcome_OptionalOmitted;
+    return ArRenderTexture_Invalid();
+  }
+
+  g_diorama_skybox_prefilter_valid = true;
+  g_diorama_skybox_prefilter_source = source;
+  g_diorama_skybox_prefilter_revision = source_revision;
+  g_diorama_skybox_prefilter_radius = blur_radius;
+  g_diorama_skybox_prefilter_tint = tint;
+  g_diorama_skybox_prefilter_rom_source = rom_source;
+  return target;
+}
+
 static PresentationOutcome DrawDioramaSkybox(
     ArRenderDevice *device, ArRenderTexture skybox_texture,
     int obj_apron, int snes_width, int snes_height,
     int out_w, int out_h, bool dim,
     float blur_radius, bool rom_source,
+    uint64_t source_revision, bool source_dynamic,
     const DioramaBgValidSpanPlan *valid_spans) {
   if (!ArRenderTexture_IsValid(skybox_texture) || snes_height <= 0)
     return kPresentationOutcome_CoreFailure;
@@ -1467,16 +1837,30 @@ static PresentationOutcome DrawDioramaSkybox(
   }
   const bool blur_requested = SkyboxBlurEnabled(device);
   bool blur_bound = false;
-  if (blur_requested) {
-    const float source_width = rom_source
-        ? (float)kDioramaRomBackdropPixels
-        : (float)SR_PPU_SURFACE_MAX_WIDTH;
-    const float source_height = rom_source
-        ? (float)kDioramaRomBackdropPixels
-        : (float)SR_PPU_SURFACE_MAX_HEIGHT;
+  bool prefiltered_skybox = false;
+  const int source_width = rom_source
+      ? kDioramaRomBackdropPixels : SR_PPU_SURFACE_MAX_WIDTH;
+  const int source_height = rom_source
+      ? kDioramaRomBackdropPixels : SR_PPU_SURFACE_MAX_HEIGHT;
+  if (blur_requested && DioramaSkyboxPrefilterEnabled()) {
+    PresentationOutcome prefilter_outcome;
+    const ArRenderTexture prefiltered = BuildDioramaSkyboxPrefilter(
+        device, skybox_texture, source_width, source_height,
+        out_w, out_h, tint, blur_radius, rom_source,
+        source_revision, source_dynamic, &prefilter_outcome);
+    outcome = PresentationOutcome_Combine(outcome, prefilter_outcome);
+    if (!PresentationOutcome_IsUsable(prefilter_outcome))
+      return prefilter_outcome;
+    if (ArRenderTexture_IsValid(prefiltered)) {
+      skybox_texture = prefiltered;
+      tint = kSkyboxFull;
+      prefiltered_skybox = true;
+    }
+  }
+  if (blur_requested && !prefiltered_skybox) {
     const DioramaBlurEffectParams params = {
-      .texel_width = 1.0f / source_width,
-      .texel_height = 1.0f / source_height,
+      .texel_width = 1.0f / (float)source_width,
+      .texel_height = 1.0f / (float)source_height,
       .radius = blur_radius,
     };
     blur_bound = DioramaEffectBackend_BindBlur(device, &params);
@@ -1870,6 +2254,7 @@ PresentationOutcome Diorama_Composite(
     const DioramaCameraPose *cam_pose, float distance_scale,
     uint32_t additive_plane_mask,
     const DioramaCoverageMask coverage_masks[kDioramaPlane_Count],
+    uint64_t bg2_content_revision, bool bg2_content_dynamic,
     uint8_t effect_obj_priority_mask, uint32_t effect_bg_plane_mask,
     uint8_t map_group, uint8_t map_number, uint8_t layer_section,
     const DioramaBgValidSpanPlan *bg2_valid_spans,
@@ -1946,6 +2331,8 @@ PresentationOutcome Diorama_Composite(
     bool both = g_settings.diorama_skybox == kDioramaSky_Both;
     ArRenderTexture skybox_texture = textures[SR_PPU_OVERLAY_BG2];
     bool rom_skybox = false;
+    uint64_t skybox_revision = bg2_content_revision;
+    bool skybox_dynamic = bg2_content_dynamic;
     const int skybox_source =
         DioramaLayerOrder_SkyboxSource(resolved, resolved_count);
     if (skybox_source != kDioramaLayerSource_Captured) {
@@ -1976,6 +2363,11 @@ PresentationOutcome Diorama_Composite(
       if (ArRenderTexture_IsValid(named_handle)) {
         skybox_texture = named_handle;
         rom_skybox = true;
+        skybox_dynamic = false;
+        skybox_revision =
+            ((uint64_t)(uint32_t)skybox_source << 33) ^
+            ((uint64_t)transparent_fill_configured << 32) ^
+            (uint64_t)transparent_fill_argb;
       }
     }
     /* Named ROM art is immutable and supplies its own current pixels. A decode
@@ -1986,7 +2378,7 @@ PresentationOutcome Diorama_Composite(
           device, skybox_texture,
           obj_apron, snes_width, snes_height, out_w, out_h, both,
           both ? kSkyboxBlurRadiusBoth : kSkyboxBlurRadiusOnly,
-          rom_skybox, bg2_valid_spans);
+          rom_skybox, skybox_revision, skybox_dynamic, bg2_valid_spans);
       outcome = PresentationOutcome_Combine(outcome, skybox);
       if (!PresentationOutcome_IsUsable(skybox)) {
         return DioramaCompositeCoreFailure(&output_frame);
@@ -2125,6 +2517,40 @@ PresentationOutcome Diorama_Composite(
   ArRenderVertex2D verts[DIORAMA_VERTS_PER_LAYER];
   int32_t indices[DIORAMA_INDICES_PER_LAYER];
   int nv, ni;
+
+  /* The focal BG1 plane owns the in-box scene aperture. A BG plane can be
+   * authored slightly in front of it to adjust parallax/priority alignment,
+   * but its rectangular mesh must not protrude through BG1's transparent
+   * pixels at the outer boundary. Build the aperture once from BG1's resolved
+   * shape; forward planes below retain their centre projection and converge to
+   * this grid only through the two outer vertex rings. */
+  ArRenderVertex2D focal_aperture_verts[DIORAMA_VERTS_PER_LAYER];
+  int32_t focal_aperture_indices[DIORAMA_INDICES_PER_LAYER];
+  int focal_aperture_nv = 0, focal_aperture_ni = 0;
+  float focal_aperture_z = kDofFocalZ;
+  bool focal_aperture_valid = false;
+  for (int i = 0; i < resolved_count; i++) {
+    if (resolved[i].plane != SR_PPU_OVERLAY_BG1 ||
+        resolved[i].alpha == 0)
+      continue;
+    const DioramaLayerDesc *aperture_layer =
+        DioramaDescForPlane(SR_PPU_OVERLAY_BG1);
+    if (!DioramaLayerIsDrawable(aperture_layer, textures, pixels))
+      break;
+    focal_aperture_z = resolved[i].z;
+    BuildLayerMesh(
+        mvp, focal_aperture_z - 0.5f,
+        resolved[i].rake, resolved[i].bow,
+        uv_u0, uv_v0, uv_u1, uv_v1,
+        aspect_x, height_scale, out_w, out_h,
+        (ArRenderColorF){1.0f, 1.0f, 1.0f, 1.0f},
+        focal_aperture_verts, focal_aperture_indices,
+        &focal_aperture_nv, &focal_aperture_ni);
+    focal_aperture_valid =
+        focal_aperture_nv == DIORAMA_VERTS_PER_LAYER &&
+        focal_aperture_ni == DIORAMA_INDICES_PER_LAYER;
+    break;
+  }
 
   /* Publish the exact authored shape/window of the effect-addressable BG
    * planes and each OBJ priority plane. A current attached effect can retain
@@ -2265,7 +2691,17 @@ PresentationOutcome Diorama_Composite(
                    layer_u1, layer_v1,
                    aspect_x, height_scale, out_w, out_h, shade,
                    verts, indices, &nv, &ni);
-    if (coverage_masks && DioramaPlaneIsObjectPriority(layer->plane)) {
+    bool constrained_to_focal_aperture = false;
+    if (focal_aperture_valid &&
+        layer->plane != SR_PPU_OVERLAY_BG1 &&
+        LayerUsesFocalAperture(layer->plane) &&
+        layer_z > focal_aperture_z + 0.0001f) {
+      constrained_to_focal_aperture = DioramaAperture_ConstrainGrid(
+          verts, focal_aperture_verts,
+          DIORAMA_SUBDIV_X, DIORAMA_SUBDIV_Y, 2.0f);
+    }
+    if (coverage_masks &&
+        DioramaSparseCoverageEnabledForPlane(layer->plane)) {
       const DioramaCoverageMask coverage = coverage_masks[layer->plane];
       if (coverage && coverage != DioramaCoverage_FullMask())
         ni = DioramaCoverage_FilterGridIndices(indices, ni, coverage);
@@ -2275,8 +2711,8 @@ PresentationOutcome Diorama_Composite(
      * both are appended into this one ordered geometry submission below.
      * Extension primitives remain first so the authentic BG2 owns the hidden
      * coplanar overlap without relying on a second draw call. */
-    ArRenderVertex2D extension_verts[DIORAMA_ATTACHED_VERTS];
-    int32_t extension_indices[DIORAMA_ATTACHED_INDICES];
+    ArRenderVertex2D extension_verts[DIORAMA_ATTACHED_AA_VERTS];
+    int32_t extension_indices[DIORAMA_ATTACHED_AA_INDICES];
     int extension_nv = 0, extension_ni = 0;
 
     /* The validated `$04/$02-$03:waterfall` token is published only when the
@@ -2463,7 +2899,15 @@ PresentationOutcome Diorama_Composite(
                        layer_u1, layer_v1, aspect_x, height_scale,
                        out_w, out_h, copy_color,
                        copy_vertices, copy_indices, &copy_nv, &copy_ni);
-        if (coverage_masks && DioramaPlaneIsObjectPriority(layer->plane)) {
+        if (focal_aperture_valid &&
+            LayerUsesFocalAperture(layer->plane) &&
+            copy_z + 0.5f > focal_aperture_z + 0.0001f) {
+          (void)DioramaAperture_ConstrainGrid(
+              copy_vertices, focal_aperture_verts,
+              DIORAMA_SUBDIV_X, DIORAMA_SUBDIV_Y, 2.0f);
+        }
+        if (coverage_masks &&
+            DioramaSparseCoverageEnabledForPlane(layer->plane)) {
           const DioramaCoverageMask coverage = coverage_masks[layer->plane];
           if (coverage && coverage != DioramaCoverage_FullMask())
             copy_ni = DioramaCoverage_FilterGridIndices(
@@ -2536,27 +2980,49 @@ PresentationOutcome Diorama_Composite(
       }
     }
 
-    /* Determined up front (before the shadow/main draws) so B1b-crisp knows
-     * whether this layer is eligible for the premultiplied supersample path
-     * — see the section comment above kDioramaSupersample. */
+    /* Shader selection and source preparation are resolved before shadows and
+     * the main draw. Edge coverage is geometry and never selects a shader. */
     bool rim_light = layer->is_figure && RimLightEnabled(device);
     bool want_dof = !rim_light &&
         layer->plane != SR_PPU_OVERLAY_BG3 &&
         DofBlurEnabled(device);
     float dof_radius = want_dof ? DofRadiusForLayer(layer_z) : 0.0f;
     if (dof_radius < 0.05f) dof_radius = 0.0f;
-    bool want_edge = !rim_light &&
+    bool want_edge = !rim_light && !constrained_to_focal_aperture &&
         LayerGetsEdgeAA(layer->plane) &&
-        EdgeAAEnabled(device);
-    bool dof_or_edge = !rim_light && (dof_radius > 0.0f || want_edge);
-    bool use_shader = rim_light || dof_or_edge;
+        EdgeAAEnabled();
+    bool use_dof_shader = !rim_light && dof_radius > 0.0f;
+    bool use_shader = rim_light || use_dof_shader;
 
     const ArRenderBlendMode layer_blend = is_backdrop
         ? kArRenderBlendMode_Opaque
         : is_additive ? kArRenderBlendMode_Add : kArRenderBlendMode_Alpha;
 
     ArRenderTexture draw_texture = texture;
-    bool used_ss = false;
+    int compact_scale = 0;
+    if (use_dof_shader) {
+      PresentationOutcome dof_source_outcome =
+          kPresentationOutcome_Complete;
+      DioramaPerformanceScope dof_source_performance =
+          DioramaPerformance_Begin(kDioramaPerformance_DofSource);
+      const ArRenderTexture compact = BuildDioramaDofSource(
+          device, texture, obj_apron, snes_width, snes_height,
+          &dof_source_outcome);
+      DioramaPerformance_End(dof_source_performance);
+      outcome = PresentationOutcome_Combine(outcome, dof_source_outcome);
+      if (!PresentationOutcome_IsUsable(dof_source_outcome))
+        return DioramaCompositeCoreFailure(&output_frame);
+      if (ArRenderTexture_IsValid(compact)) {
+        draw_texture = compact;
+        compact_scale = 1;
+      } else {
+        /* A correct crisp boundary is preferable to a blur that samples the
+         * persistent allocation's transparent tail. */
+        dof_radius = 0.0f;
+        use_dof_shader = false;
+        use_shader = rim_light;
+      }
+    }
     if (!use_shader) {
       PresentationOutcome supersample_outcome =
           kPresentationOutcome_Complete;
@@ -2573,34 +3039,46 @@ PresentationOutcome Diorama_Composite(
       }
       if (ArRenderTexture_IsValid(ss)) {
         draw_texture = ss;
-        used_ss = true;
+        compact_scale = kDioramaSupersample;
       }
     }
 
-    /* Supersample targets contain only the active capture region, unlike the
-     * source textures whose allocation uses the ABI surface maxima. Remap
-     * BOTH axes into the compact target so its right/bottom edges are 1.0
-     * instead of the live width/height ratios. V used
-     * to need no remap because the texture was exactly as tall as its content;
-     * the vertical margin ended that. Stack/skirt draws above still use the
-     * original source texture and therefore keep the original coordinates. */
-    ArRenderVertex2D ss_verts[DIORAMA_VERTS_PER_LAYER];
+    /* Both compact targets contain only the active capture, unlike the source
+     * allocation. Remap the host and attached geometry into that 0..1 window.
+     * Stack/skirt draws above intentionally keep the original texture. */
+    ArRenderVertex2D compact_verts[DIORAMA_VERTS_PER_LAYER];
     ArRenderVertex2D *draw_verts = verts;
-    if (used_ss) {
-      memcpy(ss_verts, verts, (size_t)nv * sizeof(ss_verts[0]));
-      /* U is a scale AND an offset now: the supersample target holds the
-       * displayed span alone, which begins at surface column obj_apron rather
-       * than at 0. A pure scale would map the apron into the target and shift
-       * every crisp-path layer right by apron*kDioramaSupersample texels. V
-       * needs no offset -- the vertical band's row 0 IS the surface's row 0. */
-      RemapMeshToSupersampleTexture(
-          ss_verts, nv, obj_apron, snes_width, snes_height);
+    float draw_u0 = layer_u0;
+    float draw_u1 = layer_u1;
+    float draw_v0 = layer_v0;
+    float draw_v1 = layer_v1;
+    float draw_lower_content_v_max = attached_lower_content_v_max;
+    float draw_texel_width =
+        1.0f / (float)SR_PPU_SURFACE_MAX_WIDTH;
+    float draw_texel_height =
+        1.0f / (float)SR_PPU_SURFACE_MAX_HEIGHT;
+    if (compact_scale > 0) {
+      memcpy(compact_verts, verts, (size_t)nv * sizeof(compact_verts[0]));
+      RemapMeshToCompactTexture(
+          compact_verts, nv, obj_apron, snes_width, snes_height);
       if (extension_nv > 0) {
-        RemapMeshToSupersampleTexture(
+        RemapMeshToCompactTexture(
             extension_verts, extension_nv,
             obj_apron, snes_width, snes_height);
       }
-      draw_verts = ss_verts;
+      draw_verts = compact_verts;
+      draw_u0 = 0.0f;
+      draw_u1 = 1.0f;
+      draw_v0 = 0.0f;
+      draw_v1 = 1.0f;
+      if (draw_lower_content_v_max > 0.0f) {
+        draw_lower_content_v_max *=
+            (float)SR_PPU_SURFACE_MAX_HEIGHT / (float)snes_height;
+      }
+      draw_texel_width =
+          1.0f / (float)(snes_width * compact_scale);
+      draw_texel_height =
+          1.0f / (float)(snes_height * compact_scale);
     }
 
     if (!is_backdrop && layer->casts_shadow) {
@@ -2621,8 +3099,8 @@ PresentationOutcome Diorama_Composite(
       bool shadow_blur_bound = false;
       if (shadow_blur_requested) {
         const DioramaBlurEffectParams params = {
-          .texel_width = 1.0f / (float)SR_PPU_SURFACE_MAX_WIDTH,
-          .texel_height = 1.0f / (float)SR_PPU_SURFACE_MAX_HEIGHT,
+          .texel_width = draw_texel_width,
+          .texel_height = draw_texel_height,
           .radius = 3.0f,
         };
         shadow_blur_bound = DioramaEffectBackend_BindBlur(device, &params);
@@ -2643,12 +3121,8 @@ PresentationOutcome Diorama_Composite(
       }
     }
 
-    /* M8/AR_GPU_FX_RIM, AR_GPU_FX_DOF, AR_GPU_FX_EDGEAA: rim_light/want_dof/
-     * dof_radius/want_edge/dof_or_edge were already computed above (before
-     * the shadow draw) so B1b-crisp's supersample gate could see them. Both
-     * DOF and edge-AA are applied TOGETHER in the combined DOF/edge-AA
-     * shader (src/shaders/dof_edge.frag.glsl) — neither silently
-     * loses to the other. */
+    /* Rim and nonzero DOF remain custom effects. Edge coverage is appended to
+     * the same geometry batch below and never attenuates the host mesh. */
     bool layer_shader_bound = false;
     if (rim_light) {
       const DioramaRimLightEffectParams params = {
@@ -2658,27 +3132,23 @@ PresentationOutcome Diorama_Composite(
       };
       layer_shader_bound =
           DioramaEffectBackend_BindRimLight(device, &params);
-    } else if (dof_or_edge) {
-      /* Feed the shader the exact source window used by this mesh so edge
-       * fading and geometry cannot disagree. */
+    } else if (use_dof_shader) {
       const DioramaDofEdgeEffectParams params = {
-        .texel_width = 1.0f / (float)SR_PPU_SURFACE_MAX_WIDTH,
-        .texel_height = 1.0f / (float)SR_PPU_SURFACE_MAX_HEIGHT,
+        .texel_width = draw_texel_width,
+        .texel_height = draw_texel_height,
         .blur_radius = dof_radius,
-        .u_min = layer_u0,
-        .u_max = layer_u1,
-        .v_min = layer_v0,
-        .v_max = layer_v1,
-        .edge_feather = want_edge ? 2.0f : 0.0f,
-        /* The opaque waterfall continuation owns this lower edge. Keep its
-         * host samples inside captured BG2 and suppress only the already-
-         * covered bottom feather; top/left/right AA remains active. */
-        .lower_content_v_max = attached_lower_content_v_max,
+        .u_min = draw_u0,
+        .u_max = draw_u1,
+        .v_min = draw_v0,
+        .v_max = draw_v1,
+        /* The old inward opacity fade is intentionally disabled. */
+        .edge_feather = 0.0f,
+        .lower_content_v_max = draw_lower_content_v_max,
       };
       layer_shader_bound =
           DioramaEffectBackend_BindDofEdge(device, &params);
     }
-    if ((rim_light || dof_or_edge) && !layer_shader_bound) {
+    if ((rim_light || use_dof_shader) && !layer_shader_bound) {
       outcome = PresentationOutcome_Combine(
           outcome, kPresentationOutcome_OptionalOmitted);
       if (!DioramaEffectBackend_Unbind(device)) {
@@ -2689,7 +3159,8 @@ PresentationOutcome Diorama_Composite(
      * Auxiliary water remains first and coplanar for two hidden native tile
      * rows; the following host primitives cover it in the same draw. This
      * removes an otherwise unnecessary submission boundary from the seam
-     * without pretending the folded 3D mesh can be baked into a 2D texture. */
+     * without pretending the folded 3D mesh can be baked into a 2D texture.
+     * The optional coverage fringe is appended last but shares this one draw. */
     bool main_submitted = false;
     if (extension_nv > 0) {
       const int host_vertex_base = extension_nv;
@@ -2700,9 +3171,45 @@ PresentationOutcome Diorama_Composite(
             host_vertex_base + indices[index];
       extension_nv += nv;
       extension_ni += ni;
+      if (want_edge) {
+        DioramaEdgeAaMask edge_mask = kDioramaEdgeAa_All;
+        if (draw_lower_content_v_max > 0.0f)
+          edge_mask &= ~kDioramaEdgeAa_Bottom;
+        if (!AppendDioramaEdgeFringe(
+                draw_verts, 1.0f, edge_mask,
+                draw_u0, draw_u1, draw_v0, draw_v1,
+                draw_texel_width, draw_texel_height,
+                extension_verts, DIORAMA_ATTACHED_AA_VERTS, &extension_nv,
+                extension_indices, DIORAMA_ATTACHED_AA_INDICES,
+                &extension_ni)) {
+          outcome = PresentationOutcome_Combine(
+              outcome, kPresentationOutcome_OptionalOmitted);
+        }
+      }
       main_submitted = RenderDioramaGeometry(
           device, draw_texture, extension_verts,
           extension_nv, extension_indices, extension_ni, layer_blend);
+    } else if (want_edge) {
+      ArRenderVertex2D aa_vertices[DIORAMA_AA_VERTS];
+      int32_t aa_indices[DIORAMA_AA_INDICES];
+      int aa_vertex_count = nv;
+      int aa_index_count = ni;
+      memcpy(aa_vertices, draw_verts,
+             (size_t)nv * sizeof(aa_vertices[0]));
+      memcpy(aa_indices, indices,
+             (size_t)ni * sizeof(aa_indices[0]));
+      if (!AppendDioramaEdgeFringe(
+              draw_verts, 1.0f, kDioramaEdgeAa_All,
+              draw_u0, draw_u1, draw_v0, draw_v1,
+              draw_texel_width, draw_texel_height,
+              aa_vertices, DIORAMA_AA_VERTS, &aa_vertex_count,
+              aa_indices, DIORAMA_AA_INDICES, &aa_index_count)) {
+        outcome = PresentationOutcome_Combine(
+            outcome, kPresentationOutcome_OptionalOmitted);
+      }
+      main_submitted = RenderDioramaGeometry(
+          device, draw_texture, aa_vertices, aa_vertex_count,
+          aa_indices, aa_index_count, layer_blend);
     } else {
       main_submitted = RenderDioramaGeometry(
           device, draw_texture, draw_verts, nv, indices, ni, layer_blend);
@@ -2731,7 +3238,9 @@ PresentationOutcome Diorama_Composite(
 void Diorama_ResetRendererResources(ArRenderDevice *device) {
   DioramaRomSkyboxResource_Reset(device);
   ResetDioramaSupersample(device);
+  ResetDioramaDofSource(device);
   ResetDioramaStackGroup(device);
+  ResetDioramaSkyboxPrefilter(device);
   DioramaUpload_Reset();
   DioramaEffectBackend_Reset(device);
 }
@@ -2739,7 +3248,9 @@ void Diorama_ResetRendererResources(ArRenderDevice *device) {
 void Diorama_Shutdown(ArRenderDevice *device) {
   DioramaRomSkyboxResource_Reset(device);
   ResetDioramaSupersample(device);
+  ResetDioramaDofSource(device);
   ResetDioramaStackGroup(device);
+  ResetDioramaSkyboxPrefilter(device);
   DioramaUpload_Reset();
   DioramaEffectBackend_Reset(device);
 }

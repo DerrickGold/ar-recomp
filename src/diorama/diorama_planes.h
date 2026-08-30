@@ -51,6 +51,25 @@ static inline bool DioramaPlaneIsObjectPriority(int plane) {
   return DioramaPlaneObjectPriority(plane) >= 0;
 }
 
+/* Planes whose alpha footprint is expected to be materially smaller than the
+ * complete captured rectangle. OBJ bands are sparse by construction. The BG
+ * priority/far splits likewise contain only pixels promoted out of their base
+ * plane, which makes full-grid shading especially wasteful when a manifest
+ * stacks or voxels one of those bands. Base BG1/BG2 deliberately stay on the
+ * complete mesh: their art commonly spans every coarse cell even when many
+ * individual texels are transparent, so scanning them buys no useful cull. */
+static inline bool DioramaPlaneUsesSparseCoverage(int plane) {
+  switch (plane) {
+    case kDioramaPlane_Bg1Hi:
+    case kDioramaPlane_Bg2Hi:
+    case kDioramaPlane_Bg1Far:
+    case kDioramaPlane_Bg2Far:
+      return true;
+    default:
+      return DioramaPlaneIsObjectPriority(plane);
+  }
+}
+
 /* Can this plane ever hold pixels in the resolve apron?
  *
  * ONLY the OBJ planes. Everything else is filled exclusively by the scanline

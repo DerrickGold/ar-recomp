@@ -1597,6 +1597,36 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_diorama_coverage
         COMMAND actraiser_diorama_coverage_test)
 
+    # Screen-space coverage fringe for tilted diorama plane boundaries. Pure --
+    # pins outward miters, transparent outer coverage, valid texel-centre UVs,
+    # and selective edge ownership for attached geometry.
+    add_executable(actraiser_diorama_edge_aa_test
+        tests/diorama_edge_aa_test.c
+        src/diorama/diorama_edge_aa.c
+    )
+    target_include_directories(actraiser_diorama_edge_aa_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    target_link_libraries(actraiser_diorama_edge_aa_test PRIVATE
+        actraiser_math)
+    add_test(NAME actraiser_diorama_edge_aa
+        COMMAND actraiser_diorama_edge_aa_test)
+
+    # Shared projected aperture for BG planes authored in front of the focal
+    # playfield. Pure -- verifies exact boundary ownership, a smooth interior
+    # transition, and preservation of the layer's UV/colour payload.
+    add_executable(actraiser_diorama_aperture_test
+        tests/diorama_aperture_test.c
+        src/diorama/diorama_aperture.c
+    )
+    target_include_directories(actraiser_diorama_aperture_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    target_link_libraries(actraiser_diorama_aperture_test PRIVATE
+        actraiser_math)
+    add_test(NAME actraiser_diorama_aperture
+        COMMAND actraiser_diorama_aperture_test)
+
     # Adaptive grouping policy for authored stack/voxel copies. Pure -- pins
     # indexed bounds, source-resolution gating, and the raster-cost threshold.
     add_executable(actraiser_diorama_stack_group_test

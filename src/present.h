@@ -106,6 +106,11 @@ typedef struct FrameSlot {
   /* Application-owned products that coexist with, rather than replace, the
    * PPU's current host bindings during separated SIM capture. */
   Sim3DOutputSurfaceViews sim3d_output_surfaces;
+  /* The independent selected-magic range capture can coexist with a Diorama
+   * OBJ plane bound as the PPU source's primary surface. The primary binding
+   * snapshot therefore cannot name these pixels; publish their host-owned
+   * surface explicitly beside the frame. */
+  SrPpuSurfaceView hud_obj_surface;
 
   /* Geometry, resolved (D3 — never call Settings_Visible*()/live globals from
    * present-time code; these are the already-resolved results). */
