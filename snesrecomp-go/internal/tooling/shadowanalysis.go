@@ -20,7 +20,7 @@ import (
 	romimage "github.com/DerrickGold/snesrecomp-go/internal/rom"
 )
 
-const shadowReportVersion = 16
+const shadowReportVersion = 17
 
 const (
 	shadowUnresolvedGeneric              = "generic_dynamic_target"
@@ -194,6 +194,34 @@ func SelectStaticProvenAutomaticDispatchFacts(report ShadowReport) ([]analysis.D
 	rejected := 0
 	for _, comparison := range report.Comparisons {
 		if comparison.Status != analysis.ComparisonAutomatic || comparison.Inferred == nil {
+			continue
+		}
+		fact := *comparison.Inferred
+		if !fact.TargetSetClosed || len(fact.Targets) == 0 || len(fact.UnknownFields) != 0 || !hasOnlyStaticProof(fact.Evidence) {
+			rejected++
+			continue
+		}
+		fact.Normalize()
+		selected = append(selected, fact)
+	}
+	sort.Slice(selected, func(i, j int) bool { return selected[i].SitePC < selected[j].SitePC })
+	return selected, rejected
+}
+
+// SelectStaticProvenDatabaseDispatchFacts returns closed automatic facts plus
+// independently inferred facts that exactly reproduce authored semantics.
+// Compatible guards remain report-only because replacing a deliberately
+// broader guard with the proven site-specific subset changes generated safety
+// behavior even when the extra cases are not expected to execute.
+func SelectStaticProvenDatabaseDispatchFacts(report ShadowReport) ([]analysis.DispatchFact, int) {
+	var selected []analysis.DispatchFact
+	rejected := 0
+	for _, comparison := range report.Comparisons {
+		if comparison.Status != analysis.ComparisonAutomatic && comparison.Status != analysis.ComparisonExact {
+			continue
+		}
+		if comparison.Inferred == nil {
+			rejected++
 			continue
 		}
 		fact := *comparison.Inferred

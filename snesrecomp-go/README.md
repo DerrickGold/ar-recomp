@@ -299,6 +299,11 @@ v2regen regen --rom game.sfc --cfg-dir recomp --out-dir src/gen --jobs 8
 v2regen regen --rom game.sfc --cfg-dir recomp \
   --out-dir build/proven-analysis-candidate --experimental-proven-analysis
 v2regen analyze --rom game.sfc --cfg-dir recomp --jobs 8
+v2regen analyze --rom game.sfc --cfg-dir recomp \
+  --out-analysis build/static-analysis.json
+v2regen regen --rom game.sfc --cfg-dir recomp \
+  --out-dir build/proven-analysis-db-candidate \
+  --analysis-db build/static-analysis.json
 v2regen poll-census --rom game.sfc --cfg-dir recomp --registers 4210,4212
 v2regen disasm 01:9C6F --rom game.sfc --mx 0,0 --until-flow --raw
 v2regen rom-info --rom game.sfc

@@ -631,6 +631,7 @@ func analyze(args []string) error {
 	flags.BoolVar(verbose, "v", false, "show all comparisons, callers, and decode issues")
 	strict := flags.Bool("strict", false, "fail after reporting independently proven semantic conflicts")
 	dispatchAnalysis := flags.String("dispatch-analysis", "", "optional dispatch-census JSON evidence used to rank unresolved sites")
+	outAnalysis := flags.String("out-analysis", "", "write a deterministic ROM-hashed proven-fact database")
 	compareAuthored := flags.Bool("compare-authored", true, "compare inferred facts with authored cfg declarations")
 	noWrite := flags.Bool("no-write", true, "require analysis to remain read-only")
 	if err := flags.Parse(args); err != nil {
@@ -641,6 +642,9 @@ func analyze(args []string) error {
 	}
 	if !*noWrite {
 		return errors.New("analyze is intentionally read-only; --no-write=false is not supported")
+	}
+	if strings.TrimSpace(*bankValue) != "" && strings.TrimSpace(*outAnalysis) != "" {
+		return errors.New("--out-analysis requires a whole-ROM analysis; omit --bank")
 	}
 	var onlyBank *byte
 	if strings.TrimSpace(*bankValue) != "" {
@@ -660,6 +664,17 @@ func analyze(args []string) error {
 	}
 	if err := tooling.WriteShadowReport(os.Stdout, report, *format, *verbose); err != nil {
 		return err
+	}
+	if strings.TrimSpace(*outAnalysis) != "" {
+		database, buildErr := tooling.BuildStaticAnalysisDatabase(report)
+		if buildErr != nil {
+			return buildErr
+		}
+		if writeErr := tooling.WriteStaticAnalysisDatabaseFile(*outAnalysis, database); writeErr != nil {
+			return writeErr
+		}
+		fmt.Fprintf(os.Stderr, "v2regen: wrote %d dispatch and %d entry fact(s) to %s\n",
+			len(database.DispatchFacts), len(database.EntryFacts), *outAnalysis)
 	}
 	if *strict && report.Summary.Conflicts > 0 {
 		return fmt.Errorf("shadow analysis found %d semantic conflict(s)", report.Summary.Conflicts)
@@ -808,6 +823,7 @@ func regenerate(args []string) error {
 	chunkSpan := flags.Int("bank-chunk-pc-span", 0x800, "stable PC span per split translation unit")
 	allowStubs := flags.Bool("allow-stubs", false, "write complete output and report stubs without failing this command")
 	provenAnalysis := flags.Bool("experimental-proven-analysis", false, "apply closed static dispatch facts, exact direct-call M/X, and exact continuation regions in memory (requires an isolated --out-dir)")
+	analysisDB := flags.String("analysis-db", "", "apply a deterministic ROM-hashed proven-fact database")
 	_ = flags.String("prefix", "", "deprecated compatibility option")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -825,14 +841,21 @@ func regenerate(args []string) error {
 	}
 	var provenFacts []analysis.DispatchFact
 	var provenEntryFacts []analysis.EntryFact
-	if *provenAnalysis {
+	var provenEntryTemplates []analysis.EntryTemplatePlacement
+	if *provenAnalysis && strings.TrimSpace(*analysisDB) != "" {
+		return errors.New("--experimental-proven-analysis and --analysis-db are mutually exclusive")
+	}
+	useProvenAnalysis := *provenAnalysis || strings.TrimSpace(*analysisDB) != ""
+	if useProvenAnalysis {
 		requestedOutput, pathErr := filepath.Abs(*outDir)
 		if pathErr != nil {
 			return fmt.Errorf("resolve --out-dir: %w", pathErr)
 		}
 		if filepath.Base(requestedOutput) == "gen" && filepath.Base(filepath.Dir(requestedOutput)) == "src" {
-			return errors.New("--experimental-proven-analysis requires an isolated --out-dir; refusing to replace src/gen")
+			return errors.New("proven analysis requires an isolated --out-dir; refusing to replace src/gen")
 		}
+	}
+	if *provenAnalysis {
 		shadow, analyzeErr := tooling.AnalyzeAuthoredShadow(tooling.ShadowAnalysisOptions{
 			ROMPath: *romPath, CFGDir: *cfgDir, Jobs: *jobs,
 		})
@@ -849,6 +872,16 @@ func regenerate(args []string) error {
 		continuationFacts := tooling.SelectStaticProvenContinuationEntryFacts(shadow)
 		fmt.Printf("v2regen: experimental analysis selected %d statically derivable routine root(s) and %d exact continuation ownership fact(s); other entry kinds remain report-only\n", len(provenEntryFacts), len(continuationFacts))
 		provenEntryFacts = append(provenEntryFacts, continuationFacts...)
+	} else if strings.TrimSpace(*analysisDB) != "" {
+		database, loadErr := tooling.LoadStaticAnalysisDatabaseFile(*analysisDB, *romPath)
+		if loadErr != nil {
+			return loadErr
+		}
+		provenFacts = database.DispatchFacts
+		provenEntryFacts = database.EntryFacts
+		provenEntryTemplates = database.EntryTemplates
+		fmt.Printf("v2regen: analysis database loaded %d proven dispatch fact(s) and %d proven entry fact(s)\n",
+			len(provenFacts), len(provenEntryFacts))
 	}
 	report, err := regen.Run(regen.Options{
 		ROMPath: *romPath, ConfigDir: *cfgDir, OutputDir: *outDir, Jobs: *jobs,
@@ -856,7 +889,9 @@ func regenerate(args []string) error {
 		AllowStubs:                    *allowStubs,
 		ProvenDispatchFacts:           provenFacts,
 		ProvenEntryFacts:              provenEntryFacts,
-		ExperimentalExactDirectCallMX: *provenAnalysis,
+		ProvenEntryTemplates:          provenEntryTemplates,
+		AllowMatchingAuthoredFacts:    strings.TrimSpace(*analysisDB) != "",
+		ExperimentalExactDirectCallMX: useProvenAnalysis,
 		Progress:                      func(format string, values ...any) { fmt.Printf("v2regen: "+format+"\n", values...) },
 	})
 	fmt.Printf("v2regen: %d banks, %d -> %d variants, %d files (%d changed), %s\n", report.Banks, report.InitialEntries, report.FinalEntries, report.Files, report.ChangedFiles, report.Elapsed.Round(time.Millisecond))

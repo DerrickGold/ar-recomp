@@ -53,6 +53,7 @@ type ShadowEntryAblationRecord struct {
 	PC                      uint32                      `json:"pc"`
 	Name                    string                      `json:"name"`
 	AuthoredMX              analysis.MXState            `json:"authored_mx"`
+	AuthoredOrdinal         int                         `json:"authored_ordinal"`
 	AuthoredHLE             []string                    `json:"authored_hle,omitempty"`
 	TemplateBlockers        []string                    `json:"template_blockers,omitempty"`
 	Status                  string                      `json:"status"`
@@ -287,7 +288,7 @@ func analyzeShadowEntryAblation(image romimage.Image, banks []shadowBank, result
 	var declarations []shadowEntryAblationDeclaration
 	for _, bank := range banks {
 		bankConfigs[bank.ID] = bank.Config
-		for _, entry := range bank.Config.Entries {
+		for ordinal, entry := range bank.Config.Entries {
 			node := decoder.Variant{
 				Address: decoder.Address24(bank.ID, entry.Start),
 				M:       entry.EntryMX.M & 1, X: entry.EntryMX.X & 1,
@@ -296,6 +297,7 @@ func analyzeShadowEntryAblation(image romimage.Image, banks []shadowBank, result
 				node: node,
 				record: ShadowEntryAblationRecord{
 					PC: node.Address, Name: entry.Name,
+					AuthoredOrdinal:  ordinal,
 					AuthoredMX:       analysis.MXState{M: node.M, X: node.X},
 					AuthoredHLE:      shadowEntryHLEObligations(bank.Config, entry.Start),
 					TemplateBlockers: shadowEntryTemplateBlockers(bank.ID, bank.Config, entry),

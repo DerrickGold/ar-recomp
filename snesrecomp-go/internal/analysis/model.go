@@ -59,6 +59,14 @@ type EntryVariant struct {
 	EntryMX MXState `json:"entry_mx"`
 }
 
+// EntryTemplatePlacement preserves the bank-local authored ordering of a
+// removable canonical template. It affects deterministic C layout only; it is
+// not control-flow evidence and cannot create an entry without an EntryFact.
+type EntryTemplatePlacement struct {
+	EntryVariant
+	BankOrdinal int `json:"bank_ordinal"`
+}
+
 // EntryEdge identifies one exact live-width control-flow edge. ResumeEdges
 // preserve the boundary crossing independently of whether generation lowers
 // it through the registry, an in-region goto, or a shared no-activation body.

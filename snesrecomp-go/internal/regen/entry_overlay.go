@@ -13,6 +13,20 @@ import (
 type entryOverlayCounts struct {
 	routineRoots  int
 	continuations int
+	seeded        int
+}
+
+type normalizedEntryFact struct {
+	fact    analysis.EntryFact
+	bankID  byte
+	bank    *bankState
+	variant decoder.Variant
+}
+
+type missingEntryTemplate struct {
+	item       normalizedEntryFact
+	ordinal    int
+	hasOrdinal bool
 }
 
 // applyProvenEntryFacts applies two deliberately separate entry semantics.
@@ -20,14 +34,18 @@ type entryOverlayCounts struct {
 // discovery to recreate them. Continuation facts retain their external entry;
 // a single-owner tree opens exact local boundaries, while isolated multi-owner
 // edges route to one shared body without establishing another activation.
-func (repo *repository) applyProvenEntryFacts(facts []analysis.EntryFact) (entryOverlayCounts, error) {
+func (repo *repository) applyProvenEntryFacts(facts []analysis.EntryFact, placements []analysis.EntryTemplatePlacement) (entryOverlayCounts, error) {
 	var counts entryOverlayCounts
 	seen := make(map[decoder.Variant]analysis.EntryKind)
+	normalized := make([]normalizedEntryFact, 0, len(facts))
 	for _, original := range facts {
 		fact := original
 		fact.Normalize()
 		if len(fact.Evidence) == 0 {
 			return counts, fmt.Errorf("experimental entry fact $%06X has no static proof evidence", fact.PC)
+		}
+		if fact.Kind != analysis.EntryRoutine && fact.Kind != analysis.EntryContinuation {
+			return counts, fmt.Errorf("experimental entry fact $%06X has unsupported kind %q", fact.PC, fact.Kind)
 		}
 		bankID := canonicalBank(repo.byBank, byte(fact.PC>>16))
 		bank := repo.byBank[bankID]
@@ -43,26 +61,110 @@ func (repo *repository) applyProvenEntryFacts(facts []analysis.EntryFact) (entry
 			return counts, fmt.Errorf("duplicate experimental entry fact $%06X M%dX%d (%s and %s)", variant.Address, variant.M, variant.X, previous, fact.Kind)
 		}
 		seen[variant] = fact.Kind
+		normalized = append(normalized, normalizedEntryFact{fact: fact, bankID: bankID, bank: bank, variant: variant})
+	}
+	placementByVariant := make(map[decoder.Variant]int, len(placements))
+	for _, placement := range placements {
+		if placement.BankOrdinal < 0 {
+			return counts, fmt.Errorf("experimental entry template $%06X has negative bank ordinal %d", placement.PC, placement.BankOrdinal)
+		}
+		bankID := canonicalBank(repo.byBank, byte(placement.PC>>16))
+		variant := decoder.Variant{
+			Address: decoder.Address24(bankID, uint16(placement.PC)),
+			M:       placement.EntryMX.M & 1, X: placement.EntryMX.X & 1,
+		}
+		if _, selected := seen[variant]; !selected {
+			return counts, fmt.Errorf("experimental entry template $%06X M%dX%d has no matching fact", variant.Address, variant.M, variant.X)
+		}
+		if _, duplicate := placementByVariant[variant]; duplicate {
+			return counts, fmt.Errorf("duplicate experimental entry template $%06X M%dX%d", variant.Address, variant.M, variant.X)
+		}
+		placementByVariant[variant] = placement.BankOrdinal
+	}
 
-		switch fact.Kind {
-		case analysis.EntryRoutine:
-			if err := repo.applyProvenRoutineEntryFact(bankID, bank, variant, fact); err != nil {
-				return counts, err
-			}
-			counts.routineRoots++
-		case analysis.EntryContinuation:
-			if err := repo.applyProvenContinuationEntryFact(bankID, bank, variant, fact); err != nil {
+	// A persisted fact must remain usable after its redundant canonical func
+	// line is removed. Seed every metadata-free exact template before applying
+	// any ownership facts so continuation owners may themselves come from the
+	// database. The ordinary validation below still rejects HLE obligations,
+	// special metadata, invalid resume edges, and unproved routine discovery.
+	var missing []missingEntryTemplate
+	for _, item := range normalized {
+		if !item.fact.TemplateFree || exactConfiguredEntry(item.bankID, item.bank, item.variant) != nil {
+			continue
+		}
+		ordinal, hasOrdinal := placementByVariant[item.variant]
+		missing = append(missing, missingEntryTemplate{item: item, ordinal: ordinal, hasOrdinal: hasOrdinal})
+	}
+	sort.SliceStable(missing, func(i, j int) bool {
+		left, right := missing[i], missing[j]
+		if left.item.bankID != right.item.bankID {
+			return left.item.bankID < right.item.bankID
+		}
+		if left.hasOrdinal != right.hasOrdinal {
+			return left.hasOrdinal
+		}
+		if left.hasOrdinal && left.ordinal != right.ordinal {
+			return left.ordinal < right.ordinal
+		}
+		return left.item.variant.Address < right.item.variant.Address ||
+			left.item.variant.Address == right.item.variant.Address &&
+				(left.item.variant.M < right.item.variant.M || left.item.variant.M == right.item.variant.M && left.item.variant.X < right.item.variant.X)
+	})
+	for _, candidate := range missing {
+		item := candidate.item
+		entry := config.Entry{
+			Name:  fmt.Sprintf("bank_%02X_%04X", item.bankID, uint16(item.variant.Address)),
+			Start: uint16(item.variant.Address),
+			EntryMX: config.MX{
+				M: item.variant.M & 1,
+				X: item.variant.X & 1,
+			},
+		}
+		if candidate.hasOrdinal {
+			index := min(candidate.ordinal, len(item.bank.Config.Entries))
+			item.bank.Config.Entries = append(item.bank.Config.Entries, config.Entry{})
+			copy(item.bank.Config.Entries[index+1:], item.bank.Config.Entries[index:])
+			item.bank.Config.Entries[index] = entry
+		} else {
+			item.bank.Config.Entries = append(item.bank.Config.Entries, entry)
+		}
+		repo.addCanonicalEntryVariant(item.variant)
+		counts.seeded++
+	}
+
+	// Ownership is validated before routine roots are made dormant. This keeps
+	// the result independent of fact ordering when a statically derivable
+	// routine also owns one or more continuation regions.
+	for _, item := range normalized {
+		if item.fact.Kind == analysis.EntryContinuation {
+			if err := repo.applyProvenContinuationEntryFact(item.bankID, item.bank, item.variant, item.fact); err != nil {
 				return counts, err
 			}
 			counts.continuations++
-		default:
-			return counts, fmt.Errorf("experimental entry fact $%06X has unsupported kind %q", fact.PC, fact.Kind)
 		}
 	}
-	if repo.templateFreeEntryFacts > 0 {
+	for _, item := range normalized {
+		if item.fact.Kind == analysis.EntryRoutine {
+			if err := repo.applyProvenRoutineEntryFact(item.bankID, item.bank, item.variant, item.fact); err != nil {
+				return counts, err
+			}
+			counts.routineRoots++
+		}
+	}
+	if repo.templateFreeEntryFacts > 0 || counts.seeded > 0 {
 		repo.rebuildNames()
 	}
 	return counts, nil
+}
+
+func exactConfiguredEntry(bankID byte, bank *bankState, variant decoder.Variant) *config.Entry {
+	for index := range bank.Config.Entries {
+		entry := &bank.Config.Entries[index]
+		if entryVariant(bankID, *entry) == variant {
+			return entry
+		}
+	}
+	return nil
 }
 
 func (repo *repository) applyProvenRoutineEntryFact(bankID byte, bank *bankState, variant decoder.Variant, fact analysis.EntryFact) error {

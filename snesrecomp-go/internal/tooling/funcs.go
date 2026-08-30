@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/DerrickGold/snesrecomp-go/internal/analysis"
 	"github.com/DerrickGold/snesrecomp-go/internal/config"
 )
 
@@ -18,6 +19,13 @@ type namedAddress struct {
 // SyncFuncs writes the generated forward-declaration header used by the C
 // runner. It is the Go replacement for v2_sync_funcs_h.py.
 func SyncFuncs(cfgDir, outputPath string) (int, error) {
+	return SyncFuncsWithEntryFacts(cfgDir, outputPath, nil)
+}
+
+// SyncFuncsWithEntryFacts also declares canonical templates supplied by a
+// persisted static-analysis database after their redundant func lines have
+// been removed from authored configuration.
+func SyncFuncsWithEntryFacts(cfgDir, outputPath string, entryFacts []analysis.EntryFact) (int, error) {
 	paths, err := filepath.Glob(filepath.Join(cfgDir, "bank*.cfg"))
 	if err != nil {
 		return 0, fmt.Errorf("find bank cfgs: %w", err)
@@ -50,6 +58,17 @@ func SyncFuncs(cfgDir, outputPath string) (int, error) {
 			seen[declaration.Name] = struct{}{}
 			items = append(items, namedAddress{Name: declaration.Name, Address: declaration.Address & 0xffffff})
 		}
+	}
+	for _, fact := range entryFacts {
+		if !fact.TemplateFree || (fact.Kind != analysis.EntryRoutine && fact.Kind != analysis.EntryContinuation) {
+			continue
+		}
+		name := fmt.Sprintf("bank_%02X_%04X", byte(fact.PC>>16), uint16(fact.PC))
+		if _, found := seen[name]; found {
+			continue
+		}
+		seen[name] = struct{}{}
+		items = append(items, namedAddress{Name: name, Address: fact.PC & 0xffffff})
 	}
 	sort.SliceStable(items, func(i, j int) bool { return items[i].Address < items[j].Address })
 
