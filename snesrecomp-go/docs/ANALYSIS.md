@@ -247,11 +247,19 @@ direct JSR/JSL edge may be selected as a static entry fact. Isolated proven
 regeneration withholds that exact `(PC,M,X)` variant from the initial root set
 and requires ordinary variant discovery to demand it again. This validates
 the static dependency without treating the broader ablation graph as proof.
-It is not yet a cfg-deletion feature: the authored declaration remains as an
-in-memory metadata template for its name and function options. Each entry
-record lists `authored_hle` obligations (`hle_func`, `hle_func_if`, and
-`hle_spc_upload`). An entry with any such obligation is excluded from static
-root suppression. The separate `hle_obligations` inventory includes every HLE
+It is not yet a cfg-rewriting feature. Each entry record lists
+`template_blockers` for metadata that cannot be synthesized: a custom name,
+`end`, `exit_mx`, `tail_call`, `entry_s_offset`, or an HLE obligation. A
+routine with no blockers has the canonical `bank_NN_PPPP` name and default
+function options. The isolated generator strips that template to a dormant
+PC/M/X slot, removes its name and canonical-registry identity, and recreates
+them only after an exact static call demand rediscovers the routine. The slot
+keeps deterministic cfg ordering during this proof; it is not semantic entry
+metadata.
+
+Each entry record also lists `authored_hle` obligations (`hle_func`,
+`hle_func_if`, and `hle_spc_upload`). An entry with any such obligation is
+excluded from static root suppression. The separate `hle_obligations` inventory includes every HLE
 directive even when there is no explicit `func` at that PC; `authored_entry`
 distinguishes attached and HLE-only policy. This is intentional because a
 common configuration style relies on static call discovery to create the
@@ -347,18 +355,39 @@ the default regeneration path remains unchanged.
 
 The mode also performs a fail-closed root-suppression check for the narrow
 static routine facts described above. Selected entries remain in their
-original configuration order as dormant metadata templates, but are excluded
-from initial decoding and from sibling-boundary stopping. An exact static
-call demand must reactivate each one during the variant fixpoint. Generation
-aborts with the missing PC and M/X state if even one selected root is not
-rediscovered. This preserves names, per-entry options, and deterministic file
-layout while proving that the routine no longer needs to be an unconditional
-decode seed. Internal continuations, tail targets, computed handlers, and
-external roots are never suppressed by this experiment. HLE-decorated roots
+original configuration order as dormant slots, but are excluded from initial
+decoding and from sibling-boundary stopping. An exact static call demand must
+reactivate each one during the variant fixpoint. Generation aborts with the
+missing PC and M/X state if even one selected root is not rediscovered.
+Blocked templates preserve their authored metadata; blocker-free templates
+must synthesize the canonical name/default options and restore their registry
+identity. Both paths preserve deterministic file layout while proving that
+the routine no longer needs to be an unconditional decode seed. Internal
+continuations, tail targets, computed handlers, and external roots are never
+suppressed by this experiment. HLE-decorated roots
 are also never suppressed; selection filters them and regeneration rejects a
 manually supplied fact as a second line of defense. Any eventual cfg-deletion
 workflow must migrate these obligations explicitly rather than infer their
 absence from static reachability.
+
+Exact static JSR/JSL discovery also works when the canonical `func` line is
+already absent. Variant-demand provenance records the source edge and entry
+kind, creates the canonical `bank_NN_PPPP` body at the live M/X state, and
+continues to apply any independently authored HLE directive at that PC. A
+new canonical routing preference is installed only when the generated address
+has one M/X variant. Multi-variant addresses are still generated and reported,
+but retain the existing conservative routing policy until the complete state
+set is proven. Regeneration reports both the exact discoveries and the subset
+receiving singleton canonical promotion.
+
+Every regeneration computes a `generated semantic source` SHA-256 over sorted
+function bodies, effective void-alias targets, the dispatch registry, and
+unresolved trap bodies. The hash intentionally ignores cfg order,
+translation-unit splitting, and forward-declaration order. Matching hashes
+therefore establish source-level generation equivalence when deleting a
+redundant canonical entry merely moves its body within a generated file. This
+is a hermetic compiler check, not a substitute for runtime/replay validation
+after a behavior-bearing source difference.
 
 This mode changes generated control flow and therefore requires the normal
 runtime gate. Validation builds may define

@@ -3,6 +3,7 @@ package tooling
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/DerrickGold/snesrecomp-go/internal/analysis"
 	"github.com/DerrickGold/snesrecomp-go/internal/config"
@@ -28,6 +29,7 @@ type ShadowEntryAblationSummary struct {
 	RetainedRootDeclarations   int `json:"retained_root_declarations"`
 	RetainedUniqueRootVariants int `json:"retained_unique_root_variants"`
 	BatchRoutineTargets        int `json:"batch_routine_targets"`
+	BatchTemplateFreeRoutines  int `json:"batch_template_free_routines"`
 	BatchTailTargets           int `json:"batch_tail_targets"`
 	BatchComputedTargets       int `json:"batch_computed_targets"`
 	BatchInternalContinuations int `json:"batch_internal_continuations"`
@@ -46,6 +48,7 @@ type ShadowEntryAblationRecord struct {
 	Name                    string                      `json:"name"`
 	AuthoredMX              analysis.MXState            `json:"authored_mx"`
 	AuthoredHLE             []string                    `json:"authored_hle,omitempty"`
+	TemplateBlockers        []string                    `json:"template_blockers,omitempty"`
 	Status                  string                      `json:"status"`
 	EntryKindHint           string                      `json:"entry_kind_hint"`
 	IndividuallyRecoverable bool                        `json:"individually_recoverable"`
@@ -89,6 +92,7 @@ func SelectStaticProvenRoutineEntryFacts(report ShadowReport) []analysis.EntryFa
 		}
 		fact := analysis.EntryFact{
 			PC: record.PC, EntryMX: record.AuthoredMX, Kind: analysis.EntryRoutine,
+			TemplateFree: len(record.TemplateBlockers) == 0,
 		}
 		for _, incoming := range record.Incoming {
 			for _, kind := range incoming.Kinds {
@@ -133,8 +137,9 @@ func analyzeShadowEntryAblation(image romimage.Image, banks []shadowBank, result
 				node: node,
 				record: ShadowEntryAblationRecord{
 					PC: node.Address, Name: entry.Name,
-					AuthoredMX:  analysis.MXState{M: node.M, X: node.X},
-					AuthoredHLE: shadowEntryHLEObligations(bank.Config, entry.Start),
+					AuthoredMX:       analysis.MXState{M: node.M, X: node.X},
+					AuthoredHLE:      shadowEntryHLEObligations(bank.Config, entry.Start),
+					TemplateBlockers: shadowEntryTemplateBlockers(bank.ID, bank.Config, entry),
 				},
 			})
 		}
@@ -275,6 +280,9 @@ func analyzeShadowEntryAblation(image romimage.Image, banks []shadowBank, result
 			switch record.EntryKindHint {
 			case "routine":
 				report.Summary.BatchRoutineTargets++
+				if len(record.TemplateBlockers) == 0 {
+					report.Summary.BatchTemplateFreeRoutines++
+				}
 			case "tail_target":
 				report.Summary.BatchTailTargets++
 			case "computed_handler":
@@ -306,6 +314,32 @@ func shadowEntryHLEObligations(cfg *config.Config, pc uint16) []string {
 			result = append(result, "hle_spc_upload")
 			break
 		}
+	}
+	sort.Strings(result)
+	return result
+}
+
+func shadowEntryTemplateBlockers(bank byte, cfg *config.Config, entry config.Entry) []string {
+	var result []string
+	canonicalName := fmt.Sprintf("bank_%02X_%04X", bank, entry.Start)
+	if entry.Name != "" && entry.Name != canonicalName {
+		result = append(result, "custom_name")
+	}
+	if entry.End != nil {
+		result = append(result, "end")
+	}
+	if entry.ExitMX != nil {
+		result = append(result, "exit_mx")
+	}
+	if entry.TailCallPC != nil {
+		result = append(result, "tail_call")
+	}
+	if entry.EntrySOffset != 0 {
+		result = append(result, "entry_s_offset")
+	}
+	for _, obligation := range shadowEntryHLEObligations(cfg, entry.Start) {
+		kind, _, _ := strings.Cut(obligation, ":")
+		result = append(result, kind)
 	}
 	sort.Strings(result)
 	return result

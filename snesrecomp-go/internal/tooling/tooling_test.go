@@ -1058,6 +1058,7 @@ func TestSelectStaticProvenRoutineEntryFactsExcludesContinuationAndRetainedRoots
 		t.Fatalf("selected entry facts = %+v, want only exact routine $00:8100 M0X1", facts)
 	}
 	if facts[0].Kind != analysis.EntryRoutine || len(facts[0].Evidence) != 1 ||
+		!facts[0].TemplateFree ||
 		facts[0].Evidence[0].Source != "static.direct_jsr" ||
 		facts[0].Evidence[0].Confidence != analysis.ConfidenceProven {
 		t.Fatalf("selected entry fact lacks normalized static proof: %+v", facts[0])
