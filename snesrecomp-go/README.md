@@ -151,6 +151,30 @@ classification. Build census runs without
 `SNESRECOMP_SEMANTIC_DISPATCH_TRACE`, which is reserved for lowering-neutral
 A/B edge hashes.
 
+Audio bring-up has an equivalent no-Python capture/audit path. Set the prefix
+before initializing the runner and shut the game down normally after reaching
+a scene where sound is active:
+
+```sh
+SNESRECOMP_APU_AUDIT_PREFIX=saves/audio-stage1 \
+  ./build/MyGame game.sfc --frames 2400
+
+snesrecomp-go/build/snesbuild apu-audit --root . \
+  --prefix saves/audio-stage1 --strict
+```
+
+The runtime writes `.aram`, `.dsp`, `.written`, and a canonical `.audio.jsonl`
+sidecar that omits host PCM scheduling events.
+The Go audit uses active DSP voices and retained key-on evidence, walks each
+BRR stream with the DSP's wrapping 16-bit ARAM semantics, validates loop
+addresses, and verifies every consumed byte against observed SPC/HLE writes.
+Directory entries are starts, not sample bounds: shared BRR suffixes remain
+valid. The audit reports a different CPU-to-APU port value replacing an unread
+value, while counting same-value rewrites separately. Changed overwrites are
+shown live on first/base-16 hits and in the final report. A capture with no
+audible voice or retained key-on is explicitly inconclusive rather than a successful audit.
+Capture close to the failure when a game replaces sample banks dynamically.
+
 To build an isolated runtime candidate from only closed, statically proven
 automatic facts, use the explicit experimental overlay. It refuses the normal
 `src/gen` path and never edits cfg. The same validation mode propagates exact
@@ -276,6 +300,7 @@ v2regen poll-census --rom game.sfc --cfg-dir recomp --registers 4210,4212
 v2regen disasm 01:9C6F --rom game.sfc --mx 0,0 --until-flow --raw
 v2regen rom-info --rom game.sfc
 v2regen spc-disasm 0800 08F0 --input game.sfc --upload-block 0x011ACD
+v2regen apu-audit --prefix saves/audio-stage1 --strict
 v2regen quintet-lzss 0x0CD695 --input game.sfc --out build/blob.bin
 v2regen xref 00:9DE1 --rom game.sfc --cfg-dir recomp --kind branch
 v2regen xref 0295 --rom game.sfc --cfg-dir recomp --kind write --wram-mirrors

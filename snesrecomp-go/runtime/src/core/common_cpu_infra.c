@@ -2,9 +2,11 @@
 #include "snesrecomp/game/generated_support.h"
 
 #include "snesrecomp/game/runtime.h"
+#include "snesrecomp/game/apu_sync.h"
 #include "runtime_trace.h"
 #include "snesrecomp/game/cpu.h"
 #include "snesrecomp/game/trace.h"
+#include "snesrecomp/host/audio_trace.h"
 #include "snes/apu.h"
 #include "snes/cart.h"
 #include "snes/cpu.h"
@@ -744,6 +746,14 @@ void WatchdogCheck(void) { ++g_watchdog_loop_headers; }
 
 static void clear_published_runner(void) {
     Snes *snes = g_snes;
+    const char *apu_audit_prefix = getenv("SNESRECOMP_APU_AUDIT_PREFIX");
+    if (snes != NULL && apu_audit_prefix != NULL &&
+        apu_audit_prefix[0] != '\0' &&
+        !RtlCaptureApuAudit(apu_audit_prefix)) {
+        fprintf(stderr,
+                "[apu-audit] failed to write capture prefix %s\n",
+                apu_audit_prefix);
+    }
     if (snes != NULL && g_rtl_game_lifecycle != NULL &&
         g_rtl_game_lifecycle->runner_changed != NULL) {
         g_rtl_game_lifecycle->runner_changed(NULL);
@@ -767,7 +777,10 @@ static void clear_published_runner(void) {
 
 static void publish_runner(Snes *snes) {
     const RtlGameStateProviderApi *providers = g_rtl_game_state_providers;
+    const char *apu_audit_prefix = getenv("SNESRECOMP_APU_AUDIT_PREFIX");
     if (snes == NULL) return;
+    if (apu_audit_prefix != NULL && apu_audit_prefix[0] != '\0')
+        audio_trace_reset();
     sr_runner_bind_ppu_services(snes, true);
     sr_trace_bind_runner(snes, 1);
     if (providers != NULL) {

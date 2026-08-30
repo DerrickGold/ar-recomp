@@ -49,6 +49,8 @@ func run(args []string) error {
 		return runROMInfo(args[1:])
 	case "spc-disasm":
 		return runSPCDisasm(args[1:])
+	case "apu-audit":
+		return runAPUAudit(args[1:])
 	case "quintet-lzss":
 		return runQuintetLZSS(args[1:])
 	case "poll-census":
@@ -111,6 +113,7 @@ Commands:
   disasm      Disassemble ROM code with live M/X tracking (read-only)
   rom-info    Report cartridge identity, header, and vectors (read-only)
   spc-disasm  Disassemble an SPC700 payload or ROM upload block (read-only)
+  apu-audit   Validate live BRR samples and CPU/APU port handshakes
   quintet-lzss
               Decode a bit-packed Quintet LZSS blob
   poll-census Classify decoded hardware-status read and polling sites
@@ -553,6 +556,62 @@ func runSPCDisasm(args []string) error {
 		return err
 	}
 	return tooling.WriteSPCDisassembly(os.Stdout, report, *format)
+}
+
+func runAPUAudit(args []string) error {
+	flags := flag.NewFlagSet("apu-audit", flag.ContinueOnError)
+	root := flags.String("root", ".", "game project root")
+	prefix := flags.String("prefix", "", "capture prefix for .aram, .dsp, .written, and .audio.jsonl sidecars")
+	spcPath := flags.String("spc", "", "standard SPC snapshot (alternative to --aram/--dsp)")
+	aramPath := flags.String("aram", "", "64 KiB raw ARAM snapshot")
+	dspPath := flags.String("dsp", "", "128-byte raw DSP register snapshot")
+	writtenPath := flags.String("written", "", "optional 8192-byte ARAM write-coverage bitmap")
+	tracePath := flags.String("trace", "", "optional snesrecomp audio event JSONL")
+	directoryValue := flags.String("directory-page", "", "override DSP DIR page as hexadecimal byte")
+	sourceValue := flags.String("sources", "", "additional comma-separated hexadecimal SRCN values")
+	format := flags.String("format", "text", "report format: text or json")
+	strict := flags.Bool("strict", false, "fail after reporting an invalid live sample")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("apu-audit accepts only named options")
+	}
+	absoluteRoot, err := filepath.Abs(*root)
+	if err != nil {
+		return fmt.Errorf("resolve project root: %w", err)
+	}
+	resolve := func(value string) string {
+		return resolveProjectOptional(absoluteRoot, value)
+	}
+	sources, err := tooling.ParseAPUSourceList(*sourceValue)
+	if err != nil {
+		return err
+	}
+	var directoryPage *uint8
+	if strings.TrimSpace(*directoryValue) != "" {
+		address, parseErr := tooling.ParseSPCAddress(*directoryValue)
+		if parseErr != nil || address > 0xff {
+			return fmt.Errorf("parse --directory-page %q (want hexadecimal byte)", *directoryValue)
+		}
+		value := uint8(address)
+		directoryPage = &value
+	}
+	report, err := tooling.BuildAPUAudit(tooling.APUAuditOptions{
+		Prefix: resolve(*prefix), SPCPath: resolve(*spcPath), ARAMPath: resolve(*aramPath),
+		DSPPath: resolve(*dspPath), WrittenPath: resolve(*writtenPath), TracePath: resolve(*tracePath),
+		DirectoryPage: directoryPage, Sources: sources,
+	})
+	if err != nil {
+		return err
+	}
+	if err := tooling.WriteAPUAudit(os.Stdout, report, *format); err != nil {
+		return err
+	}
+	if *strict && report.Summary.InvalidSamples != 0 {
+		return fmt.Errorf("APU audit found %d invalid live sample(s)", report.Summary.InvalidSamples)
+	}
+	return nil
 }
 
 func runQuintetLZSS(args []string) error {

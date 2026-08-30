@@ -20,7 +20,7 @@ import (
 	romimage "github.com/DerrickGold/snesrecomp-go/internal/rom"
 )
 
-const shadowReportVersion = 5
+const shadowReportVersion = 6
 
 const (
 	shadowUnresolvedGeneric              = "generic_dynamic_target"
@@ -52,18 +52,22 @@ type ShadowROM struct {
 
 type ShadowSummary struct {
 	analysis.ComparisonSummary
-	InitialVariants               int `json:"initial_variants"`
-	FinalVariants                 int `json:"final_variants"`
-	VariantPasses                 int `json:"variant_passes"`
-	ConfirmedTableSpans           int `json:"confirmed_table_spans"`
-	CandidateTableSpans           int `json:"candidate_table_spans"`
-	ObservedUnresolvedSites       int `json:"observed_unresolved_sites"`
-	UnobservedUnresolvedSites     int `json:"unobserved_unresolved_sites"`
-	RawUnresolvedEmissions        int `json:"raw_unresolved_emissions"`
-	UniqueUnresolvedSites         int `json:"unique_unresolved_sites"`
-	LikelyBlockingUnresolvedSites int `json:"likely_blocking_unresolved_sites"`
-	DecodeIssues                  int `json:"decode_issues"`
-	DispatchCodeIslands           int `json:"dispatch_code_islands"`
+	InitialVariants                int `json:"initial_variants"`
+	FinalVariants                  int `json:"final_variants"`
+	VariantPasses                  int `json:"variant_passes"`
+	ConfirmedTableSpans            int `json:"confirmed_table_spans"`
+	CandidateTableSpans            int `json:"candidate_table_spans"`
+	ObservedUnresolvedSites        int `json:"observed_unresolved_sites"`
+	UnobservedUnresolvedSites      int `json:"unobserved_unresolved_sites"`
+	RawUnresolvedEmissions         int `json:"raw_unresolved_emissions"`
+	UniqueUnresolvedSites          int `json:"unique_unresolved_sites"`
+	LikelyBlockingUnresolvedSites  int `json:"likely_blocking_unresolved_sites"`
+	DecodeIssues                   int `json:"decode_issues"`
+	DispatchCodeIslands            int `json:"dispatch_code_islands"`
+	LandingCandidates              int `json:"landing_candidates"`
+	ProbableLandingCandidates      int `json:"probable_landing_candidates"`
+	SpeculativeLandingCandidates   int `json:"speculative_landing_candidates"`
+	LandingCandidateTableConflicts int `json:"landing_candidate_table_conflicts"`
 }
 
 type ShadowCaller struct {
@@ -146,6 +150,7 @@ type ShadowReport struct {
 	Comparisons         []analysis.Comparison      `json:"comparisons"`
 	TableSpans          []ShadowTableSpan          `json:"table_spans,omitempty"`
 	DispatchCodeIslands []ShadowDispatchCodeIsland `json:"dispatch_code_islands,omitempty"`
+	LandingCandidates   []ShadowLandingCandidate   `json:"landing_candidates,omitempty"`
 	DispatchEvidence    *ShadowDispatchEvidence    `json:"dispatch_evidence,omitempty"`
 	Unresolved          []ShadowUnresolvedSite     `json:"unresolved_sites,omitempty"`
 	DecodeIssues        []ShadowDecodeIssue        `json:"decode_issues,omitempty"`
@@ -268,6 +273,8 @@ func AnalyzeAuthoredShadow(options ShadowAnalysisOptions) (ShadowReport, error) 
 	comparisons, comparisonSummary := analysis.CompareDispatchFacts(authored, inferred)
 	tableSpans := collectShadowTableSpans(comparisons)
 	dispatchCodeIslands := collectShadowDispatchCodeIslands(image, comparisons, decodeResults, allRegions, tableSpans)
+	landingCandidates := collectShadowLandingCandidates(image, banks, decodeResults, allRegions, tableSpans, dispatchCodeIslands, calleeExitMX)
+	probableLandingCandidates, speculativeLandingCandidates, landingCandidateTableConflicts := countShadowLandingConfidence(landingCandidates)
 	confirmedTableSpans, candidateTableSpans := countShadowTableSpans(tableSpans)
 	hash := sha256.Sum256(image)
 	report := ShadowReport{
@@ -276,21 +283,26 @@ func AnalyzeAuthoredShadow(options ShadowAnalysisOptions) (ShadowReport, error) 
 		NoWrite: true,
 		ROM:     ShadowROM{SHA256: hex.EncodeToString(hash[:]), Size: len(image), Mapper: "lorom"},
 		Summary: ShadowSummary{
-			ComparisonSummary:             comparisonSummary,
-			InitialVariants:               inferenceStats.initialVariants,
-			FinalVariants:                 inferenceStats.finalVariants,
-			VariantPasses:                 inferenceStats.passes,
-			ConfirmedTableSpans:           confirmedTableSpans,
-			CandidateTableSpans:           candidateTableSpans,
-			RawUnresolvedEmissions:        rawUnresolved,
-			UniqueUnresolvedSites:         len(unresolved),
-			LikelyBlockingUnresolvedSites: countLikelyBlockingUnresolved(unresolved),
-			DecodeIssues:                  len(issues),
-			DispatchCodeIslands:           len(dispatchCodeIslands),
+			ComparisonSummary:              comparisonSummary,
+			InitialVariants:                inferenceStats.initialVariants,
+			FinalVariants:                  inferenceStats.finalVariants,
+			VariantPasses:                  inferenceStats.passes,
+			ConfirmedTableSpans:            confirmedTableSpans,
+			CandidateTableSpans:            candidateTableSpans,
+			RawUnresolvedEmissions:         rawUnresolved,
+			UniqueUnresolvedSites:          len(unresolved),
+			LikelyBlockingUnresolvedSites:  countLikelyBlockingUnresolved(unresolved),
+			DecodeIssues:                   len(issues),
+			DispatchCodeIslands:            len(dispatchCodeIslands),
+			LandingCandidates:              len(landingCandidates),
+			ProbableLandingCandidates:      probableLandingCandidates,
+			SpeculativeLandingCandidates:   speculativeLandingCandidates,
+			LandingCandidateTableConflicts: landingCandidateTableConflicts,
 		},
 		Comparisons:         comparisons,
 		TableSpans:          tableSpans,
 		DispatchCodeIslands: dispatchCodeIslands,
+		LandingCandidates:   landingCandidates,
 		Unresolved:          unresolved,
 		DecodeIssues:        issues,
 		Limitations: []string{
@@ -300,6 +312,7 @@ func AnalyzeAuthoredShadow(options ShadowAnalysisOptions) (ShadowReport, error) 
 			"an authored-only result means unproven, not disproven or runtime-reachable",
 			"tagged-stream handler classification and structural handler candidates are heuristic triage evidence, not a closed target set",
 			"dispatch code-island findings are probable review hints; they never create entry points or alter regeneration",
+			"boundary landing-sweep findings are probable or speculative review hints seeded only after confirmed flow terminators; they never create entry points or alter regeneration",
 			"the current ROM reader is explicitly LoROM; mapper generalization is a later milestone",
 		},
 	}
@@ -2845,6 +2858,8 @@ func writeShadowText(output io.Writer, report ShadowReport, verbose bool) {
 		summary.ConfirmedTableSpans, summary.CandidateTableSpans)
 	fmt.Fprintf(output, "dispatch gap sweep: %d probable unclaimed code island(s) (review-only)\n",
 		summary.DispatchCodeIslands)
+	fmt.Fprintf(output, "boundary landing sweep: %d unclaimed entry candidate(s): %d probable, %d speculative (%d candidate-table conflicts; review-only)\n",
+		summary.LandingCandidates, summary.ProbableLandingCandidates, summary.SpeculativeLandingCandidates, summary.LandingCandidateTableConflicts)
 	fmt.Fprintf(output, "shadow-root unresolved dynamic edges: %d raw emissions -> %d unique source sites; likely bring-up blockers=%d; decode issues=%d\n",
 		summary.RawUnresolvedEmissions, summary.UniqueUnresolvedSites, summary.LikelyBlockingUnresolvedSites, summary.DecodeIssues)
 	if evidence := report.DispatchEvidence; evidence != nil {
@@ -2915,6 +2930,16 @@ func writeShadowText(output io.Writer, report ShadowReport, verbose bool) {
 				shadowAddress(island.SitePC), shadowAddress(island.PreviousTargetPC),
 				shadowAddress(island.NextTargetPC), island.PrecededBy,
 				shadowMX(island.LiveMX), island.Confidence, island.Reason)
+		}
+		for _, candidate := range report.LandingCandidates {
+			fmt.Fprintf(output, "[LANDING-CANDIDATE] %s anchor=%s preceded_by=%s ownership=%s confidence=%s shapes=%d reason=%s\n",
+				shadowAddress(candidate.CandidateEntryPC), shadowAddress(candidate.AnchorPC),
+				candidate.PrecededBy, candidate.Ownership, candidate.Confidence, len(candidate.Variants), candidate.Reason)
+			for _, variant := range candidate.Variants {
+				fmt.Fprintf(output, "  shape=%s..%s entry_mx=%s termination=%s instructions=%d ownership=%s confidence=%s\n",
+					shadowAddress(candidate.CandidateEntryPC), shadowAddress(variant.EndExclusive),
+					shadowMX(variant.EntryMX), variant.Termination, variant.InstructionCount, variant.Ownership, variant.Confidence)
+			}
 		}
 	} else {
 		fmt.Fprintln(output, "use --verbose for authored-only/automatic facts, deduplicated callers, and decode issues; --format json emits the complete report")

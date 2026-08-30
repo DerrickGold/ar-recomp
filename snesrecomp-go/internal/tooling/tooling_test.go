@@ -319,6 +319,9 @@ indirect_dispatch 8000 2 idx:X tables:8100 transfer:tail
 	if report.Summary.DispatchCodeIslands != 1 || len(report.DispatchCodeIslands) != 1 {
 		t.Fatalf("dispatch islands=%+v summary=%+v", report.DispatchCodeIslands, report.Summary)
 	}
+	if report.Summary.LandingCandidates != 0 || len(report.LandingCandidates) != 0 {
+		t.Fatalf("dispatch island duplicated as boundary landing: %+v", report.LandingCandidates)
+	}
 	island := report.DispatchCodeIslands[0]
 	if island.SitePC != 0x008000 || island.PreviousTargetPC != 0x008200 ||
 		island.NextTargetPC != 0x008240 || island.CandidateEntryPC != 0x008202 ||
@@ -334,6 +337,197 @@ indirect_dispatch 8000 2 idx:X tables:8100 transfer:tail
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("verbose report missing %q:\n%s", want, output.String())
 		}
+	}
+}
+
+func TestAnalyzeAuthoredShadowReportsBoundaryLandingWithExactMX(t *testing.T) {
+	root := t.TempDir()
+	image := make([]byte, 0x8000)
+	copy(image[0x0200:], []byte{0x80, 0x2e})                   // BRA $8230
+	copy(image[0x0202:], []byte{0xa9, 0x01, 0x85, 0x10, 0x60}) // M=1: LDA #$01; STA $10; RTS
+	copy(image[0x0230:], []byte{0x60})                         // owned branch target
+	copy(image[0x0240:], []byte{0xa9, 0x02, 0x85, 0x11, 0x60}) // next confirmed entry
+	romPath := filepath.Join(root, "fixture.sfc")
+	if err := os.WriteFile(romPath, image, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgDir := filepath.Join(root, "recomp")
+	writeTestFile(t, filepath.Join(cfgDir, "bank00.cfg"), `bank = 00
+func First 8200 entry_mx:1,1
+func Anchor 8240 entry_mx:1,1
+`)
+
+	report, err := AnalyzeAuthoredShadow(ShadowAnalysisOptions{
+		ROMPath: romPath, CFGDir: cfgDir, Jobs: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Summary.LandingCandidates != 1 || len(report.LandingCandidates) != 1 {
+		t.Fatalf("landing candidates=%+v summary=%+v", report.LandingCandidates, report.Summary)
+	}
+	candidate := report.LandingCandidates[0]
+	if candidate.AnchorPC != 0x008240 || candidate.CandidateEntryPC != 0x008202 || candidate.PrecededBy != "BRA" ||
+		candidate.Ownership != shadowLandingUnclaimed || candidate.Confidence != analysis.ConfidenceProbable || len(candidate.Variants) != 1 {
+		t.Fatalf("unexpected landing candidate: %+v", candidate)
+	}
+	variant := candidate.Variants[0]
+	if variant.EndExclusive != 0x008207 || variant.Termination != "clean_return" || variant.InstructionCount != 3 || variant.Confidence != analysis.ConfidenceProbable {
+		t.Fatalf("unexpected landing variant: %+v", variant)
+	}
+	wantMX := []analysis.MXState{{M: 1, X: 0}, {M: 1, X: 1}}
+	if len(variant.EntryMX) != len(wantMX) {
+		t.Fatalf("entry M/X = %+v, want %+v", variant.EntryMX, wantMX)
+	}
+	for index := range wantMX {
+		if variant.EntryMX[index] != wantMX[index] {
+			t.Fatalf("entry M/X = %+v, want %+v", variant.EntryMX, wantMX)
+		}
+	}
+	var output bytes.Buffer
+	if err := WriteShadowReport(&output, report, "text", true); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"boundary landing sweep: 1 unclaimed entry candidate(s): 1 probable, 0 speculative", "[LANDING-CANDIDATE]", "$00:8202", "entry_mx=M1X0,M1X1", "termination=clean_return"} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("verbose report missing %q:\n%s", want, output.String())
+		}
+	}
+}
+
+func TestBoundaryLandingDowngradesCandidateTableButRejectsConfirmedTable(t *testing.T) {
+	image := make([]byte, 0x8000)
+	copy(image[0x0202:], []byte{0xa9, 0x01, 0x85, 0x10, 0x60})
+	end := uint16(0x8240)
+	graph, err := decoder.DecodeFunction(image, 0, 0x8202, 1, 0, decoder.Options{End: &end})
+	if err != nil {
+		t.Fatal(err)
+	}
+	span := ShadowTableSpan{
+		StartPC: 0x008202, EndExclusive: 0x008207,
+		Ownership: shadowTableOwnershipCandidate, Confidence: analysis.ConfidenceProbable,
+	}
+	shape, ok := validateShadowLandingGraph(graph, 0x008202, 0x008240, map[uint32]struct{}{}, nil, []ShadowTableSpan{span})
+	if !ok || shape.Ownership != shadowLandingTableConflict || shape.Confidence != analysis.ConfidenceSpeculative {
+		t.Fatalf("candidate table landing shape=%+v ok=%t", shape, ok)
+	}
+	span.Ownership = shadowTableOwnershipConfirmed
+	if _, ok := validateShadowLandingGraph(graph, 0x008202, 0x008240, map[uint32]struct{}{}, nil, []ShadowTableSpan{span}); ok {
+		t.Fatal("confirmed table bytes were accepted as a landing candidate")
+	}
+}
+
+func TestAnalyzeAuthoredShadowDeduplicatesWidthDependentLandingShapes(t *testing.T) {
+	root := t.TempDir()
+	image := make([]byte, 0x8000)
+	copy(image[0x0200:], []byte{0x80, 0x2e})
+	copy(image[0x0202:], []byte{0xa9, 0x60, 0xea, 0x60}) // M=0: LDA #$EA60; RTS. M=1: LDA #$60; NOP; RTS.
+	copy(image[0x0230:], []byte{0x60})
+	copy(image[0x0240:], []byte{0x60})
+	romPath := filepath.Join(root, "fixture.sfc")
+	if err := os.WriteFile(romPath, image, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgDir := filepath.Join(root, "recomp")
+	writeTestFile(t, filepath.Join(cfgDir, "bank00.cfg"), `bank = 00
+func First 8200 entry_mx:1,1
+func Anchor 8240 entry_mx:1,1
+`)
+
+	report, err := AnalyzeAuthoredShadow(ShadowAnalysisOptions{ROMPath: romPath, CFGDir: cfgDir, Jobs: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Summary.LandingCandidates != 1 || len(report.LandingCandidates) != 1 || len(report.LandingCandidates[0].Variants) != 2 {
+		t.Fatalf("width variants inflated landing sites: summary=%+v candidates=%+v", report.Summary, report.LandingCandidates)
+	}
+	if report.LandingCandidates[0].Confidence != analysis.ConfidenceProbable || report.Summary.ProbableLandingCandidates != 1 || report.Summary.SpeculativeLandingCandidates != 0 {
+		t.Fatalf("aggregate landing confidence=%+v summary=%+v", report.LandingCandidates[0], report.Summary)
+	}
+	if report.LandingCandidates[0].Variants[0].InstructionCount != 2 || report.LandingCandidates[0].Variants[1].InstructionCount != 3 {
+		t.Fatalf("width-dependent shapes=%+v", report.LandingCandidates[0].Variants)
+	}
+}
+
+func TestAnalyzeAuthoredShadowClassifiesWeakLandingAsSpeculative(t *testing.T) {
+	root := t.TempDir()
+	image := make([]byte, 0x8000)
+	copy(image[0x0200:], []byte{0x80, 0x2e})       // BRA $8230
+	copy(image[0x0202:], []byte{0x89, 0x00, 0x40}) // M=1: BIT #$00; RTI
+	copy(image[0x0230:], []byte{0x60})
+	copy(image[0x0240:], []byte{0x60})
+	romPath := filepath.Join(root, "fixture.sfc")
+	if err := os.WriteFile(romPath, image, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgDir := filepath.Join(root, "recomp")
+	writeTestFile(t, filepath.Join(cfgDir, "bank00.cfg"), `bank = 00
+func First 8200 entry_mx:1,1
+func Anchor 8240 entry_mx:1,1
+`)
+
+	report, err := AnalyzeAuthoredShadow(ShadowAnalysisOptions{ROMPath: romPath, CFGDir: cfgDir, Jobs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.LandingCandidates) != 1 || report.LandingCandidates[0].Confidence != analysis.ConfidenceSpeculative || len(report.LandingCandidates[0].Variants) != 1 || report.LandingCandidates[0].Variants[0].Confidence != analysis.ConfidenceSpeculative {
+		t.Fatalf("landing candidates=%+v", report.LandingCandidates)
+	}
+	if report.Summary.ProbableLandingCandidates != 0 || report.Summary.SpeculativeLandingCandidates != 1 {
+		t.Fatalf("landing confidence summary=%+v", report.Summary)
+	}
+}
+
+func TestAnalyzeAuthoredShadowBoundaryLandingCanJoinAnchor(t *testing.T) {
+	root := t.TempDir()
+	image := make([]byte, 0x8000)
+	copy(image[0x0200:], []byte{0x80, 0x2e})             // BRA $8230
+	copy(image[0x0202:], []byte{0xa9, 0x01, 0x80, 0x3a}) // LDA #$01; BRA $8240
+	copy(image[0x0230:], []byte{0x60})
+	copy(image[0x0240:], []byte{0x60})
+	romPath := filepath.Join(root, "fixture.sfc")
+	if err := os.WriteFile(romPath, image, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgDir := filepath.Join(root, "recomp")
+	writeTestFile(t, filepath.Join(cfgDir, "bank00.cfg"), `bank = 00
+func First 8200 entry_mx:1,1
+func Anchor 8240 entry_mx:1,1
+`)
+
+	report, err := AnalyzeAuthoredShadow(ShadowAnalysisOptions{ROMPath: romPath, CFGDir: cfgDir, Jobs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.LandingCandidates) != 1 || len(report.LandingCandidates[0].Variants) != 1 || report.LandingCandidates[0].Variants[0].Termination != "join_anchor" || report.LandingCandidates[0].Variants[0].EndExclusive != 0x008206 {
+		t.Fatalf("landing candidates=%+v", report.LandingCandidates)
+	}
+}
+
+func TestAnalyzeAuthoredShadowBoundaryLandingRejectsDeclaredData(t *testing.T) {
+	root := t.TempDir()
+	image := make([]byte, 0x8000)
+	copy(image[0x0200:], []byte{0x80, 0x2e})
+	copy(image[0x0202:], []byte{0xa9, 0x01, 0x85, 0x10, 0x60})
+	copy(image[0x0230:], []byte{0x60})
+	copy(image[0x0240:], []byte{0x60})
+	romPath := filepath.Join(root, "fixture.sfc")
+	if err := os.WriteFile(romPath, image, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgDir := filepath.Join(root, "recomp")
+	writeTestFile(t, filepath.Join(cfgDir, "bank00.cfg"), `bank = 00
+func First 8200 entry_mx:1,1
+func Anchor 8240 entry_mx:1,1
+data_region 00 8202 8207
+`)
+
+	report, err := AnalyzeAuthoredShadow(ShadowAnalysisOptions{ROMPath: romPath, CFGDir: cfgDir, Jobs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Summary.LandingCandidates != 0 || len(report.LandingCandidates) != 0 {
+		t.Fatalf("declared data produced landing candidates: %+v", report.LandingCandidates)
 	}
 }
 

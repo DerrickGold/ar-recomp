@@ -36,6 +36,8 @@ enum {
 typedef struct AudioTraceEvent {
     uint64_t sample_idx;
     uint32_t aux;
+    uint32_t source_block;
+    const char *function_name;
     uint8_t type;
     uint8_t addr;
     uint8_t val;
@@ -71,11 +73,16 @@ typedef struct AudioTraceStats {
      * serialized game-tick target at the most recent port-sync observation. */
     uint32_t pace_consumer_active;
     uint64_t cpu_port_writes;
+    uint64_t cpu_port_applies;
     uint64_t spc_port_reads_seen;
     uint64_t spc_port_reads_logged;
     uint64_t spc_port_writes;
     uint64_t cpu_port_reads_logged;
+    /* Applied values replaced before an SPC read. Same-value rewrites are
+     * tracked separately because they may be protocol markers but are not
+     * evidence that a different command value was lost. */
     uint64_t cpu_port_overwrites[4];
+    uint64_t cpu_port_same_value_rewrites[4];
 } AudioTraceStats;
 
 /** Arms or disarms the legacy host-side PCM/event recorder. It is disabled by
@@ -92,6 +99,9 @@ void audio_trace_on_consume(uint64_t read_index, uint32_t count,
 void audio_trace_set_producer(int producer);
 void audio_trace_on_pace(int consumer_active, uint32_t baseline_cycles);
 void audio_trace_on_cpu_port_write(uint8_t port, uint8_t value);
+void audio_trace_on_cpu_port_write_at(uint8_t port, uint8_t value,
+                                      uint32_t source_block,
+                                      const char *function_name);
 void audio_trace_on_cpu_port_apply(uint8_t port, uint8_t value);
 void audio_trace_on_spc_port_read(uint8_t port, uint8_t value);
 void audio_trace_on_spc_port_write(uint8_t port, uint8_t value);
@@ -105,6 +115,9 @@ uint32_t audio_trace_copy_events(uint64_t first_index, uint32_t maximum,
                                  AudioTraceEvent *output, uint64_t *oldest);
 uint32_t audio_trace_copy_snaps(uint64_t first_index, uint32_t maximum,
                                 AudioTraceSnap *output, uint64_t *oldest);
+/** Writes the retained event ring as deterministic JSONL. The first line is
+ * a format/overflow summary; subsequent lines are chronological events. */
+int audio_trace_dump_jsonl(const char *path);
 int audio_trace_dump_wav(const char *path, int64_t start_index, uint64_t count,
                          uint64_t *output_start, uint64_t *output_count);
 

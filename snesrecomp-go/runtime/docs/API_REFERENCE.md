@@ -307,6 +307,24 @@ runner ABI audio-trace subscriptions are independent of that switch. The
 large SPC PC/write histograms are likewise pay-for-play through
 `SNESRECOMP_SPC_DIAGNOSTICS=1`.
 
+For bring-up, `SNESRECOMP_APU_AUDIT_PREFIX=<path>` enables the recorder and
+byte-level ARAM write provenance from APU reset onward. On ordinary runner
+teardown it writes `<path>.aram`, `.dsp`, `.written`, and `.audio.jsonl`.
+`RtlCaptureApuAudit(path)` provides the same operation at an explicit safe
+point. Do not call it from audio production or an audio-trace callback. Analyze
+the bundle with `snesbuild apu-audit --prefix <path>`.
+
+The write bitmap covers SPC stores and destinations declared through the
+shared HLE image/sample upload helpers. The runner also marks bytes changed by
+a game upload-customization callback; a direct callback write that stores the
+same value already present in ARAM cannot be distinguished and should not be
+used as sole proof that a sample was uploaded. Audio event capture records
+the originating recompiled block and function for CPU port writes. When a
+different value is applied before the SPC reads the first, diagnostic captures
+print the first and base-16 hit milestones immediately and retain the complete
+pair census for the Go report. Same-value rewrites have a separate counter and
+do not emit the changed-value warning.
+
 ## Threading and callbacks
 
 Unless a contract explicitly says otherwise, runner operations are synchronous

@@ -8,6 +8,9 @@
 #ifndef AUDIO_TRACE_TEST_WAV
 #define AUDIO_TRACE_TEST_WAV "runtime-audio-trace.wav"
 #endif
+#ifndef AUDIO_TRACE_TEST_JSONL
+#define AUDIO_TRACE_TEST_JSONL "runtime-audio-trace.jsonl"
+#endif
 
 static int failures;
 static unsigned lock_depth;
@@ -63,8 +66,10 @@ static void test_samples_and_events(void) {
 }
 
 static void test_port_gating(void) {
-    audio_trace_on_cpu_port_write(5u, 0x11u);
+    audio_trace_on_cpu_port_write_at(5u, 0x10u, 0x000aaau, "stale");
+    audio_trace_on_cpu_port_write_at(5u, 0x11u, 0x00d583u, "upload\"fn");
     audio_trace_on_cpu_port_apply(5u, 0x11u);
+    audio_trace_on_cpu_port_apply(5u, 0x22u);
     audio_trace_on_cpu_port_apply(5u, 0x22u);
     audio_trace_on_spc_port_read(5u, 0x22u);
     audio_trace_on_spc_port_read(5u, 0x22u);
@@ -74,13 +79,32 @@ static void test_port_gating(void) {
     audio_trace_on_cpu_port_read(5u, 0x33u);
     AudioTraceStats stats;
     audio_trace_get_stats(&stats);
-    check(stats.cpu_port_writes == 1u && stats.cpu_port_overwrites[1] == 1u,
-          "unobserved applied command overwrite counted");
+    check(stats.cpu_port_writes == 2u && stats.cpu_port_applies == 3u &&
+          stats.cpu_port_overwrites[1] == 1u &&
+          stats.cpu_port_same_value_rewrites[1] == 1u,
+          "changed overwrite and same-value rewrite counted separately");
     check(stats.spc_port_reads_seen == 2u &&
           stats.spc_port_reads_logged == 1u &&
           stats.spc_port_writes == 2u &&
           stats.cpu_port_reads_logged == 1u,
           "steady port polling is elided while raw totals remain");
+}
+
+static void test_jsonl_dump(void) {
+    check(audio_trace_dump_jsonl(AUDIO_TRACE_TEST_JSONL) == 0,
+          "JSONL evidence dump");
+    FILE *file = fopen(AUDIO_TRACE_TEST_JSONL, "rb");
+    char contents[8192];
+    const size_t count = file == NULL ? 0u :
+        fread(contents, 1u, sizeof(contents) - 1u, file);
+    if (file != NULL) fclose(file);
+    contents[count] = '\0';
+    check(strstr(contents, "\"format\":\"snesrecomp-audio-trace\"") != NULL &&
+          strstr(contents, "\"type\":\"apu_port_apply\"") != NULL &&
+          strstr(contents, "\"source_block\":54659") != NULL &&
+          strstr(contents, "upload\\\"fn") != NULL,
+          "JSONL contains correlated and escaped port evidence");
+    check(remove(AUDIO_TRACE_TEST_JSONL) == 0, "remove JSONL fixture");
 }
 
 static void test_wav_dump(void) {
@@ -122,6 +146,7 @@ static void test_disabled_fast_path(void) {
 int main(void) {
     test_samples_and_events();
     test_port_gating();
+    test_jsonl_dump();
     test_wav_dump();
     test_disabled_fast_path();
     check(lock_depth == 0u, "query locks remain balanced");

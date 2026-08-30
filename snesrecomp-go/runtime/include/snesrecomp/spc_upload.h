@@ -85,6 +85,13 @@ bool sr_spc_upload_samples(const uint8_t *rom, size_t rom_size,
                            uint8_t aram[0x10000], uint16_t *last_destination,
                            uint16_t *last_length);
 
+/** Internal diagnostic scope used by the runner around HLE upload callbacks.
+ * The shared image/sample helpers mark one bit per declared ARAM destination
+ * byte while the scope is active. Scopes are thread-local and non-nestable. */
+void sr_spc_upload_begin_write_tracking(uint8_t *bitmap,
+                                        size_t bitmap_byte_size);
+void sr_spc_upload_end_write_tracking(void);
+
 /** @} */
 
 #ifdef __cplusplus

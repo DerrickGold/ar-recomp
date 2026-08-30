@@ -65,6 +65,8 @@ func run(args []string) error {
 		return inspectROM(args[1:])
 	case "spc-disasm":
 		return disassembleSPC(args[1:])
+	case "apu-audit":
+		return auditAPU(args[1:])
 	case "quintet-lzss":
 		return decompressQuintetLZSS(args[1:])
 	case "poll-census":
@@ -118,6 +120,7 @@ Commands:
   disasm             Disassemble ROM code with live M/X tracking (no-write)
   rom-info           Report cartridge identity, header, and vectors (no-write)
   spc-disasm         Disassemble an SPC700 payload or ROM upload block (no-write)
+  apu-audit          Validate live BRR samples and CPU/APU port handshakes
   quintet-lzss       Decode a bit-packed Quintet LZSS blob
   poll-census        Classify decoded hardware-status read and polling sites
   sync-funcs         Regenerate recomp/funcs.h from bank cfg declarations
@@ -138,6 +141,54 @@ Commands:
   baseline verify    Compare a generated directory with a saved snapshot
 
 These commands replace every tool in the normal tools/regen.sh pipeline.`)
+}
+
+func auditAPU(args []string) error {
+	flags := flag.NewFlagSet("apu-audit", flag.ContinueOnError)
+	prefix := flags.String("prefix", "", "capture prefix for .aram, .dsp, .written, and .audio.jsonl sidecars")
+	spcPath := flags.String("spc", "", "standard SPC snapshot (alternative to --aram/--dsp)")
+	aramPath := flags.String("aram", "", "64 KiB raw ARAM snapshot")
+	dspPath := flags.String("dsp", "", "128-byte raw DSP register snapshot")
+	writtenPath := flags.String("written", "", "optional 8192-byte ARAM write-coverage bitmap")
+	tracePath := flags.String("trace", "", "optional snesrecomp audio event JSONL")
+	directoryValue := flags.String("directory-page", "", "override DSP DIR page as hexadecimal byte")
+	sourceValue := flags.String("sources", "", "additional comma-separated hexadecimal SRCN values")
+	format := flags.String("format", "text", "report format: text or json")
+	strict := flags.Bool("strict", false, "fail after reporting an invalid live sample")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("apu-audit accepts only named options")
+	}
+	sources, err := tooling.ParseAPUSourceList(*sourceValue)
+	if err != nil {
+		return err
+	}
+	var directoryPage *uint8
+	if strings.TrimSpace(*directoryValue) != "" {
+		address, parseErr := tooling.ParseSPCAddress(*directoryValue)
+		if parseErr != nil || address > 0xff {
+			return fmt.Errorf("parse --directory-page %q (want hexadecimal byte)", *directoryValue)
+		}
+		value := uint8(address)
+		directoryPage = &value
+	}
+	report, err := tooling.BuildAPUAudit(tooling.APUAuditOptions{
+		Prefix: *prefix, SPCPath: *spcPath, ARAMPath: *aramPath, DSPPath: *dspPath,
+		WrittenPath: *writtenPath, TracePath: *tracePath, DirectoryPage: directoryPage,
+		Sources: sources,
+	})
+	if err != nil {
+		return err
+	}
+	if err := tooling.WriteAPUAudit(os.Stdout, report, *format); err != nil {
+		return err
+	}
+	if *strict && report.Summary.InvalidSamples != 0 {
+		return fmt.Errorf("APU audit found %d invalid live sample(s)", report.Summary.InvalidSamples)
+	}
+	return nil
 }
 
 func disassemble(args []string) error {

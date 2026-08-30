@@ -2,6 +2,7 @@
 #define SNESRECOMP_APU_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "dsp.h"
@@ -25,6 +26,7 @@ typedef struct Timer {
 
 #define APU_PORT_QUEUE_LEN 128u
 #define APU_PORT_MIN_DWELL 128u
+#define APU_RAM_WRITE_BITMAP_BYTES (0x10000u / 8u)
 
 typedef struct ApuPortWrite {
     uint64_t target_sample;
@@ -38,6 +40,8 @@ struct Apu {
     /* Host diagnostic switch; derived from the environment and deliberately
      * outside the serialized ram..pad compatibility span. */
     bool diagnosticCountersEnabled;
+    bool auditWritesEnabled;
+    uint8_t ramWritten[APU_RAM_WRITE_BITMAP_BYTES];
     uint8_t ram[0x10000];
     bool romReadable;
     uint8_t dspAdr;
@@ -73,6 +77,7 @@ void apu_saveload(Apu *apu, SaveLoadInfo *info);
 void apu_schedulePortWrite(Apu *apu, uint8_t port, uint8_t value,
                            uint64_t target_sample);
 void apu_clearPortQueue(Apu *apu);
+void apu_markRamWritten(Apu *apu, uint16_t address, size_t count);
 
 extern void (*g_apu_spc_port_write_trace_hook)(Apu *, uint8_t, uint8_t);
 extern void (*g_apu_spc_dsp_write_hook)(Apu *, uint8_t, uint8_t);

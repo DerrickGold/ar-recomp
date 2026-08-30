@@ -634,6 +634,59 @@ uint64_t RtlApuCycleCount(void) {
     return cycles;
 }
 
+static bool write_apu_audit_file(const char *prefix, const char *suffix,
+                                 const uint8_t *data, size_t size) {
+    char path[1024];
+    FILE *file;
+    size_t transferred;
+    int close_result;
+    if (snprintf(path, sizeof(path), "%s%s", prefix, suffix) >=
+        (int)sizeof(path)) return false;
+    file = fopen(path, "wb");
+    if (file == NULL) return false;
+    transferred = fwrite(data, 1u, size, file);
+    close_result = fclose(file);
+    return transferred == size && close_result == 0;
+}
+
+int RtlCaptureApuAudit(const char *prefix) {
+    enum { kCaptureBytes = SR_APU_RAM_BYTE_COUNT +
+                           SR_DSP_REGISTER_BYTE_COUNT +
+                           APU_RAM_WRITE_BITMAP_BYTES };
+    uint8_t *capture;
+    uint8_t *aram;
+    uint8_t *dsp;
+    uint8_t *written;
+    char trace_path[1024];
+    bool success;
+    if (prefix == NULL || prefix[0] == '\0' || g_snes == NULL ||
+        g_snes->apu == NULL || g_snes->apu->dsp == NULL ||
+        !g_snes->apu->auditWritesEnabled) return 0;
+    capture = (uint8_t *)malloc(kCaptureBytes);
+    if (capture == NULL) return 0;
+    aram = capture;
+    dsp = aram + SR_APU_RAM_BYTE_COUNT;
+    written = dsp + SR_DSP_REGISTER_BYTE_COUNT;
+    RtlApuLock();
+    memcpy(aram, g_snes->apu->ram, SR_APU_RAM_BYTE_COUNT);
+    dsp_copyRegisters(g_snes->apu->dsp, dsp);
+    memcpy(written, g_snes->apu->ramWritten,
+           APU_RAM_WRITE_BITMAP_BYTES);
+    RtlApuUnlock();
+    success = write_apu_audit_file(
+                  prefix, ".aram", aram, SR_APU_RAM_BYTE_COUNT) &&
+              write_apu_audit_file(
+                  prefix, ".dsp", dsp, SR_DSP_REGISTER_BYTE_COUNT) &&
+              write_apu_audit_file(
+                  prefix, ".written", written,
+                  APU_RAM_WRITE_BITMAP_BYTES);
+    if (snprintf(trace_path, sizeof(trace_path), "%s.audio.jsonl", prefix) >=
+        (int)sizeof(trace_path) || audio_trace_dump_jsonl(trace_path) != 0)
+        success = false;
+    free(capture);
+    return success ? 1 : 0;
+}
+
 void RtlSetApuCatchupSuppressed(bool suppressed) {
     RtlApuLock();
     g_apu_catchup_suppressed = suppressed;
@@ -654,7 +707,13 @@ void RtlApuWrite(uint16 address, uint8 value) {
     RtlApuLock();
     rtl_accumulate_apu_catchup();
     snes_catchupApu(g_snes);
-    audio_trace_on_cpu_port_write((uint8)port, value);
+    audio_trace_on_cpu_port_write_at(
+        (uint8)port, value,
+        g_sr_block_index != 0u
+            ? g_sr_block_ring[(g_sr_block_index - 1u) &
+                              kRuntimeBlockTraceRingMask]
+            : 0u,
+        g_last_recomp_func);
     if (RtlApuProfileIsEnabled()) {
         atomic_fetch_add_explicit(&s_apuprof_port_writes, 1u,
                                   memory_order_relaxed);
@@ -749,6 +808,8 @@ static bool upload_spc_image(CpuState *cpu, bool update_result) {
         ? audio_trace_wall_ns() : 0u;
     bool initial_upload;
     bool success;
+    bool track_writes;
+    uint8_t *customize_before = NULL;
     if (cpu == NULL || g_snes == NULL || g_snes->apu == NULL || g_rom == NULL)
         return false;
     if (g_rtl_game_audio == NULL ||
@@ -763,18 +824,38 @@ static bool upload_spc_image(CpuState *cpu, bool update_result) {
     upload.apu_ram = g_snes->apu->ram;
     upload.rom_byte_size = rom_size();
     upload.apu_ram_byte_size = SR_APU_RAM_BYTE_COUNT;
+    track_writes = g_snes->apu->auditWritesEnabled;
+    if (track_writes)
+        sr_spc_upload_begin_write_tracking(
+            g_snes->apu->ramWritten, sizeof(g_snes->apu->ramWritten));
     success = sr_spc_upload_image(g_rom, rom_size(), source_offset,
                                   g_snes->apu->ram, &parsed);
     if (!success) {
+        if (track_writes) sr_spc_upload_end_write_tracking();
         RtlApuUnlock();
         return false;
     }
     upload.script_offset = parsed.script_offset;
     upload.entry_point = parsed.entry_point;
     upload.block_count = parsed.block_count;
+    if (track_writes && g_rtl_game_audio->spc_upload_customize != NULL) {
+        customize_before = (uint8_t *)malloc(SR_APU_RAM_BYTE_COUNT);
+        if (customize_before != NULL)
+            memcpy(customize_before, g_snes->apu->ram,
+                   SR_APU_RAM_BYTE_COUNT);
+    }
     if (g_rtl_game_audio->spc_upload_customize != NULL)
         success = g_rtl_game_audio->spc_upload_customize(
             cpu, &upload, source24);
+    if (customize_before != NULL) {
+        uint32_t address;
+        for (address = 0u; address < SR_APU_RAM_BYTE_COUNT; ++address) {
+            if (customize_before[address] != g_snes->apu->ram[address])
+                apu_markRamWritten(g_snes->apu, (uint16_t)address, 1u);
+        }
+        free(customize_before);
+    }
+    if (track_writes) sr_spc_upload_end_write_tracking();
     if (!success) {
         RtlApuUnlock();
         return false;

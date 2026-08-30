@@ -5,6 +5,7 @@
 #include "snes.h"
 #include "spc.h"
 #include "runner_internal.h"
+#include "snesrecomp/host/audio_trace.h"
 
 #include <stddef.h>
 #include <stdlib.h>
@@ -48,11 +49,15 @@ _Static_assert((APU_PORT_QUEUE_LEN & (APU_PORT_QUEUE_LEN - 1u)) == 0u,
 
 Apu *apu_init(void) {
     const char *diagnostics;
+    const char *audit_prefix;
     Apu *apu = (Apu *)calloc(1u, sizeof(*apu));
     if (apu == NULL) return NULL;
     diagnostics = getenv("SNESRECOMP_SPC_DIAGNOSTICS");
     apu->diagnosticCountersEnabled = diagnostics != NULL &&
         diagnostics[0] != '\0' && diagnostics[0] != '0';
+    audit_prefix = getenv("SNESRECOMP_APU_AUDIT_PREFIX");
+    apu->auditWritesEnabled = audit_prefix != NULL &&
+        audit_prefix[0] != '\0';
     apu->spc = spc_init(apu);
     apu->dsp = dsp_init(apu->ram);
     if (apu->spc == NULL || apu->dsp == NULL) {
@@ -91,6 +96,7 @@ void apu_reset(Apu *apu) {
     spc_reset(apu->spc);
     dsp_reset(apu->dsp);
     memset(apu->ram, 0, sizeof(apu->ram));
+    memset(apu->ramWritten, 0, sizeof(apu->ramWritten));
     apu->dspAdr = 0u;
     apu->cycles = 0u;
     apu->sampleClock = 0u;
@@ -105,9 +111,20 @@ void apu_reset(Apu *apu) {
     apu_clearPortQueue(apu);
 }
 
+void apu_markRamWritten(Apu *apu, uint16_t address, size_t count) {
+    size_t index;
+    if (apu == NULL || !apu->auditWritesEnabled) return;
+    for (index = 0u; index < count; ++index) {
+        const uint16_t current = (uint16_t)(address + index);
+        apu->ramWritten[current >> 3] |=
+            (uint8_t)(1u << (current & 7u));
+    }
+}
+
 static void apply_port_write(Apu *apu, const ApuPortWrite *write) {
     const uint8_t port = (uint8_t)(write->port & 3u);
     apu->inPorts[port] = write->val;
+    audio_trace_on_cpu_port_apply(port, write->val);
     if (sr_runner_audio_trace_enabled(SR_AUDIO_TRACE_MASK_APU_PORT_APPLY))
         sr_runner_emit_audio_trace(
             apu, SR_AUDIO_TRACE_APU_PORT_APPLY, 0u, port, 0u,
@@ -162,6 +179,8 @@ void apu_saveload(Apu *apu, SaveLoadInfo *info) {
         info->func(info, apu->portLastValid, sizeof(apu->portLastValid));
         if (g_apu_extra_saveload_hook != NULL)
             g_apu_extra_saveload_hook(apu, info);
+        if (!info->saving && !info->failed && apu->auditWritesEnabled)
+            memset(apu->ramWritten, 0xff, sizeof(apu->ramWritten));
         return;
     }
     saveload_bytes(info, apu->ram, sizeof(apu->ram));
@@ -200,6 +219,8 @@ void apu_saveload(Apu *apu, SaveLoadInfo *info) {
     saveload_bytes(info, apu->portLastVal, sizeof(apu->portLastVal));
     saveload_bytes(info, apu->portLastValid, sizeof(apu->portLastValid));
     if (g_apu_extra_saveload_hook != NULL) g_apu_extra_saveload_hook(apu, info);
+    if (!info->saving && !info->failed && apu->auditWritesEnabled)
+        memset(apu->ramWritten, 0xff, sizeof(apu->ramWritten));
 }
 
 uint64_t snes_apu_cycle_count(void) {
@@ -269,6 +290,7 @@ uint8_t apu_cpuRead(Apu *apu, uint16_t address) {
         case 0xf7u: {
             const uint8_t port = (uint8_t)(address - 0xf4u);
             const uint8_t value = apu->inPorts[port];
+            audio_trace_on_spc_port_read(port, value);
             if (sr_runner_audio_trace_enabled(
                     SR_AUDIO_TRACE_MASK_SPC_PORT_READ))
                 sr_runner_emit_audio_trace(
@@ -365,4 +387,5 @@ void apu_cpuWrite(Apu *apu, uint16_t address, uint8_t value) {
         default: break;
     }
     apu->ram[address] = value;
+    if (apu->auditWritesEnabled) apu_markRamWritten(apu, address, 1u);
 }
