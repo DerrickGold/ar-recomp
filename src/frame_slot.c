@@ -35,24 +35,6 @@
 extern bool g_ws_active;
 extern int g_ws_extra;
 extern bool g_diorama_frame_active;
-extern uint8_t g_hud_obj_pixels[];
-
-static void InitHostArgbSurface(
-    SrPpuSurfaceView *surface, const uint8_t *pixels,
-    int width, int height) {
-  if (!surface || !pixels || width <= 0 || height <= 0) return;
-  const uint64_t pitch = (uint64_t)(uint32_t)width * sizeof(uint32_t);
-  *surface = (SrPpuSurfaceView){
-    .flags = SR_PPU_SURFACE_BOUND | SR_PPU_SURFACE_HAS_CONTENT,
-    .pixel_format = SR_PPU_PIXEL_FORMAT_ARGB8888_U32,
-    .data = pixels,
-    .byte_size = pitch * (uint32_t)height,
-    .pitch_bytes = pitch,
-    .width_pixels = (uint32_t)width,
-    .height_pixels = (uint32_t)height,
-    .scale = 1u,
-  };
-}
 
 /* Self-calibrating velocity normalization uses a recent-activity EMA, not a
  * running or decaying peak. Live traces showed ordinary horizontal velocity at
@@ -728,9 +710,7 @@ void FrameSlot_Capture(FrameSlot *dst) {
 
     ActRaiser_HudObjIconRange(&dst->hud_icon_first, &dst->hud_icon_count);
     if (dst->hud_icon_count)
-      InitHostArgbSurface(
-          &dst->hud_obj_surface, g_hud_obj_pixels,
-          dst->snes_width, dst->snes_height);
+      ActRaiser_HudObjSurfaceView(&dst->hud_obj_surface);
 
     /* Only needed when an OBJ overlay/HUD icon is active this frame (§2.8
      * cost note). */

@@ -2482,6 +2482,33 @@ bool ActRaiser_HudObjIconRange(uint8_t *first, uint8_t *count) {
   return s_hud_obj_icon_count != 0;
 }
 
+bool ActRaiser_HudObjSurfaceView(SrPpuSurfaceView *surface) {
+  if (!surface) return false;
+  *surface = (SrPpuSurfaceView){0};
+  if (!s_hud_obj_icon_count) return false;
+
+  extern int g_ws_extra;
+  extern uint8_t g_hud_obj_pixels[];
+  const int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
+  const int height = kActRaiserAuthenticHeight;
+  if (width <= 0 || width > (int)SR_PPU_SURFACE_MAX_WIDTH ||
+      height > kHostDisplayFramebufferHeight)
+    return false;
+
+  const uint64_t pitch = (uint64_t)(uint32_t)width * sizeof(uint32_t);
+  *surface = (SrPpuSurfaceView){
+    .flags = SR_PPU_SURFACE_BOUND | SR_PPU_SURFACE_HAS_CONTENT,
+    .pixel_format = SR_PPU_PIXEL_FORMAT_ARGB8888_U32,
+    .data = g_hud_obj_pixels,
+    .byte_size = pitch * (uint32_t)height,
+    .pitch_bytes = pitch,
+    .width_pixels = (uint32_t)width,
+    .height_pixels = (uint32_t)height,
+    .scale = 1u,
+  };
+  return true;
+}
+
 /* Promote a validated fixed-screen HUD icon out of OAM.
  *
  * Action's $00:923A icon uses tiles $D4-$D7 in the first four slots.
