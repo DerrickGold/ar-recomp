@@ -131,7 +131,7 @@ static const SnesRunnerApi k_runner_api = {
         SR_RUNNER_CAP_PPU_FRAME_RESET |
         SR_RUNNER_CAP_PPU_OBJ_CAPTURE |
         SR_RUNNER_CAP_APU_STATE_SNAPSHOT |
-        SR_RUNNER_CAP_DETERMINISM_DIGEST,
+        SR_RUNNER_CAP_SEMANTIC_DIGEST,
     get_component,
     query_generations,
     borrow_memory,
@@ -177,7 +177,7 @@ static const SnesRunnerApi k_runner_api = {
     reset_ppu_frame_state,
     configure_ppu_obj_capture,
     sr_runner_query_apu_state,
-    query_determinism_digest,
+    sr_runner_query_semantic_digest,
 };
 
 /* Keep synchronized with the source boundary in runner.cmake. */
@@ -215,7 +215,7 @@ static const SrRunnerDescriptor k_runner = {
         SR_RUNNER_CAP_PPU_FRAME_RESET |
         SR_RUNNER_CAP_PPU_OBJ_CAPTURE |
         SR_RUNNER_CAP_APU_STATE_SNAPSHOT |
-        SR_RUNNER_CAP_DETERMINISM_DIGEST,
+        SR_RUNNER_CAP_SEMANTIC_DIGEST,
     .implementation = "portable",
 };
 
@@ -287,21 +287,18 @@ static void invalidate_lifetime(Snes *snes) {
 
 void sr_runner_note_tick(Snes *snes) {
     if (snes == NULL) return;
-    snes->abiScanoutAvailable = false;
     ++snes->abiTickGeneration;
     invalidate_lifetime(snes);
 }
 
 void sr_runner_note_reset(Snes *snes) {
     if (snes == NULL) return;
-    snes->abiScanoutAvailable = false;
     ++snes->abiResetGeneration;
     invalidate_lifetime(snes);
 }
 
 void sr_runner_note_load(Snes *snes) {
     if (snes == NULL) return;
-    snes->abiScanoutAvailable = false;
     ++snes->abiLoadGeneration;
     invalidate_lifetime(snes);
 }

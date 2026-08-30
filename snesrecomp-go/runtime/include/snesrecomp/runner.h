@@ -9,3 +9,4 @@
 #pragma once
 
 #include "snesrecomp/runner/api.h"
+#include "snesrecomp/runner/replay.h"

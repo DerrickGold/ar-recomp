@@ -14,13 +14,10 @@ struct SaveLoadInfo {
     SaveLoadInfoFunc *func;
     bool saving;
     bool portable;
-    /* Digest-only mode: encode emulated semantic state while omitting
-     * host-consumed presentation transport such as the DSP PCM ring. */
-    bool semantic;
     bool failed;
 };
 
-/* Legacy callers leave portable and semantic clear and retain the historical
+/* Legacy callers leave portable clear and retain the historical
  * raw-memory callback contract. Snapshot files set portable and use these
  * canonical little-endian primitives instead. */
 void saveload_bytes(SaveLoadInfo *info, void *data, size_t size);

@@ -6,6 +6,7 @@ extern "C" {
 #include "dsp.h"
 #include "snesrecomp/host/audio_trace.h"
 #include "saveload.h"
+#include "semantic_state.h"
 }
 
 #include <algorithm>
@@ -235,6 +236,102 @@ void saveloadBank(SaveLoadInfo *info, DspState& state) {
   saveload_bool(info, &state.echoGateRight);
   saveload_u8(info, &state.echoLatchedEsa);
   saveload_u8(info, &state.echoLatchedEdl);
+}
+
+/* Schema 2 is intentionally spelled out separately from saveloadBank. A
+ * save-state revision must not redefine the canonical replay digest. */
+void semanticWindowV2(SnesSemanticWriter *writer,
+                      const SampleWindow& window) {
+  snes_semantic_write_i16(writer, window.newest);
+  snes_semantic_write_i16(writer, window.old);
+  snes_semantic_write_i16(writer, window.older);
+  snes_semantic_write_i16(writer, window.oldest);
+}
+
+void semanticVoiceV2(SnesSemanticWriter *writer, const VoiceState& voice) {
+  snes_semantic_write_u16(writer, voice.brrAddress);
+  snes_semantic_write_u16(writer, voice.decoderAddress);
+  snes_semantic_write_u16(writer, voice.headerAddress);
+  snes_semantic_write_u8(writer, voice.brrSampleIndex);
+  snes_semantic_write_u16(writer, voice.pitchCounter);
+  semanticWindowV2(writer, voice.window);
+  for (const auto sample : voice.pending)
+    snes_semantic_write_i16(writer, sample);
+  snes_semantic_write_u8(writer, voice.pendingHead);
+  snes_semantic_write_u8(writer, voice.pendingCount);
+  for (const auto& decode : voice.scheduledDecodes) {
+    snes_semantic_write_u16(writer, decode.address);
+    snes_semantic_write_u8(writer, decode.offset);
+  }
+  snes_semantic_write_u8(writer, voice.scheduledDecodeCount);
+  snes_semantic_write_i16(writer, voice.decodePrev1);
+  snes_semantic_write_i16(writer, voice.decodePrev2);
+  snes_semantic_write_u16(writer, voice.envelope);
+  snes_semantic_write_u8(
+      writer, static_cast<std::uint8_t>(voice.phase));
+  snes_semantic_write_u8(writer, voice.konDelay);
+  snes_semantic_write_u8(writer, voice.computesSinceKeyOn);
+  snes_semantic_write_u8(writer, voice.computesAtRestart);
+  snes_semantic_write_u8(writer, voice.pitchCaptureHold);
+  snes_semantic_write_bool(writer, voice.restartPending);
+  snes_semantic_write_bool(writer, voice.startupWalks);
+  snes_semantic_write_u16(writer, voice.bentGainRef);
+}
+
+void semanticBankV2(SnesSemanticWriter *writer, const DspState& state) {
+  snes_semantic_write_bytes(writer, state.regs.data(), state.regs.size());
+  snes_semantic_write_u16(writer, state.globalCounter);
+  snes_semantic_write_u32(writer, state.sampleIndex);
+  snes_semantic_write_u8(writer, state.internalKon);
+  snes_semantic_write_bytes(
+      writer, state.envxStage.data(), state.envxStage.size());
+  snes_semantic_write_u8(writer, state.preparedEndx);
+  snes_semantic_write_i16(writer, state.noiseLevel);
+  snes_semantic_write_u16(writer, state.echoIndex);
+  snes_semantic_write_u16(writer, state.echoLength);
+  snes_semantic_write_u8(writer, state.echoAppliedEsa);
+  for (const auto sample : state.echoFirLeft)
+    snes_semantic_write_i16(writer, sample);
+  for (const auto sample : state.echoFirRight)
+    snes_semantic_write_i16(writer, sample);
+  snes_semantic_write_u8(writer, state.echoFirPos);
+  for (const auto& voice : state.voices) semanticVoiceV2(writer, voice);
+  snes_semantic_write_u8(writer, state.slotCursor);
+  snes_semantic_write_bool(writer, state.primed);
+  snes_semantic_write_i32(writer, static_cast<std::int32_t>(state.mixLeft));
+  snes_semantic_write_i32(writer, static_cast<std::int32_t>(state.mixRight));
+  snes_semantic_write_i32(
+      writer, static_cast<std::int32_t>(state.echoSendLeft));
+  snes_semantic_write_i32(
+      writer, static_cast<std::int32_t>(state.echoSendRight));
+  snes_semantic_write_i16(writer, state.slotFrame.left);
+  snes_semantic_write_i16(writer, state.slotFrame.right);
+  snes_semantic_write_bool(writer, state.echoWritePending);
+  snes_semantic_write_u16(writer, state.echoWriteEntry);
+  snes_semantic_write_bytes(
+      writer, state.echoWriteBytes.data(), state.echoWriteBytes.size());
+  for (const auto amplitude : state.voiceAmplitude)
+    snes_semantic_write_i32(writer, static_cast<std::int32_t>(amplitude));
+  for (const auto amplitude : state.modulatorAmplitude)
+    snes_semantic_write_i32(writer, static_cast<std::int32_t>(amplitude));
+  snes_semantic_write_bytes(
+      writer, state.preparedOutx.data(), state.preparedOutx.size());
+  snes_semantic_write_bytes(
+      writer, state.preparedEnvx.data(), state.preparedEnvx.size());
+  for (const auto pitch : state.pitchLatch)
+    snes_semantic_write_u16(writer, pitch);
+  for (const auto pitch : state.pitchLatchOld)
+    snes_semantic_write_u16(writer, pitch);
+  snes_semantic_write_u8(writer, state.pitchReloadPending);
+  snes_semantic_write_u8(writer, state.pitchReloadAge);
+  snes_semantic_write_i32(
+      writer, static_cast<std::int32_t>(state.echoFirOutLeft));
+  snes_semantic_write_i32(
+      writer, static_cast<std::int32_t>(state.echoFirOutRight));
+  snes_semantic_write_bool(writer, state.echoGateLeft);
+  snes_semantic_write_bool(writer, state.echoGateRight);
+  snes_semantic_write_u8(writer, state.echoLatchedEsa);
+  snes_semantic_write_u8(writer, state.echoLatchedEdl);
 }
 
 }  // namespace
@@ -507,6 +604,17 @@ extern "C" void sr_dsp_accuracy_saveload(SrDspAccuracy *accuracy,
         accuracy->activeBankMask |= static_cast<std::uint8_t>(1u << bank);
     }
   }
+}
+
+extern "C" void sr_dsp_accuracy_write_semantic_v2(
+    const SrDspAccuracy *accuracy, SnesSemanticWriter *writer) {
+  if (accuracy == nullptr || writer == nullptr) {
+    if (writer != nullptr) writer->failed = true;
+    return;
+  }
+  for (const auto& bank : accuracy->banks) semanticBankV2(writer, bank);
+  snes_semantic_write_u8(writer, accuracy->activeBankMask);
+  snes_semantic_write_bool(writer, accuracy->extendedWasEnabled);
 }
 
 extern "C" void sr_dsp_accuracy_decode_brr(

@@ -119,14 +119,18 @@ For one linked runner build and host target, identical ROM bytes, initial
 serialized semantic state, game module, emulation-affecting configuration,
 host-frame input sequence, adapter schedule, and APU production schedule
 produce the same schema-versioned semantic digest at equivalent safe points.
-The canonical stream fixes integer byte order and excludes host pointers,
-wall-clock time, presentation allocation padding, and the generated DSP PCM
-transport ring/read cursor.
+The digest-owned schema fixes integer byte order and is independent from the
+save-state traversal. It excludes host pointers, wall-clock time, presentation
+allocation padding, DSP PCM delivery, voice-bus mixing policy, diagnostics,
+and game-authored native/HLE extension save data. If such an extension owns
+additional emulation-affecting state, its adapter must checkpoint that state
+through a separate game-owned canonical digest.
 
 Presentation determinism additionally requires the same frame policy,
 published enhancement resources, scanout schedule, and renderer selection.
-The digest covers the completed logical canvas, including active margins, but
-not unused surface storage. Fast/reference renderer parity remains a validation
+The digest is returned by the scanout transaction that produced it and covers
+the completed logical canvas, including active margins, but not unused surface
+storage. Fast/reference renderer parity remains a validation
 gate; it is not implied merely because both implementations share a digest
 schema.
 

@@ -10,6 +10,7 @@ extern "C" {
 #endif
 
 typedef struct SaveLoadInfo SaveLoadInfo;
+typedef struct SnesSemanticWriter SnesSemanticWriter;
 typedef struct SrDspAccuracy SrDspAccuracy;
 
 typedef struct SrDspAccuracyFrame {
@@ -56,6 +57,8 @@ void sr_dsp_accuracy_get_voice(const SrDspAccuracy *accuracy, int channel,
                                SrDspAccuracyVoice *voice);
 uint8_t sr_dsp_accuracy_slot(const SrDspAccuracy *accuracy);
 void sr_dsp_accuracy_saveload(SrDspAccuracy *accuracy, SaveLoadInfo *info);
+void sr_dsp_accuracy_write_semantic_v2(
+    const SrDspAccuracy *accuracy, SnesSemanticWriter *writer);
 
 void sr_dsp_accuracy_decode_brr(const uint8_t block[9], int16_t old,
                                 int16_t older, int16_t samples[16]);

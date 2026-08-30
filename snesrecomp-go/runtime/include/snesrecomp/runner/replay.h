@@ -1,6 +1,6 @@
 /**
- * @file input_replay.h
- * @brief Canonical, transport-neutral controller input replay artifacts.
+ * @file replay.h
+ * @brief Canonical, transport-neutral runner input replay artifacts.
  */
 #pragma once
 
@@ -26,8 +26,12 @@ extern "C" {
     (SR_INPUT_REPLAY_CHECKPOINT_SEMANTIC_VALID |                         \
      SR_INPUT_REPLAY_CHECKPOINT_PRESENTATION_VALID)
 
+/** Exact-write callback. `OK` means all `byte_count` bytes were consumed. */
 typedef SrResult SrInputReplayWriteFunc(
     void *user_data, const uint8_t *bytes, uint32_t byte_count);
+/** Exact-read callback. `OK` means all bytes were produced; `UNAVAILABLE`
+ * means physical EOF with no bytes consumed. Other results retain their usual
+ * meaning. A non-OK callback must not partially consume the request. */
 typedef SrResult SrInputReplayReadFunc(
     void *user_data, uint8_t *bytes, uint32_t byte_count);
 
@@ -59,8 +63,8 @@ typedef struct SrInputReplayFrame {
     ((uint32_t)(offsetof(SrInputReplayFrame, reserved) +                 \
                 sizeof(((SrInputReplayFrame *)0)->reserved)))
 
-/** Optional checkpoint paired with the most recently written frame. Schema
- * versions are defined by the digest producer, not by the replay container. */
+/** Optional, unique checkpoint paired with the most recently written frame.
+ * Schema versions are defined by the digest producers, not this container. */
 typedef struct SrInputReplayCheckpoint {
     uint32_t struct_size;
     uint32_t flags;
@@ -93,40 +97,19 @@ typedef struct SrInputReplayRecord {
     ((uint32_t)(offsetof(SrInputReplayRecord, checkpoint) +              \
                 sizeof(((SrInputReplayRecord *)0)->checkpoint)))
 
-/** Caller-owned streaming writer. Initialize with zeroes, then call begin,
- * append one contiguous host-frame record per emulation tick, and finish. */
+/** Opaque caller-owned streaming contexts. Zero-initialize before `begin` and
+ * do not inspect or modify storage while an operation is open. The fixed
+ * storage extent is ABI, but its contents are not. */
 typedef struct SrInputReplayWriter {
-    uint32_t struct_size;
-    uint32_t state;
-    SrInputReplayWriteFunc *write;
-    void *user_data;
-    uint64_t start_frame_ordinal;
-    uint64_t next_frame_ordinal;
-    uint64_t frame_count;
-    uint64_t last_frame_ordinal;
+    uint64_t storage[8];
 } SrInputReplayWriter;
 
-#define SR_INPUT_REPLAY_WRITER_V1_SIZE                                  \
-    ((uint32_t)(offsetof(SrInputReplayWriter, last_frame_ordinal) +       \
-                sizeof(((SrInputReplayWriter *)0)->last_frame_ordinal)))
-
-/** Caller-owned streaming reader. `next` returns `SR_RESULT_UNAVAILABLE`
- * only after a valid footer has been consumed. An early transport EOF is a
- * malformed/truncated artifact and returns `SR_RESULT_INVALID_ARGUMENT`. */
 typedef struct SrInputReplayReader {
-    uint32_t struct_size;
-    uint32_t state;
-    SrInputReplayReadFunc *read;
-    void *user_data;
-    uint64_t start_frame_ordinal;
-    uint64_t next_frame_ordinal;
-    uint64_t frame_count;
-    uint64_t last_frame_ordinal;
+    uint64_t storage[8];
 } SrInputReplayReader;
 
-#define SR_INPUT_REPLAY_READER_V1_SIZE                                  \
-    ((uint32_t)(offsetof(SrInputReplayReader, last_frame_ordinal) +       \
-                sizeof(((SrInputReplayReader *)0)->last_frame_ordinal)))
+#define SR_INPUT_REPLAY_WRITER_INIT {{0u}}
+#define SR_INPUT_REPLAY_READER_INIT {{0u}}
 
 SrResult sr_input_replay_writer_begin(
     SrInputReplayWriter *writer, SrInputReplayWriteFunc *write,
@@ -141,6 +124,9 @@ SrResult sr_input_replay_writer_finish(SrInputReplayWriter *writer);
 SrResult sr_input_replay_reader_begin(
     SrInputReplayReader *reader, SrInputReplayReadFunc *read,
     void *user_data, SrInputReplayHeader *out_header);
+/** Returns `UNAVAILABLE` only after a valid footer and physical EOF. Early EOF,
+ * trailing bytes, duplicate checkpoints, and malformed records permanently
+ * fail the reader with `INVALID_ARGUMENT`. */
 SrResult sr_input_replay_reader_next(
     SrInputReplayReader *reader, SrInputReplayRecord *out_record);
 

@@ -1161,7 +1161,6 @@ static SrResult bind_ppu_output_surface(
                     ppu, request->pixels, (size_t)request->pitch_bytes,
                     request->height_pixels, render_flags))
                 return SR_RESULT_INVALID_ARGUMENT;
-            snes->abiScanoutAvailable = false;
             if (request->pixels != NULL)
                 snes->diagnosticMainSurfaceBound = true;
             return SR_RESULT_OK;

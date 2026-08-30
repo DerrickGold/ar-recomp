@@ -27,6 +27,8 @@ typedef SrResult SrRunnerPpuScanoutProvider(
 /* Private composition hooks connecting the hardware model, generated-game
  * bridge, and public opaque ABI. None exposes an internal layout publicly. */
 SrRunnerHandle *sr_runner_handle(Snes *snes);
+SrResult sr_runner_query_cpu_state_snapshot(
+    Snes *snes, SrCpuStateSnapshot *out_state);
 void sr_runner_set_cpu_state_provider(
     Snes *snes, RtlGameCpuStateQueryFunc *provider, void *user_data,
     const void *component_handle);
@@ -127,7 +129,9 @@ SrResult sr_runner_subscribe_audio_trace(
 SrResult sr_runner_unsubscribe_audio_trace(SrRunnerHandle *runner,
                                            uint64_t subscription_id);
 void sr_runner_bind_ppu_owner(Snes *snes, Ppu *ppu, bool enabled);
-void sr_runner_capture_presentation_digest(Snes *snes);
+SrResult sr_runner_query_semantic_digest(
+    SrRunnerHandle *runner, const SrSemanticDigestRequest *request,
+    SrSemanticDigestResult *out_result);
 void sr_runner_clear_event_subscriptions(Snes *snes);
 void sr_runner_clear_audio_trace_subscriptions(Snes *snes);
 SrResult sr_runner_compare_exchange_spc_pc(

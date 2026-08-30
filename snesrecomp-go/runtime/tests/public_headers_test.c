@@ -21,7 +21,7 @@
 #include "snesrecomp/spc_upload.h"
 #include "snesrecomp/support/crc32.h"
 #include "snesrecomp/support/file.h"
-#include "snesrecomp/support/input_replay.h"
+#include "snesrecomp/runner/replay.h"
 
 int main(void) {
     return SR_RUNNER_ABI_VERSION == 2u &&

@@ -1,4 +1,5 @@
-#include "snesrecomp/support/input_replay.h"
+#include "snesrecomp/runner/replay.h"
+#include "../src/support/sha256.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -55,12 +56,9 @@ static void fill_digest(uint8_t digest[32], uint8_t seed) {
 
 int main(void) {
     MemoryStream stream = {0};
-    SrInputReplayWriter writer = {
-        .struct_size = sizeof(writer),
-    };
-    SrInputReplayReader reader = {
-        .struct_size = sizeof(reader),
-    };
+    MemoryStream duplicate_checkpoint_stream = {0};
+    SrInputReplayWriter writer = SR_INPUT_REPLAY_WRITER_INIT;
+    SrInputReplayReader reader = SR_INPUT_REPLAY_READER_INIT;
     SrInputReplayHeader header = {
         .struct_size = sizeof(header),
         .flags = SR_INPUT_REPLAY_ROM_DIGEST_VALID |
@@ -107,6 +105,9 @@ int main(void) {
     check(sr_input_replay_writer_append_checkpoint(&writer, &checkpoint) ==
               SR_RESULT_OK,
           "checkpoint");
+    check(sr_input_replay_writer_append_checkpoint(&writer, &checkpoint) ==
+              SR_RESULT_INVALID_ARGUMENT,
+          "duplicate checkpoint accepted");
     frame.frame_ordinal = 41u;
     frame.packed_buttons[0] = 0x0789u;
     frame.packed_buttons[1] = 0x0abcu;
@@ -123,6 +124,19 @@ int main(void) {
               stream.bytes[128] == 'F' && stream.bytes[129] == 'R' &&
               stream.bytes[130] == 'A' && stream.bytes[131] == 'M',
           "canonical wire layout");
+    {
+        uint8_t wire_digest[32];
+        static const uint8_t expected_wire_digest[32] = {
+            0x43, 0xb9, 0x0e, 0x3b, 0x6d, 0x8d, 0xba, 0x67,
+            0x3f, 0x7f, 0x1d, 0xe8, 0x31, 0xa7, 0x95, 0xb4,
+            0x8b, 0xa3, 0x49, 0x55, 0xac, 0x38, 0xa1, 0x70,
+            0x6c, 0x93, 0xc5, 0x23, 0x02, 0x7a, 0xee, 0x56,
+        };
+        sha256_compute(stream.bytes, stream.size, wire_digest);
+        check(memcmp(wire_digest, expected_wire_digest,
+                     sizeof(wire_digest)) == 0,
+              "wire schema changed without a format-version bump");
+    }
 
     check(sr_input_replay_reader_begin(
               &reader, read_memory, &stream, &decoded) == SR_RESULT_OK &&
@@ -157,10 +171,53 @@ int main(void) {
                   SR_RESULT_UNAVAILABLE,
           "valid footer/end-of-stream");
 
+    memcpy(duplicate_checkpoint_stream.bytes, stream.bytes, 248u);
+    memcpy(duplicate_checkpoint_stream.bytes + 248u,
+           stream.bytes + 152u, 96u);
+    memcpy(duplicate_checkpoint_stream.bytes + 344u,
+           stream.bytes + 248u, full_size - 248u);
+    duplicate_checkpoint_stream.size = full_size + 96u;
+    memset(&reader, 0, sizeof(reader));
+    decoded.struct_size = sizeof(decoded);
+    check(sr_input_replay_reader_begin(
+              &reader, read_memory, &duplicate_checkpoint_stream,
+              &decoded) == SR_RESULT_OK,
+          "duplicate-checkpoint reader begin");
+    record.struct_size = sizeof(record);
+    check(sr_input_replay_reader_next(&reader, &record) == SR_RESULT_OK &&
+              record.type == SR_INPUT_REPLAY_RECORD_FRAME,
+          "duplicate-checkpoint first frame");
+    record.struct_size = sizeof(record);
+    check(sr_input_replay_reader_next(&reader, &record) == SR_RESULT_OK &&
+              record.type == SR_INPUT_REPLAY_RECORD_CHECKPOINT,
+          "duplicate-checkpoint first checkpoint");
+    record.struct_size = sizeof(record);
+    check(sr_input_replay_reader_next(&reader, &record) ==
+                  SR_RESULT_INVALID_ARGUMENT &&
+              sr_input_replay_reader_next(&reader, &record) ==
+                  SR_RESULT_INVALID_ARGUMENT,
+          "duplicate checkpoint record accepted");
+
+    stream.offset = 0u;
+    stream.size = full_size + 1u;
+    stream.bytes[full_size] = 0xa5u;
+    memset(&reader, 0, sizeof(reader));
+    decoded.struct_size = sizeof(decoded);
+    check(sr_input_replay_reader_begin(
+              &reader, read_memory, &stream, &decoded) == SR_RESULT_OK,
+          "trailing-byte reader begin");
+    do {
+        record.struct_size = sizeof(record);
+        truncated_result = sr_input_replay_reader_next(&reader, &record);
+    } while (truncated_result == SR_RESULT_OK);
+    check(truncated_result == SR_RESULT_INVALID_ARGUMENT &&
+              sr_input_replay_reader_next(&reader, &record) ==
+                  SR_RESULT_INVALID_ARGUMENT,
+          "trailing bytes accepted after footer");
+
     stream.offset = 0u;
     stream.size = full_size - 1u;
     memset(&reader, 0, sizeof(reader));
-    reader.struct_size = sizeof(reader);
     decoded.struct_size = sizeof(decoded);
     check(sr_input_replay_reader_begin(
               &reader, read_memory, &stream, &decoded) == SR_RESULT_OK,
@@ -170,11 +227,11 @@ int main(void) {
         truncated_result = sr_input_replay_reader_next(&reader, &record);
     } while (truncated_result == SR_RESULT_OK);
     check(truncated_result == SR_RESULT_INVALID_ARGUMENT &&
-              reader.state != 2u,
+              sr_input_replay_reader_next(&reader, &record) ==
+                  SR_RESULT_INVALID_ARGUMENT,
           "truncated artifact mistaken for a completed replay");
 
     memset(&reader, 0, sizeof(reader));
-    reader.struct_size = sizeof(reader);
     decoded.struct_size = sizeof(decoded);
     check(sr_input_replay_reader_begin(
               &reader, read_busy, NULL, &decoded) == SR_RESULT_BUSY,
@@ -182,7 +239,6 @@ int main(void) {
 
     memset(&stream, 0, sizeof(stream));
     memset(&writer, 0, sizeof(writer));
-    writer.struct_size = sizeof(writer);
     header.start_frame_ordinal = UINT64_MAX;
     check(sr_input_replay_writer_begin(
               &writer, write_memory, &stream, &header) == SR_RESULT_OK,

@@ -204,11 +204,10 @@ typedef struct SnesRunnerApi {
     SrResult (*query_apu_state)(
         SrRunnerHandle *runner, const SrApuStateQuery *query,
         SrApuStateSnapshot *out_state);
-    /** Produce canonical hashes for current semantic state and/or the most
-     * recently completed runner-owned presentation. */
-    SrResult (*query_determinism_digest)(
-        SrRunnerHandle *runner, const SrDeterminismDigestRequest *request,
-        SrDeterminismDigestResult *out_result);
+    /** Produce the canonical current runner-hardware semantic digest. */
+    SrResult (*query_semantic_digest)(
+        SrRunnerHandle *runner, const SrSemanticDigestRequest *request,
+        SrSemanticDigestResult *out_result);
 } SnesRunnerApi;
 
 #define SNES_RUNNER_API_V2_BASE_SIZE                                           \
@@ -337,9 +336,9 @@ typedef struct SnesRunnerApi {
     ((uint32_t)(offsetof(SnesRunnerApi, query_apu_state) +               \
                 sizeof(((SnesRunnerApi *)0)->query_apu_state)))
 
-#define SNES_RUNNER_API_DETERMINISM_DIGEST_SIZE                         \
-    ((uint32_t)(offsetof(SnesRunnerApi, query_determinism_digest) +       \
-                sizeof(((SnesRunnerApi *)0)->query_determinism_digest)))
+#define SNES_RUNNER_API_SEMANTIC_DIGEST_SIZE                            \
+    ((uint32_t)(offsetof(SnesRunnerApi, query_semantic_digest) +         \
+                sizeof(((SnesRunnerApi *)0)->query_semantic_digest)))
 
 /** @brief Stable description of the linked runner implementation. */
 typedef struct SrRunnerDescriptor {
