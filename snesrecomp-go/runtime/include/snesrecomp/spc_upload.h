@@ -73,6 +73,21 @@ bool sr_spc_upload_image(const uint8_t *rom, size_t rom_size,
                          SrSpcUploadResult *result);
 
 /**
+ * @brief Copies an exact raw ROM span into ARAM with SNES-style wrapping.
+ *
+ * This is the building block for native IPL protocols whose cartridge stream
+ * is not encoded as the shared `[length, destination, payload]` format. ROM
+ * reads mirror at `rom_size`, ARAM writes wrap at 64 KiB, and active upload
+ * write tracking records every destination byte.
+ *
+ * @param byte_count Number of bytes to copy; must not exceed 64 KiB.
+ * @return `true` when all arguments and the requested extent are valid.
+ */
+bool sr_spc_upload_copy_rom(const uint8_t *rom, size_t rom_size,
+                            size_t source_offset, uint8_t aram[0x10000],
+                            uint16_t destination, size_t byte_count);
+
+/**
  * @brief Applies a second-stage length-prefixed sample stream.
  *
  * Script bytes select chunks from `pool_offset`; decoded chunks are packed

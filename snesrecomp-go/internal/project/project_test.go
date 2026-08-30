@@ -162,3 +162,82 @@ func TestRegenerateConsumesAnalysisDatabaseAfterCanonicalEntryPruned(t *testing.
 		t.Fatalf("funcs.h omitted database-supplied continuation:\n%s", funcs)
 	}
 }
+
+func TestRegenerateZeroFactDatabaseStillEnablesExactStaticDiscovery(t *testing.T) {
+	root := t.TempDir()
+	image := make([]byte, 0x8000)
+	copy(image[0x0000:], []byte{0x20, 0x00, 0x81, 0x60}) // JSR $8100; RTS.
+	image[0x0100] = 0x60                                 // Callee RTS.
+	romPath := filepath.Join(root, "game.sfc")
+	if err := os.WriteFile(romPath, image, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	configDir := filepath.Join(root, "recomp")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "bank00.cfg"),
+		[]byte("bank = 00\nfunc Root 8000 entry_mx:1,1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	shadow, err := tooling.AnalyzeAuthoredShadow(tooling.ShadowAnalysisOptions{
+		ROMPath: romPath, CFGDir: configDir, Jobs: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, err := tooling.BuildStaticAnalysisDatabase(shadow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(database.DispatchFacts) != 0 || len(database.EntryFacts) != 0 ||
+		len(database.EntryTemplates) != 0 {
+		t.Fatalf("fixture database is not empty: %+v", database)
+	}
+	databasePath := filepath.Join(root, "saves", "static-analysis.json")
+	if err := tooling.WriteStaticAnalysisDatabaseFile(databasePath, database); err != nil {
+		t.Fatal(err)
+	}
+
+	controlPaths := DefaultPaths(root)
+	controlPaths.GeneratedDir = "build/gen-control"
+	controlPaths.FuncsHeader = "build/control-funcs.h"
+	controlPaths.Metadata = "build/control-meta.json"
+	controlPaths.RTSReport = "build/control-rts.txt"
+	controlPaths.RTSPrevious = "build/control-rts.prev.txt"
+	var controlOutput bytes.Buffer
+	control, err := Regenerate(RegenOptions{
+		Paths: controlPaths, Jobs: 1, AllowStubs: true,
+		Stdout: &controlOutput, Stderr: &controlOutput,
+	})
+	if err != nil {
+		t.Fatalf("control regeneration: %v\n%s", err, controlOutput.String())
+	}
+
+	databasePaths := DefaultPaths(root)
+	databasePaths.GeneratedDir = "build/gen-database"
+	databasePaths.FuncsHeader = "build/database-funcs.h"
+	databasePaths.Metadata = "build/database-meta.json"
+	databasePaths.RTSReport = "build/database-rts.txt"
+	databasePaths.RTSPrevious = "build/database-rts.prev.txt"
+	var databaseOutput bytes.Buffer
+	candidate, err := Regenerate(RegenOptions{
+		Paths: databasePaths, AnalysisDBPath: "saves/static-analysis.json",
+		Jobs: 1, AllowStubs: true, Stdout: &databaseOutput, Stderr: &databaseOutput,
+	})
+	if err != nil {
+		t.Fatalf("database regeneration: %v\n%s", err, databaseOutput.String())
+	}
+	if candidate.Generation.FinalEntries >= control.Generation.FinalEntries {
+		t.Fatalf("zero-fact database variants = %d, control = %d; exact static mode was not enabled",
+			candidate.Generation.FinalEntries, control.Generation.FinalEntries)
+	}
+	if candidate.Generation.SemanticSourceSHA256 ==
+		control.Generation.SemanticSourceSHA256 {
+		t.Fatal("zero-fact database unexpectedly preserved the conservative semantic source hash")
+	}
+	if !strings.Contains(databaseOutput.String(),
+		"analysis-db: loaded 0 dispatch and 0 entry fact(s)") {
+		t.Fatalf("zero-fact mode was not explicit in output:\n%s", databaseOutput.String())
+	}
+}

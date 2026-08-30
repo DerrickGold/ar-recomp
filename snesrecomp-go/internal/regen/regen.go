@@ -358,30 +358,19 @@ func (repo *repository) expandAutoVectors(logf func(string, ...any)) {
 	if bank == nil || !bank.Config.AutoVectors || len(repo.image) < 0x8000 {
 		return
 	}
-	read := func(offset int) uint16 {
-		return uint16(repo.image[0x7fe0+offset]) | uint16(repo.image[0x7fe0+offset+1])<<8
-	}
-	seeds := []struct {
-		name string
-		pc   uint16
-	}{{"I_RESET", read(0x1c)}, {"I_NMI", read(0x0a)}, {"I_IRQ", read(0x0e)}}
-	starts, names := map[uint16]struct{}{}, map[string]struct{}{}
-	for _, entry := range bank.Config.Entries {
-		starts[entry.Start] = struct{}{}
-		names[entry.Name] = struct{}{}
-	}
-	for _, seed := range seeds {
-		if seed.pc == 0 || seed.pc == 0xffff {
-			continue
+	previous := len(bank.Config.Entries)
+	bank.Config.Entries = config.AppendLoROMAutoVectorEntries(
+		repo.image, bank.Config.Entries)
+	for _, entry := range bank.Config.Entries[previous:] {
+		address := decoder.Address24(0, entry.Start)
+		if repo.canonical[address] == nil {
+			repo.canonical[address] = make(map[[2]uint8]struct{})
 		}
-		if _, found := starts[seed.pc]; found {
-			continue
-		}
-		if _, found := names[seed.name]; found {
-			continue
-		}
-		bank.Config.Entries = append(bank.Config.Entries, config.Entry{Name: seed.name, Start: seed.pc, EntryMX: config.MX{M: 1, X: 1}})
-		logf("auto_vectors: added %s at $00:%04X", seed.name, seed.pc)
+		repo.canonical[address][[2]uint8{
+			entry.EntryMX.M & 1, entry.EntryMX.X & 1,
+		}] = struct{}{}
+		logf("auto_vectors: added %s at $00:%04X M%dX%d",
+			entry.Name, entry.Start, entry.EntryMX.M&1, entry.EntryMX.X&1)
 	}
 }
 

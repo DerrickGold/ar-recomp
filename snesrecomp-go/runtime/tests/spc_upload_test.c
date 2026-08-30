@@ -50,6 +50,24 @@ static void test_rom_mirror(void) {
     check(result.entry_point == 0x0400, "mirrored entry point");
 }
 
+static void test_raw_rom_copy_and_wrapping(void) {
+    uint8_t rom[4] = {0x10, 0x20, 0x30, 0x40};
+    uint8_t aram[0x10000] = {0};
+    uint8_t written[0x2000] = {0};
+    sr_spc_upload_begin_write_tracking(written, sizeof(written));
+    check(sr_spc_upload_copy_rom(rom, sizeof(rom), 3u, aram, 0xffffu, 3u),
+          "valid raw ROM copy");
+    sr_spc_upload_end_write_tracking();
+    check(aram[0xffff] == 0x40 && aram[0] == 0x10 && aram[1] == 0x20,
+          "raw copy mirrors ROM and wraps ARAM");
+    check(marked(written, 0xffff) && marked(written, 0) &&
+              marked(written, 1) && !marked(written, 2),
+          "raw copy write provenance");
+    check(!sr_spc_upload_copy_rom(rom, sizeof(rom), 0u, aram, 0u,
+                                  0x10001u),
+          "oversized raw copy rejected");
+}
+
 static void test_sample_script(void) {
     uint8_t rom[64] = {0};
     uint8_t aram[0x10000] = {0};
@@ -91,6 +109,7 @@ static void test_invalid_arguments(void) {
 int main(void) {
     test_image_blocks_and_wrapping();
     test_rom_mirror();
+    test_raw_rom_copy_and_wrapping();
     test_sample_script();
     test_invalid_arguments();
     return failures != 0;

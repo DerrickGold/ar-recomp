@@ -809,6 +809,7 @@ static bool upload_spc_image(CpuState *cpu, bool update_result) {
     bool initial_upload;
     bool success;
     bool track_writes;
+    RtlGameSpcUploadPrepareRawFunc *prepare_raw = NULL;
     uint8_t *customize_before = NULL;
     if (cpu == NULL || g_snes == NULL || g_snes->apu == NULL || g_rom == NULL)
         return false;
@@ -824,25 +825,37 @@ static bool upload_spc_image(CpuState *cpu, bool update_result) {
     upload.apu_ram = g_snes->apu->ram;
     upload.rom_byte_size = rom_size();
     upload.apu_ram_byte_size = SR_APU_RAM_BYTE_COUNT;
+    upload.script_offset = source_offset;
+    if (g_rtl_game_audio->struct_size >= RTL_GAME_AUDIO_API_V3_SIZE)
+        prepare_raw = g_rtl_game_audio->spc_upload_prepare_raw;
     track_writes = g_snes->apu->auditWritesEnabled;
     if (track_writes)
         sr_spc_upload_begin_write_tracking(
             g_snes->apu->ramWritten, sizeof(g_snes->apu->ramWritten));
-    success = sr_spc_upload_image(g_rom, rom_size(), source_offset,
-                                  g_snes->apu->ram, &parsed);
-    if (!success) {
-        if (track_writes) sr_spc_upload_end_write_tracking();
-        RtlApuUnlock();
-        return false;
-    }
-    upload.script_offset = parsed.script_offset;
-    upload.entry_point = parsed.entry_point;
-    upload.block_count = parsed.block_count;
-    if (track_writes && g_rtl_game_audio->spc_upload_customize != NULL) {
+    if (track_writes &&
+        (prepare_raw != NULL ||
+         g_rtl_game_audio->spc_upload_customize != NULL)) {
         customize_before = (uint8_t *)malloc(SR_APU_RAM_BYTE_COUNT);
         if (customize_before != NULL)
             memcpy(customize_before, g_snes->apu->ram,
                    SR_APU_RAM_BYTE_COUNT);
+    }
+    if (prepare_raw != NULL) {
+        success = prepare_raw(cpu, &upload, source24);
+    } else {
+        success = sr_spc_upload_image(g_rom, rom_size(), source_offset,
+                                      g_snes->apu->ram, &parsed);
+        if (success) {
+            upload.script_offset = parsed.script_offset;
+            upload.entry_point = parsed.entry_point;
+            upload.block_count = parsed.block_count;
+        }
+    }
+    if (!success) {
+        free(customize_before);
+        if (track_writes) sr_spc_upload_end_write_tracking();
+        RtlApuUnlock();
+        return false;
     }
     if (g_rtl_game_audio->spc_upload_customize != NULL)
         success = g_rtl_game_audio->spc_upload_customize(

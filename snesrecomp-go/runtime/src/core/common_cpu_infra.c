@@ -357,6 +357,9 @@ static bool game_state_providers_valid(
 static bool game_audio_valid(const RtlGameAudioApi *audio) {
     const bool spc_upload = audio != NULL &&
         (audio->capabilities & RTL_GAME_AUDIO_CAP_SPC_UPLOAD) != 0u;
+    const bool raw_spc_upload = audio != NULL &&
+        audio->struct_size >= RTL_GAME_AUDIO_API_V3_SIZE &&
+        audio->spc_upload_prepare_raw != NULL;
     const bool voice_routing = audio != NULL &&
         (audio->capabilities & RTL_GAME_AUDIO_CAP_VOICE_ROUTING) != 0u;
     const bool extension = audio != NULL &&
@@ -370,7 +373,8 @@ static bool game_audio_valid(const RtlGameAudioApi *audio) {
     if (spc_upload != (audio->spc_upload_source != NULL) ||
         (!spc_upload && (audio->spc_upload_customize != NULL ||
                          audio->spc_upload_commit != NULL ||
-                         audio->spc_upload_stack_pop != NULL)))
+                         audio->spc_upload_stack_pop != NULL ||
+                         raw_spc_upload)))
         return false;
     if (voice_routing != (audio->dsp_write_routing != NULL) ||
         voice_routing != (audio->state_loaded_routing != NULL))

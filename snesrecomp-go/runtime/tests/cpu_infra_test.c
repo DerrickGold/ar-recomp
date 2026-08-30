@@ -402,6 +402,19 @@ static void route_extension_upload(
     ++extension_upload_count;
 }
 
+static bool test_spc_upload_source(CpuState *cpu, uint32_t *source24) {
+    (void)cpu;
+    if (source24 == NULL) return false;
+    *source24 = 0x008000u;
+    return true;
+}
+
+static bool test_spc_upload_prepare_raw(
+        CpuState *cpu, SrSpcUploadContext *upload, uint32_t source24) {
+    (void)cpu;
+    return upload != NULL && source24 == 0x008000u;
+}
+
 static void test_registration_and_initialization(void) {
     static const RtlGameIdentity identity = {
         .struct_size = RTL_GAME_IDENTITY_V1_SIZE,
@@ -428,9 +441,11 @@ static void test_registration_and_initialization(void) {
         .query_execution_state = query_execution_state,
     };
     static const RtlGameAudioApi audio = {
-        .struct_size = RTL_GAME_AUDIO_API_V2_SIZE,
-        .capabilities = RTL_GAME_AUDIO_CAP_VOICE_ROUTING |
+        .struct_size = RTL_GAME_AUDIO_API_V3_SIZE,
+        .capabilities = RTL_GAME_AUDIO_CAP_SPC_UPLOAD |
+                        RTL_GAME_AUDIO_CAP_VOICE_ROUTING |
                         RTL_GAME_AUDIO_CAP_EXTENSION,
+        .spc_upload_source = test_spc_upload_source,
         .dsp_write_routing = route_dsp_write,
         .state_loaded_routing = route_state_loaded,
         .extension_dsp_write = route_extension_dsp_write,
@@ -438,6 +453,7 @@ static void test_registration_and_initialization(void) {
         .extension_spc_cycle = route_extension_spc_cycle,
         .extension_save = route_extension_save,
         .extension_upload = route_extension_upload,
+        .spc_upload_prepare_raw = test_spc_upload_prepare_raw,
     };
     static const RtlGameModule module = {
         .abi_version = RTL_GAME_MODULE_ABI_VERSION,

@@ -143,6 +143,12 @@ typedef struct RtlGameStateProviderApi {
 typedef bool RtlGameSpcUploadSourceFunc(CpuState *cpu, uint32_t *source24);
 typedef bool RtlGameSpcUploadCustomizeFunc(
     CpuState *cpu, const SrSpcUploadContext *upload, uint32_t source24);
+/** Optional raw transaction used instead of the shared IPL block parser. The
+ * callback runs under the APU lock and may copy ROM bytes into ARAM, update
+ * CPU-visible exit state, and fill upload metadata/control fields. Prefer
+ * sr_spc_upload_copy_rom so diagnostic write provenance remains complete. */
+typedef bool RtlGameSpcUploadPrepareRawFunc(
+    CpuState *cpu, SrSpcUploadContext *upload, uint32_t source24);
 typedef void RtlGameSpcUploadCommitFunc(SrSpcUploadContext *upload);
 typedef int RtlGameSpcUploadStackPopFunc(const CpuState *cpu);
 typedef void RtlGameAudioDspWriteRoutingFunc(
@@ -196,11 +202,15 @@ typedef struct RtlGameAudioApi {
     RtlGameApuPortWriteFunc *apu_port_write;
     RtlGameSpcUploadCompletedFunc *spc_upload_completed;
     RtlGameAudioMixFunc *mix_output;
+    RtlGameSpcUploadPrepareRawFunc *spc_upload_prepare_raw;
 } RtlGameAudioApi;
 
 #define RTL_GAME_AUDIO_API_V2_SIZE                                      \
     ((uint32_t)(offsetof(RtlGameAudioApi, mix_output) +                  \
                 sizeof(((RtlGameAudioApi *)0)->mix_output)))
+#define RTL_GAME_AUDIO_API_V3_SIZE                                      \
+    ((uint32_t)(offsetof(RtlGameAudioApi, spc_upload_prepare_raw) +      \
+                sizeof(((RtlGameAudioApi *)0)->spc_upload_prepare_raw)))
 
 /** One immutable module is registered before runner creation and remains alive
  * until it is replaced while no runner exists. Optional table pointers must
