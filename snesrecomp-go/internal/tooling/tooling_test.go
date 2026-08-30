@@ -531,6 +531,399 @@ data_region 00 8202 8207
 	}
 }
 
+func TestAnalyzeAuthoredShadowReportsVectorRootEntryRecoveryClasses(t *testing.T) {
+	root := t.TempDir()
+	image := make([]byte, 0x8000)
+	copy(image[0x0000:], []byte{
+		0x20, 0x00, 0x81, // JSR $8100: exact authored M/X
+		0x20, 0x10, 0x81, // JSR $8110: address recovered with different M/X
+		0x4c, 0x20, 0x81, // JMP $8120: owned internally, not a new call entry
+	})
+	image[0x0100] = 0x60
+	image[0x0110] = 0x60
+	image[0x0120] = 0x60
+	image[0x0200] = 0x60
+	copy(image[0x0300:], []byte{0x00, 0x81, 0x20, 0x81, 0x00, 0x82}) // probable same-bank entry table
+	for _, offset := range []int{0x7fea, 0x7fee, 0x7ffc} {
+		image[offset], image[offset+1] = 0x00, 0x80
+	}
+	romPath := filepath.Join(root, "fixture.sfc")
+	if err := os.WriteFile(romPath, image, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgDir := filepath.Join(root, "recomp")
+	writeTestFile(t, filepath.Join(cfgDir, "bank00.cfg"), `bank = 00
+func Reset 8000 entry_mx:1,1
+func Direct 8100 entry_mx:1,1
+func WrongMX 8110 entry_mx:0,0
+func Tail 8120 entry_mx:1,1
+func Hidden 8200 entry_mx:1,1
+`)
+
+	report, err := AnalyzeAuthoredShadow(ShadowAnalysisOptions{ROMPath: romPath, CFGDir: cfgDir, Jobs: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary := report.EntryRecovery.Summary
+	if summary.AuthoredEntries != 5 || summary.ExactVariants != 2 || summary.AddressOtherMX != 1 ||
+		summary.InternalOwned != 1 || summary.ProvenContinuations != 0 || summary.NotRecovered != 1 ||
+		summary.InitialRootVariants != 1 || summary.FinalRootVariants != 3 || summary.DecodeIssues != 0 ||
+		summary.EntriesWithPointerClusters != 3 || summary.ProbablePointerClusterEntries != 3 || summary.NotRecoveredWithPointerClusters != 1 {
+		t.Fatalf("entry recovery summary=%+v", summary)
+	}
+	statuses := make(map[string]string)
+	for _, entry := range report.EntryRecovery.Entries {
+		statuses[entry.Name] = entry.Status
+	}
+	want := map[string]string{
+		"Reset": shadowEntryRecoveryExact, "Direct": shadowEntryRecoveryExact,
+		"WrongMX": shadowEntryRecoveryAddressOnly, "Tail": shadowEntryRecoveryInternal,
+		"Hidden": shadowEntryRecoveryMissing,
+	}
+	for name, status := range want {
+		if statuses[name] != status {
+			t.Fatalf("entry %s status=%q, want %q; all=%v", name, statuses[name], status, statuses)
+		}
+	}
+	for _, name := range []string{"Direct", "Tail", "Hidden"} {
+		var found *ShadowEntryRecoveryRecord
+		for index := range report.EntryRecovery.Entries {
+			if report.EntryRecovery.Entries[index].Name == name {
+				found = &report.EntryRecovery.Entries[index]
+				break
+			}
+		}
+		if found == nil || len(found.PointerClusters) != 1 || found.PointerClusters[0].StartPC != 0x008300 ||
+			found.PointerClusters[0].EndExclusive != 0x008306 || found.PointerClusters[0].Confidence != analysis.ConfidenceProbable {
+			t.Fatalf("entry %s pointer clusters=%+v", name, found)
+		}
+	}
+	var output bytes.Buffer
+	if err := WriteShadowReport(&output, report, "text", true); err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{"vector-root entry recovery: 5 authored", "exact=2", "address-other-M/X=1", "internal-owned=1", "not-recovered=1", "authored-entry ROM pointer clusters: 3 declaration(s), 3 probable", "[ENTRY-ADDRESS-OTHER-MX]", "[ENTRY-INTERNAL-OWNED]", "[ENTRY-NOT-RECOVERED]", "pointer-cluster=$00:8300..$00:8306"} {
+		if !strings.Contains(output.String(), fragment) {
+			t.Fatalf("verbose recovery report missing %q:\n%s", fragment, output.String())
+		}
+	}
+}
+
+func TestAnalyzeAuthoredShadowReportsStaticEntryAblationRoots(t *testing.T) {
+	root := t.TempDir()
+	image := make([]byte, 0x8000)
+	copy(image[0x0000:], []byte{0x20, 0x00, 0x81, 0x60}) // Reset -> Direct1
+	copy(image[0x0100:], []byte{0x20, 0x00, 0x82, 0x60}) // Direct1 -> Direct2
+	copy(image[0x0200:], []byte{0x20, 0x00, 0x83, 0x60}) // Direct2 -> Direct3
+	copy(image[0x0300:], []byte{0x20, 0x00, 0x87, 0x60}) // demands D at the wrong authored M/X
+	copy(image[0x0400:], []byte{0x20, 0x00, 0x85, 0x60}) // cycle A -> B
+	copy(image[0x0500:], []byte{0x20, 0x00, 0x84, 0x60}) // cycle B -> A
+	image[0x0600] = 0x60                                 // independent C
+	image[0x0700] = 0x60                                 // independent D M0X0
+	copy(image[0x0800:], []byte{0x4c, 0x00, 0x89})       // external TailCaller -> TailTarget
+	image[0x0900] = 0x60
+	for _, offset := range []int{0x7fea, 0x7fee, 0x7ffc} {
+		image[offset], image[offset+1] = 0x00, 0x80
+	}
+	romPath := filepath.Join(root, "fixture.sfc")
+	if err := os.WriteFile(romPath, image, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgDir := filepath.Join(root, "recomp")
+	writeTestFile(t, filepath.Join(cfgDir, "bank00.cfg"), `bank = 00
+func Reset 8000 entry_mx:1,1
+func Direct1 8100 entry_mx:1,1
+func Direct2 8200 entry_mx:1,1
+func Direct3 8300 entry_mx:1,1
+func CycleA 8400 entry_mx:1,1
+func CycleB 8500 entry_mx:1,1
+func IndependentC 8600 entry_mx:1,1
+func WrongWidthD 8700 entry_mx:0,0
+func TailCaller 8800 entry_mx:1,1
+func TailTarget 8900 entry_mx:1,1
+`)
+
+	report, err := AnalyzeAuthoredShadow(ShadowAnalysisOptions{ROMPath: romPath, CFGDir: cfgDir, Jobs: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary := report.EntryAblation.Summary
+	if summary.AuthoredDeclarations != 10 || summary.UniqueAuthoredVariants != 10 || summary.StaticDependencyEdges != 7 ||
+		summary.VectorCoveredDeclarations != 4 || summary.IndividuallyRecoverable != 7 || summary.BatchRecoverable != 2 ||
+		summary.RetainedRootDeclarations != 4 || summary.RetainedUniqueRootVariants != 4 || summary.BatchRoutineTargets != 1 ||
+		summary.BatchTailTargets != 1 || summary.BatchComputedTargets != 0 || summary.BatchInternalContinuations != 0 {
+		t.Fatalf("entry ablation summary=%+v", summary)
+	}
+	statuses := make(map[string]ShadowEntryAblationRecord)
+	for _, entry := range report.EntryAblation.Entries {
+		statuses[entry.Name] = entry
+	}
+	for _, name := range []string{"Reset", "Direct1", "Direct2", "Direct3"} {
+		if statuses[name].Status != shadowEntryAblationVectorCovered || !statuses[name].IndividuallyRecoverable {
+			t.Fatalf("vector entry %s=%+v", name, statuses[name])
+		}
+	}
+	if statuses["CycleA"].Status != shadowEntryAblationRetained || !statuses["CycleA"].IndividuallyRecoverable ||
+		statuses["CycleB"].Status != shadowEntryAblationRecoverable || !statuses["CycleB"].IndividuallyRecoverable || statuses["CycleB"].EntryKindHint != "routine" {
+		t.Fatalf("cycle statuses A=%+v B=%+v", statuses["CycleA"], statuses["CycleB"])
+	}
+	if len(statuses["CycleA"].Incoming) != 1 || len(statuses["CycleA"].Incoming[0].Kinds) != 1 || statuses["CycleA"].Incoming[0].Kinds[0] != "direct_jsr" {
+		t.Fatalf("cycle A incoming provenance=%+v", statuses["CycleA"].Incoming)
+	}
+	for _, name := range []string{"IndependentC", "WrongWidthD"} {
+		if statuses[name].Status != shadowEntryAblationRetained || statuses[name].IndividuallyRecoverable {
+			t.Fatalf("independent entry %s=%+v", name, statuses[name])
+		}
+	}
+	if statuses["TailCaller"].Status != shadowEntryAblationRetained || statuses["TailTarget"].Status != shadowEntryAblationRecoverable ||
+		statuses["TailTarget"].EntryKindHint != "tail_target" || len(statuses["TailTarget"].Incoming) != 1 ||
+		statuses["TailTarget"].Incoming[0].Kinds[0] != "direct_tail_jump" {
+		t.Fatalf("tail statuses caller=%+v target=%+v", statuses["TailCaller"], statuses["TailTarget"])
+	}
+	var output bytes.Buffer
+	if err := WriteShadowReport(&output, report, "text", true); err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{"static entry ablation: 10 declaration(s)/10 unique variant(s), 7 dependency edge(s)", "individually recoverable=7", "inclusion-minimal roots=4 declaration(s)/4 variant(s)", "[ABLATION-RETAINED-STATIC-ROOT] $00:8400", "[ABLATION-RETAINED-STATIC-ROOT] $00:8700"} {
+		if !strings.Contains(output.String(), fragment) {
+			t.Fatalf("verbose ablation report missing %q:\n%s", fragment, output.String())
+		}
+	}
+}
+
+func TestStaticEntryAblationInventoriesHLEOnlyObligations(t *testing.T) {
+	cfg := &config.Config{
+		Entries: []config.Entry{
+			{Name: "Root", Start: 0x8000, EntryMX: config.MX{M: 1, X: 1}},
+			{Name: "ExplicitHLE", Start: 0x8100, EntryMX: config.MX{M: 1, X: 1}},
+		},
+		HLEFunctions: map[uint16]string{0x8100: "HostWhole"},
+		HLEFunctionsIf: map[uint16]config.HLEFunctionIf{
+			0x8200: {Function: "HostConditional", Predicate: "HostConditionalEnabled"},
+		},
+		HLESPCUpload: []uint16{0x8300},
+	}
+	report := analyzeShadowEntryAblation(make([]byte, 0x8000), []shadowBank{{ID: 0, Config: cfg}}, nil)
+	if report.Summary.AuthoredHLEObligations != 3 || report.Summary.HLEOnlyObligations != 2 {
+		t.Fatalf("HLE obligation summary=%+v", report.Summary)
+	}
+	if len(report.HLEObligations) != 3 {
+		t.Fatalf("HLE obligations=%+v", report.HLEObligations)
+	}
+	want := []ShadowEntryHLEObligation{
+		{PC: 0x008100, Directive: "hle_func", Function: "HostWhole", AuthoredEntry: true},
+		{PC: 0x008200, Directive: "hle_func_if", Function: "HostConditional", Predicate: "HostConditionalEnabled", AuthoredEntry: false},
+		{PC: 0x008300, Directive: "hle_spc_upload", AuthoredEntry: false},
+	}
+	for index := range want {
+		if report.HLEObligations[index] != want[index] {
+			t.Fatalf("HLE obligation %d=%+v, want %+v", index, report.HLEObligations[index], want[index])
+		}
+	}
+	if len(report.Entries) != 2 || len(report.Entries[1].AuthoredHLE) != 1 || report.Entries[1].AuthoredHLE[0] != "hle_func:HostWhole" {
+		t.Fatalf("explicit HLE entry annotation missing: %+v", report.Entries)
+	}
+}
+
+func TestShadowEntryPointerOwnershipKeepsEvidenceClassesSeparate(t *testing.T) {
+	start, end := uint32(0x008100), uint32(0x008106)
+	confirmed := []ShadowTableSpan{{StartPC: start, EndExclusive: end, Ownership: shadowTableOwnershipConfirmed}}
+	if ownership, confidence := shadowEntryPointerOwnership(start, end, 3, nil, confirmed); ownership != shadowTableOwnershipConfirmed || confidence != analysis.ConfidenceProven {
+		t.Fatalf("confirmed table ownership=%s confidence=%s", ownership, confidence)
+	}
+	candidate := []ShadowTableSpan{{StartPC: start, EndExclusive: end, Ownership: shadowTableOwnershipCandidate}}
+	if ownership, confidence := shadowEntryPointerOwnership(start, end, 3, nil, candidate); ownership != shadowTableOwnershipCandidate || confidence != analysis.ConfidenceProbable {
+		t.Fatalf("candidate table ownership=%s confidence=%s", ownership, confidence)
+	}
+	owned := map[uint32]struct{}{start + 2: {}}
+	if ownership, confidence := shadowEntryPointerOwnership(start, end, 3, owned, nil); ownership != "decoded_code_overlap" || confidence != analysis.ConfidenceSpeculative {
+		t.Fatalf("decoded overlap ownership=%s confidence=%s", ownership, confidence)
+	}
+	if ownership, confidence := shadowEntryPointerOwnership(start, end-2, 2, nil, nil); ownership != "unclaimed_rom" || confidence != analysis.ConfidenceSpeculative {
+		t.Fatalf("short unclaimed ownership=%s confidence=%s", ownership, confidence)
+	}
+}
+
+func TestAnalyzeAuthoredShadowFindsTableFirstInteriorAndEdgeTarget(t *testing.T) {
+	root := t.TempDir()
+	image := make([]byte, 0x8000)
+	copy(image[0x0200:], []byte{0x80, 0x2e})                   // BRA $8230
+	copy(image[0x0202:], []byte{0xa9, 0x01, 0x85, 0x10, 0x60}) // unconfigured, stack-balanced routine
+	image[0x0230] = 0x60
+	image[0x0240] = 0x60
+	copy(image[0x0300:], []byte{0x00, 0x82, 0x02, 0x82, 0x40, 0x82}) // missing interior target
+	copy(image[0x0310:], []byte{0x00, 0x82, 0x40, 0x82, 0x02, 0x82}) // missing trailing target
+	copy(image[0x0320:], []byte{0x00, 0x82, 0x50, 0x82, 0x40, 0x82}) // pointer shape without landing evidence
+	romPath := filepath.Join(root, "fixture.sfc")
+	if err := os.WriteFile(romPath, image, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgDir := filepath.Join(root, "recomp")
+	writeTestFile(t, filepath.Join(cfgDir, "bank00.cfg"), `bank = 00
+func First 8200 entry_mx:1,1
+func Anchor 8240 entry_mx:1,1
+`)
+
+	report, err := AnalyzeAuthoredShadow(ShadowAnalysisOptions{ROMPath: romPath, CFGDir: cfgDir, Jobs: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Summary.TableFirstTargets != 1 || report.Summary.ProbableTableFirstTargets != 1 ||
+		report.Summary.SpeculativeTableFirstTargets != 0 || len(report.TableFirstTargets) != 1 {
+		t.Fatalf("table-first summary=%+v targets=%+v", report.Summary, report.TableFirstTargets)
+	}
+	target := report.TableFirstTargets[0]
+	if target.TargetPC != 0x008202 || target.AnchorPC != 0x008240 || target.Confidence != analysis.ConfidenceProbable || len(target.Sources) != 2 {
+		t.Fatalf("table-first target=%+v", target)
+	}
+	kinds := make(map[string]bool)
+	for _, source := range target.Sources {
+		kinds[source.Kind] = true
+		if source.KnownEntries != 2 || source.DistinctKnownTargets != 2 || source.Confidence != analysis.ConfidenceProbable {
+			t.Fatalf("table-first source=%+v", source)
+		}
+	}
+	if !kinds[shadowTableFirstMissingInterior] || !kinds[shadowTableFirstMissingAfter] {
+		t.Fatalf("table-first source kinds=%v", kinds)
+	}
+	for _, candidate := range report.TableFirstTargets {
+		if candidate.TargetPC == 0x008250 {
+			t.Fatalf("uncorroborated pointer shape became a finding: %+v", candidate)
+		}
+	}
+	var output bytes.Buffer
+	if err := WriteShadowReport(&output, report, "text", true); err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{"table-first target discovery: 2 pointer seed(s) (absolute=2 base+offset=0; base arithmetic=0 base(s)/0 site(s)); 1 accepted target(s) (absolute=1 base+offset=0): 1 new landing(s), 0 address-taken internal; 1 probable, 0 speculative", "post-terminator=1", "rejected=1", "[TABLE-FIRST-TARGET] $00:8202", "class=new_landing", "source=missing_interior", "source=missing_after"} {
+		if !strings.Contains(output.String(), fragment) {
+			t.Fatalf("verbose table-first report missing %q:\n%s", fragment, output.String())
+		}
+	}
+}
+
+func TestAnalyzeAuthoredShadowUsesPointerWindowAsBoundedLandingSeed(t *testing.T) {
+	root := t.TempDir()
+	image := make([]byte, 0x8000)
+	image[0x0200] = 0x60
+	copy(image[0x0210:], []byte{0xa9, 0x01, 0x85, 0x10, 0x60}) // no decoded predecessor boundary
+	image[0x0240] = 0x60
+	image[0x0280] = 0x60
+	copy(image[0x0250:], []byte{0x84, 0x9b, 0xa2, 0x13, 0x40})       // plausible data record ending in RTI
+	copy(image[0x0300:], []byte{0x00, 0x82, 0x10, 0x82, 0x40, 0x82}) // valid pointer-seeded target
+	copy(image[0x0310:], []byte{0x00, 0x82, 0x50, 0x82, 0x40, 0x82}) // RTI-ending target must stay rejected
+	romPath := filepath.Join(root, "fixture.sfc")
+	if err := os.WriteFile(romPath, image, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgDir := filepath.Join(root, "recomp")
+	writeTestFile(t, filepath.Join(cfgDir, "bank00.cfg"), `bank = 00
+func First 8200 entry_mx:1,1
+func Anchor 8240 entry_mx:1,1
+func Last 8280 entry_mx:1,1
+`)
+
+	report, err := AnalyzeAuthoredShadow(ShadowAnalysisOptions{ROMPath: romPath, CFGDir: cfgDir, Jobs: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.LandingCandidates) != 0 {
+		t.Fatalf("fixture unexpectedly supplied a post-terminator landing: %+v", report.LandingCandidates)
+	}
+	if len(report.TableFirstTargets) != 1 || report.TableFirstTargets[0].TargetPC != 0x008210 ||
+		report.TableFirstTargets[0].LandingSeed != "pointer_window" || report.TableFirstTargets[0].Confidence != analysis.ConfidenceProbable {
+		t.Fatalf("pointer-seeded findings=%+v", report.TableFirstTargets)
+	}
+	var rtiRejection *ShadowTableFirstRejection
+	for index := range report.TableFirstRejections {
+		if report.TableFirstRejections[index].TargetPC == 0x008250 {
+			rtiRejection = &report.TableFirstRejections[index]
+			break
+		}
+	}
+	if rtiRejection == nil || rtiRejection.Reason != "rti_not_valid_for_table_pointer" {
+		t.Fatalf("pointer-seeded rejections=%+v", report.TableFirstRejections)
+	}
+}
+
+func TestAnalyzeAuthoredShadowFindsBasePlusOffsetTableTarget(t *testing.T) {
+	root := t.TempDir()
+	image := make([]byte, 0x8000)
+	copy(image[0x0000:], []byte{0x18, 0x69, 0x00, 0x82, 0x60}) // CLC; ADC #$8200; RTS
+	image[0x0200] = 0x60
+	copy(image[0x0210:], []byte{0xa9, 0x01, 0x85, 0x10, 0x60})
+	image[0x0220] = 0x60
+	image[0x0240] = 0x60
+	copy(image[0x0300:], []byte{0x00, 0x00, 0x10, 0x00, 0x20, 0x00, 0x40, 0x00}) // offsets from $8200
+	romPath := filepath.Join(root, "fixture.sfc")
+	if err := os.WriteFile(romPath, image, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgDir := filepath.Join(root, "recomp")
+	writeTestFile(t, filepath.Join(cfgDir, "bank00.cfg"), `bank = 00
+func BaseEvidence 8000 entry_mx:0,0
+func Base 8200 entry_mx:1,1
+func Middle 8220 entry_mx:1,1
+func Anchor 8240 entry_mx:1,1
+`)
+
+	report, err := AnalyzeAuthoredShadow(ShadowAnalysisOptions{ROMPath: romPath, CFGDir: cfgDir, Jobs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *ShadowTableFirstTarget
+	for index := range report.TableFirstTargets {
+		if report.TableFirstTargets[index].TargetPC == 0x008210 {
+			found = &report.TableFirstTargets[index]
+			break
+		}
+	}
+	if found == nil || found.Classification != "new_landing" || found.LandingSeed != "pointer_window" ||
+		found.Confidence != analysis.ConfidenceProbable || report.Summary.TableFirstBaseOffsetTargets < 1 ||
+		report.Summary.TableFirstBaseEvidenceBases != 1 || report.Summary.TableFirstBaseEvidenceSites != 1 {
+		t.Fatalf("base+offset findings=%+v summary=%+v", report.TableFirstTargets, report.Summary)
+	}
+	baseSource := false
+	for _, source := range found.Sources {
+		if source.Encoding == shadowTableFirstBasePlusU16 && source.BasePC == 0x008200 && source.WordPC == 0x008302 &&
+			len(source.BaseEvidencePCs) == 1 && source.BaseEvidencePCs[0] == 0x008001 {
+			baseSource = true
+		}
+	}
+	if !baseSource {
+		t.Fatalf("base+offset source missing: %+v", found.Sources)
+	}
+}
+
+func TestAnalyzeAuthoredShadowClassifiesAddressTakenInternalBlock(t *testing.T) {
+	root := t.TempDir()
+	image := make([]byte, 0x8000)
+	copy(image[0x0200:], []byte{0x80, 0x0e}) // BRA $8210
+	copy(image[0x0210:], []byte{0xa9, 0x01, 0x60})
+	image[0x0240] = 0x60
+	copy(image[0x0300:], []byte{0x00, 0x82, 0x10, 0x82, 0x40, 0x82})
+	romPath := filepath.Join(root, "fixture.sfc")
+	if err := os.WriteFile(romPath, image, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgDir := filepath.Join(root, "recomp")
+	writeTestFile(t, filepath.Join(cfgDir, "bank00.cfg"), `bank = 00
+func First 8200 entry_mx:1,1
+func Anchor 8240 entry_mx:1,1
+`)
+
+	report, err := AnalyzeAuthoredShadow(ShadowAnalysisOptions{ROMPath: romPath, CFGDir: cfgDir, Jobs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.TableFirstTargets) != 1 || report.Summary.TableFirstInternalTargets != 1 ||
+		report.Summary.TableFirstNewLandings != 0 || report.TableFirstTargets[0].TargetPC != 0x008210 ||
+		report.TableFirstTargets[0].Classification != "address_taken_internal" ||
+		report.TableFirstTargets[0].LandingSeed != "decoded_instruction" || report.TableFirstTargets[0].Confidence != analysis.ConfidenceProbable {
+		t.Fatalf("internal target findings=%+v summary=%+v", report.TableFirstTargets, report.Summary)
+	}
+}
+
 func TestAnalyzeAuthoredShadowReportsPostZeroTableCandidateWithoutChangingCompiledBound(t *testing.T) {
 	root := t.TempDir()
 	image := make([]byte, 0x8000)
@@ -625,6 +1018,49 @@ func TestSelectStaticProvenAutomaticDispatchFactsRejectsOpenAndObservedFacts(t *
 	selected, rejected := SelectStaticProvenAutomaticDispatchFacts(report)
 	if len(selected) != 1 || selected[0].SitePC != proven.SitePC || rejected != 3 {
 		t.Fatalf("selection = %#v, rejected=%d; want only proven static fact", selected, rejected)
+	}
+}
+
+func TestSelectStaticProvenRoutineEntryFactsExcludesContinuationAndRetainedRoots(t *testing.T) {
+	report := ShadowReport{EntryAblation: ShadowEntryAblationReport{Entries: []ShadowEntryAblationRecord{
+		{
+			PC: 0x008100, AuthoredMX: analysis.MXState{M: 0, X: 1},
+			Status: shadowEntryAblationRecoverable, EntryKindHint: "routine",
+			Incoming: []ShadowEntryAblationSource{{
+				PC: 0x008000, EntryMX: analysis.MXState{M: 0, X: 1}, Kinds: []string{"direct_jsr"},
+			}},
+		},
+		{
+			PC: 0x008200, AuthoredMX: analysis.MXState{M: 0, X: 1},
+			Status: shadowEntryAblationRecoverable, EntryKindHint: "internal_continuation",
+			Incoming: []ShadowEntryAblationSource{{
+				PC: 0x008100, EntryMX: analysis.MXState{M: 0, X: 1}, Kinds: []string{"sibling_boundary_edge"},
+			}},
+		},
+		{
+			PC: 0x008300, AuthoredMX: analysis.MXState{M: 0, X: 1},
+			Status: shadowEntryAblationRetained, EntryKindHint: "routine",
+			Incoming: []ShadowEntryAblationSource{{
+				PC: 0x008000, EntryMX: analysis.MXState{M: 0, X: 1}, Kinds: []string{"direct_jsl"},
+			}},
+		},
+		{
+			PC: 0x008400, AuthoredMX: analysis.MXState{M: 0, X: 1},
+			AuthoredHLE: []string{"hle_func:HostRoutine"},
+			Status:      shadowEntryAblationRecoverable, EntryKindHint: "routine",
+			Incoming: []ShadowEntryAblationSource{{
+				PC: 0x008000, EntryMX: analysis.MXState{M: 0, X: 1}, Kinds: []string{"direct_jsr"},
+			}},
+		},
+	}}}
+	facts := SelectStaticProvenRoutineEntryFacts(report)
+	if len(facts) != 1 || facts[0].PC != 0x008100 || facts[0].EntryMX != (analysis.MXState{M: 0, X: 1}) {
+		t.Fatalf("selected entry facts = %+v, want only exact routine $00:8100 M0X1", facts)
+	}
+	if facts[0].Kind != analysis.EntryRoutine || len(facts[0].Evidence) != 1 ||
+		facts[0].Evidence[0].Source != "static.direct_jsr" ||
+		facts[0].Evidence[0].Confidence != analysis.ConfidenceProven {
+		t.Fatalf("selected entry fact lacks normalized static proof: %+v", facts[0])
 	}
 }
 

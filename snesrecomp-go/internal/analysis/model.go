@@ -57,6 +57,33 @@ type Evidence struct {
 	Detail     string     `json:"detail,omitempty"`
 }
 
+// EntryFact states that one exact address/width variant has a statically
+// established entry role. Unlike a configured func declaration, this fact
+// does not by itself make the variant a decode root: generation may withhold
+// the root and require an independently decoded edge to demand it.
+type EntryFact struct {
+	PC       uint32     `json:"pc"`
+	EntryMX  MXState    `json:"entry_mx"`
+	Kind     EntryKind  `json:"kind"`
+	Evidence []Evidence `json:"evidence,omitempty"`
+}
+
+func (fact *EntryFact) Normalize() {
+	fact.PC &= 0xffffff
+	fact.EntryMX.M &= 1
+	fact.EntryMX.X &= 1
+	sort.Slice(fact.Evidence, func(i, j int) bool {
+		if fact.Evidence[i].Source != fact.Evidence[j].Source {
+			return fact.Evidence[i].Source < fact.Evidence[j].Source
+		}
+		if fact.Evidence[i].Confidence != fact.Evidence[j].Confidence {
+			return fact.Evidence[i].Confidence < fact.Evidence[j].Confidence
+		}
+		return fact.Evidence[i].Detail < fact.Evidence[j].Detail
+	})
+	fact.Evidence = dedupeOrdered(fact.Evidence)
+}
+
 // DispatchFact is a normalized statement about one runtime-target site.
 // Targets contains a closed, proven set only when TargetSetClosed is true.
 // TargetCandidates may hold an independently recovered prefix when its bound

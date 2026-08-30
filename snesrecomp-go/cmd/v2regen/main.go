@@ -824,6 +824,7 @@ func regenerate(args []string) error {
 		}
 	}
 	var provenFacts []analysis.DispatchFact
+	var provenEntryFacts []analysis.EntryFact
 	if *provenAnalysis {
 		requestedOutput, pathErr := filepath.Abs(*outDir)
 		if pathErr != nil {
@@ -844,12 +845,15 @@ func regenerate(args []string) error {
 		var rejected int
 		provenFacts, rejected = tooling.SelectStaticProvenAutomaticDispatchFacts(shadow)
 		fmt.Printf("v2regen: experimental analysis selected %d proven automatic fact(s); kept %d open/probable fact(s) report-only\n", len(provenFacts), rejected)
+		provenEntryFacts = tooling.SelectStaticProvenRoutineEntryFacts(shadow)
+		fmt.Printf("v2regen: experimental analysis selected %d statically derivable routine root(s); continuations and other entry kinds remain report-only\n", len(provenEntryFacts))
 	}
 	report, err := regen.Run(regen.Options{
 		ROMPath: *romPath, ConfigDir: *cfgDir, OutputDir: *outDir, Jobs: *jobs,
 		ChunkThresholdBytes: max(0, *chunkThreshold) * 1024, ChunkPCSpan: max(0, *chunkSpan), OnlyBanks: only,
 		AllowStubs:                    *allowStubs,
 		ProvenDispatchFacts:           provenFacts,
+		ProvenEntryFacts:              provenEntryFacts,
 		ExperimentalExactDirectCallMX: *provenAnalysis,
 		Progress:                      func(format string, values ...any) { fmt.Printf("v2regen: "+format+"\n", values...) },
 	})

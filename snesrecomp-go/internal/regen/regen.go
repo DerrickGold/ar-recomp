@@ -30,6 +30,7 @@ type Options struct {
 	OnlyBanks                     map[byte]struct{}
 	AllowStubs                    bool
 	ProvenDispatchFacts           []analysis.DispatchFact
+	ProvenEntryFacts              []analysis.EntryFact
 	ExperimentalExactDirectCallMX bool
 	Progress                      func(string, ...any)
 }
@@ -40,6 +41,8 @@ type Report struct {
 	Passes, ExitMXRoutes                int
 	UnresolvedIndirects, StubHits       int
 	AnalysisFactsApplied                int
+	AnalysisEntryFactsApplied           int
+	AnalysisEntryFactsRediscovered      int
 	Elapsed                             time.Duration
 }
 
@@ -58,6 +61,7 @@ type repository struct {
 	dispatchHelpers   map[uint32]string
 	provenDispatchMX  map[uint32]struct{}
 	provenResumePCs   map[uint32]struct{}
+	dormantEntryRoots map[decoder.Variant]struct{}
 	exactDirectCallMX bool
 	exitMX            map[decoder.Variant]decoder.MX
 	allDataRegions    []decoder.DataRegion
@@ -109,9 +113,17 @@ func Run(options Options) (Report, error) {
 		}
 		logf("experimental analysis overlay: applied %d statically proven dispatch facts", reportCount)
 	}
+	entryFactCount, err := repo.applyProvenEntryFacts(options.ProvenEntryFacts)
+	if err != nil {
+		return Report{}, err
+	}
+	if entryFactCount > 0 {
+		logf("experimental analysis overlay: withheld %d statically derivable routine root(s)", entryFactCount)
+	}
 	repo.exactDirectCallMX = options.ExperimentalExactDirectCallMX
 	report := Report{Banks: len(repo.banks)}
 	report.AnalysisFactsApplied = len(options.ProvenDispatchFacts)
+	report.AnalysisEntryFactsApplied = entryFactCount
 	for _, bank := range repo.banks {
 		report.InitialEntries += len(bank.Config.Entries)
 	}
@@ -139,6 +151,13 @@ func Run(options Options) (Report, error) {
 				"variant/exit-MX fixpoint did not converge in %d passes",
 				variantFixpointPassLimit)
 		}
+	}
+	report.AnalysisEntryFactsRediscovered = entryFactCount - len(repo.dormantEntryRoots)
+	if len(repo.dormantEntryRoots) > 0 {
+		return report, repo.unrecoveredProvenEntryFactsError()
+	}
+	if entryFactCount > 0 {
+		logf("experimental analysis overlay: rediscovered %d/%d withheld routine root(s)", report.AnalysisEntryFactsRediscovered, entryFactCount)
 	}
 
 	for _, bank := range repo.banks {
@@ -211,9 +230,10 @@ func loadRepository(romPath, configDir string) (*repository, error) {
 	repo := &repository{
 		image: image, byBank: make(map[byte]*bankState), names: make(map[uint32]string),
 		canonical: make(map[uint32]map[[2]uint8]struct{}), dispatchHelpers: make(map[uint32]string),
-		provenDispatchMX: make(map[uint32]struct{}),
-		provenResumePCs:  make(map[uint32]struct{}),
-		exitMX:           make(map[decoder.Variant]decoder.MX), forceVariants: make(map[uint32][2]uint8),
+		provenDispatchMX:  make(map[uint32]struct{}),
+		provenResumePCs:   make(map[uint32]struct{}),
+		dormantEntryRoots: make(map[decoder.Variant]struct{}),
+		exitMX:            make(map[decoder.Variant]decoder.MX), forceVariants: make(map[uint32][2]uint8),
 		validVariants: make(map[uint32]map[[2]uint8]struct{}), unresolved: make(map[codegen.Variant]struct{}),
 		provenEquivalent: make(map[uint32]map[[2]uint8]map[[2]uint8]struct{}),
 		cumulativeDirty:  make(map[codegen.Variant]struct{}), cumulativeEmit: make(map[codegen.Variant]struct{}),
@@ -556,6 +576,11 @@ func (repo *repository) applyDemands(demands map[codegen.Variant]struct{}) int {
 				base = entry
 			}
 			if entry.EntryMX.M&1 == demand.M&1 && entry.EntryMX.X&1 == demand.X&1 {
+				if repo.activateDemandedEntryRoot(decoder.Variant{
+					Address: decoder.Address24(bankID, pc), M: demand.M & 1, X: demand.X & 1,
+				}) {
+					added++
+				}
 				found = true
 				break
 			}
@@ -707,7 +732,7 @@ func (repo *repository) decodeOptions(bank *bankState, start uint16) decoder.Opt
 	options.SiblingEntryPCs = make(map[uint16]struct{})
 	options.InternalResumePCs = make(map[uint16]struct{})
 	for _, entry := range bank.Config.Entries {
-		if entry.Start != start {
+		if entry.Start != start && repo.activeSiblingAddress(bank.ID, entry.Start) {
 			options.SiblingEntryPCs[entry.Start] = struct{}{}
 		}
 	}
@@ -747,6 +772,9 @@ func (repo *repository) parallelEntries(jobs int, only map[byte]struct{}, fn fun
 			}
 		}
 		for index, entry := range bank.Config.Entries {
+			if repo.entryRootDormant(bank.ID, entry) {
+				continue
+			}
 			tasks <- entryTask{bank, index, entry}
 		}
 	}

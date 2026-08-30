@@ -144,10 +144,175 @@ code-ownership evidence, not proof of a caller or runtime reachability, and
 neither is ever added to generated code or the experimental proven-analysis
 overlay. Overlap with a merely candidate table span is reported as
 `candidate_table_conflict` and downgraded to speculative instead of letting
-one heuristic silently suppress another. Raw pointer clusters,
-base-plus-offset references, and iterative promotion are later landing-sweep
-seed strategies; this first phase keeps its post-terminator seed independently
+one heuristic silently suppress another. Pointer corroboration is layered on
+top as a separate finding so the post-terminator seed remains independently
 testable.
+
+## Vector-root entry recovery
+
+The `entry_recovery` object answers a different question from ordinary variant
+discovery: how many authored `func` declarations can be found without using
+those declarations as roots? A second read-only fixed point withholds every
+authored function entry and starts only at the ROM's reset, native NMI, and
+native IRQ vector targets. Direct calls, long calls, statically recovered
+computed targets, and stack-proven continuations then grow the closure.
+
+Each authored declaration receives one status:
+
+- `exact_variant`: its address and authored entry M/X state were recovered;
+- `address_other_mx`: the address was recovered, but only under different M/X;
+- `proven_continuation`: stack provenance found an internal resume point, so it
+  must not be registered as an ordinary callable routine merely to add code;
+- `internal_owned`: the PC is an instruction boundary inside a recovered
+  region, but no external entry edge has been established;
+- `not_recovered`: the current vector-rooted closure has no evidence for the
+  declaration.
+
+Counts are authored declarations and root-generated `(PC,M,X)` variants, which
+keeps extra width variants from masquerading as recovered configuration lines.
+The complete deterministic JSON report contains every declaration; verbose
+text prints the non-exact cases.
+
+For declarations outside the root closure, the same audit scans both word
+alignments for contiguous same-bank ROM words that name at least two distinct
+authored entries. Each `pointer_clusters` record includes the table range,
+entry/distinct-target counts, occurrences of that declaration, ownership, and
+confidence. Confirmed dispatch-table ownership is proven corroboration;
+candidate table ownership and unclaimed runs of three or more words are
+probable; two-word runs and overlaps with decoded code remain speculative.
+These are config-assisted corroboration facts, not automatic recovery: they
+show where a hand-authored conclusion likely came from but do not establish a
+runtime index, bound, or caller.
+
+This audit is deliberately a lower bound. `not_recovered` does not mean dead,
+garbage, or safe to remove: handler addresses may live in ROM streams, WRAM
+state fields, split tables, save data, or runtime observations not yet imported
+into the static closure. Authored data regions, HLE dispatch declarations, and
+exit-M/X routes remain available so this phase measures `func` removal rather
+than removing every escape hatch at once. A later strict audit can ablate those
+inputs independently.
+
+## Static authored-entry ablation
+
+The `entry_ablation` report asks a less pessimistic question than withholding
+all authored functions at once: which exact `(PC,M,X)` declarations are
+recoverable through static dependencies when the other authored roots remain?
+Every decoded variant retains the finite targets it demands through direct
+JSR/JSL calls, direct long jumps, proven computed dispatches, and explicit
+sibling edges. Those source-labelled demands form a deterministic variant
+dependency graph; mirrored banks are canonicalized before comparison.
+
+For each declaration, the analyzer removes only that declaration from the
+root set and tests whether its exact variant remains reachable from another
+authored declaration or reset/NMI/IRQ. `individually_recoverable` therefore
+means what it says; a differently-sized M/X variant at the same address does
+not count.
+
+The analyzer also removes declarations in descending deterministic order,
+retaining a declaration whenever its removal would leave any authored variant
+outside the graph closure. The result is an inclusion-minimal root set:
+
+- `vector_graph_covered` needs no authored graph root;
+- `batch_recoverable` is reachable from vectors or the retained roots;
+- `retained_static_root` is required by this particular deterministic root
+  set.
+
+Incoming edges retain their transfer provenance. The report derives an entry
+kind hint rather than flattening every recovered address back into `func`:
+
+- direct JSR/JSL edges imply `routine`;
+- direct JMP/JML edges imply `tail_target`;
+- closed computed-dispatch edges imply `computed_handler`;
+- a target recovered only because decoding stopped at an authored sibling is
+  an `internal_continuation`.
+
+That final category is not a callable-function removal candidate until larger
+generated regions can resume at internal blocks without adding a host stack
+frame. The summary counts batch-recoverable declarations by these kinds so a
+large number of sibling-only edges cannot be mistaken for immediately safe cfg
+deletions.
+
+Inclusion-minimal does not mean globally minimum cardinality. More
+importantly, dependency reachability does not yet prove that removing a cfg
+line preserves generated-region boundaries or external entry semantics. The
+graph is collected while all authored sibling boundaries are present, so this
+full root set remains report-only. It identifies high-value ablation batches
+and cyclic root groups for isolated regeneration; it never edits
+configuration or feeds continuation/tail/computed candidates into production
+generation.
+
+There is one deliberately narrow experimental consumer. A
+`batch_recoverable` entry classified as `routine` and supported by an exact
+direct JSR/JSL edge may be selected as a static entry fact. Isolated proven
+regeneration withholds that exact `(PC,M,X)` variant from the initial root set
+and requires ordinary variant discovery to demand it again. This validates
+the static dependency without treating the broader ablation graph as proof.
+It is not yet a cfg-deletion feature: the authored declaration remains as an
+in-memory metadata template for its name and function options. Each entry
+record lists `authored_hle` obligations (`hle_func`, `hle_func_if`, and
+`hle_spc_upload`). An entry with any such obligation is excluded from static
+root suppression. The separate `hle_obligations` inventory includes every HLE
+directive even when there is no explicit `func` at that PC; `authored_entry`
+distinguishes attached and HLE-only policy. This is intentional because a
+common configuration style relies on static call discovery to create the
+entry and keeps only the HLE directive authored.
+
+## Table-first unknown target discovery
+
+The `table_first_targets` array crosses two independent review-only signals
+without weakening either one. It scans both ROM word alignments for an unknown
+same-bank program pointer that is either:
+
+- between two distinct authored entry pointers with at most two missing
+  words; or
+- immediately before or after a contiguous run containing at least two
+  distinct authored entry pointers.
+
+If the unknown value already names a decoded instruction boundary, it is
+reported separately as `address_taken_internal`. This is evidence for an
+external block/resume entry, not permission to wrap the address in a new C
+routine activation. A pointer into the middle of an existing instruction is
+rejected.
+
+Otherwise the value is subjected to the boundary landing sweep's same bounded,
+all-M/X forward-decode contract. An existing post-terminator landing is reused
+when available; otherwise the pointer value seeds a fresh decode. A confirmed
+entry within 256 bytes is the preferred boundary. Without one, the pass may
+accept a clean return before a 256-byte scan limit, but an edge that merely
+joins that artificial limit is rejected. The candidate must still pass the
+same instruction ownership, all-path range, stack balance, return or explicit
+confirmed-anchor join, and unsafe-opcode rejection rules. This avoids treating
+plausible linear disassembly as sufficient evidence. A pointer-shaped word
+whose target fails those semantic checks is retained in
+`table_first_rejections` with a reason rather than silently disappearing; a
+value outside the current mapper's same-bank program range is discarded before
+probing. Pointer-window-seeded regions also reject `RTI`: interrupt regions are
+valid boundary-landings when rooted by vectors, but ordinary same-bank table
+words must not turn compact data records ending in byte `$40` into invented
+interrupt entries.
+
+Each `[TABLE-FIRST-TARGET]` record includes its candidate entry M/X states,
+landing anchor, classification, landing seed (`post_terminator`,
+`pointer_window`, or `decoded_instruction`), and every minimal source window.
+Confirmed or candidate table
+ownership and unclaimed three-word windows can yield `probable`; decoded-code
+overlap, a weak landing shape, or a candidate-table conflict remains
+`speculative`. Findings do not enter variant discovery, generated entry
+registries, or the proven-analysis overlay. Authored entries are used only to
+anchor the source window, so this phase can expose a missing middle or edge
+handler but still cannot prove the table's runtime base, index, bound, or
+reachability.
+
+The same report recognizes a deliberately narrower `base_plus_u16` encoding.
+The base must have code provenance from a decoded 16-bit `CLC; ADC #base`
+sequence, must itself be an authored entry, and the compact offset run must
+contain zero (mapping back to the base) plus at least two other distinct known
+entries. Only missing interior offsets are considered, addition may not wrap,
+and source windows overlapping decoded code are discarded. Each source records
+the base and arithmetic evidence PCs. This is intentionally stricter than
+trying every authored entry as a possible base, which produces thousands of
+coincidental matches in ordinary game data. Split low/high/bank tables and
+other arithmetic forms remain later extensions.
 
 ## Experimental isolated regeneration
 
@@ -179,6 +344,21 @@ runtime four-way M/X switch. A `force_variant_at` override still takes
 precedence. This is currently gated with the analysis overlay so it can be
 validated on additional games before becoming the normal production policy;
 the default regeneration path remains unchanged.
+
+The mode also performs a fail-closed root-suppression check for the narrow
+static routine facts described above. Selected entries remain in their
+original configuration order as dormant metadata templates, but are excluded
+from initial decoding and from sibling-boundary stopping. An exact static
+call demand must reactivate each one during the variant fixpoint. Generation
+aborts with the missing PC and M/X state if even one selected root is not
+rediscovered. This preserves names, per-entry options, and deterministic file
+layout while proving that the routine no longer needs to be an unconditional
+decode seed. Internal continuations, tail targets, computed handlers, and
+external roots are never suppressed by this experiment. HLE-decorated roots
+are also never suppressed; selection filters them and regeneration rejects a
+manually supplied fact as a second line of defense. Any eventual cfg-deletion
+workflow must migrate these obligations explicitly rather than infer their
+absence from static reachability.
 
 This mode changes generated control flow and therefore requires the normal
 runtime gate. Validation builds may define
