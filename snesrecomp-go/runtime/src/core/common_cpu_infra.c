@@ -465,6 +465,15 @@ const char *RtlGameIdentifier(void) {
     return g_rtl_game_identity != NULL ? g_rtl_game_identity->game_id : NULL;
 }
 
+_Static_assert(
+    RTL_GAME_FRAME_DISPATCH_NMI_IF_ENABLED ==
+        SR_GAME_TIMING_DISPATCH_NMI_IF_ENABLED,
+    "linked and public game-timing flags must match");
+_Static_assert(
+    RTL_GAME_FRAME_NMI_ENTERED ==
+        SR_GAME_TIMING_TRANSITION_NMI_ENTERED,
+    "linked and public game-timing transitions must match");
+
 bool RtlGameDrawPpuFrame(void) {
     if (g_snes != NULL) g_snes->diagnosticDrawRequested = true;
     if (g_rtl_game_execution == NULL ||
@@ -485,22 +494,17 @@ bool RtlGameDrawPpuFrame(void) {
 
 int RtlGameFrameBegin(void) {
     if (g_snes == NULL) return -1;
-    snes_beginVblank(g_snes);
-    g_snes->forceNmi = true;
-    g_snes->nmiAvail = true;
+    (void)sr_runner_transition_game_timing(
+        g_snes, SR_GAME_TIMING_BEGIN_FRAME_SLICE, 0u);
     return 0;
 }
 
 int RtlGameFrameComplete(uint32_t flags) {
-    int enter_nmi;
     if (g_snes == NULL ||
         (flags & ~RTL_GAME_FRAME_DISPATCH_NMI_IF_ENABLED) != 0u)
         return -1;
-    enter_nmi = (flags & RTL_GAME_FRAME_DISPATCH_NMI_IF_ENABLED) != 0u &&
-        g_snes->nmiEnabled;
-    g_snes->forceNmi = false;
-    g_snes->inNmi = g_snes->inNmi || enter_nmi;
-    return enter_nmi ? RTL_GAME_FRAME_NMI_ENTERED : 0;
+    return (int)sr_runner_transition_game_timing(
+        g_snes, SR_GAME_TIMING_COMPLETE_FRAME_SLICE, flags);
 }
 
 uint32_t RtlGamePpuDisplayState(void) {

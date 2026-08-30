@@ -36,10 +36,13 @@ typedef struct RtlRdnmiReadContext {
                 sizeof(((RtlRdnmiReadContext *)0)->flags)))
 
 /** The linked game adapter uses these direct singleton calls on its once-per-
- * frame hot path. They preserve the same fixed semantics as the public runner
+ * frame hot path. They preserve the same latch semantics as the public runner
  * ABI without exposing Snes layout or repeating descriptor validation inside
- * the only in-process consumer. COMPLETE returns transition flags, or -1 when
- * no active runner is available. */
+ * the only in-process consumer. BEGIN positions the beam at VBlank and
+ * publishes the RDNMI token. COMPLETE returns transition flags, or -1 when no
+ * active runner is available. Neither call selects where game execution, the
+ * reported NMI transition, or scanout belongs in the adapter's recovered
+ * cyclic schedule. */
 #define RTL_GAME_FRAME_DISPATCH_NMI_IF_ENABLED UINT32_C(0x00000001)
 #define RTL_GAME_FRAME_NMI_ENTERED UINT32_C(0x00000001)
 int RtlGameFrameBegin(void);

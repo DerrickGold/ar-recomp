@@ -6,6 +6,48 @@ static uint32_t game_timing_state(const Snes *snes) {
         ((uint32_t)snes->inNmi << 3);
 }
 
+uint32_t sr_runner_transition_game_timing(
+        Snes *snes, SrGameTimingOperation operation, uint32_t flags) {
+    uint32_t transition_flags = 0u;
+    if (snes == NULL) return 0u;
+
+    if (operation == SR_GAME_TIMING_BEGIN_FRAME_SLICE) {
+        snes_beginVblank(snes);
+        snes->forceNmi = true;
+        snes->nmiAvail = true;
+        if (sr_runner_event_enabled(SR_EVENT_MASK_FRAME)) {
+            sr_runner_emit_frame_boundary(
+                snes,
+                SR_EVENT_FRAME_BEGIN | SR_EVENT_FRAME_VBLANK |
+                    SR_EVENT_FRAME_GAME_SLICE,
+                "game-slice-begin");
+        }
+    } else {
+        const bool enter_nmi =
+            (flags & SR_GAME_TIMING_DISPATCH_NMI_IF_ENABLED) != 0u &&
+            snes->nmiEnabled;
+        snes->forceNmi = false;
+        snes->inNmi = snes->inNmi || enter_nmi;
+        transition_flags = enter_nmi ?
+            SR_GAME_TIMING_TRANSITION_NMI_ENTERED : 0u;
+        if (sr_runner_event_enabled(SR_EVENT_MASK_FRAME)) {
+            sr_runner_emit_frame_boundary(
+                snes, SR_EVENT_FRAME_END | SR_EVENT_FRAME_GAME_SLICE,
+                "game-slice-end");
+        }
+        if (enter_nmi &&
+            sr_runner_event_enabled(SR_EVENT_MASK_INTERRUPT)) {
+            sr_runner_emit_interrupt(
+                snes, SR_INTERRUPT_NMI,
+                SR_EVENT_INTERRUPT_ENTER |
+                    SR_EVENT_INTERRUPT_TRANSITION,
+                0u, 0u, SR_INTERRUPT_SCANLINE_UNKNOWN,
+                "nmi-transition");
+        }
+    }
+    return transition_flags;
+}
+
 static SrResult control_game_timing(
         SrRunnerHandle *runner,
         const SrGameTimingRequest *request,
@@ -23,19 +65,8 @@ static SrResult control_game_timing(
          request->flags != 0u))
         return SR_RESULT_INVALID_ARGUMENT;
 
-    if (request->operation == SR_GAME_TIMING_BEGIN_FRAME_SLICE) {
-        snes->forceNmi = true;
-        snes->nmiAvail = true;
-        transition_flags = 0u;
-    } else {
-        const bool enter_nmi =
-            (request->flags & SR_GAME_TIMING_DISPATCH_NMI_IF_ENABLED) != 0u &&
-            snes->nmiEnabled;
-        snes->forceNmi = false;
-        snes->inNmi = snes->inNmi || enter_nmi;
-        transition_flags = enter_nmi ?
-            SR_GAME_TIMING_TRANSITION_NMI_ENTERED : 0u;
-    }
+    transition_flags = sr_runner_transition_game_timing(
+        snes, request->operation, request->flags);
 
     memset(out_result, 0, SR_GAME_TIMING_RESULT_V2_SIZE);
     out_result->struct_size = SR_GAME_TIMING_RESULT_V2_SIZE;
@@ -305,4 +336,3 @@ static SrResult restore_cpu_math_state(SrRunnerHandle *runner,
     snes->divideResult = state->divide_quotient;
     return SR_RESULT_OK;
 }
-

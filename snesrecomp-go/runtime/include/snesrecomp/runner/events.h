@@ -114,8 +114,13 @@ enum {
 #define SR_EVENT_FRAME_BEGIN UINT32_C(0x00000001)
 #define SR_EVENT_FRAME_END UINT32_C(0x00000002)
 #define SR_EVENT_FRAME_VBLANK UINT32_C(0x00000004)
+#define SR_EVENT_FRAME_HOST_TICK UINT32_C(0x00000008)
+#define SR_EVENT_FRAME_GAME_SLICE UINT32_C(0x00000010)
+#define SR_EVENT_FRAME_SCANOUT UINT32_C(0x00000020)
 #define SR_EVENT_INTERRUPT_ENTER UINT32_C(0x00000001)
 #define SR_EVENT_INTERRUPT_EXIT UINT32_C(0x00000002)
+#define SR_EVENT_INTERRUPT_TRANSITION UINT32_C(0x00000004)
+#define SR_EVENT_INTERRUPT_CALLBACK UINT32_C(0x00000008)
 #define SR_EVENT_ERROR_RECOVERABLE UINT32_C(0x00000001)
 
 typedef uint16_t SrAudioSampleFormat;
@@ -189,10 +194,18 @@ typedef struct SrRunnerEvent {
  * DMA_BEGIN address and dma_a_address24 are the initial A-bus address. For
  * HDMA this is the table start, dma_table_address is its 16-bit offset, and
  * dma_transfer_bytes is zero because the table determines the total. General
- * DMA normalizes a programmed size of zero to 65536 bytes. Interrupt events
- * identify the vector and use SR_INTERRUPT_SCANLINE_UNKNOWN when no raster
- * position applies. Error events identify their stable error_code; pc24 is the
- * affected execution/ROM address and source_pc24 is its caller when known.
+ * DMA normalizes a programmed size of zero to 65536 bytes. Frame BEGIN/END
+ * events describe the boundary named by HOST_TICK, GAME_SLICE, or SCANOUT; a
+ * host tick has no implied hardware phase. VBLANK means that boundary
+ * positioned the modeled beam at VBlank. Interrupt events identify the vector
+ * and use SR_INTERRUPT_SCANLINE_UNKNOWN when no raster position applies.
+ * TRANSITION reports a runner-owned interrupt-latch transition, not handler
+ * execution;
+ * CALLBACK brackets runner delivery of a game-owned callback and leaves pc24
+ * and interrupt_vector unspecified. Unqualified interrupt events are emitted
+ * by game glue around actual handler execution. Error events identify their
+ * stable error_code; pc24 is the affected execution/ROM address and
+ * source_pc24 is its caller when known.
  * AUDIO_PRODUCED reports the final interleaved host mix. audio_frame_offset is
  * the first sample frame's monotonic output clock since reset. audio_samples is
  * valid only during the callback and must not be retained; frame_counter is

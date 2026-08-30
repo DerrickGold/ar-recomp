@@ -112,6 +112,9 @@ int main(void) {
           strstr(contents, "\"ch\":\"wram\"") != NULL &&
           strstr(contents, "\"ch\":\"ppumem\"") != NULL &&
           strstr(contents, "\"ch\":\"frame\"") != NULL &&
+          strstr(contents, "\"ch\":\"interrupt\"") != NULL &&
+          strstr(contents, "\"kind\":\"nmi\"") != NULL &&
+          strstr(contents, "\"phase\":\"enter\"") != NULL &&
           strstr(contents, "\"ch\":\"dispmiss\"") != NULL &&
           strstr(contents, "\"ch\":\"dispatch\"") != NULL &&
           strstr(contents, "\"site\":\"05DB84\"") != NULL &&

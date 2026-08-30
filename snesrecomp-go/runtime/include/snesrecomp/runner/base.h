@@ -157,10 +157,14 @@ enum {
 #define SR_GAME_TIMING_TRANSITION_NMI_ENTERED UINT32_C(0x00000001)
 
 /** Synchronous control for a recompiled game's host-resumable frame slice.
- * BEGIN publishes a fresh RDNMI token and enables forced pacing. COMPLETE
- * always disables forced pacing, then optionally enters NMI when the emulated
- * hardware gate is enabled. No runner generation changes: these are live
- * emulated timing latches, not borrowed-view ownership. */
+ * BEGIN positions the beam at VBlank, publishes a fresh RDNMI token, and
+ * enables forced pacing. COMPLETE always disables forced pacing, then
+ * optionally enters NMI when the emulated hardware gate is enabled. These
+ * operations define latch transitions only: they do not prescribe whether a
+ * game's body runs before or after the reported NMI transition, nor where the
+ * adapter places scanout. The game adapter owns that recovered schedule.
+ * No runner generation changes: these are live emulated timing latches, not
+ * borrowed-view ownership. */
 typedef struct SrGameTimingRequest {
     uint32_t struct_size;
     SrGameTimingOperation operation;

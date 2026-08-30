@@ -225,15 +225,17 @@ bool RtlRunFrame(uint32 inputs) {
     }
     if (sr_runner_event_enabled(SR_EVENT_MASK_FRAME)) {
         sr_runner_emit_frame_boundary(
-            g_snes, SR_EVENT_FRAME_BEGIN | SR_EVENT_FRAME_VBLANK, "vblank");
+            g_snes, SR_EVENT_FRAME_BEGIN | SR_EVENT_FRAME_HOST_TICK,
+            "host-tick-begin");
     }
     WatchdogFrameStart();
     if (g_rtl_game_execution != NULL)
         g_rtl_game_execution->run_frame();
     WatchdogFrameEnd();
     if (sr_runner_event_enabled(SR_EVENT_MASK_FRAME)) {
-        sr_runner_emit_frame_boundary(g_snes, SR_EVENT_FRAME_END,
-                                      "complete");
+        sr_runner_emit_frame_boundary(
+            g_snes, SR_EVENT_FRAME_END | SR_EVENT_FRAME_HOST_TICK,
+            "host-tick-end");
     }
     if (g_framedump_callback != NULL)
         g_framedump_callback((uint32)snes_frame_counter, g_ram);

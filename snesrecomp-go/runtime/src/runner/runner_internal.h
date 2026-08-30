@@ -44,6 +44,8 @@ void sr_runner_note_tick(Snes *snes);
 void sr_runner_note_reset(Snes *snes);
 void sr_runner_note_load(Snes *snes);
 void sr_runner_note_mutation(Snes *snes);
+uint32_t sr_runner_transition_game_timing(
+    Snes *snes, SrGameTimingOperation operation, uint32_t flags);
 void sr_runner_apply_pending_mutations(Snes *snes, uint32_t *inputs,
                                        uint64_t frame_counter);
 void sr_runner_clear_mutations(Snes *snes);

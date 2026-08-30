@@ -128,7 +128,7 @@ the specific entry you call.
 | `SR_RUNNER_CAP_DMA_STATE` | `SNES_RUNNER_API_DMA_STATE_SIZE` | `query_dma_state` | Copied coherent DMA/HDMA snapshot |
 | `SR_RUNNER_CAP_PPU_BACKGROUND_POLICY` | `SNES_RUNNER_API_PPU_BACKGROUND_POLICY_SIZE` | `update_ppu_layer_extents`, `replace_ppu_virtual_tilemaps`, `update_ppu_authentic_camera` | Frame/game-owned providers; observe each request's copy/retain rules |
 | `SR_RUNNER_CAP_PPU_SCANOUT` | `SNES_RUNNER_API_PPU_SCANOUT_SIZE` | `run_ppu_scanout` | Runner owns scanlines, `$420C`-armed HDMA, IRQ timing, and margin hold; request suppression can only narrow HDMA |
-| `SR_RUNNER_CAP_GAME_TIMING_CONTROL` | `SNES_RUNNER_API_GAME_TIMING_CONTROL_SIZE` | `control_game_timing` | Synchronous recompiled frame-slice pacing |
+| `SR_RUNNER_CAP_GAME_TIMING_CONTROL` | `SNES_RUNNER_API_GAME_TIMING_CONTROL_SIZE` | `control_game_timing` | Timing-latch transitions only; the game adapter owns body/NMI/scanout ordering |
 | `SR_RUNNER_CAP_INPUT_STATE` | `SNES_RUNNER_API_INPUT_STATE_SIZE` | `query_input_state` | Copied controller state |
 | `SR_RUNNER_CAP_PPU_FRAME_POLICY` | `SNES_RUNNER_API_PPU_FRAME_POLICY_SIZE` | `apply_ppu_frame_policy` | BEGIN clears prior frame providers; FINALIZE preserves newly published ones |
 | `SR_RUNNER_CAP_PPU_FRAME_RESET` | `SNES_RUNNER_API_PPU_FRAME_RESET_SIZE` | `reset_ppu_frame_state` | Begin-frame clear of derived capture/override state; persistent surfaces remain bound |
@@ -143,6 +143,33 @@ the specific entry you call.
 3. Borrow only the memory region needed.
 4. Finish synchronously or copy the small subset retained later.
 5. Call `borrow_is_valid` before reusing a previous borrow.
+
+### Integrate a recompiled frame loop
+
+`RtlGameExecutionApi.run_frame` is one host tick, not a declaration that the
+callback begins at a universal SNES hardware phase. `control_game_timing`
+provides two independent timing-latch operations:
+
+- BEGIN positions the modeled beam at VBlank, publishes a fresh `$4210` token,
+  and enables forced pacing.
+- COMPLETE disables forced pacing and reports whether the live `$4200` gate
+  entered NMI.
+
+Neither operation calls the recompiled body or an interrupt handler, and
+`run_ppu_scanout` consumes whichever live PPU/DMA state exists when the adapter
+invokes it. Consequently, the adapter must recover and own the cyclic schedule.
+For example, a wait-token coroutine may resume its body before COMPLETE and
+then service the reported NMI, while another game may service the NMI before
+running the body that prepares scanout. These are examples, not exhaustive
+runner modes.
+
+Event observers make the distinction explicit. HOST_TICK boundaries describe
+frontend calls and carry no hardware-phase meaning. GAME_SLICE boundaries
+describe BEGIN/COMPLETE; BEGIN also carries VBLANK. SCANOUT boundaries bracket
+the synchronous raster transaction. An NMI event qualified TRANSITION reports
+the timing-latch transition only. IRQ events qualified CALLBACK bracket the
+runner's exact scanline callback; game glue should emit unqualified interrupt
+events around actual handler execution.
 
 ### Publish widescreen state
 

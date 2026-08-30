@@ -859,7 +859,9 @@ typedef struct SrPpuAuthenticCameraRequest {
  * scheduling. HDMA starts from the runner-owned $420C state; a request may
  * suppress channels for enhancement policy, but it cannot arm one. The
  * zero-initialized request therefore preserves normal hardware behavior.
- * irq_callback is required and owns only the recompiled CPU's IRQ handler.
+ * Scanout consumes the live PPU/DMA state present when it is called; it does
+ * not decide which body or NMI phase prepared that state. irq_callback is
+ * required and owns only the recompiled CPU's IRQ handler.
  * Optional line callbacks are for diagnostics and receive callback-lifetime,
  * zero-copy surface views; normal frames should leave them null. */
 #define SR_PPU_SCANOUT_LINE_BEFORE UINT32_C(0x00000001)

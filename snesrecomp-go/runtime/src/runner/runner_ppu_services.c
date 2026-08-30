@@ -250,6 +250,11 @@ static SrResult run_ppu_scanout(
             ppu->extraTopCur, ppu->extraBottomCur))
         return SR_RESULT_INVALID_ARGUMENT;
 
+    if (sr_runner_event_enabled(SR_EVENT_MASK_FRAME)) {
+        sr_runner_emit_frame_boundary(
+            snes, SR_EVENT_FRAME_BEGIN | SR_EVENT_FRAME_SCANOUT,
+            "scanout-begin");
+    }
     snes->diagnosticScanoutObserved = true;
     _Static_assert(SR_DMA_CHANNEL_COUNT == kDmaChannelCount,
                    "scanout HDMA channel count must match the runner");
@@ -282,8 +287,26 @@ static SrResult run_ppu_scanout(
             request->line_callback(request->user_data, &context);
         }
         if (line == trigger) {
+            const bool observe_irq =
+                sr_runner_event_enabled(SR_EVENT_MASK_INTERRUPT);
             snes->inIrq = true;
+            if (observe_irq) {
+                sr_runner_emit_interrupt(
+                    snes, SR_INTERRUPT_IRQ,
+                    SR_EVENT_INTERRUPT_ENTER |
+                        SR_EVENT_INTERRUPT_CALLBACK,
+                    0u, 0u, (int32_t)line,
+                    "scanout-irq-callback");
+            }
             request->irq_callback(request->user_data, (uint32_t)line);
+            if (observe_irq) {
+                sr_runner_emit_interrupt(
+                    snes, SR_INTERRUPT_IRQ,
+                    SR_EVENT_INTERRUPT_EXIT |
+                        SR_EVENT_INTERRUPT_CALLBACK,
+                    0u, 0u, (int32_t)line,
+                    "scanout-irq-callback");
+            }
             trigger = snes->vIrqEnabled ? (int)snes->vTimer + 1 : -1;
         }
     }
@@ -303,6 +326,13 @@ static SrResult run_ppu_scanout(
         (PpuAuthenticCameraFrameReady(
              ppu, kPpuAuthenticCameraLayer_Bg2)
             ? SR_PPU_SCANOUT_AUTHENTIC_CAMERA_BG2 : 0u);
+    if (sr_runner_event_enabled(SR_EVENT_MASK_FRAME)) {
+        sr_runner_emit_frame_boundary(
+            snes,
+            SR_EVENT_FRAME_END | SR_EVENT_FRAME_VBLANK |
+                SR_EVENT_FRAME_SCANOUT,
+            "scanout-end");
+    }
     return SR_RESULT_OK;
 }
 

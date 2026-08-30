@@ -208,14 +208,31 @@ and size come from high OAM, so inspecting the low table alone is incomplete.
 
 ## Diagnosing frame progress
 
-For deterministic speed or frame-slip bugs, count NMI enter events with an
-`SR_EVENT_MASK_INTERRUPT` observer and count the game's main-loop/frame-gate
-release at the recovered producer. Report both cumulative counts and their
-ratio over an explicit steady-state frame range. A stable ratio such as exactly
-one release per two NMIs is evidence of a game-state gate, whereas elapsed host
-time alone cannot distinguish that from performance. The runner can count NMI
-events, but the meaning and address of a frame-gate variable remain game-owned;
-do not put those addresses in shared runtime code.
+Do not infer the game's hardware phase from the start of a host frame. SNES
+execution is cyclic, and a host adapter may cut that cycle before the body or
+before NMI while preserving the same hardware relationship. The linked-game
+timing calls expose latch transitions; they do not select the cut. Recover the
+game's synchronization rule before choosing the adapter order.
+
+For deterministic speed or frame-slip bugs, count unqualified actual NMI ENTER
+events with an `SR_EVENT_MASK_INTERRUPT` observer—not the runner-qualified
+TRANSITION—and count the game's main-loop/frame-gate release at the recovered
+producer. Report both cumulative counts and their ratio over an explicit
+steady-state frame range. A stable ratio such as exactly one release per two
+NMIs is evidence of a game-state gate, whereas elapsed host time alone cannot
+distinguish that from performance. The runner can count emitted NMI events, but
+the meaning and address of a frame-gate variable remain game-owned; do not put
+those addresses in shared runtime code.
+
+Capture HOST_TICK, GAME_SLICE, SCANOUT, and interrupt events over an explicit
+steady-state range. TRANSITION means the runner changed the NMI latch; it is not
+proof that the handler ran. CALLBACK brackets the scanout IRQ callback at its
+exact line; unqualified interrupt events should bracket the game's actual
+handler. Join that dynamic sequence to decoded `xref` results for the recovered
+frame gate, IRQ selector, and HDMA-table producers. Decide which body generation
+the scanout must consume, then validate the chosen schedule with deterministic
+state and presentation hashes. The runner deliberately does not guess this
+from block counts, `forceNmi`, or the presence of a raster IRQ.
 
 When inspecting recent generated blocks directly, call
 `sr_block_history_available()` before `sr_block_history()`. The latter returns
