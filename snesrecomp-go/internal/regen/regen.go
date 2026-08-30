@@ -45,6 +45,9 @@ type Report struct {
 	AnalysisContinuationFactsApplied    int
 	AnalysisEntryFactsRediscovered      int
 	AnalysisEntryTemplatesSynthesized   int
+	SharedRegionBodies                  int
+	SharedRegionContinuationWrappers    int
+	SharedRegionContinuationFallbacks   int
 	StaticEntryDiscoveries              []analysis.EntryFact
 	StaticCanonicalPromotions           int
 	SemanticSourceSHA256                string
@@ -67,11 +70,15 @@ type repository struct {
 	provenDispatchMX        map[uint32]struct{}
 	provenResumePCs         map[uint32]struct{}
 	provenResumeEdges       map[decoder.Variant]map[decoder.ResumeEdge]struct{}
+	flattenedResumeEdges    map[decoder.Variant]map[decoder.ResumeEdge]struct{}
 	dormantEntryRoots       map[decoder.Variant]struct{}
 	templateFreeEntryRoots  map[decoder.Variant]struct{}
 	templateFreeEntryFacts  int
 	templateFreeSynthesized int
 	staticEntryDiscoveries  map[decoder.Variant]analysis.EntryFact
+	sharedRegionBodies      int
+	sharedRegionWrappers    int
+	sharedRegionFallbacks   int
 	exactDirectCallMX       bool
 	exitMX                  map[decoder.Variant]decoder.MX
 	allDataRegions          []decoder.DataRegion
@@ -224,6 +231,12 @@ func Run(options Options) (Report, error) {
 	for _, bankResults := range results {
 		report.Functions += len(bankResults)
 	}
+	report.SharedRegionBodies = repo.sharedRegionBodies
+	report.SharedRegionContinuationWrappers = repo.sharedRegionWrappers
+	report.SharedRegionContinuationFallbacks = repo.sharedRegionFallbacks
+	if report.SharedRegionBodies > 0 || report.SharedRegionContinuationFallbacks > 0 {
+		logf("resumable regions: emitted %d shared body/bodies with %d external continuation wrapper(s); %d exact continuation(s) retained standalone fallback bodies", report.SharedRegionBodies, report.SharedRegionContinuationWrappers, report.SharedRegionContinuationFallbacks)
+	}
 	repo.recordUnresolvedEmittedDemands(contexts)
 	report.SemanticSourceSHA256, err = repo.semanticSourceSHA256(results)
 	if err != nil {
@@ -272,6 +285,7 @@ func loadRepository(romPath, configDir string) (*repository, error) {
 		provenDispatchMX:       make(map[uint32]struct{}),
 		provenResumePCs:        make(map[uint32]struct{}),
 		provenResumeEdges:      make(map[decoder.Variant]map[decoder.ResumeEdge]struct{}),
+		flattenedResumeEdges:   make(map[decoder.Variant]map[decoder.ResumeEdge]struct{}),
 		dormantEntryRoots:      make(map[decoder.Variant]struct{}),
 		templateFreeEntryRoots: make(map[decoder.Variant]struct{}),
 		staticEntryDiscoveries: make(map[decoder.Variant]analysis.EntryFact),
@@ -853,6 +867,9 @@ func (repo *repository) decodeOptions(bank *bankState, current config.Entry) dec
 	for edge := range repo.provenResumeEdges[owner] {
 		options.InternalResumeEdges[edge] = struct{}{}
 	}
+	for edge := range repo.flattenedResumeEdges[owner] {
+		options.InternalResumeEdges[edge] = struct{}{}
+	}
 	return options
 }
 
@@ -895,6 +912,13 @@ func (repo *repository) parallelEntries(jobs int, only map[byte]struct{}, fn fun
 }
 
 func (repo *repository) emitFunctions(jobs int, only map[byte]struct{}) (map[byte][]*emitter.FunctionResult, []*codegen.Context, error) {
+	regionBodies, regionWrappers, err := repo.sharedRegionEmissionPlans(only)
+	if err != nil {
+		return nil, nil, err
+	}
+	repo.sharedRegionBodies = len(regionBodies)
+	repo.sharedRegionWrappers = len(regionWrappers)
+	repo.sharedRegionFallbacks = countResumeTargets(repo.provenResumeEdges) - len(regionWrappers)
 	results := make(map[byte][]*emitter.FunctionResult)
 	for _, bank := range repo.banks {
 		if only == nil || containsBank(only, bank.ID) {
@@ -923,12 +947,14 @@ func (repo *repository) emitFunctions(jobs int, only map[byte]struct{}) (map[byt
 			copy := value
 			exit = &copy
 		}
+		variant := entryVariant(bank.ID, entry)
 		result, err := emitter.EmitFunction(repo.image, bank.ID, entry.Start, entry.EntryMX.M, entry.EntryMX.X, emitter.FunctionOptions{
 			Name: entry.Name, End: entry.End, EntrySOffset: entry.EntrySOffset, Decode: options, Codegen: context,
 			ExcludeRanges: excludes, TailCallPC: entry.TailCallPC, HLESPCUpload: hleSPC,
 			HLEFunction: bank.Config.HLEFunctions[entry.Start], HLEDispatch: bank.Config.HLEDispatch,
 			HLEFunctionIf: bank.Config.HLEFunctionsIf[entry.Start],
 			ExitMX:        exit, UnresolvedAllowed: true,
+			RegionBody: regionBodies[variant], RegionWrapper: regionWrappers[variant],
 		})
 		lock.Lock()
 		defer lock.Unlock()
@@ -948,6 +974,232 @@ func (repo *repository) emitFunctions(jobs int, only map[byte]struct{}) (map[byt
 		contexts = append(contexts, context)
 	})
 	return results, contexts, firstErr
+}
+
+// sharedRegionEmissionPlans selects only ownership trees whose externally
+// entered continuation closures are identical to the corresponding subgraphs
+// in the root owner. A continuation that owns another exact continuation is
+// flattened into the same private body; this preserves local goto semantics
+// without adding helper-to-helper activations. Multi-owner graphs and closure
+// mismatches retain their standalone generated bodies.
+func (repo *repository) sharedRegionEmissionPlans(only map[byte]struct{}) (map[decoder.Variant]*emitter.RegionBodyOptions, map[decoder.Variant]*emitter.RegionWrapperOptions, error) {
+	bodies := make(map[decoder.Variant]*emitter.RegionBodyOptions)
+	wrappers := make(map[decoder.Variant]*emitter.RegionWrapperOptions)
+	repo.flattenedResumeEdges = make(map[decoder.Variant]map[decoder.ResumeEdge]struct{})
+	if len(repo.provenResumeEdges) == 0 {
+		return bodies, wrappers, nil
+	}
+
+	owners := make([]decoder.Variant, 0, len(repo.provenResumeEdges))
+	targetOwners := make(map[decoder.Variant]map[decoder.Variant]struct{})
+	for owner, edges := range repo.provenResumeEdges {
+		owners = append(owners, owner)
+		for edge := range edges {
+			if targetOwners[edge.Target] == nil {
+				targetOwners[edge.Target] = make(map[decoder.Variant]struct{})
+			}
+			targetOwners[edge.Target][owner] = struct{}{}
+		}
+	}
+	sort.Slice(owners, func(i, j int) bool { return variantLess(owners[i], owners[j]) })
+
+	for _, owner := range owners {
+		bankID := byte(owner.Address >> 16)
+		if only != nil && !containsBank(only, bankID) {
+			continue
+		}
+		// Only roots build helpers. Descendant owners are flattened into their
+		// unique root's region below.
+		if len(targetOwners[owner]) != 0 {
+			continue
+		}
+		bank, ownerEntry, found := repo.activeEntryForVariant(owner)
+		if !found || bank.ID != bankID {
+			continue
+		}
+		if bank.Config.HLEFunctions[ownerEntry.Start] != "" || uint16SliceContains(bank.Config.HLESPCUpload, ownerEntry.Start) {
+			continue
+		}
+
+		nodes, targetSet, treeOK := repo.singleOwnerRegionTree(owner, targetOwners)
+		if !treeOK {
+			continue
+		}
+		unionEdges := repo.resumeEdgesForOwners(nodes)
+		ownerOptions := repo.decodeOptions(bank, ownerEntry)
+		for edge := range unionEdges {
+			ownerOptions.InternalResumeEdges[edge] = struct{}{}
+		}
+		ownerGraph, decodeErr := decoder.DecodeFunction(repo.image, bank.ID, ownerEntry.Start, ownerEntry.EntryMX.M, ownerEntry.EntryMX.X, ownerOptions)
+		if decodeErr != nil {
+			return nil, nil, fmt.Errorf("plan shared region $%06X M%dX%d: %w", owner.Address, owner.M, owner.X, decodeErr)
+		}
+		targets := make([]decoder.Variant, 0, len(targetSet))
+		for target := range targetSet {
+			targets = append(targets, target)
+		}
+		sort.Slice(targets, func(i, j int) bool { return variantLess(targets[i], targets[j]) })
+
+		var shared []decoder.Variant
+		for _, target := range targets {
+			targetBank, targetEntry, targetFound := repo.activeEntryForVariant(target)
+			if !targetFound || targetBank != bank {
+				continue
+			}
+			targetOptions := repo.decodeOptions(bank, targetEntry)
+			targetNodes, _, targetTreeOK := repo.singleOwnerRegionTree(target, targetOwners)
+			if !targetTreeOK {
+				continue
+			}
+			for edge := range repo.resumeEdgesForOwners(targetNodes) {
+				targetOptions.InternalResumeEdges[edge] = struct{}{}
+			}
+			targetGraph, targetErr := decoder.DecodeFunction(repo.image, bank.ID, targetEntry.Start, targetEntry.EntryMX.M, targetEntry.EntryMX.X, targetOptions)
+			if targetErr != nil {
+				return nil, nil, fmt.Errorf("plan shared continuation $%06X M%dX%d: %w", target.Address, target.M, target.X, targetErr)
+			}
+			start := decoder.DecodeKey{PC: target.Address, M: target.M & 1, X: target.X & 1}
+			if !sameDecodeClosure(ownerGraph, targetGraph, start) {
+				continue
+			}
+			shared = append(shared, target)
+		}
+		if len(shared) == 0 {
+			continue
+		}
+		repo.flattenedResumeEdges[owner] = unionEdges
+
+		helper := fmt.Sprintf("sr_region_%02X_%04X_M%dX%d", bank.ID, ownerEntry.Start, owner.M&1, owner.X&1)
+		body := &emitter.RegionBodyOptions{HelperName: helper, OwnerPC: ownerEntry.Start}
+		for index, target := range shared {
+			selector := uint16(index + 1)
+			body.Entries = append(body.Entries, emitter.RegionEntry{
+				PC: uint16(target.Address), M: target.M, X: target.X, Selector: selector,
+			})
+			wrappers[target] = &emitter.RegionWrapperOptions{
+				HelperName: helper, OwnerPC: ownerEntry.Start, Selector: selector,
+			}
+		}
+		bodies[owner] = body
+	}
+	return bodies, wrappers, nil
+}
+
+func (repo *repository) singleOwnerRegionTree(root decoder.Variant, targetOwners map[decoder.Variant]map[decoder.Variant]struct{}) (map[decoder.Variant]struct{}, map[decoder.Variant]struct{}, bool) {
+	nodes := make(map[decoder.Variant]struct{})
+	targets := make(map[decoder.Variant]struct{})
+	visiting := make(map[decoder.Variant]struct{})
+	var visit func(decoder.Variant) bool
+	visit = func(owner decoder.Variant) bool {
+		if _, active := visiting[owner]; active {
+			return false
+		}
+		if _, visited := nodes[owner]; visited {
+			return true
+		}
+		visiting[owner] = struct{}{}
+		nodes[owner] = struct{}{}
+		for edge := range repo.provenResumeEdges[owner] {
+			if len(targetOwners[edge.Target]) != 1 {
+				return false
+			}
+			targets[edge.Target] = struct{}{}
+			if len(repo.provenResumeEdges[edge.Target]) != 0 && !visit(edge.Target) {
+				return false
+			}
+		}
+		delete(visiting, owner)
+		return true
+	}
+	return nodes, targets, visit(root)
+}
+
+func (repo *repository) resumeEdgesForOwners(owners map[decoder.Variant]struct{}) map[decoder.ResumeEdge]struct{} {
+	result := make(map[decoder.ResumeEdge]struct{})
+	for owner := range owners {
+		for edge := range repo.provenResumeEdges[owner] {
+			result[edge] = struct{}{}
+		}
+	}
+	return result
+}
+
+func (repo *repository) activeEntryForVariant(variant decoder.Variant) (*bankState, config.Entry, bool) {
+	bank := repo.byBank[byte(variant.Address>>16)]
+	if bank == nil {
+		return nil, config.Entry{}, false
+	}
+	for _, entry := range bank.Config.Entries {
+		if entryVariant(bank.ID, entry) == variant && !repo.entryRootDormant(bank.ID, entry) {
+			return bank, entry, true
+		}
+	}
+	return nil, config.Entry{}, false
+}
+
+func sameDecodeClosure(owner, standalone *decoder.Graph, start decoder.DecodeKey) bool {
+	ownerClosure := graphInstructionClosure(owner, start)
+	if len(ownerClosure) != len(standalone.Instructions) {
+		return false
+	}
+	for key := range standalone.Instructions {
+		if _, found := ownerClosure[key]; !found {
+			return false
+		}
+	}
+	return true
+}
+
+func graphInstructionClosure(graph *decoder.Graph, start decoder.DecodeKey) map[decoder.DecodeKey]struct{} {
+	result := make(map[decoder.DecodeKey]struct{})
+	work := []decoder.DecodeKey{start}
+	for len(work) > 0 {
+		key := work[len(work)-1]
+		work = work[:len(work)-1]
+		decoded := graph.Instructions[key]
+		if decoded == nil {
+			continue
+		}
+		if _, visited := result[key]; visited {
+			continue
+		}
+		result[key] = struct{}{}
+		for _, successor := range decoded.Successors {
+			if graph.Instructions[successor] != nil {
+				work = append(work, successor)
+			}
+		}
+	}
+	return result
+}
+
+func variantLess(left, right decoder.Variant) bool {
+	if left.Address != right.Address {
+		return left.Address < right.Address
+	}
+	if left.M != right.M {
+		return left.M < right.M
+	}
+	return left.X < right.X
+}
+
+func countResumeTargets(edges map[decoder.Variant]map[decoder.ResumeEdge]struct{}) int {
+	targets := make(map[decoder.Variant]struct{})
+	for _, ownerEdges := range edges {
+		for edge := range ownerEdges {
+			targets[edge.Target] = struct{}{}
+		}
+	}
+	return len(targets)
+}
+
+func uint16SliceContains(values []uint16, wanted uint16) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func findEntryIndex(entries []config.Entry, target config.Entry) int {

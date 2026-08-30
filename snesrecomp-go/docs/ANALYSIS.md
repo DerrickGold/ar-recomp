@@ -265,24 +265,27 @@ distinguishes attached and HLE-only policy. This is intentional because a
 common configuration style relies on static call discovery to create the
 entry and keeps only the HLE directive authored.
 
-A second experimental consumer validates a bounded resumable-region contract.
+A second experimental consumer validates an exact resumable-region contract.
 It selects only a metadata-free `internal_continuation` with exactly one owning
-entry variant, one or more exact sibling-boundary edges, and at most eight
-decoded instructions. The continuation remains a standalone generated and
-registry-visible entry. Only its proven predecessor `(PC,M,X)` edges may enter
-the block with an in-region `goto`; other callers and widths still use the
-external entry. Generation re-decodes the closed owner graph and rejects a fact
-whose claimed edge is absent. This prevents a function-level ownership claim
-from opening unrelated loops or sibling callers.
+entry variant and one or more exact sibling-boundary edges. Region size is not
+a semantic criterion. The continuation remains registry-visible through a
+public wrapper, while the owner and continuation share one private generated
+body whenever the continuation's standalone decode closure exactly matches the
+owner subgraph. The wrapper performs the continuation's entry M/X check and
+establishes one recompiler activation; an internal edge remains an in-region
+`goto` and therefore creates no recursive or duplicate activation.
 
-The eight-instruction limit is an explicit source-growth guard, not a semantic
-threshold. Eagerly duplicating every externally addressable continuation into
-every possible owner can inflate generated output even when every edge is
-correct. `batch_single_owner_continuations` and
-`batch_region_eligible_continuations` separate the broader analysis result from
-the cost-bounded overlay subset. Larger or multi-owner regions remain
-report-only until generation can share one resumable region body instead of
-duplicating it.
+Generation re-decodes the closed owner graph and rejects a fact whose claimed
+edge is absent. It also checks exact decoded closure before replacing a
+standalone body with a wrapper. Nested single-owner continuation trees are
+flattened into one body so they do not add helper activations. If sharing is
+still unavailable because the external closure differs, the exact local edge
+remains valid but the standalone body is retained; regeneration reports this
+as a resumable-region fallback so source cost is visible. `batch_single_owner_continuations` and
+`batch_region_eligible_continuations` describe the statically selectable set;
+the regeneration summary separately reports shared wrappers and fallbacks.
+Multi-owner regions remain report-only until their ownership and activation
+contracts can be flattened without duplicating code.
 
 ## Table-first unknown target discovery
 

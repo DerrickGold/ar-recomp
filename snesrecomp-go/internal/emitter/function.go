@@ -31,6 +31,37 @@ type FunctionOptions struct {
 	HLEDispatch       map[uint16]string
 	ExitMX            *decoder.MX
 	UnresolvedAllowed bool
+	RegionBody        *RegionBodyOptions
+	RegionWrapper     *RegionWrapperOptions
+}
+
+// RegionEntry identifies one exact internal label that a shared generated
+// region may accept from an external public entry wrapper. Selector zero is
+// reserved for the owning routine's ordinary entry.
+type RegionEntry struct {
+	PC       uint16
+	M, X     uint8
+	Selector uint16
+}
+
+// RegionBodyOptions asks EmitFunction to keep the decoded body in one private
+// helper. The ordinary public routine wrapper enters with selector zero, while
+// the listed continuation wrappers enter exact internal labels. The helper
+// owns no recompiler activation: whichever public wrapper called it has
+// already pushed exactly one activation, and the helper's existing return
+// paths pop that activation.
+type RegionBodyOptions struct {
+	HelperName string
+	OwnerPC    uint16
+	Entries    []RegionEntry
+}
+
+// RegionWrapperOptions replaces a standalone continuation body with a public
+// entry wrapper into its proven owner's shared region.
+type RegionWrapperOptions struct {
+	HelperName string
+	OwnerPC    uint16
+	Selector   uint16
 }
 
 type FunctionResult struct {
@@ -199,6 +230,13 @@ func EmitFunction(image rom.Image, bank byte, start uint16, entryM, entryX uint8
 	}
 	name := fmt.Sprintf("%s_M%dX%d", baseName, entryM&1, entryX&1)
 	entryPC := decoder.Address24(bank, start)
+	if options.RegionBody != nil && options.RegionWrapper != nil {
+		return nil, fmt.Errorf("%s cannot be both a resumable-region body and wrapper", name)
+	}
+	if (options.RegionBody != nil || options.RegionWrapper != nil) &&
+		(options.HLESPCUpload || options.HLEFunction != "") {
+		return nil, fmt.Errorf("%s cannot share a resumable region with an unconditional HLE entry", name)
+	}
 	if options.HLESPCUpload {
 		return &FunctionResult{Source: emitSPCStub(name, baseName, entryPC)}, nil
 	}
@@ -374,8 +412,77 @@ func EmitFunction(image rom.Image, bank byte, start uint16, entryM, entryX uint8
 		blockLines[key] = lines
 	}
 
-	var source []string
-	source = append(source,
+	decodedBody := emitDecodedBody(order, blockLines)
+	switch {
+	case options.RegionBody != nil:
+		region := options.RegionBody
+		if region.HelperName == "" {
+			return result, fmt.Errorf("%s resumable region has no helper name", name)
+		}
+		selectors := map[uint16]struct{}{0: {}}
+		regionSwitch := []string{
+			"  RecompReturn _pending_skip = RECOMP_RETURN_NORMAL;",
+			"  (void)_pending_skip;  /* unused if no NLR site in this region */",
+			"  switch (_region_entry) {",
+			fmt.Sprintf("    case 0: goto %s;", label(graph.Entry)),
+		}
+		for _, entry := range region.Entries {
+			key := decoder.DecodeKey{PC: decoder.Address24(bank, entry.PC), M: entry.M & 1, X: entry.X & 1}
+			if _, found := local[key]; !found {
+				return result, fmt.Errorf("%s resumable region does not contain $%02X:%04X M%dX%d", name, bank, entry.PC, entry.M&1, entry.X&1)
+			}
+			if entry.Selector == 0 {
+				return result, fmt.Errorf("%s resumable-region continuation $%04X uses reserved selector zero", name, entry.PC)
+			}
+			if _, duplicate := selectors[entry.Selector]; duplicate {
+				return result, fmt.Errorf("%s resumable region repeats selector %d", name, entry.Selector)
+			}
+			selectors[entry.Selector] = struct{}{}
+			regionSwitch = append(regionSwitch, fmt.Sprintf("    case %d: goto %s;", entry.Selector, label(key)))
+		}
+		regionSwitch = append(regionSwitch,
+			"    default:",
+			fmt.Sprintf("      fprintf(stderr, \"[recomp] invalid resumable-region selector %%u in %s\\n\", (unsigned)_region_entry);", name),
+			"      abort();",
+			"  }",
+		)
+		wrapper := emitFunctionEntry(name, entryPC, entryM, entryX, options, result.GarbageBRK, false)
+		wrapper = append(wrapper,
+			fmt.Sprintf("  /* resumable-region owner_pc:$%04X */", region.OwnerPC),
+			fmt.Sprintf("  return %s(cpu, _entry_s, _hrv, 0);", region.HelperName),
+			"}",
+		)
+		helper := []string{fmt.Sprintf("static inline RecompReturn %s(CpuState *cpu, uint16 _entry_s, uint8 _hrv, uint16 _region_entry) {", region.HelperName)}
+		helper = append(helper, regionSwitch...)
+		helper = append(helper, decodedBody...)
+		helper = append(helper, "  RecompStackPop();", "  return RECOMP_RETURN_NORMAL;", "}")
+		result.Source = strings.Join(append(append(wrapper, ""), helper...), "\n") + "\n"
+	case options.RegionWrapper != nil:
+		region := options.RegionWrapper
+		if region.HelperName == "" || region.Selector == 0 {
+			return result, fmt.Errorf("%s has invalid resumable-region wrapper metadata", name)
+		}
+		source := emitFunctionEntry(name, entryPC, entryM, entryX, options, result.GarbageBRK, false)
+		source = append(source,
+			fmt.Sprintf("  /* resumable-region owner_pc:$%04X */", region.OwnerPC),
+			fmt.Sprintf("  return %s(cpu, _entry_s, _hrv, %d);", region.HelperName, region.Selector),
+			"}",
+		)
+		result.Source = strings.Join(source, "\n") + "\n"
+	default:
+		source := emitFunctionEntry(name, entryPC, entryM, entryX, options, result.GarbageBRK, true)
+		source = append(source, decodedBody...)
+		source = append(source, "  RecompStackPop();", "  return RECOMP_RETURN_NORMAL;", "}")
+		result.Source = strings.Join(source, "\n") + "\n"
+	}
+	if options.HLEFunction != "" {
+		result.Source = emitHLEStub(name, options.HLEFunction, entryPC)
+	}
+	return result, nil
+}
+
+func emitFunctionEntry(name string, entryPC uint32, entryM, entryX uint8, options FunctionOptions, garbageBRK *uint16, includePending bool) []string {
+	source := []string{
 		fmt.Sprintf("RecompReturn %s(CpuState *cpu) {", name),
 		"  extern const char *g_last_recomp_func;",
 		fmt.Sprintf("  g_last_recomp_func = \"%s\";", name),
@@ -383,14 +490,16 @@ func EmitFunction(image rom.Image, bank byte, start uint16, entryM, entryX uint8
 		fmt.Sprintf("  cpu_dbg_funcname(\"%s\");", name),
 		fmt.Sprintf("  cpu_trace_func_entry(cpu, 0x%06X, \"%s\");", entryPC, name),
 		fmt.Sprintf("  sr_entry_mx_check(cpu, %d, %d, \"%s\", 0x%06X);", entryM&1, entryX&1, name, entryPC),
-	)
-	if result.GarbageBRK != nil {
-		source = append(source, fmt.Sprintf("  sr_garbage_variant_trap(cpu, \"%s\", 0x%06X);  /* split-immediate BRK at $%04X */", name, entryPC, *result.GarbageBRK))
 	}
-	source = append(source,
-		"  RecompReturn _pending_skip = RECOMP_RETURN_NORMAL;",
-		"  (void)_pending_skip;  /* unused if no NLR site in this fn */",
-	)
+	if garbageBRK != nil {
+		source = append(source, fmt.Sprintf("  sr_garbage_variant_trap(cpu, \"%s\", 0x%06X);  /* split-immediate BRK at $%04X */", name, entryPC, *garbageBRK))
+	}
+	if includePending {
+		source = append(source,
+			"  RecompReturn _pending_skip = RECOMP_RETURN_NORMAL;",
+			"  (void)_pending_skip;  /* unused if no NLR site in this fn */",
+		)
+	}
 	if options.EntrySOffset == 0 {
 		source = append(source, "  uint16 _entry_s = cpu->S;")
 	} else {
@@ -420,6 +529,11 @@ func EmitFunction(image rom.Image, bank byte, start uint16, entryM, entryX uint8
 			"  }",
 		)
 	}
+	return source
+}
+
+func emitDecodedBody(order []decoder.DecodeKey, blockLines map[decoder.DecodeKey][]string) []string {
+	var source []string
 	for _, key := range order {
 		source = append(source, "  "+label(key)+":", fmt.Sprintf("    cpu_trace_block(cpu, 0x%06X);", key.PC&0xffffff), "    WatchdogCheck();")
 		for _, line := range blockLines[key] {
@@ -429,12 +543,7 @@ func EmitFunction(image rom.Image, bank byte, start uint16, entryM, entryX uint8
 			source = append(source, "    "+line)
 		}
 	}
-	source = append(source, "  RecompStackPop();", "  return RECOMP_RETURN_NORMAL;", "}")
-	result.Source = strings.Join(source, "\n") + "\n"
-	if options.HLEFunction != "" {
-		result.Source = emitHLEStub(name, options.HLEFunction, entryPC)
-	}
-	return result, nil
+	return source
 }
 
 // emitTrappedIndirectJump records the architectural target before preserving

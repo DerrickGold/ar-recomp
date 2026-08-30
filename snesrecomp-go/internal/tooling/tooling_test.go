@@ -1104,15 +1104,19 @@ func TestSelectStaticProvenContinuationEntryFactsRequiresPlainSiblingOnlyEntry(t
 		{
 			PC: 0x008500, AuthoredMX: analysis.MXState{M: 0, X: 1},
 			Status: shadowEntryAblationRecoverable, EntryKindHint: "internal_continuation",
-			DecodedInstructions: maxStaticContinuationRegionInstructions + 1,
+			DecodedInstructions: 200,
 			Incoming: []ShadowEntryAblationSource{{
 				PC: 0x008100, EntryMX: analysis.MXState{M: 0, X: 1}, Kinds: []string{"sibling_boundary_edge"},
+				Edges: []analysis.EntryEdge{{
+					Source: analysis.EntryVariant{PC: 0x008120, EntryMX: analysis.MXState{M: 0, X: 1}},
+					Target: analysis.EntryVariant{PC: 0x008500, EntryMX: analysis.MXState{M: 0, X: 1}},
+				}},
 			}},
 		},
 	}}}
 	facts := SelectStaticProvenContinuationEntryFacts(report)
-	if len(facts) != 1 {
-		t.Fatalf("continuation facts = %+v, want one plain same-bank fact", facts)
+	if len(facts) != 2 {
+		t.Fatalf("continuation facts = %+v, want two plain same-bank facts independent of region size", facts)
 	}
 	fact := facts[0]
 	if fact.PC != 0x008200 || fact.Kind != analysis.EntryContinuation || !fact.TemplateFree ||
@@ -1121,6 +1125,9 @@ func TestSelectStaticProvenContinuationEntryFactsRequiresPlainSiblingOnlyEntry(t
 	}) || len(fact.ResumeEdges) != 1 || fact.ResumeEdges[0].Source.PC != 0x008110 ||
 		len(fact.Evidence) != 1 || fact.Evidence[0].Source != "static.sibling_boundary_edge" {
 		t.Fatalf("continuation fact = %+v", fact)
+	}
+	if facts[1].PC != 0x008500 || len(facts[1].ResumeEdges) != 1 || facts[1].ResumeEdges[0].Source.PC != 0x008120 {
+		t.Fatalf("large continuation fact was not retained: %+v", facts[1])
 	}
 }
 

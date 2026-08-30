@@ -57,3 +57,52 @@ func TestReferencedVariantDeclarationsAreSortedAndUnique(t *testing.T) {
 		t.Fatalf("declarations:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+func TestSplitBankKeepsResumableRegionWrappersWithPrivateBody(t *testing.T) {
+	source := `/* header */
+
+/* Forward declarations for in-bank entries. */
+RecompReturn Root_M1X1(CpuState *cpu);
+RecompReturn Continuation_M1X1(CpuState *cpu);
+RecompReturn Other_M1X1(CpuState *cpu);
+
+RecompReturn Root_M1X1(CpuState *cpu) {
+  /* resumable-region owner_pc:$8000 */
+  return sr_region_00_8000_M1X1(cpu, _entry_s, _hrv, 0);
+}
+static inline RecompReturn sr_region_00_8000_M1X1(CpuState *cpu, uint16 _entry_s, uint8 _hrv, uint16 _region_entry) {
+  return RECOMP_RETURN_NORMAL;
+}
+
+RecompReturn Continuation_M1X1(CpuState *cpu) {
+  /* resumable-region owner_pc:$8000 */
+  return sr_region_00_8000_M1X1(cpu, _entry_s, _hrv, 1);
+}
+
+RecompReturn Other_M1X1(CpuState *cpu) {
+  return RECOMP_RETURN_NORMAL;
+}
+`
+	outputs, err := splitBank(source, 0x00, []config.Entry{
+		{Name: "Root", Start: 0x8000},
+		{Name: "Continuation", Start: 0x9000},
+		{Name: "Other", Start: 0x9002},
+	}, 1, 0x800)
+	if err != nil {
+		t.Fatal(err)
+	}
+	regionChunk := outputs["bank00_part00_v2.c"]
+	if !strings.Contains(regionChunk, "RecompReturn Continuation_M1X1") ||
+		!strings.Contains(regionChunk, "static inline RecompReturn sr_region_00_8000_M1X1") {
+		t.Fatalf("region wrapper and body were not grouped with their owner:\n%s", regionChunk)
+	}
+	if strings.Count(regionChunk, "static inline RecompReturn sr_region_00_8000_M1X1(CpuState *cpu") != 2 {
+		t.Fatalf("region chunk should contain one prototype and one body:\n%s", regionChunk)
+	}
+	otherChunk := outputs["bank00_part02_v2.c"]
+	if !strings.Contains(otherChunk, "RecompReturn Other_M1X1") ||
+		strings.Contains(otherChunk, "Continuation_M1X1") ||
+		strings.Contains(otherChunk, "sr_region_00_8000_M1X1") {
+		t.Fatalf("unrelated chunk contains resumable-region material:\n%s", otherChunk)
+	}
+}

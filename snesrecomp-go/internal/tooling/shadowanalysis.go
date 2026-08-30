@@ -20,7 +20,7 @@ import (
 	romimage "github.com/DerrickGold/snesrecomp-go/internal/rom"
 )
 
-const shadowReportVersion = 12
+const shadowReportVersion = 13
 
 const (
 	shadowUnresolvedGeneric              = "generic_dynamic_target"

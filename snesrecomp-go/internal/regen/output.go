@@ -18,6 +18,8 @@ var (
 	variantCallRE      = regexp.MustCompile(`\b([A-Za-z_]\w*_M[01]X[01])\(cpu\)`)
 	variantSuffixRE    = regexp.MustCompile(`_M[01]X[01]$`)
 	syntheticNameRE    = regexp.MustCompile(`^bank_([0-9A-Fa-f]{2})_([0-9A-Fa-f]{4})$`)
+	regionHelperCallRE = regexp.MustCompile(`\b(sr_region_[A-Za-z0-9_]+)\(cpu,\s*_entry_s,\s*_hrv,`)
+	regionOwnerPCRE    = regexp.MustCompile(`/\*\s*resumable-region owner_pc:\$([0-9A-Fa-f]{4})\s*\*/`)
 )
 
 const forwardMarker = "/* Forward declarations for in-bank entries. */"
@@ -141,6 +143,16 @@ func splitBank(source string, bank byte, entries []config.Entry, thresholdBytes,
 		if !found {
 			return nil, fmt.Errorf("bank $%02X: cannot assign emitted function %q to stable PC chunk", bank, symbol)
 		}
+		// Every wrapper for one resumable region must remain in its owner's
+		// translation unit because the shared body has private static-inline
+		// linkage. The marker is emitted only from proven region wrappers.
+		if owner := regionOwnerPCRE.FindStringSubmatch(body); owner != nil {
+			var parsed uint64
+			if _, scanErr := fmt.Sscanf(owner[1], "%X", &parsed); scanErr != nil {
+				return nil, fmt.Errorf("bank $%02X: parse resumable-region owner PC for %q: %w", bank, symbol, scanErr)
+			}
+			pc = uint16(parsed)
+		}
 		part := 0
 		if pc >= 0x8000 {
 			part = int(pc-0x8000) / pcSpan
@@ -150,7 +162,7 @@ func splitBank(source string, bank byte, entries []config.Entry, thresholdBytes,
 	outputs := make(map[string]string, len(chunks))
 	for part, bodies := range chunks {
 		joined := strings.Join(bodies, "\n")
-		declarations := referencedVariantDeclarations(joined)
+		declarations := referencedDeclarations(joined)
 		start := 0x8000 + part*pcSpan
 		end := start + pcSpan - 1
 		if end > 0xffff {
@@ -179,13 +191,17 @@ func declareReferencedVariants(source string) string {
 		return source
 	}
 	insert := matches[0][0]
-	declarations := referencedVariantDeclarations(source[insert:])
+	declarations := referencedDeclarations(source[insert:])
 	if declarations == "" {
 		return source
 	}
 	return source[:insert] +
 		"/* Forward declarations for referenced entries. */\n" +
 		declarations + "\n" + source[insert:]
+}
+
+func referencedDeclarations(source string) string {
+	return referencedVariantDeclarations(source) + referencedRegionHelperDeclarations(source)
 }
 
 func referencedVariantDeclarations(source string) string {
@@ -201,6 +217,23 @@ func referencedVariantDeclarations(source string) string {
 	var declarations strings.Builder
 	for _, ref := range refs {
 		fmt.Fprintf(&declarations, "RecompReturn %s(CpuState *cpu);\n", ref)
+	}
+	return declarations.String()
+}
+
+func referencedRegionHelperDeclarations(source string) string {
+	refsSet := make(map[string]struct{})
+	for _, match := range regionHelperCallRE.FindAllStringSubmatch(source, -1) {
+		refsSet[match[1]] = struct{}{}
+	}
+	refs := make([]string, 0, len(refsSet))
+	for ref := range refsSet {
+		refs = append(refs, ref)
+	}
+	sort.Strings(refs)
+	var declarations strings.Builder
+	for _, ref := range refs {
+		fmt.Fprintf(&declarations, "static inline RecompReturn %s(CpuState *cpu, uint16 _entry_s, uint8 _hrv, uint16 _region_entry);\n", ref)
 	}
 	return declarations.String()
 }
