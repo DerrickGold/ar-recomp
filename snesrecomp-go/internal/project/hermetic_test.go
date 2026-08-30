@@ -162,6 +162,25 @@ func TestNewestHeaderTime(t *testing.T) {
 	}
 }
 
+func TestNewestImplementationIncludeTimeWalksUnitySources(t *testing.T) {
+	directory := t.TempDir()
+	unit := filepath.Join(directory, "unit.cpp")
+	core := filepath.Join(directory, "core.cpp")
+	table := filepath.Join(directory, "tables.inc")
+	writeTestFile(t, unit, "#include \"core.cpp\"\n")
+	writeTestFile(t, core, "#include \"tables.inc\"\n")
+	writeTestFile(t, table, "static const int table[] = { 1 };\n")
+
+	when := time.Now().Add(2 * time.Hour)
+	if err := os.Chtimes(table, when, when); err != nil {
+		t.Fatal(err)
+	}
+	newest := newestImplementationIncludeTime(unit)
+	if newest.Before(when.Add(-time.Second)) {
+		t.Fatalf("unity dependency scan missed tables.inc: got %v want ~%v", newest, when)
+	}
+}
+
 func TestFirstFlagValue(t *testing.T) {
 	// SDL3's sdl3.pc reports the parent include dir (the game includes
 	// <SDL3/SDL.h>), so the first -I is taken verbatim.

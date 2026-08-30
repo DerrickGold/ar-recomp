@@ -31,7 +31,7 @@ static const uint16_t kRatePeriods[32] = {
     10, 8, 6, 5, 4, 3, 2, 1
 };
 
-static bool s_extended_voices_enabled;
+bool g_dsp_extended_voices_enabled;
 static int s_music_gain_percent = 100;
 static int s_sfx_gain_percent = 100;
 static bool s_music_muted;
@@ -51,16 +51,16 @@ static uint16_t read_u16(const uint8_t *ram, uint16_t address) {
 }
 
 void dsp_setExtendedVoicesEnabled(bool enabled) {
-    s_extended_voices_enabled = enabled;
+    g_dsp_extended_voices_enabled = enabled;
 }
 
 bool dsp_extendedVoicesEnabled(void) {
-    return s_extended_voices_enabled;
+    return g_dsp_extended_voices_enabled;
 }
 
 int dsp_activeVoiceCount(void) {
-    return s_extended_voices_enabled ? kDspMaximumVoiceCount
-                                     : kDspHardwareVoiceCount;
+    return g_dsp_extended_voices_enabled ? kDspMaximumVoiceCount
+                                         : kDspHardwareVoiceCount;
 }
 
 void dsp_setVoiceBus(Dsp *dsp, int channel, DspVoiceBus bus) {
@@ -104,6 +104,20 @@ static bool voice_is_muted(const Dsp *dsp, int channel) {
     return bus == kDspVoiceBus_Unclassified &&
            g_dsp_voice_mute_srcn_min >= 0 &&
            dsp->channel[channel].srcn >= g_dsp_voice_mute_srcn_min;
+}
+
+void dsp_refreshMixControls(Dsp *dsp) {
+    int channel;
+    dsp->mixControlsUnity = s_music_gain_percent == 100 &&
+        s_sfx_gain_percent == 100 && !s_music_muted &&
+        g_dsp_voice_mute_srcn_min < 0;
+    if (dsp->mixControlsUnity) return;
+    for (channel = 0; channel < kDspMaximumVoiceCount; ++channel) {
+        dsp->voiceGainPercent[channel] =
+            (uint8_t)voice_bus_gain(dsp, channel);
+        dsp->voiceMuted[channel] =
+            voice_is_muted(dsp, channel) ? 1u : 0u;
+    }
 }
 
 static void mirror_voice_register(Dsp *dsp, int channel, uint8_t reg,
@@ -201,7 +215,7 @@ static void sync_accuracy_voice_mirrors(Dsp *dsp) {
     }
 }
 
-static void sync_accuracy_mirrors(Dsp *dsp) {
+void dsp_syncAccuracyMirrors(Dsp *dsp) {
     sync_accuracy_register_mirrors(dsp);
     sync_accuracy_voice_mirrors(dsp);
 }
@@ -219,7 +233,7 @@ Dsp *dsp_init(uint8_t *ram) {
         free(dsp);
         return NULL;
     }
-    sync_accuracy_mirrors(dsp);
+    dsp_syncAccuracyMirrors(dsp);
     return dsp;
 }
 
@@ -243,7 +257,8 @@ void dsp_reset(Dsp *dsp) {
     dsp->shadow = shadow;
     dsp->accuracy = accuracy;
     sr_dsp_accuracy_reset((SrDspAccuracy *)accuracy);
-    sync_accuracy_mirrors(dsp);
+    dsp_syncAccuracyMirrors(dsp);
+    dsp_refreshMixControls(dsp);
     dsp->noiseSample = -0x4000;
 }
 
@@ -270,7 +285,10 @@ void dsp_saveload(Dsp *dsp, SaveLoadInfo *info) {
                            sizeof(dsp->sampleBuffer[0]));
     saveload_u32(info, &dsp->sampleWrite);
     saveload_u32(info, &dsp->sampleRead);
-    if (!info->saving && !info->failed) sync_accuracy_mirrors(dsp);
+    if (!info->saving && !info->failed) {
+        dsp_syncAccuracyMirrors(dsp);
+        dsp_refreshMixControls(dsp);
+    }
 }
 
 static void notify_voice_key_on(Dsp *dsp, int channel) {
@@ -335,7 +353,7 @@ void dsp_writeHardwareVoiceMask(Dsp *dsp, uint8_t address, uint8_t value,
     sr_dsp_accuracy_write_hardware_mask(
         (SrDspAccuracy *)dsp->accuracy, address, value, update_mask);
     mirror_hardware_mask(dsp, address, value, update_mask);
-    sync_accuracy_mirrors(dsp);
+    sync_accuracy_register_mirrors(dsp);
     if (address == 0x4cu) notify_key_on(dsp, (uint8_t)(value & update_mask));
 }
 
@@ -343,6 +361,12 @@ uint8_t dsp_read(Dsp *dsp, uint8_t address) {
     if (dsp == NULL) return 0u;
     return sr_dsp_accuracy_read((const SrDspAccuracy *)dsp->accuracy,
                                 (uint8_t)(address & 0x7fu));
+}
+
+void dsp_copyRegisters(const Dsp *dsp, uint8_t registers[0x80]) {
+    if (dsp == NULL || registers == NULL) return;
+    sr_dsp_accuracy_copy_registers((const SrDspAccuracy *)dsp->accuracy,
+                                   registers);
 }
 
 void dsp_write(Dsp *dsp, uint8_t address, uint8_t value) {
@@ -364,45 +388,13 @@ void dsp_write(Dsp *dsp, uint8_t address, uint8_t value) {
             break;
         default: break;
     }
-    sync_accuracy_mirrors(dsp);
+    sync_accuracy_register_mirrors(dsp);
     if (address == 0x4cu) notify_key_on(dsp, value);
 }
 
 uint8_t dsp_currentSlot(const Dsp *dsp) {
     return dsp == NULL ? 0u :
         sr_dsp_accuracy_slot((const SrDspAccuracy *)dsp->accuracy);
-}
-
-void dsp_clock(Dsp *dsp) {
-    uint8_t gains[kDspMaximumVoiceCount] = {0};
-    uint8_t muted[kDspMaximumVoiceCount] = {0};
-    SrDspAccuracyFrame frame;
-    uint32_t fill;
-    int channel;
-    int dropped;
-    if (dsp == NULL) return;
-    for (channel = 0; channel < dsp_activeVoiceCount(); ++channel) {
-        gains[channel] = (uint8_t)voice_bus_gain(dsp, channel);
-        muted[channel] = voice_is_muted(dsp, channel) ? 1u : 0u;
-    }
-    frame = sr_dsp_accuracy_clock(
-        (SrDspAccuracy *)dsp->accuracy, dsp->apu_ram,
-        s_extended_voices_enabled, gains, muted);
-    sync_accuracy_register_mirrors(dsp);
-    if (!frame.delivered) return;
-    sync_accuracy_voice_mirrors(dsp);
-
-    fill = dsp->sampleWrite - dsp->sampleRead;
-    dropped = fill >= DSP_SAMPLE_RING;
-    if (!dropped) {
-        const uint32_t index = dsp->sampleWrite & (DSP_SAMPLE_RING - 1u);
-        dsp->sampleBuffer[index * 2u] = frame.left;
-        dsp->sampleBuffer[index * 2u + 1u] = frame.right;
-        ++dsp->sampleWrite;
-    }
-    audio_trace_on_sample(frame.left, frame.right, dropped,
-                          dropped ? fill : fill + 1u);
-    dsp->evenCycle = !dsp->evenCycle;
 }
 
 void dsp_cycle(Dsp *dsp) {

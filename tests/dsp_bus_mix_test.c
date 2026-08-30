@@ -238,6 +238,47 @@ static void TestExtendedVoiceStateIsSerialized(void) {
   dsp_setExtendedVoicesEnabled(false);
 }
 
+static void TestDormantVirtualBankResumesAtNativeParity(void) {
+  uint8_t hardware_ram[0x10000], virtual_ram[0x10000];
+  Dsp *hardware = NewDsp(hardware_ram);
+  Dsp *virtual_dsp = NewDsp(virtual_ram);
+  if (!hardware || !virtual_dsp) goto done;
+  dsp_setExtendedVoicesEnabled(true);
+  ConfigureVoice(hardware, 0, kDspVoiceBus_Sfx, false);
+  ConfigureVoice(virtual_dsp, 8, kDspVoiceBus_Sfx, false);
+  Run(hardware, 32);
+  Run(virtual_dsp, 32);
+
+  dsp_writeHardwareVoiceMask(hardware, 0x5c, 0x01, 0x01);
+  dsp_writeVirtualVoiceControl(virtual_dsp, 8, 0x5c, true);
+  Run(hardware, 400);
+  Run(virtual_dsp, 400);
+  CHECK(hardware->sampleBuffer[(hardware->sampleWrite - 1) * 2] == 0);
+  CHECK(virtual_dsp->sampleBuffer[(virtual_dsp->sampleWrite - 1) * 2] == 0);
+
+  dsp_writeHardwareVoiceMask(hardware, 0x5c, 0x00, 0x01);
+  dsp_writeVirtualVoiceControl(virtual_dsp, 8, 0x5c, false);
+  dsp_writeHardwareVoiceMask(hardware, 0x4c, 0x01, 0x01);
+  dsp_writeVirtualVoiceControl(virtual_dsp, 8, 0x4c, true);
+  {
+    const uint32_t hardware_cursor = hardware->sampleWrite;
+    const uint32_t virtual_cursor = virtual_dsp->sampleWrite;
+    Run(hardware, 24);
+    Run(virtual_dsp, 24);
+    CHECK(memcmp(hardware->sampleBuffer +
+                     (hardware_cursor & (DSP_SAMPLE_RING - 1u)) * 2,
+                 virtual_dsp->sampleBuffer +
+                     (virtual_cursor & (DSP_SAMPLE_RING - 1u)) * 2,
+                 24 * 2 * sizeof(int16_t)) == 0);
+    CHECK(virtual_dsp->sampleBuffer[
+              ((virtual_cursor + 16) & (DSP_SAMPLE_RING - 1u)) * 2] != 0);
+  }
+done:
+  dsp_free(hardware);
+  dsp_free(virtual_dsp);
+  dsp_setExtendedVoicesEnabled(false);
+}
+
 int main(void) {
   dsp_setExtendedVoicesEnabled(false);
   dsp_setMusicBusMuted(false);
@@ -245,6 +286,7 @@ int main(void) {
   TestExtendedControlAndPcmParity();
   TestVirtualEchoUsesSharedUnitAndBusGain();
   TestExtendedVoiceStateIsSerialized();
+  TestDormantVirtualBankResumesAtNativeParity();
   if (s_failures) {
     fprintf(stderr, "dsp_bus_mix_test: %d failure(s)\n", s_failures);
     return 1;

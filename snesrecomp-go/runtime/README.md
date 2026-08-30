@@ -107,6 +107,12 @@ The compiler target, rather than the machine running CMake, selects ARM NEON
 or x86 SSE2. Cross-compiles therefore cannot accidentally emit instructions
 for the build host.
 
+Supported release compilers also use interprocedural optimization by default
+for the runtime target. Configure with `SNESRECOMP_ENABLE_IPO=OFF` when
+debugging compiler/linker behavior or validating a toolchain without IPO. The
+portable Zig-built SDK archive keeps ordinary native objects and instead
+compiles the private accuracy core and bridge as one C++20 translation unit.
+
 PPU sprite and resolved-pixel bitsets also follow the target's native pointer
 width. A 32-bit target uses 32-bit set-bit iteration without changing the
 64-bit NEON/SSE2 desktop path. The width can be forced to exercise either

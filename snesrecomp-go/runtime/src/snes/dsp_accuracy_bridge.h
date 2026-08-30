@@ -16,6 +16,7 @@ typedef struct SrDspAccuracyFrame {
     int16_t left;
     int16_t right;
     bool delivered;
+    uint8_t active_bank_mask;
 } SrDspAccuracyFrame;
 
 typedef struct SrDspAccuracyVoice {
@@ -47,7 +48,8 @@ void sr_dsp_accuracy_write_virtual_control(SrDspAccuracy *accuracy,
                                            bool enabled);
 SrDspAccuracyFrame sr_dsp_accuracy_clock(
     SrDspAccuracy *accuracy, uint8_t *apu_ram, bool extended_enabled,
-    const uint8_t voice_gain_percent[40], const uint8_t voice_muted[40]);
+    bool mix_controls_unity, const uint8_t voice_gain_percent[40],
+    const uint8_t voice_muted[40]);
 void sr_dsp_accuracy_copy_registers(const SrDspAccuracy *accuracy,
                                     uint8_t registers[128]);
 void sr_dsp_accuracy_get_voice(const SrDspAccuracy *accuracy, int channel,

@@ -5,8 +5,7 @@ set(SNESRECOMP_RUNNER_DEVICE_ROOT ${SNESRECOMP_RUNNER_ROOT})
 set(SNESRECOMP_RUNNER_CRC32_SOURCE ${SNESRECOMP_RUNNER_ROOT}/src/support/crc32.c)
 set(SNESRECOMP_RUNNER_DSP_SOURCE ${SNESRECOMP_RUNNER_ROOT}/src/snes/dsp.c)
 set(SNESRECOMP_RUNNER_DSP_ACCURACY_SOURCES
-    ${SNESRECOMP_RUNNER_ROOT}/src/snes/dsp_accuracy_bridge.cpp
-    ${SNESRECOMP_RUNNER_ROOT}/src/snes/accuracy/dsp.cpp)
+    ${SNESRECOMP_RUNNER_ROOT}/src/snes/dsp_accuracy_unit.cpp)
 set(SNESRECOMP_RUNNER_SAVELOAD_SOURCE ${SNESRECOMP_RUNNER_ROOT}/src/snes/saveload.c)
 
 include(${SNESRECOMP_RUNNER_ROOT}/sources.cmake)
@@ -19,6 +18,8 @@ endif()
 
 option(SNESRECOMP_ENABLE_SIMD
     "Enable runner SIMD implementations supported by the build target" ON)
+option(SNESRECOMP_ENABLE_IPO
+    "Enable supported interprocedural optimization in release runner targets" ON)
 set(SNESRECOMP_PPU_BIT_WORD_BITS "auto" CACHE STRING
     "Runner PPU bitset word width: auto, 32, or 64")
 set_property(CACHE SNESRECOMP_PPU_BIT_WORD_BITS PROPERTY STRINGS auto 32 64)
@@ -51,6 +52,22 @@ function(snesrecomp_configure_runtime_target target)
     endif()
     target_compile_features(${target} PUBLIC c_std_11)
     target_compile_features(${target} PRIVATE cxx_std_20)
+    if(SNESRECOMP_ENABLE_IPO)
+        include(CheckIPOSupported)
+        check_ipo_supported(RESULT _snesrecomp_ipo_supported
+                            OUTPUT _snesrecomp_ipo_error)
+        if(_snesrecomp_ipo_supported)
+            set_property(TARGET ${target} PROPERTY
+                INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+            set_property(TARGET ${target} PROPERTY
+                INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO TRUE)
+            set_property(TARGET ${target} PROPERTY
+                INTERPROCEDURAL_OPTIMIZATION_MINSIZEREL TRUE)
+        else()
+            message(STATUS
+                "runner IPO unavailable for ${target}: ${_snesrecomp_ipo_error}")
+        endif()
+    endif()
     if(NOT MSVC)
         target_compile_options(${target} PRIVATE
             $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>

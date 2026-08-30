@@ -35,8 +35,7 @@ set(SNESRECOMP_RUNNER_SOURCES
     ${SNESRECOMP_RUNNER_ROOT}/src/snes/apu.c
     ${SNESRECOMP_RUNNER_ROOT}/src/snes/spc.c
     ${SNESRECOMP_RUNNER_ROOT}/src/snes/dsp.c
-    ${SNESRECOMP_RUNNER_ROOT}/src/snes/dsp_accuracy_bridge.cpp
-    ${SNESRECOMP_RUNNER_ROOT}/src/snes/accuracy/dsp.cpp
+    ${SNESRECOMP_RUNNER_ROOT}/src/snes/dsp_accuracy_unit.cpp
     ${SNESRECOMP_RUNNER_ROOT}/src/snes/audio_shadow.c
     ${SNESRECOMP_RUNNER_ROOT}/src/snes/dsp_shadow.c
     ${SNESRECOMP_RUNNER_ROOT}/src/snes/msu1.c
