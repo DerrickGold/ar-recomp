@@ -246,6 +246,14 @@ master-volume saturation before the five dry outputs are combined. This makes
 the extension hardware-shaped and deterministic without pretending it is a
 single 40-voice physical S-DSP. Save states serialize all five banks.
 
+An extended bank whose voices have all completed Release is dormant until its
+next KON. Waking it copies the native bank's current slot, global counter,
+sample index, noise phase, and shared registers before the key event is
+consumed. Active banks retain the complete 32-slot schedule. Their local echo
+FIR/delay work is deliberately omitted: EON sends join the native bank before
+its one physical echo pass, so a second delay line would be redundant and is
+not observable through the extended-voice API.
+
 ### APU timing ownership and profiling
 
 `RtlRunFrame` advances a serialized APU target by

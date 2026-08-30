@@ -148,7 +148,7 @@ func TestRuntimeArchiveSelectsCxx20ForAccuracySources(t *testing.T) {
 		true, RunnerManifest{})
 	c := strings.Join(runtimeSourceCompileArgs(base, "src/snes/dsp.c"), "\x00")
 	cxx := strings.Join(runtimeSourceCompileArgs(
-		base, "src/snes/accuracy/dsp.cpp"), "\x00")
+		base, "src/snes/dsp_accuracy_unit.cpp"), "\x00")
 	if !strings.HasPrefix(c, "cc\x00") || !strings.Contains(c, "-std=gnu11") {
 		t.Fatalf("C runner compile arguments changed language: %q", c)
 	}

@@ -57,6 +57,12 @@ struct Dsp {
     void *shadow;
     void *accuracy;
     uint8_t voiceBus[kDspMaximumVoiceCount];
+    /* Derived host-mix controls, refreshed once at each DSP sample boundary.
+     * Keep these ahead of ram: legacy raw states begin at ram and must not
+     * acquire transient cache bytes. */
+    uint8_t voiceGainPercent[kDspMaximumVoiceCount];
+    uint8_t voiceMuted[kDspMaximumVoiceCount];
+    bool mixControlsUnity;
     uint8_t ram[0x80];
     DspChannel channel[kDspMaximumVoiceCount];
     uint16_t dirPage;
@@ -95,6 +101,7 @@ void dsp_cycle(Dsp *dsp);
 uint8_t dsp_currentSlot(const Dsp *dsp);
 uint8_t dsp_read(Dsp *dsp, uint8_t address);
 void dsp_write(Dsp *dsp, uint8_t address, uint8_t value);
+void dsp_copyRegisters(const Dsp *dsp, uint8_t registers[0x80]);
 void dsp_getSamples(Dsp *dsp, int16_t *samples, int sample_count);
 void dsp_getSamplesResampled(Dsp *dsp, int16_t *samples, int sample_count,
                              double native_step, double *phase);
@@ -114,7 +121,13 @@ void dsp_writeVirtualVoiceControl(Dsp *dsp, int channel,
 void dsp_writeHardwareVoiceMask(Dsp *dsp, uint8_t address, uint8_t value,
                                 uint8_t update_mask);
 
+/* Private accuracy-unit seams. They are declared here because this is the
+ * runner's device header, not part of the installed public ABI. */
+void dsp_refreshMixControls(Dsp *dsp);
+void dsp_syncAccuracyMirrors(Dsp *dsp);
+
 extern int g_dsp_voice_mute_srcn_min;
+extern bool g_dsp_extended_voices_enabled;
 extern void (*g_dsp_voice_kon_hook)(int channel, uint8_t source_number,
                                     uint16_t brr_address, int volume_left,
                                     int volume_right, uint16_t pitch);

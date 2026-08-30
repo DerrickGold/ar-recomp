@@ -786,7 +786,8 @@ static void applyVoiceRight(DspState& dsp, std::size_t voice) noexcept {
 // that follow. echoRam is the machine RAM the echo unit writes into, or null for a
 // read-only caller (the FLG bit 5 case).
 static StereoFrame stepDspSampleAtomic(DspState& dsp, std::span<const std::uint8_t, 65536> ram,
-                                       std::uint8_t* echoRam) noexcept {
+                                       std::uint8_t* echoRam,
+                                       bool processEcho) noexcept {
   // A freshly seeded state holds no pitch captures yet: take both stages from
   // the registers as they stand, so this frame reads the same values a live
   // register read would — byte-identical to the frame-at-once model.
@@ -842,14 +843,17 @@ static StereoFrame stepDspSampleAtomic(DspState& dsp, std::span<const std::uint8
   // live ESA, the write lands within the call under the live FLG bit-5 gate, and
   // the ring advance applies the live registers — which warms the applied base
   // for the slot-scheduled samples that follow the seed frame.
-  const EchoOutput echo = stepEcho(dsp, ram, echoRam, dsp[kDspEsa], echoLeft, echoRight);
-  if (dsp.echoWritePending && echoRam != nullptr &&
-      (dsp[kDspFlg] & kFlgEchoWriteDisable) == 0) {
-    for (int b = 0; b < 4; ++b)
-      echoRam[static_cast<std::uint16_t>(dsp.echoWriteEntry + b)] = dsp.echoWriteBytes[b];
+  EchoOutput echo{};
+  if (processEcho) {
+    echo = stepEcho(dsp, ram, echoRam, dsp[kDspEsa], echoLeft, echoRight);
+    if (dsp.echoWritePending && echoRam != nullptr &&
+        (dsp[kDspFlg] & kFlgEchoWriteDisable) == 0) {
+      for (int b = 0; b < 4; ++b)
+        echoRam[static_cast<std::uint16_t>(dsp.echoWriteEntry + b)] = dsp.echoWriteBytes[b];
+    }
+    advanceEchoRing(dsp, dsp[kDspEsa], dsp[kDspEdl]);
   }
   dsp.echoWritePending = false;
-  advanceEchoRing(dsp, dsp[kDspEsa], dsp[kDspEdl]);
   const int evolLeft = static_cast<std::int8_t>(dsp[kDspEvolLeft]);
   const int evolRight = static_cast<std::int8_t>(dsp[kDspEvolRight]);
   left = clampSigned16(left + ((echo.left * evolLeft) >> 7));
@@ -875,15 +879,9 @@ static StereoFrame stepDspSampleAtomic(DspState& dsp, std::span<const std::uint8
 // s4Slot/s5Slot are where its left/right volume folds into the mix. Voice 0's
 // compute sits at slot T31 and feeds the following frame's output at T0..T5 — the
 // one-update lag the S-DSP's envelope pipeline produces.
-constexpr std::array<std::uint8_t, 8> kVoiceS3Slot = {31, 2, 5, 8, 11, 14, 17, 20};
-constexpr std::array<std::uint8_t, 8> kVoiceS4Slot = {0, 3, 6, 9, 12, 15, 18, 21};
-constexpr std::array<std::uint8_t, 8> kVoiceS5Slot = {1, 4, 7, 10, 13, 16, 19, 22};
 // The visibility slots: a voice's ENDX set becomes readable at S7, VxOUTX at S8,
 // VxENVX at S9 — three, four and five slots after the compute, so voice 0's
 // land in the following sample.
-constexpr std::array<std::uint8_t, 8> kVoiceS7Slot = {3, 6, 9, 12, 15, 18, 21, 24};
-constexpr std::array<std::uint8_t, 8> kVoiceS8Slot = {4, 7, 10, 13, 16, 19, 22, 25};
-constexpr std::array<std::uint8_t, 8> kVoiceS9Slot = {5, 8, 11, 14, 17, 20, 23, 26};
 
 // Computes voice `voice` at its S3 slot, storing the amplitude the S4/S5 slots
 // apply. voice n's pitch modulation reads voice n-1's amplitude from the
@@ -935,7 +933,8 @@ static void finalizeRight(DspState& dsp) noexcept {
 // consuming slot; every no-write sample reproduces the frame-at-once output for
 // voices 1-7, and voice 0 rides one update behind.
 static void runPrimedSlot(DspState& dsp, std::span<const std::uint8_t, 65536> ram,
-                          std::uint8_t* echoRam, std::uint8_t slot) noexcept {
+                          std::uint8_t* echoRam, std::uint8_t slot,
+                          bool processEcho) noexcept {
   const bool softReset = (dsp[kDspFlg] & kFlgSoftReset) != 0;
 
   if (slot == 0) {
@@ -976,29 +975,36 @@ static void runPrimedSlot(DspState& dsp, std::span<const std::uint8_t, 65536> ra
     }
   }
 
-  // Voice compute at each voice's S3 slot (voice 0's is T31, handled in the tail).
-  for (std::size_t voice = 1; voice < 8; ++voice)
-    if (kVoiceS3Slot[voice] == slot) computeVoiceSlot(dsp, ram, voice, softReset);
+  // Each regular voice group occupies three slots. Resolve the one operation
+  // directly instead of scanning all voices on every DSP clock. Voice 0's
+  // compute remains at T31 in the tail below.
+  if (slot >= 2 && slot <= 20 && (slot - 2) % 3 == 0) {
+    const std::size_t voice = static_cast<std::size_t>((slot - 2) / 3 + 1);
+    computeVoiceSlot(dsp, ram, voice, softReset);
+  }
 
-  // Voice volume folds at the S4 (left) and S5 (right) slots, in voice order. A
-  // staged ENDX set reaches the register at the S7 slot; the computed OUTX byte
-  // becomes readable at the S8 slot; ENVX carries one further pipeline stage —
-  // its S9 slot writes the value computed one sample earlier and stages the
-  // fresh one (see DspState::envxStage).
-  for (std::size_t voice = 0; voice < 8; ++voice) {
+  // Visibility belongs to the preceding voice and, in the hardware order,
+  // precedes the following voice's volume fold on their shared slot.
+  if (slot >= 3 && slot <= 24 && slot % 3 == 0) {
+    const std::size_t voice = static_cast<std::size_t>(slot / 3 - 1);
     const std::uint8_t bit = static_cast<std::uint8_t>(1u << voice);
-    if (kVoiceS4Slot[voice] == slot) applyVoiceLeft(dsp, voice);
-    if (kVoiceS5Slot[voice] == slot) applyVoiceRight(dsp, voice);
-    if (kVoiceS7Slot[voice] == slot && (dsp.preparedEndx & bit) != 0) {
+    if ((dsp.preparedEndx & bit) != 0) {
       dsp[kDspEndx] |= bit;
       dsp.preparedEndx = static_cast<std::uint8_t>(dsp.preparedEndx & ~bit);
     }
-    if (kVoiceS8Slot[voice] == slot) dsp[voiceRegister(voice, kVoiceOutx)] = dsp.preparedOutx[voice];
-    if (kVoiceS9Slot[voice] == slot) {
-      dsp[voiceRegister(voice, kVoiceEnvx)] = dsp.envxStage[voice];
-      dsp.envxStage[voice] = dsp.preparedEnvx[voice];
-    }
+  } else if (slot >= 4 && slot <= 25 && slot % 3 == 1) {
+    const std::size_t voice = static_cast<std::size_t>((slot - 4) / 3);
+    dsp[voiceRegister(voice, kVoiceOutx)] = dsp.preparedOutx[voice];
+  } else if (slot >= 5 && slot <= 26 && slot % 3 == 2) {
+    const std::size_t voice = static_cast<std::size_t>((slot - 5) / 3);
+    dsp[voiceRegister(voice, kVoiceEnvx)] = dsp.envxStage[voice];
+    dsp.envxStage[voice] = dsp.preparedEnvx[voice];
   }
+
+  if (slot <= 21 && slot % 3 == 0)
+    applyVoiceLeft(dsp, static_cast<std::size_t>(slot / 3));
+  else if (slot >= 1 && slot <= 22 && slot % 3 == 1)
+    applyVoiceRight(dsp, static_cast<std::size_t>((slot - 1) / 3));
 
   switch (slot) {
     case 24: {
@@ -1006,10 +1012,17 @@ static void runPrimedSlot(DspState& dsp, std::span<const std::uint8_t, 65536> ra
       // by T22, so the read-and-filter half runs here, addressing the APPLIED
       // base (the ESA the previous sample's T31 applied), and its FIR output is
       // held for the output slots.
-      const EchoOutput echo =
-          stepEcho(dsp, ram, echoRam, dsp.echoAppliedEsa, dsp.echoSendLeft, dsp.echoSendRight);
-      dsp.echoFirOutLeft = echo.left;
-      dsp.echoFirOutRight = echo.right;
+      if (processEcho) {
+        const EchoOutput echo = stepEcho(dsp, ram, echoRam,
+                                         dsp.echoAppliedEsa,
+                                         dsp.echoSendLeft,
+                                         dsp.echoSendRight);
+        dsp.echoFirOutLeft = echo.left;
+        dsp.echoFirOutRight = echo.right;
+      } else {
+        dsp.echoFirOutLeft = 0;
+        dsp.echoFirOutRight = 0;
+      }
       break;
     }
     case 27:
@@ -1021,20 +1034,24 @@ static void runPrimedSlot(DspState& dsp, std::span<const std::uint8_t, 65536> ra
     case 29:
       // The write gate for T30's left word: FLG bit 5 is loaded one slot before
       // the word it governs.
-      dsp.echoGateLeft = (dsp[kDspFlg] & kFlgEchoWriteDisable) == 0;
+      if (processEcho)
+        dsp.echoGateLeft = (dsp[kDspFlg] & kFlgEchoWriteDisable) == 0;
       break;
     case 30:
       // The left echo word lands at its write slot, T30, under the gate loaded at
       // T29 — the value was computed when the echo unit ran at T24 and held since.
-      if (dsp.echoWritePending && echoRam != nullptr && dsp.echoGateLeft) {
+      if (processEcho && dsp.echoWritePending && echoRam != nullptr &&
+          dsp.echoGateLeft) {
         echoRam[dsp.echoWriteEntry] = dsp.echoWriteBytes[0];
         echoRam[static_cast<std::uint16_t>(dsp.echoWriteEntry + 1)] = dsp.echoWriteBytes[1];
       }
       // Load the raw ESA/EDL for T31's ring advance to apply, and the right
       // word's own FLG bit-5 gate.
-      dsp.echoLatchedEsa = dsp[kDspEsa];
-      dsp.echoLatchedEdl = dsp[kDspEdl];
-      dsp.echoGateRight = (dsp[kDspFlg] & kFlgEchoWriteDisable) == 0;
+      if (processEcho) {
+        dsp.echoLatchedEsa = dsp[kDspEsa];
+        dsp.echoLatchedEdl = dsp[kDspEdl];
+        dsp.echoGateRight = (dsp[kDspFlg] & kFlgEchoWriteDisable) == 0;
+      }
       break;
     case 31: {
       // The KON/KOFF load runs first (the poll keeps the even-sample parity —
@@ -1067,12 +1084,15 @@ static void runPrimedSlot(DspState& dsp, std::span<const std::uint8_t, 65536> ra
       computeVoiceSlot(dsp, ram, 0, softReset);
       // The right echo word lands at its write slot, T31, under the gate loaded
       // at T30; then the ring advance applies the T30-loaded ESA/EDL.
-      if (dsp.echoWritePending && echoRam != nullptr && dsp.echoGateRight) {
+      if (processEcho && dsp.echoWritePending && echoRam != nullptr &&
+          dsp.echoGateRight) {
         echoRam[static_cast<std::uint16_t>(dsp.echoWriteEntry + 2)] = dsp.echoWriteBytes[2];
         echoRam[static_cast<std::uint16_t>(dsp.echoWriteEntry + 3)] = dsp.echoWriteBytes[3];
       }
-      dsp.echoWritePending = false;
-      advanceEchoRing(dsp, dsp.echoLatchedEsa, dsp.echoLatchedEdl);
+      if (processEcho) {
+        dsp.echoWritePending = false;
+        advanceEchoRing(dsp, dsp.echoLatchedEsa, dsp.echoLatchedEdl);
+      }
       break;
     }
     default:
@@ -1085,7 +1105,8 @@ static void runPrimedSlot(DspState& dsp, std::span<const std::uint8_t, 65536> ra
 // first sample's slots reaches it exactly as before — then primes the schedule for
 // voice 0; every later sample is slot-scheduled.
 static SlotResult stepDspCycleImpl(DspState& dsp, std::span<const std::uint8_t, 65536> ram,
-                                   std::uint8_t* echoRam) noexcept {
+                                   std::uint8_t* echoRam,
+                                   bool processEcho) noexcept {
   const std::uint8_t slot = dsp.slotCursor;
 
   if (!dsp.primed) {
@@ -1094,11 +1115,11 @@ static SlotResult stepDspCycleImpl(DspState& dsp, std::span<const std::uint8_t, 
       // amplitude in voiceAmplitude[0]; the next (slot-scheduled) frame applies
       // that value at T0..T5, so voice 0's output rides one frame behind while its
       // state trajectory stays the frame-at-once one.
-      dsp.slotFrame = stepDspSampleAtomic(dsp, ram, echoRam);
+      dsp.slotFrame = stepDspSampleAtomic(dsp, ram, echoRam, processEcho);
       dsp.primed = true;
     }
   } else {
-    runPrimedSlot(dsp, ram, echoRam, slot);
+    runPrimedSlot(dsp, ram, echoRam, slot, processEcho);
   }
 
   dsp.slotCursor = static_cast<std::uint8_t>((slot + 1) & 31);
@@ -1111,11 +1132,16 @@ static SlotResult stepDspCycleImpl(DspState& dsp, std::span<const std::uint8_t, 
 }
 
 SlotResult stepDspCycle(DspState& dsp, std::span<std::uint8_t, 65536> ram) noexcept {
-  return stepDspCycleImpl(dsp, ram, ram.data());
+  return stepDspCycleImpl(dsp, ram, ram.data(), true);
 }
 
 SlotResult stepDspCycle(DspState& dsp, std::span<const std::uint8_t, 65536> ram) noexcept {
-  return stepDspCycleImpl(dsp, ram, nullptr);
+  return stepDspCycleImpl(dsp, ram, nullptr, true);
+}
+
+SlotResult stepDspVoiceCycle(DspState& dsp,
+                             std::span<const std::uint8_t, 65536> ram) noexcept {
+  return stepDspCycleImpl(dsp, ram, nullptr, false);
 }
 
 // Runs a whole sample's 32 slots and returns the frame they finalize. The machine
@@ -1125,7 +1151,7 @@ static StereoFrame stepDspSampleLoop(DspState& dsp, std::span<const std::uint8_t
                                      std::uint8_t* echoRam) noexcept {
   StereoFrame frame{};
   for (int n = 0; n < 32; ++n) {
-    const SlotResult result = stepDspCycleImpl(dsp, ram, echoRam);
+    const SlotResult result = stepDspCycleImpl(dsp, ram, echoRam, true);
     if (result.delivered) frame = result.frame;
   }
   return frame;

@@ -530,6 +530,14 @@ struct SlotResult {
 SlotResult stepDspCycle(DspState& dsp, std::span<std::uint8_t, 65536> ram) noexcept;
 SlotResult stepDspCycle(DspState& dsp, std::span<const std::uint8_t, 65536> ram) noexcept;
 
+// Runner extension-bank path: executes the same voice, register-visibility,
+// envelope, keying, noise and slot schedule, but omits the bank-local echo
+// unit. Extended banks contribute their EON sends to the native bank's one
+// physical echo unit, so running another FIR/delay line here would be both
+// redundant and unlike the runner's extended-hardware topology.
+SlotResult stepDspVoiceCycle(DspState& dsp,
+                             std::span<const std::uint8_t, 65536> ram) noexcept;
+
 // Runs the KON/KOFF poll. On even-indexed samples it reads the KON ($4C) and
 // KOFF ($5C) registers: a set KON bit latches internal-KON and keys the voice on
 // (envelope 0, Attack, the 5-sample startup, its ENDX bit cleared, its stream

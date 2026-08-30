@@ -49,6 +49,13 @@ SNES-visible eight-voice device. Four additional eight-voice banks reuse the
 same BRR, Gaussian, envelope, noise, and 32-slot execution rules, then join at
 a bounded output/echo boundary. They are an explicitly documented extension,
 not a claim that original hardware contained a monolithic 40-voice mixer.
+Local performance adaptations replace the imported slot-table scans with an
+equivalent direct slot dispatch, provide a voice-only slot entry point for the
+parallel banks, and compile the core and bridge as one private translation
+unit. The imported arithmetic, keying, register-visibility, BRR, envelope,
+noise, native echo, and slot-order contracts remain covered by the upstream
+1,606-test suite. Dormant virtual banks fast-forward only their shared timeline
+on KON; all active voice state continues through the same slot engine.
 
 The engine-neutral shadow-verifier design is derived from Jrickey's reusable
 recomp verifier under its MIT OR Apache-2.0 grant; its attribution is retained

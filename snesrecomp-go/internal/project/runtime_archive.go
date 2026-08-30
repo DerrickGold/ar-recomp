@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const runtimeArchiveObjectCacheVersion = "3"
+const runtimeArchiveObjectCacheVersion = "4"
 
 // RuntimeArchiveOptions builds the source runner into the same target-keyed
 // static-library artifact consumed by source-free hermetic distributions.
@@ -126,6 +126,56 @@ func runtimeDebugObjectArgs(runtimeDir, target, source string) []string {
 	}
 }
 
+// newestImplementationIncludeTime follows quoted implementation includes used
+// by unity translation units. These files are intentionally absent from the
+// manifest source list, so checking only the unit's own timestamp could reuse a
+// stale cached object after one of its component sources changes.
+func newestImplementationIncludeTime(source string) time.Time {
+	newest := time.Time{}
+	visited := make(map[string]bool)
+	var visit func(string)
+	visit = func(path string) {
+		path = filepath.Clean(path)
+		if visited[path] {
+			return
+		}
+		visited[path] = true
+
+		info, err := os.Stat(path)
+		if err != nil {
+			return
+		}
+		if info.ModTime().After(newest) {
+			newest = info.ModTime()
+		}
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			return
+		}
+		for _, line := range strings.Split(string(contents), "\n") {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "#include") {
+				continue
+			}
+			include := strings.TrimSpace(strings.TrimPrefix(line, "#include"))
+			if len(include) < 3 || include[0] != '"' {
+				continue
+			}
+			end := strings.IndexByte(include[1:], '"')
+			if end < 0 {
+				continue
+			}
+			includedPath := filepath.Join(filepath.Dir(path), filepath.FromSlash(include[1:1+end]))
+			switch strings.ToLower(filepath.Ext(includedPath)) {
+			case ".c", ".cc", ".cpp", ".cxx", ".inc":
+				visit(includedPath)
+			}
+		}
+	}
+	visit(source)
+	return newest
+}
+
 // BuildRuntimeArchive creates a deterministic, reusable runner library. It
 // retains an object cache beside the archive so packaging several times does
 // not need to rebuild unchanged translation units.
@@ -206,7 +256,11 @@ func BuildRuntimeArchive(options RuntimeArchiveOptions) (string, error) {
 		}
 		object := filepath.Join(objectDir, objectName(runtimeDir, source))
 		objects = append(objects, object)
-		if flagsChanged || !objectFresh(source, object, newestHeader) {
+		newestDependency := newestHeader
+		if included := newestImplementationIncludeTime(source); included.After(newestDependency) {
+			newestDependency = included
+		}
+		if flagsChanged || !objectFresh(source, object, newestDependency) {
 			jobs = append(jobs, compileJob{source: source, object: object})
 		}
 	}

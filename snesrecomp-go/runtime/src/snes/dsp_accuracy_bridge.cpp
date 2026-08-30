@@ -3,6 +3,8 @@
 #include "snaggletooth/apu/dsp.h"
 
 extern "C" {
+#include "dsp.h"
+#include "snesrecomp/host/audio_trace.h"
 #include "saveload.h"
 }
 
@@ -29,9 +31,8 @@ constexpr std::uint8_t kDspKon = 0x4C;
 constexpr std::uint8_t kDspKoff = 0x5C;
 constexpr std::uint8_t kDspEndx = 0x7C;
 
-constexpr std::array<std::uint8_t, 16> kSharedRegisters = {
-    0x0C, 0x1C, 0x2C, 0x3C, 0x0D, 0x5D, 0x6C, 0x6D,
-    0x7D, 0x0F, 0x1F, 0x2F, 0x3F, 0x4F, 0x5F, 0x6F,
+constexpr std::array<std::uint8_t, 4> kVirtualSharedRegisters = {
+    0x0C, 0x1C, 0x5D, 0x6C,
 };
 
 int clamp16(int value) noexcept {
@@ -63,42 +64,91 @@ void writeRegister(DspState& state, std::uint8_t address,
   if (address == kDspKon) state.internalKon = value;
 }
 
-void syncVirtualGlobals(DspState& bank, const DspState& native) noexcept {
-  for (const std::uint8_t address : kSharedRegisters)
+bool isVirtualSharedRegister(std::uint8_t address) noexcept {
+  return std::find(kVirtualSharedRegisters.begin(),
+                   kVirtualSharedRegisters.end(), address) !=
+         kVirtualSharedRegisters.end();
+}
+
+void syncVirtualTimeline(DspState& bank, const DspState& native) noexcept {
+  for (const std::uint8_t address : kVirtualSharedRegisters)
     bank.regs[address] = native.regs[address];
-  bank.regs[0x7F] = native.regs[0x7F];
   bank.globalCounter = native.globalCounter;
   bank.sampleIndex = native.sampleIndex;
   bank.noiseLevel = native.noiseLevel;
+  bank.slotCursor = native.slotCursor;
+  bank.primed = native.primed;
+  bank.echoWritePending = false;
+  bank.echoFirOutLeft = 0;
+  bank.echoFirOutRight = 0;
+  bank.echoGateLeft = false;
+  bank.echoGateRight = false;
 }
 
 struct VolumeHold {
-  std::array<std::uint8_t, 16> bytes{};
+  std::array<std::uint8_t, 16> addresses;
+  std::array<std::uint8_t, 16> bytes;
+  std::uint8_t count;
 };
 
-VolumeHold applyVoiceGains(DspState& state, int bank,
-                           const std::uint8_t gains[kVoiceCount],
-                           const std::uint8_t muted[kVoiceCount]) noexcept {
-  VolumeHold hold;
-  for (int voice = 0; voice < kVoicesPerBank; ++voice) {
-    const int channel = bank * kVoicesPerBank + voice;
-    for (int side = 0; side < 2; ++side) {
-      const std::uint8_t address = voiceRegister(voice, static_cast<std::uint8_t>(side));
-      const std::uint8_t raw = state.regs[address];
-      hold.bytes[voice * 2 + side] = raw;
-      const int percent = muted[channel] != 0 ? 0 : gains[channel];
-      const int scaled = static_cast<std::int8_t>(raw) * percent / 100;
-      state.regs[address] = static_cast<std::uint8_t>(static_cast<std::int8_t>(scaled));
+void applyVoiceGain(DspState& state, int bank, int voice, int side,
+                    const std::uint8_t gains[kVoiceCount],
+                    const std::uint8_t muted[kVoiceCount],
+                    VolumeHold& hold) noexcept {
+  const int channel = bank * kVoicesPerBank + voice;
+  const int percent = muted[channel] != 0 ? 0 : gains[channel];
+  if (percent == 100) return;
+  const std::uint8_t address =
+      voiceRegister(voice, static_cast<std::uint8_t>(side));
+  const std::uint8_t raw = state.regs[address];
+  hold.addresses[hold.count] = address;
+  hold.bytes[hold.count] = raw;
+  ++hold.count;
+  const int scaled = static_cast<std::int8_t>(raw) * percent / 100;
+  state.regs[address] =
+      static_cast<std::uint8_t>(static_cast<std::int8_t>(scaled));
+}
+
+void applySlotVoiceGains(
+    DspState& state, int bank, const std::uint8_t gains[kVoiceCount],
+    const std::uint8_t muted[kVoiceCount], VolumeHold& hold) noexcept {
+  const int slot = state.slotCursor;
+  if (!state.primed) {
+    if (slot != 31) return;
+    for (int voice = 0; voice < kVoicesPerBank; ++voice) {
+      applyVoiceGain(state, bank, voice, 0, gains, muted, hold);
+      applyVoiceGain(state, bank, voice, 1, gains, muted, hold);
     }
+    return;
   }
-  return hold;
+  if (slot <= 22) {
+    const int phase = slot % 3;
+    if (phase == 0)
+      applyVoiceGain(state, bank, slot / 3, 0, gains, muted, hold);
+    else if (phase == 1)
+      applyVoiceGain(state, bank, (slot - 1) / 3, 1, gains, muted, hold);
+  }
 }
 
 void restoreVoiceGains(DspState& state, const VolumeHold& hold) noexcept {
+  for (std::uint8_t index = 0; index < hold.count; ++index)
+    state.regs[hold.addresses[index]] = hold.bytes[index];
+}
+
+bool bankIsQuiescent(const DspState& state) noexcept {
+  if (state.internalKon != 0 || state.mixLeft != 0 || state.mixRight != 0 ||
+      state.echoSendLeft != 0 || state.echoSendRight != 0 ||
+      state.slotFrame.left != 0 || state.slotFrame.right != 0)
+    return false;
   for (int voice = 0; voice < kVoicesPerBank; ++voice) {
-    state.regs[voiceRegister(voice, 0)] = hold.bytes[voice * 2];
-    state.regs[voiceRegister(voice, 1)] = hold.bytes[voice * 2 + 1];
+    const VoiceState& source = state.voices[voice];
+    if (source.envelope != 0 || source.phase != EnvPhase::Release ||
+        source.konDelay != 0 || source.restartPending ||
+        state.voiceAmplitude[voice] != 0 ||
+        state.modulatorAmplitude[voice] != 0)
+      return false;
   }
+  return true;
 }
 
 void saveloadInt(SaveLoadInfo *info, int& value) {
@@ -191,6 +241,8 @@ void saveloadBank(SaveLoadInfo *info, DspState& state) {
 
 struct SrDspAccuracy {
   std::array<DspState, kBankCount> banks{};
+  std::array<bool, kBankCount> bankActive{};
+  bool extendedWasEnabled = false;
 };
 
 extern "C" SrDspAccuracy *sr_dsp_accuracy_create(void) {
@@ -210,6 +262,9 @@ extern "C" void sr_dsp_accuracy_destroy(SrDspAccuracy *accuracy) {
 extern "C" void sr_dsp_accuracy_reset(SrDspAccuracy *accuracy) {
   if (accuracy == nullptr) return;
   for (auto& bank : accuracy->banks) resetBank(bank);
+  accuracy->bankActive.fill(false);
+  accuracy->bankActive[0] = true;
+  accuracy->extendedWasEnabled = false;
 }
 
 extern "C" std::uint8_t sr_dsp_accuracy_read(
@@ -221,7 +276,12 @@ extern "C" void sr_dsp_accuracy_write(SrDspAccuracy *accuracy,
                                         std::uint8_t address,
                                         std::uint8_t value) {
   if (accuracy == nullptr) return;
+  address &= 0x7F;
   writeRegister(accuracy->banks[0], address, value);
+  if (isVirtualSharedRegister(address)) {
+    for (int bank = 1; bank < kBankCount; ++bank)
+      accuracy->banks[bank].regs[address] = value;
+  }
 }
 
 extern "C" void sr_dsp_accuracy_write_hardware_mask(
@@ -272,10 +332,16 @@ extern "C" void sr_dsp_accuracy_write_virtual_control(
     else
       state.internalKon &= static_cast<std::uint8_t>(~bit);
   }
+  if (global_address == kDspKon && enabled && !accuracy->bankActive[bank]) {
+    syncVirtualTimeline(state, accuracy->banks[0]);
+    state.internalKon |= bit;
+    accuracy->bankActive[bank] = true;
+  }
 }
 
 extern "C" SrDspAccuracyFrame sr_dsp_accuracy_clock(
     SrDspAccuracy *accuracy, std::uint8_t *apu_ram, bool extended_enabled,
+    bool mix_controls_unity,
     const std::uint8_t voice_gain_percent[kVoiceCount],
     const std::uint8_t voice_muted[kVoiceCount]) {
   SrDspAccuracyFrame output{};
@@ -288,49 +354,112 @@ extern "C" SrDspAccuracyFrame sr_dsp_accuracy_clock(
   std::span<std::uint8_t, 65536> writable(apu_ram, 65536);
   std::span<const std::uint8_t, 65536> readonly(apu_ram, 65536);
 
+  if (extended_enabled && !accuracy->extendedWasEnabled) {
+    for (int bank = 1; bank < kBankCount; ++bank) {
+      if (accuracy->bankActive[bank])
+        syncVirtualTimeline(accuracy->banks[bank], native);
+    }
+  }
+  accuracy->extendedWasEnabled = extended_enabled;
+
   if (extended_enabled) {
     for (int bank = 1; bank < kBankCount; ++bank) {
+      if (!accuracy->bankActive[bank]) continue;
       DspState& virtualBank = accuracy->banks[bank];
-      syncVirtualGlobals(virtualBank, native);
-      const std::uint8_t evolLeft = virtualBank.regs[0x2C];
-      const std::uint8_t evolRight = virtualBank.regs[0x3C];
-      virtualBank.regs[0x2C] = 0;
-      virtualBank.regs[0x3C] = 0;
-      VolumeHold hold = applyVoiceGains(
-          virtualBank, bank, voice_gain_percent, voice_muted);
-      result[bank] = snaggletooth::stepDspCycle(virtualBank, readonly);
+      VolumeHold hold;
+      hold.count = 0;
+      if (!mix_controls_unity)
+        applySlotVoiceGains(virtualBank, bank, voice_gain_percent,
+                            voice_muted, hold);
+      result[bank] = snaggletooth::stepDspVoiceCycle(virtualBank, readonly);
       restoreVoiceGains(virtualBank, hold);
-      virtualBank.regs[0x2C] = evolLeft;
-      virtualBank.regs[0x3C] = evolRight;
     }
   }
 
   if (slot == 24 && extended_enabled) {
     for (int bank = 1; bank < kBankCount; ++bank) {
+      if (!accuracy->bankActive[bank]) continue;
       native.echoSendLeft = clamp16(
           native.echoSendLeft + accuracy->banks[bank].echoSendLeft);
       native.echoSendRight = clamp16(
           native.echoSendRight + accuracy->banks[bank].echoSendRight);
     }
   }
-  VolumeHold nativeHold = applyVoiceGains(
-      native, 0, voice_gain_percent, voice_muted);
+  VolumeHold nativeHold;
+  nativeHold.count = 0;
+  if (!mix_controls_unity)
+    applySlotVoiceGains(native, 0, voice_gain_percent, voice_muted,
+                        nativeHold);
   result[0] = snaggletooth::stepDspCycle(native, writable);
   restoreVoiceGains(native, nativeHold);
 
   if (!result[0].delivered) return output;
   int left = result[0].frame.left;
   int right = result[0].frame.right;
+  output.active_bank_mask = 1u;
   if (extended_enabled) {
     for (int bank = 1; bank < kBankCount; ++bank) {
+      if (!accuracy->bankActive[bank]) continue;
+      output.active_bank_mask |= static_cast<std::uint8_t>(1u << bank);
       left = clamp16(left + result[bank].frame.left);
       right = clamp16(right + result[bank].frame.right);
+      if (bankIsQuiescent(accuracy->banks[bank])) {
+        accuracy->banks[bank].preparedEndx = 0;
+        accuracy->bankActive[bank] = false;
+      }
     }
   }
   output.left = static_cast<std::int16_t>(left);
   output.right = static_cast<std::int16_t>(right);
   output.delivered = true;
   return output;
+}
+
+extern "C" void dsp_clock(Dsp *dsp) {
+  if (dsp == nullptr || dsp->accuracy == nullptr) return;
+  auto *accuracy = static_cast<SrDspAccuracy *>(dsp->accuracy);
+  if (accuracy->banks[0].slotCursor == 0) dsp_refreshMixControls(dsp);
+  const SrDspAccuracyFrame frame = sr_dsp_accuracy_clock(
+      accuracy, dsp->apu_ram, g_dsp_extended_voices_enabled,
+      dsp->mixControlsUnity, dsp->voiceGainPercent, dsp->voiceMuted);
+  if (!frame.delivered) return;
+
+  DspState& native = accuracy->banks[0];
+  for (int voice = 0; voice < kVoicesPerBank; ++voice) {
+    dsp->ram[voiceRegister(voice, 8)] =
+        native.regs[voiceRegister(voice, 8)];
+    dsp->ram[voiceRegister(voice, 9)] =
+        native.regs[voiceRegister(voice, 9)];
+  }
+  dsp->ram[kDspEndx] = native.regs[kDspEndx];
+  for (int bank = 0; bank < kBankCount; ++bank) {
+    if ((frame.active_bank_mask & (1u << bank)) == 0) continue;
+    const DspState& state = accuracy->banks[bank];
+    for (int voice = 0; voice < kVoicesPerBank; ++voice) {
+      const int channel = bank * kVoicesPerBank + voice;
+      const VoiceState& source = state.voices[voice];
+      DspChannel& destination = dsp->channel[channel];
+      destination.pitchCounter = source.pitchCounter;
+      destination.gain = source.envelope;
+      destination.sampleOut =
+          static_cast<std::int16_t>(state.voiceAmplitude[voice]);
+      destination.decodeOffset = source.brrAddress;
+      destination.srcn = state.regs[voiceRegister(voice, 4)];
+      destination.adsrState = source.phase == EnvPhase::Release
+          ? 4u : static_cast<std::uint8_t>(source.phase);
+    }
+  }
+  const std::uint32_t fill = dsp->sampleWrite - dsp->sampleRead;
+  const bool dropped = fill >= DSP_SAMPLE_RING;
+  if (!dropped) {
+    const std::uint32_t index = dsp->sampleWrite & (DSP_SAMPLE_RING - 1u);
+    dsp->sampleBuffer[index * 2u] = frame.left;
+    dsp->sampleBuffer[index * 2u + 1u] = frame.right;
+    ++dsp->sampleWrite;
+  }
+  audio_trace_on_sample(frame.left, frame.right, dropped ? 1 : 0,
+                        dropped ? fill : fill + 1u);
+  dsp->evenCycle = !dsp->evenCycle;
 }
 
 extern "C" void sr_dsp_accuracy_copy_registers(
@@ -366,6 +495,14 @@ extern "C" void sr_dsp_accuracy_saveload(SrDspAccuracy *accuracy,
                                            SaveLoadInfo *info) {
   if (accuracy == nullptr || info == nullptr || info->func == nullptr) return;
   for (auto& bank : accuracy->banks) saveloadBank(info, bank);
+  if (!info->saving && !info->failed) {
+    accuracy->bankActive[0] = true;
+    for (int bank = 1; bank < kBankCount; ++bank) {
+      accuracy->banks[bank].regs[0x2C] = 0;
+      accuracy->banks[bank].regs[0x3C] = 0;
+      accuracy->bankActive[bank] = !bankIsQuiescent(accuracy->banks[bank]);
+    }
+  }
 }
 
 extern "C" void sr_dsp_accuracy_decode_brr(

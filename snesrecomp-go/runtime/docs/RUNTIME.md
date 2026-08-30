@@ -96,6 +96,8 @@ runner.
 
 - Public/core ABI code is portable C11 with fixed-width types; the private
   attributed DSP device is C++20 behind a C bridge.
+- Release CMake targets enable IPO when the selected compiler reports support;
+  `SNESRECOMP_ENABLE_IPO=OFF` provides the non-IPO compatibility path.
 - OS, SDL, graphics, and audio-library types stay behind host adapters.
 - Hot read paths do not allocate.
 - Native, forced-portable, standalone subsystem, root-project, and Zig

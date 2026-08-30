@@ -61,7 +61,7 @@ SrResult sr_runner_query_apu_state(
     dsp = apu->dsp;
     spc = apu->spc;
     memcpy(query->apu_ram, apu->ram, sizeof(apu->ram));
-    memcpy(query->dsp_registers, dsp->ram, sizeof(dsp->ram));
+    dsp_copyRegisters(dsp, query->dsp_registers);
     out_state->flags = (spc->stopped ? SR_APU_STATE_SPC_STOPPED : 0u) |
         (dsp->mute ? SR_APU_STATE_DSP_MUTED : 0u) |
         (dsp->reset ? SR_APU_STATE_DSP_RESET : 0u) |
