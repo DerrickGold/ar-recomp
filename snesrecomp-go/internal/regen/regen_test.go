@@ -298,6 +298,12 @@ func TestProvenContinuationMergesExactParentRegionAndRetainsExternalEntry(t *tes
 			overlay.AnalysisContinuationFactsApplied, overlay.AnalysisEntryFactsApplied,
 			overlay.AnalysisEntryFactsRediscovered)
 	}
+	if overlay.SharedRegionBodies != 1 || overlay.SharedRegionContinuationWrappers != 1 ||
+		overlay.SharedRegionContinuationFallbacks != 0 {
+		t.Fatalf("shared region bodies/wrappers/fallbacks = %d/%d/%d, want 1/1/0",
+			overlay.SharedRegionBodies, overlay.SharedRegionContinuationWrappers,
+			overlay.SharedRegionContinuationFallbacks)
+	}
 	if control.FinalEntries != overlay.FinalEntries || control.Functions != overlay.Functions {
 		t.Fatalf("continuation overlay changed external entries/functions: control %d/%d overlay %d/%d",
 			control.FinalEntries, control.Functions, overlay.FinalEntries, overlay.Functions)
@@ -320,6 +326,19 @@ func TestProvenContinuationMergesExactParentRegionAndRetainsExternalEntry(t *tes
 	if strings.Count(string(overlaySource), "RecompReturn bank_00_8010_M1X1(CpuState *cpu) {") != 1 {
 		t.Fatalf("external continuation entry was not retained exactly once:\n%s", overlaySource)
 	}
+	for _, fragment := range []string{
+		"static inline RecompReturn sr_region_00_8000_M1X1",
+		"case 0: goto L_8000_M1X1;",
+		"case 1: goto L_8010_M1X1;",
+		"return sr_region_00_8000_M1X1(cpu, _entry_s, _hrv, 1);",
+	} {
+		if !strings.Contains(string(overlaySource), fragment) {
+			t.Fatalf("shared continuation region is missing %q:\n%s", fragment, overlaySource)
+		}
+	}
+	if strings.Count(string(overlaySource), "cpu_trace_block(cpu, 0x008010);") != 1 {
+		t.Fatalf("continuation block body was duplicated:\n%s", overlaySource)
+	}
 	controlDispatch, err := os.ReadFile(filepath.Join(controlDir, "dispatch_v2.c"))
 	if err != nil {
 		t.Fatal(err)
@@ -330,6 +349,133 @@ func TestProvenContinuationMergesExactParentRegionAndRetainsExternalEntry(t *tes
 	}
 	if string(controlDispatch) != string(overlayDispatch) {
 		t.Fatalf("continuation overlay changed external registry:\n%s\n---\n%s", controlDispatch, overlayDispatch)
+	}
+}
+
+func TestProvenContinuationRetainsStandaloneBodyWhenExternalClosureDiffers(t *testing.T) {
+	root := t.TempDir()
+	romPath := filepath.Join(root, "game.sfc")
+	cfgDir := filepath.Join(root, "recomp")
+	outputDir := filepath.Join(root, "gen")
+	image := make([]byte, 0x8000)
+	copy(image[0x0000:], []byte{0x80, 0x0E}) // $8000: BRA $8010
+	copy(image[0x0010:], []byte{0x80, 0xEE}) // $8010: BRA $8000
+	if err := os.WriteFile(romPath, image, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "bank00.cfg"), []byte(
+		"bank = 00\nfunc Root 8000 entry_mx:1,1\nfunc bank_00_8010 8010 entry_mx:1,1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fact := analysis.EntryFact{
+		PC: 0x008010, EntryMX: analysis.MXState{M: 1, X: 1},
+		Kind: analysis.EntryContinuation, TemplateFree: true,
+		RegionOwners: []analysis.EntryVariant{{
+			PC: 0x008000, EntryMX: analysis.MXState{M: 1, X: 1},
+		}},
+		ResumeEdges: []analysis.EntryEdge{{
+			Source: analysis.EntryVariant{PC: 0x008000, EntryMX: analysis.MXState{M: 1, X: 1}},
+			Target: analysis.EntryVariant{PC: 0x008010, EntryMX: analysis.MXState{M: 1, X: 1}},
+		}},
+		Evidence: []analysis.Evidence{{
+			Source: "static.sibling_boundary_edge", Confidence: analysis.ConfidenceProven,
+		}},
+	}
+	report, err := Run(Options{
+		ROMPath: romPath, ConfigDir: cfgDir, OutputDir: outputDir, Jobs: 1,
+		AllowStubs: true, ProvenEntryFacts: []analysis.EntryFact{fact},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.SharedRegionBodies != 0 || report.SharedRegionContinuationWrappers != 0 ||
+		report.SharedRegionContinuationFallbacks != 1 {
+		t.Fatalf("shared region bodies/wrappers/fallbacks = %d/%d/%d, want 0/0/1",
+			report.SharedRegionBodies, report.SharedRegionContinuationWrappers,
+			report.SharedRegionContinuationFallbacks)
+	}
+	generated, err := os.ReadFile(filepath.Join(outputDir, "bank00_v2.c"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(generated), "sr_region_") ||
+		strings.Count(string(generated), "cpu_trace_block(cpu, 0x008010);") != 2 {
+		t.Fatalf("closure mismatch did not retain the standalone continuation body:\n%s", generated)
+	}
+}
+
+func TestProvenContinuationFlattensNestedSingleOwnerTree(t *testing.T) {
+	root := t.TempDir()
+	romPath := filepath.Join(root, "game.sfc")
+	cfgDir := filepath.Join(root, "recomp")
+	outputDir := filepath.Join(root, "gen")
+	image := make([]byte, 0x8000)
+	copy(image[0x0000:], []byte{0x80, 0x0E}) // $8000: BRA $8010
+	copy(image[0x0010:], []byte{0x80, 0x0E}) // $8010: BRA $8020
+	image[0x0020] = 0x60                     // $8020: RTS
+	if err := os.WriteFile(romPath, image, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "bank00.cfg"), []byte(
+		"bank = 00\nfunc Root 8000 entry_mx:1,1\nfunc bank_00_8010 8010 entry_mx:1,1\nfunc bank_00_8020 8020 entry_mx:1,1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fact := func(pc, owner, source uint32) analysis.EntryFact {
+		return analysis.EntryFact{
+			PC: pc, EntryMX: analysis.MXState{M: 1, X: 1},
+			Kind: analysis.EntryContinuation, TemplateFree: true,
+			RegionOwners: []analysis.EntryVariant{{
+				PC: owner, EntryMX: analysis.MXState{M: 1, X: 1},
+			}},
+			ResumeEdges: []analysis.EntryEdge{{
+				Source: analysis.EntryVariant{PC: source, EntryMX: analysis.MXState{M: 1, X: 1}},
+				Target: analysis.EntryVariant{PC: pc, EntryMX: analysis.MXState{M: 1, X: 1}},
+			}},
+			Evidence: []analysis.Evidence{{
+				Source: "static.sibling_boundary_edge", Confidence: analysis.ConfidenceProven,
+			}},
+		}
+	}
+	report, err := Run(Options{
+		ROMPath: romPath, ConfigDir: cfgDir, OutputDir: outputDir, Jobs: 1,
+		AllowStubs: true,
+		ProvenEntryFacts: []analysis.EntryFact{
+			fact(0x008010, 0x008000, 0x008000),
+			fact(0x008020, 0x008010, 0x008010),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.SharedRegionBodies != 1 || report.SharedRegionContinuationWrappers != 2 ||
+		report.SharedRegionContinuationFallbacks != 0 {
+		t.Fatalf("shared region bodies/wrappers/fallbacks = %d/%d/%d, want 1/2/0",
+			report.SharedRegionBodies, report.SharedRegionContinuationWrappers,
+			report.SharedRegionContinuationFallbacks)
+	}
+	generated, err := os.ReadFile(filepath.Join(outputDir, "bank00_v2.c"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{
+		"case 1: goto L_8010_M1X1;",
+		"case 2: goto L_8020_M1X1;",
+		"return sr_region_00_8000_M1X1(cpu, _entry_s, _hrv, 1);",
+		"return sr_region_00_8000_M1X1(cpu, _entry_s, _hrv, 2);",
+	} {
+		if !strings.Contains(string(generated), fragment) {
+			t.Fatalf("flattened nested region is missing %q:\n%s", fragment, generated)
+		}
+	}
+	if strings.Count(string(generated), "cpu_trace_block(cpu, 0x008010);") != 1 ||
+		strings.Count(string(generated), "cpu_trace_block(cpu, 0x008020);") != 1 {
+		t.Fatalf("nested continuation bodies were duplicated:\n%s", generated)
 	}
 }
 

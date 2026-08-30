@@ -86,8 +86,9 @@ type shadowEntryAblationDeclaration struct {
 // SelectStaticProvenRoutineEntryFacts returns the narrow subset of the
 // ablation report that generation can validate without changing entry or
 // continuation semantics. Each selected exact variant is batch-recoverable
-// and has at least one ordinary direct JSR/JSL edge. Tail targets, computed
-// handlers, and internal continuations remain report-only.
+// and has at least one ordinary direct JSR/JSL edge. Tail targets and computed
+// handlers remain report-only; continuations use the separate exact-region
+// selector below.
 func SelectStaticProvenRoutineEntryFacts(report ShadowReport) []analysis.EntryFact {
 	var facts []analysis.EntryFact
 	for _, record := range report.EntryAblation.Entries {
@@ -132,7 +133,9 @@ func SelectStaticProvenRoutineEntryFacts(report ShadowReport) []analysis.EntryFa
 // externally dispatchable; the fact only permits the named parent variants to
 // decode a matching continuation as a local block. Special entry metadata and
 // HLE policy are excluded because a local edge would bypass their prologues.
-const maxStaticContinuationRegionInstructions = 8
+// Region size is deliberately not a selection criterion: generation shares a
+// single proven body between the owner and external continuation wrapper, then
+// independently verifies that their decoded closures match.
 
 func SelectStaticProvenContinuationEntryFacts(report ShadowReport) []analysis.EntryFact {
 	var facts []analysis.EntryFact
@@ -157,8 +160,7 @@ func staticProvenContinuationEntryFact(record ShadowEntryAblationRecord) (analys
 	if record.Status != shadowEntryAblationRecoverable ||
 		record.EntryKindHint != "internal_continuation" ||
 		len(record.AuthoredHLE) != 0 || len(record.TemplateBlockers) != 0 ||
-		len(record.Incoming) != 1 || record.DecodedInstructions <= 0 ||
-		record.DecodedInstructions > maxStaticContinuationRegionInstructions {
+		len(record.Incoming) != 1 || record.DecodedInstructions <= 0 {
 		return analysis.EntryFact{}, false
 	}
 	incoming := record.Incoming[0]
