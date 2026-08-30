@@ -16,7 +16,7 @@ import (
 	romimage "github.com/DerrickGold/snesrecomp-go/internal/rom"
 )
 
-const traceInspectionVersion = 1
+const traceInspectionVersion = 3
 
 type TraceRange struct {
 	Low  uint32 `json:"low"`
@@ -36,19 +36,20 @@ type TraceInspectOptions struct {
 }
 
 type TraceSummary struct {
-	Events       int            `json:"events"`
-	InvalidLines int            `json:"invalid_lines"`
-	Channels     map[string]int `json:"channels"`
-	FirstSeq     uint64         `json:"first_seq"`
-	LastSeq      uint64         `json:"last_seq"`
-	FirstHF      uint64         `json:"first_host_frame"`
-	LastHF       uint64         `json:"last_host_frame"`
-	FirstGF      uint64         `json:"first_game_frame"`
-	LastGF       uint64         `json:"last_game_frame"`
-	Misdecodes   int            `json:"entry_misdecodes"`
-	Leaks        int            `json:"call_mx_leaks"`
-	DispatchMiss int            `json:"dispatch_misses"`
-	Garbage      int            `json:"garbage_variants"`
+	Events               int            `json:"events"`
+	InvalidLines         int            `json:"invalid_lines"`
+	Channels             map[string]int `json:"channels"`
+	FirstSeq             uint64         `json:"first_seq"`
+	LastSeq              uint64         `json:"last_seq"`
+	FirstHF              uint64         `json:"first_host_frame"`
+	LastHF               uint64         `json:"last_host_frame"`
+	FirstGF              uint64         `json:"first_game_frame"`
+	LastGF               uint64         `json:"last_game_frame"`
+	Misdecodes           int            `json:"entry_misdecodes"`
+	Leaks                int            `json:"call_mx_leaks"`
+	DispatchMiss         int            `json:"dispatch_misses"`
+	DispatchContinuation int            `json:"dispatch_continuations"`
+	Garbage              int            `json:"garbage_variants"`
 }
 
 type TraceFinding struct {
@@ -68,6 +69,7 @@ type TraceInspectionReport struct {
 	NoWrite     bool             `json:"no_write"`
 	TraceSHA256 string           `json:"trace_sha256"`
 	Summary     TraceSummary     `json:"summary"`
+	Warnings    []string         `json:"warnings,omitempty"`
 	Findings    []TraceFinding   `json:"findings,omitempty"`
 	Events      []map[string]any `json:"events,omitempty"`
 	Truncated   int              `json:"truncated_events,omitempty"`
@@ -133,10 +135,15 @@ func BuildTraceInspection(options TraceInspectOptions) (TraceInspectionReport, e
 			return TraceInspectionReport{}, fmt.Errorf("scan runtime trace: %w", err)
 		}
 	}
-	for _, event := range events {
-		updateTraceSummary(&report.Summary, event)
+	dispatchEvidence := collectTraceDispatchEvidence(events)
+	for index, event := range events {
+		updateTraceSummary(&report.Summary, events, dispatchEvidence, index, event)
 	}
 	if options.Diagnose {
+		if report.Summary.Channels["dispatch"] == 0 {
+			report.Warnings = append(report.Warnings,
+				"dispatch diagnostics are incomplete: trace has no structured dispatch records; recapture with SNESRECOMP_TRACE_CHANNELS including dispatch")
+		}
 		metadata, metadataErr := loadOptionalGeneratedMetadata(options.MetadataPath)
 		if metadataErr != nil {
 			return TraceInspectionReport{}, metadataErr
@@ -148,17 +155,18 @@ func BuildTraceInspection(options TraceInspectOptions) (TraceInspectionReport, e
 				return TraceInspectionReport{}, err
 			}
 		}
-		report.Findings = diagnoseTrace(events, metadata, image)
+		report.Findings = diagnoseTrace(events, dispatchEvidence, metadata, image)
 	}
+	includeEvents := !options.Summary && !options.Diagnose || traceHasExplicitFilter(options)
 	selected := filterTraceEvents(events, options)
 	if options.Limit <= 0 {
 		options.Limit = 200
 	}
-	if len(selected) > options.Limit {
+	if includeEvents && len(selected) > options.Limit {
 		report.Truncated = len(selected) - options.Limit
 		selected = selected[:options.Limit]
 	}
-	if !options.Summary && !options.Diagnose || traceHasExplicitFilter(options) {
+	if includeEvents {
 		report.Events = selected
 	}
 	return report, nil
@@ -191,12 +199,13 @@ func parseLegacyDispatchDump(contents []byte) ([]map[string]any, bool) {
 			"ch": "dispatch", "fn": "legacy_dispatch_log", "site": entry["source_pc24"], "target": entry["pc24"],
 			"m": json.Number(strconv.Itoa(int((mx >> 1) & 1))), "x": json.Number(strconv.Itoa(int(mx & 1))),
 			"found": entry["found"], "hits": json.Number("1"), "continuation": false, "trapped": false,
+			"legacy": true,
 		})
 	}
 	return events, true
 }
 
-func updateTraceSummary(summary *TraceSummary, event map[string]any) {
+func updateTraceSummary(summary *TraceSummary, events []map[string]any, dispatchEvidence traceDispatchEvidence, index int, event map[string]any) {
 	seq, _ := traceUint(event, "seq")
 	hf, _ := traceUint(event, "hf")
 	gf, _ := traceUint(event, "gf")
@@ -213,8 +222,12 @@ func updateTraceSummary(summary *TraceSummary, event map[string]any) {
 	if channel == "call" && traceBool(event, "leak") {
 		summary.Leaks++
 	}
-	if channel == "dispmiss" || channel == "dispatch" && (traceBool(event, "trapped") || !traceBoolDefault(event, "found", true)) {
+	if traceEventIsActionableDispatchMiss(events, dispatchEvidence, index) {
 		summary.DispatchMiss++
+	}
+	if channel == "dispatch" && traceBool(event, "continuation") &&
+		!traceBool(event, "trapped") {
+		summary.DispatchContinuation++
 	}
 	if channel == "garbage" {
 		summary.Garbage++
@@ -274,21 +287,103 @@ func filterTraceEvents(events []map[string]any, options TraceInspectOptions) []m
 }
 
 type traceMissKey struct {
-	Target uint32
-	M, X   uint8
+	Site, Target uint32
+	M, X         uint8
 }
 
 type traceMissAggregate struct {
-	Count   uint64
-	Sources map[uint32]struct{}
-	Hidden  bool
-	Site    uint32
+	Count  uint64
+	Hidden bool
 }
 
-func diagnoseTrace(events []map[string]any, metadata *GeneratedMetadata, image romimage.Image) []TraceFinding {
+type traceDispatchEvidence struct {
+	continuations map[traceMissKey]struct{}
+	actionable    map[traceMissKey]struct{}
+}
+
+func traceDispatchIdentity(event map[string]any) (traceMissKey, bool) {
+	channel := traceString(event, "ch")
+	targetField, siteField := "to", "from"
+	if channel == "dispatch" {
+		targetField, siteField = "target", "site"
+	}
+	target, targetOK := traceAddressField(event, targetField)
+	site, siteOK := traceAddressField(event, siteField)
+	if !targetOK || !siteOK {
+		return traceMissKey{}, false
+	}
+	m, _ := traceUint(event, "m")
+	x, _ := traceUint(event, "x")
+	if channel == "dispmiss" {
+		if value, ok := traceUint(event, "mnow"); ok {
+			m = value
+		}
+		if value, ok := traceUint(event, "xnow"); ok {
+			x = value
+		}
+	}
+	return traceMissKey{
+		Site: site & 0xffffff, Target: target & 0xffffff,
+		M: uint8(m) & 1, X: uint8(x) & 1,
+	}, true
+}
+
+func collectTraceDispatchEvidence(events []map[string]any) traceDispatchEvidence {
+	evidence := traceDispatchEvidence{
+		continuations: make(map[traceMissKey]struct{}),
+		actionable:    make(map[traceMissKey]struct{}),
+	}
+	for _, event := range events {
+		if traceString(event, "ch") != "dispatch" {
+			continue
+		}
+		key, ok := traceDispatchIdentity(event)
+		if !ok {
+			continue
+		}
+		if traceBool(event, "continuation") && !traceBool(event, "trapped") {
+			evidence.continuations[key] = struct{}{}
+		} else if traceBool(event, "trapped") || !traceBoolDefault(event, "found", true) {
+			evidence.actionable[key] = struct{}{}
+		}
+	}
+	return evidence
+}
+
+func traceEventIsActionableDispatchMiss(events []map[string]any, evidence traceDispatchEvidence, index int) bool {
+	event := events[index]
+	channel := traceString(event, "ch")
+	if channel == "dispatch" {
+		if traceBool(event, "trapped") {
+			return true
+		}
+		return !traceBoolDefault(event, "found", true) &&
+			!traceBool(event, "continuation")
+	}
+	if channel != "dispmiss" {
+		return false
+	}
+	// Current trace builds emit every legacy dispmiss but sample structured
+	// dispatch observations at milestones. Let the structured classification
+	// for the same stable edge identity cover the unsampled legacy rows. If the
+	// trace ever contains an actionable structured observation for that same
+	// identity, retain the legacy evidence rather than hiding a mixed contract.
+	key, ok := traceDispatchIdentity(event)
+	if !ok {
+		return true
+	}
+	_, continuation := evidence.continuations[key]
+	_, actionable := evidence.actionable[key]
+	if continuation && !actionable {
+		return false
+	}
+	return true
+}
+
+func diagnoseTrace(events []map[string]any, dispatchEvidence traceDispatchEvidence, metadata *GeneratedMetadata, image romimage.Image) []TraceFinding {
 	misses := make(map[traceMissKey]*traceMissAggregate)
 	var findings []TraceFinding
-	for _, event := range events {
+	for index, event := range events {
 		channel := traceString(event, "ch")
 		if channel == "call" && traceBool(event, "leak") {
 			site, _ := traceAddressField(event, "site")
@@ -302,41 +397,32 @@ func diagnoseTrace(events []map[string]any, metadata *GeneratedMetadata, image r
 			pc, _ := traceAddressField(event, "pc")
 			findings = append(findings, TraceFinding{Priority: 60, Kind: "garbage_variant", SitePC: optionalTraceAddress(pc), Count: 1, Message: "runtime entered a variant classified as garbage", Evidence: []string{traceString(event, "variant")}})
 		}
-		isMiss := channel == "dispmiss" || channel == "dispatch" && (traceBool(event, "trapped") || !traceBoolDefault(event, "found", true))
-		if !isMiss {
+		if !traceEventIsActionableDispatchMiss(events, dispatchEvidence, index) {
 			continue
 		}
-		targetField, siteField := "to", "from"
-		if channel == "dispatch" {
-			targetField, siteField = "target", "site"
-		}
-		target, targetOK := traceAddressField(event, targetField)
-		site, _ := traceAddressField(event, siteField)
-		if !targetOK {
+		key, keyOK := traceDispatchIdentity(event)
+		if !keyOK {
 			continue
 		}
-		m, _ := traceUint(event, "m")
-		x, _ := traceUint(event, "x")
-		if channel == "dispmiss" {
-			if value, ok := traceUint(event, "mnow"); ok {
-				m = value
-			}
-			if value, ok := traceUint(event, "xnow"); ok {
-				x = value
-			}
-		}
-		key := traceMissKey{Target: target, M: uint8(m) & 1, X: uint8(x) & 1}
 		aggregate := misses[key]
 		if aggregate == nil {
-			aggregate = &traceMissAggregate{Sources: make(map[uint32]struct{}), Site: site}
+			aggregate = &traceMissAggregate{}
 			misses[key] = aggregate
 		}
-		hits, ok := traceUint(event, "hits")
-		if !ok || hits == 0 {
-			hits = 1
+		if channel == "dispatch" && !traceBool(event, "legacy") {
+			hits, ok := traceUint(event, "hits")
+			if !ok || hits == 0 {
+				hits = 1
+			}
+			// Runtime dispatch rows are cumulative milestone samples. The
+			// terminal/max counter is the occurrence count; summing rows would
+			// count the same observations repeatedly.
+			if hits > aggregate.Count {
+				aggregate.Count = hits
+			}
+		} else {
+			aggregate.Count++
 		}
-		aggregate.Count += hits
-		aggregate.Sources[site] = struct{}{}
 		if stack, ok := traceHex(event, "S"); ok && stack < 0x200 {
 			aggregate.Hidden = true
 		}
@@ -356,6 +442,16 @@ func diagnoseTrace(events []map[string]any, metadata *GeneratedMetadata, image r
 		if findings[j].TargetPC != nil {
 			right = *findings[j].TargetPC
 		}
+		if left != right {
+			return left < right
+		}
+		left, right = 0, 0
+		if findings[i].SitePC != nil {
+			left = *findings[i].SitePC
+		}
+		if findings[j].SitePC != nil {
+			right = *findings[j].SitePC
+		}
 		return left < right
 	})
 	return findings
@@ -363,7 +459,7 @@ func diagnoseTrace(events []map[string]any, metadata *GeneratedMetadata, image r
 
 func classifyTraceMiss(key traceMissKey, aggregate *traceMissAggregate, metadata *GeneratedMetadata, image romimage.Image) TraceFinding {
 	target := key.Target & 0xffffff
-	site := aggregate.Site & 0xffffff
+	site := key.Site & 0xffffff
 	finding := TraceFinding{
 		Priority: 90, Kind: "missing_dispatch_target", SitePC: &site, TargetPC: &target, Count: aggregate.Count,
 		Message:    fmt.Sprintf("runtime could not dispatch to $%02X:%04X M%dX%d", byte(target>>16), uint16(target), key.M, key.X),
@@ -457,8 +553,13 @@ func WriteTraceInspection(output io.Writer, report TraceInspectionReport, format
 		for _, channel := range channels {
 			fmt.Fprintf(output, "  %-10s %d\n", channel, report.Summary.Channels[channel])
 		}
-		fmt.Fprintf(output, "  entry-misdecodes=%d call-M/X-leaks=%d dispatch-misses=%d garbage-variants=%d\n",
-			report.Summary.Misdecodes, report.Summary.Leaks, report.Summary.DispatchMiss, report.Summary.Garbage)
+		fmt.Fprintf(output, "  entry-misdecodes=%d call-M/X-leaks=%d dispatch-misses=%d dispatch-continuations=%d garbage-variants=%d\n",
+			report.Summary.Misdecodes, report.Summary.Leaks,
+			report.Summary.DispatchMiss, report.Summary.DispatchContinuation,
+			report.Summary.Garbage)
+		for _, warning := range report.Warnings {
+			fmt.Fprintf(output, "  warning: %s\n", warning)
+		}
 		for index, finding := range report.Findings {
 			fmt.Fprintf(output, "\n  [%d] P%d %s x%d: %s\n", index+1, finding.Priority, finding.Kind, finding.Count, finding.Message)
 			for _, evidence := range finding.Evidence {

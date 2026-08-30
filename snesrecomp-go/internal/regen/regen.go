@@ -95,6 +95,7 @@ type repository struct {
 	forceVariants            map[uint32][2]uint8
 	validVariants            map[uint32]map[[2]uint8]struct{}
 	provenEquivalent         map[uint32]map[[2]uint8]map[[2]uint8]struct{}
+	exactStaticVariants      map[codegen.Variant]struct{}
 	unresolved               map[codegen.Variant]struct{}
 	cumulativeDirty          map[codegen.Variant]struct{}
 	cumulativeEmit           map[codegen.Variant]struct{}
@@ -312,8 +313,9 @@ func loadRepository(romPath, configDir string) (*repository, error) {
 		staticEntryDiscoveries:  make(map[decoder.Variant]analysis.EntryFact),
 		exitMX:                  make(map[decoder.Variant]decoder.MX), forceVariants: make(map[uint32][2]uint8),
 		validVariants: make(map[uint32]map[[2]uint8]struct{}), unresolved: make(map[codegen.Variant]struct{}),
-		provenEquivalent: make(map[uint32]map[[2]uint8]map[[2]uint8]struct{}),
-		cumulativeDirty:  make(map[codegen.Variant]struct{}), cumulativeEmit: make(map[codegen.Variant]struct{}),
+		provenEquivalent:    make(map[uint32]map[[2]uint8]map[[2]uint8]struct{}),
+		exactStaticVariants: make(map[codegen.Variant]struct{}),
+		cumulativeDirty:     make(map[codegen.Variant]struct{}), cumulativeEmit: make(map[codegen.Variant]struct{}),
 		cumulativePrune: make(map[codegen.Variant]struct{}),
 	}
 	for _, path := range paths {
@@ -696,6 +698,11 @@ func (repo *repository) applyDemands(demands map[codegen.Variant]variantDemandEv
 			continue
 		}
 		variant := decoder.Variant{Address: decoder.Address24(bankID, pc), M: demand.M & 1, X: demand.X & 1}
+		if evidence.Static && evidence.Canonical {
+			repo.exactStaticVariants[codegen.Variant{
+				Address: variant.Address, M: variant.M, X: variant.X,
+			}] = struct{}{}
+		}
 		found, base := false, (*config.Entry)(nil)
 		for index := range bank.Config.Entries {
 			entry := &bank.Config.Entries[index]
@@ -966,7 +973,7 @@ func (repo *repository) emitFunctions(jobs int, only map[byte]struct{}) (map[byt
 		index := findEntryIndex(bank.Config.Entries, entry)
 		context := codegen.NewContext()
 		context.ROMSize, context.Names = len(repo.image), repo.names
-		context.CanonicalVariants, context.ForceVariantAt = repo.canonical, repo.forceVariants
+		context.ForceVariantAt = repo.forceVariants
 		context.ValidVariants = repo.validVariants
 		context.ProvenEquivalent = repo.provenEquivalent
 		context.ExactDirectCallMX = repo.exactDirectCallMX
@@ -1757,6 +1764,9 @@ func (repo *repository) computePrunable(dirty, emitted, excluded map[codegen.Var
 	pruned := make(map[codegen.Variant]struct{})
 	for key := range dirty {
 		if _, skip := excluded[key]; skip {
+			continue
+		}
+		if _, required := repo.exactStaticVariants[key]; required {
 			continue
 		}
 		canonical := repo.canonical[key.Address]

@@ -32,6 +32,9 @@ RecompReturn sr_dispatch_oob_warn(CpuState *cpu, uint32 site_pc24,
 RecompReturn sr_unresolved_indirect_jump(CpuState *cpu, uint32 site_pc24);
 RecompReturn sr_unresolved_stub_warn(CpuState *cpu, uint32 target_pc24,
                                      const char *function_name);
+RecompReturn sr_missing_mx_variant_warn(
+    CpuState *cpu, uint32 target_pc24, uint8 requested_m,
+    uint8 requested_x, const char *function_name);
 RecompReturn sr_unresolved_goto_warn(CpuState *cpu, uint32 source_pc24,
                                      uint32 target_pc24,
                                      const char *function_name,

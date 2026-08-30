@@ -347,8 +347,12 @@ func EmitFunction(image rom.Image, bank byte, start uint16, entryM, entryX uint8
 						if targetName == "" {
 							targetName = fmt.Sprintf("bank_%02X_%04X", byte(targetAddress>>16), uint16(targetAddress))
 						}
-						context.Demands[codegen.Variant{Address: targetAddress, M: key.M & 1, X: key.X & 1}] = struct{}{}
-						suffixName := fmt.Sprintf("%s_M%dX%d", targetName, key.M&1, key.X&1)
+						// The JML can follow a width-restoring instruction such as PLP
+						// inside this CFG block. key.M/X describe the block entry;
+						// instruction.M/X are the live widths at the transfer itself.
+						m, x := instruction.M&1, instruction.X&1
+						context.Demands[codegen.Variant{Address: targetAddress, M: m, X: x}] = struct{}{}
+						suffixName := fmt.Sprintf("%s_M%dX%d", targetName, m, x)
 						lines = append(lines,
 							fmt.Sprintf("cpu->PB = 0x%02X; /* JML into bank $%02X */", byte(targetAddress>>16), byte(targetAddress>>16)),
 							tailCallStatement(suffixName+"(cpu)", fmt.Sprintf("/* tail-call cross-bank into %s at $%06X (JML unresolved successor) */", suffixName, targetAddress), nil),

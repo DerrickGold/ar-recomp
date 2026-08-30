@@ -822,6 +822,7 @@ func regenerate(args []string) error {
 	chunkThreshold := flags.Int("bank-chunk-threshold-kib", 4096, "split banks at or above this generated size")
 	chunkSpan := flags.Int("bank-chunk-pc-span", 0x800, "stable PC span per split translation unit")
 	allowStubs := flags.Bool("allow-stubs", false, "write complete output and report stubs without failing this command")
+	funcsOut := flags.String("funcs-out", "", "optional generated funcs.h path; omit to keep regen output-only")
 	provenAnalysis := flags.Bool("experimental-proven-analysis", false, "apply closed static dispatch facts, exact direct-call M/X, and exact continuation regions in memory (requires an isolated --out-dir)")
 	analysisDB := flags.String("analysis-db", "", "apply a deterministic ROM-hashed proven-fact database")
 	_ = flags.String("prefix", "", "deprecated compatibility option")
@@ -901,7 +902,20 @@ func regenerate(args []string) error {
 	if report.StubHits > 0 {
 		fmt.Printf("v2regen: STUB LINT: %d marker(s)\n", report.StubHits)
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(*funcsOut) != "" {
+		count, syncErr := tooling.SyncFuncsWithEntryFacts(*cfgDir, *funcsOut, provenEntryFacts)
+		if syncErr != nil {
+			return syncErr
+		}
+		fmt.Printf("sync-funcs: wrote %d function declarations to %s\n", count, *funcsOut)
+	} else {
+		fmt.Printf("v2regen: next: run `v2regen sync-funcs --cfg-dir %s --out %s` before compiling, or pass --funcs-out to regen\n",
+			*cfgDir, filepath.Join(*cfgDir, "funcs.h"))
+	}
+	return nil
 }
 
 func emitFunction(args []string) error {

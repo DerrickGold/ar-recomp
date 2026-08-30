@@ -297,6 +297,26 @@ RecompReturn sr_unresolved_stub_warn(CpuState *cpu, uint32 target_pc24,
     return RECOMP_RETURN_NORMAL;
 }
 
+RecompReturn sr_missing_mx_variant_warn(
+        CpuState *cpu, uint32 target_pc24, uint8 requested_m,
+        uint8 requested_x, const char *function_name) {
+    const uint32 detail = 0x10u |
+        ((uint32)(requested_m & 1u) << 1) | (uint32)(requested_x & 1u);
+    if (trap_should_report(target_pc24, detail)) {
+        print_cpu("missing-mx-variant", cpu, function_name, target_pc24);
+        fprintf(stderr,
+                "[missing-mx-variant] $%06X was entered with M%uX%u, but "
+                "that exact generated body was pruned and no equivalent "
+                "survivor was proved.\n"
+                "[missing-mx-variant] The recompiler refused to execute a "
+                "different-width decode. Preserve the exact entry variant "
+                "or improve the static M/X proof.\n",
+                target_pc24 & 0xffffffu, requested_m & 1u,
+                requested_x & 1u);
+    }
+    return RECOMP_RETURN_NORMAL;
+}
+
 RecompReturn sr_unresolved_goto_warn(CpuState *cpu, uint32 source_pc24,
                                      uint32 target_pc24,
                                      const char *function_name,

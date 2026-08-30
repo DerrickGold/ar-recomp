@@ -40,6 +40,27 @@ func TestLintStubsIgnoresMarkerNameInHeaderComment(t *testing.T) {
 	}
 }
 
+func TestExactStaticVariantCannotBePrunedToCanonicalSibling(t *testing.T) {
+	address := uint32(0x018000)
+	required := codegen.Variant{Address: address, M: 0, X: 0}
+	canonical := codegen.Variant{Address: address, M: 1, X: 1}
+	repo := &repository{
+		canonical: map[uint32]map[[2]uint8]struct{}{
+			address: {{1, 1}: {}},
+		},
+		exactStaticVariants: map[codegen.Variant]struct{}{required: {}},
+	}
+	dirty := map[codegen.Variant]struct{}{required: {}}
+	emitted := map[codegen.Variant]struct{}{required: {}, canonical: {}}
+	if got := repo.computePrunable(dirty, emitted, nil); len(got) != 0 {
+		t.Fatalf("exact static variant was pruned: %+v", got)
+	}
+	delete(repo.exactStaticVariants, required)
+	if got := repo.computePrunable(dirty, emitted, nil); len(got) != 1 {
+		t.Fatalf("control variant prune = %+v, want required variant", got)
+	}
+}
+
 func TestAutoVectorsRegisterLiveNativeInterruptWidths(t *testing.T) {
 	root := t.TempDir()
 	romPath := filepath.Join(root, "game.sfc")

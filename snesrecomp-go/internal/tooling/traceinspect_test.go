@@ -45,6 +45,9 @@ func TestTraceInspectionFiltersAndDiagnosesContinuations(t *testing.T) {
 	if report.Summary.Events != 4 || report.Summary.InvalidLines != 1 || report.Summary.Leaks != 1 || report.Summary.DispatchMiss != 1 {
 		t.Fatalf("summary = %+v", report.Summary)
 	}
+	if len(report.Warnings) != 1 || !strings.Contains(report.Warnings[0], "no structured dispatch records") {
+		t.Fatalf("warnings = %+v", report.Warnings)
+	}
 	if len(report.Events) != 1 || traceString(report.Events[0], "ch") != "vram" {
 		t.Fatalf("filtered events = %+v", report.Events)
 	}
@@ -55,7 +58,7 @@ func TestTraceInspectionFiltersAndDiagnosesContinuations(t *testing.T) {
 	if err := WriteTraceInspection(&output, report, "text"); err != nil {
 		t.Fatal(err)
 	}
-	for _, fragment := range []string{"4 events", "1 invalid", "active_dispatch_continuation", "do not register", "va=$0010"} {
+	for _, fragment := range []string{"4 events", "1 invalid", "no structured dispatch records", "active_dispatch_continuation", "do not register", "va=$0010"} {
 		if !strings.Contains(output.String(), fragment) {
 			t.Fatalf("trace output missing %q:\n%s", fragment, output.String())
 		}
@@ -82,5 +85,78 @@ func TestTraceInspectionAcceptsLegacyDispatchDump(t *testing.T) {
 	}
 	if report.Summary.Events != 1 || report.Summary.DispatchMiss != 1 || len(report.Findings) != 1 || report.Findings[0].Kind != "missing_dispatch_target" {
 		t.Fatalf("legacy dispatch report = %+v", report)
+	}
+}
+
+func TestTraceInspectionExcludesContinuationsAndUsesTerminalHits(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "dispatch.jsonl")
+	trace := strings.Join([]string{
+		`{"seq":1,"ch":"dispatch","site":"018000","target":"018100","m":0,"x":0,"found":0,"continuation":1,"trapped":0,"hits":1}`,
+		`{"seq":2,"ch":"dispmiss","from":"018000","to":"018100","mnow":0,"xnow":0}`,
+		`{"seq":3,"ch":"dispmiss","from":"018000","to":"018100","mnow":0,"xnow":0}`,
+		`{"seq":4,"ch":"dispatch","site":"018000","target":"018100","m":0,"x":0,"found":0,"continuation":1,"trapped":0,"hits":8}`,
+		`{"seq":5,"ch":"dispmiss","from":"018000","to":"018100","mnow":0,"xnow":0}`,
+		`{"seq":6,"ch":"dispmiss","from":"018000","to":"018100","mnow":0,"xnow":0}`,
+		`{"seq":7,"ch":"dispatch","site":"018200","target":"018300","m":0,"x":0,"found":0,"continuation":0,"trapped":0,"hits":1}`,
+		`{"seq":8,"ch":"dispatch","site":"018200","target":"018300","m":0,"x":0,"found":0,"continuation":0,"trapped":0,"hits":2}`,
+		`{"seq":9,"ch":"dispatch","site":"018200","target":"018300","m":0,"x":0,"found":0,"continuation":0,"trapped":0,"hits":4}`,
+		`{"seq":10,"ch":"dispatch","site":"018200","target":"018300","m":0,"x":0,"found":0,"continuation":0,"trapped":0,"hits":9}`,
+	}, "\n")
+	if err := os.WriteFile(path, []byte(trace), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	report, err := BuildTraceInspection(TraceInspectOptions{
+		TracePath: path, Diagnose: true, Limit: 20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Version != 3 || report.Summary.DispatchContinuation != 2 ||
+		report.Summary.DispatchMiss != 4 {
+		t.Fatalf("dispatch summary = %+v version=%d", report.Summary, report.Version)
+	}
+	if len(report.Findings) != 1 ||
+		report.Findings[0].Kind != "missing_dispatch_target" ||
+		report.Findings[0].Count != 9 ||
+		report.Findings[0].SitePC == nil ||
+		*report.Findings[0].SitePC != 0x018200 ||
+		report.Findings[0].TargetPC == nil ||
+		*report.Findings[0].TargetPC != 0x018300 {
+		t.Fatalf("dispatch findings = %+v", report.Findings)
+	}
+	if len(report.Warnings) != 0 {
+		t.Fatalf("structured dispatch trace warnings = %+v", report.Warnings)
+	}
+	if report.Truncated != 0 {
+		t.Fatalf("diagnose-only report counted hidden raw events as truncated: %d", report.Truncated)
+	}
+}
+
+func TestTraceInspectionDiagnoseDoesNotReportHiddenEventTruncation(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "clean.jsonl")
+	trace := strings.Join([]string{
+		`{"seq":1,"ch":"dispatch","site":"018000","target":"018100","m":0,"x":0,"found":1,"continuation":0,"trapped":0,"hits":1}`,
+		`{"seq":2,"ch":"dispatch","site":"018000","target":"018100","m":0,"x":0,"found":1,"continuation":0,"trapped":0,"hits":2}`,
+	}, "\n")
+	if err := os.WriteFile(path, []byte(trace), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	report, err := BuildTraceInspection(TraceInspectOptions{
+		TracePath: path, Summary: true, Diagnose: true, Limit: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Findings) != 0 || len(report.Events) != 0 || report.Truncated != 0 {
+		t.Fatalf("clean diagnose report = %+v", report)
+	}
+	var output bytes.Buffer
+	if err := WriteTraceInspection(&output, report, "text"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "raise --limit") {
+		t.Fatalf("clean diagnose output reports hidden raw-event truncation:\n%s", output.String())
 	}
 }

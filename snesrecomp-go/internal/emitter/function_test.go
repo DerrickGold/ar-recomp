@@ -234,3 +234,31 @@ func TestInvalidCrossBankLongJumpUsesLoudTrap(t *testing.T) {
 		t.Fatalf("invalid cross-bank JML remained silent:\n%s", source)
 	}
 }
+
+func TestCrossBankLongJumpUsesPostPLPLiveWidths(t *testing.T) {
+	image := make(rom.Image, 0x10000)
+	copy(image, []byte{
+		0x08,       // PHP: save entry M0X0
+		0xe2, 0x30, // SEP #$30: block is now M1X1
+		0x80, 0x00, // BRA to a new block at $8005
+		0x28,                   // PLP: restore M0X0
+		0x5c, 0x00, 0x80, 0x01, // JML $01:8000
+	})
+	image[0x8000] = 0x60 // valid target in LoROM bank $01
+	context := codegen.NewContext()
+	result, err := EmitFunction(image, 0, 0x8000, 0, 0, FunctionOptions{
+		Name: "RestoreThenJump", Codegen: context, UnresolvedAllowed: true,
+	})
+	if err != nil {
+		t.Fatalf("EmitFunction: %v", err)
+	}
+	if !strings.Contains(result.Source, "bank_01_8000_M0X0(cpu)") ||
+		strings.Contains(result.Source, "bank_01_8000_M1X1(cpu)") {
+		t.Fatalf("cross-bank JML did not use post-PLP M/X:\n%s", result.Source)
+	}
+	if _, found := context.Demands[codegen.Variant{
+		Address: 0x018000, M: 0, X: 0,
+	}]; !found {
+		t.Fatalf("post-PLP JML demand = %+v", context.Demands)
+	}
+}
