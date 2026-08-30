@@ -34,6 +34,9 @@ type ShadowEntryAblationSummary struct {
 	BatchComputedTargets             int `json:"batch_computed_targets"`
 	BatchInternalContinuations       int `json:"batch_internal_continuations"`
 	BatchSingleOwnerContinuations    int `json:"batch_single_owner_continuations"`
+	BatchMultiOwnerContinuations     int `json:"batch_multi_owner_continuations"`
+	BatchAcyclicContinuationOverlaps int `json:"batch_acyclic_continuation_overlaps"`
+	BatchCyclicContinuationOverlaps  int `json:"batch_cyclic_continuation_overlaps"`
 	BatchRegionEligibleContinuations int `json:"batch_region_eligible_continuations"`
 	AuthoredHLEObligations           int `json:"authored_hle_obligations"`
 	HLEOnlyObligations               int `json:"hle_only_obligations"`
@@ -138,38 +141,26 @@ func SelectStaticProvenRoutineEntryFacts(report ShadowReport) []analysis.EntryFa
 // independently verifies that their decoded closures match.
 
 func SelectStaticProvenContinuationEntryFacts(report ShadowReport) []analysis.EntryFact {
-	allTargets := make(map[analysis.EntryVariant]struct{})
-	allOwners := make(map[analysis.EntryVariant]struct{})
-	for _, record := range report.EntryAblation.Entries {
-		if _, valid := staticProvenContinuationEntryFact(record); !valid {
-			continue
-		}
-		allTargets[analysis.EntryVariant{PC: record.PC, EntryMX: record.AuthoredMX}] = struct{}{}
-		for _, incoming := range record.Incoming {
-			allOwners[analysis.EntryVariant{PC: incoming.PC, EntryMX: incoming.EntryMX}] = struct{}{}
-		}
-	}
-	var facts []analysis.EntryFact
+	graph := make(map[analysis.EntryVariant]map[analysis.EntryVariant]struct{})
+	var candidates []analysis.EntryFact
 	for _, record := range report.EntryAblation.Entries {
 		fact, valid := staticProvenContinuationEntryFact(record)
 		if !valid {
 			continue
 		}
-		if len(fact.RegionOwners) > 1 {
-			target := analysis.EntryVariant{PC: fact.PC, EntryMX: fact.EntryMX}
-			if _, ownsAnotherContinuation := allOwners[target]; ownsAnotherContinuation {
-				continue
+		candidates = append(candidates, fact)
+		target := analysis.EntryVariant{PC: fact.PC, EntryMX: fact.EntryMX}
+		for _, owner := range fact.RegionOwners {
+			if graph[owner] == nil {
+				graph[owner] = make(map[analysis.EntryVariant]struct{})
 			}
-			isolatedOwners := true
-			for _, owner := range fact.RegionOwners {
-				if _, isContinuation := allTargets[owner]; isContinuation {
-					isolatedOwners = false
-					break
-				}
-			}
-			if !isolatedOwners {
-				continue
-			}
+			graph[owner][target] = struct{}{}
+		}
+	}
+	var facts []analysis.EntryFact
+	for _, fact := range candidates {
+		if len(fact.RegionOwners) > 1 && continuationFactIsCyclic(fact, graph) {
+			continue
 		}
 		facts = append(facts, fact)
 	}
@@ -183,6 +174,83 @@ func SelectStaticProvenContinuationEntryFacts(report ShadowReport) []analysis.En
 		return facts[i].EntryMX.X < facts[j].EntryMX.X
 	})
 	return facts
+}
+
+func continuationFactIsCyclic(fact analysis.EntryFact, graph map[analysis.EntryVariant]map[analysis.EntryVariant]struct{}) bool {
+	target := analysis.EntryVariant{PC: fact.PC, EntryMX: fact.EntryMX}
+	for _, owner := range fact.RegionOwners {
+		if continuationOwnershipPathExists(graph, target, owner) {
+			return true
+		}
+	}
+	return false
+}
+
+func continuationOwnershipPathExists(graph map[analysis.EntryVariant]map[analysis.EntryVariant]struct{}, start, goal analysis.EntryVariant) bool {
+	visited := make(map[analysis.EntryVariant]struct{})
+	var visit func(analysis.EntryVariant) bool
+	visit = func(current analysis.EntryVariant) bool {
+		if current == goal {
+			return true
+		}
+		if _, seen := visited[current]; seen {
+			return false
+		}
+		visited[current] = struct{}{}
+		for next := range graph[current] {
+			if visit(next) {
+				return true
+			}
+		}
+		return false
+	}
+	return visit(start)
+}
+
+func classifyStaticProvenContinuationOverlaps(report ShadowReport) (multiOwner, acyclicOverlap, cyclicOverlap int) {
+	graph := make(map[analysis.EntryVariant]map[analysis.EntryVariant]struct{})
+	targets := make(map[analysis.EntryVariant]struct{})
+	var candidates []analysis.EntryFact
+	for _, record := range report.EntryAblation.Entries {
+		fact, valid := staticProvenContinuationEntryFact(record)
+		if !valid {
+			continue
+		}
+		candidates = append(candidates, fact)
+		target := analysis.EntryVariant{PC: fact.PC, EntryMX: fact.EntryMX}
+		targets[target] = struct{}{}
+		for _, owner := range fact.RegionOwners {
+			if graph[owner] == nil {
+				graph[owner] = make(map[analysis.EntryVariant]struct{})
+			}
+			graph[owner][target] = struct{}{}
+		}
+	}
+	for _, fact := range candidates {
+		if len(fact.RegionOwners) <= 1 {
+			continue
+		}
+		multiOwner++
+		target := analysis.EntryVariant{PC: fact.PC, EntryMX: fact.EntryMX}
+		overlaps := len(graph[target]) != 0
+		if !overlaps {
+			for _, owner := range fact.RegionOwners {
+				if _, isContinuation := targets[owner]; isContinuation {
+					overlaps = true
+					break
+				}
+			}
+		}
+		if !overlaps {
+			continue
+		}
+		if continuationFactIsCyclic(fact, graph) {
+			cyclicOverlap++
+		} else {
+			acyclicOverlap++
+		}
+	}
+	return multiOwner, acyclicOverlap, cyclicOverlap
 }
 
 func staticProvenContinuationEntryFact(record ShadowEntryAblationRecord) (analysis.EntryFact, bool) {
@@ -431,7 +499,11 @@ func analyzeShadowEntryAblation(image romimage.Image, banks []shadowBank, result
 	}
 	report.Summary.UniqueAuthoredVariants = len(uniqueAuthored)
 	report.Summary.RetainedUniqueRootVariants = len(uniqueRetained)
-	report.Summary.BatchRegionEligibleContinuations = len(SelectStaticProvenContinuationEntryFacts(ShadowReport{EntryAblation: report}))
+	continuationReport := ShadowReport{EntryAblation: report}
+	report.Summary.BatchMultiOwnerContinuations,
+		report.Summary.BatchAcyclicContinuationOverlaps,
+		report.Summary.BatchCyclicContinuationOverlaps = classifyStaticProvenContinuationOverlaps(continuationReport)
+	report.Summary.BatchRegionEligibleContinuations = len(SelectStaticProvenContinuationEntryFacts(continuationReport))
 	return report
 }
 

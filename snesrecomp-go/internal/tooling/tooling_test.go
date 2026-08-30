@@ -1131,7 +1131,7 @@ func TestSelectStaticProvenContinuationEntryFactsRequiresPlainSiblingOnlyEntry(t
 	}
 }
 
-func TestSelectStaticProvenContinuationEntryFactsAllowsOnlyIsolatedMultiOwnerBodies(t *testing.T) {
+func TestSelectStaticProvenContinuationEntryFactsAllowsAcyclicMultiOwnerOverlaps(t *testing.T) {
 	record := func(pc uint32, owners ...uint32) ShadowEntryAblationRecord {
 		result := ShadowEntryAblationRecord{
 			PC: pc, AuthoredMX: analysis.MXState{M: 1, X: 1},
@@ -1151,28 +1151,39 @@ func TestSelectStaticProvenContinuationEntryFactsAllowsOnlyIsolatedMultiOwnerBod
 	}
 	report := ShadowReport{EntryAblation: ShadowEntryAblationReport{Entries: []ShadowEntryAblationRecord{
 		record(0x008200, 0x008000, 0x008100), // isolated multi-owner target
-		record(0x008500, 0x008300, 0x008400), // owner $8300 is another continuation
+		record(0x008500, 0x008300, 0x008400), // acyclic: owner $8300 is another continuation
 		record(0x008300, 0x008000),
-		record(0x008600, 0x008700, 0x008800), // target $8600 owns another continuation
+		record(0x008600, 0x008700, 0x008800), // acyclic: target $8600 owns another continuation
 		record(0x008900, 0x008600),
+		record(0x008A00, 0x008B00, 0x008C00), // cyclic: target reaches owner $8B00
+		record(0x008B00, 0x008A00),
 	}}}
 	facts := SelectStaticProvenContinuationEntryFacts(report)
-	var multi *analysis.EntryFact
+	wantedMulti := map[uint32]bool{0x008200: false, 0x008500: false, 0x008600: false}
 	for index := range facts {
-		if facts[index].PC == 0x008200 {
-			multi = &facts[index]
+		if _, wanted := wantedMulti[facts[index].PC]; wanted {
+			wantedMulti[facts[index].PC] = true
+			if len(facts[index].RegionOwners) != 2 || len(facts[index].ResumeEdges) != 2 {
+				t.Fatalf("multi-owner fact = %+v", facts[index])
+			}
+			for _, edge := range facts[index].ResumeEdges {
+				if edge.RegionOwner == nil {
+					t.Fatalf("multi-owner resume edge lacks explicit owner: %+v", edge)
+				}
+			}
 		}
-		if facts[index].PC == 0x008500 || facts[index].PC == 0x008600 {
-			t.Fatalf("non-isolated multi-owner continuation was selected: %+v", facts[index])
+		if facts[index].PC == 0x008A00 {
+			t.Fatalf("cyclic multi-owner continuation was selected: %+v", facts[index])
 		}
 	}
-	if multi == nil || len(multi.RegionOwners) != 2 || len(multi.ResumeEdges) != 2 {
-		t.Fatalf("isolated multi-owner fact = %+v, all facts %+v", multi, facts)
-	}
-	for _, edge := range multi.ResumeEdges {
-		if edge.RegionOwner == nil {
-			t.Fatalf("multi-owner resume edge lacks explicit owner: %+v", edge)
+	for pc, found := range wantedMulti {
+		if !found {
+			t.Fatalf("acyclic multi-owner fact $%06X was not selected: %+v", pc, facts)
 		}
+	}
+	multiOwner, acyclicOverlap, cyclicOverlap := classifyStaticProvenContinuationOverlaps(report)
+	if multiOwner != 4 || acyclicOverlap != 2 || cyclicOverlap != 1 {
+		t.Fatalf("multi-owner/acyclic/cyclic overlap counts = %d/%d/%d, want 4/2/1", multiOwner, acyclicOverlap, cyclicOverlap)
 	}
 }
 
