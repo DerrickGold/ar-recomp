@@ -160,7 +160,7 @@ func TestBuildXrefUsesDecodedBoundariesAndDistinguishesWidths(t *testing.T) {
 		t.Fatalf("table ownership summary = %+v spans=%+v", shadow.Summary, shadow.TableSpans)
 	}
 	span := shadow.TableSpans[0]
-	if span.SitePC != 0x008009 || span.StartPC != 0x00800c || span.EndExclusive != 0x008010 || span.EntryBytes != 2 || span.EntryCount != 2 || span.Ownership != shadowTableOwnershipCandidate {
+	if span.SitePC != 0x008009 || span.StartPC != 0x00800c || span.EndExclusive != 0x00801a || span.EntryBytes != 2 || span.EntryCount != 7 || span.Ownership != shadowTableOwnershipCandidate {
 		t.Fatalf("inline table span = %+v", span)
 	}
 
@@ -176,10 +176,10 @@ indirect_dispatch 8009 2 idx:X tables:800C transfer:tail
 	if err != nil {
 		t.Fatal(err)
 	}
-	if confirmed.Summary.ConfirmedTableSpans != 1 || confirmed.Summary.CandidateTableSpans != 0 || len(confirmed.TableSpans) != 1 {
+	if confirmed.Summary.ConfirmedTableSpans != 1 || confirmed.Summary.CandidateTableSpans != 1 || len(confirmed.TableSpans) != 2 {
 		t.Fatalf("confirmed table ownership summary = %+v spans=%+v", confirmed.Summary, confirmed.TableSpans)
 	}
-	if confirmed.TableSpans[0].Ownership != shadowTableOwnershipConfirmed || confirmed.TableSpans[0].Confidence != analysis.ConfidenceAuthored {
+	if confirmed.TableSpans[0].EntryCount != 2 || confirmed.TableSpans[0].Ownership != shadowTableOwnershipConfirmed || confirmed.TableSpans[0].Confidence != analysis.ConfidenceAuthored {
 		t.Fatalf("confirmed inline table span = %+v", confirmed.TableSpans[0])
 	}
 }

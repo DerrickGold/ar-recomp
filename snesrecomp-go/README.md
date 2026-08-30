@@ -303,11 +303,15 @@ v2regen emit-function --rom game.sfc --cfg-dir recomp \
   --bank 00 --start 8000 --m 1 --x 1
 ```
 
-`poll-census --registers` accepts any comma-separated hexadecimal hardware
-register addresses; `$4210` and `$4212` are defaults, not a fixed allow-list.
-Coverage reports distinguish conditional HLE fallbacks from whole-body
-replacement. Only whole-body coverage removes a poll from the potentially
-live count.
+`poll-census --registers` accepts any comma-separated hexadecimal 16-bit
+addresses, including hardware status, APU ports, and WRAM synchronization
+flags; `$4210` and `$4212` are defaults, not a fixed allow-list. By default,
+`--interrupt-sync` also finds low-WRAM addresses written by decoded NMI/IRQ
+ownership and read by decoded code, then includes those addresses in the
+census with writer and interrupt-root provenance. Use
+`--interrupt-sync=false` for the explicit list only. Coverage reports
+distinguish conditional HLE fallbacks from whole-body replacement. Only
+whole-body coverage removes a poll from the potentially live count.
 
 The packaged `snesbuild` binary exposes the same `disasm` and `xref` commands
 with paths relative to `--root`. Decoded xrefs come only from rooted instruction

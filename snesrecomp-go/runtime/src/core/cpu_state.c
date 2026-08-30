@@ -18,9 +18,20 @@ void (*g_cpu_cop_hook)(CpuState *cpu);
 uint16 sr_cpu_stack_pointer(void) { return g_cpu.S; }
 uint8 sr_cpu_program_bank(void) { return g_cpu.PB; }
 
-enum { kDispatchDepthCapacity = 256 };
+enum {
+    kDispatchDepthCapacity = 256,
+    kMissingDispatchCapacity = 256,
+};
+typedef struct MissingDispatchWarning {
+    uint32 site_pc24;
+    uint32 target_pc24;
+    uint32 hits;
+} MissingDispatchWarning;
 static uint32 g_dispatch_depth[kDispatchDepthCapacity];
 static unsigned g_dispatch_depth_count;
+static MissingDispatchWarning
+    g_missing_dispatch_warning[kMissingDispatchCapacity];
+static unsigned g_missing_dispatch_warning_count;
 
 static int ram_offset(uint8 bank, uint16 address) {
     if (bank == 0x7eu) return address;
@@ -203,18 +214,86 @@ static RecompReturn (*dispatch_lookup_mirrored(CpuState *cpu, uint32 pc24,
     return function;
 }
 
+static int dispatch_source_is_continuation(CpuState *cpu,
+                                           uint32 source_pc24) {
+    uint8 source_opcode;
+    if ((source_pc24 & 0x00ffffffu) == 0x00ffffffu) return 0;
+    source_opcode = cpu_read8(cpu, (uint8)(source_pc24 >> 16),
+                              (uint16)source_pc24);
+    return source_opcode == 0x60u || source_opcode == 0x6bu;
+}
+
+void cpu_dispatch_diagnostic_reset(void) {
+    memset(g_missing_dispatch_warning, 0, sizeof(g_missing_dispatch_warning));
+    g_missing_dispatch_warning_count = 0u;
+}
+
+unsigned cpu_dispatch_missing_warning_count(void) {
+    return g_missing_dispatch_warning_count;
+}
+
+uint32 cpu_dispatch_missing_warning_hits(uint32 site_pc24,
+                                         uint32 target_pc24) {
+    unsigned index;
+    site_pc24 &= 0xffffffu;
+    target_pc24 &= 0xffffffu;
+    for (index = 0u; index < g_missing_dispatch_warning_count; ++index) {
+        const MissingDispatchWarning *entry =
+            &g_missing_dispatch_warning[index];
+        if (entry->site_pc24 == site_pc24 &&
+            entry->target_pc24 == target_pc24) return entry->hits;
+    }
+    return 0u;
+}
+
+static int missing_dispatch_milestone(uint32 hits) {
+    if (hits == 0u) return 0;
+    while (hits > 1u && hits % 16u == 0u) hits /= 16u;
+    return hits == 1u;
+}
+
+static void dispatch_missing_body_warn(CpuState *cpu, uint32 site_pc24,
+                                       uint32 target_pc24) {
+    MissingDispatchWarning *entry = NULL;
+    unsigned index;
+    site_pc24 &= 0xffffffu;
+    target_pc24 &= 0xffffffu;
+    if (getenv("SNESRECOMP_NO_DISPATCH_MISSING_WARNING") != NULL) return;
+    for (index = 0u; index < g_missing_dispatch_warning_count; ++index) {
+        MissingDispatchWarning *candidate =
+            &g_missing_dispatch_warning[index];
+        if (candidate->site_pc24 == site_pc24 &&
+            candidate->target_pc24 == target_pc24) {
+            entry = candidate;
+            break;
+        }
+    }
+    if (entry == NULL) {
+        if (g_missing_dispatch_warning_count >= kMissingDispatchCapacity)
+            return;
+        entry = &g_missing_dispatch_warning[g_missing_dispatch_warning_count++];
+        entry->site_pc24 = site_pc24;
+        entry->target_pc24 = target_pc24;
+    }
+    if (entry->hits != UINT32_MAX) ++entry->hits;
+    if (!missing_dispatch_milestone(entry->hits)) return;
+    fprintf(stderr,
+            "[dispatch-missing] %s site=$%06X target=$%06X M%uX%u "
+            "S=$%04X frame=%d has no generated body (hits=%u).\n"
+            "[dispatch-missing] A repeated hit usually means a data-driven "
+            "script handler is being skipped; run dispatch-census and "
+            "regenerate after adding or learning the target.\n",
+            g_last_recomp_func != NULL ? g_last_recomp_func : "?",
+            site_pc24, target_pc24, cpu->m_flag & 1u, cpu->x_flag & 1u,
+            cpu->S, snes_frame_counter, entry->hits);
+}
+
 static void record_dispatch(uint32 pc24, uint32 source_pc24, CpuState *cpu,
                             int found, int mirrored, int trapped,
                             const char *label) {
     if (sr_runner_event_enabled(SR_EVENT_MASK_DYNAMIC_DISPATCH)) {
         SrRunnerEvent runner_event = {0};
-        int continuation = 0;
-        if ((source_pc24 & 0x00ffffffu) != 0x00ffffffu) {
-            uint8 source_bank = (uint8)(source_pc24 >> 16);
-            uint8 source_opcode = cpu_read8(
-                cpu, source_bank, (uint16)source_pc24);
-            continuation = source_opcode == 0x60u || source_opcode == 0x6bu;
-        }
+        int continuation = dispatch_source_is_continuation(cpu, source_pc24);
         runner_event.type = SR_EVENT_DYNAMIC_DISPATCH;
         runner_event.frame_counter = snes_frame_counter >= 0
             ? (uint64)snes_frame_counter : 0u;
@@ -269,6 +348,13 @@ static RecompReturn dispatch_once(CpuState *cpu, uint32 pc24,
     record_dispatch(pc24, source_pc24, cpu, function != NULL, mirrored,
                     0, g_last_recomp_func);
 #endif
+    if (function == NULL &&
+        !dispatch_source_is_continuation(cpu, source_pc24)) {
+        uint8 opcode = cpu_read8(cpu, (uint8)(pc24 >> 16), (uint16)pc24);
+        if (opcode != 0x60u && opcode != 0x6bu) {
+            dispatch_missing_body_warn(cpu, source_pc24, pc24);
+        }
+    }
 
     if (function == NULL && g_rtl_game_execution != NULL &&
         g_rtl_game_execution->recover_dispatch_miss != NULL &&

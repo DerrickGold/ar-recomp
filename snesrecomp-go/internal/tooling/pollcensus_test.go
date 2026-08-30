@@ -91,7 +91,7 @@ func TestPollCensusReportsTruthfulHLECoverage(t *testing.T) {
 		coverage[0x008030] != PollHLECoverageNone {
 		t.Fatalf("coverage=%v sites=%+v", coverage, report.Sites)
 	}
-	if report.Version != 2 || report.Summary.HLEWholeBody != 2 ||
+	if report.Version != 3 || report.Summary.HLEWholeBody != 2 ||
 		report.Summary.HLEConditional != 1 ||
 		report.Summary.LivePollLoops != 2 {
 		t.Fatalf("summary=%+v version=%d", report.Summary, report.Version)
@@ -118,5 +118,52 @@ func TestPollCensusAcceptsArbitraryHardwareRegister(t *testing.T) {
 	}
 	if len(report.Sites) != 1 || report.Sites[0].Register != 0x2140 {
 		t.Fatalf("sites=%+v", report.Sites)
+	}
+}
+
+func TestPollCensusDiscoversInterruptWrittenWRAMFlag(t *testing.T) {
+	root := t.TempDir()
+	image := make([]byte, 0x8000)
+	copy(image[0x0000:], []byte{
+		0xad, 0x54, 0x01, // LDA $0154
+		0xf0, 0xfb, // BEQ $8000
+		0x60,
+	})
+	copy(image[0x0100:], []byte{0x9c, 0x54, 0x01, 0x40}) // STZ $0154; RTI
+	image[0x7fea], image[0x7feb] = 0x00, 0x81            // native NMI $8100
+	romPath := filepath.Join(root, "fixture.sfc")
+	if err := os.WriteFile(romPath, image, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgDir := filepath.Join(root, "recomp")
+	writeTestFile(t, filepath.Join(cfgDir, "bank00.cfg"),
+		"bank = 00\nauto_vectors\nfunc Root 8000 entry_mx:1,1\n")
+	report, err := BuildPollCensus(PollCensusOptions{
+		ROMPath: romPath, CFGDir: cfgDir, Jobs: 2,
+		Registers: []uint16{0x4210}, DiscoverInterruptSync: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Version != 3 || report.Summary.InterruptSyncAddresses != 1 ||
+		len(report.InterruptSync) != 1 {
+		t.Fatalf("summary=%+v interrupt_sync=%+v", report.Summary, report.InterruptSync)
+	}
+	sync := report.InterruptSync[0]
+	if sync.Address != 0x0154 || len(sync.InterruptEntries) != 1 ||
+		sync.InterruptEntries[0] != 0x008100 || len(sync.WriterPCs) != 1 ||
+		sync.WriterPCs[0] != 0x008100 {
+		t.Fatalf("interrupt sync=%+v", sync)
+	}
+	var found *PollSite
+	for index := range report.Sites {
+		if report.Sites[index].Register == 0x0154 {
+			found = &report.Sites[index]
+			break
+		}
+	}
+	if found == nil || found.Classification != "poll_loop" ||
+		found.Selection != "interrupt_write" {
+		t.Fatalf("discovered poll=%+v all=%+v", found, report.Sites)
 	}
 }

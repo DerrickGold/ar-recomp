@@ -330,7 +330,8 @@ func censusPolls(args []string) error {
 	cfgDir := flags.String("cfg-dir", "recomp", "directory containing bankXX.cfg")
 	jobs := flags.Int("jobs", runtime.NumCPU(), "parallel decode workers")
 	bankValue := flags.String("bank", "", "optional hexadecimal source bank")
-	registerValue := flags.String("registers", "4210,4212", "comma-separated hexadecimal hardware registers")
+	registerValue := flags.String("registers", "4210,4212", "comma-separated 16-bit addresses (hardware status, APU ports, or WRAM flags)")
+	interruptSync := flags.Bool("interrupt-sync", true, "also census low-WRAM flags written by decoded NMI/IRQ ownership")
 	format := flags.String("format", "text", "report format: text or json")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -350,6 +351,7 @@ func censusPolls(args []string) error {
 	}
 	report, err := tooling.BuildPollCensus(tooling.PollCensusOptions{
 		ROMPath: *romPath, CFGDir: *cfgDir, Jobs: *jobs, OnlyBank: onlyBank, Registers: registers,
+		DiscoverInterruptSync: *interruptSync,
 	})
 	if err != nil {
 		return err
@@ -365,7 +367,7 @@ func parsePollRegisters(value string) ([]uint16, error) {
 		text = strings.TrimPrefix(text, "$")
 		parsed, err := strconv.ParseUint(text, 16, 16)
 		if err != nil {
-			return nil, fmt.Errorf("parse hardware register %q: %w", part, err)
+			return nil, fmt.Errorf("parse poll address %q: %w", part, err)
 		}
 		register := uint16(parsed)
 		if _, duplicate := seen[register]; !duplicate {
@@ -374,7 +376,7 @@ func parsePollRegisters(value string) ([]uint16, error) {
 		}
 	}
 	if len(registers) == 0 {
-		return nil, errors.New("poll-census needs at least one hardware register")
+		return nil, errors.New("poll-census needs at least one 16-bit address")
 	}
 	return registers, nil
 }

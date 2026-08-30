@@ -1,6 +1,14 @@
 # Manifest for the project-owned portable replacement runner. Attributed
 # third-party components and their compatible licenses are listed in NOTICE.md.
 
+if(NOT CMAKE_CXX_COMPILER_LOADED)
+    message(FATAL_ERROR
+        "snesrecomp runtime requires C++20 for its private S-DSP accuracy "
+        "unit, but this project has not enabled C++. Declare the project as "
+        "project(<name> LANGUAGES C CXX), or call enable_language(CXX), "
+        "before including runtime/runner.cmake.")
+endif()
+
 set(SNESRECOMP_RUNNER_ROOT ${CMAKE_CURRENT_LIST_DIR})
 set(SNESRECOMP_RUNNER_DEVICE_ROOT ${SNESRECOMP_RUNNER_ROOT})
 set(SNESRECOMP_RUNNER_CRC32_SOURCE ${SNESRECOMP_RUNNER_ROOT}/src/support/crc32.c)

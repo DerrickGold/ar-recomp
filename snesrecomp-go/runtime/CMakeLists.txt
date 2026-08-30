@@ -439,4 +439,10 @@ if(BUILD_TESTING)
             -DRUNTIME_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
             -DRUNTIME_TEST_CONFIG=$<CONFIG>
             -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/install_consumer_test.cmake)
+
+    add_test(NAME snesrecomp_runtime_cxx_language_guard
+        COMMAND ${CMAKE_COMMAND}
+            -DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/c-only-guard-test
+            -DRUNNER_CMAKE=${CMAKE_CURRENT_SOURCE_DIR}/runner.cmake
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cxx_language_guard_test.cmake)
 endif()

@@ -85,6 +85,33 @@ ownership model. Candidate spans remain report-only: they do not suppress
 decoding, change generated C, or write `data_region` directives. This prevents
 a plausible table prefix from hiding real code before its bound is proven.
 
+Indexed tables may contain zero-valued holes. Automatic recovery retains a
+zero run only when a later plausible target proves that the table continues
+and the complete span lands exactly on the earliest same-bank handler. That
+larger count is reported as a structurally supported but still open candidate;
+normal generation keeps the conservative pre-zero count. If no later target
+closes the hole, the analyzer reports only the heuristic prefix instead of
+treating padding as table entries. Later plausible words without an exact
+handler landing are also shown, but explicitly as an unbounded heuristic.
+Promoting either larger count remains a behavior-affecting step gated by replay
+evidence.
+
+## Dispatch gap and code-island triage
+
+The JSON report includes `dispatch_code_islands`, and verbose text prints
+`[DISPATCH-CODE-ISLAND]` records. For each closed computed-dispatch target set,
+the analyzer compares decoded byte ownership between adjacent same-bank
+handlers. If a decoded `BRA`, `JMP`, return, or other flow terminator skips an
+unclaimed byte range and sequential decoding of that range reaches an
+`RTS`/`RTL`/`RTI` before the next claimed block, the range is reported with its
+candidate entry, end, neighboring targets, and viable M/X states.
+
+These are probable review hints, not generated entries. Shared handler tails,
+data embedded between routines, and width ambiguity prevent the sweep from
+proving a target set. Confirm a candidate with dispatch-census or an external
+trace before adding it to configuration; the analyzer never feeds a code-island
+finding into the proven-analysis overlay.
+
 ## Experimental isolated regeneration
 
 The low-level generator can consume the safest automatic facts without
@@ -238,7 +265,13 @@ by a deterministic final count at clean shutdown. A wedged interpreter therefore
 leaves useful evidence such as a million-hit target without producing a
 million-line trace. Edges emitted by RTS/RTL are classified as continuation or
 return guards even when their target has no standalone registry body; they are
-reported separately and never turned into missing-handler suggestions.
+excluded from missing-handler debt. Independently of trace builds, a computed
+target with no live-M/X registry body prints `[dispatch-missing]` on its first
+hit and at base-16 milestones (16, 256, 4096, ...), including site, target,
+M/X, stack, frame, and hit count. Set
+`SNESRECOMP_NO_DISPATCH_MISSING_WARNING=1` only when an integration has an
+intentional, separately-audited recovery policy; the deterministic exit census
+remains the complete paste-ready summary.
 
 An unresolved `JMP (abs)`, `JMP (abs,X)`, or `JML [abs]` no longer needs an
 authored `hle_dispatch` merely to become visible to the census. Before executing
