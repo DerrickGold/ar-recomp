@@ -17,8 +17,9 @@ type entryOverlayCounts struct {
 
 // applyProvenEntryFacts applies two deliberately separate entry semantics.
 // Routine facts withhold exact configured roots and require static call
-// discovery to recreate them. Continuation facts retain their external entry
-// and only open the sibling boundary in the exact named parent region.
+// discovery to recreate them. Continuation facts retain their external entry;
+// a single-owner tree opens exact local boundaries, while isolated multi-owner
+// edges route to one shared body without establishing another activation.
 func (repo *repository) applyProvenEntryFacts(facts []analysis.EntryFact) (entryOverlayCounts, error) {
 	var counts entryOverlayCounts
 	seen := make(map[decoder.Variant]analysis.EntryKind)
@@ -126,12 +127,14 @@ func (repo *repository) applyProvenContinuationEntryFact(bankID byte, bank *bank
 	if blockers := entryTemplateBlockers(bankID, bank.Config, *targetEntry); len(blockers) != 0 {
 		return fmt.Errorf("experimental continuation fact $%06X M%dX%d has authored metadata blockers (%s)", target.Address, target.M, target.X, strings.Join(blockers, ", "))
 	}
-	if len(fact.RegionOwners) != 1 {
-		return fmt.Errorf("experimental continuation fact $%06X M%dX%d has %d owning regions; exact region merging currently requires one", target.Address, target.M, target.X, len(fact.RegionOwners))
+	if len(fact.RegionOwners) == 0 {
+		return fmt.Errorf("experimental continuation fact $%06X M%dX%d has no owning region", target.Address, target.M, target.X)
 	}
 	if len(fact.ResumeEdges) == 0 {
 		return fmt.Errorf("experimental continuation fact $%06X M%dX%d has no exact resume edge", target.Address, target.M, target.X)
 	}
+	multiOwner := len(fact.RegionOwners) > 1
+	usedEdges := make(map[int]struct{})
 	for _, ownerFact := range fact.RegionOwners {
 		ownerBank := canonicalBank(repo.byBank, byte(ownerFact.PC>>16))
 		if ownerBank != bankID {
@@ -153,10 +156,22 @@ func (repo *repository) applyProvenContinuationEntryFact(bankID byte, bank *bank
 		if !ownerFound {
 			return fmt.Errorf("experimental continuation fact $%06X owner $%06X M%dX%d has no active authored entry", target.Address, owner.Address, owner.M, owner.X)
 		}
-		if repo.provenResumeEdges[owner] == nil {
-			repo.provenResumeEdges[owner] = make(map[decoder.ResumeEdge]struct{})
-		}
-		for _, factEdge := range fact.ResumeEdges {
+		ownerEdges := 0
+		for edgeIndex, factEdge := range fact.ResumeEdges {
+			if factEdge.RegionOwner == nil {
+				if multiOwner {
+					return fmt.Errorf("experimental multi-owner continuation fact $%06X has a resume edge without region_owner", target.Address)
+				}
+			} else {
+				edgeOwnerBank := canonicalBank(repo.byBank, byte(factEdge.RegionOwner.PC>>16))
+				edgeOwner := decoder.Variant{
+					Address: decoder.Address24(edgeOwnerBank, uint16(factEdge.RegionOwner.PC)),
+					M:       factEdge.RegionOwner.EntryMX.M & 1, X: factEdge.RegionOwner.EntryMX.X & 1,
+				}
+				if edgeOwner != owner {
+					continue
+				}
+			}
 			sourceBank := canonicalBank(repo.byBank, byte(factEdge.Source.PC>>16))
 			targetBank := canonicalBank(repo.byBank, byte(factEdge.Target.PC>>16))
 			edge := decoder.ResumeEdge{
@@ -175,8 +190,26 @@ func (repo *repository) applyProvenContinuationEntryFact(bankID byte, bank *bank
 			if err := repo.validateProvenResumeEdge(bank, ownerEntry, edge); err != nil {
 				return fmt.Errorf("experimental continuation fact $%06X owner $%06X M%dX%d: %w", target.Address, owner.Address, owner.M, owner.X, err)
 			}
-			repo.provenResumeEdges[owner][edge] = struct{}{}
+			if multiOwner {
+				if repo.provenContinuationCalls[owner] == nil {
+					repo.provenContinuationCalls[owner] = make(map[decoder.ResumeEdge]decoder.Variant)
+				}
+				repo.provenContinuationCalls[owner][edge] = target
+			} else {
+				if repo.provenResumeEdges[owner] == nil {
+					repo.provenResumeEdges[owner] = make(map[decoder.ResumeEdge]struct{})
+				}
+				repo.provenResumeEdges[owner][edge] = struct{}{}
+			}
+			usedEdges[edgeIndex] = struct{}{}
+			ownerEdges++
 		}
+		if ownerEdges == 0 {
+			return fmt.Errorf("experimental continuation fact $%06X owner $%06X M%dX%d has no attributed resume edge", target.Address, owner.Address, owner.M, owner.X)
+		}
+	}
+	if len(usedEdges) != len(fact.ResumeEdges) {
+		return fmt.Errorf("experimental continuation fact $%06X attributed %d/%d resume edges to an owning region", target.Address, len(usedEdges), len(fact.ResumeEdges))
 	}
 	return nil
 }

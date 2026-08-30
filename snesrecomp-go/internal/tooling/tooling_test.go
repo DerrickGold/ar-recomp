@@ -1131,6 +1131,51 @@ func TestSelectStaticProvenContinuationEntryFactsRequiresPlainSiblingOnlyEntry(t
 	}
 }
 
+func TestSelectStaticProvenContinuationEntryFactsAllowsOnlyIsolatedMultiOwnerBodies(t *testing.T) {
+	record := func(pc uint32, owners ...uint32) ShadowEntryAblationRecord {
+		result := ShadowEntryAblationRecord{
+			PC: pc, AuthoredMX: analysis.MXState{M: 1, X: 1},
+			Status: shadowEntryAblationRecoverable, EntryKindHint: "internal_continuation",
+			DecodedInstructions: 20,
+		}
+		for _, owner := range owners {
+			result.Incoming = append(result.Incoming, ShadowEntryAblationSource{
+				PC: owner, EntryMX: analysis.MXState{M: 1, X: 1}, Kinds: []string{"sibling_boundary_edge"},
+				Edges: []analysis.EntryEdge{{
+					Source: analysis.EntryVariant{PC: owner + 2, EntryMX: analysis.MXState{M: 1, X: 1}},
+					Target: analysis.EntryVariant{PC: pc, EntryMX: analysis.MXState{M: 1, X: 1}},
+				}},
+			})
+		}
+		return result
+	}
+	report := ShadowReport{EntryAblation: ShadowEntryAblationReport{Entries: []ShadowEntryAblationRecord{
+		record(0x008200, 0x008000, 0x008100), // isolated multi-owner target
+		record(0x008500, 0x008300, 0x008400), // owner $8300 is another continuation
+		record(0x008300, 0x008000),
+		record(0x008600, 0x008700, 0x008800), // target $8600 owns another continuation
+		record(0x008900, 0x008600),
+	}}}
+	facts := SelectStaticProvenContinuationEntryFacts(report)
+	var multi *analysis.EntryFact
+	for index := range facts {
+		if facts[index].PC == 0x008200 {
+			multi = &facts[index]
+		}
+		if facts[index].PC == 0x008500 || facts[index].PC == 0x008600 {
+			t.Fatalf("non-isolated multi-owner continuation was selected: %+v", facts[index])
+		}
+	}
+	if multi == nil || len(multi.RegionOwners) != 2 || len(multi.ResumeEdges) != 2 {
+		t.Fatalf("isolated multi-owner fact = %+v, all facts %+v", multi, facts)
+	}
+	for _, edge := range multi.ResumeEdges {
+		if edge.RegionOwner == nil {
+			t.Fatalf("multi-owner resume edge lacks explicit owner: %+v", edge)
+		}
+	}
+}
+
 func TestAuthoredTransferUsesOpcodeBeforeLegacyReturnMetadata(t *testing.T) {
 	returnPC := uint16(0x849b)
 	dispatch := config.IndirectDispatch{ReturnPC: &returnPC}

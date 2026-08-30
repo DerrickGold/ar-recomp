@@ -33,6 +33,8 @@ type FunctionOptions struct {
 	UnresolvedAllowed bool
 	RegionBody        *RegionBodyOptions
 	RegionWrapper     *RegionWrapperOptions
+	RegionCalls       map[decoder.ResumeEdge]string
+	regionCallCounter *int
 }
 
 // RegionEntry identifies one exact internal label that a shared generated
@@ -51,9 +53,10 @@ type RegionEntry struct {
 // already pushed exactly one activation, and the helper's existing return
 // paths pop that activation.
 type RegionBodyOptions struct {
-	HelperName string
-	OwnerPC    uint16
-	Entries    []RegionEntry
+	HelperName      string
+	OwnerPC         uint16
+	Entries         []RegionEntry
+	ExternalLinkage bool
 }
 
 // RegionWrapperOptions replaces a standalone continuation body with a public
@@ -75,6 +78,7 @@ type FunctionResult struct {
 	ConstantZFolds            []decoder.ConstantZFold
 	DispatchTargetsSuppressed []decoder.DispatchTargetSuppressed
 	UnresolvedIndirects       []decoder.UnresolvedIndirect
+	RegionCallsEmitted        int
 }
 
 // VariantEquivalence records that every instruction shape reached by From is
@@ -224,6 +228,8 @@ type instructionIR struct {
 }
 
 func EmitFunction(image rom.Image, bank byte, start uint16, entryM, entryX uint8, options FunctionOptions) (*FunctionResult, error) {
+	regionCallsEmitted := 0
+	options.regionCallCounter = &regionCallsEmitted
 	baseName := options.Name
 	if baseName == "" {
 		baseName = fmt.Sprintf("bank_%02X_%04X", bank, start)
@@ -452,7 +458,11 @@ func EmitFunction(image rom.Image, bank byte, start uint16, entryM, entryX uint8
 			fmt.Sprintf("  return %s(cpu, _entry_s, _hrv, 0);", region.HelperName),
 			"}",
 		)
-		helper := []string{fmt.Sprintf("static inline RecompReturn %s(CpuState *cpu, uint16 _entry_s, uint8 _hrv, uint16 _region_entry) {", region.HelperName)}
+		helperPrefix := "static inline RecompReturn"
+		if region.ExternalLinkage {
+			helperPrefix = "RecompReturn"
+		}
+		helper := []string{fmt.Sprintf("%s %s(CpuState *cpu, uint16 _entry_s, uint8 _hrv, uint16 _region_entry) {", helperPrefix, region.HelperName)}
 		helper = append(helper, regionSwitch...)
 		helper = append(helper, decodedBody...)
 		helper = append(helper, "  RecompStackPop();", "  return RECOMP_RETURN_NORMAL;", "}")
@@ -478,6 +488,7 @@ func EmitFunction(image rom.Image, bank byte, start uint16, entryM, entryX uint8
 	if options.HLEFunction != "" {
 		result.Source = emitHLEStub(name, options.HLEFunction, entryPC)
 	}
+	result.RegionCallsEmitted = regionCallsEmitted
 	return result, nil
 }
 
@@ -618,6 +629,16 @@ func successor(successors []decoder.DecodeKey, index int) *decoder.DecodeKey {
 }
 
 func gotoOrTail(context *codegen.Context, functionName string, bank byte, source, target decoder.DecodeKey, local map[decoder.DecodeKey]struct{}, options FunctionOptions) string {
+	edge := decoder.ResumeEdge{
+		Source: decoder.Variant{Address: source.PC & 0xffffff, M: source.M & 1, X: source.X & 1},
+		Target: decoder.Variant{Address: target.PC & 0xffffff, M: target.M & 1, X: target.X & 1},
+	}
+	if helper := options.RegionCalls[edge]; helper != "" {
+		if options.regionCallCounter != nil {
+			*options.regionCallCounter++
+		}
+		return fmt.Sprintf("{ return %s(cpu, _entry_s, _hrv, 0); }  /* exact shared continuation; helper owns the active-frame pop */", helper)
+	}
 	if _, found := local[target]; found {
 		return "goto " + label(target) + ";"
 	}

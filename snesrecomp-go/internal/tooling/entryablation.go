@@ -138,11 +138,40 @@ func SelectStaticProvenRoutineEntryFacts(report ShadowReport) []analysis.EntryFa
 // independently verifies that their decoded closures match.
 
 func SelectStaticProvenContinuationEntryFacts(report ShadowReport) []analysis.EntryFact {
+	allTargets := make(map[analysis.EntryVariant]struct{})
+	allOwners := make(map[analysis.EntryVariant]struct{})
+	for _, record := range report.EntryAblation.Entries {
+		if _, valid := staticProvenContinuationEntryFact(record); !valid {
+			continue
+		}
+		allTargets[analysis.EntryVariant{PC: record.PC, EntryMX: record.AuthoredMX}] = struct{}{}
+		for _, incoming := range record.Incoming {
+			allOwners[analysis.EntryVariant{PC: incoming.PC, EntryMX: incoming.EntryMX}] = struct{}{}
+		}
+	}
 	var facts []analysis.EntryFact
 	for _, record := range report.EntryAblation.Entries {
-		if fact, valid := staticProvenContinuationEntryFact(record); valid {
-			facts = append(facts, fact)
+		fact, valid := staticProvenContinuationEntryFact(record)
+		if !valid {
+			continue
 		}
+		if len(fact.RegionOwners) > 1 {
+			target := analysis.EntryVariant{PC: fact.PC, EntryMX: fact.EntryMX}
+			if _, ownsAnotherContinuation := allOwners[target]; ownsAnotherContinuation {
+				continue
+			}
+			isolatedOwners := true
+			for _, owner := range fact.RegionOwners {
+				if _, isContinuation := allTargets[owner]; isContinuation {
+					isolatedOwners = false
+					break
+				}
+			}
+			if !isolatedOwners {
+				continue
+			}
+		}
+		facts = append(facts, fact)
 	}
 	sort.Slice(facts, func(i, j int) bool {
 		if facts[i].PC != facts[j].PC {
@@ -160,35 +189,39 @@ func staticProvenContinuationEntryFact(record ShadowEntryAblationRecord) (analys
 	if record.Status != shadowEntryAblationRecoverable ||
 		record.EntryKindHint != "internal_continuation" ||
 		len(record.AuthoredHLE) != 0 || len(record.TemplateBlockers) != 0 ||
-		len(record.Incoming) != 1 || record.DecodedInstructions <= 0 {
+		len(record.Incoming) == 0 || record.DecodedInstructions <= 0 {
 		return analysis.EntryFact{}, false
-	}
-	incoming := record.Incoming[0]
-	if byte(incoming.PC>>16) != byte(record.PC>>16) || len(incoming.Kinds) == 0 || len(incoming.Edges) == 0 {
-		return analysis.EntryFact{}, false
-	}
-	for _, kind := range incoming.Kinds {
-		if kind != "sibling_boundary_edge" {
-			return analysis.EntryFact{}, false
-		}
 	}
 	fact := analysis.EntryFact{
 		PC: record.PC, EntryMX: record.AuthoredMX,
 		Kind: analysis.EntryContinuation, TemplateFree: true,
-		RegionOwners: []analysis.EntryVariant{{
+	}
+	for _, incoming := range record.Incoming {
+		if byte(incoming.PC>>16) != byte(record.PC>>16) || len(incoming.Kinds) == 0 || len(incoming.Edges) == 0 {
+			return analysis.EntryFact{}, false
+		}
+		for _, kind := range incoming.Kinds {
+			if kind != "sibling_boundary_edge" {
+				return analysis.EntryFact{}, false
+			}
+		}
+		owner := analysis.EntryVariant{
 			PC: incoming.PC, EntryMX: incoming.EntryMX,
-		}},
-		Evidence: []analysis.Evidence{{
+		}
+		fact.RegionOwners = append(fact.RegionOwners, owner)
+		fact.Evidence = append(fact.Evidence, analysis.Evidence{
 			Source: "static.sibling_boundary_edge", Confidence: analysis.ConfidenceProven,
 			Detail: fmt.Sprintf("$%02X:%04X M%dX%d", byte(incoming.PC>>16), uint16(incoming.PC), incoming.EntryMX.M&1, incoming.EntryMX.X&1),
-		}},
-		ResumeEdges: append([]analysis.EntryEdge(nil), incoming.Edges...),
-	}
-	for _, edge := range fact.ResumeEdges {
-		if edge.Target.PC&0xffffff != record.PC&0xffffff ||
-			edge.Target.EntryMX.M&1 != record.AuthoredMX.M&1 ||
-			edge.Target.EntryMX.X&1 != record.AuthoredMX.X&1 {
-			return analysis.EntryFact{}, false
+		})
+		for _, edge := range incoming.Edges {
+			if edge.Target.PC&0xffffff != record.PC&0xffffff ||
+				edge.Target.EntryMX.M&1 != record.AuthoredMX.M&1 ||
+				edge.Target.EntryMX.X&1 != record.AuthoredMX.X&1 {
+				return analysis.EntryFact{}, false
+			}
+			ownerCopy := owner
+			edge.RegionOwner = &ownerCopy
+			fact.ResumeEdges = append(fact.ResumeEdges, edge)
 		}
 	}
 	fact.Normalize()
@@ -390,9 +423,6 @@ func analyzeShadowEntryAblation(image romimage.Image, banks []shadowBank, result
 			if len(record.Incoming) == 1 {
 				report.Summary.BatchSingleOwnerContinuations++
 			}
-			if _, eligible := staticProvenContinuationEntryFact(record); eligible {
-				report.Summary.BatchRegionEligibleContinuations++
-			}
 		}
 		if record.IndividuallyRecoverable {
 			report.Summary.IndividuallyRecoverable++
@@ -401,6 +431,7 @@ func analyzeShadowEntryAblation(image romimage.Image, banks []shadowBank, result
 	}
 	report.Summary.UniqueAuthoredVariants = len(uniqueAuthored)
 	report.Summary.RetainedUniqueRootVariants = len(uniqueRetained)
+	report.Summary.BatchRegionEligibleContinuations = len(SelectStaticProvenContinuationEntryFacts(ShadowReport{EntryAblation: report}))
 	return report
 }
 
