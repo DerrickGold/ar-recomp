@@ -33,7 +33,7 @@ type FunctionOptions struct {
 	UnresolvedAllowed bool
 	RegionBody        *RegionBodyOptions
 	RegionWrapper     *RegionWrapperOptions
-	RegionCalls       map[decoder.ResumeEdge]string
+	RegionCalls       map[decoder.ResumeEdge]RegionCall
 	regionCallCounter *int
 }
 
@@ -64,6 +64,14 @@ type RegionBodyOptions struct {
 type RegionWrapperOptions struct {
 	HelperName string
 	OwnerPC    uint16
+	Selector   uint16
+}
+
+// RegionCall routes one exact non-local continuation edge into a shared body.
+// Selector zero names that body's ordinary root; component bodies use nonzero
+// selectors for additional public continuation entries.
+type RegionCall struct {
+	HelperName string
 	Selector   uint16
 }
 
@@ -633,14 +641,14 @@ func gotoOrTail(context *codegen.Context, functionName string, bank byte, source
 		Source: decoder.Variant{Address: source.PC & 0xffffff, M: source.M & 1, X: source.X & 1},
 		Target: decoder.Variant{Address: target.PC & 0xffffff, M: target.M & 1, X: target.X & 1},
 	}
-	if helper := options.RegionCalls[edge]; helper != "" {
+	if _, found := local[target]; found {
+		return "goto " + label(target) + ";"
+	}
+	if call := options.RegionCalls[edge]; call.HelperName != "" {
 		if options.regionCallCounter != nil {
 			*options.regionCallCounter++
 		}
-		return fmt.Sprintf("{ return %s(cpu, _entry_s, _hrv, 0); }  /* exact shared continuation; helper owns the active-frame pop */", helper)
-	}
-	if _, found := local[target]; found {
-		return "goto " + label(target) + ";"
+		return fmt.Sprintf("{ return %s(cpu, _entry_s, _hrv, %d); }  /* exact shared continuation; helper owns the active-frame pop */", call.HelperName, call.Selector)
 	}
 	pc := uint16(target.PC)
 	for _, excluded := range options.ExcludeRanges {

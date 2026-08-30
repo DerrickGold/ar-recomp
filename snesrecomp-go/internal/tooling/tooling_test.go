@@ -1131,7 +1131,7 @@ func TestSelectStaticProvenContinuationEntryFactsRequiresPlainSiblingOnlyEntry(t
 	}
 }
 
-func TestSelectStaticProvenContinuationEntryFactsAllowsAcyclicMultiOwnerOverlaps(t *testing.T) {
+func TestSelectStaticProvenContinuationEntryFactsClassifiesAndSelectsMultiOwnerOverlaps(t *testing.T) {
 	record := func(pc uint32, owners ...uint32) ShadowEntryAblationRecord {
 		result := ShadowEntryAblationRecord{
 			PC: pc, AuthoredMX: analysis.MXState{M: 1, X: 1},
@@ -1159,7 +1159,7 @@ func TestSelectStaticProvenContinuationEntryFactsAllowsAcyclicMultiOwnerOverlaps
 		record(0x008B00, 0x008A00),
 	}}}
 	facts := SelectStaticProvenContinuationEntryFacts(report)
-	wantedMulti := map[uint32]bool{0x008200: false, 0x008500: false, 0x008600: false}
+	wantedMulti := map[uint32]bool{0x008200: false, 0x008500: false, 0x008600: false, 0x008A00: false}
 	for index := range facts {
 		if _, wanted := wantedMulti[facts[index].PC]; wanted {
 			wantedMulti[facts[index].PC] = true
@@ -1172,13 +1172,10 @@ func TestSelectStaticProvenContinuationEntryFactsAllowsAcyclicMultiOwnerOverlaps
 				}
 			}
 		}
-		if facts[index].PC == 0x008A00 {
-			t.Fatalf("cyclic multi-owner continuation was selected: %+v", facts[index])
-		}
 	}
 	for pc, found := range wantedMulti {
 		if !found {
-			t.Fatalf("acyclic multi-owner fact $%06X was not selected: %+v", pc, facts)
+			t.Fatalf("multi-owner fact $%06X was not selected: %+v", pc, facts)
 		}
 	}
 	multiOwner, acyclicOverlap, cyclicOverlap := classifyStaticProvenContinuationOverlaps(report)
