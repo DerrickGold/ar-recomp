@@ -6,12 +6,13 @@
 
 set(SNESRECOMP_RUNNER_SOURCES
     ${SNESRECOMP_RUNNER_ROOT}/src/runner/runner.c
+    ${SNESRECOMP_RUNNER_ROOT}/src/runner/runner_determinism.c
     ${SNESRECOMP_RUNNER_ROOT}/src/runner/runner_game_module.c
     ${SNESRECOMP_RUNNER_ROOT}/src/runner/runner_audio_trace.c
     ${SNESRECOMP_RUNNER_ROOT}/src/runner/runner_ppu_services.c
     ${SNESRECOMP_RUNNER_ROOT}/src/support/crc32.c
     ${SNESRECOMP_RUNNER_ROOT}/src/support/sha256.c
-    ${SNESRECOMP_RUNNER_ROOT}/src/support/input_replay.c
+    ${SNESRECOMP_RUNNER_ROOT}/src/runner/replay.c
     ${SNESRECOMP_RUNNER_ROOT}/src/support/widescreen.c
     ${SNESRECOMP_RUNNER_ROOT}/src/core/recomp_hw.c
     ${SNESRECOMP_RUNNER_ROOT}/src/support/framedump.c
@@ -35,6 +36,7 @@ set(SNESRECOMP_RUNNER_SOURCES
     ${SNESRECOMP_RUNNER_ROOT}/src/snes/snes_other.c
     ${SNESRECOMP_RUNNER_ROOT}/src/snes/dma.c
     ${SNESRECOMP_RUNNER_ROOT}/src/snes/snes.c
+    ${SNESRECOMP_RUNNER_ROOT}/src/snes/semantic_state.c
     ${SNESRECOMP_RUNNER_ROOT}/src/snes/apu.c
     ${SNESRECOMP_RUNNER_ROOT}/src/snes/spc.c
     ${SNESRECOMP_RUNNER_ROOT}/src/snes/dsp.c

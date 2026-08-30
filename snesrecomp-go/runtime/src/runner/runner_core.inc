@@ -208,9 +208,8 @@ static uint32_t borrow_u16_is_valid(SrRunnerHandle *runner,
     return span->data == data && span->element_count == element_count ? 1u : 0u;
 }
 
-static SrResult query_cpu_state(SrRunnerHandle *runner,
-                                SrCpuStateSnapshot *out_state) {
-    Snes *snes = runner_from_handle(runner);
+SrResult sr_runner_query_cpu_state_snapshot(
+        Snes *snes, SrCpuStateSnapshot *out_state) {
     if (snes == NULL || out_state == NULL ||
         out_state->struct_size < SR_CPU_STATE_SNAPSHOT_V2_SIZE)
         return SR_RESULT_INVALID_ARGUMENT;
@@ -220,6 +219,12 @@ static SrResult query_cpu_state(SrRunnerHandle *runner,
     if (s_cpu_state_runner != snes || s_cpu_state_provider == NULL)
         return SR_RESULT_UNAVAILABLE;
     return s_cpu_state_provider(s_cpu_state_user_data, out_state);
+}
+
+static SrResult query_cpu_state(SrRunnerHandle *runner,
+                                SrCpuStateSnapshot *out_state) {
+    return sr_runner_query_cpu_state_snapshot(
+        runner_from_handle(runner), out_state);
 }
 
 static SrResult query_execution_state(
@@ -237,4 +242,3 @@ static SrResult query_execution_state(
     return s_execution_state_provider(
         s_execution_state_user_data, out_state);
 }
-

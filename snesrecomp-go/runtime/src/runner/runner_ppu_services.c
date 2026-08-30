@@ -6,6 +6,7 @@
 #include "snes/dma.h"
 #include "snes/ppu.h"
 #include "snes/snes.h"
+#include "support/sha256.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -18,6 +19,89 @@ typedef struct PpuScanoutHdma {
     uint8_t b_address;
     uint8_t indirect_bank;
 } PpuScanoutHdma;
+
+static void presentation_u16(Sha256Context *sha, uint16_t value) {
+    uint8_t bytes[2] = {(uint8_t)value, (uint8_t)(value >> 8)};
+    sha256_update(sha, bytes, sizeof(bytes));
+}
+
+static void presentation_u32(Sha256Context *sha, uint32_t value) {
+    uint8_t bytes[4] = {
+        (uint8_t)value, (uint8_t)(value >> 8),
+        (uint8_t)(value >> 16), (uint8_t)(value >> 24),
+    };
+    sha256_update(sha, bytes, sizeof(bytes));
+}
+
+static void presentation_u64(Sha256Context *sha, uint64_t value) {
+    uint8_t bytes[8];
+    unsigned index;
+    for (index = 0u; index < sizeof(bytes); ++index)
+        bytes[index] = (uint8_t)(value >> (index * 8u));
+    sha256_update(sha, bytes, sizeof(bytes));
+}
+
+static bool capture_presentation_digest(
+        const Snes *snes, SrPpuScanoutResult *out_result) {
+    static const uint8_t domain[] = "snesrecomp-presentation-v1";
+    const Ppu *ppu;
+    SrPpuPresentationDigest *digest;
+    Sha256Context sha;
+    uint32_t width;
+    uint32_t height;
+    int start_x;
+    uint32_t row;
+    if (snes == NULL || out_result == NULL || snes->ppu == NULL)
+        return false;
+    ppu = snes->ppu;
+    digest = &out_result->presentation;
+    digest->struct_size = SR_PPU_PRESENTATION_DIGEST_V2_SIZE;
+    if (ppu->renderBuffer == NULL || ppu->renderPitch == 0u) return false;
+    width = SR_PPU_NATIVE_WIDTH + ppu->extraLeftCur + ppu->extraRightCur;
+    height = SR_PPU_NATIVE_HEIGHT + ppu->extraTopCur + ppu->extraBottomCur;
+    start_x = PpuSurfaceApron(ppu, ppu->renderPitch) +
+        ppu->extraLeftRight - ppu->extraLeftCur;
+    if (start_x < 0 || width > ppu->renderPitch / sizeof(uint32_t) ||
+        (uint64_t)(uint32_t)start_x + width >
+            ppu->renderPitch / sizeof(uint32_t) ||
+        height > ppu->renderHeight)
+        return false;
+    sha256_init(&sha);
+    sha256_update(&sha, domain, sizeof(domain) - 1u);
+    presentation_u32(&sha, SR_PPU_PRESENTATION_SCHEMA_VERSION);
+    presentation_u64(&sha, snes->abiFrameCounter);
+    presentation_u32(&sha, SR_PPU_PRESENTATION_PIXEL_XRGB8888_LE);
+    presentation_u32(&sha, width);
+    presentation_u32(&sha, height);
+    presentation_u16(&sha, ppu->extraLeftCur);
+    presentation_u16(&sha, ppu->extraRightCur);
+    presentation_u16(&sha, ppu->extraTopCur);
+    presentation_u16(&sha, ppu->extraBottomCur);
+    for (row = 0u; row < height; ++row) {
+        const uint8_t *source = ppu->renderBuffer +
+            (size_t)row * ppu->renderPitch +
+            (size_t)start_x * sizeof(uint32_t);
+        uint32_t column;
+        for (column = 0u; column < width; ++column) {
+            uint32_t pixel;
+            memcpy(&pixel, source + (size_t)column * sizeof(pixel),
+                   sizeof(pixel));
+            presentation_u32(&sha, pixel);
+        }
+    }
+    sha256_final(&sha, digest->sha256);
+    digest->schema_version = SR_PPU_PRESENTATION_SCHEMA_VERSION;
+    digest->frame_counter = snes->abiFrameCounter;
+    digest->width_pixels = width;
+    digest->height_pixels = height;
+    digest->margin_left_pixels = ppu->extraLeftCur;
+    digest->margin_right_pixels = ppu->extraRightCur;
+    digest->margin_top_pixels = ppu->extraTopCur;
+    digest->margin_bottom_pixels = ppu->extraBottomCur;
+    digest->pixel_format = SR_PPU_PRESENTATION_PIXEL_XRGB8888_LE;
+    out_result->flags |= SR_PPU_SCANOUT_PRESENTATION_DIGEST_VALID;
+    return true;
+}
 
 static const uint8_t *scanout_hdma_pointer(
         const Snes *snes, uint32_t address) {
@@ -256,7 +340,6 @@ static SrResult run_ppu_scanout(
             "scanout-begin");
     }
     snes->diagnosticScanoutObserved = true;
-    snes->abiScanoutAvailable = false;
     _Static_assert(SR_DMA_CHANNEL_COUNT == kDmaChannelCount,
                    "scanout HDMA channel count must match the runner");
     scanout_start_hdma(
@@ -336,7 +419,7 @@ static SrResult run_ppu_scanout(
     }
     if ((request->flags &
          SR_PPU_SCANOUT_CAPTURE_PRESENTATION_DIGEST) != 0u)
-        sr_runner_capture_presentation_digest(snes);
+        (void)capture_presentation_digest(snes, out_result);
     return SR_RESULT_OK;
 }
 

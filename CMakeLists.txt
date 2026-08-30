@@ -1282,6 +1282,7 @@ if(BUILD_TESTING)
         ${SNESRECOMP_RUNNER_ROOT}/src/runner/runner_audio_control.c
         ${SNESRECOMP_RUNNER_ROOT}/src/runner/runner_ppu_services.c
         ${SNESRECOMP_RUNNER_ROOT}/src/support/sha256.c
+        ${SNESRECOMP_RUNNER_ROOT}/tests/runner_semantic_digest_stub.c
         ${SNESRECOMP_RUNNER_ROOT}/tests/apu_sync_stub.c
         tests/audio_mix_control_stub.c
         ${SNESRECOMP_RUNNER_DEVICE_ROOT}/src/snes/ppu.c

@@ -387,7 +387,6 @@ void RtlSaveSnapshot(const char *filename) {
     state.base.func = file_saveload;
     state.base.saving = true;
     state.base.portable = true;
-    state.base.semantic = false;
     state.base.failed = false;
     state.file = file;
     saveload_u32(&state.base, &magic);
@@ -424,7 +423,6 @@ bool RtlLoadSnapshot(const char *filename) {
     state.base.func = file_saveload;
     state.base.saving = false;
     state.base.portable = portable;
-    state.base.semantic = false;
     state.base.failed = false;
     state.file = file;
     RtlApuLock();

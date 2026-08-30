@@ -901,8 +901,16 @@ typedef struct SrPpuAuthenticCameraRequest {
 #define SR_PPU_SCANOUT_LINE_AFTER_HDMA UINT32_C(0x00000002)
 #define SR_PPU_SCANOUT_HDMA_ACTIVE UINT32_C(0x00000001)
 #define SR_PPU_SCANOUT_HDMA_INDIRECT UINT32_C(0x00000002)
-/** Capture the completed logical main canvas for a later determinism query. */
+/** Capture the completed logical main canvas into the scanout result. */
 #define SR_PPU_SCANOUT_CAPTURE_PRESENTATION_DIGEST UINT32_C(0x00000001)
+#define SR_PPU_PRESENTATION_SHA256_SIZE 32u
+#define SR_PPU_PRESENTATION_SCHEMA_VERSION 1u
+
+typedef uint32_t SrPpuPresentationPixelFormat;
+enum {
+    /** Canonical byte stream is one little-endian 0x00RRGGBB word per pixel. */
+    SR_PPU_PRESENTATION_PIXEL_XRGB8888_LE = 1u
+};
 
 typedef struct SrPpuScanoutHdmaState {
     uint32_t flags;
@@ -954,17 +962,40 @@ typedef struct SrPpuScanoutRequest {
 #define SR_PPU_SCANOUT_AUTHENTIC_SURFACE_READY UINT32_C(0x00000001)
 #define SR_PPU_SCANOUT_AUTHENTIC_CAMERA_BG1 UINT32_C(0x00000002)
 #define SR_PPU_SCANOUT_AUTHENTIC_CAMERA_BG2 UINT32_C(0x00000004)
+#define SR_PPU_SCANOUT_PRESENTATION_DIGEST_VALID UINT32_C(0x00000008)
+
+/** Digest produced by the scanout transaction that returned it. It has no
+ * lifetime beyond the copied result and never refers to a cached prior frame. */
+typedef struct SrPpuPresentationDigest {
+    uint32_t struct_size;
+    uint32_t schema_version;
+    uint64_t frame_counter;
+    uint32_t width_pixels;
+    uint32_t height_pixels;
+    uint16_t margin_left_pixels;
+    uint16_t margin_right_pixels;
+    uint16_t margin_top_pixels;
+    uint16_t margin_bottom_pixels;
+    SrPpuPresentationPixelFormat pixel_format;
+    uint32_t reserved;
+    uint8_t sha256[SR_PPU_PRESENTATION_SHA256_SIZE];
+} SrPpuPresentationDigest;
+
+#define SR_PPU_PRESENTATION_DIGEST_V2_SIZE                              \
+    ((uint32_t)(offsetof(SrPpuPresentationDigest, sha256) +              \
+                sizeof(((SrPpuPresentationDigest *)0)->sha256)))
 
 typedef struct SrPpuScanoutResult {
     uint32_t struct_size;
     uint32_t flags;
     uint64_t lifetime_generation;
     SrPpuStateSnapshot final_state;
+    SrPpuPresentationDigest presentation;
 } SrPpuScanoutResult;
 
 #define SR_PPU_SCANOUT_RESULT_V2_SIZE                                    \
-    ((uint32_t)(offsetof(SrPpuScanoutResult, final_state) +               \
-                sizeof(((SrPpuScanoutResult *)0)->final_state)))
+    ((uint32_t)(offsetof(SrPpuScanoutResult, presentation) +              \
+                sizeof(((SrPpuScanoutResult *)0)->presentation)))
 
 typedef struct SrPpuMode7OverrideRequest {
     uint32_t struct_size;
