@@ -77,6 +77,44 @@ func TestExactDirectCallMXEmitsSingleCompiledVariant(t *testing.T) {
 	}
 }
 
+func TestExactDirectCallMXRefusesUnprovedSurvivor(t *testing.T) {
+	context := NewContext()
+	context.ExactDirectCallMX = true
+	context.CurrentSite = 0x008000
+	context.ValidVariants[0x008200] = map[[2]uint8]struct{}{{1, 1}: {}}
+	source, target := uint32(0x008000), uint32(0x008200)
+	_, err := EmitOperation(context, ir.Call{
+		Target: &target, EntryM: 0, EntryX: 0, SourcePC: &source,
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires $008200 M0X0") ||
+		!strings.Contains(err.Error(), "without a variant-equivalence proof") {
+		t.Fatalf("unproved exact-call route error = %v", err)
+	}
+}
+
+func TestRuntimeVariantDispatchGuardsUnprovedWidths(t *testing.T) {
+	context := NewContext()
+	context.ValidVariants[0x008200] = map[[2]uint8]struct{}{{1, 1}: {}}
+	guarded := strings.Join(VariantDispatchCases(
+		context, 0x008200, "bank_00_8200", "  ", ""), "\n")
+	if !strings.Contains(guarded,
+		"case 0: _r = sr_missing_mx_variant_warn(cpu, 0x008200u, 0, 0") ||
+		strings.Contains(guarded, "case 0: _r = bank_00_8200_M1X1") ||
+		strings.Contains(guarded, "nearest survivor") {
+		t.Fatalf("unproved runtime M/X route did not fail closed:\n%s", guarded)
+	}
+
+	context.ProvenEquivalent[0x008200] = map[[2]uint8]map[[2]uint8]struct{}{
+		{0, 0}: {{1, 1}: {}},
+	}
+	proved := strings.Join(VariantDispatchCases(
+		context, 0x008200, "bank_00_8200", "  ", ""), "\n")
+	if !strings.Contains(proved,
+		"case 0: _r = bank_00_8200_M1X1(cpu); break;  /* M0X0 -> proven-equivalent survivor M1X1 */") {
+		t.Fatalf("proved runtime M/X route was not retained:\n%s", proved)
+	}
+}
+
 func TestForcedDirectCallPreservesHardwareCallEnvelope(t *testing.T) {
 	context := NewContext()
 	context.CurrentName = "Caller_M0X0"

@@ -93,6 +93,11 @@ void cpu_trace_block(CpuState *cpu, uint32 pc24);
 RecompReturn sr_unresolved_indirect_jump(CpuState *cpu, uint32 site_pc24);
 RecompReturn sr_unresolved_stub_warn(CpuState *cpu, uint32 target_pc24,
                                      const char *function_name);
+/* Generated runtime-M/X switches use this guard when the exact live-width
+ * body was removed and no semantic equivalence to a survivor was proved. */
+RecompReturn sr_missing_mx_variant_warn(
+    CpuState *cpu, uint32 target_pc24, uint8 requested_m,
+    uint8 requested_x, const char *function_name);
 RecompReturn sr_unresolved_goto_warn(CpuState *cpu, uint32 source_pc24,
                                      uint32 target_pc24,
                                      const char *function_name,

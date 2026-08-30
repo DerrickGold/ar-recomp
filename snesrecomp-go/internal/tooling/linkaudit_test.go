@@ -96,6 +96,9 @@ RecompReturn Dispatch_M1X1(CpuState *cpu) {
 RecompReturn Indirect_M1X1(CpuState *cpu) {
   return cpu_trace_unresolved_indirect_jump(cpu, 0x008020);
 }
+RecompReturn Guard_M1X1(CpuState *cpu) {
+  return sr_missing_mx_variant_warn(cpu, 0x008040, 0, 0, "Guard_M0X0");
+}
 `)
 	writeTestFile(t, filepath.Join(genDir, "unresolved_stubs_v2.c"), `RecompReturn Target_M1X1(CpuState *cpu) {
   return cpu_trace_unresolved_stub_trap(cpu, 0x008030, "Target_M1X1");
@@ -106,6 +109,7 @@ RecompReturn Indirect_M1X1(CpuState *cpu) {
   Dispatch_M1X1(cpu);
   Indirect_M1X1(cpu);
   Target_M1X1(cpu);
+  Guard_M1X1(cpu);
 }
 `)
 	writeTestFile(t, filepath.Join(runtimeDir, "placeholder.c"), "/* runtime */\n")
@@ -113,13 +117,16 @@ RecompReturn Indirect_M1X1(CpuState *cpu) {
 	var output bytes.Buffer
 	err := RunLinkAudit(LinkAuditOptions{
 		GenDir: genDir, SourceDir: sourceDir, RuntimeDir: runtimeDir,
-		Output: &output,
+		Output: &output, Verbose: true,
 	})
 	if err == nil || err.Error() != "link audit found live traps" {
 		t.Fatalf("link audit error = %v, want live-trap failure", err)
 	}
 	for _, fragment := range []string{
 		"functions with traps : 4  (orphan/garbage: 0, LIVE/must-fix: 4)",
+		"functions with M/X safety guards: 1  (orphan: 0, reachable: 1)",
+		"--- reachable M/X safety-guard functions ---",
+		"  Guard_M1X1",
 		"Goto_M1X1: goto",
 		"Dispatch_M1X1: dispatch",
 		"Indirect_M1X1: indirect",

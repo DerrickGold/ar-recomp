@@ -16,7 +16,10 @@
 enum {
     kBlockRingMask = 1023,
     kGameFrameOffset = 0x88,
-    kDefaultChannels = 0x3fff & ~(SR_TRACE_CHANNEL_WRAM | SR_TRACE_CHANNEL_STACK),
+    /* Structured dispatch rows distinguish missing bodies from resumable
+     * continuations. Keep them in default traces so legacy dispmiss events
+     * are never the only evidence available to trace-inspect. */
+    kDefaultChannels = 0x7fff & ~(SR_TRACE_CHANNEL_WRAM | SR_TRACE_CHANNEL_STACK),
     kLineCapacity = 768,
     kDefaultRingLines = 4096,
     kMaximumDedupeKeys = 512,

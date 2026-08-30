@@ -97,6 +97,7 @@ func RunLinkAudit(options LinkAuditOptions) error {
 	}
 	defined, referenced := make(map[string]struct{}), make(map[string]struct{})
 	traps := make(map[string]map[string]struct{})
+	mxGuards := make(map[string]struct{})
 	tailCalls := make(map[linkTailCallKey]int)
 	for _, path := range generatedFiles {
 		current := ""
@@ -111,6 +112,9 @@ func RunLinkAudit(options LinkAuditOptions) error {
 			}
 			if match := linkTailRE.FindStringSubmatch(line); match != nil {
 				tailCalls[linkTailCallKey{Source: current, Target: match[1], TargetPC: strings.ToUpper(match[2])}]++
+			}
+			if strings.Contains(line, "sr_missing_mx_variant_warn") {
+				mxGuards[current] = struct{}{}
 			}
 			kind := ""
 			switch {
@@ -173,6 +177,14 @@ func RunLinkAudit(options LinkAuditOptions) error {
 			liveTraps[name] = struct{}{}
 		}
 	}
+	orphanGuards, liveGuards := make(map[string]struct{}), make(map[string]struct{})
+	for name := range mxGuards {
+		if _, orphan := orphans[name]; orphan {
+			orphanGuards[name] = struct{}{}
+		} else {
+			liveGuards[name] = struct{}{}
+		}
+	}
 	reachable := 0
 	for name := range defined {
 		if _, found := referenced[name]; found {
@@ -185,6 +197,7 @@ func RunLinkAudit(options LinkAuditOptions) error {
 	fmt.Fprintf(options.Output, "  ORPHANS (dead carves): %d\n", len(orphans))
 	fmt.Fprintf(options.Output, "  unreferenced variants: %d\n", len(unreferenced))
 	fmt.Fprintf(options.Output, "  functions with traps : %d  (orphan/garbage: %d, LIVE/must-fix: %d)\n", len(traps), len(orphanTraps), len(liveTraps))
+	fmt.Fprintf(options.Output, "  functions with M/X safety guards: %d  (orphan: %d, reachable: %d)\n", len(mxGuards), len(orphanGuards), len(liveGuards))
 	tailCallSites, tailCallSuspects := 0, 0
 	for _, count := range tailCalls {
 		tailCallSites += count
@@ -229,6 +242,19 @@ func RunLinkAudit(options LinkAuditOptions) error {
 	}
 	printTraps("LIVE trap functions (reachable → must resolve)", liveTraps)
 	printTraps("orphan trap functions (unreachable → safe to suppress decode)", orphanTraps)
+	if options.Verbose {
+		printNames := func(title string, names map[string]struct{}) {
+			if len(names) == 0 {
+				return
+			}
+			fmt.Fprintf(options.Output, "\n--- %s ---\n", title)
+			for _, name := range sortedStringSet(names) {
+				fmt.Fprintf(options.Output, "  %s\n", name)
+			}
+		}
+		printNames("reachable M/X safety-guard functions", liveGuards)
+		printNames("orphan M/X safety-guard functions", orphanGuards)
+	}
 	if options.ListOrphans {
 		fmt.Fprintf(options.Output, "\n--- all %d orphan functions ---\n", len(orphans))
 		for _, name := range sortedStringSet(orphans) {

@@ -12,7 +12,6 @@ type Context struct {
 	ROMSize           int
 	Names             map[uint32]string
 	ValidVariants     map[uint32]map[[2]uint8]struct{}
-	CanonicalVariants map[uint32]map[[2]uint8]struct{}
 	ProvenEquivalent  map[uint32]map[[2]uint8]map[[2]uint8]struct{}
 	ForceVariantAt    map[uint32][2]uint8
 	CurrentName       string
@@ -31,13 +30,12 @@ type Variant struct {
 
 func NewContext() *Context {
 	return &Context{
-		Names:             make(map[uint32]string),
-		ValidVariants:     make(map[uint32]map[[2]uint8]struct{}),
-		CanonicalVariants: make(map[uint32]map[[2]uint8]struct{}),
-		ProvenEquivalent:  make(map[uint32]map[[2]uint8]map[[2]uint8]struct{}),
-		ForceVariantAt:    make(map[uint32][2]uint8),
-		Demands:           make(map[Variant]struct{}),
-		Rejected:          make(map[uint32]struct{}),
+		Names:            make(map[uint32]string),
+		ValidVariants:    make(map[uint32]map[[2]uint8]struct{}),
+		ProvenEquivalent: make(map[uint32]map[[2]uint8]map[[2]uint8]struct{}),
+		ForceVariantAt:   make(map[uint32][2]uint8),
+		Demands:          make(map[Variant]struct{}),
+		Rejected:         make(map[uint32]struct{}),
 	}
 }
 
@@ -67,52 +65,29 @@ func (context *Context) variantsAt(address uint32) [][2]uint8 {
 	return result
 }
 
-func nearestVariant(variants [][2]uint8, m, x uint8) [2]uint8 {
-	best, bestCost := [2]uint8{}, 99
-	for _, pair := range variants {
-		cost := 0
-		if pair[0] != m&1 {
-			cost += 2
-		}
-		if pair[1] != x&1 {
-			cost++
-		}
-		if cost < bestCost {
-			best, bestCost = pair, cost
+func (context *Context) provenVariantRoute(address uint32, survivors [][2]uint8, m, x uint8) ([2]uint8, bool) {
+	requested := [2]uint8{m & 1, x & 1}
+	address &= 0xffffff
+	byVariant := context.ProvenEquivalent[address]
+	if byVariant == nil {
+		bank := byte(address >> 16)
+		if bank < 0x40 || (bank >= 0x80 && bank < 0xc0) {
+			byVariant = context.ProvenEquivalent[address^0x800000]
 		}
 	}
-	return best
-}
-
-func (context *Context) routeVariant(address uint32, survivors [][2]uint8, m, x uint8) [2]uint8 {
-	requested := [2]uint8{m & 1, x & 1}
-	if byVariant := context.ProvenEquivalent[address&0xffffff]; byVariant != nil {
+	if byVariant != nil {
 		for _, candidate := range allVariants {
 			if _, proven := byVariant[requested][candidate]; !proven {
 				continue
 			}
 			for _, survivor := range survivors {
 				if candidate == survivor {
-					return candidate
+					return candidate, true
 				}
 			}
 		}
 	}
-	canonical := context.CanonicalVariants[address&0xffffff]
-	if len(canonical) == 0 {
-		canonical = map[[2]uint8]struct{}{{1, 1}: {}}
-	}
-	for _, candidate := range allVariants {
-		if _, isCanonical := canonical[candidate]; !isCanonical {
-			continue
-		}
-		for _, survivor := range survivors {
-			if candidate == survivor {
-				return candidate
-			}
-		}
-	}
-	return nearestVariant(survivors, m, x)
+	return [2]uint8{}, false
 }
 
 // VariantDispatchCases emits the shared runtime-(M,X) switch policy used by
@@ -129,13 +104,21 @@ func VariantDispatchCases(context *Context, address uint32, baseName, indent, pr
 		target := pair
 		comment := ""
 		if _, found := valid[pair]; !found {
-			target = context.routeVariant(address, survivors, pair[0], pair[1])
-			comment = fmt.Sprintf("  /* M%dX%d pruned -> nearest survivor M%dX%d */", pair[0], pair[1], target[0], target[1])
+			var proven bool
+			target, proven = context.provenVariantRoute(address, survivors, pair[0], pair[1])
+			if !proven {
+				lines = append(lines, fmt.Sprintf(
+					"%scase %d: %s_r = sr_missing_mx_variant_warn(cpu, 0x%06xu, %d, %d, \"%s_M%dX%d\"); break;  /* missing exact M/X safety guard */",
+					indent, index, preCall, address&0xffffff, pair[0], pair[1], baseName, pair[0], pair[1]))
+				continue
+			}
+			comment = fmt.Sprintf("  /* M%dX%d -> proven-equivalent survivor M%dX%d */", pair[0], pair[1], target[0], target[1])
 		}
 		lines = append(lines, fmt.Sprintf("%scase %d: %s_r = %s_M%dX%d(cpu); break;%s", indent, index, preCall, baseName, target[0], target[1], comment))
 	}
-	def := nearestVariant(survivors, 0, 0)
-	return append(lines, fmt.Sprintf("%sdefault: %s_r = %s_M%dX%d(cpu); break;", indent, preCall, baseName, def[0], def[1]))
+	return append(lines, fmt.Sprintf(
+		"%sdefault: %s_r = sr_missing_mx_variant_warn(cpu, 0x%06xu, cpu->m_flag, cpu->x_flag, \"%s_invalid_MX\"); break;  /* unreachable live M/X guard */",
+		indent, preCall, address&0xffffff, baseName))
 }
 
 func EmitOperation(context *Context, operation ir.Op) ([]string, error) {
@@ -245,7 +228,7 @@ func EmitOperation(context *Context, operation ir.Op) ([]string, error) {
 		}
 		return []string{fmt.Sprintf("/* IndirectGoto: target = (%s, %s) — caller dispatches */", bank, address)}, nil
 	case ir.Call:
-		return emitCall(context, op), nil
+		return emitCall(context, op)
 	case ir.Return:
 		return emitReturn(context, op), nil
 	case ir.Nop:

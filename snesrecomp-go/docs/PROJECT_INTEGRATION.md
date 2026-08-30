@@ -58,11 +58,8 @@ build/v2regen regen \
   --rom game.sfc \
   --cfg-dir recomp \
   --out-dir src/gen \
+  --funcs-out recomp/funcs.h \
   --jobs 8
-
-build/v2regen sync-funcs \
-  --cfg-dir recomp \
-  --out recomp/funcs.h
 
 build/v2regen stub-census --gen-dir src/gen
 ```
@@ -70,7 +67,13 @@ build/v2regen stub-census --gen-dir src/gen
 `regen` writes bank translation units, `dispatch_v2.c`, and
 `unresolved_stubs_v2.c`. It converges cross-bank discovery and variant routing
 before replacing output, preserves deterministic source order across workers,
-and removes stale bank parts when the translation-unit split changes.
+and removes stale bank parts when the translation-unit split changes. Direct
+`v2regen regen` keeps header output opt-in; pass `--funcs-out` as above to emit
+the matching declaration header in the same command. When omitted, it prints
+the exact `sync-funcs` next step rather than leaving the later missing-header
+failure unexplained. The higher-level `snesbuild regen` always synchronizes the
+header.
+
 `stub-census` covers unresolved gotos, dispatch bounds, unresolved indirect
 jumps, inline invalid-target traps, and target bodies in
 `unresolved_stubs_v2.c`; it collapses M/X variants to logical sites/targets.
@@ -78,7 +81,11 @@ jumps, inline invalid-target traps, and target bodies in
 references and reports trap-containing functions as live or orphan. Its trap
 classification covers unresolved gotos, computed indirect jumps, dispatch
 bounds, and unresolved target stubs. Function counts can exceed the logical
-site count when multiple reachable M/X variants contain the same trap.
+site count when multiple reachable M/X variants contain the same trap. Missing
+exact-M/X guards are reported on a separate line: they are fail-closed width
+safety checks, not additional unresolved-control-flow sites. A reachable guard
+still requires replay coverage, and `[missing-mx-variant]` belongs in every
+release replay manifest's hard-diagnostic list.
 
 Use strict `regen` and `stub-census` in CI. During initial bring-up,
 `regen --allow-stubs` writes all output while reporting unresolved control flow;

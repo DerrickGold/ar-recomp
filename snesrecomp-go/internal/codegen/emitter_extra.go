@@ -138,19 +138,19 @@ func emitTransfer(op ir.Transfer) []string {
 	return append(lines, "}", "cpu->P = (uint8)((cpu->P & ~0x82) | (cpu->_flag_Z ? 0x02 : 0) | (cpu->_flag_N ? 0x80 : 0));")
 }
 
-func emitCall(context *Context, op ir.Call) []string {
+func emitCall(context *Context, op ir.Call) ([]string, error) {
 	if op.Indirect {
 		if op.SourcePC != nil && op.TableBase != nil {
 			bank := byte(*op.SourcePC >> 16)
 			return []string{
 				fmt.Sprintf("  sr_indirect_suppressed_log(cpu, 0x%06xu, 0x%02xu, 0x%04xu, cpu->X);", *op.SourcePC&0xffffff, bank, *op.TableBase),
 				fmt.Sprintf("/* Call indirect SUPPRESSED: JSR ($%04X,X) at $%06X — cfg-required-dispatch-or-kill, no indirect_call_table authorisation */", *op.TableBase, *op.SourcePC&0xffffff),
-			}
+			}, nil
 		}
-		return []string{"/* Call indirect SUPPRESSED — caller dispatches */"}
+		return []string{"/* Call indirect SUPPRESSED — caller dispatches */"}, nil
 	}
 	if op.Target == nil {
-		return []string{"/* Call: target unknown — caller dispatches */"}
+		return []string{"/* Call: target unknown — caller dispatches */"}, nil
 	}
 	address := *op.Target & 0xffffff
 	if invalidLoROMTarget(context, address) {
@@ -159,7 +159,7 @@ func emitCall(context *Context, op ir.Call) []string {
 			uint16(address))
 		return []string{fmt.Sprintf(
 			"(void)cpu_trace_unresolved_stub_trap(cpu, 0x%06x, \"%s\"); /* direct call target is outside the static LoROM code domain */",
-			address, name)}
+			address, name)}, nil
 	}
 	baseName := context.Names[address]
 	if baseName == "" {
@@ -181,7 +181,13 @@ func emitCall(context *Context, op ir.Call) []string {
 			}
 		}
 		if !found {
-			target = context.routeVariant(address, survivors, requested[0], requested[1])
+			var proven bool
+			target, proven = context.provenVariantRoute(address, survivors, requested[0], requested[1])
+			if !proven {
+				return nil, fmt.Errorf(
+					"exact direct call at $%06X requires $%06X M%dX%d, but that body was pruned without a variant-equivalence proof",
+					context.CurrentSite&0xffffff, address, requested[0], requested[1])
+			}
 		}
 		context.Demands[Variant{address, target[0], target[1]}] = struct{}{}
 	} else {
@@ -213,7 +219,13 @@ func emitCall(context *Context, op ir.Call) []string {
 			}
 		}
 		if !found {
-			target = context.routeVariant(address, survivors, target[0], target[1])
+			var proven bool
+			target, proven = context.provenVariantRoute(address, survivors, target[0], target[1])
+			if !proven {
+				return nil, fmt.Errorf(
+					"exact direct call at $%06X requires $%06X M%dX%d, but that body was pruned without a variant-equivalence proof",
+					context.CurrentSite&0xffffff, address, op.EntryM&1, op.EntryX&1)
+			}
 		}
 		lines = append(lines, fmt.Sprintf("  RecompReturn _r = %s_M%dX%d(cpu);  /* exact live M/X direct call */", baseName, target[0], target[1]))
 	} else {
@@ -224,7 +236,7 @@ func emitCall(context *Context, op ir.Call) []string {
 	if op.Long {
 		lines = append(lines, "  cpu_trace_pb_change(cpu, 0, cpu->PB, _saved_pb, CPU_TR_RTL);", "  cpu->PB = _saved_pb;")
 	}
-	return append(lines, "  if (_r != RECOMP_RETURN_NORMAL) {", "    cpu_trace_event(cpu, 0, CPU_TR_NLR_PROPAGATE, (uint8)_r, 0);", "    cpu_trace_mark_nlr_exit(BD_EXIT_KIND_SKIP_PROPAGATION);", "    return (_r == RECOMP_RETURN_TAILCALL ? _r : (RecompReturn)((int)_r - 1));", "  }", "  cpu->S = _call_s;  /* stack-neutrality restore (see _call_s above) */", "}")
+	return append(lines, "  if (_r != RECOMP_RETURN_NORMAL) {", "    cpu_trace_event(cpu, 0, CPU_TR_NLR_PROPAGATE, (uint8)_r, 0);", "    cpu_trace_mark_nlr_exit(BD_EXIT_KIND_SKIP_PROPAGATION);", "    return (_r == RECOMP_RETURN_TAILCALL ? _r : (RecompReturn)((int)_r - 1));", "  }", "  cpu->S = _call_s;  /* stack-neutrality restore (see _call_s above) */", "}"), nil
 }
 
 func invalidLoROMTarget(context *Context, address uint32) bool {

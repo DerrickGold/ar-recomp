@@ -93,7 +93,15 @@ static void test_xtrace_and_warnings(void) {
                                   "source", "target") ==
               RECOMP_RETURN_NORMAL,
           "unresolved goto remains a soft diagnostic");
-    check(sr_diagnostic_trap_warning_count() == 3u,
+    check(sr_missing_mx_variant_warn(
+              &cpu, 0x018500u, 0u, 0u, "missing_M0X0") ==
+              RECOMP_RETURN_NORMAL,
+          "missing exact M/X remains a fail-closed soft diagnostic");
+    check(sr_missing_mx_variant_warn(
+              &cpu, 0x018500u, 0u, 0u, "missing_M0X0") ==
+              RECOMP_RETURN_NORMAL,
+          "repeated missing exact M/X remains soft");
+    check(sr_diagnostic_trap_warning_count() == 4u,
           "unresolved diagnostics deduplicate sites and targets");
     sr_garbage_variant_trap(&cpu, "bad-variant", 0x018123u);
     sr_diagnostic_reset();

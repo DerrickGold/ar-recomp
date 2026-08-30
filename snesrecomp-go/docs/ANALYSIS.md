@@ -443,6 +443,18 @@ precedence. This is currently gated with the analysis overlay so it can be
 validated on additional games before becoming the normal production policy;
 the default regeneration path remains unchanged.
 
+An exact static demand is also a prune root. Emit-truth may remove another
+decode only when the variant-equivalence proof shows that the surviving body
+has identical entry semantics. A canonical or nearby survivor is not such a
+proof. Exact direct calls make generation fail with the caller PC, target, and
+required M/X when this invariant is violated. Runtime-M/X dispatches retain
+their compiled cases, but an absent unproved state calls
+`sr_missing_mx_variant_warn` instead of executing a different-width decode.
+The diagnostic is a safety guard: it prevents silent corruption but remains
+coverage debt until representative runs establish that the state is cold or
+analysis supplies the exact/equivalent body. Include `[missing-mx-variant]` in
+replay hard-diagnostic lists.
+
 The mode also performs a fail-closed root-suppression check for the narrow
 static routine facts described above. Selected entries remain in their
 original configuration order as dormant slots, but are excluded from initial
@@ -604,6 +616,13 @@ SNESRECOMP_TRACE_CHANNELS=dispatch \
 ./build/MyGame game.sfc --frames 2400
 ```
 
+Structured `dispatch` records are included in the default channel mask. An
+explicit `SNESRECOMP_TRACE_CHANNELS` list can still omit them; in that case
+`trace-inspect --diagnose` warns that legacy `dispmiss` rows cannot reliably
+distinguish missing bodies from resumable continuations. Recapture with
+`dispatch` enabled before treating a zero or nonzero dispatch finding count as
+complete.
+
 Use a normal dispatch trace build for this workflow; do not define
 `SNESRECOMP_SEMANTIC_DISPATCH_TRACE`. Semantic tracing deliberately normalizes
 compiled switches and registry lookups for A/B edge hashes, while the census
@@ -657,6 +676,30 @@ census remains visibly incomplete.
 Relative `--trace`, `--rom`, and `--out-analysis` paths are resolved from
 `--root`, not from the shell's working directory. Use absolute paths when the
 trace or evidence directory is outside the game project.
+
+## Unified trace inspection
+
+`trace-inspect --diagnose` applies the same continuation contract before it
+suggests entry roots. Structured `dispatch` records with
+`continuation=1,trapped=0` are counted separately and never become
+`missing_dispatch_target` findings. Trace builds also emit an older
+`dispmiss` row for each failed registry lookup while structured rows are
+sampled at milestones. When a structured continuation classifies the same
+source, target, and M/X identity—and no structured actionable miss contradicts
+it—the matching legacy rows are suppressed as duplicate unwind evidence.
+Standalone or contradicted `dispmiss` records remain actionable.
+
+The runtime `hits` field is cumulative. Diagnostics use its maximum/terminal
+value per `(source, target, M, X)` identity rather than summing milestone
+snapshots. Legacy rows without a cumulative counter are counted as rows. The
+source PC remains part of the identity so distinct dispatch sites selecting
+the same target are not merged into one misleading finding.
+
+Trace-inspection report schema v3 exposes capture-quality notices in
+`warnings`. Text output prints them beside the summary. `truncated_events`
+counts only raw events selected for display; summary/diagnose-only reports no
+longer claim that hidden source events were omitted from an empty findings
+list.
 
 The text report identifies missing generated bodies and prints candidate `func`
 lines with the observed entry M/X. Those lines remain suggestions: before
