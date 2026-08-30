@@ -13,11 +13,20 @@
 #      F2/F9/exit dumps — so parallel analysis of older runs never gets
 #      clobbered. Play/repro, then quit (or F9).
 #   4. Post-run: for every anom_*.jsonl in the run dir (and its dispatch log),
-#      run trace_slice --diagnose + resolve_miss dry-run -> <run>/cycle_report.txt
-#      ending with a PROPOSED CFG PATCH (apply via resolve_miss --apply, review
-#      with git diff, then re-run cycle.sh).
+#      run the Go trace inspector in read-only diagnostic mode and write
+#      <run>/cycle_report.txt. Candidate cfg lines remain review-only.
 set -u
 cd "$(dirname "$0")/.."
+
+run_snesbuild() {
+  if command -v snesbuild >/dev/null 2>&1; then
+    snesbuild "$@"
+  elif [ -x snesrecomp-go/build/snesbuild ]; then
+    snesrecomp-go/build/snesbuild "$@"
+  else
+    go -C snesrecomp-go run ./cmd/snesbuild "$@"
+  fi
+}
 
 RUN=1; BUILD=1
 for a in "$@"; do
@@ -66,16 +75,15 @@ DISPLOG=$(ls "$RUN_DIR"/dump_*dispatch_log.json 2>/dev/null | head -1)
   else
     for f in $ANOMS; do
       echo; echo "--- $f ---"
-      python3 tools/trace_slice.py "$f" --diagnose 2>&1
+      run_snesbuild trace-inspect "$f" --root . --diagnose --rom ar.sfc 2>&1
     done
   fi
-  if [ -n "$ANOMS" ] || [ -n "$DISPLOG" ]; then
-    echo; echo "--- resolve_miss (dry run) ---"
-    # shellcheck disable=SC2086
-    python3 tools/resolve_miss.py $ANOMS $DISPLOG 2>&1
+  if [ -n "$DISPLOG" ]; then
+    echo; echo "--- legacy dispatch log ---"
+    run_snesbuild trace-inspect "$DISPLOG" --root . --diagnose --rom ar.sfc 2>&1
   fi
 } | tee "$REPORT"
 
 echo
 echo "[cycle] report -> $REPORT"
-echo "[cycle] to apply SAFE lines:  python3 tools/resolve_miss.py <files> --apply && tools/cycle.sh"
+echo "[cycle] candidate cfg lines are read-only evidence; review before editing authored config"

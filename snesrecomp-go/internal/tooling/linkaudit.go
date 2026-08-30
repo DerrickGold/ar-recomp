@@ -15,6 +15,8 @@ import (
 type LinkAuditOptions struct {
 	GenDir, SourceDir, RuntimeDir string
 	ListOrphans, Verbose          bool
+	ListTailCalls                 bool
+	TailCallMinimum               int
 	Output                        io.Writer
 }
 
@@ -25,7 +27,12 @@ var (
 	linkTokenRE   = regexp.MustCompile(`\b(` + linkNameRE + `)\b`)
 	linkProtoRE   = regexp.MustCompile(`^RecompReturn ` + linkNameRE + `\(CpuState \*cpu\);\s*$`)
 	linkVariantRE = regexp.MustCompile(`_M([01])X([01])$`)
+	linkTailRE    = regexp.MustCompile(`tail-call past end: into (` + linkNameRE + `) at \$([0-9A-Fa-f]+)`)
 )
+
+type linkTailCallKey struct {
+	Source, Target, TargetPC string
+}
 
 func scanLinkFile(path string, visit func(string)) error {
 	input, err := os.Open(path)
@@ -70,6 +77,9 @@ func RunLinkAudit(options LinkAuditOptions) error {
 	if options.Output == nil {
 		options.Output = os.Stdout
 	}
+	if options.TailCallMinimum <= 0 {
+		options.TailCallMinimum = 2
+	}
 	bankFiles, err := filepath.Glob(filepath.Join(options.GenDir, "bank*_v2.c"))
 	if err != nil {
 		return err
@@ -80,6 +90,7 @@ func RunLinkAudit(options LinkAuditOptions) error {
 	sort.Strings(bankFiles)
 	defined, referenced := make(map[string]struct{}), make(map[string]struct{})
 	traps := make(map[string]map[string]struct{})
+	tailCalls := make(map[linkTailCallKey]int)
 	for _, path := range bankFiles {
 		current := ""
 		if err := scanLinkFile(path, func(line string) {
@@ -90,6 +101,9 @@ func RunLinkAudit(options LinkAuditOptions) error {
 			}
 			if current == "" {
 				return
+			}
+			if match := linkTailRE.FindStringSubmatch(line); match != nil {
+				tailCalls[linkTailCallKey{Source: current, Target: match[1], TargetPC: strings.ToUpper(match[2])}]++
 			}
 			kind := ""
 			if strings.Contains(line, "cpu_trace_unresolved_goto_trap") {
@@ -159,6 +173,39 @@ func RunLinkAudit(options LinkAuditOptions) error {
 	fmt.Fprintf(options.Output, "  ORPHANS (dead carves): %d\n", len(orphans))
 	fmt.Fprintf(options.Output, "  unreferenced variants: %d\n", len(unreferenced))
 	fmt.Fprintf(options.Output, "  functions with traps : %d  (orphan/garbage: %d, LIVE/must-fix: %d)\n", len(traps), len(orphanTraps), len(liveTraps))
+	tailCallSites, tailCallSuspects := 0, 0
+	for _, count := range tailCalls {
+		tailCallSites += count
+		if count >= options.TailCallMinimum {
+			tailCallSuspects++
+		}
+	}
+	fmt.Fprintf(options.Output, "  tail-call-past-end : %d site(s), %d repeated source/target suspect(s)\n", tailCallSites, tailCallSuspects)
+	if options.ListTailCalls && len(tailCalls) > 0 {
+		type row struct {
+			key   linkTailCallKey
+			count int
+		}
+		var rows []row
+		for key, count := range tailCalls {
+			if count >= options.TailCallMinimum {
+				rows = append(rows, row{key, count})
+			}
+		}
+		sort.Slice(rows, func(i, j int) bool {
+			if rows[i].count != rows[j].count {
+				return rows[i].count > rows[j].count
+			}
+			if rows[i].key.Source != rows[j].key.Source {
+				return rows[i].key.Source < rows[j].key.Source
+			}
+			return rows[i].key.Target < rows[j].key.Target
+		})
+		fmt.Fprintf(options.Output, "\n--- repeated tail-call-past-end source/target pairs (>= %d) ---\n", options.TailCallMinimum)
+		for _, row := range rows {
+			fmt.Fprintf(options.Output, "  %3dx  %s -> %s ($%s)\n", row.count, row.key.Source, row.key.Target, row.key.TargetPC)
+		}
+	}
 	printTraps := func(title string, names map[string]struct{}) {
 		if len(names) == 0 {
 			return

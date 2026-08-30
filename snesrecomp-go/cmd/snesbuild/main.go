@@ -43,8 +43,34 @@ func run(args []string) error {
 		return runAnalyze(args[1:])
 	case "xref":
 		return runXref(args[1:])
+	case "disasm":
+		return runDisasm(args[1:])
+	case "rom-info":
+		return runROMInfo(args[1:])
+	case "spc-disasm":
+		return runSPCDisasm(args[1:])
+	case "quintet-lzss":
+		return runQuintetLZSS(args[1:])
+	case "poll-census":
+		return runPollCensus(args[1:])
+	case "rts-webs":
+		return runRTSWebs(args[1:])
+	case "link-audit":
+		return runLinkAudit(args[1:])
 	case "dispatch-census":
 		return runDispatchCensus(args[1:])
+	case "trace-inspect":
+		return runTraceInspect(args[1:])
+	case "trace-diff":
+		return runTraceDiff(args[1:])
+	case "replay-bench":
+		return runReplayBench(args[1:])
+	case "wram":
+		return tooling.RunWRAMCommand(args[1:], ".", os.Stdout)
+	case "mx-diff":
+		return tooling.RunMXDiffCommand(args[1:], ".", os.Stdout)
+	case "chr-render":
+		return tooling.RunCHRRenderCommand(args[1:], ".", os.Stdout)
 	case "configure":
 		return runConfigure(args[1:])
 	case "build":
@@ -82,8 +108,24 @@ Commands:
   regen       Regenerate C and all generated sidecars
   analyze     Compare inferred control-flow facts with authored cfg (read-only)
   xref        Find decoded instruction references to an address (read-only)
+  disasm      Disassemble ROM code with live M/X tracking (read-only)
+  rom-info    Report cartridge identity, header, and vectors (read-only)
+  spc-disasm  Disassemble an SPC700 payload or ROM upload block (read-only)
+  quintet-lzss
+              Decode a bit-packed Quintet LZSS blob
+  poll-census Classify decoded hardware-status read and polling sites
+  rts-webs    Census pushed and stack-captured continuation patterns
+  link-audit  Audit generated reachability, traps, and tail-call suspects
   dispatch-census
               Summarize observed runtime targets without editing authored cfg
+  trace-inspect
+              Slice, summarize, and diagnose unified runtime traces
+  trace-diff  Compare reference and recompiled WRAM traces (read-only)
+  replay-bench
+              Run deterministic manifest-defined replay benchmarks and A/B gates
+  wram        Inspect, compare, and scan WRAM snapshots (read-only)
+  mx-diff     Compare game-frame M/X traces (read-only)
+  chr-render  Render SNES 4bpp ROM, VRAM, and icon sheets
   configure   Configure the native game build with CMake
   build       Configure (by default) and compile the native game
               (--hermetic compiles with the pinned Zig toolchain, no CMake)
@@ -307,9 +349,16 @@ func runXref(args []string) error {
 	cfgDir := flags.String("cfg-dir", "recomp", "bank config directory, relative to project root")
 	jobs := flags.Int("jobs", runtime.NumCPU(), "parallel decode workers")
 	bankValue := flags.String("bank", "", "optional hexadecimal source bank")
+	kind := flags.String("kind", "all", "access filter: all, read, write, read-write, control, branch, or pointer-read")
+	wramMirrors := flags.Bool("wram-mirrors", false, "for a 16-bit query, include long bank $00/$7E/$7F WRAM mirrors")
+	rawWords := flags.Bool("data-words", false, "also scan raw ROM words as explicitly unowned evidence")
+	targetMinusOne := flags.Bool("target-minus-one", false, "with --data-words, also match target-1 continuation tables")
 	format := flags.String("format", "text", "report format: text or json")
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if *targetMinusOne && !*rawWords {
+		return errors.New("xref --target-minus-one requires --data-words")
 	}
 	if address == "" && flags.NArg() == 1 {
 		address = flags.Arg(0)
@@ -340,12 +389,340 @@ func runXref(args []string) error {
 	}
 	report, err := tooling.BuildXref(tooling.XrefOptions{
 		ROMPath: resolved.ROM, CFGDir: resolved.ConfigDir, Jobs: *jobs,
-		OnlyBank: onlyBank, Query: query,
+		OnlyBank: onlyBank, Query: query, AccessFilter: *kind, IncludeWRAMMirrors: *wramMirrors,
+		IncludeRawWords: *rawWords, IncludeTargetMinusOne: *targetMinusOne,
 	})
 	if err != nil {
 		return err
 	}
 	return tooling.WriteXrefReport(os.Stdout, report, *format)
+}
+
+func runDisasm(args []string) error {
+	address := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		address, args = args[0], args[1:]
+	}
+	flags := flag.NewFlagSet("disasm", flag.ContinueOnError)
+	root := flags.String("root", ".", "game project root")
+	romPath := flags.String("rom", "game.sfc", "ROM path, relative to project root")
+	metadataPath := flags.String("metadata", "saves/gen_meta.json", "optional metadata path, relative to project root")
+	mx := flags.String("mx", "0,0", "entry widths as m,x")
+	count := flags.Int("count", 24, "maximum instruction count")
+	flags.IntVar(count, "n", 24, "maximum instruction count")
+	untilFlow := flags.Bool("until-flow", false, "stop after a return or unconditional transfer")
+	raw := flags.Bool("raw", false, "show instruction bytes in text output")
+	format := flags.String("format", "text", "report format: text or json")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if address == "" && flags.NArg() == 1 {
+		address = flags.Arg(0)
+	} else if flags.NArg() != 0 {
+		return errors.New("disasm needs exactly one BB:AAAA address")
+	}
+	if strings.TrimSpace(address) == "" {
+		return errors.New("disasm needs an address such as $01:9C6F")
+	}
+	startPC, err := tooling.ParseProgramAddress(address)
+	if err != nil {
+		return err
+	}
+	parts := strings.Split(*mx, ",")
+	if len(parts) != 2 {
+		return fmt.Errorf("parse --mx %q (want m,x with each value 0 or 1)", *mx)
+	}
+	parseWidth := func(name, value string) (uint8, error) {
+		parsed, parseErr := strconv.ParseUint(strings.TrimSpace(value), 10, 1)
+		if parseErr != nil {
+			return 0, fmt.Errorf("parse --mx %s=%q (want 0 or 1)", name, value)
+		}
+		return uint8(parsed), nil
+	}
+	m, err := parseWidth("m", parts[0])
+	if err != nil {
+		return err
+	}
+	x, err := parseWidth("x", parts[1])
+	if err != nil {
+		return err
+	}
+	absoluteRoot, err := filepath.Abs(*root)
+	if err != nil {
+		return fmt.Errorf("resolve project root: %w", err)
+	}
+	report, err := tooling.BuildDisassembly(tooling.DisassemblyOptions{
+		ROMPath: resolveProjectOptional(absoluteRoot, *romPath), MetadataPath: resolveProjectOptional(absoluteRoot, *metadataPath),
+		StartPC: startPC, EntryM: m, EntryX: x, Count: *count, UntilFlow: *untilFlow,
+	})
+	if err != nil {
+		return err
+	}
+	return tooling.WriteDisassemblyReport(os.Stdout, report, *format, *raw)
+}
+
+func runROMInfo(args []string) error {
+	flags := flag.NewFlagSet("rom-info", flag.ContinueOnError)
+	root := flags.String("root", ".", "game project root")
+	romPath := flags.String("rom", "game.sfc", "ROM path, relative to project root")
+	format := flags.String("format", "text", "report format: text or json")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() > 1 {
+		return errors.New("rom-info accepts at most one positional ROM path")
+	}
+	if flags.NArg() == 1 {
+		*romPath = flags.Arg(0)
+	}
+	absoluteRoot, err := filepath.Abs(*root)
+	if err != nil {
+		return fmt.Errorf("resolve project root: %w", err)
+	}
+	report, err := tooling.BuildROMInfo(tooling.ROMInfoOptions{ROMPath: resolveProjectOptional(absoluteRoot, *romPath)})
+	if err != nil {
+		return err
+	}
+	return tooling.WriteROMInfo(os.Stdout, report, *format)
+}
+
+func runSPCDisasm(args []string) error {
+	if len(args) < 2 || strings.HasPrefix(args[0], "-") || strings.HasPrefix(args[1], "-") {
+		return errors.New("spc-disasm needs start and end ARAM addresses before its options")
+	}
+	startText, endText := args[0], args[1]
+	args = args[2:]
+	flags := flag.NewFlagSet("spc-disasm", flag.ContinueOnError)
+	root := flags.String("root", ".", "game project root")
+	inputPath := flags.String("input", "game.sfc", "ROM or raw payload path, relative to project root")
+	uploadOffsetValue := flags.String("upload-block", "", "optional file offset of [length16][ARAM target16][payload]")
+	fileOffsetValue := flags.String("file-offset", "0", "raw payload file offset when --upload-block is absent")
+	loadAddressValue := flags.String("load-address", "0", "raw payload ARAM load address when --upload-block is absent")
+	findReferenceValue := flags.String("find-ref", "", "only instructions with this literal DP/absolute operand")
+	format := flags.String("format", "text", "report format: text or json")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	start, err := tooling.ParseSPCAddress(startText)
+	if err != nil {
+		return err
+	}
+	end, err := tooling.ParseSPCAddress(endText)
+	if err != nil {
+		return err
+	}
+	parseOffset := func(name, text string) (int, error) {
+		value, parseErr := strconv.ParseInt(strings.TrimSpace(text), 0, 64)
+		if parseErr != nil || value < 0 || int64(int(value)) != value {
+			return 0, fmt.Errorf("parse %s %q as non-negative file offset", name, text)
+		}
+		return int(value), nil
+	}
+	fileOffset, err := parseOffset("--file-offset", *fileOffsetValue)
+	if err != nil {
+		return err
+	}
+	loadAddress, err := tooling.ParseSPCAddress(*loadAddressValue)
+	if err != nil {
+		return fmt.Errorf("parse --load-address: %w", err)
+	}
+	absoluteRoot, err := filepath.Abs(*root)
+	if err != nil {
+		return fmt.Errorf("resolve project root: %w", err)
+	}
+	options := tooling.SPCDisassemblyOptions{
+		InputPath: resolveProjectOptional(absoluteRoot, *inputPath), FileOffset: fileOffset, LoadAddress: loadAddress,
+		StartAddress: start, EndAddress: end,
+	}
+	if strings.TrimSpace(*uploadOffsetValue) != "" {
+		value, err := parseOffset("--upload-block", *uploadOffsetValue)
+		if err != nil {
+			return err
+		}
+		options.UploadBlockOffset = &value
+	}
+	if strings.TrimSpace(*findReferenceValue) != "" {
+		value, err := tooling.ParseSPCAddress(*findReferenceValue)
+		if err != nil {
+			return fmt.Errorf("parse --find-ref: %w", err)
+		}
+		options.FindReference = &value
+	}
+	report, err := tooling.BuildSPCDisassembly(options)
+	if err != nil {
+		return err
+	}
+	return tooling.WriteSPCDisassembly(os.Stdout, report, *format)
+}
+
+func runQuintetLZSS(args []string) error {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return errors.New("quintet-lzss needs a linear input offset before its options")
+	}
+	offsetText, args := args[0], args[1:]
+	flags := flag.NewFlagSet("quintet-lzss", flag.ContinueOnError)
+	root := flags.String("root", ".", "game project root")
+	inputPath := flags.String("input", "game.sfc", "ROM or compressed input path, relative to project root")
+	size := flags.Int("size", 0, "exact decompressed size (default: little-endian word at offset)")
+	outputPath := flags.String("out", "", "optional output path, relative to project root")
+	comparePath := flags.String("compare", "", "optional expected binary, relative to project root")
+	compareOffset := flags.Int("compare-offset", 0, "byte offset within --compare")
+	format := flags.String("format", "text", "report format: text or json")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	offset, err := strconv.ParseInt(strings.TrimSpace(offsetText), 0, 64)
+	if err != nil || offset < 0 || int64(int(offset)) != offset {
+		return fmt.Errorf("parse input offset %q as a non-negative integer", offsetText)
+	}
+	absoluteRoot, err := filepath.Abs(*root)
+	if err != nil {
+		return fmt.Errorf("resolve project root: %w", err)
+	}
+	headered := true
+	flags.Visit(func(item *flag.Flag) {
+		if item.Name == "size" {
+			headered = false
+		}
+	})
+	report, output, err := tooling.BuildQuintetLZSS(tooling.QuintetLZSSOptions{
+		InputPath: resolveProjectOptional(absoluteRoot, *inputPath), Offset: int(offset), Size: *size, Headered: headered,
+		ComparePath: resolveProjectOptional(absoluteRoot, *comparePath), CompareOffset: *compareOffset,
+	})
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(*outputPath) != "" {
+		resolved := resolveProjectOptional(absoluteRoot, *outputPath)
+		if err := os.WriteFile(resolved, output, 0o644); err != nil {
+			return fmt.Errorf("write decompressed output %s: %w", resolved, err)
+		}
+		report.NoWrite = false
+		fmt.Fprintf(os.Stderr, "quintet-lzss: wrote %d bytes to %s\n", len(output), resolved)
+	}
+	return tooling.WriteQuintetLZSSReport(os.Stdout, report, *format)
+}
+
+func runPollCensus(args []string) error {
+	flags := flag.NewFlagSet("poll-census", flag.ContinueOnError)
+	root := flags.String("root", ".", "game project root")
+	romPath := flags.String("rom", "game.sfc", "ROM path, relative to project root")
+	cfgDir := flags.String("cfg-dir", "recomp", "bank config directory, relative to project root")
+	jobs := flags.Int("jobs", runtime.NumCPU(), "parallel decode workers")
+	bankValue := flags.String("bank", "", "optional hexadecimal source bank")
+	registerValue := flags.String("registers", "4210,4212", "comma-separated hexadecimal hardware registers")
+	format := flags.String("format", "text", "report format: text or json")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	registers, err := parsePollRegisters(*registerValue)
+	if err != nil {
+		return err
+	}
+	paths := project.DefaultPaths(*root)
+	paths.ROM, paths.ConfigDir = *romPath, *cfgDir
+	resolved, err := paths.Resolve()
+	if err != nil {
+		return err
+	}
+	var onlyBank *byte
+	if strings.TrimSpace(*bankValue) != "" {
+		value, parseErr := strconv.ParseUint(strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(*bankValue), "0x"), "0X"), 16, 8)
+		if parseErr != nil {
+			return fmt.Errorf("parse --bank: %w", parseErr)
+		}
+		bank := byte(value)
+		onlyBank = &bank
+	}
+	report, err := tooling.BuildPollCensus(tooling.PollCensusOptions{
+		ROMPath: resolved.ROM, CFGDir: resolved.ConfigDir, Jobs: *jobs, OnlyBank: onlyBank, Registers: registers,
+	})
+	if err != nil {
+		return err
+	}
+	return tooling.WritePollCensus(os.Stdout, report, *format)
+}
+
+func runRTSWebs(args []string) error {
+	flags := flag.NewFlagSet("rts-webs", flag.ContinueOnError)
+	root := flags.String("root", ".", "game project root")
+	romPath := flags.String("rom", "game.sfc", "ROM path, relative to project root")
+	cfgDir := flags.String("cfg-dir", "recomp", "configuration directory, relative to project root")
+	bankValue := flags.String("bank", "", "optional hexadecimal bank")
+	suggest := flags.Bool("suggest", false, "print review-only cfg suggestions")
+	yieldHelpers := flags.Bool("yield-helpers", false, "also detect JSR helpers that capture return PCs into small indexed fields")
+	yieldFieldMax := flags.Uint("yield-field-max", 0x40, "exclusive maximum indexed field offset for --yield-helpers")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if *yieldFieldMax == 0 || *yieldFieldMax > 0x100 {
+		return errors.New("--yield-field-max must be within 1-0x100")
+	}
+	absoluteRoot, err := filepath.Abs(*root)
+	if err != nil {
+		return fmt.Errorf("resolve project root: %w", err)
+	}
+	var bank *byte
+	if strings.TrimSpace(*bankValue) != "" {
+		value, parseErr := strconv.ParseUint(strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(*bankValue), "0x"), "0X"), 16, 8)
+		if parseErr != nil {
+			return fmt.Errorf("parse --bank: %w", parseErr)
+		}
+		parsed := byte(value)
+		bank = &parsed
+	}
+	_, err = tooling.CensusRTSWebs(tooling.RTSCensusOptions{
+		ROMPath: resolveProjectOptional(absoluteRoot, *romPath), CFGDir: resolveProjectOptional(absoluteRoot, *cfgDir),
+		Bank: bank, Suggest: *suggest, YieldHelpers: *yieldHelpers, YieldFieldMax: uint16(*yieldFieldMax), Output: os.Stdout,
+	})
+	return err
+}
+
+func parsePollRegisters(value string) ([]uint16, error) {
+	var registers []uint16
+	seen := make(map[uint16]struct{})
+	for _, part := range strings.Split(value, ",") {
+		text := strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(part), "0x"), "0X")
+		text = strings.TrimPrefix(text, "$")
+		parsed, err := strconv.ParseUint(text, 16, 16)
+		if err != nil {
+			return nil, fmt.Errorf("parse hardware register %q: %w", part, err)
+		}
+		register := uint16(parsed)
+		if _, duplicate := seen[register]; !duplicate {
+			seen[register] = struct{}{}
+			registers = append(registers, register)
+		}
+	}
+	if len(registers) == 0 {
+		return nil, errors.New("poll-census needs at least one hardware register")
+	}
+	return registers, nil
+}
+
+func runLinkAudit(args []string) error {
+	flags := flag.NewFlagSet("link-audit", flag.ContinueOnError)
+	root := flags.String("root", ".", "game project root")
+	genDir := flags.String("gen-dir", "src/gen", "generated C directory, relative to project root")
+	sourceDir := flags.String("src-dir", "src", "hand-written game source directory, relative to project root")
+	runtimeDir := flags.String("runtime-dir", "snesrecomp-go/runtime/src", "runtime source directory, relative to project root")
+	orphans := flags.Bool("orphans", false, "list every orphan function")
+	verbose := flags.Bool("verbose", false, "show partial M/X variant coverage")
+	flags.BoolVar(verbose, "v", false, "show partial M/X variant coverage")
+	tailCalls := flags.Bool("tailcalls", false, "rank repeated tail-call-past-end source/target pairs")
+	tailCallMinimum := flags.Int("tailcall-min", 2, "minimum repeated source/target count to list")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	absoluteRoot, err := filepath.Abs(*root)
+	if err != nil {
+		return fmt.Errorf("resolve project root: %w", err)
+	}
+	return tooling.RunLinkAudit(tooling.LinkAuditOptions{
+		GenDir: resolveProjectOptional(absoluteRoot, *genDir), SourceDir: resolveProjectOptional(absoluteRoot, *sourceDir),
+		RuntimeDir: resolveProjectOptional(absoluteRoot, *runtimeDir), ListOrphans: *orphans, Verbose: *verbose,
+		ListTailCalls: *tailCalls, TailCallMinimum: *tailCallMinimum, Output: os.Stdout,
+	})
 }
 
 func runDispatchCensus(args []string) error {
@@ -383,6 +760,124 @@ func runDispatchCensus(args []string) error {
 		fmt.Fprintf(os.Stderr, "dispatch-census: wrote observed evidence to %s (authored cfg unchanged)\n", resolved)
 	}
 	return nil
+}
+
+func runTraceInspect(args []string) error {
+	tracePath := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		tracePath, args = args[0], args[1:]
+	}
+	flags := flag.NewFlagSet("trace-inspect", flag.ContinueOnError)
+	root := flags.String("root", ".", "game project root")
+	summary := flags.Bool("summary", false, "show aggregate channel and diagnostic counts")
+	diagnose := flags.Bool("diagnose", false, "rank M/X, garbage, and dispatch-miss findings")
+	metadataPath := flags.String("metadata", "saves/gen_meta.json", "optional metadata path, relative to project root")
+	romPath := flags.String("rom", "", "optional ROM path for paired-call guards, relative to project root")
+	channelValue := flags.String("ch", "", "comma-separated channels to include")
+	functionValue := flags.String("fn", "", "only events whose function contains this text")
+	misdecodes := flags.Bool("misdecodes", false, "only mismatched function-entry M/X events")
+	leaks := flags.Bool("leaks", false, "only call-site M/X leak events")
+	vmadd := flags.Bool("vmadd", false, "only VMADD events")
+	vramValue := flags.String("vram", "", "VRAM word address or hexadecimal low-high range")
+	wramValue := flags.String("wram", "", "WRAM offset or hexadecimal low-high range")
+	around := flags.Int64("around", -1, "select events around this sequence number")
+	window := flags.Uint64("window", 15, "sequence distance for --around")
+	limit := flags.Int("limit", 200, "maximum selected events")
+	format := flags.String("format", "text", "report format: text or json")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if tracePath == "" && flags.NArg() == 1 {
+		tracePath = flags.Arg(0)
+	} else if flags.NArg() != 0 {
+		return errors.New("trace-inspect needs exactly one trace path")
+	}
+	if strings.TrimSpace(tracePath) == "" {
+		return errors.New("trace-inspect needs a runtime JSONL trace path")
+	}
+	absoluteRoot, err := filepath.Abs(*root)
+	if err != nil {
+		return fmt.Errorf("resolve project root: %w", err)
+	}
+	options := tooling.TraceInspectOptions{
+		TracePath:    resolveProjectOptional(absoluteRoot, tracePath),
+		MetadataPath: resolveProjectOptional(absoluteRoot, *metadataPath), ROMPath: resolveProjectOptional(absoluteRoot, *romPath),
+		Summary: *summary, Diagnose: *diagnose, Function: *functionValue,
+		Misdecodes: *misdecodes, Leaks: *leaks, VMADD: *vmadd,
+		Window: *window, Limit: *limit,
+	}
+	if strings.TrimSpace(*channelValue) != "" {
+		options.Channels = strings.Split(*channelValue, ",")
+	}
+	if strings.TrimSpace(*vramValue) != "" {
+		value, err := tooling.ParseTraceRange(*vramValue)
+		if err != nil {
+			return err
+		}
+		options.VRAM = &value
+	}
+	if strings.TrimSpace(*wramValue) != "" {
+		value, err := tooling.ParseTraceRange(*wramValue)
+		if err != nil {
+			return err
+		}
+		options.WRAM = &value
+	}
+	if *around >= 0 {
+		value := uint64(*around)
+		options.Around = &value
+	}
+	report, err := tooling.BuildTraceInspection(options)
+	if err != nil {
+		return err
+	}
+	return tooling.WriteTraceInspection(os.Stdout, report, *format)
+}
+
+func runTraceDiff(args []string) error {
+	if len(args) < 3 || strings.HasPrefix(args[0], "-") || strings.HasPrefix(args[1], "-") || strings.HasPrefix(args[2], "-") {
+		return errors.New("trace-diff needs MODE ORACLE_JSONL RECOMP_JSONL before its options")
+	}
+	mode, oraclePath, recompPath := args[0], args[1], args[2]
+	flags := flag.NewFlagSet("trace-diff", flag.ContinueOnError)
+	root := flags.String("root", ".", "game project root")
+	top := flags.Int("top", 40, "maximum divergence rows")
+	skipZeroPage := flags.Bool("skip-zp", false, "ignore WRAM offsets $0000-$01FF")
+	low := flags.Uint64("lo", 0, "lowest WRAM offset to compare")
+	high := flags.Uint64("hi", 0x1ffff, "highest WRAM offset to compare")
+	minPrefix := flags.Int("min-prefix", 0, "sequence mode: minimum matching prefix before reporting")
+	fromGameFrame := flags.Uint64("from-gf", 0, "aligned mode: first game frame")
+	toGameFrame := flags.Uint64("to-gf", ^uint64(0), "aligned mode: last game frame")
+	clockLow := flags.Uint64("clock-low", 0x88, "aligned mode: low byte of game-frame clock")
+	clockHigh := flags.Uint64("clock-high", 0x89, "aligned mode: high byte of game-frame clock")
+	format := flags.String("format", "text", "report format: text or json")
+	if err := flags.Parse(args[3:]); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("trace-diff options must follow MODE ORACLE_JSONL RECOMP_JSONL")
+	}
+	if *low > *high || *high > 0x1ffff {
+		return fmt.Errorf("trace-diff WRAM range %#x-%#x is outside 0-0x1ffff", *low, *high)
+	}
+	if *clockLow > 0x1ffff || *clockHigh > 0x1ffff {
+		return errors.New("trace-diff clock offsets must be within 0-0x1ffff")
+	}
+	absoluteRoot, err := filepath.Abs(*root)
+	if err != nil {
+		return fmt.Errorf("resolve project root: %w", err)
+	}
+	report, err := tooling.BuildTraceDiff(tooling.TraceDiffOptions{
+		Mode:       mode,
+		OraclePath: resolveProjectOptional(absoluteRoot, oraclePath), RecompPath: resolveProjectOptional(absoluteRoot, recompPath),
+		Top: *top, SkipZeroPage: *skipZeroPage, Low: uint32(*low), High: uint32(*high), MinPrefix: *minPrefix,
+		FromGameFrame: *fromGameFrame, ToGameFrame: *toGameFrame,
+		ClockLow: uint32(*clockLow), ClockHigh: uint32(*clockHigh),
+	})
+	if err != nil {
+		return err
+	}
+	return tooling.WriteTraceDiff(os.Stdout, report, *format)
 }
 
 func runConfigure(args []string) error {

@@ -15,14 +15,18 @@ import (
 	romimage "github.com/DerrickGold/snesrecomp-go/internal/rom"
 )
 
-const xrefReportVersion = 1
+const xrefReportVersion = 2
 
 type XrefOptions struct {
-	ROMPath  string
-	CFGDir   string
-	Jobs     int
-	OnlyBank *byte
-	Query    XrefQuery
+	ROMPath               string
+	CFGDir                string
+	Jobs                  int
+	OnlyBank              *byte
+	Query                 XrefQuery
+	AccessFilter          string
+	IncludeWRAMMirrors    bool
+	IncludeRawWords       bool
+	IncludeTargetMinusOne bool
 }
 
 // XrefQuery preserves the spelling-derived address width. `$1C`, `$001C`,
@@ -35,11 +39,26 @@ type XrefQuery struct {
 
 type XrefSummary struct {
 	References      int `json:"references"`
+	RawWordEvidence int `json:"raw_word_evidence"`
 	UniqueSourcePCs int `json:"unique_source_pcs"`
 	InitialVariants int `json:"initial_variants"`
 	FinalVariants   int `json:"final_variants"`
 	VariantPasses   int `json:"variant_passes"`
 	DecodeIssues    int `json:"decode_issues"`
+}
+
+// XrefRawWord is deliberately not an XrefReference. It records byte-pattern
+// evidence from ROM data without claiming that the bytes are code, a table, or
+// reachable. Consumers can combine it with ownership and runtime evidence.
+type XrefRawWord struct {
+	PC               uint32 `json:"pc"`
+	InstructionBytes string `json:"bytes"`
+	Value            uint16 `json:"value"`
+	Target           uint16 `json:"target"`
+	TargetAdjustment int    `json:"target_adjustment"`
+	Evidence         string `json:"evidence"`
+	Ownership        string `json:"ownership"`
+	Reachability     string `json:"reachability"`
 }
 
 type XrefReference struct {
@@ -61,8 +80,10 @@ type XrefReport struct {
 	NoWrite      bool                `json:"no_write"`
 	ROM          ShadowROM           `json:"rom"`
 	Query        XrefQuery           `json:"query"`
+	AccessFilter string              `json:"access_filter"`
 	Summary      XrefSummary         `json:"summary"`
 	References   []XrefReference     `json:"references"`
+	RawWords     []XrefRawWord       `json:"raw_words,omitempty"`
 	DecodeIssues []ShadowDecodeIssue `json:"decode_issues,omitempty"`
 	Limitations  []string            `json:"limitations,omitempty"`
 }
@@ -106,6 +127,10 @@ func BuildXref(options XrefOptions) (XrefReport, error) {
 	if options.Query.Bits != 8 && options.Query.Bits != 16 && options.Query.Bits != 24 {
 		return XrefReport{}, fmt.Errorf("xref query width must be 8, 16, or 24 bits")
 	}
+	accessFilter, err := normalizeXrefAccessFilter(options.AccessFilter)
+	if err != nil {
+		return XrefReport{}, err
+	}
 	image, err := romimage.Load(options.ROMPath)
 	if err != nil {
 		return XrefReport{}, err
@@ -120,7 +145,8 @@ func BuildXref(options XrefOptions) (XrefReport, error) {
 	if err != nil {
 		return XrefReport{}, err
 	}
-	references, issues := collectXrefReferences(image, results, options.Query)
+	references, issues := collectXrefReferences(image, results, options.Query, accessFilter, options.IncludeWRAMMirrors)
+	rawWords := collectXrefRawWords(image, options.Query, options.OnlyBank, options.IncludeRawWords, options.IncludeTargetMinusOne)
 	hash := sha256.Sum256(image)
 	uniquePCs := make(map[uint32]struct{})
 	for _, reference := range references {
@@ -129,15 +155,16 @@ func BuildXref(options XrefOptions) (XrefReport, error) {
 	return XrefReport{
 		Version: xrefReportVersion, Mode: "decoded_instruction_xref", NoWrite: true,
 		ROM:   ShadowROM{SHA256: hex.EncodeToString(hash[:]), Size: len(image), Mapper: "lorom"},
-		Query: options.Query,
+		Query: options.Query, AccessFilter: accessFilter,
 		Summary: XrefSummary{
-			References: len(references), UniqueSourcePCs: len(uniquePCs),
+			References: len(references), RawWordEvidence: len(rawWords), UniqueSourcePCs: len(uniquePCs),
 			InitialVariants: stats.initialVariants, FinalVariants: stats.finalVariants,
 			VariantPasses: stats.passes, DecodeIssues: len(issues),
 		},
-		References: references, DecodeIssues: issues,
+		References: references, RawWords: rawWords, DecodeIssues: issues,
 		Limitations: []string{
 			"references are limited to configuration- or static-call-rooted decoded instruction boundaries",
+			"raw word evidence scans every byte offset and does not imply code/data ownership or reachability",
 			"direct-page operands are offsets from live D; absolute data operands are relative to live DB unless the resolution says otherwise",
 			"indexed references identify a base operand, not a proven runtime effective address",
 		},
@@ -153,7 +180,7 @@ type xrefReferenceKey struct {
 	resolution  string
 }
 
-func collectXrefReferences(image romimage.Image, results []shadowDecodeResult, query XrefQuery) ([]XrefReference, []ShadowDecodeIssue) {
+func collectXrefReferences(image romimage.Image, results []shadowDecodeResult, query XrefQuery, accessFilter string, includeWRAMMirrors bool) ([]XrefReference, []ShadowDecodeIssue) {
 	owners := make(map[xrefReferenceKey]map[uint32]struct{})
 	var issues []ShadowDecodeIssue
 	for _, result := range results {
@@ -162,8 +189,8 @@ func collectXrefReferences(image romimage.Image, results []shadowDecodeResult, q
 			continue
 		}
 		for _, decoded := range result.instructions {
-			access, resolution, match := matchXrefInstruction(decoded, query)
-			if !match {
+			access, resolution, match := matchXrefInstruction(decoded, query, includeWRAMMirrors)
+			if !match || !xrefAccessMatches(accessFilter, access) {
 				continue
 			}
 			key := xrefReferenceKey{
@@ -225,8 +252,12 @@ func collectXrefReferences(image romimage.Image, results []shadowDecodeResult, q
 	return references, issues
 }
 
-func matchXrefInstruction(decoded shadowDecodedInstruction, query XrefQuery) (string, string, bool) {
+func matchXrefInstruction(decoded shadowDecodedInstruction, query XrefQuery, includeWRAMMirrors bool) (string, string, bool) {
 	instruction := &decoded.Instruction
+	if xrefBranch(instruction) {
+		target := decoded.PC&0xff0000 | uint32(uint16(instruction.Operand))
+		return "branch", "program_bank_branch_target", query.Bits == 24 && target == query.Address&0xffffff
+	}
 	access := xrefAccess(instruction)
 	if access == "" {
 		return "", "", false
@@ -272,8 +303,14 @@ func matchXrefInstruction(decoded shadowDecodedInstruction, query XrefQuery) (st
 			return access, "bank_zero_long_indirect_pointer", query.Address&0xffffff == uint32(uint16(operand))
 		}
 	case cpu65816.LONG:
+		if includeWRAMMirrors && query.Bits == 16 && xrefWRAMMirror(operand, query.Address) {
+			return access, "long_wram_mirror", true
+		}
 		return access, xrefLongResolution(instruction, false), query.Bits == 24 && operand == query.Address&0xffffff
 	case cpu65816.LONGX:
+		if includeWRAMMirrors && query.Bits == 16 && xrefWRAMMirror(operand, query.Address) {
+			return access, "indexed_long_wram_mirror", true
+		}
 		return access, xrefLongResolution(instruction, true), query.Bits == 24 && operand == query.Address&0xffffff
 	case cpu65816.STK:
 		return access, "stack_relative_offset", query.Bits == 8 && uint8(operand) == uint8(query.Address)
@@ -281,6 +318,88 @@ func matchXrefInstruction(decoded shadowDecodedInstruction, query XrefQuery) (st
 		return access, "stack_relative_indirect_y_offset", query.Bits == 8 && uint8(operand) == uint8(query.Address)
 	}
 	return "", "", false
+}
+
+func xrefWRAMMirror(operand, query uint32) bool {
+	bank := byte(operand >> 16)
+	return (bank == 0x00 || bank == 0x7e || bank == 0x7f) && uint16(operand) == uint16(query)
+}
+
+func normalizeXrefAccessFilter(value string) (string, error) {
+	filter := strings.ToLower(strings.TrimSpace(value))
+	filter = strings.ReplaceAll(filter, "-", "_")
+	if filter == "" || filter == "decoded" {
+		return "all", nil
+	}
+	switch filter {
+	case "all", "read", "write", "read_write", "control", "branch", "pointer_read":
+		return filter, nil
+	default:
+		return "", fmt.Errorf("unknown xref access filter %q (want all, read, write, read-write, control, branch, or pointer-read)", value)
+	}
+}
+
+func xrefAccessMatches(filter, access string) bool {
+	switch filter {
+	case "all":
+		return true
+	case "read":
+		return access == "read" || access == "read_write" || access == "pointer_read"
+	case "write":
+		return access == "write" || access == "read_write"
+	case "control":
+		return access == "control" || access == "branch" || access == "pointer_read"
+	default:
+		return filter == access
+	}
+}
+
+func xrefBranch(instruction *cpu65816.Instruction) bool {
+	switch instruction.Mnemonic {
+	case "BPL", "BMI", "BVC", "BVS", "BCC", "BCS", "BNE", "BEQ", "BRA", "BRL":
+		return instruction.Mode == cpu65816.REL || instruction.Mode == cpu65816.REL16
+	default:
+		return false
+	}
+}
+
+func collectXrefRawWords(image romimage.Image, query XrefQuery, onlyBank *byte, include, includeMinusOne bool) []XrefRawWord {
+	if !include || query.Bits == 8 || len(image) < 2 {
+		return nil
+	}
+	target := uint16(query.Address)
+	queryBank := byte(query.Address >> 16)
+	var words []XrefRawWord
+	for bankOffset := 0; bankOffset < len(image); bankOffset += 0x8000 {
+		bank := byte(bankOffset / 0x8000)
+		if onlyBank != nil && bank != *onlyBank&0x7f {
+			continue
+		}
+		if query.Bits == 24 && bank != queryBank&0x7f {
+			continue
+		}
+		bankLength := len(image) - bankOffset
+		if bankLength > 0x8000 {
+			bankLength = 0x8000
+		}
+		for relative := 0; relative+1 < bankLength; relative++ {
+			value := uint16(image[bankOffset+relative]) | uint16(image[bankOffset+relative+1])<<8
+			adjustment := 0
+			if value != target {
+				if !includeMinusOne || value != target-1 {
+					continue
+				}
+				adjustment = -1
+			}
+			words = append(words, XrefRawWord{
+				PC:               uint32(bank)<<16 | uint32(0x8000+relative),
+				InstructionBytes: fmt.Sprintf("%02X %02X", byte(value), byte(value>>8)),
+				Value:            value, Target: target, TargetAdjustment: adjustment,
+				Evidence: "raw_rom_word", Ownership: "unclassified", Reachability: "unknown",
+			})
+		}
+	}
+	return words
 }
 
 func xrefAccess(instruction *cpu65816.Instruction) string {
@@ -340,9 +459,9 @@ func WriteXrefReport(output io.Writer, report XrefReport, format string) error {
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(report)
 	case "", "text":
-		fmt.Fprintf(output, "xref v%d: %s, %d decoded reference(s) at %d unique source PC(s); variants %d -> %d in %d pass(es)\n",
+		fmt.Fprintf(output, "xref v%d: %s, %d decoded reference(s) at %d unique source PC(s), %d raw word evidence item(s); variants %d -> %d in %d pass(es)\n",
 			report.Version, formatXrefQuery(report.Query), report.Summary.References,
-			report.Summary.UniqueSourcePCs, report.Summary.InitialVariants,
+			report.Summary.UniqueSourcePCs, report.Summary.RawWordEvidence, report.Summary.InitialVariants,
 			report.Summary.FinalVariants, report.Summary.VariantPasses)
 		for _, reference := range report.References {
 			fmt.Fprintf(output, "  $%02X:%04X %-11s %-5s %-10s M%dX%d %-28s owners=%s bytes=%s\n",
@@ -350,6 +469,14 @@ func WriteXrefReport(output io.Writer, report XrefReport, format string) error {
 				reference.Mnemonic, reference.AddressingMode,
 				reference.LiveMX.M, reference.LiveMX.X, reference.Resolution,
 				shadowAddresses(reference.FunctionEntries), reference.InstructionBytes)
+		}
+		for _, word := range report.RawWords {
+			tag := "word"
+			if word.TargetAdjustment == -1 {
+				tag = "word-1"
+			}
+			fmt.Fprintf(output, "  $%02X:%04X %-11s .dw  $%04X      ownership=%s reachability=%s bytes=%s\n",
+				byte(word.PC>>16), uint16(word.PC), tag, word.Value, word.Ownership, word.Reachability, word.InstructionBytes)
 		}
 		if len(report.DecodeIssues) > 0 {
 			fmt.Fprintf(output, "decode issues=%d (use --format json for details)\n", len(report.DecodeIssues))

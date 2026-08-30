@@ -1305,7 +1305,8 @@ lair-seal attackers, Bloodpool lightning pair) were fixed by registering the **`
 trampoline family**, NOT the `$9FCD` dispatcher family (which remains statically
 censused but symptom-free). A trampoline does
 `LDA #<continuation-1>; PHA; LDA $9220; PHA; RTS` and a caller stores the callee-1 into
-`$9220`. CE57 was found by tools/resolve_miss.py's first run, closing the
+`$9220`. CE57 was found by the dispatch-miss triage workflow (now
+`snesbuild trace-inspect --diagnose`), closing the
 untraced `$CE56` path.
 
 **Corrected 2026-08-17 — `$9220` holds the CALLEE, not a resume address.** The two halves
@@ -1322,7 +1323,7 @@ ever stored (`$03:CA8E` → `$CA79`, `$03:CA9D` → `$CA7E`, `$03:B617` → `$B6
 `$03:CDAD` and `$03:CE57` are the *call-site continuations* pushed by the two spawn loops
 (`$03:CDA4` pushes `$CDAC`, `$03:CE4E` pushes `$CE56`) — they are return points, not `$9220`
 members. All six addresses still need registering; the distinction matters when reading
-`resolve_miss` output, because a miss at `$CB1C`/`$CB85`/`$CAEE` is the spawn loop *returning*
+`snesbuild trace-inspect --diagnose` output, because a miss at `$CB1C`/`$CB85`/`$CAEE` is the spawn loop *returning*
 (benign) and proves the loop ran, whereas a miss at a `$9220` value would mean it never
 allocated. See the town architecture chapter §8 for the full spawner.
 
@@ -1384,7 +1385,9 @@ $02AB lives) is the PERSISTENT count; `$21` is the act-mode WORKING copy, loaded
 `$02:84E0` (`LDA $0295; STA $21`) — MP refills to the persistent max each act by design.
 Act-mode pickups INC only `$21` ($00:887E via the $00:87BD item dispatch); sim grants INC
 both. The stats block has NO `8D`-form direct writers — event/reward handlers use `AF/8F`
-long addressing (grep lesson; `tools/romxref.py` handles this).
+long addressing (grep lesson;
+`snesbuild xref 0295 --root . --kind write --wram-mirrors`
+handles decoded references without raw-byte false positives).
 
 ---
 
@@ -1438,7 +1441,7 @@ End-to-end seam map for casting; every stage verified. Decomp target: `magic.c`.
 
 | Seam | Routine / address | Hardware | Intent | Notes | Status |
 |---|---|---|---|---|---|
-| VBlank wait | `$00:8418`, `$02:A85E` (HLE → `ActRaiser_WaitForVblank`); inline 3-read spins (`$01:9284` et al) | RDNMI `$4210` | "wait one frame" | Three-tier model (`snes.c`): HLE'd routines yield; the 7 statically-whitelisted inline spin blocks (`kSpinBlocks`, from `find_yield_points.py`) yield once per read in the coroutine; in NON-yieldable contexts (NMI/IRQ — e.g. the mode-`$85` story-event wait chain `$01:9270→8C43→9284`) whitelisted spins FAST-EXIT bit7=1, unpaced; `[4210-wedge]` tripwire names the refusing gate if a spin ever sticks 4096 reads | 🟢 |
+| VBlank wait | `$00:8418`, `$02:A85E` (HLE → `ActRaiser_WaitForVblank`); inline 3-read spins (`$01:9284` et al) | RDNMI `$4210` | "wait one frame" | Three-tier model (`snes.c`): HLE'd routines yield; the 7 statically-whitelisted inline spin blocks (`kSpinBlocks`, reproduced by `snesbuild poll-census --registers 4210`) yield once per read in the coroutine; in NON-yieldable contexts (NMI/IRQ — e.g. the mode-`$85` story-event wait chain `$01:9270→8C43→9284`) whitelisted spins FAST-EXIT bit7=1, unpaced; `[4210-wedge]` tripwire names the refusing gate if a spin ever sticks 4096 reads | 🟢 |
 | NMI handler | `$8520` (`NmiHandler`) | NMI | "per-frame vblank service" | game frame `$0088` bumped here | 🟢 |
 | Frame coroutine | `RunOneFrameOfGame` (`actraiser_rtl.c`) | — | host frame ↔ game frame mapping | Normally resumes the coroutine to its vblank wait and then runs NMI. The action-load pacing seam starts at the exact `$00843E` force-blank write, before the collapsed loader's APU polls, and can consume up to 315 host frames with display/audio advancing while NMI is disabled and `$0088` remains fixed. While a live consumer drains audio, redundant main-CPU touch catch-up is suppressed until the matching `$F0`; no-consumer/headless runs retain accelerated handshake progress. That oracle value is the authentic upper bound; the exact enhanced one-shot latched at the transition may release it early only after natural completion. | 🟢 |
 
@@ -1662,7 +1665,7 @@ The most common in-level crash/freeze class (§7.6) comes from this system, so i
 - **Coverage guard (2026-07-14):** chain-walking from known handler seeds
   (`find_handler_chain.py --all-yields`) CANNOT reach a handler whose address only enters `$12`
   via spawn-record **data words** (`$FE89` was stored by `$F6D4/F6EC/…` records and hid two
-  soft-lock continuations that way). `tools/find_yield_helpers.py` closes the class from the
+  soft-lock continuations that way). `snesbuild rts-webs --yield-helpers` closes the class from the
   other end — it finds every helper-shaped JSR **target** by byte shape (pull/peek of the caller
   frame → object-field store) and verifies every call site's continuation is a registered cfg
   func, with no seed walk and no hand-maintained helper list. Run it after any bank00.cfg

@@ -268,15 +268,50 @@ v2regen regen --rom game.sfc --cfg-dir recomp --out-dir src/gen --jobs 8
 v2regen regen --rom game.sfc --cfg-dir recomp \
   --out-dir build/proven-analysis-candidate --experimental-proven-analysis
 v2regen analyze --rom game.sfc --cfg-dir recomp --jobs 8
+v2regen poll-census --rom game.sfc --cfg-dir recomp --registers 4210,4212
+v2regen disasm 01:9C6F --rom game.sfc --mx 0,0 --until-flow --raw
+v2regen rom-info --rom game.sfc
+v2regen spc-disasm 0800 08F0 --input game.sfc --upload-block 0x011ACD
+v2regen quintet-lzss 0x0CD695 --input game.sfc --out build/blob.bin
+v2regen xref 00:9DE1 --rom game.sfc --cfg-dir recomp --kind branch
+v2regen xref 0295 --rom game.sfc --cfg-dir recomp --kind write --wram-mirrors
+v2regen xref 01:9CD6 --rom game.sfc --cfg-dir recomp \
+  --data-words --target-minus-one
 v2regen sync-funcs --cfg-dir recomp --out recomp/funcs.h
 v2regen metadata --gen-dir src/gen --cfg-dir recomp --out build/gen_meta.json
-v2regen rts-webs --rom game.sfc --cfg-dir recomp --suggest
+v2regen rts-webs --rom game.sfc --cfg-dir recomp --suggest --yield-helpers
+v2regen trace-inspect runs/example.jsonl --summary
+v2regen trace-inspect runs/example.jsonl --diagnose \
+  --metadata saves/gen_meta.json --rom game.sfc
+v2regen trace-diff final oracle.jsonl recomp.jsonl
+v2regen trace-diff sequence oracle.jsonl recomp.jsonl --skip-zp
+v2regen trace-diff aligned oracle.jsonl recomp.jsonl \
+  --clock-low 0x88 --clock-high 0x89
+v2regen mx-diff recomp_mx.txt oracle_mx.txt --offset 0
+v2regen wram get --symbols docs/ram-map.md \
+  --file saves/dump_wram.bin 21 0295
+v2regen chr-render rom game.sfc 0x68000 0x8000 build/chr.png --cols 16
 v2regen stub-census --gen-dir src/gen
-v2regen link-audit --gen-dir src/gen --src-dir src \
+v2regen link-audit --gen-dir src/gen --src-dir src --tailcalls \
   --runtime-dir snesrecomp-go/runtime/src
 v2regen inspect --rom game.sfc --cfg-dir recomp --jobs 8
 v2regen emit-function --rom game.sfc --cfg-dir recomp \
   --bank 00 --start 8000 --m 1 --x 1
+```
+
+The packaged `snesbuild` binary exposes the same `disasm` and `xref` commands
+with paths relative to `--root`. Decoded xrefs come only from rooted instruction
+boundaries. `--data-words` is a separate raw-byte scan whose results are marked
+with unknown ownership and reachability; add `--target-minus-one` for pushed
+continuation or handler-minus-one tables.
+
+The packaged project driver also provides manifest-defined replay gates without
+a Python runtime:
+
+```sh
+snesbuild replay-bench --suite tools/runner-bench.json \
+  --binary build/game --rom game.sfc --config config.ini \
+  --runs 7 --warmups 1 --output build/runner-baseline.json
 ```
 
 The opcode differential harness consumes locally cached
@@ -359,6 +394,9 @@ CMake install manifest is the authoritative bundle contract.
 - [`docs/PROJECT_INTEGRATION.md`](docs/PROJECT_INTEGRATION.md): project layout,
   generation pipeline, CMake, runtime hooks, and redistribution rules.
 - [`docs/CFG_FORMAT.md`](docs/CFG_FORMAT.md): supported `bankNN.cfg` syntax.
+- [`docs/TOOLING_MIGRATION.md`](docs/TOOLING_MIGRATION.md): Go tooling replacements
+  for retired project Python scripts and the boundary for intentionally
+  game-specific helpers.
 - [`runtime/docs/RUNTIME.md`](runtime/docs/RUNTIME.md): shared runtime boundary, optional
   features, and current limitations.
 - [`ATTRIBUTION.md`](ATTRIBUTION.md): Python-source provenance, prior work,
