@@ -9,6 +9,10 @@
 #include <string.h>
 
 uint64_t g_apu_timer0_total_ticks;
+extern uint64_t g_spc_write_counts[0x100];
+extern uint64_t g_spc_pc_histogram[0x10000];
+extern int g_spc_pc_max_seen;
+extern uint64_t g_spc_outport_value_counts[4 * 256];
 static int failures;
 static unsigned opcode_runs;
 static unsigned dsp_observer_calls;
@@ -149,6 +153,37 @@ static void test_timers(Apu *apu) {
           "control port clears input pair");
 }
 
+static void test_diagnostic_counter_gate(Apu *apu) {
+    memset(g_spc_write_counts, 0, sizeof(uint64_t) * 0x100u);
+    memset(g_spc_pc_histogram, 0, sizeof(uint64_t) * 0x10000u);
+    memset(g_spc_outport_value_counts, 0, sizeof(uint64_t) * 4u * 256u);
+    g_spc_pc_max_seen = 0;
+    apu_reset(apu);
+    apu->diagnosticCountersEnabled = false;
+    apu->spc->pc = 0x1234u;
+    apu->cpuCyclesLeft = 0u;
+    apu_cycle(apu);
+    apu_cpuWrite(apu, 0x20u, 0x55u);
+    apu_cpuWrite(apu, 0xf4u, 0x66u);
+    check(g_spc_pc_histogram[0x1234u] == 0u &&
+              g_spc_write_counts[0x20u] == 0u &&
+              g_spc_outport_value_counts[0x66u] == 0u,
+          "SPC diagnostic counters remain inert by default");
+
+    apu->diagnosticCountersEnabled = true;
+    apu->spc->pc = 0x2345u;
+    apu->cpuCyclesLeft = 0u;
+    apu_cycle(apu);
+    apu_cpuWrite(apu, 0x20u, 0x77u);
+    apu_cpuWrite(apu, 0xf4u, 0x88u);
+    check(g_spc_pc_histogram[0x2345u] == 1u &&
+              g_spc_pc_max_seen == 0x2345 &&
+              g_spc_write_counts[0x20u] == 1u &&
+              g_spc_outport_value_counts[0x88u] == 1u,
+          "explicit SPC diagnostics retain the legacy counters");
+    apu->diagnosticCountersEnabled = false;
+}
+
 static void test_saveload(Apu *apu) {
     SaveLoadInfo info = {capture_save};
     g_apu_extra_saveload_hook = capture_extra;
@@ -196,6 +231,7 @@ int main(void) {
     test_dsp_hooks(apu);
     test_queue_and_cycles(apu);
     test_timers(apu);
+    test_diagnostic_counter_gate(apu);
     test_saveload(apu);
     test_portable_timeline_saveload(apu);
     apu_free(apu);

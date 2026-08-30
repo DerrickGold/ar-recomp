@@ -78,6 +78,11 @@ typedef struct AudioTraceStats {
     uint64_t cpu_port_overwrites[4];
 } AudioTraceStats;
 
+/** Arms or disarms the legacy host-side PCM/event recorder. It is disabled by
+ * default unless SNESRECOMP_AUDIO_TRACE is set. Runner ABI trace observers are
+ * independent and remain controlled by their subscriptions. */
+void audio_trace_set_enabled(int enabled);
+int audio_trace_enabled(void);
 void audio_trace_reset(void);
 void audio_trace_on_sample(int16_t left, int16_t right, int dropped,
                            uint32_t ring_fill);

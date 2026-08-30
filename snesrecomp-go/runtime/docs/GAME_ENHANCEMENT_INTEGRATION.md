@@ -325,7 +325,9 @@ The runtime owns APU progress once per game tick. `RtlRunFrame` advances a
 17,088-slot target after the game slice, while `RtlRenderAudio` may satisfy some
 or all of that target first. A headless frontend does not need to render and
 discard PCM merely to keep the SPC alive. Do not add wall-clock catch-up or
-call `RtlAdvanceApuTimeline` in addition to `RtlRunFrame`.
+call `RtlAdvanceApuTimeline` in addition to `RtlRunFrame`. `RtlRenderAudio`
+locks its own bounded DSP production and mix regions, so the host callback must
+not wrap the whole render/volume/device-submit path in another APU lock.
 
 Validate audio with original-only, replacement-only, and mixed output; rapid
 track changes; save/load during a note and fade; pause/turbo; all known upload

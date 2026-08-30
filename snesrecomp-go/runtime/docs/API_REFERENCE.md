@@ -289,6 +289,12 @@ not mutate emulated clocks. `RtlApuProfileRead` reports:
 An attribution sum larger than total sets `RTL_APU_PROFILE_INCONSISTENT`
 instead of wrapping `apu_cycles_unattributed`.
 
+The legacy in-process PCM/event recorder is off by default. Set
+`SNESRECOMP_AUDIO_TRACE=1` or call `audio_trace_set_enabled(1)` before capture;
+runner ABI audio-trace subscriptions are independent of that switch. The
+large SPC PC/write histograms are likewise pay-for-play through
+`SNESRECOMP_SPC_DIAGNOSTICS=1`.
+
 ## Threading and callbacks
 
 Unless a contract explicitly says otherwise, runner operations are synchronous
@@ -296,6 +302,9 @@ and belong on the emulation thread. `queue_mutation` is the cross-host-thread
 entry point. Event callbacks execute on the producing thread; audio callbacks
 may execute while the APU lock is held. Do not call back into a service that
 could acquire the same lock, advance the runner, or mutate the subscribed list.
+`RtlRenderAudio` acquires the APU lock around its bounded production and mix
+regions; a host audio callback should not hold an outer APU lock around the
+call, output gain/mute processing, or submission to the device.
 
 ## Compatibility policy
 

@@ -47,8 +47,12 @@ _Static_assert((APU_PORT_QUEUE_LEN & (APU_PORT_QUEUE_LEN - 1u)) == 0u,
                "APU port queue length must be a power of two");
 
 Apu *apu_init(void) {
+    const char *diagnostics;
     Apu *apu = (Apu *)calloc(1u, sizeof(*apu));
     if (apu == NULL) return NULL;
+    diagnostics = getenv("SNESRECOMP_SPC_DIAGNOSTICS");
+    apu->diagnosticCountersEnabled = diagnostics != NULL &&
+        diagnostics[0] != '\0' && diagnostics[0] != '0';
     apu->spc = spc_init(apu);
     apu->dsp = dsp_init(apu->ram);
     if (apu->spc == NULL || apu->dsp == NULL) {
@@ -212,8 +216,10 @@ void apu_cycle(Apu *apu) {
         unsigned guard = 0u;
         do {
             const uint16_t pc = apu->spc->pc;
-            ++g_spc_pc_histogram[pc];
-            if ((int)pc > g_spc_pc_max_seen) g_spc_pc_max_seen = pc;
+            if (apu->diagnosticCountersEnabled) {
+                ++g_spc_pc_histogram[pc];
+                if ((int)pc > g_spc_pc_max_seen) g_spc_pc_max_seen = pc;
+            }
             apu->cpuCyclesLeft = (uint8_t)spc_runOpcode(apu->spc);
         } while (apu->cpuCyclesLeft == 0u && !apu->spc->stopped &&
                  ++guard < 65536u);
@@ -289,8 +295,10 @@ uint8_t apu_cpuRead(Apu *apu, uint16_t address) {
 
 void apu_cpuWrite(Apu *apu, uint16_t address, uint8_t value) {
     if (apu == NULL) return;
-    if (address < 0x100u) ++g_spc_write_counts[address];
-    if (address >= 0xf4u && address <= 0xf7u) {
+    if (apu->diagnosticCountersEnabled && address < 0x100u)
+        ++g_spc_write_counts[address];
+    if (apu->diagnosticCountersEnabled &&
+        address >= 0xf4u && address <= 0xf7u) {
         const unsigned port = address - 0xf4u;
         ++g_spc_outport_value_counts[port * 256u + value];
         SpcWriteRec *record = &g_spc_recent_outport_writes[

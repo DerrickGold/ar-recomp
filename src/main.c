@@ -1346,6 +1346,11 @@ static void AppBoot_InstallSubsystems(AppBoot *app) {
  * (which must sit between cart_load and Randomizer_Init), fill power-on WRAM and
  * battery SRAM, load the persisted save, and honour AR_LOADSTATE. */
 static void AppBoot_StartGame(AppBoot *app) {
+  {
+    const char *audio_debug = getenv("AR_AUDIODBG");
+    if (audio_debug && audio_debug[0] && audio_debug[0] != '0')
+      audio_trace_set_enabled(1);
+  }
   if (RtlRegisterGame(&kActRaiserGameModule) != SR_RESULT_OK)
     Die("The linked game module is incompatible with this runner.");
   app->snes = SnesInit(app->rom_data, (int)app->rom_size);

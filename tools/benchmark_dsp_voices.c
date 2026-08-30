@@ -94,6 +94,53 @@ static void RunCase(const char *name, bool extended, int active_voices,
   free(ram);
 }
 
+static void RunResamplerCase(int sample_count) {
+  enum { kOutputFrames = 1024 };
+  uint8_t *ram = (uint8_t *)calloc(0x10000, 1);
+  int16_t *output =
+      (int16_t *)calloc(kOutputFrames * 2u, sizeof(*output));
+  if (!ram || !output) {
+    fprintf(stderr, "benchmark_dsp_voices: allocation failed\n");
+    free(output);
+    free(ram);
+    exit(1);
+  }
+  Dsp *dsp = dsp_init(ram);
+  if (!dsp) {
+    fprintf(stderr, "benchmark_dsp_voices: allocation failed\n");
+    free(output);
+    free(ram);
+    exit(1);
+  }
+  for (uint32_t frame = 0; frame < DSP_SAMPLE_RING; ++frame) {
+    dsp->sampleBuffer[frame * 2u] =
+        (int16_t)((frame * 109u + 3001u) & 0xffffu);
+    dsp->sampleBuffer[frame * 2u + 1u] =
+        (int16_t)((frame * 251u + 1709u) & 0xffffu);
+  }
+  dsp->sampleWrite = DSP_SAMPLE_RING;
+  double phase = 0.375;
+  volatile int checksum = 0;
+  int remaining = sample_count;
+  const clock_t begin = clock();
+  while (remaining > 0) {
+    const int frames = remaining < kOutputFrames
+        ? remaining : kOutputFrames;
+    dsp_getSamplesResampled(dsp, output, frames, 32040.0 / 48000.0,
+                            &phase);
+    checksum += output[(remaining & (kOutputFrames - 1)) * 2];
+    remaining -= frames;
+  }
+  const clock_t elapsed = clock() - begin;
+  const double seconds = (double)elapsed / CLOCKS_PER_SEC;
+  const double ns_per_frame = seconds * 1000000000.0 / sample_count;
+  printf("%-25s %8.2f ns/frame   checksum %d\n",
+         "48 kHz resampler", ns_per_frame, checksum);
+  dsp_free(dsp);
+  free(output);
+  free(ram);
+}
+
 int main(int argc, char **argv) {
   int sample_count = 5000000;
   if (argc > 1) {
@@ -106,5 +153,6 @@ int main(int argc, char **argv) {
   RunCase("authentic, 8 active", false, 8, sample_count);
   RunCase("extended, 8 active", true, 8, sample_count);
   RunCase("extended, 40 active", true, 40, sample_count);
+  RunResamplerCase(sample_count);
   return 0;
 }

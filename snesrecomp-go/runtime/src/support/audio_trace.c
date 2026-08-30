@@ -5,6 +5,8 @@
 
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <stdatomic.h>
 #include <string.h>
 
 #ifdef _WIN32
@@ -27,6 +29,27 @@ static uint8_t s_spc_write_last[4];
 static uint8_t s_spc_read_fresh[4];
 static uint8_t s_cpu_read_fresh[4];
 static uint8_t s_cpu_write_pending[4];
+static _Atomic int s_enabled = -1;
+
+int audio_trace_enabled(void) {
+    int enabled = atomic_load_explicit(&s_enabled, memory_order_relaxed);
+    if (enabled >= 0) return enabled;
+    const char *setting = getenv("SNESRECOMP_AUDIO_TRACE");
+    const int detected = setting != NULL && setting[0] != '\0' &&
+                         setting[0] != '0';
+    int expected = -1;
+    if (atomic_compare_exchange_strong_explicit(
+            &s_enabled, &expected, detected,
+            memory_order_relaxed, memory_order_relaxed)) {
+        return detected;
+    }
+    return expected;
+}
+
+void audio_trace_set_enabled(int enabled) {
+    atomic_store_explicit(&s_enabled, enabled != 0,
+                          memory_order_relaxed);
+}
 
 uint64_t audio_trace_wall_ns(void) {
 #ifdef _WIN32
@@ -65,6 +88,7 @@ void audio_trace_reset(void) {
     s_open_drop = UINT64_MAX;
     s_last_snapshot_ms = audio_trace_wall_ms();
     s_largest_consume = 0u;
+    audio_trace_set_enabled(1);
     RtlApuUnlock();
 }
 
@@ -94,11 +118,13 @@ static void take_snapshot_if_due(uint32_t occupancy) {
 }
 
 void audio_trace_set_producer(int producer) {
+    if (!audio_trace_enabled()) return;
     s_producer = producer;
 }
 
 void audio_trace_on_sample(int16_t left, int16_t right, int dropped,
                            uint32_t ring_fill) {
+    if (!audio_trace_enabled()) return;
     const uint32_t position =
         (uint32_t)s_stats.produced & (AUDIO_TRACE_PCM_RING - 1u);
     s_pcm[position * 2u] = left;
@@ -126,6 +152,7 @@ void audio_trace_on_sample(int16_t left, int16_t right, int dropped,
 }
 
 void audio_trace_on_reg_write(uint8_t address, uint8_t value) {
+    if (!audio_trace_enabled()) return;
     AudioTraceEvent *event = push_event(AUDIO_TRACE_EV_REG);
     event->addr = address;
     event->val = value;
@@ -136,6 +163,7 @@ void audio_trace_on_reg_write(uint8_t address, uint8_t value) {
 
 void audio_trace_on_consume(uint64_t read_index, uint32_t count,
                             uint32_t available_after) {
+    if (!audio_trace_enabled()) return;
     (void)read_index;
     AudioTraceEvent *event = push_event(AUDIO_TRACE_EV_CONSUME);
     event->aux = available_after;
@@ -146,6 +174,7 @@ void audio_trace_on_consume(uint64_t read_index, uint32_t count,
 }
 
 void audio_trace_on_pace(int consumer_active, uint32_t baseline_cycles) {
+    if (!audio_trace_enabled()) return;
     s_stats.pace_consumer_active = consumer_active != 0;
     s_stats.pace_baseline_cycles += baseline_cycles;
     ++s_stats.pace_accumulate_calls;
@@ -161,12 +190,14 @@ static AudioTraceEvent *push_port_event(uint8_t type, uint8_t port,
 }
 
 void audio_trace_on_cpu_port_write(uint8_t port, uint8_t value) {
+    if (!audio_trace_enabled()) return;
     port &= 3u;
     ++s_stats.cpu_port_writes;
     (void)push_port_event(AUDIO_TRACE_EV_CPU_PORT_WRITE, port, value);
 }
 
 void audio_trace_on_cpu_port_apply(uint8_t port, uint8_t value) {
+    if (!audio_trace_enabled()) return;
     port &= 3u;
     if (s_cpu_write_pending[port]) ++s_stats.cpu_port_overwrites[port];
     s_cpu_write_pending[port] = value != 0u;
@@ -175,6 +206,7 @@ void audio_trace_on_cpu_port_apply(uint8_t port, uint8_t value) {
 }
 
 void audio_trace_on_spc_port_read(uint8_t port, uint8_t value) {
+    if (!audio_trace_enabled()) return;
     port &= 3u;
     ++s_stats.spc_port_reads_seen;
     s_cpu_write_pending[port] = 0u;
@@ -186,6 +218,7 @@ void audio_trace_on_spc_port_read(uint8_t port, uint8_t value) {
 }
 
 void audio_trace_on_spc_port_write(uint8_t port, uint8_t value) {
+    if (!audio_trace_enabled()) return;
     port &= 3u;
     ++s_stats.spc_port_writes;
     s_cpu_read_fresh[port] = 1u;
@@ -195,6 +228,7 @@ void audio_trace_on_spc_port_write(uint8_t port, uint8_t value) {
 }
 
 void audio_trace_on_cpu_port_read(uint8_t port, uint8_t value) {
+    if (!audio_trace_enabled()) return;
     port &= 3u;
     if (!s_cpu_read_fresh[port] && s_cpu_read_last[port] == value) return;
     s_cpu_read_fresh[port] = 0u;

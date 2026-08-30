@@ -35,6 +35,9 @@ typedef struct ApuPortWrite {
 struct Apu {
     Spc *spc;
     Dsp *dsp;
+    /* Host diagnostic switch; derived from the environment and deliberately
+     * outside the serialized ram..pad compatibility span. */
+    bool diagnosticCountersEnabled;
     uint8_t ram[0x10000];
     bool romReadable;
     uint8_t dspAdr;
