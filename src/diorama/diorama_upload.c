@@ -7,6 +7,8 @@
 
 static PresentationUploadMirror
     s_upload_mirrors[kDioramaPlane_Count];
+static DioramaCoverageMask s_coverage_masks[kDioramaPlane_Count];
+static uint32_t s_coverage_valid_mask;
 
 DioramaUploadResult Diorama_Upload(
     ArRenderDevice *device,
@@ -53,17 +55,24 @@ DioramaUploadResult Diorama_Upload(
     upload.synchronized_plane_mask |= 1u << plane;
     if (plane_upload.changed) upload.changed_plane_mask |= 1u << plane;
     upload.coverage_masks[plane] = DioramaCoverage_FullMask();
-    if (DioramaPlaneIsObjectPriority(plane)) {
+    if (DioramaPlaneUsesSparseCoverage(plane)) {
       const int displayed_width = snes_width - obj_apron * 2;
       const uint8_t *displayed = pixels[plane] +
           (size_t)obj_apron * sizeof(uint32_t);
-      const DioramaCoverageMask coverage = DioramaCoverage_FromArgb8888(
-          displayed, pitch_bytes[plane], displayed_width, snes_height);
-      /* A content-bearing plane whose winners all lie in the resolve apron is
-       * invisible to the ordinary layer mesh. Keep the established full draw
-       * as a fail-safe instead of turning its required submission into an
-       * empty-index failure; ordinary visible sprite bands take the cull. */
-      if (coverage) upload.coverage_masks[plane] = coverage;
+      const uint32_t plane_bit = UINT32_C(1) << (unsigned)plane;
+      if (plane_upload.changed || !(s_coverage_valid_mask & plane_bit)) {
+        const DioramaCoverageMask coverage = DioramaCoverage_FromArgb8888(
+            displayed, pitch_bytes[plane], displayed_width, snes_height);
+        /* A content-bearing plane whose winners all lie in the resolve apron
+         * is invisible to the ordinary layer mesh. Keep the established full
+         * draw as a fail-safe instead of turning its required submission into
+         * an empty-index failure. BG split planes cannot carry apron pixels,
+         * but share the same conservative zero-mask policy. */
+        s_coverage_masks[plane] = coverage
+            ? coverage : DioramaCoverage_FullMask();
+        s_coverage_valid_mask |= plane_bit;
+      }
+      upload.coverage_masks[plane] = s_coverage_masks[plane];
     }
   }
   DioramaPerformance_End(performance);
@@ -71,6 +80,9 @@ DioramaUploadResult Diorama_Upload(
 }
 
 void DioramaUpload_Reset(void) {
-  for (int plane = 0; plane < kDioramaPlane_Count; plane++)
+  for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
     PresentationUploadMirror_Reset(&s_upload_mirrors[plane]);
+    s_coverage_masks[plane] = 0;
+  }
+  s_coverage_valid_mask = 0;
 }

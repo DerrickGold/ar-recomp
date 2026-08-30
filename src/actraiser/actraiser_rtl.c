@@ -2049,6 +2049,49 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     .horizontal_mode = SR_PPU_HORIZONTAL_MARGIN_CENTERED,
     .margin_budget_pixels = (uint32_t)g_ws_extra,
   };
+  static int survey = -1;
+  if (survey < 0) {
+    const char *e = getenv("AR_WS_SURVEY");
+    survey = (e && e[0] && e[0] != '0') ? 1 : 0;
+  }
+  const uint8 map_group = g_ram[kActRaiserWram_MapGroup];
+  const uint8 map_number = g_ram[kActRaiserWram_CurrentMap];
+  uint8 hud_split_height = 0;
+  uint8 hud_split_left_end = 0;
+  uint8 hud_split_right_start = 0;
+  uint8 hud_player_row_y = 0;
+  uint8 hud_left_only_y = 0;
+
+  /* Host-overlay HUD layout is independent of the world having side margins.
+   * BG3 rows 0-3 are extracted into a transparent surface, then the host
+   * scales and anchors the status groups after the framebuffer is presented.
+   * Keeping this policy ahead of the no-widescreen-budget return is what makes
+   * HUD scale work in authentic 4:3 as well as 16:x. Wide Raw deliberately
+   * remains the unsplit comparison mode. */
+  if (!survey && g_settings.display_mode != kDisplayMode_WideRaw) {
+    if (ActRaiser_IsActionMapGroup(map_group)) {
+      /* y=0-19 ACT/TIME/SCORE; y=20-27 player; y=28-39 enemy. */
+      hud_split_height = kActRaiserActionHudHeight;
+      hud_split_left_end = kActRaiserActionHudLeftEnd;
+      hud_split_right_start = kActRaiserActionHudRightStart;
+      hud_player_row_y = kActRaiserActionHudPlayerRowY;
+      hud_left_only_y = kActRaiserActionHudEnemyRowY;
+    } else if (map_group == kActRaiserMapGroup_NonAction &&
+               map_number >= kActRaiserSimulationTown_First &&
+               map_number <= kActRaiserNonActionMap_SkyPalace) {
+      hud_split_height = kActRaiserSimulationHudHeight;
+      hud_split_left_end = kActRaiserSimulationHudSplit;
+      hud_split_right_start = kActRaiserSimulationHudSplit;
+      hud_player_row_y = kActRaiserSimulationHudHeight;
+      hud_left_only_y = kActRaiserSimulationHudHeight;
+    }
+  }
+  frame_policy.hud_split_height = hud_split_height;
+  frame_policy.hud_left_end_x = hud_split_left_end;
+  frame_policy.hud_right_start_x = hud_split_right_start;
+  frame_policy.hud_player_row_y = hud_player_row_y;
+  frame_policy.hud_left_only_y = hud_left_only_y;
+
   ActionBgTuner_BeginFrame();
   s_pending_action_bg_plan = ActRaiser_NativeBgPresentationPlan();
   s_pending_bg_capture_pad_to_budget = false;
@@ -2059,11 +2102,10 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
      * classification remains the authority for which layers may bind. */
     bool bind_plan = false;
     ActionBgPlan plan;
-    if (ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
+    if (ActRaiser_IsActionMapGroup(map_group)) {
       ActionBgPresentationPolicy presentation;
       if (ActRaiser_ResolveActionBgPlan(
-              g_ram[kActRaiserWram_MapGroup],
-              g_ram[kActRaiserWram_CurrentMap], false,
+              map_group, map_number, false,
               &plan, &presentation)) {
         s_pending_action_bg_plan = plan;
         /* No side columns are rendered in this mode. Preserve source ownership
@@ -2077,22 +2119,18 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     /* Beginning the policy transaction clears any prior frame's virtual maps
      * and layer extents before the optional authentic provider is republished. */
     ActRaiser_ResolveVerticalMarginPolicy(
-        g_ram[kActRaiserWram_MapGroup],
-        g_ram[kActRaiserWram_CurrentMap], &frame_policy);
+        map_group, map_number, &frame_policy);
     if (!ActRaiser_CommitPpuFramePolicy(&frame_policy)) return;
+    if (hud_split_height)
+      ActRaiser_ClaimOverlayCapture(
+          SR_PPU_OVERLAY_BG3, 0, 0, kActRaiserAuthenticWidth,
+          hud_split_height, SR_PPU_OVERLAY_REMOVE_FROM_GAME);
     if (bind_plan)
       ActRaiserActionBg_BindPlanWithVirtualLayers(
           g_ram, kActRaiserWramSize, &plan,
           ActRaiser_CurrentVirtualLayerRoom());
     return;
   }
-  static int survey = -1;
-  if (survey < 0) {
-    const char *e = getenv("AR_WS_SURVEY");
-    survey = (e && e[0] && e[0] != '0') ? 1 : 0;
-  }
-  const uint8 map_group = g_ram[kActRaiserWram_MapGroup];
-  const uint8 map_number = g_ram[kActRaiserWram_CurrentMap];
   /* Per-mode widescreen policy (docs/rendering-engine.md section 13). Two knobs per
    * mode: (1) does it use the wide view at all, and (2) a per-layer clamp
    * mask (bit L keeps BG(L+1) at 256) for scenes that mix wide world layers
@@ -2106,11 +2144,6 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   uint8 mirror = 0;
   uint8 repeat = 0;
   ActionBgPresentationPolicy bg_presentation = { 0 };
-  uint8 hud_split_height = 0;
-  uint8 hud_split_left_end = 0;
-  uint8 hud_split_right_start = 0;
-  uint8 hud_player_row_y = 0;
-  uint8 hud_left_only_y = 0;
   int bg_plan_valid = 0;
   int bg_plan_source_bg1 = kNoActionBgPlanSource;
   int bg_plan_source_bg2 = kNoActionBgPlanSource;
@@ -2247,41 +2280,6 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     project_final_bg_policy = true;
   }
 
-  /* Host-overlay HUD layout. BG3 rows 0-3 are the live status compose band
-   * ($7F:B000 -> VRAM $5800). The PPU extracts this band into a transparent
-   * surface and the host independently scales/anchors its source chunks after
-   * the game framebuffer has been upscaled. The 2026-07-14 action dump places
-   * its three occupied groups at columns 0-10, 11-20, and 21-31. Simulation
-   * has no centered status group, so it uses the two-way form: columns 0-20
-   * anchor left and 21-31 anchor right. Selected-magic OAM is promoted
-   * separately after its exact four-slot signature is validated below.
-   *
-   * RAW and 4:3 remain unsplit comparison modes. Sky Palace ($00:$07) uses
-   * the same simulation header; temple/world-map flows do not. */
-  if (!survey && wide &&
-      g_settings.display_mode != kDisplayMode_43 &&
-      g_settings.display_mode != kDisplayMode_WideRaw) {
-    if (ActRaiser_IsActionMapGroup(map_group)) {
-      /* Three horizontal bands in the 40px action HUD:
-       *   y= 0-19  ACT/TIME/SCORE — 3-way left/center/right
-       *   y=20-27  PLAYER health + magic-scroll — left+right at rightStart
-       *   y=28-39  ENEMY health — full-width left-only (boss spans 256px) */
-      hud_split_height = kActRaiserActionHudHeight;
-      hud_split_left_end = kActRaiserActionHudLeftEnd;
-      hud_split_right_start = kActRaiserActionHudRightStart;
-      hud_player_row_y = kActRaiserActionHudPlayerRowY;
-      hud_left_only_y = kActRaiserActionHudEnemyRowY;
-    } else if (map_group == kActRaiserMapGroup_NonAction &&
-               map_number >= kActRaiserSimulationTown_First &&
-               map_number <= kActRaiserNonActionMap_SkyPalace) {
-      hud_split_height = kActRaiserSimulationHudHeight;
-      hud_split_left_end = kActRaiserSimulationHudSplit;
-      hud_split_right_start = kActRaiserSimulationHudSplit;
-      hud_player_row_y = kActRaiserSimulationHudHeight;
-      hud_left_only_y = kActRaiserSimulationHudHeight;
-    }
-  }
-
   frame_policy.horizontal_mode = wide
       ? SR_PPU_HORIZONTAL_MARGIN_AVAILABLE
       : SR_PPU_HORIZONTAL_MARGIN_CENTERED;
@@ -2297,11 +2295,6 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     if (g_settings.diorama_mode && g_settings.diorama_margin_fix)
       frame_policy.flags |=
           SR_PPU_FRAME_POLICY_PAD_CAPTURED_TO_BUDGET;
-    frame_policy.hud_split_height = hud_split_height;
-    frame_policy.hud_left_end_x = hud_split_left_end;
-    frame_policy.hud_right_start_x = hud_split_right_start;
-    frame_policy.hud_player_row_y = hud_player_row_y;
-    frame_policy.hud_left_only_y = hud_left_only_y;
   }
   /* Seed vertical geometry from the resolved game-owned plan before BEGIN so
    * a stable extended frame does not momentarily collapse to 224 lines and
@@ -2316,11 +2309,11 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
    * state as one validated operation. Provider-dependent corrections are
    * resolved below and published through the matching finalize transaction. */
   if (!ActRaiser_CommitPpuFramePolicy(&frame_policy)) return;
+  if (hud_split_height)
+    ActRaiser_ClaimOverlayCapture(
+        SR_PPU_OVERLAY_BG3, 0, 0, kActRaiserAuthenticWidth,
+        hud_split_height, SR_PPU_OVERLAY_REMOVE_FROM_GAME);
   if (wide) {
-    if (hud_split_height)
-      ActRaiser_ClaimOverlayCapture(
-          SR_PPU_OVERLAY_BG3, 0, 0, kActRaiserAuthenticWidth,
-          hud_split_height, SR_PPU_OVERLAY_REMOVE_FROM_GAME);
     if (bg_hle_allowed && bg_plan_valid) {
       bg_hle_bindings = ActRaiserActionBg_BindPlanWithVirtualLayers(
           g_ram, kActRaiserWramSize, &bg_plan,
@@ -2508,7 +2501,16 @@ static SrResult ActRaiser_WidescreenHudObjPromoteTransaction(
   (void)runner;
   s_hud_obj_icon_first = 0;
   s_hud_obj_icon_count = 0;
-  if (!context || !context->frame.margin_budget)
+  if (!context)
+    return SR_RESULT_OK;
+  /* A regular HUD split is valid without a widescreen margin budget (4:3).
+   * The native fallback handles flat Diorama modes that intentionally have no
+   * split, notably Wide Raw. */
+  const bool native_flat_diorama =
+      Diorama_IsActiveThisFrame() && g_settings.diorama_hud_flat &&
+      context->frame.hud_split_height == 0;
+  if (!context->frame.margin_budget &&
+      !context->frame.hud_split_height && !native_flat_diorama)
     return SR_RESULT_OK;
 
   uint8 capture_height = 0;
@@ -2516,11 +2518,13 @@ static SrResult ActRaiser_WidescreenHudObjPromoteTransaction(
   uint8 capture_count = kActRaiserHudObjOamCount;
   uint8 map_group = g_ram[kActRaiserWram_MapGroup];
   uint8 map_number = g_ram[kActRaiserWram_CurrentMap];
-  if (context->frame.hud_split_height == kActRaiserActionHudHeight &&
+  const bool split_action_hud =
+      context->frame.hud_split_height == kActRaiserActionHudHeight &&
       context->frame.hud_left_end == kActRaiserActionHudLeftEnd &&
       context->frame.hud_right_start == kActRaiserActionHudRightStart &&
       context->frame.hud_player_row_y == kActRaiserActionHudPlayerRowY &&
-      context->frame.hud_left_only_y == kActRaiserActionHudEnemyRowY &&
+      context->frame.hud_left_only_y == kActRaiserActionHudEnemyRowY;
+  if ((split_action_hud || native_flat_diorama) &&
       ActRaiser_IsActionMapGroup(map_group)) {
     for (int slot = 0; slot < kActRaiserHudObjOamCount; slot++) {
       int index = slot * 2;
@@ -3597,10 +3601,12 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
          * split's three anchored bands are driven by wsHudSplitHeight, not
          * by this rectangle, so their geometry is unchanged).
          *
-         * Only extend an ALREADY-ACTIVE capture: when the widescreen policy
-         * declined a HUD split (non-action map, 4:3 / RAW display mode) BG3
-         * is not captured at all, and adding a RemoveFromGame capture with
-         * nothing on the present side to draw it would erase BG3 outright. */
+         * When widescreen policy supplied a split, extend that capture. In
+         * an intentionally unsplit mode such as Wide Raw, flat Diorama still
+         * needs a full BG3 capture so the HUD can be composited in native
+         * screen space rather than inheriting the scene perspective. The
+         * present side recognizes split-height zero plus this full capture as
+         * one unsplit/native chunk. */
         const SrPpuOverlayCaptureState *bg3_capture =
             ActRaiser_PpuCapture(SR_PPU_OVERLAY_BG3);
         if (bg3_capture->y1 > bg3_capture->y0 &&
@@ -3610,6 +3616,12 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
               bg3_capture->x1 - bg3_capture->x0,
               kActRaiserAuthenticHeight - bg3_capture->y0,
               bg3_capture->flags);
+        else if (bg3_capture->y1 <= bg3_capture->y0 &&
+                 (capture_screens & (1 << SR_PPU_OVERLAY_BG3)))
+          ActRaiser_SetPpuOverlayCapture(
+              SR_PPU_OVERLAY_BG3, 0, 0, kActRaiserAuthenticWidth,
+              kActRaiserAuthenticHeight,
+              SR_PPU_OVERLAY_REMOVE_FROM_GAME);
       } else {
         if (!g_diorama_layer_pixels[SR_PPU_OVERLAY_BG3])
           g_diorama_layer_pixels[SR_PPU_OVERLAY_BG3] =

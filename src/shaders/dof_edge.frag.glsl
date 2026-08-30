@@ -1,15 +1,13 @@
 #version 450
 
-/* Depth of field + parallax-aware edge AA, COMBINED — deliberately one shader.
+/* Depth-of-field filter for diorama layers.
  *
- * Both effects target the SAME layer set (BG1/BG2 and their priority-split
- * halves), and SDL allows only ONE custom fragment shader bound per draw call.
- * An earlier version picked edge AA over DOF whenever both were enabled, which
- * — since both default on — meant DOF silently never rendered at all. Doing
- * both in one pass fixes that, and each knob is independently zeroable:
- * blur_radius = 0 makes the box blur a no-op (all 9 taps land on the same
- * texel), edge_feather <= 0 skips the fade. So this one shader correctly
- * serves DOF-only, edge-AA-only, both, or neither.
+ * Edge coverage used to live here as an inward UV-space alpha fade. A fixed
+ * source-texel width became a wide translucent band after perspective
+ * magnification, exposing dark or light layers underneath. The compositor now
+ * keeps the true boundary opaque and adds a one-output-pixel geometry fringe.
+ * `edge_feather` remains only to preserve the generated shader-blob uniform
+ * layout; production draws always set it to zero.
  *
  * The uniform block is all scalars on purpose: it mirrors the private upload
  * block in platform/sdl/diorama_effect_backend_sdl.c field-for-field, so the
@@ -92,8 +90,8 @@ void main() {
     vec3 filtered_rgb = sum.a > 0.00001 ? sum.rgb / sum.a : vec3(0.0);
     vec4 c = vec4(filtered_rgb, filtered_alpha);
 
-    /* Feather the layer's TRUE UV edge, not the screen edge — these planes are
-     * tilted, so the geometric border lands at an arbitrary screen angle. */
+    /* Legacy blob-ABI path. The production compositor leaves this disabled and
+     * supplies screen-space edge coverage as geometry. */
     float fade = 1.0;
     if (edge_feather > 0.0) {
         float du = min(uv.x - u_min, u_max - uv.x);

@@ -52,7 +52,7 @@ static void UnlockPerformanceData(void) {
 static const char *const kDioramaStageNames[] = {
   "total", "upload", "frame-analysis", "producer-setup", "scanout",
   "producer-finish", "host-post", "frame-synthesis", "mesh",
-  "supersample", "submit", "callback",
+  "supersample", "dof-source", "submit", "callback",
 };
 _Static_assert(
     sizeof(kDioramaStageNames) / sizeof(kDioramaStageNames[0]) ==

@@ -1787,8 +1787,8 @@ const SettingDesc g_setting_descs[] = {
                "Diorama: show the BG3 (HUD) plane.",
                kSettingCat_Presentation, 1, false, Diorama_ModeIsOn, NULL),
   BOOL_SETTING(diorama_hud_flat, NULL, "Flat HUD",
-               "On: HUD (ACT/TIME/SCORE, health, boss bar) stays flat and "
-               "widescreen-anchored like flat mode. Off: HUD renders as an "
+               "On: HUD (ACT/TIME/SCORE, health, boss bar) stays flat, "
+               "scalable, and screen-anchored like flat mode. Off: it is an "
                "unanchored tilted plane in the box, matching the pre-fix look.",
                kSettingCat_Presentation, 1, false, Diorama_ModeIsOn, NULL),
   PRESENTATION_ACTION_SETTING("diorama_reset", "Reset defaults",
@@ -1827,8 +1827,8 @@ const SettingDesc g_setting_descs[] = {
                "playfield.",
                kSettingCat_Graphics, 1, false, GpuShadersActive, NULL),
   BOOL_SETTING(gpu_fx_edgeaa, "AR_GPU_FX_EDGEAA", "Edge anti-aliasing",
-               "Diorama: soften the hard rectangular edge of tilted "
-               "background layers.",
+               "Diorama: add one-pixel screen-space coverage outside tilted "
+               "background layer edges.",
                kSettingCat_Graphics, 1, false, GpuShadersActive, NULL),
   BOOL_SETTING(gpu_fx_shadow, "AR_GPU_FX_SHADOW", "Soft shadow blur",
                "Diorama: blur sprite/layer drop shadows. KNOWN ISSUE: can "

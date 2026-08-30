@@ -1,4 +1,5 @@
 #include "diorama/diorama_coverage.h"
+#include "diorama/diorama_planes.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -34,9 +35,23 @@ static void TestIndexCompaction(void) {
            cell * kDioramaCoverageIndicesPerCell + i);
 }
 
+static void TestSparsePlanePolicy(void) {
+  assert(!DioramaPlaneUsesSparseCoverage(SR_PPU_OVERLAY_BG1));
+  assert(!DioramaPlaneUsesSparseCoverage(SR_PPU_OVERLAY_BG2));
+  assert(!DioramaPlaneUsesSparseCoverage(SR_PPU_OVERLAY_BG3));
+  assert(!DioramaPlaneUsesSparseCoverage(kDioramaPlane_Backdrop));
+  assert(DioramaPlaneUsesSparseCoverage(kDioramaPlane_Bg1Hi));
+  assert(DioramaPlaneUsesSparseCoverage(kDioramaPlane_Bg2Hi));
+  assert(DioramaPlaneUsesSparseCoverage(kDioramaPlane_Bg1Far));
+  assert(DioramaPlaneUsesSparseCoverage(kDioramaPlane_Bg2Far));
+  assert(DioramaPlaneUsesSparseCoverage(SR_PPU_OVERLAY_OBJ));
+  assert(DioramaPlaneUsesSparseCoverage(kDioramaPlane_Obj3));
+}
+
 int main(void) {
   TestAlphaCellAndDilation();
   TestIndexCompaction();
+  TestSparsePlanePolicy();
   puts("diorama coverage tests: pass");
   return 0;
 }

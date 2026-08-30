@@ -1692,11 +1692,13 @@ static void InvokeSelectedAction(void) {
  *
  * Apply one value step of `multiplier` base-steps. Live every call; persisted
  * immediately when `persist` (a tap or single press), otherwise deferred to
- * the end of the hold via s_hold_dirty. */
-static void StepNumeric(const SettingDesc *desc, int direction,
+ * the end of the hold via s_hold_dirty. Returns true when the HUD scale
+ * crosses its upper cycle boundary into Match game. */
+static bool StepNumeric(const SettingDesc *desc, int direction,
                         long multiplier, bool persist) {
   long value = 0;
-  if (!Settings_GetLong(desc, &value)) return;
+  if (!Settings_GetLong(desc, &value)) return false;
+  long stored_value = value;
   /* The scale rows use 0 as a "follow the auto value" sentinel; step off that
    * resolved number so the first press moves relative to what is on screen. */
   if (value == 0 && desc->field == &g_settings.menu_scale_percent)
@@ -1705,6 +1707,9 @@ static void StepNumeric(const SettingDesc *desc, int direction,
     value = s_match_game_scale_percent;
   long step = desc->step > 0 ? desc->step : 1;
   long next = value + (long)direction * step * multiplier;
+  bool wrapped = desc->field == &g_settings.hud_scale_percent &&
+                 direction > 0 && stored_value != 0 && value >= desc->maxval;
+  if (wrapped) next = 0;  /* 0 is the HUD row's "Match game" sentinel. */
   SettingChangeResult result = Settings_SetLong(desc, next);
   if (persist) {
     SaveAcceptedChange(result);
@@ -1712,6 +1717,7 @@ static void StepNumeric(const SettingDesc *desc, int direction,
     s_hold_dirty = true;
     s_hold_result = result;
   }
+  return wrapped;
 }
 
 /* Begin (or, on a re-press of the same direction, continue) a held step. The
@@ -1729,7 +1735,9 @@ static void BeginValueHold(const SettingDesc *desc, int direction,
   s_hold_next_ms = s_hold_start_ms + kHoldInitialDelayMs;
   s_hold_dirty = false;
   s_hold_result = kSettingChange_Applied;
-  StepNumeric(desc, direction, 1, false);  /* immediate fine step */
+  /* Stop this key hold at the cycle boundary. Otherwise its first repeat
+   * would immediately step away from Match game again. */
+  if (StepNumeric(desc, direction, 1, false)) EndValueHold();
 }
 
 /* ── Layer editor dispatch ───────────────────────────────────────────────
@@ -1982,7 +1990,7 @@ static void ActivateSelectedRow(void) {
     case kSettingType_Custom:  BeginEditing(); break;
     /* Confirm on a numeric row is a single fine step up, not a text prompt —
      * a discrete nudge with no hold, so it saves immediately. */
-    case kSettingType_Int:     StepNumeric(desc, +1, 1, true); break;
+    case kSettingType_Int:     (void)StepNumeric(desc, +1, 1, true); break;
     case kSettingType_Bool:
     case kSettingType_Enum:    ChangeSelectedValue(1); break;
   }
@@ -2320,7 +2328,10 @@ static void TickHold(uint64_t now_ms) {
   int guard = 0;
   while (now_ms >= s_hold_next_ms && guard++ < 8) {
     long multiplier = HoldStepMultiplier(s_hold_desc, now_ms - s_hold_start_ms);
-    StepNumeric(s_hold_desc, s_hold_dir, multiplier, false);
+    if (StepNumeric(s_hold_desc, s_hold_dir, multiplier, false)) {
+      EndValueHold();
+      return;
+    }
     s_hold_next_ms += kHoldRepeatMs;
   }
   /* If a frame hitch left the schedule far in the past, resync rather than

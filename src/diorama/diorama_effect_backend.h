@@ -36,6 +36,8 @@ typedef struct DioramaDofEdgeEffectParams {
   float u_max;
   float v_min;
   float v_max;
+  /* Deprecated shader-blob ABI slot. The compositor always supplies zero;
+   * screen-space edge coverage is geometry-owned now. */
   float edge_feather;
   float lower_content_v_max;
 } DioramaDofEdgeEffectParams;

@@ -62,6 +62,7 @@ extern ArRenderTexture g_sim3d_flat_texture;
 static uint32_t s_diorama_uploaded_plane_mask;
 static DioramaCoverageMask
     s_diorama_coverage_masks[kDioramaPlane_Count];
+static uint64_t s_diorama_bg2_content_revision;
 static ArRenderTexture s_action_bg1_mask_texture;
 static ArRenderTexture s_action_bg2_mask_texture;
 static ArRenderTexture s_action_plane_effect_target;
@@ -794,6 +795,9 @@ void PresentUpload(const FrameSlot *slot) {
         slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom,
         slot->obj_apron, upload_mask);
     s_diorama_uploaded_plane_mask = upload.synchronized_plane_mask;
+    if (upload.changed_plane_mask &
+        (UINT32_C(1) << SR_PPU_OVERLAY_BG2))
+      s_diorama_bg2_content_revision++;
     memcpy(s_diorama_coverage_masks, upload.coverage_masks,
            sizeof(s_diorama_coverage_masks));
     PlaneStatCensus(
@@ -855,10 +859,15 @@ void PresentUpload(const FrameSlot *slot) {
   /* Refresh HUD textures for both presentation paths. Diorama anchors the HUD
    * through the same textures as flat mode; skipping this upload would combine
    * stale pixels with the current frame's split geometry. */
-  if (slot->hud_split_height) {
+  const FrameSlotOverlayCapture *hud_bg_capture =
+      &slot->overlay_captures[kFrameSlotOverlay_Bg3];
+  const bool native_diorama_hud =
+      slot->diorama_active && slot->diorama_hud_flat &&
+      hud_bg_capture->y1 > hud_bg_capture->y0;
+  if (slot->hud_split_height || native_diorama_hud) {
     int split_rows = slot->hud_split_height;
     if (ArRenderTexture_IsValid(g_hud_bg_texture)) {
-      int rows = slot->overlay_captures[kFrameSlotOverlay_Bg3].y1;
+      int rows = hud_bg_capture->y1;
       if (rows < split_rows) rows = split_rows;
       const ArRenderRectI hud = {0, 0, slot->snes_width, rows};
       const SrPpuSurfaceView *surface = BoundPpuSurface(
@@ -879,6 +888,8 @@ void PresentUpload(const FrameSlot *slot) {
       const ArRenderRectI hud = {0, 0, slot->snes_width, rows};
       const SrPpuSurfaceView *surface = BoundPpuSurface(
           &slot->sim3d_output_surfaces.hud_obj);
+      if (!surface)
+        surface = BoundPpuSurface(&slot->hud_obj_surface);
       if (!surface)
         surface = BoundPpuSurface(
             &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][0]);
@@ -1923,7 +1934,7 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
       current_textures[plane] = g_diorama_textures[plane];
     DioramaPerformanceScope frame_synthesis =
         DioramaPerformance_Begin(kDioramaPerformance_FrameSynthesis);
-    (void)DioramaFrameGeneration_Prepare(
+    const uint32_t generated_plane_mask = DioramaFrameGeneration_Prepare(
         &g_render_device, slot, alpha, current_textures,
         s_diorama_uploaded_plane_mask, scene_textures);
     DioramaPerformance_End(frame_synthesis);
@@ -2119,6 +2130,9 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
         &final_cam, distance_scale,
         slot->diorama_plane_additive_mask & s_diorama_uploaded_plane_mask,
         slot->interp_setting_enabled ? NULL : s_diorama_coverage_masks,
+        s_diorama_bg2_content_revision,
+        (generated_plane_mask &
+         (UINT32_C(1) << SR_PPU_OVERLAY_BG2)) != 0,
         effect_obj_priority_mask, effect_bg_plane_mask,
         slot->diorama_map_group, slot->diorama_map_number,
         slot->diorama_layer_section, &bg2_valid_spans,

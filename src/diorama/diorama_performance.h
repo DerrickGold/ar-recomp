@@ -17,6 +17,7 @@ typedef enum DioramaPerformanceStage {
   kDioramaPerformance_FrameSynthesis,
   kDioramaPerformance_Mesh,
   kDioramaPerformance_Supersample,
+  kDioramaPerformance_DofSource,
   kDioramaPerformance_Submit,
   kDioramaPerformance_Callback,
   kDioramaPerformanceStage_Count,

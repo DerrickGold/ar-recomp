@@ -35,7 +35,7 @@ static const GpuShaderBlobs kEffectBlobs[kDioramaEffect_Count] = {
 static const char *const kEffectNames[kDioramaEffect_Count] = {
   [kDioramaEffect_Blur] = "blur",
   [kDioramaEffect_RimLight] = "rim light",
-  [kDioramaEffect_DofEdge] = "DOF/edge AA",
+  [kDioramaEffect_DofEdge] = "DOF",
 };
 
 typedef struct DioramaEffectBackendState {
