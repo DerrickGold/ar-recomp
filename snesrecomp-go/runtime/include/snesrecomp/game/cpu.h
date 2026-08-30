@@ -253,6 +253,12 @@ RecompReturn cpu_dispatch_pc_from(CpuState *cpu, uint32 pc24,
                                   uint16 miss_restore_stack,
                                   uint32 source_pc24);
 int cpu_dispatch_has_entry(CpuState *cpu, uint32 pc24);
+/* Bounded bring-up diagnostics for computed targets that have no live M/X
+ * registry body. RTS/RTL continuation sources are deliberately excluded. */
+void cpu_dispatch_diagnostic_reset(void);
+unsigned cpu_dispatch_missing_warning_count(void);
+uint32 cpu_dispatch_missing_warning_hits(uint32 site_pc24,
+                                         uint32 target_pc24);
 /* Generated direct dispatches call this only in semantic-trace builds. The
  * implementation shares the generic registry dispatch event constructor so
  * validation observes an edge independently of its lowering strategy. */

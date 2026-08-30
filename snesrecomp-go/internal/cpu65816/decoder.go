@@ -51,16 +51,26 @@ type Instruction struct {
 	Operand  uint32
 	Length   uint8
 
-	DispatchEntries   []uint32
-	DispatchKind      string
-	DispatchIndexReg  string
-	DispatchTableBase []uint16
-	M                 uint8
-	X                 uint8
-	DispatchTerminal  bool
-	DispatchReturn    *uint16
-	DispatchSEP       byte
-	DispatchMXProven  bool
+	DispatchEntries []uint32
+	// DispatchCandidateEntries is a report-only extension past a conservative
+	// zero-run bound. It must not drive successors or generated dispatch code
+	// until independent ownership/bounds evidence closes the target set.
+	DispatchCandidateEntries []uint32
+	DispatchKind             string
+	DispatchIndexReg         string
+	DispatchTableBase        []uint16
+	M                        uint8
+	X                        uint8
+	DispatchTerminal         bool
+	DispatchReturn           *uint16
+	DispatchSEP              byte
+	DispatchMXProven         bool
+	// DispatchBound records why an automatically recovered target count stops
+	// where it does. "structural_candidate" means an extended table lands
+	// exactly on its earliest same-bank handler but remains report-only;
+	// "heuristic_post_zero" found later plausible words without structural
+	// closure; "heuristic" is only the conservative open prefix.
+	DispatchBound string
 	// DispatchTransferPC is the instruction that performs the runtime control
 	// transfer. It differs from Address for collapsed PHA/.../RTS constructs,
 	// whose dispatch metadata is attached to the address-taken PHA.

@@ -274,6 +274,14 @@ promise of dot-accurate timing. If a title depends on tighter timing, put that
 ROM-address policy in a narrowly scoped HLE and document the unsupported timing
 assumption rather than replacing the generic register globally.
 
+Run `snesbuild poll-census` before the first interactive build. Its explicit
+`--registers` list accepts hardware addresses, APU ports, and 16-bit WRAM flags.
+With the default `--interrupt-sync`, it also follows decoded direct calls and
+tail transfers from the ROM's NMI/IRQ vectors, intersects their low-WRAM writes
+with decoded reads, and checks those synchronization candidates for polling
+loops. The report names the interrupt roots and writer PCs; it does not assume
+that every interrupt-written value is a frame gate or authorize an HLE.
+
 ## Recovering the game frame schedule
 
 The console timeline is cyclic, so adjacent phases can be grouped into a host

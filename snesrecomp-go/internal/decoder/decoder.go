@@ -213,10 +213,14 @@ func decodeIndirectJump(image rom.Image, bank byte, start, pc uint16, key Decode
 	}
 	site := Address24(bank, pc)
 	auth, authorized := options.IndirectDispatch[site]
+	automaticBound := ""
+	var automaticCandidates []uint32
 	if !authorized && instruction.Mode == cpu65816.INDIRX {
-		if entries := autorecoverXTable(image, bank, instruction, options.DataRegions, start); len(entries) > 0 {
-			auth = DispatchAuth{Count: len(entries), IndexReg: "X"}
+		if recovered := autorecoverXTable(image, bank, instruction, options.DataRegions, start); len(recovered.Entries) > 0 {
+			auth = DispatchAuth{Count: len(recovered.Entries), IndexReg: "X"}
 			authorized = true
+			automaticBound = recovered.Bound
+			automaticCandidates = append([]uint32(nil), recovered.Candidates...)
 		}
 	}
 	if !authorized && instruction.Mode == cpu65816.INDIR && uint16(instruction.Operand) <= 0xff {
@@ -250,6 +254,7 @@ func decodeIndirectJump(image rom.Image, bank byte, start, pc uint16, key Decode
 		entries, ok := resolveDispatch(image, bank, instruction, auth)
 		if ok {
 			instruction.DispatchEntries = entries
+			instruction.DispatchCandidateEntries = automaticCandidates
 			instruction.DispatchKind = "short"
 			if instruction.Length == 4 || len(auth.TableBases) == 3 {
 				instruction.DispatchKind = "long"
@@ -257,6 +262,7 @@ func decodeIndirectJump(image rom.Image, bank byte, start, pc uint16, key Decode
 			instruction.DispatchIndexReg = auth.IndexReg
 			instruction.DispatchTableBase = append([]uint16(nil), auth.TableBases...)
 			instruction.DispatchMXProven = auth.TargetMXProven
+			instruction.DispatchBound = automaticBound
 			instruction.DispatchTransferPC = instruction.Address & 0xffffff
 			successors := dispatchSuccessors(bank, entries, instruction.M, instruction.X)
 			storeAndQueue(key, instruction, successors, graph, worklist, pc)
@@ -368,10 +374,14 @@ func decodeIndirectJSR(image rom.Image, bank byte, start, pc uint16, key DecodeK
 	}
 	site := Address24(bank, pc)
 	auth, authorized := options.IndirectDispatch[site]
+	automaticBound := ""
+	var automaticCandidates []uint32
 	if !authorized {
-		if entries := autorecoverXTable(image, bank, instruction, options.DataRegions, start); len(entries) > 0 {
-			auth = DispatchAuth{Count: len(entries), IndexReg: "X"}
+		if recovered := autorecoverXTable(image, bank, instruction, options.DataRegions, start); len(recovered.Entries) > 0 {
+			auth = DispatchAuth{Count: len(recovered.Entries), IndexReg: "X"}
 			authorized = true
+			automaticBound = recovered.Bound
+			automaticCandidates = append([]uint32(nil), recovered.Candidates...)
 		}
 	}
 	if authorized {
@@ -380,6 +390,7 @@ func decodeIndirectJSR(image rom.Image, bank byte, start, pc uint16, key DecodeK
 		}
 		if entries, ok := resolveDispatch(image, bank, instruction, auth); ok {
 			instruction.DispatchEntries = entries
+			instruction.DispatchCandidateEntries = automaticCandidates
 			instruction.DispatchKind = "short"
 			if instruction.Length == 4 || len(auth.TableBases) == 3 {
 				instruction.DispatchKind = "long"
@@ -387,6 +398,7 @@ func decodeIndirectJSR(image rom.Image, bank byte, start, pc uint16, key DecodeK
 			instruction.DispatchIndexReg = auth.IndexReg
 			instruction.DispatchTableBase = append([]uint16(nil), auth.TableBases...)
 			instruction.DispatchMXProven = auth.TargetMXProven
+			instruction.DispatchBound = automaticBound
 			instruction.DispatchTransferPC = instruction.Address & 0xffffff
 			successors := labeledSuccessors(image, instruction, key, bank, options)
 			successors = append(successors, dispatchSuccessors(bank, entries, instruction.M, instruction.X)...)

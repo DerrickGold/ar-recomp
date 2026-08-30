@@ -50,6 +50,54 @@ func TestExplicitDispatchTransferMustMatchInstruction(t *testing.T) {
 	}
 }
 
+func TestAutoDispatchTableRetainsZeroHolesUntilStructuralBoundary(t *testing.T) {
+	table := make([]byte, 72*2)
+	for index := 0; index < 72; index++ {
+		target := uint16(0x8190)
+		if index >= 12 && index <= 15 {
+			target = 0
+		}
+		table[index*2] = byte(target)
+		table[index*2+1] = byte(target >> 8)
+	}
+	image := bank0(map[uint16][]byte{
+		0x8000: {0x7C, 0x00, 0x81}, // JMP ($8100,X)
+		0x8100: table,
+		// The table lands exactly here. A non-padding window also proves this is
+		// a plausible handler rather than an all-zero/all-FF data region.
+		0x8190: {0x60, 0xEA, 0xEA, 0xEA, 0xEA, 0xEA, 0xEA, 0xEA,
+			0xEA, 0xEA, 0xEA, 0xEA, 0xEA, 0xEA, 0xEA, 0xEA},
+	})
+
+	graph, err := DecodeFunction(image, 0, 0x8000, 1, 0, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded := graph.Instructions[DecodeKey{PC: 0x8000, M: 1, X: 0}]
+	if decoded == nil {
+		t.Fatalf("missing decoded dispatch: keys=%v", graph.Order)
+	}
+	entries := decoded.Instruction.DispatchEntries
+	if len(entries) != 12 {
+		t.Fatalf("compiled dispatch entries = %d, want conservative 12", len(entries))
+	}
+	candidates := decoded.Instruction.DispatchCandidateEntries
+	if len(candidates) != 72 {
+		t.Fatalf("analysis candidates = %d, want 72", len(candidates))
+	}
+	for index := 12; index <= 15; index++ {
+		if candidates[index] != 0 {
+			t.Errorf("candidate %d = %#06x, want zero hole", index, candidates[index])
+		}
+	}
+	if candidates[16] != 0x8190 {
+		t.Fatalf("candidate after zero run = %#06x, want $00:8190", candidates[16])
+	}
+	if decoded.Instruction.DispatchBound != "structural_candidate" {
+		t.Fatalf("dispatch bound = %q, want structural_candidate", decoded.Instruction.DispatchBound)
+	}
+}
+
 func TestModeSplitPreservesBothStates(t *testing.T) {
 	graph := mustDecode(t, bank0(map[uint16][]byte{
 		0x8000: {0xC2, 0x30, 0xB0, 0x0C, 0xE2, 0x30, 0x80, 0x08},

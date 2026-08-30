@@ -289,6 +289,117 @@ func TestAnalyzeAuthoredShadowPrioritizesTaggedStreamHandlerDispatch(t *testing.
 	}
 }
 
+func TestAnalyzeAuthoredShadowReportsDispatchCodeIslandAfterBRA(t *testing.T) {
+	root := t.TempDir()
+	image := make([]byte, 0x8000)
+	copy(image[0x0000:], []byte{0x7c, 0x00, 0x81}) // JMP ($8100,X)
+	copy(image[0x0100:], []byte{0x00, 0x82, 0x40, 0x82})
+	copy(image[0x0200:], []byte{0x80, 0x2e}) // BRA $8230
+	copy(image[0x0202:], []byte{0xa9, 0x01, 0x85, 0x10, 0x60})
+	copy(image[0x0230:], []byte{0x60, 0xea, 0xea, 0xea})
+	copy(image[0x0240:], []byte{0xa9, 0x02, 0x85, 0x11, 0x60})
+	romPath := filepath.Join(root, "fixture.sfc")
+	if err := os.WriteFile(romPath, image, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgDir := filepath.Join(root, "recomp")
+	writeTestFile(t, filepath.Join(cfgDir, "bank00.cfg"), `bank = 00
+func Dispatcher 8000 entry_mx:1,1
+func FirstHandler 8200 entry_mx:1,1
+func NextHandler 8240 entry_mx:1,1
+indirect_dispatch 8000 2 idx:X tables:8100 transfer:tail
+`)
+
+	report, err := AnalyzeAuthoredShadow(ShadowAnalysisOptions{
+		ROMPath: romPath, CFGDir: cfgDir, Jobs: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Summary.DispatchCodeIslands != 1 || len(report.DispatchCodeIslands) != 1 {
+		t.Fatalf("dispatch islands=%+v summary=%+v", report.DispatchCodeIslands, report.Summary)
+	}
+	island := report.DispatchCodeIslands[0]
+	if island.SitePC != 0x008000 || island.PreviousTargetPC != 0x008200 ||
+		island.NextTargetPC != 0x008240 || island.CandidateEntryPC != 0x008202 ||
+		island.EndExclusive != 0x008207 || island.PrecededBy != "BRA" ||
+		island.Confidence != analysis.ConfidenceProbable {
+		t.Fatalf("unexpected dispatch code island: %+v", island)
+	}
+	var output bytes.Buffer
+	if err := WriteShadowReport(&output, report, "text", true); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"dispatch gap sweep: 1", "[DISPATCH-CODE-ISLAND]", "$00:8202", "preceded_by=BRA"} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("verbose report missing %q:\n%s", want, output.String())
+		}
+	}
+}
+
+func TestAnalyzeAuthoredShadowReportsPostZeroTableCandidateWithoutChangingCompiledBound(t *testing.T) {
+	root := t.TempDir()
+	image := make([]byte, 0x8000)
+	copy(image[0x0000:], []byte{0x7c, 0x00, 0x81}) // JMP ($8100,X)
+	for index := 0; index < 72; index++ {
+		target := uint16(0x8190)
+		if index >= 12 && index <= 15 {
+			target = 0
+		}
+		image[0x100+index*2] = byte(target)
+		image[0x101+index*2] = byte(target >> 8)
+	}
+	copy(image[0x0190:], []byte{0xa9, 0x01, 0x85, 0x10, 0x60,
+		0xea, 0xea, 0xea, 0xea, 0xea, 0xea, 0xea, 0xea, 0xea, 0xea, 0xea})
+	romPath := filepath.Join(root, "fixture.sfc")
+	if err := os.WriteFile(romPath, image, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgDir := filepath.Join(root, "recomp")
+	writeTestFile(t, filepath.Join(cfgDir, "bank00.cfg"), `bank = 00
+func Dispatcher 8000 entry_mx:1,0
+func Handler 8190 entry_mx:1,0
+indirect_dispatch 8000 72 idx:X tables:8100 transfer:tail
+`)
+
+	report, err := AnalyzeAuthoredShadow(ShadowAnalysisOptions{
+		ROMPath: romPath, CFGDir: cfgDir, Jobs: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var comparison *analysis.Comparison
+	for index := range report.Comparisons {
+		if report.Comparisons[index].SitePC == 0x008000 {
+			comparison = &report.Comparisons[index]
+			break
+		}
+	}
+	if comparison == nil || comparison.Status != analysis.ComparisonPartial ||
+		comparison.Inferred == nil || comparison.Inferred.TargetSetClosed ||
+		len(comparison.Inferred.TargetCandidates) != 72 {
+		t.Fatalf("zero-hole comparison=%+v summary=%+v", comparison, report.Summary)
+	}
+	detail := comparison.Inferred.Evidence[0].Detail
+	if !strings.Contains(detail, "conservative count=12") ||
+		!strings.Contains(detail, "post-zero candidate count=72") {
+		t.Fatalf("candidate evidence=%q", detail)
+	}
+	foundSpan := false
+	for _, span := range report.TableSpans {
+		if span.SitePC == 0x008000 && span.EntryCount == 72 {
+			for _, provenance := range span.Provenance {
+				if provenance == "static.decoder.auto_dispatch" {
+					foundSpan = true
+				}
+			}
+		}
+	}
+	if !foundSpan {
+		t.Fatalf("missing 72-entry candidate table span: %+v", report.TableSpans)
+	}
+}
+
 func TestSelectStaticProvenAutomaticDispatchFactsRejectsOpenAndObservedFacts(t *testing.T) {
 	proven := analysis.DispatchFact{
 		SitePC: 0x008100, Mnemonic: "RTS", Transfer: analysis.TransferResume,

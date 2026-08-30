@@ -20,7 +20,7 @@ import (
 	romimage "github.com/DerrickGold/snesrecomp-go/internal/rom"
 )
 
-const shadowReportVersion = 4
+const shadowReportVersion = 5
 
 const (
 	shadowUnresolvedGeneric              = "generic_dynamic_target"
@@ -63,6 +63,7 @@ type ShadowSummary struct {
 	UniqueUnresolvedSites         int `json:"unique_unresolved_sites"`
 	LikelyBlockingUnresolvedSites int `json:"likely_blocking_unresolved_sites"`
 	DecodeIssues                  int `json:"decode_issues"`
+	DispatchCodeIslands           int `json:"dispatch_code_islands"`
 }
 
 type ShadowCaller struct {
@@ -119,18 +120,36 @@ type ShadowTableSpan struct {
 	Provenance   []string            `json:"provenance"`
 }
 
+// ShadowDispatchCodeIsland is a review-only candidate handler found in a CFG
+// hole between two known targets of the same computed dispatch. The bytes are
+// not promoted into generated code: the finding names a place where ordinary
+// decode ownership stopped at an unconditional transfer but sequential decode
+// reaches a return before the next claimed block.
+type ShadowDispatchCodeIsland struct {
+	SitePC           uint32              `json:"site_pc"`
+	PreviousTargetPC uint32              `json:"previous_target_pc"`
+	NextTargetPC     uint32              `json:"next_target_pc"`
+	CandidateEntryPC uint32              `json:"candidate_entry_pc"`
+	EndExclusive     uint32              `json:"end_exclusive"`
+	LiveMX           []analysis.MXState  `json:"live_mx"`
+	PrecededBy       string              `json:"preceded_by"`
+	Confidence       analysis.Confidence `json:"confidence"`
+	Reason           string              `json:"reason"`
+}
+
 type ShadowReport struct {
-	Version          int                     `json:"version"`
-	Mode             string                  `json:"mode"`
-	NoWrite          bool                    `json:"no_write"`
-	ROM              ShadowROM               `json:"rom"`
-	Summary          ShadowSummary           `json:"summary"`
-	Comparisons      []analysis.Comparison   `json:"comparisons"`
-	TableSpans       []ShadowTableSpan       `json:"table_spans,omitempty"`
-	DispatchEvidence *ShadowDispatchEvidence `json:"dispatch_evidence,omitempty"`
-	Unresolved       []ShadowUnresolvedSite  `json:"unresolved_sites,omitempty"`
-	DecodeIssues     []ShadowDecodeIssue     `json:"decode_issues,omitempty"`
-	Limitations      []string                `json:"limitations,omitempty"`
+	Version             int                        `json:"version"`
+	Mode                string                     `json:"mode"`
+	NoWrite             bool                       `json:"no_write"`
+	ROM                 ShadowROM                  `json:"rom"`
+	Summary             ShadowSummary              `json:"summary"`
+	Comparisons         []analysis.Comparison      `json:"comparisons"`
+	TableSpans          []ShadowTableSpan          `json:"table_spans,omitempty"`
+	DispatchCodeIslands []ShadowDispatchCodeIsland `json:"dispatch_code_islands,omitempty"`
+	DispatchEvidence    *ShadowDispatchEvidence    `json:"dispatch_evidence,omitempty"`
+	Unresolved          []ShadowUnresolvedSite     `json:"unresolved_sites,omitempty"`
+	DecodeIssues        []ShadowDecodeIssue        `json:"decode_issues,omitempty"`
+	Limitations         []string                   `json:"limitations,omitempty"`
 }
 
 type ShadowDispatchEvidence struct {
@@ -242,12 +261,13 @@ func AnalyzeAuthoredShadow(options ShadowAnalysisOptions) (ShadowReport, error) 
 	}
 	allRegions := collectShadowDataRegions(banks)
 	calleeExitMX := collectShadowExitMX(banks)
-	inferred, rawUnresolved, unresolved, issues, inferenceStats, err := inferShadowFacts(image, banks, allRegions, calleeExitMX, options.Jobs)
+	inferred, rawUnresolved, unresolved, issues, inferenceStats, decodeResults, err := inferShadowFacts(image, banks, allRegions, calleeExitMX, options.Jobs)
 	if err != nil {
 		return ShadowReport{}, err
 	}
 	comparisons, comparisonSummary := analysis.CompareDispatchFacts(authored, inferred)
 	tableSpans := collectShadowTableSpans(comparisons)
+	dispatchCodeIslands := collectShadowDispatchCodeIslands(image, comparisons, decodeResults, allRegions, tableSpans)
 	confirmedTableSpans, candidateTableSpans := countShadowTableSpans(tableSpans)
 	hash := sha256.Sum256(image)
 	report := ShadowReport{
@@ -266,17 +286,20 @@ func AnalyzeAuthoredShadow(options ShadowAnalysisOptions) (ShadowReport, error) 
 			UniqueUnresolvedSites:         len(unresolved),
 			LikelyBlockingUnresolvedSites: countLikelyBlockingUnresolved(unresolved),
 			DecodeIssues:                  len(issues),
+			DispatchCodeIslands:           len(dispatchCodeIslands),
 		},
-		Comparisons:  comparisons,
-		TableSpans:   tableSpans,
-		Unresolved:   unresolved,
-		DecodeIssues: issues,
+		Comparisons:         comparisons,
+		TableSpans:          tableSpans,
+		DispatchCodeIslands: dispatchCodeIslands,
+		Unresolved:          unresolved,
+		DecodeIssues:        issues,
 		Limitations: []string{
 			"configured func entries, entry M/X states, and exit_mx_at routes seed the read-only call-target variant fixed point",
 			"an open table is a partial match until value/bounds provenance proves its complete target set",
 			"a compatible guard proves safe coverage of inferred continuations, not that every guarded edge executes",
 			"an authored-only result means unproven, not disproven or runtime-reachable",
 			"tagged-stream handler classification and structural handler candidates are heuristic triage evidence, not a closed target set",
+			"dispatch code-island findings are probable review hints; they never create entry points or alter regeneration",
 			"the current ROM reader is explicitly LoROM; mapper generalization is a later milestone",
 		},
 	}
@@ -427,14 +450,14 @@ func authoredDispatchFacts(image romimage.Image, banks []shadowBank) ([]analysis
 	return facts, nil
 }
 
-func inferShadowFacts(image romimage.Image, banks []shadowBank, regions []decoder.DataRegion, calleeExitMX map[decoder.Variant]decoder.MX, jobs int) ([]analysis.DispatchFact, int, []ShadowUnresolvedSite, []ShadowDecodeIssue, shadowInferenceStats, error) {
+func inferShadowFacts(image romimage.Image, banks []shadowBank, regions []decoder.DataRegion, calleeExitMX map[decoder.Variant]decoder.MX, jobs int) ([]analysis.DispatchFact, int, []ShadowUnresolvedSite, []ShadowDecodeIssue, shadowInferenceStats, []shadowDecodeResult, error) {
 	results, stats, err := discoverShadowDecodeResults(image, banks, regions, calleeExitMX, jobs)
 	if err != nil {
-		return nil, 0, nil, nil, stats, err
+		return nil, 0, nil, nil, stats, nil, err
 	}
 	facts, rawUnresolved, unresolved, issues := summarizeShadowResults(image, results)
 	facts = inferShadowContinuationFacts(image, banks, regions, calleeExitMX, facts, collectShadowContinuationReaches(results))
-	return facts, rawUnresolved, unresolved, issues, stats, nil
+	return facts, rawUnresolved, unresolved, issues, stats, results, nil
 }
 
 func discoverShadowDecodeResults(image romimage.Image, banks []shadowBank, regions []decoder.DataRegion, calleeExitMX map[decoder.Variant]decoder.MX, jobs int) ([]shadowDecodeResult, shadowInferenceStats, error) {
@@ -445,6 +468,9 @@ func discoverShadowDecodeResults(image romimage.Image, banks []shadowBank, regio
 		entries[bank.ID] = append([]config.Entry(nil), bank.Config.Entries...)
 		bankConfigs[bank.ID] = bank.Config
 		stats.initialVariants += len(bank.Config.Entries)
+		if bank.ID == 0 && bank.Config.AutoVectors {
+			entries[bank.ID] = appendShadowAutoVectorEntries(image, entries[bank.ID])
+		}
 	}
 
 	var results []shadowDecodeResult
@@ -466,6 +492,41 @@ func discoverShadowDecodeResults(image romimage.Image, banks []shadowBank, regio
 	}
 
 	return results, stats, nil
+}
+
+func appendShadowAutoVectorEntries(image romimage.Image, entries []config.Entry) []config.Entry {
+	if len(image) < 0x8000 {
+		return entries
+	}
+	starts := make(map[uint16]struct{}, len(entries))
+	for _, entry := range entries {
+		starts[entry.Start] = struct{}{}
+	}
+	read := func(offset int) uint16 {
+		return uint16(image[offset]) | uint16(image[offset+1])<<8
+	}
+	seeds := []struct {
+		name string
+		pc   uint16
+	}{
+		{name: "I_RESET", pc: read(0x7ffc)},
+		{name: "I_NMI", pc: read(0x7fea)},
+		{name: "I_IRQ", pc: read(0x7fee)},
+	}
+	for _, seed := range seeds {
+		if seed.pc == 0 || seed.pc == 0xffff {
+			continue
+		}
+		if _, found := starts[seed.pc]; found {
+			continue
+		}
+		entries = append(entries, config.Entry{
+			Name: seed.name, Start: seed.pc,
+			EntryMX: config.MX{M: 1, X: 1},
+		})
+		starts[seed.pc] = struct{}{}
+	}
+	return entries
 }
 
 func runShadowDecodePass(image romimage.Image, banks []shadowBank, entries map[byte][]config.Entry, regions []decoder.DataRegion, calleeExitMX map[decoder.Variant]decoder.MX, jobs int) ([]shadowDecodeResult, map[decoder.Variant]struct{}) {
@@ -996,6 +1057,273 @@ func countLikelyBlockingUnresolved(unresolved []ShadowUnresolvedSite) int {
 		}
 	}
 	return count
+}
+
+func collectShadowDispatchCodeIslands(image romimage.Image, comparisons []analysis.Comparison, results []shadowDecodeResult, regions []decoder.DataRegion, tableSpans []ShadowTableSpan) []ShadowDispatchCodeIsland {
+	spansByEntry := make(map[uint32][]shadowDecodedSpan)
+	instructionsByEntry := make(map[uint32][]shadowDecodedInstruction)
+	globalOwned := make(map[uint32]struct{})
+	for _, result := range results {
+		for _, span := range result.spans {
+			entry := span.FunctionEntry & 0xffffff
+			spansByEntry[entry] = append(spansByEntry[entry], span)
+			for offset := uint8(0); offset < span.Length; offset++ {
+				globalOwned[(span.PC&0xff0000)|uint32(uint16(span.PC)+uint16(offset))] = struct{}{}
+			}
+		}
+		for _, instruction := range result.instructions {
+			entry := instruction.FunctionEntry & 0xffffff
+			instructionsByEntry[entry] = append(instructionsByEntry[entry], instruction)
+		}
+	}
+	type islandKey struct {
+		site, candidate uint32
+	}
+	findings := make(map[islandKey]ShadowDispatchCodeIsland)
+	for _, comparison := range comparisons {
+		facts := []*analysis.DispatchFact{comparison.Authored, comparison.Inferred}
+		for _, fact := range facts {
+			if fact == nil || !fact.TargetSetClosed || fact.TargetEntryKind != analysis.EntryComputed {
+				continue
+			}
+			targets := shadowUniqueSameBankTargets(fact.SitePC, fact.Targets)
+			for index := 0; index+1 < len(targets); index++ {
+				previous, next := targets[index], targets[index+1]
+				if previous >= next || len(spansByEntry[previous]) == 0 {
+					continue
+				}
+				for _, finding := range shadowCodeIslandsBetweenTargets(image, fact.SitePC, previous, next, spansByEntry, instructionsByEntry, globalOwned, regions, tableSpans) {
+					key := islandKey{site: finding.SitePC, candidate: finding.CandidateEntryPC}
+					existing, found := findings[key]
+					if !found {
+						findings[key] = finding
+						continue
+					}
+					existing.LiveMX = appendUniqueShadowMX(existing.LiveMX, finding.LiveMX...)
+					findings[key] = existing
+				}
+			}
+		}
+	}
+	result := make([]ShadowDispatchCodeIsland, 0, len(findings))
+	for _, finding := range findings {
+		sort.Slice(finding.LiveMX, func(i, j int) bool {
+			if finding.LiveMX[i].M != finding.LiveMX[j].M {
+				return finding.LiveMX[i].M < finding.LiveMX[j].M
+			}
+			return finding.LiveMX[i].X < finding.LiveMX[j].X
+		})
+		result = append(result, finding)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].SitePC != result[j].SitePC {
+			return result[i].SitePC < result[j].SitePC
+		}
+		return result[i].CandidateEntryPC < result[j].CandidateEntryPC
+	})
+	return result
+}
+
+func shadowUniqueSameBankTargets(site uint32, targets []uint32) []uint32 {
+	bank := byte(site >> 16)
+	seen := make(map[uint32]struct{})
+	var result []uint32
+	for _, target := range targets {
+		target &= 0xffffff
+		if target == 0 || byte(target>>16) != bank {
+			continue
+		}
+		if _, found := seen[target]; found {
+			continue
+		}
+		seen[target] = struct{}{}
+		result = append(result, target)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+	return result
+}
+
+func shadowCodeIslandsBetweenTargets(image romimage.Image, site, previous, next uint32, spansByEntry map[uint32][]shadowDecodedSpan, instructionsByEntry map[uint32][]shadowDecodedInstruction, globalOwned map[uint32]struct{}, regions []decoder.DataRegion, tableSpans []ShadowTableSpan) []ShadowDispatchCodeIsland {
+	if byte(previous>>16) != byte(next>>16) || uint16(previous) >= uint16(next) {
+		return nil
+	}
+	owned := make(map[uint16]struct{})
+	for _, span := range spansByEntry[previous] {
+		if span.PC < previous || span.PC >= next {
+			continue
+		}
+		for offset := uint8(0); offset < span.Length; offset++ {
+			pc := uint16(span.PC) + uint16(offset)
+			if uint32(pc) < uint32(uint16(next)) {
+				owned[pc] = struct{}{}
+			}
+		}
+	}
+	if _, found := owned[uint16(previous)]; !found {
+		return nil
+	}
+	type flowEnd struct {
+		Mnemonic string
+		MX       analysis.MXState
+	}
+	flowEnds := make(map[uint16][]flowEnd)
+	for _, decoded := range instructionsByEntry[previous] {
+		instruction := decoded.Instruction
+		if !disassemblyFlowEnd(disassemblyMnemonic(&instruction)) {
+			continue
+		}
+		end := uint16(decoded.PC) + uint16(instruction.Length)
+		flowEnds[end] = append(flowEnds[end], flowEnd{
+			Mnemonic: instruction.Mnemonic,
+			MX:       analysis.MXState{M: decoded.M & 1, X: decoded.X & 1},
+		})
+	}
+	var findings []ShadowDispatchCodeIsland
+	cursor := uint16(previous)
+	limit := uint16(next)
+	for cursor < limit {
+		if _, found := owned[cursor]; found {
+			cursor++
+			continue
+		}
+		gapStart := cursor
+		for cursor < limit {
+			if _, found := owned[cursor]; found {
+				break
+			}
+			cursor++
+		}
+		gapEnd := cursor
+		predecessors := flowEnds[gapStart]
+		if len(predecessors) == 0 {
+			continue
+		}
+		candidate := gapStart
+		for candidate < gapEnd {
+			candidatePC := uint32(byte(site>>16))<<16 | uint32(candidate)
+			if len(spansByEntry[candidatePC]) != 0 || shadowInDataRegion(regions, byte(site>>16), candidate) || shadowAddressInTableSpan(candidatePC, tableSpans) {
+				break
+			}
+			var liveMX []analysis.MXState
+			end := uint16(0)
+			for _, predecessor := range predecessors {
+				candidateEnd, ok := shadowStraightLineReturn(image, byte(site>>16), candidate, gapEnd, predecessor.MX.M, predecessor.MX.X, regions)
+				if !ok {
+					continue
+				}
+				if end == 0 || candidateEnd < end {
+					end = candidateEnd
+				}
+				liveMX = appendUniqueShadowMX(liveMX, predecessor.MX)
+			}
+			if end == 0 {
+				break
+			}
+			if shadowRangeHasOtherOwnership(candidatePC, uint32(byte(site>>16))<<16|uint32(end), globalOwned, tableSpans) {
+				break
+			}
+			findings = append(findings, ShadowDispatchCodeIsland{
+				SitePC: site & 0xffffff, PreviousTargetPC: previous, NextTargetPC: next,
+				CandidateEntryPC: candidatePC,
+				EndExclusive:     uint32(byte(site>>16))<<16 | uint32(end),
+				LiveMX:           liveMX, PrecededBy: predecessors[0].Mnemonic,
+				Confidence: analysis.ConfidenceProbable,
+				Reason:     "unclaimed bytes after a decoded flow terminator reach a return before the next known dispatch target",
+			})
+			predecessors = []flowEnd{{Mnemonic: "return", MX: liveMX[0]}}
+			candidate = end
+		}
+	}
+	return findings
+}
+
+func shadowAddressInTableSpan(address uint32, spans []ShadowTableSpan) bool {
+	address &= 0xffffff
+	for _, span := range spans {
+		if address >= span.StartPC && address < span.EndExclusive {
+			return true
+		}
+	}
+	return false
+}
+
+func shadowRangeHasOtherOwnership(start, end uint32, owned map[uint32]struct{}, tableSpans []ShadowTableSpan) bool {
+	for address := start; address < end; address++ {
+		if _, found := owned[address&0xffffff]; found || shadowAddressInTableSpan(address, tableSpans) {
+			return true
+		}
+	}
+	return false
+}
+
+func shadowStraightLineReturn(image romimage.Image, bank byte, start, limit uint16, m, x uint8, regions []decoder.DataRegion) (uint16, bool) {
+	pc := start
+	nonReturn := 0
+	for instructions := 0; instructions < 256 && pc < limit; instructions++ {
+		if shadowInDataRegion(regions, bank, pc) {
+			return 0, false
+		}
+		offset, err := romimage.LoROMOffset(bank, pc)
+		if err != nil || offset < 0 || offset >= len(image) {
+			return 0, false
+		}
+		instruction, err := cpu65816.Decode(image, offset, pc, bank, m&1, x&1)
+		if err != nil || instruction.Length == 0 || uint32(pc)+uint32(instruction.Length) > uint32(limit) {
+			return 0, false
+		}
+		next := pc + uint16(instruction.Length)
+		switch instruction.Mnemonic {
+		case "RTS", "RTL", "RTI":
+			if nonReturn == 0 {
+				return 0, false
+			}
+			return next, true
+		case "REP":
+			if instruction.Operand&0x20 != 0 {
+				m = 0
+			}
+			if instruction.Operand&0x10 != 0 {
+				x = 0
+			}
+		case "SEP":
+			if instruction.Operand&0x20 != 0 {
+				m = 1
+			}
+			if instruction.Operand&0x10 != 0 {
+				x = 1
+			}
+		case "PLP", "XCE", "BRK", "COP":
+			return 0, false
+		}
+		if disassemblyFlowEnd(disassemblyMnemonic(instruction)) {
+			return 0, false
+		}
+		if pollConditionalBranch(instruction) {
+			target := uint16(instruction.Operand)
+			if target < start || target >= limit {
+				return 0, false
+			}
+		}
+		nonReturn++
+		pc = next
+	}
+	return 0, false
+}
+
+func appendUniqueShadowMX(values []analysis.MXState, incoming ...analysis.MXState) []analysis.MXState {
+	for _, value := range incoming {
+		found := false
+		for _, existing := range values {
+			if existing == value {
+				found = true
+				break
+			}
+		}
+		if !found {
+			values = append(values, value)
+		}
+	}
+	return values
 }
 
 func collectShadowTableSpans(comparisons []analysis.Comparison) []ShadowTableSpan {
@@ -1687,6 +2015,16 @@ func shadowGraphReaches(graph *decoder.Graph, start, target decoder.DecodeKey) b
 
 func inferredDecoderDispatchFact(image romimage.Image, bank byte, functionStart uint16, key decoder.DecodeKey, instruction *cpu65816.Instruction) analysis.DispatchFact {
 	targets := normalizeShadowTargets(bank, instruction.DispatchEntries, instruction.DispatchKind)
+	candidates := targets
+	evidenceDetail := "target entries recovered without authored dispatch directives; table bound remains heuristic"
+	if len(instruction.DispatchCandidateEntries) > 0 {
+		candidates = normalizeShadowTargets(bank, instruction.DispatchCandidateEntries, instruction.DispatchKind)
+		if instruction.DispatchBound == "structural_candidate" {
+			evidenceDetail = fmt.Sprintf("conservative count=%d; post-zero candidate count=%d lands on the earliest same-bank handler but remains open", len(targets), len(candidates))
+		} else {
+			evidenceDetail = fmt.Sprintf("conservative count=%d; post-zero plausible candidate count=%d has no closed structural bound", len(targets), len(candidates))
+		}
+	}
 	tableBases := normalizeTableBases(bank, instruction.DispatchTableBase)
 	if len(tableBases) == 0 && (instruction.Mode == cpu65816.INDIRX || instruction.Mode == cpu65816.INDIR) && instruction.Operand >= 0x8000 {
 		tableBases = []uint32{decoder.Address24(bank, uint16(instruction.Operand))}
@@ -1696,10 +2034,10 @@ func inferredDecoderDispatchFact(image romimage.Image, bank byte, functionStart 
 		InstructionBytes: shadowInstructionBytes(image, bank, uint16(instruction.Address), instruction.Length),
 		Mnemonic:         instruction.Mnemonic, AddressingMode: instruction.Mode.String(), LiveMX: []analysis.MXState{{M: key.M & 1, X: key.X & 1}},
 		Transfer: transferForInstruction(instruction, instruction.DispatchReturn != nil), TargetEntryKind: analysis.EntryComputed,
-		TargetCandidates: targets, TargetSetClosed: false, IndexRegister: instruction.DispatchIndexReg,
+		TargetCandidates: candidates, TargetSetClosed: false, IndexRegister: instruction.DispatchIndexReg,
 		TableBases: tableBases, TableEntryBytes: shadowTableEntryBytes(instruction.DispatchKind, len(tableBases)), SEPMask: instruction.DispatchSEP,
 		UnknownFields: []string{"targets"},
-		Evidence:      []analysis.Evidence{{Source: "static.decoder.auto_dispatch", Confidence: analysis.ConfidenceProbable, Detail: "target entries recovered without authored dispatch directives; table bound remains heuristic"}},
+		Evidence:      []analysis.Evidence{{Source: "static.decoder.auto_dispatch", Confidence: analysis.ConfidenceProbable, Detail: evidenceDetail}},
 	}
 	if instruction.DispatchReturn != nil {
 		value := decoder.Address24(bank, *instruction.DispatchReturn)
@@ -2442,7 +2780,10 @@ func shadowTableEntryBytes(kind string, baseCount int) uint8 {
 func normalizeShadowTargets(bank byte, targets []uint32, kind string) []uint32 {
 	result := make([]uint32, len(targets))
 	for index, target := range targets {
-		if target == 0 {
+		// A zero word is a sparse-table hole. resolveDispatch represents a
+		// short-table zero as bank:$0000, while auto-recovery retains literal
+		// zero; canonicalize both so authored and inferred evidence compares.
+		if target == 0 || kind != "long" && uint16(target) == 0 {
 			continue
 		}
 		if target <= 0xffff || kind != "long" {
@@ -2502,6 +2843,8 @@ func writeShadowText(output io.Writer, report ShadowReport, verbose bool) {
 		summary.InitialVariants, summary.FinalVariants, summary.VariantPasses)
 	fmt.Fprintf(output, "table ownership: %d confirmed data span(s), %d candidate span(s)\n",
 		summary.ConfirmedTableSpans, summary.CandidateTableSpans)
+	fmt.Fprintf(output, "dispatch gap sweep: %d probable unclaimed code island(s) (review-only)\n",
+		summary.DispatchCodeIslands)
 	fmt.Fprintf(output, "shadow-root unresolved dynamic edges: %d raw emissions -> %d unique source sites; likely bring-up blockers=%d; decode issues=%d\n",
 		summary.RawUnresolvedEmissions, summary.UniqueUnresolvedSites, summary.LikelyBlockingUnresolvedSites, summary.DecodeIssues)
 	if evidence := report.DispatchEvidence; evidence != nil {
@@ -2565,6 +2908,13 @@ func writeShadowText(output io.Writer, report ShadowReport, verbose bool) {
 			fmt.Fprintf(output, "[TABLE-%s] [%s,%s) site=%s entries=%d entry_bytes=%d confidence=%s provenance=%s\n",
 				strings.ToUpper(span.Ownership), shadowAddress(span.StartPC), shadowAddress(span.EndExclusive),
 				shadowAddress(span.SitePC), span.EntryCount, span.EntryBytes, span.Confidence, strings.Join(span.Provenance, ","))
+		}
+		for _, island := range report.DispatchCodeIslands {
+			fmt.Fprintf(output, "[DISPATCH-CODE-ISLAND] %s..%s site=%s between=%s,%s preceded_by=%s live_mx=%s confidence=%s reason=%s\n",
+				shadowAddress(island.CandidateEntryPC), shadowAddress(island.EndExclusive),
+				shadowAddress(island.SitePC), shadowAddress(island.PreviousTargetPC),
+				shadowAddress(island.NextTargetPC), island.PrecededBy,
+				shadowMX(island.LiveMX), island.Confidence, island.Reason)
 		}
 	} else {
 		fmt.Fprintln(output, "use --verbose for authored-only/automatic facts, deduplicated callers, and decode issues; --format json emits the complete report")

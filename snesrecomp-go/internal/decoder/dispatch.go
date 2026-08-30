@@ -215,7 +215,13 @@ func ResolveDispatchTargets(image rom.Image, bank byte, instruction *cpu65816.In
 	return resolveDispatch(image, bank, instruction, auth)
 }
 
-func autorecoverXTable(image rom.Image, bank byte, instruction *cpu65816.Instruction, regions []DataRegion, functionStart uint16) []uint32 {
+type recoveredDispatchTable struct {
+	Entries    []uint32
+	Candidates []uint32
+	Bound      string
+}
+
+func autorecoverXTable(image rom.Image, bank byte, instruction *cpu65816.Instruction, regions []DataRegion, functionStart uint16) recoveredDispatchTable {
 	base := uint16(instruction.Operand)
 	entrySize := 2
 	if instruction.Length == 4 {
@@ -228,20 +234,34 @@ func autorecoverXTable(image rom.Image, bank byte, instruction *cpu65816.Instruc
 		codeBoundary = functionStart
 	}
 	var entries []uint32
-	var handlers []uint16
-	nulls := 0
+	boundary := codeBoundary
+	validTargets := 0
+	lastNonzero := 0
+	// A zero word may be a real sparse-table hole, but it may also be the
+	// padding immediately after a short table. Remember the conservative
+	// prefix so a later, unrelated word cannot make us absorb that padding.
+	// Compiled entries never pass this point. Report-only candidates may
+	// continue so analysis can compare post-zero targets with authored facts;
+	// only an exact code boundary gives that candidate set a structural bound.
+	conservativeCount := -1
+	validAfterZero := false
 	for len(entries) < 256 {
-		if uint32(tablePC)+uint32(entrySize)-1 > 0xffff || (hasBoundary && tablePC >= codeBoundary) {
+		if boundary != 0 && tablePC >= boundary {
+			if tablePC == boundary && validTargets > 0 {
+				if conservativeCount >= 0 {
+					if validAfterZero {
+						return recoveredDispatchTable{
+							Entries: entries[:conservativeCount], Candidates: entries,
+							Bound: "structural_candidate",
+						}
+					}
+					return recoveredDispatchTable{Entries: entries[:conservativeCount], Bound: "heuristic"}
+				}
+				return recoveredDispatchTable{Entries: entries, Bound: "structural_candidate"}
+			}
 			break
 		}
-		overlaps := false
-		for _, handler := range handlers {
-			if tablePC >= handler {
-				overlaps = true
-				break
-			}
-		}
-		if overlaps {
+		if uint32(tablePC)+uint32(entrySize)-1 > 0xffff {
 			break
 		}
 		offset, err := rom.LoROMOffset(bank, tablePC)
@@ -254,28 +274,44 @@ func autorecoverXTable(image rom.Image, bank byte, instruction *cpu65816.Instruc
 			targetBank = image[offset+2]
 		}
 		if pc == 0 && (entrySize == 2 || targetBank == 0) {
-			nulls++
-			if nulls >= 2 {
-				if len(entries) > 0 && entries[len(entries)-1] == 0 {
-					entries = entries[:len(entries)-1]
-				}
-				break
+			if conservativeCount < 0 && validTargets > 0 {
+				conservativeCount = len(entries)
 			}
 			entries = append(entries, 0)
 			tablePC += uint16(entrySize)
 			continue
 		}
-		nulls = 0
 		if pc < 0x8000 || inDataRegion(regions, targetBank, pc) || targetIsPadding(image, targetBank, pc) {
 			break
 		}
 		entries = append(entries, uint32(targetBank)<<16|uint32(pc))
+		validTargets++
+		if conservativeCount >= 0 {
+			validAfterZero = true
+		}
+		lastNonzero = len(entries)
 		if targetBank == bank && pc >= base {
-			handlers = append(handlers, pc)
+			if boundary == 0 || pc < boundary {
+				boundary = pc
+			}
 		}
 		tablePC += uint16(entrySize)
 	}
-	return entries
+	if validTargets == 0 {
+		return recoveredDispatchTable{}
+	}
+	if conservativeCount >= 0 {
+		result := recoveredDispatchTable{Entries: entries[:conservativeCount], Bound: "heuristic"}
+		if validAfterZero {
+			result.Candidates = entries[:lastNonzero]
+			result.Bound = "heuristic_post_zero"
+		}
+		return result
+	}
+	// Without an exact structural landing, trailing zero words do not prove
+	// additional entries. Internal zero runs remain holes when a later target
+	// establishes that the table continues beyond them.
+	return recoveredDispatchTable{Entries: entries[:lastNonzero], Bound: "heuristic"}
 }
 
 func autorecoverDP(image rom.Image, bank byte, functionStart, sitePC, dpAddress uint16, regions []DataRegion) ([]uint16, string) {

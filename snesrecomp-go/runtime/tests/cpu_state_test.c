@@ -362,6 +362,39 @@ static void test_trapped_dispatch_trace_queries_registry_without_execution(void)
     g_sr_runner_event_mask = 0u;
 }
 
+static void test_missing_dispatch_diagnostic_excludes_continuations(void) {
+    CpuState cpu;
+    cpu_state_init(&cpu, g_ram);
+    cpu.emulation = 0u;
+    cpu.m_flag = 1u;
+    cpu.x_flag = 0u;
+    cpu.S = 0x01e0u;
+    cpu_dispatch_diagnostic_reset();
+
+    *RomPtr(0x018600u) = 0xeau;
+    *RomPtr(0x018900u) = 0xeau;
+    check(cpu_dispatch_pc_from(&cpu, 0x018600u, 0x01f0u, 0x018900u) ==
+              RECOMP_RETURN_NORMAL,
+          "missing computed handler remains a soft failure");
+    check(cpu_dispatch_missing_warning_hits(0x018900u, 0x018600u) == 1u,
+          "first missing computed-handler hit is diagnosed");
+
+    for (unsigned hit = 1u; hit < 16u; ++hit) {
+        cpu.S = 0x01e0u;
+        (void)cpu_dispatch_pc_from(&cpu, 0x018600u, 0x01f0u, 0x018900u);
+    }
+    check(cpu_dispatch_missing_warning_hits(0x018900u, 0x018600u) == 16u,
+          "missing computed-handler hits advance to the loud milestone");
+
+    cpu_dispatch_diagnostic_reset();
+    *RomPtr(0x018900u) = 0x60u;
+    check(cpu_dispatch_pc_from(&cpu, 0x018600u, 0x01f0u, 0x018900u) ==
+              RECOMP_RETURN_NORMAL,
+          "missing continuation remains a soft failure");
+    check(cpu_dispatch_missing_warning_count() == 0u,
+          "RTS/RTL source dispatches are excluded from missing-body warnings");
+}
+
 static void test_recovered_branch_handlers(void) {
     CpuState cpu;
     cpu_state_init(&cpu, g_ram);
@@ -427,6 +460,7 @@ int main(void) {
     test_dispatch_mx_variants();
     test_resolved_dispatch_trace_matches_registry();
     test_trapped_dispatch_trace_queries_registry_without_execution();
+    test_missing_dispatch_diagnostic_excludes_continuations();
     test_recovered_branch_handlers();
     test_recovered_handler_continuation();
     return failures == 0 ? 0 : 1;
