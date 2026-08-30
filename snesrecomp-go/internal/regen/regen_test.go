@@ -40,6 +40,59 @@ func TestLintStubsIgnoresMarkerNameInHeaderComment(t *testing.T) {
 	}
 }
 
+func TestAutoVectorsRegisterLiveNativeInterruptWidths(t *testing.T) {
+	root := t.TempDir()
+	romPath := filepath.Join(root, "game.sfc")
+	cfgDir := filepath.Join(root, "recomp")
+	outDir := filepath.Join(root, "gen")
+	image := make([]byte, 0x8000)
+	image[0x0000] = 0x40 // Reset fixture body: RTI keeps the decode bounded.
+	image[0x0010] = 0x40 // Native NMI.
+	image[0x0020] = 0x40 // Native IRQ.
+	image[0x7ffc], image[0x7ffd] = 0x00, 0x80
+	image[0x7fea], image[0x7feb] = 0x10, 0x80
+	image[0x7fee], image[0x7fef] = 0x20, 0x80
+	if err := os.WriteFile(romPath, image, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "bank00.cfg"),
+		[]byte("bank = 00\nauto_vectors\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := Run(Options{
+		ROMPath: romPath, ConfigDir: cfgDir, OutputDir: outDir,
+		Jobs: 1, AllowStubs: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.FinalEntries != 9 {
+		t.Fatalf("auto-vector variants = %d, want 9", report.FinalEntries)
+	}
+	dispatch, err := os.ReadFile(filepath.Join(outDir, "dispatch_v2.c"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(dispatch)
+	for _, name := range []string{
+		"I_RESET_M1X1",
+		"I_NMI_M0X0", "I_NMI_M0X1", "I_NMI_M1X0", "I_NMI_M1X1",
+		"I_IRQ_M0X0", "I_IRQ_M0X1", "I_IRQ_M1X0", "I_IRQ_M1X1",
+	} {
+		if !strings.Contains(text, name) {
+			t.Fatalf("dispatch registry missing %s:\n%s", name, text)
+		}
+	}
+	for _, name := range []string{"I_RESET_M0X0", "I_RESET_M0X1", "I_RESET_M1X0"} {
+		if strings.Contains(text, name) {
+			t.Fatalf("reset registry unexpectedly contains %s", name)
+		}
+	}
+}
+
 func TestUnresolvedStubsFollowEmittedDemands(t *testing.T) {
 	repo := &repository{
 		image:      make(rom.Image, 0x10000),

@@ -588,38 +588,7 @@ func discoverShadowDecodeResults(image romimage.Image, banks []shadowBank, regio
 }
 
 func appendShadowAutoVectorEntries(image romimage.Image, entries []config.Entry) []config.Entry {
-	if len(image) < 0x8000 {
-		return entries
-	}
-	starts := make(map[uint16]struct{}, len(entries))
-	for _, entry := range entries {
-		starts[entry.Start] = struct{}{}
-	}
-	read := func(offset int) uint16 {
-		return uint16(image[offset]) | uint16(image[offset+1])<<8
-	}
-	seeds := []struct {
-		name string
-		pc   uint16
-	}{
-		{name: "I_RESET", pc: read(0x7ffc)},
-		{name: "I_NMI", pc: read(0x7fea)},
-		{name: "I_IRQ", pc: read(0x7fee)},
-	}
-	for _, seed := range seeds {
-		if seed.pc == 0 || seed.pc == 0xffff {
-			continue
-		}
-		if _, found := starts[seed.pc]; found {
-			continue
-		}
-		entries = append(entries, config.Entry{
-			Name: seed.name, Start: seed.pc,
-			EntryMX: config.MX{M: 1, X: 1},
-		})
-		starts[seed.pc] = struct{}{}
-	}
-	return entries
+	return config.AppendLoROMAutoVectorEntries(image, entries)
 }
 
 func runShadowDecodePass(image romimage.Image, banks []shadowBank, entries map[byte][]config.Entry, regions []decoder.DataRegion, calleeExitMX map[decoder.Variant]decoder.MX, jobs int) ([]shadowDecodeResult, map[decoder.Variant]struct{}) {

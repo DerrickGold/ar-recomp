@@ -423,6 +423,14 @@ are normalized to that fact in memory, including exact live-M/X routing, so
 removing one does not change database-mode generated C. A changed authored
 directive fails closed instead of silently overriding the snapshot.
 
+Supplying an analysis database explicitly selects the complete proven-analysis
+generation mode even when the database contains zero persisted facts. Exact
+static direct-call and variant discovery can therefore reduce variants and
+change the semantic source hash relative to conservative generation without a
+fact being applied. A zero-fact database is not a no-op flag: compare and test
+it as a separate A/B candidate. The database remains useful in this case as a
+ROM-hashed declaration that no inferred fact crossed the persistence threshold.
+
 For proven dispatch sites, variant discovery requests the exact target M/X
 state established by the current decode and any modeled SEP. It does not add
 all four speculative handler variants. Authored or uncertain dispatches keep

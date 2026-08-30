@@ -33,7 +33,11 @@ declarations required by HLE hooks or project-specific helpers.
 ### `auto_vectors`
 
 Seeds entries from the SNES vector table for the configured bank where
-applicable.
+applicable. Reset is seeded at its architectural M1/X1 state. Native NMI and
+IRQ preserve the interrupted status widths, so all four M/X variants are
+seeded and registered for live-state dispatch. An explicit `func` at a vector
+PC replaces the automatic variants when a project has proved a narrower
+interrupt-state invariant.
 
 ### `func NAME START [options...]`
 

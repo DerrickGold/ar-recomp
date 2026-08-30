@@ -55,6 +55,38 @@ func TestSyncFuncs(t *testing.T) {
 	}
 }
 
+func TestSyncFuncsDeclaresAutomaticVectorVariants(t *testing.T) {
+	root := t.TempDir()
+	cfgDir := filepath.Join(root, "recomp")
+	writeTestFile(t, filepath.Join(cfgDir, "bank00.cfg"),
+		"bank = 00\nauto_vectors\n")
+	output := filepath.Join(root, "funcs.h")
+	count, err := SyncFuncs(cfgDir, output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 3 {
+		t.Fatalf("auto-vector declaration count = %d, want 3", count)
+	}
+	data, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(data)
+	for _, wanted := range []string{
+		"void I_RESET(CpuState *cpu);  /* auto vector */",
+		"RecompReturn I_RESET_M1X1(CpuState *cpu);",
+		"RecompReturn I_NMI_M0X0(CpuState *cpu);",
+		"RecompReturn I_NMI_M1X0(CpuState *cpu);",
+		"RecompReturn I_IRQ_M0X1(CpuState *cpu);",
+		"RecompReturn I_IRQ_M1X1(CpuState *cpu);",
+	} {
+		if !strings.Contains(source, wanted) {
+			t.Errorf("auto-vector header missing %q", wanted)
+		}
+	}
+}
+
 func TestGenerateMetadata(t *testing.T) {
 	root := t.TempDir()
 	genDir, cfgDir := filepath.Join(root, "gen"), filepath.Join(root, "recomp")

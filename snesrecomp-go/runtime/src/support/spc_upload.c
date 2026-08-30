@@ -74,6 +74,22 @@ bool sr_spc_upload_image(const uint8_t *rom, size_t rom_size,
     }
 }
 
+bool sr_spc_upload_copy_rom(const uint8_t *rom, size_t rom_size,
+                            size_t source_offset, uint8_t aram[0x10000],
+                            uint16_t destination, size_t byte_count) {
+    size_t index;
+    if (rom == NULL || rom_size == 0u || aram == NULL ||
+        byte_count > 0x10000u) {
+        return false;
+    }
+    track_write(destination, byte_count);
+    for (index = 0u; index < byte_count; ++index) {
+        aram[(uint16_t)(destination + index)] =
+            rom_byte(rom, rom_size, source_offset + index);
+    }
+    return true;
+}
+
 bool sr_spc_upload_samples(const uint8_t *rom, size_t rom_size,
                            size_t script_offset, uint8_t segment_count,
                            size_t pool_offset, uint16_t first_destination,

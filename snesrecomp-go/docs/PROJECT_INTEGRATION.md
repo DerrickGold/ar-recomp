@@ -74,6 +74,11 @@ and removes stale bank parts when the translation-unit split changes.
 `stub-census` covers unresolved gotos, dispatch bounds, unresolved indirect
 jumps, inline invalid-target traps, and target bodies in
 `unresolved_stubs_v2.c`; it collapses M/X variants to logical sites/targets.
+`link-audit` answers a different question: it follows generated/source
+references and reports trap-containing functions as live or orphan. Its trap
+classification covers unresolved gotos, computed indirect jumps, dispatch
+bounds, and unresolved target stubs. Function counts can exceed the logical
+site count when multiple reachable M/X variants contain the same trap.
 
 Use strict `regen` and `stub-census` in CI. During initial bring-up,
 `regen --allow-stubs` writes all output while reporting unresolved control flow;
@@ -248,7 +253,7 @@ the "symptom if missing" column is the one worth reading first.
 | --- | --- | --- | --- |
 | Frame loop | `RtlRunFrame`, watchdog, host-tick counter | `RtlGameExecutionApi.run_frame` and a recovered body/NMI/scanout schedule | game can boot and render but advance at the wrong stable rate or present stale HDMA/PPU state |
 | Reset / main loop | generated `ResetHandler` | call it, and **service tail calls** (below) | reset unwinds silently; NMI keeps firing against a game that never started |
-| NMI / IRQ | `RtlGameFrameComplete` reports `NMI_ENTERED` | push an interrupt frame, call `NmiHandler`, restore | `RTI` over-pops and corrupts `P`, so M/X widths of interrupted code go wrong |
+| NMI / IRQ | `RtlGameFrameComplete` reports `NMI_ENTERED`; `auto_vectors` registers every live native M/X variant | push an interrupt frame, dispatch the vector target using the live M/X state, restore | a fixed-width call misdecodes width-sensitive pushes/pulls; an unbalanced frame makes `RTI` corrupt `P` |
 | Rendering (when video is requested) | per-line render, `$420C`-owned HDMA, margins via `run_ppu_scanout` | `draw_ppu_frame` that drives it once per frame | **nothing is ever rasterized**; frames advance over a black canvas |
 | Canvas (when video is requested) | writes into a host buffer | `bind_ppu_output_surface`, `SR_PPU_OUTPUT_MAIN`, `scale` **must be 0** | PPU has nowhere to draw; black canvas |
 | Canvas format | colour in the low 24 bits, **top byte left zero** | present as `XRGB8888`, not `ARGB8888` | every pixel is alpha 0 and blends away to black |
@@ -256,6 +261,14 @@ the "symptom if missing" column is the one worth reading first.
 | APU lock | calls `RtlApuLock`/`RtlApuUnlock` | define both (see `game/required_symbols.h`) | link error naming an unfamiliar symbol |
 | Audio | SPC, DSP, mixing | `RtlGameAudioApi` only for upload/routing/extension | silence, with no diagnostic |
 | Hardware polling | deterministic progress for modeled status/counter registers and APU catch-up | HLE only a documented, title-specific timing dependency the shared model cannot express | a genuinely unmodeled spin can still consume no emulated time and hang |
+
+Reset begins in M1/X1 and can call its generated variant directly. Native NMI
+and IRQ preserve the interrupted M/X flags. A project using only
+`auto_vectors` must therefore enter their known vector PC through
+`cpu_dispatch_pc`/`cpu_dispatch_pc_from` after pushing the interrupt frame;
+the generated registry selects the live-width variant. Calling a fixed
+`I_NMI_M1X1` or `I_IRQ_M1X1` symbol is valid only when the game has proved and
+authored that invariant explicitly.
 
 Hardware register state has exactly one owner. A `$420C` write arms the runner's
 DMA channels and `run_ppu_scanout` consumes that state directly. The
@@ -300,6 +313,18 @@ reported separately. Some protocols intentionally coalesce values, but a
 marker replaced before an SPC read is exactly the failure mode produced by an
 instantaneous HLE upload.
 Capture near the failure if the title swaps sample banks while running.
+
+`hle_spc_upload` normally parses the source returned by
+`spc_upload_source` as `[length16, destination16, payload...]` IPL blocks.
+Cartridges that implement the standard port handshake but store a raw
+bootstrap payload can instead publish `RTL_GAME_AUDIO_API_V3_SIZE` and provide
+`spc_upload_prepare_raw`. That callback runs inside the same APU-locked upload
+transaction and replaces only the block parser; existing customization,
+commit, tracing, and SPC-control stages still run. Use
+`sr_spc_upload_copy_rom` to copy the verified ROM span, set `entry_point` and
+other known metadata, and reproduce the native routine's CPU-visible exit
+state. This avoids fake zero-length parser records without embedding a game
+asset or requiring the minimal recomp boot ROM to emulate Nintendo's IPL.
 
 ## Recovering the game frame schedule
 

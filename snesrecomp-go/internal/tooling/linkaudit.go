@@ -88,10 +88,17 @@ func RunLinkAudit(options LinkAuditOptions) error {
 		return fmt.Errorf("link audit: no generated banks under %s", options.GenDir)
 	}
 	sort.Strings(bankFiles)
+	generatedFiles := append([]string(nil), bankFiles...)
+	unresolvedStubsPath := filepath.Join(options.GenDir, "unresolved_stubs_v2.c")
+	if _, statErr := os.Stat(unresolvedStubsPath); statErr == nil {
+		generatedFiles = append(generatedFiles, unresolvedStubsPath)
+	} else if !os.IsNotExist(statErr) {
+		return statErr
+	}
 	defined, referenced := make(map[string]struct{}), make(map[string]struct{})
 	traps := make(map[string]map[string]struct{})
 	tailCalls := make(map[linkTailCallKey]int)
-	for _, path := range bankFiles {
+	for _, path := range generatedFiles {
 		current := ""
 		if err := scanLinkFile(path, func(line string) {
 			if match := linkDefRE.FindStringSubmatch(line); match != nil {
@@ -106,10 +113,15 @@ func RunLinkAudit(options LinkAuditOptions) error {
 				tailCalls[linkTailCallKey{Source: current, Target: match[1], TargetPC: strings.ToUpper(match[2])}]++
 			}
 			kind := ""
-			if strings.Contains(line, "cpu_trace_unresolved_goto_trap") {
+			switch {
+			case strings.Contains(line, "cpu_trace_unresolved_goto_trap"):
 				kind = "goto"
-			} else if strings.Contains(line, "cpu_trace_dispatch_oob") {
+			case strings.Contains(line, "cpu_trace_dispatch_oob"):
 				kind = "dispatch"
+			case strings.Contains(line, "cpu_trace_unresolved_indirect_jump"):
+				kind = "indirect"
+			case strings.Contains(line, "cpu_trace_unresolved_stub_trap"):
+				kind = "target"
 			}
 			if kind != "" {
 				if traps[current] == nil {
