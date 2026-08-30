@@ -174,7 +174,10 @@ does not supply a complete application. A game project owns:
    `SR_RESULT_OK`, and keep the module and every referenced table alive for the
    process lifetime. Registration is rejected while a runner exists.
 5. **Frame/interrupt policy.** Supply `run_frame`, optional `draw_ppu_frame`,
-   reset entry, NMI/IRQ invocation, and any coroutine/yield policy.
+   reset entry, NMI/IRQ invocation, any coroutine/yield policy, and the
+   recovered ordering of body slices, interrupt handlers, and scanout. A host
+   tick is not a universal hardware phase; record the evidence for the chosen
+   cyclic boundary in the project.
 6. **HLE hooks and required symbols.** Every C symbol named by `hle_func`,
    `hle_func_if`, or `hle_dispatch` in a cfg must be implemented by the game
    project with the generated `CpuState *` ABI. `snesrecomp/game/required_symbols.h`
@@ -241,7 +244,7 @@ the "symptom if missing" column is the one worth reading first.
 
 | Area | Runner provides | Game must provide | Symptom if missing |
 | --- | --- | --- | --- |
-| Frame loop | `RtlRunFrame`, watchdog, frame counter | `RtlGameExecutionApi.run_frame` | registration rejected |
+| Frame loop | `RtlRunFrame`, watchdog, host-tick counter | `RtlGameExecutionApi.run_frame` and a recovered body/NMI/scanout schedule | game can boot and render but advance at the wrong stable rate or present stale HDMA/PPU state |
 | Reset / main loop | generated `ResetHandler` | call it, and **service tail calls** (below) | reset unwinds silently; NMI keeps firing against a game that never started |
 | NMI / IRQ | `RtlGameFrameComplete` reports `NMI_ENTERED` | push an interrupt frame, call `NmiHandler`, restore | `RTI` over-pops and corrupts `P`, so M/X widths of interrupted code go wrong |
 | Rendering (when video is requested) | per-line render, `$420C`-owned HDMA, margins via `run_ppu_scanout` | `draw_ppu_frame` that drives it once per frame | **nothing is ever rasterized**; frames advance over a black canvas |
@@ -268,6 +271,44 @@ leave a range makes progress. This is a liveness and ordering contract, not a
 promise of dot-accurate timing. If a title depends on tighter timing, put that
 ROM-address policy in a narrowly scoped HLE and document the unsupported timing
 assumption rather than replacing the generic register globally.
+
+## Recovering the game frame schedule
+
+The console timeline is cyclic, so adjacent phases can be grouped into a host
+tick in more than one valid way. The runner therefore defines the effects of
+its timing and scanout primitives but does not impose a body/NMI/scanout order.
+`RtlGameFrameBegin` positions the beam at VBlank, publishes the RDNMI token, and
+enables forced pacing. `RtlGameFrameComplete` disables forced pacing and reports
+whether the live NMI gate transitioned. Neither function executes the game
+body or NMI handler. `run_ppu_scanout` synchronously consumes the live PPU,
+DMA, HDMA, and IRQ state present at its call site.
+
+Recover the adapter schedule instead of selecting one by convention:
+
+1. Identify the ROM's VBlank wait, `WAI`/`$4210` polling, or WRAM frame gate.
+   Use decoded `snesbuild xref` queries on the candidate gate to find every
+   producer and consumer; do not rely on a raw byte search.
+2. Trace an explicit steady-state frame range. Record HOST_TICK, GAME_SLICE,
+   SCANOUT, NMI transition, actual NMI/IRQ handler entry and exit, and the
+   raster line of each IRQ callback.
+3. Determine which NMI produces the token or state consumed by each body
+   slice, which body generation prepares HDMA/PPU state for scanout, and which
+   body-written gates raster IRQs observe.
+4. Implement that schedule in the game adapter. Emit unqualified interrupt
+   events around actual handler calls; runner-qualified TRANSITION and CALLBACK
+   events deliberately distinguish latch/callback observation from execution.
+5. Validate cumulative body-gate releases versus NMIs, chained raster IRQs,
+   deterministic CPU/WRAM/SRAM state, and presentation hashes over the same
+   steady-state range. Include loading and forced-blank paths, which may use a
+   different number of body resumptions without changing the adapter contract.
+
+A wait-token coroutine may resume a body slice and then service the NMI
+reported by COMPLETE. Another recovered loop may service that NMI before
+running the body that prepares scanout. These examples demonstrate why the
+choice is game-owned; they are not a complete enumeration and should not become
+a runner schedule enum. Do not add shared warnings based on zero blocks between
+NMI and scanout or on execution while `forceNmi` is set: both confuse one
+adapter pattern with a hardware invariant.
 
 Intentional headless runs may omit `draw_ppu_frame` and never call
 `RtlGameDrawPpuFrame`. Once a host requests video, however, a missing callback

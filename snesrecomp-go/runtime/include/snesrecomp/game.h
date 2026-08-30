@@ -97,9 +97,11 @@ typedef bool RtlGameDispatchMissRecoveryFunc(
     uint32_t source_pc24, uint32_t target_pc24);
 typedef void RtlGamePpuDisplayControlWriteFunc(uint8_t value);
 
-/** Recompiled execution policy. run_frame is the sole required callback. The
- * runner caches this table at registration, so nesting adds no frame-time
- * lookup or allocation. */
+/** Recompiled execution policy. run_frame is the sole required callback and
+ * denotes one host tick, not a universal SNES hardware phase. The game adapter
+ * owns the recovered ordering of its body, NMI handling, and scanout within
+ * that callback. The runner caches this table at registration, so nesting adds
+ * no frame-time lookup or allocation. */
 typedef struct RtlGameExecutionApi {
     uint32_t struct_size;
     uint32_t flags;

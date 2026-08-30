@@ -57,6 +57,11 @@ typedef struct TestObserver {
     int audio_payload_valid;
 } TestObserver;
 
+typedef struct TestPhaseObserver {
+    unsigned count;
+    SrRunnerEvent events[16];
+} TestPhaseObserver;
+
 typedef struct TestAudioTraceObserver {
     unsigned count;
     SrRunnerHandle *runner;
@@ -82,6 +87,12 @@ typedef struct TestPpuScanoutObserver {
     int saw_indirect_before;
     int saw_indirect_after;
 } TestPpuScanoutObserver;
+
+typedef struct TestChainedIrqObserver {
+    Snes *snes;
+    unsigned count;
+    uint32_t lines[4];
+} TestChainedIrqObserver;
 
 static uint32_t test_virtual_tile_lookup(
         void *user_data, int32_t tile_x, int32_t tile_y,
@@ -181,6 +192,15 @@ static void observe_test_event(void *user_data, SrRunnerHandle *runner,
                 observer->expected_audio_last;
         observer->event.audio_samples = NULL;
     }
+}
+
+static void observe_test_phase_event(
+        void *user_data, SrRunnerHandle *runner,
+        const SrRunnerEvent *event) {
+    TestPhaseObserver *observer = (TestPhaseObserver *)user_data;
+    (void)runner;
+    if (observer == NULL || event == NULL || observer->count >= 16u) return;
+    observer->events[observer->count++] = *event;
 }
 
 static void observe_test_audio_trace(void *user_data,
@@ -291,6 +311,24 @@ static void observe_test_ppu_scanout_irq(
     observer->valid &= observer->snes->inIrq;
     observer->snes->inIrq = false;
     observer->snes->vIrqEnabled = false;
+}
+
+static void observe_test_chained_ppu_irq(
+        void *user_data, uint32_t line) {
+    static const uint16_t kNextTimers[] = {7u, 12u, 20u};
+    TestChainedIrqObserver *observer =
+        (TestChainedIrqObserver *)user_data;
+    if (observer == NULL || observer->snes == NULL ||
+        observer->count >= 4u)
+        return;
+    observer->lines[observer->count++] = line;
+    observer->snes->inIrq = false;
+    if (observer->count < 4u) {
+        observer->snes->vTimer = kNextTimers[observer->count - 1u];
+        observer->snes->vIrqEnabled = true;
+    } else {
+        observer->snes->vIrqEnabled = false;
+    }
 }
 
 static void mix_test_audio(int16 *buffer, int frames) {
@@ -1156,6 +1194,9 @@ int main(void) {
         snes->nmiAvail = false;
         snes->inNmi = false;
         snes->nmiEnabled = false;
+        snes->hPos = 37u;
+        snes->vPos = 17u;
+        snes->inVblank = false;
         failed |= check(api->control_game_timing(
                             runner, &timing_request,
                             &small_timing_result) ==
@@ -1193,13 +1234,14 @@ int main(void) {
                             runner, &timing_request, &timing_result) ==
                                 SR_RESULT_OK &&
                             snes->forceNmi && snes->nmiAvail &&
+                            snes->hPos == 0u && snes->inVblank &&
                             timing_result.struct_size ==
                                 SR_GAME_TIMING_RESULT_V2_SIZE &&
                             timing_result.state_flags ==
                                 (SR_GAME_TIMING_STATE_FORCE_NMI |
                                  SR_GAME_TIMING_STATE_NMI_AVAILABLE) &&
                             timing_result.transition_flags == 0u,
-                        "frame-slice begin timing state mismatch");
+                        "frame-slice begin timing/beam state mismatch");
         timing_request.operation = SR_GAME_TIMING_COMPLETE_FRAME_SLICE;
         failed |= check(api->control_game_timing(
                             runner, &timing_request, &timing_result) ==
@@ -1232,6 +1274,68 @@ int main(void) {
                             timing_result.transition_flags ==
                                 SR_GAME_TIMING_TRANSITION_NMI_ENTERED,
                         "enabled NMI gate did not enter interrupt state");
+
+        {
+            TestPhaseObserver phase_observer = {0};
+            SrEventSubscription phase_subscription = {
+                .struct_size = sizeof(phase_subscription),
+                .event_mask =
+                    SR_EVENT_MASK_FRAME | SR_EVENT_MASK_INTERRUPT,
+                .callback = observe_test_phase_event,
+                .user_data = &phase_observer,
+            };
+            uint64_t phase_subscription_id = 0u;
+            snes->inNmi = false;
+            snes->nmiEnabled = true;
+            timing_request.operation = SR_GAME_TIMING_BEGIN_FRAME_SLICE;
+            timing_request.flags = 0u;
+            failed |= check(api->subscribe_events(
+                                runner, &phase_subscription,
+                                &phase_subscription_id) == SR_RESULT_OK,
+                            "timing phase observer subscription failed");
+            failed |= check(api->control_game_timing(
+                                runner, &timing_request, &timing_result) ==
+                                SR_RESULT_OK,
+                            "observed frame-slice begin failed");
+            timing_request.operation =
+                SR_GAME_TIMING_COMPLETE_FRAME_SLICE;
+            timing_request.flags =
+                SR_GAME_TIMING_DISPATCH_NMI_IF_ENABLED;
+            failed |= check(api->control_game_timing(
+                                runner, &timing_request, &timing_result) ==
+                                SR_RESULT_OK,
+                            "observed frame-slice completion failed");
+            failed |= check(
+                phase_observer.count == 3u &&
+                    phase_observer.events[0].type ==
+                        SR_EVENT_FRAME_BOUNDARY &&
+                    phase_observer.events[0].flags ==
+                        (SR_EVENT_FRAME_BEGIN | SR_EVENT_FRAME_VBLANK |
+                         SR_EVENT_FRAME_GAME_SLICE) &&
+                    strcmp(phase_observer.events[0].label,
+                           "game-slice-begin") == 0 &&
+                    phase_observer.events[1].type ==
+                        SR_EVENT_FRAME_BOUNDARY &&
+                    phase_observer.events[1].flags ==
+                        (SR_EVENT_FRAME_END |
+                         SR_EVENT_FRAME_GAME_SLICE) &&
+                    strcmp(phase_observer.events[1].label,
+                           "game-slice-end") == 0 &&
+                    phase_observer.events[2].type ==
+                        SR_EVENT_INTERRUPT &&
+                    phase_observer.events[2].interrupt_kind ==
+                        SR_INTERRUPT_NMI &&
+                    phase_observer.events[2].flags ==
+                        (SR_EVENT_INTERRUPT_ENTER |
+                         SR_EVENT_INTERRUPT_TRANSITION) &&
+                    strcmp(phase_observer.events[2].label,
+                           "nmi-transition") == 0,
+                "timing phase event sequence mismatch");
+            failed |= check(api->unsubscribe_events(
+                                runner, phase_subscription_id) ==
+                                SR_RESULT_OK,
+                            "timing phase observer unsubscribe failed");
+        }
         snes->inNmi = false;
         snes->nmiEnabled = false;
     }
@@ -3485,9 +3589,80 @@ int main(void) {
                     "PPU scanout result mismatch");
     failed |= check_generation(api, runner, 12u, 2u, 1u, 1u, 8u);
 
+    /* A raster handler may rewrite $4209 and re-arm the next V-IRQ in the
+     * same scanout. Re-reading the timer after every callback is therefore a
+     * hardware scheduling requirement, not a redundant reload. */
+    {
+        TestChainedIrqObserver chained_irq = {
+            .snes = snes,
+        };
+        TestPhaseObserver phase_observer = {0};
+        SrEventSubscription phase_subscription = {
+            .struct_size = sizeof(phase_subscription),
+            .event_mask = SR_EVENT_MASK_FRAME | SR_EVENT_MASK_INTERRUPT,
+            .callback = observe_test_phase_event,
+            .user_data = &phase_observer,
+        };
+        uint64_t phase_subscription_id = 0u;
+        scanout_request.line_callback = NULL;
+        scanout_request.irq_callback = observe_test_chained_ppu_irq;
+        scanout_request.user_data = &chained_irq;
+        dma_reset(snes->dma);
+        snes_writeReg(snes, 0x420cu, 0u);
+        snes->vIrqEnabled = true;
+        snes->vTimer = 3u;
+        scanout_result.struct_size = sizeof(scanout_result);
+        failed |= check(api->subscribe_events(
+                            runner, &phase_subscription,
+                            &phase_subscription_id) == SR_RESULT_OK,
+                        "scanout phase observer subscription failed");
+        failed |= check(api->run_ppu_scanout(
+                            runner, &scanout_request, &scanout_result) ==
+                                SR_RESULT_OK &&
+                            chained_irq.count == 4u &&
+                            chained_irq.lines[0] == 4u &&
+                            chained_irq.lines[1] == 8u &&
+                            chained_irq.lines[2] == 13u &&
+                            chained_irq.lines[3] == 21u &&
+                            !snes->vIrqEnabled && !snes->inIrq,
+                        "chained raster IRQ timer reload mismatch");
+        failed |= check(
+            phase_observer.count == 10u &&
+                phase_observer.events[0].type ==
+                    SR_EVENT_FRAME_BOUNDARY &&
+                phase_observer.events[0].flags ==
+                    (SR_EVENT_FRAME_BEGIN | SR_EVENT_FRAME_SCANOUT) &&
+                strcmp(phase_observer.events[0].label,
+                       "scanout-begin") == 0 &&
+                phase_observer.events[1].type == SR_EVENT_INTERRUPT &&
+                phase_observer.events[1].interrupt_kind ==
+                    SR_INTERRUPT_IRQ &&
+                phase_observer.events[1].interrupt_scanline == 4 &&
+                phase_observer.events[1].flags ==
+                    (SR_EVENT_INTERRUPT_ENTER |
+                     SR_EVENT_INTERRUPT_CALLBACK) &&
+                phase_observer.events[8].type == SR_EVENT_INTERRUPT &&
+                phase_observer.events[8].interrupt_scanline == 21 &&
+                phase_observer.events[8].flags ==
+                    (SR_EVENT_INTERRUPT_EXIT |
+                     SR_EVENT_INTERRUPT_CALLBACK) &&
+                phase_observer.events[9].type ==
+                    SR_EVENT_FRAME_BOUNDARY &&
+                phase_observer.events[9].flags ==
+                    (SR_EVENT_FRAME_END | SR_EVENT_FRAME_VBLANK |
+                     SR_EVENT_FRAME_SCANOUT) &&
+                strcmp(phase_observer.events[9].label,
+                       "scanout-end") == 0,
+            "scanout phase event sequence mismatch");
+        failed |= check(api->unsubscribe_events(
+                            runner, phase_subscription_id) == SR_RESULT_OK,
+                        "scanout phase observer unsubscribe failed");
+    }
+
     /* Scanout policy can suppress hardware-armed channels, but cannot mutate
      * $420C state or arm a channel the game left disabled. */
     scanout_request.line_callback = NULL;
+    scanout_request.irq_callback = observe_test_ppu_scanout_irq;
     scanout_request.user_data = NULL;
     scanout_request.hdma_suppress_mask = 0x04u;
     snes_writeReg(snes, 0x420cu, 0x04u);

@@ -580,6 +580,34 @@ void sr_trace_frame(const char *event) {
     write_event("frame", ",\"what\":\"%s\"}\n", escaped);
 }
 
+static void trace_interrupt_event(const SrRunnerEvent *event) {
+    const char *kind = "unknown";
+    const char *phase = "event";
+    char escaped[80];
+    if (!sr_trace_active() ||
+        !sr_trace_channel_enabled(SR_TRACE_CHANNEL_FRAME) || event == NULL)
+        return;
+    switch (event->interrupt_kind) {
+        case SR_INTERRUPT_NMI: kind = "nmi"; break;
+        case SR_INTERRUPT_IRQ: kind = "irq"; break;
+        case SR_INTERRUPT_BRK: kind = "brk"; break;
+        case SR_INTERRUPT_COP: kind = "cop"; break;
+        case SR_INTERRUPT_ABORT: kind = "abort"; break;
+        case SR_INTERRUPT_RESET: kind = "reset"; break;
+        default: break;
+    }
+    if ((event->flags & SR_EVENT_INTERRUPT_ENTER) != 0u)
+        phase = "enter";
+    else if ((event->flags & SR_EVENT_INTERRUPT_EXIT) != 0u)
+        phase = "exit";
+    escape_json(event->label, escaped, sizeof(escaped));
+    write_event(
+        "interrupt",
+        ",\"kind\":\"%s\",\"phase\":\"%s\",\"line\":%d,"
+        "\"flags\":\"%08X\",\"label\":\"%s\"}\n",
+        kind, phase, event->interrupt_scanline, event->flags, escaped);
+}
+
 static void observe_runner_event(void *user_data, SrRunnerHandle *runner,
                                  const SrRunnerEvent *event) {
     (void)user_data;
@@ -610,13 +638,10 @@ static void observe_runner_event(void *user_data, SrRunnerHandle *runner,
         sr_trace_hwread((uint16_t)event->address, (uint8_t)event->value);
     } else if (event->type == SR_EVENT_DMA_BEGIN) {
         sr_trace_dma_event(event);
-    } else if (event->type == SR_EVENT_FRAME_BOUNDARY &&
-               (event->flags & SR_EVENT_FRAME_BEGIN) != 0u) {
+    } else if (event->type == SR_EVENT_FRAME_BOUNDARY) {
         sr_trace_frame(event->label);
-    } else if (event->type == SR_EVENT_INTERRUPT &&
-               event->interrupt_kind == SR_INTERRUPT_NMI &&
-               (event->flags & SR_EVENT_INTERRUPT_ENTER) != 0u) {
-        sr_trace_frame(event->label);
+    } else if (event->type == SR_EVENT_INTERRUPT) {
+        trace_interrupt_event(event);
     } else if (event->type == SR_EVENT_ERROR &&
                event->error_code == SR_RUNNER_ERROR_DISPATCH_MISS) {
         sr_trace_dispmiss(event->source_pc24, event->pc24);

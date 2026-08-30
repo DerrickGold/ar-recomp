@@ -180,7 +180,7 @@ typedef struct SnesRunnerApi {
         SrRunnerHandle *runner,
         const SrPpuScanoutRequest *request,
         SrPpuScanoutResult *out_result);
-    /** Begin or complete a recompiled game's host-resumable frame slice. */
+    /** Apply timing-latch transitions without selecting an adapter schedule. */
     SrResult (*control_game_timing)(
         SrRunnerHandle *runner,
         const SrGameTimingRequest *request,

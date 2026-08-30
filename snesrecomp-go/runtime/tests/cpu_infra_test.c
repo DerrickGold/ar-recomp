@@ -202,6 +202,23 @@ void snes_beginVblank(Snes *snes) {
     snes->vPos = 225u;
     snes->inVblank = true;
 }
+uint32_t sr_runner_transition_game_timing(
+        Snes *snes, SrGameTimingOperation operation, uint32_t flags) {
+    bool enter_nmi;
+    if (snes == NULL) return 0u;
+    if (operation == SR_GAME_TIMING_BEGIN_FRAME_SLICE) {
+        snes_beginVblank(snes);
+        snes->forceNmi = true;
+        snes->nmiAvail = true;
+        return 0u;
+    }
+    enter_nmi =
+        (flags & SR_GAME_TIMING_DISPATCH_NMI_IF_ENABLED) != 0u &&
+        snes->nmiEnabled;
+    snes->forceNmi = false;
+    snes->inNmi = snes->inNmi || enter_nmi;
+    return enter_nmi ? SR_GAME_TIMING_TRANSITION_NMI_ENTERED : 0u;
+}
 void ppu_reset(Ppu *ppu) { (void)ppu; ++ppu_reset_count; }
 void dma_reset(Dma *dma) { (void)dma; ++dma_reset_count; }
 void msu1_init(void) { ++msu_init_count; }
