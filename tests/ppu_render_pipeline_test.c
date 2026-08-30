@@ -26,6 +26,7 @@
 #include "sim_render_metadata.h"
 #include "sim_world_navigation_capture.h"
 #include "runner_internal.h"
+#include "snes/saveload.h"
 #include "snes/snes.h"
 
 /* main.c owns this global; the PPU line renderer reads it to pick new/old path. */
@@ -45,6 +46,14 @@ uint32_t g_sr_block_ring[256];
 const char *g_last_recomp_func;
 uint8_t g_ram[0x20000];
 int snes_frame_counter;
+
+/* This focused render harness has no CPU/APU/DMA/cartridge state to serialize.
+ * The public semantic digest therefore remains unavailable here, while the
+ * real SHA implementation still permits presentation-digest coverage. */
+void snes_saveload(Snes *snes, SaveLoadInfo *info) {
+  (void)snes;
+  if (info != NULL) info->failed = true;
+}
 
 void snes_setBeamPosition(
     Snes *snes, uint16_t h_master_cycles, uint16_t v_line) {

@@ -423,6 +423,7 @@ static int test_public_vertical_margin_scanout(
     };
     SrPpuScanoutRequest scanout = {
         .struct_size = sizeof(scanout),
+        .flags = SR_PPU_SCANOUT_CAPTURE_PRESENTATION_DIGEST,
         .irq_callback = observe_test_ppu_scanout_irq,
     };
     SrPpuScanoutResult result = {
@@ -431,6 +432,14 @@ static int test_public_vertical_margin_scanout(
     SrPpuSurfaceSnapshot surfaces = {
         .struct_size = sizeof(surfaces),
     };
+    SrDeterminismDigestRequest digest_request = {
+        .struct_size = sizeof(digest_request),
+        .flags = SR_DETERMINISM_DIGEST_PRESENTATION,
+    };
+    SrDeterminismDigestResult digest = {
+        .struct_size = sizeof(digest),
+    };
+    uint8_t first_presentation_digest[SR_DETERMINISM_SHA256_SIZE];
     uint32_t first_top;
     uint32_t first_native;
     uint32_t first_bottom;
@@ -475,12 +484,18 @@ static int test_public_vertical_margin_scanout(
     policy.lifetime_generation = generation.lifetime_generation;
     binding.lifetime_generation = generation.lifetime_generation;
     scanout.lifetime_generation = generation.lifetime_generation;
+    digest_request.lifetime_generation = generation.lifetime_generation;
     failed |= check(api->reset_ppu_frame_state(runner, &reset) == SR_RESULT_OK,
                     "vertical-margin frame reset failed");
     failed |= check(api->bind_ppu_output_surface(runner, &binding) == SR_RESULT_OK,
                     "vertical-margin main surface bind failed");
     failed |= check(api->apply_ppu_frame_policy(runner, &policy) == SR_RESULT_OK,
                     "vertical-margin frame policy failed");
+    failed |= check(api->query_determinism_digest(
+                        runner, &digest_request, &digest) ==
+                            SR_RESULT_UNAVAILABLE &&
+                        digest.valid_flags == 0u,
+                    "presentation digest was available before scanout");
     surfaces.struct_size = sizeof(surfaces);
     failed |= check(api->query_ppu_surfaces(runner, &surfaces) == SR_RESULT_OK &&
                         surfaces.main.origin_x == 64 &&
@@ -517,6 +532,34 @@ static int test_public_vertical_margin_scanout(
                         first_native == UINT32_C(0x000000ff) &&
                         first_bottom == UINT32_C(0x00ffff00),
                     "vertical-margin first-frame content mismatch");
+    digest.struct_size = sizeof(digest);
+    failed |= check(api->query_determinism_digest(
+                        runner, &digest_request, &digest) == SR_RESULT_OK &&
+                        digest.valid_flags ==
+                            SR_DETERMINISM_DIGEST_PRESENTATION &&
+                        digest.presentation_schema_version ==
+                            SR_DETERMINISM_PRESENTATION_SCHEMA_VERSION &&
+                        digest.presentation_width_pixels ==
+                            SR_PPU_NATIVE_WIDTH &&
+                        digest.presentation_height_pixels == kRenderedRows &&
+                        digest.presentation_margin_left_pixels == 0u &&
+                        digest.presentation_margin_right_pixels == 0u &&
+                        digest.presentation_margin_top_pixels == kTop &&
+                        digest.presentation_margin_bottom_pixels == kBottom &&
+                        digest.presentation_pixel_format ==
+                            SR_DETERMINISM_PIXEL_XRGB8888_LE,
+                    "first presentation digest mismatch");
+    memcpy(first_presentation_digest, digest.presentation_sha256,
+           sizeof(first_presentation_digest));
+    s_main_surface[0] ^= UINT32_C(0x00ffffff);
+    s_main_surface[64u] ^= UINT32_C(0x00ffffff);
+    digest.struct_size = sizeof(digest);
+    failed |= check(api->query_determinism_digest(
+                        runner, &digest_request, &digest) == SR_RESULT_OK &&
+                        memcmp(first_presentation_digest,
+                               digest.presentation_sha256,
+                               sizeof(first_presentation_digest)) == 0,
+                    "completed presentation digest depended on later surface mutations");
 
     for (row = 0u; row < kPitchPixels * kCapacityRows; ++row)
         s_main_surface[row] = sentinel;
@@ -538,6 +581,24 @@ static int test_public_vertical_margin_scanout(
                         s_main_surface[(kTop + SR_PPU_NATIVE_HEIGHT) *
                                            kPitchPixels + 64u] != first_bottom,
                     "vertical-margin rows did not follow the moving camera");
+    digest.struct_size = sizeof(digest);
+    failed |= check(api->query_determinism_digest(
+                        runner, &digest_request, &digest) == SR_RESULT_OK &&
+                        memcmp(first_presentation_digest,
+                               digest.presentation_sha256,
+                               sizeof(first_presentation_digest)) != 0,
+                    "presentation digest ignored moving-camera content");
+    scanout.flags = 0u;
+    result.struct_size = sizeof(result);
+    failed |= check(api->run_ppu_scanout(runner, &scanout, &result) ==
+                        SR_RESULT_OK,
+                    "uncaptured vertical-margin scanout failed");
+    digest.struct_size = sizeof(digest);
+    failed |= check(api->query_determinism_digest(
+                        runner, &digest_request, &digest) ==
+                            SR_RESULT_UNAVAILABLE &&
+                        digest.valid_flags == 0u,
+                    "scanout without capture flag exposed a presentation digest");
     return failed;
 }
 
@@ -959,7 +1020,9 @@ int main(void) {
         .pixel_byte_size = sizeof(obj_pixels),
         .pitch_bytes = 8u * sizeof(uint32_t),
     };
-    SaveLoadInfo load = {leave_loaded_state_unchanged, false, false, false};
+    SaveLoadInfo load = {
+        .func = leave_loaded_state_unchanged,
+    };
     Snes *snes;
     SrRunnerHandle *runner;
     int failed = 0;
@@ -1144,6 +1207,13 @@ int main(void) {
                         SNES_RUNNER_API_APU_STATE_SNAPSHOT_SIZE <=
                             sizeof(SnesRunnerApi),
                     "APU state snapshot extent exceeds structure");
+    failed |= check(SR_DETERMINISM_DIGEST_REQUEST_V2_SIZE <=
+                            sizeof(SrDeterminismDigestRequest) &&
+                        SR_DETERMINISM_DIGEST_RESULT_V2_SIZE <=
+                            sizeof(SrDeterminismDigestResult) &&
+                        SNES_RUNNER_API_DETERMINISM_DIGEST_SIZE <=
+                            sizeof(SnesRunnerApi),
+                    "determinism digest extent exceeds structure");
     failed |= check(SR_MUTATION_COMMAND_V2_SIZE <=
                         sizeof(SrMutationCommand) &&
                         SR_MUTATION_STATUS_V2_SIZE <=
@@ -1184,6 +1254,9 @@ int main(void) {
     failed |= check((api->capabilities &
                      SR_RUNNER_CAP_APU_STATE_SNAPSHOT) != 0u,
                     "APU state snapshot capability missing");
+    failed |= check((api->capabilities &
+                     SR_RUNNER_CAP_DETERMINISM_DIGEST) != 0u,
+                    "determinism digest capability missing");
     failed |= check((api->capabilities &
                          (SR_RUNNER_CAP_PPU_STATE |
                           SR_RUNNER_CAP_BORROWED_U16_SPANS |
@@ -1916,6 +1989,76 @@ int main(void) {
     sr_runner_set_execution_state_provider(
         snes, query_test_execution_state, &s_cpu_component);
     sr_runner_bind_ppu_services(snes, true);
+
+    {
+        SrDeterminismDigestRequest request = {
+            .struct_size = sizeof(request),
+            .flags = SR_DETERMINISM_DIGEST_SEMANTIC,
+            .lifetime_generation = snes->abiLifetimeGeneration,
+        };
+        SrDeterminismDigestResult first = {
+            .struct_size = sizeof(first),
+        };
+        SrDeterminismDigestResult second = {
+            .struct_size = sizeof(second),
+        };
+        SrDeterminismDigestResult changed = {
+            .struct_size = sizeof(changed),
+        };
+        uint8_t old_wram = wram[0x4321u];
+        uint8_t old_apu_ram = snes->apu->ram[0x4321u];
+        uint32_t old_sample_read = snes->apu->dsp->sampleRead;
+        snes->ppu->objScanlineMasksValid = true;
+        snes->ppu->cgramRgbValid = true;
+        failed |= check(api->query_determinism_digest(
+                            runner, &request, &first) == SR_RESULT_OK &&
+                            first.valid_flags ==
+                                SR_DETERMINISM_DIGEST_SEMANTIC &&
+                            first.semantic_schema_version ==
+                                SR_DETERMINISM_SEMANTIC_SCHEMA_VERSION &&
+                            snes->ppu->objScanlineMasksValid &&
+                            snes->ppu->cgramRgbValid,
+                        "semantic digest query failed");
+        failed |= check(api->query_determinism_digest(
+                            runner, &request, &second) == SR_RESULT_OK &&
+                            memcmp(first.semantic_sha256,
+                                   second.semantic_sha256,
+                                   SR_DETERMINISM_SHA256_SIZE) == 0,
+                        "unchanged semantic state was not deterministic");
+        wram[0x4321u] ^= 0x5au;
+        failed |= check(api->query_determinism_digest(
+                            runner, &request, &changed) == SR_RESULT_OK &&
+                            memcmp(first.semantic_sha256,
+                                   changed.semantic_sha256,
+                                   SR_DETERMINISM_SHA256_SIZE) != 0,
+                        "semantic digest ignored WRAM");
+        wram[0x4321u] = old_wram;
+        snes->apu->dsp->sampleRead += 7u;
+        second.struct_size = sizeof(second);
+        failed |= check(api->query_determinism_digest(
+                            runner, &request, &second) == SR_RESULT_OK &&
+                            memcmp(first.semantic_sha256,
+                                   second.semantic_sha256,
+                                   SR_DETERMINISM_SHA256_SIZE) == 0,
+                        "semantic digest included DSP PCM transport");
+        snes->apu->dsp->sampleRead = old_sample_read;
+        snes->apu->ram[0x4321u] ^= 0x3cu;
+        changed.struct_size = sizeof(changed);
+        failed |= check(api->query_determinism_digest(
+                            runner, &request, &changed) == SR_RESULT_OK &&
+                            memcmp(first.semantic_sha256,
+                                   changed.semantic_sha256,
+                                   SR_DETERMINISM_SHA256_SIZE) != 0,
+                        "semantic digest ignored APU RAM");
+        snes->apu->ram[0x4321u] = old_apu_ram;
+        ++request.lifetime_generation;
+        second.struct_size = sizeof(second);
+        failed |= check(api->query_determinism_digest(
+                            runner, &request, &second) ==
+                                SR_RESULT_STALE_VIEW &&
+                            second.valid_flags == 0u,
+                        "stale determinism request accepted");
+    }
 
     failed |= check_generation(api, runner, 0u, 0u, 0u, 0u, 0u);
     failed |= check(api->query_generations(runner, &too_small) ==
@@ -3961,7 +4104,7 @@ int main(void) {
                             snes->ppu->evenFrame == even_frame,
                         "stale PPU scanout request mutated state");
         --scanout_request.lifetime_generation;
-        scanout_request.flags = 1u;
+        scanout_request.flags = UINT32_C(0x80000000);
         failed |= check(api->run_ppu_scanout(
                             runner, &scanout_request,
                             &scanout_result) == SR_RESULT_INVALID_ARGUMENT &&

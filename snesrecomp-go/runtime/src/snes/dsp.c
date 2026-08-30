@@ -290,11 +290,13 @@ void dsp_saveload(Dsp *dsp, SaveLoadInfo *info) {
         saveload_i8(info, &voice->volumeR);
         saveload_bool(info, &voice->echoEnable);
     }
-    saveload_i16_array(info, dsp->sampleBuffer,
-                       sizeof(dsp->sampleBuffer) /
-                           sizeof(dsp->sampleBuffer[0]));
-    saveload_u32(info, &dsp->sampleWrite);
-    saveload_u32(info, &dsp->sampleRead);
+    if (!info->semantic) {
+        saveload_i16_array(info, dsp->sampleBuffer,
+                           sizeof(dsp->sampleBuffer) /
+                               sizeof(dsp->sampleBuffer[0]));
+        saveload_u32(info, &dsp->sampleWrite);
+        saveload_u32(info, &dsp->sampleRead);
+    }
     if (!info->saving && !info->failed) {
         dsp_syncAccuracyMirrors(dsp);
         dsp_refreshMixControls(dsp);

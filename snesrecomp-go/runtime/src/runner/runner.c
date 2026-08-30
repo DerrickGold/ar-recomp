@@ -2,11 +2,14 @@
 
 #include "runner_internal.h"
 #include "snesrecomp/game/runtime_constants.h"
+#include "snesrecomp/game/apu_sync.h"
 #include "snes/apu.h"
 #include "snes/cart.h"
 #include "snes/dma.h"
 #include "snes/ppu.h"
 #include "snes/snes.h"
+#include "snes/saveload.h"
+#include "support/sha256.h"
 
 #include <stdatomic.h>
 #include <string.h>
@@ -172,6 +175,7 @@ static const SrComponentHandle *component_handle(const void *component) {
  * optimization. The fragments provide maintainable ownership without changing
  * object layout or forcing internal symbols into headers. */
 #include "runner_core.inc"
+#include "runner_determinism.inc"
 #include "runner_events.inc"
 #include "runner_mutation.inc"
 #include "runner_ppu.inc"

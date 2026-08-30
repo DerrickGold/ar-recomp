@@ -106,9 +106,12 @@ a target configuration helper:
   boundary, public C11/private C++20 requirements, SIMD selection, and bitset
   configuration.
 
-The manifest defines `SNESRECOMP_ENABLE_TRACE`. The trace option compiles local
-trace rings and a link stub; the historical TCP debug server was intentionally
-not carried into the independent runner.
+Ordinary optimized builds retain runner event/audio observers and the
+runtime-selectable JSONL channels (`SNESRECOMP_TRACE_FILE` and
+`SNESRECOMP_TRACE_CHANNELS`). `SNESRECOMP_ENABLE_TRACE` adds deep generated-CPU
+opcode/boundary instrumentation, local trace rings, and a link stub; it is not
+required for the cheap channels. The historical TCP debug server was
+intentionally not carried into the independent runner.
 
 ```cmake
 cmake_minimum_required(VERSION 3.16)
@@ -352,7 +355,7 @@ Recover the adapter schedule instead of selecting one by convention:
    events around actual handler calls; runner-qualified TRANSITION and CALLBACK
    events deliberately distinguish latch/callback observation from execution.
 5. Validate cumulative body-gate releases versus NMIs, chained raster IRQs,
-   deterministic CPU/WRAM/SRAM state, and presentation hashes over the same
+   canonical semantic-state and presentation digests over the same
    steady-state range. Include loading and forced-blank paths, which may use a
    different number of body resumptions without changing the adapter contract.
 

@@ -44,6 +44,15 @@ struct Snes {
     uint64_t abiAudioFrameCounter;
     uint64_t abiPpuFramePolicyGeneration;
     bool abiPpuFramePolicyActive;
+    uint64_t abiLastScanoutFrame;
+    uint32_t abiLastPresentationWidth;
+    uint32_t abiLastPresentationHeight;
+    uint16_t abiLastPresentationMarginLeft;
+    uint16_t abiLastPresentationMarginRight;
+    uint16_t abiLastPresentationMarginTop;
+    uint16_t abiLastPresentationMarginBottom;
+    uint8_t abiLastPresentationSha256[32];
+    bool abiScanoutAvailable;
     /* Runner-lifetime observations used only for actionable integration
      * diagnostics. They deliberately remain outside the public ABI and the
      * savestate tail. */

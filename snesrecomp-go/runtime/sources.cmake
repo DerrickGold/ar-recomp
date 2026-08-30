@@ -11,6 +11,7 @@ set(SNESRECOMP_RUNNER_SOURCES
     ${SNESRECOMP_RUNNER_ROOT}/src/runner/runner_ppu_services.c
     ${SNESRECOMP_RUNNER_ROOT}/src/support/crc32.c
     ${SNESRECOMP_RUNNER_ROOT}/src/support/sha256.c
+    ${SNESRECOMP_RUNNER_ROOT}/src/support/input_replay.c
     ${SNESRECOMP_RUNNER_ROOT}/src/support/widescreen.c
     ${SNESRECOMP_RUNNER_ROOT}/src/core/recomp_hw.c
     ${SNESRECOMP_RUNNER_ROOT}/src/support/framedump.c

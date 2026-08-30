@@ -39,7 +39,13 @@ static void test_canonical_primitives(void) {
         0x78, 0x56, 0x34, 0x12,
         0xef, 0xcd, 0xab, 0x89, 0x67, 0x45, 0x23, 0x01
     };
-    MemorySaveLoad state = {{transfer, true, true, false}, {0}, 0u};
+    MemorySaveLoad state = {
+        .base = {
+            .func = transfer,
+            .saving = true,
+            .portable = true,
+        },
+    };
     uint8_t byte = 0xa5u;
     bool flag = true;
     uint16_t word = 0x1234u;
@@ -79,7 +85,13 @@ static void test_cpu_portable_roundtrip(void) {
         true, false, true
     };
     Cpu restored;
-    MemorySaveLoad state = {{transfer, true, true, false}, {0}, 0u};
+    MemorySaveLoad state = {
+        .base = {
+            .func = transfer,
+            .saving = true,
+            .portable = true,
+        },
+    };
     memset(&restored, 0, sizeof(restored));
     cpu_saveload(&source, &state.base);
     state.offset = 0u;

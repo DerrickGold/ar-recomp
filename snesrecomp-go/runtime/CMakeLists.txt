@@ -131,6 +131,8 @@ if(BUILD_TESTING)
         tests/public_header_ppu_test.c
         tests/public_header_events_test.c
         tests/public_header_audio_test.c
+        tests/public_header_determinism_test.c
+        tests/public_header_input_replay_test.c
         tests/public_header_mutation_test.c
         tests/public_header_api_test.c)
     target_link_libraries(snesrecomp_runtime_narrow_headers_test PRIVATE
@@ -273,6 +275,7 @@ if(BUILD_TESTING)
     add_executable(snesrecomp_runtime_runtime_trace_test
         tests/runtime_trace_test.c tests/apu_sync_stub.c)
     target_compile_definitions(snesrecomp_runtime_runtime_trace_test PRIVATE
+        SNESRECOMP_TRACE=0
         RUNTIME_TRACE_TEST_PATH="${CMAKE_CURRENT_BINARY_DIR}/runtime-trace.jsonl")
     target_link_libraries(snesrecomp_runtime_runtime_trace_test PRIVATE
         snesrecomp_runtime)
@@ -382,6 +385,13 @@ if(BUILD_TESTING)
         snesrecomp_runtime)
     add_test(NAME snesrecomp_runtime_sha256
         COMMAND snesrecomp_runtime_sha256_test)
+
+    add_executable(snesrecomp_runtime_input_replay_test
+        tests/input_replay_test.c)
+    target_link_libraries(snesrecomp_runtime_input_replay_test PRIVATE
+        snesrecomp_runtime)
+    add_test(NAME snesrecomp_runtime_input_replay
+        COMMAND snesrecomp_runtime_input_replay_test)
 
     add_executable(snesrecomp_runtime_framedump_test tests/framedump_test.c)
     target_link_libraries(snesrecomp_runtime_framedump_test PRIVATE

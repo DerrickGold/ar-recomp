@@ -12,6 +12,10 @@
 #define RUNTIME_TRACE_TEST_PATH "runtime-trace.jsonl"
 #endif
 
+#if SNESRECOMP_TRACE
+#error "runtime-selectable trace coverage must run without deep trace instrumentation"
+#endif
+
 unsigned char g_ram[0x20000];
 const char *g_last_recomp_func;
 uint32_t g_sr_block_ring[1024];
