@@ -238,3 +238,186 @@ func TestProvenAnalysisOverlayEmitsPHARTSDispatchWithoutWritingConfig(t *testing
 		t.Fatalf("internal continuation resumed through a new C activation:\n%s", generated)
 	}
 }
+
+func TestProvenRoutineRootsAreRediscoveredWithByteIdenticalOutput(t *testing.T) {
+	root := t.TempDir()
+	romPath := filepath.Join(root, "game.sfc")
+	cfgDir := filepath.Join(root, "recomp")
+	normalDir := filepath.Join(root, "normal")
+	overlayDir := filepath.Join(root, "overlay")
+	image := make([]byte, 0x8000)
+	copy(image[0x0000:], []byte{0x20, 0x00, 0x81, 0x60}) // $8000: JSR $8100; RTS
+	copy(image[0x0100:], []byte{0x20, 0x00, 0x82, 0x60}) // $8100: JSR $8200; RTS
+	image[0x0200] = 0x60                                 // $8200: RTS
+	if err := os.WriteFile(romPath, image, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configText := "bank = 00\n" +
+		"func Root 8000 entry_mx:1,1\n" +
+		"func RoutineA 8100 entry_mx:1,1\n" +
+		"func RoutineB 8200 entry_mx:1,1\n"
+	if err := os.WriteFile(filepath.Join(cfgDir, "bank00.cfg"), []byte(configText), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	baseOptions := Options{
+		ROMPath: romPath, ConfigDir: cfgDir, Jobs: 1, AllowStubs: true,
+		ExperimentalExactDirectCallMX: true,
+	}
+	normalOptions := baseOptions
+	normalOptions.OutputDir = normalDir
+	normal, err := Run(normalOptions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fact := func(pc uint32, caller string) analysis.EntryFact {
+		return analysis.EntryFact{
+			PC: pc, EntryMX: analysis.MXState{M: 1, X: 1}, Kind: analysis.EntryRoutine,
+			Evidence: []analysis.Evidence{{
+				Source: "static.direct_jsr", Confidence: analysis.ConfidenceProven, Detail: caller,
+			}},
+		}
+	}
+	overlayOptions := baseOptions
+	overlayOptions.OutputDir = overlayDir
+	overlayOptions.ProvenEntryFacts = []analysis.EntryFact{
+		fact(0x008100, "$00:8000"), fact(0x008200, "$00:8100"),
+	}
+	overlay, err := Run(overlayOptions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if overlay.AnalysisEntryFactsApplied != 2 || overlay.AnalysisEntryFactsRediscovered != 2 {
+		t.Fatalf("entry overlay applied/rediscovered = %d/%d, want 2/2",
+			overlay.AnalysisEntryFactsApplied, overlay.AnalysisEntryFactsRediscovered)
+	}
+	if normal.FinalEntries != overlay.FinalEntries || normal.Functions != overlay.Functions {
+		t.Fatalf("normal entries/functions %d/%d, overlay %d/%d",
+			normal.FinalEntries, normal.Functions, overlay.FinalEntries, overlay.Functions)
+	}
+	assertGeneratedDirectoriesEqual(t, normalDir, overlayDir)
+}
+
+func TestProvenRoutineRootFailsClosedWhenNotStaticallyRediscovered(t *testing.T) {
+	root := t.TempDir()
+	romPath := filepath.Join(root, "game.sfc")
+	cfgDir := filepath.Join(root, "recomp")
+	image := make([]byte, 0x8000)
+	image[0x0000] = 0x60 // $8000: RTS
+	image[0x0200] = 0x60 // $8200: RTS, but no static caller
+	if err := os.WriteFile(romPath, image, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "bank00.cfg"), []byte(
+		"bank = 00\nfunc Root 8000 entry_mx:1,1\nfunc Lonely 8200 entry_mx:1,1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Run(Options{
+		ROMPath: romPath, ConfigDir: cfgDir, OutputDir: filepath.Join(root, "gen"), Jobs: 1,
+		AllowStubs: true, ExperimentalExactDirectCallMX: true,
+		ProvenEntryFacts: []analysis.EntryFact{{
+			PC: 0x008200, EntryMX: analysis.MXState{M: 1, X: 1}, Kind: analysis.EntryRoutine,
+			Evidence: []analysis.Evidence{{Source: "static.direct_jsr", Confidence: analysis.ConfidenceProven}},
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "were not rediscovered") || !strings.Contains(err.Error(), "$00:8200 M1X1") {
+		t.Fatalf("unrecovered entry error = %v", err)
+	}
+}
+
+func TestProvenRoutineRootRequiresExactMXRediscovery(t *testing.T) {
+	root := t.TempDir()
+	romPath := filepath.Join(root, "game.sfc")
+	cfgDir := filepath.Join(root, "recomp")
+	image := make([]byte, 0x8000)
+	copy(image[0x0000:], []byte{0x20, 0x00, 0x82, 0x60}) // M1X1 call
+	image[0x0200] = 0x60
+	if err := os.WriteFile(romPath, image, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "bank00.cfg"), []byte(
+		"bank = 00\nfunc Root 8000 entry_mx:1,1\nfunc WrongWidth 8200 entry_mx:0,0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Run(Options{
+		ROMPath: romPath, ConfigDir: cfgDir, OutputDir: filepath.Join(root, "gen"), Jobs: 1,
+		AllowStubs: true, ExperimentalExactDirectCallMX: true,
+		ProvenEntryFacts: []analysis.EntryFact{{
+			PC: 0x008200, EntryMX: analysis.MXState{M: 0, X: 0}, Kind: analysis.EntryRoutine,
+			Evidence: []analysis.Evidence{{Source: "static.direct_jsr", Confidence: analysis.ConfidenceProven}},
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "$00:8200 M0X0") {
+		t.Fatalf("wrong-width rediscovery error = %v", err)
+	}
+}
+
+func TestProvenRoutineRootRefusesAuthoredHLEObligations(t *testing.T) {
+	root := t.TempDir()
+	romPath := filepath.Join(root, "game.sfc")
+	cfgDir := filepath.Join(root, "recomp")
+	image := make([]byte, 0x8000)
+	copy(image[0x0000:], []byte{0x20, 0x00, 0x82, 0x60})
+	image[0x0200] = 0x60
+	if err := os.WriteFile(romPath, image, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "bank00.cfg"), []byte(
+		"bank = 00\nfunc Root 8000 entry_mx:1,1\nfunc HLERoutine 8200 entry_mx:1,1\nhle_func 8200 HostRoutine\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Run(Options{
+		ROMPath: romPath, ConfigDir: cfgDir, OutputDir: filepath.Join(root, "gen"), Jobs: 1,
+		AllowStubs: true, ExperimentalExactDirectCallMX: true,
+		ProvenEntryFacts: []analysis.EntryFact{{
+			PC: 0x008200, EntryMX: analysis.MXState{M: 1, X: 1}, Kind: analysis.EntryRoutine,
+			Evidence: []analysis.Evidence{{Source: "static.direct_jsr", Confidence: analysis.ConfidenceProven}},
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "authored HLE obligations") ||
+		!strings.Contains(err.Error(), "hle_func:HostRoutine") {
+		t.Fatalf("HLE root suppression error = %v", err)
+	}
+}
+
+func assertGeneratedDirectoriesEqual(t *testing.T, left, right string) {
+	t.Helper()
+	leftEntries, err := os.ReadDir(left)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rightEntries, err := os.ReadDir(right)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(leftEntries) != len(rightEntries) {
+		t.Fatalf("generated file counts differ: %d != %d", len(leftEntries), len(rightEntries))
+	}
+	for index, leftEntry := range leftEntries {
+		if leftEntry.Name() != rightEntries[index].Name() {
+			t.Fatalf("generated filenames differ at %d: %q != %q", index, leftEntry.Name(), rightEntries[index].Name())
+		}
+		leftBytes, readErr := os.ReadFile(filepath.Join(left, leftEntry.Name()))
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		rightBytes, readErr := os.ReadFile(filepath.Join(right, leftEntry.Name()))
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if string(leftBytes) != string(rightBytes) {
+			t.Fatalf("generated file %s differs under entry overlay", leftEntry.Name())
+		}
+	}
+}

@@ -20,7 +20,7 @@ import (
 	romimage "github.com/DerrickGold/snesrecomp-go/internal/rom"
 )
 
-const shadowReportVersion = 6
+const shadowReportVersion = 10
 
 const (
 	shadowUnresolvedGeneric              = "generic_dynamic_target"
@@ -68,6 +68,21 @@ type ShadowSummary struct {
 	ProbableLandingCandidates      int `json:"probable_landing_candidates"`
 	SpeculativeLandingCandidates   int `json:"speculative_landing_candidates"`
 	LandingCandidateTableConflicts int `json:"landing_candidate_table_conflicts"`
+	TableFirstTargets              int `json:"table_first_targets"`
+	TableFirstNewLandings          int `json:"table_first_new_landings"`
+	TableFirstInternalTargets      int `json:"table_first_internal_targets"`
+	ProbableTableFirstTargets      int `json:"probable_table_first_targets"`
+	SpeculativeTableFirstTargets   int `json:"speculative_table_first_targets"`
+	TableFirstPointerSeeds         int `json:"table_first_pointer_seeds"`
+	TableFirstAbsoluteSeeds        int `json:"table_first_absolute_seeds"`
+	TableFirstBaseOffsetSeeds      int `json:"table_first_base_offset_seeds"`
+	TableFirstBaseEvidenceBases    int `json:"table_first_base_evidence_bases"`
+	TableFirstBaseEvidenceSites    int `json:"table_first_base_evidence_sites"`
+	TableFirstAbsoluteTargets      int `json:"table_first_absolute_targets"`
+	TableFirstBaseOffsetTargets    int `json:"table_first_base_offset_targets"`
+	TableFirstPostTerminatorSeeds  int `json:"table_first_post_terminator_seeds"`
+	TableFirstPointerWindowSeeds   int `json:"table_first_pointer_window_seeds"`
+	TableFirstRejectedSeeds        int `json:"table_first_rejected_seeds"`
 }
 
 type ShadowCaller struct {
@@ -142,19 +157,23 @@ type ShadowDispatchCodeIsland struct {
 }
 
 type ShadowReport struct {
-	Version             int                        `json:"version"`
-	Mode                string                     `json:"mode"`
-	NoWrite             bool                       `json:"no_write"`
-	ROM                 ShadowROM                  `json:"rom"`
-	Summary             ShadowSummary              `json:"summary"`
-	Comparisons         []analysis.Comparison      `json:"comparisons"`
-	TableSpans          []ShadowTableSpan          `json:"table_spans,omitempty"`
-	DispatchCodeIslands []ShadowDispatchCodeIsland `json:"dispatch_code_islands,omitempty"`
-	LandingCandidates   []ShadowLandingCandidate   `json:"landing_candidates,omitempty"`
-	DispatchEvidence    *ShadowDispatchEvidence    `json:"dispatch_evidence,omitempty"`
-	Unresolved          []ShadowUnresolvedSite     `json:"unresolved_sites,omitempty"`
-	DecodeIssues        []ShadowDecodeIssue        `json:"decode_issues,omitempty"`
-	Limitations         []string                   `json:"limitations,omitempty"`
+	Version              int                         `json:"version"`
+	Mode                 string                      `json:"mode"`
+	NoWrite              bool                        `json:"no_write"`
+	ROM                  ShadowROM                   `json:"rom"`
+	Summary              ShadowSummary               `json:"summary"`
+	Comparisons          []analysis.Comparison       `json:"comparisons"`
+	TableSpans           []ShadowTableSpan           `json:"table_spans,omitempty"`
+	DispatchCodeIslands  []ShadowDispatchCodeIsland  `json:"dispatch_code_islands,omitempty"`
+	LandingCandidates    []ShadowLandingCandidate    `json:"landing_candidates,omitempty"`
+	TableFirstTargets    []ShadowTableFirstTarget    `json:"table_first_targets,omitempty"`
+	TableFirstRejections []ShadowTableFirstRejection `json:"table_first_rejections,omitempty"`
+	EntryRecovery        ShadowEntryRecoveryReport   `json:"entry_recovery"`
+	EntryAblation        ShadowEntryAblationReport   `json:"entry_ablation"`
+	DispatchEvidence     *ShadowDispatchEvidence     `json:"dispatch_evidence,omitempty"`
+	Unresolved           []ShadowUnresolvedSite      `json:"unresolved_sites,omitempty"`
+	DecodeIssues         []ShadowDecodeIssue         `json:"decode_issues,omitempty"`
+	Limitations          []string                    `json:"limitations,omitempty"`
 }
 
 type ShadowDispatchEvidence struct {
@@ -207,13 +226,15 @@ type shadowBank struct {
 }
 
 type shadowDecodeResult struct {
-	facts        []analysis.DispatchFact
-	unresolved   []decoder.UnresolvedIndirect
-	demands      map[decoder.Variant]struct{}
-	seedReach    []shadowContinuationReach
-	spans        []shadowDecodedSpan
-	instructions []shadowDecodedInstruction
-	issue        *ShadowDecodeIssue
+	entry          decoder.Variant
+	facts          []analysis.DispatchFact
+	unresolved     []decoder.UnresolvedIndirect
+	demands        map[decoder.Variant]struct{}
+	demandEvidence map[decoder.Variant][]string
+	seedReach      []shadowContinuationReach
+	spans          []shadowDecodedSpan
+	instructions   []shadowDecodedInstruction
+	issue          *ShadowDecodeIssue
 }
 
 type shadowDecodedSpan struct {
@@ -275,6 +296,14 @@ func AnalyzeAuthoredShadow(options ShadowAnalysisOptions) (ShadowReport, error) 
 	dispatchCodeIslands := collectShadowDispatchCodeIslands(image, comparisons, decodeResults, allRegions, tableSpans)
 	landingCandidates := collectShadowLandingCandidates(image, banks, decodeResults, allRegions, tableSpans, dispatchCodeIslands, calleeExitMX)
 	probableLandingCandidates, speculativeLandingCandidates, landingCandidateTableConflicts := countShadowLandingConfidence(landingCandidates)
+	entryRecovery, err := analyzeShadowEntryRecovery(image, banks, allRegions, calleeExitMX, options.Jobs)
+	if err != nil {
+		return ShadowReport{}, err
+	}
+	annotateShadowEntryPointerClusters(image, decodeResults, tableSpans, &entryRecovery)
+	entryAblation := analyzeShadowEntryAblation(image, banks, decodeResults)
+	tableFirstTargets, tableFirstRejections, tableFirstStats := collectShadowTableFirstTargets(image, banks, entryRecovery.Entries, landingCandidates, decodeResults, allRegions, tableSpans, calleeExitMX)
+	probableTableFirstTargets, speculativeTableFirstTargets := countShadowTableFirstConfidence(tableFirstTargets)
 	confirmedTableSpans, candidateTableSpans := countShadowTableSpans(tableSpans)
 	hash := sha256.Sum256(image)
 	report := ShadowReport{
@@ -298,13 +327,32 @@ func AnalyzeAuthoredShadow(options ShadowAnalysisOptions) (ShadowReport, error) 
 			ProbableLandingCandidates:      probableLandingCandidates,
 			SpeculativeLandingCandidates:   speculativeLandingCandidates,
 			LandingCandidateTableConflicts: landingCandidateTableConflicts,
+			TableFirstTargets:              len(tableFirstTargets),
+			TableFirstNewLandings:          tableFirstStats.postTerminatorMatches + tableFirstStats.pointerWindowMatches,
+			TableFirstInternalTargets:      tableFirstStats.internalMatches,
+			ProbableTableFirstTargets:      probableTableFirstTargets,
+			SpeculativeTableFirstTargets:   speculativeTableFirstTargets,
+			TableFirstPointerSeeds:         tableFirstStats.pointerSeeds,
+			TableFirstAbsoluteSeeds:        tableFirstStats.absoluteSeeds,
+			TableFirstBaseOffsetSeeds:      tableFirstStats.baseOffsetSeeds,
+			TableFirstBaseEvidenceBases:    tableFirstStats.baseEvidenceBases,
+			TableFirstBaseEvidenceSites:    tableFirstStats.baseEvidenceSites,
+			TableFirstAbsoluteTargets:      tableFirstStats.absoluteTargets,
+			TableFirstBaseOffsetTargets:    tableFirstStats.baseOffsetTargets,
+			TableFirstPostTerminatorSeeds:  tableFirstStats.postTerminatorMatches,
+			TableFirstPointerWindowSeeds:   tableFirstStats.pointerWindowMatches,
+			TableFirstRejectedSeeds:        tableFirstStats.rejectedSeeds,
 		},
-		Comparisons:         comparisons,
-		TableSpans:          tableSpans,
-		DispatchCodeIslands: dispatchCodeIslands,
-		LandingCandidates:   landingCandidates,
-		Unresolved:          unresolved,
-		DecodeIssues:        issues,
+		Comparisons:          comparisons,
+		TableSpans:           tableSpans,
+		DispatchCodeIslands:  dispatchCodeIslands,
+		LandingCandidates:    landingCandidates,
+		TableFirstTargets:    tableFirstTargets,
+		TableFirstRejections: tableFirstRejections,
+		EntryRecovery:        entryRecovery,
+		EntryAblation:        entryAblation,
+		Unresolved:           unresolved,
+		DecodeIssues:         issues,
 		Limitations: []string{
 			"configured func entries, entry M/X states, and exit_mx_at routes seed the read-only call-target variant fixed point",
 			"an open table is a partial match until value/bounds provenance proves its complete target set",
@@ -313,6 +361,9 @@ func AnalyzeAuthoredShadow(options ShadowAnalysisOptions) (ShadowReport, error) 
 			"tagged-stream handler classification and structural handler candidates are heuristic triage evidence, not a closed target set",
 			"dispatch code-island findings are probable review hints; they never create entry points or alter regeneration",
 			"boundary landing-sweep findings are probable or speculative review hints seeded only after confirmed flow terminators; they never create entry points or alter regeneration",
+			"table-first targets require a tightly authored-entry-anchored ROM pointer window plus an existing instruction boundary or bounded stack-balanced decode; they remain review-only and do not prove runtime table bounds",
+			"vector-root entry recovery is a conservative lower bound; not_recovered does not mean unreachable or invalid code",
+			"entry ablation is dependency-graph evidence collected with authored boundaries present; its inclusion-minimal root set is report-only until generated-region equivalence is validated",
 			"the current ROM reader is explicitly LoROM; mapper generalization is a later milestone",
 		},
 	}
@@ -573,6 +624,10 @@ func runShadowDecodePass(image romimage.Image, banks []shadowBank, entries map[b
 		go func() {
 			defer workers.Done()
 			for item := range input {
+				entryVariant := decoder.Variant{
+					Address: decoder.Address24(item.bank.ID, item.entry.Start),
+					M:       item.entry.EntryMX.M & 1, X: item.entry.EntryMX.X & 1,
+				}
 				options := decoder.Options{
 					End: item.entry.End, DataRegions: regions,
 					HLEDispatch:     item.bank.Config.HLEDispatch,
@@ -581,19 +636,22 @@ func runShadowDecodePass(image romimage.Image, banks []shadowBank, entries map[b
 				}
 				graph, err := decoder.DecodeFunction(image, item.bank.ID, item.entry.Start, item.entry.EntryMX.M, item.entry.EntryMX.X, options)
 				if err != nil {
-					output <- shadowDecodeResult{issue: &ShadowDecodeIssue{
+					output <- shadowDecodeResult{entry: entryVariant, issue: &ShadowDecodeIssue{
 						FunctionEntry: decoder.Address24(item.bank.ID, item.entry.Start),
 						EntryMX:       analysis.MXState{M: item.entry.EntryMX.M & 1, X: item.entry.EntryMX.X & 1}, Error: err.Error(),
 					}}
 					continue
 				}
 				facts := inferredFactsFromGraph(image, item.bank.ID, item.entry.Start, graph)
+				demandEvidence := discoverShadowDemandEvidence(item.bank.ID, graph, item.siblings)
 				output <- shadowDecodeResult{
+					entry: entryVariant,
 					facts: facts, unresolved: graph.UnresolvedIndirects,
-					demands:      discoverShadowDemands(item.bank.ID, graph, item.siblings),
-					seedReach:    discoverShadowContinuationReaches(item.bank.ID, graph),
-					spans:        shadowDecodedSpans(item.bank.ID, item.entry.Start, graph),
-					instructions: shadowDecodedInstructions(item.bank.ID, item.entry.Start, graph),
+					demands:        shadowDemandEvidenceSet(demandEvidence),
+					demandEvidence: demandEvidence,
+					seedReach:      discoverShadowContinuationReaches(item.bank.ID, graph),
+					spans:          shadowDecodedSpans(item.bank.ID, item.entry.Start, graph),
+					instructions:   shadowDecodedInstructions(item.bank.ID, item.entry.Start, graph),
 				}
 			}
 		}()
@@ -656,9 +714,22 @@ func shadowDecodedSpans(bank byte, functionStart uint16, graph *decoder.Graph) [
 // only in this in-memory analysis run; authored dynamic-dispatch declarations
 // are intentionally absent.
 func discoverShadowDemands(bank byte, graph *decoder.Graph, siblingStarts map[uint16]struct{}) map[decoder.Variant]struct{} {
-	result := make(map[decoder.Variant]struct{})
-	one := func(address uint32, m, x uint8) {
-		result[decoder.Variant{Address: address & 0xffffff, M: m & 1, X: x & 1}] = struct{}{}
+	return shadowDemandEvidenceSet(discoverShadowDemandEvidence(bank, graph, siblingStarts))
+}
+
+func shadowDemandEvidenceSet(evidence map[decoder.Variant][]string) map[decoder.Variant]struct{} {
+	result := make(map[decoder.Variant]struct{}, len(evidence))
+	for variant := range evidence {
+		result[variant] = struct{}{}
+	}
+	return result
+}
+
+func discoverShadowDemandEvidence(bank byte, graph *decoder.Graph, siblingStarts map[uint16]struct{}) map[decoder.Variant][]string {
+	result := make(map[decoder.Variant][]string)
+	one := func(address uint32, m, x uint8, kind string) {
+		variant := decoder.Variant{Address: address & 0xffffff, M: m & 1, X: x & 1}
+		result[variant] = appendUniqueShadowString(result[variant], kind)
 	}
 	for _, decoded := range graph.Instructions {
 		if decoded == nil || decoded.Instruction == nil {
@@ -677,7 +748,7 @@ func discoverShadowDemands(bank byte, graph *decoder.Graph, siblingStarts map[ui
 					target = decoder.Address24(bank, uint16(target))
 				}
 				if (instruction.Mnemonic == "JSL" || (instruction.Mnemonic == "JMP" && instruction.Mode == cpu65816.LONG)) && instruction.DispatchIndexReg == "" {
-					one(target, 1, 1)
+					one(target, 1, 1, "static_computed_dispatch")
 				} else {
 					m, x := instruction.M&1, instruction.X&1
 					if instruction.DispatchTerminal {
@@ -690,28 +761,38 @@ func discoverShadowDemands(bank byte, graph *decoder.Graph, siblingStarts map[ui
 							x = 1
 						}
 					}
-					one(target, m, x)
+					one(target, m, x, "static_computed_dispatch")
 				}
 			}
 			continue
 		}
 		switch {
 		case instruction.Mnemonic == "JSR" && instruction.Mode == cpu65816.ABS:
-			one(decoder.Address24(bank, uint16(instruction.Operand)), instruction.M, instruction.X)
+			one(decoder.Address24(bank, uint16(instruction.Operand)), instruction.M, instruction.X, "direct_jsr")
 		case instruction.Mnemonic == "JSL":
-			one(instruction.Operand, instruction.M, instruction.X)
+			one(instruction.Operand, instruction.M, instruction.X, "direct_jsl")
 		case instruction.Mnemonic == "JMP" && instruction.Mode == cpu65816.LONG:
-			one(instruction.Operand, instruction.M, instruction.X)
+			one(instruction.Operand, instruction.M, instruction.X, "direct_long_jump")
 		}
 		for _, successor := range decoded.Successors {
+			if byte(successor.PC>>16) != bank {
+				continue
+			}
 			if _, known := siblingStarts[uint16(successor.PC)]; !known {
 				continue
 			}
 			if graph.Instructions[successor] != nil {
 				continue
 			}
-			result[decoder.Variant{Address: successor.PC & 0xffffff, M: successor.M & 1, X: successor.X & 1}] = struct{}{}
+			kind := "sibling_boundary_edge"
+			if instruction.Mnemonic == "JMP" && instruction.Mode == cpu65816.ABS {
+				kind = "direct_tail_jump"
+			}
+			one(successor.PC, successor.M, successor.X, kind)
 		}
+	}
+	for variant := range result {
+		sort.Strings(result[variant])
 	}
 	return result
 }
@@ -2860,6 +2941,28 @@ func writeShadowText(output io.Writer, report ShadowReport, verbose bool) {
 		summary.DispatchCodeIslands)
 	fmt.Fprintf(output, "boundary landing sweep: %d unclaimed entry candidate(s): %d probable, %d speculative (%d candidate-table conflicts; review-only)\n",
 		summary.LandingCandidates, summary.ProbableLandingCandidates, summary.SpeculativeLandingCandidates, summary.LandingCandidateTableConflicts)
+	fmt.Fprintf(output, "table-first target discovery: %d pointer seed(s) (absolute=%d base+offset=%d; base arithmetic=%d base(s)/%d site(s)); %d accepted target(s) (absolute=%d base+offset=%d): %d new landing(s), %d address-taken internal; %d probable, %d speculative (post-terminator=%d pointer-window=%d rejected=%d; review-only)\n",
+		summary.TableFirstPointerSeeds, summary.TableFirstAbsoluteSeeds, summary.TableFirstBaseOffsetSeeds,
+		summary.TableFirstBaseEvidenceBases, summary.TableFirstBaseEvidenceSites,
+		summary.TableFirstTargets, summary.TableFirstAbsoluteTargets, summary.TableFirstBaseOffsetTargets,
+		summary.TableFirstNewLandings, summary.TableFirstInternalTargets,
+		summary.ProbableTableFirstTargets, summary.SpeculativeTableFirstTargets,
+		summary.TableFirstPostTerminatorSeeds, summary.TableFirstPointerWindowSeeds, summary.TableFirstRejectedSeeds)
+	entrySummary := report.EntryRecovery.Summary
+	fmt.Fprintf(output, "vector-root entry recovery: %d authored declaration(s); exact=%d address-other-M/X=%d continuation=%d internal-owned=%d not-recovered=%d; %d roots -> %d variants in %d passes; decode issues=%d\n",
+		entrySummary.AuthoredEntries, entrySummary.ExactVariants, entrySummary.AddressOtherMX,
+		entrySummary.ProvenContinuations, entrySummary.InternalOwned, entrySummary.NotRecovered,
+		entrySummary.InitialRootVariants, entrySummary.FinalRootVariants, entrySummary.VariantPasses, entrySummary.DecodeIssues)
+	fmt.Fprintf(output, "authored-entry ROM pointer clusters: %d declaration(s), %d probable; %d are otherwise not recovered (corroboration-only)\n",
+		entrySummary.EntriesWithPointerClusters, entrySummary.ProbablePointerClusterEntries, entrySummary.NotRecoveredWithPointerClusters)
+	ablationSummary := report.EntryAblation.Summary
+	fmt.Fprintf(output, "static entry ablation: %d declaration(s)/%d unique variant(s), %d dependency edge(s); individually recoverable=%d; inclusion-minimal roots=%d declaration(s)/%d variant(s), batch-recoverable=%d (routine=%d tail=%d computed=%d internal-continuation=%d), vector-covered=%d (report-only)\n",
+		ablationSummary.AuthoredDeclarations, ablationSummary.UniqueAuthoredVariants, ablationSummary.StaticDependencyEdges,
+		ablationSummary.IndividuallyRecoverable, ablationSummary.RetainedRootDeclarations, ablationSummary.RetainedUniqueRootVariants,
+		ablationSummary.BatchRecoverable, ablationSummary.BatchRoutineTargets, ablationSummary.BatchTailTargets,
+		ablationSummary.BatchComputedTargets, ablationSummary.BatchInternalContinuations, ablationSummary.VectorCoveredDeclarations)
+	fmt.Fprintf(output, "authored HLE obligations: %d declaration(s), %d without an explicit func entry (preserved independently of root ablation)\n",
+		ablationSummary.AuthoredHLEObligations, ablationSummary.HLEOnlyObligations)
 	fmt.Fprintf(output, "shadow-root unresolved dynamic edges: %d raw emissions -> %d unique source sites; likely bring-up blockers=%d; decode issues=%d\n",
 		summary.RawUnresolvedEmissions, summary.UniqueUnresolvedSites, summary.LikelyBlockingUnresolvedSites, summary.DecodeIssues)
 	if evidence := report.DispatchEvidence; evidence != nil {
@@ -2941,9 +3044,71 @@ func writeShadowText(output io.Writer, report ShadowReport, verbose bool) {
 					shadowMX(variant.EntryMX), variant.Termination, variant.InstructionCount, variant.Ownership, variant.Confidence)
 			}
 		}
+		for _, target := range report.TableFirstTargets {
+			fmt.Fprintf(output, "[TABLE-FIRST-TARGET] %s class=%s boundary=%s anchor=%s entry_mx=%s landing_seed=%s landing_ownership=%s landing_confidence=%s confidence=%s sources=%d reason=%s\n",
+				shadowAddress(target.TargetPC), target.Classification, target.LandingBoundary,
+				shadowOptionalPatternAddress(target.AnchorPC), shadowMX(target.EntryMX), target.LandingSeed,
+				target.LandingOwnership, target.LandingConfidence, target.Confidence, len(target.Sources), target.Reason)
+			for _, source := range target.Sources {
+				fmt.Fprintf(output, "  source=%s encoding=%s base=%s base_evidence=%s word=%s window=%s..%s known=%d distinct=%d ownership=%s confidence=%s\n",
+					source.Kind, source.Encoding, shadowOptionalPatternAddress(source.BasePC), shadowAddresses(source.BaseEvidencePCs), shadowAddress(source.WordPC), shadowAddress(source.StartPC), shadowAddress(source.EndExclusive),
+					source.KnownEntries, source.DistinctKnownTargets, source.Ownership, source.Confidence)
+			}
+		}
+		for _, rejection := range report.TableFirstRejections {
+			fmt.Fprintf(output, "[TABLE-FIRST-REJECTED] %s reason=%s sources=%d\n",
+				shadowAddress(rejection.TargetPC), rejection.Reason, len(rejection.Sources))
+			for _, source := range rejection.Sources {
+				fmt.Fprintf(output, "  source=%s encoding=%s base=%s base_evidence=%s word=%s window=%s..%s known=%d distinct=%d ownership=%s confidence=%s\n",
+					source.Kind, source.Encoding, shadowOptionalPatternAddress(source.BasePC), shadowAddresses(source.BaseEvidencePCs), shadowAddress(source.WordPC), shadowAddress(source.StartPC), shadowAddress(source.EndExclusive),
+					source.KnownEntries, source.DistinctKnownTargets, source.Ownership, source.Confidence)
+			}
+		}
+		for _, entry := range report.EntryRecovery.Entries {
+			if entry.Status == shadowEntryRecoveryExact {
+				continue
+			}
+			fmt.Fprintf(output, "[ENTRY-%s] %s name=%s authored=M%dX%d recovered=%s reason=%s\n",
+				strings.ToUpper(strings.ReplaceAll(entry.Status, "_", "-")), shadowAddress(entry.PC), entry.Name,
+				entry.AuthoredMX.M, entry.AuthoredMX.X, shadowMX(entry.RecoveredMX), entry.Reason)
+			for _, cluster := range entry.PointerClusters {
+				fmt.Fprintf(output, "  pointer-cluster=%s..%s entries=%d distinct=%d occurrences=%d ownership=%s confidence=%s\n",
+					shadowAddress(cluster.StartPC), shadowAddress(cluster.EndExclusive), cluster.EntryCount,
+					cluster.DistinctTargets, cluster.TargetOccurrences, cluster.Ownership, cluster.Confidence)
+			}
+		}
+		for _, entry := range report.EntryAblation.Entries {
+			if entry.Status == shadowEntryAblationRecoverable && entry.IndividuallyRecoverable {
+				continue
+			}
+			fmt.Fprintf(output, "[ABLATION-%s] %s name=%s authored=M%dX%d entry_kind=%s individually_recoverable=%t incoming=%d hle=%s reason=%s\n",
+				strings.ToUpper(strings.ReplaceAll(entry.Status, "_", "-")), shadowAddress(entry.PC), entry.Name,
+				entry.AuthoredMX.M, entry.AuthoredMX.X, entry.EntryKindHint, entry.IndividuallyRecoverable, len(entry.Incoming), shadowStringsOrNone(entry.AuthoredHLE), entry.Reason)
+			for _, incoming := range entry.Incoming {
+				fmt.Fprintf(output, "  incoming=%s M%dX%d kinds=%s\n", shadowAddress(incoming.PC), incoming.EntryMX.M, incoming.EntryMX.X, strings.Join(incoming.Kinds, ","))
+			}
+		}
+		for _, obligation := range report.EntryAblation.HLEObligations {
+			fmt.Fprintf(output, "[HLE-OBLIGATION] %s directive=%s function=%s predicate=%s explicit_func=%t\n",
+				shadowAddress(obligation.PC), obligation.Directive, shadowStringOrNone(obligation.Function), shadowStringOrNone(obligation.Predicate), obligation.AuthoredEntry)
+		}
 	} else {
 		fmt.Fprintln(output, "use --verbose for authored-only/automatic facts, deduplicated callers, and decode issues; --format json emits the complete report")
 	}
+}
+
+func shadowStringsOrNone(values []string) string {
+	if len(values) == 0 {
+		return "none"
+	}
+	return strings.Join(values, ",")
+}
+
+func shadowStringOrNone(value string) string {
+	if value == "" {
+		return "none"
+	}
+	return value
 }
 
 func shadowAddress(address uint32) string {
