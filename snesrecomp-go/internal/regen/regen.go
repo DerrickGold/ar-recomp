@@ -930,13 +930,13 @@ func (repo *repository) emitFunctions(jobs int, only map[byte]struct{}) (map[byt
 	if err != nil {
 		return nil, nil, err
 	}
-	repo.sharedRegionBodies = len(regionBodies)
-	repo.sharedRegionWrappers = len(regionWrappers)
-	repo.sharedRegionFallbacks = countResumeTargets(repo.provenResumeEdges) - len(regionWrappers)
-	continuationBodies, continuationCalls, err := repo.sharedContinuationEmissionPlans(only)
+	continuationBodies, continuationCalls, err := repo.sharedContinuationEmissionPlans(only, regionBodies, regionWrappers)
 	if err != nil {
 		return nil, nil, err
 	}
+	repo.sharedRegionBodies = len(regionBodies)
+	repo.sharedRegionWrappers = countResumeWrappers(repo.provenResumeEdges, regionWrappers)
+	repo.sharedRegionFallbacks = countResumeTargets(repo.provenResumeEdges) - repo.sharedRegionWrappers
 	repo.sharedContinuationEdges = countProvenContinuationCalls(repo.provenContinuationCalls)
 	repo.routeContinuationCallsThroughResumeOwners(continuationCalls)
 	for target, body := range continuationBodies {
@@ -1034,7 +1034,7 @@ func (repo *repository) emitFunctions(jobs int, only map[byte]struct{}) (map[byt
 // internal block. Shared-region wrappers do not emit that block themselves;
 // their root helper does. When closure sharing is unavailable both the child
 // and ancestor retain generated copies, and both copies need the exact call.
-func (repo *repository) routeContinuationCallsThroughResumeOwners(calls map[decoder.Variant]map[decoder.ResumeEdge]string) {
+func (repo *repository) routeContinuationCallsThroughResumeOwners(calls map[decoder.Variant]map[decoder.ResumeEdge]emitter.RegionCall) {
 	reverse := make(map[decoder.Variant]map[decoder.Variant]struct{})
 	for owner, edges := range repo.provenResumeEdges {
 		for edge := range edges {
@@ -1045,14 +1045,14 @@ func (repo *repository) routeContinuationCallsThroughResumeOwners(calls map[deco
 		}
 	}
 	type routedCall struct {
-		owner  decoder.Variant
-		edge   decoder.ResumeEdge
-		helper string
+		owner decoder.Variant
+		edge  decoder.ResumeEdge
+		call  emitter.RegionCall
 	}
 	var original []routedCall
 	for owner, edges := range calls {
-		for edge, helper := range edges {
-			original = append(original, routedCall{owner: owner, edge: edge, helper: helper})
+		for edge, call := range edges {
+			original = append(original, routedCall{owner: owner, edge: edge, call: call})
 		}
 	}
 	for _, call := range original {
@@ -1067,9 +1067,9 @@ func (repo *repository) routeContinuationCallsThroughResumeOwners(calls map[deco
 				}
 				visited[parent] = struct{}{}
 				if calls[parent] == nil {
-					calls[parent] = make(map[decoder.ResumeEdge]string)
+					calls[parent] = make(map[decoder.ResumeEdge]emitter.RegionCall)
 				}
-				calls[parent][call.edge] = call.helper
+				calls[parent][call.edge] = call.call
 				queue = append(queue, parent)
 			}
 		}
@@ -1185,13 +1185,99 @@ func (repo *repository) sharedRegionEmissionPlans(only map[byte]struct{}) (map[d
 	return bodies, wrappers, nil
 }
 
-// sharedContinuationEmissionPlans gives an isolated multi-owner continuation
-// one externally linked body. Each exact owner edge calls that body while
-// retaining its current _entry_s/_hrv activation context; the registry-visible
-// public target wrapper is the only path that establishes a new activation.
-func (repo *repository) sharedContinuationEmissionPlans(only map[byte]struct{}) (map[decoder.Variant]*emitter.RegionBodyOptions, map[decoder.Variant]map[decoder.ResumeEdge]string, error) {
+// sharedContinuationEmissionPlans gives each acyclic multi-owner continuation
+// one externally linked body and coalesces every cyclic ownership component
+// into one selector-based body. Exact outside edges retain their current
+// _entry_s/_hrv activation context; internal component edges become gotos.
+// Registry-visible public wrappers remain the only paths that establish a new
+// activation.
+func (repo *repository) sharedContinuationEmissionPlans(only map[byte]struct{}, regionBodies map[decoder.Variant]*emitter.RegionBodyOptions, regionWrappers map[decoder.Variant]*emitter.RegionWrapperOptions) (map[decoder.Variant]*emitter.RegionBodyOptions, map[decoder.Variant]map[decoder.ResumeEdge]emitter.RegionCall, error) {
 	bodies := make(map[decoder.Variant]*emitter.RegionBodyOptions)
-	calls := make(map[decoder.Variant]map[decoder.ResumeEdge]string)
+	calls := make(map[decoder.Variant]map[decoder.ResumeEdge]emitter.RegionCall)
+	type componentEntry struct {
+		root     decoder.Variant
+		helper   string
+		selector uint16
+	}
+	componentEntries := make(map[decoder.Variant]componentEntry)
+	for _, component := range repo.cyclicContinuationComponents() {
+		root := component[0]
+		bankID := byte(root.Address >> 16)
+		if only != nil && !containsBank(only, bankID) {
+			continue
+		}
+		_, rootEntry, found := repo.activeEntryForVariant(root)
+		if !found {
+			return nil, nil, fmt.Errorf("cyclic continuation component root $%06X M%dX%d has no active entry", root.Address, root.M, root.X)
+		}
+		helper := fmt.Sprintf("sr_continuation_%02X_%04X_M%dX%d", bankID, rootEntry.Start, root.M&1, root.X&1)
+		entrySet := make(map[decoder.Variant]struct{}, len(component))
+		for _, variant := range component {
+			if byte(variant.Address>>16) != bankID {
+				return nil, nil, fmt.Errorf("cyclic continuation component crosses banks at $%06X", variant.Address)
+			}
+			if _, _, active := repo.activeEntryForVariant(variant); !active {
+				return nil, nil, fmt.Errorf("cyclic continuation component member $%06X M%dX%d has no active entry", variant.Address, variant.M, variant.X)
+			}
+			entrySet[variant] = struct{}{}
+		}
+
+		// Absorb any already-proven single-owner region rooted in the
+		// component. Its public wrappers become selectors in the same body.
+		for _, variant := range component {
+			localBody := regionBodies[variant]
+			if localBody == nil {
+				continue
+			}
+			oldHelper := localBody.HelperName
+			for wrapped, wrapper := range regionWrappers {
+				if wrapper.HelperName == oldHelper {
+					entrySet[wrapped] = struct{}{}
+					delete(regionWrappers, wrapped)
+				}
+			}
+			delete(regionBodies, variant)
+		}
+
+		internalEdges := make(map[decoder.ResumeEdge]struct{})
+		for _, variant := range component {
+			for edge := range repo.flattenedResumeEdges[variant] {
+				internalEdges[edge] = struct{}{}
+			}
+			for edge := range repo.provenResumeEdges[variant] {
+				internalEdges[edge] = struct{}{}
+			}
+		}
+		for _, edges := range repo.provenContinuationCalls {
+			for edge, target := range edges {
+				if _, inComponent := entrySet[target]; inComponent {
+					internalEdges[edge] = struct{}{}
+				}
+			}
+		}
+		repo.flattenedResumeEdges[root] = internalEdges
+
+		entries := make([]decoder.Variant, 0, len(entrySet))
+		for variant := range entrySet {
+			if variant != root {
+				entries = append(entries, variant)
+			}
+		}
+		sort.Slice(entries, func(i, j int) bool { return variantLess(entries[i], entries[j]) })
+		body := &emitter.RegionBodyOptions{HelperName: helper, OwnerPC: rootEntry.Start, ExternalLinkage: true}
+		componentEntries[root] = componentEntry{root: root, helper: helper}
+		for index, variant := range entries {
+			selector := uint16(index + 1)
+			body.Entries = append(body.Entries, emitter.RegionEntry{
+				PC: uint16(variant.Address), M: variant.M, X: variant.X, Selector: selector,
+			})
+			regionWrappers[variant] = &emitter.RegionWrapperOptions{
+				HelperName: helper, OwnerPC: rootEntry.Start, Selector: selector,
+			}
+			componentEntries[variant] = componentEntry{root: root, helper: helper, selector: selector}
+		}
+		bodies[root] = body
+	}
 	for owner, edges := range repo.provenContinuationCalls {
 		bankID := byte(owner.Address >> 16)
 		if only != nil && !containsBank(only, bankID) {
@@ -1206,18 +1292,118 @@ func (repo *repository) sharedContinuationEmissionPlans(only map[byte]struct{}) 
 				return nil, nil, fmt.Errorf("multi-owner continuation target $%06X M%dX%d has no active same-bank entry", target.Address, target.M, target.X)
 			}
 			helper := fmt.Sprintf("sr_continuation_%02X_%04X_M%dX%d", bankID, targetEntry.Start, target.M&1, target.X&1)
-			if calls[owner] == nil {
-				calls[owner] = make(map[decoder.ResumeEdge]string)
+			selector := uint16(0)
+			bodyTarget := target
+			if component, inComponent := componentEntries[target]; inComponent {
+				helper = component.helper
+				selector = component.selector
+				bodyTarget = component.root
 			}
-			calls[owner][edge] = helper
-			if bodies[target] == nil {
-				bodies[target] = &emitter.RegionBodyOptions{
+			if calls[owner] == nil {
+				calls[owner] = make(map[decoder.ResumeEdge]emitter.RegionCall)
+			}
+			calls[owner][edge] = emitter.RegionCall{HelperName: helper, Selector: selector}
+			if bodies[bodyTarget] == nil {
+				bodies[bodyTarget] = &emitter.RegionBodyOptions{
 					HelperName: helper, OwnerPC: targetEntry.Start, ExternalLinkage: true,
 				}
 			}
 		}
 	}
 	return bodies, calls, nil
+}
+
+// cyclicContinuationComponents returns strongly connected ownership groups
+// that include at least one multi-owner target. Sharing one selector-based
+// generated body for the whole group turns internal transfers into gotos and
+// avoids recursive helper calls or dependence on C tail-call optimization.
+func (repo *repository) cyclicContinuationComponents() [][]decoder.Variant {
+	graph := make(map[decoder.Variant]map[decoder.Variant]struct{})
+	multiTargets := make(map[decoder.Variant]struct{})
+	add := func(owner, target decoder.Variant) {
+		if graph[owner] == nil {
+			graph[owner] = make(map[decoder.Variant]struct{})
+		}
+		graph[owner][target] = struct{}{}
+		if graph[target] == nil {
+			graph[target] = make(map[decoder.Variant]struct{})
+		}
+	}
+	for owner, edges := range repo.provenResumeEdges {
+		for edge := range edges {
+			add(owner, edge.Target)
+		}
+	}
+	for owner, edges := range repo.provenContinuationCalls {
+		for _, target := range edges {
+			add(owner, target)
+			multiTargets[target] = struct{}{}
+		}
+	}
+
+	index := 0
+	indices := make(map[decoder.Variant]int)
+	lowlink := make(map[decoder.Variant]int)
+	onStack := make(map[decoder.Variant]bool)
+	var stack []decoder.Variant
+	var components [][]decoder.Variant
+	var connect func(decoder.Variant)
+	connect = func(node decoder.Variant) {
+		indices[node], lowlink[node] = index, index
+		index++
+		stack = append(stack, node)
+		onStack[node] = true
+		for next := range graph[node] {
+			if _, seen := indices[next]; !seen {
+				connect(next)
+				if lowlink[next] < lowlink[node] {
+					lowlink[node] = lowlink[next]
+				}
+			} else if onStack[next] && indices[next] < lowlink[node] {
+				lowlink[node] = indices[next]
+			}
+		}
+		if lowlink[node] != indices[node] {
+			return
+		}
+		var component []decoder.Variant
+		for {
+			last := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			onStack[last] = false
+			component = append(component, last)
+			if last == node {
+				break
+			}
+		}
+		cyclic := len(component) > 1
+		if !cyclic {
+			_, cyclic = graph[component[0]][component[0]]
+		}
+		hasMultiTarget := false
+		for _, variant := range component {
+			if _, found := multiTargets[variant]; found {
+				hasMultiTarget = true
+				break
+			}
+		}
+		if cyclic && hasMultiTarget {
+			sort.Slice(component, func(i, j int) bool { return variantLess(component[i], component[j]) })
+			components = append(components, component)
+		}
+	}
+	vertices := make([]decoder.Variant, 0, len(graph))
+	for node := range graph {
+		vertices = append(vertices, node)
+	}
+	sort.Slice(vertices, func(i, j int) bool { return variantLess(vertices[i], vertices[j]) })
+	for _, node := range vertices {
+		if _, seen := indices[node]; !seen {
+			connect(node)
+		}
+	}
+	sort.Slice(components, func(i, j int) bool { return variantLess(components[i][0], components[j][0]) })
+	return components
 }
 
 func (repo *repository) singleOwnerRegionTree(root decoder.Variant, targetOwners map[decoder.Variant]map[decoder.Variant]struct{}) (map[decoder.Variant]struct{}, map[decoder.Variant]struct{}, bool) {
@@ -1323,6 +1509,18 @@ func countResumeTargets(edges map[decoder.Variant]map[decoder.ResumeEdge]struct{
 	for _, ownerEdges := range edges {
 		for edge := range ownerEdges {
 			targets[edge.Target] = struct{}{}
+		}
+	}
+	return len(targets)
+}
+
+func countResumeWrappers(edges map[decoder.Variant]map[decoder.ResumeEdge]struct{}, wrappers map[decoder.Variant]*emitter.RegionWrapperOptions) int {
+	targets := make(map[decoder.Variant]struct{})
+	for _, ownerEdges := range edges {
+		for edge := range ownerEdges {
+			if wrappers[edge.Target] != nil {
+				targets[edge.Target] = struct{}{}
+			}
 		}
 	}
 	return len(targets)

@@ -141,7 +141,6 @@ func SelectStaticProvenRoutineEntryFacts(report ShadowReport) []analysis.EntryFa
 // independently verifies that their decoded closures match.
 
 func SelectStaticProvenContinuationEntryFacts(report ShadowReport) []analysis.EntryFact {
-	graph := make(map[analysis.EntryVariant]map[analysis.EntryVariant]struct{})
 	var candidates []analysis.EntryFact
 	for _, record := range report.EntryAblation.Entries {
 		fact, valid := staticProvenContinuationEntryFact(record)
@@ -149,21 +148,8 @@ func SelectStaticProvenContinuationEntryFacts(report ShadowReport) []analysis.En
 			continue
 		}
 		candidates = append(candidates, fact)
-		target := analysis.EntryVariant{PC: fact.PC, EntryMX: fact.EntryMX}
-		for _, owner := range fact.RegionOwners {
-			if graph[owner] == nil {
-				graph[owner] = make(map[analysis.EntryVariant]struct{})
-			}
-			graph[owner][target] = struct{}{}
-		}
 	}
-	var facts []analysis.EntryFact
-	for _, fact := range candidates {
-		if len(fact.RegionOwners) > 1 && continuationFactIsCyclic(fact, graph) {
-			continue
-		}
-		facts = append(facts, fact)
-	}
+	facts := candidates
 	sort.Slice(facts, func(i, j int) bool {
 		if facts[i].PC != facts[j].PC {
 			return facts[i].PC < facts[j].PC

@@ -725,6 +725,82 @@ func TestProvenMultiOwnerTargetReusesOwnedRegionBody(t *testing.T) {
 	}
 }
 
+func TestProvenCyclicContinuationsUseOneSelectorRegion(t *testing.T) {
+	root := t.TempDir()
+	romPath := filepath.Join(root, "game.sfc")
+	cfgDir := filepath.Join(root, "recomp")
+	outputDir := filepath.Join(root, "gen")
+	image := make([]byte, 0x8000)
+	copy(image[0x0000:], []byte{0x80, 0x1E}) // $8000: BRA $8020
+	copy(image[0x0010:], []byte{0x80, 0x1E}) // $8010: BRA $8030
+	copy(image[0x0020:], []byte{0x80, 0x0E}) // $8020: BRA $8030
+	copy(image[0x0030:], []byte{0x80, 0xEE}) // $8030: BRA $8020
+	if err := os.WriteFile(romPath, image, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "bank00.cfg"), []byte(
+		"bank = 00\nfunc RootA 8000 entry_mx:1,1\nfunc RootB 8010 entry_mx:1,1\nfunc bank_00_8020 8020 entry_mx:1,1\nfunc bank_00_8030 8030 entry_mx:1,1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	variant := func(pc uint32) analysis.EntryVariant {
+		return analysis.EntryVariant{PC: pc, EntryMX: analysis.MXState{M: 1, X: 1}}
+	}
+	fact := func(pc uint32, owners ...uint32) analysis.EntryFact {
+		result := analysis.EntryFact{
+			PC: pc, EntryMX: analysis.MXState{M: 1, X: 1}, Kind: analysis.EntryContinuation, TemplateFree: true,
+			Evidence: []analysis.Evidence{{Source: "static.sibling_boundary_edge", Confidence: analysis.ConfidenceProven}},
+		}
+		for _, ownerPC := range owners {
+			owner := variant(ownerPC)
+			result.RegionOwners = append(result.RegionOwners, owner)
+			result.ResumeEdges = append(result.ResumeEdges, analysis.EntryEdge{
+				Source: variant(ownerPC), Target: variant(pc), RegionOwner: &owner,
+			})
+		}
+		return result
+	}
+	report, err := Run(Options{
+		ROMPath: romPath, ConfigDir: cfgDir, OutputDir: outputDir, Jobs: 1, AllowStubs: true,
+		ProvenEntryFacts: []analysis.EntryFact{
+			fact(0x008020, 0x008000, 0x008030),
+			fact(0x008030, 0x008010, 0x008020),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.SharedContinuationBodies != 1 || report.SharedContinuationEdges != 4 || report.SharedContinuationCalls != 2 {
+		t.Fatalf("shared cyclic bodies/edges/calls = %d/%d/%d, want 1/4/2",
+			report.SharedContinuationBodies, report.SharedContinuationEdges, report.SharedContinuationCalls)
+	}
+	generatedBytes, err := os.ReadFile(filepath.Join(outputDir, "bank00_v2.c"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated := string(generatedBytes)
+	for _, fragment := range []string{
+		"RecompReturn sr_continuation_00_8020_M1X1(CpuState *cpu, uint16 _entry_s, uint8 _hrv, uint16 _region_entry) {",
+		"case 0: goto L_8020_M1X1;",
+		"case 1: goto L_8030_M1X1;",
+		"return sr_continuation_00_8020_M1X1(cpu, _entry_s, _hrv, 1);",
+		"goto L_8030_M1X1;",
+		"goto L_8020_M1X1;",
+	} {
+		if !strings.Contains(generated, fragment) {
+			t.Fatalf("cyclic selector region is missing %q:\n%s", fragment, generated)
+		}
+	}
+	if strings.Contains(generated, "sr_continuation_00_8030_M1X1") ||
+		strings.Count(generated, "cpu_trace_block(cpu, 0x008020);") != 1 ||
+		strings.Count(generated, "cpu_trace_block(cpu, 0x008030);") != 1 ||
+		strings.Count(generated, "exact shared continuation; helper owns the active-frame pop") != 2 {
+		t.Fatalf("cyclic continuations were duplicated or recursively dispatched:\n%s", generated)
+	}
+}
+
 func TestProvenContinuationFailsClosedOnSpecialEntryOrWrongOwner(t *testing.T) {
 	root := t.TempDir()
 	romPath := filepath.Join(root, "game.sfc")

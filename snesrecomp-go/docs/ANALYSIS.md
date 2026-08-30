@@ -297,11 +297,14 @@ owner is itself a single-owner continuation, the exact call is routed through
 every generated ancestor body that contains it. If the multi-owner target owns
 a single-owner region, that region's body is reused with external linkage.
 
-The ownership graph is checked before either lowering. An overlap is eligible
-only when the multi-owner target cannot reach back to any of its owners.
-`batch_acyclic_continuation_overlaps` counts the newly lowerable overlap shape;
-`batch_cyclic_continuation_overlaps` remains report-only because a direct
-helper lowering would recurse or make activation ownership ambiguous.
+The ownership graph is checked before either lowering.
+`batch_acyclic_continuation_overlaps` counts overlap chains that can reuse the
+ordinary target bodies. `batch_cyclic_continuation_overlaps` counts facts in a
+strongly connected ownership region. A cyclic region is lowered as one
+externally linked selector body: every continuation entry retains a public
+wrapper, edges inside the component are local gotos, and only edges from
+outside the component call a selector. This avoids recursive C helpers and
+does not depend on host compiler tail-call optimization.
 
 ## Table-first unknown target discovery
 
