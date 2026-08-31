@@ -53,6 +53,7 @@ func runtimeCompileArgs(runtimeDir, zigPath, target, optimize string, simd bool,
 		"-Wno-implicit-function-declaration",
 		"-DSNESRECOMP_ENABLE_SIMD="+simdValue,
 		"-DSNESRECOMP_TRACE=0",
+		"-DSNESRECOMP_TRACE_RECORDER=0",
 		"-DSNESRECOMP_WATCHDOG=0",
 		"-DSNESRECOMP_REVERSE_DEBUG=0",
 		"-fdebug-compilation-dir=snesrecomp-runtime")

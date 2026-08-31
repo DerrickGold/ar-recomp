@@ -36,6 +36,21 @@ arguments. A source build is launched directly:
 (The `play` preset builds into `build-release/`; the `dev` preset builds into
 `build/`.)
 
+Every launch prints one authoritative `[runner-trace]` line. Normal play and
+packaged builds report `recorder=excluded deep_instrumentation=excluded
+mode=off`; they do not contain the JSONL/anomaly-watch recorder or generated
+CPU trace probes. The `dev` preset reports `recorder=included` and
+`deep_instrumentation=excluded`; the `trace` preset includes both. A present
+recorder still defaults to `mode=off` until `SNESRECOMP_TRACE_FILE` or
+`SNESRECOMP_TRACE_WATCH_FILE` is set. The same resolved fields are recorded in
+the run's `run_info.txt`, so replay and benchmark artifacts identify their
+diagnostic overhead without relying on a build-directory name.
+
+Development and trace builds also create a timestamped `runs/` diagnostic
+bundle by default. Play and packaged builds do not create one, tee the console,
+or write `run_info.txt`. Set `AR_ENABLE_RUN_DIR=1` for a release diagnostic
+launch; `AR_NO_RUN_DIR=1` disables bundling in any build.
+
 `--config <file>` **replaces** the default `config.ini` load entirely (the file
 you pass carries its own `[Graphics]`/`[Sound]` sections too), so
 `dev-config.ini` and `nocheats-config.ini` are complete, self-contained configs,

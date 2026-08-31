@@ -25,6 +25,19 @@ if(SNESRECOMP_ENABLE_TRACE)
         ${SNESRECOMP_RUNNER_ROOT}/src/support/generated_trace_stub.c)
 endif()
 
+# The JSONL/watch recorder is a host-side diagnostic consumer of the public
+# runner observers. Keep it separate from the observer ABI itself so release
+# games can retain supported observer services without carrying the recorder,
+# its formatting code, or per-entry/call probes. Deep generated tracing needs
+# the recorder and therefore implies it even when the explicit option is off.
+option(SNESRECOMP_ENABLE_TRACE_RECORDER
+    "Build the runtime-selectable JSONL/watch trace recorder" OFF)
+if(SNESRECOMP_ENABLE_TRACE OR SNESRECOMP_ENABLE_TRACE_RECORDER)
+    set(_SNESRECOMP_TRACE_RECORDER 1)
+else()
+    set(_SNESRECOMP_TRACE_RECORDER 0)
+endif()
+
 option(SNESRECOMP_ENABLE_SIMD
     "Enable runner SIMD implementations supported by the build target" ON)
 option(SNESRECOMP_ENABLE_IPO
@@ -96,6 +109,15 @@ function(snesrecomp_configure_runtime_target target)
         target_compile_definitions(${target} PRIVATE SNESRECOMP_TRACE=1)
     else()
         target_compile_definitions(${target} PRIVATE SNESRECOMP_TRACE=0)
+    endif()
+    # game/cpu.h removes its generated entry/call probes with the same value,
+    # so the enabled definition must propagate to game-module consumers. The
+    # header defaults an absent definition to zero; leaving release consumers
+    # undefined avoids exporting a contradictory `=0` into a diagnostic target
+    # that deliberately compiles a trace-capable recorder beside the library.
+    if(_SNESRECOMP_TRACE_RECORDER)
+        target_compile_definitions(${target} PUBLIC
+            SNESRECOMP_TRACE_RECORDER=1)
     endif()
     if(NOT SNESRECOMP_PPU_BIT_WORD_BITS STREQUAL "auto")
         target_compile_definitions(${target} PRIVATE

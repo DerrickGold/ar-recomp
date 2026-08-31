@@ -23,6 +23,7 @@ typedef struct Snes Snes;
 
 int sr_trace_active(void);
 int sr_trace_channel_enabled(int channel_bit);
+const char *sr_trace_status(void);
 void sr_trace_func(uint32_t pc24, const char *name, int m, int x,
                    int expected_m, int expected_x);
 void sr_trace_call(uint32_t pc24, const char *name, int m, int x,

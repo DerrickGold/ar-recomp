@@ -39,6 +39,9 @@ int main(void) {
     sr_trace_bind_runner(&runner, 1);
     check(sr_trace_open_file(RUNTIME_TRACE_TEST_PATH, channels, 7, 7) == 1,
           "open explicit trace file");
+    check(strstr(sr_trace_status(),
+                 "recorder=included deep_instrumentation=excluded mode=file") != NULL,
+          "authoritative file trace status");
     snes_frame_counter = 6;
     check(!sr_trace_active(), "lower frame bound");
     snes_frame_counter = 7;

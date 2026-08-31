@@ -23,6 +23,7 @@
 #include "snesrecomp/game/types.h"
 #include "actraiser_rtl.h"
 #include "snesrecomp/game/bootstrap.h"
+#include "snesrecomp/game/cpu.h"
 #include "snesrecomp/game/generated_support.h"
 #include "config.h"
 #include "crt_post.h"
@@ -850,6 +851,14 @@ static int AppBoot_ParseArgs(AppBoot *app, int argc, char **argv) {
   /* Now that config-file AR_* values are env-bridged, point bare output
    * filenames into the per-run dir (see run_dir.h). */
   RunDirRebaseEnvOutputs();
+
+  /* One authoritative line identifies both build capability and resolved
+   * runtime mode. This prevents a trace-capable diagnostic build with tracing
+   * off from being confused with a play/release build where the recorder was
+   * compiled out entirely. Persist the same line beside replay artifacts. */
+  const char *trace_status = sr_trace_status();
+  fprintf(stderr, "[runner-trace] %s\n", trace_status);
+  RunDirRecordTraceStatus(trace_status);
 
   if (!app->rom_path) {
     fprintf(stderr, "Usage: %s <rom.sfc> [--config config.ini]\n", argv[0]);

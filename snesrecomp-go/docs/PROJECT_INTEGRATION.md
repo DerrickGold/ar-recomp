@@ -113,12 +113,16 @@ a target configuration helper:
   boundary, public C11/private C++20 requirements, SIMD selection, and bitset
   configuration.
 
-Ordinary optimized builds retain runner event/audio observers and the
-runtime-selectable JSONL channels (`SNESRECOMP_TRACE_FILE` and
-`SNESRECOMP_TRACE_CHANNELS`). `SNESRECOMP_ENABLE_TRACE` adds deep generated-CPU
-opcode/boundary instrumentation, local trace rings, and a link stub; it is not
-required for the cheap channels. The historical TCP debug server was
-intentionally not carried into the independent runner.
+Ordinary optimized builds retain the supported runner event/audio observer
+services. The project-owned runtime JSONL/watch consumer is optional:
+`SNESRECOMP_ENABLE_TRACE_RECORDER=ON` compiles it and enables the
+`SNESRECOMP_TRACE_FILE`, `SNESRECOMP_TRACE_WATCH_FILE`, and
+`SNESRECOMP_TRACE_CHANNELS` controls. Leave it off in play and packaged builds
+to remove its formatter, ring, and generated entry/call probes.
+`SNESRECOMP_ENABLE_TRACE=ON` adds deep generated-CPU opcode/boundary
+instrumentation, local trace rings, and a link stub, and implies the runtime
+recorder. The historical TCP debug server was intentionally not carried into
+the independent runner.
 
 ```cmake
 cmake_minimum_required(VERSION 3.16)

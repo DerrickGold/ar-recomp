@@ -9,12 +9,14 @@
  * run_info.txt (cmd line + AR_* env), anomaly captures, dumps, snapshots,
  * screenshots. Battery SRAM and save-state slots stay in saves/.
  *
- * AR_NO_RUN_DIR=1 opts out (paths fall back to the legacy saves/ layout —
- * for the launcher/production or quick throwaway runs). */
+ * Development/trace builds enable this by default. Play/package builds do
+ * not create runs/ unless AR_ENABLE_RUN_DIR=1 is set for a diagnostic launch.
+ * AR_NO_RUN_DIR=1 always opts out. When disabled, explicitly requested bare
+ * diagnostic output filenames fall back under saves/. */
 
-/* Create the run dir, tee the console, export AR_RUN_DIR, default
- * SNESRECOMP_TRACE_WATCH_FILE on, write run_info.txt, update the runs/latest symlink.
- * Call once, first thing in main() — before anything prints. */
+/* If enabled by the build/runtime policy, create the run dir, tee the console,
+ * export AR_RUN_DIR, write run_info.txt, and update runs/latest. Trace capture
+ * remains separately opt-in. Call once before anything prints. */
 void RunDirInit(int argc, char **argv);
 
 /* Rebase bare-filename output env vars (SNESRECOMP_TRACE_WATCH_FILE / SNESRECOMP_TRACE_FILE /
@@ -24,6 +26,10 @@ void RunDirInit(int argc, char **argv);
  * `SNESRECOMP_TRACE_WATCH_FILE = anom` in dev-config.ini) are covered too. Values
  * containing '/' are left alone. */
 void RunDirRebaseEnvOutputs(void);
+
+/* Append the authoritative post-config runner-recorder and deep-instrumentation
+ * state to run_info.txt. No-op when per-run directories are unavailable. */
+void RunDirRecordTraceStatus(const char *status);
 
 /* The run directory ("runs/<ts>"), or "saves" when opted out/unavailable.
  * No trailing slash. Always a usable prefix. */

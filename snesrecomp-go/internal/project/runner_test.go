@@ -129,6 +129,7 @@ func TestRuntimeArchiveFlagsAreGameIndependentAndSanitized(t *testing.T) {
 	for _, required := range []string{
 		"-DSNESRECOMP_ENABLE_SIMD=1",
 		"-DSNESRECOMP_TRACE=0",
+		"-DSNESRECOMP_TRACE_RECORDER=0",
 		"-DSNESRECOMP_WATCHDOG=0",
 		"-gno-codeview-command-line",
 		"-fdebug-compilation-dir=snesrecomp-runtime",
