@@ -181,6 +181,35 @@ if(SNESRECOMP_ENABLE_TRACE)
 else()
     set(_SNESRECOMP_TRACE 0)
 endif()
+if(SNESRECOMP_ENABLE_TRACE OR SNESRECOMP_ENABLE_TRACE_RECORDER)
+    set(_SNESRECOMP_TRACE_RECORDER 1)
+    message(STATUS
+        "ActRaiserRecomp: JSONL/watch trace recorder ENABLED (diagnostic build)")
+else()
+    set(_SNESRECOMP_TRACE_RECORDER 0)
+    message(STATUS
+        "ActRaiserRecomp: JSONL/watch trace recorder omitted (play/release build)")
+endif()
+
+if(CMAKE_BUILD_TYPE STREQUAL "Release" OR
+   CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo" OR
+   CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
+    set(_ACTRAISER_RUN_DIR_DEFAULT OFF)
+else()
+    set(_ACTRAISER_RUN_DIR_DEFAULT ON)
+endif()
+option(ACTRAISER_ENABLE_RUN_DIR_BY_DEFAULT
+       "Create a timestamped diagnostic run directory on every launch"
+       ${_ACTRAISER_RUN_DIR_DEFAULT})
+if(ACTRAISER_ENABLE_RUN_DIR_BY_DEFAULT)
+    set(_ACTRAISER_RUN_DIR_DEFAULT 1)
+    message(STATUS
+        "ActRaiserRecomp: per-run diagnostic bundles default ON (development build)")
+else()
+    set(_ACTRAISER_RUN_DIR_DEFAULT 0)
+    message(STATUS
+        "ActRaiserRecomp: per-run diagnostic bundles default OFF (play/release build)")
+endif()
 
 # SNESRECOMP_WATCHDOG: the 5s hang watchdog. Bring-up instrumentation — it exists to
 # catch an infinite loop in recompiled code during porting, and once a build is
@@ -211,12 +240,15 @@ endif()
 target_compile_definitions(ActRaiserRecomp PRIVATE
     SYSTEM_VOLUME_MIXER_AVAILABLE=0
     SNESRECOMP_TRACE=${_SNESRECOMP_TRACE}
+    SNESRECOMP_TRACE_RECORDER=${_SNESRECOMP_TRACE_RECORDER}
+    AR_RUN_DIR_DEFAULT_ENABLED=${_ACTRAISER_RUN_DIR_DEFAULT}
     SNESRECOMP_REVERSE_DEBUG=0
     SNESRECOMP_WATCHDOG=${_SNESRECOMP_WATCHDOG}
 )
 target_compile_definitions(snesrecomp_runtime PRIVATE
     SYSTEM_VOLUME_MIXER_AVAILABLE=0
     SNESRECOMP_TRACE=${_SNESRECOMP_TRACE}
+    SNESRECOMP_TRACE_RECORDER=${_SNESRECOMP_TRACE_RECORDER}
     SNESRECOMP_REVERSE_DEBUG=0
     SNESRECOMP_WATCHDOG=${_SNESRECOMP_WATCHDOG}
 )

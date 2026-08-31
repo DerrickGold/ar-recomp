@@ -273,9 +273,11 @@ if(BUILD_TESTING)
         COMMAND snesrecomp_runtime_audio_trace_test)
 
     add_executable(snesrecomp_runtime_runtime_trace_test
-        tests/runtime_trace_test.c tests/apu_sync_stub.c)
+        tests/runtime_trace_test.c tests/apu_sync_stub.c
+        src/core/runtime_trace.c)
     target_compile_definitions(snesrecomp_runtime_runtime_trace_test PRIVATE
         SNESRECOMP_TRACE=0
+        SNESRECOMP_TRACE_RECORDER=1
         RUNTIME_TRACE_TEST_PATH="${CMAKE_CURRENT_BINARY_DIR}/runtime-trace.jsonl")
     target_link_libraries(snesrecomp_runtime_runtime_trace_test PRIVATE
         snesrecomp_runtime)

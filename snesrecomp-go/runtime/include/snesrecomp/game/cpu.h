@@ -191,6 +191,10 @@ void sr_trace_func(uint32 pc24, const char *name, int m, int x,
 void sr_trace_call(uint32 pc24, const char *name, int m, int x,
                    int expected_m, int expected_x);
 
+#ifndef SNESRECOMP_TRACE_RECORDER
+#define SNESRECOMP_TRACE_RECORDER 0
+#endif
+
 static inline void sr_entry_mx_check(CpuState *cpu, int expected_m,
                                      int expected_x, const char *name,
                                      uint32 pc24) {
@@ -200,10 +204,12 @@ static inline void sr_entry_mx_check(CpuState *cpu, int expected_m,
     }
     if (g_sr_mx_history_enabled) sr_mx_history_record(pc24, cpu->m_flag & 1, cpu->x_flag & 1);
     if (g_sr_trap_function != NULL) sr_entry_trap_function(cpu, name, pc24);
+#if SNESRECOMP_TRACE_RECORDER
     if (sr_trace_active()) {
         sr_trace_func(pc24, name, cpu->m_flag & 1, cpu->x_flag & 1,
                       expected_m, expected_x);
     }
+#endif
 }
 
 static inline void sr_exit_mx_check(CpuState *cpu, int expected_m,
@@ -230,10 +236,12 @@ static inline void sr_call_mx_check(CpuState *cpu, int expected_m,
                                (cpu->x_flag & 1) != expected_x)) {
         sr_call_mx_fail(cpu, expected_m, expected_x, name, pc24);
     }
+#if SNESRECOMP_TRACE_RECORDER
     if (sr_trace_active()) {
         sr_trace_call(pc24, name, cpu->m_flag & 1, cpu->x_flag & 1,
                       expected_m, expected_x);
     }
+#endif
 }
 
 void sr_indirect_suppressed_log(CpuState *cpu, uint32 site_pc24,

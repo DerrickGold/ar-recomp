@@ -81,15 +81,20 @@ or re-established each frame. Composition uses a coherent
 
 ## Trace and debug status
 
-Cheap observation does not require a rebuild. Runner event subscriptions,
-audio-trace subscriptions, and JSONL runtime channels selected through
-`SNESRECOMP_TRACE_FILE`/`SNESRECOMP_TRACE_CHANNELS` are compiled into ordinary
-optimized builds and are inactive until selected at run time.
+Runner event subscriptions and audio-trace subscriptions remain available in
+ordinary optimized builds and are inactive until a host subscribes. The
+project-owned JSONL/watch recorder is a separate diagnostic consumer: build it
+with `SNESRECOMP_ENABLE_TRACE_RECORDER=ON`, then select its runtime mode through
+`SNESRECOMP_TRACE_FILE`, `SNESRECOMP_TRACE_WATCH_FILE`, and
+`SNESRECOMP_TRACE_CHANNELS`. Play and packaged builds should leave the option
+off so the recorder, formatting code, and generated entry/call probes are
+compiled out.
 
 `SNESRECOMP_ENABLE_TRACE=ON` additionally compiles deep generated-CPU
 instrumentation: per-opcode/boundary paths, local execution rings, and the
-generated trace link stub. Use that build only when the always-available event
-and JSONL channels cannot answer the question. Entry/call/exit M/X assertions,
+generated trace link stub. It implies the runtime recorder. Use that build only
+when public event observers and the runtime JSONL recorder cannot answer the
+question. Entry/call/exit M/X assertions,
 stack-balance checks, garbage-variant traps, dispatch-miss diagnostics, and
 unresolved-stub traps remain actionable in ordinary builds. The retired TCP
 debug server was intentionally not carried into the independent runner.

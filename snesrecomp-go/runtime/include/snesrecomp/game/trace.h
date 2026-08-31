@@ -12,6 +12,10 @@ extern "C" {
 #define SNESRECOMP_TRACE 0
 #endif
 
+/* Describes the separately compiled JSONL/watch recorder, deep generated-CPU
+ * instrumentation, and the recorder's selected runtime mode. */
+const char *sr_trace_status(void);
+
 enum {
     CPU_TR_BLOCK = 0,
     CPU_TR_PHB = 1,

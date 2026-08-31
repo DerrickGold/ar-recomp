@@ -13,6 +13,21 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef SNESRECOMP_TRACE_RECORDER
+#define SNESRECOMP_TRACE_RECORDER 0
+#endif
+#ifndef SNESRECOMP_TRACE
+#define SNESRECOMP_TRACE 0
+#endif
+
+#if SNESRECOMP_TRACE
+#define SR_DEEP_INSTRUMENTATION_STATUS "included"
+#else
+#define SR_DEEP_INSTRUMENTATION_STATUS "excluded"
+#endif
+
+#if SNESRECOMP_TRACE_RECORDER
+
 enum {
     kBlockRingMask = 1023,
     kGameFrameOffset = 0x88,
@@ -236,6 +251,48 @@ int sr_trace_active(void) {
     if (s_frame_low >= 0 && snes_frame_counter < s_frame_low) return 0;
     if (s_frame_high >= 0 && snes_frame_counter > s_frame_high) return 0;
     return 1;
+}
+
+const char *sr_trace_status(void) {
+    static char status[640];
+    const char *path;
+    const char *watch;
+    if (!s_initialized) initialize_from_environment();
+    path = getenv("SNESRECOMP_TRACE_FILE");
+    watch = getenv("SNESRECOMP_TRACE_WATCH_FILE");
+    if (s_file != NULL) {
+        if (path != NULL && path[0] != '\0')
+            snprintf(status, sizeof(status),
+                     "recorder=included deep_instrumentation="
+                     SR_DEEP_INSTRUMENTATION_STATUS " mode=file path=%s",
+                     path);
+        else
+            snprintf(status, sizeof(status),
+                     "recorder=included deep_instrumentation="
+                     SR_DEEP_INSTRUMENTATION_STATUS " mode=file");
+    } else if (s_watch) {
+        snprintf(status, sizeof(status),
+                 "recorder=included deep_instrumentation="
+                 SR_DEEP_INSTRUMENTATION_STATUS " mode=watch prefix=%s",
+                 s_watch_prefix);
+    } else if (path != NULL && path[0] != '\0') {
+        snprintf(status, sizeof(status),
+                 "recorder=included deep_instrumentation="
+                 SR_DEEP_INSTRUMENTATION_STATUS
+                 " mode=off requested=file path=%s error=open-failed",
+                 path);
+    } else if (watch != NULL && watch[0] != '\0') {
+        snprintf(status, sizeof(status),
+                 "recorder=included deep_instrumentation="
+                 SR_DEEP_INSTRUMENTATION_STATUS
+                 " mode=off requested=watch prefix=%s error=unavailable",
+                 watch);
+    } else {
+        snprintf(status, sizeof(status),
+                 "recorder=included deep_instrumentation="
+                 SR_DEEP_INSTRUMENTATION_STATUS " mode=off");
+    }
+    return status;
 }
 
 int sr_trace_channel_enabled(int channel_bit) {
@@ -723,3 +780,73 @@ void sr_trace_flush(const char *reason) {
     }
     fclose(file);
 }
+
+#else
+
+/* Play and packaged builds retain the public runner observer ABI, but omit
+ * this project-owned diagnostic consumer and all of its formatting/ring
+ * machinery. These stubs keep cold fatal-diagnostic call sites linkable; the
+ * generated entry/call probes compile away in game/cpu.h. */
+int sr_trace_active(void) { return 0; }
+int sr_trace_channel_enabled(int channel_bit) {
+    (void)channel_bit;
+    return 0;
+}
+const char *sr_trace_status(void) {
+    return "recorder=excluded deep_instrumentation="
+           SR_DEEP_INSTRUMENTATION_STATUS " mode=off";
+}
+void sr_trace_func(uint32_t pc24, const char *name, int m, int x,
+                   int expected_m, int expected_x) {
+    (void)pc24; (void)name; (void)m; (void)x;
+    (void)expected_m; (void)expected_x;
+}
+void sr_trace_call(uint32_t pc24, const char *name, int m, int x,
+                   int expected_m, int expected_x) {
+    (void)pc24; (void)name; (void)m; (void)x;
+    (void)expected_m; (void)expected_x;
+}
+void sr_trace_vram(uint16_t address, uint16_t value, const char *path) {
+    (void)address; (void)value; (void)path;
+}
+void sr_trace_vmadd(uint16_t address, const char *source) {
+    (void)address; (void)source;
+}
+void sr_trace_reg(uint16_t address, uint8_t value) {
+    (void)address; (void)value;
+}
+void sr_trace_dma(int channel, uint8_t b_address, uint8_t a_bank,
+                  uint16_t a_address, uint32_t size, int from_b_bus) {
+    (void)channel; (void)b_address; (void)a_bank; (void)a_address;
+    (void)size; (void)from_b_bus;
+}
+void sr_trace_dispmiss(uint32_t from_pc, uint32_t to_pc) {
+    (void)from_pc; (void)to_pc;
+}
+void sr_trace_garbage(uint32_t pc24, const char *name, int m, int x) {
+    (void)pc24; (void)name; (void)m; (void)x;
+}
+void sr_trace_wram(uint32_t offset, uint16_t old_value, uint16_t value,
+                   int width) {
+    (void)offset; (void)old_value; (void)value; (void)width;
+}
+void sr_trace_hwread(uint16_t address, uint8_t value) {
+    (void)address; (void)value;
+}
+void sr_trace_ppumem(const char *memory, uint16_t address, uint16_t value) {
+    (void)memory; (void)address; (void)value;
+}
+void sr_trace_frame(const char *event) { (void)event; }
+void sr_trace_flush(const char *reason) { (void)reason; }
+int sr_trace_open_file(const char *path, int channel_mask,
+                       long host_frame_low, long host_frame_high) {
+    (void)path; (void)channel_mask;
+    (void)host_frame_low; (void)host_frame_high;
+    return 0;
+}
+void sr_trace_close(void) {}
+void sr_trace_bind_runner(Snes *runner, int enabled) {
+    (void)runner; (void)enabled;
+}
+
+#endif

@@ -15,6 +15,21 @@ extern char **environ;
 static char g_run_dir[256] = "saves";
 static int g_enabled;
 
+#ifndef AR_RUN_DIR_DEFAULT_ENABLED
+#define AR_RUN_DIR_DEFAULT_ENABLED 1
+#endif
+
+static int environment_option_enabled(const char *name) {
+  const char *value = getenv(name);
+  return value && value[0] && value[0] != '0';
+}
+
+static int run_dir_enabled_for_launch(void) {
+  if (environment_option_enabled("AR_NO_RUN_DIR")) return 0;
+  if (environment_option_enabled("AR_ENABLE_RUN_DIR")) return 1;
+  return AR_RUN_DIR_DEFAULT_ENABLED != 0;
+}
+
 /* Exit note: point at the one folder that holds every diagnostic from this
  * run, ready to zip and hand over for investigation. */
 static void print_artifact_hint(void) {
@@ -30,6 +45,17 @@ void RunDirFile(char *buf, size_t n, const char *fmt, ...) {
   va_start(ap, fmt);
   vsnprintf(buf + off, n - off, fmt, ap);
   va_end(ap);
+}
+
+void RunDirRecordTraceStatus(const char *status) {
+  if (!g_enabled || !status) return;
+  char path[300];
+  RunDirFile(path, sizeof path, "run_info.txt");
+  FILE *f = fopen(path, "a");
+  if (!f) return;
+  fprintf(f, "--- resolved diagnostics (post-config) ---\n"
+             "runner_trace=%s\n", status);
+  fclose(f);
 }
 
 #ifndef _WIN32
@@ -80,10 +106,7 @@ static void write_run_info(int argc, char **argv) {
 }
 
 void RunDirInit(int argc, char **argv) {
-  const char *no = getenv("AR_NO_RUN_DIR");
-  if (no && no[0] && no[0] != '0') return;   /* legacy saves/ layout; the
-                                              * config file's SNESRECOMP_TRACE_WATCH_FILE
-                                              * fallback line applies */
+  if (!run_dir_enabled_for_launch()) return;
 
   if (mkdir("runs", 0755) != 0 && access("runs", W_OK) != 0) return;
 
@@ -106,20 +129,13 @@ void RunDirInit(int argc, char **argv) {
   /* Engine-side writers (fn_census, crash dispatch log) key off this. */
   setenv("AR_RUN_DIR", g_run_dir, 1);
 
-  /* Default the always-on anomaly capture on. overwrite=0: a real env var
-   * or a config-file SNESRECOMP_TRACE_WATCH_FILE line still wins; the bare name is
-   * rebased into the run dir by RunDirRebaseEnvOutputs() after config
-   * parsing. A deliberate SNESRECOMP_TRACE_FILE=<file> windowed capture disables watch
-   * mode in sr_trace.c, so the default is harmless in that case too. */
-  setenv("SNESRECOMP_TRACE_WATCH_FILE", "anom", 0);
-
   write_run_info(argc, argv);
 
   unlink("runs/latest");
   symlink(g_run_dir + strlen("runs/"), "runs/latest");   /* relative link */
 
   fprintf(stderr, "[run-dir] %s (console.log + dumps ringfenced here; "
-                  "AR_NO_RUN_DIR=1 for legacy saves/ layout)\n", g_run_dir);
+                  "AR_NO_RUN_DIR=1 disables)\n", g_run_dir);
   atexit(print_artifact_hint);
   (void)g_enabled;
 }
@@ -173,8 +189,7 @@ static void write_run_info(int argc, char **argv) {
 }
 
 void RunDirInit(int argc, char **argv) {
-  const char *no = getenv("AR_NO_RUN_DIR");
-  if (no && no[0] && no[0] != '0') return;   /* legacy saves/ layout */
+  if (!run_dir_enabled_for_launch()) return;
 
   /* _mkdir returns 0 on create; if it already exists, probe writability
    * (_access mode 02 == write). */
@@ -197,16 +212,12 @@ void RunDirInit(int argc, char **argv) {
   /* Engine-side writers (fn_census, crash dispatch log) key off this. */
   _putenv_s("AR_RUN_DIR", g_run_dir);
 
-  /* No SNESRECOMP_TRACE_WATCH_FILE default here, unlike the POSIX branch. Watch mode needs
-   * a memory-backed FILE* (funopen/fopencookie) that Windows has no spelling
-   * for, so sr_trace.c declines it with a diagnostic — and defaulting it on
-   * would print that diagnostic to every player's console on every boot.
-   * Setting SNESRECOMP_TRACE_WATCH_FILE explicitly still works and still explains itself. */
+  /* Trace capture is opt-in on every platform. */
 
   write_run_info(argc, argv);
 
   fprintf(stderr, "[run-dir] %s (dumps ringfenced here; "
-                  "AR_NO_RUN_DIR=1 for legacy saves/ layout)\n", g_run_dir);
+                  "AR_NO_RUN_DIR=1 disables)\n", g_run_dir);
   atexit(print_artifact_hint);
   (void)g_enabled;
 }

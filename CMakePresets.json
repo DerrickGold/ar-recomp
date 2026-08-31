@@ -8,6 +8,9 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "AR_SIM3D_TERRAIN_ELEVATION": "ON",
+        "ACTRAISER_ENABLE_RUN_DIR_BY_DEFAULT": "ON",
+        "SNESRECOMP_ENABLE_TRACE_RECORDER": "ON",
+        "SNESRECOMP_ENABLE_TRACE": "OFF",
         "AR_SANITIZE": "OFF",
         "BUILD_TESTING": "ON"
       }
@@ -19,6 +22,9 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "AR_SIM3D_TERRAIN_ELEVATION": "ON",
+        "ACTRAISER_ENABLE_RUN_DIR_BY_DEFAULT": "OFF",
+        "SNESRECOMP_ENABLE_TRACE_RECORDER": "OFF",
+        "SNESRECOMP_ENABLE_TRACE": "OFF",
         "SNESRECOMP_WATCHDOG": "OFF",
         "AR_SANITIZE": "OFF",
         "BUILD_TESTING": "OFF"
@@ -31,6 +37,9 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "AR_SIM3D_TERRAIN_ELEVATION": "OFF",
+        "ACTRAISER_ENABLE_RUN_DIR_BY_DEFAULT": "OFF",
+        "SNESRECOMP_ENABLE_TRACE_RECORDER": "OFF",
+        "SNESRECOMP_ENABLE_TRACE": "OFF",
         "SNESRECOMP_WATCHDOG": "OFF",
         "AR_SANITIZE": "OFF",
         "BUILD_TESTING": "OFF"
@@ -43,6 +52,9 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "AR_SIM3D_TERRAIN_ELEVATION": "ON",
+        "ACTRAISER_ENABLE_RUN_DIR_BY_DEFAULT": "ON",
+        "SNESRECOMP_ENABLE_TRACE_RECORDER": "OFF",
+        "SNESRECOMP_ENABLE_TRACE": "OFF",
         "AR_SANITIZE": "ON",
         "BUILD_TESTING": "OFF"
       }
@@ -54,7 +66,9 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "AR_SIM3D_TERRAIN_ELEVATION": "ON",
+        "ACTRAISER_ENABLE_RUN_DIR_BY_DEFAULT": "ON",
         "SNESRECOMP_ENABLE_TRACE": "ON",
+        "SNESRECOMP_ENABLE_TRACE_RECORDER": "ON",
         "AR_SANITIZE": "OFF",
         "BUILD_TESTING": "OFF"
       }
