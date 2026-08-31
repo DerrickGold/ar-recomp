@@ -1567,6 +1567,12 @@ static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
         case SDL_EVENT_WINDOW_RESTORED:
         case SDL_EVENT_WINDOW_SHOWN:
           g_window_hidden = false;
+          HostDisplay_ResetVsyncPacing();
+          HostInput_RequestPausedRedraw();
+          break;
+        case SDL_EVENT_WINDOW_EXPOSED:
+        case SDL_EVENT_WINDOW_FOCUS_GAINED:
+          HostDisplay_ResetVsyncPacing();
           HostInput_RequestPausedRedraw();
           break;
         /* GPU device/target reset: STATIC textures lose their contents and
@@ -1575,6 +1581,7 @@ static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
          * Init). DEVICE_LOST is unrecoverable. */
         case SDL_EVENT_RENDER_TARGETS_RESET:
         case SDL_EVENT_RENDER_DEVICE_RESET:
+          HostDisplay_ResetVsyncPacing();
           if (event.type == SDL_EVENT_RENDER_DEVICE_RESET) {
             Diorama_ResetRendererResources(&g_render_device);
             DestroyDioramaTextures();
