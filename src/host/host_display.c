@@ -22,6 +22,7 @@
 #include "actraiser_rtl.h"
 #include "diorama/diorama.h"
 #include "diorama/diorama_frame_generation.h"
+#include "display_geometry.h"
 #include "frame_slot.h"
 #include "host_display_pacing.h"
 #include "host_display_refresh_cache.h"
@@ -35,7 +36,6 @@
 #include "snesrecomp/runner.h"
 #include "settings.h"
 #include "constants.h"
-#include "snesrecomp/host/widescreen.h"
 #include "render/render_device.h"
 
 extern SDL_Window *g_window;
@@ -43,9 +43,6 @@ extern ArRenderDevice g_render_device;
 extern ArRenderTexture g_texture;
 extern int g_snes_width;
 extern int g_snes_height;
-extern bool g_ws_active;
-extern int g_ws_extra;
-extern int g_ws_display_extra;
 extern uint8_t g_pixels[
     SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight];
 extern uint8_t g_authentic_pixels[
@@ -357,15 +354,15 @@ void HostDisplay_ResolveVideoGeometry(bool apply_runtime_changes) {
         internal_width > kActRaiserAuthenticWidth
             ? (internal_width - kActRaiserAuthenticWidth + 1) / 2
             : 0;
-    if (extra_columns > kWsExtraMax) extra_columns = kWsExtraMax;
+    if (extra_columns > kActRaiserWidescreenExtraMax)
+      extra_columns = kActRaiserWidescreenExtraMax;
   }
 
-  g_ws_display_extra = extra_columns;
+  const int display_extra = extra_columns;
   if (g_settings.diorama_mode && extra_columns > 0)
-    extra_columns = kWsExtraMax;
+    extra_columns = kActRaiserWidescreenExtraMax;
 
-  g_ws_extra = extra_columns;
-  g_ws_active = extra_columns > 0;
+  DisplayGeometry_SetHorizontal(extra_columns, display_extra);
   g_snes_width =
       kActRaiserAuthenticWidth + 2 * extra_columns;
 

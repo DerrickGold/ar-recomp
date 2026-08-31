@@ -58,8 +58,9 @@ DSP key-ons. The observer exposes fixed registers and a synchronous, read-only
 ARAM view while the APU lock is held; ActRaiser-specific driver offsets stay in
 the tracer. Disabled observation is one unlikely check at each existing seam
 and no state is serialized. The tracer emits request/outcome CSV records. With the serial trace enabled,
-`AR_NATIVE_AUDIO_PCM=1` additionally writes the retained native-rate PCM ring
-as `native_audio_pcm.wav` for waveform parity checks.
+`AR_NATIVE_AUDIO_PCM=1` independently subscribes to the general runner audio
+event stream and writes the retained final host mix as `native_audio_pcm.wav`
+for waveform parity checks. It does not require the low-level provenance trace.
 
 > Audio is the highest-payoff first HAL target: the `$035A`/`$035B` events are already ID-based.
 
@@ -1523,6 +1524,18 @@ The whole scheme is **presentation-only**: `$0088`, timers, and logic never see 
 |---|---|---|---|---|
 | Joypad read | auto-joypad enable `$4200` bit0; `$4218-$421F` | controller | "read player input" | 🟢 consumers mapped 2026-07-07: NMI shadow `$02:AC4E` → `$00A0` = `$4218`&`$F4` (A/X/L/R held) and `$00A1` = the `$4219` byte; game logic reads the SHADOWS (cast trigger `$00:9843`, attack test on `$A1`), never the ports. Only other direct port reads: `$00:8151` combo check + bank-2 `$4219` menu readers. See "Magic system" §3 |
 
+`AR_INPUT_RECORD=<path>` writes the runner's canonical host-tick replay
+container. `AR_INPUT_REPLAY=<path>` reads that format and still accepts the
+historical ActRaiser `{game_frame, inputs}` records used by existing fixtures.
+Canonical recording happens immediately after each successful `RtlRunFrame`,
+using the runner's effective input snapshot; turbo subframes therefore remain
+distinct records. `AR_REPLAY_CHECKPOINT_INTERVAL=N` adds a semantic-state
+digest every N runner ticks and playback fails closed on a mismatch. Replay
+identity is established after an optional boot savestate is loaded, and replay
+sessions never persist SRAM or settings. The separate `snesref` oracle adapter
+continues to accept only historical game-frame fixtures because its emulator
+boot cadence cannot be assumed to share runner host-tick ordinals.
+
 ---
 
 ## Save / persistence  (mapped 2026-07-01)
@@ -1534,8 +1547,10 @@ The whole scheme is **presentation-only**: `$0088`, timers, and logic never see 
 
 > **Load path:** `src/main.c` now attaches `save_system.c`, which transactionally
 > decodes the boot-selected native or INI backend into the same `g_sram` buffer.
-> The runner's old `RtlReadSram` remains available generically but no longer owns
-> ActRaiser's runtime persistence. `cpu_sram_offset` (`cpu_state.c`) maps `(bank, addr)` for bank `$70`
+> It also validates and migrates the historical title-named native save into
+> the selected backend when the active target does not yet exist. The runner
+> exposes SRAM as emulated memory but deliberately owns no filesystem path,
+> migration, backup, or serialization policy. `cpu_sram_offset` (`cpu_state.c`) maps `(bank, addr)` for bank `$70`
 > to a literal 1:1 offset (`(bank & 0xF) << 15 | addr`, and bank `$70`'s `&0xF` is `0`, so addr IS
 > the offset) — confirmed correct against the checksum algorithm 2026-07-01. If a future save-format
 > HAL is built, this is the one seam that's ALREADY a clean pass/fail gate; the body itself still

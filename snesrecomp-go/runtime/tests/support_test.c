@@ -1,7 +1,6 @@
 #include "recomp_hw.h"
 #include "snes/cpu.h"
 #include "snes/saveload.h"
-#include "snesrecomp/host/widescreen.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -86,22 +85,6 @@ static void test_cpu(void) {
     cpu_free(cpu);
 }
 
-static void test_widescreen_copy(void) {
-    const uint8_t source[24] = {
-        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
-        13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
-    };
-    uint8_t destination[32];
-    memset(destination, 0xCC, sizeof(destination));
-    RtlWidescreenPresent(destination, 16u, source, 3, 2);
-    check(memcmp(destination, source, 12u) == 0, "first presented row");
-    check(memcmp(destination + 16u, source + 12u, 12u) == 0,
-          "second presented row");
-    check(destination[12] == 0xCCu && destination[28] == 0xCCu,
-          "destination pitch padding preserved");
-    check(kWsExtraMax == 120, "widescreen compatibility limit");
-}
-
 static void test_register_adapter(void) {
     Snes instance = {0x42u};
     g_snes = &instance;
@@ -115,7 +98,6 @@ static void test_register_adapter(void) {
 
 int main(void) {
     test_cpu();
-    test_widescreen_copy();
     test_register_adapter();
     return failures == 0 ? 0 : 1;
 }

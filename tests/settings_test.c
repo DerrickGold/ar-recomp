@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "config.h"
+#include "display_geometry.h"
 #include "input_map.h"
 #include "render_capabilities.h"
 #include "settings.h"
@@ -11,9 +12,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-bool g_ws_active;
-int g_ws_extra;
-int g_ws_display_extra;
 uint8 g_ram[0x20000];
 /* kSettingCat_Graphics's GpuShadersActive() availability gate reads this
  * (main.c's real runtime state); this harness has no renderer, so it's
@@ -79,8 +77,7 @@ static void ClearSettingsEnv(void) {
 static void TestDefaultsAndMetadata(void) {
   ClearSettingsEnv();
   memset(g_ram, 0, sizeof(g_ram));
-  g_ws_active = true;
-  g_ws_extra = g_ws_display_extra = 43;
+  DisplayGeometry_SetHorizontal(43, 43);
   Settings_Init();
 
   /* Count moves whenever a category gains or loses rows; the SIM 3D block
@@ -578,8 +575,7 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
   setenv("AR_AUDIO_VOLUME", "85", 1);
   setenv("AR_MUSIC_VOLUME", "55", 1);
   setenv("AR_WS_SPRITES", "0", 1);
-  g_ws_active = true;
-  g_ws_extra = g_ws_display_extra = 52;
+  DisplayGeometry_SetHorizontal(52, 52);
   Settings_InitWithFile(settings_path);
   Settings_FinalizeDisplayMode();
 
@@ -635,8 +631,7 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
 
   ClearSettingsEnv();
   setenv("AR_WINDOW_MODE", "Windowed", 1);
-  g_ws_active = true;
-  g_ws_extra = g_ws_display_extra = 52;
+  DisplayGeometry_SetHorizontal(52, 52);
   Settings_InitWithFile(saved_path);
   Settings_FinalizeDisplayMode();
   CHECK(g_settings.window_scale == 6);
@@ -665,8 +660,7 @@ static void TestLegacySeedEncodings(void) {
   setenv("AR_DIALOG_BLIP", "0", 1);
   setenv("AR_TURBO_MULT", "1", 1);
   setenv("AR_WARP", "0605", 1);
-  g_ws_active = true;
-  g_ws_extra = g_ws_display_extra = 43;
+  DisplayGeometry_SetHorizontal(43, 43);
   Settings_Init();
 
   CHECK(g_settings.cheat_inf_mp == 10);
@@ -692,8 +686,7 @@ static void TestLegacySeedEncodings(void) {
 
 static void TestMutationApi(void) {
   ClearSettingsEnv();
-  g_ws_active = true;
-  g_ws_extra = g_ws_display_extra = 43;
+  DisplayGeometry_SetHorizontal(43, 43);
   Settings_Init();
   Settings_SetChangeObserver(ChangeObserved);
   s_observer_calls = 0;
@@ -891,8 +884,7 @@ static void TestMutationApi(void) {
 
 static void TestCategoryReset(void) {
   ClearSettingsEnv();
-  g_ws_active = true;
-  g_ws_extra = g_ws_display_extra = 43;
+  DisplayGeometry_SetHorizontal(43, 43);
   Settings_Init();
   Settings_SetChangeObserver(NULL);
 
@@ -932,8 +924,7 @@ static void TestCategoryReset(void) {
 static void TestCheatsCanBeStagedOutsideTheirRuntimeMode(void) {
   ClearSettingsEnv();
   memset(g_ram, 0, sizeof(g_ram));
-  g_ws_active = true;
-  g_ws_extra = g_ws_display_extra = 43;
+  DisplayGeometry_SetHorizontal(43, 43);
   Settings_Init();
 
   /* $18=00 is the simulation/title/UI family. Action-only effects must remain
@@ -968,8 +959,7 @@ static void TestCheatsCanBeStagedOutsideTheirRuntimeMode(void) {
 static void TestNoWideBudget(void) {
   ClearSettingsEnv();
   setenv("AR_DISPLAY_MODE", "2", 1);
-  g_ws_active = false;
-  g_ws_extra = g_ws_display_extra = 0;
+  DisplayGeometry_SetHorizontal(0, 0);
   Settings_Init();
   CHECK(g_settings.display_mode == kDisplayMode_43);
   CHECK(Settings_SetLong(Settings_Find("display_mode"),
@@ -1304,8 +1294,7 @@ static void TestVideoSettingAudit(void) {
   const char *legacy_path = "settings-video-legacy-test.ini";
   const char *saved_path = "settings-video-saved-test.ini";
   ClearSettingsEnv();
-  g_ws_active = true;
-  g_ws_extra = g_ws_display_extra = 43;
+  DisplayGeometry_SetHorizontal(43, 43);
   Settings_Init();
 
   const SettingDesc *display = Settings_Find("display_mode");
@@ -1319,9 +1308,9 @@ static void TestVideoSettingAudit(void) {
   CHECK(Settings_IsAvailable(show_fps));
 
   CHECK(Settings_IsAvailable(display));
-  g_ws_active = false;
+  DisplayGeometry_SetHorizontal(0, 0);
   CHECK(!Settings_IsAvailable(display));
-  g_ws_active = true;
+  DisplayGeometry_SetHorizontal(43, 43);
 
   g_settings.window_mode = kWindowMode_Windowed;
   CHECK(Settings_IsAvailable(window_scale));
@@ -1346,11 +1335,11 @@ static void TestVideoSettingAudit(void) {
   Settings_ReconcileDisplayModeAfterGeometryChange(kDisplayMode_Custom);
   CHECK(g_settings.display_mode == kDisplayMode_Custom);
   CHECK(g_settings.ws_sprites);
-  g_ws_active = false;
+  DisplayGeometry_SetHorizontal(0, 0);
   Settings_ReconcileDisplayModeAfterGeometryChange(kDisplayMode_Custom);
   CHECK(g_settings.display_mode == kDisplayMode_43);
   CHECK(!g_settings.ws_action && !g_settings.ws_sprites);
-  g_ws_active = true;
+  DisplayGeometry_SetHorizontal(43, 43);
   Settings_ReconcileDisplayModeAfterGeometryChange(kDisplayMode_43);
   CHECK(g_settings.display_mode == kDisplayMode_WideFull);
   CHECK(g_settings.ws_action && g_settings.ws_sprites);

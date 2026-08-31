@@ -18,7 +18,7 @@ static int failures;
 enum { kAuthentic = 256 };
 
 int main(void) {
-  /* The live diorama geometry: kWsExtraMax margin, kPpuObjApron headroom. */
+  /* The live diorama geometry: 120px game margin, apron headroom. */
   const ActionApronGeometry g = { 120, 64 };
   const int surface = ActionApron_SurfaceWidth(&g);
   CHECK(surface == kAuthentic + 2 * 120 + 2 * 64);  /* 624 */

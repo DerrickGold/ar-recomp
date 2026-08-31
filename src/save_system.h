@@ -94,6 +94,10 @@ bool SaveSystem_Attach(uint8_t *live_sram, size_t size,
                        SaveBackend backend,
                        const char *native_path, const char *ini_path,
                        SaveError *error);
+/* If the active path does not exist, import one legacy native .srm through the
+ * selected backend's validated, atomic codec. The legacy source is retained. */
+bool SaveSystem_MigrateLegacyNative(const char *legacy_path,
+                                    SaveError *error);
 bool SaveSystem_LoadActive(SaveError *error);
 bool SaveSystem_WriteActive(SaveError *error);
 bool SaveSystem_AutoPersistIfChanged(SaveError *error);

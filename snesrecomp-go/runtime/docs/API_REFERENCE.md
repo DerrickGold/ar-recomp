@@ -16,7 +16,7 @@ an SDK contract.
 | Linked game hot path | `snesrecomp/game_runtime.h` | Small synchronous helpers for frame timing, PPU policy, and instrumentation |
 | Enhancement, tool, or host layer | `snesrecomp/runner.h`, or a narrow `snesrecomp/runner/*.h` domain header | Versioned, capability-gated access through `SnesRunnerApi` |
 | Generated C | `snesrecomp/game/*.h` | 65816 register, dispatch, tracing, and generated-support ABI |
-| Host conveniences | `snesrecomp/host/*.h` | ROM/path launch helpers, frame/audio tracing, and presentation support |
+| Host conveniences | `snesrecomp/host/launcher.h` | Portable ROM loading and launch-path helpers; presentation and diagnostics use the runner ABI or application-owned code |
 | Runner replay artifacts | `snesrecomp/runner/replay.h` | Stateful canonical host-frame input streams over caller-owned transport |
 | Stateless utilities | `snesrecomp/support/*.h` | File loading, CRC32, packing, and other transport-independent helpers |
 
@@ -364,10 +364,10 @@ not mutate emulated clocks. `RtlApuProfileRead` reports:
 An attribution sum larger than total sets `RTL_APU_PROFILE_INCONSISTENT`
 instead of wrapping `apu_cycles_unattributed`.
 
-The legacy in-process PCM/event recorder is off by default. Set
-`SNESRECOMP_AUDIO_TRACE=1` or call `audio_trace_set_enabled(1)` before capture;
-runner ABI audio-trace subscriptions are independent of that switch. The
-large SPC PC/write histograms are likewise pay-for-play through
+Host diagnostics use the public runner event and audio-trace subscriptions.
+The separate in-process APU-audit recorder is runner-private and is allocated
+only for `SNESRECOMP_APU_AUDIT_PREFIX`; it is not a host API. The large SPC
+PC/write histograms are likewise pay-for-play through
 `SNESRECOMP_SPC_DIAGNOSTICS=1`.
 
 For bring-up, `SNESRECOMP_APU_AUDIT_PREFIX=<path>` enables the recorder and

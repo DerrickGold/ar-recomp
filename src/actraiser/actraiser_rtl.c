@@ -21,6 +21,7 @@
 #include "diorama/diorama_performance.h"
 #include "diorama/diorama_planes.h"
 #include "deterministic_hash.h"
+#include "display_geometry.h"
 #include "host/host_display.h"   /* kHostDisplayFramebufferHeight */
 #include "settings.h"
 #include "session_fatal.h"
@@ -1654,12 +1655,11 @@ static void ActRaiser_ClearWidescreenMarginGaps(
 static void ActRaiser_ResolveVerticalMarginPolicy(
     uint8_t map_group, uint8_t map_number,
     SrPpuFramePolicy *frame_policy) {
-  extern int g_ws_extra_top;
-  extern int g_ws_extra_bottom;
   extern bool Diorama_IsActiveThisFrame(void);
 
-  g_ws_extra_top = 0;
-  g_ws_extra_bottom = 0;
+  int extra_top = 0;
+  int extra_bottom = 0;
+  DisplayGeometry_SetVertical(0, 0);
   if (!frame_policy) return;
 
   int budget = g_settings.diorama_vertical_extend;
@@ -1676,8 +1676,9 @@ static void ActRaiser_ResolveVerticalMarginPolicy(
     ActRaiserActionBg_ResolveVerticalMargins(
         ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY + layer_offset),
         ActRaiser_ReadWram16(kActRaiserWram_Bg1Height + layer_offset),
-        budget, &g_ws_extra_top, &g_ws_extra_bottom);
+        budget, &extra_top, &extra_bottom);
   }
+  DisplayGeometry_SetVertical(extra_top, extra_bottom);
   frame_policy->margin_top_pixels = (uint32_t)g_ws_extra_top;
   frame_policy->margin_bottom_pixels = (uint32_t)g_ws_extra_bottom;
   /* The role catalog chooses the primary plane that governs capture height,
@@ -2042,8 +2043,6 @@ static bool ActRaiser_ConfigurePpuObjCapture(
 }
 
 static void ActRaiser_ApplyWidescreenPolicy(void) {
-  extern bool g_ws_active;
-  extern int g_ws_extra;
   SrPpuFramePolicyBand frame_bands[kActionBgPresentationBandMax];
   SrPpuFramePolicy frame_policy = {
     .struct_size = sizeof(frame_policy),
@@ -2487,7 +2486,6 @@ bool ActRaiser_HudObjSurfaceView(SrPpuSurfaceView *surface) {
   *surface = (SrPpuSurfaceView){0};
   if (!s_hud_obj_icon_count) return false;
 
-  extern int g_ws_extra;
   extern uint8_t g_hud_obj_pixels[];
   const int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
   const int height = kActRaiserAuthenticHeight;
@@ -2717,7 +2715,6 @@ static int ActRaiser_DioramaObjPlaneForPriority(int priority) {
 
 static void ActRaiser_DioramaHudObjPrepare(void) {
   extern bool g_diorama_frame_active;
-  extern int g_ws_extra;
   extern uint8_t g_hud_obj_pixels[];
   const SrPpuFrameTransactionContext *frame = ActRaiser_PpuFrame();
 
@@ -2891,7 +2888,6 @@ static void ActRaiser_DioramaHudObjFinish(int width) {
    * screen y = -g_ws_extra_top, so the hole punched in it must carry that
    * offset -- otherwise the icon is erased from the wrong rows and a ghost of
    * it stays in the tilted OBJ plane. Zero without a vertical margin. */
-  extern int g_ws_extra_top;
   const int plane_row_bias = g_ws_extra_top;
 
   for (int y = 0; y < raster_height; y++) {
@@ -2956,7 +2952,6 @@ bool ActRaiser_DioramaDeathHeimHubFacesPromoted(void) {
 
 static void ActRaiser_DioramaDeathHeimHubStatuesFinish(int width) {
   extern bool g_diorama_frame_active;
-  extern int g_ws_extra_top;
   extern uint8_t *g_diorama_layer_pixels[];
   const SrPpuFrameTransactionContext *frame = ActRaiser_PpuFrame();
 
@@ -3059,11 +3054,10 @@ static void ActRaiser_DioramaDeathHeimHubStatuesFinish(int width) {
 }
 
 ActionApronGeometry ActRaiser_ObjApronGeometry(void) {
-  extern bool g_ws_active;
-  extern int g_ws_extra;
   ActionApronGeometry g = { g_ws_extra, 0 };
   /* The same condition host_display.c uses to pin the margin budget to
-   * kWsExtraMax. Read from settings + geometry rather than from a per-frame
+   * the ActRaiser 120-pixel display cap. Read from settings + geometry rather
+   * than from a per-frame
    * diorama flag on purpose: the emitter runs during game logic, BEFORE
    * ActRaiserDrawPpuFrame sets g_diorama_frame_active, so a per-frame flag
    * would be one frame stale exactly when it matters. */
@@ -3091,9 +3085,6 @@ ActionApronGeometry ActRaiser_ObjApronGeometry(void) {
  * bound pitch, apron included, every frame. */
 static void ActRaiser_DioramaApronFinish(const ActionApronGeometry *geom) {
   extern uint8_t *g_diorama_layer_pixels[];
-  extern int g_ws_extra_top;
-  extern int g_ws_extra_bottom;
-
   if (!geom || geom->apron <= 0 || !ActRaiser_PpuFrame() ||
       !ActionApron_Count())
     return;
@@ -3409,10 +3400,6 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
          ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]));
     g_diorama_frame_active = active;
     if (want_capture) {
-      extern bool g_ws_active;
-      extern int g_ws_extra;
-      extern int g_ws_extra_top;
-      extern int g_ws_extra_bottom;
       int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
       /* Apron-wide, matching the main framebuffer bind: the capture rect stays
        * scanline-bounded (the scanline path cannot fill apron columns), but the
@@ -3726,7 +3713,6 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
     const SrPpuOverlayCaptureState *bg1 =
         ActRaiser_PpuCapture(SR_PPU_OVERLAY_BG1);
     if (bg1->x1 <= bg1->x0 || bg1->y1 <= bg1->y0) {
-      extern int g_ws_extra;
       extern uint8_t g_action_bg1_mask_pixels[];
       const int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
       if (ActRaiser_BindPpuOutput(
@@ -3747,7 +3733,6 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
     const SrPpuOverlayCaptureState *bg2 =
         ActRaiser_PpuCapture(SR_PPU_OVERLAY_BG2);
     if (bg2->x1 <= bg2->x0 || bg2->y1 <= bg2->y0) {
-      extern int g_ws_extra;
       extern uint8_t g_action_bg2_mask_pixels[];
       const int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
       if (ActRaiser_BindPpuOutput(
@@ -3769,7 +3754,6 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
     extern bool g_sim3d_textures_ready;
     extern bool g_sim3d_billboard_renderer_ready;
     extern bool g_diorama_frame_active;
-    extern int g_ws_extra;
     uint8_t map_group = g_ram[kActRaiserWram_MapGroup];
     uint8_t map_number = g_ram[kActRaiserWram_CurrentMap];
     bool town = ActRaiser_IsSimulationTown(map_group, map_number);
@@ -3920,7 +3904,6 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
         DioramaPerformance_Begin(kDioramaPerformance_ProducerFinish);
   {
     extern uint8_t g_pixels[];
-    extern int g_ws_extra;
     int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
     /* g_pixels is bound apron-wide; the authentic frame starts kPpuObjApron
      * columns in. Offset the base and pass the real pitch. */
@@ -3963,7 +3946,6 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
      * is one diff apart. */
     extern uint8_t g_hud_bg_pixels[];
     extern uint8_t *g_diorama_layer_pixels[];
-    extern int g_ws_extra;
     int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
     size_t pitch = (size_t)width * 4;
     int hud0 = -1, hud1 = -1, plane0 = -1, plane1 = -1;

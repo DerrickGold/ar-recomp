@@ -175,9 +175,12 @@ static size_t cb_audio_batch(const int16_t* data, size_t frames) {
 }
 static void  cb_input_poll(void) {}
 
-// Game-frame-indexed input replay (SNESREF_INPUT_REPLAY=<file>; recomp
-// AR_INPUT_RECORD format: repeating 8-byte LE records {uint32 gframe; uint32 inputs},
-// SNES 12-bit layout == libretro JOYPAD id order). Keyed by the game's logical
+// Legacy game-frame-indexed input replay (SNESREF_INPUT_REPLAY=<file>):
+// repeating 8-byte LE records {uint32 gframe; uint32 inputs}, SNES 12-bit
+// layout == libretro JOYPAD id order. New AR_INPUT_RECORD artifacts use the
+// runner's canonical host-tick container and are intentionally not interpreted
+// by this game-specific cross-emulator adapter. Legacy fixtures are keyed by
+// the game's logical
 // frame counter $7E:0088 (WRAM offset 0x88, 16-bit), which advances identically
 // here and in the recomp for identical input — so the recording aligns frame-exact
 // without any host-frame offset.

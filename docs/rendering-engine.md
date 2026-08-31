@@ -2846,7 +2846,8 @@ The instinct is to show the extra columns so the object appears whole. That is
 wrong, and the reason is a hard cap elsewhere:
 
 **Background rendering now ends at `kPpuExtraLeftRight = 128` columns per side,
-and the live diorama view ends at `kWsExtraMax = 120`.** The apron remains a
+and the live diorama view ends at the game-owned
+`kActRaiserWidescreenExtraMax = 120`.** The apron remains a
 separate 64-column resolve band beyond both, so it can only ever hold OBJ
 pixels. Displaying it would show sprites floating over empty background. The BG
 width track deliberately widened the scanline buffers and accelerated tilemap

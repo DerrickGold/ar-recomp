@@ -395,12 +395,6 @@ if(BUILD_TESTING)
     add_test(NAME snesrecomp_runtime_input_replay
         COMMAND snesrecomp_runtime_input_replay_test)
 
-    add_executable(snesrecomp_runtime_framedump_test tests/framedump_test.c)
-    target_link_libraries(snesrecomp_runtime_framedump_test PRIVATE
-        snesrecomp_runtime)
-    add_test(NAME snesrecomp_runtime_framedump
-        COMMAND snesrecomp_runtime_framedump_test)
-
     add_executable(snesrecomp_runtime_ppu_test
         tests/ppu_test.c tests/runner_event_stub.c)
     target_link_libraries(snesrecomp_runtime_ppu_test PRIVATE
@@ -430,7 +424,6 @@ if(BUILD_TESTING)
         snesrecomp_runtime_cpu_state_test
         snesrecomp_runtime_support_test
         snesrecomp_runtime_sha256_test
-        snesrecomp_runtime_framedump_test
         snesrecomp_runtime_ppu_test)
     foreach(_target IN LISTS _SNESRECOMP_PRIVATE_CONTRACT_TESTS)
         target_include_directories(${_target} PRIVATE

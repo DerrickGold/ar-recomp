@@ -2,6 +2,7 @@
 #include "hd_replacement_host.h"
 
 #include "actraiser_game.h"   /* kActRaiserAuthenticHeight */
+#include "display_geometry.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,9 +51,6 @@ extern uint8_t g_hud_bg_pixels[
 extern uint8_t g_hud_obj_pixels[
     SR_PPU_SURFACE_MAX_WIDTH * kArgbBytesPerPixel *
     kHostDisplayFramebufferHeight];
-extern bool g_ws_active;
-extern int g_ws_extra;
-
 /* Authentic pixels captured for a replacement are never presented. These
  * bindings exist because RemoveFromGame only engages for a bound source;
  * BG3 and OBJ reuse the dedicated HUD surfaces. */

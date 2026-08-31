@@ -9,6 +9,7 @@
 #include "actraiser_rtl.h"
 #include "actraiser/actraiser_action_bg.h"
 #include "diorama/diorama.h"
+#include "display_geometry.h"
 #include "frame_slot.h"
 #include "host/host_audio.h"
 #include "dev/host_dev_tools.h"
@@ -26,7 +27,6 @@
 static RuntimeLifecycleRequest s_lifecycle_request;
 
 extern SDL_Window *g_window;
-extern bool g_ws_active;
 extern bool g_sim3d_textures_ready;
 extern bool g_sim3d_billboard_renderer_ready;
 

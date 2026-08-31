@@ -46,14 +46,13 @@
 #include "render_comparison.h"
 #include "dev/sfx_census.h"
 #include "dev/native_audio_trace.h"
+#include "display_geometry.h"
 #include "run_dir.h"
 #include "snesrecomp/host/launcher.h"
 #include "snesrecomp/support/file.h"
 #include "actraiser/actraiser_action_bg.h"
 #include "actraiser_game.h"
 #include "snesrecomp/game/trace.h"
-#include "snesrecomp/host/audio_trace.h"
-#include "snesrecomp/host/widescreen.h"
 #include "present.h"
 #include "frame_slot.h"
 #include "host/host_audio.h"
@@ -208,29 +207,6 @@ static void CreateDioramaTextures(void) {
   free(zero_fill);
 }
 
-/* Widescreen master switch + per-side extra-column budget — the definitions
- * for the runner's widescreen.h externs (each game defines them; 0/false =
- * authentic 256-wide, all PPU margin machinery inert). Set once at startup
- * from ExtendedAspectRatio/AspectPAR in config.ini; per-frame policy lives in
- * ActRaiser_ApplyWidescreenPolicy (actraiser_rtl.c). */
-bool g_ws_active;
-int g_ws_extra;
-/* Margin the *display* crops to (aspect-derived). Normally equal to
- * g_ws_extra; diorama mode widens the render margin to kWsExtraMax so the
- * tilt reveals real content, while the flat presentation keeps showing the
- * user's chosen aspect. */
-int g_ws_display_extra;
-/* The vertical transpose of g_ws_extra: scanlines the PPU renders above line 0
- * and below line 223 this frame, already clamped to real world space by
- * ActRaiser_ApplyVerticalMarginPolicy. Diorama-only (nothing in the flat path is
- * prepared for a non-zero frame origin), and 0 restores authentic 224-line
- * output everywhere.
- * Exact signed positions published by the action HLE emitter disambiguate OAM
- * Y in both bands; margin scanlines ignore slots without that sideband. See
- * SR_PPU_VERTICAL_MARGIN_MAX. */
-int g_ws_extra_top;
-int g_ws_extra_bottom;
-
 extern const RtlGameModule kActRaiserGameModule;
 
 
@@ -288,6 +264,35 @@ static void RtlDrawPpuFrame(void) {
   (void)RtlGameDrawPpuFrame();
 }
 
+/* Execute one canonical application-owned runner transaction. Replay input,
+ * the emulated frame, post-frame diagnostics, and replay completion must stay
+ * indivisible so turbo and ordinary pacing cannot acquire different ordering
+ * as new per-frame services are added. */
+static bool RunOneRecompiledFrame(uint32 live_inputs, bool *stop_running) {
+  InputReplayFrameResult replay = InputReplay_Resolve(live_inputs);
+  if (InputReplay_Failed()) {
+    SessionFatal_Request("Input replay failed: %s",
+                         InputReplay_LastError());
+    *stop_running = true;
+    return false;
+  }
+  if (replay.stop_requested) *stop_running = true;
+
+  (void)RtlRunFrame(replay.inputs);
+  OracleTrace_CompleteTick();
+  if (SessionFatal_Requested()) {
+    *stop_running = true;
+    return false;
+  }
+  if (!InputReplay_CompleteTick(RtlGameRunner())) {
+    SessionFatal_Request("Input replay failed: %s",
+                         InputReplay_LastError());
+    *stop_running = true;
+    return false;
+  }
+  return true;
+}
+
 /* One emulated tick: sample input, run the recompiled game logic, apply
  * turbo's extra same-input sub-frames (§3.2 — unchanged mechanism, just
  * relocated so it fires once per emulated tick instead of once per outer
@@ -314,16 +319,15 @@ static void RunOneEmulatedTick(bool *stop_running) {
   unsigned long apuprof_push0 = 0;
   uint64_t apuprof_loop0 = 0;
   if (apuprof_ms > 0) {
-    extern uint64_t audio_trace_wall_ns(void);
     extern unsigned long g_recomp_push_count;
     extern uint64_t g_watchdog_loop_headers;
     RtlApuProfileReset();
     apuprof_push0 = g_recomp_push_count;
     apuprof_loop0 = g_watchdog_loop_headers;
-    apuprof_t0 = audio_trace_wall_ns();
+    apuprof_t0 = SDL_GetTicksNS();
   }
 
-  uint32 inputs = HostInput_ComputeGameInputs(stop_running);
+  const uint32 live_inputs = HostInput_SampleLiveInputs();
 
   /* Do not hold the APU lock for a whole frame. Every APU-touching path takes
    * RtlApuLock itself (RtlApuWrite,
@@ -337,21 +341,18 @@ static void RunOneEmulatedTick(bool *stop_running) {
    * DSP ring buffered. It also pinned scheduled port-write latency at the
    * produced+3-quanta ceiling (~50 ms) because `produced` could not
    * advance while the game thread held the lock. */
-  bool r = RtlRunFrame(inputs);
-  (void)r;
-  if (SessionFatal_Requested()) {
-    *stop_running = true;
-    return;
-  }
+  if (!RunOneRecompiledFrame(live_inputs, stop_running)) return;
   /* TURBO ('t' toggle): real fast-forward = run extra game frames per
    * emulated TICK (not per rendered/present frame — that decoupling is
    * M5's job). Same input word each sub-frame (level-held buttons repeat;
    * fine for skipping sim waits). Cheats/pins apply inside RtlRunFrame, so
    * they hold during the skipped frames too. */
-  if (HostInput_IsTurbo()) {
+  if (HostInput_IsTurbo() && !*stop_running) {
     int mult = g_settings.turbo_multiplier;
-    for (int tf = 1; tf < mult && !SessionFatal_Requested(); tf++)
-      RtlRunFrame(inputs);
+    for (int tf = 1; tf < mult && !SessionFatal_Requested() &&
+         !*stop_running; tf++) {
+      if (!RunOneRecompiledFrame(live_inputs, stop_running)) break;
+    }
     if (SessionFatal_Requested()) {
       *stop_running = true;
       return;
@@ -359,10 +360,9 @@ static void RunOneEmulatedTick(bool *stop_running) {
   }
   if (apuprof_t0) {
     RtlApuProfile profile = {.struct_size = RTL_APU_PROFILE_V2_SIZE};
-    extern uint64_t audio_trace_wall_ns(void);
     extern unsigned long g_recomp_push_count;
     extern uint64_t g_watchdog_loop_headers;
-    uint64_t dt_ns = audio_trace_wall_ns() - apuprof_t0;
+    uint64_t dt_ns = SDL_GetTicksNS() - apuprof_t0;
     RtlApuProfileRead(&profile);
     if (dt_ns >=
         (uint64_t)apuprof_ms * kNanosecondsPerMillisecond) {
@@ -688,8 +688,9 @@ static void RunPostTickHousekeeping(void) {
   /* AR_DIORAMA_AT=<gameframe>: flip Diorama 3D on once the game-frame counter
    * reaches the value, through the same descriptor path the D hotkey uses.
    * Booting straight into diorama changes the widescreen margin budget and
-   * desyncs game-frame-keyed input replays, so a visual-regression run has to
-   * replay flat into the stage and only then switch. */
+   * changes the rendered baseline, so a visual-regression run should replay
+   * flat into the stage and only then switch. Canonical input is host-tick
+   * ordered; the game-frame value here is only the deterministic trigger. */
   {
     static long diorama_at = kUninitializedEnvironmentOption;
     static bool diorama_fired;
@@ -720,10 +721,9 @@ static void RunPostTickHousekeeping(void) {
   /* Auto-persist battery SRAM the moment the game writes a save, so progress
    * survives a freeze/force-quit (the clean-exit save-system write never runs
    * if the game hangs). Cheap: only writes when the 8KB SRAM actually changes.
-   * SKIPPED during input replay: a replay is keyed on the game-frame counter
-   * from a fixed boot state, so letting the replayed run overwrite save.srm
-   * mid-playthrough would change the boot state for the NEXT replay and break
-   * the frame alignment (the recording then no longer reaches the same spot). */
+   * SKIPPED during input replay: letting a diagnostic run overwrite save.srm
+   * would change the initial state of the NEXT replay and invalidate canonical
+   * initial-state/checkpoint digests as well as legacy frame alignment. */
   if (!InputReplay_ShouldProtectSaveData()) {
     static bool write_error_reported;
     static uint64_t first_write_failure_ms;
@@ -1121,7 +1121,8 @@ static void AppBoot_CreatePresentationTextures(void) {
    * near the true edge of what Diorama_Upload writes (u=uv_u1 =
    * snes_width/SR_PPU_SURFACE_MAX_WIDTH, always < 1.0 — the buffer is
    * allocated at the PPU's max width but a layer's real content is narrower,
-   * capped by kWsExtraMax's tilemap-ring streaming limit) can reach into
+   * capped by kActRaiserWidescreenExtraMax's tilemap-ring streaming limit)
+   * can reach into
    * columns snes_width..SR_PPU_SURFACE_MAX_WIDTH-1, which Diorama_Upload's
    * SDL_UpdateTexture never touches. SDL_TEXTUREACCESS_STREAMING content
    * is undefined until written (no zero guarantee, confirmed non-zero in
@@ -1186,7 +1187,8 @@ static int AppBoot_CreateVideo(AppBoot *app) {
      * framebuffer. Faithful mode keeps the historical width*scale.
      *
      * Must use the DISPLAY crop (Settings_VisibleWidth), not g_snes_width:
-     * diorama mode inflates the render width to the full kWsExtraMax margin
+     * diorama mode inflates the render width to the full
+     * kActRaiserWidescreenExtraMax margin
      * (HostDisplay_ResolveVideoGeometry) while the displayed width stays
      * aspect-derived. HostDisplay_CalculateWindowSize shares the same
      * calculation with later explicit scale/aspect changes. */
@@ -1373,11 +1375,6 @@ static void AppBoot_InstallSubsystems(AppBoot *app) {
  * (which must sit between cart_load and Randomizer_Init), fill power-on WRAM and
  * battery SRAM, load the persisted save, and honour AR_LOADSTATE. */
 static void AppBoot_StartGame(AppBoot *app) {
-  {
-    const char *audio_debug = getenv("AR_AUDIODBG");
-    if (audio_debug && audio_debug[0] && audio_debug[0] != '0')
-      audio_trace_set_enabled(1);
-  }
   if (RtlRegisterGame(&kActRaiserGameModule) != SR_RESULT_OK)
     Die("The linked game module is incompatible with this runner.");
   app->snes = SnesInit(app->rom_data, (int)app->rom_size);
@@ -1452,10 +1449,9 @@ static void AppBoot_StartGame(AppBoot *app) {
    * Portable builds use saves/ beside the executable after the bundle anchor;
    * developer runs use saves/ under their launch directory. */
   char saves_dir[kHostPathCapacity], save_srm[kHostPathCapacity],
-      save_ini[kHostPathCapacity];
+      save_ini[kHostPathCapacity], legacy_srm[kHostPathCapacity];
   UserDataFile(saves_dir, sizeof saves_dir, "saves");
   mkdir(saves_dir, 0755);
-  RtlMigrateLegacySram(RtlGameIdentifier());
   {
     extern uint8 *g_sram; extern int g_sram_size;
     SaveError error = {{0}};
@@ -1472,6 +1468,10 @@ static void AppBoot_StartGame(AppBoot *app) {
     if (!SaveSystem_Attach(g_sram, (size_t)g_sram_size,
                            (SaveBackend)g_settings.save_backend,
                            native_path, ini_path, &error))
+      Die(error.message);
+    snprintf(legacy_srm, sizeof(legacy_srm), "%s/%s.srm",
+             saves_dir, RtlGameIdentifier());
+    if (!SaveSystem_MigrateLegacyNative(legacy_srm, &error))
       Die(error.message);
     if (!SaveSystem_LoadActive(&error)) {
       char message[512];
@@ -1523,8 +1523,10 @@ static void AppBoot_StartGame(AppBoot *app) {
   { const char *ls = getenv("AR_LOADSTATE");
     if (ls && ls[0]) {
       int slot = atoi(ls);
-      for (int i = 0; i < 4 && !SessionFatal_Requested(); i++)
+      for (int i = 0; i < 4 && !SessionFatal_Requested(); i++) {
         RtlRunFrame(0);
+        OracleTrace_CompleteTick();
+      }
       if (!SessionFatal_Requested()) {
         RtlSaveLoad(kSaveLoad_Load, slot);
         FrameSlot_ResetActionEffects();
@@ -1532,6 +1534,11 @@ static void AppBoot_StartGame(AppBoot *app) {
         fprintf(stderr, "[loadstate] loaded slot %d at boot\n", slot);
       }
     } }
+  /* Canonical replay identity is defined by the state that will execute its
+   * first recorded runner tick, so validate/write the header only after the
+   * optional boot savestate has replaced the power-on state. */
+  if (!InputReplay_BeginSession(RtlGameRunner(), RtlGameIdentifier()))
+    Die(InputReplay_LastError());
 }
 
 /* The SDL event pump. One long switch over event types -- flat and skimmable
@@ -2220,28 +2227,14 @@ static int AppShutdown(AppBoot *app, char **argv) {
   SimRenderMetadata_TraceClose();
   ActRaiserActionBg_Shutdown();
 
-  /* Before tearing down audio: the census reads only its own accumulators,
-   * but the report should land while the run dir is still current. */
+  /* Stop the sole audio producer before reading observer-owned capture state
+   * or removing subscriptions. The run directory remains live for reports. */
+  HostAudio_Shutdown();
   SfxCensus_Report();
   NativeAudioTrace_Report();
-  if (getenv("AR_AUDIODBG")) {
-    AudioTraceStats stats;
-    audio_trace_get_stats(&stats);
-    fprintf(stderr,
-            "[audiodbg] summary produced=%llu cpu=%llu audio=%llu "
-            "consumed=%llu dropped=%llu/%llu-runs highwater=%u\n",
-            (unsigned long long)stats.produced,
-            (unsigned long long)stats.produced_cpu,
-            (unsigned long long)stats.produced_audio,
-            (unsigned long long)stats.consumed,
-            (unsigned long long)stats.dropped,
-            (unsigned long long)stats.drop_runs,
-            stats.occupancy_highwater);
-  }
 
   InputReplay_Shutdown();
   OracleTrace_Shutdown();
-  HostAudio_Shutdown();
   NativeAudioTrace_Shutdown();
   HdReplacementHost_Shutdown();
   PresentRendererResources_Reset();

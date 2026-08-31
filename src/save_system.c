@@ -517,6 +517,41 @@ bool SaveSystem_Attach(uint8_t *live_sram, size_t size,
   return true;
 }
 
+bool SaveSystem_MigrateLegacyNative(const char *legacy_path,
+                                    SaveError *error) {
+  ClearError(error);
+  if (!s_runtime.live) return Fail(error, "save system is not attached");
+  if (!legacy_path || !legacy_path[0])
+    return Fail(error, "legacy save path is empty");
+
+  const char *active_path = ActivePath();
+  FILE *probe = fopen(active_path, "rb");
+  if (probe) {
+    fclose(probe);
+    return true;
+  }
+  if (errno != ENOENT)
+    return Fail(error, "cannot inspect %s: %s",
+                active_path, strerror(errno));
+
+  probe = fopen(legacy_path, "rb");
+  if (!probe) {
+    if (errno == ENOENT) return true;
+    return Fail(error, "cannot inspect %s: %s",
+                legacy_path, strerror(errno));
+  }
+  fclose(probe);
+
+  uint8_t legacy[kActRaiserSramSize];
+  if (!LoadNative(legacy_path, legacy, error)) return false;
+  if (!Save_WriteFile(ActiveFormat(), active_path, legacy, error))
+    return false;
+  fprintf(stderr, "[saves] migrated legacy %s -> %s (%s backend)\n",
+          legacy_path, active_path,
+          s_runtime.backend == kSaveBackend_Ini ? "ini" : "native-srm");
+  return true;
+}
+
 void SaveSystem_ResyncShadow(void) {
   if (!s_runtime.live || s_runtime.size != kActRaiserSramSize) return;
   memcpy(s_runtime.shadow, s_runtime.live, kActRaiserSramSize);

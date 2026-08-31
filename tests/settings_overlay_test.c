@@ -2,6 +2,7 @@
 
 #include "diorama_layer_editor.h"
 #include "action/action_bg_tuner.h"
+#include "display_geometry.h"
 #include "input_map.h"
 #include "host/host_display_status.h"
 #include "render_capabilities.h"
@@ -19,9 +20,6 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-bool g_ws_active;
-int g_ws_extra;
-int g_ws_display_extra;
 uint8 g_ram[0x20000];
 /* kSettingCat_Graphics's GpuShadersActive() availability gate reads this
  * (main.c's real runtime state); this harness has no renderer, so it's
@@ -675,8 +673,7 @@ int main(void) {
   setenv("SDL_VIDEODRIVER", "dummy", 1);
   setenv("SDL_AUDIODRIVER", "dummy", 1);
 
-  g_ws_active = true;
-  g_ws_extra = g_ws_display_extra = 43;
+  DisplayGeometry_SetHorizontal(43, 43);
   Settings_ClearConfigLayer();
   Settings_Init();
   CheckMenuDeviceGateTruthTable();

@@ -29,7 +29,6 @@ void RtlApuProfileRecordHostWait(uint64_t wait_ns, bool lock_wait) {
   (void)wait_ns;
   (void)lock_wait;
 }
-uint64_t audio_trace_wall_ns(void) { return SDL_GetTicksNS(); }
 void RtlSetAudioOutputRate(int rate) { (void)rate; }
 void RtlRenderAudio(int16 *buffer, int frames, int channels) {
   memset(buffer, 0, (size_t)frames * (size_t)channels * sizeof(*buffer));

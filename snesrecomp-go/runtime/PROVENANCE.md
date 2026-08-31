@@ -16,9 +16,8 @@ adapters retain the generated/runtime ABI while their mapping and analysis
 cores have no dependency on the historical comparison runner.
 
 The SHA-256 implementation follows FIPS 180-4 and uses a 16-word rolling
-message schedule. The CPU register shell, frame-dump writer, widescreen copy,
-and internal-register adapter were implemented from their public runtime
-contracts and the repository's tests.
+message schedule. The CPU register shell and internal-register adapter were
+implemented from their public runtime contracts and the repository's tests.
 
 The DMA controller follows the public SNES DMA register map and transfer-mode
 patterns. Its bus access and optional tracing are narrow host callbacks, so the

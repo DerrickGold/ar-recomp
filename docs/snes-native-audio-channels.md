@@ -647,8 +647,10 @@ Enable it with:
 AR_NATIVE_AUDIO_TRACE=1 ./build-release/ActRaiserRecomp ar.sfc --config config.ini
 ```
 
-Set `AR_NATIVE_AUDIO_PCM=1` alongside the trace to dump the retained native-rate
-PCM ring to `native_audio_pcm.wav`. This is intended for reproducible
+Set `AR_NATIVE_AUDIO_PCM=1` to capture the runner's final interleaved output mix
+to a bounded ring and dump it as `native_audio_pcm.wav`. It can be used alone;
+`AR_NATIVE_AUDIO_TRACE=1` independently enables the ActRaiser request/SPC/DSP
+provenance reports. PCM capture is intended for reproducible
 authentic-versus-extended waveform comparisons, not normal logging.
 
 At clean shutdown it writes these files under `runs/latest/`:
@@ -659,7 +661,7 @@ At clean shutdown it writes these files under `runs/latest/`:
 | `native_audio_song_events.csv` | port-0 controls, selected song number, image upload identity, frame, and caller; deliberate level-up/restore transitions stay separate from drops |
 | `native_audio_dsp_provenance.csv` | every reached DSP writer aggregated by SPC PC, track/ownership masks, DSP register, and count |
 | `native_audio_music_suppression.csv` | the three `$1A & $47` music-update skip sites aggregated by song track mask and ownership mask |
-| `native_audio_pcm.wav` | optional S-DSP PCM ring dump when `AR_NATIVE_AUDIO_PCM=1` is also set |
+| `native_audio_pcm.wav` | optional final host-mix ring dump when `AR_NATIVE_AUDIO_PCM=1` is set |
 
 The classifier has focused tests for mailbox overwrite/coalescing, port
 overwrite/coalescing, positive-event/ordinary-SFX busy rejection, lane

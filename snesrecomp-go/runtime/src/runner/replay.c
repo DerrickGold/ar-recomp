@@ -67,7 +67,10 @@ static void store_reader(SrInputReplayReader *reader,
     memcpy(reader, state, sizeof(*state));
 }
 
-static const uint8_t kMagic[8] = {'S', 'R', 'I', 'N', 'P', 'U', 'T', 0};
+static const uint8_t kMagic[SR_INPUT_REPLAY_MAGIC_SIZE] =
+    SR_INPUT_REPLAY_MAGIC;
+_Static_assert(sizeof(SR_INPUT_REPLAY_MAGIC) == SR_INPUT_REPLAY_MAGIC_SIZE,
+               "replay signature size mismatch");
 static const uint32_t kFrameTag = UINT32_C(0x4d415246); /* FRAM */
 static const uint32_t kCheckpointTag = UINT32_C(0x4b484343); /* CCHK */
 static const uint32_t kFooterTag = UINT32_C(0x21444e45); /* END! */

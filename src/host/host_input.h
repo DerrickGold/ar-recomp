@@ -9,7 +9,10 @@
  * emulation is frozen. */
 void HostInput_HandleKeyboard(int scancode, bool pressed, bool repeated);
 void HostInput_ClearHeld(void);
-uint32_t HostInput_ComputeGameInputs(bool *keep_running);
+/* Sample frontend input and apply host-frame scripted overrides. Replay
+ * resolution belongs beside each RtlRunFrame call so turbo/catch-up ticks are
+ * represented individually in canonical recordings. */
+uint32_t HostInput_SampleLiveInputs(void);
 
 bool HostInput_MenuGamepadIsActive(void);
 bool HostInput_MenuKeyboardIsActive(void);

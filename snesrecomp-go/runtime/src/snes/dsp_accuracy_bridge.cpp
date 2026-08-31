@@ -4,7 +4,7 @@
 
 extern "C" {
 #include "dsp.h"
-#include "snesrecomp/host/audio_trace.h"
+#include "support/audio_audit_internal.h"
 #include "saveload.h"
 #include "semantic_state.h"
 }
