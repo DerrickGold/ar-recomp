@@ -5,6 +5,12 @@
 #include "constants.h"
 
 static const uint64_t kFpsSampleIntervalNs = kNanosecondsPerSecond / 2u;
+static const uint64_t kVsyncGuardSampleIntervalNs =
+    kNanosecondsPerSecond / 10u;
+enum {
+  kVsyncGuardRequiredExcessiveWindows = 2,
+  kVsyncGuardMinimumMaximumRateHz = 240,
+};
 
 uint64_t HostDisplayPacing_SourceFrameIntervalNs(
     uint64_t native_interval_ns, bool diorama_active,
@@ -45,6 +51,56 @@ double HostDisplayPacing_FramesPerSecond(
   return counter ? counter->frames_per_second : 0.0;
 }
 
+void HostDisplayPacing_ResetVsyncGuard(HostDisplayVsyncGuard *guard) {
+  if (guard) *guard = (HostDisplayVsyncGuard){0};
+}
+
+bool HostDisplayPacing_RecordVsyncPresent(
+    HostDisplayVsyncGuard *guard, bool vsync_expected,
+    int nominal_refresh_hz, uint64_t completed_at_ns) {
+  if (!guard) return false;
+  if (!vsync_expected) {
+    HostDisplayPacing_ResetVsyncGuard(guard);
+    return false;
+  }
+  if (guard->software_fallback_active) return false;
+  if (!guard->initialized || completed_at_ns <= guard->sample_start_ns) {
+    guard->sample_start_ns = completed_at_ns;
+    guard->completed_intervals = 0;
+    guard->excessive_rate_windows = 0;
+    guard->initialized = true;
+    return false;
+  }
+
+  guard->completed_intervals++;
+  const uint64_t elapsed_ns = completed_at_ns - guard->sample_start_ns;
+  if (elapsed_ns < kVsyncGuardSampleIntervalNs) return false;
+
+  /* Twice the reported refresh allows for stale 60 Hz metadata on a 120 Hz
+   * compositor. The 240 Hz floor makes low-refresh displays equally tolerant
+   * of short scheduling bursts. A genuinely nonblocking presentation loop is
+   * still far beyond this boundary (the Aitos reproduction exceeded 700 Hz). */
+  uint64_t maximum_rate_hz = nominal_refresh_hz > 0
+      ? (uint64_t)nominal_refresh_hz * 2u
+      : kVsyncGuardMinimumMaximumRateHz;
+  if (maximum_rate_hz < kVsyncGuardMinimumMaximumRateHz)
+    maximum_rate_hz = kVsyncGuardMinimumMaximumRateHz;
+  const bool excessive_rate =
+      (uint64_t)guard->completed_intervals * kNanosecondsPerSecond >
+      elapsed_ns * maximum_rate_hz;
+  guard->excessive_rate_windows = excessive_rate
+      ? (uint8_t)(guard->excessive_rate_windows + 1u)
+      : 0;
+  guard->sample_start_ns = completed_at_ns;
+  guard->completed_intervals = 0;
+  if (guard->excessive_rate_windows <
+      kVsyncGuardRequiredExcessiveWindows)
+    return false;
+
+  guard->software_fallback_active = true;
+  return true;
+}
+
 uint32_t HostDisplayPacing_AllowedFramesInFlight(RefreshMode refresh_mode) {
   switch (refresh_mode) {
     case kRefreshMode_Uncapped:
@@ -73,9 +129,15 @@ uint64_t HostDisplayPacing_UiIntervalNs(
     case kRefreshMode_Vsync:
       /* A working renderer VSync is the presentation clock. Do not put a
        * nominal-refresh sleep in front of SDL_RenderPresent: it adds jitter,
-       * breaks VRR, and duplicates the swapchain's responsibility. If the
-       * backend rejected VSync, retain a fixed native-rate safety yield. */
-      return options.vsync_active ? 0 : emulation_frame_interval_ns;
+       * breaks VRR, and duplicates the swapchain's responsibility. If an
+       * accepted policy is observed completing implausibly fast, cap it at the
+       * display's nominal cadence. A rejected policy retains the fixed native-
+       * rate safety yield used before the completion-rate guard existed. */
+      if (options.vsync_active && !options.vsync_software_fallback) return 0;
+      if (options.vsync_software_fallback && options.nominal_refresh_hz > 0)
+        return kNanosecondsPerSecond /
+            (uint64_t)options.nominal_refresh_hz;
+      return emulation_frame_interval_ns;
     case kRefreshMode_Uncapped:
       /* Uncapped is the renamed, display-relative policy. Nominal refresh is
        * optional presentation metadata; unknown/VRR/compositor sessions use

@@ -12,7 +12,21 @@ typedef struct HostDisplayPacingOptions {
   int nominal_refresh_hz;
   bool compositor_managed;
   bool vsync_active;
+  bool vsync_software_fallback;
 } HostDisplayPacingOptions;
+
+/* SDL can report renderer VSync as active even when completed presents are not
+ * being paced (for example while a window is occluded on some platforms).
+ * Observe sustained completion rate rather than individual present duration:
+ * rendering immediately before the swap can legitimately make one working
+ * VSync call return quickly. */
+typedef struct HostDisplayVsyncGuard {
+  uint64_t sample_start_ns;
+  uint32_t completed_intervals;
+  uint8_t excessive_rate_windows;
+  bool initialized;
+  bool software_fallback_active;
+} HostDisplayVsyncGuard;
 
 /* Rolling completed-present rate. Count intervals between present-completion
  * timestamps rather than emulation ticks, so retained-frame redraws and a
@@ -36,6 +50,14 @@ void HostDisplayPacing_RecordPresent(
 double HostDisplayPacing_FramesPerSecond(
     const HostDisplayFpsCounter *counter);
 
+void HostDisplayPacing_ResetVsyncGuard(HostDisplayVsyncGuard *guard);
+/* Returns true exactly when this sample activates software pacing. The guard
+ * requires two sustained excessive-rate windows, so a startup burst cannot
+ * disable otherwise working renderer VSync. */
+bool HostDisplayPacing_RecordVsyncPresent(
+    HostDisplayVsyncGuard *guard, bool vsync_expected,
+    int nominal_refresh_hz, uint64_t completed_at_ns);
+
 /* Keep VSync latency to one queued frame. Software-paced and unlimited modes
  * need two so the GPU renderer can overlap submission with the preceding
  * frame instead of serializing each SDL_RenderPresent. */
@@ -43,9 +65,10 @@ uint32_t HostDisplayPacing_AllowedFramesInFlight(RefreshMode refresh_mode);
 
 uint64_t HostDisplayPacing_FrameLimitIntervalNs(
     HostDisplayPacingOptions options);
-/* Software presentation deadline. VSync returns zero when the renderer
- * accepted it; Uncapped follows nominal display metadata; Limit follows the
- * user target; Unlimited returns zero deliberately. */
+/* Software presentation deadline. VSync returns zero while the accepted
+ * renderer policy demonstrably paces presents; its safety fallback follows
+ * nominal display metadata. Uncapped follows nominal display metadata; Limit
+ * follows the user target; Unlimited returns zero deliberately. */
 uint64_t HostDisplayPacing_UiIntervalNs(
     HostDisplayPacingOptions options,
     uint64_t emulation_frame_interval_ns);

@@ -52,6 +52,10 @@ void HostDisplay_DisplayModeChanged(uint32_t display_id);
 void HostDisplay_DisplayRemoved(uint32_t display_id);
 void HostDisplay_ApplyRefreshVsync(void);
 void HostDisplay_DisableVsync(void);
+/* A visibility/focus transition may restore blocking renderer VSync after the
+ * completion-rate guard selected software pacing while the window was not
+ * being presented normally. Re-evaluate it from a clean observation window. */
+void HostDisplay_ResetVsyncPacing(void);
 bool HostDisplay_WindowPointToOutput(int window_x, int window_y,
                                     int *output_x, int *output_y);
 

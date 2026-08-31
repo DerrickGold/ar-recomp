@@ -75,6 +75,7 @@ static unsigned long s_represent_count;
 static float s_maximum_represent_alpha;
 static unsigned long s_no_present_no_sleep_iteration_count;
 static HostDisplayFpsCounter s_fps_counter;
+static HostDisplayVsyncGuard s_vsync_guard;
 static bool s_fps_measurement_active;
 static int s_fps_refresh_mode = -1;
 static HostDisplayPresentMode s_fps_present_mode = kHostDisplayPresent_None;
@@ -178,6 +179,9 @@ static HostDisplayPacingOptions CurrentPacingOptions(void) {
       .nominal_refresh_hz = HostDisplayStatus_NominalRefreshHz(),
       .compositor_managed = RunningUnderGamescope(),
       .vsync_active = HostDisplayStatus_VsyncActive(),
+      .vsync_software_fallback =
+          s_vsync_guard.software_fallback_active &&
+          HostDisplayStatus_VsyncActive(),
   };
 }
 
@@ -240,6 +244,25 @@ static bool CompletePresent(HostDisplayPresentMode mode) {
   }
   s_present_failure_reported = false;
 
+  const uint64_t completed_at_ns = SDL_GetTicksNS();
+  const HostDisplayPacingOptions options = CurrentPacingOptions();
+  if (HostDisplayPacing_RecordVsyncPresent(
+          &s_vsync_guard,
+          options.refresh_mode == kRefreshMode_Vsync &&
+              options.vsync_active,
+          options.nominal_refresh_hz, completed_at_ns)) {
+    if (options.nominal_refresh_hz > 0) {
+      fprintf(stderr,
+              "[display] renderer Vsync is not pacing completed presents; "
+              "using a %d Hz software safety cadence\n",
+              options.nominal_refresh_hz);
+    } else {
+      fprintf(stderr,
+              "[display] renderer Vsync is not pacing completed presents; "
+              "using the native-rate software safety cadence\n");
+    }
+  }
+
   if (!g_settings.show_fps) {
     if (s_fps_measurement_active) {
       HostDisplayPacing_ResetFpsCounter(&s_fps_counter);
@@ -256,7 +279,7 @@ static bool CompletePresent(HostDisplayPresentMode mode) {
     s_fps_refresh_mode = g_settings.refresh_mode;
     s_fps_present_mode = mode;
   }
-  HostDisplayPacing_RecordPresent(&s_fps_counter, SDL_GetTicksNS());
+  HostDisplayPacing_RecordPresent(&s_fps_counter, completed_at_ns);
   return true;
 }
 
@@ -453,11 +476,13 @@ static void UpdatePixelDensity(void) {
 }
 
 void HostDisplay_UpdateProperties(void) {
+  HostDisplay_ResetVsyncPacing();
   UpdateRefreshRate(true);
   UpdatePixelDensity();
 }
 
 void HostDisplay_WindowDisplayChanged(void) {
+  HostDisplay_ResetVsyncPacing();
   UpdateRefreshRate(false);
   UpdatePixelDensity();
 }
@@ -471,6 +496,7 @@ void HostDisplay_DisplayModeChanged(uint32_t display_id) {
   const int refresh_hz = QueryDisplayRefreshHz(id);
   HostDisplayRefreshCache_Remember(&s_display_refresh_cache, id, refresh_hz);
   if (id == s_active_display_id) {
+    HostDisplay_ResetVsyncPacing();
     HostDisplayStatus_SetNominalRefreshHz(
         HostDisplayRefreshCache_Get(&s_display_refresh_cache, id));
     UpdatePixelDensity();
@@ -481,6 +507,7 @@ void HostDisplay_DisplayRemoved(uint32_t display_id) {
   const SDL_DisplayID id = (SDL_DisplayID)display_id;
   HostDisplayRefreshCache_Forget(&s_display_refresh_cache, id);
   if (id != s_active_display_id) return;
+  HostDisplay_ResetVsyncPacing();
   s_active_display_id = 0;
   HostDisplayStatus_SetNominalRefreshHz(0);
   /* SDL may already have reassigned the window to another connected display.
@@ -491,6 +518,7 @@ void HostDisplay_DisplayRemoved(uint32_t display_id) {
 }
 
 static void SetRenderVsync(int requested) {
+  HostDisplay_ResetVsyncPacing();
   if (!ArRenderDevice_IsReady(&g_render_device)) return;
   bool active = false;
   if (!ArSdlRenderBackend_SetVSync(
@@ -528,6 +556,11 @@ void HostDisplay_DisableVsync(void) {
   SetRenderVsync(0);
   SetAllowedFramesInFlight(
       HostDisplayPacing_AllowedFramesInFlight(kRefreshMode_Unlimited));
+}
+
+void HostDisplay_ResetVsyncPacing(void) {
+  HostDisplayPacing_ResetVsyncGuard(&s_vsync_guard);
+  s_present_deadline_ns = 0;
 }
 
 uint64_t HostDisplay_CatchupCapNs(uint64_t emulation_frame_interval_ns,

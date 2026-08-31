@@ -27,6 +27,7 @@ static HostDisplayPacingOptions Options(RefreshMode mode, int limit_fps,
       .nominal_refresh_hz = nominal_refresh_hz,
       .compositor_managed = compositor_managed,
       .vsync_active = mode == kRefreshMode_Vsync,
+      .vsync_software_fallback = false,
   };
 }
 
@@ -81,6 +82,18 @@ static void TestUiAndPausedIntervals(void) {
             vsync_144, kEmulationFrameIntervalNs) == 0);
   CHECK(HostDisplayPacing_PausedIntervalNs(
             vsync_144, kEmulationFrameIntervalNs) == 0);
+
+  HostDisplayPacingOptions failed_vsync = vsync_144;
+  failed_vsync.vsync_software_fallback = true;
+  CHECK(HostDisplayPacing_UiIntervalNs(
+            failed_vsync, kEmulationFrameIntervalNs) ==
+        6944444ull);
+
+  HostDisplayPacingOptions failed_unknown_vsync = failed_vsync;
+  failed_unknown_vsync.nominal_refresh_hz = 0;
+  CHECK(HostDisplayPacing_UiIntervalNs(
+            failed_unknown_vsync, kEmulationFrameIntervalNs) ==
+        kEmulationFrameIntervalNs);
 
   HostDisplayPacingOptions rejected_vsync = vsync_144;
   rejected_vsync.vsync_active = false;
@@ -165,6 +178,73 @@ static void TestCompletedPresentRate(void) {
   HostDisplayPacing_ResetFpsCounter(&counter);
   CHECK(HostDisplayPacing_FramesPerSecond(&counter) == 0.0);
   CHECK(!counter.initialized);
+}
+
+static void TestVsyncCompletionRateGuard(void) {
+  const uint64_t start_ns = 1000000000ull;
+  HostDisplayVsyncGuard guard = {0};
+
+  /* A healthy 120 Hz completion stream remains renderer-paced. The 60 Hz
+   * nominal value deliberately exercises the tolerance for stale display
+   * metadata on a 120 Hz compositor. */
+  CHECK(!HostDisplayPacing_RecordVsyncPresent(
+      &guard, true, 60, start_ns));
+  for (int interval = 1; interval <= 120; interval++) {
+    CHECK(!HostDisplayPacing_RecordVsyncPresent(
+        &guard, true, 60,
+        start_ns + (uint64_t)interval * 8333333ull));
+  }
+  CHECK(!guard.software_fallback_active);
+
+  /* One sustained fast window is suspicious but not sufficient. A second
+   * consecutive window activates exactly once. */
+  HostDisplayPacing_ResetVsyncGuard(&guard);
+  CHECK(!HostDisplayPacing_RecordVsyncPresent(
+      &guard, true, 120, start_ns));
+  bool activated = false;
+  int activation_count = 0;
+  for (int interval = 1; interval <= 220; interval++) {
+    activated = HostDisplayPacing_RecordVsyncPresent(
+        &guard, true, 120,
+        start_ns + (uint64_t)interval * 1000000ull);
+    if (activated) activation_count++;
+    if (interval == 100) CHECK(!guard.software_fallback_active);
+  }
+  CHECK(guard.software_fallback_active);
+  CHECK(activation_count == 1);
+
+  /* A normal-rate window between two bursts clears the suspicion rather than
+   * combining unrelated startup/focus-transition bursts. */
+  HostDisplayPacing_ResetVsyncGuard(&guard);
+  uint64_t now_ns = start_ns;
+  CHECK(!HostDisplayPacing_RecordVsyncPresent(
+      &guard, true, 120, now_ns));
+  for (int interval = 0; interval < 100; interval++) {
+    now_ns += 1000000ull;
+    CHECK(!HostDisplayPacing_RecordVsyncPresent(
+        &guard, true, 120, now_ns));
+  }
+  CHECK(guard.excessive_rate_windows == 1);
+  for (int interval = 0; interval < 13; interval++) {
+    now_ns += 8333333ull;
+    CHECK(!HostDisplayPacing_RecordVsyncPresent(
+        &guard, true, 120, now_ns));
+  }
+  CHECK(guard.excessive_rate_windows == 0);
+  for (int interval = 0; interval < 100; interval++) {
+    now_ns += 1000000ull;
+    CHECK(!HostDisplayPacing_RecordVsyncPresent(
+        &guard, true, 120, now_ns));
+  }
+  CHECK(!guard.software_fallback_active);
+
+  /* Leaving VSync clears every observation and the active fallback. */
+  CHECK(!HostDisplayPacing_RecordVsyncPresent(
+      &guard, false, 120, now_ns + 1u));
+  CHECK(!guard.initialized);
+  CHECK(!guard.software_fallback_active);
+  CHECK(guard.completed_intervals == 0);
+  CHECK(guard.excessive_rate_windows == 0);
 }
 
 static void TestRepresentPolicy(void) {
@@ -303,6 +383,7 @@ int main(void) {
   TestUiAndPausedIntervals();
   TestGamePresentAntiSpinFloor();
   TestCompletedPresentRate();
+  TestVsyncCompletionRateGuard();
   TestRepresentPolicy();
   TestEmulatedFramePresentModes();
   TestSub60LimitsRetainElapsedTime();
