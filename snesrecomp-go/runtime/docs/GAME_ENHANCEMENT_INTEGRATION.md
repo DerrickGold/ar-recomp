@@ -33,7 +33,7 @@ All supported integration headers are under `runtime/include/snesrecomp`:
 | `snesrecomp/game/runtime_constants.h` | Fixed capacities shared by generated runtime structures |
 | `snesrecomp/game/trace.h` | Generated-code trace hooks and no-trace inline forms |
 | `snesrecomp/game/types.h` | Fixed-width generated-code support types |
-| `snesrecomp/host/*.h` | Optional launcher, presentation, frame-dump, and audio-trace host contracts |
+| `snesrecomp/host/launcher.h` | Optional portable ROM loading and launch-path helpers |
 | `snesrecomp/support/*.h` | Stateless file and checksum helpers |
 
 Do not include anything from `runtime/src`, `runtime/src/snes`, or an

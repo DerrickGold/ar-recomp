@@ -1,11 +1,13 @@
 #include "native_audio_trace.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
-#include "snesrecomp/host/audio_trace.h"
 #include "snesrecomp/game/runtime.h"
 #include "native_audio_extension.h"
+#include "native_audio_pcm_capture.h"
 #include "snesrecomp/runner.h"
 #include "run_dir.h"
 
@@ -15,12 +17,17 @@ enum {
   kRuntimeProvenanceCapacity = 1024,
   kRuntimeSuppressionCapacity = 128,
   kRuntimePathCapacity = 512,
+  kPcmCaptureFrameCapacity = 1 << 22,
 };
 
 static int s_enabled = -1;
 static const SnesRunnerApi *s_runner_api;
 static SrRunnerHandle *s_runner;
 static uint64_t s_audio_trace_subscription;
+static uint64_t s_pcm_event_subscription;
+
+static NativeAudioPcmCapture s_pcm;
+static bool s_pcm_format_warning_reported;
 
 static int TraceEnabled(void) {
   if (s_enabled < 0) {
@@ -28,6 +35,36 @@ static int TraceEnabled(void) {
     s_enabled = value && value[0] && value[0] != '0';
   }
   return s_enabled;
+}
+
+static bool PcmEnabled(void) {
+  const char *value = getenv("AR_NATIVE_AUDIO_PCM");
+  return value && value[0] && value[0] != '0';
+}
+
+static void OnRunnerEvent(void *user_data, SrRunnerHandle *runner,
+                          const SrRunnerEvent *event) {
+  (void)user_data;
+  if (runner != s_runner || !s_pcm.samples || !event ||
+      event->struct_size < SR_RUNNER_EVENT_V2_SIZE ||
+      event->type != SR_EVENT_AUDIO_PRODUCED ||
+      !event->audio_samples || event->audio_frame_count == 0u)
+    return;
+  if (event->audio_sample_format != SR_AUDIO_SAMPLE_FORMAT_S16_NATIVE ||
+      event->audio_channel_count != 2u ||
+      event->audio_sample_rate == 0u) {
+    if (!s_pcm_format_warning_reported) {
+      s_pcm_format_warning_reported = true;
+      fprintf(stderr,
+              "[native-audio-trace] PCM capture requires S16 stereo; "
+              "unsupported runner audio event ignored\n");
+    }
+    return;
+  }
+  (void)NativeAudioPcmCapture_Append(
+      &s_pcm, event->audio_frame_offset, event->audio_samples,
+      event->audio_frame_count, event->audio_sample_rate,
+      event->audio_channel_count);
 }
 
 static void OnRunnerAudioTrace(void *user_data, SrRunnerHandle *runner,
@@ -106,7 +143,7 @@ static void OnExtendedCancel(uint64_t serial) {
 
 bool NativeAudioTrace_Init(SrRunnerHandle *runner) {
   SrAudioTraceSubscription subscription = {
-    .struct_size = sizeof(subscription),
+    .struct_size = SR_AUDIO_TRACE_SUBSCRIPTION_V2_SIZE,
     .callback = OnRunnerAudioTrace,
     .event_mask = SR_AUDIO_TRACE_MASK_CPU_PORT_WRITE |
                   SR_AUDIO_TRACE_MASK_SPC_UPLOAD |
@@ -115,33 +152,56 @@ bool NativeAudioTrace_Init(SrRunnerHandle *runner) {
                   SR_AUDIO_TRACE_MASK_SPC_OPCODE |
                   SR_AUDIO_TRACE_MASK_DSP_WRITE,
   };
-  {
-    const char *pcm = getenv("AR_NATIVE_AUDIO_PCM");
-    if (pcm && pcm[0] && pcm[0] != '0') audio_trace_set_enabled(1);
-  }
-  if (!TraceEnabled()) return true;
+  const bool trace_enabled = TraceEnabled();
+  const bool pcm_enabled = PcmEnabled();
+  if (!trace_enabled && !pcm_enabled) return true;
   NativeAudioTrace_Shutdown();
-  NativeAudioTraceModel_Reset();
+  if (trace_enabled) NativeAudioTraceModel_Reset();
   s_runner_api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
   s_runner = runner;
-  if (!s_runner_api || !s_runner ||
-      s_runner_api->struct_size < SNES_RUNNER_API_AUDIO_TRACE_OBSERVER_SIZE ||
-      !(s_runner_api->capabilities & SR_RUNNER_CAP_AUDIO_TRACE_OBSERVERS) ||
-      s_runner_api->subscribe_audio_trace(
-          s_runner, &subscription, &s_audio_trace_subscription) !=
-          SR_RESULT_OK) {
-    s_runner_api = NULL;
-    s_runner = NULL;
-    s_audio_trace_subscription = 0;
+  if (!s_runner_api || !s_runner) {
+    NativeAudioTrace_Shutdown();
     return false;
   }
-  g_native_audio_extension_trace_disposition_hook = OnExtendedDisposition;
-  g_native_audio_extension_trace_start_hook = OnExtendedStart;
-  g_native_audio_extension_trace_end_hook = OnExtendedEnd;
-  g_native_audio_extension_trace_cancel_hook = OnExtendedCancel;
-  fprintf(stderr,
-          "[native-audio-trace] enabled — serial request/lane provenance "
-          "will be written at shutdown\n");
+  if (trace_enabled) {
+    if (s_runner_api->struct_size <
+            SNES_RUNNER_API_AUDIO_TRACE_OBSERVER_SIZE ||
+        !(s_runner_api->capabilities & SR_RUNNER_CAP_AUDIO_TRACE_OBSERVERS) ||
+        s_runner_api->subscribe_audio_trace(
+            s_runner, &subscription, &s_audio_trace_subscription) !=
+            SR_RESULT_OK) {
+      NativeAudioTrace_Shutdown();
+      return false;
+    }
+    g_native_audio_extension_trace_disposition_hook = OnExtendedDisposition;
+    g_native_audio_extension_trace_start_hook = OnExtendedStart;
+    g_native_audio_extension_trace_end_hook = OnExtendedEnd;
+    g_native_audio_extension_trace_cancel_hook = OnExtendedCancel;
+    fprintf(stderr,
+            "[native-audio-trace] enabled — serial request/lane provenance "
+            "will be written at shutdown\n");
+  }
+  if (pcm_enabled) {
+    if (!NativeAudioPcmCapture_Init(&s_pcm, kPcmCaptureFrameCapacity) ||
+        s_runner_api->struct_size < SNES_RUNNER_API_EVENT_OBSERVER_SIZE ||
+        !(s_runner_api->capabilities & SR_RUNNER_CAP_EVENT_OBSERVERS)) {
+      NativeAudioTrace_Shutdown();
+      return false;
+    }
+    SrEventSubscription pcm_subscription = {
+      .struct_size = SR_EVENT_SUBSCRIPTION_V2_SIZE,
+      .event_mask = SR_EVENT_MASK_AUDIO,
+      .callback = OnRunnerEvent,
+    };
+    if (s_runner_api->subscribe_events(
+            s_runner, &pcm_subscription, &s_pcm_event_subscription) !=
+        SR_RESULT_OK) {
+      NativeAudioTrace_Shutdown();
+      return false;
+    }
+    fprintf(stderr,
+            "[native-audio-trace] PCM capture uses runner final-mix events\n");
+  }
   return true;
 }
 
@@ -150,7 +210,11 @@ void NativeAudioTrace_Shutdown(void) {
     s_runner_api->unsubscribe_audio_trace(
         s_runner, s_audio_trace_subscription);
   }
+  if (s_runner_api && s_runner && s_pcm_event_subscription) {
+    s_runner_api->unsubscribe_events(s_runner, s_pcm_event_subscription);
+  }
   s_audio_trace_subscription = 0;
+  s_pcm_event_subscription = 0;
   s_runner = NULL;
   s_runner_api = NULL;
   if (g_native_audio_extension_trace_disposition_hook == OnExtendedDisposition)
@@ -161,6 +225,8 @@ void NativeAudioTrace_Shutdown(void) {
     g_native_audio_extension_trace_end_hook = NULL;
   if (g_native_audio_extension_trace_cancel_hook == OnExtendedCancel)
     g_native_audio_extension_trace_cancel_hook = NULL;
+  NativeAudioPcmCapture_Destroy(&s_pcm);
+  s_pcm_format_warning_reported = false;
 }
 
 uint64_t NativeAudioTrace_OnCpuRequest(
@@ -230,16 +296,16 @@ static void WriteRequests(const NativeAudioRequestRecord *records,
 }
 
 static void WritePcmIfRequested(void) {
-  const char *enabled = getenv("AR_NATIVE_AUDIO_PCM");
-  if (!enabled || !enabled[0] || enabled[0] == '0') return;
+  if (!s_pcm.samples || s_pcm.sample_rate == 0u ||
+      s_pcm.end_frame <= s_pcm.first_frame)
+    return;
   char path[kRuntimePathCapacity];
   RunDirFile(path, sizeof(path), "native_audio_pcm.wav");
-  uint64_t start = 0, count = 0;
-  if (audio_trace_dump_wav(path, -1, 0, &start, &count) == 0) {
+  if (NativeAudioPcmCapture_WriteWav(&s_pcm, path)) {
     fprintf(stderr,
-            "[native-audio-trace] wrote %s (samples %llu..%llu)\n",
-            path, (unsigned long long)start,
-            (unsigned long long)(start + count));
+            "[native-audio-trace] wrote %s (frames %llu..%llu)\n",
+            path, (unsigned long long)s_pcm.first_frame,
+            (unsigned long long)s_pcm.end_frame);
   } else {
     fprintf(stderr, "[native-audio-trace] could not write %s\n", path);
   }
@@ -308,6 +374,7 @@ static void WriteMusicSuppressions(
 }
 
 void NativeAudioTrace_Report(void) {
+  WritePcmIfRequested();
   if (!TraceEnabled()) return;
 
   NativeAudioRequestRecord *requests =
@@ -344,7 +411,6 @@ void NativeAudioTrace_Report(void) {
   WriteSongEvents(songs, song_count);
   WriteProvenance(provenance, provenance_count);
   WriteMusicSuppressions(suppressions, suppression_count);
-  WritePcmIfRequested();
   fprintf(stderr,
           "[native-audio-trace] requests=%llu retained=%llu "
           "completed=%llu mailbox-coalesced=%llu mailbox-drop=%llu "

@@ -77,9 +77,9 @@ static void write_slot0(Ppu *ppu, int screen_x, int screen_y) {
 int main(void) {
   Ppu *ppu = ppu_init();
   ppu_reset(ppu);
-  /* The display cap the wrap threshold anchors to: 120 per side (kWsExtraMax's
-   * value, restated because widescreen.h is a runner header the PPU must not
-   * depend on). PpuSetExtraSpace clamps to kPpuExtraLeftRight. */
+  /* The display cap the wrap threshold anchors to: 120 per side, matching
+   * ActRaiser's game-owned tilemap-streaming budget. PpuSetExtraSpace clamps
+   * to the runner's independent kPpuExtraLeftRight hardware-model limit. */
   enum { kCap = 120 };
   PpuSetExtraSpace(ppu, kCap);
 

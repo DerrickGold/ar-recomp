@@ -4,6 +4,7 @@
 #include "randomizer.h"
 #include "render_capabilities.h"
 #include "actraiser_game.h"   /* kActRaiserAuthenticWidth */
+#include "display_geometry.h"
 #include "input_map.h"
 #include "atomic_replace.h"
 #include "sim/sim3d_camera_limits.h"
@@ -52,13 +53,8 @@ static int s_boot_widescreen_rank;
 static int s_boot_display_mode;
 static bool s_boot_display_from_environment;
 
-/* g_ws_active / g_ws_extra are the canonical exported widescreen symbols
- * (snesrecomp/host/widescreen.h). The framebuffer width is derived from
- * g_ws_extra exactly as main.c computes it, so we don't need main.c's
- * file-local g_snes_width. */
-extern bool g_ws_active;
-extern int g_ws_extra;
-extern int g_ws_display_extra;
+/* The framebuffer width is derived from the canonical ActRaiser display
+ * geometry, so this module does not need main.c's file-local g_snes_width. */
 
 static int InferDisplayMode(void);
 

@@ -7,11 +7,11 @@
 
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
+#include "display_geometry.h"
 #include "action/action_bg_metatile.h"
 #include "snesrecomp/game/runtime.h"
 #include "snesrecomp/runner.h"
 #include "settings.h"
-#include "snesrecomp/host/widescreen.h"
 
 #include <stdio.h>
 #include <stdlib.h>

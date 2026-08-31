@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "frame_slot.h"
+#include "display_geometry.h"
 #include "host/host_clock.h"
 #include "present.h"
 #include "snesrecomp/game/types.h"
@@ -31,9 +32,7 @@
 #include "hd_replacement_host.h"
 #include "snesrecomp/runner.h"
 
-/* main.c-owned globals with no header declaration, read here. */
-extern bool g_ws_active;
-extern int g_ws_extra;
+/* main.c-owned presentation state copied into the immutable slot. */
 extern bool g_diorama_frame_active;
 
 /* Self-calibrating velocity normalization uses a recent-activity EMA, not a

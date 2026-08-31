@@ -5,7 +5,7 @@
 #include "snes.h"
 #include "spc.h"
 #include "runner_internal.h"
-#include "snesrecomp/host/audio_trace.h"
+#include "support/audio_audit_internal.h"
 
 #include <stddef.h>
 #include <stdlib.h>

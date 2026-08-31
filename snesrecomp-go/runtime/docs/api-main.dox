@@ -83,7 +83,7 @@ human integration index; they remain installed and compile-tested.
  */
 
 /** @defgroup sr_host Host conveniences
- *  @brief Optional launcher, tracing, frame-dump, and presentation helpers.
+ *  @brief Optional portable ROM loading and launch-path helpers.
  */
 
 /** @defgroup sr_support Stateless support

@@ -10,7 +10,12 @@
 extern "C" {
 #endif
 
+/* Stable eight-byte artifact signature, including the terminating NUL. It is
+ * public so adapters supporting a historical format can select the canonical
+ * parser without duplicating runner-private wire constants. */
 #define SR_INPUT_REPLAY_FORMAT_VERSION 1u
+#define SR_INPUT_REPLAY_MAGIC "SRINPUT"
+#define SR_INPUT_REPLAY_MAGIC_SIZE 8u
 #define SR_INPUT_REPLAY_SHA256_SIZE 32u
 #define SR_INPUT_REPLAY_GAME_ID_SIZE 32u
 

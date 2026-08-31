@@ -31,7 +31,8 @@
  *     5-6), built where a byte-identity gate can prove it.
  *
  * The apron can only ever hold OBJ pixels. The widened background line buffer
- * ends at kPpuExtraLeftRight=128 and the live view ends at kWsExtraMax=120;
+ * ends at kPpuExtraLeftRight=128 and the live view ends at the
+ * ActRaiser-specific 120-pixel cap;
  * neither extends into these additional 64 columns. That is why the apron is
  * not displayed -- showing it would show sprites over empty background.
  *

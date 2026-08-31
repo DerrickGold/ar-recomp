@@ -6,7 +6,7 @@
 #include "runtime_trace.h"
 #include "snesrecomp/game/cpu.h"
 #include "snesrecomp/game/trace.h"
-#include "snesrecomp/host/audio_trace.h"
+#include "support/audio_audit_internal.h"
 #include "snes/apu.h"
 #include "snes/cart.h"
 #include "snes/cpu.h"

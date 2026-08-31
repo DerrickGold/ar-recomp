@@ -18,14 +18,13 @@
 #include "action/action_camera_bounds.h"
 #include "actraiser_action_bg.h"
 #include "actraiser_game.h"
+#include "display_geometry.h"
 #include "snesrecomp/game/cpu.h"
 #include "settings.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 
-extern bool g_ws_active;
-extern int g_ws_extra;
 extern RecompReturn bank_02_B9D5_M0X0(CpuState *cpu);
 extern RecompReturn bank_02_BA0B_M0X0(CpuState *cpu);
 extern RecompReturn bank_00_A1B0_M0X0(CpuState *cpu);

@@ -3,7 +3,7 @@
 #include "apu.h"
 #include "dsp_accuracy_bridge.h"
 #include "runner_internal.h"
-#include "snesrecomp/host/audio_trace.h"
+#include "support/audio_audit_internal.h"
 #include "simd.h"
 #include "dsp_shadow.h"
 #include "saveload.h"

@@ -6,7 +6,6 @@
 
 #include <SDL3/SDL.h>
 
-#include "snesrecomp/host/audio_trace.h"
 #include "snesrecomp/game/runtime.h"
 
 enum {
@@ -42,10 +41,10 @@ void RtlApuLock(void) {
   if (!s_audio_mutex) return;
   if (RtlApuProfileIsEnabled()) {
     if (SDL_TryLockMutex(s_audio_mutex)) return;
-    const uint64_t wait_start_ns = audio_trace_wall_ns();
+    const uint64_t wait_start_ns = SDL_GetTicksNS();
     SDL_LockMutex(s_audio_mutex);
     const uint64_t wait_duration_ns =
-        audio_trace_wall_ns() - wait_start_ns;
+        SDL_GetTicksNS() - wait_start_ns;
     if (s_game_thread_id != 0 &&
         SDL_GetCurrentThreadID() == s_game_thread_id) {
       RtlApuProfileRecordHostWait(wait_duration_ns, true);

@@ -23,6 +23,7 @@
 #include "action/action_obj_apron.h"
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
+#include "display_geometry.h"
 #include "snesrecomp/runner.h"
 #include "settings.h"
 #include "sim/sim_render_metadata.h"
@@ -31,8 +32,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-extern bool g_ws_active;
-extern int g_ws_extra;
 extern RecompReturn bank_00_923A_M0X0(CpuState *cpu);
 
 RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu);

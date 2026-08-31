@@ -30,7 +30,8 @@ ActRaiserRomSetupResult ActRaiser_LastRomSetupResult(void);
  * not live. `apron == 0` is the disable lever the whole phase rides on: every
  * apron-aware site collapses to its pre-apron expression, so callers test that
  * rather than re-deriving the policy. Live only under the diorama margin policy
- * (host_display.c pins g_ws_extra to kWsExtraMax there), because flat mode
+ * (host_display.c pins g_ws_extra to the ActRaiser display cap there), because
+ * flat mode
  * never samples the columns the apron would fill. */
 ActionApronGeometry ActRaiser_ObjApronGeometry(void);
 

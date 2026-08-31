@@ -1,11 +1,10 @@
 #include "snesrecomp/game/runtime.h"
 
-#include "snesrecomp/host/audio_trace.h"
+#include "support/audio_audit_internal.h"
 #include "snesrecomp/game/bootstrap.h"
 #include "snesrecomp/game/generated_support.h"
 #include "snesrecomp/game/cpu.h"
 #include "snesrecomp/game/trace.h"
-#include "snesrecomp/host/framedump.h"
 #include "recomp_hw.h"
 #include "runner_internal.h"
 #include "runner_game_module_internal.h"
@@ -27,10 +26,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef _WIN32
-#include <windows.h>
-#endif
-
 enum {
     RTL_SNAPSHOT_MAGIC = 0x52544c53u,
     /* The accurate DSP changes the raw native APU/DSP layout.  Version 9
@@ -42,9 +37,6 @@ enum {
     RTL_AUDIO_NATIVE_RATE = 32040,
     RTL_AUDIO_CHUNK = 1024
 };
-
-#define RTL_SRAM_FILE "saves/save.srm"
-#define RTL_SRAM_BACKUP_FILE "saves/save.srm.bak"
 
 uint8 g_ram[kSnesWramSize];
 uint8 *g_sram;
@@ -339,8 +331,6 @@ bool RtlRunFrame(uint32 inputs) {
             g_snes, SR_EVENT_FRAME_END | SR_EVENT_FRAME_HOST_TICK,
             "host-tick-end");
     }
-    if (g_framedump_callback != NULL)
-        g_framedump_callback((uint32)snes_frame_counter, g_ram);
     ++snes_frame_counter;
     /*
      * A game can run correctly and still show nothing, because the runner owns
@@ -995,53 +985,4 @@ void RtlRenderAudio(int16 *audio_buffer, int samples, int channels) {
         }
     }
     sr_runner_audio_production_end();
-}
-
-void RtlMigrateLegacySram(const char *legacy_title) {
-    char legacy[128];
-    char buffer[1024];
-    size_t count;
-    FILE *source;
-    FILE *destination;
-    if (legacy_title == NULL || legacy_title[0] == '\0') return;
-    destination = fopen(RTL_SRAM_FILE, "rb");
-    if (destination != NULL) { fclose(destination); return; }
-    snprintf(legacy, sizeof(legacy), "saves/%s.srm", legacy_title);
-    if (strcmp(legacy, RTL_SRAM_FILE) == 0) return;
-    source = fopen(legacy, "rb");
-    if (source == NULL) return;
-    destination = fopen(RTL_SRAM_FILE, "wb");
-    if (destination == NULL) { fclose(source); return; }
-    while ((count = fread(buffer, 1u, sizeof(buffer), source)) != 0u)
-        (void)fwrite(buffer, 1u, count, destination);
-    fclose(destination);
-    fclose(source);
-}
-
-void RtlReadSram(void) {
-    FILE *file;
-    if (g_sram == NULL || g_sram_size <= 0) return;
-    if (g_rtl_game_identity != NULL)
-        RtlMigrateLegacySram(g_rtl_game_identity->game_id);
-    file = fopen(RTL_SRAM_FILE, "rb");
-    if (file == NULL) return;
-    if (fread(g_sram, 1u, (size_t)g_sram_size, file) != (size_t)g_sram_size)
-        fprintf(stderr, "Unable to read complete SRAM file\n");
-    fclose(file);
-}
-
-void RtlWriteSram(void) {
-    FILE *file;
-    if (g_sram == NULL || g_sram_size <= 0) return;
-#ifdef _WIN32
-    (void)MoveFileExA(RTL_SRAM_FILE, RTL_SRAM_BACKUP_FILE,
-                      MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
-#else
-    (void)rename(RTL_SRAM_FILE, RTL_SRAM_BACKUP_FILE);
-#endif
-    file = fopen(RTL_SRAM_FILE, "wb");
-    if (file == NULL) return;
-    if (fwrite(g_sram, 1u, (size_t)g_sram_size, file) != (size_t)g_sram_size)
-        fprintf(stderr, "Unable to write complete SRAM file\n");
-    fclose(file);
 }

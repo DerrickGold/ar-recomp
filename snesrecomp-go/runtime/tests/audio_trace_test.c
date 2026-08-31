@@ -1,13 +1,10 @@
-#include "snesrecomp/host/audio_trace.h"
+#include "support/audio_audit_internal.h"
 
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
-#ifndef AUDIO_TRACE_TEST_WAV
-#define AUDIO_TRACE_TEST_WAV "runtime-audio-trace.wav"
-#endif
 #ifndef AUDIO_TRACE_TEST_JSONL
 #define AUDIO_TRACE_TEST_JSONL "runtime-audio-trace.jsonl"
 #endif
@@ -26,10 +23,6 @@ static void check(bool condition, const char *message) {
     if (condition) return;
     fprintf(stderr, "runtime audio trace failed: %s\n", message);
     ++failures;
-}
-
-static uint16_t little_u16(const uint8_t *bytes) {
-    return (uint16_t)(bytes[0] | (uint16_t)bytes[1] << 8);
 }
 
 static void test_samples_and_events(void) {
@@ -53,9 +46,6 @@ static void test_samples_and_events(void) {
     check(stats.pace_consumer_active == 1u &&
           stats.pace_baseline_cycles == 123u,
           "pacing counters");
-    check(audio_trace_consume_quantum() == 700u,
-          "consume quantum follows largest callback");
-
     AudioTraceEvent events[4];
     uint64_t oldest = UINT64_MAX;
     const uint32_t copied = audio_trace_copy_events(0u, 4u, events, &oldest);
@@ -107,23 +97,6 @@ static void test_jsonl_dump(void) {
     check(remove(AUDIO_TRACE_TEST_JSONL) == 0, "remove JSONL fixture");
 }
 
-static void test_wav_dump(void) {
-    uint64_t start = UINT64_MAX, count = 0u;
-    check(audio_trace_dump_wav(AUDIO_TRACE_TEST_WAV, -1, 0u,
-                               &start, &count) == 0 &&
-          start == 0u && count == 3u, "WAV dump range");
-    FILE *file = fopen(AUDIO_TRACE_TEST_WAV, "rb");
-    uint8_t bytes[56];
-    const size_t read = file == NULL ? 0u : fread(bytes, 1u, sizeof(bytes), file);
-    if (file != NULL) fclose(file);
-    check(read == sizeof(bytes) && memcmp(bytes, "RIFF", 4u) == 0 &&
-          memcmp(bytes + 8u, "WAVEfmt ", 8u) == 0 &&
-          little_u16(bytes + 44u) == 100u &&
-          (int16_t)little_u16(bytes + 46u) == -100,
-          "WAV header and little-endian PCM payload");
-    check(remove(AUDIO_TRACE_TEST_WAV) == 0, "remove WAV fixture");
-}
-
 static void test_disabled_fast_path(void) {
     AudioTraceStats before, after;
     audio_trace_get_stats(&before);
@@ -147,7 +120,6 @@ int main(void) {
     test_samples_and_events();
     test_port_gating();
     test_jsonl_dump();
-    test_wav_dump();
     test_disabled_fast_path();
     check(lock_depth == 0u, "query locks remain balanced");
     if (failures != 0) {

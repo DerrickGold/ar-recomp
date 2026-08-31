@@ -165,6 +165,42 @@ static void TestNativeAndIniCodecs(void) {
   remove(missing_path); remove(duplicate_path); remove(short_path);
 }
 
+static void TestLegacyMigration(void) {
+  static const char legacy_path[] = "actraiser-save-legacy-test.srm";
+  static const char native_path[] = "actraiser-save-migrated-test.srm";
+  static const char ini_path[] = "actraiser-save-migrated-test.ini";
+  remove(legacy_path); remove(native_path); remove(ini_path);
+
+  uint8_t original[kActRaiserSramSize];
+  uint8_t live[kActRaiserSramSize];
+  uint8_t disk[kActRaiserSramSize];
+  SaveError error = {{0}};
+  MakeFixture(original);
+  CHECK(Save_WriteFile(kSaveFileFormat_NativeSrm, legacy_path,
+                       original, &error));
+
+  memset(live, 0x60, sizeof(live));
+  CHECK(SaveSystem_Attach(live, sizeof(live), kSaveBackend_NativeSrm,
+                          native_path, ini_path, &error));
+  CHECK(SaveSystem_MigrateLegacyNative(legacy_path, &error));
+  CHECK(Save_LoadFile(kSaveFileFormat_NativeSrm, native_path, disk, &error));
+  CHECK(!memcmp(original, disk, sizeof(disk)));
+  CHECK(Save_LoadFile(kSaveFileFormat_NativeSrm, legacy_path, disk, &error));
+
+  /* A selected INI backend converts the legacy native image rather than
+   * populating an inactive native path. */
+  remove(native_path); remove(ini_path);
+  CHECK(SaveSystem_Attach(live, sizeof(live), kSaveBackend_Ini,
+                          native_path, ini_path, &error));
+  CHECK(SaveSystem_MigrateLegacyNative(legacy_path, &error));
+  CHECK(Save_LoadFile(kSaveFileFormat_Ini, ini_path, disk, &error));
+  CHECK(!memcmp(original, disk, sizeof(disk)));
+
+  remove(legacy_path); remove(native_path); remove(ini_path);
+  remove("actraiser-save-migrated-test.srm.tmp");
+  remove("actraiser-save-migrated-test.ini.tmp");
+}
+
 static void TestRuntimeTransactions(void) {
   static const char native_path[] = "actraiser-save-active-test.srm";
   static const char ini_path[] = "actraiser-save-active-test.ini";
@@ -333,6 +369,7 @@ static void TestRuntimeTransactions(void) {
 int main(void) {
   TestChecksumAndFields();
   TestNativeAndIniCodecs();
+  TestLegacyMigration();
   TestRuntimeTransactions();
   if (s_failures) {
     fprintf(stderr, "save system tests: %d failure(s)\n", s_failures);

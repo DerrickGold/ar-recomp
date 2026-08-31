@@ -92,9 +92,6 @@ enum { kSaveLoad_Save = 1, kSaveLoad_Load = 2 };
 void RtlSaveLoad(int command, int slot);
 void RtlSaveSnapshot(const char *filename);
 bool RtlLoadSnapshot(const char *filename);
-void RtlMigrateLegacySram(const char *legacy_title);
-void RtlReadSram(void);
-void RtlWriteSram(void);
 
 /** Delta counters since RtlApuProfileReset. Total cycles come from the
  * serialized semantic APU clock. The four attributed cycle categories plus

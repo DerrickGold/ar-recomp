@@ -3,11 +3,14 @@
 
 #include "snesrecomp/runner.h"
 
-/* Install the optional frame-end WRAM/oracle callback when any supported
- * AR_* trace or snapshot environment control is enabled. */
+/* Configure optional frame-end WRAM/oracle diagnostics. */
 void OracleTrace_Init(SrRunnerHandle *runner);
 
-/* Flush and close trace streams, then detach the frame callback. */
+/* Service one completed RtlRunFrame. The application owns this schedule so
+ * turbo and catch-up ticks remain distinct without a mutable runner hook. */
+void OracleTrace_CompleteTick(void);
+
+/* Flush and close trace streams. */
 void OracleTrace_Shutdown(void);
 
 #endif /* ORACLE_TRACE_H */

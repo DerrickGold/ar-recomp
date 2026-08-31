@@ -410,6 +410,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_input_replay_test
         tests/input_replay_test.c
         src/input_replay.c
+        ${SNESRECOMP_RUNNER_ROOT}/src/runner/replay.c
     )
     target_include_directories(actraiser_input_replay_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -1010,6 +1011,7 @@ if(BUILD_TESTING)
         tests/settings_test.c
         src/config.c
         src/settings.c
+        src/display_geometry.c
         src/atomic_replace.c
         # settings.c's randomizer rows call into the transform for their
         # availability gate and their on-change refresh. It is pure ROM-buffer
@@ -1035,6 +1037,7 @@ if(BUILD_TESTING)
         src/config.c
         src/quintet_lzss.c
         src/settings.c
+        src/display_geometry.c
         src/atomic_replace.c
         src/randomizer.c
         src/settings_overlay.c
@@ -1179,6 +1182,15 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_native_audio_trace
         COMMAND actraiser_native_audio_trace_test)
+
+    add_executable(actraiser_native_audio_pcm_capture_test
+        tests/native_audio_pcm_capture_test.c
+        src/dev/native_audio_pcm_capture.c
+    )
+    target_include_directories(actraiser_native_audio_pcm_capture_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_native_audio_pcm_capture
+        COMMAND actraiser_native_audio_pcm_capture_test)
 
     add_executable(actraiser_native_audio_mixer_test
         tests/native_audio_mixer_test.c

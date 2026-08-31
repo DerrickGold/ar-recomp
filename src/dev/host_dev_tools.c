@@ -2,6 +2,7 @@
 #include "host_dev_tools.h"
 
 #include "dev_tools.h"
+#include "display_geometry.h"
 #include "snesrecomp/game_runtime.h"
 #include "host/host_input.h"
 #include "platform/sdl/dev_tools_readback_sdl.h"
@@ -21,9 +22,6 @@ extern InspectorPresentationSelection g_scene_inspector_presentation;
 extern int g_snes_width;
 extern int g_snes_height;
 extern int g_active_pixel_aspect;
-extern int g_ws_extra;
-extern bool g_ws_active;
-
 static DevToolsContext CurrentContext(void) {
   DevToolsContext context = {
     .readback = {

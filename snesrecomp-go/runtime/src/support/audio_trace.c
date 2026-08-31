@@ -1,4 +1,4 @@
-#include "snesrecomp/host/audio_trace.h"
+#include "audio_audit_internal.h"
 
 #include "snesrecomp/game/apu_sync.h"
 #include "snes/snes.h"
@@ -15,14 +15,10 @@
 #include <time.h>
 #endif
 
-static int16_t s_pcm[AUDIO_TRACE_PCM_RING * 2u];
-static AudioTraceEvent s_events[AUDIO_TRACE_EVENT_RING];
-static AudioTraceSnap s_snapshots[AUDIO_TRACE_SNAP_RING];
+static AudioTraceEvent *s_events;
 static AudioTraceStats s_stats;
 static int s_producer;
 static uint64_t s_open_drop = UINT64_MAX;
-static uint64_t s_last_snapshot_ms;
-static uint32_t s_largest_consume;
 static uint8_t s_spc_read_last[4];
 static uint8_t s_cpu_read_last[4];
 static uint8_t s_spc_write_last[4];
@@ -44,11 +40,8 @@ static _Atomic int s_enabled = -1;
 int audio_trace_enabled(void) {
     int enabled = atomic_load_explicit(&s_enabled, memory_order_relaxed);
     if (enabled >= 0) return enabled;
-    const char *setting = getenv("SNESRECOMP_AUDIO_TRACE");
     const char *audit = getenv("SNESRECOMP_APU_AUDIT_PREFIX");
-    const int detected =
-        (setting != NULL && setting[0] != '\0' && setting[0] != '0') ||
-        (audit != NULL && audit[0] != '\0');
+    const int detected = audit != NULL && audit[0] != '\0';
     int expected = -1;
     if (atomic_compare_exchange_strong_explicit(
             &s_enabled, &expected, detected,
@@ -86,10 +79,22 @@ uint64_t audio_trace_wall_ms(void) {
 }
 
 void audio_trace_reset(void) {
+    AudioTraceEvent *events = s_events;
+    if (events == NULL) {
+        events = (AudioTraceEvent *)calloc(
+            AUDIO_TRACE_EVENT_RING, sizeof(*events));
+        if (events == NULL) {
+            fprintf(stderr,
+                    "[apu-audit] cannot allocate retained event storage\n");
+            audio_trace_set_enabled(0);
+            return;
+        }
+    }
     RtlApuLock();
+    s_events = events;
     memset(&s_stats, 0, sizeof(s_stats));
-    memset(s_events, 0, sizeof(s_events));
-    memset(s_snapshots, 0, sizeof(s_snapshots));
+    memset(s_events, 0,
+           (size_t)AUDIO_TRACE_EVENT_RING * sizeof(*s_events));
     memset(s_spc_read_last, 0, sizeof(s_spc_read_last));
     memset(s_cpu_read_last, 0, sizeof(s_cpu_read_last));
     memset(s_spc_write_last, 0, sizeof(s_spc_write_last));
@@ -103,8 +108,6 @@ void audio_trace_reset(void) {
     memset(s_port_source_tail, 0, sizeof(s_port_source_tail));
     s_producer = AUDIO_TRACE_PRODUCER_UNKNOWN;
     s_open_drop = UINT64_MAX;
-    s_last_snapshot_ms = audio_trace_wall_ms();
-    s_largest_consume = 0u;
     audio_trace_set_enabled(1);
     RtlApuUnlock();
 }
@@ -120,20 +123,6 @@ static AudioTraceEvent *push_event(uint8_t type) {
     return event;
 }
 
-static void take_snapshot_if_due(uint32_t occupancy) {
-    const uint64_t now = audio_trace_wall_ms();
-    if (now - s_last_snapshot_ms < 1000u) return;
-    s_last_snapshot_ms = now;
-    AudioTraceSnap *snapshot =
-        &s_snapshots[s_stats.snap_count & (AUDIO_TRACE_SNAP_RING - 1u)];
-    ++s_stats.snap_count;
-    snapshot->wall_ms = now;
-    snapshot->produced = s_stats.produced;
-    snapshot->dropped = s_stats.dropped;
-    snapshot->consumed = s_stats.consumed;
-    snapshot->occupancy = occupancy;
-}
-
 void audio_trace_set_producer(int producer) {
     if (!audio_trace_enabled()) return;
     s_producer = producer;
@@ -141,11 +130,9 @@ void audio_trace_set_producer(int producer) {
 
 void audio_trace_on_sample(int16_t left, int16_t right, int dropped,
                            uint32_t ring_fill) {
-    if (!audio_trace_enabled()) return;
-    const uint32_t position =
-        (uint32_t)s_stats.produced & (AUDIO_TRACE_PCM_RING - 1u);
-    s_pcm[position * 2u] = left;
-    s_pcm[position * 2u + 1u] = right;
+    (void)left;
+    (void)right;
+    if (!audio_trace_enabled() || s_events == NULL) return;
     if (dropped) {
         if (s_open_drop != UINT64_MAX &&
             s_stats.event_count - s_open_drop <= AUDIO_TRACE_EVENT_RING) {
@@ -165,11 +152,10 @@ void audio_trace_on_sample(int16_t left, int16_t right, int dropped,
     if (ring_fill > s_stats.occupancy_highwater) {
         s_stats.occupancy_highwater = ring_fill;
     }
-    take_snapshot_if_due(ring_fill);
 }
 
 void audio_trace_on_reg_write(uint8_t address, uint8_t value) {
-    if (!audio_trace_enabled()) return;
+    if (!audio_trace_enabled() || s_events == NULL) return;
     AudioTraceEvent *event = push_event(AUDIO_TRACE_EV_REG);
     event->addr = address;
     event->val = value;
@@ -180,13 +166,12 @@ void audio_trace_on_reg_write(uint8_t address, uint8_t value) {
 
 void audio_trace_on_consume(uint64_t read_index, uint32_t count,
                             uint32_t available_after) {
-    if (!audio_trace_enabled()) return;
+    if (!audio_trace_enabled() || s_events == NULL) return;
     (void)read_index;
     AudioTraceEvent *event = push_event(AUDIO_TRACE_EV_CONSUME);
     event->aux = available_after;
     s_stats.consumed += count;
     ++s_stats.consume_calls;
-    if (count > s_largest_consume) s_largest_consume = count;
     s_open_drop = UINT64_MAX;
 }
 
@@ -254,7 +239,7 @@ void audio_trace_on_cpu_port_write(uint8_t port, uint8_t value) {
 void audio_trace_on_cpu_port_write_at(uint8_t port, uint8_t value,
                                       uint32_t source_block,
                                       const char *function_name) {
-    if (!audio_trace_enabled()) return;
+    if (!audio_trace_enabled() || s_events == NULL) return;
     port &= 3u;
     ++s_stats.cpu_port_writes;
     AudioTraceEvent *event =
@@ -265,7 +250,7 @@ void audio_trace_on_cpu_port_write_at(uint8_t port, uint8_t value,
 }
 
 void audio_trace_on_cpu_port_apply(uint8_t port, uint8_t value) {
-    if (!audio_trace_enabled()) return;
+    if (!audio_trace_enabled() || s_events == NULL) return;
     port &= 3u;
     const PortWriteSource source = pop_port_source(port, value);
     ++s_stats.cpu_port_applies;
@@ -296,7 +281,7 @@ void audio_trace_on_cpu_port_apply(uint8_t port, uint8_t value) {
 }
 
 void audio_trace_on_spc_port_read(uint8_t port, uint8_t value) {
-    if (!audio_trace_enabled()) return;
+    if (!audio_trace_enabled() || s_events == NULL) return;
     port &= 3u;
     ++s_stats.spc_port_reads_seen;
     s_cpu_write_pending[port] = 0u;
@@ -308,7 +293,7 @@ void audio_trace_on_spc_port_read(uint8_t port, uint8_t value) {
 }
 
 void audio_trace_on_spc_port_write(uint8_t port, uint8_t value) {
-    if (!audio_trace_enabled()) return;
+    if (!audio_trace_enabled() || s_events == NULL) return;
     port &= 3u;
     ++s_stats.spc_port_writes;
     s_cpu_read_fresh[port] = 1u;
@@ -318,22 +303,13 @@ void audio_trace_on_spc_port_write(uint8_t port, uint8_t value) {
 }
 
 void audio_trace_on_cpu_port_read(uint8_t port, uint8_t value) {
-    if (!audio_trace_enabled()) return;
+    if (!audio_trace_enabled() || s_events == NULL) return;
     port &= 3u;
     if (!s_cpu_read_fresh[port] && s_cpu_read_last[port] == value) return;
     s_cpu_read_fresh[port] = 0u;
     s_cpu_read_last[port] = value;
     ++s_stats.cpu_port_reads_logged;
     (void)push_port_event(AUDIO_TRACE_EV_CPU_PORT_READ, port, value);
-}
-
-void audio_trace_sample_clocks(uint64_t *produced, uint64_t *consumed) {
-    if (produced != NULL) *produced = s_stats.produced;
-    if (consumed != NULL) *consumed = s_stats.consumed;
-}
-
-uint32_t audio_trace_consume_quantum(void) {
-    return s_largest_consume > 534u ? s_largest_consume : 534u;
 }
 
 void audio_trace_get_stats(AudioTraceStats *output) {
@@ -382,7 +358,7 @@ static bool is_apu_audit_event(uint8_t type) {
 int audio_trace_dump_jsonl(const char *path) {
     FILE *file;
     uint64_t oldest, total, selected = 0u;
-    if (path == NULL || path[0] == '\0') return -1;
+    if (path == NULL || path[0] == '\0' || s_events == NULL) return -1;
     file = fopen(path, "wb");
     if (file == NULL) return -1;
     RtlApuLock();
@@ -437,6 +413,11 @@ int audio_trace_dump_jsonl(const char *path) {
 uint32_t audio_trace_copy_events(uint64_t first_index, uint32_t maximum,
                                  AudioTraceEvent *output, uint64_t *oldest) {
     RtlApuLock();
+    if (s_events == NULL) {
+        if (oldest != NULL) *oldest = 0u;
+        RtlApuUnlock();
+        return 0u;
+    }
     const uint64_t total = s_stats.event_count;
     const uint64_t first_available = total > AUDIO_TRACE_EVENT_RING
         ? total - AUDIO_TRACE_EVENT_RING : 0u;
@@ -452,77 +433,4 @@ uint32_t audio_trace_copy_events(uint64_t first_index, uint32_t maximum,
     }
     RtlApuUnlock();
     return copied;
-}
-
-uint32_t audio_trace_copy_snaps(uint64_t first_index, uint32_t maximum,
-                                AudioTraceSnap *output, uint64_t *oldest) {
-    RtlApuLock();
-    const uint64_t total = s_stats.snap_count;
-    const uint64_t first_available = total > AUDIO_TRACE_SNAP_RING
-        ? total - AUDIO_TRACE_SNAP_RING : 0u;
-    if (oldest != NULL) *oldest = first_available;
-    if (first_index < first_available) first_index = first_available;
-    uint32_t copied = 0u;
-    while (copied < maximum && first_index + copied < total) {
-        if (output != NULL) {
-            output[copied] = s_snapshots[(first_index + copied) &
-                                         (AUDIO_TRACE_SNAP_RING - 1u)];
-        }
-        ++copied;
-    }
-    RtlApuUnlock();
-    return copied;
-}
-
-static bool write_u16(FILE *file, uint16_t value) {
-    const uint8_t bytes[2] = {(uint8_t)value, (uint8_t)(value >> 8)};
-    return fwrite(bytes, 1u, sizeof(bytes), file) == sizeof(bytes);
-}
-
-static bool write_u32(FILE *file, uint32_t value) {
-    const uint8_t bytes[4] = {
-        (uint8_t)value, (uint8_t)(value >> 8),
-        (uint8_t)(value >> 16), (uint8_t)(value >> 24)
-    };
-    return fwrite(bytes, 1u, sizeof(bytes), file) == sizeof(bytes);
-}
-
-int audio_trace_dump_wav(const char *path, int64_t start_index, uint64_t count,
-                         uint64_t *output_start, uint64_t *output_count) {
-    if (path == NULL) return -1;
-    RtlApuLock();
-    const uint64_t total = s_stats.produced;
-    RtlApuUnlock();
-    const uint64_t oldest = total > AUDIO_TRACE_PCM_RING
-        ? total - AUDIO_TRACE_PCM_RING : 0u;
-    uint64_t start = start_index < 0 ? oldest : (uint64_t)start_index;
-    if (start < oldest) start = oldest;
-    if (start > total) start = total;
-    const uint64_t available = total - start;
-    if (count == 0u || count > available) count = available;
-    if (count > (UINT32_MAX - 36u) / 4u) count = (UINT32_MAX - 36u) / 4u;
-
-    FILE *file = fopen(path, "wb");
-    if (file == NULL) return -1;
-    const uint32_t data_bytes = (uint32_t)(count * 4u);
-    bool ok = fwrite("RIFF", 1u, 4u, file) == 4u &&
-              write_u32(file, 36u + data_bytes) &&
-              fwrite("WAVEfmt ", 1u, 8u, file) == 8u &&
-              write_u32(file, 16u) && write_u16(file, 1u) &&
-              write_u16(file, 2u) && write_u32(file, 32000u) &&
-              write_u32(file, 128000u) && write_u16(file, 4u) &&
-              write_u16(file, 16u) &&
-              fwrite("data", 1u, 4u, file) == 4u &&
-              write_u32(file, data_bytes);
-    for (uint64_t index = 0u; ok && index < count; ++index) {
-        const uint32_t position =
-            (uint32_t)(start + index) & (AUDIO_TRACE_PCM_RING - 1u);
-        ok = write_u16(file, (uint16_t)s_pcm[position * 2u]) &&
-             write_u16(file, (uint16_t)s_pcm[position * 2u + 1u]);
-    }
-    if (fclose(file) != 0) ok = false;
-    if (!ok) return -1;
-    if (output_start != NULL) *output_start = start;
-    if (output_count != NULL) *output_count = count;
-    return 0;
 }

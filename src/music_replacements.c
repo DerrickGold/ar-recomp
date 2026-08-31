@@ -599,7 +599,7 @@ void MusicReplacements_MixOutput(int16_t *out, int out_frames) {
 
   /* AR_MUSICLOG: once a second, prove frames are actually reaching the mix
    * (post-mix peak) and where the read cursor sits — the counterpart of
-   * AR_AUDIODBG, whose peak is measured before this hook runs. */
+       * runner APU profiling, whose peak is measured before this hook runs. */
   if (s_musiclog) {
     static int block_count;
     if ((block_count++ % 60) == 0) {

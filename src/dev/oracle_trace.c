@@ -16,7 +16,6 @@
 #include "actraiser_rtl.h"
 #include "snesrecomp/game/runtime.h"
 #include "snesrecomp/game/cpu.h"
-#include "snesrecomp/host/framedump.h"
 #include "run_dir.h"
 
 enum {
@@ -46,6 +45,7 @@ static const char *s_vram_dump_list;
 static unsigned s_last_vram_dumped_game_frame = UINT_MAX;
 static bool s_mx_trace_initialized;
 static SrRunnerHandle *s_runner;
+static bool s_enabled;
 
 static unsigned ReadGameFrame(const uint8_t *wram) {
   return (unsigned)wram[kActRaiserWram_GameFrame] |
@@ -194,15 +194,6 @@ static void WriteWramChanges(uint32_t host_frame, const uint8_t *wram) {
     fflush(s_wram_trace_file);
 }
 
-static void OracleTrace_FrameCallback(uint32_t host_frame,
-                                      const uint8_t *wram) {
-  DumpActionFrame(host_frame, wram);
-  DumpRequestedGameFrame(wram);
-  DumpRequestedVramFrames(wram);
-  WriteMxTrace(host_frame, wram);
-  WriteWramChanges(host_frame, wram);
-}
-
 static bool AnySnapshotControlEnabled(void) {
   return getenv("AR_DUMP_ACT") || getenv("AR_DUMP_AT_GF") ||
          getenv("AR_MX_OUT") || getenv("AR_VRAMDUMP_GF");
@@ -212,8 +203,7 @@ void OracleTrace_Init(SrRunnerHandle *runner) {
   const char *trace_path = getenv("AR_WRAM_TRACE");
   s_runner = runner;
   if (!trace_path || !trace_path[0]) {
-    if (AnySnapshotControlEnabled())
-      g_framedump_callback = OracleTrace_FrameCallback;
+    s_enabled = AnySnapshotControlEnabled();
     return;
   }
 
@@ -239,13 +229,26 @@ void OracleTrace_Init(SrRunnerHandle *runner) {
     fprintf(stderr, "AR_WRAM_TRACE: cannot open %s\n", trace_path);
     return;
   }
-  g_framedump_callback = OracleTrace_FrameCallback;
+  s_enabled = true;
   fprintf(stderr, "[wram-trace] -> %s  range=[0x%05x,0x%05x]\n",
           trace_path, s_trace_low_address, s_trace_high_address);
 }
 
+void OracleTrace_CompleteTick(void) {
+  if (!s_enabled) return;
+  /* RtlRunFrame has advanced this legacy diagnostic counter by the time it
+   * returns; the retired runner callback ran immediately before that edge. */
+  const uint32_t host_frame =
+      snes_frame_counter > 0 ? (uint32_t)(snes_frame_counter - 1) : 0u;
+  DumpActionFrame(host_frame, g_ram);
+  DumpRequestedGameFrame(g_ram);
+  DumpRequestedVramFrames(g_ram);
+  WriteMxTrace(host_frame, g_ram);
+  WriteWramChanges(host_frame, g_ram);
+}
+
 void OracleTrace_Shutdown(void) {
-  g_framedump_callback = NULL;
+  s_enabled = false;
   if (s_wram_trace_file) fclose(s_wram_trace_file);
   if (s_mx_trace_file) fclose(s_mx_trace_file);
   s_wram_trace_file = NULL;

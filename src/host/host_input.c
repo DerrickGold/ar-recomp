@@ -11,7 +11,6 @@
 #include "forced_input.h"
 #include "hd_replacement_host.h"
 #include "input_map.h"
-#include "input_replay.h"
 #include "present.h"
 #include "runtime_settings.h"
 #include "render_comparison.h"
@@ -43,15 +42,11 @@ void HostInput_ClearHeld(void) {
   s_input_state = 0;
 }
 
-uint32_t HostInput_ComputeGameInputs(bool *keep_running) {
+uint32_t HostInput_SampleLiveInputs(void) {
   /* Re-read rather than trusting the last event: a gamepad's held bits are
    * owned by input_map.c and change without a keyboard event ever firing. */
   s_input_state = InputMap_State();
-  const uint32_t inputs =
-      ForcedInput_Apply(s_input_state, snes_frame_counter);
-  const InputReplayFrameResult replay_result = InputReplay_Resolve(inputs);
-  if (replay_result.stop_requested && keep_running) *keep_running = false;
-  return replay_result.inputs;
+  return ForcedInput_Apply(s_input_state, snes_frame_counter);
 }
 
 bool HostInput_MenuGamepadIsActive(void) {
