@@ -27,7 +27,10 @@ func addressExpression(segment ir.SegRef) (string, string, error) {
 	}
 	switch segment.Kind {
 	case ir.Direct:
-		return "0x7E", fmt.Sprintf("(uint16)(cpu->D + 0x%04x%s)", segment.Offset, index), nil
+		// Direct-page addressing always uses bank zero. The runtime maps the
+		// low WRAM mirror and hardware registers from that bank, while indexed
+		// effective addresses can legitimately reach SRAM or ROM above $1FFF.
+		return "0x00", fmt.Sprintf("(uint16)(cpu->D + 0x%04x%s)", segment.Offset, index), nil
 	case ir.AbsoluteBank:
 		if segment.Index == nil {
 			return "cpu->DB", fmt.Sprintf("(uint16)(0x%04x)", segment.Offset), nil

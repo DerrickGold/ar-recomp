@@ -24,7 +24,9 @@ func TestCoreOperations(t *testing.T) {
 		operation ir.Op
 		contains  []string
 	}{
-		{"read", ir.Read{Seg: ir.SegRef{Kind: ir.Direct, Offset: 0x42}, Width: 1, Out: ir.Value{ID: 1}}, []string{"cpu_read8", "_v1", "0x0042"}},
+		{"direct read stays in bank zero", ir.Read{Seg: ir.SegRef{Kind: ir.Direct, Offset: 0x42}, Width: 1, Out: ir.Value{ID: 1}}, []string{"cpu_read8(cpu, 0x00", "_v1", "cpu->D + 0x0042"}},
+		{"indexed direct stays in bank zero", ir.Read{Seg: ir.SegRef{Kind: ir.Direct, Offset: 0x01, Index: &index}, Width: 1, Out: ir.Value{ID: 1}}, []string{"cpu_read8(cpu, 0x00", "cpu->D + 0x0001 + cpu->X"}},
+		{"indexed direct write stays in bank zero", ir.Write{Seg: ir.SegRef{Kind: ir.Direct, Offset: 0x03, Index: &index}, Width: 2, Src: ir.Value{ID: 2}}, []string{"cpu_write16(cpu, 0x00", "cpu->D + 0x0003 + cpu->X"}},
 		{"indexed long", ir.Write{Seg: ir.SegRef{Kind: ir.Long, Offset: 0x1234, Bank: &bank, Index: &index}, Width: 2, Src: ir.Value{ID: 2}}, []string{"cpu_write16", "0x7e1234", "cpu->X"}},
 		{"add", ir.Alu{Kind: ir.Add, LHS: ir.Value{ID: 1}, RHS: ir.Value{ID: 2}, Width: 1, Out: value(3)}, []string{"cpu->_flag_C", "_v3"}},
 		{"shift", ir.Shift{Kind: ir.ASL, Src: ir.Value{ID: 1}, Width: 1, Out: ir.Value{ID: 2}}, []string{"<< 1", "_flag_C", "_flag_Z"}},
