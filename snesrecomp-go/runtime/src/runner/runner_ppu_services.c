@@ -494,10 +494,12 @@ static SrResult resolve_obj_range(
     if (!PpuResolveObjSlots(
             snes->ppu, (uint8_t)request->first_sprite,
             (uint8_t)request->sprite_count, (uint8_t)request->priority,
-            request->parts, (int)request->part_capacity, &part_count) ||
-        !PpuGetPartBounds(request->parts, part_count, &bounds))
+            request->parts, (int)request->part_capacity, &part_count))
         return SR_RESULT_UNAVAILABLE;
     out_result->part_count = (uint32_t)part_count;
+    if (part_count == 0) return SR_RESULT_OK;
+    if (!PpuGetPartBounds(request->parts, part_count, &bounds))
+        return SR_RESULT_UNAVAILABLE;
     out_result->x0 = bounds.x0;
     out_result->y0 = bounds.y0;
     out_result->x1 = bounds.x1;

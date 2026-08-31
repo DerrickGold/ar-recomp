@@ -118,7 +118,7 @@ the specific entry you call.
 | `SR_RUNNER_CAP_PPU_STATE` | `SNES_RUNNER_API_PPU_STATE_SIZE` | `query_ppu_state` | Instantaneous call-time controls; not an already-composited frame timeline |
 | `SR_RUNNER_CAP_BORROWED_U16_SPANS` | `SNES_RUNNER_API_PPU_STATE_SIZE` | `borrow_u16_memory`, `borrow_u16_is_valid` | Host-native VRAM/CGRAM/OAM words |
 | `SR_RUNNER_CAP_PPU_FRAME_STATE` | `SNES_RUNNER_API_PPU_FRAME_STATE_SIZE` | `query_ppu_frame_state` | Copied frame-derived policy/capture state |
-| `SR_RUNNER_CAP_PPU_OBJ_RASTER` | `SNES_RUNNER_API_PPU_OBJ_RASTER_SIZE`, `...OBJ_RESOLVE_SIZE`, or `...OBJ_PARTS_SIZE` | `rasterize_ppu_obj_range`, `resolve_ppu_obj_range`, `rasterize_ppu_obj_parts` | Caller-owned output buffers; emulation-thread |
+| `SR_RUNNER_CAP_PPU_OBJ_RASTER` | `SNES_RUNNER_API_PPU_OBJ_RASTER_SIZE`, `...OBJ_RESOLVE_SIZE`, or `...OBJ_PARTS_SIZE` | `rasterize_ppu_obj_range`, `resolve_ppu_obj_range`, `rasterize_ppu_obj_parts` | Caller-owned output buffers; emulation-thread; resolve priority filters mixed ranges and returns `OK` with zero parts when no part matches |
 | `SR_RUNNER_CAP_PPU_SURFACE_VIEWS` | `SNES_RUNNER_API_PPU_SURFACE_SIZE` | `query_ppu_surfaces`, `ppu_surface_snapshot_is_valid` | Borrowed host-surface views |
 | `SR_RUNNER_CAP_EXECUTION_STATE` | `SNES_RUNNER_API_EXECUTION_STATE_SIZE` | `query_execution_state` | Requires linked-game state provider |
 | `SR_RUNNER_CAP_EVENT_OBSERVERS` | `SNES_RUNNER_API_EVENT_OBSERVER_SIZE` | `subscribe_events`, `unsubscribe_events` | Install/remove while execution is stopped; callbacks are synchronous |

@@ -855,7 +855,8 @@ bool PpuResolveObjSlots(Ppu *ppu, uint8_t first, uint8_t count,
         uint16_t attr;
         if (slot < first || slot >= first + count) continue;
         attr = ppu->oam[slot * 2u + 1u];
-        if (((attr >> 12) & 3u) != priority || count_out >= capacity) return false;
+        if (((attr >> 12) & 3u) != priority) continue;
+        if (count_out >= capacity) return false;
         if (!PpuResolveObjSlot(ppu, (uint8_t)slot, &parts[count_out])) return false;
         ++count_out;
     }

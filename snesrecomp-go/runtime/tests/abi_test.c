@@ -1008,7 +1008,7 @@ int main(void) {
     };
     SrPpuObjRasterResult obj_result = {sizeof(obj_result), 0u};
     SrPpuObjRasterResult small_obj_result = {sizeof(uint32_t), 0u};
-    SrPpuObjPart obj_parts[1];
+    SrPpuObjPart obj_parts[2];
     SrPpuObjResolveRequest obj_resolve_request = {
         .struct_size = sizeof(obj_resolve_request),
         .first_sprite = 0u,
@@ -2954,6 +2954,32 @@ int main(void) {
                         obj_parts[0].size == 8u &&
                         obj_parts[0].reserved == 0u,
                     "PPU OBJ resolved parts mismatch");
+    const uint16_t old_mixed_position = snes->ppu->oam[2];
+    const uint16_t old_mixed_attributes = snes->ppu->oam[3];
+    snes->ppu->oam[2] = 30u | (20u << 8);
+    snes->ppu->oam[3] = 1u << 12;
+    obj_resolve_request.sprite_count = 2u;
+    obj_resolve_request.part_capacity = 2u;
+    obj_resolve_result.struct_size = sizeof(obj_resolve_result);
+    failed |= check(api->resolve_ppu_obj_range(
+                        runner, &obj_resolve_request,
+                        &obj_resolve_result) == SR_RESULT_OK &&
+                        obj_resolve_result.part_count == 1u &&
+                        obj_parts[0].x == 10 && obj_parts[0].y == 20,
+                    "mixed-priority PPU OBJ range was not filtered");
+    obj_resolve_request.priority = 3u;
+    obj_resolve_result.struct_size = sizeof(obj_resolve_result);
+    failed |= check(api->resolve_ppu_obj_range(
+                        runner, &obj_resolve_request,
+                        &obj_resolve_result) == SR_RESULT_OK &&
+                        obj_resolve_result.part_count == 0u,
+                    "empty PPU OBJ priority filter did not resolve empty");
+    obj_resolve_request.sprite_count = 1u;
+    obj_resolve_request.priority = 2u;
+    obj_resolve_request.part_capacity = 1u;
+    obj_resolve_result.struct_size = sizeof(obj_resolve_result);
+    snes->ppu->oam[2] = old_mixed_position;
+    snes->ppu->oam[3] = old_mixed_attributes;
     failed |= check(api->resolve_ppu_obj_range(
                         runner, &obj_resolve_request,
                         &small_obj_resolve_result) ==
