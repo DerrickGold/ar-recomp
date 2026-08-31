@@ -420,11 +420,12 @@ void SimBackgroundVoxelProject_FlushBatch(ArRenderDevice *device,
   FlushBatchTexture(device, batch, ArRenderTexture_Invalid());
 }
 
-void SimBackgroundVoxelProject_AppendFace(
+bool SimBackgroundVoxelProject_ResolveFace(
     const SimBackgroundProjectedFace *face,
     const SimBackgroundVoxelPalette *palette,
-    SimBackgroundVoxelShading shading) {
-  Sim3DDepthVertex vertices[4];
+    SimBackgroundVoxelShading shading,
+    Sim3DDepthVertex vertices[4]) {
+  if (!face || !vertices) return false;
   const SimBackgroundVoxelMaterial material =
       (SimBackgroundVoxelMaterial)face->material;
   const bool valid_material = palette && material >= 0 &&
@@ -446,7 +447,17 @@ void SimBackgroundVoxelProject_AppendFace(
       .uv = {-1.0f, -1.0f},
     };
   }
-  Sim3DDepthPass_AppendQuad(kSim3DDepthPass_Solid, vertices);
+  return true;
+}
+
+void SimBackgroundVoxelProject_AppendFace(
+    const SimBackgroundProjectedFace *face,
+    const SimBackgroundVoxelPalette *palette,
+    SimBackgroundVoxelShading shading) {
+  Sim3DDepthVertex vertices[4];
+  if (SimBackgroundVoxelProject_ResolveFace(
+          face, palette, shading, vertices))
+    Sim3DDepthPass_AppendQuad(kSim3DDepthPass_Solid, vertices);
 }
 
 bool SimBackgroundVoxelProject_IsDegenerate(const Scene3DPoint points[4]) {

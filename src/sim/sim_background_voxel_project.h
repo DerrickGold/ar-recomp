@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "scene3d_math.h"
+#include "sim3d_depth_pass.h"
 #include "sim_background_voxel_palette.h"
 #include "sim_background_voxel_quality.h"
 #include "sim_background_voxel_renderer.h"
@@ -159,7 +160,14 @@ bool SimBackgroundVoxelProject_GroundedPoint(
 void SimBackgroundVoxelProject_FlushBatch(
     ArRenderDevice *device, SimBackgroundGeometryBatch *batch);
 
-/* Submits one material-shaded quad to the shared solid depth layer. */
+/* Resolves a projected model face into the backend-neutral vertex contract
+ * consumed by the shared depth pass. */
+bool SimBackgroundVoxelProject_ResolveFace(
+    const SimBackgroundProjectedFace *face,
+    const SimBackgroundVoxelPalette *palette,
+    SimBackgroundVoxelShading shading,
+    Sim3DDepthVertex vertices[4]);
+/* Resolves and submits one material-shaded quad to the solid depth layer. */
 void SimBackgroundVoxelProject_AppendFace(
     const SimBackgroundProjectedFace *face,
     const SimBackgroundVoxelPalette *palette,

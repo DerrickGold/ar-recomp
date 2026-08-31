@@ -13,8 +13,10 @@
  * general renderer only asks it for a face count and then for its
  * submission. */
 
-/* Projects this frame's relief into the unit's own face buffer and returns how
- * many faces it produced. Call before SubmitFaces. */
+/* Publishes the current projected relief into the unit's own face buffer,
+ * retaining static geometry while its scene/camera inputs remain unchanged.
+ * Dynamic volcano effects are still emitted for every presentation. Call
+ * before SubmitFaces. */
 int SimBackgroundMountainRender_BuildFaces(
     const SimBackgroundVoxelRenderParams *params);
 

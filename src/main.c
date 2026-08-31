@@ -567,22 +567,40 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
    *   optionally bounded by AR_SHOT_FROM / AR_SHOT_TO. Lets us compare steady
    *   state vs bug state frame by frame. */
   {
+    static bool schedule_initialized;
+    static bool shot_done;
+    static bool shot_at_enabled;
+    static bool shot_series_enabled;
+    static unsigned shot_at;
+    static unsigned shot_every;
+    static unsigned shot_from;
+    static unsigned shot_to;
+    if (!schedule_initialized) {
+      const char *value = getenv("AR_SHOT_AT_GF");
+      shot_at_enabled = value && value[0];
+      shot_at = shot_at_enabled ? (unsigned)strtoul(value, NULL, 0) : 0u;
+      value = getenv("AR_SHOT_EVERY");
+      shot_series_enabled = value && value[0];
+      shot_every = shot_series_enabled
+          ? (unsigned)strtoul(value, NULL, 0) : 0u;
+      if (shot_series_enabled && !shot_every) shot_every = 1u;
+      value = getenv("AR_SHOT_FROM");
+      shot_from = value ? (unsigned)strtoul(value, NULL, 0) : 0u;
+      value = getenv("AR_SHOT_TO");
+      shot_to = value
+          ? (unsigned)strtoul(value, NULL, 0) : UINT_MAX;
+      schedule_initialized = true;
+    }
     const unsigned gf =
         ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
-    const char *sg = getenv("AR_SHOT_AT_GF");
-    const char *se = getenv("AR_SHOT_EVERY");
     int want = 0; char fname[320]; fname[0] = 0;
-    static int shot_done = 0;
-    if (sg && sg[0] && !shot_done && gf >= (unsigned)strtoul(sg, NULL, 0)) {
-      shot_done = 1; want = 1; RunDirFile(fname, sizeof(fname), "shot.ppm");
-    } else if (se && se[0]) {
-      unsigned every = (unsigned)strtoul(se, NULL, 0); if (!every) every = 1;
-      const char *sf = getenv("AR_SHOT_FROM"); const char *st = getenv("AR_SHOT_TO");
-      unsigned lo = sf ? (unsigned)strtoul(sf, NULL, 0) : 0;
-      unsigned hi = st ? (unsigned)strtoul(st, NULL, 0) : 0xffffffffu;
-      if (gf >= lo && gf <= hi && (gf % every) == 0) {
-        want = 1; RunDirFile(fname, sizeof(fname), "shot_%u.ppm", gf);
-      }
+    if (shot_at_enabled && !shot_done && gf >= shot_at) {
+      shot_done = true; want = 1;
+      RunDirFile(fname, sizeof(fname), "shot.ppm");
+    } else if (shot_series_enabled && gf >= shot_from && gf <= shot_to &&
+               (gf % shot_every) == 0) {
+      want = 1;
+      RunDirFile(fname, sizeof(fname), "shot_%u.ppm", gf);
     }
     if (want) {
       FILE *pf = fopen(fname, "wb");

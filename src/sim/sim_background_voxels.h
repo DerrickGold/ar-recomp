@@ -57,10 +57,12 @@ void SimBackgroundVoxels_Reset(void);
  * cycling and fades can therefore refresh enhanced pixels without rescanning
  * structure records, mountains, bridges and foliage. The original canvas is
  * never modified: this owns a cutout atlas plus an inpainted ground copy used
- * only by enhanced SIM presentation. */
+ * only by enhanced SIM presentation. `canvas_source_opacity` is the paired
+ * row-major 0/1 source plane from the canvas producer; NULL is a fail-closed
+ * transparent plane for synthetic consumers that do not model source alpha. */
 void SimBackgroundVoxels_Build(uint8_t town, const uint8_t *wram,
                                const uint32_t *canvas_pixels,
-                               const uint16_t *vram,
+                               const uint8_t *canvas_source_opacity,
                                uint32_t canvas_serial,
                                uint32_t canvas_layout_serial,
                                bool wind_stops_all);
@@ -75,6 +77,11 @@ const uint32_t *SimBackgroundVoxels_GroundPixels(void);
 /* Render-thread upload cursor for the enhanced ground. Regions accumulate
  * until drained, independently of SimTownCanvas's authentic-canvas cursor. */
 bool SimBackgroundVoxels_TakeGroundDirtyRect(
+    int *x, int *y, int *width, int *height);
+/* Takes one coalesced row region whose final cutout-atlas pixels changed
+ * since the previous drain. Atlas storage ownership is internal; consumers
+ * receive only pixel-space publication regions. */
+bool SimBackgroundVoxels_TakeAtlasDirtyRect(
     int *x, int *y, int *width, int *height);
 
 typedef struct SimBackgroundVoxelBuildStats {

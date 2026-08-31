@@ -2,6 +2,7 @@
 #define SIM3D_DEPTH_PASS_H
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #include "render/render_device.h"
 
@@ -42,13 +43,22 @@ bool Sim3DDepthPass_Require(ArRenderDevice *device);
 bool Sim3DDepthPass_Begin(ArRenderDevice *device, int width, int height,
                           ArRenderFilter output_filter);
 /* Ordinary backend textures are not necessarily valid sampling resources for
- * a backend's custom depth pipeline. Upload the immutable mountain cutout
- * atlas into pass-owned storage instead. */
-bool Sim3DDepthPass_UploadMountainAtlas(ArRenderDevice *device,
-                                        const uint32_t *argb_pixels,
-                                        int width, int height, int pitch);
+ * a backend's custom depth pipeline. Upload changed regions of the mountain
+ * cutout atlas into pass-owned storage instead. Regions use full-atlas pixel
+ * coordinates and are submitted as one backend transfer transaction. The
+ * first publication must cover the complete texture. */
+bool Sim3DDepthPass_UploadMountainAtlasRegions(
+    ArRenderDevice *device, const uint32_t *argb_pixels,
+    int width, int height, int pitch,
+    const ArRenderRectI *regions, int region_count);
 bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer,
                                const Sim3DDepthVertex vertices[4]);
+/* Appends contiguous groups of four vertices while preserving the same
+ * project-private layer contract as AppendQuad. Backends reserve once for the
+ * complete batch; callers still know nothing about backend vertex storage. */
+bool Sim3DDepthPass_AppendQuads(Sim3DDepthPassLayer layer,
+                                const Sim3DDepthVertex *vertices,
+                                size_t quad_count);
 /* Submits all collected layers. shadow_texture is required only when a
  * ShadowReceiver quad was appended; pass an invalid handle for the ordinary
  * solid pass. */

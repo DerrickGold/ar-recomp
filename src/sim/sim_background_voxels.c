@@ -66,6 +66,12 @@ enum {
   kBridgeRiverNorthSouth = 0x41,
   kCellCount = kSimBackgroundTownCells * kSimBackgroundTownCells,
   kCanvasPixelCount = kSimTownCanvasPixels * kSimTownCanvasPixels,
+  /* Replacement ownership is authored on 16-pixel town cells. Matching that
+   * boundary prevents one owned cell from pulling up to three direct cells
+   * through the scalar replacement path, while each direct cell still uses a
+   * single contiguous comparison/copy decision. */
+  kRefreshChunkPixels = kSimBackgroundCellPixels,
+  kRefreshChunksPerRow = kSimTownCanvasPixels / kRefreshChunkPixels,
 };
 
 typedef enum EnhancedReplacementKind {
@@ -81,6 +87,11 @@ enum {
    * Resolve those pixels from the live character source during refresh so a
    * CHR animation remains pixel-only rather than invalidating the mask plan. */
   kAtlasAlpha_Source = 1,
+  /* Clean mountain sources are synthesized from raw terrain definitions
+   * after the composed-atlas pass. Mark their storage explicitly so the
+   * composed pass does not clear and then restamp the same pixels on every
+   * canvas revision, falsely publishing an unchanged atlas. */
+  kAtlasAlpha_CleanMountainSource = 2,
   kAtlasAlpha_Opaque = 0xFF,
 };
 
@@ -157,6 +168,8 @@ static struct {
   /* Half-open dirty span for every output pixel row. */
   int ground_dirty_x0[kSimTownCanvasPixels];
   int ground_dirty_x1[kSimTownCanvasPixels];
+  int atlas_dirty_x0[kSimTownCanvasPixels];
+  int atlas_dirty_x1[kSimTownCanvasPixels];
 } g_background;
 /* Scene rebuild scratch. Every classified source rectangle, including static
  * terrain, is marked before a replacement tile is selected, so authentic art
@@ -165,6 +178,11 @@ static uint8_t g_object_mask[kCanvasPixelCount];
 /* Precomputed alpha ownership for the cutout atlas. Mountain silhouettes are
  * semantic; authored models retain their complete authentic source blocks. */
 static uint8_t g_atlas_alpha[kCanvasPixelCount];
+/* A quiet ground-only chunk needs only a bulk equality check. Classification
+ * marks chunks that require object replacement or cutout-alpha work once per
+ * scene revision, keeping the pixel refresh's common path branch-light. */
+static uint8_t
+    g_complex_refresh_chunk[kSimTownCanvasPixels][kRefreshChunksPerRow];
 /* Reset clears publish state when leaving a town, but a later town must never
  * reuse a serial whose GPU texture may still exist. */
 static uint32_t g_next_serial;
@@ -1093,35 +1111,110 @@ static void BuildCleanMountainSourcePlan(void) {
     used[CellIndex(cell_x, cell_y)] = true;
     g_background.mountain_source_cell[tile] =
         (uint16_t)(CellIndex(cell_x, cell_y) + 1);
+    const int x0 = cell_x * kSimBackgroundCellPixels;
+    const int y0 = cell_y * kSimBackgroundCellPixels;
+    for (int y = 0; y < kSimBackgroundCellPixels; y++)
+      for (int x = 0; x < kSimBackgroundCellPixels; x++)
+        g_atlas_alpha[(size_t)(y0 + y) * kSimTownCanvasPixels +
+                      (size_t)(x0 + x)] =
+            kAtlasAlpha_CleanMountainSource;
   }
 }
 
-static void MarkGroundDirtyPixel(int x, int y) {
+static void BuildRefreshChunkPlan(void) {
+  memset(g_complex_refresh_chunk, 0, sizeof(g_complex_refresh_chunk));
+  for (int y = 0; y < kSimTownCanvasPixels; y++)
+    for (int chunk = 0; chunk < kRefreshChunksPerRow; chunk++) {
+      const int x0 = chunk * kRefreshChunkPixels;
+      const size_t at = (size_t)y * kSimTownCanvasPixels + (size_t)x0;
+      for (int x = 0; x < kRefreshChunkPixels; x++)
+        if (g_object_mask[at + (size_t)x] ||
+            g_atlas_alpha[at + (size_t)x] != kAtlasAlpha_Transparent) {
+          g_complex_refresh_chunk[y][chunk] = 1;
+          break;
+        }
+    }
+}
+
+static void MarkGroundDirtySpan(int x0, int x1, int y) {
   if (g_background.ground_dirty_x1[y] <=
       g_background.ground_dirty_x0[y]) {
-    g_background.ground_dirty_x0[y] = x;
-    g_background.ground_dirty_x1[y] = x + 1;
+    g_background.ground_dirty_x0[y] = x0;
+    g_background.ground_dirty_x1[y] = x1;
     return;
   }
-  if (x < g_background.ground_dirty_x0[y])
-    g_background.ground_dirty_x0[y] = x;
-  if (x + 1 > g_background.ground_dirty_x1[y])
-    g_background.ground_dirty_x1[y] = x + 1;
+  if (x0 < g_background.ground_dirty_x0[y])
+    g_background.ground_dirty_x0[y] = x0;
+  if (x1 > g_background.ground_dirty_x1[y])
+    g_background.ground_dirty_x1[y] = x1;
 }
 
 static void SetGroundPixel(size_t at, int x, int y, uint32_t value,
                            uint64_t *changed_pixels) {
   if (g_background.ground[at] == value) return;
   g_background.ground[at] = value;
-  MarkGroundDirtyPixel(x, y);
+  MarkGroundDirtySpan(x, x + 1, y);
   (*changed_pixels)++;
 }
 
-static void SetAtlasPixel(size_t at, uint32_t value,
+static void MarkAtlasDirtySpan(int x0, int x1, int y) {
+  if (g_background.atlas_dirty_x1[y] <=
+      g_background.atlas_dirty_x0[y]) {
+    g_background.atlas_dirty_x0[y] = x0;
+    g_background.atlas_dirty_x1[y] = x1;
+    return;
+  }
+  if (x0 < g_background.atlas_dirty_x0[y])
+    g_background.atlas_dirty_x0[y] = x0;
+  if (x1 > g_background.atlas_dirty_x1[y])
+    g_background.atlas_dirty_x1[y] = x1;
+}
+
+static void SetAtlasPixel(size_t at, int x, int y, uint32_t value,
                           uint64_t *changed_pixels) {
   if (g_background.atlas[at] == value) return;
   g_background.atlas[at] = value;
+  MarkAtlasDirtySpan(x, x + 1, y);
   (*changed_pixels)++;
+}
+
+static void RefreshDirectGroundChunk(
+    const uint32_t *pixels, int x0, int y, bool clear_stale_atlas,
+    uint64_t *ground_changed_pixels, uint64_t *atlas_changed_pixels) {
+  const size_t at = (size_t)y * kSimTownCanvasPixels + (size_t)x0;
+  uint32_t *ground = g_background.ground + at;
+  const uint32_t *source = pixels + at;
+  if (memcmp(ground, source,
+             kRefreshChunkPixels * sizeof(uint32_t)) != 0) {
+    int first = kRefreshChunkPixels;
+    int last = 0;
+    for (int x = 0; x < kRefreshChunkPixels; x++) {
+      if (ground[x] == source[x]) continue;
+      ground[x] = source[x];
+      if (x < first) first = x;
+      last = x + 1;
+      (*ground_changed_pixels)++;
+    }
+    MarkGroundDirtySpan(x0 + first, x0 + last, y);
+  }
+
+  /* Pixel-only revisions cannot make a direct chunk acquire atlas ownership.
+   * Clear it only when a new scene plan may have released storage that the
+   * prior plan used for an object or mountain. */
+  if (!clear_stale_atlas) return;
+  static const uint32_t zeroes[kRefreshChunkPixels];
+  uint32_t *atlas = g_background.atlas + at;
+  if (memcmp(atlas, zeroes, sizeof(zeroes)) == 0) return;
+  int first = kRefreshChunkPixels;
+  int last = 0;
+  for (int x = 0; x < kRefreshChunkPixels; x++) {
+    if (!atlas[x]) continue;
+    atlas[x] = 0;
+    if (x < first) first = x;
+    last = x + 1;
+    (*atlas_changed_pixels)++;
+  }
+  MarkAtlasDirtySpan(x0 + first, x0 + last, y);
 }
 
 static void RefreshCleanMountainSources(const uint8_t *wram,
@@ -1151,7 +1244,7 @@ static void RefreshCleanMountainSources(const uint8_t *wram,
             (size_t)(y0 + y) * kSimTownCanvasPixels + (size_t)(x0 + x);
         uint32_t source = metatile_pixels[
             y * kSimBackgroundCellPixels + x];
-        SetAtlasPixel(destination,
+        SetAtlasPixel(destination, x0 + x, y0 + y,
                       opaque ? source | 0xFF000000u : 0,
                       atlas_changed_pixels);
       }
@@ -1298,11 +1391,13 @@ static void BuildEnhancedReplacementPlan(
     g_background.general_ground_cell_y = (uint8_t)ground_cell_y;
   }
   BuildCleanMountainSourcePlan();
+  BuildRefreshChunkPlan();
 }
 
 static void RefreshEnhancedPixels(
-    const uint8_t *wram, const uint16_t *vram, const uint32_t *pixels,
-    const SimBackgroundVoxelScene *scene) {
+    const uint8_t *wram, const uint32_t *pixels,
+    const uint8_t *source_opaque,
+    const SimBackgroundVoxelScene *scene, bool scene_changed) {
   uint32_t bridge_river[kSimBackgroundBridgeAxis_Count]
       [kSimBackgroundCellPixels * kSimBackgroundCellPixels];
   bool have_bridge_river[kSimBackgroundBridgeAxis_Count] = {
@@ -1326,45 +1421,57 @@ static void RefreshEnhancedPixels(
    * their grass texture, Northwall keeps snow, and no nearest-pixel flood can
    * create streaks around a large forest, cathedral, or lifted mountain. */
   for (int y = 0; y < kSimTownCanvasPixels; y++)
-    for (int x = 0; x < kSimTownCanvasPixels; x++) {
-      size_t at = (size_t)y * kSimTownCanvasPixels + (size_t)x;
-      uint32_t replacement = pixels[at];
-      int source_x = x, source_y = y;
-      SimBackgroundBridgeAxis bridge_axis = ReplacementBridgeAxis(
-          (EnhancedReplacementKind)g_object_mask[at]);
-      if (g_object_mask[at] && g_background.have_general_ground) {
-        source_x = ground_x0 + x % kSimBackgroundCellPixels;
-        source_y = ground_y0 + y % kSimBackgroundCellPixels;
+    for (int chunk = 0; chunk < kRefreshChunksPerRow; chunk++) {
+      const int chunk_x0 = chunk * kRefreshChunkPixels;
+      if (!g_complex_refresh_chunk[y][chunk]) {
+        RefreshDirectGroundChunk(
+            pixels, chunk_x0, y, scene_changed,
+            &ground_changed_pixels, &atlas_changed_pixels);
+        continue;
       }
-      if (g_object_mask[at] &&
-          bridge_axis != kSimBackgroundBridgeAxis_None) {
-        int water_cell_x, water_cell_y;
-        if (!have_bridge_river[bridge_axis] && FindBridgeWaterSource(
-                scene->town, wram,
-                x / kSimBackgroundCellPixels,
-                y / kSimBackgroundCellPixels,
-                bridge_axis, &water_cell_x, &water_cell_y)) {
-          source_x = water_cell_x * kSimBackgroundCellPixels +
-              x % kSimBackgroundCellPixels;
-          source_y = water_cell_y * kSimBackgroundCellPixels +
-              y % kSimBackgroundCellPixels;
+      for (int x = chunk_x0; x < chunk_x0 + kRefreshChunkPixels; x++) {
+        size_t at = (size_t)y * kSimTownCanvasPixels + (size_t)x;
+        uint32_t replacement = pixels[at];
+        int source_x = x, source_y = y;
+        SimBackgroundBridgeAxis bridge_axis = ReplacementBridgeAxis(
+            (EnhancedReplacementKind)g_object_mask[at]);
+        if (g_object_mask[at] && g_background.have_general_ground) {
+          source_x = ground_x0 + x % kSimBackgroundCellPixels;
+          source_y = ground_y0 + y % kSimBackgroundCellPixels;
+        }
+        if (g_object_mask[at] &&
+            bridge_axis != kSimBackgroundBridgeAxis_None) {
+          int water_cell_x, water_cell_y;
+          if (!have_bridge_river[bridge_axis] && FindBridgeWaterSource(
+                  scene->town, wram,
+                  x / kSimBackgroundCellPixels,
+                  y / kSimBackgroundCellPixels,
+                  bridge_axis, &water_cell_x, &water_cell_y)) {
+            source_x = water_cell_x * kSimBackgroundCellPixels +
+                x % kSimBackgroundCellPixels;
+            source_y = water_cell_y * kSimBackgroundCellPixels +
+                y % kSimBackgroundCellPixels;
+          }
+        }
+        if (g_object_mask[at]) replacement =
+            bridge_axis != kSimBackgroundBridgeAxis_None &&
+                have_bridge_river[bridge_axis]
+            ? bridge_river[bridge_axis][
+                  (y % kSimBackgroundCellPixels) *
+                      kSimBackgroundCellPixels +
+                  x % kSimBackgroundCellPixels]
+            : pixels[(size_t)source_y * kSimTownCanvasPixels +
+                     (size_t)source_x];
+        SetGroundPixel(at, x, y, replacement, &ground_changed_pixels);
+        if (g_atlas_alpha[at] != kAtlasAlpha_CleanMountainSource) {
+          bool atlas_opaque = g_atlas_alpha[at] == kAtlasAlpha_Opaque ||
+              (g_atlas_alpha[at] == kAtlasAlpha_Source &&
+               source_opaque && source_opaque[at]);
+          SetAtlasPixel(at, x, y,
+                        atlas_opaque ? pixels[at] | 0xFF000000u : 0,
+                        &atlas_changed_pixels);
         }
       }
-      if (g_object_mask[at]) replacement =
-          bridge_axis != kSimBackgroundBridgeAxis_None &&
-              have_bridge_river[bridge_axis]
-          ? bridge_river[bridge_axis][
-                (y % kSimBackgroundCellPixels) *
-                    kSimBackgroundCellPixels +
-                x % kSimBackgroundCellPixels]
-          : pixels[(size_t)source_y * kSimTownCanvasPixels +
-                   (size_t)source_x];
-      SetGroundPixel(at, x, y, replacement, &ground_changed_pixels);
-      bool atlas_opaque = g_atlas_alpha[at] == kAtlasAlpha_Opaque ||
-          (g_atlas_alpha[at] == kAtlasAlpha_Source &&
-           SimTownCanvas_SourcePixelOpaque(wram, vram, x, y));
-      SetAtlasPixel(at, atlas_opaque ? pixels[at] | 0xFF000000u : 0,
-                    &atlas_changed_pixels);
     }
   RefreshCleanMountainSources(wram, &atlas_changed_pixels);
 
@@ -1536,16 +1643,17 @@ void SimBackgroundVoxels_Reset(void) {
   memset(&g_background, 0, sizeof(g_background));
   memset(g_object_mask, 0, sizeof(g_object_mask));
   memset(g_atlas_alpha, 0, sizeof(g_atlas_alpha));
+  memset(g_complex_refresh_chunk, 0, sizeof(g_complex_refresh_chunk));
 }
 
 void SimBackgroundVoxels_Build(uint8_t town, const uint8_t *wram,
                                const uint32_t *canvas_pixels,
-                               const uint16_t *vram,
+                               const uint8_t *canvas_source_opacity,
                                uint32_t canvas_serial,
                                uint32_t canvas_layout_serial,
                                bool wind_stops_all) {
   if (!town || town > kSimBackgroundTownCount || !wram || !canvas_pixels ||
-      !vram || !canvas_serial || !canvas_layout_serial)
+      !canvas_serial || !canvas_layout_serial)
     return;
   g_build_stats.build_calls++;
   bool scene_changed = SceneInputsChanged(
@@ -1569,7 +1677,8 @@ void SimBackgroundVoxels_Build(uint8_t town, const uint8_t *wram,
   uint32_t prior_ground_serial = g_background.ground_serial;
   uint32_t prior_atlas_serial = g_background.atlas_serial;
   if (scene_changed || pixels_changed)
-    RefreshEnhancedPixels(wram, vram, canvas_pixels, &g_background.scene);
+    RefreshEnhancedPixels(wram, canvas_pixels, canvas_source_opacity,
+                          &g_background.scene, scene_changed);
   g_background.canvas_serial = canvas_serial;
   LogStructures(town, wram, &g_background.scene);
   if (scene_changed || prior_ground_serial != g_background.ground_serial ||
@@ -1616,6 +1725,33 @@ bool SimBackgroundVoxels_TakeGroundDirtyRect(
   } while (end_row < kSimTownCanvasPixels &&
            g_background.ground_dirty_x0[end_row] == dirty_x0 &&
            g_background.ground_dirty_x1[end_row] == dirty_x1);
+
+  if (x) *x = dirty_x0;
+  if (y) *y = first_row;
+  if (width) *width = dirty_x1 - dirty_x0;
+  if (height) *height = end_row - first_row;
+  return true;
+}
+
+bool SimBackgroundVoxels_TakeAtlasDirtyRect(
+    int *x, int *y, int *width, int *height) {
+  int first_row = 0;
+  while (first_row < kSimTownCanvasPixels &&
+         g_background.atlas_dirty_x1[first_row] <=
+             g_background.atlas_dirty_x0[first_row])
+    first_row++;
+  if (first_row == kSimTownCanvasPixels) return false;
+
+  int dirty_x0 = g_background.atlas_dirty_x0[first_row];
+  int dirty_x1 = g_background.atlas_dirty_x1[first_row];
+  int end_row = first_row;
+  do {
+    g_background.atlas_dirty_x0[end_row] = kSimTownCanvasPixels;
+    g_background.atlas_dirty_x1[end_row] = 0;
+    end_row++;
+  } while (end_row < kSimTownCanvasPixels &&
+           g_background.atlas_dirty_x0[end_row] == dirty_x0 &&
+           g_background.atlas_dirty_x1[end_row] == dirty_x1);
 
   if (x) *x = dirty_x0;
   if (y) *y = first_row;

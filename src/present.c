@@ -308,6 +308,21 @@ static bool UploadChangedSim3DSurface(
       source_pitch_pixels * (int)sizeof(uint32_t), 0, 0);
 }
 
+/* The separated SIM profile consumes its published planes (or their flat
+ * separated composite), never the ordinary PPU composite texture.  Keep this
+ * decision at the presentation layer: the PPU still produces the authentic
+ * frame and capture planes it owns, while the backend only sees uploads for
+ * resources the selected compositor can actually sample.  The upload mirror
+ * remains untouched while skipped, so returning to flat presentation detects
+ * and synchronizes every intervening change on the next frame. */
+static bool PresentationConsumesMainPpuTexture(const FrameSlot *slot) {
+  if (!slot) return false;
+  return !(slot->sim.view == kSimView_Enhanced &&
+           slot->sim.separated_valid &&
+           (slot->sim.effective_features &
+            kSimFeature_SeparatedComposite) != 0);
+}
+
 static void DisableActionPlaneEffect(const char *operation) {
   if (!s_action_plane_blend_supported) return;
   s_action_plane_blend_supported = false;
@@ -817,7 +832,7 @@ void PresentUpload(const FrameSlot *slot) {
         &g_render_device, slot, pixels, pitch_bytes,
         upload.changed_plane_mask);
     DioramaPerformance_End(frame_analysis);
-  } else {
+  } else if (PresentationConsumesMainPpuTexture(slot)) {
     s_diorama_uploaded_plane_mask = 0;
     memset(s_diorama_coverage_masks, 0, sizeof(s_diorama_coverage_masks));
     ArRenderRectI upload = {
@@ -837,6 +852,9 @@ void PresentUpload(const FrameSlot *slot) {
           &s_action_upload_mirrors[kActionUploadSurface_Frame],
           pixels, upload.w, upload.h, (int)surface->pitch_bytes,
           upload.x, upload.y);
+  } else {
+    s_diorama_uploaded_plane_mask = 0;
+    memset(s_diorama_coverage_masks, 0, sizeof(s_diorama_coverage_masks));
   }
 
   const SrPpuSurfaceView *bg1_surface =

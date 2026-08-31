@@ -47,15 +47,23 @@ static SDL_Renderer *CreateProductionRenderer(SDL_Window *window) {
   return renderer;
 }
 
-static bool AppendRect(Sim3DDepthPassLayer layer,
-                       float x0, float y0, float x1, float y1,
-                       float depth, ArRenderColorF color) {
-  const Sim3DDepthVertex vertices[4] = {
+static void MakeRect(Sim3DDepthVertex vertices[4],
+                     float x0, float y0, float x1, float y1,
+                     float depth, ArRenderColorF color) {
+  const Sim3DDepthVertex resolved[4] = {
     {x0, y0, depth, color, {0.0f, 0.0f}},
     {x1, y0, depth, color, {1.0f, 0.0f}},
     {x1, y1, depth, color, {1.0f, 1.0f}},
     {x0, y1, depth, color, {0.0f, 1.0f}},
   };
+  memcpy(vertices, resolved, sizeof(resolved));
+}
+
+static bool AppendRect(Sim3DDepthPassLayer layer,
+                       float x0, float y0, float x1, float y1,
+                       float depth, ArRenderColorF color) {
+  Sim3DDepthVertex vertices[4];
+  MakeRect(vertices, x0, y0, x1, y1, depth, color);
   return Sim3DDepthPass_AppendQuad(layer, vertices);
 }
 
@@ -111,10 +119,20 @@ int main(void) {
       kSim3DDepthPass_DepthOccluder,
       0.0f, 0.0f, kTestWidth / 2.0f, (float)kTestHeight,
       0.25f, (ArRenderColorF){1.0f, 1.0f, 1.0f, 1.0f}));
-  CHECK(AppendRect(
-      kSim3DDepthPass_Solid,
-      0.0f, 0.0f, (float)kTestWidth, (float)kTestHeight,
-      0.75f, (ArRenderColorF){1.0f, 0.0f, 0.0f, 1.0f}));
+  /* Two adjacent solids pin the generic batch seam used when the portable SIM
+   * renderer replays retained projected geometry. The backend still owns its
+   * GPU vertex representation and must make the pair indistinguishable from
+   * two ordinary AppendQuad calls. */
+  Sim3DDepthVertex solid_batch[8];
+  MakeRect(&solid_batch[0],
+           0.0f, 0.0f, kTestWidth / 2.0f, (float)kTestHeight,
+           0.75f, (ArRenderColorF){1.0f, 0.0f, 0.0f, 1.0f});
+  MakeRect(&solid_batch[4],
+           kTestWidth / 2.0f, 0.0f,
+           (float)kTestWidth, (float)kTestHeight,
+           0.75f, (ArRenderColorF){1.0f, 0.0f, 0.0f, 1.0f});
+  CHECK(Sim3DDepthPass_AppendQuads(
+      kSim3DDepthPass_Solid, solid_batch, 2));
   ArRenderTexture output_handle = Sim3DDepthPass_Submit(
       &render_device, ArRenderTexture_Invalid());
   SDL_Texture *output = ArSdlRenderBackend_UnwrapTexture(output_handle);
