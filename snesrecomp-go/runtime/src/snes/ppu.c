@@ -51,6 +51,10 @@ static int floor_div8(int value) {
     return value >= 0 ? value / 8 : -((7 - value) / 8);
 }
 
+static int floor_div_size(int value, int size) {
+    return value >= 0 ? value / size : -((size - 1 - value) / size);
+}
+
 static int wrapped_delta10(uint16_t current, uint16_t anchor) {
     int delta = ((int)current - (int)anchor) & 0x3ff;
     return delta >= 0x200 ? delta - 0x400 : delta;
@@ -1052,6 +1056,116 @@ static int bpp_for_mode(int mode, int layer) {
     return layer >= 0 && layer < 4 ? depths[mode & 7][layer] : 0;
 }
 
+static bool bg_uses_offset_per_tile(const Ppu *ppu, int layer) {
+    int mode = PPU_mode(ppu);
+    return (layer < 2 && (mode == 2 || mode == 4)) ||
+           (layer == 0 && mode == 6);
+}
+
+static int bg_tilemap_address(const Ppu *ppu, int layer,
+                              int map_x, int map_y) {
+    int address = PPU_bgTilemapAdr(ppu, layer) + (map_x & 31) +
+                  ((map_y & 31) << 5);
+    if ((map_x & 32) != 0 && PPU_bgTilemapWider(ppu, layer))
+        address += 0x400;
+    if ((map_y & 32) != 0 && PPU_bgTilemapHigher(ppu, layer))
+        address += PPU_bgTilemapWider(ppu, layer) ? 0x800 : 0x400;
+    return address & 0x7fff;
+}
+
+typedef struct BgOffsetPerTileState {
+    int mode;
+    int base_h_scroll;
+    int base_v_scroll;
+    int fine;
+    int target_width;
+    int offset_width;
+    int h_map_y;
+    int v_map_y;
+    int table_h_scroll;
+    unsigned enable;
+} BgOffsetPerTileState;
+
+static bool bg_offset_per_tile_state(const Ppu *ppu, int layer,
+        BgOffsetPerTileState *state) {
+    int offset_height;
+    if (!bg_uses_offset_per_tile(ppu, layer)) return false;
+    state->mode = PPU_mode(ppu);
+    state->base_h_scroll = ppu->hScroll[layer];
+    state->base_v_scroll = ppu->vScroll[layer];
+    state->fine = state->base_h_scroll & 7;
+    state->target_width = state->mode == 6 ? 8 :
+        (PPU_bigTiles(ppu, layer) ? 16 : 8);
+    state->offset_width = state->mode == 6 ? 8 :
+        (PPU_bigTiles(ppu, 2) ? 16 : 8);
+    offset_height = PPU_bigTiles(ppu, 2) ? 16 : 8;
+    state->h_map_y = ppu->vScroll[2] / offset_height;
+    state->v_map_y =
+        (ppu->vScroll[2] + (state->mode == 4 ? 0 : 8)) /
+        offset_height;
+    state->table_h_scroll = ppu->hScroll[2] & ~7u;
+    state->enable = 0x2000u << layer;
+    return true;
+}
+
+/* Modes 2, 4, and 6 repurpose BG3's tilemap as scroll data.  Resolve the
+ * effective scroll at a target BG's eight-pixel fetch boundary so both the
+ * scalar sampler and the decoded-row renderer share the same hardware rules.
+ *
+ * Mode 6's fetch coordinates are expressed in this renderer's 256-wide
+ * logical space.  Its 16-hires-pixel tile is therefore one eight-pixel fetch,
+ * while the BG3 vertical tile size remains selected by BGMODE. */
+static inline void bg_offset_per_tile_scroll_resolved(const Ppu *ppu,
+        const BgOffsetPerTileState *state, int screen_x,
+        int *h_scroll, int *v_scroll) {
+    int shifted_x, offset_x, lookup_x, map_x;
+    uint16_t h_word, v_word;
+    *h_scroll = state->base_h_scroll;
+    *v_scroll = state->base_v_scroll;
+    shifted_x = screen_x + state->fine;
+    offset_x = shifted_x >= 0
+        ? (shifted_x & ~7)
+        : floor_div_size(shifted_x, 8) * 8;
+    if (offset_x < state->target_width) return;
+    lookup_x = offset_x - state->target_width + state->table_h_scroll;
+    map_x = lookup_x / state->offset_width;
+    h_word = ppu->vram[
+        bg_tilemap_address(ppu, 2, map_x, state->h_map_y)];
+    if (state->mode == 4) {
+        v_word = (h_word & 0x8000u) != 0u ? h_word : 0u;
+        if (v_word != 0u) h_word = 0u;
+    } else {
+        v_word = ppu->vram[
+            bg_tilemap_address(ppu, 2, map_x, state->v_map_y)];
+    }
+    if ((h_word & state->enable) != 0u)
+        *h_scroll = (h_word & 0x03f8u) | state->fine;
+    if ((v_word & state->enable) != 0u)
+        *v_scroll = v_word & 0x03ffu;
+}
+
+static inline void bg_vram_world_position_resolved(const Ppu *ppu,
+        const BgOffsetPerTileState *state,
+        int source_x, int sample_y, int *world_x, int *world_y) {
+    int h_scroll, v_scroll;
+    bg_offset_per_tile_scroll_resolved(
+        ppu, state, source_x, &h_scroll, &v_scroll);
+    *world_x = source_x + h_scroll;
+    *world_y = sample_y + v_scroll;
+}
+
+static void bg_vram_world_position(const Ppu *ppu, int layer,
+        int source_x, int sample_y, int *world_x, int *world_y) {
+    BgOffsetPerTileState state;
+    if (bg_offset_per_tile_state(ppu, layer, &state)) {
+        bg_vram_world_position_resolved(
+            ppu, &state, source_x, sample_y, world_x, world_y);
+    } else {
+        *world_x = source_x + ppu->hScroll[layer];
+        *world_y = sample_y + ppu->vScroll[layer];
+    }
+}
+
 static uint8_t layer_rank(const Ppu *ppu, int layer, int priority) {
     static const uint8_t ranks[10][5][4] = {
         {{9,12,0,0}, {8,11,0,0}, {3,6,0,0}, {2,5,0,0}, {4,7,10,13}},
@@ -1324,30 +1438,16 @@ static bool sample_mode7(Ppu *ppu, int layer, int x, int y, SrPpuPixel *out) {
 static void sample_bg_vram_tile(Ppu *ppu, int layer, int source_x,
                                 int sample_y, uint16_t *entry,
                                 int *in_x, int *in_y) {
-    int world_x = source_x + ppu->hScroll[layer];
-    int world_y = sample_y + ppu->vScroll[layer];
+    int world_x, world_y;
     int tile_size = PPU_bigTiles(ppu, layer) ? 16 : 8;
     int map_x, map_y;
-    int map_address;
-    if (world_x >= 0 && world_y >= 0) {
-        int shift = tile_size == 16 ? 4 : 3;
-        map_x = world_x >> shift;
-        map_y = world_y >> shift;
-        *in_x = world_x & (tile_size - 1);
-        *in_y = world_y & (tile_size - 1);
-    } else {
-        map_x = floor_div8(world_x) / (tile_size / 8);
-        map_y = floor_div8(world_y) / (tile_size / 8);
-        *in_x = ((world_x % tile_size) + tile_size) % tile_size;
-        *in_y = ((world_y % tile_size) + tile_size) % tile_size;
-    }
-    map_address = PPU_bgTilemapAdr(ppu, layer) + (map_x & 31) +
-                  ((map_y & 31) << 5);
-    if ((map_x & 32) != 0 && PPU_bgTilemapWider(ppu, layer))
-        map_address += 0x400;
-    if ((map_y & 32) != 0 && PPU_bgTilemapHigher(ppu, layer))
-        map_address += PPU_bgTilemapWider(ppu, layer) ? 0x800 : 0x400;
-    *entry = ppu->vram[map_address & 0x7fff];
+    bg_vram_world_position(
+        ppu, layer, source_x, sample_y, &world_x, &world_y);
+    map_x = floor_div_size(world_x, tile_size);
+    map_y = floor_div_size(world_y, tile_size);
+    *in_x = world_x - map_x * tile_size;
+    *in_y = world_y - map_y * tile_size;
+    *entry = ppu->vram[bg_tilemap_address(ppu, layer, map_x, map_y)];
 }
 
 static bool sample_bg(Ppu *ppu, int layer, int screen_x, int screen_y,
@@ -2062,7 +2162,8 @@ static uint16_t final_color(Ppu *ppu, int x, const SrPpuPixel *main,
                    (clip == 1u && !color_window);
     bool prevented = prevent == 3u || (prevent == 2u && color_window) ||
                      (prevent == 1u && !color_window);
-    bool eligible = main->layer < 5u &&
+    /* Layer 5 is the backdrop, selected by CGADSUB bit 5. */
+    bool eligible = main->layer <= 5u &&
                     (PPU_mathEnabled(ppu) & (1u << main->layer)) != 0u;
     if (main->layer == 4u && main->palette < 4u) eligible = false;
     if (clipped) color = 0u;
@@ -2554,11 +2655,12 @@ static void native_resolve_vram_bg_span(Ppu *SR_RESTRICT ppu, int layer,
     int bpp = bpp_for_mode(mode, layer);
     int tile_size = PPU_bigTiles(ppu, layer) ? 16 : 8;
     int sample_y = screen_y + 1;
-    int world_y = sample_y + ppu->vScroll[layer];
-    int map_y, in_y;
     int row = clamp_int(screen_y, 0, kPpuYPixels - 1);
     int tile_address = PPU_bgTileAdr(ppu, layer);
     int tile_words = bpp * 4;
+    BgOffsetPerTileState offset_state;
+    bool offset_per_tile =
+        bg_offset_per_tile_state(ppu, layer, &offset_state);
     uint16_t extent;
     if (bpp == 0 || left >= right) return;
     if (screen_y < 0) {
@@ -2597,19 +2699,11 @@ static void native_resolve_vram_bg_span(Ppu *SR_RESTRICT ppu, int layer,
     if (plan.main_mode == 0u && plan.sub_mode == 0u) return;
     policy = PpuResolveWidescreenLayerPolicy(
         ppu, (uint8_t)layer, screen_y);
-    if (world_y >= 0) {
-        int shift = tile_size == 16 ? 4 : 3;
-        map_y = world_y >> shift;
-        in_y = world_y & (tile_size - 1);
-    } else {
-        map_y = floor_div8(world_y) / (tile_size / 8);
-        in_y = ((world_y % tile_size) + tile_size) % tile_size;
-    }
     for (int x = left; x < right;) {
         int source_x;
         int step = 1;
         int segment_right = right;
-        int world_x, map_x, fine_x;
+        int world_x, world_y, map_x, map_y, fine_x, in_y;
         int map_address, sample_x, sample_row, tile, tile_base;
         int run;
         uint16_t entry;
@@ -2631,28 +2725,30 @@ static void native_resolve_vram_bg_span(Ppu *SR_RESTRICT ppu, int layer,
         } else if (policy.fill == kPpuWidescreenBandFill_Mirror) {
             step = -1;
         }
-        world_x = source_x + ppu->hScroll[layer];
-        if (world_x >= 0) {
-            int shift = tile_size == 16 ? 4 : 3;
-            map_x = world_x >> shift;
-            fine_x = world_x & (tile_size - 1);
+        if (offset_per_tile) {
+            bg_vram_world_position_resolved(
+                ppu, &offset_state, source_x, sample_y,
+                &world_x, &world_y);
         } else {
-            map_x = floor_div8(world_x) / (tile_size / 8);
-            fine_x = ((world_x % tile_size) + tile_size) % tile_size;
+            world_x = source_x + ppu->hScroll[layer];
+            world_y = sample_y + ppu->vScroll[layer];
         }
+        map_x = floor_div_size(world_x, tile_size);
+        map_y = floor_div_size(world_y, tile_size);
+        fine_x = world_x - map_x * tile_size;
+        in_y = world_y - map_y * tile_size;
         run = step > 0 ? 8 - (fine_x & 7) : (fine_x & 7) + 1;
+        if (offset_per_tile) {
+            int phase = ((source_x + offset_state.fine) % 8 + 8) % 8;
+            int opt_run = step > 0 ? 8 - phase : phase + 1;
+            if (run > opt_run) run = opt_run;
+        }
         if (run > segment_right - x) run = segment_right - x;
         if (step < 0 &&
             policy.motion == kPpuWidescreenMotion_NormalScroll &&
             run > source_x + 1) run = source_x + 1;
-        map_address = PPU_bgTilemapAdr(ppu, layer) + (map_x & 31) +
-                      ((map_y & 31) << 5);
-        if ((map_x & 32) != 0 && PPU_bgTilemapWider(ppu, layer))
-            map_address += 0x400;
-        if ((map_y & 32) != 0 && PPU_bgTilemapHigher(ppu, layer))
-            map_address +=
-                PPU_bgTilemapWider(ppu, layer) ? 0x800 : 0x400;
-        entry = ppu->vram[map_address & 0x7fff];
+        map_address = bg_tilemap_address(ppu, layer, map_x, map_y);
+        entry = ppu->vram[map_address];
         sample_x = fine_x;
         sample_row = in_y;
         if ((entry & 0x4000u) != 0u)
@@ -2980,12 +3076,15 @@ static void native_resolve_bg(Ppu *SR_RESTRICT ppu, int layer, int screen_y,
     unsigned pixel_mask = (1u << bpp) - 1u;
     int tile_size = PPU_bigTiles(ppu, layer) ? 16 : 8;
     int tile_shift = tile_size == 16 ? 4 : 3;
-    int world_y = screen_y + 1 + ppu->vScroll[layer];
-    int map_y = world_y >> tile_shift;
-    int in_y = world_y & (tile_size - 1);
+    int base_world_y = screen_y + 1 + ppu->vScroll[layer];
+    int base_map_y = base_world_y >> tile_shift;
+    int base_in_y = base_world_y & (tile_size - 1);
     int h_scroll = ppu->hScroll[layer];
-    int map_row_address = PPU_bgTilemapAdr(ppu, layer) +
-                          ((map_y & 31) << 5);
+    int base_map_row_address = PPU_bgTilemapAdr(ppu, layer) +
+                               ((base_map_y & 31) << 5);
+    BgOffsetPerTileState offset_state;
+    bool offset_per_tile =
+        bg_offset_per_tile_state(ppu, layer, &offset_state);
     int tile_address = PPU_bgTileAdr(ppu, layer);
     int tile_words = bpp * 4;
     int x = 0;
@@ -3002,26 +3101,48 @@ static void native_resolve_bg(Ppu *SR_RESTRICT ppu, int layer, int screen_y,
                                   main_pixels, sub_pixels, bands);
         return;
     }
-    if ((map_y & 32) != 0 && PPU_bgTilemapHigher(ppu, layer))
-        map_row_address += PPU_bgTilemapWider(ppu, layer) ? 0x800 : 0x400;
+    if ((base_map_y & 32) != 0 && PPU_bgTilemapHigher(ppu, layer))
+        base_map_row_address +=
+            PPU_bgTilemapWider(ppu, layer) ? 0x800 : 0x400;
     if ((!main_always && !main_variable) &&
         (!sub_always && !sub_variable)) return;
     if (main_variable || sub_variable)
         native_window_runs(ppu, layer, &window_runs);
     while (x < kPpuXPixels) {
-        int world_x = x + h_scroll;
-        int map_x = world_x >> tile_shift;
-        int in_x = world_x & (tile_size - 1);
-        int map_address = map_row_address + (map_x & 31);
-        int sample_y = in_y;
-        int run = 8 - (world_x & 7);
+        int world_x, world_y;
+        int map_x, map_y, in_x, in_y;
+        int map_address;
+        int sample_y;
+        int run;
         uint16_t entry;
         uint64_t decoded_pixels = 0u;
         unsigned palette_base, rank;
         int tile, tile_base;
-        if ((map_x & 32) != 0 && PPU_bgTilemapWider(ppu, layer))
-            map_address += 0x400;
-        entry = ppu->vram[map_address & 0x7fff];
+        if (offset_per_tile) {
+            bg_vram_world_position_resolved(
+                ppu, &offset_state, x, screen_y + 1,
+                &world_x, &world_y);
+            map_x = world_x >> tile_shift;
+            map_y = world_y >> tile_shift;
+            in_x = world_x & (tile_size - 1);
+            in_y = world_y & (tile_size - 1);
+            map_address = bg_tilemap_address(
+                ppu, layer, map_x, map_y);
+        } else {
+            world_x = x + h_scroll;
+            map_x = world_x >> tile_shift;
+            map_y = base_map_y;
+            in_x = world_x & (tile_size - 1);
+            in_y = base_in_y;
+            map_address = base_map_row_address + (map_x & 31);
+            if ((map_x & 32) != 0 &&
+                PPU_bgTilemapWider(ppu, layer))
+                map_address += 0x400;
+            map_address &= 0x7fff;
+        }
+        sample_y = in_y;
+        run = 8 - (world_x & 7);
+        entry = ppu->vram[map_address];
         if ((entry & 0x8000u) != 0u) sample_y = tile_size - 1 - sample_y;
         {
             int sample_x = (entry & 0x4000u) != 0u
@@ -3368,7 +3489,8 @@ static uint32_t native_final_rgb(Ppu *ppu, uint16_t main, uint16_t sub,
     unsigned main_palette = main & 0xffu;
     unsigned main_layer = native_pixel_layer(main);
     uint16_t color = ppu->cgram[main_palette];
-    bool eligible = main_layer < 5u &&
+    /* Layer 5 is the backdrop, selected by CGADSUB bit 5. */
+    bool eligible = main_layer <= 5u &&
         (math_enabled & (1u << main_layer)) != 0u;
     if (main_layer == kPpuOverlaySource_Obj && main_palette < 0xc0u)
         eligible = false;
@@ -4322,7 +4444,7 @@ static void post_capture_masks(Ppu *ppu, int x, int y,
             if (owner->layer == source) write_overlay(ppu, source, x, y, owner,
                                                       0xffffffffu);
         } else if ((capture->flags & kPpuOverlayFlag_MarkFullAddSubscreen) != 0u) {
-            if (full_sub->layer == source && full_main->layer < 5u &&
+            if (full_sub->layer == source && full_main->layer <= 5u &&
                 (PPU_mathEnabled(ppu) & (1u << full_main->layer)) != 0u)
                 write_overlay(ppu, source, x, y, full_sub, 0u);
         }
