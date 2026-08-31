@@ -140,6 +140,37 @@ static void test_basic_bg_scanout(Ppu *ppu) {
     ppu->inidisp |= 0x80u;
     ppu_runLine(ppu, 2);
     CHECK(pixels[kPpuXPixels] == 0u);
+
+    /* CGADSUB bit 5 selects the main-screen backdrop for math. A subscreen
+     * pixel must therefore remain visible where every main BG is transparent;
+     * this is how Mode-2 licensing screens compose text over black gaps. */
+    for (unsigned reference = 0u; reference < 2u; ++reference) {
+        ppu_reset(ppu);
+        memset(pixels, 0xa5, sizeof(pixels));
+        ppu->inidisp = 0x0fu;
+        ppu->bgmode = 1u;
+        ppu->screenEnabled[0] = 0u;
+        ppu->screenEnabled[1] = 2u;
+        ppu->bgXsc[1] = 0x24u;
+        ppu->cgram[0] = 0u;
+        ppu->cgram[1] = 0x001fu;
+        for (int row = 0; row < 8; ++row) {
+            ppu->vram[16 + row] = 0x00ffu;
+            ppu->vram[24 + row] = 0u;
+        }
+        for (int entry = 0; entry < 0x400; ++entry)
+            ppu->vram[0x2400 + entry] = 1u;
+        ppu->cgwsel = 0x02u;
+        ppu->cgadsub = 0x20u;
+        PpuBeginDrawing(
+            ppu, (uint8_t *)pixels,
+            kPpuXPixels * sizeof(uint32_t),
+            reference ? kPpuRenderFlags_ReferencePixelRenderer : 0u);
+        ppu_runLine(ppu, 0);
+        ppu_runLine(ppu, 1);
+        CHECK(pixels[0] == 0x00ff0000u);
+        CHECK(pixels[kPpuXPixels - 1] == 0x00ff0000u);
+    }
 }
 
 static uint32_t fixture_color_rgb(uint16_t color) {
@@ -523,6 +554,222 @@ static int fixture_bpp(int mode, int layer) {
         {8, 2, 0, 0}, {4, 2, 0, 0}, {4, 0, 0, 0}, {8, 0, 0, 0}
     };
     return depths[mode][layer];
+}
+
+static const uint16_t kOptFixtureColors[8] = {
+    0x0000u, 0x001fu, 0x03e0u, 0x7c00u,
+    0x7fffu, 0x03ffu, 0x7c1fu, 0x7fe0u
+};
+
+static unsigned opt_fixture_color(int map_x, int map_y) {
+    return 1u + (unsigned)(map_x + map_y * 3) % 7u;
+}
+
+static void fill_solid_bg_tile(Ppu *ppu, int tile, int bpp,
+                               unsigned pixel) {
+    int address = tile * bpp * 4;
+    for (int row = 0; row < 8; ++row) {
+        for (int plane = 0; plane < bpp / 2; ++plane) {
+            unsigned low_bit = (unsigned)plane * 2u;
+            ppu->vram[(address + row + plane * 8) & 0x7fff] =
+                (uint16_t)(((pixel & (1u << low_bit)) != 0u ? 0x00ffu : 0u) |
+                    ((pixel & (2u << low_bit)) != 0u ? 0xff00u : 0u));
+        }
+    }
+}
+
+static void setup_opt_fixture(Ppu *ppu, uint8_t mode, uint8_t big_tiles,
+                              int layer) {
+    static const int map_bases[2] = {0x2000, 0x2400};
+    int bpp = fixture_bpp(mode, layer);
+    bool big = (big_tiles & (0x10u << layer)) != 0u;
+    ppu_reset(ppu);
+    ppu->inidisp = 0x0fu;
+    ppu->bgmode = (uint8_t)(mode | big_tiles);
+    ppu->screenEnabled[0] = (uint8_t)(1u << layer);
+    ppu->bgXsc[0] = 0x20u;
+    ppu->bgXsc[1] = 0x24u;
+    ppu->bgXsc[2] = 0x28u;
+    for (unsigned color = 1u; color < 8u; ++color) {
+        int tile = big ? (int)color * 32 : (int)color;
+        ppu->cgram[color] = kOptFixtureColors[color];
+        fill_solid_bg_tile(ppu, tile, bpp, color);
+        if (big) {
+            fill_solid_bg_tile(ppu, tile + 1, bpp, color);
+            fill_solid_bg_tile(ppu, tile + 16, bpp, color);
+            fill_solid_bg_tile(ppu, tile + 17, bpp, color);
+        }
+    }
+    for (int map_y = 0; map_y < 32; ++map_y) {
+        for (int map_x = 0; map_x < 32; ++map_x) {
+            unsigned color = opt_fixture_color(map_x, map_y);
+            int tile = big ? (int)color * 32 : (int)color;
+            ppu->vram[map_bases[layer] + map_y * 32 + map_x] =
+                (uint16_t)tile;
+        }
+    }
+}
+
+static void render_opt_pair(Ppu *fast, Ppu *reference,
+                            uint32_t *fast_pixels,
+                            uint32_t *reference_pixels) {
+    memset(fast_pixels, 0, kPpuXPixels * sizeof(*fast_pixels));
+    memset(reference_pixels, 0,
+           kPpuXPixels * sizeof(*reference_pixels));
+    PpuBeginDrawing(fast, (uint8_t *)fast_pixels,
+                    kPpuXPixels * sizeof(*fast_pixels), 0u);
+    PpuBeginDrawing(reference, (uint8_t *)reference_pixels,
+                    kPpuXPixels * sizeof(*reference_pixels),
+                    kPpuRenderFlags_ReferencePixelRenderer);
+    ppu_runLine(fast, 0);
+    ppu_runLine(reference, 0);
+    ppu_runLine(fast, 1);
+    ppu_runLine(reference, 1);
+    CHECK(memcmp(fast_pixels, reference_pixels,
+                 kPpuXPixels * sizeof(*fast_pixels)) == 0);
+}
+
+static void set_opt_word(Ppu *fast, Ppu *reference, int map_x, int map_y,
+                         uint16_t word) {
+    int address = 0x2800 + map_y * 32 + map_x;
+    fast->vram[address] = word;
+    reference->vram[address] = word;
+}
+
+static void test_mode2_offset_per_tile(void) {
+    uint32_t fast_pixels[kPpuXPixels], reference_pixels[kPpuXPixels];
+    Ppu *fast = ppu_init();
+    Ppu *reference = ppu_init();
+    CHECK(fast != NULL && reference != NULL);
+    if (fast == NULL || reference == NULL) goto cleanup;
+
+    /* BG1-only enable bits apply both rows, preserve HOFS fine scroll, and
+     * leave the partially visible first tile column untouched. */
+    setup_opt_fixture(fast, 2u, 0u, 0);
+    setup_opt_fixture(reference, 2u, 0u, 0);
+    fast->hScroll[0] = reference->hScroll[0] = 5u;
+    set_opt_word(fast, reference, 0, 0, 0x2000u | 16u);
+    set_opt_word(fast, reference, 0, 1, 0x2000u | 7u);
+    render_opt_pair(fast, reference, fast_pixels, reference_pixels);
+    CHECK(fast_pixels[0] ==
+          fixture_color_rgb(kOptFixtureColors[opt_fixture_color(0, 0)]));
+    CHECK(fast_pixels[3] ==
+          fixture_color_rgb(kOptFixtureColors[opt_fixture_color(3, 1)]));
+
+    /* The same entries do not affect BG2 until its independent enable bit is
+     * selected. */
+    setup_opt_fixture(fast, 2u, 0u, 1);
+    setup_opt_fixture(reference, 2u, 0u, 1);
+    fast->hScroll[1] = reference->hScroll[1] = 5u;
+    set_opt_word(fast, reference, 0, 0, 0x2000u | 16u);
+    set_opt_word(fast, reference, 0, 1, 0x2000u | 7u);
+    render_opt_pair(fast, reference, fast_pixels, reference_pixels);
+    CHECK(fast_pixels[3] ==
+          fixture_color_rgb(kOptFixtureColors[opt_fixture_color(1, 0)]));
+    set_opt_word(fast, reference, 0, 0, 0x4000u | 16u);
+    set_opt_word(fast, reference, 0, 1, 0x4000u | 7u);
+    render_opt_pair(fast, reference, fast_pixels, reference_pixels);
+    CHECK(fast_pixels[3] ==
+          fixture_color_rgb(kOptFixtureColors[opt_fixture_color(3, 1)]));
+
+cleanup:
+    ppu_free(fast);
+    ppu_free(reference);
+}
+
+static void test_mode2_big_tile_offset_map(void) {
+    uint32_t fast_pixels[kPpuXPixels], reference_pixels[kPpuXPixels];
+    Ppu *fast = ppu_init();
+    Ppu *reference = ppu_init();
+    CHECK(fast != NULL && reference != NULL);
+    if (fast == NULL || reference == NULL) goto cleanup;
+    setup_opt_fixture(fast, 2u, 0x50u, 0);
+    setup_opt_fixture(reference, 2u, 0x50u, 0);
+    fast->hScroll[2] = reference->hScroll[2] = 16u;
+    fast->vScroll[2] = reference->vScroll[2] = 8u;
+    set_opt_word(fast, reference, 1, 0, 0x2000u | 32u);
+    set_opt_word(fast, reference, 1, 1, 0x2000u | 15u);
+    render_opt_pair(fast, reference, fast_pixels, reference_pixels);
+    CHECK(fast_pixels[8] ==
+          fixture_color_rgb(kOptFixtureColors[opt_fixture_color(0, 0)]));
+    CHECK(fast_pixels[16] ==
+          fixture_color_rgb(kOptFixtureColors[opt_fixture_color(3, 1)]));
+cleanup:
+    ppu_free(fast);
+    ppu_free(reference);
+}
+
+static void test_mode2_large_target_eight_pixel_opt_fetches(void) {
+    uint32_t fast_pixels[kPpuXPixels], reference_pixels[kPpuXPixels];
+    Ppu *fast = ppu_init();
+    Ppu *reference = ppu_init();
+    CHECK(fast != NULL && reference != NULL);
+    if (fast == NULL || reference == NULL) goto cleanup;
+
+    /* A 16x16 target BG still fetches a new BG3 OPT entry for each eight
+     * screen pixels after its exempt first tile. BG3 remains 8x8 here so the
+     * two halves cannot accidentally alias the same table entry. */
+    setup_opt_fixture(fast, 2u, 0x10u, 0);
+    setup_opt_fixture(reference, 2u, 0x10u, 0);
+    set_opt_word(fast, reference, 0, 0, 0x2000u | 32u);
+    set_opt_word(fast, reference, 1, 0, 0x2000u | 64u);
+    render_opt_pair(fast, reference, fast_pixels, reference_pixels);
+    CHECK(fast_pixels[8] ==
+          fixture_color_rgb(kOptFixtureColors[opt_fixture_color(0, 0)]));
+    CHECK(fast_pixels[16] ==
+          fixture_color_rgb(kOptFixtureColors[opt_fixture_color(3, 0)]));
+    CHECK(fast_pixels[24] ==
+          fixture_color_rgb(kOptFixtureColors[opt_fixture_color(5, 0)]));
+
+cleanup:
+    ppu_free(fast);
+    ppu_free(reference);
+}
+
+static void test_mode4_offset_direction(void) {
+    uint32_t fast_pixels[kPpuXPixels], reference_pixels[kPpuXPixels];
+    Ppu *fast = ppu_init();
+    Ppu *reference = ppu_init();
+    CHECK(fast != NULL && reference != NULL);
+    if (fast == NULL || reference == NULL) goto cleanup;
+    setup_opt_fixture(fast, 4u, 0u, 0);
+    setup_opt_fixture(reference, 4u, 0u, 0);
+    fast->hScroll[0] = reference->hScroll[0] = 5u;
+    set_opt_word(fast, reference, 0, 0, 0xa000u | 15u);
+    render_opt_pair(fast, reference, fast_pixels, reference_pixels);
+    CHECK(fast_pixels[3] ==
+          fixture_color_rgb(kOptFixtureColors[opt_fixture_color(1, 2)]));
+    set_opt_word(fast, reference, 0, 0, 0x2000u | 16u);
+    render_opt_pair(fast, reference, fast_pixels, reference_pixels);
+    CHECK(fast_pixels[3] ==
+          fixture_color_rgb(kOptFixtureColors[opt_fixture_color(3, 0)]));
+cleanup:
+    ppu_free(fast);
+    ppu_free(reference);
+}
+
+static void test_mode6_offset_geometry(void) {
+    uint32_t fast_pixels[kPpuXPixels], reference_pixels[kPpuXPixels];
+    Ppu *fast = ppu_init();
+    Ppu *reference = ppu_init();
+    CHECK(fast != NULL && reference != NULL);
+    if (fast == NULL || reference == NULL) goto cleanup;
+    setup_opt_fixture(fast, 6u, 0x50u, 0);
+    setup_opt_fixture(reference, 6u, 0x50u, 0);
+    fast->hScroll[2] = reference->hScroll[2] = 8u;
+    fast->vScroll[2] = reference->vScroll[2] = 8u;
+    set_opt_word(fast, reference, 1, 0, 0x2000u | 24u);
+    set_opt_word(fast, reference, 1, 1, 0x2000u | 15u);
+    render_opt_pair(fast, reference, fast_pixels, reference_pixels);
+    /* Mode 6's 16-hires-pixel column is eight pixels in the runner's logical
+     * output, even when BG1/BG3 select their 16-pixel vertical tile size. */
+    CHECK(fast_pixels[7] ==
+          fixture_color_rgb(kOptFixtureColors[opt_fixture_color(0, 0)]));
+    CHECK(fast_pixels[8] ==
+          fixture_color_rgb(kOptFixtureColors[opt_fixture_color(2, 1)]));
+cleanup:
+    ppu_free(fast);
+    ppu_free(reference);
 }
 
 static void setup_native_fast_fixture(Ppu *ppu, uint8_t mode,
@@ -1481,11 +1728,17 @@ static void test_native_vram_margin_path_parity(void) {
         1u, 0xf0u, kPpuWidescreenBandFill_Mirror,
         kPpuWidescreenMotion_NormalScroll, false, 1u);
     compare_native_vram_margin(
+        2u, 0u, kPpuWidescreenBandFill_RawWrap,
+        kPpuWidescreenMotion_FillRelative, false, 1u);
+    compare_native_vram_margin(
         3u, 0u, kPpuWidescreenBandFill_Repeat,
         kPpuWidescreenMotion_FillRelative, false, 1u);
     compare_native_vram_margin(
         4u, 0xf0u, kPpuWidescreenBandFill_Clamp,
         kPpuWidescreenMotion_FillRelative, false, 1u);
+    compare_native_vram_margin(
+        6u, 0x50u, kPpuWidescreenBandFill_Mirror,
+        kPpuWidescreenMotion_NormalScroll, false, 1u);
     compare_native_vram_margin(
         7u, 0u, kPpuWidescreenBandFill_RawWrap,
         kPpuWidescreenMotion_FillRelative, true, 1u);
@@ -1515,6 +1768,11 @@ int main(void) {
         test_virtual_provider_vertical_margin_continues_world(ppu);
         test_hud_split_does_not_widen_bg3(ppu);
         test_mode7_hardware_origin(ppu);
+        test_mode2_offset_per_tile();
+        test_mode2_big_tile_offset_map();
+        test_mode2_large_target_eight_pixel_opt_fetches();
+        test_mode4_offset_direction();
+        test_mode6_offset_geometry();
         test_native_fast_path_parity();
         test_native_capture_path_parity();
         test_unbound_capture_fails_open();

@@ -614,6 +614,187 @@ static int test_public_vertical_margin_scanout(
     return failed;
 }
 
+static void setup_public_mode2_hdma_opt_state(Snes *snes, uint8_t *wram) {
+    Ppu *ppu = snes->ppu;
+    unsigned row;
+    unsigned column;
+
+    ppu_reset(ppu);
+    dma_reset(snes->dma);
+    memset(ppu->vram, 0, sizeof(ppu->vram));
+    ppu->inidisp = 0x0fu;
+    ppu->bgmode = 2u;
+    ppu->screenEnabled[0] = 1u;
+    ppu->screenEnabled[1] = 2u;
+    ppu->bgTileAdr = 0u;
+    ppu->bgXsc[0] = 0x20u;
+    ppu->bgXsc[1] = 0x24u;
+    ppu->bgXsc[2] = 0x30u;
+    ppu->cgwsel = 0x02u;
+    ppu->cgadsub = 0x20u;
+    ppu->cgram[1] = 0x001fu; /* red */
+    ppu->cgram[2] = 0x03e0u; /* green */
+    ppu->cgram[3] = 0x7c00u; /* blue */
+    set_solid_4bpp_tile(ppu, 1u, 1u);
+    set_solid_4bpp_tile(ppu, 2u, 2u);
+    set_solid_4bpp_tile(ppu, 3u, 3u);
+    for (row = 0u; row < 32u; ++row)
+        for (column = 0u; column < 32u; ++column) {
+            ppu->vram[0x2000u + row * 32u + column] = 0u;
+            ppu->vram[0x2400u + row * 32u + column] = 3u;
+        }
+    ppu->vram[0x2000u + 1u * 32u + 3u] = 1u;
+    ppu->vram[0x2000u + 2u * 32u + 6u] = 2u;
+
+    /* BG3 row zero supplies horizontal OPT values; row one supplies vertical
+     * values. At x=11, changing BG1HOFS fine scroll moves the second scanline
+     * from table entry zero to entry one. */
+    ppu->vram[0x3000u + 0u] = 0x2000u | 16u;
+    ppu->vram[0x3000u + 1u] = 0x2000u | 32u;
+    ppu->vram[0x3000u + 32u] = 0x2000u | 8u;
+    ppu->vram[0x3000u + 33u] = 0x2000u | 16u;
+
+    /* Two direct mode-2 HDMA entries write low/high BG1HOFS bytes before the
+     * first and second visible rows, then terminate. */
+    wram[0x0200u] = 1u;
+    wram[0x0201u] = 1u;
+    wram[0x0202u] = 0u;
+    wram[0x0203u] = 1u;
+    wram[0x0204u] = 5u;
+    wram[0x0205u] = 0u;
+    wram[0x0206u] = 0u;
+    snes->dma->channel[6].aBank = 0x7eu;
+    snes->dma->channel[6].aAdr = 0x0200u;
+    snes->dma->channel[6].bAdr = 0x0du;
+    snes->dma->channel[6].mode = 2u;
+    snes->dma->channel[6].indirect = false;
+    snes_writeReg(snes, 0x420cu, 0x40u);
+    snes->vIrqEnabled = false;
+    snes->inIrq = false;
+}
+
+static int test_public_mode2_hdma_opt_scanout(
+        const SnesRunnerApi *api, SrRunnerHandle *runner, Snes *snes,
+        uint8_t *wram) {
+    enum {
+        kPitchPixels = 384,
+        kRenderedRows = SR_PPU_NATIVE_HEIGHT,
+    };
+    const uint32_t sentinel = UINT32_C(0x005aa55a);
+    SrGenerationSnapshot generation = {
+        .struct_size = sizeof(generation),
+    };
+    SrPpuFrameResetRequest reset = {
+        .struct_size = sizeof(reset),
+    };
+    SrPpuFramePolicyRequest policy = {
+        .struct_size = sizeof(policy),
+        .policy = {
+            .struct_size = sizeof(policy.policy),
+            .horizontal_mode = SR_PPU_HORIZONTAL_MARGIN_AVAILABLE,
+        },
+    };
+    SrPpuOutputBindingRequest binding = {
+        .struct_size = sizeof(binding),
+        .kind = SR_PPU_OUTPUT_MAIN,
+        .pixels = (uint8_t *)s_main_surface,
+        .pixel_byte_size = sizeof(s_main_surface),
+        .pitch_bytes = kPitchPixels * sizeof(uint32_t),
+        .height_pixels = 253u,
+    };
+    SrPpuScanoutRequest scanout = {
+        .struct_size = sizeof(scanout),
+        .irq_callback = observe_test_ppu_scanout_irq,
+    };
+    SrPpuScanoutResult result = {
+        .struct_size = sizeof(result),
+    };
+    SrPpuSurfaceSnapshot surfaces = {
+        .struct_size = sizeof(surfaces),
+    };
+    uint32_t *fast_pixels = malloc(
+        SR_PPU_NATIVE_WIDTH * kRenderedRows * sizeof(*fast_pixels));
+    int failed = 0;
+    unsigned pass;
+    unsigned row;
+    unsigned column;
+
+    failed |= check(fast_pixels != NULL,
+                    "Mode-2 HDMA/OPT parity allocation failed");
+    if (fast_pixels == NULL) return failed;
+    failed |= check(api->query_generations(runner, &generation) ==
+                        SR_RESULT_OK,
+                    "Mode-2 HDMA/OPT generation query failed");
+    reset.lifetime_generation = generation.lifetime_generation;
+    policy.lifetime_generation = generation.lifetime_generation;
+    binding.lifetime_generation = generation.lifetime_generation;
+    scanout.lifetime_generation = generation.lifetime_generation;
+
+    for (pass = 0u; pass < 2u; ++pass) {
+        setup_public_mode2_hdma_opt_state(snes, wram);
+        binding.flags = pass == 0u ? 0u :
+            SR_PPU_OUTPUT_REFERENCE_PIXEL_RENDERER;
+        failed |= check(api->reset_ppu_frame_state(
+                            runner, &reset) == SR_RESULT_OK,
+                        "Mode-2 HDMA/OPT frame reset failed");
+        failed |= check(api->bind_ppu_output_surface(
+                            runner, &binding) == SR_RESULT_OK,
+                        "Mode-2 HDMA/OPT output bind failed");
+        failed |= check(api->apply_ppu_frame_policy(
+                            runner, &policy) == SR_RESULT_OK,
+                        "Mode-2 HDMA/OPT frame policy failed");
+        surfaces.struct_size = sizeof(surfaces);
+        failed |= check(api->query_ppu_surfaces(
+                            runner, &surfaces) == SR_RESULT_OK &&
+                            surfaces.main.origin_y == 0 &&
+                            surfaces.main.width_pixels ==
+                                kPitchPixels &&
+                            surfaces.main.height_pixels == kRenderedRows,
+                        "Mode-2 HDMA/OPT surface geometry mismatch");
+        for (row = 0u; row < kPitchPixels * 253u; ++row)
+            s_main_surface[row] = sentinel;
+        result.struct_size = sizeof(result);
+        failed |= check(api->run_ppu_scanout(
+                            runner, &scanout, &result) == SR_RESULT_OK,
+                        "Mode-2 HDMA/OPT public scanout failed");
+        failed |= check(
+            s_main_surface[surfaces.main.origin_x + 3u] ==
+                    UINT32_C(0x000000ff) &&
+                s_main_surface[surfaces.main.origin_x + 11u] ==
+                    UINT32_C(0x00ff0000) &&
+                s_main_surface[kPitchPixels + surfaces.main.origin_x + 3u] ==
+                    UINT32_C(0x00ff0000) &&
+                s_main_surface[kPitchPixels + surfaces.main.origin_x + 11u] ==
+                    UINT32_C(0x0000ff00),
+            "Mode-2 HDMA/OPT exact-content mismatch");
+        for (row = 0u; row < kRenderedRows; ++row) {
+            const uint32_t *source = s_main_surface +
+                row * kPitchPixels + surfaces.main.origin_x;
+            if (pass == 0u) {
+                memcpy(fast_pixels + row * SR_PPU_NATIVE_WIDTH,
+                       source,
+                       SR_PPU_NATIVE_WIDTH * sizeof(*source));
+            } else {
+                failed |= check(memcmp(
+                                    fast_pixels +
+                                        row * SR_PPU_NATIVE_WIDTH,
+                                    source,
+                                    SR_PPU_NATIVE_WIDTH * sizeof(*source)) == 0,
+                                "Mode-2 HDMA/OPT fast/reference mismatch");
+            }
+            for (column = 0u; column < SR_PPU_NATIVE_WIDTH; ++column)
+                if (source[column] == sentinel) {
+                    failed |= check(
+                        0, "Mode-2 HDMA/OPT scanout left a sentinel pixel");
+                    row = kRenderedRows;
+                    break;
+                }
+        }
+    }
+    free(fast_pixels);
+    return failed;
+}
+
 static int check_generation(const SnesRunnerApi *api, SrRunnerHandle *runner,
                             uint64_t lifetime, uint64_t tick, uint64_t reset,
                             uint64_t load, uint64_t mutation) {
@@ -4116,6 +4297,8 @@ int main(void) {
                     "PPU authentic-camera clear failed");
 
     failed |= test_public_vertical_margin_scanout(api, runner, snes);
+    failed |= test_public_mode2_hdma_opt_scanout(
+        api, runner, snes, wram);
 
     /* The synchronous scanout service owns the generic PPU/HDMA schedule.
      * Use one-line direct and indirect tables to update INIDISP and BGMODE,
