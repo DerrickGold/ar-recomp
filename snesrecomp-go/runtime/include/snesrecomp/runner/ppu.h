@@ -305,9 +305,13 @@ typedef struct SrPpuObjRasterResult {
     ((uint32_t)(offsetof(SrPpuObjRasterResult, height) +                  \
                 sizeof(((SrPpuObjRasterResult *)0)->height)))
 
-/* Resolve an OAM range once into caller-owned fixed-width parts. The result
- * preserves the PPU's live rotation, exact-position, camera-relative, size,
- * and priority rules without exposing any of their concrete storage. The
+/* Resolve an OAM range once into caller-owned fixed-width parts. `priority`
+ * filters the selected slots; mismatching slots do not invalidate a mixed-
+ * priority range. The result preserves the PPU's live rotation, exact-position,
+ * size, and priority rules without exposing concrete storage. Camera-relative
+ * offsets belong to scanout and are not applied to these returned values.
+ * A successful filter with no matching slots returns OK with `part_count == 0`;
+ * UNAVAILABLE is reserved for an unavailable provider or PPU service. The
  * returned parts are ordinary values and may be retained by the caller. */
 typedef struct SrPpuObjResolveRequest {
     uint32_t struct_size;
