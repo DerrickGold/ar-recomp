@@ -44,6 +44,7 @@ static struct {
   /* Half-open horizontal span for each tile row; x1<=x0 means clean. */
   int dirty_x0[kSimTownCanvasTiles], dirty_x1[kSimTownCanvasTiles];
   uint32_t pixels[kSimTownCanvasPixels * kSimTownCanvasPixels];
+  uint8_t source_opaque[kSimTownCanvasPixels * kSimTownCanvasPixels];
 } g_canvas;
 
 void SimTownCanvas_Reset(void) { memset(&g_canvas, 0, sizeof(g_canvas)); }
@@ -66,6 +67,9 @@ uint32_t SimTownCanvas_LastChangeMask(void) {
   return g_canvas.last_change_mask;
 }
 const uint32_t *SimTownCanvas_Pixels(void) { return g_canvas.pixels; }
+const uint8_t *SimTownCanvas_SourceOpacity(void) {
+  return g_canvas.have_source ? g_canvas.source_opaque : NULL;
+}
 
 static void AdvanceSerial(uint32_t *serial) {
   if (++*serial == 0) *serial = 1;
@@ -126,19 +130,6 @@ static unsigned TilePixelIndex(const uint16_t *chars, uint16_t entry,
       (((high >> (shift + 8)) & 1) << 3);
 }
 
-bool SimTownCanvas_SourcePixelOpaque(const uint8 *wram,
-                                     const uint16_t *vram,
-                                     int pixel_x, int pixel_y) {
-  if (!wram || !vram || pixel_x < 0 || pixel_y < 0 ||
-      pixel_x >= kSimTownCanvasPixels || pixel_y >= kSimTownCanvasPixels)
-    return false;
-  int tile_x = pixel_x >> 3, tile_y = pixel_y >> 3;
-  uint16_t entry = TilemapEntry(
-      wram + kSimTownTilemapWram, tile_x, tile_y);
-  return TilePixelIndex(vram + kBg1CharBaseWord, entry,
-                        pixel_x & 7, pixel_y & 7) != 0;
-}
-
 static void MarkDirtyTile(int tile_x, int tile_y) {
   int x0 = tile_x * 8, x1 = x0 + 8;
   if (g_canvas.dirty_x1[tile_y] <= g_canvas.dirty_x0[tile_y]) {
@@ -158,8 +149,11 @@ static void RenderTile(int tile_x, int tile_y, uint16_t entry,
   for (int row = 0; row < 8; row++) {
     uint32_t *out = g_canvas.pixels +
         (size_t)(tile_y * 8 + row) * kSimTownCanvasPixels + tile_x * 8;
+    uint8_t *source_opaque = g_canvas.source_opaque +
+        (size_t)(tile_y * 8 + row) * kSimTownCanvasPixels + tile_x * 8;
     for (int column = 0; column < 8; column++) {
       unsigned index = TilePixelIndex(chars, entry, column, row);
+      source_opaque[column] = index != 0;
       /* Colour zero is transparent on hardware and the backdrop shows
        * through it; matching that keeps the canvas opaque everywhere so it
        * never punches a hole in the world map beneath. */

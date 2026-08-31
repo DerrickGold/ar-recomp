@@ -2,6 +2,7 @@
 
 #include <limits.h>
 #include <math.h>
+#include <string.h>
 
 #include "scene3d_math.h"
 #include "sim3d_depth_pass.h"
@@ -40,8 +41,35 @@ typedef struct ProjectedMountainReliefFace {
   uint8_t alpha[4];
 } ProjectedMountainReliefFace;
 
+/* Projection-only cache key. Pixel generations are deliberately absent:
+ * atlas colour changes do not move geometry, while the scene generation,
+ * terrain magnitude, camera, source/viewport and prepared projection do.
+ * Animated volcano effects are emitted separately and therefore do not put
+ * game_frame into this retained static-geometry key. */
+typedef struct MountainProjectionCacheKey {
+  uint32_t scene_serial;
+  uint8_t detail;
+  uint8_t lod;
+  uint8_t facing;
+  uint8_t render_scale;
+  uint8_t town;
+  uint16_t landscape_height_pct;
+  uint16_t camera_x, camera_y;
+  uint16_t town_screen_x0;
+  ArRenderRectI source;
+  ArRenderRectI viewport;
+  float matrix[16];
+  float texture_to_clip[16];
+  bool texture_to_clip_valid;
+} MountainProjectionCacheKey;
+
 static struct {
   ProjectedMountainReliefFace projected[kMaxMountainReliefFaces];
+  MountainProjectionCacheKey projection_key;
+  SimBackgroundMountainObjectList mountain_objects;
+  int projected_count;
+  bool projection_valid;
+  bool mountain_objects_valid;
   /* Exact per-column silhouette tops keep every repeated mountain copy
    * converged at its own local peak, even inside one connected range. */
   int16_t peak_y
@@ -54,6 +82,53 @@ static struct {
       [kSimBackgroundMountainCellCount + 1]
       [kSimBackgroundMountainTownCells];
 } g_mountain_state;
+
+static bool SameRenderRect(ArRenderRectI a, ArRenderRectI b) {
+  return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
+}
+
+static bool MountainProjectionCacheMatches(
+    const SimBackgroundVoxelRenderParams *params, uint32_t scene_serial) {
+  const MountainProjectionCacheKey *key = &g_mountain_state.projection_key;
+  return g_mountain_state.projection_valid &&
+      key->scene_serial == scene_serial &&
+      key->detail == params->detail && key->lod == params->lod &&
+      key->facing == params->facing &&
+      key->render_scale == params->render_scale &&
+      key->town == params->town &&
+      key->landscape_height_pct == params->landscape_height_pct &&
+      key->camera_x == params->camera_x && key->camera_y == params->camera_y &&
+      key->town_screen_x0 == params->town_screen_x0 &&
+      SameRenderRect(key->source, params->source) &&
+      SameRenderRect(key->viewport, params->viewport) &&
+      key->texture_to_clip_valid == params->texture_to_clip_valid &&
+      memcmp(key->matrix, params->matrix, sizeof(key->matrix)) == 0 &&
+      memcmp(key->texture_to_clip, params->texture_to_clip,
+             sizeof(key->texture_to_clip)) == 0;
+}
+
+static void SaveMountainProjectionCacheKey(
+    const SimBackgroundVoxelRenderParams *params, uint32_t scene_serial) {
+  MountainProjectionCacheKey *key = &g_mountain_state.projection_key;
+  *key = (MountainProjectionCacheKey){
+    .scene_serial = scene_serial,
+    .detail = params->detail,
+    .lod = params->lod,
+    .facing = params->facing,
+    .render_scale = params->render_scale,
+    .town = params->town,
+    .landscape_height_pct = params->landscape_height_pct,
+    .camera_x = params->camera_x,
+    .camera_y = params->camera_y,
+    .town_screen_x0 = params->town_screen_x0,
+    .source = params->source,
+    .viewport = params->viewport,
+    .texture_to_clip_valid = params->texture_to_clip_valid,
+  };
+  memcpy(key->matrix, params->matrix, sizeof(key->matrix));
+  memcpy(key->texture_to_clip, params->texture_to_clip,
+         sizeof(key->texture_to_clip));
+}
 
 static SimBackgroundVoxelDetail EffectiveMountainDetail(
     const SimBackgroundVoxelRenderParams *params) {
@@ -859,9 +934,6 @@ static int BuildProjectedMountainObjectFaces(
     const SimBackgroundMountainField *field,
     const SimBackgroundMountainObjectList *objects) {
   int count = 0;
-  /* Cleared every frame so a town with no volcano cannot hand the eruption
-   * arcs the last town's crater. */
-  g_crater_anchor.valid = false;
   for (uint8_t at = 0; at < objects->count; at++) {
     const SimBackgroundMountainObject *object = &objects->objects[at];
     /* Only the volcano's extra height varies between objects. */
@@ -914,11 +986,31 @@ static int BuildProjectedMountainObjectFaces(
               source_x, source_y, source_tile, right_edge, &count);
         }
       }
+  }
+  return count;
+}
+
+/* Volcano glow/smoke is intentionally outside the retained relief cache: its
+ * geometry follows game_frame, while the mountain mass does not. The crater
+ * anchor is also republished every presentation so leaving a volcano scene
+ * cannot retain the prior town's emitter. */
+static void AppendMountainObjectEffects(
+    const MountainTileContext *shared,
+    const SimBackgroundMountainObjectList *objects) {
+  g_crater_anchor.valid = false;
+  for (uint8_t at = 0; at < objects->count; at++) {
+    const SimBackgroundMountainObject *object = &objects->objects[at];
+    MountainTileContext context = *shared;
+    context.height_scale *=
+        object->flags & kSimBackgroundMountainObject_Volcano
+            ? kVolcanoHeightScale : 1.0f;
+    const float baseline =
+        (object->cell_y + object->height_cells) *
+        (float)kSimBackgroundCellPixels;
     AppendVolcanoEffects(
         context.params, context.axis, context.relief, object,
         context.origin_x, context.origin_y, baseline, context.height_scale);
   }
-  return count;
 }
 
 static void AddNorthMountainCaps(
@@ -990,12 +1082,27 @@ int SimBackgroundMountainRender_BuildFaces(
     .origin_x = origin_x,
     .origin_y = origin_y,
   };
-  SimBackgroundMountainObjectList mountain_objects;
-  if (SimBackgroundMountainObjects_Build(
-          field, &scene->mountain_caps, &mountain_objects)) {
-    return BuildProjectedMountainObjectFaces(
-        &context, field, &mountain_objects);
+  const uint32_t scene_serial = SimBackgroundVoxels_SceneSerial();
+  const bool cache_hit = MountainProjectionCacheMatches(
+      params, scene_serial);
+  if (!cache_hit) {
+    g_mountain_state.mountain_objects_valid =
+        SimBackgroundMountainObjects_Build(
+            field, &scene->mountain_caps,
+            &g_mountain_state.mountain_objects);
   }
+  if (g_mountain_state.mountain_objects_valid) {
+    AppendMountainObjectEffects(
+        &context, &g_mountain_state.mountain_objects);
+    if (cache_hit) return g_mountain_state.projected_count;
+    g_mountain_state.projected_count = BuildProjectedMountainObjectFaces(
+        &context, field, &g_mountain_state.mountain_objects);
+    SaveMountainProjectionCacheKey(params, scene_serial);
+    g_mountain_state.projection_valid = true;
+    return g_mountain_state.projected_count;
+  }
+  g_crater_anchor.valid = false;
+  if (cache_hit) return g_mountain_state.projected_count;
   /* Each connected range shares one baseline. Mapping source Y partly into
    * height and partly into ground depth turns the original pseudo-perspective
    * art into one continuous shallow facade. */
@@ -1059,7 +1166,10 @@ int SimBackgroundMountainRender_BuildFaces(
   AddNorthMountainCaps(
       &context, field, &scene->mountain_caps,
       component_bottom, component_top, &count);
-  return count;
+  g_mountain_state.projected_count = count;
+  SaveMountainProjectionCacheKey(params, scene_serial);
+  g_mountain_state.projection_valid = true;
+  return g_mountain_state.projected_count;
 }
 
 static void AppendProjectedMountainReliefFace(
@@ -1086,4 +1196,7 @@ void SimBackgroundMountainRender_SubmitFaces(int count) {
 
 void SimBackgroundMountainRender_Reset(void) {
   g_crater_anchor = (SimBackgroundCraterAnchor){0};
+  g_mountain_state.projection_valid = false;
+  g_mountain_state.mountain_objects_valid = false;
+  g_mountain_state.projected_count = 0;
 }

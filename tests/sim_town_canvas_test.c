@@ -61,6 +61,11 @@ static uint32_t CanvasAt(int x, int y) {
   return SimTownCanvas_Pixels()[(size_t)y * kSimTownCanvasPixels + x];
 }
 
+static uint8_t SourceOpacityAt(int x, int y) {
+  const uint8_t *opacity = SimTownCanvas_SourceOpacity();
+  return opacity ? opacity[(size_t)y * kSimTownCanvasPixels + x] : 0;
+}
+
 static void Render(uint8_t town) {
   SimTownCanvas_Render(town, g_wram, g_vram, g_cgram, kBrightness, kBackdrop);
 }
@@ -84,8 +89,11 @@ static void TestQuadrantAddressing(void) {
   for (int i = 0; i < 4; i++) {
     uint32_t expect = probes[i].bank == (1 << 10) ? red : blue;
     CHECK(CanvasAt(probes[i].tx * 8, probes[i].ty * 8) == expect);
+    CHECK(SourceOpacityAt(probes[i].tx * 8, probes[i].ty * 8) == 1);
     /* Everything else in the tile is colour 0, i.e. the backdrop. */
     CHECK(CanvasAt(probes[i].tx * 8 + 1, probes[i].ty * 8) == kBackdrop);
+    CHECK(SourceOpacityAt(probes[i].tx * 8 + 1,
+                          probes[i].ty * 8) == 0);
   }
   /* A tile left empty stays backdrop, never transparent: the canvas must not
    * punch a hole in the world map drawn beneath it. */
@@ -141,6 +149,8 @@ static void TestChangeDetection(void) {
   Render(1);
   CHECK(SimTownCanvas_Serial() != serial);
   CHECK(CanvasAt(1 * 8 + 1, 1 * 8) == 0xFFFF0000);
+  CHECK(SourceOpacityAt(1 * 8, 1 * 8) == 0);
+  CHECK(SourceOpacityAt(1 * 8 + 1, 1 * 8) == 1);
   CHECK(SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h));
   /* Both cells using character 1 are refreshed as separate row spans, not a
    * large bounding rectangle containing the other 4094 cells. */

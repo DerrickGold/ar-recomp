@@ -418,11 +418,13 @@ const char *Sim3DDepthPass_LastError(void) {
   return error && error[0] ? error : "required SDL_GPU depth pass unavailable";
 }
 
-bool Sim3DDepthPass_UploadMountainAtlas(ArRenderDevice *device,
-                                        const uint32_t *argb_pixels,
-                                        int width, int height, int pitch) {
+bool Sim3DDepthPass_UploadMountainAtlasRegions(
+    ArRenderDevice *device, const uint32_t *argb_pixels,
+    int width, int height, int pitch,
+    const ArRenderRectI *regions, int region_count) {
   SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
-  if (!renderer || !argb_pixels || width <= 0 || height <= 0 || pitch <= 0)
+  if (!renderer || !argb_pixels || width <= 0 || height <= 0 || pitch <= 0 ||
+      !regions || region_count <= 0)
     return false;
   if ((size_t)width > SIZE_MAX / sizeof(uint32_t)) return false;
   const size_t row_bytes = (size_t)width * sizeof(uint32_t);
@@ -433,6 +435,12 @@ bool Sim3DDepthPass_UploadMountainAtlas(ArRenderDevice *device,
       !EnsureInitialized(renderer))
     return false;
   const Uint32 upload_size = (Uint32)(row_bytes * (size_t)height);
+  for (int region = 0; region < region_count; region++) {
+    const ArRenderRectI *dirty = &regions[region];
+    if (dirty->x < 0 || dirty->y < 0 || dirty->w <= 0 || dirty->h <= 0 ||
+        dirty->x > width - dirty->w || dirty->y > height - dirty->h)
+      return false;
+  }
 
   const bool resources_match = g_depth_pass.mountain_atlas &&
       g_depth_pass.mountain_atlas_transfer &&
@@ -486,27 +494,41 @@ bool Sim3DDepthPass_UploadMountainAtlas(ArRenderDevice *device,
             SDL_GetError());
     return false;
   }
-  /* Convert numeric ARGB words to an explicit byte format. Besides avoiding
-   * backend-specific channel layouts, this keeps the upload correct on either
-   * host byte order; it runs only when the immutable town atlas changes. */
-  for (int y = 0; y < height; y++) {
-    const uint8_t *source =
-        (const uint8_t *)argb_pixels + (size_t)y * (size_t)pitch;
-    uint8_t *destination = mapped + (size_t)y * row_bytes;
-    for (int x = 0; x < width; x++) {
-      /* A caller-provided pitch is not required to preserve uint32_t
-       * alignment on every row. memcpy gives the numeric ARGB word without
-       * an unaligned typed dereference (undefined on strict-alignment ARM). */
-      uint32_t argb;
-      memcpy(&argb, source + (size_t)x * sizeof(argb), sizeof(argb));
-      destination[x * kSim3DDepthRgbaBytesPerPixel + 0] =
-          (uint8_t)(argb >> 16);
-      destination[x * kSim3DDepthRgbaBytesPerPixel + 1] =
-          (uint8_t)(argb >> 8);
-      destination[x * kSim3DDepthRgbaBytesPerPixel + 2] = (uint8_t)argb;
-      destination[x * kSim3DDepthRgbaBytesPerPixel + 3] =
-          (uint8_t)(argb >> 24);
+  /* Pack each rectangle contiguously. SDL GPU backends are free to cycle the
+   * transfer storage on map, so callers cannot depend on untouched full-atlas
+   * rows remaining addressable through a strided subwindow. Packing also
+   * keeps backend row-layout constraints behind this depth-pass seam. */
+  size_t packed_at = 0;
+  for (int region = 0; region < region_count; region++) {
+    const ArRenderRectI *dirty = &regions[region];
+    const size_t region_row_bytes =
+        (size_t)dirty->w * kSim3DDepthRgbaBytesPerPixel;
+    const size_t region_bytes = region_row_bytes * (size_t)dirty->h;
+    if (packed_at > (size_t)upload_size ||
+        region_bytes > (size_t)upload_size - packed_at) {
+      SDL_UnmapGPUTransferBuffer(
+          g_depth_pass.device, g_depth_pass.mountain_atlas_transfer);
+      return false;
     }
+    for (int y = dirty->y; y < dirty->y + dirty->h; y++) {
+      const uint8_t *source = (const uint8_t *)argb_pixels +
+          (size_t)y * (size_t)pitch +
+          (size_t)dirty->x * sizeof(uint32_t);
+      uint8_t *destination = mapped + packed_at +
+          (size_t)(y - dirty->y) * region_row_bytes;
+      for (int x = 0; x < dirty->w; x++) {
+        uint32_t argb;
+        memcpy(&argb, source + (size_t)x * sizeof(argb), sizeof(argb));
+        destination[x * kSim3DDepthRgbaBytesPerPixel + 0] =
+            (uint8_t)(argb >> 16);
+        destination[x * kSim3DDepthRgbaBytesPerPixel + 1] =
+            (uint8_t)(argb >> 8);
+        destination[x * kSim3DDepthRgbaBytesPerPixel + 2] = (uint8_t)argb;
+        destination[x * kSim3DDepthRgbaBytesPerPixel + 3] =
+            (uint8_t)(argb >> 24);
+      }
+    }
+    packed_at += region_bytes;
   }
   SDL_UnmapGPUTransferBuffer(
       g_depth_pass.device, g_depth_pass.mountain_atlas_transfer);
@@ -519,22 +541,29 @@ bool Sim3DDepthPass_UploadMountainAtlas(ArRenderDevice *device,
     if (commands) SDL_CancelGPUCommandBuffer(commands);
     return false;
   }
-  SDL_GPUTextureTransferInfo source_info = {
-    .transfer_buffer = g_depth_pass.mountain_atlas_transfer,
-    .offset = 0,
-    .pixels_per_row = (Uint32)width,
-    .rows_per_layer = (Uint32)height,
-  };
-  SDL_GPUTextureRegion destination = {
-    .texture = g_depth_pass.mountain_atlas,
-    .w = (Uint32)width,
-    .h = (Uint32)height,
-    .d = 1,
-  };
-  /* Both resources persist across animated canvas revisions. Cycling keeps a
-   * new upload from waiting on the previous frame while avoiding per-frame
-   * GPU allocation and deferred destruction. */
-  SDL_UploadToGPUTexture(copy, &source_info, &destination, true);
+  packed_at = 0;
+  for (int region = 0; region < region_count; region++) {
+    const ArRenderRectI *dirty = &regions[region];
+    SDL_GPUTextureTransferInfo source_info = {
+      .transfer_buffer = g_depth_pass.mountain_atlas_transfer,
+      .offset = (Uint32)packed_at,
+      .pixels_per_row = (Uint32)dirty->w,
+      .rows_per_layer = (Uint32)dirty->h,
+    };
+    SDL_GPUTextureRegion destination = {
+      .texture = g_depth_pass.mountain_atlas,
+      .x = (Uint32)dirty->x,
+      .y = (Uint32)dirty->y,
+      .w = (Uint32)dirty->w,
+      .h = (Uint32)dirty->h,
+      .d = 1,
+    };
+    /* Mapping with `cycle=true` selected writable storage for this frame.
+     * Every region in this transaction must reference that same generation. */
+    SDL_UploadToGPUTexture(copy, &source_info, &destination, false);
+    packed_at += (size_t)dirty->w * (size_t)dirty->h *
+        kSim3DDepthRgbaBytesPerPixel;
+  }
   SDL_EndGPUCopyPass(copy);
   if (!SDL_SubmitGPUCommandBuffer(commands)) {
     fprintf(stderr, "[sim3d-depth] mountain upload submission failed: %s\n",
@@ -585,17 +614,22 @@ bool Sim3DDepthPass_Begin(ArRenderDevice *device, int width, int height,
   return true;
 }
 
-bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer,
-                               const Sim3DDepthVertex vertices[4]) {
+bool Sim3DDepthPass_AppendQuads(Sim3DDepthPassLayer layer,
+                               const Sim3DDepthVertex *vertices,
+                               size_t quad_count) {
   if (!g_depth_pass.collecting || !vertices || layer < 0 ||
       layer >= kSim3DDepthPassLayerCount)
     return false;
+  if (!quad_count) return true;
+  if (quad_count > UINT32_MAX / kSim3DDepthVerticesPerQuad) return false;
+  const Uint32 vertex_count =
+      (Uint32)quad_count * kSim3DDepthVerticesPerQuad;
   Sim3DDepthList *list = &g_depth_pass.lists[layer];
-  if (!ReserveList(list, kSim3DDepthVerticesPerQuad)) {
+  if (!ReserveList(list, vertex_count)) {
     g_depth_pass.geometry_failed = true;
     return false;
   }
-  for (int i = 0; i < kSim3DDepthVerticesPerQuad; i++) {
+  for (Uint32 i = 0; i < vertex_count; i++) {
     const Sim3DDepthVertex *source = &vertices[i];
     Sim3DGpuVertex *destination = &list->vertices[list->count++];
     destination->position[0] =
@@ -612,6 +646,11 @@ bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer,
     destination->uv[1] = source->uv.y;
   }
   return true;
+}
+
+bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer,
+                               const Sim3DDepthVertex vertices[4]) {
+  return Sim3DDepthPass_AppendQuads(layer, vertices, 1);
 }
 
 static bool EnsureGpuBuffers(Uint32 vertex_count) {
