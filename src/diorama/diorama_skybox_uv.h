@@ -43,6 +43,19 @@ typedef struct DioramaBgValidSpanPlan {
   DioramaBgValidSpan spans[kDioramaBgMaxValidSpans];
 } DioramaBgValidSpanPlan;
 
+/* A captured skybox is an enveloping presentation surface, not a literal
+ * continuation of every source layer. When the layer has fewer live vertical
+ * margin rows than the primary playfield, crop the unavailable capture rows
+ * and stretch the remaining BG across the complete output. Texture V remains
+ * separate from capture Y because the PPU surface has fixed allocation
+ * headroom above and below the active capture. */
+typedef struct DioramaSkyboxVerticalMapping {
+  int capture_y0;
+  int capture_y1;
+  float texture_v0;
+  float texture_v1;
+} DioramaSkyboxVerticalMapping;
+
 void DioramaBgValidSpanPlan_Build(
     int ws_extra, int budget, int live_left, int live_right,
     bool pad_captured_to_budget, const ActionBgLayerPlan *layer,
@@ -55,6 +68,18 @@ void DioramaBgValidSpanPlan_Build(
  * transparent rows. */
 bool DioramaBgValidSpanPlan_DrawableRowBounds(
     const DioramaBgValidSpanPlan *plan, int *out_y0, int *out_y1);
+
+/* Resolve the drawable vertical capture interval and its blur-safe texture
+ * range. A complete capture is bit-identical to the legacy V mapping; only a
+ * genuinely clipped interval receives the radius+1 inset used by U. */
+bool DioramaSkyboxVerticalMapping_Build(
+    const DioramaBgValidSpanPlan *plan, int capture_height,
+    int texture_height, float blur_radius,
+    DioramaSkyboxVerticalMapping *out);
+
+/* Normalize one capture-row boundary into the skybox's full-output axis. */
+float DioramaSkyboxVerticalMapping_Fraction(
+    const DioramaSkyboxVerticalMapping *mapping, int capture_y);
 
 /* Map a texture-column span to the skybox quad's U range.
  *

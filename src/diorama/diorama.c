@@ -1884,19 +1884,35 @@ static PresentationOutcome DrawDioramaSkybox(
   };
   const DioramaBgValidSpan *spans = &legacy;
   unsigned span_count = 1;
-  if (!rom_source && g_settings.diorama_margin_fix &&
-      valid_spans && valid_spans->count) {
+  const bool use_valid_spans = !rom_source &&
+      g_settings.diorama_margin_fix && valid_spans && valid_spans->count;
+  if (use_valid_spans) {
     spans = valid_spans->spans;
     span_count = valid_spans->count;
     if (span_count > kDioramaBgMaxValidSpans)
       span_count = kDioramaBgMaxValidSpans;
   }
+  DioramaSkyboxVerticalMapping vertical = {
+    .capture_y0 = 0,
+    .capture_y1 = snes_height,
+    .texture_v0 = 0.0f,
+    .texture_v1 = rom_source
+        ? 1.0f : (float)snes_height / (float)source_height,
+  };
+  const bool vertical_valid = !use_valid_spans ||
+      DioramaSkyboxVerticalMapping_Build(
+          valid_spans, snes_height, source_height,
+          blur_radius, &vertical);
   for (unsigned i = 0; i < span_count; i++) {
-    /* A fixed vertical extent is represented by an empty horizontal span for
-     * those capture rows. Do not stretch a single boundary texel across it. */
-    if (spans[i].x1 <= spans[i].x0) continue;
-    int y0 = spans[i].y0 < 0 ? 0 : spans[i].y0;
-    int y1 = spans[i].y1 > snes_height ? snes_height : spans[i].y1;
+    /* The layer capture may contain unavailable top/bottom rows when another
+     * primary plane owns a taller world. A skybox is an enveloping backdrop:
+     * discard those rows, then normalize the remaining BG over the complete
+     * output rather than preserving a black band in world space. */
+    if (!vertical_valid || spans[i].x1 <= spans[i].x0) continue;
+    int y0 = spans[i].y0 < vertical.capture_y0
+        ? vertical.capture_y0 : spans[i].y0;
+    int y1 = spans[i].y1 > vertical.capture_y1
+        ? vertical.capture_y1 : spans[i].y1;
     if (y1 <= y0) continue;
     float u0, u1;
     if (rom_source) {
@@ -1913,16 +1929,16 @@ static PresentationOutcome DrawDioramaSkybox(
       u1 = uv_u1 - margin_u;
       if (u1 < u0) u1 = u0;
     }
-    const float draw_y0 =
-        (float)out_h * ((float)y0 / (float)snes_height);
-    const float draw_y1 =
-        (float)out_h * ((float)y1 / (float)snes_height);
-    const float v0 = rom_source
-        ? (float)y0 / (float)snes_height
-        : (float)y0 / (float)SR_PPU_SURFACE_MAX_HEIGHT;
-    const float v1 = rom_source
-        ? (float)y1 / (float)snes_height
-        : (float)y1 / (float)SR_PPU_SURFACE_MAX_HEIGHT;
+    const float vertical_t0 = DioramaSkyboxVerticalMapping_Fraction(
+        &vertical, y0);
+    const float vertical_t1 = DioramaSkyboxVerticalMapping_Fraction(
+        &vertical, y1);
+    const float draw_y0 = (float)out_h * vertical_t0;
+    const float draw_y1 = (float)out_h * vertical_t1;
+    const float v0 = vertical.texture_v0 +
+        (vertical.texture_v1 - vertical.texture_v0) * vertical_t0;
+    const float v1 = vertical.texture_v0 +
+        (vertical.texture_v1 - vertical.texture_v0) * vertical_t1;
     ArRenderVertex2D verts[4] = {
       { { 0.0f, draw_y0 },         tint, { u0, v0 } },
       { { (float)out_w, draw_y0 }, tint, { u1, v0 } },
