@@ -1,81 +1,79 @@
 # ActRaiser Recomp
 
-**A native port of ActRaiser (SNES, USA release) — built on your machine, from
-your own cartridge dump, into a real executable.**
+**A native port of ActRaiser (SNES, USA release) that recompiles your own
+cartridge dump into a standalone executable.**
 
-![title screen](/assets/title.png)
+![ActRaiser Recompiled title screen with the optional high-resolution logo](/assets/title-hd.png)
 
-*ActRaiser* is Quintet and Enix's 1990 SNES game that alternates between
-side-scrolling action-platformer stages and a top-down "god game" town
-simulation. This project targets the USA cartridge dump.
-
-The project statically recompiles the ROM's 65816 machine code into C and links
-it against a hand-written SDL3 runtime. It is not an emulator. The native
-runtime enables true widescreen, 3D presentations for action stages and towns,
-GPU effects, replacement art and music, re-bindable controls, save states, and
-an in-game settings menu.
+The 1990 SNES game from Quintet and Enix alternates between side-scrolling
+action stages and a top-down town simulation. This project targets the USA
+cartridge dump and converts its 65816 machine code into C, which is then linked
+with a hand-written SDL3 runtime. Running the game as native code allows
+widescreen rendering, layered 3D action stages, height-mapped towns, GPU and
+CRT effects, replacement art and music, rebindable controls, save states, and
+an in-game settings menu and manual.
 
 **[Quick start](#quick-start)** · **[Features](#features)** ·
 **[Manual](docs/manual.md)** · **[Game documentation](docs/README.md)** ·
-**[Status](#current-status)**
+**[Status](#progress-at-a-glance)** · **[Development](#development)**
+
+> **For visitors from Japan / 日本語でご覧の皆さまへ**
+>
+> Thank you for taking an interest in the project and for sharing it with
+> others. The current build is based on the USA release, which differs from the
+> Japanese version in many ways beyond the language itself. I am working to
+> bring the Japanese version's regional features and Japanese-language support
+> to a future release.
+>
+> 本プロジェクトに関心を寄せていただき、ありがとうございます。また、本作を広めてくださった皆さまにも心より御礼申し上げます。現在のビルドは北米版をベースとしており、日本版とは言語以外にも多くの違いがあります。将来のリリースに向けて、日本版独自の要素への対応と日本語化を進めています。
 
 ---
 
 ## Progress at a glance
 
+Development is active, and bugs remain.
+
 | | |
 |---|---|
-| ✅ | **Action stages** — every act across all regions, plus Death Heim, played through end to end |
-| 🟡 | **Simulation mode** — Fillmore, Bloodpool, Kasandora, Aitos, and Marahna have confirmed event coverage; Northwall remains |
-| 🟡 | **Diorama mode** — every action route except Northwall is play-tested; a future action-editor pass will further enhance room presentation |
-| 🟡 | **Platforms** — builds confirmed on macOS and Steam Deck. **Windows is untested and unverified.** |
+| ✅ | **Action stages:** All USA action routes across the six regions and Death Heim have been completed end to end. |
+| 🟡 | **Simulation mode:** Event coverage is confirmed in Fillmore, Bloodpool, Kasandora, Aitos, and Marahna; Northwall remains to be validated. |
+| 🟡 | **Diorama mode:** Every action route except Northwall has been play-tested, with further room-by-room refinement planned. |
+| 🟡 | **Platforms:** macOS arm64 and Steam Deck are confirmed. macOS x86_64, generic Linux, and Windows still need representative launch testing. |
+| 🟡 | **Localization and regional support:** Multilingual text and optional Japanese-version mechanics are under investigation and early development. |
 
-Per-stage detail: [`docs/progress.md`](docs/progress.md).
+See [`docs/progress.md`](docs/progress.md) for stage, town, subsystem, and
+platform details.
 
 ---
 
 ## AI disclosure
 
-**This project is built with substantial help from AI coding assistants**
-(Claude / Claude Code). AI contributed to the tooling, runtime, debugging
-infrastructure, and documentation under my direction and review. Assume AI
-involvement throughout.
+Multiple AI coding assistants have contributed to the tooling, runtime,
+debugging infrastructure, and documentation under my direction and review.
 
-The two halves have different provenance: the recompiled game logic is a
-mechanical translation of the original binary — never committed here, no
-authorship claimed. The runtime around it (widescreen streaming, the diorama and
-3D town renderers, the settings system) is original work.
+Game logic is mechanically translated from the original binary and is never
+committed to this repository. The widescreen renderer, 3D presentation,
+settings system, and other host-side features are original work.
 
-The goal is preservation: a portable native build that can improve the game
-without changing how it feels. Every enhancement is optional, and the authentic
-4:3 path remains available.
+### Reverse-engineering notes
 
-### Notes for a non-AI decompilation
-
-The MIT-licensed reverse-engineering notes describe the original game rather
-than this implementation. They contain no ROM-derived code and can support a
-separate decompilation effort.
-
-| | |
-|---|---|
-| [`docs/SEAMS.md`](docs/SEAMS.md) | Logic↔hardware boundaries, object systems, dispatch tables, and subsystem roles |
-| [`docs/research-symbol-map.md`](docs/research-symbol-map.md) | address → candidate name, with confidence and evidence |
-| [`docs/ram-map.md`](docs/ram-map.md) · [`docs/rom-map.md`](docs/rom-map.md) | WRAM and ROM data-region references |
-| [`docs/rendering-engine.md`](docs/rendering-engine.md) | rendering, streaming, and OAM behaviour |
-| [`docs/sim-object-catalog.md`](docs/sim-object-catalog.md) | simulation-mode object/structure records |
-| [`recomp/*.cfg`](recomp/) | 29 bank files: function addresses, entry m/x pins, dispatch tables |
+The MIT-licensed [research documents](docs/README.md) describe the original
+game rather than this implementation. They contain no ROM-derived code and may
+also be useful to an independent decompilation effort.
 
 ---
 
 ## Quick start
 
-You do not need a compiler, CMake, SDL, Go, or a repository checkout. You need
-your own ROM and about five minutes.
+The downloadable builder needs only your ROM. It includes the compiler and
+other build dependencies, so there is no need to install CMake, SDL, Go, or
+clone the repository.
 
 ### What you need
 
-Your own legally obtained USA cartridge dump. **The ROM is not included and
-never will be.** The build verifies it against:
+Provide your own legally obtained USA cartridge dump. The project does not
+include a ROM, and the builder verifies the file against these values before
+continuing:
 
 | | |
 |---|---|
@@ -88,7 +86,7 @@ never will be.** The build verifies it against:
 
 ### 1. Download the builder for your platform
 
-Grab the archive for your machine from
+Download the archive for your machine from
 **[Releases](https://github.com/DerrickGold/ar-recomp/releases)** and unpack it
 anywhere.
 
@@ -97,65 +95,75 @@ anywhere.
 | macOS (Apple Silicon / Intel) | `actraiser-recomp-macos-arm64.tar.xz` / `-macos-x86_64.tar.xz` |
 | Windows (x64 / ARM64) | `actraiser-recomp-windows-x86_64.zip` / `-windows-arm64.zip` |
 | Linux (x64 / ARM64) | `actraiser-recomp-linux-x86_64.tar.xz` / `-linux-arm64.tar.xz` |
-| Steam Deck | `actraiser-recomp-steam-deck.tar.xz` |
+| Steam Deck | `actraiser-recomp-steam-deck-x86_64.tar.xz` |
 
-Each bundle is fully self-contained: the whole buildable project plus a pinned C
-toolchain (Zig) and, where a redistributable exists, SDL3. Every archive ships a
-SHA-256 sidecar.
+Each bundle contains the buildable project, a pinned Zig C/C++ toolchain, and
+SDL3 where a redistributable is available. A SHA-256 sidecar is included for
+each archive.
 
-**macOS and Steam Deck are the tested paths.** Every bundle cross-builds from
-one machine, but the Windows and generic Linux archives have not been run
-end-to-end by this project yet — if you try one, an issue either way is useful.
+The macOS arm64 and Steam Deck bundles have been tested end to end. The macOS
+x86_64, Windows, and generic Linux archives are cross-built from the same
+project but still need representative launch testing. Reports from those
+platforms are welcome whether the build succeeds or fails.
 
 ![An unpacked bundle folder: a run-build script, a README, and a utils folder](/assets/builder-run-script.png)
 
 ### 2. Run `run-build` and pick your ROM
 
-Double-click `run-build.command` (macOS) or `run-build.bat` (Windows), or run
-`./run-build.sh` (Linux). Your browser opens a private local builder — served on
-loopback only, behind a per-process token. Choose your ROM and press **Build
-game**.
+Double-click `run-build.command` on macOS or `run-build.bat` on Windows. On
+Linux, run `./run-build.sh`. The script opens a private builder in your browser,
+served only on the loopback interface and protected by a per-process token.
+Choose your ROM and press **Build game**.
 
-The game's C is generated on your computer from your ROM and compiled there.
-**Your ROM never leaves the machine** — the page talks only to `127.0.0.1`, and
-nothing is uploaded. This takes a few minutes and happens once.
+The builder generates and compiles the game's C code locally. Its page
+communicates only with `127.0.0.1`, so the ROM never leaves your machine. The
+initial build usually takes a few minutes.
 
 ![The local builder in three stages: the ROM picker with a Build game button; the build running with a step list and a progress dock at 38%; and the finished build showing the original instruction manual with a Launch game button](/assets/builder-stages.webp)
 
-The **Manual** tab carries the original 40-page instruction booklet, so it is
-there while you wait.
+The **Manual** tab includes the original 40-page instruction booklet, which can
+be read while the build runs.
 
 ### 3. Play
 
-When the build finishes, press **Play** — and a `run-game` file appears in the
-folder. Open that any time afterwards to play instantly, with no rebuild.
-
-You can also run `run-build` again. It detects the finished game and opens as a
-launcher with **Play** and the manual.
+When the build finishes, press **Play**. The builder also creates a `run-game`
+launcher in the bundle folder; use that for later sessions without rebuilding.
+Running `run-build` again detects the existing game and opens directly as a
+launcher.
 
 ### 4. Upgrading later
 
-Extract a newer bundle straight over the folder. Your settings, saves, authored
-diorama rooms and asset entries are kept — the shipped defaults live in
-`utils/defaults/` and are merged forward on the next launch, so a value you
-changed always wins and only genuinely new settings are added.
+To upgrade, extract the newer bundle over the existing folder. Settings, saves,
+authored diorama rooms, and asset entries remain in place because shipped
+defaults are stored separately under `utils/defaults/`. On the next launch,
+new settings are added without replacing values you have changed.
 
 ### 5. Optionally, reclaim the space
 
-The build toolchain is most of the bundle's size and is only needed to build
-again. After a successful build the builder offers to remove it and keep just the
-game, telling you how much that frees.
-
-Your settings, saves and any added music or graphics are untouched — only
-build-only files go. `run-build` afterwards is launcher-only; to rebuild, download
-the bundle again.
+Most of the bundle's size comes from the toolchain. After a successful build,
+the builder can remove it and reports how much space will be recovered. The
+game, settings, saves, music, and graphics remain in place, and `run-build`
+continues to work as a launcher. Download the bundle again if you later need
+to rebuild.
 
 <details>
-<summary>Building from a source checkout instead</summary>
+<summary>Building and testing from a source checkout instead</summary>
 
-If you want to change the code, run `make dev` from a source checkout with Go,
-CMake, a C11 compiler, and SDL3 installed. `make help` lists the available
-developer, test, and packaging targets.
+For a source build, place the ROM at `ar.sfc` and run `make dev`, or pass a
+different path with `ROM=/path/to/dump.sfc`. The build requires Go 1.24+,
+CMake 3.16+, C and C++ compilers, and SDL3 3.4+. On a fresh checkout, this
+command generates the ROM-derived C, creates a user-owned `config.ini` from the
+stock template if one is not already present, and builds the optimized `play`
+preset in `build-release/`. Generated game code stays local and is not
+committed.
+
+For the usual edit-and-build loop, run `cmake --build --preset play`. Configure
+and build the Debug test tier with `cmake --preset dev` followed by
+`cmake --build --preset dev`, then run it with `ctest --preset dev`. The Go
+tooling tests use `go -C snesrecomp-go test ./...`. Additional checks are
+available through `make check-constants` for high-risk authored constants and
+`make check-cross` for a Windows x86_64 compile-and-link test using the pinned
+Zig and SDL toolchain.
 
 </details>
 
@@ -163,136 +171,167 @@ developer, test, and packaging targets.
 
 ## Features
 
-Everything below is off-by-default-safe: the game boots as an authentic 4:3
-SNES experience, and each enhancement is a toggle in the in-game settings
-overlay (`Esc` or `F1`, or L3 on a pad).
+On a fresh install, the game uses 4:3 geometry and the original music and
+artwork, with the 3D and CRT presentation modes disabled. You can configure the
+enhancements from the in-game settings overlay (`Esc`, `F1`, or L3 on a pad)
+and compare them with the authentic rendering and audio at any time.
 
 ### Widescreen
 
-True 16:9 and 16:10 presentation — not a stretch or a crop. Background layers
-are streamed into the wider viewport, sprites are activated beyond the original
-screen bounds, and the HDMA/parallax effects the game relies on keep working.
-Three modes cycle live with `F9`: authentic 4:3, widescreen raw, and widescreen
-full (which promotes the HUD to an independently scaled host overlay).
+Widescreen supports true 16:9 and 16:10 presentation by streaming background
+layers into the wider viewport and activating sprites beyond the original
+screen bounds. This preserves the game's HDMA and parallax effects instead of
+stretching or cropping the original view. Press `F9` to cycle among authentic
+4:3, widescreen raw, and widescreen full, which places the HUD in an
+independently scaled overlay.
 
-Every ordinary action level across regions 1–6 plus all of Death Heim has been
-played through and validated in widescreen.
+Every standard action stage across regions 1–6, along with all of Death Heim,
+has been played through and validated in widescreen.
 
 ![Bloodpool Act 2 in authentic 4:3 above the same scene in 16:9, with the background extending symmetrically into the extra width](/assets/widescreen-comparison.png)
 
-### Diorama 3D — the action stages as a tilted layered box
+### Diorama 3D for action stages
 
-The PPU's background layers, sprite plane, and HUD are captured separately each
-frame and rendered as real planes in 3D space, tilted toward the camera. The
-result reads like a physical diorama of the stage: BG2 sits behind BG1, sprites
-stand between them, and depth shading falls off with distance.
+The renderer captures the PPU's background layers, sprite plane, and HUD
+separately each frame, then places them on distinct planes in 3D space. BG2
+sits behind BG1, sprites stand between them, and depth shading falls off with
+distance to give the stage the appearance of a physical diorama.
 
-A per-room layer file (`diorama-layers.ini`) tunes each area's depths, and the
-camera is yours — orbit with the right stick or a right-drag, zoom with the
-triggers or the wheel. Optional **Skybox** and **Shoebox walls** modes enclose
-the box so tilting never reveals the void past a finite backdrop.
+Rooms can be tuned independently:
+
+- **Layer layout:** Each room defines its own depths and can use a stable
+  backdrop from the ROM when the live PPU view is too narrow.
+- **Camera modes:** Free Cam supports manual orbit and zoom, while Dynamic Cam
+  leans and reacts around an authored pose.
+- **Framing:** Vertical extension reveals more of the stage above and below the
+  original 224 lines. Skybox and Shoebox walls enclose finite backdrops.
 
 ![The diorama camera orbiting a Fillmore stage, layers moving against each other in depth](/assets/diorama.gif)
-
-The same paused frame, flat and tilted — nothing about the game changed, only how
-its layers are composited:
 
 ![Fillmore Act 1 side by side: flat 2D on the left, the same frame tilted into separated 3D planes on the right](/assets/diorama-comparison.png)
 
 ### 3D simulation towns
 
-Simulation mode's top-down map is projected onto an oblique 3D ground plane.
-Structures, people, and effects become billboards standing on that ground;
-flying actors are lifted to their real height; each object casts a ground
-shadow, optionally soft-blurred, with a rim light on the side facing the sun.
-The world map extends the terrain past the town's edge so the town sits in a
-landscape instead of on a floating tile. Everything stays in the tilted space —
-building placement and miracle targeting happen in 3D too, with no drop back to
-a flat view.
+Simulation mode rebuilds each town as an oblique 3D scene:
+
+- **Terrain:** A height field raises hills, plateaus, and cliff faces across
+  all six towns. A landscape slider can scale the relief back to a flat plane.
+- **Scenery:** Region-aware voxel models replace structures and foliage at
+  selectable quality levels. Stone bridges span the banks, while mountains
+  and volcanoes use camera-aligned relief.
+- **Actors and depth:** People and effects remain billboards grounded against
+  the terrain, and flying actors maintain a stable altitude above it. Ridges
+  and buildings can occlude objects behind them.
+- **Lighting and interaction:** Objects cast terrain-following shadows, with
+  optional soft blur and rim lighting. The surrounding world map continues
+  beyond the town, and building placement and miracle targeting remain in the
+  tilted view.
 
 ![Fillmore projected onto a 3D ground plane, trees and structures standing as billboards while the camera moves](/assets/3dtown.gif)
 
-![Close on Fillmore's temple: trees and buildings standing on the projected ground](/assets/sim3d-detail.png)
-
-Pull the camera back and the world-map underlay carries the terrain out to the
-coastline, with the cloud deck between you and the ground:
+![Aitos rebuilt with elevated terrain, voxel buildings, trees and mountain relief, with the authentic town view inset for comparison](/assets/sim3d-detail.png)
 
 ![Zooming out from Fillmore until the whole landmass and its surrounding clouds are visible](/assets/3dtown-zoom.gif)
 
 ### 3D world navigation
 
-Flying the Sky Palace between towns renders as a full-world 3D scene: the whole
-map on one ground plane, directional cloud shadows, and world-anchored cloud
-banks that you descend through as the Palace drops toward a town.
+While the Sky Palace travels between towns, the game renders the full world map
+on a single ground plane. Directional shadows move across the terrain, and the
+Palace descends through world-anchored cloud banks as it approaches a town.
 
 ![Approaching Bloodpool across the full world map, terrain on one ground plane with cloud banks at the edges](/assets/worldnav-3d.png)
 
-### GPU shader effects
+### GPU and CRT effects
 
-An SDL GPU renderer backend adds per-effect polish to the diorama: **rim
-lighting** on sprite silhouettes, **depth of field** blurring layers by
-distance, and **edge anti-aliasing** on the tilted layer edges. Soft shadow blur
-ships off by default with a known transparency-bleed issue. Optional frame
-interpolation now works from consecutive captured image planes, filling
-high-refresh presents without changing the game's 60 Hz logic. An explicit
-30-to-60 Hz slow-motion source mode makes generated midpoints easy to inspect
-on a 60 Hz display without pretending SDL can request fractional Vsync.
+The SDL GPU renderer adds rim lighting to diorama sprite silhouettes, depth of
+field between layers, and edge anti-aliasing to tilted planes. Particles and
+local illumination extend the original spell and environmental effects in both
+flat and 3D action-stage views. Soft shadow blur is disabled by default because
+it has a known transparency-bleed issue.
+
+An optional final CRT pass applies to every presentation mode and provides live
+controls for glass curvature, scanline depth, phosphor mask, colour fringing,
+signal bandwidth, corner falloff, and brightness. Optional frame interpolation
+uses consecutive action-layer captures for smoother output on high-refresh
+displays without changing the game's 60 Hz logic.
 
 ![A diorama scene with GPU effects off on the left and rim lighting plus depth of field on the right](/assets/shader-comparison.png)
 
-### Mode 7 and HD art replacement
+### High-resolution Mode 7
 
-Mode-7 rendering runs at the internal render scale rather than 256×224, so
-rotation and zoom stay sharp. On top of that, a tracked manifest exposes every
-known replacement hook: drop a PNG into `game-assets/hd/` and it appears next
-launch — `screen`-plane art scales to the viewport, `mode7`-plane art is
-rendered through the live Mode-7 matrix so warps and zooms apply to your
-artwork. Nothing to configure; a missing file is silently inert.
-
-The hermetic builder's **Assets** tab also previews the included HD title art,
-toggles it without manual file editing, and provides preview/replacement
-controls for all 17 ROM song images. Unidentified entries stay visible by song-
-table slot so they can be auditioned and named without encountering them in
-gameplay. Save copies the selected assets into the game's working directory and
-keeps `game-assets/manifest.ini` in sync.
+Mode 7 rendering runs at the internal render scale rather than 256×224, so its
+rotation, zoom, and per-scanline warps stay sharp instead of magnifying the
+original low-resolution sampling.
 
 ![Mode 7 rendering at increased internal resolution](/assets/mode7.png)
 
+### Asset and music replacements
+
+Art replacement uses explicit renderer hooks rather than a generic
+texture-pack system. The stock manifest currently supports the title logo in
+two contexts: the static title screen scales the replacement to the viewport,
+while the animated intro carries it through the original Mode 7 matrix so its
+rotation, zoom, and HDMA warps still apply.
+
 ![The title screen twice: the ROM's original logo on the left, a high-resolution replacement in its place on the right](/assets/hd-title-comparison.png)
 
-### Custom music
+Art and music replacements share the user-owned `game-assets/manifest.ini`,
+which is preserved across upgrades. The builder's **Assets** tab provides:
 
-The same manifest streams OGG Vorbis in place of the SPC driver's songs, with
-sample-accurate looping (`LOOPSTART`/`LOOPLENGTH` tags or manifest keys) and
-optional per-song variants gated on game state. Sound effects stay authentic —
-the SPC driver keeps running and only its per-song instrument voices are muted.
-Toggle between your track and the original sequencer live, mid-song.
+- previews of the included HD title art and all 17 entries in the ROM's song
+  table, including unnamed tracks identified by slot;
+- extracted previews of the original audio; and
+- controls for installing or restoring replacements without removing
+  hand-authored gain, loop, or gate settings from the manifest.
 
-Every song the game starts without a replacement prints exactly what to drop in,
-so one playthrough identifies all 17 tracks.
+![The local builder's Assets tab with the HD title toggle, original-audio extraction, side-by-side audio previews, and pending Save and Discard controls](/assets/assets-1.png)
+
+![The Assets tab's Split by level editor, with per-region variants and replacement previews for a shared action track](/assets/assets-2.png)
+
+Music replacement supports:
+
+- OGG Vorbis files in place of the SPC driver's songs;
+- sample-accurate looping through `LOOPSTART`/`LOOPLENGTH` tags or manifest
+  keys; and
+- variants selected by game state. When the ROM shares a song across several
+  levels, **Split by level** gives each selected region and act its own OGG
+  file. The unsplit entry remains the fallback everywhere else.
+
+The SPC driver continues to handle sound effects, while only the instrument
+voices for a replaced song are muted. You can switch between the replacement
+and the original sequencer while a song is playing.
 
 ### Live authentic comparison
 
 Bind **Compare rendering** in **Settings → Controls** to switch between the
-player's current enhanced presentation and the ROM's native 256×224 graphics
-and SPC audio without changing any saved settings. A short click toggles the
-two base views. A long hold toggles a persistent enhanced-priority view with
-the authentic game in a picture-in-picture window; releasing the hold leaves
-PiP active, and the next short click exits PiP while switching base views. The
-comparison state is shared by action and simulation modes and resets to
-enhanced on every launch. Gameplay pauses during the short transition, while
-gameplay QoL options and cheats remain active in both views. CRT remains
-independently controlled by the player's current Video settings and applies to
-every comparison view. When neither comparison binding is configured, the
-parallel authentic scanout stays dormant.
+current enhanced presentation and the ROM's native 256×224 graphics and SPC
+audio without changing any saved settings:
 
-### The settings overlay
+- **Short press:** Toggle the enhanced and authentic base views.
+- **Long press:** Open a persistent picture-in-picture view with the enhanced
+  presentation as the main image and the authentic game inset. Hold the control
+  again to close PiP without switching the base view, or press it briefly to
+  close PiP and switch views.
 
-A complete in-game menu, drawn with ActRaiser's own 2bpp dialog font and Sky
-Palace dialog frame decoded from your ROM at startup. Eight sections — Video,
-Diorama, Town 3D, Audio, Controls, Cheats, Save, System — reachable from any
-game state, keyboard or gamepad, with every row explaining itself. Changes apply
-live and are written back to `settings.ini` atomically.
+The comparison state is shared by action and simulation modes and resets to
+the enhanced view each time the game launches. Gameplay pauses during the
+brief transition, but quality-of-life options and cheats remain active in both
+views. The CRT pass follows the current Video settings and can be used with
+either view.
+
+![An enhanced widescreen action stage with CRT styling, with the authentic 4:3 renderer running in a framed picture-in-picture inset](/assets/picture-in-picture.png)
+
+### Settings overlay
+
+The in-game menu uses ActRaiser's own 2bpp dialog font and the Sky Palace dialog
+frame decoded from the ROM at startup. Its nine sections cover Video, Action
+3D, Town 3D, Audio, Controls, Cheats, Save, Manual, and System, and remain
+accessible from any game state by keyboard or gamepad.
+
+Each setting includes an explanation, and the manual is also available in-game.
+Changes take effect immediately and are written atomically to `settings.ini`.
+Enabling debug settings also reveals the unvalidated seeded randomizer and the
+action-layer and background authoring tools.
 
 ![Navigating the settings overlay: moving between sections and tabs, drawn in the game's own dialog font and frame graphics](/assets/overlay.gif)
 
@@ -300,30 +339,50 @@ live and are written back to `settings.ini` atomically.
 
 | | |
 |---|---|
-| **Re-bindable controls** | Every button, keyboard and gamepad independently, from Settings → Controls. Keyboard binds are stored by physical key position, so layout changes follow the keys. |
-| **Full gamepad support** | Standard SNES-on-Xbox mapping, multiple pads with hotplug, `gamecontrollerdb.txt` support, and seven host actions (menu, pause, turbo, save/load state, reset camera, rendering comparison) available on the pad so no keyboard is needed. |
-| **Steam Deck** | A dedicated bundle with Valve's Steam Runtime SDL3. Works with defaults through Steam Input, and via SDL's HIDAPI Steam driver from desktop mode. L3 opens the menu. |
-| **Camera on the stick** | Right stick orbits, triggers zoom, R3 recentres — with sensitivity, deadzone, and invert-Y, integrated over real elapsed time so orbit speed is frame-rate independent. |
-| **Save states** | `F5` / `F7`, or bind them to the pad. |
-| **Turbo** | `T` fast-forwards at 8 game frames per rendered frame (2–64, configurable). |
-| **Render scale & refresh** | Internal render scale 1×–8× downsampled to the window; renderer-paced VSync, display-relative Uncapped, a chosen FPS limit, or genuinely unthrottled Unlimited presentation; windowed, borderless, or exclusive fullscreen. |
-| **Independent HUD & menu scaling** | Scale the promoted widescreen HUD and the settings menu separately from the game framebuffer, 25–400% and 100–800%. |
-| **Save editor** | Inspect and stage battery-save edits in-game behind an explicit safety switch: town states, unlocks, levels, magic, items, scores. Backs up, checksums, and supports lossless INI import/export. |
-| **Bridge-free structure limit** | Optional fix: completed bridges stop consuming a town's 128-structure population cap, migrating to spare save space while keeping their tiles, crossing, and 32-person support. Retroactive on existing towns. |
-| **Cheats** | Infinite HP/MP/SP, moonjump, invincibility, all magic, ranged sword, angel health, and a generic Pro Action Replay code pinner — all toggleable live from the menu. |
-| **Audio** | Independent music, sound-effects, and master volume; optional 40-voice mode that preserves all eight song voices while queued native effects use 32 independent virtual voices; 32.04/44.1/48 kHz output through a continuous resampler; and a dialogue-blip mute. |
+| **Rebindable controls** | Bind every keyboard and gamepad control independently in Settings → Controls. Keyboard bindings use physical key positions, so they remain in place when the keyboard layout changes. |
+| **Full gamepad support** | The default mapping follows a SNES-on-Xbox layout, with support for multiple hotpluggable pads and `gamecontrollerdb.txt`. Seven host actions are also available on the pad: menu, pause, turbo, save state, load state, reset camera, and rendering comparison. |
+| **Steam Deck** | The dedicated bundle includes Valve's Steam Runtime SDL3. It works with the default Steam Input mapping, or with SDL's HIDAPI Steam driver in desktop mode. L3 opens the menu. |
+| **Camera controls** | The right stick orbits, the triggers zoom, and R3 recentres the view. Sensitivity, deadzone, and invert-Y are configurable, and orbit speed remains consistent across frame rates. |
+| **Save states** | Use `F5` and `F7`, or bind both actions to the gamepad. |
+| **Turbo** | Press `T` to fast-forward at eight game frames per rendered frame, configurable from 2 to 64. |
+| **Render scale and refresh** | Choose an internal render scale from 1× to 8×, downsampled to the window. Presentation modes include renderer-paced VSync, display-relative Uncapped, a selected FPS limit, and unthrottled Unlimited, with windowed, borderless, and exclusive fullscreen options. |
+| **Independent HUD and menu scaling** | The promoted widescreen HUD and settings menu can be scaled independently of the game framebuffer, from 25–400% and 100–800% respectively. |
+| **Save editor** | After enabling an explicit safety switch, inspect and stage changes to town states, unlocks, levels, magic, items, and scores. The editor creates backups, maintains checksums, and supports lossless INI import and export. |
+| **Bridge-free structure limit** | This optional fix stops completed bridges from consuming a town's 128-structure population cap. It applies retroactively while preserving bridge tiles, crossings, and 32-person support. |
+| **Cheats** | Infinite HP, MP, and SP; moonjump; invincibility; all magic; ranged sword; angel health; and a generic Pro Action Replay code pinner can all be toggled from the menu. |
+| **Audio** | Music, sound effects, and master volume have independent controls. An optional 40-voice mode preserves all eight song voices while queued native effects use 32 additional voices. Output is available at 32.04, 44.1, or 48 kHz, and dialogue blips can be muted separately. |
 
 ![Independently scaled simulation-mode HUD in widescreen](/assets/hud-scaling.png)
 
-Full reference for every one of these: **[docs/manual.md](docs/manual.md)**.
+See [the manual](docs/manual.md) for the complete settings and controls
+reference.
 
 ---
 
-## Current status
+## Development
 
-**Actively in development — expect bugs.** The [summary above](#progress-at-a-glance)
-is only an overview. [`docs/progress.md`](docs/progress.md) is the authoritative
-tracker for stage, town, subsystem, and platform status.
+The source tree keeps the mechanically generated game banks in `src/gen/`
+separate from the authored runtime in `src/` and the reusable recompiler and
+portable runner in `snesrecomp-go/`. Both local CMake builds and the hermetic
+release builder read their source list from `snesbuild.ini`, which keeps the two
+build paths in sync when an authored file is added.
+
+| Preset | Purpose |
+|---|---|
+| `play` | Produces an optimized local build in `build-release/` without the trace recorder, deep CPU probes, tests, or default per-run diagnostic bundles. |
+| `dev` | Produces a Debug build with the unit-test suite, on-demand trace recorder, and timestamped diagnostics under `runs/`. |
+| `trace` | Extends the Debug build with generated CPU instrumentation. |
+| `asan` | Enables AddressSanitizer and UndefinedBehaviorSanitizer for corruption testing. |
+| `control` | Produces an optimized A/B control build with flat town terrain. |
+
+Regression testing combines CTest, Go tests, deterministic recorded input,
+semantic end-state digests, and manifest-defined replay benchmarks. Before
+reporting performance, the benchmark runner verifies artifact equivalence and
+isolates the saves and settings for each run. It can also compare candidate and
+reference binaries in adjacent A/B pairs. For more information, see the
+source-build instructions under [Quick start](#quick-start), the benchmark
+manifest at [`tools/runner-bench.json`](tools/runner-bench.json), and the
+[`snesrecomp-go` documentation](snesrecomp-go/README.md).
 
 ## Documentation
 
@@ -334,16 +393,22 @@ tracker for stage, town, subsystem, and platform status.
 | [`docs/SEAMS.md`](docs/SEAMS.md) | Logic↔hardware boundary and architecture map |
 | [`docs/progress.md`](docs/progress.md) | Stage, town, and subsystem status |
 | [`docs/rendering-engine.md`](docs/rendering-engine.md) | Rendering, streaming, and OAM architecture |
+| [`docs/sim-town-terrain.md`](docs/sim-town-terrain.md) | Audited town elevation, grounding, depth, and performance contracts |
+| [`docs/snes-native-audio-channels.md`](docs/snes-native-audio-channels.md) | Original SPC channel ownership and effect sequencing |
+| [`docs/regional-variants.md`](docs/regional-variants.md) | Hash-provenanced Japanese/USA ROM differences and localization seams |
 
 ## License
 
-This repo's original source (runtime, tooling, `recomp/*.cfg`, docs) is
-[MIT-licensed](LICENSE). That license explicitly does **not** cover the
-ActRaiser ROM or anything derived from it; see the LICENSE file's Scope
-section for the exact boundary.
+The repository's original source, including the runtime, tooling,
+`recomp/*.cfg`, and documentation, is [MIT-licensed](LICENSE). This license does
+not cover the ActRaiser ROM or material derived from it; the Scope section of
+the license defines the boundary.
 
-The original Go implementation, tooling, tests, and documentation under
-`snesrecomp-go/`, including its independently authored portable C runner, have
-their own [MIT license](snesrecomp-go/LICENSE). Historical project lineage and
-third-party acknowledgements are recorded in
-[`snesrecomp-go/ATTRIBUTION.md`](snesrecomp-go/ATTRIBUTION.md).
+The Go implementation, tooling, tests, documentation, and project-authored
+portable C runner under `snesrecomp-go/` use a separate
+[MIT license](snesrecomp-go/LICENSE). Its slot-accurate S-DSP contains
+adaptations from the MIT-licensed Snaggletooth project. The exact scope,
+historical lineage, and retained third-party notices are documented in
+[`snesrecomp-go/LICENSE_SCOPE.md`](snesrecomp-go/LICENSE_SCOPE.md),
+[`snesrecomp-go/ATTRIBUTION.md`](snesrecomp-go/ATTRIBUTION.md), and
+[`snesrecomp-go/THIRD_PARTY_NOTICES.md`](snesrecomp-go/THIRD_PARTY_NOTICES.md).
