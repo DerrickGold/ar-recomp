@@ -56,13 +56,25 @@ static void ValidSpanForPolicy(int ws_extra, int budget,
 
 static bool RowWithinVerticalExtent(const ActionBgLayerPlan *layer,
                                     int authentic_y) {
-  if (!layer || layer->vertical_extent.mode != kActionBgExtent_Fixed)
-    return true;
-  if (authentic_y < 0)
-    return -authentic_y <= layer->vertical_extent.top;
-  if (authentic_y >= kActRaiserAuthenticHeight)
-    return authentic_y - (kActRaiserAuthenticHeight - 1) <=
-        layer->vertical_extent.bottom;
+  if (!layer) return true;
+  if (authentic_y < 0) {
+    const int distance = -authentic_y;
+    if (layer->world_height && distance > layer->camera_y) return false;
+    if (layer->vertical_extent.mode == kActionBgExtent_Fixed &&
+        distance > layer->vertical_extent.top)
+      return false;
+  } else if (authentic_y >= kActRaiserAuthenticHeight) {
+    const int distance = authentic_y - (kActRaiserAuthenticHeight - 1);
+    if (layer->world_height) {
+      int available = (int)layer->world_height -
+          kActRaiserActionCameraViewportHeight - (int)layer->camera_y;
+      if (available < 0) available = 0;
+      if (distance > available) return false;
+    }
+    if (layer->vertical_extent.mode == kActionBgExtent_Fixed &&
+        distance > layer->vertical_extent.bottom)
+      return false;
+  }
   return true;
 }
 
@@ -130,6 +142,46 @@ bool DioramaBgValidSpanPlan_DrawableRowBounds(
   if (out_y0) *out_y0 = y0;
   if (out_y1) *out_y1 = y1;
   return true;
+}
+
+bool DioramaSkyboxVerticalMapping_Build(
+    const DioramaBgValidSpanPlan *plan, int capture_height,
+    int texture_height, float blur_radius,
+    DioramaSkyboxVerticalMapping *out) {
+  if (out) *out = (DioramaSkyboxVerticalMapping){ 0 };
+  if (!out || capture_height <= 0 || texture_height <= 0) return false;
+  int y0 = 0, y1 = 0;
+  if (!DioramaBgValidSpanPlan_DrawableRowBounds(plan, &y0, &y1))
+    return false;
+  y0 = ClampInt(y0, 0, capture_height);
+  y1 = ClampInt(y1, 0, capture_height);
+  if (y1 <= y0) return false;
+
+  float sample_y0 = (float)y0;
+  float sample_y1 = (float)y1;
+  if (y0 != 0 || y1 != capture_height) {
+    if (blur_radius < 0.0f) blur_radius = 0.0f;
+    const float inset = blur_radius + 1.0f;
+    sample_y0 += inset;
+    sample_y1 -= inset;
+    if (sample_y1 < sample_y0) sample_y1 = sample_y0;
+  }
+  *out = (DioramaSkyboxVerticalMapping) {
+    .capture_y0 = y0,
+    .capture_y1 = y1,
+    .texture_v0 = sample_y0 / (float)texture_height,
+    .texture_v1 = sample_y1 / (float)texture_height,
+  };
+  return true;
+}
+
+float DioramaSkyboxVerticalMapping_Fraction(
+    const DioramaSkyboxVerticalMapping *mapping, int capture_y) {
+  if (!mapping || mapping->capture_y1 <= mapping->capture_y0) return 0.0f;
+  capture_y = ClampInt(
+      capture_y, mapping->capture_y0, mapping->capture_y1);
+  return (float)(capture_y - mapping->capture_y0) /
+      (float)(mapping->capture_y1 - mapping->capture_y0);
 }
 
 void DioramaSkyboxUvRange(int tex_width, int valid_x0, int valid_x1,

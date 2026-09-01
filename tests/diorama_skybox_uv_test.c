@@ -11,7 +11,14 @@
 #include <math.h>
 #include <stdio.h>
 
-enum { kTexWidth = 512, kBudget = 120, kAuthentic = 256, kCapture = 496 };
+enum {
+  kTexWidth = 512,
+  kTexHeight = 352,
+  kBudget = 120,
+  kAuthentic = 256,
+  kCapture = 496,
+  kVerticalCapture = 288,
+};
 
 static int g_failures;
 
@@ -36,6 +43,9 @@ static ActionBgLayerPlan Layer(ActionBgEdgeMode edge) {
     .valid = true,
     .source = kActionBgSource_AuthenticViewport,
     .default_edge = edge,
+    .camera_y = 64,
+    .world_width = 256,
+    .world_height = 512,
     .horizontal_extent = { .mode = kActionBgExtent_Available },
     .vertical_extent = { .mode = kActionBgExtent_Available },
   };
@@ -328,6 +338,62 @@ static void TestUvRangeMatchesLegacyOnFullSpan(void) {
   }
 }
 
+static void TestLiveVerticalWorldMapping(void) {
+  DioramaBgValidSpanPlan spans;
+  ActionBgLayerPlan layer = Layer(kActionBgEdge_Repeat);
+  /* Northwall 0601 at the reported frame: BG1 owns a 32-row top/bottom
+   * capture, but BG2 is at world Y=0 in a 256-row world. Its drawable capture
+   * is therefore [32,287): 224 native rows plus 31 real lower rows. */
+  layer.camera_y = 0;
+  layer.world_height = 256;
+  DioramaBgValidSpanPlan_Build(
+      kBudget, kBudget, kBudget, kBudget, false,
+      &layer, 32, kVerticalCapture, kTexWidth, &spans);
+  ExpectInt("Northwall vertical span count", spans.count, 3);
+  ExpectSpan("Northwall unavailable top", &spans.spans[0],
+             0, 32, 0, 0);
+  ExpectSpan("Northwall drawable BG2", &spans.spans[1],
+             32, 287, 0, kCapture);
+  ExpectSpan("Northwall unavailable bottom", &spans.spans[2],
+             287, 288, 0, 0);
+
+  DioramaSkyboxVerticalMapping mapping;
+  ExpectInt("Northwall vertical mapping",
+            DioramaSkyboxVerticalMapping_Build(
+                &spans, kVerticalCapture, kTexHeight, 3.0f, &mapping),
+            true);
+  ExpectInt("Northwall source start", mapping.capture_y0, 32);
+  ExpectInt("Northwall source end", mapping.capture_y1, 287);
+  ExpectFloat("Northwall blur-safe v0", mapping.texture_v0,
+              36.0f / (float)kTexHeight);
+  ExpectFloat("Northwall blur-safe v1", mapping.texture_v1,
+              283.0f / (float)kTexHeight);
+  ExpectFloat("Northwall output top",
+              DioramaSkyboxVerticalMapping_Fraction(&mapping, 32), 0.0f);
+  ExpectFloat("Northwall output bottom",
+              DioramaSkyboxVerticalMapping_Fraction(&mapping, 287), 1.0f);
+
+  /* A BG2 with enough real rows on both sides retains the exact legacy map:
+   * no blur inset and capture midpoint remains output midpoint. */
+  layer.camera_y = 64;
+  layer.world_height = 512;
+  DioramaBgValidSpanPlan_Build(
+      kBudget, kBudget, kBudget, kBudget, false,
+      &layer, 32, kVerticalCapture, kTexWidth, &spans);
+  ExpectInt("full vertical span count", spans.count, 1);
+  ExpectInt("full vertical mapping",
+            DioramaSkyboxVerticalMapping_Build(
+                &spans, kVerticalCapture, kTexHeight, 3.0f, &mapping),
+            true);
+  ExpectInt("full source start", mapping.capture_y0, 0);
+  ExpectInt("full source end", mapping.capture_y1, kVerticalCapture);
+  ExpectFloat("full legacy v0", mapping.texture_v0, 0.0f);
+  ExpectFloat("full legacy v1", mapping.texture_v1,
+              (float)kVerticalCapture / (float)kTexHeight);
+  ExpectFloat("full output midpoint",
+              DioramaSkyboxVerticalMapping_Fraction(&mapping, 144), 0.5f);
+}
+
 static void TestUvRangeCropsNarrowedSpan(void) {
   float u0, u1;
   /* Level start with radius 1: the blur inset must still apply at the NEW
@@ -386,6 +452,7 @@ int main(void) {
   TestBandedValidSpans();
   TestExtentValidSpans();
   TestUvRangeMatchesLegacyOnFullSpan();
+  TestLiveVerticalWorldMapping();
   TestUvRangeCropsNarrowedSpan();
   TestUvRangeNeverInverts();
   TestRomUvRepeatsAcrossDisplayedWidth();
