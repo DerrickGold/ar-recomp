@@ -42,6 +42,7 @@
 #include "funcs.h"
 #include "snesrecomp/game/trace.h"
 #include <stdio.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <errno.h>
 #ifdef _WIN32
@@ -195,7 +196,6 @@ typedef enum ActRaiserDeveloperFlag {
 } ActRaiserDeveloperFlag;
 
 typedef struct ActRaiserDeveloperEnvironment {
-  bool initialized;
   bool flags[kActRaiserDeveloperFlag_Count];
   bool widescreen_only_bg_present;
   int widescreen_only_bg_layer;
@@ -227,32 +227,43 @@ _Static_assert(
         kActRaiserDeveloperFlag_Count,
     "developer environment flag table is incomplete");
 
+/* RunOneFrameOfGame takes the snapshot once, but the readers below run from
+ * vblank, object, and presentation paths, so the publish has to be safe for a
+ * second thread that arrives first: resolve into a local, copy it in, and only
+ * then release the ready flag (DioramaPerformance_Enabled uses the same
+ * idiom). Nothing may consult shared storage to decide whether a pointer is
+ * safe to dereference -- the local that was tested is the only thing allowed to
+ * gate the parse, so a torn or clobbered flag byte cannot hand strtol a NULL
+ * string. */
 static ActRaiserDeveloperEnvironment s_developer_environment;
+static atomic_bool s_developer_environment_ready;
 
 static const ActRaiserDeveloperEnvironment *
 ActRaiser_GetDeveloperEnvironment(void) {
-  if (s_developer_environment.initialized)
+  if (atomic_load_explicit(&s_developer_environment_ready,
+                           memory_order_acquire))
     return &s_developer_environment;
 
+  ActRaiserDeveloperEnvironment env = {0};
   for (unsigned flag = 0; flag < kActRaiserDeveloperFlag_Count; flag++)
-    s_developer_environment.flags[flag] =
-        getenv(kActRaiserDeveloperFlagNames[flag]) != NULL;
+    env.flags[flag] = getenv(kActRaiserDeveloperFlagNames[flag]) != NULL;
 
+  env.widescreen_only_bg_layer = -1;
   const char *value = getenv("AR_WS_ONLYBG");
-  s_developer_environment.widescreen_only_bg_present =
-      value && value[0];
-  s_developer_environment.widescreen_only_bg_layer =
-      s_developer_environment.widescreen_only_bg_present
-          ? atoi(value) - 1
-          : -1;
+  if (value && value[0]) {
+    env.widescreen_only_bg_present = true;
+    env.widescreen_only_bg_layer = atoi(value) - 1;
+  }
 
   value = getenv("AR_WS_CLAMP");
-  s_developer_environment.widescreen_clamp_present = value && value[0];
-  s_developer_environment.widescreen_clamp_mask =
-      s_developer_environment.widescreen_clamp_present
-          ? (uint8_t)strtoul(value, NULL, 16)
-          : 0;
-  s_developer_environment.initialized = true;
+  if (value && value[0]) {
+    env.widescreen_clamp_present = true;
+    env.widescreen_clamp_mask = (uint8_t)strtoul(value, NULL, 16);
+  }
+
+  s_developer_environment = env;
+  atomic_store_explicit(&s_developer_environment_ready, true,
+                        memory_order_release);
   return &s_developer_environment;
 }
 
@@ -318,7 +329,6 @@ static bool ActRaiser_PpuShapeTraceActive(unsigned gf) {
     const unsigned any_gf = kActRaiserPpuShapeMaximumRecords;
     unsigned exact_gf = ActRaiser_PpuShapeUnsignedEnvironment(
         "AR_PPU_SHAPE_GF", any_gf, 0xffffu);
-    trace->initialized = true;
     trace->gf_lo = exact_gf != any_gf
         ? exact_gf
         : ActRaiser_PpuShapeUnsignedEnvironment(
@@ -359,6 +369,9 @@ static bool ActRaiser_PpuShapeTraceActive(unsigned gf) {
                 trace->gf_lo, trace->gf_hi, trace->maximum_records, path);
       }
     }
+    /* Last, so the flag never advertises a window/file that is not filled in
+     * yet -- the fields below are read on the strength of it. */
+    trace->initialized = true;
   }
   if (!trace->file || gf < trace->gf_lo || gf > trace->gf_hi)
     return false;

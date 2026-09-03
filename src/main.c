@@ -311,8 +311,13 @@ static void RunOneEmulatedTick(bool *stop_running) {
    * vs SPC catch-up vs handshake-spin vs upload vs music-hook time. */
   static int apuprof_ms = kUninitializedEnvironmentOption;
   if (apuprof_ms == kUninitializedEnvironmentOption) {
-    apuprof_ms = RtlApuProfileIsEnabled()
-        ? atoi(getenv("SNESRECOMP_APU_PROFILE")) : -1;
+    /* RtlApuProfileIsEnabled caches its own answer in the runner, so it is a
+     * separate module's older read of this variable -- it may agree with the
+     * environment and still not be a promise about THIS getenv result. Gate
+     * the parse on the pointer being parsed. */
+    const char *profile = getenv("SNESRECOMP_APU_PROFILE");
+    apuprof_ms = (RtlApuProfileIsEnabled() && profile && profile[0])
+        ? atoi(profile) : -1;
     if (apuprof_ms >= 0 && apuprof_ms < 2) apuprof_ms = 8;
   }
   uint64_t apuprof_t0 = 0;
@@ -576,14 +581,24 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
     static unsigned shot_from;
     static unsigned shot_to;
     if (!schedule_initialized) {
+      /* The parse is gated by the local pointer, never by the static that
+       * recorded the test: a static is shared storage, and only the pointer
+       * itself is evidence that it is safe to dereference. */
       const char *value = getenv("AR_SHOT_AT_GF");
-      shot_at_enabled = value && value[0];
-      shot_at = shot_at_enabled ? (unsigned)strtoul(value, NULL, 0) : 0u;
+      shot_at_enabled = false;
+      shot_at = 0u;
+      if (value && value[0]) {
+        shot_at_enabled = true;
+        shot_at = (unsigned)strtoul(value, NULL, 0);
+      }
       value = getenv("AR_SHOT_EVERY");
-      shot_series_enabled = value && value[0];
-      shot_every = shot_series_enabled
-          ? (unsigned)strtoul(value, NULL, 0) : 0u;
-      if (shot_series_enabled && !shot_every) shot_every = 1u;
+      shot_series_enabled = false;
+      shot_every = 0u;
+      if (value && value[0]) {
+        shot_series_enabled = true;
+        shot_every = (unsigned)strtoul(value, NULL, 0);
+        if (!shot_every) shot_every = 1u;
+      }
       value = getenv("AR_SHOT_FROM");
       shot_from = value ? (unsigned)strtoul(value, NULL, 0) : 0u;
       value = getenv("AR_SHOT_TO");
