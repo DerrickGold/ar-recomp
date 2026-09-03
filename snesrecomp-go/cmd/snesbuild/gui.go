@@ -88,6 +88,20 @@ func buildFromGUI(
 	paths := project.DefaultPaths(root)
 	paths.ROM = romPath
 	paths.ToolchainDir = values.toolchainDir
+
+	// Scan the host's dependencies BEFORE regeneration and the compile. Every
+	// check is milliseconds; the build behind it is minutes, and a missing or
+	// architecture-mismatched SDL3 previously announced itself only at the
+	// final link. The toolchain check is appended here rather than living in
+	// the scan because fetching Zig is this command's job, not a failure.
+	checks := project.Preflight(project.PreflightOptions{
+		Paths: paths, OutputDir: outputDir,
+	})
+	checks = append(checks, toolchainCheck(root))
+	if err := project.WritePreflightReport(output, checks); err != nil {
+		return buildgui.Result{}, err
+	}
+
 	if _, err := project.Regenerate(project.RegenOptions{
 		Paths: paths, Jobs: values.jobs, AllowStubs: values.allowStubs,
 		Stdout: output, Stderr: output,
@@ -206,4 +220,22 @@ func launchViaScript(result buildgui.Result) error {
 		return fmt.Errorf("launch game: %w", err)
 	}
 	return nil
+}
+
+// toolchainCheck reports the hermetic compiler as part of the dependency scan.
+// A missing Zig is a warning, not a failure: the build fetches the pinned
+// release itself, and saying so up front explains the pause that follows.
+func toolchainCheck(root string) project.PreflightCheck {
+	const name = "hermetic compiler"
+	zig, err := toolchain.Locate(toolchainCacheDir(root))
+	if err != nil {
+		return project.PreflightCheck{
+			Name: name, Status: project.PreflightWarn,
+			Detail: "no local Zig; the pinned release will be downloaded first",
+		}
+	}
+	return project.PreflightCheck{
+		Name: name, Status: project.PreflightOK,
+		Detail: fmt.Sprintf("Zig %s (%s)", zig.Version, zig.Source),
+	}
 }

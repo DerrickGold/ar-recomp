@@ -1261,6 +1261,16 @@ func runDoctor(args []string) error {
 	} else {
 		fmt.Printf("zig            ok (%s, %s, via %s)\n", zig.Version, zig.Path, zig.Source)
 	}
+	// Doctor already covers the ROM and the manifest above; SDL3 was the gap,
+	// and it is how an architecture-mismatched libSDL3 reached the linker on a
+	// host that could have said so up front. Same check the GUI runs.
+	if sdl := project.PreflightSDL3(resolved, ""); sdl.Status == project.PreflightFail {
+		fmt.Printf("%-15s MISSING (%s)\n", "SDL3", sdl.Detail)
+		fmt.Printf("%-15s -> %s\n", "", sdl.Remedy)
+		buildMissing = true
+	} else {
+		fmt.Printf("%-15s ok (%s)\n", "SDL3", sdl.Detail)
+	}
 	manifestPath := filepath.Join(resolved.Root, project.ManifestFileName)
 	manifest, manifestErr := project.LoadManifest(manifestPath)
 	if manifestErr != nil {

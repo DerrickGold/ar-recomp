@@ -2,6 +2,8 @@ package project
 
 import (
 	"crypto/sha256"
+	"debug/elf"
+	"debug/macho"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -555,18 +557,132 @@ type sdlCandidate struct {
 	lib     string
 }
 
-// sdlLibDirHasLib reports whether dir actually contains an SDL3 shared library
-// (libSDL3*.dylib on macOS, libSDL3*.so* on Linux). A directory merely
-// existing is not enough — /usr/lib exists everywhere but only the multiarch
-// subdir holds the .so on Debian/Ubuntu.
-func sdlLibDirHasLib(dir string) bool {
+// sdlLibraryArchitectureMatches reports whether the object at path is built for
+// the architecture this build targets, and whether that could be determined at
+// all. A multilib distribution (Fedora/RHEL/openSUSE) keeps 64-bit libraries in
+// lib64 and leaves 32-bit ones in lib, so a directory holding a libSDL3.so says
+// nothing on its own — the ELF header is what settles it, and picking wrong
+// surfaces much later as `ld.lld: ... is incompatible with elf64-x86-64`.
+// A file we cannot parse (a linker script, a dangling symlink, a stub written
+// by a test) reports known=false so discovery stays permissive there.
+func sdlLibraryArchitectureMatches(path string) (matches, known bool) {
+	if file, err := elf.Open(path); err == nil {
+		defer file.Close()
+		class, machine, supported := elfArchitectureForGOARCH(runtime.GOARCH)
+		if !supported {
+			return false, false
+		}
+		return file.Class == class && file.Machine == machine, true
+	}
+	if file, err := macho.Open(path); err == nil {
+		defer file.Close()
+		cpu, supported := machoArchitectureForGOARCH(runtime.GOARCH)
+		return supported && file.Cpu == cpu, supported
+	}
+	// A universal (fat) dylib is compatible when any slice matches.
+	if fat, err := macho.OpenFat(path); err == nil {
+		defer fat.Close()
+		cpu, supported := machoArchitectureForGOARCH(runtime.GOARCH)
+		if !supported {
+			return false, false
+		}
+		for _, arch := range fat.Arches {
+			if arch.Cpu == cpu {
+				return true, true
+			}
+		}
+		return false, true
+	}
+	return false, false
+}
+
+func elfArchitectureForGOARCH(goarch string) (elf.Class, elf.Machine, bool) {
+	switch goarch {
+	case "amd64":
+		return elf.ELFCLASS64, elf.EM_X86_64, true
+	case "arm64":
+		return elf.ELFCLASS64, elf.EM_AARCH64, true
+	case "386":
+		return elf.ELFCLASS32, elf.EM_386, true
+	case "arm":
+		return elf.ELFCLASS32, elf.EM_ARM, true
+	case "riscv64":
+		return elf.ELFCLASS64, elf.EM_RISCV, true
+	case "ppc64le":
+		return elf.ELFCLASS64, elf.EM_PPC64, true
+	case "s390x":
+		return elf.ELFCLASS64, elf.EM_S390, true
+	}
+	return 0, 0, false
+}
+
+func machoArchitectureForGOARCH(goarch string) (macho.Cpu, bool) {
+	switch goarch {
+	case "amd64":
+		return macho.CpuAmd64, true
+	case "arm64":
+		return macho.CpuArm64, true
+	}
+	return 0, false
+}
+
+// sdlLibDirLibs splits the SDL3 shared libraries in dir into the ones this
+// build can link and the ones built for another architecture. The second list
+// is what makes the "not found" error explain itself instead of leaving the
+// caller to decode a linker message.
+func sdlLibDirLibs(dir string) (usable, wrongArchitecture []string) {
+	if dir == "" {
+		// Guard the glob: joining onto "" would search the working directory.
+		return nil, nil
+	}
 	for _, pattern := range []string{"libSDL3*.dylib", "libSDL3*.so*"} {
 		matches, err := filepath.Glob(filepath.Join(dir, pattern))
-		if err == nil && len(matches) > 0 {
-			return true
+		if err != nil {
+			continue
+		}
+		for _, match := range matches {
+			switch okay, known := sdlLibraryArchitectureMatches(match); {
+			case okay || !known:
+				usable = append(usable, match)
+			default:
+				wrongArchitecture = append(wrongArchitecture, match)
+			}
 		}
 	}
-	return false
+	return usable, wrongArchitecture
+}
+
+// sdlLibDirHasLib reports whether dir actually contains an SDL3 shared library
+// this build can link (libSDL3*.dylib on macOS, libSDL3*.so* on Linux). A
+// directory merely existing is not enough — /usr/lib exists everywhere but only
+// the multiarch subdir holds the .so on Debian/Ubuntu, and on a multilib distro
+// it holds the 32-bit one.
+func sdlLibDirHasLib(dir string) bool {
+	usable, _ := sdlLibDirLibs(dir)
+	return len(usable) > 0
+}
+
+// gnuMultiarchDir is the Debian/Ubuntu multiarch leaf for the host, e.g.
+// "x86_64-linux-gnu". Empty when the host architecture has no mapping here, in
+// which case the caller simply skips those candidates.
+func gnuMultiarchDir() string {
+	switch runtime.GOARCH {
+	case "amd64":
+		return "x86_64-linux-gnu"
+	case "arm64":
+		return "aarch64-linux-gnu"
+	case "386":
+		return "i386-linux-gnu"
+	case "arm":
+		return "arm-linux-gnueabihf"
+	case "riscv64":
+		return "riscv64-linux-gnu"
+	case "ppc64le":
+		return "powerpc64le-linux-gnu"
+	case "s390x":
+		return "s390x-linux-gnu"
+	}
+	return ""
 }
 
 // resolveSDL3 picks the SDL3 development files for the build's target. For a
@@ -613,38 +729,106 @@ func discoverSDL3() (includeDir, libDir string, bundled bool, err error) {
 	if pkgConfig, lookErr := exec.LookPath("pkg-config"); lookErr == nil {
 		includeOut, includeErr := exec.Command(pkgConfig, "--cflags-only-I", "sdl3").Output()
 		libOut, libErr := exec.Command(pkgConfig, "--libs-only-L", "sdl3").Output()
-		include := firstFlagValue(string(includeOut), "-I")
-		lib := firstFlagValue(string(libOut), "-L")
-		if includeErr == nil && libErr == nil && include != "" && lib != "" {
-			return include, lib, false, nil
+		if includeErr == nil && libErr == nil {
+			include := firstFlagValue(string(includeOut), "-I")
+			lib := firstFlagValue(string(libOut), "-L")
+			// pkg-config omits -I/-L for directories already on the compiler's
+			// default search path, which is precisely the distributions where
+			// guessing is most dangerous: an empty -L on a multilib box used to
+			// send us to the hardcoded /usr/lib guess and its 32-bit SDL3. Ask
+			// for the directories themselves instead of discarding the answer.
+			if include == "" {
+				include = pkgConfigVariable(pkgConfig, "includedir")
+			}
+			if lib == "" {
+				lib = pkgConfigVariable(pkgConfig, "libdir")
+			}
+			// pkg-config names a real prefix rather than guessing at one, so
+			// the only reason to refuse it is a directory that demonstrably
+			// holds SDL3 for another architecture. A layout whose libraries we
+			// cannot see at all (static-only, an unusual store path) is still
+			// trusted -- that is strictly what it reported.
+			usable, wrongArchitecture := sdlLibDirLibs(lib)
+			if sdlIncludeDirHasHeaders(include) &&
+				(len(usable) > 0 || len(wrongArchitecture) == 0) {
+				return include, lib, false, nil
+			}
 		}
 	}
 	candidates := []sdlCandidate{
 		{"/opt/homebrew/opt/sdl3/include", "/opt/homebrew/opt/sdl3/lib"},
 		{"/usr/local/opt/sdl3/include", "/usr/local/opt/sdl3/lib"},
 		{"/opt/homebrew/include", "/opt/homebrew/lib"},
-		{"/usr/local/include", "/usr/local/lib"},
-		{"/usr/include", "/usr/lib"},
 	}
 	if runtime.GOOS == "linux" {
-		// Debian/Ubuntu install the SDL3 shared object under a multiarch dir
-		// (e.g. /usr/lib/x86_64-linux-gnu or .../aarch64-linux-gnu), not the
-		// plain /usr/lib the base candidates check. Add both arch dirs so an
-		// ARM64 Debian/Ubuntu box is found, not just x86_64.
+		// Two Linux layouts put the SDL3 shared object somewhere other than the
+		// plain lib dir, and BOTH have to be tried before it. Multilib distros
+		// (Fedora/RHEL/openSUSE/Arch) keep 64-bit libraries in lib64 and leave
+		// the 32-bit ones in lib; Debian/Ubuntu use a per-architecture subdir.
+		// Probing the plain lib dir first is what picked a 32-bit libSDL3.so on
+		// a Fedora box. The multiarch leaf follows the HOST architecture, so an
+		// ARM64 box looks in aarch64-linux-gnu rather than in both and hoping.
 		candidates = append(candidates,
-			sdlCandidate{"/usr/include", "/usr/lib/x86_64-linux-gnu"},
-			sdlCandidate{"/usr/include", "/usr/lib/aarch64-linux-gnu"},
-			sdlCandidate{"/usr/local/include", "/usr/local/lib/x86_64-linux-gnu"},
-			sdlCandidate{"/usr/local/include", "/usr/local/lib/aarch64-linux-gnu"},
+			sdlCandidate{"/usr/local/include", "/usr/local/lib64"},
+			sdlCandidate{"/usr/include", "/usr/lib64"},
 		)
-	}
-	for _, candidate := range candidates {
-		if fsutil.DirectoryExists(filepath.Join(candidate.include, "SDL3")) &&
-			sdlLibDirHasLib(candidate.lib) {
-			return candidate.include, candidate.lib, false, nil
+		if multiarch := gnuMultiarchDir(); multiarch != "" {
+			candidates = append(candidates,
+				sdlCandidate{"/usr/local/include", filepath.Join("/usr/local/lib", multiarch)},
+				sdlCandidate{"/usr/include", filepath.Join("/usr/lib", multiarch)},
+			)
 		}
 	}
+	candidates = append(candidates,
+		sdlCandidate{"/usr/local/include", "/usr/local/lib"},
+		sdlCandidate{"/usr/include", "/usr/lib"},
+	)
+	var rejected []string
+	for _, candidate := range candidates {
+		if !sdlIncludeDirHasHeaders(candidate.include) {
+			continue
+		}
+		usable, wrongArchitecture := sdlLibDirLibs(candidate.lib)
+		if len(usable) > 0 {
+			return candidate.include, candidate.lib, false, nil
+		}
+		rejected = append(rejected, wrongArchitecture...)
+	}
+	if len(rejected) > 0 {
+		// Name the file and the architecture wanted: the alternative is the
+		// link failing later with `is incompatible with elf64-x86-64`, which
+		// does not say which of the machine's SDL3 copies was picked or why.
+		return "", "", false, fmt.Errorf(
+			"SDL3 was found but only for another architecture (%s needs %s): %s; "+
+				"install the %s SDL3 development package, or pass --sdl-include and --sdl-lib",
+			runtime.GOOS, runtime.GOARCH, strings.Join(rejected, ", "), runtime.GOARCH)
+	}
 	return "", "", false, fmt.Errorf("SDL3 development files not found; pass --sdl-include and --sdl-lib")
+}
+
+// pkgConfigVariable reads one directory straight out of sdl3.pc. Used when
+// --cflags-only-I / --libs-only-L come back empty because pkg-config elided a
+// path it considers part of the default search set.
+func pkgConfigVariable(pkgConfig, name string) string {
+	out, err := exec.Command(pkgConfig, "--variable="+name, "sdl3").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// sdlIncludeDirHasHeaders accepts either the parent that holds SDL3/ (what the
+// game's <SDL3/SDL.h> needs, and what sdl3.pc reports) or the SDL3/ leaf itself,
+// which some distributions put in Cflags. The caller adds the parent for the
+// leaf form.
+func sdlIncludeDirHasHeaders(dir string) bool {
+	if dir == "" {
+		return false
+	}
+	if fsutil.DirectoryExists(filepath.Join(dir, "SDL3")) {
+		return true
+	}
+	return strings.EqualFold(filepath.Base(dir), "SDL3") && fsutil.DirectoryExists(dir)
 }
 
 func firstFlagValue(output, prefix string) string {
