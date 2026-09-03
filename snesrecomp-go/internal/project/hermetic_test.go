@@ -1,6 +1,9 @@
 package project
 
 import (
+	"bytes"
+	"debug/elf"
+	"encoding/binary"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -325,5 +328,160 @@ func TestNewestHeaderTimeSkipsBuildDir(t *testing.T) {
 	direct := newestHeaderTime([]string{filepath.Dir(staged)}, buildDir)
 	if !direct.Equal(future) {
 		t.Fatalf("explicit staged include dir should still count: got %v", direct)
+	}
+}
+
+// writeTestELF emits a minimal, well-formed ELF header (no program or section
+// table) so the architecture checks can be exercised without shipping binary
+// fixtures or shelling out to a cross compiler.
+func writeTestELF(t *testing.T, path string, class elf.Class, machine elf.Machine) {
+	t.Helper()
+	var buffer bytes.Buffer
+	identifier := make([]byte, 16)
+	copy(identifier, []byte{0x7f, 'E', 'L', 'F'})
+	identifier[4] = byte(class)
+	identifier[5] = byte(elf.ELFDATA2LSB)
+	identifier[6] = byte(elf.EV_CURRENT)
+	buffer.Write(identifier)
+	write16 := func(value uint16) { _ = binary.Write(&buffer, binary.LittleEndian, value) }
+	write32 := func(value uint32) { _ = binary.Write(&buffer, binary.LittleEndian, value) }
+	write16(uint16(elf.ET_DYN))
+	write16(uint16(machine))
+	write32(uint32(elf.EV_CURRENT))
+	if class == elf.ELFCLASS64 {
+		for range 3 { // e_entry, e_phoff, e_shoff
+			_ = binary.Write(&buffer, binary.LittleEndian, uint64(0))
+		}
+		write32(0)  // e_flags
+		write16(64) // e_ehsize
+		write16(56) // e_phentsize
+		write16(0)  // e_phnum
+		write16(64) // e_shentsize
+		write16(0)  // e_shnum
+		write16(0)  // e_shstrndx
+	} else {
+		for range 3 {
+			write32(0)
+		}
+		write32(0)
+		write16(52)
+		write16(32)
+		write16(0)
+		write16(40)
+		write16(0)
+		write16(0)
+	}
+	if err := os.WriteFile(path, buffer.Bytes(), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// hostAndForeignELF returns an architecture this build can link and one it
+// cannot, so the tests read the same on an x86_64 CI box and an arm64 laptop.
+func hostAndForeignELF(t *testing.T) (hostClass elf.Class, hostMachine elf.Machine,
+	foreignClass elf.Class, foreignMachine elf.Machine) {
+	t.Helper()
+	class, machine, supported := elfArchitectureForGOARCH(runtime.GOARCH)
+	if !supported {
+		t.Skipf("no ELF architecture mapping for %s", runtime.GOARCH)
+	}
+	if class == elf.ELFCLASS64 && machine == elf.EM_X86_64 {
+		return class, machine, elf.ELFCLASS32, elf.EM_386
+	}
+	return class, machine, elf.ELFCLASS64, elf.EM_X86_64
+}
+
+func TestSdlLibraryArchitectureMatches(t *testing.T) {
+	dir := t.TempDir()
+	hostClass, hostMachine, foreignClass, foreignMachine := hostAndForeignELF(t)
+
+	host := filepath.Join(dir, "libSDL3.so.0")
+	writeTestELF(t, host, hostClass, hostMachine)
+	if matches, known := sdlLibraryArchitectureMatches(host); !matches || !known {
+		t.Fatalf("host object rejected: matches=%v known=%v", matches, known)
+	}
+
+	foreign := filepath.Join(dir, "foreign.so")
+	writeTestELF(t, foreign, foreignClass, foreignMachine)
+	if matches, known := sdlLibraryArchitectureMatches(foreign); matches || !known {
+		t.Fatalf("foreign object accepted: matches=%v known=%v", matches, known)
+	}
+
+	// Anything we cannot parse stays permissive: a linker script or a stub must
+	// not be reported as the wrong architecture.
+	stub := filepath.Join(dir, "stub.so")
+	writeTestFile(t, stub, "INPUT(libSDL3.so.0)")
+	if matches, known := sdlLibraryArchitectureMatches(stub); matches || known {
+		t.Fatalf("unparseable object claimed: matches=%v known=%v", matches, known)
+	}
+}
+
+func TestSdlLibDirRejectsForeignArchitecture(t *testing.T) {
+	// The reported multilib failure: /usr/lib holds a 32-bit libSDL3.so while
+	// the 64-bit one lives in /usr/lib64. Accepting the first directory that
+	// merely has the file is what produced `ld.lld: ... is incompatible with
+	// elf64-x86-64` late in the link.
+	hostClass, hostMachine, foreignClass, foreignMachine := hostAndForeignELF(t)
+
+	wrong := t.TempDir()
+	writeTestELF(t, filepath.Join(wrong, "libSDL3.so"), foreignClass, foreignMachine)
+	if sdlLibDirHasLib(wrong) {
+		t.Fatal("foreign-architecture lib dir accepted")
+	}
+	usable, foreignFound := sdlLibDirLibs(wrong)
+	if len(usable) != 0 || len(foreignFound) != 1 {
+		t.Fatalf("usable=%v foreign=%v", usable, foreignFound)
+	}
+
+	right := t.TempDir()
+	writeTestELF(t, filepath.Join(right, "libSDL3.so"), hostClass, hostMachine)
+	if !sdlLibDirHasLib(right) {
+		t.Fatal("host-architecture lib dir rejected")
+	}
+}
+
+func TestSdlIncludeDirHasHeaders(t *testing.T) {
+	root := t.TempDir()
+	if sdlIncludeDirHasHeaders(root) {
+		t.Fatal("include dir without SDL3/ accepted")
+	}
+	if sdlIncludeDirHasHeaders("") {
+		t.Fatal("empty include dir accepted")
+	}
+	leaf := filepath.Join(root, "SDL3")
+	if err := os.MkdirAll(leaf, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The parent form (<SDL3/SDL.h> resolves) and the SDL3/ leaf form that some
+	// distributions report in Cflags are both accepted.
+	if !sdlIncludeDirHasHeaders(root) {
+		t.Fatal("parent include dir rejected")
+	}
+	if !sdlIncludeDirHasHeaders(leaf) {
+		t.Fatal("SDL3 leaf include dir rejected")
+	}
+}
+
+func TestGnuMultiarchDirTracksHost(t *testing.T) {
+	switch runtime.GOARCH {
+	case "amd64":
+		if got := gnuMultiarchDir(); got != "x86_64-linux-gnu" {
+			t.Fatalf("got %q", got)
+		}
+	case "arm64":
+		if got := gnuMultiarchDir(); got != "aarch64-linux-gnu" {
+			t.Fatalf("got %q", got)
+		}
+	}
+}
+
+func TestSdlLibDirLibsIgnoresEmptyDir(t *testing.T) {
+	// An empty dir string must not be joined into a glob against the working
+	// directory, which could match an unrelated libSDL3 there.
+	if usable, wrong := sdlLibDirLibs(""); usable != nil || wrong != nil {
+		t.Fatalf("usable=%v wrong=%v", usable, wrong)
+	}
+	if sdlLibDirHasLib("") {
+		t.Fatal("empty lib dir accepted")
 	}
 }
