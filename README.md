@@ -19,7 +19,7 @@ an in-game settings menu and manual.
 
 [![GitHub downloads (all assets, all releases)](https://img.shields.io/github/downloads/DerrickGold/ar-recomp/total)](https://github.com/DerrickGold/ar-recomp/releases)
 ![GitHub Downloads (all assets, latest release)](https://img.shields.io/github/downloads-pre/DerrickGold/ar-recomp/latest/total)
-![GitHub commits since tagged version](https://img.shields.io/github/commits-since/DerrickGold/ar-recomp/v0013)
+![GitHub commits since tagged version](https://img.shields.io/github/commits-since/DerrickGold/ar-recomp/v0014)
 
 
 > **For visitors from Japan / 日本語でご覧の皆さまへ**
