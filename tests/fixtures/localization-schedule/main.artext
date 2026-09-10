@@ -1,4 +1,9 @@
 # Original test wording; no retail text or assets.
+:: sky.magic.choose
+@anchor reset_text_cursor.00
+  A   é 𐐀 B
+@anchor yield.01
+
 :: system.message_speed.choose
 @anchor reset_text_cursor.00
 Première page.

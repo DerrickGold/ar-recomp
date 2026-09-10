@@ -1,0 +1,1232 @@
+{
+  "action_ids": [
+    "action.hud.act_1",
+    "action.hud.act_2",
+    "",
+    "action.hud.clear",
+    "action.hud.ready",
+    "action.hud.time_up",
+    "action.hud.pause"
+  ],
+  "city_ids": [
+    "city.fillmore.name",
+    "city.bloodpool.name",
+    "city.kasandora.name",
+    "city.aitos.name",
+    "city.marahna.name",
+    "city.northwall.name",
+    "city.death_heim.name"
+  ],
+  "city_keys": [
+    "fillmore",
+    "bloodpool",
+    "kasandora",
+    "aitos",
+    "marahna",
+    "northwall"
+  ],
+  "composer_pointer_routes": {
+    "city_name": [
+      "city.fillmore.name",
+      "city.bloodpool.name",
+      "city.kasandora.name",
+      "city.aitos.name",
+      "city.marahna.name",
+      "city.northwall.name",
+      "city.death_heim.name"
+    ],
+    "selected_magic": [
+      "sky.menu.magic.fire",
+      "sky.menu.magic.stardust",
+      "sky.menu.magic.aura",
+      "sky.menu.magic.light"
+    ],
+    "selected_possession": [
+      "sim.menu.possession.slot_00",
+      "sim.menu.possession.slot_01",
+      "sim.menu.possession.slot_02",
+      "sim.menu.possession.slot_03",
+      "sim.menu.possession.slot_04",
+      "sim.menu.possession.slot_05",
+      "sim.menu.possession.slot_06",
+      "sim.menu.possession.slot_07",
+      "sim.menu.possession.slot_08",
+      "sim.menu.possession.slot_09",
+      "sim.menu.possession.slot_10",
+      "sim.menu.possession.slot_11",
+      "sim.menu.possession.slot_12",
+      "sim.menu.possession.slot_13",
+      "sim.menu.possession.slot_14",
+      "sim.menu.possession.slot_15",
+      "sim.menu.possession.slot_16",
+      "sim.menu.possession.slot_17",
+      "sim.menu.possession.slot_18",
+      "sim.menu.possession.slot_19"
+    ],
+    "sim_choice": [
+      "sim.menu.choice.movement",
+      "sim.menu.choice.direct_people",
+      "sim.menu.choice.miracles",
+      "sim.menu.choice.offerings",
+      "sim.menu.choice.status",
+      "sim.menu.choice.other"
+    ],
+    "sim_root": [
+      "sim.menu.return_to_palace",
+      "sim.menu.sky_palace_movement",
+      "sim.menu.building_direction",
+      "sim.menu.listen",
+      "sim.menu.lightning",
+      "sim.menu.rain",
+      "sim.menu.sun",
+      "sim.menu.wind",
+      "sim.menu.earthquake",
+      "sim.menu.take_offering",
+      "sim.menu.use_offering",
+      "sim.menu.status_master",
+      "sim.menu.status_cities",
+      "sim.menu.progress_log",
+      "sim.menu.message_speed"
+    ],
+    "sky_choice": [
+      "sky.menu.choice.movement",
+      "sky.menu.choice.fight",
+      "sky.menu.choice.status",
+      "sky.menu.choice.other"
+    ],
+    "sky_root": [
+      "sky.menu.movement",
+      "sky.menu.observe_people",
+      "sky.menu.fight_monsters",
+      "sky.menu.select_magic",
+      "sky.menu.status_master",
+      "sky.menu.status_cities",
+      "sky.menu.progress_log",
+      "sky.menu.message_speed"
+    ]
+  },
+  "enemy_ids": [
+    "enemy.blue_dragon.name",
+    "enemy.napper_bat.name",
+    "enemy.red_demon.name",
+    "enemy.skull_head.name"
+  ],
+  "profiles": [
+    {
+      "action_end": 9421,
+      "action_start": 9376,
+      "angel_end": 136102,
+      "angel_start": 131191,
+      "ending_table": 150972,
+      "enemy_table": 131139,
+      "handler_table": 136102,
+      "id": "de",
+      "interactive_routes": {
+        "98887": [
+          "sim.development.direction.prompt"
+        ],
+        "98897": [
+          "sim.development.direction.cancel_confirm"
+        ],
+        "98963": [
+          "sim.miracle.lightning.description"
+        ],
+        "98988": [
+          "sim.miracle.lightning.confirm"
+        ],
+        "98999": [
+          "sim.miracle.lightning.target_prompt"
+        ],
+        "99041": [
+          "sim.miracle.lightning.target_cancel"
+        ],
+        "99049": [
+          "sim.miracle.lightning.insufficient_sp"
+        ],
+        "99070": [
+          "sim.miracle.rain.description"
+        ],
+        "99095": [
+          "sim.miracle.rain.confirm"
+        ],
+        "99106": [
+          "sim.miracle.rain.target_prompt"
+        ],
+        "99148": [
+          "sim.miracle.rain.target_cancel"
+        ],
+        "99156": [
+          "sim.miracle.rain.insufficient_sp"
+        ],
+        "99177": [
+          "sim.miracle.sun.description"
+        ],
+        "99202": [
+          "sim.miracle.sun.confirm"
+        ],
+        "99213": [
+          "sim.miracle.sun.target_prompt"
+        ],
+        "99255": [
+          "sim.miracle.sun.target_cancel"
+        ],
+        "99263": [
+          "sim.miracle.sun.insufficient_sp"
+        ],
+        "99284": [
+          "sim.miracle.earthquake.description"
+        ],
+        "99309": [
+          "sim.miracle.earthquake.confirm"
+        ],
+        "99351": [
+          "sim.miracle.earthquake.cancel"
+        ],
+        "99359": [
+          "sim.miracle.earthquake.insufficient_sp"
+        ],
+        "99380": [
+          "sim.miracle.wind.description"
+        ],
+        "99405": [
+          "sim.miracle.wind.confirm"
+        ],
+        "99447": [
+          "sim.miracle.wind.cancel"
+        ],
+        "99455": [
+          "sim.miracle.wind.insufficient_sp"
+        ],
+        "99498": [
+          "sim.inventory.full"
+        ],
+        "99517": [
+          "sim.inventory.empty"
+        ],
+        "99525": [
+          "sim.inventory.choose_item"
+        ],
+        "99573": [
+          "sim.inventory.cancelled"
+        ],
+        "99992": [
+          "sky.action_mode.unavailable.no_residents"
+        ],
+        "100151": [
+          "sky.action_mode.outcome.final_battle",
+          "sky.action_mode.outcome.first_lair",
+          "sky.action_mode.outcome.repeat_lair"
+        ],
+        "100157": [
+          "sky.action_mode.confirm"
+        ],
+        "100168": [
+          "sky.action_mode.begin_blessing"
+        ],
+        "100203": [
+          "sky.action_mode.unavailable.master_level",
+          "sky.action_mode.unavailable.already_cleared",
+          "sky.action_mode.unavailable.cannot_land",
+          "sky.action_mode.cancel_confirm",
+          "sky.action_mode.unavailable.no_monsters"
+        ],
+        "100233": [
+          "sky.magic.empty"
+        ],
+        "100241": [
+          "sky.magic.choose"
+        ],
+        "100326": [
+          "sky.magic.cancelled",
+          "sky.magic.selected.fire",
+          "sky.magic.selected.stardust",
+          "sky.magic.selected.aura",
+          "sky.magic.selected.light"
+        ],
+        "100460": [
+          "sim.town.gratitude"
+        ],
+        "100550": [
+          "sim.offerings.choose"
+        ],
+        "100721": [
+          "sim.offerings.choose_more"
+        ],
+        "100748": [
+          "sim.offerings.unavailable.no_residents",
+          "sim.offerings.unavailable.none",
+          "sim.offerings.completed",
+          "sim.offerings.cancelled",
+          "sim.offerings.unavailable.inventory_full"
+        ],
+        "101021": [
+          "system.save.confirm"
+        ],
+        "101051": [
+          "system.save.completed_continue_confirm"
+        ],
+        "101066": [
+          "system.save.rest_message"
+        ],
+        "101102": [
+          "system.save.continue",
+          "system.save.cancelled"
+        ],
+        "101112": [
+          "system.message_speed.choose"
+        ],
+        "101223": [
+          "system.message_speed.cancelled"
+        ],
+        "101236": [
+          "system.message_speed.sample"
+        ],
+        "101423": [
+          "variant.western.sim.command_menu.prompt"
+        ],
+        "101435": [
+          "variant.western.sim.command_menu.prompt_continuation"
+        ]
+      },
+      "japanese": false,
+      "lookup_tables": [
+        {
+          "id": "required_master_level",
+          "offset": 61422,
+          "semantic_ids": [
+            "required_master_level.1",
+            "required_master_level.2",
+            "required_master_level.4",
+            "required_master_level.6",
+            "required_master_level.8",
+            "required_master_level.10"
+          ]
+        },
+        {
+          "id": "growth_state",
+          "offset": 63113,
+          "semantic_ids": [
+            "simulation.growth_state.none",
+            "simulation.growth_state.stopped",
+            "simulation.growth_state.slow",
+            "simulation.growth_state.normal",
+            "simulation.growth_state.fast",
+            "simulation.growth_state.maximum"
+          ]
+        }
+      ],
+      "offering_table": 149424,
+      "post_text_end": null,
+      "regional_title": true,
+      "sound_end": 71863,
+      "sound_start": 71793,
+      "stage_table": 9240,
+      "title_end": 76556,
+      "title_route_ids": [
+        "title.copyright",
+        "title.mode_select.without_save",
+        "title.mode_select.with_save",
+        "title.difficulty.labels",
+        "title.selector.beginner",
+        "title.selector.normal",
+        "title.selector.expert"
+      ],
+      "title_start": 76317,
+      "town_start": 136498,
+      "town_table": 131072
+    },
+    {
+      "action_end": 9419,
+      "action_start": 9376,
+      "angel_end": 136087,
+      "angel_start": 131191,
+      "ending_table": 150666,
+      "enemy_table": 131139,
+      "handler_table": 136087,
+      "id": "eu-en",
+      "interactive_routes": {
+        "98887": [
+          "sim.development.direction.prompt"
+        ],
+        "98897": [
+          "sim.development.direction.cancel_confirm"
+        ],
+        "98963": [
+          "sim.miracle.lightning.description"
+        ],
+        "98988": [
+          "sim.miracle.lightning.confirm"
+        ],
+        "98999": [
+          "sim.miracle.lightning.target_prompt"
+        ],
+        "99041": [
+          "sim.miracle.lightning.target_cancel"
+        ],
+        "99049": [
+          "sim.miracle.lightning.insufficient_sp"
+        ],
+        "99070": [
+          "sim.miracle.rain.description"
+        ],
+        "99095": [
+          "sim.miracle.rain.confirm"
+        ],
+        "99106": [
+          "sim.miracle.rain.target_prompt"
+        ],
+        "99148": [
+          "sim.miracle.rain.target_cancel"
+        ],
+        "99156": [
+          "sim.miracle.rain.insufficient_sp"
+        ],
+        "99177": [
+          "sim.miracle.sun.description"
+        ],
+        "99202": [
+          "sim.miracle.sun.confirm"
+        ],
+        "99213": [
+          "sim.miracle.sun.target_prompt"
+        ],
+        "99255": [
+          "sim.miracle.sun.target_cancel"
+        ],
+        "99263": [
+          "sim.miracle.sun.insufficient_sp"
+        ],
+        "99284": [
+          "sim.miracle.earthquake.description"
+        ],
+        "99309": [
+          "sim.miracle.earthquake.confirm"
+        ],
+        "99351": [
+          "sim.miracle.earthquake.cancel"
+        ],
+        "99359": [
+          "sim.miracle.earthquake.insufficient_sp"
+        ],
+        "99380": [
+          "sim.miracle.wind.description"
+        ],
+        "99405": [
+          "sim.miracle.wind.confirm"
+        ],
+        "99447": [
+          "sim.miracle.wind.cancel"
+        ],
+        "99455": [
+          "sim.miracle.wind.insufficient_sp"
+        ],
+        "99498": [
+          "sim.inventory.full"
+        ],
+        "99517": [
+          "sim.inventory.empty"
+        ],
+        "99525": [
+          "sim.inventory.choose_item"
+        ],
+        "99573": [
+          "sim.inventory.cancelled"
+        ],
+        "99992": [
+          "sky.action_mode.unavailable.no_residents"
+        ],
+        "100151": [
+          "sky.action_mode.outcome.final_battle",
+          "sky.action_mode.outcome.first_lair",
+          "sky.action_mode.outcome.repeat_lair"
+        ],
+        "100157": [
+          "sky.action_mode.confirm"
+        ],
+        "100168": [
+          "sky.action_mode.begin_blessing"
+        ],
+        "100203": [
+          "sky.action_mode.unavailable.master_level",
+          "sky.action_mode.unavailable.already_cleared",
+          "sky.action_mode.unavailable.cannot_land",
+          "sky.action_mode.cancel_confirm",
+          "sky.action_mode.unavailable.no_monsters"
+        ],
+        "100233": [
+          "sky.magic.empty"
+        ],
+        "100241": [
+          "sky.magic.choose"
+        ],
+        "100326": [
+          "sky.magic.cancelled",
+          "sky.magic.selected.fire",
+          "sky.magic.selected.stardust",
+          "sky.magic.selected.aura",
+          "sky.magic.selected.light"
+        ],
+        "100460": [
+          "sim.town.gratitude"
+        ],
+        "100550": [
+          "sim.offerings.choose"
+        ],
+        "100721": [
+          "sim.offerings.choose_more"
+        ],
+        "100748": [
+          "sim.offerings.unavailable.no_residents",
+          "sim.offerings.unavailable.none",
+          "sim.offerings.completed",
+          "sim.offerings.cancelled",
+          "sim.offerings.unavailable.inventory_full"
+        ],
+        "101021": [
+          "system.save.confirm"
+        ],
+        "101051": [
+          "system.save.completed_continue_confirm"
+        ],
+        "101066": [
+          "system.save.rest_message"
+        ],
+        "101102": [
+          "system.save.continue",
+          "system.save.cancelled"
+        ],
+        "101112": [
+          "system.message_speed.choose"
+        ],
+        "101223": [
+          "system.message_speed.cancelled"
+        ],
+        "101236": [
+          "system.message_speed.sample"
+        ],
+        "101423": [
+          "variant.western.sim.command_menu.prompt"
+        ],
+        "101435": [
+          "variant.western.sim.command_menu.prompt_continuation"
+        ]
+      },
+      "japanese": false,
+      "lookup_tables": [
+        {
+          "id": "required_master_level",
+          "offset": 61416,
+          "semantic_ids": [
+            "required_master_level.1",
+            "required_master_level.2",
+            "required_master_level.4",
+            "required_master_level.6",
+            "required_master_level.8",
+            "required_master_level.10"
+          ]
+        },
+        {
+          "id": "growth_state",
+          "offset": 63095,
+          "semantic_ids": [
+            "simulation.growth_state.none",
+            "simulation.growth_state.stopped",
+            "simulation.growth_state.slow",
+            "simulation.growth_state.normal",
+            "simulation.growth_state.fast",
+            "simulation.growth_state.maximum"
+          ]
+        }
+      ],
+      "offering_table": 149166,
+      "post_text_end": null,
+      "regional_title": true,
+      "sound_end": 71863,
+      "sound_start": 71793,
+      "stage_table": 9240,
+      "title_end": 76547,
+      "title_route_ids": [
+        "title.copyright",
+        "title.mode_select.without_save",
+        "title.mode_select.with_save",
+        "title.difficulty.labels",
+        "title.selector.beginner",
+        "title.selector.normal",
+        "title.selector.expert"
+      ],
+      "title_start": 76317,
+      "town_start": 136498,
+      "town_table": 131072
+    },
+    {
+      "action_end": 10421,
+      "action_start": 10379,
+      "angel_end": 78363,
+      "angel_start": 77153,
+      "ending_table": null,
+      "enemy_table": 77105,
+      "handler_table": 78363,
+      "id": "jp",
+      "interactive_routes": {
+        "98855": [
+          "sim.development.direction.prompt"
+        ],
+        "98906": [
+          "sim.miracle.lightning.description"
+        ],
+        "98931": [
+          "sim.miracle.lightning.confirm"
+        ],
+        "98942": [
+          "sim.miracle.lightning.target_prompt"
+        ],
+        "98984": [
+          "sim.miracle.lightning.target_cancel"
+        ],
+        "98992": [
+          "sim.miracle.lightning.insufficient_sp"
+        ],
+        "99013": [
+          "sim.miracle.rain.description"
+        ],
+        "99038": [
+          "sim.miracle.rain.confirm"
+        ],
+        "99049": [
+          "sim.miracle.rain.target_prompt"
+        ],
+        "99091": [
+          "sim.miracle.rain.target_cancel"
+        ],
+        "99099": [
+          "sim.miracle.rain.insufficient_sp"
+        ],
+        "99120": [
+          "sim.miracle.sun.description"
+        ],
+        "99145": [
+          "sim.miracle.sun.confirm"
+        ],
+        "99156": [
+          "sim.miracle.sun.target_prompt"
+        ],
+        "99198": [
+          "sim.miracle.sun.target_cancel"
+        ],
+        "99206": [
+          "sim.miracle.sun.insufficient_sp"
+        ],
+        "99227": [
+          "sim.miracle.earthquake.description"
+        ],
+        "99252": [
+          "sim.miracle.earthquake.confirm"
+        ],
+        "99294": [
+          "sim.miracle.earthquake.cancel"
+        ],
+        "99302": [
+          "sim.miracle.earthquake.insufficient_sp"
+        ],
+        "99323": [
+          "sim.miracle.wind.description"
+        ],
+        "99348": [
+          "sim.miracle.wind.confirm"
+        ],
+        "99390": [
+          "sim.miracle.wind.cancel"
+        ],
+        "99398": [
+          "sim.miracle.wind.insufficient_sp"
+        ],
+        "99441": [
+          "sim.inventory.full"
+        ],
+        "99460": [
+          "sim.inventory.empty"
+        ],
+        "99468": [
+          "sim.inventory.choose_item"
+        ],
+        "99516": [
+          "sim.inventory.cancelled"
+        ],
+        "99917": [
+          "sky.action_mode.unavailable.no_residents"
+        ],
+        "100076": [
+          "sky.action_mode.outcome.final_battle",
+          "sky.action_mode.outcome.first_lair",
+          "sky.action_mode.outcome.repeat_lair"
+        ],
+        "100082": [
+          "sky.action_mode.confirm"
+        ],
+        "100093": [
+          "sky.action_mode.begin_blessing"
+        ],
+        "100128": [
+          "sky.action_mode.unavailable.master_level",
+          "sky.action_mode.unavailable.already_cleared",
+          "sky.action_mode.unavailable.cannot_land",
+          "sky.action_mode.cancel_confirm",
+          "sky.action_mode.unavailable.no_monsters"
+        ],
+        "100158": [
+          "sky.magic.empty"
+        ],
+        "100166": [
+          "sky.magic.choose"
+        ],
+        "100251": [
+          "sky.magic.cancelled",
+          "sky.magic.selected.fire",
+          "sky.magic.selected.stardust",
+          "sky.magic.selected.aura",
+          "sky.magic.selected.light"
+        ],
+        "100385": [
+          "variant.jp.sim.town.no_buildable_space"
+        ],
+        "100398": [
+          "variant.jp.sim.town.needs_development_direction"
+        ],
+        "100411": [
+          "variant.jp.sim.town.dry_fields"
+        ],
+        "100424": [
+          "variant.jp.sim.town.low_productivity"
+        ],
+        "100432": [
+          "sim.town.gratitude"
+        ],
+        "100527": [
+          "sim.offerings.choose"
+        ],
+        "100686": [
+          "sim.offerings.choose_more"
+        ],
+        "100713": [
+          "sim.offerings.unavailable.no_residents",
+          "sim.offerings.unavailable.none",
+          "sim.offerings.completed",
+          "sim.offerings.cancelled",
+          "sim.offerings.unavailable.inventory_full"
+        ],
+        "100920": [
+          "system.save.confirm"
+        ],
+        "100954": [
+          "system.save.completed_continue_confirm"
+        ],
+        "100969": [
+          "system.save.rest_message"
+        ],
+        "100997": [
+          "system.save.continue",
+          "system.save.cancelled"
+        ],
+        "101007": [
+          "system.message_speed.choose"
+        ],
+        "101118": [
+          "system.message_speed.cancelled"
+        ],
+        "101131": [
+          "system.message_speed.sample"
+        ]
+      },
+      "japanese": true,
+      "lookup_tables": [
+        {
+          "id": "required_master_level",
+          "offset": 61124,
+          "semantic_ids": [
+            "required_master_level.1",
+            "required_master_level.2",
+            "required_master_level.4",
+            "required_master_level.6",
+            "required_master_level.8",
+            "required_master_level.10"
+          ]
+        },
+        {
+          "id": "growth_state",
+          "offset": 62702,
+          "semantic_ids": [
+            "simulation.growth_state.none",
+            "simulation.growth_state.stopped",
+            "simulation.growth_state.slow",
+            "simulation.growth_state.normal",
+            "simulation.growth_state.fast",
+            "simulation.growth_state.maximum"
+          ]
+        }
+      ],
+      "offering_table": 90214,
+      "post_text_end": 95976,
+      "regional_title": false,
+      "sound_end": 71242,
+      "sound_start": 71172,
+      "stage_table": 10246,
+      "title_end": 75708,
+      "title_route_ids": [
+        "title.save_choice.labels",
+        "title.start_prompt",
+        "title.copyright",
+        "title.selector.continue",
+        "title.selector.new_game",
+        "title.selector.special"
+      ],
+      "title_start": 75549,
+      "town_start": 78761,
+      "town_table": 77041
+    },
+    {
+      "action_end": 9424,
+      "action_start": 9376,
+      "angel_end": 136303,
+      "angel_start": 131191,
+      "ending_table": 150867,
+      "enemy_table": 131139,
+      "handler_table": 136303,
+      "id": "fr",
+      "interactive_routes": {
+        "98887": [
+          "sim.development.direction.prompt"
+        ],
+        "98897": [
+          "sim.development.direction.cancel_confirm"
+        ],
+        "98963": [
+          "sim.miracle.lightning.description"
+        ],
+        "98988": [
+          "sim.miracle.lightning.confirm"
+        ],
+        "98999": [
+          "sim.miracle.lightning.target_prompt"
+        ],
+        "99041": [
+          "sim.miracle.lightning.target_cancel"
+        ],
+        "99049": [
+          "sim.miracle.lightning.insufficient_sp"
+        ],
+        "99070": [
+          "sim.miracle.rain.description"
+        ],
+        "99095": [
+          "sim.miracle.rain.confirm"
+        ],
+        "99106": [
+          "sim.miracle.rain.target_prompt"
+        ],
+        "99148": [
+          "sim.miracle.rain.target_cancel"
+        ],
+        "99156": [
+          "sim.miracle.rain.insufficient_sp"
+        ],
+        "99177": [
+          "sim.miracle.sun.description"
+        ],
+        "99202": [
+          "sim.miracle.sun.confirm"
+        ],
+        "99213": [
+          "sim.miracle.sun.target_prompt"
+        ],
+        "99255": [
+          "sim.miracle.sun.target_cancel"
+        ],
+        "99263": [
+          "sim.miracle.sun.insufficient_sp"
+        ],
+        "99284": [
+          "sim.miracle.earthquake.description"
+        ],
+        "99309": [
+          "sim.miracle.earthquake.confirm"
+        ],
+        "99351": [
+          "sim.miracle.earthquake.cancel"
+        ],
+        "99359": [
+          "sim.miracle.earthquake.insufficient_sp"
+        ],
+        "99380": [
+          "sim.miracle.wind.description"
+        ],
+        "99405": [
+          "sim.miracle.wind.confirm"
+        ],
+        "99447": [
+          "sim.miracle.wind.cancel"
+        ],
+        "99455": [
+          "sim.miracle.wind.insufficient_sp"
+        ],
+        "99498": [
+          "sim.inventory.full"
+        ],
+        "99517": [
+          "sim.inventory.empty"
+        ],
+        "99525": [
+          "sim.inventory.choose_item"
+        ],
+        "99573": [
+          "sim.inventory.cancelled"
+        ],
+        "99992": [
+          "sky.action_mode.unavailable.no_residents"
+        ],
+        "100151": [
+          "sky.action_mode.outcome.final_battle",
+          "sky.action_mode.outcome.first_lair",
+          "sky.action_mode.outcome.repeat_lair"
+        ],
+        "100157": [
+          "sky.action_mode.confirm"
+        ],
+        "100168": [
+          "sky.action_mode.begin_blessing"
+        ],
+        "100203": [
+          "sky.action_mode.unavailable.master_level",
+          "sky.action_mode.unavailable.already_cleared",
+          "sky.action_mode.unavailable.cannot_land",
+          "sky.action_mode.cancel_confirm",
+          "sky.action_mode.unavailable.no_monsters"
+        ],
+        "100233": [
+          "sky.magic.empty"
+        ],
+        "100241": [
+          "sky.magic.choose"
+        ],
+        "100326": [
+          "sky.magic.cancelled",
+          "sky.magic.selected.fire",
+          "sky.magic.selected.stardust",
+          "sky.magic.selected.aura",
+          "sky.magic.selected.light"
+        ],
+        "100460": [
+          "sim.town.gratitude"
+        ],
+        "100550": [
+          "sim.offerings.choose"
+        ],
+        "100721": [
+          "sim.offerings.choose_more"
+        ],
+        "100748": [
+          "sim.offerings.unavailable.no_residents",
+          "sim.offerings.unavailable.none",
+          "sim.offerings.completed",
+          "sim.offerings.cancelled",
+          "sim.offerings.unavailable.inventory_full"
+        ],
+        "101021": [
+          "system.save.confirm"
+        ],
+        "101051": [
+          "system.save.completed_continue_confirm"
+        ],
+        "101066": [
+          "system.save.rest_message"
+        ],
+        "101102": [
+          "system.save.continue",
+          "system.save.cancelled"
+        ],
+        "101112": [
+          "system.message_speed.choose"
+        ],
+        "101223": [
+          "system.message_speed.cancelled"
+        ],
+        "101236": [
+          "system.message_speed.sample"
+        ],
+        "101423": [
+          "variant.western.sim.command_menu.prompt"
+        ],
+        "101435": [
+          "variant.western.sim.command_menu.prompt_continuation"
+        ]
+      },
+      "japanese": false,
+      "lookup_tables": [
+        {
+          "id": "required_master_level",
+          "offset": 61419,
+          "semantic_ids": [
+            "required_master_level.1",
+            "required_master_level.2",
+            "required_master_level.4",
+            "required_master_level.6",
+            "required_master_level.8",
+            "required_master_level.10"
+          ]
+        },
+        {
+          "id": "growth_state",
+          "offset": 63168,
+          "semantic_ids": [
+            "simulation.growth_state.none",
+            "simulation.growth_state.stopped",
+            "simulation.growth_state.slow",
+            "simulation.growth_state.normal",
+            "simulation.growth_state.fast",
+            "simulation.growth_state.maximum"
+          ]
+        }
+      ],
+      "offering_table": 149188,
+      "post_text_end": null,
+      "regional_title": true,
+      "sound_end": 71841,
+      "sound_start": 71771,
+      "stage_table": 9240,
+      "title_end": 76533,
+      "title_route_ids": [
+        "title.copyright",
+        "title.mode_select.without_save",
+        "title.mode_select.with_save",
+        "title.difficulty.labels",
+        "title.selector.beginner",
+        "title.selector.normal",
+        "title.selector.expert"
+      ],
+      "title_start": 76295,
+      "town_start": 136699,
+      "town_table": 131072
+    },
+    {
+      "action_end": 10486,
+      "action_start": 10443,
+      "angel_end": 136087,
+      "angel_start": 131191,
+      "ending_table": 150666,
+      "enemy_table": 131139,
+      "handler_table": 136087,
+      "id": "us",
+      "interactive_routes": {
+        "98887": [
+          "sim.development.direction.prompt"
+        ],
+        "98897": [
+          "sim.development.direction.cancel_confirm"
+        ],
+        "98963": [
+          "sim.miracle.lightning.description"
+        ],
+        "98988": [
+          "sim.miracle.lightning.confirm"
+        ],
+        "98999": [
+          "sim.miracle.lightning.target_prompt"
+        ],
+        "99041": [
+          "sim.miracle.lightning.target_cancel"
+        ],
+        "99049": [
+          "sim.miracle.lightning.insufficient_sp"
+        ],
+        "99070": [
+          "sim.miracle.rain.description"
+        ],
+        "99095": [
+          "sim.miracle.rain.confirm"
+        ],
+        "99106": [
+          "sim.miracle.rain.target_prompt"
+        ],
+        "99148": [
+          "sim.miracle.rain.target_cancel"
+        ],
+        "99156": [
+          "sim.miracle.rain.insufficient_sp"
+        ],
+        "99177": [
+          "sim.miracle.sun.description"
+        ],
+        "99202": [
+          "sim.miracle.sun.confirm"
+        ],
+        "99213": [
+          "sim.miracle.sun.target_prompt"
+        ],
+        "99255": [
+          "sim.miracle.sun.target_cancel"
+        ],
+        "99263": [
+          "sim.miracle.sun.insufficient_sp"
+        ],
+        "99284": [
+          "sim.miracle.earthquake.description"
+        ],
+        "99309": [
+          "sim.miracle.earthquake.confirm"
+        ],
+        "99351": [
+          "sim.miracle.earthquake.cancel"
+        ],
+        "99359": [
+          "sim.miracle.earthquake.insufficient_sp"
+        ],
+        "99380": [
+          "sim.miracle.wind.description"
+        ],
+        "99405": [
+          "sim.miracle.wind.confirm"
+        ],
+        "99447": [
+          "sim.miracle.wind.cancel"
+        ],
+        "99455": [
+          "sim.miracle.wind.insufficient_sp"
+        ],
+        "99498": [
+          "sim.inventory.full"
+        ],
+        "99517": [
+          "sim.inventory.empty"
+        ],
+        "99525": [
+          "sim.inventory.choose_item"
+        ],
+        "99573": [
+          "sim.inventory.cancelled"
+        ],
+        "99992": [
+          "sky.action_mode.unavailable.no_residents"
+        ],
+        "100151": [
+          "sky.action_mode.outcome.final_battle",
+          "sky.action_mode.outcome.first_lair",
+          "sky.action_mode.outcome.repeat_lair"
+        ],
+        "100157": [
+          "sky.action_mode.confirm"
+        ],
+        "100168": [
+          "sky.action_mode.begin_blessing"
+        ],
+        "100203": [
+          "sky.action_mode.unavailable.master_level",
+          "sky.action_mode.unavailable.already_cleared",
+          "sky.action_mode.unavailable.cannot_land",
+          "sky.action_mode.cancel_confirm",
+          "sky.action_mode.unavailable.no_monsters"
+        ],
+        "100233": [
+          "sky.magic.empty"
+        ],
+        "100241": [
+          "sky.magic.choose"
+        ],
+        "100326": [
+          "sky.magic.cancelled",
+          "sky.magic.selected.fire",
+          "sky.magic.selected.stardust",
+          "sky.magic.selected.aura",
+          "sky.magic.selected.light"
+        ],
+        "100460": [
+          "sim.town.gratitude"
+        ],
+        "100550": [
+          "sim.offerings.choose"
+        ],
+        "100721": [
+          "sim.offerings.choose_more"
+        ],
+        "100748": [
+          "sim.offerings.unavailable.no_residents",
+          "sim.offerings.unavailable.none",
+          "sim.offerings.completed",
+          "sim.offerings.cancelled",
+          "sim.offerings.unavailable.inventory_full"
+        ],
+        "101021": [
+          "system.save.confirm"
+        ],
+        "101051": [
+          "system.save.completed_continue_confirm"
+        ],
+        "101066": [
+          "system.save.rest_message"
+        ],
+        "101102": [
+          "system.save.continue",
+          "system.save.cancelled"
+        ],
+        "101112": [
+          "system.message_speed.choose"
+        ],
+        "101223": [
+          "system.message_speed.cancelled"
+        ],
+        "101236": [
+          "system.message_speed.sample"
+        ],
+        "101423": [
+          "variant.western.sim.command_menu.prompt"
+        ],
+        "101435": [
+          "variant.western.sim.command_menu.prompt_continuation"
+        ]
+      },
+      "japanese": false,
+      "lookup_tables": [
+        {
+          "id": "required_master_level",
+          "offset": 61416,
+          "semantic_ids": [
+            "required_master_level.1",
+            "required_master_level.2",
+            "required_master_level.4",
+            "required_master_level.6",
+            "required_master_level.8",
+            "required_master_level.10"
+          ]
+        },
+        {
+          "id": "growth_state",
+          "offset": 63087,
+          "semantic_ids": [
+            "simulation.growth_state.none",
+            "simulation.growth_state.stopped",
+            "simulation.growth_state.slow",
+            "simulation.growth_state.normal",
+            "simulation.growth_state.fast",
+            "simulation.growth_state.maximum"
+          ]
+        }
+      ],
+      "offering_table": 149166,
+      "post_text_end": null,
+      "regional_title": false,
+      "sound_end": 71863,
+      "sound_start": 71793,
+      "stage_table": 10307,
+      "title_end": 76406,
+      "title_route_ids": [
+        "title.save_choice.labels",
+        "title.start_prompt",
+        "title.copyright",
+        "title.selector.continue",
+        "title.selector.new_game",
+        "title.selector.professional"
+      ],
+      "title_start": 76199,
+      "town_start": 136498,
+      "town_table": 131072
+    }
+  ]
+}

@@ -108,13 +108,20 @@ def require_identifier(value, description, path=None, line=None):
 
 def portable_relative_path(value, path=None, line=None):
     if not value or '\\' in value or value.startswith('/') or \
-            value.endswith('/') or '//' in value:
+            value.endswith('/') or '//' in value or utf8_length(value) > 511:
         fail(f'path must be portable and relative: {value!r}', path, line)
-    candidate = PurePosixPath(value)
-    if any(part in ('', '.', '..') for part in candidate.parts):
+    # PurePosixPath normalizes away './'; validate the actual spelling first.
+    parts = value.split('/')
+    if any(part in ('', '.', '..') for part in parts):
         fail(f'path contains an unsafe component: {value!r}', path, line)
-    if candidate.parts and candidate.parts[0].endswith(':'):
-        fail(f'path must not contain a drive prefix: {value!r}', path, line)
+    if any(ord(c) < 0x20 or ord(c) == 0x7f or c in '<>:"|?*' for c in value):
+        fail(f'path has non-portable characters: {value!r}', path, line)
+    reserved = {'CON', 'PRN', 'AUX', 'NUL', 'CONIN$', 'CONOUT$'}
+    reserved.update(prefix + suffix for prefix in ('COM', 'LPT')
+                    for suffix in '123456789¹²³')
+    if any(part.endswith(('.', ' ')) or part.split('.')[0].rstrip(' ').upper() in reserved
+           for part in parts):
+        fail(f'path has a reserved component: {value!r}', path, line)
     return value
 
 
@@ -126,12 +133,12 @@ def parse_manifest_text(text, path='<manifest>'):
     sections = collections.defaultdict(lambda: collections.defaultdict(list))
     current = None
     seen_sections = set()
-    for line_number, physical in enumerate(text.splitlines(), 1):
-        line = physical.strip()
+    for line_number, physical in enumerate(physical_lines(text.removeprefix('\ufeff')), 1):
+        line = physical.strip(' \t')
         if not line or line.startswith(('#', ';')):
             continue
         if line.startswith('[') and line.endswith(']'):
-            current = line[1:-1].strip()
+            current = line[1:-1].strip(' \t')
             if current not in MANIFEST_KEYS:
                 fail(f'unknown manifest section [{current}]', path, line_number)
             if current in seen_sections:
@@ -143,7 +150,7 @@ def parse_manifest_text(text, path='<manifest>'):
             fail('key appears before a section', path, line_number)
         if '=' not in line:
             fail('expected key = value', path, line_number)
-        key, value = (part.strip() for part in line.split('=', 1))
+        key, value = (part.strip(' \t') for part in line.split('=', 1))
         if key not in MANIFEST_KEYS[current]:
             fail(f'unknown key {key!r} in [{current}]', path, line_number)
         if not value:
@@ -202,10 +209,14 @@ def parse_manifest_text(text, path='<manifest>'):
     if len(fallbacks) > MAX_FALLBACK_FONTS:
         fail('too many fallback fonts', path)
     for reference in [primary] + fallbacks:
+        if utf8_length(reference) > 511:
+            fail('font reference is too long', path)
         if reference.startswith('builtin:'):
             require_identifier(reference[8:], 'built-in font id', path)
         else:
             portable_relative_path(reference, path)
+    if len(set(fallbacks)) != len(fallbacks):
+        fail('duplicate fallback font', path)
     sources = [value for value, _ in sections['scripts']['source']]
     if len(sources) > MAX_SOURCES:
         fail('too many script sources', path)
@@ -262,6 +273,8 @@ def append_inline(operations, value, path, line):
             if end < 0:
                 fail('unclosed placeholder', path, line)
             name = value[index + 1:end]
+            if utf8_length(name) >= 256:
+                fail('invalid placeholder: name exceeds runtime limit', path, line)
             digits = 0
             if ':' in name:
                 name, spec = name.split(':', 1)
@@ -292,6 +305,8 @@ def parse_command(message, line, path, line_number):
     except ValueError as error:
         fail(f'invalid command: {error}', path, line_number)
     command = parts[0]
+    if len(parts) > 128:
+        fail('command has too many arguments', path, line_number)
     arguments = parts[1:]
     operations = message['operations']
     if command in ('@line', '@paragraph', '@page', '@empty', '@end'):
@@ -310,7 +325,7 @@ def parse_command(message, line, path, line_number):
             'op': 'anchor', 'id': arguments[0], 'source_line': line_number})
         return
     if command == '@wait':
-        if len(arguments) != 1 or not arguments[0].isdigit():
+        if len(arguments) != 1 or not re.fullmatch(r'[0-9]+', arguments[0]):
             fail('@wait requires a decimal frame count', path, line_number)
         operations.append({
             'op': 'wait', 'frames': int(arguments[0]),
@@ -368,6 +383,12 @@ def finalize_message(message, path):
     return message
 
 
+def physical_lines(text):
+    # Match the runtime's CR/LF/CRLF grammar. str.splitlines() additionally
+    # consumes Unicode paragraph/line separators that are actual font content.
+    return re.split(r'\r\n|\r|\n', text)
+
+
 def parse_artext_text(text, path='<script>'):
     if utf8_length(text) > MAX_SCRIPT_BYTES:
         fail('script exceeds size limit', path)
@@ -377,12 +398,13 @@ def parse_artext_text(text, path='<script>'):
     seen = set()
     current = None
     previous_text_line = False
-    for line_number, physical in enumerate(text.splitlines(), 1):
-        stripped = physical.strip()
+    for line_number, physical in enumerate(physical_lines(text.removeprefix('\ufeff')), 1):
+        # NBSP and other Unicode whitespace are authored text, not grammar.
+        stripped = physical.strip(' \t')
         if stripped.startswith('::'):
             if current is not None:
                 messages.append(finalize_message(current, path))
-            semantic_id = stripped[2:].strip()
+            semantic_id = stripped[2:].strip(' \t')
             require_identifier(semantic_id, 'semantic message id', path,
                                line_number)
             if semantic_id in seen:
@@ -918,7 +940,30 @@ def source_operations_to_author(route, native_layout=None):
             visible[-1]['value'] = visible[-1]['value'].rstrip()
         operations = [operation for operation in normalized
                       if operation['op'] != 'text' or operation['value']]
-    return fixed_table_operations(operations, route['id'])
+    return strip_native_padding(fixed_table_operations(operations, route['id']))
+
+
+def strip_native_padding(operations):
+    """Blank cell runs clear native tiles; retain lines, not empty prose.
+
+    Padding adjacent to real text/placeholders remains content. This makes
+    explicit what the author parser already discards on otherwise blank rows.
+    """
+    result = []
+    start = 0
+    while start < len(operations):
+        end = start
+        while end < len(operations) and operations[end]['op'] in ('text', 'placeholder'):
+            end += 1
+        if end == start:
+            result.append(operations[start])
+            start += 1
+            continue
+        run = operations[start:end]
+        if not all(op['op'] == 'text' and not op['value'].strip(' \t') for op in run):
+            result.extend(run)
+        start = end
+    return result
 
 
 def build_source_messages(extraction):
@@ -984,7 +1029,7 @@ def progress_text(message_ids, statuses=None):
 
 def parse_progress_text(text, known_ids=None, path='<progress>'):
     statuses = {}
-    for line_number, physical in enumerate(text.splitlines(), 1):
+    for line_number, physical in enumerate(physical_lines(text), 1):
         if not physical or physical.startswith('#'):
             continue
         parts = physical.split('\t')

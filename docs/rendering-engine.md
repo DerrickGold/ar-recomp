@@ -319,7 +319,7 @@ live interval and whether each requested axis fit.
 | `$0000-$1FFF` | BG1+BG2 chars (BG12NBA=$00); Sky Palace capture is byte-identical to the `$4000`-byte ROM bank at `$0D:C000` (file `$06C000`) | `$02:B28E` (`ActRaiser_LoadActionCharacters` for guarded action shapes) + `$02:C5C9` decompressor pair |
 | `$2000-$2FFF` | common action OBJ atlas (OBSEL=$01, 8x8/16x16) | `$02:BC9E`: 4096 words from ROM `$07:8000-$07:9FFF` |
 | `$2D40-$2DBF` | reserved OBJ magic/effect overlays inside the common atlas | `$02:BC9E` writes 128 words to `$2D40`; `$00:96C3-$96F5` can arm 128-byte slot-0 upload to `$2D80` |
-| `$3000-$3FFF` | OBJ address space reachable through OBSEL name selection; resident contents/consumers not yet catalogued | `?` |
+| `$3000-$3FFF` | per-room enemy OBJ sheet; Fillmore `$01/$01` uses 8192 decoded bytes from file `$080000`. Bird visuals `$1F-$22` in the decoded `$7E:4000` table consume it | asset-script command 7, `$02:B28E` |
 | `$4000-$4FFF` | extra char bank (user `?` — B28E loads it; no NBA points there in-game) | `$02:B28E` |
 | `$5000-$57FF` | BG3 chars 2bpp (BG34NBA=$05); dialog font is the `$1000`-byte decode of compressed ROM `$17:ECFB` (file `$0BECFB`) | `$02:C5C9` decompressor |
 | `$5800-$5BFF` | BG3 map (BG3SC=$58, 32x32) — THE HUD | `$02:AEEB` per-frame stream from `$7F:B000` |
@@ -332,8 +332,19 @@ to CGRAM `$C0-$EF`, then selects a magic overlay rooted at `$06:A400` for
 VRAM `$2D40`. Descriptor slot 0's later armer is `$00:96C3-$96F5`: when
 object `$30 & $0040` and `$D5==0`, object `$38` selects a source rooted at
 `$06:A000`, target `$2D80`, size `$0080`. It then advances paired object
-states. Thus the **regular action atlas is static/common**, with small dynamic
-magic/effect replacements; there is no per-enemy sheet allocator to exhaust.
+states. Thus the **common action atlas is static**, with small dynamic
+magic/effect replacements; the separate `$3000` enemy atlas is supplied by the
+room script. There is no per-enemy sheet allocator to exhaust.
+
+The Master uses the common sheet: spawn record `$00:9810` installs `$0900` in
+object `+$28`; the emitter's XOR `$0100` cancels its bank-select bit and retains
+palette 4. Sword-trail parts add palette 5. Both facings must preserve the
+composition extent/offset pair rather than tight-cropping each pose. In normal
+orientation, OAM places a part at `worldX - leftExtent + partX` and
+`worldY - topExtent + partY - 1`; the Y subtraction includes the native
+carry quirk. Earlier OAM parts win overlap. Idle/walk/sword programs in
+`$06:8000` now also supply the builder's decorative actor poses; gameplay
+handlers, hitboxes and movement remain untouched.
 
 ## 9. OAM / sprite pipeline (action)
 

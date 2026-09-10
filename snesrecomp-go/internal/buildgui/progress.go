@@ -47,12 +47,13 @@ type phase struct {
 // source so a rename upstream fails a test here instead of silently
 // flattening the bar.
 var buildPhases = []phase{
+	{id: "localization", label: "Preparing the native US language source", banner: "Preparing native US language source", weight: 1},
 	{id: "regen", label: "Regenerating banks from your ROM", banner: "Regenerating banks", weight: 30},
 	{id: "funcs", label: "Syncing function declarations", banner: "Syncing funcs.h", weight: 1},
 	{id: "metadata", label: "Refreshing generated-code metadata", banner: "Refreshing generated-code metadata", weight: 2},
 	{id: "rts", label: "Auditing return-site coverage", banner: "RTS-web census", weight: 3},
 	{id: "stubs", label: "Checking for unimplemented code", banner: "Hard stub census", weight: 2},
-	{id: "compile", label: "Compiling the game", banner: "", weight: 50},
+	{id: "compile", label: "Compiling the game", banner: "", weight: 49},
 	{id: "link", label: "Linking the executable", banner: "", weight: 8},
 	{id: "install", label: "Installing your playable game", banner: "", weight: 4},
 }

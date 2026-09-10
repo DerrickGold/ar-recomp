@@ -132,7 +132,8 @@ They contain these broad groups:
 | `$E9CC/$EA27/$EA82/$EAEC` | Town-creation lightning frames initialized by selector `$0504`; live records are world process `$000E` with script base `$A8BB` in raw `+$06`; `$E527` is the interleaved offscreen gap | ground-targeted effect; record-origin anchor; no independent altitude or shadow |
 | `$EBE8-$EC09` | People/horse scene metatiles | grounded scene composite, not a flying actor |
 | `$EC14-$EC35` | Angel cloud tiles used by rain, thunder, and other miracles | flying effect |
-| `$EC40-$EDF8` | Large aggregate strips/grids and event effects | effect/controller, not one physical actor |
+| `$EC40/$EC6E` | Two 48×48 navigation Sky Palace frames, each a 3×3 grid of 16×16 parts. `$A7C5` alternates these at 96 ticks per frame. Their tile IDs require the navigation atlas/palette, not the town snapshot | fixed screen-centred navigation object |
+| `$EC9C-$EDF8` | Remaining large aggregate strips/grids and event effects | effect/controller, not one physical actor |
 
 The sailboat frame order is:
 

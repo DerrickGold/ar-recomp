@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{TITLE}}</title>
+<link rel="stylesheet" href="builder/theme.css">
+</head>
+<body>
+<div id="workshop-atmosphere" aria-hidden="true"><canvas id="ambient-scene" width="640" height="420"></canvas></div>
+<a class="skip-link" href="#workspace">Skip to workspace</a>
+<aside class="sidebar">
+  <a class="brand" href="#home"><span class="brand-sigil" aria-hidden="true">✦</span><span>ACTRAISER<small>THE WORKSHOP</small></span></a>
+  <div class="nav-label">YOUR WORKSPACE</div>
+  <div class="tabs" role="tablist" aria-orientation="vertical" aria-label="Workshop sections">
+    <button class="tab" id="tab-home" role="tab" aria-selected="true" aria-controls="panel-home"><span class="nav-icon" aria-hidden="true">⌂</span>Home</button>
+    <button class="tab" id="tab-build" role="tab" aria-selected="false" aria-controls="panel-build" tabindex="-1"><span class="nav-icon" aria-hidden="true">◇</span><span id="build-nav-label">Build game</span><span class="badge" aria-hidden="true"></span></button>
+    <button class="tab" id="tab-localization" role="tab" aria-selected="false" aria-controls="panel-localization" tabindex="-1" disabled title="Requires the native US language source"><span class="nav-icon" aria-hidden="true">文</span>Languages</button>
+    <button class="tab" id="tab-assets" role="tab" aria-selected="false" aria-controls="panel-assets" tabindex="-1"><span class="nav-icon" aria-hidden="true">♫</span>Assets</button>
+    <button class="tab" id="tab-manual" role="tab" aria-selected="false" aria-controls="panel-manual" tabindex="-1"><span class="nav-icon" aria-hidden="true">▤</span>Help &amp; manual</button>
+  </div>
+  <div class="sidebar-bottom">
+    <label for="scene-motion">A little atmosphere</label>
+    <select id="scene-motion"><option value="auto">Follow system</option><option value="animated">Animated scene</option><option value="still">Still scene</option><option value="off">Scene off</option></select>
+    <label for="scene-setting">Scenery</label>
+    <select id="scene-setting"><option value="fillmore">Fillmore · the Master’s patrol</option><option value="palace">Sky Palace · angel patrol</option></select>
+    <p class="local-note"><span aria-hidden="true">●</span> Local. Private. Yours.</p>
+    <button id="close" class="quiet" type="button">Close workshop</button>
+  </div>
+</aside>
+
+<main id="workspace" tabindex="-1">
+  <header class="workspace-bar"><span id="workspace-section">Home</span><div id="dock" data-open="false" data-kind="idle"><span id="workspace-status" class="status-badge" role="status">Checking installation…</span><span id="track" role="progressbar" aria-label="Build progress" aria-valuemin="0" aria-valuemax="100" hidden><span id="dock-pct" aria-hidden="true">0%</span></span><button id="dock-launch" type="button" hidden disabled>▶ Run game</button></div></header>
+  <section class="panel" id="panel-home" role="tabpanel" aria-labelledby="tab-home">
+    <div class="home-hero">
+      <div class="hero-copy"><p class="eyebrow">WELCOME TO YOUR WORKSHOP</p><h1>A little world.<br>Made yours.</h1><p class="lede">Build your game, give it a new voice, and make it feel like home.</p><div class="actions"><button id="home-primary" type="button" disabled>Checking your game…</button><button class="quiet" type="button" data-nav="localization" disabled>Explore languages <span aria-hidden="true">↗</span></button></div><p id="home-game-note" class="muted">Everything stays on this computer.</p></div>
+      <div class="scene-stage"><canvas id="palace-scene" width="640" height="420" aria-label="A small illustrated palace floating above the clouds"></canvas><span class="scene-caption" id="scene-caption">A moment above the clouds</span></div>
+    </div>
+    <div class="section-heading"><h2>Make it your own</h2><span class="muted">One small project at a time</span></div>
+    <div class="home-actions">
+      <button class="task-card" data-nav="localization" type="button" disabled><span class="card-icon" aria-hidden="true">文</span><strong>Give it a new voice</strong><span>Install a translation or pick up where you left off.</span><span class="card-link">Open languages ↗</span></button>
+      <button class="task-card" data-nav="assets" type="button"><span class="card-icon" aria-hidden="true">♫</span><strong>Set the atmosphere</strong><span>Choose title artwork and compare replacement music.</span><span class="card-link">Browse assets ↗</span></button>
+      <button class="task-card" data-nav="manual" type="button"><span class="card-icon" aria-hidden="true">▤</span><strong>Find your bearings</strong><span>Read the original manual and learn your way around.</span><span class="card-link">Open the guide ↗</span></button>
+    </div>
+    <p class="notice" data-language-status role="status">Checking the native US language source…</p>
+    <div class="section-heading"><h2>Back to your translations</h2><button id="home-refresh-projects" class="quiet" type="button" disabled>Refresh</button></div>
+    <div id="home-projects" class="project-library"><p class="empty-note">Your saved translation projects will appear here.</p></div>
+    <p class="privacy">Offline by design. Your ROM, translations, and custom assets stay on this computer.</p>
+  </section>
+
+  <section class="panel" id="panel-build" role="tabpanel" aria-labelledby="tab-build" hidden>
+    <div class="page-heading"><div><p class="eyebrow">FROM YOUR ROM TO YOUR GAME</p><h1>Build &amp; play</h1><p>Choose your local US ROM. We’ll prepare everything needed to play.</p></div></div>
+    <p class="notice" data-language-status role="status">Checking the native US language source…</p>
+    <!-- PLAY BLOCK. Shown whenever a built game is on disk, whether this
+         session built it or a previous one did. In launcher mode it is the only
+         thing here. -->
+    <div id="play-box" hidden>
+      <div class="play-head">
+        <div>
+          <div class="play-title" id="play-title">Your game is built and ready</div>
+          <div class="play-sub" id="play-sub"></div>
+        </div>
+        <button id="play" type="button" class="play-btn">&#9654;&nbsp; Play</button>
+      </div>
+    </div>
+
+    <!-- CLEANUP OFFER. Appears after a successful build, and on any install
+         that still carries removable build files. -->
+    <details id="slim-box" hidden>
+      <summary>Storage &amp; build tools</summary>
+      <p class="slim-copy" id="slim-copy">
+        The build tools are only needed for future rebuilds. You can remove them
+        and keep just the game &mdash; and if you ever want to rebuild, download
+        the package again from the repository.
+      </p>
+      <div class="actions">
+        <button id="slim" type="button" class="secondary">Clean up build tools</button>
+        <button id="slim-dismiss" type="button" class="quiet">Keep them</button>
+      </div>
+    </details>
+
+    <div id="slim-done" hidden class="slim-done">
+      Build tools removed &mdash; this install is now just the game.
+    </div>
+
+    <!-- BUILD BLOCK. Hidden entirely in launcher mode: with the inputs gone
+         there is nothing a ROM picker could accomplish, and a disabled control
+         invites the question "why?" without answering it. -->
+    <div id="build-box">
+      <form id="build-form">
+        <label for="rom" id="rom-label">ActRaiser ROM (.sfc or .smc)</label>
+        <input id="rom" name="rom" type="file" accept=".sfc,.smc" required>
+        <div class="actions">
+          <button id="build" type="submit">Build game</button>
+          <button id="launch" class="secondary" type="button" disabled>Launch game</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Why building is unavailable. Only rendered in the modes where the
+         build block is hidden, so it explains an absence rather than
+         decorating a working page. -->
+    <div id="nobuild" hidden class="notice">
+      <strong>Rebuilding is unavailable in this copy.</strong>
+      The build tools were removed to save space. Download the package again from
+      the repository if you want to rebuild from a ROM.
+    </div>
+
+    <div id="state" data-kind="idle">Ready to build &mdash; choose your ROM above</div>
+
+    <div id="steps-box" hidden>
+      <ol class="steps" id="steps">{{STEPS}}</ol>
+    </div>
+
+    <details id="log-box">
+      <summary>Build log</summary>
+      <pre id="log">Select your ROM to begin.</pre>
+    </details>
+    <p class="privacy">Your ROM is copied only into this local folder and is never uploaded.
+    This page talks only to the builder on 127.0.0.1.</p>
+  </section>
+
+  <section class="panel" id="panel-assets" role="tabpanel" aria-labelledby="tab-assets" hidden>
+    <div class="page-heading"><div><p class="eyebrow">YOUR PERSONAL EDITION</p><h1>Art &amp; sound</h1><p>Preview a replacement, choose your favorite, then save it for the next launch.</p></div></div>
+    <form id="assets-form">
+      <div class="asset-bar" id="asset-bar" data-dirty="false">
+        <div class="asset-bar-text">
+          <strong id="asset-bar-title">Asset replacements</strong>
+          <span id="asset-bar-note">Loading the current configuration&hellip;</span>
+        </div>
+        <div class="asset-bar-actions">
+          <button type="button" id="discard-assets" class="quiet" disabled>Discard</button>
+          <button type="submit" id="save-assets-top" disabled>Save changes</button>
+        </div>
+      </div>
+      <div class="asset-categories" aria-label="Asset categories"><button type="button" data-asset-category="music" aria-pressed="true">Music <span class="count">17</span></button><button type="button" data-asset-category="title" aria-pressed="false">Title artwork</button></div>
+
+      <div class="asset-title-card" id="asset-title-view" hidden>
+        <img src="title-logo.png" width="2087" height="754" loading="lazy"
+             alt="Preview of the included high-resolution ActRaiser title treatment">
+        <div class="asset-title-copy">
+          <h2>High-resolution title</h2>
+          <p>The included art replaces both the settled title logo and its Mode-7 intro swirl.
+          Turn it off at any time to return to the ROM artwork.</p>
+          <div class="asset-toggle">
+            <input id="title-toggle" name="title" type="checkbox">
+            <label for="title-toggle">Use the included HD title</label>
+          </div>
+          <input id="title-change" name="title-change" type="hidden" value="0">
+        </div>
+      </div>
+
+      <div class="asset-music" id="asset-music-view">
+        <div class="asset-browser"><div class="asset-track-picker"><label for="asset-track-toggle">Music track</label><button id="asset-track-toggle" type="button" aria-expanded="false" aria-controls="asset-track-options"><span id="asset-selected-track">Choose a track</span><span aria-hidden="true">▾</span></button><div id="asset-track-options" hidden><label for="asset-search" class="sr-only">Search music tracks</label><input id="asset-search" type="search" placeholder="Search Sky Palace, Fillmore…" autocomplete="off"><div id="asset-track-list" aria-label="Matching music tracks"></div><p id="asset-search-empty" class="muted" role="status" hidden>No matching tracks.</p></div></div><div class="asset-detail">
+        <div class="preview-tools">
+          <button id="generate-previews" type="button" disabled>
+            Extract original-audio previews
+          </button>
+          <!-- Previews are cached per ROM, and the renderer is deterministic, so
+               re-running it changes nothing until the cached file is gone. This
+               discards them first: the escape hatch for a preview that sounds
+               wrong without asking anyone to find a cache directory by hand. -->
+          <button id="regenerate-previews" class="quiet" type="button" hidden>
+            Discard and re-render
+          </button>
+          <span id="preview-state" role="status">
+            Supply a ROM on the Build tab to enable original-audio comparisons.
+          </span>
+        </div>
+        <div class="asset-rows">{{ASSET_TRACKS}}</div>
+        </div></div>
+      </div>
+
+      <template id="asset-row-prototype">{{ASSET_ROW_PROTOTYPE}}</template>
+
+
+      <div class="actions asset-bottom-save">
+        <button id="save-assets" type="submit" disabled>Save assets</button>
+      </div>
+      <div id="asset-state" role="status">Open this tab to load the current configuration.</div>
+      <p class="privacy">Replacement files stay on this computer and are never uploaded.
+      Saved changes take effect the next time the game starts.</p>
+    </form>
+  </section>
+
+  {{LOCALIZATION}}
+  <section class="panel" id="panel-manual" role="tabpanel" aria-labelledby="tab-manual" hidden>
+    <div class="page-heading"><div><p class="eyebrow">A LITTLE GUIDANCE</p><h1>Help &amp; manual</h1><p>The original booklet, plus a few workshop essentials.</p></div></div>
+    <details class="workshop-help"><summary>How do workshop projects and installed packs differ?</summary><p>Opening a pack makes an editable workshop copy. Saving keeps your work, but does not update the game. Use Review &amp; install to apply it, restart the game, then select the package name under Localization with Enhanced text rendering.</p></details>
+    <div class="manual-bar">
+      <p>The original 40-page instruction booklet &mdash; your browser's own reader
+      handles paging, zoom and search.</p>
+      <a class="linkbtn" href="manual.pdf" target="_blank" rel="noreferrer">Open in a new tab</a>
+    </div>
+    <iframe id="manual-frame" title="ActRaiser instruction booklet"></iframe>
+    <details class="blurb"><summary>About ActRaiser</summary><img class="manual-cover" src="boxart.webp" width="760" height="555" loading="lazy" alt="Original ActRaiser box artwork">
+      <h2>Action &amp; Simulation</h2>
+      <p>Pulse-stopping action sequences combined with a Simulation Mode that lets you
+      forge a new civilization &mdash; a game built to use the Super NES to the full.
+      Long ago you and your people built a peaceful land; since then the evil Tanzra
+      and his Guardians have made it a breeding ground for monsters. Punish Tanzra and
+      give your people back the world they knew.</p>
+      <p class="colophon">Text and artwork &copy; 1990&ndash;1992 Quintet / Enix.
+      Reproduced from the retail packaging and manual for reference. This project ships
+      no game code or data &mdash; that is generated on this machine from your own ROM.</p>
+    </details>
+  </section>
+</main>
+
+<script src="builder/scene.js" type="module"></script>
+<script src="builder/app.js" defer></script>
+</body>
+</html>

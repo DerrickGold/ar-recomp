@@ -26,9 +26,14 @@ void ActRaiserLocalizationRuntime_ScheduleByte(
 bool ActRaiserLocalizationRuntime_ContinueDialogue(
     const ActRaiserLocalizationDialogueHost *host, bool retain_rows);
 void ActRaiserLocalizationRuntime_ReturnDialogue(void);
+void ActRaiserLocalizationRuntime_RevealGlyph(
+    uint8_t text_speed, const ActRaiserLocalizationDialogueHost *host);
+/* Only $901C's call to $9278 is replaced, never the shared delay's other users. */
+bool ActRaiser_LocalizationScheduleGlyphDelay(CpuState *cpu);
+RecompReturn ActRaiser_LocalizationGlyphDelay(CpuState *cpu);
 
 /* Conditional HLE seams: interpreter/reader wrappers always execute the
- * original bodies. Only enhanced continuation waits are adapted. */
+ * original bodies. Enhanced glyph timing and continuation waits are adapted. */
 bool ActRaiser_LocalizationScheduleEntry(CpuState *cpu);
 RecompReturn ActRaiser_LocalizationRunDialogue(CpuState *cpu);
 bool ActRaiser_LocalizationScheduleByte(CpuState *cpu);

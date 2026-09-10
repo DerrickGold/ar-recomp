@@ -117,6 +117,43 @@ def native_break_tests():
 
 
 def main():
+    clearing = [
+        {'op': 'text', 'value': 'Label '}, {'op': 'placeholder', 'name': 'master_name'},
+        {'op': 'text', 'value': '  '}, {'op': 'line'},
+        {'op': 'text', 'value': '   '}, {'op': 'line'}, {'op': 'end'},
+    ]
+    normalized = PACK.strip_native_padding(clearing)
+    assert normalized == clearing[:4] + clearing[5:]
+    def presentation(ops):
+        return PACK.canonical_messages(PACK.parse_artext_text(PACK.emit_artext([
+            {'id': 'test.clear', 'operations': ops}])))
+    assert presentation(clearing) == presentation(normalized)
+    assert PACK.strip_native_padding([{'op': 'text', 'value': '\u00a0'}]) == [
+        {'op': 'text', 'value': '\u00a0'}]
+    for path in ('../font.ttf', 'fonts/./font.ttf', 'C:font.ttf',
+                 'font.ttf:stream', 'NUL.ttf', 'nul .ttf', 'LPT³.ttf',
+                 'fonts/end./font.ttf', 'fonts/end /font.ttf', 'bad?.ttf'):
+        try:
+            PACK.portable_relative_path(path)
+        except PACK.LanguagePackError:
+            pass
+        else:
+            raise AssertionError(f'non-portable path accepted: {path!r}')
+    assert PACK.portable_relative_path('fonts/École.ttf') == 'fonts/École.ttf'
+    # The C loader and Go editor retain Unicode whitespace as content. The
+    # development oracle must not consume it as a physical source separator.
+    whitespace = PACK.parse_artext_text(
+        ':: action.hud.act_1\r\n\u00a0\r\n@line\r\nx\u2028y\r\n@end\r\n')
+    assert whitespace[0]['operations'] == [
+        {'op': 'text', 'value': '\u00a0', 'source_line': 2},
+        {'op': 'line', 'source_line': 3},
+        {'op': 'text', 'value': 'x\u2028y', 'source_line': 4},
+        {'op': 'end', 'source_line': 5},
+    ]
+    expect_error(lambda: PACK.parse_artext_text(':: a\n@wait ١\n'),
+                 'decimal frame count')
+    expect_error(lambda: PACK.parse_artext_text(
+        ':: a\n@anchor "reset_text_cursor\\.00"\n'), 'anchor id')
     real_catalog = json.loads((ROOT / 'tools/data/localization/semantic-catalog-v1.json').read_text())
     for tail in ('Unreachable.', '@page', '@wait 1', '@line'):
         after_yield = PACK.parse_artext_text(

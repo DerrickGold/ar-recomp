@@ -28,6 +28,7 @@
 #include "config.h"
 #include "crt_post.h"
 #include "settings.h"
+#include "localization/pack_discovery.h"
 #include "settings_overlay.h"
 #include "sim/sim3d_depth_pass.h"
 #include "input_map.h"
@@ -947,6 +948,23 @@ static void AppBoot_ResolveDisplayAndSettings(AppBoot *app) {
   if (!settings_path || !settings_path[0])
     settings_path = UserDataFile(settings_file, sizeof settings_file,
                                  "settings.ini");
+  /* The launcher has resolved the runtime working directory (utils/ in a
+   * bundle). Catalog scanning does not move it to the executable directory. */
+  ArLanguagePackCatalog *catalog = calloc(1, sizeof(*catalog));
+  SettingsLocalizationPack *choices = calloc(kSettingsLocalizationMaximumPacks, sizeof(*choices));
+  if (catalog && choices && ArLanguagePackCatalog_ScanDesktop(catalog, "game-assets/languages/packs")) {
+    for (size_t i = 0; i < catalog->count; ++i) {
+      const ArLanguagePackCatalogEntry *entry = &catalog->entries[i];
+      snprintf(choices[i].id, sizeof(choices[i].id), "%s", entry->metadata.package_id);
+      snprintf(choices[i].name, sizeof(choices[i].name), "%s", entry->metadata.display_name);
+      snprintf(choices[i].locale, sizeof(choices[i].locale), "%s", entry->metadata.locale);
+      snprintf(choices[i].manifest, sizeof(choices[i].manifest), "%s", entry->manifest);
+    }
+    if (!Settings_SetLocalizationPacks(choices, catalog->count))
+      fprintf(stderr, "[localization] installed pack catalog has conflicting identities\n");
+  }
+  free(choices);
+  free(catalog);
   Settings_InitWithFile(settings_path);
   HostDisplay_ResolveVideoGeometry(false);
 

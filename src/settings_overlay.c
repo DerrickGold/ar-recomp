@@ -1942,8 +1942,8 @@ static void ChangeSelectedValue(int direction) {
       } else {
         long step = desc->step > 0 ? desc->step : 1;
         next = value + (direction < 0 ? -step : step);
-        if (next < desc->minval) next = desc->maxval;
-        if (next > desc->maxval) next = desc->minval;
+        if (next < desc->minval) next = Settings_Maximum(desc);
+        if (next > Settings_Maximum(desc)) next = desc->minval;
       }
       SaveAcceptedChange(Settings_SetLong(desc, next));
       return;

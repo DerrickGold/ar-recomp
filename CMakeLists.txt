@@ -466,6 +466,11 @@ if(BUILD_TESTING)
         tests/language_pack_test.c
         src/localization/language_pack.c
         src/localization/language_contract.c)
+    add_executable(actraiser_language_pack_discovery_test
+        tests/language_pack_discovery_test.c
+        src/localization/pack_discovery.c src/localization/language_pack.c)
+    target_include_directories(actraiser_language_pack_discovery_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_language_pack_discovery COMMAND actraiser_language_pack_discovery_test)
     target_include_directories(actraiser_language_pack_runtime_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_language_pack_runtime
@@ -560,6 +565,19 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_localization_art
         COMMAND actraiser_localization_art_test)
 
+    # Primary author/editor gate directly exercises the game's production C
+    # loader and semantic validator against Go. No Python or ROM is required.
+    find_program(ACTRAISER_GO_EXECUTABLE NAMES go)
+    if(ACTRAISER_GO_EXECUTABLE)
+        add_test(NAME actraiser_go_localization_author
+            COMMAND ${ACTRAISER_GO_EXECUTABLE} test ./internal/localizationkit
+                -run Author -count=1)
+        set_tests_properties(actraiser_go_localization_author PROPERTIES
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/snesrecomp-go"
+            ENVIRONMENT "GOCACHE=${CMAKE_BINARY_DIR}/go-cache;AR_AUTHOR_RUNTIME_PROBE=$<TARGET_FILE:actraiser_language_pack_runtime_test>"
+            TIMEOUT 120)
+    endif()
+
     if(Python3_Interpreter_FOUND)
         add_test(NAME actraiser_font_asset
             COMMAND ${Python3_EXECUTABLE}
@@ -573,6 +591,21 @@ if(BUILD_TESTING)
         add_test(NAME actraiser_language_pack_catalog
             COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_SOURCE_DIR}/tests/language_pack_catalog_test.py)
+        add_test(NAME actraiser_go_localization_profiles
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/generate_go_localization_profiles.py
+                --check)
+        if(ACTRAISER_GO_EXECUTABLE)
+            # ROM-free, independent Python/Go reader, source and catalogue checks.
+            # Retail parity remains an additional local five-ROM release gate.
+            add_test(NAME actraiser_go_localization_decoder
+                COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_SOURCE_DIR}/tools/check_go_localization_decoder.py
+                    --go ${ACTRAISER_GO_EXECUTABLE})
+            set_tests_properties(actraiser_go_localization_decoder PROPERTIES
+                ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1;GOCACHE=${CMAKE_BINARY_DIR}/go-cache"
+                TIMEOUT 180)
+        endif()
         add_test(NAME actraiser_language_contract_generation
             COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_SOURCE_DIR}/tools/generate_language_contract_data.py
@@ -589,6 +622,7 @@ if(BUILD_TESTING)
             actraiser_language_pack_extract
             actraiser_language_pack_v1
             actraiser_language_pack_catalog
+            actraiser_go_localization_profiles
             actraiser_language_contract_generation
             actraiser_localization_route_generation
             actraiser_localization_compose_route_generation

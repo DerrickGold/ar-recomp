@@ -40,8 +40,9 @@ typedef struct DialogueWindow {
   uint64_t revision;
   size_t bytes;
   size_t current_page_offset;
-  uint32_t current_page_clusters;
-  uint32_t current_page_prefix_clusters;
+  size_t current_page_source_offset;
+  size_t current_page_source_bytes;
+  uint16_t reveal_offsets[kArLocalizationFrameTextCapacity + 1u];
   uint32_t clusters;
   char text[kArLocalizationFrameTextCapacity];
 } DialogueWindow;
@@ -51,7 +52,7 @@ typedef struct LocalizationRuntime {
   bool enabled;
   bool refresh_pending;
   bool native_attempted;
-  bool selected_attempted;
+  int selected_content;
   int content;
   int presentation;
   ArLanguagePack selected_pack;
@@ -193,9 +194,8 @@ static bool EnsureConfigured(void) {
     ActRaiserLocalizationComposeState_Init(&s_runtime.compose);
     ActRaiserLocalizationNameEntryTracker_Init(&s_runtime.name_tracker);
     s_runtime.content = -1;
+    s_runtime.selected_content = -1;
     s_runtime.presentation = -1;
-    (void)CopyPath(s_runtime.manifest_path, sizeof(s_runtime.manifest_path),
-                   getenv("AR_LOCALIZATION_PACK"));
     const char *native = getenv("AR_LOCALIZATION_NATIVE_PACK");
     (void)CopyPath(s_runtime.native_manifest_path,
                    sizeof(s_runtime.native_manifest_path),
@@ -208,6 +208,10 @@ static bool EnsureConfigured(void) {
     return s_runtime.enabled;
 
   ArLanguagePackError error = {{0}};
+  ArLanguagePack candidate;
+  ArLanguagePack_Init(&candidate);
+  bool candidate_ready = false;
+  const char *selected_manifest = s_runtime.manifest_path;
   if (presentation && !s_runtime.native_attempted) {
     s_runtime.native_attempted = true;
     if (!LoadRuntimePack(&s_runtime.native_pack,
@@ -215,14 +219,15 @@ static bool EnsureConfigured(void) {
       fprintf(stderr, "[localization] enhanced USA fallback unavailable: %s\n",
               error.message);
   }
-  if (presentation && content && !s_runtime.selected_attempted) {
-    s_runtime.selected_attempted = true;
+  if (presentation && content && content != s_runtime.selected_content) {
+    selected_manifest = Settings_LocalizationPackPath(content);
     error.message[0] = 0;
-    (void)LoadRuntimePack(&s_runtime.selected_pack, s_runtime.manifest_path,
-                          false, &error);
+    if (!selected_manifest || strlen(selected_manifest) >= sizeof(s_runtime.manifest_path) ||
+        !LoadRuntimePack(&candidate, selected_manifest, false, &error)) goto reject;
+    candidate_ready = true;
   }
   const ArLanguagePack *pack =
-      content ? &s_runtime.selected_pack : &s_runtime.native_pack;
+      content ? (candidate_ready ? &candidate : &s_runtime.selected_pack) : &s_runtime.native_pack;
   const ArLanguagePackMetadata *metadata =
       pack->content_revision ? ArLanguagePack_GetMetadata(pack) : NULL;
   char font_path[kArLocalizationFrameFontPathCapacity] = {0};
@@ -230,7 +235,7 @@ static bool EnsureConfigured(void) {
                      [kArLocalizationFrameFontPathCapacity] = {{0}};
   const char *fallbacks[kArTextPresentationMaximumFallbackFonts] = {0};
   if (presentation &&
-      (!metadata || !ResolveFontPath(content ? s_runtime.manifest_path
+      (!metadata || !ResolveFontPath(content ? selected_manifest
                                              : s_runtime.native_manifest_path,
                                      metadata->primary_font, font_path,
                                      sizeof(font_path)))) {
@@ -246,7 +251,7 @@ static bool EnsureConfigured(void) {
       goto reject;
     }
     for (uint32_t i = 0; i < metadata->fallback_font_count; ++i) {
-      if (!ResolveFontPath(content ? s_runtime.manifest_path
+      if (!ResolveFontPath(content ? selected_manifest
                                    : s_runtime.native_manifest_path,
                            metadata->fallback_fonts[i], fallback_paths[i],
                            sizeof(fallback_paths[i]))) {
@@ -277,6 +282,7 @@ static bool EnsureConfigured(void) {
   }
   ArDialogueContentSelection selection;
   MakeSelection(content, presentation, &selection);
+  if (presentation && content) selection.selected_pack = pack;
   const bool was_scheduled = ActRaiserLocalizationRuntime_DialogueScheduled();
   if (!was_scheduled && !SynchronizeObservedDialogue(
                             s_runtime.pack ? s_runtime.pack : pack, &error))
@@ -285,6 +291,17 @@ static bool EnsureConfigured(void) {
       !ArDialogueSession_SwitchBounded(&s_runtime.session, &selection,
                                        kArLocalizationFrameTextCapacity, &error))
     goto reject;
+  /* Sessions own their composed program. Only after validation, font readiness
+   * and bounded live-switch succeed can we retire the previous pack storage. */
+  if (candidate_ready) {
+    ArLanguagePack_Destroy(&s_runtime.selected_pack);
+    s_runtime.selected_pack = candidate;
+    ArLanguagePack_Init(&candidate);
+    s_runtime.selected_content = content;
+    (void)CopyPath(s_runtime.manifest_path, sizeof(s_runtime.manifest_path), selected_manifest);
+    pack = &s_runtime.selected_pack;
+    metadata = ArLanguagePack_GetMetadata(pack);
+  }
   s_runtime.content = content;
   s_runtime.presentation = presentation;
   s_runtime.scheduled_dialogue = presentation && s_runtime.route &&
@@ -321,6 +338,7 @@ static bool EnsureConfigured(void) {
   return s_runtime.enabled;
 
 reject:
+  ArLanguagePack_Destroy(&candidate);
   fprintf(stderr,
           "[localization] selection rejected (%s); prior selection retained\n",
           error.message);
@@ -397,17 +415,21 @@ static bool NormalizeText(
     bool preserve_blank_lines,
     char *destination, size_t capacity, size_t *destination_bytes,
     ArLocalizationInlineObjectSnapshot *destination_objects,
-    size_t destination_object_capacity, uint8_t *destination_object_count) {
+    size_t destination_object_capacity, uint8_t *destination_object_count,
+    uint16_t *reveal_offsets) {
   if (!source || !destination || !capacity || !destination_bytes ||
       !destination_object_count ||
       (source_object_count && (!source_objects || !destination_objects)) ||
       source_object_count > destination_object_capacity ||
-      source_object_count > UINT8_MAX)
+      source_object_count > UINT8_MAX ||
+      (reveal_offsets && (source_bytes > kArLocalizationFrameTextCapacity ||
+                          capacity > UINT16_MAX)))
     return false;
   size_t written = 0;
   size_t object_index = 0;
   bool pending_space = false;
   for (size_t index = 0; index < source_bytes; ++index) {
+    if (reveal_offsets) reveal_offsets[index] = (uint16_t)written;
     const char byte = source[index];
     if (byte == ' ' || byte == '\t' || byte == '\r') {
       pending_space = written && destination[written - 1u] != '\n';
@@ -461,6 +483,7 @@ static bool NormalizeText(
     --written;
   destination[written] = 0;
   *destination_bytes = written;
+  if (reveal_offsets) reveal_offsets[source_bytes] = (uint16_t)written;
   if (object_index != source_object_count) return false;
   *destination_object_count = (uint8_t)object_index;
   /* A successfully resolved empty message is intentional, not a missing
@@ -506,13 +529,14 @@ static bool BuildDialogueWindow(
     if (!NormalizeText(page.utf8 + source_offset, page.utf8_bytes - source_offset,
                        NULL, 0, false,
                        window->text + offset, sizeof(window->text) - offset,
-                       &bytes, NULL, 0, &object_count))
+                       &bytes, NULL, 0, &object_count,
+                       index == current->page_index ? window->reveal_offsets : NULL))
       return false;
     window->bytes += bytes;
     if (index == current->page_index) {
       window->current_page_offset = offset;
-      window->current_page_clusters = CountClusters(window->text + offset, bytes);
-      window->current_page_prefix_clusters = CountClusters(page.utf8, source_offset);
+      window->current_page_source_offset = source_offset;
+      window->current_page_source_bytes = page.utf8_bytes - source_offset;
     }
   }
   window->clusters = CountClusters(window->text, window->bytes);
@@ -788,7 +812,7 @@ static bool ResolveNameEntryText(
         normalized, sizeof(normalized), &normalized_bytes,
         normalized_objects,
         sizeof(normalized_objects) / sizeof(normalized_objects[0]),
-        &normalized_object_count);
+        &normalized_object_count, NULL);
   }
   if (resolved) {
     resolved = ClearNameEntryUnderline(
@@ -829,7 +853,7 @@ static bool ResolveNameEntryText(
         page.utf8, page.utf8_bytes,
         page.inline_objects, page.inline_object_count, false,
         utf8, utf8_capacity, utf8_bytes,
-        inline_objects, inline_object_capacity, inline_object_count);
+        inline_objects, inline_object_capacity, inline_object_count, NULL);
   }
   if (resolved) {
     resolved = ClearNameEntryUnderline(
@@ -916,7 +940,7 @@ static bool ResolveComposeText(
           page.inline_objects, page.inline_object_count,
           status_table,
           utf8, utf8_capacity, utf8_bytes,
-          inline_objects, inline_object_capacity, inline_object_count);
+          inline_objects, inline_object_capacity, inline_object_count, NULL);
     }
   }
   if (resolved) {
@@ -1219,12 +1243,12 @@ bool ActRaiserLocalizationRuntime_ContinueDialogue(
   return AdvanceScheduledPage(retain_rows);
 }
 
-/* Native glyph tokens supply the usual reveal ratio. A native page boundary
- * drains only the current authored page; a locked control/end drains added
+/* Expanded native glyphs supply reveal opportunities, never source-byte ratios.
+ * A native page boundary drains only the current authored page;
+ * a locked control/end drains added
  * pages too, without ever acknowledging a control itself. All optional waits
  * are consumed through Next/TickWait rather than skipped by ratio mapping. */
-static bool PumpDialogue(uint32_t source_revealed, uint32_t source_units,
-                         bool cross_pages, uint8_t text_speed, bool pace,
+static bool PumpDialogue(bool one_glyph, bool cross_pages, uint8_t text_speed,
                          const ActRaiserLocalizationDialogueHost *host,
                          ArDialogueToken *last) {
   ArLanguagePackError error = {{0}};
@@ -1237,7 +1261,6 @@ static bool PumpDialogue(uint32_t source_revealed, uint32_t source_units,
         return false;
       if (!ActRaiserLocalizationRuntime_DialogueScheduled())
         return false;
-      pace = true; /* Added pages have no native glyphs to pace their reveal. */
     }
     while (s_runtime.session.state.wait_frames_remaining) {
       if (!host->wait_frame(host->context)) {
@@ -1248,23 +1271,14 @@ static bool PumpDialogue(uint32_t source_revealed, uint32_t source_units,
         return false;
       ArDialogueSession_TickWait(&s_runtime.session, 1);
     }
-    const uint32_t target_clusters =
-        source_units
-            ? (uint32_t)(((uint64_t)source_revealed *
-                              s_runtime.session.state.page_cluster_count +
-                          source_units - 1u) /
-                         source_units)
-            : UINT32_MAX;
-    if (target_clusters != UINT32_MAX &&
-        s_runtime.session.state.revealed_cluster_count >= target_clusters)
-      return true;
     if (!ArDialogueSession_Next(&s_runtime.session, last, &error)) {
       ScheduleFailed(error.message);
       return false;
     }
     switch (last->kind) {
     case kArDialogueToken_Grapheme:
-      if (pace && last->first_scalar != ' ' && last->first_scalar != '\n') {
+      if (last->first_scalar != ' ' && last->first_scalar != '\n' &&
+          last->first_scalar != '\t' && last->first_scalar != '\r') {
         /* Match the native $901C delay scale, including instant text. */
         for (uint8_t tick = 0; tick < text_speed; ++tick) {
           if (!host->wait_frame(host->context)) {
@@ -1274,6 +1288,7 @@ static bool PumpDialogue(uint32_t source_revealed, uint32_t source_units,
           if (!ActRaiserLocalizationRuntime_DialogueScheduled())
             return false;
         }
+        if (one_glyph) return true;
       }
       break;
     case kArDialogueToken_WaitStarted:
@@ -1284,6 +1299,13 @@ static bool PumpDialogue(uint32_t source_revealed, uint32_t source_units,
     }
   }
   return false;
+}
+
+void ActRaiserLocalizationRuntime_RevealGlyph(
+    uint8_t text_speed, const ActRaiserLocalizationDialogueHost *host) {
+  if (!host || !host->wait_frame || !host->confirm_page) return;
+  ArDialogueToken token;
+  (void)PumpDialogue(true, false, text_speed, host, &token);
 }
 
 void ActRaiserLocalizationRuntime_ScheduleByte(
@@ -1336,19 +1358,9 @@ void ActRaiserLocalizationRuntime_ScheduleByte(
     }
   }
   const bool boundary = locked || code == 0 || code == 2;
-  uint32_t units = 0;
-  uint32_t revealed = 0;
-  if (!boundary) {
-    units = ActRaiserLocalizationRoute_PageUnitCount(s_runtime.route,
-                                                     observation->page_index);
-    if (!units)
-      return;
-    revealed = observation->page_unit_index;
-    if (revealed > units)
-      revealed = units;
-  }
+  if (!boundary) return;
   ArDialogueToken token;
-  if (!PumpDialogue(revealed, units, locked || code == 0, text_speed, false,
+  if (!PumpDialogue(false, locked || code == 0, text_speed,
                     host, &token))
     return;
   if (locked && (token.kind != kArDialogueToken_Control ||
@@ -1576,24 +1588,34 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
     return;
   }
   const DialogueWindow *window = &s_runtime.dialogue_window;
-  uint32_t revealed = window->current_page_clusters;
-  if (page.cluster_count > window->current_page_prefix_clusters) {
-    const uint32_t source_clusters = page.cluster_count - window->current_page_prefix_clusters;
-    const uint32_t source_revealed = page.revealed_cluster_count > window->current_page_prefix_clusters
-        ? page.revealed_cluster_count - window->current_page_prefix_clusters : 0;
-    revealed = (uint32_t)(((uint64_t)source_revealed *
-                           window->current_page_clusters + source_clusters - 1u) /
-                          source_clusters);
-    if (revealed > window->current_page_clusters)
-      revealed = window->current_page_clusters;
+  /* Whitespace normalization changes byte/cluster counts. Map the actual
+   * grapheme boundary through the cached normalization, not another ratio.
+   * This is O(1) per frame and never reveals half a UTF-8 grapheme. */
+  size_t source_revealed =
+      page.revealed_utf8_bytes > window->current_page_source_offset
+      ? page.revealed_utf8_bytes - window->current_page_source_offset : 0;
+  if (source_revealed > window->current_page_source_bytes)
+    source_revealed = window->current_page_source_bytes;
+  size_t reveal_bytes =
+      window->current_page_offset + window->reveal_offsets[source_revealed];
+  if (reveal_bytes > window->bytes) reveal_bytes = window->bytes;
+  static int reveal_trace = -1;
+  static uint64_t trace_ticket;
+  static size_t trace_bytes;
+  if (reveal_trace < 0) {
+    const char *value = getenv("AR_LOCALIZATION_REVEAL_TRACE");
+    reveal_trace = value && value[0] && value[0] != '0';
   }
-  size_t reveal_bytes = window->current_page_offset;
-  for (uint32_t cluster = 0; cluster < revealed; ++cluster) {
-    size_t next = 0;
-    if (!ArUnicodeGrapheme_Next(window->text, window->bytes, reveal_bytes,
-                                NULL, &next) || next <= reveal_bytes)
-      return;
-    reveal_bytes = next;
+  if (reveal_trace && (trace_ticket != s_runtime.dialogue_ticket ||
+                       trace_bytes != reveal_bytes)) {
+    const unsigned game_frame = g_ram[kActRaiserWram_GameFrame] |
+        ((unsigned)g_ram[kActRaiserWram_GameFrame + 1u] << 8);
+    fprintf(stderr,
+            "[localization-reveal] gf=%u serial=%llu page=%u bytes=%zu total=%zu\n",
+            game_frame, (unsigned long long)observation.serial,
+            page.page_index, reveal_bytes, window->bytes);
+    trace_ticket = s_runtime.dialogue_ticket;
+    trace_bytes = reveal_bytes;
   }
   const bool added = ArLocalizationFrame_AddDialogueWindow(
       frame, route->surface_id, destination, route->region,
@@ -1607,7 +1629,7 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
     frame->dialogue_ticket = s_runtime.dialogue_ticket;
     frame->dialogue_surface_id = route->surface_id;
   }
-  if (added && revealed == window->current_page_clusters &&
+  if (added && reveal_bytes == window->bytes &&
       observation.awaiting_page_advance &&
       frame->artwork[kArLocalizationArtwork_Continue].valid) {
     (void)ArLocalizationFrame_AddIndicator(

@@ -12,6 +12,11 @@
 
 uint8 g_ram[kActRaiserWramSize];
 Settings g_settings;
+static const char *s_installed_pack_path;
+const char *Settings_LocalizationPackPath(int content) {
+  if (content == 2) return s_installed_pack_path;
+  return content == 1 ? getenv("AR_LOCALIZATION_PACK") : NULL;
+}
 static uint8_t s_rom[65536];
 static unsigned s_failures, s_frames, s_confirms, s_resets, s_native_entries;
 static unsigned s_seen_pages;
@@ -19,6 +24,9 @@ static unsigned s_polls;
 static unsigned s_native_confirms;
 static bool s_first_poll_held;
 static bool s_prefix_seen, s_suffix_seen;
+static bool s_check_cadence;
+static unsigned s_cadence_frames;
+static unsigned s_cadence_speed;
 static void (*s_frame_hook)(void);
 static void (*s_native_byte_hook)(CpuState *cpu, uint8_t code);
 static void (*s_native_page_hook)(void);
@@ -129,6 +137,14 @@ RecompReturn bank_01_9284_M1X0(CpuState *cpu) {
     exit(1);
   }
   Capture();
+  if (s_check_cadence && s_frame.snapshot_count) {
+    const ArLocalizationTextSnapshot *snapshot = &s_frame.snapshots[0];
+    static const unsigned boundaries[] = {1, 5, 10, 12};
+    CHECK(s_cadence_speed && s_cadence_frames < 4 * s_cadence_speed);
+    if (s_cadence_speed && s_cadence_frames < 4 * s_cadence_speed)
+      CHECK(snapshot->revealed_utf8_bytes == boundaries[s_cadence_frames / s_cadence_speed]);
+    ++s_cadence_frames;
+  }
   if (s_frame_hook)
     s_frame_hook();
   /* Prove architectural restoration without undoing RAM/animation effects. */
@@ -158,6 +174,29 @@ RecompReturn bank_01_8C43_M1X0(CpuState *cpu) {
 /* Minimal ROM-free token driver. These are synthetic bytes, not a second
  * interpreter implementation. Real decoded-body/input parity is replayed too.
  */
+static void ExpandedGlyph(CpuState *cpu) {
+  const CpuState saved = *cpu;
+  cpu->A = (cpu->A & 0xff00u) | g_ram[0x200];
+  cpu_write8(cpu, 0, cpu->S--, 0x90);
+  cpu_write8(cpu, 0, cpu->S--, 0x26);
+  const uint8_t bank = cpu->PB, m = cpu->m_flag;
+  cpu->PB = 2;
+  CHECK(!ActRaiser_LocalizationScheduleGlyphDelay(cpu));
+  cpu->PB = bank;
+  cpu->m_flag = 0;
+  CHECK(!ActRaiser_LocalizationScheduleGlyphDelay(cpu));
+  cpu->m_flag = m;
+  cpu_write8(cpu, 0, cpu->S + 1, 0x27);
+  CHECK(!ActRaiser_LocalizationScheduleGlyphDelay(cpu));
+  cpu_write8(cpu, 0, cpu->S + 1, 0x26);
+  if (ActRaiser_LocalizationScheduleGlyphDelay(cpu)) {
+    CHECK(ActRaiser_LocalizationGlyphDelay(cpu) == RECOMP_RETURN_NORMAL);
+    CHECK(cpu->S == saved.S && cpu->X == saved.X && cpu->Y == saved.Y);
+    CHECK(cpu->A == (saved.A & 0xff00u) && cpu->_flag_C && cpu->_flag_Z && !cpu->_flag_N);
+  }
+  *cpu = saved;
+}
+
 static RecompReturn NativeDialogue(CpuState *cpu) {
   CHECK(!ActRaiser_LocalizationScheduleEntry(cpu)); /* Re-entry guard. */
   ++s_native_entries;
@@ -170,6 +209,7 @@ static RecompReturn NativeDialogue(CpuState *cpu) {
     const uint8_t code = (uint8_t)cpu->A;
     if (s_native_byte_hook)
       s_native_byte_hook(cpu, code);
+    if (code > 5 && code != ' ') ExpandedGlyph(cpu);
     if (code == 5)
       ++s_resets;
     else if (code == 2) {
@@ -219,8 +259,11 @@ RecompReturn bank_01_8E29_M1X0(CpuState *cpu) { return NativeDialogue(cpu); }
 RecompReturn bank_01_8E29_M1X1(CpuState *cpu) { return NativeDialogue(cpu); }
 RecompReturn bank_01_8FC5_M1X0(CpuState *cpu) {
   CHECK(!ActRaiser_LocalizationScheduleByte(cpu));
-  while (s_rom[cpu->Y] >= 0x80)
+  while (s_rom[cpu->Y] >= 0x80) {
+    for (unsigned n = 0; n < (s_rom[cpu->Y] & 7u) + 2u; ++n)
+      ExpandedGlyph(cpu);
     ++cpu->Y; /* Native internal dictionary loop. */
+  }
   cpu->A = (cpu->A & 0xff00u) | s_rom[cpu->Y++];
   cpu->S += 2;
   return RECOMP_RETURN_NORMAL;
@@ -551,6 +594,44 @@ int main(void) {
   CHECK(!s_frame_hook && s_confirms == 2 && s_frames == 12 &&
         s_seen_pages == 7);
   CHECK(s_font_preflights == 3);
+  /* A newly selected installed pack is staged, not loaded over the active
+   * working pack. Both malformed sources and font rejection retain it. */
+  s_installed_pack_path = "/missing/community-pack/pack.ini";
+  g_settings.localization_content = 2;
+  ActRaiserLocalizationRuntime_ApplySettings();
+  CHECK(g_settings.localization_content == 1);
+  s_installed_pack_path = getenv("AR_LOCALIZATION_PACK");
+  s_font_available = false;
+  g_settings.localization_content = 2;
+  ActRaiserLocalizationRuntime_ApplySettings();
+  CHECK(g_settings.localization_content == 1);
+  s_font_available = true;
+  g_settings.localization_content = 2;
+  ActRaiserLocalizationRuntime_ApplySettings();
+  CHECK(g_settings.localization_content == 2);
+  Run(0xfa7b, 0x8afb, one_page, sizeof(one_page), 0);
+  CHECK(s_confirms == 2 && s_frames == 12 && s_seen_pages == 7);
+  g_settings.localization_content = 1;
+  ActRaiserLocalizationRuntime_ApplySettings();
+
+  /* One visible grapheme per speed interval regardless of source compression,
+   * source length, removed whitespace, combining accents or astral UTF-8. */
+  const uint8_t cadence_sources[][12] = {
+      {5, 'a', 'b', 'c', 'd', 'e', 'f', 1},
+      {5, 0x80, 0x87, 1},
+      {5, 'a', 1},
+  };
+  for (unsigned i = 0; i < 3; ++i) {
+    const uint8_t speeds[] = {0, 1, 2, 4, 9};
+    for (unsigned j = 0; j < sizeof(speeds) / sizeof(speeds[0]); ++j) {
+      s_cadence_frames = 0;
+      s_cadence_speed = speeds[j];
+      s_check_cadence = true;
+      Run(0xf854, 0x8794, cadence_sources[i], sizeof(cadence_sources[i]), speeds[j]);
+      s_check_cadence = false;
+      CHECK(s_cadence_frames == 4 * speeds[j] && s_frames == 4 * speeds[j] && s_confirms == 0);
+    }
+  }
 
   s_first_poll_held = true;
   Run(0xfa7b, 0x8afb, one_page, sizeof(one_page), 0);

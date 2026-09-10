@@ -45,6 +45,8 @@ game ROM and should not be redistributed.
 - Go 1.24 or newer is required to build the tools or run their tests from source.
 - A C11 compiler, CMake 3.16+, and SDL3 development files for the traditional
   developer build. The hermetic/GUI path uses the packaged Zig and SDL3 inputs.
+  Games enabling enhanced text also require SDL3_ttf development files; its
+  headers and runtime are included in the supported standalone bundles.
 - A legally obtained, local ROM for the game being recompiled.
 
 The Go module has no third-party Go dependencies.
@@ -209,6 +211,13 @@ build-time dependencies. The hermetic path removes all but the last of those:
 snesbuild toolchain fetch                # pinned Zig, checksum-verified
 snesbuild build --hermetic --root .      # zig cc + link, no CMake
 ```
+
+For ActRaiser's local US text-source extraction, pass the selected ROM to
+`build --rom path/to/ar.sfc`; `all --rom ...` forwards the same selection to
+regeneration and building. Existing local source packs are not overwritten.
+The GUI's dependency scan and `doctor` check SDL3_ttf when the manifest links
+it. Native system packages may occupy separate prefixes; explicit SDKs and
+cross builds must contain both dependencies and never borrow host libraries.
 
 Windows ARM64 uses a native AArch64 Zig development snapshot rather than the
 stable 0.16.0 binary. The stable binary was itself miscompiled by an upstream
@@ -397,6 +406,10 @@ never falls back to the host's SDL3; pass
 `--sdl-include`/`--sdl-lib` for targets with no official redistributable to
 stage.
 
+`sdl stage` stages base SDL3 only. For an enhanced-text game, use a complete
+target SDL3 + SDL3_ttf SDK (the platform bundle includes one) with both header
+folders in the include directory and both libraries in the library directory.
+
 Run `v2regen help` or `v2regen <command> -h` for every option.
 Run `snesbuild help` or `snesbuild <command> -h` for project-driver options.
 
@@ -420,7 +433,7 @@ content and are intentionally outside the module's MIT grant.
 `packaging/` is a standalone CMake project that builds a **fully
 self-contained, one-click bundle per platform**: the whole buildable game
 project plus the build machinery (`tools/snesbuild`, the pinned Zig toolchain,
-and the supported SDL3 redistributables) and a `run-build` script. A user
+and the supported SDL3/SDL3_ttf redistributables) and a `run-build` script. A user
 unpacks it and runs the script, which opens the local graphical ROM picker and
 build log — no repository checkout or developer tools required.
 
@@ -433,7 +446,9 @@ Go is CGO-free, so every platform cross-builds from one machine. Bundles are
 named `actraiser-recomp-<os>-<arch>.{tar.xz,zip}` and written to the repo's
 `release/`. They contain only generic tools, the project's own authored
 source, and redistributable third-party components — never a ROM, generated C,
-or media assets (the asset manifest ships as an empty template). The packaging
+or retail media assets. The licensed shared Noto face and its OFL are included;
+HD/audio asset manifests remain templates. Generic Linux uses system SDL3 and
+SDL3_ttf development packages. The packaging
 CMake install manifest is the authoritative bundle contract.
 
 ## Documentation

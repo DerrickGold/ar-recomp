@@ -1,5 +1,18 @@
 # Third-party notices
 
+## SDL3_ttf and shared game font
+
+Standalone macOS and Windows distributions include the official SDL3_ttf
+redistributable alongside SDL3. Steam Deck uses Valve's corresponding Steam
+Runtime library; generic Linux uses system development packages. The selected
+SDK license and upstream FreeType, HarfBuzz, PlutoSVG and PlutoVG notices are
+retained under `utils/licenses/SDL3_ttf` in distributions, independently of the
+removable compiler SDK. Source provenance is recorded in
+[`packaging/licenses/sdl-ttf/README.md`](packaging/licenses/sdl-ttf/README.md).
+
+The shared Noto Sans face retains its SIL Open Font License beside the font at
+`game-assets/fonts/noto/OFL.txt`. Retail fonts and scripts are not distributed.
+
 ## Snaggletooth S-DSP accuracy core
 
 The runner's slot-accurate S-DSP implementation contains code adapted from

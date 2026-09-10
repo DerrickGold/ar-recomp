@@ -347,7 +347,7 @@ See [dialogue-system.md](dialogue-system.md) for the control and clear paths.
 | --- | --- |
 | `DB:Y` | Interactive or fixed source cursor; caller determines bank |
 | DP `$14` | Packed row/column saved by `$02:BF60` from A; not a global message ID |
-| `$7E:0200` | Dialogue pacing/retained-row mode: `$901C` delays non-space glyphs by this many `$9284` frames; zero selects clear at `$02` continuation, nonzero selects row advancement/scroll. Authored pages retain the same zero/nonzero window policy. |
+| `$7E:0200` | Dialogue pacing/retained-row mode: `$901C` delays non-space glyphs by this many `$9284` frames; zero selects clear at `$02` continuation, nonzero selects row advancement/scroll. Enhanced sessions apply this interval per authored Unicode grapheme through caller-scoped `$9278` (return `$9026`), not per compressed source token. Authored pages retain the same zero/nonzero window policy. |
 | `$7E:0201` | Text presentation-state byte initialized to `$FF` on interpreter entry; not a standalone host page counter |
 | `$7E:0288-$028F` | Eight live native player-name slots read by interactive `$06`; can precede SRAM `$1439` until the next save. `$0290` is terminator/padding. Never UTF-8 storage. |
 | `$7E:034B/$034C/$034D` | Name-entry selected column / row / entered length |

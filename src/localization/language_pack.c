@@ -217,17 +217,41 @@ static bool IsLocale(const char *value) {
   return true;
 }
 
+static bool IsReservedPathComponent(const char *part, size_t length) {
+  size_t base_length = 0;
+  while (base_length < length && part[base_length] != '.') base_length++;
+  while (base_length && part[base_length - 1] == ' ') base_length--;
+  if (base_length > 7) return false;
+  char base[8] = {0};
+  for (size_t i = 0; i < base_length; i++)
+    base[i] = part[i] >= 'a' && part[i] <= 'z'
+                  ? (char)(part[i] - 'a' + 'A') : part[i];
+  if (!strcmp(base, "CON") || !strcmp(base, "PRN") ||
+      !strcmp(base, "AUX") || !strcmp(base, "NUL") ||
+      !strcmp(base, "CONIN$") || !strcmp(base, "CONOUT$"))
+    return true;
+  if (strncmp(base, "COM", 3) && strncmp(base, "LPT", 3)) return false;
+  return (base_length == 4 && base[3] >= '1' && base[3] <= '9') ||
+         (base_length == 5 && (uint8_t)base[3] == 0xC2 &&
+          ((uint8_t)base[4] == 0xB9 || (uint8_t)base[4] == 0xB2 ||
+           (uint8_t)base[4] == 0xB3));
+}
+
 static bool IsPortableRelativePath(const char *path) {
   if (!path || !path[0] || path[0] == '/' || strchr(path, '\\') ||
       path[strlen(path) - 1] == '/')
     return false;
   const char *part = path;
   for (const char *cursor = path;; cursor++) {
+    if (*cursor && ((uint8_t)*cursor < 0x20 || *cursor == 0x7F ||
+                    strchr("<>:\"|?*", *cursor)))
+      return false;
     if (*cursor == '/' || *cursor == 0) {
       const size_t length = (size_t)(cursor - part);
       if (length == 0 || (length == 1 && part[0] == '.') ||
           (length == 2 && part[0] == '.' && part[1] == '.') ||
-          (part == path && part[length - 1] == ':'))
+          part[length - 1] == '.' || part[length - 1] == ' ' ||
+          IsReservedPathComponent(part, length))
         return false;
       if (*cursor == 0)
         return true;
@@ -301,7 +325,9 @@ static bool AddManifestPath(char paths[][kArLanguageFontPathCapacity],
     SetError(error, "%s:%u: too many %s entries", manifest_path, line, kind);
     return false;
   }
-  if (!IsPortableRelativePath(value)) {
+  const bool builtin_font = strcmp(kind, "fallback font") == 0 &&
+                            strncmp(value, "builtin:", 8) == 0;
+  if (!(builtin_font ? IsIdentifier(value + 8) : IsPortableRelativePath(value))) {
     SetError(error, "%s:%u: %s path must be portable and relative: %s",
              manifest_path, line, kind, value);
     return false;
@@ -843,6 +869,11 @@ static bool TokenizeCommand(char *line, char **tokens, uint32_t *token_count,
                    line_number);
           return false;
         }
+        /* Inside double quotes only quote/backslash are escaped. Retaining
+         * other backslashes prevents silently turning an invalid identifier
+         * into a different, valid native anchor. Match the author grammar. */
+        if (quote == '"' && *source != '"' && *source != '\\')
+          *write++ = current;
         *write++ = *source++;
         continue;
       }

@@ -1,0 +1,1492 @@
+{
+  "descriptor_abis": {
+    "native": {
+      "slot_0": {
+        "byte_count": "$D5",
+        "source_address": "$D0",
+        "source_bank": "$D2",
+        "vram_destination": "$D3"
+      },
+      "slot_1": {
+        "byte_count": "$DC",
+        "source_address": "$D7",
+        "source_bank": "$D9",
+        "vram_destination": "$DA"
+      }
+    },
+    "shifted_western": {
+      "slot_0": {
+        "byte_count": "$D6",
+        "source_address": "$D1",
+        "source_bank": "$D3",
+        "vram_destination": "$D4"
+      },
+      "slot_1": {
+        "byte_count": "$DD",
+        "source_address": "$D8",
+        "source_bank": "$DA",
+        "vram_destination": "$DB"
+      }
+    }
+  },
+  "descriptor_details": {
+    "action_magic_overlay": {
+      "byte_count": "$0080",
+      "classification": "verified_non_language_action_graphics",
+      "destination": "$2D80",
+      "slot": 0
+    },
+    "action_spell_upload_a": {
+      "classification": "verified_non_language_spell_graphics",
+      "destination": "$1F00-$27FF in $0200-byte chunks",
+      "slot": 0
+    },
+    "action_spell_upload_b": {
+      "classification": "verified_non_language_spell_graphics",
+      "destination": "$1F00-$27FF in $0200-byte chunks",
+      "slot": 0
+    },
+    "animation_target_config": {
+      "classification": "verified_non_language_animation_target",
+      "destination": "$0000 or $1000",
+      "slot": 1
+    },
+    "scene_initialization_source": {
+      "classification": "verified_non_language_scene_graphics",
+      "destination": "paired animation target",
+      "slot": 1
+    },
+    "tile_animation_source": {
+      "classification": "verified_non_language_animation_graphics",
+      "destination": "$0000 or $1000 (paired target configuration)",
+      "slot": 1
+    },
+    "world_water_selector": {
+      "classification": "verified_non_language_water_graphics",
+      "destination": "$0000 and $2A80 (fixed DMA consumers)",
+      "slot": 1
+    }
+  },
+  "descriptor_patterns": {
+    "native": [
+      {
+        "hex": "a90685d2c220a9802d85d3a9800085d5",
+        "id": "action_magic_overlay"
+      },
+      {
+        "hex": "84d085d2c220faa9001f85d3",
+        "id": "action_spell_upload_a"
+      },
+      {
+        "hex": "a9007e85d0e220a90785d2c220a9001f85d3",
+        "id": "action_spell_upload_b"
+      },
+      {
+        "hex": "6900b885d7e220c210a6e186dc",
+        "id": "tile_animation_source"
+      },
+      {
+        "hex": "29c000186900b085d7a9400085dc",
+        "id": "world_water_selector"
+      },
+      {
+        "hex": "a97fa200b886d78dd900",
+        "id": "scene_initialization_source"
+      },
+      {
+        "hex": "1003a0001084da",
+        "id": "animation_target_config"
+      }
+    ],
+    "shifted_western": [
+      {
+        "hex": "a90685d3c220a9802d85d4a9800085d6",
+        "id": "action_magic_overlay"
+      },
+      {
+        "hex": "84d185d3c220faa9001f85d4",
+        "id": "action_spell_upload_a"
+      },
+      {
+        "hex": "a9007e85d1e220a90785d3c220a9001f85d4",
+        "id": "action_spell_upload_b"
+      },
+      {
+        "hex": "6900b885d8e220c210a6e286dd",
+        "id": "tile_animation_source"
+      },
+      {
+        "hex": "29c000186900b085d8a9400085dd",
+        "id": "world_water_selector"
+      },
+      {
+        "hex": "a97fa200b886d88dda00",
+        "id": "scene_initialization_source"
+      },
+      {
+        "hex": "1003a0001084db",
+        "id": "animation_target_config"
+      }
+    ]
+  },
+  "dma_details": {
+    "bg3_dialogue_rows": [
+      "$7F:B100 to BG3 VRAM $5880 (1472 bytes)",
+      "known_text_staging_transfer"
+    ],
+    "bg3_status_rows": [
+      "$7F:B000 to BG3 VRAM $5800 (256 bytes)",
+      "known_text_staging_transfer"
+    ],
+    "cgram_descriptor": [
+      "queued palette descriptor",
+      "verified_non_language_palette"
+    ],
+    "cgram_flicker": [
+      "flicker palette transfer",
+      "verified_non_language_palette"
+    ],
+    "dma_disable": [
+      "DMA disable/acknowledgement",
+      "non_transfer_write"
+    ],
+    "generic_vram_descriptor": [
+      "two-slot generic VRAM descriptor",
+      "classified_graphics_descriptor"
+    ],
+    "oam_shadow": [
+      "OAM shadow transfer",
+      "verified_non_language_oam"
+    ],
+    "simulation_town_tilemap": [
+      "simulation town tilemap",
+      "verified_non_language_tilemap"
+    ],
+    "tilemap_record": [
+      "queued tilemap record",
+      "verified_non_language_tilemap"
+    ],
+    "world_effect": [
+      "$7F:47F0 world-map effect graphics",
+      "verified_non_language_graphics"
+    ],
+    "world_water_bg": [
+      "world-map water background graphics",
+      "verified_non_language_graphics"
+    ],
+    "world_water_obj": [
+      "world-map water object graphics",
+      "verified_non_language_graphics"
+    ]
+  },
+  "dma_roles": [
+    "oam_shadow",
+    "tilemap_record",
+    "cgram_flicker",
+    "cgram_descriptor",
+    "simulation_town_tilemap",
+    "bg3_status_rows",
+    "bg3_dialogue_rows",
+    "generic_vram_descriptor",
+    "world_water_bg",
+    "world_water_obj",
+    "world_effect",
+    "dma_disable"
+  ],
+  "hud_regions": {
+    "action_hud_template": [
+      {
+        "id": "action.hud.act_label",
+        "indices": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ]
+      },
+      {
+        "id": "action.hud.time_label",
+        "indices": [
+          11,
+          12,
+          13,
+          14
+        ]
+      },
+      {
+        "id": "action.hud.score_label",
+        "indices": [
+          21,
+          22,
+          23,
+          24,
+          25
+        ]
+      },
+      {
+        "id": "action.hud.player_label",
+        "indices": [
+          32,
+          33,
+          34,
+          35,
+          36,
+          37
+        ]
+      }
+    ],
+    "sim_sky_hud_template": [
+      {
+        "id": "sim_sky.hud.context_label",
+        "indices": []
+      },
+      {
+        "id": "sim_sky.hud.angel_label",
+        "indices": [
+          32,
+          33,
+          34,
+          35,
+          36,
+          37
+        ]
+      },
+      {
+        "id": "sim_sky.hud.sp_label",
+        "indices": [
+          53,
+          54
+        ]
+      }
+    ]
+  },
+  "indirect_details": {
+    "action_map": {
+      "classification": "verified_non_language_action_tilemap",
+      "destination": "$7E:8000 or $7E:C000 action map",
+      "proof": "the command-4 destination table contains the two action map workspaces; the copy length is the decoded map size"
+    },
+    "asset_workspace": {
+      "classification": "verified_non_language_asset_workspace",
+      "destination": "$7E:6000-$7E:67FF",
+      "proof": "the command-5 asset path initializes the destination to $6000 and copies $0800 bytes"
+    },
+    "character_vram_readback": {
+      "classification": "verified_non_language_character_graphics_snapshot",
+      "destination": "$7F:B800-$7F:BFFF",
+      "proof": "the VRAM readback path fixes the destination at $B800 and copies $1000 bytes; this is outside the text canvas $B000-$B7FF"
+    },
+    "deferred_ppu_register": {
+      "classification": "verified_non_language_ppu_register_write",
+      "destination": "$00:2100-$00:2132 selected PPU registers",
+      "proof": "all producers install a bank-$00 PPU-register address before the NMI tail performs the deferred byte store"
+    },
+    "developed_world_map": {
+      "classification": "verified_non_language_world_map_tilemap",
+      "destination": "$7E:C000-$7E:FFFF",
+      "proof": "the world-map load path fixes the destination at $C000 and copies $4000 bytes"
+    },
+    "developed_world_map_stamp": {
+      "classification": "verified_non_language_world_map_tilemap",
+      "destination": "$7E:C000-$7E:FFFF",
+      "proof": "the owning routine initializes the long pointer to $C000 and stamps the developed Mode-7 map"
+    },
+    "lzss_ring": {
+      "classification": "verified_non_language_lzss_ring_buffer",
+      "destination": "$7E:2000-$7E:20FF",
+      "proof": "the decompressor initializes its bank-$7E circular output pointer to $2000 and wraps its low byte"
+    },
+    "metatile_definitions": {
+      "classification": "verified_non_language_metatile_definitions",
+      "destination": "$7E:2100/$2900/$3100 definition tables",
+      "proof": "the only callers select the three fixed metatile-table bases before byte-swapping the decompressed words"
+    },
+    "oam_high_table": {
+      "classification": "verified_non_language_oam_bit_table",
+      "destination": "$7E:0580-$7E:05FF",
+      "proof": "the owning renderer initializes the pointer to $0580 and uses it as the 128-byte OAM high table"
+    }
+  },
+  "profiles": {
+    "de": {
+      "auxiliary": [
+        {
+          "address": 100821,
+          "id": "manual_dialogue_attribute"
+        },
+        {
+          "address": 180327,
+          "id": "action_hud_template"
+        },
+        {
+          "address": 180350,
+          "id": "sim_sky_hud_template"
+        }
+      ],
+      "base_write_count": 33,
+      "context_words": 6,
+      "descriptor_abi": "shifted_western",
+      "dma": [
+        {
+          "address": 175462,
+          "id": "oam_shadow"
+        },
+        {
+          "address": 175713,
+          "id": "tilemap_record"
+        },
+        {
+          "address": 175826,
+          "id": "cgram_flicker"
+        },
+        {
+          "address": 175944,
+          "id": "cgram_descriptor"
+        },
+        {
+          "address": 176009,
+          "id": "simulation_town_tilemap"
+        },
+        {
+          "address": 176048,
+          "id": "bg3_status_rows"
+        },
+        {
+          "address": 176078,
+          "id": "bg3_dialogue_rows"
+        },
+        {
+          "address": 176135,
+          "id": "generic_vram_descriptor"
+        },
+        {
+          "address": 176222,
+          "id": "world_water_bg"
+        },
+        {
+          "address": 176233,
+          "id": "world_water_obj"
+        },
+        {
+          "address": 176278,
+          "id": "world_effect"
+        },
+        {
+          "address": 183805,
+          "id": "dma_disable"
+        }
+      ],
+      "hud_sources": {
+        "action_hud_template": 167550,
+        "sim_sky_hud_template": 167678
+      },
+      "indirect": [
+        {
+          "hex": "929b",
+          "id": "oam_high_table",
+          "sites": [
+            110073,
+            110093,
+            110267,
+            110287,
+            177308,
+            177466,
+            177630
+          ]
+        },
+        {
+          "hex": "97a9",
+          "id": "developed_world_map_stamp",
+          "sites": [
+            165615
+          ]
+        },
+        {
+          "hex": "92eb",
+          "id": "deferred_ppu_register",
+          "sites": [
+            175334
+          ]
+        },
+        {
+          "hex": "97a9",
+          "id": "asset_workspace",
+          "sites": [
+            178588
+          ]
+        },
+        {
+          "hex": "97a9",
+          "id": "metatile_definitions",
+          "sites": [
+            178654
+          ]
+        },
+        {
+          "hex": "97a9",
+          "id": "action_map",
+          "sites": [
+            178785
+          ]
+        },
+        {
+          "hex": "97a9",
+          "id": "developed_world_map",
+          "sites": [
+            178821
+          ]
+        },
+        {
+          "hex": "97a9",
+          "id": "character_vram_readback",
+          "sites": [
+            180510
+          ]
+        },
+        {
+          "hex": "92b0",
+          "id": "lzss_ring",
+          "sites": [
+            183296,
+            183341,
+            183365
+          ]
+        }
+      ],
+      "indirect_count": null,
+      "indirect_rejected": [],
+      "long_write_count": 50,
+      "noncode": [
+        1149244,
+        1215377
+      ],
+      "outside_roles": [
+        "status_strip_clear",
+        "status_strip_sequential_tiles",
+        "dialogue_surface_clear",
+        "general_surface_clear",
+        "city_pause_surface_clear"
+      ],
+      "range_count": 53,
+      "range_long_count": 46,
+      "range_rejected": [
+        {
+          "address": 46832,
+          "hex": "7e00b2"
+        },
+        {
+          "address": 46852,
+          "hex": "7e00b2"
+        },
+        {
+          "address": 46872,
+          "hex": "7e00b2"
+        },
+        {
+          "address": 46892,
+          "hex": "7e00b2"
+        },
+        {
+          "address": 47880,
+          "hex": "0c00b0"
+        },
+        {
+          "address": 51648,
+          "hex": "7e00b2"
+        },
+        {
+          "address": 61633,
+          "hex": "8df1b9"
+        }
+      ],
+      "vram_paths": [
+        {
+          "id": "asset_script_character_upload",
+          "sites": [
+            178374,
+            178400,
+            178443,
+            178469
+          ]
+        },
+        {
+          "id": "developed_world_map_upload",
+          "sites": [
+            178863
+          ]
+        },
+        {
+          "id": "bg3_tilemap_clear",
+          "sites": [
+            180410
+          ]
+        },
+        {
+          "id": "action_obj_graphics_upload",
+          "sites": [
+            180914,
+            181011
+          ]
+        },
+        {
+          "id": "simulation_tilemap_upload",
+          "sites": [
+            229635
+          ]
+        }
+      ]
+    },
+    "eu-en": {
+      "auxiliary": [
+        {
+          "address": 100821,
+          "id": "manual_dialogue_attribute"
+        },
+        {
+          "address": 180318,
+          "id": "action_hud_template"
+        },
+        {
+          "address": 180341,
+          "id": "sim_sky_hud_template"
+        }
+      ],
+      "base_write_count": 33,
+      "context_words": 6,
+      "descriptor_abi": "shifted_western",
+      "dma": [
+        {
+          "address": 175453,
+          "id": "oam_shadow"
+        },
+        {
+          "address": 175704,
+          "id": "tilemap_record"
+        },
+        {
+          "address": 175817,
+          "id": "cgram_flicker"
+        },
+        {
+          "address": 175935,
+          "id": "cgram_descriptor"
+        },
+        {
+          "address": 176000,
+          "id": "simulation_town_tilemap"
+        },
+        {
+          "address": 176039,
+          "id": "bg3_status_rows"
+        },
+        {
+          "address": 176069,
+          "id": "bg3_dialogue_rows"
+        },
+        {
+          "address": 176126,
+          "id": "generic_vram_descriptor"
+        },
+        {
+          "address": 176213,
+          "id": "world_water_bg"
+        },
+        {
+          "address": 176224,
+          "id": "world_water_obj"
+        },
+        {
+          "address": 176269,
+          "id": "world_effect"
+        },
+        {
+          "address": 183796,
+          "id": "dma_disable"
+        }
+      ],
+      "hud_sources": {
+        "action_hud_template": 167550,
+        "sim_sky_hud_template": 167678
+      },
+      "indirect": [
+        {
+          "hex": "929b",
+          "id": "oam_high_table",
+          "sites": [
+            110073,
+            110093,
+            110267,
+            110287,
+            177299,
+            177457,
+            177621
+          ]
+        },
+        {
+          "hex": "97a9",
+          "id": "developed_world_map_stamp",
+          "sites": [
+            165615
+          ]
+        },
+        {
+          "hex": "92eb",
+          "id": "deferred_ppu_register",
+          "sites": [
+            175325
+          ]
+        },
+        {
+          "hex": "97a9",
+          "id": "asset_workspace",
+          "sites": [
+            178579
+          ]
+        },
+        {
+          "hex": "97a9",
+          "id": "metatile_definitions",
+          "sites": [
+            178645
+          ]
+        },
+        {
+          "hex": "97a9",
+          "id": "action_map",
+          "sites": [
+            178776
+          ]
+        },
+        {
+          "hex": "97a9",
+          "id": "developed_world_map",
+          "sites": [
+            178812
+          ]
+        },
+        {
+          "hex": "97a9",
+          "id": "character_vram_readback",
+          "sites": [
+            180501
+          ]
+        },
+        {
+          "hex": "92b0",
+          "id": "lzss_ring",
+          "sites": [
+            183287,
+            183332,
+            183356
+          ]
+        }
+      ],
+      "indirect_count": null,
+      "indirect_rejected": [],
+      "long_write_count": 50,
+      "noncode": [
+        1149244,
+        1215377
+      ],
+      "outside_roles": [
+        "status_strip_clear",
+        "status_strip_sequential_tiles",
+        "dialogue_surface_clear",
+        "general_surface_clear",
+        "city_pause_surface_clear"
+      ],
+      "range_count": 49,
+      "range_long_count": 46,
+      "range_rejected": [
+        {
+          "address": 46850,
+          "hex": "7e00b2"
+        },
+        {
+          "address": 46890,
+          "hex": "7e00b2"
+        },
+        {
+          "address": 51646,
+          "hex": "7e00b2"
+        }
+      ],
+      "vram_paths": [
+        {
+          "id": "asset_script_character_upload",
+          "sites": [
+            178365,
+            178391,
+            178434,
+            178460
+          ]
+        },
+        {
+          "id": "developed_world_map_upload",
+          "sites": [
+            178854
+          ]
+        },
+        {
+          "id": "bg3_tilemap_clear",
+          "sites": [
+            180401
+          ]
+        },
+        {
+          "id": "action_obj_graphics_upload",
+          "sites": [
+            180905,
+            181002
+          ]
+        },
+        {
+          "id": "simulation_tilemap_upload",
+          "sites": [
+            229635
+          ]
+        }
+      ]
+    },
+    "fr": {
+      "auxiliary": [
+        {
+          "address": 100821,
+          "id": "manual_dialogue_attribute"
+        },
+        {
+          "address": 180304,
+          "id": "action_hud_template"
+        },
+        {
+          "address": 180327,
+          "id": "sim_sky_hud_template"
+        }
+      ],
+      "base_write_count": 33,
+      "context_words": 6,
+      "descriptor_abi": "shifted_western",
+      "dma": [
+        {
+          "address": 175439,
+          "id": "oam_shadow"
+        },
+        {
+          "address": 175690,
+          "id": "tilemap_record"
+        },
+        {
+          "address": 175803,
+          "id": "cgram_flicker"
+        },
+        {
+          "address": 175921,
+          "id": "cgram_descriptor"
+        },
+        {
+          "address": 175986,
+          "id": "simulation_town_tilemap"
+        },
+        {
+          "address": 176025,
+          "id": "bg3_status_rows"
+        },
+        {
+          "address": 176055,
+          "id": "bg3_dialogue_rows"
+        },
+        {
+          "address": 176112,
+          "id": "generic_vram_descriptor"
+        },
+        {
+          "address": 176199,
+          "id": "world_water_bg"
+        },
+        {
+          "address": 176210,
+          "id": "world_water_obj"
+        },
+        {
+          "address": 176255,
+          "id": "world_effect"
+        },
+        {
+          "address": 183782,
+          "id": "dma_disable"
+        }
+      ],
+      "hud_sources": {
+        "action_hud_template": 167550,
+        "sim_sky_hud_template": 167678
+      },
+      "indirect": [
+        {
+          "hex": "929b",
+          "id": "oam_high_table",
+          "sites": [
+            110073,
+            110093,
+            110267,
+            110287,
+            177285,
+            177443,
+            177607
+          ]
+        },
+        {
+          "hex": "97a9",
+          "id": "developed_world_map_stamp",
+          "sites": [
+            165615
+          ]
+        },
+        {
+          "hex": "92eb",
+          "id": "deferred_ppu_register",
+          "sites": [
+            175311
+          ]
+        },
+        {
+          "hex": "97a9",
+          "id": "asset_workspace",
+          "sites": [
+            178565
+          ]
+        },
+        {
+          "hex": "97a9",
+          "id": "metatile_definitions",
+          "sites": [
+            178631
+          ]
+        },
+        {
+          "hex": "97a9",
+          "id": "action_map",
+          "sites": [
+            178762
+          ]
+        },
+        {
+          "hex": "97a9",
+          "id": "developed_world_map",
+          "sites": [
+            178798
+          ]
+        },
+        {
+          "hex": "97a9",
+          "id": "character_vram_readback",
+          "sites": [
+            180487
+          ]
+        },
+        {
+          "hex": "92b0",
+          "id": "lzss_ring",
+          "sites": [
+            183273,
+            183318,
+            183342
+          ]
+        }
+      ],
+      "indirect_count": null,
+      "indirect_rejected": [],
+      "long_write_count": 50,
+      "noncode": [
+        1149244,
+        1215377
+      ],
+      "outside_roles": [
+        "status_strip_clear",
+        "status_strip_sequential_tiles",
+        "dialogue_surface_clear",
+        "general_surface_clear",
+        "city_pause_surface_clear"
+      ],
+      "range_count": 53,
+      "range_long_count": 47,
+      "range_rejected": [
+        {
+          "address": 46835,
+          "hex": "7e00b2"
+        },
+        {
+          "address": 46875,
+          "hex": "7e00b2"
+        },
+        {
+          "address": 47883,
+          "hex": "0c00b0"
+        },
+        {
+          "address": 50978,
+          "hex": "8cb0b7"
+        },
+        {
+          "address": 51415,
+          "hex": "7e00b2"
+        },
+        {
+          "address": 51455,
+          "hex": "7e00b2"
+        }
+      ],
+      "vram_paths": [
+        {
+          "id": "asset_script_character_upload",
+          "sites": [
+            178351,
+            178377,
+            178420,
+            178446
+          ]
+        },
+        {
+          "id": "developed_world_map_upload",
+          "sites": [
+            178840
+          ]
+        },
+        {
+          "id": "bg3_tilemap_clear",
+          "sites": [
+            180387
+          ]
+        },
+        {
+          "id": "action_obj_graphics_upload",
+          "sites": [
+            180891,
+            180988
+          ]
+        },
+        {
+          "id": "simulation_tilemap_upload",
+          "sites": [
+            229635
+          ]
+        }
+      ]
+    },
+    "jp": {
+      "auxiliary": [
+        {
+          "address": 297569,
+          "id": "action_hud_template"
+        },
+        {
+          "address": 297592,
+          "id": "sim_sky_hud_template"
+        }
+      ],
+      "base_write_count": 26,
+      "context_words": 10,
+      "descriptor_abi": "native",
+      "dma": [
+        {
+          "address": 174570,
+          "id": "oam_shadow"
+        },
+        {
+          "address": 174821,
+          "id": "tilemap_record"
+        },
+        {
+          "address": 174934,
+          "id": "cgram_flicker"
+        },
+        {
+          "address": 175052,
+          "id": "cgram_descriptor"
+        },
+        {
+          "address": 175117,
+          "id": "simulation_town_tilemap"
+        },
+        {
+          "address": 175156,
+          "id": "bg3_status_rows"
+        },
+        {
+          "address": 175186,
+          "id": "bg3_dialogue_rows"
+        },
+        {
+          "address": 175243,
+          "id": "generic_vram_descriptor"
+        },
+        {
+          "address": 175330,
+          "id": "world_water_bg"
+        },
+        {
+          "address": 175341,
+          "id": "world_water_obj"
+        },
+        {
+          "address": 301115,
+          "id": "dma_disable"
+        }
+      ],
+      "hud_sources": {
+        "action_hud_template": 167207,
+        "sim_sky_hud_template": 167335
+      },
+      "indirect": [
+        {
+          "hex": "929a",
+          "id": "oam_high_table",
+          "sites": [
+            36287,
+            36307,
+            37533,
+            37554,
+            110012,
+            110032,
+            110206,
+            110226
+          ]
+        },
+        {
+          "hex": "97a8",
+          "id": "developed_world_map_stamp",
+          "sites": [
+            165279
+          ]
+        },
+        {
+          "hex": "92ed",
+          "id": "deferred_ppu_register",
+          "sites": [
+            174445
+          ]
+        },
+        {
+          "hex": "97a8",
+          "id": "asset_workspace",
+          "sites": [
+            295844
+          ]
+        },
+        {
+          "hex": "97a8",
+          "id": "metatile_definitions",
+          "sites": [
+            295910
+          ]
+        },
+        {
+          "hex": "97a8",
+          "id": "action_map",
+          "sites": [
+            296041
+          ]
+        },
+        {
+          "hex": "97a8",
+          "id": "developed_world_map",
+          "sites": [
+            296077
+          ]
+        },
+        {
+          "hex": "97a8",
+          "id": "character_vram_readback",
+          "sites": [
+            297752
+          ]
+        },
+        {
+          "hex": "92af",
+          "id": "lzss_ring",
+          "sites": [
+            300606,
+            300651,
+            300675
+          ]
+        }
+      ],
+      "indirect_count": null,
+      "indirect_rejected": [],
+      "long_write_count": 37,
+      "noncode": [
+        1162921,
+        1175176
+      ],
+      "outside_roles": [
+        "status_strip_clear",
+        "status_strip_sequential_tiles",
+        "dialogue_surface_clear",
+        "general_surface_clear",
+        "city_pause_surface_clear"
+      ],
+      "range_count": 41,
+      "range_long_count": 34,
+      "range_rejected": [
+        {
+          "address": 36871,
+          "hex": "3e00bd"
+        },
+        {
+          "address": 59742,
+          "hex": "1c00b9"
+        },
+        {
+          "address": 61400,
+          "hex": "3e20bc"
+        },
+        {
+          "address": 63252,
+          "hex": "1ca9b2"
+        },
+        {
+          "address": 113002,
+          "hex": "1c00b9"
+        },
+        {
+          "address": 116681,
+          "hex": "8c03bf"
+        },
+        {
+          "address": 256861,
+          "hex": "9dedb0"
+        }
+      ],
+      "vram_paths": [
+        {
+          "id": "asset_script_character_upload",
+          "sites": [
+            295630,
+            295656,
+            295699,
+            295725
+          ]
+        },
+        {
+          "id": "developed_world_map_upload",
+          "sites": [
+            296119
+          ]
+        },
+        {
+          "id": "bg3_tilemap_clear",
+          "sites": [
+            297652
+          ]
+        },
+        {
+          "id": "action_obj_graphics_upload",
+          "sites": [
+            298155,
+            298220
+          ]
+        },
+        {
+          "id": "simulation_tilemap_upload",
+          "sites": [
+            229632
+          ]
+        }
+      ]
+    },
+    "us": {
+      "auxiliary": [
+        {
+          "address": 100821,
+          "id": "manual_dialogue_attribute"
+        },
+        {
+          "address": 178790,
+          "id": "action_hud_template"
+        },
+        {
+          "address": 178813,
+          "id": "sim_sky_hud_template"
+        }
+      ],
+      "base_write_count": 33,
+      "context_words": 6,
+      "descriptor_abi": "native",
+      "dma": [
+        {
+          "address": 175300,
+          "id": "oam_shadow"
+        },
+        {
+          "address": 175551,
+          "id": "tilemap_record"
+        },
+        {
+          "address": 175664,
+          "id": "cgram_flicker"
+        },
+        {
+          "address": 175782,
+          "id": "cgram_descriptor"
+        },
+        {
+          "address": 175847,
+          "id": "simulation_town_tilemap"
+        },
+        {
+          "address": 175886,
+          "id": "bg3_status_rows"
+        },
+        {
+          "address": 175916,
+          "id": "bg3_dialogue_rows"
+        },
+        {
+          "address": 175973,
+          "id": "generic_vram_descriptor"
+        },
+        {
+          "address": 176060,
+          "id": "world_water_bg"
+        },
+        {
+          "address": 176071,
+          "id": "world_water_obj"
+        },
+        {
+          "address": 176116,
+          "id": "world_effect"
+        },
+        {
+          "address": 182235,
+          "id": "dma_disable"
+        }
+      ],
+      "hud_sources": {
+        "action_hud_template": 167550,
+        "sim_sky_hud_template": 167678
+      },
+      "indirect": [
+        {
+          "hex": "929a",
+          "id": "oam_high_table",
+          "sites": [
+            36196,
+            36354,
+            37553,
+            110073,
+            110093,
+            110267,
+            110287
+          ]
+        },
+        {
+          "hex": "97a8",
+          "id": "developed_world_map_stamp",
+          "sites": [
+            165615
+          ]
+        },
+        {
+          "hex": "92ea",
+          "id": "deferred_ppu_register",
+          "sites": [
+            175172
+          ]
+        },
+        {
+          "hex": "97a8",
+          "id": "asset_workspace",
+          "sites": [
+            177052
+          ]
+        },
+        {
+          "hex": "97a8",
+          "id": "metatile_definitions",
+          "sites": [
+            177118
+          ]
+        },
+        {
+          "hex": "97a8",
+          "id": "action_map",
+          "sites": [
+            177249
+          ]
+        },
+        {
+          "hex": "97a8",
+          "id": "developed_world_map",
+          "sites": [
+            177285
+          ]
+        },
+        {
+          "hex": "97a8",
+          "id": "character_vram_readback",
+          "sites": [
+            178973
+          ]
+        },
+        {
+          "hex": "92af",
+          "id": "lzss_ring",
+          "sites": [
+            181726,
+            181771,
+            181795
+          ]
+        }
+      ],
+      "indirect_count": 24,
+      "indirect_rejected": [
+        {
+          "address": 33045,
+          "hex": "8103"
+        },
+        {
+          "address": 51282,
+          "hex": "9190"
+        },
+        {
+          "address": 63175,
+          "hex": "9202"
+        },
+        {
+          "address": 176426,
+          "hex": "93f0"
+        },
+        {
+          "address": 176438,
+          "hex": "93f0"
+        },
+        {
+          "address": 176450,
+          "hex": "93f0"
+        },
+        {
+          "address": 176462,
+          "hex": "93f0"
+        }
+      ],
+      "long_write_count": 50,
+      "noncode": [
+        1149244,
+        1215377
+      ],
+      "outside_roles": [
+        "status_strip_clear",
+        "status_strip_sequential_tiles",
+        "dialogue_surface_clear",
+        "general_surface_clear",
+        "city_pause_surface_clear"
+      ],
+      "range_count": 57,
+      "range_long_count": 48,
+      "range_rejected": [
+        {
+          "address": 47670,
+          "hex": "7e00b2"
+        },
+        {
+          "address": 47690,
+          "hex": "7e00b2"
+        },
+        {
+          "address": 47710,
+          "hex": "7e00b2"
+        },
+        {
+          "address": 47730,
+          "hex": "7e00b2"
+        },
+        {
+          "address": 52235,
+          "hex": "7e00b2"
+        },
+        {
+          "address": 52255,
+          "hex": "7e00b2"
+        },
+        {
+          "address": 52275,
+          "hex": "7e00b2"
+        },
+        {
+          "address": 52431,
+          "hex": "7e00b2"
+        },
+        {
+          "address": 52471,
+          "hex": "7e00b2"
+        }
+      ],
+      "vram_paths": [
+        {
+          "id": "asset_script_character_upload",
+          "sites": [
+            176838,
+            176864,
+            176907,
+            176933
+          ]
+        },
+        {
+          "id": "developed_world_map_upload",
+          "sites": [
+            177327
+          ]
+        },
+        {
+          "id": "bg3_tilemap_clear",
+          "sites": [
+            178873
+          ]
+        },
+        {
+          "id": "action_obj_graphics_upload",
+          "sites": [
+            179376,
+            179441
+          ]
+        },
+        {
+          "id": "simulation_tilemap_upload",
+          "sites": [
+            229635
+          ]
+        }
+      ]
+    }
+  },
+  "vram_details": {
+    "action_obj_graphics_upload": {
+      "classification": "verified_non_language_obj_graphics",
+      "destination": "$2000-$2FFF and $2D40-$2DBF",
+      "language_bearing_candidate": false
+    },
+    "asset_script_character_upload": {
+      "classification": "contains_classified_language_graphics",
+      "destination": "dynamic asset-script VMADD",
+      "detail": "The regional dialog font is the independently resolved $5000 upload; remaining commands are graphics assets.",
+      "language_bearing_candidate": false
+    },
+    "bg3_tilemap_clear": {
+      "classification": "verified_non_language_clear",
+      "destination": "$5800-$5BFF",
+      "language_bearing_candidate": false
+    },
+    "developed_world_map_upload": {
+      "classification": "verified_non_language_graphics",
+      "destination": "$0000-$3FFF",
+      "language_bearing_candidate": false
+    },
+    "simulation_tilemap_upload": {
+      "classification": "verified_non_language_tilemap",
+      "destination": "$6000-$6FFF",
+      "language_bearing_candidate": false
+    }
+  }
+}

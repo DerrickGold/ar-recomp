@@ -11,11 +11,14 @@ set(_scan_exempt "@SNESBUILD_SCAN_EXEMPT_DIRS@")
 set(_runtime_archive_relative "@SNESBUILD_RUNTIME_ARCHIVE_RELATIVE@")
 set(_runtime_source_paths "@SNESBUILD_RUNTIME_SOURCE_PATHS@")
 set(_required_sdl_runtime "@SNESBUILD_REQUIRED_SDL_RUNTIME@")
+set(_required_ttf_runtime "@SNESBUILD_REQUIRED_TTF_RUNTIME@")
+set(_required_ttf_link "@SNESBUILD_REQUIRED_TTF_LINK@")
 set(_required_license_files
     "utils/LICENSE"
     "utils/LICENSE_SCOPE.md"
     "utils/ATTRIBUTION.md"
     "utils/THIRD_PARTY_NOTICES.md"
+    "utils/game-assets/fonts/noto/OFL.txt"
     "utils/snesrecomp-go/runtime/LICENSE"
     "utils/snesrecomp-go/runtime/NOTICE.md"
     "utils/snesrecomp-go/runtime/PROVENANCE.md"
@@ -71,6 +74,20 @@ foreach(_package IN LISTS CPACK_PACKAGE_FILES)
                 "license check: ${_package} is missing ${_license_file}")
         endif()
     endforeach()
+    if(NOT _required_ttf_runtime STREQUAL "")
+        foreach(_ttf_file IN ITEMS "${_required_ttf_runtime}" "${_required_ttf_link}"
+                "utils/tools/sdl3/include/SDL3_ttf/SDL_ttf.h"
+                "utils/tools/sdl3/licenses/SDL3_ttf/LICENSE.txt"
+                "utils/licenses/SDL3_ttf/LICENSE.txt"
+                "utils/licenses/SDL3_ttf/FreeType-FTL.txt"
+                "utils/licenses/SDL3_ttf/HarfBuzz-COPYING.txt"
+                "utils/licenses/SDL3_ttf/PlutoSVG-LICENSE.txt"
+                "utils/licenses/SDL3_ttf/PlutoVG-LICENSE.txt")
+            if(NOT EXISTS "${_root}/${_ttf_file}")
+                message(FATAL_ERROR "SDL3_ttf package check: missing ${_ttf_file}")
+            endif()
+        endforeach()
+    endif()
 
     file(GLOB _entries LIST_DIRECTORIES true RELATIVE "${_root}" "${_root}/*")
     foreach(_entry IN LISTS _entries)
@@ -83,6 +100,13 @@ foreach(_package IN LISTS CPACK_PACKAGE_FILES)
     file(GLOB_RECURSE _files LIST_DIRECTORIES false RELATIVE "${_root}" "${_root}/*")
     set(_checked 0)
     foreach(_file IN LISTS _files)
+        string(TOLOWER "${_file}" _localization_path)
+        if(_localization_path MATCHES "\\.(sfc|smc|srm|rec|artext|arproject|arlang)$" OR
+           _localization_path MATCHES "^utils/(development|runs)/" OR
+           _localization_path MATCHES "^utils/game-assets/languages/" OR
+           _localization_path MATCHES "^utils/game-assets/workshop/")
+            message(FATAL_ERROR "localization distribution check: local-only payload ${_file}")
+        endif()
         set(_exempt FALSE)
         foreach(_dir IN LISTS _scan_exempt)
             if(_file MATCHES "^${_dir}/")

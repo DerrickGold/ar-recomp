@@ -41,6 +41,10 @@ game-assets/manifest.ini
 *.ogg
 *.bin
 *.rec
+# Private author backups and locally exported translations can contain retail
+# reference text or user-owned work. Never publish them with the source tree.
+*.arproject
+*.arlang
 !assets/*.png
 !snesrecomp-go/internal/buildgui/assets/title-logo.png
 

@@ -14,15 +14,16 @@ import (
 // A realistic prefix of a build log, assembled from the exact lines
 // project.Regenerate and project.HermeticBuild emit.
 const (
-	logRegen    = "\n=== Regenerating banks (8 workers) ===\nv2regen: 96 banks, 1 -> 2 variants, 98 files (3 changed), 4.2s\n"
-	logFuncs    = "\n=== Syncing funcs.h ===\nsync-funcs: wrote 12043 function declarations to recomp/funcs.h\n"
-	logMetadata = "\n=== Refreshing generated-code metadata ===\n"
-	logRTS      = "\n=== RTS-web census ===\nno new uncovered continuations since last regen\n"
-	logStubs    = "\n=== Hard stub census ===\n"
-	logDone     = "\n=== Regeneration complete ===\n"
-	logUnits    = "hermetic: 612 translation units (100 cached, 512 to compile, 8 jobs)\n"
-	logLinking  = "hermetic: compile done in 91.4s; linking\n"
-	logBuilt    = "hermetic: built build/hermetic/ActRaiserRecomp\n"
+	logLocalization = "\n=== Preparing native US language source ===\n"
+	logRegen        = "\n=== Regenerating banks (8 workers) ===\nv2regen: 96 banks, 1 -> 2 variants, 98 files (3 changed), 4.2s\n"
+	logFuncs        = "\n=== Syncing funcs.h ===\nsync-funcs: wrote 12043 function declarations to recomp/funcs.h\n"
+	logMetadata     = "\n=== Refreshing generated-code metadata ===\n"
+	logRTS          = "\n=== RTS-web census ===\nno new uncovered continuations since last regen\n"
+	logStubs        = "\n=== Hard stub census ===\n"
+	logDone         = "\n=== Regeneration complete ===\n"
+	logUnits        = "hermetic: 612 translation units (100 cached, 512 to compile, 8 jobs)\n"
+	logLinking      = "hermetic: compile done in 91.4s; linking\n"
+	logBuilt        = "hermetic: built build/hermetic/ActRaiserRecomp\n"
 )
 
 func TestComputeProgressAdvancesThroughPhases(t *testing.T) {
@@ -34,16 +35,17 @@ func TestComputeProgressAdvancesThroughPhases(t *testing.T) {
 		wantMinPct int
 		wantMaxPct int
 	}{
-		{"empty log is the first phase at zero", "", "idle", "regen", 0, 0},
-		{"regen banner selects regen", logRegen, "building", "regen", 0, 0},
+		{"empty log is the first phase at zero", "", "idle", "localization", 0, 0},
+		{"source extraction runs first", logLocalization, "building", "localization", 0, 0},
+		{"regen banner selects regen", logLocalization + logRegen, "building", "regen", 1, 1},
 		{"funcs banner advances", logRegen + logFuncs, "building", "funcs", 29, 31},
 		{"metadata banner advances", logRegen + logFuncs + logMetadata, "building", "metadata", 30, 32},
 		{"rts banner advances", logRegen + logFuncs + logMetadata + logRTS, "building", "rts", 32, 34},
 		{"stub banner advances", logRegen + logFuncs + logMetadata + logRTS + logStubs, "building", "stubs", 35, 37},
 		{
-			"regeneration complete moves to compile",
+			"regeneration complete moves to compilation",
 			logRegen + logFuncs + logMetadata + logRTS + logStubs + logDone,
-			"building", "compile", 37, 39,
+			"building", "compile", 38, 40,
 		},
 		{
 			"linking line moves to link",
@@ -157,7 +159,7 @@ func TestComputeProgressReservesHundredForSuccess(t *testing.T) {
 // Progress must never go backwards as the log grows, whatever it contains.
 // This is the invariant that matters most to a watching user.
 func TestComputeProgressIsMonotonic(t *testing.T) {
-	full := logRegen + logFuncs + logMetadata + logRTS + logStubs + logDone +
+	full := logLocalization + logRegen + logFuncs + logMetadata + logRTS + logStubs + logDone + logLocalization +
 		logUnits + strings.Repeat("  cc src/present.c\n", 512) + logLinking + logBuilt
 	previousPercent, previousIndex := -1, -1
 	for length := 0; length <= len(full); length += 37 {
@@ -253,6 +255,11 @@ func TestPhaseBannersMatchBuildOutput(t *testing.T) {
 	if err != nil {
 		t.Skipf("cannot read the build source to cross-check banners: %v", err)
 	}
+	localization, err := os.ReadFile(filepath.Join("..", "project", "localization.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source = append(source, localization...)
 	text := string(source)
 	for _, item := range buildPhases {
 		if item.banner == "" {
