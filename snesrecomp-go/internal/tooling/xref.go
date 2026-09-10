@@ -23,6 +23,7 @@ type XrefOptions struct {
 	Jobs                  int
 	OnlyBank              *byte
 	Query                 XrefQuery
+	QueryEnd              *XrefQuery
 	AccessFilter          string
 	IncludeWRAMMirrors    bool
 	IncludeRawWords       bool
@@ -80,6 +81,7 @@ type XrefReport struct {
 	NoWrite      bool                `json:"no_write"`
 	ROM          ShadowROM           `json:"rom"`
 	Query        XrefQuery           `json:"query"`
+	QueryEnd     *XrefQuery          `json:"query_end,omitempty"`
 	AccessFilter string              `json:"access_filter"`
 	Summary      XrefSummary         `json:"summary"`
 	References   []XrefReference     `json:"references"`
@@ -127,6 +129,14 @@ func BuildXref(options XrefOptions) (XrefReport, error) {
 	if options.Query.Bits != 8 && options.Query.Bits != 16 && options.Query.Bits != 24 {
 		return XrefReport{}, fmt.Errorf("xref query width must be 8, 16, or 24 bits")
 	}
+	if options.QueryEnd != nil {
+		if options.QueryEnd.Bits != options.Query.Bits {
+			return XrefReport{}, fmt.Errorf("xref range endpoints must have the same address width")
+		}
+		if options.QueryEnd.Address < options.Query.Address {
+			return XrefReport{}, fmt.Errorf("xref range end must not precede its start")
+		}
+	}
 	accessFilter, err := normalizeXrefAccessFilter(options.AccessFilter)
 	if err != nil {
 		return XrefReport{}, err
@@ -145,8 +155,8 @@ func BuildXref(options XrefOptions) (XrefReport, error) {
 	if err != nil {
 		return XrefReport{}, err
 	}
-	references, issues := collectXrefReferences(image, results, options.Query, accessFilter, options.IncludeWRAMMirrors)
-	rawWords := collectXrefRawWords(image, options.Query, options.OnlyBank, options.IncludeRawWords, options.IncludeTargetMinusOne)
+	references, issues := collectXrefReferences(image, results, options.Query, options.QueryEnd, accessFilter, options.IncludeWRAMMirrors)
+	rawWords := collectXrefRawWords(image, options.Query, options.QueryEnd, options.OnlyBank, options.IncludeRawWords, options.IncludeTargetMinusOne)
 	hash := sha256.Sum256(image)
 	uniquePCs := make(map[uint32]struct{})
 	for _, reference := range references {
@@ -155,7 +165,7 @@ func BuildXref(options XrefOptions) (XrefReport, error) {
 	return XrefReport{
 		Version: xrefReportVersion, Mode: "decoded_instruction_xref", NoWrite: true,
 		ROM:   ShadowROM{SHA256: hex.EncodeToString(hash[:]), Size: len(image), Mapper: "lorom"},
-		Query: options.Query, AccessFilter: accessFilter,
+		Query: options.Query, QueryEnd: options.QueryEnd, AccessFilter: accessFilter,
 		Summary: XrefSummary{
 			References: len(references), RawWordEvidence: len(rawWords), UniqueSourcePCs: len(uniquePCs),
 			InitialVariants: stats.initialVariants, FinalVariants: stats.finalVariants,
@@ -180,7 +190,7 @@ type xrefReferenceKey struct {
 	resolution  string
 }
 
-func collectXrefReferences(image romimage.Image, results []shadowDecodeResult, query XrefQuery, accessFilter string, includeWRAMMirrors bool) ([]XrefReference, []ShadowDecodeIssue) {
+func collectXrefReferences(image romimage.Image, results []shadowDecodeResult, query XrefQuery, queryEnd *XrefQuery, accessFilter string, includeWRAMMirrors bool) ([]XrefReference, []ShadowDecodeIssue) {
 	owners := make(map[xrefReferenceKey]map[uint32]struct{})
 	var issues []ShadowDecodeIssue
 	for _, result := range results {
@@ -189,7 +199,7 @@ func collectXrefReferences(image romimage.Image, results []shadowDecodeResult, q
 			continue
 		}
 		for _, decoded := range result.instructions {
-			access, resolution, match := matchXrefInstruction(decoded, query, includeWRAMMirrors)
+			access, resolution, match := matchXrefInstruction(decoded, query, queryEnd, includeWRAMMirrors)
 			if !match || !xrefAccessMatches(accessFilter, access) {
 				continue
 			}
@@ -252,11 +262,11 @@ func collectXrefReferences(image romimage.Image, results []shadowDecodeResult, q
 	return references, issues
 }
 
-func matchXrefInstruction(decoded shadowDecodedInstruction, query XrefQuery, includeWRAMMirrors bool) (string, string, bool) {
+func matchXrefInstruction(decoded shadowDecodedInstruction, query XrefQuery, queryEnd *XrefQuery, includeWRAMMirrors bool) (string, string, bool) {
 	instruction := &decoded.Instruction
 	if xrefBranch(instruction) {
 		target := decoded.PC&0xff0000 | uint32(uint16(instruction.Operand))
-		return "branch", "program_bank_branch_target", query.Bits == 24 && target == query.Address&0xffffff
+		return "branch", "program_bank_branch_target", query.Bits == 24 && xrefQueryMatches(query, queryEnd, target)
 	}
 	access := xrefAccess(instruction)
 	if access == "" {
@@ -265,64 +275,80 @@ func matchXrefInstruction(decoded shadowDecodedInstruction, query XrefQuery, inc
 	operand := instruction.Operand & 0xffffff
 	switch instruction.Mode {
 	case cpu65816.DP:
-		return access, "direct_page_offset", query.Bits == 8 && uint8(operand) == uint8(query.Address)
+		return access, "direct_page_offset", query.Bits == 8 && xrefQueryMatches(query, queryEnd, uint32(uint8(operand)))
 	case cpu65816.DPX, cpu65816.DPY:
-		return access, "indexed_direct_page_base", query.Bits == 8 && uint8(operand) == uint8(query.Address)
+		return access, "indexed_direct_page_base", query.Bits == 8 && xrefQueryMatches(query, queryEnd, uint32(uint8(operand)))
 	case cpu65816.INDIRY, cpu65816.INDIRLY, cpu65816.INDIRDPX, cpu65816.DPINDIR:
-		return access, "direct_page_pointer_offset", query.Bits == 8 && uint8(operand) == uint8(query.Address)
+		return access, "direct_page_pointer_offset", query.Bits == 8 && xrefQueryMatches(query, queryEnd, uint32(uint8(operand)))
 	case cpu65816.ABS:
 		if query.Bits == 16 {
-			return access, xrefAbsoluteResolution(instruction, false), uint16(operand) == uint16(query.Address)
+			return access, xrefAbsoluteResolution(instruction, false), xrefQueryMatches(query, queryEnd, uint32(uint16(operand)))
 		}
 		if query.Bits == 24 && xrefControlTarget(instruction) {
 			target := decoded.PC&0xff0000 | uint32(uint16(operand))
-			return access, "program_bank_control_target", target == query.Address&0xffffff
+			return access, "program_bank_control_target", xrefQueryMatches(query, queryEnd, target)
 		}
 	case cpu65816.ABSX, cpu65816.ABSY:
-		return access, "indexed_absolute_db_base", query.Bits == 16 && uint16(operand) == uint16(query.Address)
+		return access, "indexed_absolute_db_base", query.Bits == 16 && xrefQueryMatches(query, queryEnd, uint32(uint16(operand)))
 	case cpu65816.INDIR:
 		if query.Bits == 16 {
-			return access, "bank_zero_indirect_pointer", uint16(operand) == uint16(query.Address)
+			return access, "bank_zero_indirect_pointer", xrefQueryMatches(query, queryEnd, uint32(uint16(operand)))
 		}
 		if query.Bits == 24 {
-			return access, "bank_zero_indirect_pointer", query.Address&0xffffff == uint32(uint16(operand))
+			return access, "bank_zero_indirect_pointer", xrefQueryMatches(query, queryEnd, uint32(uint16(operand)))
 		}
 	case cpu65816.INDIRX:
 		if query.Bits == 16 {
-			return access, "program_bank_indexed_pointer_base", uint16(operand) == uint16(query.Address)
+			return access, "program_bank_indexed_pointer_base", xrefQueryMatches(query, queryEnd, uint32(uint16(operand)))
 		}
 		if query.Bits == 24 {
 			base := decoded.PC&0xff0000 | uint32(uint16(operand))
-			return access, "program_bank_indexed_pointer_base", base == query.Address&0xffffff
+			return access, "program_bank_indexed_pointer_base", xrefQueryMatches(query, queryEnd, base)
 		}
 	case cpu65816.INDIRL:
 		if query.Bits == 16 {
-			return access, "bank_zero_long_indirect_pointer", uint16(operand) == uint16(query.Address)
+			return access, "bank_zero_long_indirect_pointer", xrefQueryMatches(query, queryEnd, uint32(uint16(operand)))
 		}
 		if query.Bits == 24 {
-			return access, "bank_zero_long_indirect_pointer", query.Address&0xffffff == uint32(uint16(operand))
+			return access, "bank_zero_long_indirect_pointer", xrefQueryMatches(query, queryEnd, uint32(uint16(operand)))
 		}
 	case cpu65816.LONG:
-		if includeWRAMMirrors && query.Bits == 16 && xrefWRAMMirror(operand, query.Address) {
+		if includeWRAMMirrors && query.Bits == 16 && xrefWRAMMirror(operand, query, queryEnd) {
 			return access, "long_wram_mirror", true
 		}
-		return access, xrefLongResolution(instruction, false), query.Bits == 24 && operand == query.Address&0xffffff
+		return access, xrefLongResolution(instruction, false), query.Bits == 24 && xrefQueryMatches(query, queryEnd, operand)
 	case cpu65816.LONGX:
-		if includeWRAMMirrors && query.Bits == 16 && xrefWRAMMirror(operand, query.Address) {
+		if includeWRAMMirrors && query.Bits == 16 && xrefWRAMMirror(operand, query, queryEnd) {
 			return access, "indexed_long_wram_mirror", true
 		}
-		return access, xrefLongResolution(instruction, true), query.Bits == 24 && operand == query.Address&0xffffff
+		return access, xrefLongResolution(instruction, true), query.Bits == 24 && xrefQueryMatches(query, queryEnd, operand)
 	case cpu65816.STK:
-		return access, "stack_relative_offset", query.Bits == 8 && uint8(operand) == uint8(query.Address)
+		return access, "stack_relative_offset", query.Bits == 8 && xrefQueryMatches(query, queryEnd, uint32(uint8(operand)))
 	case cpu65816.STKIY:
-		return access, "stack_relative_indirect_y_offset", query.Bits == 8 && uint8(operand) == uint8(query.Address)
+		return access, "stack_relative_indirect_y_offset", query.Bits == 8 && xrefQueryMatches(query, queryEnd, uint32(uint8(operand)))
 	}
 	return "", "", false
 }
 
-func xrefWRAMMirror(operand, query uint32) bool {
+func xrefQueryMatches(query XrefQuery, queryEnd *XrefQuery, value uint32) bool {
+	mask := uint32(0xffffff)
+	if query.Bits == 8 {
+		mask = 0xff
+	} else if query.Bits == 16 {
+		mask = 0xffff
+	}
+	value &= mask
+	start := query.Address & mask
+	if queryEnd == nil {
+		return value == start
+	}
+	return value >= start && value <= queryEnd.Address&mask
+}
+
+func xrefWRAMMirror(operand uint32, query XrefQuery, queryEnd *XrefQuery) bool {
 	bank := byte(operand >> 16)
-	return (bank == 0x00 || bank == 0x7e || bank == 0x7f) && uint16(operand) == uint16(query)
+	return (bank == 0x00 || bank == 0x7e || bank == 0x7f) &&
+		xrefQueryMatches(query, queryEnd, uint32(uint16(operand)))
 }
 
 func normalizeXrefAccessFilter(value string) (string, error) {
@@ -363,7 +389,7 @@ func xrefBranch(instruction *cpu65816.Instruction) bool {
 	}
 }
 
-func collectXrefRawWords(image romimage.Image, query XrefQuery, onlyBank *byte, include, includeMinusOne bool) []XrefRawWord {
+func collectXrefRawWords(image romimage.Image, query XrefQuery, queryEnd *XrefQuery, onlyBank *byte, include, includeMinusOne bool) []XrefRawWord {
 	if !include || query.Bits == 8 || len(image) < 2 {
 		return nil
 	}
@@ -385,16 +411,20 @@ func collectXrefRawWords(image romimage.Image, query XrefQuery, onlyBank *byte, 
 		for relative := 0; relative+1 < bankLength; relative++ {
 			value := uint16(image[bankOffset+relative]) | uint16(image[bankOffset+relative+1])<<8
 			adjustment := 0
-			if value != target {
-				if !includeMinusOne || value != target-1 {
+			matchedTarget := target
+			if !xrefQueryMatches(query, queryEnd, uint32(value)) {
+				if !includeMinusOne || !xrefQueryMatches(query, queryEnd, uint32(value+1)) {
 					continue
 				}
 				adjustment = -1
+				matchedTarget = value + 1
+			} else if queryEnd != nil {
+				matchedTarget = value
 			}
 			words = append(words, XrefRawWord{
 				PC:               uint32(bank)<<16 | uint32(0x8000+relative),
 				InstructionBytes: fmt.Sprintf("%02X %02X", byte(value), byte(value>>8)),
-				Value:            value, Target: target, TargetAdjustment: adjustment,
+				Value:            value, Target: matchedTarget, TargetAdjustment: adjustment,
 				Evidence: "raw_rom_word", Ownership: "unclassified", Reachability: "unknown",
 			})
 		}
@@ -460,7 +490,7 @@ func WriteXrefReport(output io.Writer, report XrefReport, format string) error {
 		return encoder.Encode(report)
 	case "", "text":
 		fmt.Fprintf(output, "xref v%d: %s, %d decoded reference(s) at %d unique source PC(s), %d raw word evidence item(s); variants %d -> %d in %d pass(es)\n",
-			report.Version, formatXrefQuery(report.Query), report.Summary.References,
+			report.Version, formatXrefRange(report.Query, report.QueryEnd), report.Summary.References,
 			report.Summary.UniqueSourcePCs, report.Summary.RawWordEvidence, report.Summary.InitialVariants,
 			report.Summary.FinalVariants, report.Summary.VariantPasses)
 		for _, reference := range report.References {
@@ -495,5 +525,23 @@ func formatXrefQuery(query XrefQuery) string {
 		return fmt.Sprintf("$%04X 16-bit operand", uint16(query.Address))
 	default:
 		return fmt.Sprintf("$%02X:%04X architectural address", byte(query.Address>>16), uint16(query.Address))
+	}
+}
+
+func formatXrefRange(query XrefQuery, queryEnd *XrefQuery) string {
+	if queryEnd == nil {
+		return formatXrefQuery(query)
+	}
+	switch query.Bits {
+	case 8:
+		return fmt.Sprintf("$%02X-$%02X direct-page/stack operand range",
+			uint8(query.Address), uint8(queryEnd.Address))
+	case 16:
+		return fmt.Sprintf("$%04X-$%04X 16-bit operand range",
+			uint16(query.Address), uint16(queryEnd.Address))
+	default:
+		return fmt.Sprintf("$%02X:%04X-$%02X:%04X architectural address range",
+			byte(query.Address>>16), uint16(query.Address),
+			byte(queryEnd.Address>>16), uint16(queryEnd.Address))
 	}
 }

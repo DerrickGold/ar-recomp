@@ -371,6 +371,7 @@ func runXref(args []string) error {
 	cfgDir := flags.String("cfg-dir", "recomp", "bank config directory, relative to project root")
 	jobs := flags.Int("jobs", runtime.NumCPU(), "parallel decode workers")
 	bankValue := flags.String("bank", "", "optional hexadecimal source bank")
+	endValue := flags.String("end", "", "optional inclusive address-range end (same width as the start)")
 	kind := flags.String("kind", "all", "access filter: all, read, write, read-write, control, branch, or pointer-read")
 	wramMirrors := flags.Bool("wram-mirrors", false, "for a 16-bit query, include long bank $00/$7E/$7F WRAM mirrors")
 	rawWords := flags.Bool("data-words", false, "also scan raw ROM words as explicitly unowned evidence")
@@ -394,6 +395,14 @@ func runXref(args []string) error {
 	if err != nil {
 		return err
 	}
+	var queryEnd *tooling.XrefQuery
+	if strings.TrimSpace(*endValue) != "" {
+		parsedEnd, parseErr := tooling.ParseXrefQuery(*endValue)
+		if parseErr != nil {
+			return fmt.Errorf("parse --end: %w", parseErr)
+		}
+		queryEnd = &parsedEnd
+	}
 	paths := project.DefaultPaths(*root)
 	paths.ROM, paths.ConfigDir = *romPath, *cfgDir
 	resolved, err := paths.Resolve()
@@ -411,7 +420,8 @@ func runXref(args []string) error {
 	}
 	report, err := tooling.BuildXref(tooling.XrefOptions{
 		ROMPath: resolved.ROM, CFGDir: resolved.ConfigDir, Jobs: *jobs,
-		OnlyBank: onlyBank, Query: query, AccessFilter: *kind, IncludeWRAMMirrors: *wramMirrors,
+		OnlyBank: onlyBank, Query: query, QueryEnd: queryEnd,
+		AccessFilter: *kind, IncludeWRAMMirrors: *wramMirrors,
 		IncludeRawWords: *rawWords, IncludeTargetMinusOne: *targetMinusOne,
 	})
 	if err != nil {

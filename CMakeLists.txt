@@ -338,6 +338,12 @@ endif() # NOT AR_TESTS_ONLY
 if(BUILD_TESTING)
     find_package(Python3 QUIET COMPONENTS Interpreter)
 
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME actraiser_language_pack_extract
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tests/language_pack_extract_test.py)
+    endif()
+
     # The production HLE fatal path escapes through the game coroutine. Unit
     # targets link only the formatter/trampoline core; invalid direct calls
     # retain abort semantics unless a focused test registers its own escape.

@@ -49,12 +49,13 @@ func TestBuildXrefUsesDecodedBoundariesAndDistinguishesWidths(t *testing.T) {
 	copy(image[0x0040:], []byte{0x80, 0x0e}) // BRA $8050
 	image[0x0050] = 0x60
 	copy(image[0x0060:], []byte{0x8f, 0x1c, 0x00, 0x7e, 0x60}) // STA $7E:001C; RTS
+	copy(image[0x0070:], []byte{0x8f, 0x1d, 0x00, 0x7f, 0x60}) // STA $7F:001D; RTS
 	romPath := filepath.Join(root, "fixture.sfc")
 	if err := os.WriteFile(romPath, image, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfgDir := filepath.Join(root, "recomp")
-	writeTestFile(t, filepath.Join(cfgDir, "bank00.cfg"), "bank = 00\nfunc Root 8000 entry_mx:1,1\nfunc BranchRoot 8040 entry_mx:1,1\nfunc LongRoot 8060 entry_mx:1,1\n")
+	writeTestFile(t, filepath.Join(cfgDir, "bank00.cfg"), "bank = 00\nfunc Root 8000 entry_mx:1,1\nfunc BranchRoot 8040 entry_mx:1,1\nfunc LongRoot 8060 entry_mx:1,1\nfunc RangeRoot 8070 entry_mx:1,1\n")
 
 	dp, err := BuildXref(XrefOptions{
 		ROMPath: romPath, CFGDir: cfgDir, Jobs: 2,
@@ -103,6 +104,27 @@ func TestBuildXrefUsesDecodedBoundariesAndDistinguishesWidths(t *testing.T) {
 	}
 	if len(wram.References) != 1 || wram.References[0].PC != 0x008060 || wram.References[0].Resolution != "long_wram_mirror" {
 		t.Fatalf("WRAM mirror references = %+v", wram.References)
+	}
+	rangeEnd := XrefQuery{Address: 0x001d, Bits: 16}
+	wramRange, err := BuildXref(XrefOptions{
+		ROMPath: romPath, CFGDir: cfgDir, Jobs: 1,
+		Query: XrefQuery{Address: 0x001b, Bits: 16}, QueryEnd: &rangeEnd,
+		AccessFilter: "write", IncludeWRAMMirrors: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(wramRange.References) != 2 ||
+		wramRange.References[0].PC != 0x008060 ||
+		wramRange.References[1].PC != 0x008070 {
+		t.Fatalf("WRAM range references = %+v", wramRange.References)
+	}
+	var rangeOutput bytes.Buffer
+	if err := WriteXrefReport(&rangeOutput, wramRange, "text"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rangeOutput.String(), "$001B-$001D 16-bit operand range") {
+		t.Fatalf("xref range output missing range: %s", rangeOutput.String())
 	}
 
 	table, err := BuildXref(XrefOptions{
@@ -168,6 +190,7 @@ func TestBuildXrefUsesDecodedBoundariesAndDistinguishesWidths(t *testing.T) {
 func Root 8000 entry_mx:1,1
 func BranchRoot 8040 entry_mx:1,1
 func LongRoot 8060 entry_mx:1,1
+func RangeRoot 8070 entry_mx:1,1
 indirect_dispatch 8009 2 idx:X tables:800C transfer:tail
 `)
 	confirmed, err := AnalyzeAuthoredShadow(ShadowAnalysisOptions{
