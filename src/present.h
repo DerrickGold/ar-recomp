@@ -339,6 +339,13 @@ typedef struct FrameSlot {
    * which is exactly how the icon used to get lost and fall back to being
    * drawn centered with the scene instead of anchored right. */
   uint8_t hud_icon_first, hud_icon_count;
+  /* Rows the promote claimed, latched under that same rule and for the same
+   * reason: it describes hud_obj_surface, while overlay_captures[Obj].y1
+   * describes whatever claimed the OBJ slot last. Taking the extent from the
+   * capture while taking the pixels from the promoted surface is how the icon
+   * silently stopped being uploaded — a full-frame claim made y1 taller than
+   * that surface, so the upload was skipped and the texture stayed empty. */
+  uint8_t hud_icon_rows;
 
   /* oam/high_oam are only populated when there is an OBJ overlay or a promoted
    * icon to resolve (§2.8 cost note); oam_valid says whether this frame

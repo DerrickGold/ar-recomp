@@ -117,16 +117,16 @@ static void RevealPage(ArDialogueSession *session) {
 
 static void TestLongerShorterAndNativeSwitch(void) {
   static const char native_script[] =
-      ":: action.hud.act_1\nNative source\n";
+      ":: dialogue.event.relay.aitos\nNative source\n";
   static const char long_script[] =
-      ":: action.hud.act_1\n"
+      ":: dialogue.event.relay.aitos\n"
       "Première page café\n"
       "@page\n"
       "Deuxième page\n"
       "@page\n"
       "Troisième page\n";
   static const char short_script[] =
-      ":: action.hud.act_1\nBref\n";
+      ":: dialogue.event.relay.aitos\nBref\n";
   ArLanguagePack native_pack, long_pack, short_pack;
   ArLanguagePack_Init(&native_pack);
   ArLanguagePack_Init(&long_pack);
@@ -144,7 +144,7 @@ static void TestLongerShorterAndNativeSwitch(void) {
   ArDialogueContentSelection short_selection =
       Selection(kArDialoguePresentation_Enhanced, &short_pack, &native_pack);
   CHECK(ArDialogueSession_Begin(&session, &long_selection,
-                                "action.hud.act_1", NULL, &error));
+                                "dialogue.event.relay.aitos", NULL, &error));
   ArDialoguePageSnapshot page;
   CHECK(ArDialogueSession_GetPage(&session, &page));
   CHECK(page.page_count == 3);
@@ -185,7 +185,7 @@ static void TestLongerShorterAndNativeSwitch(void) {
   ArDialogueSession_Destroy(&session);
   ArDialogueSession_Init(&session);
   CHECK(ArDialogueSession_Begin(&session, &long_selection,
-                                "action.hud.act_1", NULL, &error));
+                                "dialogue.event.relay.aitos", NULL, &error));
   RevealPage(&session);
   CHECK(ArDialogueSession_Next(&session, &token, &error));
   CHECK(token.kind == kArDialogueToken_PageComplete);
@@ -211,7 +211,7 @@ static void TestLongerShorterAndNativeSwitch(void) {
   ArDialogueSession_Destroy(&session);
   ArDialogueSession_Init(&session);
   CHECK(ArDialogueSession_Begin(&session, &short_selection,
-                                "action.hud.act_1", NULL, &error));
+                                "dialogue.event.relay.aitos", NULL, &error));
   CHECK(ArDialogueSession_Next(&session, &token, &error));
   CHECK(ArDialogueSession_Switch(&session, &long_selection, &error));
   CHECK(ArDialogueSession_GetPage(&session, &page));
@@ -223,20 +223,36 @@ static void TestLongerShorterAndNativeSwitch(void) {
   ArLanguagePack_Destroy(&native_pack);
 }
 
+static void TestOptionalHudRoute(void) {
+  ArLanguagePack pack;
+  ArLanguagePack_Init(&pack);
+  ArLanguagePackError error;
+  CHECK(LoadPack(&pack, "test.hud", "fr-FR", ":: action.hud.player_label\nJOUEUR\n@end\n", &error));
+  ArDialogueSession session;
+  ArDialogueSession_Init(&session);
+  ArDialogueContentSelection selection = Selection(kArDialoguePresentation_Enhanced, &pack, NULL);
+  CHECK(ArDialogueSession_Begin(&session, &selection, "action.hud.player_label", NULL, &error));
+  ArDialoguePageSnapshot page;
+  CHECK(ArDialogueSession_GetPage(&session, &page));
+  CHECK(page.utf8_bytes >= 6 && !strncmp(page.utf8, "JOUEUR", 6));
+  ArDialogueSession_Destroy(&session);
+  ArLanguagePack_Destroy(&pack);
+}
+
 static void TestIntentionalEmptySource(void) {
   ArLanguagePack native_pack, empty_pack;
   ArLanguagePack_Init(&native_pack);
   ArLanguagePack_Init(&empty_pack);
   ArLanguagePackError error;
   CHECK(LoadPack(&native_pack, "native.us", "en-US",
-                 ":: action.hud.act_1\nNative fallback\n", &error));
+                 ":: dialogue.event.relay.aitos\nNative fallback\n", &error));
   CHECK(LoadPack(&empty_pack, "test.empty", "en-CA",
-                 ":: action.hud.act_1\n@empty\n", &error));
+                 ":: dialogue.event.relay.aitos\n@empty\n", &error));
   ArDialogueContentSelection selection =
       Selection(kArDialoguePresentation_Enhanced, &empty_pack, &native_pack);
   ArDialogueSession session;
   ArDialogueSession_Init(&session);
-  CHECK(ArDialogueSession_Begin(&session, &selection, "action.hud.act_1", NULL, &error));
+  CHECK(ArDialogueSession_Begin(&session, &selection, "dialogue.event.relay.aitos", NULL, &error));
   for (uint32_t native_page = 0; native_page < 3; ++native_page) {
     ArDialogueNativeProgress progress = {
         .struct_size = sizeof(progress), .abi_version = AR_DIALOGUE_SESSION_ABI_VERSION,
@@ -262,16 +278,16 @@ static void TestIntentionalEmptySource(void) {
 
 static void TestNativeProgressBridge(void) {
   static const char native_script[] =
-      ":: action.hud.act_1\nNative source\n";
+      ":: dialogue.event.relay.aitos\nNative source\n";
   static const char enhanced_script[] =
-      ":: action.hud.act_1\n"
+      ":: dialogue.event.relay.aitos\n"
       "Alpha\n"
       "@page\n"
       "Éléphant\n"
       "@page\n"
       "Omega\n";
   static const char short_script[] =
-      ":: action.hud.act_1\nFin\n";
+      ":: dialogue.event.relay.aitos\nFin\n";
   ArLanguagePack native_pack, enhanced_pack, short_pack;
   ArLanguagePack_Init(&native_pack);
   ArLanguagePack_Init(&enhanced_pack);
@@ -287,7 +303,7 @@ static void TestNativeProgressBridge(void) {
   ArDialogueContentSelection native_selection =
       Selection(kArDialoguePresentation_NativeRetail, NULL, &native_pack);
   CHECK(ArDialogueSession_Begin(&session, &native_selection,
-                                "action.hud.act_1", NULL, &error));
+                                "dialogue.event.relay.aitos", NULL, &error));
   ArDialogueNativeProgress observed = {
       .struct_size = sizeof(observed),
       .abi_version = AR_DIALOGUE_SESSION_ABI_VERSION,
@@ -335,11 +351,11 @@ static void TestNativeProgressBridge(void) {
 
 static void TestFallbackAndTransactionalFailure(void) {
   static const char native_script[] =
-      ":: action.hud.act_1\nNative enhanced fallback\n";
+      ":: dialogue.event.relay.aitos\nNative enhanced fallback\n";
   static const char missing_script[] =
-      ":: action.hud.act_2\nUnrelated translated message\n";
+      ":: dialogue.event.relay.bloodpool\nUnrelated translated message\n";
   static const char malformed_script[] =
-      ":: action.hud.act_1\nForbidden {master_name}\n";
+      ":: dialogue.event.relay.aitos\nForbidden {master_name}\n";
   ArLanguagePack native_pack, missing_pack, malformed_pack;
   ArLanguagePack_Init(&native_pack);
   ArLanguagePack_Init(&missing_pack);
@@ -355,7 +371,7 @@ static void TestFallbackAndTransactionalFailure(void) {
   ArDialogueSession_Init(&session);
   ArDialogueContentSelection selection = Selection(
       kArDialoguePresentation_Enhanced, &missing_pack, &native_pack);
-  CHECK(ArDialogueSession_Begin(&session, &selection, "action.hud.act_1",
+  CHECK(ArDialogueSession_Begin(&session, &selection, "dialogue.event.relay.aitos",
                                 NULL, &error));
   ArDialoguePageSnapshot page;
   CHECK(ArDialogueSession_GetPage(&session, &page));
@@ -387,9 +403,9 @@ static void TestFallbackAndTransactionalFailure(void) {
 
 static void TestWaitSwitchAndRestore(void) {
   static const char first_script[] =
-      ":: action.hud.act_1\nAB\n@wait 10\nCD\n";
+      ":: dialogue.event.relay.aitos\nAB\n@wait 10\nCD\n";
   static const char second_script[] =
-      ":: action.hud.act_1\nWX\n@wait 20\nYZ\n";
+      ":: dialogue.event.relay.aitos\nWX\n@wait 20\nYZ\n";
   ArLanguagePack first, second;
   ArLanguagePack_Init(&first);
   ArLanguagePack_Init(&second);
@@ -404,7 +420,7 @@ static void TestWaitSwitchAndRestore(void) {
   ArDialogueSession session;
   ArDialogueSession_Init(&session);
   CHECK(ArDialogueSession_Begin(&session, &first_selection,
-                                "action.hud.act_1", NULL, &error));
+                                "dialogue.event.relay.aitos", NULL, &error));
   ArDialogueToken token;
   CHECK(ArDialogueSession_Next(&session, &token, &error));
   CHECK(token.kind == kArDialogueToken_Grapheme);
@@ -713,11 +729,11 @@ static void TestEnhancedNativeControlProgress(void) {
 
 static void TestCueCannotSplitGrapheme(void) {
   const char *scripts[] = {
-      ":: action.hud.act_1\ne\n@wait 1\n\xCC\x81\n",
+      ":: dialogue.event.relay.aitos\ne\n@wait 1\n\xCC\x81\n",
       ":: sky.action_mode.confirm\ne\n@anchor reset_text_cursor.00\n"
       "\xCC\x81\n@anchor yield.01\n",
   };
-  const char *ids[] = {"action.hud.act_1", "sky.action_mode.confirm"};
+  const char *ids[] = {"dialogue.event.relay.aitos", "sky.action_mode.confirm"};
   for (size_t index = 0; index < sizeof(scripts) / sizeof(scripts[0]); ++index) {
     ArLanguagePack pack;
     ArLanguagePack_Init(&pack);
@@ -741,7 +757,7 @@ static void TestCueCannotSplitGrapheme(void) {
 }
 
 static void TestCorruptStateRejected(void) {
-  static const char script[] = ":: action.hud.act_1\nSafe\n";
+  static const char script[] = ":: dialogue.event.relay.aitos\nSafe\n";
   ArLanguagePack pack;
   ArLanguagePack_Init(&pack);
   ArLanguagePackError error;
@@ -750,7 +766,7 @@ static void TestCorruptStateRejected(void) {
       Selection(kArDialoguePresentation_Enhanced, &pack, &pack);
   ArDialogueSession session;
   ArDialogueSession_Init(&session);
-  CHECK(ArDialogueSession_Begin(&session, &selection, "action.hud.act_1",
+  CHECK(ArDialogueSession_Begin(&session, &selection, "dialogue.event.relay.aitos",
                                 NULL, &error));
   ArDialogueStableState saved;
   CHECK(ArDialogueSession_ExportState(&session, &saved));
@@ -766,7 +782,7 @@ static void TestCorruptStateRejected(void) {
 
 static void TestEnhancedNativeProgressSynchronization(void) {
   static const char script[] =
-      ":: action.hud.act_1\n"
+      ":: dialogue.event.relay.aitos\n"
       "ABCDE\n"
       "@page\n"
       "XYZ\n"
@@ -779,7 +795,7 @@ static void TestEnhancedNativeProgressSynchronization(void) {
       Selection(kArDialoguePresentation_Enhanced, &pack, &pack);
   ArDialogueSession session;
   ArDialogueSession_Init(&session);
-  CHECK(ArDialogueSession_Begin(&session, &selection, "action.hud.act_1",
+  CHECK(ArDialogueSession_Begin(&session, &selection, "dialogue.event.relay.aitos",
                                 NULL, &error));
 
   ArDialogueNativeProgress progress = {
@@ -844,13 +860,13 @@ static void TestPresentationBudget(void) {
   ArLanguagePack_Init(&pack);
   ArLanguagePackError error;
   CHECK(LoadPack(&pack, "budget.test", "en-US",
-                 ":: action.hud.act_1\nÉ\n@page\nZ\n", &error));
+                 ":: dialogue.event.relay.aitos\nÉ\n@page\nZ\n", &error));
   const ArDialogueContentSelection selection =
       Selection(kArDialoguePresentation_Enhanced, &pack, &pack);
   ArDialogueSession session;
   ArDialogueSession_Init(&session);
   /* Two bytes for É, one for Z and two page separators: exact-fit succeeds. */
-  CHECK(ArDialogueSession_BeginBounded(&session, &selection, "action.hud.act_1",
+  CHECK(ArDialogueSession_BeginBounded(&session, &selection, "dialogue.event.relay.aitos",
                                        NULL, 5, &error));
   const ArDialogueStableState before = session.state;
   const void *program = session.private_program;
@@ -859,7 +875,7 @@ static void TestPresentationBudget(void) {
   CHECK(session.private_program == program &&
         !memcmp(&session.state, &before, sizeof(before)));
   CHECK(!ArDialogueSession_BeginBounded(&session, &selection,
-                                        "action.hud.act_1", NULL, 4, &error));
+                                        "dialogue.event.relay.aitos", NULL, 4, &error));
   CHECK(session.private_program == program &&
         !memcmp(&session.state, &before, sizeof(before)));
   ArDialogueContentSelection native =
@@ -890,6 +906,7 @@ static void TestPresentationBudget(void) {
 }
 
 int main(void) {
+  TestOptionalHudRoute();
   TestPresentationBudget();
   TestLongerShorterAndNativeSwitch();
   TestNativeProgressBridge();

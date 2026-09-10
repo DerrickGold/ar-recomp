@@ -118,6 +118,12 @@ func readInstalledSummary(root, key string) (InstalledPackSummary, error) {
 	return row, nil
 }
 
+// MaximumEnabledPacks is the game's supported number of enabled packages
+// (kArLanguagePackCatalogMaximum in src/localization/pack_discovery.h). Enabling
+// more would install packages the player cannot select, so the builder refuses
+// instead of pretending they are available.
+const MaximumEnabledPacks = 128
+
 // SetLanguagePackEnabled toggles discovery by renaming only the manifest.
 // Versioned script/font paths remain stable for running games; re-enabling
 // validates the declared files.
@@ -146,6 +152,19 @@ func SetLanguagePackEnabled(root, key, id, expected string, enabled bool) error 
 		source, target = target, source
 		if _, err := openInstalledAuthorPack(dir, source); err != nil {
 			return err
+		}
+		rows, err := ListInstalledPacks(root)
+		if err != nil {
+			return err
+		}
+		active := 0
+		for _, other := range rows {
+			if other.Enabled {
+				active++
+			}
+		}
+		if active >= MaximumEnabledPacks {
+			return fmt.Errorf("the game offers %d enabled language packages; disable one before enabling another", MaximumEnabledPacks)
 		}
 	}
 	if _, err := os.Lstat(filepath.Join(dir, target)); !errors.Is(err, os.ErrNotExist) {

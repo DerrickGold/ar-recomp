@@ -27,6 +27,8 @@ static uint64_t HashRequest(uint64_t hash,
   hash = HashU64(hash, request->source_revision);
   hash = HashU64(hash, request->font_revision);
   hash = HashU32(hash, request->style_id);
+  hash = HashU32(hash, request->band_rgb);
+  hash = HashU32(hash, request->body_rgb);
   hash = HashU32(hash, request->flags);
   hash = HashU32(hash, (uint32_t)request->direction);
   hash = HashU32(hash, (uint32_t)request->alignment);
@@ -74,6 +76,8 @@ bool ArTextSurfaceCache_Init(ArTextSurfaceCache *cache, size_t capacity) {
   *cache = (ArTextSurfaceCache){
     .entries = entries,
     .capacity = capacity,
+    /* Nothing is pinned until a frame declares itself. */
+    .frame_start = UINT64_MAX,
   };
   return true;
 }
@@ -212,6 +216,71 @@ static bool ApplyMosaic(const ArTextBitmap *source, int block_size,
   return true;
 }
 
+static uint64_t FormatBytesPerPixel(ArRenderPixelFormat format) {
+  switch (format) {
+    case kArRenderPixelFormat_A8: return 1;
+    case kArRenderPixelFormat_Rgb565:
+    case kArRenderPixelFormat_Rgba4444: return 2;
+    default: return 4;
+  }
+}
+
+/* Texture bytes for a surface, saturating rather than wrapping so an absurd
+ * request is rejected instead of appearing free. */
+static uint64_t SurfaceBytes(int width, int height,
+                             ArRenderPixelFormat format) {
+  if (width <= 0 || height <= 0) return 0;
+  const uint64_t pixels = (uint64_t)width * (uint64_t)height;
+  if (pixels > UINT64_MAX / 8u) return UINT64_MAX;
+  return pixels * FormatBytesPerPixel(format);
+}
+
+static void ReleaseEntry(ArTextSurfaceCache *cache, ArRenderDevice *device,
+                         ArTextSurfaceCacheEntry *entry) {
+  if (!entry->valid) return;
+  ArRenderDevice_DestroyTexture(device, entry->surface.texture);
+  free((void *)entry->surface.reveal_clusters);
+  free((void *)entry->surface.cluster_ink_bounds);
+  cache->stats.texture_bytes -= entry->texture_bytes;
+  entry->valid = false;
+  entry->texture_bytes = 0;
+  ++cache->stats.evictions;
+}
+
+/* Least recently used entry that the frame being prepared is not already
+ * holding, or capacity when every entry is pinned. */
+static size_t SelectByteVictim(const ArTextSurfaceCache *cache) {
+  size_t victim = cache->capacity;
+  for (size_t i = 0; i < cache->capacity; ++i) {
+    if (!cache->entries[i].valid ||
+        cache->entries[i].last_use >= cache->frame_start)
+      continue;
+    if (victim == cache->capacity ||
+        cache->entries[i].last_use < cache->entries[victim].last_use)
+      victim = i;
+  }
+  return victim;
+}
+
+static void EnforceByteBudget(ArTextSurfaceCache *cache,
+                              ArRenderDevice *device) {
+  if (!cache->byte_budget) return;
+  while (cache->stats.texture_bytes > cache->byte_budget) {
+    const size_t victim = SelectByteVictim(cache);
+    if (victim >= cache->capacity) return;
+    ReleaseEntry(cache, device, &cache->entries[victim]);
+  }
+}
+
+void ArTextSurfaceCache_SetByteBudget(ArTextSurfaceCache *cache,
+                                      uint64_t budget) {
+  if (cache) cache->byte_budget = budget;
+}
+
+void ArTextSurfaceCache_BeginFrame(ArTextSurfaceCache *cache) {
+  if (cache) cache->frame_start = cache->clock + 1u;
+}
+
 static size_t SelectVictim(const ArTextSurfaceCache *cache) {
   size_t victim = 0;
   for (size_t i = 0; i < cache->capacity; ++i) {
@@ -220,6 +289,51 @@ static size_t SelectVictim(const ArTextSurfaceCache *cache) {
       victim = i;
   }
   return victim;
+}
+
+static ArTextSurfaceFailure *FindFailure(ArTextSurfaceCache *cache,
+                                        ArTextCacheKey key) {
+  for (size_t i = 0; i < kArTextNegativeCacheCapacity; ++i) {
+    ArTextSurfaceFailure *failure = &cache->failures[i];
+    if (failure->valid && ArTextCacheKey_Equals(failure->key, key))
+      return failure;
+  }
+  return NULL;
+}
+
+/* Re-records `existing` in place when this key has failed before, so a request
+ * that keeps failing cannot fill the ring and evict other keys' answers. */
+static void RememberFailure(ArTextSurfaceCache *cache,
+                            ArTextSurfaceFailure *existing, ArTextCacheKey key,
+                            ArTextRasterFailure kind, const char *message) {
+  ArTextSurfaceFailure *failure = existing
+      ? existing
+      : &cache->failures[cache->next_failure++ % kArTextNegativeCacheCapacity];
+  const uint32_t attempts =
+      existing && existing->kind == kind && existing->attempts < UINT32_MAX
+          ? existing->attempts + 1u : 1u;
+  memset(failure, 0, sizeof(*failure));
+  failure->valid = true;
+  failure->key = key;
+  failure->kind = kind;
+  failure->attempts = attempts;
+  if (kind == kArTextRasterFailure_Retryable) {
+    /* 1, 2, 4, ... lookups: the first retry is immediate, and a backend that
+     * stays broken is not asked again every frame. */
+    uint64_t delay = UINT64_C(1) << (attempts - 1u < 31u ? attempts - 1u : 31u);
+    if (delay > (uint64_t)kArTextFailureRetryCeiling)
+      delay = (uint64_t)kArTextFailureRetryCeiling;
+    failure->retry_at = cache->clock + delay;
+  }
+  SetError(failure->error, sizeof(failure->error), message);
+}
+
+static void ForgetRetryableFailures(ArTextSurfaceCache *cache) {
+  for (size_t i = 0; i < kArTextNegativeCacheCapacity; ++i) {
+    if (cache->failures[i].valid &&
+        cache->failures[i].kind == kArTextRasterFailure_Retryable)
+      cache->failures[i].valid = false;
+  }
 }
 
 bool ArTextSurfaceCache_Acquire(
@@ -262,14 +376,13 @@ bool ArTextSurfaceCache_Acquire(
     }
   }
 
-  for (size_t i = 0; i < kArTextNegativeCacheCapacity; ++i) {
-    const ArTextSurfaceFailure *failure = &cache->failures[i];
-    if (failure->valid && ArTextCacheKey_Equals(failure->key, key)) {
-      ++cache->stats.hits;
-      ++cache->stats.negative_hits;
-      SetError(error, error_capacity, failure->error);
-      return false;
-    }
+  ArTextSurfaceFailure *remembered = FindFailure(cache, key);
+  if (remembered && (remembered->kind != kArTextRasterFailure_Retryable ||
+                     cache->clock < remembered->retry_at)) {
+    ++cache->stats.hits;
+    ++cache->stats.negative_hits;
+    SetError(error, error_capacity, remembered->error);
+    return false;
   }
 
   ++cache->stats.misses;
@@ -304,22 +417,33 @@ bool ArTextSurfaceCache_Acquire(
       return false;
     }
   }
+  /* Refuse an impossible field before any font work: the backend would
+   * otherwise render it at full size and only then discover it cannot fit. */
+  if (SurfaceBytes(request->maximum_width, request->maximum_height,
+                   kArRenderPixelFormat_Rgba8888) >
+      (uint64_t)kArTextSurfaceMaximumRequestBytes) {
+    ++cache->stats.failures;
+    ++cache->stats.oversize_rejects;
+    SetError(error, error_capacity,
+             "requested text bounds exceed the per-request texture ceiling");
+    return false;
+  }
   ArTextBitmap bitmap;
   char raster_error[kArTextRasterErrorCapacity] = {0};
+  ArTextRasterFailure kind = kArTextRasterFailure_Deterministic;
   if (!ArTextRasterizer_Rasterize(
-          rasterizer, &raster_request, &bitmap,
+          rasterizer, &raster_request, &bitmap, &kind,
           raster_error, sizeof(raster_error))) {
     ++cache->stats.failures;
-    ArTextSurfaceFailure *failure = &cache->failures[
-        cache->next_failure++ % kArTextNegativeCacheCapacity];
-    failure->valid = true;
-    failure->key = key;
-    SetError(failure->error, sizeof(failure->error),
-             raster_error[0] ? raster_error : "text rasterization failed");
+    RememberFailure(cache, remembered, key, kind,
+                    raster_error[0] ? raster_error : "text rasterization failed");
     SetError(error, error_capacity,
              raster_error[0] ? raster_error : "text rasterization failed");
     return false;
   }
+  /* The backend just served a request, so nothing that failed for a transient
+   * reason is still entitled to its remembered answer. */
+  ForgetRetryableFailures(cache);
 
   uint8_t *treated_pixels = NULL;
   const void *upload_pixels = bitmap.pixels;
@@ -453,17 +577,19 @@ bool ArTextSurfaceCache_Acquire(
 
   const size_t victim_index = SelectVictim(cache);
   ArTextSurfaceCacheEntry *victim = &cache->entries[victim_index];
-  if (victim->valid) {
-    ArRenderDevice_DestroyTexture(device, victim->surface.texture);
-    free((void *)victim->surface.reveal_clusters);
-    free((void *)victim->surface.cluster_ink_bounds);
-    ++cache->stats.evictions;
-  }
+  ReleaseEntry(cache, device, victim);
   *victim = (ArTextSurfaceCacheEntry){
     .surface = replacement,
     .last_use = cache->clock,
+    .texture_bytes = SurfaceBytes(upload_width, upload_height, bitmap.format),
     .valid = true,
   };
+  cache->stats.texture_bytes += victim->texture_bytes;
+  if (cache->stats.texture_bytes > cache->stats.peak_texture_bytes)
+    cache->stats.peak_texture_bytes = cache->stats.texture_bytes;
+  /* Evicting for bytes happens after the replacement is installed, so the
+   * entry we just handed the caller is never the one released. */
+  EnforceByteBudget(cache, device);
   *out_surface = replacement;
   return true;
 }

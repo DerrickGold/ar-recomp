@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 #include "render/hud_layout.h"
-#include "render/text_cell_record.h"
+#include "localization/text_cell_record.h"
 
 enum {
   kArTextCellMaximumProjectedRegions = 4,

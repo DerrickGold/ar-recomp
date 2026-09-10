@@ -11,13 +11,51 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 )
 
 var ErrProjectConflict = errors.New("project changed or already exists; reopen or explicitly choose replacement")
 
 // AuthorStore owns only .arproject archives below an explicitly selected root.
 // A save atomically replaces one file; it never rewrites an imported directory.
-type AuthorStore struct{ root string }
+type AuthorStore struct {
+	root string
+	// Revision of the archive this store last read or wrote, with the file
+	// identity it had at the time. A save can then check for a conflict
+	// without reparsing a large pack, and any change on disk -- size, time,
+	// mode, or a different file -- misses and falls back to a full read.
+	mu    sync.Mutex
+	known map[string]storedRevision
+}
+
+type storedRevision struct {
+	info     os.FileInfo
+	revision string
+}
+
+func (s *AuthorStore) rememberRevision(path string, revision string) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.known == nil {
+		s.known = map[string]storedRevision{}
+	}
+	s.known[path] = storedRevision{info, revision}
+}
+
+func (s *AuthorStore) rememberedRevision(path string, info os.FileInfo) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	known, ok := s.known[path]
+	if !ok || !os.SameFile(info, known.info) || info.Size() != known.info.Size() ||
+		!info.ModTime().Equal(known.info.ModTime()) || info.Mode() != known.info.Mode() {
+		return "", false
+	}
+	return known.revision, true
+}
 
 func NewAuthorStore(directory string) (*AuthorStore, error) {
 	root, err := filepath.Abs(directory)
@@ -27,7 +65,7 @@ func NewAuthorStore(directory string) (*AuthorStore, error) {
 	if err := makeAuthorDirectory(root); err != nil {
 		return nil, err
 	}
-	return &AuthorStore{root}, nil
+	return &AuthorStore{root: root}, nil
 }
 func (s *AuthorStore) Root() string { return s.root }
 func validProjectID(id string) bool {
@@ -60,6 +98,7 @@ func (s *AuthorStore) Open(id string) (*AuthorProject, error) {
 	if p.pack.manifest.metadata.ID != id {
 		return nil, fmt.Errorf("project filename/identity mismatch")
 	}
+	s.rememberRevision(path, p.ProjectRevision())
 	return p, nil
 }
 func (s *AuthorStore) Save(p *AuthorProject, expected string) error {
@@ -82,13 +121,17 @@ func (s *AuthorStore) Save(p *AuthorProject, expected string) error {
 			return ErrProjectConflict
 		}
 	}
-	_, err = os.Lstat(path)
+	info, err := os.Lstat(path)
 	if err == nil {
-		current, readErr := s.Open(id)
-		if readErr != nil {
-			return readErr
+		revision, known := s.rememberedRevision(path, info)
+		if !known {
+			current, readErr := s.Open(id)
+			if readErr != nil {
+				return readErr
+			}
+			revision = current.ProjectRevision()
 		}
-		if expected == "" || current.ProjectRevision() != expected {
+		if expected == "" || revision != expected {
 			return ErrProjectConflict
 		}
 	} else if !os.IsNotExist(err) {
@@ -96,7 +139,11 @@ func (s *AuthorStore) Save(p *AuthorProject, expected string) error {
 	} else if expected != "" {
 		return ErrProjectConflict
 	}
-	return atomicAuthorFile(path, func(w io.Writer) error { return p.WriteArchive(w, "backup") })
+	if err := atomicAuthorFile(path, func(w io.Writer) error { return p.WriteArchive(w, "backup") }); err != nil {
+		return err
+	}
+	s.rememberRevision(path, p.ProjectRevision())
+	return nil
 }
 
 type AuthorProjectSummary struct {
@@ -294,6 +341,75 @@ func atomicAuthorFile(path string, write func(io.Writer) error) (err error) {
 // replacement as its commit point. Readers see either complete version. Prior
 // versions remain available for recovery; install never changes game selection.
 func InstallAuthorProject(directory string, project *AuthorProject, replace bool) (string, error) {
+	return installAuthorProject(directory, project, replace, 0)
+}
+
+// A pack opened from an installed layout carries the previous install's
+// version directory on every path it named. This installer adds its own, so
+// that one has to come off first: otherwise each update buries the source a
+// level deeper and the manifest path grows without bound. Only a prefix this
+// installer could have written is removed -- a single leading "v-" segment
+// shared by every source and font the manifest names, each of which must be
+// present in the pack under that prefix. Anything else is left alone, since it
+// is the author's own directory rather than a storage detail.
+// The directory an install stages a version into: "v-" and digits, nothing
+// else, matching what os.MkdirTemp produces below. Shared with the archiver,
+// which reads notices out of one -- two spellings of "is this ours" would let
+// a pack be stripped here and not recognised there.
+func installedVersionSegment(path string) (string, bool) {
+	prefix, _, found := strings.Cut(path, "/")
+	if !found || !strings.HasPrefix(prefix, "v-") || len(prefix) <= 2 ||
+		strings.Trim(prefix[2:], "0123456789") != "" {
+		return "", false
+	}
+	return prefix, true
+}
+
+func stripInstalledVersion(files map[string][]byte, sources []string, fonts *PackFonts) string {
+	if len(sources) == 0 {
+		return ""
+	}
+	prefix := ""
+	named := append([]string{}, sources...)
+	for _, path := range append([]string{fonts.Primary}, fonts.Fallback...) {
+		if !strings.HasPrefix(path, "builtin:") {
+			named = append(named, path)
+		}
+	}
+	for _, path := range named {
+		segment, ours := installedVersionSegment(path)
+		if !ours {
+			return ""
+		}
+		if prefix == "" {
+			prefix = segment + "/"
+		} else if prefix != segment+"/" {
+			return ""
+		}
+		if _, present := files[path]; !present {
+			return ""
+		}
+	}
+	for i, source := range sources {
+		sources[i] = strings.TrimPrefix(source, prefix)
+	}
+	if !strings.HasPrefix(fonts.Primary, "builtin:") {
+		fonts.Primary = strings.TrimPrefix(fonts.Primary, prefix)
+	}
+	for i, path := range fonts.Fallback {
+		if !strings.HasPrefix(path, "builtin:") {
+			fonts.Fallback[i] = strings.TrimPrefix(path, prefix)
+		}
+	}
+	for _, path := range named {
+		data := files[path]
+		delete(files, path)
+		files[strings.TrimPrefix(path, prefix)] = data
+	}
+	return prefix
+}
+
+func installAuthorProject(directory string, project *AuthorProject, replace bool, expectedRevision uint64) (string, error) {
 	if project == nil || (!project.publicationReady && !project.installationReady && !project.nativeReady) {
 		return "", fmt.Errorf("prepare installation or publication before installing")
 	}
@@ -324,6 +440,9 @@ func InstallAuthorProject(directory string, project *AuthorProject, replace bool
 		if !replace || old.manifest.metadata.ID != pack.manifest.metadata.ID {
 			return "", ErrProjectConflict
 		}
+		if expectedRevision != 0 && old.RuntimeRevision() != expectedRevision {
+			return "", ErrProjectConflict
+		}
 	} else if !os.IsNotExist(err) {
 		return "", err
 	}
@@ -342,6 +461,17 @@ func InstallAuthorProject(directory string, project *AuthorProject, replace bool
 		files[path] = data
 	}
 	delete(files, "translation-progress.tsv")
+	fonts := pack.manifest.Fonts()
+	sources := pack.manifest.Sources()
+	if stripInstalledVersion(files, sources, &fonts) != "" {
+		// The copy staged inside the version directory has to name its members
+		// the way they now sit beside it, or opening it below fails.
+		relative, err := NewPackManifest(pack.manifest.Metadata(), fonts, sources)
+		if err != nil {
+			return "", err
+		}
+		files["pack.ini"] = []byte(relative.Text())
+	}
 	for path, data := range files {
 		if !PortablePackPath(path) {
 			return "", fmt.Errorf("unsafe pack member")
@@ -358,7 +488,6 @@ func InstallAuthorProject(directory string, project *AuthorProject, replace bool
 		return "", err
 	}
 	prefix := filepath.Base(version) + "/"
-	fonts := pack.manifest.Fonts()
 	if !strings.HasPrefix(fonts.Primary, "builtin:") {
 		fonts.Primary = prefix + fonts.Primary
 	}
@@ -367,7 +496,6 @@ func InstallAuthorProject(directory string, project *AuthorProject, replace bool
 			fonts.Fallback[i] = prefix + path
 		}
 	}
-	sources := pack.manifest.Sources()
 	for i := range sources {
 		sources[i] = prefix + sources[i]
 	}

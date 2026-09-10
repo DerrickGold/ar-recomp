@@ -36,28 +36,6 @@ int main(void) {
       if (i) CHECK(columns.left[i] - columns.right[i - 1] >= 2);
     }
   }
-  unsigned start, end;
-  for (unsigned digit = 0; digit < 10; ++digit) {
-    CHECK(ArLocalizedTextLayout_TableColumns(
-        kArLocalizationTextLayout_MessageSpeed, 0, digit, 10, &start, &end));
-    CHECK(start == digit && end == digit + 1);
-    CHECK(!ArLocalizedTextLayout_TableNumeric(
-        kArLocalizationTextLayout_MessageSpeed, 0, digit, 10));
-    for (ArTextDirection direction = kArTextDirection_LeftToRight;
-         direction <= kArTextDirection_RightToLeft; ++direction)
-      CHECK(ArLocalizedTextLayout_TableAlignment(
-          kArLocalizationTextLayout_MessageSpeed, 0, digit, 10, direction) ==
-          kArTextHorizontalAlignment_Center);
-  }
-  CHECK(ArLocalizedTextLayout_TableAlignment(
-      kArLocalizationTextLayout_MessageSpeed, 2, 0, 3,
-      kArTextDirection_LeftToRight) == kArTextHorizontalAlignment_Leading);
-  CHECK(ArLocalizedTextLayout_TableAlignment(
-      kArLocalizationTextLayout_MessageSpeed, 2, 2, 3,
-      kArTextDirection_LeftToRight) == kArTextHorizontalAlignment_Trailing);
-  CHECK(ArLocalizedTextLayout_TableAlignment(
-      kArLocalizationTextLayout_StatusMaster, 3, 1, 4,
-      kArTextDirection_LeftToRight) == kArTextHorizontalAlignment_Trailing);
   for (int scale = 1; scale <= 6; ++scale) {
     const ArRenderRectI left = {10 * scale, 20, 23 * scale, 10};
     const ArRenderRectI right = {75 * scale, 20, 35 * scale, 10};
@@ -87,27 +65,6 @@ int main(void) {
   CHECK(!ArLocalizedTextLayout_CenterInkVertically(
       (ArRenderRectI){0, 0, 10, 10}, (ArRenderRectI){0, 7, 8, 4}, 8, &invalid));
   CHECK(invalid.y == 99);
-  CHECK(!ArLocalizedTextLayout_TableColumns(
-      kArLocalizationTextLayout_MessageSpeed, 0, 0, 8, &start, &end));
-  CHECK(ArLocalizedTextLayout_TableColumns(
-      kArLocalizationTextLayout_StatusMaster, 3, 1, 4, &start, &end));
-  CHECK(start == 3 && end == 6); /* Blank before HP at column 7. */
-  CHECK(ArLocalizedTextLayout_TableColumns(
-      kArLocalizationTextLayout_StatusCities, 7, 1, 5, &start, &end));
-  CHECK(start == 10 && end == 13); /* Blank before growth at column 14. */
-  CHECK(ArLocalizedTextLayout_TableColumns(
-      kArLocalizationTextLayout_StatusCities, 3, 4, 5, &start, &end));
-  CHECK(start == 23 && end == 26); /* Preferred interval, before measured fitting. */
-  CHECK(ArLocalizedTextLayout_TableColumns(
-      kArLocalizationTextLayout_StatusMaster, 12, 0, 1, &start, &end));
-  CHECK(start == 0 && end == 5); /* Magic label cannot enter native icon cells. */
-  CHECK(ArLocalizedTextLayout_TableNumeric(
-      kArLocalizationTextLayout_StatusMaster, 1, 0, 1));
-  CHECK(!ArLocalizedTextLayout_TableNumeric(
-      kArLocalizationTextLayout_StatusCities, 7, 2, 5));
-  CHECK(!ArLocalizedTextLayout_TableColumns(
-      kArLocalizationTextLayout_StatusCities, 7, 5, 5, &start, &end));
-
   ArTextSurface surface = {.ascent = 18, .descent = -5, .line_advance = 25};
   ArTextRevealCluster narrow = {1, 1, 3, 25, 5, 22};
   ArTextRevealCluster wide = {2, 1, 8, 25, 21, 24};
@@ -154,5 +111,85 @@ int main(void) {
   destination = (ArRenderRectI){100, 190, 10, 20};
   CHECK(ArLocalizedTextLayout_Clip(origin, &source, &destination));
   CHECK(source.y == 10 && source.h == 10 && destination.h == 10);
+  /* Uniform key pitch. Three keys a row, a two-blank gutter between them, and
+   * a shaper whose advances differ per glyph the way a proportional font's do.
+   * The last key of the second row carries no ink, standing in for the finish
+   * and backspace keys the game draws as native artwork. */
+  {
+    enum { kKeyColumns = 3, kPerRow = 7, kClusters = 14 };
+    static const char text[] = "A  B  C\nD  E  F";
+    static ArTextRevealCluster keys[kClusters] = {
+      {1, 0, 0, 0, 30, 20},   {2, 0, 30, 0, 10, 20},  {3, 0, 40, 0, 10, 20},
+      {4, 0, 50, 0, 50, 20},  {5, 0, 100, 0, 10, 20}, {6, 0, 110, 0, 10, 20},
+      {7, 0, 120, 0, 20, 20},
+      {9, 1, 0, 20, 20, 20},  {10, 1, 20, 20, 10, 20}, {11, 1, 30, 20, 10, 20},
+      {12, 1, 40, 20, 60, 20},{13, 1, 100, 20, 10, 20},{14, 1, 110, 20, 10, 20},
+      {15, 1, 120, 20, 40, 20},
+    };
+    ArRenderRectI ink[kClusters];
+    for (size_t i = 0; i < kClusters; ++i)
+      ink[i] = (ArRenderRectI){keys[i].x, keys[i].y, keys[i].width, keys[i].height};
+    const size_t gutters[] = {1, 2, 4, 5, 8, 9, 11, 12};
+    for (size_t i = 0; i < sizeof(gutters) / sizeof(gutters[0]); ++i)
+      ink[gutters[i]] = (ArRenderRectI){0, 0, 0, 0};
+    ink[13] = (ArRenderRectI){0, 0, 0, 0}; /* artwork key: placed, but no ink */
+    ArTextSurface keyboard = {
+      .width = 160, .height = 40, .line_advance = 20,
+      .reveal_clusters = keys, .cluster_ink_bounds = ink,
+      .reveal_cluster_count = kClusters,
+    };
+    int shifts[kClusters];
+    CHECK(ArLocalizedTextLayout_KeyCellShifts(
+        &keyboard, text, sizeof(text) - 1u, " ", 1, kKeyColumns, 2,
+        /*first_key_center=*/50, /*key_pitch=*/100, shifts, kClusters));
+    /* Every key lands on its column, whatever advance the shaper measured. */
+    CHECK(shifts[0] == 50 - 15 && shifts[3] == 150 - 75 && shifts[6] == 250 - 130);
+    CHECK(shifts[7] == 50 - 10 && shifts[10] == 150 - 70 && shifts[13] == 250 - 140);
+    /* Each gutter splits down the middle, so a cut never lands on a glyph. */
+    CHECK(shifts[1] == shifts[0] && shifts[2] == shifts[3]);
+    CHECK(shifts[4] == shifts[3] && shifts[5] == shifts[6]);
+    CHECK(shifts[8] == shifts[7] && shifts[9] == shifts[10]);
+    /* A row that does not hold the stated number of keys leaves text flowed. */
+    CHECK(!ArLocalizedTextLayout_KeyCellShifts(
+        &keyboard, text, sizeof(text) - 1u, " ", 1, kKeyColumns + 1u, 2,
+        50, 100, shifts, kClusters));
+    CHECK(!ArLocalizedTextLayout_KeyCellShifts(
+        &keyboard, text, sizeof(text) - 1u, " ", 1, kKeyColumns, 2,
+        50, 0, shifts, kClusters));
+    CHECK(!ArLocalizedTextLayout_KeyCellShifts(
+        &keyboard, text, sizeof(text) - 1u, " ", 1, kKeyColumns, 2,
+        50, 100, shifts, kClusters - 1u));
+    /* Columns stay exactly on pitch at every size the window can produce.
+     * Each key's shift is solved from its column, not accumulated along the
+     * row, so a shrinking window scales the grid without drift piling up in
+     * the last column -- which is what pushed a key into the frame before. */
+    for (int pitch = 3; pitch <= 400; ++pitch) {
+      const int center = pitch * 3 / 4;
+      CHECK(ArLocalizedTextLayout_KeyCellShifts(
+          &keyboard, text, sizeof(text) - 1u, " ", 1, kKeyColumns, 2,
+          center, pitch, shifts, kClusters));
+      for (unsigned row = 0; row < 2u; ++row) {
+        for (unsigned key = 0; key < kKeyColumns; ++key) {
+          const size_t index = row * kPerRow + key * 3u; /* key, gutter, gutter */
+          /* Same extent rule the layout uses: ink when the key has any, and
+           * the shaped advance box when it is artwork that has none. */
+          const ArRenderRectI box = ink[index].w > 0 && ink[index].h > 0
+              ? ink[index]
+              : (ArRenderRectI){keys[index].x, keys[index].y,
+                                keys[index].width, keys[index].height};
+          const int placed = (box.x + box.x + box.w) / 2 + shifts[index];
+          CHECK(placed == center + (int)key * pitch);
+        }
+      }
+    }
+
+    /* Lines outside the keyed range keep flowing. */
+    CHECK(ArLocalizedTextLayout_KeyCellShifts(
+        &keyboard, text, sizeof(text) - 1u, " ", 1, kKeyColumns, 1,
+        50, 100, shifts, kClusters));
+    for (size_t i = 0; i < kPerRow; ++i) CHECK(shifts[i] == 0);
+    CHECK(shifts[7] != 0);
+  }
+
   return failures ? 1 : 0;
 }

@@ -12,10 +12,22 @@ typedef struct ArLanguagePackCatalogEntry {
   char manifest[1024];
 } ArLanguagePackCatalogEntry;
 
-enum { kArLanguagePackCatalogMaximum = 128 };
+/* The supported number of enabled packs. The builder publishes the same value
+ * so it can refuse an enable that the game could not offer. */
+enum {
+  kArLanguagePackCatalogMaximum = 128,
+  kArLanguagePackCatalogVisitLimit = 1024,
+};
 typedef struct ArLanguagePackCatalog {
+  /* Ordered by package ID, so which packs a full catalog keeps does not depend
+   * on the order the filesystem happened to enumerate them in. */
   ArLanguagePackCatalogEntry entries[kArLanguagePackCatalogMaximum];
   size_t count;
+  /* Valid packs dropped because the catalog was already full, and whether the
+   * scan stopped before reading the whole directory. Either means the player
+   * is looking at a subset and should be told so. */
+  size_t dropped;
+  bool visit_limit_reached;
 } ArLanguagePackCatalog;
 
 bool ArLanguagePackCatalog_Add(ArLanguagePackCatalog *catalog,

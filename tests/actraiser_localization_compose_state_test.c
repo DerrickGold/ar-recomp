@@ -1,4 +1,5 @@
 #include "actraiser/actraiser_localization_compose_state.h"
+#include "actraiser/actraiser_localization_hud.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -268,7 +269,152 @@ static void TestPartialMenuErases(void) {
       &state, &event, NULL, NULL, error, sizeof(error)));
 }
 
+static bool ResolveLiteral(
+    void *context, const char *id, char *utf8, size_t capacity, size_t *bytes,
+    uint32_t *clusters, uint64_t *revision,
+    ArLocalizationInlineObjectSnapshot *objects, size_t object_capacity,
+    uint8_t *object_count, char *error, size_t error_capacity) {
+  (void)id;
+  return ResolveSemanticId(NULL, context, utf8, capacity, bytes, clusters,
+      revision, objects, object_capacity, object_count, error, error_capacity);
+}
+
+static void TestActionAndTitle(void) {
+  ActRaiserLocalizationComposeState state;
+  ActRaiserLocalizationComposeState_Init(&state);
+  ActRaiserLocalizationComposeState_SetScene(&state, 1, 1);
+  const struct { uint32_t source; uint16_t dest; unsigned surface; } cards[] = {
+    {0x00a851, 0x080b, 10}, {0x00a8cb, 0x0a0d, 11},
+    {0x00a8d8, 0x0c0d, 12}, {0x00a8df, 0x090d, 13},
+    {0x00a8e6, 0x090c, 13}, {0x00a8ef, 0x0b0d, 13},
+  };
+  char error[256];
+  for (unsigned i = 0; i < sizeof(cards) / sizeof(cards[0]); ++i) {
+    ActRaiserLocalizationComposeObservation event = Compose(i * 2 + 1, cards[i].source, cards[i].dest);
+    event.map_group = event.map_number = 1;
+    CHECK(ActRaiserLocalizationComposeState_Process(&state, &event,
+        ResolveSemanticId, NULL, error, sizeof(error)));
+    const ActRaiserLocalizationComposeSnapshot *slot =
+        ActRaiserLocalizationComposeState_Find(&state, cards[i].surface);
+    CHECK(slot && slot->layout == kArLocalizationTextLayout_CenteredLabel);
+    if (!slot) continue;
+    event.serial++;
+    event.clear_first_row = slot->region.row;
+    event.clear_first_column = slot->region.column;
+    event.clear_row_count = event.clear_column_count = 1;
+    CHECK(ActRaiserLocalizationComposeState_Process(&state, &event, NULL, NULL, error, sizeof(error)));
+    CHECK(!ActRaiserLocalizationComposeState_FindObserved(&state, cards[i].surface));
+  }
+  ActRaiserLocalizationComposeState_SetScene(&state, 0, 0);
+  const char *labels[] = {"  CONTINUE\n\n  NEW GAME", "Continuer\nNouvelle partie", "Continue", ""};
+  for (unsigned i = 0; i < 4; ++i) {
+    ActRaiserLocalizationComposeObservation event = Compose(20 + i, 0x02a9a7, 0x1100);
+    event.map_number = 0;
+    CHECK(ActRaiserLocalizationComposeState_Process(&state, &event,
+        ResolveLiteral, (void *)labels[i], error, sizeof(error)));
+    ArLocalizationFrame frame;
+    ArLocalizationFrame_Reset(&frame);
+    CHECK(ArLocalizationFrame_SetFont(&frame, "en", "test", "/tmp/test.ttf", 1, &frame.settings));
+    CHECK(ActRaiserLocalizationComposeState_AppendFrame(&state, &frame,
+        (ArTextCellDestination){3, kArTextCellScreen_Composited, 0x5800}, kArTextDirection_LeftToRight));
+    CHECK(frame.snapshot_count == 2);
+    CHECK(frame.cells.records[0].region.row == 17 && frame.cells.records[1].region.row == 19);
+    CHECK(frame.cells.records[0].region.column == 14 && frame.cells.records[0].region.rows == 1);
+    CHECK((frame.snapshots[1].utf8_bytes == 0) == (i >= 2));
+    if (i == 3) CHECK(!frame.snapshots[0].utf8_bytes);
+  }
+  ActRaiserLocalizationComposeObservation event = Compose(30, 0x02aa60, 0x110c);
+  event.map_number = 0;
+  CHECK(ActRaiserLocalizationComposeState_Process(&state, &event, ResolveSemanticId, NULL, error, sizeof(error)));
+  CHECK(ActRaiserLocalizationComposeState_Find(&state, 15));
+  event.source_pc24 = 0x02aa34;
+  event.serial++;
+  (void)ActRaiserLocalizationComposeState_Process(&state, &event, ResolveSemanticId, NULL, error, sizeof(error));
+  CHECK(!ActRaiserLocalizationComposeState_FindObserved(&state, 15));
+  CHECK(ActRaiserLocalizationComposeState_Find(&state, 14));
+  ActRaiserLocalizationComposeState_SetScene(&state, 0, kActRaiserNonActionMap_SkyPalace);
+  CHECK(!ActRaiserLocalizationComposeState_ActiveCount(&state));
+}
+
+static void TestActionHud(void) {
+  uint16_t vram[0x8000] = {0}, cgram[256] = {0};
+  const uint16_t base = 0x5800;
+  const struct { unsigned row, col, count, first; } fields[] = {
+    {1, 0, 6, 34}, {1, 11, 4, 1}, {1, 21, 4, 5},
+    {2, 0, 6, 9}, {3, 0, 6, 15},
+  };
+  for (unsigned i = 0; i < 5; ++i)
+    for (unsigned j = 0; j < fields[i].count; ++j)
+      vram[base + fields[i].row * 32 + fields[i].col + j] = 0x2400 | (fields[i].first + j);
+  vram[base + 32 + 25] = 0x2404;
+  const unsigned digitcols[] = {8, 9, 15, 16, 17, 26, 27, 28, 29, 30};
+  for (unsigned i = 0; i < 10; ++i) vram[base + 32 + digitcols[i]] = 0x2430 + i;
+  cgram[6] = 0x001f; /* Palette one: exact red ends and green body. */
+  cgram[7] = 0x03e0;
+  /* Synthetic source pixels on both sides of each tile boundary. Adjacent
+   * letter pixels immediately outside the ornament crop must not leak. */
+  vram[0x22 * 8] = 0x0404;
+  vram[0x23 * 8 + 1] = 0x8080;
+  vram[0x23 * 8 + 2] = 0x0404; /* x=13, not left ornament */
+  vram[0x26 * 8] = 0x0404;
+  vram[0x27 * 8 + 1] = 0x1010;
+  vram[0x26 * 8 + 2] = 0x0808; /* x=36, not right ornament */
+  vram[0x27 * 8 + 2] = 0x0808; /* x=44, not right ornament */
+  ActRaiserLocalizationHud hud = {0};
+  ArLocalizationFrame frame;
+  const ArTextCellDestination destination = {3, kArTextCellScreen_Composited, base};
+  ArLocalizationFrame_Reset(&frame);
+  CHECK(ArLocalizationFrame_SetFont(&frame, "en", "test", "/tmp/test.ttf", 1, &frame.settings));
+  ActRaiserLocalizationHud_Append(&hud, &frame, destination,
+      kArTextDirection_LeftToRight, 0, vram, 0x8000, cgram, 256, ResolveSemanticId, NULL);
+  CHECK(frame.snapshot_count == 8 && hud.resolved);
+  CHECK(frame.snapshots[1].band_rgb == 0xff0000 && frame.snapshots[1].body_rgb == 0x00ff00);
+  CHECK(frame.snapshots[1].style_id == kArTextStyle_RetailPaletteBands);
+  CHECK(!frame.snapshots[1].italic && frame.snapshots[5].italic);
+  CHECK(frame.snapshots[3].left_inset_pixels == 5 && frame.snapshots[3].right_inset_pixels == 4);
+  CHECK(frame.snapshots[3].top_inset_pixels == 1);
+  CHECK(frame.snapshots[5].direction == kArTextDirection_LeftToRight);
+  CHECK(frame.snapshots[1].layout == kArLocalizationTextLayout_RightAlignedLabel);
+  CHECK(frame.snapshots[1].right_inset_pixels == 6);
+  CHECK(frame.snapshots[3].layout == kArLocalizationTextLayout_RightAlignedLabel);
+  CHECK(frame.snapshots[5].layout == kArLocalizationTextLayout_SingleLineLabel);
+  CHECK(frame.snapshots[6].layout == kArLocalizationTextLayout_SingleLineLabel);
+  CHECK(frame.snapshots[6].left_inset_pixels == 1);
+  CHECK(frame.snapshots[7].layout == kArLocalizationTextLayout_RightAlignedLabel);
+  CHECK(frame.snapshots[7].right_inset_pixels == 1);
+  CHECK(!strncmp(frame.text + frame.snapshots[7].utf8_offset, "56789", 5));
+  CHECK(frame.cells.records[0].region.column == 0 && frame.cells.records[0].region.columns == 6);
+  CHECK(frame.snapshots[0].layout == kArLocalizationTextLayout_FramedLabel);
+  CHECK(frame.artwork[kArLocalizationArtwork_LabelFrameLeft].width == 8);
+  CHECK(frame.artwork[kArLocalizationArtwork_LabelFrameRight].width == 7);
+  const ArLocalizationArtwork *left = &frame.artwork[kArLocalizationArtwork_LabelFrameLeft];
+  const ArLocalizationArtwork *right = &frame.artwork[kArLocalizationArtwork_LabelFrameRight];
+  CHECK(left->argb[0] == 0xff00ff00 && left->argb[8 + 3] == 0xff00ff00);
+  CHECK(right->argb[0] == 0xff00ff00 && right->argb[7 + 6] == 0xff00ff00);
+  for (unsigned x = 0; x < 8; ++x) CHECK(!left->argb[16 + x]);
+  for (unsigned x = 0; x < 7; ++x) CHECK(!right->argb[14 + x]);
+  CHECK(frame.snapshots[2].layout == kArLocalizationTextLayout_LeftAlignedLabel);
+  CHECK(!frame.snapshots[2].left_inset_pixels && !frame.snapshots[2].right_inset_pixels);
+  CHECK(frame.cells.records[3].region.columns == 6); /* Bars, heart and magic stay native. */
+  vram[base + 32 + 15] = 0x2499; /* Bad number retains native pixels. */
+  cgram[6] = 0x7c00;
+  ArLocalizationFrame_Reset(&frame);
+  CHECK(ArLocalizationFrame_SetFont(&frame, "en", "test", "/tmp/test.ttf", 1, &frame.settings));
+  ActRaiserLocalizationHud_Append(&hud, &frame, destination,
+      kArTextDirection_LeftToRight, 0, vram, 0x8000, cgram, 256, ResolveSemanticId, "action.hud.time_label");
+  CHECK(frame.snapshot_count == 7); /* Resolver was not called again. */
+  CHECK(frame.snapshots[1].band_rgb == 0x0000ff);
+  memset(vram, 0, sizeof(vram));
+  ArLocalizationFrame_Reset(&frame);
+  CHECK(ArLocalizationFrame_SetFont(&frame, "en", "test", "/tmp/test.ttf", 1, &frame.settings));
+  ActRaiserLocalizationHud_Append(&hud, &frame, destination,
+      kArTextDirection_LeftToRight, 0, vram, 0x8000, cgram, 256, ResolveSemanticId, NULL);
+  CHECK(!frame.snapshot_count); /* Clear/fade transition cannot leave stale HUD. */
+}
+
 int main(void) {
+  TestActionAndTitle();
+  TestActionHud();
   TestEmptyMenuLifecycle();
   TestPartialMenuErases();
   ActRaiserLocalizationComposeState state;
@@ -318,8 +464,9 @@ int main(void) {
   snapshot = ActRaiserLocalizationComposeState_Find(&state, 7);
   CHECK(snapshot && !strcmp(snapshot->semantic_id,
                             "status.report.cities_report"));
-  CHECK(snapshot && snapshot->layout ==
-        kArLocalizationTextLayout_StatusCities);
+  CHECK(snapshot && snapshot->menu ==
+        kActRaiserLocalizationMenu_StatusCities);
+  CHECK(snapshot && snapshot->layout == kArLocalizationTextLayout_Grid);
   CHECK(!ActRaiserLocalizationComposeState_Find(&state, 2));
   CHECK(ActRaiserLocalizationComposeState_ActiveCount(&state) == 1);
 
@@ -349,8 +496,8 @@ int main(void) {
   CHECK(ActRaiserLocalizationComposeState_Process(
       &state, &event, ResolveSemanticId, NULL, error, sizeof(error)));
   snapshot = ActRaiserLocalizationComposeState_Find(&state, 7);
-  CHECK(snapshot && snapshot->layout ==
-        kArLocalizationTextLayout_StatusScore);
+  CHECK(snapshot && snapshot->menu ==
+        kActRaiserLocalizationMenu_StatusScore);
   ArLocalizationFrame report_frame;
   ArLocalizationFrame_Reset(&report_frame);
   CHECK(ArLocalizationFrame_SetFont(
@@ -364,6 +511,9 @@ int main(void) {
   CHECK(report_frame.snapshots[0].native_preserve_count == 1);
   CHECK(report_frame.snapshots[0].native_preserves[0].row == 11);
   CHECK(report_frame.snapshots[0].native_preserves[0].columns == 26);
+  /* The divider comes from the grid's reserved rule, not a second copy of
+   * the row number in the adapter. */
+  CHECK(report_frame.snapshots[0].native_preserves[0].rows == 1);
 
   revision.revision = 4;
   CHECK(!ActRaiserLocalizationComposeState_Refresh(

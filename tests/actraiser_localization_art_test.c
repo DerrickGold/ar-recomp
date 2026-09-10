@@ -32,5 +32,26 @@ int main(void) {
   CHECK(!ActRaiserLocalizationArt_Capture(
       &art, 0, cells, 3, vram, 0x8000, palette, 32));
   CHECK(!art.valid);
+
+  /* The keyboard's finish and backspace glyphs are font characters $7E and
+   * $7F, resolved through the BG3 tile base the same way the selector glyph
+   * $3E is. Pin that arithmetic: a tile lives at base + index * 8 words, so
+   * a descriptor naming $7F must read the row written there and nowhere
+   * else. */
+  enum { kTileBase = 0x1000, kBackspace = 0x7f };
+  uint16_t keyboard[0x8000] = {0};
+  keyboard[kTileBase + kBackspace * 8] = 0x8080; /* both planes, leftmost */
+  const uint16_t backspace_cell[] = {kBackspace};
+  CHECK(ActRaiserLocalizationArt_Capture(
+      &art, kTileBase, backspace_cell, 1, keyboard, 0x8000, palette, 32));
+  CHECK(art.valid && art.width == 8 && art.height == 8);
+  CHECK(art.argb[0] != 0);          /* colour index 3, palette 0 */
+  CHECK(art.argb[1] == 0);
+  /* The neighbouring character must not bleed into it. */
+  const uint16_t finish_cell[] = {0x7e};
+  CHECK(ActRaiserLocalizationArt_Capture(
+      &art, kTileBase, finish_cell, 1, keyboard, 0x8000, palette, 32));
+  for (unsigned i = 0; i < kArLocalizationArtworkPixels; ++i)
+    CHECK(art.argb[i] == 0);
   return failures ? 1 : 0;
 }

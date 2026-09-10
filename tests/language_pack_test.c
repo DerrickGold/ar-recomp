@@ -143,6 +143,41 @@ static const ArLanguageOperation *FindOperation(
   return NULL;
 }
 
+/* One host-path contract, exercised in the shapes a Windows or network host
+ * hands us. Pack-internal members stay portable, so the joined result may mix
+ * separators; Win32 accepts that and POSIX never sees these prefixes. */
+static void TestMemberPathResolution(void) {
+  static const struct {
+    const char *manifest;
+    const char *expected;
+  } cases[] = {
+      {"packs/example/pack.ini", "packs/example/script/main.txt"},
+      {"pack.ini", "script/main.txt"},
+      {"C:\\packs\\example\\pack.ini", "C:\\packs\\example\\script/main.txt"},
+      {"C:/packs/example/pack.ini", "C:/packs/example/script/main.txt"},
+      {"C:\\packs/example\\pack.ini", "C:\\packs/example\\script/main.txt"},
+      {"C:pack.ini", "C:script/main.txt"},
+      {"\\\\server\\share\\my packs\\pack.ini",
+       "\\\\server\\share\\my packs\\script/main.txt"},
+      {"packs/\u00e9t\u00e9 2026/pack.ini", "packs/\u00e9t\u00e9 2026/script/main.txt"},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    char resolved[kArLanguageFontPathCapacity];
+    CHECK(ArLanguagePack_ResolveMemberPath(cases[i].manifest, "script/main.txt",
+                                           resolved, sizeof(resolved)));
+    if (strcmp(resolved, cases[i].expected) != 0) {
+      fprintf(stderr, "%s:%d: %s resolved to %s, expected %s\n", __FILE__,
+              __LINE__, cases[i].manifest, resolved, cases[i].expected);
+      failures++;
+    }
+  }
+  char small[8];
+  CHECK(!ArLanguagePack_ResolveMemberPath("packs/example/pack.ini",
+                                          "script/main.txt", small,
+                                          sizeof(small)));
+  CHECK(!ArLanguagePack_ResolveMemberPath(NULL, "x", small, sizeof(small)));
+}
+
 static void TestMetadataFastPath(void) {
   TestVfs vfs = GoodVfs();
   ArLanguagePackIo io = MakeIo(&vfs);
@@ -364,6 +399,143 @@ static void ExpectContractFailure(const char *script, const char *expected) {
   ArLanguagePack_Destroy(&pack);
 }
 
+/* Fixed menus, cards and labels display exactly what their native surface
+ * reserves. Content past that is not a style choice; the game never shows it,
+ * so the pack must be rejected rather than silently truncated. */
+static void TestPresentationContracts(void) {
+  ArLanguagePresentationContract shape;
+  CHECK(ArLanguageContract_Presentation("action.hud.act_1", &shape) &&
+        shape.shape == kArLanguagePresentation_Fixed &&
+        shape.maximum_pages == 1 && shape.maximum_lines == 0);
+  CHECK(ArLanguageContract_Presentation("title.save_choice.labels", &shape) &&
+        shape.required_nonempty_lines == 2);
+  CHECK(ArLanguageContract_Presentation("name_entry.prompt_and_alphabet",
+                                        &shape) &&
+        shape.shape == kArLanguagePresentation_Keyboard &&
+        shape.maximum_pages == 0);
+  CHECK(ArLanguageContract_Presentation("town.name.aitos", &shape) &&
+        shape.shape == kArLanguagePresentation_Inline &&
+        shape.maximum_lines == 1);
+  CHECK(ArLanguageContract_Presentation("dialogue.event.relay.aitos",
+                                        &shape) &&
+        shape.shape == kArLanguagePresentation_Flow &&
+        shape.maximum_pages == 0 && shape.maximum_lines == 0);
+  CHECK(!ArLanguageContract_Presentation("community.unknown", &shape));
+
+  ExpectContractFailure(
+      ":: action.hud.act_1\nFirst card.\n@page\nNever displayed.\n",
+      "pages beyond that are never shown");
+  ExpectContractFailure(
+      ":: action.hud.act_label\nToo\n@line\ntall\n",
+      "reserves 1 line(s); the message has 2");
+  CHECK(ArLanguageContract_Presentation("action.hud.act_label", &shape) &&
+        shape.maximum_lines == 1);
+  ExpectContractFailure(
+      ":: town.name.aitos\nAitos\n@line\nover two rows\n",
+      "inline term reserves 1 line(s)");
+  ExpectContractFailure(
+      ":: title.save_choice.labels\nContinue\n@line\nNew game\n@line\n"
+      "A third option\n",
+      "exactly 2 choice(s); the message has 3");
+  ExpectContractFailure(
+      ":: title.save_choice.labels\nContinue\n",
+      "exactly 2 choice(s); the message has 1");
+
+  /* What must keep working: documented empties, native blank spacer rows,
+   * multipage keyboards, and dialogue of any length. */
+  static const char accepted[] =
+      ":: title.save_choice.labels\n@empty\n"
+      ":: title.mode_select.with_save\nContinue\n@line\n@line\nNew game\n"
+      ":: name_entry.prompt_and_alphabet\nA B C\n@page\nD E F\n"
+      ":: dialogue.event.relay.aitos\nOne\n@page\nTwo\n@page\nThree\n"
+      ":: action.hud.act_1\nACT\n";
+  ArLanguagePack pack;
+  ArLanguagePackError error;
+  ArLanguagePack_Init(&pack);
+  CHECK(LoadContractPack(accepted, "partial", &pack, &error));
+  CHECK(ArLanguageContract_ValidatePack(&pack, NULL, &error));
+  ArLanguagePack_Destroy(&pack);
+}
+
+/* Loading indexes messages once, so a long alias chain costs one pass rather
+ * than one full-pack scan per hop. This checks the outcomes, not the timing:
+ * the same chains, cycles and missing targets must still be diagnosed. */
+static void TestAliasChainsAndLookup(void) {
+  static const char *const chain[] = {
+      "dialogue.event.relay.aitos",       "dialogue.event.relay.bloodpool",
+      "dialogue.event.relay.fillmore",    "dialogue.event.relay.kasandora",
+      "dialogue.event.relay.marahna",     "dialogue.event.relay.northwall",
+      "sim.miracle.earthquake.cancel",    "sim.miracle.lightning.target_cancel",
+      "sim.miracle.lightning.target_prompt", "sim.miracle.rain.target_cancel",
+      "sim.miracle.rain.target_prompt",   "sim.miracle.sun.target_cancel",
+      "sim.miracle.sun.target_prompt",    "sim.miracle.wind.cancel",
+      "sim.offerings.cancelled",          "sim.offerings.completed",
+  };
+  const size_t links = sizeof(chain) / sizeof(chain[0]);
+  char script[4096];
+  size_t used = 0;
+  for (size_t i = 0; i + 1 < links; i++)
+    used += (size_t)snprintf(script + used, sizeof(script) - used,
+                             ":: %s\n@alias %s\n", chain[i], chain[i + 1]);
+  used += (size_t)snprintf(script + used, sizeof(script) - used,
+                           ":: %s\nThe end of the chain.\n", chain[links - 1]);
+  CHECK(used < sizeof(script));
+
+  ArLanguagePack pack;
+  ArLanguagePackError error;
+  ArLanguagePack_Init(&pack);
+  CHECK(LoadContractPack(script, "partial", &pack, &error));
+  /* Every link resolves to the one body, and lookup finds each by id. */
+  for (size_t i = 0; i < links; i++) {
+    const ArLanguageMessage *message =
+        ArLanguagePack_FindMessage(&pack, chain[i]);
+    CHECK(message != NULL);
+    CHECK(message == NULL || message->is_alias == (i + 1 < links));
+  }
+  CHECK(!ArLanguagePack_FindMessage(&pack, "dialogue.event.relay.missing"));
+  ArLanguagePack_Destroy(&pack);
+
+  /* An operation pointer from another pack is refused without a scan. */
+  ArLanguagePack other;
+  ArLanguagePack_Init(&other);
+  CHECK(LoadContractPack(":: dialogue.event.relay.aitos\nOnly message.\n",
+                         "partial", &other, &error));
+  ArLanguagePack_Init(&pack);
+  CHECK(LoadContractPack(script, "partial", &pack, &error));
+  const ArLanguageMessage *foreign =
+      ArLanguagePack_FindMessage(&other, "dialogue.event.relay.aitos");
+  CHECK(foreign && !ArLanguagePack_GetOperation(&pack, foreign, 0));
+  CHECK(ArLanguagePack_GetOperation(&other, foreign, 0) != NULL);
+  ArLanguagePack_Destroy(&pack);
+  ArLanguagePack_Destroy(&other);
+
+  char cycle[4096];
+  used = 0;
+  for (size_t i = 0; i < links; i++)
+    used += (size_t)snprintf(cycle + used, sizeof(cycle) - used,
+                             ":: %s\n@alias %s\n", chain[i],
+                             chain[(i + 1) % links]);
+  CHECK(used < sizeof(cycle));
+  ArLanguagePack_Init(&pack);
+  CHECK(!LoadContractPack(cycle, "partial", &pack, &error));
+  CHECK(strstr(error.message, "alias cycle detected") != NULL);
+  ArLanguagePack_Destroy(&pack);
+
+  ArLanguagePack_Init(&pack);
+  CHECK(!LoadContractPack(":: dialogue.event.relay.aitos\n"
+                          "@alias dialogue.event.relay.bloodpool\n",
+                          "partial", &pack, &error));
+  CHECK(strstr(error.message, "is not included in this pack") != NULL);
+  ArLanguagePack_Destroy(&pack);
+
+  ArLanguagePack_Init(&pack);
+  CHECK(!LoadContractPack(":: dialogue.event.relay.aitos\nOne.\n"
+                          ":: dialogue.event.relay.aitos\nTwo.\n",
+                          "partial", &pack, &error));
+  CHECK(strstr(error.message, "duplicate message") != NULL);
+  ArLanguagePack_Destroy(&pack);
+}
+
 static void TestSemanticContracts(void) {
   static const char valid[] =
       ":: action.hud.act_1\n"
@@ -382,9 +554,9 @@ static void TestSemanticContracts(void) {
   CHECK(stats.validated_messages == 3);
   CHECK(stats.aliases == 1);
   CHECK(stats.required_messages == 495);
-  CHECK(ArLanguageContract_RouteCount() == 531);
+  CHECK(ArLanguageContract_RouteCount() == 539);
   CHECK(strcmp(ArLanguageContract_RouteId(0), "action.hud.act_1") == 0);
-  CHECK(ArLanguageContract_RouteId(531) == NULL);
+  CHECK(ArLanguageContract_RouteId(539) == NULL);
   CHECK(ArLanguageContract_RouteAvailable("action.hud.act_1",
                                           kArLanguageSourceProfile_Us));
   CHECK(!ArLanguageContract_RouteAvailable(
@@ -585,11 +757,14 @@ int main(int argc, char **argv) {
     fprintf(stderr, "usage: %s [--dump|--inspect|--metadata] [pack.ini]\n", argv[0]);
     return EXIT_FAILURE;
   }
+  TestMemberPathResolution();
   TestMetadataFastPath();
   TestFullLoad();
   TestRejectedInputs();
   TestTransactionalReload();
   TestSemanticContracts();
+  TestPresentationContracts();
+  TestAliasChainsAndLookup();
   if (failures) {
     fprintf(stderr, "%d language-pack test(s) failed\n", failures);
     return EXIT_FAILURE;

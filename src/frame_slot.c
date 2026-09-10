@@ -348,7 +348,8 @@ void FrameSlot_SetPendingAnnotatedSim(const SimFrameData *sim) {
  * never do this; it only reads the FrameSlot this produces. */
 void FrameSlot_Capture(FrameSlot *dst) {
   memset(dst, 0, sizeof(*dst));
-  ArLocalizationFrame_Reset(&dst->localization);
+  /* The slot is already zeroed; stamping the header is all that is left. */
+  ArLocalizationFrame_InitCleared(&dst->localization);
   FramePpuView ppu_view;
   const bool have_ppu_view =
       FramePpuView_Capture(&ppu_view, &dst->ppu_surfaces);
@@ -723,7 +724,8 @@ void FrameSlot_Capture(FrameSlot *dst) {
       d->oamFirst = src->oam_first; d->oamCount = src->oam_count;
     }
 
-    ActRaiser_HudObjIconRange(&dst->hud_icon_first, &dst->hud_icon_count);
+    ActRaiser_HudObjIconRange(&dst->hud_icon_first, &dst->hud_icon_count,
+                              &dst->hud_icon_rows);
     if (dst->hud_icon_count)
       ActRaiser_HudObjSurfaceView(&dst->hud_obj_surface);
 
@@ -770,10 +772,17 @@ void FrameSlot_Capture(FrameSlot *dst) {
         cgram.data = NULL;
         cgram.element_count = 0;
       }
+      /* Identity is A=D=1.0 with no shear in 8.8 fixed point; anything else
+       * means the layer is rotated or scaled away from the flat presentation
+       * a screen-space replacement can stand in for. */
+      const int16_t *m7 = ppu_view.live_state.mode7_matrix;
+      const bool mode7_transformed = dst->bg_mode == 7 &&
+          !(m7[0] == 256 && m7[1] == 0 && m7[2] == 0 && m7[3] == 256);
       ActRaiserLocalizationRuntime_CaptureFrame(
           &dst->localization, dst->bg3_tilemap_base_words,
           ppu_view.live_state.backgrounds[2].tile_base_word,
-          vram.data, vram.element_count, cgram.data, cgram.element_count);
+          vram.data, vram.element_count, cgram.data, cgram.element_count,
+          mode7_transformed);
     }
   }
 

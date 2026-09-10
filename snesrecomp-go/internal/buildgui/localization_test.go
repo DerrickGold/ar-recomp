@@ -14,8 +14,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	lk "github.com/DerrickGold/snesrecomp-go/internal/localizationkit"
 )
@@ -419,10 +421,24 @@ func TestLocalizationGUIRetailExtraction(t *testing.T) {
 		t.Skip("optional five-ROM GUI acceptance")
 	}
 	app := localizationTestApp(t)
+	// Expected counts and HUD lettering are reviewed values held independently
+	// of the extractor: the HUD labels are transcriptions of packed graphics, so
+	// a decoder change must not be able to redefine its own gate. The counts
+	// differ per release because the sim/Sky labels are listed only where they
+	// have been read: every Western release carries all three, and Japanese
+	// carries only the angel label -- its context label is a ten-cell shape
+	// this table has no room for.
 	for _, tc := range []struct {
 		file, profile string
 		messages      int
-	}{{"ar.sfc", "us", 495}, {"ar-eu.sfc", "eu-en", 496}, {"ar-ger.sfc", "de", 496}, {"ar-fra.sfc", "fr", 494}, {"ar-jp.sfc", "jp", 493}} {
+		hud           [5]string
+	}{
+		{"ar.sfc", "us", 503, [5]string{"ACT", "ENEMY", "PLAYER", "SCORE", "TIME"}},
+		{"ar-eu.sfc", "eu-en", 504, [5]string{"ACT", "ENEMY", "PLAYER", "SCORE", "TIME"}},
+		{"ar-ger.sfc", "de", 504, [5]string{"ACT", "FEIND", "SPIELER", "PUNKTE", "ZEIT"}},
+		{"ar-fra.sfc", "fr", 502, [5]string{"ACT", "ENNEMI", "JOUEUR", "SCORE", "TEMPS"}},
+		{"ar-jp.sfc", "jp", 499, [5]string{"ACT", "ENEMY", "PLAYER", "SCORE", "TIME"}},
+	} {
 		t.Run(tc.profile, func(t *testing.T) {
 			data, err := os.ReadFile(filepath.Join(root, tc.file))
 			if err != nil {
@@ -431,7 +447,17 @@ func TestLocalizationGUIRetailExtraction(t *testing.T) {
 			locUpload(t, app, "extract", data, nil, 200)
 			p := app.localization.current
 			if p.Pack().Manifest().Metadata().SourceProfile != tc.profile || p.Pack().Workspace().Stats().MessageCount != tc.messages || p.Origin() != "native-source" {
-				t.Fatal("wrong regional source/coverage")
+				t.Fatal("wrong regional source/coverage", p.Pack().Workspace().Stats().MessageCount)
+			}
+			for i, name := range [5]string{"act", "enemy", "player", "score", "time"} {
+				id := "action.hud." + name + "_label"
+				operations, err := p.Pack().MessageOperations(id)
+				if err != nil {
+					t.Fatal("missing action HUD route", id, err)
+				}
+				if len(operations) != 2 || operations[0].Op != "text" || operations[0].Value != tc.hud[i] || operations[1].Op != "end" {
+					t.Fatal("wrong HUD lettering", id, operations)
+				}
 			}
 			if tc.profile != "us" && p.Pack().Manifest().Metadata().Target != "reference-only" {
 				t.Fatal("regional source became an active US translation")
@@ -514,4 +540,69 @@ func TestLocalizationRetailReferencesPreserveEditingProject(t *testing.T) {
 			t.Fatal("extraction switched project", file)
 		}
 	}
+}
+
+// stallingReader delivers a prefix, then blocks until released. It stands in
+// for a client whose upload or download stops halfway.
+type stallingReader struct {
+	prefix   []byte
+	released chan struct{}
+	reading  chan struct{}
+	once     sync.Once
+}
+
+func (s *stallingReader) Read(p []byte) (int, error) {
+	if len(s.prefix) > 0 {
+		n := copy(p, s.prefix)
+		s.prefix = s.prefix[n:]
+		return n, nil
+	}
+	s.once.Do(func() { close(s.reading) })
+	<-s.released
+	return 0, io.EOF
+}
+
+// The build page polls localization availability every 500 ms. A transfer that
+// stalls mid-body must not hold the session lock and freeze that poll, or the
+// rest of the workspace.
+func TestLocalizationStalledUploadDoesNotBlockStatus(t *testing.T) {
+	app := editableWorkflowFixture(t)
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	file, _ := form.CreateFormFile("file", "test.arlang")
+	file.Write(make([]byte, 4096))
+	form.Close()
+	stall := &stallingReader{
+		prefix:   body.Bytes()[:1024],
+		released: make(chan struct{}),
+		reading:  make(chan struct{}),
+	}
+	r := httptest.NewRequest("POST", "/secret/localization/import", stall)
+	r.Header.Set("Content-Type", form.FormDataContentType())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		app.ServeHTTP(httptest.NewRecorder(), r)
+	}()
+	select {
+	case <-stall.reading:
+	case <-time.After(5 * time.Second):
+		t.Fatal("upload never started reading")
+	}
+
+	answered := make(chan struct{})
+	go func() {
+		defer close(answered)
+		app.localizationAvailability()
+		locGET(t, app, "state", nil)
+	}()
+	select {
+	case <-answered:
+	case <-time.After(5 * time.Second):
+		close(stall.released)
+		<-done
+		t.Fatal("a stalled upload blocked localization status")
+	}
+	close(stall.released)
+	<-done
 }

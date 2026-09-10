@@ -142,8 +142,7 @@ static void TestRasterization(void) {
   ArTextRasterRequest request = Request(
       "Crème brûlée — Élévation\nUtiliser un don");
   ArTextBitmap bitmap;
-  CHECK(ArTextRasterizer_Rasterize(
-      rasterizer, &request, &bitmap, error, sizeof(error)));
+  CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
   CHECK(bitmap.format == kArRenderPixelFormat_Rgba8888);
   CHECK(bitmap.width > 0 && bitmap.width <= request.maximum_width);
   CHECK(bitmap.height > 0 && bitmap.height <= request.maximum_height);
@@ -173,16 +172,40 @@ static void TestRasterization(void) {
   CHECK(saw_blue && saw_white);
   ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
 
+  /* HUD gold uses the live palette; italic digits cannot contaminate a
+   * subsequent upright request sharing the same cached font size. */
+  request = Request("012345");
+  request.style_id = kArTextStyle_RetailPaletteBands;
+  request.band_rgb = 0xe08000;
+  request.body_rgb = 0xffff80;
+  request.flags |= kArTextRasterFlag_IncludeRevealClusters;
+  CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
+  const uint64_t upright_hash = BitmapHash(&bitmap);
+  /* Banded ink is a reviewed appearance; pin it so moving the formula behind
+   * the portable contract cannot quietly change a pixel. */
+  CHECK(request.style_id != kArTextStyle_RetailPaletteBands ||
+        upright_hash == UINT64_C(0x3924da22796386bc));
+  uint8_t r, g, b;
+  CHECK(BottomClusterInk(&bitmap, 1, NULL, &r, &g, &b));
+  CHECK(r == 0xe0 && g == 0x80 && b == 0);
+  ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
+  request.flags |= kArTextRasterFlag_Italic;
+  CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
+  CHECK(BitmapHash(&bitmap) != upright_hash);
+  ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
+  request.flags &= ~kArTextRasterFlag_Italic;
+  CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
+  CHECK(BitmapHash(&bitmap) == upright_hash);
+  ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
+
   /* Tight menu rows fit visible ink, including accents/descenders, without
    * reducing the font just to accommodate transparent typographic padding. */
   request = Request("Égj");
   request.flags |= kArTextRasterFlag_IncludeRevealClusters;
   ArTextBitmap padded;
-  CHECK(ArTextRasterizer_Rasterize(
-      rasterizer, &request, &padded, error, sizeof(error)));
+  CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &padded, NULL, error, sizeof(error)));
   request.flags |= kArTextRasterFlag_CropVerticalWhitespace;
-  CHECK(ArTextRasterizer_Rasterize(
-      rasterizer, &request, &bitmap, error, sizeof(error)));
+  CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
   const int removed_top = padded.ascent - bitmap.ascent;
   CHECK(removed_top >= 0 && bitmap.height < padded.height);
   CHECK(bitmap.width == padded.width && bitmap.line_advance == padded.line_advance);
@@ -205,8 +228,7 @@ static void TestRasterization(void) {
   request.maximum_height = bitmap.height;
   ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
   ArTextRasterizer_ReleaseBitmap(rasterizer, &padded);
-  CHECK(ArTextRasterizer_Rasterize(
-      rasterizer, &request, &bitmap, error, sizeof(error)));
+  CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
   ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
 
   /* A user-selected accessibility size may make a long translated heading
@@ -217,8 +239,7 @@ static void TestRasterization(void) {
   request.minimum_font_pixels = 20;
   request.maximum_width = 240;
   request.maximum_height = 60;
-  CHECK(ArTextRasterizer_Rasterize(
-      rasterizer, &request, &bitmap, error, sizeof(error)));
+  CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
   CHECK(bitmap.width <= request.maximum_width);
   CHECK(bitmap.height <= request.maximum_height);
   CHECK(bitmap.line_advance >= request.minimum_font_pixels);
@@ -227,8 +248,7 @@ static void TestRasterization(void) {
 
   request.minimum_font_pixels = request.font_pixels;
   request.maximum_height = 1;
-  CHECK(!ArTextRasterizer_Rasterize(
-      rasterizer, &request, &bitmap, error, sizeof(error)));
+  CHECK(!ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
   CHECK(strstr(error, "minimum font size") != NULL);
 
   /* The retail SNES font has one blue/white/blue palette cell per 8x8 tile,
@@ -237,8 +257,7 @@ static void TestRasterization(void) {
    * though their visible bottoms occupy different output rows. */
   request = Request("Mg");
   request.flags |= kArTextRasterFlag_IncludeRevealClusters;
-  CHECK(ArTextRasterizer_Rasterize(
-      rasterizer, &request, &bitmap, error, sizeof(error)));
+  CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
   int capital_bottom = -1;
   int descender_bottom = -1;
   uint8_t capital_red = 0, capital_green = 0, capital_blue = 0;
@@ -304,8 +323,7 @@ static void TestRasterization(void) {
     request.minimum_font_pixels = status_fixtures[index].font_pixels;
     request.maximum_width = status_fixtures[index].maximum_width;
     request.maximum_height = status_fixtures[index].maximum_height;
-    CHECK(ArTextRasterizer_Rasterize(
-        rasterizer, &request, &bitmap, error, sizeof(error)));
+    CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
     CHECK(bitmap.width > 0 && bitmap.width <= request.maximum_width);
     CHECK(bitmap.height > 0 && bitmap.height <= request.maximum_height);
     CHECK(bitmap.height >=
@@ -315,8 +333,7 @@ static void TestRasterization(void) {
 
   request = Request("Ame\xCC\x81lie et crème brûlée");
   request.flags |= kArTextRasterFlag_IncludeRevealClusters;
-  CHECK(ArTextRasterizer_Rasterize(
-      rasterizer, &request, &bitmap, error, sizeof(error)));
+  CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
   CHECK(bitmap.reveal_clusters != NULL);
   CHECK(bitmap.reveal_cluster_count > 0);
   bool saw_complete_text = false;
@@ -342,8 +359,7 @@ static void TestRasterization(void) {
   request = Request("天空城 — 日本語のメニュー");
   request.language_bcp47 = "ja-JP";
   request.language_bcp47_bytes = strlen("ja-JP");
-  CHECK(ArTextRasterizer_Rasterize(
-      rasterizer, &request, &bitmap, error, sizeof(error)));
+  CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
   const uint64_t japanese_fallback_hash = BitmapHash(&bitmap);
   CHECK(bitmap.width > 0 && bitmap.height > 0);
   ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
@@ -352,8 +368,7 @@ static void TestRasterization(void) {
   request.flags |= kArTextRasterFlag_IncludeRevealClusters;
   request.language_bcp47 = "ja-JP";
   request.language_bcp47_bytes = strlen("ja-JP");
-  CHECK(ArTextRasterizer_Rasterize(
-      rasterizer, &request, &bitmap, error, sizeof(error)));
+  CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
   bool split_japanese_dakuten = false;
   bool saw_complete_japanese = false;
   for (size_t index = 0; index < bitmap.reveal_cluster_count; ++index) {
@@ -419,7 +434,8 @@ static void TestRasterization(void) {
   CHECK(ArTextRasterizer_IsReady(&old));
   CHECK(!ArTextRasterizer_HasGlyph(&old, 'A', &provided, error, sizeof(error)));
   if (ArTextRasterizer_Rasterize(
-          primary_rasterizer, &request, &bitmap, error, sizeof(error))) {
+          primary_rasterizer, &request, &bitmap, NULL, error,
+          sizeof(error))) {
     CHECK(BitmapHash(&bitmap) != japanese_fallback_hash);
     ArTextRasterizer_ReleaseBitmap(primary_rasterizer, &bitmap);
   } else {
@@ -435,8 +451,7 @@ static void TestRasterization(void) {
   request.direction = kArTextDirection_RightToLeft;
   request.language_bcp47 = "ar";
   request.language_bcp47_bytes = 2;
-  CHECK(ArTextRasterizer_Rasterize(
-      rasterizer, &request, &bitmap, error, sizeof(error)));
+  CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
   const uint64_t rtl_hash = BitmapHash(&bitmap);
   CHECK(bitmap.reveal_cluster_count > 0);
   bool saw_complete_rtl_run = false;
@@ -447,8 +462,7 @@ static void TestRasterization(void) {
   ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
 
   request.direction = kArTextDirection_LeftToRight;
-  CHECK(ArTextRasterizer_Rasterize(
-      rasterizer, &request, &bitmap, error, sizeof(error)));
+  CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
   CHECK(BitmapHash(&bitmap) != rtl_hash);
   ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
 
@@ -458,26 +472,22 @@ static void TestRasterization(void) {
   request.direction = kArTextDirection_LeftToRight;
   request.language_bcp47 = "ar";
   request.language_bcp47_bytes = 2;
-  CHECK(ArTextRasterizer_Rasterize(
-      rasterizer, &request, &bitmap, error, sizeof(error)));
+  CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
   const uint64_t latin_ltr_hash = BitmapHash(&bitmap);
   ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
   request.direction = kArTextDirection_Auto;
-  CHECK(ArTextRasterizer_Rasterize(
-      rasterizer, &request, &bitmap, error, sizeof(error)));
+  CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
   CHECK(BitmapHash(&bitmap) == latin_ltr_hash);
   ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
 
   request.font_stack_id = "unknown";
   request.font_stack_id_bytes = strlen("unknown");
-  CHECK(!ArTextRasterizer_Rasterize(
-      rasterizer, &request, &bitmap, error, sizeof(error)));
+  CHECK(!ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
   CHECK(strstr(error, "font stack") != NULL);
 
   request = Request("Texte trop grand");
   request.maximum_height = 1;
-  CHECK(!ArTextRasterizer_Rasterize(
-      rasterizer, &request, &bitmap, error, sizeof(error)));
+  CHECK(!ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
   CHECK(strstr(error, "bounds") != NULL);
 
   ArSdlTextRasterizer_Destroy(&adapter);
@@ -507,8 +517,8 @@ static void TestMissingGlyphWarnings(void) {
       ArTextRasterRequest request = Request(text);
       for (int repeat = 0; repeat < 2; ++repeat) {
         ArTextBitmap bitmap = {0};
-        CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, error,
-                                         sizeof(error)));
+        CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL,
+                                         error, sizeof(error)));
         ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
       }
     }
@@ -516,7 +526,49 @@ static void TestMissingGlyphWarnings(void) {
   }
 }
 
+/* The shadow pass is pure pixel work with two hazards worth pinning: it must
+ * read coverage from a copy (or one shadow pixel seeds the next and the run
+ * smears sideways), and it must never paint over a letterform. */
+static void TestStyleShadow(void) {
+  enum { kWidth = 6, kHeight = 3 };
+  uint32_t pixels[kHeight][kWidth];
+  memset(pixels, 0, sizeof(pixels));
+  /* Two adjacent ink pixels, opaque white. */
+  pixels[1][1] = UINT32_C(0xffffffff);
+  pixels[1][2] = UINT32_C(0xffffffff);
+
+  CHECK(ArTextBitmap_ApplyStyleShadow(
+      pixels, kWidth, kHeight, kWidth * 4, kArRenderPixelFormat_Rgba8888,
+      1, 1, UINT32_C(0x000000)));
+  /* Shadow lands one right and one down of each ink pixel. */
+  CHECK((pixels[2][2] & UINT32_C(0xff)) == 0xffu);
+  CHECK((pixels[2][3] & UINT32_C(0xff)) == 0xffu);
+  CHECK((pixels[2][2] >> 8) == 0u); /* black, not white */
+  /* The letterform is untouched, and its own shadow did not cast another. */
+  CHECK(pixels[1][1] == UINT32_C(0xffffffff));
+  CHECK(pixels[1][2] == UINT32_C(0xffffffff));
+  CHECK((pixels[2][4] & UINT32_C(0xff)) == 0u);
+  CHECK((pixels[0][0] & UINT32_C(0xff)) == 0u);
+
+  /* Rejected inputs leave the caller's pixels alone. */
+  uint32_t guard[kHeight][kWidth];
+  memcpy(guard, pixels, sizeof(guard));
+  CHECK(!ArTextBitmap_ApplyStyleShadow(
+      pixels, kWidth, kHeight, kWidth * 4, kArRenderPixelFormat_Rgba8888,
+      0, 0, 0));
+  CHECK(!ArTextBitmap_ApplyStyleShadow(
+      NULL, kWidth, kHeight, kWidth * 4, kArRenderPixelFormat_Rgba8888,
+      1, 1, 0));
+  CHECK(!memcmp(guard, pixels, sizeof(guard)));
+  /* An offset past the surface succeeds and changes nothing. */
+  CHECK(ArTextBitmap_ApplyStyleShadow(
+      pixels, kWidth, kHeight, kWidth * 4, kArRenderPixelFormat_Rgba8888,
+      kWidth, 0, 0));
+  CHECK(!memcmp(guard, pixels, sizeof(guard)));
+}
+
 int main(int argc, char **argv) {
+  TestStyleShadow();
   if (argc == 2 && !strcmp(argv[1], "--missing-glyph-warnings"))
     TestMissingGlyphWarnings();
   else

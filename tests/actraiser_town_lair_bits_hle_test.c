@@ -269,6 +269,45 @@ static void CheckGlobalOperation(TownBitHle hle, uint16 return_address,
                    (uint16)(entry_stack - 9)) == kGlobalFlagsBase);
 }
 
+/* $03:F3F6 is the one call site in this family that arrives with a 16-bit
+ * accumulator: it runs LDA #$0008 / JSR $F4EA and does not SEP #$20 until
+ * $03:F3F9, after the call returns. The resolver's own REP #$20 / AND #$00FF
+ * makes the entry width irrelevant, so a wide accumulator must set the same
+ * bit as a narrow one, preserve the caller's high byte, and still leave the
+ * family 8-bit. Northwall's angel-power-up expiry reaches this site. */
+static void CheckGlobalSetFromWideAccumulator(void) {
+  InitializeMemory();
+  const uint8 flag_id = 8;
+  const uint16 byte_address = (uint16)(
+      kGlobalFlagsBase + flag_id / CHAR_BIT);
+  const uint16 saved_x = 0x1357;
+  const uint16 saved_y = 0x2468;
+  cpu_write8(NULL, kDataBank, byte_address, 0x21);
+  /* The high byte the ROM leaves in a 16-bit LDA #$0008 is zero, unlike the
+   * $B4xx the narrow-entry cases carry, so it also proves the mask's own
+   * high byte -- not the caller's -- is what survives in A. */
+  CpuState cpu = MakeCpu(flag_id, saved_x, saved_y, false);
+  cpu.m_flag = 0;
+  cpu_mirrors_to_p(&cpu);
+  const uint16 entry_stack = cpu.S;
+  const uint16 mask_word = cpu_read16(
+      NULL, kRomBank,
+      (uint16)(kMaskTableAddress + (flag_id & 7u)));
+
+  CHECK(ActRaiser_TownGlobalFlagSet(&cpu) == RECOMP_RETURN_NORMAL);
+  CHECK(cpu_read8(NULL, kDataBank, byte_address) == (0x21u | kBitMasks[0]));
+  CHECK(cpu.A == (uint16)((mask_word & 0xFF00u) | (0x21u | kBitMasks[0])));
+  CHECK(cpu.X == saved_x);
+  CHECK(cpu.Y == saved_y);
+  CHECK(cpu.S == (uint16)(entry_stack + 2));
+  /* The resolver's SEP #$20 is modelled, so the caller resumes 8-bit. */
+  CHECK(cpu.m_flag == 1);
+  CHECK(cpu.x_flag == 0);
+  CHECK(cpu.P == ExpectedResolverP(false, false, saved_x == 0,
+                                   (saved_x & 0x8000u) != 0));
+  CheckOuterStack(entry_stack, saved_x, saved_y, 0xF4EE);
+}
+
 int main(void) {
   CheckPerTownResolver();
   CheckGlobalResolver(false, 7);
@@ -287,6 +326,8 @@ int main(void) {
                        3, 0x80, 0x90, false);
   CheckGlobalOperation(ActRaiser_TownGlobalFlagClear, 0xF4FC,
                        3, 0x90, 0x80, false);
+
+  CheckGlobalSetFromWideAccumulator();
 
   if (failures) {
     printf("actraiser town-lair-bit HLE: %d failure(s)\n", failures);

@@ -20,13 +20,18 @@ static bool RegionContains(ArTextCellRegion outer,
           (unsigned)outer.row + outer.rows;
 }
 
-void ArLocalizationFrame_Reset(ArLocalizationFrame *frame) {
+void ArLocalizationFrame_InitCleared(ArLocalizationFrame *frame) {
   if (!frame) return;
-  memset(frame, 0, sizeof(*frame));
   frame->struct_size = sizeof(*frame);
   frame->abi_version = AR_LOCALIZATION_FRAME_ABI_VERSION;
   ArTextCellRecordSet_Reset(&frame->cells);
   ArEnhancedTextSettings_Defaults(&frame->settings);
+}
+
+void ArLocalizationFrame_Reset(ArLocalizationFrame *frame) {
+  if (!frame) return;
+  memset(frame, 0, sizeof(*frame));
+  ArLocalizationFrame_InitCleared(frame);
 }
 
 bool ArLocalizationFrame_SetFont(ArLocalizationFrame *frame,
@@ -107,13 +112,97 @@ bool ArLocalizationFrame_AddTextWithObjects(
       inline_objects, inline_object_count);
 }
 
-bool ArLocalizationFrame_AddTextWithObjectsAndLayout(
+/* Grids are compared and hashed as bytes, so the description must pack without
+ * padding: a byte no caller wrote would make two identical grids differ. */
+_Static_assert(sizeof(ArLocalizationTextCellRule) == 6,
+               "cell rule gained padding");
+_Static_assert(sizeof(ArLocalizationTextRowRule) ==
+                   6 + 6 * kArLocalizationGridMaximumCells,
+               "row rule gained padding");
+_Static_assert(sizeof(ArLocalizationTextGrid) ==
+                   5 + (6 + 6 * kArLocalizationGridMaximumCells) *
+                           kArLocalizationGridMaximumRules,
+               "grid gained padding");
+
+/* Rejects geometry the renderer could not act on, so a malformed grid fails
+ * where it is published rather than while a frame is being prepared. */
+static bool GridValid(const ArLocalizationTextGrid *grid,
+                      ArTextCellRegion region) {
+  if (!grid || !grid->rule_count ||
+      grid->rule_count > kArLocalizationGridMaximumRules || !grid->row_height ||
+      grid->shared_column_count > kArLocalizationGridMaximumCells)
+    return false;
+  for (uint8_t index = 0; index < grid->rule_count; ++index) {
+    const ArLocalizationTextRowRule *rule = &grid->rules[index];
+    if (rule->first_line > rule->last_line ||
+        rule->field_count > kArLocalizationGridMaximumCells ||
+        rule->cell_count > kArLocalizationGridMaximumCells)
+      return false;
+    if (rule->native_reserved) {
+      if (rule->cell_count || rule->shared_columns) return false;
+      continue;
+    }
+    if (!rule->cell_count ||
+        (rule->field_count && rule->cell_count != rule->field_count))
+      return false;
+    if (rule->shared_columns &&
+        (!grid->shared_column_count ||
+         rule->cell_count != grid->shared_column_count))
+      return false;
+    for (uint8_t cell = 0; cell < rule->cell_count; ++cell) {
+      const ArLocalizationTextCellRule *entry = &rule->cells[cell];
+      if (entry->start >= entry->end || entry->end > region.columns ||
+          entry->alignment > (uint8_t)kArTextHorizontalAlignment_Trailing)
+        return false;
+    }
+  }
+  return true;
+}
+
+const ArLocalizationTextRowRule *ArLocalizationGrid_FindRow(
+    const ArLocalizationTextGrid *grid, unsigned line, unsigned field_count) {
+  if (!grid || line > kArLocalizationGridAnyLine) return NULL;
+  for (uint8_t index = 0; index < grid->rule_count; ++index) {
+    const ArLocalizationTextRowRule *rule = &grid->rules[index];
+    if (line < rule->first_line || line > rule->last_line) continue;
+    if (rule->field_count != kArLocalizationGridAnyFieldCount &&
+        rule->field_count != field_count)
+      continue;
+    return rule;
+  }
+  return NULL;
+}
+
+const ArLocalizationTextGrid *ArLocalizationFrame_GetGrid(
+    const ArLocalizationFrame *frame,
+    const ArLocalizationTextSnapshot *snapshot) {
+  if (!frame || !snapshot || !snapshot->grid_index ||
+      snapshot->grid_index > frame->grid_count)
+    return NULL;
+  return &frame->grids[snapshot->grid_index - 1u];
+}
+
+/* Interns one grid, so a report drawn by several surfaces is published once.
+ * Returns a one-based index, or zero when the table is full. */
+static uint8_t InternGrid(ArLocalizationFrame *frame,
+                          const ArLocalizationTextGrid *grid) {
+  for (uint8_t index = 0; index < frame->grid_count; ++index) {
+    if (!memcmp(&frame->grids[index], grid, sizeof(*grid)))
+      return index + 1u;
+  }
+  if (frame->grid_count >= kArLocalizationFrameGridCapacity) return 0;
+  frame->grids[frame->grid_count] = *grid;
+  return ++frame->grid_count;
+}
+
+static bool AddTextInternal(
     ArLocalizationFrame *frame, uint32_t surface_id,
     ArTextCellDestination destination, ArTextCellRegion region,
     const char *utf8, size_t utf8_bytes,
     uint32_t revealed_cluster_count, uint32_t cluster_count,
     uint64_t source_revision, ArTextDirection direction,
     uint8_t native_font_pixels, ArLocalizationTextLayoutKind layout,
+    const ArLocalizationTextGrid *grid,
     const ArTextCellRegion *native_preserves,
     uint8_t native_preserve_count,
     const ArLocalizationInlineObjectSnapshot *inline_objects,
@@ -132,7 +221,9 @@ bool ArLocalizationFrame_AddTextWithObjectsAndLayout(
       direction < kArTextDirection_Auto ||
       direction > kArTextDirection_RightToLeft ||
       layout < kArLocalizationTextLayout_Flow ||
-      layout > kArLocalizationTextLayout_SingleLineLabel ||
+      layout > kArLocalizationTextLayout_FramedLabel ||
+      (layout == kArLocalizationTextLayout_Grid) != (grid != NULL) ||
+      (grid && !GridValid(grid, region)) ||
       frame->snapshot_count >= kArTextCellRecordCapacity ||
       utf8_bytes >= kArLocalizationFrameTextCapacity - frame->text_bytes)
     return false;
@@ -155,11 +246,16 @@ bool ArLocalizationFrame_AddTextWithObjectsAndLayout(
   if (!ArTextCellRecordSet_Claim(&cells, surface_id, destination, region,
                                  (int8_t)slot))
     return false;
+  /* Intern before publishing anything: a full grid table must not leave a
+   * half-added snapshot behind. */
+  const uint8_t grid_index = grid ? InternGrid(frame, grid) : 0u;
+  if (grid && !grid_index) return false;
   const uint32_t offset = frame->text_bytes;
   memcpy(frame->text + offset, utf8, utf8_bytes);
   frame->text[offset + utf8_bytes] = 0;
   frame->text_bytes += (uint32_t)utf8_bytes + 1u;
   frame->snapshots[slot] = (ArLocalizationTextSnapshot){
+      .style_id = kArTextStyle_RetailBlueWhiteBands,
       .surface_id = surface_id,
       .utf8_offset = offset,
       .utf8_bytes = (uint32_t)utf8_bytes,
@@ -168,6 +264,7 @@ bool ArLocalizationFrame_AddTextWithObjectsAndLayout(
       .source_revision = source_revision,
       .direction = direction,
       .layout = layout,
+      .grid_index = grid_index,
       .native_font_pixels = native_font_pixels,
       .native_preserve_count = native_preserve_count,
       .inline_object_offset = frame->inline_object_count,
@@ -184,6 +281,70 @@ bool ArLocalizationFrame_AddTextWithObjectsAndLayout(
   }
   frame->snapshot_count++;
   frame->cells = cells;
+  return true;
+}
+
+bool ArLocalizationFrame_AddTextWithObjectsAndLayout(
+    ArLocalizationFrame *frame, uint32_t surface_id,
+    ArTextCellDestination destination, ArTextCellRegion region,
+    const char *utf8, size_t utf8_bytes,
+    uint32_t revealed_cluster_count, uint32_t cluster_count,
+    uint64_t source_revision, ArTextDirection direction,
+    uint8_t native_font_pixels, ArLocalizationTextLayoutKind layout,
+    const ArTextCellRegion *native_preserves,
+    uint8_t native_preserve_count,
+    const ArLocalizationInlineObjectSnapshot *inline_objects,
+    uint8_t inline_object_count) {
+  return AddTextInternal(frame, surface_id, destination, region, utf8,
+                         utf8_bytes, revealed_cluster_count, cluster_count,
+                         source_revision, direction, native_font_pixels,
+                         layout, NULL, native_preserves, native_preserve_count,
+                         inline_objects, inline_object_count);
+}
+
+bool ArLocalizationFrame_AddTextWithGrid(
+    ArLocalizationFrame *frame, uint32_t surface_id,
+    ArTextCellDestination destination, ArTextCellRegion region,
+    const char *utf8, size_t utf8_bytes,
+    uint32_t revealed_cluster_count, uint32_t cluster_count,
+    uint64_t source_revision, ArTextDirection direction,
+    uint8_t native_font_pixels, const ArLocalizationTextGrid *grid,
+    const ArTextCellRegion *native_preserves,
+    uint8_t native_preserve_count,
+    const ArLocalizationInlineObjectSnapshot *inline_objects,
+    uint8_t inline_object_count) {
+  return AddTextInternal(frame, surface_id, destination, region, utf8,
+                         utf8_bytes, revealed_cluster_count, cluster_count,
+                         source_revision, direction, native_font_pixels,
+                         kArLocalizationTextLayout_Grid, grid,
+                         native_preserves, native_preserve_count,
+                         inline_objects, inline_object_count);
+}
+
+bool ArLocalizationFrame_SetKeySeparator(ArLocalizationFrame *frame,
+                                         const char *utf8, size_t utf8_bytes) {
+  if (!frame || frame->abi_version != AR_LOCALIZATION_FRAME_ABI_VERSION ||
+      !frame->snapshot_count || !utf8 || !utf8_bytes ||
+      utf8_bytes > kArLocalizationFrameKeySeparatorCapacity)
+    return false;
+  ArLocalizationTextSnapshot *snapshot =
+      &frame->snapshots[frame->snapshot_count - 1u];
+  memcpy(snapshot->key_separator, utf8, utf8_bytes);
+  snapshot->key_separator_bytes = (uint8_t)utf8_bytes;
+  return true;
+}
+
+bool ArLocalizationFrame_SetKeyGrid(ArLocalizationFrame *frame,
+                                    uint8_t columns, uint8_t trailing_lines,
+                                    uint8_t cell_columns) {
+  if (!frame || frame->abi_version != AR_LOCALIZATION_FRAME_ABI_VERSION ||
+      !frame->snapshot_count || !columns || !trailing_lines || !cell_columns)
+    return false;
+  ArLocalizationTextSnapshot *snapshot =
+      &frame->snapshots[frame->snapshot_count - 1u];
+  snapshot->key_columns = columns;
+  snapshot->key_trailing_lines = trailing_lines;
+  snapshot->key_cell_columns = cell_columns;
   return true;
 }
 

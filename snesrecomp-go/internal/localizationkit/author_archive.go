@@ -3,14 +3,18 @@ package localizationkit
 import (
 	"archive/zip"
 	"bytes"
+	"compress/flate"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"io/fs"
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
@@ -62,6 +66,23 @@ func (p *AuthorProject) WriteArchive(output io.Writer, kind string) error {
 		h := zip.FileHeader{Name: path, Method: zip.Deflate}
 		h.SetMode(0644)
 		h.SetModTime(time.Date(1980, 1, 1, 0, 0, 0, 0, time.UTC))
+		// A one-message edit must not re-deflate megabytes of unchanged font.
+		// Members large enough to be worth it are compressed once per distinct
+		// content and then written raw, which produces the identical archive.
+		if member, ok := cachedDeflate(files[path]); ok {
+			h.Method = zip.Deflate
+			h.CRC32 = member.crc
+			h.CompressedSize64 = uint64(len(member.compressed))
+			h.UncompressedSize64 = uint64(len(files[path]))
+			target, err := w.CreateRaw(&h)
+			if err != nil {
+				return err
+			}
+			if _, err = target.Write(member.compressed); err != nil {
+				return err
+			}
+			continue
+		}
 		member, err := w.CreateHeader(&h)
 		if err != nil {
 			return err
@@ -71,6 +92,67 @@ func (p *AuthorProject) WriteArchive(output io.Writer, kind string) error {
 		}
 	}
 	return w.Close()
+}
+
+// Compressing a font is the expensive part of saving a project, and fonts do
+// not change when a message does. Results are keyed by content digest, so a
+// changed member simply misses; the cache is bounded and never consulted for
+// small members, where compressing again is cheaper than remembering.
+const deflateCacheMinimumBytes = 64 << 10
+const deflateCacheMaximumBytes = 64 << 20
+
+type deflatedMember struct {
+	compressed []byte
+	crc        uint32
+}
+
+var deflateCache = struct {
+	sync.Mutex
+	members map[[32]byte]deflatedMember
+	order   [][32]byte
+	bytes   int
+	// Compressions actually performed, so a test can assert that an ordinary
+	// edit does not recompress an unchanged font.
+	compressions int
+}{members: map[[32]byte]deflatedMember{}}
+
+func cachedDeflate(data []byte) (deflatedMember, bool) {
+	if len(data) < deflateCacheMinimumBytes {
+		return deflatedMember{}, false
+	}
+	key := sha256.Sum256(data)
+	deflateCache.Lock()
+	member, hit := deflateCache.members[key]
+	deflateCache.Unlock()
+	if hit {
+		return member, true
+	}
+	deflateCache.Lock()
+	deflateCache.compressions++
+	deflateCache.Unlock()
+	var buffer bytes.Buffer
+	writer, err := flate.NewWriter(&buffer, flate.DefaultCompression)
+	if err != nil {
+		return deflatedMember{}, false
+	}
+	if _, err = writer.Write(data); err != nil || writer.Close() != nil {
+		return deflatedMember{}, false
+	}
+	member = deflatedMember{compressed: buffer.Bytes(), crc: crc32.ChecksumIEEE(data)}
+	deflateCache.Lock()
+	defer deflateCache.Unlock()
+	if _, present := deflateCache.members[key]; !present {
+		deflateCache.members[key] = member
+		deflateCache.order = append(deflateCache.order, key)
+		deflateCache.bytes += len(member.compressed)
+		for deflateCache.bytes > deflateCacheMaximumBytes && len(deflateCache.order) > 1 {
+			evicted := deflateCache.order[0]
+			deflateCache.order = deflateCache.order[1:]
+			deflateCache.bytes -= len(deflateCache.members[evicted].compressed)
+			delete(deflateCache.members, evicted)
+		}
+	}
+	return member, true
 }
 
 // ReadAuthorArchive validates all members before exposing any project. No ZIP
@@ -307,7 +389,7 @@ func OpenAuthorProjectDirectory(path string) (*AuthorProject, error) {
 	noticeDir := "notices"
 	// Our versioned installer keeps notices with the immutable scripts/fonts.
 	// Read that one known version directory, never enumerate historical versions.
-	if prefix, _, ok := strings.Cut(pack.manifest.sources[0], "/"); ok && strings.HasPrefix(prefix, "v-") && len(prefix) > 2 && strings.Trim(prefix[2:], "0123456789") == "" {
+	if prefix, ours := installedVersionSegment(pack.manifest.sources[0]); ours {
 		shared := true
 		for _, source := range pack.manifest.sources {
 			shared = shared && strings.HasPrefix(source, prefix+"/")

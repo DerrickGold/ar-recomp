@@ -4,21 +4,14 @@
 #include "render/text_surface_cache.h"
 #include "localization/localization_frame.h"
 
-/* Native-preferred logical cells, also the fixed contract for cursor-driven
- * menus. Reports may redistribute their widths using FitColumns. Returned
- * columns are relative to the owned native region. */
-bool ArLocalizedTextLayout_TableColumns(
-    ArLocalizationTextLayoutKind layout, unsigned line, unsigned field_index,
-    unsigned field_count, unsigned *column, unsigned *next_column);
-bool ArLocalizedTextLayout_TableNumeric(
-    ArLocalizationTextLayoutKind layout, unsigned line,
-    unsigned field_index, unsigned field_count);
-/* Physical alignment within fixed cells, independent of shaping direction. */
-ArTextHorizontalAlignment ArLocalizedTextLayout_TableAlignment(
-    ArLocalizationTextLayoutKind layout, unsigned line, unsigned field_index,
-    unsigned field_count, ArTextDirection direction);
-
-enum { kArTextTableMaximumColumns = 5 };
+/* Cell geometry arrives with the frame as an ArLocalizationTextGrid; this
+ * module only shares measured space across a table's fitted columns. */
+enum {
+  kArTextTableMaximumColumns = 5,
+  /* Upper bounds for a surface laid out on a uniform key pitch. */
+  kArTextLayoutMaximumClusters = 1024,
+  kArTextLayoutMaximumKeyColumns = 64,
+};
 typedef struct ArTextTableColumns {
   int left[kArTextTableMaximumColumns];
   int right[kArTextTableMaximumColumns];
@@ -31,6 +24,8 @@ typedef struct ArTextTableColumns {
 bool ArLocalizedTextLayout_FitColumns(
     const int *minimum_widths, const int *preferred_widths, unsigned count,
     int width, int preferred_gap, int minimum_gap, ArTextTableColumns *out);
+/* Smallest rectangle covering both, treating an empty one as absent. */
+ArRenderRectI ArLocalizedTextLayout_UnionInk(ArRenderRectI a, ArRenderRectI b);
 /* Center an object in the actual gap between two fitted labels. */
 bool ArLocalizedTextLayout_CenterBetween(
     ArRenderRectI left_label, ArRenderRectI right_label,
@@ -51,6 +46,25 @@ bool ArLocalizedTextLayout_NameUnderline(
 int ArLocalizedTextLayout_ScrollOffset(
     const ArTextSurface *surface, uint32_t revealed_utf8_bytes,
     int viewport_height, uint32_t *revealed_clusters);
+
+/* Uniform key pitch. Fills `out_shifts` with the horizontal shift, in surface
+ * pixels, that moves each cluster onto its key's column: the last
+ * `trailing_lines` lines are read as rows of `columns` keys, and each key --
+ * the run of clusters between two gutters of `separator` -- is centred on its
+ * column. `first_key_center` and `key_pitch` describe those columns in surface
+ * coordinates, so the caller reproduces the native cell pitch instead of
+ * whatever width the shaper happened to produce. Clusters outside those lines,
+ * and the gutters between keys, follow the key they belong to, each gutter
+ * splitting between its two neighbours. Fails, leaving the text flowed, when a
+ * keyed line does not hold exactly `columns` keys.
+ *
+ * Shaping is untouched: one pass still measures the whole text, so every key
+ * keeps the same glyph size, and only placement is regularized. */
+bool ArLocalizedTextLayout_KeyCellShifts(
+    const ArTextSurface *surface, const char *utf8, size_t utf8_bytes,
+    const char *separator, size_t separator_bytes, unsigned columns,
+    unsigned trailing_lines, int first_key_center, int key_pitch,
+    int *out_shifts, size_t capacity);
 
 /* Clip equal-sized source/destination rectangles without changing the device's
  * clip state (the caller may already be compositing through PPU windows). */

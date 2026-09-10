@@ -1,4 +1,6 @@
 #include "settings_overlay.h"
+
+#include "localization/unicode_grapheme.h"
 #include "settings_overlay_internal.h"
 
 #include <stdint.h>
@@ -2900,12 +2902,66 @@ static void DrawGlyph(const MenuLayout *layout, int x, int y,
       s_render_device, texture, &source, &destination);
 }
 
+/* ── Character cells ───────────────────────────────────────────────────────
+ *
+ * Package names come from whoever authored the pack, in whatever script, so
+ * the overlay is handed UTF-8. Its font atlas is ASCII-only until the overlay
+ * owns a real font stack, but the counting must be right either way: one cell
+ * per extended grapheme cluster, not per byte. A name with an accent then
+ * occupies the cells a reader would count, right alignment lands where it
+ * should, and truncation can never cut a character in half.
+ *
+ * A cluster that is a single ASCII byte draws its glyph; anything else draws
+ * the replacement, so a precomposed and a decomposed accent look the same
+ * rather than one silently losing its mark. Nothing is transliterated. The
+ * package ID in the same row is ASCII by construction and stays readable
+ * while a name has no glyphs. */
+static size_t OverlayNextCell(const char *text, size_t bytes, size_t offset,
+                              unsigned char *glyph) {
+  uint32_t first = 0;
+  size_t next = 0;
+  if (!ArUnicodeGrapheme_Next(text, bytes, offset, &first, &next) ||
+      next <= offset) {
+    /* Malformed bytes cost one cell each and never stop the row: a package
+     * name with one bad byte must still be readable and selectable, not
+     * vanish. Deciding a cluster boundary reads the following scalar, so a
+     * bad byte fails its predecessor too -- recovering a byte at a time is
+     * what keeps that local. */
+    *glyph = (unsigned char)'?';
+    return offset + 1u;
+  }
+  *glyph = next - offset == 1u && first >= 0x20u && first < 0x80u
+      ? (unsigned char)first : (unsigned char)'?';
+  return next;
+}
+
+/* Cells `text` occupies, at most `maximum`. */
+static int OverlayCellCount(const char *text, int maximum) {
+  if (!text || maximum <= 0) return 0;
+  const size_t bytes = strlen(text);
+  int cells = 0;
+  for (size_t offset = 0; offset < bytes && cells < maximum;) {
+    unsigned char glyph = 0;
+    const size_t next = OverlayNextCell(text, bytes, offset, &glyph);
+    if (!next) break;
+    offset = next;
+    ++cells;
+  }
+  return cells;
+}
+
 static void DrawTextN(const MenuLayout *layout, int x, int y,
                       const char *text, int max_chars, TextStyle style) {
   if (!text || max_chars <= 0) return;
-  for (int i = 0; text[i] && i < max_chars; i++)
-    DrawGlyph(layout, x + i * kGlyphSize, y,
-              (unsigned char)text[i], style);
+  const size_t bytes = strlen(text);
+  int cell = 0;
+  for (size_t offset = 0; offset < bytes && cell < max_chars; ++cell) {
+    unsigned char glyph = 0;
+    const size_t next = OverlayNextCell(text, bytes, offset, &glyph);
+    if (!next) break;
+    DrawGlyph(layout, x + cell * kGlyphSize, y, glyph, style);
+    offset = next;
+  }
 }
 
 /* ── The game font at output-pixel coordinates ─────────────────────────────
@@ -2916,7 +2972,7 @@ static void DrawTextN(const MenuLayout *layout, int x, int y,
 
 int SettingsOverlay_GameTextWidth(const char *text, int scale) {
   if (!text || scale <= 0) return 0;
-  return (int)strlen(text) * kGlyphSize * scale;
+  return OverlayCellCount(text, INT32_MAX) * kGlyphSize * scale;
 }
 
 void SettingsOverlay_DrawGameText(int x, int y, int scale, uint8_t alpha,
@@ -2960,8 +3016,14 @@ void SettingsOverlay_DrawGameText(int x, int y, int scale, uint8_t alpha,
     .flags = kArRenderDrawState_Blend,
     .blend = kArRenderBlendMode_Alpha,
   };
-  for (int i = 0; text[i]; i++) {
-    unsigned char ch = (unsigned char)text[i];
+  const size_t text_bytes = strlen(text);
+  int cell = -1;
+  for (size_t offset = 0; offset < text_bytes;) {
+    unsigned char ch = 0;
+    const size_t next = OverlayNextCell(text, text_bytes, offset, &ch);
+    if (!next) break;
+    offset = next;
+    ++cell;
     if (ch == ' ') continue;
     if (!s_glyph_defined[ch]) ch = '?';
     if (!s_glyph_defined[ch]) continue;
@@ -2974,7 +3036,7 @@ void SettingsOverlay_DrawGameText(int x, int y, int scale, uint8_t alpha,
       glyph_count = 0;
     }
 
-    const float x0 = (float)(x + i * kGlyphSize * scale);
+    const float x0 = (float)(x + cell * kGlyphSize * scale);
     const float y0 = (float)y;
     const float x1 = x0 + glyph_pixels;
     const float y1 = y0 + glyph_pixels;
@@ -2997,9 +3059,7 @@ void SettingsOverlay_DrawGameText(int x, int y, int scale, uint8_t alpha,
 }
 
 static int CappedTextLength(const char *text, int max_chars) {
-  if (!text || max_chars <= 0) return 0;
-  int length = (int)strlen(text);
-  return length < max_chars ? length : max_chars;
+  return OverlayCellCount(text, max_chars);
 }
 
 static void DrawTextRight(const MenuLayout *layout, int right, int y,
@@ -3039,9 +3099,15 @@ static void DrawSmallTextN(const MenuLayout *layout, int x, int y,
                            const char *text, int max_chars, uint32_t color) {
   if (!text || max_chars <= 0 ||
       !ArRenderTexture_IsValid(s_debug_font_texture)) return;
-  for (int i = 0; text[i] && i < max_chars; i++)
-    DrawSmallGlyph(layout, x + i * kDebugGlyphWidth, y,
-                   (unsigned char)text[i], color);
+  const size_t bytes = strlen(text);
+  int cell = 0;
+  for (size_t offset = 0; offset < bytes && cell < max_chars; ++cell) {
+    unsigned char glyph = 0;
+    const size_t next = OverlayNextCell(text, bytes, offset, &glyph);
+    if (!next) break;
+    DrawSmallGlyph(layout, x + cell * kDebugGlyphWidth, y, glyph, color);
+    offset = next;
+  }
 }
 
 static void DrawSmallText(const MenuLayout *layout, int x, int y,
@@ -3050,7 +3116,7 @@ static void DrawSmallText(const MenuLayout *layout, int x, int y,
 }
 
 static int SmallTextWidth(const char *text) {
-  return text ? (int)strlen(text) * kDebugGlyphWidth : 0;
+  return OverlayCellCount(text, INT32_MAX) * kDebugGlyphWidth;
 }
 
 /* Icons are authored at 16x16 but drawn at whatever `size` the caller wants;

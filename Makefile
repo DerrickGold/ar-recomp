@@ -30,6 +30,12 @@
 #   stale in an existing CMake cache.
 #
 #   make check-constants  reject high-risk duplicate literals in authored code.
+#   make check-localization-roms  run the OPTIONAL five-ROM localization
+#                     acceptance gate. `ctest` and a plain `go test` SKIP these
+#                     cases when the regional ROMs are absent, so a green
+#                     default run is not evidence that this gate ran. This
+#                     target fails loudly instead of skipping. Override the ROM
+#                     directory with `make check-localization-roms ROM_ROOT=...`.
 #   make check-cross  compile AND link the game for the platforms that cannot be
 #                     tested on this machine (currently Windows x86_64), using
 #                     the pinned Zig toolchain and the same SDL3 redistributable
@@ -55,7 +61,7 @@ CLEAN_BUILD_DIRS := build build-release build-control build-terrain build-asan b
 CLEAN_GENERATED  := src/gen recomp/funcs.h saves/gen_meta.json saves/rts_webs.txt saves/rts_webs.prev.txt
 CLEAN_RELEASE    := release
 
-.PHONY: dev release $(addprefix release-,$(PLATFORMS)) check-constants check-cross clean clean-all clean-release clean-packaging-mounts
+.PHONY: dev release $(addprefix release-,$(PLATFORMS)) check-constants check-cross check-localization-roms clean clean-all clean-release clean-packaging-mounts
 
 check-constants:
 	@sh tools/check_constants.sh
@@ -124,6 +130,31 @@ check-cross:
 	  ./snesrecomp-go/build/snesbuild build --hermetic --root . --target $$t || exit 1; \
 	done
 	@echo "Cross targets link cleanly: $(CROSS_TARGETS)"
+
+# Optional localization acceptance that needs the five regional ROMs. These are
+# never in source control, so the Go tests skip themselves without them; that
+# skip is deliberately indistinguishable from a pass in `go test` output, which
+# is exactly why this target exists. Run it before claiming five-ROM coverage.
+ROM_ROOT ?= .
+LOCALIZATION_ROMS := ar.sfc ar-eu.sfc ar-ger.sfc ar-fra.sfc ar-jp.sfc
+LOCALIZATION_PROBE := build/actraiser_language_pack_runtime_test
+
+check-localization-roms:
+	@missing=""; for r in $(LOCALIZATION_ROMS); do \
+	  [ -f "$(ROM_ROOT)/$$r" ] || missing="$$missing $$r"; \
+	done; \
+	if [ -n "$$missing" ]; then \
+	  echo "missing regional ROMs in $(ROM_ROOT):$$missing"; \
+	  echo "this gate cannot be reported as passed without them"; exit 1; \
+	fi
+	@if [ ! -x "$(LOCALIZATION_PROBE)" ]; then \
+	  echo "=== building the production C loader probe ==="; \
+	  cmake --build build --target actraiser_language_pack_runtime_test || exit 1; \
+	fi
+	AR_LOCALIZATION_GUI_ROM_ROOT="$(abspath $(ROM_ROOT))" \
+	AR_AUTHOR_RUNTIME_PROBE="$(abspath $(LOCALIZATION_PROBE))" \
+	  go -C snesrecomp-go test ./internal/buildgui ./internal/localizationkit -count=1
+	@echo "five-ROM localization acceptance ran with all $(words $(LOCALIZATION_ROMS)) ROMs and the C probe"
 
 clean-packaging-mounts:
 	@/bin/sh "$(PACKAGING)/scripts/detach-macos-dmgs.sh" "$(abspath $(PACKAGING)/cache)"

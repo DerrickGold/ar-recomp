@@ -1,8 +1,190 @@
 {
   "format": "actraiser-us-runtime-compose-routes",
   "rom_sha256": "b8055844825653210d252d29a2229f9a3e7e512004e83940620173c57d8723f0",
-  "route_count": 73,
+  "route_count": 89,
   "routes": [
+    {
+      "destination": 2059,
+      "native_font_pixels": 7,
+      "region": [
+        2,
+        8,
+        28,
+        2
+      ],
+      "semantic_id": "action.stage_name.fillmore",
+      "source_pc24": "$00:A851",
+      "surface_id": 10,
+      "surface_kind": "action_stage"
+    },
+    {
+      "destination": 2059,
+      "native_font_pixels": 7,
+      "region": [
+        2,
+        8,
+        28,
+        2
+      ],
+      "semantic_id": "action.stage_name.bloodpool",
+      "source_pc24": "$00:A85E",
+      "surface_id": 10,
+      "surface_kind": "action_stage"
+    },
+    {
+      "destination": 2059,
+      "native_font_pixels": 7,
+      "region": [
+        2,
+        8,
+        28,
+        2
+      ],
+      "semantic_id": "action.stage_name.kasandora",
+      "source_pc24": "$00:A870",
+      "surface_id": 10,
+      "surface_kind": "action_stage"
+    },
+    {
+      "destination": 2059,
+      "native_font_pixels": 7,
+      "region": [
+        2,
+        8,
+        28,
+        2
+      ],
+      "semantic_id": "action.stage_name.aitos",
+      "source_pc24": "$00:A880",
+      "surface_id": 10,
+      "surface_kind": "action_stage"
+    },
+    {
+      "destination": 2059,
+      "native_font_pixels": 7,
+      "region": [
+        2,
+        8,
+        28,
+        2
+      ],
+      "semantic_id": "action.stage_name.marahna",
+      "source_pc24": "$00:A88F",
+      "surface_id": 10,
+      "surface_kind": "action_stage"
+    },
+    {
+      "destination": 2059,
+      "native_font_pixels": 7,
+      "region": [
+        2,
+        8,
+        28,
+        2
+      ],
+      "semantic_id": "action.stage_name.northwall",
+      "source_pc24": "$00:A8A0",
+      "surface_id": 10,
+      "surface_kind": "action_stage"
+    },
+    {
+      "destination": 2059,
+      "native_font_pixels": 7,
+      "region": [
+        2,
+        8,
+        28,
+        2
+      ],
+      "semantic_id": "action.stage_name.death_heim",
+      "source_pc24": "$00:A8B2",
+      "surface_id": 10,
+      "surface_kind": "action_stage"
+    },
+    {
+      "destination": 2573,
+      "native_font_pixels": 7,
+      "region": [
+        2,
+        10,
+        28,
+        2
+      ],
+      "semantic_id": "action.hud.act_1",
+      "source_pc24": "$00:A8CB",
+      "surface_id": 11,
+      "surface_kind": "action_act"
+    },
+    {
+      "destination": 2573,
+      "native_font_pixels": 7,
+      "region": [
+        2,
+        10,
+        28,
+        2
+      ],
+      "semantic_id": "action.hud.act_2",
+      "source_pc24": "$00:A8D1",
+      "surface_id": 11,
+      "surface_kind": "action_act"
+    },
+    {
+      "destination": 3085,
+      "native_font_pixels": 7,
+      "region": [
+        2,
+        12,
+        28,
+        2
+      ],
+      "semantic_id": "action.hud.clear",
+      "source_pc24": "$00:A8D8",
+      "surface_id": 12,
+      "surface_kind": "action_clear"
+    },
+    {
+      "destination": 2317,
+      "native_font_pixels": 7,
+      "region": [
+        2,
+        9,
+        28,
+        2
+      ],
+      "semantic_id": "action.hud.ready",
+      "source_pc24": "$00:A8DF",
+      "surface_id": 13,
+      "surface_kind": "action_ready"
+    },
+    {
+      "destination": 2316,
+      "native_font_pixels": 7,
+      "region": [
+        2,
+        9,
+        28,
+        2
+      ],
+      "semantic_id": "action.hud.time_up",
+      "source_pc24": "$00:A8E6",
+      "surface_id": 13,
+      "surface_kind": "action_time_up"
+    },
+    {
+      "destination": 2829,
+      "native_font_pixels": 7,
+      "region": [
+        2,
+        11,
+        28,
+        2
+      ],
+      "semantic_id": "action.hud.pause",
+      "source_pc24": "$00:A8EF",
+      "surface_id": 13,
+      "surface_kind": "action_pause"
+    },
     {
       "destination": 1795,
       "native_font_pixels": 8,
@@ -1072,6 +1254,48 @@
       "source_pc24": "$01:FA9A",
       "surface_id": 9,
       "surface_kind": "flow_speed"
+    },
+    {
+      "destination": 4352,
+      "native_font_pixels": 7,
+      "region": [
+        14,
+        17,
+        17,
+        4
+      ],
+      "semantic_id": "title.save_choice.labels",
+      "source_pc24": "$02:A9A7",
+      "surface_id": 14,
+      "surface_kind": "title_options"
+    },
+    {
+      "destination": 4620,
+      "native_font_pixels": 7,
+      "region": [
+        14,
+        18,
+        17,
+        1
+      ],
+      "semantic_id": "title.start_prompt",
+      "source_pc24": "$02:A9D6",
+      "surface_id": 14,
+      "surface_kind": "title_start"
+    },
+    {
+      "destination": 4364,
+      "native_font_pixels": 7,
+      "region": [
+        14,
+        21,
+        17,
+        1
+      ],
+      "semantic_id": "title.selector.professional",
+      "source_pc24": "$02:AA60",
+      "surface_id": 15,
+      "surface_kind": "title_professional"
     }
   ],
   "source_profile": "us",

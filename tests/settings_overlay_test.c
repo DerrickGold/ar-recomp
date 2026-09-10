@@ -741,6 +741,26 @@ int main(void) {
       }
     CHECK(changed_pixels > 0);
 
+    /* Package names arrive as UTF-8 from whoever authored the pack. The
+     * overlay's atlas is ASCII-only, but its measuring must still count
+     * characters: a name is as many cells as a reader would count, so right
+     * alignment lands correctly and truncation cannot cut a character in
+     * half. Byte counting made "Francais" with a cedilla nine cells wide. */
+    const int ascii = SettingsOverlay_GameTextWidth("Francais", 2);
+    CHECK(SettingsOverlay_GameTextWidth("Fran\u00e7ais", 2) == ascii);
+    /* Decomposed and precomposed spellings occupy the same cells. */
+    CHECK(SettingsOverlay_GameTextWidth("Franc\u0327ais", 2) == ascii);
+    /* Scripts with no glyphs still measure one cell per character. */
+    CHECK(SettingsOverlay_GameTextWidth("\u65e5\u672c\u8a9e", 2) ==
+          SettingsOverlay_GameTextWidth("abc", 2));
+    /* Malformed input must not run past the terminator or hang. */
+    /* A bad byte costs one cell and never swallows the rest of the name. */
+    const char malformed[] = {'a', (char)0xff, (char)0xfe, 'b', 0};
+    CHECK(SettingsOverlay_GameTextWidth(malformed, 2) ==
+          SettingsOverlay_GameTextWidth("abcd", 2));
+    CHECK(SettingsOverlay_GameTextWidth("", 2) == 0);
+    SettingsOverlay_DrawGameText(8, 40, 2, 255, "Fran\u00e7ais \u65e5\u672c");
+
     /* PiP reuses the same native frame atlas at output coordinates. Exercise
      * the checked draw seam with exact scaled-tile dimensions; it must render
      * both with a real ROM atlas and with the normal host-frame fallback used

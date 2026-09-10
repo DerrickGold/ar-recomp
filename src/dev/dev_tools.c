@@ -383,7 +383,7 @@ static void FillLiveHudProjectionInputs(const DevToolsContext *context,
    * full-frame scene claim. Reading the capture here would make the inspector's
    * hit-test disagree with what was actually drawn. */
   uint8_t icon_first = 0, icon_count = 0;
-  ActRaiser_HudObjIconRange(&icon_first, &icon_count);
+  ActRaiser_HudObjIconRange(&icon_first, &icon_count, NULL);
   if (icon_count && context->oam.data && context->high_oam.data) {
     const int first = icon_first;
     const uint64_t oam_word = (uint64_t)first * 2u;

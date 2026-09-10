@@ -153,14 +153,57 @@ int main(void) {
   CHECK(ArLocalizationFrame_SetFont(
       &table_frame, "en-US", "test.font", "/tmp/test.ttf", 7,
       &table_frame.settings));
-  CHECK(ArLocalizationFrame_AddTextWithObjectsAndLayout(
+  /* A grid layout carries its own geometry; the frame interns it and the
+   * snapshot references it by index. */
+  ArLocalizationTextGrid grid = {
+      .rule_count = 2, .row_height = 2,
+      .shared_column_count = 2, .shared_template_line = 0,
+      .rules = {
+          {.first_line = 0, .last_line = 0, .field_count = 2, .cell_count = 2,
+           .shared_columns = true,
+           .cells = {{0, 10, kArTextHorizontalAlignment_Leading, true, false, false},
+                     {10, 26, kArTextHorizontalAlignment_Trailing, false, false, false}}},
+          {.first_line = 1, .last_line = 19,
+           .field_count = kArLocalizationGridAnyFieldCount,
+           .native_reserved = true},
+      }};
+  CHECK(ArLocalizationFrame_AddTextWithGrid(
       &table_frame, 7, destination, (ArTextCellRegion){3, 6, 26, 20},
       text, strlen(text), 5, 5, 12,
-      kArTextDirection_LeftToRight, 7,
-      kArLocalizationTextLayout_StatusCities,
+      kArTextDirection_LeftToRight, 7, &grid,
       NULL, 0, NULL, 0));
-  CHECK(table_frame.snapshots[0].layout ==
-        kArLocalizationTextLayout_StatusCities);
+  CHECK(table_frame.snapshots[0].layout == kArLocalizationTextLayout_Grid);
+  CHECK(table_frame.snapshots[0].grid_index == 1 && table_frame.grid_count == 1);
+  CHECK(ArLocalizationFrame_GetGrid(&table_frame, &table_frame.snapshots[0]) ==
+        &table_frame.grids[0]);
+  const ArLocalizationTextRowRule *row =
+      ArLocalizationGrid_FindRow(&table_frame.grids[0], 0, 2);
+  CHECK(row && row->shared_columns && row->cells[1].end == 26);
+  /* A reserved rule matches whatever shape the row parsed into. */
+  CHECK(ArLocalizationGrid_FindRow(&table_frame.grids[0], 4, 5) ==
+        &table_frame.grids[0].rules[1]);
+  CHECK(!ArLocalizationGrid_FindRow(&table_frame.grids[0], 0, 3));
+  /* Geometry the renderer could not act on is refused where it is published. */
+  ArLocalizationTextGrid invalid = grid;
+  invalid.rules[0].cells[1].end = 27; /* outside the claimed region */
+  CHECK(!ArLocalizationFrame_AddTextWithGrid(
+      &table_frame, 9, destination, (ArTextCellRegion){3, 6, 26, 20},
+      text, strlen(text), 5, 5, 12,
+      kArTextDirection_LeftToRight, 7, &invalid, NULL, 0, NULL, 0));
+  /* A grid layout without geometry, and geometry without a grid layout, are
+   * both rejected. */
+  CHECK(!ArLocalizationFrame_AddTextWithObjectsAndLayout(
+      &table_frame, 9, destination, (ArTextCellRegion){3, 6, 26, 20},
+      text, strlen(text), 5, 5, 12,
+      kArTextDirection_LeftToRight, 7, kArLocalizationTextLayout_Grid,
+      NULL, 0, NULL, 0));
+  /* The key separator belongs to the surface that was just published, and a
+   * frame with no surfaces has nowhere to put one. */
+  CHECK(ArLocalizationFrame_SetKeySeparator(&table_frame, " ", 1));
+  CHECK(table_frame.snapshots[0].key_separator_bytes == 1 &&
+        table_frame.snapshots[0].key_separator[0] == ' ');
+  CHECK(!ArLocalizationFrame_SetKeySeparator(&table_frame, "", 0));
+  CHECK(!ArLocalizationFrame_SetKeySeparator(&table_frame, "        ", 8));
   const ArLocalizationFrame table_before = table_frame;
   CHECK(!ArLocalizationFrame_AddTextWithObjectsAndLayout(
       &table_frame, 8, destination, (ArTextCellRegion){30, 6, 2, 2},

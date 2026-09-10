@@ -399,6 +399,27 @@ int main(void) {
   CHECK(SimBackgroundMountains_CellOccupied(&field, 31, 31));
   CHECK(!SimBackgroundMountains_CellOccupied(&field, 32, 31));
 
+  /* Northwall (19,15) is the game's only $A0: the left half of a peak apex,
+   * paired with the ordinary $82 at (20,15). Classifying it as ground failed
+   * the audited object coverage for the whole town, and the fused
+   * connected-range fallback then stood a nineteen-cell chain of overlapping
+   * stamps up as one mountain instead of anchoring each to its own foot. */
+  SetCell(wram, 6, 19, 15, 0xA0);
+  SetCell(wram, 6, 20, 15, 0x82);
+  SetCell(wram, 6, 21, 15, 0xA1);
+  SimBackgroundMountains_Classify(6, wram, &field);
+  CHECK(SimBackgroundMountains_CellOccupied(&field, 19, 15));
+  CHECK(SimBackgroundMountains_CellOccupied(&field, 21, 15));
+  CHECK(field.component[15 * 32 + 19] == field.component[15 * 32 + 20]);
+  CHECK(SimBackgroundMountains_TileFlags(6, 0xA0) ==
+        kSimBackgroundMountainCell_Occupied);
+  CHECK(SimBackgroundMountains_TileFlags(6, 0xA1) ==
+        kSimBackgroundMountainCell_Occupied);
+  CHECK(SimBackgroundMountains_TileFlags(6, 0xA2) == 0);
+  CHECK(SimBackgroundMountains_TileFlags(1, 0xA0) ==
+        kSimBackgroundMountainCell_Occupied);
+  CHECK(SimBackgroundMountains_TileFlags(5, 0xA0) == 0);
+
   memset(&field, 0xFF, sizeof(field));
   SimBackgroundMountains_Classify(0, wram, &field);
   CHECK(field.town == 0 && field.cell_count == 0);

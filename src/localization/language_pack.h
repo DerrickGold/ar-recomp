@@ -85,6 +85,9 @@ typedef struct ArLanguageMessage {
   uint32_t first_operation;
   uint32_t operation_count;
   uint32_t source_line;
+  /* Its own position in the owning pack, so ownership of a caller-supplied
+   * message is a constant-time equality check rather than a scan. */
+  uint32_t index;
   bool is_alias;
 } ArLanguageMessage;
 
@@ -137,6 +140,11 @@ typedef struct ArLanguagePack {
   uint32_t message_count;
   uint32_t operation_count;
   ArLanguageMessage *messages;
+  /* Open-addressed semantic-ID index, maintained while parsing. Slots hold
+   * "message index + 1"; zero is empty. It keeps duplicate detection, message
+   * lookup and alias resolution from rescanning the whole pack. */
+  uint32_t *message_lookup;
+  size_t message_lookup_capacity;
   ArLanguageOperation *operations;
   char *strings;
   size_t strings_size;
@@ -166,6 +174,24 @@ bool ArLanguagePack_ReadMetadata(const ArLanguagePackIo *io,
 
 /* Standard-C adapter. Archive and console ports provide the same small ABI. */
 void ArLanguagePackFileIo_Init(ArLanguagePackIo *io);
+
+/* The one place that knows how a pack-internal member path is joined to the
+ * host path of the manifest that referenced it, so the loader, the font
+ * resolver and any port adapter cannot disagree about it.
+ *
+ * `manifest_path` is a host path in whatever form the host handed us: rooted,
+ * relative, UNC, with spaces or non-ASCII bytes. Its directory prefix is taken
+ * verbatim, so the member resolves next to the manifest rather than against the
+ * process working directory. Only '/' separates directories on POSIX, where a
+ * backslash is an ordinary filename byte; Windows additionally honours '\' and
+ * a bare "C:" drive-relative prefix.
+ *
+ * `member` must be a portable pack-internal path (forward slashes, no drive,
+ * no traversal); the manifest parser rejects anything else. Returns false and
+ * leaves `result` unspecified when the joined path does not fit `capacity`. */
+bool ArLanguagePack_ResolveMemberPath(const char *manifest_path,
+                                      const char *member, char *result,
+                                      size_t capacity);
 
 const ArLanguagePackMetadata *ArLanguagePack_GetMetadata(
     const ArLanguagePack *pack);

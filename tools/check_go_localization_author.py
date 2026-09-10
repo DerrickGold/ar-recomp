@@ -97,11 +97,18 @@ def cases(roms):
         for rom, (profile, ir) in zip(roms, extractions):
             if not ir['coverage']['complete']:
                 raise ValueError(f"incomplete source census: {profile['id']}")
-            script = pack.emit_artext(pack.build_source_messages(ir))
+            # Packed graphical labels are shared, reviewed transcriptions,
+            # not byte-decoded prose. The independent ROM oracle continues
+            # to compare every original source route and operation.
+            labels = json.loads((ROOT / 'snesrecomp-go/internal/localizationkit/data/native-hud-labels.json').read_bytes()).get(profile['id'], [])
+            extras = [{'id': f'action.hud.{name}_label',
+                       'operations': [{'op': 'text', 'value': text}, {'op': 'end'}]}
+                      for name, text in zip(('act', 'enemy', 'player', 'score', 'time'), labels)]
+            script = pack.emit_artext(sorted(pack.build_source_messages(ir) + extras, key=lambda m: m['id']))
             # Explicit native-clear padding normalization must preserve the
             # existing parser's presentation for every retail route.
             with mock.patch.object(pack, 'strip_native_padding', lambda ops: ops):
-                legacy = pack.emit_artext(pack.build_source_messages(ir))
+                legacy = pack.emit_artext(sorted(pack.build_source_messages(ir) + extras, key=lambda m: m['id']))
             if resolved_presentations(script) != resolved_presentations(legacy):
                 raise ValueError(f"padding normalization changed presentation: {profile['id']}")
             add('retail/' + profile['id'], profile['id'], 'complete', script)

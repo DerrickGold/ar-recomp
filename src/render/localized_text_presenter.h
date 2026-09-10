@@ -15,6 +15,10 @@ enum {
   kArLocalizedPreparedMaskCapacity =
       kArTextCellRecordCapacity * kArTextCellMaximumChunkPieces,
   kArLocalizedPreparedTextCapacity = 64,
+  /* Per-cluster horizontal shifts for texts laid out on a uniform key pitch.
+   * Pooled, so one keyboard's clusters do not cost every prepared text an
+   * array of its own. */
+  kArLocalizedPreparedClusterShiftCapacity = 1024,
 };
 
 typedef struct ArLocalizedPreparedIndicator {
@@ -36,7 +40,16 @@ typedef struct ArLocalizedPreparedText {
   uint32_t cluster_count;
   /* Empty for ordinary fixed text; dialogue is clipped to this software window. */
   ArRenderRectI viewport;
+  /* Start of this text's run in the frame's cluster shift pool, or negative
+   * when the text flows and every cluster draws where it was shaped. An index
+   * rather than a pointer, so a prepared frame stays safe to copy. */
+  int32_t cluster_shift_offset;
 } ArLocalizedPreparedText;
+
+typedef struct ArLocalizedPreparedDecoration {
+  ArRenderRectI destination;
+  ArRenderTexture texture;
+} ArLocalizedPreparedDecoration;
 
 typedef struct ArLocalizedPreparedFrame {
   ArLocalizedPreparedText texts[kArLocalizedPreparedTextCapacity];
@@ -49,6 +62,10 @@ typedef struct ArLocalizedPreparedFrame {
   ArLocalizedPreparedInlineObject
       inline_objects[kArLocalizationFrameInlineObjectCapacity];
   uint8_t inline_object_count;
+  ArLocalizedPreparedDecoration decorations[kArTextCellRecordCapacity * 2];
+  uint8_t decoration_count;
+  int cluster_shifts[kArLocalizedPreparedClusterShiftCapacity];
+  size_t cluster_shift_count;
   uint64_t ready_dialogue_ticket;
 } ArLocalizedPreparedFrame;
 
@@ -78,6 +95,10 @@ void ArLocalizedTextPresenter_Prepare(
 /* Called while the HUD composite target is active. */
 bool ArLocalizedTextPresenter_Draw(
     ArRenderDevice *device, const ArLocalizedPreparedFrame *prepared);
+/* Post-raster master brightness, 0..1; does not invalidate cached text or
+ * reapply brightness to native chunks already shaded by their producer. */
+bool ArLocalizedTextPresenter_DrawWithBrightness(
+    ArRenderDevice *device, const ArLocalizedPreparedFrame *prepared, float brightness);
 void ArLocalizedTextPresenter_Reset(ArRenderDevice *device);
 
 #endif /* AR_RENDER_LOCALIZED_TEXT_PRESENTER_H */

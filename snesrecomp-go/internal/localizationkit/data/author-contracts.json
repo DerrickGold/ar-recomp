@@ -72,7 +72,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "action.hud.act_1"
+      "id": "action.hud.act_1",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -84,7 +88,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "action.hud.act_2"
+      "id": "action.hud.act_2",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -96,7 +104,13 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "action.hud.clear"
+      "id": "action.hud.act_label",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -108,7 +122,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "action.hud.pause"
+      "id": "action.hud.clear",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -120,7 +138,13 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "action.hud.ready"
+      "id": "action.hud.enemy_label",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -132,7 +156,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "action.hud.time_up"
+      "id": "action.hud.pause",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -144,7 +172,13 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "action.stage_name.aitos"
+      "id": "action.hud.player_label",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -156,7 +190,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "action.stage_name.bloodpool"
+      "id": "action.hud.ready",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -168,7 +206,13 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "action.stage_name.death_heim"
+      "id": "action.hud.score_label",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -180,7 +224,13 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "action.stage_name.fillmore"
+      "id": "action.hud.time_label",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -192,7 +242,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "action.stage_name.kasandora"
+      "id": "action.hud.time_up",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -204,7 +258,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "action.stage_name.marahna"
+      "id": "action.stage_name.aitos",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -216,7 +274,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "action.stage_name.northwall"
+      "id": "action.stage_name.bloodpool",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -228,7 +290,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "city.aitos.name"
+      "id": "action.stage_name.death_heim",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -240,7 +306,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "city.bloodpool.name"
+      "id": "action.stage_name.fillmore",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -252,7 +322,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "city.death_heim.name"
+      "id": "action.stage_name.kasandora",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -264,7 +338,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "city.fillmore.name"
+      "id": "action.stage_name.marahna",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -276,7 +354,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "city.kasandora.name"
+      "id": "action.stage_name.northwall",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -288,7 +370,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "city.marahna.name"
+      "id": "city.aitos.name",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -300,7 +386,91 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "city.northwall.name"
+      "id": "city.bloodpool.name",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "city.death_heim.name",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "city.fillmore.name",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "city.kasandora.name",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "city.marahna.name",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "city.northwall.name",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [
@@ -385,7 +555,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.ending.slot_00"
+      "id": "dialogue.ending.slot_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -492,7 +665,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.ending.slot_01"
+      "id": "dialogue.ending.slot_01",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -589,7 +765,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.ending.slot_02"
+      "id": "dialogue.ending.slot_02",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -685,7 +864,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.ending.slot_03"
+      "id": "dialogue.ending.slot_03",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -768,7 +950,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.ending.slot_04"
+      "id": "dialogue.ending.slot_04",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -843,7 +1028,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.ending.slot_05"
+      "id": "dialogue.ending.slot_05",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -960,7 +1148,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.ending.slot_06"
+      "id": "dialogue.ending.slot_06",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -1067,7 +1258,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.ending.slot_07"
+      "id": "dialogue.ending.slot_07",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -1079,7 +1273,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.relay.aitos"
+      "id": "dialogue.event.relay.aitos",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -1091,7 +1288,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.relay.bloodpool"
+      "id": "dialogue.event.relay.bloodpool",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -1103,7 +1303,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.relay.fillmore"
+      "id": "dialogue.event.relay.fillmore",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -1115,7 +1318,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.relay.kasandora"
+      "id": "dialogue.event.relay.kasandora",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -1127,7 +1333,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.relay.marahna"
+      "id": "dialogue.event.relay.marahna",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -1139,7 +1348,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.relay.northwall"
+      "id": "dialogue.event.relay.northwall",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -1245,7 +1457,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_00.call_00.source_00"
+      "id": "dialogue.event.wrapper_00.call_00.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -1373,7 +1588,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_00.call_00.source_01"
+      "id": "dialogue.event.wrapper_00.call_00.source_01",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -1488,7 +1706,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_00.call_00.source_02"
+      "id": "dialogue.event.wrapper_00.call_00.source_02",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -1601,7 +1822,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_00.call_00.source_03"
+      "id": "dialogue.event.wrapper_00.call_00.source_03",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -1698,7 +1922,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_00.call_00.source_04"
+      "id": "dialogue.event.wrapper_00.call_00.source_04",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -1798,7 +2025,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_00.call_00.source_05"
+      "id": "dialogue.event.wrapper_00.call_00.source_05",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -1916,7 +2146,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_00.call_00.source_06"
+      "id": "dialogue.event.wrapper_00.call_00.source_06",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -1938,7 +2171,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_00.call_01.source_00"
+      "id": "dialogue.event.wrapper_00.call_01.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -1950,7 +2186,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_00.call_02.source_00"
+      "id": "dialogue.event.wrapper_00.call_02.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -1975,7 +2214,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_00.call_03.source_00"
+      "id": "dialogue.event.wrapper_00.call_03.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -1997,7 +2239,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_00.call_04.source_00"
+      "id": "dialogue.event.wrapper_00.call_04.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2021,7 +2266,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_00.call_05.source_00"
+      "id": "dialogue.event.wrapper_00.call_05.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2046,7 +2294,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_00.call_05.source_01"
+      "id": "dialogue.event.wrapper_00.call_05.source_01",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2071,7 +2322,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_00.call_06.source_00"
+      "id": "dialogue.event.wrapper_00.call_06.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2095,7 +2349,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_00.call_07.source_00"
+      "id": "dialogue.event.wrapper_00.call_07.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2120,7 +2377,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_00.call_08.source_00"
+      "id": "dialogue.event.wrapper_00.call_08.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2145,7 +2405,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_00.call_09.source_00"
+      "id": "dialogue.event.wrapper_00.call_09.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2170,7 +2433,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_00.call_10.source_00"
+      "id": "dialogue.event.wrapper_00.call_10.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2195,7 +2461,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_00.call_11.source_00"
+      "id": "dialogue.event.wrapper_00.call_11.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2219,7 +2488,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_00.call_12.source_00"
+      "id": "dialogue.event.wrapper_00.call_12.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -2241,7 +2513,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_00.call_13.source_00"
+      "id": "dialogue.event.wrapper_00.call_13.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2266,7 +2541,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_00.call_14.source_00"
+      "id": "dialogue.event.wrapper_00.call_14.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2290,7 +2568,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_00.call_15.source_00"
+      "id": "dialogue.event.wrapper_00.call_15.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2314,7 +2595,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_00.call_16.source_00"
+      "id": "dialogue.event.wrapper_00.call_16.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -2336,7 +2620,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_00.call_17.source_00"
+      "id": "dialogue.event.wrapper_00.call_17.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2365,7 +2652,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_01.call_00.source_00"
+      "id": "dialogue.event.wrapper_01.call_00.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2394,7 +2684,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_01.call_01.source_00"
+      "id": "dialogue.event.wrapper_01.call_01.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2424,7 +2717,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_01.call_02.source_00"
+      "id": "dialogue.event.wrapper_01.call_02.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2453,7 +2749,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_01.call_03.source_00"
+      "id": "dialogue.event.wrapper_01.call_03.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -2465,7 +2764,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_02.call_00.source_00"
+      "id": "dialogue.event.wrapper_02.call_00.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2489,7 +2791,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_02.call_01.source_00"
+      "id": "dialogue.event.wrapper_02.call_01.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2505,7 +2810,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_02.call_02.source_00"
+      "id": "dialogue.event.wrapper_02.call_02.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2522,7 +2830,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_02.call_03.source_00"
+      "id": "dialogue.event.wrapper_02.call_03.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2548,7 +2859,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_03.call_01.source_00"
+      "id": "dialogue.event.wrapper_03.call_01.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -2570,7 +2884,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_04.call_00.source_00"
+      "id": "dialogue.event.wrapper_04.call_00.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2594,7 +2911,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_04.call_01.source_00"
+      "id": "dialogue.event.wrapper_04.call_01.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2618,7 +2938,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_04.call_02.source_00"
+      "id": "dialogue.event.wrapper_04.call_02.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2640,7 +2963,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_04.call_03.source_00"
+      "id": "dialogue.event.wrapper_04.call_03.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2665,7 +2991,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_04.call_04.source_00"
+      "id": "dialogue.event.wrapper_04.call_04.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2689,7 +3018,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_04.call_05.source_00"
+      "id": "dialogue.event.wrapper_04.call_05.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2713,7 +3045,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_04.call_06.source_00"
+      "id": "dialogue.event.wrapper_04.call_06.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -2735,7 +3070,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_04.call_07.source_00"
+      "id": "dialogue.event.wrapper_04.call_07.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2759,7 +3097,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_04.call_08.source_00"
+      "id": "dialogue.event.wrapper_04.call_08.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2784,7 +3125,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_04.call_09.source_00"
+      "id": "dialogue.event.wrapper_04.call_09.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2809,7 +3153,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_04.call_10.source_00"
+      "id": "dialogue.event.wrapper_04.call_10.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2834,7 +3181,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_04.call_11.source_00"
+      "id": "dialogue.event.wrapper_04.call_11.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2859,7 +3209,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_04.call_12.source_00"
+      "id": "dialogue.event.wrapper_04.call_12.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -2881,7 +3234,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_00.source_00"
+      "id": "dialogue.event.wrapper_05.call_00.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2905,7 +3261,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_01.source_00"
+      "id": "dialogue.event.wrapper_05.call_01.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -2929,7 +3288,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_02.source_00"
+      "id": "dialogue.event.wrapper_05.call_02.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -3032,7 +3394,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_03.source_00"
+      "id": "dialogue.event.wrapper_05.call_03.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -3056,7 +3421,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_04.source_00"
+      "id": "dialogue.event.wrapper_05.call_04.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -3080,7 +3448,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_05.source_00"
+      "id": "dialogue.event.wrapper_05.call_05.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -3213,7 +3584,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_06.source_00"
+      "id": "dialogue.event.wrapper_05.call_06.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -3237,7 +3611,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_07.source_00"
+      "id": "dialogue.event.wrapper_05.call_07.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -3261,7 +3638,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_08.source_00"
+      "id": "dialogue.event.wrapper_05.call_08.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -3283,7 +3663,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_09.source_00"
+      "id": "dialogue.event.wrapper_05.call_09.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -3305,7 +3688,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_10.source_00"
+      "id": "dialogue.event.wrapper_05.call_10.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -3329,7 +3715,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_11.source_00"
+      "id": "dialogue.event.wrapper_05.call_11.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -3351,7 +3740,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_12.source_00"
+      "id": "dialogue.event.wrapper_05.call_12.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -3375,7 +3767,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_13.source_00"
+      "id": "dialogue.event.wrapper_05.call_13.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -3399,7 +3794,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_14.source_00"
+      "id": "dialogue.event.wrapper_05.call_14.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -3423,7 +3821,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_15.source_00"
+      "id": "dialogue.event.wrapper_05.call_15.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -3447,7 +3848,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_16.source_00"
+      "id": "dialogue.event.wrapper_05.call_16.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -3471,7 +3875,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_17.source_00"
+      "id": "dialogue.event.wrapper_05.call_17.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -3495,7 +3902,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_18.source_00"
+      "id": "dialogue.event.wrapper_05.call_18.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -3517,7 +3927,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_19.source_00"
+      "id": "dialogue.event.wrapper_05.call_19.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -3541,7 +3954,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_20.source_00"
+      "id": "dialogue.event.wrapper_05.call_20.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -3563,7 +3979,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_21.source_00"
+      "id": "dialogue.event.wrapper_05.call_21.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -3585,7 +4004,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_22.source_00"
+      "id": "dialogue.event.wrapper_05.call_22.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -3607,7 +4029,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_23.source_00"
+      "id": "dialogue.event.wrapper_05.call_23.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -3629,7 +4054,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_24.source_00"
+      "id": "dialogue.event.wrapper_05.call_24.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -3651,7 +4079,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_25.source_00"
+      "id": "dialogue.event.wrapper_05.call_25.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -3673,7 +4104,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_26.source_00"
+      "id": "dialogue.event.wrapper_05.call_26.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -3695,7 +4129,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_05.call_27.source_00"
+      "id": "dialogue.event.wrapper_05.call_27.source_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -3719,7 +4156,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_06.route_00"
+      "id": "dialogue.event.wrapper_06.route_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -3741,7 +4181,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_06.route_01"
+      "id": "dialogue.event.wrapper_06.route_01",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -3765,7 +4208,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_06.route_02"
+      "id": "dialogue.event.wrapper_06.route_02",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -3789,7 +4235,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_06.route_03"
+      "id": "dialogue.event.wrapper_06.route_03",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -3813,7 +4262,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_06.route_04"
+      "id": "dialogue.event.wrapper_06.route_04",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -3837,7 +4289,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_06.route_05"
+      "id": "dialogue.event.wrapper_06.route_05",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -3861,7 +4316,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.event.wrapper_06.route_06"
+      "id": "dialogue.event.wrapper_06.route_06",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -3883,7 +4341,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.offering.slot_00"
+      "id": "dialogue.offering.slot_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -3905,7 +4366,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.offering.slot_01"
+      "id": "dialogue.offering.slot_01",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -3927,7 +4391,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.offering.slot_02"
+      "id": "dialogue.offering.slot_02",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -3949,7 +4416,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.offering.slot_03"
+      "id": "dialogue.offering.slot_03",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -3971,7 +4441,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.offering.slot_04"
+      "id": "dialogue.offering.slot_04",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -3993,7 +4466,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.offering.slot_05"
+      "id": "dialogue.offering.slot_05",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4015,7 +4491,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.offering.slot_06"
+      "id": "dialogue.offering.slot_06",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4037,7 +4516,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.offering.slot_07"
+      "id": "dialogue.offering.slot_07",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4059,7 +4541,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.offering.slot_08"
+      "id": "dialogue.offering.slot_08",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4081,7 +4566,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.offering.slot_09"
+      "id": "dialogue.offering.slot_09",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4103,7 +4591,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.offering.slot_10"
+      "id": "dialogue.offering.slot_10",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4125,7 +4616,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.offering.slot_11"
+      "id": "dialogue.offering.slot_11",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4147,7 +4641,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.offering.slot_12"
+      "id": "dialogue.offering.slot_12",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4169,7 +4666,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.offering.slot_13"
+      "id": "dialogue.offering.slot_13",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4191,7 +4691,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.offering.slot_14"
+      "id": "dialogue.offering.slot_14",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4213,7 +4716,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.offering.slot_15"
+      "id": "dialogue.offering.slot_15",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4235,7 +4741,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.offering.slot_16"
+      "id": "dialogue.offering.slot_16",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4257,7 +4766,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.offering.slot_17"
+      "id": "dialogue.offering.slot_17",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4279,7 +4791,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.offering.slot_18"
+      "id": "dialogue.offering.slot_18",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4301,7 +4816,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "dialogue.offering.slot_19"
+      "id": "dialogue.offering.slot_19",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4309,7 +4827,10 @@
         "jp": []
       },
       "canonical_profile": "jp",
-      "id": "dialogue.offering.slot_20"
+      "id": "dialogue.offering.slot_20",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4321,7 +4842,12 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "enemy.name.slot_00"
+      "id": "enemy.name.slot_00",
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "inline"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4333,7 +4859,12 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "enemy.name.slot_01"
+      "id": "enemy.name.slot_01",
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "inline"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4345,7 +4876,12 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "enemy.name.slot_02"
+      "id": "enemy.name.slot_02",
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "inline"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4357,7 +4893,12 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "enemy.name.slot_03"
+      "id": "enemy.name.slot_03",
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "inline"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4369,7 +4910,12 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "growth_state.00"
+      "id": "growth_state.00",
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "inline"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4381,7 +4927,12 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "growth_state.01"
+      "id": "growth_state.01",
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "inline"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4393,7 +4944,12 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "growth_state.02"
+      "id": "growth_state.02",
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "inline"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4405,7 +4961,12 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "growth_state.03"
+      "id": "growth_state.03",
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "inline"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4417,7 +4978,12 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "growth_state.04"
+      "id": "growth_state.04",
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "inline"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4429,7 +4995,12 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "growth_state.05"
+      "id": "growth_state.05",
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "inline"
+      }
     },
     {
       "allowed_placeholders": [
@@ -4444,7 +5015,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "name_entry.prompt_and_alphabet"
+      "id": "name_entry.prompt_and_alphabet",
+      "presentation": {
+        "shape": "keyboard"
+      }
     },
     {
       "allowed_placeholders": [
@@ -4454,7 +5028,10 @@
         "jp": []
       },
       "canonical_profile": "jp",
-      "id": "name_entry.prompt_and_hiragana"
+      "id": "name_entry.prompt_and_hiragana",
+      "presentation": {
+        "shape": "keyboard"
+      }
     },
     {
       "allowed_placeholders": [
@@ -4464,7 +5041,10 @@
         "jp": []
       },
       "canonical_profile": "jp",
-      "id": "name_entry.prompt_and_katakana"
+      "id": "name_entry.prompt_and_katakana",
+      "presentation": {
+        "shape": "keyboard"
+      }
     },
     {
       "allowed_placeholders": [
@@ -4478,7 +5058,12 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "name_entry.selection_cursor"
+      "id": "name_entry.selection_cursor",
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "inline"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4490,7 +5075,12 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "required_master_level.00"
+      "id": "required_master_level.00",
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "inline"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4502,7 +5092,12 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "required_master_level.01"
+      "id": "required_master_level.01",
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "inline"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4514,7 +5109,12 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "required_master_level.02"
+      "id": "required_master_level.02",
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "inline"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4526,7 +5126,12 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "required_master_level.03"
+      "id": "required_master_level.03",
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "inline"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4538,7 +5143,12 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "required_master_level.04"
+      "id": "required_master_level.04",
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "inline"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4550,7 +5160,12 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "required_master_level.05"
+      "id": "required_master_level.05",
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "inline"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4569,7 +5184,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sim.development.direction.cancel_confirm"
+      "id": "sim.development.direction.cancel_confirm",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -4593,7 +5211,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sim.development.direction.prompt"
+      "id": "sim.development.direction.prompt",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4615,7 +5236,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sim.inventory.cancelled"
+      "id": "sim.inventory.cancelled",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -4644,7 +5268,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sim.inventory.choose_item"
+      "id": "sim.inventory.choose_item",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -4668,7 +5295,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sim.inventory.empty"
+      "id": "sim.inventory.empty",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4690,7 +5320,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sim.inventory.full"
+      "id": "sim.inventory.full",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4702,7 +5335,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.building_direction"
+      "id": "sim.menu.building_direction",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4714,7 +5351,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.choice.direct_people"
+      "id": "sim.menu.choice.direct_people",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4726,7 +5367,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.choice.miracles"
+      "id": "sim.menu.choice.miracles",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4738,7 +5383,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.choice.movement"
+      "id": "sim.menu.choice.movement",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4750,7 +5399,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.choice.offerings"
+      "id": "sim.menu.choice.offerings",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4762,7 +5415,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.choice.other"
+      "id": "sim.menu.choice.other",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4774,7 +5431,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.choice.status"
+      "id": "sim.menu.choice.status",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4786,7 +5447,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.earthquake"
+      "id": "sim.menu.earthquake",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4798,7 +5463,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.lightning"
+      "id": "sim.menu.lightning",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4810,7 +5479,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.listen"
+      "id": "sim.menu.listen",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4822,7 +5495,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.message_speed"
+      "id": "sim.menu.message_speed",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4834,7 +5511,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.offering_action.give_oracle"
+      "id": "sim.menu.offering_action.give_oracle",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4846,7 +5527,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.offering_action.listen"
+      "id": "sim.menu.offering_action.listen",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [
@@ -4856,7 +5541,11 @@
         "jp": []
       },
       "canonical_profile": "jp",
-      "id": "sim.menu.offering_action.selected"
+      "id": "sim.menu.offering_action.selected",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4868,7 +5557,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.offering_action.take_offering"
+      "id": "sim.menu.offering_action.take_offering",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4880,7 +5573,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.possession.slot_00"
+      "id": "sim.menu.possession.slot_00",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4892,7 +5589,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.possession.slot_01"
+      "id": "sim.menu.possession.slot_01",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4904,7 +5605,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.possession.slot_02"
+      "id": "sim.menu.possession.slot_02",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4916,7 +5621,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.possession.slot_03"
+      "id": "sim.menu.possession.slot_03",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4928,7 +5637,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.possession.slot_04"
+      "id": "sim.menu.possession.slot_04",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4940,7 +5653,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.possession.slot_05"
+      "id": "sim.menu.possession.slot_05",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4952,7 +5669,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.possession.slot_06"
+      "id": "sim.menu.possession.slot_06",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4964,7 +5685,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.possession.slot_07"
+      "id": "sim.menu.possession.slot_07",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4976,7 +5701,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.possession.slot_08"
+      "id": "sim.menu.possession.slot_08",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -4988,7 +5717,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.possession.slot_09"
+      "id": "sim.menu.possession.slot_09",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5000,7 +5733,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.possession.slot_10"
+      "id": "sim.menu.possession.slot_10",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5012,7 +5749,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.possession.slot_11"
+      "id": "sim.menu.possession.slot_11",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5024,7 +5765,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.possession.slot_12"
+      "id": "sim.menu.possession.slot_12",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5036,7 +5781,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.possession.slot_13"
+      "id": "sim.menu.possession.slot_13",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5048,7 +5797,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.possession.slot_14"
+      "id": "sim.menu.possession.slot_14",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5060,7 +5813,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.possession.slot_15"
+      "id": "sim.menu.possession.slot_15",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5072,7 +5829,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.possession.slot_16"
+      "id": "sim.menu.possession.slot_16",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5084,7 +5845,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.possession.slot_17"
+      "id": "sim.menu.possession.slot_17",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5096,7 +5861,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.possession.slot_18"
+      "id": "sim.menu.possession.slot_18",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5108,7 +5877,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.possession.slot_19"
+      "id": "sim.menu.possession.slot_19",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5120,7 +5893,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.progress_log"
+      "id": "sim.menu.progress_log",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5132,7 +5909,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.rain"
+      "id": "sim.menu.rain",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5144,7 +5925,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.return_to_palace"
+      "id": "sim.menu.return_to_palace",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5156,7 +5941,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.sky_palace_movement"
+      "id": "sim.menu.sky_palace_movement",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5168,7 +5957,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.status_cities"
+      "id": "sim.menu.status_cities",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5180,7 +5973,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.status_master"
+      "id": "sim.menu.status_master",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5192,7 +5989,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.sun"
+      "id": "sim.menu.sun",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5204,7 +6005,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.take_offering"
+      "id": "sim.menu.take_offering",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5216,7 +6021,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.use_offering"
+      "id": "sim.menu.use_offering",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5228,7 +6037,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.menu.wind"
+      "id": "sim.menu.wind",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5240,7 +6053,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.miracle.earthquake.cancel"
+      "id": "sim.miracle.earthquake.cancel",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5267,7 +6083,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sim.miracle.earthquake.confirm"
+      "id": "sim.miracle.earthquake.confirm",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5289,7 +6108,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sim.miracle.earthquake.description"
+      "id": "sim.miracle.earthquake.description",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -5303,7 +6125,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.miracle.earthquake.insufficient_sp"
+      "id": "sim.miracle.earthquake.insufficient_sp",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5330,7 +6155,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sim.miracle.lightning.confirm"
+      "id": "sim.miracle.lightning.confirm",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5352,7 +6180,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sim.miracle.lightning.description"
+      "id": "sim.miracle.lightning.description",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -5366,7 +6197,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.miracle.lightning.insufficient_sp"
+      "id": "sim.miracle.lightning.insufficient_sp",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5378,7 +6212,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.miracle.lightning.target_cancel"
+      "id": "sim.miracle.lightning.target_cancel",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5390,7 +6227,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.miracle.lightning.target_prompt"
+      "id": "sim.miracle.lightning.target_prompt",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5417,7 +6257,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sim.miracle.rain.confirm"
+      "id": "sim.miracle.rain.confirm",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5439,7 +6282,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sim.miracle.rain.description"
+      "id": "sim.miracle.rain.description",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -5453,7 +6299,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.miracle.rain.insufficient_sp"
+      "id": "sim.miracle.rain.insufficient_sp",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5465,7 +6314,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.miracle.rain.target_cancel"
+      "id": "sim.miracle.rain.target_cancel",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5477,7 +6329,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.miracle.rain.target_prompt"
+      "id": "sim.miracle.rain.target_prompt",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5504,7 +6359,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sim.miracle.sun.confirm"
+      "id": "sim.miracle.sun.confirm",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5526,7 +6384,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sim.miracle.sun.description"
+      "id": "sim.miracle.sun.description",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -5540,7 +6401,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.miracle.sun.insufficient_sp"
+      "id": "sim.miracle.sun.insufficient_sp",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5552,7 +6416,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.miracle.sun.target_cancel"
+      "id": "sim.miracle.sun.target_cancel",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5564,7 +6431,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.miracle.sun.target_prompt"
+      "id": "sim.miracle.sun.target_prompt",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5576,7 +6446,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.miracle.wind.cancel"
+      "id": "sim.miracle.wind.cancel",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5603,7 +6476,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sim.miracle.wind.confirm"
+      "id": "sim.miracle.wind.confirm",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5625,7 +6501,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sim.miracle.wind.description"
+      "id": "sim.miracle.wind.description",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -5639,7 +6518,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.miracle.wind.insufficient_sp"
+      "id": "sim.miracle.wind.insufficient_sp",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5651,7 +6533,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.offerings.cancelled"
+      "id": "sim.offerings.cancelled",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5678,7 +6563,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sim.offerings.choose"
+      "id": "sim.offerings.choose",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5705,7 +6593,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sim.offerings.choose_more"
+      "id": "sim.offerings.choose_more",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5717,7 +6608,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sim.offerings.completed"
+      "id": "sim.offerings.completed",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5739,7 +6633,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sim.offerings.unavailable.inventory_full"
+      "id": "sim.offerings.unavailable.inventory_full",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -5763,7 +6660,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sim.offerings.unavailable.no_residents"
+      "id": "sim.offerings.unavailable.no_residents",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5785,7 +6685,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sim.offerings.unavailable.none"
+      "id": "sim.offerings.unavailable.none",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5807,7 +6710,64 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sim.town.gratitude"
+      "id": "sim.town.gratitude",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim_sky.hud.angel_label",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim_sky.hud.context_label",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim_sky.hud.sp_label",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5829,7 +6789,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_00"
+      "id": "simulation.event.aitos.slot_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -5853,7 +6816,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_01"
+      "id": "simulation.event.aitos.slot_01",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5875,7 +6841,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_02"
+      "id": "simulation.event.aitos.slot_02",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5897,7 +6866,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_03"
+      "id": "simulation.event.aitos.slot_03",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5919,7 +6891,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_04"
+      "id": "simulation.event.aitos.slot_04",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5941,7 +6916,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_05"
+      "id": "simulation.event.aitos.slot_05",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5963,7 +6941,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_06"
+      "id": "simulation.event.aitos.slot_06",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -5985,7 +6966,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_07"
+      "id": "simulation.event.aitos.slot_07",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -6007,7 +6991,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_08"
+      "id": "simulation.event.aitos.slot_08",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -6029,7 +7016,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_09"
+      "id": "simulation.event.aitos.slot_09",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -6051,7 +7041,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_10"
+      "id": "simulation.event.aitos.slot_10",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -6073,7 +7066,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_11"
+      "id": "simulation.event.aitos.slot_11",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -6095,7 +7091,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_12"
+      "id": "simulation.event.aitos.slot_12",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -6117,7 +7116,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_13"
+      "id": "simulation.event.aitos.slot_13",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -6139,7 +7141,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_14"
+      "id": "simulation.event.aitos.slot_14",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -6161,7 +7166,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_15"
+      "id": "simulation.event.aitos.slot_15",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -6183,7 +7191,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_16"
+      "id": "simulation.event.aitos.slot_16",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -6205,7 +7216,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_17"
+      "id": "simulation.event.aitos.slot_17",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -6227,7 +7241,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_18"
+      "id": "simulation.event.aitos.slot_18",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -6249,7 +7266,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_19"
+      "id": "simulation.event.aitos.slot_19",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -6271,7 +7291,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_20"
+      "id": "simulation.event.aitos.slot_20",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -6293,7 +7316,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_21"
+      "id": "simulation.event.aitos.slot_21",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -6315,7 +7341,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_22"
+      "id": "simulation.event.aitos.slot_22",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -6337,7 +7366,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_23"
+      "id": "simulation.event.aitos.slot_23",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -6359,7 +7391,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_24"
+      "id": "simulation.event.aitos.slot_24",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -6381,7 +7416,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_25"
+      "id": "simulation.event.aitos.slot_25",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -6403,7 +7441,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_26"
+      "id": "simulation.event.aitos.slot_26",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -6425,7 +7466,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_27"
+      "id": "simulation.event.aitos.slot_27",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -6447,7 +7491,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_28"
+      "id": "simulation.event.aitos.slot_28",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -6469,7 +7516,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_29"
+      "id": "simulation.event.aitos.slot_29",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -6491,7 +7541,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_30"
+      "id": "simulation.event.aitos.slot_30",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -6513,7 +7566,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.aitos.slot_31"
+      "id": "simulation.event.aitos.slot_31",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -6535,713 +7591,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_00"
-    },
-    {
-      "allowed_placeholders": [
-        "town_name"
-      ],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_01"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_02"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_03"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_04"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_05"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_06"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_07"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_08"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_09"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_10"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_11"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_12"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_13"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_14"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_15"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_16"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_17"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_18"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_19"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_20"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_21"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_22"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_23"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_24"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_25"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_26"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_27"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_28"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_29"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_30"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.bloodpool.slot_31"
-    },
-    {
-      "allowed_placeholders": [],
-      "anchors": {
-        "de": [
-          "reset_text_cursor.00"
-        ],
-        "eu-en": [
-          "reset_text_cursor.00"
-        ],
-        "fr": [
-          "reset_text_cursor.00"
-        ],
-        "jp": [
-          "reset_text_cursor.00"
-        ],
-        "us": [
-          "reset_text_cursor.00"
-        ]
-      },
-      "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_00"
+      "id": "simulation.event.bloodpool.slot_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -7265,7 +7618,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_01"
+      "id": "simulation.event.bloodpool.slot_01",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7287,7 +7643,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_02"
+      "id": "simulation.event.bloodpool.slot_02",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7309,7 +7668,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_03"
+      "id": "simulation.event.bloodpool.slot_03",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7331,7 +7693,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_04"
+      "id": "simulation.event.bloodpool.slot_04",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7353,7 +7718,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_05"
+      "id": "simulation.event.bloodpool.slot_05",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7375,7 +7743,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_06"
+      "id": "simulation.event.bloodpool.slot_06",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7397,7 +7768,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_07"
+      "id": "simulation.event.bloodpool.slot_07",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7419,7 +7793,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_08"
+      "id": "simulation.event.bloodpool.slot_08",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7441,7 +7818,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_09"
+      "id": "simulation.event.bloodpool.slot_09",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7463,7 +7843,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_10"
+      "id": "simulation.event.bloodpool.slot_10",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7485,7 +7868,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_11"
+      "id": "simulation.event.bloodpool.slot_11",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7507,7 +7893,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_12"
+      "id": "simulation.event.bloodpool.slot_12",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7529,7 +7918,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_13"
+      "id": "simulation.event.bloodpool.slot_13",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7551,7 +7943,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_14"
+      "id": "simulation.event.bloodpool.slot_14",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7573,7 +7968,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_15"
+      "id": "simulation.event.bloodpool.slot_15",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7595,7 +7993,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_16"
+      "id": "simulation.event.bloodpool.slot_16",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7617,7 +8018,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_17"
+      "id": "simulation.event.bloodpool.slot_17",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7639,7 +8043,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_18"
+      "id": "simulation.event.bloodpool.slot_18",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7661,7 +8068,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_19"
+      "id": "simulation.event.bloodpool.slot_19",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7683,7 +8093,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_20"
+      "id": "simulation.event.bloodpool.slot_20",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7705,7 +8118,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_21"
+      "id": "simulation.event.bloodpool.slot_21",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7727,7 +8143,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_22"
+      "id": "simulation.event.bloodpool.slot_22",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7749,7 +8168,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_23"
+      "id": "simulation.event.bloodpool.slot_23",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7771,7 +8193,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_24"
+      "id": "simulation.event.bloodpool.slot_24",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7793,7 +8218,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_25"
+      "id": "simulation.event.bloodpool.slot_25",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7815,7 +8243,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_26"
+      "id": "simulation.event.bloodpool.slot_26",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7837,7 +8268,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_27"
+      "id": "simulation.event.bloodpool.slot_27",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7859,7 +8293,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_28"
+      "id": "simulation.event.bloodpool.slot_28",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7881,7 +8318,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_29"
+      "id": "simulation.event.bloodpool.slot_29",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7903,7 +8343,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_30"
+      "id": "simulation.event.bloodpool.slot_30",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7925,7 +8368,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.fillmore.slot_31"
+      "id": "simulation.event.bloodpool.slot_31",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7947,7 +8393,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_00"
+      "id": "simulation.event.fillmore.slot_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -7971,7 +8420,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_01"
+      "id": "simulation.event.fillmore.slot_01",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -7993,7 +8445,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_02"
+      "id": "simulation.event.fillmore.slot_02",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8015,7 +8470,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_03"
+      "id": "simulation.event.fillmore.slot_03",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8037,7 +8495,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_04"
+      "id": "simulation.event.fillmore.slot_04",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8059,7 +8520,812 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_05"
+      "id": "simulation.event.fillmore.slot_05",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.fillmore.slot_06",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.fillmore.slot_07",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.fillmore.slot_08",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.fillmore.slot_09",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.fillmore.slot_10",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.fillmore.slot_11",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.fillmore.slot_12",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.fillmore.slot_13",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.fillmore.slot_14",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.fillmore.slot_15",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.fillmore.slot_16",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.fillmore.slot_17",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.fillmore.slot_18",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.fillmore.slot_19",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.fillmore.slot_20",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.fillmore.slot_21",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.fillmore.slot_22",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.fillmore.slot_23",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.fillmore.slot_24",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.fillmore.slot_25",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.fillmore.slot_26",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.fillmore.slot_27",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.fillmore.slot_28",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.fillmore.slot_29",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.fillmore.slot_30",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.fillmore.slot_31",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.kasandora.slot_00",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [
+        "town_name"
+      ],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.kasandora.slot_01",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.kasandora.slot_02",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.kasandora.slot_03",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.kasandora.slot_04",
+      "presentation": {
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [
+          "reset_text_cursor.00"
+        ],
+        "eu-en": [
+          "reset_text_cursor.00"
+        ],
+        "fr": [
+          "reset_text_cursor.00"
+        ],
+        "jp": [
+          "reset_text_cursor.00"
+        ],
+        "us": [
+          "reset_text_cursor.00"
+        ]
+      },
+      "canonical_profile": "us",
+      "id": "simulation.event.kasandora.slot_05",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8071,7 +9337,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_06"
+      "id": "simulation.event.kasandora.slot_06",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8093,7 +9362,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_07"
+      "id": "simulation.event.kasandora.slot_07",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8115,7 +9387,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_08"
+      "id": "simulation.event.kasandora.slot_08",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8137,7 +9412,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_09"
+      "id": "simulation.event.kasandora.slot_09",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8159,7 +9437,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_10"
+      "id": "simulation.event.kasandora.slot_10",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8181,7 +9462,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_11"
+      "id": "simulation.event.kasandora.slot_11",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8203,7 +9487,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_12"
+      "id": "simulation.event.kasandora.slot_12",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8225,7 +9512,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_13"
+      "id": "simulation.event.kasandora.slot_13",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8247,7 +9537,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_14"
+      "id": "simulation.event.kasandora.slot_14",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8269,7 +9562,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_15"
+      "id": "simulation.event.kasandora.slot_15",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8291,7 +9587,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_16"
+      "id": "simulation.event.kasandora.slot_16",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8313,7 +9612,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_17"
+      "id": "simulation.event.kasandora.slot_17",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8335,7 +9637,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_18"
+      "id": "simulation.event.kasandora.slot_18",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8357,7 +9662,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_19"
+      "id": "simulation.event.kasandora.slot_19",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8379,7 +9687,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_20"
+      "id": "simulation.event.kasandora.slot_20",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8401,7 +9712,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_21"
+      "id": "simulation.event.kasandora.slot_21",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8423,7 +9737,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_22"
+      "id": "simulation.event.kasandora.slot_22",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8445,7 +9762,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_23"
+      "id": "simulation.event.kasandora.slot_23",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8467,7 +9787,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_24"
+      "id": "simulation.event.kasandora.slot_24",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -8491,7 +9814,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_25"
+      "id": "simulation.event.kasandora.slot_25",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -8515,7 +9841,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_26"
+      "id": "simulation.event.kasandora.slot_26",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8537,7 +9866,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_27"
+      "id": "simulation.event.kasandora.slot_27",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8559,7 +9891,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_28"
+      "id": "simulation.event.kasandora.slot_28",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8581,7 +9916,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_29"
+      "id": "simulation.event.kasandora.slot_29",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8603,7 +9941,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_30"
+      "id": "simulation.event.kasandora.slot_30",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8625,7 +9966,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.kasandora.slot_31"
+      "id": "simulation.event.kasandora.slot_31",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -8649,7 +9993,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_00"
+      "id": "simulation.event.marahna.slot_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -8673,7 +10020,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_01"
+      "id": "simulation.event.marahna.slot_01",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8695,7 +10045,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_02"
+      "id": "simulation.event.marahna.slot_02",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -8719,7 +10072,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_03"
+      "id": "simulation.event.marahna.slot_03",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8741,7 +10097,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_04"
+      "id": "simulation.event.marahna.slot_04",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8763,7 +10122,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_05"
+      "id": "simulation.event.marahna.slot_05",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8785,7 +10147,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_06"
+      "id": "simulation.event.marahna.slot_06",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8808,7 +10173,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_07"
+      "id": "simulation.event.marahna.slot_07",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8830,7 +10198,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_08"
+      "id": "simulation.event.marahna.slot_08",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8852,7 +10223,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_09"
+      "id": "simulation.event.marahna.slot_09",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8874,7 +10248,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_10"
+      "id": "simulation.event.marahna.slot_10",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8896,7 +10273,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_11"
+      "id": "simulation.event.marahna.slot_11",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8918,7 +10298,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_12"
+      "id": "simulation.event.marahna.slot_12",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8940,7 +10323,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_13"
+      "id": "simulation.event.marahna.slot_13",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8962,7 +10348,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_14"
+      "id": "simulation.event.marahna.slot_14",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -8984,7 +10373,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_15"
+      "id": "simulation.event.marahna.slot_15",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9006,7 +10398,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_16"
+      "id": "simulation.event.marahna.slot_16",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9028,7 +10423,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_17"
+      "id": "simulation.event.marahna.slot_17",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9050,7 +10448,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_18"
+      "id": "simulation.event.marahna.slot_18",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9072,7 +10473,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_19"
+      "id": "simulation.event.marahna.slot_19",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9094,7 +10498,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_20"
+      "id": "simulation.event.marahna.slot_20",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9116,7 +10523,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_21"
+      "id": "simulation.event.marahna.slot_21",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9138,7 +10548,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_22"
+      "id": "simulation.event.marahna.slot_22",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9160,7 +10573,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_23"
+      "id": "simulation.event.marahna.slot_23",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9182,7 +10598,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_24"
+      "id": "simulation.event.marahna.slot_24",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9204,7 +10623,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_25"
+      "id": "simulation.event.marahna.slot_25",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9226,7 +10648,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_26"
+      "id": "simulation.event.marahna.slot_26",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9248,7 +10673,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_27"
+      "id": "simulation.event.marahna.slot_27",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9270,7 +10698,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_28"
+      "id": "simulation.event.marahna.slot_28",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9292,7 +10723,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_29"
+      "id": "simulation.event.marahna.slot_29",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9314,7 +10748,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_30"
+      "id": "simulation.event.marahna.slot_30",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9336,7 +10773,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.marahna.slot_31"
+      "id": "simulation.event.marahna.slot_31",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9358,7 +10798,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_00"
+      "id": "simulation.event.northwall.slot_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9380,7 +10823,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_01"
+      "id": "simulation.event.northwall.slot_01",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9402,7 +10848,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_02"
+      "id": "simulation.event.northwall.slot_02",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9424,7 +10873,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_03"
+      "id": "simulation.event.northwall.slot_03",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9446,7 +10898,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_04"
+      "id": "simulation.event.northwall.slot_04",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9468,7 +10923,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_05"
+      "id": "simulation.event.northwall.slot_05",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9490,7 +10948,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_06"
+      "id": "simulation.event.northwall.slot_06",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9512,7 +10973,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_07"
+      "id": "simulation.event.northwall.slot_07",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9534,7 +10998,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_08"
+      "id": "simulation.event.northwall.slot_08",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9556,7 +11023,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_09"
+      "id": "simulation.event.northwall.slot_09",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9578,7 +11048,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_10"
+      "id": "simulation.event.northwall.slot_10",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9600,7 +11073,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_11"
+      "id": "simulation.event.northwall.slot_11",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9622,7 +11098,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_12"
+      "id": "simulation.event.northwall.slot_12",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9644,7 +11123,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_13"
+      "id": "simulation.event.northwall.slot_13",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9666,7 +11148,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_14"
+      "id": "simulation.event.northwall.slot_14",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9688,7 +11173,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_15"
+      "id": "simulation.event.northwall.slot_15",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9710,7 +11198,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_16"
+      "id": "simulation.event.northwall.slot_16",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9732,7 +11223,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_17"
+      "id": "simulation.event.northwall.slot_17",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9754,7 +11248,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_18"
+      "id": "simulation.event.northwall.slot_18",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9776,7 +11273,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_19"
+      "id": "simulation.event.northwall.slot_19",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9798,7 +11298,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_20"
+      "id": "simulation.event.northwall.slot_20",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9820,7 +11323,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_21"
+      "id": "simulation.event.northwall.slot_21",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9842,7 +11348,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_22"
+      "id": "simulation.event.northwall.slot_22",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9864,7 +11373,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_23"
+      "id": "simulation.event.northwall.slot_23",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9886,7 +11398,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_24"
+      "id": "simulation.event.northwall.slot_24",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9908,7 +11423,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_25"
+      "id": "simulation.event.northwall.slot_25",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9930,7 +11448,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_26"
+      "id": "simulation.event.northwall.slot_26",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9952,7 +11473,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_27"
+      "id": "simulation.event.northwall.slot_27",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9974,7 +11498,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_28"
+      "id": "simulation.event.northwall.slot_28",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -9996,7 +11523,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_29"
+      "id": "simulation.event.northwall.slot_29",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10018,7 +11548,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_30"
+      "id": "simulation.event.northwall.slot_30",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10040,7 +11573,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "simulation.event.northwall.slot_31"
+      "id": "simulation.event.northwall.slot_31",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10062,7 +11598,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sky.action_mode.begin_blessing"
+      "id": "sky.action_mode.begin_blessing",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10084,7 +11623,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sky.action_mode.cancel_confirm"
+      "id": "sky.action_mode.cancel_confirm",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -10113,7 +11655,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sky.action_mode.confirm"
+      "id": "sky.action_mode.confirm",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10140,7 +11685,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sky.action_mode.outcome.final_battle"
+      "id": "sky.action_mode.outcome.final_battle",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -10169,7 +11717,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sky.action_mode.outcome.first_lair"
+      "id": "sky.action_mode.outcome.first_lair",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -10198,7 +11749,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sky.action_mode.outcome.repeat_lair"
+      "id": "sky.action_mode.outcome.repeat_lair",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -10222,7 +11776,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sky.action_mode.unavailable.already_cleared"
+      "id": "sky.action_mode.unavailable.already_cleared",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -10246,7 +11803,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sky.action_mode.unavailable.cannot_land"
+      "id": "sky.action_mode.unavailable.cannot_land",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -10271,7 +11831,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sky.action_mode.unavailable.master_level"
+      "id": "sky.action_mode.unavailable.master_level",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -10295,7 +11858,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sky.action_mode.unavailable.no_monsters"
+      "id": "sky.action_mode.unavailable.no_monsters",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -10319,7 +11885,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sky.action_mode.unavailable.no_residents"
+      "id": "sky.action_mode.unavailable.no_residents",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10341,7 +11910,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sky.magic.cancelled"
+      "id": "sky.magic.cancelled",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -10370,7 +11942,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sky.magic.choose"
+      "id": "sky.magic.choose",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -10394,7 +11969,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sky.magic.empty"
+      "id": "sky.magic.empty",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -10418,7 +11996,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sky.magic.selected.aura"
+      "id": "sky.magic.selected.aura",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10440,7 +12021,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sky.magic.selected.fire"
+      "id": "sky.magic.selected.fire",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10462,7 +12046,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sky.magic.selected.light"
+      "id": "sky.magic.selected.light",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10484,7 +12071,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "sky.magic.selected.stardust"
+      "id": "sky.magic.selected.stardust",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10496,7 +12086,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sky.menu.choice.fight"
+      "id": "sky.menu.choice.fight",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10508,7 +12102,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sky.menu.choice.movement"
+      "id": "sky.menu.choice.movement",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10520,7 +12118,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sky.menu.choice.other"
+      "id": "sky.menu.choice.other",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10532,7 +12134,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sky.menu.choice.status"
+      "id": "sky.menu.choice.status",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10544,7 +12150,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sky.menu.fight_monsters"
+      "id": "sky.menu.fight_monsters",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10556,7 +12166,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sky.menu.magic.aura"
+      "id": "sky.menu.magic.aura",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10568,7 +12182,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sky.menu.magic.fire"
+      "id": "sky.menu.magic.fire",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10580,7 +12198,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sky.menu.magic.light"
+      "id": "sky.menu.magic.light",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10592,7 +12214,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sky.menu.magic.stardust"
+      "id": "sky.menu.magic.stardust",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10604,7 +12230,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sky.menu.message_speed"
+      "id": "sky.menu.message_speed",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10616,7 +12246,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sky.menu.movement"
+      "id": "sky.menu.movement",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10628,7 +12262,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sky.menu.observe_people"
+      "id": "sky.menu.observe_people",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10640,7 +12278,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sky.menu.progress_log"
+      "id": "sky.menu.progress_log",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10652,7 +12294,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sky.menu.select_magic"
+      "id": "sky.menu.select_magic",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10664,7 +12310,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sky.menu.status_cities"
+      "id": "sky.menu.status_cities",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10676,7 +12326,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sky.menu.status_master"
+      "id": "sky.menu.status_master",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [
@@ -10691,7 +12345,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "sound_test.menu.labels"
+      "id": "sound_test.menu.labels",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [
@@ -10730,7 +12388,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "status.report.cities_report"
+      "id": "status.report.cities_report",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [
@@ -10752,7 +12414,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "status.report.master_report"
+      "id": "status.report.master_report",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [
@@ -10777,7 +12443,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "status.report.score_report"
+      "id": "status.report.score_report",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10789,7 +12459,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "system.choice.yes_no"
+      "id": "system.choice.yes_no",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10811,7 +12485,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "system.message_speed.cancelled"
+      "id": "system.message_speed.cancelled",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -10840,7 +12517,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "system.message_speed.choose"
+      "id": "system.message_speed.choose",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10862,7 +12542,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "system.message_speed.sample"
+      "id": "system.message_speed.sample",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -10876,7 +12559,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "system.message_speed.scale_labels"
+      "id": "system.message_speed.scale_labels",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10898,7 +12585,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "system.save.cancelled"
+      "id": "system.save.cancelled",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -10925,7 +12615,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "system.save.completed_continue_confirm"
+      "id": "system.save.completed_continue_confirm",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -10954,7 +12647,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "system.save.confirm"
+      "id": "system.save.confirm",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -10978,7 +12674,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "system.save.continue"
+      "id": "system.save.continue",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11005,7 +12704,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "system.save.rest_message"
+      "id": "system.save.rest_message",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11017,7 +12719,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "title.copyright"
+      "id": "title.copyright",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11027,7 +12733,11 @@
         "fr": []
       },
       "canonical_profile": "eu-en",
-      "id": "title.difficulty.labels"
+      "id": "title.difficulty.labels",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11037,7 +12747,11 @@
         "fr": []
       },
       "canonical_profile": "eu-en",
-      "id": "title.mode_select.with_save"
+      "id": "title.mode_select.with_save",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11047,7 +12761,11 @@
         "fr": []
       },
       "canonical_profile": "eu-en",
-      "id": "title.mode_select.without_save"
+      "id": "title.mode_select.without_save",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11056,7 +12774,12 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "title.save_choice.labels"
+      "id": "title.save_choice.labels",
+      "presentation": {
+        "maximum_pages": 1,
+        "required_nonempty_lines": 2,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11066,7 +12789,11 @@
         "fr": []
       },
       "canonical_profile": "eu-en",
-      "id": "title.selector.beginner"
+      "id": "title.selector.beginner",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [
@@ -11077,7 +12804,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "title.selector.continue"
+      "id": "title.selector.continue",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11087,7 +12818,11 @@
         "fr": []
       },
       "canonical_profile": "eu-en",
-      "id": "title.selector.expert"
+      "id": "title.selector.expert",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [
@@ -11098,7 +12833,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "title.selector.new_game"
+      "id": "title.selector.new_game",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11108,7 +12847,11 @@
         "fr": []
       },
       "canonical_profile": "eu-en",
-      "id": "title.selector.normal"
+      "id": "title.selector.normal",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11116,7 +12859,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "title.selector.professional"
+      "id": "title.selector.professional",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [
@@ -11126,7 +12873,11 @@
         "jp": []
       },
       "canonical_profile": "jp",
-      "id": "title.selector.special"
+      "id": "title.selector.special",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [
@@ -11137,7 +12888,11 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "title.start_prompt"
+      "id": "title.start_prompt",
+      "presentation": {
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11149,7 +12904,12 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "town.name.aitos"
+      "id": "town.name.aitos",
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "inline"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11161,7 +12921,12 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "town.name.bloodpool"
+      "id": "town.name.bloodpool",
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "inline"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11173,7 +12938,12 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "town.name.fillmore"
+      "id": "town.name.fillmore",
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "inline"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11185,7 +12955,12 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "town.name.kasandora"
+      "id": "town.name.kasandora",
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "inline"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11197,7 +12972,12 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "town.name.marahna"
+      "id": "town.name.marahna",
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "inline"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11209,7 +12989,12 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "town.name.northwall"
+      "id": "town.name.northwall",
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "inline"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11221,7 +13006,12 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "town.name.table.sentinel"
+      "id": "town.name.table.sentinel",
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "inline"
+      }
     },
     {
       "allowed_placeholders": [
@@ -11233,7 +13023,10 @@
         ]
       },
       "canonical_profile": "de",
-      "id": "variant.de.dormant.angel_dialogue.resource_00"
+      "id": "variant.de.dormant.angel_dialogue.resource_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -11245,7 +13038,10 @@
         ]
       },
       "canonical_profile": "de",
-      "id": "variant.de.dormant.angel_dialogue.resource_01"
+      "id": "variant.de.dormant.angel_dialogue.resource_01",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -11257,7 +13053,10 @@
         ]
       },
       "canonical_profile": "de",
-      "id": "variant.de.dormant.angel_dialogue.resource_02"
+      "id": "variant.de.dormant.angel_dialogue.resource_02",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11265,7 +13064,10 @@
         "de": []
       },
       "canonical_profile": "de",
-      "id": "variant.de.dormant.town_dialogue.resource_00"
+      "id": "variant.de.dormant.town_dialogue.resource_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11275,7 +13077,10 @@
         ]
       },
       "canonical_profile": "de",
-      "id": "variant.de.dormant.town_dialogue.resource_01"
+      "id": "variant.de.dormant.town_dialogue.resource_01",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -11287,7 +13092,10 @@
         ]
       },
       "canonical_profile": "eu-en",
-      "id": "variant.eu-en.dormant.angel_dialogue.resource_00"
+      "id": "variant.eu-en.dormant.angel_dialogue.resource_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -11299,7 +13107,10 @@
         ]
       },
       "canonical_profile": "eu-en",
-      "id": "variant.eu-en.dormant.angel_dialogue.resource_01"
+      "id": "variant.eu-en.dormant.angel_dialogue.resource_01",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -11311,7 +13122,10 @@
         ]
       },
       "canonical_profile": "eu-en",
-      "id": "variant.eu-en.dormant.angel_dialogue.resource_02"
+      "id": "variant.eu-en.dormant.angel_dialogue.resource_02",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11319,7 +13133,10 @@
         "eu-en": []
       },
       "canonical_profile": "eu-en",
-      "id": "variant.eu-en.dormant.town_dialogue.resource_00"
+      "id": "variant.eu-en.dormant.town_dialogue.resource_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11329,7 +13146,10 @@
         ]
       },
       "canonical_profile": "eu-en",
-      "id": "variant.eu-en.dormant.town_dialogue.resource_01"
+      "id": "variant.eu-en.dormant.town_dialogue.resource_01",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -11341,7 +13161,10 @@
         ]
       },
       "canonical_profile": "fr",
-      "id": "variant.fr.dormant.angel_dialogue.resource_00"
+      "id": "variant.fr.dormant.angel_dialogue.resource_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -11353,7 +13176,10 @@
         ]
       },
       "canonical_profile": "fr",
-      "id": "variant.fr.dormant.angel_dialogue.resource_01"
+      "id": "variant.fr.dormant.angel_dialogue.resource_01",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11363,7 +13189,10 @@
         ]
       },
       "canonical_profile": "fr",
-      "id": "variant.fr.dormant.town_dialogue.resource_00"
+      "id": "variant.fr.dormant.town_dialogue.resource_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -11375,7 +13204,10 @@
         ]
       },
       "canonical_profile": "jp",
-      "id": "variant.jp.dialogue.event.wrapper_00.extra_call_02"
+      "id": "variant.jp.dialogue.event.wrapper_00.extra_call_02",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -11387,7 +13219,10 @@
         ]
       },
       "canonical_profile": "jp",
-      "id": "variant.jp.dormant.angel_dialogue_native.resource_00"
+      "id": "variant.jp.dormant.angel_dialogue_native.resource_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11397,7 +13232,10 @@
         ]
       },
       "canonical_profile": "jp",
-      "id": "variant.jp.dormant.post_offering_or_ending_native.resource_00"
+      "id": "variant.jp.dormant.post_offering_or_ending_native.resource_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -11409,7 +13247,10 @@
         ]
       },
       "canonical_profile": "jp",
-      "id": "variant.jp.dormant.post_offering_or_ending_native.resource_01"
+      "id": "variant.jp.dormant.post_offering_or_ending_native.resource_01",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11417,7 +13258,10 @@
         "jp": []
       },
       "canonical_profile": "jp",
-      "id": "variant.jp.dormant.town_dialogue_native.resource_00"
+      "id": "variant.jp.dormant.town_dialogue_native.resource_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11425,7 +13269,10 @@
         "jp": []
       },
       "canonical_profile": "jp",
-      "id": "variant.jp.dormant.town_dialogue_native.resource_01"
+      "id": "variant.jp.dormant.town_dialogue_native.resource_01",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11435,7 +13282,10 @@
         ]
       },
       "canonical_profile": "jp",
-      "id": "variant.jp.dormant.town_dialogue_native.resource_02"
+      "id": "variant.jp.dormant.town_dialogue_native.resource_02",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -11447,7 +13297,10 @@
         ]
       },
       "canonical_profile": "jp",
-      "id": "variant.jp.dormant.town_dialogue_native.resource_03"
+      "id": "variant.jp.dormant.town_dialogue_native.resource_03",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11457,7 +13310,10 @@
         ]
       },
       "canonical_profile": "jp",
-      "id": "variant.jp.sim.town.dry_fields"
+      "id": "variant.jp.sim.town.dry_fields",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -11469,7 +13325,10 @@
         ]
       },
       "canonical_profile": "jp",
-      "id": "variant.jp.sim.town.low_productivity"
+      "id": "variant.jp.sim.town.low_productivity",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11479,7 +13338,10 @@
         ]
       },
       "canonical_profile": "jp",
-      "id": "variant.jp.sim.town.needs_development_direction"
+      "id": "variant.jp.sim.town.needs_development_direction",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -11491,7 +13353,10 @@
         ]
       },
       "canonical_profile": "jp",
-      "id": "variant.jp.sim.town.no_buildable_space"
+      "id": "variant.jp.sim.town.no_buildable_space",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -11503,7 +13368,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "variant.us.dormant.angel_dialogue.resource_00"
+      "id": "variant.us.dormant.angel_dialogue.resource_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -11515,7 +13383,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "variant.us.dormant.angel_dialogue.resource_01"
+      "id": "variant.us.dormant.angel_dialogue.resource_01",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [
@@ -11527,7 +13398,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "variant.us.dormant.angel_dialogue.resource_02"
+      "id": "variant.us.dormant.angel_dialogue.resource_02",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11535,7 +13409,10 @@
         "us": []
       },
       "canonical_profile": "us",
-      "id": "variant.us.dormant.town_dialogue.resource_00"
+      "id": "variant.us.dormant.town_dialogue.resource_00",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11545,7 +13422,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "variant.us.dormant.town_dialogue.resource_01"
+      "id": "variant.us.dormant.town_dialogue.resource_01",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11568,7 +13448,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "variant.western.sim.command_menu.prompt"
+      "id": "variant.western.sim.command_menu.prompt",
+      "presentation": {
+        "shape": "flow"
+      }
     },
     {
       "allowed_placeholders": [],
@@ -11591,7 +13474,10 @@
         ]
       },
       "canonical_profile": "us",
-      "id": "variant.western.sim.command_menu.prompt_continuation"
+      "id": "variant.western.sim.command_menu.prompt_continuation",
+      "presentation": {
+        "shape": "flow"
+      }
     }
   ]
 }

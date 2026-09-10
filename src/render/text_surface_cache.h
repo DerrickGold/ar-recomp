@@ -40,24 +40,58 @@ typedef struct ArTextSurfaceCacheStats {
   uint64_t evictions;
   uint64_t failures;
   uint64_t negative_hits;
+  /* Texture bytes the cache currently owns, and the most it has ever owned.
+   * An entry count is not a memory budget: one large scrolling page at HiDPI
+   * can outweigh a hundred menu labels. Peak is not reset by eviction. */
+  uint64_t texture_bytes;
+  uint64_t peak_texture_bytes;
+  /* Requests refused before rasterization because their bitmap could not fit
+   * the per-request ceiling. These never allocate. */
+  uint64_t oversize_rejects;
 } ArTextSurfaceCacheStats;
 
 typedef struct ArTextSurfaceCacheEntry {
   ArTextSurface surface;
   uint64_t last_use;
+  uint64_t texture_bytes;
   bool valid;
 } ArTextSurfaceCacheEntry;
 
-enum { kArTextNegativeCacheCapacity = 16 };
+enum {
+  kArTextNegativeCacheCapacity = 16,
+  /* Backoff for a retryable failure, counted in cache lookups: the first
+   * retry is immediate, and a backend that stays broken is asked at most once
+   * every kArTextFailureRetryCeiling lookups instead of once per frame. */
+  kArTextFailureRetryCeiling = 64,
+};
 typedef struct ArTextSurfaceFailure {
   ArTextCacheKey key;
   char error[kArTextRasterErrorCapacity];
+  /* Deterministic failures are the permanent answer for this key. Retryable
+   * ones are only remembered until `retry_at`, so a transient allocation or
+   * font-resource failure cannot outlive itself and force the player to change
+   * locale, font or window size to get their text back. */
+  ArTextRasterFailure kind;
+  uint64_t retry_at;
+  uint32_t attempts;
   bool valid;
 } ArTextSurfaceFailure;
+
+/* A single request can never be worth more than this many texture bytes.
+ * Fixed fields disable wrapping, so an accepted-but-impossible label would
+ * otherwise be rendered at full width before anything rejected it. */
+enum { kArTextSurfaceMaximumRequestBytes = 64u << 20 };
 
 typedef struct ArTextSurfaceCache {
   ArTextSurfaceCacheEntry *entries;
   size_t capacity;
+  /* Aggregate texture budget, in addition to the entry count. Zero disables
+   * it. Eviction for bytes never touches an entry acquired since the current
+   * frame began (see ArTextSurfaceCache_BeginFrame). */
+  uint64_t byte_budget;
+  /* Entries acquired at or after this clock value belong to the frame being
+   * prepared and are never evicted for bytes. UINT64_MAX pins nothing. */
+  uint64_t frame_start;
   uint64_t clock;
   ArRenderDevice *device;
   ArTextSurfaceCacheStats stats;
@@ -74,6 +108,14 @@ ArTextCacheKey ArTextSurfaceCache_MakeKey(
 bool ArTextCacheKey_Equals(ArTextCacheKey left, ArTextCacheKey right);
 
 bool ArTextSurfaceCache_Init(ArTextSurfaceCache *cache, size_t capacity);
+/* Optional aggregate texture-byte budget. Entries beyond it are evicted from
+ * the least recently used end, never below one entry and never an entry the
+ * current frame has already acquired. */
+void ArTextSurfaceCache_SetByteBudget(ArTextSurfaceCache *cache,
+                                      uint64_t budget);
+/* Pins everything acquired from here on against byte-budget eviction, so a
+ * frame being prepared cannot lose a texture it is already holding. */
+void ArTextSurfaceCache_BeginFrame(ArTextSurfaceCache *cache);
 void ArTextSurfaceCache_Destroy(ArTextSurfaceCache *cache,
                                 ArRenderDevice *device);
 
@@ -82,8 +124,11 @@ void ArTextSurfaceCache_Destroy(ArTextSurfaceCache *cache,
  * uploaded before an LRU entry is evicted, so failure leaves the old cache
  * usable. Failed raster requests have a separate bounded negative cache, so
  * static layout failures do not repeat font work or evict usable textures.
- * A changed request/font/backend revision retries; destroy/init also clears
- * failures (including after device recreation). Upload failures are retried. */
+ * Only deterministic raster failures are remembered permanently: a retryable
+ * one is retried on the next lookup and then with growing backoff, and any
+ * successful rasterization clears every retryable entry. A changed
+ * request/font/backend revision retries; destroy/init also clears failures
+ * (including after device recreation). Upload failures are retried. */
 bool ArTextSurfaceCache_Acquire(
     ArTextSurfaceCache *cache,
     ArRenderDevice *device,

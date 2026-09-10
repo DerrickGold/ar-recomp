@@ -691,6 +691,55 @@ static const char *StringAt(const ArLanguagePack *pack,
   return pack->strings + string.offset;
 }
 
+static size_t LookupSlot(const ArLanguagePack *pack, const char *id) {
+  const uint64_t hash =
+      DeterministicHash_Fnv1a64(DETERMINISTIC_HASH_FNV1A64_OFFSET, id,
+                                strlen(id));
+  const size_t mask = pack->message_lookup_capacity - 1u;
+  size_t slot = (size_t)hash & mask;
+  for (size_t probe = 0; probe < pack->message_lookup_capacity; ++probe) {
+    const uint32_t stored = pack->message_lookup[slot];
+    if (!stored)
+      return slot;
+    const char *candidate = StringAt(pack, pack->messages[stored - 1u].id);
+    if (candidate && strcmp(candidate, id) == 0)
+      return slot;
+    slot = (slot + 1u) & mask;
+  }
+  return pack->message_lookup_capacity; /* full: never reached below 70% load */
+}
+
+/* Grows to keep the table under a 70% load factor, so probe runs stay short
+ * even at the parser's message ceiling. */
+static bool ReserveLookup(ArLanguagePack *pack, uint32_t needed,
+                          ArLanguagePackError *error) {
+  if (pack->message_lookup &&
+      (size_t)needed * 10u < pack->message_lookup_capacity * 7u)
+    return true;
+  size_t capacity = pack->message_lookup_capacity ? pack->message_lookup_capacity
+                                                  : 64u;
+  while ((size_t)needed * 10u >= capacity * 7u)
+    capacity *= 2u;
+  uint32_t *table = (uint32_t *)calloc(capacity, sizeof(*table));
+  if (!table) {
+    SetError(error, "out of memory indexing pack messages");
+    return false;
+  }
+  uint32_t *old_table = pack->message_lookup;
+  pack->message_lookup = table;
+  pack->message_lookup_capacity = capacity;
+  for (uint32_t i = 0; i < pack->message_count; i++) {
+    const char *id = StringAt(pack, pack->messages[i].id);
+    if (!id)
+      continue;
+    pack->message_lookup[LookupSlot(pack, id)] = i + 1u;
+  }
+  free(old_table);
+  return true;
+}
+
+
+
 static bool AddOperation(ScriptState *state, ArLanguageOperation operation,
                          ArLanguagePackError *error) {
   ArLanguageMessage *message = &state->pack->messages[state->message_index];
@@ -1094,13 +1143,14 @@ static bool BeginMessage(ScriptState *state, const char *semantic_id,
     SetError(error, "%s:%u: pack has too many messages", state->path, line);
     return false;
   }
-  for (uint32_t i = 0; i < state->pack->message_count; i++) {
-    const char *existing = StringAt(state->pack, state->pack->messages[i].id);
-    if (existing && strcmp(existing, semantic_id) == 0) {
-      SetError(error, "%s:%u: duplicate message '%s'", state->path, line,
-               semantic_id);
-      return false;
-    }
+  if (!ReserveLookup(state->pack, state->pack->message_count + 1u, error))
+    return false;
+  const size_t slot = LookupSlot(state->pack, semantic_id);
+  if (slot < state->pack->message_lookup_capacity &&
+      state->pack->message_lookup[slot]) {
+    SetError(error, "%s:%u: duplicate message '%s'", state->path, line,
+             semantic_id);
+    return false;
   }
   if (!Reserve((void **)&state->pack->messages,
                sizeof(*state->pack->messages),
@@ -1110,10 +1160,15 @@ static bool BeginMessage(ScriptState *state, const char *semantic_id,
   state->message_index = state->pack->message_count++;
   ArLanguageMessage *message = &state->pack->messages[state->message_index];
   memset(message, 0, sizeof(*message));
+  message->index = state->message_index;
   message->first_operation = state->pack->operation_count;
   message->source_line = line;
   if (!AddString(state->pack, semantic_id, &message->id, error))
     return false;
+  /* Interning the id can move the string blob, so index it afterwards; the
+   * slot cannot have been taken in between. */
+  state->pack->message_lookup[LookupSlot(state->pack, semantic_id)] =
+      state->message_index + 1u;
   state->has_message = true;
   state->previous_text_line = false;
   state->ended = false;
@@ -1222,41 +1277,112 @@ static bool ParseScript(ArLanguagePack *pack, char *text, const char *path,
 
 static const ArLanguageMessage *FindMessageInternal(const ArLanguagePack *pack,
                                                     const char *id) {
-  if (!pack || !id)
+  if (!pack || !id || !pack->message_lookup)
     return NULL;
-  for (uint32_t i = 0; i < pack->message_count; i++) {
-    const char *candidate = StringAt(pack, pack->messages[i].id);
-    if (candidate && strcmp(candidate, id) == 0)
-      return &pack->messages[i];
-  }
-  return NULL;
+  const size_t slot = LookupSlot(pack, id);
+  if (slot >= pack->message_lookup_capacity || !pack->message_lookup[slot])
+    return NULL;
+  return &pack->messages[pack->message_lookup[slot] - 1u];
 }
+
+/* Iterative memoized walk: every message is resolved once, so a long chain
+ * costs one pass rather than one pass per alias that mentions it. */
+enum { kAliasUnvisited = 0, kAliasWalking, kAliasResolved };
 
 static bool ValidateAliases(const ArLanguagePack *pack,
                             ArLanguagePackError *error) {
-  for (uint32_t i = 0; i < pack->message_count; i++) {
-    const ArLanguageMessage *origin = &pack->messages[i];
-    if (!origin->is_alias)
+  if (!pack->message_count)
+    return true;
+  uint8_t *state = (uint8_t *)calloc(pack->message_count, sizeof(*state));
+  if (!state) {
+    SetError(error, "out of memory validating pack aliases");
+    return false;
+  }
+  bool valid = true;
+  for (uint32_t i = 0; valid && i < pack->message_count; i++) {
+    if (state[i] != kAliasUnvisited)
       continue;
-    const ArLanguageMessage *cursor = origin;
-    for (uint32_t depth = 0; depth <= pack->message_count; depth++) {
+    uint32_t walked = 0;
+    const ArLanguageMessage *cursor = &pack->messages[i];
+    while (valid) {
+      if (state[cursor->index] == kAliasResolved)
+        break;
+      if (state[cursor->index] == kAliasWalking) {
+        SetError(error, "%s: alias cycle detected",
+                 StringAt(pack, cursor->id));
+        valid = false;
+        break;
+      }
+      state[cursor->index] = kAliasWalking;
+      walked++;
+      if (!cursor->is_alias)
+        break;
       const char *target_id = StringAt(pack, cursor->alias);
       const ArLanguageMessage *target = FindMessageInternal(pack, target_id);
       if (!target) {
         SetError(error, "%s: alias target '%s' is not included in this pack",
-                 StringAt(pack, origin->id), target_id ? target_id : "");
-        return false;
-      }
-      if (!target->is_alias)
+                 StringAt(pack, cursor->id), target_id ? target_id : "");
+        valid = false;
         break;
+      }
       cursor = target;
-      if (depth == pack->message_count) {
-        SetError(error, "%s: alias cycle detected",
-                 StringAt(pack, origin->id));
-        return false;
+    }
+    /* Mark the chain resolved so a later alias into it stops immediately. */
+    if (valid && walked) {
+      const ArLanguageMessage *member = &pack->messages[i];
+      for (uint32_t step = 0; step < walked; step++) {
+        state[member->index] = kAliasResolved;
+        if (!member->is_alias)
+          break;
+        member = FindMessageInternal(pack, StringAt(pack, member->alias));
+        if (!member)
+          break;
       }
     }
   }
+  free(state);
+  return valid;
+}
+
+/* A backslash is an ordinary filename byte on POSIX, so it only separates
+ * directories where the host says it does -- on Windows, or in a path that
+ * announces itself as a Windows path by its drive or UNC prefix. Honouring the
+ * announced forms everywhere keeps this rule testable off Windows and costs
+ * only the ability to open a POSIX file literally named "C:\...". */
+static bool HostSeparatesOnBackslash(const char *path) {
+#ifdef _WIN32
+  (void)path;
+  return true;
+#else
+  return (path[0] && path[1] == ':') || (path[0] == '\\' && path[1] == '\\');
+#endif
+}
+
+/* Length of the host directory prefix of `path`, including its separator. */
+static size_t HostDirectoryPrefix(const char *path) {
+  const char *separator = strrchr(path, '/');
+  if (HostSeparatesOnBackslash(path)) {
+    const char *backslash = strrchr(path, '\\');
+    if (!separator || (backslash && backslash > separator))
+      separator = backslash;
+    /* "C:pack.ini" is relative to that drive's directory, not to ours. */
+    if (!separator && path[0] && path[1] == ':')
+      return 2;
+  }
+  return separator ? (size_t)(separator - path + 1) : 0;
+}
+
+bool ArLanguagePack_ResolveMemberPath(const char *manifest_path,
+                                      const char *member, char *result,
+                                      size_t capacity) {
+  if (!manifest_path || !member || !result || !capacity)
+    return false;
+  const size_t prefix = HostDirectoryPrefix(manifest_path);
+  const size_t member_size = strlen(member);
+  if (prefix + member_size >= capacity)
+    return false;
+  memcpy(result, manifest_path, prefix);
+  memcpy(result + prefix, member, member_size + 1);
   return true;
 }
 
@@ -1264,15 +1390,11 @@ static bool JoinManifestRelativePath(const char *manifest_path,
                                      const char *relative, char *result,
                                      size_t capacity,
                                      ArLanguagePackError *error) {
-  const char *slash = strrchr(manifest_path, '/');
-  const size_t prefix = slash ? (size_t)(slash - manifest_path + 1) : 0;
-  const size_t relative_size = strlen(relative);
-  if (prefix + relative_size >= capacity) {
+  if (!ArLanguagePack_ResolveMemberPath(manifest_path, relative, result,
+                                        capacity)) {
     SetError(error, "%s: resolved pack path is too long", manifest_path);
     return false;
   }
-  memcpy(result, manifest_path, prefix);
-  memcpy(result + prefix, relative, relative_size + 1);
   return true;
 }
 
@@ -1309,6 +1431,7 @@ void ArLanguagePack_Destroy(ArLanguagePack *pack) {
     return;
   if (pack->private_magic == kPackMagic) {
     free(pack->messages);
+    free(pack->message_lookup);
     free(pack->operations);
     free(pack->strings);
   }
@@ -1507,13 +1630,10 @@ const ArLanguageOperation *ArLanguagePack_GetOperation(
   if (!pack || pack->private_magic != kPackMagic || !message ||
       index >= message->operation_count)
     return NULL;
-  bool belongs_to_pack = false;
-  for (uint32_t i = 0; i < pack->message_count; i++) {
-    if (message == &pack->messages[i]) {
-      belongs_to_pack = true;
-      break;
-    }
-  }
+  /* Equality against the message's own recorded slot: constant time, and
+   * well-defined for a pointer that turns out to belong to another pack. */
+  const bool belongs_to_pack = message->index < pack->message_count &&
+      message == &pack->messages[message->index];
   if (!belongs_to_pack || message->first_operation >= pack->operation_count ||
       index >= pack->operation_count - message->first_operation)
     return NULL;

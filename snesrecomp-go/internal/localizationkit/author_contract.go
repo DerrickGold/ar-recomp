@@ -13,11 +13,122 @@ import (
 //go:embed data/author-contracts.json
 var authorContractJSON []byte
 
+// AuthorPresentation is how the game presents a route, so the editor can
+// refuse content the runtime will never display. "flow" paginates; "fixed"
+// shows only the first page of a card, label or menu row; "keyboard" is the
+// paged name-entry alphabet; "inline" is a term substituted into another
+// message. A zero limit means the catalog does not constrain it.
+type AuthorPresentation struct {
+	Shape                 string `json:"shape"`
+	MaximumPages          int    `json:"maximum_pages"`
+	MaximumLines          int    `json:"maximum_lines"`
+	RequiredNonemptyLines int    `json:"required_nonempty_lines"`
+}
+
 type authorRoute struct {
-	ID        string              `json:"id"`
-	Allowed   []string            `json:"allowed_placeholders"`
-	Canonical string              `json:"canonical_profile"`
-	Anchors   map[string][]string `json:"anchors"`
+	Optional     bool                `json:"optional"`
+	ID           string              `json:"id"`
+	Allowed      []string            `json:"allowed_placeholders"`
+	Canonical    string              `json:"canonical_profile"`
+	Anchors      map[string][]string `json:"anchors"`
+	Presentation AuthorPresentation  `json:"presentation"`
+}
+
+func (p AuthorPresentation) name() string {
+	switch p.Shape {
+	case "fixed":
+		return "fixed field"
+	case "keyboard":
+		return "name-entry keyboard"
+	case "inline":
+		return "inline term"
+	}
+	return "dialogue"
+}
+
+// presentationScan counts authored shape the way the game reads it: a
+// paragraph break advances two lines, a page break starts a page, and a line
+// counts as content when it holds anything but spaces. Only lines that carry
+// content count towards the field height, so the newline that ends the last
+// authored line is not a second row.
+type presentationScan struct {
+	pages, line, linesUsed, nonempty int
+	lineHasContent                   bool
+}
+
+func (s *presentationScan) content() {
+	s.lineHasContent = true
+	if s.line > s.linesUsed {
+		s.linesUsed = s.line
+	}
+}
+
+func (s *presentationScan) breakLines(advance int) {
+	for i := 0; i < advance; i++ {
+		if s.lineHasContent {
+			s.nonempty++
+		}
+		s.lineHasContent = false
+		s.line++
+	}
+}
+
+func (s *presentationScan) text(value string) {
+	for _, b := range []byte(value) {
+		switch b {
+		case '\n':
+			s.breakLines(1)
+		case ' ', '\t':
+		default:
+			s.content()
+		}
+	}
+}
+
+func (s *presentationScan) page() {
+	if s.lineHasContent {
+		s.nonempty++
+	}
+	s.lineHasContent = false
+	s.pages++
+	s.line = 1
+}
+
+func (s *presentationScan) operation(op AuthorOperation) {
+	switch op.Op {
+	case "text":
+		s.text(op.Value)
+	case "placeholder":
+		s.content()
+	case "line":
+		s.breakLines(1)
+	case "paragraph":
+		s.breakLines(2)
+	case "page":
+		s.page()
+	}
+}
+
+// check rejects content the game would silently never display: a page the
+// fixed composer never advances to, a row past the native field, or a choice
+// count the native menu cannot show.
+func (s *presentationScan) check(p AuthorPresentation) error {
+	if s.lineHasContent {
+		s.nonempty++
+	}
+	s.lineHasContent = false
+	if p.MaximumPages != 0 && s.pages > p.MaximumPages {
+		return fmt.Errorf("this %s displays %d page(s); pages beyond that are never shown, so remove the extra page break(s)", p.name(), p.MaximumPages)
+	}
+	if p.MaximumLines != 0 && s.linesUsed > p.MaximumLines {
+		return fmt.Errorf("this %s reserves %d line(s); the message has %d", p.name(), p.MaximumLines, s.linesUsed)
+	}
+	// A message with no content at all is the documented way to leave a route
+	// to its native lettering; only a partly filled menu is a mistake.
+	if p.RequiredNonemptyLines != 0 && s.nonempty != 0 && s.nonempty != p.RequiredNonemptyLines {
+		return fmt.Errorf("this menu shows exactly %d choice(s); the message has %d", p.RequiredNonemptyLines, s.nonempty)
+	}
+	return nil
 }
 
 type authorContractRegistry struct {
@@ -55,6 +166,9 @@ type AuthorReference struct {
 	Placeholders    []AuthorPlaceholder `json:"placeholders"`
 	Anchors         []string            `json:"anchors"`
 	NativeInProfile bool                `json:"native_in_profile"`
+	// What the game does with this route, so an editor can size its field and
+	// hide controls the runtime would ignore.
+	Presentation AuthorPresentation `json:"presentation"`
 }
 
 // AuthorReferences supplies the editor's tree and contextual pickers. Results
@@ -69,7 +183,7 @@ func AuthorReferences(profile string) ([]AuthorReference, error) {
 		if !native {
 			anchors = route.Anchors[route.Canonical]
 		}
-		entry := AuthorReference{ID: route.ID, Anchors: append([]string{}, anchors...), NativeInProfile: native, Placeholders: []AuthorPlaceholder{}}
+		entry := AuthorReference{ID: route.ID, Anchors: append([]string{}, anchors...), NativeInProfile: native, Placeholders: []AuthorPlaceholder{}, Presentation: route.Presentation}
 		for _, name := range route.Allowed {
 			entry.Placeholders = append(entry.Placeholders, AuthorPlaceholder{name, authorContracts.placeholders[name]})
 		}
@@ -132,7 +246,7 @@ func ValidateAuthorScripts(profile, coverage string, scripts ...*AuthorScript) (
 	}
 	if coverage == "complete" {
 		for _, route := range authorContracts.ordered {
-			if _, required := route.Anchors[profile]; required {
+			if _, required := route.Anchors[profile]; required && !route.Optional {
 				if _, present := index[route.ID]; !present {
 					return zero, fmt.Errorf("complete pack is missing message %s", route.ID)
 				}
@@ -182,7 +296,9 @@ func ValidateAuthorScripts(profile, coverage string, scripts ...*AuthorScript) (
 		}
 		anchorIndex, yielded := 0, false
 		body := resolved[id]
+		scan := presentationScan{pages: 1, line: 1}
 		for _, op := range body.message.Operations {
+			scan.operation(op)
 			fail := func(format string, args ...any) (AuthorValidationStats, error) {
 				return zero, authorError(body.path, op.SourceLine, id+": "+format, args...)
 			}
@@ -209,6 +325,9 @@ func ValidateAuthorScripts(profile, coverage string, scripts ...*AuthorScript) (
 		}
 		if anchorIndex != len(anchors) {
 			return zero, authorError(index[id].path, index[id].message.SourceLine, "%s: locked anchors changed; expected %d, found %d", id, len(anchors), anchorIndex)
+		}
+		if err := scan.check(route.Presentation); err != nil {
+			return zero, authorError(body.path, body.message.SourceLine, "%s: %s", id, err)
 		}
 	}
 	return stats, nil

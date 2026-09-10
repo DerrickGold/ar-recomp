@@ -92,12 +92,12 @@ func AuthorMessageLocations(id string) []AuthorLocation {
 			}
 		}
 		if id == "city."+r.ID+".name" || id == "town.name."+r.ID || id == "action.stage_name."+r.ID {
-			return root(r.ID, "names", "Location names & action title cards", "", "Extraction reference includes action title cards; enhanced action rendering is a later phase.")
+			return root(r.ID, "names", "Location names & action title cards", "", "Action title cards use fitted, centered enhanced text.")
 		}
 	}
 	switch {
 	case strings.HasPrefix(id, "title."), strings.HasPrefix(id, "sound_test."):
-		return root("title", "menus", "Menus & title text", "title.", "Title rendering is a later phase; these entries remain available for translation.")
+		return root("title", "menus", "Menus & title text", "title.", "Title options support enhanced text. Logo, copyright and sound-test presentation remain native.")
 	case strings.HasPrefix(id, "dialogue.ending."), strings.HasPrefix(id, "dialogue.event.wrapper_00.call_00."), strings.HasPrefix(id, "dialogue.event.wrapper_05.call_03."):
 		return root("ending", "dialogue", "Ending dialogue", "dialogue.ending.", "Ending and credits rendering is a later phase.")
 	case id == "sky.action_mode.outcome.final_battle":
@@ -123,7 +123,7 @@ func AuthorMessageLocations(id string) []AuthorLocation {
 	case strings.HasPrefix(id, "growth_state."), strings.HasPrefix(id, "enemy.name."):
 		return makeLocations(towns, "terms", "Town & monster terms", "", "")
 	case strings.HasPrefix(id, "action.hud."):
-		return makeLocations(authorLocationRoots[2:9], "action", "Action HUD labels", "action.hud.", "Enhanced action rendering is a later phase.")
+		return makeLocations(authorLocationRoots[2:9], "action", "Action HUD labels & messages", "action.hud.", "HUD labels, pause and stage messages support enhanced text; counters retain native formatting.")
 	case strings.HasPrefix(id, "sim."), strings.HasPrefix(id, "dialogue.event."), strings.Contains(id, ".sim."):
 		return makeLocations(towns, "responses", "Dialogue & event responses", "dialogue.event.", "Common event/reference routes; not a separate script for each town.")
 	case strings.HasPrefix(id, "required_master_level."):

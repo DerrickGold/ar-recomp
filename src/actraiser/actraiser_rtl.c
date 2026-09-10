@@ -2114,7 +2114,9 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
    * destination surface; it must not silently expand policy after another
    * owner has inspected it. */
   const bool scoped_text_scene =
-      !survey && ActRaiserLocalizationRoute_InScope(map_group, map_number);
+      !survey && (ActRaiserLocalizationRoute_InScope(map_group, map_number) ||
+                  (g_settings.localization_presentation &&
+                   ActRaiserLocalizationRoute_FixedTextInScope(map_group, map_number)));
   const bool flat_diorama = !survey && Diorama_IsActiveThisFrame() &&
       g_settings.diorama_hud_flat;
   const int bg3_capture_height = ArBg3Composite_CaptureHeight(
@@ -2505,13 +2507,19 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
  * instead of re-deriving it from the capture. */
 static uint8_t s_hud_obj_icon_first;
 static uint8_t s_hud_obj_icon_count;
+/* Rows of the promoted capture, latched for the same reason as the OAM range:
+ * the surface holding the icon is described by what the promote claimed, not
+ * by the single OBJ overlay capture that a later full-frame scene claim
+ * legitimately overwrites. */
+static uint8_t s_hud_obj_icon_rows;
 
-bool ActRaiser_HudObjIconRange(uint8_t *first, uint8_t *count) {
-  /* Writes both outputs on every path, including "nothing promoted" (0/0):
+bool ActRaiser_HudObjIconRange(uint8_t *first, uint8_t *count, uint8_t *rows) {
+  /* Writes every output on every path, including "nothing promoted" (0/0/0):
    * FrameSlot slots are recycled, so leaving them untouched would republish
    * the previous occupant's icon range on a frame that has no icon. */
   if (first) *first = s_hud_obj_icon_first;
   if (count) *count = s_hud_obj_icon_count;
+  if (rows) *rows = s_hud_obj_icon_rows;
   return s_hud_obj_icon_count != 0;
 }
 
@@ -2561,6 +2569,7 @@ static SrResult ActRaiser_WidescreenHudObjPromoteTransaction(
   (void)runner;
   s_hud_obj_icon_first = 0;
   s_hud_obj_icon_count = 0;
+  s_hud_obj_icon_rows = 0;
   if (!context)
     return SR_RESULT_OK;
   /* A regular HUD split is valid without a widescreen margin budget (4:3).
@@ -2674,6 +2683,7 @@ static SrResult ActRaiser_WidescreenHudObjPromoteTransaction(
           &expected, &replacement)) {
     s_hud_obj_icon_first = capture_first;
     s_hud_obj_icon_count = capture_count;
+    s_hud_obj_icon_rows = capture_height;
   }
   return SR_RESULT_OK;
 }

@@ -18,14 +18,14 @@ enum {
  * extraction; it contains no retail wording or decoded operation streams. */
 #include "actraiser/actraiser_localization_route_data.inc"
 
-/* Complete address-only fixed-composer inventory for the current Sky Palace
- * and simulation runtime phase. Indicator-only sources are intentionally not
+/* Address-only fixed-composer inventory for Sky Palace, simulation, action
+ * cards and title options. Indicator-only sources are intentionally not
  * language routes; their typed ownership is handled by the surface adapter. */
 #include "actraiser/actraiser_localization_compose_route_data.inc"
 
 _Static_assert(sizeof(kDialogueRoutes) / sizeof(kDialogueRoutes[0]) == 365,
                "USA scoped dialogue route census changed");
-_Static_assert(sizeof(kComposeRoutes) / sizeof(kComposeRoutes[0]) == 73,
+_Static_assert(sizeof(kComposeRoutes) / sizeof(kComposeRoutes[0]) == 89,
                "USA scoped fixed-composer route census changed");
 
 bool ActRaiserLocalizationRoute_InScope(uint8_t map_group, uint8_t map_number) {
@@ -34,6 +34,13 @@ bool ActRaiserLocalizationRoute_InScope(uint8_t map_group, uint8_t map_number) {
        map_number == kActRaiserNonActionMap_Temple ||
        (map_number >= kFirstSimulationTown &&
         map_number <= kLastSimulationTown));
+}
+
+bool ActRaiserLocalizationRoute_FixedTextInScope(uint8_t group, uint8_t map) {
+  return ActRaiserLocalizationRoute_InScope(group, map) ||
+      (group == 0 && map == kActRaiserNonActionMap_Title) ||
+      (group >= kActRaiserActionMapGroup_First &&
+       group <= kActRaiserActionMapGroup_Last);
 }
 
 const ActRaiserLocalizationRoute *ActRaiserLocalizationRoute_ResolveDialogue(
@@ -81,7 +88,7 @@ ActRaiserLocalizationRoute_ResolveCompose(
   if (!observation ||
       observation->abi_version !=
           ACTRAISER_LOCALIZATION_COMPOSE_OBSERVATION_ABI_VERSION ||
-      !ActRaiserLocalizationRoute_InScope(
+      !ActRaiserLocalizationRoute_FixedTextInScope(
           observation->map_group, observation->map_number))
     return NULL;
   size_t low = 0;
@@ -98,6 +105,14 @@ ActRaiserLocalizationRoute_ResolveCompose(
        kComposeRoutes[index].source_pc24 == observation->source_pc24;
        ++index) {
     const ActRaiserLocalizationComposeRoute *route = &kComposeRoutes[index];
+    /* Identical native destinations have different owners in each scene. */
+    if (route->surface_id >= 14) {
+      if (observation->map_group || observation->map_number) continue;
+    } else if (route->surface_id >= 10) {
+      if (observation->map_group < kActRaiserActionMapGroup_First ||
+          observation->map_group > kActRaiserActionMapGroup_Last) continue;
+    } else if (!ActRaiserLocalizationRoute_InScope(
+                   observation->map_group, observation->map_number)) continue;
     if (route->destination != observation->destination)
       continue;
     if ((route->match_flags &

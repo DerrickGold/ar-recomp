@@ -18,8 +18,17 @@ uint8_t SimBackgroundMountains_TileFlags(uint8_t town, uint8_t tile) {
   /* $8D/$8E are deliberate holes between overlapping peaks: grass in the
    * temperate towns and plain snow in Northwall. Treating the numeric gap as
    * one continuous mountain family pulled those ground cells into the range
-   * silhouette and produced square shoulders/horns. */
-  if (tile >= 0x78 && tile <= 0x9F && tile != 0x8D && tile != 0x8E)
+   * silhouette and produced square shoulders/horns.
+   *
+   * The range ends at $A1, not $9F. Northwall cell (19,15) holds the only $A0
+   * in any town: an apex variant paired with the ordinary $82 beside it and
+   * sitting on the usual $88/$90/$98 body rows. The audited offline
+   * classifier in archive/handover/tools/classify.py has always counted
+   * $A0/$A1 as rock, and stopping short of it here left that single cell
+   * unoccupied - enough to fail SimBackgroundMountainObjects_Build's
+   * all-or-nothing coverage check and drop the entire town onto the fused
+   * connected-range fallback. */
+  if (tile >= 0x78 && tile <= 0xA1 && tile != 0x8D && tile != 0x8E)
     return kSimBackgroundMountainCell_Occupied;
   /* Aitos' two volcanic crown cells sit immediately before the shared ridge
    * range and carry the red cap visible in the source palette. */

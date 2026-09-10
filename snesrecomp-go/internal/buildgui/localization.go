@@ -103,9 +103,33 @@ func (app *application) serveLocalization(w http.ResponseWriter, r *http.Request
 		return
 	}
 	s := &app.localization
+	// Everything that waits on the client -- reading a request body, writing an
+	// archive back -- and the ROM decode that follows an upload happen off the
+	// session lock. The same lock answers the build page's 500 ms status poll,
+	// so a stalled transfer must not be able to hold it.
+	if r.Method == http.MethodGet && strings.HasPrefix(endpoint, "download/") {
+		app.serveLocalizationDownload(w, r, endpoint)
+		return
+	}
+	var upload *localizationUpload
+	var q localizationRequest
+	var err error
+	if r.Method == http.MethodPost {
+		if endpoint == "extract" || endpoint == "import" {
+			upload, err = app.prepareLocalizationUpload(w, r, endpoint)
+			if upload != nil && upload.cleanup != nil {
+				defer upload.cleanup()
+			}
+		} else {
+			q, err = decodeLocalizationRequest(w, r)
+		}
+		if err != nil {
+			writeLocalizationError(w, err)
+			return
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var err error
 	if s.store == nil {
 		s.store, err = lk.NewAuthorStore(filepath.Join(app.localizationRoot(), "projects"))
 		if err != nil {
@@ -115,31 +139,55 @@ func (app *application) serveLocalization(w http.ResponseWriter, r *http.Request
 	}
 	if r.Method == http.MethodGet {
 		err = app.readLocalization(w, r, endpoint)
-	} else if endpoint == "extract" || endpoint == "import" {
-		err = app.uploadLocalization(w, r, endpoint)
+	} else if upload != nil {
+		err = app.commitLocalizationUpload(w, r, upload)
 	} else {
-		var q localizationRequest
-		r.Body = http.MaxBytesReader(w, r.Body, 20<<20)
-		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
-		if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
-			err = fmt.Errorf("expected application/json")
-		} else if err = decoder.Decode(&q); err == nil {
-			var extra any
-			if decoder.Decode(&extra) != io.EOF {
-				err = fmt.Errorf("expected one JSON request")
-			} else {
-				err = app.mutateLocalization(w, r, endpoint, q)
-			}
-		}
+		err = app.mutateLocalization(w, r, endpoint, q)
 	}
 	if err != nil {
-		code := http.StatusBadRequest
-		if errors.Is(err, lk.ErrProjectConflict) {
-			code = http.StatusConflict
-		}
-		writeJSONError(w, code, err.Error())
+		writeLocalizationError(w, err)
 	}
+}
+
+func writeLocalizationError(w http.ResponseWriter, err error) {
+	code := http.StatusBadRequest
+	if errors.Is(err, lk.ErrProjectConflict) {
+		code = http.StatusConflict
+	}
+	writeJSONError(w, code, err.Error())
+}
+
+func decodeLocalizationRequest(w http.ResponseWriter, r *http.Request) (localizationRequest, error) {
+	var q localizationRequest
+	r.Body = http.MaxBytesReader(w, r.Body, 20<<20)
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		return q, fmt.Errorf("expected application/json")
+	}
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&q); err != nil {
+		return q, err
+	}
+	var extra any
+	if decoder.Decode(&extra) != io.EOF {
+		return q, fmt.Errorf("expected one JSON request")
+	}
+	return q, nil
+}
+
+// The prepared archive is immutable once published, so it is served from a
+// snapshot taken under a momentary lock rather than for the whole transfer.
+func (app *application) serveLocalizationDownload(w http.ResponseWriter, r *http.Request, endpoint string) {
+	app.localization.mu.Lock()
+	export := app.localization.export
+	app.localization.mu.Unlock()
+	if export == nil || endpoint != "download/"+export.token {
+		writeJSONError(w, http.StatusBadRequest, "download expired; prepare the archive again")
+		return
+	}
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, export.name))
+	http.ServeContent(w, r, export.name, time.Time{}, bytes.NewReader(export.data))
 }
 
 func (app *application) localizationState() map[string]any {
@@ -331,15 +379,6 @@ func (app *application) localizationMessageTitle(id string, location lk.AuthorLo
 
 func (app *application) readLocalization(w http.ResponseWriter, r *http.Request, endpoint string) error {
 	s := &app.localization
-	if strings.HasPrefix(endpoint, "download/") {
-		if s.export == nil || endpoint != "download/"+s.export.token {
-			return fmt.Errorf("download expired; prepare the archive again")
-		}
-		w.Header().Set("Content-Type", "application/zip")
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, s.export.name))
-		http.ServeContent(w, r, s.export.name, time.Time{}, bytes.NewReader(s.export.data))
-		return nil
-	}
 	switch endpoint {
 	case "state":
 		app.refreshNativeLocalizationSource()
@@ -737,7 +776,27 @@ func (app *application) acceptLocalizationReference(p *lk.AuthorProject) error {
 	return nil
 }
 
-func (app *application) uploadLocalization(w http.ResponseWriter, r *http.Request, endpoint string) error {
+// localizationUpload is the result of the unlocked half of an upload: the
+// client's bytes are in, the ROM (if any) is decoded, and nothing shared has
+// been touched yet.
+type localizationUpload struct {
+	endpoint    string
+	project     *lk.AuthorProject
+	pack        *lk.AuthorPack // native US source to install, when extracted
+	asReference bool
+	preview     bool
+	newID       string
+	replace     bool
+	expected    string
+	cleanup     func()
+}
+
+// prepareLocalizationUpload runs without the session lock. It reads the request
+// body and decodes a ROM -- the two slow parts -- and only reads shared state
+// through a momentary lock for the fail-fast identity check. The commit half
+// rechecks that identity, so a project that changes meanwhile is a conflict,
+// not a silent overwrite.
+func (app *application) prepareLocalizationUpload(w http.ResponseWriter, r *http.Request, endpoint string) (*localizationUpload, error) {
 	limit := int64(lk.MaxAuthorArchiveBytes + (1 << 20))
 	if endpoint == "extract" {
 		limit = 2 << 20
@@ -747,68 +806,89 @@ func (app *application) uploadLocalization(w http.ResponseWriter, r *http.Reques
 		if r.MultipartForm != nil {
 			r.MultipartForm.RemoveAll()
 		}
-		return err
+		return nil, err
 	}
-	defer r.MultipartForm.RemoveAll()
-	asReference := endpoint == "extract" && r.FormValue("intent") == "reference"
-	if asReference {
-		if err := app.checkLocalizationIdentity(r.FormValue("projectID"), r.FormValue("revision")); err != nil {
-			return err
+	upload := &localizationUpload{
+		endpoint:    endpoint,
+		asReference: endpoint == "extract" && r.FormValue("intent") == "reference",
+		preview:     endpoint == "import" && r.FormValue("intent") == "preview",
+		newID:       r.FormValue("newID"),
+		replace:     r.FormValue("replace") == "true",
+		expected:    r.FormValue("expected"),
+		cleanup:     func() { _ = r.MultipartForm.RemoveAll() },
+	}
+	if upload.asReference {
+		app.localization.mu.Lock()
+		err := app.checkLocalizationIdentity(r.FormValue("projectID"), r.FormValue("revision"))
+		app.localization.mu.Unlock()
+		if err != nil {
+			return upload, err
 		}
 	}
 	f, _, err := r.FormFile("file")
 	if err != nil {
-		return err
+		return upload, err
 	}
 	defer f.Close()
-	var p *lk.AuthorProject
 	if endpoint == "extract" {
 		data, err := io.ReadAll(io.LimitReader(f, (1<<20)+1))
 		if err != nil {
-			return err
+			return upload, err
 		}
 		d, err := lk.NewDecoder(data)
 		if err != nil {
-			return err
+			return upload, err
 		}
 		pack, err := d.BuildNativeAuthorPack(d.NativeSourceMetadata())
 		if err != nil {
-			return err
+			return upload, err
 		}
-		p, err = lk.NewSourceProject(pack)
+		upload.project, err = lk.NewSourceProject(pack)
 		if err != nil {
-			return err
-		}
-		if err = r.Context().Err(); err != nil {
-			return err
+			return upload, err
 		}
 		// Do not touch a build ROM or install a regional reference as US text.
 		if d.ReleaseID() == "us" {
-			if _, err = lk.InstallNativeUSSource(filepath.Join(app.localizationRoot(), "native-us"), pack); err != nil {
-				return err
-			}
-			app.refreshNativeLocalizationSource()
+			upload.pack = pack
 		}
 	} else {
 		info, err := f.Seek(0, io.SeekEnd)
 		if err != nil {
-			return err
+			return upload, err
 		}
-		p, err = lk.ReadAuthorArchive(f, info)
+		upload.project, err = lk.ReadAuthorArchive(f, info)
 		if err != nil {
-			return err
+			return upload, err
 		}
 	}
-	if err = r.Context().Err(); err != nil {
+	return upload, r.Context().Err()
+}
+
+// commitLocalizationUpload holds the session lock. It only installs, accepts
+// and answers from state that is already in memory.
+func (app *application) commitLocalizationUpload(w http.ResponseWriter, r *http.Request, upload *localizationUpload) error {
+	if err := r.Context().Err(); err != nil {
 		return err
 	}
-	if endpoint == "import" && r.FormValue("intent") == "preview" {
-		return app.previewLocalizationImport(w, p)
+	if upload.asReference {
+		if err := app.checkLocalizationIdentity(r.FormValue("projectID"), r.FormValue("revision")); err != nil {
+			return err
+		}
 	}
-	if asReference {
-		err = app.acceptLocalizationReference(p)
+	if upload.pack != nil {
+		if _, err := lk.InstallNativeUSSource(filepath.Join(app.localizationRoot(), "native-us"), upload.pack); err != nil {
+			return err
+		}
+		app.refreshNativeLocalizationSource()
+	}
+	if upload.preview {
+		return app.previewLocalizationImport(w, upload.project)
+	}
+	var err error
+	if upload.asReference {
+		err = app.acceptLocalizationReference(upload.project)
 	} else {
-		err = app.acceptLocalizationImport(p, r.FormValue("newID"), r.FormValue("replace") == "true", r.FormValue("expected"))
+		err = app.acceptLocalizationImport(upload.project, upload.newID, upload.replace, upload.expected)
 	}
 	if err != nil {
 		return err
