@@ -47,6 +47,8 @@
 #include "presentation_upload_mirror.h"
 #include "render/presentation_layout.h"
 #include "render/render_output.h"
+#include "render/localized_text_presenter.h"
+#include "render/text_cell_composite.h"
 
 
 extern ArRenderDevice g_render_device;
@@ -418,13 +420,23 @@ static HudProjectionInputs BuildProjectionInputsFromSlot(const FrameSlot *slot) 
   return in;
 }
 
-static void PresentHudOverlay(const FrameSlot *slot, ArRenderRectI viewport) {
+static void PresentHudChunksDirect(const FrameSlot *slot,
+                                   ArRenderRectI viewport) {
   HudProjectionInputs in = BuildProjectionInputsFromSlot(slot);
   HudPresentationChunk chunks[kHudPresentationChunkCapacity];
   int count = ArHudLayout_BuildPresentationChunks(viewport, &in, chunks);
   for (int i = 0; i < count; i++)
     RenderHudChunk(chunks[i].texture, chunks[i].texture_source,
                    chunks[i].output_destination);
+}
+
+static void PresentHudOverlay(const FrameSlot *slot, ArRenderRectI viewport) {
+  const FrameSlotOverlayCapture *bg3 =
+      &slot->overlay_captures[kFrameSlotOverlay_Bg3];
+  if (bg3->y1 > (int16_t)slot->hud_split_height)
+    PresentHudOverlayComposited(slot, viewport);
+  else
+    PresentHudChunksDirect(slot, viewport);
 }
 
 /* A7 (followup doc), diorama variant. A straight port of PresentHudOverlay
@@ -471,14 +483,25 @@ void PresentHudOverlayComposited(const FrameSlot *slot,
                                  ArRenderRectI viewport) {
   ArRenderTexture composite = EnsureHudCompositeTexture(
       viewport.w, viewport.h);
-  if (!ArRenderTexture_IsValid(composite)) return;
-
   HudProjectionInputs in = BuildProjectionInputsFromSlot(slot);
   HudPresentationChunk chunks[kHudPresentationChunkCapacity];
+  if (!ArRenderTexture_IsValid(composite)) {
+    PresentHudChunksDirect(slot, viewport);
+    return;
+  }
+
   ArRenderRectI local_viewport = {0, 0, viewport.w, viewport.h};
   int count = ArHudLayout_BuildPresentationChunks(
       local_viewport, &in, chunks);
   if (count <= 0) return;
+  ArLocalizedPreparedFrame localized;
+  ArLocalizedTextPresenter_Prepare(
+      &g_render_device, &slot->localization,
+      slot->bg3_state_valid, slot->bg3_tilemap_base_words,
+      slot->bg3_tilemap_width_tiles, slot->bg3_tilemap_height_tiles,
+      slot->bg3_hscroll, slot->bg3_vscroll,
+      kFrameSlotAuthenticWidth, kFrameSlotAuthenticHeight,
+      chunks, (size_t)count, &localized);
 
   ArRenderTargetState target_state;
   const ArRenderTargetBeginResult begin = ArRenderDevice_BeginTarget(
@@ -489,6 +512,9 @@ void PresentHudOverlayComposited(const FrameSlot *slot,
           "The renderer lost its scene target while beginning HUD composition "
           "(%s). Restart the game; if this repeats, update your graphics "
           "driver.", ArRenderDevice_LastError(&g_render_device));
+    else {
+      PresentHudChunksDirect(slot, viewport);
+    }
     return;
   }
   const bool target_ready =
@@ -497,9 +523,33 @@ void PresentHudOverlayComposited(const FrameSlot *slot,
           &g_render_device,
           (ArRenderColorF){0.0f, 0.0f, 0.0f, 0.0f});
   if (target_ready) {
-    for (int i = 0; i < count; i++)
-      RenderHudChunk(chunks[i].texture, chunks[i].texture_source,
-                     chunks[i].output_destination);
+    for (int i = 0; i < count; i++) {
+      if (!localized.mask_count) {
+        RenderHudChunk(chunks[i].texture, chunks[i].texture_source,
+                       chunks[i].output_destination);
+        continue;
+      }
+      HudPresentationChunk pieces[kArTextCellMaximumChunkPieces];
+      const size_t piece_count = ArTextCellComposite_SubtractMasks(
+          &chunks[i], localized.masks, localized.mask_count,
+          pieces, kArTextCellMaximumChunkPieces);
+      if (piece_count == SIZE_MAX) {
+        RenderHudChunk(chunks[i].texture, chunks[i].texture_source,
+                       chunks[i].output_destination);
+        continue;
+      }
+      for (size_t piece = 0; piece < piece_count; ++piece)
+        RenderHudChunk(pieces[piece].texture, pieces[piece].texture_source,
+                       pieces[piece].output_destination);
+    }
+    /* Rasterization and upload completed before any native cell was masked.
+     * If the final draw still fails, repaint the original chunks over the
+     * partial result so the completed composite falls back atomically. */
+    if (!ArLocalizedTextPresenter_Draw(&g_render_device, &localized)) {
+      for (int i = 0; i < count; ++i)
+        RenderHudChunk(chunks[i].texture, chunks[i].texture_source,
+                       chunks[i].output_destination);
+    }
   }
   if (!ArRenderDevice_EndTarget(&g_render_device, &target_state)) {
     SessionFatal_Request(
@@ -508,13 +558,24 @@ void PresentHudOverlayComposited(const FrameSlot *slot,
         "driver.", ArRenderDevice_LastError(&g_render_device));
     return;
   }
-  if (!target_ready) return;
+  if (!target_ready) {
+    PresentHudChunksDirect(slot, viewport);
+    return;
+  }
 
   const ArRenderRectF destination = {
     viewport.x, viewport.y, viewport.w, viewport.h,
   };
-  (void)ArRenderDevice_DrawTexture(
-      &g_render_device, composite, NULL, &destination);
+  /* Ordinary alpha draws into a transparent target leave premultiplied RGB.
+   * Use the matching over operation when flattening that group, otherwise its
+   * alpha is applied twice and transparent texels can replace the scene with
+   * the target's clear colour on some GPU backends. */
+  const ArRenderDrawState over = {
+    .flags = kArRenderDrawState_Blend,
+    .blend = kArRenderBlendMode_AlphaPremultiplied,
+  };
+  (void)ArRenderDevice_DrawTextureWithState(
+      &g_render_device, composite, NULL, &destination, &over);
 }
 
 static void PresentMode7Composite(const FrameSlot *slot,
@@ -879,10 +940,10 @@ void PresentUpload(const FrameSlot *slot) {
    * stale pixels with the current frame's split geometry. */
   const FrameSlotOverlayCapture *hud_bg_capture =
       &slot->overlay_captures[kFrameSlotOverlay_Bg3];
-  const bool native_diorama_hud =
-      slot->diorama_active && slot->diorama_hud_flat &&
-      hud_bg_capture->y1 > hud_bg_capture->y0;
-  if (slot->hud_split_height || native_diorama_hud) {
+  const bool captured_bg3 =
+      hud_bg_capture->y1 > hud_bg_capture->y0 &&
+      (hud_bg_capture->flags & kFrameSlotOverlayFlag_RemoveFromGame) != 0u;
+  if (slot->hud_split_height || captured_bg3) {
     int split_rows = slot->hud_split_height;
     if (ArRenderTexture_IsValid(g_hud_bg_texture)) {
       int rows = hud_bg_capture->y1;
@@ -1858,6 +1919,7 @@ void PresentRendererResources_Reset(void) {
   ArRenderDevice_DestroyTexture(&g_render_device, s_hud_composite_texture);
   s_hud_composite_texture = ArRenderTexture_Invalid();
   s_hud_composite_w = s_hud_composite_h = 0;
+  ArLocalizedTextPresenter_Reset(&g_render_device);
   ArRenderDevice_DestroyTexture(&g_render_device, s_action_bg1_mask_texture);
   ArRenderDevice_DestroyTexture(&g_render_device, s_action_bg2_mask_texture);
   ArRenderDevice_DestroyTexture(
@@ -2260,8 +2322,12 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
   }
   EndActionHeat(slot, output_viewport);
   if (SessionFatal_Requested()) return;
-  PresentHudOverlay(slot, output_viewport);
   PresentHdReplacements(slot, output_viewport);
+  /* The captured BG3 surface is transparent outside its visible cells, so it
+   * can be the final single unit without covering a BG1/BG2 HD replacement.
+   * Drawing replacements first also makes the ordering explicit for future
+   * enhanced glyph claims inside this same composite. */
+  PresentHudOverlay(slot, output_viewport);
 }
 
 bool PresentAuthenticScene(const FrameSlot *slot, ArRenderRectI viewport) {

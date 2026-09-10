@@ -1253,7 +1253,7 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
 
   CHECK(PpuSetOverlayCapture(
       ppu, kPpuOverlaySource_Bg3, 0, 0,
-      kActRaiserAuthenticWidth, kActRaiserSimulationHudHeight,
+      kActRaiserAuthenticWidth, kActRaiserAuthenticHeight,
       kPpuOverlayFlag_RemoveFromGame));
   CHECK(PpuSetOverlayCapture(
       ppu, kPpuOverlaySource_Obj, 0, 0,
@@ -1321,7 +1321,7 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
         (size_t)width * sizeof(uint32_t)));
     CHECK(PpuSetOverlayCapture(
         ppu, kPpuOverlaySource_Bg3, 0, 0,
-        kActRaiserAuthenticWidth, kActRaiserSimulationHudHeight,
+        kActRaiserAuthenticWidth, kActRaiserAuthenticHeight,
         kPpuOverlayFlag_RemoveFromGame));
     CHECK(PpuSetOverlayCapture(
         ppu, kPpuOverlaySource_Obj, 0, 0,
@@ -1341,9 +1341,34 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
                       : 0);
     request.billboard_atlas_ready = suppress_raw;
     request.billboard_renderer_ready = suppress_raw;
+    /* A supported fixed-colour add may designate BG3 without making BG3 a
+     * subscreen input. The capture path applies that colour before rebuilding
+     * the late winner surface, so this must not be mistaken for an ownership
+     * conflict. */
+    if (!suppress_raw) {
+      ppu->cgwsel = 0;
+      ppu->cgadsub = 1u << kActRaiserPpuLayer_Bg3;
+      ppu->fixedColor = bgr555(1, 1, 1);
+    }
     CHECK(Sim3D_PrepareCapture(TestRunnerForPpu(ppu), &request));
     CHECK((ppu->overlayRenderBuffer[kPpuOverlaySource_Obj] == NULL) ==
           (suppress_raw != 0));
+    /* Exercise a body row, not just the historical 32-row status handoff.
+     * BG3-high survives as the native winner; BG3-low behind BG1-low remains
+     * transparent in the late composite. */
+    enum { kBodyProbeY = 100, kBg3WinnerX = 20, kBg3OccludedX = 21 };
+    for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
+      g_sim3d_layer_pixels[plane][
+          (size_t)kBodyProbeY * width + extra + kBg3WinnerX] = 0;
+      g_sim3d_layer_pixels[plane][
+          (size_t)kBodyProbeY * width + extra + kBg3OccludedX] = 0;
+    }
+    g_sim3d_layer_pixels[kSim3DPlane_Bg3High][
+        (size_t)kBodyProbeY * width + extra + kBg3WinnerX] = 0xffffffffu;
+    g_sim3d_layer_pixels[kSim3DPlane_Bg3Low][
+        (size_t)kBodyProbeY * width + extra + kBg3OccludedX] = 0xffffffffu;
+    g_sim3d_layer_pixels[kSim3DPlane_Bg1Low][
+        (size_t)kBodyProbeY * width + extra + kBg3OccludedX] = 0xffff0000u;
     Sim3D_FinishCapture(
         (uint8_t *)authentic, width * (int)sizeof(uint32_t), 1);
     CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg3].x0 == 0);
@@ -1365,6 +1390,10 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
               .transparentFillMode == kPpuOverlayTransparentFill_Black);
     CHECK(hud_obj[(size_t)kActRaiserHudObjUpperY * width +
                   extra + kActRaiserSimulationHourglassLeftX] != 0);
+    CHECK(hud_bg[(size_t)kBodyProbeY * width +
+                 extra + kBg3WinnerX] == 0xffffffffu);
+    CHECK(hud_bg[(size_t)kBodyProbeY * width +
+                 extra + kBg3OccludedX] == 0u);
     if (!suppress_raw) {
       Sim3DOutputSurfaceViews views = {0};
       Sim3D_CaptureOutputSurfaceViews(&views);
@@ -1378,12 +1407,14 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
       CHECK(views.planes[kSim3DPlane_Obj0].data ==
             (const uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Obj0]);
       CHECK(views.hud_bg.data == (const uint8_t *)hud_bg);
-      CHECK(views.hud_bg.height_pixels == kActRaiserSimulationHudHeight);
+      CHECK(views.hud_bg.height_pixels == kActRaiserAuthenticHeight);
       CHECK(views.hud_obj.data == (const uint8_t *)hud_obj);
       CHECK(views.hud_obj.width_pixels == (uint32_t)width);
       CHECK(views.hud_obj.height_pixels == kActRaiserSimulationHudHeight);
     }
     CHECK(Sim3D_BeginFrame());
+    ppu->cgadsub = 0;
+    ppu->fixedColor = 0;
   }
 
   /* The same four-slot-sized capture at the old allocation is not the
@@ -1719,6 +1750,73 @@ static void TestMainScreenWinnerMask(void) {
   CHECK(mask[128] == 0xff000000u);
   CHECK(mask[255] == 0xff000000u);
   PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
+  ppu_free(ppu);
+}
+
+/* Scoped ActRaiser text uses Mode 1's BG3-priority mode and every observed
+ * displayed BG3 cell sets its tile priority bit. Under that measured contract,
+ * a late transparent BG3 draw must exactly reconstruct native scanout. Exercise
+ * hardware priority, a BG3 visibility window, and two master-brightness values
+ * so the whole-layer presenter cannot accidentally apply those policies twice
+ * or promote pixels which the source window hid. */
+static void TestBg3NativeParityComposite(void) {
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+  static uint8_t fb[kW * sizeof(uint32_t)];
+  static uint32_t reference[kW];
+  static uint32_t capture[kW];
+  ppu_reset(ppu);
+  ppu->bgmode = 9;
+  ppu->screenEnabled[0] =
+      (1u << kActRaiserPpuLayer_Bg1) |
+      (1u << kActRaiserPpuLayer_Bg3);
+  ppu->screenWindowed[0] = 1u << kActRaiserPpuLayer_Bg3;
+  ppu->windowsel = 0x200; /* BG3 main: window 1 enabled, inside disabled. */
+  ppu->window1left = 128;
+  ppu->window1right = 255;
+  ppu->cgram[0x11] = bgr555(31, 0, 0);
+  ppu->cgram[5] = bgr555(31, 31, 31);
+  set_solid_4bpp_tile(ppu, 1, 1);
+  set_solid_2bpp_tile(ppu, 0x4000, 0, 1);
+  ppu->bgTileAdr = 0x0400;
+  ppu->bgXsc[kActRaiserPpuLayer_Bg1] = 0x20;
+  ppu->bgXsc[kActRaiserPpuLayer_Bg3] = 0x28;
+  for (int x = 0; x < 32; x++) {
+    ppu->vram[0x2000 + x] = (uint16_t)(1 | (1 << 10));
+    ppu->vram[0x2800 + x] = (uint16_t)((1 << 10) | (1 << 13));
+  }
+  PpuBeginDrawing(ppu, fb, sizeof(fb), 0);
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg3,
+                              (uint8_t *)capture, sizeof(capture)));
+
+  static const uint8_t kBrightness[] = {15, 7};
+  for (size_t pass = 0; pass < sizeof(kBrightness); pass++) {
+    ppu->inidisp = kBrightness[pass];
+    PpuClearOverlayCaptures(ppu);
+    memset(fb, 0, sizeof(fb));
+    render_first_line(ppu);
+    memcpy(reference, fb, sizeof(reference));
+
+    CHECK(PpuSetOverlayCapture(
+        ppu, kPpuOverlaySource_Bg3, 0, 0, kW, 1,
+        kPpuOverlayFlag_RemoveFromGame));
+    memset(fb, 0, sizeof(fb));
+    memset(capture, 0, sizeof(capture));
+    render_first_line(ppu);
+    for (int x = 0; x < kW; x++) {
+      const uint32_t reconstructed = capture[x] >> 24
+          ? capture[x] & 0x00ffffffu
+          : ((const uint32_t *)(const void *)fb)[x] & 0x00ffffffu;
+      CHECK(reconstructed == (reference[x] & 0x00ffffffu));
+    }
+    CHECK(capture[0] >> 24 == 0xffu);
+    CHECK(capture[127] >> 24 == 0xffu);
+    CHECK(capture[128] == 0u);
+    CHECK(capture[255] == 0u);
+  }
+
+  PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg3, NULL, 0);
   ppu_free(ppu);
 }
 
@@ -2814,6 +2912,7 @@ int main(void) {
   TestSubscreenOnlyOverlayCapture();
   TestFullAddSubscreenWinnerCapture();
   TestMainScreenWinnerMask();
+  TestBg3NativeParityComposite();
   TestVerticalMarginLayerClip();
   TestVerticalMarginBottomLayerClip();
   TestVerticalMarginExactObj();

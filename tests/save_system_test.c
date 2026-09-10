@@ -287,6 +287,10 @@ static void TestRuntimeTransactions(void) {
   CHECK(live[0x1437] == 0 && live[0x1438] == 24);
   CHECK(live[0x13b1] == 9);
   CHECK(!memcmp(live + 0x1439, "CODEX\0\0\0\0", 9));
+  char player_name[kActRaiserPlayerNameStorageBytes];
+  CHECK(SaveSystem_CopyPlayerName(player_name, sizeof(player_name)));
+  CHECK(!strcmp(player_name, "CODEX"));
+  CHECK(!SaveSystem_CopyPlayerName(player_name, 3));
   CHECK(!memcmp(live + 0x1ff0, "ACT", 3));
   CHECK(live[0x120c] == 3 && (live[0x1240] & 1));
   CHECK(live[0x144a] == 4 && live[0x144b] == 1 &&

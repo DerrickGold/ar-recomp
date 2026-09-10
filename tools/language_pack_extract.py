@@ -144,6 +144,10 @@ CONSUMER_CENSUS_PROFILES = {
         'composer_name_entry_sources': (
             ('prompt_and_alphabet', 0x01EF3B),
             ('selection_cursor', 0x01EFE6)),
+        'composer_flow_sources': {
+            'message_speed_selector_call_site': 0x018B22,
+            'choice_yield_call_site': 0x018C3B,
+        },
         'composer_entry_pc24': 0x02BF60,
         'composer_end_pc24': 0x02C3D9,
         'composer_groups': (
@@ -239,6 +243,10 @@ CONSUMER_CENSUS_PROFILES = {
         'composer_name_entry_sources': (
             ('prompt_and_alphabet', 0x01EF3B),
             ('selection_cursor', 0x01EFE6)),
+        'composer_flow_sources': {
+            'message_speed_selector_call_site': 0x018B22,
+            'choice_yield_call_site': 0x018C3B,
+        },
         'composer_entry_pc24': 0x02C579,
         'composer_end_pc24': 0x02C9F2,
         'composer_groups': (
@@ -321,6 +329,10 @@ CONSUMER_CENSUS_PROFILES = {
         'composer_name_entry_sources': (
             ('prompt_and_alphabet', 0x01EF3B),
             ('selection_cursor', 0x01EFEC)),
+        'composer_flow_sources': {
+            'message_speed_selector_call_site': 0x018B22,
+            'choice_yield_call_site': 0x018C3B,
+        },
         'composer_entry_pc24': 0x02C582,
         'composer_end_pc24': 0x02C9FB,
         'composer_groups': (
@@ -405,6 +417,10 @@ CONSUMER_CENSUS_PROFILES = {
         'composer_name_entry_sources': (
             ('prompt_and_alphabet', 0x01EF3B),
             ('selection_cursor', 0x01EFE9)),
+        'composer_flow_sources': {
+            'message_speed_selector_call_site': 0x018B22,
+            'choice_yield_call_site': 0x018C3B,
+        },
         'composer_entry_pc24': 0x02C56B,
         'composer_end_pc24': 0x02C9E4,
         'composer_groups': (
@@ -500,6 +516,11 @@ CONSUMER_CENSUS_PROFILES = {
             ('prompt_and_hiragana', 0x01ED34),
             ('prompt_and_katakana', 0x01EDFB),
             ('selection_cursor', 0x01EEC2)),
+        'composer_flow_sources': {
+            'message_speed_selector_call_site': 0x018AB9,
+            'choice_descriptor_pc24': 0x01F51A,
+            'choice_descriptor_load_sites': (0x018D17, 0x018D76),
+        },
         'composer_entry_pc24': 0x048F56,
         'composer_end_pc24': 0x049314,
         'composer_groups': (
@@ -573,7 +594,9 @@ for start, characters in (
 JAPANESE_GLYPH_MAP.update({
     # The Japanese atlas uses the Western colon/selector slots for corner
     # quotes. FE/FF are spacing marks selectable from the name-entry grid;
-    # following DE/DF remain combining overlay controls in Decoder.
+    # following DE/DF remain combining overlay controls in Decoder. The
+    # message-speed scale retains its own verified equals/less-than tiles.
+    0x1C: '<', 0x1D: '=',
     0x3A: '」', 0x3B: '「', 0x3E: '!',
     0xA1: '。', 0xA4: '、', 0xA5: '・', 0xB0: 'ー',
     0xFE: '゛', 0xFF: '゜',
@@ -2801,6 +2824,150 @@ def build_consumer_census(profile, rom):
         for call, group in zip(composer_calls, composer_groups)
     ]
 
+    # Some fixed-composer streams are reached through stateful menu flow
+    # rather than a ROM pointer table.  They still need explicit ownership:
+    # otherwise the common Yes/No labels and message-speed scale can disappear
+    # from an extraction which incorrectly reports itself as complete.
+    composer_flow_rows = []
+    flow_profile = census_profile.get('composer_flow_sources')
+    if flow_profile is not None:
+        selector_call = flow_profile['message_speed_selector_call_site']
+        if selector_call not in composer_calls:
+            raise ValueError(
+                f"{profile['id']}: message-speed selector call is not a "
+                'fixed-composer call site')
+        selector_y = direct_y_source(rom, selector_call)
+        if selector_y is None:
+            raise ValueError(
+                f"{profile['id']}: message-speed selector lost its direct "
+                f'Y source at {pc24_string(selector_call)}')
+        selector_source = source_pc24(selector_call >> 16, selector_y)
+        validate_composer_source('message_speed_selector', selector_source)
+        scale_descriptor = selector_source + 4
+        scale_source = selector_source + 6
+        validate_composer_source('message_speed_scale_labels', scale_source)
+
+        composer_decoder = FixedComposerDecoder(Decoder(rom, profile))
+        selector_record = composer_decoder.decode_record(
+            pc24_to_offset(selector_source), profile['menu_end'])
+        if offset_to_pc24(selector_record['end']) != scale_descriptor:
+            raise ValueError(
+                f"{profile['id']}: message-speed selector no longer ends "
+                'at its scale descriptor')
+        scale_record = composer_decoder.decode_record(
+            pc24_to_offset(scale_source), profile['menu_end'])
+        specifications = (JAPANESE_INTERACTIVE_ROUTE_IDS
+                          if profile['id'] == 'jp' else
+                          LATIN_INTERACTIVE_ROUTE_IDS)
+        sample_call = next(
+            call for call, semantic_id in specifications.items()
+            if semantic_id == 'system.message_speed.sample')
+        sample_y = direct_y_source(rom, sample_call)
+        sample_source = source_pc24(sample_call >> 16, sample_y)
+        if not scale_record['terminated'] or \
+                offset_to_pc24(scale_record['end']) != sample_source:
+            raise ValueError(
+                f"{profile['id']}: message-speed scale no longer terminates "
+                'at the sample dialogue source')
+
+        choice_descriptor = flow_profile.get('choice_descriptor_pc24')
+        choice_provenance = None
+        if choice_descriptor is None:
+            choice_call = flow_profile['choice_yield_call_site']
+            continuation_rows = {
+                call: continuation for call, _, continuation in
+                census_profile.get('interactive_yield_continuations', ())
+            }
+            continuation = continuation_rows.get(choice_call)
+            if continuation is None:
+                raise ValueError(
+                    f"{profile['id']}: choice-label continuation is missing")
+            continuation_record = Decoder(rom, profile).decode_record(
+                pc24_to_offset(continuation))
+            if not continuation_record['terminated'] or \
+                    continuation_record['operations'][-1]['op'] != 'yield':
+                raise ValueError(
+                    f"{profile['id']}: choice-label continuation no longer "
+                    'returns a descriptor cursor')
+            choice_descriptor = offset_to_pc24(continuation_record['end'])
+            choice_provenance = choice_call
+        else:
+            expected_load = bytes((
+                0xA2, choice_descriptor & 0xFF,
+                choice_descriptor >> 8 & 0xFF))
+            load_sites = flow_profile.get('choice_descriptor_load_sites', ())
+            if not load_sites:
+                raise ValueError(
+                    f"{profile['id']}: choice descriptor has no load-site "
+                    'evidence')
+            for load_site in load_sites:
+                load_offset = pc24_to_offset(load_site)
+                if rom[load_offset:load_offset + 3] != expected_load:
+                    raise ValueError(
+                        f"{profile['id']}: choice descriptor load changed "
+                        f'at {pc24_string(load_site)}')
+            choice_provenance = load_sites[0]
+
+        def validate_flow_descriptor(source_id, address):
+            validate_composer_source(source_id, address)
+            offset = pc24_to_offset(address)
+            column, row = rom[offset:offset + 2]
+            if column >= 32 or row >= 32:
+                raise ValueError(
+                    f"{profile['id']}: {source_id} has invalid BG3 cell "
+                    f'destination {column:02X}/{row:02X}')
+            return {'column': column, 'row': row}
+
+        scale_destination = validate_flow_descriptor(
+            'message_speed_scale_descriptor', scale_descriptor)
+        choice_destination = validate_flow_descriptor(
+            'choice_labels_descriptor', choice_descriptor)
+        choice_source = choice_descriptor + 2
+        validate_composer_source('choice_labels', choice_source)
+        choice_record = composer_decoder.decode_record(
+            pc24_to_offset(choice_source), profile['menu_end'])
+        if not choice_record['terminated']:
+            raise ValueError(
+                f"{profile['id']}: choice labels have no terminator")
+
+        composer_flow_rows.extend((
+            {
+                'id': 'message_speed_selector',
+                'source_pc24': pc24_string(selector_source),
+                'classification': 'typed_non_language_indicator',
+                'included_in_language_source_seeds': False,
+                'via_call_site': pc24_string(selector_call),
+                'confidence': 'direct_call_flow_verified',
+            },
+            {
+                'id': 'message_speed_scale_labels',
+                'source_pc24': pc24_string(scale_source),
+                'descriptor_pc24': pc24_string(scale_descriptor),
+                'destination': scale_destination,
+                'classification': 'fixed_composer_text',
+                'included_in_language_source_seeds': True,
+                'via_call_site': pc24_string(selector_call),
+                'confidence': 'direct_call_and_adjacent_flow_verified',
+            },
+            {
+                'id': 'choice_labels',
+                'source_pc24': pc24_string(choice_source),
+                'descriptor_pc24': pc24_string(choice_descriptor),
+                'destination': choice_destination,
+                'classification': 'fixed_composer_text',
+                'included_in_language_source_seeds': True,
+                'via_call_site': pc24_string(choice_provenance),
+                'confidence': 'stateful_flow_and_destination_verified',
+            },
+        ))
+        source_references.append(source_reference(
+            scale_source,
+            'fixed_composer_flow_message_speed_scale_labels',
+            via_call_site=selector_call))
+        source_references.append(source_reference(
+            choice_source, 'fixed_composer_flow_choice_labels',
+            via_call_site=choice_provenance))
+
     buffer_writes = scan_pattern_pc24(rom, BG3_TEXT_BUFFER_WRITE)
     expected_writes = census_profile['bg3_buffer_write_count']
     if len(buffer_writes) != expected_writes:
@@ -3000,7 +3167,10 @@ def build_consumer_census(profile, rom):
                 for target in row['target_pc24s']}),
         },
         'fixed_composer_sources': {
-            'status': 'known_tables_direct_dynamic_censused',
+            'status': (
+                'tables_direct_dynamic_and_stateful_flows_censused'
+                if composer_flow_rows else
+                'known_tables_direct_dynamic_censused'),
             'pointer_tables': composer_table_rows,
             'pointer_slot_count': sum(
                 row['pointer_count'] for row in composer_table_rows),
@@ -3017,6 +3187,7 @@ def build_consumer_census(profile, rom):
                 for row in composer_dynamic_rows),
             'numeric_only_source': composer_numeric_row,
             'name_entry_sources': composer_name_entry_rows,
+            'flow_sources': composer_flow_rows,
         },
         'source_reference_seeds': {
             'status': 'known_call_paths_censused',
@@ -3907,6 +4078,10 @@ def fixed_composer_catalog(profile, rom, decoder, consumer_census):
         add_source(
             row['source_pc24'], f'name_entry.{row["id"]}',
             f'name_entry:{row["id"]}', 'fixed_composer_text')
+    for row in composer_sources.get('flow_sources', ()):
+        add_source(
+            row['source_pc24'], f'system.{row["id"]}',
+            f'stateful_flow:{row["id"]}', row['classification'])
 
     composer_decoder = FixedComposerDecoder(decoder)
     segments = []
@@ -3921,6 +4096,15 @@ def fixed_composer_catalog(profile, rom, decoder, consumer_census):
             raise ValueError(
                 f'fixed composer record at {address_text} has no terminator')
         raw = rom[position:decoded['end']]
+        operations = decoded['operations']
+        if identity['classification'] == 'typed_non_language_indicator':
+            operations = [{
+                'op': 'insert_icon',
+                'value': 'message_speed_selector',
+                'part_index': 0,
+                'part_count': 1,
+                'confidence': 'mapped_semantic',
+            }, operations[-1]]
         segment = {
             'id': native_id(profile, position),
             'candidate_semantic_ids': sorted(
@@ -3938,8 +4122,8 @@ def fixed_composer_catalog(profile, rom, decoder, consumer_census):
                 'raw_sha256': hashlib.sha256(raw).hexdigest(),
             },
             'terminated': True,
-            'visible_units': visible_units(decoded['operations']),
-            'operations': decoded['operations'],
+            'visible_units': visible_units(operations),
+            'operations': operations,
         }
         if decoded['dictionary_tokens']:
             segment['source_dictionary_tokens'] = decoded[
@@ -4125,8 +4309,12 @@ def build_language_source_ownership(profile, rom, messages, pointer_sets,
             ownership = 'live_consumer_text'
         elif not record_has_visible_language(record):
             ownership = 'verified_non_language_empty_record'
-        elif record.get('classification') == 'typed_numeric_only':
-            ownership = 'verified_non_language_numeric_descriptor'
+        elif record.get('classification') in (
+                'typed_numeric_only', 'typed_non_language_indicator'):
+            ownership = ('verified_non_language_numeric_descriptor'
+                         if record.get('classification') ==
+                         'typed_numeric_only' else
+                         'verified_non_language_ui_indicator')
         elif category in bounded_ui_categories:
             ownership = 'bounded_consumer_catalog_text'
         elif category in dormant_categories:
@@ -4199,6 +4387,13 @@ def build_language_source_ownership(profile, rom, messages, pointer_sets,
             f'fixed_composer.indexed.{row["id"]}',
             pc24_to_offset(pc24_from_string(row['source_table_pc24'])),
             row['pointer_count'] * 2, 'language_source_pointer_table')
+    for row in composer.get('flow_sources', ()):
+        descriptor = row.get('descriptor_pc24')
+        if descriptor is not None:
+            add_metadata(
+                f'fixed_composer.flow.{row["id"]}.destination',
+                pc24_to_offset(pc24_from_string(descriptor)), 2,
+                'fixed_composer_destination_descriptor')
 
     if profile['encoding'] == 'dictionary-12':
         add_metadata(
@@ -4301,11 +4496,19 @@ def fixed_composer_route_id(reference_kind, occurrence):
     name_prefix = 'fixed_composer_name_entry_'
     if reference_kind.startswith(name_prefix):
         return 'name_entry.' + reference_kind[len(name_prefix):]
+    flow_prefix = 'fixed_composer_flow_'
+    if reference_kind.startswith(flow_prefix):
+        flow_id = reference_kind[len(flow_prefix):]
+        return {
+            'choice_labels': 'system.choice.yes_no',
+            'message_speed_scale_labels':
+                'system.message_speed.scale_labels',
+        }.get(flow_id)
     return None
 
 
 def build_semantic_route_catalog(profile, messages, pointer_sets, menu,
-                                 consumer_census):
+                                 consumer_census, decoder=None):
     """Build logical routes without treating physical record order as identity."""
     records = list(messages) + list(menu['segments'])
     records_by_id = {record['id']: record for record in records}
@@ -4319,6 +4522,9 @@ def build_semantic_route_catalog(profile, messages, pointer_sets, menu,
             'id': route_id,
             'source_record_id': record_id,
             'source_offset_within_record': source_offset,
+            'source_category': records_by_id[record_id].get(
+                'category', records_by_id[record_id].get(
+                    'classification', 'unclassified')),
             'route_kind': route_kind,
             'availability': ('release_variant' if regional else
                              'cross_release_candidate'),
@@ -4484,6 +4690,7 @@ def build_semantic_route_catalog(profile, messages, pointer_sets, menu,
         route['source_record_id'] for route in routes.values()
     }
     dormant_count = 0
+    dormant_category_counts = {}
     unclassified_records = []
     for record in records:
         record_routes = sorted(
@@ -4495,16 +4702,18 @@ def build_semantic_route_catalog(profile, messages, pointer_sets, menu,
         elif not record_has_visible_language(record):
             record['semantic_route_ids'] = []
             record['alignment_status'] = 'verified_non_language_resource'
-        elif record.get('source_ownership') == \
-                'verified_non_language_numeric_descriptor':
+        elif record.get('source_ownership', '').startswith(
+                'verified_non_language_'):
             record['semantic_route_ids'] = []
             record['alignment_status'] = 'verified_non_language_resource'
         elif record.get('source_ownership') == \
                 'dormant_or_release_variant_text':
-            native_suffix = record['id'].split('.', 2)[-1]
+            category = record.get('category', 'text')
+            dormant_index = dormant_category_counts.get(category, 0)
+            dormant_category_counts[category] = dormant_index + 1
             route_id = (
                 f'variant.{profile["id"]}.dormant.'
-                f'{record.get("category", "text")}.{native_suffix}')
+                f'{category}.resource_{dormant_index:02d}')
             add_route(route_id, record['id'], 0, 'dormant_retail_resource',
                       'decoded_bounded_resource_without_live_reference', True)
             record['semantic_route_ids'] = [route_id]
@@ -4512,6 +4721,43 @@ def build_semantic_route_catalog(profile, messages, pointer_sets, menu,
             dormant_count += 1
         else:
             unclassified_records.append(record['id'])
+
+    # A logical route can enter a shared physical record after an earlier
+    # prefix. Preserve the exact invocation-visible operation stream so the
+    # authoring exporter never has to guess by slicing another route's text.
+    # Fixed-composer routes currently begin at their record start; the six
+    # non-zero USA offsets (and regional counterparts) are interpreter inputs.
+    menu_record_ids = {record['id'] for record in menu['segments']}
+    for route in routes.values():
+        record = records_by_id[route['source_record_id']]
+        source_offset = route['source_offset_within_record']
+        if source_offset:
+            if decoder is None:
+                continue
+            if record['id'] in menu_record_ids:
+                raise ValueError(
+                    f'{profile["id"]}: fixed-composer route enters inside '
+                    f'{record["id"]}')
+            source_start = int(record['source']['file_offset'], 16)
+            source_end = int(
+                record['source']['end_file_offset_exclusive'], 16)
+            decoded = decoder.decode_record(
+                source_start + source_offset, source_end,
+                stop_on_yield=True)
+            if not decoded['terminated']:
+                raise ValueError(
+                    f'{profile["id"]}: route {route["id"]} has no '
+                    'invocation boundary')
+            operations = decoded['operations']
+        else:
+            operations = record['operations']
+        serialized = json.dumps(
+            operations, ensure_ascii=False, sort_keys=True,
+            separators=(',', ':')).encode('utf-8')
+        route['source_operations'] = operations
+        route['source_operation_count'] = len(operations)
+        route['source_operations_sha256'] = hashlib.sha256(
+            serialized).hexdigest()
 
     complete = not unknown_references and not unclassified_records
     return {
@@ -4788,6 +5034,13 @@ def build_coverage_report(profile, source, messages, pointer_sets, menu,
             'fixed_composer_numeric_only_sources': int(
                 consumer_census['fixed_composer_sources'][
                     'numeric_only_source'] is not None),
+            'fixed_composer_stateful_flow_sources': len(
+                consumer_census['fixed_composer_sources'].get(
+                    'flow_sources', ())),
+            'fixed_composer_stateful_language_sources': sum(
+                source.get('included_in_language_source_seeds', False)
+                for source in consumer_census['fixed_composer_sources'].get(
+                    'flow_sources', ())),
         })
     if dynamic_census:
         counts.update({
@@ -5099,7 +5352,7 @@ def inspect_rom(path):
     source_ownership = build_language_source_ownership(
         profile, rom, messages, pointer_sets, menu, consumer_census)
     semantic_routes = build_semantic_route_catalog(
-        profile, messages, pointer_sets, menu, consumer_census)
+        profile, messages, pointer_sets, menu, consumer_census, decoder)
     graphical_census = build_graphical_text_census(
         profile, rom, consumer_census)
     coverage = build_coverage_report(

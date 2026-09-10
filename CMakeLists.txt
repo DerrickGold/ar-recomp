@@ -70,6 +70,17 @@ endif()
 
 find_package(SDL3 3.4.0 REQUIRED)
 
+# Enhanced Unicode text remains optional at the platform binding. The pack,
+# contract, session, and cache layers are portable C and still build when a
+# port supplies no SDL3_ttf rasterizer yet.
+option(AR_ENHANCED_TEXT "Build the desktop SDL3_ttf text backend" ON)
+if(AR_ENHANCED_TEXT)
+    find_package(SDL3_ttf 3.2.0 REQUIRED)
+    set(_AR_ENHANCED_TEXT 1)
+else()
+    set(_AR_ENHANCED_TEXT 0)
+endif()
+
 set(ACTRAISER_GEN_DIR "${CMAKE_SOURCE_DIR}/src/gen" CACHE PATH
     "Directory containing generated recomp C translation units")
 file(GLOB ACTRAISER_GEN_SOURCES CONFIGURE_DEPENDS "${ACTRAISER_GEN_DIR}/*.c")
@@ -244,6 +255,7 @@ target_compile_definitions(ActRaiserRecomp PRIVATE
     AR_RUN_DIR_DEFAULT_ENABLED=${_ACTRAISER_RUN_DIR_DEFAULT}
     SNESRECOMP_REVERSE_DEBUG=0
     SNESRECOMP_WATCHDOG=${_SNESRECOMP_WATCHDOG}
+    AR_HAS_SDL3_TTF=${_AR_ENHANCED_TEXT}
 )
 target_compile_definitions(snesrecomp_runtime PRIVATE
     SYSTEM_VOLUME_MIXER_AVAILABLE=0
@@ -332,16 +344,155 @@ target_link_libraries(ActRaiserRecomp PRIVATE
     SDL3::SDL3
     actraiser_math
 )
+if(AR_ENHANCED_TEXT)
+    target_link_libraries(ActRaiserRecomp PRIVATE SDL3_ttf::SDL3_ttf)
+endif()
 
 endif() # NOT AR_TESTS_ONLY
 
 if(BUILD_TESTING)
     find_package(Python3 QUIET COMPONENTS Interpreter)
 
+    add_executable(actraiser_unicode_grapheme_test
+        tests/unicode_grapheme_test.c
+        src/localization/unicode_grapheme.c)
+    target_include_directories(actraiser_unicode_grapheme_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_unicode_grapheme
+        COMMAND actraiser_unicode_grapheme_test)
+
+    add_executable(actraiser_text_backend_test
+        tests/text_backend_test.c
+        src/localization/text_backend.c
+        src/localization/text_rasterizer.c)
+    target_include_directories(actraiser_text_backend_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_text_backend COMMAND actraiser_text_backend_test)
+
+    add_executable(actraiser_enhanced_text_settings_test
+        tests/enhanced_text_settings_test.c
+        src/localization/enhanced_text_settings.c
+        src/localization/text_rasterizer.c)
+    target_include_directories(actraiser_enhanced_text_settings_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_enhanced_text_settings
+        COMMAND actraiser_enhanced_text_settings_test)
+
+    add_executable(actraiser_text_surface_cache_test
+        tests/text_surface_cache_test.c
+        src/localization/text_rasterizer.c
+        src/render/text_surface_cache.c
+        src/render/render_device.c)
+    target_include_directories(actraiser_text_surface_cache_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_text_surface_cache_test PRIVATE
+        actraiser_math)
+    add_test(NAME actraiser_text_surface_cache
+        COMMAND actraiser_text_surface_cache_test)
+
+    if(TARGET SDL3_ttf::SDL3_ttf)
+        add_executable(actraiser_text_rasterizer_sdl_test
+            tests/text_rasterizer_sdl_test.c
+            src/localization/text_rasterizer.c
+            src/platform/sdl/text_rasterizer_sdl.c)
+        target_include_directories(actraiser_text_rasterizer_sdl_test PRIVATE
+            ${CMAKE_SOURCE_DIR}/src)
+        target_compile_definitions(actraiser_text_rasterizer_sdl_test PRIVATE
+            AR_HAS_SDL3_TTF=1
+            "AR_TEST_FONT_PATH=\"${CMAKE_SOURCE_DIR}/game-assets/fonts/noto/NotoSans-SemiCondensedExtraBold.ttf\""
+            "AR_TEST_JAPANESE_FONT_PATH=\"${CMAKE_SOURCE_DIR}/tests/fixtures/unicode-fonts/fonts/NotoSansJP-Bold.otf\""
+            "AR_TEST_ARABIC_FONT_PATH=\"${CMAKE_SOURCE_DIR}/tests/fixtures/unicode-fonts/fonts/NotoSansArabic[wdth,wght].ttf\"")
+        target_link_libraries(actraiser_text_rasterizer_sdl_test PRIVATE
+            SDL3::SDL3 SDL3_ttf::SDL3_ttf actraiser_math)
+        add_test(NAME actraiser_text_rasterizer_sdl
+            COMMAND actraiser_text_rasterizer_sdl_test)
+    endif()
+
+    add_executable(actraiser_language_pack_runtime_test
+        tests/language_pack_test.c
+        src/localization/language_pack.c
+        src/localization/language_contract.c)
+    target_include_directories(actraiser_language_pack_runtime_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_language_pack_runtime
+        COMMAND actraiser_language_pack_runtime_test)
+
+    add_executable(actraiser_dialogue_session_test
+        tests/dialogue_session_test.c
+        src/localization/dialogue_session.c
+        src/localization/language_pack.c
+        src/localization/language_contract.c
+        src/localization/unicode_grapheme.c)
+    target_include_directories(actraiser_dialogue_session_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_dialogue_session
+        COMMAND actraiser_dialogue_session_test)
+
+    add_executable(actraiser_text_cell_record_test
+        tests/text_cell_record_test.c
+        src/render/text_cell_record.c)
+    target_include_directories(actraiser_text_cell_record_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_text_cell_record
+        COMMAND actraiser_text_cell_record_test)
+
+    add_executable(actraiser_text_cell_composite_test
+        tests/text_cell_composite_test.c
+        src/render/text_cell_composite.c)
+    target_include_directories(actraiser_text_cell_composite_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_text_cell_composite
+        COMMAND actraiser_text_cell_composite_test)
+
+    add_executable(actraiser_localization_frame_test
+        tests/localization_frame_test.c
+        src/localization/localization_frame.c
+        src/localization/enhanced_text_settings.c
+        src/localization/text_rasterizer.c
+        src/render/text_cell_record.c)
+    target_include_directories(actraiser_localization_frame_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_localization_frame
+        COMMAND actraiser_localization_frame_test)
+
+    add_executable(actraiser_localization_routes_test
+        tests/actraiser_localization_routes_test.c
+        src/actraiser/actraiser_localization_routes.c)
+    target_include_directories(actraiser_localization_routes_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_localization_routes
+        COMMAND actraiser_localization_routes_test)
+
     if(Python3_Interpreter_FOUND)
+        add_test(NAME actraiser_font_asset
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tests/font_asset_test.py)
         add_test(NAME actraiser_language_pack_extract
             COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_SOURCE_DIR}/tests/language_pack_extract_test.py)
+        add_test(NAME actraiser_language_pack_v1
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tests/language_pack_v1_test.py)
+        add_test(NAME actraiser_language_pack_catalog
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tests/language_pack_catalog_test.py)
+        add_test(NAME actraiser_language_contract_generation
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/generate_language_contract_data.py
+                --check)
+        add_test(NAME actraiser_localization_route_generation
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/generate_actraiser_localization_routes.py
+                --check)
+        set_tests_properties(
+            actraiser_language_pack_extract
+            actraiser_language_pack_v1
+            actraiser_language_pack_catalog
+            actraiser_language_contract_generation
+            actraiser_localization_route_generation
+            actraiser_font_asset
+            PROPERTIES ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
     endif()
 
     # The production HLE fatal path escapes through the game coroutine. Unit
@@ -465,6 +616,16 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src
     )
     add_test(NAME actraiser_hud_layout COMMAND actraiser_hud_layout_test)
+
+    add_executable(actraiser_bg3_composite_policy_test
+        tests/bg3_composite_policy_test.c
+        src/render/bg3_composite_policy.c
+    )
+    target_include_directories(actraiser_bg3_composite_policy_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    add_test(NAME actraiser_bg3_composite_policy
+        COMMAND actraiser_bg3_composite_policy_test)
 
     add_executable(actraiser_present_world_nav_test
         tests/present_world_nav_test.c
@@ -1469,6 +1630,15 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_save_checksum_hle
         COMMAND actraiser_save_checksum_hle_test)
+
+    add_executable(actraiser_localization_text_test
+        tests/actraiser_localization_text_test.c
+        src/actraiser/actraiser_localization_text.c)
+    target_include_directories(actraiser_localization_text_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_localization_text
+        COMMAND actraiser_localization_text_test)
 
     # Exhaustive semantic grids plus the complete CPU-facing contracts for the
     # shared $03:9710 cell-to-mark-map index and $03:96EF traversal-predicate

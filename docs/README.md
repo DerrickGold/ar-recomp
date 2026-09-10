@@ -9,6 +9,8 @@ histories, and retired specifications are intentionally excluded.
 ## Player and project status
 
 - [Manual](manual.md) — running, configuring, and extending the game.
+- [Language pack format](language-pack-format.md) — creating UTF-8 game
+  translations with typed placeholders and safe page/control semantics.
 - [Project progress](progress.md) — public gameplay, subsystem, and platform
   acceptance status.
 

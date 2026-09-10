@@ -552,6 +552,7 @@ def main():
     assert len(fixed_sources['indexed_direct_sources']) == 1
     assert fixed_sources['indexed_direct_sources'][0]['pointer_count'] == 2
     assert not fixed_sources['direct_source_candidates']
+    assert not fixed_sources['flow_sources']
     assert len(fixed_sources['dynamic_reports']) == 1
     assert not fixed_sources['score_report_present']
     assert not fixed_sources['numeric_only_source'][
@@ -599,6 +600,15 @@ def main():
         'fixed_composer_score_report_present']
     assert coverage_with_census['counts'][
         'fixed_composer_numeric_only_sources'] == 1
+    assert coverage_with_census['counts'][
+        'fixed_composer_stateful_flow_sources'] == 0
+    assert coverage_with_census['counts'][
+        'fixed_composer_stateful_language_sources'] == 0
+    assert EXTRACT.fixed_composer_route_id(
+        'fixed_composer_flow_choice_labels', 0) == 'system.choice.yes_no'
+    assert EXTRACT.fixed_composer_route_id(
+        'fixed_composer_flow_message_speed_scale_labels', 0) == \
+        'system.message_speed.scale_labels'
     consumer_blocker = next(
         blocker for blocker in coverage_with_census['blockers']
         if blocker['id'] == 'text_consumer_reference_census')

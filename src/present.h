@@ -13,6 +13,7 @@
 #include "presentation_frame_generation.h"
 #include "render/hud_layout.h"
 #include "render/render_device.h"
+#include "localization/localization_frame.h"
 #include "snesrecomp/runner.h"
 
 /* FrameSlot is the sole game-state contract for presentation. FrameSlot_Capture
@@ -183,6 +184,10 @@ typedef struct FrameSlot {
    * the live HLE producer state stays private. Disabled stages remain inert. */
   SimFrameData sim;
 
+  /* Immutable enhanced-text payload captured beside the PPU pixels whose BG3
+   * cells it may replace. Empty means native presentation is untouched. */
+  ArLocalizationFrame localization;
+
   /* Action-stage spell and scene lifecycles, captured from WRAM beside the
    * frame they decorate. Payloads are inert outside positively identified
    * source records/map objects. */
@@ -317,6 +322,10 @@ typedef struct FrameSlot {
   bool action_bg_extent_guides;
   uint8_t inidisp;
   uint8_t bg_mode;  /* PPU_mode(g_ppu) == (g_ppu->bgmode & 7) */
+  bool bg3_state_valid;
+  uint16_t bg3_hscroll, bg3_vscroll;
+  uint16_t bg3_tilemap_base_words;
+  uint8_t bg3_tilemap_width_tiles, bg3_tilemap_height_tiles;
 
   FrameSlotOverlayCapture overlay_captures[kFrameSlotOverlaySourceCount];
 

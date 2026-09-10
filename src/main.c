@@ -51,6 +51,7 @@
 #include "snesrecomp/host/launcher.h"
 #include "snesrecomp/support/file.h"
 #include "actraiser/actraiser_action_bg.h"
+#include "actraiser/actraiser_localization_runtime.h"
 #include "actraiser_game.h"
 #include "snesrecomp/game/trace.h"
 #include "present.h"
@@ -82,6 +83,8 @@
 #include "sim/sim3d.h"
 #include "constants.h"
 #include "platform/sdl/render_sdl.h"
+#include "platform/sdl/text_rasterizer_sdl.h"
+#include "render/localized_text_presenter.h"
 
 static const char kWindowTitle[] = "ActRaiser (Recompiled)";
 enum {
@@ -1321,6 +1324,9 @@ static int AppBoot_CreateVideo(AppBoot *app) {
  * manual), input, and music. Injection rather than direct calls is what keeps
  * settings_overlay.c testable with no renderer at all -- see settings_overlay.h. */
 static void AppBoot_InstallSubsystems(AppBoot *app) {
+  static ArTextBackend localized_text_backend;
+  ArSdlTextBackend_Init(&localized_text_backend);
+  ArLocalizedTextPresenter_SetBackend(&localized_text_backend);
   if (!SettingsOverlay_Init(&g_render_device, g_window,
                             app->rom_data, app->rom_size))
     Die("font atlas creation for settings overlay failed");
@@ -2241,6 +2247,7 @@ static int AppShutdown(AppBoot *app, char **argv) {
   SimPhase0Trace_Close();
   SimRenderMetadata_TraceClose();
   ActRaiserActionBg_Shutdown();
+  ActRaiserLocalizationRuntime_Shutdown();
 
   /* Stop the sole audio producer before reading observer-owned capture state
    * or removing subscriptions. The run directory remains live for reports. */
