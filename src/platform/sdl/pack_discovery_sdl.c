@@ -31,12 +31,14 @@ static bool PrepareArchives(ArLanguagePackCatalog *catalog,
                             const ArLanguagePackIo *io, const char *root) {
   /* Only fixed locations beside the game executable are executable candidates.
    * Neither PATH nor a pack/cache member can choose what program we launch.
-   * A bundle retains utils/tools/snesbuild even after build-only cleanup. */
+   * A bundle retains utils/tools/actraiser-builder after build-only cleanup. */
 #ifdef _WIN32
   const char *leaves[] = {
-      "utils/tools/snesbuild.exe", "snesbuild.exe", "tools/snesbuild.exe"};
+      "utils/tools/actraiser-builder.exe", "actraiser-builder.exe",
+      "tools/actraiser-builder.exe"};
 #else
-  const char *leaves[] = {"utils/tools/snesbuild", "snesbuild", "tools/snesbuild"};
+  const char *leaves[] = {"utils/tools/actraiser-builder",
+                          "actraiser-builder", "tools/actraiser-builder"};
 #endif
   char helper[1024] = {0};
   const char *base = SDL_GetBasePath();
@@ -50,8 +52,9 @@ static bool PrepareArchives(ArLanguagePackCatalog *catalog,
     helper[0] = 0;
   }
   if (!helper[0]) {
-    fprintf(stderr, "[localization] .arlang files need the installed snesbuild "
-                    "helper; restore utils/tools/snesbuild or use unpacked packs\n");
+    fprintf(stderr, "[localization] .arlang files need the installed ActRaiser "
+                    "Builder helper; restore utils/tools/actraiser-builder or "
+                    "use unpacked packs\n");
     return false;
   }
   const char *args[] = {helper, "language", "prepare", "--packs-root", root, NULL};

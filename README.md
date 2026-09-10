@@ -164,9 +164,10 @@ committed.
 
 For the usual edit-and-build loop, run `cmake --build --preset play`. Configure
 and build the Debug test tier with `cmake --preset dev` followed by
-`cmake --build --preset dev`, then run it with `ctest --preset dev`. The Go
-tooling tests use `go -C snesrecomp-go test ./...`. Additional checks are
-available through `make check-constants` for high-risk authored constants and
+`cmake --build --preset dev`, then run it with `ctest --preset dev`. Test the
+generic toolchain with `go -C snesrecomp-go test ./...` and the ActRaiser
+Builder with `go -C installer test ./...`. Additional checks are available
+through `make check-constants` for high-risk authored constants and
 `make check-cross` for a Windows x86_64 compile-and-link test using the pinned
 Zig and SDL toolchain.
 
@@ -398,11 +399,14 @@ reference.
 
 ## Development
 
-The source tree keeps the mechanically generated game banks in `src/gen/`
-separate from the authored runtime in `src/` and the reusable recompiler and
-portable runner in `snesrecomp-go/`. Both local CMake builds and the hermetic
-release builder read their source list from `snesbuild.ini`, which keeps the two
-build paths in sync when an authored file is added.
+The source tree keeps mechanically generated game banks in `src/gen/` separate
+from the authored game runtime in `src/`. The `installer/` module owns the
+ActRaiser-specific Builder, Workshop, localization/content tools, embedded
+resources, and release packaging. It delegates generic regeneration, compiling,
+and installation to the reusable `snesbuild` executable and portable runner in
+`snesrecomp-go/` through a versioned process contract. Both local CMake builds
+and the hermetic path read their source list from `snesbuild.ini`, which keeps
+the two build paths in sync when an authored file is added.
 
 | Preset | Purpose |
 |---|---|
@@ -419,6 +423,7 @@ isolates the saves and settings for each run. It can also compare candidate and
 reference binaries in adjacent A/B pairs. For more information, see the
 source-build instructions under [Quick start](#quick-start), the benchmark
 manifest at [`tools/runner-bench.json`](tools/runner-bench.json), and the
+[`installer` documentation](installer/README.md) and
 [`snesrecomp-go` documentation](snesrecomp-go/README.md).
 
 ## Documentation
@@ -427,14 +432,16 @@ manifest at [`tools/runner-bench.json`](tools/runner-bench.json), and the
 |---|---|
 | [`docs/README.md`](docs/README.md) | Curated game-documentation index |
 | [`docs/manual.md`](docs/manual.md) | Player and power-user reference |
+| [`docs/builder-workshop.md`](docs/builder-workshop.md) | Builder and Workshop user guide |
 | [`docs/language-pack-format.md`](docs/language-pack-format.md) | UTF-8 translation pack authoring and validation contract |
 | [`docs/language-packs.md`](docs/language-packs.md) | Direct `.arlang` installation, sharing, and editor-free/AI authoring |
+| [`installer/README.md`](installer/README.md) | ActRaiser Builder ownership and developer entry points |
 | [`docs/SEAMS.md`](docs/SEAMS.md) | Logic↔hardware boundary and architecture map |
 | [`docs/progress.md`](docs/progress.md) | Stage, town, and subsystem status |
 | [`docs/rendering-engine.md`](docs/rendering-engine.md) | Rendering, streaming, and OAM architecture |
 | [`docs/sim-town-terrain.md`](docs/sim-town-terrain.md) | Audited town elevation, grounding, depth, and performance contracts |
 | [`docs/snes-native-audio-channels.md`](docs/snes-native-audio-channels.md) | Original SPC channel ownership and effect sequencing |
-| [`docs/regional-variants.md`](docs/regional-variants.md) | Hash-provenanced Japanese/USA ROM differences and localization seams |
+| [`docs/rom-map.md`](docs/rom-map.md) | ROM data regions and cross-release localization evidence |
 
 ## License
 
@@ -451,3 +458,6 @@ historical lineage, and retained third-party notices are documented in
 [`snesrecomp-go/LICENSE_SCOPE.md`](snesrecomp-go/LICENSE_SCOPE.md),
 [`snesrecomp-go/ATTRIBUTION.md`](snesrecomp-go/ATTRIBUTION.md), and
 [`snesrecomp-go/THIRD_PARTY_NOTICES.md`](snesrecomp-go/THIRD_PARTY_NOTICES.md).
+ActRaiser Builder resources and game-distribution dependencies are documented
+separately in
+[`installer/THIRD_PARTY_NOTICES.md`](installer/THIRD_PARTY_NOTICES.md).

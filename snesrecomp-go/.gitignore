@@ -5,10 +5,9 @@
 /recomp/funcs.h
 /testdata/baseline/
 
-# Local builds and downloaded differential-test vectors.
+# Local builds and downloaded differential-test vectors. Per-game release
+# packaging belongs to consuming projects and has no entries in this module.
 /build/
-/packaging/build/
-/packaging/cache/
 /tools/oracle/harte_cache/
 
 # Editor/OS noise.

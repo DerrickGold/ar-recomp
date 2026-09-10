@@ -740,10 +740,6 @@ func flagExpression(register ir.Reg) string {
 // byte. Downstream, the next RTS reads its return address misaligned and
 // dispatches to a plausible-but-wrong PC.
 //
-// Observed in ActRaiser: $03:9EF4's guard entered L_9E32_M0X0 while runtime m=1,
-// so $9E39's PLA popped 2 bytes for the 1-byte PHA at $9E09 (odd +1 drift), after
-// which $9EF4 popped the $A0D1 jump-table base as a return address.
-//
 // So: only take the goto when the runtime widths match the labels' decode widths;
 // otherwise fall through to the generic host return, which is exactly what an
 // unregistered target already does. This is upstream snesrecomp's invariant

@@ -1,0 +1,170 @@
+ActRaiser Recomp  (@SNESBUILD_OS_NAME@/@SNESBUILD_ARCH_NAME@)
+Version @SNESBUILD_VERSION@
+
+This builds and runs the game on your computer from a game ROM you already
+own. Everything needed is already in this folder. You do NOT need to install
+anything.
+
+
+WHAT YOU NEED
+-------------
+Your own game ROM: a ".sfc" or ".smc" file. Nothing else.
+
+
+HOW TO PLAY
+-----------
+1. Start "@SNESBUILD_RUN_SCRIPT@":
+      macOS    - double-click  run-build.command
+      Windows  - double-click  run-build.bat
+      Linux    - run           ./run-build.sh
+
+2. Your browser opens the private local workshop. Choose "Build your game" on
+   Home, select your ROM, then press "Build game". This takes a few minutes
+   and only needs to be done one time.
+   Your ROM never leaves this computer.
+
+3. Play - when the build finishes, a "run-game" file appears in this folder
+   (run-game.command on macOS, run-game.bat on Windows, run-game.sh on Linux).
+   Press "Play" in the builder now. Later you can either open the run-game file
+   directly, or start run-build again: it notices the game is already built and
+   opens as a launcher, so there is nothing to rebuild and no ROM to choose.
+
+
+UPGRADING TO A NEWER VERSION
+----------------------------
+Extract the new package over the top of this folder. Your settings, saves, and
+anything you customised are kept - the new version's settings are merged in
+alongside them, and you will see a line like
+
+      [upgrade] config.ini: 2 new settings added, your values kept
+
+the next time you play. If you changed a setting, your value always wins; only
+settings that are genuinely new in that version get added.
+
+The same is true of "diorama-layers.ini" and "game-assets/manifest.ini": your
+authored rooms and your own asset entries survive an upgrade.
+
+You will need your ROM again only if you want to REBUILD. If you just want to
+keep playing, the game is already built and nothing else is needed.
+
+
+OPTIONAL: FREE UP SPACE WHEN YOU ARE DONE BUILDING
+--------------------------------------------------
+Most of this folder is the build toolchain, and it is only needed if you want to
+build again later. After a successful build the builder offers to remove it and
+keep just the game - it will tell you how much space that frees.
+
+Nothing you need to play is touched: the game, your settings, your saves and any
+music or graphics you added, and the bundled manual all stay. Afterwards
+run-build still works as a launcher, it simply no longer offers to build - so
+the builder itself is kept (it is small), and only the toolchain it needs goes.
+If you ever do want to rebuild, download this package again.
+
+You can also do it by hand. These folders inside "utils" are only for building
+and are safe to delete. Note it is "utils/tools/toolchain", not all of
+"utils/tools": that folder also holds the builder program itself, and run-build
+will not start without it.
+
+      utils/tools/toolchain  the compiler toolchain (by far the largest)
+      utils/tools/sdl3       build copy of a support library
+      utils/build          leftover build scratch
+      utils/src            the game's source code
+      utils/recomp         recompiler configuration
+      utils/snesrecomp-go  runner SDK headers and static library used while building
+      utils/third_party    a support library used while building
+
+Do NOT delete anything else in "utils". The game runs from inside that folder,
+so "utils/config.ini", "utils/diorama-layers.ini", "utils/game-assets" and
+"utils/saves" all have to stay.
+
+
+IF SOMETHING GOES WRONG
+-----------------------
+- The browser does not open: copy the private http://127.0.0.1 URL printed in
+  the run-build window and paste it into any browser on this computer.
+
+- macOS says the file is from an unidentified developer: hold Control, click
+  run-build.command, choose Open, then Open again. (You only do this once.)
+
+@SNESBUILD_SDL_NOTE@
+
+
+OPTIONAL: YOUR OWN MUSIC AND HD GRAPHICS
+----------------------------------------
+This package starts with the ROM's original music and graphics. Open Assets
+in the sidebar and choose Music or Title artwork. Select a music track and
+browse to an Ogg Vorbis file, then press Save changes. All 17 ROM song images
+are listed; currently unknown names use a "Track NN"
+label so you can extract and listen to them before naming them.
+The builder copies those files into "utils/game-assets" and updates
+"manifest.ini" for you. Advanced packs can still add their own files and
+records there directly. Anything you don't add simply stays original.
+
+After supplying the ROM on the Build tab, you can also press "Extract
+original-audio previews" on Assets. The bundled pure-Go audio renderer creates
+local 30-second WAVs so each original track can be played beside the selected
+replacement. These previews stay in your computer's user cache; they are not
+copied into the game, its manifest, or a release package.
+
+
+LOCALIZATION WORKSHOP
+---------------------
+To install a published .arlang without the editor, copy the file directly into
+utils/game-assets/languages/packs/ (do not unzip), restart with run-game.*, and
+select its package name under Localization. Keep utils/tools/actraiser-builder: the game
+uses its shared archive reader without opening the GUI. Duplicate enabled IDs,
+including archive/folder duplicates, must be resolved before selection.
+See utils/docs/language-packs.md for manual install/update/removal, editor-free
+authoring and validation commands. The machine-readable route reference and
+archive schema accompany it; small authored examples live in utils/examples/.
+
+Open Languages in the sidebar to install a shared language pack, create your
+own translation, resume or clone a project, or extract a read-only source from
+a clean US, EU,
+German, French or Japanese ROM. The build also prepares your local US source.
+Create a named translation from US, browse/search messages, and save each as
+Not started, WIP or Done. Regional sources can be selected as references.
+
+Author backups (.arproject) keep your progress, notes and local source template;
+keep ROM-derived backups private. Language pack exports (.arlang) include your
+reviewed translations, author credits and license notices. Import packs or
+backups to resume editing; duplicate locales remain separate by package ID.
+The GUI and build use the same Go extraction/validation code. No Python needed.
+
+Install a reviewed pack, restart the game, then select its name in the overlay's
+Localization menu. Enhanced text uses the selected source. Native rendering
+keeps original USA text/font. The editor preview is a script preview, not final
+in-game font layout; visually check translations before sharing them.
+Opening/importing and saving only change your workshop copy. Use the explicit
+Pack actions → Install in game workflow to update the installed version the game uses.
+Local installation keeps all supplied translations; redistribution consent and
+WIP filtering belong to Export for sharing. Import new pack opens a folder
+chooser; Install already imported lets you choose saved work. Installed packs
+have enable/disable checkboxes in Languages. Unchecking keeps their files and
+progress but hides them from the game's language selector after restart.
+
+Workshop projects and installed packs live under utils/game-assets/languages.
+The shared and Japanese interface fonts and their licenses are under
+utils/game-assets/fonts. Regional
+ROMs and extracted scripts are never included in the distribution. See
+utils/docs/language-pack-format.md for authoring, controls, fonts and credits.
+See utils/docs/builder-workshop.md for navigation and the optional Home scene.
+
+
+WHAT THE FOLDERS ARE
+--------------------
+- run-build.*     opens the graphical builder. After the game is built this
+                  opens as a launcher instead.
+- run-game.*      created by the build; press it to play, every time.
+- utils/          the build tools AND the files the game itself needs while
+                  running - your settings, saves, manual, and assets live here,
+                  so keep it. See "free up space" above for what is safe to
+                  remove.
+- utils/defaults/ this version's stock settings, kept separately so upgrading
+                  never overwrites yours. Do not edit these; edit the copies in
+                  utils/ instead.
+
+Licensing and credits are in utils/LICENSE, utils/LICENSE_SCOPE.md,
+utils/ATTRIBUTION.md, utils/THIRD_PARTY_NOTICES.md, and
+utils/ACTRAISER-THIRD-PARTY-NOTICES.md. The vended runner's
+notices are also under utils/snesrecomp-go/runtime/.

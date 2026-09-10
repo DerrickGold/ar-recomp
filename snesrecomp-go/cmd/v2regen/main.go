@@ -70,8 +70,6 @@ func run(args []string) error {
 		return disassembleSPC(args[1:])
 	case "apu-audit":
 		return auditAPU(args[1:])
-	case "quintet-lzss":
-		return decompressQuintetLZSS(args[1:])
 	case "poll-census":
 		return censusPolls(args[1:])
 	case "sync-funcs":
@@ -125,7 +123,6 @@ Commands:
   rom-info           Report cartridge identity, header, and vectors (no-write)
   spc-disasm         Disassemble an SPC700 payload or ROM upload block (no-write)
   apu-audit          Validate live BRR samples and CPU/APU port handshakes
-  quintet-lzss       Decode a bit-packed Quintet LZSS blob
   poll-census        Classify decoded hardware-status read and polling sites
   sync-funcs         Regenerate recomp/funcs.h from bank cfg declarations
   metadata           Refresh the generated-code metadata sidecar
@@ -335,48 +332,6 @@ func disassembleSPC(args []string) error {
 		return err
 	}
 	return tooling.WriteSPCDisassembly(os.Stdout, report, *format)
-}
-
-func decompressQuintetLZSS(args []string) error {
-	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		return errors.New("quintet-lzss needs a linear input offset before its options")
-	}
-	offsetText, args := args[0], args[1:]
-	flags := flag.NewFlagSet("quintet-lzss", flag.ContinueOnError)
-	inputPath := flags.String("input", "game.sfc", "ROM or compressed input file")
-	size := flags.Int("size", 0, "exact decompressed size (default: little-endian word at offset)")
-	outputPath := flags.String("out", "", "optional decompressed output path")
-	comparePath := flags.String("compare", "", "optional expected binary to compare")
-	compareOffset := flags.Int("compare-offset", 0, "byte offset within --compare")
-	format := flags.String("format", "text", "report format: text or json")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	offset, err := strconv.ParseInt(strings.TrimSpace(offsetText), 0, 64)
-	if err != nil || offset < 0 || int64(int(offset)) != offset {
-		return fmt.Errorf("parse input offset %q as a non-negative integer", offsetText)
-	}
-	headered := true
-	flags.Visit(func(item *flag.Flag) {
-		if item.Name == "size" {
-			headered = false
-		}
-	})
-	report, output, err := tooling.BuildQuintetLZSS(tooling.QuintetLZSSOptions{
-		InputPath: *inputPath, Offset: int(offset), Size: *size, Headered: headered,
-		ComparePath: *comparePath, CompareOffset: *compareOffset,
-	})
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(*outputPath) != "" {
-		if err := os.WriteFile(*outputPath, output, 0o644); err != nil {
-			return fmt.Errorf("write decompressed output %s: %w", *outputPath, err)
-		}
-		report.NoWrite = false
-		fmt.Fprintf(os.Stderr, "quintet-lzss: wrote %d bytes to %s\n", len(output), *outputPath)
-	}
-	return tooling.WriteQuintetLZSSReport(os.Stdout, report, *format)
 }
 
 func censusPolls(args []string) error {

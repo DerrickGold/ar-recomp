@@ -459,8 +459,8 @@ cursor) and unreadable afterwards (it is behind it).
 
 These are USA coarse ranges, not a sequential-record grammar. For exact
 consumer-rooted extraction use the verified profiles in
-`snesrecomp-go/internal/localizationkit/data/*-profiles.json` and the Go
-`snesbuild localization-extract` command; the [dialogue reference](dialogue-system.md)
+`installer/internal/localization/data/*-profiles.json` and the Go
+`actraiser-builder localization-extract` command; the [dialogue reference](dialogue-system.md)
 explains native controls and source identity. Menu-bank text is interleaved
 with code and tables and is not covered by the bank-04 ranges alone.
 

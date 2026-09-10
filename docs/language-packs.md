@@ -25,7 +25,8 @@ copies of the same ID conflict; neither should be selected until the duplicate
 is removed or disabled. This also applies to a folder and archive with the same
 ID. Do not keep an older `.arlang` beside its replacement under a different name.
 
-The game prepares archives through the retained `utils/tools/snesbuild` utility;
+The game prepares archives through the retained
+`utils/tools/actraiser-builder` utility;
 it never opens the editor. Keep that executable when moving/slimming a bundle.
 The workshop's build-tool cleanup already retains it. A source CMake build
 with Go available builds the helper beside the game executable. Other ports
@@ -65,12 +66,13 @@ The builder's Languages checklist can enable/disable or recoverably uninstall
 archives as well as folders. Alternatively, from the distribution root:
 
 ```sh
-utils/tools/snesbuild language disable --root utils --installed my-pack.arlang
-utils/tools/snesbuild language enable --root utils --installed my-pack.arlang
-utils/tools/snesbuild language uninstall --root utils --installed my-pack.arlang
+utils/tools/actraiser-builder language disable --root utils --installed my-pack.arlang
+utils/tools/actraiser-builder language enable --root utils --installed my-pack.arlang
+utils/tools/actraiser-builder language uninstall --root utils --installed my-pack.arlang
 ```
 
-Windows uses `utils\tools\snesbuild.exe`; use the same arguments. `--installed`
+Windows uses `utils\tools\actraiser-builder.exe`; use the same arguments.
+`--installed`
 names the file or folder **as it appears in `packs/`**, not its display name.
 Restart afterward. Uninstalling an archive moves it into `packs/.uninstalled/`
 and prints its recovery path. Unpacked installs retain a recovery manifest.
@@ -127,29 +129,32 @@ or builder interface catalogs.
 
 ## Validate and package without the GUI
 
-The following commands run from the distribution root. In a checkout use
-`build/snesbuild`, or run `go run ./cmd/snesbuild` from `snesrecomp-go/` with
-explicit paths. Paths in flags are relative to your shell's current directory;
-only `--root` identifies the game's assets/fallback directory.
+The following commands run from the distribution root. In a checkout build
+`installer/build/actraiser-builder`, or use
+`go -C installer run ./cmd/actraiser-builder` from the repository root with
+absolute input/output paths. A built executable resolves ordinary relative
+paths from your shell's current directory; `go -C installer run` starts in the
+`installer/` module instead. Options documented as relative to `--root` still
+resolve from the selected game assets/fallback directory.
 
 ```sh
 # Grammar, paths, aliases, anchors, placeholders and presentation contracts.
-utils/tools/snesbuild language validate --pack /path/to/my-pack
+utils/tools/actraiser-builder language validate --pack /path/to/my-pack
 
 # Also check the actual game font stack, including omitted native-US messages.
-utils/tools/snesbuild language validate --pack /path/to/my-pack \
+utils/tools/actraiser-builder language validate --pack /path/to/my-pack \
   --root utils --game ./ActRaiserRecomp --sample 'Élise'
 
 # Publish all supplied messages after explicitly reviewing them.
-utils/tools/snesbuild language package --pack /path/to/my-pack \
+utils/tools/actraiser-builder language package --pack /path/to/my-pack \
   --root utils --game ./ActRaiserRecomp --out my-translation.arlang \
   --all-messages --confirm-rights
 
 # Optional validated copy into this installation (no publishing consent needed).
-utils/tools/snesbuild language install --root utils --pack my-translation.arlang
+utils/tools/actraiser-builder language install --root utils --pack my-translation.arlang
 
 # Export a fresh ROM-free machine-readable reference for external tools.
-utils/tools/snesbuild language reference --out authoring-reference.json
+utils/tools/actraiser-builder language reference --out authoring-reference.json
 ```
 
 On Windows use `--game .\ActRaiserRecomp.exe`. A game build and its locally

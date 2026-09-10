@@ -8,14 +8,14 @@
 # bundles.
 #
 # The equivalent pure-CMake command (run from the packaging directory) is:
-#   cd snesrecomp-go/packaging && cmake --workflow --preset release
+#   cd installer/packaging && cmake --workflow --preset release
 # Individual platforms: `make release-macos-arm64`, `make release-steam-deck`,
 # etc.
 #
 # Each platform's CMake build tree (which holds a freshly extracted ~180 MB Zig
 # toolchain) is removed as soon as that bundle is staged into release/, so the
 # large intermediate build data does not accumulate. The download cache
-# (snesrecomp-go/packaging/cache) is kept so re-runs need no re-download. Pass
+# (installer/packaging/cache) is kept so re-runs need no re-download. Pass
 # KEEP_BUILD=1 to retain the per-platform build trees for debugging.
 #
 # Local development:
@@ -36,7 +36,7 @@
 #                     default run is not evidence that this gate ran. This
 #                     target fails loudly instead of skipping. Override the ROM
 #                     directory with `make check-localization-roms ROM_ROOT=...`.
-#   make check-localization-workflow LOCALIZATION_BUILDER=/path/to/snesbuild
+#   make check-localization-workflow ACTRAISER_BUILDER=/path/to/actraiser-builder
 #                     exercise a packaged Go extractor, editor import/export,
 #                     real game font gate, same-locale installs and relocation.
 #                     This does not replace clean full-game regeneration.
@@ -55,13 +55,13 @@
 #                     re-download on the next `make release`).
 #   make clean-release  remove only the packaged bundles + packaging build.
 
-PACKAGING := snesrecomp-go/packaging
+PACKAGING := installer/packaging
 PLATFORMS := macos-arm64 macos-x86_64 linux-x86_64 linux-arm64 windows-x86_64 windows-arm64 steam-deck
 ROM ?= ar.sfc
 
 # Regenerable artifacts, grouped. Never lists the ROM, saves/*.srm, recordings,
 # or authored source; only the specific generated sidecars inside saves/.
-CLEAN_BUILD_DIRS := build build-release build-control build-terrain build-asan build-trace $(PACKAGING)/build snesrecomp-go/build
+CLEAN_BUILD_DIRS := build build-release build-control build-terrain build-asan build-trace $(PACKAGING)/build snesrecomp-go/build installer/build
 CLEAN_GENERATED  := src/gen recomp/funcs.h saves/gen_meta.json saves/rts_webs.txt saves/rts_webs.prev.txt
 CLEAN_RELEASE    := release
 
@@ -82,6 +82,7 @@ config.ini:
 	@echo "seeded $@ from $(CONFIG_TEMPLATE)"
 
 dev: config.ini
+	go -C installer run ./cmd/actraiser-builder native-source --root .. --rom $(ROM)
 	@if [ -z "$$(ls src/gen/*.c 2>/dev/null)" ]; then \
 	  echo "=== regenerating (src/gen is empty) ==="; \
 	  go -C snesrecomp-go run ./cmd/snesbuild regen --root .. --rom $(ROM) --allow-stubs; \
@@ -121,6 +122,7 @@ $(addprefix release-,$(PLATFORMS)): release-%:
 CROSS_TARGETS := x86_64-windows-gnu
 
 check-cross:
+	go -C installer run ./cmd/actraiser-builder native-source --root .. --rom $(ROM)
 	@if [ -z "$$(ls src/gen/*.c 2>/dev/null)" ]; then \
 	  echo "=== regenerating (src/gen is empty) ==="; \
 	  go -C snesrecomp-go run ./cmd/snesbuild regen --root .. --rom $(ROM) --allow-stubs || exit 1; \
@@ -157,20 +159,20 @@ check-localization-roms:
 	AR_AUTHOR_RUNTIME_PROBE="$(abspath $(LOCALIZATION_PROBE))" \
 	AR_NATIVE_GRAPHICS_PROBE="$(abspath build/actraiser_localization_art_test)" \
 	AR_CREDITS_RUNTIME_PROBE="$(abspath build/actraiser_localization_credits_test)" \
-	  go -C snesrecomp-go test ./internal/buildgui ./internal/localizationkit ./internal/project -count=1
+	  go -C installer test ./internal/builder ./internal/localization -count=1
 	@echo "five-ROM localization acceptance ran with all $(words $(LOCALIZATION_ROMS)) ROMs and the C probe"
 
 check-localization-workflow: check-localization-roms
-	@test -n "$(LOCALIZATION_BUILDER)" && test -x "$(LOCALIZATION_BUILDER)" || \
-	  { echo "set LOCALIZATION_BUILDER to a freshly packaged snesbuild executable"; exit 1; }
+	@test -n "$(ACTRAISER_BUILDER)" && test -x "$(ACTRAISER_BUILDER)" || \
+	  { echo "set ACTRAISER_BUILDER to a freshly packaged actraiser-builder executable"; exit 1; }
 	cmake --build build --target ActRaiserRecomp actraiser_input_replay_test
 	AR_LOCALIZATION_GUI_ROM_ROOT="$(abspath $(ROM_ROOT))" \
 	AR_LOCALIZATION_BUILD_ROM="$(abspath $(ROM_ROOT)/ar.sfc)" \
-	AR_LOCALIZATION_BUILDER_PROBE="$(abspath $(LOCALIZATION_BUILDER))" \
+	AR_LOCALIZATION_BUILDER_PROBE="$(abspath $(ACTRAISER_BUILDER))" \
 	AR_AUTHOR_RUNTIME_PROBE="$(abspath $(LOCALIZATION_PROBE))" \
 	AR_AUTHOR_FONT_PROBE="$(abspath build/ActRaiserRecomp)" \
 	AR_REPLAY_WRITER_PROBE="$(abspath build/actraiser_input_replay_test)" \
-	  go -C snesrecomp-go test -race ./internal/buildgui \
+	  go -C installer test -race ./internal/builder \
 	    -run 'TestLocalizationRelocatedBuilderGameWorkflow|TestHeadlessDebugStateRejectionExits|TestHeadlessReplayEndExitsBeforeSafetyCap' -count=1
 
 clean-packaging-mounts:

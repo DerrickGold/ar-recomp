@@ -135,8 +135,8 @@ set(ACTRAISER_GEN_DIR "${CMAKE_SOURCE_DIR}/src/gen" CACHE PATH
 file(GLOB ACTRAISER_GEN_SOURCES CONFIGURE_DEPENDS "${ACTRAISER_GEN_DIR}/*.c")
 if(NOT ACTRAISER_GEN_SOURCES AND NOT AR_TESTS_ONLY)
     message(FATAL_ERROR
-        "${ACTRAISER_GEN_DIR} is empty — run `snesbuild regen --root . "
-        "--rom ar.sfc` (or the compatibility tools/regen.sh wrapper) before building. "
+        "${ACTRAISER_GEN_DIR} is empty — run `tools/regen.sh` (which performs "
+        "ActRaiser native-source preparation before generic regeneration) before building. "
         "(Configure with -DAR_TESTS_ONLY=ON to build only the ROM-free test tier.)")
 endif()
 
@@ -228,23 +228,27 @@ add_executable(ActRaiserRecomp
     ${ACTRAISER_GEN_SOURCES}
 )
 
-# Source builds stage the shared Go archive importer beside the game. Released
-# bundles already retain it under utils/tools after build-only cleanup.
+# Source builds stage the ActRaiser language/archive helper beside the game.
+# Released bundles retain it under utils/tools after build-only cleanup.
 find_program(ACTRAISER_GO_EXECUTABLE NAMES go)
 if(ACTRAISER_GO_EXECUTABLE AND NOT CMAKE_CROSSCOMPILING)
-    file(GLOB_RECURSE AR_LANGUAGE_HELPER_INPUTS CONFIGURE_DEPENDS
-        "${SNESRECOMP_GO_ROOT}/cmd/*.go" "${SNESRECOMP_GO_ROOT}/internal/*")
-    set(AR_LANGUAGE_HELPER "${CMAKE_CURRENT_BINARY_DIR}/snesbuild${CMAKE_EXECUTABLE_SUFFIX}")
-    add_custom_command(OUTPUT "${AR_LANGUAGE_HELPER}"
+    set(ACTRAISER_INSTALLER_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/installer")
+    file(GLOB_RECURSE ACTRAISER_BUILDER_INPUTS CONFIGURE_DEPENDS
+        "${ACTRAISER_INSTALLER_ROOT}/cmd/*.go"
+        "${ACTRAISER_INSTALLER_ROOT}/internal/*")
+    set(ACTRAISER_BUILDER_HELPER
+        "${CMAKE_CURRENT_BINARY_DIR}/actraiser-builder${CMAKE_EXECUTABLE_SUFFIX}")
+    add_custom_command(OUTPUT "${ACTRAISER_BUILDER_HELPER}"
         COMMAND ${CMAKE_COMMAND} -E env
             "GOCACHE=${CMAKE_BINARY_DIR}/go-cache" CGO_ENABLED=0
-            ${ACTRAISER_GO_EXECUTABLE} build -trimpath -o "${AR_LANGUAGE_HELPER}" ./cmd/snesbuild
-        WORKING_DIRECTORY "${SNESRECOMP_GO_ROOT}"
-        DEPENDS ${AR_LANGUAGE_HELPER_INPUTS} "${SNESRECOMP_GO_ROOT}/go.mod"
-        COMMENT "Building shared language archive/authoring helper"
+            ${ACTRAISER_GO_EXECUTABLE} build -trimpath
+                -o "${ACTRAISER_BUILDER_HELPER}" ./cmd/actraiser-builder
+        WORKING_DIRECTORY "${ACTRAISER_INSTALLER_ROOT}"
+        DEPENDS ${ACTRAISER_BUILDER_INPUTS} "${ACTRAISER_INSTALLER_ROOT}/go.mod"
+        COMMENT "Building ActRaiser Builder language/archive helper"
         VERBATIM)
-    add_custom_target(actraiser_language_helper DEPENDS "${AR_LANGUAGE_HELPER}")
-    add_dependencies(ActRaiserRecomp actraiser_language_helper)
+    add_custom_target(actraiser_builder_helper DEPENDS "${ACTRAISER_BUILDER_HELPER}")
+    add_dependencies(ActRaiserRecomp actraiser_builder_helper)
 endif()
 
 target_include_directories(ActRaiserRecomp PRIVATE
@@ -711,22 +715,22 @@ if(BUILD_TESTING)
     find_program(ACTRAISER_GO_EXECUTABLE NAMES go)
     if(ACTRAISER_GO_EXECUTABLE)
         add_test(NAME actraiser_go_ui_catalog
-            COMMAND ${ACTRAISER_GO_EXECUTABLE} test ./internal/uicatalog -count=1)
+            COMMAND ${ACTRAISER_GO_EXECUTABLE} test ./internal/interfacecatalog -count=1)
         set_tests_properties(actraiser_go_ui_catalog PROPERTIES
-            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/snesrecomp-go"
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/installer"
             ENVIRONMENT "GOCACHE=${CMAKE_BINARY_DIR}/go-cache"
             TIMEOUT 120)
         add_test(NAME actraiser_go_localization
-            COMMAND ${ACTRAISER_GO_EXECUTABLE} test ./internal/localizationkit
+            COMMAND ${ACTRAISER_GO_EXECUTABLE} test ./internal/localization
                 -count=1)
         set_tests_properties(actraiser_go_localization PROPERTIES
-            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/snesrecomp-go"
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/installer"
             ENVIRONMENT "GOCACHE=${CMAKE_BINARY_DIR}/go-cache;AR_AUTHOR_RUNTIME_PROBE=$<TARGET_FILE:actraiser_language_pack_runtime_test>;AR_NATIVE_GRAPHICS_PROBE=$<TARGET_FILE:actraiser_localization_art_test>;AR_CREDITS_RUNTIME_PROBE=$<TARGET_FILE:actraiser_localization_credits_test>"
             TIMEOUT 120)
         add_test(NAME actraiser_go_language_distribution
             COMMAND ${ACTRAISER_GO_EXECUTABLE} test ./internal/languagecli -count=1)
         set_tests_properties(actraiser_go_language_distribution PROPERTIES
-            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/snesrecomp-go"
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/installer"
             ENVIRONMENT "GOCACHE=${CMAKE_BINARY_DIR}/go-cache;AR_LANGUAGE_DESKTOP_PROBE=$<TARGET_FILE:actraiser_language_pack_desktop_test>"
             TIMEOUT 120)
     endif()

@@ -26,7 +26,7 @@ VERSION = 1
 
 
 SURFACE_KINDS = json.loads((ROOT /
-    'snesrecomp-go/internal/localizationkit/data/us-compose-surfaces.json'
+    'installer/internal/localization/data/us-compose-surfaces.json'
     ).read_text(encoding='utf-8'))
 
 

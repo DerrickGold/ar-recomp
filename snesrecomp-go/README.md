@@ -4,10 +4,8 @@
 games. It translates configured 65816 entry points into C ahead of time and
 ships the C runtime and SNES hardware model that generated code links against.
 
-This directory is a self-contained Go module inside ActRaiserRecomp. It is not
-published as a separate repository yet, but it is deliberately structured so
-it can be extracted later without bringing the historical Python checkout or
-any ActRaiser files with it.
+This directory is a self-contained, game-agnostic Go module. It can be copied
+or published independently of any game repository.
 
 No ROM, generated game code, game assets, memory dumps, or captured gameplay
 data belong in this module. Supply ROMs locally and keep generated C and
@@ -44,7 +42,7 @@ game ROM and should not be redistributed.
 - A downloaded `v2regen` or `snesbuild` binary needs no Go installation.
 - Go 1.24 or newer is required to build the tools or run their tests from source.
 - A C11 compiler, CMake 3.16+, and SDL3 development files for the traditional
-  developer build. The hermetic/GUI path uses the packaged Zig and SDL3 inputs.
+  developer build. The hermetic path can use explicitly staged Zig and SDL3 inputs.
   Games enabling enhanced text also require SDL3_ttf development files; its
   headers and runtime are included in the supported standalone bundles.
 - A legally obtained, local ROM for the game being recompiled.
@@ -229,12 +227,8 @@ snesbuild toolchain fetch                # pinned Zig, checksum-verified
 snesbuild build --hermetic --root .      # zig cc + link, no CMake
 ```
 
-For ActRaiser's local US text-source extraction, pass the selected ROM to
-`build --rom path/to/ar.sfc`; `all --rom ...` forwards the same selection to
-regeneration and building. Existing local source packs are not overwritten.
-The GUI's dependency scan and `doctor` check SDL3_ttf when the manifest links
-it. Native system packages may occupy separate prefixes; explicit SDKs and
-cross builds must contain both dependencies and never borrow host libraries.
+Native system packages may occupy separate prefixes; explicit SDKs and cross
+builds must contain every manifest dependency and never borrow host libraries.
 
 Windows ARM64 uses a native AArch64 Zig development snapshot rather than the
 stable 0.16.0 binary. The stable binary was itself miscompiled by an upstream
@@ -335,7 +329,6 @@ v2regen disasm 01:9C6F --rom game.sfc --mx 0,0 --until-flow --raw
 v2regen rom-info --rom game.sfc
 v2regen spc-disasm 0800 08F0 --input game.sfc --upload-block 0x011ACD
 v2regen apu-audit --prefix saves/audio-stage1 --strict
-v2regen quintet-lzss 0x0CD695 --input game.sfc --out build/blob.bin
 v2regen xref 00:9DE1 --rom game.sfc --cfg-dir recomp --kind branch
 v2regen xref 0295 --rom game.sfc --cfg-dir recomp --kind write --wram-mirrors
 v2regen xref 01:9CD6 --rom game.sfc --cfg-dir recomp \
@@ -430,52 +423,13 @@ folders in the include directory and both libraries in the library directory.
 Run `v2regen help` or `v2regen <command> -h` for every option.
 Run `snesbuild help` or `snesbuild <command> -h` for project-driver options.
 
-### Local audio previews
-
-The `snesbuild` binary also contains an independently authored, pure-Go
-SPC700/S-DSP audio-only emulator for ROM-owner preview generation:
-
-```sh
-snesbuild audio-preview --rom ../game.sfc --out ../build/audio-previews \
-  --seconds 30 --tracks title-theme,song-00
-```
-
-The GUI invokes the same package from its Assets tab and writes stereo WAVs to
-the per-user cache. It has no dependency on the playable C runner, a browser
-SPC player, FFmpeg, or a system audio converter. The generated WAVs are ROM-derived game
-content and are intentionally outside the module's MIT grant.
-
-## Distribution packaging
-
-`packaging/` is a standalone CMake project that builds a **fully
-self-contained, one-click bundle per platform**: the whole buildable game
-project plus the build machinery (`tools/snesbuild`, the pinned Zig toolchain,
-and the supported SDL3/SDL3_ttf redistributables) and a `run-build` script. A user
-unpacks it and runs the script, which opens the local graphical ROM picker and
-build log — no repository checkout or developer tools required.
-
-```sh
-make release                                    # from the game repo root, all platforms
-# cd packaging && cmake --workflow --preset release   # pure-CMake equivalent
-```
-
-Go is CGO-free, so every platform cross-builds from one machine. Bundles are
-named `actraiser-recomp-<os>-<arch>.{tar.xz,zip}` and written to the repo's
-`release/`. They contain only generic tools, the project's own authored
-source, and redistributable third-party components — never a ROM, generated C,
-or retail media assets. The licensed shared Noto face and its OFL are included;
-HD/audio asset manifests remain templates. Generic Linux uses system SDL3 and
-SDL3_ttf development packages. The packaging
-CMake install manifest is the authoritative bundle contract.
-
 ## Documentation
 
 - [`docs/PROJECT_INTEGRATION.md`](docs/PROJECT_INTEGRATION.md): project layout,
   generation pipeline, CMake, runtime hooks, and redistribution rules.
 - [`docs/CFG_FORMAT.md`](docs/CFG_FORMAT.md): supported `bankNN.cfg` syntax.
-- [`docs/TOOLING_MIGRATION.md`](docs/TOOLING_MIGRATION.md): Go tooling replacements
-  for retired project Python scripts and the boundary for intentionally
-  game-specific helpers.
+- [`docs/TOOLING_MIGRATION.md`](docs/TOOLING_MIGRATION.md): the ownership boundary
+  between reusable Go tooling and project-specific helpers.
 - [`runtime/docs/RUNTIME.md`](runtime/docs/RUNTIME.md): shared runtime boundary, optional
   features, and current limitations.
 - [`ATTRIBUTION.md`](ATTRIBUTION.md): Python-source provenance, prior work,

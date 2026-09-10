@@ -277,7 +277,7 @@ unchanged source templates are counted separately. Publication coverage uses
 the actual filtered export, retaining the author's WIP status in the report.
 Changing publication options invalidates that report until checked again.
 
-`snesbuild language validate --pack <path>` provides the same inventory in
+`actraiser-builder language validate --pack <path>` provides the same inventory in
 `text_coverage`, independently of optional `font_coverage`. `required` describes
 contract completeness; `liveOptional` identifies the 26 audited live US HUD/
 credits extras. `surfaces[].missing` lists native-fallback IDs. Groups include
@@ -849,15 +849,16 @@ pack passing the portable format validator will fit every layout/font setting.
 
 The build and Languages UI use the same Go extraction/authoring core. The build
 creates the U.S. starting source automatically. A source checkout can also run
-the bundled command directly (from `snesrecomp-go/`, prefix these commands with
-`go run ./cmd/snesbuild` in place of `snesbuild`):
+the command directly from the repository root by replacing
+`actraiser-builder` below with
+`go -C installer run ./cmd/actraiser-builder`:
 
 ```sh
-snesbuild localization-extract --rom /path/to/ar.sfc --out native-us.zip
-snesbuild localization-extract --rom /path/to/ar-fra.sfc --out source-fr.zip
-snesbuild localization-extract --rom /path/to/ar.sfc \
+actraiser-builder localization-extract --rom /path/to/ar.sfc --out native-us.zip
+actraiser-builder localization-extract --rom /path/to/ar-fra.sfc --out source-fr.zip
+actraiser-builder localization-extract --rom /path/to/ar.sfc \
   --format catalog --out native-us-catalog.json
-snesbuild localization-graphics --rom /path/to/ar-jp.sfc --out graphics-jp.zip
+actraiser-builder localization-graphics --rom /path/to/ar-jp.sfc --out graphics-jp.zip
 ```
 
 Outputs must not already exist. Source archives are private workshop backups:

@@ -1,0 +1,530 @@
+package builder
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+// The load-bearing property: launch and rebuild are INDEPENDENT capabilities,
+// and the mode a page takes follows from their combination. A slimmed install
+// (playable, no tools) must report "launcher" so the build affordances are
+// hidden rather than merely disabled.
+func TestModeFollowsCapabilities(t *testing.T) {
+	cases := []struct {
+		name            string
+		launch, rebuild bool
+		want            string
+	}{
+		{"fresh copy, nothing built", false, true, "buildable"},
+		{"built with tools present", true, true, "ready"},
+		{"slimmed: built, tools gone", true, false, "launcher"},
+		{"neither possible", false, false, "unusable"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			state := InstallState{CanLaunch: testCase.launch, CanRebuild: testCase.rebuild}
+			if got := state.mode(); got != testCase.want {
+				t.Fatalf("mode() = %q, want %q", got, testCase.want)
+			}
+		})
+	}
+}
+
+// A build must be refused when its inputs are gone. Enforced server-side on
+// purpose: hiding the button is presentation, and presentation is not a
+// guarantee -- a stale page, or a cleanup performed in another window, would
+// otherwise start a build that dies partway with a confusing toolchain error.
+func TestBuildRefusedWhenRebuildImpossible(t *testing.T) {
+	buildCalls := 0
+	app := newApplication(context.Background(), Options{
+		ProjectRoot: t.TempDir(),
+		Build: func(context.Context, string, io.Writer) (Result, error) {
+			buildCalls++
+			return Result{}, nil
+		},
+		Detect: func() InstallState {
+			return InstallState{CanLaunch: true, CanRebuild: false}
+		},
+	}, "token")
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/token/build", nil)
+	app.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusConflict)
+	}
+	if buildCalls != 0 {
+		t.Fatalf("build ran %d times despite missing inputs", buildCalls)
+	}
+	// The message has to say what to DO about it, not just that it failed.
+	if body := recorder.Body.String(); !bytes.Contains([]byte(body), []byte("download the package again")) {
+		t.Fatalf("refusal does not tell the user how to recover: %s", body)
+	}
+}
+
+// Launching an EXISTING build without building first is the whole point of
+// detection: reopening the GUI beside a finished game must offer to play it.
+func TestLaunchWorksOnDetectedBuildWithoutBuilding(t *testing.T) {
+	launched := make(chan string, 1)
+	app := newApplication(context.Background(), Options{
+		ProjectRoot: t.TempDir(),
+		Build: func(context.Context, string, io.Writer) (Result, error) {
+			return Result{}, nil
+		},
+		Launch: func(result Result) error {
+			launched <- result.OutputPath
+			return nil
+		},
+		Detect: func() InstallState {
+			return InstallState{
+				CanLaunch: true, CanRebuild: true,
+				Result: Result{OutputPath: "/games/run-game.sh"},
+			}
+		},
+	}, "token")
+
+	// Note the state is still "idle" -- no build has run in this process.
+	if app.state != "idle" {
+		t.Fatalf("state = %q, want idle", app.state)
+	}
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/token/launch", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s), want 200", recorder.Code, recorder.Body.String())
+	}
+	select {
+	case path := <-launched:
+		if path != "/games/run-game.sh" {
+			t.Fatalf("launched %q, want the detected launcher", path)
+		}
+	default:
+		t.Fatal("launch did not reach the host")
+	}
+}
+
+// Without a detected build there is nothing to launch, and the old refusal must
+// still apply -- otherwise the Play path would call the host with an empty path.
+func TestLaunchStillRefusedWithNothingBuilt(t *testing.T) {
+	app := newApplication(context.Background(), Options{
+		ProjectRoot: t.TempDir(),
+		Build:       func(context.Context, string, io.Writer) (Result, error) { return Result{}, nil },
+		Launch:      func(Result) error { t.Fatal("launch must not run"); return nil },
+		Detect:      func() InstallState { return InstallState{CanRebuild: true} },
+	}, "token")
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/token/launch", nil))
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusConflict)
+	}
+}
+
+// The cleanup offer must not appear when there is nothing to clean, when the
+// host cannot do it, or when the game is not playable yet -- reclaiming space
+// before there is a working build trades away the ability to make one.
+func TestSlimOfferedOnlyWhenMeaningful(t *testing.T) {
+	cases := []struct {
+		name      string
+		install   InstallState
+		hasSlim   bool
+		wantOffer bool
+	}{
+		{"built, tools present", InstallState{CanLaunch: true, CanRebuild: true, CanSlim: true}, true, true},
+		{"already lean", InstallState{CanLaunch: true, CanSlim: false}, true, false},
+		{"host cannot slim", InstallState{CanLaunch: true, CanSlim: true}, false, false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			options := Options{
+				ProjectRoot: t.TempDir(),
+				Build:       func(context.Context, string, io.Writer) (Result, error) { return Result{}, nil },
+				Detect:      func() InstallState { return testCase.install },
+			}
+			if testCase.hasSlim {
+				options.Slim = func(io.Writer) error { return nil }
+			}
+			app := newApplication(context.Background(), options, "token")
+			recorder := httptest.NewRecorder()
+			app.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/token/status", nil))
+			var got status
+			if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
+				t.Fatalf("decode status: %v", err)
+			}
+			if got.Install.CanSlim != testCase.wantOffer {
+				t.Fatalf("canSlim = %v, want %v", got.Install.CanSlim, testCase.wantOffer)
+			}
+		})
+	}
+}
+
+// After a cleanup the page must settle into launcher mode from the SERVER's
+// answer, so the page never has to infer capability from a transition.
+func TestSlimReprobesAndReportsLauncherMode(t *testing.T) {
+	slimmed := false
+	app := newApplication(context.Background(), Options{
+		ProjectRoot: t.TempDir(),
+		Build:       func(context.Context, string, io.Writer) (Result, error) { return Result{}, nil },
+		Slim: func(output io.Writer) error {
+			slimmed = true
+			_, _ = io.WriteString(output, "removed tools\n")
+			return nil
+		},
+		Detect: func() InstallState {
+			if slimmed {
+				return InstallState{CanLaunch: true, CanRebuild: false, CanSlim: false,
+					Result: Result{OutputPath: "run-game.sh"}}
+			}
+			return InstallState{CanLaunch: true, CanRebuild: true, CanSlim: true,
+				SlimBytes: 700 << 20, Result: Result{OutputPath: "run-game.sh"}}
+		},
+	}, "token")
+
+	// Before: offered, and a rebuild is possible.
+	var before status
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/token/status", nil))
+	_ = json.Unmarshal(recorder.Body.Bytes(), &before)
+	if before.Mode != "ready" || !before.Install.CanSlim {
+		t.Fatalf("before: mode=%q canSlim=%v", before.Mode, before.Install.CanSlim)
+	}
+	if before.SlimSize != "700 MB" {
+		t.Fatalf("SlimSize = %q, want 700 MB", before.SlimSize)
+	}
+
+	recorder = httptest.NewRecorder()
+	app.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/token/slim", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("slim status = %d (%s)", recorder.Code, recorder.Body.String())
+	}
+
+	// After: launcher mode, no further offer, and a rebuild now refused.
+	var after status
+	recorder = httptest.NewRecorder()
+	app.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/token/status", nil))
+	_ = json.Unmarshal(recorder.Body.Bytes(), &after)
+	if after.Mode != "launcher" {
+		t.Fatalf("mode = %q, want launcher", after.Mode)
+	}
+	if after.Install.CanSlim {
+		t.Fatal("cleanup still offered after it ran")
+	}
+	if !after.SlimDone {
+		t.Fatal("slimDone not reported, so the page cannot confirm it")
+	}
+	// And the game is still launchable -- the point of the whole exercise.
+	if !after.Install.CanLaunch {
+		t.Fatal("cleanup left the install unable to launch")
+	}
+}
+
+// A second cleanup must be refused rather than running against a changed
+// filesystem.
+func TestSlimRefusedWhenNothingLeftToRemove(t *testing.T) {
+	app := newApplication(context.Background(), Options{
+		ProjectRoot: t.TempDir(),
+		Build:       func(context.Context, string, io.Writer) (Result, error) { return Result{}, nil },
+		Slim:        func(io.Writer) error { t.Fatal("slim must not run"); return nil },
+		Detect:      func() InstallState { return InstallState{CanLaunch: true, CanSlim: false} },
+	}, "token")
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/token/slim", nil))
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusConflict)
+	}
+}
+
+// Every existing caller passes no Detect hook. Those sessions must behave
+// exactly as the builder always did, or this change breaks the CLI.
+func TestWithoutDetectBehavesLikeTheOriginalBuilder(t *testing.T) {
+	app := newApplication(context.Background(), Options{
+		ProjectRoot: t.TempDir(),
+		Build:       func(context.Context, string, io.Writer) (Result, error) { return Result{}, nil },
+	}, "token")
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/token/status", nil))
+	var got status
+	if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Mode != "buildable" {
+		t.Fatalf("mode = %q, want buildable", got.Mode)
+	}
+	if got.Install.CanLaunch || got.Install.CanSlim {
+		t.Fatal("no-Detect session claimed capabilities it cannot have")
+	}
+}
+
+func TestSlimSummaryRoundsAndOmitsSmallSizes(t *testing.T) {
+	cases := []struct {
+		bytes int64
+		want  string
+	}{
+		{0, ""},
+		{512 << 10, ""}, // under a MB: not worth a figure
+		{700 << 20, "700 MB"},
+		{(1 << 30) + (512 << 20), "1.5 GB"},
+		{2 << 30, "2 GB"}, // no trailing ".0"
+	}
+	for _, testCase := range cases {
+		if got := slimSummary(testCase.bytes); got != testCase.want {
+			t.Fatalf("slimSummary(%d) = %q, want %q", testCase.bytes, got, testCase.want)
+		}
+	}
+}
+
+// The install state can change from OUTSIDE this process: the game is deleted,
+// the folder is moved, someone cleans up by hand. A cached answer would leave the
+// page offering Play for a game that is gone -- which is exactly what happened
+// before status re-probed (found by deleting the binary mid-session and watching
+// canLaunch stay true).
+func TestStatusReprobesSoAVanishedGameStopsBeingOffered(t *testing.T) {
+	present := true
+	app := newApplication(context.Background(), Options{
+		ProjectRoot: t.TempDir(),
+		Build:       func(context.Context, string, io.Writer) (Result, error) { return Result{}, nil },
+		Launch:      func(Result) error { return nil },
+		Detect: func() InstallState {
+			if !present {
+				return InstallState{CanRebuild: true}
+			}
+			return InstallState{CanLaunch: true, CanRebuild: true,
+				Result: Result{BinaryPath: "/games/ActRaiserRecomp", WorkingDir: "/games/utils"}}
+		},
+	}, "token")
+
+	poll := func() status {
+		recorder := httptest.NewRecorder()
+		app.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/token/status", nil))
+		var got status
+		if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return got
+	}
+
+	if first := poll(); !first.Install.CanLaunch || first.Mode != "ready" {
+		t.Fatalf("before: canLaunch=%v mode=%q", first.Install.CanLaunch, first.Mode)
+	}
+
+	present = false // someone deletes the game while the page is open
+
+	after := poll()
+	if after.Install.CanLaunch {
+		t.Fatal("still offering Play for a game that no longer exists")
+	}
+	if after.Mode != "buildable" {
+		t.Fatalf("mode = %q, want buildable", after.Mode)
+	}
+	// And the stale path is dropped, so Launch refuses instead of failing
+	// against a path that is gone.
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/token/launch", nil))
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("launch status = %d, want %d", recorder.Code, http.StatusConflict)
+	}
+}
+
+// A build that succeeded in THIS session keeps its own paths: they are
+// authoritative, and re-probing must not overwrite them with a detected guess.
+func TestSessionBuildResultSurvivesReprobe(t *testing.T) {
+	app := newApplication(context.Background(), Options{
+		ProjectRoot: t.TempDir(),
+		Build:       func(context.Context, string, io.Writer) (Result, error) { return Result{}, nil },
+		Detect: func() InstallState {
+			return InstallState{CanLaunch: true, CanRebuild: true,
+				Result: Result{BinaryPath: "/detected/game", WorkingDir: "/detected"}}
+		},
+	}, "token")
+	app.mu.Lock()
+	app.state = "succeeded"
+	app.result = Result{BinaryPath: "/built/game", WorkingDir: "/built"}
+	app.mu.Unlock()
+
+	app.refreshState()
+
+	app.mu.Lock()
+	got := app.result.BinaryPath
+	app.mu.Unlock()
+	if got != "/built/game" {
+		t.Fatalf("BinaryPath = %q, want this session's own build", got)
+	}
+}
+
+// A launchable install with NO run-game script must still launch: the host runs
+// the binary directly, so the script is optional. Guards the OutputPath-only
+// check that would otherwise refuse a launch the host can perform.
+func TestLaunchWorksWithoutARunGameScript(t *testing.T) {
+	launched := make(chan Result, 1)
+	app := newApplication(context.Background(), Options{
+		ProjectRoot: t.TempDir(),
+		Build:       func(context.Context, string, io.Writer) (Result, error) { return Result{}, nil },
+		Launch:      func(result Result) error { launched <- result; return nil },
+		Detect: func() InstallState {
+			return InstallState{CanLaunch: true, CanRebuild: true,
+				Result: Result{BinaryPath: "/games/ActRaiserRecomp",
+					WorkingDir: "/games/utils"}} // no OutputPath at all
+		},
+	}, "token")
+
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/token/launch", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s), want 200", recorder.Code, recorder.Body.String())
+	}
+	select {
+	case result := <-launched:
+		if result.BinaryPath != "/games/ActRaiserRecomp" {
+			t.Fatalf("BinaryPath = %q", result.BinaryPath)
+		}
+		if result.WorkingDir != "/games/utils" {
+			t.Fatalf("WorkingDir = %q, want the project dir", result.WorkingDir)
+		}
+	default:
+		t.Fatal("launch never reached the host")
+	}
+}
+
+// Play must be refused WHILE a build is running. Broadening the launch guard to
+// accept a DETECTED build (which is what turns the builder into a launcher) had
+// the side effect of permitting Play mid-rebuild -- launching the very binary the
+// build is overwriting. Found by an audit probe.
+//
+// The cached install state legitimately still says "launchable" during a build,
+// because status deliberately skips re-probing while the tree is churning, so the
+// build state has to be checked FIRST and independently.
+func TestLaunchRefusedWhileBuilding(t *testing.T) {
+	launchesDuringBuild := 0
+	app := newApplication(context.Background(), Options{
+		ProjectRoot: t.TempDir(),
+		Build:       func(context.Context, string, io.Writer) (Result, error) { return Result{}, nil },
+		// Counted rather than fatal: the second half of this test deliberately
+		// launches successfully once the build has finished, so a fatal here would
+		// fire on the legitimate call.
+		Launch: func(Result) error { launchesDuringBuild++; return nil },
+		Detect: func() InstallState {
+			return InstallState{CanLaunch: true, CanRebuild: true,
+				Result: Result{BinaryPath: "/old/game", WorkingDir: "/old"}}
+		},
+	}, "token")
+
+	app.mu.Lock()
+	app.state = "building"
+	app.mu.Unlock()
+
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/token/launch", nil))
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusConflict)
+	}
+	if body := recorder.Body.String(); !strings.Contains(body, "build is running") {
+		t.Fatalf("refusal does not explain why: %s", body)
+	}
+	if launchesDuringBuild != 0 {
+		t.Fatal("launched a game while the build was overwriting it")
+	}
+
+	// And once the build finishes, Play works again.
+	app.mu.Lock()
+	app.state = "idle"
+	app.mu.Unlock()
+	recorder = httptest.NewRecorder()
+	app.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/token/launch", nil))
+	if recorder.Code == http.StatusConflict {
+		t.Fatalf("still refused after the build ended: %s", recorder.Body.String())
+	}
+}
+
+// The cleanup size comes from MeasureSlim, which WALKS the build tree. The
+// status poll runs twice a second, so the walk must NOT be on that path: the
+// figure is measured when it can have changed and cached in between.
+//
+// This is the regression that motivated the split -- Detect used to size the
+// trees itself, costing 24ms per poll at ~900 files and 74ms at ~3600.
+func TestSlimSizeIsMeasuredOnceAndCachedAcrossPolls(t *testing.T) {
+	measures := 0
+	app := newApplication(context.Background(), Options{
+		ProjectRoot: t.TempDir(),
+		Build:       func(context.Context, string, io.Writer) (Result, error) { return Result{}, nil },
+		Slim:        func(io.Writer) error { return nil },
+		// A cheap probe: presence, no size -- exactly what the host now returns.
+		Detect: func() InstallState {
+			return InstallState{CanLaunch: true, CanRebuild: true, CanSlim: true,
+				Result: Result{OutputPath: "run-game.sh"}}
+		},
+		MeasureSlim: func() int64 {
+			measures++
+			return 700 << 20
+		},
+	}, "token")
+
+	poll := func() status {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		app.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/token/status", nil))
+		var got status
+		if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode status: %v", err)
+		}
+		return got
+	}
+
+	// Session start measures once, so an already-slimmable bundle shows a size
+	// without waiting for a build.
+	if measures != 1 {
+		t.Fatalf("MeasureSlim called %d times at startup, want 1", measures)
+	}
+	for i := 1; i <= 5; i++ {
+		got := poll()
+		if got.SlimSize != "700 MB" {
+			t.Fatalf("poll %d: SlimSize = %q, want 700 MB (the cached figure must "+
+				"survive a poll that does not re-measure)", i, got.SlimSize)
+		}
+	}
+	if measures != 1 {
+		t.Fatalf("MeasureSlim called %d times after 5 polls, want 1: the tree walk "+
+			"is back on the 500ms status path", measures)
+	}
+
+	// A cleanup IS a moment the size changes, so it re-measures.
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/token/slim", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("slim status = %d (%s)", recorder.Code, recorder.Body.String())
+	}
+	if measures != 2 {
+		t.Fatalf("MeasureSlim called %d times, want 2: a cleanup changes the size "+
+			"and must re-measure", measures)
+	}
+}
+
+// Without MeasureSlim the offer still appears; it just carries no figure. Keeps
+// the hook optional for callers that do not want to pay for a walk at all.
+func TestCleanupOfferSurvivesAMissingMeasureHook(t *testing.T) {
+	app := newApplication(context.Background(), Options{
+		ProjectRoot: t.TempDir(),
+		Build:       func(context.Context, string, io.Writer) (Result, error) { return Result{}, nil },
+		Slim:        func(io.Writer) error { return nil },
+		Detect: func() InstallState {
+			return InstallState{CanLaunch: true, CanRebuild: true, CanSlim: true,
+				Result: Result{OutputPath: "run-game.sh"}}
+		},
+	}, "token")
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/token/status", nil))
+	var got status
+	if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if !got.Install.CanSlim {
+		t.Fatal("cleanup not offered with no MeasureSlim hook")
+	}
+	if got.SlimSize != "" {
+		t.Fatalf("SlimSize = %q with no way to measure, want empty", got.SlimSize)
+	}
+}

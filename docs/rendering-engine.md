@@ -1297,8 +1297,8 @@ bundled runtime's widescreen/PPU interfaces:
   fields rather than translated prose.
 - Host interface messages use stable IDs in `localization/ui_catalog`, separate
   from game language packs. English/French/German/Japanese columns are authored
-  in `snesrecomp-go/internal/uicatalog/messages.json`; `go generate
-  ./internal/uicatalog` produces the static, sorted C table. Validation requires
+  in `installer/internal/interfacecatalog/messages.json`; `go generate
+  ./installer/internal/interfacecatalog` produces the static, sorted C table. Validation requires
   every entry's four translations and identical named-argument sets. C lookup
   allocates nothing; `{arguments}` are substituted literally with bounded,
   all-or-nothing writes, never as `printf` format strings. The overlay's

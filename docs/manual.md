@@ -508,7 +508,7 @@ default, and is safe to ignore unless you are debugging the source checkout.
 Both systems use `game-assets/manifest.ini`. That file is LIVE and yours: the
 builder writes to it, you can hand-edit it, and it is gitignored along with the
 asset files. It is seeded from a tracked template
-(`snesrecomp-go/internal/buildgui/assets/manifest.ini`, embedded in snesbuild
+(`installer/internal/builder/assets/manifest.ini`, embedded in actraiser-builder
 and vended as the release default) the first time the builder runs, and never
 overwritten afterwards — so an upgrade cannot discard entries you added. A
 replacement activates only when its named file exists; missing files are inert,

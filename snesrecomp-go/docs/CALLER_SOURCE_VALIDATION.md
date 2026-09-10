@@ -93,9 +93,9 @@ for byte:
 | Power Rangers | 8,248 / 138 | 7,318 / 122 |
 
 Tooling unit/race tests, vet, the strict standalone runtime build, and all 33
-runtime CTests pass. An initial live-tree `go test ./...` fails only
-`internal/languagecli.TestReferenceAndEditorFreeValidation`: concurrent
-language-contract edits do not match the shipped reference. These unrelated
+runtime CTests pass. At the time, an initial test of the enclosing game checkout
+failed only an unrelated game-localization reference check because concurrent
+language-contract edits did not match the shipped reference. Those unrelated
 files were not modified by this work. Full `go test ./...` passes in
 `/private/tmp/snesrecomp-caller-source-tests.jpdmJe`, a `d58ff739` snapshot
 overlaid with only our seven analysis implementation/test files. That snapshot

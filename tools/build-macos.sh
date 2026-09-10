@@ -6,6 +6,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG="Release"
+GO_COMMAND="${GO:-$(command -v go || true)}"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -29,6 +30,18 @@ if command -v brew >/dev/null 2>&1; then
   DRIVER_ARGS+=(--prefix-path "$(brew --prefix)")
 fi
 
+if [ -n "${ACTRAISER_BUILDER:-}" ]; then
+  "$ACTRAISER_BUILDER" native-source --root "$ROOT" --rom "$ROOT/ar.sfc"
+elif [ -x "$ROOT/installer/build/actraiser-builder" ]; then
+  "$ROOT/installer/build/actraiser-builder" native-source --root "$ROOT" --rom "$ROOT/ar.sfc"
+elif [ -n "$GO_COMMAND" ]; then
+  "$GO_COMMAND" -C "$ROOT/installer" run ./cmd/actraiser-builder \
+    native-source --root "$ROOT" --rom "$ROOT/ar.sfc"
+else
+  echo "build-macos.sh: no actraiser-builder binary or Go toolchain found" >&2
+  exit 1
+fi
+
 if [ -n "${SNESBUILD:-}" ]; then
   exec "$SNESBUILD" "${DRIVER_ARGS[@]}"
 fi
@@ -38,7 +51,6 @@ if [ -x "$HOST_DRIVER" ]; then
   exec "$HOST_DRIVER" "${DRIVER_ARGS[@]}"
 fi
 
-GO_COMMAND="${GO:-$(command -v go || true)}"
 if [ -z "$GO_COMMAND" ]; then
   echo "build-macos.sh: no snesbuild binary or Go toolchain found" >&2
   exit 1

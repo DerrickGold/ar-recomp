@@ -13,7 +13,7 @@ are a compact, modified representation of Unicode 17.0.0 DerivedCoreProperties:
 https://www.unicode.org/Public/17.0.0/ucd/DerivedCoreProperties.txt
 
 The kana_compositions table in
-snesrecomp-go/internal/localizationkit/data/decoder-profiles.json is a compact
+installer/internal/localization/data/decoder-profiles.json is a compact
 representation of Unicode canonical composition data for U+3040..U+30FF plus
 the combining dakuten/handakuten marks. It is generated through Python's
 unicodedata NFC normalization, not copied from game ROMs. These normalization
