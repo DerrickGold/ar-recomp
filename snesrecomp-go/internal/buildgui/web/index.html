@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="builder/theme.css">
 <script type="application/json" id="interface-catalog">{{UI_CATALOG}}</script>
 <script src="builder/i18n.js" defer></script>
+<script src="builder/file-input.js" defer></script>
 </head>
 <body>
 <div id="workshop-atmosphere" aria-hidden="true"><canvas id="ambient-scene" width="640" height="420"></canvas></div>
@@ -35,26 +36,24 @@
 </aside>
 
 <main id="workspace" tabindex="-1">
-  <header class="workspace-bar"><span id="workspace-section" data-i18n="builder.nav.home">Home</span><div id="dock" data-open="false" data-kind="idle"><span id="workspace-status" class="status-badge" role="status" data-i18n="builder.checking">Checking installation…</span><span id="track" role="progressbar" aria-label="Build progress" data-i18n-aria="builder.progress" aria-valuemin="0" aria-valuemax="100" hidden><span id="dock-pct" aria-hidden="true">0%</span></span><button id="dock-launch" type="button" hidden disabled data-i18n="builder.run">▶ Run game</button></div></header>
+  <header class="workspace-bar"><div id="dock" data-open="false" data-kind="idle"><span id="workspace-status" class="status-badge" role="status" data-i18n="builder.checking">Checking installation…</span><span id="track" role="progressbar" aria-label="Build progress" data-i18n-aria="builder.progress" aria-valuemin="0" aria-valuemax="100" hidden><span id="dock-pct" aria-hidden="true">0%</span></span><button id="dock-launch" type="button" hidden disabled data-i18n="builder.run">▶ Run game</button></div></header>
   <section class="panel" id="panel-home" role="tabpanel" aria-labelledby="tab-home">
     <div class="home-hero">
-      <div class="hero-copy"><p class="eyebrow" data-i18n="builder.home.welcome">WELCOME TO YOUR WORKSHOP</p><h1 data-i18n="builder.home.title">A little world.&#10;Made yours.</h1><p class="lede" data-i18n="builder.home.intro">Build your game, give it a new voice, and make it feel like home.</p><div class="actions"><button id="home-primary" type="button" disabled data-i18n="builder.home.checking">Checking your game…</button><button class="quiet" type="button" data-nav="localization" disabled><span data-i18n="builder.home.explore">Explore languages</span> <span aria-hidden="true">↗</span></button></div><p id="home-game-note" class="muted" data-i18n="builder.home.local">Everything stays on this computer.</p></div>
-      <div class="scene-stage"><canvas id="palace-scene" width="640" height="420" aria-label="A small illustrated palace floating above the clouds" data-i18n-aria="builder.scene.placeholder_aria"></canvas><span class="scene-caption" id="scene-caption" data-i18n="builder.scene.placeholder">A moment above the clouds</span></div>
+      <div class="hero-copy"><h1 data-i18n="builder.home.title">Shape the land.&#10;Make it yours.</h1><p class="lede" data-i18n="builder.home.intro">Build ActRaiser, give its people a new voice, and tune the adventure to your liking.</p><div class="actions"><button id="home-primary" type="button" disabled data-i18n="builder.home.checking">Checking your game…</button></div><p id="home-game-note" class="muted" data-i18n="builder.home.local">Everything stays on this computer.</p></div>
+      <div class="scene-stage"><canvas id="palace-scene" width="640" height="420" aria-label="A small illustrated palace floating above the clouds" data-i18n-aria="builder.scene.placeholder_aria"></canvas><span class="scene-caption" id="scene-caption" data-i18n="builder.scene.placeholder">A quiet moment above the clouds</span></div>
     </div>
-    <div class="section-heading"><h2 data-i18n="builder.home.customize">Make it your own</h2><span class="muted" data-i18n="builder.home.one_project">One small project at a time</span></div>
+    <div class="section-heading"><h2 data-i18n="builder.home.customize">Choose your path</h2></div>
     <div class="home-actions">
-      <button class="task-card" data-nav="localization" type="button" disabled><span class="card-icon" aria-hidden="true">文</span><strong data-i18n="builder.home.voice">Give it a new voice</strong><span data-i18n="builder.home.voice_help">Install a translation or pick up where you left off.</span><span class="card-link" data-i18n="builder.home.open_languages">Open languages ↗</span></button>
-      <button class="task-card" data-nav="assets" type="button"><span class="card-icon" aria-hidden="true">♫</span><strong data-i18n="builder.home.atmosphere">Set the atmosphere</strong><span data-i18n="builder.home.atmosphere_help">Choose title artwork and compare replacement music.</span><span class="card-link" data-i18n="builder.home.browse_assets">Browse assets ↗</span></button>
-      <button class="task-card" data-nav="manual" type="button"><span class="card-icon" aria-hidden="true">▤</span><strong data-i18n="builder.home.guide">Find your bearings</strong><span data-i18n="builder.home.guide_help">Read the original manual and learn your way around.</span><span class="card-link" data-i18n="builder.home.open_guide">Open the guide ↗</span></button>
+      <button class="task-card" data-nav="localization" type="button" disabled><span class="card-icon" aria-hidden="true">文</span><strong data-i18n="builder.home.voice">Give the people a voice</strong><span data-i18n="builder.home.voice_help">Install a translation or continue one of your own.</span><span class="card-link" data-i18n="builder.home.open_languages">Open languages ↗</span></button>
+      <button class="task-card" data-nav="assets" type="button"><span class="card-icon" aria-hidden="true">♫</span><strong data-i18n="builder.home.atmosphere">Set the scene</strong><span data-i18n="builder.home.atmosphere_help">Choose the title treatment and audition music from every realm.</span><span class="card-link" data-i18n="builder.home.browse_assets">Browse assets ↗</span></button>
+      <button class="task-card" data-nav="manual" type="button"><span class="card-icon" aria-hidden="true">▤</span><strong data-i18n="builder.home.guide">Consult the archives</strong><span data-i18n="builder.home.guide_help">Read the original instruction booklet and workshop guide.</span><span class="card-link" data-i18n="builder.home.open_guide">Open the guide ↗</span></button>
     </div>
     <p class="notice" data-language-status data-i18n="builder.language.source_checking" role="status">Checking the native US language source…</p>
-    <div class="section-heading"><h2 data-i18n="builder.home.translations">Back to your translations</h2><button id="home-refresh-projects" class="quiet" type="button" disabled data-i18n="builder.refresh">Refresh</button></div>
-    <div id="home-projects" class="project-library"><p class="empty-note" data-i18n="builder.home.projects_placeholder">Your saved translation projects will appear here.</p></div>
-    <p class="privacy" data-i18n="builder.home.privacy">Offline by design. Your ROM, translations, and custom assets stay on this computer.</p>
+    <section id="home-translations" hidden><div class="section-heading"><h2 data-i18n="builder.home.translations">Return to your translations</h2></div><div id="home-projects" class="project-library"></div></section>
   </section>
 
   <section class="panel" id="panel-build" role="tabpanel" aria-labelledby="tab-build" hidden>
-    <div class="page-heading"><div><p class="eyebrow" data-i18n="builder.build.eyebrow">FROM YOUR ROM TO YOUR GAME</p><h1 data-i18n="builder.nav.build">Build &amp; play</h1><p data-i18n="builder.build.intro">Choose your local US ROM. We’ll prepare everything needed to play.</p></div></div>
+    <div class="page-heading"><div><p class="eyebrow" data-i18n="builder.build.eyebrow">FROM YOUR ROM TO THE REALM</p><h1 data-i18n="builder.nav.build">Build &amp; play</h1><p data-i18n="builder.build.intro">Choose your local US ActRaiser ROM. The workshop will prepare a playable build on this computer.</p></div></div>
     <p class="notice" data-language-status data-i18n="builder.language.source_checking" role="status">Checking the native US language source…</p>
     <!-- PLAY BLOCK. Shown whenever a built game is on disk, whether this
          session built it or a previous one did. In launcher mode it is the only
@@ -126,7 +125,7 @@
   </section>
 
   <section class="panel" id="panel-assets" role="tabpanel" aria-labelledby="tab-assets" hidden>
-    <div class="page-heading"><div><p class="eyebrow" data-i18n="builder.assets.eyebrow">YOUR PERSONAL EDITION</p><h1 data-i18n="builder.assets.title">Art &amp; sound</h1><p data-i18n="builder.assets.intro">Preview a replacement, choose your favorite, then save it for the next launch.</p></div></div>
+    <div class="page-heading"><div><p class="eyebrow" data-i18n="builder.assets.eyebrow">SET THE STAGE</p><h1 data-i18n="builder.assets.title">Sights &amp; sounds</h1><p data-i18n="builder.assets.intro">Choose the title treatment, audition music from every realm, and save the arrangement for your next journey.</p></div></div>
     <form id="assets-form">
       <div class="asset-bar" id="asset-bar" data-dirty="false">
         <div class="asset-bar-text">
@@ -179,10 +178,7 @@
       <template id="asset-row-prototype">{{ASSET_ROW_PROTOTYPE}}</template>
 
 
-      <div class="actions asset-bottom-save">
-        <button id="save-assets" type="submit" disabled data-i18n="builder.assets.save">Save assets</button>
-      </div>
-      <div id="asset-state" role="status" data-i18n="builder.assets.open_to_load">Open this tab to load the current configuration.</div>
+      <div id="asset-state" role="status" hidden></div>
       <p class="privacy" data-i18n="builder.assets.privacy">Replacement files stay on this computer and are never uploaded.
       Saved changes take effect the next time the game starts.</p>
     </form>
@@ -190,7 +186,7 @@
 
   {{LOCALIZATION}}
   <section class="panel" id="panel-manual" role="tabpanel" aria-labelledby="tab-manual" hidden>
-    <div class="page-heading"><div><p class="eyebrow" data-i18n="builder.help.eyebrow">A LITTLE GUIDANCE</p><h1 data-i18n="builder.nav.help">Help &amp; manual</h1><p data-i18n="builder.help.intro">The original booklet, plus a few workshop essentials.</p></div></div>
+    <div class="page-heading"><div><p class="eyebrow" data-i18n="builder.help.eyebrow">GUIDANCE FROM THE SKY PALACE</p><h1 data-i18n="builder.nav.help">Help &amp; manual</h1><p data-i18n="builder.help.intro">The original instruction booklet, plus practical guidance for the workshop.</p></div></div>
     <details class="workshop-help"><summary data-i18n="builder.help.projects">How do workshop projects and installed packs differ?</summary><p data-i18n="builder.help.projects_help">Opening a pack makes an editable workshop copy. Saving keeps your work, but does not update the game. Install your saved pack from the editor, restart the game, then select its package name in the game’s localization settings. Translated packs use enhanced text rendering.</p></details>
     <div class="manual-bar">
       <p data-i18n="builder.help.manual_help">The original English 40-page instruction booklet — your browser's own reader handles paging, zoom and search. Changing the interface language does not translate the scanned booklet.</p>

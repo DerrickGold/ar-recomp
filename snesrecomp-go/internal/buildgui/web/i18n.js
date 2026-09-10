@@ -60,12 +60,13 @@
   const status=document.getElementById("interface-language-status");
   picker.value=locale;
   if(bootstrap.preferenceError){ status.hidden=false; set(status,"builder.interface.read_failed"); }
-  let saving=false,closed=false;
-  document.addEventListener("workshop:closed",()=>{ closed=true; picker.disabled=true; });
+  let saving=false,closed=false,statusTimer=0;
+  document.addEventListener("workshop:closed",()=>{ closed=true; picker.disabled=true; clearTimeout(statusTimer); });
   picker.addEventListener("change",async()=>{
     if(saving||closed){ picker.value=locale; return; }
     const requested=picker.value;
     if(!locales.includes(requested)){ picker.value=locale; return; }
+    clearTimeout(statusTimer);
     saving=true; picker.disabled=true; picker.setAttribute("aria-busy","true");
     status.hidden=false; set(status,"builder.interface.saving");
     try {
@@ -80,6 +81,7 @@
       // unsaved messages, file inputs and game-pack locale all stay untouched.
       set(status,"builder.interface.saved"); apply();
       document.dispatchEvent(new Event("workshop:language"));
+      statusTimer=setTimeout(()=>{ if(!closed&&locale===requested) status.hidden=true; },3500);
     } catch(error) {
       if(!closed){ picker.value=locale; set(status,Object.hasOwn(messages,error.message)?error.message:"builder.interface.save_failed"); }
     } finally { saving=false; picker.disabled=closed; picker.removeAttribute("aria-busy"); }

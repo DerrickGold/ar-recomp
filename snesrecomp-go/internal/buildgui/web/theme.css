@@ -254,7 +254,7 @@ body[data-scene-motion=off] #workshop-atmosphere { visibility:hidden }
   z-index:8;
   background:#111b29;
   display:flex;
-  justify-content:space-between;
+  justify-content:flex-end;
   align-items:center;
   gap:12px;
   padding:22px 40px;
@@ -340,11 +340,6 @@ body[data-scene-motion=off] #workshop-atmosphere { visibility:hidden }
 .hero-copy .actions {
   gap:10px
 }
-.hero-copy .quiet {
-  border:none;
-  font-size:12px;
-  padding-inline:8px
-}
 .hero-copy #home-game-note {
   margin-top:14px;
   font-size:11px;
@@ -384,9 +379,6 @@ body[data-scene-motion=off] #workshop-atmosphere { visibility:hidden }
 }
 .section-heading h2 {
   margin:0
-}
-.section-heading .muted {
-  font-size:11px
 }
 .section-heading button {
   font-size:11px;
@@ -512,20 +504,65 @@ input[type=checkbox] {
   width:auto;
   accent-color:var(--gold)
 }
-input[type=file] {
-  font-size:12px;
-  padding:12px;
-  border-style:dashed
+.file-control {
+  position:relative;
+  display:block;
+  width:100%;
+  min-width:0;
+  border:1px dashed #425065;
+  border-radius:6px;
+  background:#111d2b;
+  cursor:pointer;
+  transition:border-color .16s ease,box-shadow .16s ease
 }
-input[type=file]::file-selector-button {
-  font:inherit;
-  color:var(--ink);
-  background:#2b3b50;
-  border:0;
-  padding:7px 11px;
-  border-radius:4px;
-  margin-right:12px;
+.file-control:hover {
+  border-color:#66758a
+}
+.file-control:focus-within {
+  border-color:var(--gold);
+  box-shadow:0 0 0 2px rgba(239,201,130,.18)
+}
+.file-control input[type=file] {
+  position:absolute;
+  inset:0;
+  z-index:1;
+  width:100%;
+  height:100%;
+  margin:0;
+  padding:0;
+  opacity:0;
   cursor:pointer
+}
+.file-control-view {
+  display:flex;
+  align-items:center;
+  gap:12px;
+  min-height:48px;
+  padding:8px 12px;
+  pointer-events:none
+}
+.file-control-action {
+  flex:none;
+  color:#111b29;
+  background:var(--gold);
+  border-radius:4px;
+  padding:7px 11px;
+  font-size:12px;
+  font-weight:650
+}
+.file-control-name {
+  min-width:0;
+  overflow:hidden;
+  color:var(--muted);
+  font-size:12px;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+.file-control[data-has-file=true] .file-control-name {
+  color:var(--ink)
+}
+.file-control input[type=file]:disabled+.file-control-view {
+  opacity:.48
 }
 #build-box,#play-box {
   padding:25px;
@@ -586,7 +623,10 @@ input[type=file]::file-selector-button {
   color:var(--muted);
   overflow-wrap:anywhere
 }
-#state[data-kind=succeeded],#asset-state[data-kind=succeeded] {
+#state[data-kind=idle],#state[data-kind=succeeded] {
+  display:none
+}
+#asset-state[data-kind=succeeded] {
   color:var(--ok)
 }
 #state[data-kind=failed],#asset-state[data-kind=failed] {
@@ -793,6 +833,18 @@ pre {
   color:var(--muted);
   font-size:11px
 }
+.asset-technical {
+  margin-top:5px
+}
+.asset-technical summary {
+  color:var(--muted);
+  font-size:10px;
+  padding:0
+}
+.asset-technical .asset-source {
+  display:block;
+  margin-top:6px
+}
 .asset-current {
   font-size:11px;
   color:var(--muted)
@@ -899,9 +951,6 @@ pre {
 }
 .split-region input {
   flex:none
-}
-.asset-bottom-save {
-  display:none
 }
 #asset-state {
   margin-top:20px;
@@ -1210,9 +1259,6 @@ pre {
   }
   .task-card>span:not(.card-icon):not(.card-link) {
     margin-bottom:17px
-  }
-  .section-heading .muted {
-    display:none
   }
   .project-library {
     grid-template-columns:1fr

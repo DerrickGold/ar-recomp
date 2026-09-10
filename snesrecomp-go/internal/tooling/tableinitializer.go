@@ -16,6 +16,7 @@ import (
 func writeShadowInitializer(out io.Writer, r *ShadowInitializerRead, indent string) {
 	fmt.Fprintf(out, "%sload=%s M%dX%d mode=%s operand=$%X index=%s domain-superset=%d known-zero=$%04X known-one=$%04X bank-unknown=%t\n", indent, shadowAddress(r.LoadPC), r.LoadMX.M, r.LoadMX.X, r.Mode, r.Operand, r.IndexRegister, r.Index.DomainSize, r.Index.KnownZero, r.Index.KnownOne, r.DataBank.UnknownPaths)
 	fmt.Fprintf(out, "%sindex-origin=%s %s %s $%X reason=%s conditional-source-writers=%d\n", indent, shadowAddress(r.Index.Source.PC), r.Index.Source.Kind, r.Index.Source.Mode, r.Index.Source.Operand, r.Index.Source.Reason, len(r.Index.Writers))
+	writeShadowLocalSlot(out, r.Index.LocalSource, indent)
 	for _, op := range r.Index.Operations {
 		fmt.Fprintf(out, "%sindex-operation=%s %s $%04X\n", indent, shadowAddress(op.PC), op.Mnemonic, op.Operand)
 	}
@@ -78,6 +79,8 @@ type ShadowInitializerIndex struct {
 	DomainSize   uint32                     `json:"local_domain_size"`
 	DomainValues []uint16                   `json:"local_domain_values,omitempty"`
 	Writers      []ShadowStoredTargetWriter `json:"conditional_source_writers,omitempty"`
+	LocalSource  *ShadowLocalSlotSource     `json:"local_slot_source,omitempty"`
+	sourceKey    decoder.DecodeKey
 }
 
 type ShadowInitializerSample struct {
@@ -97,8 +100,16 @@ const shadowInitializerBankLimit = 256
 // No origin load's global range is guessed. Masks/shifts after an unknown
 // origin can still establish a useful finite superset on this decoded path.
 func (walk shadowPointerWalk) initializerIndex(at decoder.DecodeKey, reg string) ShadowInitializerIndex {
+	return walk.indexExpression(at, reg, false)
+}
+
+// Argument queries may cross stack/bank operations that preserve the value
+// register, but never pulls into that register or unknown status restoration.
+// Keep this separate from the previously published initializer expression.
+func (walk shadowPointerWalk) indexExpression(at decoder.DecodeKey, reg string, argument bool) ShadowInitializerIndex {
 	result := ShadowInitializerIndex{}
 	finish := func(kind, reason string, ins *cpu65816.Instruction) ShadowInitializerIndex {
+		result.sourceKey = at
 		result.Source = ShadowStoredOrigin{Kind: kind, PC: at.PC, Register: reg, Reason: reason}
 		if ins != nil {
 			result.Source.Mode, result.Source.Operand = ins.Mode.String(), ins.Operand
@@ -129,9 +140,15 @@ func (walk shadowPointerWalk) initializerIndex(at decoder.DecodeKey, reg string)
 		}
 		return result
 	}
+	if argument && !shadowPointerWord(at, reg) {
+		return finish("unknown", "byte_or_truncated_input", nil)
+	}
 	for range shadowPointerWalkLimit {
 		previous := walk.previous(at)
 		if previous == nil || previous.Instruction == nil {
+			if argument && at == walk.graph.Entry && len(walk.preds[at]) == 0 && shadowPointerWord(at, reg) {
+				return finish("entry_register", "entry_value_unproven", nil)
+			}
 			return finish("unknown", "entry_or_ambiguous_predecessor", nil)
 		}
 		at = previous.Key
@@ -161,6 +178,12 @@ func (walk shadowPointerWalk) initializerIndex(at decoder.DecodeKey, reg string)
 			return finish("register_after_call", "callee_value_unproven", nil)
 		case "LDA", "LDX", "LDY", "STA", "STX", "STY", "STZ":
 			continue
+		}
+		if argument {
+			switch ins.Mnemonic {
+			case "PHB", "PHK", "PLB", "PHD", "PLD", "PHP", "PHA", "PHX", "PHY", "PEA", "PEI", "PER":
+				continue
+			}
 		}
 		if shadowPointerTransparent(ins) {
 			continue
@@ -275,6 +298,9 @@ func (walk shadowPointerWalk) initializerRead(key decoder.DecodeKey, allowPointe
 	}
 	r := &ShadowInitializerRead{LoadPC: key.PC, LoadMX: analysis.MXState{M: key.M, X: key.X}, Mode: ins.Mode.String(), Operand: ins.Operand, IndexRegister: index, Index: walk.initializerIndex(key, index),
 		Obligations: []string{"decoded_context_not_reachability", "local_index_superset_not_table_extent", "ROM_mapping_and_data_ownership", "writer_alias_lifetime_and_reaching_definition", "stored_word_not_handler_or_stream_root"}}
+	if r.Index.Field != nil {
+		r.Index.LocalSource = walk.localSlotSource(r.Index.sourceKey, *r.Index.Field)
+	}
 	if ins.Mode == cpu65816.LONGX {
 		r.DataBank.Constants = []ShadowRegisterConstant{{Value: uint16(ins.Operand >> 16), DefinitionPC: key.PC}}
 	} else {
@@ -321,13 +347,9 @@ func (walk shadowPointerWalk) initializerRead(key decoder.DecodeKey, allowPointe
 
 func attachInitializerSamples(image romimage.Image, results []shadowDecodeResult, sites map[uint32]*ShadowDispatchSite) {
 	var reads []*ShadowInitializerRead
-	wanted := make(map[ShadowStoredField]bool)
 	var add func(*ShadowInitializerRead)
 	add = func(r *ShadowInitializerRead) {
 		reads = append(reads, r)
-		if r.Index.Field != nil {
-			wanted[*r.Index.Field] = true
-		}
 		if r.PointerSource != nil {
 			copy := *r.PointerSource
 			r.PointerSource = &copy
@@ -343,25 +365,19 @@ func attachInitializerSamples(image romimage.Image, results []shadowDecodeResult
 			}
 		}
 	}
-	writers := make(map[ShadowStoredField]map[string]ShadowStoredTargetWriter)
-	for _, r := range results {
-		if r.issue != nil {
-			continue
-		}
-		for _, w := range r.storedWrites {
-			if !wanted[w.field] {
-				continue
-			}
-			if writers[w.field] == nil {
-				writers[w.field] = make(map[string]ShadowStoredTargetWriter)
-			}
-			v, contexts := w.writer, w.writer.Contexts
-			v.Contexts = nil
-			id := shadowStoredJSONKey(v)
-			v.Contexts = mergeStoredContexts(writers[w.field][id].Contexts, contexts)
-			writers[w.field][id] = v
+	attachInitializerReadSamples(image, results, reads)
+}
+
+// Reusable for one-hop caller table reads without visiting or mutating the
+// already-populated initializer tree a second time.
+func attachInitializerReadSamples(image romimage.Image, results []shadowDecodeResult, reads []*ShadowInitializerRead) {
+	wanted := make(map[ShadowStoredField]bool)
+	for _, r := range reads {
+		if r.Index.Field != nil {
+			wanted[*r.Index.Field] = true
 		}
 	}
+	writers := shadowFieldWriterIndex(results, wanted)
 	for _, r := range reads {
 		candidates := make(map[uint16][]uint32)
 		if r.Index.Field != nil {
@@ -378,9 +394,6 @@ func attachInitializerSamples(image romimage.Image, results []shadowDecodeResult
 					candidates[one] = appendUniqueAddresses(candidates[one], w.StorePC)
 				}
 			}
-			sort.Slice(r.Index.Writers, func(i, j int) bool {
-				return shadowStoredJSONKey(r.Index.Writers[i]) < shadowStoredJSONKey(r.Index.Writers[j])
-			})
 		}
 		local := make(map[uint16]bool)
 		for _, v := range r.Index.DomainValues {
@@ -437,4 +450,37 @@ func attachInitializerSamples(image romimage.Image, results []shadowDecodeResult
 			}
 		}
 	}
+}
+
+// Exact expression spellings across decoded program banks, not alias proof.
+func shadowFieldWriterIndex(results []shadowDecodeResult, wanted map[ShadowStoredField]bool) map[ShadowStoredField][]ShadowStoredTargetWriter {
+	writers := make(map[ShadowStoredField]map[string]ShadowStoredTargetWriter)
+	for _, r := range results {
+		if r.issue != nil {
+			continue
+		}
+		for _, w := range r.storedWrites {
+			if !wanted[w.field] {
+				continue
+			}
+			if writers[w.field] == nil {
+				writers[w.field] = make(map[string]ShadowStoredTargetWriter)
+			}
+			v, contexts := w.writer, w.writer.Contexts
+			v.Contexts = nil
+			id := shadowStoredJSONKey(v)
+			v.Contexts = mergeStoredContexts(writers[w.field][id].Contexts, contexts)
+			writers[w.field][id] = v
+		}
+	}
+	index := make(map[ShadowStoredField][]ShadowStoredTargetWriter)
+	for field, matches := range writers {
+		for _, w := range matches {
+			index[field] = append(index[field], w)
+		}
+		sort.Slice(index[field], func(i, j int) bool {
+			return shadowStoredJSONKey(index[field][i]) < shadowStoredJSONKey(index[field][j])
+		})
+	}
+	return index
 }

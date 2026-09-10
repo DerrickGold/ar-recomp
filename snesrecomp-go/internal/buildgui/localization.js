@@ -197,6 +197,7 @@
       const fileLabel=document.createElement("label"); fileLabel.append(phrase("builder.editor.choose_font_file"));
       const file=document.createElement("input"); file.type="file"; file.accept=".ttf,.otf";
       file.addEventListener("change",()=>{const chosen=file.files[0];if(!chosen)return;if(!chosen.size||chosen.size>64*1024*1024){feedbackKey("builder.editor.font_size_error",{},true);file.value="";return;}const path="fonts/"+chosen.name;fontUploads.set(path,chosen);fontDraft[index]=path;fontChanged();}); fileLabel.append(file);row.append(fileLabel);
+      window.workshopFileInputs?.enhance(file);
       const actions=document.createElement("div");actions.className="loc-row";
       for(const [key,aria,emptyAria,offset] of [
         ["builder.editor.move_up","builder.editor.move_up_font","builder.editor.move_up_slot",-1],
@@ -252,16 +253,17 @@
       const card=document.createElement("article"); card.className="loc-package-card"; card.dataset.packageId=p.id; card.dataset.packageKey=p.key||"";
       const title=document.createElement("h3"); title.textContent=p.name;
       contentLanguage(title,{locale:p.locale});
-      const badge=document.createElement("span"); badge.className="loc-package-badge"; badge.dataset.installed=String(p.installed);
-      ui.set(badge,p.error?"builder.language.needs_attention":p.installed?"builder.language.installed":p.readOnly?"builder.language.read_only":"builder.language.workshop_only");
+      const badge=document.createElement("span"); badge.className="loc-package-badge"; badge.dataset.error=String(!!p.error);
+      if(p.error || !p.installed) ui.set(badge,p.error?"builder.language.needs_attention":p.readOnly?"builder.language.read_only":"builder.language.workshop_only");
       const info=document.createElement("p"); info.className="loc-help"; info.textContent=(p.locale?p.locale+" · ":"")+p.id;
       if(p.installed&&p.installedName!==p.name){const name=document.createElement("span");ui.set(name,"builder.language.installed_as",{name:p.installedName});info.append(name);}
       if(p.installed&&p.key!==p.id){const folder=document.createElement("span");ui.set(folder,"builder.language.folder",{folder:p.key});info.append(folder);}
-      card.append(badge,title,info);
+      if(p.error || !p.installed) card.append(badge);
+      card.append(title,info);
       if(p.installed){
         const label=document.createElement("label"); label.className="loc-package-enable";
         const checkbox=document.createElement("input"); checkbox.type="checkbox"; checkbox.checked=p.enabled; checkbox.disabled=!p.installedRevision||(!p.enabled&&!!p.error); ui.attribute(checkbox,"aria-label","builder.language.enable_pack",{name:p.installedName});
-        const caption=document.createElement("span");ui.set(caption,p.enabled?"builder.language.enabled":"builder.language.disabled");
+        const caption=document.createElement("span");ui.set(caption,p.enabled?"builder.language.enabled_game":"builder.language.disabled_game");
         label.append(checkbox,caption);card.prepend(label);
         checkbox.addEventListener("change",()=>{
           if(busy){checkbox.checked=p.enabled;return;}
@@ -291,7 +293,6 @@
   }
   $("library-search").addEventListener("input",renderCatalog);
   $("library-filter").addEventListener("change",renderCatalog);
-  $("catalog-refresh").addEventListener("click",()=>run(loadCatalog));
   async function adopt(next, preserveMessage = false) {
     state = next; loaded = true; saveFailure="";
     label("path","builder.language.paths",{root:next.root});
@@ -649,7 +650,7 @@
   window.localizationActivate = () => run(async () => {
     const next = await json("state");
     if (!loaded) await adopt(next);
-    else { await refreshReference(next); workflowView(); }
+    else { await refreshReference(next); workflowView(); if(workflow==="home") await loadCatalog(); }
   });
   // The shell passes only a project ID. It never reads archives or edits pack
   // state; this same guarded Go-backed workflow handles library navigation.

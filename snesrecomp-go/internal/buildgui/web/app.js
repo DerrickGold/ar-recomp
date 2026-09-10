@@ -14,7 +14,7 @@ const languageTab=document.querySelector("#tab-localization");
 let localizationReady=false, localizationChecked=false;
 const assetTab=document.querySelector("#tab-assets"), assetForm=document.querySelector("#assets-form");
 const titleToggle=document.querySelector("#title-toggle"), titleChange=document.querySelector("#title-change");
-const saveAssets=document.querySelector("#save-assets"), assetState=document.querySelector("#asset-state");
+const assetState=document.querySelector("#asset-state");
 const saveAssetsTop=document.querySelector("#save-assets-top"), discardAssets=document.querySelector("#discard-assets");
 const assetBar=document.querySelector("#asset-bar"), assetBarNote=document.querySelector("#asset-bar-note");
 const rowPrototype=document.querySelector("#asset-row-prototype");
@@ -61,7 +61,6 @@ function selectTab(tab,{history=true,focus=true,activate=true}={}){
   if(tab===buildTab) buildTab.removeAttribute("data-badge");
   if(tab.id==="tab-home") loadHomeProjects();
   if(tab!==assetTab) assetForm.querySelectorAll("audio").forEach(audio=>audio.pause());
-  ui.set(document.querySelector("#workspace-section"),{"tab-home":"builder.nav.home","tab-build":"builder.nav.build","tab-localization":"builder.nav.languages","tab-assets":"builder.nav.assets","tab-manual":"builder.nav.help"}[tab.id]);
   if(history&&location.hash!=="#"+tab.id.slice(4)) window.history.pushState(null,"","#"+tab.id.slice(4));
   if(activeTab!==tab) window.scrollTo(0,scrollPositions.get(tab.id)||0);
   activeTab=tab;
@@ -121,11 +120,11 @@ document.addEventListener("workshop:language",()=>{
  * authoring status, validation and installation still belong to localization. */
 function projectCards(host,rows,limit=Infinity){
   const visible=rows.slice(0,limit);
+  const section=document.querySelector("#home-translations");
   if(!visible.length){
-    const empty=document.createElement("p"); empty.className="empty-note";
-    ui.set(empty,"builder.home.empty_projects");
-    host.replaceChildren(empty); return;
+    host.replaceChildren(); section.hidden=true; return;
   }
+  section.hidden=false;
   host.replaceChildren(...visible.map(row=>{
     const card=document.createElement("button"); card.type="button"; card.className="project-card";
     card.disabled=!!row.error; card.dataset.projectId=row.id;
@@ -145,9 +144,8 @@ function projectCards(host,rows,limit=Infinity){
 }
 let homeRequest=0;
 async function loadHomeProjects(){
-  if(closed||!localizationReady) return;
+  if(closed||!localizationReady){ document.querySelector("#home-translations").hidden=true; return; }
   const request=++homeRequest;
-  const button=document.querySelector("#home-refresh-projects"); button.disabled=true;
   try {
     const rows=await responseJSON(await fetch("localization/projects",{cache:"no-store"}));
     if(!closed&&localizationReady&&request===homeRequest) projectCards(document.querySelector("#home-projects"),rows,4);
@@ -155,10 +153,10 @@ async function loadHomeProjects(){
     if(!closed&&localizationReady&&request===homeRequest){
       const note=document.createElement("p"); note.className="empty-note"; ui.set(note,"builder.home.projects_failed",{detail:error.message});
       document.querySelector("#home-projects").replaceChildren(note);
+      document.querySelector("#home-translations").hidden=false;
     }
-  } finally { if(!closed&&request===homeRequest) button.disabled=!localizationReady; }
+  }
 }
-document.querySelector("#home-refresh-projects").addEventListener("click",loadHomeProjects);
 
 function applyLocalizationAvailability(data){
   const first=!localizationChecked, ready=data.localizationReady===true;
@@ -172,20 +170,19 @@ function applyLocalizationAvailability(data){
       ?"builder.language.build_required"
       :"builder.language.restore_required";
   for(const el of document.querySelectorAll("[data-language-status]")) {
-    ui.set(el,ready?"builder.language.ready":instruction);
+    el.hidden=ready;
+    if(!ready) ui.set(el,instruction);
     el.title=data.localizationError||""; // Raw diagnostic, not an actionable instruction.
   }
   languageTab.disabled=!ready;
   languageTab.setAttribute("data-i18n-title",ready?"builder.language.available_title":"builder.language.unavailable_title"); ui.apply(languageTab);
   for(const el of document.querySelectorAll('[data-nav="localization"]')){ el.disabled=!ready; el.setAttribute("data-i18n-title",languageTab.getAttribute("data-i18n-title")); ui.apply(el); }
   if(changed){
-    document.querySelector("#home-refresh-projects").disabled=!ready;
     if(ready) loadHomeProjects();
     else {
       ++homeRequest; // Ignore a library response already in flight.
-      const note=document.createElement("p"); note.className="empty-note";
-      ui.set(note,"builder.home.projects_locked");
-      document.querySelector("#home-projects").replaceChildren(note);
+      document.querySelector("#home-projects").replaceChildren();
+      document.querySelector("#home-translations").hidden=true;
       if(activeTab===languageTab) selectTab(buildTab);
     }
   }
@@ -365,7 +362,6 @@ function refreshAssetDirtyState(){
   });
   const dirty=changes>0;
   assetBar.dataset.dirty=String(dirty);
-  saveAssets.disabled=!dirty;
   saveAssetsTop.disabled=!dirty;
   discardAssets.disabled=!dirty;
   ui.set(assetBarNote,dirty?"builder.assets.unsaved":"builder.assets.no_changes",{count:changes});
@@ -399,6 +395,7 @@ function discardAssetChanges(){
 function clearRowSelection(row){
   const input=row.querySelector("input[type=file]"), audio=row.querySelector(".replacement-audio");
   input.value="";
+  window.workshopFileInputs?.refresh(input);
   if(audio.dataset.objectUrl){
     URL.revokeObjectURL(audio.dataset.objectUrl);
     delete audio.dataset.objectUrl;
@@ -440,6 +437,7 @@ function paintAssetConfiguration(config){
 }
 
 async function loadAssetConfiguration(){
+  assetState.hidden=false;
   assetState.dataset.kind="loading";
   ui.set(assetState,"builder.assets.loading");
   try {
@@ -454,8 +452,9 @@ async function loadAssetConfiguration(){
     paintAssetConfiguration(config);
     assetsLoaded=true;
     assetState.dataset.kind="idle";
-    ui.set(assetState,"builder.assets.ready");
+    assetState.hidden=true;
   } catch(error){
+    assetState.hidden=false;
     assetState.dataset.kind="failed";
     ui.set(assetState,"builder.assets.load_failed",{detail:error.message});
   }
@@ -639,6 +638,7 @@ function buildVariantRow(variant){
   applyVariantState(row,variant);
   input.id="variant-"+variant.name;
   input.name="variant-"+variant.name;
+  window.workshopFileInputs?.enhance(input);
   const label=row.querySelector("label");
   label.setAttribute("for",input.id);
   label.textContent=variant.name;
@@ -648,7 +648,7 @@ function buildVariantRow(variant){
   gate.className="variant-gate";
   if(variant.when) gate.textContent="when = "+variant.when;
   else ui.set(gate,"builder.assets.no_condition");
-  row.querySelector(".asset-copy").appendChild(gate);
+  (row.querySelector(".asset-technical")||row.querySelector(".asset-copy")).appendChild(gate);
   row.querySelector(".asset-current").id="variant-state-"+variant.name;
   row.querySelector(".asset-remove").name="variant-remove-"+variant.name;
   /* A variant is already the split of a slot; there is nothing left to divide
@@ -784,8 +784,9 @@ document.addEventListener("play",event=>{
 
 assetForm.addEventListener("submit",async event=>{
   event.preventDefault();
-  saveAssets.disabled=true; saveAssetsTop.disabled=true; discardAssets.disabled=true;
+  saveAssetsTop.disabled=true; discardAssets.disabled=true;
   ui.set(assetBarNote,"builder.assets.saving");
+  assetState.hidden=false;
   assetState.dataset.kind="loading";
   ui.set(assetState,"builder.assets.copying");
   try {

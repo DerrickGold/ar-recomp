@@ -64,7 +64,7 @@ func TestPageHasTabShellAndHeaderBuildStatus(t *testing.T) {
 func TestAssetsTabHasTitleToggleAndIdentifiedTrackPickers(t *testing.T) {
 	body := renderFrontendSource(t)
 	for _, want := range []string{
-		`id="title-toggle"`, `id="save-assets"`, `src="title-logo.png"`,
+		`id="title-toggle"`, `id="save-assets-top"`, `src="title-logo.png"`,
 		`id="generate-previews"`, `class="original-audio"`,
 		`class="replacement-audio"`,
 		`name="track-title-theme"`, `name="track-song-00"`,

@@ -39,7 +39,7 @@ export function setup(initial="en") {
   doc.dispatchEvent=event=>{void doc.fire(event.type);};
   const requests=[];let responder=async options=>({ok:true,json:async()=>JSON.parse(options.body)});
   const window={};
-  const context={document:doc,window,Intl,Event:class{constructor(type){this.type=type;}},fetch:async(path,options)=>{requests.push({path,options});return responder(options);}};
+  const context={document:doc,window,Intl,setTimeout,clearTimeout,Event:class{constructor(type){this.type=type;}},fetch:async(path,options)=>{requests.push({path,options});return responder(options);}};
   runInNewContext(source,context);
   return {picker,status,label,input,textarea,localeField,files,parent,raw,attr,doc,context,ui:window.workshopI18n,requests,setResponder(fn){responder=fn;}};
 }
