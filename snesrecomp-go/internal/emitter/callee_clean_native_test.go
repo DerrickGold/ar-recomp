@@ -19,7 +19,7 @@ func TestCalleeCleanNativeExecution(t *testing.T) {
 	if err != nil {
 		t.Skip("native conformance needs CMake and C/C++")
 	}
-	for _, kind := range []string{"short", "long", "recursive-split", "interrupt", "hle", "reset"} {
+	for _, kind := range []string{"short", "long", "recursive-split", "interrupt", "hle", "reset", "retired-caller", "retired-caller-recursive"} {
 		t.Run(kind, func(t *testing.T) { testCalleeCleanNative(t, cmake, kind) })
 	}
 }
@@ -29,6 +29,10 @@ func testCalleeCleanNative(t *testing.T, cmake, kind string) {
 	// Preserve live P, supply three words, then check that the continuation
 	// executes once with all arguments removed, before restoring P and RTS.
 	caller := []byte{0x08, 0xc2, 0x30}
+	retired := strings.HasPrefix(kind, "retired-caller")
+	if retired {
+		caller = []byte{0xc2, 0x30, 0x68, 0x08} // consume incoming word, then save P
+	}
 	if kind == "reset" {
 		caller = append([]byte{0xc2, 0x30, 0xa9, 0xff, 0x1f, 0x1b}, caller...)
 	}
@@ -42,14 +46,15 @@ func testCalleeCleanNative(t *testing.T, cmake, kind string) {
 	} else {
 		caller = append(caller, 0x20, 0x40, 0x80)
 	}
+	returnWord := uint16(0x8000 + len(caller) - 1)
 	caller = append(caller, 0xee, 0x10, 0, 0x28, 0x60)
-	if kind == "reset" {
+	if kind == "reset" || retired {
 		caller[len(caller)-1] = 0xdb
 	} // terminal synthetic STP, not RTS from reset
 	copy(image, caller)
 	// Eight local bytes; move the original return word above six argument bytes.
 	callee := []byte{}
-	if kind == "recursive-split" {
+	if kind == "recursive-split" || kind == "retired-caller-recursive" {
 		// All recursive invocations use the same call site/return PC. The
 		// cleanup is a separate generated tail body, inheriting its owner.
 		callee = append(callee, 0xce, 0x20, 0, 0xf0, 15, 0xf4, 1, 0, 0xf4, 2, 0, 0xf4, 3, 0, 0x20, 0x40, 0x80, 0xee, 0x22, 0)
@@ -59,15 +64,22 @@ func testCalleeCleanNative(t *testing.T, cmake, kind string) {
 	if kind == "interrupt" {
 		callee = append(callee, 0xad, 0x30, 0, 0xd0, 0xfb)
 	}
-	callee = append(callee, 0xa3, 9, 0x83, 15)
-	if kind == "long" {
-		callee = append(callee, 0xe2, 0x20, 0xa3, 11, 0x83, 17, 0xc2, 0x20)
-	} // move bank byte too
-	callee = append(callee, 0x3b, 0x18, 0x69, 14, 0, 0x1b)
-	if kind == "long" {
-		callee = append(callee, 0x6b)
+	if retired {
+		// Discard eight locals, compute final S past six argument bytes,
+		// then pull THIS invocation's word and push it at the new position.
+		callee = append(callee, 0x3b, 0x18, 0x69, 8, 0, 0x1b,
+			0x3b, 0x18, 0x69, 8, 0, 0x7a, 0x1b, 0x5a, 0x9c, 0x18, 0, 0x60)
 	} else {
-		callee = append(callee, 0x60)
+		callee = append(callee, 0xa3, 9, 0x83, 15)
+		if kind == "long" {
+			callee = append(callee, 0xe2, 0x20, 0xa3, 11, 0x83, 17, 0xc2, 0x20)
+		} // move bank byte too
+		callee = append(callee, 0x3b, 0x18, 0x69, 14, 0, 0x1b)
+		if kind == "long" {
+			callee = append(callee, 0x6b)
+		} else {
+			callee = append(callee, 0x60)
+		}
 	}
 	copy(image[int(bank)*0x8000+0x40:], callee)
 	copy(image[0x200:], []byte{0xce, 0x30, 0, 0x40}) // ISR: DEC; RTI
@@ -79,7 +91,7 @@ func testCalleeCleanNative(t *testing.T, cmake, kind string) {
 		name string
 		pc   uint32
 	}{{"Caller", 0x8000}, {"Interrupt", 0x8200}, {"Cleaner", uint32(bank)<<16 | 0x8040}}
-	if kind == "recursive-split" {
+	if kind == "recursive-split" || kind == "retired-caller-recursive" {
 		roots = append(roots, struct {
 			name string
 			pc   uint32
@@ -114,7 +126,7 @@ func testCalleeCleanNative(t *testing.T, cmake, kind string) {
 		source += other
 	}
 	expectedRecursive := 0
-	if kind == "recursive-split" {
+	if kind == "recursive-split" || kind == "retired-caller-recursive" {
 		expectedRecursive = 2
 	}
 	expectedPolls := 0
@@ -128,6 +140,10 @@ func testCalleeCleanNative(t *testing.T, cmake, kind string) {
 	isReset := 0
 	if kind == "reset" {
 		isReset = 1
+	}
+	expectedY, pMask := uint16(45), uint8(0xff)
+	if retired {
+		expectedY, pMask = returnWord, 0xcf
 	}
 	runNativeContract(t, cmake, map[string]string{
 		"generated.c": source, "funcs.h": declarations.String(),
@@ -171,6 +187,7 @@ int main(void) {
  for(unsigned mx=0;mx<4;mx++) {
   CpuState cpu;cpu_state_init(&cpu,g_ram);cpu.emulation=0;cpu.S=0x1ffd;cpu.host_return_valid=1;
   cpu.P=(uint8)(0x45|(mx&2?CPU_P_M:0)|(mx&1?CPU_P_X:0));cpu_p_to_mirrors(&cpu);uint8 old_p=cpu.P;
+` + fmt.Sprintf("  old_p &= 0x%02xu;\n", pMask) + `
   cpu.X=23;cpu.Y=45;cpu.D=0;cpu.DB=0;cpu.PB=0;
   cpu_write16(&cpu,0,0x1ffe,0x1234);memset(g_ram+0x10,0,0x30);g_ram[0x20]=3;g_ram[0x30]=3;polls=0;WatchdogFrameStart();
 ` + fmt.Sprintf("  const int reset=%d;\n", isReset) + `
@@ -178,7 +195,8 @@ int main(void) {
   if(reset) {cpu.S=0x1ff;cpu.host_return_valid=0;old_p&=(uint8)~0x30u;cpu_reset_scope_begin(&reset_owner,&cpu);}
   RecompReturn r=g_dispatch_table[0].variant[mx](&cpu);cpu_mirrors_to_p(&cpu);
   if(reset) cpu_return_scope_end(&reset_owner);
-  if(r!=RECOMP_RETURN_NORMAL||g_fail||cpu.S!=0x1fff||cpu.P!=old_p||cpu.X!=23||cpu.Y!=45||
+  if(r!=RECOMP_RETURN_NORMAL||g_fail||cpu.S!=0x1fff||cpu.P!=old_p||cpu.X!=23||
+` + fmt.Sprintf("     cpu.Y!=0x%04xu||\n", expectedY) + `
      g_ram[0x10]!=1||g_ram[0x11]||g_recomp_stack_top||g_cpu_return_scope||failed||
 ` + fmt.Sprintf("     g_ram[0x22]!=%d||polls!=%d||g_ram[0x12]!=%d", expectedRecursive, expectedPolls, expectedHLE) + `) {
    fprintf(stderr,"callee-clean mx=%u r=%d fail=%d S=%04x P=%02x expected=%02x once=%u depth=%d\n",mx,r,g_fail,cpu.S,cpu.P,old_p,g_ram[0x10],g_recomp_stack_top);return 1;

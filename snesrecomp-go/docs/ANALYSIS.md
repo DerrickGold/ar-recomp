@@ -1031,6 +1031,73 @@ This is the prerequisite audit for future stack-qualified M/X exit sets and
 inline-call-argument discovery, not an automatic cfg-removal gate. See
 [return-frame validation](RETURN_FRAME_VALIDATION.md).
 
+### Frame lifetime at calls and jumps (report-only)
+
+`return_frame_lifetimes` (shadow report version 19) checks calls and jumps
+after local pulls or exact stack-relative stores may have exposed or replaced
+incoming return bytes. An early RTS does not describe every path: another
+branch can consume the incoming frame and then make more calls or transition
+elsewhere without returning to it. This is relevant to generated caller-frame
+ownership limits, not just to finding missing compiled targets.
+
+This bounded, path-sensitive audit tracks individual incoming byte identities
+through A/B, X, Y, D, DB, stack saves, register transfers, and exact native
+stack-relative loads/stores. `PLA; PHA` restores the original word; `PLA; LDA
+#value; PHA` only restores height. PHP/PLP retain known saved M/X; unknown PLP
+values and conflicting decoded widths stop that path. A nested call invalidates
+register identities and inactive stack scratch, including its own pushed
+return frame. Active stack bytes survive a call only under an explicit,
+**unproven stack-neutral normal-return contract**. Potentially aliasing writes
+also require an explicit assumption. These assumptions let the inventory
+describe local shapes beyond unknown effects without promoting them to proofs.
+
+Each review boundary includes source bytes, live decoded M/X, direct target
+(when available), lexical continuation for calls, entry-relative S, the sites
+that pulled/wrote entry bytes, and byte masks. Mask bit 0 denotes entry S+1,
+bit 1 entry S+2, and bit 2 the additional native JSL bank byte:
+
+- `unprotected_entry_byte_mask` marks touched entry slots whose original
+  identity/active-stack position is not established at the boundary. Unknown
+  values might still equal the original bytes; this is not a corruption proof.
+- `modeled_saved_copy_byte_mask` records copies still in tracked registers or
+  active stack storage, not inactive memory left behind by a pop. An extracted
+  frame with saved copies is not classified as permanently consumed.
+- `S_minus_entry_S` uses the opposite sign to the older depth audit: positive
+  means S has advanced above entry S. A negative value at a call does not prove
+  that the original frame still exists; later arguments can cover its slots.
+
+RTS-only and RTL-only graphs select two-byte and three-byte **hypotheses**;
+mixed or tail-only graphs retain both. A configured `func` or return opcode
+does not prove a normal-call entry or that `_entry_s` owns that frame. Graphs
+with RTI retain an explicit unsupported interrupt-frame contract. HLE hooks
+(including conditional/dispatch/SPC hooks), collapsed dispatches, stack resets,
+unsupported control effects, missing graph edges, and unknown status restores
+remain blockers. The audit never inherits a replaced ROM body's HLE behavior.
+
+Counts distinguish entry/frame contracts, boundary contexts, unique source
+PCs, and source-M/X sites. Incomplete contracts and exhausted budgets are
+reported separately; no review sites does not imply completeness or a safe
+game. Selection requires an existing decoded pull/stack-relative store and a
+call/jump. No new bytes are decoded. Analysis is bounded to 4,096 states per
+entry/frame hypothesis and S within ±64 bytes; blockers are capped at eight
+displayed reasons per hypothesis with an explicit omitted count. Verbose text
+uses `[FRAME-LIFETIME]` and `[FRAME-LIFETIME-BLOCKED]`; JSON retains all review
+boundary contexts. Nothing is added to unresolved runtime failure counts.
+
+These findings cannot authorize changing caller limits, treating an internal
+continuation as a new function, adding roots, or skipping instructions. The
+next proof obligations are callee cleanup, possible saved/relocated frames,
+entry kind, aliases, and ancestor ownership. Existing production fact payloads
+and generation remain unchanged; a newly exported database records report
+version 19 as provenance only. See
+[frame-lifetime validation](FRAME_LIFETIME_VALIDATION.md).
+
+A separate, behavior-affecting emitter contract now recognizes a narrow
+single-block return-word relocation and checks the word's immediate-call
+origin at runtime. It does **not** consume these conditional findings or
+relax caller limits. See [return-word relocation validation](RETURN_WORD_RELOCATION_VALIDATION.md)
+for the proof boundaries, synthetic tests, and game validation.
+
 ### Return-address value provenance (report-only)
 
 `return_address_provenance` adds bounded symbolic execution after the frame

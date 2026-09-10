@@ -178,6 +178,9 @@ type Call struct {
 type Return struct {
 	Long, Interrupt bool
 	SourcePC        *uint32
+	// A single-block native word shuttle emitted a checked _return_origin.
+	// Not set by ordinary lowering or by report-only analysis evidence.
+	OwnFrameWord bool
 }
 type Transfer struct{ Source, Destination Reg }
 type ExchangeAccumulatorBytes struct{}

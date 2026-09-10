@@ -56,7 +56,7 @@ func TestShadowDispatchInventoryPreservesHLEWithoutCreatingTrapsOrRoots(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Version != 18 || report.Summary.RawUnresolvedEmissions != 1 || report.Summary.UniqueUnresolvedSites != 1 || len(report.Unresolved) != 1 {
+	if report.Version != shadowReportVersion || report.Summary.RawUnresolvedEmissions != 1 || report.Summary.UniqueUnresolvedSites != 1 || len(report.Unresolved) != 1 {
 		t.Fatalf("HLE routes changed unresolved totals: %+v", report.Summary)
 	}
 	if report.DispatchSummary.UniqueSites != 3 || report.DispatchSummary.HLERoutedSites != 2 || report.DispatchSummary.HLEUnprovenTargetSites != 2 {

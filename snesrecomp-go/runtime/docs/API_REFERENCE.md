@@ -228,6 +228,28 @@ restore. Ordinary equal-stack returns keep their existing fast path. HLEs
 which return normally without a native adjusted return retain their existing
 stack contract; no return ownership is inferred from an HLE name.
 
+A stronger, narrowly generated contract handles native **return-word
+relocation** even when the caller has already consumed its own entry frame.
+The emitter recognizes a single-block word pull, stack transfer using a
+different register, unchanged word push, and RTS (`PLY/TCS/PHY`, `PLX/TCS/PHX`,
+or `PLA/TXS/PHA`). A runtime witness checks that the pull actually read the
+current immediate call's original two-byte frame and exact continuation.
+Up to four intervening direct/absolute STZ stores require live WRAM and
+nonaliasing guards; hardware or mapper-dependent writes invalidate the
+witness. No extra guest memory reads, frame pushes, or stack adjustments are
+introduced. This is not a whole-function M/X or cleanup-size summary.
+
+Only that preserved origin permits the wider cleanup. Merely finding the
+same PC at an ancestor's stack position does not: the original bounds check
+and ancestor-return paths remain unchanged. The runtime does not rebase
+caller limits, search ancestors for a convenient PC, or create a function for
+an internal continuation. Equal-stack returns remain direct fast paths.
+The generated `cpu_capture_return_word`, `cpu_return_word_store_disjoint`, and
+`cpu_accept_return_word_relocation` calls form this internal compiler/runtime
+contract; adapters should not fabricate witnesses. Regenerate and rebuild
+against the matching runtime when adopting it. Long return-word/bank shuttles,
+branch-crossing shuttles and other effects remain on their existing paths.
+
 Reset has no incoming hardware return frame and may initialize S. An adapter
 which invokes compiled reset should explicitly bracket that root (and its
 tail-dispatch driver) rather than treating the initial emulation-mode S as
