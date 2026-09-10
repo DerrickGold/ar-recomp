@@ -675,7 +675,7 @@ func loadAssetConfiguration(root string) (assetConfiguration, error) {
 // field is what the save actually reads -- a button press alone would be lost
 // on submit.
 const assetTrackRowTemplate = `<div class="asset-row" data-track="{ID}" data-source="{SRC}" style="--tint-h:{HUE}">
-  <div class="asset-copy"><label for="track-{ID}">{NAME}</label><span class="asset-source">Manifest [music:{ID}] &middot; ROM source {SRC}</span></div>
+  <div class="asset-copy"><label for="track-{ID}">{NAME}</label><details class="asset-technical"><summary data-i18n="builder.technical_details">Technical details</summary><span class="asset-source">Manifest [music:{ID}] &middot; ROM source {SRC}</span></details></div>
   <div class="asset-picker"><input id="track-{ID}" name="track-{ID}" type="file" accept=".ogg,.oga,audio/ogg">
     <div class="asset-row-foot">
       <span class="asset-current" id="track-state-{ID}" data-i18n="builder.assets.not_installed">Not installed</span>

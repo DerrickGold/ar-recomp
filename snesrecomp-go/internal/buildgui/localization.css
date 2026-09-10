@@ -163,7 +163,7 @@
 }
 .loc-package-card {
   display:grid;
-  grid-template-columns:110px minmax(0,1fr) auto;
+  grid-template-columns:max-content minmax(0,1fr) auto;
   align-items:center;
   gap:4px 16px;
   border:1px solid var(--line);
@@ -183,6 +183,7 @@
 .loc-package-card>.loc-package-badge { grid-column:2; grid-row:3; justify-self:start; padding:1px 6px; font-size:10px }
 #panel-localization .loc-package-enable { grid-row:1/4; grid-column:1; flex-direction:row; align-items:center; gap:8px; margin:0; font-size:12px }
 #panel-localization .loc-package-enable input { width:20px; height:20px; accent-color:var(--gold); flex:none }
+#panel-localization .loc-package-enable span { white-space:nowrap }
 .loc-package-badge {
   border:1px solid var(--line);
   border-radius:5px;
@@ -190,9 +191,9 @@
   font-size:12px;
   color:var(--muted)
 }
-.loc-package-badge[data-installed=true] {
-  color:var(--ok);
-  border-color:#477860
+.loc-package-badge[data-error=true] {
+  color:var(--bad);
+  border-color:#8e5151
 }
 #panel-localization .loc-package-card .loc-row>button { min-height:36px }
 #panel-localization .loc-uninstall { color:var(--bad); background:transparent }
@@ -501,6 +502,12 @@
 .loc-preview-page { unicode-bidi:isolate; text-align:start }
 .loc-preview-value, .loc-preview-control { unicode-bidi:isolate }
 #loc-script-help code { direction:ltr; unicode-bidi:isolate }
+#loc-script-help { margin-top:14px }
+#loc-script-help summary { color:var(--ink) }
+#loc-script-help p { margin:10px 0 0; line-height:1.7 }
+#loc-storage { margin-top:26px }
+#loc-storage summary { color:var(--muted); font-size:11px }
+#loc-storage p { margin:9px 0 0; overflow-wrap:anywhere }
 #loc-dirty {
   font-size:12px;
   color:#efc982
@@ -539,7 +546,7 @@
   .loc-comparison #loc-reference-body { height:auto; max-height:260px }
 }
 @media(max-width:950px) {
-  .loc-package-card { grid-template-columns:90px minmax(0,1fr) }
+  .loc-package-card { grid-template-columns:max-content minmax(0,1fr) }
   .loc-package-card>.loc-row { grid-column:1/-1; grid-row:auto; justify-content:flex-start; margin-top:8px }
   .loc-editor-grid,.loc-fields {
     grid-template-columns:1fr

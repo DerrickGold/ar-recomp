@@ -795,6 +795,329 @@ remain explicit proof obligations. No samples are fed back into consumer
 index candidates, dispatch target sets, code roots, HLE policy, or the proven
 database. See [initializer validation](TABLE_INITIALIZER_VALIDATION.md).
 
+#### Local scratch-slot writers and direct-caller inputs
+
+An initializer index loaded from a scalar DP/absolute/long slot may now carry
+`local_slot_source`. This is the nearest **same-spelling candidate writer** on
+a bounded, unique decoded predecessor path, not a proven reaching definition.
+It records the entry PC/M/X, store and load PCs, stored register expression,
+and every intervening explicit memory write as `possible_alias_writes`.
+Different operands or addressing modes are not assumed disjoint. Indexed
+destinations are excluded from this scalar query. A nearer partial, zero, or
+read-modify-write overwrite blocks recovery of an older register writer;
+calls, D/DB changes, unsupported stack effects, joins, and the 128-step budget
+also stop it. An empty alias-write list is not a memory-lifetime proof.
+
+The stored-value query can follow A/X/Y back through register transfers and
+passive stack/bank operations to `entry_register`. It stops at callee effects,
+pulls into registers, status restoration, truncation, unsupported arithmetic,
+joins/backedges, or its 32-step budget. This is a separate argument query:
+the existing initializer index domains are unchanged.
+
+When the candidate receives an entry register, `direct_caller_inputs` lists
+decoded direct JSR/JSL callers to that exact PC, with instruction bytes,
+containing entry PC/M/X, call-site M/X, argument register, origin, and local
+bit-domain superset. JSR retains its program bank; JSL supplies its explicit
+24-bit target. Indirect or collapsed dispatches are not invented as direct
+callers, and mirrored PCs are not silently combined. Exact duplicate records
+are removed; differing caller contexts and M/X states remain separate, with
+`entry_mx_matches` recording width compatibility rather than choosing a mode.
+
+`call_scope=decoded_direct_callers_only_not_all_entries` is intentional. A few
+masked callers cannot bound another unbounded caller, an indirect entry, or an
+HLE implementation. Branch predicates do not narrow these argument domains.
+Even matching widths do not prove a calling contract or reachability. The
+report preserves the global scratch-slot writer inventory alongside this
+local shortlist, and substitutes **neither** caller values into the slot nor
+slot values into table reads. No samples, target sets, database facts, roots,
+authored configuration, or HLE obligations change. See
+[call-input validation](CALL_INPUT_VALIDATION.md).
+
+Each direct caller can additionally carry `source_evidence`: one bounded
+expansion of the argument's originating memory load. Indexed loads expose
+`table_read`, including their own index origin/operations/domain, bank evidence,
+exact-spelling index-field writer candidates, and conditional ROM word samples.
+Scalar loads expose candidate writers of their exact address expression and,
+when recoverable, a local scalar-slot candidate. The caller's **table index**,
+the loaded/masked **argument**, and the callee's **initializer index** are three
+different values; the report never substitutes or merges their domains.
+
+`expansion_scope=one_caller_source_hop_no_recursive_expansion` bounds the query.
+It does not follow another caller, expand a nested indirect pointer, or turn
+writer candidates into additional code roots. Bank state is not presumed to
+equal the caller's program bank, even when a nearby ROM table looks plausible.
+Unknown DB therefore prevents ROM sampling. Word reads preserve both bytes;
+an argument's later mask does not change what the table read actually fetched.
+Existing sample caps and bank-crossing exclusions apply. Exact expression
+matching is not an alias proof or complete writer census, and arithmetic or
+unknown writers are retained alongside literals. This additive evidence does
+not narrow prior reports, samples, facts, generated code, or HLE policy. See
+[caller-source validation](CALLER_SOURCE_VALIDATION.md).
+
+#### Bank preservation across calls (report-only)
+
+Caller-table `source_evidence.bank_context` records a bounded bank-state query
+at the exact load PC/M/X and at the directly decoded callers of its containing
+entry. These are separate calling contexts, not a global entry-bank proof.
+The old `data_bank`, table samples, input domains, and proven database remain
+unchanged. A numeric `constant_banks` array is emitted only when every state
+reaching the queried interpretation has a modeled constant DB; mixed entry-DB
+or unknown states do not become a closed bank set.
+
+The native decoded-width model tracks symbolic entry DB, PHB/PHK/PLB, local
+byte pushes/pulls, PHP/PLP width restoration, and REP/SEP. Summaries describe
+DB preservation **on decoded normal returns**, under the normal call-frame
+and stack-lifetime contract. They are not reachability, emulation-mode,
+interrupt-preservation, or code-ownership proofs. Explicit memory writes
+conservatively poison saved DB/status bytes, including writes in callees;
+different operands are not presumed disjoint. Unsupported stack/interrupt
+effects, block moves, opaque tails, unbalanced frames, return-kind mismatches,
+missing exit-width interpretations, and HLE hooks block the query. No summary
+chooses a canonical M/X variant or supplies an HLE contract.
+
+Direct JSR/JSL calls use exact target PCs and widths. JSR (abs,X) may use a
+finite local **superset** of word-sized X values to enumerate immutable ROM
+pointer reads. Every possible read must be ROM-mapped and non-boundary-crossing;
+the decoder's heuristic table prefix is never treated as complete. Each target
+needs its own valid return/DB summary. `target_superset_closed` therefore does
+not mean that all listed words are reachable handlers, owned code, or missing
+configuration obligations. In particular, an overly broad mask can produce
+many irrelevant targets and prevent a preservation proof.
+
+Only existing exact entry variants are re-decoded on demand; no new roots are
+created. Work is bounded to 256 programs, 32 caller records per queried entry,
+32 monotone summary passes, 4,096 states per evaluation, and 64 local/nested
+stack bytes. The least fixed point leaves unresolved recursive groups unknown
+rather than assuming their own preservation. Call diagnostics retain at most
+eight target blockers and explicitly mark truncation. Queries consider only
+decoded paths that can reach their exact PC/M/X, so unrelated exit branches
+do not inflate a table load's debt. External/indirect entries, non-local
+returns, and normal-frame assumptions remain explicit obligations. See
+[bank-summary validation](BANK_SUMMARY_VALIDATION.md).
+
+### Return-frame audit (report-only)
+
+`return_frame_audit` inventories RTS/RTL/RTI sites in the existing shadow
+decode closure. It checks a property that a return opcode alone cannot supply:
+which part of the guest stack its return bytes occupy, relative to an assumed
+normal entry frame. This does not change `AnalyzeExitMX`, regeneration,
+dispatch facts, entry roots, authored configuration, or HLE behavior.
+
+The native-width worklist retains finite sets of local stack depths, following
+the existing CFG and its exact M/X interpretations. Positive depth means bytes
+pushed below entry S; negative depth means bytes have been pulled past entry S.
+RTS consumes two bytes and RTL three. Shapes distinguish:
+
+- `entry_frame_position_only`: depth zero, without a modeled explicit overwrite
+  of the relevant entry slots. **Not** a proof that the return PC or M/X is intact.
+- `locally_pushed_frame`: all return bytes occupy newly pushed stack space.
+- `mixed_local_and_entry_frame`: the return spans local and entry-frame bytes.
+- `past_entry_frame`: the stack has already advanced beyond entry S.
+- `entry_frame_written`: pushes after pulling entry bytes, or direct
+  stack-relative writes, have overwritten entry return slots. The written value
+  may equal the old value; height alone cannot establish that.
+- `unknown_stack_position`: stack resets, HLE hooks, collapsed constructs,
+  unsupported control effects, or depth limits prevent a position claim.
+- Interrupt returns and recognized RTS dispatches have separate classifications;
+  neither is treated as a new ordinary-call return proof.
+
+The audit intentionally does not guess callee behavior. A lexical post-call
+path uses a **conditional** zero net depth and carries
+`callee_normal_return_and_stack_effects`; a callee may invalidate that entire
+path or its frame shape. Explicit memory writes outside an exact stack-relative
+slot carry an alias obligation. Saved-return values, PLP contents, interrupts,
+emulation state, and the entry kind remain unproven. HLE contracts are never
+inherited from their replaced ROM bodies. A copied/restored stack pointer is
+still unknown until value provenance and alias safety establish the restoration.
+
+`legacy_local_exit_candidate` records only whether the old opcode-based local
+exit collector admits that site in this shadow graph. It does not mean that
+production published an exit fact, that the fact changed M/X, or that a defect
+executes. Different authored boundaries and entry kinds can give one PC several
+legitimate frame shapes. Decodable, unobserved, or speculative paths are not
+asserted reachable or discarded as garbage by this audit.
+
+Counts distinguish raw entry/return/M/X contexts, source PCs, and source-M/X
+sites. Shape counts overlap when contexts disagree; HLE-affected sites are
+reported separately. These counts are not added to unresolved runtime debt.
+JSON retains all contexts; verbose text lists non-entry/unknown shapes and
+incomplete audits. Work is bounded to 4,096 states per graph and depths within
+±64 bytes. Depth overflow becomes unknown, never a clamped valid frame; state
+exhaustion and external CFG edges retain explicit incompleteness.
+
+This is the prerequisite audit for future stack-qualified M/X exit sets and
+inline-call-argument discovery, not an automatic cfg-removal gate. See
+[return-frame validation](RETURN_FRAME_VALIDATION.md).
+
+### Return-address value provenance (report-only)
+
+`return_address_provenance` adds bounded symbolic execution after the frame
+inventory. It selects existing decoded graphs with a normal return and stack
+pulls, stack-relative operands, or address pushes; this is a focused inventory,
+not a census of all callable routines. No new bytes are decoded or skipped.
+
+The native entry contract is explicit: incoming stack bytes represent a JSR
+return PC or a JSL return PC plus its bank. The engine follows the identities
+of individual bytes through A/B, X, Y, pushes, pulls, transfers, and exact
+stack-relative loads/stores. A word can denote the original stacked PC plus
+a constant modulo 65,536. Partial overwrites and X-width truncation cannot
+silently preserve a whole-word identity. Local saved registers are not confused
+with the incoming PC merely because both occupy stack slots. RTL additionally
+requires preservation of the incoming bank; a graph mixing RTS and RTL retains
+an entry-frame blocker.
+
+The bounded worklist follows all existing decoded successors. PHP/PLP save and
+restore tracked M/X, carry, and decimal state, with a check against successor
+decode widths. Entry carry and decimal mode are unknown. ADC/SBC of the return
+word requires locally established binary mode and carry; a nearby CLC alone
+does not suffice. Word INC/DEC and INX/DEX/INY/DEY do not require binary mode.
+Unknown calls, potentially aliasing non-stack stores/RMW/block moves, stack
+resets, unsupported effects, collapsed dispatches, and HLE hooks stop the path.
+No ROM-derived contract is inherited by an HLE replacement.
+
+The statuses are deliberately conditional:
+
+- `conditional_incoming_PC_preserved`: every modeled return restores the entry
+  frame and the unchanged incoming PC (and bank for JSL).
+- `conditional_constant_adjustment`: every modeled return instead uses the
+  same incoming-PC addend. It is **not** yet a count of inline argument bytes.
+- `path_dependent_adjustment`: otherwise-closed paths have different addends;
+  there is no uniform skip count.
+- `unproven`: at least one path has an unsupported effect, external edge,
+  incomplete budget, wrong frame position, or unknown returned value. Any
+  retained addends describe only the individually qualified paths, not a
+  complete contract.
+
+Entry kind, native mode, and entry M/X remain assumptions. The modeled stack
+window must be writable, nonaliasing memory rather than hardware or ROM, and
+interrupts or hardware writes must preserve the guest frame. These are properties of all
+modeled returns, **not** proofs that a routine terminates or executes. A constant
+addend alone does not establish that caller bytes are inline data: call-site
+ownership, continuation and bank wrapping, overlapping entries, and all incoming
+references still need checking. Neither suspicious instructions nor absent
+contracts establish dead code. Counts stay separate from unresolved runtime debt.
+
+The engine is capped at 512 states, a ±32-byte local SP window with room for
+the incoming frame, and eight reported blocker sites per entry (with an omitted
+count). Budgets become explicit blockers. JSON entries are sorted and deduplicated
+by entry/M/X; normal and experimental generation, exit-M/X summaries, dispatch
+facts, cfg files, and HLE definitions are unchanged. See
+[return-address validation](RETURN_PROVENANCE_VALIDATION.md).
+
+### Context-specific direct-call return contracts (report-only)
+
+`return_call_contracts` follows the direct JSR/JSL blockers in the local
+return-address inventory. It performs bounded abstract execution across
+already-known exact entry/M/X variants. It does not discover entries, change
+decoding boundaries, or publish a general callee summary. The previous local
+`return_address_provenance` results remain available unchanged for comparison.
+
+Each call pushes its actual native return bytes into the same symbolic guest
+stack used by its caller. JSL also pushes the program bank. Registers, saved
+status bytes, carry, and decimal state flow through the inspected callee body;
+they are neither assumed preserved nor indiscriminately discarded. In
+particular, PHP/PLP can restore X width without restoring the high bytes of X/Y
+that SEP cleared. A callee may also write into its caller's frame via a
+stack-relative operand even when the callee's own return address is intact.
+
+The caller resumes only after the callee reaches the matching RTS/RTL frame
+position with the original call PC (and original bank for JSL). Adjusted,
+unknown, constructed, or non-local returns remain blockers rather than
+ordinary fallthrough. The return PC wraps within its program bank. Each
+resulting live M/X state must have a corresponding existing decoded successor
+at the true continuation PC; no canonical width, invented continuation, or
+newly decoded variant is substituted. All modeled callee branches must qualify
+for the entire root query to close.
+
+`calls` lists exact targets, caller entries, continuation PCs, and individually
+matched frame-return sites/M/X states. `entered_exact_variant` means only that
+the query entered that decoded body. Neither that status nor an individually
+matched return proves that every callee path succeeds. The enclosing root's
+status and blockers remain authoritative. A callee that hard-codes one caller's
+return address can qualify in that specific context and fail in another; it
+never acquires an address-independent preservation summary.
+
+Programs are loaded lazily from the existing shadow closure, using the same
+end limits, data regions, exit-M/X inputs, HLE dispatch declarations, and sibling
+boundaries. Failed sibling decodes still retain their boundary. These are the
+decoder's existing boundaries: sibling jump edges are bounded while ordinary
+fallthrough remains permitted. Missing exact variants, including differing M/X
+or bank aliases, stay unproven rather than triggering canonical substitution or
+extra discovery. HLE entry/site/conditional/upload hooks and collapsed dispatches
+remain barriers; non-stack stores still require a separate alias proof.
+
+Queries share a 512-state budget across their inspected call tree, retain the
+±32-byte SP window, and allow at most eight nested abstract call frames. A
+recursive group cannot bootstrap its own correctness from a base-case return.
+The report selects at most 256 root variants and loads at most 512 exact
+programs, deterministically ordered. Root/program omissions and depth/state
+exhaustion are explicit. At most 64 call checks per root are displayed, with an
+omitted count; that display limit does not stop analysis. Local blocker display
+truncation does not hide the fact that a root encountered a call.
+
+Native entry/frame/M/X and writable, nonaliasing stack-memory assumptions still
+apply, as does preservation of the frame by interrupts and hardware. A repeated
+abstract state is not a termination proof. No inline-data skip count, production
+exit-M/X fact, authored cfg edit, HLE change, or runtime fallback results from
+this query. Its counts are not unresolved runtime debt or reachability claims.
+See [direct-call validation](RETURN_CALL_VALIDATION.md).
+
+### Return-stack write alias contracts (report-only)
+
+`return_stack_aliases` revisits the preceding return-call queries that stopped
+at a potentially aliasing memory write. It is a separate query with a separate
+program cache/budget: the existing local and call-contract answers stay intact.
+It does not select every store-containing routine or change code ownership.
+
+The first exclusion is deliberately narrow. Under the standard SNES system
+bus, ordinary stores entirely within `$7E:2000–$7F:FFFF` cannot overwrite
+bank-zero stack memory. The 65816 stack is in bank zero; only the first 8 KiB
+of WRAM has a bank-zero mirror. This is a system-bus property, not a LoROM
+code-address heuristic or an assumption that a game's S is on page one.
+See the [WDC datasheet, stack and addressing sections](https://www.westerndesigncenter.com/wdc/documentation/w65c816s.pdf)
+and the [SNES memory map](https://wiki.superfamicom.org/memory-mapping).
+Special hardware that changes these system-bus properties would require a
+different contract; this report is not a general cartridge-mapper proof.
+
+The query models ordinary STA/STX/STY/STZ stores with long operands, or
+absolute operands whose DB is known from actual byte-valued stack operations.
+PHK pushes the active program bank, PHB saves the current tracked DB, and PLB
+uses the byte actually pulled. DB starts unknown and flows through inspected
+calls rather than being assumed equal to PB or preserved by every callee.
+
+For indexed stores, a known register value supplies a singleton range;
+otherwise the live X flag bounds the full index domain to 0–255 or 0–65535.
+The footprint includes every possible destination byte, with the store width
+selected by M or X as appropriate. Bank carry and the second byte count:
+a word store at `$7E:FFFF` stays in WRAM, but one at `$7F:FFFF` reaches the
+bank-$80 low-WRAM mirror and is rejected. Overflowing sums are not masked
+into an apparently safe interval. This pass does not infer bounds from a
+nearby comparison or substitute a likely index value.
+
+Low-WRAM mirrors, direct-page and indirect operands, unknown DB, hardware
+registers, cartridge writes, RMW instructions, and block moves remain
+barriers. In particular, `$2180` and `$420B` are not harmless non-stack
+addresses: WRAM-port writes or DMA can overwrite the guest frame. A proven
+disjoint store does not supply values to subsequent memory loads; those
+remain unknown. Exact stack-relative writes still update the real symbolic
+frame, including corruption of a parent frame. HLE hooks and other unsupported
+control effects remain barriers even after a disjoint store.
+
+Each root retains its call checks and adds `write_footprints`, with instruction
+bytes, live M/X, known DB, index domain, inclusive unwrapped byte range, and
+a proof or blocking reason. Footprints are deduplicated context observations,
+not execution counts or universal store-site summaries. `write_footprint_status_counts`
+and `sites_with_disjoint_write_context` are computed before the 64-footprint
+display limit; `write_footprints_omitted` makes truncation explicit. A site
+may have a disjoint context and an unproven one. Only the complete enclosing
+query can establish a conditional return contract.
+
+The existing native/writable-stack, interrupt preservation, exact-variant,
+depth/state/root/program limits, and non-termination caveats still apply.
+Memory barriers suppressed by this exclusion do not become production facts,
+new roots, inline-data skips, cfg edits, or HLE replacements. See
+[stack-alias validation](RETURN_ALIAS_VALIDATION.md).
+
 ### Indexed-memory RTS targets and writer candidates
 
 The report-only `stored_target_flows` query connects a decoded indexed word

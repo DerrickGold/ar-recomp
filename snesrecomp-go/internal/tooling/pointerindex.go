@@ -318,4 +318,7 @@ func attachShadowPointerIndexEvidence(image romimage.Image, banks []shadowBank, 
 		}
 	}
 	attachInitializerSamples(image, results, sites)
+	attachShadowEntryCallInputs(results, sites)
+	attachShadowCallerSources(image, results, sites)
+	attachShadowBankContexts(image, banks, results, sites)
 }

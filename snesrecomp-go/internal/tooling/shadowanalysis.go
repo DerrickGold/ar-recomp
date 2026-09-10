@@ -172,6 +172,10 @@ type ShadowReport struct {
 	EntryAblation        ShadowEntryAblationReport   `json:"entry_ablation"`
 	DispatchEvidence     *ShadowDispatchEvidence     `json:"dispatch_evidence,omitempty"`
 	DispatchSummary      ShadowDispatchSummary       `json:"dispatch_summary"`
+	ReturnAudit          ShadowReturnAudit           `json:"return_frame_audit"`
+	ReturnProvenance     ShadowReturnProvenance      `json:"return_address_provenance"`
+	ReturnCalls          ShadowReturnCalls           `json:"return_call_contracts"`
+	ReturnAliases        ShadowReturnCalls           `json:"return_stack_aliases"`
 	DispatchSites        []ShadowDispatchSite        `json:"dispatch_sites,omitempty"`
 	Unresolved           []ShadowUnresolvedSite      `json:"unresolved_sites,omitempty"`
 	DecodeIssues         []ShadowDecodeIssue         `json:"decode_issues,omitempty"`
@@ -268,6 +272,10 @@ type shadowDecodeResult struct {
 	pointerProducers []ShadowPointerProducer
 	storedReads      []shadowStoredRead
 	storedWrites     []shadowStoredWrite
+	callInputs       []shadowDirectCallInputs
+	bankRecipe       *shadowDBRecipe
+	returnAudit      shadowReturnAuditResult
+	returnValues     *ShadowReturnValueEntry
 	issue            *ShadowDecodeIssue
 }
 
@@ -387,6 +395,9 @@ func AnalyzeAuthoredShadow(options ShadowAnalysisOptions) (ShadowReport, error) 
 		EntryAblation:        entryAblation,
 		Unresolved:           unresolved,
 		DecodeIssues:         issues,
+		ReturnAudit:          collectShadowReturnAudit(decodeResults),
+		ReturnProvenance:     collectShadowReturnProvenance(decodeResults),
+		ReturnCalls:          collectShadowReturnCalls(image, banks, decodeResults),
 		Limitations: []string{
 			"configured func entries, entry M/X states, and exit_mx_at routes seed the read-only call-target variant fixed point",
 			"an open table is a partial match until value/bounds provenance proves its complete target set",
@@ -401,6 +412,7 @@ func AnalyzeAuthoredShadow(options ShadowAnalysisOptions) (ShadowReport, error) 
 			"the current ROM reader is explicitly LoROM; mapper generalization is a later milestone",
 		},
 	}
+	report.ReturnAliases = collectShadowReturnAliases(image, banks, decodeResults, report.ReturnCalls)
 	report.DispatchSites = collectShadowDispatchInventory(image, banks, decodeResults, report)
 	report.DispatchSummary = summarizeShadowDispatchInventory(report.DispatchSites)
 	if strings.TrimSpace(options.DispatchAnalysisPath) != "" {
@@ -671,6 +683,10 @@ func runShadowDecodePass(image romimage.Image, banks []shadowBank, entries map[b
 					instructions:     shadowDecodedInstructions(item.bank.ID, item.entry.Start, graph),
 					pointerProducers: collectShadowPointerProducers(image, graph, regions),
 					storedReads:      storedReads, storedWrites: storedWrites,
+					callInputs:   collectShadowDirectCallInputs(graph),
+					bankRecipe:   &shadowDBRecipe{end: item.entry.End, regions: regions, exitMX: calleeExitMX},
+					returnAudit:  auditShadowReturns(graph, item.bank.Config),
+					returnValues: collectShadowReturnValues(graph, item.bank.Config),
 				}
 			}
 		}()
@@ -3035,6 +3051,10 @@ func writeShadowText(output io.Writer, report ShadowReport, verbose bool) {
 	fmt.Fprintf(output, "shadow-root unresolved dynamic edges: %d raw emissions -> %d unique source sites; likely bring-up blockers=%d; decode issues=%d\n",
 		summary.RawUnresolvedEmissions, summary.UniqueUnresolvedSites, summary.LikelyBlockingUnresolvedSites, summary.DecodeIssues)
 	writeShadowDispatchInventory(output, report, verbose)
+	writeShadowReturnAudit(output, report.ReturnAudit, verbose)
+	writeShadowReturnProvenance(output, report.ReturnProvenance, verbose)
+	writeShadowReturnCalls(output, report.ReturnCalls, verbose)
+	writeShadowReturnAliases(output, report.ReturnAliases, verbose)
 	if evidence := report.DispatchEvidence; evidence != nil {
 		fmt.Fprintf(output, "runtime triage: %d unresolved site(s) observed, %d unobserved; evidence observations=%d overflow=%t trace_sha256=%s\n",
 			summary.ObservedUnresolvedSites, summary.UnobservedUnresolvedSites,
