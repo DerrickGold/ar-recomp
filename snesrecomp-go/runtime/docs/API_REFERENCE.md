@@ -396,6 +396,42 @@ through to VRAM. Use the explicit fallback result for partial coverage. A span
 with null entries is likewise transparent; return a zero-length span at a
 mixed-coverage boundary to defer that coordinate to scalar lookup.
 
+### Drive custom composition and high-refresh presentation
+
+The runner has no interpolation clock and does not retain previous presentation
+frames. That is intentional: host refresh, window pacing, interpolation
+quality, and game-semantic motion belong to the frontend or game renderer. The
+runner owns one hardware transaction per emulated tick.
+
+For an image-plane renderer:
+
+1. Bind caller-owned main/authentic and separated overlay surfaces.
+2. Publish the frame policy, providers, extents, camera, and OBJ metadata.
+3. Run the game-owned preparation and `run_ppu_scanout` once.
+4. Copy or upload only the completed caller-owned surfaces needed for a
+   previous/current pair. Borrowed surface descriptors must still obey their
+   generation rules; ownership of the bound host storage does not transfer.
+5. Between emulated ticks, synthesize and present from that immutable pair
+   without calling scanout, IRQ, audio, or guest execution again.
+6. If a pair is missing or discontinuous, present the exact current endpoint.
+
+Semantic renderers may use `visit_ppu_frame_transaction`, OBJ resolve/raster,
+virtual providers, overlays, and Mode-7 replacement as bounded inputs. The
+transaction borrows are callback-lifetime only. Entity identity, room formats,
+effect reconstruction, previous/current storage, and interpolation eligibility
+are not runner services and must not be derived by casting an
+`SrComponentHandle` or including private PPU headers.
+
+`SrPpuScanoutLineContext` reports instantaneous line state at the callback's
+BEFORE or AFTER_HDMA phase. It does not claim to reconstruct the VRAM/CGRAM/OAM
+history of an already completed frame. Leave `line_callback` null outside an
+explicit diagnostic. A consumer that keeps its own renderer snapshot or offline
+capture owns the copy, serialization format, and performance cost; it is not a
+portable emulation save state.
+
+See [Game enhancement integration](GAME_ENHANCEMENT_INTEGRATION.md#custom-composition-and-high-refresh-presentation)
+for strategy selection, invalidation, fallback, and conformance guidance.
+
 ### Observe and replace audio
 
 1. Recover semantic track/SFX events in the game adapter.

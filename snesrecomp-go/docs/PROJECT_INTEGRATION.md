@@ -498,6 +498,14 @@ pointer. The linked game uses `RtlGameApplyPpuFramePolicy`; external enhancement
 layers use the capability-gated `SnesRunnerApi.apply_ppu_frame_policy` request
 with the current lifetime generation.
 
+Frame policy controls one hardware scanout; it does not select host refresh or
+interpolation behavior. A high-refresh frontend runs the recovered game
+schedule and `run_ppu_scanout` once per emulated tick, then re-presents an
+immutable, integration-owned result without advancing the game, IRQs, HDMA, or
+audio again. Image-plane and semantic-rerasterization strategies, including
+their ownership and fallback rules, are mapped to the public ABI in
+[`GAME_ENHANCEMENT_INTEGRATION.md`](../runtime/docs/GAME_ENHANCEMENT_INTEGRATION.md#custom-composition-and-high-refresh-presentation).
+
 The generated ABI is `RecompReturn Function_MxXx(CpuState *cpu)`. Do not invent
 per-function return structs or pass CPU registers as C parameters; mutate the
 shared `CpuState` exactly as generated code does.

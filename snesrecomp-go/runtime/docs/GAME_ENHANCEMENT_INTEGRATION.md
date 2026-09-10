@@ -301,6 +301,84 @@ inside the frame transaction. Avoid copying full framebuffers between game and
 runner. Derived OBJ parts and rasters use caller-provided buffers so the runner
 can remain allocation-free on the hot path.
 
+## Custom composition and high-refresh presentation
+
+A custom renderer does not replace the runner's hardware ownership. Execute the
+game, PPU scanout, HDMA, raster IRQs, and audio progression exactly once per
+emulated tick. After that transaction completes, a frontend may present the
+same immutable result any number of times at the host display cadence. A
+presentation-only iteration must not call the game, `run_ppu_scanout`, an IRQ
+callback, or an audio-advancement operation again.
+
+The public ABI supports custom composition as a set of mechanisms rather than
+as one custom-renderer callback:
+
+| Need | Runner mechanism | Integration-owned decision |
+| --- | --- | --- |
+| Wider resident backgrounds | Frame policy, fill/motion bands, and layer extents | Which world is finite, repeating, clamped, or mirrored |
+| Background data beyond resident VRAM | Virtual tilemap providers | Game map decoding, camera identity, and unloaded-world policy |
+| Independently composited BG/HUD/OBJ planes | Overlay captures and caller-owned surfaces | Plane grouping, depth, projection, and presentation layout |
+| Sprites outside the native viewport | OBJ metadata plus resolve/raster services | Stable entity identity and unwrapped world position |
+| A replacement affine scene | Mode-7 override | Replacement pixels and game-specific transform semantics |
+| Native fallback and comparison | Authentic surface and optional presentation digest | Acceptance ranges and intentional differences |
+| One coherent preparation point | PPU frame transaction | Any durable copy or host-renderer resource built from the callback borrows |
+
+There are two useful interpolation strategies, and neither requires the runner
+to own presentation cadence:
+
+1. **Image-plane interpolation.** Retain previous/current copies of selected
+   caller-owned BG, OBJ, or residual surfaces; estimate or publish motion; and
+   synthesize an intermediate host texture. This is the more generic strategy.
+   The runner has already performed SNES priority, window, mosaic, color-math,
+   and HDMA work. Reject a discontinuous pair per plane and present the exact
+   current plane when motion is unavailable.
+2. **Semantic rerasterization.** Retain the game data needed to reconstruct a
+   scene, match entities to stable game-owned producers, interpolate verified
+   coordinates or transforms, and rasterize again for presentation. Room
+   formats, entity identities, animation continuity, effect geometry, and
+   interpolation eligibility remain in the game project. Use current artwork
+   for a moved entity and snap births, deaths, ambiguous matches, large jumps,
+   or incompatible modes rather than cross-fading unrelated pixel art.
+
+`query_ppu_state` and `SrPpuScanoutLineContext.state` are instantaneous views.
+The scanline callback is opt-in diagnostic observation of its declared BEFORE
+or AFTER_HDMA phase; it is not a retained, replayable description of a
+completed frame. Likewise, a frame transaction provides coherent VRAM, CGRAM,
+OAM, state, and surface borrows at one synchronous point, not 224 immutable
+memory generations. A project that records additional game-owned snapshots for
+its renderer or offline tests owns their storage and format. Do not include a
+private `snes/ppu.h`, copy a concrete `Ppu`, or infer that the runner has
+promised a full raster-history API. If multiple games demonstrate a missing
+hardware observation, add a bounded public value or callback-lifetime borrow
+instead of publishing the private layout.
+
+Keep the previous/current presentation pair outside portable CPU, PPU, APU,
+and save-state data. Invalidate it on load/reset, geometry or scene-family
+change, forced blank, missing capture, turbo/catch-up discontinuity, and any
+other condition under which the two images do not describe one ordinary visual
+interval. Calculate the interpolation phase from the frontend's monotonic
+presentation clock and the actual number of elapsed emulated ticks; do not
+derive it from an assumed 60 Hz display.
+
+Validation must include all of the following:
+
+- `alpha == 1` endpoint output exactly matches the ordinary current
+  presentation in the native centre except for explicitly declared
+  replacements;
+- intermediate presentation does not change WRAM, CPU, APU, IRQ, HDMA, input,
+  or logical frame counters;
+- unsupported planes, lines, effects, and objects visibly fall back to the
+  exact current result rather than stale retained content;
+- scene transitions, animation changes, pause, turbo, save/load, and dropped or
+  coalesced emulation ticks invalidate unsafe pairs; and
+- performance is measured separately for simulation/scanout, pair analysis,
+  synthesis, upload, and completed presentation at the requested display rate.
+
+Normal frames should leave scanline diagnostic callbacks null. Do not copy full
+VRAM/CGRAM/OAM images per line, compress captures, write files, poll environment
+variables, or acquire cross-thread locks on the emulation/render hot path merely
+to make an optional custom-renderer diagnostic convenient.
+
 ## Enhanced audio integration
 
 The baseline SPC700 and S-DSP path requires no game-specific audio code. Add an
@@ -383,6 +461,13 @@ variants; and an unknown track ID that falls back safely.
   diagnostic did not run. Finish the census and handle `SR_RESULT_UNAVAILABLE`.
 - **Wrapping sprite X before publishing metadata:** loses the world position
   needed to place an object in a margin.
+- **Running scanout for every interpolated presentation:** advances HDMA, raster
+  IRQs, and the modeled beam more than once per emulated tick.
+- **Treating OAM slots as durable entity identities:** interpolates unrelated
+  occupants after slot reuse, animation remapping, birth, or death. Semantic
+  matching belongs to the game producer; uncertain matches must snap.
+- **Treating one scanline callback as a completed raster history:** confuses an
+  instantaneous callback phase with retained per-line memory generations.
 - **Treating every DSP voice as music:** suppresses or replaces sound effects.
 - **Putting game IDs or ROM addresses in the runner:** makes the core less
   reusable and prevents another game from using the same mechanism.
