@@ -4,8 +4,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "localization/font_resource.h"
 
-#define AR_TEXT_PRESENTATION_ABI_VERSION UINT32_C(1)
+#define AR_TEXT_PRESENTATION_ABI_VERSION UINT32_C(2)
 
 enum { kArTextPresentationMaximumFallbackFonts = 8 };
 
@@ -15,9 +16,9 @@ typedef struct ArTextPresentationFont {
   size_t struct_size;
   uint32_t abi_version;
   const char *stack_id;
-  const char *primary_path;
+  ArFontResourceId primary;
   uint64_t revision;
-  const char *const *fallback_paths;
+  const ArFontResourceId *fallbacks;
   size_t fallback_count;
 } ArTextPresentationFont;
 
@@ -32,6 +33,15 @@ typedef struct ArTextPresentationHost {
   void *context;
   bool (*prepare_font)(void *context, const ArTextPresentationFont *font,
                        char *error, size_t error_capacity);
+  /* Host input only: a pack locator and logical member (including builtin:).
+   * The game never resolves a physical font path. Each nonzero result owns a
+   * registration, retired on rejection/replacement/shutdown. */
+  ArFontResourceId (*register_font)(void *context, const char *manifest,
+                                    const char *member, char *error, size_t capacity);
+  void (*retire_font)(void *context, ArFontResourceId font);
+  /* Aborts only the staged preflight, never the active font/cache. Called
+   * on rejected selection so an unused candidate cannot hold the budget. */
+  void (*discard_prepared_font)(void *context);
 } ArTextPresentationHost;
 
 /* Same-thread, pointer-free feedback mailbox. A nonzero ticket identifies one

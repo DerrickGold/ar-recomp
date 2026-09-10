@@ -28,7 +28,26 @@ func EnsureNativeUSSource(directory string, rom []byte) (*AuthorPack, error) {
 	if pack, err := OpenNativeUSSource(directory); err != nil {
 		return nil, err
 	} else if pack != nil {
-		return supplementNativeUSSource(directory, pack)
+		var credits []AuthorMessage
+		if len(rom) != 0 {
+			d, err := NewDecoder(rom)
+			if err != nil {
+				return nil, err
+			}
+			if d.ReleaseID() != "us" {
+				return nil, fmt.Errorf("the runtime baseline requires the US ROM")
+			}
+			entries, err := d.assetScript()
+			if err != nil {
+				return nil, err
+			}
+			pages, err := d.nativeCredits(entries)
+			if err != nil {
+				return nil, err
+			}
+			credits = nativeCreditsMessages(pages)
+		}
+		return supplementNativeUSSource(directory, pack, credits...)
 	}
 	d, err := NewDecoder(rom)
 	if err != nil {
@@ -67,17 +86,24 @@ func OpenNativeUSSource(directory string) (*AuthorPack, error) {
 // InstallNativeUSSource shares the build's non-overwrite policy with a GUI
 // which already holds its validated extraction. No second ROM scan is needed.
 func InstallNativeUSSource(directory string, pack *AuthorPack) (*AuthorPack, error) {
-	if old, err := OpenNativeUSSource(directory); err != nil {
-		return nil, err
-	} else if old != nil {
-		return supplementNativeUSSource(directory, old)
-	}
 	if pack == nil {
 		return nil, fmt.Errorf("native source is required")
 	}
 	m := pack.Manifest().Metadata()
 	if m.ID != "native-us" || m.SourceProfile != "us" || m.Target != "us-runtime" || m.Coverage != "complete" {
 		return nil, fmt.Errorf("incompatible native US source")
+	}
+	if old, err := OpenNativeUSSource(directory); err != nil {
+		return nil, err
+	} else if old != nil {
+		var credits []AuthorMessage
+		for page := 0; page < endingPageCount; page++ {
+			id := creditPageID("us", page)
+			if ops, err := pack.MessageOperations(id); id != "" && err == nil {
+				credits = append(credits, AuthorMessage{ID: id, Operations: ops})
+			}
+		}
+		return supplementNativeUSSource(directory, old, credits...)
 	}
 	p, err := NewSourceProject(pack)
 	if err != nil {
@@ -89,15 +115,19 @@ func InstallNativeUSSource(directory string, pack *AuthorPack) (*AuthorPack, err
 	return pack, nil
 }
 
-func supplementNativeUSSource(directory string, old *AuthorPack) (*AuthorPack, error) {
+func supplementNativeUSSource(directory string, old *AuthorPack, supplemental ...AuthorMessage) (*AuthorPack, error) {
 	pack := old
-	for _, label := range nativeHUDLabels("us") {
+	for _, label := range append(nativeHUDLabels("us"), supplemental...) {
 		if view, found := pack.workspace.Message(label.ID); found && view.Present {
 			continue
 		}
-		var err error
+		script, err := EmitAuthorScript([]AuthorMessage{label}, "supplement.artext")
+		if err != nil {
+			return nil, err
+		}
+		body, _ := script.Body(label.ID)
 		pack, err = pack.AddMessage(label.ID, pack.manifest.Sources()[0],
-			label.Operations[0].Value+"\n@end\n", TranslationNotStarted)
+			body, TranslationNotStarted)
 		if err != nil {
 			return nil, err
 		}

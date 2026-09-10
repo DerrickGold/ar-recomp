@@ -148,3 +148,35 @@ bool ActRaiserLocalizationText_InsertInlineObject(
   ++*count;
   return true;
 }
+
+bool ActRaiserLocalizationText_MapBidiSpans(
+    const ArTextBidiSpan *spans, size_t count, size_t source_offset,
+    size_t source_bytes, const uint16_t *offsets,
+    const char *normalized, size_t normalized_bytes, size_t destination_base,
+    ArTextBidiSpans *destination) {
+  if (!destination || !offsets || (count && !spans) ||
+      (normalized_bytes && !normalized) ||
+      destination->count > kArTextMaximumBidiSpans ||
+      count > kArTextMaximumBidiSpans ||
+      source_offset > UINT32_MAX || source_bytes > UINT32_MAX - source_offset ||
+      normalized_bytes > UINT32_MAX || destination_base > UINT32_MAX - normalized_bytes)
+    return false;
+  for (size_t i = 0; i < count; ++i) {
+    ArTextBidiSpan value = spans[i];
+    if (value.end <= source_offset || value.start >= source_offset + source_bytes) continue;
+    size_t a = value.start > source_offset ? value.start - source_offset : 0;
+    size_t b = value.end - source_offset;
+    if (b > source_bytes) b = source_bytes;
+    a = offsets[a]; b = offsets[b];
+    if (a > normalized_bytes) a = normalized_bytes;
+    if (b > normalized_bytes) b = normalized_bytes;
+    while (a < b && (normalized[a] == ' ' || normalized[a] == '\n')) ++a;
+    while (b > a && (normalized[b-1] == ' ' || normalized[b-1] == '\n')) --b;
+    if (b <= a) continue;
+    if (destination->count >= kArTextMaximumBidiSpans) return false;
+    value.start = (uint32_t)(destination_base + a);
+    value.end = (uint32_t)(destination_base + b);
+    destination->spans[destination->count++] = value;
+  }
+  return true;
+}

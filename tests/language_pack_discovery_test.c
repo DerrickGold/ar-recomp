@@ -45,7 +45,21 @@ int main(void) {
   CHECK(!strcmp(catalog->entries[0].metadata.locale, "en-CA"));
   CHECK(!ArLanguagePackCatalog_Add(catalog, &io, "/other/pack.ini", "community.excellent", &error));
   CHECK(!ArLanguagePackCatalog_Add(catalog, &io, "/other/pack.ini", "mismatched-directory", &error));
+  CHECK(catalog->count == 0 && catalog->conflict_count == 1);
+  CHECK(!ArLanguagePackCatalog_Add(catalog, &io, "/third/pack.ini", "community.excellent", &error));
+
+  memset(catalog, 0, sizeof(*catalog));
+  const char *token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/v-123";
+  char index[1024];
+  snprintf(index, sizeof(index), "actraiser-language-catalog\t1\npack\tcommunity.excellent\t%s\n", token);
+  CHECK(ArLanguagePackCatalog_ReadArchiveIndex(catalog, &io, "/packs", index, strlen(index), &error));
+  CHECK(catalog->count == 1 && strstr(catalog->entries[0].manifest, token));
+  const char *bad_index = "actraiser-language-catalog\t1\npack\tcommunity.excellent\t../escape\n";
+  CHECK(!ArLanguagePackCatalog_ReadArchiveIndex(catalog, &io, "/packs", bad_index, strlen(bad_index), &error));
   CHECK(catalog->count == 1);
+  const char *conflict_index = "actraiser-language-catalog\t1\nconflict\tCOMMUNITY.EXCELLENT\n";
+  CHECK(ArLanguagePackCatalog_ReadArchiveIndex(catalog, &io, "/packs", conflict_index, strlen(conflict_index), &error));
+  CHECK(catalog->count == 0 && catalog->conflict_count == 1);
 
   /* A library larger than the supported capacity keeps a subset that does not
    * depend on the order the filesystem enumerated it, and says how many it

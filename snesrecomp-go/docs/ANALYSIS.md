@@ -604,6 +604,292 @@ site can collapse to one candidate. Raw opcode-like bytes in data can also
 produce false candidates. Confirm entries and completeness with the runtime
 dispatch census rather than feeding this list directly into generation.
 
+## Dispatch inventory and HLE coverage
+
+Shadow report schema v18 adds `dispatch_sites` and `dispatch_summary`. This
+inventory is separate from `unresolved_sites` and its raw/unique emission
+counts. It includes static dispatch comparisons, unresolved decoded sites,
+every authored `hle_dispatch` hook, indexed-memory-fed RTS sites, and source
+sites present only in an imported dispatch census. It never changes decoding,
+entry discovery, generated code,
+proven-fact selection, or the production unresolved-site gate. Exported database
+facts stay unchanged; their `shadow_report_version` provenance advances to 18.
+Existing v17 databases remain accepted with all ROM and proof checks intact.
+
+Each record separates:
+
+- `routing`: `compiler`, `hle` (with `hle_function`), or `unknown` for an
+  observed-only source. HLE hooks remain owned by the project; no generated
+  dispatch replaces them.
+- `static_status`: the existing authored/inferred comparison category,
+  `unresolved`, or `not_analyzed`.
+- `target_set_status`: `unproven`, `open`, `authored_closed`,
+  `statically_closed`, or `conflict`. A declared closed set is an override,
+  not independent proof. None of these statuses certifies generated-body
+  coverage or that a project helper delegates all targets to the registry.
+- `runtime_status` and `runtime_observations`: exact observed targets, M/X/E,
+  mirror and continuation flags, hit counts, generated-body availability,
+  and trapped-before-dispatch status **in the captured build**. Successful
+  observations never close an unproven target set. These fields are empty
+  until a census is imported; zero observations is not evidence of safety.
+
+A decoded hook records its instruction bytes and deduplicated containing
+function/M/X contexts. `decoded_occurrences` counts shadow decode contexts,
+not executed blocks or emitted traps. A hook without an analyzed root remains
+`authored_only_not_decoded`: it gets no invented width, instruction decode, or
+reachability claim. An `observed_only` site retains its runtime evidence but
+does not become a static root. Site joins use the exact 24-bit source PC;
+mirrored target identities are preserved rather than guessed equivalent.
+
+The compact text report displays HLE hooks and observed missing/trapped sites;
+`--verbose` includes every inventory site, containing function/M/X context,
+and all observations. Imported continuations with no registry body are not
+counted as missing functions. `--bank` scopes imported observations by exact
+source bank. Existing unresolved counts continue to describe shadow decoding
+with authored dispatch declarations withheld, not this wider inventory.
+
+**Zero classified bring-up blockers is not a coverage certificate.** In
+particular, routing an indirect jump through HLE does not prove that its
+helper has every handler it needs. A source reported as HLE-routed with an
+unproven target set still merits table/provenance analysis or runtime census.
+
+### Caller-to-trampoline pointer provenance
+
+The report-only `pointer_producers` field connects a decoded near `JSR` to a
+one-instruction `JMP (abs)` trampoline, including HLE-routed trampolines. A
+bounded predecessor-graph query finds a word-sized direct-page store and
+follows its A/X/Y value through register transfers to an indexed absolute or
+long table load. This is a def-use query over decoded control flow, not a raw
+backward byte scan or an address-based match across unrelated functions.
+
+Each finding records the containing entry, call PC and M/X, load/store PCs,
+index register and (when available) index-value origin, pointer-slot address,
+and conditional ROM base candidates. `dispatch_summary.pointer_producer_sites`
+counts sites with findings; `--verbose` prints the chains and outstanding
+`proof_obligations`. These findings do not create entry roots, handler bodies,
+table spans, configuration edits, or proven database facts. Project HLE remains
+in control; the original ROM chain does not prove a helper's implementation.
+
+Direct-page stores address bank zero at `D + operand`, whereas `JMP (abs)`
+reads an absolute bank-zero slot. Equal operands therefore require D=0, not
+merely matching text. Local constant D evidence can establish a nonzero alias
+or reject a mismatch; unknown D yields a conditional match only for equal
+operands. DB evidence recognizes local `PEA/PLB` and `PHK/PLB` definitions (or
+the explicit bank of a long load). Candidate definitions are reported alongside
+`unknown_paths`: a backedge crossing a call prevents treating an initial DB
+assignment as an all-path constant. Candidate bases use the current LoROM
+reader, exclude WRAM banks, and are not mapper-independent code ownership.
+
+Remaining obligations explicitly include the index domain/stride, table extent
+and ownership, handler entry kind/live M/X, and preservation of the pointer
+across the call stack and interrupts. A counter that bounds object iteration
+does **not** bound an index read from the object. Syntactically valid table
+words or a pointer just beyond a candidate span do not close a target set.
+
+This first query is deliberately bounded to 32 predecessor steps per walk and
+one near-call hop. Ambiguous producer joins, clobbers, unknown writes, byte
+stores, unsupported stack shuffles, and overlapping authored data stop recovery.
+Far calls, multi-hop trampolines, absolute/indexed pointer stores, split tables,
+and interprocedural D/DB-preservation summaries remain future work. A missing
+finding means this bounded query did not recover the relationship, not that a
+site has no table-derived targets.
+
+#### Index writers, script-pointer sources, and conditional ROM samples
+
+When a pointer producer's index comes from a word load, `index_evidence`
+records the origin-to-index path and writers to the same address expression.
+This includes scalar direct-page/absolute/long slots and indexed fields.
+Unlike the indexed RTS writer query below, this writer index includes **all
+decoded program banks**: initialization may be in a different bank from the
+script interpreter. `writer_match` explicitly says
+`same_address_expression_across_program_banks`. This is not proof of a shared
+allocation, D/DB/index identity, or a reaching definition. Only writers in the
+existing decoded closure are included; unseen code and differently spelled
+aliases can still write the field.
+
+Writer records retain PCs, M/X, width, source loads, symbolic expressions,
+partial/RMW writes, and unknown values. Literal word writers supply sorted
+`literal_value_candidates` with writer PCs. An immediate index load instead
+has `writer_match=literal_index_load`. Neither case establishes a complete
+dispatch domain. Byte/truncated index transfers cannot provide word samples.
+
+For each candidate index and locally encountered DB definition, the report
+can sample one ROM word at the **effective** address `base + index`. Thus a
+script load `$0000,Y` can be sampled if a candidate Y reaches mapped ROM; a
+non-ROM unindexed base is not by itself a rejection. Unknown DB paths remain
+visible and do not become all-path constants. WRAM banks, unmapped addresses,
+and reads/index additions crossing a bank boundary are not sampled. This
+uses the current ROM mapper and is not a claim about all cartridge mappings.
+
+The bounded local path evaluator tracks load/transfer N/Z, immediate word
+comparisons, BIT, CLC/SEC/CLV, and decoded conditional-branch direction. It
+filters zero indices skipped by BEQ, nonnegative stream data skipped by BPL,
+and `$FFFF` terminators excluded by CMP/BEQ. Unknown flags or paths remain
+unknown, not accepted guards. A comparison on an unrelated object-loop
+counter cannot bound the table index. Paths are limited to the existing
+32-step unique-predecessor walks, not speculative linear decoding.
+
+`rom_read_samples` includes the index, DB, effective read PC, word, and status
+(`word_passes_local_guards`, `word_fails_local_guards`,
+`word_unknown_local_guard`, corresponding `index_*` rejections,
+`not_rom_mapped`, or `bank_boundary_not_sampled`). A passing word receives a
+`conditional_target_pc` in the trampoline's program bank, plus **address-only**
+authored overlap and ROM-mapping annotations. These annotations do not prove
+an instruction boundary, code ownership, handler entry kind/M/X, reachability,
+or compatibility with an HLE hook. Even an unconfigured, ROM-mapped candidate
+is not a newly discovered valid function. Samples are capped at 512 per
+producer; `samples_truncated` reports the cap rather than implying completeness.
+
+This is explicitly report-only: conditional index substitutions never enter
+the proven database, target-set classification, code roots, or generation.
+They do not reduce unresolved counts or authorize removing authored funcs,
+continuations, or HLE definitions. See
+[the cross-game validation](POINTER_INDEX_VALIDATION.md) for reproduced
+handler-address overlap and unresolved source relationships.
+
+#### Initializer tables and local index bit constraints
+
+`index_evidence.table_initializers` follows decoded word writers back to their
+indexed table loads, preserving the writer PC, decode contexts, source load
+M/X, and any writer addend. It includes one additional pointer-source hop for
+`LDA (dp),Y` when a nearby word STA to the same DP operand comes from another
+indexed load. Intervening writes, D changes, unsupported stack effects, and
+callees stop that hop. Equal operands still do not prove D/wrapping/alias
+behavior; the nested source is conditional and its sampled words are never
+substituted into the outer indirect read.
+
+The initializer's index query follows a word through transfers, immediate
+AND/ORA/EOR, and accumulator ASL/LSR on bounded unique-predecessor paths. It
+reports the origin plus operations and `known_zero_bits`/`known_one_bits`.
+The resulting `local_domain_size` counts a **local overapproximation**, not
+table entries or reachable states. For example AND #3 followed by ASL yields
+the superset `{0,2,4,6}`; an unbounded word followed only by ASL yields 32,768
+possible even words, not a small table bound. Unknown inputs, calls, joins,
+truncation, and unsupported arithmetic cannot manufacture an origin constant.
+Later masks can still constrain an otherwise unknown word. Branch predicates
+are not used to narrow this initializer domain, and constraints on unrelated
+registers are not applied to it.
+
+Domains of at most 256 values are enumerated. Other domains retain their bit
+constraints without a full enumeration. Identically spelled source-field
+writers across decoded program banks are listed separately as
+`conditional_source_writers`; literal words from those writers can supply
+hypothetical indices after the recorded operations. These are not reaching
+definitions or a complete input domain. Scratch slots may match hundreds of
+unrelated writers, so a larger writer list does not imply stronger evidence.
+
+Initializer bank evidence uses a separate 256-step unique-predecessor query.
+It recognizes PHK, PEA, and literal PHA sources of PLB, including two consecutive
+PLB pulls from a word PHA/PEA. Byte PHA cannot supply two bytes. Calls, joins,
+unsupported bank definitions, and exhausted budgets leave the bank unknown.
+This longer query does not change existing pointer-producer or code-generation
+status analysis.
+
+`rom_word_samples` records the effective read address, word, and index evidence
+(`local_word_domain_superset` or `conditional_writer_value`). It excludes
+unmapped/WRAM addresses and bank-boundary crossings and caps output at 512
+samples per read. A word is labeled `conditional_rom_word_not_a_root`: it is
+not automatically a stream start, a nested table pointer, or a handler. The
+table's extent, data ownership, incoming state domain, aliases, and reachability
+remain explicit proof obligations. No samples are fed back into consumer
+index candidates, dispatch target sets, code roots, HLE policy, or the proven
+database. See [initializer validation](TABLE_INITIALIZER_VALIDATION.md).
+
+### Indexed-memory RTS targets and writer candidates
+
+The report-only `stored_target_flows` query connects a decoded indexed word
+load to `PHA`/`PHX`/`PHY` followed by `RTS`. It follows bounded, unique decoded
+predecessors, register transfers, and word-sized `INC`/`DEC` adjustments. Each
+flow records the load and push PCs, the live M/X at RTS, and the net addend
+including RTS's increment: loading an address, decrementing, and pushing it
+has net addend zero. The destination stays in the RTS instruction's program
+bank, with 16-bit wrapping. This does not assume that a low destination address
+is invalid code; mapping and ownership are reported separately.
+
+Writers are collected from the existing decoded closure, using the same
+indexed addressing mode and operand in the same program bank. This is an
+**address-expression match, not a proven alias or complete writer census**.
+Different D, DB, index values, allocations, and lifetimes can make identical
+expressions access unrelated memory; different expressions and banks can
+also alias. No object-field offset or game-specific record layout is built in.
+
+Literal word stores provide conditional target candidates. A helper whose
+first decoded instruction reads `$01,S` or executes word-sized PLA can be
+joined to decoded direct JSR callers with matching entry M/X. The saved near
+return word is the call PC plus two, before any writer/consumer adjustments.
+Only a net adjustment of one is labeled `continuation_candidate`; other
+offsets are not called continuations. A stack read after PHP/PHA, or at an
+unsupported offset, never becomes caller-return evidence. A continuation
+candidate is not a normal callable routine, and no registration is generated.
+
+The report retains partial writes, read/modify/writes, memory-derived values,
+unknown values, and context-dependent alternatives. It does not silently
+discard them to manufacture a closed set. Unsupported arithmetic (including
+ADC/SBC with unproven carry/decimal state), clobbers, entry boundaries, and
+ambiguous predecessor joins stop value recovery. Byte and truncated values
+cannot supply a word target through this query.
+
+`--verbose` prints writer provenance and target candidates. Summary counts
+deduplicate writer PCs and target addresses across owner/M/X contexts;
+`stored_target_authored_addresses` measures **address-only** overlap with
+authored entries, not entry-kind or M/X equivalence. Candidate ownership
+distinguishes decoded boundaries, instruction interiors, conflicting decodes,
+authored data, unmapped addresses, and unclaimed ROM. Even an unclaimed
+ROM address is not decoded or promoted into a root by this query.
+
+These candidates neither close a dispatch set nor enter the proven-fact
+database. Existing unresolved-emission counts are unchanged. Every flow
+retains explicit obligations for aliases, all writers/clobbers, entry kind,
+live M/X, HLE semantics, and reachability. Authored funcs, dispatch guards,
+continuations, and all HLE directives remain intact. Record-base arithmetic,
+finite table/index domains, cross-bank aliases, and interprocedural object
+lifetimes remain future work.
+
+#### Arithmetic evidence and source-field dependencies
+
+An otherwise unknown word writer can now include a report-only
+`value_expression`. It records a load/stack origin, an entry register, a
+register after a call, or an unsupported/ambiguous origin, followed by
+operations in execution order. Immediate ADC/SBC operations carry separate
+`carry_before` and `decimal_before` evidence, including constant-definition PCs
+or the reason the status is unknown. CLD/SED, CLC/SEC, and the corresponding
+REP/SEP bits are recognized on bounded unique-predecessor paths. Comparisons,
+shifts, and previous arithmetic invalidate carry evidence; PLP, RTI, calls,
+interrupt instructions, and unsupported status changes are barriers. Entry
+decimal mode is never assumed clear from a game-wide convention or M/X state.
+
+`local_word_expression` permits an `exact_addend` only when the source and
+all supported adjustments are established locally. ADC adds its immediate
+operand plus carry; SBC subtracts its operand plus one minus carry. Both
+require decimal mode locally proven clear. An immediate origin can then yield
+`constant_word`, with 16-bit wrapping. Unknown/set decimal mode or unknown
+carry produces `conditional_arithmetic`; missing register/callee/producer
+information produces `unresolved_origin`. Operations and their individual
+status evidence remain visible even when the origin is unresolved.
+
+The expression walk can cross a store that does not clobber the tracked
+register. A load origin denotes the value captured at its load PC, not a fresh
+read of that location at the later store PC. Arbitrary callees, unsupported
+operations, truncation, and ambiguous predecessor joins still block a complete
+value expression. `register_after_call` does **not** claim that the callee
+changed or preserved that register; it names the missing summary.
+
+Flows also include `source_fields`: a two-hop, same-program-bank index of
+writer expressions whose loads mention another indexed field expression.
+Each field records its depth, consuming store PCs, and writer candidates.
+Cycles terminate; `source_fields_truncated` explicitly marks deeper unexpanded
+dependencies. This also exposes suspiciously broad expression matches such
+as `$0000,Y`, which can refer to unrelated objects or ROM records. The index
+does not establish D/DB/index identity, allocation/lifetime, or table bounds.
+
+**No values are substituted through these field links.** Even a locally proven
+addend and a literal writer to the same expression do not prove a reaching
+definition or dispatch target. The new expression metadata does not alter the
+legacy writer `kind`, `stored_value`, or `value_addend`, enumerate new targets,
+close target sets, or enter the analysis database. In particular, neither
+local arithmetic evidence nor memory-expression matches authorize removal of
+funcs, continuations, HLE hooks, or other authored policy.
+
 ## Runtime dispatch census
 
 For data-derived targets that static analysis cannot see, trace builds can
@@ -615,6 +901,12 @@ SNESRECOMP_TRACE_FILE=saves/dispatch.jsonl \
 SNESRECOMP_TRACE_CHANNELS=dispatch \
 ./build/MyGame game.sfc --frames 2400
 ```
+
+For a registry-target census, leave `SNESRECOMP_SEMANTIC_DISPATCH_TRACE` at
+its default of `0`. Semantic-equivalence builds suppress implementation-level
+registry events; in particular, an HLE helper delegating directly to the
+registry may then be absent from the census. Use a separate ordinary trace
+build to measure that coverage.
 
 Structured `dispatch` records are included in the default channel mask. An
 explicit `SNESRECOMP_TRACE_CHANNELS` list can still omit them; in that case

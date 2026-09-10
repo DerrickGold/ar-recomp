@@ -131,8 +131,14 @@ int main(void) {
 
   ActRaiserLocalizationValues values;
   CHECK(ActRaiserLocalizationValues_Capture(
-      &values, wram, sizeof(wram), &pack, "Maître"));
+      &values, wram, sizeof(wram), &pack, NULL, "Maître"));
   ArDialogueValue value;
+  Write16(0x0010, 22);
+  Write16(0x0012, 38);
+  CHECK(Resolve(&values, "sound_music_id", kArLanguagePlaceholder_Number, &value));
+  CHECK(value.number == 22);
+  CHECK(Resolve(&values, "sound_effect_id", kArLanguagePlaceholder_Number, &value));
+  CHECK(value.number == 38);
   CHECK(Resolve(&values, "master_name",
                 kArLanguagePlaceholder_LocalizedText, &value));
   CHECK(!strcmp(value.text, "Maître"));
@@ -168,6 +174,44 @@ int main(void) {
   CHECK(ActRaiserLocalizationValues_ReportRevision(&values) != revision);
   CHECK(!Resolve(&values, "selected_offering_action",
                  kArLanguagePlaceholder_LocalizedText, &value));
+
+  // A partial community pack may translate a dialogue but omit the city/enemy
+  // dictionary it references. Missing terms use the native pack, while local
+  // overrides win. The fallback is an explicit borrowed input, not a global.
+  static const char partial_script[] =
+      ":: city.bloodpool.name\nElsewhere\n@end\n"
+      ":: enemy.name.slot_02\nExcellent demon\n@end\n";
+  vfs.script = (const uint8_t *)partial_script;
+  vfs.script_bytes = sizeof(partial_script) - 1;
+  ArLanguagePack partial;
+  ArLanguagePack_Init(&partial);
+  CHECK(ArLanguagePack_Load(&partial, &io, "pack/pack.ini", &pack_error));
+  CHECK(ActRaiserLocalizationValues_Capture(
+      &values, wram, sizeof(wram), &partial, &pack, "Maître"));
+  CHECK(Resolve(&values, "current_city_name", kArLanguagePlaceholder_LocalizedText, &value));
+  CHECK(!strcmp(value.text, "Fíllmore"));
+  CHECK(Resolve(&values, "town_name", kArLanguagePlaceholder_LocalizedText, &value));
+  CHECK(!strcmp(value.text, "Fíllmore"));
+  CHECK(Resolve(&values, "enemy_name", kArLanguagePlaceholder_LocalizedText, &value));
+  CHECK(!strcmp(value.text, "Excellent demon"));
+  uint64_t with_fallback = ActRaiserLocalizationValues_ReportRevision(&values);
+  values.fallback_pack = NULL;
+  CHECK(ActRaiserLocalizationValues_ReportRevision(&values) != with_fallback);
+  CHECK(!Resolve(&values, "current_city_name", kArLanguagePlaceholder_LocalizedText, &value));
+  ArLanguagePack_Destroy(&partial);
+  static const char empty_script[] = ":: city.fillmore.name\n@empty\n@end\n";
+  vfs.script = (const uint8_t *)empty_script;
+  vfs.script_bytes = sizeof(empty_script) - 1;
+  ArLanguagePack_Init(&partial);
+  CHECK(ArLanguagePack_Load(&partial, &io, "pack/pack.ini", &pack_error));
+  CHECK(ActRaiserLocalizationValues_Capture(
+      &values, wram, sizeof(wram), &partial, &pack, "Maître"));
+  CHECK(!Resolve(&values, "current_city_name", kArLanguagePlaceholder_LocalizedText, &value));
+  CHECK(Resolve(&values, "enemy_name", kArLanguagePlaceholder_LocalizedText, &value));
+  CHECK(!strcmp(value.text, "Démon"));
+  values.abi_version = 1;
+  CHECK(!Resolve(&values, "enemy_name", kArLanguagePlaceholder_LocalizedText, &value));
+  ArLanguagePack_Destroy(&partial);
 
   ArLanguagePack_Destroy(&pack);
   puts("localization dynamic value checks passed");

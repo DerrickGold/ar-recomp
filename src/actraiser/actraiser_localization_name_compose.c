@@ -32,7 +32,7 @@ static bool CollectNameEntryLines(const char *utf8, size_t utf8_bytes,
  * the eight shaped name graphemes independently of keyboard geometry. */
 bool ActRaiserLocalizationNameCompose_ClearUnderlineRow(
     char *utf8, size_t *utf8_bytes,
-    ArLocalizationInlineObjectSnapshot *objects, uint8_t object_count) {
+    ArLocalizationInlineObjectSnapshot *objects, uint8_t object_count, ArTextBidiSpans *bidi) {
   if (!utf8 || !utf8_bytes || !*utf8_bytes) return false;
   size_t starts[64];
   size_t ends[64];
@@ -57,13 +57,14 @@ bool ActRaiserLocalizationNameCompose_ClearUnderlineRow(
   memmove(utf8 + remove_start, utf8 + remove_end,
           *utf8_bytes - remove_end + 1u);
   *utf8_bytes -= removed;
+  ArTextBidiSpans_Edit(bidi, (uint32_t)remove_start, (uint32_t)removed, 0);
   return true;
 }
 
 static bool InsertNameEntryText(
     char *utf8, size_t capacity, size_t *utf8_bytes, size_t offset,
     const char *insertion, size_t insertion_bytes,
-    ArLocalizationInlineObjectSnapshot *objects, uint8_t object_count) {
+    ArLocalizationInlineObjectSnapshot *objects, uint8_t object_count, ArTextBidiSpans *bidi) {
   if (!utf8 || !capacity || !utf8_bytes || !insertion || !insertion_bytes ||
       offset > *utf8_bytes || insertion_bytes >= capacity - *utf8_bytes)
     return false;
@@ -71,6 +72,7 @@ static bool InsertNameEntryText(
           *utf8_bytes - offset + 1u);
   memcpy(utf8 + offset, insertion, insertion_bytes);
   *utf8_bytes += insertion_bytes;
+  ArTextBidiSpans_Edit(bidi, (uint32_t)offset, 0, (uint32_t)insertion_bytes);
   for (uint8_t index = 0; index < object_count; ++index) {
     /* An endpoint equal to the insertion point belongs to the preceding
      * cluster. Only objects attached to following text move. */
@@ -87,7 +89,7 @@ static bool InsertNameEntryText(
  * glyphs remain shaped/VWF; only the navigation affordance has fixed room. */
 bool ActRaiserLocalizationNameCompose_ExpandKeyGutters(
     char *utf8, size_t capacity, size_t *utf8_bytes,
-    ArLocalizationInlineObjectSnapshot *objects, uint8_t object_count) {
+    ArLocalizationInlineObjectSnapshot *objects, uint8_t object_count, ArTextBidiSpans *bidi) {
   size_t starts[64];
   size_t ends[64];
   size_t line_count = 0;
@@ -105,7 +107,7 @@ bool ActRaiserLocalizationNameCompose_ExpandKeyGutters(
         continue;
       if (!InsertNameEntryText(
               utf8, capacity, utf8_bytes, offset, "   ", 3u,
-              objects, object_count))
+              objects, object_count, bidi))
         return false;
     }
   }
@@ -115,7 +117,7 @@ bool ActRaiserLocalizationNameCompose_ExpandKeyGutters(
 bool ActRaiserLocalizationNameCompose_InsertPageIndicator(
     char *utf8, size_t capacity, size_t *utf8_bytes,
     uint32_t page_index, uint32_t page_count,
-    ArLocalizationInlineObjectSnapshot *objects, uint8_t object_count) {
+    ArLocalizationInlineObjectSnapshot *objects, uint8_t object_count, ArTextBidiSpans *bidi) {
   if (page_count <= 1u) return true;
   size_t starts[64];
   size_t ends[64];
@@ -133,7 +135,7 @@ bool ActRaiserLocalizationNameCompose_InsertPageIndicator(
   return InsertNameEntryText(
       utf8, capacity, utf8_bytes,
       starts[line_count - kActRaiserLocalizationNameEntryRows],
-      indicator, (size_t)written, objects, object_count);
+      indicator, (size_t)written, objects, object_count, bidi);
 }
 
 bool ActRaiserLocalizationNameCompose_InsertFieldUnderlines(

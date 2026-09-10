@@ -96,6 +96,28 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/diorama/diorama_projection.c")
 list(REMOVE_DUPLICATES _portable_render_files)
 
+# Font byte acquisition is host policy, not a renderer/frame responsibility.
+# Keep both the portable contracts and the SDL rasterizer free of path opens;
+# the backend receives immutable leased bytes, including for new raster sizes.
+file(GLOB _font_resource_files
+    "${GAME_SOURCE_ROOT}/localization/font_resource*.[ch]"
+    "${GAME_SOURCE_ROOT}/localization/text_backend*.[ch]"
+    "${GAME_SOURCE_ROOT}/localization/text_presentation*.[ch]"
+    "${GAME_SOURCE_ROOT}/localization/localization_frame*.[ch]"
+    "${GAME_SOURCE_ROOT}/render/localized_text*.[ch]"
+    "${GAME_SOURCE_ROOT}/render/ui_text_renderer*.[ch]"
+    "${GAME_SOURCE_ROOT}/platform/sdl/text_rasterizer*.[ch]")
+foreach(_file IN LISTS _font_resource_files)
+    file(READ "${_file}" _contents)
+    if(_contents MATCHES "(fopen|SDL_IOFromFile|TTF_OpenFont)[ \t\r\n]*[(]" OR
+       _contents MATCHES "ArHostFontResources_|ArLanguagePack_ResolveMemberPath" OR
+       _contents MATCHES "primary_font_path|fallback_font_paths|FontPathCapacity")
+        message(FATAL_ERROR
+            "Text font resource boundary bypassed: ${_file}\n"
+            "Resolve font members in the host and acquire immutable resource bytes.")
+    endif()
+endforeach()
+
 # Dependency direction: the portable render and localization layers may not
 # depend on the game, and may not name one of its screens. Cell geometry for a
 # fixed menu arrives as an ArLocalizationTextGrid published by the game

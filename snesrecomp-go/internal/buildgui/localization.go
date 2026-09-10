@@ -504,7 +504,7 @@ func (work *localizationWork) mutateLocalization(w *localizationReply, r *http.R
 		if err != nil {
 			return err
 		}
-		w.json(200, map[string]string{"backup": backup, "message": "Uninstalled from game discovery. Restart the game. Your workshop project and installed files are retained; the manifest was saved for recovery."})
+		w.json(200, map[string]string{"backup": backup, "message": "Uninstalled from game discovery. Restart the game. Your workshop project and installed files are retained for recovery."})
 		return nil
 	}
 	if endpoint == "open" || endpoint == "reference" {
@@ -646,7 +646,7 @@ func (work *localizationWork) mutateLocalization(w *localizationReply, r *http.R
 			w.json(200, report)
 			return nil
 		}
-		path, err := lk.InstallAuthorProject(filepath.Join(work.root, "packs", p.Pack().Manifest().Metadata().ID), prepared, q.Replace)
+		path, err := lk.InstallProjectInLibrary(filepath.Join(work.root, "packs"), prepared, q.Replace)
 		if err != nil {
 			return err
 		}

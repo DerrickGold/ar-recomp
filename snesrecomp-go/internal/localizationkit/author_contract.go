@@ -58,6 +58,7 @@ func (p AuthorPresentation) detached() AuthorPresentation {
 }
 
 type authorRoute struct {
+	USRuntimeUsage        string                        `json:"us_runtime_usage"`
 	Optional              bool                          `json:"optional"`
 	ID                    string                        `json:"id"`
 	Allowed               []string                      `json:"allowed_placeholders"`
@@ -202,10 +203,12 @@ type AuthorPlaceholder struct {
 }
 
 type AuthorReference struct {
-	ID              string              `json:"id"`
-	Placeholders    []AuthorPlaceholder `json:"placeholders"`
-	Anchors         []string            `json:"anchors"`
-	NativeInProfile bool                `json:"native_in_profile"`
+	USRuntimeUsage      string              `json:"us_runtime_usage"`
+	ID                  string              `json:"id"`
+	Placeholders        []AuthorPlaceholder `json:"placeholders"`
+	Anchors             []string            `json:"anchors"`
+	NativeInProfile     bool                `json:"native_in_profile"`
+	RequiredForComplete bool                `json:"required_for_complete"`
 	// What the game does with this route, so an editor can size its field and
 	// hide controls the runtime would ignore.
 	Presentation AuthorPresentation `json:"presentation"`
@@ -223,7 +226,8 @@ func AuthorReferences(profile string) ([]AuthorReference, error) {
 		if !native {
 			anchors = route.Anchors[route.Canonical]
 		}
-		entry := AuthorReference{ID: route.ID, Anchors: append([]string{}, anchors...), NativeInProfile: native, Placeholders: []AuthorPlaceholder{}, Presentation: route.presentation(profile).detached()}
+		entry := AuthorReference{ID: route.ID, Anchors: append([]string{}, anchors...), NativeInProfile: native, RequiredForComplete: native && !route.Optional, Placeholders: []AuthorPlaceholder{}, Presentation: route.presentation(profile).detached()}
+		entry.USRuntimeUsage = route.USRuntimeUsage
 		for _, name := range route.Allowed {
 			entry.Placeholders = append(entry.Placeholders, AuthorPlaceholder{name, authorContracts.placeholders[name]})
 		}
@@ -352,6 +356,10 @@ func ValidateAuthorScripts(profile, coverage string, scripts ...*AuthorScript) (
 				}
 				if op.MinimumDigits != 0 && authorContracts.placeholders[op.Name] != "number" {
 					return fail("number format requires a numeric placeholder")
+				}
+			case "text":
+				if route.presentation(profile).Shape != "flow" && strings.ContainsAny(op.Value, "\u0085\u2028\u2029") {
+					return fail("use @line or @paragraph instead of Unicode line-separator controls in fixed fields")
 				}
 			case "anchor":
 				if anchorIndex >= len(anchors) || op.ID != anchors[anchorIndex] {

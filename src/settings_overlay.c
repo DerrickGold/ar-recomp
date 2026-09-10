@@ -86,6 +86,8 @@ static ArUiLocale InterfaceLocale(void) {
       ? (ArUiLocale)g_settings.interface_language : kArUiLocale_English;
 }
 
+ArUiLocale SettingsOverlay_InterfaceLocale(void) { return InterfaceLocale(); }
+
 static const char *Ui(const char *key) {
   return ArUiCatalog_Text(InterfaceLocale(), key, key);
 }
@@ -2975,7 +2977,7 @@ static int OverlayCellCount(const char *text, int maximum) {
  * shaping is whole-run, never a collection of isolated Unicode code points. */
 static bool MakeUnicodeTextRun(const MenuLayout *layout, int x, int y,
                              const char *text, int max_chars, int cell_width,
-                             ArTextHorizontalAlignment alignment,
+                             ArUiTextAlignment alignment,
                              int style, uint32_t tint, ArUiTextRun *out_run) {
   if (!text || max_chars <= 0 || !ArUiTextRenderer_IsReady(&s_ui_text)) return false;
   const size_t bytes = strlen(text);
@@ -3017,7 +3019,7 @@ static bool MakeUnicodeTextRun(const MenuLayout *layout, int x, int y,
 
 static bool DrawUnicodeText(const MenuLayout *layout, int x, int y,
                              const char *text, int max_chars, int cell_width,
-                             ArTextHorizontalAlignment alignment,
+                             ArUiTextAlignment alignment,
                              int style, uint32_t tint) {
   ArUiTextRun run;
   return MakeUnicodeTextRun(layout, x, y, text, max_chars, cell_width,
@@ -3029,7 +3031,7 @@ static void DrawTextN(const MenuLayout *layout, int x, int y,
                       const char *text, int max_chars, TextStyle style) {
   if (!text || max_chars <= 0) return;
   if (DrawUnicodeText(layout, x, y, text, max_chars, kGlyphSize,
-                        kArTextHorizontalAlignment_Leading, style,
+                        kArUiTextAlignment_Left, style,
                         UINT32_C(0xffffffff))) return;
   const size_t bytes = strlen(text);
   int cell = 0;
@@ -3055,7 +3057,7 @@ int SettingsOverlay_GameTextWidth(const char *text, int scale) {
     ArUiTextRun run;
     int width;
     if (MakeUnicodeTextRun(&layout, 0, 0, text, INT32_MAX, kGlyphSize,
-          kArTextHorizontalAlignment_Leading, kText_Normal,
+          kArUiTextAlignment_Left, kText_Normal,
           UINT32_C(0xffffffff), &run) &&
         ArUiTextRenderer_Measure(&s_ui_text, &run, &width, NULL)) return width;
   }
@@ -3075,7 +3077,7 @@ void SettingsOverlay_DrawGameText(int x, int y, int scale, uint8_t alpha,
     const MenuLayout layout = {.scale_percent = scale * kPercentScale,
                                .origin_x = x, .origin_y = y};
     if (DrawUnicodeText(&layout, 0, 0, text, INT32_MAX,
-          kGlyphSize, kArTextHorizontalAlignment_Leading, kText_Normal,
+          kGlyphSize, kArUiTextAlignment_Left, kText_Normal,
           ARGB(alpha, 255, 255, 255))) return;
   }
   const ArRenderTexture texture = s_font_textures[kText_Normal];
@@ -3160,7 +3162,7 @@ static void DrawTextRight(const MenuLayout *layout, int right, int y,
                           const char *text, int max_chars, TextStyle style) {
   int length = CappedTextLength(text, max_chars);
   if (DrawUnicodeText(layout, right - length * kGlyphSize, y, text, length,
-                        kGlyphSize, kArTextHorizontalAlignment_Trailing, style,
+                        kGlyphSize, kArUiTextAlignment_Right, style,
                         UINT32_C(0xffffffff))) return;
   DrawTextN(layout, right - length * kGlyphSize, y,
             text, length, style);
@@ -3197,7 +3199,7 @@ static void DrawSmallTextN(const MenuLayout *layout, int x, int y,
   if (!text || max_chars <= 0 ||
       !ArRenderTexture_IsValid(s_debug_font_texture)) return;
   if (DrawUnicodeText(layout, x, y, text, max_chars, kDebugGlyphWidth,
-                        kArTextHorizontalAlignment_Leading, -1, color)) return;
+                        kArUiTextAlignment_Left, -1, color)) return;
   const size_t bytes = strlen(text);
   int cell = 0;
   for (size_t offset = 0; offset < bytes && cell < max_chars; ++cell) {

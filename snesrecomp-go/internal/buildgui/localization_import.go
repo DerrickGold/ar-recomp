@@ -50,7 +50,7 @@ func (work *localizationWork) previewLocalizationImport(w *localizationReply, p 
 func (app *application) chooseLocalizationDirectory(w http.ResponseWriter, r *http.Request) {
 	// A native modal must not hold the editor lock or stall build-status polls.
 	if !app.directoryPickerMu.TryLock() {
-		writeJSONError(w, http.StatusConflict, "a folder chooser is already open")
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "a folder chooser is already open", "errorCode": "builder.language.chooser_busy"})
 		return
 	}
 	defer app.directoryPickerMu.Unlock()
@@ -65,11 +65,15 @@ func (app *application) chooseLocalizationDirectory(w http.ResponseWriter, r *ht
 	}
 	dir, err := pick(ctx)
 	if err != nil {
-		writeJSONError(w, 400, err.Error())
+		code := "builder.language.chooser_failed"
+		if errors.Is(err, errDirectoryChooserUnavailable) {
+			code = "builder.language.chooser_unavailable"
+		}
+		writeJSON(w, 400, map[string]string{"error": err.Error(), "errorCode": code})
 		return
 	}
 	if dir != "" && !filepath.IsAbs(dir) {
-		writeJSONError(w, 400, fmt.Sprintf("folder chooser returned a non-absolute path: %q", dir))
+		writeJSON(w, 400, map[string]string{"error": fmt.Sprintf("folder chooser returned a non-absolute path: %q", dir), "errorCode": "builder.language.chooser_failed"})
 		return
 	}
 	writeJSON(w, 200, map[string]any{"directory": dir, "cancelled": dir == ""})

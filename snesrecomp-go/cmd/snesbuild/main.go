@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/DerrickGold/snesrecomp-go/internal/languagecli"
 	"github.com/DerrickGold/snesrecomp-go/internal/project"
 	"github.com/DerrickGold/snesrecomp-go/internal/toolchain"
 	"github.com/DerrickGold/snesrecomp-go/internal/tooling"
@@ -37,6 +39,8 @@ func run(args []string) error {
 		return errors.New("missing command")
 	}
 	switch args[0] {
+	case "language":
+		return languagecli.Run(context.Background(), args[1:], os.Stdout)
 	case "regen":
 		return runRegen(args[1:])
 	case "analyze":
@@ -73,6 +77,10 @@ func run(args []string) error {
 		return tooling.RunMXDiffCommand(args[1:], ".", os.Stdout)
 	case "chr-render":
 		return tooling.RunCHRRenderCommand(args[1:], ".", os.Stdout)
+	case "localization-graphics":
+		return tooling.RunLocalizationGraphicsCommand(args[1:], ".", os.Stdout)
+	case "localization-extract":
+		return tooling.RunLocalizationExtractCommand(args[1:], ".", os.Stdout)
 	case "configure":
 		return runConfigure(args[1:])
 	case "build":
@@ -107,6 +115,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `Usage: snesbuild <command> [options]
 
 Commands:
+  language    Validate, package, install or describe language packs without the GUI
   regen       Regenerate C and all generated sidecars
   analyze     Compare inferred control-flow facts with authored cfg (read-only)
   xref        Find decoded instruction references to an address (read-only)
@@ -129,6 +138,10 @@ Commands:
   wram        Inspect, compare, and scan WRAM snapshots (read-only)
   mx-diff     Compare game-frame M/X traces (read-only)
   chr-render  Render SNES 4bpp ROM, VRAM, and icon sheets
+  localization-graphics
+              Extract regional font/credits reference assets to a private ZIP
+  localization-extract
+              Extract a local source pack, catalogue, or US runtime-route manifest
   configure   Configure the native game build with CMake
   build       Configure (by default) and compile the native game
               (--hermetic compiles with the pinned Zig toolchain, no CMake)

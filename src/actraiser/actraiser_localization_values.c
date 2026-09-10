@@ -42,7 +42,8 @@ static bool Valid(const ActRaiserLocalizationValues *values) {
   return values && values->struct_size >= sizeof(*values) &&
       values->abi_version == ACTRAISER_LOCALIZATION_VALUES_ABI_VERSION &&
       values->wram && values->wram_bytes >= kActRaiserWramSize &&
-      ArLanguagePack_GetMetadata(values->pack);
+      ArLanguagePack_GetMetadata(values->pack) &&
+      (!values->fallback_pack || ArLanguagePack_GetMetadata(values->fallback_pack));
 }
 
 static uint8_t Read8(const ActRaiserLocalizationValues *values,
@@ -136,7 +137,11 @@ static unsigned CurrentTown(const ActRaiserLocalizationValues *values) {
 static bool CopyTermById(const ActRaiserLocalizationValues *values,
                          const char *semantic_id,
                          ArDialogueValue *value) {
-  return CopyPlainTerm(values->pack, semantic_id,
+  // Partial publications omit unchanged terms. Only absence falls back:
+  // invalid/empty authored terms keep the existing fail-closed behavior.
+  const ArLanguagePack *pack = values->pack;
+  if (!ArLanguagePack_FindMessage(pack, semantic_id)) pack = values->fallback_pack;
+  return CopyPlainTerm(pack, semantic_id,
                        value->text, sizeof(value->text));
 }
 
@@ -200,9 +205,12 @@ static bool DecodeBcdScore(uint16_t bcd, uint32_t *numeric) {
 bool ActRaiserLocalizationValues_Capture(
     ActRaiserLocalizationValues *values,
     const uint8_t *wram, size_t wram_bytes,
-    const ArLanguagePack *pack, const char *master_name) {
+    const ArLanguagePack *pack, const ArLanguagePack *fallback_pack,
+    const char *master_name) {
   if (!values || !wram || wram_bytes < kActRaiserWramSize ||
-      !ArLanguagePack_GetMetadata(pack) || !master_name || !master_name[0] ||
+      !ArLanguagePack_GetMetadata(pack) ||
+      (fallback_pack && !ArLanguagePack_GetMetadata(fallback_pack)) ||
+      !master_name || !master_name[0] ||
       strlen(master_name) >= sizeof(values->master_name))
     return false;
   ActRaiserLocalizationValues captured = {
@@ -211,6 +219,7 @@ bool ActRaiserLocalizationValues_Capture(
       .wram = wram,
       .wram_bytes = wram_bytes,
       .pack = pack,
+      .fallback_pack = fallback_pack,
   };
   snprintf(captured.master_name, sizeof(captured.master_name), "%s",
            master_name);
@@ -358,6 +367,9 @@ uint64_t ActRaiserLocalizationValues_ReportRevision(
   hash = HashBytes(hash, values->master_name, strlen(values->master_name));
   hash = HashBytes(hash, &values->pack->content_revision,
                    sizeof(values->pack->content_revision));
+  if (values->fallback_pack)
+    hash = HashBytes(hash, &values->fallback_pack->content_revision,
+                    sizeof(values->fallback_pack->content_revision));
   static const struct { uint16_t address; uint16_t bytes; } kRanges[] = {
     {kWramTotalPopulation, 2}, {kWramTownPopulation, kTownCount * 2},
     {kWramTownGrowth, kTownCount}, {kWramTownLevels, kTownCount * 2},

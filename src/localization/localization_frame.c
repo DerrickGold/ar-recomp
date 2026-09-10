@@ -1,6 +1,28 @@
 #include "localization/localization_frame.h"
 
+#include <stddef.h>
 #include <string.h>
+
+#define AR_MEMBER_END(type, member) \
+  (offsetof(type, member) + sizeof(((type *)0)->member))
+
+static bool FrameStorageValid(const ArLocalizationFrame *frame) {
+  return frame &&
+      frame->struct_size >=
+          AR_MEMBER_END(ArLocalizationFrame, dialogue_surface_id) &&
+      frame->abi_version == AR_LOCALIZATION_FRAME_ABI_VERSION &&
+      frame->cells.count <= kArTextCellRecordCapacity &&
+      frame->snapshot_count <= kArTextCellRecordCapacity &&
+      frame->bidi.count <= kArTextMaximumBidiSpans &&
+      frame->grid_count <= kArLocalizationFrameGridCapacity &&
+      frame->indicator_count <= kArLocalizationFrameIndicatorCapacity &&
+      frame->inline_object_count <= kArLocalizationFrameInlineObjectCapacity &&
+      frame->fallback_font_count <= kArTextPresentationMaximumFallbackFonts &&
+      frame->text_bytes <= kArLocalizationFrameTextCapacity;
+}
+
+static bool SnapshotTextValid(const ArLocalizationFrame *frame,
+                              const ArLocalizationTextSnapshot *snapshot);
 
 static bool CopyString(char *destination, size_t capacity,
                        const char *source) {
@@ -37,41 +59,74 @@ void ArLocalizationFrame_Reset(ArLocalizationFrame *frame) {
 bool ArLocalizationFrame_SetFont(ArLocalizationFrame *frame,
                                  const char *locale,
                                  const char *font_stack_id,
-                                 const char *primary_font_path,
+                                 ArFontResourceId primary_font,
                                  uint64_t font_revision,
                                  const ArEnhancedTextSettings *settings) {
-  if (!frame || frame->abi_version != AR_LOCALIZATION_FRAME_ABI_VERSION ||
-      !font_revision || !ArEnhancedTextSettings_IsValid(settings))
+  if (!FrameStorageValid(frame) ||
+      !primary_font || !font_revision || !ArEnhancedTextSettings_IsValid(settings))
     return false;
   char locale_copy[kArLocalizationFrameLocaleCapacity] = {0};
   char stack_copy[kArLocalizationFrameFontStackCapacity] = {0};
-  char path_copy[kArLocalizationFrameFontPathCapacity] = {0};
   if (!CopyString(locale_copy, sizeof(locale_copy), locale) ||
-      !CopyString(stack_copy, sizeof(stack_copy), font_stack_id) ||
-      !CopyString(path_copy, sizeof(path_copy), primary_font_path))
+      !CopyString(stack_copy, sizeof(stack_copy), font_stack_id))
     return false;
   memcpy(frame->locale, locale_copy, sizeof(locale_copy));
   memcpy(frame->font_stack_id, stack_copy, sizeof(stack_copy));
-  memcpy(frame->primary_font_path, path_copy, sizeof(path_copy));
+  frame->primary_font = primary_font;
   frame->font_revision = font_revision;
   frame->settings = *settings;
   frame->fallback_font_count = 0;
-  memset(frame->fallback_font_paths, 0, sizeof(frame->fallback_font_paths));
+  memset(frame->fallback_fonts, 0, sizeof(frame->fallback_fonts));
   return true;
 }
 
 bool ArLocalizationFrame_SetFallbackFonts(
-    ArLocalizationFrame *frame, const char *const *paths, size_t count) {
-  if (!frame || frame->abi_version != AR_LOCALIZATION_FRAME_ABI_VERSION ||
+    ArLocalizationFrame *frame, const ArFontResourceId *fonts, size_t count) {
+  if (!FrameStorageValid(frame) ||
       !frame->font_revision || count > kArTextPresentationMaximumFallbackFonts ||
-      (count && !paths))
+      (count && !fonts))
     return false;
-  char copied[kArTextPresentationMaximumFallbackFonts]
-             [kArLocalizationFrameFontPathCapacity] = {{0}};
+  ArFontResourceId copied[kArTextPresentationMaximumFallbackFonts] = {0};
   for (size_t i = 0; i < count; ++i)
-    if (!CopyString(copied[i], sizeof(copied[i]), paths[i])) return false;
-  memcpy(frame->fallback_font_paths, copied, sizeof(copied));
+    if (!(copied[i] = fonts[i])) return false;
+  memcpy(frame->fallback_fonts, copied, sizeof(copied));
   frame->fallback_font_count = (uint8_t)count;
+  return true;
+}
+
+bool ArLocalizationTextLanguage_IsValid(const ArLocalizationTextLanguage *language) {
+  return language && language->locale[0] &&
+      memchr(language->locale, 0, sizeof(language->locale)) &&
+      language->direction >= kArTextDirection_Auto &&
+      language->direction <= kArTextDirection_RightToLeft;
+}
+
+bool ArLocalizationFrame_SetTextLanguage(
+    ArLocalizationFrame *frame, const ArLocalizationTextLanguage *language) {
+  if (!FrameStorageValid(frame) ||
+      !frame->snapshot_count || frame->snapshot_count > kArTextCellRecordCapacity ||
+      !ArLocalizationTextLanguage_IsValid(language))
+    return false;
+  frame->snapshots[frame->snapshot_count - 1u].language = *language;
+  return true;
+}
+
+bool ArLocalizationFrame_SetTextBidiSpans(
+    ArLocalizationFrame *frame, const ArTextBidiSpans *spans) {
+  if (!FrameStorageValid(frame) ||
+      !frame->snapshot_count || frame->snapshot_count > kArTextCellRecordCapacity ||
+      !spans || frame->bidi.count > kArTextMaximumBidiSpans ||
+      spans->count > kArTextMaximumBidiSpans - frame->bidi.count) return false;
+  ArLocalizationTextSnapshot *snapshot = &frame->snapshots[frame->snapshot_count - 1];
+  if (!SnapshotTextValid(frame, snapshot) || snapshot->bidi_span_count ||
+      (spans->count && spans->spans[spans->count - 1].end > snapshot->utf8_bytes) ||
+      !ArTextBidiSpans_Valid(spans->spans, spans->count,
+          frame->text + snapshot->utf8_offset, snapshot->utf8_bytes, 0)) return false;
+  snapshot->bidi_span_offset = frame->bidi.count;
+  snapshot->bidi_span_count = spans->count;
+  memcpy(frame->bidi.spans + frame->bidi.count, spans->spans,
+         spans->count * sizeof(spans->spans[0]));
+  frame->bidi.count += spans->count;
   return true;
 }
 
@@ -114,13 +169,13 @@ bool ArLocalizationFrame_AddTextWithObjects(
 
 /* Grids are compared and hashed as bytes, so the description must pack without
  * padding: a byte no caller wrote would make two identical grids differ. */
-_Static_assert(sizeof(ArLocalizationTextCellRule) == 6,
+_Static_assert(sizeof(ArLocalizationTextCellRule) == 7,
                "cell rule gained padding");
 _Static_assert(sizeof(ArLocalizationTextRowRule) ==
-                   6 + 6 * kArLocalizationGridMaximumCells,
+                   6 + 7 * kArLocalizationGridMaximumCells,
                "row rule gained padding");
 _Static_assert(sizeof(ArLocalizationTextGrid) ==
-                   5 + (6 + 6 * kArLocalizationGridMaximumCells) *
+                   6 + (6 + 7 * kArLocalizationGridMaximumCells) *
                            kArLocalizationGridMaximumRules,
                "grid gained padding");
 
@@ -152,11 +207,123 @@ static bool GridValid(const ArLocalizationTextGrid *grid,
     for (uint8_t cell = 0; cell < rule->cell_count; ++cell) {
       const ArLocalizationTextCellRule *entry = &rule->cells[cell];
       if (entry->start >= entry->end || entry->end > region.columns ||
+          entry->italic > 1 ||
           entry->alignment > (uint8_t)kArTextHorizontalAlignment_Trailing)
         return false;
     }
   }
   return true;
+}
+
+static bool SnapshotTextValid(const ArLocalizationFrame *frame,
+                              const ArLocalizationTextSnapshot *snapshot) {
+  return snapshot->utf8_offset < frame->text_bytes &&
+      snapshot->utf8_bytes < frame->text_bytes - snapshot->utf8_offset &&
+      frame->text[snapshot->utf8_offset + snapshot->utf8_bytes] == 0;
+}
+
+bool ArLocalizationFrame_IsValid(const ArLocalizationFrame *frame) {
+  if (!FrameStorageValid(frame)) return false;
+  if (!frame->snapshot_count) {
+    return !frame->cells.count && !frame->bidi.count && !frame->grid_count &&
+        !frame->indicator_count && !frame->inline_object_count &&
+        !frame->text_bytes;
+  }
+  if (!frame->primary_font || !frame->font_revision ||
+      !frame->locale[0] || !memchr(frame->locale, 0, sizeof(frame->locale)) ||
+      !frame->font_stack_id[0] ||
+      !memchr(frame->font_stack_id, 0, sizeof(frame->font_stack_id)) ||
+      !ArEnhancedTextSettings_IsValid(&frame->settings))
+    return false;
+  for (uint8_t i = 0; i < frame->fallback_font_count; ++i)
+    if (!frame->fallback_fonts[i]) return false;
+
+  ArTextCellRecordSet rebuilt;
+  ArTextCellRecordSet_Reset(&rebuilt);
+  for (uint8_t i = 0; i < frame->cells.count; ++i) {
+    const ArTextCellRecord *record = &frame->cells.records[i];
+    if (!record->surface_id || record->snapshot_slot < 0 ||
+        (uint8_t)record->snapshot_slot >= frame->snapshot_count ||
+        frame->snapshots[record->snapshot_slot].surface_id != record->surface_id ||
+        !ArTextCellRecordSet_Claim(&rebuilt, record->surface_id,
+            record->destination, record->region, record->snapshot_slot) ||
+        rebuilt.count != i + 1u)
+      return false;
+  }
+
+  for (uint8_t i = 0; i < frame->snapshot_count; ++i) {
+    const ArLocalizationTextSnapshot *snapshot = &frame->snapshots[i];
+    const ArTextCellRecord *owner = NULL;
+    for (uint8_t cell = 0; cell < frame->cells.count; ++cell)
+      if (frame->cells.records[cell].snapshot_slot == (int8_t)i) {
+        owner = &frame->cells.records[cell];
+        break;
+      }
+    if (!SnapshotTextValid(frame, snapshot) ||
+        !snapshot->source_revision || !snapshot->native_font_pixels ||
+        snapshot->revealed_cluster_count > snapshot->cluster_count ||
+        (!snapshot->utf8_bytes && snapshot->cluster_count) ||
+        (snapshot->utf8_bytes && !snapshot->cluster_count) ||
+        snapshot->revealed_utf8_bytes > snapshot->utf8_bytes ||
+        (snapshot->revealed_utf8_bytes < snapshot->utf8_bytes &&
+         ((uint8_t)frame->text[snapshot->utf8_offset +
+                               snapshot->revealed_utf8_bytes] & 0xc0u) == 0x80u) ||
+        !ArLocalizationTextLanguage_IsValid(&snapshot->language) ||
+        snapshot->layout < kArLocalizationTextLayout_Flow ||
+        snapshot->layout > kArLocalizationTextLayout_FramedLabel ||
+        snapshot->native_preserve_count >
+            kArLocalizationFrameNativePreserveCapacity ||
+        snapshot->inline_object_offset > frame->inline_object_count ||
+        snapshot->inline_object_count >
+            frame->inline_object_count - snapshot->inline_object_offset ||
+        snapshot->bidi_span_offset > frame->bidi.count ||
+        snapshot->bidi_span_count >
+            frame->bidi.count - snapshot->bidi_span_offset ||
+        snapshot->key_separator_bytes >
+            kArLocalizationFrameKeySeparatorCapacity)
+      return false;
+    if ((snapshot->layout == kArLocalizationTextLayout_Grid) !=
+        (snapshot->grid_index != 0) || snapshot->grid_index > frame->grid_count)
+      return false;
+    const ArTextCellRegion grid_region = owner
+        ? owner->region : (ArTextCellRegion){0, 0, 64, 64};
+    if (snapshot->grid_index &&
+        !GridValid(&frame->grids[snapshot->grid_index - 1u], grid_region))
+      return false;
+    for (uint8_t preserve = 0;
+         preserve < snapshot->native_preserve_count; ++preserve)
+      if (owner &&
+          !RegionContains(owner->region, snapshot->native_preserves[preserve]))
+        return false;
+    uint32_t previous_end = 0;
+    for (uint8_t object = 0; object < snapshot->inline_object_count; ++object) {
+      const ArLocalizationInlineObjectSnapshot *entry =
+          &frame->inline_objects[snapshot->inline_object_offset + object];
+      if (entry->kind <= kArLocalizationInlineObject_None ||
+          entry->kind > kArLocalizationInlineObject_NameFieldUnderline ||
+          entry->end_utf8_byte < previous_end ||
+          entry->end_utf8_byte > snapshot->utf8_bytes)
+        return false;
+      previous_end = entry->end_utf8_byte;
+    }
+    if (!ArTextBidiSpans_Valid(
+            frame->bidi.spans + snapshot->bidi_span_offset,
+            snapshot->bidi_span_count,
+            frame->text + snapshot->utf8_offset, snapshot->utf8_bytes, 0))
+      return false;
+  }
+  for (uint8_t i = 0; i < frame->indicator_count; ++i) {
+    const ArLocalizationIndicatorSnapshot *indicator = &frame->indicators[i];
+    const ArTextCellRecord *owner =
+        ArTextCellRecordSet_Find(&frame->cells, indicator->surface_id);
+    if (indicator->kind <= kArLocalizationIndicator_None ||
+        indicator->kind > kArLocalizationIndicator_DialogueContinue ||
+        !owner || !RegionContains(owner->region, indicator->region))
+      return false;
+  }
+  return !frame->dialogue_ticket ||
+      (frame->dialogue_surface_id &&
+       ArTextCellRecordSet_Find(&frame->cells, frame->dialogue_surface_id));
 }
 
 const ArLocalizationTextRowRule *ArLocalizationGrid_FindRow(
@@ -176,7 +343,7 @@ const ArLocalizationTextRowRule *ArLocalizationGrid_FindRow(
 const ArLocalizationTextGrid *ArLocalizationFrame_GetGrid(
     const ArLocalizationFrame *frame,
     const ArLocalizationTextSnapshot *snapshot) {
-  if (!frame || !snapshot || !snapshot->grid_index ||
+  if (!FrameStorageValid(frame) || !snapshot || !snapshot->grid_index ||
       snapshot->grid_index > frame->grid_count)
     return NULL;
   return &frame->grids[snapshot->grid_index - 1u];
@@ -207,7 +374,7 @@ static bool AddTextInternal(
     uint8_t native_preserve_count,
     const ArLocalizationInlineObjectSnapshot *inline_objects,
     uint8_t inline_object_count) {
-  if (!frame || frame->abi_version != AR_LOCALIZATION_FRAME_ABI_VERSION ||
+  if (!FrameStorageValid(frame) ||
       !frame->font_revision || !utf8 || !source_revision ||
       (!utf8_bytes && (cluster_count || inline_object_count)) ||
       (utf8_bytes && !cluster_count) ||
@@ -262,7 +429,7 @@ static bool AddTextInternal(
       .revealed_cluster_count = revealed_cluster_count,
       .cluster_count = cluster_count,
       .source_revision = source_revision,
-      .direction = direction,
+      .language.direction = direction,
       .layout = layout,
       .grid_index = grid_index,
       .native_font_pixels = native_font_pixels,
@@ -270,6 +437,7 @@ static bool AddTextInternal(
       .inline_object_offset = frame->inline_object_count,
       .inline_object_count = inline_object_count,
   };
+  memcpy(frame->snapshots[slot].language.locale, frame->locale, sizeof(frame->locale));
   if (native_preserve_count)
     memcpy(frame->snapshots[slot].native_preserves, native_preserves,
            (size_t)native_preserve_count * sizeof(native_preserves[0]));
@@ -331,7 +499,7 @@ bool ArLocalizationFrame_AddTextWithGrid(
 
 bool ArLocalizationFrame_SetKeySeparator(ArLocalizationFrame *frame,
                                          const char *utf8, size_t utf8_bytes) {
-  if (!frame || frame->abi_version != AR_LOCALIZATION_FRAME_ABI_VERSION ||
+  if (!FrameStorageValid(frame) ||
       !frame->snapshot_count || !utf8 || !utf8_bytes ||
       utf8_bytes > kArLocalizationFrameKeySeparatorCapacity)
     return false;
@@ -345,7 +513,7 @@ bool ArLocalizationFrame_SetKeySeparator(ArLocalizationFrame *frame,
 bool ArLocalizationFrame_SetKeyGrid(ArLocalizationFrame *frame,
                                     uint8_t columns, uint8_t trailing_lines,
                                     uint8_t cell_columns) {
-  if (!frame || frame->abi_version != AR_LOCALIZATION_FRAME_ABI_VERSION ||
+  if (!FrameStorageValid(frame) ||
       !frame->snapshot_count || !columns || !trailing_lines || !cell_columns)
     return false;
   ArLocalizationTextSnapshot *snapshot =
@@ -359,7 +527,7 @@ bool ArLocalizationFrame_SetKeyGrid(ArLocalizationFrame *frame,
 bool ArLocalizationFrame_AddIndicator(
     ArLocalizationFrame *frame, uint32_t surface_id,
     ArLocalizationIndicatorKind kind, ArTextCellRegion region) {
-  if (!frame || frame->abi_version != AR_LOCALIZATION_FRAME_ABI_VERSION ||
+  if (!FrameStorageValid(frame) ||
       kind <= kArLocalizationIndicator_None ||
       kind > kArLocalizationIndicator_DialogueContinue ||
       frame->indicator_count >= kArLocalizationFrameIndicatorCapacity)
@@ -402,14 +570,12 @@ const char *ArLocalizationFrame_GetText(
     const ArLocalizationFrame *frame, uint8_t snapshot_index,
     size_t *utf8_bytes) {
   if (utf8_bytes) *utf8_bytes = 0;
-  if (!frame || frame->abi_version != AR_LOCALIZATION_FRAME_ABI_VERSION ||
+  if (!FrameStorageValid(frame) ||
       snapshot_index >= frame->snapshot_count)
     return NULL;
   const ArLocalizationTextSnapshot *snapshot =
       &frame->snapshots[snapshot_index];
-  if (snapshot->utf8_offset >= frame->text_bytes ||
-      snapshot->utf8_bytes >= frame->text_bytes - snapshot->utf8_offset ||
-      frame->text[snapshot->utf8_offset + snapshot->utf8_bytes] != 0)
+  if (!SnapshotTextValid(frame, snapshot))
     return NULL;
   if (utf8_bytes) *utf8_bytes = snapshot->utf8_bytes;
   return frame->text + snapshot->utf8_offset;

@@ -48,8 +48,8 @@ typedef struct DevToolsContext {
 void DevTools_FormatInspectorInfo(const DevToolsContext *context,
                                   char *buffer, size_t buffer_size);
 bool DevTools_DumpSceneAssets(const DevToolsContext *context);
-ArRenderExtentI DevTools_WriteFramebufferPpm(
-    FILE *file, const DevToolsContext *context);
+DevToolsCaptureResult DevTools_WriteFramebufferPpm(
+    FILE *file, const DevToolsContext *context, bool require_composite);
 void DevTools_TakeFullSnapshot(const DevToolsContext *context);
 void DevTools_DumpDioramaLayers(const DevToolsContext *context);
 void DevTools_AdjustHudOutputScale(const DevToolsContext *context,

@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <math.h>
 #include <string.h>
 
@@ -95,23 +96,33 @@ bool ArTextRasterRequest_IsValid(const ArTextRasterRequest *request) {
       kArTextRasterFlag_CropHorizontalWhitespace |
       kArTextRasterFlag_CropVerticalWhitespace |
       kArTextRasterFlag_Italic |
+      kArTextRasterFlag_SlantAsciiNumerals |
       kArTextRasterFlag_IncludeRevealClusters;
   return request &&
       request->struct_size >= AR_MEMBER_END(
-          ArTextRasterRequest, pixelation_size) &&
+          ArTextRasterRequest, bidi_source_offset) &&
       request->abi_version == AR_TEXT_RASTER_REQUEST_ABI_VERSION &&
       ValidUtf8Buffer(request->utf8, request->utf8_bytes) &&
+      ArTextBidiSpans_Valid(request->bidi_spans, request->bidi_span_count,
+          request->utf8, request->utf8_bytes, request->bidi_source_offset) &&
+      request->accent_end_utf8_byte <= request->utf8_bytes &&
+      (!request->accent_end_utf8_byte ||
+       request->accent_end_utf8_byte == request->utf8_bytes ||
+       ((uint8_t)request->utf8[request->accent_end_utf8_byte] & 0xc0u) != 0x80u) &&
       request->font_stack_id && request->font_stack_id_bytes > 0 &&
       !memchr(request->font_stack_id, 0, request->font_stack_id_bytes) &&
       request->font_revision != 0 &&
-      request->font_pixels > 0 && request->minimum_font_pixels > 0 &&
+      request->shadow_shape >= kArTextShadow_Diagonal &&
+      request->shadow_shape <= kArTextShadow_Keyline &&
+      request->font_pixels > 0 && request->font_pixels <= 4096 &&
+      request->minimum_font_pixels > 0 &&
       request->minimum_font_pixels <= request->font_pixels &&
       request->maximum_width > 0 &&
       request->maximum_height > 0 &&
       request->direction >= kArTextDirection_Auto &&
       request->direction <= kArTextDirection_RightToLeft &&
       request->alignment >= kArTextHorizontalAlignment_Leading &&
-      request->alignment <= kArTextHorizontalAlignment_Trailing &&
+      request->alignment <= kArTextHorizontalAlignment_Right &&
       (request->flags & ~known_flags) == 0 &&
       (request->filter == kArRenderFilter_Nearest ||
        request->filter == kArRenderFilter_Linear) &&
@@ -143,7 +154,8 @@ bool ArTextGlyphNeedsCoverage(uint32_t scalar) {
       {0xffa0, 0xffa0},   {0xfff0, 0xfff8},   {0x1bca0, 0x1bca3},
       {0x1d173, 0x1d17a}, {0xe0000, 0xe0fff},
   };
-  if (scalar == '\n' || scalar == '\r' || scalar == '\t' || scalar == 0xfffc)
+  if (scalar == '\n' || scalar == '\r' || scalar == '\t' || scalar == 0x85 ||
+      scalar == 0x2028 || scalar == 0x2029 || scalar == 0xfffc)
     return false;
   for (size_t i = 0; i < sizeof(ranges) / sizeof(ranges[0]); ++i) {
     if (scalar < ranges[i][0])
@@ -185,9 +197,13 @@ bool ArTextRasterizer_HasGlyph(const ArTextRasterizer *rasterizer,
 static bool BitmapValid(const ArTextBitmap *bitmap,
                         const ArTextRasterRequest *request) {
   if (!bitmap ||
-      bitmap->struct_size < AR_MEMBER_END(ArTextBitmap, token) ||
+      bitmap->struct_size < AR_MEMBER_END(ArTextBitmap, paragraph_direction) ||
       bitmap->abi_version != AR_TEXT_BITMAP_ABI_VERSION ||
+      bitmap->paragraph_direction < kArTextDirection_Auto ||
+      bitmap->paragraph_direction > kArTextDirection_RightToLeft ||
       !bitmap->pixels || bitmap->width <= 0 || bitmap->height <= 0 ||
+      bitmap->reveal_cluster_count > 65536 ||
+      (bitmap->reveal_cluster_count && !bitmap->reveal_clusters) ||
       bitmap->width > request->maximum_width ||
       bitmap->height > request->maximum_height ||
       ((request->flags & kArTextRasterFlag_IncludeRevealClusters) &&
@@ -195,8 +211,13 @@ static bool BitmapValid(const ArTextBitmap *bitmap,
     return false;
   for (size_t index = 0; index < bitmap->reveal_cluster_count; ++index) {
     const ArTextRevealCluster *cluster = &bitmap->reveal_clusters[index];
+    const size_t previous_end = index
+        ? bitmap->reveal_clusters[index - 1u].end_utf8_byte : 0u;
     if (!cluster->end_utf8_byte ||
+        cluster->end_utf8_byte <= previous_end ||
         cluster->end_utf8_byte > request->utf8_bytes ||
+        (cluster->end_utf8_byte < request->utf8_bytes &&
+         ((uint8_t)request->utf8[cluster->end_utf8_byte] & 0xc0u) == 0x80u) ||
         cluster->line_index < 0 || cluster->x < 0 || cluster->y < 0 ||
         cluster->width <= 0 || cluster->height <= 0 ||
         cluster->x > bitmap->width - cluster->width ||
@@ -213,8 +234,27 @@ static bool BitmapValid(const ArTextBitmap *bitmap,
     case kArRenderPixelFormat_A8: bytes_per_pixel = 1; break;
     default: return false;
   }
-  return bitmap->width <= INT32_MAX / bytes_per_pixel &&
-      bitmap->pitch_bytes >= bitmap->width * bytes_per_pixel;
+  if (bitmap->width > INT32_MAX / bytes_per_pixel ||
+      bitmap->pitch_bytes < bitmap->width * bytes_per_pixel ||
+      (size_t)bitmap->height > SIZE_MAX / (size_t)bitmap->pitch_bytes)
+    return false;
+  if (bitmap->pixel_owners) {
+    if (bitmap->format != kArRenderPixelFormat_Rgba8888 ||
+        !bitmap->reveal_cluster_count ||
+        (uint64_t)bitmap->width * bitmap->height > (UINT64_C(64) << 20) / 8)
+      return false;
+    for (int y = 0; y < bitmap->height; ++y)
+      for (int x = 0; x < bitmap->width; ++x) {
+        uint32_t pixel;
+        memcpy(&pixel, (const uint8_t *)bitmap->pixels +
+            (size_t)y * bitmap->pitch_bytes + (size_t)x * 4, 4);
+        const uint32_t owner = bitmap->pixel_owners[(size_t)y * bitmap->width + x];
+        if (owner > bitmap->reveal_cluster_count ||
+            (owner != 0) != ((pixel & 255) != 0))
+          return false;
+      }
+  }
+  return true;
 }
 
 ArRenderRectI ArTextBitmap_InkBounds(const ArTextBitmap *bitmap,
@@ -326,16 +366,17 @@ static float RetailBlueWeight(float position) {
   return 0.0f;
 }
 
-bool ArTextBitmap_ApplyStyleShadow(void *pixels, int width, int height,
+static bool ApplyShadow(void *pixels, int width, int height,
                                    int pitch_bytes, ArRenderPixelFormat format,
                                    int offset_x, int offset_y,
-                                   uint32_t shadow_rgb) {
+                                   uint32_t shadow_rgb, uint32_t *owners,
+                                   bool keyline) {
   if (!pixels || format != kArRenderPixelFormat_Rgba8888 || width <= 0 ||
       height <= 0 || width > INT32_MAX / 4 || pitch_bytes < width * 4 ||
       (!offset_x && !offset_y))
     return false;
-  if (offset_x <= -width || offset_x >= width ||
-      offset_y <= -height || offset_y >= height)
+  if (!keyline && (offset_x <= -width || offset_x >= width ||
+      offset_y <= -height || offset_y >= height))
     return true; /* Shifted clear of the surface: nothing to lay down. */
 
   /* Traverse against the offset, like an overlapping memmove. Every source
@@ -353,28 +394,176 @@ bool ArTextBitmap_ApplyStyleShadow(void *pixels, int width, int height,
   for (int y = y_step < 0 ? height - 1 : 0; y != y_end; y += y_step) {
     /* Clip before subtraction so even extreme valid dimensions cannot
      * overflow a signed source-row index. */
-    if ((offset_y > 0 && y < offset_y) ||
-        (offset_y < 0 && y >= height + offset_y)) continue;
-    const int source_y = y - offset_y;
     uint8_t *row = (uint8_t *)pixels + (size_t)y * (size_t)pitch_bytes;
-    const uint8_t *source_row =
-        (const uint8_t *)pixels + (size_t)source_y * (size_t)pitch_bytes;
     for (int x = x_step < 0 ? width - 1 : 0; x != x_end; x += x_step) {
-      const int source_x = x - offset_x;
-      if (source_x < 0 || source_x >= width) continue;
       uint32_t pixel;
       memcpy(&pixel, row + (size_t)x * 4u, sizeof(pixel));
       if (pixel & UINT32_C(0xff)) continue; /* Never overwrite a letterform. */
-      uint32_t source_pixel;
-      memcpy(&source_pixel, source_row + (size_t)source_x * 4u,
-             sizeof(source_pixel));
-      const uint8_t alpha = (uint8_t)(source_pixel & UINT32_C(0xff));
+      uint8_t alpha = 0;
+      uint32_t owner = 0;
+      for (unsigned sample = 0; sample < (keyline ? 2u : 1u); ++sample) {
+        const int64_t sx = (int64_t)x - (keyline && sample ? 0 : offset_x);
+        const int64_t sy = (int64_t)y - (keyline && !sample ? 0 : offset_y);
+        if (sx < 0 || sx >= width || sy < 0 || sy >= height) continue;
+        uint32_t source;
+        memcpy(&source, (const uint8_t *)pixels + (size_t)sy*pitch_bytes + (size_t)sx*4, 4);
+        if ((source & 255u) <= alpha) continue;
+        alpha = source & 255u;
+        if (owners) owner = owners[(size_t)sy*width + (size_t)sx];
+      }
       if (!alpha) continue;
       pixel = ((uint32_t)red << 24) | ((uint32_t)green << 16) |
               ((uint32_t)blue << 8) | alpha;
       memcpy(row + (size_t)x * 4u, &pixel, sizeof(pixel));
+      if (owners) owners[(size_t)y*width + x] = owner;
     }
   }
+  return true;
+}
+
+bool ArTextBitmap_ApplyStyleShadow(void *pixels, int width, int height,
+    int pitch_bytes, ArRenderPixelFormat format, int dx, int dy, uint32_t rgb) {
+  return ApplyShadow(pixels, width, height, pitch_bytes, format, dx, dy, rgb, NULL, false);
+}
+
+bool ArTextBitmap_ApplyOwnedShadow(void *pixels, int width, int height,
+    int pitch_bytes, uint32_t *owners, int step, uint32_t rgb,
+    ArTextShadowShape shape) {
+  if (step <= 0 || shape < kArTextShadow_Diagonal || shape > kArTextShadow_Keyline) return false;
+  return ApplyShadow(pixels, width, height, pitch_bytes, kArRenderPixelFormat_Rgba8888,
+                     step, step, rgb, owners, shape == kArTextShadow_Keyline);
+}
+
+uint32_t *ArTextBitmap_BuildOwnership(const ArTextBitmap *b) {
+  if (!b || !b->pixels || b->format != kArRenderPixelFormat_Rgba8888 ||
+      b->width <= 0 || b->height <= 0 || b->width > INT32_MAX/4 ||
+      b->pitch_bytes < b->width*4 || !b->reveal_clusters ||
+      !b->reveal_cluster_count || b->reveal_cluster_count > 65536 ||
+      (uint64_t)b->width*b->height > (UINT64_C(64)<<20)/8) return NULL;
+  uint32_t *owners = calloc((size_t)b->width*b->height, sizeof(*owners));
+  if (!owners) return NULL;
+  for (size_t i = 0; i < b->reveal_cluster_count; ++i) {
+    const ArTextRevealCluster *c = &b->reveal_clusters[i];
+    const int left = c->x > 0 ? c->x : 0, top = c->y > 0 ? c->y : 0;
+    const int64_t right = (int64_t)c->x+c->width, bottom = (int64_t)c->y+c->height;
+    for (int y = top; y < b->height && y < bottom; ++y)
+      for (int x = left; x < b->width && x < right; ++x) {
+        uint32_t p;
+        memcpy(&p, (const uint8_t *)b->pixels+(size_t)y*b->pitch_bytes+x*4u, 4);
+        /* A shared ink pixel cannot be separated after whole-run shaping.
+         * Give overlaps to the later logical cluster: delaying shared ink is
+         * safe, whereas the earlier owner could reveal its neighbour early. */
+        if (p & 255) owners[(size_t)y * b->width + x] = (uint32_t)i + 1;
+      }
+  }
+  /* Shapers can return advance boxes excluding an antialiased overhang.
+   * Assign only those uncovered ink pixels to the closest shaped box. This
+   * does not reshape/split a grapheme, and never assigns transparent padding. */
+  for (int y=0; y<b->height; ++y) for (int x=0; x<b->width; ++x) {
+    const size_t at=(size_t)y*b->width+x;
+    if (owners[at]) continue;
+    uint32_t p;
+    memcpy(&p, (const uint8_t *)b->pixels+(size_t)y*b->pitch_bytes+x*4u, 4);
+    if (!(p&255)) continue;
+    int64_t best=INT64_MAX;
+    for (size_t i=0; i<b->reveal_cluster_count; ++i) {
+      const ArTextRevealCluster *c=&b->reveal_clusters[i];
+      const int64_t right=(int64_t)c->x+c->width-1, bottom=(int64_t)c->y+c->height-1;
+      const int64_t dx=x<c->x ? (int64_t)c->x-x : x>right ? x-right : 0;
+      const int64_t dy=y<c->y ? (int64_t)c->y-y : y>bottom ? y-bottom : 0;
+      const int64_t distance=dx+dy;
+      if (distance <= best) {best=distance;owners[at]=(uint32_t)i+1;}
+    }
+  }
+  return owners;
+}
+
+bool ArTextBitmap_SlantAsciiNumerals(ArTextBitmap *b,
+                                    const char *utf8, size_t bytes) {
+  if (!b || !utf8 || !b->pixel_owners || !b->reveal_clusters ||
+      !b->reveal_cluster_count || b->reveal_cluster_count > 65536 ||
+      b->format != kArRenderPixelFormat_Rgba8888 || !b->pixels || b->width <= 0 ||
+      b->width > INT32_MAX / 4 || b->pitch_bytes < b->width * 4 ||
+      b->height <= 0 || (uint64_t)b->width * b->height > (UINT64_C(64) << 20) / 16)
+    return false;
+  const size_t area = (size_t)b->width * b->height;
+  int *bottom = malloc((b->reveal_cluster_count + 1u) * sizeof(*bottom));
+  uint32_t *pixels = calloc(area, sizeof(*pixels));
+  uint32_t *owners = calloc(area, sizeof(*owners));
+  if (!bottom || !pixels || !owners) {
+    free(bottom); free(pixels); free(owners);
+    return false;
+  }
+  bottom[0] = -1;
+  size_t start = 0;
+  for (size_t i = 0; i < b->reveal_cluster_count; ++i) {
+    const size_t end = b->reveal_clusters[i].end_utf8_byte;
+    bool number = start < end && end <= bytes;
+    /* A skipped hard-break substring is not part of the next ink cluster. */
+    while (start < end && start < bytes &&
+           (utf8[start] == '\n' || utf8[start] == '\r')) ++start;
+    number &= start < end;
+    for (size_t j = start; number && j < end; ++j)
+      number = utf8[j] >= '0' && utf8[j] <= '9';
+    bottom[i + 1u] = number ? 0 : -1;
+    start = end;
+  }
+  for (int y = 0; y < b->height; ++y)
+    for (int x = 0; x < b->width; ++x) {
+      const uint32_t owner = b->pixel_owners[(size_t)y * b->width + x];
+      if (owner > b->reveal_cluster_count) {
+        free(bottom); free(pixels); free(owners);
+        return false;
+      }
+      if (owner && bottom[owner] >= 0) bottom[owner] = y;
+    }
+  /* Preserve the upright ink first. A slanted bearing may extend behind its
+   * neighbour but may not overwrite that neighbour's letterform. */
+  for (int pass = 0; pass < 2; ++pass)
+    for (int y = 0; y < b->height; ++y)
+      for (int x = 0; x < b->width; ++x) {
+        const uint32_t owner = b->pixel_owners[(size_t)y * b->width + x];
+        if (!owner || (bottom[owner] >= 0) != (pass != 0)) continue;
+        const int target_x = x + (pass ? (bottom[owner] - y + 2) / 4 : 0);
+        if (target_x >= b->width) {
+          free(bottom); free(pixels); free(owners);
+          return false;
+        }
+        const size_t at = (size_t)y * b->width + target_x;
+        uint32_t pixel;
+        memcpy(&pixel, (const uint8_t *)b->pixels +
+            (size_t)y * b->pitch_bytes + (size_t)x * 4, 4);
+        if (owners[at] && (bottom[owners[at]] < 0 ||
+                          (pixels[at] & 255) >= (pixel & 255))) continue;
+        pixels[at] = pixel;
+        owners[at] = owner;
+      }
+  for (int y = 0; y < b->height; ++y)
+    memcpy((uint8_t *)b->pixels + (size_t)y * b->pitch_bytes,
+           pixels + (size_t)y * b->width, (size_t)b->width * 4);
+  memcpy((void *)b->pixel_owners, owners, area * sizeof(*owners));
+  free(bottom); free(pixels); free(owners);
+  return true;
+}
+
+bool ArTextBitmap_ApplyClusterAccent(void *pixels, int width, int height,
+                                     int pitch_bytes, ArRenderPixelFormat format,
+                                     const ArTextRevealCluster *clusters,
+                                     size_t cluster_count, uint32_t utf8_end,
+                                     uint32_t rgb) {
+  if (!utf8_end) return true;
+  if (!clusters || !cluster_count) return false;
+  size_t selected = SIZE_MAX;
+  for (size_t i = 0; i < cluster_count; ++i) {
+    const size_t end = clusters[i].end_utf8_byte;
+    if (end >= utf8_end && end < selected) selected = end;
+  }
+  if (selected == SIZE_MAX) return false;
+  for (size_t i = 0; i < cluster_count; ++i)
+    if (clusters[i].end_utf8_byte == selected &&
+        !ArTextBitmap_ApplyStyleBands(pixels, width, height, pitch_bytes,
+                                      format, &clusters[i], 1, rgb, rgb))
+      return false;
   return true;
 }
 

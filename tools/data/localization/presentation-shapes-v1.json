@@ -21,6 +21,11 @@
     "fixed_rows": [
       {"first_line": 0, "last_line": 255, "fields": [1]}
     ],
+    "sound_test": [
+      {"first_line": 0, "last_line": 4, "fields": [1]},
+      {"first_line": 2, "last_line": 2, "fields": [2]},
+      {"first_line": 4, "last_line": 4, "fields": [2]}
+    ],
     "message_speed": [
       {"first_line": 0, "last_line": 3, "fields": [1]},
       {"first_line": 0, "last_line": 0, "fields": [10]},
@@ -35,6 +40,7 @@
   "bindings": {
     "sim.menu.*": "fixed_rows",
     "sky.menu.*": "fixed_rows",
+    "sound_test.menu.labels": "sound_test",
     "status.report.cities_report": "cities",
     "status.report.master_report": "master",
     "status.report.score_report": "score",

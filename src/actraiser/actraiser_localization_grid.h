@@ -16,6 +16,7 @@ typedef enum ActRaiserLocalizationMenu {
   kActRaiserLocalizationMenu_StatusMaster = kArLanguageRowShape_Master,
   kActRaiserLocalizationMenu_FixedRows = kArLanguageRowShape_FixedRows,
   kActRaiserLocalizationMenu_MessageSpeed = kArLanguageRowShape_MessageSpeed,
+  kActRaiserLocalizationMenu_SoundTest = kArLanguageRowShape_SoundTest,
 } ActRaiserLocalizationMenu;
 
 /* Derives the renderer-neutral description of one menu's native geometry for

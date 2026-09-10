@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate address-only USA fixed-composer routes from private extraction.
+"""Generate C tables from the Go-owned address-only USA composer manifest.
 
 The checked manifest and C include contain semantic IDs, native addresses,
 destinations, ownership geometry, and indexed-source identities only. They
@@ -13,9 +13,7 @@ import re
 import sys
 from pathlib import Path
 
-from generate_actraiser_localization_routes import (
-    checked_json, load_extractor, parse_pc24, pc24, source_for_route,
-)
+from generate_actraiser_localization_routes import parse_pc24
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,208 +25,9 @@ FORMAT = 'actraiser-us-runtime-compose-routes'
 VERSION = 1
 
 
-SURFACE_KINDS = {
-    'menu_heading': {
-        'surface_id': 2, 'destination': 0x0512,
-        'region': [18, 5, 10, 2], 'native_font_pixels': 7,
-    },
-    'menu_selection': {
-        'surface_id': 3, 'destination': 0x0A12,
-        'region': [18, 10, 10, 2], 'native_font_pixels': 7,
-    },
-    'city_name': {
-        'surface_id': 4, 'destination': 0x0106,
-        # Row 2 belongs to the live angel-health bar, not the town label.
-        'region': [6, 1, 12, 1], 'native_font_pixels': 7,
-    },
-    'name_entry': {
-        'surface_id': 5, 'destination': 0x0703,
-        'region': [3, 7, 27, 16], 'native_font_pixels': 8,
-    },
-    'status_master': {
-        'surface_id': 6, 'destination': 0x060A,
-        'region': [10, 6, 12, 17], 'native_font_pixels': 7,
-    },
-    'status_table': {
-        'surface_id': 7, 'destination': 0x0603,
-        'region': [3, 6, 26, 20], 'native_font_pixels': 8,
-    },
-    'flow_choice': {
-        'surface_id': 8, 'destination': 0x0B17,
-        'region': [23, 11, 6, 5], 'native_font_pixels': 7,
-    },
-    'flow_speed': {
-        'surface_id': 9, 'destination': 0x0C12,
-        'region': [18, 12, 10, 4], 'native_font_pixels': 7,
-    },
-    'action_stage': {
-        'surface_id': 10, 'destination': 0x080B,
-        'region': [2, 8, 28, 2], 'native_font_pixels': 7,
-    },
-    'action_act': {
-        'surface_id': 11, 'destination': 0x0A0D,
-        'region': [2, 10, 28, 2], 'native_font_pixels': 7,
-    },
-    'action_clear': {
-        'surface_id': 12, 'destination': 0x0C0D,
-        'region': [2, 12, 28, 2], 'native_font_pixels': 7,
-    },
-    'action_ready': {
-        'surface_id': 13, 'destination': 0x090D,
-        'region': [2, 9, 28, 2], 'native_font_pixels': 7,
-    },
-    'action_time_up': {
-        'surface_id': 13, 'destination': 0x090C,
-        'region': [2, 9, 28, 2], 'native_font_pixels': 7,
-    },
-    'action_pause': {
-        'surface_id': 13, 'destination': 0x0B0D,
-        'region': [2, 11, 28, 2], 'native_font_pixels': 7,
-    },
-    'title_options': {
-        'surface_id': 14, 'destination': 0x1100,
-        'region': [14, 17, 17, 4], 'native_font_pixels': 7,
-    },
-    'title_start': {
-        'surface_id': 14, 'destination': 0x120C,
-        'region': [14, 18, 17, 1], 'native_font_pixels': 7,
-    },
-    'title_professional': {
-        'surface_id': 15, 'destination': 0x110C,
-        'region': [14, 21, 17, 1], 'native_font_pixels': 7,
-    },
-}
-
-
-def kind_for(semantic_id):
-    if semantic_id.startswith('action.stage_name.'):
-        return 'action_stage'
-    if semantic_id in ('action.hud.act_1', 'action.hud.act_2'):
-        return 'action_act'
-    action = {
-        'action.hud.clear': 'action_clear',
-        'action.hud.ready': 'action_ready',
-        'action.hud.pause': 'action_pause',
-        'action.hud.time_up': 'action_time_up',
-        'title.save_choice.labels': 'title_options',
-        'title.start_prompt': 'title_start',
-        'title.selector.professional': 'title_professional',
-    }
-    if semantic_id in action:
-        return action[semantic_id]
-    if semantic_id.startswith('sky.menu.magic.') or \
-            semantic_id.startswith('sim.menu.possession.'):
-        return 'menu_selection'
-    if semantic_id.startswith(('sky.menu.', 'sim.menu.')):
-        return 'menu_heading'
-    if semantic_id.startswith('city.') and semantic_id.endswith('.name'):
-        return 'city_name'
-    if semantic_id == 'name_entry.prompt_and_alphabet':
-        return 'name_entry'
-    if semantic_id == 'status.report.master_report':
-        return 'status_master'
-    if semantic_id in ('status.report.cities_report',
-                       'status.report.score_report'):
-        return 'status_table'
-    if semantic_id == 'system.choice.yes_no':
-        return 'flow_choice'
-    if semantic_id == 'system.message_speed.scale_labels':
-        return 'flow_speed'
-    return None
-
-
-def indexed_identity(semantic_id, source, pointer_tables):
-    if semantic_id.startswith('sim.menu.possession.slot_'):
-        table = pointer_tables['selected_possession']
-        selector = int(semantic_id.rsplit('_', 1)[1])
-    elif semantic_id.startswith('sky.menu.magic.'):
-        table = pointer_tables['selected_magic']
-        targets = [parse_pc24(value) for value in table['target_pc24s']]
-        matches = [index for index, target in enumerate(targets)
-                   if target == source]
-        if len(matches) != 1:
-            raise ValueError(
-                f'{semantic_id}: selected-magic source is not unique')
-        selector = matches[0]
-    else:
-        return None
-    targets = [parse_pc24(value) for value in table['target_pc24s']]
-    if selector >= len(targets) or targets[selector] != source:
-        raise ValueError(f'{semantic_id}: indexed source identity changed')
-    return parse_pc24(table['source_table_pc24']), selector
-
-
-def build_manifest(extraction_path, rom_path):
-    extractor = load_extractor()
-    extraction = checked_json(extraction_path)
-    rom = rom_path.read_bytes()
-    source_identity = extraction.get('source', {})
-    if source_identity.get('release_id') != 'us':
-        raise ValueError('runtime route generation requires the USA extraction')
-    digest = hashlib.sha256(rom).hexdigest()
-    if digest != source_identity.get('rom_sha256'):
-        raise ValueError('ROM does not match the extraction source hash')
-    if not extraction.get('coverage', {}).get('complete') or not \
-            extraction.get('semantic_route_catalog', {}).get('complete'):
-        raise ValueError('runtime route generation requires complete extraction')
-
-    records = {
-        record['id']: record for record in
-        extraction['messages'] + extraction['menu_source_catalog']['segments']
-    }
-    pointer_tables = {
-        table['id']: table for table in
-        extraction['consumer_census']['fixed_composer_sources'][
-            'pointer_tables']
-    }
-    rows = []
-    for semantic_route in extraction['semantic_route_catalog']['routes']:
-        semantic_id = semantic_route['id']
-        kind = kind_for(semantic_id)
-        if kind is None:
-            continue
-        route_source = source_for_route(
-            semantic_route, records, extractor)
-        geometry = SURFACE_KINDS[kind]
-        row = {
-            'semantic_id': semantic_id,
-            'source_pc24': pc24(route_source),
-            'destination': geometry['destination'],
-            'surface_kind': kind,
-            'surface_id': geometry['surface_id'],
-            'region': geometry['region'],
-            'native_font_pixels': geometry['native_font_pixels'],
-        }
-        indexed = indexed_identity(
-            semantic_id, route_source, pointer_tables)
-        if indexed is not None:
-            row['source_table_pc24'] = pc24(indexed[0])
-            row['source_selector'] = indexed[1]
-        rows.append(row)
-
-    rows.sort(key=lambda row: (
-        parse_pc24(row['source_pc24']), row['destination'],
-        parse_pc24(row.get('source_table_pc24', '$00:8000')),
-        row.get('source_selector', -1), row['semantic_id']))
-    identities = set()
-    for row in rows:
-        identity = (row['source_pc24'], row['destination'],
-                    row.get('source_table_pc24'),
-                    row.get('source_selector'))
-        if identity in identities:
-            raise ValueError(
-                f"{row['semantic_id']}: ambiguous compose route identity")
-        identities.add(identity)
-    if not rows:
-        raise ValueError('no runtime fixed-composer routes were generated')
-    return {
-        'format': FORMAT,
-        'version': VERSION,
-        'source_profile': 'us',
-        'rom_sha256': digest,
-        'route_count': len(rows),
-        'routes': rows,
-    }
+SURFACE_KINDS = json.loads((ROOT /
+    'snesrecomp-go/internal/localizationkit/data/us-compose-surfaces.json'
+    ).read_text(encoding='utf-8'))
 
 
 def validate_manifest(manifest):
@@ -307,6 +106,10 @@ def generate_c(manifest_path):
     ]
     for row in routes:
         flags = []
+        kind = row['surface_kind']
+        scope = ('Action' if kind.startswith('action_') else
+                 'Title' if kind.startswith('title_') else
+                 'SoundTest' if kind == 'sound_test' else 'Simulation')
         if 'source_table_pc24' in row:
             flags.append('kActRaiserLocalizationComposeRouteMatch_SourceTable')
             flags.append('kActRaiserLocalizationComposeRouteMatch_Selector')
@@ -318,6 +121,7 @@ def generate_c(manifest_path):
             if 'source_table_pc24' in row else '',
             f'    .semantic_id = {json.dumps(row["semantic_id"])},',
             f'    .surface_id = UINT32_C({row["surface_id"]}),',
+            f'    .scope = kActRaiserLocalizationComposeScope_{scope},',
             f'    .destination = UINT16_C(0x{row["destination"]:04X}),',
             f'    .region = {{{", ".join(str(v) for v in row["region"])}}},',
             f'    .source_selector = UINT16_C({row.get("source_selector", 0)}),',
@@ -345,24 +149,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--manifest', type=Path, default=DEFAULT_MANIFEST)
     parser.add_argument('--output', type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument('--extraction', type=Path)
-    parser.add_argument('--rom', type=Path)
-    parser.add_argument('--update-manifest', action='store_true')
     parser.add_argument('--check', action='store_true')
     args = parser.parse_args()
     try:
-        if args.update_manifest:
-            if args.check or args.extraction is None or args.rom is None:
-                raise ValueError(
-                    '--update-manifest requires --extraction and --rom, and '
-                    'cannot be combined with --check')
-            manifest = build_manifest(args.extraction, args.rom)
-            write_or_check(
-                args.manifest,
-                json.dumps(manifest, indent=2, sort_keys=True) + '\n', False)
-        elif args.extraction is not None or args.rom is not None:
-            raise ValueError(
-                '--extraction/--rom are only valid with --update-manifest')
         write_or_check(args.output, generate_c(args.manifest), args.check)
         if args.check:
             print('ActRaiser localization compose route data is current')

@@ -12,7 +12,9 @@
 
 typedef ArTextBackendConfig ArSdlTextRasterizerConfig;
 
-/* Platform-owned adapter with no SDL/SDL_ttf type in its public layout. */
+/* Platform-owned adapter with no SDL/SDL_ttf type in its public layout.
+ * Zero-initialize it; Init replaces transactionally, Destroy is idempotent.
+ * The configured provider outlives this adapter's acquired font leases. */
 typedef struct ArSdlTextRasterizer {
   void *implementation;
   ArTextRasterizer rasterizer;

@@ -23,6 +23,16 @@ FALLBACK_FONTS = (
         "63111b5b2e074dd48cc67692e0a2726d86ee94c1c37fe8598257b7b4e87e869e",
         "العربية",
     ),
+    (
+        ROOT / "game-assets/fonts/noto/NotoSansArabic-Bold.ttf",
+        "ed2711b387750ae991b6a980b8dd16fdd65e6702b97e9f52adf3a8edf09ef4df",
+        "العَرَبِيَّة فارسی اردو پ چ ژ گ ک ی ٹ ڈ ڑ ں ھ ے",
+    ),
+    (
+        ROOT / "game-assets/fonts/noto/NotoSansHebrew-Bold.ttf",
+        "a30243d1c625eaf63bb889f036fe9de97e81d9248976f89e6e4252f9668c832e",
+        "עִבְרִית שָׁלוֹם",
+    ),
 )
 
 

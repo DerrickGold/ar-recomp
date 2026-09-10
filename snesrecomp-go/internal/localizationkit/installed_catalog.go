@@ -18,6 +18,7 @@ type InstalledPackSummary struct {
 	Metadata PackMetadata `json:"metadata"`
 	Revision string       `json:"revision"`
 	Enabled  bool         `json:"enabled"`
+	Archive  bool         `json:"archive,omitempty"`
 	Error    string       `json:"error,omitempty"`
 }
 
@@ -88,6 +89,14 @@ func installedDirectory(root, key string) (string, error) {
 
 func readInstalledSummary(root, key string) (InstalledPackSummary, error) {
 	row := InstalledPackSummary{Key: key}
+	if info, err := os.Lstat(root); err != nil {
+		return row, err
+	} else if !info.IsDir() {
+		return row, fmt.Errorf("installed packages root is not a regular directory")
+	}
+	if IsLanguageArchiveName(key) {
+		return readInstalledArchive(root, key)
+	}
 	dir, err := installedDirectory(root, key)
 	if err != nil {
 		return row, err
@@ -114,6 +123,9 @@ func readInstalledSummary(root, key string) (InstalledPackSummary, error) {
 		return row, err
 	}
 	row.Metadata = manifest.Metadata()
+	if row.Metadata.ID != key || row.Metadata.Target != "us-runtime" || row.Metadata.SourceProfile != "us" || strings.EqualFold(key, "native-us") {
+		return row, fmt.Errorf("folder name must match a community US-runtime package ID")
+	}
 	row.Revision = fmt.Sprintf("%x", sha256.Sum256(append([]byte(name+"\x00"), data...)))
 	return row, nil
 }
@@ -124,10 +136,50 @@ func readInstalledSummary(root, key string) (InstalledPackSummary, error) {
 // instead of pretending they are available.
 const MaximumEnabledPacks = 128
 
+// Workshop installations retain every draft message as unpacked snapshots.
+// Never silently shadow a distributed archive with an editor's local draft.
+func InstallProjectInLibrary(root string, project *AuthorProject, replace bool) (string, error) {
+	if project == nil {
+		return "", fmt.Errorf("project is required")
+	}
+	if err := makeAuthorDirectory(root); err != nil {
+		return "", err
+	}
+	unlock, err := authorLock(root)
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+	rows, err := ListInstalledPacks(root)
+	if err != nil {
+		return "", err
+	}
+	id := project.Pack().Manifest().Metadata().ID
+	active, exists := 0, false
+	for _, row := range rows {
+		if row.Enabled {
+			active++
+		}
+		if strings.EqualFold(row.Metadata.ID, id) {
+			if row.Archive || row.Key != id {
+				return "", fmt.Errorf("package %s is installed as %s; uninstall that copy first, or export a reviewed .arlang and replace its archive", id, row.Key)
+			}
+			exists = true
+		}
+	}
+	if !exists && active >= MaximumEnabledPacks {
+		return "", fmt.Errorf("only %d enabled packages are supported", MaximumEnabledPacks)
+	}
+	return InstallAuthorProject(filepath.Join(root, id), project, replace)
+}
+
 // SetLanguagePackEnabled toggles discovery by renaming only the manifest.
 // Versioned script/font paths remain stable for running games; re-enabling
 // validates the declared files.
 func SetLanguagePackEnabled(root, key, id, expected string, enabled bool) error {
+	if IsLanguageArchiveName(key) {
+		return setArchiveEnabled(root, key, id, expected, enabled)
+	}
 	dir, err := installedDirectory(root, key)
 	if err != nil {
 		return err
@@ -161,6 +213,9 @@ func SetLanguagePackEnabled(root, key, id, expected string, enabled bool) error 
 		for _, other := range rows {
 			if other.Enabled {
 				active++
+				if strings.EqualFold(other.Metadata.ID, id) {
+					return fmt.Errorf("another enabled installation has package ID %s", id)
+				}
 			}
 		}
 		if active >= MaximumEnabledPacks {
@@ -198,7 +253,10 @@ func ListInstalledPacks(root string) ([]InstalledPackSummary, error) {
 		return nil, fmt.Errorf("too many installed package entries")
 	}
 	for _, entry := range entries {
-		if !entry.IsDir() && entry.Type()&os.ModeSymlink == 0 {
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		if !entry.IsDir() && entry.Type()&os.ModeSymlink == 0 && !IsLanguageArchiveName(entry.Name()) {
 			continue
 		}
 		row, err := readInstalledSummary(root, entry.Name())
@@ -210,6 +268,17 @@ func ListInstalledPacks(root string) ([]InstalledPackSummary, error) {
 		}
 		rows = append(rows, row)
 	}
+	counts := make(map[string]int, len(rows))
+	for _, row := range rows {
+		if row.Enabled && row.Metadata.ID != "" {
+			counts[strings.ToLower(row.Metadata.ID)]++
+		}
+	}
+	for i := range rows {
+		if rows[i].Enabled && counts[strings.ToLower(rows[i].Metadata.ID)] > 1 {
+			rows[i].Error = "Conflicting enabled package ID; disable or uninstall a duplicate."
+		}
+	}
 	return rows, nil
 }
 
@@ -217,6 +286,9 @@ func ListInstalledPacks(root string) ([]InstalledPackSummary, error) {
 // recoverable manifest remain in place, so a running game isn't broken and no
 // author project is touched. Reinstallation publishes a new pack.ini normally.
 func UninstallLanguagePack(root, key, id, expected string) (string, error) {
+	if IsLanguageArchiveName(key) {
+		return uninstallArchive(root, key, id, expected)
+	}
 	dir, err := installedDirectory(root, key)
 	if err != nil {
 		return "", err

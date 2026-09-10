@@ -3,6 +3,15 @@
 
 #include <stdbool.h>
 
+typedef enum SessionFailureKind {
+  kSessionFailure_Generic = 0,
+  kSessionFailure_BatterySave,
+  kSessionFailure_GraphicsReset,
+  kSessionFailure_GraphicsLost,
+  kSessionFailure_AudioDevice,
+  kSessionFailure_Startup,
+} SessionFailureKind;
+
 /*
  * Latched request for an orderly, user-visible runtime shutdown.
  *
@@ -18,5 +27,13 @@ void SessionFatal_Request(const char *format, ...)
     ;
 bool SessionFatal_Requested(void);
 const char *SessionFatal_Message(void);
+SessionFailureKind SessionFatal_Kind(void);
+/* Same first-error-wins latch; the kind selects translated recovery copy.
+ * The formatted diagnostic remains literal in logs and the details field. */
+void SessionFatal_RequestKind(SessionFailureKind kind, const char *format, ...)
+#ifdef __GNUC__
+    __attribute__((format(printf, 2, 3)))
+#endif
+    ;
 
 #endif /* AR_SESSION_FATAL_H */

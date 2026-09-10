@@ -1,0 +1,195 @@
+{
+  "action_act": {
+    "destination": 2573,
+    "native_font_pixels": 7,
+    "region": [
+      2,
+      10,
+      28,
+      2
+    ],
+    "surface_id": 11
+  },
+  "action_clear": {
+    "destination": 3085,
+    "native_font_pixels": 7,
+    "region": [
+      2,
+      12,
+      28,
+      2
+    ],
+    "surface_id": 12
+  },
+  "action_pause": {
+    "destination": 2829,
+    "native_font_pixels": 7,
+    "region": [
+      2,
+      11,
+      28,
+      2
+    ],
+    "surface_id": 13
+  },
+  "action_ready": {
+    "destination": 2317,
+    "native_font_pixels": 7,
+    "region": [
+      2,
+      9,
+      28,
+      2
+    ],
+    "surface_id": 13
+  },
+  "action_stage": {
+    "destination": 2059,
+    "native_font_pixels": 7,
+    "region": [
+      2,
+      8,
+      28,
+      2
+    ],
+    "surface_id": 10
+  },
+  "action_time_up": {
+    "destination": 2316,
+    "native_font_pixels": 7,
+    "region": [
+      2,
+      9,
+      28,
+      2
+    ],
+    "surface_id": 13
+  },
+  "city_name": {
+    "destination": 262,
+    "native_font_pixels": 7,
+    "region": [
+      6,
+      1,
+      12,
+      1
+    ],
+    "surface_id": 4
+  },
+  "flow_choice": {
+    "destination": 2839,
+    "native_font_pixels": 7,
+    "region": [
+      23,
+      11,
+      6,
+      5
+    ],
+    "surface_id": 8
+  },
+  "flow_speed": {
+    "destination": 3090,
+    "native_font_pixels": 7,
+    "region": [
+      18,
+      12,
+      10,
+      4
+    ],
+    "surface_id": 9
+  },
+  "menu_heading": {
+    "destination": 1298,
+    "native_font_pixels": 7,
+    "region": [
+      18,
+      5,
+      10,
+      2
+    ],
+    "surface_id": 2
+  },
+  "menu_selection": {
+    "destination": 2578,
+    "native_font_pixels": 7,
+    "region": [
+      18,
+      10,
+      10,
+      2
+    ],
+    "surface_id": 3
+  },
+  "name_entry": {
+    "destination": 1795,
+    "native_font_pixels": 8,
+    "region": [
+      3,
+      7,
+      27,
+      16
+    ],
+    "surface_id": 5
+  },
+  "sound_test": {
+    "destination": 2059,
+    "native_font_pixels": 7,
+    "region": [11, 8, 10, 6],
+    "surface_id": 16
+  },
+  "status_master": {
+    "destination": 1546,
+    "native_font_pixels": 7,
+    "region": [
+      10,
+      6,
+      12,
+      17
+    ],
+    "surface_id": 6
+  },
+  "status_table": {
+    "destination": 1539,
+    "native_font_pixels": 8,
+    "region": [
+      3,
+      6,
+      26,
+      20
+    ],
+    "surface_id": 7
+  },
+  "title_options": {
+    "destination": 4352,
+    "native_font_pixels": 7,
+    "region": [
+      14,
+      17,
+      17,
+      4
+    ],
+    "surface_id": 14
+  },
+  "title_professional": {
+    "destination": 4364,
+    "native_font_pixels": 7,
+    "region": [
+      14,
+      21,
+      17,
+      1
+    ],
+    "surface_id": 15
+  },
+  "title_start": {
+    "destination": 4620,
+    "native_font_pixels": 7,
+    "region": [
+      14,
+      18,
+      17,
+      1
+    ],
+    "surface_id": 14
+  }
+}

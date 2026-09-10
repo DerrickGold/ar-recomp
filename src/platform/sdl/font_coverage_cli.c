@@ -5,25 +5,34 @@
 #include <string.h>
 
 #include "platform/sdl/text_rasterizer_sdl.h"
+#include "host/font_resources.h"
 
 int ArSdlFontCoverage_Run(int argc, char **argv) {
   if (argc < 2 || argc > 10) {
     fprintf(stderr, "usage: %s FONT [FALLBACK ...] < scalars.txt\n", argv[0]);
     return 2;
   }
+  ArHostFontResources store = {0};
+  ArFontResourceId fonts[9] = {0};
+  ArSdlTextRasterizer adapter = {0};
+  char error[kArTextRasterErrorCapacity] = {0};
+  int result = 2;
+  for (int i = 1; i < argc; ++i) {
+    fonts[i - 1] = ArHostFontResources_RegisterFile(
+        &store, argv[i], error, sizeof(error));
+    if (!fonts[i - 1]) goto done;
+  }
   const ArSdlTextRasterizerConfig config = {
       .struct_size = sizeof(config),
       .abi_version = AR_SDL_TEXT_RASTERIZER_CONFIG_ABI_VERSION,
       .font_stack_id = "author-coverage",
-      .primary_font_path = argv[1],
-      .fallback_font_paths = (const char *const *)(argv + 2),
+      .resources = ArHostFontResources_Provider(&store),
+      .primary_font = fonts[0],
+      .fallback_fonts = fonts + 1,
       .fallback_font_count = (size_t)argc - 2u,
       .font_revision = 1,
       .cached_size_capacity = 1,
   };
-  ArSdlTextRasterizer adapter = {0};
-  char error[kArTextRasterErrorCapacity] = {0};
-  int result = 2;
   if (!ArSdlTextRasterizer_Init(&adapter, &config, error, sizeof(error)))
     goto done;
   /* Force font opening even for an empty or entirely non-rendering input. */
@@ -56,5 +65,6 @@ done:
   if (result)
     fprintf(stderr, "font coverage: %s\n", error[0] ? error : "I/O failure");
   ArSdlTextRasterizer_Destroy(&adapter);
+  if (!ArHostFontResources_Destroy(&store)) result = 2;
   return result;
 }

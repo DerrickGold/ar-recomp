@@ -23,6 +23,7 @@ type NativeCatalog struct {
 	SemanticRoutes            *NativeSemanticCatalog   `json:"semantic_route_catalog"`
 	Destinations              *NativeDestinationCensus `json:"destination_census,omitempty"`
 	Graphics                  IRObject                 `json:"graphical_text_census,omitempty"`
+	Credits                   []NativeCreditsPage      `json:"credits_text,omitempty"`
 	releaseID                 string
 	source                    *NativeSourceCensus
 	locale, romSHA256         string
@@ -70,6 +71,10 @@ func (d *Decoder) BuildNativeCatalog() (*NativeCatalog, error) {
 		return nil, err
 	}
 	catalog.Destinations, catalog.Graphics = destinations, graphics
+	catalog.Credits, err = d.nativeCredits(entries)
+	if err != nil {
+		return nil, err
+	}
 	return catalog, nil
 }
 func (d *Decoder) catalogFromSources(profile catalogProfile, source sourceProfile, census *NativeSourceCensus) (*NativeCatalog, error) {

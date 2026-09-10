@@ -2,6 +2,7 @@ package buildgui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/DerrickGold/snesrecomp-go/internal/uicatalog"
 )
+
+var errDirectoryChooserUnavailable = errors.New("no native folder chooser available")
 
 // Constant programs only: translated captions are data arguments/environment,
 // never interpolated into a shell/AppleScript/PowerShell program. Cancellation
@@ -22,7 +25,7 @@ func choosePackDirectory(ctx context.Context, language string) (string, error) {
 	}
 	name, args := directoryPickerCommand(runtime.GOOS, prompt, func(name string) bool { _, err := exec.LookPath(name); return err == nil })
 	if name == "" {
-		return "", fmt.Errorf("no folder chooser is available; install Zenity or KDialog, or use the folder path option")
+		return "", errDirectoryChooserUnavailable
 	}
 	command := exec.CommandContext(ctx, name, args...)
 	command.Env = append(os.Environ(), "AR_BUILDER_FOLDER_PROMPT="+prompt)
@@ -34,7 +37,7 @@ func choosePackDirectory(ctx context.Context, language string) (string, error) {
 		if exit, ok := err.(*exec.ExitError); ok && (name == "zenity" || name == "kdialog") && exit.ExitCode() == 1 {
 			return "", nil
 		}
-		return "", fmt.Errorf("could not open the folder chooser; use the folder path option: %w", err)
+		return "", fmt.Errorf("native folder chooser: %w", err)
 	}
 	// Some Windows PowerShell hosts prefix redirected UTF-8 with a BOM.
 	return strings.TrimRight(strings.TrimPrefix(string(output), "\ufeff"), "\r\n"), nil

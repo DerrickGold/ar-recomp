@@ -43,7 +43,8 @@ func (d *Decoder) BuildNativeAuthorPack(metadata PackMetadata) (*AuthorPack, err
 	if !catalog.SemanticRoutes.Complete {
 		return nil, fmt.Errorf("native routes are incomplete")
 	}
-	return nativeAuthorPack(manifest, catalog.SemanticRoutes.Routes, catalog.source.NativeDialogueLayout, nativeHUDLabels(d.profile.ID)...)
+	labels := append(nativeHUDLabels(d.profile.ID), nativeCreditsMessages(catalog.Credits)...)
+	return nativeAuthorPack(manifest, catalog.SemanticRoutes.Routes, catalog.source.NativeDialogueLayout, labels...)
 }
 
 func nativeAuthorPack(manifest *PackManifest, routes []*NativeSemanticRoute, layout IRObject, supplemental ...AuthorMessage) (*AuthorPack, error) {

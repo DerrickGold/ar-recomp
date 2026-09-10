@@ -176,15 +176,17 @@ type PublicationOptions struct {
 	IncludeWIP    bool
 }
 type PublicationReport struct {
-	Included        int `json:"included"`
-	WIP             int `json:"wip"`
-	UnchangedSource int `json:"unchangedSource"`
-	Fallback        int `json:"fallback"`
+	Coverage        AuthorCoverageReport `json:"coverage"`
+	Included        int                  `json:"included"`
+	WIP             int                  `json:"wip"`
+	UnchangedSource int                  `json:"unchangedSource"`
+	Fallback        int                  `json:"fallback"`
 }
 
 type InstallationReport struct {
-	Messages int `json:"messages"`
-	Fallback int `json:"fallback"`
+	Coverage AuthorCoverageReport `json:"coverage"`
+	Messages int                  `json:"messages"`
+	Fallback int                  `json:"fallback"`
 }
 
 // Installation is local use, not a publication. Preserve every supplied
@@ -204,6 +206,7 @@ func (p *AuthorProject) Installation() (*AuthorProject, InstallationReport, erro
 		}
 	}
 	report.Messages = len(p.pack.workspace.messageScript)
+	report.Coverage = p.Coverage()
 	refs, _ := AuthorReferences("us")
 	for _, ref := range refs {
 		if _, present := p.pack.workspace.messageScript[ref.ID]; ref.NativeInProfile && !present {
@@ -272,6 +275,7 @@ func (p *AuthorProject) Publication(options PublicationOptions) (*AuthorProject,
 	for _, m := range messages {
 		included[m.ID] = true
 	}
+	report.Coverage = p.coverageFor(included)
 	refs, _ := AuthorReferences("us")
 	for _, ref := range refs {
 		if ref.NativeInProfile && !included[ref.ID] {

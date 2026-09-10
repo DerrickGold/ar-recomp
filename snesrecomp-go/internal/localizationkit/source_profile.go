@@ -87,7 +87,7 @@ type sourceProfile struct {
 	SpaceDelimitedWords  bool                 `json:"space_delimited_words"`
 }
 
-// Generated structural facts only: no discovered pointers, call sites, or prose.
+// Go-owned structural facts only: no discovered pointers, call sites, or prose.
 //
 //go:embed data/source-profiles.json
 var sourceProfileJSON []byte

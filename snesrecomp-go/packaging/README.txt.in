@@ -109,6 +109,15 @@ copied into the game, its manifest, or a release package.
 
 LOCALIZATION WORKSHOP
 ---------------------
+To install a published .arlang without the editor, copy the file directly into
+utils/game-assets/languages/packs/ (do not unzip), restart with run-game.*, and
+select its package name under Localization. Keep utils/tools/snesbuild: the game
+uses its shared archive reader without opening the GUI. Duplicate enabled IDs,
+including archive/folder duplicates, must be resolved before selection.
+See utils/docs/language-packs.md for manual install/update/removal, editor-free
+authoring and validation commands. The machine-readable route reference and
+archive schema accompany it; small authored examples live in utils/examples/.
+
 Open Languages in the sidebar to install a shared language pack, create your
 own translation, resume or clone a project, or extract a read-only source from
 a clean US, EU,

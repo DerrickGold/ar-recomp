@@ -7,7 +7,10 @@
 /* Cell geometry arrives with the frame as an ArLocalizationTextGrid; this
  * module only shares measured space across a table's fitted columns. */
 enum {
-  kArTextTableMaximumColumns = 5,
+  /* The frame contract permits this many cells in a row. A shared table must
+   * support the same range; fixed and fitted rows cannot disagree about the
+   * storage needed for a contract-valid grid. */
+  kArTextTableMaximumColumns = kArLocalizationGridMaximumCells,
   /* Upper bounds for a surface laid out on a uniform key pitch. */
   kArTextLayoutMaximumClusters = 1024,
   kArTextLayoutMaximumKeyColumns = 64,

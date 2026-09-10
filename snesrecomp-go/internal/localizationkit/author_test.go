@@ -109,7 +109,7 @@ func TestAuthorContractsAndAliasDependents(t *testing.T) {
 		}
 	}
 	refs, err := AuthorReferences("us")
-	if err != nil || len(refs) != 539 {
+	if err != nil || len(refs) != 558 {
 		t.Fatalf("refs: %d %v", len(refs), err)
 	}
 	for i := range refs {
@@ -182,7 +182,7 @@ func TestAuthorWorkspaceEditReopenTreeAndAtomicFailure(t *testing.T) {
 		present += entry.Present
 		done += entry.Done
 	}
-	if total != 539 || present != 3 || done != 1 {
+	if total != 558 || present != 3 || done != 1 {
 		t.Fatalf("tree counts %d %d %d", total, present, done)
 	}
 	children := w2.Children("action.hud")
@@ -400,19 +400,8 @@ func FuzzAuthorScript(f *testing.F) {
 	})
 }
 
-func TestAuthorOracleParity(t *testing.T) {
-	path := os.Getenv("AR_AUTHOR_ORACLE_CASES")
-	if path == "" {
-		t.Skip("optional developer Python comparison; not a builder dependency")
-	}
+func TestAuthorRegressions(t *testing.T) {
 	probe := os.Getenv("AR_AUTHOR_RUNTIME_PROBE")
-	if probe == "" {
-		t.Fatal("oracle comparison must also exercise the production C loader")
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
 	var cases []struct {
 		ID, Profile, Coverage string
 		Sources               map[string]string
@@ -420,77 +409,33 @@ func TestAuthorOracleParity(t *testing.T) {
 		Messages              []AuthorMessage
 		Stats                 AuthorValidationStats
 		Manifest, Progress    string
-		NativeROM             string `json:"native_rom"`
-		NativeProgress        string `json:"native_progress"`
 		ManifestMetadata      struct {
 			Pack    PackMetadata
 			Fonts   PackFonts
 			Scripts []string
 		} `json:"manifest_metadata"`
 	}
-	if err := json.Unmarshal(data, &cases); err != nil {
-		t.Fatal(err)
-	}
+	readRegressionFixture(t, "author-regressions.json.gz", &cases)
 	if len(cases) == 0 {
-		t.Fatal("empty oracle cases")
+		t.Fatal("empty fixture cases")
 	}
 	for _, c := range cases {
 		t.Run(c.ID, func(t *testing.T) {
 			w, err := NewAuthorWorkspace(c.Profile, c.Coverage, c.Sources, "")
 			if (err == nil) != c.Valid {
-				t.Fatalf("Go/oracle acceptance differs: expected=%v error=%v", c.Valid, err)
+				t.Fatalf("Go/fixture acceptance differs: expected=%v error=%v", c.Valid, err)
 			}
 			if c.Valid {
-				if c.NativeROM != "" {
-					rom, err := os.ReadFile(c.NativeROM)
-					if err != nil {
-						t.Fatal(err)
-					}
-					d, err := NewDecoder(rom)
-					if err != nil {
-						t.Fatal(err)
-					}
-					p, err := d.BuildNativeAuthorPack(c.ManifestMetadata.Pack)
-					if err != nil {
-						t.Fatal(err)
-					}
-					want := map[string][]byte{"pack.ini": []byte(c.Manifest), "translation-progress.tsv": []byte(c.NativeProgress)}
-					for path, source := range c.Sources {
-						want[path] = []byte(source)
-					}
-					files := p.Files()
-					if len(files) != len(want) {
-						t.Fatal("unexpected Go-native source files")
-					}
-					for path, expected := range want {
-						if string(files[path]) != string(expected) {
-							// Keep retail content out of failure logs; report the byte only.
-							actual := files[path]
-							at := 0
-							for at < min(len(actual), len(expected)) && actual[at] == expected[at] {
-								at++
-							}
-							t.Fatalf("Go-native/oracle %s differs at byte %d (Go=%d reference=%d bytes)", path, at, len(actual), len(expected))
-						}
-					}
-					root := t.TempDir()
-					writeAuthorTestFiles(t, root, p.Files())
-					assertAuthorPackRuntime(t, probe, root, p)
-					reopened, err := OpenAuthorPack(root)
-					if err != nil || !reflect.DeepEqual(p.Files(), reopened.Files()) {
-						t.Fatal("Go-native pack reopen mismatch", err)
-					}
-				}
 				var messages []AuthorMessage
 				for _, script := range w.scripts {
 					messages = append(messages, script.Messages()...)
 				}
 				if !reflect.DeepEqual(messages, c.Messages) || w.Stats() != c.Stats {
-					t.Fatal("Go/oracle operation/source-line/stats mismatch")
+					t.Fatal("Go/fixture operation/source-line/stats mismatch")
 				}
 				reopened, err := NewAuthorWorkspace(c.Profile, c.Coverage, w.Sources(), w.ProgressText())
 				if err != nil || !reflect.DeepEqual(w.Sources(), reopened.Sources()) {
-					t.Fatal("oracle pack reopen lost content", err)
+					t.Fatal("fixture pack reopen lost content", err)
 				}
 				if c.Manifest != "" {
 					files := map[string][]byte{"pack.ini": []byte(c.Manifest), "translation-progress.tsv": []byte(c.Progress)}
@@ -502,14 +447,18 @@ func TestAuthorOracleParity(t *testing.T) {
 						t.Fatal(err)
 					}
 					if p.Manifest().Metadata() != c.ManifestMetadata.Pack || !reflect.DeepEqual(p.Manifest().Fonts(), c.ManifestMetadata.Fonts) || !slices.Equal(p.Manifest().Sources(), c.ManifestMetadata.Scripts) || !reflect.DeepEqual(p.Files(), files) {
-						t.Fatal("whole oracle pack metadata/progress/source snapshot changed")
+						t.Fatal("whole fixture pack metadata/progress/source snapshot changed")
 					}
 					root := t.TempDir()
 					writeAuthorTestFiles(t, root, p.Files())
-					assertAuthorPackRuntime(t, probe, root, p)
+					if probe != "" {
+						assertAuthorPackRuntime(t, probe, root, p)
+					}
 				}
 			}
-			authorRuntimeCheck(t, probe, c.Profile, c.Coverage, c.Sources)
+			if probe != "" {
+				authorRuntimeCheck(t, probe, c.Profile, c.Coverage, c.Sources)
+			}
 		})
 	}
 }

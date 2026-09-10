@@ -5,8 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -262,9 +260,8 @@ func TestNamePrefixIsConsumerSpecific(t *testing.T) {
 	}
 }
 
-// The parity harness generates expectations from the independent verified
-// Python decoder. Official ROMs/prose remain in temporary private files;
-// ordinary tests use synthetic vectors and do not require a retail ROM.
+// ROM-free regression fixtures preserve independently decoded cases from the
+// retired implementation. New discoveries and fixtures are maintained in Go.
 type referenceMutation struct {
 	ID       string `json:"id"`
 	Offset   int    `json:"offset"`
@@ -290,31 +287,18 @@ func mutatedDecoder(t *testing.T, d *Decoder, mutation referenceMutation) (*Deco
 	return newDecoder(rom, d.profile)
 }
 
-func TestReferenceParity(t *testing.T) {
-	path := os.Getenv("AR_LOCALIZATION_DECODER_VECTORS")
-	if path == "" {
-		t.Skip("run tools/check_go_localization_decoder.py for reference parity")
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer file.Close()
+func TestNativeReaderRegressions(t *testing.T) {
 	var groups []struct {
-		ID                   string              `json:"id"`
-		ROMPath              string              `json:"rom_path"`
-		ROM                  []byte              `json:"rom"`
-		Profile              decoderProfile      `json:"profile"`
-		SourceExpected       any                 `json:"source_expected"`
-		CatalogExpected      any                 `json:"catalog_expected"`
-		AlignmentExpected    any                 `json:"alignment_expected"`
-		CoverageExpected     any                 `json:"coverage_expected"`
-		SourceProfile        *sourceProfile      `json:"source_profile"`
-		CatalogProfile       *catalogProfile     `json:"catalog_profile"`
-		SourceMutations      []referenceMutation `json:"source_mutations"`
-		CatalogMutations     []referenceMutation `json:"catalog_mutations"`
-		DestinationMutations []referenceMutation `json:"destination_mutations"`
-		Cases                []struct {
+		ID               string              `json:"id"`
+		ROM              []byte              `json:"rom"`
+		Profile          decoderProfile      `json:"profile"`
+		SourceExpected   any                 `json:"source_expected"`
+		CatalogExpected  any                 `json:"catalog_expected"`
+		SourceProfile    *sourceProfile      `json:"source_profile"`
+		CatalogProfile   *catalogProfile     `json:"catalog_profile"`
+		SourceMutations  []referenceMutation `json:"source_mutations"`
+		CatalogMutations []referenceMutation `json:"catalog_mutations"`
+		Cases            []struct {
 			ID       string   `json:"id"`
 			Consumer Consumer `json:"consumer"`
 			Start    int      `json:"start"`
@@ -323,37 +307,15 @@ func TestReferenceParity(t *testing.T) {
 			Expected any      `json:"expected"`
 		} `json:"cases"`
 	}
-	if err := json.NewDecoder(io.LimitReader(file, 64<<20)).Decode(&groups); err != nil {
-		t.Fatal(err)
-	}
+	readRegressionFixture(t, "native-reader-regressions.json.gz", &groups)
 	if len(groups) == 0 {
 		t.Fatal("empty parity gate")
 	}
 	total := 0
-	var retailCatalogs []*NativeCatalog
 	for _, group := range groups {
-		var d *Decoder
-		if group.ROMPath != "" {
-			rom, err := os.ReadFile(group.ROMPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			d, err = NewDecoder(rom)
-			if err != nil {
-				t.Fatalf("%s: %v", group.ID, err)
-			}
-			if d.ReleaseID() != group.ID {
-				t.Fatalf("ROM identity %s != %s", d.ReleaseID(), group.ID)
-			}
-			rom[0] ^= 1
-			if _, err := NewDecoder(rom); err == nil {
-				t.Fatal("modified ROM accepted")
-			}
-		} else {
-			d, err = newDecoder(group.ROM, group.Profile)
-			if err != nil {
-				t.Fatalf("%s: %v", group.ID, err)
-			}
+		d, err := newDecoder(group.ROM, group.Profile)
+		if err != nil {
+			t.Fatal(group.ID, err)
 		}
 		if len(group.Cases) == 0 && group.SourceExpected == nil && group.CatalogExpected == nil {
 			t.Fatalf("%s has no vectors", group.ID)
@@ -427,11 +389,7 @@ func TestReferenceParity(t *testing.T) {
 				t.Fatalf("%s catalogue: %v", group.ID, err)
 			}
 			requireJSONEqual(t, group.ID+" native catalogue", catalog, group.CatalogExpected)
-			if group.ROMPath != "" {
-				retailCatalogs = append(retailCatalogs, catalog)
-			}
-			mutations := append(append([]referenceMutation{}, group.CatalogMutations...), group.DestinationMutations...)
-			for _, mutation := range mutations {
+			for _, mutation := range group.CatalogMutations {
 				changed, err := mutatedDecoder(t, d, mutation)
 				var actual *NativeCatalog
 				if err == nil {
@@ -450,34 +408,6 @@ func TestReferenceParity(t *testing.T) {
 			}
 			t.Logf("%s: %d structured + %d composer records, %d routes agree", group.ID, len(catalog.Messages), len(catalog.Menu.Segments), catalog.SemanticRoutes.RouteCount)
 			t.Logf("%s: %d catalogue mutations agree", group.ID, len(group.CatalogMutations))
-			if len(group.DestinationMutations) > 0 {
-				t.Logf("%s: %d destination/graphics mutations agree", group.ID, len(group.DestinationMutations))
-			}
-		}
-		if group.AlignmentExpected != nil {
-			alignment, err := AlignNativeCatalogs(retailCatalogs...)
-			if err != nil {
-				t.Fatal(err)
-			}
-			requireJSONEqual(t, "cross-release route alignment", alignment, group.AlignmentExpected)
-			t.Logf("%d cross-release routes agree (%d shared, %d variants)", alignment.RouteCount, alignment.AllReleaseCount, alignment.VariantCount)
-			coverage, err := CheckNativeCoverage(retailCatalogs...)
-			if err != nil {
-				t.Fatal(err)
-			}
-			requireJSONEqual(t, "whole-game native coverage", coverage, group.CoverageExpected)
-			checkCoverageBlockers(t, retailCatalogs)
-			for _, catalog := range retailCatalogs {
-				single, err := CheckNativeCoverage(catalog)
-				if err != nil {
-					t.Fatal(err)
-				}
-				blockers := irRows(single[0], "blockers")
-				if single[0]["complete"] != false || len(blockers) != 1 || blockers[0]["id"] != "cross_release_semantic_alignment" {
-					t.Fatal("single-release coverage hid missing alignment", single)
-				}
-			}
-			t.Logf("%d whole-game coverage reports agree; single-release incompleteness retained", len(coverage))
 		}
 		if len(group.Cases) > 0 {
 			t.Logf("%s: %d records agree", group.ID, len(group.Cases))

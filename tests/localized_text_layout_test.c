@@ -26,7 +26,13 @@ int main(void) {
   CHECK(!ArLocalizedTextLayout_FitColumns(crowded, preferred, 5, 190, 8, 2, &columns));
   CHECK(!memcmp(&before, &columns, sizeof(columns)));
   CHECK(!ArLocalizedTextLayout_FitColumns(NULL, preferred, 5, 208, 8, 2, &columns));
-  CHECK(!ArLocalizedTextLayout_FitColumns(crowded, preferred, 6, 208, 8, 2, &columns));
+  const int ten_minimum[] = {8, 8, 8, 8, 8, 8, 8, 8, 8, 8};
+  const int ten_preferred[] = {12, 12, 12, 12, 12, 12, 12, 12, 12, 12};
+  CHECK(ArLocalizedTextLayout_FitColumns(
+      ten_minimum, ten_preferred, 10, 160, 4, 2, &columns));
+  CHECK(columns.left[0] == 0 && columns.right[9] == 160);
+  CHECK(!ArLocalizedTextLayout_FitColumns(
+      ten_minimum, ten_preferred, 11, 208, 8, 2, &columns));
   CHECK(!ArLocalizedTextLayout_FitColumns(crowded, preferred, 5, 208, 1, 2, &columns));
   for (int width = 200; width <= 1600; width += 7) {
     CHECK(ArLocalizedTextLayout_FitColumns(crowded, preferred, 5, width, 8, 2, &columns));

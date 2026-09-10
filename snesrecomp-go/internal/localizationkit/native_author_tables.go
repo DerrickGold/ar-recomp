@@ -5,6 +5,16 @@ import "strings"
 // Only verified native report roles interpret padding as columns. Authored
 // translations use explicit cell separators; runtime never splits their words.
 func nativeAuthorTable(ops []AuthorOperation, id string) []AuthorOperation {
+	if id == "sound_test.menu.labels" {
+		var out []AuthorOperation
+		for _, op := range ops {
+			if op.Op == "placeholder" && (op.Name == "sound_music_id" || op.Name == "sound_effect_id") {
+				out = append(out, AuthorOperation{Op: "text", Value: " | "})
+			}
+			out = append(out, op)
+		}
+		return out
+	}
 	if id == "system.message_speed.scale_labels" {
 		ops = append([]AuthorOperation{}, ops...)
 		if len(ops) > 0 && ops[0].Op == "text" {

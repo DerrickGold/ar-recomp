@@ -29,10 +29,20 @@ static uint64_t HashRequest(uint64_t hash,
   hash = HashU32(hash, request->style_id);
   hash = HashU32(hash, request->band_rgb);
   hash = HashU32(hash, request->body_rgb);
+  hash = HashU32(hash, request->accent_end_utf8_byte);
+  hash = HashU32(hash, request->accent_rgb);
   hash = HashU32(hash, request->shadow_enabled);
   hash = HashU32(hash, request->shadow_rgb);
+  hash = HashU32(hash, request->shadow_shape);
   hash = HashU32(hash, request->flags);
   hash = HashU32(hash, (uint32_t)request->direction);
+  hash = HashU32(hash, request->bidi_source_offset);
+  hash = HashU64(hash, request->bidi_span_count);
+  for (size_t i = 0; i < request->bidi_span_count; ++i) {
+    hash = HashU32(hash, request->bidi_spans[i].start);
+    hash = HashU32(hash, request->bidi_spans[i].end);
+    hash = HashU32(hash, request->bidi_spans[i].direction);
+  }
   hash = HashU32(hash, (uint32_t)request->alignment);
   hash = HashU32(hash, (uint32_t)request->font_pixels);
   hash = HashU32(hash, (uint32_t)request->minimum_font_pixels);
@@ -218,6 +228,90 @@ static bool ApplyMosaic(const ArTextBitmap *source, int block_size,
   return true;
 }
 
+static uint32_t TreatedOwner(const ArTextBitmap *b, int x, int y,
+                              int scale, int mosaic) {
+  x /= scale;
+  y /= scale;
+  if (mosaic > 1) {
+    x = x / mosaic * mosaic + mosaic / 2;
+    y = y / mosaic * mosaic + mosaic / 2;
+    if (x >= b->width) x = b->width - 1;
+    if (y >= b->height) y = b->height - 1;
+  }
+  return b->pixel_owners[(size_t)y * b->width + x];
+}
+
+/* Cache-miss only. Pixelation samples owner and color at the identical source
+ * pixel. Merge equal horizontal runs vertically; the resulting rectangles
+ * are disjoint, so partial/shifted draws cannot double-blend or leak a neighbor.
+ * Both scratch and retained metadata are bounded, independently of the font. */
+static bool BuildRevealPieces(const ArTextBitmap *b, int scale, int mosaic,
+    ArTextRevealPiece **out, size_t *count, size_t *allocation,
+    ArRenderRectI *ink) {
+  *out = NULL;
+  *count = 0;
+  *allocation = 0;
+  if (!b->pixel_owners) return true;
+  const int width = b->width * scale, height = b->height * scale;
+  if (width <= 0 || width > 65536 || height <= 0) return false;
+  size_t *previous = malloc((size_t)width * sizeof(*previous));
+  size_t *current = malloc((size_t)width * sizeof(*current));
+  ArTextRevealPiece *pieces = NULL;
+  size_t used = 0, capacity = 0;
+  if (!previous || !current) goto fail;
+  memset(previous, 0xff, (size_t)width * sizeof(*previous));
+  for (int y = 0; y < height; ++y) {
+    memset(current, 0xff, (size_t)width * sizeof(*current));
+    for (int x = 0; x < width;) {
+      const uint32_t owner = TreatedOwner(b, x, y, scale, mosaic);
+      const int left = x++;
+      while (x < width && TreatedOwner(b, x, y, scale, mosaic) == owner) ++x;
+      if (!owner) continue;
+      if (owner > b->reveal_cluster_count) goto fail;
+      const int w = x - left;
+      size_t index = previous[left];
+      if (index != SIZE_MAX && pieces[index].cluster_index == owner - 1 &&
+          pieces[index].source.w == w) {
+        ++pieces[index].source.h;
+      } else {
+        if (used == capacity) {
+          if (capacity == 65536) goto fail;
+          const size_t next = capacity ? capacity * 2 : 64;
+          ArTextRevealPiece *grown = realloc(pieces, next * sizeof(*pieces));
+          if (!grown) goto fail;
+          pieces = grown;
+          capacity = next;
+        }
+        index = used++;
+        pieces[index] = (ArTextRevealPiece){{left, y, w, 1}, owner - 1};
+      }
+      current[left] = index;
+      ArRenderRectI *bounds = &ink[owner - 1];
+      if (!bounds->w) *bounds = (ArRenderRectI){left, y, w, 1};
+      else {
+        const int right = bounds->x + bounds->w > x ? bounds->x + bounds->w : x;
+        if (left < bounds->x) bounds->x = left;
+        bounds->w = right - bounds->x;
+        bounds->h = y - bounds->y + 1;
+      }
+    }
+    size_t *swap = previous;
+    previous = current;
+    current = swap;
+  }
+  free(previous);
+  free(current);
+  *out = pieces;
+  *count = used;
+  *allocation = capacity * sizeof(*pieces);
+  return true;
+fail:
+  free(previous);
+  free(current);
+  free(pieces);
+  return false;
+}
+
 /* Texture bytes for a surface, saturating rather than wrapping so an absurd
  * request is rejected instead of appearing free. */
 static uint64_t SurfaceBytes(int width, int height,
@@ -234,7 +328,9 @@ static void ReleaseEntry(ArTextSurfaceCache *cache, ArRenderDevice *device,
   ArRenderDevice_DestroyTexture(device, entry->surface.texture);
   free((void *)entry->surface.reveal_clusters);
   free((void *)entry->surface.cluster_ink_bounds);
+  free((void *)entry->surface.reveal_pieces);
   cache->stats.texture_bytes -= entry->texture_bytes;
+  cache->stats.effect_metadata_bytes -= entry->effect_metadata_bytes;
   entry->valid = false;
   entry->texture_bytes = 0;
   ++cache->stats.evictions;
@@ -259,7 +355,7 @@ static size_t SelectByteVictim(const ArTextSurfaceCache *cache,
 static void EnforceByteBudget(ArTextSurfaceCache *cache,
                               ArRenderDevice *device, size_t protected_index) {
   if (!cache->byte_budget) return;
-  while (cache->stats.texture_bytes > cache->byte_budget) {
+  while (cache->stats.texture_bytes + cache->stats.effect_metadata_bytes > cache->byte_budget) {
     const size_t victim = SelectByteVictim(cache, protected_index);
     if (victim >= cache->capacity) return;
     ReleaseEntry(cache, device, &cache->entries[victim]);
@@ -453,6 +549,7 @@ bool ArTextSurfaceCache_Acquire(
   int upload_width = bitmap.width;
   int upload_height = bitmap.height;
   int upload_pitch = bitmap.pitch_bytes;
+  int mosaic_block = 1;
   if (request->pixelation == kArTextPixelation_LowResolution && metric_scale > 1) {
     if (!UpscaleNearest(&bitmap, metric_scale, &treated_pixels,
                         &upload_width, &upload_height, &upload_pitch) ||
@@ -471,6 +568,7 @@ bool ArTextSurfaceCache_Acquire(
      * fitted heading can be much smaller than its surrounding dialogue. */
     int block = bitmap.line_advance / 8;
     if (block > request->pixelation_size) block = request->pixelation_size;
+    if (block > 1) mosaic_block = block;
     if (block > 1 && !ApplyMosaic(&bitmap, block,
                      &treated_pixels, &upload_pitch)) {
       ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
@@ -502,6 +600,8 @@ bool ArTextSurfaceCache_Acquire(
   ArRenderTexture texture = ArRenderTexture_Invalid();
   ArTextRevealCluster *reveal_clusters = NULL;
   ArRenderRectI *cluster_ink_bounds = NULL;
+  ArTextRevealPiece *reveal_pieces = NULL;
+  size_t reveal_piece_count = 0, effect_metadata_bytes = 0;
   if (bitmap.reveal_cluster_count) {
     if (bitmap.reveal_cluster_count >
         SIZE_MAX / sizeof(*reveal_clusters)) {
@@ -543,10 +643,18 @@ bool ArTextSurfaceCache_Acquire(
   };
   const ArRenderRectI ink_bounds = ArTextBitmap_InkBounds(
       &treated_bitmap, (ArRenderRectI){0, 0, upload_width, upload_height});
-  for (size_t index = 0; index < bitmap.reveal_cluster_count; ++index) {
+  for (size_t index = 0; !bitmap.pixel_owners && index < bitmap.reveal_cluster_count; ++index) {
     const ArTextRevealCluster *cluster = &reveal_clusters[index];
     cluster_ink_bounds[index] = ArTextBitmap_InkBounds(&treated_bitmap,
         (ArRenderRectI){cluster->x, cluster->y, cluster->width, cluster->height});
+  }
+  if (!BuildRevealPieces(&bitmap, metric_scale, mosaic_block, &reveal_pieces,
+        &reveal_piece_count, &effect_metadata_bytes, cluster_ink_bounds)) {
+    free(treated_pixels);free(reveal_clusters);free(cluster_ink_bounds);
+    ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
+    ++cache->stats.failures;
+    SetError(error, error_capacity, "cannot build bounded text effect reveal geometry");
+    return false;
   }
   ++cache->stats.upload_calls;
   const bool created = ArRenderDevice_CreateTexture(
@@ -561,10 +669,13 @@ bool ArTextSurfaceCache_Acquire(
     .ascent = bitmap.ascent * metric_scale,
     .descent = bitmap.descent * metric_scale,
     .line_advance = bitmap.line_advance * metric_scale,
+    .paragraph_direction = bitmap.paragraph_direction,
     .ink_bounds = ink_bounds,
     .reveal_clusters = reveal_clusters,
     .cluster_ink_bounds = cluster_ink_bounds,
     .reveal_cluster_count = bitmap.reveal_cluster_count,
+    .reveal_pieces = reveal_pieces,
+    .reveal_piece_count = reveal_piece_count,
   };
   free(treated_pixels);
   ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
@@ -572,6 +683,7 @@ bool ArTextSurfaceCache_Acquire(
     ArRenderDevice_DestroyTexture(device, texture);
     free(reveal_clusters);
     free(cluster_ink_bounds);
+    free(reveal_pieces);
     ++cache->stats.failures;
     SetError(error, error_capacity,
              ArRenderDevice_LastError(device));
@@ -584,9 +696,11 @@ bool ArTextSurfaceCache_Acquire(
     .surface = replacement,
     .last_use = cache->clock,
     .texture_bytes = SurfaceBytes(upload_width, upload_height, descriptor.format),
+    .effect_metadata_bytes = effect_metadata_bytes,
     .valid = true,
   };
   cache->stats.texture_bytes += victim->texture_bytes;
+  cache->stats.effect_metadata_bytes += victim->effect_metadata_bytes;
   if (cache->stats.texture_bytes > cache->stats.peak_texture_bytes)
     cache->stats.peak_texture_bytes = cache->stats.texture_bytes;
   /* Evicting for bytes happens after the replacement is installed, so the
@@ -609,5 +723,6 @@ void ArTextSurfaceCache_ResetStats(ArTextSurfaceCache *cache) {
   cache->stats = (ArTextSurfaceCacheStats){
     .texture_bytes = live_bytes,
     .peak_texture_bytes = live_bytes,
+    .effect_metadata_bytes = cache->stats.effect_metadata_bytes,
   };
 }

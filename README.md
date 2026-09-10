@@ -428,6 +428,7 @@ manifest at [`tools/runner-bench.json`](tools/runner-bench.json), and the
 | [`docs/README.md`](docs/README.md) | Curated game-documentation index |
 | [`docs/manual.md`](docs/manual.md) | Player and power-user reference |
 | [`docs/language-pack-format.md`](docs/language-pack-format.md) | UTF-8 translation pack authoring and validation contract |
+| [`docs/language-packs.md`](docs/language-packs.md) | Direct `.arlang` installation, sharing, and editor-free/AI authoring |
 | [`docs/SEAMS.md`](docs/SEAMS.md) | Logic↔hardware boundary and architecture map |
 | [`docs/progress.md`](docs/progress.md) | Stage, town, and subsystem status |
 | [`docs/rendering-engine.md`](docs/rendering-engine.md) | Rendering, streaming, and OAM architecture |

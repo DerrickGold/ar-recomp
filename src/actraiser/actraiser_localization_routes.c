@@ -25,7 +25,7 @@ enum {
 
 _Static_assert(sizeof(kDialogueRoutes) / sizeof(kDialogueRoutes[0]) == 365,
                "USA scoped dialogue route census changed");
-_Static_assert(sizeof(kComposeRoutes) / sizeof(kComposeRoutes[0]) == 89,
+_Static_assert(sizeof(kComposeRoutes) / sizeof(kComposeRoutes[0]) == 90,
                "USA scoped fixed-composer route census changed");
 
 bool ActRaiserLocalizationRoute_InScope(uint8_t map_group, uint8_t map_number) {
@@ -106,13 +106,26 @@ ActRaiserLocalizationRoute_ResolveCompose(
        ++index) {
     const ActRaiserLocalizationComposeRoute *route = &kComposeRoutes[index];
     /* Identical native destinations have different owners in each scene. */
-    if (route->surface_id >= 14) {
-      if (observation->map_group || observation->map_number) continue;
-    } else if (route->surface_id >= 10) {
-      if (observation->map_group < kActRaiserActionMapGroup_First ||
-          observation->map_group > kActRaiserActionMapGroup_Last) continue;
-    } else if (!ActRaiserLocalizationRoute_InScope(
-                   observation->map_group, observation->map_number)) continue;
+    switch (route->scope) {
+      case kActRaiserLocalizationComposeScope_Title:
+        if (observation->map_group || observation->map_number) continue;
+        break;
+      case kActRaiserLocalizationComposeScope_Action:
+        if (observation->map_group < kActRaiserActionMapGroup_First ||
+            observation->map_group > kActRaiserActionMapGroup_Last) continue;
+        break;
+      case kActRaiserLocalizationComposeScope_Simulation:
+        if (!ActRaiserLocalizationRoute_InScope(
+                observation->map_group, observation->map_number)) continue;
+        break;
+      case kActRaiserLocalizationComposeScope_SoundTest:
+        /* The dormant native modal can overlay a scene. Source/destination
+         * alone must not confuse it with an action card at the same cell. */
+        if (observation->caller_pc24 != UINT32_C(0x0297F0)) continue;
+        break;
+      default:
+        continue;
+    }
     if (route->destination != observation->destination)
       continue;
     if ((route->match_flags &

@@ -136,8 +136,11 @@ func normalizeAndValidateStaticAnalysisDatabase(database *StaticAnalysisDatabase
 	if database.Provenance != staticAnalysisDatabaseProvenance {
 		return fmt.Errorf("analysis database provenance %q is not supported", database.Provenance)
 	}
-	if database.ShadowReportVersion != shadowReportVersion {
-		return fmt.Errorf("analysis database shadow report version %d is not supported (want %d)", database.ShadowReportVersion, shadowReportVersion)
+	// Report v18 only adds a report-only dispatch inventory. Its fact schema,
+	// proof requirements, and generation semantics are unchanged from v17.
+	// Preserve existing checked-in databases without trusting older schemas.
+	if database.ShadowReportVersion != 17 && database.ShadowReportVersion != shadowReportVersion {
+		return fmt.Errorf("analysis database shadow report version %d is not supported (want 17 or %d)", database.ShadowReportVersion, shadowReportVersion)
 	}
 	if len(database.ROM.SHA256) != sha256.Size*2 {
 		return fmt.Errorf("analysis database ROM SHA-256 has %d hexadecimal characters, want %d", len(database.ROM.SHA256), sha256.Size*2)

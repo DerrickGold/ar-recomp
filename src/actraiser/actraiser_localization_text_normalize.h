@@ -43,4 +43,13 @@ bool ActRaiserLocalizationText_InsertInlineObject(
     ArLocalizationInlineObjectSnapshot *objects, size_t capacity,
     uint8_t *count, ArLocalizationInlineObjectSnapshot object);
 
+/* Map immutable value spans through normalization's existing byte map. The
+ * source may be a retained page slice; mapped spans append at destination_base.
+ * Edge whitespace belongs to layout, not to the isolated semantic value. */
+bool ActRaiserLocalizationText_MapBidiSpans(
+    const ArTextBidiSpan *spans, size_t count, size_t source_offset,
+    size_t source_bytes, const uint16_t *offsets,
+    const char *normalized, size_t normalized_bytes, size_t destination_base,
+    ArTextBidiSpans *destination);
+
 #endif /* ACTRAISER_LOCALIZATION_TEXT_NORMALIZE_H */

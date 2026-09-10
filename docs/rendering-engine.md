@@ -1195,6 +1195,83 @@ bundled runtime's widescreen/PPU interfaces:
   shadow pass traverses against its offset to preserve original coverage
   without allocating a temporary alpha plane; invalid inputs remain distinct
   from retryable font/resource failures.
+- Text raster requests (ABI 11) may accent the shaped cluster containing a
+  logical UTF-8 grapheme end; zero disables the accent. Its RGB and logical
+  offset participate in cache identity. The portable color pass preserves alpha
+  and complete ligatures/combining marks, independent of visual direction;
+  SDL applies it after bands and before shadows. Frame ABI 26 carries this
+  pointer-free style and a grid `center_rows` option. Grid slices remap the
+  accent into their own byte ranges; row centering is geometry, not re-shaping.
+- The presenter accepts a frame only after `ArLocalizationFrame_IsValid`
+  verifies ABI extent, fixed-pool counts, terminated stack/locale identifiers,
+  cell ownership, nested text/grid/object/span ranges and UTF-8 reveal
+  boundaries. Superseded snapshots remain legal but cannot be reached through
+  active cells. Shared table fitting supports the frame contract's complete
+  ten-cell row capacity; fixed and fitted layouts no longer have different
+  accepted maxima.
+- The desktop text backend resolves bidi paragraphs and script runs with the
+  pinned, statically compiled SheenBidi dependency before SDL_ttf/HarfBuzz
+  shaping. Logical UTF-8 text is never reversed. Wrapped lines are reordered
+  at line boundaries, and each shaped run supplies both its pixels and its
+  reveal rectangles. The cached result keeps monotonically increasing logical
+  byte endpoints, even when visual glyph positions run right-to-left. Ordinary
+  non-bidi text retains the existing fast path. Both paths share font resources,
+  fitting, palette bands, shadows, numeral slant, mosaic and cached reveal.
+  Logical `Leading`/`Trailing` alignment follows the resolved paragraph base;
+  explicit `Left`/`Right` alignment preserves native HUD/selector geometry.
+  Dialogue requests use logical leading alignment, not an already-flipped edge.
+  Bitmap ABI 4 carries the first resolved paragraph direction through the
+  surface cache so auto-direction cropped labels and direction-following cells
+  can use it without duplicating bidi analysis in the presenter.
+  `ArUiTextRun` ABI 2 uses a separate physical left/center/right placement enum,
+  so host UI placement cannot be mistaken for paragraph direction. SheenBidi
+  and SDL handles remain private to the desktop backend; alternate backends
+  must provide equivalent paragraph/run processing, not just a font direction
+  flag. Frame ABI 26 carries an effective `ArLocalizationTextLanguage` per
+  snapshot, independent of the selected font stack/default locale. Both grid
+  requests and flowed dialogue/labels use that source locale and direction;
+  the existing raster cache identity includes them. A changed frame default
+  cannot reinterpret cached fallback text. Raster request ABI 11 additionally
+  borrows bounded logical source ranges for inserted names/numbers/terms. The
+  session/frame/composer carry these beside UTF-8, not as control characters in
+  it. Grid requests include their offset into the source. The backend inserts
+  private isolate controls and maps every shaped endpoint back to original
+  bytes, retaining the unchanged reveal clock and native anchors. Cache keys
+  include ranges, direction and slice offset. Browser carets, interface font
+  coverage and all-script visual qualification remain separate requirements.
+  CRLF is one hard break; CR, NEL and U+2029 terminate paragraphs without
+  rasterizing separator glyphs. U+2028 splits physical lines inside the same
+  resolved paragraph, retaining its base. Both bidi and ordinary Latin requests
+  containing these separators use the shared run-layout path. Fixed-field
+  authoring rejects raw Unicode separators in favor of explicit structural
+  operations; Go/C validation agree on that boundary.
+- Font resources cross the renderer boundary through `ArFontResources` (ABI 1),
+  not filenames. `ArTextBackendConfig` and `ArTextPresentationFont`/host ABI 2
+  carry ordered, nonzero `ArFontResourceId` values. `ArLocalizationFrame` ABI 26
+  copies these identities, not paths or pointers. The desktop host resolves
+  bundled identifiers and pack-relative members, registers immutable file
+  snapshots, and injects the provider through
+  `ArLocalizedTextPresenter_SetFontResources`. A port may supply memory/archive
+  resources without changing game or rendering code.
+  Each resource is bounded at 64 MiB; the desktop store allows 64 resources and
+  256 MiB total, including retired resources still leased by backends. A failed
+  registration or preflight retains the previous working selection. The game
+  retires registrations on rejection, successful replacement and shutdown;
+  rejected selections also discard the staged preflight immediately, without
+  touching active surfaces or holding unused bytes against the host budget.
+  The backend closes all sized fonts and streams before releasing its leases.
+  SDL_ttf opens read-only memory streams over those same bytes for every raster
+  size, so size-cache misses neither reopen files nor see mid-session edits.
+  High-resolution shaping, per-character palette bands, mosaic sampling and
+  surface caching are unchanged.
+  Providers and their contexts must outlive every lease; these APIs run on the
+  host/presenter thread. Resource IDs are process-local and never reused or
+  serialized into saves. A copied frame borrows its IDs: an already-pinned
+  backend can still present it after registration retirement; after both have
+  retired (including a device reset), it retains the captured native text,
+  without erasure masks or a dangling handle. Shutdown resets the game
+  presenter, destroys the independent interface backend, then destroys the
+  host store. Store destruction refuses live leases without invalidating them.
 - System-interface text has a separate `ArUiTextRenderer` instance, injected
   through `SettingsOverlay_SetTextBackend`. The host resolves the bundled
   Noto Sans/JP files; the overlay owns the font instance and a 256-entry,
@@ -1232,13 +1309,32 @@ bundled runtime's widescreen/PPU interfaces:
   Interface tab changes it live. A host without ready interface fonts displays
   English while retaining that preference. Reset/save feedback wraps in the
   description panel rather than sharing space with the section title.
+  Application recovery dialogs use the same four-language catalog through the
+  pure `SessionRecovery` formatter, not the font backend. The first fatal
+  request retains a typed reason plus literal technical details. Startup,
+  battery-save, graphics-reset/loss and audio-device failures have localized
+  recovery instructions, titles and shutdown warnings; raw diagnostics stay
+  in logs. The saved interface preference (or explicit environment override)
+  selects the locale, with English before preferences are available. Formatting
+  is bounded and preserves warnings when details are too long. Headless runs
+  still avoid modal dialogs, and localization does not change save/retry policy.
+  The overlay's independent trusted Noto stack adds Japanese, Arabic and Hebrew fallback
+  faces so package metadata can be read before activation without loading an
+  unselected pack's fonts. These bundled fallbacks do not implicitly extend
+  a game pack's font stack or add new host UI locales. File hashes, glyph samples
+  and nonempty distribution members are gated; no universal Unicode claim is made.
   Catalogs cover navigation, interaction feedback, all compiled setting labels,
   help and built-in enum choices, plus layer-editor captions. Coverage tests
   compare the real compiled registry's English text with the catalog; new or
   drifted descriptors fail the gate. Controller names are keyed by typed binding
   kind/code, while platform keycap/device names and user-authored values remain
   literal. Live Vsync captions read host-reported status, not requested settings.
-  Manual-reader controls are a separate presentation consumer.
+  Manual-reader controls consume the same effective interface locale. Their
+  pure `manual_caption` layout binds one-based page/opening numbers to the
+  input owner's device/zoom hints and wraps complete graphemes within the
+  output viewport. Integer scale can decrease to fit; each line is centered
+  using the overlay's actual cached width. Page images, reader input semantics
+  and technical load diagnostics are unchanged.
   Generated C strings encode UTF-8 bytes with fixed-width escapes, independent
   of compiler execution code pages; builder-only IDs are excluded from that
   table. The builder embeds the same validated catalog subset in an inert,

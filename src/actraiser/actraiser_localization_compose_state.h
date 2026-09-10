@@ -9,12 +9,12 @@
 #include "actraiser/actraiser_localization_grid.h"
 #include "localization/localization_frame.h"
 
-#define ACTRAISER_LOCALIZATION_COMPOSE_STATE_ABI_VERSION UINT32_C(7)
+#define ACTRAISER_LOCALIZATION_COMPOSE_STATE_ABI_VERSION UINT32_C(10)
 
 enum {
   kActRaiserLocalizationComposeSurfaceFirst = 2,
-  kActRaiserLocalizationComposeSurfaceLast = 15,
-  kActRaiserLocalizationComposeSurfaceCapacity = 14,
+  kActRaiserLocalizationComposeSurfaceLast = 16,
+  kActRaiserLocalizationComposeSurfaceCapacity = 15,
   kActRaiserLocalizationComposeTextCapacity = 4096,
   kActRaiserLocalizationComposeSemanticIdCapacity = 256,
 };
@@ -24,6 +24,7 @@ enum {
 enum {
   kActRaiserLocalizationTitleTextSurface = 14,
   kActRaiserLocalizationTitleSelectorSurface = 15,
+  kActRaiserLocalizationSoundTestSurface = 16,
 };
 
 typedef struct ActRaiserLocalizationComposeSnapshot {
@@ -34,6 +35,8 @@ typedef struct ActRaiserLocalizationComposeSnapshot {
   uint32_t surface_id;
   uint64_t generation_serial;
   uint64_t source_revision;
+  ArLocalizationTextLanguage language;
+  ArTextBidiSpans bidi;
   ArTextCellRegion region;
   uint16_t native_destination;
   uint8_t native_font_pixels;
@@ -67,7 +70,8 @@ typedef struct ActRaiserLocalizationComposeState {
 /* Resolves one semantic fixed-text message into an immutable, complete UTF-8
  * snapshot. The boundary bitmap covers utf8_capacity bytes and distinguishes
  * authored grid delimiters from inserted values; non-grid consumers may omit
- * it. Returning false leaves the
+ * it. Language describes the effective message source (including fallback),
+ * not the selected pack or font stack. Returning false leaves the
  * corresponding native cells unclaimed. */
 typedef bool (*ActRaiserLocalizationComposeTextResolver)(
     void *context, const char *semantic_id,
@@ -75,7 +79,8 @@ typedef bool (*ActRaiserLocalizationComposeTextResolver)(
     uint32_t *cluster_count, uint64_t *source_revision,
     ArLocalizationInlineObjectSnapshot *inline_objects,
     size_t inline_object_capacity, uint8_t *inline_object_count,
-    uint8_t *structural_boundaries,
+    uint8_t *structural_boundaries, ArLocalizationTextLanguage *language,
+    ArTextBidiSpans *bidi,
     char *error, size_t error_capacity);
 
 void ActRaiserLocalizationComposeState_Init(
@@ -111,7 +116,7 @@ bool ActRaiserLocalizationComposeState_RefreshLatest(
 bool ActRaiserLocalizationComposeState_AppendFrame(
     const ActRaiserLocalizationComposeState *state,
     ArLocalizationFrame *frame, ArTextCellDestination destination,
-    ArTextDirection direction);
+    const uint16_t palette[4]);
 bool ActRaiserLocalizationComposeState_DialogueWasReplaced(
     const ActRaiserLocalizationComposeState *state,
     uint64_t terminal_compose_serial);

@@ -46,6 +46,17 @@ static void ExpectCell(const ArLocalizationTextGrid *grid, unsigned line,
 }
 
 int main(void) {
+  const ArLocalizationTextGrid sound =
+      Build(kActRaiserLocalizationMenu_SoundTest, 10, 6);
+  CHECK(sound.row_height == 2);
+  ExpectCell(&sound, 0, 1, 0, 0, 10, kArTextHorizontalAlignment_Leading);
+  for (unsigned line = 2; line <= 4; line += 2) {
+    ExpectCell(&sound, line, 2, 0, 1, 6, kArTextHorizontalAlignment_Leading);
+    ExpectCell(&sound, line, 2, 1, 7, 9, kArTextHorizontalAlignment_Trailing);
+    ExpectCell(&sound, line, 1, 0, 0, 10, kArTextHorizontalAlignment_Leading);
+  }
+  CHECK(!ArLocalizationGrid_FindRow(&sound, 0, 2));
+  CHECK(!ArLocalizationGrid_FindRow(&sound, 5, 1));
   const ArLocalizationTextGrid cities =
       Build(kActRaiserLocalizationMenu_StatusCities, 26, 20);
   const ArLocalizationTextGrid score =
@@ -56,6 +67,12 @@ int main(void) {
       Build(kActRaiserLocalizationMenu_MessageSpeed, 10, 4);
   const ArLocalizationTextGrid rows =
       Build(kActRaiserLocalizationMenu_FixedRows, 10, 2);
+  CHECK(ArLocalizationGrid_FindRow(&speed, 0, 10)->cells[0].italic);
+  CHECK(!ArLocalizationGrid_FindRow(&speed, 2, 3)->cells[0].italic);
+  CHECK(ArLocalizationGrid_FindRow(&master, 3, 4)->cells[1].italic);
+  CHECK(!ArLocalizationGrid_FindRow(&master, 3, 4)->cells[0].italic);
+  CHECK(ArLocalizationGrid_FindRow(&cities, 7, 5)->cells[1].italic);
+  CHECK(!ArLocalizationGrid_FindRow(&cities, 3, 5)->cells[1].italic);
 
   /* Authoring accepts precisely the shapes represented by the game-owned
    * grid, including reserved artwork rows and the last logical row. Pixel

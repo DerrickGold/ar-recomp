@@ -8,7 +8,7 @@
 #include "localization/dialogue_session.h"
 #include "localization/language_pack.h"
 
-#define ACTRAISER_LOCALIZATION_VALUES_ABI_VERSION UINT32_C(1)
+#define ACTRAISER_LOCALIZATION_VALUES_ABI_VERSION UINT32_C(2)
 
 enum {
   kActRaiserLocalizationMasterNameCapacity =
@@ -23,13 +23,15 @@ typedef struct ActRaiserLocalizationValues {
   const uint8_t *wram;
   size_t wram_bytes;
   const ArLanguagePack *pack;
+  const ArLanguagePack *fallback_pack;
   char master_name[kActRaiserLocalizationMasterNameCapacity];
 } ActRaiserLocalizationValues;
 
 bool ActRaiserLocalizationValues_Capture(
     ActRaiserLocalizationValues *values,
     const uint8_t *wram, size_t wram_bytes,
-    const ArLanguagePack *pack, const char *master_name);
+    const ArLanguagePack *pack, const ArLanguagePack *fallback_pack,
+    const char *master_name);
 
 /* Matches ArDialogueResolveValue. */
 bool ActRaiserLocalizationValues_Resolve(

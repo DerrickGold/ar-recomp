@@ -57,7 +57,7 @@ var authorNavigationCaptions = map[string]string{
 	"group.story":          "Town story & requests",
 	"group.names":          "Location names & action title cards",
 	"group.title_menus":    "Menus & title text",
-	"group.ending":         "Ending dialogue",
+	"group.ending":         "Ending dialogue & credits",
 	"group.final_battle":   "Final battle dialogue",
 	"group.save":           "Save progress & quit",
 	"group.speed":          "Message speed",
@@ -74,8 +74,8 @@ var authorNavigationCaptions = map[string]string{
 	"group.references":     "Additional regional & table references",
 	"context.start":        "Sky Palace introduction or returning to an existing save from the title screen.",
 	"context.names":        "Action title cards use fitted, centered enhanced text.",
-	"context.title":        "Title options support enhanced text. Logo, copyright and sound-test presentation remain native.",
-	"context.ending":       "Ending and credits rendering is a later phase.",
+	"context.title":        "Title options and dormant sound-test labels support enhanced text. Logo and copyright artwork remain native.",
+	"context.ending":       "Ending dialogue and credits support enhanced text. Credits pages keep native timing; copyright artwork remains native.",
 	"context.final_battle": "Final-battle message delivered from the Sky Palace.",
 	"context.action":       "HUD labels, pause and stage messages support enhanced text; counters retain native formatting.",
 	"context.responses":    "Common event/reference routes; not a separate script for each town.",
@@ -158,6 +158,8 @@ func AuthorMessageLocations(id string) []AuthorLocation {
 		}
 	}
 	switch {
+	case strings.HasPrefix(id, "credits."):
+		return root("ending", "dialogue", "group.ending", "credits.", "context.ending")
 	case strings.HasPrefix(id, "title."), strings.HasPrefix(id, "sound_test."):
 		return root("title", "menus", "group.title_menus", "title.", "context.title")
 	case strings.HasPrefix(id, "dialogue.ending."), strings.HasPrefix(id, "dialogue.event.wrapper_00.call_00."), strings.HasPrefix(id, "dialogue.event.wrapper_05.call_03."):

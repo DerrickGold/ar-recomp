@@ -5,7 +5,8 @@ face for localized game text. It is a broad Latin/Greek/Cyrillic face, not a
 universal Unicode font: a pack in another script must supply its own font.
 
 The settings overlay owns an independent stack using this face plus the
-Japanese fallback below. Its English bitmap lettering stays native; non-ASCII
+Japanese, Arabic and Hebrew fallbacks below. Its English bitmap lettering stays
+native; non-ASCII
 runs are shaped together at output resolution and cached. Selecting a game
 language pack never replaces the interface's fonts.
 
@@ -52,3 +53,26 @@ font file.
 The same bytes are retained in the Unicode regression fixtures. This licensed
 host font is not an extraction from the Japanese game ROM and does not include
 retail text or artwork. It is not a universal Unicode font.
+
+## Arabic and Hebrew interface metadata fallbacks
+
+These unmodified static Bold faces make community package names readable before
+activation, independently of any font bundled in a language pack. They add
+275,632 bytes total. They do not add Arabic/Hebrew host interface translations,
+nor become implicit dependencies of game text. Unsupported scripts still need
+their own game-pack fonts; the ASCII package ID remains the safe identifier.
+
+Both come from [`notofonts/noto-fonts`](https://github.com/notofonts/noto-fonts/tree/ffebf8c1ee449e544955a7e813c54f9b73848eac),
+the same pinned revision as the primary font:
+`ffebf8c1ee449e544955a7e813c54f9b73848eac`.
+
+| File | Upstream path | SHA-256 |
+| --- | --- | --- |
+| `NotoSansArabic-Bold.ttf` | `hinted/ttf/NotoSansArabic/NotoSansArabic-Bold.ttf` | `ed2711b387750ae991b6a980b8dd16fdd65e6702b97e9f52adf3a8edf09ef4df` |
+| `NotoSansHebrew-Bold.ttf` | `hinted/ttf/NotoSansHebrew/NotoSansHebrew-Bold.ttf` | `a30243d1c625eaf63bb889f036fe9de97e81d9248976f89e6e4252f9668c832e` |
+
+License: SIL Open Font License 1.1, shared `OFL.txt` (byte-identical to the
+pinned upstream `LICENSE`). Copyright and author information remain in each
+font's original name table. Scalar regression samples include Arabic and Hebrew
+combining marks, Persian and Urdu letters; glyph presence is not a substitute
+for native-speaker review of shaping, appearance or clipping.

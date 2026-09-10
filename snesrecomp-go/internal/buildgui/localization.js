@@ -8,12 +8,28 @@
   function phrase(key,args={},tag="span") { const el=document.createElement(tag); ui.set(el,key,args); return el; }
   // Only the authoritative Go navigation model supplies caption IDs. Source
   // excerpts and technical message IDs have no caption key and remain literal.
-  function navigationCaption(key,text) { const el=document.createElement("span"); el.textContent=text; if(key)ui.set(el,"builder.navigation."+key); return el; }
+  function navigationCaption(key,text) { const el=document.createElement("span"); el.textContent=text; if(key)ui.set(el,"builder.navigation."+key); else contentLanguage(el); return el; }
+  // Content direction is never the workshop UI locale. Keep UTF-8 untouched;
+  // dir/lang affect presentation only, not saved scripts or selection offsets.
+  function contentLanguage(el, metadata={}) {
+    el.setAttribute("dir", ["ltr","rtl"].includes(metadata?.direction) ? metadata.direction : "auto");
+    el.setAttribute("lang", metadata?.locale || "");
+  }
+  function draftLanguage() {
+    const fields=$("metadata").elements;
+    return {locale:fields.locale.value,direction:fields.direction.value};
+  }
+  function updateContentLanguage() {
+    const metadata=draftLanguage();
+    contentLanguage($("body"),metadata);
+    for(const page of $("preview-content").querySelectorAll(".loc-preview-page")) contentLanguage(page,metadata);
+  }
   function failure(key,args={}) { const error=new Error(ui.text(key,args)); error.uiKey=key; error.uiArgs=args; return error; }
   function feedbackKey(key,args={},error=false) { label("feedback",key,args); $("feedback").dataset.error=String(error); }
   const panel = document.getElementById("panel-localization");
   const statusKeys = {not_started: "builder.editor.not_started", wip: "builder.editor.wip", done: "builder.editor.done"};
   const valueKindKeys = {number:"builder.editor.value_number",localized_term:"builder.editor.value_term",localized_text:"builder.editor.value_text",icon:"builder.editor.value_icon"};
+  const coverageSurfaceKeys = {dialogue:"builder.coverage.surface.dialogue",menus:"builder.coverage.surface.menus",keyboard:"builder.coverage.surface.keyboard",terms:"builder.coverage.surface.terms",hud:"builder.coverage.surface.hud",credits:"builder.coverage.surface.credits"};
   let state = {project: null}, selected = "", message = null, dirty = false, detailsDirty = false, noticeDirty = false, busy = false;
   let offset = 0, searchSnapshot = null, loaded = false, closed = false;
   let workflow = "home", phase = "choose", reviewPurpose = "install";
@@ -72,6 +88,24 @@
     if (phase === "clone") $("clone").elements.name.value = ui.text("builder.language.clone_default",{name:state.project.metadata.name});
     workflowView();
   }
+  function renderTextCoverage(report) {
+    const host=$("text-coverage");host.replaceChildren();host.hidden=!report;
+    if(!report)return;
+    host.append(phrase("builder.coverage.contract",{provided:report.required.provided,total:report.required.total},"p"));
+    if(report.runtime)host.append(phrase("builder.coverage.live_optional",{provided:report.liveOptional.provided,total:report.liveOptional.total},"p"));
+    host.append(phrase("builder.coverage.explanation",{},"p"));
+    for(const surface of report.surfaces){
+      const details=document.createElement("details"),summary=document.createElement("summary");
+      summary.append(phrase(coverageSurfaceKeys[surface.surface]),document.createTextNode(" · "),phrase("builder.coverage.supplied",{provided:surface.provided,total:surface.total}));
+      details.append(summary,phrase("builder.coverage.review",{done:surface.done,wip:surface.wip,unreviewed:surface.notStarted,unchanged:surface.unchangedSource},"p"));
+      if(surface.missing?.length){
+        details.append(phrase("builder.coverage.fallback_ids",{},"p"));
+        const ids=document.createElement("pre");ids.setAttribute("dir","ltr");ids.textContent=surface.missing.join("\n");details.append(ids);
+      }
+      host.append(details);
+    }
+    if(report.dormant?.length)host.append(phrase("builder.coverage.dormant",{ids:report.dormant.join(", ")},"p"));
+  }
   function feedback(text, error = false) { raw("feedback",text); $("feedback").dataset.error = String(error); }
   function hasEdits() { return dirty || detailsDirty || noticeDirty || fontsDirty; }
   function saveIndicator() {
@@ -93,7 +127,7 @@
     if(closed) throw failure("builder.closed");
     if (!response.ok) {
       let body; try { body = await response.json(); } catch { body = {}; }
-      const key=["builder.language.request_conflict","builder.language.request_failed"].includes(body.errorCode)
+      const key=["builder.language.request_conflict","builder.language.request_failed","builder.language.chooser_unavailable","builder.language.chooser_failed","builder.language.chooser_busy"].includes(body.errorCode)
         ? body.errorCode : "builder.language.request_failed";
       const error = failure(key,{detail:body.error||String(response.status)});
       error.status = response.status; throw error;
@@ -137,6 +171,7 @@
     const p = state.project; if (!p) return;
     for (const [key, value] of Object.entries(p.metadata)) if ($("metadata").elements.namedItem(key)) $("metadata").elements.namedItem(key).value = value;
     $("metadata").elements.notes.value = p.notes;
+    updateContentLanguage();
     label("fonts","builder.editor.font_summary",{fonts:[p.fonts.primary, ...(p.fonts.fallback || [])].join(" → ")});
     fontDraft = [p.fonts.primary, ...(p.fonts.fallback || [])]; fontUploads = new Map(); fontsDirty = false;
     $("font-report").replaceChildren(); renderFonts();
@@ -197,8 +232,9 @@
     $("reference-project").replaceChildren(keyedOption("",state.sourceAvailable?"builder.editor.native_reference":"builder.editor.native_unavailable"));
     for (const row of rows) {
       const el = option(row.id, row.name + " · " + row.locale + " · " + row.id + (row.error ? " — " + row.error : ""));
+      contentLanguage(el);
       el.disabled = !!row.error; $("projects").append(el);
-      if (!row.error && row.id !== state.project?.metadata.id) $("reference-project").append(option(row.id, row.name + " · " + row.locale));
+      if (!row.error && row.id !== state.project?.metadata.id) { const ref=option(row.id, row.name + " · " + row.locale); contentLanguage(ref); $("reference-project").append(ref); }
     }
     $("projects").value = state.project?.metadata.id || old;
     // A built US source need not have an author-store copy yet.
@@ -215,6 +251,7 @@
     $("library").replaceChildren(...rows.map(p=>{
       const card=document.createElement("article"); card.className="loc-package-card"; card.dataset.packageId=p.id; card.dataset.packageKey=p.key||"";
       const title=document.createElement("h3"); title.textContent=p.name;
+      contentLanguage(title,{locale:p.locale});
       const badge=document.createElement("span"); badge.className="loc-package-badge"; badge.dataset.installed=String(p.installed);
       ui.set(badge,p.error?"builder.language.needs_attention":p.installed?"builder.language.installed":p.readOnly?"builder.language.read_only":"builder.language.workshop_only");
       const info=document.createElement("p"); info.className="loc-help"; info.textContent=(p.locale?p.locale+" · ":"")+p.id;
@@ -223,7 +260,7 @@
       card.append(badge,title,info);
       if(p.installed){
         const label=document.createElement("label"); label.className="loc-package-enable";
-        const checkbox=document.createElement("input"); checkbox.type="checkbox"; checkbox.checked=p.enabled; checkbox.disabled=!!p.error; ui.attribute(checkbox,"aria-label","builder.language.enable_pack",{name:p.installedName});
+        const checkbox=document.createElement("input"); checkbox.type="checkbox"; checkbox.checked=p.enabled; checkbox.disabled=!p.installedRevision||(!p.enabled&&!!p.error); ui.attribute(checkbox,"aria-label","builder.language.enable_pack",{name:p.installedName});
         const caption=document.createElement("span");ui.set(caption,p.enabled?"builder.language.enabled":"builder.language.disabled");
         label.append(checkbox,caption);card.prepend(label);
         checkbox.addEventListener("change",()=>{
@@ -241,7 +278,7 @@
         action(p.readOnly?"builder.language.view_reference":"builder.language.edit_project",()=>openProject(p.id));
         if (!p.readOnly) action(p.installed?"builder.language.review_update":"builder.language.review_install",()=>openProject(p.id,true));
       }
-      if(p.installed&&!p.error) action("builder.language.uninstall",()=>run(async()=>{
+      if(p.installed&&p.installedRevision) action("builder.language.uninstall",()=>run(async()=>{
         if(!window.confirm(ui.text("builder.language.uninstall_confirm",{name:p.installedName,id:p.id,folder:p.key}))) return;
         const result=await json("uninstall",{id:p.id,directory:p.key,expected:p.installedRevision,confirmUninstall:true});
         await loadCatalog(); feedbackKey("builder.language.uninstalled",{backup:result.backup});
@@ -263,8 +300,10 @@
     fillMetadata();
     const totals = p.totals.reduce((a, x) => ({total:a.total+x.total, done:a.done+x.done, wip:a.wip+x.wip}), {total:0,done:0,wip:0});
     $("editor-title").textContent = p.metadata.name;
+    contentLanguage($("editor-title"),{locale:p.metadata.locale});
     label("progress","builder.language.progress",totals);
     raw("publication-report","");
+    renderTextCoverage(null);
     $("download").hidden = true;
     dirty = false; raw("dirty","");
     if (!preserveMessage) {
@@ -360,6 +399,8 @@
     else label("reference-title","builder.editor.source_reference");
     if(data.reference?.body) raw("reference-body",data.reference.body);
     else label("reference-body","builder.editor.reference_missing");
+    if(data.reference?.body) contentLanguage($("reference-body"),m);
+    else { $("reference-body").removeAttribute("dir"); $("reference-body").removeAttribute("lang"); }
   }
   async function refreshReference(next) {
     // This is deliberately not adopt(): it must preserve the selected message,
@@ -463,7 +504,7 @@
       catch(error) { await prepareReview("install"); throw failure("builder.language.import_partial",{detail:error.uiArgs?.detail||error.message}); }
     } else feedbackKey("builder.language.imported_edit");
   }));
-  $("metadata").addEventListener("input", () => { detailsDirty = true; saveFailure=""; saveIndicator(); });
+  $("metadata").addEventListener("input", () => { detailsDirty = true; saveFailure=""; updateContentLanguage(); saveIndicator(); });
   $("notice").addEventListener("input", () => { noticeDirty = true; saveFailure=""; saveIndicator(); });
   $("notices").addEventListener("change", () => {
     if (noticeDirty && !window.confirm(ui.text("builder.editor.discard_notice"))) { $("notices").value = ""; return; }
@@ -505,14 +546,14 @@
     const ops = await json("preview", {...identity(), id:selected, body:$("body").value, status:$("message-status").value});
     const container = $("preview-content"); container.replaceChildren();
     let page, number = 0;
-    const newPage = () => { const heading=phrase("builder.editor.page_number",{number:++number},"h4"); page = document.createElement("div"); page.className = "loc-preview-page"; container.append(heading,page); };
+    const newPage = () => { const heading=phrase("builder.editor.page_number",{number:++number},"h4"); page = document.createElement("div"); page.className = "loc-preview-page"; contentLanguage(page,draftLanguage()); container.append(heading,page); };
     newPage();
     for (const op of ops) {
       if (op.op === "page") newPage();
       else if (op.op === "text") page.append(document.createTextNode(op.value));
       else if (op.op === "line" || op.op === "paragraph") page.append(document.createTextNode(op.op === "line" ? "\n" : "\n\n"));
-      else if (op.op === "placeholder") { const value = document.createElement("span"); value.textContent = "⟦" + op.name + (op.minimum_digits ? ":0" + op.minimum_digits : "") + "⟧"; ui.attribute(value,"title","builder.editor.runtime_value"); page.append(value); }
-      else { const control = document.createElement("div"); control.className = "loc-preview-control"; control.textContent = op.op + (op.id ? ": " + op.id : ""); if(!op.id&&op.frames)control.append(document.createTextNode(": "),phrase("builder.editor.frames",{count:op.frames})); page.append(control); }
+      else if (op.op === "placeholder") { const value = document.createElement("span"); value.textContent = "⟦" + op.name + (op.minimum_digits ? ":0" + op.minimum_digits : "") + "⟧"; value.className="loc-preview-value"; contentLanguage(value,{direction:"ltr"}); ui.attribute(value,"title","builder.editor.runtime_value"); page.append(value); }
+      else { const control = document.createElement("div"); control.className = "loc-preview-control"; contentLanguage(control,{direction:"ltr"}); control.textContent = op.op + (op.id ? ": " + op.id : ""); if(!op.id&&op.frames)control.append(document.createTextNode(": "),phrase("builder.editor.frames",{count:op.frames})); page.append(control); }
     }
     panel.querySelector(".loc-preview").hidden = false; feedbackKey("builder.editor.preview_valid");
   }));
@@ -528,20 +569,26 @@
   submit("search", () => search(false)); $("more").addEventListener("click", () => run(() => search(true))); $("browse").addEventListener("click", () => run(tree));
   $("backup").addEventListener("click", () => run(() => download("backup")));
   $("publish").addEventListener("click", () => run(() => download("publish")));
+  for(const id of ["rights","wip"]) $(id).addEventListener("change",()=>{
+    raw("publication-report","");renderTextCoverage(null);
+  });
   $("check").addEventListener("click", () => run(async () => {
     if (hasEdits()) throw failure("builder.language.save_first");
     const report=await json("publication-check", publicationOptions());
     label("publication-report","builder.language.publication_report",{included:report.included,wip:report.wip,omitted:report.unchangedSource,fallback:report.fallback});
+    renderTextCoverage(report.coverage);
   }));
   async function prepareReview(purpose) {
     reviewPurpose=purpose; phase="review"; $("editor-actions").open=false; feedback("");
     const m=state.project.metadata;
     label("review-pack","builder.language.review_pack",{name:m.name,locale:m.locale,id:m.id,author:m.author});
     raw("publication-report","");
+    renderTextCoverage(null);
     if(purpose==="install") {
       installedExists=!!(await json("installation",identity())).installed;
       const r=await json("installation-check",identity());
       label("publication-report","builder.language.install_report",{count:r.messages,fallback:r.fallback});
+      renderTextCoverage(r.coverage);
     }
     workflowView(); $("review-title").scrollIntoView({block:"nearest"}); $("review-title").focus();
   }

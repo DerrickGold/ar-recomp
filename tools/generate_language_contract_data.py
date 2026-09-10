@@ -25,6 +25,7 @@ ROW_SHAPES = {
     'score': 'kArLanguageRowShape_Score',
     'master': 'kArLanguageRowShape_Master',
     'fixed_rows': 'kArLanguageRowShape_FixedRows',
+    'sound_test': 'kArLanguageRowShape_SoundTest',
     'message_speed': 'kArLanguageRowShape_MessageSpeed',
     'message_speed_jp': 'kArLanguageRowShape_MessageSpeedJP',
 }
@@ -77,6 +78,12 @@ def generate(catalog_path):
     routes = sorted(routes + catalog.get('optional_routes', []), key=lambda r: r['id'])
     if len({route['id'] for route in routes}) != len(routes):
         raise ValueError('duplicate semantic route')
+    coverage = catalog['us_runtime_coverage']
+    live, dormant = set(coverage['live_optional']), set(coverage['dormant'])
+    native = {r['id'] for r in routes if 'us' in r['contracts']}
+    optional = {r['id'] for r in routes if r.get('optional') and 'us' in r['contracts']}
+    if live & dormant or not live <= optional or not dormant <= native or optional != live | (dormant & optional):
+        raise ValueError('classify every optional US route as live or dormant')
 
     for route in routes:
         shape = route.get('presentation', {}).get('shape')
@@ -247,6 +254,9 @@ def generate_go(catalog_path, shapes_path=DEFAULT_SHAPES):
             'id': route['id'],
             'allowed_placeholders': route['allowed_placeholders'],
             'canonical_profile': route['canonical_contract_profile'],
+            'us_runtime_usage': ('live_optional' if route['id'] in catalog['us_runtime_coverage']['live_optional']
+                                 else 'dormant' if route['id'] in catalog['us_runtime_coverage']['dormant']
+                                 else 'contract' if 'us' in route['contracts'] else 'regional_reference'),
             **({'optional': True} if route.get('optional') else {}),
             'presentation': presentation(route, {}),
             **({'presentation_by_profile': {

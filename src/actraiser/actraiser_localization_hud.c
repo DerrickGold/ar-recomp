@@ -1,5 +1,6 @@
 #include "actraiser/actraiser_localization_hud.h"
 #include "actraiser/actraiser_localization_art.h"
+#include "actraiser/actraiser_localization_style.h"
 
 #include <string.h>
 #include "snes_bgr555.h"
@@ -67,12 +68,6 @@ static uint16_t Word(const uint16_t *vram, uint16_t base, unsigned row, unsigned
   return vram[(base + row * 32 + col) & 0x7fff];
 }
 
-static uint32_t Rgb(uint16_t color) {
-  return (uint32_t)ExpandColor5(color, 15) << 16 |
-         (uint32_t)ExpandColor5(color >> 5, 15) << 8 |
-         ExpandColor5(color >> 10, 15);
-}
-
 static bool Matches(const HudField *field, const uint16_t *vram, uint16_t base) {
   for (unsigned i = 0; i < field->source_count; ++i)
     if ((Word(vram, base, field->source_row, field->source_column + i) & 0x3ff) != field->tiles[i])
@@ -103,40 +98,38 @@ static bool CaptureFrameEnd(ArLocalizationArtwork *art, unsigned column,
 static void Append(ArLocalizationFrame *frame, uint32_t id,
                    ArTextCellDestination destination, ArTextCellRegion region,
                    const char *text, size_t bytes, uint32_t clusters,
-                   uint64_t revision, ArTextDirection direction,
+                   uint64_t revision, const ArLocalizationTextLanguage *language,
+                   const ArTextBidiSpans *bidi,
                    uint16_t native_word, const uint16_t *cgram, bool number,
                    ArLocalizationTextLayoutKind layout,
                    uint8_t left_inset, uint8_t right_inset) {
   const uint8_t slot = frame->snapshot_count;
+  if (bidi && bidi->count > kArTextMaximumBidiSpans - frame->bidi.count) return;
   if (!ArLocalizationFrame_AddTextWithObjectsAndLayout(
           frame, id, destination, region, text, bytes, clusters, clusters,
-          revision, direction, 7,
+          revision, language->direction, number ? 8 : 7,
           layout,
-          NULL, 0, NULL, 0)) return;
+          NULL, 0, NULL, 0) ||
+      !ArLocalizationFrame_SetTextLanguage(frame, language) ||
+      (bidi && !ArLocalizationFrame_SetTextBidiSpans(frame, bidi))) return;
   const unsigned palette = ((native_word >> 10) & 7) * 4;
   ArLocalizationTextSnapshot *snapshot = &frame->snapshots[slot];
-  snapshot->style_id = kArTextStyle_RetailPaletteBands;
-  snapshot->band_rgb = Rgb(cgram[palette + 2]);
-  snapshot->body_rgb = Rgb(cgram[palette + 3]);
-  /* Retail glyph tiles are three inks, not two: colour 1 is the shade drawn
-   * beside every stroke. Reading only the band pair left the replacement
-   * lighter than the lettering it stands in for. */
-  snapshot->shadow_rgb = Rgb(cgram[palette + 1]);
-  snapshot->shadow_enabled = true;
+  ActRaiserLocalizationStyle_Ordinary(snapshot, cgram + palette);
   /* A bookended label carries its shading in the artwork ends, so its text is
    * one flat colour. That is a property of the framed shape, not of which
    * label happens to be first in the table. */
   if (layout == kArLocalizationTextLayout_FramedLabel)
     snapshot->band_rgb = snapshot->body_rgb;
   snapshot->italic = number;
-  snapshot->top_inset_pixels = 1; /* Retail glyph tiles leave scanline zero blank. */
+  /* Native letters start on scanline one; all ten digits use scanline zero. */
+  snapshot->top_inset_pixels = number ? 0 : 1;
   snapshot->left_inset_pixels = left_inset;
   snapshot->right_inset_pixels = right_inset;
 }
 
 void ActRaiserLocalizationHud_Append(
     ActRaiserLocalizationHud *hud, ArLocalizationFrame *frame,
-    ArTextCellDestination destination, ArTextDirection direction,
+    ArTextCellDestination destination,
     uint16_t tile_base_words,
     const uint16_t *vram, size_t vram_count,
     const uint16_t *cgram, size_t cgram_count,
@@ -151,8 +144,10 @@ void ActRaiserLocalizationHud_Append(
       char error[256];
       label->valid = resolve(context, kFields[i].id, label->text, sizeof(label->text),
           &label->bytes, &label->clusters, &label->revision, NULL, 0, &objects,
-          NULL, error, sizeof(error)) && !objects &&
+          NULL, &label->language, &label->bidi, error, sizeof(error)) && !objects &&
+          ArLocalizationTextLanguage_IsValid(&label->language) &&
           label->bytes < sizeof(label->text) && !label->text[label->bytes] &&
+          ArTextBidiSpans_FitSource(&label->bidi, label->text, label->bytes) &&
           label->revision && ((label->bytes != 0) == (label->clusters != 0));
     }
     hud->resolved = true;
@@ -170,7 +165,7 @@ void ActRaiserLocalizationHud_Append(
         continue;
       Append(frame, 200 + i, destination, field->region,
              label->text, label->bytes, label->clusters, label->revision,
-             direction, Word(vram, base, field->source_row, field->source_column), cgram, false,
+             &label->language, &label->bidi, Word(vram, base, field->source_row, field->source_column), cgram, false,
              field->layout, field->left_inset, field->right_inset);
     }
   }
@@ -225,7 +220,8 @@ void ActRaiserLocalizationHud_Append(
           (ArTextCellRegion){numbers[i].column, numbers[i].row,
                              numbers[i].count, 1},
           digits, numbers[i].count, numbers[i].count, revision,
-          kArTextDirection_LeftToRight, ink_word, cgram, true,
+          &(ArLocalizationTextLanguage){.locale = "en-US",
+              .direction = kArTextDirection_LeftToRight}, NULL, ink_word, cgram, true,
           numbers[i].layout, numbers[i].left_inset, 1);
   }
 }

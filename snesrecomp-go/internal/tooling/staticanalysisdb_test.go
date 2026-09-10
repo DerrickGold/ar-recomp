@@ -105,6 +105,41 @@ func TestStaticAnalysisDatabaseRejectsNonStaticEvidenceAndUnknownFields(t *testi
 	}
 }
 
+func TestStaticAnalysisDatabaseAcceptsV17FactsAfterInventoryOnlyReportChange(t *testing.T) {
+	options, _ := shadowHLEInventoryFixture(t)
+	identity, err := shadowROMIdentity(options.ROMPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	database := StaticAnalysisDatabase{
+		Version: staticAnalysisDatabaseVersion, Provenance: staticAnalysisDatabaseProvenance,
+		ShadowReportVersion: 17, ROM: identity,
+		DispatchFacts: []analysis.DispatchFact{{
+			SitePC: 0x008010, Targets: []uint32{0x009000}, TargetSetClosed: true,
+			Evidence: []analysis.Evidence{{Source: "static.fixture", Confidence: analysis.ConfidenceProven}},
+		}},
+	}
+	path := filepath.Join(t.TempDir(), "v17.json")
+	if err := WriteStaticAnalysisDatabaseFile(path, database); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadStaticAnalysisDatabaseFile(path, options.ROMPath)
+	if err != nil || loaded.ShadowReportVersion != 17 || len(loaded.DispatchFacts) != 1 {
+		t.Fatalf("v17 database rejected/rewritten: %+v, %v", loaded, err)
+	}
+	for _, version := range []int{16, 19} {
+		database.ShadowReportVersion = version
+		if err := WriteStaticAnalysisDatabaseFile(path, database); err == nil {
+			t.Fatalf("accepted incompatible report version %d", version)
+		}
+	}
+	database.ShadowReportVersion = 17
+	database.DispatchFacts[0].Evidence[0].Confidence = analysis.ConfidenceObserved
+	if err := WriteStaticAnalysisDatabaseFile(path, database); err == nil {
+		t.Fatal("v17 compatibility bypassed static-proof validation")
+	}
+}
+
 func TestBuildStaticAnalysisDatabaseFailsOnAuthoredConflict(t *testing.T) {
 	report := ShadowReport{
 		Version: shadowReportVersion,

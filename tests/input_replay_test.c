@@ -373,7 +373,58 @@ static void TestCanonicalIdentityAndCheckpoint(void) {
   ClearEnvironment();
 }
 
-int main(void) {
+static SrResult WriteExact(void *context, const uint8_t *bytes, uint32_t count) {
+  return fwrite(bytes, 1, count, context) == count
+      ? SR_RESULT_OK : SR_RESULT_INVALID_ARGUMENT;
+}
+
+// ROM-free canonical fixture generation/counting for the real game-process
+// regression. Keep replay encoding in the runner's public API, never in Go.
+static int ProcessFixture(int argc, char **argv) {
+  if (argc != 3) return 2;
+  if (!strcmp(argv[1], "--write-smoke")) {
+    FILE *file = fopen(argv[2], "wbx");
+    if (!file) return 1;
+    SrInputReplayWriter writer = {0};
+    SrInputReplayHeader header = {
+      .struct_size = SR_INPUT_REPLAY_HEADER_V1_SIZE,
+      .game_id = "actraiser",
+    };
+    CHECK(sr_input_replay_writer_begin(&writer, WriteExact, file, &header) == SR_RESULT_OK);
+    for (unsigned i = 0; i < 3; ++i) {
+      SrInputReplayFrame frame = {
+        .struct_size = SR_INPUT_REPLAY_FRAME_V1_SIZE, .frame_ordinal = i,
+      };
+      CHECK(sr_input_replay_writer_append_frame(&writer, &frame) == SR_RESULT_OK);
+    }
+    CHECK(sr_input_replay_writer_finish(&writer) == SR_RESULT_OK);
+    CHECK(fclose(file) == 0);
+    return s_failures ? 1 : 0;
+  }
+  if (!strcmp(argv[1], "--count")) {
+    FILE *file = fopen(argv[2], "rb");
+    if (!file) return 1;
+    SrInputReplayReader reader = {0};
+    SrInputReplayHeader header = {.struct_size = SR_INPUT_REPLAY_HEADER_V1_SIZE};
+    CHECK(sr_input_replay_reader_begin(&reader, ReadExact, file, &header) == SR_RESULT_OK);
+    unsigned frames = 0;
+    for (;;) {
+      SrInputReplayRecord record = {.struct_size = SR_INPUT_REPLAY_RECORD_V1_SIZE};
+      SrResult result = sr_input_replay_reader_next(&reader, &record);
+      if (result == SR_RESULT_UNAVAILABLE) break;
+      CHECK(result == SR_RESULT_OK);
+      if (result != SR_RESULT_OK) break;
+      if (record.type == SR_INPUT_REPLAY_RECORD_FRAME) ++frames;
+    }
+    CHECK(fclose(file) == 0);
+    printf("%u\n", frames);
+    return s_failures ? 1 : 0;
+  }
+  return 2;
+}
+
+int main(int argc, char **argv) {
+  if (argc > 1) return ProcessFixture(argc, argv);
   char *path = MakeReplay();
   if (!path) return 1;
 

@@ -106,8 +106,8 @@ static bool AcquireRun(ArUiTextRenderer *renderer, const ArUiTextRun *run,
       !run->utf8 || run->utf8_bytes > kArInterfaceTextMaximumBytes ||
       run->bounds.w <= 0 || run->bounds.w > kUiTextMaximumWidth ||
       run->bounds.h <= 0 || run->bounds.h > kUiTextMaximumHeight ||
-      run->alignment < kArTextHorizontalAlignment_Leading ||
-      run->alignment > kArTextHorizontalAlignment_Trailing)
+      run->alignment < kArUiTextAlignment_Left ||
+      run->alignment > kArUiTextAlignment_Right)
     return false;
   if (!run->utf8_bytes) return true;
   UiTextState *state = renderer->implementation;
@@ -154,9 +154,9 @@ bool ArUiTextRenderer_Draw(ArUiTextRenderer *renderer, const ArUiTextRun *run) {
   if (!run->utf8_bytes) return true;
   UiTextState *state = renderer->implementation;
   int offset = 0;
-  if (run->alignment == kArTextHorizontalAlignment_Center)
+  if (run->alignment == kArUiTextAlignment_Center)
     offset = (run->bounds.w - surface.width) / 2;
-  else if (run->alignment == kArTextHorizontalAlignment_Trailing)
+  else if (run->alignment == kArUiTextAlignment_Right)
     offset = run->bounds.w - surface.width;
   const ArRenderRectF destination = {
     (float)run->bounds.x + offset,

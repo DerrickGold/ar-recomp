@@ -20,19 +20,19 @@
  * hard line break that positions the keyboard below it. */
 bool ActRaiserLocalizationNameCompose_ClearUnderlineRow(
     char *utf8, size_t *utf8_bytes,
-    ArLocalizationInlineObjectSnapshot *objects, uint8_t object_count);
+    ArLocalizationInlineObjectSnapshot *objects, uint8_t object_count, ArTextBidiSpans *bidi);
 
 /* Widens the single blank between keys so a selector can sit beside a key
  * without covering its neighbour. */
 bool ActRaiserLocalizationNameCompose_ExpandKeyGutters(
     char *utf8, size_t capacity, size_t *utf8_bytes,
-    ArLocalizationInlineObjectSnapshot *objects, uint8_t object_count);
+    ArLocalizationInlineObjectSnapshot *objects, uint8_t object_count, ArTextBidiSpans *bidi);
 
 /* Adds the "< page/total >" row above a multi-page alphabet. */
 bool ActRaiserLocalizationNameCompose_InsertPageIndicator(
     char *utf8, size_t capacity, size_t *utf8_bytes,
     uint32_t page_index, uint32_t page_count,
-    ArLocalizationInlineObjectSnapshot *objects, uint8_t object_count);
+    ArLocalizationInlineObjectSnapshot *objects, uint8_t object_count, ArTextBidiSpans *bidi);
 
 /* Attaches an underline object to each of the eight shaped name graphemes,
  * independently of keyboard geometry. */

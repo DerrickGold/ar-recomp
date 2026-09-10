@@ -4,6 +4,25 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+typedef enum DevToolsCaptureKind {
+  kDevToolsCapture_Failed = 0,
+  kDevToolsCapture_Composite,
+  kDevToolsCapture_NativeFramebuffer,
+} DevToolsCaptureKind;
+
+typedef struct DevToolsCaptureResult {
+  int width, height;
+  DevToolsCaptureKind kind;
+} DevToolsCaptureResult;
+
+static inline const char *DevToolsCaptureKind_Name(DevToolsCaptureKind kind) {
+  switch (kind) {
+    case kDevToolsCapture_Composite: return "final-composite";
+    case kDevToolsCapture_NativeFramebuffer: return "native-framebuffer";
+    default: return "failed";
+  }
+}
+
 typedef struct DevToolsRgb24Capture {
   /* Rows contain width*3 RGB bytes followed by any provider-owned padding. */
   const uint8_t *pixels;

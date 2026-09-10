@@ -13,6 +13,11 @@ typedef struct ArTextCacheKey {
   uint64_t secondary;
 } ArTextCacheKey;
 
+typedef struct ArTextRevealPiece {
+  ArRenderRectI source;
+  uint32_t cluster_index;
+} ArTextRevealPiece;
+
 typedef struct ArTextSurface {
   ArRenderTexture texture;
   ArTextCacheKey key;
@@ -21,6 +26,7 @@ typedef struct ArTextSurface {
   int ascent;
   int descent;
   int line_advance;
+  ArTextDirection paragraph_direction;
   /* Actual post-pixelation ink, measured once on cache miss. Empty regions
    * represent spaces; never use padded line/reveal rectangles as ink bounds. */
   ArRenderRectI ink_bounds;
@@ -29,6 +35,9 @@ typedef struct ArTextSurface {
   const ArTextRevealCluster *reveal_clusters;
   const ArRenderRectI *cluster_ink_bounds;
   size_t reveal_cluster_count;
+  /* Disjoint effect-aware rectangles; typographic advances stay unchanged. */
+  const ArTextRevealPiece *reveal_pieces;
+  size_t reveal_piece_count;
 } ArTextSurface;
 
 typedef struct ArTextSurfaceCacheStats {
@@ -45,6 +54,7 @@ typedef struct ArTextSurfaceCacheStats {
    * can outweigh a hundred menu labels. Peak is not reset by eviction. */
   uint64_t texture_bytes;
   uint64_t peak_texture_bytes;
+  uint64_t effect_metadata_bytes;
   /* Requests refused before rasterization because their bitmap could not fit
    * the per-request ceiling. These never allocate. */
   uint64_t oversize_rejects;
@@ -54,6 +64,7 @@ typedef struct ArTextSurfaceCacheEntry {
   ArTextSurface surface;
   uint64_t last_use;
   uint64_t texture_bytes;
+  uint64_t effect_metadata_bytes;
   bool valid;
 } ArTextSurfaceCacheEntry;
 
@@ -108,7 +119,7 @@ ArTextCacheKey ArTextSurfaceCache_MakeKey(
 bool ArTextCacheKey_Equals(ArTextCacheKey left, ArTextCacheKey right);
 
 bool ArTextSurfaceCache_Init(ArTextSurfaceCache *cache, size_t capacity);
-/* Optional aggregate texture-byte budget. Entries beyond it are evicted from
+/* Optional aggregate texture + effect-metadata byte budget. Entries beyond it are evicted from
  * the least recently used end, never below one entry and never an entry the
  * current frame has already acquired. */
 void ArTextSurfaceCache_SetByteBudget(ArTextSurfaceCache *cache,

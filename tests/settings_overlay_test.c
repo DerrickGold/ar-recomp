@@ -15,6 +15,9 @@
 #include "sim/sim_town_terrain.h"
 #ifdef AR_OVERLAY_UI_FONT
 #include "platform/sdl/text_rasterizer_sdl.h"
+#include "host/font_resources.h"
+#include "localization/unicode_grapheme.h"
+static ArHostFontResources s_font_store;
 #endif
 
 #include <SDL3/SDL.h>
@@ -497,6 +500,11 @@ static void CheckInterfaceCatalogs(SDL_Renderer *renderer, SDL_Surface *surface)
     CHECK(g_settings.localization_content == before.localization_content);
     CHECK(g_settings.localization_presentation == before.localization_presentation);
     CHECK(g_settings.localization_font_sampling == native_sampling);
+#ifdef AR_OVERLAY_UI_FONT
+    CHECK(SettingsOverlay_InterfaceLocale() == (ArUiLocale)locale);
+#else
+    CHECK(SettingsOverlay_InterfaceLocale() == kArUiLocale_English);
+#endif
     Settings_FormatValue(language, serialized, sizeof(serialized));
     CHECK(!strcmp(serialized, ArUiCatalog_LocaleTag((ArUiLocale)locale)));
     SettingsOverlay_LocalizedValue((ArUiLocale)locale, font, value, sizeof(value));
@@ -1137,16 +1145,57 @@ int main(int argc, char **argv) {
 #ifdef AR_OVERLAY_UI_FONT
     ArTextBackend ui_backend;
     ArSdlTextBackend_Init(&ui_backend);
-    const char *ui_fallbacks[] = {AR_OVERLAY_UI_JP_FONT};
+    const ArFontResourceId ui_fallbacks[] = {
+        ArHostFontResources_RegisterFile(&s_font_store, AR_OVERLAY_UI_JP_FONT, NULL, 0),
+        ArHostFontResources_RegisterFile(&s_font_store, AR_OVERLAY_UI_AR_FONT, NULL, 0),
+        ArHostFontResources_RegisterFile(&s_font_store, AR_OVERLAY_UI_HE_FONT, NULL, 0)};
     const ArTextBackendConfig ui_fonts = {.struct_size = sizeof(ui_fonts),
         .abi_version = AR_TEXT_BACKEND_CONFIG_ABI_VERSION,
-        .font_stack_id = "test-interface", .primary_font_path = AR_OVERLAY_UI_FONT,
-        .fallback_font_paths = ui_fallbacks, .fallback_font_count = 1,
-        .font_revision = 1, .cached_size_capacity = 16};
+        .font_stack_id = "test-interface",
+        .resources = ArHostFontResources_Provider(&s_font_store),
+        .primary_font = ArHostFontResources_RegisterFile(&s_font_store, AR_OVERLAY_UI_FONT, NULL, 0),
+        .fallback_fonts = ui_fallbacks,
+        .fallback_font_count = sizeof(ui_fallbacks) / sizeof(ui_fallbacks[0]),
+        .font_revision = 2, .cached_size_capacity = 16};
     char ui_error[kArTextRasterErrorCapacity] = {0};
     bool ui_ready = SettingsOverlay_SetTextBackend(&ui_backend, &ui_fonts, ui_error, sizeof(ui_error));
     if (!ui_ready) fprintf(stderr, "interface font: %s\n", ui_error);
     CHECK(ui_ready);
+    /* Metadata must be readable before any game pack is activated. Exercise
+     * the same trusted host stack, with no selected-pack font resources. */
+    ArTextBackendInstance metadata_font = {0};
+    CHECK(ArTextBackendInstance_Create(&metadata_font, &ui_backend, &ui_fonts,
+                                      ui_error, sizeof(ui_error)));
+    const ArTextRasterizer *metadata_rasterizer = ArTextBackendInstance_Get(&metadata_font);
+    const char *metadata_names[] = {
+        "العَرَبِيَّة (AR 123)", "עִבְרִית (HE 123)", "فارسی", "اردو ٹ ڈ ڑ ں ھ ے"};
+    for (size_t name = 0; name < sizeof(metadata_names)/sizeof(metadata_names[0]); ++name) {
+      const char *text = metadata_names[name];
+      for (size_t i = 0, bytes = strlen(text); i < bytes;) {
+        uint32_t scalar = 0;
+        if (!ArUnicode_DecodeScalar(text, bytes, i, &scalar, &i)) { CHECK(false); break; }
+        bool present = false;
+        CHECK(ArTextRasterizer_HasGlyph(metadata_rasterizer, scalar, &present,
+                                        ui_error, sizeof(ui_error)) && present);
+      }
+      SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
+      CHECK(SDL_RenderClear(renderer));
+      SettingsOverlay_DrawGameText(9, 41, 3, 255, text);
+      CHECK(SDL_RenderPresent(renderer));
+      size_t ink = 0;
+      const int width = SettingsOverlay_GameTextWidth(text, 3);
+      CHECK(width > 0);
+      for (int y = 0; y < surface->h; ++y) {
+        const uint32_t *pixels = (const uint32_t *)((const uint8_t *)surface->pixels + y * surface->pitch);
+        for (int x = 0; x < surface->w; ++x) {
+          if (pixels[x] == UINT32_C(0xff201810)) continue;
+          ++ink;
+          CHECK(x >= 9 && x < 9 + width && y >= 41 && y < 65);
+        }
+      }
+      CHECK(ink > 30);
+    }
+    ArTextBackendInstance_Destroy(&metadata_font);
     /* The real host font must draw more than the old replacement marks. Use
      * non-tile-aligned output coordinates to catch accidental integer division
      * when bridging the overlay's logical and output-pixel drawing APIs. */
@@ -1968,6 +2017,9 @@ int main(int argc, char **argv) {
 
   SettingsOverlay_SetManualHooks(NULL);
   SettingsOverlay_Destroy();
+#ifdef AR_OVERLAY_UI_FONT
+  CHECK(ArHostFontResources_Destroy(&s_font_store));
+#endif
   ArRenderDevice_Reset(&render_device);
   Settings_SetActionObserver(NULL);
   SDL_DestroyRenderer(renderer);

@@ -28,6 +28,7 @@
 #include "config.h"
 #include "crt_post.h"
 #include "settings.h"
+#include "session_recovery.h"
 #include "localization/pack_discovery.h"
 #include "platform/sdl/font_coverage_cli.h"
 #include "settings_overlay.h"
@@ -87,6 +88,8 @@
 #include "constants.h"
 #include "platform/sdl/render_sdl.h"
 #include "platform/sdl/text_rasterizer_sdl.h"
+#include "host/font_resources.h"
+#include "localization/language_pack.h"
 #include "render/localized_text_presenter.h"
 
 static const char kWindowTitle[] = "ActRaiser (Recompiled)";
@@ -260,9 +263,26 @@ static bool CaptureTownCanvasPpuView(SrPpuStateSnapshot *ppu,
       cgram->lifetime_generation == ppu->lifetime_generation;
 }
 
+static ArUiLocale RecoveryLocale(void) {
+  const char *override = getenv("AR_INTERFACE_LANGUAGE");
+  return override && override[0] ? ArUiCatalog_ParseLocale(override)
+      : (ArUiLocale)g_settings.interface_language;
+}
+
 void NORETURN Die(const char *error) {
-  SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kWindowTitle, error, NULL);
   fprintf(stderr, "Error: %s\n", error);
+  // Startup failures also happen in unattended replay/font qualification. A
+  // modal dialog there prevents the process from exiting or reporting failure.
+  const char *headless = getenv("AR_HEADLESS");
+  if (!headless || !headless[0] || headless[0] == '0') {
+    char message[kSessionRecoveryCapacity];
+    const ArUiLocale locale = RecoveryLocale();
+    const bool formatted = SessionRecovery_Format(message, sizeof(message), locale,
+        kSessionFailure_Startup, error, false, false);
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,
+        SessionRecovery_Title(locale, kSessionFailure_Startup),
+        formatted ? message : ArUiCatalog_Text(locale, "recovery.startup", error), NULL);
+  }
   exit(1);
 }
 
@@ -579,7 +599,8 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
    * AR_SHOT_AT_GF=N      : one shot to saves/shot.ppm at game-frame >= N.
    * AR_SHOT_EVERY=N      : a SERIES — saves/shot_<gf>.ppm every N game-frames,
    *   optionally bounded by AR_SHOT_FROM / AR_SHOT_TO. Lets us compare steady
-   *   state vs bug state frame by frame. */
+   *   state vs bug state frame by frame.
+   * AR_SHOT_REQUIRE_COMPOSITE=1: fail the run instead of using raw PPU fallback. */
   {
     static bool schedule_initialized;
     static bool shot_done;
@@ -627,18 +648,31 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
       RunDirFile(fname, sizeof(fname), "shot_%u.ppm", gf);
     }
     if (want) {
+      const char *strict = getenv("AR_SHOT_REQUIRE_COMPOSITE");
+      const bool require_composite = strict && strict[0] && strcmp(strict, "0");
       FILE *pf = fopen(fname, "wb");
       if (pf) {
-        const ArRenderExtentI shot_size =
-            HostDevTools_WriteFramebufferPpm(pf);
-        fclose(pf);
+        DevToolsCaptureResult shot_size =
+            HostDevTools_WriteFramebufferPpm(pf, require_composite);
+        const bool closed = fclose(pf) == 0;
+        if (!closed) shot_size.kind = kDevToolsCapture_Failed;
+        if (shot_size.kind == kDevToolsCapture_Failed) {
+          fprintf(stderr, "[shot] capture=failed path=%s\n", fname);
+          if (require_composite)
+            SessionFatal_Request("Required final-composite screenshot could not be captured.");
+        }
         int margin_left = 0;
         int margin_right = 0;
         ActRaiser_LiveMargins(&margin_left, &margin_right);
-        fprintf(stderr, "[shot] wrote %s at gf=%u (%dx%d) margins=%d/%d mode=%s\n",
+        fprintf(stderr, "[shot] %s at gf=%u (%dx%d) margins=%d/%d mode=%s capture=%s\n",
                 fname, gf, shot_size.width, shot_size.height,
                 margin_left, margin_right,
-                Settings_DisplayModeName(g_settings.display_mode));
+                Settings_DisplayModeName(g_settings.display_mode),
+                DevToolsCaptureKind_Name(shot_size.kind));
+      } else {
+        fprintf(stderr, "[shot] capture=failed cannot open %s\n", fname);
+        if (require_composite)
+          SessionFatal_Request("Required screenshot file could not be opened.");
       }
     }
   }
@@ -759,10 +793,8 @@ static void RunPostTickHousekeeping(void) {
       const uint64_t now_ms = SDL_GetTicks();
       if (!first_write_failure_ms) first_write_failure_ms = now_ms;
       if (now_ms - first_write_failure_ms >= 5000) {
-        SessionFatal_Request(
-            "The game could not write your battery save for five seconds "
-            "(%s). It is closing instead of letting you continue with "
-            "unsaved progress. Check free disk space and permissions for %s.",
+        SessionFatal_RequestKind(kSessionFailure_BatterySave,
+            "battery auto-persist failed for five seconds: %s; path: %s",
             error.message, SaveSystem_ActivePath());
       }
     } else {
@@ -787,10 +819,8 @@ static void ApplyHostAudioPause(bool paused) {
   MusicReplacements_SetHostPaused(paused);
   if (!paused) success = HostAudio_SetHostPaused(false);
   if (!success) {
-    SessionFatal_Request(
-        "The audio device stopped accepting the game's audio stream (%s). "
-        "Restart the game after checking the selected output device. If the "
-        "problem repeats, choose another device or buffer size.",
+    SessionFatal_RequestKind(kSessionFailure_AudioDevice,
+        "audio stream rejected by device: %s",
         SDL_GetError());
   }
 }
@@ -1343,11 +1373,38 @@ static int AppBoot_CreateVideo(AppBoot *app) {
   return -1;
 }
 
+static ArHostFontResources s_font_resources;
+
+static ArFontResourceId RegisterLocalizedFont(
+    void *context, const char *manifest, const char *member,
+    char *error, size_t capacity) {
+  (void)context;
+  char path[1024];
+  if (member && !strcmp(member, "builtin:actraiser-sans"))
+    snprintf(path, sizeof(path),
+             "game-assets/fonts/noto/NotoSans-SemiCondensedExtraBold.ttf");
+  else if (!member || !strncmp(member, "builtin:", 8) ||
+           !ArLanguagePack_ResolveMemberPath(manifest, member, path, sizeof(path))) {
+    if (error && capacity) snprintf(error, capacity, "font member is unavailable");
+    return 0;
+  }
+  return ArHostFontResources_RegisterFile(&s_font_resources, path, error, capacity);
+}
+
+static void RetireLocalizedFont(void *context, ArFontResourceId font) {
+  (void)context;
+  ArHostFontResources_Retire(&s_font_resources, font);
+}
+
 static bool PrepareLocalizedFont(void *context,
                                  const ArTextPresentationFont *font,
                                  char *error, size_t error_capacity) {
   return ArLocalizedTextPresenter_PrepareFont(context, font, error,
                                               error_capacity);
+}
+
+static void DiscardPreparedLocalizedFont(void *context) {
+  ArLocalizedTextPresenter_DiscardPreparedFont(context);
 }
 
 /* Overlay, world map, diorama manifest, the injected overlay hooks (layer editor,
@@ -1357,11 +1414,28 @@ static void AppBoot_InstallSubsystems(AppBoot *app) {
   static ArTextBackend localized_text_backend;
   ArSdlTextBackend_Init(&localized_text_backend);
   ArLocalizedTextPresenter_SetBackend(&localized_text_backend);
+  const ArFontResources font_resources = ArHostFontResources_Provider(&s_font_resources);
+  ArLocalizedTextPresenter_SetFontResources(&font_resources);
+  ArLanguagePackIo pack_io;
+  ArLanguagePackFileIo_Init(&pack_io);
+  const char *native_manifest = getenv("AR_LOCALIZATION_NATIVE_PACK");
+  if (!native_manifest || !native_manifest[0])
+    native_manifest = "game-assets/languages/native-us/pack.ini";
+  const ActRaiserLocalizationPackHost pack_host = {
+      .struct_size = sizeof(pack_host),
+      .abi_version = ACTRAISER_LOCALIZATION_PACK_HOST_ABI_VERSION,
+      .io = pack_io,
+      .native_manifest = native_manifest,
+  };
+  ActRaiserLocalizationRuntime_SetPackHost(&pack_host);
   const ArTextPresentationHost text_host = {
       .struct_size = sizeof(text_host),
       .abi_version = AR_TEXT_PRESENTATION_ABI_VERSION,
       .context = &g_render_device,
       .prepare_font = PrepareLocalizedFont,
+      .register_font = RegisterLocalizedFont,
+      .retire_font = RetireLocalizedFont,
+      .discard_prepared_font = DiscardPreparedLocalizedFont,
   };
   ActRaiserLocalizationRuntime_SetPresentationHost(&text_host);
   if (!SettingsOverlay_Init(&g_render_device, g_window,
@@ -1369,21 +1443,44 @@ static void AppBoot_InstallSubsystems(AppBoot *app) {
     Die("font atlas creation for settings overlay failed");
   /* Interface text has its own font/cache lifetime, independent of whichever
    * game language pack is selected. Resources are resolved by this host. */
-  const char *ui_fallbacks[] = {"game-assets/fonts/noto/NotoSansJP-Bold.otf"};
+  char ui_font_error[kArTextRasterErrorCapacity] = {0};
+  const ArFontResourceId ui_primary = ArTextBackend_IsReady(&localized_text_backend)
+      ? ArHostFontResources_RegisterFile(
+            &s_font_resources,
+            "game-assets/fonts/noto/NotoSans-SemiCondensedExtraBold.ttf",
+            ui_font_error, sizeof(ui_font_error)) : 0;
+  const ArFontResourceId ui_fallbacks[] = {
+      ui_primary ? ArHostFontResources_RegisterFile(
+          &s_font_resources, "game-assets/fonts/noto/NotoSansJP-Bold.otf",
+          ui_font_error, sizeof(ui_font_error)) : 0,
+      ui_primary ? ArHostFontResources_RegisterFile(
+          &s_font_resources, "game-assets/fonts/noto/NotoSansArabic-Bold.ttf",
+          ui_font_error, sizeof(ui_font_error)) : 0,
+      ui_primary ? ArHostFontResources_RegisterFile(
+          &s_font_resources, "game-assets/fonts/noto/NotoSansHebrew-Bold.ttf",
+          ui_font_error, sizeof(ui_font_error)) : 0};
+  const size_t ui_fallback_count = sizeof(ui_fallbacks) / sizeof(ui_fallbacks[0]);
+  bool ui_fonts_ready = ui_primary != 0;
+  for (size_t i = 0; i < ui_fallback_count; ++i)
+    ui_fonts_ready = ui_fonts_ready && ui_fallbacks[i] != 0;
   const ArTextBackendConfig ui_fonts = {
       .struct_size = sizeof(ui_fonts),
       .abi_version = AR_TEXT_BACKEND_CONFIG_ABI_VERSION,
       .font_stack_id = "system-interface",
-      .primary_font_path = "game-assets/fonts/noto/NotoSans-SemiCondensedExtraBold.ttf",
-      .fallback_font_paths = ui_fallbacks, .fallback_font_count = 1,
-      .font_revision = 1, .cached_size_capacity = 16,
+      .resources = font_resources, .primary_font = ui_primary,
+      .fallback_fonts = ui_fallbacks, .fallback_font_count = ui_fallback_count,
+      .font_revision = 2, .cached_size_capacity = 16,
   };
-  char ui_font_error[kArTextRasterErrorCapacity] = {0};
-  if (ArRenderDevice_IsReady(&g_render_device) &&
-      !SettingsOverlay_SetTextBackend(&localized_text_backend, &ui_fonts,
-                                       ui_font_error, sizeof(ui_font_error)))
+  if (ArTextBackend_IsReady(&localized_text_backend) &&
+      ArRenderDevice_IsReady(&g_render_device) &&
+      (!ui_fonts_ready ||
+       !SettingsOverlay_SetTextBackend(&localized_text_backend, &ui_fonts,
+                                        ui_font_error, sizeof(ui_font_error))))
     fprintf(stderr, "[settings-menu] Unicode font unavailable; keeping native interface: %s\n",
             ui_font_error);
+  ArHostFontResources_Retire(&s_font_resources, ui_primary);
+  for (size_t i = 0; i < ui_fallback_count; ++i)
+    ArHostFontResources_Retire(&s_font_resources, ui_fallbacks[i]);
   /* The world-map image and pure development-builder tables are immutable ROM
    * data. Failure is not fatal: consumers retain the authentic presentation. */
   if (SimWorldMap_Init(app->rom_data, app->rom_size))
@@ -1695,10 +1792,8 @@ static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
           ManualReader_DestroyTextures();
           HdReplacementHost_ReloadTextures();
           if (!SettingsOverlay_ReloadTextures(app->rom_data, app->rom_size)) {
-            SessionFatal_Request(
-                "The graphics device reset, but the settings and controls "
-                "overlay could not be restored (%s). Restart the game after "
-                "checking graphics-driver stability.",
+            SessionFatal_RequestKind(kSessionFailure_GraphicsReset,
+                "overlay resources could not be restored after graphics reset: %s",
                 SDL_GetError());
           }
           /* The sim-3D caches are serial-gated on GAME state, so they would
@@ -1716,10 +1811,8 @@ static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
           HostDisplay_InvalidatePresentHistory();
           break;
         case SDL_EVENT_RENDER_DEVICE_LOST:
-          SessionFatal_Request(
-              "The graphics device was lost and cannot continue this session "
-              "(%s). Restart the game after checking graphics-driver and GPU "
-              "stability.",
+          SessionFatal_RequestKind(kSessionFailure_GraphicsLost,
+              "graphics device lost: %s",
               SDL_GetError());
           break;
         case SDL_EVENT_KEY_DOWN:
@@ -2137,7 +2230,9 @@ static void AppRunMainLoop(AppBoot *app) {
       /* Headless mode is uncapped by default and advances exactly one tick per
        * outer iteration. Oracle/replay tooling depends on it running as fast as
        * the CPU allows. */
-      RunOneEmulatedTick(&running);
+      bool stop_requested = false;
+      RunOneEmulatedTick(&stop_requested);
+      if (stop_requested) running = false;
       RunPostTickHousekeeping();
       DrawAndPresentFrame(emulated_frame_present_mode,
                           kPresentationFrameGenerationPhaseNone);
@@ -2190,12 +2285,17 @@ static void AppRunMainLoop(AppBoot *app) {
       if (accumulator > catchup_cap_ns) accumulator = catchup_cap_ns;
 
       bool produced_frame = false;
-      while (accumulator >= emulation_frame_interval_ns) {
-        RunOneEmulatedTick(&running);
+      while (running && accumulator >= emulation_frame_interval_ns) {
+        bool stop_requested = false;
+        RunOneEmulatedTick(&stop_requested);
+        if (stop_requested) running = false;
         accumulator -= emulation_frame_interval_ns;
         produced_frame = true;
       }
       if (DevTools_ShouldAutoQuit()) running = false;
+      // A replay/fatal stop can leave undrained catch-up ticks. They must not
+      // execute after its final transaction or become an invalid alpha.
+      if (!running) accumulator = 0;
 
       /* R17/C4: the sub-tick phase, taken AFTER the drain — whatever wall-clock
        * time has accrued toward the next tick but has not yet produced one.
@@ -2296,6 +2396,7 @@ static int AppShutdown(AppBoot *app, char **argv) {
   ActRaiserActionBg_Shutdown();
   ActRaiserLocalizationRuntime_Shutdown();
   ActRaiserLocalizationRuntime_SetPresentationHost(NULL);
+  ActRaiserLocalizationRuntime_SetPackHost(NULL);
 
   /* Stop the sole audio producer before reading observer-owned capture state
    * or removing subscriptions. The run directory remains live for reports. */
@@ -2324,6 +2425,9 @@ static int AppShutdown(AppBoot *app, char **argv) {
   g_sim3d_flat_texture = ArRenderTexture_Invalid();
   ManualReader_DestroyTextures();
   SettingsOverlay_Destroy();
+  ArLocalizedTextPresenter_SetFontResources(NULL);
+  if (!ArHostFontResources_Destroy(&s_font_resources))
+    fprintf(stderr, "[localized-text] font resources still leased at shutdown\n");
   /* Release the game coroutine's stack mapping / fiber. Safe here: the game
    * thread is this thread and the main loop has exited, so nothing can be
    * running on that stack. */
@@ -2349,25 +2453,17 @@ static int AppShutdown(AppBoot *app, char **argv) {
   ArSdlRenderBackend_Destroy(&g_render_device);
   SDL_DestroyWindow(g_window);
   if (fatal_session) {
-    char message[1536];
-    snprintf(
-        message, sizeof(message),
-        "%s\n\nThe game has closed to avoid continuing in a broken state.%s%s",
-        SessionFatal_Message(),
-        settings_flush_failed
-            ? "\n\nWarning: settings.ini could not be updated."
-            : "",
-        save_flush_failed
-            ? "\n\nWarning: the latest battery save could not be written. "
-              "Check free disk space and folder permissions before restarting."
-            : "");
+    char message[kSessionRecoveryCapacity];
+    const ArUiLocale locale = RecoveryLocale();
+    const bool formatted = SessionRecovery_Format(message, sizeof(message), locale,
+        SessionFatal_Kind(), SessionFatal_Message(), settings_flush_failed, save_flush_failed);
     fprintf(stderr, "[fatal-session] shutdown complete%s%s\n",
             settings_flush_failed ? "; settings write failed" : "",
             save_flush_failed ? "; battery save write failed" : "");
     if (!app->headless &&
         !SDL_ShowSimpleMessageBox(
-            SDL_MESSAGEBOX_ERROR, "ActRaiser Recompiled closed safely",
-            message, NULL)) {
+            SDL_MESSAGEBOX_ERROR, SessionRecovery_Title(locale, SessionFatal_Kind()),
+            formatted ? message : ArUiCatalog_Text(locale, "recovery.generic", NULL), NULL)) {
       fprintf(stderr, "[fatal-session] could not show error dialog: %s\n",
               SDL_GetError());
     }

@@ -479,11 +479,11 @@ func TestLocalizationGUIRetailExtraction(t *testing.T) {
 		messages      int
 		hud           [5]string
 	}{
-		{"ar.sfc", "us", 503, [5]string{"ACT", "ENEMY", "PLAYER", "SCORE", "TIME"}},
-		{"ar-eu.sfc", "eu-en", 504, [5]string{"ACT", "ENEMY", "PLAYER", "SCORE", "TIME"}},
-		{"ar-ger.sfc", "de", 504, [5]string{"ACT", "FEIND", "SPIELER", "PUNKTE", "ZEIT"}},
-		{"ar-fra.sfc", "fr", 502, [5]string{"ACT", "ENNEMI", "JOUEUR", "SCORE", "TEMPS"}},
-		{"ar-jp.sfc", "jp", 499, [5]string{"ACT", "ENEMY", "PLAYER", "SCORE", "TIME"}},
+		{"ar.sfc", "us", 521, [5]string{"ACT", "ENEMY", "PLAYER", "SCORE", "TIME"}},
+		{"ar-eu.sfc", "eu-en", 522, [5]string{"ACT", "ENEMY", "PLAYER", "SCORE", "TIME"}},
+		{"ar-ger.sfc", "de", 522, [5]string{"ACT", "FEIND", "SPIELER", "PUNKTE", "ZEIT"}},
+		{"ar-fra.sfc", "fr", 520, [5]string{"ACT", "ENNEMI", "JOUEUR", "SCORE", "TEMPS"}},
+		{"ar-jp.sfc", "jp", 518, [5]string{"ACT", "ENEMY", "PLAYER", "SCORE", "TIME"}},
 	} {
 		t.Run(tc.profile, func(t *testing.T) {
 			data, err := os.ReadFile(filepath.Join(root, tc.file))

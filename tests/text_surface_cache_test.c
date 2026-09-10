@@ -1,9 +1,11 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "localization/text_rasterizer.h"
 #include "render/render_device.h"
 #include "render/text_surface_cache.h"
+#include "host/font_resources.h"
 #include "render/ui_text_renderer.h"
 
 static int g_failures;
@@ -153,6 +155,10 @@ static const ArRenderBackendOps kRenderOps = {
 
 typedef struct FakeRasterizer {
   uint32_t pixels[64 * 16];
+  uint32_t owners[64 * 16];
+  ArTextRevealCluster owned_clusters[2];
+  bool with_owners;
+  bool invalid_owner;
   ArTextRevealCluster cluster;
   int calls;
   int releases;
@@ -160,6 +166,8 @@ typedef struct FakeRasterizer {
   ArTextRasterFailure fail_kind;
   bool invalid_bitmap;
   bool invalid_cluster_bounds;
+  bool invalid_cluster_order;
+  bool invalid_cluster_utf8_boundary;
   ArTextRasterRequest last_request;
   int line_advance;
   ArRenderPixelFormat format;
@@ -207,6 +215,38 @@ static bool Rasterize(void *context, const ArTextRasterRequest *request,
     .reveal_cluster_count = 1,
     .token = 1,
   };
+  if (fake->with_owners) {
+    fake->owned_clusters[0] = fake->cluster;
+    fake->owned_clusters[0].width = width / 2;
+    fake->owned_clusters[0].end_utf8_byte = request->utf8_bytes / 2;
+    fake->owned_clusters[1] = fake->cluster;
+    fake->owned_clusters[1].x = width / 2;
+    fake->owned_clusters[1].width = width - width / 2;
+    for (int y = 0; y < 16; ++y)
+      for (int x = 0; x < width; ++x) {
+        /* Disjoint irregular ink, with owner 1 spilling over its typographic
+         * box as a shadow/overhang would. */
+        const bool ink = (x + y) % 3 != 0;
+        fake->pixels[y * 64 + x] = ink ? 0xffffff80 : 0;
+        fake->owners[y * width + x] = !ink ? 0 : x < width / 2 + y % 2 ? 1 : 2;
+      }
+    bitmap->reveal_clusters = fake->owned_clusters;
+    bitmap->reveal_cluster_count = 2;
+    bitmap->pixel_owners = fake->owners;
+    if (fake->invalid_owner) fake->owners[0] = 3;
+  } else if (fake->invalid_cluster_order) {
+    fake->owned_clusters[0] = fake->cluster;
+    fake->owned_clusters[0].end_utf8_byte = request->utf8_bytes;
+    fake->owned_clusters[0].width = width / 2;
+    fake->owned_clusters[1] = fake->cluster;
+    fake->owned_clusters[1].end_utf8_byte = request->utf8_bytes - 1u;
+    fake->owned_clusters[1].x = width / 2;
+    fake->owned_clusters[1].width = width - width / 2;
+    bitmap->reveal_clusters = fake->owned_clusters;
+    bitmap->reveal_cluster_count = 2;
+  } else if (fake->invalid_cluster_utf8_boundary) {
+    fake->cluster.end_utf8_byte = 1;
+  }
   return true;
 }
 
@@ -260,6 +300,22 @@ static void TestAbiValidation(void) {
 
   ArTextRasterRequest request = Request("Texte");
   CHECK(ArTextRasterRequest_IsValid(&request));
+  ArTextBidiSpan span = {0,5,kArTextDirection_Auto};
+  request.bidi_spans = &span; request.bidi_span_count = 1;
+  CHECK(ArTextRasterRequest_IsValid(&request));
+  const ArTextCacheKey isolated = ArTextSurfaceCache_MakeKey(&rasterizer,&request);
+  span.direction = kArTextDirection_LeftToRight;
+  CHECK(!ArTextCacheKey_Equals(isolated,ArTextSurfaceCache_MakeKey(&rasterizer,&request)));
+  request.bidi_span_count = kArTextMaximumBidiSpans + 1;
+  CHECK(!ArTextRasterRequest_IsValid(&request));
+  request.bidi_span_count = 1; request.bidi_spans = NULL;
+  CHECK(!ArTextRasterRequest_IsValid(&request));
+  request.bidi_spans = &span; span.end = 0;
+  CHECK(!ArTextRasterRequest_IsValid(&request));
+  request = Request("Élise"); span.start = 1; span.end = 3;
+  request.bidi_spans = &span; request.bidi_span_count = 1;
+  CHECK(!ArTextRasterRequest_IsValid(&request));
+  request = Request("Texte");
   request.utf8_bytes++;
   CHECK(!ArTextRasterRequest_IsValid(&request));
   request = Request("Texte");
@@ -302,6 +358,20 @@ static void TestAbiValidation(void) {
   CHECK(!ArTextRasterizer_Rasterize(
       &rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
   CHECK(fake.calls == 2 && fake.releases == 2);
+  CHECK(strstr(error, "invalid bitmap") != NULL);
+  fake.invalid_cluster_bounds = false;
+  fake.invalid_cluster_order = true;
+  request = Request("ab");
+  CHECK(!ArTextRasterizer_Rasterize(
+      &rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
+  CHECK(fake.calls == 3 && fake.releases == 3);
+  CHECK(strstr(error, "invalid bitmap") != NULL);
+  fake.invalid_cluster_order = false;
+  fake.invalid_cluster_utf8_boundary = true;
+  request = Request("\xC3\xA9x");
+  CHECK(!ArTextRasterizer_Rasterize(
+      &rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
+  CHECK(fake.calls == 4 && fake.releases == 4);
   CHECK(strstr(error, "invalid bitmap") != NULL);
   ArTextRasterizer_Reset(&rasterizer);
 }
@@ -448,6 +518,12 @@ static void TestCacheHitsMissesAndFailureAtomicity(void) {
   CHECK(!ArTextCacheKey_Equals(old_key, shadow_key));
   ink_changed.shadow_rgb = 0x222233;
   CHECK(!ArTextCacheKey_Equals(shadow_key, ArTextSurfaceCache_MakeKey(&rasterizer, &ink_changed)));
+  ink_changed = third_request;
+  ink_changed.shadow_shape = kArTextShadow_Keyline;
+  CHECK(!ArTextCacheKey_Equals(old_key, ArTextSurfaceCache_MakeKey(&rasterizer, &ink_changed)));
+  ink_changed = third_request;
+  ink_changed.flags |= kArTextRasterFlag_SlantAsciiNumerals;
+  CHECK(!ArTextCacheKey_Equals(old_key, ArTextSurfaceCache_MakeKey(&rasterizer, &ink_changed)));
 
   ArTextSurfaceCache_Destroy(&cache, &device);
   CHECK(render.destroys == render.creates);
@@ -857,6 +933,7 @@ static void DestroyUiFont(void *context, ArTextBackendInstance *instance) {
 }
 
 static void TestInterfaceTextCacheAndLifecycle(void) {
+  ArHostFontResources font_store = {0};
   FakeRenderBackend render = {0};
   FakeRasterizer raster = {0};
   ArRenderDevice device = {0};
@@ -867,7 +944,8 @@ static void TestInterfaceTextCacheAndLifecycle(void) {
   const ArTextBackend backend = {.ops = &ops, .context = &raster};
   const ArTextBackendConfig fonts = {.struct_size = sizeof(fonts),
       .abi_version = AR_TEXT_BACKEND_CONFIG_ABI_VERSION,
-      .font_stack_id = "interface", .primary_font_path = "host-resolved.ttf",
+      .font_stack_id = "interface", .primary_font = 1,
+      .resources = ArHostFontResources_Provider(&font_store),
       .font_revision = 7, .cached_size_capacity = 4};
   ArUiTextRenderer ui = {0};
   CHECK(ArUiTextRenderer_Init(&ui, &device, &backend, &fonts, NULL, 0));
@@ -885,7 +963,7 @@ static void TestInterfaceTextCacheAndLifecycle(void) {
   const int uploads = render.uploads;
   run.bounds.x = 30;
   run.tint = (ArRenderColorF){0.5f, 0.3f, 0.2f, 0.7f};
-  run.alignment = kArTextHorizontalAlignment_Trailing;
+  run.alignment = kArUiTextAlignment_Right;
   CHECK(ArUiTextRenderer_Draw(&ui, &run));
   CHECK(raster.calls == 2 && render.uploads == uploads);
   CHECK(render.last_destination.x + render.last_destination.w == 286);
@@ -922,7 +1000,75 @@ static void TestInterfaceTextCacheAndLifecycle(void) {
   ArUiTextRenderer_Destroy(&ui);
 }
 
+static void TestEffectPieces(void) {
+  const uint32_t pixels[6] = {255, 255, 255, 255, 255, 255};
+  const ArTextRevealCluster clusters[] = {{1, 0, 0, 0, 4, 1}, {2, 0, 2, 0, 4, 1}};
+  const ArTextBitmap overlap = {.pixels = pixels, .width = 6, .height = 1,
+      .pitch_bytes = 24, .format = kArRenderPixelFormat_Rgba8888,
+      .reveal_clusters = clusters, .reveal_cluster_count = 2};
+  uint32_t *owners = ArTextBitmap_BuildOwnership(&overlap);
+  CHECK(owners != NULL);
+  if (owners) {
+    CHECK(owners[0] == 1 && owners[1] == 1);
+    CHECK(owners[2] == 2 && owners[3] == 2 && owners[4] == 2 && owners[5] == 2);
+    free(owners);
+  }
+  for (int effect = kArTextPixelation_None; effect <= kArTextPixelation_Mosaic; ++effect) {
+    FakeRasterizer fake = {.with_owners = true};
+    FakeRenderBackend render = {0};
+    ArRenderDevice device = {0};
+    ArTextRasterizer rasterizer = {0};
+    ArTextSurfaceCache cache = {0};
+    CHECK(ArRenderDevice_Init(&device, &kRenderOps, &render, (ArRenderCapabilities){0}));
+    CHECK(ArTextRasterizer_Init(&rasterizer, &kRasterOps, &fake, 1));
+    CHECK(ArTextSurfaceCache_Init(&cache, 2));
+    ArTextRasterRequest request = Request("abcd");
+    request.pixelation = (ArTextPixelation)effect;
+    request.pixelation_size = effect ? 2 : 0;
+    ArTextSurface surface;
+    CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &request,
+                                    &surface, NULL, 0));
+    CHECK(surface.reveal_piece_count > 0);
+    CHECK(cache.stats.effect_metadata_bytes >= surface.reveal_piece_count * sizeof(ArTextRevealPiece));
+    unsigned visits[64 * 32] = {0};
+    for (size_t i = 0; i < surface.reveal_piece_count; ++i) {
+      const ArTextRevealPiece *piece = &surface.reveal_pieces[i];
+      CHECK(piece->cluster_index < 2);
+      for (int y = piece->source.y; y < piece->source.y + piece->source.h; ++y)
+        for (int x = piece->source.x; x < piece->source.x + piece->source.w; ++x) {
+          CHECK(x >= 0 && x < surface.width && y >= 0 && y < surface.height);
+          CHECK(++visits[y * 64 + x] == 1);
+          int sx = x, sy = y;
+          if (effect == kArTextPixelation_LowResolution) { sx /= 2; sy /= 2; }
+          if (effect == kArTextPixelation_Mosaic) { sx = x / 2 * 2 + 1; sy = y / 2 * 2 + 1; }
+          CHECK(fake.owners[sy * 8 + sx] == piece->cluster_index + 1);
+        }
+    }
+    for (int y = 0; y < surface.height; ++y)
+      for (int x = 0; x < surface.width; ++x)
+        CHECK(visits[y * 64 + x] == ((render.uploaded_pixels[y * 64 + x] & 255) != 0));
+    const uint64_t metadata = cache.stats.effect_metadata_bytes;
+    ArTextSurfaceCache_ResetStats(&cache);
+    CHECK(cache.stats.effect_metadata_bytes == metadata);
+    CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &request,
+                                    &surface, NULL, 0));
+    CHECK(fake.calls == 1 && render.uploads == 1);
+    ArTextSurfaceCache_SetByteBudget(&cache, cache.stats.texture_bytes + metadata);
+    request.source_revision++;
+    CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &request,
+                                    &surface, NULL, 0));
+    CHECK(cache.stats.evictions == 1); /* CPU effects count against the budget. */
+    ArTextSurfaceCache_Destroy(&cache, &device);
+    CHECK(cache.stats.effect_metadata_bytes == 0);
+    fake.invalid_owner = true;
+    ArTextBitmap invalid;
+    CHECK(!ArTextRasterizer_Rasterize(&rasterizer, &request, &invalid, NULL, NULL, 0));
+    CHECK(invalid.pixels == NULL && invalid.pixel_owners == NULL);
+  }
+}
+
 int main(void) {
+  TestEffectPieces();
   TestAbiValidation();
   TestCacheHitsMissesAndFailureAtomicity();
   TestTransientFailureRecovers();

@@ -20,7 +20,7 @@ import (
 	romimage "github.com/DerrickGold/snesrecomp-go/internal/rom"
 )
 
-const shadowReportVersion = 17
+const shadowReportVersion = 18
 
 const (
 	shadowUnresolvedGeneric              = "generic_dynamic_target"
@@ -171,6 +171,8 @@ type ShadowReport struct {
 	EntryRecovery        ShadowEntryRecoveryReport   `json:"entry_recovery"`
 	EntryAblation        ShadowEntryAblationReport   `json:"entry_ablation"`
 	DispatchEvidence     *ShadowDispatchEvidence     `json:"dispatch_evidence,omitempty"`
+	DispatchSummary      ShadowDispatchSummary       `json:"dispatch_summary"`
+	DispatchSites        []ShadowDispatchSite        `json:"dispatch_sites,omitempty"`
 	Unresolved           []ShadowUnresolvedSite      `json:"unresolved_sites,omitempty"`
 	DecodeIssues         []ShadowDecodeIssue         `json:"decode_issues,omitempty"`
 	Limitations          []string                    `json:"limitations,omitempty"`
@@ -254,16 +256,19 @@ type shadowBank struct {
 }
 
 type shadowDecodeResult struct {
-	entry          decoder.Variant
-	facts          []analysis.DispatchFact
-	unresolved     []decoder.UnresolvedIndirect
-	demands        map[decoder.Variant]struct{}
-	demandEvidence map[decoder.Variant][]string
-	resumeEdges    map[decoder.Variant][]analysis.EntryEdge
-	seedReach      []shadowContinuationReach
-	spans          []shadowDecodedSpan
-	instructions   []shadowDecodedInstruction
-	issue          *ShadowDecodeIssue
+	entry            decoder.Variant
+	facts            []analysis.DispatchFact
+	unresolved       []decoder.UnresolvedIndirect
+	demands          map[decoder.Variant]struct{}
+	demandEvidence   map[decoder.Variant][]string
+	resumeEdges      map[decoder.Variant][]analysis.EntryEdge
+	seedReach        []shadowContinuationReach
+	spans            []shadowDecodedSpan
+	instructions     []shadowDecodedInstruction
+	pointerProducers []ShadowPointerProducer
+	storedReads      []shadowStoredRead
+	storedWrites     []shadowStoredWrite
+	issue            *ShadowDecodeIssue
 }
 
 type shadowDecodedSpan struct {
@@ -396,10 +401,21 @@ func AnalyzeAuthoredShadow(options ShadowAnalysisOptions) (ShadowReport, error) 
 			"the current ROM reader is explicitly LoROM; mapper generalization is a later milestone",
 		},
 	}
+	report.DispatchSites = collectShadowDispatchInventory(image, banks, decodeResults, report)
+	report.DispatchSummary = summarizeShadowDispatchInventory(report.DispatchSites)
 	if strings.TrimSpace(options.DispatchAnalysisPath) != "" {
 		evidence, loadErr := LoadDispatchCensusFile(options.DispatchAnalysisPath)
 		if loadErr != nil {
 			return ShadowReport{}, loadErr
+		}
+		if options.OnlyBank != nil {
+			var observations []DispatchObservation
+			for _, observation := range evidence.Observations {
+				if byte(observation.SitePC>>16) == *options.OnlyBank {
+					observations = append(observations, observation)
+				}
+			}
+			evidence.Observations = observations
 		}
 		if applyErr := applyShadowDispatchEvidence(&report, evidence); applyErr != nil {
 			return ShadowReport{}, applyErr
@@ -643,15 +659,18 @@ func runShadowDecodePass(image romimage.Image, banks []shadowBank, entries map[b
 				facts := inferredFactsFromGraph(image, item.bank.ID, item.entry.Start, graph)
 				demandEvidence := discoverShadowDemandEvidence(item.bank.ID, graph, item.siblings)
 				resumeEdges := discoverShadowSiblingBoundaryEdges(item.bank.ID, graph, item.siblings)
+				storedReads, storedWrites := collectShadowStoredTargets(graph)
 				output <- shadowDecodeResult{
 					entry: entryVariant,
 					facts: facts, unresolved: graph.UnresolvedIndirects,
-					demands:        shadowDemandEvidenceSet(demandEvidence),
-					demandEvidence: demandEvidence,
-					resumeEdges:    resumeEdges,
-					seedReach:      discoverShadowContinuationReaches(item.bank.ID, graph),
-					spans:          shadowDecodedSpans(item.bank.ID, item.entry.Start, graph),
-					instructions:   shadowDecodedInstructions(item.bank.ID, item.entry.Start, graph),
+					demands:          shadowDemandEvidenceSet(demandEvidence),
+					demandEvidence:   demandEvidence,
+					resumeEdges:      resumeEdges,
+					seedReach:        discoverShadowContinuationReaches(item.bank.ID, graph),
+					spans:            shadowDecodedSpans(item.bank.ID, item.entry.Start, graph),
+					instructions:     shadowDecodedInstructions(item.bank.ID, item.entry.Start, graph),
+					pointerProducers: collectShadowPointerProducers(image, graph, regions),
+					storedReads:      storedReads, storedWrites: storedWrites,
 				}
 			}
 		}()
@@ -1599,31 +1618,18 @@ func applyShadowDispatchEvidence(report *ShadowReport, evidence DispatchCensusRe
 		site := observation.SitePC & 0xffffff
 		bySite[site] = append(bySite[site], observation)
 	}
+	report.Summary.ObservedUnresolvedSites = 0
+	report.Summary.UnobservedUnresolvedSites = 0
 	for index := range report.Unresolved {
 		site := &report.Unresolved[index]
-		observations := append([]DispatchObservation(nil), bySite[site.SitePC&0xffffff]...)
-		if len(observations) == 0 {
-			site.RuntimeStatus = shadowRuntimeUnobserved
+		attachShadowRuntimeObservations(site, bySite[site.SitePC&0xffffff])
+		if site.RuntimeStatus == shadowRuntimeUnobserved {
 			report.Summary.UnobservedUnresolvedSites++
 			continue
 		}
 		report.Summary.ObservedUnresolvedSites++
-		site.RuntimeObservations = observations
-		status := shadowRuntimeObservedResolved
-		for _, observation := range observations {
-			site.RuntimeObservationCount += observation.ObservationCount
-			missing := !observation.Found && !observation.Continuation
-			switch {
-			case observation.Trapped && missing:
-				status = shadowRuntimeObservedTrappedMissing
-			case missing && status != shadowRuntimeObservedTrappedMissing:
-				status = shadowRuntimeObservedMissing
-			case observation.Trapped && status != shadowRuntimeObservedTrappedMissing && status != shadowRuntimeObservedMissing:
-				status = shadowRuntimeObservedTrapped
-			}
-		}
-		site.RuntimeStatus = status
 	}
+	attachShadowDispatchInventoryEvidence(report, bySite)
 	sort.SliceStable(report.Unresolved, func(i, j int) bool {
 		left, right := report.Unresolved[i], report.Unresolved[j]
 		leftRank, rightRank := shadowUnresolvedRuntimeRank(left), shadowUnresolvedRuntimeRank(right)
@@ -3028,6 +3034,7 @@ func writeShadowText(output io.Writer, report ShadowReport, verbose bool) {
 		ablationSummary.AuthoredHLEObligations, ablationSummary.HLEOnlyObligations)
 	fmt.Fprintf(output, "shadow-root unresolved dynamic edges: %d raw emissions -> %d unique source sites; likely bring-up blockers=%d; decode issues=%d\n",
 		summary.RawUnresolvedEmissions, summary.UniqueUnresolvedSites, summary.LikelyBlockingUnresolvedSites, summary.DecodeIssues)
+	writeShadowDispatchInventory(output, report, verbose)
 	if evidence := report.DispatchEvidence; evidence != nil {
 		fmt.Fprintf(output, "runtime triage: %d unresolved site(s) observed, %d unobserved; evidence observations=%d overflow=%t trace_sha256=%s\n",
 			summary.ObservedUnresolvedSites, summary.UnobservedUnresolvedSites,

@@ -9,6 +9,13 @@ included here. For the author-facing contract see
 
 ## Two consumers, not one text format
 
+Extraction is owned by the Go builder's `internal/localizationkit`; the game
+and Go author validator share the semantic contract. Profiles are declarative
+Go-owned data. The former Python ROM extractor is removed, not a fallback.
+See [local extraction commands](language-pack-format.md#tooling) for source
+packs and diagnostic catalogues; neither catalogue JSON nor decoded ROM blobs
+is a runtime language-pack format.
+
 | Native entry | Inputs / role | Important distinction |
 | --- | --- | --- |
 | `$01:8E29` | `DB:Y` dialogue stream; caller and wrapper context select its semantic invocation | Interactive reveal, input waits, continuation, scroll/clear, and yield back to a caller |
@@ -26,6 +33,42 @@ The menu bank interleaves records, pointers, coordinates, and instructions.
 Sequentially parsing the whole bank with the dialogue grammar produces false
 messages and false controls. Root fixed records at their proven direct callers,
 pointer-table selections, and dynamic composer inputs instead.
+
+Ending-tour dialogue already uses the ordinary interpreter through wrapper
+`$01:9314`: `$03:824D` indexes the seven-entry table at `$04:CC8A` using twice
+the tour index at `$0341`, after checking `$0347 == 7`. At the interpreter seam
+the caller continuation is `$01:9330` and wrapper context is `$03:8251`.
+The Sky Palace introduction also calls through `$01:93A8` from `$01:85E9`;
+the empty-temple epilogue uses that wrapper from `$01:884C`. These are existing
+`dialogue.event.wrapper_*` runtime routes, not missing interpreter hooks.
+The Western `dialogue.ending.slot_*` source bodies are connected to them by
+author-script aliases; the Go/C extraction and edit checks verify those links
+across all five releases. Native controls, software scrolling, fallback and
+scene retirement use the same dialogue path as the rest of simulation mode.
+World-map transitions and mode-8 graphical credits do not inherit its claims.
+
+The dormant US sound-test routine `$02:97D4` draws source `$02:9871` via
+`$02:BF60` at `$080B` (column 11, row 8), then redraws on counter changes.
+Music/effect counters use `$0010/$0012`. It closes at `$02:985C` by composing
+the blank source `$02:9896` at the same destination before restoring TM to
+`$17`. That close is not a call to the ordinary erase routine. Surface 16
+therefore retires on the exact blank-source/caller/destination tuple, as well
+as ordinary region clears and scene changes. Source plus caller identifies
+the modal; its destination overlaps an action-stage card. Scope is explicit
+adapter metadata, not a numeric surface-ID range. Three label rows use a
+fixed-row grid with two native spacer rows and fitted cached text. Explicit
+label/counter fields keep the two right-aligned counter cells at columns 18–19;
+extraction inserts their separators, while older single-field rows still work.
+The input routine changes counters directly; there is no selector sprite.
+No normal-play entry or new sound-test controls are enabled by localization.
+
+Graphical credits form another producer/consumer pair rather than a third
+dialogue grammar. Asset scene 08/01 decompresses twenty complete maps and a
+separate 2bpp alphabet. The presenter copies one map into BG3 and owns its
+fade/hold timing. These tile compositions cannot be decoded using the ordinary
+dialogue codepoint table. See the [ending source map](rom-map.md) for the five
+release-specific producers, offsets and timing. Extracting these assets alone
+does not imply editable credit text or an enhanced-rendering runtime adapter.
 
 ## Native dialogue boundaries
 
@@ -89,6 +132,13 @@ does not re-shape or re-rasterize text at every character. Optional
 `AR_LOCALIZATION_REVEAL_TRACE=1` diagnostics report frame/reveal-offset changes
 without logging dialogue content.
 
+The game-owned live-value capture uses ABI 2. It borrows the selected and native
+fallback packs alongside WRAM/name inputs; sessions copy resolved values.
+Missing city/enemy dictionary entries in a partial pack resolve from the native
+fallback, without discarding the translated sentence. Authored entries take
+priority; invalid or empty live text values still fail closed. Report revisions
+include both pack revisions, so fallback updates cannot leave cached terms stale.
+
 Enhanced sessions consume authored text with `Next`, `TickWait`, and
 `AdvancePage`, stopping at native control barriers. A native `$02` drains the
 current authored page and confirms only if an authored page boundary remains;
@@ -139,7 +189,7 @@ continues from the switched session's valid grapheme boundary after a yielding c
 Completed terminal/menu-yield states do not reopen earlier pages or repeat game
 events. Styling changes rebuild presentation only, not the dialogue program.
 
-Enhanced activation crosses the renderer-neutral `ArTextPresentationHost` ABI 1
+Enhanced activation crosses the renderer-neutral `ArTextPresentationHost` ABI 2
 before switching the semantic session or enabling authored page/wait scheduling.
 The presenter opens the requested primary and ordered fallback fonts, shapes and
 rasters a small probe, and creates/uploads its texture. A missing backend,
@@ -152,8 +202,43 @@ The presenter retains at most one prepared font candidate separately from its
 active surfaces. Only a frame carrying the approved font identity consumes that
 candidate, so a later semantic rejection cannot destroy the previous frame's
 resources. Repeated readiness checks and steady-state frames reuse font/cache
-resources. Frame ABI 13 carries resolved fallback paths as bounded, owned strings;
-no platform font or texture handles enter the game-thread session.
+resources. Frame ABI 26 carries opaque, host-registered font resource IDs, not
+filesystem paths; no platform font or texture handles enter the game-thread session.
+
+Pack storage crosses the separate `ActRaiserLocalizationPackHost` ABI 1. The
+host supplies the existing bounded `ArLanguagePackIo` VFS callbacks and the
+native-pack locator; the game runtime owns parsing, contract validation,
+selection and dialogue state. The desktop host installs the ordinary file
+adapter and resolves the development environment override/default path. Other
+ports can provide archive or memory storage without adding file or working-
+directory policy to the game adapter.
+
+Each snapshot also carries its effective source locale and paragraph direction,
+copied from `ArDialoguePageSnapshot` before the resolving session is destroyed.
+The fixed-composer resolver returns the same bounded value; compose state ABI 10,
+HUD labels and credits cache it with the text. A partial RTL pack may therefore
+publish native-English fallback and translated text together without sharing a
+paragraph base. Fonts remain the selected presentation stack. Native formatted
+HUD digits explicitly retain `en-US`/LTR.
+
+Session ABI 3 also publishes semantic insertion ranges beside the original
+logical UTF-8: names/text use first-strong isolation, formatted numbers use LTR,
+and terms use their actual source's direction, including native fallback.
+Ranges encompass whole graphemes. The compiler bounds them to 256 per resolved
+message, rejecting an oversized begin/switch before replacing the active state.
+Frame ABI 26 owns a 256-range pool; fixed composers retain ranges with their
+cached text. Normalization, retained-page scrolling, name-entry edits, credits
+padding and grid-cell slicing relocate these ranges along with the text.
+
+Raster request ABI 11 carries borrowed source ranges and a slice offset. The
+desktop backend creates layout-only isolate controls, closes them across
+paragraph separators and maps shaped endpoints back to original UTF-8 bytes.
+An inserted value cannot escape its isolate with unmatched controls. No hidden
+bytes enter scripts, saved names, native anchors or the session's reveal clock.
+These ranges and their directions participate in raster cache identity; reveal
+progress alone still reuses the same raster. Alternative backends must implement
+equivalent isolation/index mapping. Mixed-script visual qualification remains
+separate from these automated contracts.
 
 The production adapter bounds resolved dialogue to 16,384 UTF-8 bytes, counting
 one separator per authored page and captured values. This conservative limit
@@ -288,8 +373,8 @@ The runtime checks these exact destination cells before claiming labels.
 Lives (row 1 columns 8–9), time (15–17) and score (26–30) use the native
 writer's final `$30-$39` digit/blank cells, retaining BCD formatting and zero
 padding. Labels/health bars are not inferred by scanning arbitrary glyphs.
-The selected tile's CGRAM palette supplies 2bpp ink index 2 (edge band) and
-3 (body), with per-character banding; ACT uses a solid body colour. Numerals
+The selected tile's CGRAM palette supplies 2bpp ink index 1 (opaque shadow),
+2 (edge band) and 3 (body), with per-character banding; ACT uses a solid body colour. Numerals
 request italic shaping, labels stay upright. Heart, multiplier, health bars,
 and magic artwork stay in the native HUD. ACT's asymmetric ornaments also use
 native pixels: the left end spans strip x=5–12 (tiles `$22/$23`), and the right
@@ -301,11 +386,13 @@ presenter fits the text between the original-size ornaments and places them
 against its ink bounds; no font bracket substitute or glyph stretching is used.
 Missing artwork retains the entire native panel, not a partially replaced frame.
 
-Frame ABI 16 passes palette RGB endpoints, italic style and physical left/right/top
-gutters to the renderer-neutral presenter. HUD lettering retains its blank first
-tile scanline, preventing larger glyphs from touching the preceding row.
-Raster request ABI 6 includes palette
-endpoints and italic in cache identity. Right alignment is independent of
+Frame ABI 26 passes palette RGB endpoints, shadow shape, numeral/field styling
+and physical left/right/top gutters to the renderer-neutral presenter. Native
+labels/capitals use ink rows 1–7; all ten digits use rows 0–7. HUD labels therefore
+use a seven-pixel reference and one-pixel top inset, while counters use an
+eight-pixel reference with no top inset. Town names retain the capital inset.
+Raster request ABI 11 includes all style choices in cache identity.
+Right alignment is independent of
 Unicode direction. The font backend resets both primary and fallback styles
 on each raster request; unchanged menus/counters reuse cached surfaces. Master
 INIDISP brightness is applied to enhanced text/artwork at draw time, not baked
@@ -322,6 +409,46 @@ their five-pixel left gutter. Their tile claims
 cross the HUD's y=20/y=28 band boundaries by one scanline: projection can join
 contiguous pieces only when their output horizontal placements agree, including
 zero-height slivers at small HUD scales. No join bridges independent anchors.
+
+### Styled ink, reveal and portability
+
+The ordinary dialogue, menu, keyboard, town, title-option and action-notice
+adapters explicitly publish the live palette-0 three-ink style. At full
+brightness the US sampled palette is `$0000,$0000,$7F33,$7FFF`: transparency,
+opaque black, blue `#9CCEFF`, white. A zero RGB shadow is still enabled.
+Credits use their separate white/gold one-ink font and do not receive this style.
+Native hearts, selectors, underlines and frame ornaments retain their own pixels;
+they are not shadowed a second time.
+
+Semantic grid value cells request whole-field italic shaping, including
+locale-specific numerals. Mixed ordinary text such as `ACT-1` uses a separate
+portable oblique treatment for complete ASCII-digit clusters only. It preserves
+shaping, advances and baseline, and leaves combined/ligature clusters and
+non-ASCII numerals unchanged. Whole-field italic takes precedence, so no glyph
+is slanted twice. These vector-font effects approximate the hand-drawn retail
+letterforms; they do not promise identical contours.
+
+The rasterizer reserves effect padding before fitting, wrapping and cropping.
+Padding never expands a text box's ownership. Bitmap ABI 3 optionally supplies
+a tightly packed `pixel_owners` plane (cluster index + 1; zero for transparency).
+The SDL backend supplies it for revealable text and carries ownership through
+numeral slant, shadow and cropping. Typographic cluster rectangles remain layout
+metrics, not overlapping effect masks. The cache samples ownership at the same
+source pixel as mosaic/nearest upscaling and retains disjoint draw rectangles.
+Partial reveal and spaced keyboards submit these in bounded geometry batches;
+completed unshifted text still uses one whole-surface draw. No font work,
+allocation or upload occurs merely because another character is revealed.
+Effect metadata counts against the cache's byte budget, with independent
+per-request/rectangle ceilings. Cache failure retains the existing native
+fallback behavior. An alternate raster backend may omit ownership for its
+legacy rectangle path, but must provide ownership to guarantee effect-safe
+partial/shifted rendering.
+
+For visual diagnostics, `AR_SHOT_REQUIRE_COMPOSITE=1` makes a missing final
+readback or failed screenshot write a fatal test failure. Shot logs report
+`capture=final-composite`, `native-framebuffer` or `failed`; without the strict
+option, a native framebuffer fallback remains available. A native VRAM dump
+does not establish which pixels the enhanced presenter actually drew.
 
 ## Source identity and dynamic cells
 
@@ -403,7 +530,7 @@ resolved page. Literal `|` bytes and explicit authored newlines set bits;
 captured names/numbers, localized terms (including aliases), and icons cannot
 create them. Fixed-text normalization remaps that structure while collapsing
 whitespace; inserted value newlines become inline spaces in tables. Compose
-state ABI 7 retains the map and frame ABI 21 copies it into the pointer-free
+state ABI 10 retains the map and frame ABI 26 copies it into the pointer-free
 text pool (one bit per UTF-8 byte, 2 KiB maximum per frame). Grid parsing and
 column-plan cache keys consume that structure rather than reinterpreting all
 resolved punctuation as layout. Ordinary dialogue/keyboard pipes remain text.
@@ -418,6 +545,37 @@ selection mapping. The builder's grapheme data is generated from the same
 embedded Unicode properties as the game, without a runtime Python dependency.
 The 63-line/3,072-byte author budget leaves room for the runtime page indicator,
 Unicode name expansion and enlarged gutters in the 4,096-byte compose buffer.
+
+### Graphical credits page adapter
+
+Credits are a distinct 16-pixel alphabet, not `$901C` dialogue. In scene 08/01,
+the asset loader produces twenty `$0800`-byte maps at `$7E:4000-$DFFF` and
+uploads the credits font to VRAM word `$5000`. `$02:AB30` copies one map to
+`$7F:B000`; native code retains all fade steps, holds, input and completion-save
+writes. `ActRaiserLocalizationCredits_Append` matches the captured VRAM map to
+those resident maps in that exact scene/font context. It observes no timer and
+writes no RAM. Clears, mismatches and scene changes remove the claim; selection
+changes invalidate only the resolved text cache. It can activate without any
+preceding dialogue observation, including during a debug recovery.
+
+The Go extractor decodes complete upper/lower tile compositions, including
+narrow I/J, packed lettering, French accents and macrons. Unsupported or clipped
+compositions fail extraction. `NativeCatalog.credits_text` contains per-page
+Unicode lines and source rows; copyright/logo pages are explicitly artwork-only.
+Staff-page IDs follow page indices; the JP terminal page is mapped by meaning
+(`credits.the_end` is page 16, not the US page 17). Its dormant Special Mode page
+is reference-only. Regional contributor lists are preserved, not rewritten into
+US staffing or gameplay variants.
+
+At presentation, one atomic grid owns all lettering cells: columns 0–31, rows
+1–26. Rows 0 and 27–31 must be native blanks. This avoids clipping the SNES
+first scanline and stretching the grid's vertical pitch. One to six authored
+lines are centered on a four-cell pitch; all native lettering is masked even
+when the replacement has fewer lines. A failed row keeps the entire native
+page. A warm page resolves no text and uploads no new textures. Palette 0 ink
+(CGRAM 1) remains white; a native palette-1 initial uses CGRAM 5 gold. The generic
+cluster-accent field colors its whole shaped grapheme/ligature, not UTF-8 bytes.
+Existing INIDISP brightness, font-size, mosaic and low-resolution settings apply.
 An unfit report retains native rendering rather than masking a partial table.
 
 The renderer caches eight content/font/settings/extent-specific column plans
