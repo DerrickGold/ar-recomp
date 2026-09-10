@@ -527,7 +527,7 @@ static void TestMissingGlyphWarnings(void) {
 }
 
 /* The shadow pass is pure pixel work with two hazards worth pinning: it must
- * read coverage from a copy (or one shadow pixel seeds the next and the run
+ * read original coverage (or one shadow pixel seeds the next and the run
  * smears sideways), and it must never paint over a letterform. */
 static void TestStyleShadow(void) {
   enum { kWidth = 6, kHeight = 3 };
@@ -567,8 +567,39 @@ static void TestStyleShadow(void) {
   CHECK(!memcmp(guard, pixels, sizeof(guard)));
 }
 
+static void TestStyleShadowTraversalMatchesSnapshot(void) {
+  enum { kWidth = 7, kHeight = 5, kStride = 9 };
+  uint32_t original[kHeight][kStride];
+  for (int y = 0; y < kHeight; ++y)
+    for (int x = 0; x < kStride; ++x)
+      original[y][x] = x >= kWidth ? UINT32_C(0xdeadbeef)
+          : (x + y * 3) % 4 == 0 ? UINT32_C(0xffffff80)
+          : (x + y) % 3 == 0 ? UINT32_C(0xffccffff) : 0;
+  for (int dy = -kHeight; dy <= kHeight; ++dy) {
+    for (int dx = -kWidth; dx <= kWidth; ++dx) {
+      if (!dx && !dy) continue;
+      uint32_t expected[kHeight][kStride], actual[kHeight][kStride];
+      memcpy(expected, original, sizeof(expected));
+      memcpy(actual, original, sizeof(actual));
+      for (int y = 0; y < kHeight; ++y) {
+        for (int x = 0; x < kWidth; ++x) {
+          const int sx = x - dx, sy = y - dy;
+          if ((original[y][x] & 255u) || sx < 0 || sx >= kWidth ||
+              sy < 0 || sy >= kHeight) continue;
+          const uint32_t alpha = original[sy][sx] & 255u;
+          if (alpha) expected[y][x] = UINT32_C(0x12345600) | alpha;
+        }
+      }
+      CHECK(ArTextBitmap_ApplyStyleShadow(actual, kWidth, kHeight,
+          kStride * 4, kArRenderPixelFormat_Rgba8888, dx, dy, 0x123456));
+      CHECK(!memcmp(expected, actual, sizeof(expected)));
+    }
+  }
+}
+
 int main(int argc, char **argv) {
   TestStyleShadow();
+  TestStyleShadowTraversalMatchesSnapshot();
   if (argc == 2 && !strcmp(argv[1], "--missing-glyph-warnings"))
     TestMissingGlyphWarnings();
   else

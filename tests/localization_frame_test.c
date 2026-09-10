@@ -170,7 +170,7 @@ int main(void) {
   CHECK(ArLocalizationFrame_AddTextWithGrid(
       &table_frame, 7, destination, (ArTextCellRegion){3, 6, 26, 20},
       text, strlen(text), 5, 5, 12,
-      kArTextDirection_LeftToRight, 7, &grid,
+      kArTextDirection_LeftToRight, 7, &grid, NULL,
       NULL, 0, NULL, 0));
   CHECK(table_frame.snapshots[0].layout == kArLocalizationTextLayout_Grid);
   CHECK(table_frame.snapshots[0].grid_index == 1 && table_frame.grid_count == 1);
@@ -183,13 +183,26 @@ int main(void) {
   CHECK(ArLocalizationGrid_FindRow(&table_frame.grids[0], 4, 5) ==
         &table_frame.grids[0].rules[1]);
   CHECK(!ArLocalizationGrid_FindRow(&table_frame.grids[0], 0, 3));
+  /* Structure is copied relative to each snapshot, including an unaligned
+   * start in the shared text pool. A dynamic pipe remains ordinary text. */
+  const char value_text[] = "É|li|2";
+  uint8_t boundaries[AR_TEXT_BOUNDARY_BYTES(sizeof(value_text))] = {0};
+  ArTextBoundary_Set(boundaries, 5, true);
+  CHECK(ArLocalizationFrame_AddTextWithGrid(
+      &table_frame, 8, destination, (ArTextCellRegion){3, 6, 26, 20},
+      value_text, sizeof(value_text) - 1, 6, 6, 13,
+      kArTextDirection_LeftToRight, 7, &grid, boundaries, NULL, 0, NULL, 0));
+  const size_t value_offset = table_frame.snapshots[1].utf8_offset;
+  memset(boundaries, 0, sizeof(boundaries));
+  for (size_t i = 0; i < sizeof(value_text) - 1; ++i)
+    CHECK(ArTextBoundary_Get(table_frame.structural_boundaries, value_offset + i) == (i == 5));
   /* Geometry the renderer could not act on is refused where it is published. */
   ArLocalizationTextGrid invalid = grid;
   invalid.rules[0].cells[1].end = 27; /* outside the claimed region */
   CHECK(!ArLocalizationFrame_AddTextWithGrid(
       &table_frame, 9, destination, (ArTextCellRegion){3, 6, 26, 20},
       text, strlen(text), 5, 5, 12,
-      kArTextDirection_LeftToRight, 7, &invalid, NULL, 0, NULL, 0));
+      kArTextDirection_LeftToRight, 7, &invalid, NULL, NULL, 0, NULL, 0));
   /* A grid layout without geometry, and geometry without a grid layout, are
    * both rejected. */
   CHECK(!ArLocalizationFrame_AddTextWithObjectsAndLayout(
@@ -200,8 +213,8 @@ int main(void) {
   /* The key separator belongs to the surface that was just published, and a
    * frame with no surfaces has nowhere to put one. */
   CHECK(ArLocalizationFrame_SetKeySeparator(&table_frame, " ", 1));
-  CHECK(table_frame.snapshots[0].key_separator_bytes == 1 &&
-        table_frame.snapshots[0].key_separator[0] == ' ');
+  CHECK(table_frame.snapshots[1].key_separator_bytes == 1 &&
+        table_frame.snapshots[1].key_separator[0] == ' ');
   CHECK(!ArLocalizationFrame_SetKeySeparator(&table_frame, "", 0));
   CHECK(!ArLocalizationFrame_SetKeySeparator(&table_frame, "        ", 8));
   const ArLocalizationFrame table_before = table_frame;

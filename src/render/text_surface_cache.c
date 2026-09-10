@@ -29,6 +29,8 @@ static uint64_t HashRequest(uint64_t hash,
   hash = HashU32(hash, request->style_id);
   hash = HashU32(hash, request->band_rgb);
   hash = HashU32(hash, request->body_rgb);
+  hash = HashU32(hash, request->shadow_enabled);
+  hash = HashU32(hash, request->shadow_rgb);
   hash = HashU32(hash, request->flags);
   hash = HashU32(hash, (uint32_t)request->direction);
   hash = HashU32(hash, (uint32_t)request->alignment);
@@ -216,15 +218,6 @@ static bool ApplyMosaic(const ArTextBitmap *source, int block_size,
   return true;
 }
 
-static uint64_t FormatBytesPerPixel(ArRenderPixelFormat format) {
-  switch (format) {
-    case kArRenderPixelFormat_A8: return 1;
-    case kArRenderPixelFormat_Rgb565:
-    case kArRenderPixelFormat_Rgba4444: return 2;
-    default: return 4;
-  }
-}
-
 /* Texture bytes for a surface, saturating rather than wrapping so an absurd
  * request is rejected instead of appearing free. */
 static uint64_t SurfaceBytes(int width, int height,
@@ -232,7 +225,7 @@ static uint64_t SurfaceBytes(int width, int height,
   if (width <= 0 || height <= 0) return 0;
   const uint64_t pixels = (uint64_t)width * (uint64_t)height;
   if (pixels > UINT64_MAX / 8u) return UINT64_MAX;
-  return pixels * FormatBytesPerPixel(format);
+  return pixels * (uint64_t)BytesPerPixel(format);
 }
 
 static void ReleaseEntry(ArTextSurfaceCache *cache, ArRenderDevice *device,
@@ -249,10 +242,11 @@ static void ReleaseEntry(ArTextSurfaceCache *cache, ArRenderDevice *device,
 
 /* Least recently used entry that the frame being prepared is not already
  * holding, or capacity when every entry is pinned. */
-static size_t SelectByteVictim(const ArTextSurfaceCache *cache) {
+static size_t SelectByteVictim(const ArTextSurfaceCache *cache,
+                               size_t protected_index) {
   size_t victim = cache->capacity;
   for (size_t i = 0; i < cache->capacity; ++i) {
-    if (!cache->entries[i].valid ||
+    if (i == protected_index || !cache->entries[i].valid ||
         cache->entries[i].last_use >= cache->frame_start)
       continue;
     if (victim == cache->capacity ||
@@ -263,10 +257,10 @@ static size_t SelectByteVictim(const ArTextSurfaceCache *cache) {
 }
 
 static void EnforceByteBudget(ArTextSurfaceCache *cache,
-                              ArRenderDevice *device) {
+                              ArRenderDevice *device, size_t protected_index) {
   if (!cache->byte_budget) return;
   while (cache->stats.texture_bytes > cache->byte_budget) {
-    const size_t victim = SelectByteVictim(cache);
+    const size_t victim = SelectByteVictim(cache, protected_index);
     if (victim >= cache->capacity) return;
     ReleaseEntry(cache, device, &cache->entries[victim]);
   }
@@ -281,14 +275,15 @@ void ArTextSurfaceCache_BeginFrame(ArTextSurfaceCache *cache) {
   if (cache) cache->frame_start = cache->clock + 1u;
 }
 
+void ArTextSurfaceCache_EndFrame(ArTextSurfaceCache *cache) {
+  if (cache) cache->frame_start = UINT64_MAX;
+}
+
 static size_t SelectVictim(const ArTextSurfaceCache *cache) {
-  size_t victim = 0;
   for (size_t i = 0; i < cache->capacity; ++i) {
     if (!cache->entries[i].valid) return i;
-    if (cache->entries[i].last_use < cache->entries[victim].last_use)
-      victim = i;
   }
-  return victim;
+  return SelectByteVictim(cache, cache->capacity);
 }
 
 static ArTextSurfaceFailure *FindFailure(ArTextSurfaceCache *cache,
@@ -386,6 +381,14 @@ bool ArTextSurfaceCache_Acquire(
   }
 
   ++cache->stats.misses;
+  /* Refuse entry pressure before doing any font work. A prepared frame owns
+   * every pinned handle until EndFrame/BeginFrame, even if bytes would fit. */
+  const size_t victim_index = SelectVictim(cache);
+  if (victim_index >= cache->capacity) {
+    ++cache->stats.failures;
+    SetError(error, error_capacity, "text surface cache entries are all in use");
+    return false;
+  }
   ++cache->stats.rasterize_calls;
   ArTextRasterRequest raster_request = *request;
   int metric_scale = 1;
@@ -575,13 +578,12 @@ bool ArTextSurfaceCache_Acquire(
     return false;
   }
 
-  const size_t victim_index = SelectVictim(cache);
   ArTextSurfaceCacheEntry *victim = &cache->entries[victim_index];
   ReleaseEntry(cache, device, victim);
   *victim = (ArTextSurfaceCacheEntry){
     .surface = replacement,
     .last_use = cache->clock,
-    .texture_bytes = SurfaceBytes(upload_width, upload_height, bitmap.format),
+    .texture_bytes = SurfaceBytes(upload_width, upload_height, descriptor.format),
     .valid = true,
   };
   cache->stats.texture_bytes += victim->texture_bytes;
@@ -589,7 +591,7 @@ bool ArTextSurfaceCache_Acquire(
     cache->stats.peak_texture_bytes = cache->stats.texture_bytes;
   /* Evicting for bytes happens after the replacement is installed, so the
    * entry we just handed the caller is never the one released. */
-  EnforceByteBudget(cache, device);
+  EnforceByteBudget(cache, device, victim_index);
   *out_surface = replacement;
   return true;
 }
@@ -600,5 +602,12 @@ const ArTextSurfaceCacheStats *ArTextSurfaceCache_GetStats(
 }
 
 void ArTextSurfaceCache_ResetStats(ArTextSurfaceCache *cache) {
-  if (cache) memset(&cache->stats, 0, sizeof(cache->stats));
+  if (!cache) return;
+  /* Live ownership is not a resettable counter. Start the new measurement
+   * interval's high-water mark at the resources already owned. */
+  const uint64_t live_bytes = cache->stats.texture_bytes;
+  cache->stats = (ArTextSurfaceCacheStats){
+    .texture_bytes = live_bytes,
+    .peak_texture_bytes = live_bytes,
+  };
 }

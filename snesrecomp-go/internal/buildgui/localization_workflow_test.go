@@ -13,6 +13,7 @@ import (
 func editableWorkflowFixture(t *testing.T) *application {
 	t.Helper()
 	app := localizationTestApp(t)
+	installLocalizationCoverageSource(t, app)
 	locGET(t, app, "state", nil)
 	source := localizationTestSource(t)
 	m := source.Pack().Manifest().Metadata()
@@ -96,7 +97,7 @@ func TestLocalizationCatalogAndUninstallPreserveProject(t *testing.T) {
 		t.Fatal(rows)
 	}
 	// Installed-only packages remain visible even without an editable project.
-	projectFile := filepath.Join(app.localization.store.Root(), q.ProjectID+".arproject")
+	projectFile := filepath.Join(app.localizationRoot(), "projects", q.ProjectID+".arproject")
 	if err := os.Rename(projectFile, projectFile+".backup"); err != nil {
 		t.Fatal(err)
 	}

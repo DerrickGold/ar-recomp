@@ -1,4 +1,6 @@
 #include "localization/language_contract.h"
+#include "localization/language_row_shape.h"
+#include "localization/language_keyboard.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -192,8 +194,9 @@ static bool ValidatePresentation(const ArGeneratedRoute *route,
              scan->lines_used);
     return false;
   }
-  /* A message with no content at all is the documented way to leave a route
-   * to its native lettering; only a partly filled menu is a mistake. */
+  /* An intentional empty replacement hides wording while retaining native
+   * controls/artwork; omitting the route requests fallback instead. Only a
+   * partly filled choice menu is a shape error here. */
   if (route->required_nonempty_lines && scan->nonempty_lines &&
       scan->nonempty_lines != route->required_nonempty_lines) {
     SetError(error,
@@ -203,6 +206,65 @@ static bool ValidatePresentation(const ArGeneratedRoute *route,
     return false;
   }
   return true;
+}
+
+typedef struct TableScan {
+  ArLanguageRowShape shape;
+  uint32_t line, fields;
+  bool started, content;
+} TableScan;
+
+static bool CheckTableRow(TableScan *scan, const char *id,
+                           ArLanguagePackError *error) {
+  if (scan->content &&
+      !ArLanguageRowShape_Allows(scan->shape, scan->line, scan->fields)) {
+    SetError(error, "%s: table row %u has %u field(s); this row shape is "
+                    "unsupported (keep the template's | separators and "
+                    "blank rows)", id, scan->line + 1, scan->fields);
+    return false;
+  }
+  return true;
+}
+
+static bool TableBreak(TableScan *scan, const char *id,
+                        ArLanguagePackError *error) {
+  if (!CheckTableRow(scan, id, error)) return false;
+  /* The game's fixed-text normalization discards leading blank lines, keeps
+   * internal blank rows and trims trailing blanks. Count content, not tiles. */
+  if (scan->started) ++scan->line;
+  scan->fields = 1;
+  scan->content = false;
+  return true;
+}
+
+static bool ValidateTable(const ArLanguagePack *pack,
+                           const ArLanguageMessage *body, const char *id,
+                           ArLanguagePackError *error) {
+  TableScan scan = {.shape = ArLanguageRowShape_ForProfile(
+      id, ArLanguagePack_GetMetadata(pack)->source_profile), .fields = 1};
+  if (scan.shape == kArLanguageRowShape_None) return true;
+  for (uint32_t i = 0; i < body->operation_count; ++i) {
+    const ArLanguageOperation *op = ArLanguagePack_GetOperation(pack, body, i);
+    if (op->kind == kArLanguageOperation_Text) {
+      const char *text = ArLanguagePack_GetString(pack, op->value.text);
+      for (const char *p = text; p && *p; ++p) {
+        if (*p == '\n') {
+          if (!TableBreak(&scan, id, error)) return false;
+        } else if (*p != ' ' && *p != '\t' && *p != '\r') {
+          scan.started = scan.content = true;
+          if (*p == '|') ++scan.fields;
+        }
+      }
+    } else if (op->kind == kArLanguageOperation_Placeholder) {
+      scan.started = scan.content = true;
+    } else if (op->kind == kArLanguageOperation_LineBreak ||
+               op->kind == kArLanguageOperation_ParagraphBreak) {
+      if (!TableBreak(&scan, id, error)) return false;
+      if (op->kind == kArLanguageOperation_ParagraphBreak &&
+          !TableBreak(&scan, id, error)) return false;
+    }
+  }
+  return CheckTableRow(&scan, id, error);
 }
 
 static bool ValidateBody(const ArLanguagePack *pack,
@@ -283,7 +345,9 @@ static bool ValidateBody(const ArLanguagePack *pack,
              diagnostic_id, contract->anchor_count, anchor_index);
     return false;
   }
-  return ValidatePresentation(route, &scan, diagnostic_id, error);
+  return ValidatePresentation(route, &scan, diagnostic_id, error) &&
+      ValidateTable(pack, body, diagnostic_id, error) &&
+      ArLanguageKeyboard_ValidateMessage(pack, body, diagnostic_id, error);
 }
 
 bool ArLanguageContract_ValidatePack(const ArLanguagePack *pack,

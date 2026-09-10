@@ -9,8 +9,9 @@
 #include "localization/text_rasterizer.h"
 #include "localization/text_presentation.h"
 #include "localization/text_cell_record.h"
+#include "localization/text_boundaries.h"
 
-#define AR_LOCALIZATION_FRAME_ABI_VERSION UINT32_C(20)
+#define AR_LOCALIZATION_FRAME_ABI_VERSION UINT32_C(21)
 
 enum {
   kArLocalizationFrameTextCapacity = 16 * 1024,
@@ -245,6 +246,8 @@ typedef struct ArLocalizationFrame {
   ArLocalizationArtwork artwork[kArLocalizationArtwork_Count];
   uint32_t text_bytes;
   char text[kArLocalizationFrameTextCapacity];
+  /* Authored grid delimiters, indexed by absolute byte in the shared pool. */
+  uint8_t structural_boundaries[AR_TEXT_BOUNDARY_BYTES(kArLocalizationFrameTextCapacity)];
   char locale[kArLocalizationFrameLocaleCapacity];
   char font_stack_id[kArLocalizationFrameFontStackCapacity];
   char primary_font_path[kArLocalizationFrameFontPathCapacity];
@@ -305,7 +308,9 @@ bool ArLocalizationFrame_AddTextWithObjects(
     uint8_t inline_object_count);
 /* Grid layouts publish their own cell geometry: the renderer positions cells
  * from `grid` and never needs to know which menu it is drawing. The grid is
- * copied and interned; identical grids share one table entry. */
+ * copied and interned; identical grids share one table entry. Boundaries are
+ * copied from a bitmap relative to utf8. NULL explicitly means literal text
+ * (all pipes/newlines are authored); resolved values must supply their map. */
 bool ArLocalizationFrame_AddTextWithGrid(
     ArLocalizationFrame *frame, uint32_t surface_id,
     ArTextCellDestination destination, ArTextCellRegion region,
@@ -313,6 +318,7 @@ bool ArLocalizationFrame_AddTextWithGrid(
     uint32_t revealed_cluster_count, uint32_t cluster_count,
     uint64_t source_revision, ArTextDirection direction,
     uint8_t native_font_pixels, const ArLocalizationTextGrid *grid,
+    const uint8_t *structural_boundaries,
     const ArTextCellRegion *native_preserves,
     uint8_t native_preserve_count,
     const ArLocalizationInlineObjectSnapshot *inline_objects,

@@ -93,6 +93,11 @@ uint32_t SimWorldMap_GeographySerial(void);
  * ($40-$45). Desert sand ($2C-$2F), snow, forests and buildings are separate
  * materials. Zero for unavailable/out-of-range cells. */
 float SimWorldMap_MountainCoverage(int tile_x, int tile_y);
+/* True only when every texel in the developed cell belongs to the authored
+ * ocean/wave palette ($10/$11). Mixed shores and unknown cells return false.
+ * Animated tiles must qualify in every wave phase, so this is geography,
+ * not a per-frame RGB classification. */
+bool SimWorldMap_CellIsOpenWater(int tile_x, int tile_y);
 /* Copy one owned 8x8 world-art tile and optional palette identities. Index
  * zero remains opaque here, just as in Mode 7. Never borrows mutable storage;
  * unavailable/invalid destinations are left unchanged. */

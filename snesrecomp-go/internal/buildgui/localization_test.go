@@ -42,8 +42,46 @@ func localizationTestSource(t *testing.T) *lk.AuthorProject {
 
 func localizationTestApp(t *testing.T) *application {
 	t.Helper()
-	app := newApplication(context.Background(), Options{ProjectRoot: filepath.Join(t.TempDir(), "space bundle", "utils")}, "secret")
+	app := newApplication(context.Background(), Options{ProjectRoot: filepath.Join(t.TempDir(), "space bundle", "utils"), fontCoverageProbe: unitFontCoverageProbe}, "secret")
 	return app
+}
+
+// Unit workflow fixtures model an available font backend, not actual coverage.
+// The real headless game command is exercised separately by font integration tests.
+func unitFontCoverageProbe(_ context.Context, fonts []lk.FontCoverageSource, scalars []rune) (lk.FontCoverageProbeResult, error) {
+	result := lk.FontCoverageProbeResult{Provided: make([]bool, len(scalars))}
+	for i := range result.Provided {
+		result.Provided[i] = true
+	}
+	for _, font := range fonts {
+		result.Fonts = append(result.Fonts, lk.FontCoverageIdentity{Reference: font.Reference, SHA256: strings.Repeat("0", 64)})
+	}
+	return result, nil
+}
+
+// Seed fixtures through the same detached-work/publication boundary used by
+// requests. These helpers are test-only, not alternate production APIs.
+func (app *application) testLocalizationWork(action func(*localizationWork) error) error {
+	s := &app.localization
+	s.editMu.Lock()
+	defer s.editMu.Unlock()
+	work, err := app.localizationSnapshot()
+	if err != nil {
+		return err
+	}
+	err = action(work)
+	s.mu.Lock()
+	s.localizationStateData = work.localizationStateData
+	s.mu.Unlock()
+	return err
+}
+
+func (app *application) saveLocalization(p *lk.AuthorProject, expected string) error {
+	return app.testLocalizationWork(func(work *localizationWork) error { return work.saveLocalization(p, expected) })
+}
+
+func (app *application) acceptLocalizationReference(p *lk.AuthorProject) error {
+	return app.testLocalizationWork(func(work *localizationWork) error { return work.acceptLocalizationReference(p) })
 }
 
 func locJSON(t *testing.T, app *application, endpoint string, q any, code int) *httptest.ResponseRecorder {
@@ -223,6 +261,7 @@ func TestLocalizationCloneDoesNotInstall(t *testing.T) {
 
 func TestLocalizationGUIAuthorSharingLifecycle(t *testing.T) {
 	app := localizationTestApp(t)
+	installLocalizationCoverageSource(t, app)
 	locGET(t, app, "state", nil)
 	source := localizationTestSource(t)
 	if err := app.localization.store.Save(source, ""); err != nil {
@@ -322,6 +361,7 @@ func TestLocalizationGUIAuthorSharingLifecycle(t *testing.T) {
 	q.Replace = true
 	locJSON(t, app, "install", q, 200)
 	fresh := localizationTestApp(t)
+	installLocalizationCoverageSource(t, fresh)
 	locUpload(t, fresh, "import", shared, nil, 200)
 	if fresh.localization.current.Pack().Manifest().Metadata().Locale != "en-CA" {
 		t.Fatal("locale lost on import")

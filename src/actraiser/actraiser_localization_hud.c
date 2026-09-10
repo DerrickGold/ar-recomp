@@ -151,7 +151,7 @@ void ActRaiserLocalizationHud_Append(
       char error[256];
       label->valid = resolve(context, kFields[i].id, label->text, sizeof(label->text),
           &label->bytes, &label->clusters, &label->revision, NULL, 0, &objects,
-          error, sizeof(error)) && !objects &&
+          NULL, error, sizeof(error)) && !objects &&
           label->bytes < sizeof(label->text) && !label->text[label->bytes] &&
           label->revision && ((label->bytes != 0) == (label->clusters != 0));
     }

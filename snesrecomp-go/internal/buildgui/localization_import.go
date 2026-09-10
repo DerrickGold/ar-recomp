@@ -20,9 +20,9 @@ type localizationImport struct {
 // One detached preview per session. Selecting a folder/archive never replaces
 // the open project or writes an installation. Duplicate decisions refer to the
 // incoming ID, not whichever unrelated project happens to be open.
-func (app *application) previewLocalizationImport(w http.ResponseWriter, p *lk.AuthorProject) error {
+func (work *localizationWork) previewLocalizationImport(w *localizationReply, p *lk.AuthorProject) error {
 	id := p.Pack().Manifest().Metadata().ID
-	existing, err := app.localization.store.Open(id)
+	existing, err := work.store.Open(id)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -34,7 +34,7 @@ func (app *application) previewLocalizationImport(w http.ResponseWriter, p *lk.A
 	if existing != nil {
 		result["existingProject"] = map[string]string{"name": existing.Pack().Manifest().Metadata().Name, "revision": existing.ProjectRevision()}
 	}
-	if _, err := lk.InspectInstalledPack(filepath.Join(app.localizationRoot(), "packs"), id); err == nil {
+	if _, err := lk.InspectInstalledPack(filepath.Join(work.root, "packs"), id); err == nil {
 		result["installed"] = true
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -42,8 +42,8 @@ func (app *application) previewLocalizationImport(w http.ResponseWriter, p *lk.A
 	if _, _, err := p.Installation(); err != nil {
 		result["installError"] = err.Error()
 	}
-	app.localization.pendingImport = &localizationImport{token: token, project: p}
-	writeJSON(w, 200, result)
+	work.pendingImport = &localizationImport{token: token, project: p}
+	w.json(200, result)
 	return nil
 }
 

@@ -591,6 +591,7 @@ static bool ResolveComposeText(
     uint32_t *cluster_count, uint64_t *source_revision,
     ArLocalizationInlineObjectSnapshot *inline_objects,
     size_t inline_object_capacity, uint8_t *inline_object_count,
+    uint8_t *structural_boundaries,
     char *error_text, size_t error_capacity) {
   (void)context;
   if (!s_runtime.presentation) return false;
@@ -598,6 +599,8 @@ static bool ResolveComposeText(
       !cluster_count || !source_revision || !inline_object_count)
     return false;
   *inline_object_count = 0;
+  if (structural_boundaries)
+    memset(structural_boundaries, 0, AR_TEXT_BOUNDARY_BYTES(utf8_capacity));
   ArDialogueSession session;
   ArDialogueSession_Init(&session);
   ArDialogueContentSelection selection;
@@ -630,12 +633,13 @@ static bool ResolveComposeText(
         &session, &selection, semantic_id, &resolver, &error);
     if (resolved) resolved = ArDialogueSession_GetPage(&session, &page);
     if (resolved) {
-      resolved = ActRaiserLocalizationText_Normalize(
+      resolved = ActRaiserLocalizationText_NormalizeStructured(
           page.utf8, page.utf8_bytes,
           page.inline_objects, page.inline_object_count,
           status_table,
           utf8, utf8_capacity, utf8_bytes,
-          inline_objects, inline_object_capacity, inline_object_count, NULL);
+          inline_objects, inline_object_capacity, inline_object_count, NULL,
+          page.structural_boundaries, status_table ? structural_boundaries : NULL);
     }
   }
   if (resolved) {
@@ -1131,21 +1135,6 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
       .screen = kArTextCellScreen_Composited,
       .tilemap_base_words = bg3_tilemap_base_words,
   };
-  /* The title's lettering is drawn inside the Mode 7 image, not over it, so
-   * the game never clears it when an option is chosen -- it spins and shrinks
-   * the whole layer away instead, leaving the tiles and every register this
-   * adapter watches untouched. A flat replacement cannot follow that, so it
-   * has to stop standing in the moment the layer stops being flat. Without
-   * this it sat still while the original flew off, then faded out with the
-   * screen. Only the title surfaces are dropped: elsewhere a transformed
-   * Mode 7 layer is scenery under text that really is composited flat, such
-   * as the city name over the world map. */
-  if (mode7_transformed) {
-    (void)ActRaiserLocalizationComposeState_ReleaseSurface(
-        &s_runtime.compose, kActRaiserLocalizationTitleTextSurface);
-    (void)ActRaiserLocalizationComposeState_ReleaseSurface(
-        &s_runtime.compose, kActRaiserLocalizationTitleSelectorSurface);
-  }
   const uint8_t map_group = g_ram[kActRaiserWram_MapGroup];
   const uint8_t map_number = g_ram[kActRaiserWram_CurrentMap];
   ActRaiserLocalizationComposeState_SetScene(
@@ -1190,6 +1179,17 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
       s_runtime.compose_observation_serial =
           compose_observations[index].serial;
     }
+  }
+
+  /* A title exit spins/shrinks the native layer rather than clearing its text
+   * tiles. Retire flat replacements after consuming queued native composes,
+   * or a redraw observed on the first transformed frame can resurrect them.
+   * No other surface is retired: city text stays flat over Mode 7 scenery. */
+  if (mode7_transformed) {
+    (void)ActRaiserLocalizationComposeState_ReleaseSurface(
+        &s_runtime.compose, kActRaiserLocalizationTitleTextSurface);
+    (void)ActRaiserLocalizationComposeState_ReleaseSurface(
+        &s_runtime.compose, kActRaiserLocalizationTitleSelectorSurface);
   }
 
   ActRaiserLocalizationTextObservation observation = {

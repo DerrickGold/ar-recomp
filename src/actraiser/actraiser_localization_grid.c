@@ -10,6 +10,8 @@ static bool MenuColumns(ActRaiserLocalizationMenu menu, unsigned line,
                         unsigned *column, unsigned *next_column) {
   if (!column || !next_column || !field_count || field_index >= field_count)
     return false;
+  if (!ArLanguageRowShape_Allows((ArLanguageRowShape)menu, line, field_count))
+    return false;
   if (menu == kActRaiserLocalizationMenu_StatusCities) {
     /* City rows occupy five retail columns: name, population, growth,
      * level, and item count. Header rows reuse those anchors but allow the
@@ -131,8 +133,7 @@ static bool MenuSharedRow(ActRaiserLocalizationMenu menu, unsigned line,
  * row's artwork, gaps and palette; it is neither localizable text nor a font
  * decoration. */
 static bool MenuReservedRow(ActRaiserLocalizationMenu menu, unsigned line) {
-  return (menu == kActRaiserLocalizationMenu_StatusCities ||
-          menu == kActRaiserLocalizationMenu_StatusScore) && line == 5;
+  return ArLanguageRowShape_IsReserved((ArLanguageRowShape)menu, line);
 }
 
 static bool BuildRow(ActRaiserLocalizationMenu menu, ArTextCellRegion region,

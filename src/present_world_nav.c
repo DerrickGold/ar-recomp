@@ -914,8 +914,7 @@ static bool WorldNavigationFlatOutputPoint(
 }
 
 static bool WorldNavigationInspecting(const FrameSlot *slot) {
-  return slot->sim_manual_orbit_yaw != 0 || slot->sim_manual_orbit_pitch != 0 ||
-      slot->sim_world_inspection_blend > 0;
+  return slot->sim_manual_orbit_yaw != 0 || slot->sim_manual_orbit_pitch != 0;
 }
 
 static SimBackgroundBridgeBounds WorldNavigationObjectBounds(
@@ -1042,11 +1041,12 @@ static bool PrepareWorldNavigationProjection(
   out->chart_radius_tiles = WorldNavigationChartRadius(slot);
   if (slot->sim.view == kSimView_SkyPalace)
     return PrepareSkyPalaceProjection(slot, viewport, out);
+  /* Navigation's native Palace sprite is top-down. Look radially through
+   * its travel location and the planet centre, independently of the town
+   * camera's oblique pose. Manual inspection rotates the globe, not this eye. */
   Scene3DCamera camera = {
-    .tilt_x = (float)slot->sim.projection_pitch_mrad /
-        (float)kPermilleScale,
-    .tilt_y = (float)slot->sim.projection_yaw_mrad /
-        (float)kPermilleScale,
+    .tilt_x = 0,
+    .tilt_y = 0,
     .distance = (float)slot->sim.projection_distance_x100 /
         (float)kPercentScale,
     .fov_y = 0.4f,
@@ -1126,24 +1126,6 @@ static bool PrepareWorldNavigationProjection(
       atmosphere.cloud_tiles * out->tile_world - reference_height_world;
   out->atmosphere_height_world =
       atmosphere.outer_tiles * out->tile_world - reference_height_world;
-  if (!isfinite(slot->sim_world_inspection_blend)) return false;
-  const float inspection = fminf(1, fmaxf(0, slot->sim_world_inspection_blend));
-  if (inspection > 0) {
-    const float centre_z = -out->globe_radius_world - reference_height_world;
-    const float target_z = centre_z * inspection;
-    /* Aim at the planet centre during inspection, not at the town tangent
-     * above it. Preserve the planet centre's axial camera distance, so this
-     * reframes without a surprise dolly/scale change or overriding zoom.
-     * The eye and homogeneous matrix move together; depth, horizon culling,
-     * atmosphere and all weather receivers continue to share one camera. */
-    camera.distance += target_z * out->matrix[11];
-    Scene3D_BuildViewProjection(&camera, viewport.w, viewport.h, out->matrix);
-    for (int row = 0; row < 4; row++)
-      out->matrix[12 + row] -= out->matrix[8 + row] * target_z;
-    for (int i = 0; i < 3; i++)
-      out->camera_world[i] = -camera.distance * out->matrix[i * 4 + 3];
-    out->camera_world[2] += target_z;
-  }
   return true;
 }
 
@@ -1612,7 +1594,8 @@ static bool DrawWorldNavigationGround(
   memcpy(key.source_to_screen, scene->source_to_screen,
          sizeof(key.source_to_screen));
   key.viewport = viewport;
-  key.geography_serial = s_world_terrain.serial;
+  /* Shore opacity still follows geography when optional relief is off. */
+  key.geography_serial = SimWorldMap_GeographySerial();
   key.snes_width = slot->snes_width;
   key.snes_height = slot->snes_height;
   key.visible_width = slot->visible_width;
@@ -1661,7 +1644,19 @@ static bool DrawWorldNavigationGround(
             fminf((float)x, (float)y),
             fminf((float)(kWorldNavigationTerrainCells - x),
                   (float)(kWorldNavigationTerrainCells - y)));
-        const float edge_alpha = WorldNavigationSmoothstep(edge_tiles / 10.0f);
+        float edge_alpha = WorldNavigationSmoothstep(edge_tiles / 10.0f);
+        /* Fade the chart into the surrounding sea, never its land. Every
+         * corner of a mixed shore/building cell must stay opaque; the next
+         * all-water cell supplies the transition. Marahna reaches this strip. */
+        if (edge_alpha < 1) {
+          for (int dy = -1; dy <= 0; dy++)
+            for (int dx = -1; dx <= 0; dx++) {
+              const int cx = x + dx, cy = y + dy;
+              if (cx >= 0 && cy >= 0 && cx < kWorldNavigationTerrainCells &&
+                  cy < kWorldNavigationTerrainCells && !SimWorldMap_CellIsOpenWater(cx, cy))
+                edge_alpha = 1;
+            }
+        }
         s_world_terrain.vertices[
             WorldNavigationTerrainVertexIndex(x, y)] = (ArRenderVertex2D){
           {output.x, output.y},
@@ -2891,9 +2886,8 @@ static bool DrawWorldNavigationPalace(
     Scene3DPoint focus;
     if (!Scene3D_ProjectWorldPoint(projection->matrix, world[0], world[1], world[2],
             viewport.w, viewport.h, &focus)) return false;
-    /* The authored marker is relative to the unmodified travel centre, not
-     * the newly aimed projection of (0,0,0). Subtracting the latter would
-     * cancel framing motion and detach the Palace from its real location. */
+    /* Native art stays the same size and orientation; only its location
+     * follows inspection. Normal radial travel needs no screen offset. */
     offset = (ArRenderPointF){focus.x - viewport.w * .5f, focus.y - viewport.h * .5f};
   }
   return DrawWorldNavigationCompositionLayer(slot, viewport,

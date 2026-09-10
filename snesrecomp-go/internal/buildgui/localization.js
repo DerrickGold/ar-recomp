@@ -8,6 +8,7 @@
   let workflow = "home", phase = "choose", reviewPurpose = "install";
   let installPath = "", editorTab = "messages", installedExists = false, importPreview = null;
   let catalog = [], saveFailure = "";
+  let fontsDirty = false, fontDraft = [], fontUploads = new Map();
   const expanded = new Set();
   const flowTitles = {install:"Install a language pack",create:"Create a translation",edit:"Continue editing",clone:"Clone a language pack",extract:"Extract a ROM reference"};
   function workflowView() {
@@ -35,8 +36,10 @@
     if (state.project?.origin === "native-source") editorTab = "messages";
     $("details").hidden = !editing || editorTab !== "details";
     $("editing").hidden = !editing || editorTab !== "messages";
+    $("font-panel").hidden = !editing || editorTab !== "fonts";
     $("tab-details").hidden = state.project?.origin === "native-source";
-    for (const name of ["messages","details"]) { $("tab-"+name).setAttribute("aria-selected",String(editorTab===name)); $("tab-"+name).tabIndex=editorTab===name?0:-1; }
+    $("tab-fonts").hidden = state.project?.origin === "native-source";
+    for (const name of ["messages","details","fonts"]) { $("tab-"+name).setAttribute("aria-selected",String(editorTab===name)); $("tab-"+name).tabIndex=editorTab===name?0:-1; }
     $("editor-bar").hidden = !editing;
     $("reference-tools").hidden = !editing;
     $("sharing").hidden = phase !== "review";
@@ -58,13 +61,15 @@
     workflowView();
   }
   function feedback(text, error = false) { $("feedback").textContent = text; $("feedback").dataset.error = String(error); }
-  function hasEdits() { return dirty || detailsDirty || noticeDirty; }
+  function hasEdits() { return dirty || detailsDirty || noticeDirty || fontsDirty; }
   function saveIndicator() {
     const native = state.project?.origin === "native-source";
     $("save-state").textContent = native ? "Read-only reference" : saveFailure ? "Not saved: " + saveFailure : hasEdits() ? "Unsaved changes · save to keep your progress" : "All changes saved in workshop · not automatically installed";
     $("editor-bar").dataset.dirty = String(hasEdits());
     $("save-progress").disabled = busy || !state.project || native || !hasEdits();
     $("save").disabled = busy || !state.project || native || !hasEdits();
+    $("save-fonts").disabled = busy || !state.project || native || !hasEdits();
+    $("font-check").textContent = hasEdits() ? "Save & check coverage" : "Check coverage with game font backend";
   }
   function discard() { return !hasEdits() || window.confirm("Discard unsaved changes? Saved messages, progress and notes will be kept."); }
   function identity() { return {projectID: state.project?.metadata.id, revision: state.project?.revision}; }
@@ -85,6 +90,8 @@
     $("preview").disabled = !message;
     $("independent").disabled = native || !message?.body.trimStart().startsWith("@alias ");
     for (const id of ["install","publish","check","review-install","review-publish"]) $(id).disabled = native;
+    for (const el of $("font-stack").querySelectorAll("input,select,button")) el.disabled = native || busy || el.dataset.unavailable === "true";
+    $("font-add").disabled = native || busy || fontDraft.length >= 9;
     saveIndicator();
     syncImportPreview();
   }
@@ -103,12 +110,56 @@
     const p = state.project; if (!p) return;
     for (const [key, value] of Object.entries(p.metadata)) if ($("metadata").elements.namedItem(key)) $("metadata").elements.namedItem(key).value = value;
     $("metadata").elements.notes.value = p.notes;
-    $("fonts").textContent = "Fonts: " + [p.fonts.primary, ...(p.fonts.fallback || [])].join(" → ") + ". Imported font files and notices are retained. New projects use the bundled ActRaiser Sans font. Font coverage and the final layout must be checked in game.";
+    $("fonts").textContent = "Fonts: " + [p.fonts.primary, ...(p.fonts.fallback || [])].join(" → ") + ". Use the Fonts tab to change the stack or check coverage.";
+    fontDraft = [p.fonts.primary, ...(p.fonts.fallback || [])]; fontUploads = new Map(); fontsDirty = false;
+    $("font-report").replaceChildren(); renderFonts();
     $("notices").replaceChildren(option("", "New notice"));
     for (const name of Object.keys(p.notices).sort()) $("notices").append(option(name, name));
     $("notice").reset();
     detailsDirty = noticeDirty = false;
   }
+  function fontChanged() {
+    fontsDirty=true; saveFailure="";
+    for(const name of fontUploads.keys()) if(!fontDraft.includes(name)) fontUploads.delete(name);
+    $("font-report").replaceChildren(); renderFonts(); saveIndicator();
+  }
+  function renderFonts() {
+    const known = [...new Set(["builtin:actraiser-sans", state.project?.fonts.primary, ...(state.project?.fonts.fallback || []), ...fontUploads.keys(), ...fontDraft].filter(Boolean))];
+    $("font-list").replaceChildren(...fontDraft.map((reference,index)=>{
+      const row=document.createElement("li"); row.className="loc-font-row";
+      const label=document.createElement("label"); label.textContent=index?"Fallback "+index:"Primary font";
+      const select=document.createElement("select"); select.required=true; select.append(option("","Choose a font…"));
+      for(const name of known) select.append(option(name,name==="builtin:actraiser-sans"?"Bundled ActRaiser Sans":name));
+      select.value=reference; select.addEventListener("change",()=>{fontDraft[index]=select.value; fontChanged();}); label.append(select); row.append(label);
+      if(fontUploads.has(reference)){const pending=document.createElement("small");pending.textContent="New file — not saved yet";label.append(pending);}
+      const fileLabel=document.createElement("label"); fileLabel.textContent="Or choose a font file";
+      const file=document.createElement("input"); file.type="file"; file.accept=".ttf,.otf";
+      file.addEventListener("change",()=>{const chosen=file.files[0];if(!chosen)return;if(!chosen.size||chosen.size>64*1024*1024){feedback("Choose a nonempty font up to 64 MiB.",true);file.value="";return;}const path="fonts/"+chosen.name;fontUploads.set(path,chosen);fontDraft[index]=path;fontChanged();}); fileLabel.append(file);row.append(fileLabel);
+      const actions=document.createElement("div");actions.className="loc-row";
+      for(const [text,offset] of [["Move up",-1],["Move down",1],["Remove",0]]) {
+        const button=document.createElement("button");button.type="button";button.textContent=text;button.setAttribute("aria-label",text+" "+(reference||"font "+(index+1)));
+        button.dataset.unavailable=String(offset?index+offset<0||index+offset>=fontDraft.length:fontDraft.length===1);
+        button.disabled=button.dataset.unavailable==="true";
+        button.addEventListener("click",()=>{if(offset)[fontDraft[index],fontDraft[index+offset]]=[fontDraft[index+offset],fontDraft[index]];else fontDraft.splice(index,1);fontChanged();});actions.append(button);
+      }
+      row.append(actions);return row;
+    }));
+    readonly();
+  }
+  $("font-add").addEventListener("click",()=>{if(fontDraft.length<9){fontDraft.push("");fontChanged();$("font-list").lastElementChild.querySelector("select").focus();}});
+  $("font-check").addEventListener("click",async()=>{
+    if(hasEdits()) await saveProgress();
+    if(hasEdits()||busy)return;
+    return run(async()=>{
+      const sample=$("font-sample").value;
+      const result=await json("font-coverage",{...identity(),samples:sample?[sample]:[]});
+      const summary=document.createElement("p");summary.textContent=result.complete?"All "+result.scalars+" checked characters are covered.":result.missingCount+" characters are missing. Showing up to 256, with up to four locations each.";
+      const list=document.createElement("ul");
+      for(const gap of result.missing){const item=document.createElement("li");item.textContent=gap.codepoint+" “"+gap.character+"” — "+gap.locations.map(loc=>loc.messageID?loc.messageID+" · "+loc.source+":"+loc.line:loc.source).join("; ");list.append(item);}
+      const values=document.createElement("p");values.className="loc-help";values.textContent=result.dynamicValues.length?"Live values not resolved: "+result.dynamicValues.join(", ")+". Add a sample above to check a player name.":"No unresolved dynamic values.";
+      $("font-report").replaceChildren(summary,list,values);
+    });
+  });
   async function projects() {
     const rows = await json("projects"), old = $("projects").value;
     $("projects").replaceChildren(option("", "Choose a project…"));
@@ -223,9 +274,23 @@
     return button;
   }
   function emptyBody(ref) { return [...ref.anchors.map(id => "@anchor " + id), "@empty", "@end", ""].join("\n"); }
+  function showShape(p) {
+    const descriptions = [];
+    if (p?.maximum_pages) descriptions.push("Displays up to " + p.maximum_pages + " page(s).");
+    if (p?.maximum_lines) descriptions.push("Up to " + p.maximum_lines + " authored line(s).");
+    if (p?.required_nonempty_lines) descriptions.push("Exactly " + p.required_nonempty_lines + " choices, or intentionally empty.");
+    if (p?.keyboard) descriptions.push("Every page: name field, dash-only underline slot, then " + p.keyboard.rows + " rows of " + p.keyboard.columns + " grapheme keys. Keep backspace and finish in the final two positions. Up to " + p.keyboard.maximum_lines + " normalized lines and " + p.keyboard.maximum_page_bytes + " UTF-8 bytes per page.");
+    for (const rule of p?.table?.rules || []) {
+      const rows = rule.last_line === 255 ? "All rows" : rule.first_line === rule.last_line ? "Row " + (rule.first_line + 1) : "Rows " + (rule.first_line + 1) + "–" + (rule.last_line + 1);
+      descriptions.push(rows + ": " + (rule.native_reserved ? "native artwork is preserved." : rule.fields.join(", ") + " field(s), separated by |. Keep internal blank rows."));
+    }
+    $("shape").hidden = !descriptions.length;
+    $("shape-rules").replaceChildren(...descriptions.map(text => { const item = document.createElement("li"); item.textContent = text; return item; }));
+  }
   async function showMessage(id) {
     const data = await json("message", undefined, {...identity(), id});
     selected = id; message = data.message;
+    showShape(message.reference.presentation);
     $("message-title").textContent = data.location?.title || id;
     $("message-context").textContent = id + " · " + (data.location?.context || data.location?.group_label || "") + "\n" + (message.present ? "Saved in " + message.path : "Not included yet — native US fallback is used until you supply a translation.") + (message.reference.native_in_profile ? "" : " This route is absent in the source release; it is included for cross-region reference.");
     renderReference(data);
@@ -357,22 +422,26 @@
   $("body").addEventListener("input", markDirty); $("message-status").addEventListener("change", markDirty);
   function saveProgress() {
     if (busy || !hasEdits() || state.project?.origin === "native-source") return;
-    for (const [id, changed] of [["metadata", detailsDirty],["notice", noticeDirty]]) {
-      if (changed && !$(id).checkValidity()) { editorTab="details"; workflowView(); $(id).reportValidity(); return; }
+    for (const [id, changed] of [["metadata", detailsDirty],["notice", noticeDirty],["font-stack", fontsDirty]]) {
+      if (changed && !$(id).checkValidity()) { editorTab=id==="font-stack"?"fonts":"details"; workflowView(); $(id).reportValidity(); return; }
     }
     // Capture before run() disables controls: FormData omits disabled fields.
     const fields = Object.fromEntries(new FormData($("metadata"))), notes = fields.notes; delete fields.notes;
     const q = {...identity(), saveMessage:dirty, saveDetails:detailsDirty, saveNotice:noticeDirty, id:selected, body:$("body").value, status:$("message-status").value, metadata:fields, notes, ...Object.fromEntries(new FormData($("notice")))};
+    q.saveFonts=fontsDirty; q.fonts={primary:fontDraft[0],fallback:fontDraft.slice(1)};
+    const uploads=[...fontUploads].filter(([name])=>fontDraft.includes(name));
+    let payload=q;
+    if(fontsDirty&&uploads.length){q.fontPaths=uploads.map(([name])=>name);payload=new FormData();payload.set("request",JSON.stringify(q));uploads.forEach(([,file],i)=>payload.set("font"+i,file));}
     return run(async () => {
       let next;
-      try { next = await json("save", q); }
+      try { next = await json("save", payload); }
       catch (error) { saveFailure=error.message; throw error; }
       await adopt(next, true);
       feedback("Progress saved: message text, translation status, package details and notices. The installed game copy is unchanged.");
     });
   }
   for (const id of ["save", "save-progress"]) $(id).addEventListener("click", saveProgress);
-  for (const id of ["metadata", "notice"]) $(id).addEventListener("submit", event => { event.preventDefault(); saveProgress(); });
+  for (const id of ["metadata", "notice", "font-stack"]) $(id).addEventListener("submit", event => { event.preventDefault(); saveProgress(); });
   document.addEventListener("keydown", event => {
     if (!panel.hidden && phase === "edit" && workflow !== "home" && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); saveProgress(); }
   });
@@ -440,13 +509,13 @@
   }));
   for (const button of panel.querySelectorAll("[data-loc-flow]")) button.addEventListener("click", () => run(async () => {
     if (!discard()) return;
-    dirty=detailsDirty=noticeDirty=false; workflow=button.dataset.locFlow; phase="choose"; installPath=""; importPreview=null; editorTab="messages";
+    dirty=detailsDirty=noticeDirty=fontsDirty=false; fontUploads.clear(); workflow=button.dataset.locFlow; phase="choose"; installPath=""; importPreview=null; editorTab="messages";
     $("download").hidden=true; feedback(""); workflowView(); await projects();
   }));
   for(const button of panel.querySelectorAll("[data-loc-install]")) button.addEventListener("click",()=>run(async()=>{
     installPath=button.dataset.locInstall; importPreview=null; feedback(""); workflowView(); await projects();
   }));
-  function backToLanguages() { return run(async () => { if (discard()) { dirty=detailsDirty=noticeDirty=false; workflow="home"; $("download").hidden=true; feedback(""); workflowView(); await loadCatalog(); window.scrollTo(0,0); $("title").focus({preventScroll:true}); } }); }
+  function backToLanguages() { return run(async () => { if (discard()) { dirty=detailsDirty=noticeDirty=fontsDirty=false; fontUploads.clear(); workflow="home"; $("download").hidden=true; feedback(""); workflowView(); await loadCatalog(); window.scrollTo(0,0); $("title").focus({preventScroll:true}); } }); }
   $("home-button").addEventListener("click", backToLanguages);
   $("installed-home").addEventListener("click", backToLanguages);
   $("back-projects").addEventListener("click", backToLanguages);
@@ -455,11 +524,18 @@
     await prepareReview(purpose);
   }));
   for (const id of ["back-edit","installed-edit"]) $(id).addEventListener("click", () => { phase="edit"; feedback(""); workflowView(); window.scrollTo(0,0); });
-  function editorView(name,focus=false) { editorTab=name; workflowView(); if(focus) $("tab-"+name).focus(); }
-  for(const name of ["messages","details"]) $("tab-"+name).addEventListener("click",()=>editorView(name));
+  function editorView(name,focus=false) {
+    editorTab=name; workflowView();
+    // Tab panels have different heights. Reset their scroll position so the
+    // sticky toolbar cannot conceal the new panel's first heading/controls.
+    panel.scrollIntoView({block:"start"});
+    if(focus) $("tab-"+name).focus({preventScroll:true});
+  }
+  for(const name of ["messages","details","fonts"]) $("tab-"+name).addEventListener("click",()=>editorView(name));
   panel.querySelector(".loc-editor-tabs").addEventListener("keydown",event=>{
     if(["ArrowLeft","ArrowRight","Home","End"].includes(event.key)&&!$("tab-details").hidden) {
-      event.preventDefault(); editorView(event.key==="Home"?"messages":event.key==="End"?"details":editorTab==="messages"?"details":"messages",true);
+      const tabs=["messages","details","fonts"], step=event.key==="ArrowLeft"?-1:1;
+      event.preventDefault(); editorView(event.key==="Home"?tabs[0]:event.key==="End"?tabs[2]:tabs[(tabs.indexOf(editorTab)+step+tabs.length)%tabs.length],true);
     }
   });
   document.addEventListener("pointerdown",event=>{ if(!$("editor-actions").contains(event.target)) $("editor-actions").open=false; });
@@ -485,6 +561,6 @@
   }); }
   window.localizationOpenProject = openProject;
   window.localizationHasEdits = hasEdits;
-  document.addEventListener("workshop:closed", () => { dirty=detailsDirty=noticeDirty=false; });
+  document.addEventListener("workshop:closed", () => { dirty=detailsDirty=noticeDirty=fontsDirty=false; fontUploads.clear(); });
   workflowView();
 })();

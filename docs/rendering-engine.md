@@ -1183,6 +1183,18 @@ bundled runtime's widescreen/PPU interfaces:
   it; the accessibility font preference must not force a native fallback merely
   because HUD scale is independently small. Repeated presentation reuses the
   fitted bitmap through the text-surface cache.
+- The enhanced-text cache uses both an entry bound and a soft texture-byte
+  budget. Fitting probes run without pins and consume their results immediately;
+  the final preparation pass pins every acquired surface until that frame has
+  been consumed. Neither byte pressure nor entry pressure may evict a pinned
+  handle. A miss with all slots pinned fails cleanly instead. An unpinned
+  acquisition retains at least its newly returned entry even when that entry
+  alone exceeds the byte budget. Statistics reset clears activity counters,
+  not live resource ownership, and starts a new peak at the current byte size.
+  Cache keys include the enabled shadow and its palette color. The portable
+  shadow pass traverses against its offset to preserve original coverage
+  without allocating a temporary alpha plane; invalid inputs remain distinct
+  from retryable font/resource failures.
 - Renderer-backed F2/`AR_SHOT_AT_GF` captures read the final composited output,
   so scaled-HUD regressions include the host overlay. Pure headless/oracle runs
   bind no overlay surfaces and preserve the historical internal framebuffer
@@ -2766,6 +2778,18 @@ is disabled throughout, verifying the navigation controls remain independent.
 
 #### Native-resolution ground and perspective separation
 
+Current sanctuary capture follows the complete retained tile signature, not
+the town number: `$C2/$C3/$CA/$CB` selects the shared cathedral and the `$C0`
+family selects the temple. This includes Marahna saves with the ordinary
+cathedral. The same protected 2x2 footprint supplies clean model-owned ground.
+
+The globe's chart-boundary fade applies only to pure ocean. All four corners
+of every mixed shore/land cell remain opaque, including Marahna's southern
+plots near world row 127. `SimWorldMap_CellIsOpenWater` classifies immutable
+palette identities, conservatively including all wave variants, while the
+presenter owns the fade and keys it to geography even with relief disabled.
+See `docs/world-navigation-cache-audit.md` for the Marahna regression coverage.
+
 Fallback checkpoint `a41b1e4` preserves the complete pre-native-ground globe.
 The detailed-ground stage adds 16x16-pixel native terrain cells inside the
 existing 2048x2048 atlas, without taking screenshots or requiring town visits.
@@ -3243,9 +3267,9 @@ disabling its master clears this temporary state. It works independently of
 the town master and Free/Dynamic town mode without changing persisted poses,
 native WRAM coordinates or save data. Retained-frame refresh also copies this
 host-owned camera state while emulation is paused; the captured game scene
-remains immutable. The initial orbit reused the captured camera fields; the
-centering refinement below adds one application-owned `FrameSlot` float, not
-a runner ABI field or renderer/backend type.
+remains immutable. Orbit and zoom reuse the captured camera fields. Navigation
+now uses an always-centered radial eye, so the former application-owned
+inspection-centering blend is no longer captured or updated.
 
 The Palace remains the original billboard, offset to its actual travel
 location as the globe rotates and omitted on the far hemisphere. Destination
@@ -3335,51 +3359,48 @@ replay `runs/20260908-034816/` retains all 19 gf400–2200 screenshots byte-for-
 against `runs/20260908-032849/`; sharing the environment definitions changes
 neither the normal travel image nor the chosen town model detail.
 
-#### Smooth globe inspection framing
+#### Centered radial navigation framing
 
-Checkpoint `b9be38a` preserves the current original-art mountain appearance and
-the initial centering implementation. Inspection now aims at the planet center
-instead of the tilted town tangent above it. Target translation and camera
-distance change together to preserve the center's axial depth, with the actual
-eye reconstructed from the same view matrix. Horizon culling, shared GPU depth,
-cloud projection and atmosphere therefore see the same camera; this is not a
-screen-space offset. Zero blend is an exact no-op, with no override of the
-player's zoom distance.
+Navigation always looks radially through the native travel location and globe
+center. Its camera pitch and yaw are zero, independently of the persisted
+town camera's oblique pose. The terrain under the original top-down Palace
+sprite therefore faces the eye; centering a still-tilted town camera would
+not fix that perspective mismatch. Native heading and zoom scaling remain,
+as does visit-local inspection zoom. Close zoom can crop the globe equally
+at opposite viewport edges; this is not an automatic whole-planet fit.
 
-The host owns an explicit 0..1 focus blend, captured as
-`sim_world_inspection_blend` alongside orbit state and refreshed for retained
-frames. It approaches inspection with a 0.16-second exponential time constant
-and returns with 0.65 seconds; this is frame-rate independent, with the tiny
-tail snapped to the target. Holding orbit targets full centering independently
-of angle wrap. A positive visit-local zoom offset uses smoothstep over the first
-distance unit, so deliberate zoom-out keeps centered framing after release;
-returning to the original distance or resetting restores travel framing. This
-state clears on leaving navigation/master disable and is never persisted.
+Manual inspection rotates the globe's frame beneath the same centered eye.
+Release returns that rotation with the existing damped orbit helper; no
+separate centering transition is needed. The obsolete focus-blend state is
+removed from the host camera, `FrameSlot`, and retained-frame refresh. This
+simplifies application-owned state without changing runner ABI, settings,
+emulated coordinates, save data, backend formats, shaders or effect controls.
+Horizon culling, GPU depth, clouds, atmosphere and Advent's global clearance
+bound all use the same view matrix and eye, with no screen-space correction.
 
-The original Palace billboard subtracts the unmodified travel screen center
-when applying its projected location. Subtracting the newly projected tangent
-origin instead would cancel reframing and leave it detached from the terrain.
-The destination UI remains screen-space. Camera tests cover full-turn wrap,
-invalid time steps, one large versus many small updates, intermediate/full
-zoom-out focus, reset and visit isolation. The production GPU test measures
-the atmospheric envelope converging to the viewport center at distances 3, 5
-and 10, with exact image restoration at zero blend. It also verifies near/far
-authored-building occlusion with the reframed eye, Palace translation without
-orbit, and unchanged UI masks on both axes. Billboard translation may change
-coverage by one raster row due to fractional pixel alignment, not scaling.
+The native Palace keeps its size and orientation. Normal travel and zoom leave
+its authored screen placement unchanged. Inspection offsets it to the actual
+travel location and hides it on the far hemisphere; the destination UI stays
+fixed. The separate enhanced Sky Palace backdrop retains its oblique daylight
+horizon camera and selected 3x diameter unchanged.
 
-The populated Metal captures in
-`/private/tmp/actraiser-globe-framing.Jhdjfe/` cover centered front, east, back,
-west, both poles and mixed-axis views with all six towns/1048 objects. Visual
-inspection confirms that the planet no longer sits against the bottom edge,
-and native terrain/model and full-ocean weather rotation still render. Exact
-front/return equality is preserved. Debug and Release game builds succeed;
-the expanded GPU checks pass. Normal six-town travel in
-`runs/20260908-040418/` matches all 19 gf400–2200 screenshots from
-`runs/20260908-034816/` byte-for-byte, and both source/isolated-save SHA256 values
-remain `480a8375b6255ad681202986640c5b06889458125ec0f82641a0e4fb425c0d45`.
-This closes the frozen-render framing check, not live mouse/pad acceptance,
-moving-weather acceptance, mountain-boundary polish or cross-platform testing.
+Camera tests cover held-neutral input without redundant redraws, full-turn
+wrap, invalid elapsed time, frame-rate-independent return, zoom/reset and
+visit isolation. GPU tests require the atmospheric envelope to stay centered
+within two pixels at distances 3, 5 and 10, with exact image equality across
+five inherited town poses. Marker/UI masks, front/return restoration,
+near/far building occlusion, all-six-town quality/effect toggles and raised
+terrain Advent clearance remain covered. The oblique offscreen-anchor/visible-
+roof regression now uses the still-oblique Sky Palace camera. Its fake depth
+pass explicitly binds the supplied device context, rather than a previous
+test's expired output-setup context.
+
+Checkpoint `b9be38a` retains the superseded inspection-only blend, with its
+historical captures in `/private/tmp/actraiser-globe-framing.Jhdjfe/`. Current
+centered navigation evidence is in
+`/private/tmp/actraiser-centered-navigation.2e0hx3/`; six captured Sky Palace
+town views remain byte-identical to the selected 3x implementation. See
+`docs/world-navigation-cache-audit.md` for validation and measurement limits.
 
 #### Density-shaped atmospheric halo and cloud limb
 

@@ -177,6 +177,113 @@ Evidence, commands and run manifest: `/private/tmp/actraiser-palace-3x.UDZaQP/`.
 Production capture: `runs/20260908-181433/shot_800.ppm`; selected preview:
 `runs/20260908-175911/shot_800.ppm`.
 
+## Centered navigation camera
+
+The navigation follow-up on `wip-localization` replaces the inherited oblique
+town camera with a radial eye through the travel location and planet center.
+Normal travel, zoom and manual globe inspection now share centered framing;
+the original top-down Palace sprite faces correspondingly top-down terrain.
+The separate 3x Sky Palace horizon camera is unchanged. No art, terrain
+resolution, model detail, LOD threshold, weather sample or effect control is
+reduced. Existing zoom can still crop a close planet symmetrically.
+
+The obsolete inspection-centering blend is removed from application-owned
+camera/`FrameSlot` state and retained-frame refresh. Runner ABI, backend,
+settings and native gameplay contracts remain unchanged. No new cache, draw
+pass, allocation or graphics dependency is introduced. Shared view/eye math
+continues to own horizon culling, occlusion, clouds and Advent clearance.
+
+Debug/Release builds and all 149 CTests pass. Both ordinary and ASan/UBSan GPU
+sweeps pass with 252 captures each, covering all six towns, orbit/return,
+native markers/UI, quality and weather toggles, and raised-terrain Advent.
+The six ordinary Sky Palace captures remain byte-identical to the selected
+3x baseline. The oblique tall-roof/offscreen-anchor fixture now exercises the
+still-oblique Palace camera; the fake depth pass binds its current device
+context directly instead of retaining a prior test's expired stack context.
+The source and isolated save SHA256 values remain
+`480a8375b6255ad681202986640c5b06889458125ec0f82641a0e4fb425c0d45`.
+
+Four independent runs per camera use ABBA-ABBA order, the same 2240-frame
+six-town replay, 1792x1344 Metal output and frozen clouds. No builds, tests or
+image encodes from this task overlap timing; unrelated localization work was
+active on the shared machine. Each replay supplies 18 complete steady windows
+after entry. All 19 gf400-2200 screenshots repeat exactly within each camera
+variant, and final WRAM is identical across all eight replays.
+
+| CPU presentation time | Before | Centered radial |
+| --- | --- | --- |
+| Median of four runs | 7.519 ms | 8.256 ms |
+| Run-average range | 7.331-7.676 ms | 8.115-8.395 ms |
+
+The centered view has a measured 0.737 ms (9.8%) steady CPU cost increase,
+not a performance improvement. Cloud work rises from 2.336 to 2.671 ms,
+depth projection from 1.041 to 1.227 ms, and submission from 1.007 to
+1.113 ms. This is consistent with the different visible globe coverage;
+quality/effect reductions were not used to hide that cost. It is not an
+isolated GPU timing, moving-weather benchmark or cross-platform FPS claim.
+The existing fade timing and entry/leave controls are unchanged.
+
+Evidence and reproducible timing analysis:
+`/private/tmp/actraiser-centered-navigation.2e0hx3/`.
+
+## Marahna sanctuary and coastal opacity
+
+The Marahna follow-up fixes two independent source/coverage mistakes. The
+populated retained map contains a complete `$C2/$C3/$CA/$CB` cathedral at
+cell (17,17), but navigation previously searched Marahna only for the `$C0`
+temple variant. Sanctuary capture now selects the shared authored model from
+the complete four-cell signature, matching the full town classifier. Both
+variants retain the same protected 2x2 footprint and development gate.
+
+The ten-cell chart-boundary fade previously made actual land translucent.
+Marahna's window starts at world row 96 and reaches row 127, so its southern
+plots and coastline fell inside that fade. Every corner of a non-open-water
+cell now stays opaque. Only adjacent pure ocean supplies the transition to
+the full-globe sea; no shoreline, terrain height, model LOD or atlas texel is
+reshaped to conceal the defect.
+
+`SimWorldMap` owns a 256-entry categorical source-tile table. Its public
+`CellIsOpenWater` query returns true only for all-`$10/$11` ocean/wave palette
+samples; even a single non-water texel protects a mixed shore. Animated tiles
+must qualify in every native wave phase, keeping opacity independent of time
+and RGB lighting. The presenter queries only incident cells in the boundary
+strip while rebuilding an existing projection cache. Its geography key now
+tracks the published map directly, so shoreline changes invalidate opacity
+even when optional relief is disabled. This adds no per-frame pixel scan,
+heap allocation, texture, draw pass, backend type or runner/frame ABI field.
+Authored town models and material classification remain in portable SIM
+modules; presentation owns the boundary-fade policy.
+
+Coverage includes both sanctuary variants in every town, cross-page 2x2
+signatures, incomplete/stale data rejection, protected ground masks, palette
+identity versus merely blue RGB, mixed shores, all four map edges, wave
+phases, held-frame replay, resource reset and live map changes with relief
+On/Off. The captured Low cathedral test keeps ground cleanup and the safety
+envelope enabled in both images, removing only drawable model geometry, so
+erasing its old 2D glyph cannot produce a false pass.
+
+Debug/Release builds and all 149 CTests pass. The ordinary and ASan/UBSan
+GPU sweeps each pass with 254 captures, including six-town quality/effect
+matrices, cloud motion, view-family restoration and raised-terrain Advent.
+Four independent runs per revision use ABBA-ABBA order, the same 2240-frame
+six-town replay, 1792x1344 Metal output, frozen clouds and one frame-1800
+screenshot per run. All four screenshots repeat exactly within each revision,
+and final WRAM is identical across all eight runs. The original and isolated
+save hashes remain unchanged.
+
+Across 18 complete steady windows per run, median CPU presentation time is
+8.252 ms before (run-average range 8.193-8.432) and 8.316 ms after
+(8.269-8.784). The 0.064 ms/0.8% median difference and overlapping ranges do
+not establish a material steady regression on this host. There were no
+concurrent builds/tests/encodes from this task; unrelated localization work
+remained active on the shared machine. These are CPU timings, not isolated
+GPU measurements or a cross-platform FPS guarantee. No visual quality or
+effect settings were reduced for this fix.
+
+Evidence: `/private/tmp/actraiser-marahna-fixes.AuTVyL/`. In-game six-town
+visual replay: `runs/20260908-212206/`. Close-up of the production GPU capture:
+`runs/marahna-globe-fixes/marahna.png`.
+
 ## Remaining measurement limits
 
 The geometry stream still reaches the backend each frame. Its roughly 0.7 ms

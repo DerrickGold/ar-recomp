@@ -263,6 +263,16 @@ selector `>` are not new font glyphs. Copyright `$02:A9DE` is not claimed.
 Other ROMs' mode/difficulty menus are separate semantic routes, not automatic
 translations of the US Continue/New game workflow.
 
+Title exit has a separate lifetime boundary: frame capture reports when Mode 7
+has a nonidentity scale/rotation matrix. The runtime then releases the title
+text and Professional-selector owners **after** consuming pending fixed-text
+observations and before refreshing/publishing the frame. That order prevents
+a redraw queued on the first spin frame from resurrecting a flat replacement.
+Returning to an identity matrix alone does not restore it; a new native compose
+does. Other owners, including city HUD text over the transformed world map,
+are retained. This is native-art handback during the title exit, not a Mode 7
+projection of the translated font; transient exit lettering remains native.
+
 The action HUD template `$02:8E7E` uploads to `$7F:B040-$B0BF`. Its packed
 graphical labels are not ASCII: TIME uses tiles `$01-$04`, SCORE `$05-$08,$04`,
 PLAYER `$09-$0E`, ACT `$22-$27`. `$00:A4D6` writes ENEMY `$0F-$14` at
@@ -377,6 +387,37 @@ then reduce gutters from one native cell to two native pixels before reducing
 the **shared** font size. Individual column headings are not independently
 shrunk. Native borders, row anchors, divider artwork and game state do not
 move; title rows and Master/cursor-based layouts remain separate contracts.
+
+Fixed-table content shapes are defined in
+`tools/data/localization/presentation-shapes-v1.json`. The contract generator
+emits Go author metadata and the portable C row registry; the game grid consults
+the latter before publishing geometry. This shares accepted field counts and
+reserved rows without moving native pixel coordinates into authoring or the
+renderer. Validators count normalized logical rows, retaining internal blank
+rows but discarding leading/trailing blanks. The JP reference speed scale has
+eight positions; the US-runtime scale has ten. Profile-specific source shapes
+do not grant playable packs a different native input range.
+
+Dialogue session ABI 2 retains a compact authored-boundary bitmap beside each
+resolved page. Literal `|` bytes and explicit authored newlines set bits;
+captured names/numbers, localized terms (including aliases), and icons cannot
+create them. Fixed-text normalization remaps that structure while collapsing
+whitespace; inserted value newlines become inline spaces in tables. Compose
+state ABI 7 retains the map and frame ABI 21 copies it into the pointer-free
+text pool (one bit per UTF-8 byte, 2 KiB maximum per frame). Grid parsing and
+column-plan cache keys consume that structure rather than reinterpreting all
+resolved punctuation as layout. Ordinary dialogue/keyboard pipes remain text.
+This avoids changing or banning valid player-name characters to protect menus.
+
+The playable alphabet keyboard also has a generated content contract. Its
+last five rows contain 13 space-separated grapheme keys; the preceding rows
+hold the name and underline slot. Native input owns the last row's backspace
+and finish columns, so those typed objects cannot be moved by a translation.
+The author validator checks all pages and shares its key reader with native
+selection mapping. The builder's grapheme data is generated from the same
+embedded Unicode properties as the game, without a runtime Python dependency.
+The 63-line/3,072-byte author budget leaves room for the runtime page indicator,
+Unicode name expansion and enlarged gutters in the 4,096-byte compose buffer.
 An unfit report retains native rendering rather than masking a partial table.
 
 The renderer caches eight content/font/settings/extent-specific column plans

@@ -32,17 +32,10 @@ var localizationCSS string
 var localizationJS string
 
 type localizationSession struct {
-	mu             sync.Mutex
-	store          *lk.AuthorStore
-	current        *lk.AuthorProject
-	reference      *lk.AuthorProject
-	export         *localizationExport
-	pendingImport  *localizationImport
-	native         *lk.AuthorProject
-	nativeChecked  bool
-	nativeManifest os.FileInfo
-	nativeError    error
-	nativeRetry    time.Time
+	mu     sync.Mutex
+	editMu sync.Mutex
+	initMu sync.Mutex
+	localizationStateData
 }
 
 type localizationExport struct {
@@ -71,9 +64,14 @@ type localizationRequest struct {
 	SaveDetails      bool                 `json:"saveDetails"`
 	SaveNotice       bool                 `json:"saveNotice"`
 	ConfirmUninstall bool                 `json:"confirmUninstall"`
-	PreviewImport    bool                 `json:"previewImport"`
-	ImportToken      string               `json:"importToken"`
-	Enabled          bool                 `json:"enabled"`
+	SaveFonts        bool                 `json:"saveFonts"`
+	Fonts            lk.PackFonts         `json:"fonts"`
+	FontPaths        []string             `json:"fontPaths"`
+	Samples          []string             `json:"samples"`
+	fontUploads      map[string][]byte
+	PreviewImport    bool   `json:"previewImport"`
+	ImportToken      string `json:"importToken"`
+	Enabled          bool   `json:"enabled"`
 }
 
 func (app *application) localizationRoot() string {
@@ -120,6 +118,12 @@ func (app *application) serveLocalization(w http.ResponseWriter, r *http.Request
 			if upload != nil && upload.cleanup != nil {
 				defer upload.cleanup()
 			}
+		} else if endpoint == "save" && strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+			var cleanup func()
+			q, cleanup, err = app.prepareLocalizationFontSave(w, r)
+			if cleanup != nil {
+				defer cleanup()
+			}
 		} else {
 			q, err = decodeLocalizationRequest(w, r)
 		}
@@ -128,24 +132,49 @@ func (app *application) serveLocalization(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.store == nil {
-		s.store, err = lk.NewAuthorStore(filepath.Join(app.localizationRoot(), "projects"))
-		if err != nil {
-			writeJSONError(w, 400, err.Error())
-			return
+	// A writer owns its detached working snapshot. Other readers/status polls
+	// keep using the previous immutable project until publication. The separate
+	// writer mutex orders mutations without holding the state lock over I/O.
+	reply := &localizationReply{}
+	err = func() error {
+		if r.Method == http.MethodPost && endpoint != "font-coverage" {
+			s.editMu.Lock()
+			defer s.editMu.Unlock()
 		}
-	}
-	if r.Method == http.MethodGet {
-		err = app.readLocalization(w, r, endpoint)
-	} else if upload != nil {
-		err = app.commitLocalizationUpload(w, r, upload)
-	} else {
-		err = app.mutateLocalization(w, r, endpoint, q)
-	}
+		if err := r.Context().Err(); err != nil {
+			return err
+		}
+		work, err := app.localizationSnapshot()
+		if err != nil {
+			return err
+		}
+		if r.Method == http.MethodGet {
+			return work.readLocalization(reply, r, endpoint)
+		}
+		if endpoint == "font-coverage" {
+			if err := work.checkLocalizationIdentity(q.ProjectID, q.Revision); err != nil {
+				return err
+			}
+			report, err := work.checkFontCoverage(r.Context(), work.current, q.Samples)
+			if err == nil {
+				reply.json(200, report)
+			}
+			return err
+		}
+		if upload != nil {
+			err = work.commitLocalizationUpload(reply, r, upload)
+		} else {
+			err = work.mutateLocalization(reply, r, endpoint, q)
+		}
+		s.mu.Lock()
+		s.localizationStateData = work.localizationStateData
+		s.mu.Unlock()
+		return err
+	}()
 	if err != nil {
 		writeLocalizationError(w, err)
+	} else {
+		reply.write(w, r)
 	}
 }
 
@@ -163,7 +192,12 @@ func decodeLocalizationRequest(w http.ResponseWriter, r *http.Request) (localiza
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		return q, fmt.Errorf("expected application/json")
 	}
-	decoder := json.NewDecoder(r.Body)
+	return decodeLocalizationJSON(r.Body)
+}
+
+func decodeLocalizationJSON(input io.Reader) (localizationRequest, error) {
+	var q localizationRequest
+	decoder := json.NewDecoder(input)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&q); err != nil {
 		return q, err
@@ -190,9 +224,9 @@ func (app *application) serveLocalizationDownload(w http.ResponseWriter, r *http
 	http.ServeContent(w, r, export.name, time.Time{}, bytes.NewReader(export.data))
 }
 
-func (app *application) localizationState() map[string]any {
-	s := &app.localization
-	state := map[string]any{"project": nil, "root": app.localizationRoot()}
+func (work *localizationWork) localizationState() map[string]any {
+	s := work
+	state := map[string]any{"project": nil, "root": work.root}
 	if s.current != nil {
 		p := s.current
 		state["project"] = map[string]any{"metadata": p.Pack().Manifest().Metadata(), "revision": p.ProjectRevision(), "origin": p.Origin(), "notes": p.Notes(), "notices": p.Notices(), "fonts": p.Pack().Manifest().Fonts(), "totals": p.Pack().Workspace().Children("")}
@@ -200,59 +234,17 @@ func (app *application) localizationState() map[string]any {
 	if s.reference != nil {
 		state["reference"] = s.reference.Pack().Manifest().Metadata()
 	}
-	state["sourceAvailable"] = app.nativeLocalizationSource() != nil
+	state["sourceAvailable"] = work.nativeLocalizationSource() != nil
 	return state
 }
 
-// Reused until the publication marker changes. Opening/importing a translation
-// must not require a separate, undiscoverable reference selection.
-func (app *application) nativeLocalizationSource() *lk.AuthorProject {
-	s := &app.localization
-	if !s.nativeChecked {
-		s.nativeChecked = true
-		pack, err := lk.OpenNativeUSSource(filepath.Join(app.localizationRoot(), "native-us"))
-		s.nativeError = err
-		if pack != nil && err == nil {
-			s.native, s.nativeError = lk.NewSourceProject(pack)
-		}
-	}
-	return s.native
-}
-
-// Poll only the publication marker while building; never rescan all messages
-// on every 500 ms status request. The installer publishes pack.ini last and
-// does not modify the version files underneath an active manifest. Failed
-// validation retries slowly so a repaired dependency can be picked up too.
-// Caller holds localization.mu, independently of the build's log mutex.
-func (app *application) refreshNativeLocalizationSource() {
-	s := &app.localization
-	info, err := os.Lstat(filepath.Join(app.localizationRoot(), "native-us", "pack.ini"))
-	unchanged := err == nil && s.nativeManifest != nil && os.SameFile(info, s.nativeManifest) && info.Size() == s.nativeManifest.Size() && info.ModTime().Equal(s.nativeManifest.ModTime()) && info.Mode() == s.nativeManifest.Mode()
-	if unchanged && s.nativeChecked && (s.native != nil || time.Now().Before(s.nativeRetry)) {
-		return
-	}
-	s.native, s.nativeChecked, s.nativeManifest = nil, false, info
-	s.nativeRetry = time.Now().Add(2 * time.Second)
-	app.nativeLocalizationSource()
-}
-
-func (app *application) localizationAvailability() (bool, string) {
-	app.localization.mu.Lock()
-	defer app.localization.mu.Unlock()
-	app.refreshNativeLocalizationSource()
-	if err := app.localization.nativeError; err != nil {
-		return false, "The native US language source needs attention: " + err.Error()
-	}
-	return app.localization.native != nil, ""
-}
-
-func (app *application) localizationReference(id string) *lk.AuthorMessageView {
-	view, _ := app.localizationReferenceWithMetadata(id)
+func (work *localizationWork) localizationReference(id string) *lk.AuthorMessageView {
+	view, _ := work.localizationReferenceWithMetadata(id)
 	return view
 }
 
-func (app *application) localizationReferenceWithMetadata(id string) (*lk.AuthorMessageView, *lk.PackMetadata) {
-	for _, p := range []*lk.AuthorProject{app.localization.reference, app.nativeLocalizationSource()} {
+func (work *localizationWork) localizationReferenceWithMetadata(id string) (*lk.AuthorMessageView, *lk.PackMetadata) {
+	for _, p := range []*lk.AuthorProject{work.reference, work.nativeLocalizationSource()} {
 		if p != nil {
 			if v, ok := p.Pack().Workspace().Message(id); ok && v.Present {
 				metadata := p.Pack().Manifest().Metadata()
@@ -263,9 +255,9 @@ func (app *application) localizationReferenceWithMetadata(id string) (*lk.Author
 	return nil, nil
 }
 
-func (app *application) locationTree(parent string) []lk.AuthorTreeEntry {
-	w := app.localization.current.Pack().Workspace()
-	refs, _ := lk.AuthorReferences(app.localization.current.Pack().Manifest().Metadata().SourceProfile)
+func (work *localizationWork) locationTree(parent string) []lk.AuthorTreeEntry {
+	w := work.current.Pack().Workspace()
+	refs, _ := lk.AuthorReferences(work.current.Pack().Manifest().Metadata().SourceProfile)
 	groups := map[string]*lk.AuthorTreeEntry{}
 	parents := map[string]string{}
 	order := map[string]int{}
@@ -300,7 +292,7 @@ func (app *application) locationTree(parent string) []lk.AuthorTreeEntry {
 		for _, loc := range locations {
 			order[loc.Group] = loc.CategoryOrder
 			if parent == loc.Group {
-				row.Label = app.localizationMessageTitle(ref.ID, loc)
+				row.Label = work.localizationMessageTitle(ref.ID, loc)
 				if len(locations) > 1 {
 					row.Label += " [shared]"
 				}
@@ -341,11 +333,11 @@ func (app *application) locationTree(parent string) []lk.AuthorTreeEntry {
 // Opaque ROM-wrapper/slot names are useful IDs, not useful translator labels.
 // Resolve only requested labels through the shared parser; keep prose out of
 // collapsed groups and retain the exact semantic ID in the editor tooltip.
-func (app *application) localizationMessageTitle(id string, location lk.AuthorLocation) string {
+func (work *localizationWork) localizationMessageTitle(id string, location lk.AuthorLocation) string {
 	if !(strings.Contains(location.Title, "wrapper ") || strings.Contains(location.Title, "slot ")) {
 		return location.Title
 	}
-	for _, project := range []*lk.AuthorProject{app.nativeLocalizationSource(), app.localization.current} {
+	for _, project := range []*lk.AuthorProject{work.nativeLocalizationSource(), work.current} {
 		if project == nil {
 			continue
 		}
@@ -377,26 +369,26 @@ func (app *application) localizationMessageTitle(id string, location lk.AuthorLo
 	return location.Title
 }
 
-func (app *application) readLocalization(w http.ResponseWriter, r *http.Request, endpoint string) error {
-	s := &app.localization
+func (work *localizationWork) readLocalization(w *localizationReply, r *http.Request, endpoint string) error {
+	s := work
 	switch endpoint {
 	case "state":
-		app.refreshNativeLocalizationSource()
-		writeJSON(w, 200, app.localizationState())
+		work.refreshNativeLocalizationSource()
+		w.json(200, work.localizationState())
 		return nil
 	case "projects":
 		rows, err := s.store.List()
 		if err != nil {
 			return err
 		}
-		writeJSON(w, 200, rows)
+		w.json(200, rows)
 		return nil
 	case "catalog":
-		rows, err := app.localizationCatalog()
+		rows, err := work.localizationCatalog()
 		if err != nil {
 			return err
 		}
-		writeJSON(w, 200, rows)
+		w.json(200, rows)
 		return nil
 	}
 	if s.current == nil {
@@ -409,10 +401,10 @@ func (app *application) readLocalization(w http.ResponseWriter, r *http.Request,
 	switch endpoint {
 	case "tree":
 		if r.URL.Query().Get("view") == "locations" {
-			writeJSON(w, 200, app.locationTree(r.URL.Query().Get("parent")))
+			w.json(200, work.locationTree(r.URL.Query().Get("parent")))
 			return nil
 		}
-		writeJSON(w, 200, workspace.Children(r.URL.Query().Get("parent")))
+		w.json(200, workspace.Children(r.URL.Query().Get("parent")))
 	case "message":
 		id := r.URL.Query().Get("id")
 		view, ok := workspace.Message(id)
@@ -420,13 +412,13 @@ func (app *application) readLocalization(w http.ResponseWriter, r *http.Request,
 			return fmt.Errorf("unknown message")
 		}
 		location := lk.AuthorMessageLocation(id)
-		location.Title = app.localizationMessageTitle(id, location)
+		location.Title = work.localizationMessageTitle(id, location)
 		result := map[string]any{"message": view, "location": location}
-		if ref, metadata := app.localizationReferenceWithMetadata(id); ref != nil {
+		if ref, metadata := work.localizationReferenceWithMetadata(id); ref != nil {
 			result["reference"] = ref
 			result["referenceMetadata"] = metadata
 		}
-		writeJSON(w, 200, result)
+		w.json(200, result)
 	case "search":
 		q := r.URL.Query()
 		needle, status := strings.ToLower(q.Get("q")), q.Get("status")
@@ -451,7 +443,7 @@ func (app *application) readLocalization(w http.ResponseWriter, r *http.Request,
 				for _, place := range lk.AuthorMessageLocations(ref.ID) {
 					haystack += " " + place.Title + " " + place.RootLabel + " " + place.GroupLabel + " " + place.Context
 				}
-				if source := app.localizationReference(ref.ID); source != nil {
+				if source := work.localizationReference(ref.ID); source != nil {
 					haystack += " " + source.Body
 				}
 				if !strings.Contains(strings.ToLower(haystack), needle) {
@@ -459,64 +451,64 @@ func (app *application) readLocalization(w http.ResponseWriter, r *http.Request,
 				}
 			}
 			if total >= offset && len(rows) < 60 {
-				rows = append(rows, map[string]any{"id": ref.ID, "title": app.localizationMessageTitle(ref.ID, loc), "group": loc.GroupLabel, "status": v.Status, "present": v.Present})
+				rows = append(rows, map[string]any{"id": ref.ID, "title": work.localizationMessageTitle(ref.ID, loc), "group": loc.GroupLabel, "status": v.Status, "present": v.Present})
 			}
 			total++
 		}
-		writeJSON(w, 200, map[string]any{"rows": rows, "total": total, "offset": offset})
+		w.json(200, map[string]any{"rows": rows, "total": total, "offset": offset})
 	default:
 		return fmt.Errorf("unknown localization endpoint")
 	}
 	return nil
 }
 
-func (app *application) saveLocalization(p *lk.AuthorProject, expected string) error {
-	if err := app.localization.store.Save(p, expected); err != nil {
+func (work *localizationWork) saveLocalization(p *lk.AuthorProject, expected string) error {
+	if err := work.store.Save(p, expected); err != nil {
 		return err
 	}
-	app.localization.current = p
+	work.current = p
 	return nil
 }
 
-func (app *application) mutateLocalization(w http.ResponseWriter, r *http.Request, endpoint string, q localizationRequest) error {
-	s := &app.localization
+func (work *localizationWork) mutateLocalization(w *localizationReply, r *http.Request, endpoint string, q localizationRequest) error {
+	s := work
 	if endpoint == "set-enabled" {
-		if err := lk.SetLanguagePackEnabled(filepath.Join(app.localizationRoot(), "packs"), q.Directory, q.ID, q.Expected, q.Enabled); err != nil {
+		if err := lk.SetLanguagePackEnabled(filepath.Join(work.root, "packs"), q.Directory, q.ID, q.Expected, q.Enabled); err != nil {
 			return err
 		}
-		writeJSON(w, 200, map[string]any{"enabled": q.Enabled, "message": "Package availability saved. Restart the game to refresh its language selector."})
+		w.json(200, map[string]any{"enabled": q.Enabled, "message": "Package availability saved. Restart the game to refresh its language selector."})
 		return nil
 	}
 	if endpoint == "accept-import" {
 		if s.pendingImport == nil || q.ImportToken != s.pendingImport.token {
 			return fmt.Errorf("%w: import preview expired; select the pack again", lk.ErrProjectConflict)
 		}
-		if err := app.acceptLocalizationImport(s.pendingImport.project, q.NewID, q.Replace, q.Expected); err != nil {
+		if err := work.acceptLocalizationImport(s.pendingImport.project, q.NewID, q.Replace, q.Expected); err != nil {
 			return err
 		}
 		s.pendingImport = nil
-		writeJSON(w, 200, app.localizationState())
+		w.json(200, work.localizationState())
 		return nil
 	}
 	if endpoint == "uninstall" {
 		if !q.ConfirmUninstall {
 			return fmt.Errorf("confirm removal of this installed package first")
 		}
-		backup, err := lk.UninstallLanguagePack(filepath.Join(app.localizationRoot(), "packs"), q.Directory, q.ID, q.Expected)
+		backup, err := lk.UninstallLanguagePack(filepath.Join(work.root, "packs"), q.Directory, q.ID, q.Expected)
 		if err != nil {
 			return err
 		}
-		writeJSON(w, 200, map[string]string{"backup": backup, "message": "Uninstalled from game discovery. Restart the game. Your workshop project and installed files are retained; the manifest was saved for recovery."})
+		w.json(200, map[string]string{"backup": backup, "message": "Uninstalled from game discovery. Restart the game. Your workshop project and installed files are retained; the manifest was saved for recovery."})
 		return nil
 	}
 	if endpoint == "open" || endpoint == "reference" {
 		if endpoint == "reference" {
-			if err := app.checkLocalizationIdentity(q.ProjectID, q.Revision); err != nil {
+			if err := work.checkLocalizationIdentity(q.ProjectID, q.Revision); err != nil {
 				return err
 			}
 			if q.ID == "" {
 				s.reference = nil // Automatic Native US fallback.
-				writeJSON(w, 200, app.localizationState())
+				w.json(200, work.localizationState())
 				return nil
 			}
 		}
@@ -529,7 +521,7 @@ func (app *application) mutateLocalization(w http.ResponseWriter, r *http.Reques
 		} else {
 			s.reference = p
 		}
-		writeJSON(w, 200, app.localizationState())
+		w.json(200, work.localizationState())
 		return nil
 	}
 	if endpoint == "directory" {
@@ -541,12 +533,12 @@ func (app *application) mutateLocalization(w http.ResponseWriter, r *http.Reques
 			return err
 		}
 		if q.PreviewImport {
-			return app.previewLocalizationImport(w, p)
+			return work.previewLocalizationImport(w, p)
 		}
-		if err = app.acceptLocalizationImport(p, q.NewID, q.Replace, q.Expected); err != nil {
+		if err = work.acceptLocalizationImport(p, q.NewID, q.Replace, q.Expected); err != nil {
 			return err
 		}
-		writeJSON(w, 200, app.localizationState())
+		w.json(200, work.localizationState())
 		return nil
 	}
 	if endpoint == "create" {
@@ -555,7 +547,7 @@ func (app *application) mutateLocalization(w http.ResponseWriter, r *http.Reques
 			source = s.current.Pack()
 		} else {
 			var err error
-			source, err = lk.OpenAuthorPack(filepath.Join(app.localizationRoot(), "native-us"))
+			source, err = lk.OpenAuthorPack(filepath.Join(work.root, "native-us"))
 			if err != nil {
 				return fmt.Errorf("extract the US source or build the game first: %w", err)
 			}
@@ -566,11 +558,11 @@ func (app *application) mutateLocalization(w http.ResponseWriter, r *http.Reques
 		if err != nil {
 			return err
 		}
-		if err = app.saveLocalization(p, ""); err != nil {
+		if err = work.saveLocalization(p, ""); err != nil {
 			return err
 		}
 		s.reference, _ = lk.NewSourceProject(source)
-		writeJSON(w, 200, app.localizationState())
+		w.json(200, work.localizationState())
 		return nil
 	}
 	if s.current == nil || q.ProjectID != s.current.Pack().Manifest().Metadata().ID || q.Revision != s.current.ProjectRevision() {
@@ -589,7 +581,7 @@ func (app *application) mutateLocalization(w http.ResponseWriter, r *http.Reques
 		}
 		// One immutable edit chain and one archive replacement: invalid text or
 		// metadata must not leave a partially saved set of progress/details.
-		if !q.SaveMessage && !q.SaveDetails && !q.SaveNotice {
+		if !q.SaveMessage && !q.SaveDetails && !q.SaveNotice && !q.SaveFonts {
 			return fmt.Errorf("no changes to save")
 		}
 		next = p
@@ -607,6 +599,9 @@ func (app *application) mutateLocalization(w http.ResponseWriter, r *http.Reques
 		if err == nil && q.SaveMessage {
 			next, err = next.EditMessage(q.ID, q.Body, q.Status)
 		}
+		if err == nil && q.SaveFonts {
+			next, err = next.WithFonts(q.Fonts, q.fontUploads)
+		}
 	case "clone":
 		if p.Origin() == "native-source" {
 			return fmt.Errorf("create a translation from the US source instead of cloning a read-only source")
@@ -620,33 +615,36 @@ func (app *application) mutateLocalization(w http.ResponseWriter, r *http.Reques
 		if err != nil {
 			return err
 		}
-		if err = app.saveLocalization(next, ""); err != nil {
+		if err = work.saveLocalization(next, ""); err != nil {
 			return err
 		}
-		writeJSON(w, 200, app.localizationState())
+		w.json(200, work.localizationState())
 		return nil
 	case "installation":
-		path := filepath.Join(app.localizationRoot(), "packs", p.Pack().Manifest().Metadata().ID, "pack.ini")
-		installed, statErr := lk.InspectInstalledPack(filepath.Join(app.localizationRoot(), "packs"), p.Pack().Manifest().Metadata().ID)
+		path := filepath.Join(work.root, "packs", p.Pack().Manifest().Metadata().ID, "pack.ini")
+		installed, statErr := lk.InspectInstalledPack(filepath.Join(work.root, "packs"), p.Pack().Manifest().Metadata().ID)
 		if statErr != nil && !os.IsNotExist(statErr) {
 			return statErr
 		}
-		writeJSON(w, 200, map[string]any{"installed": statErr == nil, "enabled": installed.Enabled, "path": path})
+		w.json(200, map[string]any{"installed": statErr == nil, "enabled": installed.Enabled, "path": path})
 		return nil
 	case "install", "installation-check":
 		prepared, report, err := p.Installation()
 		if err != nil {
 			return err
 		}
+		if err := work.requireFontCoverage(r.Context(), prepared); err != nil {
+			return err
+		}
 		if endpoint == "installation-check" {
-			writeJSON(w, 200, report)
+			w.json(200, report)
 			return nil
 		}
-		path, err := lk.InstallAuthorProject(filepath.Join(app.localizationRoot(), "packs", p.Pack().Manifest().Metadata().ID), prepared, q.Replace)
+		path, err := lk.InstallAuthorProject(filepath.Join(work.root, "packs", p.Pack().Manifest().Metadata().ID), prepared, q.Replace)
 		if err != nil {
 			return err
 		}
-		writeJSON(w, 200, map[string]any{"path": path, "report": report, "enabled": filepath.Base(path) == "pack.ini"})
+		w.json(200, map[string]any{"path": path, "report": report, "enabled": filepath.Base(path) == "pack.ini"})
 		return nil
 	case "edit":
 		next, err = p.EditMessage(q.ID, q.Body, q.Status)
@@ -661,7 +659,7 @@ func (app *application) mutateLocalization(w http.ResponseWriter, r *http.Reques
 		if err != nil {
 			return err
 		}
-		writeJSON(w, 200, ops)
+		w.json(200, ops)
 		return nil
 	case "materialize":
 		ops, err := p.Pack().MessageOperations(q.ID)
@@ -673,7 +671,7 @@ func (app *application) mutateLocalization(w http.ResponseWriter, r *http.Reques
 			return err
 		}
 		body, _ := script.Body(q.ID)
-		writeJSON(w, 200, map[string]string{"body": body})
+		w.json(200, map[string]string{"body": body})
 		return nil
 	case "metadata":
 		m := p.Pack().Manifest().Metadata()
@@ -692,10 +690,13 @@ func (app *application) mutateLocalization(w http.ResponseWriter, r *http.Reques
 			if err != nil {
 				return err
 			}
+			if err := work.requireFontCoverage(r.Context(), p); err != nil {
+				return err
+			}
 			kind, extension = "publication", ".arlang"
 		}
 		if endpoint == "publication-check" {
-			writeJSON(w, 200, report)
+			w.json(200, report)
 			return nil
 		}
 		var archive bytes.Buffer
@@ -708,28 +709,25 @@ func (app *application) mutateLocalization(w http.ResponseWriter, r *http.Reques
 				return err
 			}
 			s.export = &localizationExport{token: token, name: p.Pack().Manifest().Metadata().ID + extension, data: archive.Bytes()}
-			writeJSON(w, 200, map[string]string{"url": "localization/download/" + token, "name": s.export.name})
+			w.json(200, map[string]string{"url": "localization/download/" + token, "name": s.export.name})
 			return nil
 		}
-		w.Header().Set("Content-Type", "application/zip")
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s%s"`, p.Pack().Manifest().Metadata().ID, extension))
-		w.Header().Set("Content-Length", strconv.Itoa(archive.Len()))
-		_, err = io.Copy(w, &archive)
-		return err
+		w.archive = &localizationExport{name: p.Pack().Manifest().Metadata().ID + extension, data: archive.Bytes()}
+		return nil
 	default:
 		return fmt.Errorf("unknown localization action")
 	}
 	if err != nil {
 		return err
 	}
-	if err = app.saveLocalization(next, p.ProjectRevision()); err != nil {
+	if err = work.saveLocalization(next, p.ProjectRevision()); err != nil {
 		return err
 	}
-	writeJSON(w, 200, app.localizationState())
+	w.json(200, work.localizationState())
 	return nil
 }
 
-func (app *application) acceptLocalizationImport(p *lk.AuthorProject, newID string, replace bool, expected string) error {
+func (work *localizationWork) acceptLocalizationImport(p *lk.AuthorProject, newID string, replace bool, expected string) error {
 	if newID != "" {
 		m := p.Pack().Manifest().Metadata()
 		m.ID = newID
@@ -745,11 +743,11 @@ func (app *application) acceptLocalizationImport(p *lk.AuthorProject, newID stri
 	if replace && expected == "" {
 		return fmt.Errorf("replacement requires the existing project's current revision; open it first")
 	}
-	return app.saveLocalization(p, expected)
+	return work.saveLocalization(p, expected)
 }
 
-func (app *application) checkLocalizationIdentity(id, revision string) error {
-	p := app.localization.current
+func (work *localizationWork) checkLocalizationIdentity(id, revision string) error {
+	p := work.current
 	if p == nil || id != p.Pack().Manifest().Metadata().ID || revision != p.ProjectRevision() {
 		return fmt.Errorf("%w: project changed; reopen before continuing", lk.ErrProjectConflict)
 	}
@@ -759,20 +757,20 @@ func (app *application) checkLocalizationIdentity(id, revision string) error {
 // Extracting a comparison source is not opening a different author project.
 // Repeated extraction can reuse the identical read-only source, but cannot
 // silently overwrite a modified project with a colliding ID.
-func (app *application) acceptLocalizationReference(p *lk.AuthorProject) error {
+func (work *localizationWork) acceptLocalizationReference(p *lk.AuthorProject) error {
 	if p.Origin() != "native-source" {
 		return fmt.Errorf("extracted reference must be a native source")
 	}
-	if err := app.localization.store.Save(p, ""); err != nil {
+	if err := work.store.Save(p, ""); err != nil {
 		if !errors.Is(err, lk.ErrProjectConflict) {
 			return err
 		}
-		existing, openErr := app.localization.store.Open(p.Pack().Manifest().Metadata().ID)
+		existing, openErr := work.store.Open(p.Pack().Manifest().Metadata().ID)
 		if openErr != nil || existing.Origin() != "native-source" || existing.ProjectRevision() != p.ProjectRevision() {
 			return err
 		}
 	}
-	app.localization.reference = p
+	work.reference = p
 	return nil
 }
 
@@ -818,9 +816,7 @@ func (app *application) prepareLocalizationUpload(w http.ResponseWriter, r *http
 		cleanup:     func() { _ = r.MultipartForm.RemoveAll() },
 	}
 	if upload.asReference {
-		app.localization.mu.Lock()
 		err := app.checkLocalizationIdentity(r.FormValue("projectID"), r.FormValue("revision"))
-		app.localization.mu.Unlock()
 		if err != nil {
 			return upload, err
 		}
@@ -864,35 +860,35 @@ func (app *application) prepareLocalizationUpload(w http.ResponseWriter, r *http
 	return upload, r.Context().Err()
 }
 
-// commitLocalizationUpload holds the session lock. It only installs, accepts
-// and answers from state that is already in memory.
-func (app *application) commitLocalizationUpload(w http.ResponseWriter, r *http.Request, upload *localizationUpload) error {
+// commitLocalizationUpload runs against one writer's detached snapshot. Store
+// and installation transactions complete before the session publishes it.
+func (work *localizationWork) commitLocalizationUpload(w *localizationReply, r *http.Request, upload *localizationUpload) error {
 	if err := r.Context().Err(); err != nil {
 		return err
 	}
 	if upload.asReference {
-		if err := app.checkLocalizationIdentity(r.FormValue("projectID"), r.FormValue("revision")); err != nil {
+		if err := work.checkLocalizationIdentity(r.FormValue("projectID"), r.FormValue("revision")); err != nil {
 			return err
 		}
 	}
 	if upload.pack != nil {
-		if _, err := lk.InstallNativeUSSource(filepath.Join(app.localizationRoot(), "native-us"), upload.pack); err != nil {
+		if _, err := lk.InstallNativeUSSource(filepath.Join(work.root, "native-us"), upload.pack); err != nil {
 			return err
 		}
-		app.refreshNativeLocalizationSource()
+		work.refreshNativeLocalizationSource()
 	}
 	if upload.preview {
-		return app.previewLocalizationImport(w, upload.project)
+		return work.previewLocalizationImport(w, upload.project)
 	}
 	var err error
 	if upload.asReference {
-		err = app.acceptLocalizationReference(upload.project)
+		err = work.acceptLocalizationReference(upload.project)
 	} else {
-		err = app.acceptLocalizationImport(upload.project, upload.newID, upload.replace, upload.expected)
+		err = work.acceptLocalizationImport(upload.project, upload.newID, upload.replace, upload.expected)
 	}
 	if err != nil {
 		return err
 	}
-	writeJSON(w, 200, app.localizationState())
+	w.json(200, work.localizationState())
 	return nil
 }

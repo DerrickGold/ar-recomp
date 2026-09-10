@@ -86,11 +86,11 @@ typedef struct ArTextSurfaceCache {
   ArTextSurfaceCacheEntry *entries;
   size_t capacity;
   /* Aggregate texture budget, in addition to the entry count. Zero disables
-   * it. Eviction for bytes never touches an entry acquired since the current
+   * it. Eviction never touches an entry acquired since the current
    * frame began (see ArTextSurfaceCache_BeginFrame). */
   uint64_t byte_budget;
   /* Entries acquired at or after this clock value belong to the frame being
-   * prepared and are never evicted for bytes. UINT64_MAX pins nothing. */
+   * prepared and are never evicted. UINT64_MAX pins nothing. */
   uint64_t frame_start;
   uint64_t clock;
   ArRenderDevice *device;
@@ -113,9 +113,14 @@ bool ArTextSurfaceCache_Init(ArTextSurfaceCache *cache, size_t capacity);
  * current frame has already acquired. */
 void ArTextSurfaceCache_SetByteBudget(ArTextSurfaceCache *cache,
                                       uint64_t budget);
-/* Pins everything acquired from here on against byte-budget eviction, so a
- * frame being prepared cannot lose a texture it is already holding. */
+/* Releases the previous frame's pins and pins subsequent acquisitions against
+ * byte and entry eviction. A miss with all slots pinned fails without font
+ * work; it is not negatively cached and can succeed after pins are released. */
 void ArTextSurfaceCache_BeginFrame(ArTextSurfaceCache *cache);
+/* Release pins after the caller has finished using every acquired surface.
+ * Subsequent acquisitions are unpinned until BeginFrame (useful for fitting
+ * probes, whose handles are consumed immediately rather than retained). */
+void ArTextSurfaceCache_EndFrame(ArTextSurfaceCache *cache);
 void ArTextSurfaceCache_Destroy(ArTextSurfaceCache *cache,
                                 ArRenderDevice *device);
 
@@ -139,6 +144,8 @@ bool ArTextSurfaceCache_Acquire(
 
 const ArTextSurfaceCacheStats *ArTextSurfaceCache_GetStats(
     const ArTextSurfaceCache *cache);
+/* Reset activity counters, preserve live bytes, and restart the peak at the
+ * current live size. Does not release resources, failures, or frame pins. */
 void ArTextSurfaceCache_ResetStats(ArTextSurfaceCache *cache);
 
 #endif /* AR_RENDER_TEXT_SURFACE_CACHE_H */

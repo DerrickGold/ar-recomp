@@ -181,13 +181,17 @@ static bool SanctuaryAt(
 static void CaptureSanctuary(
     const uint8_t *wram, uint8_t town,
     SimWorldNavigationTowns *out, bool occupied[kTownCellCount]) {
-  const uint8_t base = town == 5 ? 0xC0 : 0xC2;
   for (int y = 0; y < 31; y++) {
     for (int x = 0; x < 31; x++) {
+      /* Match the retained sanctuary art, not a town-name assumption.
+       * Marahna can contain the ordinary cathedral as well as the temple
+       * variant, just as the full town classifier already recognizes. */
+      const uint8_t base = wram[SimTownLayout_CellMapIndex(town, x, y)];
+      if (base != 0xC0 && base != 0xC2) continue;
       if (!SanctuaryAt(wram, town, x, y, base)) continue;
       (void)Append(out, (SimWorldNavigationTownObject){
         .town = town,
-        .kind = town == 5
+        .kind = base == 0xC0
             ? kSimBackgroundVoxel_MarahnaTemple
             : kSimBackgroundVoxel_Cathedral,
         .record_slot = kSimBackgroundVoxelNoRecordSlot,

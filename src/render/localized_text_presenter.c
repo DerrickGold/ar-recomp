@@ -469,9 +469,12 @@ static bool AddTableField(TableField *fields, size_t capacity,
   return true;
 }
 
-/* Explicit `|` separators keep translated multiword labels in one cell.
- * Blank lines retain native row anchors and never become raster work. */
-static bool ParseTableFields(const char *utf8, size_t utf8_bytes,
+/* Explicit authored boundaries keep translated multiword labels in one cell.
+ * A pipe inside a resolved value is text, not a delimiter. Blank authored
+ * lines retain native row anchors and never become raster work. */
+static bool ParseTableFields(const ArLocalizationFrame *frame,
+                             const ArLocalizationTextSnapshot *snapshot,
+                             const char *utf8, size_t utf8_bytes,
                              TableField *fields, size_t capacity,
                              size_t *field_count,
                              unsigned *logical_line_count) {
@@ -484,18 +487,26 @@ static bool ParseTableFields(const char *utf8, size_t utf8_bytes,
   unsigned line_index = 0;
   while (line_start <= utf8_bytes) {
     size_t line_end = line_start;
-    while (line_end < utf8_bytes && utf8[line_end] != '\n') ++line_end;
+    while (line_end < utf8_bytes &&
+           !(utf8[line_end] == '\n' && ArTextBoundary_Get(
+               frame->structural_boundaries, snapshot->utf8_offset + line_end)))
+      ++line_end;
     bool explicit_columns = false;
     for (size_t index = line_start; index < line_end; ++index)
-      explicit_columns |= utf8[index] == '|';
+      explicit_columns |= utf8[index] == '|' && ArTextBoundary_Get(
+          frame->structural_boundaries, snapshot->utf8_offset + index);
     if (explicit_columns) {
       unsigned columns = 1;
       for (size_t index = line_start; index < line_end; ++index)
-        columns += utf8[index] == '|';
+        columns += utf8[index] == '|' && ArTextBoundary_Get(
+            frame->structural_boundaries, snapshot->utf8_offset + index);
       size_t cell_start = line_start;
       unsigned cell = 0;
       for (size_t index = line_start; index <= line_end; ++index) {
-        if (index != line_end && utf8[index] != '|') continue;
+        if (index != line_end &&
+            !(utf8[index] == '|' && ArTextBoundary_Get(
+                frame->structural_boundaries, snapshot->utf8_offset + index)))
+          continue;
         size_t offset = cell_start;
         size_t bytes = index - cell_start;
         TrimAsciiSpaces(utf8, &offset, &bytes);
@@ -653,8 +664,16 @@ static bool ResolveReportPlan(
     return false;
   const ArTextCacheKey key = ArTextSurfaceCache_MakeKey(
       ArTextBackendInstance_Get(&s_presenter.instance), &request);
-  const uint64_t digest =
+  uint64_t digest =
       GridDigest(ArLocalizationFrame_GetGrid(frame, snapshot));
+  /* Identical resolved bytes can have different authored column boundaries.
+   * Include structure, not just text/font/geometry, in the fitting cache key. */
+  for (size_t i = 0; i < field_count; ++i) {
+    const uint32_t shape[] = {(uint32_t)fields[i].utf8_offset,
+        (uint32_t)fields[i].utf8_bytes, fields[i].logical_line,
+        fields[i].field_index, fields[i].field_count};
+    digest = DeterministicHash_Fnv1a64(digest, shape, sizeof(shape));
+  }
   for (unsigned i = 0; i < kReportPlanCapacity; ++i) {
     const ReportPlan *cached = &s_presenter.reports[i];
     if (cached->valid && cached->grid_digest == digest &&
@@ -702,7 +721,7 @@ static bool PrepareTable(
   TableField fields[kMaximumTableFields];
   size_t field_count = 0;
   unsigned logical_lines = 0;
-  if (!ParseTableFields(utf8, utf8_bytes, fields,
+  if (!ParseTableFields(frame, snapshot, utf8, utf8_bytes, fields,
                         kMaximumTableFields, &field_count, &logical_lines) ||
       !logical_lines ||
       logical_lines > kMaximumTableFields ||
@@ -1021,9 +1040,12 @@ void ArLocalizedTextPresenter_Prepare(
   /* Resolve all cold report fits before retaining any frame-owned surface
    * references. Font-size probes can evict LRU entries; they must never evict
    * a HUD/text surface already published into this prepared frame. */
-  ArTextSurfaceCache_BeginFrame(&s_presenter.cache);
+  ArTextSurfaceCache_EndFrame(&s_presenter.cache);
   ReportPlan reports[kArTextCellRecordCapacity] = {0};
   for (unsigned pass = 0; pass < 2; ++pass) {
+    /* Fitting probes retain no surfaces. Only the second pass publishes
+     * handles that must survive until this prepared frame has been drawn. */
+    if (pass == 1) ArTextSurfaceCache_BeginFrame(&s_presenter.cache);
     for (uint8_t record_index = 0; record_index < frame->cells.count; ++record_index) {
       const ArTextCellRecord *record = &frame->cells.records[record_index];
       if (record->destination.background != 3u ||
@@ -1065,7 +1087,7 @@ void ArLocalizedTextPresenter_Prepare(
         if (snapshot->inline_object_offset > frame->inline_object_count ||
             snapshot->inline_object_count >
                 frame->inline_object_count - snapshot->inline_object_offset ||
-            !ParseTableFields(utf8, utf8_bytes, fields, kMaximumTableFields, &field_count,
+            !ParseTableFields(frame, snapshot, utf8, utf8_bytes, fields, kMaximumTableFields, &field_count,
                               &lines) ||
             lines > kMaximumTableFields)
           continue;

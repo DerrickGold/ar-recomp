@@ -52,16 +52,25 @@ package IDs require explicit replacement; a distinct ID lets you keep both.
 Opening a saved project gives you an editable workshop copy. The editor's
 sticky toolbar has **Languages** and **Save progress**, with a visible
 saved/unsaved indicator. **Save progress** (or Cmd+S / Ctrl+S) saves pending
-message text, Not started / WIP / Done status, package details, notes and public
-notices together. Validation failure leaves all of those edits unsaved so you
+message text, Not started / WIP / Done status, package details, notes, public
+notices and font dependencies together. Validation failure leaves all of those edits unsaved so you
 can correct them. This does not change the game.
-**Messages** and **Details & credits** are separate tabs; drafts survive switching.
+**Messages**, **Details & credits**, and **Fonts** are separate tabs; drafts survive switching.
 Use **Pack actions → Install in game**, then **Install for this game**. Local
 installation keeps every supplied message, including unfinished translations.
 It does not ask you to confirm redistribution rights or filter someone else's
 work. Those choices belong to **Export for sharing**, where publishers choose
 whether to include WIP translations. Restart the game and select the package
 name in the overlay's Localization settings with Enhanced text rendering.
+
+Use **Fonts** to choose a primary TTF/OTF, add ordered fallback fonts, or restore
+the bundled font. File selections are copied into the project by **Save progress**;
+reordering retained fonts does not duplicate their data. Keep redistribution
+license notices in **Details & credits**. **Check coverage** uses the built game's
+own font backend and reports missing characters with message locations; an
+optional sample checks a player name or other live value. Install and export
+require this check to succeed. Private backups remain available without it.
+Complete a game build first; scalar coverage does not prove shaping or layout.
 
 The library is sorted by package name, with locale and stable ID to distinguish
 editions. **Installed in game**, **Workshop only**, and **Read-only reference**

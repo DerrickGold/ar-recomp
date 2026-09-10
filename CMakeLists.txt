@@ -90,6 +90,7 @@ if(_AR_ENHANCED_TEXT)
     # Also available in ROM-free source checkouts and tests-only builds.
     add_executable(actraiser_font_coverage
         tools/font_coverage_probe.c
+        src/platform/sdl/font_coverage_cli.c
         src/localization/text_rasterizer.c
         src/localization/unicode_grapheme.c
         src/platform/sdl/text_rasterizer_sdl.c)
@@ -464,7 +465,8 @@ if(BUILD_TESTING)
             # The renderer itself never links this: the test uses the game's
             # own menu geometry so its layout results stay comparable, and
             # separately checks a hand-built grid the game never publishes.
-            src/actraiser/actraiser_localization_grid.c)
+            src/actraiser/actraiser_localization_grid.c
+            src/localization/language_row_shape.c)
         target_include_directories(actraiser_localized_text_presenter_test PRIVATE
             ${CMAKE_SOURCE_DIR}/src)
         target_compile_definitions(actraiser_localized_text_presenter_test PRIVATE
@@ -488,6 +490,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_localization_grid_test
         tests/actraiser_localization_grid_test.c
         src/actraiser/actraiser_localization_grid.c
+        src/localization/language_row_shape.c
         ${AR_LOCALIZATION_FRAME_SOURCES})
     target_include_directories(actraiser_localization_grid_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
@@ -497,7 +500,10 @@ if(BUILD_TESTING)
     add_executable(actraiser_language_pack_runtime_test
         tests/language_pack_test.c
         src/localization/language_pack.c
-        src/localization/language_contract.c)
+        src/localization/language_keyboard.c
+        src/localization/unicode_grapheme.c
+        src/localization/language_contract.c
+        src/localization/language_row_shape.c)
     add_executable(actraiser_language_pack_discovery_test
         tests/language_pack_discovery_test.c
         src/localization/pack_discovery.c src/localization/language_pack.c)
@@ -512,7 +518,9 @@ if(BUILD_TESTING)
         tests/dialogue_session_test.c
         src/localization/dialogue_session.c
         src/localization/language_pack.c
+        src/localization/language_keyboard.c
         src/localization/language_contract.c
+        src/localization/language_row_shape.c
         src/localization/unicode_grapheme.c)
     target_include_directories(actraiser_dialogue_session_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
@@ -556,6 +564,7 @@ if(BUILD_TESTING)
         tests/actraiser_localization_compose_state_test.c
         src/actraiser/actraiser_localization_compose_state.c
         src/actraiser/actraiser_localization_grid.c
+        src/localization/language_row_shape.c
         src/actraiser/actraiser_localization_hud.c
         src/actraiser/actraiser_localization_art.c
         src/actraiser/actraiser_localization_routes.c
@@ -570,7 +579,10 @@ if(BUILD_TESTING)
         tests/actraiser_localization_values_test.c
         src/actraiser/actraiser_localization_values.c
         src/localization/language_pack.c
-        src/localization/language_contract.c)
+        src/localization/language_keyboard.c
+        src/localization/unicode_grapheme.c
+        src/localization/language_contract.c
+        src/localization/language_row_shape.c)
     target_include_directories(actraiser_localization_values_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
@@ -580,6 +592,8 @@ if(BUILD_TESTING)
     add_executable(actraiser_localization_name_entry_test
         tests/actraiser_localization_name_entry_test.c
         src/actraiser/actraiser_localization_name_entry.c
+        src/localization/language_keyboard.c
+        src/localization/language_pack.c
         src/localization/unicode_grapheme.c)
     target_include_directories(actraiser_localization_name_entry_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
@@ -2010,7 +2024,9 @@ if(BUILD_TESTING)
         src/actraiser/actraiser_localization_art.c
         src/localization/dialogue_session.c
         src/localization/language_pack.c
+        src/localization/language_keyboard.c
         src/localization/language_contract.c
+        src/localization/language_row_shape.c
         src/localization/unicode_grapheme.c
         ${AR_LOCALIZATION_FRAME_SOURCES})
     target_include_directories(actraiser_localization_schedule_test PRIVATE

@@ -5,7 +5,7 @@ editors and the builder's Languages workspace. A pack contains no ROM
 addresses, dictionary tokens, or font-tile numbers. Version 1 deliberately
 starts fresh; the unreleased prototype format is not supported.
 
-The game applies packs to simulation-mode and Sky Palace menus/dialogue, action
+The game applies packs to simulation-mode and Sky Palace menus/dialogue/HUD, action
 HUD labels and counters, action stage cards and pause/stage messages, and the
 US title-screen options. Logo/copyright artwork, ending/credits, sound-test
 presentation and regional-only menu flows remain native. The semantic catalog
@@ -18,6 +18,15 @@ extractions include them; an older community pack falls back to Native US for
 missing labels. Lives, timer and score remain game-owned numbers, not editable
 script literals. Enhanced counters retain their slanted appearance and labels
 use the game's palette rather than the dialogue palette.
+
+Simulation/Sky Palace HUD labels use `sim_sky.hud.context_label`,
+`sim_sky.hud.angel_label`, and `sim_sky.hud.sp_label`. These are also optional
+additions with Native US fallback in older community packs. Population and
+current/maximum SP remain game-owned values. Western reference extractions
+include all three labels; the Japanese reference currently includes only the
+angel label. Its different CRT/AREA context layout is not interchangeable with
+the US field. A translation targeting the US game can author all three US
+fields regardless of the language of its reference ROM.
 
 Title `title.save_choice.labels` takes two nonempty lines: Continue and New
 game, in that order. Blank padding rows are ignored; labels stay beside the
@@ -183,7 +192,8 @@ still accepts `AR_LOCALIZATION_PACK`; it does not replace installed discovery.
 
 The editor's script preview shows logical pages and controls, not exact in-game
 wrapping, font size, mosaic, scroll timing or keyboard geometry. It does not
-certify font coverage/shaping. Test those in game before publishing. Directory
+certify shaping or final layout. The separate Fonts tab checks scalar coverage
+through the game backend; test appearance in game before publishing. Directory
 imports and archives retain declared fonts; new translations use the bundled
 font. A missing or incompatible selected pack retains the prior working source.
 
@@ -229,10 +239,50 @@ keyboards still require their valid interactive grid and cannot be blanked.
 
 ## Checking font coverage
 
-The game warns on its standard error when a font stack has no glyph for a
-character your pack uses, naming the stack and the code point; the fix is to
-add a font that covers it under Fonts in the builder's Languages workspace.
-That warning is the only coverage check available from a distribution.
+Open an editable project in **Languages → Fonts**. Choose a primary font and
+up to eight ordered fallbacks; use **Move up**, **Move down**, and **Remove** to
+adjust the stack. Choose TTF/OTF files (up to 64 MiB each) or reuse a dependency
+already in the project. **Save progress** copies new files into the project in
+the same transaction as pending message, metadata and notice edits. Removing
+a dependency does not delete its original file or its notices. Native reference
+projects are read-only: create a translation first.
+
+**Check coverage with game font backend** checks the saved project, plus native
+US routes omitted from it. With pending changes the button becomes **Save & check
+coverage**. A report lists missing code points with script/message/line locations
+and unresolved live placeholders. Use the optional sample for a player name.
+The report identifies the content and native-fallback revisions and SHA-256
+digests of the exact primary/fallback bytes checked. It shows at most 256 missing
+code points and four locations each, while retaining the total missing count.
+
+Install and export run the same check before writing their candidate pack.
+Export checks its filtered publication, not unfinished text excluded from it.
+A missing/corrupt font, missing glyph, unavailable native source or unavailable
+game backend blocks installation/export without changing the prior installation.
+Saving work and downloading private backups do not require coverage to pass.
+Complete a game build first; the installed builder invokes that trusted game
+executable, never an executable supplied by a pack. No Python is required.
+
+The game also warns on its standard error when a font stack has no glyph for a
+character encountered during play, naming the stack and the code point. Add a
+suitable dependency in the Fonts tab or in the source pack's `pack.ini`.
+
+Place an appropriately licensed TTF/OTF file inside the source pack directory
+(for example, `fonts/MyFallback.ttf`), then add
+`fallback = fonts/MyFallback.ttf` under `[fonts]` in `pack.ini`. Fallback rows
+are ordered and may repeat for different font files. Include any required
+license notices when sharing. Reimport the updated source directory through
+Languages, explicitly replacing the same-ID workshop project/installation when
+prompted; save or back up existing workshop edits first. Restart the game after
+installing. Do not edit files inside an installed immutable version directory.
+
+The shipped headless host protocol is `ActRaiserRecomp --font-coverage-v1 FONT
+[FALLBACK ...]`. It reads one hexadecimal Unicode scalar per stdin line and
+writes `HEX<TAB>0/1` per input line in order. Exit 0 means the query completed
+(inspect the 0/1 results); exit 2 means invalid input or an unavailable backend.
+It opens no ROM, window, settings or save file. The builder supplies immutable
+private font snapshots and bounds input, output and run time. This adapter uses
+the same SDL3_ttf primary/fallback implementation as live text rendering.
 
 The checker below is a **development tool** and is not part of a released
 build. From a source checkout configured with SDL3_ttf enhanced-text support,
@@ -261,8 +311,8 @@ Exit status is 0 for complete scalar coverage, 1 for missing glyphs, and 2 for
 invalid input or an unavailable font/backend. This is separate from pack semantic
 validation and can also check reference-only regional extracts.
 
-Coverage is advisory, not proof of correct shaping, ligatures, emoji sequences,
-or layout. Layout controls, typed inline objects, and Unicode default-ignorable
+Scalar coverage gates builder install/export; it is not proof of correct shaping,
+ligatures, emoji sequences, or layout. Layout controls, typed inline objects, and Unicode default-ignorable
 characters do not need standalone glyphs. Combining accents and ordinary spaces
 are checked. Always visually review complex scripts and real dynamic values.
 
@@ -344,6 +394,10 @@ source = text/simulation.artext
   a font). The builder's pack reader rejects conflicting paths, symlinks and
   nonregular files. It reads only declared scripts/fonts and optional
   `translation-progress.tsv` from the selected pack root.
+  `package.json`, `author-project.json`, and the `notices/` directory are
+  reserved for archive metadata and notices, not script/font dependencies.
+  Author imports and font edits accept TTF/OTF envelopes only; actual font
+  parsing and glyph coverage belong to the game backend.
 
 The builder's pack reader limits a manifest to 256 KiB, each script or progress
 file to 16 MiB, each local font to 64 MiB, and the combined snapshot to 256 MiB.
@@ -482,8 +536,9 @@ checked when a pack is validated, not silently truncated at runtime:
 | Inline term | Town names, enemy names, growth states, required master levels | One page and one line. These are substituted into another message, not printed on a line of their own. |
 
 `title.save_choice.labels` additionally shows exactly two choices, so a partly
-filled menu (one choice, or three) is rejected. Leaving the whole message empty
-is still allowed and means "keep the native lettering".
+filled menu (one choice, or three) is rejected. An intentional `@empty` hides
+the wording while keeping native controls/artwork. Omit the route instead to
+keep fallback lettering.
 
 The five optional `action.hud.*_label` routes are single words on a single
 line.
@@ -494,10 +549,22 @@ line to change before an install rather than after.
 ## Fixed menu and report rows
 
 `|` separates cells on the routes that use a fixed row or report layout: the
-status reports, the message-speed scale, the menu rows and the name-entry
-keyboard. On those routes a pipe is always a separator, so a literal `|` is not
-representable there — write the label without it. Everywhere else, including
-all dialogue, a pipe is ordinary text and is printed as written.
+status reports, the message-speed scale and the menu rows. On those routes an
+authored pipe is always a separator, so a literal `|` cannot be written directly
+in a table label. Pipes inserted by placeholders (for example a player's name
+or a localized growth-state term) remain ordinary text inside that one cell;
+they never create extra columns. Everywhere else, including all dialogue and
+keyboard keys, a pipe is ordinary text and is printed as written.
+
+The editor's **Layout constraints** disclosure shows the accepted row shapes
+from the same registry used by the game's grid. Unsupported field counts and
+misplaced report rows are rejected on save and import, with the logical row
+number in the diagnostic. Leading/trailing blank lines are ignored for table
+positioning; internal blank rows are significant. Native divider rows remain
+artwork. Single-column menu rows cannot gain extra fields.
+
+Keyboard keys use ASCII spaces, not pipes. Keep their alphabet layout separate
+from report-cell syntax.
 
 Report totals belong in their own explicit cell, for example
 `Resident count | {total_population:04}`. Use `|`, not a run of spaces, to
@@ -549,8 +616,9 @@ centres each key on that grid rather than letting the shaped advance decide.
 Rows therefore line up with each other and with the original whatever letters
 a pack puts on them -- a row of wide capitals cannot creep toward the window
 frame, and a row of narrow ones cannot fall short of it. Keys are still shaped
-in one pass, so every glyph on the keyboard shares one size. A row that does
-not hold exactly 13 keys is laid out as ordinary flowed text instead.
+in one pass, so every glyph on the keyboard shares one size. The builder and
+game reject a page whose rows do not contain exactly 13 grapheme keys with
+ASCII spaces between them; malformed keys cannot silently become flowed text.
 
 Names support up to eight Unicode grapheme clusters. `{master_name}` uses the
 accepted Unicode spelling in later enhanced dialogue, independently of which
@@ -568,6 +636,10 @@ characters:
 :: name_entry.prompt_and_alphabet
 Choose a name.
 @line
+{master_name}
+@line
+--------
+@line
 A B C D E F G H I J K L M
 @line
 N O P Q R S T U V W X Y Z
@@ -576,9 +648,13 @@ a b c d e f g h i j k l m
 @line
 n o p q r s t u v w x y z
 @line
-0 1 2 3 4 5 6 7 8 9 {icon.name_entry.backspace} - {icon.name_entry.finish}
+0 1 2 3 4 5 6 7 8 9 . {icon.name_entry.backspace} {icon.name_entry.finish}
 @page
 Choose a name.
+@line
+{master_name}
+@line
+--------
 @line
 À Á Â Ä Ç È É Ê Ë Ì Í Î Ï
 @line
@@ -588,15 +664,23 @@ Choose a name.
 @line
 ñ ò ó ô ö ù ú û ü ý œ æ ÿ
 @line
-’ - . , ? ! {icon.name_entry.backspace} ( ) / : ; {icon.name_entry.finish}
+’ - . , ? ! ( ) / : ; {icon.name_entry.backspace} {icon.name_entry.finish}
 @end
 ```
 
-Keep the row and grapheme counts exact on every page. A malformed page cannot
-take ownership from the native keyboard and therefore falls back safely;
-builder-side diagnostics for the complete page shape are required before the
-version 1 editor ships. Keyboard pages are pack-authored and are not limited
-to the official French character inventory.
+Keep the row and grapheme counts exact on every page. Put `{master_name}` on
+its own line immediately above the dash-only underline slot, then the five
+key rows. Backspace and finish must occupy the final two positions: native
+input still owns those actions. Every page is checked before save/import, not
+just the selected page. Each page may contain up to 63 nonblank normalized
+lines and 3,072 normalized UTF-8 bytes; runtime name expansion, gutters and the
+page indicator have separate reserved space. An entirely empty keyboard route
+remains accepted for native fallback. Regional JP kana routes are extracted
+references, not substitutes for this US-runtime keyboard consumer.
+
+Keyboard pages are pack-authored and are not limited to the official French
+character inventory. Grapheme checks use the same Unicode property version as
+the game; neither the builder nor runtime requires Python.
 
 ## Progress tracking
 

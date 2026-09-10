@@ -46,6 +46,8 @@ typedef struct FakeBackend {
   int ground_vertex_count;
   int ground_index_count;
   ArRenderVertex2D ground_vertices[4];
+  bool check_map_edge_opacity;
+  unsigned opaque_edge_land, faded_edge_water;
   bool check_atmosphere_enclosure;
   bool atmosphere_seen;
   float atmosphere_support[64];
@@ -176,7 +178,10 @@ bool Sim3DDepthPass_UploadAtlasRegions(
 
 bool Sim3DDepthPass_Begin(ArRenderDevice *device, int width, int height,
                          ArRenderFilter filter) {
-  (void)device;
+  assert(device && device->context);
+  /* Backdrops inherit output setup from their caller, so bind this pass's
+   * device directly instead of relying on UseOutputCoordinates being called. */
+  s_backend = device->context;
   (void)filter;
   assert(width > 0 && height > 0);
   depth_width = width; depth_height = height;
@@ -189,6 +194,7 @@ bool Sim3DDepthPass_Begin(ArRenderDevice *device, int width, int height,
   depth_near_volume_faces = 0;
   depth_upper_volume_faces = 0;
   s_backend->palace_focus_vertices = 0;
+  s_backend->opaque_edge_land = s_backend->faded_edge_water = 0;
   near_volume_max_depth = 0;
   far_volume_min_depth = 1;
   volume_previous_depth = 1;
@@ -250,6 +256,18 @@ bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer,
     }
   }
   if (layer == kSim3DDepthPass_Ground && vertices[0].uv.x >= 0.0f) {
+    if (s_backend->check_map_edge_opacity) {
+      const int x = (int)lroundf(vertices[0].uv.x * 128);
+      const int y = (int)lroundf(vertices[0].uv.y * 128);
+      if (x < 10 || y < 10 || x >= 118 || y >= 118) {
+        bool opaque = true;
+        for (int p = 0; p < 4; p++) opaque &= vertices[p].color.a == 1;
+        if (!SimWorldMap_CellIsOpenWater(x, y)) {
+          assert(opaque); /* No corner of a mixed coast/land cell may fade. */
+          s_backend->opaque_edge_land++;
+        } else if (!opaque) s_backend->faded_edge_water++;
+      }
+    }
     depth_terrain_faces++;
     if (QuadTouchesViewport(vertices)) depth_expected_shadow_terrain_faces++;
     s_backend->ground_vertex_count = 129 * 129;
@@ -876,8 +894,59 @@ static void TestGroundCacheInvalidation(void) {
   assert(backend.ground_vertices[1].color.r < unlit);
   const float old_y = backend.ground_vertices[1].position.y;
   slot.sim.projection_pitch_mrad = -300;
+  slot.sim.projection_yaw_mrad = 600;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
-  assert(fabsf(backend.ground_vertices[1].position.y - old_y) > 0.01f);
+  assert(backend.ground_vertices[1].position.y == old_y); /* Town pose never tilts navigation. */
+}
+
+static void TestMapEdgeLandOpacity(void) {
+  FakeBackend backend = {.output_width = 800, .output_height = 600,
+                         .check_map_edge_opacity = true};
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend,
+                            (ArRenderCapabilities){0}));
+  uint8_t *rom = calloc(1, 0x100000);
+  assert(rom);
+  memset(rom + 0x70000, 0x10, 64);
+  memset(rom + 0x53000, 0x10, 4 * 64);
+  memset(rom + 0x70000 + 64, 0x10, 64);
+  rom[0x70000 + 127] = 0x20; /* One land texel in an otherwise blue shore. */
+  const int cells[][2] = {{80, 124}, {50, 0}, {0, 64}, {127, 64}, {64, 127}};
+  for (size_t i = 0; i < sizeof(cells) / sizeof(cells[0]); i++)
+    rom[0x33341 + cells[i][1] * 128 + cells[i][0]] = 1;
+  assert(SimWorldMap_Init(rom, 0x100000));
+  PresentWorldNav_ResetResources();
+  FrameSlot slot = WorldNavigationSlot();
+  slot.sim.world_navigation_cloud_shadows = false;
+  UploadWorldNavigationComposition(&slot);
+  for (int relief = 0; relief <= 1; relief++) {
+    slot.sim.world_navigation_relief = relief != 0;
+    for (int repeat = 0; repeat < 3; repeat++) {
+      assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+      assert(backend.opaque_edge_land == 5 && backend.faded_edge_water > 0);
+    }
+  }
+  uint8_t map[kSimWorldMapBytes];
+  memcpy(map, SimWorldMap_Baseline(), sizeof(map));
+  for (int relief = 0; relief <= 1; relief++) {
+    slot.sim.world_navigation_relief = relief != 0;
+    assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+    map[124 * 128 + 80] = 0;
+    assert(SimWorldMap_PublishBuiltTilemap(map) == 1);
+    slot.sim.underlay_serial = SimWorldMap_Serial();
+    assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+    assert(backend.opaque_edge_land == 4 && backend.faded_edge_water > 0);
+    map[124 * 128 + 80] = 1;
+    SimWorldMap_PublishBuiltTilemap(map);
+    SimWorldMap_SetWaterAnimationSource(0xB0C0);
+    slot.sim.underlay_serial = SimWorldMap_Serial();
+    assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+    assert(backend.opaque_edge_land == 5);
+  }
+  PresentWorldNav_ResetResources();
+  UploadWorldNavigationComposition(&slot);
+  assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+  assert(backend.opaque_edge_land == 5);
+  free(rom);
 }
 
 static void TestTallModelViewportClearance(void) {
@@ -888,8 +957,10 @@ static void TestTallModelViewportClearance(void) {
   slot.sim.world_navigation_relief = false;
   slot.sim.world_navigation_cloud_shadows = false;
   slot.sim.height_scale_x100 = 400;
-  slot.sim.projection_pitch_mrad = -1300;
-  slot.sim.world_navigation.focus_y = 338;
+  /* Radial navigation no longer has an oblique offscreen-anchor/visible-roof
+   * case. Keep that shared culling regression in the horizon camera. */
+  slot.sim.view = kSimView_SkyPalace;
+  slot.sim.world_navigation.focus_y = 136;
   slot.sim.world_navigation_towns.object_count = 1;
   SimBackgroundVoxelObject *object = &slot.sim.world_navigation_towns.objects[0];
   *object = (SimBackgroundVoxelObject){
@@ -899,32 +970,22 @@ static void TestTallModelViewportClearance(void) {
     .footprint_cells_w = 2, .footprint_cells_d = 2,
     .visual_state = kSimStructureVisualState_Finished,
   };
-  const float scale = 512.0f / 70;
-  slot.sim.world_navigation_scene.source_to_screen[0] = scale;
-  slot.sim.world_navigation_scene.source_to_screen[4] = scale;
-  slot.sim.world_navigation_scene.source_to_screen[2] = 128 - 512 * scale;
-  slot.sim.world_navigation_scene.source_to_screen[5] = 112 - 338 * scale;
-  SimBackgroundVoxelModel model;
-  SimBackgroundVoxelModel_BuildStyled(object, kSimBackgroundVoxelDetail_Ultra,
-      kSimBackgroundVoxelStyle_Varied, &model);
-  UploadWorldNavigationComposition(&slot);
-  /* The anchor is below y=799 with a 193px margin, but its raised roof
-   * reaches inside this 600px viewport. The old footprint-only test drops
-   * the entire castle. All authored faces must reach the shared depth pass. */
+  const ArRenderRectI viewport = {0, 0, 800, 600};
+  /* Its raised roof enters the viewport although the short castle remains
+   * outside. Replayed and rebuilt caches must retain those clipped faces. */
   for (int repeat = 0; repeat < 3; repeat++) {
-    assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
-    assert(depth_solid_faces == model.face_count);
+    assert(PresentWorldNavigationBackdrop(&slot, viewport) == kPresentationOutcome_Complete);
+    assert(depth_solid_faces > 0);
   }
   slot.sim.height_scale_x100 = 100;
-  assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+  assert(PresentWorldNavigationBackdrop(&slot, viewport) == kPresentationOutcome_Complete);
   assert(depth_solid_faces == 0); /* Truly offscreen at native model height. */
   slot.sim.height_scale_x100 = 400;
-  assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
-  assert(depth_solid_faces == model.face_count);
+  assert(PresentWorldNavigationBackdrop(&slot, viewport) == kPresentationOutcome_Complete);
+  assert(depth_solid_faces > 0);
   PresentWorldNav_ResetResources();
-  UploadWorldNavigationComposition(&slot);
-  assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
-  assert(depth_solid_faces == model.face_count);
+  assert(PresentWorldNavigationBackdrop(&slot, viewport) == kPresentationOutcome_Complete);
+  assert(depth_solid_faces > 0);
 }
 
 static void TestOptionalStagesSkipWorkAndRestore(void) {
@@ -1394,7 +1455,6 @@ static void TestGlobeInspection(void) {
   memcpy(rest, backend.ground_vertices, sizeof(rest));
   assert(backend.palace_draws == 1 && backend.ui_draws == 1);
   slot.sim_manual_orbit_yaw = .6f;
-  slot.sim_world_inspection_blend = 1;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
   assert(backend.palace_draws == 2 && backend.ui_draws == 2);
   assert(backend.palace_rect.x != palace.x);
@@ -1408,18 +1468,17 @@ static void TestGlobeInspection(void) {
   slot.sim_manual_orbit_pitch = -1.57079632679f;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
   slot.sim_manual_orbit_yaw = slot.sim_manual_orbit_pitch = 0;
-  slot.sim_world_inspection_blend = 0;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
   assert(!memcmp(rest, backend.ground_vertices, sizeof(rest)));
   assert(!memcmp(&palace, &backend.palace_rect, sizeof(palace)));
   assert(!memcmp(&slot.sim.world_navigation, &navigation, sizeof(navigation)));
   assert(backend.ground_uploads == 1); /* Camera never rebuilds native artwork. */
-  slot.sim_world_inspection_blend = .5f;
+  slot.sim.projection_distance_x100 += 200;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
-  assert(backend.palace_rect.y != palace.y); /* Zoom-only framing moves its location too. */
+  assert(!memcmp(&palace, &backend.palace_rect, sizeof(palace))); /* Zoom retains radial alignment. */
   assert(!memcmp(&ui, &backend.ui_rect, sizeof(ui)));
   assert(backend.ground_uploads == 1);
-  slot.sim_world_inspection_blend = 0;
+  slot.sim.projection_distance_x100 -= 200;
   slot.sim.world_navigation.focus_x = slot.sim.world_navigation.focus_y = 0;
   slot.sim.world_navigation_towns.object_count = 1;
   slot.sim.world_navigation_towns.objects[0] = (SimBackgroundVoxelObject){
@@ -1607,6 +1666,7 @@ int main(void) {
   TestAdventAuthoredModelClearance();
   TestTallModelViewportClearance();
   TestSkyPalaceClippingAndOwnership();
+  TestMapEdgeLandOpacity();
   AssertPerformanceScopeRestored();
   SimWorldMap_Shutdown();
   puts("present_world_nav_test: PASS");

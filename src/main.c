@@ -29,6 +29,7 @@
 #include "crt_post.h"
 #include "settings.h"
 #include "localization/pack_discovery.h"
+#include "platform/sdl/font_coverage_cli.h"
 #include "settings_overlay.h"
 #include "sim/sim3d_depth_pass.h"
 #include "input_map.h"
@@ -2372,6 +2373,8 @@ static int AppShutdown(AppBoot *app, char **argv) {
 }
 
 int main(int argc, char **argv) {
+  if (argc > 1 && !strcmp(argv[1], "--font-coverage-v1"))
+    return ArSdlFontCoverage_Run(argc - 1, argv + 1);
   setvbuf(stdout, NULL, _IONBF, 0);
   setvbuf(stderr, NULL, _IONBF, 0);
 

@@ -50,6 +50,7 @@ type PackManifest struct {
 	fonts      PackFonts
 	sources    []string
 	packValues []manifestValueSpan
+	fontRows   []manifestValueSpan
 	packEnd    int
 }
 
@@ -240,6 +241,7 @@ func ParsePackManifest(text, path string) (*PackManifest, error) {
 			valueStart := equals + 1 + len(physical[equals+1:]) - len(strings.TrimLeft(physical[equals+1:], " \t"))
 			m.packValues = append(m.packValues, manifestValueSpan{key, start + valueStart, start + valueStart + len(value)})
 		case "fonts":
+			m.fontRows = append(m.fontRows, manifestValueSpan{key, start, next})
 			if key != "primary" && key != "fallback" {
 				return fail("unknown key %q in [fonts]", key)
 			}

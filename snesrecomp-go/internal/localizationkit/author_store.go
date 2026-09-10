@@ -33,11 +33,10 @@ type storedRevision struct {
 	revision string
 }
 
-func (s *AuthorStore) rememberRevision(path string, revision string) {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return
-	}
+// The identity must belong to the file that supplied this revision, not a
+// fresh lookup of path: another store may have atomically replaced it while
+// Open was parsing the archive. A stale identity safely misses on the next save.
+func (s *AuthorStore) rememberRevision(path string, info os.FileInfo, revision string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.known == nil {
@@ -98,7 +97,7 @@ func (s *AuthorStore) Open(id string) (*AuthorProject, error) {
 	if p.pack.manifest.metadata.ID != id {
 		return nil, fmt.Errorf("project filename/identity mismatch")
 	}
-	s.rememberRevision(path, p.ProjectRevision())
+	s.rememberRevision(path, info, p.ProjectRevision())
 	return p, nil
 }
 func (s *AuthorStore) Save(p *AuthorProject, expected string) error {
@@ -142,7 +141,11 @@ func (s *AuthorStore) Save(p *AuthorProject, expected string) error {
 	if err := atomicAuthorFile(path, func(w io.Writer) error { return p.WriteArchive(w, "backup") }); err != nil {
 		return err
 	}
-	s.rememberRevision(path, p.ProjectRevision())
+	// Unlike Open, Save still holds the cross-process author lock here, so no
+	// cooperating writer can replace the file between publication and this stat.
+	if savedInfo, statErr := os.Lstat(path); statErr == nil {
+		s.rememberRevision(path, savedInfo, p.ProjectRevision())
+	}
 	return nil
 }
 

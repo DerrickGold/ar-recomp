@@ -19,19 +19,59 @@ var authorContractJSON []byte
 // paged name-entry alphabet; "inline" is a term substituted into another
 // message. A zero limit means the catalog does not constrain it.
 type AuthorPresentation struct {
-	Shape                 string `json:"shape"`
-	MaximumPages          int    `json:"maximum_pages"`
-	MaximumLines          int    `json:"maximum_lines"`
-	RequiredNonemptyLines int    `json:"required_nonempty_lines"`
+	Shape                 string               `json:"shape"`
+	MaximumPages          int                  `json:"maximum_pages"`
+	MaximumLines          int                  `json:"maximum_lines"`
+	RequiredNonemptyLines int                  `json:"required_nonempty_lines"`
+	Table                 *AuthorTableShape    `json:"table,omitempty"`
+	Keyboard              *AuthorKeyboardShape `json:"keyboard,omitempty"`
+}
+
+// AuthorTableShape describes content only. Native cell coordinates remain in
+// the game adapter; both consumers use these generated zero-based row rules.
+type AuthorTableShape struct {
+	Kind  string          `json:"kind"`
+	Rules []AuthorRowRule `json:"rules"`
+}
+
+type AuthorRowRule struct {
+	FirstLine      int   `json:"first_line"`
+	LastLine       int   `json:"last_line"`
+	Fields         []int `json:"fields,omitempty"`
+	NativeReserved bool  `json:"native_reserved,omitempty"`
+}
+
+func (p AuthorPresentation) detached() AuthorPresentation {
+	if p.Keyboard != nil {
+		keyboard := *p.Keyboard
+		p.Keyboard = &keyboard
+	}
+	if p.Table != nil {
+		table := *p.Table
+		table.Rules = slices.Clone(table.Rules)
+		for i := range table.Rules {
+			table.Rules[i].Fields = slices.Clone(table.Rules[i].Fields)
+		}
+		p.Table = &table
+	}
+	return p
 }
 
 type authorRoute struct {
-	Optional     bool                `json:"optional"`
-	ID           string              `json:"id"`
-	Allowed      []string            `json:"allowed_placeholders"`
-	Canonical    string              `json:"canonical_profile"`
-	Anchors      map[string][]string `json:"anchors"`
-	Presentation AuthorPresentation  `json:"presentation"`
+	Optional              bool                          `json:"optional"`
+	ID                    string                        `json:"id"`
+	Allowed               []string                      `json:"allowed_placeholders"`
+	Canonical             string                        `json:"canonical_profile"`
+	Anchors               map[string][]string           `json:"anchors"`
+	Presentation          AuthorPresentation            `json:"presentation"`
+	PresentationByProfile map[string]AuthorPresentation `json:"presentation_by_profile"`
+}
+
+func (r authorRoute) presentation(profile string) AuthorPresentation {
+	if p, ok := r.PresentationByProfile[profile]; ok {
+		return p
+	}
+	return r.Presentation
 }
 
 func (p AuthorPresentation) name() string {
@@ -123,8 +163,8 @@ func (s *presentationScan) check(p AuthorPresentation) error {
 	if p.MaximumLines != 0 && s.linesUsed > p.MaximumLines {
 		return fmt.Errorf("this %s reserves %d line(s); the message has %d", p.name(), p.MaximumLines, s.linesUsed)
 	}
-	// A message with no content at all is the documented way to leave a route
-	// to its native lettering; only a partly filled menu is a mistake.
+	// An intentional empty replacement hides wording. Omit a route to request
+	// native fallback; only a partly filled choice menu is a shape error here.
 	if p.RequiredNonemptyLines != 0 && s.nonempty != 0 && s.nonempty != p.RequiredNonemptyLines {
 		return fmt.Errorf("this menu shows exactly %d choice(s); the message has %d", p.RequiredNonemptyLines, s.nonempty)
 	}
@@ -183,7 +223,7 @@ func AuthorReferences(profile string) ([]AuthorReference, error) {
 		if !native {
 			anchors = route.Anchors[route.Canonical]
 		}
-		entry := AuthorReference{ID: route.ID, Anchors: append([]string{}, anchors...), NativeInProfile: native, Placeholders: []AuthorPlaceholder{}, Presentation: route.Presentation}
+		entry := AuthorReference{ID: route.ID, Anchors: append([]string{}, anchors...), NativeInProfile: native, Placeholders: []AuthorPlaceholder{}, Presentation: route.presentation(profile).detached()}
 		for _, name := range route.Allowed {
 			entry.Placeholders = append(entry.Placeholders, AuthorPlaceholder{name, authorContracts.placeholders[name]})
 		}
@@ -326,9 +366,79 @@ func ValidateAuthorScripts(profile, coverage string, scripts ...*AuthorScript) (
 		if anchorIndex != len(anchors) {
 			return zero, authorError(index[id].path, index[id].message.SourceLine, "%s: locked anchors changed; expected %d, found %d", id, len(anchors), anchorIndex)
 		}
-		if err := scan.check(route.Presentation); err != nil {
+		if err := scan.check(route.presentation(profile)); err != nil {
+			return zero, authorError(body.path, body.message.SourceLine, "%s: %s", id, err)
+		}
+		if err := validateAuthorTable(route.presentation(profile).Table, body.message.Operations); err != nil {
+			return zero, authorError(body.path, body.message.SourceLine, "%s: %s", id, err)
+		}
+		if err := validateAuthorKeyboard(route.presentation(profile).Keyboard, body.message.Operations); err != nil {
 			return zero, authorError(body.path, body.message.SourceLine, "%s: %s", id, err)
 		}
 	}
 	return stats, nil
+}
+
+func (t *AuthorTableShape) allows(line, fields int) bool {
+	for _, rule := range t.Rules {
+		if line >= rule.FirstLine && line <= rule.LastLine && (rule.NativeReserved || slices.Contains(rule.Fields, fields)) {
+			return true
+		}
+	}
+	return false
+}
+
+func validateAuthorTable(table *AuthorTableShape, ops []AuthorOperation) error {
+	if table == nil {
+		return nil
+	}
+	line, fields := 0, 1
+	started, content := false, false
+	check := func() error {
+		if content && !table.allows(line, fields) {
+			return fmt.Errorf("table row %d has %d field(s); this row shape is unsupported (keep the template's | separators and blank rows)", line+1, fields)
+		}
+		return nil
+	}
+	lineBreak := func() error {
+		if err := check(); err != nil {
+			return err
+		}
+		if started {
+			line++
+		}
+		fields, content = 1, false
+		return nil
+	}
+	for _, op := range ops {
+		switch op.Op {
+		case "text":
+			for _, b := range []byte(op.Value) {
+				switch b {
+				case '\n':
+					if err := lineBreak(); err != nil {
+						return err
+					}
+				case ' ', '\t', '\r':
+				default:
+					started, content = true, true
+					if b == '|' {
+						fields++
+					}
+				}
+			}
+		case "placeholder":
+			started, content = true, true
+		case "line", "paragraph":
+			if err := lineBreak(); err != nil {
+				return err
+			}
+			if op.Op == "paragraph" {
+				if err := lineBreak(); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return check()
 }

@@ -162,7 +162,7 @@ static void Exercise(ArRenderDevice *device, ArEnhancedTextSettings settings,
     CHECK(ArLocalizationFrame_AddTextWithGrid(
         &frame, 1, (ArTextCellDestination){3, kArTextCellScreen_Composited, 0},
         regions[example], text, strlen(text), 100, 100, 1,
-        kArTextDirection_LeftToRight, example >= 3 ? 8 : 7, &grid,
+        kArTextDirection_LeftToRight, example >= 3 ? 8 : 7, &grid, NULL,
         NULL, 0, &object, 1));
   } else {
     CHECK(ArLocalizationFrame_AddTextWithObjectsAndLayout(
@@ -324,7 +324,7 @@ static int ExerciseReport(ArRenderDevice *device, ArEnhancedTextSettings setting
   CHECK(ArLocalizationFrame_AddTextWithGrid(
       &frame, 7, (ArTextCellDestination){3, kArTextCellScreen_Composited, 0},
       report_region, text, strlen(text), 100, 100, 1,
-      kArTextDirection_LeftToRight, 8, &report_grid,
+      kArTextDirection_LeftToRight, 8, &report_grid, NULL,
       NULL, 0, example ? NULL : &object, example ? 0 : 1));
   const HudPresentationChunk chunk = {
     .inspector_kind = kInspectorPresentation_HudBg,
@@ -596,7 +596,7 @@ static void ExerciseEmpty(ArRenderDevice *device, const ArTextBackend *backend) 
     if (layout == kArLocalizationTextLayout_Grid) {
       CHECK(ArLocalizationFrame_AddTextWithGrid(
           &frame, 1, destination, region, "", 0, 0, 0, 1,
-          kArTextDirection_LeftToRight, 8, &invented, &preserve, 1, NULL, 0));
+          kArTextDirection_LeftToRight, 8, &invented, NULL, &preserve, 1, NULL, 0));
     } else {
       CHECK(ArLocalizationFrame_AddTextWithObjectsAndLayout(
           &frame, 1, destination, region, "", 0, 0, 0, 1,
@@ -1044,6 +1044,47 @@ static void ExerciseRevealBatching(ArRenderDevice *device) {
   CHECK(sink->draws == 1);
 }
 
+static void ExerciseValueBoundaries(ArRenderDevice *device) {
+  test_case = "authored boundaries versus literal value pipes";
+  const char text[] = "I|WWWWWWWWWWWWWWWW|M";
+  const ArLocalizationTextGrid grid = {
+      .rule_count = 1, .row_height = 2, .shared_column_count = 2,
+      .rules = {{.first_line = 0, .last_line = 0, .field_count = 2,
+          .cell_count = 2, .shared_columns = true,
+          .cells = {{0, 13, kArTextHorizontalAlignment_Leading, true, 0, 0},
+                    {13, 26, kArTextHorizontalAlignment_Trailing, false, 0, 0}}}}};
+  const HudPresentationChunk chunk = {
+      .inspector_kind = kInspectorPresentation_HudBg,
+      .screen_source = {0, 0, 256, 224}, .texture_source = {0, 0, 256, 224},
+      .output_destination = {0, 0, 1024, 896}};
+  ArLocalizedTextPresenter_Reset(device);
+  for (unsigned variant = 0; variant < 2; ++variant) {
+    ArLocalizationFrame frame;
+    ArLocalizationFrame_Reset(&frame);
+    CHECK(ArLocalizationFrame_SetFont(&frame, "en", "test", AR_TEST_FONT_PATH, 1, &frame.settings));
+    uint8_t boundaries[AR_TEXT_BOUNDARY_BYTES(sizeof(text))] = {0};
+    ArTextBoundary_Set(boundaries, variant ? sizeof(text) - 3 : 1, true);
+    CHECK(ArLocalizationFrame_AddTextWithGrid(
+        &frame, 7, (ArTextCellDestination){3, kArTextCellScreen_Composited, 0},
+        (ArTextCellRegion){3, 6, 26, 2}, text, sizeof(text) - 1, 20, 20, 1,
+        kArTextDirection_LeftToRight, 8, &grid, boundaries, NULL, 0, NULL, 0));
+    ArLocalizedPreparedFrame warm, cold;
+    ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0,
+                                    256, 224, &chunk, 1, &warm);
+    CHECK(warm.text_count == 2 && warm.mask_count == 1);
+    ArLocalizedTextPresenter_Reset(device);
+    ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0,
+                                    256, 224, &chunk, 1, &cold);
+    CHECK(cold.text_count == 2 && cold.mask_count == 1);
+    for (unsigned i = 0; i < warm.text_count && i < cold.text_count; ++i) {
+      CHECK(!memcmp(&warm.texts[i].destination, &cold.texts[i].destination,
+                    sizeof(ArRenderRectI)));
+      CHECK(warm.texts[i].surface.ascent == cold.texts[i].surface.ascent);
+    }
+  }
+  ArLocalizedTextPresenter_Reset(device);
+}
+
 int main(void) {
   TextureSink sink = {0};
   ArRenderDevice device;
@@ -1061,6 +1102,7 @@ int main(void) {
   ExerciseLabelFrame(&device);
   ExerciseRevealBatching(&device);
   ExerciseKeyboardActionKeys(&device);
+  ExerciseValueBoundaries(&device);
   const int sizes[] = {80, 110, 140};
   for (int scale = 2; scale <= 6; scale += 2) {
     for (size_t size = 0; size < 3; ++size) {

@@ -22,6 +22,7 @@ static bool ResolveSemanticId(
     uint32_t *cluster_count, uint64_t *source_revision,
     ArLocalizationInlineObjectSnapshot *inline_objects,
     size_t inline_object_capacity, uint8_t *inline_object_count,
+    uint8_t *structural_boundaries,
     char *error, size_t error_capacity) {
   (void)inline_objects;
   (void)inline_object_capacity;
@@ -35,6 +36,12 @@ static bool ResolveSemanticId(
   const size_t length = strlen(semantic_id);
   if (length >= utf8_capacity) return false;
   memcpy(utf8, semantic_id, length + 1u);
+  if (structural_boundaries) {
+    memset(structural_boundaries, 0, AR_TEXT_BOUNDARY_BYTES(utf8_capacity));
+    for (size_t i = 0; i < length; ++i)
+      if (utf8[i] == '|' || utf8[i] == '\n')
+        ArTextBoundary_Set(structural_boundaries, i, true);
+  }
   *utf8_bytes = length;
   *cluster_count = (uint32_t)length;
   *source_revision = 1;
@@ -52,8 +59,10 @@ static bool ResolveRevision(
     uint32_t *cluster_count, uint64_t *source_revision,
     ArLocalizationInlineObjectSnapshot *inline_objects,
     size_t inline_object_capacity, uint8_t *inline_object_count,
+    uint8_t *structural_boundaries,
     char *error, size_t error_capacity) {
   (void)inline_objects;
+  (void)structural_boundaries;
   (void)inline_object_capacity;
   *inline_object_count = 0;
   (void)error;
@@ -74,8 +83,10 @@ static bool ResolveInlineObject(
     uint32_t *cluster_count, uint64_t *source_revision,
     ArLocalizationInlineObjectSnapshot *inline_objects,
     size_t inline_object_capacity, uint8_t *inline_object_count,
+    uint8_t *structural_boundaries,
     char *error, size_t error_capacity) {
   (void)context;
+  (void)structural_boundaries;
   (void)semantic_id;
   (void)error;
   (void)error_capacity;
@@ -110,10 +121,12 @@ static bool ResolveEmpty(
     uint32_t *cluster_count, uint64_t *source_revision,
     ArLocalizationInlineObjectSnapshot *inline_objects,
     size_t inline_object_capacity, uint8_t *inline_object_count,
+    uint8_t *structural_boundaries,
     char *error, size_t error_capacity) {
   if (!ResolveSemanticId(NULL, semantic_id, utf8, utf8_capacity, utf8_bytes,
                          cluster_count, source_revision, inline_objects,
-                         inline_object_capacity, inline_object_count, error, error_capacity))
+                         inline_object_capacity, inline_object_count, structural_boundaries,
+                         error, error_capacity))
     return false;
   utf8[0] = 0;
   *utf8_bytes = 0;
@@ -273,10 +286,12 @@ static bool ResolveLiteral(
     void *context, const char *id, char *utf8, size_t capacity, size_t *bytes,
     uint32_t *clusters, uint64_t *revision,
     ArLocalizationInlineObjectSnapshot *objects, size_t object_capacity,
-    uint8_t *object_count, char *error, size_t error_capacity) {
+    uint8_t *object_count, uint8_t *structural_boundaries,
+    char *error, size_t error_capacity) {
   (void)id;
   return ResolveSemanticId(NULL, context, utf8, capacity, bytes, clusters,
-      revision, objects, object_capacity, object_count, error, error_capacity);
+      revision, objects, object_capacity, object_count, structural_boundaries,
+      error, error_capacity);
 }
 
 static void TestActionAndTitle(void) {

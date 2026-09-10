@@ -24,6 +24,19 @@ bool ActRaiserLocalizationText_Normalize(
     size_t destination_object_capacity, uint8_t *destination_object_count,
     uint16_t *reveal_offsets);
 
+/* Fixed-table variant: remaps the compiler's authored boundaries while
+ * normalizing. Inserted values stay inline (including any value newlines).
+ * Both bitmaps cover their respective UTF-8 byte capacities. */
+bool ActRaiserLocalizationText_NormalizeStructured(
+    const char *source, size_t source_bytes,
+    const ArDialogueInlineObject *source_objects, size_t source_object_count,
+    bool preserve_blank_lines,
+    char *destination, size_t capacity, size_t *destination_bytes,
+    ArLocalizationInlineObjectSnapshot *destination_objects,
+    size_t destination_object_capacity, uint8_t *destination_object_count,
+    uint16_t *reveal_offsets,
+    const uint8_t *source_boundaries, uint8_t *destination_boundaries);
+
 /* Inserts one object in ascending byte order, keeping the snapshot list sorted
  * the way the frame contract requires. */
 bool ActRaiserLocalizationText_InsertInlineObject(

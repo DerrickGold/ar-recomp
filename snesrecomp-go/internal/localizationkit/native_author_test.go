@@ -269,6 +269,11 @@ func TestNativeAuthorCompleteSourceRuntimeParity(t *testing.T) {
 				if ref.Presentation.MaximumLines != 1 {
 					ops = append(ops, Operation{"op": "line_break"}, Operation{"op": "text", "value": "Party on!"})
 				}
+				if ref.Presentation.Keyboard != nil {
+					// This census fixture intentionally omits keyboard wording;
+					// full page/Unicode/input-shape parity has dedicated cases.
+					ops = nil
+				}
 				for _, anchor := range ref.Anchors {
 					ops = append(ops, Operation{"op": anchor[:strings.LastIndexByte(anchor, '.')]})
 				}

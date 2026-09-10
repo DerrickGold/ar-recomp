@@ -22,12 +22,12 @@ type localizationCatalogEntry struct {
 	ReadOnly          bool   `json:"readOnly"`
 }
 
-func (app *application) localizationCatalog() ([]localizationCatalogEntry, error) {
-	projects, err := app.localization.store.List()
+func (work *localizationWork) localizationCatalog() ([]localizationCatalogEntry, error) {
+	projects, err := work.store.List()
 	if err != nil {
 		return nil, err
 	}
-	installed, err := lk.ListInstalledPacks(filepath.Join(app.localizationRoot(), "packs"))
+	installed, err := lk.ListInstalledPacks(filepath.Join(work.root, "packs"))
 	if err != nil {
 		return nil, err
 	}

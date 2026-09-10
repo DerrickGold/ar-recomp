@@ -5,6 +5,8 @@
 #include <string.h>
 
 #include "actraiser/actraiser_localization_runtime.h"
+#include "actraiser/actraiser_localization_compose_state.h"
+#include "actraiser/actraiser_localization_text_normalize.h"
 #include "actraiser_game.h"
 #include "localization/language_contract.h"
 #include "save_system.h"
@@ -74,7 +76,11 @@ static void WriteNativeFixture(bool oversized) {
       continue;
     fprintf(file, ":: %s\n", id);
     const bool speed = !strcmp(id, "system.message_speed.choose");
-    if (!speed)
+    if (!strcmp(id, "title.save_choice.labels"))
+      fputs("Continue fixture\n@line\nNew fixture\n", file);
+    else if (!strcmp(id, "city.fillmore.name"))
+      fputs("Town fixture\n", file);
+    else if (!speed)
       fputs("@empty\n", file);
     const uint32_t count =
         ArLanguageContract_RequiredAnchorCount(id, kArLanguageSourceProfile_Us);
@@ -113,11 +119,9 @@ void cpu_write16(CpuState *cpu, uint8 bank, uint16 address, uint16 value) {
   cpu_write8(cpu, bank, address, (uint8_t)value);
   cpu_write8(cpu, bank, (uint16_t)(address + 1u), (uint8_t)(value >> 8));
 }
-static void Capture(void) {
-  /* Flat presentation: this fixture exercises dialogue scheduling, not the
-   * title screen's Mode 7 transform. */
+static void CaptureWithTransform(bool mode7_transformed) {
   ActRaiserLocalizationRuntime_CaptureFrame(&s_frame, 0x7800, 0, NULL, 0, NULL,
-                                            0, false);
+                                            0, mode7_transformed);
   if (strstr(s_frame.text, "Première"))
     s_seen_pages |= 1;
   if (strstr(s_frame.text, "Deuxième"))
@@ -129,6 +133,8 @@ static void Capture(void) {
   if (strstr(s_frame.text, "Après") && !strstr(s_frame.text, "Avant"))
     s_suffix_seen = true;
 }
+
+static void Capture(void) { CaptureWithTransform(false); }
 
 RecompReturn bank_01_9284_M1X0(CpuState *cpu) {
   CHECK(cpu->m_flag == 1 && cpu->x_flag == 0 && cpu->host_return_valid == 1);
@@ -452,6 +458,69 @@ static bool BeginNameDialogue(void) {
   return ActRaiserLocalizationRuntime_BeginDialogue(&observation);
 }
 
+static bool FrameHasText(const char *text) {
+  for (uint8_t i = 0; i < s_frame.snapshot_count; ++i) {
+    const char *actual = ArLocalizationFrame_GetText(&s_frame, i, NULL);
+    if (actual && !strcmp(actual, text)) return true;
+  }
+  return false;
+}
+
+static void TestTitleTransformHandoff(void) {
+  ActRaiserLocalizationRuntime_Shutdown();
+  ActRaiserLocalizationText_ResetObservation();
+  memset(g_ram, 0, sizeof(g_ram));
+  g_settings.localization_content = 0;
+  g_settings.localization_presentation = 1;
+  CpuState title = {.S = 0x1e0, .DB = 2, .Y = 0xa9a7, .A = 0x1100,
+                    .ram = g_ram};
+  CHECK(!ActRaiser_LocalizationObserveTextCompose(&title));
+  Capture();
+  CHECK(FrameHasText("Continue fixture"));
+  CHECK(FrameHasText("New fixture"));
+  CHECK(s_frame.cells.count == 2); /* Separate fixed cells for the two choices. */
+  CpuState professional = title;
+  professional.Y = 0xaa60;
+  professional.A = 0x110c;
+  CHECK(!ActRaiser_LocalizationObserveTextCompose(&professional));
+  Capture();
+  CHECK(ArTextCellRecordSet_Find(&s_frame.cells,
+      kActRaiserLocalizationTitleSelectorSurface));
+  CaptureWithTransform(true);
+  CHECK(s_frame.cells.count == 0 && s_frame.snapshot_count == 0);
+  Capture();
+  CHECK(s_frame.cells.count == 0); /* Identity alone cannot resurrect old text. */
+
+  /* A native redraw queued on the same frame as the spin must also retire,
+   * rather than recreating a replacement after the transform check. */
+  CHECK(!ActRaiser_LocalizationObserveTextCompose(&title));
+  CaptureWithTransform(true);
+  CHECK(s_frame.cells.count == 0 && s_frame.snapshot_count == 0);
+
+  /* A transformed world-map background does not transform its flat city HUD. */
+  g_ram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_SkyPalace;
+  CpuState city = {.S = 0x1e0, .DB = 1, .Y = 0xf1cb, .A = 0x0106,
+                   .ram = g_ram};
+  CHECK(!ActRaiser_LocalizationObserveTextCompose(&city));
+  CaptureWithTransform(true);
+  CHECK(FrameHasText("Town fixture"));
+  CHECK(ArTextCellRecordSet_Find(&s_frame.cells, 4));
+  CHECK(!ArTextCellRecordSet_Find(&s_frame.cells,
+      kActRaiserLocalizationTitleTextSurface));
+  CaptureWithTransform(true);
+  CHECK(FrameHasText("Town fixture"));
+
+  /* Reentering the title with a new native compose restores both choices. */
+  g_ram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Title;
+  CHECK(!ActRaiser_LocalizationObserveTextCompose(&title));
+  Capture();
+  CHECK(FrameHasText("Continue fixture"));
+  CHECK(FrameHasText("New fixture"));
+  CHECK(!ArTextCellRecordSet_Find(&s_frame.cells, 4));
+  ActRaiserLocalizationRuntime_Shutdown();
+  ActRaiserLocalizationText_ResetObservation();
+}
+
 static void TestUnicodeNameHandoff(void) {
   const char *native_path = AR_TEST_NATIVE_FIXTURE_DIR "/name.srm";
   const char *sidecar_path = AR_TEST_NATIVE_FIXTURE_DIR "/name.srm.arname";
@@ -581,7 +650,38 @@ static void TestUnicodeNameHandoff(void) {
   ActRaiserLocalizationRuntime_Shutdown();
 }
 
+static void TestStructuredNormalization(void) {
+  static const char source[] = "\n  É|li\nse  |  left \n \n B|C  \n";
+  uint8_t source_bits[AR_TEXT_BOUNDARY_BYTES(sizeof(source))] = {0};
+  for (size_t i = 0; i < sizeof(source) - 1; ++i)
+    if (source[i] == '\n' || source[i] == '|')
+      ArTextBoundary_Set(source_bits, i, true);
+  ArTextBoundary_Set(source_bits, strstr(source, "É|li") - source + 2, false);
+  ArTextBoundary_Set(source_bits, strstr(source, "li\nse") - source + 2, false);
+  ArTextBoundary_Set(source_bits, strstr(source, "B|C") - source + 1, false);
+  char output[80];
+  uint8_t output_bits[AR_TEXT_BOUNDARY_BYTES(sizeof(output))];
+  memset(output_bits, 0xff, sizeof(output_bits));
+  size_t bytes = 0;
+  uint8_t objects = 0;
+  CHECK(ActRaiserLocalizationText_NormalizeStructured(
+      source, sizeof(source) - 1, NULL, 0, true, output, sizeof(output), &bytes,
+      NULL, 0, &objects, NULL, source_bits, output_bits));
+  CHECK(!strcmp(output, "É|li se | left\n\nB|C"));
+  const size_t delimiter = strstr(output, " | ") - output + 1;
+  for (size_t i = 0; i < bytes; ++i)
+    CHECK(ArTextBoundary_Get(output_bits, i) ==
+          (i == delimiter || output[i] == '\n'));
+  CHECK(!objects);
+  CHECK(ActRaiserLocalizationText_NormalizeStructured(
+      "", 0, NULL, 0, true, output, sizeof(output), &bytes,
+      NULL, 0, &objects, NULL, source_bits, output_bits));
+  CHECK(!bytes && !output[0]);
+  for (size_t i = 0; i < sizeof(output_bits); ++i) CHECK(!output_bits[i]);
+}
+
 int main(void) {
+  TestStructuredNormalization();
   WriteNativeFixture(false);
   g_settings.localization_presentation = 1;
   g_settings.localization_content = 1;
@@ -778,6 +878,7 @@ int main(void) {
   CHECK(!s_frame.snapshot_count); /* No retry/resurrection on capture. */
   ActRaiserLocalizationRuntime_Shutdown();
   WriteNativeFixture(false);
+  TestTitleTransformHandoff();
   TestUnicodeNameHandoff();
   return s_failures ? 1 : 0;
 }

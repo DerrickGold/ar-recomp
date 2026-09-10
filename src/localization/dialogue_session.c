@@ -36,6 +36,7 @@ typedef struct DialogueCue {
 
 typedef struct DialoguePage {
   char *utf8;
+  uint8_t *structural_boundaries;
   size_t utf8_bytes;
   size_t utf8_capacity;
   DialogueCue *cues;
@@ -125,6 +126,7 @@ static void DestroyPage(DialoguePage *page) {
   for (uint32_t i = 0; i < page->object_count; i++)
     free((void *)page->objects[i].id);
   free(page->utf8);
+  free(page->structural_boundaries);
   free(page->cues);
   free(page->objects);
   memset(page, 0, sizeof(*page));
@@ -200,7 +202,8 @@ static DialoguePage *AddPage(DialogueProgram *program,
   DialoguePage *page = &program->pages[program->page_count++];
   memset(page, 0, sizeof(*page));
   page->utf8 = (char *)malloc(1);
-  if (!page->utf8) {
+  page->structural_boundaries = (uint8_t *)calloc(1, 1);
+  if (!page->utf8 || !page->structural_boundaries) {
     SetError(error, "out of memory creating dialogue page");
     return NULL;
   }
@@ -232,11 +235,30 @@ static bool AppendBytes(DialoguePage *page, const char *bytes, size_t size,
       return false;
     }
     page->utf8 = grown;
+    const size_t old_bytes = AR_TEXT_BOUNDARY_BYTES(page->utf8_capacity);
+    const size_t new_bytes = AR_TEXT_BOUNDARY_BYTES(capacity);
+    uint8_t *boundaries = realloc(page->structural_boundaries, new_bytes);
+    if (!boundaries) {
+      SetError(error, "out of memory composing dialogue structure");
+      return false;
+    }
+    memset(boundaries + old_bytes, 0, new_bytes - old_bytes);
+    page->structural_boundaries = boundaries;
     page->utf8_capacity = capacity;
   }
   memcpy(page->utf8 + page->utf8_bytes, bytes, size);
   page->utf8_bytes += size;
   page->utf8[page->utf8_bytes] = 0;
+  return true;
+}
+
+static bool AppendLiteral(DialoguePage *page, const char *bytes, size_t size,
+                           ArLanguagePackError *error) {
+  const size_t start = page->utf8_bytes;
+  if (!AppendBytes(page, bytes, size, error)) return false;
+  for (size_t i = 0; i < size; ++i)
+    if (bytes[i] == '|' || bytes[i] == '\n')
+      ArTextBoundary_Set(page->structural_boundaries, start + i, true);
   return true;
 }
 
@@ -497,7 +519,7 @@ static bool BuildProgram(const ProgramSource *source,
     case kArLanguageOperation_Text: {
       const char *text = ArLanguagePack_GetString(source->effective_pack,
                                                   operation->value.text);
-      if (!AppendBytes(page, text, operation->value.text.length, error))
+      if (!AppendLiteral(page, text, operation->value.text.length, error))
         goto failed;
       break;
     }
@@ -510,11 +532,11 @@ static bool BuildProgram(const ProgramSource *source,
       break;
     }
     case kArLanguageOperation_LineBreak:
-      if (!AppendBytes(page, "\n", 1, error))
+      if (!AppendLiteral(page, "\n", 1, error))
         goto failed;
       break;
     case kArLanguageOperation_ParagraphBreak:
-      if (!AppendBytes(page, "\n\n", 2, error))
+      if (!AppendLiteral(page, "\n\n", 2, error))
         goto failed;
       break;
     case kArLanguageOperation_PageBreak:
@@ -1220,6 +1242,7 @@ bool ArDialogueSession_GetPage(const ArDialogueSession *session,
       &program->pages[session->state.authored_page_index];
   *page = (ArDialoguePageSnapshot){
       .utf8 = source->utf8,
+      .structural_boundaries = source->structural_boundaries,
       .utf8_bytes = source->utf8_bytes,
       .revealed_utf8_bytes = session->private_revealed_utf8_bytes,
       .page_index = session->state.authored_page_index,
@@ -1247,6 +1270,7 @@ bool ArDialogueSession_GetAuthoredPage(const ArDialogueSession *session,
   const DialoguePage *source = &program->pages[page_index];
   *page = (ArDialoguePageSnapshot){
       .utf8 = source->utf8,
+      .structural_boundaries = source->structural_boundaries,
       .utf8_bytes = source->utf8_bytes,
       .revealed_utf8_bytes = source->utf8_bytes,
       .page_index = page_index,

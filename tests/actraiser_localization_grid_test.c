@@ -57,6 +57,28 @@ int main(void) {
   const ArLocalizationTextGrid rows =
       Build(kActRaiserLocalizationMenu_FixedRows, 10, 2);
 
+  /* Authoring accepts precisely the shapes represented by the game-owned
+   * grid, including reserved artwork rows and the last logical row. Pixel
+   * anchors remain tested independently below. */
+  const ArLocalizationTextGrid *grids[] = {&cities, &score, &master, &rows, &speed};
+  const ArLanguageRowShape shapes[] = {kArLanguageRowShape_Cities,
+      kArLanguageRowShape_Score, kArLanguageRowShape_Master,
+      kArLanguageRowShape_FixedRows, kArLanguageRowShape_MessageSpeed};
+  const unsigned heights[] = {20, 20, 17, 2, 4};
+  for (unsigned index = 0; index < 5; ++index) {
+    for (unsigned line = 0; line < heights[index]; ++line) {
+      for (unsigned fields = 1; fields <= 11; ++fields) {
+        CHECK(ArLanguageRowShape_Allows(shapes[index], line, fields) ==
+              (ArLocalizationGrid_FindRow(grids[index], line, fields) != NULL));
+      }
+    }
+  }
+  CHECK(ArLanguageRowShape_ForRoute("status.report.cities_report") == kArLanguageRowShape_Cities);
+  CHECK(ArLanguageRowShape_ForRoute("sim.menu.use_offering") == kArLanguageRowShape_FixedRows);
+  CHECK(ArLanguageRowShape_ForRoute("sky.menu.magic.fire") == kArLanguageRowShape_FixedRows);
+  CHECK(ArLanguageRowShape_ForRoute("unknown") == kArLanguageRowShape_None);
+  CHECK(!ArLanguageRowShape_Allows(kArLanguageRowShape_Cities, 20, 1));
+
   /* Native column anchors, including the blank a right-aligned value keeps
    * before its neighbour. */
   ExpectCell(&master, 3, 4, 1, 3, 6, kArTextHorizontalAlignment_Trailing);
