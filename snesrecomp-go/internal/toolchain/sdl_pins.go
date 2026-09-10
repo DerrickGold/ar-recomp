@@ -2,9 +2,9 @@ package toolchain
 
 import "fmt"
 
-// PinnedSDL3Version is the single SDL3 release every platform bundle carries
-// where an official redistributable exists. It is the source of truth for the
-// version and checksums the packaging CMake used to hardcode inline.
+// PinnedSDL3Version is the fixed developer cross-build SDK. Installer archives
+// use ResolveSDLSDK's stable-3.x selection instead. These reviewed checksums
+// also support exact legacy assets that predate GitHub's SHA-256 metadata.
 const PinnedSDL3Version = "3.4.12"
 
 // PinnedSDL3TtfVersion is the SDL_ttf release bundled beside SDL3. SDL_ttf
@@ -14,8 +14,8 @@ const PinnedSDL3Version = "3.4.12"
 const PinnedSDL3TtfVersion = "3.2.2"
 
 const (
-	PinnedSteamDeckSDL3HeaderVersion  = "3.4.10"
-	PinnedSteamDeckSDL3RuntimeVersion = "3.4.10+ds-1+steamrt3.1+bsrt3.1"
+	PinnedSteamDeckSDL3HeaderVersion  = "3.4.14"
+	PinnedSteamDeckSDL3RuntimeVersion = PinnedSteamDeckSDL3HeaderVersion + "+ds-1+steamrt3.1+bsrt3.1"
 	// Valve packages the same upstream SDL_ttf release the official
 	// redistributables carry, so headers and runtime agree on one version.
 	PinnedSteamDeckSDL3TtfHeaderVersion  = PinnedSDL3TtfVersion
@@ -38,8 +38,8 @@ type sdlPin struct {
 // present: the macOS universal .dmg (one file serves both arches), the Windows
 // x86_64 MinGW tarball, and the Windows ARM64 VC development archive. Zig/lld
 // accepts the latter's COFF import library when targeting aarch64-windows-gnu.
-// Everything else falls back to a system SDL3, so it has no pin here and
-// SDL3Pin returns an error for it.
+// Installer development/runtime package pairs are selected by ResolveSDLSDK.
+// Unsupported targets have no pin here and SDL3Pin returns an error for them.
 var pinnedSDL3 = map[string]sdlPin{
 	"darwin/arm64":  {"SDL3-" + PinnedSDL3Version + ".dmg", "c77d36d9393bb5481e38d222b75a1a63ab16274457b3d18c63fef90aaf5fc93b", "dmg"},
 	"darwin/amd64":  {"SDL3-" + PinnedSDL3Version + ".dmg", "c77d36d9393bb5481e38d222b75a1a63ab16274457b3d18c63fef90aaf5fc93b", "dmg"},
@@ -58,8 +58,8 @@ var pinnedSDL3Ttf = map[string]sdlPin{
 }
 
 // SDL3TtfPin is SDL3Pin's counterpart for SDL_ttf, with the same contract: an
-// error on a platform with no official redistributable, where the caller falls
-// back to a system SDL3_ttf.
+// error on a platform with no official redistributable. Linux installers use
+// ResolveSDLSDK for publisher development/runtime package pairs instead.
 func SDL3TtfPin(goos, goarch string) (url, sha, archive, kind string, err error) {
 	entry, ok := pinnedSDL3Ttf[goos+"/"+goarch]
 	if !ok {
@@ -71,8 +71,8 @@ func SDL3TtfPin(goos, goarch string) (url, sha, archive, kind string, err error)
 
 // SDL3Pin returns the bundled SDL3 redistributable pin for a target platform:
 // its download URL, SHA256, archive file name, and archive kind. It returns an
-// error for platforms with no official redistributable (the caller falls back
-// to a system SDL3). The URL base mirrors the packaging CMake's _sdl_base.
+// error for platforms with no official redistributable; Linux installers use
+// ResolveSDLSDK instead.
 func SDL3Pin(goos, goarch string) (url, sha, archive, kind string, err error) {
 	entry, ok := pinnedSDL3[goos+"/"+goarch]
 	if !ok {
@@ -84,8 +84,8 @@ func SDL3Pin(goos, goarch string) (url, sha, archive, kind string, err error) {
 
 // SteamDeckSDL3Pins returns the two independently verified inputs for the
 // standalone Deck bundle: public SDL headers used to compile the game and
-// Valve's x86_64 Steam Runtime shared library used to link and run it. Valve
-// publishes. Keeping both inputs on SDL 3.4.10 avoids a compile-time/runtime
+// Valve's x86_64 Steam Runtime shared library used to link and run it.
+// Keeping both inputs on the same SDL release avoids a compile-time/runtime
 // API mismatch while retaining Valve's SteamOS-specific build configuration.
 func SteamDeckSDL3Pins() (
 	headersURL, headersSHA, headersArchive string,
@@ -94,12 +94,12 @@ func SteamDeckSDL3Pins() (
 	headersArchive = "SDL3-" + PinnedSteamDeckSDL3HeaderVersion + ".tar.gz"
 	headersURL = "https://github.com/libsdl-org/SDL/releases/download/release-" +
 		PinnedSteamDeckSDL3HeaderVersion + "/" + headersArchive
-	headersSHA = "12b34280415ec8418c864408b93d008a20a6530687ee613d60bfbd20411f2785"
+	headersSHA = "30d4aa2b3037718142b32dffd4e72f917ebb6cc5227150e7bb9c45efb2153aeb"
 
 	runtimeArchive = "libsdl3-0_" + PinnedSteamDeckSDL3RuntimeVersion + "_amd64.deb"
 	runtimeURL = steamRuntimeSniperBaseURL +
 		"/pool/main/libs/libsdl3/" + runtimeArchive
-	runtimeSHA = "a4e4086b1fb5461ffc2e1df5cd6810531abf86a57f2aee558f5cb9addd6f48e6"
+	runtimeSHA = "87449bfb70b8191c778ba87959649983a2613b64c80f585702e61048b11880d5"
 	return
 }
 

@@ -9,7 +9,7 @@
 #
 #  * Single platform (-DSNESBUILD_GOOS/-GOARCH, set by the package-* presets):
 #    cross-builds actraiser-builder and snesbuild, stages the target's pinned build dependencies
-#    (Zig, and prebuilt SDL3 where an official redistributable exists), and
+#    (Zig, SDL3 and SDL3_ttf for every supported platform), and
 #    assembles a STANDALONE bundle with the authored game project and a
 #    target-specific prebuilt runner SDK so a user needs only this archive and
 #    their own ROM — no repo checkout or developer tools. Go and Zig
@@ -27,6 +27,9 @@ project(actraiser-recomp-dist NONE)
 
 set(SNESBUILD_GOOS "" CACHE STRING "Target GOOS (darwin, linux, windows); empty = orchestrator")
 set(SNESBUILD_GOARCH "" CACHE STRING "Target GOARCH (arm64, amd64); empty = orchestrator")
+set(SNESBUILD_SDL3_VERSION "3" CACHE STRING "SDL3: latest stable major 3, or exact 3.x.y")
+set(SNESBUILD_SDL3_TTF_VERSION "3" CACHE STRING "SDL3_ttf: latest stable major 3, or exact 3.x.y")
+set(SNESBUILD_SDL_LOCKFILE "" CACHE FILEPATH "Reuse a target-specific SDL SDK lock (no metadata lookup)")
 option(SNESBUILD_STEAM_DECK
     "Build the standalone x86_64 Steam Deck bundle with Valve's SDL3 runtime"
     OFF)
@@ -37,6 +40,9 @@ set(SNESBUILD_ALL_PRESETS
 
 # ── Orchestrator mode ────────────────────────────────────────────────────────
 if(NOT SNESBUILD_GOOS AND NOT SNESBUILD_GOARCH)
+    if(SNESBUILD_SDL_LOCKFILE)
+        message(FATAL_ERROR "SDL lock files are target-specific; use one with a single-platform preset")
+    endif()
     get_filename_component(_release_dir ${CMAKE_CURRENT_SOURCE_DIR}/../../release ABSOLUTE)
     add_custom_target(release
         COMMENT "Building every platform bundle into release/")
@@ -48,7 +54,12 @@ if(NOT SNESBUILD_GOOS AND NOT SNESBUILD_GOARCH)
         # build dir (build/orchestrator) is left alone — it is in use here.
         add_custom_command(TARGET release POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E echo "=== packaging ${_preset} ==="
-            COMMAND ${CMAKE_COMMAND} --workflow --preset package-${_preset}
+            COMMAND ${CMAKE_COMMAND} --preset ${_preset}
+                -DSNESBUILD_SDL3_VERSION=${SNESBUILD_SDL3_VERSION}
+                -DSNESBUILD_SDL3_TTF_VERSION=${SNESBUILD_SDL3_TTF_VERSION}
+                -DSNESBUILD_SDL_LOCKFILE=
+            COMMAND ${CMAKE_COMMAND} --build --preset ${_preset}
+            COMMAND ${CMAKE_CPACK_COMMAND} --preset ${_preset}
             COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_CURRENT_SOURCE_DIR}/build/${_preset}
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
             VERBATIM)
@@ -226,42 +237,19 @@ if(NOT IS_DIRECTORY ${_zig_stage}/${_zig_release})
     endif()
 endif()
 
-# ── Bundled SDL3 (official redistributables; zlib license) ───────────────────
-set(SNESBUILD_SDL3_VERSION "3.4.12" CACHE STRING "Bundled SDL3 release")
-set(_sdl_base "https://github.com/libsdl-org/SDL/releases/download/release-${SNESBUILD_SDL3_VERSION}")
-set(_sdl_stage ${CMAKE_BINARY_DIR}/deps/sdl3)
-set(SNESBUILD_SDL3_BUNDLED FALSE)
-
-# The SDL3 checksum comes from the Go source of truth (internal/toolchain/
-# sdl_pins.go), the same pattern as the Zig pin above, so no SHA256 is
-# hardcoded here. Only query the official redistributable pin on platforms
-# where one is required; generic Linux intentionally uses the system SDL.
-if(SNESBUILD_GOOS STREQUAL "darwin" OR SNESBUILD_GOOS STREQUAL "windows")
-    execute_process(
-        COMMAND ${CMAKE_COMMAND} -E env GOCACHE=${_go_cache}
-            ${GO_EXECUTABLE} -C ${SNESBUILD_MODULE_DIR} run ./cmd/snesbuild
-            toolchain pin --sdl --goos ${SNESBUILD_GOOS} --goarch ${SNESBUILD_GOARCH}
-        OUTPUT_VARIABLE _sdl_pin OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE _sdl_pin_result)
-    if(NOT _sdl_pin_result EQUAL 0)
-        message(FATAL_ERROR
-            "could not resolve the SDL3 pin for ${SNESBUILD_GOOS}/${SNESBUILD_GOARCH}")
-    endif()
-    separate_arguments(_sdl_pin_fields UNIX_COMMAND "${_sdl_pin}")
-    list(GET _sdl_pin_fields 0 _sdl_url)
-    list(GET _sdl_pin_fields 1 _sdl_src_sha)
-    list(GET _sdl_pin_fields 2 _sdl_archive)
-    list(GET _sdl_pin_fields 3 _sdl_kind)
-endif()
+# ── Bundled SDL SDKs ──────────────────────────────────────────────────────
+include(${CMAKE_CURRENT_SOURCE_DIR}/sdl-resolve.cmake)
 
 if(SNESBUILD_GOOS STREQUAL "darwin")
     if(NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
         message(FATAL_ERROR "macOS bundles must be packaged on a macOS host")
     endif()
-    set(_sdl_dmg SDL3-${SNESBUILD_SDL3_VERSION}.dmg)
-    file(DOWNLOAD ${_sdl_base}/${_sdl_dmg} ${_cache_dir}/${_sdl_dmg}
+    set(_sdl_dmg ${_sdl_archive})
+    file(DOWNLOAD ${_sdl_url} ${_cache_dir}/${_sdl_dmg}
         EXPECTED_HASH SHA256=${_sdl_src_sha})
-    if(NOT EXISTS ${_sdl_stage}/lib/libSDL3.dylib)
+    if(NOT EXISTS ${_sdl_stage}/lib/libSDL3.dylib OR
+       NOT EXISTS ${_sdl_stage}/include/SDL3/SDL.h OR
+       NOT EXISTS ${_sdl_stage}/licenses/SDL3/LICENSE.txt)
         file(REMOVE_RECURSE ${_sdl_stage} ${CMAKE_BINARY_DIR}/deps/dmg)
         file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/deps/dmg)
         # Keep the attach/copy/detach lifecycle in one process so its EXIT and
@@ -286,114 +274,19 @@ if(SNESBUILD_GOOS STREQUAL "darwin")
         file(MAKE_DIRECTORY ${_sdl_stage}/lib)
         file(COPY ${_framework_dir}/Headers/ DESTINATION ${_sdl_stage}/include/SDL3)
         file(COPY_FILE ${_framework_binary} ${_sdl_stage}/lib/libSDL3.dylib)
+        file(COPY ${_framework_dir}/Resources/LICENSE.txt DESTINATION ${_sdl_stage}/licenses/SDL3)
         execute_process(COMMAND install_name_tool -id "@rpath/libSDL3.dylib"
             ${_sdl_stage}/lib/libSDL3.dylib COMMAND_ERROR_IS_FATAL ANY)
         execute_process(COMMAND codesign --force --sign - --timestamp=none
             ${_sdl_stage}/lib/libSDL3.dylib COMMAND_ERROR_IS_FATAL ANY)
     endif()
     set(SNESBUILD_SDL3_BUNDLED TRUE)
-elseif(SNESBUILD_STEAM_DECK)
-    # A standalone Deck download is not necessarily launched through Steam,
-    # so it cannot rely on the Steam client's SDL injection. Pair the pinned
-    # public headers with Valve's own x86_64 Steam Runtime SDL shared object.
-    # This avoids pretending a dependency-poor macOS cross-build is equivalent
-    # to SDL built inside Valve's Linux SDK.
-    execute_process(
-        COMMAND ${CMAKE_COMMAND} -E env GOCACHE=${_go_cache}
-            ${GO_EXECUTABLE} -C ${SNESBUILD_MODULE_DIR}
-            run ./cmd/snesbuild toolchain pin --steam-deck-sdl
-        OUTPUT_VARIABLE _deck_sdl_pin OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE _deck_sdl_pin_result)
-    if(NOT _deck_sdl_pin_result EQUAL 0)
-        message(FATAL_ERROR "could not resolve the Steam Deck SDL3 pins")
-    endif()
-    separate_arguments(_deck_sdl_pin_fields UNIX_COMMAND "${_deck_sdl_pin}")
-    list(GET _deck_sdl_pin_fields 0 _deck_sdl_headers_url)
-    list(GET _deck_sdl_pin_fields 1 _deck_sdl_headers_sha)
-    list(GET _deck_sdl_pin_fields 2 _deck_sdl_headers_archive)
-    list(GET _deck_sdl_pin_fields 3 _deck_sdl_runtime_url)
-    list(GET _deck_sdl_pin_fields 4 _deck_sdl_runtime_sha)
-    list(GET _deck_sdl_pin_fields 5 _deck_sdl_runtime_archive)
-    string(REGEX REPLACE "\\.tar\\.gz$" ""
-        _deck_sdl_headers_root ${_deck_sdl_headers_archive})
-    set(_deck_sdl_pin_stamp ${CMAKE_BINARY_DIR}/deps/deck-sdl.pin)
-    set(_deck_sdl_expected_pin
-        "format=2\n${_deck_sdl_headers_archive}\n${_deck_sdl_runtime_archive}\n")
-    set(_deck_sdl_installed_pin "")
-    if(EXISTS ${_deck_sdl_pin_stamp})
-        file(READ ${_deck_sdl_pin_stamp} _deck_sdl_installed_pin)
-    endif()
-
-    file(DOWNLOAD
-        ${_deck_sdl_headers_url}
-        ${_cache_dir}/${_deck_sdl_headers_archive}
-        EXPECTED_HASH SHA256=${_deck_sdl_headers_sha} SHOW_PROGRESS)
-    file(DOWNLOAD
-        ${_deck_sdl_runtime_url}
-        ${_cache_dir}/${_deck_sdl_runtime_archive}
-        EXPECTED_HASH SHA256=${_deck_sdl_runtime_sha} SHOW_PROGRESS)
-
-    if(NOT EXISTS ${_sdl_stage}/lib/libSDL3.so OR
-       NOT _deck_sdl_installed_pin STREQUAL _deck_sdl_expected_pin)
-        file(REMOVE_RECURSE
-            ${_sdl_stage}
-            ${CMAKE_BINARY_DIR}/deps/deck-sdl-headers
-            ${CMAKE_BINARY_DIR}/deps/deck-sdl-runtime)
-        file(MAKE_DIRECTORY
-            ${CMAKE_BINARY_DIR}/deps/deck-sdl-headers
-            ${CMAKE_BINARY_DIR}/deps/deck-sdl-runtime)
-        execute_process(
-            COMMAND ${CMAKE_COMMAND} -E tar xf
-                ${_cache_dir}/${_deck_sdl_headers_archive}
-            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/deps/deck-sdl-headers
-            COMMAND_ERROR_IS_FATAL ANY)
-        file(COPY
-            ${CMAKE_BINARY_DIR}/deps/deck-sdl-headers/${_deck_sdl_headers_root}/include/SDL3/
-            DESTINATION ${_sdl_stage}/include/SDL3)
-
-        # Debian packages are ar containers around a data tarball. Extract the
-        # package with the host's standard `ar`, then let CMake unpack the
-        # compression format used by that pinned package.
-        find_program(DECK_AR_EXECUTABLE ar REQUIRED)
-        execute_process(
-            COMMAND ${DECK_AR_EXECUTABLE} x
-                ${_cache_dir}/${_deck_sdl_runtime_archive}
-            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/deps/deck-sdl-runtime
-            COMMAND_ERROR_IS_FATAL ANY)
-        file(GLOB _deck_sdl_data_archive
-            ${CMAKE_BINARY_DIR}/deps/deck-sdl-runtime/data.tar.*)
-        list(LENGTH _deck_sdl_data_archive _deck_sdl_data_count)
-        if(NOT _deck_sdl_data_count EQUAL 1)
-            message(FATAL_ERROR
-                "expected one data archive in ${_deck_sdl_runtime_archive}")
-        endif()
-        list(GET _deck_sdl_data_archive 0 _deck_sdl_data_archive)
-        file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/deps/deck-sdl-runtime/root)
-        execute_process(
-            COMMAND ${CMAKE_COMMAND} -E tar xf ${_deck_sdl_data_archive}
-            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/deps/deck-sdl-runtime/root
-            COMMAND_ERROR_IS_FATAL ANY)
-        file(GLOB _deck_sdl_runtime_library
-            ${CMAKE_BINARY_DIR}/deps/deck-sdl-runtime/root/usr/lib/x86_64-linux-gnu/libSDL3.so.0.*)
-        list(LENGTH _deck_sdl_runtime_library _deck_sdl_library_count)
-        if(NOT _deck_sdl_library_count EQUAL 1)
-            message(FATAL_ERROR
-                "expected one versioned x86_64 libSDL3 in Valve's package")
-        endif()
-        list(GET _deck_sdl_runtime_library 0 _deck_sdl_runtime_library)
-        get_filename_component(
-            _deck_sdl_runtime_name ${_deck_sdl_runtime_library} NAME)
-        file(MAKE_DIRECTORY ${_sdl_stage}/lib)
-        file(COPY_FILE ${_deck_sdl_runtime_library}
-            ${_sdl_stage}/lib/${_deck_sdl_runtime_name})
-        # Hermetic linking needs the development name; runtime loading follows
-        # the SONAME. Regular copies are archive-safe on every packaging host.
-        file(COPY_FILE ${_deck_sdl_runtime_library}
-            ${_sdl_stage}/lib/libSDL3.so.0)
-        file(COPY_FILE ${_deck_sdl_runtime_library}
-            ${_sdl_stage}/lib/libSDL3.so)
-        file(WRITE ${_deck_sdl_pin_stamp} "${_deck_sdl_expected_pin}")
-    endif()
+elseif(SNESBUILD_GOOS STREQUAL "linux")
+    include(${CMAKE_CURRENT_SOURCE_DIR}/sdl-linux.cmake)
+    # Generic x86_64 and Steam Deck share Valve's Sniper SDK.
+    file(REMOVE_RECURSE "${_sdl_stage}")
+    stage_linux_sdl(SDL3)
+    stage_linux_sdl(SDL3_ttf)
     set(SNESBUILD_SDL3_BUNDLED TRUE)
 elseif(SNESBUILD_GOOS STREQUAL "windows" AND SNESBUILD_GOARCH STREQUAL "arm64")
     if(NOT _sdl_kind STREQUAL "vc")
@@ -402,16 +295,19 @@ elseif(SNESBUILD_GOOS STREQUAL "windows" AND SNESBUILD_GOARCH STREQUAL "arm64")
     file(DOWNLOAD ${_sdl_url} ${_cache_dir}/${_sdl_archive}
         EXPECTED_HASH SHA256=${_sdl_src_sha})
     if(NOT EXISTS ${_sdl_stage}/lib/SDL3.dll OR
-       NOT EXISTS ${_sdl_stage}/lib/SDL3.lib)
+       NOT EXISTS ${_sdl_stage}/lib/SDL3.lib OR
+       NOT EXISTS ${_sdl_stage}/include/SDL3/SDL.h OR
+       NOT EXISTS ${_sdl_stage}/licenses/SDL3/LICENSE.txt)
         file(REMOVE_RECURSE ${_sdl_stage} ${CMAKE_BINARY_DIR}/deps/vc)
         file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/deps/vc)
         execute_process(COMMAND ${CMAKE_COMMAND} -E tar xf ${_cache_dir}/${_sdl_archive}
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/deps/vc COMMAND_ERROR_IS_FATAL ANY)
-        set(_vc_root ${CMAKE_BINARY_DIR}/deps/vc/SDL3-${SNESBUILD_SDL3_VERSION})
+        set(_vc_root ${CMAKE_BINARY_DIR}/deps/vc/SDL3-${_sdl_version})
         file(MAKE_DIRECTORY ${_sdl_stage}/lib)
         file(COPY ${_vc_root}/include/SDL3/ DESTINATION ${_sdl_stage}/include/SDL3)
         file(COPY_FILE ${_vc_root}/lib/arm64/SDL3.lib ${_sdl_stage}/lib/SDL3.lib)
         file(COPY_FILE ${_vc_root}/lib/arm64/SDL3.dll ${_sdl_stage}/lib/SDL3.dll)
+        file(COPY ${_vc_root}/LICENSE.txt DESTINATION ${_sdl_stage}/licenses/SDL3)
     endif()
     set(SNESBUILD_SDL3_BUNDLED TRUE)
 elseif(SNESBUILD_GOOS STREQUAL "windows" AND SNESBUILD_GOARCH STREQUAL "amd64")
@@ -420,27 +316,34 @@ elseif(SNESBUILD_GOOS STREQUAL "windows" AND SNESBUILD_GOARCH STREQUAL "amd64")
     endif()
     file(DOWNLOAD ${_sdl_url} ${_cache_dir}/${_sdl_archive}
         EXPECTED_HASH SHA256=${_sdl_src_sha})
-    if(NOT EXISTS ${_sdl_stage}/lib/SDL3.dll)
+    if(NOT EXISTS ${_sdl_stage}/lib/SDL3.dll OR
+       NOT EXISTS ${_sdl_stage}/lib/libSDL3.dll.a OR
+       NOT EXISTS ${_sdl_stage}/include/SDL3/SDL.h OR
+       NOT EXISTS ${_sdl_stage}/licenses/SDL3/LICENSE.txt)
         file(REMOVE_RECURSE ${_sdl_stage} ${CMAKE_BINARY_DIR}/deps/mingw)
         file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/deps/mingw)
         execute_process(COMMAND ${CMAKE_COMMAND} -E tar xf ${_cache_dir}/${_sdl_archive}
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/deps/mingw COMMAND_ERROR_IS_FATAL ANY)
-        set(_mingw_root ${CMAKE_BINARY_DIR}/deps/mingw/SDL3-${SNESBUILD_SDL3_VERSION}/x86_64-w64-mingw32)
+        set(_mingw_root ${CMAKE_BINARY_DIR}/deps/mingw/SDL3-${_sdl_version}/x86_64-w64-mingw32)
         file(MAKE_DIRECTORY ${_sdl_stage}/lib)
         file(COPY ${_mingw_root}/include/SDL3/ DESTINATION ${_sdl_stage}/include/SDL3)
         # SDL3 dropped the separate SDLmain static lib; only the import lib
         # for the DLL is needed to link.
         file(COPY ${_mingw_root}/lib/libSDL3.dll.a DESTINATION ${_sdl_stage}/lib)
         file(COPY_FILE ${_mingw_root}/bin/SDL3.dll ${_sdl_stage}/lib/SDL3.dll)
+        file(COPY ${CMAKE_BINARY_DIR}/deps/mingw/SDL3-${_sdl_version}/LICENSE.txt
+            DESTINATION ${_sdl_stage}/licenses/SDL3)
     endif()
     set(SNESBUILD_SDL3_BUNDLED TRUE)
 else()
-    message(STATUS "No official SDL3 redistributable for ${SNESBUILD_GOOS}/${SNESBUILD_GOARCH}; "
-        "the run script will fall back to a system SDL3")
+    message(FATAL_ERROR "No bundled SDL SDK for ${SNESBUILD_GOOS}/${SNESBUILD_GOARCH}")
 endif()
 
-# SDL3_ttf shares the selected SDK, but its own version/checksum is pinned in Go.
+# SDL3_ttf shares the SDK root and the resolved lock.
 include(${CMAKE_CURRENT_SOURCE_DIR}/sdl-ttf.cmake)
+file(WRITE "${_sdl_stage}/sdk.pin" "${_sdl_expected}")
+configure_file("${CMAKE_BINARY_DIR}/sdl-sdk.lock.json" "${_sdl_stage}/sdl-sdk.lock.json" COPYONLY)
+install(FILES "${CMAKE_BINARY_DIR}/sdl-sdk.lock.json" DESTINATION utils/licenses)
 include(${CMAKE_CURRENT_SOURCE_DIR}/appimage.cmake)
 
 # ── One-click run script per platform ────────────────────────────────────────
@@ -456,14 +359,30 @@ get_filename_component(_run_script_name ${_run_script} NAME)
 set(SNESBUILD_OS_NAME "${_os_name}")
 set(SNESBUILD_ARCH_NAME "${_arch_name}")
 set(SNESBUILD_RUN_SCRIPT "${_run_script_name}")
-if(SNESBUILD_SDL3_BUNDLED)
-    set(SNESBUILD_SDL_NOTE
-        "- SDL3 and SDL3_ttf are included. The Steam Deck build uses SteamOS runtime dependencies.")
-else()
-    set(SNESBUILD_SDL_NOTE
-"- Generic Linux builds require development packages for SDL3 and SDL3_ttf.
-  Install both for your architecture using your package manager or a source
-  build, then try again. The dependency scan reports which one is missing.")
+set(SNESBUILD_SDL_NOTE "- SDL3 ${_sdl_version} and SDL3_ttf ${_ttf_version} headers and libraries are included.")
+if(SNESBUILD_STEAM_DECK)
+    string(APPEND SNESBUILD_SDL_NOTE " The Steam Deck build uses SteamOS runtime dependencies.")
+elseif(SNESBUILD_GOOS STREQUAL "linux")
+    string(JSON _sdl_dependencies GET "${_sdl_lock}" sdl dependencies)
+    string(JSON _ttf_dependencies GET "${_sdl_lock}" ttf dependencies)
+    string(APPEND SNESBUILD_SDL_NOTE
+" Do not install
+  SDL development packages. This build needs the Linux desktop/audio/font
+  runtime libraries below. The Builder reports missing libraries
+  before compiling. On a minimal Debian 13 installation these can be added with:
+    sudo apt install libasound2t64 libpulse0 libdecor-0-0 libfribidi0 libx11-6 libxext6 libxcursor1 libxi6 libxfixes3 libxrandr2 libxss1 libxtst6 libwayland-client0 libwayland-cursor0 libwayland-egl1 libxkbcommon0 libfreetype6 libharfbuzz0b
+  These are OS runtime components, not compilers or SDL SDKs. A graphical
+  session and working graphics drivers are also needed to play normally.
+  Selected SDL3 package requirements: ${_sdl_dependencies}
+  Selected SDL3_ttf package requirements: ${_ttf_dependencies}")
+endif()
+string(APPEND SNESBUILD_SDL_NOTE
+"\n  Exact dependency versions, URLs and checksums: utils/licenses/sdl-sdk.lock.json")
+set(SNESBUILD_APPIMAGE_NOTE "")
+if(SNESBUILD_GOOS STREQUAL "linux")
+    set(SNESBUILD_APPIMAGE_NOTE
+"- Normal AppImage launching needs working FUSE (for example, Debian's fuse3).
+  APPIMAGE_EXTRACT_AND_RUN=1 provides a no-FUSE launch fallback.")
 endif()
 configure_file(README.txt.in ${CMAKE_BINARY_DIR}/README.txt @ONLY)
 
@@ -637,6 +556,9 @@ install(DIRECTORY ${_zig_stage}/${_zig_release} DESTINATION utils/tools/toolchai
     USE_SOURCE_PERMISSIONS)
 if(SNESBUILD_SDL3_BUNDLED)
     install(DIRECTORY ${_sdl_stage}/ DESTINATION utils/tools/sdl3 USE_SOURCE_PERMISSIONS)
+    if(EXISTS "${_sdl_stage}/licenses/SDL3")
+        install(DIRECTORY ${_sdl_stage}/licenses/SDL3/ DESTINATION utils/licenses/SDL3)
+    endif()
     # Keep notices outside the optional compiler SDK too: slimming removes
     # tools/sdl3, but the game's copied shared libraries remain in use.
     install(DIRECTORY ${_sdl_stage}/licenses/SDL3_ttf/

@@ -84,3 +84,42 @@ func TestRunSnesbuildCompletionFailureAndCancellation(t *testing.T) {
 		t.Fatal("cancellation did not stop the process tree promptly")
 	}
 }
+
+func TestPrepareBuildToolchainUsesAvailableCompilerBeforeFetching(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is POSIX-only")
+	}
+	for _, tc := range []struct {
+		name, available, override, want string
+		wantError                       bool
+	}{
+		{"bundled compiler is offline", "1", "", "status\n", false},
+		{"source checkout fetches missing compiler", "0", "", "status\nfetch\n", false},
+		{"broken override does not download", "0", "/missing/zig", "status\n", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			calls := filepath.Join(dir, "calls")
+			script := filepath.Join(dir, "snesbuild")
+			t.Setenv("TEST_TOOLCHAIN_CALLS", calls)
+			t.Setenv("TEST_TOOLCHAIN_AVAILABLE", tc.available)
+			t.Setenv("SNESBUILD_ZIG", tc.override)
+			body := `#!/bin/sh
+printf '%s\n' "$2" >> "$TEST_TOOLCHAIN_CALLS"
+if [ "$2" = status ] && [ "$TEST_TOOLCHAIN_AVAILABLE" != 1 ]; then exit 1; fi
+printf '%s\n' '{"schema":"snesbuild-event","version":1,"type":"artifact","kind":"toolchain","path":"/fixture/bundled-zig"}'
+`
+			if err := os.WriteFile(script, []byte(body), 0755); err != nil {
+				t.Fatal(err)
+			}
+			err := prepareBuildToolchain(context.Background(), script, dir, &bytes.Buffer{})
+			if (err != nil) != tc.wantError {
+				t.Fatalf("prepare toolchain: %v", err)
+			}
+			got, err := os.ReadFile(calls)
+			if err != nil || string(got) != tc.want {
+				t.Fatalf("commands = %q, %v; want %q", got, err, tc.want)
+			}
+		})
+	}
+}

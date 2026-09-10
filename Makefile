@@ -30,6 +30,9 @@
 #   stale in an existing CMake cache.
 #
 #   make check-constants  reject high-risk duplicate literals in authored code.
+#   make check-appimage   Linux-only, ROM-free finished AppImage acceptance.
+#                     Uses the same packaging code and pinned tools shipped in
+#                     the portable Builder; see docs/desktop-packaging.md.
 #   make check-localization-roms  run the OPTIONAL five-ROM localization
 #                     acceptance gate. `ctest` and a plain `go test` SKIP these
 #                     cases when the regional ROMs are absent, so a green
@@ -65,10 +68,14 @@ CLEAN_BUILD_DIRS := build build-release build-control build-terrain build-asan b
 CLEAN_GENERATED  := src/gen recomp/funcs.h saves/gen_meta.json saves/rts_webs.txt saves/rts_webs.prev.txt
 CLEAN_RELEASE    := release
 
-.PHONY: dev release $(addprefix release-,$(PLATFORMS)) check-constants check-cross check-localization-roms check-localization-workflow clean clean-all clean-release clean-packaging-mounts
+.PHONY: dev release $(addprefix release-,$(PLATFORMS)) check-constants check-appimage check-cross check-localization-roms check-localization-workflow clean clean-all clean-release clean-packaging-mounts
 
 check-constants:
 	@sh tools/check_constants.sh
+
+check-appimage:
+	cmake -S $(PACKAGING)/appimage-check -B build-appimage-check
+	cmake --build build-appimage-check --target check-appimage
 
 # config.ini is gitignored -- it is the developer's live config, and the stock
 # copy that ships is the packaging template. Seed it once so a fresh clone runs

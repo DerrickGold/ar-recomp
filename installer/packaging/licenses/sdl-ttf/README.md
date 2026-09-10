@@ -3,7 +3,13 @@
 These verbatim notices correspond to external dependencies pinned by the
 [official SDL3_ttf 3.2.2 release](https://github.com/libsdl-org/SDL_ttf/tree/release-3.2.2/external).
 The applicable SDK's SDL3_ttf `LICENSE.txt` is copied from its hash-verified
-redistributable; Steam Deck also retains Valve's Debian copyright file.
+redistributable. All Linux installers, including Steam Deck, retain the
+selected publisher's full Debian-format copyright notice
+as `LICENSE.txt` (Valve on x86_64, Debian on ARM64).
+The selected SDK version and verified archive provenance are recorded in
+`utils/licenses/sdl-sdk.lock.json`. These supplemental notice copies describe
+the reviewed 3.2.2 dependencies; check upstream dependency/license changes as
+part of release acceptance when a newer stable SDL3_ttf is selected.
 Keep this directory when slimming the compiler SDK or sharing a playable copy.
 
 | Notice | Upstream revision and original file |

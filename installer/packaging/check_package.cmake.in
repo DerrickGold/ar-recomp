@@ -21,6 +21,8 @@ set(_required_license_files
     "utils/ACTRAISER-THIRD-PARTY-NOTICES.md"
     "utils/third_party/sheenbidi/LICENSE"
     "utils/licenses/SheenBidi/LICENSE"
+    "utils/licenses/SDL3/LICENSE.txt"
+    "utils/licenses/sdl-sdk.lock.json"
     "utils/game-assets/fonts/noto/OFL.txt"
     "utils/game-assets/fonts/noto/NotoSansJP-OFL.txt"
     "utils/snesrecomp-go/runtime/LICENSE"
@@ -81,6 +83,18 @@ foreach(_package IN LISTS CPACK_PACKAGE_FILES)
         endif()
     endforeach()
     if("@SNESBUILD_GOOS@" STREQUAL "linux")
+        foreach(_sdl_file IN ITEMS
+                "include/SDL3/SDL.h" "include/SDL3_ttf/SDL_ttf.h"
+                "lib/libSDL3.so" "lib/libSDL3.so.0"
+                "lib/libSDL3_ttf.so" "lib/libSDL3_ttf.so.0")
+            if(NOT EXISTS "${_root}/utils/tools/sdl3/${_sdl_file}")
+                message(FATAL_ERROR "bundled SDL check: missing ${_sdl_file}")
+            endif()
+            file(SIZE "${_root}/utils/tools/sdl3/${_sdl_file}" _sdl_size)
+            if(_sdl_size EQUAL 0)
+                message(FATAL_ERROR "bundled SDL check: empty ${_sdl_file}")
+            endif()
+        endforeach()
         foreach(_appimage_file IN ITEMS "utils/tools/appimagetool"
                 "utils/tools/appimage-runtime"
                 "utils/licenses/AppImage/appimagetool-LICENSE.txt"

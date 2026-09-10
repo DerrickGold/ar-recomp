@@ -164,8 +164,8 @@ func TestSDL3PinReturnsRedistributables(t *testing.T) {
 }
 
 func TestSDL3PinErrorsWithoutRedistributable(t *testing.T) {
-	// Generic Linux has no official redistributable used by this packaging
-	// path; it must fall back to a system SDL3, so the pin must error.
+	// SDL's own release assets have no Linux binaries. ResolveSDLSDK supplies
+	// matched publisher development/runtime packages for installers.
 	for _, p := range []struct{ goos, goarch string }{
 		{"linux", "amd64"}, {"linux", "arm64"},
 	} {

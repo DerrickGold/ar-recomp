@@ -2,13 +2,15 @@ ActRaiser Recomp  (@SNESBUILD_OS_NAME@/@SNESBUILD_ARCH_NAME@)
 Version @SNESBUILD_VERSION@
 
 This builds and runs the game on your computer from a game ROM you already
-own. Everything needed is already in this folder. You do NOT need to install
-anything.
+own. The compiler and build tools are included. Platform-specific library and
+runtime requirements are listed below.
 
 
 WHAT YOU NEED
 -------------
-Your own game ROM: a ".sfc" or ".smc" file. Nothing else.
+Your own game ROM: a ".sfc" or ".smc" file.
+@SNESBUILD_SDL_NOTE@
+@SNESBUILD_APPIMAGE_NOTE@
 
 
 HOW TO PLAY
@@ -132,9 +134,6 @@ IF SOMETHING GOES WRONG
 
 - macOS says the file is from an unidentified developer: hold Control, click
   run-build.command, choose Open, then Open again. (You only do this once.)
-
-@SNESBUILD_SDL_NOTE@
-
 
 OPTIONAL: YOUR OWN MUSIC AND HD GRAPHICS
 ----------------------------------------

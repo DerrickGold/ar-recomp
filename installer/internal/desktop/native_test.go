@@ -41,21 +41,18 @@ func TestNativeApplicationSurvivesRelocationAndMissingBuildLibraries(t *testing.
 		build("-shared", "-fPIC", "middle.c", "-L.", "-lbase", "-o", "libmiddle.so", "-Wl,-soname,libmiddle.so", "-Wl,-rpath,"+source)
 	}
 	build("main.c", "-L.", "-lmiddle", "-Wl,-rpath,"+source, "-o", Name)
+	if runtime.GOOS == "linux" {
+		// An inherited path must not replace the SDK the binary was built with.
+		wrong := t.TempDir()
+		put(t, filepath.Join(wrong, "base.c"), "int base(void) { return -1; }\n")
+		build("-shared", "-fPIC", filepath.Join(wrong, "base.c"), "-o", filepath.Join(wrong, "libbase.so"), "-Wl,-soname,libbase.so")
+		t.Setenv("LD_LIBRARY_PATH", wrong)
+	}
 	if runtime.GOOS == "darwin" {
 		// Package generation itself must not invoke an Xcode/CLT shim.
 		t.Setenv("DEVELOPER_DIR", filepath.Join(t.TempDir(), "no-developer-tools"))
 	}
-	for _, leaf := range []string{"config.ini", "diorama-layers.ini", "game-assets/manifest.ini"} {
-		put(t, filepath.Join(root, "defaults", leaf), "[test]\n")
-	}
-	for _, leaf := range []string{"manual.pdf", "manifest.ini", "languages/native-us/pack.ini", "fonts/noto/NotoSans-SemiCondensedExtraBold.ttf", "fonts/noto/NotoSansJP-Bold.otf", "fonts/noto/NotoSansArabic-Bold.ttf", "fonts/noto/NotoSansHebrew-Bold.ttf", "fonts/noto/OFL.txt", "fonts/noto/NotoSansJP-OFL.txt"} {
-		put(t, filepath.Join(root, "game-assets", leaf), "synthetic resource")
-	}
-	put(t, filepath.Join(root, "game-assets/languages/packs/.arlang-cache/private"), "must not ship")
-	put(t, filepath.Join(root, "game-assets/languages/sources/private"), "must not ship")
-	put(t, filepath.Join(root, "saves/save.srm"), "must not ship")
-	rom := filepath.Join(root, "synthetic.sfc")
-	put(t, rom, "synthetic ROM")
+	rom := nativePackageFixture(t, root)
 	format := "app"
 	if runtime.GOOS == "linux" {
 		format = "appdir"
@@ -93,4 +90,22 @@ func TestNativeApplicationSurvivesRelocationAndMissingBuildLibraries(t *testing.
 	if err != nil || strings.TrimSpace(string(output)) != "42" {
 		t.Fatalf("relocated app: %v: %s", err, output)
 	}
+}
+
+// The package API intentionally accepts synthetic inputs; unlike the public
+// package command these tests never extract retail data or need a game ROM.
+func nativePackageFixture(t *testing.T, root string) string {
+	t.Helper()
+	for _, leaf := range []string{"config.ini", "diorama-layers.ini", "game-assets/manifest.ini"} {
+		put(t, filepath.Join(root, "defaults", leaf), "[test]\n")
+	}
+	for _, leaf := range []string{"manual.pdf", "manifest.ini", "languages/native-us/pack.ini", "fonts/noto/NotoSans-SemiCondensedExtraBold.ttf", "fonts/noto/NotoSansJP-Bold.otf", "fonts/noto/NotoSansArabic-Bold.ttf", "fonts/noto/NotoSansHebrew-Bold.ttf", "fonts/noto/OFL.txt", "fonts/noto/NotoSansJP-OFL.txt"} {
+		put(t, filepath.Join(root, "game-assets", leaf), "synthetic resource")
+	}
+	put(t, filepath.Join(root, "game-assets/languages/packs/.arlang-cache/private"), "must not ship")
+	put(t, filepath.Join(root, "game-assets/languages/sources/private"), "must not ship")
+	put(t, filepath.Join(root, "saves/save.srm"), "must not ship")
+	rom := filepath.Join(root, "synthetic.sfc")
+	put(t, rom, "synthetic ROM")
+	return rom
 }
