@@ -103,8 +103,21 @@ anywhere.
 | Steam Deck | `actraiser-recomp-steam-deck-x86_64.tar.xz` |
 
 Each bundle contains the buildable project, a pinned Zig C/C++ toolchain, and
-SDL3 where a redistributable is available. A SHA-256 sidecar is included for
-each archive.
+matched SDL3/SDL3_ttf headers and libraries for its platform. A SHA-256 sidecar
+is included for each archive. Players do not need system SDL development
+packages; the Builder selects its bundled SDK ahead of any system SDL.
+
+Installer packaging automatically selects the latest stable **3.x** SDL3 and
+SDL3_ttf SDKs available from each platform's publisher. Players use those
+included versions offline; the Builder does not download updates. Exact inputs
+are recorded in `utils/licenses/sdl-sdk.lock.json`. Maintainers can
+[override versions or reuse a lock](docs/desktop-packaging.md#sdl-version-policy).
+
+Linux installers require normal Linux desktop/audio/font runtime libraries.
+Minimal installations may need these OS components added;
+the archive's README lists them, and the Builder checks before compiling.
+Normal AppImage launching also needs a working FUSE setup (for example,
+Debian's `fuse3` package). `APPIMAGE_EXTRACT_AND_RUN=1` is the no-FUSE fallback.
 
 The macOS arm64 and Steam Deck bundles have been tested end to end. The macOS
 x86_64, Windows, and generic Linux archives are cross-built from the same
@@ -139,8 +152,10 @@ Running `run-build` again detects the existing game and opens as a launcher.
 
 These applications are generated locally and contain your ROM; they are not
 public release artifacts. macOS signing is automatic and local, with no Apple
-developer account or Xcode required. Native AppImage/Steam Deck launch testing
-of this new packaging path is still pending.
+developer account or Xcode required. Linux ARM64 tests cover finished AppImage
+creation and both mounted/extracted launching; the real Builder also compiled
+and launched the game offline with system SDL removed. Graphical desktop
+acceptance and the new x86_64/Steam Deck AppImage path remain unverified.
 
 The generated desktop application supports two installation types. The same
 instructions apply regardless of its platform-specific filename. Legacy

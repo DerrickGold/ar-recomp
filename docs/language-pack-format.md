@@ -154,7 +154,8 @@ is optional development tooling, not a builder, editor, or runtime dependency.
 Enhanced-text builds require SDL3_ttf as well as SDL3. Supported standalone
 bundles carry the font-rendering SDK and preserve its license notices under
 `utils/licenses/SDL3_ttf`, even when build tools are removed. Generic Linux
-builds use matching system development packages. The builder checks for missing
+installers also include matching pinned headers and libraries; only source
+checkouts use system development packages. The builder checks for missing
 headers/link libraries and known wrong-architecture binaries before compiling.
 
 Open **Languages** in the builder sidebar. **Install a language pack** and

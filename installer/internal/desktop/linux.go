@@ -30,6 +30,14 @@ func packageLinux(ctx context.Context, options PackageOptions, app, bin, librari
 			continue
 		} // Static Go helper.
 		command := exec.CommandContext(ctx, "ldd", binary)
+		// The build driver copies its selected SDL SDK beside the executable.
+		// Inspect those libraries first even when the caller has another SDL
+		// on LD_LIBRARY_PATH; otherwise packaging could undo the pinned build.
+		privatePath := filepath.Dir(binary)
+		if inherited := os.Getenv("LD_LIBRARY_PATH"); inherited != "" {
+			privatePath += ":" + inherited
+		}
+		command.Env = append(os.Environ(), "LD_LIBRARY_PATH="+privatePath)
 		output, err := command.CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("inspect Linux dependencies: %w: %s", err, output)

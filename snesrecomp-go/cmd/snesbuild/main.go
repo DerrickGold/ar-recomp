@@ -135,7 +135,7 @@ Commands:
   install     Install an explicitly named built game, ROM, and launcher
   toolchain   Report, fetch, or pin the hermetic C toolchain (Zig)
   runtime     Build a target-specific vended runner archive
-  sdl         Stage the pinned SDL3 redistributable for a cross target
+  sdl         Stage a cross-target SDK; 'sdl resolve' selects stable 3.x installer inputs
   doctor      Report host tools and project inputs
   version     Print the driver version and target platform
 
@@ -1295,6 +1295,9 @@ func runRuntime(args []string) error {
 // own SDL3 is never right for another platform, and the point of a cross build
 // is to prove the link a user's machine would do, not an approximation of it.
 func runSDL(args []string) error {
+	if len(args) > 0 && args[0] == "resolve" {
+		return runSDLResolve(args[1:])
+	}
 	flags := flag.NewFlagSet("sdl", flag.ContinueOnError)
 	root := flags.String("root", ".", "game project root")
 	buildDir := flags.String("build-dir", "build", "native build directory")

@@ -1,37 +1,21 @@
 # Included after SDL3 staging, which may replace the entire shared SDK root.
-# All versions and checksums come from the Go pin registry. No retail assets
+# All versions and checksums come from the resolved SDK lock. No retail assets
 # or authoring tools are part of this dependency payload.
 if(NOT SNESBUILD_SDL3_BUNDLED)
-    return() # Generic Linux deliberately uses system development packages.
+    message(FATAL_ERROR "Every installer must include SDL3 and SDL3_ttf")
+endif()
+if(SNESBUILD_GOOS STREQUAL "linux")
+    # Staged together by sdl-linux.cmake, with matching dev/runtime packages.
+    set(SNESBUILD_REQUIRED_TTF_RUNTIME "utils/tools/sdl3/lib/libSDL3_ttf.so.0")
+    set(SNESBUILD_REQUIRED_TTF_LINK "utils/tools/sdl3/lib/libSDL3_ttf.so")
+    return()
 endif()
 
-if(SNESBUILD_STEAM_DECK)
-    execute_process(COMMAND ${CMAKE_COMMAND} -E env GOCACHE=${_go_cache}
-        ${GO_EXECUTABLE} -C ${SNESBUILD_MODULE_DIR}
-        run ./cmd/snesbuild toolchain pin --steam-deck-sdl-ttf
-        OUTPUT_VARIABLE _ttf_pin OUTPUT_STRIP_TRAILING_WHITESPACE
-        COMMAND_ERROR_IS_FATAL ANY)
-    separate_arguments(_ttf_fields UNIX_COMMAND "${_ttf_pin}")
-    list(GET _ttf_fields 0 _ttf_headers_url)
-    list(GET _ttf_fields 1 _ttf_headers_sha)
-    list(GET _ttf_fields 2 _ttf_headers_archive)
-    list(GET _ttf_fields 3 _ttf_url)
-    list(GET _ttf_fields 4 _ttf_sha)
-    list(GET _ttf_fields 5 _ttf_archive)
-    set(_ttf_kind deck)
-else()
-    execute_process(COMMAND ${CMAKE_COMMAND} -E env GOCACHE=${_go_cache}
-        ${GO_EXECUTABLE} -C ${SNESBUILD_MODULE_DIR}
-        run ./cmd/snesbuild toolchain pin --sdl-ttf
-        --goos ${SNESBUILD_GOOS} --goarch ${SNESBUILD_GOARCH}
-        OUTPUT_VARIABLE _ttf_pin OUTPUT_STRIP_TRAILING_WHITESPACE
-        COMMAND_ERROR_IS_FATAL ANY)
-    separate_arguments(_ttf_fields UNIX_COMMAND "${_ttf_pin}")
-    list(GET _ttf_fields 0 _ttf_url)
-    list(GET _ttf_fields 1 _ttf_sha)
-    list(GET _ttf_fields 2 _ttf_archive)
-    list(GET _ttf_fields 3 _ttf_kind)
-endif()
+string(JSON _ttf_pin GET "${_sdl_lock}" ttf)
+string(JSON _ttf_kind GET "${_ttf_pin}" kind)
+string(JSON _ttf_url GET "${_ttf_pin}" archives 0 url)
+string(JSON _ttf_sha GET "${_ttf_pin}" archives 0 sha256)
+string(JSON _ttf_archive GET "${_ttf_pin}" archives 0 archive)
 
 file(DOWNLOAD "${_ttf_url}" "${_cache_dir}/${_ttf_archive}"
     EXPECTED_HASH SHA256=${_ttf_sha})
@@ -71,6 +55,7 @@ if(_ttf_installed STREQUAL _ttf_expected AND
 endif()
 
 file(REMOVE_RECURSE "${_ttf_unpack}")
+file(REMOVE_RECURSE "${_sdl_stage}/include/SDL3_ttf")
 file(MAKE_DIRECTORY "${_ttf_unpack}" "${_sdl_stage}/lib"
     "${_sdl_stage}/licenses/SDL3_ttf")
 if(_ttf_kind STREQUAL "dmg")
@@ -96,40 +81,6 @@ if(_ttf_kind STREQUAL "dmg")
         "${_sdl_stage}/lib/${_ttf_runtime}" COMMAND_ERROR_IS_FATAL ANY)
     execute_process(COMMAND codesign --force --sign - --timestamp=none
         "${_sdl_stage}/lib/${_ttf_runtime}" COMMAND_ERROR_IS_FATAL ANY)
-elseif(_ttf_kind STREQUAL "deck")
-    file(DOWNLOAD "${_ttf_headers_url}" "${_cache_dir}/${_ttf_headers_archive}"
-        EXPECTED_HASH SHA256=${_ttf_headers_sha})
-    execute_process(COMMAND ${CMAKE_COMMAND} -E tar xf "${_cache_dir}/${_ttf_headers_archive}"
-        WORKING_DIRECTORY "${_ttf_unpack}" COMMAND_ERROR_IS_FATAL ANY)
-    string(REGEX REPLACE "\\.tar\\.gz$" "" _ttf_headers_root "${_ttf_headers_archive}")
-    file(COPY "${_ttf_unpack}/${_ttf_headers_root}/include/SDL3_ttf/"
-        DESTINATION "${_sdl_stage}/include/SDL3_ttf")
-    file(COPY "${_ttf_unpack}/${_ttf_headers_root}/LICENSE.txt"
-        DESTINATION "${_sdl_stage}/licenses/SDL3_ttf")
-    # Isolate each Debian container so different data.tar compression suffixes
-    # cannot accidentally make us extract SDL3's old payload as SDL3_ttf.
-    file(MAKE_DIRECTORY "${_ttf_unpack}/runtime")
-    find_program(_ttf_ar ar REQUIRED)
-    execute_process(COMMAND ${_ttf_ar} x "${_cache_dir}/${_ttf_archive}"
-        WORKING_DIRECTORY "${_ttf_unpack}/runtime" COMMAND_ERROR_IS_FATAL ANY)
-    file(GLOB _ttf_data "${_ttf_unpack}/runtime/data.tar.*")
-    list(LENGTH _ttf_data _ttf_count)
-    if(NOT _ttf_count EQUAL 1)
-        message(FATAL_ERROR "Expected one SDL3_ttf Debian data archive")
-    endif()
-    list(GET _ttf_data 0 _ttf_data)
-    execute_process(COMMAND ${CMAKE_COMMAND} -E tar xf "${_ttf_data}"
-        WORKING_DIRECTORY "${_ttf_unpack}/runtime" COMMAND_ERROR_IS_FATAL ANY)
-    file(GLOB _ttf_binaries "${_ttf_unpack}/runtime/usr/lib/x86_64-linux-gnu/libSDL3_ttf.so.0.*")
-    list(LENGTH _ttf_binaries _ttf_count)
-    if(NOT _ttf_count EQUAL 1)
-        message(FATAL_ERROR "Expected one versioned x86_64 SDL3_ttf library")
-    endif()
-    list(GET _ttf_binaries 0 _ttf_binary)
-    file(COPY_FILE "${_ttf_binary}" "${_sdl_stage}/lib/${_ttf_runtime}")
-    file(COPY_FILE "${_ttf_binary}" "${_sdl_stage}/lib/${_ttf_link}")
-    file(COPY "${_ttf_unpack}/runtime/usr/share/doc/libsdl3-ttf0/copyright"
-        DESTINATION "${_sdl_stage}/licenses/SDL3_ttf")
 else()
     execute_process(COMMAND ${CMAKE_COMMAND} -E tar xf "${_cache_dir}/${_ttf_archive}"
         WORKING_DIRECTORY "${_ttf_unpack}" COMMAND_ERROR_IS_FATAL ANY)

@@ -13,9 +13,12 @@ if not exist "%UTILS%\tools\actraiser-builder.exe" (
 )
 
 if not exist "%UTILS%\tools\sdl3\lib\SDL3.dll" (
-    echo NOTE: bundled SDL3.dll was not found. This platform may require a
-    echo system SDL3 development package before it can build.
-    echo.
+    echo ERROR: The bundled SDL SDK is incomplete. Re-extract the archive.
+    goto :error
+)
+if not exist "%UTILS%\tools\sdl3\lib\SDL3_ttf.dll" (
+    echo ERROR: The bundled SDL font library is missing. Re-extract the archive.
+    goto :error
 )
 
 echo Opening the local ActRaiser Recomp builder...

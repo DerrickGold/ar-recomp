@@ -31,11 +31,14 @@ func TestLocalizationPackageGate(t *testing.T) {
 		"utils/game-assets/fonts/noto/NotoSansArabic-Bold.ttf", "utils/game-assets/fonts/noto/NotoSansHebrew-Bold.ttf",
 		"utils/LICENSE", "utils/LICENSE_SCOPE.md", "utils/ATTRIBUTION.md", "utils/THIRD_PARTY_NOTICES.md", "utils/ACTRAISER-THIRD-PARTY-NOTICES.md",
 		"utils/third_party/sheenbidi/LICENSE", "utils/licenses/SheenBidi/LICENSE",
+		"utils/licenses/SDL3/LICENSE.txt", "utils/licenses/sdl-sdk.lock.json",
 		"utils/third_party/sheenbidi/Source/SheenBidi.c", "utils/third_party/sheenbidi/Headers/SheenBidi/SheenBidi.h", "utils/src/platform/sdl/bidi_text_sdl.c",
 		"utils/game-assets/fonts/noto/OFL.txt", "utils/snesrecomp-go/runtime/LICENSE", "utils/snesrecomp-go/runtime/NOTICE.md", "utils/snesrecomp-go/runtime/PROVENANCE.md", "utils/snesrecomp-go/runtime/licenses/Snaggletooth-LICENSE.txt",
 		"utils/runtime.a", "utils/tools/sdl3/lib/SDL3.dll", "utils/tools/sdl3/lib/SDL3_ttf.dll", "utils/tools/sdl3/lib/SDL3_ttf.lib", "utils/tools/sdl3/include/SDL3_ttf/SDL_ttf.h", "utils/tools/sdl3/licenses/SDL3_ttf/LICENSE.txt",
 		"utils/licenses/SDL3_ttf/LICENSE.txt", "utils/licenses/SDL3_ttf/FreeType-FTL.txt", "utils/licenses/SDL3_ttf/HarfBuzz-COPYING.txt", "utils/licenses/SDL3_ttf/PlutoSVG-LICENSE.txt", "utils/licenses/SDL3_ttf/PlutoVG-LICENSE.txt",
 		"utils/tools/actraiser-builder", "utils/tools/snesbuild",
+		"utils/tools/sdl3/include/SDL3/SDL.h", "utils/tools/sdl3/lib/libSDL3.so", "utils/tools/sdl3/lib/libSDL3.so.0",
+		"utils/tools/sdl3/lib/libSDL3_ttf.so", "utils/tools/sdl3/lib/libSDL3_ttf.so.0",
 		"utils/tools/appimagetool", "utils/tools/appimage-runtime",
 		"utils/licenses/AppImage/appimagetool-LICENSE.txt", "utils/licenses/AppImage/runtime-LICENSE.txt",
 	}
@@ -53,6 +56,12 @@ func TestLocalizationPackageGate(t *testing.T) {
 	for _, tc := range []struct{ name, omit, add, goos string }{
 		{name: "valid"},
 		{name: "valid Linux", goos: "linux"},
+		{name: "missing SDL lock", omit: "utils/licenses/sdl-sdk.lock.json"},
+		{name: "missing SDL notice", omit: "utils/licenses/SDL3/LICENSE.txt"},
+		{name: "missing Linux SDL headers", goos: "linux", omit: "utils/tools/sdl3/include/SDL3/SDL.h"},
+		{name: "missing Linux SDL link library", goos: "linux", omit: "utils/tools/sdl3/lib/libSDL3.so"},
+		{name: "missing Linux SDL runtime", goos: "linux", omit: "utils/tools/sdl3/lib/libSDL3.so.0"},
+		{name: "missing Linux ttf runtime", goos: "linux", omit: "utils/tools/sdl3/lib/libSDL3_ttf.so.0"},
 		{name: "missing AppImage tool", goos: "linux", omit: "utils/tools/appimagetool"},
 		{name: "missing AppImage runtime", goos: "linux", omit: "utils/tools/appimage-runtime"},
 		{name: "missing AppImage notice", goos: "linux", omit: "utils/licenses/AppImage/runtime-LICENSE.txt"},
@@ -116,7 +125,7 @@ func TestLocalizationPackageGate(t *testing.T) {
 				}
 			} else if err == nil {
 				t.Fatal("invalid package accepted")
-			} else if !strings.Contains(string(output), "SDL3_ttf package check") && !strings.Contains(string(output), "localization distribution check") && !strings.Contains(string(output), "interface font check") && !strings.Contains(string(output), "license check") && !strings.Contains(string(output), "AppImage package check") {
+			} else if !strings.Contains(string(output), "bundled SDL check") && !strings.Contains(string(output), "SDL3_ttf package check") && !strings.Contains(string(output), "localization distribution check") && !strings.Contains(string(output), "interface font check") && !strings.Contains(string(output), "license check") && !strings.Contains(string(output), "AppImage package check") {
 				t.Fatalf("wrong rejection: %s", output)
 			}
 		})

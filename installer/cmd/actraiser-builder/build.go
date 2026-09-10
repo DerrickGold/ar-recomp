@@ -53,6 +53,11 @@ func buildFromGUI(ctx context.Context, values guiFlags, root, outputDir, romPath
 		return builder.Result{}, err
 	}
 	fmt.Fprintf(output, "Using generic build driver %s\n", snesbuild)
+	if runtime.GOOS == "linux" {
+		if err := checkBundledLinuxSDL(ctx, snesbuild); err != nil {
+			return builder.Result{}, err
+		}
+	}
 
 	regenArgs := []string{"regen", "--root", root, "--rom", romPath,
 		"--toolchain-dir", values.toolchainDir, "--jobs", fmt.Sprint(values.jobs)}
@@ -62,8 +67,7 @@ func buildFromGUI(ctx context.Context, values guiFlags, root, outputDir, romPath
 	if _, err := runSnesbuild(ctx, snesbuild, output, regenArgs...); err != nil {
 		return builder.Result{}, err
 	}
-	if _, err := runSnesbuild(ctx, snesbuild, output,
-		"toolchain", "fetch", "--root", root); err != nil {
+	if err := prepareBuildToolchain(ctx, snesbuild, root, output); err != nil {
 		return builder.Result{}, err
 	}
 	buildResult, err := runSnesbuild(ctx, snesbuild, output,
@@ -118,6 +122,35 @@ func buildFromGUI(ctx context.Context, values guiFlags, root, outputDir, romPath
 		Message:    "Build complete — your playable game is ready.",
 		OutputPath: launcher, BinaryPath: installedBinary, WorkingDir: root,
 	}, nil
+}
+
+// Fetch fills a cache; it does not discover the compiler carried beside the
+// portable build driver. Ask the driver to locate that compiler first so a
+// complete installer can build without any network access or duplicate SDK.
+func prepareBuildToolchain(ctx context.Context, snesbuild, root string, output io.Writer) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	result, statusErr := runSnesbuild(ctx, snesbuild, io.Discard,
+		"toolchain", "status", "--root", root)
+	if statusErr == nil {
+		path, err := oneArtifact(result, "toolchain")
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(output, "toolchain: using existing compiler %s\n", path)
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// An explicit broken override will still win during compilation. Fetching
+	// another compiler cannot repair it, and must not hide that choice.
+	if os.Getenv("SNESBUILD_ZIG") != "" {
+		return fmt.Errorf("configured SNESBUILD_ZIG toolchain is unavailable: %w", statusErr)
+	}
+	_, err := runSnesbuild(ctx, snesbuild, output, "toolchain", "fetch", "--root", root)
+	return err
 }
 
 func prepareNativeUS(root, romPath string, output io.Writer) error {

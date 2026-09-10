@@ -17,18 +17,13 @@ fail() {
 [ -x "$UTILS/tools/actraiser-builder" ] || fail "This package looks incomplete.
 Re-extract the downloaded archive and run this again."
 
-# Generic Linux bundles rely on the system package. The Steam Deck preset
-# instead carries Valve's pinned x86_64 Steam Runtime SDL under tools/sdl3.
-if [ ! -f "$UTILS/tools/sdl3/lib/libSDL3.so" ] \
-        && ! pkg-config --exists sdl3 2>/dev/null \
-        && ! ldconfig -p 2>/dev/null | grep -q 'libSDL3\.so'; then
-    fail "SDL3 is not installed. Install it first, for example:
-  Debian 13+/Ubuntu 24.04+:  sudo apt install libsdl3-dev
-  (Ubuntu 22.04 / Debian 12 have no SDL3 package - use a PPA or build from source)
-  Fedora:         sudo dnf install SDL3-devel
-  Arch:           sudo pacman -S sdl3
-then run this again."
-fi
+# Every Linux installer includes a matched SDL SDK. Do not silently substitute
+# an older system SDL if an archive was incompletely extracted.
+for sdk_file in include/SDL3/SDL.h include/SDL3_ttf/SDL_ttf.h \
+        lib/libSDL3.so lib/libSDL3.so.0 lib/libSDL3_ttf.so lib/libSDL3_ttf.so.0; do
+    [ -s "$UTILS/tools/sdl3/$sdk_file" ] || fail "The bundled SDL SDK is incomplete.
+Re-extract the downloaded archive and run this again."
+done
 
 echo "Opening the local ActRaiser Recomp builder..."
 echo "If the browser does not open, use the private URL shown below."
