@@ -12,7 +12,7 @@
  * descriptors: g_setting_descs is a static const array, so a list whose shape
  * depends on the room the player is standing in and on which plane the cursor
  * is over cannot live there. But the overlay (settings_overlay.c, 3083 lines)
- * is the wrong place for the row arithmetic either -- it is an SDL file, and
+ * is the wrong place for the row arithmetic either -- it owns host UI, and
  * while it IS in a test target, that target deliberately does not link
  * diorama.c. So the row list, the strategy cycling and every bound live here,
  * pure: no SDL, no globals, no file I/O. The overlay walks the list this
@@ -52,8 +52,8 @@ enum {
 };
 
 /* What a row DOES, which is what the overlay's key dispatch switches on. The
- * label/value columns come from the row itself, so the overlay never needs to
- * know what a rake is. */
+ * label/value columns and semantic snapshot come from the row itself. Host
+ * translation maps these identities without reimplementing shape arithmetic. */
 typedef enum DioramaEditorRowKind {
   /* Not selectable: the "Room 02" caption, or the "no live room" notice. */
   kDioramaEditorRow_Header = 0,
@@ -95,6 +95,12 @@ typedef struct DioramaEditorRow {
   DioramaEditorRowKind kind;
   char label[32];
   char value[24];
+  /* Semantic presentation snapshot. Hosts localize captions from these
+   * values, never by parsing the English label/value or re-reading a room. */
+  bool room_live;
+  DioramaDepthStrategy strategy;
+  float shape_depth;
+  DioramaStackDirection direction;
   /* Which plane this row belongs to, or -1 for a header / reset row. Plane
    * rows and the parameter rows beneath them share it. */
   int plane;

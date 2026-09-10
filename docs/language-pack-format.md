@@ -74,6 +74,19 @@ Pixelation strength is an upper bound: small windows and tightly fitted text
 automatically use finer blocks to avoid reducing characters to unreadable dots.
 These settings can be changed during play and are saved with other settings.
 
+The **Interface** tab selects English, French, German or Japanese for the system
+menu, independently of game text and the builder's interface preference.
+Setting labels, descriptions, choices and controller-binding captions are
+translated. Saved setting keys/values, package names, player names and
+platform-provided keycap/device names retain their original identity.
+
+The system interface owns a separate font stack, not your selected pack's
+fonts. Non-ASCII package names use cached, shaped Noto Sans/Japanese text at
+output resolution; ordinary English interface lettering keeps the native
+bitmap appearance. Ports without the enhanced backend retain the safe bitmap
+fallback. This does not make a game pack's missing glyphs available: declare
+the dependencies needed by its actual game text in the pack's Fonts tab.
+
 The Go builder prepares the local Native US source first in both its CMake-backed
 and hermetic build flows, preserving existing source messages. Older native
 baselines gain missing graphical HUD label entries through an atomic update;

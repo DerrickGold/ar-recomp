@@ -131,16 +131,39 @@ func TestFolderPickerCancellationAndNonBlockingStatus(t *testing.T) {
 
 func TestDirectoryPickerCommandsArePlatformSpecific(t *testing.T) {
 	for _, platform := range []string{"darwin", "windows", "linux"} {
-		name, args := directoryPickerCommand(platform, func(name string) bool { return name == "zenity" })
+		name, args := directoryPickerCommand(platform, "Choose folder", func(name string) bool { return name == "zenity" })
 		if name == "" || len(args) == 0 {
 			t.Fatal("missing native chooser", platform)
 		}
 	}
-	if name, _ := directoryPickerCommand("linux", func(string) bool { return false }); name != "" {
+	if name, _ := directoryPickerCommand("linux", "Choose folder", func(string) bool { return false }); name != "" {
 		t.Fatal("invented Linux chooser")
 	}
-	if name, _ := directoryPickerCommand("linux", func(name string) bool { return name == "kdialog" }); name != "kdialog" {
+	if name, _ := directoryPickerCommand("linux", "Choose folder", func(name string) bool { return name == "kdialog" }); name != "kdialog" {
 		t.Fatal("missing KDialog fallback")
+	}
+}
+
+func TestDirectoryPromptLanguageIsDataNotProgram(t *testing.T) {
+	for _, language := range []string{"en", "fr", "de", "ja", "en-GB", "invalid"} {
+		prompt, err := directoryPickerPrompt(language)
+		if err != nil || !strings.Contains(prompt, "pack.ini") {
+			t.Fatal(language, prompt, err)
+		}
+		_, args := directoryPickerCommand("darwin", prompt, nil)
+		if args[len(args)-1] != prompt || strings.Contains(args[1], prompt) {
+			t.Fatal("caption interpolated into AppleScript", args)
+		}
+	}
+	const injection = "'; exit 1; # \" 日本語\n"
+	_, mac := directoryPickerCommand("darwin", injection, nil)
+	if mac[len(mac)-1] != injection || strings.Contains(mac[1], injection) {
+		t.Fatal(mac)
+	}
+	_, windows := directoryPickerCommand("windows", injection, nil)
+	program := windows[len(windows)-1]
+	if strings.Contains(program, injection) || !strings.Contains(program, "$env:AR_BUILDER_FOLDER_PROMPT") {
+		t.Fatal(program)
 	}
 }
 

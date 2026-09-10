@@ -241,6 +241,7 @@ type application struct {
 	// second request from rebuilding a manifest from stale text.
 	assetMu           sync.Mutex
 	directoryPickerMu sync.Mutex
+	interfaceMu       sync.Mutex
 	localization      localizationSession
 	previewMu         sync.Mutex
 	preview           audioPreviewStatus
@@ -361,6 +362,14 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 		return
 	}
 	endpoint := strings.TrimPrefix(request.URL.Path, app.prefix)
+	if endpoint == "interface/preferences" {
+		app.serveInterfacePreferences(response, request)
+		return
+	}
+	if endpoint == "interface/japanese.otf" && request.Method == http.MethodGet {
+		app.serveInterfaceFont(response, request)
+		return
+	}
 	if strings.HasPrefix(endpoint, "builder/") {
 		serveFrontend(response, request, endpoint)
 		return
@@ -371,6 +380,11 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 	}
 	switch {
 	case endpoint == "" && request.Method == http.MethodGet:
+		interfaceData, err := app.interfaceBootstrap()
+		if err != nil {
+			http.Error(response, "interface catalog unavailable", http.StatusInternalServerError)
+			return
+		}
 		response.Header().Set("Content-Type", "text/html; charset=utf-8")
 		// The sky, clouds and columns are CSS; the cover art and the manual
 		// are served from this same origin, so 'self' covers everything and
@@ -384,12 +398,15 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 		response.Header().Set("Cache-Control", "no-store")
 		response.Header().Set("Referrer-Policy", "no-referrer")
 		response.Header().Set("X-Content-Type-Options", "nosniff")
-		page := strings.Replace(pageHTML, "{{TITLE}}",
-			html.EscapeString(app.options.Title), 1)
-		page = strings.Replace(page, "{{STEPS}}", renderStepList(), 1)
-		page = strings.Replace(page, "{{ASSET_TRACKS}}", renderAssetTrackRows(), 1)
-		page = strings.Replace(page, "{{ASSET_ROW_PROTOTYPE}}", renderAssetRowPrototype(), 1)
-		page = strings.Replace(page, "{{LOCALIZATION}}", localizationHTML, 1)
+		// Replace once over the template, never rescan inserted title/catalog
+		// text for another marker that happens to look like template syntax.
+		page := strings.NewReplacer(
+			"{{TITLE}}", html.EscapeString(app.options.Title),
+			"{{STEPS}}", renderStepList(),
+			"{{ASSET_TRACKS}}", renderAssetTrackRows(),
+			"{{ASSET_ROW_PROTOTYPE}}", renderAssetRowPrototype(),
+			"{{LOCALIZATION}}", localizationHTML,
+			"{{UI_CATALOG}}", interfaceData).Replace(pageHTML)
 		_, _ = io.WriteString(response, page)
 	case endpoint == "boxart.webp" && request.Method == http.MethodGet:
 		serveBoxArt(response, request)

@@ -9,8 +9,13 @@
 #include "settings.h"
 #include "randomizer.h"
 #include "settings_overlay.h"
+#include "settings_overlay_localization.h"
+#include "settings_overlay_layers_localization.h"
 #include "platform/sdl/render_sdl_internal.h"
 #include "sim/sim_town_terrain.h"
+#ifdef AR_OVERLAY_UI_FONT
+#include "platform/sdl/text_rasterizer_sdl.h"
+#endif
 
 #include <SDL3/SDL.h>
 #include <stdbool.h>
@@ -186,6 +191,370 @@ static void RowToKey(const char *key) {
     CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   }
   CHECK(!"row not reachable");
+}
+
+static bool s_dump_catalog;
+static void CheckCatalogEntry(const char *key, const char *english) {
+  if (s_dump_catalog) {
+    printf("%s\t%s\n", key, english);
+    return;
+  }
+  for (int locale = 0; locale < kArUiLocale_Count; ++locale) {
+    const char *text = ArUiCatalog_Text((ArUiLocale)locale, key, NULL);
+    if (!text[0] || (!locale && strcmp(text, english))) {
+      fprintf(stderr, "catalog missing/drifted: %s (%s)\n", key,
+              ArUiCatalog_LocaleTag((ArUiLocale)locale));
+      CHECK(false);
+    }
+  }
+}
+
+static void CheckLayerHelpCatalog(void) {
+  char key[128];
+  for (int kind = kActionBgTunerRow_Header; kind <= kActionBgTunerRow_Reset; ++kind) {
+    ActionBgTunerRow row = {.kind = (ActionBgTunerRowKind)kind};
+    snprintf(key, sizeof(key), "overlay.layer.action.help.%d", kind);
+    CheckCatalogEntry(key, ActionBgTuner_RowHelp(&row));
+  }
+  CheckCatalogEntry("overlay.layer.diorama.help.header", DioramaLayerEditor_RowHelp(
+      kDioramaEditorRow_Header, kDioramaEditorParam_None, kDioramaDepth_Flat));
+  CheckCatalogEntry("overlay.layer.diorama.help.reset", DioramaLayerEditor_RowHelp(
+      kDioramaEditorRow_ResetRoom, kDioramaEditorParam_None, kDioramaDepth_Flat));
+  for (int shape = 0; shape < kDioramaDepth_StrategyCount; ++shape) {
+    snprintf(key, sizeof(key), "overlay.layer.diorama.help.shape.%d", shape);
+    CheckCatalogEntry(key, DioramaLayerEditor_RowHelp(kDioramaEditorRow_Plane,
+        kDioramaEditorParam_None, (DioramaDepthStrategy)shape));
+  }
+  for (int param = kDioramaEditorParam_Depth; param <= kDioramaEditorParam_Order; ++param) {
+    snprintf(key, sizeof(key), "overlay.layer.diorama.help.param.%d", param);
+    CheckCatalogEntry(key, DioramaLayerEditor_RowHelp(kDioramaEditorRow_Param,
+        (DioramaEditorParam)param, kDioramaDepth_Flat));
+  }
+}
+
+static void CheckLayerCaptionParity(const char *label, const char *value,
+                                     const SettingsOverlayLayerText *text,
+                                     ArUiLocale locale) {
+  CHECK(text->label[0] && text->help && text->help[0]);
+  if (locale == kArUiLocale_English) {
+    /* The authentic atlas uppercases ASCII. Capitalization of keyed captions
+     * may differ; words, quantities, scope and expansion indicators may not. */
+    CHECK(!SDL_strcasecmp(label, text->label));
+    CHECK(!SDL_strcasecmp(value, text->value));
+  }
+}
+
+static void CheckLayerRowPresentation(void) {
+  const struct { const char *family; int count; } enums[] = {
+    {"action.edge", kActionBgEdge_RawWrap + 1},
+    {"action.motion", kActionBgMotion_NormalScroll + 1},
+    {"action.anchor", kActionBgBandAnchor_World + 1},
+    {"action.extent", kActionBgExtent_Fixed + 1},
+    {"action.source", kActionBgSource_AuthenticViewport + 1},
+    {"action.role", kActionBgLayerRole_Backdrop + 1},
+    {"diorama.shape", kDioramaDepth_StrategyCount},
+    {"diorama.direction", kDioramaStack_DirectionCount},
+  };
+  for (size_t f = 0; f < sizeof(enums) / sizeof(enums[0]); ++f) {
+    for (int v = 0; v < enums[f].count; ++v) {
+      char key[128];
+      snprintf(key, sizeof(key), "overlay.layer.%s.%d", enums[f].family, v);
+      for (int locale = 0; locale < kArUiLocale_Count; ++locale)
+        CHECK(ArUiCatalog_Text((ArUiLocale)locale, key, NULL)[0]);
+    }
+  }
+  DioramaLayerOrderTable table = {0};
+  DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 1, 2);
+  CHECK(room);
+  if (!room) return;
+  DioramaEditorContext context = {.room_live = true, .map_group = 1, .map_number = 2};
+  unsigned params = 0;
+  for (int shape = 0; shape < kDioramaDepth_StrategyCount; ++shape) {
+    for (int p = 0; p < DioramaLayerOrder_PlaneCount(); ++p) {
+      int plane = DioramaLayerOrder_PlaneAt(p);
+      context.selected_plane = plane;
+      DioramaLayerEditor_SetStrategy(&room->planes[plane], (DioramaDepthStrategy)shape);
+      if (shape == kDioramaDepth_Stack) {
+        room->planes[plane].set_stack_density = true;
+        room->planes[plane].stack_density = 14.0f;
+      }
+      DioramaEditorRow rows[kDioramaEditorRowMax];
+      int count = DioramaLayerEditor_BuildRows(&table, &context, 0, rows, kDioramaEditorRowMax);
+      for (int i = 0; i < count; ++i) {
+        DioramaEditorRow before = rows[i];
+        CHECK(rows[i].room_live && rows[i].map_group == 1 && rows[i].map_number == 2);
+        if (rows[i].param) params |= 1u << rows[i].param;
+        if (rows[i].kind == kDioramaEditorRow_Param || rows[i].kind == kDioramaEditorRow_ParamEnum) {
+          char key[128];
+          if (rows[i].param == kDioramaEditorParam_Copies && rows[i].strategy == kDioramaDepth_Voxel)
+            snprintf(key, sizeof(key), "overlay.layer.diorama.slices");
+          else snprintf(key, sizeof(key), "overlay.layer.diorama.param.%d", rows[i].param);
+          CheckCatalogEntry(key, rows[i].label);
+        }
+        for (int locale = 0; locale < kArUiLocale_Count; ++locale) {
+          SettingsOverlayLayerText text;
+          SettingsOverlay_LocalizedDioramaRow((ArUiLocale)locale, &rows[i], &text);
+          CheckLayerCaptionParity(rows[i].label, rows[i].value, &text, (ArUiLocale)locale);
+          CHECK(!memcmp(&before, &rows[i], sizeof(before)));
+        }
+      }
+    }
+  }
+  CHECK(params == ((1u << (kDioramaEditorParam_Order + 1)) - 2));
+  context.room_live = false;
+  DioramaEditorRow offline[kDioramaEditorRowMax];
+  CHECK(DioramaLayerEditor_BuildRows(NULL, &context, 0, offline, kDioramaEditorRowMax) == 1);
+  CHECK(!offline[0].room_live);
+  SettingsOverlayLayerText text;
+  SettingsOverlay_LocalizedDioramaRow(kArUiLocale_French, &offline[0], &text);
+  CHECK(!strcmp(text.label, ArUiCatalog_Text(kArUiLocale_French, "overlay.layer.diorama.enter", NULL)));
+
+  ActionBgTuner_ResetSession();
+  ActionBgPlan plan;
+  ActionBgPlan_InitNative(&plan);
+  plan.layer[0].role = kActionBgLayerRole_Playfield;
+  plan.layer[0].source = kActionBgSource_WorldMap;
+  plan.layer[0].world_width = 4096;
+  plan.layer[0].world_height = 512;
+  plan.layer[0].horizontal_extent = (ActionBgHorizontalExtent){kActionBgExtent_Fixed, 32, 48};
+  plan.layer[0].vertical_extent = (ActionBgVerticalExtent){kActionBgExtent_Fixed, 16, 24};
+  plan.layer[0].band_count = 1;
+  plan.layer[0].bands[0] = (ActionBgBand){.y0 = 136, .y1 = 224,
+      .edge = kActionBgEdge_Repeat,
+      .horizontal_extent = {kActionBgExtent_Fixed, 16, 24}};
+  CHECK(ActionBgTuner_ObservePlan(1, 2, &plan, (ActionBgTunerLimits){120,120,64,64}));
+  ActionBgTunerRow layer = {.kind = kActionBgTunerRow_Layer, .layer = 0, .band = -1, .selectable = true};
+  ActionBgTunerRow band = {.kind = kActionBgTunerRow_BandHeader, .layer = 0, .band = 0, .selectable = true};
+  CHECK(ActionBgTuner_Activate(&layer) == kActionBgTunerResult_Changed);
+  CHECK(ActionBgTuner_Activate(&band) == kActionBgTunerResult_Changed);
+  ActionBgTunerRow rows[kActionBgTunerRowMax];
+  int count = ActionBgTuner_BuildRows(rows, kActionBgTunerRowMax);
+  unsigned kinds = 0;
+  for (int i = 0; i < count; ++i) kinds |= 1u << rows[i].kind;
+  CHECK(kinds == ((1u << (kActionBgTunerRow_Reset + 1)) - 1));
+  /* Changing the owner after building a snapshot must not change its captions.
+   * This catches accidental presentation-time access to the live draft. */
+  ActionBgTuner_ResetSession();
+  for (int i = 0; i < count; ++i) {
+    ActionBgTunerRow before = rows[i];
+    if (rows[i].kind != kActionBgTunerRow_Header && rows[i].kind != kActionBgTunerRow_Layer &&
+        rows[i].kind != kActionBgTunerRow_BandHeader) {
+      char key[128];
+      snprintf(key, sizeof(key), "overlay.layer.action.label.%d", rows[i].kind);
+      CheckCatalogEntry(key, rows[i].label);
+    }
+    for (int locale = 0; locale < kArUiLocale_Count; ++locale) {
+      SettingsOverlay_LocalizedActionBgRow((ArUiLocale)locale, &rows[i], &text);
+      CheckLayerCaptionParity(rows[i].label, rows[i].value, &text, (ArUiLocale)locale);
+      CHECK(!memcmp(&before, &rows[i], sizeof(before)));
+    }
+  }
+}
+
+static void CheckCompleteDescriptorCatalog(void) {
+  /* Compile the real registry, including macros and debug-only settings. A
+   * second source parser would miss conditional/expanded descriptors. */
+  for (int i = 0; i < g_setting_desc_count; ++i) {
+    const SettingDesc *desc = &g_setting_descs[i];
+    char key[192];
+    snprintf(key, sizeof(key), "setting.%s.label", desc->key);
+    CheckCatalogEntry(key, desc->label);
+    if (desc->tooltip && desc->tooltip[0]) {
+      snprintf(key, sizeof(key), "setting.%s.help", desc->key);
+      CheckCatalogEntry(key, desc->tooltip);
+    }
+    for (int v = 0; desc->enum_labels && v < desc->enum_count; ++v) {
+      snprintf(key, sizeof(key), "setting.%s.value.%d", desc->key, v);
+      CheckCatalogEntry(key, desc->enum_labels[v]);
+    }
+  }
+  /* Controller names come from the input owner; adding a named button/axis
+   * requires a caption without affecting the numeric persisted identity. */
+  for (int kind = kInputBind_PadButton; kind <= kInputBind_PadAxis; ++kind) {
+    int count = kind == kInputBind_PadButton ? SDL_GAMEPAD_BUTTON_COUNT
+                                            : SDL_GAMEPAD_AXIS_COUNT;
+    for (int code = 0; code < count; ++code) {
+      for (int negative = 0; negative <= (kind == kInputBind_PadAxis); ++negative) {
+        uint32 binding = INPUT_BIND_MAKE(kind, code, negative);
+        const char *name = InputMap_BindingName(binding);
+        if (!name || !name[0]) continue;
+        char key[80];
+        snprintf(key, sizeof(key), "overlay.binding.%s.%d.%d",
+                 kind == kInputBind_PadButton ? "button" : "axis", code, negative);
+        CheckCatalogEntry(key, name);
+      }
+    }
+  }
+}
+
+static void CheckDynamicInterfaceValues(void) {
+  Settings before = g_settings;
+  int hz = HostDisplayStatus_NominalRefreshHz();
+  bool vsync = HostDisplayStatus_VsyncActive();
+  char value[512], serialized[512];
+  struct { const char *setting; const char *text; const char *key; } cases[] = {
+    {"hud_scale_percent", "match", "overlay.value.match_game"},
+    {"menu_scale_percent", "auto", "overlay.value.auto"},
+    {"save_master_hp", "leave-as-is", "overlay.value.leave"},
+    {"save_angel_hp_current", "leave-as-is", "overlay.value.leave"},
+    {"save_score_fillmore_1", "leave-as-is", "overlay.value.leave"},
+    {"save_player_name", "", "overlay.value.leave"},
+    {"bind_key_up", "Unbound", "overlay.binding.unbound"},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    const SettingDesc *desc = Settings_Find(cases[i].setting);
+    CHECK(desc && Settings_SetText(desc, cases[i].text) != kSettingChange_Rejected);
+    for (int locale = 0; locale < kArUiLocale_Count; ++locale) {
+      SettingsOverlay_LocalizedValue((ArUiLocale)locale, desc, value, sizeof(value));
+      CHECK(!strcmp(value, ArUiCatalog_Text((ArUiLocale)locale, cases[i].key, NULL)));
+    }
+  }
+  /* User/device/keycap text is literal. No runtime matching of English labels,
+   * no catalog strings written to settings.ini or save fields. */
+  snprintf(g_settings.save_player_name, sizeof(g_settings.save_player_name), "Auto");
+  g_settings.save_master_hp = 15;
+  g_settings.save_angel_hp_current = 1;
+  CHECK(Settings_SetText(Settings_Find("save_score_fillmore_1"), "210") !=
+        kSettingChange_Rejected);
+  const char *literal[] = {"save_player_name", "save_master_hp", "save_angel_hp_current",
+                          "save_score_fillmore_1"};
+  for (size_t i = 0; i < sizeof(literal) / sizeof(literal[0]); ++i) {
+    const SettingDesc *desc = Settings_Find(literal[i]);
+    Settings_FormatValue(desc, serialized, sizeof(serialized));
+    SettingsOverlay_LocalizedValue(kArUiLocale_Japanese, desc, value, sizeof(value));
+    CHECK(!strcmp(serialized, value));
+  }
+  const SettingDesc *refresh = Settings_Find("refresh_mode");
+  g_settings.refresh_mode = kRefreshMode_Vsync;
+  HostDisplayStatus_SetVsyncActive(false);
+  SettingsOverlay_LocalizedValue(kArUiLocale_French, refresh, value, sizeof(value));
+  CHECK(!strcmp(value, ArUiCatalog_Text(kArUiLocale_French, "overlay.value.vsync_unavailable", NULL)));
+  HostDisplayStatus_SetNominalRefreshHz(144);
+  HostDisplayStatus_SetVsyncActive(true);
+  SettingsOverlay_LocalizedValue(kArUiLocale_Japanese, refresh, value, sizeof(value));
+  CHECK(!strcmp(value, "Vsync 144Hz"));
+  Settings_FormatValue(refresh, serialized, sizeof(serialized));
+  CHECK(!strcmp(serialized, "Vsync"));
+  const SettingDesc *binding = Settings_Find("bind_key_up");
+  CHECK(Settings_SetText(binding, "Key 4 A") != kSettingChange_Rejected);
+  SettingsOverlay_LocalizedValue(kArUiLocale_French, binding, value, sizeof(value));
+  CHECK(!strcmp(value, "Touche A"));
+  Settings_FormatValue(binding, serialized, sizeof(serialized));
+  CHECK(!strcmp(serialized, "Key 4 A"));
+  CHECK(Settings_SetText(binding, "Pad R-Stick Up") != kSettingChange_Rejected);
+  SettingsOverlay_LocalizedValue(kArUiLocale_German, binding, value, sizeof(value));
+  CHECK(!strcmp(value, "Pad R-Stick hoch"));
+  Settings_FormatValue(binding, serialized, sizeof(serialized));
+  CHECK(!strcmp(serialized, "Pad R-Stick Up"));
+  /* The harness has no connected controllers: test both hotplug-following and
+   * explicit disconnected slot captions without depending on local hardware. */
+  g_settings.input_gamepad_slot = 0;
+  SettingsOverlay_LocalizedValue(kArUiLocale_Japanese,
+      Settings_Find("input_gamepad_slot"), value, sizeof(value));
+  CHECK(!strcmp(value, "最初の接続"));
+  g_settings.input_gamepad_slot = 7;
+  SettingsOverlay_LocalizedValue(kArUiLocale_French,
+      Settings_Find("input_gamepad_slot"), value, sizeof(value));
+  CHECK(!strcmp(value, "Manette 7 (déconnectée)"));
+  const SettingsLocalizationPack packs[] = {
+    {.id = "literal", .name = "common.save {slot}", .locale = "en-CA", .manifest = "pack.ini"},
+  };
+  CHECK(Settings_SetLocalizationPacks(packs, 1));
+  g_settings.localization_content = 2;
+  SettingsOverlay_LocalizedValue(kArUiLocale_Japanese,
+      Settings_Find("localization_content"), value, sizeof(value));
+  CHECK(!strcmp(value, "common.save {slot} (en-CA) [literal]"));
+  CHECK(Settings_SetLocalizationPacks(NULL, 0));
+  /* Small buffers must never split a translated UTF-8 caption. */
+  g_settings.menu_scale_percent = 0;
+  char tiny[4] = {0};
+  CHECK(SettingsOverlay_LocalizedValue(kArUiLocale_Japanese,
+      Settings_Find("menu_scale_percent"), tiny, sizeof(tiny)) == 6);
+  CHECK(!strcmp(tiny, "自"));
+  HostDisplayStatus_SetNominalRefreshHz(hz);
+  HostDisplayStatus_SetVsyncActive(vsync);
+  g_settings = before;
+}
+
+static void CheckInterfaceCatalogs(SDL_Renderer *renderer, SDL_Surface *surface) {
+  CheckCompleteDescriptorCatalog();
+  CheckLayerHelpCatalog();
+  CheckLayerRowPresentation();
+  CheckDynamicInterfaceValues();
+  Settings before = g_settings;
+  const SettingDesc *language = Settings_Find("interface_language");
+  const SettingDesc *font = Settings_Find("localization_font_sampling");
+  CHECK(language && language->category == kSettingCat_Interface);
+  NavToSection(kSection_Localization);
+  NavToTab(2);
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  RowToKey("interface_language");
+  int native_sampling = g_settings.localization_font_sampling;
+  char value[256], serialized[256];
+  for (int locale = 0; locale < kArUiLocale_Count; ++locale) {
+    CHECK(Settings_SetText(language, ArUiCatalog_LocaleTag((ArUiLocale)locale)) !=
+          kSettingChange_Rejected);
+    CHECK(g_settings.localization_content == before.localization_content);
+    CHECK(g_settings.localization_presentation == before.localization_presentation);
+    CHECK(g_settings.localization_font_sampling == native_sampling);
+    Settings_FormatValue(language, serialized, sizeof(serialized));
+    CHECK(!strcmp(serialized, ArUiCatalog_LocaleTag((ArUiLocale)locale)));
+    SettingsOverlay_LocalizedValue((ArUiLocale)locale, font, value, sizeof(value));
+    Settings_FormatValue(font, serialized, sizeof(serialized));
+    CHECK(!strcmp(serialized, native_sampling == 0 ? "Crisp" : "Smooth"));
+    CHECK(!strcmp(SettingsOverlay_LocalizedLabel((ArUiLocale)locale, language),
+        ArUiCatalog_Text((ArUiLocale)locale, "setting.interface_language.label", NULL)));
+    /* Traversal, help, and reset prompts use the actual shaped overlay. The
+     * same loop also runs in no-TTF builds, which must remain English/readable. */
+    for (int tab = 0; tab < 3; ++tab) {
+      NavToTab(tab);
+      if (renderer && surface) {
+        SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
+        CHECK(SDL_RenderClear(renderer));
+        SettingsOverlay_Render((ArRenderRectI){0, 0, surface->w, surface->h});
+        CHECK(SDL_RenderPresent(renderer));
+        const char *prefix = getenv("AR_OVERLAY_CATALOG_TEST_PREFIX");
+        if (prefix && prefix[0]) {
+          char path[1024];
+          int size = snprintf(path, sizeof(path), "%s-%s-%d.bmp", prefix,
+                               ArUiCatalog_LocaleTag((ArUiLocale)locale), tab);
+          CHECK(size > 0 && size < (int)sizeof(path));
+          if (size > 0 && size < (int)sizeof(path)) CHECK(SDL_SaveBMP(surface, path));
+        }
+      }
+    }
+  }
+  /* Keyed presentation must not translate user-authored values or custom
+   * formatting; even a pack named exactly like a catalog key is just data. */
+  SettingDesc copy = *font;
+  copy.key = "unknown_user_setting";
+  copy.label = "common.save";
+  CHECK(!strcmp(SettingsOverlay_LocalizedLabel(kArUiLocale_Japanese, &copy), "common.save"));
+  SettingsOverlay_LocalizedValue(kArUiLocale_Japanese, &copy, value, sizeof(value));
+  Settings_FormatValue(&copy, serialized, sizeof(serialized));
+  CHECK(!strcmp(value, serialized));
+  NavToTab(2);
+  RowToKey("interface_language");
+  /* Use the real menu change/persistence path too, not just direct formatting.
+   * Feedback must occupy the description region without covering the title. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, true, false));
+  if (renderer && surface) {
+    CHECK(SDL_RenderClear(renderer));
+    SettingsOverlay_Render((ArRenderRectI){0, 0, surface->w, surface->h});
+    CHECK(SDL_RenderPresent(renderer));
+    const char *prefix = getenv("AR_OVERLAY_CATALOG_TEST_PREFIX");
+    if (prefix && prefix[0]) {
+      char path[1024];
+      int size = snprintf(path, sizeof(path), "%s-feedback.bmp", prefix);
+      CHECK(size > 0 && size < (int)sizeof(path));
+      if (size > 0 && size < (int)sizeof(path)) CHECK(SDL_SaveBMP(surface, path));
+    }
+  }
+  g_settings = before;
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+  NavToTab(0);
+  NavToSection(kSection_Video);
 }
 
 static uint8_t *ReadOptionalRom(size_t *size_out) {
@@ -665,7 +1034,12 @@ static void CheckLayerEditorSection(void) {
   ActionBgTuner_ResetSession();
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+  if (argc == 2 && !strcmp(argv[1], "--dump-layer-help")) {
+    s_dump_catalog = true;
+    CheckLayerHelpCatalog();
+    return 0;
+  }
   char settings_path[160];
   char settings_temporary[164];
   snprintf(settings_path, sizeof(settings_path),
@@ -760,6 +1134,56 @@ int main(void) {
           SettingsOverlay_GameTextWidth("abcd", 2));
     CHECK(SettingsOverlay_GameTextWidth("", 2) == 0);
     SettingsOverlay_DrawGameText(8, 40, 2, 255, "Fran\u00e7ais \u65e5\u672c");
+#ifdef AR_OVERLAY_UI_FONT
+    ArTextBackend ui_backend;
+    ArSdlTextBackend_Init(&ui_backend);
+    const char *ui_fallbacks[] = {AR_OVERLAY_UI_JP_FONT};
+    const ArTextBackendConfig ui_fonts = {.struct_size = sizeof(ui_fonts),
+        .abi_version = AR_TEXT_BACKEND_CONFIG_ABI_VERSION,
+        .font_stack_id = "test-interface", .primary_font_path = AR_OVERLAY_UI_FONT,
+        .fallback_font_paths = ui_fallbacks, .fallback_font_count = 1,
+        .font_revision = 1, .cached_size_capacity = 16};
+    char ui_error[kArTextRasterErrorCapacity] = {0};
+    bool ui_ready = SettingsOverlay_SetTextBackend(&ui_backend, &ui_fonts, ui_error, sizeof(ui_error));
+    if (!ui_ready) fprintf(stderr, "interface font: %s\n", ui_error);
+    CHECK(ui_ready);
+    /* The real host font must draw more than the old replacement marks. Use
+     * non-tile-aligned output coordinates to catch accidental integer division
+     * when bridging the overlay's logical and output-pixel drawing APIs. */
+    SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
+    CHECK(SDL_RenderClear(renderer));
+    SettingsOverlay_DrawGameText(9, 41, 3, 255, "Fran?ais ???");
+    CHECK(SDL_RenderPresent(renderer));
+    size_t reference_size = (size_t)surface->pitch * (size_t)surface->h;
+    void *reference = malloc(reference_size);
+    CHECK(reference != NULL);
+    if (reference) memcpy(reference, surface->pixels, reference_size);
+    CHECK(SDL_RenderClear(renderer));
+    SettingsOverlay_DrawGameText(9, 41, 3, 255, "Français 日本語");
+    CHECK(SDL_RenderPresent(renderer));
+    if (reference) CHECK(memcmp(reference, surface->pixels, reference_size) != 0);
+    const int unicode_width = SettingsOverlay_GameTextWidth("Français 日本語", 3);
+    CHECK(unicode_width > 0 && unicode_width < SettingsOverlay_GameTextWidth("Fran?ais ???", 3));
+    CHECK(SettingsOverlay_GameTextWidth("Français", 3) == SettingsOverlay_GameTextWidth("Franc\u0327ais", 3));
+    for (int y = 0; y < surface->h; ++y) {
+      const uint32_t *pixels = (const uint32_t *)((const uint8_t *)surface->pixels + y * surface->pitch);
+      for (int x = 0; x < surface->w; ++x)
+        if (x < 9 || x >= 9 + unicode_width || y < 41 || y >= 65)
+          CHECK(pixels[x] == UINT32_C(0xff201810));
+    }
+    const char *unicode_preview = getenv("AR_OVERLAY_UNICODE_TEST_BMP");
+    if (unicode_preview && unicode_preview[0]) CHECK(SDL_SaveBMP(surface, unicode_preview));
+    if (reference) memcpy(reference, surface->pixels, reference_size);
+    size_t reset_rom_size = 0;
+    uint8_t *reset_rom = ReadOptionalRom(&reset_rom_size);
+    CHECK(SettingsOverlay_ReloadTextures(reset_rom, reset_rom_size));
+    free(reset_rom);
+    CHECK(SDL_RenderClear(renderer));
+    SettingsOverlay_DrawGameText(9, 41, 3, 255, "Français 日本語");
+    CHECK(SDL_RenderPresent(renderer));
+    if (reference) CHECK(memcmp(reference, surface->pixels, reference_size) == 0);
+    free(reference);
+#endif
 
     /* PiP reuses the same native frame atlas at output coordinates. Exercise
      * the checked draw seam with exact scaled-tile dimensions; it must render
@@ -797,6 +1221,7 @@ int main(void) {
   SettingsOverlay_Open();
   CHECK(SettingsOverlay_IsOpen());
   CheckManualSectionAvailability();
+  CheckInterfaceCatalogs(renderer, surface);
   if (renderer) {
     /* Fullscreen 4:3 leaves SDL's game presentation pillarboxed on a wide
      * output. The overlay is terminal host UI: it discards that coordinate
@@ -1123,6 +1548,23 @@ int main(void) {
   CHECK(SettingsOverlay_HandleKey(SDLK_ESCAPE, true, false));
   CHECK(!SettingsOverlay_IsEditing());
   CHECK(SettingsOverlay_IsOpen());
+  /* Exercise the actual input wiring, not just the standalone Unicode helper.
+   * Delete four user-perceived characters, then commit an ordinary valid pin.
+   * Byte-wise deletion leaves debris and prevents that final value parsing. */
+  const SettingDesc *pins = Settings_Find("pins");
+  CHECK(Settings_SetText(pins, "") != kSettingChange_Rejected);
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(SettingsOverlay_IsEditing());
+  CHECK(SettingsOverlay_HandleText("e\u0301日本👩🏽‍💻"));
+  for (int i = 0; i < 4; ++i)
+    CHECK(SettingsOverlay_HandleKey(SDLK_BACKSPACE, true, false));
+  CHECK(SettingsOverlay_HandleText("bad\xff")); /* Rejected atomically. */
+  CHECK(SettingsOverlay_HandleText("7E00210A"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RETURN, true, false));
+  CHECK(!SettingsOverlay_IsEditing());
+  CHECK(g_settings.pin_count == 1 && g_settings.pins[0].off == 0x21 &&
+        g_settings.pins[0].val == 0x0a);
+  CHECK(Settings_Reset(pins) >= kSettingChange_Applied);
   CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
 
   /* Controls: the Devices tab holds device/analog rows, and the Keyboard and

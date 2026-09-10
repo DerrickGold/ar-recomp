@@ -328,6 +328,20 @@ static const char *PadAxisDirectionName(int axis, bool negative) {
 }
 
 
+const char *InputMap_BindingName(uint32 binding) {
+  int code = INPUT_BIND_CODE(binding);
+  switch (INPUT_BIND_KIND(binding)) {
+    case kInputBind_Key:
+      return code < SDL_SCANCODE_COUNT
+          ? SDL_GetScancodeName((SDL_Scancode)code) : NULL;
+    case kInputBind_PadButton:
+      return code < SDL_GAMEPAD_BUTTON_COUNT ? kPadButtonNames[code] : NULL;
+    case kInputBind_PadAxis:
+      return PadAxisDirectionName(code, INPUT_BIND_NEG(binding));
+    default: return NULL;
+  }
+}
+
 /* Persisted (settings.ini) form. For keys the NUMBER is authoritative and the
  * name is only a human hint: SDL documents scancode names as "by design not
  * stable across platforms" and "unsuitable for creating a stable

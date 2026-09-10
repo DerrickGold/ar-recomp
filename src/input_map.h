@@ -223,6 +223,10 @@ int InputMap_FormatBinding(char *buffer, int buffer_size, uint32 binding);
 /* Pretty form for the settings menu — a key reads as "Key Return", without
  * the numeric storage spelling. */
 int InputMap_DescribeBinding(char *buffer, int buffer_size, uint32 binding);
+/* Borrowed display name without device prefix; NULL for an unknown control.
+ * Hosts may localize a controller's typed kind/code, but key names originate
+ * from the platform and are display-only, never the persisted identity. */
+const char *InputMap_BindingName(uint32 binding);
 bool InputMap_ParseBinding(const char *text, uint32 *binding);
 
 /* Connected-pad enumeration for the "Gamepad" row. Slot 0 is "first

@@ -60,7 +60,8 @@ func (app *application) chooseLocalizationDirectory(w http.ResponseWriter, r *ht
 	defer stop()
 	pick := app.options.pickDirectory
 	if pick == nil {
-		pick = choosePackDirectory
+		preferences, _ := app.readInterfacePreferences()
+		pick = func(ctx context.Context) (string, error) { return choosePackDirectory(ctx, preferences.Language) }
 	}
 	dir, err := pick(ctx)
 	if err != nil {

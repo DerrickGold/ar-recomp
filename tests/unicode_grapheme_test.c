@@ -1,4 +1,5 @@
 #include "localization/unicode_grapheme.h"
+#include "localization/interface_text.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -50,7 +51,84 @@ static void CheckBoundaries(const char *name, const char *text,
                   sizeof(expected_) / sizeof(expected_[0])); \
 } while (0)
 
+static void TestInterfaceEditing(void) {
+  char buffer[16] = "X";
+  CHECK(ArInterfaceText_Append(buffer, sizeof(buffer), "é日", strlen("é日")) == 5);
+  CHECK(!strcmp(buffer, "Xé日"));
+  CHECK(ArInterfaceText_EraseLast(buffer, sizeof(buffer)));
+  CHECK(!strcmp(buffer, "Xé"));
+  CHECK(ArInterfaceText_EraseLast(buffer, sizeof(buffer)));
+  CHECK(!strcmp(buffer, "X"));
+  CHECK(!ArInterfaceText_Append(buffer, sizeof(buffer), "👩🏽‍💻", strlen("👩🏽‍💻")));
+  CHECK(!strcmp(buffer, "X")); /* Can't fit the whole 15-byte cluster. */
+  CHECK(ArInterfaceText_Append(buffer, sizeof(buffer), "e\u0301", 3) == 3);
+  CHECK(ArInterfaceText_EraseLast(buffer, sizeof(buffer)));
+  CHECK(!strcmp(buffer, "X"));
+  CHECK(!ArInterfaceText_Append(buffer, sizeof(buffer), "A\xff", 2));
+  CHECK(!ArInterfaceText_Append(buffer, sizeof(buffer), "A\0B", 3));
+  CHECK(!strcmp(buffer, "X"));
+  CHECK(!ArInterfaceText_Append(buffer, 4, "e\u0301", 3));
+  CHECK(!strcmp(buffer, "X"));
+  CHECK(ArInterfaceText_EraseLast(buffer, sizeof(buffer)));
+  CHECK(!ArInterfaceText_EraseLast(buffer, sizeof(buffer)));
+  char full[] = {'A','B'};
+  CHECK(!ArInterfaceText_Append(full, sizeof(full), "C", 1));
+  CHECK(!ArInterfaceText_EraseLast(full, sizeof(full)));
+}
+
+static void TestInterfaceWrapping(void) {
+  const struct { const char *text, *line; size_t cells, bytes, consumed; } cases[] = {
+    {"One two three", "One two", 7, 64, 8},
+    {"One two three", "One", 6, 64, 4},
+    {"longword", "lon", 3, 64, 3},
+    {"日本語です", "日本", 2, 64, 6},
+    {"日本語です", "日本", 9, 7, 6},
+    {"éà Français", "éà", 2, 64, 5},
+    {"e\u0301éZ", "e\u0301é", 2, 64, 5},
+    {"👩🏽‍💻AB", "👩🏽‍💻", 1, 64, 15},
+    {"Oui\nNon", "Oui", 20, 64, 4},
+    {"Oui\r\nNon", "Oui", 3, 64, 5},
+    {"\r\nNon", "", 20, 64, 2},
+    {"One two\n\nNext", "One two", 7, 64, 8},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    ArInterfaceTextLine line;
+    CHECK(ArInterfaceText_WrapLine(cases[i].text, strlen(cases[i].text), cases[i].cells, cases[i].bytes, &line));
+    CHECK(line.bytes == strlen(cases[i].line));
+    CHECK(!memcmp(cases[i].text, cases[i].line, line.bytes));
+    CHECK(line.consumed == cases[i].consumed);
+    CHECK(line.consumed > 0 && line.cells <= cases[i].cells);
+  }
+  ArInterfaceTextLine line;
+  CHECK(!ArInterfaceText_WrapLine("👩🏽‍💻", 15, 20, 8, &line));
+  CHECK(!line.bytes && !line.consumed);
+  CHECK(!ArInterfaceText_WrapLine("", 0, 20, 64, &line));
+  const char *paragraph = "日本語の説明です。\né\u0301 et des mots";
+  size_t at = 0, bytes = strlen(paragraph), lines = 0;
+  while (at < bytes) {
+    if (!ArInterfaceText_WrapLine(paragraph + at, bytes - at, 3, 64, &line)) {
+      CHECK(false); break;
+    }
+    CHECK(line.consumed <= bytes - at);
+    size_t cluster = 0;
+    while (cluster < line.bytes) {
+      size_t next = cluster;
+      bool valid = ArUnicodeGrapheme_Next(paragraph + at, line.bytes, cluster, NULL, &next);
+      CHECK(valid);
+      CHECK(next > cluster && next <= line.bytes);
+      if (!valid || next <= cluster || next > line.bytes) break;
+      cluster = next;
+    }
+    if (!line.consumed || line.consumed > bytes - at) break;
+    at += line.consumed;
+    ++lines;
+  }
+  CHECK(at == bytes && lines > 3);
+}
+
 int main(void) {
+  TestInterfaceEditing();
+  TestInterfaceWrapping();
   CHECK_BOUNDARIES("ASCII", "abc", 1u, 2u, 3u);
   CHECK_BOUNDARIES("CRLF", "\r\na", 2u, 3u);
   CHECK_BOUNDARIES("decomposed accent", "e\xCC\x81x", 3u, 4u);

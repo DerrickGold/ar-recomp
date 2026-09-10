@@ -185,6 +185,7 @@ typedef enum {
   kSettingCat_RandoSim,      /* Randomizer: sim-mode monster lairs */
   kSettingCat_Localization,
   kSettingCat_LocalizationFont,
+  kSettingCat_Interface,
   kSettingCat_Count,
 } SettingCategory;
 
@@ -284,6 +285,8 @@ typedef struct Settings {
   int localization_font_sampling;
   int localization_font_pixelation;
   int localization_font_pixel_size;
+  /* Independent of game packs/fonts. Serialized as a stable locale code. */
+  int interface_language;
   int display_mode;
   /* Absolute host-output HUD scale percent. 0 follows the game's current
    * presentation scale; 100 means one output pixel per SNES pixel vertically. */

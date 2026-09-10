@@ -7,6 +7,7 @@ import (
 )
 
 func TestAuthorLocationOrderAndCoverage(t *testing.T) {
+	captions := AuthorNavigationCaptions()
 	want := []string{"Title", "Sky Palace", "Fillmore", "Bloodpool", "Kasandora", "Aitos", "Marahna", "Northwall", "Death Heim", "End Credits"}
 	roots := AuthorLocationRoots()
 	var labels []string
@@ -34,12 +35,19 @@ func TestAuthorLocationOrderAndCoverage(t *testing.T) {
 			}
 			seen := map[string]bool{}
 			for _, loc := range locations {
+				if captions[loc.RootKey] != loc.RootLabel || captions[loc.GroupKey] != loc.GroupLabel || loc.TitleKey != "" && captions[loc.TitleKey] != loc.Title || loc.ContextKey != "" && captions[loc.ContextKey] == "" {
+					t.Fatalf("unregistered navigation caption: %+v", loc)
+				}
 				if valid[loc.Root] != loc.RootLabel || loc.RootLabel == "" || loc.Title == "" || loc.GroupLabel == "" || !strings.HasPrefix(loc.Group, loc.Root+".") || seen[loc.Root] {
 					t.Fatalf("invalid/duplicate location for %s: %+v", ref.ID, loc)
 				}
 				seen[loc.Root] = true
 			}
 		}
+	}
+	captions["root.sky"] = "modified"
+	if AuthorNavigationCaptions()["root.sky"] != "Sky Palace" {
+		t.Fatal("caller mutated caption registry")
 	}
 }
 

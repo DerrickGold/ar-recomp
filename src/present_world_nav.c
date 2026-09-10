@@ -103,11 +103,12 @@ typedef enum WorldNavigationShell {
 
 static const float kWorldNavigationTerrainAmbient = 0.68f;
 
-/* Presentation choice, not a native coordinate or renderer setting. Keep
- * town/relief scale fixed while broadening only the Palace's horizon. */
+/* Presentation choices, not native coordinates or renderer settings. Keep
+ * the local tile/relief scale while giving navigation a broader landscape
+ * and the Palace backdrop its separately art-directed horizon. */
 static float WorldNavigationChartRadius(const FrameSlot *slot) {
   return kSimWorldNavigationGlobeRadiusTiles *
-      (slot->sim.view == kSimView_SkyPalace ? 3.0f : 1.0f);
+      (slot->sim.view == kSimView_SkyPalace ? 3.0f : 2.0f);
 }
 
 typedef struct WorldNavigationGroundKey {
@@ -1064,7 +1065,7 @@ static bool PrepareWorldNavigationProjection(
   const float focus_y = slot->sim.world_navigation.focus_y;
   const float *affine = slot->sim.world_navigation_scene.source_to_screen;
   const float heading = atan2f(-affine[3], affine[0]);
-  if (!SimWorldNavigationGlobe_BuildFrame(
+  if (!SimWorldNavigationGlobe_BuildFrameAtRadius(out->chart_radius_tiles,
           focus_x / kSimWorldMapTilePixels,
           focus_y / kSimWorldMapTilePixels, heading, &out->globe_frame))
     return false;
@@ -1092,7 +1093,7 @@ static bool PrepareWorldNavigationProjection(
   out->reference_height_units = landscape_scale > 0.0f
       ? WorldNavigationTerrainHeightAt(focus_x, focus_y, NULL) : 0.0f;
   out->globe_radius_world = fmaxf(
-      0.25f, out->tile_world * kSimWorldNavigationGlobeRadiusTiles);
+      0.25f, out->tile_world * out->chart_radius_tiles);
   const SimWorldNavigationAtmosphereHeights atmosphere =
       SimWorldNavigationScene_AtmosphereHeights(
           s_world_terrain.maximum_height * landscape_scale +
@@ -1112,13 +1113,13 @@ static bool PrepareWorldNavigationProjection(
     const float facing_z = -out->matrix[11];
     const float envelope = fmaxf(atmosphere.outer_tiles,
         s_world_terrain.maximum_height * landscape_scale + model_rise);
-    const float support = kSimWorldNavigationGlobeRadiusTiles * (1 - facing_z) +
+    const float support = out->chart_radius_tiles * (1 - facing_z) +
         envelope - out->reference_height_units * landscape_scale * facing_z;
     const float maximum_scale = support > 0 ? (camera.distance - .25f) / support : out->tile_world;
     out->tile_world = SimWorldNavigationScene_AdventScale(out->tile_world, maximum_scale);
     if (out->tile_world <= 0) return false;
     out->height_world_per_unit = out->tile_world * landscape_scale;
-    out->globe_radius_world = fmaxf(.25f, out->tile_world * kSimWorldNavigationGlobeRadiusTiles);
+    out->globe_radius_world = fmaxf(.25f, out->tile_world * out->chart_radius_tiles);
   }
   const float reference_height_world =
       out->reference_height_units * out->height_world_per_unit;
@@ -2848,7 +2849,7 @@ static PresentationOutcome DrawWorldNavigationWeather(
 static bool DrawWorldNavigationCompositionLayer(
     const FrameSlot *slot, ArRenderRectI viewport,
     const SimWorldNavigationCompositionLayer *layer,
-    ArRenderTexture texture, ArRenderPointF offset) {
+    ArRenderTexture texture, ArRenderPointF offset, float scale) {
   if (!layer || !layer->visible) return true;
   if (!ArRenderTexture_IsValid(texture) ||
       !layer->width || !layer->height)
@@ -2864,6 +2865,14 @@ static bool DrawWorldNavigationCompositionLayer(
     bottom_right.x - top_left.x,
     bottom_right.y - top_left.y,
   };
+  if (scale != 1.0f) {
+    /* Scale about the native travel focus, including the authored offset of
+     * the cloud/platform, not about a potentially asymmetric raster crop. */
+    destination.x = viewport.w * .5f + (top_left.x - viewport.w * .5f) * scale + offset.x;
+    destination.y = viewport.h * .5f + (top_left.y - viewport.h * .5f) * scale + offset.y;
+    destination.w *= scale;
+    destination.h *= scale;
+  }
   return ArRenderDevice_DrawTexture(
       &g_render_device, texture, &source, &destination);
 }
@@ -2886,13 +2895,20 @@ static bool DrawWorldNavigationPalace(
     Scene3DPoint focus;
     if (!Scene3D_ProjectWorldPoint(projection->matrix, world[0], world[1], world[2],
             viewport.w, viewport.h, &focus)) return false;
-    /* Native art stays the same size and orientation; only its location
-     * follows inspection. Normal radial travel needs no screen offset. */
+    /* Preserve the authored orientation; only its location follows
+     * inspection. Normal radial travel needs no screen offset. */
     offset = (ArRenderPointF){focus.x - viewport.w * .5f, focus.y - viewport.h * .5f};
   }
+  /* Retain native animation/brightness, but integrate its screen-space
+   * marker with camera zoom: 75% at the default distance of 3, never larger
+   * than native, and at least 35% so the travel focus stays readable in orbit.
+   * Use the resolved eye distance so auto-fit and clamped cameras agree. */
+  const float distance = hypotf(hypotf(projection->camera_world[0],
+      projection->camera_world[1]), projection->camera_world[2]);
+  const float scale = fminf(1.0f, fmaxf(.35f, .75f * 3.0f / distance));
   return DrawWorldNavigationCompositionLayer(slot, viewport,
       &slot->sim.world_navigation_scene.composition.palace,
-      s_world_composition.palace, offset);
+      s_world_composition.palace, offset, scale);
 }
 
 static bool DrawWorldNavigationMasterFade(
@@ -3097,7 +3113,7 @@ PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
       (!DrawWorldNavigationPalace(slot, viewport, &projection) ||
        !DrawWorldNavigationCompositionLayer(
            slot, viewport, &composition->ui,
-           s_world_composition.ui, (ArRenderPointF){0}))) {
+           s_world_composition.ui, (ArRenderPointF){0}, 1.0f))) {
     ArRenderOutputFrame_Abort(&output_frame);
     return kPresentationOutcome_CoreFailure;
   }

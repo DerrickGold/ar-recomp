@@ -1195,6 +1195,67 @@ bundled runtime's widescreen/PPU interfaces:
   shadow pass traverses against its offset to preserve original coverage
   without allocating a temporary alpha plane; invalid inputs remain distinct
   from retryable font/resource failures.
+- System-interface text has a separate `ArUiTextRenderer` instance, injected
+  through `SettingsOverlay_SetTextBackend`. The host resolves the bundled
+  Noto Sans/JP files; the overlay owns the font instance and a 256-entry,
+  16 MiB GPU text cache. Non-ASCII runs and non-English interface runs are
+  truncated at grapheme boundaries and shaped together inside the overlay's
+  cell envelope; normal English
+  keeps the ROM/host bitmap atlases. Output-space text width queries share
+  the same cached layout as drawing, so centering uses actual shaped width.
+  Tint and position changes don't rerasterize. The renderer owns no game
+  routes, settings, ROM state or filesystem policy; it uses the portable text
+  backend and render-device contracts. Texture resets clear only its GPU cache,
+  and a rejected font initialization retains the previous working instance.
+  Final destruction precedes render-device teardown. Missing backend/resources
+  retain the compatibility atlas; dynamic game packs cannot replace interface
+  font dependencies.
+- Interface paragraph wrapping and direct-edit fields share
+  `localization/interface_text`: word-space wrapping honors explicit newlines
+  and falls back to complete-grapheme breaks for unspaced scripts, with separate
+  byte and cell bounds. Appends reject malformed UTF-8 atomically and truncate
+  only at whole-cluster boundaries; Backspace removes the last cluster. These
+  are interface operations, not the native game dialogue paging/scheduling
+  contract. Developer syntax-highlight spans remain technical byte-oriented
+  fields rather than translated prose.
+- Host interface messages use stable IDs in `localization/ui_catalog`, separate
+  from game language packs. English/French/German/Japanese columns are authored
+  in `snesrecomp-go/internal/uicatalog/messages.json`; `go generate
+  ./internal/uicatalog` produces the static, sorted C table. Validation requires
+  every entry's four translations and identical named-argument sets. C lookup
+  allocates nothing; `{arguments}` are substituted literally with bounded,
+  all-or-nothing writes, never as `printf` format strings. The overlay's
+  `settings_overlay_localization` adapter derives label/help/value IDs from
+  stable setting keys without modifying `Settings_FormatValue` or serialization.
+  `interface_language = en|fr|de|ja` (also `AR_INTERFACE_LANGUAGE`) persists
+  independently of game content and font presentation. The Localization →
+  Interface tab changes it live. A host without ready interface fonts displays
+  English while retaining that preference. Reset/save feedback wraps in the
+  description panel rather than sharing space with the section title.
+  Catalogs cover navigation, interaction feedback, all compiled setting labels,
+  help and built-in enum choices, plus layer-editor captions. Coverage tests
+  compare the real compiled registry's English text with the catalog; new or
+  drifted descriptors fail the gate. Controller names are keyed by typed binding
+  kind/code, while platform keycap/device names and user-authored values remain
+  literal. Live Vsync captions read host-reported status, not requested settings.
+  Manual-reader controls are a separate presentation consumer.
+  Generated C strings encode UTF-8 bytes with fixed-width escapes, independent
+  of compiler execution code pages; builder-only IDs are excluded from that
+  table. The builder embeds the same validated catalog subset in an inert,
+  HTML-escaped JSON bootstrap. Its explicit leaf/attribute bindings never
+  rewrite input values, scripts or author metadata. Browser language changes
+  persist in `game-assets/workshop-settings.json` independently of the game,
+  without navigation or editor reload; font fallback is a fixed, shipped
+  Noto Sans JP endpoint, not an imported-pack file service.
+- Auxiliary layer editors expose immutable, resolved row metadata (room scope,
+  depth strategy/magnitude/direction, band bounds/anchor and enum values).
+  `settings_overlay_layers_localization` consumes that snapshot without parsing
+  English display strings or re-reading live room/draft state. Original English
+  row formatting stays available for tools and parity checks. Manifest plane,
+  section and ROM-source tokens remain literal; host captions cannot change
+  edit targets or authoring rules. Only visible rows and selected help are
+  translated, not navigation/count probes. Label/value and help-heading budgets
+  reserve their separate columns, including nonselectable notices.
 - Renderer-backed F2/`AR_SHOT_AT_GF` captures read the final composited output,
   so scaled-HUD regressions include the host overlay. Pure headless/oracle runs
   bind no overlay surfaces and preserve the historical internal framebuffer
@@ -3378,11 +3439,17 @@ emulated coordinates, save data, backend formats, shaders or effect controls.
 Horizon culling, GPU depth, clouds, atmosphere and Advent's global clearance
 bound all use the same view matrix and eye, with no screen-space correction.
 
-The native Palace keeps its size and orientation. Normal travel and zoom leave
-its authored screen placement unchanged. Inspection offsets it to the actual
-travel location and hides it on the far hemisphere; the destination UI stays
-fixed. The separate enhanced Sky Palace backdrop retains its oblique daylight
-horizon camera and selected 3x diameter unchanged.
+Navigation uses a **2x diameter** globe (96-tile chart radius), with the local
+tile/relief scale and native travel coordinates unchanged. Focus frames,
+terrain, authored models, mountain joins, clouds and Advent clearance use that
+same metric. The native Palace retains its animation, brightness and top-down
+orientation, but scales with the resolved camera distance: 75% at distance 3,
+capped at native size nearby and floored at 35% for a readable distant marker.
+Scaling is about the travel focus, preserving the authored cloud/platform crop
+offset. Inspection moves it to the actual travel location and hides it on the
+far hemisphere; the destination UI remains unscaled and fixed. This adds no
+textures or draw passes. The separate enhanced Sky Palace backdrop retains its
+oblique daylight horizon camera and selected 3x diameter unchanged.
 
 Camera tests cover held-neutral input without redundant redraws, full-turn
 wrap, invalid elapsed time, frame-rate-independent return, zoom/reset and
@@ -4343,7 +4410,8 @@ scaling the camera too would preserve the old curve. Global terrain/model/air
 bounds still raise the eye if required by effect settings. The camera aims
 slightly above the sea tangent (about 53% down the viewport), leaving more sky
 around the angel. The horizon veil is narrower and less opaque so nearby
-terrain keeps its color. Navigation retains its original 48-tile chart and camera.
+terrain keeps its color. Navigation separately uses a 96-tile chart and its
+centered radial camera.
 The globe rotates independently to put the selected region's raised centre
 just below the sea horizon, about 56.5% down the viewport above the menu.
 Presentation consumes captured region bounds (travel focus is the fallback),
@@ -4352,7 +4420,7 @@ intersection accounts for the region's terrain height without scaling relief
 or moving native destination coordinates.
 The chosen radius is presentation-owned. Explicit-radius portable globe and
 mountain-transition functions have no mode/global-state dependency, and their
-default wrappers preserve navigation behavior. Radius participates in private
+default wrappers preserve the original 48-tile math contract. Radius participates in private
 projection, mountain, cliff, model-bound and weather-normal cache keys.
 Switching Palace/navigation rebuilds chart-dependent surfaces from native art
 (including pre-animation mountain colors), but retains compiled town models

@@ -179,7 +179,7 @@ func TestLocalizationLocationTreeAndSourceSearch(t *testing.T) {
 			total += row.Total
 			if row.IsMessage {
 				leaves[row.ID] = true
-				if row.ID == "sim.menu.listen" && (row.Done != 1 || !strings.Contains(row.Label, "[shared]")) {
+				if row.ID == "sim.menu.listen" && (row.Done != 1 || !row.Shared) {
 					t.Fatal("shared progress lost", row)
 				}
 			} else if got := walk(row.ID); got != row.Total {
@@ -216,6 +216,12 @@ func TestLocalizationLocationTreeAndSourceSearch(t *testing.T) {
 	query.Set("q", "welcome back")
 	if body := locGET(t, app, "search", query).Body.String(); !strings.Contains(body, "dialogue.event.wrapper_05.call_02.source_00") {
 		t.Fatal("missing Continue shortcut", body)
+	}
+	for _, caption := range []string{"accueil après Continuer", "Begrüßung nach Fortsetzen", "つづきからの挨拶"} {
+		query.Set("q", caption)
+		if body := locGET(t, app, "search", query).Body.String(); !strings.Contains(body, "dialogue.event.wrapper_05.call_02.source_00") {
+			t.Fatal("translated navigation not searchable", body)
+		}
 	}
 	query.Set("id", "sky.action_mode.confirm")
 	if body := locGET(t, app, "message", query).Body.String(); !strings.Contains(body, `"reference":`) || !strings.Contains(body, "Invented US template") {

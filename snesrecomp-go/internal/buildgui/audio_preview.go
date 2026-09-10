@@ -108,8 +108,10 @@ func (app *application) startAudioPreviews(response http.ResponseWriter,
 	request *http.Request) {
 	romPath := findWorkshopROM(app.options.ProjectRoot)
 	if romPath == "" {
-		writeJSONError(response, http.StatusConflict,
-			"select a ROM on the Build tab before generating original-audio previews")
+		writeJSON(response, http.StatusConflict, map[string]string{
+			"error":     "select a ROM on the Build tab before generating original-audio previews",
+			"errorCode": "builder.assets.need_rom",
+		})
 		return
 	}
 	cacheRoot, err := audioPreviewCacheRoot(app.options)
@@ -136,7 +138,10 @@ func (app *application) startAudioPreviews(response http.ResponseWriter,
 	app.previewMu.Lock()
 	if app.preview.State == "generating" {
 		app.previewMu.Unlock()
-		writeJSONError(response, http.StatusConflict, "audio previews are already being generated")
+		writeJSON(response, http.StatusConflict, map[string]string{
+			"error":     "audio previews are already being generated",
+			"errorCode": "builder.assets.preview_busy",
+		})
 		return
 	}
 	app.preview = audioPreviewStatus{

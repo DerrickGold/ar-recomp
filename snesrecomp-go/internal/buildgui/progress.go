@@ -95,7 +95,9 @@ func renderStepList() string {
 	for _, item := range buildPhases {
 		builder.WriteString(`<li class="step" data-step="`)
 		builder.WriteString(html.EscapeString(item.id))
-		builder.WriteString(`"><span class="tick" aria-hidden="true"></span><span class="step-name">`)
+		builder.WriteString(`"><span class="tick" aria-hidden="true"></span><span class="step-name" data-i18n="builder.phase.`)
+		builder.WriteString(html.EscapeString(item.id))
+		builder.WriteString(`">`)
 		builder.WriteString(html.EscapeString(item.label))
 		builder.WriteString(`</span></li>`)
 	}

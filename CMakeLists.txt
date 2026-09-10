@@ -381,11 +381,18 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_unicode_grapheme_test
         tests/unicode_grapheme_test.c
+        src/localization/interface_text.c
         src/localization/unicode_grapheme.c)
     target_include_directories(actraiser_unicode_grapheme_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_unicode_grapheme
         COMMAND actraiser_unicode_grapheme_test)
+
+    add_executable(actraiser_ui_catalog_test
+        tests/ui_catalog_test.c src/localization/ui_catalog.c)
+    target_include_directories(actraiser_ui_catalog_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_ui_catalog COMMAND actraiser_ui_catalog_test)
 
     add_executable(actraiser_text_backend_test
         tests/text_backend_test.c
@@ -406,6 +413,8 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_text_surface_cache_test
         tests/text_surface_cache_test.c
+        src/render/ui_text_renderer.c
+        src/localization/text_backend.c
         src/localization/text_rasterizer.c
         src/render/text_surface_cache.c
         src/render/render_device.c)
@@ -612,6 +621,12 @@ if(BUILD_TESTING)
     # loader and semantic validator against Go. No Python or ROM is required.
     find_program(ACTRAISER_GO_EXECUTABLE NAMES go)
     if(ACTRAISER_GO_EXECUTABLE)
+        add_test(NAME actraiser_go_ui_catalog
+            COMMAND ${ACTRAISER_GO_EXECUTABLE} test ./internal/uicatalog -count=1)
+        set_tests_properties(actraiser_go_ui_catalog PROPERTIES
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/snesrecomp-go"
+            ENVIRONMENT "GOCACHE=${CMAKE_BINARY_DIR}/go-cache"
+            TIMEOUT 120)
         add_test(NAME actraiser_go_localization_author
             COMMAND ${ACTRAISER_GO_EXECUTABLE} test ./internal/localizationkit
                 -run Author -count=1)
@@ -1547,6 +1562,9 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_settings_overlay_test
         tests/settings_overlay_test.c
+        src/settings_overlay_localization.c
+        src/settings_overlay_layers_localization.c
+        src/localization/ui_catalog.c
         src/config.c
         src/quintet_lzss.c
         src/settings.c
@@ -1554,6 +1572,11 @@ if(BUILD_TESTING)
         src/atomic_replace.c
         src/randomizer.c
         src/settings_overlay.c
+        src/localization/interface_text.c
+        src/render/ui_text_renderer.c
+        src/render/text_surface_cache.c
+        src/localization/text_rasterizer.c
+        src/localization/text_backend.c
         src/localization/unicode_grapheme.c
         src/settings_overlay_debug_panel.c
         src/render/render_device.c
@@ -1583,6 +1606,15 @@ if(BUILD_TESTING)
         SDL3::SDL3
         actraiser_math
     )
+    if(TARGET SDL3_ttf::SDL3_ttf)
+        target_sources(actraiser_settings_overlay_test PRIVATE
+            src/platform/sdl/text_rasterizer_sdl.c)
+        target_link_libraries(actraiser_settings_overlay_test PRIVATE SDL3_ttf::SDL3_ttf)
+        target_compile_definitions(actraiser_settings_overlay_test PRIVATE
+            AR_HAS_SDL3_TTF=1
+            "AR_OVERLAY_UI_FONT=\"${CMAKE_SOURCE_DIR}/game-assets/fonts/noto/NotoSans-SemiCondensedExtraBold.ttf\""
+            "AR_OVERLAY_UI_JP_FONT=\"${CMAKE_SOURCE_DIR}/game-assets/fonts/noto/NotoSansJP-Bold.otf\"")
+    endif()
     target_compile_definitions(actraiser_settings_overlay_test PRIVATE
         AR_SIM3D_TERRAIN_ELEVATION=${AR_SIM3D_TERRAIN_ELEVATION_VALUE})
     add_test(NAME actraiser_settings_overlay COMMAND actraiser_settings_overlay_test)

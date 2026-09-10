@@ -173,7 +173,12 @@ static void TestFraming(SDL_Renderer *renderer, FrameSlot *slot) {
       const float dx = bounds.x + bounds.w * .5f - kWidth * .5f;
       const float dy = bounds.y + bounds.h * .5f - kHeight * .5f;
       CHECK(fabsf(dx) <= 2 && fabsf(dy) <= 2);
-      CHECK(bounds.x > 0 && bounds.y > 0 && bounds.x + bounds.w < kWidth && bounds.y + bounds.h < kHeight);
+      /* The 2x globe deliberately extends beyond the near viewport. Wide
+       * navigation must still reveal its entire centered silhouette. */
+      if (zoom >= 5)
+        CHECK(bounds.x > 0 && bounds.y > 0 && bounds.x + bounds.w < kWidth && bounds.y + bounds.h < kHeight);
+      else
+        CHECK(bounds.y == 0 && bounds.h == kHeight);
       CHECK(Differences(travel, view) == 0);
       SDL_DestroySurface(view);
     }
@@ -965,7 +970,11 @@ static void TestSynthetic(SDL_Renderer *renderer) {
   CHECK(ColorCount(near_marker, 0xff00ffff) == ColorCount(far_marker, 0xff00ffff));
   slot->sim_manual_orbit_yaw = .6f;
   SDL_Surface *moved_marker = Render(renderer, slot, "synthetic-markers-orbit");
-  CHECK(ColorCount(moved_marker, 0xffff00ff) == ColorCount(near_marker, 0xffff00ff));
+  /* Fractional-size artwork can cover one more/less pixel column as it
+   * crosses the raster grid. Its submitted dimensions are checked exactly
+   * by the portable backend test; allow only that column here. */
+  CHECK(abs(ColorCount(moved_marker, 0xffff00ff) - ColorCount(near_marker, 0xffff00ff)) <=
+      (int)ceilf(16 * .75f * kHeight / kActRaiserAuthenticHeight));
   CHECK(abs(FirstColorX(moved_marker, 0xffff00ff) - FirstColorX(near_marker, 0xffff00ff)) > 10);
   CHECK(FirstColorX(moved_marker, 0xff00ffff) == FirstColorX(near_marker, 0xff00ffff));
   CheckColorMaskEqual(moved_marker, near_marker, 0xff00ffff);
@@ -974,8 +983,8 @@ static void TestSynthetic(SDL_Renderer *renderer) {
   CHECK(Differences(near_marker, restored) == 0);
   SDL_DestroySurface(restored);
 
-  /* Zooming preserves the radial travel alignment. Native Palace/UI pixels
-   * stay the same size and location; town-camera tilt cannot displace them. */
+  /* Zooming preserves radial alignment, while the Palace becomes smaller.
+   * The native UI retains its exact pixel mask, unaffected by camera tilt. */
   slot->sim.projection_pitch_mrad = -575;
   SDL_Surface *travel_marker = Render(renderer, slot, "synthetic-markers-travel");
   const uint16_t distance = slot->sim.projection_distance_x100;
@@ -983,8 +992,11 @@ static void TestSynthetic(SDL_Renderer *renderer) {
   slot->sim.projection_pitch_mrad = -1300;
   slot->sim.projection_yaw_mrad = 650;
   SDL_Surface *centred_marker = Render(renderer, slot, "synthetic-markers-centred");
-  CHECK(ColorCount(centred_marker, 0xffff00ff) > 500);
-  CheckColorMaskEqual(centred_marker, travel_marker, 0xffff00ff);
+  const int close_pixels = ColorCount(travel_marker, 0xffff00ff);
+  const int wide_pixels = ColorCount(centred_marker, 0xffff00ff);
+  CHECK(wide_pixels > close_pixels * .30f && wide_pixels < close_pixels * .42f);
+  CHECK(FirstColorX(centred_marker, 0xffff00ff) > FirstColorX(travel_marker, 0xffff00ff));
+  CHECK(FirstColorY(centred_marker, 0xffff00ff) > FirstColorY(travel_marker, 0xffff00ff));
   CheckColorMaskEqual(centred_marker, travel_marker, 0xff00ffff);
   slot->sim.projection_distance_x100 = distance;
   restored = Render(renderer, slot, NULL);

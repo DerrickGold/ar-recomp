@@ -7,6 +7,7 @@
 #include <SDL3/SDL.h>
 
 #include "render/render_device.h"
+#include "localization/text_backend.h"
 #include "settings_overlay_render.h"
 
 /* Host-owned settings overlay. It consumes SDL input before the SNES joypad
@@ -16,6 +17,13 @@
 bool SettingsOverlay_Init(ArRenderDevice *render_device, SDL_Window *window,
                           const uint8_t *rom_data, size_t rom_size);
 void SettingsOverlay_Destroy(void);
+
+/* Host-resolved, independent interface font stack. The overlay owns the
+ * instance and bounded GPU cache, not the backend operations or render device.
+ * Failure retains a working stack (or the existing ROM/ASCII fallback). */
+bool SettingsOverlay_SetTextBackend(const ArTextBackend *backend,
+                                    const ArTextBackendConfig *fonts,
+                                    char *error, size_t error_capacity);
 
 /* Render-target/device-reset recovery: the overlay's static atlases are
  * uploaded once at Init, so a backend reset may empty them. Rebuilds them from

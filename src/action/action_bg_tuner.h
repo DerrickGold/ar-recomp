@@ -62,6 +62,17 @@ typedef struct ActionBgTunerRow {
   bool nested;
   bool selectable;
   bool separator_before;
+  /* Resolved presentation metadata, owned by the same row builder as value.
+   * enum_value is the row kind's edge/motion/extent/anchor/bool; no host parses
+   * English display strings or reaches into the tuner's private draft state. */
+  int enum_value;
+  bool expanded;
+  bool room_live;
+  uint8_t map_group, map_number;
+  uint16_t first_row, end_row;
+  ActionBgBandAnchor anchor;
+  ActionBgLayerRole role;
+  ActionBgSourceKind source;
 } ActionBgTunerRow;
 
 typedef enum ActionBgTunerResult {

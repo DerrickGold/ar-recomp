@@ -22,6 +22,8 @@ func TestLocalizationPackageGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	files := []string{
+		"utils/game-assets/fonts/noto/NotoSans-SemiCondensedExtraBold.ttf",
+		"utils/game-assets/fonts/noto/NotoSansJP-Bold.otf", "utils/game-assets/fonts/noto/NotoSansJP-OFL.txt",
 		"utils/LICENSE", "utils/LICENSE_SCOPE.md", "utils/ATTRIBUTION.md", "utils/THIRD_PARTY_NOTICES.md",
 		"utils/game-assets/fonts/noto/OFL.txt", "utils/snesrecomp-go/runtime/LICENSE", "utils/snesrecomp-go/runtime/NOTICE.md", "utils/snesrecomp-go/runtime/PROVENANCE.md", "utils/snesrecomp-go/runtime/licenses/Snaggletooth-LICENSE.txt",
 		"utils/runtime.a", "utils/tools/sdl3/lib/SDL3.dll", "utils/tools/sdl3/lib/SDL3_ttf.dll", "utils/tools/sdl3/lib/SDL3_ttf.lib", "utils/tools/sdl3/include/SDL3_ttf/SDL_ttf.h", "utils/tools/sdl3/licenses/SDL3_ttf/LICENSE.txt",
@@ -39,6 +41,8 @@ func TestLocalizationPackageGate(t *testing.T) {
 	).Replace(string(template))
 	for _, tc := range []struct{ name, omit, add string }{
 		{name: "valid"},
+		{name: "missing Japanese UI font", omit: "utils/game-assets/fonts/noto/NotoSansJP-Bold.otf"},
+		{name: "missing Japanese UI notice", omit: "utils/game-assets/fonts/noto/NotoSansJP-OFL.txt"},
 		{name: "missing runtime", omit: "utils/tools/sdl3/lib/SDL3_ttf.dll"},
 		{name: "missing link", omit: "utils/tools/sdl3/lib/SDL3_ttf.lib"},
 		{name: "missing header", omit: "utils/tools/sdl3/include/SDL3_ttf/SDL_ttf.h"},
@@ -86,7 +90,7 @@ func TestLocalizationPackageGate(t *testing.T) {
 				}
 			} else if err == nil {
 				t.Fatal("invalid package accepted")
-			} else if !strings.Contains(string(output), "SDL3_ttf package check") && !strings.Contains(string(output), "localization distribution check") {
+			} else if !strings.Contains(string(output), "SDL3_ttf package check") && !strings.Contains(string(output), "localization distribution check") && !strings.Contains(string(output), "interface font check") && !strings.Contains(string(output), "license check") {
 				t.Fatalf("wrong rejection: %s", output)
 			}
 		})

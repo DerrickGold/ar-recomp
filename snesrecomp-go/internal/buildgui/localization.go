@@ -180,10 +180,12 @@ func (app *application) serveLocalization(w http.ResponseWriter, r *http.Request
 
 func writeLocalizationError(w http.ResponseWriter, err error) {
 	code := http.StatusBadRequest
+	key := "builder.language.request_failed"
 	if errors.Is(err, lk.ErrProjectConflict) {
 		code = http.StatusConflict
+		key = "builder.language.request_conflict"
 	}
-	writeJSONError(w, code, err.Error())
+	writeJSON(w, code, map[string]string{"error": err.Error(), "errorCode": key})
 }
 
 func decodeLocalizationRequest(w http.ResponseWriter, r *http.Request) (localizationRequest, error) {
@@ -262,9 +264,9 @@ func (work *localizationWork) locationTree(parent string) []lk.AuthorTreeEntry {
 	parents := map[string]string{}
 	order := map[string]int{}
 	rows := []lk.AuthorTreeEntry{}
-	accumulate := func(id, label, parent string, row lk.AuthorTreeEntry) {
+	accumulate := func(id, label, key, parent string, row lk.AuthorTreeEntry) {
 		if groups[id] == nil {
-			groups[id] = &lk.AuthorTreeEntry{ID: id, Label: label, HasChildren: true}
+			groups[id] = &lk.AuthorTreeEntry{ID: id, Label: label, LabelKey: key, HasChildren: true}
 			parents[id] = parent
 		}
 		g := groups[id]
@@ -293,13 +295,12 @@ func (work *localizationWork) locationTree(parent string) []lk.AuthorTreeEntry {
 			order[loc.Group] = loc.CategoryOrder
 			if parent == loc.Group {
 				row.Label = work.localizationMessageTitle(ref.ID, loc)
-				if len(locations) > 1 {
-					row.Label += " [shared]"
-				}
+				row.LabelKey = loc.TitleKey
+				row.Shared = loc.Shared
 				rows = append(rows, row)
 			}
-			accumulate(loc.Root, loc.RootLabel, "", row)
-			accumulate(loc.Group, loc.GroupLabel, loc.Root, row)
+			accumulate(loc.Root, loc.RootLabel, loc.RootKey, "", row)
+			accumulate(loc.Group, loc.GroupLabel, loc.GroupKey, loc.Root, row)
 		}
 	}
 	if parent == "" {
@@ -334,7 +335,7 @@ func (work *localizationWork) locationTree(parent string) []lk.AuthorTreeEntry {
 // Resolve only requested labels through the shared parser; keep prose out of
 // collapsed groups and retain the exact semantic ID in the editor tooltip.
 func (work *localizationWork) localizationMessageTitle(id string, location lk.AuthorLocation) string {
-	if !(strings.Contains(location.Title, "wrapper ") || strings.Contains(location.Title, "slot ")) {
+	if location.TitleKey != "" || !(strings.Contains(id, ".wrapper_") || strings.Contains(id, ".slot_")) {
 		return location.Title
 	}
 	for _, project := range []*lk.AuthorProject{work.nativeLocalizationSource(), work.current} {
@@ -442,6 +443,11 @@ func (work *localizationWork) readLocalization(w *localizationReply, r *http.Req
 				haystack := ref.ID + " " + v.Body
 				for _, place := range lk.AuthorMessageLocations(ref.ID) {
 					haystack += " " + place.Title + " " + place.RootLabel + " " + place.GroupLabel + " " + place.Context
+					// Search built-in navigation in every UI language. No query or
+					// project locale changes the route IDs, results or source text.
+					for _, key := range []string{place.RootKey, place.GroupKey, place.TitleKey, place.ContextKey} {
+						haystack += " " + navigationSearchText(key)
+					}
 				}
 				if source := work.localizationReference(ref.ID); source != nil {
 					haystack += " " + source.Body
@@ -451,7 +457,7 @@ func (work *localizationWork) readLocalization(w *localizationReply, r *http.Req
 				}
 			}
 			if total >= offset && len(rows) < 60 {
-				rows = append(rows, map[string]any{"id": ref.ID, "title": work.localizationMessageTitle(ref.ID, loc), "group": loc.GroupLabel, "status": v.Status, "present": v.Present})
+				rows = append(rows, map[string]any{"id": ref.ID, "title": work.localizationMessageTitle(ref.ID, loc), "label_key": loc.TitleKey, "shared": loc.Shared, "group": loc.GroupLabel, "status": v.Status, "present": v.Present})
 			}
 			total++
 		}
