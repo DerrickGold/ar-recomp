@@ -783,12 +783,328 @@ static void test_ancestor_skip(void) {
           "nearest paired frame remains a valid target");
 }
 
+static unsigned poll_calls, poll_block_calls;
+static uint32_t poll_expected_address, poll_expected_width;
+static void poll_checkpoint(CpuState *cpu, uint32_t pc24) {
+    (void)pc24;
+    ++poll_block_calls;
+    cpu_poll_wait(cpu, 0x123456u, 0x000010u, 1u);
+}
+static void poll_wait(CpuState *cpu, uint32_t pc24,
+                      uint32_t address, uint32_t width) {
+    CpuState saved = *cpu;
+    ++poll_calls;
+    check(pc24 == 0x123456u && address == poll_expected_address &&
+              width == poll_expected_width, "poll callback masked metadata");
+    check(g_recomp_stack_top == 1, "poll keeps active frame");
+    RecompStackPush("poll-interrupt");
+    cpu->S -= 4u; cpu->A = 0x3412u;
+    WatchdogFrameStart();
+    RtlAudioExtensionConfigure(false);
+    cpu_trace_block(cpu, 0x008000u);
+    cpu_poll_wait(cpu, 0x123456u, address, width);
+    ++g_ram[0x20];
+    RecompStackPop();
+    *cpu = saved;
+    g_last_recomp_func = "interrupt-exit";
+}
+static void test_poll_wait(void) {
+    static const RtlGameIdentity identity = {
+        .struct_size = RTL_GAME_IDENTITY_V1_SIZE,
+        .game_id = "poll-test", .display_name = "Poll test", .save_name_prefix = "poll-test",
+    };
+    static RtlGameExecutionApi execution = {
+        .struct_size = RTL_GAME_EXECUTION_API_V3_SIZE, .run_frame = run_frame,
+        .execution_checkpoint = poll_checkpoint, .poll_wait = poll_wait,
+    };
+    static const RtlGameModule module = {
+        .abi_version = RTL_GAME_MODULE_ABI_VERSION, .struct_size = RTL_GAME_MODULE_V2_SIZE,
+        .capabilities = RTL_GAME_MODULE_CAP_IDENTITY | RTL_GAME_MODULE_CAP_EXECUTION,
+        .identity = &identity, .execution = &execution,
+    };
+    CpuState cpu = {0}; cpu.ram=g_ram; cpu.S=0x1ff0u; cpu.A=0x9876u;
+    check(RTL_GAME_EXECUTION_API_V3_SIZE == offsetof(RtlGameExecutionApi, poll_wait),
+          "execution v3 prefix unchanged");
+    check(RtlRegisterGame(&module)==SR_RESULT_OK, "register old poll extent");
+    cpu_poll_wait(&cpu,0x123456u,0x10u,1u);
+    check(poll_calls==0u,"v3 extent ignores populated poll pointer");
+    execution.struct_size=RTL_GAME_EXECUTION_API_V4_SIZE;
+    check(RtlRegisterGame(&module)==SR_RESULT_OK,"register poll extent");
+    RecompStackPush("poll-mainline");
+    const uint32_t reads[][2]={{0x10,1},{0x801ffe,2},{0xbf1000,1},{0x7e9000,2},{0x7ffffe,2}};
+    unsigned count=0; g_ram[0x20]=0;
+    for(unsigned round=0;round<2000u;round++) for(unsigned i=0;i<sizeof(reads)/sizeof(reads[0]);i++) {
+        poll_expected_address=reads[i][0]; poll_expected_width=reads[i][1];
+        cpu_poll_wait(&cpu,0xff123456u,0xff000000u|reads[i][0],reads[i][1]);
+        ++count;
+        check(cpu.S==0x1ff0u && cpu.A==0x9876u && g_recomp_stack_top==1 &&
+                  strcmp(g_last_recomp_func,"poll-mainline")==0,
+              "poll restores CPU and active trace context");
+    }
+    check(poll_calls==count && poll_block_calls==0u && g_ram[0x20]==(uint8_t)count,
+          "poll callback exact count and no nested scheduling");
+    const uint32_t denied[][2]={{0x1fff,2},{0x2140,1},{0x4210,1},{0x4212,1},
+        {0x808000,1},{0x400010,1},{0x700010,1},{0x7fffff,2},{0x10,0},{0x10,3}};
+    for(unsigned i=0;i<sizeof(denied)/sizeof(denied[0]);i++)
+        cpu_poll_wait(&cpu,0x123456u,denied[i][0],denied[i][1]);
+    cpu_poll_wait(NULL,0x123456u,0x10,1);
+    cpu_trace_block(&cpu,0xabcdefu);
+    check(poll_calls==count && poll_block_calls==1u,
+          "MMIO/ROM/SRAM/wrap/bad widths rejected; checkpoint suppresses poll reentry");
+    RecompStackPop(); execution.poll_wait=NULL; execution.execution_checkpoint=NULL;
+    check(RtlRegisterGame(&module)==SR_RESULT_OK,"disable poll hook");
+    cpu_poll_wait(&cpu,0x123456u,0x10,1);
+    check(poll_calls==count,"null poll hook no-op");
+}
+
+static unsigned checkpoint_calls;
+static unsigned checkpoint_depth;
+static void execution_checkpoint(CpuState *cpu, uint32_t pc24) {
+    CpuState interrupted = *cpu;
+    ++checkpoint_depth;
+    check(checkpoint_depth == 1u, "checkpoint cannot recursively enter itself");
+    if (checkpoint_depth != 1u) { --checkpoint_depth; return; }
+    ++checkpoint_calls;
+    check(pc24 == 0x123456u, "checkpoint receives masked block PC");
+    check(g_recomp_stack_top == 1, "checkpoint keeps active compiled frame");
+    /* Synthetic interrupt work: nested blocks remain observable, scheduling
+     * cannot recursively fire, CPU context is restored but memory writes live. */
+    RecompStackPush("synthetic-interrupt");
+    cpu->A = 0x4321u;
+    cpu->S -= 4u;
+    cpu->m_flag = 0u;
+    WatchdogFrameStart(); /* a host frame inside this still-active activation */
+    RtlAudioExtensionConfigure(false); /* refresh hooks without losing guard */
+    cpu_trace_block(cpu, 0x008000u);
+    ++g_ram[0x10];
+    cpu_trace_block(cpu, 0x008010u);
+    RecompStackPop();
+    *cpu = interrupted;
+    /* The checkpoint wrapper must also restore the suspended trace label. */
+    g_last_recomp_func = "synthetic-interrupt-exit";
+    --checkpoint_depth;
+}
+
+static void test_execution_checkpoint(void) {
+    static const RtlGameIdentity identity = {
+        .struct_size = RTL_GAME_IDENTITY_V1_SIZE,
+        .game_id = "checkpoint-test", .display_name = "Checkpoint test",
+        .save_name_prefix = "checkpoint-test",
+    };
+    static RtlGameExecutionApi execution = {
+        .struct_size = RTL_GAME_EXECUTION_API_V2_SIZE,
+        .run_frame = run_frame, .execution_checkpoint = execution_checkpoint,
+    };
+    static const RtlGameModule module = {
+        .abi_version = RTL_GAME_MODULE_ABI_VERSION,
+        .struct_size = RTL_GAME_MODULE_V2_SIZE,
+        .capabilities = RTL_GAME_MODULE_CAP_IDENTITY | RTL_GAME_MODULE_CAP_EXECUTION,
+        .identity = &identity, .execution = &execution,
+    };
+    CpuState cpu = {0};
+    uint32_t history[3];
+    check(RTL_GAME_EXECUTION_API_V2_SIZE ==
+              offsetof(RtlGameExecutionApi, execution_checkpoint),
+          "execution v2 prefix is unchanged");
+    check(RtlRegisterGame(&module) == SR_RESULT_OK, "register old execution extent");
+    cpu_trace_block(&cpu, 0x123456u);
+    check(checkpoint_calls == 0u, "old table extent cannot enable appended hook");
+    execution.struct_size = RTL_GAME_EXECUTION_API_V3_SIZE;
+    check(RtlRegisterGame(&module) == SR_RESULT_OK, "register checkpoint extent");
+    g_recomp_stack_top = 0;
+    RecompStackPush("suspended-mainline");
+    cpu.A = 0x1234u; cpu.X = 0x4567u; cpu.S = 0x1ff0u;
+    cpu.P = CPU_P_M | CPU_P_I | CPU_P_C;
+    cpu_p_to_mirrors(&cpu);
+    cpu.host_return_valid = 1u; cpu.ram = g_ram;
+    CpuState expected = cpu;
+    g_ram[0x10] = 0;
+    for (unsigned i = 0; i < 10000u; ++i) {
+        cpu_trace_block(&cpu, 0xff123456u);
+        /* Compare fields, not ABI padding (which structure assignment need
+         * not preserve on every compiler/CPU architecture). */
+        check(cpu.A == expected.A && cpu.X == expected.X && cpu.Y == expected.Y &&
+                  cpu.S == expected.S && cpu.D == expected.D && cpu.DB == expected.DB &&
+                  cpu.PB == expected.PB && cpu.P == expected.P &&
+                  cpu.m_flag == expected.m_flag && cpu.x_flag == expected.x_flag &&
+                  cpu.emulation == expected.emulation &&
+                  cpu.host_return_valid == expected.host_return_valid &&
+                  cpu._flag_N == expected._flag_N && cpu._flag_V == expected._flag_V &&
+                  cpu._flag_Z == expected._flag_Z && cpu._flag_C == expected._flag_C &&
+                  cpu._flag_I == expected._flag_I && cpu._flag_D == expected._flag_D &&
+                  cpu.ram == expected.ram,
+              "checkpoint resumes identical CPU state");
+        check(g_recomp_stack_top == 1 &&
+                  strcmp(g_last_recomp_func, "suspended-mainline") == 0,
+              "repeated checkpoints do not accumulate activation frames");
+    }
+    check(checkpoint_calls == 10000u && g_ram[0x10] == (uint8_t)10000u,
+          "each checkpoint's memory effect executes exactly once");
+    check(sr_block_history(history, 3) == 3 && history[0] == 0x008000u &&
+              history[1] == 0x008010u && history[2] == 0x123456u,
+          "nested interrupt blocks precede resumed block in history");
+    RecompStackPop();
+    execution.execution_checkpoint = NULL;
+    check(RtlRegisterGame(&module) == SR_RESULT_OK, "disable optional checkpoint");
+    cpu_trace_block(&cpu, 0x123456u);
+    check(checkpoint_calls == 10000u, "null hook leaves ordinary path alone");
+}
+
+/* Dispatch seam for this infrastructure-only unit. Actual registry lookup /
+ * live M/X selection is covered by cpu_state_test; here model the generated
+ * entry/return ABI and observe native driver nesting without game code. */
+static unsigned tail_dispatch_depth, tail_max_depth, tail_steps, tail_child_calls;
+static uint16 tail_expected_entry;
+static uint8 tail_expected_hrv;
+RecompReturn cpu_dispatch_pc_from(CpuState *cpu, uint32 pc24,
+        uint16 miss_stack, uint32 source_pc24) {
+    (void)miss_stack; (void)source_pc24;
+    ++tail_dispatch_depth;
+    if (tail_dispatch_depth > tail_max_depth) tail_max_depth = tail_dispatch_depth;
+    RecompReturn result = RECOMP_RETURN_NORMAL;
+    do {
+        if (pc24 == 0x00deadu) break; /* registry miss: no prologue consumes context */
+        uint16 entry = cpu->S;
+        uint8 hrv = 0; /* registry dispatch deliberately clears host_return_valid */
+        cpu->host_return_valid = 0;
+        check(cpu_take_tailcall_return_context(&entry, &hrv) == 1,
+              "paired registry entry inherits return context");
+        cpu->host_return_valid = hrv;
+        RecompStackPush("split-body");
+        if (pc24 == 0x009000u) {
+            check(entry == tail_expected_entry && hrv == tail_expected_hrv,
+                  "split bodies keep original entry S and host pairing");
+            check(cpu->m_flag == (tail_steps & 1u), "live width retained across split tail");
+            if (tail_steps == 5000u) {
+                uint16 before = cpu->S;
+                cpu->S -= 2u; /* a genuine nested JSR must keep its own driver */
+                check(cpu_dispatch_paired_tail_from(cpu, 0x009100u, cpu->S, 1u, pc24) == RECOMP_RETURN_NORMAL,
+                      "nested child returns to its own caller");
+                cpu->S = before;
+                ++tail_child_calls;
+            }
+            if (tail_steps++ < 10000u) {
+                cpu->m_flag = (uint8)(tail_steps & 1u);
+                RecompStackPop();
+                result = cpu_dispatch_paired_tail_from(cpu, pc24, entry, hrv, pc24);
+            } else {
+                RecompStackPop();
+                cpu->S = (uint16)(entry + 3u); /* original RTL, exactly once */
+                result = RECOMP_RETURN_NORMAL;
+            }
+        } else {
+            check(pc24 == 0x009100u && entry == (uint16)(tail_expected_entry - 3u),
+                  "nested JSR uses distinct hardware frame");
+            RecompStackPop();
+            cpu->S += 2u;
+            result = RECOMP_RETURN_NORMAL;
+        }
+        if (result == RECOMP_RETURN_TAILCALL) pc24 = g_tailcall_pc24;
+    } while (result == RECOMP_RETURN_TAILCALL);
+    --tail_dispatch_depth;
+    return result;
+}
+
+static void test_paired_tail_driver(void) {
+    CpuState cpu = {0};
+    WatchdogFrameStart();
+    RecompStackPush("jsl-caller");
+    cpu.S = 0x1fecu; cpu.m_flag = 0;
+    tail_expected_entry = cpu.S;
+    tail_expected_hrv = 1;
+    /* A split after a temporary push must inherit entry S, not current S. */
+    --cpu.S;
+    check(cpu_dispatch_paired_tail_from(&cpu, 0x009000u, tail_expected_entry, 1u, 0x008000u) == RECOMP_RETURN_NORMAL,
+          "split-tail chain returns normally to the active caller");
+    check(tail_steps == 10001u && tail_child_calls == 1u && tail_max_depth == 2u &&
+              tail_dispatch_depth == 0u && g_recomp_stack_top == 1 &&
+              cpu.S == (uint16)(tail_expected_entry + 3u),
+          "long tail chains are flat; only genuine nested calls add a driver");
+    check(cpu_take_tailcall_return_context(NULL, NULL) == 0,
+          "completed tail leaves no pending context");
+    (void)cpu_dispatch_paired_tail_from(&cpu, 0x00deadu, 0x1234u, 1u, 0x008000u);
+    check(cpu_take_tailcall_return_context(NULL, NULL) == 0,
+          "missing body cannot poison a later unrelated entry");
+    RecompStackPop();
+}
+
+static void test_return_ownership(void) {
+    CpuState cpu = {0}, other = {0};
+    CpuReturnScope outer, inner;
+    cpu.emulation=0; cpu.S=0x1fe0;
+    WatchdogFrameStart();
+    cpu_return_scope_begin(&outer,&cpu,0x008123,0x1fff,2);
+    cpu.S=0x1fd0;
+    cpu_return_scope_begin(&inner,&cpu,0x008123,0x1fe0,2);
+    cpu.S=0x1fda;
+    check(cpu_accept_adjusted_return(&cpu,0x1fd0,0x1fd8,0x008123,2) &&
+              inner.adjusted_return && !outer.adjusted_return,
+          "relocated frame belongs only to immediate recursive call");
+    inner.adjusted_return=0;
+    check(!cpu_accept_adjusted_return(&cpu,0x1fd0,0x1fd8,0x008124,2) &&
+          !cpu_accept_adjusted_return(&cpu,0x1fd0,0x1fd8,0x018123,2) &&
+          !cpu_accept_adjusted_return(&cpu,0x1fd0,0x1fd8,0x008123,3) &&
+          !cpu_accept_adjusted_return(&cpu,0x1fe0,0x1fd8,0x008123,2) &&
+          !cpu_accept_adjusted_return(&other,0x1fd0,0x1fd8,0x008123,2),
+          "wrong PC, bank, frame kind, activation, and CPU are not owned returns");
+    cpu.S=0x1fe2;
+    check(!cpu_accept_adjusted_return(&cpu,0x1fd0,0x1fe0,0x008123,2),
+          "same-PC ancestor return cannot cross caller frame boundary");
+    cpu.S=0x1fd2;
+    check(!cpu_accept_adjusted_return(&cpu,0x1fd0,0x1fd0,0x008123,2),
+          "ordinary equal-stack return is not a callee-clean proof");
+    cpu.S=0x1fda; cpu.emulation=1;
+    check(!cpu_accept_adjusted_return(&cpu,0x1fd0,0x1fd8,0x008123,2),
+          "emulation stack wrapping is outside native contract");
+    cpu.emulation=0; inner.caller_stack_limit=0x2000;
+    check(!cpu_accept_adjusted_return(&cpu,0x1fd0,0x1fd8,0x008123,2),
+          "non-WRAM stack window rejected");
+    inner.caller_stack_limit=0x1fe0; cpu.S=0;
+    check(!cpu_accept_adjusted_return(&cpu,0x1fd0,0xfffe,0x008123,2),
+          "wrapped post-return stack rejected");
+    cpu_return_scope_end(&inner);
+    check(g_cpu_return_scope==&outer && !inner.adjusted_return,
+          "scope pop restores outer owner without claiming rejected returns");
+    cpu_return_scope_end(&outer);
+    check(!g_cpu_return_scope && !cpu_accept_adjusted_return(&cpu,0x1fd0,0x1fd8,0x008123,2),
+          "unpaired return cannot acquire an owner");
+    cpu.S=0x1ff0; cpu_return_scope_begin(&outer,&cpu,0x128123,0x1fff,3);
+    cpu.S=0x1ff9;
+    check(cpu_accept_adjusted_return(&cpu,0x1ff0,0x1ff6,0x128123,3),
+          "native long return includes bank and retains six-byte cleanup");
+    WatchdogFrameStart(); cpu_return_scope_end(&outer);
+    check(!g_cpu_return_scope,"reset does not resurrect an abandoned owner chain");
+    cpu.S=0x1ff;
+    cpu_reset_scope_begin(&outer,&cpu);
+    RecompStackPush("reset-root");
+    cpu.S=0x1ff7; /* reset initialized S before pushing arguments and JSR */
+    cpu_return_scope_begin(&inner,&cpu,0x008123,0x1ff,2);
+    cpu.S=0x1fff;
+    check(cpu_accept_adjusted_return(&cpu,0x1ff7,0x1ffd,0x008123,2),
+          "explicit reset entry has no stale hardware return-frame boundary");
+    cpu_return_scope_end(&inner);
+    RecompStackPush("interrupt-during-reset");
+    cpu.S=0x1fe0;
+    cpu_return_scope_begin(&inner,&cpu,0x008123,0x1fe8,2);
+    cpu.S=0x1ff0;
+    check(!cpu_accept_adjusted_return(&cpu,0x1fe0,0x1fee,0x008123,2) &&
+              inner.caller_stack_limit==0x1fe8,
+          "reset scope cannot relax the frame boundary of a nested ISR");
+    cpu_return_scope_end(&inner);
+    RecompStackPop(); RecompStackPop(); cpu_return_scope_end(&outer);
+    check(!g_cpu_return_scope,"explicit reset scope leaves no dangling owner");
+}
+
 int main(void) {
     test_registration_and_initialization();
     test_indirect_pointer();
     test_block_history();
     test_stack_and_tailcalls();
     test_ancestor_skip();
+    test_execution_checkpoint();
+    test_poll_wait();
+    test_paired_tail_driver();
+    test_return_ownership();
     WatchdogFrameStart();
     WatchdogCheck();
     WatchdogFrameEnd();

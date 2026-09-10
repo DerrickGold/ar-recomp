@@ -41,6 +41,64 @@ typedef enum RecompReturn {
     RECOMP_RETURN_TAILCALL = 0x4000,
 } RecompReturn;
 
+/* Generated direct-call ownership, separate from emulated CPU/save state.
+ * Records live on the C stack and only cover a synchronous native call.
+ * No allocation, registry lookup, or fixed recursion capacity is required.
+ * The caller's entry frame is an upper boundary: an adjusted return must
+ * not consume it, even if a recursive ancestor has the same return PC. */
+typedef struct CpuReturnScope {
+    struct CpuReturnScope *previous;
+    CpuState *cpu;
+    uint32 continuation;
+    uint16 entry_stack;
+    uint16 caller_stack_limit;
+    uint8 frame_bytes;
+    uint8 adjusted_return;
+    int reset_activation_depth;
+} CpuReturnScope;
+extern CpuReturnScope *g_cpu_return_scope;
+extern int g_recomp_stack_top;
+
+/* A reset entry owns no hardware return frame and may initialize S. Hosts
+ * explicitly bracket reset execution, including any tail-dispatch driver.
+ * This is not permission to run arbitrary routines as reset. Nested ISR
+ * activations do not inherit its unframed stack boundary. */
+static inline void cpu_reset_scope_begin(CpuReturnScope *scope, CpuState *cpu) {
+    scope->previous = g_cpu_return_scope;
+    scope->cpu = cpu;
+    scope->continuation = 0u;
+    scope->entry_stack = cpu->S;
+    scope->caller_stack_limit = 0x1fffu;
+    scope->frame_bytes = 0u;
+    scope->adjusted_return = 0u;
+    scope->reset_activation_depth = g_recomp_stack_top + 1;
+    g_cpu_return_scope = scope;
+}
+
+static inline void cpu_return_scope_begin(CpuReturnScope *scope, CpuState *cpu,
+        uint32 continuation, uint16 caller_stack_limit, uint8 frame_bytes) {
+    scope->previous = g_cpu_return_scope;
+    scope->cpu = cpu;
+    scope->continuation = continuation & 0xffffffu;
+    scope->entry_stack = cpu->S; /* after pushing the hardware call frame */
+    if (scope->previous != NULL && scope->previous->cpu == cpu &&
+        scope->previous->frame_bytes == 0u &&
+        scope->previous->reset_activation_depth == g_recomp_stack_top)
+        caller_stack_limit = scope->previous->caller_stack_limit;
+    scope->caller_stack_limit = caller_stack_limit;
+    scope->frame_bytes = frame_bytes;
+    scope->adjusted_return = 0u;
+    scope->reset_activation_depth = 0;
+    g_cpu_return_scope = scope;
+}
+static inline void cpu_return_scope_end(CpuReturnScope *scope) {
+    /* A terminal/reset boundary must not resurrect an invalidated chain. */
+    if (g_cpu_return_scope == scope) g_cpu_return_scope = scope->previous;
+}
+int cpu_accept_adjusted_return(CpuState *cpu, uint16 entry_stack,
+                              uint16 return_stack, uint32 target,
+                              uint8 frame_bytes);
+
 static inline uint8 cpu_read_b(const CpuState *cpu) {
     return (uint8)(cpu->A >> 8);
 }
@@ -260,6 +318,14 @@ RecompReturn cpu_dispatch_pc(CpuState *cpu, uint32 pc24,
 RecompReturn cpu_dispatch_pc_from(CpuState *cpu, uint32 pc24,
                                   uint16 miss_restore_stack,
                                   uint32 source_pc24);
+/** Tail to a split body after popping the current generated activation.
+ * Retains its paired caller context, and reuses a driver only at the same
+ * CPU, hardware entry stack and generated activation depth. Ordinary nested
+ * JSR/JSL calls must keep their own driver/return boundary. */
+RecompReturn cpu_dispatch_paired_tail_from(CpuState *cpu, uint32 pc24,
+        uint16 entry_stack, uint8 hrv, uint32 source_pc24);
+void cpu_poll_wait(CpuState *cpu, uint32 resume_pc24,
+                   uint32 read_address24, uint32 read_width_bytes);
 int cpu_dispatch_has_entry(CpuState *cpu, uint32 pc24);
 /* Bounded bring-up diagnostics for computed targets that have no live M/X
  * registry body. RTS/RTL continuation sources are deliberately excluded. */

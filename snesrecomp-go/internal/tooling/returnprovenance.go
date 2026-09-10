@@ -24,6 +24,7 @@ const (
 	returnValuePC
 	returnValueBank
 	returnValueStatus
+	returnValueBits // lane is a known-bit mask; value contains only known ones
 )
 
 type returnByte struct {
@@ -449,13 +450,21 @@ func auditShadowReturnContext(g *decoder.Graph, cfg *config.Config, calls *retur
 			s.carry = -1
 		case "BIT":
 		case "AND", "ORA", "EOR":
-			load(0, m, returnWord{})
+			w := returnWord{}
+			if calls != nil && calls.stackAliases && i.Mode == cpu65816.IMM {
+				w = returnLogicBits(i.Mnemonic, s.regs[0], m, uint16(i.Operand))
+			}
+			load(0, m, w)
 		case "ASL", "LSR", "ROL", "ROR":
 			if i.Mode != cpu65816.ACC {
 				reason = "memory_write_may_alias_return_frame"
 			} else {
-				load(0, m, returnWord{})
-				s.carry = -1
+				w, carry := returnWord{}, int8(-1)
+				if calls != nil && calls.stackAliases {
+					w, carry = returnShiftBits(i.Mnemonic, s.regs[0], m, s.carry)
+				}
+				load(0, m, w)
+				s.carry = carry
 			}
 		default:
 			if shadowDBMemoryWrite(i.Opcode, i.Mode) || i.Mnemonic == "MVN" || i.Mnemonic == "MVP" {

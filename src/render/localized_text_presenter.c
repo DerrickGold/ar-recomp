@@ -1388,6 +1388,160 @@ void ArLocalizedTextPresenter_Prepare(
   }
 }
 
+bool ArLocalizedTextPresenter_PrepareScreenText(
+    ArRenderDevice *device, const ArLocalizationFrame *frame,
+    uint32_t surface_id, ArRenderRectI bounds,
+    ArLocalizedPreparedFrame *prepared) {
+  if (!prepared) return false;
+  memset(prepared, 0, sizeof(*prepared));
+  if (!device || bounds.w <= 0 || bounds.h <= 0 ||
+      !ArLocalizationFrame_IsValid(frame))
+    return false;
+  const ArLocalizationScreenTextRecord *record =
+      ArLocalizationFrame_FindScreenText(frame, surface_id);
+  if (!record || record->snapshot_slot >= frame->snapshot_count)
+    return false;
+  const ArLocalizationTextSnapshot *snapshot =
+      &frame->snapshots[record->snapshot_slot];
+  size_t utf8_bytes = 0;
+  const char *utf8 = ArLocalizationFrame_GetText(
+      frame, record->snapshot_slot, &utf8_bytes);
+  if (!utf8 || snapshot->surface_id != surface_id ||
+      !ArLocalizationTextLanguage_IsValid(&snapshot->language) ||
+      snapshot->bidi_span_offset > frame->bidi.count ||
+      snapshot->bidi_span_count >
+          frame->bidi.count - snapshot->bidi_span_offset)
+    return false;
+  if (!utf8_bytes) {
+    /* A blank still constitutes the current prepared frame: release a prior
+     * label's pin even though this one needs no font or texture. */
+    if (s_presenter.cache_initialized)
+      ArTextSurfaceCache_EndFrame(&s_presenter.cache);
+    return !snapshot->cluster_count && !snapshot->revealed_cluster_count;
+  }
+  if (!ActivateFont(device, frame)) return false;
+
+  const unsigned logical_width = record->width;
+  if (snapshot->left_inset_pixels || snapshot->right_inset_pixels) {
+    if (snapshot->left_inset_pixels + snapshot->right_inset_pixels >=
+        logical_width)
+      return false;
+    const int left =
+        (snapshot->left_inset_pixels * bounds.w + logical_width / 2) /
+        logical_width;
+    const int right =
+        (snapshot->right_inset_pixels * bounds.w + logical_width / 2) /
+        logical_width;
+    bounds.x += left;
+    bounds.w -= left + right;
+    if (bounds.w <= 0) return false;
+  }
+  if (snapshot->top_inset_pixels) {
+    if (snapshot->top_inset_pixels >= record->height) return false;
+    const int top =
+        (snapshot->top_inset_pixels * bounds.h + record->height / 2) /
+        record->height;
+    bounds.y += top;
+    bounds.h -= top;
+    if (bounds.h <= 0) return false;
+  }
+
+  int base_pixels =
+      (snapshot->native_font_pixels * bounds.h + record->height / 2) /
+      record->height;
+  if (base_pixels < 1) base_pixels = 1;
+  int minimum_base_pixels = base_pixels / 2;
+  if (minimum_base_pixels < 1) minimum_base_pixels = 1;
+  const bool centered =
+      snapshot->layout == kArLocalizationTextLayout_CenteredLabel;
+  const bool physical_right =
+      snapshot->layout == kArLocalizationTextLayout_RightAlignedLabel;
+  const bool physical_left =
+      snapshot->layout == kArLocalizationTextLayout_LeftAlignedLabel;
+  if (!centered && !physical_right && !physical_left &&
+      snapshot->layout != kArLocalizationTextLayout_SingleLineLabel)
+    return false;
+
+  ArTextRasterRequest request = {
+      .struct_size = sizeof(request),
+      .abi_version = AR_TEXT_RASTER_REQUEST_ABI_VERSION,
+      .utf8 = utf8,
+      .utf8_bytes = utf8_bytes,
+      .font_stack_id = frame->font_stack_id,
+      .font_stack_id_bytes = strlen(frame->font_stack_id),
+      .source_revision = snapshot->source_revision,
+      .font_revision = frame->font_revision,
+      .style_id = snapshot->style_id,
+      .band_rgb = snapshot->band_rgb,
+      .body_rgb = snapshot->body_rgb,
+      .accent_end_utf8_byte = snapshot->accent_end_utf8_byte,
+      .accent_rgb = snapshot->accent_rgb,
+      .shadow_rgb = snapshot->shadow_rgb,
+      .shadow_enabled = snapshot->shadow_enabled,
+      .shadow_shape = snapshot->shadow_shape,
+      .flags = kArTextRasterFlag_CropHorizontalWhitespace |
+               kArTextRasterFlag_CropVerticalWhitespace |
+               kArTextRasterFlag_IncludeRevealClusters |
+               (snapshot->slant_ascii_numerals
+                    ? kArTextRasterFlag_SlantAsciiNumerals
+                    : 0u),
+      .direction = snapshot->language.direction,
+      .bidi_spans = frame->bidi.spans + snapshot->bidi_span_offset,
+      .bidi_span_count = snapshot->bidi_span_count,
+      .alignment = physical_right ? kArTextHorizontalAlignment_Right
+          : physical_left ? kArTextHorizontalAlignment_Left
+                          : kArTextHorizontalAlignment_Leading,
+      .font_pixels = base_pixels,
+      .minimum_font_pixels = minimum_base_pixels,
+      .maximum_width = bounds.w,
+      .maximum_height = bounds.h,
+      .filter = kArRenderFilter_Nearest,
+      .language_bcp47 = snapshot->language.locale,
+      .language_bcp47_bytes = strlen(snapshot->language.locale),
+  };
+  if (!ArEnhancedTextSettings_Apply(
+          &frame->settings, base_pixels, minimum_base_pixels, &request))
+    return false;
+  const int minimum_for_row = bounds.h / 2 > 0 ? bounds.h / 2 : 1;
+  if (request.minimum_font_pixels > minimum_for_row)
+    request.minimum_font_pixels = minimum_for_row;
+  if (snapshot->italic) request.flags |= kArTextRasterFlag_Italic;
+
+  /* No other prepared frame is live on the mutually exclusive navigation
+   * branch. Rotate retained cache references before acquiring this label. */
+  ArTextSurfaceCache_EndFrame(&s_presenter.cache);
+  ArTextSurfaceCache_BeginFrame(&s_presenter.cache);
+  ArTextSurface surface;
+  char error[kArTextRasterErrorCapacity] = {0};
+  if (!ArTextSurfaceCache_Acquire(
+          &s_presenter.cache, device,
+          ArTextBackendInstance_Get(&s_presenter.instance), &request,
+          &surface, error, sizeof(error))) {
+    ReportRequestFailure(snapshot, &request, error);
+    return false;
+  }
+  const ArTextDirection effective_direction =
+      snapshot->language.direction == kArTextDirection_Auto
+          ? surface.paragraph_direction
+          : snapshot->language.direction;
+  const bool trailing = physical_right ||
+      (!physical_left && effective_direction == kArTextDirection_RightToLeft);
+  const int x = centered ? bounds.x + (bounds.w - surface.width) / 2
+      : trailing ? bounds.x + bounds.w - surface.width
+                 : bounds.x;
+  prepared->texts[0] = (ArLocalizedPreparedText){
+      .surface = surface,
+      .destination = {
+          x, bounds.y + (bounds.h - surface.height) / 2,
+          surface.width, surface.height},
+      .revealed_cluster_count = snapshot->revealed_cluster_count,
+      .cluster_count = snapshot->cluster_count,
+      .cluster_shift_offset = -1,
+  };
+  prepared->text_count = 1;
+  return true;
+}
+
 void ArLocalizedTextPresenter_Reset(ArRenderDevice *device) {
   DestroyPendingFont(device);
   if (s_presenter.cache_initialized) {

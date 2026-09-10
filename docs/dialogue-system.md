@@ -202,7 +202,7 @@ The presenter retains at most one prepared font candidate separately from its
 active surfaces. Only a frame carrying the approved font identity consumes that
 candidate, so a later semantic rejection cannot destroy the previous frame's
 resources. Repeated readiness checks and steady-state frames reuse font/cache
-resources. Frame ABI 26 carries opaque, host-registered font resource IDs, not
+resources. Frame ABI 27 carries opaque, host-registered font resource IDs, not
 filesystem paths; no platform font or texture handles enter the game-thread session.
 
 Pack storage crosses the separate `ActRaiserLocalizationPackHost` ABI 1. The
@@ -226,7 +226,7 @@ logical UTF-8: names/text use first-strong isolation, formatted numbers use LTR,
 and terms use their actual source's direction, including native fallback.
 Ranges encompass whole graphemes. The compiler bounds them to 256 per resolved
 message, rejecting an oversized begin/switch before replacing the active state.
-Frame ABI 26 owns a 256-range pool; fixed composers retain ranges with their
+Frame ABI 27 owns a 256-range pool; fixed composers retain ranges with their
 cached text. Normalization, retained-page scrolling, name-entry edits, credits
 padding and grid-cell slicing relocate these ranges along with the text.
 
@@ -386,7 +386,7 @@ presenter fits the text between the original-size ornaments and places them
 against its ink bounds; no font bracket substitute or glyph stretching is used.
 Missing artwork retains the entire native panel, not a partially replaced frame.
 
-Frame ABI 26 passes palette RGB endpoints, shadow shape, numeral/field styling
+Frame ABI 27 passes palette RGB endpoints, shadow shape, numeral/field styling
 and physical left/right/top gutters to the renderer-neutral presenter. Native
 labels/capitals use ink rows 1–7; all ten digits use rows 0–7. HUD labels therefore
 use a seven-pixel reference and one-pixel top inset, while counters use an
@@ -419,6 +419,21 @@ opaque black, blue `#9CCEFF`, white. A zero RGB shadow is still enabled.
 Credits use their separate white/gold one-ink font and do not receive this style.
 Native hearts, selectors, underlines and frame ornaments retain their own pixels;
 they are not shadowed a second time.
+
+World navigation is the first non-tilemap consumer of the same contract. The
+native OAM composition is classified as a variable zero-to-nine-glyph location
+prefix, a fixed 6x2 plaque, and the Palace's fixed 3x3 sprites. Capture preserves
+those as three independent immutable layers. Frame ABI 27 can publish a bounded
+`ArLocalizationScreenTextRecord` in authentic 256x224 coordinates without
+pretending that OBJ owns BG3 cells. Enhanced presentation suppresses only the
+captured glyph prefix, retains the native plaque and Palace, resolves
+`city.*.name`, fits one line into `(156,25)-(232,33)`, and aligns it to the
+logical leading edge (left for LTR, right for RTL). Its body, band and diagonal
+shadow come from live OBJ CGRAM entries 132, 131 and 129. A hidden label,
+unrecognized OAM, invalid pack value, failed shaping/upload, or forced blank
+retains the native path. The translated surface is tinted by the captured
+INIDISP brightness at draw time, so font-cache identity does not churn through
+navigation fades.
 
 Semantic grid value cells request whole-field italic shaping, including
 locale-specific numerals. Mixed ordinary text such as `ACT-1` uses a separate
@@ -530,7 +545,7 @@ resolved page. Literal `|` bytes and explicit authored newlines set bits;
 captured names/numbers, localized terms (including aliases), and icons cannot
 create them. Fixed-text normalization remaps that structure while collapsing
 whitespace; inserted value newlines become inline spaces in tables. Compose
-state ABI 10 retains the map and frame ABI 26 copies it into the pointer-free
+state ABI 10 retains the map and frame ABI 27 copies it into the pointer-free
 text pool (one bit per UTF-8 byte, 2 KiB maximum per frame). Grid parsing and
 column-plan cache keys consume that structure rather than reinterpreting all
 resolved punctuation as layout. Ordinary dialogue/keyboard pipes remain text.

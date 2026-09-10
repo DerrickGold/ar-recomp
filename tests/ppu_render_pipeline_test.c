@@ -68,6 +68,27 @@ uint16_t SwapInputBits(uint16_t value) {
   return (uint16_t)((value << 8) | (value >> 8));
 }
 
+/* This focused harness embeds runner.c but never advances or samples input.
+ * Keep the runner's input hooks inert rather than importing the complete
+ * device protocol into a PPU/presentation test. */
+void snes_input_submit(Snes *snes, unsigned port, unsigned device,
+                       unsigned buttons, int32_t dx, int32_t dy) {
+  (void)snes;
+  (void)port;
+  (void)device;
+  (void)buttons;
+  (void)dx;
+  (void)dy;
+}
+
+void snes_input_auto_read(Snes *snes) { (void)snes; }
+
+uint16_t snes_input_auto_result(const Snes *snes, unsigned port) {
+  (void)snes;
+  (void)port;
+  return 0;
+}
+
 static int s_failures;
 #define CHECK(expr) do { \
   if (!(expr)) { \
@@ -759,17 +780,27 @@ static void TestWorldNavigationPartialBrightnessCapture(void) {
     CHECK(frame.world_navigation_scene.composition.empty_animation);
   }
 
-  /* Synthetic copy of the measured steady navigation ownership shape: a
-   * packed priority-3 UI prefix followed by the fixed 3x3 Palace. This drives
-   * both caller-owned ABI raster requests, not just the empty-animation path. */
+  /* Synthetic copy of the measured steady navigation ownership shape: eight
+   * glyphs, the fixed 6x2 plaque, then the fixed 3x3 Palace. This drives all
+   * three caller-owned ABI raster requests, not just the empty path. */
   for (int tile = 0; tile < 256; tile++)
     set_solid_4bpp_tile(ppu, tile, 1);
   ppu->cgram[0x81] = bgr555(31, 0, 0);
   ppu->cgram[0x91] = bgr555(0, 0, 31);
-  for (int slot = 0; slot < 20; slot++) {
+  for (int slot = 0; slot < 8; slot++) {
     ppu->oam[slot * 2] =
-        (uint16_t)((0x11u << 8) | (uint8_t)(0x20 + slot));
+        (uint16_t)((25u << 8) | (uint8_t)(156 + slot * 8));
     ppu->oam[slot * 2 + 1] = (uint16_t)(0x3000u | (uint8_t)slot);
+  }
+  for (int cell = 0; cell < 12; ++cell) {
+    const int slot = 8 + cell;
+    ppu->oam[slot * 2] = (uint16_t)(
+        (17u + (unsigned)(cell / 6) * 8u) << 8 |
+        (144u + (unsigned)(cell % 6) * 16u));
+    ppu->oam[slot * 2 + 1] =
+        (uint16_t)(0x3200u | (cell < 6 ? 0x28u : 0x38u));
+    const unsigned high_bit = (unsigned)(slot & 3) * 2u + 1u;
+    ppu->highOam[slot >> 2] |= (uint8_t)(1u << high_bit);
   }
   static const uint8_t palace_x[9] =
       {104, 120, 136, 104, 120, 136, 104, 120, 136};
@@ -789,15 +820,20 @@ static void TestWorldNavigationPartialBrightnessCapture(void) {
   ppu->inidisp = 0x0f;
   CHECK(SimWorldNavigationCapture_Capture(
       &composed, sr_runner_handle(&snes)));
-  CHECK(composed.world_navigation_scene.composition.ui.screen_x == 32);
-  CHECK(composed.world_navigation_scene.composition.ui.screen_y == 17);
-  CHECK(composed.world_navigation_scene.composition.ui.width == 27);
-  CHECK(composed.world_navigation_scene.composition.ui.height == 8);
+  CHECK(composed.world_navigation_scene.composition.label.screen_x == 156);
+  CHECK(composed.world_navigation_scene.composition.label.screen_y == 25);
+  CHECK(composed.world_navigation_scene.composition.label.width == 64);
+  CHECK(composed.world_navigation_scene.composition.label.height == 8);
+  CHECK(composed.world_navigation_scene.composition.plaque.screen_x == 144);
+  CHECK(composed.world_navigation_scene.composition.plaque.screen_y == 17);
+  CHECK(composed.world_navigation_scene.composition.plaque.width == 96);
+  CHECK(composed.world_navigation_scene.composition.plaque.height == 24);
   CHECK(composed.world_navigation_scene.composition.palace.screen_x == 104);
   CHECK(composed.world_navigation_scene.composition.palace.screen_y == 81);
   CHECK(composed.world_navigation_scene.composition.palace.width == 40);
   CHECK(composed.world_navigation_scene.composition.palace.height == 40);
-  CHECK(g_sim_world_navigation_ui_pixels[0] == 0xffff0000u);
+  CHECK(g_sim_world_navigation_label_pixels[0] == 0xffff0000u);
+  CHECK(g_sim_world_navigation_plaque_pixels[0] == 0xff0000ffu);
   CHECK(g_sim_world_navigation_palace_pixels[0] == 0xff0000ffu);
 
   SimFrameData blank = {0};

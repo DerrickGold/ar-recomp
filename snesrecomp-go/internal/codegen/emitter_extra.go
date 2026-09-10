@@ -197,6 +197,16 @@ func emitCall(context *Context, op ir.Call) ([]string, error) {
 	}
 	lines := []string{"{", "  uint16 _call_s = cpu->S;"}
 	lines = append(lines, emitReturnFramePush(op)...)
+	if op.SourcePC != nil {
+		frameBytes := 2
+		continuation := fmt.Sprintf("(((uint32)cpu->PB << 16) | 0x%04xu)", uint16(*op.SourcePC+3))
+		if op.Long {
+			frameBytes = 3
+			continuation = fmt.Sprintf("0x%06xu", (*op.SourcePC&0xff0000)|uint32(uint16(*op.SourcePC+4)))
+		}
+		lines = append(lines, "  CpuReturnScope _call_owner;",
+			fmt.Sprintf("  cpu_return_scope_begin(&_call_owner, cpu, %s, _entry_s, %du);", continuation, frameBytes))
+	}
 	if op.Long {
 		lines = append(lines, "  uint8 _saved_pb = cpu->PB;", fmt.Sprintf("  cpu_trace_pb_change(cpu, 0, _saved_pb, 0x%02x, CPU_TR_JSL);", byte(address>>16)), fmt.Sprintf("  cpu->PB = 0x%02x;", byte(address>>16)))
 	}
@@ -236,7 +246,14 @@ func emitCall(context *Context, op ir.Call) ([]string, error) {
 	if op.Long {
 		lines = append(lines, "  cpu_trace_pb_change(cpu, 0, cpu->PB, _saved_pb, CPU_TR_RTL);", "  cpu->PB = _saved_pb;")
 	}
-	return append(lines, "  if (_r != RECOMP_RETURN_NORMAL) {", "    cpu_trace_event(cpu, 0, CPU_TR_NLR_PROPAGATE, (uint8)_r, 0);", "    cpu_trace_mark_nlr_exit(BD_EXIT_KIND_SKIP_PROPAGATION);", "    return (_r == RECOMP_RETURN_TAILCALL ? _r : (RecompReturn)((int)_r - 1));", "  }", "  cpu->S = _call_s;  /* stack-neutrality restore (see _call_s above) */", "}"), nil
+	if op.SourcePC != nil {
+		lines = append(lines, "  cpu_return_scope_end(&_call_owner);  /* also unwind ownership on NLR */")
+	}
+	lines = append(lines, "  if (_r != RECOMP_RETURN_NORMAL) {", "    cpu_trace_event(cpu, 0, CPU_TR_NLR_PROPAGATE, (uint8)_r, 0);", "    cpu_trace_mark_nlr_exit(BD_EXIT_KIND_SKIP_PROPAGATION);", "    return (_r == RECOMP_RETURN_TAILCALL ? _r : (RecompReturn)((int)_r - 1));", "  }")
+	if op.SourcePC != nil {
+		lines = append(lines, "  if (!_call_owner.adjusted_return) /* native callee cleanup keeps its actual post-return S */")
+	}
+	return append(lines, "  cpu->S = _call_s;  /* stack-neutrality restore (see _call_s above) */", "}"), nil
 }
 
 func invalidLoROMTarget(context *Context, address uint32) bool {
@@ -308,6 +325,13 @@ func emitReturn(context *Context, op ir.Return) []string {
 	}
 	lines = append(lines,
 		fmt.Sprintf("    return RECOMP_RETURN_NORMAL;  /* %s host return */ }", label),
+		fmt.Sprintf("  if (_hrv && cpu_accept_adjusted_return(cpu, _entry_s, _ret_s, _rpc24, %du)) {", frameSize),
+	)
+	if context.CurrentExitM != nil && context.CurrentExitX != nil {
+		lines = append(lines, fmt.Sprintf("    sr_exit_mx_check(cpu, %d, %d, \"%s\", 0x%06xu);", *context.CurrentExitM&1, *context.CurrentExitX&1, context.CurrentName, source))
+	}
+	lines = append(lines,
+		fmt.Sprintf("    return RECOMP_RETURN_NORMAL;  /* %s owned callee-clean return; retain native S */ }", label),
 		"  if (_ret_s != _entry_s && cpu_resolve_ancestor_skip(_ret_s) >= 0) {",
 		"    cpu_trace_mark_nlr_exit(BD_EXIT_KIND_TRAMPOLINE);",
 		"    if (cpu_dispatch_has_entry(cpu, _rpc24)) {",

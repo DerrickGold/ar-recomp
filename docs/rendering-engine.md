@@ -1199,7 +1199,7 @@ bundled runtime's widescreen/PPU interfaces:
   logical UTF-8 grapheme end; zero disables the accent. Its RGB and logical
   offset participate in cache identity. The portable color pass preserves alpha
   and complete ligatures/combining marks, independent of visual direction;
-  SDL applies it after bands and before shadows. Frame ABI 26 carries this
+  SDL applies it after bands and before shadows. Frame ABI 27 carries this
   pointer-free style and a grid `center_rows` option. Grid slices remap the
   accent into their own byte ranges; row centering is geometry, not re-shaping.
 - The presenter accepts a frame only after `ArLocalizationFrame_IsValid`
@@ -1227,7 +1227,7 @@ bundled runtime's widescreen/PPU interfaces:
   so host UI placement cannot be mistaken for paragraph direction. SheenBidi
   and SDL handles remain private to the desktop backend; alternate backends
   must provide equivalent paragraph/run processing, not just a font direction
-  flag. Frame ABI 26 carries an effective `ArLocalizationTextLanguage` per
+  flag. Frame ABI 27 carries an effective `ArLocalizationTextLanguage` per
   snapshot, independent of the selected font stack/default locale. Both grid
   requests and flowed dialogue/labels use that source locale and direction;
   the existing raster cache identity includes them. A changed frame default
@@ -4458,18 +4458,30 @@ in `runs/20260907-212325/`. These are local diagnostic captures, not portable
 golden fixtures.
 
 The game thread classifies navigation OAM separately from town records. Steady
-navigation owns 20 packed priority-3 label/frame sprites followed by the
-Palace's fixed-centre 3x3 grid; tile IDs and grid traversal change during
-Palace animation, so position/attribute ownership is the invariant. An
-all-hidden OAM table is the valid action-entry composition. The PPU-backed
-capture rasterizes Palace and UI into separate immutable layers, and any other
-layout, non-Mode-7 state, or forced blank selects authentic Mode 7. Partial
-INIDISP brightness remains enhanced: presentation draws the full-intensity
-backdrop, developed ground, colour/location haze, and weather, applies one
-black master-fade overlay with exact 17/255 steps, then draws Palace/UI pixels
-whose PPU rasterization already applied the same brightness. A gf380-451 replay
-shows the view selected at brightness 0 before fade-in, retained through all
-15 steps and the complete fade-out, and released only after the black endpoint.
+navigation owns a variable zero-to-nine-glyph priority-3 location prefix, the
+fixed 6x2 plaque immediately after it, and then the Palace's fixed-centre 3x3
+grid. Tile IDs and Palace traversal change during animation, so the measured
+positions/attributes and relative ranges are the invariant. An all-hidden OAM
+table is the valid action-entry composition. The PPU-backed capture rasterizes
+the glyphs, plaque and Palace into three independent immutable layers; any
+other layout, non-Mode-7 state, or forced blank selects authentic Mode 7.
+
+Enhanced localization publishes the selected `city.*.name` through frame ABI
+27's authentic-screen record rather than crossing the BG3 tile-cell contract.
+Presentation projects the label's `(156,25,76,8)` safe interior with the same
+aspect-fit transform as the native layers, retains the plaque and Palace, and
+replaces only the glyph layer after the cached Unicode text is ready. Logical
+leading alignment gives LTR and RTL packs opposite anchors without moving the
+plaque. The live OBJ palette supplies its body/band/diagonal-shadow colors.
+Preparation failure or a missing record draws the captured native label.
+
+Partial INIDISP brightness remains enhanced: presentation draws the
+full-intensity backdrop, developed ground, colour/location haze, and weather,
+applies one black master-fade overlay with exact 17/255 steps, then draws the
+already-brightness-adjusted native Palace/plaque and tints enhanced label text
+by the same captured brightness. A gf380-451 replay shows the view selected at
+brightness 0 before fade-in, retained through all 15 steps and the complete
+fade-out, and released only after the black endpoint.
 
 #### Enhanced Sky Palace horizon view
 

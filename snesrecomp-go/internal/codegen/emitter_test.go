@@ -143,6 +143,49 @@ func TestForcedDirectCallPreservesHardwareCallEnvelope(t *testing.T) {
 	}
 }
 
+func TestDirectCallReturnOwnership(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		pc   uint32
+		long bool
+		want string
+	}{
+		{"JSR live bank", 0x808123, false, "(((uint32)cpu->PB << 16) | 0x8126u), _entry_s, 2u"},
+		{"JSR PC wrap", 0x80fffd, false, "(((uint32)cpu->PB << 16) | 0x0000u), _entry_s, 2u"},
+		{"JSL full continuation", 0x808123, true, "0x808127u, _entry_s, 3u"},
+		{"JSL PC wrap without bank carry", 0x80fffc, true, "0x800000u, _entry_s, 3u"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := NewContext()
+			ctx.CurrentName = "Caller"
+			target := uint32(0x008200)
+			lines, err := EmitOperation(ctx, ir.Call{Target: &target, SourcePC: &tc.pc, Long: tc.long})
+			if err != nil {
+				t.Fatal(err)
+			}
+			s := strings.Join(lines, "\n")
+			for _, want := range []string{tc.want, "CpuReturnScope _call_owner;", "cpu_return_scope_end(&_call_owner);", "if (!_call_owner.adjusted_return)"} {
+				if !strings.Contains(s, want) {
+					t.Fatalf("missing %q:\n%s", want, s)
+				}
+			}
+			if strings.Index(s, "cpu_return_scope_end") > strings.Index(s, "if (_r != RECOMP_RETURN_NORMAL)") {
+				t.Fatal("non-local exit bypasses scope teardown")
+			}
+			if strings.Index(s, "cpu_return_scope_begin") < strings.Index(s, "cpu->host_return_valid = 1") {
+				t.Fatal("scope captured S before hardware frame push")
+			}
+			lines, err = EmitOperation(ctx, ir.Call{Target: &target, Long: tc.long})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(strings.Join(lines, "\n"), "_call_owner") {
+				t.Fatal("unknown source PC manufactured an owned continuation")
+			}
+		})
+	}
+}
+
 func value(id int) *ir.Value {
 	v := ir.Value{ID: id}
 	return &v

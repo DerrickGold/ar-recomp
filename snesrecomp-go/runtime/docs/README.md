@@ -5,6 +5,8 @@ becomes a standalone repository.
 
 ## Integration guides
 
+- [`INPUT_AND_BOOT.md`](INPUT_AND_BOOT.md) covers serial pad/mouse input,
+  native SPC uploads, and snapshot compatibility.
 - [`API_REFERENCE.md`](API_REFERENCE.md) is the operation, capability,
   ownership, lifetime, and result-code reference for the public C SDK.
 - [`GAME_ENHANCEMENT_INTEGRATION.md`](GAME_ENHANCEMENT_INTEGRATION.md) explains

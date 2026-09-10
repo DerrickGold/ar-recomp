@@ -972,7 +972,7 @@ typedef struct SimFrameData {
   SimWorldNavigationFrame world_navigation;
   /* INIDISP master brightness captured with the navigation OAM composition.
    * Partial values remain enhanced frames: presentation fades the complete
-   * host world before drawing Palace/UI pixels that the PPU rasterizer has
+   * host world before drawing Palace/plaque/label pixels that the PPU has
    * already brightness-adjusted. */
   uint8_t world_navigation_brightness;
   /* Full-world scene derived during capture from the state above and the owned

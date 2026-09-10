@@ -116,6 +116,23 @@ snesrecomp-go/build/snesbuild analyze --root . --rom game.sfc
 See [`docs/ANALYSIS.md`](docs/ANALYSIS.md) for comparison semantics, the
 entry/continuation model, and the cfg-removal validation gate.
 
+To write a usable reduced configuration instead of a report, choose a **new**
+isolated directory (its parent must already exist):
+
+```sh
+snesrecomp-go/build/snesbuild materialize --root . --rom game.sfc \
+  --out-dir build/static-bundle --jobs 8 --allow-stubs
+# v2regen materialize accepts the same options.
+```
+
+This writes `recomp/`, `analysis-db.json`, and `gen/` only after full and reduced
+configurations generate byte-identical C and headers in proven-analysis mode.
+It preserves HLE and overrides, never edits the original cfg, and never adopts
+speculative findings. Keep the database with the reduced cfg. `--allow-stubs`
+permits existing diagnostics; it does not waive the equality check or establish
+runtime coverage. See [verified materialization](docs/ANALYSIS.md#verified-configuration-materialization)
+for the build/adoption contract.
+
 For memory-producer investigation, use the same decoded instruction index
 rather than scanning raw ROM bytes:
 

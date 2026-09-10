@@ -16,6 +16,13 @@ enum {
   kSimWorldNavigationMatrixComponentCount = 4,
   kSimWorldNavigationAffineComponentCount = 6,
   kSimWorldNavigationGroundVertexCount = 4,
+  /* Authentic screen-space ownership of the variable-length native location
+   * glyphs. The OAM classifier and enhanced localization adapter share this
+   * rectangle so capture and replacement cannot drift independently. */
+  kSimWorldNavigationLabelX = 156,
+  kSimWorldNavigationLabelY = 25,
+  kSimWorldNavigationLabelWidth = 76,
+  kSimWorldNavigationLabelHeight = 8,
 };
 
 /* Raw $09 camera state captured from WRAM on the game thread. The current
@@ -53,7 +60,11 @@ typedef struct SimWorldNavigationComposition {
   bool valid;
   bool empty_animation;
   SimWorldNavigationCompositionLayer palace;
-  SimWorldNavigationCompositionLayer ui;
+  /* The label glyphs and their authentic plaque are separate ownership
+   * ranges. Enhanced localization may replace only `label`; `plaque` remains
+   * native artwork in every presentation mode. */
+  SimWorldNavigationCompositionLayer label;
+  SimWorldNavigationCompositionLayer plaque;
 } SimWorldNavigationComposition;
 
 /* Immutable Step-3 scene contract.
@@ -158,7 +169,8 @@ float SimWorldNavigationScene_LocationHaze(
 
 /* Pure OAM ownership classifier. `oam` is the PPU's 256-word low table
  * (position/attributes pairs). It recognizes either the fixed Palace
- * signature with the packed UI prefix, or the all-hidden action-entry state.
+ * signature with the packed label/plaque prefix, or the all-hidden
+ * action-entry state.
  * Anything else fails closed. Raster bounds are filled later by the PPU-backed
  * capture step. */
 bool SimWorldNavigationScene_ClassifyOam(

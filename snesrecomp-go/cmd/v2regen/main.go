@@ -20,6 +20,7 @@ import (
 	"github.com/DerrickGold/snesrecomp-go/internal/config"
 	"github.com/DerrickGold/snesrecomp-go/internal/decoder"
 	"github.com/DerrickGold/snesrecomp-go/internal/emitter"
+	"github.com/DerrickGold/snesrecomp-go/internal/materialize"
 	"github.com/DerrickGold/snesrecomp-go/internal/regen"
 	romimage "github.com/DerrickGold/snesrecomp-go/internal/rom"
 	"github.com/DerrickGold/snesrecomp-go/internal/tooling"
@@ -57,6 +58,8 @@ func run(args []string) error {
 		return regenerate(args[1:])
 	case "analyze":
 		return analyze(args[1:])
+	case "materialize":
+		return materialize.RunCommand(args[1:], os.Stdout)
 	case "xref":
 		return crossReference(args[1:])
 	case "disasm":
@@ -116,6 +119,7 @@ func usage() {
 Commands:
   regen              Regenerate all C banks with the concurrent Go pipeline
   analyze            Compare independent static facts with authored cfg (no-write)
+  materialize        Write an isolated reduced cfg/DB/C bundle after equivalence checks
   xref               Find decoded instruction references to an address (no-write)
   disasm             Disassemble ROM code with live M/X tracking (no-write)
   rom-info           Report cartridge identity, header, and vectors (no-write)

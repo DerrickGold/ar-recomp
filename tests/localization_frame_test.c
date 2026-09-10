@@ -64,6 +64,43 @@ int main(void) {
   CHECK(!strcmp(frame.snapshots[0].language.locale, "ar"));
   CHECK(frame.snapshots[0].language.direction == kArTextDirection_RightToLeft);
   CHECK(!strcmp(frame.locale, "fr-FR") && frame.primary_font == 1);
+
+  ArLocalizationFrame screen_frame;
+  ArLocalizationFrame_Reset(&screen_frame);
+  CHECK(ArLocalizationFrame_SetFont(
+      &screen_frame, "fr-FR", "test.font", UINT64_C(1), 7,
+      &screen_frame.settings));
+  CHECK(ArLocalizationFrame_AddScreenText(
+      &screen_frame, 17, 156, 25, 76, 8,
+      text, strlen(text), 5, 5, 12,
+      kArTextDirection_LeftToRight, 7,
+      kArLocalizationTextLayout_SingleLineLabel));
+  CHECK(screen_frame.cells.count == 0 && screen_frame.screen_text_count == 1 &&
+        screen_frame.snapshot_count == 1);
+  const ArLocalizationScreenTextRecord *screen =
+      ArLocalizationFrame_FindScreenText(&screen_frame, 17);
+  CHECK(screen && screen->x == 156 && screen->y == 25 &&
+        screen->width == 76 && screen->height == 8 &&
+        screen->snapshot_slot == 0);
+  CHECK(!ArLocalizationFrame_FindScreenText(&screen_frame, 18));
+  CHECK(ArLocalizationFrame_IsValid(&screen_frame));
+  const ArLocalizationFrame screen_before = screen_frame;
+  CHECK(!ArLocalizationFrame_AddScreenText(
+      &screen_frame, 17, 0, 0, 1, 1, text, strlen(text), 5, 5, 13,
+      kArTextDirection_LeftToRight, 7,
+      kArLocalizationTextLayout_SingleLineLabel));
+  CHECK(!memcmp(&screen_frame, &screen_before, sizeof(screen_frame)));
+
+  ArLocalizationFrame blank_screen;
+  ArLocalizationFrame_Reset(&blank_screen);
+  CHECK(ArLocalizationFrame_SetFont(
+      &blank_screen, "ar", "test.font", UINT64_C(1), 7,
+      &blank_screen.settings));
+  CHECK(ArLocalizationFrame_AddScreenText(
+      &blank_screen, 17, 156, 25, 76, 8, "", 0, 0, 0, 14,
+      kArTextDirection_RightToLeft, 7,
+      kArLocalizationTextLayout_SingleLineLabel));
+  CHECK(ArLocalizationFrame_IsValid(&blank_screen));
   const ArLocalizationFrame language_before = frame;
   CHECK(!ArLocalizationFrame_SetTextLanguage(&frame, NULL));
   language.locale[0] = 0;
@@ -284,6 +321,9 @@ int main(void) {
   malformed = frame;
   malformed.cells.records[0].snapshot_slot =
       (int8_t)malformed.snapshot_count;
+  CHECK(!ArLocalizationFrame_IsValid(&malformed));
+  malformed = screen_frame;
+  malformed.screen_texts[0].snapshot_slot = malformed.snapshot_count;
   CHECK(!ArLocalizationFrame_IsValid(&malformed));
   puts("localization frame checks passed");
   return failures ? 1 : 0;

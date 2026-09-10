@@ -23,6 +23,7 @@ set(SNESRECOMP_RUNNER_SOURCES
     ${SNESRECOMP_RUNNER_ROOT}/src/support/keybinds.c
     ${SNESRECOMP_RUNNER_ROOT}/src/core/cpu_state.c
     ${SNESRECOMP_RUNNER_ROOT}/src/core/common_cpu_infra.c
+    ${SNESRECOMP_RUNNER_ROOT}/src/core/paired_tail.c
     ${SNESRECOMP_RUNNER_ROOT}/src/core/diagnostic.c
     ${SNESRECOMP_RUNNER_ROOT}/src/core/cpu_trace.c
     ${SNESRECOMP_RUNNER_ROOT}/src/core/common_rtl.c
@@ -48,4 +49,5 @@ set(SNESRECOMP_RUNNER_SOURCES
     # Cold, synchronous adapter control stays last so adding it does not
     # perturb the established hot runner object order.
     ${SNESRECOMP_RUNNER_ROOT}/src/runner/runner_audio_control.c
+    ${SNESRECOMP_RUNNER_ROOT}/src/snes/input.c
 )

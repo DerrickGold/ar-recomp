@@ -8,6 +8,7 @@
 #include "snesrecomp/runner/audio.h"
 #include "snesrecomp/runner/determinism.h"
 #include "snesrecomp/runner/events.h"
+#include "snesrecomp/runner/input.h"
 #include "snesrecomp/runner/mutation.h"
 #include "snesrecomp/runner/ppu.h"
 
@@ -208,6 +209,9 @@ typedef struct SnesRunnerApi {
     SrResult (*query_semantic_digest)(
         SrRunnerHandle *runner, const SrSemanticDigestRequest *request,
         SrSemanticDigestResult *out_result);
+    /** Synchronously attach/sample a serial input device at a safe point. */
+    SrResult (*submit_input_device)(
+        SrRunnerHandle *runner, const SrInputDeviceRequest *request);
 } SnesRunnerApi;
 
 #define SNES_RUNNER_API_V2_BASE_SIZE                                           \
@@ -339,6 +343,10 @@ typedef struct SnesRunnerApi {
 #define SNES_RUNNER_API_SEMANTIC_DIGEST_SIZE                            \
     ((uint32_t)(offsetof(SnesRunnerApi, query_semantic_digest) +         \
                 sizeof(((SnesRunnerApi *)0)->query_semantic_digest)))
+
+#define SNES_RUNNER_API_INPUT_DEVICES_SIZE                              \
+    ((uint32_t)(offsetof(SnesRunnerApi, submit_input_device) +           \
+                sizeof(((SnesRunnerApi *)0)->submit_input_device)))
 
 /** @brief Stable description of the linked runner implementation. */
 typedef struct SrRunnerDescriptor {

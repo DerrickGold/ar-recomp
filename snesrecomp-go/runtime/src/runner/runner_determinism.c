@@ -34,7 +34,7 @@ static void write_cpu_v2(SnesSemanticWriter *writer,
 SrResult sr_runner_query_semantic_digest(
         SrRunnerHandle *runner, const SrSemanticDigestRequest *request,
         SrSemanticDigestResult *out_result) {
-    static const uint8_t domain[] = "snesrecomp-semantic-state-v2";
+    static const uint8_t domain[] = "snesrecomp-semantic-state-v3";
     Snes *snes = (Snes *)(void *)runner;
     SrCpuStateSnapshot cpu = {
         .struct_size = sizeof(cpu),
@@ -73,7 +73,7 @@ SrResult sr_runner_query_semantic_digest(
     snes_semantic_write_u16(&writer, snes->input1_currentState);
     snes_semantic_write_u16(&writer, snes->input2_currentState);
 
-    (void)snes_write_semantic_main_state_v2(snes, &writer);
+    (void)snes_write_semantic_main_state_v3(snes, &writer);
     RtlApuLock();
     (void)snes_write_semantic_apu_state_v2(snes, &writer);
     RtlApuUnlock();

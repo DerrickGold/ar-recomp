@@ -62,6 +62,10 @@ func DecodeFunction(image rom.Image, bank byte, start uint16, entryM, entryX uin
 			return nil, fmt.Errorf("v2 decoder: unknown opcode $%02X at $%02X:%04X entry_mx=(%d,%d)", image[offset], bank, pc, item.Key.M, item.Key.X)
 		}
 		instruction.M, instruction.X = item.Key.M, item.Key.X
+		if options.NativeReturnTables && decodeNativeReturnTable(image, instruction, options) {
+			graph.record(&DecodedInstruction{Key: item.Key, Instruction: instruction})
+			continue // the bytes after JSL are table data, not a continuation
+		}
 
 		if handled, err := decodeDispatchHelper(image, bank, start, pc, item.Key, instruction, graph, options); err != nil {
 			return nil, err

@@ -17,9 +17,16 @@ enum {
   kOamSlotCount =
       kSimWorldNavigationOamWords / kOamWordsPerSlot,
   kOamHiddenY = 0xE0,
-  /* Slot zero begins the packed location UI, so a valid Palace must leave at
-   * least that one-slot prefix in front of its fixed grid. */
-  kPalaceFirstSlotMinimum = 1,
+  kPlaqueGridColumns = 6,
+  kPlaqueGridRows = 2,
+  kPlaqueOamCount = kPlaqueGridColumns * kPlaqueGridRows,
+  kPlaqueOriginX = 144,
+  kPlaqueOriginY = 17,
+  kPlaqueCellWidth = 16,
+  kPlaqueCellHeight = 8,
+  kPlaqueAttributesHigh = 0x32,
+  /* A label can be hidden between locations, but the fixed plaque remains. */
+  kPalaceFirstSlotMinimum = kPlaqueOamCount,
   kPalaceGridColumns = 3,
   kPalaceGridRows = 3,
   kPalaceOamCount = kPalaceGridColumns * kPalaceGridRows,
@@ -31,6 +38,7 @@ enum {
   kUiPriorityShift = 12,
   kUiPriorityMask = 3,
   kUiRequiredPriority = 3,
+  kLabelAttributesHigh = 0x30,
 };
 
 static const float kCameraAltitudePerZoomUnit = 0.25f;
@@ -291,6 +299,35 @@ static bool PalaceSignatureAt(const uint16_t oam[kSimWorldNavigationOamWords], i
   return occupied == kPalaceOccupiedMask;
 }
 
+static bool PlaqueSignatureAt(
+    const uint16_t oam[kSimWorldNavigationOamWords], int first) {
+  if (first < 0 || first > kOamSlotCount - kPlaqueOamCount) return false;
+  unsigned occupied = 0;
+  for (int i = 0; i < kPlaqueOamCount; ++i) {
+    const int word = (first + i) * kOamWordsPerSlot;
+    const uint16_t position = oam[word];
+    const int x = position & UINT8_MAX;
+    const int y = position >> 8;
+    if (x < kPlaqueOriginX ||
+        x > kPlaqueOriginX +
+                (kPlaqueGridColumns - 1) * kPlaqueCellWidth ||
+        (x - kPlaqueOriginX) % kPlaqueCellWidth ||
+        y < kPlaqueOriginY ||
+        y > kPlaqueOriginY +
+                (kPlaqueGridRows - 1) * kPlaqueCellHeight ||
+        (y - kPlaqueOriginY) % kPlaqueCellHeight ||
+        (oam[word + 1] >> 8) != kPlaqueAttributesHigh)
+      return false;
+    const unsigned cell =
+        (unsigned)((y - kPlaqueOriginY) / kPlaqueCellHeight *
+                       kPlaqueGridColumns +
+                   (x - kPlaqueOriginX) / kPlaqueCellWidth);
+    if (occupied & (1u << cell)) return false;
+    occupied |= 1u << cell;
+  }
+  return occupied == (1u << kPlaqueOamCount) - 1u;
+}
+
 bool SimWorldNavigationScene_ClassifyOam(
     const uint16_t oam[kSimWorldNavigationOamWords],
     SimWorldNavigationComposition *out) {
@@ -320,26 +357,42 @@ bool SimWorldNavigationScene_ClassifyOam(
     }
   }
   if (palace_first < kPalaceFirstSlotMinimum) return false;
+  const int plaque_first = palace_first - kPlaqueOamCount;
+  if (!PlaqueSignatureAt(oam, plaque_first)) return false;
 
-  /* The location label/frame is packed immediately before the Palace. Hidden
-   * holes would make one range raster include stale off-screen entries, so an
-   * unexpected layout is a fallback rather than an inferred composition. */
-  for (int slot = 0; slot < palace_first; slot++) {
+  /* The variable-length location glyphs precede the fixed plaque. Validate
+   * their measured row and ordering so unrelated priority-3 objects cannot be
+   * mistaken for replaceable text. */
+  int previous_x = kSimWorldNavigationLabelX - 1;
+  for (int slot = 0; slot < plaque_first; slot++) {
+    const uint16_t position = oam[slot * kOamWordsPerSlot];
     const uint16_t attributes =
         oam[slot * kOamWordsPerSlot + 1];
+    const int x = position & UINT8_MAX;
+    const int y = position >> 8;
     if (OamSlotHidden(oam, slot) ||
         ((attributes >> kUiPriorityShift) & kUiPriorityMask) !=
-            kUiRequiredPriority)
+            kUiRequiredPriority ||
+        (attributes >> 8) != kLabelAttributesHigh ||
+        y != kSimWorldNavigationLabelY || x < kSimWorldNavigationLabelX ||
+        x >= kSimWorldNavigationLabelX + kSimWorldNavigationLabelWidth ||
+        x <= previous_x)
       return false;
+    previous_x = x;
   }
   for (int slot = palace_first + kPalaceOamCount;
        slot < kOamSlotCount; slot++)
     if (!OamSlotHidden(oam, slot)) return false;
 
   out->valid = true;
-  out->ui.visible = true;
-  out->ui.oam_first = 0;
-  out->ui.oam_count = (uint8_t)palace_first;
+  if (plaque_first) {
+    out->label.visible = true;
+    out->label.oam_first = 0;
+    out->label.oam_count = (uint8_t)plaque_first;
+  }
+  out->plaque.visible = true;
+  out->plaque.oam_first = (uint8_t)plaque_first;
+  out->plaque.oam_count = kPlaqueOamCount;
   out->palace.visible = true;
   out->palace.oam_first = (uint8_t)palace_first;
   out->palace.oam_count = kPalaceOamCount;

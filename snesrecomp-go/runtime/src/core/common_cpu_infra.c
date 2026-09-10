@@ -1,5 +1,6 @@
 #include "snesrecomp/game/bootstrap.h"
 #include "snesrecomp/game/generated_support.h"
+#include "paired_tail_internal.h"
 
 #include "snesrecomp/game/runtime.h"
 #include "snesrecomp/game/apu_sync.h"
@@ -54,6 +55,7 @@ uint32 g_tailcall_src24;
 static uint16 g_tailcall_entry_s;
 static uint8 g_tailcall_hrv;
 static bool g_tailcall_context_valid;
+PairedTailDriver *g_sr_paired_tail_driver;
 
 uint64 g_watchdog_loop_headers;
 int g_watchdog_tripped;
@@ -79,6 +81,9 @@ static uint32 audio_voice_count(void) {
 }
 
 static bool s_audio_extension_enabled;
+static RtlGameExecutionCheckpointFunc *s_execution_checkpoint;
+static RtlGamePollWaitFunc *s_poll_wait;
+static bool s_execution_checkpoint_active;
 static void install_game_hooks(void);
 
 static bool audio_extension_dsp_operation(
@@ -429,6 +434,12 @@ static SrResult validate_game_module(const RtlGameModule *module) {
 }
 
 static void install_game_hooks(void) {
+    s_poll_wait = g_rtl_game_execution != NULL &&
+        g_rtl_game_execution->struct_size >= RTL_GAME_EXECUTION_API_V4_SIZE
+        ? g_rtl_game_execution->poll_wait : NULL;
+    s_execution_checkpoint = g_rtl_game_execution != NULL &&
+        g_rtl_game_execution->struct_size >= RTL_GAME_EXECUTION_API_V3_SIZE
+        ? g_rtl_game_execution->execution_checkpoint : NULL;
     g_snes_rdnmi_read_hook = g_rtl_game_execution != NULL
         ? g_rtl_game_execution->read_rdnmi : NULL;
     g_apu_spc_dsp_write_hook = g_rtl_game_audio != NULL &&
@@ -462,6 +473,7 @@ SrResult RtlRegisterGame(const RtlGameModule *module) {
     g_rtl_game_execution = module->execution;
     g_rtl_game_state_providers = module->state_providers;
     g_rtl_game_audio = module->audio;
+    s_execution_checkpoint_active = false;
     install_game_hooks();
     msu1_init();
     return SR_RESULT_OK;
@@ -568,7 +580,38 @@ uint8 *IndirPtrDB(uint8 direct_page_address, uint16 offset) {
     return RomPtr(address & 0xffffffu);
 }
 
+void cpu_poll_wait(CpuState *cpu, uint32 resume_pc24,
+                   uint32 read_address24, uint32 read_width_bytes) {
+    uint32 bank, address;
+    const char *interrupted_name;
+    if (s_poll_wait == NULL || s_execution_checkpoint_active || cpu == NULL ||
+        (read_width_bytes != 1u && read_width_bytes != 2u)) return;
+    bank = (read_address24 >> 16) & 0xffu;
+    address = read_address24 & 0xffffu;
+    /* Only reads wholly inside WRAM. No MMIO/ROM/SRAM read, bus probe, or
+     * wrapping second byte is introduced by this scheduling seam. */
+    if (bank == 0x7eu || bank == 0x7fu) {
+        if (address + read_width_bytes > 0x10000u) return;
+    } else if (!((bank & 0x7fu) < 0x40u &&
+                 address + read_width_bytes <= 0x2000u)) {
+        return;
+    }
+    interrupted_name = g_last_recomp_func;
+    s_execution_checkpoint_active = true;
+    s_poll_wait(cpu, resume_pc24 & 0xffffffu, read_address24 & 0xffffffu,
+                read_width_bytes);
+    s_execution_checkpoint_active = false;
+    g_last_recomp_func = interrupted_name;
+}
+
 void cpu_trace_block(CpuState *cpu, uint32 pc24) {
+    if (s_execution_checkpoint != NULL && !s_execution_checkpoint_active) {
+        const char *interrupted_name = g_last_recomp_func;
+        s_execution_checkpoint_active = true;
+        s_execution_checkpoint(cpu, pc24 & 0xffffffu);
+        s_execution_checkpoint_active = false;
+        g_last_recomp_func = interrupted_name;
+    }
     unsigned slot = g_sr_block_index++ & kRuntimeBlockTraceRingMask;
     g_sr_block_ring[slot] = pc24 & 0xffffffu;
     g_sr_block_aux[slot] = ((uint32)(cpu->x_flag & 1u) << 17) |
@@ -640,6 +683,29 @@ void cpu_tailcall_request(uint32 pc24, uint16 miss_stack,
     g_tailcall_pc24 = pc24 & 0xffffffu;
     g_tailcall_miss_s = miss_stack;
     g_tailcall_src24 = source_pc24 & 0xffffffu;
+}
+
+CpuReturnScope *g_cpu_return_scope;
+
+int cpu_accept_adjusted_return(CpuState *cpu, uint16 entry_stack,
+                              uint16 return_stack, uint32 target,
+                              uint8 frame_bytes) {
+    CpuReturnScope *scope = g_cpu_return_scope;
+    /* Only moved native WRAM frames owned by this immediate call. Compare
+     * the actual hardware target and frame kind, not stack height alone.
+     * The final S cannot cross the suspended caller's own return frame.
+     * Unknown/wrapping stacks, unpaired/HLE/ancestor returns stay on their
+     * existing paths; there is no scan for a conveniently matching PC. */
+    if (scope == NULL || scope->cpu != cpu || cpu->emulation ||
+        scope->entry_stack != entry_stack || scope->frame_bytes != frame_bytes ||
+        (frame_bytes != 2u && frame_bytes != 3u) ||
+        scope->continuation != (target & 0xffffffu) ||
+        return_stack <= entry_stack ||
+        (uint32)return_stack + frame_bytes != cpu->S ||
+        cpu->S > scope->caller_stack_limit || scope->caller_stack_limit > 0x1fffu)
+        return 0;
+    scope->adjusted_return = 1u;
+    return 1;
 }
 
 int cpu_resolve_ancestor_skip(uint16 return_stack) {
@@ -717,8 +783,12 @@ void WatchdogFrameStart(void) {
     g_watchdog_poll_count = 0u;
     g_watchdog_enabled = true;
     g_watchdog_tripped = 0;
-    g_recomp_stack_top = 0;
-    g_tailcall_context_valid = false;
+    if (!s_execution_checkpoint_active) {
+        g_recomp_stack_top = 0;
+        g_tailcall_context_valid = false;
+        g_sr_paired_tail_driver = NULL;
+        g_cpu_return_scope = NULL;
+    }
 }
 
 void WatchdogFrameEnd(void) { g_watchdog_enabled = false; }
@@ -741,8 +811,12 @@ void WatchdogCheck(void) {
 #else
 void WatchdogFrameStart(void) {
     g_watchdog_tripped = 0;
-    g_recomp_stack_top = 0;
-    g_tailcall_context_valid = false;
+    if (!s_execution_checkpoint_active) {
+        g_recomp_stack_top = 0;
+        g_tailcall_context_valid = false;
+        g_sr_paired_tail_driver = NULL;
+        g_cpu_return_scope = NULL;
+    }
 }
 void WatchdogFrameEnd(void) {}
 void WatchdogCheck(void) { ++g_watchdog_loop_headers; }
@@ -819,6 +893,7 @@ void SnesShutdown(void) {
     Snes *snes = g_snes;
     clear_published_runner();
     snes_free(snes);
+    g_cpu_return_scope = NULL; /* terminal shutdown may abandon reset's C scope */
 }
 
 Snes *SnesInit(const uint8 *data, int data_size) {

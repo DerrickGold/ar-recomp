@@ -39,7 +39,7 @@ final executable link; the game module supplies those symbols.
 
 `snesrecomp/runner.h` is the stable umbrella. Consumers that need a smaller
 surface may include `runner/base.h`, `ppu.h`, `events.h`, `audio.h`,
-`mutation.h`, `determinism.h`, `replay.h`, or `api.h`; each domain header is independently compile-tested
+`mutation.h`, `determinism.h`, `input.h`, `replay.h`, or `api.h`; each domain header is independently compile-tested
 in C11 and the umbrella is compile-tested in C++17.
 
 ## Acquiring and checking the API
@@ -196,9 +196,9 @@ title-owned diagnostics rather than the generic stream format.
 
 ### Compare deterministic state and presentation
 
-Call `query_semantic_digest` at an emulation-thread safe point. Schema 2 is an
+Call `query_semantic_digest` at an emulation-thread safe point. Schema 3 is an
 explicit digest-owned traversal, not a save-state traversal. It hashes the
-recompiled 65816 snapshot, current packed input, and runner-owned
+recompiled 65816 snapshot, current packed and serial device input, and runner-owned
 APU/SPC/DSP/DMA/PPU/SRAM/WRAM state. It excludes pointers, ABI lifetime
 counters, host clocks, DSP PCM delivery, voice-bus mixing policy, diagnostics,
 and game-authored HLE/native extension save data. A game that has additional
@@ -218,6 +218,103 @@ separate lifecycles: pair the semantic query and scanout result explicitly in
 the replay checkpoint assembled by the adapter.
 
 ### Integrate a recompiled frame loop
+
+Generated direct JSR/JSL calls now bracket their hardware return frame with a
+stack-local `CpuReturnScope`. An adjusted native RTS/RTL may resume that exact
+call when its actual PC/bank, frame kind, and entry stack match, and its final
+stack remains below the caller's own return frame. The caller then retains
+the native post-return S instead of applying its legacy stack-neutrality
+restore. Ordinary equal-stack returns keep their existing fast path. HLEs
+which return normally without a native adjusted return retain their existing
+stack contract; no return ownership is inferred from an HLE name.
+
+Reset has no incoming hardware return frame and may initialize S. An adapter
+which invokes compiled reset should explicitly bracket that root (and its
+tail-dispatch driver) rather than treating the initial emulation-mode S as
+a native caller-frame boundary:
+
+```c
+WatchdogFrameStart();
+CpuReturnScope reset_owner;
+cpu_reset_scope_begin(&reset_owner, &cpu);
+RecompReturn result = compiled_reset(&cpu);
+if (result == RECOMP_RETURN_TAILCALL)
+    result = cpu_dispatch_pc_from(&cpu, g_tailcall_pc24,
+                                  g_tailcall_miss_s, g_tailcall_src24);
+cpu_return_scope_end(&reset_owner);
+/* Handle result; an unexpected return from the game mainline is an error. */
+```
+
+Include `snesrecomp/game/cpu.h` and `snesrecomp/game/generated_support.h`.
+This is an execution-entry contract, not a configuration directive or
+permission to enter arbitrary routines as reset. The reset boundary is
+limited to that root activation, including same-activation tail bodies;
+nested interrupt routines retain their own hardware-frame boundary. Ordinary
+calls, reset scopes, and paired tails run on the owning execution thread.
+These records are host bookkeeping, not additions to portable CPU/save state.
+Terminal shutdown clears abandoned records. Watchdog resets outside an active
+synchronous checkpoint invalidate records without resurrecting old owners;
+they must not be used as normal continuation transfers.
+
+This first adjusted-return contract covers known direct calls and native
+bank-zero WRAM stacks without wrap. It does not yet replace the legacy
+equal-stack rewritten-return rules or establish ownership for every authored
+computed-call construct. Unknown/ancestor returns keep their existing paths;
+matching a PC alone does not authorize resuming an arbitrary C caller.
+
+`SR_RUNNER_CAP_EXECUTION_CHECKPOINT` advertises the optional appended
+`RtlGameExecutionApi.execution_checkpoint(cpu, pc24)` callback. Opt in with
+`RTL_GAME_EXECUTION_API_V3_SIZE`; the V2 extent is unchanged and remains valid.
+The runner calls it synchronously before a compiled basic block executes.
+No generated-code change or callback is needed for existing games.
+
+This is an **execution adapter**, not an event observer. At a recovered safe
+wait block it can service a balanced compiled interrupt, scan out a frame,
+submit input, and wait for host pacing, then return to the same active C
+frame. Restore the interrupted CPU registers, status widths, stack depth,
+program-bank bookkeeping, and host-return context. ISR memory effects remain
+live. Never register the active continuation as a new callable routine or
+abandon its C activation to advance an ordinary frame. Non-local exit is
+reserved for terminal shutdown; resuming or loading an abandoned activation
+is unsupported. Nested compiled ISR blocks remain traceable but do not
+recursively invoke the checkpoint. Calls run on the owning execution thread.
+
+The hook does not prove a polling loop safe, choose a frame schedule, emulate
+an interrupt, or replace game code. Those remain explicit adapter duties.
+In particular, an error inside an interrupt is not a successful frame.
+
+`SR_RUNNER_CAP_POLL_WAIT` additionally advertises the appended
+`RtlGameExecutionApi.poll_wait(cpu, resume_pc24, read_address24, read_width_bytes)`
+callback, enabled with `RTL_GAME_EXECUTION_API_V4_SIZE`. V2 and V3 extents
+retain their previous meanings. Regenerate with the matching compiler/runtime
+pair to insert this seam; older generated C does not invoke it.
+
+The compiler recognizes a deliberately narrow two-instruction self-loop:
+an unindexed direct-page, absolute, or long `LDA`/`LDX`/`LDY`, followed by
+`BEQ`/`BNE`/`BMI`/`BPL` back to that same block and M/X state. Only the taken
+backedge invokes `cpu_poll_wait`, immediately before the original goto.
+The runtime offers it to the adapter only when the entire one- or two-byte
+read is in WRAM (including its low-bank mirrors). MMIO, ROM, SRAM, wrapping
+reads, indexed accesses, masked tests, and read-modify-write loops are not
+offered by this first contract. The original read and flags are retained;
+the hook performs no additional bus read. With no callback, behavior is
+unchanged and the ordinary compiled loop remains in place.
+
+`resume_pc24` names the load at the loop header, not a new function entry.
+The address includes live D/DB and the width comes from the decoded M/X
+variant. A callback may synchronously service the adapter's interrupt/frame
+policy and return to the same activation, subject to the context-restoration
+rules above. Poll and checkpoint callbacks share a reentry guard: nested ISR
+blocks remain observable but cannot schedule another callback. Watchdog frame
+starts inside either callback preserve active return/stack tracking.
+
+Recognition proves a repeated memory test, **not** that NMI owns the flag,
+that an interrupt is enabled, or that the loop terminates. The adapter must
+choose a suitable schedule and retain a failing watchdog for genuine stalls.
+Never clear the polled memory in the host, synthesize ISR results, or treat
+each callback as an unconditional successful frame. There is no automatic
+hardware-wait lowering, universal cycle-accurate scheduler, or interpreter
+fallback here.
 
 `RtlGameExecutionApi.run_frame` is one host tick, not a declaration that the
 callback begins at a universal SNES hardware phase. `control_game_timing`

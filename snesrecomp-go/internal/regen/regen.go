@@ -56,6 +56,7 @@ type Report struct {
 	SharedContinuationCalls             int
 	StaticEntryDiscoveries              []analysis.EntryFact
 	StaticCanonicalPromotions           int
+	NativeReturnTables                  []NativeReturnTableSite
 	SemanticSourceSHA256                string
 	Elapsed                             time.Duration
 }
@@ -73,6 +74,7 @@ type repository struct {
 	names                    map[uint32]string
 	canonical                map[uint32]map[[2]uint8]struct{}
 	dispatchHelpers          map[uint32]string
+	nativeReturnBarriers     [][2]uint32
 	provenDispatchMX         map[uint32]struct{}
 	provenResumePCs          map[uint32]struct{}
 	provenResumeEdges        map[decoder.Variant]map[decoder.ResumeEdge]struct{}
@@ -246,6 +248,10 @@ func Run(options Options) (Report, error) {
 	for _, bankResults := range results {
 		report.Functions += len(bankResults)
 	}
+	report.NativeReturnTables = nativeReturnTableSites(results)
+	for _, site := range report.NativeReturnTables {
+		logf("native return-table $%06X via $%06X: %d open-prefix ROM references, %d M/X contexts; live-target fallback retained", site.SitePC, site.HelperPC, len(site.Targets), len(site.Modes))
+	}
 	report.SharedRegionBodies = repo.sharedRegionBodies
 	report.SharedRegionContinuationWrappers = repo.sharedRegionWrappers
 	report.SharedRegionContinuationFallbacks = repo.sharedRegionFallbacks
@@ -333,6 +339,7 @@ func loadRepository(romPath, configDir string) (*repository, error) {
 		}
 		bank := byte(value)
 		state := &bankState{ID: bank, Path: path, Config: cfg}
+		repo.nativeReturnBarriers = append(repo.nativeReturnBarriers, nativeReturnConfigBarriers(bank, cfg)...)
 		repo.banks = append(repo.banks, state)
 		repo.byBank[bank] = state
 		for _, entry := range cfg.Entries {
@@ -563,6 +570,13 @@ func discoverGraphDemandEvidence(graph *decoder.Graph, siblingStarts map[uint16]
 	}
 	for _, decoded := range graph.Instructions {
 		ins := decoded.Instruction
+		if ins.NativeReturnTable != nil {
+			for _, target := range ins.NativeReturnTable.Targets {
+				all(target) // computed-address evidence, not gameplay reachability
+			}
+			// Still demand the native helper below: it is not an HLE or a
+			// replacement implementation of the helper's register effects.
+		}
 		if len(ins.DispatchEntries) > 0 {
 			if ins.DispatchKind == "rts_trick" {
 				continue
@@ -858,6 +872,8 @@ func exitMapsEqual(a, b map[decoder.Variant]decoder.MX) bool {
 
 func (repo *repository) decodeOptions(bank *bankState, current config.Entry) decoder.Options {
 	options := emitter.DecodeOptionsFromConfig(bank.ID, bank.Config)
+	options.NativeReturnTables = true
+	options.NativeReturnBarriers = repo.nativeReturnBarriers
 	for site := range repo.provenDispatchMX {
 		if auth, found := options.IndirectDispatch[site]; found {
 			auth.TargetMXProven = true

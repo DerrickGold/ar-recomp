@@ -11,22 +11,44 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* A small independently assembled bootstrap for recomp projects whose host
- * performs the cartridge-to-ARAM upload. It publishes the conventional AABB
- * ready marker and idles until the host installs the uploaded entry point. */
+/* Original firmware assembled from the documented IPL port protocol, not a
+ * Nintendo ROM dump or emulator implementation. See docs/INPUT_AND_BOOT.md.
+ * Native uploads use the ordinary SPC and ARAM/MMIO paths; host bootstrap
+ * transactions may still install an entry point directly.
+ * Scratch $00/$01 holds the transfer base, Y the byte counter, and X stays 0
+ * after initialization. The signed polling difference handles counter wrap. */
 static const uint8_t k_recomp_boot_rom[0x40] = {
-    0xe8, 0xaa,       /* MOV A,#$AA */
-    0xc4, 0xf4,       /* MOV $F4,A  */
-    0xe8, 0xbb,       /* MOV A,#$BB */
-    0xc4, 0xf5,       /* MOV $F5,A  */
-    0x2f, 0xfe,       /* BRA $FFC8  */
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0xff,
+    0xcd, 0xef,       /* FFC0: MOV X,#$EF */
+    0xbd, 0x20,       /*       MOV SP,X; CLRP */
+    0xe8, 0x00,       /*       MOV A,#0 */
+    0xc6, 0x1d,       /* FFC6: MOV (X),A; DEC X */
+    0xd0, 0xfc,       /*       BNE $FFC6 */
+    0xc6,             /*       MOV (X),A (also clear $00) */
+    0x8f, 0xaa, 0xf4, /*       MOV $F4,#$AA */
+    0x8f, 0xbb, 0xf5, /*       MOV $F5,#$BB */
+    0xe8, 0xcc,       /*       MOV A,#$CC */
+    0x2e, 0xf4, 0xfd, /* FFD3: CBNE $F4,$FFD3 */
+    0xba, 0xf6,       /* FFD6: MOVW YA,$F6 (destination) */
+    0xda, 0x00,       /*       MOVW $00,YA */
+    0xe4, 0xf4,       /*       MOV A,$F4 */
+    0xc4, 0xf4,       /*       MOV $F4,A (command acknowledgement) */
+    0xe4, 0xf5,       /*       MOV A,$F5 */
+    0xf0, 0x19,       /*       BEQ $FFFB (execute command) */
+    0x8d, 0x00,       /*       MOV Y,#0 */
+    0xe4, 0xf4,       /* FFE4: MOV A,$F4 */
+    0xd0, 0xfc,       /*       BNE $FFE4 (first byte) */
+    0xe4, 0xf5,       /* FFE8: MOV A,$F5 */
+    0xd7, 0x00,       /*       MOV [$00]+Y,A */
+    0xcb, 0xf4,       /*       MOV $F4,Y (byte acknowledgement) */
+    0xfc,             /*       INC Y */
+    0xd0, 0x02,       /*       BNE $FFF3 */
+    0xab, 0x01,       /*       INC $01 (counter wrap) */
+    0x7e, 0xf4,       /* FFF3: CMP Y,$F4 */
+    0xf0, 0xf1,       /*       BEQ $FFE8 (next byte) */
+    0x10, 0xfa,       /*       BPL $FFF3 (old counter) */
+    0x2f, 0xdb,       /*       BRA $FFD6 (new command) */
+    0x1f, 0x00, 0x00, /* FFFB: JMP [$0000+X] */
+    0xc0, 0xff,       /* reset vector */
 };
 
 void (*g_apu_spc_port_write_trace_hook)(Apu *, uint8_t, uint8_t);
@@ -157,6 +179,20 @@ static void drain_port_queue(Apu *apu) {
     }
 }
 
+static void migrate_old_bootstrap(Apu *apu, const SaveLoadInfo *info) {
+    /* Versions 11/12 used the AABB-only bootstrap. Its internal PCs are not
+     * instruction boundaries in the new firmware. Only restart that firmware;
+     * uploaded programs and hidden-ROM ARAM execution retain their exact PC. */
+    if (!info->saving && !info->failed && info->format_version >= 11u &&
+        info->format_version <= 12u && apu->romReadable && apu->spc->pc >= 0xffc0u) {
+        apu->spc->pc = 0xffc0u;
+        apu->spc->instructionPc = 0xffc0u;
+        apu->spc->cyclesUsed = 0u;
+        apu->spc->stopped = false;
+        apu->cpuCyclesLeft = 0u;
+    }
+}
+
 void apu_saveload(Apu *apu, SaveLoadInfo *info) {
     if (apu == NULL || info == NULL || info->func == NULL) return;
     if (!info->portable) {
@@ -179,6 +215,7 @@ void apu_saveload(Apu *apu, SaveLoadInfo *info) {
         info->func(info, apu->portLastValid, sizeof(apu->portLastValid));
         if (g_apu_extra_saveload_hook != NULL)
             g_apu_extra_saveload_hook(apu, info);
+        migrate_old_bootstrap(apu, info);
         if (!info->saving && !info->failed && apu->auditWritesEnabled)
             memset(apu->ramWritten, 0xff, sizeof(apu->ramWritten));
         return;
@@ -219,6 +256,7 @@ void apu_saveload(Apu *apu, SaveLoadInfo *info) {
     saveload_bytes(info, apu->portLastVal, sizeof(apu->portLastVal));
     saveload_bytes(info, apu->portLastValid, sizeof(apu->portLastValid));
     if (g_apu_extra_saveload_hook != NULL) g_apu_extra_saveload_hook(apu, info);
+    migrate_old_bootstrap(apu, info);
     if (!info->saving && !info->failed && apu->auditWritesEnabled)
         memset(apu->ramWritten, 0xff, sizeof(apu->ramWritten));
 }

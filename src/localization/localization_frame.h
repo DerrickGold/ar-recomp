@@ -11,7 +11,7 @@
 #include "localization/text_cell_record.h"
 #include "localization/text_boundaries.h"
 
-#define AR_LOCALIZATION_FRAME_ABI_VERSION UINT32_C(26)
+#define AR_LOCALIZATION_FRAME_ABI_VERSION UINT32_C(27)
 
 enum {
   kArLocalizationFrameTextCapacity = 16 * 1024,
@@ -20,6 +20,10 @@ enum {
   kArLocalizationFrameNativePreserveCapacity = 8,
   kArLocalizationFrameIndicatorCapacity = 8,
   kArLocalizationFrameInlineObjectCapacity = 32,
+  /* Screen-space records are intentionally scarce. Unlike tile-cell claims,
+   * they are for positively identified native UI whose placement is already
+   * expressed in authentic 256x224 pixels. */
+  kArLocalizationFrameScreenTextCapacity = 4,
   kArLocalizationFrameNameCursorExtent = 8,
   kArLocalizationFrameNameCursorPixels = 8 * 8,
   kArLocalizationArtworkPixels = 16 * 8,
@@ -238,6 +242,16 @@ typedef struct ArLocalizationTextSnapshot {
       kArLocalizationFrameNativePreserveCapacity];
 } ArLocalizationTextSnapshot;
 
+/* A renderer-neutral claim in the game's authentic screen coordinate space.
+ * This is separate from ArTextCellRecord because it owns no BG/tilemap cells:
+ * callers must not disguise OBJ or host UI as a tilemap destination. */
+typedef struct ArLocalizationScreenTextRecord {
+  uint32_t surface_id;
+  uint16_t x, y;
+  uint16_t width, height;
+  uint8_t snapshot_slot;
+} ArLocalizationScreenTextRecord;
+
 /* Pointer-free game-thread -> presenter contract. Text shares one bounded
  * UTF-8 pool, while cell records bind each snapshot to its exact BG target.
  * Font IDs are borrowed process-local identities, not owning leases. Retained
@@ -247,6 +261,9 @@ typedef struct ArLocalizationFrame {
   uint32_t struct_size;
   uint32_t abi_version;
   ArTextCellRecordSet cells;
+  ArLocalizationScreenTextRecord
+      screen_texts[kArLocalizationFrameScreenTextCapacity];
+  uint8_t screen_text_count;
   ArLocalizationTextSnapshot snapshots[kArTextCellRecordCapacity];
   uint8_t snapshot_count;
   ArTextBidiSpans bidi;
@@ -337,6 +354,17 @@ bool ArLocalizationFrame_AddTextWithObjects(
     uint8_t native_preserve_count,
     const ArLocalizationInlineObjectSnapshot *inline_objects,
     uint8_t inline_object_count);
+/* Publishes fixed text whose native owner is a screen-space OBJ/host surface,
+ * not a BG tilemap. Coordinates are authentic game pixels and are projected
+ * by the owning presentation path. Native pixels remain the fallback until
+ * the renderer successfully prepares this exact record. */
+bool ArLocalizationFrame_AddScreenText(
+    ArLocalizationFrame *frame, uint32_t surface_id,
+    uint16_t x, uint16_t y, uint16_t width, uint16_t height,
+    const char *utf8, size_t utf8_bytes,
+    uint32_t revealed_cluster_count, uint32_t cluster_count,
+    uint64_t source_revision, ArTextDirection direction,
+    uint8_t native_font_pixels, ArLocalizationTextLayoutKind layout);
 /* Grid layouts publish their own cell geometry: the renderer positions cells
  * from `grid` and never needs to know which menu it is drawing. The grid is
  * copied and interned; identical grids share one table entry. Boundaries are
@@ -388,6 +416,8 @@ const ArLocalizationTextRowRule *ArLocalizationGrid_FindRow(
 const ArLocalizationTextGrid *ArLocalizationFrame_GetGrid(
     const ArLocalizationFrame *frame,
     const ArLocalizationTextSnapshot *snapshot);
+const ArLocalizationScreenTextRecord *ArLocalizationFrame_FindScreenText(
+    const ArLocalizationFrame *frame, uint32_t surface_id);
 
 const char *ArLocalizationFrame_GetText(
     const ArLocalizationFrame *frame, uint8_t snapshot_index,

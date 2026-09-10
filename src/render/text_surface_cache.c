@@ -94,25 +94,25 @@ bool ArTextSurfaceCache_Init(ArTextSurfaceCache *cache, size_t capacity) {
   return true;
 }
 
+static void ReleaseSurfaceResources(ArTextSurface *surface,
+                                    ArRenderDevice *device,
+                                    bool release_texture) {
+  if (!surface) return;
+  if (release_texture && device)
+    ArRenderDevice_DestroyTexture(device, surface->texture);
+  free((void *)surface->reveal_clusters);
+  free((void *)surface->cluster_ink_bounds);
+  free((void *)surface->reveal_pieces);
+  memset(surface, 0, sizeof(*surface));
+}
+
 void ArTextSurfaceCache_Destroy(ArTextSurfaceCache *cache,
                                 ArRenderDevice *device) {
   if (!cache) return;
   ArRenderDevice *owner = cache->device ? cache->device : device;
-  if (owner) {
-    for (size_t i = 0; i < cache->capacity; ++i) {
-      if (cache->entries[i].valid) {
-        ArRenderDevice_DestroyTexture(
-            owner, cache->entries[i].surface.texture);
-        free((void *)cache->entries[i].surface.reveal_clusters);
-        free((void *)cache->entries[i].surface.cluster_ink_bounds);
-      }
-    }
-  } else {
-    for (size_t i = 0; i < cache->capacity; ++i) {
-      free((void *)cache->entries[i].surface.reveal_clusters);
-      free((void *)cache->entries[i].surface.cluster_ink_bounds);
-    }
-  }
+  for (size_t i = 0; i < cache->capacity; ++i)
+    ReleaseSurfaceResources(&cache->entries[i].surface, owner,
+                            cache->entries[i].valid);
   free(cache->entries);
   memset(cache, 0, sizeof(*cache));
 }
@@ -325,10 +325,7 @@ static uint64_t SurfaceBytes(int width, int height,
 static void ReleaseEntry(ArTextSurfaceCache *cache, ArRenderDevice *device,
                          ArTextSurfaceCacheEntry *entry) {
   if (!entry->valid) return;
-  ArRenderDevice_DestroyTexture(device, entry->surface.texture);
-  free((void *)entry->surface.reveal_clusters);
-  free((void *)entry->surface.cluster_ink_bounds);
-  free((void *)entry->surface.reveal_pieces);
+  ReleaseSurfaceResources(&entry->surface, device, true);
   cache->stats.texture_bytes -= entry->texture_bytes;
   cache->stats.effect_metadata_bytes -= entry->effect_metadata_bytes;
   entry->valid = false;

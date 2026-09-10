@@ -15,6 +15,9 @@ struct SaveLoadInfo {
     bool saving;
     bool portable;
     bool failed;
+    /* Zero selects the current internal portable stream. File readers set
+     * the accepted on-disk version to retain older snapshot compatibility. */
+    uint32_t format_version;
 };
 
 /* Legacy callers leave portable clear and retain the historical
