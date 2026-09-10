@@ -58,6 +58,15 @@ var titleLogoPNG []byte
 //go:embed assets/manifest.ini
 var assetManifestTemplate []byte
 
+// PrepareRuntimeAssets supplies the same embedded runtime files for GUI builds
+// and explicit desktop packaging. Existing player files keep precedence.
+func PrepareRuntimeAssets(root string) error {
+	if err := materializeBundledManual(root); err != nil {
+		return err
+	}
+	return materializeAssetManifest(root)
+}
+
 // materializeBundledManual makes the builder's copy available to the game at
 // the runtime path it already reads. The live game-assets directory survives a
 // "keep just the game" cleanup, so this is a one-time handoff rather than a

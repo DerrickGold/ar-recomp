@@ -38,7 +38,13 @@ static bool PrepareArchives(ArLanguagePackCatalog *catalog,
       "tools/actraiser-builder.exe"};
 #else
   const char *leaves[] = {"utils/tools/actraiser-builder",
-                          "actraiser-builder", "tools/actraiser-builder"};
+                          "actraiser-builder", "tools/actraiser-builder",
+#ifdef __APPLE__
+                          /* SDL_GetBasePath returns Contents/Resources in an
+                           * app, while executable helpers belong in MacOS. */
+                          "../MacOS/actraiser-builder",
+#endif
+  };
 #endif
   char helper[1024] = {0};
   const char *base = SDL_GetBasePath();

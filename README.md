@@ -131,17 +131,63 @@ be read while the build runs.
 
 ### 3. Play
 
-When the build finishes, press **Play**. The builder also creates a `run-game`
-launcher in the bundle folder; use that for later sessions without rebuilding.
-Running `run-build` again detects the existing game and opens directly as a
-launcher.
+When the build finishes, press **Play**. On macOS the builder creates
+`ActRaiserRecomp.app`; on Linux it creates `ActRaiserRecomp.AppImage`. Open that
+application for later sessions without a terminal. Windows continues to use
+`run-game.bat`; the older `run-game` scripts remain available on all platforms.
+Running `run-build` again detects the existing game and opens as a launcher.
+
+These applications are generated locally and contain your ROM; they are not
+public release artifacts. macOS signing is automatic and local, with no Apple
+developer account or Xcode required. Native AppImage/Steam Deck launch testing
+of this new packaging path is still pending.
+
+The generated desktop application supports two installation types. The same
+instructions apply regardless of its platform-specific filename. Legacy
+`run-game` scripts continue to use the original bundle's data folder.
+
+#### Portable installation (Builder default)
+
+Keep the application, its `.portable` sidecar, and `utils/` together. The Builder
+creates the sidecar automatically: it is a small file named after the complete
+application filename, with `.portable` appended, that points to `utils/`.
+
+Launch the application directly. It uses the existing saves, settings, language
+packs, music, and artwork in `utils/`. To move the installation, copy all three
+together, preserving their names and relative locations. No manual sidecar
+setup or data migration is needed when rebuilding an existing portable install.
+
+#### Non-portable installation (per-user data)
+
+Copy **only the application** to your preferred location, leaving its `.portable`
+sidecar and `utils/` behind, then launch that copy directly. Without a sidecar,
+the application uses your operating system's standard per-user application data
+directory, even if an old portable data folder happens to be nearby.
+
+On first launch it initializes the required files there; later launches reuse
+that user's saves, settings, and assets. Moving or replacing the application
+does not move this data. Switching installation types does not automatically
+transfer or merge saves and settings; the original portable files remain intact.
+
+The Workshop opened through `run-build` still edits the original bundle's
+`utils/`, not a separate non-portable installation. See
+[desktop packaging](docs/desktop-packaging.md) for exact data locations,
+advanced overrides, and source-checkout commands.
 
 ### 4. Upgrading later
 
-To upgrade, extract the newer bundle over the existing folder. Settings, saves,
-authored diorama rooms, and asset entries remain in place because shipped
-defaults are stored separately under `utils/defaults/`. On the next launch,
-new settings are added without replacing values you have changed.
+Back up your saves before upgrading. For a portable installation, extract the
+newer Builder bundle over the existing folder and rebuild the game. Keep the
+generated application and sidecar with the existing `utils/` data.
+
+For a non-portable installation, generate the updated application with the newer
+Builder, then replace only the application in your chosen location. Leave the
+new Builder's `.portable` sidecar behind. Your existing per-user data stays in
+its operating-system directory and is reused by the updated application.
+
+Shipped defaults are stored separately from live settings. On the next launch,
+new settings are added without replacing values you have changed; existing
+saves, authored diorama rooms, and custom asset entries remain in place.
 
 ### 5. Optionally, reclaim the space
 

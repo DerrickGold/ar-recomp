@@ -36,6 +36,8 @@ func TestLocalizationPackageGate(t *testing.T) {
 		"utils/runtime.a", "utils/tools/sdl3/lib/SDL3.dll", "utils/tools/sdl3/lib/SDL3_ttf.dll", "utils/tools/sdl3/lib/SDL3_ttf.lib", "utils/tools/sdl3/include/SDL3_ttf/SDL_ttf.h", "utils/tools/sdl3/licenses/SDL3_ttf/LICENSE.txt",
 		"utils/licenses/SDL3_ttf/LICENSE.txt", "utils/licenses/SDL3_ttf/FreeType-FTL.txt", "utils/licenses/SDL3_ttf/HarfBuzz-COPYING.txt", "utils/licenses/SDL3_ttf/PlutoSVG-LICENSE.txt", "utils/licenses/SDL3_ttf/PlutoVG-LICENSE.txt",
 		"utils/tools/actraiser-builder", "utils/tools/snesbuild",
+		"utils/tools/appimagetool", "utils/tools/appimage-runtime",
+		"utils/licenses/AppImage/appimagetool-LICENSE.txt", "utils/licenses/AppImage/runtime-LICENSE.txt",
 	}
 	configured := strings.NewReplacer(
 		"@SNESBUILD_LEAK_PATTERNS@", "/invented/build/machine",
@@ -48,8 +50,12 @@ func TestLocalizationPackageGate(t *testing.T) {
 		"@SNESBUILD_REQUIRED_TTF_LINK@", "utils/tools/sdl3/lib/SDL3_ttf.lib",
 		"@_exe_suffix@", "",
 	).Replace(string(template))
-	for _, tc := range []struct{ name, omit, add string }{
+	for _, tc := range []struct{ name, omit, add, goos string }{
 		{name: "valid"},
+		{name: "valid Linux", goos: "linux"},
+		{name: "missing AppImage tool", goos: "linux", omit: "utils/tools/appimagetool"},
+		{name: "missing AppImage runtime", goos: "linux", omit: "utils/tools/appimage-runtime"},
+		{name: "missing AppImage notice", goos: "linux", omit: "utils/licenses/AppImage/runtime-LICENSE.txt"},
 		{name: "missing bidi source", omit: "utils/third_party/sheenbidi/Source/SheenBidi.c"},
 		{name: "missing bidi header", omit: "utils/third_party/sheenbidi/Headers/SheenBidi/SheenBidi.h"},
 		{name: "missing bidi notice", omit: "utils/licenses/SheenBidi/LICENSE"},
@@ -99,17 +105,18 @@ func TestLocalizationPackageGate(t *testing.T) {
 				t.Fatal(err)
 			}
 			script := filepath.Join(dir, "gate.cmake")
-			if err := os.WriteFile(script, []byte("cmake_minimum_required(VERSION 3.25)\n"+configured), 0644); err != nil {
+			platformConfigured := strings.ReplaceAll(configured, "@SNESBUILD_GOOS@", tc.goos)
+			if err := os.WriteFile(script, []byte("cmake_minimum_required(VERSION 3.25)\n"+platformConfigured), 0644); err != nil {
 				t.Fatal(err)
 			}
 			output, err := exec.Command(cmake, "-DCPACK_PACKAGE_FILES="+archive, "-P", script).CombinedOutput()
-			if tc.name == "valid" {
+			if tc.omit == "" && tc.add == "" {
 				if err != nil {
 					t.Fatalf("valid rejected: %s", output)
 				}
 			} else if err == nil {
 				t.Fatal("invalid package accepted")
-			} else if !strings.Contains(string(output), "SDL3_ttf package check") && !strings.Contains(string(output), "localization distribution check") && !strings.Contains(string(output), "interface font check") && !strings.Contains(string(output), "license check") {
+			} else if !strings.Contains(string(output), "SDL3_ttf package check") && !strings.Contains(string(output), "localization distribution check") && !strings.Contains(string(output), "interface font check") && !strings.Contains(string(output), "license check") && !strings.Contains(string(output), "AppImage package check") {
 				t.Fatalf("wrong rejection: %s", output)
 			}
 		})

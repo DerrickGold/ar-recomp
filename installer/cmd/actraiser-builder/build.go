@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"github.com/DerrickGold/ar-recomp/installer/internal/builder"
+	"github.com/DerrickGold/ar-recomp/installer/internal/desktop"
 	"github.com/DerrickGold/ar-recomp/installer/internal/localization"
 )
 
@@ -89,6 +90,29 @@ func buildFromGUI(ctx context.Context, values guiFlags, root, outputDir, romPath
 	launcher, err := oneArtifact(installResult, "launcher")
 	if err != nil {
 		return builder.Result{}, err
+	}
+	if values.appFormat != "folder" && (runtime.GOOS == "darwin" || runtime.GOOS == "linux") {
+		executable, err := os.Executable()
+		if err != nil {
+			return builder.Result{}, err
+		}
+		builder.ReportBuildProgress(output, builder.BuildProgress{PhaseID: "install", Message: "Creating desktop application"})
+		artifact, err := desktop.Package(ctx, desktop.PackageOptions{
+			Binary: binary, Builder: executable, ROM: romPath, Root: root,
+			Destination: outputDir, Format: values.appFormat, Version: version,
+			AppImageTool: values.appImageTool, AppImageRuntime: values.appImageRuntime,
+			Replace: true, Output: output,
+		})
+		if err != nil {
+			return builder.Result{}, err
+		}
+		if err := desktop.WritePortableMarker(artifact.Path, root); err != nil {
+			return builder.Result{}, err
+		}
+		if artifact.Backup != "" {
+			fmt.Fprintf(output, "Previous application retained at %s\n", artifact.Backup)
+		}
+		launcher = artifact.Path
 	}
 	return builder.Result{
 		Message:    "Build complete — your playable game is ready.",

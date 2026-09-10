@@ -9,12 +9,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/DerrickGold/ar-recomp/installer/internal/builder"
 )
 
 type guiFlags struct {
 	root, outputDir, toolchainDir, optimize, snesbuild string
+	appFormat, appImageTool, appImageRuntime           string
 	jobs                                               int
 	allowStubs, noOpen                                 bool
 }
@@ -27,6 +29,9 @@ func runGUI(args []string) error {
 	flags.StringVar(&values.toolchainDir, "toolchain-dir", "snesrecomp-go", "snesrecomp-go module directory")
 	flags.StringVar(&values.optimize, "optimize", "-O2", "hermetic optimization level")
 	flags.StringVar(&values.snesbuild, "snesbuild", "", "trusted snesbuild executable (default: bundled sibling, source build, then PATH)")
+	flags.StringVar(&values.appFormat, "app-format", "", "desktop output: app, appimage, appdir, or folder (default: native application)")
+	flags.StringVar(&values.appImageTool, "appimagetool", "", "local appimagetool executable")
+	flags.StringVar(&values.appImageRuntime, "appimage-runtime", "", "local type-2 AppImage runtime")
 	flags.IntVar(&values.jobs, "jobs", runtime.NumCPU(), "parallel generation/build workers")
 	flags.BoolVar(&values.allowStubs, "allow-stubs", false, "complete despite the inherited hard-stub backlog")
 	flags.BoolVar(&values.noOpen, "no-open", false, "print the local URL without opening a browser")
@@ -88,6 +93,24 @@ func runGUI(args []string) error {
 // The argument list mirrors project.launcher(): the ROM path, then
 // `--config config.ini` resolved against the working directory.
 func launchBuiltGame(result builder.Result) error {
+	if strings.HasSuffix(result.OutputPath, ".app") || strings.HasSuffix(result.OutputPath, ".AppImage") || strings.HasSuffix(result.OutputPath, ".AppDir") {
+		path := result.OutputPath
+		var arguments []string
+		if strings.HasSuffix(path, ".app") {
+			path = filepath.Join(path, "Contents", "MacOS", "actraiser-builder")
+			arguments = []string{"app-launch"}
+		} else if strings.HasSuffix(path, ".AppDir") {
+			path = filepath.Join(path, "AppRun")
+		}
+		command := exec.Command(path, arguments...)
+		command.Dir = result.WorkingDir
+		detachFromBuilder(command)
+		if err := command.Start(); err != nil {
+			return fmt.Errorf("launch application: %w", err)
+		}
+		go func() { _ = command.Wait() }()
+		return nil
+	}
 	if result.BinaryPath == "" {
 		// Older Result (or a host that only knows the script): fall back to the
 		// previous behaviour rather than refusing to launch.

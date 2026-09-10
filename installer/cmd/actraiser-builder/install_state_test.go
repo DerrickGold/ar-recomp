@@ -10,7 +10,44 @@ import (
 	"time"
 
 	"github.com/DerrickGold/ar-recomp/installer/internal/builder"
+	"github.com/DerrickGold/ar-recomp/installer/internal/desktop"
 )
+
+func TestDetectPrefersCompleteNativeApplication(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("native desktop application")
+	}
+	output, root := bundleFixture(t)
+	app := filepath.Join(output, desktop.Name+".app")
+	bin, resources := filepath.Join(app, "Contents", "MacOS"), filepath.Join(app, "Contents", "Resources")
+	if runtime.GOOS == "linux" {
+		app = filepath.Join(output, desktop.Name+".AppDir")
+		bin, resources = filepath.Join(app, "usr", "bin"), filepath.Join(app, "usr", "share", desktop.Name)
+	}
+	for _, dir := range []string{bin, resources} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(resources, "actraiser-app.json"), []byte(`{"format":1,"product":"ActRaiserRecomp"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "actraiser-builder"), []byte("helper"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if state := detectInstallState(root, output); state.Result.OutputPath == app {
+		t.Fatal("incomplete app hid the working loose executable")
+	}
+	binary := filepath.Join(bin, desktop.Name)
+	if err := os.WriteFile(binary, []byte("game"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	state := detectInstallState(root, output)
+	canonical, _ := filepath.EvalSymlinks(binary)
+	if !state.CanLaunch || state.Result.OutputPath != app || state.Result.BinaryPath != canonical {
+		t.Fatalf("native application not preferred: %+v", state)
+	}
+}
 
 // A bundle-shaped fixture: build inputs under utils/, the playable game in the
 // root, and the RUNTIME files that share utils/ with the build inputs. That

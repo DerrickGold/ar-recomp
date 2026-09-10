@@ -441,6 +441,7 @@ endif()
 
 # SDL3_ttf shares the selected SDK, but its own version/checksum is pinned in Go.
 include(${CMAKE_CURRENT_SOURCE_DIR}/sdl-ttf.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/appimage.cmake)
 
 # ── One-click run script per platform ────────────────────────────────────────
 if(SNESBUILD_GOOS STREQUAL "darwin")
@@ -561,6 +562,7 @@ install(FILES
     ${GAME_ROOT}/docs/README.md
     ${GAME_ROOT}/docs/manual.md
     ${GAME_ROOT}/docs/builder-workshop.md
+    ${GAME_ROOT}/docs/desktop-packaging.md
     ${GAME_ROOT}/docs/language-pack-format.md
     ${GAME_ROOT}/docs/language-packs.md
     ${GAME_ROOT}/docs/language-authoring-reference.json
