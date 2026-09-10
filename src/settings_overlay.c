@@ -325,6 +325,10 @@ static const MenuTab kTabsRandomizer[] = {
   TAB(RandoItems, "Items"),
   TAB(RandoSim, "Simulation"),
 };
+static const MenuTab kTabsLocalization[] = {
+  TAB(Localization, "Game text"),
+  TAB(LocalizationFont, "Enhanced font"),
+};
 
 /* Most Layers tabs are LEVELS ($18), not setting categories. Their position is
  * the diorama level index. The final tab is the independent live action-BG
@@ -398,6 +402,8 @@ static const MenuSection kSections[] = {
   MANUAL_SECTION("Manual", "Read the game's manual.", kTabsManual),
   SECTION("System", "Host commands, restart and exit, plus the scene inspector.",
           kTabsSystem),
+  SECTION("Localization", "Game text and enhanced font presentation.",
+          kTabsLocalization),
   /* Developer-only until a randomized run has actually been played end to end.
    * Every table it rewrites is verified against the ROM, but no seed has been
    * played through, so it must not read as a finished player feature. Placed
@@ -867,6 +873,24 @@ static const IconIndexMap kSectionIconMaps[] = {
     {14,11,14,15, 4, 5, 4, 5, 5, 5, 5, 4,15,14,11,14},
     {14,11,14,14, 4, 4, 4, 5, 5, 5, 5, 3,14,14,11,14},
     {14,11,11,11,14,14,14,14,14,14,14,14,11,11,11,14},
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
+  },
+  { /* Localization: an independently drawn speech bubble. */
+    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
+    {14,11,11,11,11,11,11,11,11,11,11,11,11,11,11,14},
+    {14,11,15,15,15,15,15,15,15,15,15,15,15,15,11,14},
+    {14,11,15,15,15,15,15,15,15,15,15,15,15,15,11,14},
+    {14,11,15, 3, 3, 3, 3, 3, 3, 3, 3,15,15,15,11,14},
+    {14,11,15,15,15,15,15,15,15,15,15,15,15,15,11,14},
+    {14,11,15, 3, 3, 3, 3, 3, 3, 3, 3,15,15,15,11,14},
+    {14,11,15,15,15,15,15,15,15,15,15,15,15,15,11,14},
+    {14,11,15, 3, 3, 3, 3, 3,15,15,15,15,15,15,11,14},
+    {14,11,15,15,15,15,15,15,15,15,15,15,15,15,11,14},
+    {14,11,15,15,15,15,15,15,15,15,15,15,15,15,11,14},
+    {14,11,11,11,11,11,11,15,15,11,11,11,11,11,11,14},
+    {14,14,14,14,14,14,11,15,11,14,14,14,14,14,14,14},
+    {14,14,14,14,14,11,15,11,14,14,14,14,14,14,14,14},
+    {14,14,14,14,11,11,11,14,14,14,14,14,14,14,14,14},
     {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
   },
   { /* Randomizer <- sim composition $01:D128, the red/blue double arrow the
@@ -3358,8 +3382,10 @@ static void DrawMenuNavColumn(const MenuLayout *layout, const MenuChrome *c) {
      * so the cursor reads at a glance. */
     DrawSectionIcon(layout, left_text_x, row_y, kIconSize, section,
                     current, current ? 255 : 205);
-    DrawTextN(layout, left_text_x + kIconSize + 4, row_y + 4,
-              kSections[section].label, 11,
+    const int label_x = left_text_x + kIconSize + 4;
+    const int label_chars = (left_x + left_width - 16 - label_x) / kGlyphSize;
+    DrawTextN(layout, label_x, row_y + 4,
+              kSections[section].label, label_chars,
               current ? kText_Normal : kText_Dim);
   }
   DrawScrollBar(layout, left_x + left_width - 12, nav_first_y,

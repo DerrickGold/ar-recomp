@@ -85,6 +85,7 @@ enum {
    * host commands. */
   kSection_Manual,
   kSection_System,
+  kSection_Localization,
   /* Developer-only until a seeded run has been played end to end, so it sits
    * with Layers rather than among the player sections. */
   kSection_Randomizer,
@@ -135,16 +136,20 @@ static void CheckManualSectionAvailability(void) {
   CHECK(total == kPlayerSectionCountWithoutManual);
 
   /* DOWN skips the hidden raw Manual section and lands on System. Its visible
-   * ordinal closes the gap, then another DOWN wraps to Video. */
+   * ordinal closes the gap, followed by Localization and then Video. */
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_GetNavigationState(&selected, NULL, NULL, NULL));
   CHECK(selected == kSystemVisibleOrdinalWithoutManual);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_GetNavigationState(&selected, NULL, NULL, NULL));
+  CHECK(selected == kSection_Localization - 1);
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_GetNavigationState(&selected, NULL, NULL, NULL));
   CHECK(selected == kSection_Video);
 
   /* UP must likewise skip the missing section. Restoring availability inserts
    * Manual back ahead of System and makes it reachable again. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
   CHECK(SettingsOverlay_GetNavigationState(&selected, NULL, NULL, NULL));
   CHECK(selected == kSystemVisibleOrdinalWithoutManual);
@@ -324,16 +329,16 @@ static void CheckLayerEditorSection(void) {
    *
    * Driven from the last PLAYER-visible section, which is the property under
    * test -- not that section's name. */
-  NavToSection(kSection_System);
+  NavToSection(kSection_Localization);
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   int wrapped = -1;
   CHECK(SettingsOverlay_GetNavigationState(&wrapped, NULL, NULL, &total));
   CHECK(wrapped == 0);
   CHECK(total == kPlayerSectionCount);
-  /* And UP from the first must reach System, not the hidden section past it. */
+  /* UP from the first reaches Localization, not a hidden developer section. */
   CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
   CHECK(SettingsOverlay_GetNavigationState(&wrapped, NULL, NULL, NULL));
-  CHECK(wrapped == kSection_System);
+  CHECK(wrapped == kSection_Localization);
 
   /* The randomizer is gated at BOTH levels: its section is debug_only so the
    * nav column omits it (asserted by the count above), and its rows are
@@ -355,7 +360,7 @@ static void CheckLayerEditorSection(void) {
   CHECK(total == kDebugSectionCount);
   /* ...and revealed by the same flag, so the gate is a switch and not a wall. */
   CHECK(Settings_IsMenuVisible(Settings_Find("rando_enable")));
-  /* With debug on, DOWN from System reaches the first hidden section and one
+  /* With debug on, DOWN from Localization reaches the first hidden section and one
    * more DOWN reaches the last -- which is what pins the reported ordinal to
    * the VISIBLE numbering that the nav column draws in. */
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));

@@ -10,6 +10,31 @@ dialogue. The semantic catalog covers the whole game so later integrations can
 use the same packs without another format migration. Unsupported screens keep
 their native presentation for now.
 
+## Current runtime controls
+
+The system overlay's **Localization** section separates **Game text** from
+**Enhanced font** settings. Native rendering always uses the unchanged U.S.
+text and font. Enhanced rendering uses the chosen text source and supports
+80–140% font size, Crisp/Smooth sampling, and None/Low resolution/Mosaic
+pixelation with strengths 2, 4, 6, or 8. Defaults are 140%, Crisp, and Mosaic 2.
+Choose Pixelation = None for the full-resolution font without a pixelation
+effect. Existing saved font preferences are retained when defaults change.
+Pixelation strength is an upper bound: small windows and tightly fitted text
+automatically use finer blocks to avoid reducing characters to unreadable dots.
+These settings can be changed during play and are saved with other settings.
+
+Automatic pack discovery and the builder's updated installation flow are not
+connected yet. For now, Native US enhanced text requires a locally generated
+complete pack at `game-assets/languages/native-us/pack.ini`; the optional
+Configured pack source is supplied by the `AR_LOCALIZATION_PACK` manifest path
+at launch. That path also defaults presentation to Enhanced unless an explicit
+setting overrides it. A missing or incompatible source retains the prior
+selection. Retail-derived extraction products are not bundled for distribution.
+
+The format and portable session support changing page counts, but the game
+adapter still follows native dialogue progress. Extra authored pages and waits
+are not yet fully playable; do not rely on them for a finished translation yet.
+
 ## Directory layout
 
 ```text
@@ -96,8 +121,21 @@ Cette page supplémentaire est validée indépendamment du nombre de pages natif
 ```
 
 Ordinary physical lines in one paragraph are joined with wrappable whitespace.
-A blank source line starts a paragraph. Retail fixed-width line endings are not
-authoritative for enhanced variable-width rendering.
+A blank source line starts a paragraph. Source extraction compares each native
+dialogue line plus the next complete word with the region's native cell width.
+If the word fits (including an exact fit), the exporter keeps the break as
+`@line`; if it overflows, the exporter makes that break wrappable whitespace.
+This preserves short greetings and similar deliberate-looking lines while
+allowing width-induced wraps to adapt to enhanced fonts.
+
+This is an inference, not proof of the original author's intent: review the
+exported `@line` commands and add or remove them as appropriate. Unknown dynamic
+widths (such as the player name), missing geometry, Japanese text without
+reliable space-delimited words, and unprofiled ending layouts preserve their
+breaks conservatively. Fixed menu/table rows are always kept. This conversion
+only happens during export; loading an edited pack never reinterprets `@line`.
+Existing packs must be re-extracted or edited to gain these breaks; back up
+translations before replacing generated files.
 
 The supported commands are:
 
@@ -156,6 +194,79 @@ type rather than asking authors to memorize it.
 
 Values are snapshotted when a semantic message begins. A language switch does
 not mix counters or names captured at different moments.
+
+Number placeholders may request a minimum digit count: `{master_level:02}`
+or `{city_northwall_population:03}`. These display `02` and `002` for a value
+of 2. Formats `01` through `09` are supported; larger values are never
+truncated. Omit the suffix for unpadded numbers. Extracted scripts retain the
+native decimal padding; score fields suppress leading zeroes and use column
+alignment instead. Number formatting is not valid on names or icons.
+
+## Fixed menu and report rows
+
+Reports use `|` between cells, so a translated cell can contain multiple words:
+
+```text
+Next level | {next_level_population:04}
+```
+
+Keep the cell order and `@line` rows of the extracted template: those rows
+align labels and values with the game's artwork and selectors. Blank rows
+are deliberate. Edit the words inside a cell without adding spaces to align
+it. The speed scale has one cell per digit; its selector stays in the native
+column. Dialogue paragraphs still use word wrapping, not report columns.
+
+## Name-entry keyboard pages
+
+`name_entry.prompt_and_alphabet` may contain multiple keyboard pages separated
+by `@page`. Each page ends with exactly five logical rows of 13 selectable
+grapheme keys. Put the alphabet and digits most players need on page 1, then
+place accented letters or other language-specific symbols on later pages.
+
+The enhanced name-entry screen displays `< current/total >` above the keyboard.
+Moving left from the first column or right from the last column cycles to the
+adjacent page. The selector retains its logical row and moves to the opposite
+edge. The renderer reserves an arrow gutter before every key, so variable-width
+letters do not overlap the authentic selection arrow.
+
+Use one Unicode grapheme per position. A precomposed letter such as `é` is one
+key; an emoji or a base letter plus combining marks is also one key when it is
+a single grapheme. Backspace and finish are typed placeholders rather than font
+characters:
+
+```text
+:: name_entry.prompt_and_alphabet
+Choose a name.
+@line
+A B C D E F G H I J K L M
+@line
+N O P Q R S T U V W X Y Z
+@line
+a b c d e f g h i j k l m
+@line
+n o p q r s t u v w x y z
+@line
+0 1 2 3 4 5 6 7 8 9 {icon.name_entry.backspace} - {icon.name_entry.finish}
+@page
+Choose a name.
+@line
+À Á Â Ä Ç È É Ê Ë Ì Í Î Ï
+@line
+Ñ Ò Ó Ô Ö Ù Ú Û Ü Ý Œ Æ ß
+@line
+à á â ä ç è é ê ë ì í î ï
+@line
+ñ ò ó ô ö ù ú û ü ý œ æ ÿ
+@line
+’ - . , ? ! {icon.name_entry.backspace} ( ) / : ; {icon.name_entry.finish}
+@end
+```
+
+Keep the row and grapheme counts exact on every page. A malformed page cannot
+take ownership from the native keyboard and therefore falls back safely;
+builder-side diagnostics for the complete page shape are required before the
+version 1 editor ships. Keyboard pages are pack-authored and are not limited
+to the official French character inventory.
 
 ## Progress tracking
 

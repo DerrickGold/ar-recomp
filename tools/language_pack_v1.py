@@ -12,6 +12,7 @@ import collections
 import hashlib
 import json
 import re
+import unicodedata
 import shlex
 import sys
 from pathlib import Path, PurePosixPath
@@ -261,10 +262,17 @@ def append_inline(operations, value, path, line):
             if end < 0:
                 fail('unclosed placeholder', path, line)
             name = value[index + 1:end]
+            digits = 0
+            if ':' in name:
+                name, spec = name.split(':', 1)
+                if not re.fullmatch(r'0[1-9]', spec):
+                    fail('number format must be 01 through 09', path, line)
+                digits = int(spec[1])
             require_identifier(name, 'placeholder', path, line)
             flush_literal()
             operations.append({
-                'op': 'placeholder', 'name': name, 'source_line': line})
+                'op': 'placeholder', 'name': name, 'source_line': line,
+                **({'minimum_digits': digits} if digits else {})})
             index = end + 1
             continue
         if character == '}':
@@ -466,7 +474,9 @@ def emit_artext(messages):
             if kind == 'text':
                 inline.append(escape_text(operation['value']))
             elif kind == 'placeholder':
-                inline.append('{' + operation['name'] + '}')
+                spec = (':0' + str(operation['minimum_digits'])) \
+                    if operation.get('minimum_digits') else ''
+                inline.append('{' + operation['name'] + spec + '}')
             elif kind == 'line':
                 flush_inline()
                 lines.append('@line')
@@ -539,7 +549,8 @@ def placeholder_from_source(operation):
 def placeholder_type(name):
     if name.startswith('icon.'):
         return 'icon'
-    if name.endswith(('_population', '_level', '_items', '_score')) or \
+    if name.startswith('score_') or \
+            name.endswith(('_population', '_level', '_items', '_score')) or \
             name in {
                 'lair_count', 'master_level', 'master_hp', 'master_sp',
                 'master_max_sp', 'master_lives_display',
@@ -680,23 +691,164 @@ def load_catalog(path):
     return catalog
 
 
-def source_operations_to_author(route):
+def fixed_table_operations(operations, semantic_id):
+    """Export explicit editable cells; never infer columns from translated text.
+
+    Retail report rows have verified roles. Only this source-conversion step
+    interprets their padding. Runtime authors can freely use spaces in cells.
+    """
+    if semantic_id == 'system.message_speed.scale_labels':
+        result = [dict(operation) for operation in operations]
+        if result and result[0]['op'] == 'text':
+            digits = result[0]['value'].strip()
+            if digits.isascii() and digits.isdigit():
+                result[0]['value'] = ' | '.join(digits)
+        fields = []
+        for operation in result:
+            direction = operation['op'] == 'placeholder' and \
+                operation['name'] == 'icon.ui.speed_direction'
+            if direction:
+                fields.append({'op': 'text', 'value': ' | '})
+            fields.append(operation)
+            if direction:
+                fields.append({'op': 'text', 'value': ' | '})
+        return fields
+    if not semantic_id.startswith('status.report.'):
+        return operations
+    result, row = [], []
+    row_index = 0
+    for operation in operations:
+        if operation['op'] not in ('line', 'end'):
+            row.append(operation)
+            continue
+        master = semantic_id == 'status.report.master_report'
+        score = semantic_id == 'status.report.score_report'
+        split = (not master and row_index not in (2, 5)) or \
+            (master and row_index in (3, 5, 7, 9))
+        if row_index == 0 and not any(item['op'] == 'placeholder' for item in row):
+            split = False  # e.g. the French two-line population title.
+        if row_index == 1 and not master:
+            # A continued title is a multiword label plus its total, not
+            # separate columns for each word of that label.
+            row = [dict(item, value=' '.join(item['value'].split()) + '  ')
+                   if item['op'] == 'text' and item['value'].strip() else item
+                   for item in row]
+            separator = r'\s{2,}'
+        else:
+            separator = r'\s{2,}' if row_index == 0 or \
+                (score and row_index == 3) else r'\s+'
+        cells = [[]]
+        for item in row:
+            if not split or item['op'] != 'text':
+                cells[-1].append(item)
+                continue
+            parts = re.split('(' + separator + ')', item['value'])
+            for part in parts:
+                if not part:
+                    continue
+                if re.fullmatch(separator, part):
+                    if cells[-1]:
+                        cells.append([])
+                else:
+                    cells[-1].append({'op': 'text', 'value': part})
+        cells = [cell for cell in cells if cell]
+        for index, cell in enumerate(cells):
+            if index:
+                result.append({'op': 'text', 'value': ' | '})
+            result.extend(cell)
+        result.append(operation)
+        row, row_index = [], row_index + 1
+    return result
+
+
+# These categories use the native small dialogue window. Ending scenes have
+# different geometry; retain their explicit breaks until separately profiled.
+NATIVE_DIALOGUE_REFLOW_CATEGORIES = REFLOW_SOURCE_CATEGORIES - {
+    'ending_text', 'post_offering_or_ending_native',
+}
+
+
+def native_line_breaks(route, layout):
+    """Return source indices of hard breaks; uncertainty preserves the break.
+
+    A line is soft only if the next complete native word could not have fit.
+    Measure native cells, not UTF-8 bytes, HD font advances or word count.
+    Unknown dynamic widths preserve the break: never infer author intent from
+    the name or population in a particular save.
+    """
+    source = route['source_operations']
+    breaks = {i for i, op in enumerate(source) if op['op'] == 'line_break'}
+    if (not layout or not layout.get('space_delimited_words', False) or
+            route['source_category'] not in NATIVE_DIALOGUE_REFLOW_CATEGORIES):
+        return breaks
+    columns = layout['columns']
+
+    def units(operations):
+        result = []
+        for op in operations:
+            kind = op['op']
+            if kind == 'text':
+                # Dictionary expansion carries padding; it is not visible
+                # word width. A combining dakuten shares its native cell.
+                for char in unicodedata.normalize('NFC', op['value']):
+                    if char.isspace():
+                        if result and result[-1] != ' ':
+                            result.append(' ')
+                    elif not unicodedata.combining(char):
+                        result.append(1)
+            elif kind == 'format_number' and 0 < op.get('width', 0) < 10:
+                result.append(op['width'])
+            elif kind == 'insert_icon':
+                result.append(1)
+            elif kind in SOURCE_PLACEHOLDER_KINDS:
+                result.append(None)  # Variable lookup/BCD width is unknown.
+        while result and result[-1] == ' ':
+            result.pop()
+        return result
+
+    def cell_width(items):
+        if None in items:
+            return None
+        return sum(1 if item == ' ' else item for item in items)
+
+    boundaries = {'line_break', 'page_break', 'reset_text_cursor', 'yield', 'end'}
+    start = 0
+    for index, op in enumerate(source):
+        if op['op'] == 'line_break':
+            end = index + 1
+            while end < len(source) and source[end]['op'] not in boundaries:
+                end += 1
+            current = units(source[start:index])
+            following = units(source[index + 1:end])
+            next_word = following[:following.index(' ')] if ' ' in following else following
+            left, right = cell_width(current), cell_width(next_word)
+            if current and next_word and left is not None and right is not None:
+                # Exact fits are intentional breaks; only a complete word
+                # that overflows the native width is eligible for reflow.
+                if left + 1 + right > columns:
+                    breaks.remove(index)
+        if op['op'] in boundaries:
+            start = index + 1
+    return breaks
+
+
+def source_operations_to_author(route, native_layout=None):
     operations = []
     reflow = route['source_category'] in REFLOW_SOURCE_CATEGORIES
+    hard_breaks = native_line_breaks(route, native_layout) if reflow else set()
     anchors = 0
-    for source in route['source_operations']:
+    for source_index, source in enumerate(route['source_operations']):
         kind = source['op']
         if kind == 'text':
             value = source['value']
             if reflow:
-                value = ' '.join(value.split())
-                if value and operations and operations[-1]['op'] in (
-                        'text', 'placeholder'):
-                    value = ' ' + value
+                # Preserve explicit word boundaries on both sides of values
+                # and punctuation. A placeholder is not itself a word break.
+                value = re.sub(r'\s+', ' ', value)
             if value:
                 operations.append({'op': 'text', 'value': value})
         elif kind == 'line_break':
-            if reflow:
+            if reflow and source_index not in hard_breaks:
                 if operations and operations[-1]['op'] in (
                         'text', 'placeholder'):
                     operations.append({'op': 'text', 'value': ' '})
@@ -705,8 +857,21 @@ def source_operations_to_author(route):
         elif kind == 'page_break':
             operations.append({'op': 'page'})
         elif kind in SOURCE_PLACEHOLDER_KINDS:
-            operations.append({
-                'op': 'placeholder', 'name': placeholder_from_source(source)})
+            if kind == 'insert_icon' and source.get('part_index', 0):
+                # One logical object, even when the native atlas uses two
+                # adjacent tiles. IR retains every part for extraction QA.
+                continue
+            placeholder = {
+                'op': 'placeholder', 'name': placeholder_from_source(source)}
+            if kind == 'format_number' and source.get('width'):
+                width = source['width']
+                # Decimal fields retain leading zeros. The packed-BCD score
+                # renderer ($02:BFF6) skips leading zero nibbles and advances
+                # the cursor instead; its trailing zero is already included
+                # in the numeric value. Cell geometry supplies that alignment.
+                if not width & 0x80:
+                    placeholder['minimum_digits'] = width
+            operations.append(placeholder)
         elif kind in SOURCE_ANCHOR_KINDS:
             operations.append({
                 'op': 'anchor', 'id': source_anchor(source, anchors)['id']})
@@ -716,29 +881,32 @@ def source_operations_to_author(route):
         else:
             raise LanguagePackError(
                 f'unrepresentable extracted operation {kind!r}')
-    # Retail centering spaces and repeated soft line breaks are presentation,
-    # not content, on variable-width dialogue surfaces.
+    # Keep hard line/paragraph boundaries. Only width-induced wraps and retail
+    # padding are presentation rather than content on variable-width surfaces.
     if reflow:
         normalized = []
         for operation in operations:
             if operation['op'] == 'text':
-                value = re.sub(r'\s+', ' ', operation['value'])
                 if normalized and normalized[-1]['op'] == 'text':
-                    normalized[-1]['value'] += value
-                elif value:
-                    normalized.append({'op': 'text', 'value': value})
+                    normalized[-1]['value'] += operation['value']
+                elif operation['value']:
+                    normalized.append(dict(operation))
             else:
                 normalized.append(operation)
-        first_text = next((operation for operation in normalized
-                           if operation['op'] == 'text'), None)
-        last_text = next((operation for operation in reversed(normalized)
-                          if operation['op'] == 'text'), None)
-        if first_text is not None:
-            first_text['value'] = first_text['value'].lstrip()
-            last_text['value'] = last_text['value'].rstrip()
+        for operation in normalized:
+            if operation['op'] == 'text':
+                operation['value'] = re.sub(r'\s+', ' ', operation['value'])
+        visible = [operation for operation in normalized
+                   if operation['op'] in ('text', 'placeholder')]
+        # A separator after a leading placeholder (or before a trailing one)
+        # is content. Only trim at the actual visible paragraph boundary.
+        if visible and visible[0]['op'] == 'text':
+            visible[0]['value'] = visible[0]['value'].lstrip()
+        if visible and visible[-1]['op'] == 'text':
+            visible[-1]['value'] = visible[-1]['value'].rstrip()
         operations = [operation for operation in normalized
                       if operation['op'] != 'text' or operation['value']]
-    return operations
+    return fixed_table_operations(operations, route['id'])
 
 
 def build_source_messages(extraction):
@@ -746,14 +914,17 @@ def build_source_messages(extraction):
     canonical_by_hash = {}
     messages = []
     for route in sorted(routes, key=lambda item: item['id']):
-        content_hash = route['source_operations_sha256']
+        operations = source_operations_to_author(
+            route, extraction.get('native_dialogue_layout'))
+        # Source-identical routes can have different layout/line-break rules.
+        # Alias only the actual author operations, not their pre-layout IR.
+        content_hash = json.dumps(operations, ensure_ascii=False, sort_keys=True)
         canonical = canonical_by_hash.get(content_hash)
         if canonical is not None:
             messages.append({
                 'id': route['id'], 'alias': canonical, 'operations': []})
             continue
         canonical_by_hash[content_hash] = route['id']
-        operations = source_operations_to_author(route)
         visible = any(operation['op'] in ('text', 'placeholder')
                       for operation in operations)
         if not visible:
@@ -869,6 +1040,12 @@ def validate_messages(messages, catalog, source_profile, coverage='partial',
             raise LanguagePackError(f'{semantic_id}: too many authored pages')
         wait_total = 0
         for operation in operations:
+            if operation.get('minimum_digits') and (
+                    operation['op'] != 'placeholder' or
+                    catalog['placeholders'].get(operation['name']) != 'number' or
+                    not 1 <= operation['minimum_digits'] <= 9):
+                raise LanguagePackError(
+                    f'{semantic_id}: number format requires a numeric placeholder')
             if operation['op'] not in AUTHOR_OPERATION_KINDS:
                 raise LanguagePackError(
                     f'{semantic_id}: unknown operation {operation["op"]!r}')

@@ -31,7 +31,7 @@ typedef struct ArGeneratedRoute {
 
 _Static_assert(ARRAY_COUNT(kGeneratedRoutes) == 531,
                "v1 semantic route count changed");
-_Static_assert(ARRAY_COUNT(kGeneratedPlaceholders) == 58,
+_Static_assert(ARRAY_COUNT(kGeneratedPlaceholders) == 60,
                "v1 placeholder count changed");
 
 static void SetError(ArLanguagePackError *error, const char *format, ...) {
@@ -142,6 +142,14 @@ static bool ValidateBody(const ArLanguagePack *pack,
       if (!PlaceholderAllowed(route, placeholder)) {
         SetError(error, "%s: placeholder {%s} is unavailable on this route",
                  diagnostic_id, placeholder ? placeholder : "");
+        return false;
+      }
+      if (operation->minimum_digits &&
+          (operation->minimum_digits > 9 ||
+           ArLanguageContract_PlaceholderKind(placeholder) !=
+               kArLanguagePlaceholder_Number)) {
+        SetError(error, "%s: number format requires a numeric placeholder",
+                 diagnostic_id);
         return false;
       }
     } else if (operation->kind == kArLanguageOperation_Anchor) {

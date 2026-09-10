@@ -58,6 +58,25 @@ static bool s_boot_display_from_environment;
 
 static int InferDisplayMode(void);
 
+static const char *const kLocalizationContentLabels[] = {
+  "Native US", "Configured pack",
+};
+static const char *const kLocalizationPresentationLabels[] = {
+  "Native", "Enhanced",
+};
+static const char *const kLocalizationSamplingLabels[] = {"Crisp", "Smooth"};
+static const char *const kLocalizationPixelationLabels[] = {
+  "None", "Low resolution", "Mosaic",
+};
+
+static bool EnhancedTextSelected(void) {
+  return g_settings.localization_presentation == 1;
+}
+
+static bool TextPixelationSelected(void) {
+  return EnhancedTextSelected() && g_settings.localization_font_pixelation != 0;
+}
+
 static bool ParseInfMp(const char *text, void *field) {
   int *value = (int *)field;
   if (!text || !text[0] || text[0] == '0') *value = 0;
@@ -1056,6 +1075,39 @@ static void RandoChanged(const SettingDesc *desc) {
     NULL, 0, NULL, NULL, ParseStagedScore, FormatStagedScore }
 
 const SettingDesc g_setting_descs[] = {
+  { "localization_content", "AR_LOCALIZATION_CONTENT", "Text source",
+    "Native US uses your locally extracted USA text. Configured pack is the "
+    "development source; installed-pack selection is still in development.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_Localization,
+    &g_settings.localization_content, 0, 0, 1, 1, false,
+    kLocalizationContentLabels, 2, NULL, NULL, NULL, NULL, true },
+  { "localization_presentation", "AR_LOCALIZATION_PRESENTATION", "Text rendering",
+    "Native retains the untouched USA text and font. Enhanced renders scoped "
+    "Sky Palace and simulation text with the selected source and font settings.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_Localization,
+    &g_settings.localization_presentation, 0, 0, 1, 1, false,
+    kLocalizationPresentationLabels, 2, NULL, NULL, NULL, NULL, true },
+  { "localization_font_scale_percent", "AR_LOCALIZATION_FONT_SCALE_PERCENT",
+    "Font size (%)", "Enhanced text size. Layout fits within its safe box.",
+    kSettingType_Int, kApply_Passive, kSettingCat_LocalizationFont,
+    &g_settings.localization_font_scale_percent, 140, 80, 140, 5, false,
+    NULL, 0, EnhancedTextSelected, NULL, NULL, NULL, true },
+  { "localization_font_sampling", "AR_LOCALIZATION_FONT_SAMPLING", "Sampling",
+    "Crisp keeps sharp pixel edges; Smooth blends scaled text edges.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_LocalizationFont,
+    &g_settings.localization_font_sampling, 0, 0, 1, 1, false,
+    kLocalizationSamplingLabels, 2, EnhancedTextSelected, NULL, NULL, NULL, true },
+  { "localization_font_pixelation", "AR_LOCALIZATION_FONT_PIXELATION",
+    "Pixelation", "Full-resolution text, lower-resolution upscaling, or "
+    "a mosaic applied to the high-resolution font.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_LocalizationFont,
+    &g_settings.localization_font_pixelation, 2, 0, 2, 1, false,
+    kLocalizationPixelationLabels, 3, EnhancedTextSelected, NULL, NULL, NULL, true },
+  { "localization_font_pixel_size", "AR_LOCALIZATION_FONT_PIXEL_SIZE",
+    "Pixel size", "Pixelation strength in output pixels: 2, 4, 6, or 8.",
+    kSettingType_Int, kApply_Passive, kSettingCat_LocalizationFont,
+    &g_settings.localization_font_pixel_size, 2, 2, 8, 2, false,
+    NULL, 0, TextPixelationSelected, NULL, NULL, NULL, true },
   { "display_mode", "AR_DISPLAY_MODE", "Render profile",
     "Switch between authentic 4:3, uncorrected wide output, and full HLE widescreen.",
     kSettingType_Enum, kApply_Callback, kSettingCat_Display,
@@ -2765,6 +2817,8 @@ const char *Settings_CategoryName(SettingCategory category) {
     case kSettingCat_RandoEnemies: return "Enemies";
     case kSettingCat_RandoItems: return "Items";
     case kSettingCat_RandoSim: return "Simulation";
+    case kSettingCat_Localization: return "Localization";
+    case kSettingCat_LocalizationFont: return "Enhanced font";
     case kSettingCat_Count: break;
   }
   return "Unknown";
@@ -3064,6 +3118,14 @@ void Settings_InitWithFile(const char *path) {
 
   for (int i = 0; i < g_setting_desc_count; i++)
     SetSettingDefault(&g_setting_descs[i]);
+
+  /* Preserve the private visual-fixture bootstrap as a default only. Explicit
+   * config/file/environment selections (including Native) still win. */
+  const char *development_pack = getenv("AR_LOCALIZATION_PACK");
+  if (development_pack && development_pack[0]) {
+    g_settings.localization_content = 1;
+    g_settings.localization_presentation = 1;
+  }
 
   for (int i = 0; i < g_setting_desc_count; i++) {
     if (s_config_layer[i].present)

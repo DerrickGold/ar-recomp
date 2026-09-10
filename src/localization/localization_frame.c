@@ -65,18 +65,71 @@ bool ArLocalizationFrame_AddText(ArLocalizationFrame *frame,
                                  uint8_t native_font_pixels,
                                  const ArTextCellRegion *native_preserves,
                                  uint8_t native_preserve_count) {
+  return ArLocalizationFrame_AddTextWithObjects(
+      frame, surface_id, destination, region, utf8, utf8_bytes,
+      revealed_cluster_count, cluster_count, source_revision, direction,
+      native_font_pixels, native_preserves, native_preserve_count, NULL, 0);
+}
+
+bool ArLocalizationFrame_AddTextWithObjects(
+    ArLocalizationFrame *frame, uint32_t surface_id,
+    ArTextCellDestination destination, ArTextCellRegion region,
+    const char *utf8, size_t utf8_bytes,
+    uint32_t revealed_cluster_count, uint32_t cluster_count,
+    uint64_t source_revision, ArTextDirection direction,
+    uint8_t native_font_pixels,
+    const ArTextCellRegion *native_preserves,
+    uint8_t native_preserve_count,
+    const ArLocalizationInlineObjectSnapshot *inline_objects,
+    uint8_t inline_object_count) {
+  return ArLocalizationFrame_AddTextWithObjectsAndLayout(
+      frame, surface_id, destination, region, utf8, utf8_bytes,
+      revealed_cluster_count, cluster_count, source_revision, direction,
+      native_font_pixels, kArLocalizationTextLayout_Flow,
+      native_preserves, native_preserve_count,
+      inline_objects, inline_object_count);
+}
+
+bool ArLocalizationFrame_AddTextWithObjectsAndLayout(
+    ArLocalizationFrame *frame, uint32_t surface_id,
+    ArTextCellDestination destination, ArTextCellRegion region,
+    const char *utf8, size_t utf8_bytes,
+    uint32_t revealed_cluster_count, uint32_t cluster_count,
+    uint64_t source_revision, ArTextDirection direction,
+    uint8_t native_font_pixels, ArLocalizationTextLayoutKind layout,
+    const ArTextCellRegion *native_preserves,
+    uint8_t native_preserve_count,
+    const ArLocalizationInlineObjectSnapshot *inline_objects,
+    uint8_t inline_object_count) {
   if (!frame || frame->abi_version != AR_LOCALIZATION_FRAME_ABI_VERSION ||
       !frame->font_revision || !utf8 || !utf8_bytes || !source_revision ||
       !native_font_pixels || revealed_cluster_count > cluster_count ||
       native_preserve_count > kArLocalizationFrameNativePreserveCapacity ||
       (native_preserve_count && !native_preserves) ||
+      (inline_object_count && !inline_objects) ||
+      inline_object_count >
+          kArLocalizationFrameInlineObjectCapacity -
+              frame->inline_object_count ||
       direction < kArTextDirection_Auto ||
       direction > kArTextDirection_RightToLeft ||
+      layout < kArLocalizationTextLayout_Flow ||
+      layout > kArLocalizationTextLayout_DialogueWindow ||
       frame->snapshot_count >= kArTextCellRecordCapacity ||
       utf8_bytes >= kArLocalizationFrameTextCapacity - frame->text_bytes)
     return false;
   for (uint8_t index = 0; index < native_preserve_count; ++index) {
     if (!RegionContains(region, native_preserves[index])) return false;
+  }
+  uint32_t previous_end = 0;
+  for (uint8_t index = 0; index < inline_object_count; ++index) {
+    const ArLocalizationInlineObjectSnapshot *object =
+        &inline_objects[index];
+    if (object->kind <= kArLocalizationInlineObject_None ||
+        object->kind > kArLocalizationInlineObject_NameFieldUnderline ||
+        object->end_utf8_byte < previous_end ||
+        object->end_utf8_byte > utf8_bytes)
+      return false;
+    previous_end = object->end_utf8_byte;
   }
   const uint8_t slot = frame->snapshot_count;
   ArTextCellRecordSet cells = frame->cells;
@@ -95,14 +148,65 @@ bool ArLocalizationFrame_AddText(ArLocalizationFrame *frame,
       .cluster_count = cluster_count,
       .source_revision = source_revision,
       .direction = direction,
+      .layout = layout,
       .native_font_pixels = native_font_pixels,
       .native_preserve_count = native_preserve_count,
+      .inline_object_offset = frame->inline_object_count,
+      .inline_object_count = inline_object_count,
   };
   if (native_preserve_count)
     memcpy(frame->snapshots[slot].native_preserves, native_preserves,
            (size_t)native_preserve_count * sizeof(native_preserves[0]));
+  if (inline_object_count) {
+    memcpy(&frame->inline_objects[frame->inline_object_count],
+           inline_objects,
+           (size_t)inline_object_count * sizeof(inline_objects[0]));
+    frame->inline_object_count += inline_object_count;
+  }
   frame->snapshot_count++;
   frame->cells = cells;
+  return true;
+}
+
+bool ArLocalizationFrame_AddIndicator(
+    ArLocalizationFrame *frame, uint32_t surface_id,
+    ArLocalizationIndicatorKind kind, ArTextCellRegion region) {
+  if (!frame || frame->abi_version != AR_LOCALIZATION_FRAME_ABI_VERSION ||
+      kind <= kArLocalizationIndicator_None ||
+      kind > kArLocalizationIndicator_DialogueContinue ||
+      frame->indicator_count >= kArLocalizationFrameIndicatorCapacity)
+    return false;
+  const ArTextCellRecord *owner = NULL;
+  for (uint8_t index = 0; index < frame->cells.count; ++index) {
+    if (frame->cells.records[index].surface_id == surface_id) {
+      owner = &frame->cells.records[index];
+      break;
+    }
+  }
+  if (!owner || !RegionContains(owner->region, region)) return false;
+  frame->indicators[frame->indicator_count++] =
+      (ArLocalizationIndicatorSnapshot){surface_id, kind, region};
+  return true;
+}
+
+bool ArLocalizationFrame_AddDialogueWindow(
+    ArLocalizationFrame *frame, uint32_t surface_id,
+    ArTextCellDestination destination, ArTextCellRegion region,
+    const char *utf8, size_t utf8_bytes, uint32_t revealed_utf8_bytes,
+    uint32_t cluster_count, uint64_t source_revision,
+    ArTextDirection direction, uint8_t native_font_pixels) {
+  if (!utf8 || revealed_utf8_bytes > utf8_bytes ||
+      (revealed_utf8_bytes < utf8_bytes &&
+       ((uint8_t)utf8[revealed_utf8_bytes] & 0xc0u) == 0x80u))
+    return false;
+  if (!ArLocalizationFrame_AddTextWithObjectsAndLayout(
+          frame, surface_id, destination, region, utf8, utf8_bytes,
+          cluster_count, cluster_count, source_revision, direction,
+          native_font_pixels, kArLocalizationTextLayout_DialogueWindow,
+          NULL, 0, NULL, 0))
+    return false;
+  frame->snapshots[frame->snapshot_count - 1u].revealed_utf8_bytes =
+      revealed_utf8_bytes;
   return true;
 }
 

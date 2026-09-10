@@ -9,7 +9,7 @@
     "wait_frames_per_message": 3600,
     "wait_frames_per_operation": 600
   },
-  "placeholder_count": 58,
+  "placeholder_count": 60,
   "placeholders": {
     "city_aitos_growth_state": "localized_term",
     "city_aitos_items": "number",
@@ -41,7 +41,9 @@
     "icon.name_entry.cursor": "icon",
     "icon.name_entry.finish": "icon",
     "icon.status.life": "icon",
+    "icon.status.population": "icon",
     "icon.ui.selection_pointer": "icon",
+    "icon.ui.speed_direction": "icon",
     "lair_count": "number",
     "master_hp": "number",
     "master_level": "number",
@@ -51,18 +53,18 @@
     "master_sp": "number",
     "next_level_population": "number",
     "required_master_level": "number",
-    "score_aitos_act_1": "localized_text",
-    "score_aitos_act_2": "localized_text",
-    "score_bloodpool_act_1": "localized_text",
-    "score_bloodpool_act_2": "localized_text",
-    "score_fillmore_act_1": "localized_text",
-    "score_fillmore_act_2": "localized_text",
-    "score_kasandora_act_1": "localized_text",
-    "score_kasandora_act_2": "localized_text",
-    "score_marahna_act_1": "localized_text",
-    "score_marahna_act_2": "localized_text",
-    "score_northwall_act_1": "localized_text",
-    "score_northwall_act_2": "localized_text",
+    "score_aitos_act_1": "number",
+    "score_aitos_act_2": "number",
+    "score_bloodpool_act_1": "number",
+    "score_bloodpool_act_2": "number",
+    "score_fillmore_act_1": "number",
+    "score_fillmore_act_2": "number",
+    "score_kasandora_act_1": "number",
+    "score_kasandora_act_2": "number",
+    "score_marahna_act_1": "number",
+    "score_marahna_act_2": "number",
+    "score_northwall_act_1": "number",
+    "score_northwall_act_2": "number",
     "selected_offering_action": "localized_text",
     "sound_effect_id": "number",
     "sound_music_id": "number",
@@ -1135,7 +1137,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 48,
+          "native_operation_count": 49,
           "placeholders_used": [
             "master_name"
           ],
@@ -1227,7 +1229,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 46,
+          "native_operation_count": 48,
           "placeholders_used": [
             "master_name"
           ],
@@ -1319,7 +1321,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 46,
+          "native_operation_count": 47,
           "placeholders_used": [
             "master_name"
           ],
@@ -1411,7 +1413,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 46,
+          "native_operation_count": 48,
           "placeholders_used": [
             "master_name"
           ],
@@ -2025,7 +2027,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 72,
+          "native_operation_count": 73,
           "placeholders_used": [
             "master_name"
           ],
@@ -2132,7 +2134,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 68,
+          "native_operation_count": 70,
           "placeholders_used": [
             "master_name"
           ],
@@ -2239,7 +2241,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 63,
+          "native_operation_count": 64,
           "placeholders_used": [
             "master_name"
           ],
@@ -2346,7 +2348,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 68,
+          "native_operation_count": 70,
           "placeholders_used": [
             "master_name"
           ],
@@ -3640,7 +3642,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 115,
+          "native_operation_count": 116,
           "placeholders_used": [
             "master_name"
           ],
@@ -3772,7 +3774,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 103,
+          "native_operation_count": 105,
           "placeholders_used": [
             "master_name"
           ],
@@ -3904,7 +3906,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 102,
+          "native_operation_count": 103,
           "placeholders_used": [
             "master_name"
           ],
@@ -4036,7 +4038,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 103,
+          "native_operation_count": 105,
           "placeholders_used": [
             "master_name"
           ],
@@ -5003,7 +5005,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 48,
+          "native_operation_count": 49,
           "placeholders_used": [
             "master_name"
           ],
@@ -5095,7 +5097,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 46,
+          "native_operation_count": 48,
           "placeholders_used": [
             "master_name"
           ],
@@ -5187,7 +5189,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 46,
+          "native_operation_count": 47,
           "placeholders_used": [
             "master_name"
           ],
@@ -5379,7 +5381,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 46,
+          "native_operation_count": 48,
           "placeholders_used": [
             "master_name"
           ],
@@ -6091,7 +6093,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 72,
+          "native_operation_count": 73,
           "placeholders_used": [
             "master_name"
           ],
@@ -6198,7 +6200,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 68,
+          "native_operation_count": 70,
           "placeholders_used": [
             "master_name"
           ],
@@ -6305,7 +6307,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 63,
+          "native_operation_count": 64,
           "placeholders_used": [
             "master_name"
           ],
@@ -6497,7 +6499,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 68,
+          "native_operation_count": 70,
           "placeholders_used": [
             "master_name"
           ],
@@ -8054,7 +8056,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 115,
+          "native_operation_count": 116,
           "placeholders_used": [
             "master_name"
           ],
@@ -8186,7 +8188,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 103,
+          "native_operation_count": 105,
           "placeholders_used": [
             "master_name"
           ],
@@ -8318,7 +8320,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 102,
+          "native_operation_count": 103,
           "placeholders_used": [
             "master_name"
           ],
@@ -8456,7 +8458,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 103,
+          "native_operation_count": 105,
           "placeholders_used": [
             "master_name"
           ],
@@ -8742,7 +8744,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 10,
+          "native_operation_count": 11,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -8756,7 +8758,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 11,
+          "native_operation_count": 13,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -8770,7 +8772,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 12,
+          "native_operation_count": 13,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -8798,7 +8800,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 11,
+          "native_operation_count": 13,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -8913,7 +8915,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 2,
-          "native_operation_count": 13,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name"
           ],
@@ -8926,7 +8928,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 2,
-          "native_operation_count": 15,
+          "native_operation_count": 17,
           "placeholders_used": [
             "master_name"
           ],
@@ -8939,7 +8941,7 @@
         },
         "fr": {
           "native_authored_page_count": 2,
-          "native_operation_count": 15,
+          "native_operation_count": 16,
           "placeholders_used": [
             "master_name"
           ],
@@ -8965,7 +8967,7 @@
         },
         "us": {
           "native_authored_page_count": 2,
-          "native_operation_count": 15,
+          "native_operation_count": 17,
           "placeholders_used": [
             "master_name"
           ],
@@ -9098,7 +9100,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 13,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -9112,7 +9114,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 12,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -9126,7 +9128,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 15,
+          "native_operation_count": 16,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -9154,7 +9156,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 12,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -9192,7 +9194,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 11,
+          "native_operation_count": 12,
           "placeholders_used": [
             "master_name"
           ],
@@ -9205,7 +9207,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 11,
+          "native_operation_count": 13,
           "placeholders_used": [
             "master_name"
           ],
@@ -9218,7 +9220,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 11,
+          "native_operation_count": 12,
           "placeholders_used": [
             "master_name"
           ],
@@ -9244,7 +9246,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 11,
+          "native_operation_count": 13,
           "placeholders_used": [
             "master_name"
           ],
@@ -9282,7 +9284,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 13,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name"
           ],
@@ -9295,7 +9297,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 13,
+          "native_operation_count": 15,
           "placeholders_used": [
             "master_name"
           ],
@@ -9308,7 +9310,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 13,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name"
           ],
@@ -9335,7 +9337,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 13,
+          "native_operation_count": 15,
           "placeholders_used": [
             "master_name"
           ],
@@ -9373,7 +9375,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 13,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -9387,7 +9389,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 12,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -9401,7 +9403,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 15,
+          "native_operation_count": 16,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -9429,7 +9431,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 12,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -9468,7 +9470,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 13,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -9482,7 +9484,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 12,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -9496,7 +9498,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 15,
+          "native_operation_count": 16,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -9524,7 +9526,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 12,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -9563,7 +9565,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 13,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -9577,7 +9579,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 12,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -9591,7 +9593,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 15,
+          "native_operation_count": 16,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -9619,7 +9621,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 12,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -9657,7 +9659,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 10,
+          "native_operation_count": 11,
           "placeholders_used": [
             "master_name"
           ],
@@ -9670,7 +9672,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 10,
+          "native_operation_count": 12,
           "placeholders_used": [
             "master_name"
           ],
@@ -9683,7 +9685,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 10,
+          "native_operation_count": 11,
           "placeholders_used": [
             "master_name"
           ],
@@ -9709,7 +9711,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 10,
+          "native_operation_count": 12,
           "placeholders_used": [
             "master_name"
           ],
@@ -9824,7 +9826,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 13,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -9838,7 +9840,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 12,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -9852,7 +9854,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 15,
+          "native_operation_count": 16,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -9880,7 +9882,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 12,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -9918,7 +9920,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 2,
-          "native_operation_count": 19,
+          "native_operation_count": 20,
           "placeholders_used": [
             "master_name"
           ],
@@ -9931,7 +9933,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 2,
-          "native_operation_count": 19,
+          "native_operation_count": 21,
           "placeholders_used": [
             "master_name"
           ],
@@ -9944,7 +9946,7 @@
         },
         "fr": {
           "native_authored_page_count": 2,
-          "native_operation_count": 19,
+          "native_operation_count": 20,
           "placeholders_used": [
             "master_name"
           ],
@@ -9970,7 +9972,7 @@
         },
         "us": {
           "native_authored_page_count": 2,
-          "native_operation_count": 19,
+          "native_operation_count": 21,
           "placeholders_used": [
             "master_name"
           ],
@@ -10007,7 +10009,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 10,
+          "native_operation_count": 11,
           "placeholders_used": [
             "master_name"
           ],
@@ -10020,7 +10022,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 10,
+          "native_operation_count": 12,
           "placeholders_used": [
             "master_name"
           ],
@@ -10033,7 +10035,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 10,
+          "native_operation_count": 11,
           "placeholders_used": [
             "master_name"
           ],
@@ -10059,7 +10061,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 10,
+          "native_operation_count": 12,
           "placeholders_used": [
             "master_name"
           ],
@@ -10174,7 +10176,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 2,
-          "native_operation_count": 18,
+          "native_operation_count": 19,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -10192,7 +10194,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 2,
-          "native_operation_count": 18,
+          "native_operation_count": 20,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -10210,7 +10212,7 @@
         },
         "fr": {
           "native_authored_page_count": 2,
-          "native_operation_count": 18,
+          "native_operation_count": 19,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -10242,7 +10244,7 @@
         },
         "us": {
           "native_authored_page_count": 2,
-          "native_operation_count": 18,
+          "native_operation_count": 20,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -10284,7 +10286,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 2,
-          "native_operation_count": 10,
+          "native_operation_count": 11,
           "placeholders_used": [
             "master_name"
           ],
@@ -10301,7 +10303,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 2,
-          "native_operation_count": 10,
+          "native_operation_count": 12,
           "placeholders_used": [
             "master_name"
           ],
@@ -10318,7 +10320,7 @@
         },
         "fr": {
           "native_authored_page_count": 2,
-          "native_operation_count": 10,
+          "native_operation_count": 11,
           "placeholders_used": [
             "master_name"
           ],
@@ -10352,7 +10354,7 @@
         },
         "us": {
           "native_authored_page_count": 2,
-          "native_operation_count": 10,
+          "native_operation_count": 12,
           "placeholders_used": [
             "master_name"
           ],
@@ -10394,7 +10396,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 2,
-          "native_operation_count": 14,
+          "native_operation_count": 15,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -10412,7 +10414,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 2,
-          "native_operation_count": 11,
+          "native_operation_count": 13,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -10430,7 +10432,7 @@
         },
         "fr": {
           "native_authored_page_count": 2,
-          "native_operation_count": 12,
+          "native_operation_count": 13,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -10466,7 +10468,7 @@
         },
         "us": {
           "native_authored_page_count": 2,
-          "native_operation_count": 11,
+          "native_operation_count": 13,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -10744,7 +10746,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 2,
-          "native_operation_count": 21,
+          "native_operation_count": 22,
           "placeholders_used": [
             "master_level",
             "master_hp",
@@ -10754,7 +10756,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 2,
-          "native_operation_count": 19,
+          "native_operation_count": 21,
           "placeholders_used": [
             "master_level",
             "master_hp",
@@ -10764,7 +10766,7 @@
         },
         "fr": {
           "native_authored_page_count": 2,
-          "native_operation_count": 21,
+          "native_operation_count": 22,
           "placeholders_used": [
             "master_level",
             "master_hp",
@@ -10784,7 +10786,7 @@
         },
         "us": {
           "native_authored_page_count": 2,
-          "native_operation_count": 19,
+          "native_operation_count": 21,
           "placeholders_used": [
             "master_level",
             "master_hp",
@@ -11061,7 +11063,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 13,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name"
           ],
@@ -11074,7 +11076,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 13,
+          "native_operation_count": 15,
           "placeholders_used": [
             "master_name"
           ],
@@ -11087,7 +11089,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 13,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name"
           ],
@@ -11113,7 +11115,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 13,
+          "native_operation_count": 15,
           "placeholders_used": [
             "master_name"
           ],
@@ -11150,7 +11152,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 10,
           "placeholders_used": [
             "master_name"
           ],
@@ -11163,7 +11165,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 11,
           "placeholders_used": [
             "master_name"
           ],
@@ -11176,7 +11178,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 10,
           "placeholders_used": [
             "master_name"
           ],
@@ -11202,7 +11204,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 11,
           "placeholders_used": [
             "master_name"
           ],
@@ -11239,7 +11241,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 11,
+          "native_operation_count": 12,
           "placeholders_used": [
             "master_name"
           ],
@@ -11252,7 +11254,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 11,
+          "native_operation_count": 13,
           "placeholders_used": [
             "master_name"
           ],
@@ -11265,7 +11267,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 10,
           "placeholders_used": [
             "master_name"
           ],
@@ -11286,7 +11288,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 11,
+          "native_operation_count": 13,
           "placeholders_used": [
             "master_name"
           ],
@@ -11345,7 +11347,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 15,
+          "native_operation_count": 16,
           "placeholders_used": [
             "master_name"
           ],
@@ -11408,7 +11410,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 2,
-          "native_operation_count": 15,
+          "native_operation_count": 16,
           "placeholders_used": [
             "master_name"
           ],
@@ -11421,7 +11423,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 2,
-          "native_operation_count": 15,
+          "native_operation_count": 17,
           "placeholders_used": [
             "master_name"
           ],
@@ -11434,7 +11436,7 @@
         },
         "fr": {
           "native_authored_page_count": 2,
-          "native_operation_count": 13,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name"
           ],
@@ -11460,7 +11462,7 @@
         },
         "us": {
           "native_authored_page_count": 2,
-          "native_operation_count": 15,
+          "native_operation_count": 17,
           "placeholders_used": [
             "master_name"
           ],
@@ -11655,7 +11657,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 2,
-          "native_operation_count": 17,
+          "native_operation_count": 18,
           "placeholders_used": [
             "master_name"
           ],
@@ -11668,7 +11670,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 2,
-          "native_operation_count": 17,
+          "native_operation_count": 19,
           "placeholders_used": [
             "master_name"
           ],
@@ -11681,7 +11683,7 @@
         },
         "fr": {
           "native_authored_page_count": 2,
-          "native_operation_count": 17,
+          "native_operation_count": 18,
           "placeholders_used": [
             "master_name"
           ],
@@ -11705,7 +11707,7 @@
         },
         "us": {
           "native_authored_page_count": 2,
-          "native_operation_count": 17,
+          "native_operation_count": 19,
           "placeholders_used": [
             "master_name"
           ],
@@ -11743,7 +11745,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 13,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -11757,7 +11759,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 12,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -11771,7 +11773,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 15,
+          "native_operation_count": 16,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -11799,7 +11801,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 12,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -11838,7 +11840,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 13,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -11852,7 +11854,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 12,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -11866,7 +11868,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 15,
+          "native_operation_count": 16,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -11894,7 +11896,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 12,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -11933,7 +11935,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 13,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -11947,7 +11949,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 12,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -11961,7 +11963,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 15,
+          "native_operation_count": 16,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -11989,7 +11991,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 12,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -12028,7 +12030,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 13,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -12042,7 +12044,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 12,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -12056,7 +12058,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 15,
+          "native_operation_count": 16,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -12084,7 +12086,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 12,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name",
             "town_name"
@@ -12199,7 +12201,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 5,
-          "native_operation_count": 45,
+          "native_operation_count": 46,
           "placeholders_used": [
             "master_name"
           ],
@@ -12212,7 +12214,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 5,
-          "native_operation_count": 47,
+          "native_operation_count": 49,
           "placeholders_used": [
             "master_name"
           ],
@@ -12225,7 +12227,7 @@
         },
         "fr": {
           "native_authored_page_count": 5,
-          "native_operation_count": 49,
+          "native_operation_count": 50,
           "placeholders_used": [
             "master_name"
           ],
@@ -12254,7 +12256,7 @@
         },
         "us": {
           "native_authored_page_count": 5,
-          "native_operation_count": 47,
+          "native_operation_count": 49,
           "placeholders_used": [
             "master_name"
           ],
@@ -12291,7 +12293,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 2,
-          "native_operation_count": 19,
+          "native_operation_count": 20,
           "placeholders_used": [
             "master_name"
           ],
@@ -12304,7 +12306,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 2,
-          "native_operation_count": 19,
+          "native_operation_count": 21,
           "placeholders_used": [
             "master_name"
           ],
@@ -12317,7 +12319,7 @@
         },
         "fr": {
           "native_authored_page_count": 2,
-          "native_operation_count": 23,
+          "native_operation_count": 24,
           "placeholders_used": [
             "master_name"
           ],
@@ -12343,7 +12345,7 @@
         },
         "us": {
           "native_authored_page_count": 2,
-          "native_operation_count": 19,
+          "native_operation_count": 21,
           "placeholders_used": [
             "master_name"
           ],
@@ -12379,6 +12381,98 @@
       "canonical_contract_profile": "us",
       "contracts": {
         "de": {
+          "native_authored_page_count": 1,
+          "native_operation_count": 49,
+          "placeholders_used": [
+            "master_name"
+          ],
+          "required_anchors": [
+            {
+              "id": "reset_text_cursor.00",
+              "kind": "reset_text_cursor"
+            },
+            {
+              "id": "toggle_text_state.01",
+              "kind": "toggle_text_state",
+              "state": "04"
+            },
+            {
+              "frames": 30,
+              "id": "delay.02",
+              "kind": "delay"
+            },
+            {
+              "frames": 30,
+              "id": "delay.03",
+              "kind": "delay"
+            },
+            {
+              "frames": 30,
+              "id": "delay.04",
+              "kind": "delay"
+            },
+            {
+              "frames": 30,
+              "id": "delay.05",
+              "kind": "delay"
+            },
+            {
+              "frames": 30,
+              "id": "delay.06",
+              "kind": "delay"
+            },
+            {
+              "frames": 30,
+              "id": "delay.07",
+              "kind": "delay"
+            },
+            {
+              "frames": 30,
+              "id": "delay.08",
+              "kind": "delay"
+            },
+            {
+              "frames": 30,
+              "id": "delay.09",
+              "kind": "delay"
+            },
+            {
+              "frames": 30,
+              "id": "delay.10",
+              "kind": "delay"
+            },
+            {
+              "frames": 30,
+              "id": "delay.11",
+              "kind": "delay"
+            },
+            {
+              "frames": 30,
+              "id": "delay.12",
+              "kind": "delay"
+            },
+            {
+              "frames": 30,
+              "id": "delay.13",
+              "kind": "delay"
+            },
+            {
+              "frames": 30,
+              "id": "delay.14",
+              "kind": "delay"
+            },
+            {
+              "frames": 30,
+              "id": "delay.15",
+              "kind": "delay"
+            },
+            {
+              "id": "yield.16",
+              "kind": "yield"
+            }
+          ]
+        },
+        "eu-en": {
           "native_authored_page_count": 1,
           "native_operation_count": 48,
           "placeholders_used": [
@@ -12470,101 +12564,9 @@
             }
           ]
         },
-        "eu-en": {
-          "native_authored_page_count": 1,
-          "native_operation_count": 46,
-          "placeholders_used": [
-            "master_name"
-          ],
-          "required_anchors": [
-            {
-              "id": "reset_text_cursor.00",
-              "kind": "reset_text_cursor"
-            },
-            {
-              "id": "toggle_text_state.01",
-              "kind": "toggle_text_state",
-              "state": "04"
-            },
-            {
-              "frames": 30,
-              "id": "delay.02",
-              "kind": "delay"
-            },
-            {
-              "frames": 30,
-              "id": "delay.03",
-              "kind": "delay"
-            },
-            {
-              "frames": 30,
-              "id": "delay.04",
-              "kind": "delay"
-            },
-            {
-              "frames": 30,
-              "id": "delay.05",
-              "kind": "delay"
-            },
-            {
-              "frames": 30,
-              "id": "delay.06",
-              "kind": "delay"
-            },
-            {
-              "frames": 30,
-              "id": "delay.07",
-              "kind": "delay"
-            },
-            {
-              "frames": 30,
-              "id": "delay.08",
-              "kind": "delay"
-            },
-            {
-              "frames": 30,
-              "id": "delay.09",
-              "kind": "delay"
-            },
-            {
-              "frames": 30,
-              "id": "delay.10",
-              "kind": "delay"
-            },
-            {
-              "frames": 30,
-              "id": "delay.11",
-              "kind": "delay"
-            },
-            {
-              "frames": 30,
-              "id": "delay.12",
-              "kind": "delay"
-            },
-            {
-              "frames": 30,
-              "id": "delay.13",
-              "kind": "delay"
-            },
-            {
-              "frames": 30,
-              "id": "delay.14",
-              "kind": "delay"
-            },
-            {
-              "frames": 30,
-              "id": "delay.15",
-              "kind": "delay"
-            },
-            {
-              "id": "yield.16",
-              "kind": "yield"
-            }
-          ]
-        },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 46,
+          "native_operation_count": 47,
           "placeholders_used": [
             "master_name"
           ],
@@ -12743,7 +12745,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 46,
+          "native_operation_count": 48,
           "placeholders_used": [
             "master_name"
           ],
@@ -12859,7 +12861,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 2,
-          "native_operation_count": 17,
+          "native_operation_count": 18,
           "placeholders_used": [
             "master_name"
           ],
@@ -12872,7 +12874,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 2,
-          "native_operation_count": 17,
+          "native_operation_count": 19,
           "placeholders_used": [
             "master_name"
           ],
@@ -12885,7 +12887,7 @@
         },
         "fr": {
           "native_authored_page_count": 2,
-          "native_operation_count": 17,
+          "native_operation_count": 18,
           "placeholders_used": [
             "master_name"
           ],
@@ -12912,7 +12914,7 @@
         },
         "us": {
           "native_authored_page_count": 2,
-          "native_operation_count": 17,
+          "native_operation_count": 19,
           "placeholders_used": [
             "master_name"
           ],
@@ -12949,7 +12951,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 3,
-          "native_operation_count": 28,
+          "native_operation_count": 29,
           "placeholders_used": [
             "master_name"
           ],
@@ -12962,7 +12964,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 3,
-          "native_operation_count": 28,
+          "native_operation_count": 30,
           "placeholders_used": [
             "master_name"
           ],
@@ -12975,7 +12977,7 @@
         },
         "fr": {
           "native_authored_page_count": 3,
-          "native_operation_count": 27,
+          "native_operation_count": 28,
           "placeholders_used": [
             "master_name"
           ],
@@ -13002,7 +13004,7 @@
         },
         "us": {
           "native_authored_page_count": 3,
-          "native_operation_count": 28,
+          "native_operation_count": 30,
           "placeholders_used": [
             "master_name"
           ],
@@ -13660,7 +13662,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 11,
+          "native_operation_count": 12,
           "placeholders_used": [
             "master_name"
           ],
@@ -13673,7 +13675,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 11,
           "placeholders_used": [
             "master_name"
           ],
@@ -13686,7 +13688,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 10,
           "placeholders_used": [
             "master_name"
           ],
@@ -13712,7 +13714,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 11,
           "placeholders_used": [
             "master_name"
           ],
@@ -13749,7 +13751,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 8,
           "placeholders_used": [
             "master_name"
           ],
@@ -13762,7 +13764,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 9,
           "placeholders_used": [
             "master_name"
           ],
@@ -13775,7 +13777,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 8,
           "placeholders_used": [
             "master_name"
           ],
@@ -13801,7 +13803,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 9,
           "placeholders_used": [
             "master_name"
           ],
@@ -13992,7 +13994,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 8,
           "placeholders_used": [
             "master_name"
           ],
@@ -14005,7 +14007,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 11,
           "placeholders_used": [
             "master_name"
           ],
@@ -14018,7 +14020,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 8,
+          "native_operation_count": 9,
           "placeholders_used": [
             "master_name"
           ],
@@ -14044,7 +14046,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 11,
           "placeholders_used": [
             "master_name"
           ],
@@ -14158,7 +14160,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 8,
           "placeholders_used": [
             "master_name"
           ],
@@ -14171,7 +14173,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 9,
           "placeholders_used": [
             "master_name"
           ],
@@ -14184,7 +14186,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 8,
           "placeholders_used": [
             "master_name"
           ],
@@ -14210,7 +14212,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 9,
           "placeholders_used": [
             "master_name"
           ],
@@ -14247,7 +14249,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 10,
           "placeholders_used": [
             "master_name"
           ],
@@ -14260,7 +14262,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 13,
+          "native_operation_count": 15,
           "placeholders_used": [
             "master_name"
           ],
@@ -14273,7 +14275,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 13,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name"
           ],
@@ -14299,7 +14301,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 13,
+          "native_operation_count": 15,
           "placeholders_used": [
             "master_name"
           ],
@@ -14336,7 +14338,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 10,
           "placeholders_used": [
             "master_name"
           ],
@@ -14349,7 +14351,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 11,
           "placeholders_used": [
             "master_name"
           ],
@@ -14362,7 +14364,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 10,
           "placeholders_used": [
             "master_name"
           ],
@@ -14388,7 +14390,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 11,
           "placeholders_used": [
             "master_name"
           ],
@@ -14425,7 +14427,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 10,
           "placeholders_used": [
             "master_name"
           ],
@@ -14438,7 +14440,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 11,
           "placeholders_used": [
             "master_name"
           ],
@@ -14451,7 +14453,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 10,
           "placeholders_used": [
             "master_name"
           ],
@@ -14477,7 +14479,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 11,
           "placeholders_used": [
             "master_name"
           ],
@@ -14514,7 +14516,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 2,
-          "native_operation_count": 19,
+          "native_operation_count": 20,
           "placeholders_used": [
             "master_name"
           ],
@@ -14527,7 +14529,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 2,
-          "native_operation_count": 17,
+          "native_operation_count": 19,
           "placeholders_used": [
             "master_name"
           ],
@@ -14540,7 +14542,7 @@
         },
         "fr": {
           "native_authored_page_count": 2,
-          "native_operation_count": 19,
+          "native_operation_count": 20,
           "placeholders_used": [
             "master_name"
           ],
@@ -14566,7 +14568,7 @@
         },
         "us": {
           "native_authored_page_count": 2,
-          "native_operation_count": 17,
+          "native_operation_count": 19,
           "placeholders_used": [
             "master_name"
           ],
@@ -14761,7 +14763,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 10,
           "placeholders_used": [
             "master_name"
           ],
@@ -14774,7 +14776,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 11,
           "placeholders_used": [
             "master_name"
           ],
@@ -14787,7 +14789,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 10,
           "placeholders_used": [
             "master_name"
           ],
@@ -14813,7 +14815,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 11,
           "placeholders_used": [
             "master_name"
           ],
@@ -15555,7 +15557,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 5,
+          "native_operation_count": 6,
           "placeholders_used": [
             "master_name"
           ],
@@ -15568,7 +15570,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 9,
           "placeholders_used": [
             "master_name"
           ],
@@ -15581,7 +15583,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 8,
           "placeholders_used": [
             "master_name"
           ],
@@ -15607,7 +15609,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 9,
           "placeholders_used": [
             "master_name"
           ],
@@ -15644,7 +15646,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 5,
+          "native_operation_count": 6,
           "placeholders_used": [
             "master_name"
           ],
@@ -15657,7 +15659,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 9,
           "placeholders_used": [
             "master_name"
           ],
@@ -15670,7 +15672,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 8,
           "placeholders_used": [
             "master_name"
           ],
@@ -15696,7 +15698,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 9,
           "placeholders_used": [
             "master_name"
           ],
@@ -15733,7 +15735,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 5,
+          "native_operation_count": 6,
           "placeholders_used": [
             "master_name"
           ],
@@ -15746,7 +15748,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 9,
           "placeholders_used": [
             "master_name"
           ],
@@ -15759,7 +15761,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 8,
           "placeholders_used": [
             "master_name"
           ],
@@ -15785,7 +15787,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 9,
           "placeholders_used": [
             "master_name"
           ],
@@ -15822,7 +15824,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 5,
+          "native_operation_count": 6,
           "placeholders_used": [
             "master_name"
           ],
@@ -15835,7 +15837,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 9,
           "placeholders_used": [
             "master_name"
           ],
@@ -15848,7 +15850,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 8,
           "placeholders_used": [
             "master_name"
           ],
@@ -15874,7 +15876,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 9,
           "placeholders_used": [
             "master_name"
           ],
@@ -15911,7 +15913,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 5,
+          "native_operation_count": 6,
           "placeholders_used": [
             "master_name"
           ],
@@ -15924,7 +15926,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 9,
           "placeholders_used": [
             "master_name"
           ],
@@ -15937,7 +15939,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 8,
           "placeholders_used": [
             "master_name"
           ],
@@ -15963,7 +15965,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 9,
           "placeholders_used": [
             "master_name"
           ],
@@ -18624,7 +18626,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 10,
           "placeholders_used": [
             "master_name"
           ],
@@ -18637,7 +18639,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 11,
           "placeholders_used": [
             "master_name"
           ],
@@ -18650,7 +18652,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 10,
           "placeholders_used": [
             "master_name"
           ],
@@ -18676,7 +18678,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 11,
           "placeholders_used": [
             "master_name"
           ],
@@ -18790,7 +18792,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 8,
           "placeholders_used": [
             "master_name"
           ],
@@ -18807,7 +18809,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 9,
           "placeholders_used": [
             "master_name"
           ],
@@ -18824,7 +18826,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 8,
           "placeholders_used": [
             "master_name"
           ],
@@ -18858,7 +18860,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 9,
           "placeholders_used": [
             "master_name"
           ],
@@ -18899,7 +18901,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 5,
+          "native_operation_count": 6,
           "placeholders_used": [
             "master_name"
           ],
@@ -18912,7 +18914,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 5,
+          "native_operation_count": 7,
           "placeholders_used": [
             "master_name"
           ],
@@ -18925,7 +18927,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 5,
+          "native_operation_count": 6,
           "placeholders_used": [
             "master_name"
           ],
@@ -18951,7 +18953,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 5,
+          "native_operation_count": 7,
           "placeholders_used": [
             "master_name"
           ],
@@ -23318,7 +23320,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 5,
+          "native_operation_count": 6,
           "placeholders_used": [
             "master_name"
           ],
@@ -23331,7 +23333,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 5,
+          "native_operation_count": 7,
           "placeholders_used": [
             "master_name"
           ],
@@ -23344,7 +23346,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 5,
+          "native_operation_count": 6,
           "placeholders_used": [
             "master_name"
           ],
@@ -23370,7 +23372,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 5,
+          "native_operation_count": 7,
           "placeholders_used": [
             "master_name"
           ],
@@ -33416,7 +33418,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 3,
-          "native_operation_count": 21,
+          "native_operation_count": 23,
           "placeholders_used": [
             "master_name",
             "master_name"
@@ -33430,7 +33432,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 3,
-          "native_operation_count": 21,
+          "native_operation_count": 25,
           "placeholders_used": [
             "master_name",
             "master_name"
@@ -33444,7 +33446,7 @@
         },
         "fr": {
           "native_authored_page_count": 3,
-          "native_operation_count": 25,
+          "native_operation_count": 27,
           "placeholders_used": [
             "master_name",
             "master_name"
@@ -33472,7 +33474,7 @@
         },
         "us": {
           "native_authored_page_count": 3,
-          "native_operation_count": 21,
+          "native_operation_count": 25,
           "placeholders_used": [
             "master_name",
             "master_name"
@@ -38527,7 +38529,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 5,
+          "native_operation_count": 6,
           "placeholders_used": [
             "master_name"
           ],
@@ -38544,7 +38546,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 5,
+          "native_operation_count": 7,
           "placeholders_used": [
             "master_name"
           ],
@@ -38561,7 +38563,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 5,
+          "native_operation_count": 6,
           "placeholders_used": [
             "master_name"
           ],
@@ -38595,7 +38597,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 5,
+          "native_operation_count": 7,
           "placeholders_used": [
             "master_name"
           ],
@@ -38733,7 +38735,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 2,
-          "native_operation_count": 12,
+          "native_operation_count": 13,
           "placeholders_used": [
             "master_name"
           ],
@@ -38750,7 +38752,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 2,
-          "native_operation_count": 13,
+          "native_operation_count": 15,
           "placeholders_used": [
             "master_name"
           ],
@@ -38767,7 +38769,7 @@
         },
         "fr": {
           "native_authored_page_count": 2,
-          "native_operation_count": 14,
+          "native_operation_count": 15,
           "placeholders_used": [
             "master_name"
           ],
@@ -38801,7 +38803,7 @@
         },
         "us": {
           "native_authored_page_count": 2,
-          "native_operation_count": 13,
+          "native_operation_count": 15,
           "placeholders_used": [
             "master_name"
           ],
@@ -38842,7 +38844,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 2,
-          "native_operation_count": 14,
+          "native_operation_count": 15,
           "placeholders_used": [
             "master_name"
           ],
@@ -38859,7 +38861,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 2,
-          "native_operation_count": 13,
+          "native_operation_count": 15,
           "placeholders_used": [
             "master_name"
           ],
@@ -38876,7 +38878,7 @@
         },
         "fr": {
           "native_authored_page_count": 2,
-          "native_operation_count": 14,
+          "native_operation_count": 15,
           "placeholders_used": [
             "master_name"
           ],
@@ -38910,7 +38912,7 @@
         },
         "us": {
           "native_authored_page_count": 2,
-          "native_operation_count": 13,
+          "native_operation_count": 15,
           "placeholders_used": [
             "master_name"
           ],
@@ -38951,7 +38953,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 13,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name"
           ],
@@ -38964,7 +38966,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 14,
+          "native_operation_count": 16,
           "placeholders_used": [
             "master_name"
           ],
@@ -38977,7 +38979,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 13,
+          "native_operation_count": 14,
           "placeholders_used": [
             "master_name"
           ],
@@ -39003,7 +39005,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 14,
+          "native_operation_count": 16,
           "placeholders_used": [
             "master_name"
           ],
@@ -39040,7 +39042,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 2,
-          "native_operation_count": 15,
+          "native_operation_count": 16,
           "placeholders_used": [
             "master_name"
           ],
@@ -39053,7 +39055,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 2,
-          "native_operation_count": 15,
+          "native_operation_count": 17,
           "placeholders_used": [
             "master_name"
           ],
@@ -39066,7 +39068,7 @@
         },
         "fr": {
           "native_authored_page_count": 2,
-          "native_operation_count": 15,
+          "native_operation_count": 16,
           "placeholders_used": [
             "master_name"
           ],
@@ -39092,7 +39094,7 @@
         },
         "us": {
           "native_authored_page_count": 2,
-          "native_operation_count": 15,
+          "native_operation_count": 17,
           "placeholders_used": [
             "master_name"
           ],
@@ -39130,7 +39132,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 15,
+          "native_operation_count": 16,
           "placeholders_used": [
             "master_name",
             "required_master_level"
@@ -39144,7 +39146,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 15,
+          "native_operation_count": 17,
           "placeholders_used": [
             "master_name",
             "required_master_level"
@@ -39158,7 +39160,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 14,
+          "native_operation_count": 15,
           "placeholders_used": [
             "master_name",
             "required_master_level"
@@ -39186,7 +39188,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 15,
+          "native_operation_count": 17,
           "placeholders_used": [
             "master_name",
             "required_master_level"
@@ -39224,7 +39226,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 10,
           "placeholders_used": [
             "master_name"
           ],
@@ -39237,7 +39239,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 11,
           "placeholders_used": [
             "master_name"
           ],
@@ -39250,7 +39252,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 10,
           "placeholders_used": [
             "master_name"
           ],
@@ -39276,7 +39278,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 11,
           "placeholders_used": [
             "master_name"
           ],
@@ -39313,7 +39315,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 8,
           "placeholders_used": [
             "master_name"
           ],
@@ -39326,7 +39328,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 9,
           "placeholders_used": [
             "master_name"
           ],
@@ -39339,7 +39341,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 8,
           "placeholders_used": [
             "master_name"
           ],
@@ -39365,7 +39367,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 9,
           "placeholders_used": [
             "master_name"
           ],
@@ -39479,7 +39481,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 8,
           "placeholders_used": [
             "master_name"
           ],
@@ -39496,7 +39498,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 9,
           "placeholders_used": [
             "master_name"
           ],
@@ -39513,7 +39515,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 8,
           "placeholders_used": [
             "master_name"
           ],
@@ -39547,7 +39549,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 9,
           "placeholders_used": [
             "master_name"
           ],
@@ -39588,7 +39590,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 5,
+          "native_operation_count": 6,
           "placeholders_used": [
             "master_name"
           ],
@@ -39601,7 +39603,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 5,
+          "native_operation_count": 7,
           "placeholders_used": [
             "master_name"
           ],
@@ -39614,7 +39616,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 5,
+          "native_operation_count": 6,
           "placeholders_used": [
             "master_name"
           ],
@@ -39640,7 +39642,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 5,
+          "native_operation_count": 7,
           "placeholders_used": [
             "master_name"
           ],
@@ -40901,7 +40903,7 @@
         "city_northwall_items",
         "city_northwall_level",
         "city_northwall_population",
-        "icon.ui.selection_pointer",
+        "icon.status.population",
         "total_population"
       ],
       "availability": "all_supported_releases",
@@ -40919,8 +40921,8 @@
           "native_operation_count": 74,
           "placeholders_used": [
             "total_population",
-            "icon.ui.selection_pointer",
-            "icon.ui.selection_pointer",
+            "icon.status.population",
+            "icon.status.population",
             "city_fillmore_population",
             "city_fillmore_growth_state",
             "city_fillmore_level",
@@ -40953,8 +40955,8 @@
           "native_operation_count": 73,
           "placeholders_used": [
             "total_population",
-            "icon.ui.selection_pointer",
-            "icon.ui.selection_pointer",
+            "icon.status.population",
+            "icon.status.population",
             "city_fillmore_population",
             "city_fillmore_growth_state",
             "city_fillmore_level",
@@ -40987,8 +40989,8 @@
           "native_operation_count": 74,
           "placeholders_used": [
             "total_population",
-            "icon.ui.selection_pointer",
-            "icon.ui.selection_pointer",
+            "icon.status.population",
+            "icon.status.population",
             "city_fillmore_population",
             "city_fillmore_growth_state",
             "city_fillmore_level",
@@ -41018,9 +41020,11 @@
         },
         "jp": {
           "native_authored_page_count": 1,
-          "native_operation_count": 71,
+          "native_operation_count": 74,
           "placeholders_used": [
             "total_population",
+            "icon.status.population",
+            "icon.status.population",
             "city_fillmore_population",
             "city_fillmore_growth_state",
             "city_fillmore_level",
@@ -41053,8 +41057,8 @@
           "native_operation_count": 73,
           "placeholders_used": [
             "total_population",
-            "icon.ui.selection_pointer",
-            "icon.ui.selection_pointer",
+            "icon.status.population",
+            "icon.status.population",
             "city_fillmore_population",
             "city_fillmore_growth_state",
             "city_fillmore_level",
@@ -41461,7 +41465,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 8,
           "placeholders_used": [
             "master_name"
           ],
@@ -41478,7 +41482,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 9,
           "placeholders_used": [
             "master_name"
           ],
@@ -41495,7 +41499,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 8,
           "placeholders_used": [
             "master_name"
           ],
@@ -41529,7 +41533,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 9,
           "placeholders_used": [
             "master_name"
           ],
@@ -41632,7 +41636,9 @@
       }
     },
     {
-      "allowed_placeholders": [],
+      "allowed_placeholders": [
+        "icon.ui.speed_direction"
+      ],
       "availability": "all_supported_releases",
       "available_releases": [
         "us",
@@ -41645,32 +41651,47 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 5,
-          "placeholders_used": [],
+          "native_operation_count": 8,
+          "placeholders_used": [
+            "icon.ui.speed_direction",
+            "icon.ui.speed_direction"
+          ],
           "required_anchors": []
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 5,
-          "placeholders_used": [],
+          "native_operation_count": 8,
+          "placeholders_used": [
+            "icon.ui.speed_direction",
+            "icon.ui.speed_direction"
+          ],
           "required_anchors": []
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 5,
-          "placeholders_used": [],
+          "native_operation_count": 8,
+          "placeholders_used": [
+            "icon.ui.speed_direction",
+            "icon.ui.speed_direction"
+          ],
           "required_anchors": []
         },
         "jp": {
           "native_authored_page_count": 1,
-          "native_operation_count": 5,
-          "placeholders_used": [],
+          "native_operation_count": 8,
+          "placeholders_used": [
+            "icon.ui.speed_direction",
+            "icon.ui.speed_direction"
+          ],
           "required_anchors": []
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 5,
-          "placeholders_used": [],
+          "native_operation_count": 8,
+          "placeholders_used": [
+            "icon.ui.speed_direction",
+            "icon.ui.speed_direction"
+          ],
           "required_anchors": []
         }
       },
@@ -41873,7 +41894,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 10,
           "placeholders_used": [
             "master_name"
           ],
@@ -41890,7 +41911,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 11,
           "placeholders_used": [
             "master_name"
           ],
@@ -41907,7 +41928,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 10,
           "placeholders_used": [
             "master_name"
           ],
@@ -41941,7 +41962,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 11,
           "placeholders_used": [
             "master_name"
           ],
@@ -41982,7 +42003,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 9,
+          "native_operation_count": 10,
           "placeholders_used": [
             "master_name"
           ],
@@ -41995,7 +42016,7 @@
         },
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 11,
+          "native_operation_count": 13,
           "placeholders_used": [
             "master_name"
           ],
@@ -42008,7 +42029,7 @@
         },
         "fr": {
           "native_authored_page_count": 1,
-          "native_operation_count": 11,
+          "native_operation_count": 12,
           "placeholders_used": [
             "master_name"
           ],
@@ -42034,7 +42055,7 @@
         },
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 11,
+          "native_operation_count": 13,
           "placeholders_used": [
             "master_name"
           ],
@@ -42964,7 +42985,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 3,
-          "native_operation_count": 23,
+          "native_operation_count": 24,
           "placeholders_used": [
             "master_name"
           ],
@@ -42993,7 +43014,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 2,
-          "native_operation_count": 15,
+          "native_operation_count": 16,
           "placeholders_used": [
             "master_name"
           ],
@@ -43022,7 +43043,7 @@
       "contracts": {
         "de": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 8,
           "placeholders_used": [
             "master_name"
           ],
@@ -43096,7 +43117,7 @@
       "contracts": {
         "eu-en": {
           "native_authored_page_count": 3,
-          "native_operation_count": 25,
+          "native_operation_count": 27,
           "placeholders_used": [
             "master_name"
           ],
@@ -43125,7 +43146,7 @@
       "contracts": {
         "eu-en": {
           "native_authored_page_count": 2,
-          "native_operation_count": 15,
+          "native_operation_count": 17,
           "placeholders_used": [
             "master_name"
           ],
@@ -43154,7 +43175,7 @@
       "contracts": {
         "eu-en": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 9,
           "placeholders_used": [
             "master_name"
           ],
@@ -43228,7 +43249,7 @@
       "contracts": {
         "fr": {
           "native_authored_page_count": 3,
-          "native_operation_count": 27,
+          "native_operation_count": 28,
           "placeholders_used": [
             "master_name"
           ],
@@ -43257,7 +43278,7 @@
       "contracts": {
         "fr": {
           "native_authored_page_count": 2,
-          "native_operation_count": 17,
+          "native_operation_count": 18,
           "placeholders_used": [
             "master_name"
           ],
@@ -43625,7 +43646,7 @@
       "contracts": {
         "us": {
           "native_authored_page_count": 3,
-          "native_operation_count": 25,
+          "native_operation_count": 27,
           "placeholders_used": [
             "master_name"
           ],
@@ -43654,7 +43675,7 @@
       "contracts": {
         "us": {
           "native_authored_page_count": 2,
-          "native_operation_count": 15,
+          "native_operation_count": 17,
           "placeholders_used": [
             "master_name"
           ],
@@ -43683,7 +43704,7 @@
       "contracts": {
         "us": {
           "native_authored_page_count": 1,
-          "native_operation_count": 7,
+          "native_operation_count": 9,
           "placeholders_used": [
             "master_name"
           ],

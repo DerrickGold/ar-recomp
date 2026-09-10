@@ -15,6 +15,30 @@ static bool ByteNear(Uint8 left, Uint8 right) {
   return abs((int)left - (int)right) <= 2;
 }
 
+static SDL_BlendMode AlphaAccumulateBlend(void) {
+  return SDL_ComposeCustomBlendMode(
+      SDL_BLENDFACTOR_ZERO, SDL_BLENDFACTOR_ONE,
+      SDL_BLENDOPERATION_ADD, SDL_BLENDFACTOR_ONE,
+      SDL_BLENDFACTOR_ONE, SDL_BLENDOPERATION_ADD);
+}
+
+static SDL_BlendMode DestinationAlphaMaskBlend(void) {
+  return SDL_ComposeCustomBlendMode(
+      SDL_BLENDFACTOR_ZERO, SDL_BLENDFACTOR_ONE,
+      SDL_BLENDOPERATION_ADD, SDL_BLENDFACTOR_ZERO,
+      SDL_BLENDFACTOR_SRC_ALPHA, SDL_BLENDOPERATION_ADD);
+}
+
+static bool TextureBlendSupported(SDL_Texture *texture,
+                                  SDL_BlendMode blend) {
+  SDL_BlendMode original = SDL_BLENDMODE_INVALID;
+  assert(SDL_GetTextureBlendMode(texture, &original));
+  const bool supported = SDL_SetTextureBlendMode(texture, blend);
+  assert(SDL_SetTextureBlendMode(texture, original));
+  SDL_ClearError();
+  return supported;
+}
+
 static void AssertTextureState(SDL_Texture *texture,
                                float r, float g, float b, float a,
                                SDL_BlendMode blend) {
@@ -89,6 +113,10 @@ int main(void) {
   assert(SDL_SetTextureColorModFloat(native, 0.8f, 0.7f, 0.6f));
   assert(SDL_SetTextureAlphaModFloat(native, 0.5f));
   assert(SDL_SetTextureBlendMode(native, SDL_BLENDMODE_BLEND));
+  const bool mask_blend_supported = TextureBlendSupported(
+      native, DestinationAlphaMaskBlend());
+  const bool accumulate_blend_supported = TextureBlendSupported(
+      native, AlphaAccumulateBlend());
 
   const ArRenderDrawState state = {
     .flags = kArRenderDrawState_Tint | kArRenderDrawState_Blend,
@@ -105,7 +133,9 @@ int main(void) {
     .blend = kArRenderBlendMode_DestinationAlphaMask,
   };
   assert(ArRenderDevice_DrawTextureWithState(
-      &device, texture, NULL, &destination, &mask_state));
+      &device, texture, NULL, &destination, &mask_state) ==
+      mask_blend_supported);
+  SDL_ClearError();
   AssertTextureState(
       native, 0.8f, 0.7f, 0.6f, 0.5f, SDL_BLENDMODE_BLEND);
   const ArRenderDrawState accumulate_state = {
@@ -113,7 +143,9 @@ int main(void) {
     .blend = kArRenderBlendMode_AlphaAccumulate,
   };
   assert(ArRenderDevice_DrawTextureWithState(
-      &device, texture, NULL, &destination, &accumulate_state));
+      &device, texture, NULL, &destination, &accumulate_state) ==
+      accumulate_blend_supported);
+  SDL_ClearError();
   AssertTextureState(
       native, 0.8f, 0.7f, 0.6f, 0.5f, SDL_BLENDMODE_BLEND);
 
@@ -179,13 +211,9 @@ int main(void) {
   ArRenderTexture alpha_premultiplied_target = ArRenderTexture_Invalid();
   assert(ArRenderDevice_CreateTexture(
       &device, &alpha_premultiplied_desc, &alpha_premultiplied_target));
-  const SDL_BlendMode alpha_premultiplied = SDL_ComposeCustomBlendMode(
-      SDL_BLENDFACTOR_ONE, SDL_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
-      SDL_BLENDOPERATION_ADD, SDL_BLENDFACTOR_ONE,
-      SDL_BLENDFACTOR_ONE_MINUS_SRC_ALPHA, SDL_BLENDOPERATION_ADD);
   AssertTextureState(
       ArSdlRenderBackend_UnwrapTexture(alpha_premultiplied_target),
-      1.0f, 1.0f, 1.0f, 1.0f, alpha_premultiplied);
+      1.0f, 1.0f, 1.0f, 1.0f, SDL_BLENDMODE_BLEND_PREMULTIPLIED);
   const SDL_Rect saved_viewport = {1, 2, 12, 11};
   const SDL_Rect saved_clip = {3, 4, 6, 5};
   assert(SDL_SetRenderViewport(renderer, &saved_viewport));
@@ -220,20 +248,22 @@ int main(void) {
     .tint = {1.0f, 1.0f, 1.0f, 64.0f / 255.0f},
     .blend = kArRenderBlendMode_AlphaAccumulate,
   };
-  assert(ArRenderDevice_DrawTextureWithState(
-      &device, texture, NULL, &destination, &weighted_accumulate));
-  assert(ArRenderDevice_DrawTextureWithState(
-      &device, texture, NULL, &destination, &weighted_accumulate));
-  SDL_Surface *accumulated = SDL_RenderReadPixels(renderer, NULL);
-  assert(accumulated);
-  Uint8 accumulated_r = 255, accumulated_g = 255;
-  Uint8 accumulated_b = 255, accumulated_a = 0;
-  assert(SDL_ReadSurfacePixel(
-      accumulated, 0, 0, &accumulated_r, &accumulated_g,
-      &accumulated_b, &accumulated_a));
-  assert(accumulated_r == 0 && accumulated_g == 0 && accumulated_b == 0);
-  assert(accumulated_a == 128);
-  SDL_DestroySurface(accumulated);
+  if (accumulate_blend_supported) {
+    assert(ArRenderDevice_DrawTextureWithState(
+        &device, texture, NULL, &destination, &weighted_accumulate));
+    assert(ArRenderDevice_DrawTextureWithState(
+        &device, texture, NULL, &destination, &weighted_accumulate));
+    SDL_Surface *accumulated = SDL_RenderReadPixels(renderer, NULL);
+    assert(accumulated);
+    Uint8 accumulated_r = 255, accumulated_g = 255;
+    Uint8 accumulated_b = 255, accumulated_a = 0;
+    assert(SDL_ReadSurfacePixel(
+        accumulated, 0, 0, &accumulated_r, &accumulated_g,
+        &accumulated_b, &accumulated_a));
+    assert(accumulated_r == 0 && accumulated_g == 0 && accumulated_b == 0);
+    assert(accumulated_a == 128);
+    SDL_DestroySurface(accumulated);
+  }
 
   /* A stack group is rendered over transparent with ordinary alpha, which
    * leaves premultiplied RGB in its target. Compositing that target once with

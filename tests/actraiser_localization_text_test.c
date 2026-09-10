@@ -8,6 +8,7 @@
 static uint8_t s_wram[0x20000];
 static uint8_t s_bank01[0x10000];
 static int s_failures;
+static unsigned s_bank01_reads;
 
 #define CHECK(expression) do {                                             \
   if (!(expression)) {                                                     \
@@ -21,7 +22,10 @@ uint8 cpu_read8(CpuState *cpu, uint8 bank, uint16 address) {
   (void)cpu;
   if (bank == 0 || bank == 0x7E) return s_wram[address];
   if (bank == 0x7F) return s_wram[0x10000u + address];
-  if (bank == 1) return s_bank01[address];
+  if (bank == 1) {
+    ++s_bank01_reads;
+    return s_bank01[address];
+  }
   return 0;
 }
 
@@ -98,9 +102,20 @@ static void TestDialogueObservationIsReadOnly(void) {
   CHECK(observation.game_frame == 0x1234);
   CHECK(observation.direct_page == 0x0200);
   CHECK(observation.map_number == kActRaiserNonActionMap_SkyPalace);
+  CHECK(observation.entry_compose_serial != 0);
 
   s_bank01[0xFA6A] = 0x02;
   CHECK(!ActRaiser_LocalizationObserveTextByte(&cpu));
+  observation.struct_size = sizeof(observation);
+  CHECK(ActRaiserLocalizationText_CopyObservation(&observation));
+  CHECK(observation.awaiting_page_advance);
+  const uint16_t saved_x = cpu.X;
+  cpu.X = 0x0610;
+  CHECK(!ActRaiser_LocalizationObserveContinuation(&cpu));
+  CHECK(ActRaiserLocalizationText_CopyObservation(&observation));
+  CHECK(observation.continuation_cell_valid);
+  CHECK(observation.continuation_cell == 0x0308);
+  cpu.X = saved_x;
   cpu.Y = 0xFA6B;
   s_bank01[0xFA6B] = 'A';
   CHECK(!ActRaiser_LocalizationObserveTextByte(&cpu));
@@ -108,32 +123,49 @@ static void TestDialogueObservationIsReadOnly(void) {
   CHECK(ActRaiserLocalizationText_CopyObservation(&observation));
   CHECK(observation.cursor_pc24 == 0x01FA6Bu);
   CHECK(observation.page_index == 1);
+  CHECK(observation.window_start_page == 1);
   CHECK(observation.page_unit_index == 1);
+  CHECK(!observation.awaiting_page_advance);
+  CHECK(!observation.continuation_cell_valid);
   CHECK(!observation.terminal);
+
+  /* Nonzero native text-state keeps rows across the same $02 command. */
+  s_wram[0x0200] = 1;
+  s_bank01[0xFA6B] = 0x02;
+  CHECK(!ActRaiser_LocalizationObserveTextByte(&cpu));
+  s_bank01[0xFA6B] = 'B';
+  CHECK(!ActRaiser_LocalizationObserveTextByte(&cpu));
+  CHECK(ActRaiserLocalizationText_CopyObservation(&observation));
+  CHECK(observation.page_index == 2);
+  CHECK(observation.window_start_page == 1);
+  CHECK(observation.page_unit_index == 1);
+  /* An explicit reset discards earlier continuations, not the session. */
+  s_bank01[0xFA6B] = 0x05;
+  CHECK(!ActRaiser_LocalizationObserveTextByte(&cpu));
+  CHECK(ActRaiserLocalizationText_CopyObservation(&observation));
+  CHECK(observation.window_start_page == 2);
+
+  s_bank01[0xFA6B] = 0x01;
+  CHECK(!ActRaiser_LocalizationObserveTextByte(&cpu));
+  CHECK(ActRaiserLocalizationText_CopyObservation(&observation));
+  CHECK(observation.yielded_to_menu);
+  CHECK(!observation.terminal && !observation.awaiting_page_advance);
 
   s_bank01[0xFA6B] = 0x00;
   CHECK(!ActRaiser_LocalizationObserveTextByte(&cpu));
   observation.struct_size = sizeof(observation);
   CHECK(ActRaiserLocalizationText_CopyObservation(&observation));
-  CHECK(observation.page_unit_index == 2);
+  CHECK(observation.page_unit_index == 4);
+  CHECK(!observation.yielded_to_menu);
   CHECK(observation.terminal);
-  CHECK(!ActRaiserLocalizationText_TerminalWasReplaced(&observation));
+  CHECK(observation.terminal_compose_serial ==
+        observation.entry_compose_serial);
 
-  /* The terminal byte starts the visible native acknowledgement wait. The
-   * completed page remains current until subsequent UI composition proves it
-   * was replaced. */
-  cpu.PB = 0x02;
-  cpu.DB = 0x01;
-  cpu.Y = 0xF272;
-  cpu.A = 0x0714;
-  WriteReturnAddress(cpu.S, 0x01, 0xF100);
-  CHECK(!ActRaiser_LocalizationObserveTextCompose(&cpu));
-  CHECK(ActRaiserLocalizationText_TerminalWasReplaced(&observation));
-  observation.terminal = false;
-  CHECK(!ActRaiserLocalizationText_TerminalWasReplaced(&observation));
-  observation.abi_version = 0;
-  observation.terminal = true;
-  CHECK(!ActRaiserLocalizationText_TerminalWasReplaced(&observation));
+  CHECK(!ActRaiser_LocalizationObserveMenuClear(&cpu));
+  CHECK(!ActRaiserLocalizationText_CopyObservation(&observation));
+  const CpuState before_clear = cpu;
+  CHECK(!ActRaiser_LocalizationObserveGeneralClear(&cpu));
+  CHECK(memcmp(&before_clear, &cpu, sizeof(cpu)) == 0);
 }
 
 static void TestDialogueWrapperContext(void) {
@@ -199,6 +231,27 @@ static void TestComposerRingAndDropSignal(void) {
   CHECK(event[0].source_pc24 == 0x01F272u);
   CHECK(event[0].caller_pc24 == 0x01F101u);
   CHECK(event[0].destination == 0x0714);
+  CHECK(event[0].source_table_pc24 == 0);
+
+  /* The indexed source resolver is a read-only seam before `$01:8C79`
+   * destroys the logical selector while looking up a pointer. */
+  cpu.DB = 1;
+  cpu.D = 0x0200;
+  cpu.A = 13;
+  cpu_write16(&cpu, 0, 0x0208, 0xF08C);
+  const CpuState before = cpu;
+  CHECK(!ActRaiser_LocalizationObserveIndexedComposeSource(&cpu));
+  CHECK(memcmp(&before, &cpu, sizeof(cpu)) == 0);
+  cpu.Y = 0xF158;
+  cpu.A = 0x0A12;
+  WriteReturnAddress(cpu.S, 0x01, 0x8C92);
+  CHECK(!ActRaiser_LocalizationObserveTextCompose(&cpu));
+  count = 0;
+  CHECK(ActRaiserLocalizationText_CopyComposeObservations(
+      event[0].serial, event, 4, &count, &dropped));
+  CHECK(count == 1);
+  CHECK(event[0].source_table_pc24 == 0x01F08Eu);
+  CHECK(event[0].source_selector == 12);
 
   const uint64_t first_serial = event[0].serial;
   for (unsigned i = 0; i < 260; ++i) {
@@ -223,10 +276,109 @@ static void TestRejectionsAndReset(void) {
   CHECK(!ActRaiserLocalizationText_CopyObservation(&observation));
   CHECK(!ActRaiser_LocalizationObserveTextEntry(NULL));
   CHECK(!ActRaiser_LocalizationObserveTextByte(NULL));
+  CHECK(!ActRaiser_LocalizationObserveIndexedComposeSource(NULL));
   CHECK(!ActRaiser_LocalizationObserveTextCompose(NULL));
+  CHECK(!ActRaiser_LocalizationObserveTextErase(NULL));
   CHECK(!ActRaiser_LocalizationObserveDialogueWrapper0(NULL));
   CHECK(!ActRaiser_LocalizationObserveDialogueWrapper6(NULL));
   CHECK(ActRaiser_LocalizationTextObserverTrap(NULL) == RECOMP_RETURN_NORMAL);
+}
+
+static void TestEraseFootprints(void) {
+  const uint16_t destinations[] = {
+      0x0B17, 0x0A12, 0x0C12, 0x0512, 0x0603, 0x1310,
+      0x001F, 0x1F1F, 0x2000, 0xFF00,
+  };
+  const uint8_t records[][16] = {
+      {0}, {'A', 'B', 'C', 0},
+      {'A', 0x0D, 0x0D, 'B', 'C', 0},
+      {0x09, 0x80, 0x0B, 0x20, 0x0D, 0x0D, 'X', 0},
+      {'1', '2', '3', '4', '5', '6', 0x0D, '7', 0},
+  };
+  for (size_t d = 0; d < sizeof(destinations) / sizeof(destinations[0]); ++d) {
+    for (size_t r = 0; r < sizeof(records) / sizeof(records[0]); ++r) {
+      ActRaiserLocalizationText_ResetObservation();
+      CpuState cpu = MakeCpu();
+      cpu.x_flag = 0;
+      cpu.A = destinations[d];
+      cpu.Y = 0xFFFF;  /* The native 16-bit source cursor can wrap banks. */
+      for (size_t i = 0; i < sizeof(records[r]); ++i)
+        s_bank01[(uint16_t)(cpu.Y + i)] = records[r][i];
+      CHECK(!ActRaiser_LocalizationObserveTextCompose(&cpu));
+      CHECK(!ActRaiser_LocalizationObserveTextEntry(&cpu));
+      ActRaiserLocalizationTextObservation text = {.struct_size = sizeof(text)};
+      CHECK(ActRaiserLocalizationText_CopyObservation(&text));
+      const uint64_t after_serial = text.entry_compose_serial;
+      const CpuState before = cpu;
+      static uint8_t wram_before[sizeof(s_wram)];
+      memcpy(wram_before, s_wram, sizeof(s_wram));
+      CHECK(!ActRaiser_LocalizationObserveTextErase(&cpu));
+      CHECK(memcmp(&before, &cpu, sizeof(cpu)) == 0);
+      CHECK(memcmp(wram_before, s_wram, sizeof(s_wram)) == 0);
+
+      /* Independent byte-store oracle for $C1E9/$C1ED. $09/$80/$0B
+       * have no special formatting meaning to the native eraser. */
+      bool expected[32 * 32] = {0}, actual[32 * 32] = {0};
+      uint16_t line = (uint16_t)((cpu.A >> 8) * 64u + (cpu.A & 255u) * 2u);
+      uint16_t x = line;
+      for (size_t i = 0; records[r][i]; ++i) {
+        if (records[r][i] == 0x0D) {
+          line += 64;
+          x = line;
+        } else {
+          const uint16_t writes[] = {(uint16_t)(0xB000u + x),
+                                     (uint16_t)(0xAFC0u + x)};
+          for (size_t w = 0; w < 2; ++w)
+            if (writes[w] >= 0xB000 && writes[w] < 0xB800)
+              expected[(writes[w] - 0xB000) / 2u] = true;
+          x += 2;
+        }
+      }
+      ActRaiserLocalizationComposeObservation events[64];
+      size_t count = 0;
+      bool dropped = false;
+      CHECK(ActRaiserLocalizationText_CopyComposeObservations(
+          after_serial, events, 64, &count, &dropped));
+      CHECK(!dropped);
+      bool dialogue_erased = false;
+      for (size_t i = 0; i < count; ++i) {
+        const ActRaiserLocalizationComposeObservation *event = &events[i];
+        CHECK(event->serial > after_serial);
+        CHECK(event->clear_first_column + event->clear_column_count <= 32);
+        CHECK(event->clear_first_row + event->clear_row_count <= 32);
+        for (unsigned row = event->clear_first_row;
+             row < event->clear_first_row + event->clear_row_count; ++row)
+          for (unsigned col = event->clear_first_column;
+               col < event->clear_first_column + event->clear_column_count; ++col)
+            actual[row * 32 + col] = true;
+        dialogue_erased |= event->clears_dialogue;
+      }
+      CHECK(memcmp(actual, expected, sizeof(actual)) == 0);
+      bool expected_dialogue_erased = false;
+      for (unsigned row = 19; row < 25; ++row)
+        for (unsigned col = 5; col < 29; ++col)
+          expected_dialogue_erased |= expected[row * 32 + col];
+      CHECK(dialogue_erased == expected_dialogue_erased);
+      CHECK(ActRaiserLocalizationText_CopyObservation(&text) == !dialogue_erased);
+    }
+  }
+  /* Malformed records cannot turn a read-only observer into an MMIO read or
+   * an unbounded scan. Their native execution is still left untouched. */
+  CpuState cpu = MakeCpu();
+  cpu.A = 0;
+  s_bank01_reads = 0;
+  CHECK(!ActRaiser_LocalizationObserveTextErase(&cpu));
+  CHECK(s_bank01_reads == 0);  /* Unsupported 8-bit indices: no inferred erase. */
+  cpu.x_flag = 0;
+  cpu.Y = 0x2100;
+  s_bank01_reads = 0;
+  CHECK(!ActRaiser_LocalizationObserveTextErase(&cpu));
+  CHECK(s_bank01_reads == 0);
+  cpu.Y = 0x9000;
+  memset(s_bank01 + cpu.Y, 'X', 4096);
+  s_bank01_reads = 0;
+  CHECK(!ActRaiser_LocalizationObserveTextErase(&cpu));
+  CHECK(s_bank01_reads == 2048);
 }
 
 int main(void) {
@@ -236,6 +388,7 @@ int main(void) {
   TestComposerRingAndDropSignal();
   TestDialogueObservationIsReadOnly();
   TestDialogueWrapperContext();
+  TestEraseFootprints();
   TestRejectionsAndReset();
   if (s_failures) return 1;
   puts("localization text observation checks passed");

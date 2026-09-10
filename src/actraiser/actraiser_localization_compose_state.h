@@ -1,0 +1,109 @@
+#ifndef ACTRAISER_LOCALIZATION_COMPOSE_STATE_H
+#define ACTRAISER_LOCALIZATION_COMPOSE_STATE_H
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "actraiser/actraiser_localization_routes.h"
+#include "localization/localization_frame.h"
+
+#define ACTRAISER_LOCALIZATION_COMPOSE_STATE_ABI_VERSION UINT32_C(5)
+
+enum {
+  kActRaiserLocalizationComposeSurfaceFirst = 2,
+  kActRaiserLocalizationComposeSurfaceLast = 9,
+  kActRaiserLocalizationComposeSurfaceCapacity = 8,
+  kActRaiserLocalizationComposeTextCapacity = 4096,
+  kActRaiserLocalizationComposeSemanticIdCapacity = 256,
+};
+
+typedef struct ActRaiserLocalizationComposeSnapshot {
+  /* A live native source can remain observed without claiming any pixels.
+   * This permits enabling/recovering enhanced text without a native redraw. */
+  bool observed;
+  bool active;
+  uint32_t surface_id;
+  uint64_t generation_serial;
+  uint64_t source_revision;
+  ArTextCellRegion region;
+  uint16_t native_destination;
+  uint8_t native_font_pixels;
+  ArLocalizationTextLayoutKind layout;
+  char semantic_id[kActRaiserLocalizationComposeSemanticIdCapacity];
+  uint32_t cluster_count;
+  ArLocalizationInlineObjectSnapshot
+      inline_objects[kArLocalizationFrameInlineObjectCapacity];
+  uint8_t inline_object_count;
+  size_t utf8_bytes;
+  char utf8[kActRaiserLocalizationComposeTextCapacity];
+} ActRaiserLocalizationComposeSnapshot;
+
+typedef struct ActRaiserLocalizationComposeState {
+  size_t struct_size;
+  uint32_t abi_version;
+  uint64_t dialogue_replacement_serial;
+  uint8_t map_group;
+  uint8_t map_number;
+  bool scene_valid;
+  ActRaiserLocalizationComposeSnapshot
+      surfaces[kActRaiserLocalizationComposeSurfaceCapacity];
+} ActRaiserLocalizationComposeState;
+
+/* Resolves one semantic fixed-text message into an immutable, complete UTF-8
+ * snapshot. Returning false leaves the corresponding native cells unclaimed. */
+typedef bool (*ActRaiserLocalizationComposeTextResolver)(
+    void *context, const char *semantic_id,
+    char *utf8, size_t utf8_capacity, size_t *utf8_bytes,
+    uint32_t *cluster_count, uint64_t *source_revision,
+    ArLocalizationInlineObjectSnapshot *inline_objects,
+    size_t inline_object_capacity, uint8_t *inline_object_count,
+    char *error, size_t error_capacity);
+
+void ActRaiserLocalizationComposeState_Init(
+    ActRaiserLocalizationComposeState *state);
+void ActRaiserLocalizationComposeState_Clear(
+    ActRaiserLocalizationComposeState *state);
+void ActRaiserLocalizationComposeState_SetScene(
+    ActRaiserLocalizationComposeState *state,
+    uint8_t map_group, uint8_t map_number);
+/* Releases one semantic surface at a proven native generation boundary. */
+bool ActRaiserLocalizationComposeState_ReleaseSurface(
+    ActRaiserLocalizationComposeState *state, uint32_t surface_id);
+bool ActRaiserLocalizationComposeState_Process(
+    ActRaiserLocalizationComposeState *state,
+    const ActRaiserLocalizationComposeObservation *observation,
+    ActRaiserLocalizationComposeTextResolver resolve_text,
+    void *resolve_context, char *error, size_t error_capacity);
+/* Rebuilds one active persistent surface only when its expected revision has
+ * changed. A failed rebuild releases ownership so current native cells remain
+ * visible instead of leaving stale enhanced values on screen. */
+bool ActRaiserLocalizationComposeState_Refresh(
+    ActRaiserLocalizationComposeState *state, uint32_t surface_id,
+    uint64_t expected_source_revision,
+    ActRaiserLocalizationComposeTextResolver resolve_text,
+    void *resolve_context, char *error, size_t error_capacity);
+/* Resolve the latest revision transactionally when the revision is itself
+ * derived from live UI state. A failed refresh releases native-cell ownership
+ * rather than retaining stale enhanced text. */
+bool ActRaiserLocalizationComposeState_RefreshLatest(
+    ActRaiserLocalizationComposeState *state, uint32_t surface_id,
+    ActRaiserLocalizationComposeTextResolver resolve_text,
+    void *resolve_context, char *error, size_t error_capacity);
+bool ActRaiserLocalizationComposeState_AppendFrame(
+    const ActRaiserLocalizationComposeState *state,
+    ArLocalizationFrame *frame, ArTextCellDestination destination,
+    ArTextDirection direction);
+bool ActRaiserLocalizationComposeState_DialogueWasReplaced(
+    const ActRaiserLocalizationComposeState *state,
+    uint64_t terminal_compose_serial);
+size_t ActRaiserLocalizationComposeState_ActiveCount(
+    const ActRaiserLocalizationComposeState *state);
+const ActRaiserLocalizationComposeSnapshot *
+ActRaiserLocalizationComposeState_Find(
+    const ActRaiserLocalizationComposeState *state, uint32_t surface_id);
+const ActRaiserLocalizationComposeSnapshot *
+ActRaiserLocalizationComposeState_FindObserved(
+    const ActRaiserLocalizationComposeState *state, uint32_t surface_id);
+
+#endif /* ACTRAISER_LOCALIZATION_COMPOSE_STATE_H */

@@ -50,7 +50,133 @@ def extraction(release_id, routes):
     }
 
 
+def native_break_tests():
+    layout = {'columns': 12, 'space_delimited_words': True}
+
+    def converted(left, right, geometry=layout, category='town_dialogue'):
+        left_ops = [{'op': 'text', 'value': left}] if isinstance(left, str) else left
+        right_ops = [{'op': 'text', 'value': right}] if isinstance(right, str) else right
+        return PACK.source_operations_to_author(route('test.wrap', [
+            *left_ops, {'op': 'line_break'}, *right_ops, {'op': 'end'},
+        ], category), geometry)
+
+    def hard(operations):
+        return any(op['op'] == 'line' for op in operations)
+
+    assert hard(converted('Hello', 'world again'))  # Short intentional line.
+    assert hard(converted('Hello!', 'world again'))  # Exact 12-cell fit.
+    soft = converted('Hello!!', 'world again')  # Whole word exceeds by one.
+    assert not hard(soft)
+    assert soft[0]['value'] == 'Hello!! world again'
+    assert hard(converted('Hello!!', 'a longer phrase'))  # Only the first word.
+    assert hard(converted('  Hello!    ', '    world again'))  # Dictionary padding.
+    for accent in ('é', 'e\u0301'):
+        assert hard(converted(accent * 6, 'world again'))  # Not UTF-8 byte count.
+        assert not hard(converted(accent * 7, 'world again'))
+    for dynamic in ({'op': 'insert_master_name'},
+                    {'op': 'format_number', 'value': 'total_score', 'width': 0x86},
+                    {'op': 'insert_indexed_text', 'value': 'town_name'}):
+        assert hard(converted([{'op': 'text', 'value': 'Title '}, dynamic], 'welcome'))
+    assert hard(converted('Hello!', [
+        {'op': 'format_number', 'value': 'total_population', 'width': 5}]))
+    assert not hard(converted('Hello!!', [
+        {'op': 'format_number', 'value': 'total_population', 'width': 5}]))
+    assert hard(converted('', 'world'))
+    assert hard(converted('Hello!!', ''))
+    assert hard(converted('Hello!!', 'world', None))  # Old extraction: no geometry.
+    assert hard(converted('Hello!!', 'world', {'columns': 12}))
+    assert hard(converted('Hello!!', 'world',
+                          {'columns': 12, 'space_delimited_words': False}))
+    for category in ('ending_text', 'post_offering_or_ending_native', 'fixed_composer'):
+        assert hard(converted('Hello!!', 'world', category=category))
+    for boundary in ('page_break', 'reset_text_cursor', 'yield', 'end'):
+        source = route('test.boundary', [
+            {'op': 'text', 'value': 'Previous long text'}, {'op': boundary},
+            {'op': 'text', 'value': 'Hi'}, {'op': 'line_break'},
+            {'op': 'text', 'value': 'there'}, {'op': boundary},
+            {'op': 'line_break'}, {'op': 'line_break'},
+        ])
+        assert PACK.native_line_breaks(source, layout) == {3, 6, 7}
+    source = route('test.round_trip', [
+        {'op': 'text', 'value': 'Title '}, {'op': 'insert_master_name'},
+        {'op': 'line_break'}, {'op': 'text', 'value': 'Hello!!'},
+        {'op': 'line_break'}, {'op': 'text', 'value': 'world again'},
+        {'op': 'yield'}, {'op': 'end'},
+    ])
+    operations = PACK.source_operations_to_author(source, layout)
+    emitted = PACK.emit_artext([{'id': source['id'], 'operations': operations}])
+    assert 'Title {master_name}\n@line\nHello!! world again' in emitted
+    assert PACK.canonical_messages(PACK.parse_artext_text(emitted)) == \
+        PACK.canonical_messages([{'id': source['id'], 'operations': operations}])
+    # Equal source bytes cannot alias routes with different line/layout policies.
+    other = route('test.fixed', source['source_operations'], 'fixed_composer')
+    ir = extraction('us', [source, other])
+    ir['native_dialogue_layout'] = layout
+    messages = PACK.build_source_messages(ir)
+    assert all('alias' not in message for message in messages)
+
+
 def main():
+    native_break_tests()
+    numbers = PACK.source_operations_to_author(route('test.numbers', [
+        {'op': 'format_number', 'value': 'total_population', 'width': 3},
+        {'op': 'format_number', 'value': 'score_fillmore_act_1', 'width': 0x84},
+        {'op': 'format_number', 'value': 'total_score', 'width': 0x86},
+        {'op': 'end'},
+    ], 'fixed_composer'))
+    assert numbers[0]['minimum_digits'] == 3
+    assert 'minimum_digits' not in numbers[1]
+    assert 'minimum_digits' not in numbers[2]
+
+    # Source conversion produces explicit cells and collapses multipart art;
+    # the renderer must not guess columns from words in a translated label.
+    speed = PACK.source_operations_to_author(route(
+        'system.message_speed.scale_labels', [
+            {'op': 'text', 'value': '0123456789  '},
+            {'op': 'line_break'}, {'op': 'line_break'},
+            {'op': 'text', 'value': 'Quick'},
+            {'op': 'insert_icon', 'value': 'ui.speed_direction', 'part_index': 0},
+            {'op': 'insert_icon', 'value': 'ui.speed_direction', 'part_index': 1},
+            {'op': 'text', 'value': 'Gradual'}, {'op': 'end'},
+        ], 'fixed_composer'))
+    assert speed[0]['value'] == '0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9'
+    assert sum(op['op'] == 'placeholder' for op in speed) == 1
+    title = PACK.fixed_table_operations([
+        {'op': 'text', 'value': 'TOTAL PEOPLE'}, {'op': 'line'},
+        {'op': 'text', 'value': 'IN THIS CITY   '},
+        {'op': 'placeholder', 'name': 'total_population'}, {'op': 'end'},
+    ], 'status.report.cities_report')
+    assert title[0]['value'] == 'TOTAL PEOPLE'
+    assert title[2]['value'] == 'IN THIS CITY'
+    assert title[3]['value'] == ' | '
+
+    formatted = PACK.parse_artext_text(
+        ':: status.report.master_report\n{master_level:03}\n@end\n')
+    assert formatted[0]['operations'][0]['minimum_digits'] == 3
+    assert PACK.canonical_messages(PACK.parse_artext_text(
+        PACK.emit_artext(formatted))) == PACK.canonical_messages(formatted)
+    for bad_format in ('00', '010', '3', '0', ''):
+        expect_error(lambda: PACK.parse_artext_text(
+            ':: test.format\n{master_level:' + bad_format + '}\n'),
+            'number format')
+
+    for category in ('town_dialogue', 'system_dialogue'):
+        addressed = PACK.source_operations_to_author(route('test.address', [
+            {'op': 'text', 'value': 'Title '},
+            {'op': 'insert_master_name'},
+            {'op': 'text', 'value': ' what next?'},
+            {'op': 'end'},
+        ], category))
+        assert PACK.emit_artext([{'id': 'test.address',
+                                 'operations': addressed}]).find(
+                                     'Title {master_name} what next?') >= 0
+    for suffix in (' next', ', welcome'):
+        addressed = PACK.source_operations_to_author(route('test.name', [
+            {'op': 'insert_master_name'},
+            {'op': 'text', 'value': suffix}, {'op': 'end'},
+        ]))
+        assert addressed[1]['value'] == suffix
+
     manifest = PACK.parse_manifest_text('''
 [pack]
 format = actraiser-language-pack

@@ -437,8 +437,44 @@ static bool ResolveValue(void *context, const char *name,
     snprintf(value->text, sizeof(value->text), "%s", name);
     return true;
   }
+  if (expected == kArLanguagePlaceholder_Number) {
+    value->number = 2;
+    return true;
+  }
   snprintf(error, error_capacity, "unexpected synthetic value");
   return false;
+}
+
+static void TestNumberFormatting(void) {
+  ArLanguagePack pack;
+  ArLanguagePack_Init(&pack);
+  ArLanguagePackError error;
+  CHECK(LoadPack(&pack, "format.test", "en-US",
+      ":: status.report.master_report\n"
+      "{master_level:03}|{master_level:01}|{master_level}\n@end\n", &error));
+  ResolverState values = {0};
+  const ArDialogueValueResolver resolver = {
+      .struct_size = sizeof(resolver),
+      .abi_version = AR_DIALOGUE_VALUE_RESOLVER_ABI_VERSION,
+      .context = &values, .resolve = ResolveValue,
+  };
+  const ArDialogueContentSelection selection =
+      Selection(kArDialoguePresentation_Enhanced, &pack, &pack);
+  ArDialogueSession session;
+  ArDialogueSession_Init(&session);
+  CHECK(ArDialogueSession_Begin(&session, &selection,
+                                "status.report.master_report", &resolver, &error));
+  ArDialoguePageSnapshot page;
+  CHECK(ArDialogueSession_GetPage(&session, &page));
+  CHECK(!strcmp(page.utf8, "002|2|2"));
+  CHECK((uint32_t)values.calls == ArLanguageContract_AllowedPlaceholderCount(
+      "status.report.master_report")); /* One capture per allowed value. */
+  ArDialogueSession_Destroy(&session);
+  ArLanguagePack_Destroy(&pack);
+  CHECK(LoadPack(&pack, "format.bad", "en-US",
+      ":: status.report.master_report\n{master_name:03}\n@end\n", &error));
+  CHECK(!ArLanguageContract_ValidatePack(&pack, NULL, &error));
+  ArLanguagePack_Destroy(&pack);
 }
 
 static void TestControlsValuesAndIcons(void) {
@@ -455,7 +491,9 @@ static void TestControlsValuesAndIcons(void) {
       "@anchor yield.01\n";
   static const char icon_script[] =
       ":: name_entry.prompt_and_alphabet\n"
-      "A{icon.name_entry.backspace}B{icon.name_entry.finish}\n";
+      "A{icon.name_entry.backspace}B{icon.name_entry.finish}\n"
+      "@page\n"
+      "α{icon.name_entry.backspace}β{icon.name_entry.finish}\n";
   ArLanguagePack first, second, icons;
   ArLanguagePack_Init(&first);
   ArLanguagePack_Init(&second);
@@ -546,9 +584,12 @@ static void TestControlsValuesAndIcons(void) {
   ArDialoguePageSnapshot page;
   CHECK(ArDialogueSession_GetPage(&session, &page));
   CHECK(page.inline_object_count == 2);
+  CHECK(page.page_count == 2);
   CHECK(strcmp(page.inline_objects[0].id, "icon.name_entry.backspace") == 0);
   CHECK(strcmp(page.inline_objects[1].id, "icon.name_entry.finish") == 0);
   CHECK(strstr(page.utf8, "\xEF\xBF\xBC") != NULL);
+  CHECK(ArDialogueSession_GetAuthoredPage(&session, 1, &page));
+  CHECK(page.page_index == 1 && strstr(page.utf8, "α") != NULL);
 
   ArDialogueSession_Destroy(&session);
   ArLanguagePack_Destroy(&icons);
@@ -613,6 +654,17 @@ static void TestEnhancedNativeProgressSynchronization(void) {
   CHECK(page.revealed_cluster_count == 3); /* ceil(2/4 * 5) */
   CHECK(page.revealed_utf8_bytes == 3);
 
+  ArDialoguePageSnapshot authored;
+  CHECK(ArDialogueSession_GetAuthoredPage(&session, 1, &authored));
+  CHECK(authored.page_index == 1 && authored.page_count == 2);
+  CHECK(authored.revealed_cluster_count == authored.cluster_count);
+  CHECK(authored.revealed_utf8_bytes == authored.utf8_bytes);
+  CHECK(!memcmp(authored.utf8, "XYZ", 3));
+  CHECK(!ArDialogueSession_GetAuthoredPage(&session, 2, &authored));
+  /* Reading another authored page never moves the live mapped page. */
+  CHECK(ArDialogueSession_GetPage(&session, &page));
+  CHECK(page.page_index == 0 && page.revealed_cluster_count == 3);
+
   /* A native script with more pages maps to the final translated page. */
   progress.authored_page_index = 9;
   progress.revealed_unit_count = 1;
@@ -629,6 +681,17 @@ static void TestEnhancedNativeProgressSynchronization(void) {
   CHECK(ArDialogueSession_GetPage(&session, &page));
   CHECK(page.page_index == 1 && page.revealed_cluster_count == 1);
 
+  progress.revealed_unit_count = 1;
+  progress.awaiting_page_advance = true;
+  CHECK(ArDialogueSession_SynchronizeNativeProgress(&session, &progress, &error));
+  CHECK(ArDialogueSession_GetPage(&session, &page));
+  CHECK(page.revealed_cluster_count == page.cluster_count);
+  progress.awaiting_page_advance = false;
+  progress.terminal = true;
+  CHECK(ArDialogueSession_SynchronizeNativeProgress(&session, &progress, &error));
+  CHECK(ArDialogueSession_GetPage(&session, &page));
+  CHECK(page.revealed_utf8_bytes == page.utf8_bytes);
+
   ArDialogueSession_Destroy(&session);
   ArLanguagePack_Destroy(&pack);
 }
@@ -639,6 +702,7 @@ int main(void) {
   TestFallbackAndTransactionalFailure();
   TestWaitSwitchAndRestore();
   TestControlsValuesAndIcons();
+  TestNumberFormatting();
   TestCorruptStateRejected();
   TestEnhancedNativeProgressSynchronization();
   if (failures) {

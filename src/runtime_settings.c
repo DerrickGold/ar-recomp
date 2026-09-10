@@ -8,6 +8,7 @@
 
 #include "actraiser_rtl.h"
 #include "actraiser/actraiser_action_bg.h"
+#include "actraiser/actraiser_localization_runtime.h"
 #include "diorama/diorama.h"
 #include "display_geometry.h"
 #include "frame_slot.h"
@@ -245,6 +246,9 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
                                     SettingChangeResult result) {
   (void)result;
 
+  if (desc->category == kSettingCat_Localization)
+    ActRaiserLocalizationRuntime_ApplySettings();
+
   if (desc->field == &g_settings.audio_master_volume)
     HostAudio_SetMasterVolumePercent(g_settings.audio_master_volume);
   if (desc->field == &g_settings.audio_music_volume ||
@@ -300,6 +304,8 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
            desc->category == kSettingCat_Widescreen)
     HostDisplay_ApplyWindowScale();
   if (desc->category == kSettingCat_Display ||
+      desc->category == kSettingCat_Localization ||
+      desc->category == kSettingCat_LocalizationFont ||
       desc->category == kSettingCat_Widescreen ||
       Settings_CategoryIsSim3D(desc->category))
     HostInput_RequestPausedRedraw();

@@ -8,7 +8,7 @@
 #include "render/render_types.h"
 
 #define AR_TEXT_RASTERIZER_ABI_VERSION UINT32_C(1)
-#define AR_TEXT_RASTER_REQUEST_ABI_VERSION UINT32_C(4)
+#define AR_TEXT_RASTER_REQUEST_ABI_VERSION UINT32_C(5)
 #define AR_TEXT_BITMAP_ABI_VERSION UINT32_C(2)
 
 enum { kArTextRasterErrorCapacity = 256 };
@@ -33,6 +33,9 @@ enum {
   /* Ask the backend to return shaped cluster rectangles. The cached page can
    * then be revealed without reshaping, rerasterizing, or moving glyphs. */
   kArTextRasterFlag_IncludeRevealClusters = UINT32_C(1) << 3,
+  /* Tight fixed-row labels may discard transparent top/bottom padding. This
+   * is not appropriate for baseline-aligned fields or scrolling dialogue. */
+  kArTextRasterFlag_CropVerticalWhitespace = UINT32_C(1) << 4,
 };
 
 typedef enum ArTextStyle {
@@ -141,5 +144,10 @@ bool ArTextRasterizer_Rasterize(const ArTextRasterizer *rasterizer,
                                 char *error, size_t error_capacity);
 void ArTextRasterizer_ReleaseBitmap(const ArTextRasterizer *rasterizer,
                                     ArTextBitmap *bitmap);
+
+/* Bounds of nontransparent pixels within a bitmap-local rectangle. Empty for
+ * transparent/invalid input; RGB565 is opaque. Does not alter font metrics. */
+ArRenderRectI ArTextBitmap_InkBounds(const ArTextBitmap *bitmap,
+                                    ArRenderRectI region);
 
 #endif /* AR_LOCALIZATION_TEXT_RASTERIZER_H */

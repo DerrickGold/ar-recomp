@@ -8,7 +8,7 @@
 #include <stdint.h>
 
 #define AR_DIALOGUE_SESSION_ABI_VERSION UINT32_C(1)
-#define AR_DIALOGUE_VALUE_RESOLVER_ABI_VERSION UINT32_C(1)
+#define AR_DIALOGUE_VALUE_RESOLVER_ABI_VERSION UINT32_C(2)
 
 enum {
   kArDialogueMessageIdCapacity = 256,
@@ -42,7 +42,8 @@ typedef bool (*ArDialogueResolveValue)(
     ArDialogueValue *value, char *error, size_t error_capacity);
 
 typedef bool (*ArDialogueFormatNumber)(
-    void *context, const char *locale, int64_t number, char *utf8,
+    void *context, const char *locale, int64_t number, unsigned minimum_digits,
+    char *utf8,
     size_t utf8_capacity);
 
 typedef struct ArDialogueValueResolver {
@@ -193,6 +194,12 @@ bool ArDialogueSession_ResumeInput(ArDialogueSession *session);
 bool ArDialogueSession_AdvancePage(ArDialogueSession *session);
 bool ArDialogueSession_GetPage(const ArDialogueSession *session,
                                ArDialoguePageSnapshot *page);
+/* Read one complete authored page without mutating reveal or dialogue state.
+ * Fixed semantic UIs such as the name-entry keyboard use this to select among
+ * pack-defined pages while the untouched native loop remains authoritative. */
+bool ArDialogueSession_GetAuthoredPage(const ArDialogueSession *session,
+                                       uint32_t page_index,
+                                       ArDialoguePageSnapshot *page);
 
 /* Valid only while NativeRom is the resolved source. This is transactional:
  * malformed or regressive observations leave the prior state untouched. */

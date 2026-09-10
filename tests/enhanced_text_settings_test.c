@@ -45,7 +45,7 @@ int main(void) {
   CHECK(settings.size_percent == 140);
   CHECK(settings.sampling == kArEnhancedTextSampling_Crisp);
   CHECK(settings.pixelation == kArEnhancedTextPixelation_Mosaic);
-  CHECK(settings.pixelation_size == 4);
+  CHECK(settings.pixelation_size == 2);
   CHECK(ArEnhancedTextSettings_ScaledPixels(&settings, 20) == 28);
 
   ArTextRasterRequest request = Request();
@@ -54,7 +54,7 @@ int main(void) {
   CHECK(request.minimum_font_pixels == 21);
   CHECK(request.filter == kArRenderFilter_Nearest);
   CHECK(request.pixelation == kArTextPixelation_Mosaic);
-  CHECK(request.pixelation_size == 4);
+  CHECK(request.pixelation_size == 2);
 
   for (int percent = kArEnhancedTextMinimumSizePercent;
        percent <= kArEnhancedTextMaximumSizePercent;

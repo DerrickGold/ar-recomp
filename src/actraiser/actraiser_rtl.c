@@ -10,6 +10,7 @@
 #include "actraiser_game.h"
 #include "actraiser_action_bg.h"
 #include "actraiser_hle_fatal.h"
+#include "actraiser/actraiser_localization_routes.h"
 #include "action/action_bg_tuner.h"
 #include "action/action_effects.h"
 #include "action/action_load_pacing.h"
@@ -2113,9 +2114,7 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
    * destination surface; it must not silently expand policy after another
    * owner has inspected it. */
   const bool scoped_text_scene =
-      !survey && map_group == kActRaiserMapGroup_NonAction &&
-      map_number >= kActRaiserSimulationTown_First &&
-      map_number <= kActRaiserNonActionMap_SkyPalace;
+      !survey && ActRaiserLocalizationRoute_InScope(map_group, map_number);
   const bool flat_diorama = !survey && Diorama_IsActiveThisFrame() &&
       g_settings.diorama_hud_flat;
   const int bg3_capture_height = ArBg3Composite_CaptureHeight(

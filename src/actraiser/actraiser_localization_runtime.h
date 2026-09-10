@@ -6,15 +6,18 @@
 
 #include "localization/localization_frame.h"
 
-/* Game-thread adapter. Enhanced mode is currently enabled by the private
- * AR_LOCALIZATION_PACK manifest path; P9 replaces that bootstrap seam with the
- * persisted overlay catalogue without changing this frame contract. */
+/* Game-thread adapter. Persisted localization settings select native/enhanced
+ * presentation and font style. AR_LOCALIZATION_PACK still supplies the optional
+ * selected manifest until installed-pack discovery replaces that bootstrap
+ * seam; the native enhanced source is loaded separately. */
+/* Resolve source changes synchronously before the overlay saves preferences.
+ * Failed activation restores the previous content/presentation settings. */
+void ActRaiserLocalizationRuntime_ApplySettings(void);
 void ActRaiserLocalizationRuntime_CaptureFrame(
     ArLocalizationFrame *frame, uint16_t bg3_tilemap_base_words,
-    unsigned bg3_tilemap_width_tiles,
-    unsigned bg3_tilemap_height_tiles,
-    const uint16_t *vram_words,
-    size_t vram_word_count);
+    uint16_t bg3_tile_base_words,
+    const uint16_t *vram_words, size_t vram_word_count,
+    const uint16_t *cgram_words, size_t cgram_word_count);
 void ActRaiserLocalizationRuntime_Shutdown(void);
 
 #endif /* ACTRAISER_LOCALIZATION_RUNTIME_H */

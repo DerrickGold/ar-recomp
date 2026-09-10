@@ -363,6 +363,7 @@ static bool AppendValue(const ProgramSource *source,
                         const ArDialogueStableState *state,
                         const ArDialogueValueResolver *resolver,
                         DialoguePage *page, const char *name,
+                        unsigned minimum_digits,
                         ArLanguagePackError *error) {
   const ArDialogueValue *value = FindValue(state, name);
   if (!value) {
@@ -379,12 +380,12 @@ static bool AppendValue(const ProgramSource *source,
       formatted_number = resolver->format_number(
           resolver->context,
           ArLanguagePack_GetMetadata(source->effective_pack)->locale,
-          value->number, formatted, sizeof(formatted));
+          value->number, minimum_digits, formatted, sizeof(formatted));
       formatted[sizeof(formatted) - 1] = 0;
     } else {
       formatted_number =
-          snprintf(formatted, sizeof(formatted), "%lld",
-                   (long long)value->number) > 0;
+          snprintf(formatted, sizeof(formatted), "%0*lld",
+                   (int)minimum_digits, (long long)value->number) > 0;
     }
     if (!formatted_number || !ValidUtf8(formatted)) {
       SetError(error, "could not format numeric dialogue value '%s'", name);
@@ -487,7 +488,8 @@ static bool BuildProgram(const ProgramSource *source,
     case kArLanguageOperation_Placeholder: {
       const char *name = ArLanguagePack_GetString(
           source->effective_pack, operation->value.placeholder);
-      if (!AppendValue(source, state, resolver, page, name, error))
+      if (!AppendValue(source, state, resolver, page, name,
+                        operation->minimum_digits, error))
         goto failed;
       break;
     }
@@ -1179,6 +1181,33 @@ bool ArDialogueSession_GetPage(const ArDialogueSession *session,
   return true;
 }
 
+bool ArDialogueSession_GetAuthoredPage(const ArDialogueSession *session,
+                                       uint32_t page_index,
+                                       ArDialoguePageSnapshot *page) {
+  if (!IsInitialized(session) || !page ||
+      session->state.resolved_source == kArDialogueResolvedSource_NativeRom)
+    return false;
+  DialogueProgram *program = (DialogueProgram *)session->private_program;
+  if (!program || page_index >= program->page_count) return false;
+  const DialoguePage *source = &program->pages[page_index];
+  *page = (ArDialoguePageSnapshot){
+      .utf8 = source->utf8,
+      .utf8_bytes = source->utf8_bytes,
+      .revealed_utf8_bytes = source->utf8_bytes,
+      .page_index = page_index,
+      .page_count = program->page_count,
+      .revealed_cluster_count = source->cluster_count,
+      .cluster_count = source->cluster_count,
+      .inline_objects = source->objects,
+      .inline_object_count = source->object_count,
+      .source_revision = program->source_revision,
+      .package_id = program->package_id,
+      .locale = program->locale,
+      .direction = program->direction,
+  };
+  return true;
+}
+
 bool ArDialogueSession_ObserveNativeProgress(
     ArDialogueSession *session, const ArDialogueNativeProgress *progress,
     ArLanguagePackError *error) {
@@ -1257,7 +1286,11 @@ bool ArDialogueSession_SynchronizeNativeProgress(
   if (page_index >= program->page_count) page_index = program->page_count - 1u;
   DialoguePage *page = &program->pages[page_index];
   uint32_t revealed = page->cluster_count;
-  if (progress->page_unit_count) {
+  /* A native continuation/end is authoritative completion. Decoder-unit
+   * ratios are only an approximation while typing (dictionary/inline values
+   * need not expand to the extraction's number of top-level observations). */
+  if (progress->page_unit_count && !progress->awaiting_page_advance &&
+      !progress->terminal) {
     const uint64_t numerator =
         (uint64_t)progress->revealed_unit_count * page->cluster_count;
     revealed = (uint32_t)((numerator + progress->page_unit_count - 1u) /

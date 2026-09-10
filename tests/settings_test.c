@@ -67,6 +67,7 @@ static void InputActionObserved(InputAction action) {
 }
 
 static void ClearSettingsEnv(void) {
+  unsetenv("AR_LOCALIZATION_PACK");
   Settings_ClearConfigLayer();
   for (int i = 0; i < g_setting_desc_count; i++) {
     if (g_setting_descs[i].env)
@@ -105,8 +106,9 @@ static void TestDefaultsAndMetadata(void) {
    * mode setting. The native-audio work then added one restart-class extended
    * channel toggle. Removing the renderer selector took one Display row back
    * off: the PPU has a single path, so the setting selected between a modern
-   * renderer and a legacy one that no longer exists. */
-  CHECK(g_setting_desc_count == 274);
+   * renderer and a legacy one that no longer exists. Localization adds six
+   * source, presentation, and enhanced-font preferences. */
+  CHECK(g_setting_desc_count == 280);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -600,9 +602,15 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
         kSettingChange_Applied);
   CHECK(Settings_SetLong(Settings_Find("audio_master_volume"), 40) ==
         kSettingChange_Applied);
+  CHECK(Settings_SetText(Settings_Find("localization_presentation"), "Enhanced") ==
+        kSettingChange_Applied);
+  CHECK(Settings_SetLong(Settings_Find("localization_font_scale_percent"), 115) ==
+        kSettingChange_Applied);
   CHECK(Settings_Save(saved_path));
   CHECK(FileContains(saved_path, "window_scale = 6"));
   CHECK(FileContains(saved_path, "audio_master_volume = 40%"));
+  CHECK(FileContains(saved_path, "localization_presentation = Enhanced"));
+  CHECK(FileContains(saved_path, "localization_font_scale_percent = 115"));
   CHECK(FileContains(saved_path, "audio_music_volume = 55%"));
   CHECK(FileContains(saved_path, "audio_sfx_volume = 75%"));
   CHECK(FileContains(saved_path, "audio_extended_channels = On"));
@@ -637,6 +645,8 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
   CHECK(g_settings.window_scale == 6);
   CHECK(g_settings.window_mode == kWindowMode_Windowed);
   CHECK(g_settings.audio_master_volume == 45);
+  CHECK(g_settings.localization_presentation == 1);
+  CHECK(g_settings.localization_font_scale_percent == 115);
   CHECK(g_settings.audio_frequency == kAudioFrequency_32040);
   CHECK(Settings_AudioFrequencyHz() == 32040);
   CHECK(!g_settings.ws_sprites);
@@ -1475,7 +1485,61 @@ static void TestPersistenceCanBeDisabled(void) {
   remove(path);
 }
 
+static void TestLocalizationPreferences(void) {
+  ClearSettingsEnv();
+  Settings_Init();
+  CHECK(g_settings.localization_content == 0);
+  CHECK(g_settings.localization_presentation == 0);
+  CHECK(g_settings.localization_font_scale_percent == 140);
+  CHECK(g_settings.localization_font_sampling == 0);
+  CHECK(g_settings.localization_font_pixelation == 2);
+  CHECK(g_settings.localization_font_pixel_size == 2);
+  const SettingDesc *source = Settings_Find("localization_content");
+  const SettingDesc *mode = Settings_Find("localization_presentation");
+  const SettingDesc *size = Settings_Find("localization_font_scale_percent");
+  const SettingDesc *pixel = Settings_Find("localization_font_pixel_size");
+  CHECK(source && Settings_IsMenuVisible(source));
+  CHECK(size && !size->available());
+  CHECK(Settings_SetText(mode, "Enhanced") == kSettingChange_Applied);
+  CHECK(size->available());
+  CHECK(Settings_SetLong(size, 103) == kSettingChange_Applied);
+  CHECK(g_settings.localization_font_scale_percent == 100);
+  CHECK(Settings_SetLong(size, 200) == kSettingChange_Applied);
+  CHECK(g_settings.localization_font_scale_percent == 140);
+  CHECK(Settings_SetLong(size, 1) == kSettingChange_Applied);
+  CHECK(g_settings.localization_font_scale_percent == 80);
+  CHECK(Settings_SetLong(pixel, 7) == kSettingChange_Applied);
+  CHECK(g_settings.localization_font_pixel_size == 6);
+  CHECK(Settings_SetText(Settings_Find("localization_font_pixelation"),
+                         "None") == kSettingChange_Applied);
+  CHECK(!pixel->available());
+  CHECK(Settings_IsMenuVisible(source));
+
+  setenv("AR_LOCALIZATION_PACK", "/synthetic/pack.ini", 1);
+  Settings_Init();
+  CHECK(g_settings.localization_content == 1);
+  CHECK(g_settings.localization_presentation == 1);
+  setenv("AR_LOCALIZATION_PRESENTATION", "Native", 1);
+  Settings_Init();
+  CHECK(g_settings.localization_content == 1);
+  CHECK(g_settings.localization_presentation == 0);
+  ClearSettingsEnv();
+  setenv("AR_LOCALIZATION_PRESENTATION", "Enhanced", 1);
+  setenv("AR_LOCALIZATION_CONTENT", "Native US", 1);
+  setenv("AR_LOCALIZATION_FONT_SAMPLING", "Smooth", 1);
+  setenv("AR_LOCALIZATION_FONT_PIXELATION", "Low resolution", 1);
+  setenv("AR_LOCALIZATION_FONT_SCALE_PERCENT", "103", 1);
+  Settings_Init();
+  CHECK(g_settings.localization_content == 0);
+  CHECK(g_settings.localization_presentation == 1);
+  CHECK(g_settings.localization_font_sampling == 1);
+  CHECK(g_settings.localization_font_pixelation == 1);
+  CHECK(g_settings.localization_font_scale_percent == 100);
+  ClearSettingsEnv();
+}
+
 int main(void) {
+  TestLocalizationPreferences();
   TestPersistenceCanBeDisabled();
   TestUserDataFile();
   TestRimLightAvailabilityFollowsBlendSupport();

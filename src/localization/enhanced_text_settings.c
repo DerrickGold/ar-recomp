@@ -15,7 +15,7 @@ void ArEnhancedTextSettings_Defaults(ArEnhancedTextSettings *settings) {
       .size_percent = 140,
       .sampling = kArEnhancedTextSampling_Crisp,
       .pixelation = kArEnhancedTextPixelation_Mosaic,
-      .pixelation_size = 4,
+      .pixelation_size = 2,
   };
 }
 
