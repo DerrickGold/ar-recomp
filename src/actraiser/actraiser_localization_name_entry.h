@@ -4,14 +4,15 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "localization/language_keyboard_shape.h"
 
 #define ACTRAISER_LOCALIZATION_NAME_ENTRY_ABI_VERSION UINT32_C(2)
 #define ACTRAISER_LOCALIZATION_NAME_ENTRY_TRACKER_ABI_VERSION UINT32_C(1)
 
 enum {
   kActRaiserLocalizationNameLength = 8,
-  kActRaiserLocalizationNameEntryRows = 5,
-  kActRaiserLocalizationNameEntryColumns = 13,
+  kActRaiserLocalizationNameEntryRows = kArLanguageKeyboardRows,
+  kActRaiserLocalizationNameEntryColumns = kArLanguageKeyboardColumns,
   /* Native cells per key: a blank for the selector, then the glyph. */
   kActRaiserLocalizationNameEntryKeyCellColumns = 2,
   kActRaiserLocalizationNameCursorPixels = 8 * 8,

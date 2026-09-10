@@ -3,7 +3,6 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <math.h>
-#include <stdlib.h>
 #include <string.h>
 
 #define AR_MEMBER_END(type, member) \
@@ -339,44 +338,43 @@ bool ArTextBitmap_ApplyStyleShadow(void *pixels, int width, int height,
       offset_y <= -height || offset_y >= height)
     return true; /* Shifted clear of the surface: nothing to lay down. */
 
-  /* The source coverage has to be read from a copy: writing shadow into the
-   * surface as we scan would let one shadow pixel seed the next and smear the
-   * whole run sideways. Only the alpha plane is needed. */
-  uint8_t *coverage = (uint8_t *)malloc((size_t)width * (size_t)height);
-  if (!coverage) return false;
-  for (int y = 0; y < height; ++y) {
-    const uint8_t *row =
-        (const uint8_t *)pixels + (size_t)y * (size_t)pitch_bytes;
-    for (int x = 0; x < width; ++x) {
-      uint32_t pixel;
-      memcpy(&pixel, row + (size_t)x * 4u, sizeof(pixel));
-      coverage[(size_t)y * (size_t)width + (size_t)x] =
-          (uint8_t)(pixel & UINT32_C(0xff));
-    }
-  }
-
+  /* Traverse against the offset, like an overlapping memmove. Every source
+   * pixel is then read before its destination can overwrite it: when Y moves,
+   * its source row has not been visited; on the same row X provides the order.
+   * This prevents shadows casting more shadows without a coverage allocation
+   * (and therefore without a transient OOM being mistaken for invalid input). */
+  const int y_step = offset_y > 0 ? -1 : 1;
+  const int x_step = offset_x > 0 ? -1 : 1;
+  const int y_end = y_step < 0 ? -1 : height;
+  const int x_end = x_step < 0 ? -1 : width;
   const uint8_t red = (uint8_t)((shadow_rgb >> 16) & 255);
   const uint8_t green = (uint8_t)((shadow_rgb >> 8) & 255);
   const uint8_t blue = (uint8_t)(shadow_rgb & 255);
-  for (int y = 0; y < height; ++y) {
+  for (int y = y_step < 0 ? height - 1 : 0; y != y_end; y += y_step) {
+    /* Clip before subtraction so even extreme valid dimensions cannot
+     * overflow a signed source-row index. */
+    if ((offset_y > 0 && y < offset_y) ||
+        (offset_y < 0 && y >= height + offset_y)) continue;
     const int source_y = y - offset_y;
-    if (source_y < 0 || source_y >= height) continue;
     uint8_t *row = (uint8_t *)pixels + (size_t)y * (size_t)pitch_bytes;
-    for (int x = 0; x < width; ++x) {
+    const uint8_t *source_row =
+        (const uint8_t *)pixels + (size_t)source_y * (size_t)pitch_bytes;
+    for (int x = x_step < 0 ? width - 1 : 0; x != x_end; x += x_step) {
       const int source_x = x - offset_x;
       if (source_x < 0 || source_x >= width) continue;
       uint32_t pixel;
       memcpy(&pixel, row + (size_t)x * 4u, sizeof(pixel));
       if (pixel & UINT32_C(0xff)) continue; /* Never overwrite a letterform. */
-      const uint8_t alpha =
-          coverage[(size_t)source_y * (size_t)width + (size_t)source_x];
+      uint32_t source_pixel;
+      memcpy(&source_pixel, source_row + (size_t)source_x * 4u,
+             sizeof(source_pixel));
+      const uint8_t alpha = (uint8_t)(source_pixel & UINT32_C(0xff));
       if (!alpha) continue;
       pixel = ((uint32_t)red << 24) | ((uint32_t)green << 16) |
               ((uint32_t)blue << 8) | alpha;
       memcpy(row + (size_t)x * 4u, &pixel, sizeof(pixel));
     }
   }
-  free(coverage);
   return true;
 }
 

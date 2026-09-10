@@ -309,16 +309,24 @@ bool ArLocalizationFrame_AddTextWithGrid(
     uint32_t revealed_cluster_count, uint32_t cluster_count,
     uint64_t source_revision, ArTextDirection direction,
     uint8_t native_font_pixels, const ArLocalizationTextGrid *grid,
+    const uint8_t *structural_boundaries,
     const ArTextCellRegion *native_preserves,
     uint8_t native_preserve_count,
     const ArLocalizationInlineObjectSnapshot *inline_objects,
     uint8_t inline_object_count) {
-  return AddTextInternal(frame, surface_id, destination, region, utf8,
+  if (!AddTextInternal(frame, surface_id, destination, region, utf8,
                          utf8_bytes, revealed_cluster_count, cluster_count,
                          source_revision, direction, native_font_pixels,
                          kArLocalizationTextLayout_Grid, grid,
                          native_preserves, native_preserve_count,
-                         inline_objects, inline_object_count);
+                         inline_objects, inline_object_count))
+    return false;
+  const size_t offset = frame->snapshots[frame->snapshot_count - 1u].utf8_offset;
+  for (size_t i = 0; i < utf8_bytes; ++i)
+    ArTextBoundary_Set(frame->structural_boundaries, offset + i,
+        (utf8[i] == '|' || utf8[i] == '\n') &&
+        (!structural_boundaries || ArTextBoundary_Get(structural_boundaries, i)));
+  return true;
 }
 
 bool ArLocalizationFrame_SetKeySeparator(ArLocalizationFrame *frame,

@@ -82,6 +82,43 @@ static size_t FirstPixelForTile(size_t tile) {
          (tile % kSimWorldMapTiles) * kSimWorldMapTilePixels;
 }
 
+static void TestOpenWaterMaterial(void) {
+  uint8_t *rom = BuildRom();
+  memset(rom + kTilesOffset, 0x10, 64);
+  memset(rom + kTilesOffset + 0xAA * 64, 0x11, 64);
+  memset(rom + kWaterFramesOffset, 0x10, 4 * 64);
+  for (int f = 0; f < 4; f++) rom[kWaterFramesOffset + f * 64 + f] = 0x11;
+  memset(rom + kTilesOffset + 64, 0x10, 64);
+  rom[kTilesOffset + 127] = 0x20; /* Just one land texel protects a shore. */
+  CHECK(SimWorldMap_Init(rom, kRomSize));
+  CHECK(SimWorldMap_CellIsOpenWater(0, 0));
+  CHECK(!SimWorldMap_CellIsOpenWater(1, 0));
+  CHECK(SimWorldMap_CellIsOpenWater(0x10, 0));
+  CHECK(!SimWorldMap_CellIsOpenWater(0x12, 0)); /* Also blue in this fake palette. */
+  CHECK(!SimWorldMap_CellIsOpenWater(-1, 0) && !SimWorldMap_CellIsOpenWater(128, 0));
+  CHECK(!SimWorldMap_CellIsOpenWater(0, -1) && !SimWorldMap_CellIsOpenWater(0, 128));
+  const uint32_t geography = SimWorldMap_GeographySerial();
+  for (int f = 0; f < 4; f++) {
+    SimWorldMap_SetWaterAnimationSource(0xB000 + f * 64);
+    CHECK(SimWorldMap_CellIsOpenWater(0, 0));
+    CHECK(SimWorldMap_GeographySerial() == geography);
+  }
+  uint8_t map[kSimWorldMapBytes];
+  memcpy(map, SimWorldMap_Baseline(), sizeof(map));
+  map[0] = 1; map[1] = 0xAA;
+  CHECK(SimWorldMap_PublishBuiltTilemap(map) == 2);
+  CHECK(!SimWorldMap_CellIsOpenWater(0, 0) && SimWorldMap_CellIsOpenWater(1, 0));
+  /* A changed/custom animation cannot make the opacity pulse by phase. */
+  rom[kWaterFramesOffset + 3 * 64] = 0x20;
+  CHECK(SimWorldMap_Init(rom, kRomSize));
+  CHECK(!SimWorldMap_CellIsOpenWater(0, 0));
+  SimWorldMap_SetWaterAnimationSource(0xB000);
+  CHECK(!SimWorldMap_CellIsOpenWater(0, 0));
+  SimWorldMap_Shutdown();
+  CHECK(!SimWorldMap_CellIsOpenWater(0, 0));
+  free(rom);
+}
+
 static void TestWaterAnimation(void) {
   uint8_t *rom = BuildRom();
   /* Exercise both upload destinations. The baseline already contains tile
@@ -761,6 +798,7 @@ int main(int argc, char **argv) {
   TestTownWindows();
   TestBuiltTilemapPublication();
   TestWaterAnimation();
+  TestOpenWaterMaterial();
   TestMountainMaterialCoverage();
   TestBakeIsFullyCovered();
   TestDirtyTrackingMatchesFullBake();

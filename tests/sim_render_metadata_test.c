@@ -185,6 +185,38 @@ static void TestWorldNavigationAllTownObjects(void) {
       &towns, 3, kSimBackgroundVoxel_House, 1, 1) != NULL);
 }
 
+static void TestWorldNavigationSanctuaryVariants(void) {
+  uint8 wram[kActRaiserWramSize] = {0};
+  SimWorldNavigationTowns towns;
+  for (uint8 base = 0xC0; base <= 0xC2; base += 2) {
+    for (uint8 town = 1; town <= 6; town++) {
+      Write16(wram, 0x16B18 + (town - 1) * 2, 1);
+      /* Cross all four retained-map pages, including Marahna's C2 case. */
+      SetTownCell(wram, town, 15, 15, base);
+      SetTownCell(wram, town, 16, 15, base + 1);
+      SetTownCell(wram, town, 15, 16, base + 8);
+      SetTownCell(wram, town, 16, 16, base + 9);
+    }
+    SimWorldNavigationTowns_Capture(wram, &towns);
+    CHECK(towns.object_count == 6 && !towns.overflow);
+    for (uint8 town = 1; town <= 6; town++) {
+      const SimWorldNavigationTownObject *object = FindNavigationTownObject(
+          &towns, town, base == 0xC0 ? kSimBackgroundVoxel_MarahnaTemple
+                                   : kSimBackgroundVoxel_Cathedral, 15, 15);
+      CHECK(object && object->source_cells_w == 2 && object->source_cells_h == 2);
+      CHECK(towns.ground.object_rows[town - 1][15] == (3u << 15));
+      CHECK(towns.ground.object_rows[town - 1][16] == (3u << 15));
+    }
+    SetTownCell(wram, 5, 16, 16, 0); /* A partial signature must not be guessed. */
+    SimWorldNavigationTowns_Capture(wram, &towns);
+    CHECK(towns.object_count == 5 && !towns.ground.object_rows[4][15]);
+    SetTownCell(wram, 5, 16, 16, base + 9);
+    Write16(wram, 0x16B18 + 4 * 2, 0);
+    SimWorldNavigationTowns_Capture(wram, &towns);
+    CHECK(towns.object_count == 5 && !(towns.enabled_town_mask & (1u << 4)));
+  }
+}
+
 static void TestLightningMiracleEffectCapture(void) {
   uint8 wram[kActRaiserWramSize] = {0};
   wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
@@ -3109,6 +3141,7 @@ static void TestEruptionScriptWalk(void) {
 int main(int argc, char **argv) {
   TestFeatureDependencies();
   TestWorldNavigationAllTownObjects();
+  TestWorldNavigationSanctuaryVariants();
   TestLightningMiracleEffectCapture();
   TestTownCreationLightningEffectCapture();
   TestEnemyLightningAndFireEffectCapture();

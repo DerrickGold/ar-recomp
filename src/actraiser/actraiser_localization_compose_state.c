@@ -131,19 +131,9 @@ static void ClearIntersections(
  * renderer needs about that menu's shape is derived from this in
  * actraiser_localization_grid.c; the identity itself never leaves the game. */
 static ActRaiserLocalizationMenu MenuForSemanticId(const char *semantic_id) {
-  if (!strcmp(semantic_id, "status.report.cities_report"))
-    return kActRaiserLocalizationMenu_StatusCities;
-  if (!strcmp(semantic_id, "status.report.score_report"))
-    return kActRaiserLocalizationMenu_StatusScore;
-  if (!strcmp(semantic_id, "status.report.master_report"))
-    return kActRaiserLocalizationMenu_StatusMaster;
-  if (!strcmp(semantic_id, "system.message_speed.scale_labels"))
-    return kActRaiserLocalizationMenu_MessageSpeed;
-  if (!strcmp(semantic_id, "system.choice.yes_no") ||
-      !strncmp(semantic_id, "sky.menu.", 9) ||
-      !strncmp(semantic_id, "sim.menu.", 9))
-    return kActRaiserLocalizationMenu_FixedRows;
-  return kActRaiserLocalizationMenu_None;
+  /* The enum explicitly maps content shapes to this game's geometry. Route
+   * classification is generated, not a second prefix-based registry. */
+  return (ActRaiserLocalizationMenu)ArLanguageRowShape_ForRoute(semantic_id);
 }
 
 /* The name-entry keyboard reserves runs of ASCII blanks between its keys, so
@@ -173,12 +163,14 @@ static bool ResolveSnapshot(
     ActRaiserLocalizationComposeTextResolver resolve_text,
     void *resolve_context, char *error, size_t error_capacity) {
   if (!resolved || !resolve_text || !resolved->semantic_id[0]) return false;
+  memset(resolved->structural_boundaries, 0, sizeof(resolved->structural_boundaries));
   if (!resolve_text(resolve_context, resolved->semantic_id,
                     resolved->utf8, sizeof(resolved->utf8),
                     &resolved->utf8_bytes, &resolved->cluster_count,
                     &resolved->source_revision, resolved->inline_objects,
                     kArLocalizationFrameInlineObjectCapacity,
-                    &resolved->inline_object_count, error, error_capacity) ||
+                    &resolved->inline_object_count, resolved->structural_boundaries,
+                    error, error_capacity) ||
       resolved->utf8_bytes >= sizeof(resolved->utf8) ||
       resolved->utf8[resolved->utf8_bytes] != 0 ||
       (!resolved->utf8_bytes &&
@@ -322,6 +314,8 @@ bool ActRaiserLocalizationComposeState_RefreshLatest(
       refreshed.utf8_bytes == slot->utf8_bytes &&
       refreshed.inline_object_count == slot->inline_object_count &&
       !memcmp(refreshed.utf8, slot->utf8, refreshed.utf8_bytes + 1u) &&
+      !memcmp(refreshed.structural_boundaries, slot->structural_boundaries,
+              AR_TEXT_BOUNDARY_BYTES(refreshed.utf8_bytes)) &&
       !memcmp(refreshed.inline_objects, slot->inline_objects,
               (size_t)refreshed.inline_object_count *
                   sizeof(refreshed.inline_objects[0])))
@@ -395,7 +389,8 @@ bool ActRaiserLocalizationComposeState_AppendFrame(
               slot->utf8, slot->utf8_bytes,
               slot->cluster_count, slot->cluster_count,
               slot->source_revision, direction, slot->native_font_pixels,
-              &slot->grid, preserve_count ? preserves : NULL, preserve_count,
+              &slot->grid, slot->structural_boundaries,
+              preserve_count ? preserves : NULL, preserve_count,
               slot->inline_objects, slot->inline_object_count))
         complete = false;
       continue;

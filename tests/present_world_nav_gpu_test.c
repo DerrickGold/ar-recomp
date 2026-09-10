@@ -162,35 +162,29 @@ static void TestFraming(SDL_Renderer *renderer, FrameSlot *slot) {
   UploadWorldNavigationComposition(probe);
   for (int zoom = 3; zoom <= 10; zoom += zoom == 3 ? 2 : 5) {
     probe->sim.projection_distance_x100 = zoom * 100;
-    probe->sim_world_inspection_blend = 0;
     SDL_Surface *travel = Render(renderer, probe, NULL);
-    float previous = 10000;
+    /* Normal travel is centered too. Persisted oblique town poses cannot
+     * move the globe or skew the surface under the top-down Palace sprite. */
     for (int step = 0; step <= 4; step++) {
-      probe->sim_world_inspection_blend = step * .25f;
+      probe->sim.projection_pitch_mrad = -1300 + step * 300;
+      probe->sim.projection_yaw_mrad = -650 + step * 300;
       SDL_Surface *view = Render(renderer, probe, step == 4 && zoom == 3 ? "synthetic-centred" : NULL);
       const ArRenderRectI bounds = ColoredBounds(view);
       const float dx = bounds.x + bounds.w * .5f - kWidth * .5f;
       const float dy = bounds.y + bounds.h * .5f - kHeight * .5f;
-      const float offset = hypotf(dx, dy);
-      CHECK(offset <= previous + 1); /* Smoothly converges, no angle-dependent snap. */
-      if (step == 0) CHECK(offset > 20);
-      if (step == 4) {
-        CHECK(fabsf(dx) <= 2 && fabsf(dy) <= 2);
-        CHECK(bounds.x > 0 && bounds.y > 0 && bounds.x + bounds.w < kWidth && bounds.y + bounds.h < kHeight);
-      }
-      previous = offset;
+      CHECK(fabsf(dx) <= 2 && fabsf(dy) <= 2);
+      CHECK(bounds.x > 0 && bounds.y > 0 && bounds.x + bounds.w < kWidth && bounds.y + bounds.h < kHeight);
+      CHECK(Differences(travel, view) == 0);
       SDL_DestroySurface(view);
     }
-    probe->sim_world_inspection_blend = 0;
     SDL_Surface *restored = Render(renderer, probe, NULL);
     CHECK(Differences(travel, restored) == 0);
     SDL_DestroySurface(travel);
     SDL_DestroySurface(restored);
   }
-  /* Reframing moves the actual eye, not just projected pixels. The shared
-   * depth pass and whole-model horizon test must agree with that new eye. */
+  /* The shared depth pass and whole-model horizon test must agree with the
+   * centered radial eye, including manual rotation to the far hemisphere. */
   probe->sim.projection_distance_x100 = 300;
-  probe->sim_world_inspection_blend = 1;
   for (int side = 0; side < 2; side++) {
     probe->sim_manual_orbit_yaw = side * kPi;
     probe->sim.world_navigation_models = false;
@@ -216,7 +210,6 @@ static void TestAtmosphereProfile(SDL_Renderer *renderer, const FrameSlot *slot)
   probe->sim.cloud_altitude_px = 512;
   probe->sim.projection_pitch_mrad = probe->sim.projection_yaw_mrad = 0;
   probe->sim_manual_orbit_yaw = probe->sim_manual_orbit_pitch = 0;
-  probe->sim_world_inspection_blend = 1;
   UploadWorldNavigationComposition(probe);
   SDL_Surface *off = Render(renderer, probe, NULL);
   const ArRenderRectI ocean = ColoredBounds(off);
@@ -276,7 +269,6 @@ static void TestWeatherMotion(SDL_Renderer *renderer, const FrameSlot *slot,
   probe->sim.cloud_drift_pct = 100;
   probe->sim.world_navigation_clouds = probe->sim.world_navigation_cloud_shadows = true;
   probe->sim.world_navigation_lighting = true;
-  probe->sim_world_inspection_blend = 1;
   const float views[][2] = {{0, 0}, {kPi, 0}, {0, kPi * .5f}, {0, -kPi * .5f}, {.8f, .6f}};
   const uint64_t boundaries[] = {151000, 153500, 166667, 3600000, UINT64_C(576000000)};
   for (size_t view = 0; view < sizeof(views) / sizeof(views[0]); view++) {
@@ -368,7 +360,6 @@ static void CaptureWeatherSequence(SDL_Renderer *renderer, const FrameSlot *slot
   CHECK(probe);
   memcpy(probe, slot, sizeof(*probe));
   probe->sim.cloud_drift_pct = 100;
-  probe->sim_world_inspection_blend = 1;
   probe->sim_manual_orbit_yaw = .8f;
   probe->sim_manual_orbit_pitch = .6f;
   /* Thirty seconds of unchanged native geography and camera, including a
@@ -783,7 +774,6 @@ static void TestAdventClearance(SDL_Renderer *renderer, const FrameSlot *slot) {
   };
   const uint16_t heights[] = {0, 100, 400};
   probe->sim_manual_orbit_yaw = probe->sim_manual_orbit_pitch = 0;
-  probe->sim_world_inspection_blend = 0;
   probe->sim.projection_pitch_mrad = -575;
   probe->sim.projection_yaw_mrad = 0;
   probe->sim.projection_distance_x100 = 200;
@@ -826,6 +816,7 @@ static void TestTallModelViewport(SDL_Renderer *renderer, const FrameSlot *slot)
   FrameSlot *probe = malloc(sizeof(*probe));
   CHECK(probe);
   memcpy(probe, slot, sizeof(*probe));
+  probe->sim.view = kSimView_SkyPalace;
   probe->sim.world_navigation_models = true;
   probe->sim.world_navigation_relief = probe->sim.world_navigation_mountains = false;
   probe->sim.world_navigation_ground_detail = probe->sim.world_navigation_atmosphere = false;
@@ -833,16 +824,9 @@ static void TestTallModelViewport(SDL_Renderer *renderer, const FrameSlot *slot)
   probe->sim.world_navigation_lighting = probe->sim.world_navigation_backdrop = false;
   probe->sim.cloud_altitude_px = 0;
   probe->sim.height_scale_x100 = 400;
-  probe->sim.projection_pitch_mrad = -1300;
-  probe->sim.projection_yaw_mrad = 0;
-  probe->sim.projection_distance_x100 = 300;
   probe->sim_manual_orbit_pitch = probe->sim_manual_orbit_yaw = 0;
-  probe->sim_world_inspection_blend = 0;
   probe->sim.world_navigation.focus_x = 512;
-  probe->sim.world_navigation.focus_y = 338;
-  probe->sim.world_navigation.zoom_current = 70;
-  probe->sim.world_navigation.matrix[0] = probe->sim.world_navigation.matrix[3] = 35;
-  probe->sim.world_navigation.matrix[1] = probe->sim.world_navigation.matrix[2] = 0;
+  probe->sim.world_navigation.focus_y = 136;
   probe->sim.world_navigation_towns.object_count = 1;
   probe->sim.world_navigation_towns.objects[0] = (SimBackgroundVoxelObject){
     .town = 2, .kind = kSimBackgroundVoxel_BloodpoolCastle,
@@ -852,11 +836,12 @@ static void TestTallModelViewport(SDL_Renderer *renderer, const FrameSlot *slot)
     .visual_state = kSimStructureVisualState_Finished,
   };
   BuildScene(probe);
+  probe->sim.world_navigation_scene.active_region_valid = false;
   SDL_Surface *visible = Render(renderer, probe, "synthetic-tall-viewport");
   SDL_Surface *held = Render(renderer, probe, NULL);
   CHECK(Differences(visible, held) == 0);
   SDL_DestroySurface(held);
-  /* Keep models enabled so the same retained Advent envelope owns both
+  /* Keep models enabled so the same global safety envelope owns both
    * images. A zero-width footprint preserves that bound but cannot reach the
    * draw list. Ground detail is off in both images. */
   probe->sim.world_navigation_towns.objects[0].footprint_cells_w = 0;
@@ -880,6 +865,10 @@ static void TestSynthetic(SDL_Renderer *renderer) {
   /* A green central continent in blue ocean. Only public immutable decoder
    * inputs are generated: no copyrighted fixture or renderer-only texture. */
   rom[0xE3F93 + 1] = 0x60;
+  rom[0xE3F93 + 0x10 * 2 + 1] = 0x60;
+  memset(rom + 0x70000, 0x10, 64);
+  memset(rom + 0x70000 + 0xAA * 64, 0x10, 64);
+  memset(rom + 0x53000, 0x10, 4 * 64);
   rom[0xE3F93 + 2] = 0x04; rom[0xE3F93 + 3] = 0x03;
   memset(rom + 0x70000 + 64, 1, 64);
   for (int y = 40; y < 88; y++)
@@ -985,24 +974,19 @@ static void TestSynthetic(SDL_Renderer *renderer) {
   CHECK(Differences(near_marker, restored) == 0);
   SDL_DestroySurface(restored);
 
-  /* A wheel-only inspection has no orbit angle. The Palace must follow the
-   * terrain's reframing translation instead of cancelling it, while UI
-   * pixels stay fixed on both axes. Keep a tilted baseline to expose this. */
+  /* Zooming preserves the radial travel alignment. Native Palace/UI pixels
+   * stay the same size and location; town-camera tilt cannot displace them. */
   slot->sim.projection_pitch_mrad = -575;
   SDL_Surface *travel_marker = Render(renderer, slot, "synthetic-markers-travel");
-  slot->sim_world_inspection_blend = 1;
+  const uint16_t distance = slot->sim.projection_distance_x100;
+  slot->sim.projection_distance_x100 += 200;
+  slot->sim.projection_pitch_mrad = -1300;
+  slot->sim.projection_yaw_mrad = 650;
   SDL_Surface *centred_marker = Render(renderer, slot, "synthetic-markers-centred");
-  /* A fractional vertical translation may cover one extra raster row;
-   * the source billboard size is unchanged, unlike a projected model. */
-  const int marker_row = (int)ceilf(composition->palace.width * kWidth /
-      (float)kActRaiserAuthenticWidth);
   CHECK(ColorCount(centred_marker, 0xffff00ff) > 500);
-  CHECK(abs(ColorCount(centred_marker, 0xffff00ff) -
-      ColorCount(travel_marker, 0xffff00ff)) <= marker_row);
-  CHECK(abs(FirstColorY(centred_marker, 0xffff00ff) - FirstColorY(travel_marker, 0xffff00ff)) > 10);
-  CHECK(FirstColorX(centred_marker, 0xffff00ff) == FirstColorX(travel_marker, 0xffff00ff));
+  CheckColorMaskEqual(centred_marker, travel_marker, 0xffff00ff);
   CheckColorMaskEqual(centred_marker, travel_marker, 0xff00ffff);
-  slot->sim_world_inspection_blend = 0;
+  slot->sim.projection_distance_x100 = distance;
   restored = Render(renderer, slot, NULL);
   CHECK(Differences(travel_marker, restored) == 0);
   SDL_DestroySurface(restored);
@@ -1084,15 +1068,14 @@ static void CaptureTownAcceptanceMatrix(SDL_Renderer *renderer, const FrameSlot 
   const struct {
     const char *name;
     uint16_t zoom;
-    int distance, yaw;
-    float inspection;
+    int distance;
     int width, height;
     bool isolate_models;
   } views[] = {
-    {"near", kSimWorldNavigationZoomNear, 200, 0, 0, kWidth, kHeight, false},
-    {"middle", kSimWorldNavigationZoomMiddle, 300, 650, 0, kWidth, kHeight, false},
-    {"wide", kSimWorldNavigationZoomFar, 600, 0, 1, kWidth, kHeight, false},
-    {"near-hd", kSimWorldNavigationZoomNear, 200, 0, 0, 1792, 1344, true},
+    {"near", kSimWorldNavigationZoomNear, 200, kWidth, kHeight, false},
+    {"middle", kSimWorldNavigationZoomMiddle, 300, kWidth, kHeight, false},
+    {"wide", kSimWorldNavigationZoomFar, 600, kWidth, kHeight, false},
+    {"near-hd", kSimWorldNavigationZoomNear, 200, 1792, 1344, true},
   };
   const struct { const char *name; size_t offset; } toggles[] = {
     {"lighting", offsetof(SimFrameData, world_navigation_lighting)},
@@ -1125,9 +1108,7 @@ static void CaptureTownAcceptanceMatrix(SDL_Renderer *renderer, const FrameSlot 
       probe->sim.world_navigation.matrix[0] = probe->sim.world_navigation.matrix[3] = (int16_t)views[view].zoom;
       probe->sim.world_navigation.matrix[1] = probe->sim.world_navigation.matrix[2] = 0;
       probe->sim.projection_distance_x100 = views[view].distance;
-      probe->sim.projection_yaw_mrad = views[view].yaw;
       probe->sim_manual_orbit_yaw = probe->sim_manual_orbit_pitch = 0;
-      probe->sim_world_inspection_blend = views[view].inspection;
       probe->sim.world_navigation_haze = true;
       probe->sim.underlay_haze_pct = probe->sim.underlay_defocus_pct = 25;
       probe->sim.cull_haze_lead_px = 64;
@@ -1237,7 +1218,6 @@ static void TestVolcanoCapViews(SDL_Renderer *renderer, const FrameSlot *slot) {
   probe->sim.world_navigation_brightness = 15;
   probe->sim.projection_distance_x100 = 300;
   probe->sim_manual_orbit_yaw = probe->sim_manual_orbit_pitch = 0;
-  probe->sim_world_inspection_blend = 0;
   const int16_t matrices[5][4] = {
     {64, 0, 0, 64}, {0, -64, 64, 0}, {-64, 0, 0, -64},
     {0, 64, -64, 0}, {64, 0, 0, 64},
@@ -1271,6 +1251,53 @@ static void TestVolcanoCapViews(SDL_Renderer *renderer, const FrameSlot *slot) {
   free(probe);
 }
 
+static void TestCapturedMarahnaSanctuary(SDL_Renderer *renderer, const FrameSlot *slot) {
+  const SimWorldNavigationTowns *towns = &slot->sim.world_navigation_towns;
+  if (!(towns->enabled_town_mask & (1u << 4))) return;
+  const SimWorldNavigationTownObject *sanctuary = NULL;
+  for (int i = 0; i < towns->object_count; i++) {
+    const SimWorldNavigationTownObject *object = &towns->objects[i];
+    if (object->town == 5 && (object->kind == kSimBackgroundVoxel_Cathedral ||
+        object->kind == kSimBackgroundVoxel_MarahnaTemple)) {
+      CHECK(!sanctuary);
+      sanctuary = object;
+    }
+  }
+  CHECK(sanctuary);
+  FrameSlot *probe = malloc(sizeof(*probe));
+  CHECK(probe);
+  memcpy(probe, slot, sizeof(*probe));
+  probe->sim.world_navigation_towns.objects[0] = *sanctuary;
+  probe->sim.world_navigation_towns.object_count = 1;
+  int ox, oy;
+  CHECK(SimWorldMap_OriginForTown(5, &ox, &oy));
+  probe->sim.world_navigation.focus_x = (ox + sanctuary->cell_x + 1) * kSimWorldMapTilePixels;
+  probe->sim.world_navigation.focus_y = (oy + sanctuary->cell_y + 1) * kSimWorldMapTilePixels;
+  probe->sim.world_navigation.active_location = 5;
+  probe->sim.background_voxel_detail = kSimBackgroundVoxelDetail_Low;
+  probe->sim.projection_distance_x100 = 200;
+  probe->sim.world_navigation.zoom_current = kSimWorldNavigationZoomNear;
+  probe->sim.world_navigation.matrix[0] = probe->sim.world_navigation.matrix[3] = kSimWorldNavigationZoomNear;
+  probe->sim.world_navigation_models = true;
+  /* Keep the cleaned footprint and global height bound identical. Removing
+   * only drawable geometry prevents a vanished 2D glyph from passing this. */
+  probe->sim.world_navigation_towns.objects[0].footprint_cells_w = 0;
+  BuildScene(probe);
+  SDL_Surface *off = Render(renderer, probe, "captured-marahna-sanctuary-off");
+  probe->sim.world_navigation_towns.objects[0].footprint_cells_w = sanctuary->footprint_cells_w;
+  SDL_Surface *on = Render(renderer, probe, "captured-marahna-sanctuary-on");
+  CHECK(Differences(off, on) > 100);
+  SDL_Surface *held = Render(renderer, probe, NULL);
+  CHECK(Differences(on, held) == 0);
+  SDL_DestroySurface(held);
+  probe->sim.world_navigation_towns.objects[0].footprint_cells_w = 0;
+  SDL_Surface *restored = Render(renderer, probe, NULL);
+  CHECK(Differences(off, restored) == 0);
+  SDL_DestroySurface(off); SDL_DestroySurface(on); SDL_DestroySurface(restored);
+  UploadWorldNavigationComposition(slot);
+  free(probe);
+}
+
 static void TestCaptured(SDL_Renderer *renderer, const char *rom_path, const char *wram_path) {
   uint8_t *rom = ReadFile(rom_path, kRomBytes), *wram = ReadFile(wram_path, kWramBytes);
   CHECK(wram[0x18] == 0 && wram[0x19] == 9); /* Navigation dump, not shared action scratch. */
@@ -1292,6 +1319,7 @@ static void TestCaptured(SDL_Renderer *renderer, const char *rom_path, const cha
   slot->sim.world_navigation_clouds = slot->sim.world_navigation_cloud_shadows = true;
   slot->sim.world_navigation_atmosphere = slot->sim.world_navigation_backdrop = true;
   BuildScene(slot);
+  TestCapturedMarahnaSanctuary(renderer, slot);
   TestGroundLightDirections(renderer, slot, "captured");
   TestColdBlackEntry(renderer, slot);
   TestVolcanoCapViews(renderer, slot);
@@ -1305,15 +1333,13 @@ static void TestCaptured(SDL_Renderer *renderer, const char *rom_path, const cha
     {"captured-south", 0, -1.57079632679f}, {"captured-tilted", .8f, .6f},
   };
   for (size_t i = 0; i < sizeof(views) / sizeof(views[0]); i++) {
-    slot->sim_world_inspection_blend = 1;
     slot->sim_manual_orbit_yaw = views[i].yaw;
     slot->sim_manual_orbit_pitch = views[i].pitch;
     SDL_Surface *view = Render(renderer, slot, views[i].name);
-    CHECK(Differences(front, view) > 1000);
+    CHECK(i ? Differences(front, view) > 1000 : Differences(front, view) == 0);
     SDL_DestroySurface(view);
   }
   slot->sim_manual_orbit_yaw = slot->sim_manual_orbit_pitch = 0;
-  slot->sim_world_inspection_blend = 0;
   SDL_Surface *restored = Render(renderer, slot, "captured-restored");
   CHECK(Differences(front, restored) == 0);
   CHECK(!memcmp(&navigation, &slot->sim.world_navigation, sizeof(navigation)));

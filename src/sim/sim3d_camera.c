@@ -31,7 +31,6 @@ static CameraOrbit s_dynamic_orbit;
 /* Inspection is local to a world-map visit, not the persisted town pose. */
 static CameraOrbit s_world_orbit;
 static float s_world_zoom;
-static float s_world_inspection_blend;
 static bool s_world_active;
 
 static bool WorldNavigationActive(void) {
@@ -45,7 +44,6 @@ static bool SyncWorldNavigationCamera(void) {
   if (active != s_world_active) {
     CameraOrbit_Reset(&s_world_orbit);
     s_world_zoom = 0;
-    s_world_inspection_blend = 0;
     s_world_active = active;
   }
   return active;
@@ -86,7 +84,6 @@ void Sim3DCamera_CapturePresentationState(
         : g_settings.sim3d_distance_x100,
     .orbit_yaw = world ? s_world_orbit.yaw : s_dynamic_orbit.yaw,
     .orbit_pitch = world ? s_world_orbit.pitch : s_dynamic_orbit.pitch,
-    .world_inspection_blend = world ? s_world_inspection_blend : 0,
   };
   if (world && s_world_zoom != 0) {
     const float base = state->distance_x100 > 0 ? state->distance_x100 / 100.0f
@@ -188,19 +185,8 @@ void Sim3DCamera_Adjust(float yaw_delta, float pitch_delta,
 bool Sim3DCamera_UpdateDynamic(float elapsed_seconds, bool orbit_held) {
   if (SyncWorldNavigationCamera()) {
     if (!isfinite(elapsed_seconds) || elapsed_seconds <= 0) return false;
-    const bool orbit_changed = CameraOrbit_Update(
+    return CameraOrbit_Update(
         &s_world_orbit, elapsed_seconds, orbit_held, .65f);
-    const float zoom = ClampFloat(s_world_zoom, 0, 1);
-    const float target = orbit_held ? 1 : zoom * zoom * (3 - 2 * zoom);
-    const float previous = s_world_inspection_blend;
-    /* Enter inspection promptly; release follows the returning orbit. A
-     * deliberate zoom-out keeps the globe centred even with the stick up.
-     * No angle test: wrapping a full turn must not tug the framing home. */
-    const float seconds = target > previous ? .16f : .65f;
-    s_world_inspection_blend = target + (previous - target) * expf(-elapsed_seconds / seconds);
-    if (fabsf(s_world_inspection_blend - target) < .0001f)
-      s_world_inspection_blend = target;
-    return orbit_changed || s_world_inspection_blend != previous;
   }
   if (g_settings.sim3d_camera_mode != kSimCam_Dynamic) {
     bool changed = s_dynamic_orbit.yaw != 0.0f ||
@@ -223,7 +209,6 @@ void Sim3DCamera_Reset(void) {
   if (SyncWorldNavigationCamera()) {
     CameraOrbit_Reset(&s_world_orbit);
     s_world_zoom = 0;
-    s_world_inspection_blend = 0;
     return;
   }
   /* Reset the pose currently in use. Resetting the hidden free pose while

@@ -276,7 +276,7 @@ func ReadAuthorArchive(input io.ReaderAt, size int64) (*AuthorProject, error) {
 		}
 	}
 	for path, data := range pack.fonts {
-		if !(strings.HasSuffix(strings.ToLower(path), ".ttf") || strings.HasSuffix(strings.ToLower(path), ".otf")) || len(data) < 4 || !(bytes.Equal(data[:4], []byte{0, 1, 0, 0}) || string(data[:4]) == "OTTO") {
+		if !validAuthorFontPayload(path, data) {
 			return nil, fmt.Errorf("unsupported font payload %s (use TTF/OTF)", path)
 		}
 	}

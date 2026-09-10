@@ -9,7 +9,7 @@
 #include "actraiser/actraiser_localization_grid.h"
 #include "localization/localization_frame.h"
 
-#define ACTRAISER_LOCALIZATION_COMPOSE_STATE_ABI_VERSION UINT32_C(6)
+#define ACTRAISER_LOCALIZATION_COMPOSE_STATE_ABI_VERSION UINT32_C(7)
 
 enum {
   kActRaiserLocalizationComposeSurfaceFirst = 2,
@@ -50,6 +50,7 @@ typedef struct ActRaiserLocalizationComposeSnapshot {
   uint8_t inline_object_count;
   size_t utf8_bytes;
   char utf8[kActRaiserLocalizationComposeTextCapacity];
+  uint8_t structural_boundaries[AR_TEXT_BOUNDARY_BYTES(kActRaiserLocalizationComposeTextCapacity)];
 } ActRaiserLocalizationComposeSnapshot;
 
 typedef struct ActRaiserLocalizationComposeState {
@@ -64,13 +65,17 @@ typedef struct ActRaiserLocalizationComposeState {
 } ActRaiserLocalizationComposeState;
 
 /* Resolves one semantic fixed-text message into an immutable, complete UTF-8
- * snapshot. Returning false leaves the corresponding native cells unclaimed. */
+ * snapshot. The boundary bitmap covers utf8_capacity bytes and distinguishes
+ * authored grid delimiters from inserted values; non-grid consumers may omit
+ * it. Returning false leaves the
+ * corresponding native cells unclaimed. */
 typedef bool (*ActRaiserLocalizationComposeTextResolver)(
     void *context, const char *semantic_id,
     char *utf8, size_t utf8_capacity, size_t *utf8_bytes,
     uint32_t *cluster_count, uint64_t *source_revision,
     ArLocalizationInlineObjectSnapshot *inline_objects,
     size_t inline_object_capacity, uint8_t *inline_object_count,
+    uint8_t *structural_boundaries,
     char *error, size_t error_capacity);
 
 void ActRaiserLocalizationComposeState_Init(

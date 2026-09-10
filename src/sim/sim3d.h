@@ -117,7 +117,6 @@ typedef struct Sim3DCameraPresentationState {
   int distance_x100;
   float orbit_yaw;
   float orbit_pitch;
-  float world_inspection_blend;
 } Sim3DCameraPresentationState;
 
 void Sim3DCamera_CapturePresentationState(

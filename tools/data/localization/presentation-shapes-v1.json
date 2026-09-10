@@ -1,0 +1,54 @@
+{
+  "format": "actraiser-language-presentation-shapes",
+  "version": 1,
+  "comment": "Content constraints, not pixel geometry. Rows are zero-based normalized logical lines; the game owns all cell positions. JP kana keyboards are extracted references, not the US-runtime alphabet consumer.",
+  "tables": {
+    "cities": [
+      {"first_line": 5, "last_line": 5, "native_reserved": true},
+      {"first_line": 0, "last_line": 19, "fields": [1, 2, 3, 5]}
+    ],
+    "score": [
+      {"first_line": 5, "last_line": 5, "native_reserved": true},
+      {"first_line": 0, "last_line": 19, "fields": [1, 2, 3]}
+    ],
+    "master": [
+      {"first_line": 0, "last_line": 16, "fields": [1]},
+      {"first_line": 3, "last_line": 3, "fields": [4]},
+      {"first_line": 5, "last_line": 5, "fields": [4]},
+      {"first_line": 7, "last_line": 7, "fields": [2]},
+      {"first_line": 9, "last_line": 9, "fields": [2]}
+    ],
+    "fixed_rows": [
+      {"first_line": 0, "last_line": 255, "fields": [1]}
+    ],
+    "message_speed": [
+      {"first_line": 0, "last_line": 3, "fields": [1]},
+      {"first_line": 0, "last_line": 0, "fields": [10]},
+      {"first_line": 2, "last_line": 2, "fields": [3]}
+    ],
+    "message_speed_jp": [
+      {"first_line": 0, "last_line": 3, "fields": [1]},
+      {"first_line": 0, "last_line": 0, "fields": [8]},
+      {"first_line": 2, "last_line": 2, "fields": [3]}
+    ]
+  },
+  "bindings": {
+    "sim.menu.*": "fixed_rows",
+    "sky.menu.*": "fixed_rows",
+    "status.report.cities_report": "cities",
+    "status.report.master_report": "master",
+    "status.report.score_report": "score",
+    "system.choice.yes_no": "fixed_rows",
+    "system.message_speed.scale_labels": "message_speed"
+  },
+  "profile_bindings": {
+    "jp": {"system.message_speed.scale_labels": "message_speed_jp"}
+  },
+  "keyboard": {
+    "id": "name_entry.prompt_and_alphabet",
+    "rows": 5,
+    "columns": 13,
+    "maximum_lines": 63,
+    "maximum_page_bytes": 3072
+  }
+}

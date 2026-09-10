@@ -50,6 +50,16 @@ func completeLocalizationTestSource(t *testing.T) *lk.AuthorProject {
 	return p
 }
 
+func installLocalizationCoverageSource(t *testing.T, app *application) {
+	t.Helper()
+	if _, err := lk.InstallNativeUSSource(filepath.Join(app.localizationRoot(), "native-us"), completeLocalizationTestSource(t).Pack()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.localizationSource().snapshot(true); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func localizationGateStatus(t *testing.T, app *application) status {
 	t.Helper()
 	w := httptest.NewRecorder()
@@ -81,8 +91,10 @@ func TestLocalizationGateUnlocksDuringBuildAndSurvivesLaterFailure(t *testing.T)
 	if s := localizationGateStatus(t, app); s.State != "building" || !s.LocalizationReady {
 		t.Fatal("waited for build completion", s)
 	}
-	first := app.localization.native
-	if s := localizationGateStatus(t, app); !s.LocalizationReady || first != app.localization.native {
+	first, _ := app.localizationSource().snapshot(false)
+	s := localizationGateStatus(t, app)
+	currentSource, _ := app.localizationSource().snapshot(false)
+	if !s.LocalizationReady || first != currentSource {
 		t.Fatal("reloaded unchanged source on a poll")
 	}
 	app.state = "failed"

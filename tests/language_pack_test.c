@@ -1,5 +1,6 @@
 #include "localization/language_pack.h"
 #include "localization/language_contract.h"
+#include "fixtures/keyboard_body.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -446,7 +447,8 @@ static void TestPresentationContracts(void) {
   static const char accepted[] =
       ":: title.save_choice.labels\n@empty\n"
       ":: title.mode_select.with_save\nContinue\n@line\n@line\nNew game\n"
-      ":: name_entry.prompt_and_alphabet\nA B C\n@page\nD E F\n"
+      ":: name_entry.prompt_and_alphabet\n"
+      AR_TEST_KEYBOARD_PAGE("É") "@page\n" AR_TEST_KEYBOARD_PAGE("α")
       ":: dialogue.event.relay.aitos\nOne\n@page\nTwo\n@page\nThree\n"
       ":: action.hud.act_1\nACT\n";
   ArLanguagePack pack;

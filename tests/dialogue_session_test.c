@@ -1,4 +1,5 @@
 #include "localization/dialogue_session.h"
+#include "fixtures/keyboard_body.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -473,6 +474,7 @@ static void TestWaitSwitchAndRestore(void) {
 
 typedef struct ResolverState {
   int calls;
+  const char *master_name;
 } ResolverState;
 
 static bool ResolveValue(void *context, const char *name,
@@ -483,7 +485,8 @@ static bool ResolveValue(void *context, const char *name,
   state->calls++;
   value->kind = expected;
   if (strcmp(name, "master_name") == 0) {
-    snprintf(value->text, sizeof(value->text), "Élise");
+    snprintf(value->text, sizeof(value->text), "%s",
+             state->master_name ? state->master_name : "Élise");
     return true;
   }
   if (expected == kArLanguagePlaceholder_Icon) {
@@ -492,6 +495,10 @@ static bool ResolveValue(void *context, const char *name,
   }
   if (expected == kArLanguagePlaceholder_Number) {
     value->number = 2;
+    return true;
+  }
+  if (expected == kArLanguagePlaceholder_LocalizedTerm) {
+    snprintf(value->text, sizeof(value->text), "growth_state.01");
     return true;
   }
   snprintf(error, error_capacity, "unexpected synthetic value");
@@ -504,7 +511,7 @@ static void TestNumberFormatting(void) {
   ArLanguagePackError error;
   CHECK(LoadPack(&pack, "format.test", "en-US",
       ":: status.report.master_report\n"
-      "{master_level:03}|{master_level:01}|{master_level}\n@end\n", &error));
+      "{master_level:03}/{master_level:01}/{master_level}\n@end\n", &error));
   ResolverState values = {0};
   const ArDialogueValueResolver resolver = {
       .struct_size = sizeof(resolver),
@@ -519,7 +526,7 @@ static void TestNumberFormatting(void) {
                                 "status.report.master_report", &resolver, &error));
   ArDialoguePageSnapshot page;
   CHECK(ArDialogueSession_GetPage(&session, &page));
-  CHECK(!strcmp(page.utf8, "002|2|2"));
+  CHECK(!strcmp(page.utf8, "002/2/2"));
   CHECK((uint32_t)values.calls == ArLanguageContract_AllowedPlaceholderCount(
       "status.report.master_report")); /* One capture per allowed value. */
   ArDialogueSession_Destroy(&session);
@@ -527,6 +534,60 @@ static void TestNumberFormatting(void) {
   CHECK(LoadPack(&pack, "format.bad", "en-US",
       ":: status.report.master_report\n{master_name:03}\n@end\n", &error));
   CHECK(!ArLanguageContract_ValidatePack(&pack, NULL, &error));
+  ArLanguagePack_Destroy(&pack);
+}
+
+static void TestAuthoredBoundaries(void) {
+  ArLanguagePack pack;
+  ArLanguagePack_Init(&pack);
+  ArLanguagePackError error;
+  CHECK(LoadPack(&pack, "boundaries.test", "en-US",
+      ":: status.report.master_report\n"
+      "{master_name}\n@line\n@line\n@line\n"
+      "{master_name}|{master_level}|left|right\n@end\n"
+      ":: status.report.cities_report\n{city_fillmore_growth_state}|{total_population}\n@end\n"
+      ":: growth_state.00\nMax|growth\n@end\n"
+      ":: growth_state.01\n@alias growth_state.00\n",
+      &error));
+  ResolverState values = {.master_name = "É|li\nse"};
+  const ArDialogueValueResolver resolver = {
+      .struct_size = sizeof(resolver),
+      .abi_version = AR_DIALOGUE_VALUE_RESOLVER_ABI_VERSION,
+      .context = &values, .resolve = ResolveValue};
+  const ArDialogueContentSelection selection =
+      Selection(kArDialoguePresentation_Enhanced, &pack, &pack);
+  ArDialogueSession session;
+  ArDialogueSession_Init(&session);
+  const bool began = ArDialogueSession_Begin(&session, &selection,
+      "status.report.master_report", &resolver, &error);
+  CHECK(began);
+  if (!began) {
+    fprintf(stderr, "boundary fixture: %s\n", error.message);
+    ArDialogueSession_Destroy(&session);
+    ArLanguagePack_Destroy(&pack);
+    return;
+  }
+  ArDialoguePageSnapshot page;
+  CHECK(ArDialogueSession_GetPage(&session, &page));
+  CHECK(!strcmp(page.utf8, "É|li\nse\n\n\nÉ|li\nse|2|left|right"));
+  unsigned pipes = 0, lines = 0, literal_pipes = 0, literal_lines = 0;
+  for (size_t i = 0; i < page.utf8_bytes; ++i) {
+    const bool boundary = ArTextBoundary_Get(page.structural_boundaries, i);
+    if (page.utf8[i] == '|') { if (boundary) ++pipes; else ++literal_pipes; }
+    else if (page.utf8[i] == '\n') { if (boundary) ++lines; else ++literal_lines; }
+    else CHECK(!boundary);
+  }
+  CHECK(pipes == 3 && lines == 3 && literal_pipes == 2 && literal_lines == 2);
+  ArDialoguePageSnapshot authored;
+  CHECK(ArDialogueSession_GetAuthoredPage(&session, 0, &authored));
+  CHECK(authored.structural_boundaries == page.structural_boundaries);
+  CHECK(ArDialogueSession_Begin(&session, &selection,
+      "status.report.cities_report", &resolver, &error));
+  CHECK(ArDialogueSession_GetPage(&session, &page));
+  CHECK(!strcmp(page.utf8, "Max|growth|2"));
+  for (size_t i = 0; i < page.utf8_bytes; ++i)
+    CHECK(ArTextBoundary_Get(page.structural_boundaries, i) == (i == 10));
+  ArDialogueSession_Destroy(&session);
   ArLanguagePack_Destroy(&pack);
 }
 
@@ -544,9 +605,7 @@ static void TestControlsValuesAndIcons(void) {
       "@anchor yield.01\n";
   static const char icon_script[] =
       ":: name_entry.prompt_and_alphabet\n"
-      "A{icon.name_entry.backspace}B{icon.name_entry.finish}\n"
-      "@page\n"
-      "α{icon.name_entry.backspace}β{icon.name_entry.finish}\n";
+      AR_TEST_KEYBOARD_PAGE("É") "@page\n" AR_TEST_KEYBOARD_PAGE("α");
   ArLanguagePack first, second, icons;
   ArLanguagePack_Init(&first);
   ArLanguagePack_Init(&second);
@@ -917,6 +976,7 @@ int main(void) {
   TestEnhancedNativeControlProgress();
   TestCueCannotSplitGrapheme();
   TestNumberFormatting();
+  TestAuthoredBoundaries();
   TestCorruptStateRejected();
   TestEnhancedNativeProgressSynchronization();
   if (failures) {

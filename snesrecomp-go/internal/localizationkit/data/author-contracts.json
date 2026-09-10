@@ -5017,6 +5017,12 @@
       "canonical_profile": "us",
       "id": "name_entry.prompt_and_alphabet",
       "presentation": {
+        "keyboard": {
+          "columns": 13,
+          "maximum_lines": 63,
+          "maximum_page_bytes": 3072,
+          "rows": 5
+        },
         "shape": "keyboard"
       }
     },
@@ -5338,7 +5344,19 @@
       "id": "sim.menu.building_direction",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5354,7 +5372,19 @@
       "id": "sim.menu.choice.direct_people",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5370,7 +5400,19 @@
       "id": "sim.menu.choice.miracles",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5386,7 +5428,19 @@
       "id": "sim.menu.choice.movement",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5402,7 +5456,19 @@
       "id": "sim.menu.choice.offerings",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5418,7 +5484,19 @@
       "id": "sim.menu.choice.other",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5434,7 +5512,19 @@
       "id": "sim.menu.choice.status",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5450,7 +5540,19 @@
       "id": "sim.menu.earthquake",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5466,7 +5568,19 @@
       "id": "sim.menu.lightning",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5482,7 +5596,19 @@
       "id": "sim.menu.listen",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5498,7 +5624,19 @@
       "id": "sim.menu.message_speed",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5514,7 +5652,19 @@
       "id": "sim.menu.offering_action.give_oracle",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5530,7 +5680,19 @@
       "id": "sim.menu.offering_action.listen",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5544,7 +5706,19 @@
       "id": "sim.menu.offering_action.selected",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5560,7 +5734,19 @@
       "id": "sim.menu.offering_action.take_offering",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5576,7 +5762,19 @@
       "id": "sim.menu.possession.slot_00",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5592,7 +5790,19 @@
       "id": "sim.menu.possession.slot_01",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5608,7 +5818,19 @@
       "id": "sim.menu.possession.slot_02",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5624,7 +5846,19 @@
       "id": "sim.menu.possession.slot_03",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5640,7 +5874,19 @@
       "id": "sim.menu.possession.slot_04",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5656,7 +5902,19 @@
       "id": "sim.menu.possession.slot_05",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5672,7 +5930,19 @@
       "id": "sim.menu.possession.slot_06",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5688,7 +5958,19 @@
       "id": "sim.menu.possession.slot_07",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5704,7 +5986,19 @@
       "id": "sim.menu.possession.slot_08",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5720,7 +6014,19 @@
       "id": "sim.menu.possession.slot_09",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5736,7 +6042,19 @@
       "id": "sim.menu.possession.slot_10",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5752,7 +6070,19 @@
       "id": "sim.menu.possession.slot_11",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5768,7 +6098,19 @@
       "id": "sim.menu.possession.slot_12",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5784,7 +6126,19 @@
       "id": "sim.menu.possession.slot_13",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5800,7 +6154,19 @@
       "id": "sim.menu.possession.slot_14",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5816,7 +6182,19 @@
       "id": "sim.menu.possession.slot_15",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5832,7 +6210,19 @@
       "id": "sim.menu.possession.slot_16",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5848,7 +6238,19 @@
       "id": "sim.menu.possession.slot_17",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5864,7 +6266,19 @@
       "id": "sim.menu.possession.slot_18",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5880,7 +6294,19 @@
       "id": "sim.menu.possession.slot_19",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5896,7 +6322,19 @@
       "id": "sim.menu.progress_log",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5912,7 +6350,19 @@
       "id": "sim.menu.rain",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5928,7 +6378,19 @@
       "id": "sim.menu.return_to_palace",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5944,7 +6406,19 @@
       "id": "sim.menu.sky_palace_movement",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5960,7 +6434,19 @@
       "id": "sim.menu.status_cities",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5976,7 +6462,19 @@
       "id": "sim.menu.status_master",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -5992,7 +6490,19 @@
       "id": "sim.menu.sun",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -6008,7 +6518,19 @@
       "id": "sim.menu.take_offering",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -6024,7 +6546,19 @@
       "id": "sim.menu.use_offering",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -6040,7 +6574,19 @@
       "id": "sim.menu.wind",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -12089,7 +12635,19 @@
       "id": "sky.menu.choice.fight",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -12105,7 +12663,19 @@
       "id": "sky.menu.choice.movement",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -12121,7 +12691,19 @@
       "id": "sky.menu.choice.other",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -12137,7 +12719,19 @@
       "id": "sky.menu.choice.status",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -12153,7 +12747,19 @@
       "id": "sky.menu.fight_monsters",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -12169,7 +12775,19 @@
       "id": "sky.menu.magic.aura",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -12185,7 +12803,19 @@
       "id": "sky.menu.magic.fire",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -12201,7 +12831,19 @@
       "id": "sky.menu.magic.light",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -12217,7 +12859,19 @@
       "id": "sky.menu.magic.stardust",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -12233,7 +12887,19 @@
       "id": "sky.menu.message_speed",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -12249,7 +12915,19 @@
       "id": "sky.menu.movement",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -12265,7 +12943,19 @@
       "id": "sky.menu.observe_people",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -12281,7 +12971,19 @@
       "id": "sky.menu.progress_log",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -12297,7 +12999,19 @@
       "id": "sky.menu.select_magic",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -12313,7 +13027,19 @@
       "id": "sky.menu.status_cities",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -12329,7 +13055,19 @@
       "id": "sky.menu.status_master",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -12391,7 +13129,27 @@
       "id": "status.report.cities_report",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "cities",
+          "rules": [
+            {
+              "first_line": 5,
+              "last_line": 5,
+              "native_reserved": true
+            },
+            {
+              "fields": [
+                1,
+                2,
+                3,
+                5
+              ],
+              "first_line": 0,
+              "last_line": 19
+            }
+          ]
+        }
       }
     },
     {
@@ -12417,7 +13175,47 @@
       "id": "status.report.master_report",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "master",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 16
+            },
+            {
+              "fields": [
+                4
+              ],
+              "first_line": 3,
+              "last_line": 3
+            },
+            {
+              "fields": [
+                4
+              ],
+              "first_line": 5,
+              "last_line": 5
+            },
+            {
+              "fields": [
+                2
+              ],
+              "first_line": 7,
+              "last_line": 7
+            },
+            {
+              "fields": [
+                2
+              ],
+              "first_line": 9,
+              "last_line": 9
+            }
+          ]
+        }
       }
     },
     {
@@ -12446,7 +13244,26 @@
       "id": "status.report.score_report",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "score",
+          "rules": [
+            {
+              "first_line": 5,
+              "last_line": 5,
+              "native_reserved": true
+            },
+            {
+              "fields": [
+                1,
+                2,
+                3
+              ],
+              "first_line": 0,
+              "last_line": 19
+            }
+          ]
+        }
       }
     },
     {
@@ -12462,7 +13279,19 @@
       "id": "system.choice.yes_no",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "fixed_rows",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 255
+            }
+          ]
+        }
       }
     },
     {
@@ -12562,7 +13391,65 @@
       "id": "system.message_speed.scale_labels",
       "presentation": {
         "maximum_pages": 1,
-        "shape": "fixed"
+        "shape": "fixed",
+        "table": {
+          "kind": "message_speed",
+          "rules": [
+            {
+              "fields": [
+                1
+              ],
+              "first_line": 0,
+              "last_line": 3
+            },
+            {
+              "fields": [
+                10
+              ],
+              "first_line": 0,
+              "last_line": 0
+            },
+            {
+              "fields": [
+                3
+              ],
+              "first_line": 2,
+              "last_line": 2
+            }
+          ]
+        }
+      },
+      "presentation_by_profile": {
+        "jp": {
+          "maximum_pages": 1,
+          "shape": "fixed",
+          "table": {
+            "kind": "message_speed_jp",
+            "rules": [
+              {
+                "fields": [
+                  1
+                ],
+                "first_line": 0,
+                "last_line": 3
+              },
+              {
+                "fields": [
+                  8
+                ],
+                "first_line": 0,
+                "last_line": 0
+              },
+              {
+                "fields": [
+                  3
+                ],
+                "first_line": 2,
+                "last_line": 2
+              }
+            ]
+          }
+        }
       }
     },
     {

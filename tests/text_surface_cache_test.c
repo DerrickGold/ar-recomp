@@ -157,6 +157,8 @@ typedef struct FakeRasterizer {
   bool invalid_cluster_bounds;
   ArTextRasterRequest last_request;
   int line_advance;
+  ArRenderPixelFormat format;
+  int pitch_bytes;
 } FakeRasterizer;
 
 static bool Rasterize(void *context, const ArTextRasterRequest *request,
@@ -191,8 +193,8 @@ static bool Rasterize(void *context, const ArTextRasterRequest *request,
     .pixels = fake->pixels,
     .width = width,
     .height = 16,
-    .pitch_bytes = 64 * (int)sizeof(uint32_t),
-    .format = kArRenderPixelFormat_Rgba8888,
+    .pitch_bytes = fake->pitch_bytes ? fake->pitch_bytes : 64 * (int)sizeof(uint32_t),
+    .format = fake->pitch_bytes ? fake->format : kArRenderPixelFormat_Rgba8888,
     .ascent = 11,
     .descent = 3,
     .line_advance = fake->line_advance ? fake->line_advance : 16,
@@ -435,6 +437,12 @@ static void TestCacheHitsMissesAndFailureAtomicity(void) {
   ink_changed = third_request;
   ink_changed.flags |= kArTextRasterFlag_Italic;
   CHECK(!ArTextCacheKey_Equals(old_key, ArTextSurfaceCache_MakeKey(&rasterizer, &ink_changed)));
+  ink_changed = third_request;
+  ink_changed.shadow_enabled = true;
+  const ArTextCacheKey shadow_key = ArTextSurfaceCache_MakeKey(&rasterizer, &ink_changed);
+  CHECK(!ArTextCacheKey_Equals(old_key, shadow_key));
+  ink_changed.shadow_rgb = 0x222233;
+  CHECK(!ArTextCacheKey_Equals(shadow_key, ArTextSurfaceCache_MakeKey(&rasterizer, &ink_changed)));
 
   ArTextSurfaceCache_Destroy(&cache, &device);
   CHECK(render.destroys == render.creates);
@@ -606,6 +614,105 @@ static void TestByteBudgetAndOversizeRejection(void) {
   ArRenderDevice_Reset(&device);
 }
 
+static void TestOwnershipAcrossStatsResetAndEviction(void) {
+  static const struct { ArRenderPixelFormat format; int bytes; } formats[] = {
+    {kArRenderPixelFormat_Argb8888, 4}, {kArRenderPixelFormat_Abgr8888, 4},
+    {kArRenderPixelFormat_Rgba8888, 4}, {kArRenderPixelFormat_Rgb565, 2},
+    {kArRenderPixelFormat_Rgba4444, 2}, {kArRenderPixelFormat_A8, 1},
+  };
+  for (size_t i = 0; i < sizeof(formats) / sizeof(formats[0]); ++i) {
+    FakeRenderBackend render = {0};
+    ArRenderDevice device;
+    CHECK(ArRenderDevice_Init(&device, &kRenderOps, &render,
+                             (ArRenderCapabilities){0}));
+    FakeRasterizer fake = {.format = formats[i].format,
+                           .pitch_bytes = 64 * formats[i].bytes};
+    ArTextRasterizer rasterizer;
+    CHECK(ArTextRasterizer_Init(&rasterizer, &kRasterOps, &fake, 23));
+    ArTextSurfaceCache cache;
+    CHECK(ArTextSurfaceCache_Init(&cache, 2));
+    ArTextSurface first, second;
+    ArTextRasterRequest a = Request("Menu"), b = Request("Longer");
+    char error[256];
+    /* Even without a frame pin, a successful acquisition must own a live
+     * texture when the budget is smaller than a single entry. */
+    ArTextSurfaceCache_SetByteBudget(&cache, 1);
+    CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &a,
+                                     &first, error, sizeof(error)));
+    const uint64_t first_bytes = 8u * 16u * (unsigned)formats[i].bytes;
+    CHECK(render.destroys == 0);
+    CHECK(cache.entries[0].valid);
+    CHECK(ArRenderTexture_Equals(cache.entries[0].surface.texture, first.texture));
+    CHECK(cache.stats.texture_bytes == first_bytes);
+    CHECK(render.last_descriptor.format == formats[i].format);
+
+    ArTextSurfaceCache_ResetStats(&cache);
+    CHECK(cache.stats.lookups == 0 && cache.stats.upload_calls == 0);
+    CHECK(cache.stats.texture_bytes == first_bytes);
+    CHECK(cache.stats.peak_texture_bytes == first_bytes);
+    CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &a,
+                                     &second, error, sizeof(error)));
+    CHECK(ArRenderTexture_Equals(first.texture, second.texture));
+    CHECK(fake.calls == 1 && cache.stats.hits == 1);
+    CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &b,
+                                     &second, error, sizeof(error)));
+    const uint64_t second_bytes = 12u * 16u * (unsigned)formats[i].bytes;
+    CHECK(render.destroys == 1);
+    CHECK(cache.entries[1].valid);
+    CHECK(ArRenderTexture_Equals(cache.entries[1].surface.texture, second.texture));
+    CHECK(cache.stats.texture_bytes == second_bytes);
+    CHECK(cache.stats.peak_texture_bytes == first_bytes + second_bytes);
+    ArTextSurfaceCache_ResetStats(&cache);
+    CHECK(cache.stats.texture_bytes == second_bytes);
+    CHECK(cache.stats.peak_texture_bytes == second_bytes);
+    ArTextSurfaceCache_Destroy(&cache, &device);
+    CHECK(render.destroys == render.creates);
+    ArTextRasterizer_Reset(&rasterizer);
+    ArRenderDevice_Reset(&device);
+  }
+}
+
+static void TestFramePinsSurviveEntryPressure(void) {
+  FakeRenderBackend render = {0};
+  ArRenderDevice device;
+  CHECK(ArRenderDevice_Init(&device, &kRenderOps, &render,
+                           (ArRenderCapabilities){0}));
+  FakeRasterizer fake = {0};
+  ArTextRasterizer rasterizer;
+  CHECK(ArTextRasterizer_Init(&rasterizer, &kRasterOps, &fake, 23));
+  ArTextSurfaceCache cache;
+  CHECK(ArTextSurfaceCache_Init(&cache, 1));
+  ArTextSurface first, second;
+  ArTextRasterRequest a = Request("Menu"), b = Request("Other");
+  char error[256];
+  ArTextSurfaceCache_SetByteBudget(&cache, 1);
+  ArTextSurfaceCache_BeginFrame(&cache);
+  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &a,
+                                   &first, error, sizeof(error)));
+  CHECK(!ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &b,
+                                    &second, error, sizeof(error)));
+  CHECK(strstr(error, "all in use") != NULL);
+  CHECK(!ArRenderTexture_IsValid(second.texture));
+  CHECK(fake.calls == 1 && render.destroys == 0);
+  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &a,
+                                   &second, error, sizeof(error)));
+  CHECK(ArRenderTexture_Equals(first.texture, second.texture));
+  /* The next frame can retry the identical request: capacity failures must
+   * neither poison the negative cache nor retain the previous frame's pins. */
+  ArTextSurfaceCache_BeginFrame(&cache);
+  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &b,
+                                   &second, error, sizeof(error)));
+  CHECK(fake.calls == 2 && render.destroys == 1);
+  ArTextSurfaceCache_EndFrame(&cache);
+  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &a,
+                                   &first, error, sizeof(error)));
+  CHECK(fake.calls == 3 && render.destroys == 2);
+  ArTextSurfaceCache_Destroy(&cache, &device);
+  CHECK(render.destroys == render.creates);
+  ArTextRasterizer_Reset(&rasterizer);
+  ArRenderDevice_Reset(&device);
+}
+
 static void TestPixelationTreatments(void) {
   FakeRenderBackend render = {0};
   ArRenderDevice device;
@@ -737,6 +844,8 @@ int main(void) {
   TestCacheHitsMissesAndFailureAtomicity();
   TestTransientFailureRecovers();
   TestByteBudgetAndOversizeRejection();
+  TestOwnershipAcrossStatsResetAndEviction();
+  TestFramePinsSurviveEntryPressure();
   TestPixelationTreatments();
   TestInkFormatsAndBounds();
   if (g_failures) {

@@ -99,7 +99,6 @@ static void RefreshRetainedSimCamera(FrameSlot *slot) {
   slot->sim_camera_mode = camera.mode;
   slot->sim_manual_orbit_yaw = camera.orbit_yaw;
   slot->sim_manual_orbit_pitch = camera.orbit_pitch;
-  slot->sim_world_inspection_blend = camera.world_inspection_blend;
 }
 
 /* Action's camera is presentation-owned for the same reason as SIM's. Only

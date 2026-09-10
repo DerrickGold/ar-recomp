@@ -204,8 +204,9 @@ static void WarnMissingGlyphs(SdlTextRasterizerState *state, const char *text) {
     fprintf(stderr,
             "[localized-text] font stack '%s' has no glyph for U+%04X; "
             "a replacement box may be shown. The language pack needs a font "
-            "covering this character -- add one under Fonts in the builder's "
-            "Languages workspace.\n",
+            "covering this character -- add a fallback under [fonts] in the "
+            "source pack's pack.ini, then reimport and reinstall it. "
+            "See the language-pack authoring manual.\n",
             state->font_stack_id, (unsigned)scalar);
   }
 }

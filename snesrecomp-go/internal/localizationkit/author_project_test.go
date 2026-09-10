@@ -331,6 +331,96 @@ func TestAuthorAtomicWriteFailureKeepsDestination(t *testing.T) {
 // A one-message edit must not recompress the pack's fonts. Saving a project
 // with a script-specific font is otherwise dominated by deflating megabytes
 // that did not change.
+func TestAuthorStoreOpenIdentitySurvivesConcurrentReplacement(t *testing.T) {
+	for _, recreate := range []bool{false, true} {
+		name := "atomic replacement"
+		if recreate {
+			name = "delete and recreate"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "projects")
+			reader, err := NewAuthorStore(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writer, err := NewAuthorStore(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			original := authorAdventureProject(t)
+			if err := writer.Save(original, ""); err != nil {
+				t.Fatal(err)
+			}
+			id := original.Pack().Manifest().Metadata().ID
+			path, err := reader.path(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Pause the read/memoize sequence after reading the archive. Close
+			// its handle before the writer runs: Windows os.Open does not share
+			// delete access. The captured FileInfo still identifies the bytes.
+			file, err := openRegularAuthorFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer file.Close()
+			readInfo, err := file.Stat()
+			if err != nil {
+				t.Fatal(err)
+			}
+			stale, err := ReadAuthorArchive(file, readInfo.Size())
+			closeErr := file.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if closeErr != nil {
+				t.Fatal(closeErr)
+			}
+			latest, err := original.WithNotes("Other author's newer work")
+			if err != nil {
+				t.Fatal(err)
+			}
+			expected := original.ProjectRevision()
+			if recreate {
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				expected = ""
+			}
+			if err := writer.Save(latest, expected); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			currentInfo, err := os.Lstat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Finish the paused Open with the identity of the bytes it read.
+			reader.rememberRevision(path, readInfo, stale.ProjectRevision())
+			if _, hit := reader.rememberedRevision(path, currentInfo); hit {
+				t.Fatal("stale revision was attached to the replacement file")
+			}
+			if err := reader.Save(stale, stale.ProjectRevision()); !errors.Is(err, ErrProjectConflict) {
+				t.Fatal("concurrent edits were overwritten", err)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatal("conflict changed the newer archive", err)
+			}
+			reopened, err := reader.Open(id)
+			if err != nil || reopened.ProjectRevision() != latest.ProjectRevision() {
+				t.Fatal("reopen did not recover the newer work", err)
+			}
+			if revision, hit := reader.rememberedRevision(path, currentInfo); !hit || revision != latest.ProjectRevision() {
+				t.Fatal("ordinary open did not warm the revision cache")
+			}
+		})
+	}
+}
+
 func TestAuthorStoreSaveDoesNotRecompressUnchangedFonts(t *testing.T) {
 	font := make([]byte, 4<<20)
 	for i := range font {

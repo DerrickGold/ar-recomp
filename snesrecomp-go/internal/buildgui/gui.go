@@ -22,6 +22,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	lk "github.com/DerrickGold/snesrecomp-go/internal/localizationkit"
 )
 
 const (
@@ -87,6 +89,7 @@ type Options struct {
 	AudioPreviewCacheDir string
 	openURL              func(string) error
 	pickDirectory        func(context.Context) (string, error)
+	fontCoverageProbe    lk.FontCoverageProbe
 	sessionToken         string
 }
 

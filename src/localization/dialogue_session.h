@@ -2,12 +2,13 @@
 #define AR_LOCALIZATION_DIALOGUE_SESSION_H
 
 #include "localization/language_contract.h"
+#include "localization/text_boundaries.h"
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-#define AR_DIALOGUE_SESSION_ABI_VERSION UINT32_C(1)
+#define AR_DIALOGUE_SESSION_ABI_VERSION UINT32_C(2)
 #define AR_DIALOGUE_VALUE_RESOLVER_ABI_VERSION UINT32_C(2)
 
 enum {
@@ -98,6 +99,9 @@ typedef struct ArDialogueInlineObject {
 
 typedef struct ArDialoguePageSnapshot {
   const char *utf8;
+  /* Borrowed alongside utf8. Only authored literals/breaks can set these
+   * bits; resolving a name, number, term or icon never creates structure. */
+  const uint8_t *structural_boundaries;
   size_t utf8_bytes;
   size_t revealed_utf8_bytes;
   uint32_t page_index;

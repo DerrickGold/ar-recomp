@@ -1,4 +1,5 @@
 #include "actraiser/actraiser_localization_name_entry.h"
+#include "localization/language_keyboard.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -13,7 +14,6 @@ enum {
   kWramSelectedRow = 0x034C,
   kWramEnteredLength = 0x034D,
   kRequiredWramBytes = kWramEnteredLength + 1,
-  kMaximumLogicalLines = 64,
 };
 
 bool ActRaiserLocalizationNameEntry_CopyNativeName(const uint8_t *wram,
@@ -184,53 +184,9 @@ bool ActRaiserLocalizationNameEntry_SelectedKeyRange(
     uint32_t *start_utf8_byte, uint32_t *end_utf8_byte) {
   if (start_utf8_byte) *start_utf8_byte = 0;
   if (end_utf8_byte) *end_utf8_byte = 0;
-  if (!Valid(state) || !utf8 || !utf8_bytes || !start_utf8_byte ||
-      !end_utf8_byte ||
-      utf8_bytes > UINT32_MAX)
-    return false;
-
-  size_t starts[kMaximumLogicalLines];
-  size_t ends[kMaximumLogicalLines];
-  size_t line_count = 0;
-  size_t start = 0;
-  for (size_t index = 0; index <= utf8_bytes; ++index) {
-    if (index != utf8_bytes && utf8[index] != '\n') continue;
-    if (line_count >= kMaximumLogicalLines) return false;
-    starts[line_count] = start;
-    ends[line_count] = index;
-    ++line_count;
-    start = index + 1u;
-  }
-  if (line_count < kActRaiserLocalizationNameEntryRows) return false;
-  const size_t target_line =
-      line_count - kActRaiserLocalizationNameEntryRows + state->selected_row;
-  size_t offset = starts[target_line];
-  uint8_t key = 0;
-  bool found = false;
-  uint32_t selected_start = 0;
-  uint32_t selected_end = 0;
-  while (offset < ends[target_line]) {
-    size_t next = 0;
-    if (!ArUnicodeGrapheme_Next(utf8, utf8_bytes, offset, NULL, &next) ||
-        next <= offset || next > ends[target_line])
-      return false;
-    const bool separator = next == offset + 1u &&
-        (utf8[offset] == ' ' || utf8[offset] == '\t');
-    if (!separator) {
-      if (key == state->selected_column) {
-        selected_start = (uint32_t)offset;
-        selected_end = (uint32_t)next;
-        found = true;
-      }
-      if (key == UINT8_MAX) return false;
-      ++key;
-    }
-    offset = next;
-  }
-  if (!found || key != kActRaiserLocalizationNameEntryColumns) return false;
-  *start_utf8_byte = selected_start;
-  *end_utf8_byte = selected_end;
-  return true;
+  return Valid(state) && ArLanguageKeyboard_KeyRange(
+      utf8, utf8_bytes, state->selected_row, state->selected_column,
+      start_utf8_byte, end_utf8_byte);
 }
 
 void ActRaiserLocalizationNameEntryTracker_Init(

@@ -4,17 +4,18 @@
 #include <stdbool.h>
 
 #include "localization/localization_frame.h"
+#include "localization/language_row_shape.h"
 
 /* ActRaiser's fixed cell menus. These identities stay on the game side: the
  * renderer receives the derived ArLocalizationTextGrid and never learns which
  * screen it is drawing. */
 typedef enum ActRaiserLocalizationMenu {
-  kActRaiserLocalizationMenu_None = 0,
-  kActRaiserLocalizationMenu_StatusCities,
-  kActRaiserLocalizationMenu_StatusScore,
-  kActRaiserLocalizationMenu_StatusMaster,
-  kActRaiserLocalizationMenu_FixedRows,
-  kActRaiserLocalizationMenu_MessageSpeed,
+  kActRaiserLocalizationMenu_None = kArLanguageRowShape_None,
+  kActRaiserLocalizationMenu_StatusCities = kArLanguageRowShape_Cities,
+  kActRaiserLocalizationMenu_StatusScore = kArLanguageRowShape_Score,
+  kActRaiserLocalizationMenu_StatusMaster = kArLanguageRowShape_Master,
+  kActRaiserLocalizationMenu_FixedRows = kArLanguageRowShape_FixedRows,
+  kActRaiserLocalizationMenu_MessageSpeed = kArLanguageRowShape_MessageSpeed,
 } ActRaiserLocalizationMenu;
 
 /* Derives the renderer-neutral description of one menu's native geometry for

@@ -71,8 +71,8 @@ typedef struct ArTextRasterRequest {
   uint32_t band_rgb;
   uint32_t body_rgb;
   /* Third retail ink: the shade the game draws beside every stroke, which is
-   * what gives its lettering weight against a busy background. Zero leaves
-   * the text unshaded, as a two-colour style has nothing to cast. */
+   * what gives its lettering weight against a busy background. Disabled
+   * leaves the text unshaded; RGB zero is a valid black shadow. */
   uint32_t shadow_rgb;
   bool shadow_enabled;
   ArTextRasterFlags flags;
@@ -201,7 +201,8 @@ ArRenderRectI ArTextBitmap_InkBounds(const ArTextBitmap *bitmap,
  * has ink `offset_x`/`offset_y` before it becomes shadow at that ink's
  * coverage. Existing ink is never overwritten, so the letterforms are
  * untouched and only their surroundings gain weight. Runs after the bands, or
- * the recolouring would sweep the shadow up with the strokes. */
+ * the recolouring would sweep the shadow up with the strokes. Allocation-free;
+ * false means invalid arguments, never a transient resource failure. */
 bool ArTextBitmap_ApplyStyleShadow(void *pixels, int width, int height,
                                    int pitch_bytes, ArRenderPixelFormat format,
                                    int offset_x, int offset_y,

@@ -178,39 +178,10 @@ func loadAuthorPack(fsys fs.FS, maximum int) (*AuthorPack, error) {
 	if err != nil {
 		return nil, err
 	}
-	// A portable snapshot cannot contain conflicting file/directory roles or
-	// case aliases. Keep these checks independent of the host filesystem.
-	type fileRole struct{ path, kind string }
-	roles := []fileRole{{"pack.ini", "manifest"}, {"translation-progress.tsv", "progress"}}
-	addRole := func(path, role string) error {
-		for _, entry := range roles {
-			existing, kind := entry.path, entry.kind
-			if existing == path {
-				if role == "font" && kind == "font" {
-					return nil
-				}
-				return fmt.Errorf("%s is used as both %s and %s", path, kind, role)
-			}
-			if strings.EqualFold(existing, path) || strings.HasPrefix(strings.ToLower(path), strings.ToLower(existing)+"/") || strings.HasPrefix(strings.ToLower(existing), strings.ToLower(path)+"/") {
-				return fmt.Errorf("conflicting pack paths %q and %q", existing, path)
-			}
-		}
-		roles = append(roles, fileRole{path, role})
-		return nil
-	}
-	for _, path := range m.sources {
-		if err := addRole(path, "script"); err != nil {
-			return nil, err
-		}
+	if err := validateAuthorPackPaths(m); err != nil {
+		return nil, err
 	}
 	fontReferences := append([]string{m.fonts.Primary}, m.fonts.Fallback...)
-	for _, path := range fontReferences {
-		if !strings.HasPrefix(path, "builtin:") {
-			if err := addRole(path, "font"); err != nil {
-				return nil, err
-			}
-		}
-	}
 	scripts := make([]*AuthorScript, 0, len(m.sources))
 	for _, path := range m.sources {
 		raw, err := read(path, MaxAuthorScriptBytes)
@@ -251,6 +222,43 @@ func loadAuthorPack(fsys fs.FS, maximum int) (*AuthorPack, error) {
 		fonts[path] = data
 	}
 	return &AuthorPack{manifest: m, workspace: w, fonts: fonts, progressPresent: present}, nil
+}
+
+func validateAuthorPackPaths(m *PackManifest) error {
+	// A portable snapshot cannot contain conflicting file/directory roles or
+	// case aliases. Keep these checks independent of the host filesystem.
+	type fileRole struct{ path, kind string }
+	roles := []fileRole{{"pack.ini", "manifest"}, {"translation-progress.tsv", "progress"},
+		{"package.json", "archive metadata"}, {"author-project.json", "author metadata"}, {"notices", "notice directory"}}
+	addRole := func(path, role string) error {
+		for _, entry := range roles {
+			existing, kind := entry.path, entry.kind
+			if existing == path {
+				if role == "font" && kind == "font" {
+					return nil
+				}
+				return fmt.Errorf("%s is used as both %s and %s", path, kind, role)
+			}
+			if strings.EqualFold(existing, path) || strings.HasPrefix(strings.ToLower(path), strings.ToLower(existing)+"/") || strings.HasPrefix(strings.ToLower(existing), strings.ToLower(path)+"/") {
+				return fmt.Errorf("conflicting pack paths %q and %q", existing, path)
+			}
+		}
+		roles = append(roles, fileRole{path, role})
+		return nil
+	}
+	for _, path := range m.sources {
+		if err := addRole(path, "script"); err != nil {
+			return err
+		}
+	}
+	for _, path := range append([]string{m.fonts.Primary}, m.fonts.Fallback...) {
+		if !strings.HasPrefix(path, "builtin:") {
+			if err := addRole(path, "font"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func readPackFile(fsys fs.FS, path string, maximum int) (data []byte, err error) {

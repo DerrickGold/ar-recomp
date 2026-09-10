@@ -302,7 +302,6 @@ static void CaptureSimDynamicCamera(FrameSlot *dst, bool in_town) {
   dst->sim_dyncam_strength = g_settings.sim3d_reactive_strength;
   dst->sim_manual_orbit_yaw = camera.orbit_yaw;
   dst->sim_manual_orbit_pitch = camera.orbit_pitch;
-  dst->sim_world_inspection_blend = camera.world_inspection_blend;
 
   /* Outside a town there is no angel record to read: the memory holds
    * whatever the action stage left there. Reporting a neutral camera and

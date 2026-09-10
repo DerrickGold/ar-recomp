@@ -560,11 +560,11 @@ func TestAuthorPresentationContracts(t *testing.T) {
 		{"action.hud.act_1", AuthorPresentation{Shape: "fixed", MaximumPages: 1}},
 		{"action.hud.act_label", AuthorPresentation{Shape: "fixed", MaximumPages: 1, MaximumLines: 1}},
 		{"title.save_choice.labels", AuthorPresentation{Shape: "fixed", MaximumPages: 1, RequiredNonemptyLines: 2}},
-		{"name_entry.prompt_and_alphabet", AuthorPresentation{Shape: "keyboard"}},
+		{"name_entry.prompt_and_alphabet", AuthorPresentation{Shape: "keyboard", Keyboard: &AuthorKeyboardShape{Rows: 5, Columns: 13, MaximumLines: 63, MaximumPageBytes: 3072}}},
 		{"town.name.aitos", AuthorPresentation{Shape: "inline", MaximumPages: 1, MaximumLines: 1}},
 		{"dialogue.event.relay.aitos", AuthorPresentation{Shape: "flow"}},
 	} {
-		if shapes[expected.id] != expected.AuthorPresentation {
+		if !reflect.DeepEqual(shapes[expected.id], expected.AuthorPresentation) {
 			t.Fatalf("%s: %+v", expected.id, shapes[expected.id])
 		}
 	}
@@ -591,7 +591,7 @@ func TestAuthorPresentationContracts(t *testing.T) {
 	for _, text := range []string{
 		":: title.save_choice.labels\n@empty\n",
 		":: title.mode_select.with_save\nContinue\n@line\n@line\nNew game\n",
-		":: name_entry.prompt_and_alphabet\nA B C\n@page\nD E F\n",
+		":: name_entry.prompt_and_alphabet\n" + authorKeyboardPage + "@page\n" + authorKeyboardPage,
 		":: dialogue.event.relay.aitos\nOne\n@page\nTwo\n@page\nThree\n",
 		":: action.hud.act_1\nACT\n",
 	} {

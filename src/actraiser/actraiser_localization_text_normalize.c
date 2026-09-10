@@ -22,29 +22,35 @@ static ArLocalizationInlineObjectKind InlineObjectKind(const char *id) {
   return kArLocalizationInlineObject_None;
 }
 
-bool ActRaiserLocalizationText_Normalize(
+bool ActRaiserLocalizationText_NormalizeStructured(
     const char *source, size_t source_bytes,
     const ArDialogueInlineObject *source_objects, size_t source_object_count,
     bool preserve_blank_lines,
     char *destination, size_t capacity, size_t *destination_bytes,
     ArLocalizationInlineObjectSnapshot *destination_objects,
     size_t destination_object_capacity, uint8_t *destination_object_count,
-    uint16_t *reveal_offsets) {
+    uint16_t *reveal_offsets,
+    const uint8_t *source_boundaries, uint8_t *destination_boundaries) {
   if (!source || !destination || !capacity || !destination_bytes ||
       !destination_object_count ||
       (source_object_count && (!source_objects || !destination_objects)) ||
       source_object_count > destination_object_capacity ||
       source_object_count > UINT8_MAX ||
+      (destination_boundaries && !source_boundaries) ||
       (reveal_offsets && (source_bytes > kArLocalizationFrameTextCapacity ||
                           capacity > UINT16_MAX)))
     return false;
+  if (destination_boundaries)
+    memset(destination_boundaries, 0, AR_TEXT_BOUNDARY_BYTES(capacity));
   size_t written = 0;
   size_t object_index = 0;
   bool pending_space = false;
   for (size_t index = 0; index < source_bytes; ++index) {
     if (reveal_offsets) reveal_offsets[index] = (uint16_t)written;
     const char byte = source[index];
-    if (byte == ' ' || byte == '\t' || byte == '\r') {
+    const bool boundary = ArTextBoundary_Get(source_boundaries, index);
+    if (byte == ' ' || byte == '\t' || byte == '\r' ||
+        (destination_boundaries && byte == '\n' && !boundary)) {
       pending_space = written && destination[written - 1u] != '\n';
       continue;
     }
@@ -53,6 +59,8 @@ bool ActRaiserLocalizationText_Normalize(
       if (written &&
           (preserve_blank_lines || destination[written - 1u] != '\n')) {
         if (written + 1u >= capacity) return false;
+        if (destination_boundaries)
+          ArTextBoundary_Set(destination_boundaries, written, boundary);
         destination[written++] = '\n';
       }
       pending_space = false;
@@ -89,6 +97,8 @@ bool ActRaiserLocalizationText_Normalize(
       pending_space = false;
     }
     if (written + 1u >= capacity) return false;
+    if (destination_boundaries)
+      ArTextBoundary_Set(destination_boundaries, written, boundary);
     destination[written++] = byte;
   }
   while (written && (destination[written - 1u] == ' ' ||
@@ -102,6 +112,21 @@ bool ActRaiserLocalizationText_Normalize(
   /* A successfully resolved empty message is intentional, not a missing
    * translation. It still owns its native cells while the UI is alive. */
   return true;
+}
+
+bool ActRaiserLocalizationText_Normalize(
+    const char *source, size_t source_bytes,
+    const ArDialogueInlineObject *source_objects, size_t source_object_count,
+    bool preserve_blank_lines,
+    char *destination, size_t capacity, size_t *destination_bytes,
+    ArLocalizationInlineObjectSnapshot *destination_objects,
+    size_t destination_object_capacity, uint8_t *destination_object_count,
+    uint16_t *reveal_offsets) {
+  return ActRaiserLocalizationText_NormalizeStructured(
+      source, source_bytes, source_objects, source_object_count,
+      preserve_blank_lines, destination, capacity, destination_bytes,
+      destination_objects, destination_object_capacity, destination_object_count,
+      reveal_offsets, NULL, NULL);
 }
 
 bool ActRaiserLocalizationText_InsertInlineObject(
