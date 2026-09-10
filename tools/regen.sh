@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Compatibility launcher for the cross-platform Go project driver.
 #
-# New automation should invoke a downloaded snesbuild binary directly:
+# New game automation should prepare project-owned content, then invoke the
+# generic driver:
+#   actraiser-builder native-source --root . --rom ar.sfc
 #   snesbuild regen --root . --rom ar.sfc
 #
 # This wrapper keeps the historical developer command working. It runs the Go
@@ -11,6 +13,20 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+GO_COMMAND="${GO:-$(command -v go || true)}"
+
+if [ -n "${ACTRAISER_BUILDER:-}" ]; then
+  "$ACTRAISER_BUILDER" native-source --root "$ROOT" --rom "$ROOT/ar.sfc"
+elif [ -x "$ROOT/installer/build/actraiser-builder" ]; then
+  "$ROOT/installer/build/actraiser-builder" native-source --root "$ROOT" --rom "$ROOT/ar.sfc"
+elif [ -n "$GO_COMMAND" ]; then
+  "$GO_COMMAND" -C "$ROOT/installer" run ./cmd/actraiser-builder \
+    native-source --root "$ROOT" --rom "$ROOT/ar.sfc"
+else
+  echo "regen.sh: no actraiser-builder binary or Go toolchain found" >&2
+  echo "Set ACTRAISER_BUILDER=/path/to/actraiser-builder." >&2
+  exit 1
+fi
 
 DRIVER_ARGS=(regen --root "$ROOT" --rom ar.sfc --run-tests)
 if [ -n "${SNESRECOMP_JOBS:-}" ]; then
@@ -28,7 +44,6 @@ fi
 # regenerate successfully with yesterday's generator. Release automation that
 # intentionally selects a downloaded binary invokes it directly (or sets
 # SNESBUILD above).
-GO_COMMAND="${GO:-$(command -v go || true)}"
 if [ -n "$GO_COMMAND" ]; then
   exec "$GO_COMMAND" -C "$ROOT/snesrecomp-go" run ./cmd/snesbuild "${DRIVER_ARGS[@]}"
 fi

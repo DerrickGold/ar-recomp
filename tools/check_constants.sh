@@ -82,7 +82,7 @@ check_vended_config_is_stock() {
   fi
 }
 
-check_vended_config_is_stock snesrecomp-go/packaging/templates/config.ini
+check_vended_config_is_stock installer/packaging/templates/config.ini
 
 if [ "$status" -eq 0 ]; then
   printf '%s\n' "Canonical constant checks passed."

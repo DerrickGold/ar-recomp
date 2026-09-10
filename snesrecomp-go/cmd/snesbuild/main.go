@@ -4,10 +4,10 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,7 +15,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/DerrickGold/snesrecomp-go/internal/languagecli"
 	"github.com/DerrickGold/snesrecomp-go/internal/materialize"
 	"github.com/DerrickGold/snesrecomp-go/internal/project"
 	"github.com/DerrickGold/snesrecomp-go/internal/toolchain"
@@ -40,8 +39,6 @@ func run(args []string) error {
 		return errors.New("missing command")
 	}
 	switch args[0] {
-	case "language":
-		return languagecli.Run(context.Background(), args[1:], os.Stdout)
 	case "regen":
 		return runRegen(args[1:])
 	case "analyze":
@@ -58,8 +55,6 @@ func run(args []string) error {
 		return runSPCDisasm(args[1:])
 	case "apu-audit":
 		return runAPUAudit(args[1:])
-	case "quintet-lzss":
-		return runQuintetLZSS(args[1:])
 	case "poll-census":
 		return runPollCensus(args[1:])
 	case "rts-webs":
@@ -80,20 +75,14 @@ func run(args []string) error {
 		return tooling.RunMXDiffCommand(args[1:], ".", os.Stdout)
 	case "chr-render":
 		return tooling.RunCHRRenderCommand(args[1:], ".", os.Stdout)
-	case "localization-graphics":
-		return tooling.RunLocalizationGraphicsCommand(args[1:], ".", os.Stdout)
-	case "localization-extract":
-		return tooling.RunLocalizationExtractCommand(args[1:], ".", os.Stdout)
 	case "configure":
 		return runConfigure(args[1:])
 	case "build":
 		return runBuild(args[1:])
 	case "all":
 		return runAll(args[1:])
-	case "gui":
-		return runGUI(args[1:])
-	case "audio-preview":
-		return runAudioPreview(args[1:])
+	case "install":
+		return runInstall(args[1:])
 	case "toolchain":
 		return runToolchain(args[1:])
 	case "runtime":
@@ -118,7 +107,6 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `Usage: snesbuild <command> [options]
 
 Commands:
-  language    Validate, package, install or describe language packs without the GUI
   regen       Regenerate C and all generated sidecars
   analyze     Compare inferred control-flow facts with authored cfg (read-only)
   materialize Write an isolated reduced cfg/DB/C bundle after equivalence checks
@@ -127,8 +115,6 @@ Commands:
   rom-info    Report cartridge identity, header, and vectors (read-only)
   spc-disasm  Disassemble an SPC700 payload or ROM upload block (read-only)
   apu-audit   Validate live BRR samples and CPU/APU port handshakes
-  quintet-lzss
-              Decode a bit-packed Quintet LZSS blob
   poll-census Classify decoded hardware-status read and polling sites
   rts-webs    Census pushed and stack-captured continuation patterns
   link-audit  Audit generated reachability, traps, and tail-call suspects
@@ -142,17 +128,11 @@ Commands:
   wram        Inspect, compare, and scan WRAM snapshots (read-only)
   mx-diff     Compare game-frame M/X traces (read-only)
   chr-render  Render SNES 4bpp ROM, VRAM, and icon sheets
-  localization-graphics
-              Extract regional font/credits reference assets to a private ZIP
-  localization-extract
-              Extract a local source pack, catalogue, or US runtime-route manifest
   configure   Configure the native game build with CMake
   build       Configure (by default) and compile the native game
               (--hermetic compiles with the pinned Zig toolchain, no CMake)
   all         Regenerate, configure, and compile in one command
-  gui         Open the local graphical hermetic game builder
-  audio-preview
-              Render local ActRaiser soundtrack comparison WAVs in pure Go
+  install     Install an explicitly named built game, ROM, and launcher
   toolchain   Report, fetch, or pin the hermetic C toolchain (Zig)
   runtime     Build a target-specific vended runner archive
   sdl         Stage the pinned SDL3 redistributable for a cross target
@@ -244,6 +224,10 @@ func toolchainCacheDir(root string) string {
 }
 
 func (values *buildFlags) hermeticOptions() (project.HermeticOptions, error) {
+	return values.hermeticOptionsWithWriters(os.Stdout, os.Stderr)
+}
+
+func (values *buildFlags) hermeticOptionsWithWriters(stdout, stderr io.Writer) (project.HermeticOptions, error) {
 	paths := project.DefaultPaths(values.root)
 	paths.BuildDir, paths.ToolchainDir = values.buildDir, values.toolchainDir
 	if values.rom != "" {
@@ -255,14 +239,14 @@ func (values *buildFlags) hermeticOptions() (project.HermeticOptions, error) {
 		if err != nil {
 			return project.HermeticOptions{}, err
 		}
-		fmt.Printf("hermetic: using Zig %s (%s, via %s)\n", located.Version, located.Path, located.Source)
+		fmt.Fprintf(stdout, "hermetic: using Zig %s (%s, via %s)\n", located.Version, located.Path, located.Source)
 		zigPath = located.Path
 	}
 	return project.HermeticOptions{
 		Paths: paths, ZigPath: zigPath, Jobs: values.jobs, Optimize: values.optimize,
 		SDLIncludeDir: values.sdlInclude, SDLLibDir: values.sdlLib, Target: values.target,
 		Verbose: values.verbose,
-		Stdout:  os.Stdout, Stderr: os.Stderr,
+		Stdout:  stdout, Stderr: stderr,
 	}, nil
 }
 
@@ -300,11 +284,33 @@ func (values *buildFlags) options() project.BuildOptions {
 func runRegen(args []string) error {
 	flags := flag.NewFlagSet("regen", flag.ContinueOnError)
 	values := addRegenFlags(flags)
+	eventFormat := flags.String("event-format", "human", "output contract: human or jsonl")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	_, err := project.Regenerate(values.options())
-	return err
+	sink, err := newEventSink(*eventFormat, os.Stdout)
+	if err != nil {
+		return err
+	}
+	options := values.options()
+	if sink != nil {
+		options.Stdout, options.Stderr = commandWriters(sink)
+		sink.phase("regen", "Regenerating")
+		sink.progress("regen", 0, 1)
+	}
+	_, err = project.Regenerate(options)
+	if err != nil {
+		return sink.fail("regen", err)
+	}
+	if sink != nil {
+		sink.progress("regen", 1, 1)
+		resolved, resolveErr := options.Paths.Resolve()
+		if resolveErr != nil {
+			return sink.fail("regen", resolveErr)
+		}
+		sink.artifact("generated-source-directory", resolved.GeneratedDir)
+	}
+	return nil
 }
 
 func runAnalyze(args []string) error {
@@ -668,54 +674,6 @@ func runAPUAudit(args []string) error {
 	return nil
 }
 
-func runQuintetLZSS(args []string) error {
-	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		return errors.New("quintet-lzss needs a linear input offset before its options")
-	}
-	offsetText, args := args[0], args[1:]
-	flags := flag.NewFlagSet("quintet-lzss", flag.ContinueOnError)
-	root := flags.String("root", ".", "game project root")
-	inputPath := flags.String("input", "game.sfc", "ROM or compressed input path, relative to project root")
-	size := flags.Int("size", 0, "exact decompressed size (default: little-endian word at offset)")
-	outputPath := flags.String("out", "", "optional output path, relative to project root")
-	comparePath := flags.String("compare", "", "optional expected binary, relative to project root")
-	compareOffset := flags.Int("compare-offset", 0, "byte offset within --compare")
-	format := flags.String("format", "text", "report format: text or json")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	offset, err := strconv.ParseInt(strings.TrimSpace(offsetText), 0, 64)
-	if err != nil || offset < 0 || int64(int(offset)) != offset {
-		return fmt.Errorf("parse input offset %q as a non-negative integer", offsetText)
-	}
-	absoluteRoot, err := filepath.Abs(*root)
-	if err != nil {
-		return fmt.Errorf("resolve project root: %w", err)
-	}
-	headered := true
-	flags.Visit(func(item *flag.Flag) {
-		if item.Name == "size" {
-			headered = false
-		}
-	})
-	report, output, err := tooling.BuildQuintetLZSS(tooling.QuintetLZSSOptions{
-		InputPath: resolveProjectOptional(absoluteRoot, *inputPath), Offset: int(offset), Size: *size, Headered: headered,
-		ComparePath: resolveProjectOptional(absoluteRoot, *comparePath), CompareOffset: *compareOffset,
-	})
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(*outputPath) != "" {
-		resolved := resolveProjectOptional(absoluteRoot, *outputPath)
-		if err := os.WriteFile(resolved, output, 0o644); err != nil {
-			return fmt.Errorf("write decompressed output %s: %w", resolved, err)
-		}
-		report.NoWrite = false
-		fmt.Fprintf(os.Stderr, "quintet-lzss: wrote %d bytes to %s\n", len(output), resolved)
-	}
-	return tooling.WriteQuintetLZSSReport(os.Stdout, report, *format)
-}
-
 func runPollCensus(args []string) error {
 	flags := flag.NewFlagSet("poll-census", flag.ContinueOnError)
 	root := flags.String("root", ".", "game project root")
@@ -1009,21 +967,51 @@ func runConfigure(args []string) error {
 func runBuild(args []string) error {
 	flags := flag.NewFlagSet("build", flag.ContinueOnError)
 	values := addBuildFlags(flags)
+	eventFormat := flags.String("event-format", "human", "output contract: human or jsonl")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if values.hermetic {
-		if err := project.PrepareBuildLocalization(values.options().Paths, os.Stdout); err != nil {
-			return err
-		}
-		options, err := values.hermeticOptions()
-		if err != nil {
-			return err
-		}
-		_, err = project.HermeticBuild(options)
+	sink, err := newEventSink(*eventFormat, os.Stdout)
+	if err != nil {
 		return err
 	}
-	return project.Build(values.options())
+	stdout, stderr := io.Writer(os.Stdout), io.Writer(os.Stderr)
+	if sink != nil {
+		stdout, stderr = commandWriters(sink)
+		sink.phase("compile", "Compiling")
+	}
+	if values.hermetic {
+		options, err := values.hermeticOptionsWithWriters(stdout, stderr)
+		if err != nil {
+			return sink.fail("compile", err)
+		}
+		if sink != nil {
+			options.Progress = func(completed, total int) {
+				sink.progress("compile", completed, total)
+			}
+		}
+		binary, err := project.HermeticBuild(options)
+		if err != nil {
+			return sink.fail("compile", err)
+		}
+		if sink != nil {
+			sink.artifact("game-binary", binary)
+		}
+		return nil
+	}
+	options := values.options()
+	options.Stdout, options.Stderr = stdout, stderr
+	if err := project.Build(options); err != nil {
+		return sink.fail("compile", err)
+	}
+	if sink != nil {
+		binary, err := locateCMakeBinary(values)
+		if err != nil {
+			return sink.fail("compile", err)
+		}
+		sink.artifact("game-binary", binary)
+	}
+	return nil
 }
 
 func runAll(args []string) error {
@@ -1031,9 +1019,6 @@ func runAll(args []string) error {
 	regenValues := addRegenFlags(flags)
 	buildValues := addBuildFlagsForAll(flags)
 	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	if err := project.PrepareBuildLocalization(regenValues.options().Paths, os.Stdout); err != nil {
 		return err
 	}
 	if _, err := project.Regenerate(regenValues.options()); err != nil {
@@ -1051,6 +1036,76 @@ func runAll(args []string) error {
 		return err
 	}
 	return project.Build(buildValues.options())
+}
+
+func locateCMakeBinary(values *buildFlags) (string, error) {
+	root, err := filepath.Abs(values.root)
+	if err != nil {
+		return "", err
+	}
+	manifest, err := project.LoadManifest(filepath.Join(root, project.ManifestFileName))
+	if err != nil {
+		return "", err
+	}
+	name := manifest.Name
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	buildDir := values.buildDir
+	if !filepath.IsAbs(buildDir) {
+		buildDir = filepath.Join(root, buildDir)
+	}
+	for _, candidate := range []string{
+		filepath.Join(buildDir, name),
+		filepath.Join(buildDir, values.config, name),
+	} {
+		if info, statErr := os.Stat(candidate); statErr == nil && info.Mode().IsRegular() {
+			return filepath.Abs(candidate)
+		}
+	}
+	return "", fmt.Errorf("build succeeded but game artifact %s was not found under %s", name, buildDir)
+}
+
+func runInstall(args []string) error {
+	flags := flag.NewFlagSet("install", flag.ContinueOnError)
+	root := flags.String("root", "", "game project root")
+	binary := flags.String("binary", "", "built game executable")
+	rom := flags.String("rom", "", "ROM passed by the generated launcher")
+	destination := flags.String("destination", "", "playable output directory")
+	eventFormat := flags.String("event-format", "human", "output contract: human or jsonl")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	sink, err := newEventSink(*eventFormat, os.Stdout)
+	if err != nil {
+		return err
+	}
+	if flags.NArg() != 0 || *root == "" || *binary == "" || *rom == "" || *destination == "" {
+		return sink.fail("install", errors.New("install requires --root, --binary, --rom, and --destination"))
+	}
+	if sink != nil {
+		sink.phase("install", "Installing playable game")
+		sink.progress("install", 0, 1)
+	}
+	installed, err := project.InstallPlayable(project.InstallOptions{
+		ProjectRoot: *root, BinaryPath: *binary, ROMPath: *rom,
+		DestinationDir: *destination,
+	})
+	if err != nil {
+		return sink.fail("install", err)
+	}
+	if sink == nil {
+		fmt.Printf("Playable game installed at %s\nLauncher written to %s\n",
+			installed.BinaryPath, installed.Launcher)
+		return nil
+	}
+	sink.progress("install", 1, 1)
+	sink.artifact("game-binary", installed.BinaryPath)
+	sink.artifact("launcher", installed.Launcher)
+	for _, library := range installed.Libraries {
+		sink.artifact("shared-library", library)
+	}
+	return nil
 }
 
 func addBuildFlagsForAll(flags *flag.FlagSet) *buildFlags {
@@ -1075,6 +1130,7 @@ func runToolchain(args []string) error {
 	goarch := flags.String("goarch", runtime.GOARCH, "target architecture for `pin`")
 	sdl := flags.Bool("sdl", false, "print the SDL3 pin (url sha archive kind) instead of the Zig pin")
 	sdlTtf := flags.Bool("sdl-ttf", false, "print the SDL3_ttf pin (url sha archive kind)")
+	eventFormat := flags.String("event-format", "human", "output contract: human or jsonl")
 	steamDeckTtf := flags.Bool("steam-deck-sdl-ttf", false, "print Steam Deck SDL3_ttf header/runtime pins")
 	steamDeckSDL := flags.Bool(
 		"steam-deck-sdl", false,
@@ -1086,6 +1142,15 @@ func runToolchain(args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	sink, err := newEventSink(*eventFormat, os.Stdout)
+	if err != nil {
+		return err
+	}
+	output := io.Writer(os.Stdout)
+	if sink != nil {
+		output, _ = commandWriters(sink)
+		sink.phase("toolchain", "Preparing toolchain")
+	}
 	if subcommand == "pin" {
 		selected := 0
 		for _, enabled := range []bool{*sdl, *sdlTtf, *steamDeckSDL, *steamDeckTtf} {
@@ -1094,26 +1159,26 @@ func runToolchain(args []string) error {
 			}
 		}
 		if selected > 1 {
-			return fmt.Errorf("SDL pin selectors are mutually exclusive")
+			return sink.fail("toolchain", fmt.Errorf("SDL pin selectors are mutually exclusive"))
 		}
 		if *steamDeckTtf {
 			hURL, hSHA, hArchive, rURL, rSHA, rArchive := toolchain.SteamDeckSDL3TtfPins()
-			fmt.Printf("%s %s %s %s %s %s\n", hURL, hSHA, hArchive, rURL, rSHA, rArchive)
+			fmt.Fprintf(output, "%s %s %s %s %s %s\n", hURL, hSHA, hArchive, rURL, rSHA, rArchive)
 			return nil
 		}
 		if *sdlTtf {
 			url, sha, archive, kind, err := toolchain.SDL3TtfPin(*goos, *goarch)
 			if err != nil {
-				return err
+				return sink.fail("toolchain", err)
 			}
-			fmt.Printf("%s %s %s %s\n", url, sha, archive, kind)
+			fmt.Fprintf(output, "%s %s %s %s\n", url, sha, archive, kind)
 			return nil
 		}
 		if *steamDeckSDL {
 			headersURL, headersSHA, headersArchive,
 				runtimeURL, runtimeSHA, runtimeArchive :=
 				toolchain.SteamDeckSDL3Pins()
-			fmt.Printf("%s %s %s %s %s %s\n",
+			fmt.Fprintf(output, "%s %s %s %s %s %s\n",
 				headersURL, headersSHA, headersArchive,
 				runtimeURL, runtimeSHA, runtimeArchive)
 			return nil
@@ -1121,16 +1186,16 @@ func runToolchain(args []string) error {
 		if *sdl {
 			url, sha, archive, kind, err := toolchain.SDL3Pin(*goos, *goarch)
 			if err != nil {
-				return err
+				return sink.fail("toolchain", err)
 			}
-			fmt.Printf("%s %s %s %s\n", url, sha, archive, kind)
+			fmt.Fprintf(output, "%s %s %s %s\n", url, sha, archive, kind)
 			return nil
 		}
 		url, sha, archive, err := toolchain.Pin(*goos, *goarch)
 		if err != nil {
-			return err
+			return sink.fail("toolchain", err)
 		}
-		fmt.Printf("%s %s %s\n", url, sha, archive)
+		fmt.Fprintf(output, "%s %s %s\n", url, sha, archive)
 		return nil
 	}
 	cache := *cacheDir
@@ -1141,30 +1206,39 @@ func runToolchain(args []string) error {
 	case "status":
 		url, sha, err := toolchain.PinnedURL()
 		if err != nil {
-			return err
+			return sink.fail("toolchain", err)
 		}
 		pinnedVersion, err := toolchain.PinnedVersion()
 		if err != nil {
-			return err
+			return sink.fail("toolchain", err)
 		}
-		fmt.Printf("pinned Zig      %s\n", pinnedVersion)
-		fmt.Printf("release         %s\n", url)
-		fmt.Printf("sha256          %s\n", sha)
+		fmt.Fprintf(output, "pinned Zig      %s\n", pinnedVersion)
+		fmt.Fprintf(output, "release         %s\n", url)
+		fmt.Fprintf(output, "sha256          %s\n", sha)
 		located, err := toolchain.Locate(cache)
 		if err != nil {
-			fmt.Printf("local zig       MISSING\n")
-			return err
+			fmt.Fprintf(output, "local zig       MISSING\n")
+			return sink.fail("toolchain", err)
 		}
-		fmt.Printf("local zig       %s (%s, via %s)\n", located.Version, located.Path, located.Source)
+		fmt.Fprintf(output, "local zig       %s (%s, via %s)\n", located.Version, located.Path, located.Source)
 		if located.Version != pinnedVersion {
-			fmt.Printf("note            local version differs from the pin; hermetic release builds should use %s\n", pinnedVersion)
+			fmt.Fprintf(output, "note            local version differs from the pin; hermetic release builds should use %s\n", pinnedVersion)
+		}
+		if sink != nil {
+			sink.artifact("toolchain", located.Path)
 		}
 		return nil
 	case "fetch":
-		_, err := toolchain.Fetch(cache, os.Stdout)
-		return err
+		located, err := toolchain.Fetch(cache, output)
+		if err != nil {
+			return sink.fail("toolchain", err)
+		}
+		if sink != nil {
+			sink.artifact("toolchain", located.Path)
+		}
+		return nil
 	default:
-		return fmt.Errorf("unknown toolchain subcommand %q (expected status, fetch, or pin)", subcommand)
+		return sink.fail("toolchain", fmt.Errorf("unknown toolchain subcommand %q (expected status, fetch, or pin)", subcommand))
 	}
 }
 

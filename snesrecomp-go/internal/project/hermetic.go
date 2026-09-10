@@ -43,8 +43,12 @@ type HermeticOptions struct {
 	// that teaches nothing) -- see CrossSDL3Dir.
 	Target  string
 	Verbose bool
-	Stdout  io.Writer
-	Stderr  io.Writer
+	// Progress receives completed and total translation-unit counts. Cached
+	// objects are included in completed. It is optional and independent of the
+	// human build log so external drivers never need to parse prose.
+	Progress func(completed, total int)
+	Stdout   io.Writer
+	Stderr   io.Writer
 }
 
 // toolLog forwards a subprocess's own output to the build log. Zig's
@@ -151,9 +155,6 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	}
 	manifest, err := LoadManifest(manifestPath)
 	if err != nil {
-		return "", err
-	}
-	if err := prepareBuildLocalization(paths, manifestPath, options.Stdout); err != nil {
 		return "", err
 	}
 	if options.ZigPath == "" {
@@ -330,10 +331,15 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	}
 	fmt.Fprintf(options.Stdout, "hermetic: %d translation units (%d cached, %d to compile, %d jobs)\n",
 		len(sources), cached, len(jobs), options.Jobs)
+	if options.Progress != nil {
+		options.Progress(cached, len(sources))
+	}
 
 	started := time.Now()
 	tools := &toolLog{writer: options.Stdout}
 	var failed atomic.Bool
+	var completed atomic.Int64
+	completed.Store(int64(cached))
 	var firstError error
 	var errorOnce sync.Once
 	semaphore := make(chan struct{}, options.Jobs)
@@ -368,6 +374,10 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 					firstError = fmt.Errorf("compile %s: %w (its output is in the build log above)",
 						item.source, err)
 				})
+				return
+			}
+			if options.Progress != nil {
+				options.Progress(int(completed.Add(1)), len(sources))
 			}
 		}(item)
 	}

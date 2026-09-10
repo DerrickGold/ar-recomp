@@ -1099,7 +1099,8 @@ bool Diorama_SaveLayerManifest(void) {
   /* One atomic replace on both platforms. A bare rename() FAILS on Windows when
    * the destination exists (packaging builds windows-x86_64/arm64), so every save
    * after the first would silently stop persisting the user's edits -- the same
-   * trap handled by buildgui's storeROM. See atomic_replace.h; this file may
+   * trap handled by the ActRaiser Builder's ROM storage. See atomic_replace.h;
+   * this file may
    * contain hand-authored rooms that cannot be reproduced from the table, so
    * "original kept" below must be TRUE. */
   if (!AtomicReplaceFile(tmp, path)) {

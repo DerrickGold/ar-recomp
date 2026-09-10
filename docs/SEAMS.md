@@ -105,8 +105,8 @@ values and nonzero port-2 ids to catch them in play.
    `src/music_replacements.c` + `[music:<name>]` sections of
    `game-assets/manifest.ini` (all 17 table songs enumerated; the manifest
    TEMPLATE ships them inert until their .ogg exists). The live manifest is
-   gitignored and seeded from that template — embedded in snesbuild at
-   `internal/buildgui/assets/manifest.ini` — so a developer's own entries never
+   gitignored and seeded from that template — embedded in actraiser-builder at
+   `installer/internal/builder/assets/manifest.ini` — so a developer's own entries never
    reach a release. Identity = the stage-1
    image source address delivered by
    `RtlGameAudioApi.spc_upload_completed`; start/stop keyed off the port-0

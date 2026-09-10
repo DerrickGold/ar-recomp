@@ -15,10 +15,10 @@ It does **not** cover, and grants no rights to:
   generate them yourself, locally, from your own legally obtained ROM, and
   they remain subject to the original game's copyright regardless of this
   license.
-- Retail/manual/cover media under `snesrecomp-go/internal/buildgui/assets/`.
+- Retail/manual/cover media under `installer/internal/builder/assets/`.
   Those files are distributed for project use but are not relicensed under
   MIT. The independently authored Go source which embeds and serves them is
-  covered by `snesrecomp-go/LICENSE`.
+  covered by this license.
 - `tools/oracle/libretro.h`, which contains and remains covered by the
   libretro project's own MIT license notice.
 

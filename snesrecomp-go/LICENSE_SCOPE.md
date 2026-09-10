@@ -24,9 +24,7 @@ The module license does not relicense material for which this repository does
 not own the necessary rights, including:
 
 - game ROMs or generated/recompiled code derived from them;
-- extracted audio, graphics, memory captures, or other game content; and
-- retail/manual/cover media under `internal/buildgui/assets/` or other
-  third-party artwork.
+- extracted audio, graphics, memory captures, or other game content.
 
 Third-party files or components carrying their own notices remain governed by
 those notices. Their presence does not narrow the MIT grant for the original

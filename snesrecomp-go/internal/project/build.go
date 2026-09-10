@@ -54,9 +54,6 @@ func Build(options BuildOptions) error {
 	}
 	options.Paths = paths
 	applyBuildDefaults(&options)
-	if err := prepareBuildLocalization(paths, filepath.Join(paths.Root, ManifestFileName), options.Stdout); err != nil {
-		return err
-	}
 	generated, err := filepath.Glob(filepath.Join(paths.GeneratedDir, "*.c"))
 	if err != nil {
 		return err

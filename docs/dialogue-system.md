@@ -9,7 +9,7 @@ included here. For the author-facing contract see
 
 ## Two consumers, not one text format
 
-Extraction is owned by the Go builder's `internal/localizationkit`; the game
+Extraction is owned by `installer/internal/localization`; the game
 and Go author validator share the semantic contract. Profiles are declarative
 Go-owned data. The former Python ROM extractor is removed, not a fallback.
 See [local extraction commands](language-pack-format.md#tooling) for source

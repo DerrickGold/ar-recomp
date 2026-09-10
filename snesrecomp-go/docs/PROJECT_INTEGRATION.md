@@ -64,6 +64,33 @@ build/v2regen regen \
 build/v2regen stub-census --gen-dir src/gen
 ```
 
+## Machine process contract
+
+External project installers must request `--event-format jsonl` on `regen`,
+`build`, `toolchain`, and `install`. In that mode stdout contains exactly one
+JSON object per line; human and child-process output is carried inside escaped
+`diagnostic` events. Exit status remains authoritative.
+
+Every object has `"schema":"snesbuild-event"` and `"version":1`. Version 1
+defines `phase`, `progress`, `artifact`, and `diagnostic` event types. Progress
+events include a phase plus completed/total units. Artifact events include a
+kind and absolute path; hermetic builds report `game-binary`, and install
+reports the installed `game-binary`, `launcher`, and any `shared-library`
+artifacts.
+
+```sh
+snesbuild regen --root . --rom game.sfc --event-format jsonl
+snesbuild toolchain fetch --root . --event-format jsonl
+snesbuild build --root . --hermetic --event-format jsonl
+snesbuild install --root . --binary /absolute/build/MyGame \
+  --rom /absolute/game.sfc --destination /absolute/playable \
+  --event-format jsonl
+```
+
+Consumers must reject an unknown schema or version and must not infer artifact
+paths or progress from diagnostics. Cancellation should terminate the
+`snesbuild` process tree so compiler children do not survive their orchestrator.
+
 `regen` writes bank translation units, `dispatch_v2.c`, and
 `unresolved_stubs_v2.c`. It converges cross-bank discovery and variant routing
 before replacing output, preserves deterministic source order across workers,
