@@ -410,6 +410,13 @@ column is knowable at the crater placement (the `$10` operand is ahead of the
 cursor) and unreadable afterwards (it is behind it).
 
 ### Text Data (Bank $04: 0x20000-0x27FFF)
+
+These are USA coarse ranges, not a sequential-record grammar. For exact
+consumer-rooted extraction use the verified profiles in
+`tools/language_pack_extract.py`; the [dialogue reference](dialogue-system.md)
+explains native controls and source identity. Menu-bank text is interleaved
+with code and tables and is not covered by the bank-04 ranges alone.
+
 | Range | Content |
 |-------|---------|
 | 0x20000-0x2000D | Town name pointers |
@@ -417,10 +424,27 @@ cursor) and unreadable afterwards (it is behind it).
 | 0x20043-0x2004A | Enemy name pointers |
 | 0x2004B-0x020076 | Enemy names |
 | 0x20077-0x21396 | Angel dialogue |
-| 0x21523-0x246AD | Town dialogue |
+| 0x21532-0x246AD | Town dialogue (additional event roots are consumer-resolved) |
 | 0x246AE-0x24C99 | Offering descriptions |
 | 0x24C8A-0x258F2 | Ending sequence text |
 | 0x258F3-0x25EF2 | Text compression dictionary |
+
+USA fixed-text source tables (SNES bank `$01`, same numeric file offset):
+
+| Address | Entries / meaning |
+| --- | --- |
+| `$01:F04F` / `$01:F08E` | 4 selected-magic / 20 selected-possession pointers; one-based native selections |
+| `$01:F1BD` | 7 city-name pointers |
+| `$01:F272` / `$01:F290` | 8 Sky root / 4 Sky choice pointers |
+| `$01:F34C` / `$01:F36A` | 15 simulation root / 6 simulation choice pointers |
+| `$01:F484` / `$01:F4DC` / `$01:F5BC` | Master / Cities / Score dynamic records |
+| `$01:EF3B` / `$01:EFE6` | Name-entry prompt/alphabet / selector records |
+| `$01:F46D` | Numeric-only fixed record, not a prose message |
+
+Western dictionaries each occupy 128 × 12 bytes: file offsets USA `0x258F3`,
+Europe English `0x258F1`, German `0x25A75`, French `0x25989`. Japanese has no
+equivalent dictionary. Fixed-composer table and RAM addresses also move across
+releases; do not apply a single bank-wide offset to translate them.
 
 ### World-map construction, navigation, and presentation (mapped 2026-07-27)
 

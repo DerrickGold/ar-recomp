@@ -1,4 +1,5 @@
 #include "platform/sdl/text_rasterizer_sdl.h"
+#include "localization/unicode_grapheme.h"
 
 #include <stddef.h>
 #include <stdio.h>
@@ -26,6 +27,8 @@ static void SetError(char *error, size_t capacity, const char *message) {
 enum {
   kMaximumFallbackFonts = 16,
   kMaximumCachedFontSizes = 32,
+  kGlyphCoverageCacheCapacity = 1024,
+  kMissingGlyphWarningCapacity = 64,
 };
 
 typedef struct CachedFontSet {
@@ -45,6 +48,11 @@ typedef struct SdlTextRasterizerState {
   size_t font_set_capacity;
   uint64_t clock;
   bool ttf_initialized;
+  uint32_t coverage_keys[kGlyphCoverageCacheCapacity];
+  bool coverage_values[kGlyphCoverageCacheCapacity];
+  uint32_t warned_scalars[kMissingGlyphWarningCapacity];
+  size_t warning_count;
+  bool warnings_saturated;
 } SdlTextRasterizerState;
 
 typedef struct SdlTextBitmapToken {
@@ -134,6 +142,67 @@ static CachedFontSet *AcquireFontSet(
   CloseFontSet(&state->font_sets[victim], state->fallback_count);
   state->font_sets[victim] = replacement;
   return &state->font_sets[victim];
+}
+
+static bool HasGlyph(void *context, uint32_t scalar, bool *provided,
+                     char *error, size_t error_capacity) {
+  SdlTextRasterizerState *state = context;
+  const size_t slot = scalar % kGlyphCoverageCacheCapacity;
+  if (state->coverage_keys[slot] == scalar + 1u) {
+    *provided = state->coverage_values[slot];
+    return true;
+  }
+  CachedFontSet *set = NULL;
+  for (size_t i = 0; i < state->font_set_capacity; ++i)
+    if (state->font_sets[i].primary) {
+      set = &state->font_sets[i];
+      break;
+    }
+  if (!set)
+    set = AcquireFontSet(state, 24, error, error_capacity);
+  if (!set)
+    return false;
+  /* SDL_ttf's query traverses the configured fallback chain too. */
+  *provided = TTF_FontHasGlyph(set->primary, scalar);
+  state->coverage_keys[slot] = scalar + 1u;
+  state->coverage_values[slot] = *provided;
+  return true;
+}
+
+static void WarnMissingGlyphs(SdlTextRasterizerState *state, const char *text) {
+  /* Only called on raster misses, never on cached menu/reveal frames. Keep
+   * reports bounded for arbitrary authored/dynamic text and reset with stack.
+   */
+  if (state->warnings_saturated)
+    return;
+  const size_t length = strlen(text);
+  size_t cursor = 0;
+  while (cursor < length) {
+    uint32_t scalar;
+    if (!ArUnicode_DecodeScalar(text, length, cursor, &scalar, &cursor))
+      return;
+    bool provided = false;
+    if (!ArTextGlyphNeedsCoverage(scalar) ||
+        !HasGlyph(state, scalar, &provided, NULL, 0) || provided)
+      continue;
+    size_t i = 0;
+    while (i < state->warning_count && state->warned_scalars[i] != scalar)
+      ++i;
+    if (i < state->warning_count)
+      continue;
+    if (state->warning_count == kMissingGlyphWarningCapacity) {
+      fprintf(stderr, "[localized-text] additional missing-glyph warnings "
+                      "suppressed; run tools/check_language_fonts.py\n");
+      state->warnings_saturated = true;
+      return;
+    }
+    state->warned_scalars[state->warning_count++] = scalar;
+    fprintf(stderr,
+            "[localized-text] font stack '%s' lacks U+%04X; "
+            "a replacement glyph may be shown. "
+            "Run tools/check_language_fonts.py for source locations.\n",
+            state->font_stack_id, (unsigned)scalar);
+  }
 }
 
 static float RetailBlueWeight(float position) {
@@ -587,6 +656,7 @@ static bool Rasterize(void *context, const ArTextRasterRequest *request,
     free(text);
     return false;
   }
+  WarnMissingGlyphs(state, text);
   if (requested_result == kRasterAttempt_Success) {
     best = requested;
   } else {
@@ -662,10 +732,11 @@ static void ReleaseBitmap(void *context, ArTextBitmap *bitmap) {
 }
 
 static const ArTextRasterizerOps kOps = {
-  .struct_size = sizeof(ArTextRasterizerOps),
-  .abi_version = AR_TEXT_RASTERIZER_ABI_VERSION,
-  .rasterize = Rasterize,
-  .release_bitmap = ReleaseBitmap,
+    .struct_size = sizeof(ArTextRasterizerOps),
+    .abi_version = AR_TEXT_RASTERIZER_ABI_VERSION,
+    .rasterize = Rasterize,
+    .has_glyph = HasGlyph,
+    .release_bitmap = ReleaseBitmap,
 };
 
 static void DestroyState(SdlTextRasterizerState *state) {

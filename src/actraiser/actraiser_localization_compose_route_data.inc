@@ -2,7 +2,7 @@
  * tools/generate_actraiser_localization_compose_routes.py.
  * Do not edit by hand. Contains address-only USA adapter metadata;
  * it contains no retail wording, decoded operations, or raw bytes.
- * Manifest SHA-256: 8d29f66423a86ee929108cd4efb631eaea5c69c0e36a937e42fbb2bbb068c8bb
+ * Manifest SHA-256: cbdb3b47a071bca94da402f9b73de88f62dcf20e56675f24e01d91dc0e0339ca
  */
 static const ActRaiserLocalizationComposeRoute kComposeRoutes[] = {
   {
@@ -284,7 +284,7 @@ static const ActRaiserLocalizationComposeRoute kComposeRoutes[] = {
     .semantic_id = "city.fillmore.name",
     .surface_id = UINT32_C(4),
     .destination = UINT16_C(0x0106),
-    .region = {6, 1, 12, 2},
+    .region = {6, 1, 12, 1},
     .source_selector = UINT16_C(0),
     .native_font_pixels = UINT8_C(7),
     .match_flags = 0,
@@ -294,7 +294,7 @@ static const ActRaiserLocalizationComposeRoute kComposeRoutes[] = {
     .semantic_id = "city.bloodpool.name",
     .surface_id = UINT32_C(4),
     .destination = UINT16_C(0x0106),
-    .region = {6, 1, 12, 2},
+    .region = {6, 1, 12, 1},
     .source_selector = UINT16_C(0),
     .native_font_pixels = UINT8_C(7),
     .match_flags = 0,
@@ -304,7 +304,7 @@ static const ActRaiserLocalizationComposeRoute kComposeRoutes[] = {
     .semantic_id = "city.kasandora.name",
     .surface_id = UINT32_C(4),
     .destination = UINT16_C(0x0106),
-    .region = {6, 1, 12, 2},
+    .region = {6, 1, 12, 1},
     .source_selector = UINT16_C(0),
     .native_font_pixels = UINT8_C(7),
     .match_flags = 0,
@@ -314,7 +314,7 @@ static const ActRaiserLocalizationComposeRoute kComposeRoutes[] = {
     .semantic_id = "city.aitos.name",
     .surface_id = UINT32_C(4),
     .destination = UINT16_C(0x0106),
-    .region = {6, 1, 12, 2},
+    .region = {6, 1, 12, 1},
     .source_selector = UINT16_C(0),
     .native_font_pixels = UINT8_C(7),
     .match_flags = 0,
@@ -324,7 +324,7 @@ static const ActRaiserLocalizationComposeRoute kComposeRoutes[] = {
     .semantic_id = "city.marahna.name",
     .surface_id = UINT32_C(4),
     .destination = UINT16_C(0x0106),
-    .region = {6, 1, 12, 2},
+    .region = {6, 1, 12, 1},
     .source_selector = UINT16_C(0),
     .native_font_pixels = UINT8_C(7),
     .match_flags = 0,
@@ -334,7 +334,7 @@ static const ActRaiserLocalizationComposeRoute kComposeRoutes[] = {
     .semantic_id = "city.northwall.name",
     .surface_id = UINT32_C(4),
     .destination = UINT16_C(0x0106),
-    .region = {6, 1, 12, 2},
+    .region = {6, 1, 12, 1},
     .source_selector = UINT16_C(0),
     .native_font_pixels = UINT8_C(7),
     .match_flags = 0,
@@ -344,7 +344,7 @@ static const ActRaiserLocalizationComposeRoute kComposeRoutes[] = {
     .semantic_id = "city.death_heim.name",
     .surface_id = UINT32_C(4),
     .destination = UINT16_C(0x0106),
-    .region = {6, 1, 12, 2},
+    .region = {6, 1, 12, 1},
     .source_selector = UINT16_C(0),
     .native_font_pixels = UINT8_C(7),
     .match_flags = 0,

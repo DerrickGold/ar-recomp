@@ -223,6 +223,43 @@ static void TestLongerShorterAndNativeSwitch(void) {
   ArLanguagePack_Destroy(&native_pack);
 }
 
+static void TestIntentionalEmptySource(void) {
+  ArLanguagePack native_pack, empty_pack;
+  ArLanguagePack_Init(&native_pack);
+  ArLanguagePack_Init(&empty_pack);
+  ArLanguagePackError error;
+  CHECK(LoadPack(&native_pack, "native.us", "en-US",
+                 ":: action.hud.act_1\nNative fallback\n", &error));
+  CHECK(LoadPack(&empty_pack, "test.empty", "en-CA",
+                 ":: action.hud.act_1\n@empty\n", &error));
+  ArDialogueContentSelection selection =
+      Selection(kArDialoguePresentation_Enhanced, &empty_pack, &native_pack);
+  ArDialogueSession session;
+  ArDialogueSession_Init(&session);
+  CHECK(ArDialogueSession_Begin(&session, &selection, "action.hud.act_1", NULL, &error));
+  for (uint32_t native_page = 0; native_page < 3; ++native_page) {
+    ArDialogueNativeProgress progress = {
+        .struct_size = sizeof(progress), .abi_version = AR_DIALOGUE_SESSION_ABI_VERSION,
+        .authored_page_index = native_page, .revealed_unit_count = 3, .page_unit_count = 8,
+        .awaiting_page_advance = native_page < 2, .terminal = native_page == 2,
+    };
+    CHECK(ArDialogueSession_SynchronizeNativeProgress(&session, &progress, &error));
+    ArDialoguePageSnapshot page;
+    CHECK(ArDialogueSession_GetPage(&session, &page));
+    CHECK(page.utf8 && !page.utf8[0] && !page.utf8_bytes && !page.cluster_count);
+    CHECK(!page.revealed_utf8_bytes && !page.revealed_cluster_count);
+    CHECK(page.page_count == 1 && page.page_index == 0);
+    CHECK(!strcmp(page.package_id, "test.empty"));
+    CHECK(session.state.resolved_source == kArDialogueResolvedSource_SelectedPack);
+  }
+  ArDialogueToken token;
+  CHECK(ArDialogueSession_Next(&session, &token, &error));
+  CHECK(token.kind == kArDialogueToken_End);
+  ArDialogueSession_Destroy(&session);
+  ArLanguagePack_Destroy(&empty_pack);
+  ArLanguagePack_Destroy(&native_pack);
+}
+
 static void TestNativeProgressBridge(void) {
   static const char native_script[] =
       ":: action.hud.act_1\nNative source\n";
@@ -597,6 +634,112 @@ static void TestControlsValuesAndIcons(void) {
   ArLanguagePack_Destroy(&first);
 }
 
+static void TestEnhancedNativeControlProgress(void) {
+  const char script[] =
+      ":: sky.action_mode.confirm\n"
+      "Été\n"
+      "@anchor reset_text_cursor.00\n"
+      "Après\n"
+      "@anchor yield.01\n";
+  ArLanguagePack pack;
+  ArLanguagePack_Init(&pack);
+  ArLanguagePackError error;
+  CHECK(LoadPack(&pack, "control.sync", "fr-FR", script, &error));
+  ArDialogueContentSelection selection =
+      Selection(kArDialoguePresentation_Enhanced, &pack, &pack);
+  ResolverState values = {0};
+  const ArDialogueValueResolver resolver = {
+      .struct_size = sizeof(resolver), .abi_version = AR_DIALOGUE_VALUE_RESOLVER_ABI_VERSION,
+      .context = &values, .resolve = ResolveValue,
+  };
+  ArDialogueSession session;
+  ArDialogueSession_Init(&session);
+  CHECK(ArDialogueSession_Begin(&session, &selection, "sky.action_mode.confirm", &resolver, &error));
+  uint32_t page_index = 99;
+  size_t offset = 99;
+  const ArDialogueStableState original = session.state;
+  CHECK(ArDialogueSession_GetControlPosition(&session, 0, &page_index, &offset));
+  CHECK(page_index == 0 && offset == strlen("Été"));
+  CHECK(!memcmp(&original, &session.state, sizeof(original)));
+  CHECK(!ArDialogueSession_GetControlPosition(&session, 2, &page_index, &offset));
+  CHECK(page_index == 0 && offset == strlen("Été"));
+  ArDialogueNativeProgress progress = {
+      .struct_size = sizeof(progress), .abi_version = AR_DIALOGUE_SESSION_ABI_VERSION,
+      .revealed_unit_count = 1, .page_unit_count = 8, .control_pending = true,
+  };
+  CHECK(ArDialogueSession_SynchronizeNativeProgress(&session, &progress, &error));
+  ArDialoguePageSnapshot page;
+  CHECK(ArDialogueSession_GetPage(&session, &page));
+  CHECK(page.revealed_utf8_bytes == offset && page.revealed_cluster_count == 3);
+  CHECK(session.state.control_pending && !session.state.completed_control_count);
+  ArDialogueToken token;
+  CHECK(ArDialogueSession_Next(&session, &token, &error));
+  CHECK(token.kind == kArDialogueToken_Control && token.control_ordinal == 0);
+  /* Only a proven native completion moves past the clear, even if the page
+   * ratio points before its Unicode boundary. Next cannot re-deliver it. */
+  progress.completed_control_count = 1;
+  progress.control_pending = false;
+  CHECK(ArDialogueSession_SynchronizeNativeProgress(&session, &progress, &error));
+  CHECK(ArDialogueSession_GetPage(&session, &page));
+  CHECK(page.revealed_utf8_bytes == offset);
+  CHECK(ArDialogueSession_Next(&session, &token, &error));
+  CHECK(token.kind == kArDialogueToken_Grapheme && token.first_scalar == 'A');
+  /* Impossible/regressive acknowledgements and wait states are atomic. */
+  const ArDialogueSession before = session;
+  const ArDialogueNativeProgress valid = progress;
+  for (int invalid = 0; invalid < 5; ++invalid) {
+    progress = valid;
+    if (invalid == 0) progress.completed_control_count = 0;
+    if (invalid == 1) progress.completed_control_count = 3;
+    if (invalid == 2) progress.wait_frames_remaining = 1;
+    if (invalid == 3) progress.terminal = progress.control_pending = true;
+    if (invalid == 4) progress.terminal = true; /* Cannot silently drop yield. */
+    CHECK(!ArDialogueSession_SynchronizeNativeProgress(&session, &progress, &error));
+    CHECK(!memcmp(&before, &session, sizeof(before)));
+  }
+  progress = valid;
+  progress.control_pending = progress.awaiting_input = true;
+  CHECK(ArDialogueSession_SynchronizeNativeProgress(&session, &progress, &error));
+  CHECK(ArDialogueSession_GetPage(&session, &page));
+  CHECK(page.revealed_utf8_bytes == page.utf8_bytes);
+  CHECK(session.state.completed_control_count == 1);
+  CHECK(ArDialogueSession_Switch(&session, &selection, &error));
+  CHECK(ArDialogueSession_ResumeInput(&session));
+  CHECK(ArDialogueSession_Next(&session, &token, &error));
+  CHECK(token.kind == kArDialogueToken_Control && token.control_ordinal == 1);
+  ArDialogueSession_Destroy(&session);
+  ArLanguagePack_Destroy(&pack);
+}
+
+static void TestCueCannotSplitGrapheme(void) {
+  const char *scripts[] = {
+      ":: action.hud.act_1\ne\n@wait 1\n\xCC\x81\n",
+      ":: sky.action_mode.confirm\ne\n@anchor reset_text_cursor.00\n"
+      "\xCC\x81\n@anchor yield.01\n",
+  };
+  const char *ids[] = {"action.hud.act_1", "sky.action_mode.confirm"};
+  for (size_t index = 0; index < sizeof(scripts) / sizeof(scripts[0]); ++index) {
+    ArLanguagePack pack;
+    ArLanguagePack_Init(&pack);
+    ArLanguagePackError error;
+    CHECK(LoadPack(&pack, "split.grapheme", "fr-FR", scripts[index], &error));
+    ArDialogueContentSelection selection =
+        Selection(kArDialoguePresentation_Enhanced, &pack, &pack);
+    ResolverState values = {0};
+    const ArDialogueValueResolver resolver = {
+        .struct_size = sizeof(resolver), .abi_version = AR_DIALOGUE_VALUE_RESOLVER_ABI_VERSION,
+        .context = &values, .resolve = ResolveValue,
+    };
+    ArDialogueSession session;
+    ArDialogueSession_Init(&session);
+    CHECK(!ArDialogueSession_Begin(&session, &selection, ids[index], &resolver, &error));
+    CHECK(strstr(error.message, "splits a Unicode grapheme"));
+    CHECK(!session.state.message_id[0]);
+    ArDialogueSession_Destroy(&session);
+    ArLanguagePack_Destroy(&pack);
+  }
+}
+
 static void TestCorruptStateRejected(void) {
   static const char script[] = ":: action.hud.act_1\nSafe\n";
   ArLanguagePack pack;
@@ -696,12 +839,66 @@ static void TestEnhancedNativeProgressSynchronization(void) {
   ArLanguagePack_Destroy(&pack);
 }
 
+static void TestPresentationBudget(void) {
+  ArLanguagePack pack;
+  ArLanguagePack_Init(&pack);
+  ArLanguagePackError error;
+  CHECK(LoadPack(&pack, "budget.test", "en-US",
+                 ":: action.hud.act_1\nÉ\n@page\nZ\n", &error));
+  const ArDialogueContentSelection selection =
+      Selection(kArDialoguePresentation_Enhanced, &pack, &pack);
+  ArDialogueSession session;
+  ArDialogueSession_Init(&session);
+  /* Two bytes for É, one for Z and two page separators: exact-fit succeeds. */
+  CHECK(ArDialogueSession_BeginBounded(&session, &selection, "action.hud.act_1",
+                                       NULL, 5, &error));
+  const ArDialogueStableState before = session.state;
+  const void *program = session.private_program;
+  CHECK(!ArDialogueSession_SwitchBounded(&session, &selection, 4, &error));
+  CHECK(strstr(error.message, "presentation budget"));
+  CHECK(session.private_program == program &&
+        !memcmp(&session.state, &before, sizeof(before)));
+  CHECK(!ArDialogueSession_BeginBounded(&session, &selection,
+                                        "action.hud.act_1", NULL, 4, &error));
+  CHECK(session.private_program == program &&
+        !memcmp(&session.state, &before, sizeof(before)));
+  ArDialogueContentSelection native =
+      Selection(kArDialoguePresentation_NativeRetail, NULL, NULL);
+  CHECK(ArDialogueSession_SwitchBounded(&session, &native, 1, &error));
+  CHECK(session.state.resolved_source == kArDialogueResolvedSource_NativeRom);
+  ArDialogueSession_Destroy(&session);
+  ArLanguagePack_Destroy(&pack);
+
+  CHECK(LoadPack(&pack, "budget.values", "en-US",
+                 ":: sky.action_mode.confirm\n@anchor reset_text_cursor.00\n"
+                 "{master_name}\n@wait 7\n@anchor yield.01\n",
+                 &error));
+  ResolverState state = {0};
+  const ArDialogueValueResolver resolver = {
+      .struct_size = sizeof(resolver),
+      .abi_version = AR_DIALOGUE_VALUE_RESOLVER_ABI_VERSION,
+      .context = &state,
+      .resolve = ResolveValue,
+  };
+  ArDialogueSession_Init(&session);
+  CHECK(!ArDialogueSession_BeginBounded(
+      &session, &selection, "sky.action_mode.confirm", &resolver, 1, &error));
+  CHECK(strstr(error.message, "presentation budget") && state.calls == 1);
+  CHECK(!session.state.message_id[0] && !session.state.wait_frames_remaining);
+  ArDialogueSession_Destroy(&session);
+  ArLanguagePack_Destroy(&pack);
+}
+
 int main(void) {
+  TestPresentationBudget();
   TestLongerShorterAndNativeSwitch();
   TestNativeProgressBridge();
+  TestIntentionalEmptySource();
   TestFallbackAndTransactionalFailure();
   TestWaitSwitchAndRestore();
   TestControlsValuesAndIcons();
+  TestEnhancedNativeControlProgress();
+  TestCueCannotSplitGrapheme();
   TestNumberFormatting();
   TestCorruptStateRejected();
   TestEnhancedNativeProgressSynchronization();

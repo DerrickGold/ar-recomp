@@ -397,6 +397,12 @@ static void TestSemanticContracts(void) {
       "Hello, {town_name}.\n";
   ExpectContractFailure(missing_anchor, "locked anchors changed");
 
+  static const char after_yield[] =
+      ":: sky.action_mode.confirm\n"
+      "@anchor reset_text_cursor.00\nReady?\n@anchor yield.01\n"
+      "@page\nUnreachable text.\n";
+  ExpectContractFailure(after_yield, "content after a menu yield is unreachable");
+
   static const char event[] =
       ":: action.hud.act_1\n"
       "@event mutate_game forbidden\n";

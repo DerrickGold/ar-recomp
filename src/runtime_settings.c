@@ -7,12 +7,11 @@
 #include <SDL3/SDL.h>
 
 #include "actraiser_rtl.h"
-#include "actraiser/actraiser_action_bg.h"
 #include "actraiser/actraiser_localization_runtime.h"
 #include "diorama/diorama.h"
 #include "display_geometry.h"
-#include "frame_slot.h"
 #include "host/host_audio.h"
+#include "dev/debug_state.h"
 #include "dev/host_dev_tools.h"
 #include "randomizer.h"
 #include "host/host_display.h"
@@ -147,14 +146,9 @@ bool RuntimeSettings_HandleAction(const SettingDesc *desc) {
   } else if (!strcmp(desc->key, "toggle_turbo")) {
     HostInput_ToggleTurbo();
   } else if (!strcmp(desc->key, "save_state")) {
-    RtlSaveLoad(kSaveLoad_Save, RuntimeSettings_QuickStateSlot());
-    fprintf(stderr, "State saved.\n");
+    return DebugState_Apply(kSaveLoad_Save, RuntimeSettings_QuickStateSlot());
   } else if (!strcmp(desc->key, "load_state")) {
-    RtlSaveLoad(kSaveLoad_Load, RuntimeSettings_QuickStateSlot());
-    FrameSlot_ResetActionEffects();
-    ActRaiserActionBg_Reset();
-    HostDisplay_InvalidatePresentHistory();
-    fprintf(stderr, "State loaded.\n");
+    return DebugState_Apply(kSaveLoad_Load, RuntimeSettings_QuickStateSlot());
   } else if (!strcmp(desc->key, "warp_now")) {
     extern void ActRaiser_Warp(unsigned region, unsigned map);
     const unsigned target = (unsigned)g_settings.warp_target;

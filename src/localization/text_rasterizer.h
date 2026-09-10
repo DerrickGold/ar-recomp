@@ -121,6 +121,11 @@ typedef struct ArTextRasterizerOps {
                     ArTextBitmap *out_bitmap,
                     char *error, size_t error_capacity);
   void (*release_bitmap)(void *context, ArTextBitmap *bitmap);
+  /* Optional ABI-1 tail: scalar coverage of the registered ordered stack.
+   * Success with provided=false means a missing glyph; false means the query
+   * failed/unavailable. This does not certify cluster shaping or ligatures. */
+  bool (*has_glyph)(void *context, uint32_t scalar, bool *provided, char *error,
+                    size_t error_capacity);
 } ArTextRasterizerOps;
 
 typedef struct ArTextRasterizer {
@@ -144,6 +149,13 @@ bool ArTextRasterizer_Rasterize(const ArTextRasterizer *rasterizer,
                                 char *error, size_t error_capacity);
 void ArTextRasterizer_ReleaseBitmap(const ArTextRasterizer *rasterizer,
                                     ArTextBitmap *bitmap);
+
+/* Layout controls and Unicode default-ignorables do not require standalone
+ * glyphs. Combining accents and ordinary spaces still require coverage. */
+bool ArTextGlyphNeedsCoverage(uint32_t scalar);
+bool ArTextRasterizer_HasGlyph(const ArTextRasterizer *rasterizer,
+                               uint32_t scalar, bool *provided, char *error,
+                               size_t error_capacity);
 
 /* Bounds of nontransparent pixels within a bitmap-local rectangle. Empty for
  * transparent/invalid input; RGB565 is opaque. Does not alter font metrics. */

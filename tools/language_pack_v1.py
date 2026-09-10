@@ -739,6 +739,18 @@ def fixed_table_operations(operations, semantic_id):
                 (score and row_index == 3) else r'\s+'
         cells = [[]]
         for item in row:
+            # Report totals are typed fields, even when the preceding native
+            # dictionary emits just one trailing space. Padding is not their
+            # identity: otherwise corrected dictionary expansion merges the
+            # value into a label and sends it to the wrong renderer column.
+            if (not master and row_index <= 1 and
+                    item['op'] == 'placeholder' and
+                    item['name'] in ('total_population', 'total_score') and
+                    cells[-1]):
+                if cells[-1][-1]['op'] == 'text':
+                    label = cells[-1][-1]
+                    cells[-1][-1] = dict(label, value=label['value'].rstrip())
+                cells.append([])
             if not split or item['op'] != 'text':
                 cells[-1].append(item)
                 continue
@@ -1039,7 +1051,14 @@ def validate_messages(messages, catalog, source_profile, coverage='partial',
         if pages > MAX_AUTHORED_PAGES:
             raise LanguagePackError(f'{semantic_id}: too many authored pages')
         wait_total = 0
+        yielded = False
         for operation in operations:
+            if yielded and operation['op'] not in ('end', 'empty'):
+                raise LanguagePackError(
+                    f'{semantic_id}: content after a menu yield is unreachable; '
+                    'place it before the yield anchor')
+            if operation['op'] == 'anchor' and operation['id'].startswith('yield.'):
+                yielded = True
             if operation.get('minimum_digits') and (
                     operation['op'] != 'placeholder' or
                     catalog['placeholders'].get(operation['name']) != 'number' or

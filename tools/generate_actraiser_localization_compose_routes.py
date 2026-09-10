@@ -38,7 +38,8 @@ SURFACE_KINDS = {
     },
     'city_name': {
         'surface_id': 4, 'destination': 0x0106,
-        'region': [6, 1, 12, 2], 'native_font_pixels': 7,
+        # Row 2 belongs to the live angel-health bar, not the town label.
+        'region': [6, 1, 12, 1], 'native_font_pixels': 7,
     },
     'name_entry': {
         'surface_id': 5, 'destination': 0x0703,

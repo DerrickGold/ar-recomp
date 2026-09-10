@@ -10,7 +10,7 @@ action stages and a top-down town simulation. This project targets the USA
 cartridge dump and converts its 65816 machine code into C, which is then linked
 with a hand-written SDL3 runtime. Running the game as native code allows
 widescreen rendering, layered 3D action stages, height-mapped towns, GPU and
-CRT effects, replacement art and music, rebindable controls, save states, and
+CRT effects, replacement art and music, rebindable controls, and
 an in-game settings menu and manual.
 
 **[Quick start](#quick-start)** · **[Features](#features)** ·
@@ -345,10 +345,9 @@ action-layer and background authoring tools.
 | | |
 |---|---|
 | **Rebindable controls** | Bind every keyboard and gamepad control independently in Settings → Controls. Keyboard bindings use physical key positions, so they remain in place when the keyboard layout changes. |
-| **Full gamepad support** | The default mapping follows a SNES-on-Xbox layout, with support for multiple hotpluggable pads and `gamecontrollerdb.txt`. Seven host actions are also available on the pad: menu, pause, turbo, save state, load state, reset camera, and rendering comparison. |
+| **Full gamepad support** | The default mapping follows a SNES-on-Xbox layout, with support for multiple hotpluggable pads and `gamecontrollerdb.txt`. Bind host actions for the menu, pause, turbo, reset camera, and rendering comparison. Legacy debug snapshot bindings remain available, but restore is unsupported. |
 | **Steam Deck** | The dedicated bundle includes Valve's Steam Runtime SDL3. It works with the default Steam Input mapping, or with SDL's HIDAPI Steam driver in desktop mode. L3 opens the menu. |
 | **Camera controls** | The right stick orbits, the triggers zoom, and R3 recentres the view. Sensitivity, deadzone, and invert-Y are configurable, and orbit speed remains consistent across frame rates. |
-| **Save states** | Use `F5` and `F7`, or bind both actions to the gamepad. |
 | **Turbo** | Press `T` to fast-forward at eight game frames per rendered frame, configurable from 2 to 64. |
 | **Render scale and refresh** | Choose an internal render scale from 1× to 8×, downsampled to the window. Presentation modes include renderer-paced VSync, display-relative Uncapped, a selected FPS limit, and unthrottled Unlimited, with windowed, borderless, and exclusive fullscreen options. |
 | **Independent HUD and menu scaling** | The promoted widescreen HUD and settings menu can be scaled independently of the game framebuffer, from 25–400% and 100–800% respectively. |

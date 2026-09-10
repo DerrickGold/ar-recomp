@@ -7,8 +7,17 @@
 
 #include "snesrecomp/game/cpu.h"
 
-#define ACTRAISER_LOCALIZATION_TEXT_OBSERVATION_ABI_VERSION UINT32_C(9)
+#define ACTRAISER_LOCALIZATION_TEXT_OBSERVATION_ABI_VERSION UINT32_C(11)
 #define ACTRAISER_LOCALIZATION_COMPOSE_OBSERVATION_ABI_VERSION UINT32_C(4)
+
+/* Called only after the native interpreter actually returns. In particular,
+ * exposing $01 does not by itself acknowledge its menu yield. */
+void ActRaiserLocalizationText_ObserveReturn(void);
+/* $8FC5 loops internally across consecutive dictionary words, bypassing its
+ * function-entry seam. Observe the literal/control it actually returns, before
+ * the caller dispatches it; first_cursor is the original reader input. */
+void ActRaiserLocalizationText_ObserveDecodedByte(CpuState *cpu,
+                                                 uint16_t first_cursor);
 
 /* Immutable host-side identity observed at the untouched bank-$01 dialogue
  * interpreter. No pointer in this value borrows CPU or ROM storage. */
@@ -28,9 +37,17 @@ typedef struct ActRaiserLocalizationTextObservation {
   /* Earliest continuation still owned by the native text window. A $02 wait
    * can retain rows or clear them, depending on native text-state $0200. */
   uint16_t window_start_page;
-  /* Top-level native decoder invocations completed on the current page. A
-   * dictionary token is one unit even when it expands to several glyphs; the
-   * runtime maps this native ratio onto complete enhanced grapheme clusters. */
+  /* One-based locked-anchor identity of the most recent $05 clear within
+   * this retained window. Zero means a page clear/entry, not an anchor. */
+  uint16_t window_start_control_count;
+  /* $01/$03/$04/$05 are the contract's locked controls. A reader entry
+   * observes a pending operation; only the following entry proves it ran.
+   * $02 is presentation pagination and is not a locked control. */
+  uint16_t completed_control_count;
+  bool control_pending;
+  /* Native source bytes consumed on the current page, including consecutive
+   * dictionary tokens traversed by the reader's internal loop. A dictionary
+   * token is one unit, not its expanded glyph count. */
   uint16_t page_unit_index;
   /* Native X at interpreter entry. Pointer-matrix and offering dispatchers
    * retain their selected slot here, disambiguating aliased source records. */

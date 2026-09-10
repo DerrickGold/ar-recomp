@@ -36,6 +36,29 @@ static int TestCapture(void) {
   wram[0x034D] = 9;
   CHECK(!ActRaiserLocalizationNameEntry_Capture(
       &state, wram, sizeof(wram)));
+  /* After entry, cursor/length scratch is no longer a name validity signal. */
+  char name[9];
+  CHECK(ActRaiserLocalizationNameEntry_CopyNativeName(wram, sizeof(wram), name,
+                                                      sizeof(name)));
+  CHECK(!strcmp(name, "CODEX"));
+  CHECK(!ActRaiserLocalizationNameEntry_CopyNativeName(wram, 0x288, name,
+                                                       sizeof(name)) &&
+        !name[0]);
+  CHECK(!ActRaiserLocalizationNameEntry_CopyNativeName(wram, sizeof(wram), name,
+                                                       5) &&
+        !name[0]);
+  memcpy(wram + 0x288, "ABCDEFGH", 8);
+  CHECK(ActRaiserLocalizationNameEntry_CopyNativeName(wram, sizeof(wram), name,
+                                                      sizeof(name)));
+  CHECK(!strcmp(name, "ABCDEFGH"));
+  wram[0x288] = 0xff;
+  CHECK(!ActRaiserLocalizationNameEntry_CopyNativeName(wram, sizeof(wram), name,
+                                                       sizeof(name)) &&
+        !name[0]);
+  wram[0x288] = 1;
+  CHECK(!ActRaiserLocalizationNameEntry_CopyNativeName(wram, sizeof(wram), name,
+                                                       sizeof(name)) &&
+        !name[0]);
   return 0;
 }
 

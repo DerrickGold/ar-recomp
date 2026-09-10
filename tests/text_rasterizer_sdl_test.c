@@ -382,6 +382,42 @@ static void TestRasterization(void) {
   request.font_revision = 8;
   const ArTextRasterizer *primary_rasterizer =
       ArSdlTextRasterizer_Get(&primary_only);
+  bool provided = false;
+  CHECK(ArTextRasterizer_HasGlyph(rasterizer, 0x65e5, &provided, error,
+                                  sizeof(error)));
+  CHECK(provided); /* Ordered Japanese fallback, without rasterizing. */
+  CHECK(ArTextRasterizer_HasGlyph(primary_rasterizer, 0x65e5, &provided, error,
+                                  sizeof(error)));
+  CHECK(!provided);
+  CHECK(ArTextRasterizer_HasGlyph(rasterizer, 0x0627, &provided, error,
+                                  sizeof(error)));
+  CHECK(provided); /* Arabic fallback. */
+  CHECK(ArTextRasterizer_HasGlyph(rasterizer, 0x0301, &provided, error,
+                                  sizeof(error)));
+  CHECK(provided); /* Real combining marks must be checked. */
+  CHECK(ArTextGlyphNeedsCoverage(0x0301) && ArTextGlyphNeedsCoverage(' '));
+  CHECK(!ArTextGlyphNeedsCoverage(0x200d) && !ArTextGlyphNeedsCoverage(0xfe0f));
+  CHECK(!ArTextGlyphNeedsCoverage(0xe0100) &&
+        !ArTextGlyphNeedsCoverage(0xfffc));
+  CHECK(!ArTextGlyphNeedsCoverage('\n') && !ArTextGlyphNeedsCoverage(0x034f));
+  CHECK(ArTextRasterizer_HasGlyph(primary_rasterizer, 0x200d, &provided, error,
+                                  sizeof(error)) &&
+        provided);
+  CHECK(ArTextRasterizer_HasGlyph(rasterizer, 0x10ffff, &provided, error,
+                                  sizeof(error)) &&
+        !provided);
+  CHECK(!ArTextRasterizer_HasGlyph(rasterizer, 0xd800, &provided, error,
+                                   sizeof(error)) &&
+        !provided);
+  CHECK(!ArTextRasterizer_HasGlyph(rasterizer, 0x110000, &provided, error,
+                                   sizeof(error)));
+  /* Appended optional ABI fields must never be read from an older provider. */
+  ArTextRasterizerOps old_ops = *rasterizer->ops;
+  old_ops.struct_size = offsetof(ArTextRasterizerOps, has_glyph);
+  ArTextRasterizer old = *rasterizer;
+  old.ops = &old_ops;
+  CHECK(ArTextRasterizer_IsReady(&old));
+  CHECK(!ArTextRasterizer_HasGlyph(&old, 'A', &provided, error, sizeof(error)));
   if (ArTextRasterizer_Rasterize(
           primary_rasterizer, &request, &bitmap, error, sizeof(error))) {
     CHECK(BitmapHash(&bitmap) != japanese_fallback_hash);
@@ -448,8 +484,43 @@ static void TestRasterization(void) {
   CHECK(ArSdlTextRasterizer_Get(&adapter) == NULL);
 }
 
-int main(void) {
-  TestRasterization();
+static void TestMissingGlyphWarnings(void) {
+  /* Capture stderr from a separate process: exercise the actual rendering
+   * path, duplicate suppression, cap, and recreation without exposing backend
+   * bookkeeping through a test-only production API. */
+  for (int stack = 0; stack < 2; ++stack) {
+    ArSdlTextRasterizer adapter = {0};
+    const ArSdlTextRasterizerConfig config = {
+        .struct_size = sizeof(config),
+        .abi_version = AR_SDL_TEXT_RASTERIZER_CONFIG_ABI_VERSION,
+        .font_stack_id = "actraiser-default",
+        .primary_font_path = AR_TEST_FONT_PATH,
+        .font_revision = 7,
+        .cached_size_capacity = 1,
+    };
+    char error[256];
+    CHECK(ArSdlTextRasterizer_Init(&adapter, &config, error, sizeof(error)));
+    const ArTextRasterizer *rasterizer = ArSdlTextRasterizer_Get(&adapter);
+    for (uint32_t scalar = 0xf0000; scalar < 0xf0043; ++scalar) {
+      char text[8] = {0};
+      SDL_UCS4ToUTF8(scalar, text);
+      ArTextRasterRequest request = Request(text);
+      for (int repeat = 0; repeat < 2; ++repeat) {
+        ArTextBitmap bitmap = {0};
+        CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, error,
+                                         sizeof(error)));
+        ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
+      }
+    }
+    ArSdlTextRasterizer_Destroy(&adapter);
+  }
+}
+
+int main(int argc, char **argv) {
+  if (argc == 2 && !strcmp(argv[1], "--missing-glyph-warnings"))
+    TestMissingGlyphWarnings();
+  else
+    TestRasterization();
   if (g_failures) {
     fprintf(stderr, "%d SDL text rasterizer test(s) failed\n", g_failures);
     return 1;

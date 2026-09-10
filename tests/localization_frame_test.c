@@ -19,6 +19,22 @@ int main(void) {
   CHECK(ArLocalizationFrame_SetFont(
       &frame, "fr-FR", "test.font", "/tmp/test.ttf", 7,
       &frame.settings));
+  char fallback[] = "/tmp/fallback.ttf";
+  const char *fallbacks[] = {fallback, "/tmp/second.ttf"};
+  CHECK(ArLocalizationFrame_SetFallbackFonts(&frame, fallbacks, 2));
+  fallback[5] = 'X';
+  CHECK(frame.fallback_font_count == 2 &&
+        !strcmp(frame.fallback_font_paths[0], "/tmp/fallback.ttf"));
+  CHECK(!ArLocalizationFrame_SetFallbackFonts(&frame, NULL, 1));
+  CHECK(!ArLocalizationFrame_SetFallbackFonts(
+      &frame, fallbacks, kArTextPresentationMaximumFallbackFonts + 1));
+  const char *invalid_fallbacks[] = {"valid.ttf", ""};
+  CHECK(!ArLocalizationFrame_SetFallbackFonts(&frame, invalid_fallbacks, 2));
+  CHECK(frame.fallback_font_count == 2 &&
+        !strcmp(frame.fallback_font_paths[1], "/tmp/second.ttf"));
+  CHECK(ArLocalizationFrame_SetFont(
+      &frame, "fr-FR", "test.font", "/tmp/test.ttf", 7, &frame.settings));
+  CHECK(!frame.fallback_font_count && !frame.fallback_font_paths[0][0]);
   const ArTextCellDestination destination = {
       .background = 3,
       .screen = kArTextCellScreen_Composited,
@@ -67,6 +83,34 @@ int main(void) {
       rolling, strlen(rolling), 8, 10, 9, kArTextDirection_LeftToRight, 6));
   CHECK(window_frame.snapshots[0].layout == kArLocalizationTextLayout_DialogueWindow);
   CHECK(window_frame.snapshots[0].revealed_utf8_bytes == 8);
+
+  /* An intentional empty replacement has a real ownership slot, not a
+   * missing snapshot. Reject malformed empty payloads transactionally. */
+  ArLocalizationFrame empty_frame;
+  ArLocalizationFrame_Reset(&empty_frame);
+  CHECK(ArLocalizationFrame_SetFont(
+      &empty_frame, "en", "test.font", "/tmp/test.ttf", 7, &empty_frame.settings));
+  CHECK(ArLocalizationFrame_AddDialogueWindow(
+      &empty_frame, 1, destination, (ArTextCellRegion){5, 19, 24, 6},
+      "", 0, 0, 0, 9, kArTextDirection_LeftToRight, 8));
+  CHECK(empty_frame.snapshot_count == 1 && empty_frame.cells.count == 1);
+  CHECK(empty_frame.text_bytes == 1);
+  bytes = 99;
+  CHECK(!strcmp(ArLocalizationFrame_GetText(&empty_frame, 0, &bytes), ""));
+  CHECK(bytes == 0);
+  CHECK(ArLocalizationFrame_AddIndicator(
+      &empty_frame, 1, kArLocalizationIndicator_DialogueContinue,
+      (ArTextCellRegion){17, 24, 1, 1}));
+  const ArLocalizationFrame empty_before = empty_frame;
+  CHECK(!ArLocalizationFrame_AddText(
+      &empty_frame, 2, destination, (ArTextCellRegion){3, 3, 4, 4},
+      "", 0, 0, 1, 9, kArTextDirection_LeftToRight, 8, NULL, 0));
+  const ArLocalizationInlineObjectSnapshot empty_object = {
+      kArLocalizationInlineObject_StatusLife, 0};
+  CHECK(!ArLocalizationFrame_AddTextWithObjects(
+      &empty_frame, 2, destination, (ArTextCellRegion){3, 3, 4, 4},
+      "", 0, 0, 0, 9, kArTextDirection_LeftToRight, 8, NULL, 0, &empty_object, 1));
+  CHECK(memcmp(&empty_before, &empty_frame, sizeof(empty_frame)) == 0);
 
   ArLocalizationFrame_Reset(&object_frame);
   CHECK(ArLocalizationFrame_SetFont(

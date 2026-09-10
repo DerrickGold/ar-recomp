@@ -1125,6 +1125,15 @@ DEFAULT_ROMS = ('ar.sfc', 'ar-eu.sfc', 'ar-ger.sfc', 'ar-fra.sfc',
 ROM_SIZE = 0x100000
 DICTIONARY_ENTRY_BYTES = 12
 DICTIONARY_ENTRY_COUNT = 128
+
+# Reader entries, not the top-level dialogue/composer entries. The dictionary
+# storage is shared, but the two consumers have different termination rules.
+DICTIONARY_CONSUMER_PROFILES = {
+    'us': (0x018FC5, 0x02C0DF, 0xF1, False),
+    'eu-en': (0x018FC5, 0x02C6F8, 0xF2, False),
+    'de': (0x018FBD, 0x02C701, 0xF2, True),
+    'fr': (0x018FBD, 0x02C6EA, 0xF2, True),
+}
 OFFERING_POINTER_COUNT = 21
 ENDING_POINTER_COUNT = 8
 HANDLER_CITY_COUNT = 6
@@ -2329,6 +2338,65 @@ def pointer_targets(rom, table_pc24, count, target_bank):
     return targets
 
 
+def native_dictionary_consumers(profile, rom):
+    """Verify each reader's bounded expansion and retain local provenance.
+
+    In particular, fixed composition stops BEFORE a zero, and DE/FR dialogue
+    appends a space only when all twelve entry bytes were emitted. Neither
+    behavior follows from interpreting both space tiles as Unicode whitespace.
+    """
+    if profile['encoding'] != 'dictionary-12':
+        return {}
+    release = profile['id']
+    interactive, fixed, upload_flag, trailing_space = \
+        DICTIONARY_CONSUMER_PROFILES[release]
+    dictionary_pc = offset_to_pc24(profile['dictionary'])
+    dictionary_load = bytes((0xB9, dictionary_pc & 255,
+                             (dictionary_pc >> 8) & 255))
+    # Reader dispatch, saved cursor, (token & $7f)*12, bank, and count.
+    prefix = bytes.fromhex(
+        'b9 00 00 30 02 c8 60 c8 8b 5a c2 20 29 7f 00 48 0a 18 '
+        '63 01 0a 0a a8 68 e2 20 a9') + bytes((dictionary_pc >> 16,)) + \
+        bytes.fromhex('48 ab a9 0c')
+    result = {}
+    for consumer, entry in (('interactive', interactive), ('fixed', fixed)):
+        if consumer == 'interactive':
+            suffix = (bytes((0xEB, 0xE6, upload_flag)) + dictionary_load +
+                      bytes.fromhex('9f 00 b0 7f e8 e8 c8 c9 20 f0') +
+                      bytes((0x11 if trailing_space else 0x09,)) +
+                      bytes.fromhex('eb 48 20 1c 90 68 3a d0 e6'))
+            if trailing_space:
+                suffix += bytes.fromhex('a9 20 9f 00 b0 7f e8 e8')
+            suffix += bytes.fromhex('7a ab 80') + bytes((
+                0xBA if trailing_space else 0xC2,))
+        else:
+            suffix = (bytes((0xEB,)) + dictionary_load + bytes.fromhex(
+                'f0 0f 9f 00 b0 7f e8 e8 c8 c9 20 f0 04 eb 3a d0 eb '
+                '7a ab 80 c7'))
+        expected = prefix + suffix
+        offset = pc24_to_offset(entry)
+        if rom[offset:offset + len(expected)] != expected:
+            raise ValueError(
+                f'{release}: unrecognized {consumer} dictionary reader at '
+                f'{pc24_string(entry)}')
+        census = CONSUMER_CENSUS_PROFILES[release]
+        owner = 'interactive' if consumer == 'interactive' else 'composer'
+        start = pc24_to_offset(census[f'{owner}_entry_pc24'])
+        end = pc24_to_offset(census[f'{owner}_end_pc24'])
+        if routine_call_pattern(entry, 'jsr') not in rom[start:end]:
+            raise ValueError(f'{release}: {consumer} dictionary reader is '
+                             'not called by its profiled consumer')
+        result[consumer] = {
+            'reader_pc24': pc24_string(entry),
+            'entry_bytes': DICTIONARY_ENTRY_BYTES,
+            'stop_after_space': '20',
+            'stop_before_zero': consumer == 'fixed',
+            'append_space_on_full_entry':
+                consumer == 'interactive' and trailing_space,
+        }
+    return result
+
+
 def native_dialogue_layout(profile, rom):
     """Read cell geometry from the verified native clear loop, not HD bounds."""
     entry = CONSUMER_CENSUS_PROFILES[profile['id']]['interactive_entry_pc24']
@@ -3457,16 +3525,24 @@ class Decoder:
             if len(self.dictionary) != size:
                 raise ValueError('truncated dictionary')
 
-    def dictionary_bytes(self, token):
+    def dictionary_bytes(self, token, *, consumer):
+        if consumer not in ('interactive', 'fixed'):
+            raise ValueError('dictionary expansion requires a known consumer')
+        if self.dictionary is None or not 0x80 <= token <= 0xFF:
+            raise ValueError('invalid dictionary token')
         index = token & 0x7F
         start = index * DICTIONARY_ENTRY_BYTES
         entry = self.dictionary[start:start + DICTIONARY_ENTRY_BYTES]
-        # The native decoder emits at most 12 bytes and returns after emitting
-        # the first word-space tile ($40), including that tile.
-        try:
-            return entry[:entry.index(0x40) + 1]
-        except ValueError:
-            return entry
+        for offset, code in enumerate(entry):
+            if consumer == 'fixed' and code == 0:
+                return entry[:offset]
+            if code == 0x20:
+                return entry[:offset + 1]
+        # $40 is also a blank glyph, but never a dictionary terminator.
+        # Only the DE/FR interactive loop emits an extra space after count=0.
+        if consumer == 'interactive' and self.profile.get('id') in ('de', 'fr'):
+            return entry + b'\x20'
+        return entry
 
     def decode_record(self, start, limit=None, stop_on_yield=True):
         limit = len(self.rom) if limit is None else limit
@@ -3649,7 +3725,8 @@ class Decoder:
 
             if self.encoding == 'dictionary-12' and code >= 0x80:
                 dictionary_tokens.append(f'{code:02X}')
-                for expanded in self.dictionary_bytes(code):
+                for expanded in self.dictionary_bytes(
+                        code, consumer='interactive'):
                     emit_glyph(expanded)
                 continue
 
@@ -3780,7 +3857,8 @@ class FixedComposerDecoder:
 
             if self.profile['encoding'] == 'dictionary-12' and code >= 0x80:
                 dictionary_tokens.append(f'{code:02X}')
-                for expanded in self.decoder.dictionary_bytes(code):
+                for expanded in self.decoder.dictionary_bytes(
+                        code, consumer='fixed'):
                     emit_glyph(expanded)
                 continue
             if self.profile['encoding'] == 'direct-glyph' and \
@@ -5393,6 +5471,7 @@ def inspect_rom(path):
             'clean ActRaiser ROM is required')
     if len(rom) != ROM_SIZE:
         raise ValueError(f'{path}: expected 1 MiB headerless ROM')
+    dictionary_consumers = native_dictionary_consumers(profile, rom)
     decoder = Decoder(rom, profile)
     if profile['encoding'] == 'direct-glyph':
         messages, pointer_sets, inventory = extract_japanese(rom, profile, decoder)
@@ -5438,6 +5517,7 @@ def inspect_rom(path):
         'locale': profile['locale'],
         'source': source,
         'native_dialogue_layout': native_dialogue_layout(profile, rom),
+        'native_dictionary_consumers': dictionary_consumers,
         'capabilities': {
             'dialogue_unicode': True,
             'native_glyphs_losslessly_preserved': True,

@@ -81,6 +81,19 @@ else()
     set(_AR_ENHANCED_TEXT 0)
 endif()
 
+if(_AR_ENHANCED_TEXT)
+    # Also available in ROM-free source checkouts and tests-only builds.
+    add_executable(actraiser_font_coverage
+        tools/font_coverage_probe.c
+        src/localization/text_rasterizer.c
+        src/localization/unicode_grapheme.c
+        src/platform/sdl/text_rasterizer_sdl.c)
+    target_include_directories(actraiser_font_coverage PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_definitions(actraiser_font_coverage PRIVATE AR_HAS_SDL3_TTF=1)
+    target_link_libraries(actraiser_font_coverage PRIVATE
+        SDL3::SDL3 SDL3_ttf::SDL3_ttf actraiser_math)
+endif()
+
 set(ACTRAISER_GEN_DIR "${CMAKE_SOURCE_DIR}/src/gen" CACHE PATH
     "Directory containing generated recomp C translation units")
 file(GLOB ACTRAISER_GEN_SOURCES CONFIGURE_DEPENDS "${ACTRAISER_GEN_DIR}/*.c")
@@ -352,6 +365,13 @@ endif() # NOT AR_TESTS_ONLY
 
 if(BUILD_TESTING)
     find_package(Python3 QUIET COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND AND TARGET actraiser_font_coverage)
+        add_test(NAME actraiser_language_font_coverage
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tests/language_font_coverage_test.py
+                $<TARGET_FILE:actraiser_font_coverage>
+                $<TARGET_FILE:actraiser_text_rasterizer_sdl_test>)
+    endif()
 
     add_executable(actraiser_unicode_grapheme_test
         tests/unicode_grapheme_test.c
@@ -402,6 +422,7 @@ if(BUILD_TESTING)
         add_executable(actraiser_text_rasterizer_sdl_test
             tests/text_rasterizer_sdl_test.c
             src/localization/text_rasterizer.c
+            src/localization/unicode_grapheme.c
             src/platform/sdl/text_rasterizer_sdl.c)
         target_include_directories(actraiser_text_rasterizer_sdl_test PRIVATE
             ${CMAKE_SOURCE_DIR}/src)
@@ -417,7 +438,9 @@ if(BUILD_TESTING)
 
         add_executable(actraiser_localized_text_presenter_test
             tests/localized_text_presenter_test.c
+            src/render/hud_layout.c
             src/localization/text_rasterizer.c
+            src/localization/unicode_grapheme.c
             src/localization/text_backend.c
             src/localization/localization_frame.c
             src/localization/enhanced_text_settings.c
@@ -1362,6 +1385,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_present_frame_order_test
         tests/present_frame_order_test.c
         src/present_frame.c
+        src/localization/text_presentation.c
         src/render_comparison.c
         src/session_fatal.c
     )
@@ -1681,6 +1705,16 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_save_system COMMAND actraiser_save_system_test)
 
+    add_executable(actraiser_debug_state_test
+        tests/debug_state_test.c
+        src/dev/debug_state.c
+    )
+    target_include_directories(actraiser_debug_state_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
+    )
+    add_test(NAME actraiser_debug_state COMMAND actraiser_debug_state_test)
+
     # Shared instruction-exact arithmetic used by CPU-facing HLE wrappers.
     # Pin carry-in, carry-out, overflow, and packed-BCD adjustment directly.
     add_executable(actraiser_cpu_65816_math_test
@@ -1719,6 +1753,37 @@ if(BUILD_TESTING)
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_localization_text
         COMMAND actraiser_localization_text_test)
+
+    add_executable(actraiser_localization_schedule_test
+        tests/actraiser_localization_schedule_test.c
+        src/save_system.c
+        src/atomic_replace.c
+        src/localization/text_presentation.c
+        src/actraiser/actraiser_localization_schedule.c
+        src/actraiser/actraiser_localization_runtime.c
+        src/actraiser/actraiser_localization_text.c
+        src/actraiser/actraiser_localization_routes.c
+        src/actraiser/actraiser_localization_compose_state.c
+        src/actraiser/actraiser_localization_values.c
+        src/actraiser/actraiser_localization_name_entry.c
+        src/actraiser/actraiser_localization_art.c
+        src/localization/dialogue_session.c
+        src/localization/language_pack.c
+        src/localization/language_contract.c
+        src/localization/unicode_grapheme.c
+        src/localization/localization_frame.c
+        src/localization/enhanced_text_settings.c
+        src/localization/text_rasterizer.c
+        src/render/text_cell_record.c)
+    target_include_directories(actraiser_localization_schedule_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_localization_schedule
+        COMMAND actraiser_localization_schedule_test)
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/localization-schedule-native")
+    target_compile_definitions(actraiser_localization_schedule_test PRIVATE
+        AR_TEST_NATIVE_FIXTURE_DIR="${CMAKE_CURRENT_BINARY_DIR}/localization-schedule-native")
+    set_tests_properties(actraiser_localization_schedule PROPERTIES ENVIRONMENT
+        "AR_LOCALIZATION_PACK=${CMAKE_SOURCE_DIR}/tests/fixtures/localization-schedule/pack.ini;AR_LOCALIZATION_NATIVE_PACK=${CMAKE_CURRENT_BINARY_DIR}/localization-schedule-native/pack.ini")
 
     # Exhaustive semantic grids plus the complete CPU-facing contracts for the
     # shared $03:9710 cell-to-mark-map index and $03:96EF traversal-predicate

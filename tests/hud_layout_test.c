@@ -107,6 +107,45 @@ int main(void) {
   CheckRect(chunks[7].texture_source, 224, 8, 16, 16);
   CheckRect(chunks[7].output_destination, 956, 66, 32, 32);
 
+  /* A 2.25x preference on a 2x-density display is 450% here. At a 1024px
+   * viewport that used to put the native angel bar underneath the magic icon.
+   * Fit the complete status strip, never shorten or mask the health itself. */
+  HudProjectionInputs sim = scaled_43;
+  sim.hud_scale_percent = 450;
+  sim.hud_split_height = sim.hud_player_row_y = sim.hud_left_only_y = 32;
+  sim.hud_left_end = sim.hud_right_start = 168;
+  sim.obj_icon_x = 148;
+  sim.obj_icon_y = 11;
+  assert(ArHudLayout_BuildPresentationChunks(
+      (ArRenderRectI){100, 50, 1024, 896}, &sim, chunks) == 4);
+  CheckRect(chunks[0].output_destination, 100, 50, 672, 128);
+  CheckRect(chunks[1].output_destination, 772, 50, 352, 128);
+  CheckRect(chunks[3].output_destination, 692, 94, 64, 64);
+  assert(sim.hud_scale_percent == 450);
+  /* Widening the viewport restores the user's desired scale automatically. */
+  assert(ArHudLayout_BuildPresentationChunks(
+      (ArRenderRectI){100, 50, 1280, 896}, &sim, chunks) == 4);
+  CheckRect(chunks[0].output_destination, 100, 50, 756, 144);
+
+  const int widths[] = {320, 511, 1024, 1984};
+  for (unsigned w = 0; w < sizeof(widths) / sizeof(widths[0]); ++w) {
+    for (int par = 0; par <= 1; ++par) {
+      for (int percent = 0; percent <= 800; percent += 100) {
+        sim.crt_pixel_aspect = par != 0;
+        sim.hud_scale_percent = percent;
+        assert(ArHudLayout_BuildPresentationChunks(
+            (ArRenderRectI){0, 0, widths[w], 896}, &sim, chunks) == 4);
+        const ArRenderRectI left = chunks[0].output_destination;
+        const ArRenderRectI right = chunks[1].output_destination;
+        const ArRenderRectI icon = chunks[3].output_destination;
+        const int health_right = (144 * left.w + 167) / 168;
+        assert(health_right <= icon.x);
+        assert(icon.x + icon.w <= right.x);
+        assert(left.w <= right.x + 1); /* Independent rounding may share 1px. */
+      }
+    }
+  }
+
   HudProjectionInputs invalid = inputs;
   invalid.authentic_width = 0;
   assert(ArHudLayout_BuildPresentationChunks(

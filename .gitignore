@@ -95,6 +95,10 @@ venv/
 # Dependencies (cloned repos) — except small vendored single-file libs
 third_party/*
 !third_party/stb/
+!third_party/unicode/
+third_party/unicode/*
+!third_party/unicode/NOTICE
+!third_party/unicode/utf8proc-LICENSE.md
 
 # Test artifacts
 tests/golden/*.png

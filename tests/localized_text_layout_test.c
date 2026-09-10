@@ -1,6 +1,7 @@
 #include "render/localized_text_layout.h"
 
 #include <stdio.h>
+#include <string.h>
 
 static int failures;
 #define CHECK(value) do { if (!(value)) { \
@@ -8,6 +9,33 @@ static int failures;
 } } while (0)
 
 int main(void) {
+  const int preferred[] = {80, 32, 48, 24, 24};
+  const int translated[] = {56, 24, 28, 12, 40};
+  ArTextTableColumns columns = {0};
+  CHECK(ArLocalizedTextLayout_FitColumns(translated, preferred, 5, 208, 8, 2, &columns));
+  CHECK(columns.gap == 8 && columns.left[0] == 0 && columns.right[4] == 208);
+  CHECK(columns.left[4] <= 168); /* Borrow pixels for a five-cell header. */
+  for (unsigned i = 0; i < 5; ++i) {
+    CHECK(columns.right[i] - columns.left[i] >= translated[i]);
+    if (i) CHECK(columns.left[i] - columns.right[i - 1] == 8);
+  }
+  const int crowded[] = {70, 30, 42, 14, 28};
+  CHECK(ArLocalizedTextLayout_FitColumns(crowded, preferred, 5, 208, 8, 2, &columns));
+  CHECK(columns.gap == 6); /* Tighten spacing before changing font size. */
+  const ArTextTableColumns before = columns;
+  CHECK(!ArLocalizedTextLayout_FitColumns(crowded, preferred, 5, 190, 8, 2, &columns));
+  CHECK(!memcmp(&before, &columns, sizeof(columns)));
+  CHECK(!ArLocalizedTextLayout_FitColumns(NULL, preferred, 5, 208, 8, 2, &columns));
+  CHECK(!ArLocalizedTextLayout_FitColumns(crowded, preferred, 6, 208, 8, 2, &columns));
+  CHECK(!ArLocalizedTextLayout_FitColumns(crowded, preferred, 5, 208, 1, 2, &columns));
+  for (int width = 200; width <= 1600; width += 7) {
+    CHECK(ArLocalizedTextLayout_FitColumns(crowded, preferred, 5, width, 8, 2, &columns));
+    CHECK(columns.left[0] == 0 && columns.right[4] == width);
+    for (unsigned i = 0; i < 5; ++i) {
+      CHECK(columns.right[i] - columns.left[i] >= crowded[i]);
+      if (i) CHECK(columns.left[i] - columns.right[i - 1] >= 2);
+    }
+  }
   unsigned start, end;
   for (unsigned digit = 0; digit < 10; ++digit) {
     CHECK(ArLocalizedTextLayout_TableColumns(
@@ -69,7 +97,7 @@ int main(void) {
   CHECK(start == 10 && end == 13); /* Blank before growth at column 14. */
   CHECK(ArLocalizedTextLayout_TableColumns(
       kArLocalizationTextLayout_StatusCities, 3, 4, 5, &start, &end));
-  CHECK(start == 23 && end == 26); /* Wider translated item heading. */
+  CHECK(start == 23 && end == 26); /* Preferred interval, before measured fitting. */
   CHECK(ArLocalizedTextLayout_TableColumns(
       kArLocalizationTextLayout_StatusMaster, 12, 0, 1, &start, &end));
   CHECK(start == 0 && end == 5); /* Magic label cannot enter native icon cells. */

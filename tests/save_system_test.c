@@ -5,6 +5,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <direct.h>
+#else
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 static int s_failures;
 
@@ -371,49 +377,154 @@ static void TestRuntimeTransactions(void) {
   remove("actraiser-save-active-test.ini.tmp");
 }
 
-static void TestLocalizedNameExtension(void) {
+static void TestLocalizedNameExtension(SaveBackend backend) {
   static const char native_path[] = "actraiser-name-extension-test.srm";
   static const char ini_path[] = "actraiser-name-extension-test.ini";
-  static const char localized_path[] =
-      "actraiser-name-extension-test.srm.arname";
+  const char *localized_path = backend == kSaveBackend_NativeSrm
+                                   ? "actraiser-name-extension-test.srm.arname"
+                                   : "actraiser-name-extension-test.ini.arname";
+  const char *active_path =
+      backend == kSaveBackend_NativeSrm ? native_path : ini_path;
+  const SaveFileFormat format = backend == kSaveBackend_NativeSrm
+                                    ? kSaveFileFormat_NativeSrm
+                                    : kSaveFileFormat_Ini;
   remove(native_path); remove(ini_path); remove(localized_path);
 
   uint8_t live[kActRaiserSramSize];
   MakeFixture(live);
-  memcpy(live + 0x1439, "ELISE\0\0\0\0", 9);
+  memcpy(live + 0x1439, "OLD\0\0\0\0\0\0", 9);
   Save_RecomputeChecksum(live);
   SaveError error = {{0}};
-  CHECK(SaveSystem_Attach(live, sizeof(live), kSaveBackend_NativeSrm,
-                          native_path, ini_path, &error));
+  CHECK(SaveSystem_Attach(live, sizeof(live), backend, native_path, ini_path,
+                          &error));
   CHECK(SaveSystem_WriteActive(&error));
 
   /* Unicode names remain associated with the exact retail save and native
    * compatibility mirror without changing the SRAM image. */
   static const char localized_name[] = "E\xCC\x81lise";
+  uint8_t before[kActRaiserSramSize], disk[kActRaiserSramSize];
+  memcpy(before, live, sizeof(before));
+  CHECK(!SaveSystem_SetLocalizedPlayerName(localized_name, "BAD\x01"));
+  CHECK(!SaveSystem_SetLocalizedPlayerName(localized_name, "123456789"));
+  CHECK(SaveSystem_SetLocalizedPlayerName(localized_name, "ELISE"));
+  /* An accepted WRAM name precedes native saving. No early SRAM/sidecar
+   * mutation, and repeated persistence attempts must not discard the name. */
+  CHECK(SaveSystem_AutoPersistIfChanged(&error));
+  CHECK(SaveSystem_AutoPersistIfChanged(&error));
+  CHECK(!memcmp(before, live, sizeof(before)));
+  CHECK(Save_LoadFile(format, active_path, disk, &error));
+  CHECK(!memcmp(before, disk, sizeof(before)));
+  FILE *sidecar = fopen(localized_path, "rb");
+  CHECK(sidecar == NULL);
+  if (sidecar)
+    fclose(sidecar);
+  char unicode_name[64];
+  CHECK(!SaveSystem_CopyLocalizedPlayerName("OLD", unicode_name,
+                                            sizeof(unicode_name)));
+  CHECK(SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name,
+                                           sizeof(unicode_name)));
+  CHECK(!strcmp(unicode_name, localized_name));
+  /* Native game code performs its ordinary save, including its checksum. */
+  memcpy(live + 0x1439, "ELISE\0\0\0\0", 9);
+  Save_RecomputeChecksum(live);
+  memcpy(before, live, sizeof(before));
+  CHECK(SaveSystem_AutoPersistIfChanged(&error));
+  CHECK(!memcmp(before, live, sizeof(before)));
+  CHECK(Save_LoadFile(format, active_path, disk, &error));
+  CHECK(!memcmp(before, disk, sizeof(before)) && Save_ChecksumValid(disk));
+  memset(live, 0, sizeof(live));
+  CHECK(SaveSystem_Attach(live, sizeof(live), backend, native_path, ini_path,
+                          &error));
+  CHECK(SaveSystem_LoadActive(&error));
+  CHECK(SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name,
+                                           sizeof(unicode_name)));
+  CHECK(!strcmp(unicode_name, localized_name));
+
+  /* Ordinary gameplay changes rebind the companion to the new checksum. */
+  live[0x1200] ^= 1;
+  Save_RecomputeChecksum(live);
+  char temporary_path[128];
+  snprintf(temporary_path, sizeof(temporary_path), "%s.tmp", localized_path);
+  /* Force a companion-only write failure after the native save succeeds. */
+#ifdef _WIN32
+  CHECK(_mkdir(temporary_path) == 0);
+#else
+  CHECK(mkdir(temporary_path, 0700) == 0);
+#endif
+  CHECK(!SaveSystem_AutoPersistIfChanged(&error));
+  CHECK(Save_LoadFile(format, active_path, disk, &error));
+  CHECK(!memcmp(live, disk, sizeof(disk)) && Save_ChecksumValid(disk));
+#ifdef _WIN32
+  CHECK(_rmdir(temporary_path) == 0);
+#else
+  CHECK(rmdir(temporary_path) == 0);
+#endif
+  CHECK(SaveSystem_AutoPersistIfChanged(&error));
+  CHECK(SaveSystem_LoadActive(&error));
+  CHECK(SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name,
+                                           sizeof(unicode_name)));
+
+  SaveEditRequest edits;
+  SaveEditRequest_Clear(&edits);
+  edits.master_level = 10;
+  CHECK(SaveSystem_ApplyEdits(&edits, true, true, false, &error));
+  CHECK(SaveSystem_AutoPersistIfChanged(&error));
+  CHECK(SaveSystem_LoadActive(&error));
+  CHECK(SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name,
+                                           sizeof(unicode_name)));
+
+  /* Embedded NUL cannot silently shorten a length-delimited Unicode name. */
+  sidecar = fopen(localized_path, "r+b");
+  CHECK(sidecar != NULL);
+  if (sidecar) {
+    CHECK(fseek(sidecar, -1, SEEK_END) == 0);
+    CHECK(fputc(0, sidecar) != EOF);
+    CHECK(fclose(sidecar) == 0);
+  }
+  CHECK(SaveSystem_LoadActive(&error));
+  CHECK(!SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name,
+                                            sizeof(unicode_name)));
   CHECK(SaveSystem_SetLocalizedPlayerName(localized_name, "ELISE"));
   CHECK(SaveSystem_AutoPersistIfChanged(&error));
-  char unicode_name[64];
-  CHECK(SaveSystem_CopyLocalizedPlayerName(
-      unicode_name, sizeof(unicode_name)));
-  CHECK(!strcmp(unicode_name, localized_name));
-  memset(live, 0, sizeof(live));
-  CHECK(SaveSystem_Attach(live, sizeof(live), kSaveBackend_NativeSrm,
-                          native_path, ini_path, &error));
-  CHECK(SaveSystem_LoadActive(&error));
-  CHECK(SaveSystem_CopyLocalizedPlayerName(
-      unicode_name, sizeof(unicode_name)));
-  CHECK(!strcmp(unicode_name, localized_name));
 
   /* Replacing the native save invalidates the checksum-bound extension. */
   live[0x1200] ^= 1;
   Save_RecomputeChecksum(live);
-  CHECK(Save_WriteFile(kSaveFileFormat_NativeSrm, native_path, live, &error));
+  CHECK(Save_WriteFile(format, active_path, live, &error));
   memset(live, 0, sizeof(live));
-  CHECK(SaveSystem_Attach(live, sizeof(live), kSaveBackend_NativeSrm,
-                          native_path, ini_path, &error));
+  CHECK(SaveSystem_Attach(live, sizeof(live), backend, native_path, ini_path,
+                          &error));
   CHECK(SaveSystem_LoadActive(&error));
-  CHECK(!SaveSystem_CopyLocalizedPlayerName(
-      unicode_name, sizeof(unicode_name)));
+  CHECK(!SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name,
+                                            sizeof(unicode_name)));
+
+  /* A missing/invalid companion cannot make an otherwise valid save fail. */
+  remove(localized_path);
+  CHECK(SaveSystem_LoadActive(&error));
+  CHECK(Save_ChecksumValid(live));
+  CHECK(!SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name,
+                                            sizeof(unicode_name)));
+  sidecar = fopen(localized_path, "wb");
+  CHECK(sidecar != NULL);
+  if (sidecar) {
+    fputs("invalid sidecar", sidecar);
+    fclose(sidecar);
+  }
+  CHECK(SaveSystem_LoadActive(&error));
+  CHECK(Save_ChecksumValid(live));
+  CHECK(!SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name,
+                                            sizeof(unicode_name)));
+
+  CHECK(SaveSystem_SetLocalizedPlayerName(localized_name, "ELISE"));
+  CHECK(SaveSystem_AutoPersistIfChanged(&error));
+  /* Importing another image with the same ASCII name still retires the old
+   * metadata; the save checksum, not just the name, binds disk companions. */
+  live[0x1200] ^= 1;
+  Save_RecomputeChecksum(live);
+  CHECK(Save_WriteFile(format, active_path, live, &error));
+  CHECK(SaveSystem_Import(active_path, false, &error));
+  CHECK(!SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name,
+                                            sizeof(unicode_name)));
 
   remove(native_path); remove(ini_path); remove(localized_path);
   remove("actraiser-name-extension-test.srm.tmp");
@@ -425,7 +536,8 @@ int main(void) {
   TestNativeAndIniCodecs();
   TestLegacyMigration();
   TestRuntimeTransactions();
-  TestLocalizedNameExtension();
+  TestLocalizedNameExtension(kSaveBackend_NativeSrm);
+  TestLocalizedNameExtension(kSaveBackend_Ini);
   if (s_failures) {
     fprintf(stderr, "save system tests: %d failure(s)\n", s_failures);
     return 1;

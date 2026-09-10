@@ -517,12 +517,14 @@ void PresentHudOverlayComposited(const FrameSlot *slot,
     }
     return;
   }
-  const bool target_ready =
+  bool target_ready =
       ArRenderDevice_UseOutputCoordinates(&g_render_device) &&
       ArRenderDevice_Clear(
           &g_render_device,
           (ArRenderColorF){0.0f, 0.0f, 0.0f, 0.0f});
+  bool localized_drawn = false;
   if (target_ready) {
+    bool masks_valid = true;
     for (int i = 0; i < count; i++) {
       if (!localized.mask_count) {
         RenderHudChunk(chunks[i].texture, chunks[i].texture_source,
@@ -534,21 +536,20 @@ void PresentHudOverlayComposited(const FrameSlot *slot,
           &chunks[i], localized.masks, localized.mask_count,
           pieces, kArTextCellMaximumChunkPieces);
       if (piece_count == SIZE_MAX) {
-        RenderHudChunk(chunks[i].texture, chunks[i].texture_source,
-                       chunks[i].output_destination);
-        continue;
+        masks_valid = false;
+        break;
       }
       for (size_t piece = 0; piece < piece_count; ++piece)
         RenderHudChunk(pieces[piece].texture, pieces[piece].texture_source,
                        pieces[piece].output_destination);
     }
-    /* Rasterization and upload completed before any native cell was masked.
-     * If the final draw still fails, repaint the original chunks over the
-     * partial result so the completed composite falls back atomically. */
-    if (!ArLocalizedTextPresenter_Draw(&g_render_device, &localized)) {
-      for (int i = 0; i < count; ++i)
-        RenderHudChunk(chunks[i].texture, chunks[i].texture_source,
-                       chunks[i].output_destination);
+    /* Discard a failed partial composite. Painting transparent native chunks
+     * over it cannot erase already-drawn enhanced ink. After restoring the
+     * output target below, draw only the untouched native chunks instead. */
+    if (!masks_valid || !ArLocalizedTextPresenter_Draw(&g_render_device, &localized)) {
+      target_ready = false;
+    } else {
+      localized_drawn = true;
     }
   }
   if (!ArRenderDevice_EndTarget(&g_render_device, &target_state)) {
@@ -574,8 +575,13 @@ void PresentHudOverlayComposited(const FrameSlot *slot,
     .flags = kArRenderDrawState_Blend,
     .blend = kArRenderBlendMode_AlphaPremultiplied,
   };
-  (void)ArRenderDevice_DrawTextureWithState(
-      &g_render_device, composite, NULL, &destination, &over);
+  if (ArRenderDevice_DrawTextureWithState(
+          &g_render_device, composite, NULL, &destination, &over)) {
+    if (localized_drawn)
+      ArTextPresentation_MarkReady(localized.ready_dialogue_ticket);
+  } else {
+    PresentHudChunksDirect(slot, viewport);
+  }
 }
 
 static void PresentMode7Composite(const FrameSlot *slot,

@@ -103,6 +103,62 @@ static ActRaiserLocalizationComposeObservation Compose(
   };
 }
 
+static bool ResolveEmpty(
+    void *context, const char *semantic_id,
+    char *utf8, size_t utf8_capacity, size_t *utf8_bytes,
+    uint32_t *cluster_count, uint64_t *source_revision,
+    ArLocalizationInlineObjectSnapshot *inline_objects,
+    size_t inline_object_capacity, uint8_t *inline_object_count,
+    char *error, size_t error_capacity) {
+  if (!ResolveSemanticId(NULL, semantic_id, utf8, utf8_capacity, utf8_bytes,
+                         cluster_count, source_revision, inline_objects,
+                         inline_object_capacity, inline_object_count, error, error_capacity))
+    return false;
+  utf8[0] = 0;
+  *utf8_bytes = 0;
+  *cluster_count = context ? 1 : 0; /* Malformed-empty fixture. */
+  return true;
+}
+
+static void TestEmptyMenuLifecycle(void) {
+  ActRaiserLocalizationComposeState state;
+  ActRaiserLocalizationComposeState_Init(&state);
+  ActRaiserLocalizationComposeState_SetScene(&state, 0, kActRaiserNonActionMap_SkyPalace);
+  ActRaiserLocalizationComposeObservation event = Compose(10, 0x01F6C8, 0x0B17);
+  char error[256] = {0};
+  CHECK(ActRaiserLocalizationComposeState_Process(
+      &state, &event, ResolveEmpty, NULL, error, sizeof(error)));
+  const ActRaiserLocalizationComposeSnapshot *slot =
+      ActRaiserLocalizationComposeState_Find(&state, 8);
+  CHECK(slot && slot->utf8_bytes == 0 && slot->cluster_count == 0);
+  ArLocalizationFrame frame;
+  ArLocalizationFrame_Reset(&frame);
+  CHECK(ArLocalizationFrame_SetFont(
+      &frame, "en", "test", "/tmp/test.ttf", 1, &frame.settings));
+  CHECK(ActRaiserLocalizationComposeState_AppendFrame(
+      &state, &frame, (ArTextCellDestination){3, kArTextCellScreen_Composited, 0},
+      kArTextDirection_LeftToRight));
+  CHECK(frame.snapshot_count == 1 && frame.snapshots[0].utf8_bytes == 0);
+  /* Empty, visible, and failed replacements share the same lifetime. */
+  CHECK(ActRaiserLocalizationComposeState_RefreshLatest(
+      &state, 8, ResolveSemanticId, NULL, error, sizeof(error)));
+  CHECK(ActRaiserLocalizationComposeState_Find(&state, 8)->utf8_bytes > 0);
+  CHECK(!ActRaiserLocalizationComposeState_RefreshLatest(
+      &state, 8, ResolveEmpty, &state, error, sizeof(error)));
+  CHECK(!ActRaiserLocalizationComposeState_Find(&state, 8));
+  CHECK(ActRaiserLocalizationComposeState_RefreshLatest(
+      &state, 8, ResolveEmpty, NULL, error, sizeof(error)));
+  event = Compose(11, 0, 0);
+  event.clear_first_column = frame.cells.records[0].region.column;
+  event.clear_first_row = frame.cells.records[0].region.row;
+  event.clear_column_count = event.clear_row_count = 1;
+  CHECK(ActRaiserLocalizationComposeState_Process(
+      &state, &event, NULL, NULL, error, sizeof(error)));
+  CHECK(!ActRaiserLocalizationComposeState_FindObserved(&state, 8));
+  CHECK(!ActRaiserLocalizationComposeState_RefreshLatest(
+      &state, 8, ResolveEmpty, NULL, error, sizeof(error)));
+}
+
 static void TestPartialMenuErases(void) {
   const struct {
     uint32_t source, surface, table;
@@ -213,6 +269,7 @@ static void TestPartialMenuErases(void) {
 }
 
 int main(void) {
+  TestEmptyMenuLifecycle();
   TestPartialMenuErases();
   ActRaiserLocalizationComposeState state;
   ActRaiserLocalizationComposeState_Init(&state);
@@ -371,6 +428,10 @@ int main(void) {
   CHECK(ActRaiserLocalizationComposeState_Process(
       &state, &event, ResolveSemanticId, NULL, error, sizeof(error)));
   CHECK(ActRaiserLocalizationComposeState_Find(&state, 4));
+  snapshot = ActRaiserLocalizationComposeState_Find(&state, 4);
+  CHECK(snapshot && snapshot->layout == kArLocalizationTextLayout_SingleLineLabel);
+  CHECK(snapshot && snapshot->region.column == 6 && snapshot->region.row == 1 &&
+        snapshot->region.columns == 12 && snapshot->region.rows == 1);
   event = Compose(19, 0, 0);
   event.clear_first_row = 4;
   event.clear_row_count = 28;

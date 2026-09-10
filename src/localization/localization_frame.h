@@ -7,9 +7,10 @@
 
 #include "localization/enhanced_text_settings.h"
 #include "localization/text_rasterizer.h"
+#include "localization/text_presentation.h"
 #include "render/text_cell_record.h"
 
-#define AR_LOCALIZATION_FRAME_ABI_VERSION UINT32_C(9)
+#define AR_LOCALIZATION_FRAME_ABI_VERSION UINT32_C(13)
 
 enum {
   kArLocalizationFrameTextCapacity = 16 * 1024,
@@ -75,11 +76,16 @@ typedef enum ArLocalizationTextLayoutKind {
   kArLocalizationTextLayout_FixedRows,
   kArLocalizationTextLayout_MessageSpeed,
   kArLocalizationTextLayout_DialogueWindow,
+  /* One fitted line, anchored to the leading edge and vertically centered
+   * inside its claim. It must never wrap into neighboring native content. */
+  kArLocalizationTextLayout_SingleLineLabel,
 } ArLocalizationTextLayoutKind;
 
 typedef struct ArLocalizationTextSnapshot {
   uint32_t surface_id;
   uint32_t utf8_offset;
+  /* Zero bytes/clusters is an intentional blank replacement: retain the
+   * cell claim and native preserves/indicators without rasterizing text. */
   uint32_t utf8_bytes;
   uint32_t revealed_cluster_count;
   uint32_t cluster_count;
@@ -121,8 +127,15 @@ typedef struct ArLocalizationFrame {
   char locale[kArLocalizationFrameLocaleCapacity];
   char font_stack_id[kArLocalizationFrameFontStackCapacity];
   char primary_font_path[kArLocalizationFrameFontPathCapacity];
+  char fallback_font_paths[kArTextPresentationMaximumFallbackFonts]
+                          [kArLocalizationFrameFontPathCapacity];
+  uint8_t fallback_font_count;
   uint64_t font_revision;
   ArEnhancedTextSettings settings;
+  /* Zero for observational/fixed text; only scheduled dialogue needs execution
+   * feedback when the presentation path falls back to native pixels. */
+  uint64_t dialogue_ticket;
+  uint32_t dialogue_surface_id;
 } ArLocalizationFrame;
 
 void ArLocalizationFrame_Reset(ArLocalizationFrame *frame);
@@ -138,6 +151,10 @@ bool ArLocalizationFrame_SetFont(ArLocalizationFrame *frame,
                                  const char *primary_font_path,
                                  uint64_t font_revision,
                                  const ArEnhancedTextSettings *settings);
+/* SetFont clears previous fallbacks; attach this ordered stack afterwards.
+ * Paths are copied transactionally into the pointer-free frame. */
+bool ArLocalizationFrame_SetFallbackFonts(
+    ArLocalizationFrame *frame, const char *const *paths, size_t count);
 bool ArLocalizationFrame_AddText(ArLocalizationFrame *frame,
                                  uint32_t surface_id,
                                  ArTextCellDestination destination,

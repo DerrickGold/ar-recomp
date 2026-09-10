@@ -6,6 +6,7 @@
 
 #include "localization/localization_frame.h"
 #include "localization/text_backend.h"
+#include "localization/text_presentation.h"
 #include "render/hud_layout.h"
 #include "render/text_cell_composite.h"
 #include "render/text_surface_cache.h"
@@ -48,10 +49,20 @@ typedef struct ArLocalizedPreparedFrame {
   ArLocalizedPreparedInlineObject
       inline_objects[kArLocalizationFrameInlineObjectCapacity];
   uint8_t inline_object_count;
+  uint64_t ready_dialogue_ticket;
 } ArLocalizedPreparedFrame;
 
 /* The host injects a portable factory once. No SDL type crosses this API. */
 void ArLocalizedTextPresenter_SetBackend(const ArTextBackend *backend);
+
+/* Synchronous selection preflight, before authored waits/pages are enabled.
+ * Opens, rasters and uploads into one retained candidate cache. Only a later
+ * frame with that identity replaces the live font; semantic rejection after
+ * preflight cannot invalidate active surfaces. Repeated requests reuse the
+ * active/candidate resources without font or GPU work. Same-thread only. */
+bool ArLocalizedTextPresenter_PrepareFont(
+    ArRenderDevice *device, const ArTextPresentationFont *font,
+    char *error, size_t error_capacity);
 
 /* Rasterize/upload every viable replacement before publishing its masks.
  * Failure of one record leaves that record's native cells unclaimed. */

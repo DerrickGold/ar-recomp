@@ -4,8 +4,9 @@
 #include "render/text_surface_cache.h"
 #include "localization/localization_frame.h"
 
-/* Fixed logical cells, independent of font metrics, text contents and output
- * resolution. Returned columns are relative to the owned native region. */
+/* Native-preferred logical cells, also the fixed contract for cursor-driven
+ * menus. Reports may redistribute their widths using FitColumns. Returned
+ * columns are relative to the owned native region. */
 bool ArLocalizedTextLayout_TableColumns(
     ArLocalizationTextLayoutKind layout, unsigned line, unsigned field_index,
     unsigned field_count, unsigned *column, unsigned *next_column);
@@ -16,6 +17,20 @@ bool ArLocalizedTextLayout_TableNumeric(
 ArTextHorizontalAlignment ArLocalizedTextLayout_TableAlignment(
     ArLocalizationTextLayoutKind layout, unsigned line, unsigned field_index,
     unsigned field_count, ArTextDirection direction);
+
+enum { kArTextTableMaximumColumns = 5 };
+typedef struct ArTextTableColumns {
+  int left[kArTextTableMaximumColumns];
+  int right[kArTextTableMaximumColumns];
+  int gap;
+} ArTextTableColumns;
+
+/* Share space across an entire measured table. Keep preferred widths where
+ * possible, reduce gutters before rejecting the font size, and never overlap
+ * columns. All dimensions are output pixels; failure leaves output unchanged. */
+bool ArLocalizedTextLayout_FitColumns(
+    const int *minimum_widths, const int *preferred_widths, unsigned count,
+    int width, int preferred_gap, int minimum_gap, ArTextTableColumns *out);
 /* Center an object in the actual gap between two fitted labels. */
 bool ArLocalizedTextLayout_CenterBetween(
     ArRenderRectI left_label, ArRenderRectI right_label,

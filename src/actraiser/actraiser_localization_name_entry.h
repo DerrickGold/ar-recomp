@@ -56,6 +56,13 @@ bool ActRaiserLocalizationNameEntry_Capture(
     ActRaiserLocalizationNameEntryState *state,
     const uint8_t *wram, size_t wram_bytes);
 
+/* Read the live native name independently of keyboard scratch/cursor state.
+ * Dialogue $06 reads this WRAM field, not the last battery-save image. */
+bool ActRaiserLocalizationNameEntry_CopyNativeName(const uint8_t *wram,
+                                                   size_t wram_bytes,
+                                                   char *destination,
+                                                   size_t capacity);
+
 /* Decode the USA keyboard selector's original 8x8 font tile using the live
  * BG3 character data and palette. Call only for a semantically owned keyboard;
  * this reads artwork, never infers UI ownership from VRAM. */

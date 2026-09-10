@@ -117,6 +117,13 @@ def native_break_tests():
 
 
 def main():
+    real_catalog = json.loads((ROOT / 'tools/data/localization/semantic-catalog-v1.json').read_text())
+    for tail in ('Unreachable.', '@page', '@wait 1', '@line'):
+        after_yield = PACK.parse_artext_text(
+            ':: sky.action_mode.confirm\n@anchor reset_text_cursor.00\n'
+            'Ready?\n@anchor yield.01\n' + tail + '\n')
+        expect_error(lambda: PACK.validate_messages(after_yield, real_catalog, 'us'),
+                     'content after a menu yield is unreachable')
     native_break_tests()
     numbers = PACK.source_operations_to_author(route('test.numbers', [
         {'op': 'format_number', 'value': 'total_population', 'width': 3},
@@ -149,6 +156,33 @@ def main():
     assert title[0]['value'] == 'TOTAL PEOPLE'
     assert title[2]['value'] == 'IN THIS CITY'
     assert title[3]['value'] == ' | '
+
+    # Dictionary padding must not be required to delimit a typed total. Both
+    # reports retain the same cells with zero, one, or several native blanks.
+    for report, total in (('cities_report', 'total_population'),
+                          ('score_report', 'total_score')):
+        for padding in ('', ' ', '  ', '       '):
+            title = PACK.fixed_table_operations([
+                {'op': 'text', 'value': 'AGGREGATE   RESIDENTS' + padding},
+                {'op': 'placeholder', 'name': total}, {'op': 'end'},
+            ], 'status.report.' + report)
+            assert title == [
+                {'op': 'text', 'value': 'AGGREGATE'},
+                {'op': 'text', 'value': ' | '},
+                {'op': 'text', 'value': 'RESIDENTS'},
+                {'op': 'text', 'value': ' | '},
+                {'op': 'placeholder', 'name': total}, {'op': 'end'},
+            ]
+            # Multiword continued headings remain one label, not one field
+            # per word, and keep a separate total.
+            title = PACK.fixed_table_operations([
+                {'op': 'text', 'value': 'RESIDENT COUNT'}, {'op': 'line'},
+                {'op': 'text', 'value': 'IN THIS REGION' + padding},
+                {'op': 'placeholder', 'name': total}, {'op': 'end'},
+            ], 'status.report.' + report)
+            assert title[-2] == {'op': 'placeholder', 'name': total}
+            assert title[-3] == {'op': 'text', 'value': ' | '}
+            assert title[-4] == {'op': 'text', 'value': 'IN THIS REGION'}
 
     formatted = PACK.parse_artext_text(
         ':: status.report.master_report\n{master_level:03}\n@end\n')

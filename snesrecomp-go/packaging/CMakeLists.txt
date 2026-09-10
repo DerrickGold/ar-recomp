@@ -519,6 +519,10 @@ install(DIRECTORY ${GAME_ROOT}/src/ DESTINATION utils/src
     PATTERN ".DS_Store" EXCLUDE)
 install(DIRECTORY ${GAME_ROOT}/third_party/stb/ DESTINATION utils/third_party/stb
     PATTERN ".DS_Store" EXCLUDE)
+install(FILES
+    ${GAME_ROOT}/third_party/unicode/NOTICE
+    ${GAME_ROOT}/third_party/unicode/utf8proc-LICENSE.md
+    DESTINATION utils/third_party/unicode)
 
 # Curated game documentation. This is an allowlist by design: public progress,
 # player guidance, and durable reverse-engineering knowledge ship with the

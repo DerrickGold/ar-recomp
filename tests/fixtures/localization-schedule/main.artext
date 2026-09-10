@@ -1,0 +1,42 @@
+# Original test wording; no retail text or assets.
+:: system.message_speed.choose
+@anchor reset_text_cursor.00
+Première page.
+@wait 3
+@page
+Deuxième page.
+@page
+Dernière page.
+@wait 5
+@anchor yield.01
+
+:: name_entry.prompt_and_alphabet
+Test keyboard
+@line
+{master_name}
+@line
+--------
+@line
+É B C D E F G H I J K L M
+@line
+N O P Q R S T U V W X Y Z
+@line
+a b c d e f g h i j k l m
+@line
+n o p q r s t u v w x y z
+@line
+0 1 2 3 4 5 6 7 8 9 . {icon.name_entry.backspace} {icon.name_entry.finish}
+@end
+
+:: system.save.confirm
+@empty
+@anchor reset_text_cursor.00
+@anchor yield.01
+
+:: sky.action_mode.confirm
+Avant.
+@wait 2
+@anchor reset_text_cursor.00
+Après.
+@wait 4
+@anchor yield.01
