@@ -1,5 +1,6 @@
 (() => {
 "use strict";
+const ui=window.workshopI18n;
 const form=document.querySelector("#build-form"), build=document.querySelector("#build"), launch=document.querySelector("#launch");
 const state=document.querySelector("#state"), log=document.querySelector("#log"), closeButton=document.querySelector("#close");
 const track=document.querySelector("#track"), logBox=document.querySelector("#log-box");
@@ -27,6 +28,7 @@ let assetsLoaded=false;
 let previewPolling=false, previewTimer=0;
 const homePrimary=document.querySelector("#home-primary"), workspaceStatus=document.querySelector("#workspace-status");
 let canLaunch=false, closed=false, launching=false;
+let lastPaint=null;
 let activeTab=document.querySelector("#tab-home");
 const scrollPositions=new Map();
 
@@ -59,7 +61,7 @@ function selectTab(tab,{history=true,focus=true,activate=true}={}){
   if(tab===buildTab) buildTab.removeAttribute("data-badge");
   if(tab.id==="tab-home") loadHomeProjects();
   if(tab!==assetTab) assetForm.querySelectorAll("audio").forEach(audio=>audio.pause());
-  document.querySelector("#workspace-section").textContent={"tab-home":"Home","tab-build":"Build & play","tab-localization":"Languages","tab-assets":"Assets","tab-manual":"Help & manual"}[tab.id];
+  ui.set(document.querySelector("#workspace-section"),{"tab-home":"builder.nav.home","tab-build":"builder.nav.build","tab-localization":"builder.nav.languages","tab-assets":"builder.nav.assets","tab-manual":"builder.nav.help"}[tab.id]);
   if(history&&location.hash!=="#"+tab.id.slice(4)) window.history.pushState(null,"","#"+tab.id.slice(4));
   if(activeTab!==tab) window.scrollTo(0,scrollPositions.get(tab.id)||0);
   activeTab=tab;
@@ -102,9 +104,18 @@ function navOrientation(){ document.querySelector(".tabs").setAttribute("aria-or
 compactNav.addEventListener("change",navOrientation); navOrientation();
 
 function show(kind,text){
+  ui.unbind(state); ui.unbind(workspaceStatus);
   state.dataset.kind=kind; state.textContent=text;
   workspaceStatus.dataset.kind=kind; workspaceStatus.textContent=text; workspaceStatus.title=text;
 }
+function showKey(kind,key,args={}) {
+  show(kind,ui.text(key,args));
+  ui.set(state,key,args); ui.set(workspaceStatus,key,args);
+}
+document.addEventListener("workshop:language",()=>{
+  workspaceStatus.title=workspaceStatus.textContent;
+  if(lastPaint) paint(lastPaint.progress,lastPaint.kind);
+});
 
 /* List summaries are supplied by Go. This is navigation only: pack contents,
  * authoring status, validation and installation still belong to localization. */
@@ -112,7 +123,7 @@ function projectCards(host,rows,limit=Infinity){
   const visible=rows.slice(0,limit);
   if(!visible.length){
     const empty=document.createElement("p"); empty.className="empty-note";
-    empty.textContent="No saved projects yet. Create a translation or import a pack to begin.";
+    ui.set(empty,"builder.home.empty_projects");
     host.replaceChildren(empty); return;
   }
   host.replaceChildren(...visible.map(row=>{
@@ -121,7 +132,8 @@ function projectCards(host,rows,limit=Infinity){
     const badge=document.createElement("span"); badge.className="project-monogram"; badge.setAttribute("aria-hidden","true"); badge.textContent=row.locale||"文";
     const copy=document.createElement("span"); copy.className="project-copy";
     const title=document.createElement("strong"); title.textContent=row.name;
-    const note=document.createElement("small"); note.textContent=row.error||row.id+" · Workshop copy";
+    const note=document.createElement("small");
+    if(row.error) note.textContent=row.error; else ui.set(note,"builder.home.project_copy",{id:row.id});
     copy.append(title,note);
     const arrow=document.createElement("span"); arrow.className="project-arrow"; arrow.textContent="↗"; arrow.setAttribute("aria-hidden","true");
     card.append(badge,copy,arrow);
@@ -141,7 +153,7 @@ async function loadHomeProjects(){
     if(!closed&&localizationReady&&request===homeRequest) projectCards(document.querySelector("#home-projects"),rows,4);
   } catch(error){
     if(!closed&&localizationReady&&request===homeRequest){
-      const note=document.createElement("p"); note.className="empty-note"; note.textContent="Could not load projects: "+error.message;
+      const note=document.createElement("p"); note.className="empty-note"; ui.set(note,"builder.home.projects_failed",{detail:error.message});
       document.querySelector("#home-projects").replaceChildren(note);
     }
   } finally { if(!closed&&request===homeRequest) button.disabled=!localizationReady; }
@@ -153,24 +165,26 @@ function applyLocalizationAvailability(data){
   const changed=first||ready!==localizationReady;
   localizationChecked=true; localizationReady=ready;
   const instruction=data.localizationError
-    ?"Restore a valid backup of game-assets/languages/native-us, or move that folder aside and rebuild with your US ROM. It will not be overwritten automatically."
+    ?"builder.language.repair"
     :data.state==="building"
-    ?"Languages will unlock automatically as soon as the native US source is ready. The rest of the build can keep running."
+    ?"builder.language.building"
     :data.install?.canRebuild
-      ?"The Languages section requires the native US source. Start a build with your US ROM; extraction runs first and unlocks this section before the game finishes building."
-      :"The Languages section requires the native US source. Restore your generated native-us folder, or download the build tools again and build with your US ROM. Saved language projects are kept.";
-  const note=ready?"Native US source ready — Languages is available.":(data.localizationError?data.localizationError+" ":"")+instruction;
-  for(const el of document.querySelectorAll("[data-language-status]")) if(el.textContent!==note) el.textContent=note;
+      ?"builder.language.build_required"
+      :"builder.language.restore_required";
+  for(const el of document.querySelectorAll("[data-language-status]")) {
+    ui.set(el,ready?"builder.language.ready":instruction);
+    el.title=data.localizationError||""; // Raw diagnostic, not an actionable instruction.
+  }
   languageTab.disabled=!ready;
-  languageTab.title=ready?"Language packages and translation projects":"Requires the native US language source — see Build & play";
-  for(const el of document.querySelectorAll('[data-nav="localization"]')){ el.disabled=!ready; el.title=languageTab.title; }
+  languageTab.setAttribute("data-i18n-title",ready?"builder.language.available_title":"builder.language.unavailable_title"); ui.apply(languageTab);
+  for(const el of document.querySelectorAll('[data-nav="localization"]')){ el.disabled=!ready; el.setAttribute("data-i18n-title",languageTab.getAttribute("data-i18n-title")); ui.apply(el); }
   if(changed){
     document.querySelector("#home-refresh-projects").disabled=!ready;
     if(ready) loadHomeProjects();
     else {
       ++homeRequest; // Ignore a library response already in flight.
       const note=document.createElement("p"); note.className="empty-note";
-      note.textContent="Saved projects will appear here once the native US source is ready. Nothing has been removed.";
+      ui.set(note,"builder.home.projects_locked");
       document.querySelector("#home-projects").replaceChildren(note);
       if(activeTab===languageTab) selectTab(buildTab);
     }
@@ -196,8 +210,9 @@ const trackList=document.querySelector("#asset-track-list");
 const trackToggle=document.querySelector("#asset-track-toggle"), trackOptions=document.querySelector("#asset-track-options"), trackSearch=document.querySelector("#asset-search");
 function closeTrackPicker(focus=false){ trackOptions.hidden=true; trackToggle.setAttribute("aria-expanded","false"); if(focus) trackToggle.focus(); }
 function filterTracks(){
-  const query=trackSearch.value.trim().toLocaleLowerCase();
-  for(const button of trackButtons.values()) button.hidden=!button.textContent.toLocaleLowerCase().includes(query);
+  const query=trackSearch.value.trim().toLocaleLowerCase(ui.locale);
+  for(const button of trackButtons.values()) button.hidden=![button.textContent,button.dataset.track,button.dataset.nativeName]
+    .some(text=>text.toLocaleLowerCase(ui.locale).includes(query));
   document.querySelector("#asset-search-empty").hidden=[...trackButtons.values()].some(button=>!button.hidden);
 }
 trackToggle.addEventListener("click",()=>{
@@ -220,7 +235,11 @@ trackOptions.addEventListener("keydown",event=>{
 });
 for(const row of assetRows.filter(row=>!row.dataset.variant)){
   const button=document.createElement("button"); button.type="button"; button.className="asset-track-button";
-  button.textContent=row.querySelector(".asset-copy label").textContent;
+  const label=row.querySelector(".asset-copy label");
+  button.dataset.nativeName=label.textContent;
+  const key="builder.assets.track."+row.dataset.track.replaceAll("-","_");
+  ui.set(label,key); ui.set(button,key);
+  ui.set(row.querySelector(".asset-source"),"builder.assets.source",{id:row.dataset.track,source:row.dataset.source});
   button.dataset.track=row.dataset.track;
   button.addEventListener("click",()=>{ selectedTrack=row.dataset.track; syncAssetSelection(); closeTrackPicker(true); });
   trackButtons.set(row.dataset.track,button); trackList.append(button);
@@ -234,11 +253,14 @@ function syncAssetSelection(){
     if(!on){ row.querySelectorAll("audio").forEach(audio=>audio.pause()); host?.querySelectorAll("audio").forEach(audio=>audio.pause()); }
     const button=trackButtons.get(row.dataset.track);
     button?.setAttribute("aria-current",String(on));
-    if(on&&button) document.querySelector("#asset-selected-track").textContent=button.textContent;
+    if(on&&button) ui.set(document.querySelector("#asset-selected-track"),button.dataset.i18n);
     if(button) button.dataset.dirty=String(!!row.dataset.pending || !!host?.querySelector('[data-pending="pending"],[data-pending="removed"],[data-pending-split="true"]') || row.querySelector(".split-change")?.value==="1");
   }
 }
 trackSearch.addEventListener("input",filterTracks);
+// Bindings refresh labels in place. Only re-filter after a language change:
+// repainting configuration/players here would discard drafts or pause audio.
+document.addEventListener("workshop:language",filterTracks);
 document.querySelectorAll("[data-asset-category]").forEach(button=>button.addEventListener("click",()=>{
   const category=button.dataset.assetCategory;
   document.querySelectorAll("[data-asset-category]").forEach(b=>b.setAttribute("aria-pressed",String(b===button)));
@@ -282,14 +304,14 @@ function paintRowAudio(row,state){
   const audio=row.querySelector(".replacement-audio");
   const caption=row.querySelector(".replacement-caption");
   if(state==="pending"){
-    caption.textContent="Selected replacement";
+    ui.set(caption,"builder.assets.selected_replacement");
     audio.hidden=false;   /* src is the object URL the change handler made */
     return;
   }
   const url=(state==="installed")?(row.dataset.installedUrl||""):"";
   /* "Selected" is the prospective label for a slot with nothing in it -- it
      names where a pick would appear. Only a slot that HAS one says installed. */
-  caption.textContent=url?"Installed replacement":"Selected replacement";
+  ui.set(caption,url?"builder.assets.installed_replacement":"builder.assets.selected_replacement");
   if(!url){
     audio.pause();
     audio.hidden=true;
@@ -310,23 +332,23 @@ function paintRow(row){
   paintRowAudio(row,state);
   if(state==="pending"){
     label.dataset.configured="pending";
-    label.textContent="Selected: "+row.querySelector("input[type=file]").files[0].name;
-    clear.hidden=false; clear.textContent="Cancel";
+    ui.set(label,"builder.assets.selected_file",{file:row.querySelector("input[type=file]").files[0].name});
+    clear.hidden=false; ui.set(clear,"builder.assets.cancel");
   } else if(state==="removed"){
     label.dataset.configured="removed";
-    label.textContent="Reverting to the original game music on save";
-    clear.hidden=false; clear.textContent="Keep replacement";
+    ui.set(label,"builder.assets.reverting");
+    clear.hidden=false; ui.set(clear,"builder.assets.keep_replacement");
   } else if(state==="installed"){
     label.dataset.configured="true";
-    label.textContent="Installed: "+(row.dataset.installedFile||"replacement");
-    clear.hidden=false; clear.textContent="Use original";
+    ui.set(label,row.dataset.installedFile?"builder.assets.installed_file":"builder.assets.installed_replacement",{file:row.dataset.installedFile});
+    clear.hidden=false; ui.set(clear,"builder.assets.use_original");
   } else if(row.dataset.pendingSplit==="true"){
     label.dataset.configured="pending";
-    label.textContent="New \u2014 choose a file; the entry is written when you save";
+    ui.set(label,"builder.assets.new_split");
     clear.hidden=true;
   } else {
     label.dataset.configured="false";
-    label.textContent="Using original game music";
+    ui.set(label,"builder.assets.using_original");
     clear.hidden=true;
   }
 }
@@ -346,9 +368,7 @@ function refreshAssetDirtyState(){
   saveAssets.disabled=!dirty;
   saveAssetsTop.disabled=!dirty;
   discardAssets.disabled=!dirty;
-  assetBarNote.textContent=dirty
-    ? changes+(changes===1?" unsaved change":" unsaved changes")
-    : "No unsaved changes";
+  ui.set(assetBarNote,dirty?"builder.assets.unsaved":"builder.assets.no_changes",{count:changes});
   syncAssetSelection();
 }
 
@@ -421,23 +441,23 @@ function paintAssetConfiguration(config){
 
 async function loadAssetConfiguration(){
   assetState.dataset.kind="loading";
-  assetState.textContent="Loading current assets…";
+  ui.set(assetState,"builder.assets.loading");
   try {
     const config=await responseJSON(await fetch("assets",{cache:"no-store"}));
     // A read started on tab entry must not overwrite a change made while the
     // request was in flight. Keeping the existing draft also keeps file inputs.
     if(assetBar.dataset.dirty==="true"){
       assetState.dataset.kind="idle";
-      assetState.textContent="Your unsaved changes were kept. Save or discard to refresh the installed configuration.";
+      ui.set(assetState,"builder.assets.draft_kept");
       return;
     }
     paintAssetConfiguration(config);
     assetsLoaded=true;
     assetState.dataset.kind="idle";
-    assetState.textContent="Ready — choose any replacements, then save.";
+    ui.set(assetState,"builder.assets.ready");
   } catch(error){
     assetState.dataset.kind="failed";
-    assetState.textContent=error.message;
+    ui.set(assetState,"builder.assets.load_failed",{detail:error.message});
   }
 }
 
@@ -446,19 +466,19 @@ function paintAudioPreviewStatus(status){
   generatePreviews.disabled=!status.romAvailable||generating;
   if(!status.romAvailable){
     previewState.dataset.kind="idle";
-    previewState.textContent="Supply a ROM on the Build tab to enable original-audio comparisons.";
+    ui.set(previewState,"builder.assets.need_rom");
   } else if(generating){
     previewState.dataset.kind="loading";
-    previewState.textContent=status.message||("Rendering "+(status.current||"audio")+"…");
+    ui.set(previewState,status.current?"builder.assets.preview_progress":"builder.assets.preview_preparing",{count:status.completed||0,total:status.total||0});
   } else if(status.state==="failed"){
     previewState.dataset.kind="failed";
-    previewState.textContent=status.error||"Original-audio preview generation failed.";
+    ui.set(previewState,status.error?"builder.assets.preview_failed_detail":"builder.assets.preview_failed",{detail:status.error});
   } else if(status.state==="ready"){
     previewState.dataset.kind="ready";
-    previewState.textContent=status.message||"Original ROM previews are ready.";
+    ui.set(previewState,"builder.assets.previews_ready");
   } else {
     previewState.dataset.kind="idle";
-    previewState.textContent="ROM ready — extract 30-second WAV previews for side-by-side listening.";
+    ui.set(previewState,"builder.assets.rom_ready");
   }
   /* Re-rendering is only meaningful once something has been rendered, and never
      while a render is running. */
@@ -494,7 +514,7 @@ async function loadAudioPreviewStatus(){
   } catch(error){
     previewPolling=false;
     previewState.dataset.kind="failed";
-    previewState.textContent=error.message;
+    ui.set(previewState,"builder.assets.preview_status_failed",{detail:error.message});
   }
   if(previewPolling) previewTimer=setTimeout(loadAudioPreviewStatus,500);
 }
@@ -503,9 +523,7 @@ async function startAudioPreviews(force){
   generatePreviews.disabled=true;
   regeneratePreviews.disabled=true;
   previewState.dataset.kind="loading";
-  previewState.textContent=force
-    ? "Discarding the cached previews and re-rendering…"
-    : "Starting the pure-Go audio renderer…";
+  ui.set(previewState,force?"builder.assets.preview_regenerating":"builder.assets.preview_starting");
   try {
     const status=await responseJSON(await fetch(
       force?"audio-previews?force=1":"audio-previews",{method:"POST"}));
@@ -514,7 +532,9 @@ async function startAudioPreviews(force){
     previewTimer=setTimeout(loadAudioPreviewStatus,250);
   } catch(error){
     previewState.dataset.kind="failed";
-    previewState.textContent=error.message;
+    const key=["builder.assets.need_rom","builder.assets.preview_busy"].includes(error.code)
+      ? error.code : "builder.assets.preview_start_failed";
+    ui.set(previewState,key,{detail:error.message});
     generatePreviews.disabled=false;
     regeneratePreviews.disabled=false;
   }
@@ -622,11 +642,12 @@ function buildVariantRow(variant){
   const label=row.querySelector("label");
   label.setAttribute("for",input.id);
   label.textContent=variant.name;
-  const caption=row.querySelector(".asset-copy span");
-  caption.textContent="Plays instead when its condition holds \u00b7 "+(variant.file||"");
+  const caption=row.querySelector(".asset-source");
+  ui.set(caption,"builder.assets.variant_help",{file:variant.file||""});
   const gate=document.createElement("code");
   gate.className="variant-gate";
-  gate.textContent=variant.when?("when = "+variant.when):"no condition — always eligible";
+  if(variant.when) gate.textContent="when = "+variant.when;
+  else ui.set(gate,"builder.assets.no_condition");
   row.querySelector(".asset-copy").appendChild(gate);
   row.querySelector(".asset-current").id="variant-state-"+variant.name;
   row.querySelector(".asset-remove").name="variant-remove-"+variant.name;
@@ -638,6 +659,7 @@ function buildVariantRow(variant){
   row.querySelectorAll(".split-toggle,.asset-split,.split-change")
      .forEach(node=>node.remove());
   wireAssetRow(row);
+  ui.apply(row); // Template contents are inert; new clones need their own pass.
   return row;
 }
 
@@ -661,7 +683,14 @@ function syncSplitPanel(row,track){
     box.dataset.enabled=String(!!split.enabled);
     const label=document.createElement("label");
     label.setAttribute("for",box.id);
-    label.textContent=split.label;
+    const region=document.createElement("span");
+    ui.set(region,"builder.assets.region."+split.slug.replaceAll("-","_"));
+    label.append(region);
+    if(split.acts){
+      const acts=document.createElement("span");
+      ui.set(acts,split.acts===3?"builder.assets.acts_both":"builder.assets.act",{act:split.acts===1?1:2});
+      label.append(acts);
+    }
     item.append(box,label);
     return item;
   }));
@@ -756,9 +785,9 @@ document.addEventListener("play",event=>{
 assetForm.addEventListener("submit",async event=>{
   event.preventDefault();
   saveAssets.disabled=true; saveAssetsTop.disabled=true; discardAssets.disabled=true;
-  assetBarNote.textContent="Saving…";
+  ui.set(assetBarNote,"builder.assets.saving");
   assetState.dataset.kind="loading";
-  assetState.textContent="Copying assets and updating the manifest…";
+  ui.set(assetState,"builder.assets.copying");
   try {
     const result=await responseJSON(await fetch("assets",{method:"POST",body:new FormData(assetForm)}));
     /* Clear the pickers BEFORE repainting: paintAssetConfiguration derives each
@@ -767,10 +796,10 @@ assetForm.addEventListener("submit",async event=>{
     assetRows.forEach(clearRowSelection);
     paintAssetConfiguration(result.config);
     assetState.dataset.kind="succeeded";
-    assetState.textContent=result.message||"Assets saved.";
+    ui.set(assetState,result.changed===false?"builder.assets.nothing_saved":"builder.assets.saved");
   } catch(error){
     assetState.dataset.kind="failed";
-    assetState.textContent=error.message;
+    ui.set(assetState,"builder.assets.save_failed",{detail:error.message});
   }
   refreshAssetDirtyState();
 });
@@ -811,22 +840,22 @@ function applyMode(data){
    * working build would be the wrong trade. */
   slimBox.hidden=!(install.canSlim && install.canLaunch && !slimDismissed && !data.slimDone);
   if(data.slimSize) slimCopy.dataset.size=data.slimSize;
-  slimButton.textContent=data.slimSize
-    ? "Clean up build tools ("+data.slimSize+")" : "Clean up build tools";
+  ui.set(slimButton,data.slimSize?"builder.build.cleanup_size":"builder.build.cleanup",{size:data.slimSize});
   if(mode==="launcher"){
-    playTitle.textContent="Ready to play";
-    playSub.textContent="This copy contains just the game.";
+    ui.set(playTitle,"builder.build.ready");
+    ui.set(playSub,"builder.build.launcher_only");
   } else if(install.canLaunch && data.state!=="building"){
-    playTitle.textContent="Your game is built and ready";
+    ui.set(playTitle,"builder.build.built");
+    ui.unbind(playSub);
     playSub.textContent=install.result&&install.result.outputPath?install.result.outputPath:"";
   }
   if(mode==="unusable" && lastMode!==mode)
-    show("failed","This copy has neither a built game nor the tools to build one — download the package again.");
+    showKey("failed","builder.home.unusable");
   canLaunch=!!install.canLaunch&&!building;
   homePrimary.disabled=closed||building||launching||(!canLaunch&&!install.canRebuild);
-  homePrimary.textContent=building?"Building your game…":canLaunch?"▶  Play ActRaiser":"Build your game";
-  document.querySelector("#home-game-note").textContent=building?"You can explore the workshop while the build runs.":canLaunch?"Ready when you are. Your game is installed locally.":install.canRebuild?"Start with your local US ROM. No upload required.":"This copy needs a built game or the build tools. Download the package again to get started.";
-  document.querySelector("#build-nav-label").textContent=canLaunch?"Build & play":"Build game";
+  ui.set(homePrimary,building?"builder.home.building":canLaunch?"builder.home.play":"builder.home.build");
+  ui.set(document.querySelector("#home-game-note"),building?"builder.home.while_building":canLaunch?"builder.home.ready":install.canRebuild?"builder.home.rom":"builder.home.unusable");
+  ui.set(document.querySelector("#build-nav-label"),canLaunch?"builder.nav.build":"builder.nav.build_game");
   lastMode=mode;
 }
 
@@ -835,6 +864,7 @@ function applyMode(data){
  * model, and the dock cannot disagree with the step list. */
 function paint(progress,kind){
   if(!progress) return;
+  lastPaint={progress,kind};
   const done=new Set(progress.completed||[]);
   steps.forEach(step=>{
     const id=step.dataset.step;
@@ -843,8 +873,8 @@ function paint(progress,kind){
     else step.removeAttribute("data-state");
   });
   const percent=Math.max(0,Math.min(100,progress.percent|0));
-  dock.title=[progress.phaseLabel,progress.detail].filter(Boolean).join(" · ");
-  dockPct.textContent=percent+"%";
+  dock.title=[ui.text("builder.phase."+progress.phaseId,{},progress.phaseLabel),progress.unitsTotal?ui.text("builder.build.units",{done:ui.number(progress.units),total:ui.number(progress.unitsTotal)}):""].filter(Boolean).join(" · ");
+  dockPct.textContent=ui.number(percent)+"%";
   track.setAttribute("aria-valuenow",percent);
 }
 
@@ -853,65 +883,73 @@ function paint(progress,kind){
 function announce(kind,message){
   dock.dataset.kind=kind;
   dock.dataset.open="true";
-  if(message) dockPhase.textContent=message;
+  if(message) { ui.unbind(dockPhase); dockPhase.textContent=message; }
   if(document.querySelector("#panel-build").hidden)
     buildTab.dataset.badge=(kind==="failed"?"bad":"ok");
 }
 
-async function responseJSON(response){ const body=await response.json(); if(!response.ok) throw new Error(body.error||"Request failed"); return body; }
+async function responseJSON(response){
+  const body=await response.json();
+  if(!response.ok){
+    const error=new Error(body.error||"Request failed");
+    error.code=body.errorCode; // Presentation code is separate from raw diagnostic details.
+    throw error;
+  }
+  return body;
+}
 
 async function refresh(){
   if(closed) return;
   try {
     const data=await responseJSON(await fetch("status",{cache:"no-store"}));
     if(closed) return;
-    if(data.log){ log.textContent=data.log; log.scrollTop=log.scrollHeight; }
+    if(data.log){ ui.unbind(log); log.textContent=data.log; log.scrollTop=log.scrollHeight; }
     applyMode(data);
     applyLocalizationAvailability(data);
     paint(data.progress,data.state);
     if(data.state==="building"){
       polling=true; stepsBox.hidden=false;
-      show("building","Building — this can take a few minutes");
+      showKey("building","builder.build.running");
       build.disabled=true; launch.disabled=true;
       dock.dataset.kind="building"; dock.dataset.open="true";
     }
     if(data.state==="succeeded"){
-      show("succeeded",data.message||"Build complete");
+      showKey("succeeded","builder.build.complete");
       build.disabled=false; launch.disabled=false; polling=false;
       dockPct.textContent="100%";
-      announce("succeeded",data.message||"Build complete");
+      announce("succeeded");
     }
     if(data.state==="failed"){
-      show("failed",data.error||"Build failed"); build.disabled=false; launch.disabled=true; polling=false;
+      showKey("failed","builder.build.failed",{detail:data.error||""}); build.disabled=false; launch.disabled=true; polling=false;
       logBox.open=true;  /* a failure is the one time the log matters unprompted */
-      announce("failed",data.error||"Build failed");
+      announce("failed");
     }
     if(data.state==="idle"){
       /* The original copy assumed nothing was built. Say what is actually
        * true, so a returning user is not told to choose a ROM they do not
        * need. */
       const install=data.install||{};
-      if(data.mode==="launcher") show("idle","Ready to play");
-      else if(install.canLaunch){ show("idle","A built game is ready — Play, or rebuild below"); launch.disabled=false; }
-      else if(install.canRebuild) show("idle","Ready to build — choose your ROM above");
+      if(data.mode==="launcher") showKey("idle","builder.build.ready");
+      else if(install.canLaunch){ showKey("idle","builder.build.ready_or_rebuild"); launch.disabled=false; }
+      else if(install.canRebuild) showKey("idle","builder.build.ready_to_build");
     }
-  } catch(error) { show("failed",error.message); polling=false; announce("failed",error.message); }
+  } catch(error) { showKey("failed","builder.request_failed",{detail:error.message}); polling=false; announce("failed"); }
   if(polling) setTimeout(refresh,500);
 }
 
 form.addEventListener("submit",async event=>{
   event.preventDefault();
   if(!document.querySelector("#rom").files.length) return;
-  build.disabled=true; launch.disabled=true; log.textContent="Preparing local ROM copy…";
-  show("building","Starting build");
+  build.disabled=true; launch.disabled=true; ui.unbind(log); log.textContent=ui.text("builder.build.preparing");
+  showKey("building","builder.build.starting");
   steps.forEach(step=>step.removeAttribute("data-state"));
   stepsBox.hidden=false;   /* only worth showing once there is progress to show */
   buildTab.removeAttribute("data-badge");
   dock.dataset.kind="building"; dock.dataset.open="true";
-  dockPhase.textContent="Preparing your ROM"; dockPct.textContent="…"; track.hidden=false; dockLaunch.hidden=true;
+  ui.set(dockPhase,"builder.build.preparing_rom"); dockPct.textContent="…"; track.hidden=false; dockLaunch.hidden=true;
   track.removeAttribute("aria-valuenow");
   try { await responseJSON(await fetch("build",{method:"POST",body:new FormData(form)})); polling=true; refresh(); }
-  catch(error){ show("failed",error.message); build.disabled=false; announce("failed",error.message); }
+  catch(error){ showKey("failed","builder.request_failed",{detail:error.message}); build.disabled=false; announce("failed"); }
 });
 
 async function doLaunch(){
@@ -920,9 +958,9 @@ async function doLaunch(){
   const buttons=[homePrimary,playButton,launch,dockLaunch];
   const previous=buttons.map(button=>button.disabled);
   buttons.forEach(button=>button.disabled=true);
-  show("idle","Launching game…");
-  try { await responseJSON(await fetch("launch",{method:"POST"})); show("succeeded","Game launched"); dockPhase.textContent="Game launched"; }
-  catch(error){ show("failed",error.message); }
+  showKey("idle","builder.build.launching");
+  try { await responseJSON(await fetch("launch",{method:"POST"})); showKey("succeeded","builder.build.launched"); }
+  catch(error){ showKey("failed","builder.request_failed",{detail:error.message}); }
   finally { launching=false; if(!closed) buttons.forEach((button,i)=>button.disabled=previous[i]); }
 }
 launch.addEventListener("click",doLaunch);
@@ -933,15 +971,15 @@ homePrimary.addEventListener("click",()=>canLaunch?doLaunch():selectTab(buildTab
 slimDismiss.addEventListener("click",()=>{ slimDismissed=true; slimBox.hidden=true; });
 slimButton.addEventListener("click",async()=>{
   slimButton.disabled=true; slimDismiss.disabled=true;
-  show("building","Removing build tools…");
+  showKey("building","builder.build.removing_tools");
   try {
     await responseJSON(await fetch("slim",{method:"POST"}));
     /* One poll settles everything: the server has re-probed, so the offer
      * disappears, the confirmation appears, and the page drops into launcher
      * mode without the page having to guess any of it. */
     await refresh();
-    show("succeeded","Build tools removed");
-  } catch(error){ show("failed",error.message); }
+    showKey("succeeded","builder.build.tools_removed");
+  } catch(error){ showKey("failed","builder.request_failed",{detail:error.message}); }
   slimButton.disabled=false; slimDismiss.disabled=false;
 });
 
@@ -954,19 +992,19 @@ route();
 window.addEventListener("focus",()=>{ if(!closed&&!polling) refresh(); });
 closeButton.addEventListener("click",async()=>{
   if(window.localizationHasEdits?.()||assetBar.dataset.dirty==="true"){
-    if(!window.confirm("Close the workshop and discard unsaved edits? Saved projects and installed assets will be kept.")) return;
+    if(!window.confirm(ui.text("builder.close_confirm"))) return;
   }
   try {
     await responseJSON(await fetch("close",{method:"POST"}));
-    show("idle","Builder closed — you can close this tab");
+    showKey("idle","builder.closed");
     closed=true; polling=false; clearTimeout(previewTimer);
     document.dispatchEvent(new Event("workshop:closed"));
     document.querySelectorAll("button,input,select,textarea").forEach(control=>control.disabled=true);
     assetForm.querySelectorAll("audio").forEach(audio=>audio.pause());
-    document.querySelector("#home-game-note").textContent="Workshop closed. You can close this browser tab.";
+    ui.set(document.querySelector("#home-game-note"),"builder.closed_note");
     document.querySelector("#scene-motion").value="still";
     document.querySelector("#scene-motion").dispatchEvent(new Event("change"));
     dock.dataset.open="false";
-  } catch(error){ show("failed",error.message); }
+  } catch(error){ showKey("failed","builder.request_failed",{detail:error.message}); }
 });
 })();

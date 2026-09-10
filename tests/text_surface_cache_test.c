@@ -4,6 +4,7 @@
 #include "localization/text_rasterizer.h"
 #include "render/render_device.h"
 #include "render/text_surface_cache.h"
+#include "render/ui_text_renderer.h"
 
 static int g_failures;
 
@@ -25,6 +26,8 @@ typedef struct FakeRenderBackend {
   ArRenderTextureDesc last_descriptor;
   uint32_t uploaded_pixels[64 * 32];
   int uploaded_pitch;
+  int draws;
+  ArRenderRectF last_destination;
 } FakeRenderBackend;
 
 static bool CreateTexture(void *context, const ArRenderTextureDesc *descriptor,
@@ -96,7 +99,9 @@ static bool AlwaysDrawTexture(void *context, ArRenderTexture texture,
                               const ArRenderRectF *source,
                               const ArRenderRectF *destination,
                               const ArRenderDrawState *state) {
-  (void)context;
+  FakeRenderBackend *backend = context;
+  ++backend->draws;
+  backend->last_destination = *destination;
   (void)texture;
   (void)source;
   (void)destination;
@@ -839,6 +844,84 @@ static void TestInkFormatsAndBounds(void) {
   }
 }
 
+static bool CreateUiFont(void *context, ArTextBackendInstance *instance,
+                          const ArTextBackendConfig *config,
+                          char *error, size_t error_capacity) {
+  (void)error; (void)error_capacity;
+  instance->implementation = context;
+  return ArTextRasterizer_Init(&instance->rasterizer, &kRasterOps, context,
+                                config->font_revision);
+}
+static void DestroyUiFont(void *context, ArTextBackendInstance *instance) {
+  (void)context; (void)instance;
+}
+
+static void TestInterfaceTextCacheAndLifecycle(void) {
+  FakeRenderBackend render = {0};
+  FakeRasterizer raster = {0};
+  ArRenderDevice device = {0};
+  CHECK(ArRenderDevice_Init(&device, &kRenderOps, &render, (ArRenderCapabilities){0}));
+  const ArTextBackendOps ops = {.struct_size = sizeof(ops),
+      .abi_version = AR_TEXT_BACKEND_ABI_VERSION,
+      .create = CreateUiFont, .destroy = DestroyUiFont};
+  const ArTextBackend backend = {.ops = &ops, .context = &raster};
+  const ArTextBackendConfig fonts = {.struct_size = sizeof(fonts),
+      .abi_version = AR_TEXT_BACKEND_CONFIG_ABI_VERSION,
+      .font_stack_id = "interface", .primary_font_path = "host-resolved.ttf",
+      .font_revision = 7, .cached_size_capacity = 4};
+  ArUiTextRenderer ui = {0};
+  CHECK(ArUiTextRenderer_Init(&ui, &device, &backend, &fonts, NULL, 0));
+  CHECK(raster.calls == 1); /* Preflight before transactional publication. */
+  ArUiTextRun run = {.struct_size = sizeof(run),
+      .abi_version = AR_UI_TEXT_RUN_ABI_VERSION,
+      .utf8 = "Français 日本語", .utf8_bytes = strlen("Français 日本語"),
+      .bounds = {10, 20, 256, 32}, .tint = {1, 1, 1, 1}};
+  CHECK(ArUiTextRenderer_Draw(&ui, &run));
+  CHECK(raster.calls == 2 && render.draws == 1);
+  CHECK(raster.last_request.utf8_bytes == run.utf8_bytes);
+  CHECK(!memcmp(raster.last_request.utf8, run.utf8, run.utf8_bytes));
+  CHECK(raster.last_request.direction == kArTextDirection_Auto);
+  CHECK(render.last_destination.x == 10 && render.last_destination.y == 28);
+  const int uploads = render.uploads;
+  run.bounds.x = 30;
+  run.tint = (ArRenderColorF){0.5f, 0.3f, 0.2f, 0.7f};
+  run.alignment = kArTextHorizontalAlignment_Trailing;
+  CHECK(ArUiTextRenderer_Draw(&ui, &run));
+  CHECK(raster.calls == 2 && render.uploads == uploads);
+  CHECK(render.last_destination.x + render.last_destination.w == 286);
+  CHECK(ArUiTextRenderer_GetStats(&ui)->hits == 1);
+  CHECK(ArUiTextRenderer_GetStats(&ui)->texture_bytes < (16u << 20));
+  int measured_width = 0, measured_height = 0;
+  CHECK(ArUiTextRenderer_Measure(&ui, &run, &measured_width, &measured_height));
+  CHECK(measured_width == (int)run.utf8_bytes * 2 && measured_height == 16);
+  CHECK(raster.calls == 2 && render.uploads == uploads && render.draws == 2);
+
+  /* Rejected initialization cannot destroy the working font/cache. */
+  raster.fail = true;
+  CHECK(!ArUiTextRenderer_Init(&ui, &device, &backend, &fonts, NULL, 0));
+  CHECK(ArUiTextRenderer_IsReady(&ui));
+  raster.fail = false;
+  const int calls_after_failure = raster.calls;
+  CHECK(ArUiTextRenderer_Draw(&ui, &run));
+  CHECK(raster.calls == calls_after_failure);
+  ArUiTextRenderer_ClearTextures(&ui);
+  CHECK(ArUiTextRenderer_Draw(&ui, &run));
+  CHECK(raster.calls == calls_after_failure + 1);
+  run.language_bcp47 = "ja";
+  CHECK(ArUiTextRenderer_Draw(&ui, &run));
+  CHECK(raster.calls == calls_after_failure + 2);
+  run.bounds.w = 8193;
+  CHECK(!ArUiTextRenderer_Draw(&ui, &run));
+  CHECK(raster.calls == calls_after_failure + 2);
+  run.bounds.w = 256;
+  run.abi_version++;
+  CHECK(!ArUiTextRenderer_Draw(&ui, &run));
+  ArUiTextRenderer_Destroy(&ui);
+  CHECK(!ArUiTextRenderer_IsReady(&ui));
+  CHECK(render.creates == render.destroys);
+  ArUiTextRenderer_Destroy(&ui);
+}
+
 int main(void) {
   TestAbiValidation();
   TestCacheHitsMissesAndFailureAtomicity();
@@ -848,6 +931,7 @@ int main(void) {
   TestFramePinsSurviveEntryPressure();
   TestPixelationTreatments();
   TestInkFormatsAndBounds();
+  TestInterfaceTextCacheAndLifecycle();
   if (g_failures) {
     fprintf(stderr, "%d text-surface cache test(s) failed\n", g_failures);
     return 1;

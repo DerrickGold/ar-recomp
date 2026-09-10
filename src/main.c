@@ -1367,6 +1367,23 @@ static void AppBoot_InstallSubsystems(AppBoot *app) {
   if (!SettingsOverlay_Init(&g_render_device, g_window,
                             app->rom_data, app->rom_size))
     Die("font atlas creation for settings overlay failed");
+  /* Interface text has its own font/cache lifetime, independent of whichever
+   * game language pack is selected. Resources are resolved by this host. */
+  const char *ui_fallbacks[] = {"game-assets/fonts/noto/NotoSansJP-Bold.otf"};
+  const ArTextBackendConfig ui_fonts = {
+      .struct_size = sizeof(ui_fonts),
+      .abi_version = AR_TEXT_BACKEND_CONFIG_ABI_VERSION,
+      .font_stack_id = "system-interface",
+      .primary_font_path = "game-assets/fonts/noto/NotoSans-SemiCondensedExtraBold.ttf",
+      .fallback_font_paths = ui_fallbacks, .fallback_font_count = 1,
+      .font_revision = 1, .cached_size_capacity = 16,
+  };
+  char ui_font_error[kArTextRasterErrorCapacity] = {0};
+  if (ArRenderDevice_IsReady(&g_render_device) &&
+      !SettingsOverlay_SetTextBackend(&localized_text_backend, &ui_fonts,
+                                       ui_font_error, sizeof(ui_font_error)))
+    fprintf(stderr, "[settings-menu] Unicode font unavailable; keeping native interface: %s\n",
+            ui_font_error);
   /* The world-map image and pure development-builder tables are immutable ROM
    * data. Failure is not fatal: consumers retain the authentic presentation. */
   if (SimWorldMap_Init(app->rom_data, app->rom_size))

@@ -1,4 +1,5 @@
 #include "settings.h"
+#include "localization/ui_catalog.h"
 #include "text_parse_utils.h"
 #include "constants.h"
 #include "randomizer.h"
@@ -61,6 +62,9 @@ static int InferDisplayMode(void);
 static const char *const kLocalizationContentLabels[] = {
   "Native US", "Configured pack",
 };
+static const char *const kInterfaceLanguageLabels[] = {"en", "fr", "de", "ja"};
+_Static_assert(sizeof(kInterfaceLanguageLabels) / sizeof(*kInterfaceLanguageLabels) ==
+                   kArUiLocale_Count, "interface locale settings/catalog agreement");
 static SettingsLocalizationPack s_localization_packs[kSettingsLocalizationMaximumPacks];
 static size_t s_localization_pack_count;
 
@@ -1172,6 +1176,11 @@ static void RandoChanged(const SettingDesc *desc) {
     NULL, 0, NULL, NULL, ParseStagedScore, FormatStagedScore }
 
 const SettingDesc g_setting_descs[] = {
+  { "interface_language", "AR_INTERFACE_LANGUAGE", "Interface language",
+    "Choose this settings menu's language independently of game text.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_Interface,
+    &g_settings.interface_language, 0, 0, kArUiLocale_Count - 1, 1, false,
+    kInterfaceLanguageLabels, kArUiLocale_Count, NULL, NULL, NULL, NULL, true },
   { "localization_content", "AR_LOCALIZATION_CONTENT", "Text source",
     "Select an installed translation by package name. Packs sharing a locale "
     "remain separate. External packs require enhanced rendering; the built-in "
@@ -2993,6 +3002,7 @@ const char *Settings_CategoryName(SettingCategory category) {
     case kSettingCat_RandoSim: return "Simulation";
     case kSettingCat_Localization: return "Localization";
     case kSettingCat_LocalizationFont: return "Enhanced font";
+    case kSettingCat_Interface: return "Interface";
     case kSettingCat_Count: break;
   }
   return "Unknown";

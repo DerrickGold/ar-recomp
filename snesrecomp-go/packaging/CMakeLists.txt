@@ -574,11 +574,13 @@ install(FILES
 install(FILES ${_runtime_archive}
     DESTINATION utils/snesrecomp-go/runtime/lib/${_runtime_zig_target})
 
-# The shared licensed font is the only localization content distributed by
-# default. Retail prose/source projects and ROM-owned graphics remain local.
+# Licensed interface/game fonts are redistributed with their notices. Retail
+# prose/source projects and ROM-owned graphics remain local.
 install(FILES
     ${GAME_ROOT}/game-assets/fonts/noto/NotoSans-SemiCondensedExtraBold.ttf
     ${GAME_ROOT}/game-assets/fonts/noto/OFL.txt
+    ${GAME_ROOT}/game-assets/fonts/noto/NotoSansJP-Bold.otf
+    ${GAME_ROOT}/game-assets/fonts/noto/NotoSansJP-OFL.txt
     ${GAME_ROOT}/game-assets/fonts/noto/README.md
     DESTINATION utils/game-assets/fonts/noto)
 

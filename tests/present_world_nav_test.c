@@ -1451,6 +1451,10 @@ static void TestGlobeInspection(void) {
   UploadWorldNavigationComposition(&slot);
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
   const ArRenderRectF palace = backend.palace_rect, ui = backend.ui_rect;
+  assert(fabsf(palace.w - 16 * 960.0f / 256 * .75f) < .0001f);
+  assert(fabsf(palace.x + palace.w * .5f - 480) < .0001f);
+  assert(fabsf(palace.y + palace.h * .5f - 360) < .0001f);
+  const SimWorldNavigationComposition original_composition = *composition;
   ArRenderVertex2D rest[4];
   memcpy(rest, backend.ground_vertices, sizeof(rest));
   assert(backend.palace_draws == 1 && backend.ui_draws == 1);
@@ -1473,12 +1477,22 @@ static void TestGlobeInspection(void) {
   assert(!memcmp(&palace, &backend.palace_rect, sizeof(palace)));
   assert(!memcmp(&slot.sim.world_navigation, &navigation, sizeof(navigation)));
   assert(backend.ground_uploads == 1); /* Camera never rebuilds native artwork. */
-  slot.sim.projection_distance_x100 += 200;
-  assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
-  assert(!memcmp(&palace, &backend.palace_rect, sizeof(palace))); /* Zoom retains radial alignment. */
-  assert(!memcmp(&ui, &backend.ui_rect, sizeof(ui)));
-  assert(backend.ground_uploads == 1);
-  slot.sim.projection_distance_x100 -= 200;
+  const struct { uint16_t distance; float scale; } zooms[] = {
+    {100, 1}, {200, 1}, {225, 1}, {300, .75f}, {500, .45f},
+    {900, .35f}, {2000, .35f}, {300, .75f},
+  };
+  for (size_t i = 0; i < sizeof(zooms) / sizeof(zooms[0]); i++) {
+    slot.sim.projection_distance_x100 = zooms[i].distance;
+    assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+    const ArRenderRectF actual = backend.palace_rect;
+    assert(fabsf(actual.w / palace.w - zooms[i].scale / .75f) < .00001f);
+    assert(fabsf(actual.h / palace.h - zooms[i].scale / .75f) < .00001f);
+    assert(fabsf(actual.x + actual.w * .5f - 480) < .0001f);
+    assert(fabsf(actual.y + actual.h * .5f - 360) < .0001f);
+    assert(!memcmp(&ui, &backend.ui_rect, sizeof(ui)));
+    assert(!memcmp(composition, &original_composition, sizeof(*composition)));
+    assert(backend.ground_uploads == 1);
+  }
   slot.sim.world_navigation.focus_x = slot.sim.world_navigation.focus_y = 0;
   slot.sim.world_navigation_towns.object_count = 1;
   slot.sim.world_navigation_towns.objects[0] = (SimBackgroundVoxelObject){
@@ -1511,6 +1525,41 @@ static void TestGlobeInspection(void) {
   slot.sim.world_navigation.focus_x = slot.sim.world_navigation.focus_y = 0;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
   assert(depth_solid_faces == visible_faces);
+  PresentWorldNav_ResetResources();
+}
+
+static void TestPalaceMarkerAutoFitAndRasterBounds(void) {
+  FakeBackend backend = {.track_markers = true};
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
+  PresentWorldNav_ResetResources();
+  FrameSlot slot = WorldNavigationSlot();
+  slot.sim.projection_distance_x100 = 0;
+  SimWorldNavigationComposition *composition = &slot.sim.world_navigation_scene.composition;
+  composition->empty_animation = false;
+  /* Deliberately asymmetric around the travel focus, as the native cloud
+   * crop is. Resizing must scale that offset, not recenter the raster. */
+  composition->palace = (SimWorldNavigationCompositionLayer){
+      .visible = true, .screen_x = 123, .screen_y = 97, .width = 16, .height = 16};
+  const SimWorldNavigationComposition original = *composition;
+  UploadWorldNavigationComposition(&slot);
+  const float scale = fminf(1, fmaxf(.35f, 2.25f / Scene3D_AutoFitDistance(.4f)));
+  const int sizes[][3] = {{800, 600, 800}, {1280, 720, 960}, {1920, 1080, 1440}};
+  for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
+    backend.output_width = sizes[i][0]; backend.output_height = sizes[i][1];
+    assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+    const float x_scale = sizes[i][2] / 256.0f, y_scale = sizes[i][1] / 224.0f;
+    const ArRenderRectF actual = backend.palace_rect;
+    assert(fabsf(actual.w - 16 * x_scale * scale) < .0001f);
+    assert(fabsf(actual.h - 16 * y_scale * scale) < .0001f);
+    assert(fabsf(actual.x + actual.w * .5f - (sizes[i][2] * .5f + 3 * x_scale * scale)) < .0001f);
+    assert(fabsf(actual.y + actual.h * .5f - (sizes[i][1] * .5f - 7 * y_scale * scale)) < .0001f);
+    assert(!memcmp(composition, &original, sizeof(original)));
+  }
+  const int draws = backend.palace_draws;
+  composition->empty_animation = true; /* Native Advent has no marker. */
+  UploadWorldNavigationComposition(&slot);
+  assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+  assert(backend.palace_draws == draws);
   PresentWorldNav_ResetResources();
 }
 
@@ -1663,6 +1712,7 @@ int main(void) {
   TestLavaUploadRecovery();
   TestAtmosphereEnclosesRaisedTerrain();
   TestGlobeInspection();
+  TestPalaceMarkerAutoFitAndRasterBounds();
   TestAdventAuthoredModelClearance();
   TestTallModelViewportClearance();
   TestSkyPalaceClippingAndOwnership();

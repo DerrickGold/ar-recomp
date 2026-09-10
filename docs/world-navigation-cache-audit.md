@@ -135,8 +135,8 @@ image-equivalence baseline.
 ## Selected 3x Palace diameter
 
 The follow-up against `b07b03e` adopts the user's 3x Palace preview, retaining
-daylight, cloud decks and selected-town framing. Navigation remains at the
-original radius. Portable `*AtRadius` chart/transition functions accept an
+daylight, cloud decks and selected-town framing. At that checkpoint navigation
+remained at the original radius. Portable `*AtRadius` chart/transition functions accept an
 explicit metric, with default wrappers preserving existing callers. Only the
 presenter selects the Palace radius; no mode dependency enters the math layer
 and no runner ABI, frame schema, settings, backend or shader contract changes.
@@ -283,6 +283,59 @@ effect settings were reduced for this fix.
 Evidence: `/private/tmp/actraiser-marahna-fixes.AuTVyL/`. In-game six-town
 visual replay: `runs/20260908-212206/`. Close-up of the production GPU capture:
 `runs/marahna-globe-fixes/marahna.png`.
+
+## Selected 2x navigation and zoom-responsive Palace marker
+
+Navigation now uses a 96-tile chart radius (2x diameter), while the enhanced
+Sky Palace retains its 144-tile metric. The presenter selects both; portable
+math keeps explicit-radius inputs and its original default wrappers. Native
+focus, heading, local tile/relief scale, authored models and quality settings
+are unchanged. Navigation's focus frame and physical radius, including Advent
+support, now consume the selected metric instead of the default-radius wrapper.
+Existing radius-keyed geometry and weather caches remain the sole owners.
+
+The original animated Palace marker is 75% of native size at camera distance
+3, scales inversely with the resolved eye distance, and stays within 35-100%
+for readability. Scaling is about the native travel focus, not the raster
+crop's center. This preserves its cloud/platform offset and orbit attachment;
+the destination UI stays unscaled, and native Advent still omits the marker.
+No new texture, draw pass, allocation, setting, frame field, renderer contract
+or runner ABI is introduced. The native OAM composition is not mutated.
+
+Debug/Release builds and all 151 CTests pass. The six-town GPU acceptance run
+passes with 194 captures, including model/quality/effect toggles, shared-depth
+occlusion, near/wide framing and raised-terrain Advent clearance. All six
+Sky Palace captures remain byte-identical to the preceding implementation.
+The ASan/UBSan GPU run passes its synthetic and populated-scene checks with
+56 captures (without the optional extended town matrix). Marker tests cover
+exact submitted bounds, camera limits/auto-fit, aspect-fit resolutions,
+asymmetric raster crops, unmodified UI/composition, far-side hiding and
+restoration. GPU translation tolerates one raster column for fractional
+marker size; the portable test still requires the exact intended dimensions.
+
+Four independent release runs per version use ABBA-ABBA ordering, the same
+2240-frame six-town replay, frozen clouds and 1792x1344 Metal output. No builds,
+GPU tests or image encodes overlap these timings. The statistic weights
+complete steady presentation windows after entry, then takes the median of
+four run averages; startup and partial windows are excluded.
+
+| CPU presentation time | Prior 1x navigation | Selected 2x + marker sizing |
+| --- | --- | --- |
+| Median of four runs | 8.047 ms | 5.545 ms |
+| Run-average range | 8.027-8.098 ms | 5.527-5.559 ms |
+
+The measured 31% reduction reflects this view's different visible geometry,
+not a general optimization or an FPS guarantee. Median cloud work decreases
+from 2.635 to 1.309 ms, depth projection from 1.178 to 0.771 ms, and submission
+from 1.049 to 0.528 ms. No model, terrain or effect quality was lowered.
+This is not a moving-weather, isolated GPU, view-switch or non-Metal result.
+Frame-700 images repeat exactly within each version; all eight final WRAM
+dumps match, and original/isolated save hashes remain unchanged.
+
+Evidence, immutable comparison executables and analysis:
+`/private/tmp/actraiser-navigation-adoption.mS3fEL/`.
+Before/after marker captures at normal and wide zoom:
+`runs/navigation-diameter-comparison/palace-sizing.png`.
 
 ## Remaining measurement limits
 

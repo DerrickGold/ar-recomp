@@ -96,6 +96,7 @@ func splitRegions(track assetTrack) []assetRegion {
 				continue
 			}
 			region.Label += actSuffix(played.Acts)
+			region.Acts = played.Acts
 			offered = append(offered, region)
 			break
 		}
@@ -163,6 +164,7 @@ type assetRegion struct {
 	Slug  string
 	Label string
 	Group byte
+	Acts  byte
 }
 
 var assetRegions = []assetRegion{
@@ -195,6 +197,7 @@ func splitGate(group byte) string {
 type assetSplitStatus struct {
 	Slug    string `json:"slug"`
 	Label   string `json:"label"`
+	Acts    byte   `json:"acts"` // Semantic act mask; the browser translates presentation only.
 	Enabled bool   `json:"enabled"`
 	// Name, Gate and File are exactly what a save WILL write for this region.
 	// Sent up front so the page can show the row the moment the box is ticked,
@@ -654,7 +657,7 @@ func loadAssetConfiguration(root string) (assetConfiguration, error) {
 			_, exists := findManifestSection(manifest,
 				"music:"+splitSectionName(track.ID, region.Slug))
 			status.Splits = append(status.Splits, assetSplitStatus{
-				Slug: region.Slug, Label: region.Label, Enabled: exists,
+				Slug: region.Slug, Label: region.Label, Acts: region.Acts, Enabled: exists,
 				Name: splitSectionName(track.ID, region.Slug),
 				Gate: splitGate(region.Group),
 				File: splitStubFile(track.ID, region.Slug),
@@ -671,26 +674,26 @@ func loadAssetConfiguration(root string) (assetConfiguration, error) {
 // different file, never returned to the ROM's own music. The hidden companion
 // field is what the save actually reads -- a button press alone would be lost
 // on submit.
-const assetTrackRowTemplate = `<div class="asset-row" data-track="{ID}" style="--tint-h:{HUE}">
-  <div class="asset-copy"><label for="track-{ID}">{NAME}</label><span>Manifest [music:{ID}] &middot; ROM source {SRC}</span></div>
+const assetTrackRowTemplate = `<div class="asset-row" data-track="{ID}" data-source="{SRC}" style="--tint-h:{HUE}">
+  <div class="asset-copy"><label for="track-{ID}">{NAME}</label><span class="asset-source">Manifest [music:{ID}] &middot; ROM source {SRC}</span></div>
   <div class="asset-picker"><input id="track-{ID}" name="track-{ID}" type="file" accept=".ogg,.oga,audio/ogg">
     <div class="asset-row-foot">
-      <span class="asset-current" id="track-state-{ID}">Not installed</span>
-      <button type="button" class="asset-clear" hidden>Use original</button>
-      <button type="button" class="split-toggle" aria-expanded="false">Split by level</button>
+      <span class="asset-current" id="track-state-{ID}" data-i18n="builder.assets.not_installed">Not installed</span>
+      <button type="button" class="asset-clear" hidden data-i18n="builder.assets.use_original">Use original</button>
+      <button type="button" class="split-toggle" aria-expanded="false" data-i18n="builder.assets.split">Split by level</button>
     </div>
     <input class="asset-remove" name="track-remove-{ID}" type="hidden" value="0">
     <input class="split-change" name="split-change-{ID}" type="hidden" value="0">
     <div class="asset-split" hidden>
-      <p class="split-note">Give this song its own track in chosen levels. Each one becomes a
+      <p class="split-note" data-i18n="builder.assets.split_help">Give this song its own track in chosen levels. Each one becomes a
       gated entry below, ready for a file. Only the levels whose maps actually play this song
       are listed &mdash; that comes from the ROM&rsquo;s own per-map script, so the choice
       cannot name a level the gate could never fire in.</p>
       <div class="split-regions"></div>
     </div>
     <div class="audio-compare">
-      <div><span>Original ROM</span><audio class="original-audio" controls preload="metadata" hidden></audio></div>
-      <div><span class="replacement-caption">Selected replacement</span><audio class="replacement-audio" controls preload="metadata" hidden></audio></div>
+      <div><span data-i18n="builder.assets.original_rom">Original ROM</span><audio class="original-audio" controls preload="metadata" hidden></audio></div>
+      <div><span class="replacement-caption" data-i18n="builder.assets.selected_replacement">Selected replacement</span><audio class="replacement-audio" controls preload="metadata" hidden></audio></div>
     </div>
   </div>
 </div>`
@@ -1264,7 +1267,7 @@ func (app *application) saveAssets(response http.ResponseWriter, request *http.R
 			return
 		}
 		writeJSON(response, http.StatusOK, map[string]any{
-			"message": "No asset changes were selected.", "config": configuration,
+			"message": "No asset changes were selected.", "changed": false, "config": configuration,
 		})
 		return
 	}
@@ -1322,6 +1325,7 @@ func (app *application) saveAssets(response http.ResponseWriter, request *http.R
 	}
 	writeJSON(response, http.StatusOK, map[string]any{
 		"message": "Assets saved. Changes apply the next time the game starts.",
+		"changed": true,
 		"config":  configuration,
 	})
 }

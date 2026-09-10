@@ -20,13 +20,16 @@ game-assets/*
 game-assets/hd/*
 !game-assets/audio/
 game-assets/audio/*
-# The independently redistributable default Unicode face is the sole tracked
-# font exception. User/pack fonts and all ROM-extracted font data remain local.
+# Only the explicitly listed, independently redistributable host fonts are
+# tracked. User/pack fonts and all ROM-extracted font data remain local.
 !game-assets/fonts/
 game-assets/fonts/*
 !game-assets/fonts/noto/
+game-assets/fonts/noto/*
 !game-assets/fonts/noto/NotoSans-SemiCondensedExtraBold.ttf
 !game-assets/fonts/noto/OFL.txt
+!game-assets/fonts/noto/NotoSansJP-Bold.otf
+!game-assets/fonts/noto/NotoSansJP-OFL.txt
 !game-assets/fonts/noto/README.md
 game-assets/manifest.ini
 

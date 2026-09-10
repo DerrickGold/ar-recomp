@@ -35,8 +35,21 @@ func TestAudioPreviewStatusRequiresSuppliedROM(t *testing.T) {
 	app.ServeHTTP(response,
 		httptest.NewRequest(http.MethodPost, "/tok/audio-previews", nil))
 	if response.Code != http.StatusConflict ||
-		!strings.Contains(response.Body.String(), "Build tab") {
+		!strings.Contains(response.Body.String(), "Build tab") ||
+		!strings.Contains(response.Body.String(), `"errorCode":"builder.assets.need_rom"`) {
 		t.Fatalf("unexpected start response: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestAudioPreviewBusyHasPresentationCode(t *testing.T) {
+	root := t.TempDir()
+	writeAssetTestFile(t, filepath.Join(root, "user-rom.sfc"), []byte("test ROM placeholder"))
+	app := newApplication(context.Background(), Options{ProjectRoot: root, AudioPreviewCacheDir: t.TempDir()}, "tok")
+	app.preview.State = "generating"
+	w := httptest.NewRecorder()
+	app.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/tok/audio-previews", nil))
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), `"errorCode":"builder.assets.preview_busy"`) {
+		t.Fatalf("busy response: %d %s", w.Code, w.Body.String())
 	}
 }
 

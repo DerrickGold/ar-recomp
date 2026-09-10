@@ -237,6 +237,8 @@ func (w *AuthorWorkspace) AddMessage(id, path, body string, status TranslationSt
 type AuthorTreeEntry struct {
 	ID          string `json:"id"`
 	Label       string `json:"label"`
+	LabelKey    string `json:"label_key,omitempty"`
+	Shared      bool   `json:"shared,omitempty"`
 	IsMessage   bool   `json:"is_message"`
 	HasChildren bool   `json:"has_children"`
 	Total       int    `json:"total"`

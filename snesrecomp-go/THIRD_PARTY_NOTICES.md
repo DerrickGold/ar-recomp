@@ -1,6 +1,6 @@
 # Third-party notices
 
-## SDL3_ttf and shared game font
+## SDL3_ttf and bundled fonts
 
 Standalone macOS and Windows distributions include the official SDL3_ttf
 redistributable alongside SDL3. Steam Deck uses Valve's corresponding Steam
@@ -11,7 +11,10 @@ removable compiler SDK. Source provenance is recorded in
 [`packaging/licenses/sdl-ttf/README.md`](packaging/licenses/sdl-ttf/README.md).
 
 The shared Noto Sans face retains its SIL Open Font License beside the font at
-`game-assets/fonts/noto/OFL.txt`. Retail fonts and scripts are not distributed.
+`game-assets/fonts/noto/OFL.txt`. The independent interface stack also includes
+unmodified Noto Sans JP Bold with `game-assets/fonts/noto/NotoSansJP-OFL.txt`.
+Provenance and hashes are recorded beside them in `README.md`. Retail fonts
+and scripts are not distributed.
 
 ## Snaggletooth S-DSP accuracy core
 

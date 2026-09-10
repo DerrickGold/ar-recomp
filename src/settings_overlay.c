@@ -1,7 +1,10 @@
 #include "settings_overlay.h"
 
 #include "localization/unicode_grapheme.h"
+#include "localization/interface_text.h"
 #include "settings_overlay_internal.h"
+#include "settings_overlay_localization.h"
+#include "settings_overlay_layers_localization.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -12,11 +15,11 @@
 #include "constants.h"
 #include "diorama/diorama_layer_editor.h"
 #include "action/action_bg_tuner.h"
-#include "host/host_display_status.h"
 #include "host/host_clock.h"
 #include "input_map.h"
 #include "quintet_lzss.h"
 #include "render/render_output.h"
+#include "render/ui_text_renderer.h"
 #include "settings.h"
 #include "snes_bgr555.h"
 #include "user_data_dir.h"
@@ -74,6 +77,24 @@ static const uint32_t kSteelDim = ARGB(255, 74, 104, 130);
 static const uint32_t kSelectYellow = ARGB(255, 255, 230, 0);
 static const uint32_t kGameGold = ARGB(255, 255, 180, 65);
 static const uint32_t kMutedText = ARGB(255, 120, 140, 158);
+static ArUiTextRenderer s_ui_text;
+
+static ArUiLocale InterfaceLocale(void) {
+  /* A port without a ready text backend must keep its menu readable. The
+   * persisted choice survives so a later successful font setup can adopt it. */
+  return ArUiTextRenderer_IsReady(&s_ui_text)
+      ? (ArUiLocale)g_settings.interface_language : kArUiLocale_English;
+}
+
+static const char *Ui(const char *key) {
+  return ArUiCatalog_Text(InterfaceLocale(), key, key);
+}
+
+static void FormatSectionMessage(char *out, size_t capacity, const char *key,
+                                  const char *section_key) {
+  ArUiTextArgument arg = {"section", Ui(section_key)};
+  if (!ArUiCatalog_Format(out, capacity, Ui(key), &arg, 1) && capacity) out[0] = 0;
+}
 
 /* DebugTextStyle is defined in settings_overlay_internal.h (shared with the
  * panel, which passes these roles to DrawDebugTextN). */
@@ -276,60 +297,61 @@ typedef struct MenuSection {
 #define PAGE_TAB(cat, name, key, value) { kSettingCat_##cat, name, key, value }
 
 static const MenuTab kTabsVideo[] = {
-  TAB(Display, "General"),
-  TAB(Graphics, "Effects"),
+  TAB(Display, "overlay.tab.general"),
+  TAB(Graphics, "overlay.tab.effects"),
   TAB(Crt, "CRT"),
-  TAB(Widescreen, "Widescreen"),
+  TAB(Widescreen, "overlay.tab.widescreen"),
 };
 static const MenuTab kTabsDiorama[] = {
-  TAB(Presentation, "Scene"),
-  TAB(DioramaCamera, "Camera"),
+  TAB(Presentation, "overlay.tab.scene"),
+  TAB(DioramaCamera, "overlay.tab.camera"),
 };
 static const MenuTab kTabsTown[] = {
-  TAB(Simulation, "Scene"),
-  TAB(SimCamera, "Camera"),
-  TAB(SimLighting, "Light"),
-  TAB(SimAtmosphere, "Weather"),
+  TAB(Simulation, "overlay.tab.scene"),
+  TAB(SimCamera, "overlay.tab.camera"),
+  TAB(SimLighting, "overlay.tab.light"),
+  TAB(SimAtmosphere, "overlay.tab.weather"),
 };
 static const MenuTab kTabsAudio[] = {
-  TAB(Audio, "Audio"),
+  TAB(Audio, "overlay.section.audio"),
 };
 static const MenuTab kTabsControls[] = {
-  TAB(Input, "Devices"),
-  PAGE_TAB(InputBinds, "Keyboard", "input_bind_page", 0),
-  PAGE_TAB(InputBinds, "Gamepad", "input_bind_page", 1),
+  TAB(Input, "overlay.tab.devices"),
+  PAGE_TAB(InputBinds, "overlay.tab.keyboard", "input_bind_page", 0),
+  PAGE_TAB(InputBinds, "overlay.tab.gamepad", "input_bind_page", 1),
 };
 static const MenuTab kTabsCheats[] = {
-  TAB(Cheats, "Cheats"),
+  TAB(Cheats, "overlay.section.cheats"),
 };
 static const MenuTab kTabsSave[] = {
   /* The backend/arming controls and the apply/import/export commands used to
    * repeat on every editor page, inflating each list. They live on their own
    * Actions tab now, so the payload pages stay short. */
-  PAGE_TAB(Save, "Actions", "save_editor_page", kSaveEditorPage_Actions),
-  PAGE_TAB(Save, "Progress", "save_editor_page", kSaveEditorPage_Progress),
-  PAGE_TAB(Save, "Status", "save_editor_page", kSaveEditorPage_Status),
-  PAGE_TAB(Save, "Magic", "save_editor_page", kSaveEditorPage_Magic),
-  PAGE_TAB(Save, "Items", "save_editor_page", kSaveEditorPage_Items),
-  PAGE_TAB(Save, "Scores", "save_editor_page", kSaveEditorPage_Scores),
+  PAGE_TAB(Save, "overlay.tab.actions", "save_editor_page", kSaveEditorPage_Actions),
+  PAGE_TAB(Save, "overlay.tab.progress", "save_editor_page", kSaveEditorPage_Progress),
+  PAGE_TAB(Save, "overlay.tab.status", "save_editor_page", kSaveEditorPage_Status),
+  PAGE_TAB(Save, "overlay.tab.magic", "save_editor_page", kSaveEditorPage_Magic),
+  PAGE_TAB(Save, "overlay.tab.items", "save_editor_page", kSaveEditorPage_Items),
+  PAGE_TAB(Save, "overlay.tab.scores", "save_editor_page", kSaveEditorPage_Scores),
 };
 static const MenuTab kTabsSystem[] = {
-  TAB(Extras, "Tools"),
-  TAB(Enhancements, "Game"),
-  TAB(Inspector, "Inspector"),
+  TAB(Extras, "overlay.tab.tools"),
+  TAB(Enhancements, "overlay.tab.game"),
+  TAB(Inspector, "overlay.tab.inspector"),
 };
 static const MenuTab kTabsManual[] = {
-  TAB(Manual, "Manual"),
+  TAB(Manual, "overlay.section.manual"),
 };
 static const MenuTab kTabsRandomizer[] = {
-  TAB(RandoSeed, "Seed"),
-  TAB(RandoEnemies, "Enemies"),
-  TAB(RandoItems, "Items"),
-  TAB(RandoSim, "Simulation"),
+  TAB(RandoSeed, "overlay.tab.seed"),
+  TAB(RandoEnemies, "overlay.tab.enemies"),
+  TAB(RandoItems, "overlay.tab.items"),
+  TAB(RandoSim, "overlay.tab.simulation"),
 };
 static const MenuTab kTabsLocalization[] = {
-  TAB(Localization, "Game text"),
-  TAB(LocalizationFont, "Enhanced font"),
+  TAB(Localization, "overlay.tab.game_text"),
+  TAB(LocalizationFont, "overlay.tab.font"),
+  TAB(Interface, "overlay.tab.interface"),
 };
 
 /* Most Layers tabs are LEVELS ($18), not setting categories. Their position is
@@ -343,7 +365,7 @@ static const MenuTab kTabsLayers[] = {
   TAB(Presentation, "Marahna"),
   TAB(Presentation, "Northwall"),
   TAB(Presentation, "Death Heim"),
-  TAB(Presentation, "BG Extents"),
+  TAB(Presentation, "overlay.tab.bg_extents"),
 };
 _Static_assert((int)(sizeof(kTabsLayers) / sizeof(kTabsLayers[0])) ==
                    kDioramaEditorLevelCount + 1,
@@ -378,48 +400,46 @@ _Static_assert((int)(sizeof(kTabsLayers) / sizeof(kTabsLayers[0])) ==
  * unselected, the colored game slot palette when current); all chrome is the
  * shared steel-blue/yellow game scheme. */
 static const MenuSection kSections[] = {
-  SECTION("Video", "Window, aspect, shader effects and widescreen behavior.",
+  SECTION("overlay.section.video", "overlay.section.video.help",
           kTabsVideo),
   /* Both 3D sections are named for the MODE they apply to, not the technique
      they apply. "Diorama" is the technique; a player looking for the action
      stages' visuals has no reason to guess that word, and it left the pair
      reading as unrelated features when they are the same idea per mode. Named
      this way the blurbs carry the technique instead. */
-  SECTION("Action 3D", "Tilt the action stages into a layered 3D diorama.",
+  SECTION("overlay.section.action", "overlay.section.action.help",
           kTabsDiorama),
-  SECTION("Town 3D", "Project the simulation town onto a 3D ground plane.",
+  SECTION("overlay.section.town", "overlay.section.town.help",
           kTabsTown),
-  SECTION("Audio", "Output device, mixing and music replacement.",
+  SECTION("overlay.section.audio", "overlay.section.audio.help",
           kTabsAudio),
-  SECTION("Controls", "Input device, analog tuning and every key binding.",
+  SECTION("overlay.section.controls", "overlay.section.controls.help",
           kTabsControls),
-  SECTION("Cheats", "Gameplay assists and raw memory pins.",
+  SECTION("overlay.section.cheats", "overlay.section.cheats.help",
           kTabsCheats),
-  SECTION("Save", "Inspect and stage edits to the battery save.",
+  SECTION("overlay.section.save", "overlay.section.save.help",
           kTabsSave),
   /* Before System: the manual is something a PLAYER reaches for, while System
    * holds host commands, restart and exit. Inserting here renumbers everything
    * below it, and tests/settings_overlay_test.c indexes sections positionally,
    * so its enum moves with this. */
-  MANUAL_SECTION("Manual", "Read the game's manual.", kTabsManual),
-  SECTION("System", "Host commands, restart and exit, plus the scene inspector.",
+  MANUAL_SECTION("overlay.section.manual", "overlay.section.manual.help", kTabsManual),
+  SECTION("overlay.section.system", "overlay.section.system.help",
           kTabsSystem),
-  SECTION("Localization", "Game text and enhanced font presentation.",
+  SECTION("overlay.section.localization", "overlay.section.localization.help",
           kTabsLocalization),
   /* Developer-only until a randomized run has actually been played end to end.
    * Every table it rewrites is verified against the ROM, but no seed has been
    * played through, so it must not read as a finished player feature. Placed
    * with the other hidden section so revealing it cannot renumber any
    * player-visible section. */
-  DEBUG_SECTION("Randomizer",
-          "Reseed the game's enemies, statues and lairs. UNTESTED.",
+  DEBUG_SECTION("overlay.section.randomizer", "overlay.section.randomizer.help",
           kTabsRandomizer),
   /* Last deliberately: it is the developer-only section, and keeping it at the
    * end means every player section's nav position is the same whether debug
    * settings are on or off. tests/settings_overlay_test.c indexes sections
    * positionally, so an insertion anywhere above here would renumber them. */
-  CUSTOM_DEBUG_SECTION("Layers",
-          "Author Diorama depth or tune live action BG extents. Developer tool.",
+  CUSTOM_DEBUG_SECTION("overlay.section.layers", "overlay.section.layers.help",
           kTabsLayers),
 };
 
@@ -473,7 +493,7 @@ static int s_top_row;
 static int s_visible_rows = 9;
 static int s_auto_menu_scale_percent = kPercentScale;
 static int s_match_game_scale_percent = kPercentScale;
-static char s_status[48];
+static char s_status[256];
 static uint64_t s_status_until;
 static bool s_editing;
 static char s_edit_buffer[512];
@@ -1364,8 +1384,6 @@ typedef enum LayerMenuRowOwner {
 typedef struct LayerMenuRow {
   LayerMenuRowOwner owner;
   char key[48];
-  char label[32];
-  char value[24];
   bool nested;
   bool selectable;
   bool separator_before;
@@ -1391,16 +1409,8 @@ static int LayerEditorRows(DioramaEditorRow *rows, int capacity) {
                                               &context.section);
   const DioramaLayerOrderTable *table =
       s_layer_table_provider ? s_layer_table_provider() : NULL;
-  const int count = DioramaLayerEditor_BuildRows(
+  return DioramaLayerEditor_BuildRows(
       table, &context, ActiveTabIndex(), rows, capacity);
-  if (context.room_live) {
-    for (int i = 0; i < count; i++) {
-      rows[i].map_group = context.map_group;
-      rows[i].map_number = context.map_number;
-      rows[i].section = context.section;
-    }
-  }
-  return count;
 }
 
 static int LayerMenuRows(LayerMenuRow *out, int capacity) {
@@ -1414,8 +1424,6 @@ static int LayerMenuRows(LayerMenuRow *out, int capacity) {
       *dst = (LayerMenuRow) { .owner = kLayerMenuRow_ActionBg };
       dst->source.action_bg = rows[i];
       snprintf(dst->key, sizeof(dst->key), "%s", rows[i].key);
-      snprintf(dst->label, sizeof(dst->label), "%s", rows[i].label);
-      snprintf(dst->value, sizeof(dst->value), "%s", rows[i].value);
       dst->nested = rows[i].nested;
       dst->selectable = rows[i].selectable;
       dst->separator_before = rows[i].separator_before;
@@ -1429,8 +1437,6 @@ static int LayerMenuRows(LayerMenuRow *out, int capacity) {
     LayerMenuRow *dst = &out[count++];
     *dst = (LayerMenuRow) { .owner = kLayerMenuRow_Diorama };
     dst->source.diorama = rows[i];
-    snprintf(dst->label, sizeof(dst->label), "%s", rows[i].label);
-    snprintf(dst->value, sizeof(dst->value), "%s", rows[i].value);
     dst->nested = rows[i].nested;
     dst->selectable = rows[i].selectable;
     dst->separator_before =
@@ -1447,6 +1453,15 @@ static int LayerMenuRows(LayerMenuRow *out, int capacity) {
     }
   }
   return count;
+}
+
+/* Resolve captions only for rows actually drawn, not every navigation/count
+ * probe. The immutable source row remains the authority for both text and edits. */
+static void LocalizeLayerRow(const LayerMenuRow *row, SettingsOverlayLayerText *text) {
+  if (row->owner == kLayerMenuRow_ActionBg)
+    SettingsOverlay_LocalizedActionBgRow(InterfaceLocale(), &row->source.action_bg, text);
+  else
+    SettingsOverlay_LocalizedDioramaRow(InterfaceLocale(), &row->source.diorama, text);
 }
 
 /* The selected row, or NULL when the cursor is on a header (which is not
@@ -1554,21 +1569,21 @@ static void PersistChange(SettingChangeResult result) {
     settings_path = UserDataFile(settings_file, sizeof settings_file,
                                  "settings.ini");
   if (!Settings_Save(settings_path)) {
-    SetStatus("SAVE FAILED");
+    SetStatus(Ui("overlay.status.save_failed"));
     fprintf(stderr, "[settings-menu] could not save %s\n", settings_path);
     return;
   }
   if (result == kSettingChange_RestartPending)
-    SetStatus("RESTART REQUIRED - SAVED");
+    SetStatus(Ui("overlay.status.restart_saved"));
   else if (result == kSettingChange_AppliedStickyDisable)
-    SetStatus("STICKY EFFECTS REMAIN - SAVED");
+    SetStatus(Ui("overlay.status.sticky_saved"));
   else
-    SetStatus("APPLIED - SAVED");
+    SetStatus(Ui("overlay.status.applied_saved"));
 }
 
 static void SaveAcceptedChange(SettingChangeResult result) {
   if (result <= kSettingChange_Unchanged) {
-    SetStatus(result == kSettingChange_Rejected ? "NOT EDITABLE" : "UNCHANGED");
+    SetStatus(result == kSettingChange_Rejected ? Ui("overlay.status.not_editable") : Ui("overlay.status.unchanged"));
     return;
   }
   PersistChange(result);
@@ -1586,7 +1601,7 @@ static void ConfirmOrResetActiveSection(void) {
     s_reset_armed_section = s_section;
     s_reset_armed_until = now + kSectionResetConfirmMs;
     char status[sizeof(s_status)];
-    snprintf(status, sizeof(status), "B AGAIN: RESET %s", section->label);
+    FormatSectionMessage(status, sizeof(status), "overlay.confirm_reset", section->label);
     SetStatus(status);
     s_status_until = s_reset_armed_until;
     return;
@@ -1605,7 +1620,7 @@ static void ConfirmOrResetActiveSection(void) {
     if (result > aggregate) aggregate = result;
   }
   fprintf(stderr, "[settings-menu] reset %s section to built-in defaults\n",
-          section->label);
+          ArUiCatalog_Text(kArUiLocale_English, section->label, section->label));
   SaveAcceptedChange(aggregate);
 }
 
@@ -1665,7 +1680,7 @@ static void BeginEditing(void) {
       desc->type == kSettingType_Enum ||
       desc->type == kSettingType_Binding ||
       desc->type == kSettingType_Action) {
-    SetStatus("NOT TEXT EDITABLE");
+    SetStatus(Ui("overlay.status.not_text_editable"));
     return;
   }
   Settings_FormatValue(desc, s_edit_buffer, sizeof(s_edit_buffer));
@@ -1674,13 +1689,13 @@ static void BeginEditing(void) {
     s_edit_buffer[0] = 0;
   s_editing = true;
   if (OverlayWindow()) SDL_StartTextInput(OverlayWindow());
-  SetStatus("TYPE VALUE - RETURN APPLIES");
+  SetStatus(Ui("overlay.status.type_value"));
 }
 
 static void CancelCapture(void) {
   if (!s_capture_desc) return;
   s_capture_desc = NULL;
-  SetStatus("BIND CANCELLED");
+  SetStatus(Ui("overlay.status.bind_cancelled"));
 }
 
 static void BeginCapture(void) {
@@ -1689,8 +1704,8 @@ static void BeginCapture(void) {
   InputClass klass;
   if (!InputMap_DescribeRow(desc, NULL, &klass)) return;
   s_capture_desc = desc;
-  SetStatus(klass == kInputClass_Keyboard ? "PRESS A KEY - ESC CANCELS"
-                                          : "PRESS A BUTTON - ESC CANCELS");
+  SetStatus(klass == kInputClass_Keyboard ? Ui("overlay.status.press_key")
+                                          : Ui("overlay.status.press_button"));
 }
 
 static void CommitEditing(void) {
@@ -1698,7 +1713,7 @@ static void CommitEditing(void) {
   if (!s_editing || !desc) return;
   SettingChangeResult result = Settings_SetText(desc, s_edit_buffer);
   if (result == kSettingChange_Rejected) {
-    SetStatus("INVALID VALUE");
+    SetStatus(Ui("overlay.status.invalid_value"));
     return;
   }
   StopEditing();
@@ -1708,7 +1723,7 @@ static void CommitEditing(void) {
 static void InvokeSelectedAction(void) {
   const SettingDesc *desc = SelectedDesc();
   if (!desc || desc->type != kSettingType_Action) return;
-  SetStatus(Settings_InvokeAction(desc) ? "ACTION COMPLETE" : "ACTION FAILED");
+  SetStatus(Settings_InvokeAction(desc) ? Ui("overlay.status.action_complete") : Ui("overlay.status.action_failed"));
 }
 
 /* Int rows are adjusted entirely by stepping (with hold-to-accelerate); they
@@ -1808,14 +1823,14 @@ static void LayerPruneEmptySection(const DioramaEditorRow *row) {
 
 static void LayerSaveEdit(void) {
   if (s_layer_save_provider && !s_layer_save_provider())
-    SetStatus("SAVE FAILED");
+    SetStatus(Ui("overlay.status.save_failed"));
 }
 
 static bool LayerOpenPalette(const DioramaEditorRow *row) {
   if (!row || row->param != kDioramaEditorParam_TransparentFill ||
       !s_layer_palette_provider ||
       !s_layer_palette_provider(s_layer_palette)) {
-    SetStatus("LIVE PALETTE UNAVAILABLE");
+    SetStatus(Ui("overlay.status.palette_unavailable"));
     return false;
   }
   s_layer_palette_row = *row;
@@ -1835,10 +1850,10 @@ static bool LayerOpenPalette(const DioramaEditorRow *row) {
 
 static void ReportActionBgTunerResult(ActionBgTunerResult result) {
   switch (result) {
-    case kActionBgTunerResult_Changed: SetStatus("DRAFT UPDATED"); break;
-    case kActionBgTunerResult_AtLimit: SetStatus("AT LIMIT"); break;
-    case kActionBgTunerResult_Printed: SetStatus("PRINTED TO LOG"); break;
-    case kActionBgTunerResult_Reset: SetStatus("DRAFT RESET"); break;
+    case kActionBgTunerResult_Changed: SetStatus(Ui("overlay.status.draft_updated")); break;
+    case kActionBgTunerResult_AtLimit: SetStatus(Ui("overlay.status.at_limit")); break;
+    case kActionBgTunerResult_Printed: SetStatus(Ui("overlay.status.printed")); break;
+    case kActionBgTunerResult_Reset: SetStatus(Ui("overlay.status.draft_reset")); break;
     case kActionBgTunerResult_Unchanged:
     default: break;
   }
@@ -1853,7 +1868,7 @@ static bool LayerChangeSelected(int direction) {
   if (row->owner == kLayerMenuRow_ActionBg) {
     if (row->source.action_bg.kind == kActionBgTunerRow_Print ||
         row->source.action_bg.kind == kActionBgTunerRow_Reset) {
-      SetStatus("PRESS B TO ACTIVATE");
+      SetStatus(Ui("overlay.status.activate"));
       return true;
     }
     ReportActionBgTunerResult(
@@ -1863,13 +1878,13 @@ static bool LayerChangeSelected(int direction) {
   const DioramaEditorRow *diorama = &row->source.diorama;
 
   if (diorama->kind == kDioramaEditorRow_ResetRoom) {
-    SetStatus("PRESS B TO RESET ROOM");
+    SetStatus(Ui("overlay.status.reset_room"));
     return true;
   }
 
   DioramaPlaneOverride *plane = LayerPlaneForRow(diorama, true);
   if (!plane) {
-    SetStatus("NO ROOM TO EDIT");
+    SetStatus(Ui("overlay.status.no_room"));
     return true;
   }
 
@@ -1879,13 +1894,10 @@ static bool LayerChangeSelected(int direction) {
     /* Expanding the plane the player just changed puts its parameters under the
      * cursor immediately, which is the next thing they want. */
     s_layer_plane = diorama->plane;
-    /* Uppercased to match every other status in this menu, which is drawn in the
-     * game's own all-caps face -- the strategy names are lowercase because they
-     * are manifest tokens. */
-    char status[24];
-    DioramaLayerEditor_Upper(status, sizeof(status),
-                             DioramaLayerOrder_StrategyName(next));
-    SetStatus(status);
+    char key[64];
+    snprintf(key, sizeof(key), "overlay.layer.diorama.shape.%d", next);
+    SetStatus(ArUiCatalog_Text(InterfaceLocale(), key,
+                               DioramaLayerOrder_StrategyName(next)));
     LayerSaveEdit();
     return true;
   }
@@ -1899,7 +1911,7 @@ static bool LayerChangeSelected(int direction) {
   }
 
   if (!DioramaLayerEditor_StepParam(plane, diorama->param, direction)) {
-    SetStatus("AT LIMIT");
+    SetStatus(Ui("overlay.status.at_limit"));
     return true;
   }
   LayerSaveEdit();
@@ -1909,12 +1921,12 @@ static bool LayerChangeSelected(int direction) {
 static void ChangeSelectedValue(int direction) {
   if (LayerChangeSelected(direction)) return;
   if (SelectedRowIsSectionReset()) {
-    SetStatus("PRESS B TO RESET SECTION");
+    SetStatus(Ui("overlay.status.reset_section"));
     return;
   }
   const SettingDesc *desc = SelectedDesc();
   if (!desc || !Settings_IsAvailable(desc)) {
-    SetStatus("UNAVAILABLE HERE");
+    SetStatus(Ui("overlay.status.unavailable"));
     return;
   }
   switch (desc->type) {
@@ -1935,7 +1947,7 @@ static void ChangeSelectedValue(int direction) {
     case kSettingType_Enum: {
       long value = 0;
       if (!Settings_GetLong(desc, &value)) {
-        SetStatus("EDIT IN SETTINGS.INI");
+        SetStatus(Ui("overlay.status.edit_ini"));
         return;
       }
       long next;
@@ -1973,13 +1985,13 @@ static bool LayerActivateSelected(void) {
     DioramaLayerOrderTable *table =
         s_layer_table_provider ? s_layer_table_provider() : NULL;
     if (!table) {
-      SetStatus("NO ROOM TO RESET");
+      SetStatus(Ui("overlay.status.no_reset_room"));
       return true;
     }
     DioramaLayerOrder_ResetPlaneOverridesSection(
         table, diorama->map_group, diorama->map_number, diorama->section);
     s_layer_plane = -1;
-    SetStatus("PLANE OVERRIDES RESET");
+    SetStatus(Ui("overlay.status.planes_reset"));
     LayerSaveEdit();
     return true;
   }
@@ -2006,7 +2018,7 @@ static void ActivateSelectedRow(void) {
   }
   const SettingDesc *desc = SelectedDesc();
   if (!desc || !Settings_IsAvailable(desc)) {
-    SetStatus("UNAVAILABLE HERE");
+    SetStatus(Ui("overlay.status.unavailable"));
     return;
   }
   switch (desc->type) {
@@ -2042,15 +2054,15 @@ static bool LayerResetSelected(void) {
 
   DioramaPlaneOverride *plane = LayerPlaneForRow(diorama, false);
   if (!plane) {
-    SetStatus("ALREADY INHERITED");
+    SetStatus(Ui("overlay.status.inherited"));
     return true;
   }
   if (diorama->kind == kDioramaEditorRow_Plane) {
     DioramaLayerEditor_ClearPlane(plane);
-    SetStatus("PLANE CLEARED");
+    SetStatus(Ui("overlay.status.plane_cleared"));
   } else {
     DioramaLayerEditor_ClearParam(plane, diorama->param);
-    SetStatus("CLEARED");
+    SetStatus(Ui("overlay.status.cleared"));
   }
   LayerPruneEmptySection(diorama);
   LayerSaveEdit();
@@ -2065,7 +2077,7 @@ static void ResetSelectedValue(void) {
   }
   const SettingDesc *desc = SelectedDesc();
   if (!desc || !Settings_IsAvailable(desc)) {
-    SetStatus("UNAVAILABLE HERE");
+    SetStatus(Ui("overlay.status.unavailable"));
     return;
   }
   SaveAcceptedChange(Settings_Reset(desc));
@@ -2223,6 +2235,7 @@ bool SettingsOverlay_Init(ArRenderDevice *render_device, SDL_Window *window,
 
 bool SettingsOverlay_ReloadTextures(const uint8_t *rom_data, size_t rom_size) {
   if (!s_render_device) return true;
+  ArUiTextRenderer_ClearTextures(&s_ui_text);
   DestroyFontTextures();
   ArRenderDevice_DestroyTexture(s_render_device, s_icon_texture);
   s_icon_texture = ArRenderTexture_Invalid();
@@ -2237,6 +2250,7 @@ bool SettingsOverlay_ReloadTextures(const uint8_t *rom_data, size_t rom_size) {
 
 void SettingsOverlay_Destroy(void) {
   StopEditing();
+  ArUiTextRenderer_Destroy(&s_ui_text);
   DestroyFontTextures();
   ArRenderDevice_DestroyTexture(s_render_device, s_icon_texture);
   s_icon_texture = ArRenderTexture_Invalid();
@@ -2250,6 +2264,13 @@ void SettingsOverlay_Destroy(void) {
   s_submenu_open = false;
   SettingsOverlayDebugPanel_Reset();
   s_inspector_info_provider = NULL;
+}
+
+bool SettingsOverlay_SetTextBackend(const ArTextBackend *backend,
+                                    const ArTextBackendConfig *fonts,
+                                    char *error, size_t error_capacity) {
+  return ArUiTextRenderer_Init(&s_ui_text, s_render_device, backend, fonts,
+                                error, error_capacity);
 }
 
 bool SettingsOverlay_IsOpen(void) {
@@ -2419,7 +2440,7 @@ static bool ApplyLayerPaletteNav(MenuNav nav, bool repeat) {
       DioramaPlaneOverride *plane = LayerPlaneForRow(
           &s_layer_palette_row, true);
       if (!plane) {
-        SetStatus("NO ROOM TO EDIT");
+        SetStatus(Ui("overlay.status.no_room"));
         s_layer_palette_open = false;
         break;
       }
@@ -2427,7 +2448,7 @@ static bool ApplyLayerPaletteNav(MenuNav nav, bool repeat) {
       plane->transparent_fill_kind = kDioramaTransparentFill_Cgram;
       plane->transparent_fill_cgram = s_layer_palette_cursor;
       LayerSaveEdit();
-      SetStatus("PALETTE FILL APPLIED");
+      SetStatus(Ui("overlay.status.fill_applied"));
       s_layer_palette_open = false;
       break;
     }
@@ -2440,9 +2461,9 @@ static bool ApplyLayerPaletteNav(MenuNav nav, bool repeat) {
             plane, kDioramaEditorParam_TransparentFill);
         LayerPruneEmptySection(&s_layer_palette_row);
         LayerSaveEdit();
-        SetStatus("FILL CLEARED");
+        SetStatus(Ui("overlay.status.fill_cleared"));
       } else {
-        SetStatus("ALREADY INHERITED");
+        SetStatus(Ui("overlay.status.inherited"));
       }
       s_layer_palette_open = false;
       break;
@@ -2679,15 +2700,14 @@ bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
     switch (key) {
       case SDLK_ESCAPE:
         StopEditing();
-        SetStatus("EDIT CANCELLED");
+        SetStatus(Ui("overlay.status.edit_cancelled"));
         break;
       case SDLK_RETURN:
       case SDLK_KP_ENTER:
         if (!repeat) CommitEditing();
         break;
       case SDLK_BACKSPACE: {
-        size_t length = strlen(s_edit_buffer);
-        if (length) s_edit_buffer[length - 1] = 0;
+        ArInterfaceText_EraseLast(s_edit_buffer, sizeof(s_edit_buffer));
         break;
       }
       default:
@@ -2748,9 +2768,7 @@ bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
 bool SettingsOverlay_HandleText(const char *text) {
   if (!s_open || !s_editing) return false;
   if (!text) return true;
-  size_t used = strlen(s_edit_buffer);
-  size_t available = sizeof(s_edit_buffer) - used - 1;
-  if (available) strncat(s_edit_buffer, text, available);
+  ArInterfaceText_Append(s_edit_buffer, sizeof(s_edit_buffer), text, strlen(text));
   return true;
 }
 
@@ -2905,17 +2923,18 @@ static void DrawGlyph(const MenuLayout *layout, int x, int y,
 /* ── Character cells ───────────────────────────────────────────────────────
  *
  * Package names come from whoever authored the pack, in whatever script, so
- * the overlay is handed UTF-8. Its font atlas is ASCII-only until the overlay
- * owns a real font stack, but the counting must be right either way: one cell
+ * the overlay is handed UTF-8. The compatibility font atlas is ASCII-only,
+ * but the counting must be right with either renderer: one cell
  * per extended grapheme cluster, not per byte. A name with an accent then
  * occupies the cells a reader would count, right alignment lands where it
  * should, and truncation can never cut a character in half.
  *
- * A cluster that is a single ASCII byte draws its glyph; anything else draws
+ * The fallback path draws a cluster that is a single ASCII byte; anything else draws
  * the replacement, so a precomposed and a decomposed accent look the same
  * rather than one silently losing its mark. Nothing is transliterated. The
  * package ID in the same row is ASCII by construction and stays readable
- * while a name has no glyphs. */
+ * while a name has no glyphs. The host-injected font path instead shapes the
+ * complete bounded UTF-8 run, preserving accents and contextual joining. */
 static size_t OverlayNextCell(const char *text, size_t bytes, size_t offset,
                               unsigned char *glyph) {
   uint32_t first = 0;
@@ -2950,9 +2969,68 @@ static int OverlayCellCount(const char *text, int maximum) {
   return cells;
 }
 
+/* Keep English's authentic atlases unchanged. Any non-ASCII run (including a
+ * package name) goes through the independently owned interface font stack.
+ * Grapheme boundaries retain the existing cell-budget/truncation contract;
+ * shaping is whole-run, never a collection of isolated Unicode code points. */
+static bool MakeUnicodeTextRun(const MenuLayout *layout, int x, int y,
+                             const char *text, int max_chars, int cell_width,
+                             ArTextHorizontalAlignment alignment,
+                             int style, uint32_t tint, ArUiTextRun *out_run) {
+  if (!text || max_chars <= 0 || !ArUiTextRenderer_IsReady(&s_ui_text)) return false;
+  const size_t bytes = strlen(text);
+  /* ASCII remains the common path. Don't repeat the grapheme walk for it. */
+  bool candidate = InterfaceLocale() != kArUiLocale_English;
+  for (size_t i = 0; i < bytes; ++i)
+    if ((unsigned char)text[i] >= 0x80) { candidate = true; break; }
+  if (!candidate) return false;
+  size_t end = 0;
+  int cells = 0;
+  bool non_ascii = InterfaceLocale() != kArUiLocale_English;
+  while (end < bytes && cells < max_chars) {
+    unsigned char glyph;
+    const size_t next = OverlayNextCell(text, bytes, end, &glyph);
+    if (next > kArInterfaceTextMaximumBytes) return false;
+    for (size_t i = end; i < next; ++i)
+      if ((unsigned char)text[i] >= 0x80) non_ascii = true;
+    end = next;
+    ++cells;
+  }
+  if (!non_ascii) return false;
+  ArUiTextRun run = {
+    .struct_size = sizeof(run), .abi_version = AR_UI_TEXT_RUN_ABI_VERSION,
+    .utf8 = text, .utf8_bytes = end,
+    .bounds = LogicalRect(layout, x, y, cells * cell_width, kGlyphSize),
+    .alignment = alignment, .tint = RenderColor(tint),
+    .language_bcp47 = ArUiCatalog_LocaleTag(InterfaceLocale()),
+  };
+  if (style >= 0 && style < kTextStyle_Count) {
+    run.style_id = kArTextStyle_RetailPaletteBands;
+    run.band_rgb = kTextPalettes[style][2] & UINT32_C(0xffffff);
+    run.body_rgb = kTextPalettes[style][3] & UINT32_C(0xffffff);
+    run.shadow_rgb = kTextPalettes[style][1] & UINT32_C(0xffffff);
+    run.shadow_enabled = true;
+  }
+  *out_run = run;
+  return true;
+}
+
+static bool DrawUnicodeText(const MenuLayout *layout, int x, int y,
+                             const char *text, int max_chars, int cell_width,
+                             ArTextHorizontalAlignment alignment,
+                             int style, uint32_t tint) {
+  ArUiTextRun run;
+  return MakeUnicodeTextRun(layout, x, y, text, max_chars, cell_width,
+                             alignment, style, tint, &run) &&
+      ArUiTextRenderer_Draw(&s_ui_text, &run);
+}
+
 static void DrawTextN(const MenuLayout *layout, int x, int y,
                       const char *text, int max_chars, TextStyle style) {
   if (!text || max_chars <= 0) return;
+  if (DrawUnicodeText(layout, x, y, text, max_chars, kGlyphSize,
+                        kArTextHorizontalAlignment_Leading, style,
+                        UINT32_C(0xffffffff))) return;
   const size_t bytes = strlen(text);
   int cell = 0;
   for (size_t offset = 0; offset < bytes && cell < max_chars; ++cell) {
@@ -2972,6 +3050,15 @@ static void DrawTextN(const MenuLayout *layout, int x, int y,
 
 int SettingsOverlay_GameTextWidth(const char *text, int scale) {
   if (!text || scale <= 0) return 0;
+  if (scale <= kMaximumScalePercent / kPercentScale) {
+    const MenuLayout layout = {.scale_percent = scale * kPercentScale};
+    ArUiTextRun run;
+    int width;
+    if (MakeUnicodeTextRun(&layout, 0, 0, text, INT32_MAX, kGlyphSize,
+          kArTextHorizontalAlignment_Leading, kText_Normal,
+          UINT32_C(0xffffffff), &run) &&
+        ArUiTextRenderer_Measure(&s_ui_text, &run, &width, NULL)) return width;
+  }
   return OverlayCellCount(text, INT32_MAX) * kGlyphSize * scale;
 }
 
@@ -2984,6 +3071,13 @@ void SettingsOverlay_DrawGameText(int x, int y, int scale, uint8_t alpha,
     kIndicesPerGlyph = 6,
   };
   if (!text || scale <= 0 || alpha == 0) return;
+  if (scale <= kMaximumScalePercent / kPercentScale) {
+    const MenuLayout layout = {.scale_percent = scale * kPercentScale,
+                               .origin_x = x, .origin_y = y};
+    if (DrawUnicodeText(&layout, 0, 0, text, INT32_MAX,
+          kGlyphSize, kArTextHorizontalAlignment_Leading, kText_Normal,
+          ARGB(alpha, 255, 255, 255))) return;
+  }
   const ArRenderTexture texture = s_font_textures[kText_Normal];
   if (!s_render_device || !ArRenderTexture_IsValid(texture)) return;
 
@@ -3065,6 +3159,9 @@ static int CappedTextLength(const char *text, int max_chars) {
 static void DrawTextRight(const MenuLayout *layout, int right, int y,
                           const char *text, int max_chars, TextStyle style) {
   int length = CappedTextLength(text, max_chars);
+  if (DrawUnicodeText(layout, right - length * kGlyphSize, y, text, length,
+                        kGlyphSize, kArTextHorizontalAlignment_Trailing, style,
+                        UINT32_C(0xffffffff))) return;
   DrawTextN(layout, right - length * kGlyphSize, y,
             text, length, style);
 }
@@ -3099,6 +3196,8 @@ static void DrawSmallTextN(const MenuLayout *layout, int x, int y,
                            const char *text, int max_chars, uint32_t color) {
   if (!text || max_chars <= 0 ||
       !ArRenderTexture_IsValid(s_debug_font_texture)) return;
+  if (DrawUnicodeText(layout, x, y, text, max_chars, kDebugGlyphWidth,
+                        kArTextHorizontalAlignment_Leading, -1, color)) return;
   const size_t bytes = strlen(text);
   int cell = 0;
   for (size_t offset = 0; offset < bytes && cell < max_chars; ++cell) {
@@ -3265,20 +3364,19 @@ static int DrawWrappedSmallText(const MenuLayout *layout, int x, int y,
                                 int max_lines, uint32_t color) {
   const char *cursor = text;
   if (max_chars > 127) max_chars = 127;
+  if (max_chars <= 0 || !cursor) return 0;
+  size_t remaining = strlen(cursor);
   int line = 0;
-  for (; line < max_lines && cursor && *cursor; line++) {
-    int length = (int)strlen(cursor);
-    if (length > max_chars) {
-      length = max_chars;
-      while (length > 1 && cursor[length] != ' ') length--;
-      if (length <= 1) length = max_chars;
-    }
-    char buffer[128];
-    memcpy(buffer, cursor, (size_t)length);
-    buffer[length] = 0;
+  for (; line < max_lines && remaining; line++) {
+    ArInterfaceTextLine slice;
+    char buffer[kArInterfaceTextMaximumBytes + 1];
+    if (!ArInterfaceText_WrapLine(cursor, remaining, (size_t)max_chars,
+                                   sizeof(buffer) - 1, &slice)) break;
+    memcpy(buffer, cursor, slice.bytes);
+    buffer[slice.bytes] = 0;
     DrawSmallText(layout, x, y + line * kSmallLineHeight, buffer, color);
-    cursor += length;
-    while (*cursor == ' ') cursor++;
+    cursor += slice.consumed;
+    remaining -= slice.consumed;
   }
   return line;
 }
@@ -3411,7 +3509,7 @@ static void DrawMenuNavColumn(const MenuLayout *layout, const MenuChrome *c) {
   const int left_title_y = top_y + 10;
   const int nav_first_y = top_y + 18;
 
-  DrawSmallText(layout, left_text_x, left_title_y - 3, "SYSTEM SETTINGS",
+  DrawSmallText(layout, left_text_x, left_title_y - 3, Ui("overlay.title"),
                 ARGB(255, 132, 154, 174));
   FillLogicalRect(layout, left_text_x, left_title_y + 6,
                   left_width - 20, 1, ARGB(120, 120, 150, 178));
@@ -3451,7 +3549,7 @@ static void DrawMenuNavColumn(const MenuLayout *layout, const MenuChrome *c) {
     const int label_x = left_text_x + kIconSize + 4;
     const int label_chars = (left_x + left_width - 16 - label_x) / kGlyphSize;
     DrawTextN(layout, label_x, row_y + 4,
-              kSections[section].label, label_chars,
+              Ui(kSections[section].label), label_chars,
               current ? kText_Normal : kText_Dim);
   }
   DrawScrollBar(layout, left_x + left_width - 12, nav_first_y,
@@ -3479,15 +3577,9 @@ static int DrawMenuHeader(const MenuLayout *layout, const MenuChrome *c,
   DrawSectionIcon(layout, right_text_x, right_title_y - 2, kIconSize,
                   s_section, true, 255);
   DrawTextN(layout, right_text_x + kIconSize + 6, right_title_y,
-            section->label, 12, kText_Normal);
-  if (s_status[0]) {
-    int status_chars = (right_width - 32) / kDebugGlyphWidth;
-    if (status_chars > 40) status_chars = 40;
-    int status_length = CappedTextLength(s_status, status_chars);
-    DrawSmallTextN(layout,
-                   value_right - status_length * kDebugGlyphWidth,
-                   right_title_y + 1, s_status, status_length, kGameGold);
-  }
+            Ui(section->label), 14, kText_Normal);
+  /* Translated feedback belongs in the full-width description panel below,
+   * not beside the title where longer reset/save messages collide with it. */
 
   /* A section with a single VISIBLE tab draws no strip at all — a lone
    * highlighted chip would read as a control the player can act on, and it
@@ -3507,7 +3599,7 @@ static int DrawMenuHeader(const MenuLayout *layout, const MenuChrome *c,
       if (RawTabHidden(s_section, tab) || vcount >= 64) continue;
       if (tab == active_tab) apos = vcount;
       vis[vcount] = tab;
-      vwidth[vcount] = SmallTextWidth(section->tabs[tab].label) + 8;
+      vwidth[vcount] = SmallTextWidth(Ui(section->tabs[tab].label)) + 8;
       vcount++;
     }
 
@@ -3550,7 +3642,7 @@ static int DrawMenuHeader(const MenuLayout *layout, const MenuChrome *c,
                         ScaleColor(kSelectYellow, 20));
         FillLogicalRect(layout, tab_x, tab_y + 9, vwidth[i], 1, kSelectYellow);
       }
-      DrawSmallText(layout, tab_x + 4, tab_y + 1, section->tabs[vis[i]].label,
+      DrawSmallText(layout, tab_x + 4, tab_y + 1, Ui(section->tabs[vis[i]].label),
                     current ? kSelectYellow : kMutedText);
       tab_x += vwidth[i] + 2;
       last_shown = i;
@@ -3612,6 +3704,8 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
       drawn_rows++;
       int y = first_row_y + (row - s_top_row) * kRowHeight;
       const LayerMenuRow *entry = &rows[i];
+      SettingsOverlayLayerText text;
+      LocalizeLayerRow(entry, &text);
       /* An unselectable row is never drawn as selected, even when the cursor sits
        * on it -- which happens on a tab whose every row is a notice, since there
        * is nothing for SkipUnselectableRow to move to. Highlighting it with the
@@ -3638,25 +3732,27 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
       TextStyle style = s_submenu_open ? kText_Normal : kText_Dim;
       int row_label_x = label_x + (entry->nested ? 3 * kGlyphSize : 0);
       if (!entry->selectable) {
-        DrawSmallText(layout, row_label_x, y + 1, entry->label, structure);
-        if (entry->value[0])
-          DrawSmallText(layout, value_right - SmallTextWidth(entry->value),
-                        y + 1, entry->value, kGameGold);
+        int shown = CappedTextLength(text.value, value_chars);
+        int value_x = value_right - shown * kDebugGlyphWidth;
+        DrawSmallTextN(layout, row_label_x, y + 1, text.label,
+                        (value_x - row_label_x - 8) / kDebugGlyphWidth, structure);
+        if (shown)
+          DrawSmallTextN(layout, value_x, y + 1, text.value, shown, kGameGold);
         continue;
       }
 
-      int shown = CappedTextLength(entry->value, value_chars);
+      int shown = CappedTextLength(text.value, value_chars);
       int label_chars = (value_right - shown * kGlyphSize - 12 -
                          row_label_x - 4) / kGlyphSize;
       if (label_chars < 1) label_chars = 1;
-      DrawTextN(layout, row_label_x, y, entry->label, label_chars,
+      DrawTextN(layout, row_label_x, y, text.label, label_chars,
                 entry->nested && !selected ? kText_Dim : style);
       bool reset_row =
           (entry->owner == kLayerMenuRow_Diorama &&
            entry->source.diorama.kind == kDioramaEditorRow_ResetRoom) ||
           (entry->owner == kLayerMenuRow_ActionBg &&
            entry->source.action_bg.kind == kActionBgTunerRow_Reset);
-      DrawTextRight(layout, value_right, y, entry->value, value_chars,
+      DrawTextRight(layout, value_right, y, text.value, value_chars,
                     reset_row
                         ? (s_submenu_open ? kText_Warning : kText_Dim)
                         : (style == kText_Normal ? kText_Value : style));
@@ -3695,52 +3791,24 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
       /* Blink so an armed row is unmistakable — on a Deck the status line at
        * the bottom of the panel is easy to miss mid-rebind. */
       snprintf(value, sizeof(value), "%s",
-               (HostClock_Milliseconds() / 300) & 1 ? "PRESS..." : "");
+               (HostClock_Milliseconds() / 300) & 1 ? Ui("overlay.value.press") : "");
     } else if (selected && s_editing) {
       snprintf(value, sizeof(value), "%s", s_edit_buffer);
-    } else if (desc->type == kSettingType_Binding) {
-      /* Bindings persist as "Key #40 (Return)" (scancode NAMES are not stable
-       * across platforms), but the menu shows the readable "Key Return". */
-      InputMap_DescribeBinding(value, sizeof(value),
-                               *(const uint32 *)desc->field);
     } else {
-      Settings_FormatValue(desc, value, sizeof(value));
+      SettingsOverlay_LocalizedValue(InterfaceLocale(), desc, value, sizeof(value));
+      if (desc->field == &g_settings.interface_language &&
+          !ArUiTextRenderer_IsReady(&s_ui_text))
+        Settings_FormatValue(desc, value, sizeof(value));
     }
     if (!value[0] && desc != s_capture_desc)
-      snprintf(value, sizeof(value), "CUSTOM");
-    if (desc->field == &g_settings.display_mode) {
-      static const char *const short_modes[] = {
-        "4:3 AUTH", "WIDE RAW", "WIDE FULL", "CUSTOM"
-      };
-      int mode = g_settings.display_mode;
-      if (mode >= 0 &&
-          mode < (int)(sizeof(short_modes) / sizeof(short_modes[0])))
-        snprintf(value, sizeof(value), "%s", short_modes[mode]);
-    }
-    /* Vsync delegates to the renderer, so name the display's nominal rate
-     * rather than the bare word "Vsync". Purely display-side (the saved value
-     * stays the plain enum label). Unknown Hz falls back to "Vsync".
-     *
-     * Labelled from what the renderer ACTUALLY reports, not from the requested
-     * mode: SDL_SetRenderVSync can be rejected by a backend (Metal accepts only
-     * 0/1) and vsync defaults to disabled, so claiming "Vsync 60Hz" while the
-     * renderer is tearing would be a lie the player cannot debug. */
-    if (desc->field == &g_settings.refresh_mode &&
-        g_settings.refresh_mode == kRefreshMode_Vsync) {
-      if (!HostDisplayStatus_VsyncActive()) {
-        snprintf(value, sizeof(value), "Vsync (unavailable)");
-      } else {
-        int hz = HostDisplayStatus_NominalRefreshHz();
-        if (hz > 0)
-          snprintf(value, sizeof(value), "Vsync %dHz", hz);
-      }
-    }
+      snprintf(value, sizeof(value), "%s", Ui("overlay.value.custom"));
     int shown_value_chars = CappedTextLength(value, value_chars);
     int row_value_left = value_right - shown_value_chars * kGlyphSize;
     int restart_x = row_value_left - 12;
     int label_chars = (restart_x - label_x - 4) / kGlyphSize;
     if (label_chars < 1) label_chars = 1;
-    DrawTextN(layout, label_x, y, desc->label, label_chars, style);
+    DrawTextN(layout, label_x, y,
+              SettingsOverlay_LocalizedLabel(InterfaceLocale(), desc), label_chars, style);
     /* M2 (followup doc): values render in kText_Value (cool cyan) so they
      * read distinct from labels, but only for normal/enabled rows — a
      * dim/unavailable row's style must win so it stays visibly greyed. */
@@ -3769,14 +3837,14 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
         DrawGlyph(layout, selector_x + CursorBlinkOffset(), y, '>',
                   kText_Warning);
       }
-      char label[64];
-      snprintf(label, sizeof(label), "Reset %s defaults", section->label);
+      char label[256];
+      FormatSectionMessage(label, sizeof(label), "overlay.reset_section", section->label);
       int restart_x = value_right - 5 * kGlyphSize - 12;
       int label_chars = (restart_x - label_x - 4) / kGlyphSize;
       if (label_chars < 1) label_chars = 1;
       DrawTextN(layout, label_x, y, label, label_chars,
                 s_submenu_open ? kText_Normal : kText_Dim);
-      DrawTextRight(layout, value_right, y, "RESET", 5,
+      DrawTextRight(layout, value_right, y, Ui("common.reset"), 8,
                     s_submenu_open ? kText_Warning : kText_Dim);
     }
   }
@@ -3787,13 +3855,13 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
 
   if (row_index == 0)
     DrawSmallText(layout, right_text_x, first_row_y + 2,
-                  "Nothing to configure on this tab.", kMutedText);
+                  Ui("overlay.empty_tab"), kMutedText);
 
   if (category == kSettingCat_Inspector) {
     int info_y = first_row_y + drawn_rows * kRowHeight + 5;
     FillLogicalRect(layout, right_x + 12, info_y - 4, right_width - 24, 1,
                     structure_dim);
-    DrawSmallText(layout, right_text_x, info_y, "LIVE SCENE", structure);
+    DrawSmallText(layout, right_text_x, info_y, Ui("overlay.scene.live"), structure);
     DrawInspectorInfo(layout, right_text_x, info_y + 11,
                       (right_width - 24) / kDebugGlyphWidth, 6);
   }
@@ -3824,68 +3892,62 @@ static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
   const LayerMenuRow *help_row =
       (custom_rows && s_submenu_open)
           ? SelectedLayerRow(help_rows, kLayerMenuRowMax, NULL) : NULL;
-  if (help_row) {
-    DioramaDepthStrategy strategy = kDioramaDepth_Flat;
+  if (s_status[0]) {
+    DrawSmallText(layout, description_x, header_y, Ui("overlay.tab.status"), kGameGold);
+    FillLogicalRect(layout, description_x, header_y + 10,
+                    bottom_width - 24, 1, structure_dim);
+    DrawWrappedSmallText(layout, description_x, header_y + 14,
+                         s_status, description_chars, 4, ARGB(255, 208, 220, 232));
+  } else if (help_row) {
+    SettingsOverlayLayerText text;
+    LocalizeLayerRow(help_row, &text);
     const DioramaEditorRow *diorama = help_row->owner == kLayerMenuRow_Diorama
         ? &help_row->source.diorama : NULL;
-    if (diorama && diorama->plane >= 0) {
-      const DioramaLayerOrderTable *table =
-          s_layer_table_provider ? s_layer_table_provider() : NULL;
-      if (table) {
-        const DioramaRoomOverride *room = DioramaLayerOrder_FindSection(
-            table, diorama->map_group, diorama->map_number,
-            diorama->section);
-        if (room)
-          strategy = DioramaLayerEditor_StrategyOfPlane(
-              &room->planes[diorama->plane]);
-      }
-    }
-    char label[64];
+    char label[2 * kOverlayLayerCaptionBytes + 8];
     if (diorama && diorama->kind == kDioramaEditorRow_Plane)
-      snprintf(label, sizeof(label), "%s -- %s", help_row->label,
-               DioramaLayerOrder_StrategyName(strategy));
+      snprintf(label, sizeof(label), "%s -- %s", text.label, text.value);
     else
-      snprintf(label, sizeof(label), "%s", help_row->label);
-    DrawSmallText(layout, description_x, header_y, label, structure);
+      snprintf(label, sizeof(label), "%s", text.label);
     /* The right-hand slug says WHEN a change takes effect, which for these is
      * always "the next frame" -- that immediacy is the point of the tool. */
-    static const char kApplyNow[] = "Live";
+    const char *kApplyNow = Ui("overlay.apply.0");
+    int apply_x = panel_right - 12 - SmallTextWidth(kApplyNow);
+    DrawSmallTextN(layout, description_x, header_y, label,
+                   (apply_x - description_x - 8) / kDebugGlyphWidth, structure);
     DrawSmallTextN(layout, panel_right - 12 - SmallTextWidth(kApplyNow),
                    header_y, kApplyNow, description_chars, kMutedText);
     FillLogicalRect(layout, description_x, header_y + 10,
                     bottom_width - 24, 1, structure_dim);
-    const char *help = diorama
-        ? DioramaLayerEditor_RowHelp(diorama->kind, diorama->param, strategy)
-        : ActionBgTuner_RowHelp(&help_row->source.action_bg);
     DrawWrappedSmallText(layout, description_x, header_y + 14,
-                         help,
+                         text.help,
                          description_chars, 4, ARGB(255, 208, 220, 232));
   } else if (reset_selected) {
-    char label[64], help[256];
-    snprintf(label, sizeof(label), "Reset %s defaults", section->label);
-    snprintf(help, sizeof(help),
-             "Restore every %s tab, including hidden developer controls, "
-             "to the shipped defaults. Press B twice to confirm.",
-             section->label);
+    char label[256], help[1024];
+    FormatSectionMessage(label, sizeof(label), "overlay.reset_section", section->label);
+    FormatSectionMessage(help, sizeof(help), "overlay.reset_section.help", section->label);
     DrawSmallText(layout, description_x, header_y, label, structure);
     DrawSmallTextN(layout,
-                   panel_right - 12 - SmallTextWidth("Action"), header_y,
-                   "Action", description_chars, kGameGold);
+                   panel_right - 12 - SmallTextWidth(Ui("overlay.apply.4")), header_y,
+                   Ui("overlay.apply.4"), description_chars, kGameGold);
     FillLogicalRect(layout, description_x, header_y + 10,
                     bottom_width - 24, 1, structure_dim);
     DrawWrappedSmallText(layout, description_x, header_y + 14,
                          help, description_chars, 4,
                          ARGB(255, 208, 220, 232));
   } else if (selected) {
-    DrawSmallText(layout, description_x, header_y, selected->label, structure);
+    DrawSmallText(layout, description_x, header_y,
+                   SettingsOverlay_LocalizedLabel(InterfaceLocale(), selected), structure);
     /* Naming HOW a change takes effect next to the row removes the usual
      * "did that do anything?" question; the '*' row marker only says that a
      * restart is involved, not what the other kinds do. */
-    const char *apply = Settings_ApplyKindName(selected->apply);
+    char apply_key[32];
+    snprintf(apply_key, sizeof(apply_key), "overlay.apply.%d", selected->apply);
+    const char *apply = ArUiCatalog_Text(InterfaceLocale(), apply_key,
+                                         Settings_ApplyKindName(selected->apply));
     uint32_t apply_color = selected->apply == kApply_Restart
         ? kGameGold : kMutedText;
     if (!Settings_IsAvailable(selected)) {
-      apply = "Unavailable in this mode";
+      apply = Ui("overlay.unavailable");
       apply_color = ARGB(255, 246, 49, 49);  /* menu red */
     }
     DrawSmallTextN(layout,
@@ -3893,15 +3955,18 @@ static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
                    apply, description_chars, apply_color);
     FillLogicalRect(layout, description_x, header_y + 10,
                     bottom_width - 24, 1, structure_dim);
+    const char *help = SettingsOverlay_LocalizedHelp(InterfaceLocale(), selected);
+    if (selected->field == &g_settings.interface_language &&
+        !ArUiTextRenderer_IsReady(&s_ui_text)) help = Ui("overlay.font_unavailable");
     DrawWrappedSmallText(layout, description_x, header_y + 14,
-                         selected->tooltip, description_chars, 4,
+                         help, description_chars, 4,
                          ARGB(255, 208, 220, 232));
   } else {
-    DrawSmallText(layout, description_x, header_y, section->label, structure);
+    DrawSmallText(layout, description_x, header_y, Ui(section->label), structure);
     FillLogicalRect(layout, description_x, header_y + 10,
                     bottom_width - 24, 1, structure_dim);
     DrawWrappedSmallText(layout, description_x, header_y + 14,
-                         section->blurb, description_chars, 4,
+                         Ui(section->blurb), description_chars, 4,
                          ARGB(255, 208, 220, 232));
   }
 
@@ -3913,18 +3978,18 @@ static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
   const char *hints[14];
   int hint_count = 0;
 #define HINT(key, text) do { \
-    hints[hint_count++] = (key); hints[hint_count++] = (text); \
+    hints[hint_count++] = (key); hints[hint_count++] = Ui(text); \
   } while (0)
   if (s_capture_desc) {
-    HINT("ANY KEY", "bind");
-    HINT("ESC", "cancel");
+    HINT(Ui("overlay.key.any"), "overlay.hint.bind");
+    HINT("ESC", "overlay.hint.cancel");
   } else if (s_editing) {
-    HINT("RETURN", "apply");
-    HINT("A/ESC", "cancel");
+    HINT("RETURN", "overlay.hint.apply");
+    HINT("A/ESC", "overlay.hint.cancel");
   } else if (s_submenu_open) {
     /* Omitted when the only row is a notice: there is nothing to select, and
      * offering the verb would suggest otherwise. */
-    if (!help_row || help_row->selectable) HINT("UP/DOWN", "select");
+    if (!help_row || help_row->selectable) HINT("UP/DOWN", "overlay.hint.select");
     if (help_row) {
       /* The editor's verbs differ enough to be worth spelling out: Left/Right
        * cycles the SHAPE on a plane row but steps a number on a parameter row,
@@ -3932,50 +3997,50 @@ static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
       if (help_row->owner == kLayerMenuRow_ActionBg) {
         switch (help_row->source.action_bg.kind) {
           case kActionBgTunerRow_Layer:
-            HINT("B", "settings");
-            HINT("Y", "clear layer");
+            HINT("B", "overlay.hint.settings");
+            HINT("Y", "overlay.hint.clear_layer");
             break;
           case kActionBgTunerRow_BandHeader:
-            HINT("B", "settings");
-            HINT("Y", "canonical bands");
+            HINT("B", "overlay.hint.settings");
+            HINT("Y", "overlay.hint.canonical_bands");
             break;
           case kActionBgTunerRow_Print:
-            HINT("B", "print");
+            HINT("B", "overlay.hint.print");
             break;
           case kActionBgTunerRow_Reset:
-            HINT("B", "reset draft");
+            HINT("B", "overlay.hint.reset_draft");
             break;
           case kActionBgTunerRow_Header:
             break;
           default:
-            HINT("LEFT/RIGHT", "adjust");
-            HINT("Y", "canonical");
+            HINT("LEFT/RIGHT", "overlay.hint.adjust");
+            HINT("Y", "overlay.hint.canonical");
             break;
         }
       } else {
         switch (help_row->source.diorama.kind) {
           case kDioramaEditorRow_Plane:
-            HINT("LEFT/RIGHT", "shape");
-            HINT("B", "settings");
-            HINT("Y", "clear plane");
+            HINT("LEFT/RIGHT", "overlay.hint.shape");
+            HINT("B", "overlay.hint.settings");
+            HINT("Y", "overlay.hint.clear_plane");
             break;
           case kDioramaEditorRow_ResetRoom:
-            HINT("B", "reset room");
+            HINT("B", "overlay.hint.reset_room");
             break;
           case kDioramaEditorRow_Header:
             break;
           default:
-            HINT("LEFT/RIGHT", "adjust");
-            HINT("Y", "clear");
+            HINT("LEFT/RIGHT", "overlay.hint.adjust");
+            HINT("Y", "overlay.hint.clear");
             break;
         }
       }
       if (VisibleTabCount(s_section) > 1)
         HINT("L/R", help_row->owner == kLayerMenuRow_ActionBg
-                        ? "tab" : "level");
+                        ? "overlay.hint.tab" : "overlay.hint.level");
     } else if (SelectedRowIsSectionReset()) {
-      HINT("B", "reset");
-      if (VisibleTabCount(s_section) > 1) HINT("L/R", "tab");
+      HINT("B", "overlay.hint.reset");
+      if (VisibleTabCount(s_section) > 1) HINT("L/R", "overlay.hint.tab");
     } else {
       /* The verbs track what the selected row actually does: an Int row
        * adjusts (hold to accelerate — felt, not spelled out, to keep the line
@@ -3984,17 +4049,17 @@ static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
       bool numeric = row && row->type == kSettingType_Int;
       bool textual = row && (row->type == kSettingType_Mask ||
                              row->type == kSettingType_Custom);
-      HINT("LEFT/RIGHT", numeric ? "adjust" : "change");
-      if (VisibleTabCount(s_section) > 1) HINT("L/R", "tab");
-      if (textual) HINT("B", "type");
-      HINT("Y", "reset");
+      HINT("LEFT/RIGHT", numeric ? "overlay.hint.adjust" : "overlay.hint.change");
+      if (VisibleTabCount(s_section) > 1) HINT("L/R", "overlay.hint.tab");
+      if (textual) HINT("B", "overlay.hint.type");
+      HINT("Y", "overlay.hint.reset");
     }
-    HINT("A", "back");
+    HINT("A", "overlay.hint.back");
   } else {
-    HINT("UP/DOWN", "section");
-    if (VisibleTabCount(s_section) > 1) HINT("L/R", "tab");
-    HINT("B", "open");
-    HINT("A", "close");
+    HINT("UP/DOWN", "overlay.hint.section");
+    if (VisibleTabCount(s_section) > 1) HINT("L/R", "overlay.hint.tab");
+    HINT("B", "overlay.hint.open");
+    HINT("A", "overlay.hint.close");
   }
 #undef HINT
   int hint_x = description_x;
@@ -4079,8 +4144,8 @@ static void DrawLayerPalettePicker(const MenuLayout *layout) {
   const int x = (layout->logical_width - kPickerWidth) / 2;
   const int y = (layout->logical_height - kPickerHeight) / 2;
   DrawDialogPanel(layout, x, y, kPickerWidth, kPickerHeight);
-  DrawSmallText(layout, x + 14, y + 11, "LIVE CGRAM BACKDROP FILL",
-                kSteelBlue);
+  DrawSmallTextN(layout, x + 14, y + 11, Ui("overlay.palette.title"),
+                 (kPickerWidth - 28) / kDebugGlyphWidth, kSteelBlue);
 
   if (!ArRenderTexture_IsValid(s_layer_palette_texture))
     (void)RebuildLayerPaletteTexture();
@@ -4120,7 +4185,8 @@ static void DrawLayerPalettePicker(const MenuLayout *layout) {
   snprintf(selected, sizeof(selected), "CGRAM $%02X",
            (unsigned)s_layer_palette_cursor);
   DrawSmallText(layout, x + 14, y + 173, selected, kGameGold);
-  DrawSmallText(layout, x + 76, y + 173, "B USE  A CANCEL", kMutedText);
+  DrawSmallTextN(layout, x + 76, y + 173, Ui("overlay.palette.hint"),
+                 (kPickerWidth - 90) / kDebugGlyphWidth, kMutedText);
 }
 
 

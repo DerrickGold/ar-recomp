@@ -135,7 +135,8 @@ have enable/disable checkboxes in Languages. Unchecking keeps their files and
 progress but hides them from the game's language selector after restart.
 
 Workshop projects and installed packs live under utils/game-assets/languages.
-The shared font and its license are under utils/game-assets/fonts. Regional
+The shared and Japanese interface fonts and their licenses are under
+utils/game-assets/fonts. Regional
 ROMs and extracted scripts are never included in the distribution. See
 utils/docs/language-pack-format.md for authoring, controls, fonts and credits.
 See utils/docs/builder-workshop.md for navigation and the optional Home scene.

@@ -107,8 +107,9 @@ static void TestDefaultsAndMetadata(void) {
    * channel toggle. Removing the renderer selector took one Display row back
    * off: the PPU has a single path, so the setting selected between a modern
    * renderer and a legacy one that no longer exists. Localization adds six
-   * source, presentation, and enhanced-font preferences. */
-  CHECK(g_setting_desc_count == 288);
+   * source, presentation, and enhanced-font preferences, plus an independent
+   * host interface language. */
+  CHECK(g_setting_desc_count == 289);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -1552,6 +1553,23 @@ static void TestLocalizationPreferences(void) {
   CHECK(g_settings.localization_font_sampling == 0);
   CHECK(g_settings.localization_font_pixelation == 2);
   CHECK(g_settings.localization_font_pixel_size == 2);
+  CHECK(g_settings.interface_language == 0);
+  const SettingDesc *interface = Settings_Find("interface_language");
+  CHECK(interface && Settings_IsMenuVisible(interface));
+  CHECK(interface->category == kSettingCat_Interface);
+  CHECK(Settings_SetText(interface, "ja") == kSettingChange_Applied);
+  CHECK(g_settings.localization_content == 0);
+  CHECK(g_settings.localization_presentation == 0);
+  CHECK(Settings_Save("actraiser-interface-language-test.ini"));
+  CHECK(FileContains("actraiser-interface-language-test.ini", "interface_language = ja"));
+  CHECK(FileContains("actraiser-interface-language-test.ini", "localization_content = Native US"));
+  Settings_InitWithFile("actraiser-interface-language-test.ini");
+  CHECK(g_settings.interface_language == 3);
+  CHECK(g_settings.localization_content == 0);
+  CHECK(g_settings.localization_presentation == 0);
+  CHECK(Settings_SetText(interface, "日本語") == kSettingChange_Rejected);
+  remove("actraiser-interface-language-test.ini");
+  Settings_Init();
   const SettingDesc *source = Settings_Find("localization_content");
   const SettingDesc *mode = Settings_Find("localization_presentation");
   const SettingDesc *size = Settings_Find("localization_font_scale_percent");
@@ -1641,7 +1659,34 @@ static void TestLocalizationPackIdentity(void) {
   CHECK(Settings_Maximum(source) == 1);
 }
 
-int main(void) {
+/* Development-only inventory from the compiled descriptor registry, so host
+ * localization audits never need a second C-preprocessor/parser in a script. */
+static void PrintJsonString(const char *text) {
+  putchar('"');
+  for (const unsigned char *p=(const unsigned char *)(text?text:"");*p;++p) {
+    if (*p=='"'||*p=='\\') printf("\\%c",*p);
+    else if (*p<32) printf("\\u%04x",*p);
+    else putchar(*p);
+  }
+  putchar('"');
+}
+static void DumpInterfaceInventory(void) {
+  puts("[");
+  for(int i=0;i<g_setting_desc_count;++i) {
+    const SettingDesc *desc=&g_setting_descs[i];
+    if(i)puts(",");
+    printf("{\"key\":");PrintJsonString(desc->key);
+    printf(",\"label\":");PrintJsonString(desc->label);
+    printf(",\"help\":");PrintJsonString(desc->tooltip);
+    printf(",\"debug\":%s,\"values\":[",Settings_IsDebugOnly(desc)?"true":"false");
+    for(int j=0;j<desc->enum_count;++j) {if(j)putchar(',');PrintJsonString(desc->enum_labels[j]);}
+    printf("]}");
+  }
+  puts("\n]");
+}
+
+int main(int argc,char **argv) {
+  if(argc==2&&!strcmp(argv[1],"--dump-ui-catalog")) {DumpInterfaceInventory();return 0;}
   TestLocalizationPackIdentity();
   TestLocalizationPreferences();
   TestPersistenceCanBeDisabled();

@@ -9,15 +9,17 @@
 /* Portable drawing surface shared by terminal host UI, comparison views, and
  * the manual. Window ownership and input events remain in settings_overlay.h.
  *
- * The overlay owns font atlases built from the ROM's dialog glyphs. All
+ * The overlay owns font atlases built from the ROM's dialog glyphs and an
+ * optional independent, cached Unicode font stack supplied by the host. All
  * coordinates and sizes below are physical renderer-output pixels, independent
  * of the menu's own scaled logical layout. */
 enum { kSettingsOverlayGlyphSize = 8 };
 
-/* Output-pixel width for centering or framing a text run. */
+/* Output-pixel width for centering or framing a text run. Unicode runs use
+ * the exact same cached shaping/bounds as DrawGameText when available. */
 int SettingsOverlay_GameTextWidth(const char *text, int scale);
-/* No-op before the atlas exists. `scale` multiplies the 8x8 glyph and `alpha`
- * fades the complete run. */
+/* No-op before the atlas/backend exists. `scale` multiplies the 8x8 cell
+ * envelope and `alpha` fades the complete run. */
 void SettingsOverlay_DrawGameText(int x, int y, int scale, uint8_t alpha,
                                   const char *text);
 /* Draw the ROM dialog frame. Dimensions must be divisible by 8*scale. */

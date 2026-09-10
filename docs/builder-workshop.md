@@ -4,6 +4,30 @@ Open your package's `run-build` launcher to enter the local workshop. It runs
 in your browser, but talks only to the builder on this computer. No account,
 upload, online service, Python, Node.js or package manager is needed to use it.
 
+**Interface language** in the sidebar selects English, French, German or
+Japanese independently of game text and of the locale you are translating.
+European English uses English. The preference is saved in
+`game-assets/workshop-settings.json`, so it survives reopening the builder on a
+different local browser port. Switching updates only interface labels; it does
+not reload your project, discard unsaved text/file selections, install a pack,
+or change the game's selected language. Navigation, Home, Build & play, Assets
+and Help are translated, along with language-package management, creation,
+cloning, import, installation and export workflows. Message-editing controls,
+reference tools, layout guidance, previews, credits/notices and font tools also
+use the selected interface language. Location groups, introductory-message
+titles and route descriptions are translated too; searching accepts these
+navigation captions in all four interface languages. Original script excerpts, technical build logs,
+manifest identifiers and raw diagnostic details retain their original text.
+The scanned English manual is not translated, and native
+browser controls (PDF reader, audio player and file chooser) use the browser's
+own language settings. The workshop's native package-folder prompt uses your
+workshop interface language, while its standard buttons follow the operating system.
+
+Script commands and inserted value names stay the same in every interface
+language. For example, the value picker inserts `{master_name}`, not a translated
+identifier. Switching languages also preserves expanded tree branches, search
+results, reference text, font order, coverage results and unsaved credit notices.
+
 ## Find the right task
 
 - **Home** — build your game or play an existing installation, open a tool,
@@ -27,6 +51,17 @@ The sidebar supports arrow-key navigation, Home and End. Browser Back and
 Forward return to sections without unloading the editor. Unsaved message text
 and file selections stay in place when changing sections, but are not durable
 browser drafts. Save before closing.
+
+Music search accepts translated track names, the original English names and
+manifest IDs such as `song-01`. Switching the interface language preserves the
+selected track, search text, pending files, per-level choices and audio playback.
+Custom variant names, filenames and manifest conditions are displayed unchanged.
+
+The interface language does not change your translation's locale, package ID,
+name, credits, private notes or script. It also preserves import replacement
+choices, publication permissions, the WIP option and pending font uploads.
+Only install/export actions apply those choices; switching the interface
+language never installs, publishes or enables a pack.
 
 Languages and its Home shortcuts stay disabled until a complete, valid native
 US source exists at `game-assets/languages/native-us/pack.ini`. Start a build

@@ -190,6 +190,7 @@ static void TestInvalidRadii(void) {
 int main(void) {
   TestHorizonBounds();
   TestChart(kSimWorldNavigationGlobeRadiusTiles);
+  TestChart(kSimWorldNavigationGlobeRadiusTiles * 2.0f);
   TestChart(kSimWorldNavigationGlobeRadiusTiles * 3.0f);
   TestInvalidRadii();
   puts("sim_world_navigation_globe_test: PASS");

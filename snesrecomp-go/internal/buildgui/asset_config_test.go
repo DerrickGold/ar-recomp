@@ -857,10 +857,10 @@ func TestSplitOfferDescribesTheRecordItWillWrite(t *testing.T) {
 		}
 	}
 	want := map[string]assetSplitStatus{
-		"fillmore": {Slug: "fillmore", Label: "Fillmore \u2014 Act 2",
+		"fillmore": {Slug: "fillmore", Label: "Fillmore \u2014 Act 2", Acts: actTwo,
 			Name: "song-09-fillmore", Gate: "wram[0018]==0x01",
 			File: "audio/song-09-fillmore.ogg"},
-		"marahna": {Slug: "marahna", Label: "Marahna \u2014 Act 1",
+		"marahna": {Slug: "marahna", Label: "Marahna \u2014 Act 1", Acts: actOne,
 			Name: "song-09-marahna", Gate: "wram[0018]==0x05",
 			File: "audio/song-09-marahna.ogg"},
 	}
@@ -898,6 +898,54 @@ func TestSplitOfferDescribesTheRecordItWillWrite(t *testing.T) {
 	} {
 		if !strings.Contains(string(manifest), line) {
 			t.Errorf("the save did not write %q:\n%s", line, manifest)
+		}
+	}
+}
+
+func TestAssetSaveReportsSemanticChangeState(t *testing.T) {
+	app := newApplication(context.Background(), Options{ProjectRoot: t.TempDir()}, "tok")
+	for _, test := range []struct {
+		form    map[string]string
+		changed bool
+	}{
+		{map[string]string{}, false},
+		{map[string]string{"title-change": "1", "title": "on"}, true},
+	} {
+		w := postAssetForm(t, app, test.form, nil)
+		var result struct {
+			Changed *bool `json:"changed"`
+		}
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Changed == nil || *result.Changed != test.changed {
+			t.Fatalf("save changed=%v: %d %s", test.changed, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestAssetSplitActMetadataAgreesWithSongMap(t *testing.T) {
+	config, err := loadAssetConfiguration(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, track := range config.Tracks {
+		for _, split := range track.Splits {
+			var group byte
+			for _, region := range assetRegions {
+				if region.Slug == split.Slug {
+					group = region.Group
+				}
+			}
+			found := false
+			for _, played := range assetTracks[i].Regions {
+				if played.Group == group {
+					found = true
+					if split.Acts != played.Acts {
+						t.Errorf("%s/%s: act mask %d, want %d", track.ID, split.Slug, split.Acts, played.Acts)
+					}
+				}
+			}
+			if !found {
+				t.Errorf("%s/%s has no authoritative region", track.ID, split.Slug)
+			}
 		}
 	}
 }

@@ -143,6 +143,12 @@ def main() -> None:
         )
         assert not fallback_missing, f"{fallback.name} lacks fixture glyphs: {fallback_missing!r}"
 
+    ui_japanese = ROOT / "game-assets/fonts/noto/NotoSansJP-Bold.otf"
+    assert ui_japanese.read_bytes() == FALLBACK_FONTS[0][0].read_bytes()
+    assert (ROOT / "game-assets/fonts/noto/NotoSansJP-OFL.txt").read_bytes() == (
+        ROOT / "tests/fixtures/unicode-fonts/fonts/NotoSansJP-OFL.txt"
+    ).read_bytes()
+
     print(
         f"font assets OK: base={len(data)} bytes, "
         f"fallbacks={len(FALLBACK_FONTS)}, SHA-256 {digest}"

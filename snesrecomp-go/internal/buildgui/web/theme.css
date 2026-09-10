@@ -1,5 +1,12 @@
 /* Embedded, offline workbench. Optional scenery sits behind opaque work
    surfaces. Shared tokens also style the independently loaded language editor. */
+@font-face {
+  font-family:"Workshop Japanese";
+  src:url("../interface/japanese.otf") format("opentype");
+  font-weight:700;
+  font-style:normal;
+  font-display:swap
+}
 :root {
   color-scheme:dark;
   --ink:#f0ede5;
@@ -24,7 +31,7 @@ body {
   margin:0;
   background:#111b29;
   color:var(--ink);
-  font:14px/1.6 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  font:14px/1.6 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI","Workshop Japanese",sans-serif;
   min-height:100vh;
   padding-bottom:28px
 }
@@ -213,6 +220,8 @@ code {
   font-size:7px;
   margin-right:5px
 }
+.local-note .local-copy { color:inherit; font-size:inherit; margin:0; }
+.home-hero h1 { white-space:pre-line; }
 .sidebar-bottom #close {
   width:100%;
   font-size:11px

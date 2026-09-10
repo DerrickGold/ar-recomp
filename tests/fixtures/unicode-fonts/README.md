@@ -1,8 +1,9 @@
 # Unicode fallback acceptance fonts
 
-These faces are test-only, self-contained language-pack dependencies. They are
-not part of the base install and are not silently selected from the operating
-system. Both remain under the SIL Open Font License 1.1; the corresponding
+These are self-contained language-pack dependencies, never silently selected
+from the operating system. The Japanese face is also bundled for the independent
+system-interface font stack; the Arabic face remains test-only. Both remain
+under the SIL Open Font License 1.1; the corresponding
 license texts are stored beside the binaries in `fonts/`.
 
 ## Japanese

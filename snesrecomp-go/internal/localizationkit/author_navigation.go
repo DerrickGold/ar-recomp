@@ -15,6 +15,11 @@ type AuthorLocation struct {
 	Title         string `json:"title"`
 	Context       string `json:"context"`
 	CategoryOrder int    `json:"-"`
+	RootKey       string `json:"root_key"`
+	GroupKey      string `json:"group_key"`
+	TitleKey      string `json:"title_key,omitempty"`
+	ContextKey    string `json:"context_key,omitempty"`
+	Shared        bool   `json:"shared,omitempty"`
 }
 
 type AuthorLocationRoot struct {
@@ -36,14 +41,68 @@ func AuthorLocationRoots() []AuthorLocationRoot {
 }
 
 var authorStartTitles = map[string]string{
-	"dialogue.event.wrapper_05.call_00.source_00": "New game — before name entry",
-	"dialogue.event.wrapper_05.call_01.source_00": "New game — after name entry",
-	"dialogue.event.wrapper_05.call_02.source_00": "Resume saved game — welcome back after Continue",
-	"name_entry.prompt_and_alphabet":              "Name entry — prompt and keyboard",
-	"name_entry.prompt_and_hiragana":              "Name entry — hiragana keyboard",
-	"name_entry.prompt_and_katakana":              "Name entry — katakana keyboard",
-	"name_entry.selection_cursor":                 "Name entry — selection cursor",
+	"dialogue.event.wrapper_05.call_00.source_00": "title.before_name",
+	"dialogue.event.wrapper_05.call_01.source_00": "title.after_name",
+	"dialogue.event.wrapper_05.call_02.source_00": "title.continue",
+	"name_entry.prompt_and_alphabet":              "title.keyboard",
+	"name_entry.prompt_and_hiragana":              "title.hiragana",
+	"name_entry.prompt_and_katakana":              "title.katakana",
+	"name_entry.selection_cursor":                 "title.cursor",
 }
+
+// Presentation IDs only: these never select runtime routes or rewrite scripts.
+// Hosts may translate the captions; English remains a deterministic fallback.
+var authorNavigationCaptions = map[string]string{
+	"group.start":          "Introduction, name entry & Continue",
+	"group.story":          "Town story & requests",
+	"group.names":          "Location names & action title cards",
+	"group.title_menus":    "Menus & title text",
+	"group.ending":         "Ending dialogue",
+	"group.final_battle":   "Final battle dialogue",
+	"group.save":           "Save progress & quit",
+	"group.speed":          "Message speed",
+	"group.reports":        "Status reports",
+	"group.confirmations":  "Yes / No choices",
+	"group.sky_menus":      "Menus",
+	"group.sky_dialogue":   "Dialogue — magic & battles",
+	"group.sim_menus":      "Simulation menus",
+	"group.miracles":       "Miracles",
+	"group.offerings":      "Gifts & inventory",
+	"group.terms":          "Town & monster terms",
+	"group.action":         "Action HUD labels & messages",
+	"group.responses":      "Dialogue & event responses",
+	"group.references":     "Additional regional & table references",
+	"context.start":        "Sky Palace introduction or returning to an existing save from the title screen.",
+	"context.names":        "Action title cards use fitted, centered enhanced text.",
+	"context.title":        "Title options support enhanced text. Logo, copyright and sound-test presentation remain native.",
+	"context.ending":       "Ending and credits rendering is a later phase.",
+	"context.final_battle": "Final-battle message delivered from the Sky Palace.",
+	"context.action":       "HUD labels, pause and stage messages support enhanced text; counters retain native formatting.",
+	"context.responses":    "Common event/reference routes; not a separate script for each town.",
+	"context.level":        "Required-level table reference.",
+	"context.references":   "Reference-only or dormant resource; active location is not established.",
+	"title.before_name":    "New game — before name entry",
+	"title.after_name":     "New game — after name entry",
+	"title.continue":       "Resume saved game — welcome back after Continue",
+	"title.keyboard":       "Name entry — prompt and keyboard",
+	"title.hiragana":       "Name entry — hiragana keyboard",
+	"title.katakana":       "Name entry — katakana keyboard",
+	"title.cursor":         "Name entry — selection cursor",
+	"context.shared":       "Shared message: these location links edit one translation and one progress status.",
+}
+
+// AuthorNavigationCaptions returns a detached caption inventory for host catalogs.
+func AuthorNavigationCaptions() map[string]string {
+	out := make(map[string]string, len(authorNavigationCaptions)+len(authorLocationRoots))
+	for key, text := range authorNavigationCaptions {
+		out[key] = text
+	}
+	for _, root := range authorLocationRoots {
+		out["root."+root.ID] = root.Label
+	}
+	return out
+}
+
 var authorTitleWords = strings.NewReplacer("_", " ", ".", " / ")
 var authorCategoryOrder = []string{"start", "story", "menus", "dialogue", "miracles", "offerings", "responses", "reports", "speed", "save", "confirmations", "names", "terms", "action", "references"}
 
@@ -57,14 +116,16 @@ func AuthorMessageLocation(id string) AuthorLocation {
 func AuthorMessageLocations(id string) []AuthorLocation {
 	makeLocations := func(roots []AuthorLocationRoot, category, label, prefix, context string) []AuthorLocation {
 		out := make([]AuthorLocation, 0, len(roots))
+		contextText := authorNavigationCaptions[context]
 		if len(roots) > 1 {
-			context = "Shared message: these location links edit one translation and one progress status. " + context
+			contextText = authorNavigationCaptions["context.shared"] + " " + contextText
 		}
 		for _, root := range roots {
 			out = append(out, AuthorLocation{
 				Root: "place." + root.ID, RootLabel: root.Label,
-				Group: "place." + root.ID + "." + category, GroupLabel: label,
-				Title: authorTitleWords.Replace(strings.TrimPrefix(id, prefix)), Context: strings.TrimSpace(context),
+				Group: "place." + root.ID + "." + category, GroupLabel: authorNavigationCaptions[label],
+				RootKey: "root." + root.ID, GroupKey: label, ContextKey: context, Shared: len(roots) > 1,
+				Title: authorTitleWords.Replace(strings.TrimPrefix(id, prefix)), Context: strings.TrimSpace(contextText),
 				CategoryOrder: slices.Index(authorCategoryOrder, category),
 			})
 		}
@@ -80,56 +141,57 @@ func AuthorMessageLocations(id string) []AuthorLocation {
 	}
 	towns := authorLocationRoots[2:8]
 	if title, ok := authorStartTitles[id]; ok {
-		out := root("sky", "start", "Introduction, name entry & Continue", "", "Sky Palace introduction or returning to an existing save from the title screen.")
-		out[0].Title = title
+		out := root("sky", "start", "group.start", "", "context.start")
+		out[0].Title = authorNavigationCaptions[title]
+		out[0].TitleKey = title
 		return out
 	}
 	// Explicit town-bearing routes take precedence over shared SIM categories.
 	for _, r := range authorLocationRoots[2:9] {
 		for _, prefix := range []string{"simulation.event." + r.ID + ".", "dialogue.event.relay." + r.ID} {
 			if id == prefix || strings.HasPrefix(id, prefix) && strings.HasSuffix(prefix, ".") {
-				return root(r.ID, "story", "Town story & requests", "simulation.event."+r.ID+".", "")
+				return root(r.ID, "story", "group.story", "simulation.event."+r.ID+".", "")
 			}
 		}
 		if id == "city."+r.ID+".name" || id == "town.name."+r.ID || id == "action.stage_name."+r.ID {
-			return root(r.ID, "names", "Location names & action title cards", "", "Action title cards use fitted, centered enhanced text.")
+			return root(r.ID, "names", "group.names", "", "context.names")
 		}
 	}
 	switch {
 	case strings.HasPrefix(id, "title."), strings.HasPrefix(id, "sound_test."):
-		return root("title", "menus", "Menus & title text", "title.", "Title options support enhanced text. Logo, copyright and sound-test presentation remain native.")
+		return root("title", "menus", "group.title_menus", "title.", "context.title")
 	case strings.HasPrefix(id, "dialogue.ending."), strings.HasPrefix(id, "dialogue.event.wrapper_00.call_00."), strings.HasPrefix(id, "dialogue.event.wrapper_05.call_03."):
-		return root("ending", "dialogue", "Ending dialogue", "dialogue.ending.", "Ending and credits rendering is a later phase.")
+		return root("ending", "dialogue", "group.ending", "dialogue.ending.", "context.ending")
 	case id == "sky.action_mode.outcome.final_battle":
-		return root("death_heim", "dialogue", "Final battle dialogue", "sky.action_mode.", "Final-battle message delivered from the Sky Palace.")
+		return root("death_heim", "dialogue", "group.final_battle", "sky.action_mode.", "context.final_battle")
 	case strings.HasPrefix(id, "system.save."):
-		return makeLocations(authorLocationRoots[1:8], "save", "Save progress & quit", "system.save.", "")
+		return makeLocations(authorLocationRoots[1:8], "save", "group.save", "system.save.", "")
 	case strings.HasPrefix(id, "system.message_speed."):
-		return makeLocations(authorLocationRoots[1:8], "speed", "Message speed", "system.message_speed.", "")
+		return makeLocations(authorLocationRoots[1:8], "speed", "group.speed", "system.message_speed.", "")
 	case strings.HasPrefix(id, "status.report."):
-		return makeLocations(authorLocationRoots[1:8], "reports", "Status reports", "status.report.", "")
+		return makeLocations(authorLocationRoots[1:8], "reports", "group.reports", "status.report.", "")
 	case id == "system.choice.yes_no":
-		return makeLocations(authorLocationRoots[1:8], "confirmations", "Yes / No choices", "system.choice.", "")
+		return makeLocations(authorLocationRoots[1:8], "confirmations", "group.confirmations", "system.choice.", "")
 	case strings.HasPrefix(id, "sky.menu."):
-		return root("sky", "menus", "Menus", "sky.menu.", "")
+		return root("sky", "menus", "group.sky_menus", "sky.menu.", "")
 	case strings.HasPrefix(id, "sky."):
-		return root("sky", "dialogue", "Dialogue — magic & battles", "sky.", "")
+		return root("sky", "dialogue", "group.sky_dialogue", "sky.", "")
 	case strings.HasPrefix(id, "sim.menu."):
-		return makeLocations(towns, "menus", "Simulation menus", "sim.menu.", "")
+		return makeLocations(towns, "menus", "group.sim_menus", "sim.menu.", "")
 	case strings.HasPrefix(id, "sim.miracle."):
-		return makeLocations(towns, "miracles", "Miracles", "sim.miracle.", "")
+		return makeLocations(towns, "miracles", "group.miracles", "sim.miracle.", "")
 	case strings.HasPrefix(id, "dialogue.offering."), strings.HasPrefix(id, "sim.offerings."), strings.HasPrefix(id, "sim.inventory."):
-		return makeLocations(towns, "offerings", "Gifts & inventory", "dialogue.offering.", "")
+		return makeLocations(towns, "offerings", "group.offerings", "dialogue.offering.", "")
 	case strings.HasPrefix(id, "growth_state."), strings.HasPrefix(id, "enemy.name."):
-		return makeLocations(towns, "terms", "Town & monster terms", "", "")
+		return makeLocations(towns, "terms", "group.terms", "", "")
 	case strings.HasPrefix(id, "action.hud."):
-		return makeLocations(authorLocationRoots[2:9], "action", "Action HUD labels & messages", "action.hud.", "HUD labels, pause and stage messages support enhanced text; counters retain native formatting.")
+		return makeLocations(authorLocationRoots[2:9], "action", "group.action", "action.hud.", "context.action")
 	case strings.HasPrefix(id, "sim."), strings.HasPrefix(id, "dialogue.event."), strings.Contains(id, ".sim."):
-		return makeLocations(towns, "responses", "Dialogue & event responses", "dialogue.event.", "Common event/reference routes; not a separate script for each town.")
+		return makeLocations(towns, "responses", "group.responses", "dialogue.event.", "context.responses")
 	case strings.HasPrefix(id, "required_master_level."):
-		return root("sky", "reports", "Status reports", "", "Required-level table reference.")
+		return root("sky", "reports", "group.reports", "", "context.level")
 	}
 	// Dormant/regional resources have no proven playthrough location. Keep them
 	// reachable and clearly identified without inventing an active town event.
-	return root("sky", "references", "Additional regional & table references", "", "Reference-only or dormant resource; active location is not established.")
+	return root("sky", "references", "group.references", "", "context.references")
 }

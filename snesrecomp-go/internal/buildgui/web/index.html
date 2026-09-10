@@ -5,51 +5,56 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{TITLE}}</title>
 <link rel="stylesheet" href="builder/theme.css">
+<script type="application/json" id="interface-catalog">{{UI_CATALOG}}</script>
+<script src="builder/i18n.js" defer></script>
 </head>
 <body>
 <div id="workshop-atmosphere" aria-hidden="true"><canvas id="ambient-scene" width="640" height="420"></canvas></div>
-<a class="skip-link" href="#workspace">Skip to workspace</a>
+<a class="skip-link" href="#workspace" data-i18n="builder.nav.skip">Skip to workspace</a>
 <aside class="sidebar">
-  <a class="brand" href="#home"><span class="brand-sigil" aria-hidden="true">✦</span><span>ACTRAISER<small>THE WORKSHOP</small></span></a>
-  <div class="nav-label">YOUR WORKSPACE</div>
-  <div class="tabs" role="tablist" aria-orientation="vertical" aria-label="Workshop sections">
-    <button class="tab" id="tab-home" role="tab" aria-selected="true" aria-controls="panel-home"><span class="nav-icon" aria-hidden="true">⌂</span>Home</button>
-    <button class="tab" id="tab-build" role="tab" aria-selected="false" aria-controls="panel-build" tabindex="-1"><span class="nav-icon" aria-hidden="true">◇</span><span id="build-nav-label">Build game</span><span class="badge" aria-hidden="true"></span></button>
-    <button class="tab" id="tab-localization" role="tab" aria-selected="false" aria-controls="panel-localization" tabindex="-1" disabled title="Requires the native US language source"><span class="nav-icon" aria-hidden="true">文</span>Languages</button>
-    <button class="tab" id="tab-assets" role="tab" aria-selected="false" aria-controls="panel-assets" tabindex="-1"><span class="nav-icon" aria-hidden="true">♫</span>Assets</button>
-    <button class="tab" id="tab-manual" role="tab" aria-selected="false" aria-controls="panel-manual" tabindex="-1"><span class="nav-icon" aria-hidden="true">▤</span>Help &amp; manual</button>
+  <a class="brand" href="#home"><span class="brand-sigil" aria-hidden="true">✦</span><span>ACTRAISER<small data-i18n="builder.brand.workshop">THE WORKSHOP</small></span></a>
+  <div class="nav-label" data-i18n="builder.nav.workspace">YOUR WORKSPACE</div>
+  <div class="tabs" role="tablist" aria-orientation="vertical" aria-label="Workshop sections" data-i18n-aria="builder.nav.sections">
+    <button class="tab" id="tab-home" role="tab" aria-selected="true" aria-controls="panel-home"><span class="nav-icon" aria-hidden="true">⌂</span><span data-i18n="builder.nav.home">Home</span></button>
+    <button class="tab" id="tab-build" role="tab" aria-selected="false" aria-controls="panel-build" tabindex="-1"><span class="nav-icon" aria-hidden="true">◇</span><span id="build-nav-label" data-i18n="builder.nav.build_game">Build game</span><span class="badge" aria-hidden="true"></span></button>
+    <button class="tab" id="tab-localization" role="tab" aria-selected="false" aria-controls="panel-localization" tabindex="-1" disabled title="Requires the native US language source"><span class="nav-icon" aria-hidden="true">文</span><span data-i18n="builder.nav.languages">Languages</span></button>
+    <button class="tab" id="tab-assets" role="tab" aria-selected="false" aria-controls="panel-assets" tabindex="-1"><span class="nav-icon" aria-hidden="true">♫</span><span data-i18n="builder.nav.assets">Assets</span></button>
+    <button class="tab" id="tab-manual" role="tab" aria-selected="false" aria-controls="panel-manual" tabindex="-1"><span class="nav-icon" aria-hidden="true">▤</span><span data-i18n="builder.nav.help">Help &amp; manual</span></button>
   </div>
   <div class="sidebar-bottom">
-    <label for="scene-motion">A little atmosphere</label>
-    <select id="scene-motion"><option value="auto">Follow system</option><option value="animated">Animated scene</option><option value="still">Still scene</option><option value="off">Scene off</option></select>
-    <label for="scene-setting">Scenery</label>
-    <select id="scene-setting"><option value="fillmore">Fillmore · the Master’s patrol</option><option value="palace">Sky Palace · angel patrol</option></select>
-    <p class="local-note"><span aria-hidden="true">●</span> Local. Private. Yours.</p>
-    <button id="close" class="quiet" type="button">Close workshop</button>
+    <label for="interface-language" data-i18n="interface.language">Interface language</label>
+    <select id="interface-language" aria-describedby="interface-language-status"><option value="en">English</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="ja">日本語</option></select>
+    <p id="interface-language-status" class="local-note" role="status" hidden></p>
+    <label for="scene-motion" data-i18n="builder.atmosphere">A little atmosphere</label>
+    <select id="scene-motion"><option value="auto" data-i18n="builder.motion.auto">Follow system</option><option value="animated" data-i18n="builder.motion.animated">Animated scene</option><option value="still" data-i18n="builder.motion.still">Still scene</option><option value="off" data-i18n="builder.motion.off">Scene off</option></select>
+    <label for="scene-setting" data-i18n="builder.scenery">Scenery</label>
+    <select id="scene-setting"><option value="fillmore" data-i18n="builder.scenery.fillmore">Fillmore · the Master’s patrol</option><option value="palace" data-i18n="builder.scenery.palace">Sky Palace · angel patrol</option></select>
+    <p class="local-note"><span aria-hidden="true">●</span><span class="local-copy" data-i18n="builder.privacy.short">Local. Private. Yours.</span></p>
+    <button id="close" class="quiet" type="button" data-i18n="builder.close">Close workshop</button>
   </div>
 </aside>
 
 <main id="workspace" tabindex="-1">
-  <header class="workspace-bar"><span id="workspace-section">Home</span><div id="dock" data-open="false" data-kind="idle"><span id="workspace-status" class="status-badge" role="status">Checking installation…</span><span id="track" role="progressbar" aria-label="Build progress" aria-valuemin="0" aria-valuemax="100" hidden><span id="dock-pct" aria-hidden="true">0%</span></span><button id="dock-launch" type="button" hidden disabled>▶ Run game</button></div></header>
+  <header class="workspace-bar"><span id="workspace-section" data-i18n="builder.nav.home">Home</span><div id="dock" data-open="false" data-kind="idle"><span id="workspace-status" class="status-badge" role="status" data-i18n="builder.checking">Checking installation…</span><span id="track" role="progressbar" aria-label="Build progress" data-i18n-aria="builder.progress" aria-valuemin="0" aria-valuemax="100" hidden><span id="dock-pct" aria-hidden="true">0%</span></span><button id="dock-launch" type="button" hidden disabled data-i18n="builder.run">▶ Run game</button></div></header>
   <section class="panel" id="panel-home" role="tabpanel" aria-labelledby="tab-home">
     <div class="home-hero">
-      <div class="hero-copy"><p class="eyebrow">WELCOME TO YOUR WORKSHOP</p><h1>A little world.<br>Made yours.</h1><p class="lede">Build your game, give it a new voice, and make it feel like home.</p><div class="actions"><button id="home-primary" type="button" disabled>Checking your game…</button><button class="quiet" type="button" data-nav="localization" disabled>Explore languages <span aria-hidden="true">↗</span></button></div><p id="home-game-note" class="muted">Everything stays on this computer.</p></div>
-      <div class="scene-stage"><canvas id="palace-scene" width="640" height="420" aria-label="A small illustrated palace floating above the clouds"></canvas><span class="scene-caption" id="scene-caption">A moment above the clouds</span></div>
+      <div class="hero-copy"><p class="eyebrow" data-i18n="builder.home.welcome">WELCOME TO YOUR WORKSHOP</p><h1 data-i18n="builder.home.title">A little world.&#10;Made yours.</h1><p class="lede" data-i18n="builder.home.intro">Build your game, give it a new voice, and make it feel like home.</p><div class="actions"><button id="home-primary" type="button" disabled data-i18n="builder.home.checking">Checking your game…</button><button class="quiet" type="button" data-nav="localization" disabled><span data-i18n="builder.home.explore">Explore languages</span> <span aria-hidden="true">↗</span></button></div><p id="home-game-note" class="muted" data-i18n="builder.home.local">Everything stays on this computer.</p></div>
+      <div class="scene-stage"><canvas id="palace-scene" width="640" height="420" aria-label="A small illustrated palace floating above the clouds" data-i18n-aria="builder.scene.placeholder_aria"></canvas><span class="scene-caption" id="scene-caption" data-i18n="builder.scene.placeholder">A moment above the clouds</span></div>
     </div>
-    <div class="section-heading"><h2>Make it your own</h2><span class="muted">One small project at a time</span></div>
+    <div class="section-heading"><h2 data-i18n="builder.home.customize">Make it your own</h2><span class="muted" data-i18n="builder.home.one_project">One small project at a time</span></div>
     <div class="home-actions">
-      <button class="task-card" data-nav="localization" type="button" disabled><span class="card-icon" aria-hidden="true">文</span><strong>Give it a new voice</strong><span>Install a translation or pick up where you left off.</span><span class="card-link">Open languages ↗</span></button>
-      <button class="task-card" data-nav="assets" type="button"><span class="card-icon" aria-hidden="true">♫</span><strong>Set the atmosphere</strong><span>Choose title artwork and compare replacement music.</span><span class="card-link">Browse assets ↗</span></button>
-      <button class="task-card" data-nav="manual" type="button"><span class="card-icon" aria-hidden="true">▤</span><strong>Find your bearings</strong><span>Read the original manual and learn your way around.</span><span class="card-link">Open the guide ↗</span></button>
+      <button class="task-card" data-nav="localization" type="button" disabled><span class="card-icon" aria-hidden="true">文</span><strong data-i18n="builder.home.voice">Give it a new voice</strong><span data-i18n="builder.home.voice_help">Install a translation or pick up where you left off.</span><span class="card-link" data-i18n="builder.home.open_languages">Open languages ↗</span></button>
+      <button class="task-card" data-nav="assets" type="button"><span class="card-icon" aria-hidden="true">♫</span><strong data-i18n="builder.home.atmosphere">Set the atmosphere</strong><span data-i18n="builder.home.atmosphere_help">Choose title artwork and compare replacement music.</span><span class="card-link" data-i18n="builder.home.browse_assets">Browse assets ↗</span></button>
+      <button class="task-card" data-nav="manual" type="button"><span class="card-icon" aria-hidden="true">▤</span><strong data-i18n="builder.home.guide">Find your bearings</strong><span data-i18n="builder.home.guide_help">Read the original manual and learn your way around.</span><span class="card-link" data-i18n="builder.home.open_guide">Open the guide ↗</span></button>
     </div>
     <p class="notice" data-language-status role="status">Checking the native US language source…</p>
-    <div class="section-heading"><h2>Back to your translations</h2><button id="home-refresh-projects" class="quiet" type="button" disabled>Refresh</button></div>
-    <div id="home-projects" class="project-library"><p class="empty-note">Your saved translation projects will appear here.</p></div>
-    <p class="privacy">Offline by design. Your ROM, translations, and custom assets stay on this computer.</p>
+    <div class="section-heading"><h2 data-i18n="builder.home.translations">Back to your translations</h2><button id="home-refresh-projects" class="quiet" type="button" disabled data-i18n="builder.refresh">Refresh</button></div>
+    <div id="home-projects" class="project-library"><p class="empty-note" data-i18n="builder.home.projects_placeholder">Your saved translation projects will appear here.</p></div>
+    <p class="privacy" data-i18n="builder.home.privacy">Offline by design. Your ROM, translations, and custom assets stay on this computer.</p>
   </section>
 
   <section class="panel" id="panel-build" role="tabpanel" aria-labelledby="tab-build" hidden>
-    <div class="page-heading"><div><p class="eyebrow">FROM YOUR ROM TO YOUR GAME</p><h1>Build &amp; play</h1><p>Choose your local US ROM. We’ll prepare everything needed to play.</p></div></div>
+    <div class="page-heading"><div><p class="eyebrow" data-i18n="builder.build.eyebrow">FROM YOUR ROM TO YOUR GAME</p><h1 data-i18n="builder.nav.build">Build &amp; play</h1><p data-i18n="builder.build.intro">Choose your local US ROM. We’ll prepare everything needed to play.</p></div></div>
     <p class="notice" data-language-status role="status">Checking the native US language source…</p>
     <!-- PLAY BLOCK. Shown whenever a built game is on disk, whether this
          session built it or a previous one did. In launcher mode it is the only
@@ -57,29 +62,29 @@
     <div id="play-box" hidden>
       <div class="play-head">
         <div>
-          <div class="play-title" id="play-title">Your game is built and ready</div>
+          <div class="play-title" id="play-title" data-i18n="builder.build.built">Your game is built and ready</div>
           <div class="play-sub" id="play-sub"></div>
         </div>
-        <button id="play" type="button" class="play-btn">&#9654;&nbsp; Play</button>
+        <button id="play" type="button" class="play-btn" data-i18n="builder.build.play">&#9654;&nbsp; Play</button>
       </div>
     </div>
 
     <!-- CLEANUP OFFER. Appears after a successful build, and on any install
          that still carries removable build files. -->
     <details id="slim-box" hidden>
-      <summary>Storage &amp; build tools</summary>
-      <p class="slim-copy" id="slim-copy">
+      <summary data-i18n="builder.build.storage">Storage &amp; build tools</summary>
+      <p class="slim-copy" id="slim-copy" data-i18n="builder.build.storage_help">
         The build tools are only needed for future rebuilds. You can remove them
         and keep just the game &mdash; and if you ever want to rebuild, download
         the package again from the repository.
       </p>
       <div class="actions">
-        <button id="slim" type="button" class="secondary">Clean up build tools</button>
-        <button id="slim-dismiss" type="button" class="quiet">Keep them</button>
+        <button id="slim" type="button" class="secondary" data-i18n="builder.build.cleanup">Clean up build tools</button>
+        <button id="slim-dismiss" type="button" class="quiet" data-i18n="builder.build.keep_tools">Keep them</button>
       </div>
     </details>
 
-    <div id="slim-done" hidden class="slim-done">
+    <div id="slim-done" hidden class="slim-done" data-i18n="builder.build.slimmed">
       Build tools removed &mdash; this install is now just the game.
     </div>
 
@@ -88,11 +93,11 @@
          invites the question "why?" without answering it. -->
     <div id="build-box">
       <form id="build-form">
-        <label for="rom" id="rom-label">ActRaiser ROM (.sfc or .smc)</label>
+        <label for="rom" id="rom-label" data-i18n="builder.build.rom_label">ActRaiser ROM (.sfc or .smc)</label>
         <input id="rom" name="rom" type="file" accept=".sfc,.smc" required>
         <div class="actions">
-          <button id="build" type="submit">Build game</button>
-          <button id="launch" class="secondary" type="button" disabled>Launch game</button>
+          <button id="build" type="submit" data-i18n="builder.nav.build_game">Build game</button>
+          <button id="launch" class="secondary" type="button" disabled data-i18n="builder.build.launch">Launch game</button>
         </div>
       </form>
     </div>
@@ -101,69 +106,69 @@
          build block is hidden, so it explains an absence rather than
          decorating a working page. -->
     <div id="nobuild" hidden class="notice">
-      <strong>Rebuilding is unavailable in this copy.</strong>
-      The build tools were removed to save space. Download the package again from
-      the repository if you want to rebuild from a ROM.
+      <strong data-i18n="builder.build.no_rebuild">Rebuilding is unavailable in this copy.</strong>
+      <span data-i18n="builder.build.no_rebuild_help">The build tools were removed to save space. Download the package again from
+      the repository if you want to rebuild from a ROM.</span>
     </div>
 
-    <div id="state" data-kind="idle">Ready to build &mdash; choose your ROM above</div>
+    <div id="state" data-kind="idle" data-i18n="builder.build.ready_to_build">Ready to build &mdash; choose your ROM above</div>
 
     <div id="steps-box" hidden>
       <ol class="steps" id="steps">{{STEPS}}</ol>
     </div>
 
     <details id="log-box">
-      <summary>Build log</summary>
-      <pre id="log">Select your ROM to begin.</pre>
+      <summary data-i18n="builder.build.log">Build log</summary>
+      <pre id="log" data-i18n="builder.build.select_rom">Select your ROM to begin.</pre>
     </details>
-    <p class="privacy">Your ROM is copied only into this local folder and is never uploaded.
+    <p class="privacy" data-i18n="builder.build.privacy">Your ROM is copied only into this local folder and is never uploaded.
     This page talks only to the builder on 127.0.0.1.</p>
   </section>
 
   <section class="panel" id="panel-assets" role="tabpanel" aria-labelledby="tab-assets" hidden>
-    <div class="page-heading"><div><p class="eyebrow">YOUR PERSONAL EDITION</p><h1>Art &amp; sound</h1><p>Preview a replacement, choose your favorite, then save it for the next launch.</p></div></div>
+    <div class="page-heading"><div><p class="eyebrow" data-i18n="builder.assets.eyebrow">YOUR PERSONAL EDITION</p><h1 data-i18n="builder.assets.title">Art &amp; sound</h1><p data-i18n="builder.assets.intro">Preview a replacement, choose your favorite, then save it for the next launch.</p></div></div>
     <form id="assets-form">
       <div class="asset-bar" id="asset-bar" data-dirty="false">
         <div class="asset-bar-text">
-          <strong id="asset-bar-title">Asset replacements</strong>
-          <span id="asset-bar-note">Loading the current configuration&hellip;</span>
+          <strong id="asset-bar-title" data-i18n="builder.assets.replacements">Asset replacements</strong>
+          <span id="asset-bar-note" data-i18n="builder.assets.loading">Loading the current configuration&hellip;</span>
         </div>
         <div class="asset-bar-actions">
-          <button type="button" id="discard-assets" class="quiet" disabled>Discard</button>
-          <button type="submit" id="save-assets-top" disabled>Save changes</button>
+          <button type="button" id="discard-assets" class="quiet" disabled data-i18n="builder.assets.discard">Discard</button>
+          <button type="submit" id="save-assets-top" disabled data-i18n="builder.assets.save_changes">Save changes</button>
         </div>
       </div>
-      <div class="asset-categories" aria-label="Asset categories"><button type="button" data-asset-category="music" aria-pressed="true">Music <span class="count">17</span></button><button type="button" data-asset-category="title" aria-pressed="false">Title artwork</button></div>
+      <div class="asset-categories" aria-label="Asset categories" data-i18n-aria="builder.assets.categories"><button type="button" data-asset-category="music" aria-pressed="true"><span data-i18n="builder.assets.music">Music</span> <span class="count">17</span></button><button type="button" data-asset-category="title" aria-pressed="false" data-i18n="builder.assets.title_art">Title artwork</button></div>
 
       <div class="asset-title-card" id="asset-title-view" hidden>
         <img src="title-logo.png" width="2087" height="754" loading="lazy"
-             alt="Preview of the included high-resolution ActRaiser title treatment">
+             alt="Preview of the included high-resolution ActRaiser title treatment" data-i18n-alt="builder.assets.title_preview">
         <div class="asset-title-copy">
-          <h2>High-resolution title</h2>
-          <p>The included art replaces both the settled title logo and its Mode-7 intro swirl.
+          <h2 data-i18n="builder.assets.hd_title">High-resolution title</h2>
+          <p data-i18n="builder.assets.hd_title_help">The included art replaces both the settled title logo and its Mode-7 intro swirl.
           Turn it off at any time to return to the ROM artwork.</p>
           <div class="asset-toggle">
             <input id="title-toggle" name="title" type="checkbox">
-            <label for="title-toggle">Use the included HD title</label>
+            <label for="title-toggle" data-i18n="builder.assets.use_hd_title">Use the included HD title</label>
           </div>
           <input id="title-change" name="title-change" type="hidden" value="0">
         </div>
       </div>
 
       <div class="asset-music" id="asset-music-view">
-        <div class="asset-browser"><div class="asset-track-picker"><label for="asset-track-toggle">Music track</label><button id="asset-track-toggle" type="button" aria-expanded="false" aria-controls="asset-track-options"><span id="asset-selected-track">Choose a track</span><span aria-hidden="true">▾</span></button><div id="asset-track-options" hidden><label for="asset-search" class="sr-only">Search music tracks</label><input id="asset-search" type="search" placeholder="Search Sky Palace, Fillmore…" autocomplete="off"><div id="asset-track-list" aria-label="Matching music tracks"></div><p id="asset-search-empty" class="muted" role="status" hidden>No matching tracks.</p></div></div><div class="asset-detail">
+        <div class="asset-browser"><div class="asset-track-picker"><label for="asset-track-toggle" data-i18n="builder.assets.track">Music track</label><button id="asset-track-toggle" type="button" aria-expanded="false" aria-controls="asset-track-options"><span id="asset-selected-track" data-i18n="builder.assets.choose_track">Choose a track</span><span aria-hidden="true">▾</span></button><div id="asset-track-options" hidden><label for="asset-search" class="sr-only" data-i18n="builder.assets.search">Search music tracks</label><input id="asset-search" type="search" placeholder="Search Sky Palace, Fillmore…" autocomplete="off" data-i18n-placeholder="builder.assets.search_hint"><div id="asset-track-list" aria-label="Matching music tracks" data-i18n-aria="builder.assets.matches"></div><p id="asset-search-empty" class="muted" role="status" hidden data-i18n="builder.assets.no_matches">No matching tracks.</p></div></div><div class="asset-detail">
         <div class="preview-tools">
-          <button id="generate-previews" type="button" disabled>
+          <button id="generate-previews" type="button" disabled data-i18n="builder.assets.extract_previews">
             Extract original-audio previews
           </button>
           <!-- Previews are cached per ROM, and the renderer is deterministic, so
                re-running it changes nothing until the cached file is gone. This
                discards them first: the escape hatch for a preview that sounds
                wrong without asking anyone to find a cache directory by hand. -->
-          <button id="regenerate-previews" class="quiet" type="button" hidden>
+          <button id="regenerate-previews" class="quiet" type="button" hidden data-i18n="builder.assets.regenerate">
             Discard and re-render
           </button>
-          <span id="preview-state" role="status">
+          <span id="preview-state" role="status" data-i18n="builder.assets.need_rom">
             Supply a ROM on the Build tab to enable original-audio comparisons.
           </span>
         </div>
@@ -175,32 +180,31 @@
 
 
       <div class="actions asset-bottom-save">
-        <button id="save-assets" type="submit" disabled>Save assets</button>
+        <button id="save-assets" type="submit" disabled data-i18n="builder.assets.save">Save assets</button>
       </div>
-      <div id="asset-state" role="status">Open this tab to load the current configuration.</div>
-      <p class="privacy">Replacement files stay on this computer and are never uploaded.
+      <div id="asset-state" role="status" data-i18n="builder.assets.open_to_load">Open this tab to load the current configuration.</div>
+      <p class="privacy" data-i18n="builder.assets.privacy">Replacement files stay on this computer and are never uploaded.
       Saved changes take effect the next time the game starts.</p>
     </form>
   </section>
 
   {{LOCALIZATION}}
   <section class="panel" id="panel-manual" role="tabpanel" aria-labelledby="tab-manual" hidden>
-    <div class="page-heading"><div><p class="eyebrow">A LITTLE GUIDANCE</p><h1>Help &amp; manual</h1><p>The original booklet, plus a few workshop essentials.</p></div></div>
-    <details class="workshop-help"><summary>How do workshop projects and installed packs differ?</summary><p>Opening a pack makes an editable workshop copy. Saving keeps your work, but does not update the game. Use Review &amp; install to apply it, restart the game, then select the package name under Localization with Enhanced text rendering.</p></details>
+    <div class="page-heading"><div><p class="eyebrow" data-i18n="builder.help.eyebrow">A LITTLE GUIDANCE</p><h1 data-i18n="builder.nav.help">Help &amp; manual</h1><p data-i18n="builder.help.intro">The original booklet, plus a few workshop essentials.</p></div></div>
+    <details class="workshop-help"><summary data-i18n="builder.help.projects">How do workshop projects and installed packs differ?</summary><p data-i18n="builder.help.projects_help">Opening a pack makes an editable workshop copy. Saving keeps your work, but does not update the game. Install your saved pack from the editor, restart the game, then select its package name in the game’s localization settings. Translated packs use enhanced text rendering.</p></details>
     <div class="manual-bar">
-      <p>The original 40-page instruction booklet &mdash; your browser's own reader
-      handles paging, zoom and search.</p>
-      <a class="linkbtn" href="manual.pdf" target="_blank" rel="noreferrer">Open in a new tab</a>
+      <p data-i18n="builder.help.manual_help">The original English 40-page instruction booklet — your browser's own reader handles paging, zoom and search. Changing the interface language does not translate the scanned booklet.</p>
+      <a class="linkbtn" href="manual.pdf" target="_blank" rel="noreferrer" data-i18n="builder.help.open_tab">Open in a new tab</a>
     </div>
-    <iframe id="manual-frame" title="ActRaiser instruction booklet"></iframe>
-    <details class="blurb"><summary>About ActRaiser</summary><img class="manual-cover" src="boxart.webp" width="760" height="555" loading="lazy" alt="Original ActRaiser box artwork">
-      <h2>Action &amp; Simulation</h2>
-      <p>Pulse-stopping action sequences combined with a Simulation Mode that lets you
+    <iframe id="manual-frame" title="ActRaiser instruction booklet" data-i18n-title="builder.help.manual_title"></iframe>
+    <details class="blurb"><summary data-i18n="builder.help.about">About ActRaiser</summary><img class="manual-cover" src="boxart.webp" width="760" height="555" loading="lazy" alt="Original ActRaiser box artwork" data-i18n-alt="builder.help.box_art">
+      <h2 data-i18n="builder.help.genre">Action &amp; Simulation</h2>
+      <p data-i18n="builder.help.story">Pulse-stopping action sequences combined with a Simulation Mode that lets you
       forge a new civilization &mdash; a game built to use the Super NES to the full.
       Long ago you and your people built a peaceful land; since then the evil Tanzra
       and his Guardians have made it a breeding ground for monsters. Punish Tanzra and
       give your people back the world they knew.</p>
-      <p class="colophon">Text and artwork &copy; 1990&ndash;1992 Quintet / Enix.
+      <p class="colophon" data-i18n="builder.help.attribution">Text and artwork &copy; 1990&ndash;1992 Quintet / Enix.
       Reproduced from the retail packaging and manual for reference. This project ships
       no game code or data &mdash; that is generated on this machine from your own ROM.</p>
     </details>

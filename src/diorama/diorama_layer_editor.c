@@ -593,23 +593,30 @@ static void SetText(char *dst, size_t size, const char *text) {
 
 /* Value column for a plane row: the shape it is using and its magnitude, which
  * together are what the player is comparing between presses. */
-static void FormatPlaneValue(char *dst, size_t size,
+static float ShapeDepth(const DioramaPlaneOverride *p,
+                         DioramaDepthStrategy strategy) {
+  switch (strategy) {
+    case kDioramaDepth_Rake: return p->rake;
+    case kDioramaDepth_Bow: return p->bow;
+    case kDioramaDepth_Thick: return p->thickness;
+    case kDioramaDepth_Stack: return p->stack;
+    case kDioramaDepth_Voxel: return p->voxel;
+    default: return 0.0f;
+  }
+}
+
+static void FormatPlaneValue(DioramaEditorRow *row,
                              const DioramaPlaneOverride *p) {
-  const DioramaDepthStrategy strategy = DioramaLayerEditor_StrategyOfPlane(p);
+  row->strategy = DioramaLayerEditor_StrategyOfPlane(p);
+  row->shape_depth = ShapeDepth(p, row->strategy);
   char upper[16];
   DioramaLayerEditor_Upper(upper, sizeof(upper),
-                           DioramaLayerOrder_StrategyName(strategy));
-
-  switch (strategy) {
-    case kDioramaDepth_Rake:  snprintf(dst, size, "%s %.2f", upper, (double)p->rake); break;
-    case kDioramaDepth_Bow:   snprintf(dst, size, "%s %.2f", upper, (double)p->bow); break;
-    case kDioramaDepth_Thick: snprintf(dst, size, "%s %.2f", upper, (double)p->thickness); break;
-    case kDioramaDepth_Stack: snprintf(dst, size, "%s %.2f", upper, (double)p->stack); break;
-    case kDioramaDepth_Voxel: snprintf(dst, size, "%s %.2f", upper, (double)p->voxel); break;
-    case kDioramaDepth_Flat:
-    case kDioramaDepth_StrategyCount:
-    default:                  SetText(dst, size, upper); break;
-  }
+                           DioramaLayerOrder_StrategyName(row->strategy));
+  if (row->strategy == kDioramaDepth_Flat)
+    SetText(row->value, sizeof(row->value), upper);
+  else
+    snprintf(row->value, sizeof(row->value), "%s %.2f", upper,
+             (double)row->shape_depth);
 }
 
 /* Append the parameter rows for the selected plane. Only the ones its ACTIVE
@@ -659,21 +666,14 @@ static void PushParamRows(DioramaEditorRow *out, int capacity, int *count,
         ? kDioramaEditorRow_ParamEnum : kDioramaEditorRow_Param;
     row->plane = plane;
     row->param = rows[i].param;
+    row->strategy = strategy;
     row->nested = true;
     row->selectable = true;
     SetText(row->label, sizeof(row->label), rows[i].label);
 
     switch (rows[i].param) {
       case kDioramaEditorParam_Depth: {
-        float v = 0.0f;
-        switch (strategy) {
-          case kDioramaDepth_Rake:  v = p->rake; break;
-          case kDioramaDepth_Bow:   v = p->bow; break;
-          case kDioramaDepth_Thick: v = p->thickness; break;
-          case kDioramaDepth_Stack: v = p->stack; break;
-          case kDioramaDepth_Voxel: v = p->voxel; break;
-          default: break;
-        }
+        float v = ShapeDepth(p, strategy);
         snprintf(row->value, sizeof(row->value), "%.2f", (double)v);
         break;
       }
@@ -689,11 +689,12 @@ static void PushParamRows(DioramaEditorRow *out, int capacity, int *count,
                  (double)p->stack_density);
         break;
       case kDioramaEditorParam_Direction: {
+        row->direction = p->set_stack_direction ? p->stack_direction
+                                                : kDioramaStack_Forward;
         DioramaLayerEditor_Upper(
             row->value, sizeof(row->value),
             DioramaLayerOrder_StackDirectionToken(
-                p->set_stack_direction ? p->stack_direction
-                                       : kDioramaStack_Forward));
+                row->direction));
         break;
       }
       case kDioramaEditorParam_Z:
@@ -741,7 +742,7 @@ static void PushParamRows(DioramaEditorRow *out, int capacity, int *count,
   }
 }
 
-int DioramaLayerEditor_BuildRows(const DioramaLayerOrderTable *table,
+static int BuildRows(const DioramaLayerOrderTable *table,
                                  const DioramaEditorContext *context,
                                  int level_index,
                                  DioramaEditorRow *out, int capacity) {
@@ -811,7 +812,7 @@ int DioramaLayerEditor_BuildRows(const DioramaLayerOrderTable *table,
     row->plane = plane;
     row->selectable = true;
     SetText(row->label, sizeof(row->label), token);
-    FormatPlaneValue(row->value, sizeof(row->value), p);
+    FormatPlaneValue(row, p);
 
     if (plane == context->selected_plane) {
       DioramaTransparentFill effective_fill_kind =
@@ -840,6 +841,21 @@ int DioramaLayerEditor_BuildRows(const DioramaLayerOrderTable *table,
       snprintf(reset->label, sizeof(reset->label), "Reset room %02X",
                context->map_number);
     SetText(reset->value, sizeof(reset->value), "RESET");
+  }
+  return count;
+}
+
+int DioramaLayerEditor_BuildRows(const DioramaLayerOrderTable *table,
+                                 const DioramaEditorContext *context,
+                                 int level_index,
+                                 DioramaEditorRow *out, int capacity) {
+  int count = BuildRows(table, context, level_index, out, capacity);
+  for (int i = 0; i < count; ++i) {
+    out[i].room_live = context->room_live &&
+        context->map_group == DioramaLayerEditor_LevelGroup(level_index);
+    out[i].map_group = context->map_group;
+    out[i].map_number = context->map_number;
+    out[i].section = context->section;
   }
   return count;
 }

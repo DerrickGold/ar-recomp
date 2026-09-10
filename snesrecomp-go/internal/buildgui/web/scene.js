@@ -188,8 +188,9 @@ import {createEncounterState,sampleEncounter} from "./encounters.mjs";
   function describe() {
     const fillmore=nativeArt&&setting.value==="fillmore";
     canvas.dataset.scene=fillmore?"fillmore":"palace";
-    canvas.setAttribute("aria-label",nativeArt?(fillmore?"The Master jump-slashes birds, defeats ground enemies, and occasionally duels a centaur in Fillmore; decorative scene with locally extracted US ROM artwork":"The original Sky Palace with an angel flying through the clouds; locally extracted US ROM artwork"):"An illustrated palace floating above the clouds");
-    caption.textContent=nativeArt?(fillmore?"A little adventure in Fillmore · original ROM artwork":"A little patrol above the clouds · original ROM artwork"):"A moment above the clouds";
+    canvas.setAttribute("data-i18n-aria",nativeArt?(fillmore?"builder.scene.fillmore_aria":"builder.scene.palace_aria"):"builder.scene.placeholder_aria");
+    window.workshopI18n.apply(canvas);
+    window.workshopI18n.set(caption,nativeArt?(fillmore?"builder.scene.fillmore":"builder.scene.palace"):"builder.scene.placeholder");
   }
   async function loadArt() {
     if(nativeArt||loading||closed||document.hidden||choice.value==="off"||performance.now()<retryAfter) return;
