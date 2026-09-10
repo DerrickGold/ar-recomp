@@ -1,4 +1,5 @@
 #include "localization/text_backend.h"
+#include "host/font_resources.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -84,13 +85,15 @@ int main(void) {
   invalid.ops = &invalid_ops;
   CHECK(!ArTextBackend_IsReady(&invalid));
 
-  const char *fallbacks[] = {"fallback.ttf"};
+  ArHostFontResources store = {0}; /* Fake backend never acquires bytes. */
+  const ArFontResourceId fallbacks[] = {2};
   ArTextBackendConfig config = {
     .struct_size = sizeof(config),
     .abi_version = AR_TEXT_BACKEND_CONFIG_ABI_VERSION,
     .font_stack_id = "test-stack",
-    .primary_font_path = "primary.ttf",
-    .fallback_font_paths = fallbacks,
+    .resources = ArHostFontResources_Provider(&store),
+    .primary_font = 1,
+    .fallback_fonts = fallbacks,
     .fallback_font_count = 1,
     .font_revision = 7,
     .cached_size_capacity = 4,
@@ -122,11 +125,25 @@ int main(void) {
   CHECK(ArTextBackendInstance_Get(&instance)->implementation_revision == 8);
 
   ArTextBackendConfig bad = config;
-  bad.fallback_font_paths = NULL;
+  bad.fallback_fonts = NULL;
   CHECK(!ArTextBackendInstance_Create(
       &instance, &backend, &bad, error, sizeof(error)));
   CHECK(fake.creates == 3);
   CHECK(ArTextBackendInstance_Get(&instance) != NULL);
+
+  bad = config;
+  bad.fallback_font_count = SIZE_MAX;
+  CHECK(!ArTextBackendInstance_Create(&instance, &backend, &bad, error, sizeof(error)));
+  bad = config;
+  bad.primary_font = 0;
+  CHECK(!ArTextBackendInstance_Create(&instance, &backend, &bad, error, sizeof(error)));
+  bad = config;
+  bad.resources = (ArFontResources){0};
+  CHECK(!ArTextBackendInstance_Create(&instance, &backend, &bad, error, sizeof(error)));
+  bad = config;
+  --bad.abi_version;
+  CHECK(!ArTextBackendInstance_Create(&instance, &backend, &bad, error, sizeof(error)));
+  CHECK(fake.creates == 3 && ArTextBackendInstance_Get(&instance));
 
   ArTextBackendInstance_Destroy(&instance);
   CHECK(fake.destroys == 3);

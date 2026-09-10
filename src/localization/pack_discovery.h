@@ -28,12 +28,18 @@ typedef struct ArLanguagePackCatalog {
    * is looking at a subset and should be told so. */
   size_t dropped;
   bool visit_limit_reached;
+  /* Ambiguous portable IDs never select an arbitrary first copy. */
+  char conflicts[kArLanguagePackCatalogVisitLimit][kArLanguagePackageIdCapacity];
+  size_t conflict_count;
 } ArLanguagePackCatalog;
 
 bool ArLanguagePackCatalog_Add(ArLanguagePackCatalog *catalog,
                                const ArLanguagePackIo *io,
                                const char *manifest, const char *directory_id,
                                ArLanguagePackError *error);
+bool ArLanguagePackCatalog_ReadArchiveIndex(ArLanguagePackCatalog *catalog,
+    const ArLanguagePackIo *io, const char *root, const char *data, size_t size,
+    ArLanguagePackError *error);
 /* Desktop adapter: scan one explicit installation root once at startup. */
 bool ArLanguagePackCatalog_ScanDesktop(ArLanguagePackCatalog *catalog,
                                        const char *root);

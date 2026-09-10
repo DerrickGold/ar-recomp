@@ -33,6 +33,14 @@ func (d *Decoder) titleGraphicalSurface(entries []assetEntry) (IRObject, error) 
 }
 
 func (d *Decoder) endingGraphicalSurface() (IRObject, error) {
+	entries, err := d.assetScript()
+	if err != nil {
+		return nil, err
+	}
+	assets, err := d.endingAssets(entries)
+	if err != nil {
+		return nil, err
+	}
 	matches := scanPattern(d.rom, endingPageSignature)
 	if len(matches) != 1 {
 		return nil, fmt.Errorf("expected one ending page copy, found %d", len(matches))
@@ -45,6 +53,29 @@ func (d *Decoder) endingGraphicalSurface() (IRObject, error) {
 	raw, err := d.span(routineOffset, 5)
 	if err != nil || !bytes.Equal(raw, instructionBytes("48b00ea90f")) {
 		return nil, fmt.Errorf("ending page-copy entry changed")
+	}
+	fade, err := d.span(routineOffset+5, 12)
+	if err != nil || fade[0] != 0x20 || !bytes.Equal(fade[:3], fade[3:6]) ||
+		!bytes.Equal(fade[6:], instructionBytes("8d00213a10f4")) {
+		return nil, fmt.Errorf("ending fade-out changed")
+	}
+	fadeIn, err := d.span(routineOffset+0x33, 16)
+	if err != nil || !bytes.Equal(fadeIn[:2], instructionBytes("a900")) ||
+		!bytes.Equal(fadeIn[2:8], fade[:6]) || !bytes.Equal(fadeIn[8:], instructionBytes("8d00211ac91090f2")) {
+		return nil, fmt.Errorf("ending fade-in changed")
+	}
+	hold, err := d.span(routineOffset+0x43, 18)
+	if err != nil || !bytes.Equal(hold[:9], instructionBytes("a301c913f00ac220a9")) ||
+		hold[11] != 0x20 || !bytes.Equal(hold[14:], instructionBytes("e2206860")) {
+		return nil, fmt.Errorf("ending page hold changed")
+	}
+	waitOffset, err := pc24Offset((offsetPC(routineOffset) & 0xff0000) | word(hold[12:]))
+	if err != nil {
+		return nil, err
+	}
+	wait, err := d.span(waitOffset, 7)
+	if err != nil || !bytes.Equal(wait[:3], fade[:3]) || !bytes.Equal(wait[3:], instructionBytes("3ad0fa60")) {
+		return nil, fmt.Errorf("ending frame-counted hold changed")
 	}
 	routine := offsetPC(routineOffset)
 	calls, err := d.callsTo(routine, "jsr", true)
@@ -97,12 +128,14 @@ func (d *Decoder) endingGraphicalSurface() (IRObject, error) {
 		}
 	}
 	mvn := signatureOffset + bytes.Index(endingPageSignature, instructionBytes("547f7e"))
-	return IRObject{"id": "ending.credits.graphical_pages", "classification": "graphical_text_paged_surface", "replacement_path": "future_graphics_surface_replacement",
+	return IRObject{"id": "ending.credits.graphical_pages", "classification": "graphical_text_paged_surface", "replacement_path": "editable_credits_pages_with_native_artwork_exclusions",
 		"runtime_selector": IRObject{"mode_18": "$08"},
 		"copy_routine":     IRObject{"entry_pc24": pcString(routine), "mvn_site_pc24": cursorAddress(mvn), "signature_sha256": rawSHA256(endingPageSignature), "caller_count": len(calls), "call_sites": pcStrings(calls)},
 		"page_abi": IRObject{"page_byte_count": 0x800, "sequential_page_stop_exclusive": stop, "immediate_calls": immediate, "active_page_indices": active, "dormant_page_indices": dormant,
 			"addressable_page_count": pageCount, "source_wram_range": fmt.Sprintf("$7E:4000-$7E:%04X", 0x4000+pageCount*0x800-1), "destination_wram_range": "$7F:B000-$7F:B7FF"},
-		"source_asset_status": "runtime_prepared_wram_original_rom_producer_not_claimed", "redistribution": "structural_provenance_only_no_retail_pages"}, nil
+		"source_asset_status": "asset_script_source_verified", "producer": assets.evidence(),
+		"timing":         IRObject{"fade_out_steps": 16, "fade_in_steps": 16, "frames_per_step": 2, "hold_frames": word(hold[9:]), "hold_exempt_page_index": 19},
+		"redistribution": "structural_provenance_only_no_retail_pages"}, nil
 }
 
 func (d *Decoder) graphicalCensus(census *NativeDestinationCensus, entries []assetEntry) (IRObject, error) {
@@ -184,6 +217,6 @@ func (d *Decoder) graphicalCensus(census *NativeDestinationCensus, entries []ass
 		"claim":          "All language-bearing graphical surfaces are owned by a stable replacement class; only structured text is author-editable.",
 		"resource_count": len(resources), "font_resource_count": 1, "tile_strip_or_tilemap_region_count": 8, "full_surface_count": 2, "path_audits": audits, "resources": resources,
 		"boundaries": []string{"Non-language regional art and gameplay graphics belong to the future regional-graphics registry, not language extraction.",
-			"Title and ending/credits lettering remains graphical and is not represented as editable Unicode text.",
-			"The ending page producer is deliberately not inferred from the runtime WRAM copy ABI."}}, nil
+			"Title logo and copyright pages remain artwork; credits lettering has a separate editable Unicode composition decoder.",
+			"Credits use the final 08/01 asset entry's distinct alphabet, palette and twenty page maps; not the dialogue alphabet."}}, nil
 }

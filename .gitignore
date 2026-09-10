@@ -30,6 +30,8 @@ game-assets/fonts/noto/*
 !game-assets/fonts/noto/OFL.txt
 !game-assets/fonts/noto/NotoSansJP-Bold.otf
 !game-assets/fonts/noto/NotoSansJP-OFL.txt
+!game-assets/fonts/noto/NotoSansArabic-Bold.ttf
+!game-assets/fonts/noto/NotoSansHebrew-Bold.ttf
 !game-assets/fonts/noto/README.md
 game-assets/manifest.ini
 
@@ -48,6 +50,9 @@ game-assets/manifest.ini
 # reference text or user-owned work. Never publish them with the source tree.
 *.arproject
 *.arlang
+# Two independently authored demo messages, validated against the source
+# example. All user publications and ROM-derived backups remain ignored.
+!examples/example.fr-ca.arlang
 !assets/*.png
 !snesrecomp-go/internal/buildgui/assets/title-logo.png
 
@@ -99,10 +104,11 @@ __pycache__/
 .venv/
 venv/
 
-# Dependencies (cloned repos) — except small vendored single-file libs
+# Dependencies (cloned repos) — except explicitly vendored dependencies
 third_party/*
 !third_party/stb/
 !third_party/unicode/
+!third_party/sheenbidi/
 third_party/unicode/*
 !third_party/unicode/NOTICE
 !third_party/unicode/utf8proc-LICENSE.md

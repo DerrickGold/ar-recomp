@@ -16,25 +16,28 @@ int main(void) {
   ArLocalizationFrame frame;
   ArLocalizationFrame_Reset(&frame);
   CHECK(frame.snapshot_count == 0 && frame.text_bytes == 0);
+  CHECK(ArLocalizationFrame_IsValid(&frame));
   CHECK(ArLocalizationFrame_SetFont(
-      &frame, "fr-FR", "test.font", "/tmp/test.ttf", 7,
+      &frame, "fr-FR", "test.font", UINT64_C(1), 7,
       &frame.settings));
-  char fallback[] = "/tmp/fallback.ttf";
-  const char *fallbacks[] = {fallback, "/tmp/second.ttf"};
+  ArFontResourceId fallbacks[] = {2, 3};
   CHECK(ArLocalizationFrame_SetFallbackFonts(&frame, fallbacks, 2));
-  fallback[5] = 'X';
+  fallbacks[0] = 4;
   CHECK(frame.fallback_font_count == 2 &&
-        !strcmp(frame.fallback_font_paths[0], "/tmp/fallback.ttf"));
+        frame.fallback_fonts[0] == 2);
   CHECK(!ArLocalizationFrame_SetFallbackFonts(&frame, NULL, 1));
   CHECK(!ArLocalizationFrame_SetFallbackFonts(
       &frame, fallbacks, kArTextPresentationMaximumFallbackFonts + 1));
-  const char *invalid_fallbacks[] = {"valid.ttf", ""};
+  const ArFontResourceId invalid_fallbacks[] = {2, 0};
   CHECK(!ArLocalizationFrame_SetFallbackFonts(&frame, invalid_fallbacks, 2));
   CHECK(frame.fallback_font_count == 2 &&
-        !strcmp(frame.fallback_font_paths[1], "/tmp/second.ttf"));
+        frame.fallback_fonts[1] == 3);
   CHECK(ArLocalizationFrame_SetFont(
-      &frame, "fr-FR", "test.font", "/tmp/test.ttf", 7, &frame.settings));
-  CHECK(!frame.fallback_font_count && !frame.fallback_font_paths[0][0]);
+      &frame, "fr-FR", "test.font", UINT64_C(1), 7, &frame.settings));
+  CHECK(!frame.fallback_font_count && !frame.fallback_fonts[0]);
+  const ArLocalizationFrame font_before = frame;
+  CHECK(!ArLocalizationFrame_SetFont(&frame, "fr", "test", 0, 7, &frame.settings));
+  CHECK(!memcmp(&frame, &font_before, sizeof(frame)));
   const ArTextCellDestination destination = {
       .background = 3,
       .screen = kArTextCellScreen_Composited,
@@ -53,6 +56,30 @@ int main(void) {
   CHECK(frame.cells.records[0].snapshot_slot == 0);
   CHECK(frame.snapshots[0].native_preserve_count == 1);
   CHECK(frame.snapshots[0].native_preserves[0].column == 15);
+  CHECK(!strcmp(frame.snapshots[0].language.locale, "fr-FR"));
+  CHECK(frame.snapshots[0].language.direction == kArTextDirection_LeftToRight);
+  ArLocalizationTextLanguage language = {.locale = "ar",
+      .direction = kArTextDirection_RightToLeft};
+  CHECK(ArLocalizationFrame_SetTextLanguage(&frame, &language));
+  CHECK(!strcmp(frame.snapshots[0].language.locale, "ar"));
+  CHECK(frame.snapshots[0].language.direction == kArTextDirection_RightToLeft);
+  CHECK(!strcmp(frame.locale, "fr-FR") && frame.primary_font == 1);
+  const ArLocalizationFrame language_before = frame;
+  CHECK(!ArLocalizationFrame_SetTextLanguage(&frame, NULL));
+  language.locale[0] = 0;
+  CHECK(!ArLocalizationFrame_SetTextLanguage(&frame, &language));
+  memset(language.locale, 'a', sizeof(language.locale));
+  CHECK(!ArLocalizationFrame_SetTextLanguage(&frame, &language));
+  language.locale[2] = 0;
+  language.direction = (ArTextDirection)99;
+  CHECK(!ArLocalizationFrame_SetTextLanguage(&frame, &language));
+  CHECK(!memcmp(&frame, &language_before, sizeof(frame)));
+  ArTextBidiSpans bidi = {.count = 1, .spans = {{0, sizeof(text)-1, kArTextDirection_Auto}}};
+  CHECK(ArLocalizationFrame_SetTextBidiSpans(&frame, &bidi));
+  CHECK(frame.bidi.count == 1 && frame.snapshots[0].bidi_span_count == 1);
+  bidi.spans[0].end = 1; // Cannot split É or change already published spans.
+  CHECK(!ArLocalizationFrame_SetTextBidiSpans(&frame, &bidi));
+  CHECK(frame.bidi.spans[0].end == sizeof(text)-1);
   CHECK(ArLocalizationFrame_AddIndicator(
       &frame, 1, kArLocalizationIndicator_DialogueContinue,
       (ArTextCellRegion){15, 21, 1, 1}));
@@ -71,7 +98,7 @@ int main(void) {
   ArLocalizationFrame window_frame;
   ArLocalizationFrame_Reset(&window_frame);
   CHECK(ArLocalizationFrame_SetFont(
-      &window_frame, "fr", "test.font", "/tmp/test.ttf", 7,
+      &window_frame, "fr", "test.font", UINT64_C(1), 7,
       &window_frame.settings));
   const char rolling[] = "Avant\n\xC3\x89" "tape";
   CHECK(!ArLocalizationFrame_AddDialogueWindow(
@@ -89,7 +116,7 @@ int main(void) {
   ArLocalizationFrame empty_frame;
   ArLocalizationFrame_Reset(&empty_frame);
   CHECK(ArLocalizationFrame_SetFont(
-      &empty_frame, "en", "test.font", "/tmp/test.ttf", 7, &empty_frame.settings));
+      &empty_frame, "en", "test.font", UINT64_C(1), 7, &empty_frame.settings));
   CHECK(ArLocalizationFrame_AddDialogueWindow(
       &empty_frame, 1, destination, (ArTextCellRegion){5, 19, 24, 6},
       "", 0, 0, 0, 9, kArTextDirection_LeftToRight, 8));
@@ -114,7 +141,7 @@ int main(void) {
 
   ArLocalizationFrame_Reset(&object_frame);
   CHECK(ArLocalizationFrame_SetFont(
-      &object_frame, "en-US", "test.font", "/tmp/test.ttf", 7,
+      &object_frame, "en-US", "test.font", UINT64_C(1), 7,
       &object_frame.settings));
   static const char object_text[] = "A\xE2\x80\x87" "B";
   const ArLocalizationInlineObjectSnapshot objects[] = {
@@ -151,7 +178,7 @@ int main(void) {
   ArLocalizationFrame table_frame;
   ArLocalizationFrame_Reset(&table_frame);
   CHECK(ArLocalizationFrame_SetFont(
-      &table_frame, "en-US", "test.font", "/tmp/test.ttf", 7,
+      &table_frame, "en-US", "test.font", UINT64_C(1), 7,
       &table_frame.settings));
   /* A grid layout carries its own geometry; the frame interns it and the
    * snapshot references it by index. */
@@ -233,6 +260,31 @@ int main(void) {
       NULL, 0));
   CHECK(memcmp(&before, &frame, sizeof(frame)) == 0);
   CHECK(!ArLocalizationFrame_GetText(&frame, 1, NULL));
+
+  /* Every public consumer rejects mismatched ABI extents and forged bounded
+   * pool metadata before following a tail member or nested index. */
+  CHECK(ArLocalizationFrame_IsValid(&frame));
+  ArLocalizationFrame malformed = frame;
+  malformed.struct_size = 8;
+  const ArLocalizationFrame malformed_before = malformed;
+  CHECK(!ArLocalizationFrame_SetFont(
+      &malformed, "en", "test", 1, 1, &frame.settings));
+  CHECK(!memcmp(&malformed, &malformed_before, sizeof(malformed)));
+  CHECK(!ArLocalizationFrame_GetText(&malformed, 0, NULL));
+  CHECK(!ArLocalizationFrame_IsValid(&malformed));
+  malformed = frame;
+  malformed.text_bytes = kArLocalizationFrameTextCapacity + 1u;
+  CHECK(!ArLocalizationFrame_IsValid(&malformed));
+  malformed = frame;
+  malformed.grid_count = kArLocalizationFrameGridCapacity + 1u;
+  CHECK(!ArLocalizationFrame_IsValid(&malformed));
+  malformed = frame;
+  malformed.snapshots[0].utf8_offset = malformed.text_bytes;
+  CHECK(!ArLocalizationFrame_IsValid(&malformed));
+  malformed = frame;
+  malformed.cells.records[0].snapshot_slot =
+      (int8_t)malformed.snapshot_count;
+  CHECK(!ArLocalizationFrame_IsValid(&malformed));
   puts("localization frame checks passed");
   return failures ? 1 : 0;
 }

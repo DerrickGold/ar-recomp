@@ -71,6 +71,10 @@ typedef struct ArLocalizedPreparedFrame {
 
 /* The host injects a portable factory once. No SDL type crosses this API. */
 void ArLocalizedTextPresenter_SetBackend(const ArTextBackend *backend);
+/* Provider/context outlive active and pending backend leases. Reset resources
+ * before destroying the host store. Changing providers invalidates caches. */
+void ArLocalizedTextPresenter_SetFontResources(const ArFontResources *resources);
+void ArLocalizedTextPresenter_DiscardPreparedFont(ArRenderDevice *device);
 
 /* Synchronous selection preflight, before authored waits/pages are enabled.
  * Opens, rasters and uploads into one retained candidate cache. Only a later

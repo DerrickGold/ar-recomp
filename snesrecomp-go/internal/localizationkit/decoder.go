@@ -29,8 +29,8 @@ const (
 )
 
 // Operation is a tagged, lossless extraction-IR object, not author syntax.
-// Its fields follow language_pack_extract.py (including explicit null values
-// for unresolved semantics). It is never executed by the game or GUI.
+// Explicit null values retain unresolved semantics. It is never executed by
+// the game or GUI; author export must first prove every operation's meaning.
 type Operation map[string]any
 
 type Record struct {
@@ -38,6 +38,9 @@ type Record struct {
 	End              int         `json:"end"`
 	Terminated       bool        `json:"terminated"`
 	DictionaryTokens []string    `json:"dictionary_tokens"`
+	// Top-level native token counts, not expanded glyph counts. Internal
+	// runtime-route evidence is produced by the same authoritative decoder.
+	nativePageUnits []int
 }
 
 type iconPart struct {
@@ -83,7 +86,7 @@ var decoderFacts = func() decoderFactsData {
 }()
 
 // Decoder owns a private ROM copy. The caller cannot change the bytes after
-// identification; supported profiles are immutable, generated encoding facts.
+// identification; supported profiles are immutable, Go-owned encoding facts.
 type Decoder struct {
 	rom         []byte
 	profile     decoderProfile
@@ -277,9 +280,17 @@ func (d *Decoder) DecodeRecord(consumer Consumer, start, limit int, stopOnYield 
 	w := recordWriter{decoder: d, consumer: consumer, start: start,
 		record: Record{Operations: []Operation{}, DictionaryTokens: []string{}}}
 	position := start
+	pageUnits := 0
 	for position < limit {
 		code := d.rom[position]
 		position++
+		if consumer == Interactive {
+			pageUnits++
+			if code == 0 || code == 1 || code == 2 {
+				w.record.nativePageUnits = append(w.record.nativePageUnits, pageUnits)
+				pageUnits = 0
+			}
+		}
 		if code == 0 || code == 1 {
 			op := Operation{"op": "end", "native_cursor_after": cursorAddress(position)}
 			if code == 1 {

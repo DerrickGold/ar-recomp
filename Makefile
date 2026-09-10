@@ -36,6 +36,10 @@
 #                     default run is not evidence that this gate ran. This
 #                     target fails loudly instead of skipping. Override the ROM
 #                     directory with `make check-localization-roms ROM_ROOT=...`.
+#   make check-localization-workflow LOCALIZATION_BUILDER=/path/to/snesbuild
+#                     exercise a packaged Go extractor, editor import/export,
+#                     real game font gate, same-locale installs and relocation.
+#                     This does not replace clean full-game regeneration.
 #   make check-cross  compile AND link the game for the platforms that cannot be
 #                     tested on this machine (currently Windows x86_64), using
 #                     the pinned Zig toolchain and the same SDL3 redistributable
@@ -61,7 +65,7 @@ CLEAN_BUILD_DIRS := build build-release build-control build-terrain build-asan b
 CLEAN_GENERATED  := src/gen recomp/funcs.h saves/gen_meta.json saves/rts_webs.txt saves/rts_webs.prev.txt
 CLEAN_RELEASE    := release
 
-.PHONY: dev release $(addprefix release-,$(PLATFORMS)) check-constants check-cross check-localization-roms clean clean-all clean-release clean-packaging-mounts
+.PHONY: dev release $(addprefix release-,$(PLATFORMS)) check-constants check-cross check-localization-roms check-localization-workflow clean clean-all clean-release clean-packaging-mounts
 
 check-constants:
 	@sh tools/check_constants.sh
@@ -147,14 +151,27 @@ check-localization-roms:
 	  echo "missing regional ROMs in $(ROM_ROOT):$$missing"; \
 	  echo "this gate cannot be reported as passed without them"; exit 1; \
 	fi
-	@if [ ! -x "$(LOCALIZATION_PROBE)" ]; then \
-	  echo "=== building the production C loader probe ==="; \
-	  cmake --build build --target actraiser_language_pack_runtime_test || exit 1; \
-	fi
+	cmake --build build --target actraiser_language_pack_runtime_test actraiser_localization_art_test actraiser_localization_credits_test
 	AR_LOCALIZATION_GUI_ROM_ROOT="$(abspath $(ROM_ROOT))" \
+	AR_LOCALIZATION_BUILD_ROM="$(abspath $(ROM_ROOT)/ar.sfc)" \
 	AR_AUTHOR_RUNTIME_PROBE="$(abspath $(LOCALIZATION_PROBE))" \
-	  go -C snesrecomp-go test ./internal/buildgui ./internal/localizationkit -count=1
+	AR_NATIVE_GRAPHICS_PROBE="$(abspath build/actraiser_localization_art_test)" \
+	AR_CREDITS_RUNTIME_PROBE="$(abspath build/actraiser_localization_credits_test)" \
+	  go -C snesrecomp-go test ./internal/buildgui ./internal/localizationkit ./internal/project -count=1
 	@echo "five-ROM localization acceptance ran with all $(words $(LOCALIZATION_ROMS)) ROMs and the C probe"
+
+check-localization-workflow: check-localization-roms
+	@test -n "$(LOCALIZATION_BUILDER)" && test -x "$(LOCALIZATION_BUILDER)" || \
+	  { echo "set LOCALIZATION_BUILDER to a freshly packaged snesbuild executable"; exit 1; }
+	cmake --build build --target ActRaiserRecomp actraiser_input_replay_test
+	AR_LOCALIZATION_GUI_ROM_ROOT="$(abspath $(ROM_ROOT))" \
+	AR_LOCALIZATION_BUILD_ROM="$(abspath $(ROM_ROOT)/ar.sfc)" \
+	AR_LOCALIZATION_BUILDER_PROBE="$(abspath $(LOCALIZATION_BUILDER))" \
+	AR_AUTHOR_RUNTIME_PROBE="$(abspath $(LOCALIZATION_PROBE))" \
+	AR_AUTHOR_FONT_PROBE="$(abspath build/ActRaiserRecomp)" \
+	AR_REPLAY_WRITER_PROBE="$(abspath build/actraiser_input_replay_test)" \
+	  go -C snesrecomp-go test -race ./internal/buildgui \
+	    -run 'TestLocalizationRelocatedBuilderGameWorkflow|TestHeadlessDebugStateRejectionExits|TestHeadlessReplayEndExitsBeforeSafetyCap' -count=1
 
 clean-packaging-mounts:
 	@/bin/sh "$(PACKAGING)/scripts/detach-macos-dmgs.sh" "$(abspath $(PACKAGING)/cache)"

@@ -42,6 +42,15 @@ typedef enum ActRaiserLocalizationComposeRouteMatch {
   kActRaiserLocalizationComposeRouteMatch_Selector = 1u << 1,
 } ActRaiserLocalizationComposeRouteMatch;
 
+/* Scene ownership is explicit metadata, never inferred from surface ID ranges.
+ * The sound-test modal is additionally identified by its native caller. */
+typedef enum ActRaiserLocalizationComposeScope {
+  kActRaiserLocalizationComposeScope_Simulation,
+  kActRaiserLocalizationComposeScope_Action,
+  kActRaiserLocalizationComposeScope_Title,
+  kActRaiserLocalizationComposeScope_SoundTest,
+} ActRaiserLocalizationComposeScope;
+
 /* Persistent fixed-composer surfaces use one stable surface ID per ownership
  * slot. A later route for that slot replaces it without exposing USA-ROM
  * identity to the renderer or language pack. */
@@ -50,6 +59,7 @@ typedef struct ActRaiserLocalizationComposeRoute {
   uint32_t source_table_pc24;
   const char *semantic_id;
   uint32_t surface_id;
+  ActRaiserLocalizationComposeScope scope;
   ArTextCellRegion region;
   uint16_t destination;
   uint16_t source_selector;

@@ -3,12 +3,13 @@
 
 #include "localization/language_contract.h"
 #include "localization/text_boundaries.h"
+#include "localization/text_bidi.h"
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-#define AR_DIALOGUE_SESSION_ABI_VERSION UINT32_C(2)
+#define AR_DIALOGUE_SESSION_ABI_VERSION UINT32_C(3)
 #define AR_DIALOGUE_VALUE_RESOLVER_ABI_VERSION UINT32_C(2)
 
 enum {
@@ -114,6 +115,8 @@ typedef struct ArDialoguePageSnapshot {
   const char *package_id;
   const char *locale;
   ArLanguageDirection direction;
+  const ArTextBidiSpan *bidi_spans;
+  size_t bidi_span_count;
 } ArDialoguePageSnapshot;
 
 /* Progress observed while the untouched ROM presenter owns the text box.

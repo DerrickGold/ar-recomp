@@ -13,8 +13,19 @@ removable compiler SDK. Source provenance is recorded in
 The shared Noto Sans face retains its SIL Open Font License beside the font at
 `game-assets/fonts/noto/OFL.txt`. The independent interface stack also includes
 unmodified Noto Sans JP Bold with `game-assets/fonts/noto/NotoSansJP-OFL.txt`.
+Arabic/Hebrew package metadata uses unmodified Noto Sans Arabic Bold and Noto
+Sans Hebrew Bold under the same shared `OFL.txt` as the primary face.
 Provenance and hashes are recorded beside them in `README.md`. Retail fonts
 and scripts are not distributed.
+
+## SheenBidi
+
+Enhanced text uses unmodified SheenBidi 3.0.0 for Unicode bidi resolution and
+script itemization, Copyright (C) 2014–2026 Muhammad Tayyab Akram, under the
+Apache License 2.0. It is compiled into the game; no additional shared library
+or system installation is required. The source and provenance are included
+under `utils/third_party/sheenbidi`, and its license is also retained under
+`utils/licenses/SheenBidi/LICENSE` independently of buildable source.
 
 ## Snaggletooth S-DSP accuracy core
 

@@ -46,6 +46,8 @@ typedef struct DialoguePage {
   uint32_t object_count;
   uint32_t object_capacity;
   uint32_t cluster_count;
+  ArTextBidiSpan *bidi_spans;
+  uint32_t bidi_span_count, bidi_span_capacity;
 } DialoguePage;
 
 typedef struct DialogueProgram {
@@ -129,6 +131,7 @@ static void DestroyPage(DialoguePage *page) {
   free(page->structural_boundaries);
   free(page->cues);
   free(page->objects);
+  free(page->bidi_spans);
   memset(page, 0, sizeof(*page));
 }
 
@@ -363,20 +366,29 @@ static bool AppendPlainMessage(const ArLanguagePack *pack,
 
 static bool ResolveLocalizedTerm(const ProgramSource *source, const char *id,
                                  char *output, size_t capacity,
+                                 ArTextDirection *direction,
                                  ArLanguagePackError *error) {
   const ArLanguageMessage *message =
       ArLanguagePack_FindMessage(source->effective_pack, id);
   if (message && AppendPlainMessage(source->effective_pack, message, output,
-                                    capacity, error))
+                                    capacity, error)) {
+    const ArLanguageDirection d = ArLanguagePack_GetMetadata(source->effective_pack)->direction;
+    *direction = d == kArLanguageDirection_RightToLeft ? kArTextDirection_RightToLeft :
+        d == kArLanguageDirection_LeftToRight ? kArTextDirection_LeftToRight : kArTextDirection_Auto;
     return true;
+  }
   if (source->term_fallback_pack &&
       source->term_fallback_pack != source->effective_pack) {
     if (error)
       error->message[0] = 0;
     message = ArLanguagePack_FindMessage(source->term_fallback_pack, id);
     if (message && AppendPlainMessage(source->term_fallback_pack, message,
-                                      output, capacity, error))
+                                      output, capacity, error)) {
+      const ArLanguageDirection d = ArLanguagePack_GetMetadata(source->term_fallback_pack)->direction;
+      *direction = d == kArLanguageDirection_RightToLeft ? kArTextDirection_RightToLeft :
+          d == kArLanguageDirection_LeftToRight ? kArTextDirection_LeftToRight : kArTextDirection_Auto;
       return true;
+    }
   }
   SetError(error, "localized term '%s' is unavailable", id);
   return false;
@@ -397,7 +409,9 @@ static bool AppendValue(const ProgramSource *source,
   formatted[0] = 0;
   formatted[sizeof(formatted) - 1] = 0;
   const char *text = value->text;
+  ArTextDirection direction = kArTextDirection_Auto;
   if (value->kind == kArLanguagePlaceholder_Number) {
+    direction = kArTextDirection_LeftToRight;
     bool formatted_number = false;
     if (resolver && resolver->format_number) {
       formatted_number = resolver->format_number(
@@ -417,7 +431,7 @@ static bool AppendValue(const ProgramSource *source,
     text = formatted;
   } else if (value->kind == kArLanguagePlaceholder_LocalizedTerm) {
     if (!ResolveLocalizedTerm(source, value->text, formatted,
-                              sizeof(formatted), error))
+                              sizeof(formatted), &direction, error))
       return false;
     text = formatted;
   } else if (value->kind == kArLanguagePlaceholder_Icon) {
@@ -428,7 +442,18 @@ static bool AppendValue(const ProgramSource *source,
       return false;
     return true;
   }
-  return AppendBytes(page, text, strlen(text), error);
+  const uint32_t start = (uint32_t)page->utf8_bytes;
+  if (!AppendBytes(page, text, strlen(text), error)) return false;
+  if (start == page->utf8_bytes) return true;
+  if (page->bidi_span_count >= kArTextMaximumBidiSpans) {
+    SetError(error, "dialogue page exceeds %u inserted value spans", kArTextMaximumBidiSpans);
+    return false;
+  }
+  if (!Reserve((void **)&page->bidi_spans, sizeof(*page->bidi_spans),
+               page->bidi_span_count + 1, &page->bidi_span_capacity, error)) return false;
+  page->bidi_spans[page->bidi_span_count++] = (ArTextBidiSpan){
+      start, (uint32_t)page->utf8_bytes, direction};
+  return true;
 }
 
 static size_t ByteOffsetForClusters(const DialoguePage *page,
@@ -451,7 +476,7 @@ static size_t ByteOffsetForClusters(const DialoguePage *page,
  * otherwise native synchronization could publish a half-character cursor. */
 static bool FinalizePage(DialoguePage *page, ArLanguagePackError *error) {
   size_t offset = 0;
-  uint32_t clusters = 0, cue = 0;
+  uint32_t clusters = 0, cue = 0, span = 0;
   for (;;) {
     while (cue < page->cue_count && page->cues[cue].utf8_offset <= offset) {
       if (page->cues[cue].utf8_offset != offset) {
@@ -467,6 +492,14 @@ static bool FinalizePage(DialoguePage *page, ArLanguagePackError *error) {
       SetError(error, "dialogue page is not valid UTF-8");
       return false;
     }
+    /* An insertion that begins/ends in a combining sequence belongs to the
+     * complete grapheme. Never make a new shaping/reveal boundary inside it. */
+    while (span < page->bidi_span_count && page->bidi_spans[span].start < next) {
+      ArTextBidiSpan *value = &page->bidi_spans[span];
+      if (value->start > offset) value->start = (uint32_t)offset;
+      if (value->end <= next) { value->end = (uint32_t)next; ++span; }
+      else break;
+    }
     offset = next;
     ++clusters;
   }
@@ -475,6 +508,15 @@ static bool FinalizePage(DialoguePage *page, ArLanguagePackError *error) {
     return false;
   }
   page->cluster_count = clusters;
+  uint32_t merged = 0;
+  for (uint32_t i = 0; i < page->bidi_span_count; ++i) {
+    const ArTextBidiSpan value = page->bidi_spans[i];
+    if (merged && value.start < page->bidi_spans[merged - 1].end) {
+      page->bidi_spans[merged - 1].end = value.end;
+      page->bidi_spans[merged - 1].direction = kArTextDirection_Auto;
+    } else page->bidi_spans[merged++] = value;
+  }
+  page->bidi_span_count = merged;
   return true;
 }
 
@@ -949,17 +991,25 @@ static bool ActivateSelection(ArDialogueSession *session,
                     &program, error))
     return false;
 
-  if (program && maximum_text_bytes) {
+  if (program) {
     size_t remaining = maximum_text_bytes;
+    size_t remaining_spans = kArTextMaximumBidiSpans;
     for (uint32_t i = 0; i < program->page_count; ++i) {
-      if (program->pages[i].utf8_bytes >= remaining) {
+      if (program->pages[i].bidi_span_count > remaining_spans) {
+        SetError(error, "resolved dialogue exceeds %u inserted value spans",
+                 kArTextMaximumBidiSpans);
+        DestroyProgram(program);
+        return false;
+      }
+      remaining_spans -= program->pages[i].bidi_span_count;
+      if (maximum_text_bytes && program->pages[i].utf8_bytes >= remaining) {
         SetError(error,
                  "resolved dialogue exceeds the %zu-byte presentation budget",
                  maximum_text_bytes);
         DestroyProgram(program);
         return false;
       }
-      remaining -= program->pages[i].utf8_bytes + 1u;
+      if (maximum_text_bytes) remaining -= program->pages[i].utf8_bytes + 1u;
     }
   }
 
@@ -1255,6 +1305,8 @@ bool ArDialogueSession_GetPage(const ArDialogueSession *session,
       .package_id = program->package_id,
       .locale = program->locale,
       .direction = program->direction,
+      .bidi_spans = source->bidi_spans,
+      .bidi_span_count = source->bidi_span_count,
   };
   return true;
 }
@@ -1283,6 +1335,8 @@ bool ArDialogueSession_GetAuthoredPage(const ArDialogueSession *session,
       .package_id = program->package_id,
       .locale = program->locale,
       .direction = program->direction,
+      .bidi_spans = source->bidi_spans,
+      .bidi_span_count = source->bidi_span_count,
   };
   return true;
 }

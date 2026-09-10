@@ -1,7 +1,7 @@
 {
   "format": "actraiser-us-runtime-compose-routes",
   "rom_sha256": "b8055844825653210d252d29a2229f9a3e7e512004e83940620173c57d8723f0",
-  "route_count": 89,
+  "route_count": 90,
   "routes": [
     {
       "destination": 2059,
@@ -1254,6 +1254,20 @@
       "source_pc24": "$01:FA9A",
       "surface_id": 9,
       "surface_kind": "flow_speed"
+    },
+    {
+      "destination": 2059,
+      "native_font_pixels": 7,
+      "region": [
+        11,
+        8,
+        10,
+        6
+      ],
+      "semantic_id": "sound_test.menu.labels",
+      "source_pc24": "$02:9871",
+      "surface_id": 16,
+      "surface_kind": "sound_test"
     },
     {
       "destination": 4352,

@@ -5,8 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
-	"os"
 	"reflect"
 	"slices"
 	"testing"
@@ -83,25 +81,14 @@ func runDestinationCase(d *Decoder, p destinationProfile, c destinationTestCase)
 	return result, nil
 }
 
-func TestDestinationReferenceParity(t *testing.T) {
-	path := os.Getenv("AR_LOCALIZATION_DESTINATION_VECTORS")
-	if path == "" {
-		t.Skip("run tools/check_go_localization_decoder.py for independent destination parity")
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer file.Close()
+func TestDestinationRegressions(t *testing.T) {
 	var groups []struct {
 		ID      string                `json:"id"`
 		ROM     []byte                `json:"rom"`
 		Profile destinationProfile    `json:"profile"`
 		Cases   []destinationTestCase `json:"cases"`
 	}
-	if err := json.NewDecoder(io.LimitReader(file, 32<<20)).Decode(&groups); err != nil {
-		t.Fatal(err)
-	}
+	readRegressionFixture(t, "destination-regressions.json.gz", &groups)
 	if len(groups) == 0 {
 		t.Fatal("empty destination gate")
 	}
@@ -111,6 +98,7 @@ func TestDestinationReferenceParity(t *testing.T) {
 			t.Fatal("empty group", group.ID)
 		}
 		for _, c := range group.Cases {
+			var err error
 			d := catalogTestDecoder(t, group.ROM)
 			if len(c.Data) > 0 {
 				d, err = mutatedDecoder(t, d, referenceMutation{Offset: c.Offset, Data: c.Data})
@@ -238,7 +226,7 @@ func TestNativeCompressedAndAssetBoundaries(t *testing.T) {
 	if result, err := d.assetScript(); err == nil || result != nil {
 		t.Fatal("unterminated scene table accepted")
 	}
-	copy(rom[assetScriptBase+3:], []byte{7, 8, 0})
+	copy(rom[assetScriptBase+3:], []byte{8, 1, 0})
 	d = catalogTestDecoder(t, rom[:assetScriptBase+6])
 	entries, err := d.assetScript()
 	if err != nil || len(entries) != 1 {

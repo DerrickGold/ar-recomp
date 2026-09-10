@@ -158,72 +158,19 @@ func cachedDeflate(data []byte) (deflatedMember, bool) {
 // ReadAuthorArchive validates all members before exposing any project. No ZIP
 // entry is extracted to disk, and executable/unreferenced payloads are rejected.
 func ReadAuthorArchive(input io.ReaderAt, size int64) (*AuthorProject, error) {
-	if size <= 0 || size > MaxAuthorArchiveBytes {
-		return nil, fmt.Errorf("archive exceeds size limit")
-	}
-	z, err := zip.NewReader(input, size)
+	index, err := inspectAuthorArchive(input, size)
 	if err != nil {
-		return nil, fmt.Errorf("invalid language ZIP: %w", err)
-	}
-	if len(z.File) == 0 || len(z.File) > maxArchiveFiles {
-		return nil, fmt.Errorf("invalid archive member count")
-	}
-	files := map[string][]byte{}
-	remaining := uint64(MaxAuthorPackBytes)
-	for _, member := range z.File {
-		if !PortablePackPath(member.Name) || !member.Mode().IsRegular() || member.Mode()&0111 != 0 || member.Flags&1 != 0 {
-			return nil, fmt.Errorf("unsafe archive member %q", member.Name)
-		}
-		if _, ok := files[member.Name]; ok {
-			return nil, fmt.Errorf("duplicate archive member %s", member.Name)
-		}
-		if member.UncompressedSize64 > remaining {
-			return nil, fmt.Errorf("archive expansion exceeds size limit")
-		}
-		limit := uint64(MaxAuthorScriptBytes)
-		switch {
-		case member.Name == "pack.ini":
-			limit = MaxPackManifestBytes
-		case member.Name == "package.json":
-			limit = 4096
-		case member.Name == "author-project.json":
-			limit = 2 << 20
-		case strings.HasPrefix(member.Name, "notices/"):
-			limit = 1 << 20
-		case strings.HasSuffix(strings.ToLower(member.Name), ".ttf") || strings.HasSuffix(strings.ToLower(member.Name), ".otf"):
-			limit = MaxPackFontBytes
-		}
-		if member.UncompressedSize64 > limit {
-			return nil, fmt.Errorf("archive member exceeds size limit: %s", member.Name)
-		}
-		reader, err := member.Open()
-		if err != nil {
-			return nil, err
-		}
-		data, err := io.ReadAll(io.LimitReader(reader, int64(member.UncompressedSize64)+1))
-		closeErr := reader.Close()
-		if err != nil {
-			return nil, err
-		}
-		if closeErr != nil {
-			return nil, closeErr
-		}
-		if uint64(len(data)) != member.UncompressedSize64 {
-			return nil, fmt.Errorf("archive member size mismatch")
-		}
-		remaining -= uint64(len(data))
-		files[member.Name] = data
-	}
-	if err := validateProjectFiles(files); err != nil {
 		return nil, err
 	}
-	var header archiveHeader
-	if err := strictAuthorJSON(files["package.json"], &header); err != nil {
-		return nil, fmt.Errorf("invalid package.json: %w", err)
+	files := map[string][]byte{}
+	for _, member := range index.ordered {
+		data, err := readArchiveMember(member, member.UncompressedSize64)
+		if err != nil {
+			return nil, err
+		}
+		files[member.Name] = data
 	}
-	if header.Format != "actraiser-language-archive" || header.Version != 1 || (header.Kind != "backup" && header.Kind != "publication") {
-		return nil, fmt.Errorf("unsupported language archive schema")
-	}
+	header := index.header
 	pack, err := LoadAuthorPack(projectMapFS(files))
 	if err != nil {
 		return nil, err

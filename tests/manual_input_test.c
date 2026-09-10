@@ -12,6 +12,8 @@
  */
 
 #include "manual_input.h"
+#include "manual_caption.h"
+#include "localization/unicode_grapheme.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -222,6 +224,63 @@ static void TestTheHintNamesTheDeviceInHand(void) {
   }
 }
 
+static void TestLocalizedCaptionLayout(void) {
+  const int views[][2] = {{320,224}, {464,208}, {1280,720}, {3840,2160}, {720,1280}};
+  for (int device = 0; device <= 1; ++device) {
+    for (int zoomed = 0; zoomed <= 1; ++zoomed) {
+      char key[64];
+      snprintf(key, sizeof(key), "overlay.manual.controls.%d.%d", device, zoomed);
+      CHECK(!strcmp(ArUiCatalog_Text(kArUiLocale_English, key, NULL),
+                    ManualInput_HintText((ManualHintDevice)device, zoomed)));
+      for (int locale = 0; locale < kArUiLocale_Count; ++locale) {
+        const char *controls = ArUiCatalog_Text((ArUiLocale)locale, key, NULL);
+        CHECK(controls[0]);
+        for (int spread = 0; spread <= 1; ++spread) {
+          for (size_t v = 0; v < sizeof(views) / sizeof(views[0]); ++v) {
+            ManualCaption caption;
+            CHECK(ManualCaption_Build((ArUiLocale)locale, (ManualHintDevice)device,
+                zoomed, spread, 12, 99, views[v][0], views[v][1], 8, &caption));
+            CHECK(caption.scale >= 1 && caption.scale <= 4);
+            CHECK(caption.height <= views[v][1]);
+            CHECK(caption.line_count > 0 && caption.line_count <= kManualCaptionLines);
+            CHECK(strstr(caption.text, "12/99"));
+            CHECK(strstr(caption.text, controls));
+            size_t previous_end = 0, bytes = strlen(caption.text);
+            for (int line = 0; line < caption.line_count; ++line) {
+              const ManualCaptionLine *span = &caption.lines[line];
+              CHECK(span->offset + span->bytes <= bytes);
+              CHECK(span->cells * 8 * caption.scale + 2 * caption.padding <= (size_t)views[v][0]);
+              for (size_t gap = previous_end; gap < span->offset; ++gap)
+                CHECK(caption.text[gap] == ' '); /* no lost text between wraps */
+              size_t offset = span->offset, end = offset + span->bytes, cells = 0;
+              while (offset < end) {
+                size_t next = 0;
+                bool valid = ArUnicodeGrapheme_Next(caption.text, end, offset, NULL, &next);
+                CHECK(valid && next > offset);
+                if (!valid || next <= offset) break;
+                offset = next;
+                ++cells;
+              }
+              CHECK(cells == span->cells);
+              previous_end = end;
+            }
+            CHECK(previous_end == bytes);
+          }
+        }
+      }
+    }
+  }
+  ManualCaption unchanged;
+  memset(&unchanged, 0x5a, sizeof(unchanged));
+  ManualCaption before = unchanged;
+  CHECK(!ManualCaption_Build(kArUiLocale_Japanese, kManualHintDevice_Gamepad,
+      true, false, 1, 10, 1, 1, 8, &unchanged));
+  CHECK(!memcmp(&unchanged, &before, sizeof(before)));
+  CHECK(!ManualCaption_Build(kArUiLocale_English, kManualHintDevice_Keyboard,
+      false, false, 0, 10, 640, 480, 8, &unchanged));
+  CHECK(!memcmp(&unchanged, &before, sizeof(before)));
+}
+
 /* ── Analog panning ───────────────────────────────────────────────────────── */
 
 /* THE DEADZONE IS SUBTRACTED, NOT JUST TESTED.
@@ -374,6 +433,7 @@ int main(void) {
   TestUnmappedKeysMeanNothing();
   TestPadMirrorsTheKeyboardsLogic();
   TestTheHintNamesTheDeviceInHand();
+  TestLocalizedCaptionLayout();
   TestStickStartsFromRestAtTheDeadzoneEdge();
   TestStickDeadzoneMatchesTheGamesClamp();
 

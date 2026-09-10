@@ -75,15 +75,45 @@ endif()
 
 find_package(SDL3 3.4.0 REQUIRED)
 
+# The game source manifest includes these too. Small ROM-free consumers share
+# this target so the host byte-provider contract has no SDL dependency.
+add_library(actraiser_font_resources STATIC
+    src/localization/font_resource.c src/host/font_resources.c)
+target_include_directories(actraiser_font_resources PUBLIC ${CMAKE_SOURCE_DIR}/src)
+
 # Enhanced Unicode text remains optional at the platform binding. The pack,
 # contract, session, and cache layers are portable C and still build when a
 # port supplies no SDL3_ttf rasterizer yet.
 option(AR_ENHANCED_TEXT "Build the desktop SDL3_ttf text backend" ON)
+# Source-local settings also apply to the manifest-driven game target, without
+# exposing a third-party API or dependency macro to every game source file.
+file(STRINGS "${CMAKE_SOURCE_DIR}/snesbuild.ini" _AR_BIDI_SOURCE_LINES
+    REGEX "^source = third_party/sheenbidi/.*[.]c$")
+set(_AR_BIDI_SOURCES)
+foreach(_line IN LISTS _AR_BIDI_SOURCE_LINES)
+    string(REGEX REPLACE "^source = " "" _source "${_line}")
+    list(APPEND _AR_BIDI_SOURCES "${_source}")
+endforeach()
+set_property(SOURCE src/platform/sdl/bidi_text_sdl.c
+    ${_AR_BIDI_SOURCES} PROPERTY INCLUDE_DIRECTORIES
+    "${CMAKE_SOURCE_DIR}/third_party/sheenbidi/Headers;${CMAKE_SOURCE_DIR}/third_party/sheenbidi/Source")
 if(AR_ENHANCED_TEXT)
     find_package(SDL3_ttf 3.2.0 REQUIRED)
+    add_library(actraiser_bidi_text STATIC
+        src/platform/sdl/bidi_text_sdl.c
+        ${_AR_BIDI_SOURCES})
+    target_include_directories(actraiser_bidi_text PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_bidi_text PRIVATE SDL3::SDL3 SDL3_ttf::SDL3_ttf)
+    target_compile_definitions(actraiser_bidi_text PRIVATE AR_HAS_SDL3_TTF=1)
     set(_AR_ENHANCED_TEXT 1)
 else()
     set(_AR_ENHANCED_TEXT 0)
+endif()
+
+if(BUILD_TESTING)
+    add_test(NAME actraiser_bidi_source_manifest
+        COMMAND ${CMAKE_COMMAND} -DGAME_ROOT=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_SOURCE_DIR}/tests/bidi_source_manifest_test.cmake)
 endif()
 
 if(_AR_ENHANCED_TEXT)
@@ -97,7 +127,7 @@ if(_AR_ENHANCED_TEXT)
     target_include_directories(actraiser_font_coverage PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_compile_definitions(actraiser_font_coverage PRIVATE AR_HAS_SDL3_TTF=1)
     target_link_libraries(actraiser_font_coverage PRIVATE
-        SDL3::SDL3 SDL3_ttf::SDL3_ttf actraiser_math)
+        SDL3::SDL3 SDL3_ttf::SDL3_ttf actraiser_bidi_text actraiser_math actraiser_font_resources)
 endif()
 
 set(ACTRAISER_GEN_DIR "${CMAKE_SOURCE_DIR}/src/gen" CACHE PATH
@@ -197,6 +227,25 @@ add_executable(ActRaiserRecomp
     # recompiled banks (generated)
     ${ACTRAISER_GEN_SOURCES}
 )
+
+# Source builds stage the shared Go archive importer beside the game. Released
+# bundles already retain it under utils/tools after build-only cleanup.
+find_program(ACTRAISER_GO_EXECUTABLE NAMES go)
+if(ACTRAISER_GO_EXECUTABLE AND NOT CMAKE_CROSSCOMPILING)
+    file(GLOB_RECURSE AR_LANGUAGE_HELPER_INPUTS CONFIGURE_DEPENDS
+        "${SNESRECOMP_GO_ROOT}/cmd/*.go" "${SNESRECOMP_GO_ROOT}/internal/*")
+    set(AR_LANGUAGE_HELPER "${CMAKE_CURRENT_BINARY_DIR}/snesbuild${CMAKE_EXECUTABLE_SUFFIX}")
+    add_custom_command(OUTPUT "${AR_LANGUAGE_HELPER}"
+        COMMAND ${CMAKE_COMMAND} -E env
+            "GOCACHE=${CMAKE_BINARY_DIR}/go-cache" CGO_ENABLED=0
+            ${ACTRAISER_GO_EXECUTABLE} build -trimpath -o "${AR_LANGUAGE_HELPER}" ./cmd/snesbuild
+        WORKING_DIRECTORY "${SNESRECOMP_GO_ROOT}"
+        DEPENDS ${AR_LANGUAGE_HELPER_INPUTS} "${SNESRECOMP_GO_ROOT}/go.mod"
+        COMMENT "Building shared language archive/authoring helper"
+        VERBATIM)
+    add_custom_target(actraiser_language_helper DEPENDS "${AR_LANGUAGE_HELPER}")
+    add_dependencies(ActRaiserRecomp actraiser_language_helper)
+endif()
 
 target_include_directories(ActRaiserRecomp PRIVATE
     ${CMAKE_SOURCE_DIR}
@@ -401,6 +450,20 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_text_backend_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_text_backend COMMAND actraiser_text_backend_test)
+    target_link_libraries(actraiser_text_backend_test PRIVATE actraiser_font_resources)
+
+    add_executable(actraiser_font_resource_test tests/font_resource_test.c)
+    target_link_libraries(actraiser_font_resource_test PRIVATE actraiser_font_resources)
+    target_compile_definitions(actraiser_font_resource_test PRIVATE
+        "AR_FONT_RESOURCE_TEST_FILE=\"${CMAKE_CURRENT_BINARY_DIR}/font-resource-test.bin\"")
+    add_test(NAME actraiser_font_resource COMMAND actraiser_font_resource_test)
+
+    add_executable(actraiser_text_backend_no_ttf_test
+        tests/text_backend_no_ttf_test.c src/platform/sdl/text_rasterizer_sdl.c
+        src/localization/text_backend.c src/localization/text_rasterizer.c)
+    target_link_libraries(actraiser_text_backend_no_ttf_test PRIVATE actraiser_font_resources)
+    target_compile_definitions(actraiser_text_backend_no_ttf_test PRIVATE AR_HAS_SDL3_TTF=0)
+    add_test(NAME actraiser_text_backend_no_ttf COMMAND actraiser_text_backend_no_ttf_test)
 
     add_executable(actraiser_enhanced_text_settings_test
         tests/enhanced_text_settings_test.c
@@ -421,7 +484,7 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_text_surface_cache_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_text_surface_cache_test PRIVATE
-        actraiser_math)
+        actraiser_math actraiser_font_resources)
     add_test(NAME actraiser_text_surface_cache
         COMMAND actraiser_text_surface_cache_test)
 
@@ -443,11 +506,13 @@ if(BUILD_TESTING)
             ${CMAKE_SOURCE_DIR}/src)
         target_compile_definitions(actraiser_text_rasterizer_sdl_test PRIVATE
             AR_HAS_SDL3_TTF=1
+            "AR_TEST_SNAPSHOT_FONT_PATH=\"${CMAKE_CURRENT_BINARY_DIR}/rasterizer-snapshot-font.bin\""
             "AR_TEST_FONT_PATH=\"${CMAKE_SOURCE_DIR}/game-assets/fonts/noto/NotoSans-SemiCondensedExtraBold.ttf\""
             "AR_TEST_JAPANESE_FONT_PATH=\"${CMAKE_SOURCE_DIR}/tests/fixtures/unicode-fonts/fonts/NotoSansJP-Bold.otf\""
+            "AR_TEST_HEBREW_FONT_PATH=\"${CMAKE_SOURCE_DIR}/game-assets/fonts/noto/NotoSansHebrew-Bold.ttf\""
             "AR_TEST_ARABIC_FONT_PATH=\"${CMAKE_SOURCE_DIR}/tests/fixtures/unicode-fonts/fonts/NotoSansArabic[wdth,wght].ttf\"")
         target_link_libraries(actraiser_text_rasterizer_sdl_test PRIVATE
-            SDL3::SDL3 SDL3_ttf::SDL3_ttf actraiser_math)
+            SDL3::SDL3 SDL3_ttf::SDL3_ttf actraiser_bidi_text actraiser_math actraiser_font_resources)
         add_test(NAME actraiser_text_rasterizer_sdl
             COMMAND actraiser_text_rasterizer_sdl_test)
 
@@ -480,9 +545,10 @@ if(BUILD_TESTING)
             ${CMAKE_SOURCE_DIR}/src)
         target_compile_definitions(actraiser_localized_text_presenter_test PRIVATE
             AR_HAS_SDL3_TTF=1
+            "AR_TEST_ARABIC_FONT_PATH=\"${CMAKE_SOURCE_DIR}/tests/fixtures/unicode-fonts/fonts/NotoSansArabic[wdth,wght].ttf\""
             "AR_TEST_FONT_PATH=\"${CMAKE_SOURCE_DIR}/game-assets/fonts/noto/NotoSans-SemiCondensedExtraBold.ttf\"")
         target_link_libraries(actraiser_localized_text_presenter_test PRIVATE
-            SDL3::SDL3 SDL3_ttf::SDL3_ttf actraiser_math)
+            SDL3::SDL3 SDL3_ttf::SDL3_ttf actraiser_bidi_text actraiser_math actraiser_font_resources)
         add_test(NAME actraiser_localized_text_presenter
             COMMAND actraiser_localized_text_presenter_test)
     endif()
@@ -518,6 +584,11 @@ if(BUILD_TESTING)
         src/localization/pack_discovery.c src/localization/language_pack.c)
     target_include_directories(actraiser_language_pack_discovery_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_language_pack_discovery COMMAND actraiser_language_pack_discovery_test)
+    add_executable(actraiser_language_pack_desktop_test
+        tests/language_pack_desktop_test.c src/localization/pack_discovery.c
+        src/localization/language_pack.c src/platform/sdl/pack_discovery_sdl.c)
+    target_include_directories(actraiser_language_pack_desktop_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_language_pack_desktop_test PRIVATE SDL3::SDL3)
     target_include_directories(actraiser_language_pack_runtime_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_language_pack_runtime
@@ -617,8 +688,17 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_localization_art
         COMMAND actraiser_localization_art_test)
 
-    # Primary author/editor gate directly exercises the game's production C
-    # loader and semantic validator against Go. No Python or ROM is required.
+    add_executable(actraiser_localization_credits_test
+        tests/actraiser_localization_credits_test.c
+        src/actraiser/actraiser_localization_credits.c
+        src/localization/unicode_grapheme.c
+        ${AR_LOCALIZATION_FRAME_SOURCES})
+    target_include_directories(actraiser_localization_credits_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_localization_credits COMMAND actraiser_localization_credits_test)
+
+    # Go owns extraction and authoring. ROM-free regression fixtures, the
+    # game's C loader and native-tile pixel probe run without Python or a ROM.
     find_program(ACTRAISER_GO_EXECUTABLE NAMES go)
     if(ACTRAISER_GO_EXECUTABLE)
         add_test(NAME actraiser_go_ui_catalog
@@ -627,12 +707,18 @@ if(BUILD_TESTING)
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/snesrecomp-go"
             ENVIRONMENT "GOCACHE=${CMAKE_BINARY_DIR}/go-cache"
             TIMEOUT 120)
-        add_test(NAME actraiser_go_localization_author
+        add_test(NAME actraiser_go_localization
             COMMAND ${ACTRAISER_GO_EXECUTABLE} test ./internal/localizationkit
-                -run Author -count=1)
-        set_tests_properties(actraiser_go_localization_author PROPERTIES
+                -count=1)
+        set_tests_properties(actraiser_go_localization PROPERTIES
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/snesrecomp-go"
-            ENVIRONMENT "GOCACHE=${CMAKE_BINARY_DIR}/go-cache;AR_AUTHOR_RUNTIME_PROBE=$<TARGET_FILE:actraiser_language_pack_runtime_test>"
+            ENVIRONMENT "GOCACHE=${CMAKE_BINARY_DIR}/go-cache;AR_AUTHOR_RUNTIME_PROBE=$<TARGET_FILE:actraiser_language_pack_runtime_test>;AR_NATIVE_GRAPHICS_PROBE=$<TARGET_FILE:actraiser_localization_art_test>;AR_CREDITS_RUNTIME_PROBE=$<TARGET_FILE:actraiser_localization_credits_test>"
+            TIMEOUT 120)
+        add_test(NAME actraiser_go_language_distribution
+            COMMAND ${ACTRAISER_GO_EXECUTABLE} test ./internal/languagecli -count=1)
+        set_tests_properties(actraiser_go_language_distribution PROPERTIES
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/snesrecomp-go"
+            ENVIRONMENT "GOCACHE=${CMAKE_BINARY_DIR}/go-cache;AR_LANGUAGE_DESKTOP_PROBE=$<TARGET_FILE:actraiser_language_pack_desktop_test>"
             TIMEOUT 120)
     endif()
 
@@ -640,30 +726,12 @@ if(BUILD_TESTING)
         add_test(NAME actraiser_font_asset
             COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_SOURCE_DIR}/tests/font_asset_test.py)
-        add_test(NAME actraiser_language_pack_extract
-            COMMAND ${Python3_EXECUTABLE}
-                ${CMAKE_SOURCE_DIR}/tests/language_pack_extract_test.py)
         add_test(NAME actraiser_language_pack_v1
             COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_SOURCE_DIR}/tests/language_pack_v1_test.py)
         add_test(NAME actraiser_language_pack_catalog
             COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_SOURCE_DIR}/tests/language_pack_catalog_test.py)
-        add_test(NAME actraiser_go_localization_profiles
-            COMMAND ${Python3_EXECUTABLE}
-                ${CMAKE_SOURCE_DIR}/tools/generate_go_localization_profiles.py
-                --check)
-        if(ACTRAISER_GO_EXECUTABLE)
-            # ROM-free, independent Python/Go reader, source and catalogue checks.
-            # Retail parity remains an additional local five-ROM release gate.
-            add_test(NAME actraiser_go_localization_decoder
-                COMMAND ${Python3_EXECUTABLE}
-                    ${CMAKE_SOURCE_DIR}/tools/check_go_localization_decoder.py
-                    --go ${ACTRAISER_GO_EXECUTABLE})
-            set_tests_properties(actraiser_go_localization_decoder PROPERTIES
-                ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1;GOCACHE=${CMAKE_BINARY_DIR}/go-cache"
-                TIMEOUT 180)
-        endif()
         add_test(NAME actraiser_language_contract_generation
             COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_SOURCE_DIR}/tools/generate_language_contract_data.py
@@ -677,10 +745,8 @@ if(BUILD_TESTING)
                 ${CMAKE_SOURCE_DIR}/tools/generate_actraiser_localization_compose_routes.py
                 --check)
         set_tests_properties(
-            actraiser_language_pack_extract
             actraiser_language_pack_v1
             actraiser_language_pack_catalog
-            actraiser_go_localization_profiles
             actraiser_language_contract_generation
             actraiser_localization_route_generation
             actraiser_localization_compose_route_generation
@@ -1605,15 +1671,18 @@ if(BUILD_TESTING)
     target_link_libraries(actraiser_settings_overlay_test PRIVATE
         SDL3::SDL3
         actraiser_math
+        actraiser_font_resources
     )
     if(TARGET SDL3_ttf::SDL3_ttf)
         target_sources(actraiser_settings_overlay_test PRIVATE
             src/platform/sdl/text_rasterizer_sdl.c)
-        target_link_libraries(actraiser_settings_overlay_test PRIVATE SDL3_ttf::SDL3_ttf)
+        target_link_libraries(actraiser_settings_overlay_test PRIVATE SDL3_ttf::SDL3_ttf actraiser_bidi_text)
         target_compile_definitions(actraiser_settings_overlay_test PRIVATE
             AR_HAS_SDL3_TTF=1
             "AR_OVERLAY_UI_FONT=\"${CMAKE_SOURCE_DIR}/game-assets/fonts/noto/NotoSans-SemiCondensedExtraBold.ttf\""
-            "AR_OVERLAY_UI_JP_FONT=\"${CMAKE_SOURCE_DIR}/game-assets/fonts/noto/NotoSansJP-Bold.otf\"")
+            "AR_OVERLAY_UI_JP_FONT=\"${CMAKE_SOURCE_DIR}/game-assets/fonts/noto/NotoSansJP-Bold.otf\""
+            "AR_OVERLAY_UI_AR_FONT=\"${CMAKE_SOURCE_DIR}/game-assets/fonts/noto/NotoSansArabic-Bold.ttf\""
+            "AR_OVERLAY_UI_HE_FONT=\"${CMAKE_SOURCE_DIR}/game-assets/fonts/noto/NotoSansHebrew-Bold.ttf\"")
     endif()
     target_compile_definitions(actraiser_settings_overlay_test PRIVATE
         AR_SIM3D_TERRAIN_ELEVATION=${AR_SIM3D_TERRAIN_ELEVATION_VALUE})
@@ -1695,6 +1764,10 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_session_fatal
         COMMAND actraiser_session_fatal_test)
+    add_executable(actraiser_session_recovery_test
+        tests/session_recovery_test.c src/session_recovery.c src/localization/ui_catalog.c)
+    target_include_directories(actraiser_session_recovery_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_session_recovery COMMAND actraiser_session_recovery_test)
 
     add_executable(actraiser_presentation_outcome_test
         tests/presentation_outcome_test.c
@@ -2044,6 +2117,7 @@ if(BUILD_TESTING)
         src/localization/text_presentation.c
         src/actraiser/actraiser_localization_schedule.c
         src/actraiser/actraiser_localization_runtime.c
+        src/actraiser/actraiser_localization_credits.c
         src/actraiser/actraiser_localization_text.c
         src/actraiser/actraiser_localization_routes.c
         src/actraiser/actraiser_localization_compose_state.c
@@ -2415,6 +2489,10 @@ if(BUILD_TESTING)
     add_executable(actraiser_manual_input_test
         tests/manual_input_test.c
         src/manual/manual_input.c
+        src/manual/manual_caption.c
+        src/localization/ui_catalog.c
+        src/localization/interface_text.c
+        src/localization/unicode_grapheme.c
     )
     target_include_directories(actraiser_manual_input_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src

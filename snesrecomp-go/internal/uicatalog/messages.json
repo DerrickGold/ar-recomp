@@ -1,4 +1,89 @@
 [
+  {"key":"builder.coverage.contract","text":["Required entries: {provided}/{total} supplied.","Entrées requises : {provided}/{total} fournies.","Erforderliche Einträge: {provided}/{total} vorhanden.","必須項目：{total}件中{provided}件を収録。"]},
+  {"key":"builder.coverage.live_optional","text":["Live HUD and credits extras: {provided}/{total} supplied. Omitted entries use native fallback, even in a complete pack.","Textes supplémentaires du HUD et du générique en jeu : {provided}/{total} fournis. Les entrées omises utilisent le texte natif, même dans un pack complet.","Zusätzliche aktive HUD- und Abspanntexte: {provided}/{total} vorhanden. Fehlende Einträge verwenden den nativen Text, auch in einem vollständigen Paket.","ゲーム内の追加HUD・クレジット項目：{total}件中{provided}件を収録。完全なパックでも、未収録の項目には原文が使われます。"]},
+  {"key":"builder.coverage.explanation","text":["Supplied text is not necessarily translated or reviewed. These catalog groups include shared terms and references; this is not a count of screens. Font coverage and visual layout need separate checks.","Un texte fourni n’est pas forcément traduit ou relu. Ces groupes incluent des termes partagés et des références ; il ne s’agit pas d’un nombre d’écrans. La couverture des polices et la mise en page se vérifient séparément.","Vorhandener Text ist nicht unbedingt übersetzt oder geprüft. Diese Gruppen enthalten gemeinsame Begriffe und Referenzen; sie zählen keine Bildschirme. Zeichenabdeckung und Layout müssen separat geprüft werden.","収録済みでも、翻訳・確認済みとは限りません。各グループには共通用語や参照項目が含まれ、画面数を表すものではありません。フォントの文字対応と表示レイアウトは別途確認してください。"]},
+  {"key":"builder.coverage.supplied","text":["{provided}/{total} supplied","{provided}/{total} fournis","{provided}/{total} vorhanden","{total}件中{provided}件収録"]},
+  {"key":"builder.coverage.review","text":["Author status: {done} done · {wip} WIP · {unreviewed} not started. {unchanged} unchanged source templates.","Statut de l’auteur : {done} terminés · {wip} en cours · {unreviewed} non commencés. {unchanged} modèles sources inchangés.","Autorenstatus: {done} fertig · {wip} in Arbeit · {unreviewed} nicht begonnen. {unchanged} unveränderte Quellvorlagen.","作者の進捗：完了{done}件・作業中{wip}件・未着手{unreviewed}件。原文のままのテンプレート{unchanged}件。"]},
+  {"key":"builder.coverage.fallback_ids","text":["Missing IDs (native fallback):","Identifiants manquants (texte natif de repli) :","Fehlende IDs (nativer Ersatztext):","未収録ID（原文を使用）："]},
+  {"key":"builder.coverage.dormant","text":["Dormant US entries, not ordinary gameplay: {ids}","Entrées inactives dans la version US, hors jeu normal : {ids}","Inaktive US-Einträge, nicht im normalen Spiel: {ids}","米国版の通常プレイでは使われない項目：{ids}"]},
+  {"key":"builder.coverage.surface.dialogue","text":["Dialogue","Dialogues","Dialoge","会話"]},
+  {"key":"builder.coverage.surface.menus","text":["Menus and fixed labels","Menus et libellés fixes","Menüs und feste Beschriftungen","メニュー・固定表示"]},
+  {"key":"builder.coverage.surface.keyboard","text":["Name-entry keyboard","Clavier de saisie du nom","Namenseingabetastatur","名前入力キーボード"]},
+  {"key":"builder.coverage.surface.terms","text":["Shared terms","Termes partagés","Gemeinsame Begriffe","共通用語"]},
+  {"key":"builder.coverage.surface.hud","text":["HUD and action labels","HUD et textes d’action","HUD- und Action-Beschriftungen","HUD・アクション表示"]},
+  {"key":"builder.coverage.surface.credits","text":["Credits","Générique","Abspann","クレジット"]},
+  {"key":"recovery.startup_title","text":["ActRaiser Recompiled could not start","ActRaiser Recompiled n’a pas pu démarrer","ActRaiser Recompiled konnte nicht starten","ActRaiser Recompiledを起動できませんでした"]},
+  {"key":"recovery.closed_title","text":["ActRaiser Recompiled has closed","ActRaiser Recompiled s’est fermé","ActRaiser Recompiled wurde beendet","ActRaiser Recompiledを終了しました"]},
+  {"key":"recovery.generic","text":["The game encountered an unrecoverable error. Check the details below before restarting.","Le jeu a rencontré une erreur irrécupérable. Consultez les détails ci-dessous avant de le redémarrer.","Im Spiel ist ein nicht behebbarer Fehler aufgetreten. Prüfe vor dem Neustart die folgenden Details.","ゲームで回復できないエラーが発生しました。再起動する前に、以下の詳細を確認してください。"]},
+  {"key":"recovery.startup","text":["The game could not start. Check your installation and the selected devices. The technical details below may help identify the problem.","Le jeu n’a pas pu démarrer. Vérifiez l’installation et les périphériques sélectionnés. Les détails techniques ci-dessous peuvent aider à identifier le problème.","Das Spiel konnte nicht starten. Prüfe die Installation und die ausgewählten Geräte. Die technischen Details unten können bei der Fehlersuche helfen.","ゲームを起動できませんでした。インストール内容と選択した機器を確認してください。以下の技術情報が原因の特定に役立つ場合があります。"]},
+  {"key":"recovery.battery_save","text":["Your game save could not be written for five seconds. The game is closing to prevent further unsaved progress. Check free disk space and permissions for the save folder shown below.","Votre sauvegarde n’a pas pu être écrite pendant cinq secondes. Le jeu se ferme pour éviter de poursuivre sans sauvegarder. Vérifiez l’espace disque et les autorisations du dossier de sauvegarde indiqué ci-dessous.","Dein Spielstand konnte fünf Sekunden lang nicht gespeichert werden. Das Spiel wird beendet, damit du nicht ungesichert weiterspielst. Prüfe den freien Speicherplatz und die Zugriffsrechte für den unten angegebenen Speicherordner.","5秒間ゲームデータを保存できませんでした。未保存の進行が増えないようにゲームを終了します。空き容量と、以下に表示される保存フォルダーへのアクセス権を確認してください。"]},
+  {"key":"recovery.graphics_reset","text":["The graphics device reset, but the settings and controls overlay could not be restored. Check graphics-driver stability before restarting the game.","Le périphérique graphique a été réinitialisé, mais le menu des paramètres et des commandes n’a pas pu être restauré. Vérifiez la stabilité du pilote graphique avant de redémarrer le jeu.","Das Grafikgerät wurde zurückgesetzt, aber das Einstellungs- und Steuerungsmenü konnte nicht wiederhergestellt werden. Prüfe vor dem Neustart die Stabilität des Grafiktreibers.","グラフィックス機器がリセットされ、設定・操作メニューを復元できませんでした。グラフィックスドライバーの安定性を確認してからゲームを再起動してください。"]},
+  {"key":"recovery.graphics_lost","text":["The graphics device was lost. Check the graphics driver and GPU stability before restarting the game.","La connexion au périphérique graphique a été perdue. Vérifiez le pilote graphique et la stabilité du GPU avant de redémarrer le jeu.","Die Verbindung zum Grafikgerät wurde unterbrochen. Prüfe den Grafiktreiber und die GPU-Stabilität, bevor du das Spiel neu startest.","グラフィックス機器との接続が失われました。グラフィックスドライバーとGPUの安定性を確認してからゲームを再起動してください。"]},
+  {"key":"recovery.audio_device","text":["The audio device stopped accepting game audio. Check the selected output device before restarting. If this repeats, try another device or buffer size.","Le périphérique audio n’accepte plus le son du jeu. Vérifiez la sortie sélectionnée avant de redémarrer. Si le problème persiste, essayez un autre périphérique ou une autre taille de tampon.","Das Audiogerät nimmt kein Spielaudio mehr an. Prüfe vor dem Neustart das ausgewählte Ausgabegerät. Falls das Problem erneut auftritt, versuche ein anderes Gerät oder eine andere Puffergröße.","音声機器がゲームの音声を受け付けなくなりました。選択した出力機器を確認してから再起動してください。繰り返す場合は、別の機器やバッファーサイズを試してください。"]},
+  {"key":"recovery.closed","text":["\n\nThe game has closed to avoid continuing in a broken state.","\n\nLe jeu s’est fermé pour éviter de continuer dans un état défectueux.","\n\nDas Spiel wurde beendet, um nicht in einem fehlerhaften Zustand fortzufahren.","\n\n不具合がある状態で続行しないように、ゲームを終了しました。"]},
+  {"key":"recovery.settings_warning","text":["\n\nWarning: settings.ini could not be updated.","\n\nAttention : settings.ini n’a pas pu être mis à jour.","\n\nWarnung: settings.ini konnte nicht aktualisiert werden.","\n\n警告：settings.iniを更新できませんでした。"]},
+  {"key":"recovery.save_warning","text":["\n\nWarning: the latest game save could not be written. Check free disk space and save-folder permissions before restarting.","\n\nAttention : la dernière sauvegarde n’a pas pu être écrite. Vérifiez l’espace disque et les autorisations du dossier de sauvegarde avant de redémarrer.","\n\nWarnung: Der neueste Spielstand konnte nicht gespeichert werden. Prüfe vor dem Neustart den freien Speicherplatz und die Zugriffsrechte des Speicherordners.","\n\n警告：最新のゲームデータを保存できませんでした。再起動する前に空き容量と保存フォルダーへのアクセス権を確認してください。"]},
+  {"key":"recovery.message","text":["{reason}\n\nTechnical details: {detail}{closed}{settings}{save}","{reason}\n\nDétails techniques : {detail}{closed}{settings}{save}","{reason}\n\nTechnische Details: {detail}{closed}{settings}{save}","{reason}\n\n技術情報：{detail}{closed}{settings}{save}"]},
+  {"key":"builder.language.source_checking","text":["Checking the native US language source…","Vérification du texte natif américain…","Die native US-Textquelle wird geprüft…","米国版の原文を確認中…"]},
+  {"key":"builder.language.name_example","text":["My translation","Ma traduction","Meine Übersetzung","自分の翻訳"]},
+  {"key":"builder.language.autonym_example","text":["English (Canada)","Français (Canada)","Deutsch","日本語"]},
+  {"key":"builder.language.chooser_unavailable","text":["No folder chooser is available. Use “Or enter a folder path”; on Linux you can also install Zenity or KDialog.","Aucun sélecteur de dossier n’est disponible. Utilisez « Ou saisir un chemin de dossier » ; sous Linux, vous pouvez aussi installer Zenity ou KDialog.","Keine Ordnerauswahl verfügbar. Verwende „Oder einen Ordnerpfad eingeben“; unter Linux kannst du auch Zenity oder KDialog installieren.","フォルダー選択機能を利用できません。「フォルダーのパスを入力」を使用してください。LinuxではZenityまたはKDialogをインストールする方法もあります。"]},
+  {"key":"builder.language.chooser_failed","text":["The folder chooser could not open. Use “Or enter a folder path” instead. Technical details: {detail}","Le sélecteur de dossier n’a pas pu s’ouvrir. Utilisez « Ou saisir un chemin de dossier ». Détails techniques : {detail}","Die Ordnerauswahl konnte nicht geöffnet werden. Verwende stattdessen „Oder einen Ordnerpfad eingeben“. Technische Details: {detail}","フォルダー選択画面を開けませんでした。代わりに「フォルダーのパスを入力」を使用してください。技術情報：{detail}"]},
+  {"key":"builder.language.chooser_busy","text":["A folder chooser is already open. Finish or cancel that selection first.","Un sélecteur de dossier est déjà ouvert. Terminez ou annulez d’abord cette sélection.","Eine Ordnerauswahl ist bereits geöffnet. Schließe diese Auswahl zuerst ab oder brich sie ab.","フォルダー選択画面がすでに開いています。先に選択を完了するかキャンセルしてください。"]},
+  {
+    "key": "overlay.manual.page",
+    "text": [
+      "PAGE {page}/{total}   {controls}",
+      "PAGE {page}/{total}   {controls}",
+      "SEITE {page}/{total}   {controls}",
+      "ページ {page}/{total}   {controls}"
+    ]
+  },
+  {
+    "key": "overlay.manual.opening",
+    "text": [
+      "OPENING {page}/{total}   {controls}",
+      "DOUBLE PAGE {page}/{total}   {controls}",
+      "DOPPELSEITE {page}/{total}   {controls}",
+      "見開き {page}/{total}   {controls}"
+    ]
+  },
+  {
+    "key": "overlay.manual.controls.0.0",
+    "text": [
+      "ARROWS PAGE   +/- ZOOM   CLICK A PAGE TO TURN   ESC BACK",
+      "FLÈCHES PAGE   +/- ZOOM   CLIQUER POUR TOURNER   ÉCHAP RETOUR",
+      "PFEILE BLÄTTERN   +/- ZOOM   SEITE ZUM BLÄTTERN ANKLICKEN   ESC ZURÜCK",
+      "矢印 ページ   +/- ズーム   ページをクリックでめくる   ESC 戻る"
+    ]
+  },
+  {
+    "key": "overlay.manual.controls.0.1",
+    "text": [
+      "ARROWS PAN   PGUP/PGDN PAGE   +/- ZOOM   DRAG PANS   ESC BACK",
+      "FLÈCHES DÉPLACER   PGUP/PGDN PAGE   +/- ZOOM   GLISSER DÉPLACE   ÉCHAP RETOUR",
+      "PFEILE VERSCHIEBEN   PGUP/PGDN BLÄTTERN   +/- ZOOM   ZIEHEN VERSCHIEBT   ESC ZURÜCK",
+      "矢印 移動   PGUP/PGDN ページ   +/- ズーム   ドラッグで移動   ESC 戻る"
+    ]
+  },
+  {
+    "key": "overlay.manual.controls.1.0",
+    "text": [
+      "L/R OR D-PAD PAGE   A/X ZOOM   B BACK",
+      "L/R OU CROIX PAGE   A/X ZOOM   B RETOUR",
+      "L/R ODER STEUERKREUZ BLÄTTERN   A/X ZOOM   B ZURÜCK",
+      "L/Rまたは方向キー ページ   A/X ズーム   B 戻る"
+    ]
+  },
+  {
+    "key": "overlay.manual.controls.1.1",
+    "text": [
+      "L/R PAGE   STICK OR D-PAD PANS   A/X ZOOM   B BACK",
+      "L/R PAGE   STICK OU CROIX DÉPLACER   A/X ZOOM   B RETOUR",
+      "L/R BLÄTTERN   STICK ODER STEUERKREUZ VERSCHIEBEN   A/X ZOOM   B ZURÜCK",
+      "L/R ページ   スティックまたは方向キー 移動   A/X ズーム   B 戻る"
+    ]
+  },
   {
     "key": "overlay.layer.action.help.0",
     "text": [
@@ -4787,7 +4872,7 @@
   {"key":"builder.navigation.group.story","text":["Town story & requests","Histoire et requêtes de la ville","Stadtgeschichte & Bitten","町の物語・お願い"]},
   {"key":"builder.navigation.group.names","text":["Location names & action title cards","Noms des lieux et titres des niveaux","Ortsnamen & Action-Titelkarten","地名・アクション開始タイトル"]},
   {"key":"builder.navigation.group.title_menus","text":["Menus & title text","Menus et texte du titre","Menüs & Titeltext","メニュー・タイトルの文字"]},
-  {"key":"builder.navigation.group.ending","text":["Ending dialogue","Dialogue de fin","Enddialog","エンディングの会話"]},
+  {"key":"builder.navigation.group.ending","text":["Ending dialogue & credits","Dialogue de fin et générique","Enddialog & Abspann","エンディングの会話・クレジット"]},
   {"key":"builder.navigation.group.final_battle","text":["Final battle dialogue","Dialogue du combat final","Dialog zum Endkampf","最終決戦の会話"]},
   {"key":"builder.navigation.group.save","text":["Save progress & quit","Sauvegarder et quitter","Speichern & beenden","セーブ・終了"]},
   {"key":"builder.navigation.group.speed","text":["Message speed","Vitesse des messages","Textgeschwindigkeit","メッセージ速度"]},
@@ -4804,8 +4889,8 @@
   {"key":"builder.navigation.group.references","text":["Additional regional & table references","Autres références régionales et tableaux","Weitere Regional- & Tabellenreferenzen","その他の地域版・表の参照"]},
   {"key":"builder.navigation.context.start","text":["Sky Palace introduction or returning to an existing save from the title screen.","Introduction au palais céleste ou reprise d’une sauvegarde depuis le titre.","Einleitung im Himmelspalast oder Rückkehr zu einem Spielstand vom Titelbildschirm.","天空城の導入、またはタイトル画面からセーブデータを再開する場面。"]},
   {"key":"builder.navigation.context.names","text":["Action title cards use fitted, centered enhanced text.","Les titres des niveaux utilisent un texte amélioré, ajusté et centré.","Action-Titelkarten verwenden angepassten, zentrierten erweiterten Text.","アクション開始タイトルは枠に合わせた中央配置の高品質テキストを使用します。"]},
-  {"key":"builder.navigation.context.title","text":["Title options support enhanced text. Logo, copyright and sound-test presentation remain native.","Les options du titre prennent en charge le texte amélioré. Logo, copyright et test sonore conservent leur présentation d’origine.","Titeloptionen unterstützen erweiterten Text. Logo, Copyright und Soundtest werden weiterhin original dargestellt.","タイトルの選択肢は高品質テキストに対応しています。ロゴ、著作権表記、サウンドテストの表示は元のままです。"]},
-  {"key":"builder.navigation.context.ending","text":["Ending and credits rendering is a later phase.","Le rendu de la fin et du générique sera traité ultérieurement.","Die Darstellung von Ende und Abspann folgt in einer späteren Phase.","エンディングとクレジットの描画対応は後の段階で行います。"]},
+  {"key":"builder.navigation.context.title","text":["Title options and dormant sound-test labels support enhanced text. Logo and copyright artwork remain native.","Les options du titre et les libellés du test sonore dormant prennent en charge le texte amélioré. Les images du logo et du copyright restent d’origine.","Titeloptionen und Texte des ungenutzten Soundtests unterstützen erweiterten Text. Logo und Copyright-Grafiken bleiben original.","タイトルの選択肢と通常は使われないサウンドテストの文字は高品質テキストに対応しています。ロゴと著作権表記の画像は元のままです。"]},
+  {"key":"builder.navigation.context.ending","text":["Ending dialogue and credits support enhanced text. Credits pages keep native timing; copyright artwork remains native.","Les dialogues de fin et le générique prennent en charge le texte amélioré. Le rythme des pages et les images de copyright restent d’origine.","Enddialoge und Abspann unterstützen erweiterten Text. Die Seitendauer und Copyright-Grafiken bleiben original.","エンディングの会話とクレジットは高品質テキストに対応しています。ページの表示時間と著作権表記の画像は元のままです。"]},
   {"key":"builder.navigation.context.final_battle","text":["Final-battle message delivered from the Sky Palace.","Message du combat final envoyé depuis le palais céleste.","Nachricht zum Endkampf aus dem Himmelspalast.","天空城から伝えられる最終決戦のメッセージ。"]},
   {"key":"builder.navigation.context.action","text":["HUD labels, pause and stage messages support enhanced text; counters retain native formatting.","Les libellés d’interface, la pause et les messages de niveau prennent en charge le texte amélioré ; les compteurs gardent le format d’origine.","HUD-Texte, Pause und Levelmeldungen unterstützen erweiterten Text; Zähler behalten ihr Originalformat.","HUDの文字、ポーズ、ステージのメッセージは高品質テキストに対応し、カウンターは元の書式を保持します。"]},
   {"key":"builder.navigation.context.responses","text":["Common event/reference routes; not a separate script for each town.","Routes d’événements ou de référence communes, sans script distinct pour chaque ville.","Gemeinsame Ereignis-/Referenzrouten; kein separates Skript je Stadt.","共通のイベント・参照ルートです。町ごとに別のスクリプトではありません。"]},
@@ -4974,7 +5059,7 @@
   {"key":"builder.language.needs_attention","text":["Needs attention","À vérifier","Prüfung erforderlich","確認が必要"]},
   {"key":"builder.language.installed","text":["Installed in game","Installé dans le jeu","Im Spiel installiert","ゲームにインストール済み"]},
   {"key":"builder.language.installed_as","text":[" · Installed as “{name}”"," · Installé sous « {name} »"," · Installiert als „{name}“","・インストール名「{name}」"]},
-  {"key":"builder.language.folder","text":[" · Folder: {folder}"," · Dossier : {folder}"," · Ordner: {folder}","・フォルダー: {folder}"]},
+  {"key":"builder.language.folder","text":[" · Installed: {folder}"," · Installation : {folder}"," · Installiert: {folder}","・インストール先: {folder}"]},
   {"key":"builder.language.enable_pack","text":["Enable {name}","Activer {name}","{name} aktivieren","{name}を有効にする"]},
   {"key":"builder.language.enabled","text":["Enabled","Activé","Aktiviert","有効"]},
   {"key":"builder.language.disabled","text":["Disabled","Désactivé","Deaktiviert","無効"]},
@@ -4983,8 +5068,8 @@
   {"key":"builder.language.edit_project","text":["Edit project","Modifier le projet","Projekt bearbeiten","プロジェクトを編集"]},
   {"key":"builder.language.review_update","text":["Review & update","Vérifier et mettre à jour","Prüfen & aktualisieren","確認して更新"]},
   {"key":"builder.language.uninstall","text":["Uninstall…","Désinstaller…","Deinstallieren…","アンインストール…"]},
-  {"key":"builder.language.uninstall_confirm","text":["Uninstall “{name}” ({id}, folder {folder}) from the game? Your editable project and progress will stay. Installed files are retained for recovery. Restart the game afterward.","Désinstaller « {name} » ({id}, dossier {folder}) du jeu ? Le projet modifiable et sa progression seront conservés. Les fichiers installés seront gardés pour restauration. Redémarrez ensuite le jeu.","„{name}“ ({id}, Ordner {folder}) aus dem Spiel entfernen? Dein bearbeitbares Projekt und Fortschritt bleiben erhalten. Installierte Dateien werden zur Wiederherstellung aufbewahrt. Starte danach das Spiel neu.","「{name}」（{id}、フォルダー {folder}）をゲームからアンインストールしますか？編集用プロジェクトと進捗は残ります。インストールしたファイルも復元用に保持されます。その後ゲームを再起動してください。"]},
-  {"key":"builder.language.uninstalled","text":["Removed from game discovery. Restart the game. Your project and installed files are retained. Recovery manifest: {backup}","Retiré de la liste du jeu. Redémarrez le jeu. Votre projet et les fichiers installés sont conservés. Manifeste de restauration : {backup}","Aus der Spielauswahl entfernt. Starte das Spiel neu. Projekt und installierte Dateien bleiben erhalten. Wiederherstellungsmanifest: {backup}","ゲームの検出対象から外しました。ゲームを再起動してください。プロジェクトとインストール済みファイルは残ります。復元用マニフェスト: {backup}"]},
+  {"key":"builder.language.uninstall_confirm","text":["Uninstall “{name}” ({id}, {folder}) from the game? Your editable project and progress will stay. Installed files are retained for recovery. Restart the game afterward.","Désinstaller « {name} » ({id}, {folder}) du jeu ? Le projet modifiable et sa progression seront conservés. Les fichiers installés seront gardés pour restauration. Redémarrez ensuite le jeu.","„{name}“ ({id}, {folder}) aus dem Spiel entfernen? Dein bearbeitbares Projekt und Fortschritt bleiben erhalten. Installierte Dateien werden zur Wiederherstellung aufbewahrt. Starte danach das Spiel neu.","「{name}」（{id}、{folder}）をゲームからアンインストールしますか？編集用プロジェクトと進捗は残ります。インストールしたファイルも復元用に保持されます。その後ゲームを再起動してください。"]},
+  {"key":"builder.language.uninstalled","text":["Removed from game discovery. Restart the game. Your project and installed files are retained. Recovery copy: {backup}","Retiré de la liste du jeu. Redémarrez le jeu. Votre projet et les fichiers installés sont conservés. Copie de restauration : {backup}","Aus der Spielauswahl entfernt. Starte das Spiel neu. Projekt und installierte Dateien bleiben erhalten. Wiederherstellungskopie: {backup}","ゲームの検出対象から外しました。ゲームを再起動してください。プロジェクトとインストール済みファイルは残ります。復元用コピー: {backup}"]},
   {"key":"builder.language.no_project","text":["Installed package; no editable project. Import its folder or archive to edit a copy.","Pack installé sans projet modifiable. Importez son dossier ou son archive pour modifier une copie.","Installiertes Paket ohne bearbeitbares Projekt. Importiere den Ordner oder das Archiv, um eine Kopie zu bearbeiten.","インストール済みですが、編集用プロジェクトはありません。フォルダーやアーカイブを読み込むと、コピーを編集できます。"]},
   {"key":"builder.language.paths","text":["Workshop & runtime assets: {root}. Author projects are saved in projects/; installed translations are in packs/.","Ressources de l’atelier et du jeu : {root}. Les projets sont dans projects/ ; les traductions installées dans packs/.","Werkstatt- und Spielressourcen: {root}. Arbeitsprojekte liegen in projects/; installierte Übersetzungen in packs/.","作業用・ゲーム用の素材: {root}。編集用プロジェクトはprojects/、インストール済みの翻訳はpacks/に保存されます。"]},
   {"key":"builder.language.progress","text":["{done}/{total} done · {wip} WIP","{done}/{total} terminés · {wip} en cours","{done}/{total} fertig · {wip} in Arbeit","完了 {done}/{total}・作業中 {wip}"]},

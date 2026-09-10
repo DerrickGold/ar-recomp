@@ -1,6 +1,7 @@
 package buildgui
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -9,6 +10,46 @@ import (
 
 	lk "github.com/DerrickGold/snesrecomp-go/internal/localizationkit"
 )
+
+func TestDirectArchiveChecklist(t *testing.T) {
+	app := editableWorkflowFixture(t)
+	p := app.localization.current
+	p, err := p.EditMessage("action.hud.act_1", "Excellent!\n@end\n", lk.TranslationDone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, _, err = p.Publication(lk.PublicationOptions{ConfirmRights: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var archive bytes.Buffer
+	if err = p.WriteArchive(&archive, "publication"); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(app.localizationRoot(), "packs")
+	if err = os.MkdirAll(root, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(root, "Fun translation.arlang"), archive.Bytes(), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, enabled := range []bool{false, true} {
+		var rows []localizationCatalogEntry
+		if err := json.Unmarshal(locGET(t, app, "catalog", nil).Body.Bytes(), &rows); err != nil {
+			t.Fatal(err)
+		}
+		if len(rows) != 1 || !rows[0].Installed || rows[0].Key != "Fun translation.arlang" || rows[0].Error != "" {
+			t.Fatal(rows)
+		}
+		locJSON(t, app, "set-enabled", localizationRequest{ID: rows[0].ID, Directory: rows[0].Key, Expected: rows[0].InstalledRevision, Enabled: enabled}, 200)
+	}
+	var rows []localizationCatalogEntry
+	json.Unmarshal(locGET(t, app, "catalog", nil).Body.Bytes(), &rows)
+	locJSON(t, app, "uninstall", localizationRequest{ID: rows[0].ID, Directory: rows[0].Key, Expected: rows[0].InstalledRevision, ConfirmUninstall: true}, 200)
+	if _, err := os.Stat(filepath.Join(root, "Fun translation.arlang")); !os.IsNotExist(err) {
+		t.Fatal("archive remained discoverable")
+	}
+}
 
 func editableWorkflowFixture(t *testing.T) *application {
 	t.Helper()

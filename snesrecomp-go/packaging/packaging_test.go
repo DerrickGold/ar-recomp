@@ -22,9 +22,16 @@ func TestLocalizationPackageGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	files := []string{
+		"utils/docs/language-packs.md", "utils/docs/language-pack-format.md",
+		"utils/docs/language-authoring-reference.json", "utils/docs/language-archive.schema.json",
+		"utils/examples/language-pack/pack.ini", "utils/examples/language-pack/text/example.artext",
+		"utils/examples/example.fr-ca.arlang",
 		"utils/game-assets/fonts/noto/NotoSans-SemiCondensedExtraBold.ttf",
 		"utils/game-assets/fonts/noto/NotoSansJP-Bold.otf", "utils/game-assets/fonts/noto/NotoSansJP-OFL.txt",
+		"utils/game-assets/fonts/noto/NotoSansArabic-Bold.ttf", "utils/game-assets/fonts/noto/NotoSansHebrew-Bold.ttf",
 		"utils/LICENSE", "utils/LICENSE_SCOPE.md", "utils/ATTRIBUTION.md", "utils/THIRD_PARTY_NOTICES.md",
+		"utils/third_party/sheenbidi/LICENSE", "utils/licenses/SheenBidi/LICENSE",
+		"utils/third_party/sheenbidi/Source/SheenBidi.c", "utils/third_party/sheenbidi/Headers/SheenBidi/SheenBidi.h", "utils/src/platform/sdl/bidi_text_sdl.c",
 		"utils/game-assets/fonts/noto/OFL.txt", "utils/snesrecomp-go/runtime/LICENSE", "utils/snesrecomp-go/runtime/NOTICE.md", "utils/snesrecomp-go/runtime/PROVENANCE.md", "utils/snesrecomp-go/runtime/licenses/Snaggletooth-LICENSE.txt",
 		"utils/runtime.a", "utils/tools/sdl3/lib/SDL3.dll", "utils/tools/sdl3/lib/SDL3_ttf.dll", "utils/tools/sdl3/lib/SDL3_ttf.lib", "utils/tools/sdl3/include/SDL3_ttf/SDL_ttf.h", "utils/tools/sdl3/licenses/SDL3_ttf/LICENSE.txt",
 		"utils/licenses/SDL3_ttf/LICENSE.txt", "utils/licenses/SDL3_ttf/FreeType-FTL.txt", "utils/licenses/SDL3_ttf/HarfBuzz-COPYING.txt", "utils/licenses/SDL3_ttf/PlutoSVG-LICENSE.txt", "utils/licenses/SDL3_ttf/PlutoVG-LICENSE.txt",
@@ -41,7 +48,13 @@ func TestLocalizationPackageGate(t *testing.T) {
 	).Replace(string(template))
 	for _, tc := range []struct{ name, omit, add string }{
 		{name: "valid"},
+		{name: "missing bidi source", omit: "utils/third_party/sheenbidi/Source/SheenBidi.c"},
+		{name: "missing bidi header", omit: "utils/third_party/sheenbidi/Headers/SheenBidi/SheenBidi.h"},
+		{name: "missing bidi notice", omit: "utils/licenses/SheenBidi/LICENSE"},
 		{name: "missing Japanese UI font", omit: "utils/game-assets/fonts/noto/NotoSansJP-Bold.otf"},
+		{name: "missing Arabic UI font", omit: "utils/game-assets/fonts/noto/NotoSansArabic-Bold.ttf"},
+		{name: "missing Hebrew UI font", omit: "utils/game-assets/fonts/noto/NotoSansHebrew-Bold.ttf"},
+		{name: "missing shared font notice", omit: "utils/game-assets/fonts/noto/OFL.txt"},
 		{name: "missing Japanese UI notice", omit: "utils/game-assets/fonts/noto/NotoSansJP-OFL.txt"},
 		{name: "missing runtime", omit: "utils/tools/sdl3/lib/SDL3_ttf.dll"},
 		{name: "missing link", omit: "utils/tools/sdl3/lib/SDL3_ttf.lib"},
@@ -52,6 +65,10 @@ func TestLocalizationPackageGate(t *testing.T) {
 		{name: "extracted scenery", add: "utils/game-assets/workshop/us-scene-v1.json"},
 		{name: "private backup", add: "utils/work.arproject"},
 		{name: "private notes", add: "utils/development/tasks.md"},
+		{name: "missing authoring reference", omit: "utils/docs/language-authoring-reference.json"},
+		{name: "missing example archive", omit: "utils/examples/example.fr-ca.arlang"},
+		{name: "unexpected example script", add: "utils/examples/language-pack/text/retail.artext"},
+		{name: "unexpected example archive", add: "utils/examples/retail.arlang"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()

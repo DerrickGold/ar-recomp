@@ -280,6 +280,8 @@ All addresses here are USA. Detailed contracts and regional cautions are in
 | `$01:9284` | `Menu_UpdateAndWaitFrame` | Verified | Calls `$0192B7` and `$01ACD9` before VBlank polling; required for animations during added pages/pauses. Not a bare host yield. |
 | `$01:8C79` | `Menu_ResolveIndexedText` | Mapped | One-based selector, pointer base two bytes before first entry; retain logical slot when pointers alias |
 | `$02:BF60` | `FixedText_Compose` | Verified | Packed row/column in A, record at `DB:Y`; writes BG3 staging |
+| `$03:8238` / `$03:824D` | `EndingTour_CheckAndDescribe` | Mapped | Requires completed Death Heim progress `$0347 == 7`; indexes `$04:CC8A` by `$0341 * 2` and calls dialogue wrapper `$01:9314`. Live localization uses wrapper context `$03:8251`, not a separate credits interpreter. |
+| `$02:97D4` | `SoundTest_RunModal` | Mapped | Dormant native menu; composes labels/counters at `$080B` through `$02:97EC`, changes scratch counters `$10/$12`, and closes with blank source `$02:9896` through `$02:985C`. Native TM changes `$04` → `$17`; no selector sprite. Localization observes these compositions without enabling a new normal-play entry. |
 | `$02:C1B7` | `FixedText_EraseRecord` | Verified | Only `$00/$0D` controls; other bytes erase cell plus row above, no yield |
 | `$02:C206` | `Hud_UpdateStatus` | Mapped | Non-action branch clears the 12-tile health row at `$7F:B08C` and supplies `$0286/$0287` to the bar writer |
 | `$02:C375` | `Bg3_FillWords` | Verified | Fill Y words with A at `$7F:B000+X`, preserving X |
@@ -298,6 +300,7 @@ All addresses here are USA. Detailed contracts and regional cautions are in
 | `$03:9156` | `ActionToSimulation_Dispatch` | Mapped | Relocates the stack and dispatches the act-to-sim transition chain. | [SEAMS function roles](SEAMS.md#function-roles-discovered-decomp-groundwork) |
 | `$03:AC8E` | `Transition_RunStep` | Observed | Counter-driven transition state step that calls `$97B0`; full role is not yet traced. | [SEAMS function roles](SEAMS.md#function-roles-discovered-decomp-groundwork) |
 | `$02:AA9C` | `Ending_RunCredits` | Verified | Drives ending/credits entries, stamps the `ACT` completion marker into SRAM `$70:1FF0`, waits for Start, and RTL-jumps back to `$00:8059`. Relocates S to `$01FF` and never returns (dispatch-only class). | [rom map ending](rom-map.md) |
+| `$02:AB30` | `Ending_PresentPage` | Verified | A selects a 2048-byte map at `$7E:4000 + A*$0800`; MVN to `$7F:B000`, increment `$F1`, native fade-in and hold (except page 19). Carry clear also fades out the old page. | [rom map ending](rom-map.md) |
 | `$00:82C3` | `Ending_EnterViaRtlJump` | Verified | Mode-8 (`$18=08`) main-loop entry into the ending: `LDA #$02; PHA; LDX #$AA9B; PHX; RTL` — a cross-bank RTL long-jump to `$02:AA9C`. Whole-ROM scan confirms this and the presenter's exit are the only two RTL-jump sites. | [rom map ending](rom-map.md) |
 
 ### Audio and SPC transport

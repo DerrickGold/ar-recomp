@@ -33,6 +33,24 @@ static void (*s_frame_hook)(void);
 static void (*s_native_byte_hook)(CpuState *cpu, uint8_t code);
 static void (*s_native_page_hook)(void);
 static ArLocalizationFrame s_frame;
+static ArLanguagePackIo s_file_pack_io;
+static unsigned s_pack_reads, s_pack_releases;
+
+static bool ReadPack(void *context, const char *path, size_t maximum_bytes,
+                     ArLanguagePackBlob *blob, char *error,
+                     size_t error_capacity) {
+  (void)context;
+  const bool loaded = s_file_pack_io.read_file(
+      s_file_pack_io.context, path, maximum_bytes, blob, error, error_capacity);
+  if (loaded) ++s_pack_reads;
+  return loaded;
+}
+
+static void ReleasePack(void *context, ArLanguagePackBlob *blob) {
+  (void)context;
+  ++s_pack_releases;
+  s_file_pack_io.release_file(s_file_pack_io.context, blob);
+}
 
 #define CHECK(condition)                                                       \
   do {                                                                         \
@@ -80,6 +98,8 @@ static void WriteNativeFixture(bool oversized) {
       fputs("Continue fixture\n@line\nNew fixture\n", file);
     else if (!strcmp(id, "city.fillmore.name"))
       fputs("Town fixture\n", file);
+    else if (!strcmp(id, "credits.page_01"))
+      fputs("- Credits fixture -\n@line\nA contributor\n", file);
     else if (!speed)
       fputs("@empty\n", file);
     const uint32_t count =
@@ -120,8 +140,19 @@ void cpu_write16(CpuState *cpu, uint8 bank, uint16 address, uint16 value) {
   cpu_write8(cpu, bank, (uint16_t)(address + 1u), (uint8_t)(value >> 8));
 }
 static void CaptureWithTransform(bool mode7_transformed) {
-  ActRaiserLocalizationRuntime_CaptureFrame(&s_frame, 0x7800, 0, NULL, 0, NULL,
-                                            0, mode7_transformed);
+  const uint16_t palette[] = {0, 0, 0x7f33, 0x7fff};
+  ActRaiserLocalizationRuntime_CaptureFrame(&s_frame, 0x7800, 0, NULL, 0, palette,
+                                            4, mode7_transformed);
+  for (uint8_t i = 0; i < s_frame.snapshot_count; ++i) {
+    const ArLocalizationTextSnapshot *s = &s_frame.snapshots[i];
+    CHECK(s->bidi_span_offset + s->bidi_span_count <= s_frame.bidi.count);
+    CHECK(ArTextBidiSpans_Valid(s_frame.bidi.spans + s->bidi_span_offset,
+        s->bidi_span_count, s_frame.text + s->utf8_offset, s->utf8_bytes, 0));
+    CHECK(s_frame.snapshots[i].shadow_enabled);
+    CHECK(s_frame.snapshots[i].shadow_rgb == 0);
+    CHECK(s_frame.snapshots[i].band_rgb == 0x9cceff);
+    CHECK(s_frame.snapshots[i].body_rgb == 0xffffff);
+  }
   if (strstr(s_frame.text, "Première"))
     s_seen_pages |= 1;
   if (strstr(s_frame.text, "Deuxième"))
@@ -386,17 +417,42 @@ static void StyleOnce(void) {
 
 static bool s_font_available = true;
 static unsigned s_font_preflights;
+static unsigned s_last_font, s_live_fonts;
+static unsigned s_discarded_preflights;
+static void DiscardPreparedFont(void *context) {
+  CHECK(context == &s_font_available);
+  ++s_discarded_preflights;
+}
+static bool s_registered_fonts[4096], s_fallback_fonts[4096];
+static ArFontResourceId RegisterFont(void *context, const char *manifest,
+                                     const char *member, char *error, size_t capacity) {
+  (void)error; (void)capacity;
+  CHECK(context == &s_font_available && manifest && manifest[0] && member && member[0]);
+  CHECK(s_last_font + 1 < 4096);
+  if (s_last_font + 1 >= 4096) return 0;
+  const unsigned id = ++s_last_font;
+  s_registered_fonts[id] = true;
+  s_fallback_fonts[id] = !strcmp(member, "fixture-font.ttf");
+  ++s_live_fonts;
+  return id;
+}
+static void RetireFont(void *context, ArFontResourceId id) {
+  CHECK(context == &s_font_available && id < 4096);
+  if (id >= 4096) return;
+  CHECK(s_registered_fonts[id]);
+  if (s_registered_fonts[id]) --s_live_fonts;
+  s_registered_fonts[id] = false;
+}
 static bool PrepareFont(void *context, const ArTextPresentationFont *font,
                         char *error, size_t error_capacity) {
   CHECK(context == &s_font_available);
   CHECK(font && font->abi_version == AR_TEXT_PRESENTATION_ABI_VERSION &&
         font->struct_size == sizeof(*font) && font->stack_id[0] &&
-        font->primary_path[0] && font->revision);
+        font->primary && font->revision);
   ++s_font_preflights;
   if (font->fallback_count) {
     CHECK(font->fallback_count == 1);
-    CHECK(!strcmp(font->fallback_paths[0],
-                  AR_TEST_NATIVE_FIXTURE_DIR "/fixture-font.ttf"));
+    CHECK(font->fallbacks[0] < 4096 && s_fallback_fonts[font->fallbacks[0]]);
   }
   if (!s_font_available)
     snprintf(error, error_capacity, "injected unavailable font");
@@ -664,10 +720,25 @@ static void TestStructuredNormalization(void) {
   memset(output_bits, 0xff, sizeof(output_bits));
   size_t bytes = 0;
   uint8_t objects = 0;
+  uint16_t offsets[sizeof(source)];
   CHECK(ActRaiserLocalizationText_NormalizeStructured(
       source, sizeof(source) - 1, NULL, 0, true, output, sizeof(output), &bytes,
-      NULL, 0, &objects, NULL, source_bits, output_bits));
+      NULL, 0, &objects, offsets, source_bits, output_bits));
   CHECK(!strcmp(output, "É|li se | left\n\nB|C"));
+  const uint32_t name_start = (uint32_t)(strstr(source,"É|li")-source);
+  const uint32_t tail_start = (uint32_t)(strstr(source,"B|C")-source);
+  const ArTextBidiSpan values[] = {{name_start,name_start+(uint32_t)strlen("É|li\nse"),kArTextDirection_Auto},
+      {tail_start,tail_start+3,kArTextDirection_LeftToRight}};
+  ArTextBidiSpans mapped = {0};
+  CHECK(ActRaiserLocalizationText_MapBidiSpans(values,2,0,sizeof(source)-1,
+      offsets,output,bytes,20,&mapped));
+  CHECK(mapped.count == 2 && mapped.spans[0].start == 20);
+  CHECK(mapped.spans[0].end == 20+strlen("É|li se"));
+  CHECK(mapped.spans[1].end == 20+bytes);
+  ArTextBidiSpans_Edit(&mapped,20,0,3);
+  CHECK(mapped.spans[0].start == 23 && mapped.spans[1].end == 23+bytes);
+  ArTextBidiSpans_Edit(&mapped,23,3,0);
+  CHECK(mapped.spans[0].start == 23 && mapped.spans[0].end == 20+strlen("É|li se"));
   const size_t delimiter = strstr(output, " | ") - output + 1;
   for (size_t i = 0; i < bytes; ++i)
     CHECK(ArTextBoundary_Get(output_bits, i) ==
@@ -680,9 +751,107 @@ static void TestStructuredNormalization(void) {
   for (size_t i = 0; i < sizeof(output_bits); ++i) CHECK(!output_bits[i]);
 }
 
+static void TestCreditsWithoutDialogueObservation(void) {
+  ActRaiserLocalizationRuntime_Shutdown();
+  ActRaiserLocalizationText_ResetObservation();
+  memset(g_ram,0,sizeof(g_ram));
+  g_settings.localization_content=0;
+  g_settings.localization_presentation=1;
+  g_ram[kActRaiserWram_MapGroup]=8;
+  g_ram[kActRaiserWram_CurrentMap]=1;
+  static uint16_t vram[0x8000],cgram[16]={0,0x7fff,0,0,0,0x25f};
+  for (unsigned page=0;page<20;++page) for (unsigned i=0;i<1024;++i) {
+    const uint16_t word=i==13*32+10 ? 0x420+page : 0x10;
+    g_ram[0x4000+page*0x800+i*2]=word;
+    g_ram[0x4000+page*0x800+i*2+1]=word>>8;
+    if (page==1) vram[0x3800+i]=word;
+  }
+  uint8_t before[kActRaiserWramSize];memcpy(before,g_ram,sizeof(before));
+  ActRaiserLocalizationRuntime_CaptureFrame(&s_frame,0x3800,0x5000,vram,0x8000,cgram,16,false);
+  CHECK(s_frame.snapshot_count==1 && strstr(s_frame.text,"Credits fixture"));
+  CHECK(!memcmp(before,g_ram,sizeof(before)));
+  g_ram[kActRaiserWram_MapGroup]=0;
+  ActRaiserLocalizationRuntime_CaptureFrame(&s_frame,0x3800,0x5000,vram,0x8000,cgram,16,false);
+  CHECK(!s_frame.snapshot_count);
+}
+
+static void TestPartialRtlSources(void) {
+  const char *path = AR_TEST_NATIVE_FIXTURE_DIR "/partial.ini";
+  FILE *file = fopen(path, "wb");
+  CHECK(file);
+  if (!file) return;
+  fputs("[pack]\nformat = actraiser-language-pack\nversion = 1\n"
+        "id = test.partial-rtl\nlocale = ar\nname = Synthetic RTL\n"
+        "autonym = اختبار\nauthor = Test suite\nlicense = MIT\n"
+        "direction = rtl\ntarget = us-runtime\nsource_profile = us\n"
+        "fallback = native-us\ncoverage = partial\n"
+        "[fonts]\nprimary = builtin:actraiser-sans\n"
+        "[scripts]\nsource = partial.artext\n", file);
+  CHECK(fclose(file) == 0);
+  file = fopen(AR_TEST_NATIVE_FIXTURE_DIR "/partial.artext", "wb");
+  CHECK(file);
+  if (!file) return;
+  fputs(":: city.fillmore.name\nمدينة\n", file);
+  CHECK(fclose(file) == 0);
+
+  ActRaiserLocalizationRuntime_Shutdown();
+  ActRaiserLocalizationText_ResetObservation();
+  memset(g_ram, 0, sizeof(g_ram));
+  s_installed_pack_path = path;
+  g_settings.localization_content = 2;
+  g_settings.localization_presentation = 1;
+  CpuState title = {.S = 0x1e0, .DB = 2, .Y = 0xa9a7, .A = 0x1100, .ram = g_ram};
+  CHECK(!ActRaiser_LocalizationObserveTextCompose(&title));
+  Capture();
+  CHECK(FrameHasText("Continue fixture") && FrameHasText("New fixture"));
+  CHECK(!strcmp(s_frame.locale, "ar"));
+  CHECK(s_frame.snapshot_count == 2);
+  for (uint8_t i = 0; i < s_frame.snapshot_count; ++i) {
+    CHECK(!strcmp(s_frame.snapshots[i].language.locale, "en-US"));
+    CHECK(s_frame.snapshots[i].language.direction == kArTextDirection_LeftToRight);
+  }
+  g_ram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_SkyPalace;
+  CpuState city = {.S = 0x1e0, .DB = 1, .Y = 0xf1cb, .A = 0x0106, .ram = g_ram};
+  CHECK(!ActRaiser_LocalizationObserveTextCompose(&city));
+  Capture();
+  CHECK(FrameHasText("مدينة") && s_frame.snapshot_count == 1);
+  CHECK(!strcmp(s_frame.snapshots[0].language.locale, "ar"));
+  CHECK(s_frame.snapshots[0].language.direction == kArTextDirection_RightToLeft);
+  /* A translated and fallback surface coexist; font selection is shared but
+   * their paragraph bases and shaping locales are not. */
+  const uint8_t one_page[] = {5, 'a', 'b', 1};
+  Run(0xfa7b, 0x8afb, one_page, sizeof(one_page), 0);
+  bool dialogue = false;
+  CHECK(!strcmp(s_frame.locale, "ar"));
+  for (uint8_t i = 0; i < s_frame.snapshot_count; ++i) {
+    if (s_frame.snapshots[i].layout != kArLocalizationTextLayout_DialogueWindow) continue;
+    dialogue = true;
+    CHECK(!strcmp(s_frame.snapshots[i].language.locale, "en-US"));
+    CHECK(s_frame.snapshots[i].language.direction == kArTextDirection_LeftToRight);
+  }
+  CHECK(dialogue);
+  ActRaiserLocalizationRuntime_Shutdown();
+  ActRaiserLocalizationText_ResetObservation();
+  s_installed_pack_path = NULL;
+}
+
 int main(void) {
   TestStructuredNormalization();
   WriteNativeFixture(false);
+  ArLanguagePackFileIo_Init(&s_file_pack_io);
+  const ArLanguagePackIo pack_io = {
+      .struct_size = sizeof(pack_io),
+      .abi_version = AR_LANGUAGE_PACK_IO_ABI_VERSION,
+      .read_file = ReadPack,
+      .release_file = ReleasePack,
+  };
+  const ActRaiserLocalizationPackHost pack_host = {
+      .struct_size = sizeof(pack_host),
+      .abi_version = ACTRAISER_LOCALIZATION_PACK_HOST_ABI_VERSION,
+      .io = pack_io,
+      .native_manifest = getenv("AR_LOCALIZATION_NATIVE_PACK"),
+  };
+  ActRaiserLocalizationRuntime_SetPackHost(&pack_host);
   g_settings.localization_presentation = 1;
   g_settings.localization_content = 1;
   g_settings.localization_font_scale_percent = 140;
@@ -696,6 +865,9 @@ int main(void) {
       .abi_version = AR_TEXT_PRESENTATION_ABI_VERSION,
       .context = &s_font_available,
       .prepare_font = PrepareFont,
+      .register_font = RegisterFont,
+      .retire_font = RetireFont,
+      .discard_prepared_font = DiscardPreparedFont,
   };
   ++text_host.abi_version;
   ActRaiserLocalizationRuntime_SetPresentationHost(&text_host);
@@ -830,8 +1002,7 @@ int main(void) {
   CHECK(!s_frame_hook && !s_confirms && s_frames == 4);
   CHECK(strstr(s_frame.text, "Brief page,"));
   CHECK(s_frame.fallback_font_count == 1 &&
-        !strcmp(s_frame.fallback_font_paths[0],
-                AR_TEST_NATIVE_FIXTURE_DIR "/fixture-font.ttf"));
+        s_frame.fallback_fonts[0] < 4096 && s_fallback_fonts[s_frame.fallback_fonts[0]]);
 
   s_frame_hook = ExtendOnce;
   Run(0xfa7b, 0x8afb, one_page, sizeof(one_page), 0);
@@ -880,5 +1051,12 @@ int main(void) {
   WriteNativeFixture(false);
   TestTitleTransformHandoff();
   TestUnicodeNameHandoff();
+  TestCreditsWithoutDialogueObservation();
+  TestPartialRtlSources();
+  ActRaiserLocalizationRuntime_Shutdown();
+  ActRaiserLocalizationRuntime_SetPackHost(NULL);
+  CHECK(s_pack_reads > 0 && s_pack_reads == s_pack_releases);
+  CHECK(!s_live_fonts);
+  CHECK(s_discarded_preflights > 0);
   return s_failures ? 1 : 0;
 }

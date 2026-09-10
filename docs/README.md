@@ -13,6 +13,8 @@ histories, and retired specifications are intentionally excluded.
   replacing assets, and navigating the local GUI.
 - [Language pack format](language-pack-format.md) — creating UTF-8 game
   translations with typed placeholders and safe page/control semantics.
+- [Install and share language packs](language-packs.md) — direct `.arlang`
+  installation, editor-free/AI authoring, CLI validation and publication.
 - [Project progress](progress.md) — public gameplay, subsystem, and platform
   acceptance status.
 

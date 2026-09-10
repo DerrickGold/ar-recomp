@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "actraiser/actraiser_localization_name_entry.h"
+#include "actraiser/actraiser_localization_style.h"
 
 static bool IsValid(const ActRaiserLocalizationComposeState *state) {
   return state && state->struct_size >= sizeof(*state) &&
@@ -163,6 +164,8 @@ static bool ResolveSnapshot(
     ActRaiserLocalizationComposeTextResolver resolve_text,
     void *resolve_context, char *error, size_t error_capacity) {
   if (!resolved || !resolve_text || !resolved->semantic_id[0]) return false;
+  memset(&resolved->language, 0, sizeof(resolved->language));
+  resolved->bidi.count = 0;
   memset(resolved->structural_boundaries, 0, sizeof(resolved->structural_boundaries));
   if (!resolve_text(resolve_context, resolved->semantic_id,
                     resolved->utf8, sizeof(resolved->utf8),
@@ -170,9 +173,11 @@ static bool ResolveSnapshot(
                     &resolved->source_revision, resolved->inline_objects,
                     kArLocalizationFrameInlineObjectCapacity,
                     &resolved->inline_object_count, resolved->structural_boundaries,
-                    error, error_capacity) ||
+                    &resolved->language, &resolved->bidi, error, error_capacity) ||
+      !ArLocalizationTextLanguage_IsValid(&resolved->language) ||
       resolved->utf8_bytes >= sizeof(resolved->utf8) ||
       resolved->utf8[resolved->utf8_bytes] != 0 ||
+      !ArTextBidiSpans_FitSource(&resolved->bidi, resolved->utf8, resolved->utf8_bytes) ||
       (!resolved->utf8_bytes &&
        (resolved->cluster_count || resolved->inline_object_count)) ||
       (resolved->utf8_bytes && !resolved->cluster_count) ||
@@ -226,6 +231,13 @@ bool ActRaiserLocalizationComposeState_Process(
       (observation->source_pc24 == 0x02aa34 ||
        observation->source_pc24 == 0x02aa4a))
     ClearSurface(state, 15);
+  /* Sound test closes by composing spaces, not via the general text erase
+   * routine. Release even a native-only/missing-translation generation, so a
+   * later font/language change cannot resurrect the closed modal. */
+  if (observation->source_pc24 == UINT32_C(0x029896) &&
+      observation->caller_pc24 == UINT32_C(0x029860) &&
+      observation->destination == UINT16_C(0x080B))
+    ClearSurface(state, kActRaiserLocalizationSoundTestSurface);
   const ActRaiserLocalizationComposeRoute *route =
       ActRaiserLocalizationRoute_ResolveCompose(observation);
   if (!route || !resolve_text) return true;
@@ -328,14 +340,21 @@ bool ActRaiserLocalizationComposeState_RefreshLatest(
 bool ActRaiserLocalizationComposeState_AppendFrame(
     const ActRaiserLocalizationComposeState *state,
     ArLocalizationFrame *frame, ArTextCellDestination destination,
-    ArTextDirection direction) {
-  if (!IsValid(state) || !frame) return false;
+    const uint16_t palette[4]) {
+  if (!IsValid(state) || !frame || !palette) return false;
+  const uint8_t first_snapshot = frame->snapshot_count;
   bool complete = true;
   for (size_t index = 0;
        index < kActRaiserLocalizationComposeSurfaceCapacity; ++index) {
     const ActRaiserLocalizationComposeSnapshot *slot =
         &state->surfaces[index];
     if (!slot->active) continue;
+    if (!ArLocalizationTextLanguage_IsValid(&slot->language) ||
+        !ArTextBidiSpans_FitSource(&slot->bidi, slot->utf8, slot->utf8_bytes) ||
+        slot->bidi.count > kArTextMaximumBidiSpans - frame->bidi.count) {
+      complete = false;
+      continue;
+    }
     if (!strcmp(slot->semantic_id, "title.save_choice.labels")) {
       /* Two choices, two fixed arrow slots. Ignore ROM padding/blank spacer
        * rows; an omitted choice still owns an empty replacement so native
@@ -355,11 +374,21 @@ bool ActRaiserLocalizationComposeState_AppendFrame(
         region.row += choice * 2;
         region.rows = 1;
         const uint32_t clusters = first < end ? slot->cluster_count : 0;
+        ArTextBidiSpans bidi = {0};
+        for (uint16_t i = 0; i < slot->bidi.count; ++i) {
+          ArTextBidiSpan s = slot->bidi.spans[i];
+          if (s.end <= first || s.start >= end) continue;
+          s.start = s.start > first ? s.start - (uint32_t)first : 0;
+          s.end = (s.end < end ? s.end : (uint32_t)end) - (uint32_t)first;
+          bidi.spans[bidi.count++] = s;
+        }
         complete &= ArLocalizationFrame_AddTextWithObjectsAndLayout(
             frame, 140 + choice, destination, region,
             slot->utf8 + first, end - first, clusters, clusters,
-            slot->source_revision, direction, slot->native_font_pixels,
-            kArLocalizationTextLayout_SingleLineLabel, NULL, 0, NULL, 0);
+            slot->source_revision, slot->language.direction, slot->native_font_pixels,
+            kArLocalizationTextLayout_SingleLineLabel, NULL, 0, NULL, 0) &&
+            ArLocalizationFrame_SetTextLanguage(frame, &slot->language) &&
+            ArLocalizationFrame_SetTextBidiSpans(frame, &bidi);
       }
       continue;
     }
@@ -388,10 +417,12 @@ bool ActRaiserLocalizationComposeState_AppendFrame(
               frame, slot->surface_id, destination, slot->region,
               slot->utf8, slot->utf8_bytes,
               slot->cluster_count, slot->cluster_count,
-              slot->source_revision, direction, slot->native_font_pixels,
+              slot->source_revision, slot->language.direction, slot->native_font_pixels,
               &slot->grid, slot->structural_boundaries,
               preserve_count ? preserves : NULL, preserve_count,
-              slot->inline_objects, slot->inline_object_count))
+              slot->inline_objects, slot->inline_object_count) ||
+          !ArLocalizationFrame_SetTextLanguage(frame, &slot->language) ||
+          !ArLocalizationFrame_SetTextBidiSpans(frame, &slot->bidi))
         complete = false;
       continue;
     }
@@ -399,13 +430,18 @@ bool ActRaiserLocalizationComposeState_AppendFrame(
             frame, slot->surface_id, destination, slot->region,
             slot->utf8, slot->utf8_bytes,
             slot->cluster_count, slot->cluster_count,
-            slot->source_revision, direction, slot->native_font_pixels,
+            slot->source_revision, slot->language.direction, slot->native_font_pixels,
             slot->layout, NULL, 0,
-            slot->inline_objects, slot->inline_object_count)) {
+            slot->inline_objects, slot->inline_object_count) ||
+        !ArLocalizationFrame_SetTextLanguage(frame, &slot->language) ||
+        !ArLocalizationFrame_SetTextBidiSpans(frame, &slot->bidi)) {
       complete = false;
       continue;
     }
     const char *separator = KeySeparatorForSemanticId(slot->semantic_id);
+    if (!strncmp(slot->semantic_id, "city.", 5) &&
+        slot->layout == kArLocalizationTextLayout_SingleLineLabel)
+      frame->snapshots[frame->snapshot_count - 1u].top_inset_pixels = 1;
     if (separator &&
         !ArLocalizationFrame_SetKeySeparator(frame, separator,
                                              strlen(separator)))
@@ -421,6 +457,8 @@ bool ActRaiserLocalizationComposeState_AppendFrame(
             kActRaiserLocalizationNameEntryKeyCellColumns))
       complete = false;
   }
+  for (uint8_t i = first_snapshot; i < frame->snapshot_count; ++i)
+    ActRaiserLocalizationStyle_Ordinary(&frame->snapshots[i], palette);
   return complete;
 }
 

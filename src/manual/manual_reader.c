@@ -9,6 +9,7 @@
 #include "host/host_clock.h"
 #include "input_map.h"
 #include "manual_input.h"
+#include "manual_caption.h"
 #include "manual_pages.h"
 #include "render/render_device.h"
 #include "scene3d_math.h"
@@ -658,37 +659,34 @@ static void DrawHint(ArRenderRectI viewport, uint64_t now, bool spread) {
   const uint8_t alpha = HintAlpha(now);
   if (alpha == 0) return;
 
-  char hint[192];
-  snprintf(hint, sizeof hint, "%s %d/%d   %s",
-           spread ? "OPENING" : "PAGE", s_reader.view.item + 1, ItemCount(),
-           ManualInput_HintText(s_hint_device, Zoomed()));
-
-  /* Scaled to the window rather than fixed, so the line is the same physical
-   * size on a 720p handheld and a 4K display instead of shrinking to nothing on
-   * the one where there is most room for it. */
-  int scale = viewport.h / 320;
-  if (scale < 1) scale = 1;
-  if (scale > 4) scale = 4;
-  const int text_w = SettingsOverlay_GameTextWidth(hint, scale);
-  const int glyph = kSettingsOverlayGlyphSize * scale;
-  const int pad = glyph / 2;
-  const int bar_h = glyph + pad * 2;
-  const int x = viewport.x + (viewport.w - text_w) / 2;
-  const int y = viewport.y + viewport.h - bar_h + pad;
+  ManualCaption caption;
+  if (!ManualCaption_Build(SettingsOverlay_InterfaceLocale(), s_hint_device,
+      Zoomed(), spread, s_reader.view.item + 1, ItemCount(), viewport.w,
+      viewport.h, kSettingsOverlayGlyphSize, &caption)) return;
 
   /* The backing plate fades with the text; a bar that outlived it would be a
    * black stripe across the page for no reason. Alpha is scaled rather than
    * fixed so the plate never survives the words it exists to make readable. */
   const ArRenderRectF backing = {
-    (float)viewport.x, (float)(viewport.y + viewport.h - bar_h),
-    (float)viewport.w, (float)bar_h,
+    (float)viewport.x, (float)(viewport.y + viewport.h - caption.height),
+    (float)viewport.w, (float)caption.height,
   };
   (void)ArRenderDevice_DrawSolidRect(
       &g_render_device, &backing,
       (ArRenderColorF){0.0f, 0.0f, 0.0f,
                        (float)(alpha * 150 / 255) / 255.0f},
       kArRenderBlendMode_Alpha);
-  SettingsOverlay_DrawGameText(x, y, scale, alpha, hint);
+  for (int i = 0; i < caption.line_count; ++i) {
+    const ManualCaptionLine *span = &caption.lines[i];
+    char line[kManualCaptionBytes];
+    memcpy(line, caption.text + span->offset, span->bytes);
+    line[span->bytes] = 0;
+    const int width = SettingsOverlay_GameTextWidth(line, caption.scale);
+    const int x = viewport.x + (viewport.w - width) / 2;
+    const int y = viewport.y + viewport.h - caption.height + caption.padding +
+                  i * kSettingsOverlayGlyphSize * caption.scale;
+    SettingsOverlay_DrawGameText(x, y, caption.scale, alpha, line);
+  }
 }
 
 static void DrawSheet(int page, const ManualMesh *density,

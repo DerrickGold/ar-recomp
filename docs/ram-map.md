@@ -347,11 +347,14 @@ See [dialogue-system.md](dialogue-system.md) for the control and clear paths.
 | --- | --- |
 | `DB:Y` | Interactive or fixed source cursor; caller determines bank |
 | DP `$14` | Packed row/column saved by `$02:BF60` from A; not a global message ID |
+| DP `$10/$12` (sound-test modal only) | Music/effect selection counters; the routine changes their low bytes in ranges 1–22 and 1–38. Native numeric formatting and the localization value adapter read the words. These are reused scratch, not global current-song/SFX state. |
 | `$7E:0200` | Dialogue pacing/retained-row mode: `$901C` delays non-space glyphs by this many `$9284` frames; zero selects clear at `$02` continuation, nonzero selects row advancement/scroll. Enhanced sessions apply this interval per authored Unicode grapheme through caller-scoped `$9278` (return `$9026`), not per compressed source token. Authored pages retain the same zero/nonzero window policy. |
 | `$7E:0201` | Text presentation-state byte initialized to `$FF` on interpreter entry; not a standalone host page counter |
 | `$7E:0288-$028F` | Eight live native player-name slots read by interactive `$06`; can precede SRAM `$1439` until the next save. `$0290` is terminator/padding. Never UTF-8 storage. |
 | `$7E:034B/$034C/$034D` | Name-entry selected column / row / entered length |
 | `$7F:B000-$B7FF` | 32×32 BG3 tilemap staging; byte offset = `row*64 + column*2` |
+| `$7E:4000-$DFFF` (ending 08/01 only) | Twenty decompressed credits page maps, `$0800` bytes each. `$02:AB30` copies the selected map to `$7F:B000` and increments `$F1`; the same RAM serves different asset owners in other scenes. |
+| VRAM words `$5000-$57FF` (ending 08/01 only) | Separate 256-tile 2bpp credits alphabet; this replaces the dialogue font occupying that slot in ordinary scenes. CGRAM 0–15 is loaded with its palette. |
 | `$7F:B100-$B7FF` | Whole-menu clear range at `$01:8CCE`; status rows survive |
 | `$7F:B000-$B6FF` | General clear range at `$02:ABC4/$BA41` |
 | `$7F:B040-$B0BF` (action) | Two-row HUD template from `$02:8E7E`; lives at `$B050`, timer `$B05E`, score `$B074`; labels use packed graphical lettering |

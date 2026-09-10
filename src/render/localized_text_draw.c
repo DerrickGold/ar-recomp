@@ -157,6 +157,45 @@ static bool DrawRun(ArRenderDevice *device,
 
 /* `shifts` carries one horizontal offset per cluster for text laid out on a
  * uniform key pitch, and is NULL for text that draws where it was shaped. */
+static bool DrawOwnedPieces(ArRenderDevice *device,
+                            const ArLocalizedPreparedText *text,
+                            const int *shifts, size_t revealed,
+                            float brightness) {
+  enum { kBatchQuads = 128 };
+  ArRenderVertex2D vertices[kBatchQuads * 4];
+  int32_t indices[kBatchQuads * 6];
+  unsigned count = 0;
+  const ArRenderColorF color = {brightness, brightness, brightness, 1};
+  for (size_t i = 0; i < text->surface.reveal_piece_count; ++i) {
+    const ArTextRevealPiece *piece = &text->surface.reveal_pieces[i];
+    if (piece->cluster_index >= revealed) continue;
+    const int shift = shifts ? shifts[piece->cluster_index] : 0;
+    ArRenderRectI source = piece->source;
+    ArRenderRectI target = {text->destination.x + source.x + shift,
+        text->destination.y + source.y, source.w, source.h};
+    if (text->viewport.w > 0 &&
+        !ArLocalizedTextLayout_Clip(text->viewport, &source, &target)) continue;
+    const float u = (float)source.x / text->surface.width;
+    const float v = (float)source.y / text->surface.height;
+    const float right = (float)(source.x + source.w) / text->surface.width;
+    const float bottom = (float)(source.y + source.h) / text->surface.height;
+    const unsigned at = count * 4;
+    vertices[at] = (ArRenderVertex2D){{target.x, target.y}, color, {u, v}};
+    vertices[at + 1] = (ArRenderVertex2D){{target.x + target.w, target.y}, color, {right, v}};
+    vertices[at + 2] = (ArRenderVertex2D){{target.x + target.w, target.y + target.h}, color, {right, bottom}};
+    vertices[at + 3] = (ArRenderVertex2D){{target.x, target.y + target.h}, color, {u, bottom}};
+    const int32_t order[] = {0, 1, 2, 0, 2, 3};
+    for (unsigned j = 0; j < 6; ++j) indices[count * 6 + j] = (int32_t)at + order[j];
+    if (++count == kBatchQuads) {
+      if (!ArRenderDevice_DrawGeometry(device, text->surface.texture,
+              vertices, count * 4, indices, count * 6)) return false;
+      count = 0;
+    }
+  }
+  return !count || ArRenderDevice_DrawGeometry(device, text->surface.texture,
+      vertices, count * 4, indices, count * 6);
+}
+
 static bool DrawOne(ArRenderDevice *device,
                     const ArLocalizedPreparedText *text, const int *shifts,
                     float brightness) {
@@ -167,6 +206,8 @@ static bool DrawOne(ArRenderDevice *device,
   if (!shifts && revealed >= text->surface.reveal_cluster_count)
     return DrawTextPiece(device, text,
         (ArRenderRectI){0, 0, destination.w, destination.h}, destination, brightness);
+  if (text->surface.reveal_pieces)
+    return DrawOwnedPieces(device, text, shifts, revealed, brightness);
   ArRenderRectI run = {0, 0, 0, 0};
   int run_shift = 0;
   bool have_run = false;

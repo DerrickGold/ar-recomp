@@ -67,7 +67,7 @@ static bool LoadPack(ArLanguagePack *pack, const char *id, const char *locale,
       "autonym = Synthetic %s\n"
       "author = Test Author\n"
       "license = MIT\n"
-      "direction = ltr\n"
+      "direction = %s\n"
       "target = us-runtime\n"
       "source_profile = us\n"
       "fallback = native-us\n"
@@ -76,7 +76,7 @@ static bool LoadPack(ArLanguagePack *pack, const char *id, const char *locale,
       "primary = builtin:actraiser-sans\n"
       "[scripts]\n"
       "source = text/main.artext\n",
-      id, locale, id, id);
+      id, locale, id, id, !strcmp(locale, "ar") ? "rtl" : "ltr");
   CHECK(manifest_size > 0 && (size_t)manifest_size < sizeof(manifest));
   const MemoryFile files[] = {
       {"pack.ini", (const uint8_t *)manifest, (size_t)manifest_size},
@@ -363,7 +363,7 @@ static void TestFallbackAndTransactionalFailure(void) {
   ArLanguagePack_Init(&malformed_pack);
   ArLanguagePackError error;
   CHECK(LoadPack(&native_pack, "native.us", "en-US", native_script, &error));
-  CHECK(LoadPack(&missing_pack, "community.partial", "fr-FR", missing_script,
+  CHECK(LoadPack(&missing_pack, "community.partial", "ar", missing_script,
                  &error));
   CHECK(LoadPack(&malformed_pack, "community.invalid", "fr-FR",
                  malformed_script, &error));
@@ -380,6 +380,10 @@ static void TestFallbackAndTransactionalFailure(void) {
         kArDialogueResolvedSource_NativeEnhanced);
   CHECK(strcmp(page.package_id, "native.us") == 0);
   CHECK(strstr(page.utf8, "fallback") != NULL);
+  CHECK(!strcmp(page.locale, "en-US"));
+  CHECK(page.direction == kArLanguageDirection_LeftToRight);
+  CHECK(ArDialogueSession_GetAuthoredPage(&session, 0, &page));
+  CHECK(!strcmp(page.locale, "en-US") && page.direction == kArLanguageDirection_LeftToRight);
 
   const uint64_t revision = session.state.source_revision;
   const uint32_t revealed = session.state.revealed_cluster_count;
@@ -395,6 +399,12 @@ static void TestFallbackAndTransactionalFailure(void) {
   selection.native_us_enhanced_pack = NULL;
   CHECK(ArDialogueSession_Switch(&session, &selection, &error));
   CHECK(session.state.resolved_source == kArDialogueResolvedSource_NativeRom);
+
+  selection.native_us_enhanced_pack = &native_pack;
+  CHECK(ArDialogueSession_Begin(&session, &selection, "dialogue.event.relay.bloodpool",
+                                NULL, &error));
+  CHECK(ArDialogueSession_GetPage(&session, &page));
+  CHECK(!strcmp(page.locale, "ar") && page.direction == kArLanguageDirection_RightToLeft);
 
   ArDialogueSession_Destroy(&session);
   ArLanguagePack_Destroy(&malformed_pack);
@@ -527,6 +537,12 @@ static void TestNumberFormatting(void) {
   ArDialoguePageSnapshot page;
   CHECK(ArDialogueSession_GetPage(&session, &page));
   CHECK(!strcmp(page.utf8, "002/2/2"));
+  CHECK(page.bidi_span_count == 3);
+  CHECK(page.bidi_spans[0].start == 0 && page.bidi_spans[0].end == 3);
+  CHECK(page.bidi_spans[1].start == 4 && page.bidi_spans[1].end == 5);
+  CHECK(page.bidi_spans[2].start == 6 && page.bidi_spans[2].end == 7);
+  for (size_t i = 0; i < page.bidi_span_count; ++i)
+    CHECK(page.bidi_spans[i].direction == kArTextDirection_LeftToRight);
   CHECK((uint32_t)values.calls == ArLanguageContract_AllowedPlaceholderCount(
       "status.report.master_report")); /* One capture per allowed value. */
   ArDialogueSession_Destroy(&session);
@@ -535,6 +551,73 @@ static void TestNumberFormatting(void) {
       ":: status.report.master_report\n{master_name:03}\n@end\n", &error));
   CHECK(!ArLanguageContract_ValidatePack(&pack, NULL, &error));
   ArLanguagePack_Destroy(&pack);
+}
+
+static void TestValueSpanBoundaries(void) {
+  ArLanguagePack pack, native;
+  ArLanguagePack_Init(&pack); ArLanguagePack_Init(&native);
+  ArLanguagePackError error;
+  CHECK(LoadPack(&pack,"spans.test","ar",
+      ":: status.report.master_report\nA{master_name}Z\n@end\n"
+      ":: status.report.cities_report\n{city_fillmore_growth_state}|{total_population}\n@end\n",&error));
+  CHECK(LoadPack(&native,"spans.native","en-US",
+      ":: growth_state.01\nNative term\n@end\n",&error));
+  ResolverState values = {.master_name = "\xcc\x81"};
+  ArDialogueValueResolver resolver = {.struct_size = sizeof(resolver),
+      .abi_version = AR_DIALOGUE_VALUE_RESOLVER_ABI_VERSION, .context = &values, .resolve = ResolveValue};
+  ArDialogueContentSelection selection = Selection(kArDialoguePresentation_Enhanced,&pack,&native);
+  ArDialogueSession session; ArDialogueSession_Init(&session);
+  CHECK(ArDialogueSession_Begin(&session,&selection,"status.report.master_report",&resolver,&error));
+  ArDialoguePageSnapshot page;
+  CHECK(ArDialogueSession_GetPage(&session,&page));
+  CHECK(!strcmp(page.utf8,"A\xcc\x81Z") && page.cluster_count == 2);
+  CHECK(page.bidi_span_count == 1 && page.bidi_spans[0].start == 0 && page.bidi_spans[0].end == 3);
+  ArDialogueToken token;
+  CHECK(ArDialogueSession_Next(&session,&token,&error));
+  CHECK(token.kind == kArDialogueToken_Grapheme && token.end_utf8_byte == 3);
+  CHECK(ArDialogueSession_Next(&session,&token,&error));
+  CHECK(token.kind == kArDialogueToken_Grapheme && token.end_utf8_byte == 4);
+  CHECK(ArDialogueSession_Begin(&session,&selection,"status.report.cities_report",&resolver,&error));
+  CHECK(ArDialogueSession_GetPage(&session,&page));
+  CHECK(!strcmp(page.utf8,"Native term|2") && page.direction == kArLanguageDirection_RightToLeft);
+  CHECK(page.bidi_span_count == 2);
+  CHECK(page.bidi_spans[0].direction == kArTextDirection_LeftToRight);
+  CHECK(page.bidi_spans[0].start == 0 && page.bidi_spans[0].end == 11);
+  CHECK(page.bidi_spans[1].start == 12 && page.bidi_spans[1].end == 13);
+  ArDialogueSession_Destroy(&session); ArLanguagePack_Destroy(&pack); ArLanguagePack_Destroy(&native);
+}
+
+static void TestValueSpanBudget(void) {
+  char script[8192];
+  size_t bytes = (size_t)snprintf(script, sizeof(script),
+      ":: sky.action_mode.confirm\n@anchor reset_text_cursor.00\n");
+  for (unsigned i = 0; i < kArTextMaximumBidiSpans; ++i)
+    bytes += (size_t)snprintf(script + bytes, sizeof(script) - bytes, "{master_name}");
+  const size_t boundary = bytes;
+  snprintf(script + bytes, sizeof(script) - bytes, "\n@anchor yield.01\n");
+  ArLanguagePack pack, over;
+  ArLanguagePack_Init(&pack); ArLanguagePack_Init(&over);
+  ArLanguagePackError error;
+  CHECK(LoadPack(&pack, "spans.limit", "en-US", script, &error));
+  snprintf(script + boundary, sizeof(script) - boundary,
+      "\n@page\n{master_name}\n@anchor yield.01\n");
+  CHECK(LoadPack(&over, "spans.over", "en-US", script, &error));
+  ResolverState values = {.master_name = "A"};
+  const ArDialogueValueResolver resolver = {.struct_size = sizeof(resolver),
+      .abi_version = AR_DIALOGUE_VALUE_RESOLVER_ABI_VERSION, .context = &values, .resolve = ResolveValue};
+  ArDialogueContentSelection selection = Selection(kArDialoguePresentation_Enhanced, &pack, &pack);
+  ArDialogueSession session; ArDialogueSession_Init(&session);
+  CHECK(ArDialogueSession_Begin(&session, &selection, "sky.action_mode.confirm", &resolver, &error));
+  ArDialoguePageSnapshot page;
+  CHECK(ArDialogueSession_GetPage(&session, &page));
+  CHECK(page.bidi_span_count == kArTextMaximumBidiSpans);
+  CHECK(page.cluster_count == kArTextMaximumBidiSpans);
+  selection.selected_pack = &over;
+  CHECK(!ArDialogueSession_Switch(&session, &selection, &error));
+  CHECK(strstr(error.message, "inserted value spans") != NULL);
+  CHECK(ArDialogueSession_GetPage(&session, &page));
+  CHECK(!strcmp(page.package_id, "spans.limit") && page.page_count == 1);
+  ArDialogueSession_Destroy(&session); ArLanguagePack_Destroy(&pack); ArLanguagePack_Destroy(&over);
 }
 
 static void TestAuthoredBoundaries(void) {
@@ -570,6 +653,9 @@ static void TestAuthoredBoundaries(void) {
   ArDialoguePageSnapshot page;
   CHECK(ArDialogueSession_GetPage(&session, &page));
   CHECK(!strcmp(page.utf8, "É|li\nse\n\n\nÉ|li\nse|2|left|right"));
+  CHECK(page.bidi_span_count == 3);
+  CHECK(page.bidi_spans[0].start == 0 && page.bidi_spans[0].end == strlen("É|li\nse"));
+  CHECK(page.bidi_spans[0].direction == kArTextDirection_Auto);
   unsigned pipes = 0, lines = 0, literal_pipes = 0, literal_lines = 0;
   for (size_t i = 0; i < page.utf8_bytes; ++i) {
     const bool boundary = ArTextBoundary_Get(page.structural_boundaries, i);
@@ -581,10 +667,13 @@ static void TestAuthoredBoundaries(void) {
   ArDialoguePageSnapshot authored;
   CHECK(ArDialogueSession_GetAuthoredPage(&session, 0, &authored));
   CHECK(authored.structural_boundaries == page.structural_boundaries);
+  CHECK(authored.bidi_spans == page.bidi_spans && authored.bidi_span_count == page.bidi_span_count);
   CHECK(ArDialogueSession_Begin(&session, &selection,
       "status.report.cities_report", &resolver, &error));
   CHECK(ArDialogueSession_GetPage(&session, &page));
   CHECK(!strcmp(page.utf8, "Max|growth|2"));
+  CHECK(page.bidi_span_count == 2 && page.bidi_spans[0].end == 10);
+  CHECK(page.bidi_spans[0].direction == kArTextDirection_LeftToRight);
   for (size_t i = 0; i < page.utf8_bytes; ++i)
     CHECK(ArTextBoundary_Get(page.structural_boundaries, i) == (i == 10));
   ArDialogueSession_Destroy(&session);
@@ -976,6 +1065,8 @@ int main(void) {
   TestEnhancedNativeControlProgress();
   TestCueCannotSplitGrapheme();
   TestNumberFormatting();
+  TestValueSpanBoundaries();
+  TestValueSpanBudget();
   TestAuthoredBoundaries();
   TestCorruptStateRejected();
   TestEnhancedNativeProgressSynchronization();

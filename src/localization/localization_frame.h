@@ -11,12 +11,11 @@
 #include "localization/text_cell_record.h"
 #include "localization/text_boundaries.h"
 
-#define AR_LOCALIZATION_FRAME_ABI_VERSION UINT32_C(21)
+#define AR_LOCALIZATION_FRAME_ABI_VERSION UINT32_C(26)
 
 enum {
   kArLocalizationFrameTextCapacity = 16 * 1024,
   kArLocalizationFrameFontStackCapacity = 128,
-  kArLocalizationFrameFontPathCapacity = 512,
   kArLocalizationFrameLocaleCapacity = 33,
   kArLocalizationFrameNativePreserveCapacity = 8,
   kArLocalizationFrameIndicatorCapacity = 8,
@@ -124,6 +123,8 @@ typedef struct ArLocalizationTextCellRule {
   /* Reserve a native pixel beside adjacent artwork on that side. */
   uint8_t gutter_leading;
   uint8_t gutter_trailing;
+  /* Whole semantic value field, including locale-specific numeral scripts. */
+  uint8_t italic;
 } ArLocalizationTextCellRule;
 
 /* Rules are searched in order; the first whose line range and row shape match
@@ -158,8 +159,19 @@ typedef struct ArLocalizationTextGrid {
   uint8_t row_height;
   /* Tight single-row cells may discard transparent top/bottom padding. */
   uint8_t crop_rows;
+  /* Center each row's ink vertically inside its declared row height. */
+  uint8_t center_rows;
   ArLocalizationTextRowRule rules[kArLocalizationGridMaximumRules];
 } ArLocalizationTextGrid;
+
+/* Effective content language, independent of the selected presentation font
+ * stack. A partial pack can publish several source languages in one frame. */
+typedef struct ArLocalizationTextLanguage {
+  char locale[kArLocalizationFrameLocaleCapacity];
+  ArTextDirection direction;
+} ArLocalizationTextLanguage;
+
+bool ArLocalizationTextLanguage_IsValid(const ArLocalizationTextLanguage *language);
 
 typedef struct ArLocalizationTextSnapshot {
   uint32_t surface_id;
@@ -182,13 +194,18 @@ typedef struct ArLocalizationTextSnapshot {
    * no such shade. */
   uint32_t shadow_rgb;
   bool shadow_enabled;
+  ArTextShadowShape shadow_shape;
   bool italic;
+  bool slant_ascii_numerals;
+  uint32_t accent_end_utf8_byte;
+  uint32_t accent_rgb;
   /* Logical (8-pixel-cell) physical gutters, scaled with the claim, independent
    * of shaping direction. Masking still covers the complete native field. */
   uint8_t left_inset_pixels;
   uint8_t right_inset_pixels;
   uint8_t top_inset_pixels;
-  ArTextDirection direction;
+  ArLocalizationTextLanguage language;
+  uint16_t bidi_span_offset, bidi_span_count;
   ArLocalizationTextLayoutKind layout;
   /* One-based index into the frame's grid table; zero for a non-grid layout. */
   uint8_t grid_index;
@@ -222,13 +239,17 @@ typedef struct ArLocalizationTextSnapshot {
 } ArLocalizationTextSnapshot;
 
 /* Pointer-free game-thread -> presenter contract. Text shares one bounded
- * UTF-8 pool, while cell records bind each snapshot to its exact BG target. */
+ * UTF-8 pool, while cell records bind each snapshot to its exact BG target.
+ * Font IDs are borrowed process-local identities, not owning leases. Retained
+ * frames can use an already pinned stack; if its registration and backend have
+ * both retired, presentation falls back to the captured native pixels. */
 typedef struct ArLocalizationFrame {
   uint32_t struct_size;
   uint32_t abi_version;
   ArTextCellRecordSet cells;
   ArLocalizationTextSnapshot snapshots[kArTextCellRecordCapacity];
   uint8_t snapshot_count;
+  ArTextBidiSpans bidi;
   /* Interned grid descriptions; snapshots reference them by index so a report
    * shared by several surfaces is published once. */
   ArLocalizationTextGrid grids[kArLocalizationFrameGridCapacity];
@@ -250,9 +271,8 @@ typedef struct ArLocalizationFrame {
   uint8_t structural_boundaries[AR_TEXT_BOUNDARY_BYTES(kArLocalizationFrameTextCapacity)];
   char locale[kArLocalizationFrameLocaleCapacity];
   char font_stack_id[kArLocalizationFrameFontStackCapacity];
-  char primary_font_path[kArLocalizationFrameFontPathCapacity];
-  char fallback_font_paths[kArTextPresentationMaximumFallbackFonts]
-                          [kArLocalizationFrameFontPathCapacity];
+  ArFontResourceId primary_font;
+  ArFontResourceId fallback_fonts[kArTextPresentationMaximumFallbackFonts];
   uint8_t fallback_font_count;
   uint64_t font_revision;
   ArEnhancedTextSettings settings;
@@ -267,6 +287,10 @@ void ArLocalizationFrame_Reset(ArLocalizationFrame *frame);
  * slot. Stamps the header without clearing tens of kilobytes a second time.
  * Passing anything else leaves stale content behind. */
 void ArLocalizationFrame_InitCleared(ArLocalizationFrame *frame);
+/* Validate a complete pointer-free frame before a consumer follows any of its
+ * bounded pool indices. Cleared frames are valid; populated frames must carry
+ * a configured font and mutually consistent snapshots/cell ownership. */
+bool ArLocalizationFrame_IsValid(const ArLocalizationFrame *frame);
 bool ArLocalizationFrame_AddDialogueWindow(
     ArLocalizationFrame *frame, uint32_t surface_id,
     ArTextCellDestination destination, ArTextCellRegion region,
@@ -276,13 +300,20 @@ bool ArLocalizationFrame_AddDialogueWindow(
 bool ArLocalizationFrame_SetFont(ArLocalizationFrame *frame,
                                  const char *locale,
                                  const char *font_stack_id,
-                                 const char *primary_font_path,
+                                 ArFontResourceId primary_font,
                                  uint64_t font_revision,
                                  const ArEnhancedTextSettings *settings);
 /* SetFont clears previous fallbacks; attach this ordered stack afterwards.
- * Paths are copied transactionally into the pointer-free frame. */
+ * Resource IDs are copied transactionally into the pointer-free frame. */
 bool ArLocalizationFrame_SetFallbackFonts(
-    ArLocalizationFrame *frame, const char *const *paths, size_t count);
+    ArLocalizationFrame *frame, const ArFontResourceId *fonts, size_t count);
+/* Override the last added snapshot's effective language. AddText otherwise
+ * copies SetFont's default locale and the explicit direction argument. Does
+ * not change fonts or other snapshots; failure leaves the frame untouched. */
+bool ArLocalizationFrame_SetTextLanguage(
+    ArLocalizationFrame *frame, const ArLocalizationTextLanguage *language);
+bool ArLocalizationFrame_SetTextBidiSpans(
+    ArLocalizationFrame *frame, const ArTextBidiSpans *spans);
 bool ArLocalizationFrame_AddText(ArLocalizationFrame *frame,
                                  uint32_t surface_id,
                                  ArTextCellDestination destination,

@@ -104,7 +104,7 @@ for non-action modes or any operand shape outside the stock action census.
 | 3 | `$02:B4E8` / `0x0134E8` | 1 | Apply one 28-byte `$02:893E` video profile to PPU and direct-page presentation state. | Guarded `ActRaiser_ApplyActionVideoConfig`; native fallback |
 | 2 | `$02:B631` / `0x013631` | 3 | Semantics were not resolved by the presentation-loader work. | Native VM |
 | 1 | `$02:B63B` / `0x01363B` | 5 | Script-driven song change. | Native VM |
-| 0 | `$02:B69C` / `0x01369C` | 6 | Decompress ordinary/boss OBJ animation and composition data to `$7E:4000/$5000`. | Native VM |
+| 0 | `$02:B69C` / `0x01369C` | 6 | Decompress ordinary/boss OBJ animation/composition data to `$7E:4000/$5000`; ending scene 08/01 uses this producer for twenty BG3 page maps. | Native VM |
 
 The per-region object-type tables at `$00:96AF/$A8F6/$B449/$C11E/$CD9B/$D928/$E722/$F39A`
 (already listed above) are the **enemy stat tables**: each 12-byte record carries ATK at `+7`,
@@ -205,6 +205,36 @@ entries via `JSR $02:AB30`, stamps `'A','C','T'` into SRAM `$70:1FF0-1FF2`
 (the beat-the-game marker), waits for Start (`$4219` bit 4), and RTL-jumps
 back to the main loop top `$00:8059` (the ROM's only other RTL-jump site,
 `$02:AAFD`).
+
+The final asset-script entry is **08/01**, not the preceding final-boss entry
+07/08. It selects video profile `$2F`, uploads sixteen colours from file
+`0x03C7C5` to CGRAM 0–15, decompresses a distinct 4096-byte credits alphabet
+to VRAM word `$5000`, and decompresses twenty 2048-byte maps to `$7E:4000-DFFF`.
+The bit-0 asset producer `$02:B69C` is therefore also a text-map source; treating
+all its output as actor composition data misses the credits.
+
+The localization adapter observes those resident maps without replacing this
+native controller. Editable pages are 0–14, 17–19 in the US; 15/16 remain native
+copyright artwork. The Go catalogue records all twenty page identities and
+decodes the non-artwork compositions into Unicode. See the
+[credits adapter contract](dialogue-system.md#graphical-credits-page-adapter).
+
+| Release | Scene file offset | Font compressed offset | Page compressed offset | Page presenter | Hold frames |
+| --- | --- | --- | --- | --- | --- |
+| US | `0x028E1A` | `0x0D1B6F` | `0x03D1A0` | `$02:AB30` | 354 |
+| EU English | `0x028E1A` | `0x0D14B2` | `0x03D1A0` | `$02:ABC9` | 286 |
+| German | `0x028E1A` | `0x0D06F7` | `0x03D1A0` | `$02:ABD2` | 286 |
+| French | `0x028E1A` | `0x0D0000` | `0x03D1A0` | `$02:ABBB` | 286 |
+| Japanese | `0x028E14` | `0x0D1A2B` | `0x054549` | `$02:A876` | 382 |
+
+Each page copy is an `$0800`-byte MVN into `$7F:B000`, followed by an increment
+of `$F1` for upload. On carry clear the old page fades out first; both fade
+loops have sixteen steps and two frame waits per step. The hold follows fade-in,
+except for page 19. The US page 0 call clears carry, while the other immediate
+terminal-page calls set it. Page indices and the sequence bound are extracted
+from the native callers; not all twenty stored pages are active in each release.
+The source asset/consumer evidence and raw page/atlas previews are available
+through the [Go localization commands](language-pack-format.md#tooling).
 
 These are different identity layers. The action object handler and composition
 pointer select behavior/layout within a common resident atlas; the small bank-6
@@ -429,7 +459,8 @@ cursor) and unreadable afterwards (it is behind it).
 
 These are USA coarse ranges, not a sequential-record grammar. For exact
 consumer-rooted extraction use the verified profiles in
-`tools/language_pack_extract.py`; the [dialogue reference](dialogue-system.md)
+`snesrecomp-go/internal/localizationkit/data/*-profiles.json` and the Go
+`snesbuild localization-extract` command; the [dialogue reference](dialogue-system.md)
 explains native controls and source identity. Menu-bank text is interleaved
 with code and tables and is not covered by the bank-04 ranges alone.
 

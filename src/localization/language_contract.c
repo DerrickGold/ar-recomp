@@ -36,7 +36,7 @@ typedef struct ArGeneratedRoute {
 
 #define ARRAY_COUNT(array) (sizeof(array) / sizeof((array)[0]))
 
-_Static_assert(ARRAY_COUNT(kGeneratedRoutes) == 539,
+_Static_assert(ARRAY_COUNT(kGeneratedRoutes) == 558,
                "v1 semantic route count changed");
 _Static_assert(ARRAY_COUNT(kGeneratedPlaceholders) == 60,
                "v1 placeholder count changed");
@@ -283,8 +283,17 @@ static bool ValidateBody(const ArLanguagePack *pack,
       SetError(error, "%s: invalid operation range", diagnostic_id);
       return false;
     }
-    if (operation->kind == kArLanguageOperation_Text)
-      ScanText(&scan, ArLanguagePack_GetString(pack, operation->value.text));
+    if (operation->kind == kArLanguageOperation_Text) {
+      const char *text = ArLanguagePack_GetString(pack, operation->value.text);
+      /* Fixed/native field structure uses explicit authored breaks. A Unicode
+       * separator must not bypass its row/choice contract as an opaque glyph. */
+      if (route->shape != kArLanguagePresentation_Flow && text &&
+          (strstr(text, "\xc2\x85") || strstr(text, "\xe2\x80\xa8") || strstr(text, "\xe2\x80\xa9"))) {
+        SetError(error, "%s: use @line or @paragraph instead of Unicode line-separator controls in fixed fields", diagnostic_id);
+        return false;
+      }
+      ScanText(&scan, text);
+    }
     else if (operation->kind == kArLanguageOperation_Placeholder)
       ScanContent(&scan);
     else if (operation->kind == kArLanguageOperation_LineBreak)

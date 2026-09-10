@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ActRaiser published language archive header (package.json)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "kind"],
+  "properties": {
+    "format": {"const": "actraiser-language-archive"},
+    "version": {"const": 1},
+    "kind": {"const": "publication"}
+  }
+}

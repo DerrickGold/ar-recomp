@@ -9,6 +9,8 @@ typedef struct ActRaiserLocalizationHudLabel {
   size_t bytes;
   uint32_t clusters;
   uint64_t revision;
+  ArLocalizationTextLanguage language;
+  ArTextBidiSpans bidi;
   bool valid;
 } ActRaiserLocalizationHudLabel;
 typedef struct ActRaiserLocalizationHud {
@@ -21,7 +23,7 @@ typedef struct ActRaiserLocalizationHud {
  * Reset resolved on pack changes; text shaping remains presenter-cached. */
 void ActRaiserLocalizationHud_Append(
     ActRaiserLocalizationHud *hud, ArLocalizationFrame *frame,
-    ArTextCellDestination destination, ArTextDirection direction,
+    ArTextCellDestination destination,
     uint16_t tile_base_words,
     const uint16_t *vram, size_t vram_count,
     const uint16_t *cgram, size_t cgram_count,

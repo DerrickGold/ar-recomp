@@ -71,6 +71,18 @@ static bool MenuColumns(ActRaiserLocalizationMenu menu, unsigned line,
     } else return false;
     return true;
   }
+  if (menu == kActRaiserLocalizationMenu_SoundTest) {
+    if (field_count == 1) {
+      *column = 0;
+      *next_column = 10;
+    } else if (field_count == 2) {
+      /* Stable counter anchors despite proportional/translated label widths.
+       * Preserve the modal's blank first column on its value rows. */
+      *column = field_index ? 7 : 1;
+      *next_column = field_index ? 9 : 6;
+    } else return false;
+    return true;
+  }
   if (menu == kActRaiserLocalizationMenu_FixedRows && field_count == 1) {
     *column = 0;
     *next_column = 10;
@@ -100,6 +112,7 @@ static bool MenuValueCell(ActRaiserLocalizationMenu menu, unsigned line,
   if (!field_count || field_index >= field_count) return false;
   return (menu == kActRaiserLocalizationMenu_StatusMaster &&
           (line == 1 || (field_index & 1u))) ||
+      (menu == kActRaiserLocalizationMenu_SoundTest && field_index == 1) ||
       ((menu == kActRaiserLocalizationMenu_StatusCities ||
         menu == kActRaiserLocalizationMenu_StatusScore) &&
        ((line <= 1 && field_count > 1 && field_index + 1 == field_count) ||
@@ -158,6 +171,8 @@ static bool BuildRow(ActRaiserLocalizationMenu menu, ArTextCellRegion region,
     if (next_column > region.columns) next_column = region.columns;
     if (next_column <= column) return false;
     ArLocalizationTextCellRule *cell = &rule->cells[index];
+    cell->italic = MenuValueCell(menu, line, index, field_count) ||
+        (menu == kActRaiserLocalizationMenu_MessageSpeed && line == 0 && field_count == 10);
     cell->start = (uint8_t)column;
     cell->end = (uint8_t)next_column;
     if (physical) {

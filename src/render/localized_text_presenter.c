@@ -37,23 +37,22 @@ typedef struct PendingFont {
   ArTextBackendInstance instance;
   ArTextSurfaceCache cache;
   char stack[kArLocalizationFrameFontStackCapacity];
-  char path[kArLocalizationFrameFontPathCapacity];
-  char fallbacks[kArTextPresentationMaximumFallbackFonts]
-                [kArLocalizationFrameFontPathCapacity];
+  ArFontResourceId primary;
+  ArFontResourceId fallbacks[kArTextPresentationMaximumFallbackFonts];
   size_t fallback_count;
   uint64_t revision, backend_revision;
 } PendingFont;
 
 typedef struct LocalizedTextPresenterState {
   ArTextBackend backend;
+  ArFontResources resources;
   uint64_t backend_revision, active_backend_revision;
   ArTextBackendInstance instance;
   ArTextSurfaceCache cache;
   bool cache_initialized;
   char active_stack[kArLocalizationFrameFontStackCapacity];
-  char active_path[kArLocalizationFrameFontPathCapacity];
-  char active_fallbacks[kArTextPresentationMaximumFallbackFonts]
-                       [kArLocalizationFrameFontPathCapacity];
+  ArFontResourceId active_primary;
+  ArFontResourceId active_fallbacks[kArTextPresentationMaximumFallbackFonts];
   size_t active_fallback_count;
   PendingFont pending;
   uint64_t active_revision;
@@ -90,6 +89,15 @@ void ArLocalizedTextPresenter_SetBackend(const ArTextBackend *backend) {
   s_presenter.backend = selected;
 }
 
+void ArLocalizedTextPresenter_SetFontResources(const ArFontResources *resources) {
+  const ArFontResources selected = ArFontResources_IsReady(resources)
+      ? *resources : (ArFontResources){0};
+  if (selected.ops != s_presenter.resources.ops ||
+      selected.context != s_presenter.resources.context)
+    ++s_presenter.backend_revision;
+  s_presenter.resources = selected;
+}
+
 static void DestroyResources(ArRenderDevice *device) {
   ArLocalizedTextArtwork_Reset(device);
   if (s_presenter.cache_initialized)
@@ -97,7 +105,7 @@ static void DestroyResources(ArRenderDevice *device) {
   ArTextBackendInstance_Destroy(&s_presenter.instance);
   s_presenter.cache_initialized = false;
   s_presenter.active_stack[0] = 0;
-  s_presenter.active_path[0] = 0;
+  s_presenter.active_primary = 0;
   s_presenter.active_revision = 0;
   s_presenter.active_fallback_count = 0;
   memset(s_presenter.active_fallbacks, 0, sizeof(s_presenter.active_fallbacks));
@@ -133,6 +141,10 @@ static void DestroyPendingFont(ArRenderDevice *device) {
   memset(&s_presenter.pending, 0, sizeof(s_presenter.pending));
 }
 
+void ArLocalizedTextPresenter_DiscardPreparedFont(ArRenderDevice *device) {
+  DestroyPendingFont(device);
+}
+
 static bool ActiveFontMatches(ArRenderDevice *device,
                               const ArTextPresentationFont *font) {
   if (!s_presenter.cache_initialized || s_presenter.cache.device != device ||
@@ -140,10 +152,10 @@ static bool ActiveFontMatches(ArRenderDevice *device,
       s_presenter.active_revision != font->revision ||
       s_presenter.active_fallback_count != font->fallback_count ||
       strcmp(s_presenter.active_stack, font->stack_id) ||
-      strcmp(s_presenter.active_path, font->primary_path))
+      s_presenter.active_primary != font->primary)
     return false;
   for (size_t i = 0; i < font->fallback_count; ++i)
-    if (strcmp(font->fallback_paths[i], s_presenter.active_fallbacks[i]))
+    if (font->fallbacks[i] != s_presenter.active_fallbacks[i])
       return false;
   return true;
 }
@@ -154,7 +166,8 @@ bool ArLocalizedTextPresenter_PrepareFont(ArRenderDevice *device,
   if (error && error_capacity)
     error[0] = 0;
   if (!ArRenderDevice_IsReady(device) ||
-      !ArTextBackend_IsReady(&s_presenter.backend))
+      !ArTextBackend_IsReady(&s_presenter.backend) ||
+      !ArFontResources_IsReady(&s_presenter.resources))
     return FontError(error, error_capacity,
                      "enhanced text backend is unavailable");
   if (!font ||
@@ -162,17 +175,14 @@ bool ArLocalizedTextPresenter_PrepareFont(ArRenderDevice *device,
                               sizeof(font->fallback_count) ||
       font->abi_version != AR_TEXT_PRESENTATION_ABI_VERSION ||
       !font->revision || !font->stack_id || !font->stack_id[0] ||
-      !font->primary_path || !font->primary_path[0] ||
+      !font->primary ||
       strlen(font->stack_id) >= sizeof(s_presenter.active_stack) ||
-      strlen(font->primary_path) >= sizeof(s_presenter.active_path) ||
       font->fallback_count > kArTextPresentationMaximumFallbackFonts ||
-      (font->fallback_count && !font->fallback_paths))
+      (font->fallback_count && !font->fallbacks))
     return FontError(error, error_capacity, "invalid enhanced font selection");
   for (size_t i = 0; i < font->fallback_count; ++i) {
-    if (!font->fallback_paths[i] || !font->fallback_paths[i][0] ||
-        strlen(font->fallback_paths[i]) >=
-            sizeof(s_presenter.active_fallbacks[i]))
-      return FontError(error, error_capacity, "invalid fallback font path");
+    if (!font->fallbacks[i])
+      return FontError(error, error_capacity, "invalid fallback font resource");
   }
   if (ActiveFontMatches(device, font))
     return true;
@@ -183,19 +193,20 @@ bool ArLocalizedTextPresenter_PrepareFont(ArRenderDevice *device,
       pending->revision == font->revision &&
       pending->fallback_count == font->fallback_count &&
       !strcmp(pending->stack, font->stack_id) &&
-      !strcmp(pending->path, font->primary_path);
+      pending->primary == font->primary;
   for (size_t i = 0; same_pending && i < font->fallback_count; ++i)
-    same_pending = !strcmp(pending->fallbacks[i], font->fallback_paths[i]);
+    same_pending = pending->fallbacks[i] == font->fallbacks[i];
   if (same_pending)
     return true;
   const ArTextBackendConfig config = {
       .struct_size = sizeof(config),
       .abi_version = AR_TEXT_BACKEND_CONFIG_ABI_VERSION,
       .font_stack_id = font->stack_id,
-      .primary_font_path = font->primary_path,
+      .resources = s_presenter.resources,
+      .primary_font = font->primary,
       .font_revision = font->revision,
       .cached_size_capacity = kFontSizeCacheCapacity,
-      .fallback_font_paths = font->fallback_paths,
+      .fallback_fonts = font->fallbacks,
       .fallback_font_count = font->fallback_count,
   };
   ArTextBackendInstance instance = {0};
@@ -244,13 +255,12 @@ bool ArLocalizedTextPresenter_PrepareFont(ArRenderDevice *device,
   pending->instance = instance;
   pending->cache = cache;
   snprintf(pending->stack, sizeof(pending->stack), "%s", font->stack_id);
-  snprintf(pending->path, sizeof(pending->path), "%s", font->primary_path);
+  pending->primary = font->primary;
   pending->revision = font->revision;
   pending->backend_revision = s_presenter.backend_revision;
   pending->fallback_count = font->fallback_count;
   for (size_t i = 0; i < font->fallback_count; ++i)
-    snprintf(pending->fallbacks[i], sizeof(pending->fallbacks[i]), "%s",
-             font->fallback_paths[i]);
+    pending->fallbacks[i] = font->fallbacks[i];
   return true;
 }
 
@@ -258,16 +268,13 @@ static bool ActivateFont(ArRenderDevice *device,
                          const ArLocalizationFrame *frame) {
   if (frame->fallback_font_count > kArTextPresentationMaximumFallbackFonts)
     return false;
-  const char *fallbacks[kArTextPresentationMaximumFallbackFonts];
-  for (size_t i = 0; i < frame->fallback_font_count; ++i)
-    fallbacks[i] = frame->fallback_font_paths[i];
   const ArTextPresentationFont font = {
       .struct_size = sizeof(font),
       .abi_version = AR_TEXT_PRESENTATION_ABI_VERSION,
       .stack_id = frame->font_stack_id,
-      .primary_path = frame->primary_font_path,
+      .primary = frame->primary_font,
       .revision = frame->font_revision,
-      .fallback_paths = fallbacks,
+      .fallbacks = frame->fallback_fonts,
       .fallback_count = frame->fallback_font_count,
   };
   char error[kArTextRasterErrorCapacity] = {0};
@@ -280,7 +287,7 @@ static bool ActivateFont(ArRenderDevice *device,
       s_presenter.cache = pending->cache;
       s_presenter.cache_initialized = true;
       memcpy(s_presenter.active_stack, pending->stack, sizeof(pending->stack));
-      memcpy(s_presenter.active_path, pending->path, sizeof(pending->path));
+      s_presenter.active_primary = pending->primary;
       memcpy(s_presenter.active_fallbacks, pending->fallbacks,
              sizeof(pending->fallbacks));
       s_presenter.active_fallback_count = pending->fallback_count;
@@ -549,6 +556,10 @@ static bool TableRequest(const ArLocalizationFrame *frame,
                          int base_pixels, int minimum_base_pixels,
                          int width, int height, bool crop_vertical,
                          ArTextRasterRequest *request) {
+  const ArLocalizationTextRowRule *rule = ArLocalizationGrid_FindRow(
+      ArLocalizationFrame_GetGrid(frame, snapshot), field->logical_line, field->field_count);
+  const bool italic = snapshot->italic || (rule && field->field_index < rule->cell_count &&
+      rule->cells[field->field_index].italic);
   *request = (ArTextRasterRequest){
       .struct_size = sizeof(*request), .abi_version = AR_TEXT_RASTER_REQUEST_ABI_VERSION,
       .utf8 = utf8 + field->utf8_offset, .utf8_bytes = field->utf8_bytes,
@@ -559,18 +570,27 @@ static bool TableRequest(const ArLocalizationFrame *frame,
       .band_rgb = snapshot->band_rgb, .body_rgb = snapshot->body_rgb,
       .shadow_rgb = snapshot->shadow_rgb,
       .shadow_enabled = snapshot->shadow_enabled,
+      .shadow_shape = snapshot->shadow_shape,
       .flags = kArTextRasterFlag_IncludeRevealClusters |
-          (snapshot->italic ? kArTextRasterFlag_Italic : 0u) |
+          (snapshot->slant_ascii_numerals ? kArTextRasterFlag_SlantAsciiNumerals : 0u) |
+          (italic ? kArTextRasterFlag_Italic : 0u) |
           (crop_vertical ? kArTextRasterFlag_CropVerticalWhitespace : 0u) |
           (FieldHasObject(frame, snapshot, field) ? 0u : kArTextRasterFlag_CropHorizontalWhitespace),
-      .direction = snapshot->direction,
-      .alignment = snapshot->direction == kArTextDirection_RightToLeft
-          ? kArTextHorizontalAlignment_Trailing : kArTextHorizontalAlignment_Leading,
+      .direction = snapshot->language.direction,
+      .bidi_spans = frame->bidi.spans + snapshot->bidi_span_offset,
+      .bidi_span_count = snapshot->bidi_span_count,
+      .bidi_source_offset = (uint32_t)field->utf8_offset,
+      .alignment = kArTextHorizontalAlignment_Leading,
       .font_pixels = base_pixels, .minimum_font_pixels = minimum_base_pixels,
       .maximum_width = width, .maximum_height = height,
       .filter = kArRenderFilter_Nearest,
-      .language_bcp47 = frame->locale, .language_bcp47_bytes = strlen(frame->locale),
+      .language_bcp47 = snapshot->language.locale, .language_bcp47_bytes = strlen(snapshot->language.locale),
   };
+  if (snapshot->accent_end_utf8_byte > field->utf8_offset &&
+      snapshot->accent_end_utf8_byte <= field->utf8_offset + field->utf8_bytes) {
+    request->accent_end_utf8_byte = snapshot->accent_end_utf8_byte - field->utf8_offset;
+    request->accent_rgb = snapshot->accent_rgb;
+  }
   return ArEnhancedTextSettings_Apply(
       &frame->settings, base_pixels, minimum_base_pixels, request);
 }
@@ -768,10 +788,6 @@ static bool PrepareTable(
     const ArLocalizationTextCellRule *cell =
         &rule->cells[field->field_index];
     ArTextHorizontalAlignment alignment = cell->alignment;
-    if (cell->follows_direction &&
-        alignment == kArTextHorizontalAlignment_Leading &&
-        snapshot->direction == kArTextDirection_RightToLeft)
-      alignment = kArTextHorizontalAlignment_Trailing;
     int left = bounds.x +
         bounds.w * (int)cell->start / (int)record->region.columns;
     int right = bounds.x +
@@ -819,6 +835,11 @@ static bool PrepareTable(
       goto fail;
     }
     if (surface.width > right - left || surface.height > bottom - top) goto fail;
+    const ArTextDirection effective_direction = snapshot->language.direction == kArTextDirection_Auto
+        ? surface.paragraph_direction : snapshot->language.direction;
+    if (cell->follows_direction && alignment == kArTextHorizontalAlignment_Leading &&
+        effective_direction == kArTextDirection_RightToLeft)
+      alignment = kArTextHorizontalAlignment_Trailing;
     const int x = alignment == kArTextHorizontalAlignment_Center
         ? left + (right - left - surface.width) / 2
         : alignment == kArTextHorizontalAlignment_Trailing
@@ -832,9 +853,11 @@ static bool PrepareTable(
        * Intersect their legal baseline ranges to keep every ink pixel inside
        * its own cell, including accents and descenders from fallback fonts. */
       TableRowBaseline *row = &baselines[field->logical_line];
-      const int desired = top + surface.ascent;
-      const int minimum = desired + top - ink.y;
-      const int maximum = desired + bottom - ink.y - ink.h;
+      const int baseline = top + surface.ascent;
+      const int desired = grid->center_rows
+          ? baseline + top + (bottom - top - ink.h) / 2 - ink.y : baseline;
+      const int minimum = baseline + top - ink.y;
+      const int maximum = baseline + bottom - ink.y - ink.h;
       if (!row->active) {
         *row = (TableRowBaseline){desired, minimum, maximum, true};
       } else {
@@ -1019,11 +1042,8 @@ void ArLocalizedTextPresenter_Prepare(
     ArLocalizedPreparedFrame *prepared) {
   if (!prepared) return;
   memset(prepared, 0, sizeof(*prepared));
-  if (!device || !frame ||
-      frame->abi_version != AR_LOCALIZATION_FRAME_ABI_VERSION ||
-      !frame->snapshot_count || frame->snapshot_count > kArTextCellRecordCapacity ||
-      frame->cells.count > kArTextCellRecordCapacity ||
-      frame->indicator_count > kArLocalizationFrameIndicatorCapacity ||
+  if (!device || !ArLocalizationFrame_IsValid(frame) ||
+      !frame->snapshot_count ||
       !bg3_state_valid || !chunks || !chunk_count)
     return;
   /* Empty replacements claim cells without manufacturing a space glyph or
@@ -1072,7 +1092,11 @@ void ArLocalizedTextPresenter_Prepare(
       const ArLocalizationTextSnapshot *snapshot = &frame->snapshots[snapshot_index];
       size_t utf8_bytes = 0;
       const char *utf8 = ArLocalizationFrame_GetText(frame, snapshot_index, &utf8_bytes);
-      if (!utf8 || snapshot->surface_id != record->surface_id) continue;
+      if (!utf8 || snapshot->surface_id != record->surface_id ||
+          !ArLocalizationTextLanguage_IsValid(&snapshot->language) ||
+          frame->bidi.count > kArTextMaximumBidiSpans ||
+          snapshot->bidi_span_offset > frame->bidi.count ||
+          snapshot->bidi_span_count > frame->bidi.count - snapshot->bidi_span_offset) continue;
       if ((utf8_bytes && !font_ready) ||
           (!utf8_bytes && (snapshot->cluster_count || snapshot->revealed_cluster_count ||
                            snapshot->revealed_utf8_bytes || snapshot->inline_object_count)))
@@ -1155,8 +1179,6 @@ void ArLocalizedTextPresenter_Prepare(
           snapshot->layout == kArLocalizationTextLayout_CenteredLabel;
       const bool right_label = snapshot->layout == kArLocalizationTextLayout_RightAlignedLabel;
       const bool left_label = snapshot->layout == kArLocalizationTextLayout_LeftAlignedLabel;
-      const bool trailing = right_label ||
-          (!left_label && snapshot->direction == kArTextDirection_RightToLeft);
       const bool single_line = centered_label || right_label || left_label ||
           snapshot->layout == kArLocalizationTextLayout_SingleLineLabel;
       if (snapshot->layout == kArLocalizationTextLayout_Grid) {
@@ -1197,21 +1219,28 @@ void ArLocalizedTextPresenter_Prepare(
           .style_id = snapshot->style_id,
           .band_rgb = snapshot->band_rgb,
           .body_rgb = snapshot->body_rgb,
+          .accent_end_utf8_byte = snapshot->accent_end_utf8_byte,
+          .accent_rgb = snapshot->accent_rgb,
           .shadow_rgb = snapshot->shadow_rgb,
           .shadow_enabled = snapshot->shadow_enabled,
+          .shadow_shape = snapshot->shadow_shape,
           .flags = kArTextRasterFlag_WrapWords | kArTextRasterFlag_PreserveHardBreaks |
+                   (snapshot->slant_ascii_numerals ? kArTextRasterFlag_SlantAsciiNumerals : 0u) |
                    kArTextRasterFlag_CropHorizontalWhitespace |
                    kArTextRasterFlag_IncludeRevealClusters,
-          .direction = snapshot->direction,
-          .alignment = trailing ? kArTextHorizontalAlignment_Trailing
-                                : kArTextHorizontalAlignment_Leading,
+          .direction = snapshot->language.direction,
+          .bidi_spans = frame->bidi.spans + snapshot->bidi_span_offset,
+          .bidi_span_count = snapshot->bidi_span_count,
+          .alignment = right_label ? kArTextHorizontalAlignment_Right
+              : left_label ? kArTextHorizontalAlignment_Left
+                           : kArTextHorizontalAlignment_Leading,
           .font_pixels = base_pixels,
           .minimum_font_pixels = minimum_base_pixels,
           .maximum_width = bounds.w,
           .maximum_height = scrolling ? 4096 : bounds.h,
           .filter = kArRenderFilter_Nearest,
-          .language_bcp47 = frame->locale,
-          .language_bcp47_bytes = strlen(frame->locale),
+          .language_bcp47 = snapshot->language.locale,
+          .language_bcp47_bytes = strlen(snapshot->language.locale),
       };
       if (!ArEnhancedTextSettings_Apply(&frame->settings, base_pixels, minimum_base_pixels,
                                         &request))
@@ -1241,6 +1270,10 @@ void ArLocalizedTextPresenter_Prepare(
         ReportRequestFailure(snapshot, &request, error);
         continue;
       }
+      const ArTextDirection effective_direction = snapshot->language.direction == kArTextDirection_Auto
+          ? surface.paragraph_direction : snapshot->language.direction;
+      const bool trailing = right_label ||
+          (!left_label && effective_direction == kArTextDirection_RightToLeft);
       uint32_t revealed_clusters = snapshot->revealed_cluster_count;
       const int scroll_y =
           scrolling ? ArLocalizedTextLayout_ScrollOffset(&surface, snapshot->revealed_utf8_bytes,

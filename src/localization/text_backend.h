@@ -6,18 +6,21 @@
 #include <stdint.h>
 
 #include "localization/text_rasterizer.h"
+#include "localization/font_resource.h"
 
 #define AR_TEXT_BACKEND_ABI_VERSION UINT32_C(1)
-#define AR_TEXT_BACKEND_CONFIG_ABI_VERSION UINT32_C(1)
+#define AR_TEXT_BACKEND_CONFIG_ABI_VERSION UINT32_C(2)
+enum { kArTextBackendMaximumFallbackFonts = 16 };
 
-/* Portable input for constructing one ordered font-stack rasterizer. Paths
- * have already been resolved by the pack/catalogue owner. */
+/* Portable input for constructing one ordered font stack. The host resolves
+ * resources; backends pin immutable bytes for their complete lifetime. */
 typedef struct ArTextBackendConfig {
   size_t struct_size;
   uint32_t abi_version;
   const char *font_stack_id;
-  const char *primary_font_path;
-  const char *const *fallback_font_paths;
+  ArFontResources resources;
+  ArFontResourceId primary_font;
+  const ArFontResourceId *fallback_fonts;
   size_t fallback_font_count;
   uint64_t font_revision;
   size_t cached_size_capacity;

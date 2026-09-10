@@ -78,8 +78,38 @@ func TestNativeLocalizationFreshBuildExtraction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Manifest().Metadata().ID != "native-us" || p.Workspace().Stats().MessageCount != 500 {
+	if p.Manifest().Metadata().ID != "native-us" || p.Workspace().Stats().MessageCount != 521 {
 		t.Fatal("incorrect source coverage")
+	}
+	// Model a pre-credits baseline without changing any surviving message. A
+	// subsequent build must forward its ROM to the shared supplementation seam.
+	files := p.Files()
+	for name, data := range files {
+		if strings.HasSuffix(name, ".artext") {
+			text := string(data)
+			start := strings.Index(text, ":: credits.page_00\n")
+			if start < 0 {
+				continue
+			}
+			end := strings.Index(text[start:], "@end\n")
+			if end < 0 {
+				t.Fatal("credits fixture missing terminator")
+			}
+			file := filepath.Join(dir, filepath.FromSlash(name))
+			if err := os.WriteFile(file, []byte(text[:start]+text[start+end+len("@end\n"):]), 0644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if old, err := localizationkit.OpenAuthorPack(dir); err != nil || old.Workspace().Stats().MessageCount != 520 {
+		t.Fatal("pre-credits baseline fixture invalid", err)
+	}
+	if err := prepareBuildLocalization(paths, manifest, &output); err != nil {
+		t.Fatal("rebuild did not supplement old baseline", err)
+	}
+	p, err = localizationkit.OpenAuthorPack(dir)
+	if err != nil || p.Workspace().Stats().MessageCount != 521 {
+		t.Fatal("rebuild omitted credits", err)
 	}
 	before := p.RuntimeRevision()
 	paths.ROM = filepath.Join(paths.Root, "missing.sfc")

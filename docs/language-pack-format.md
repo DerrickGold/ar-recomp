@@ -1,5 +1,10 @@
 # Language pack authoring format
 
+For direct `.arlang` installation and authoring with an editor or AI, start with
+[Install, create and share language packs](language-packs.md). The accompanying
+[machine-readable route reference](language-authoring-reference.json) supplies
+the US contract for every message, including anchors and allowed placeholders.
+
 ActRaiser language packs are UTF-8 directories designed for ordinary text
 editors and the builder's Languages workspace. A pack contains no ROM
 addresses, dictionary tokens, or font-tile numbers. Version 1 deliberately
@@ -7,9 +12,48 @@ starts fresh; the unreleased prototype format is not supported.
 
 The game applies packs to simulation-mode and Sky Palace menus/dialogue/HUD, action
 HUD labels and counters, action stage cards and pause/stage messages, and the
-US title-screen options. Logo/copyright artwork, ending/credits, sound-test
-presentation and regional-only menu flows remain native. The semantic catalog
+US title-screen options. Ending-tour dialogue uses the ordinary dialogue
+integration; credit pages support editable text while logo/copyright artwork remains native,
+as do regional-only menu flows. The dormant native sound-test composer also
+supports enhanced text when invoked by debugging tools; this does not enable
+a new sound-test menu in normal play. The semantic catalog
 covers the whole game so later integrations can use the same packs.
+
+In Western source packs, `dialogue.ending.slot_00` through `slot_07` hold the
+ending messages. Their live wrapper routes are emitted as aliases to those
+editable bodies, so editing an ending message updates its linked uses. The
+Japanese reference exposes the equivalent messages through
+`dialogue.event.wrapper_00.call_00.source_00` through `source_06`, the Sky Palace
+introduction `dialogue.event.wrapper_05.call_03.source_00`, and the empty-temple
+message `dialogue.event.wrapper_05.call_06.source_00`. An author can deliberately
+replace an alias with an independent body to vary a particular use. Keep each
+message's locked control anchors: they preserve the native delays and exits.
+
+Credits appear under **End Credits**. `credits.page_00`–`credits.page_14`
+are staff pages; `credits.the_end`, `credits.best_player` and `credits.game_over`
+are the final cards. Each accepts up to six explicit lines (`@line`) on one
+page; `@page` is not supported because native code owns the page sequence and
+timing. Lines are centered and fitted independently on a fixed vertical pitch;
+the heading's first grapheme retains the native gold accent. `@empty` clears
+the entire text page. Missing entries fall back to Native US, and a rendering
+failure retains the whole native page, never a partially erased staff list.
+Changing language while a credit page is visible retains its native timing.
+The build/extraction step adds missing credits to older Native US baselines
+without replacing existing edits or progress. Community packs are not modified.
+Regional references preserve their original contributor lists, line breaks and
+spelling; they are not silently corrected. Japan's extra `credits.special_mode`
+is dormant reference text, not an additional page enabled in the US game.
+US copyright pages 15/16 and JP page 15 remain artwork-only, available in the
+graphics archive rather than as editable translations.
+
+`sound_test.menu.labels` is a fixed five-line grid (including the blank lines)
+with live `{sound_music_id:02}` and `{sound_effect_id:02}` values. Separate each
+counter from its label with ` | ` to keep both counters in the same fixed
+column regardless of label width. Older single-field rows remain supported.
+Its native
+origin and two-row line cells are game-owned; labels fit within ten native
+columns. It has no separate selector sprite. Closing the native modal releases
+the enhanced surface, including when its translation was unavailable.
 
 Action labels use `action.hud.act_label`, `time_label`, `score_label`,
 `player_label` and `enemy_label` (each with the `action.hud.` prefix).
@@ -77,19 +121,21 @@ These settings can be changed during play and are saved with other settings.
 The **Interface** tab selects English, French, German or Japanese for the system
 menu, independently of game text and the builder's interface preference.
 Setting labels, descriptions, choices and controller-binding captions are
-translated. Saved setting keys/values, package names, player names and
+translated, as are the manual reader's page counters and control hints (not
+the scanned manual artwork). Saved setting keys/values, package names, player names and
 platform-provided keycap/device names retain their original identity.
 
 The system interface owns a separate font stack, not your selected pack's
-fonts. Non-ASCII package names use cached, shaped Noto Sans/Japanese text at
-output resolution; ordinary English interface lettering keeps the native
+fonts. Non-ASCII package names use cached, shaped Noto Sans with bundled Japanese,
+Arabic and Hebrew fallbacks at output resolution; ordinary English interface lettering keeps the native
 bitmap appearance. Ports without the enhanced backend retain the safe bitmap
 fallback. This does not make a game pack's missing glyphs available: declare
 the dependencies needed by its actual game text in the pack's Fonts tab.
 
 The Go builder prepares the local Native US source first in both its CMake-backed
 and hermetic build flows, preserving existing source messages. Older native
-baselines gain missing graphical HUD label entries through an atomic update;
+baselines gain missing graphical HUD labels and, when a ROM is available,
+credit text through an atomic update;
 previous source files and translation progress remain intact. Community packs
 are never automatically rewritten. Its runtime path
 is `game-assets/languages/native-us/pack.ini`. The workshop's Languages section
@@ -178,9 +224,16 @@ it neither asks for redistribution rights nor re-filters a publisher's content.
 Publication remains separate: the publisher confirms rights and chooses whether
 to include WIP, while Not started and unchanged source templates are omitted.
 Multiple packs with the same locale or name remain distinct by their stable ID;
-selection survives package-name changes and catalog reordering. Text-source
-choices are visible in both rendering modes, but Native still displays original
-USA text/font; Enhanced applies the chosen translation.
+selection survives package-name changes and catalog reordering. Selecting an
+external pack forces enhanced rendering; only Native US offers the original
+text/font mode.
+
+Players can also copy a published `.arlang` directly into that `packs/` directory.
+The game prepares it on startup through the same Go archive reader, with no GUI.
+The archive filename is independent of its ID; unpacked directory names must
+exactly match their manifest ID. Conflicting enabled IDs are unavailable until
+resolved, including folder/archive duplicates. The complete manual workflow,
+CLI commands and cache locations are in the [quickstart](language-packs.md).
 
 The library defaults to an installed-package checklist. Enable/disable choices
 save immediately; restart the game to apply them. Unchecking a package keeps
@@ -189,6 +242,12 @@ its files and project but hides it from the runtime selector by renaming
 and restores `pack.ini`. Only one of these manifests may exist at a time.
 Updating a disabled pack preserves its disabled state. Original US text remains
 available independently; the game uses one selected language, not a merged stack.
+
+For archives the checklist records disabled IDs in `.arlang-state/` instead of
+modifying the archive. Archive uninstall moves the file to `.uninstalled/` for
+recovery. Both directories are inside `packs/`; the game ignores them during
+ordinary discovery. Prepared archive snapshots in `.arlang-cache/` are retained
+until explicitly discarded with the game closed.
 
 The library's **Uninstall…** action removes an enabled or disabled package from discovery
 after confirmation; restart the game afterward. It never deletes the editable
@@ -209,6 +268,33 @@ certify shaping or final layout. The separate Fonts tab checks scalar coverage
 through the game backend; test appearance in game before publishing. Directory
 imports and archives retain declared fonts; new translations use the bundled
 font. A missing or incompatible selected pack retains the prior working source.
+
+Install/publication review also reports text coverage by dialogue, menus,
+keyboard, shared terms, HUD and credits. Expand a group for missing IDs and
+separate author progress counts. **Supplied** includes aliases and intentional
+`@empty` entries; it does not certify translation or review quality. Known
+unchanged source templates are counted separately. Publication coverage uses
+the actual filtered export, retaining the author's WIP status in the report.
+Changing publication options invalidates that report until checked again.
+
+`snesbuild language validate --pack <path>` provides the same inventory in
+`text_coverage`, independently of optional `font_coverage`. `required` describes
+contract completeness; `liveOptional` identifies the 26 audited live US HUD/
+credits extras. `surfaces[].missing` lists native-fallback IDs. Groups include
+shared/reference contract entries and are not an execution/screen census.
+The reference's `us_runtime_usage` distinguishes `contract`, `live_optional`,
+`dormant` and `regional_reference`; it does not change runtime dispatch or pack
+syntax. The sound-test menu and special-mode credits are listed as dormant US
+entries, not ordinary gameplay. This inventory contains IDs/counts, not ROM text.
+
+Translation and reference panes use their own content language, independently
+of the workshop interface language. Raw script lines resolve direction one line
+at a time so ASCII directives such as `@anchor` remain readable alongside RTL
+prose. The logical preview uses the translation's `direction` setting and keeps
+control IDs/value placeholders isolated left-to-right. These are display rules:
+the editor does not insert hidden bidi characters or reverse saved text. Browser
+caret behavior and the game's mixed-script appearance still need RTL-specific
+qualification; the logical preview is not proof of in-game bidi correctness.
 
 Authorship is stored in `author` and `license`. Preserve original contributor
 credits when adapting a pack, add your contributions, and use public
@@ -384,9 +470,19 @@ source = text/simulation.artext
 - `id` is the stable package identity. Locale is metadata, so several packages
   can target the same locale. Discovery sorts by package name and then package
   ID, independently of locale or autonym.
+  For manual folder installation, use this exact ID as the directory name.
 - `locale` is a BCP-47 language tag such as `en-CA`, `fr-FR`, or `ja-JP`.
 - `name` is the package name; `autonym` is the language's own display name.
-- `direction` is `ltr`, `rtl`, or `auto`.
+- `direction` is `ltr`, `rtl`, or `auto`. This selects the paragraph base,
+  not the order in which you write the script. Always store normal logical
+  Unicode text; never reverse Arabic/Hebrew text or numbers manually. The
+  enhanced backend resolves mixed-direction runs before shaping. RTL packs
+  remain experimental end to end: validate mixed names/numbers, partial-pack
+  fallback, editor behavior and package-name display, not just glyph coverage.
+  Inserted names/text are automatically isolated using their own first strong
+  character; numbers are isolated LTR and localized terms use the term's source
+  direction. Do not add direction controls around placeholders to implement
+  this: isolation is private to rendering and leaves script/reveal offsets intact.
 - Player-selectable packs use `target = us-runtime` and
   `source_profile = us`. A local extract from another official ROM uses
   `target = reference-only`; it cannot accidentally replace the U.S. execution
@@ -394,8 +490,17 @@ source = text/simulation.artext
 - `fallback` is fixed to `native-us` in version 1. Missing or rejected messages
   therefore fall back to the locally extracted U.S. enhanced source and then
   to untouched native ROM rendering.
+  Enhanced fallback uses the effective message source's locale and direction,
+  while retaining the selected pack's font stack. An English fallback message
+  does not inherit `rtl` from a partial translation. This applies to dialogue,
+  fixed menus/labels, HUD text and credits; native numeric HUD fields retain
+  their U.S. formatting and physical placement.
 - `coverage = partial` permits per-message fallback. `complete` requires every
-  catalog message available in the declared source profile.
+  **required** catalog message in the declared source profile, not optional
+  routes and not every visible word. The public reference marks these with
+  `required_for_complete`. The unchanged US contract has 495 required entries;
+  eight additional live HUD labels and eighteen live credits entries remain
+  optional. Omitting them requests native fallback even in a complete pack.
 - `source` and fallback-font rows may repeat for distinct references. Paths
   must be UTF-8, pack-relative, and at most 511 bytes. Use `/` separators;
   absolute paths, backslashes, empty/`.`/`..` components, control characters,
@@ -722,12 +827,19 @@ Version 1 rejects rather than truncates content above these limits:
 Native locked delays are part of the generated control contract and do not
 consume the author-wait budget.
 
+Use `@line`/`@paragraph` for structural breaks in fixed fields, tables and name
+entry. Raw NEL/U+2028/U+2029 line-separator controls are rejected there so they
+cannot bypass native row/choice boundaries. Flowed dialogue and the shared text
+backend recognize Unicode separators; U+2028 retains its paragraph's bidi base,
+whereas paragraph separators resolve a new base. These controls need no glyph.
+
 The scoped Sky Palace/simulation runtime has a smaller presentation limit:
-**16,384 bytes per resolved dialogue**, including substituted values and one
-separator per page. This is a whole-message budget even when pages clear the
+**16,384 bytes and 256 nonempty value insertions per resolved dialogue**, including
+substituted values and one byte separator per page. These are whole-message
+budgets even when pages clear the
 box. A new over-budget invocation uses native text; switching an active message
 to an over-budget candidate keeps the prior selection. Simultaneous menu text
-shares the frame buffer, and a rendered window must also fit the backend's
+shares the frame's text and 256 insertion-range pools, and a rendered window must also fit the backend's
 4,096-pixel height limit. Those later capacity/layout failures use the native
 fallback described above rather than silently truncating text or leaving
 invisible authored prompts. These are runtime limits, not a claim that every
@@ -735,27 +847,37 @@ pack passing the portable format validator will fit every layout/font setting.
 
 ## Tooling
 
-These optional source-checkout tools operate on local extraction products:
+The build and Languages UI use the same Go extraction/authoring core. The build
+creates the U.S. starting source automatically. A source checkout can also run
+the bundled command directly (from `snesrecomp-go/`, prefix these commands with
+`go run ./cmd/snesbuild` in place of `snesbuild`):
 
 ```sh
-python3 tools/language_pack_extract.py \
-  ar.sfc ar-eu.sfc ar-ger.sfc ar-fra.sfc ar-jp.sfc \
-  --out-dir game-assets/languages/sources --require-complete
-
-python3 tools/language_pack_v1.py catalog \
-  --extraction game-assets/languages/sources/en-US.extraction.json \
-  --extraction game-assets/languages/sources/en-GB.extraction.json \
-  --extraction game-assets/languages/sources/de-DE.extraction.json \
-  --extraction game-assets/languages/sources/fr-FR.extraction.json \
-  --extraction game-assets/languages/sources/ja-JP.extraction.json \
-  --out game-assets/languages/sources/semantic-catalog.json
-
-python3 tools/language_pack_v1.py validate \
-  --pack game-assets/languages/example.fr-ca \
-  --catalog game-assets/languages/sources/semantic-catalog.json
+snesbuild localization-extract --rom /path/to/ar.sfc --out native-us.zip
+snesbuild localization-extract --rom /path/to/ar-fra.sfc --out source-fr.zip
+snesbuild localization-extract --rom /path/to/ar.sfc \
+  --format catalog --out native-us-catalog.json
+snesbuild localization-graphics --rom /path/to/ar-jp.sfc --out graphics-jp.zip
 ```
 
-The shipped builder implements extraction, validation and authoring in Go,
-creates the U.S. starting source, and provides the tree editor and contextual
-placeholder/control pickers described above. The Python tools here are optional
-source-checkout references, not a dependency of the builder or game.
+Outputs must not already exist. Source archives are private workshop backups:
+opening/importing one is not installation or publication. Regional source packs
+remain reference-only; create a translation against the U.S. semantic contract
+to use their wording in the U.S. runtime. The tree editor and contextual
+placeholder/control pickers use the same validator as these source exports.
+
+The catalogue includes its ROM identity, source-consumer proofs and coverage
+report; it is decompilation evidence, not a playable script. A single-ROM
+catalogue deliberately does not claim the separate five-release coverage gate.
+The graphics archive contains the 256-tile dialogue and credits atlases, raw
+2bpp data, codepoint/unknown-slot inventory, source palette slices, all twenty
+credits page maps/previews, and a provenance manifest. Credits use a distinct
+alphabet, not the dialogue codepoint map. These ROM-derived outputs are for
+local reference and must not be included in a community publication.
+
+For adapter development, `--format runtime-routes` and `--format compose-routes`
+produce the address-only U.S. dialogue and fixed-menu manifests from fresh Go
+discovery. The data-only C-table generators consume those manifests; they do
+not extract the ROM or define a second dialogue parser. Composer surface bounds
+are shared declarative adapter data, not copied between two implementations.
+The former Python ROM extractor and its generation harnesses have been removed.

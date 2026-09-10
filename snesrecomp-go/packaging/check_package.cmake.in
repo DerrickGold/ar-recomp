@@ -18,6 +18,8 @@ set(_required_license_files
     "utils/LICENSE_SCOPE.md"
     "utils/ATTRIBUTION.md"
     "utils/THIRD_PARTY_NOTICES.md"
+    "utils/third_party/sheenbidi/LICENSE"
+    "utils/licenses/SheenBidi/LICENSE"
     "utils/game-assets/fonts/noto/OFL.txt"
     "utils/game-assets/fonts/noto/NotoSansJP-OFL.txt"
     "utils/snesrecomp-go/runtime/LICENSE"
@@ -75,7 +77,25 @@ foreach(_package IN LISTS CPACK_PACKAGE_FILES)
                 "license check: ${_package} is missing ${_license_file}")
         endif()
     endforeach()
-    foreach(_font_file IN ITEMS "NotoSans-SemiCondensedExtraBold.ttf" "NotoSansJP-Bold.otf")
+    foreach(_bidi_source
+            "utils/third_party/sheenbidi/Source/SheenBidi.c"
+            "utils/third_party/sheenbidi/Headers/SheenBidi/SheenBidi.h"
+            "utils/src/platform/sdl/bidi_text_sdl.c")
+        if(NOT EXISTS "${_root}/${_bidi_source}")
+            message(FATAL_ERROR "localization distribution check: missing ${_bidi_source}")
+        endif()
+    endforeach()
+    foreach(_language_file IN ITEMS
+            "utils/docs/language-packs.md" "utils/docs/language-pack-format.md"
+            "utils/docs/language-authoring-reference.json" "utils/docs/language-archive.schema.json"
+            "utils/examples/language-pack/pack.ini" "utils/examples/language-pack/text/example.artext"
+            "utils/examples/example.fr-ca.arlang")
+        if(NOT EXISTS "${_root}/${_language_file}")
+            message(FATAL_ERROR "localization distribution check: missing public artifact ${_language_file}")
+        endif()
+    endforeach()
+    foreach(_font_file IN ITEMS "NotoSans-SemiCondensedExtraBold.ttf" "NotoSansJP-Bold.otf"
+            "NotoSansArabic-Bold.ttf" "NotoSansHebrew-Bold.ttf")
         set(_font_path "${_root}/utils/game-assets/fonts/noto/${_font_file}")
         if(NOT EXISTS "${_font_path}")
             message(FATAL_ERROR "interface font check: missing ${_font_file}")
@@ -112,7 +132,15 @@ foreach(_package IN LISTS CPACK_PACKAGE_FILES)
     set(_checked 0)
     foreach(_file IN LISTS _files)
         string(TOLOWER "${_file}" _localization_path)
-        if(_localization_path MATCHES "\\.(sfc|smc|srm|rec|artext|arproject|arlang)$" OR
+        # These two exact, independently authored examples are checked against
+        # their source/Go publication in tests. Never exempt an entire directory
+        # or file extension: extracted retail scripts remain forbidden.
+        set(_authored_example FALSE)
+        if(_file STREQUAL "utils/examples/language-pack/text/example.artext" OR
+           _file STREQUAL "utils/examples/example.fr-ca.arlang")
+            set(_authored_example TRUE)
+        endif()
+        if((_localization_path MATCHES "\\.(sfc|smc|srm|rec|artext|arproject|arlang)$" AND NOT _authored_example) OR
            _localization_path MATCHES "^utils/(development|runs)/" OR
            _localization_path MATCHES "^utils/game-assets/languages/" OR
            _localization_path MATCHES "^utils/game-assets/workshop/")

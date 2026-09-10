@@ -23,9 +23,10 @@ static void SetError(char *error, size_t capacity, const char *message) {
 
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
+#include "platform/sdl/bidi_text_sdl.h"
 
 enum {
-  kMaximumFallbackFonts = 16,
+  kMaximumFallbackFonts = kArTextBackendMaximumFallbackFonts,
   kMaximumCachedFontSizes = 32,
   kGlyphCoverageCacheCapacity = 1024,
   kMissingGlyphWarningCapacity = 64,
@@ -34,14 +35,16 @@ enum {
 typedef struct CachedFontSet {
   TTF_Font *primary;
   TTF_Font **fallbacks;
+  SDL_IOStream *primary_stream;
+  SDL_IOStream **fallback_streams;
   int pixels;
   uint64_t last_use;
 } CachedFontSet;
 
 typedef struct SdlTextRasterizerState {
   char *font_stack_id;
-  char *primary_path;
-  char **fallback_paths;
+  ArFontResourceLease primary;
+  ArFontResourceLease fallbacks[kMaximumFallbackFonts];
   size_t fallback_count;
   uint64_t font_revision;
   CachedFontSet *font_sets;
@@ -58,6 +61,7 @@ typedef struct SdlTextRasterizerState {
 typedef struct SdlTextBitmapToken {
   SDL_Surface *surface;
   ArTextRevealCluster *reveal_clusters;
+  uint32_t *pixel_owners;
 } SdlTextBitmapToken;
 
 static char *CopyString(const char *source) {
@@ -74,11 +78,15 @@ static void CloseFontSet(CachedFontSet *set, size_t fallback_count) {
     TTF_ClearFallbackFonts(set->primary);
     TTF_CloseFont(set->primary);
   }
+  if (set->primary_stream) SDL_CloseIO(set->primary_stream);
   for (size_t i = 0; i < fallback_count; ++i) {
     if (set->fallbacks && set->fallbacks[i])
       TTF_CloseFont(set->fallbacks[i]);
+    if (set->fallback_streams && set->fallback_streams[i])
+      SDL_CloseIO(set->fallback_streams[i]);
   }
   free(set->fallbacks);
+  free(set->fallback_streams);
   memset(set, 0, sizeof(*set));
 }
 
@@ -86,27 +94,36 @@ static bool OpenFontSet(SdlTextRasterizerState *state, CachedFontSet *set,
                         int pixels, char *error, size_t error_capacity) {
   CachedFontSet opened = {0};
   opened.pixels = pixels;
-  opened.primary = TTF_OpenFont(state->primary_path, (float)pixels);
+  opened.primary_stream = SDL_IOFromConstMem(
+      state->primary.data.bytes, state->primary.data.size);
+  if (opened.primary_stream)
+    opened.primary = TTF_OpenFontIO(opened.primary_stream, false, (float)pixels);
   if (!opened.primary) {
     SetError(error, error_capacity, SDL_GetError());
+    CloseFontSet(&opened, state->fallback_count);
     return false;
   }
   if (state->fallback_count) {
     opened.fallbacks = (TTF_Font **)calloc(
         state->fallback_count, sizeof(*opened.fallbacks));
-    if (!opened.fallbacks) {
+    opened.fallback_streams = (SDL_IOStream **)calloc(
+        state->fallback_count, sizeof(*opened.fallback_streams));
+    if (!opened.fallbacks || !opened.fallback_streams) {
       CloseFontSet(&opened, state->fallback_count);
       SetError(error, error_capacity, "out of memory opening fallback fonts");
       return false;
     }
   }
   for (size_t i = 0; i < state->fallback_count; ++i) {
-    opened.fallbacks[i] = TTF_OpenFont(
-        state->fallback_paths[i], (float)pixels);
+    opened.fallback_streams[i] = SDL_IOFromConstMem(
+        state->fallbacks[i].data.bytes, state->fallbacks[i].data.size);
+    if (opened.fallback_streams[i])
+      opened.fallbacks[i] = TTF_OpenFontIO(
+          opened.fallback_streams[i], false, (float)pixels);
     if (!opened.fallbacks[i] ||
         !TTF_AddFallbackFont(opened.primary, opened.fallbacks[i])) {
-      CloseFontSet(&opened, state->fallback_count);
       SetError(error, error_capacity, SDL_GetError());
+      CloseFontSet(&opened, state->fallback_count);
       return false;
     }
   }
@@ -230,13 +247,14 @@ static bool ApplyRetailTextBands(
  * this attempt rendered at, not the one the caller asked for: a label that had
  * to shrink to fit its cells would otherwise keep the larger type's shadow. */
 static bool ApplyRetailTextShadow(
-    SDL_Surface *surface, int font_pixels, uint32_t shadow_rgb) {
+    SDL_Surface *surface, int font_pixels, const ArTextRasterRequest *request,
+    uint32_t *owners) {
   if (!surface || surface->format != SDL_PIXELFORMAT_RGBA8888) return false;
   int step = (font_pixels + 4) / 8;
   if (step < 1) step = 1;
-  return ArTextBitmap_ApplyStyleShadow(
+  return ArTextBitmap_ApplyOwnedShadow(
       surface->pixels, surface->w, surface->h, surface->pitch,
-      kArRenderPixelFormat_Rgba8888, step, step, shadow_rgb);
+      owners, step, request->shadow_rgb, request->shadow_shape);
 }
 
 static SDL_Surface *CropWhitespace(SDL_Surface *surface, ArTextRasterFlags flags,
@@ -390,7 +408,8 @@ static bool BuildRevealClusters(
 
 static size_t ClampRevealClusters(ArTextRevealCluster *clusters,
                                   size_t count, int removed_left,
-                                  int removed_top, int width, int height) {
+                                  int removed_top, int width, int height,
+                                  uint32_t *remap) {
   size_t kept = 0;
   for (size_t index = 0; index < count; ++index) {
     ArTextRevealCluster cluster = clusters[index];
@@ -407,6 +426,7 @@ static size_t ClampRevealClusters(ArTextRevealCluster *clusters,
     cluster.y = top;
     cluster.width = right - left;
     cluster.height = bottom - top;
+    if (remap) remap[index+1] = (uint32_t)kept+1;
     clusters[kept++] = cluster;
   }
   return kept;
@@ -428,6 +448,10 @@ static bool ConfigureFontForRequest(
   TTF_HorizontalAlignment alignment = TTF_HORIZONTAL_ALIGN_LEFT;
   if (request->alignment == kArTextHorizontalAlignment_Center)
     alignment = TTF_HORIZONTAL_ALIGN_CENTER;
+  else if (request->alignment == kArTextHorizontalAlignment_Right)
+    alignment = TTF_HORIZONTAL_ALIGN_RIGHT;
+  else if (request->alignment == kArTextHorizontalAlignment_Left)
+    alignment = TTF_HORIZONTAL_ALIGN_LEFT;
   else if (request->alignment == kArTextHorizontalAlignment_Trailing)
     alignment = request->direction == kArTextDirection_RightToLeft
         ? TTF_HORIZONTAL_ALIGN_LEFT : TTF_HORIZONTAL_ALIGN_RIGHT;
@@ -476,16 +500,19 @@ typedef enum RasterAttemptResult {
 typedef struct RasterAttempt {
   SDL_Surface *surface;
   ArTextRevealCluster *reveal_clusters;
+  uint32_t *pixel_owners;
   size_t reveal_cluster_count;
   int ascent;
   int descent;
   int line_advance;
+  ArTextDirection paragraph_direction;
 } RasterAttempt;
 
 static void DestroyRasterAttempt(RasterAttempt *attempt) {
   if (!attempt) return;
   SDL_DestroySurface(attempt->surface);
   free(attempt->reveal_clusters);
+  free(attempt->pixel_owners);
   memset(attempt, 0, sizeof(*attempt));
 }
 
@@ -510,6 +537,23 @@ static RasterAttemptResult RasterizeAtSize(
   TTF_SetFontStyle(set->primary, style);
   for (size_t i = 0; i < state->fallback_count; ++i)
     TTF_SetFontStyle(set->fallbacks[i], style);
+  const int shadow_step = !request->shadow_enabled ? 0 :
+      (font_pixels + 4) / 8 > 0 ? (font_pixels + 4) / 8 : 1;
+  bool slant_numerals = false;
+  if ((request->flags & kArTextRasterFlag_SlantAsciiNumerals) &&
+      !(request->flags & kArTextRasterFlag_Italic))
+    for (size_t i = 0; i < request->utf8_bytes; ++i)
+      slant_numerals |= text[i] >= '0' && text[i] <= '9';
+  const int right_padding = shadow_step +
+      (slant_numerals ? (TTF_GetFontHeight(set->primary) + 3) / 4 : 0);
+  const bool need_owners = slant_numerals ||
+      (request->flags & kArTextRasterFlag_IncludeRevealClusters);
+  const int bytes_per_sample = slant_numerals ? 16 : need_owners ? 8 : 4;
+  const int wrap_width = request->maximum_width - right_padding;
+  if (wrap_width <= 0) {
+    *failure = kArTextRasterFailure_None;
+    return kRasterAttempt_ExceedsBounds;
+  }
 
   /* Measure before rendering. A fixed field disables wrapping, so an accepted
    * but far too long label would otherwise be rasterized at its full width and
@@ -517,10 +561,24 @@ static RasterAttemptResult RasterizeAtSize(
    * is limited to the axes this request is not asking to crop, plus an
    * absolute ceiling that no request may exceed. */
   int measured_w = 0, measured_h = 0;
+  ArTextRasterRequest shaping = *request;
+  shaping.maximum_width = wrap_width;
+  ArSdlBidiLayout *bidi = NULL;
+  if (request->bidi_span_count ||
+      ArSdlBidiText_NeedsLayout(text, request->utf8_bytes, request->direction)) {
+    bidi = ArSdlBidiText_Create(set->primary, text, &shaping, failure);
+    if (!bidi) {
+      SetError(error, error_capacity, SDL_GetError());
+      return kRasterAttempt_Error;
+    }
+    ArSdlBidiText_GetSize(bidi, &measured_w, &measured_h);
+  }
+  attempt->paragraph_direction = bidi ? ArSdlBidiText_GetDirection(bidi)
+                                      : kArTextDirection_LeftToRight;
   const bool measured =
-      request->flags & kArTextRasterFlag_WrapWords
+      bidi ? true : request->flags & kArTextRasterFlag_WrapWords
       ? TTF_GetStringSizeWrapped(set->primary, text, request->utf8_bytes,
-                                 request->maximum_width, &measured_w,
+                                 wrap_width, &measured_w,
                                  &measured_h)
       : TTF_GetStringSize(set->primary, text, request->utf8_bytes, &measured_w,
                           &measured_h);
@@ -529,14 +587,17 @@ static RasterAttemptResult RasterizeAtSize(
         (request->flags & kArTextRasterFlag_CropHorizontalWhitespace) != 0;
     const bool crops_height =
         (request->flags & kArTextRasterFlag_CropVerticalWhitespace) != 0;
-    if ((!crops_width && measured_w > request->maximum_width) ||
-        (!crops_height && measured_h > request->maximum_height)) {
+    if ((!crops_width && (int64_t)measured_w+right_padding > request->maximum_width) ||
+        (!crops_height && (int64_t)measured_h+shadow_step > request->maximum_height)) {
+      ArSdlBidiText_Destroy(bidi);
       DestroyRasterAttempt(attempt);
       *failure = kArTextRasterFailure_None;
       return kRasterAttempt_ExceedsBounds;
     }
     if (measured_w > 0 && measured_h > 0 &&
-        (int64_t)measured_w * measured_h * 4 > kMaximumRasterBytes) {
+        ((int64_t)measured_w+right_padding) * ((int64_t)measured_h+shadow_step) *
+          bytes_per_sample > kMaximumRasterBytes) {
+      ArSdlBidiText_Destroy(bidi);
       *failure = kArTextRasterFailure_Deterministic;
       SetError(error, error_capacity,
                "rasterized text would exceed the per-request size ceiling");
@@ -547,24 +608,28 @@ static RasterAttemptResult RasterizeAtSize(
 
   const SDL_Color white = {255, 255, 255, 255};
   SDL_Surface *rendered =
-      request->flags & kArTextRasterFlag_WrapWords
+      bidi ? ArSdlBidiText_Render(bidi, &attempt->reveal_clusters,
+                                 &attempt->reveal_cluster_count, failure)
+      : request->flags & kArTextRasterFlag_WrapWords
       ? TTF_RenderText_Blended_Wrapped(
             set->primary, text, request->utf8_bytes, white,
-            request->maximum_width)
+            wrap_width)
       : TTF_RenderText_Blended(
             set->primary, text, request->utf8_bytes, white);
   const bool need_cluster_layout =
+      request->accent_end_utf8_byte || slant_numerals ||
       request->style_id == kArTextStyle_RetailBlueWhiteBands ||
       request->style_id == kArTextStyle_RetailPaletteBands ||
       (request->flags & kArTextRasterFlag_IncludeRevealClusters);
-  if (rendered && need_cluster_layout &&
+  if (rendered && !bidi && need_cluster_layout &&
       !BuildRevealClusters(
-          set->primary, text, request,
+          set->primary, text, &shaping,
           &attempt->reveal_clusters, &attempt->reveal_cluster_count,
           error, error_capacity)) {
     SDL_DestroySurface(rendered);
     rendered = NULL;
   }
+  ArSdlBidiText_Destroy(bidi);
   if (!rendered) {
     if (!error || !error_capacity || !error[0])
       SetError(error, error_capacity, SDL_GetError());
@@ -580,6 +645,49 @@ static RasterAttemptResult RasterizeAtSize(
     DestroyRasterAttempt(attempt);
     return kRasterAttempt_Error;
   }
+  if (right_padding || shadow_step) {
+    SDL_Surface *original = attempt->surface;
+    if ((int64_t)original->w+right_padding > INT32_MAX ||
+        (int64_t)original->h+shadow_step > INT32_MAX ||
+        ((int64_t)original->w+right_padding)*((int64_t)original->h+shadow_step)*
+          bytes_per_sample > kMaximumRasterBytes) {
+      *failure = kArTextRasterFailure_Deterministic;
+      SetError(error, error_capacity, "styled text exceeds the per-request size ceiling");
+      DestroyRasterAttempt(attempt);
+      return kRasterAttempt_Error;
+    }
+    SDL_Surface *padded = SDL_CreateSurface(original->w+right_padding,
+        original->h+shadow_step, SDL_PIXELFORMAT_RGBA8888);
+    if (!padded) {
+      SetError(error, error_capacity, SDL_GetError());
+      DestroyRasterAttempt(attempt);
+      return kRasterAttempt_Error;
+    }
+    memset(padded->pixels, 0, (size_t)padded->pitch*padded->h);
+    for (int y=0; y<original->h; ++y)
+      memcpy((uint8_t *)padded->pixels+(size_t)y*padded->pitch,
+             (uint8_t *)original->pixels+(size_t)y*original->pitch, (size_t)original->w*4);
+    SDL_DestroySurface(original);
+    attempt->surface=padded;
+  }
+  if (need_owners) {
+    if (!attempt->reveal_cluster_count) {
+      *failure = kArTextRasterFailure_Deterministic;
+      SetError(error, error_capacity, "text contains no rasterizable ink");
+      DestroyRasterAttempt(attempt);
+      return kRasterAttempt_Error;
+    }
+    const ArTextBitmap ink = {.pixels=attempt->surface->pixels,
+        .width=attempt->surface->w, .height=attempt->surface->h,
+        .pitch_bytes=attempt->surface->pitch, .format=kArRenderPixelFormat_Rgba8888,
+        .reveal_clusters=attempt->reveal_clusters, .reveal_cluster_count=attempt->reveal_cluster_count};
+    attempt->pixel_owners=ArTextBitmap_BuildOwnership(&ink);
+    if (!attempt->pixel_owners) {
+      SetError(error, error_capacity, "cannot allocate text effect ownership");
+      DestroyRasterAttempt(attempt);
+      return kRasterAttempt_Error;
+    }
+  }
   if ((request->style_id == kArTextStyle_RetailBlueWhiteBands ||
        request->style_id == kArTextStyle_RetailPaletteBands) &&
       !ApplyRetailTextBands(
@@ -592,17 +700,42 @@ static RasterAttemptResult RasterizeAtSize(
     DestroyRasterAttempt(attempt);
     return kRasterAttempt_Error;
   }
+  if (!ArTextBitmap_ApplyClusterAccent(
+          attempt->surface->pixels, attempt->surface->w, attempt->surface->h,
+          attempt->surface->pitch, kArRenderPixelFormat_Rgba8888,
+          attempt->reveal_clusters, attempt->reveal_cluster_count,
+          request->accent_end_utf8_byte, request->accent_rgb)) {
+    *failure = kArTextRasterFailure_Deterministic;
+    SetError(error, error_capacity, "cannot apply cluster accent");
+    DestroyRasterAttempt(attempt);
+    return kRasterAttempt_Error;
+  }
   /* After the bands, never before: the band pass recolours every pixel it
    * finds ink on, which would turn the shadow into more letter. */
+  if (slant_numerals) {
+    ArTextBitmap ink = {.pixels = attempt->surface->pixels,
+        .width = attempt->surface->w, .height = attempt->surface->h,
+        .pitch_bytes = attempt->surface->pitch, .format = kArRenderPixelFormat_Rgba8888,
+        .reveal_clusters = attempt->reveal_clusters,
+        .reveal_cluster_count = attempt->reveal_cluster_count,
+        .pixel_owners = attempt->pixel_owners};
+    if (!ArTextBitmap_SlantAsciiNumerals(&ink, text, request->utf8_bytes)) {
+      SetError(error, error_capacity, "cannot apply numeral style");
+      DestroyRasterAttempt(attempt);
+      return kRasterAttempt_Error;
+    }
+  }
   if (request->shadow_enabled &&
-      !ApplyRetailTextShadow(attempt->surface, font_pixels,
-                             request->shadow_rgb)) {
+      !ApplyRetailTextShadow(attempt->surface, font_pixels, request,
+                             attempt->pixel_owners)) {
     *failure = kArTextRasterFailure_Deterministic;
     SetError(error, error_capacity, "cannot apply retail text shadow");
     DestroyRasterAttempt(attempt);
     return kRasterAttempt_Error;
   }
   if (!(request->flags & kArTextRasterFlag_IncludeRevealClusters)) {
+    free(attempt->pixel_owners);
+    attempt->pixel_owners = NULL;
     free(attempt->reveal_clusters);
     attempt->reveal_clusters = NULL;
     attempt->reveal_cluster_count = 0;
@@ -610,6 +743,7 @@ static RasterAttemptResult RasterizeAtSize(
 
   int removed_left = 0;
   int removed_top = 0;
+  const int owner_width = attempt->surface->w;
   if (request->flags & (kArTextRasterFlag_CropHorizontalWhitespace |
                         kArTextRasterFlag_CropVerticalWhitespace)) {
     SDL_Surface *cropped = CropWhitespace(
@@ -632,9 +766,22 @@ static RasterAttemptResult RasterizeAtSize(
   }
 
   if (attempt->reveal_clusters) {
+    uint32_t *remap = attempt->pixel_owners ? calloc(attempt->reveal_cluster_count+1, sizeof(*remap)) : NULL;
+    if (attempt->pixel_owners && !remap) {
+      SetError(error, error_capacity, "cannot crop text effect ownership");
+      DestroyRasterAttempt(attempt);
+      return kRasterAttempt_Error;
+    }
     attempt->reveal_cluster_count = ClampRevealClusters(
         attempt->reveal_clusters, attempt->reveal_cluster_count,
-        removed_left, removed_top, attempt->surface->w, attempt->surface->h);
+        removed_left, removed_top, attempt->surface->w, attempt->surface->h, remap);
+    if (remap) {
+      for (int y=0; y<attempt->surface->h; ++y)
+        for (int x=0; x<attempt->surface->w; ++x)
+          attempt->pixel_owners[(size_t)y*attempt->surface->w+x] = remap[
+              attempt->pixel_owners[(size_t)(y+removed_top)*owner_width+x+removed_left]];
+      free(remap);
+    }
     if (!attempt->reveal_cluster_count) {
       *failure = kArTextRasterFailure_Deterministic;
       SetError(error, error_capacity,
@@ -725,6 +872,7 @@ static bool Rasterize(void *context, const ArTextRasterRequest *request,
   if (!token) {
     SDL_DestroySurface(surface);
     free(reveal_clusters);
+    free(best.pixel_owners);
     *out_failure = kArTextRasterFailure_Retryable;
     SetError(error, error_capacity,
              "out of memory retaining rasterized text");
@@ -732,6 +880,7 @@ static bool Rasterize(void *context, const ArTextRasterRequest *request,
   }
   token->surface = surface;
   token->reveal_clusters = reveal_clusters;
+  token->pixel_owners = best.pixel_owners;
 
   *out_bitmap = (ArTextBitmap){
     .struct_size = sizeof(*out_bitmap),
@@ -747,6 +896,8 @@ static bool Rasterize(void *context, const ArTextRasterRequest *request,
     .reveal_clusters = reveal_clusters,
     .reveal_cluster_count = reveal_cluster_count,
     .token = (uintptr_t)token,
+    .pixel_owners = best.pixel_owners,
+    .paragraph_direction = best.paragraph_direction,
   };
   return true;
 }
@@ -757,6 +908,7 @@ static void ReleaseBitmap(void *context, ArTextBitmap *bitmap) {
     SdlTextBitmapToken *token = (SdlTextBitmapToken *)bitmap->token;
     SDL_DestroySurface(token->surface);
     free(token->reveal_clusters);
+    free(token->pixel_owners);
     free(token);
   }
   if (bitmap) memset(bitmap, 0, sizeof(*bitmap));
@@ -772,14 +924,13 @@ static const ArTextRasterizerOps kOps = {
 
 static void DestroyState(SdlTextRasterizerState *state) {
   if (!state) return;
-  for (size_t i = 0; i < state->font_set_capacity; ++i)
+  for (size_t i = 0; state->font_sets && i < state->font_set_capacity; ++i)
     CloseFontSet(&state->font_sets[i], state->fallback_count);
   free(state->font_sets);
   for (size_t i = 0; i < state->fallback_count; ++i)
-    free(state->fallback_paths[i]);
-  free(state->fallback_paths);
+    ArFontResource_Release(&state->fallbacks[i]);
   free(state->font_stack_id);
-  free(state->primary_path);
+  ArFontResource_Release(&state->primary);
   if (state->ttf_initialized) TTF_Quit();
   free(state);
 }
@@ -794,16 +945,15 @@ bool ArSdlTextRasterizer_Init(
           ArSdlTextRasterizerConfig, cached_size_capacity) ||
       config->abi_version != AR_SDL_TEXT_RASTERIZER_CONFIG_ABI_VERSION ||
       !config->font_stack_id || !config->font_stack_id[0] ||
-      !config->primary_font_path || !config->primary_font_path[0] ||
+      !config->primary_font || !ArFontResources_IsReady(&config->resources) ||
       !config->font_revision ||
       config->fallback_font_count > kMaximumFallbackFonts ||
-      (config->fallback_font_count && !config->fallback_font_paths) ||
+      (config->fallback_font_count && !config->fallback_fonts) ||
       !config->cached_size_capacity ||
       config->cached_size_capacity > kMaximumCachedFontSizes) {
     SetError(error, error_capacity, "invalid SDL text rasterizer config");
     return false;
   }
-  memset(adapter, 0, sizeof(*adapter));
   SdlTextRasterizerState *state =
       (SdlTextRasterizerState *)calloc(1, sizeof(*state));
   if (!state) {
@@ -811,36 +961,37 @@ bool ArSdlTextRasterizer_Init(
     return false;
   }
   state->font_stack_id = CopyString(config->font_stack_id);
-  state->primary_path = CopyString(config->primary_font_path);
   state->fallback_count = config->fallback_font_count;
   state->font_revision = config->font_revision;
   state->font_set_capacity = config->cached_size_capacity;
   state->font_sets = (CachedFontSet *)calloc(
       state->font_set_capacity, sizeof(*state->font_sets));
-  if (state->fallback_count)
-    state->fallback_paths = (char **)calloc(
-        state->fallback_count, sizeof(*state->fallback_paths));
-  bool copied = state->font_stack_id && state->primary_path &&
-      state->font_sets &&
-      (!state->fallback_count || state->fallback_paths);
-  for (size_t i = 0; copied && i < state->fallback_count; ++i) {
-    state->fallback_paths[i] = CopyString(config->fallback_font_paths[i]);
-    copied = state->fallback_paths[i] != NULL;
+  if (!state->font_stack_id || !state->font_sets) {
+    SetError(error, error_capacity, "out of memory copying font stack");
+    DestroyState(state);
+    return false;
   }
-  if (!copied || !TTF_Init()) {
-    SetError(error, error_capacity,
-             copied ? SDL_GetError() : "out of memory copying font stack");
+  bool acquired = ArFontResource_Acquire(&state->primary, &config->resources,
+                                         config->primary_font, error, error_capacity);
+  for (size_t i = 0; acquired && i < state->fallback_count; ++i)
+    acquired = ArFontResource_Acquire(&state->fallbacks[i], &config->resources,
+                                      config->fallback_fonts[i], error, error_capacity);
+  if (!acquired || !TTF_Init()) {
+    if (acquired) SetError(error, error_capacity, SDL_GetError());
     DestroyState(state);
     return false;
   }
   state->ttf_initialized = true;
+  ArSdlTextRasterizer replacement = {0};
   if (!ArTextRasterizer_Init(
-          &adapter->rasterizer, &kOps, state, UINT64_C(3))) {
+          &replacement.rasterizer, &kOps, state, UINT64_C(5))) {
     DestroyState(state);
     SetError(error, error_capacity, "cannot initialize text rasterizer ABI");
     return false;
   }
-  adapter->implementation = state;
+  replacement.implementation = state;
+  ArSdlTextRasterizer_Destroy(adapter);
+  *adapter = replacement;
   return true;
 }
 
@@ -857,7 +1008,7 @@ bool ArSdlTextRasterizer_Init(
     const ArSdlTextRasterizerConfig *config,
     char *error, size_t error_capacity) {
   (void)config;
-  if (adapter) memset(adapter, 0, sizeof(*adapter));
+  (void)adapter;
   SetError(error, error_capacity,
            "SDL3_ttf text rasterizer is not available in this build");
   return false;
@@ -875,6 +1026,7 @@ const ArTextRasterizer *ArSdlTextRasterizer_Get(
       ? &adapter->rasterizer : NULL;
 }
 
+#if AR_HAS_SDL3_TTF
 static bool CreateBackendInstance(
     void *context, ArTextBackendInstance *instance,
     const ArTextBackendConfig *config,
@@ -908,10 +1060,15 @@ static const ArTextBackendOps kBackendOps = {
   .create = CreateBackendInstance,
   .destroy = DestroyBackendInstance,
 };
+#endif
 
 void ArSdlTextBackend_Init(ArTextBackend *backend) {
   if (!backend) return;
+#if AR_HAS_SDL3_TTF
   *backend = (ArTextBackend){
     .ops = &kBackendOps,
   };
+#else
+  *backend = (ArTextBackend){0};
+#endif
 }

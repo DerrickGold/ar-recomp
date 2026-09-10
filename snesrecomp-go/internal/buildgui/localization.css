@@ -493,6 +493,14 @@
   font-weight:400;
   letter-spacing:normal
 }
+/* Raw source is an editable script, not laid-out dialogue: resolve each line
+ * independently so @anchor/IDs remain LTR beside Arabic/Hebrew prose. No
+ * hidden bidi characters are inserted into the saved text or undo history. */
+#loc-body, #loc-reference-body { unicode-bidi:plaintext; text-align:start }
+#loc-text-coverage pre { max-height:16rem; overflow:auto; white-space:pre; font-size:.85em }
+.loc-preview-page { unicode-bidi:isolate; text-align:start }
+.loc-preview-value, .loc-preview-control { unicode-bidi:isolate }
+#loc-script-help code { direction:ltr; unicode-bidi:isolate }
 #loc-dirty {
   font-size:12px;
   color:#efc982

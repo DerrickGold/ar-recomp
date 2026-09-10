@@ -4,7 +4,15 @@
 #include "localization/text_backend.h"
 #include "render/text_surface_cache.h"
 
-#define AR_UI_TEXT_RUN_ABI_VERSION UINT32_C(1)
+#define AR_UI_TEXT_RUN_ABI_VERSION UINT32_C(2)
+
+/* Placement in the host's physical UI rectangle, independent of the text's
+ * paragraph direction. Do not reuse logical leading/trailing raster alignment. */
+typedef enum ArUiTextAlignment {
+  kArUiTextAlignment_Left = 0,
+  kArUiTextAlignment_Center,
+  kArUiTextAlignment_Right,
+} ArUiTextAlignment;
 
 /* Host-interface text, independent of game text routes, saves and settings.
  * All coordinates are physical output pixels. A complete UTF-8 run is shaped
@@ -15,7 +23,7 @@ typedef struct ArUiTextRun {
   const char *utf8;
   size_t utf8_bytes;
   ArRenderRectI bounds;
-  ArTextHorizontalAlignment alignment;
+  ArUiTextAlignment alignment;
   ArRenderColorF tint;
   uint32_t style_id;
   uint32_t band_rgb;

@@ -55,5 +55,25 @@ foreach(_relative IN LISTS _cases)
         file(REMOVE "${_path}")
     endif()
 endforeach()
+set(_font_cases
+    "localization/text_backend.h"
+    "localization/font_resource.c"
+    "localization/localization_frame.h"
+    "render/localized_text_presenter.c"
+    "render/ui_text_renderer.c"
+    "platform/sdl/text_rasterizer_sdl.c")
+foreach(_relative IN LISTS _font_cases)
+    set(_path "${_scratch}/${_relative}")
+    file(READ "${_path}" _original)
+    file(WRITE "${_path}" "${_original}\nvoid font_probe(void) { fopen(\"font.ttf\", \"rb\"); }\n")
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" "-DGAME_SOURCE_ROOT=${_scratch}" -P "${BOUNDARY_CHECK}"
+        RESULT_VARIABLE _result OUTPUT_VARIABLE _stdout ERROR_VARIABLE _stderr)
+    if(_result STREQUAL "0" OR NOT _stderr MATCHES "Text font resource boundary bypassed")
+        file(REMOVE_RECURSE "${_scratch}")
+        message(FATAL_ERROR "Font boundary checker accepted or misclassified ${_relative}: ${_stdout}${_stderr}")
+    endif()
+    file(WRITE "${_path}" "${_original}")
+endforeach()
 file(REMOVE_RECURSE "${_scratch}")
-message(STATUS "Navigation boundary negative cases: PASS")
+message(STATUS "Navigation and font-resource boundary negative cases: PASS")

@@ -37,11 +37,17 @@ func prepareBuildLocalization(paths Paths, manifestPath string, output io.Writer
 	step(output, "Preparing native US language source")
 	dir := filepath.Join(paths.Root, "game-assets", "languages", "native-us")
 	var data []byte
-	if _, err := os.Lstat(filepath.Join(dir, "pack.ini")); errors.Is(err, os.ErrNotExist) {
-		f, err := os.Open(paths.ROM)
-		if err != nil {
-			return err
-		}
+	_, packErr := os.Lstat(filepath.Join(dir, "pack.ini"))
+	if packErr != nil && !errors.Is(packErr, os.ErrNotExist) {
+		return packErr
+	}
+	// Rebuilds with a ROM must also supplement older extracted baselines. A
+	// compile-only install with an existing source still works without its ROM.
+	f, err := os.Open(paths.ROM)
+	if err != nil && (packErr != nil || !errors.Is(err, os.ErrNotExist)) {
+		return err
+	}
+	if err == nil {
 		data, err = io.ReadAll(io.LimitReader(f, (1<<20)+1))
 		f.Close()
 		if err != nil {

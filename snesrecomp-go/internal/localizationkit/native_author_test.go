@@ -14,6 +14,38 @@ func nativeAuthorRoute(category string, ops ...Operation) *NativeSemanticRoute {
 	return &NativeSemanticRoute{ID: "action.hud.act_1", Category: category, Operations: ops}
 }
 
+func TestNativeSoundTestColumns(t *testing.T) {
+	route := &NativeSemanticRoute{ID: "sound_test.menu.labels", Category: "sound_test_menu", Operations: []Operation{
+		{"op": "text", "value": "Sound test"}, {"op": "line_break"}, {"op": "line_break"},
+		{"op": "text", "value": " Music "}, {"op": "format_number", "value": "sound_music_id", "width": 2},
+		{"op": "line_break"}, {"op": "line_break"},
+		{"op": "text", "value": " Effect "}, {"op": "format_number", "value": "sound_effect_id", "width": 2}, {"op": "end"},
+	}}
+	ops, err := nativeAuthorOperations(route, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script, err := EmitAuthorScript([]AuthorMessage{{ID: route.ID, Operations: ops}}, "text/sound.artext")
+	if err != nil || strings.Count(script.Text(), "|") != 2 {
+		t.Fatal("missing explicit counter cells", err)
+	}
+	if _, err := NewAuthorWorkspace("us", "partial", map[string]string{script.Path(): script.Text()}, ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{
+		"Heading\n@line\n@line\nMusic | {sound_music_id:02}\n@line\n@line\nEffect | {sound_effect_id:02}\n",
+		"Heading\n@line\n@line\nMusic {sound_music_id:02}\n@line\n@line\nEffect {sound_effect_id:02}\n",
+	} {
+		source := ":: sound_test.menu.labels\n" + body
+		if _, err := NewAuthorWorkspace("us", "partial", map[string]string{"text/sound.artext": source}, ""); err != nil {
+			t.Fatal("valid split or legacy counter row rejected", err)
+		}
+		if _, err := NewAuthorWorkspace("us", "partial", map[string]string{"text/sound.artext": source + "@line\nextra\n"}, ""); err == nil {
+			t.Fatal("sound-test text can escape its native rows")
+		}
+	}
+}
+
 func TestNativeAuthorWrappingAndControls(t *testing.T) {
 	text := func(value string) Operation { return Operation{"op": "text", "value": value} }
 	line, end := Operation{"op": "line_break"}, Operation{"op": "end"}

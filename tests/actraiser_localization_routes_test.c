@@ -40,6 +40,49 @@ static ActRaiserLocalizationComposeObservation Compose(uint32_t source,
 }
 
 int main(void) {
+  /* Modal ownership is independent of numeric surface IDs, and requires the
+   * real producer continuation. The action title shares this destination. */
+  ActRaiserLocalizationComposeObservation sound = Compose(0x029871, 0x080B);
+  CHECK(!ActRaiserLocalizationRoute_ResolveCompose(&sound));
+  sound.caller_pc24 = 0x0297F0;
+  const ActRaiserLocalizationComposeRoute *sound_route =
+      ActRaiserLocalizationRoute_ResolveCompose(&sound);
+  CHECK(sound_route && !strcmp(sound_route->semantic_id, "sound_test.menu.labels"));
+  CHECK(sound_route && sound_route->region.column == 11 &&
+        sound_route->region.row == 8 && sound_route->region.rows == 6);
+  sound.map_group = 1;
+  CHECK(ActRaiserLocalizationRoute_ResolveCompose(&sound) == sound_route);
+  sound.source_pc24 = 0x029896; /* Closing spaces never acquire ownership. */
+  CHECK(!ActRaiserLocalizationRoute_ResolveCompose(&sound));
+
+  /* The ending montage uses the ordinary simulation wrapper. The shared
+   * source-table name is an author alias, not a second runtime consumer. */
+  const uint32_t ending_sources[] = {
+      0x04CC9A, 0x04CD8D, 0x04CF6A, 0x04D0E5,
+      0x04D287, 0x04D3BE, 0x04D4FD};
+  const uint16_t ending_units[] = {243, 477, 379, 418, 311, 319, 690};
+  for (unsigned slot = 0; slot < 7; ++slot) {
+    ActRaiserLocalizationTextObservation ending =
+        Observation(ending_sources[slot], 0x019330);
+    ending.context_pc24 = 0x038251;
+    ending.map_number = slot ? slot : kActRaiserNonActionMap_SkyPalace;
+    const ActRaiserLocalizationRoute *resolved =
+        ActRaiserLocalizationRoute_ResolveDialogue(&ending);
+    char id[80];
+    snprintf(id, sizeof(id), "dialogue.event.wrapper_00.call_00.source_%02u", slot);
+    CHECK(resolved && !strcmp(resolved->semantic_id, id));
+    CHECK(resolved && resolved->native_page_count == 1 &&
+          resolved->native_page_units[0] == ending_units[slot]);
+    ending.map_number = kActRaiserNonActionMap_WorldMap;
+    CHECK(!ActRaiserLocalizationRoute_ResolveDialogue(&ending));
+    ending.map_group = kActRaiserMapGroup_Ending;
+    CHECK(!ActRaiserLocalizationRoute_ResolveDialogue(&ending));
+  }
+  ActRaiserLocalizationTextObservation temple = Observation(0x04D7AF, 0x0193B2);
+  temple.context_pc24 = 0x01884F;
+  temple.map_number = kActRaiserNonActionMap_Temple;
+  CHECK(ActRaiserLocalizationRoute_ResolveDialogue(&temple));
+
   ActRaiserLocalizationTextObservation observation =
       Observation(0x049048, 0x0193B2);
   observation.context_pc24 = 0x0185DA;

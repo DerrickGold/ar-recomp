@@ -4,6 +4,23 @@ import {readFileSync} from "node:fs";
 import {runInNewContext} from "node:vm";
 import {Node, setup, messages} from "./interface_dom.mjs";
 
+test("initial language readiness copy is bound without waiting for a status response",()=>{
+  const html=readFileSync(new URL("../web/index.html",import.meta.url),"utf8");
+  const tags=[...html.matchAll(/<button[^>]*id="tab-localization"[^>]*>|<p[^>]*data-language-status[^>]*>/g)].map(m=>m[0]);
+  assert.equal(tags.length,3);
+  for(const locale of ["en","fr","de","ja"]){
+    const s=setup(locale);
+    for(const tag of tags){
+      const attrs=Object.fromEntries([...tag.matchAll(/([a-z0-9-]+)="([^"]*)"/g)].map(m=>[m[1],m[2]]));
+      const node=new Node(tag.startsWith("<button")?"button":"p","untranslated startup",attrs);
+      s.doc.children.push(node);s.ui.apply(node);
+      if(tag.includes("tab-localization"))assert.equal(node.getAttribute("title"),s.ui.text("builder.language.unavailable_title"));
+      else assert.equal(node.textContent,s.ui.text("builder.language.source_checking"));
+    }
+    assert.equal(s.requests.length,0); // Status fetch may stall or fail entirely.
+  }
+});
+
 test("language changes only explicitly bound UI and preserves author state",async()=>{
   const s=setup();const selectedFiles=s.files.files;
   s.picker.value="fr";await s.picker.fire("change");

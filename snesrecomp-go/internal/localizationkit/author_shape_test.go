@@ -7,6 +7,20 @@ import (
 	"testing"
 )
 
+func TestUnicodeSeparatorsCannotBypassFixedFieldContracts(t *testing.T) {
+	for _, separator := range []string{"\u0085", "\u2028", "\u2029"} {
+		for _, id := range []string{"action.hud.player_label", "title.mode_select.with_save", "status.report.master_report"} {
+			sources := map[string]string{"text/test.artext": ":: " + id + "\nFirst" + separator + "Second\n@end\n"}
+			if _, err := NewAuthorWorkspace("us", "partial", sources, ""); err == nil || !strings.Contains(err.Error(), "line-separator controls") {
+				t.Fatal("separator bypassed fixed shape", id)
+			}
+			if probe := os.Getenv("AR_AUTHOR_RUNTIME_PROBE"); probe != "" {
+				authorRuntimeCheck(t, probe, "us", "partial", sources)
+			}
+		}
+	}
+}
+
 func TestAuthorTableShapes(t *testing.T) {
 	cases := []struct{ id, body, diagnostic string }{
 		{"status.report.cities_report", "Town | {city_fillmore_population} | {city_fillmore_growth_state} | {city_fillmore_level} {city_fillmore_items}\n", "row 1 has 4 field(s)"},

@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "render/render_types.h"
+#include "localization/ui_catalog.h"
 
 /* Portable drawing surface shared by terminal host UI, comparison views, and
  * the manual. Window ownership and input events remain in settings_overlay.h.
@@ -14,6 +15,10 @@
  * coordinates and sizes below are physical renderer-output pixels, independent
  * of the menu's own scaled logical layout. */
 enum { kSettingsOverlayGlyphSize = 8 };
+
+/* Effective interface locale: English when the Unicode backend is unavailable,
+ * without changing the persisted preference. Shared by nested host UI views. */
+ArUiLocale SettingsOverlay_InterfaceLocale(void);
 
 /* Output-pixel width for centering or framing a text run. Unicode runs use
  * the exact same cached shaping/bounds as DrawGameText when available. */

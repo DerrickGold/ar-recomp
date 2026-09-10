@@ -17,7 +17,7 @@
   <div class="tabs" role="tablist" aria-orientation="vertical" aria-label="Workshop sections" data-i18n-aria="builder.nav.sections">
     <button class="tab" id="tab-home" role="tab" aria-selected="true" aria-controls="panel-home"><span class="nav-icon" aria-hidden="true">⌂</span><span data-i18n="builder.nav.home">Home</span></button>
     <button class="tab" id="tab-build" role="tab" aria-selected="false" aria-controls="panel-build" tabindex="-1"><span class="nav-icon" aria-hidden="true">◇</span><span id="build-nav-label" data-i18n="builder.nav.build_game">Build game</span><span class="badge" aria-hidden="true"></span></button>
-    <button class="tab" id="tab-localization" role="tab" aria-selected="false" aria-controls="panel-localization" tabindex="-1" disabled title="Requires the native US language source"><span class="nav-icon" aria-hidden="true">文</span><span data-i18n="builder.nav.languages">Languages</span></button>
+    <button class="tab" id="tab-localization" role="tab" aria-selected="false" aria-controls="panel-localization" tabindex="-1" disabled data-i18n-title="builder.language.unavailable_title" title="Requires the native US language source"><span class="nav-icon" aria-hidden="true">文</span><span data-i18n="builder.nav.languages">Languages</span></button>
     <button class="tab" id="tab-assets" role="tab" aria-selected="false" aria-controls="panel-assets" tabindex="-1"><span class="nav-icon" aria-hidden="true">♫</span><span data-i18n="builder.nav.assets">Assets</span></button>
     <button class="tab" id="tab-manual" role="tab" aria-selected="false" aria-controls="panel-manual" tabindex="-1"><span class="nav-icon" aria-hidden="true">▤</span><span data-i18n="builder.nav.help">Help &amp; manual</span></button>
   </div>
@@ -47,7 +47,7 @@
       <button class="task-card" data-nav="assets" type="button"><span class="card-icon" aria-hidden="true">♫</span><strong data-i18n="builder.home.atmosphere">Set the atmosphere</strong><span data-i18n="builder.home.atmosphere_help">Choose title artwork and compare replacement music.</span><span class="card-link" data-i18n="builder.home.browse_assets">Browse assets ↗</span></button>
       <button class="task-card" data-nav="manual" type="button"><span class="card-icon" aria-hidden="true">▤</span><strong data-i18n="builder.home.guide">Find your bearings</strong><span data-i18n="builder.home.guide_help">Read the original manual and learn your way around.</span><span class="card-link" data-i18n="builder.home.open_guide">Open the guide ↗</span></button>
     </div>
-    <p class="notice" data-language-status role="status">Checking the native US language source…</p>
+    <p class="notice" data-language-status data-i18n="builder.language.source_checking" role="status">Checking the native US language source…</p>
     <div class="section-heading"><h2 data-i18n="builder.home.translations">Back to your translations</h2><button id="home-refresh-projects" class="quiet" type="button" disabled data-i18n="builder.refresh">Refresh</button></div>
     <div id="home-projects" class="project-library"><p class="empty-note" data-i18n="builder.home.projects_placeholder">Your saved translation projects will appear here.</p></div>
     <p class="privacy" data-i18n="builder.home.privacy">Offline by design. Your ROM, translations, and custom assets stay on this computer.</p>
@@ -55,7 +55,7 @@
 
   <section class="panel" id="panel-build" role="tabpanel" aria-labelledby="tab-build" hidden>
     <div class="page-heading"><div><p class="eyebrow" data-i18n="builder.build.eyebrow">FROM YOUR ROM TO YOUR GAME</p><h1 data-i18n="builder.nav.build">Build &amp; play</h1><p data-i18n="builder.build.intro">Choose your local US ROM. We’ll prepare everything needed to play.</p></div></div>
-    <p class="notice" data-language-status role="status">Checking the native US language source…</p>
+    <p class="notice" data-language-status data-i18n="builder.language.source_checking" role="status">Checking the native US language source…</p>
     <!-- PLAY BLOCK. Shown whenever a built game is on disk, whether this
          session built it or a previous one did. In launcher mode it is the only
          thing here. -->

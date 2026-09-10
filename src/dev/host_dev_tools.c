@@ -119,7 +119,7 @@ void HostDevTools_DumpDioramaLayers(void) {
   DevTools_DumpDioramaLayers(&context);
 }
 
-ArRenderExtentI HostDevTools_WriteFramebufferPpm(FILE *file) {
+DevToolsCaptureResult HostDevTools_WriteFramebufferPpm(FILE *file, bool require_composite) {
   const DevToolsContext context = CurrentContext();
-  return DevTools_WriteFramebufferPpm(file, &context);
+  return DevTools_WriteFramebufferPpm(file, &context, require_composite);
 }

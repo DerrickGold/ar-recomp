@@ -16,6 +16,7 @@ typedef enum ArLanguageRowShape {
   kArLanguageRowShape_MessageSpeed,
   /* Extracted JP reference only; playable packs use the US contract. */
   kArLanguageRowShape_MessageSpeedJP,
+  kArLanguageRowShape_SoundTest,
 } ArLanguageRowShape;
 
 ArLanguageRowShape ArLanguageRowShape_ForRoute(const char *semantic_id);

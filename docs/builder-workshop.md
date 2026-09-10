@@ -1,5 +1,11 @@
 # The builder workshop
 
+You can install a shared `.arlang` without opening the workshop: copy it into
+`utils/game-assets/languages/packs/`, restart through `run-game.*`, and select its
+name in Localization. See [installation and external authoring](language-packs.md)
+for archive/folder layouts, updates, command-line tools and AI-ready references.
+The installed-package checklist manages directly copied archives too.
+
 Open your package's `run-build` launcher to enter the local workshop. It runs
 in your browser, but talks only to the builder on this computer. No account,
 upload, online service, Python, Node.js or package manager is needed to use it.

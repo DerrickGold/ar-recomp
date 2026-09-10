@@ -522,6 +522,10 @@ install(DIRECTORY ${GAME_ROOT}/src/ DESTINATION utils/src
     PATTERN ".DS_Store" EXCLUDE)
 install(DIRECTORY ${GAME_ROOT}/third_party/stb/ DESTINATION utils/third_party/stb
     PATTERN ".DS_Store" EXCLUDE)
+install(DIRECTORY ${GAME_ROOT}/third_party/sheenbidi/ DESTINATION utils/third_party/sheenbidi
+    PATTERN ".DS_Store" EXCLUDE)
+install(FILES ${GAME_ROOT}/third_party/sheenbidi/LICENSE
+    DESTINATION utils/licenses/SheenBidi)
 install(FILES
     ${GAME_ROOT}/third_party/unicode/NOTICE
     ${GAME_ROOT}/third_party/unicode/utf8proc-LICENSE.md
@@ -538,6 +542,9 @@ install(FILES
     ${GAME_ROOT}/docs/manual.md
     ${GAME_ROOT}/docs/builder-workshop.md
     ${GAME_ROOT}/docs/language-pack-format.md
+    ${GAME_ROOT}/docs/language-packs.md
+    ${GAME_ROOT}/docs/language-authoring-reference.json
+    ${GAME_ROOT}/docs/language-archive.schema.json
     ${GAME_ROOT}/docs/progress.md
     ${GAME_ROOT}/docs/SEAMS.md
     ${GAME_ROOT}/docs/ram-map.md
@@ -549,6 +556,10 @@ install(FILES
     ${GAME_ROOT}/docs/sim-town-terrain.md
     ${GAME_ROOT}/docs/diorama-depth-shapes.md
     DESTINATION utils/docs)
+# Independently authored syntax/demo artifacts; no retail prose.
+install(DIRECTORY ${GAME_ROOT}/examples/language-pack/ DESTINATION utils/examples/language-pack
+    PATTERN ".DS_Store" EXCLUDE)
+install(FILES ${GAME_ROOT}/examples/example.fr-ca.arlang DESTINATION utils/examples)
 # Vended runner SDK: generated/game sources compile against public headers and
 # link this target-matched archive. Private headers, implementation sources,
 # tests, examples, and source-build manifests intentionally do not ship.
@@ -581,6 +592,8 @@ install(FILES
     ${GAME_ROOT}/game-assets/fonts/noto/OFL.txt
     ${GAME_ROOT}/game-assets/fonts/noto/NotoSansJP-Bold.otf
     ${GAME_ROOT}/game-assets/fonts/noto/NotoSansJP-OFL.txt
+    ${GAME_ROOT}/game-assets/fonts/noto/NotoSansArabic-Bold.ttf
+    ${GAME_ROOT}/game-assets/fonts/noto/NotoSansHebrew-Bold.ttf
     ${GAME_ROOT}/game-assets/fonts/noto/README.md
     DESTINATION utils/game-assets/fonts/noto)
 

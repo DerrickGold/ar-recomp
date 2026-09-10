@@ -25,14 +25,14 @@ static bool ValidConfig(const ArTextBackendConfig *config) {
           AR_MEMBER_END(ArTextBackendConfig, cached_size_capacity) ||
       config->abi_version != AR_TEXT_BACKEND_CONFIG_ABI_VERSION ||
       !config->font_stack_id || !config->font_stack_id[0] ||
-      !config->primary_font_path || !config->primary_font_path[0] ||
+      !config->primary_font || !ArFontResources_IsReady(&config->resources) ||
+      config->fallback_font_count > kArTextBackendMaximumFallbackFonts ||
       !config->font_revision || !config->cached_size_capacity)
     return false;
-  if (config->fallback_font_count && !config->fallback_font_paths)
+  if (config->fallback_font_count && !config->fallback_fonts)
     return false;
   for (size_t index = 0; index < config->fallback_font_count; ++index)
-    if (!config->fallback_font_paths[index] ||
-        !config->fallback_font_paths[index][0])
+    if (!config->fallback_fonts[index])
       return false;
   return true;
 }

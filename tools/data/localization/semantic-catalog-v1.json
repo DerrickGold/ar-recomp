@@ -2,6 +2,19 @@
   "all_release_route_count": 472,
   "format": "actraiser-language-semantic-catalog",
   "identity": "logical_consumer_route",
+  "us_runtime_coverage": {
+    "live_optional": [
+      "action.hud.act_label", "action.hud.enemy_label", "action.hud.player_label",
+      "action.hud.score_label", "action.hud.time_label",
+      "sim_sky.hud.angel_label", "sim_sky.hud.context_label", "sim_sky.hud.sp_label",
+      "credits.best_player", "credits.game_over", "credits.the_end",
+      "credits.page_00", "credits.page_01", "credits.page_02", "credits.page_03",
+      "credits.page_04", "credits.page_05", "credits.page_06", "credits.page_07",
+      "credits.page_08", "credits.page_09", "credits.page_10", "credits.page_11",
+      "credits.page_12", "credits.page_13", "credits.page_14"
+    ],
+    "dormant": ["credits.special_mode", "sound_test.menu.labels"]
+  },
   "limits": {
     "authored_pages_per_message": 64,
     "message_utf8_bytes": 262144,
@@ -82,14 +95,762 @@
   ],
   "route_count": 531,
   "optional_routes": [
-    {"allowed_placeholders":[],"canonical_contract_profile":"us","contracts":{"us":{"required_anchors":[]},"eu-en":{"required_anchors":[]},"de":{"required_anchors":[]},"fr":{"required_anchors":[]},"jp":{"required_anchors":[]}},"id":"action.hud.act_label","optional":true,"presentation":{"maximum_lines":1,"maximum_pages":1,"shape":"fixed"}},
-    {"allowed_placeholders":[],"canonical_contract_profile":"us","contracts":{"us":{"required_anchors":[]},"eu-en":{"required_anchors":[]},"de":{"required_anchors":[]},"fr":{"required_anchors":[]},"jp":{"required_anchors":[]}},"id":"action.hud.enemy_label","optional":true,"presentation":{"maximum_lines":1,"maximum_pages":1,"shape":"fixed"}},
-    {"allowed_placeholders":[],"canonical_contract_profile":"us","contracts":{"us":{"required_anchors":[]},"eu-en":{"required_anchors":[]},"de":{"required_anchors":[]},"fr":{"required_anchors":[]},"jp":{"required_anchors":[]}},"id":"action.hud.player_label","optional":true,"presentation":{"maximum_lines":1,"maximum_pages":1,"shape":"fixed"}},
-    {"allowed_placeholders":[],"canonical_contract_profile":"us","contracts":{"us":{"required_anchors":[]},"eu-en":{"required_anchors":[]},"de":{"required_anchors":[]},"fr":{"required_anchors":[]},"jp":{"required_anchors":[]}},"id":"action.hud.score_label","optional":true,"presentation":{"maximum_lines":1,"maximum_pages":1,"shape":"fixed"}},
-    {"allowed_placeholders":[],"canonical_contract_profile":"us","contracts":{"us":{"required_anchors":[]},"eu-en":{"required_anchors":[]},"de":{"required_anchors":[]},"fr":{"required_anchors":[]},"jp":{"required_anchors":[]}},"id":"action.hud.time_label","optional":true,"presentation":{"maximum_lines":1,"maximum_pages":1,"shape":"fixed"}},
-    {"allowed_placeholders":[],"canonical_contract_profile":"us","contracts":{"us":{"required_anchors":[]},"eu-en":{"required_anchors":[]},"de":{"required_anchors":[]},"fr":{"required_anchors":[]},"jp":{"required_anchors":[]}},"id":"sim_sky.hud.angel_label","optional":true,"presentation":{"maximum_lines":1,"maximum_pages":1,"shape":"fixed"}},
-    {"allowed_placeholders":[],"canonical_contract_profile":"us","contracts":{"us":{"required_anchors":[]},"eu-en":{"required_anchors":[]},"de":{"required_anchors":[]},"fr":{"required_anchors":[]},"jp":{"required_anchors":[]}},"id":"sim_sky.hud.context_label","optional":true,"presentation":{"maximum_lines":1,"maximum_pages":1,"shape":"fixed"}},
-    {"allowed_placeholders":[],"canonical_contract_profile":"us","contracts":{"us":{"required_anchors":[]},"eu-en":{"required_anchors":[]},"de":{"required_anchors":[]},"fr":{"required_anchors":[]},"jp":{"required_anchors":[]}},"id":"sim_sky.hud.sp_label","optional":true,"presentation":{"maximum_lines":1,"maximum_pages":1,"shape":"fixed"}}
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "action.hud.act_label",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "action.hud.enemy_label",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "action.hud.player_label",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "action.hud.score_label",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "action.hud.time_label",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "credits.best_player",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 6,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "credits.game_over",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 6,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "credits.page_00",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 6,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "credits.page_01",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 6,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "credits.page_02",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 6,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "credits.page_03",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 6,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "credits.page_04",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 6,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "credits.page_05",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 6,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "credits.page_06",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 6,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "credits.page_07",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 6,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "credits.page_08",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 6,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "credits.page_09",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 6,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "credits.page_10",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 6,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "credits.page_11",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 6,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "credits.page_12",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 6,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "credits.page_13",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 6,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "credits.page_14",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 6,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "credits.special_mode",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 6,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "credits.the_end",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 6,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim_sky.hud.angel_label",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim_sky.hud.context_label",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim_sky.hud.sp_label",
+      "optional": true,
+      "presentation": {
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    }
   ],
   "routes": [
     {
@@ -42390,6 +43151,7 @@
       },
       "id": "sound_test.menu.labels",
       "presentation": {
+        "maximum_lines": 5,
         "maximum_pages": 1,
         "shape": "fixed"
       },

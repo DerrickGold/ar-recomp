@@ -105,6 +105,33 @@ function setupEditor(){
 const packageInfo={key:"edition-folder",id:"community.same-locale",name:"Français {name} <b>1234</b>",locale:"en-CA",project:true,installed:true,enabled:true,installedName:"Installed <i>edition</i>",installedRevision:"keep-revision"};
 const snapshot={sourceAvailable:true,root:"/tmp/My translations",project:null};
 
+test("chooser recovery uses typed translated copy and preserves literal details",async()=>{
+  const s=setupEditor(),detail="platform 100% {name} 日本語";
+  for(const code of ["chooser_unavailable","chooser_failed","chooser_busy"]){
+    s.response(async endpoint=>{
+      assert.equal(endpoint,"choose-directory");
+      return {ok:false,status:400,json:async()=>({errorCode:"builder.language."+code,error:detail})};
+    });
+    await s.node("pick-directory").fire("click");
+    for(const locale of ["en","fr","de","ja"]){
+      s.picker.value=locale;await s.picker.fire("change");
+      assert.equal(s.node("feedback").textContent,s.ui.text("builder.language."+code,{detail}));
+      assert.equal(s.node("feedback").dataset.error,"true");
+    }
+  }
+});
+
+test("create examples translate without replacing entered package identity",async()=>{
+  const s=setupEditor(),fields=s.node("create").elements;
+  fields.name.value="My custom package";fields.autonym.value="العربية";
+  for(const locale of ["en","fr","de","ja"]){
+    s.picker.value=locale;await s.picker.fire("change");
+    assert.equal(fields.name.getAttribute("placeholder"),s.ui.text("builder.language.name_example"));
+    assert.equal(fields.autonym.getAttribute("placeholder"),s.ui.text("builder.language.autonym_example"));
+    assert.equal(fields.name.value,"My custom package");assert.equal(fields.autonym.value,"العربية");
+  }
+});
+
 test("real editor catalog translates in place without changing enabled choices or identifiers",async()=>{
   const s=setupEditor();
   s.respond(endpoint=>({state:snapshot,projects:[],catalog:[packageInfo]})[endpoint]);
@@ -375,6 +402,63 @@ test("script previews translate only framing, preserving controls, values and in
   assert.equal(s.context.window.localizationHasEdits(),true);assert.equal(s.requests.length,before);
 });
 
+test("content direction follows translation drafts and effective reference, never the UI locale",async()=>{
+  const s=setupEditor(), view=editorMessage();
+  view.referenceMetadata.direction="ltr";
+  await openEditorMessage(s,view);
+  assert.equal(s.node("body").getAttribute("dir"),"auto");
+  assert.equal(s.node("body").getAttribute("lang"),"en-CA");
+  assert.equal(s.node("reference-body").getAttribute("dir"),"ltr");
+  assert.equal(s.node("reference-body").getAttribute("lang"),"en-US");
+  const draft="@anchor reset_text_cursor.00\nمرحبا {master_name} 123!\n@anchor yield.01\n@end\n";
+  s.node("body").value=draft;
+  s.node("body").selectionStart=32;s.node("body").selectionEnd=40;
+  await s.node("body").fire("input");
+  const fields=s.node("metadata").elements;
+  fields.locale.value="ar";fields.direction.value="rtl";
+  await s.node("metadata").fire("input");
+  assert.equal(s.node("body").getAttribute("dir"),"rtl");
+  assert.equal(s.node("body").getAttribute("lang"),"ar");
+  assert.equal(s.node("body").selectionStart,32);
+  assert.equal(s.node("body").selectionEnd,40);
+  s.respond((endpoint,data)=>{assert.equal(endpoint,"preview");assert.equal(data.body,draft);return [{op:"text",value:"مرحبا "},{op:"placeholder",name:"master_name"},{op:"anchor",id:"yield.01"},{op:"page"},{op:"text",value:"שלום 123"}];});
+  await s.node("preview").fire("click");
+  const pages=s.node("preview-content").querySelectorAll(".loc-preview-page"),before=s.requests.length;
+  assert.equal(pages.length,2);
+  for(const locale of ["ja","fr","de","en"]){
+    s.picker.value=locale;await s.picker.fire("change");
+    assert.equal(s.requests.length,before);
+    assert.equal(s.node("body").value,draft);
+    assert.equal(s.node("body").getAttribute("dir"),"rtl");
+    assert.equal(s.node("reference-body").getAttribute("dir"),"ltr");
+    assert.equal(s.node("reference-body").getAttribute("lang"),"en-US");
+    for(const page of pages){assert.equal(page.getAttribute("dir"),"rtl");assert.equal(page.getAttribute("lang"),"ar");}
+    assert.equal(pages[0].querySelector(".loc-preview-value").getAttribute("dir"),"ltr");
+    assert.equal(pages[0].querySelector(".loc-preview-control").getAttribute("dir"),"ltr");
+  }
+  // Updating direction alone must neither replace the editable node/value nor
+  // rebuild its preview; auto resolves mixed scripts per paragraph in browser.
+  fields.direction.value="auto";fields.locale.value="he";
+  await s.node("metadata").fire("input");
+  assert.equal(s.node("body").getAttribute("dir"),"auto");
+  assert.equal(s.node("body").selectionEnd,40);
+  assert.deepEqual(s.node("preview-content").querySelectorAll(".loc-preview-page"),pages);
+  assert.equal(pages[1].getAttribute("lang"),"he");
+  s.respond(endpoint=>{
+    if(endpoint==="reference")return {...projectSnapshot(),reference:{id:"requested-ar"}};
+    if(endpoint==="projects")return [];
+    if(endpoint==="message")return {...view,reference:{body:"@anchor yield.01\nمرحبا 123"},referenceMetadata:{id:"requested-ar",name:"عربي",locale:"ar",direction:"rtl"}};
+    throw Error(endpoint);
+  });
+  s.node("reference-project").value="requested-ar";await s.node("reference-project").fire("change");
+  assert.equal(s.node("reference-body").getAttribute("dir"),"rtl");
+  assert.equal(s.node("reference-body").getAttribute("lang"),"ar");
+  assert.equal(s.node("body").getAttribute("lang"),"he");
+  assert.equal(s.node("body").value,draft);
+  assert.equal(s.node("body").selectionStart,32);
+  assert.equal(s.context.window.localizationHasEdits(),true);
+});
+
 test("search labels retain raw snippets and clear old empty-result feedback",async()=>{
   const s=setupEditor();await openEditorMessage(s);
   let rows=[];
@@ -472,6 +556,26 @@ test("publication and installation keep rights, WIP and replacement choices inde
   s.picker.value="fr";await s.picker.fire("change");
   assert.equal(s.node("installed-title").textContent,s.ui.text("builder.language.updated_disabled"));
   assert.equal(s.node("installed-steps").hidden,true);
+});
+
+test("review coverage separates contract completeness, live extras and author progress",async()=>{
+  const s=setupEditor();await openEditorMessage(s);
+  const coverage={runtime:true,contractComplete:true,required:{total:495,provided:495},liveOptional:{total:26,provided:0},surfaces:[{surface:"hud",total:8,provided:0,done:0,wip:0,notStarted:0,unchangedSource:0,missing:["action.hud.player_label"]}],dormant:["credits.special_mode"]};
+  s.respond(endpoint=>endpoint==="installation"?{installed:false}:{messages:495,fallback:27,coverage});
+  await s.node("review-install").fire("click");
+  const host=s.node("text-coverage");assert.equal(host.hidden,false);
+  const details=host.querySelector("details");assert.equal(details.hasAttribute("open"),false);
+  const ids=details.querySelector("pre");assert.equal(ids.textContent,"action.hud.player_label");assert.equal(ids.getAttribute("dir"),"ltr");
+  for(const locale of ["en","fr","de","ja"]){
+    s.picker.value=locale;await s.picker.fire("change");
+    assert.ok(host.textContent.includes(s.ui.text("builder.coverage.contract",{provided:495,total:495})));
+    assert.ok(host.textContent.includes(s.ui.text("builder.coverage.live_optional",{provided:0,total:26})));
+    assert.equal(ids.textContent,"action.hud.player_label");
+  }
+  await s.node("review-publish").fire("click");assert.equal(host.hidden,true);
+  s.respond(()=>({included:495,wip:0,unchangedSource:0,fallback:27,coverage}));
+  await s.node("check").fire("click");assert.equal(host.hidden,false);
+  s.node("wip").checked=true;await s.node("wip").fire("change");assert.equal(host.hidden,true);
 });
 
 test("a completed in-flight editor request cannot re-enable a closed workshop",async()=>{

@@ -6,23 +6,22 @@
 #include <stdint.h>
 
 #include "render/render_types.h"
+#include "localization/text_bidi.h"
 
 #define AR_TEXT_RASTERIZER_ABI_VERSION UINT32_C(2)
-#define AR_TEXT_RASTER_REQUEST_ABI_VERSION UINT32_C(7)
-#define AR_TEXT_BITMAP_ABI_VERSION UINT32_C(2)
+#define AR_TEXT_RASTER_REQUEST_ABI_VERSION UINT32_C(11)
+#define AR_TEXT_BITMAP_ABI_VERSION UINT32_C(4)
 
 enum { kArTextRasterErrorCapacity = 256 };
 
-typedef enum ArTextDirection {
-  kArTextDirection_Auto = 0,
-  kArTextDirection_LeftToRight,
-  kArTextDirection_RightToLeft,
-} ArTextDirection;
-
 typedef enum ArTextHorizontalAlignment {
+  /* Logical paragraph edges, resolved once by the text backend. */
   kArTextHorizontalAlignment_Leading = 0,
   kArTextHorizontalAlignment_Center,
   kArTextHorizontalAlignment_Trailing,
+  /* Fixed game geometry (selectors/HUD columns) must not follow bidi. */
+  kArTextHorizontalAlignment_Left,
+  kArTextHorizontalAlignment_Right,
 } ArTextHorizontalAlignment;
 
 typedef uint32_t ArTextRasterFlags;
@@ -37,6 +36,10 @@ enum {
    * is not appropriate for baseline-aligned fields or scrolling dialogue. */
   kArTextRasterFlag_CropVerticalWhitespace = UINT32_C(1) << 4,
   kArTextRasterFlag_Italic = UINT32_C(1) << 5,
+  /* Synthetic oblique for complete ASCII-numeral clusters in a mixed run.
+   * Keeps labels, non-ASCII numerals and joined/combining clusters unchanged.
+   * Whole-field Italic takes precedence; effects never reshape the string. */
+  kArTextRasterFlag_SlantAsciiNumerals = UINT32_C(1) << 6,
 };
 
 typedef enum ArTextStyle {
@@ -44,6 +47,11 @@ typedef enum ArTextStyle {
   kArTextStyle_RetailBlueWhiteBands = 1,
   kArTextStyle_RetailPaletteBands = 2,
 } ArTextStyle;
+
+typedef enum ArTextShadowShape {
+  kArTextShadow_Diagonal = 0,
+  kArTextShadow_Keyline, /* union of right and lower edges, not a full outline */
+} ArTextShadowShape;
 
 /* Renderer-neutral enhanced-font treatment. LowResolution changes the source
  * rasterization size before nearest upscaling; Mosaic rasterizes at full size
@@ -93,6 +101,17 @@ typedef struct ArTextRasterRequest {
   /* Zero is the no-effect value. Active treatments use a final-output block
    * size from 2 through 8 pixels. */
   int pixelation_size;
+  /* Optional solid accent on the shaped cluster containing this complete
+   * UTF-8 grapheme end. Zero disables it. Never splits a ligature/combining
+   * sequence, and is independent of the paragraph's visual direction. */
+  uint32_t accent_end_utf8_byte;
+  uint32_t accent_rgb;
+  ArTextShadowShape shadow_shape;
+  const ArTextBidiSpan *bidi_spans;
+  size_t bidi_span_count;
+  /* Grid/row requests borrow the owning source's spans without allocating a
+   * list per cell. Backend clips to this view and returns view-local offsets. */
+  uint32_t bidi_source_offset;
 } ArTextRasterRequest;
 
 typedef struct ArTextRevealCluster {
@@ -122,6 +141,15 @@ typedef struct ArTextBitmap {
   const ArTextRevealCluster *reveal_clusters;
   size_t reveal_cluster_count;
   uintptr_t token;
+  /* Optional effect-aware ownership, one cluster index + 1 per pixel (zero
+   * for transparency). Tightly packed width*height uint32_t values. Effects
+   * carry their source owner; advances/reveal rectangles remain typographic.
+   * Backend-owned and released with the bitmap. */
+  const uint32_t *pixel_owners;
+  /* Resolved base of the first paragraph, for direction-following placement
+   * of a cropped single label. Subsequent auto paragraphs may differ and are
+   * aligned internally by the backend. Auto means not supplied by a port. */
+  ArTextDirection paragraph_direction;
 } ArTextBitmap;
 
 /* Why a rasterization failed, so a caller can tell "this request can never
@@ -208,10 +236,30 @@ bool ArTextBitmap_ApplyStyleShadow(void *pixels, int width, int height,
                                    int offset_x, int offset_y,
                                    uint32_t shadow_rgb);
 
+/* Allocates bounded, per-pixel ownership from a shaper's cluster rectangles.
+ * Call before effects; clusters must describe the same complete shaped run.
+ * The caller owns the result. No allocation takes place during reveal. */
+uint32_t *ArTextBitmap_BuildOwnership(const ArTextBitmap *bitmap);
+bool ArTextBitmap_ApplyOwnedShadow(void *pixels, int width, int height,
+    int pitch_bytes, uint32_t *owners, int step, uint32_t rgb,
+    ArTextShadowShape shape);
+
+/* Cache-miss-only numeral treatment, before shadow. The caller reserves
+ * ceil(maximum glyph ink height / 4) pixels on the right. Uses the existing
+ * complete-run cluster ownership, leaving advances and baselines unchanged. */
+bool ArTextBitmap_SlantAsciiNumerals(ArTextBitmap *bitmap,
+                                    const char *utf8, size_t bytes);
+
 bool ArTextBitmap_ApplyStyleBands(void *pixels, int width, int height,
                                   int pitch_bytes, ArRenderPixelFormat format,
                                   const ArTextRevealCluster *clusters,
                                   size_t cluster_count, uint32_t band_rgb,
                                   uint32_t body_rgb);
+
+bool ArTextBitmap_ApplyClusterAccent(void *pixels, int width, int height,
+                                     int pitch_bytes, ArRenderPixelFormat format,
+                                     const ArTextRevealCluster *clusters,
+                                     size_t cluster_count, uint32_t utf8_end,
+                                     uint32_t rgb);
 
 #endif /* AR_LOCALIZATION_TEXT_RASTERIZER_H */
