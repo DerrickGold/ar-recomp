@@ -52,14 +52,6 @@ enum {
   kSimCloudIndexCount = kSimCloudColumns * kSimCloudRows * 6,
 };
 
-const SimCloudLayer kSimCloudLayers[] = {
-  { 4.0f, 0.00f, 0.00f, 1.00f, 0.0060f, 0.0011f },
-  { 2.7f, 0.37f, 0.61f, 0.85f, 0.0037f, 0.0008f },
-  { 6.3f, 0.72f, 0.19f, 0.70f, 0.0094f, 0.0021f },
-};
-const int kSimCloudLayerCount =
-    (int)(sizeof(kSimCloudLayers) / sizeof(kSimCloudLayers[0]));
-
 /* Deterministic value noise. A hash rather than rand() so the field is
  * identical every run and a checkpoint image is reproducible. */
 static float CloudHash(int x, int y) {
@@ -281,7 +273,7 @@ void DrawSimCloudShroud(const FrameSlot *slot, ArRenderRectI source,
     .address_v = kArRenderTextureAddressMode_Wrap,
   };
   for (unsigned layer = 0;
-       layer < sizeof(kSimCloudLayers) / sizeof(kSimCloudLayers[0]); layer++) {
+       layer < (size_t)kSimCloudLayerCount; layer++) {
     float scale = kSimCloudLayers[layer].scale;
     float weight = kSimCloudLayers[layer].weight;
     int vertex_count = 0;

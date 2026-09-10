@@ -47,17 +47,19 @@ bool SimBackgroundMountains_CellOccupied(
           kSimBackgroundMountainCell_Occupied) != 0;
 }
 
-void SimBackgroundMountains_Classify(
-    uint8_t town, const uint8_t *wram, SimBackgroundMountainField *out) {
+static void ClassifyTerrain(
+    uint8_t town, const uint8_t *bytes, bool paged_wram,
+    SimBackgroundMountainField *out) {
   if (!out) return;
   memset(out, 0, sizeof(*out));
-  if (town < 1 || town > 6 || !wram) return;
+  if (town < 1 || town > 6 || !bytes) return;
   out->town = town;
 
   for (int y = 0; y < kSimBackgroundMountainTownCells; y++)
     for (int x = 0; x < kSimBackgroundMountainTownCells; x++) {
       size_t cell = CellIndex(x, y);
-      uint8_t tile = wram[SimTownLayout_CellMapIndex(town, x, y)];
+      uint8_t tile = bytes[paged_wram
+          ? SimTownLayout_CellMapIndex(town, x, y) : cell];
       out->tile[cell] = tile;
       out->flags[cell] = SimBackgroundMountains_TileFlags(town, tile);
       if (out->flags[cell] & kSimBackgroundMountainCell_Occupied) {
@@ -95,6 +97,16 @@ void SimBackgroundMountains_Classify(
         }
       }
     }
+}
+
+void SimBackgroundMountains_Classify(
+    uint8_t town, const uint8_t *wram, SimBackgroundMountainField *out) {
+  ClassifyTerrain(town, wram, true, out);
+}
+
+void SimBackgroundMountains_ClassifyCells(
+    uint8_t town, const uint8_t *cells, SimBackgroundMountainField *out) {
+  ClassifyTerrain(town, cells, false, out);
 }
 
 bool SimBackgroundMountains_TileSource(

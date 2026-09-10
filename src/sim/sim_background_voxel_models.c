@@ -2446,7 +2446,7 @@ void SimBackgroundVoxelModel_Build(
       object, detail, kSimBackgroundVoxelStyle_Basic, out);
 }
 
-void SimBackgroundVoxelModel_BuildStyled(
+static void BuildAuthoredModel(
     const SimBackgroundVoxelObject *object,
     SimBackgroundVoxelDetail detail,
     SimBackgroundVoxelStyle style,
@@ -2524,5 +2524,63 @@ void SimBackgroundVoxelModel_BuildStyled(
       object->kind != kSimBackgroundVoxel_House &&
       object->kind != kSimBackgroundVoxel_Bridge)
     BuildDeterministicVariation(object, detail, out);
-  FinalizeModelSurface(out);
+}
+
+void SimBackgroundVoxelModel_BuildStyled(
+    const SimBackgroundVoxelObject *object,
+    SimBackgroundVoxelDetail detail,
+    SimBackgroundVoxelStyle style,
+    SimBackgroundVoxelModel *out) {
+  BuildAuthoredModel(object, detail, style, out);
+  if (out && object) FinalizeModelSurface(out);
+}
+
+float SimBackgroundVoxelModel_HeightBound(
+    const SimBackgroundVoxelObject *object,
+    SimBackgroundVoxelDetail maximum_detail,
+    SimBackgroundVoxelStyle style) {
+  SimBackgroundVoxelModelBounds bounds;
+  return SimBackgroundVoxelModel_MeasureBounds(object, maximum_detail, style, &bounds)
+      ? fmaxf(0.0f, bounds.max_z) : 0.0f;
+}
+
+bool SimBackgroundVoxelModel_MeasureBounds(
+    const SimBackgroundVoxelObject *object,
+    SimBackgroundVoxelDetail maximum_detail,
+    SimBackgroundVoxelStyle style,
+    SimBackgroundVoxelModelBounds *out) {
+  if (!out) return false;
+  *out = (SimBackgroundVoxelModelBounds){0};
+  if (!object || object->kind >= kSimBackgroundVoxelKindCount) return false;
+  if (maximum_detail < kSimBackgroundVoxelDetail_Low ||
+      maximum_detail >= kSimBackgroundVoxelDetail_Count)
+    maximum_detail = kSimBackgroundVoxelDetail_High;
+  SimBackgroundVoxelObject pose = *object;
+  SimBackgroundVoxelModel model;
+  bool measured = false;
+  const int phases = object->kind == kSimBackgroundVoxel_Windmill ? 3 : 1;
+  for (int phase = 0; phase < phases; phase++) {
+    if (phases > 1) pose.animation_phase = (uint8_t)phase;
+    for (int detail = kSimBackgroundVoxelDetail_Low;
+         detail <= (int)maximum_detail; detail++) {
+      BuildAuthoredModel(&pose, (SimBackgroundVoxelDetail)detail, style, &model);
+      /* Surface finalization only removes faces and writes shading. Measure
+       * its input envelope without paying for duplicate removal/corner AO or
+       * filling the shared render cache with offscreen LODs. */
+      if (!model.face_count) continue;
+      if (!measured) {
+        *out = (SimBackgroundVoxelModelBounds){model.min_x, model.min_y, model.min_z,
+            model.max_x, model.max_y, model.max_z};
+        measured = true;
+      } else {
+        out->min_x = fminf(out->min_x, model.min_x);
+        out->min_y = fminf(out->min_y, model.min_y);
+        out->min_z = fminf(out->min_z, model.min_z);
+        out->max_x = fmaxf(out->max_x, model.max_x);
+        out->max_y = fmaxf(out->max_y, model.max_y);
+        out->max_z = fmaxf(out->max_z, model.max_z);
+      }
+    }
+  }
+  return measured;
 }

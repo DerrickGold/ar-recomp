@@ -2347,6 +2347,22 @@ static void CaptureWorldNavigationState(SimFrameData *dst,
   navigation->active_location = wram[kActRaiserWram_WorldLocation];
 }
 
+void SimRenderMetadata_CaptureSkyPalaceFrame(
+    SimFrameData *dst, const uint8 *wram, bool enabled) {
+  if (!dst || !wram || !enabled ||
+      wram[kActRaiserWram_MapGroup] != kActRaiserMapGroup_NonAction ||
+      wram[kActRaiserWram_CurrentMap] != kActRaiserNonActionMap_SkyPalace)
+    return;
+  dst->master_enabled = true;
+  CaptureWorldNavigationState(dst, wram);
+  SimWorldNavigationTowns_Capture(wram, &dst->world_navigation_towns);
+  dst->underlay_serial = SimWorldMap_DevelopedAvailable() ? SimWorldMap_Serial() : 0;
+  dst->view = SimWorldNavigationScene_BuildSkyPalace(
+      &dst->world_navigation_scene, dst->world_navigation.focus_x,
+      dst->world_navigation.focus_y, dst->world_navigation.active_location,
+      dst->underlay_serial) ? kSimView_SkyPalace : kSimView_AuthenticFallback;
+}
+
 void SimRenderMetadata_CaptureFrame(
     SimFrameData *dst, const uint8 *wram, bool town_master_enabled,
     bool world_navigation_enabled,
@@ -2396,7 +2412,10 @@ void SimRenderMetadata_CaptureFrame(
       ReadMirror16(wram, kActRaiserWram_SimMiracleVisualComplete);
   dst->miracle_actor_done =
       ReadMirror16(wram, kActRaiserWram_SimMiracleActorDone);
-  if (world_navigation) CaptureWorldNavigationState(dst, wram);
+  if (world_navigation) {
+    CaptureWorldNavigationState(dst, wram);
+    SimWorldNavigationTowns_Capture(wram, &dst->world_navigation_towns);
+  }
 
   if (town) {
     for (int i = 0; i < kActRaiserSimWorldRecordCount; i++) {
@@ -2496,6 +2515,7 @@ const char *Sim3D_ViewName(SimViewKind view) {
     case kSimView_None: return "none";
     case kSimView_Enhanced: return "enhanced";
     case kSimView_WorldNavigation: return "world_navigation";
+    case kSimView_SkyPalace: return "sky_palace";
     case kSimView_AuthenticPicker: return "authentic_picker";
     case kSimView_AuthenticFallback: return "authentic_fallback";
   }

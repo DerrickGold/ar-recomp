@@ -14,6 +14,7 @@ enum {
 
 typedef struct Sim3DPerformanceCounters {
   uint64_t elapsed_ns;
+  uint64_t maximum_ns;
   uint64_t calls;
   uint64_t draws;
   uint64_t vertices;
@@ -31,7 +32,8 @@ static uint64_t s_presentations;
 static const char *const kStageNames[] = {
   "upload", "backdrop", "underlay", "terrain", "depth-voxel",
   "depth-cull", "depth-mountain", "depth-project", "depth-submit",
-  "shadow", "billboard", "effects", "cloud", "host-ui",
+  "shadow", "billboard", "effects", "cloud", "host-ui", "world-animation", "world-transfer",
+  "world-prepare", "world-atmosphere", "world-ocean",
 };
 _Static_assert(
     sizeof(kStageNames) / sizeof(kStageNames[0]) ==
@@ -64,7 +66,9 @@ void Sim3DPerformance_End(Sim3DPerformanceScope scope) {
   if (!scope.active) return;
   uint64_t now_ns = HostClock_Nanoseconds();
   Sim3DPerformanceCounters *counter = &s_counters[scope.stage];
-  counter->elapsed_ns += now_ns - scope.started_ns;
+  const uint64_t elapsed_ns = now_ns - scope.started_ns;
+  counter->elapsed_ns += elapsed_ns;
+  if (elapsed_ns > counter->maximum_ns) counter->maximum_ns = elapsed_ns;
   counter->calls++;
   s_current_stage = scope.previous_stage;
 }
@@ -102,6 +106,17 @@ static void ReportPerformance(uint64_t window_ns) {
     if (!counter->calls && !counter->draws && !counter->uploads) continue;
     fprintf(stderr, " %s=%.3fms", kStageNames[stage],
             (double)counter->elapsed_ns / 1000000.0 / divisor);
+  }
+  fputc('\n', stderr);
+
+  /* A one-off asset build can disappear in the per-presentation mean. Keep
+   * maxima separate from the existing mean/work report for cold-entry audits. */
+  fprintf(stderr, "[sim3d-perf-max]");
+  for (int stage = 0; stage < kSim3DPerformanceStage_Count; stage++) {
+    const Sim3DPerformanceCounters *counter = &s_counters[stage];
+    if (!counter->calls) continue;
+    fprintf(stderr, " %s=%.3fms", kStageNames[stage],
+            (double)counter->maximum_ns / 1000000.0);
   }
   fputc('\n', stderr);
 

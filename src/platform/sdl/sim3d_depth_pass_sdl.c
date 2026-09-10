@@ -33,6 +33,13 @@ typedef struct Sim3DDepthList {
   Uint32 capacity;
 } Sim3DDepthList;
 
+typedef struct Sim3DDepthAtlas {
+  SDL_GPUTexture *texture;
+  SDL_GPUTransferBuffer *transfer;
+  Uint32 transfer_size;
+  int width, height;
+} Sim3DDepthAtlas;
+
 static struct {
   SDL_Renderer *renderer;
   SDL_GPUDevice *device;
@@ -52,10 +59,7 @@ static struct {
   bool index_upload_required;
   SDL_GPUTexture *color_target;
   SDL_GPUTexture *depth_target;
-  SDL_GPUTexture *mountain_atlas;
-  SDL_GPUTransferBuffer *mountain_atlas_transfer;
-  Uint32 mountain_atlas_transfer_size;
-  int mountain_atlas_width, mountain_atlas_height;
+  Sim3DDepthAtlas atlases[kSim3DDepthPassLayerCount];
   SDL_GPUTexture *white_texture;
   SDL_Texture *output_texture;
   int width, height;
@@ -418,10 +422,16 @@ const char *Sim3DDepthPass_LastError(void) {
   return error && error[0] ? error : "required SDL_GPU depth pass unavailable";
 }
 
-bool Sim3DDepthPass_UploadMountainAtlasRegions(
-    ArRenderDevice *device, const uint32_t *argb_pixels,
+bool Sim3DDepthPass_UploadAtlasRegions(
+    ArRenderDevice *device, Sim3DDepthPassLayer layer,
+    const uint32_t *argb_pixels,
     int width, int height, int pitch,
     const ArRenderRectI *regions, int region_count) {
+  if (layer != kSim3DDepthPass_Mountain && layer != kSim3DDepthPass_Ground &&
+      layer != kSim3DDepthPass_GroundBlur && layer != kSim3DDepthPass_Cloud &&
+      layer != kSim3DDepthPass_WorldMountain && layer != kSim3DDepthPass_VolumeCloud)
+    return false;
+  Sim3DDepthAtlas *atlas = &g_depth_pass.atlases[layer];
   SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
   if (!renderer || !argb_pixels || width <= 0 || height <= 0 || pitch <= 0 ||
       !regions || region_count <= 0)
@@ -442,11 +452,11 @@ bool Sim3DDepthPass_UploadMountainAtlasRegions(
       return false;
   }
 
-  const bool resources_match = g_depth_pass.mountain_atlas &&
-      g_depth_pass.mountain_atlas_transfer &&
-      g_depth_pass.mountain_atlas_width == width &&
-      g_depth_pass.mountain_atlas_height == height &&
-      g_depth_pass.mountain_atlas_transfer_size >= upload_size;
+  const bool resources_match = atlas->texture &&
+      atlas->transfer &&
+      atlas->width == width &&
+      atlas->height == height &&
+      atlas->transfer_size >= upload_size;
   if (!resources_match) {
     SDL_GPUTextureCreateInfo texture_info;
     SDL_zero(texture_info);
@@ -467,7 +477,7 @@ bool Sim3DDepthPass_UploadMountainAtlasRegions(
     SDL_GPUTransferBuffer *transfer = texture ? SDL_CreateGPUTransferBuffer(
         g_depth_pass.device, &transfer_info) : NULL;
     if (!texture || !transfer) {
-      fprintf(stderr, "[sim3d-depth] mountain upload resource creation "
+      fprintf(stderr, "[sim3d-depth] material atlas upload resource creation "
                       "failed: %s\n", SDL_GetError());
       if (transfer)
         SDL_ReleaseGPUTransferBuffer(g_depth_pass.device, transfer);
@@ -475,22 +485,22 @@ bool Sim3DDepthPass_UploadMountainAtlasRegions(
         SDL_ReleaseGPUTexture(g_depth_pass.device, texture);
       return false;
     }
-    if (g_depth_pass.mountain_atlas_transfer)
+    if (atlas->transfer)
       SDL_ReleaseGPUTransferBuffer(
-          g_depth_pass.device, g_depth_pass.mountain_atlas_transfer);
-    if (g_depth_pass.mountain_atlas)
-      SDL_ReleaseGPUTexture(g_depth_pass.device, g_depth_pass.mountain_atlas);
-    g_depth_pass.mountain_atlas = texture;
-    g_depth_pass.mountain_atlas_transfer = transfer;
-    g_depth_pass.mountain_atlas_transfer_size = upload_size;
-    g_depth_pass.mountain_atlas_width = width;
-    g_depth_pass.mountain_atlas_height = height;
+          g_depth_pass.device, atlas->transfer);
+    if (atlas->texture)
+      SDL_ReleaseGPUTexture(g_depth_pass.device, atlas->texture);
+    atlas->texture = texture;
+    atlas->transfer = transfer;
+    atlas->transfer_size = upload_size;
+    atlas->width = width;
+    atlas->height = height;
   }
 
   uint8_t *mapped = SDL_MapGPUTransferBuffer(
-      g_depth_pass.device, g_depth_pass.mountain_atlas_transfer, true);
+      g_depth_pass.device, atlas->transfer, true);
   if (!mapped) {
-    fprintf(stderr, "[sim3d-depth] mountain upload allocation failed: %s\n",
+    fprintf(stderr, "[sim3d-depth] material atlas upload allocation failed: %s\n",
             SDL_GetError());
     return false;
   }
@@ -507,31 +517,26 @@ bool Sim3DDepthPass_UploadMountainAtlasRegions(
     if (packed_at > (size_t)upload_size ||
         region_bytes > (size_t)upload_size - packed_at) {
       SDL_UnmapGPUTransferBuffer(
-          g_depth_pass.device, g_depth_pass.mountain_atlas_transfer);
+          g_depth_pass.device, atlas->transfer);
       return false;
     }
-    for (int y = dirty->y; y < dirty->y + dirty->h; y++) {
-      const uint8_t *source = (const uint8_t *)argb_pixels +
-          (size_t)y * (size_t)pitch +
-          (size_t)dirty->x * sizeof(uint32_t);
-      uint8_t *destination = mapped + packed_at +
-          (size_t)(y - dirty->y) * region_row_bytes;
-      for (int x = 0; x < dirty->w; x++) {
-        uint32_t argb;
-        memcpy(&argb, source + (size_t)x * sizeof(argb), sizeof(argb));
-        destination[x * kSim3DDepthRgbaBytesPerPixel + 0] =
-            (uint8_t)(argb >> 16);
-        destination[x * kSim3DDepthRgbaBytesPerPixel + 1] =
-            (uint8_t)(argb >> 8);
-        destination[x * kSim3DDepthRgbaBytesPerPixel + 2] = (uint8_t)argb;
-        destination[x * kSim3DDepthRgbaBytesPerPixel + 3] =
-            (uint8_t)(argb >> 24);
-      }
+    const uint8_t *source = (const uint8_t *)argb_pixels +
+        (size_t)dirty->y * (size_t)pitch +
+        (size_t)dirty->x * sizeof(uint32_t);
+    /* ARGB8888 describes native-endian integer values; RGBA32 describes the
+     * GPU's byte order on every host. SDL owns optimized conversion, while
+     * the portable caller retains its existing ARGB/pitch/region contract.
+     * Validation above bounds row_bytes by the positive int source pitch. */
+    if (!SDL_ConvertPixels(dirty->w, dirty->h, SDL_PIXELFORMAT_ARGB8888,
+            source, pitch, SDL_PIXELFORMAT_RGBA32,
+            mapped + packed_at, (int)region_row_bytes)) {
+      SDL_UnmapGPUTransferBuffer(g_depth_pass.device, atlas->transfer);
+      return false;
     }
     packed_at += region_bytes;
   }
   SDL_UnmapGPUTransferBuffer(
-      g_depth_pass.device, g_depth_pass.mountain_atlas_transfer);
+      g_depth_pass.device, atlas->transfer);
 
   if (!SDL_FlushRenderer(renderer)) return false;
   SDL_GPUCommandBuffer *commands = SDL_AcquireGPUCommandBuffer(
@@ -545,13 +550,13 @@ bool Sim3DDepthPass_UploadMountainAtlasRegions(
   for (int region = 0; region < region_count; region++) {
     const ArRenderRectI *dirty = &regions[region];
     SDL_GPUTextureTransferInfo source_info = {
-      .transfer_buffer = g_depth_pass.mountain_atlas_transfer,
+      .transfer_buffer = atlas->transfer,
       .offset = (Uint32)packed_at,
       .pixels_per_row = (Uint32)dirty->w,
       .rows_per_layer = (Uint32)dirty->h,
     };
     SDL_GPUTextureRegion destination = {
-      .texture = g_depth_pass.mountain_atlas,
+      .texture = atlas->texture,
       .x = (Uint32)dirty->x,
       .y = (Uint32)dirty->y,
       .w = (Uint32)dirty->w,
@@ -566,11 +571,20 @@ bool Sim3DDepthPass_UploadMountainAtlasRegions(
   }
   SDL_EndGPUCopyPass(copy);
   if (!SDL_SubmitGPUCommandBuffer(commands)) {
-    fprintf(stderr, "[sim3d-depth] mountain upload submission failed: %s\n",
+    fprintf(stderr, "[sim3d-depth] material atlas upload submission failed: %s\n",
             SDL_GetError());
     return false;
   }
   return true;
+}
+
+bool Sim3DDepthPass_UploadMountainAtlasRegions(
+    ArRenderDevice *device, const uint32_t *argb_pixels,
+    int width, int height, int pitch,
+    const ArRenderRectI *regions, int region_count) {
+  return Sim3DDepthPass_UploadAtlasRegions(
+      device, kSim3DDepthPass_Mountain, argb_pixels,
+      width, height, pitch, regions, region_count);
 }
 
 static bool ReserveList(Sim3DDepthList *list, Uint32 additional) {
@@ -630,20 +644,23 @@ bool Sim3DDepthPass_AppendQuads(Sim3DDepthPassLayer layer,
     return false;
   }
   for (Uint32 i = 0; i < vertex_count; i++) {
-    const Sim3DDepthVertex *source = &vertices[i];
+    /* Read a complete value before writing backend storage. Besides keeping
+     * the conversion independent of caller storage, this lets the compiler
+     * group unchanged color/UV transfers without alias checks per field. */
+    const Sim3DDepthVertex source = vertices[i];
     Sim3DGpuVertex *destination = &list->vertices[list->count++];
     destination->position[0] =
-        source->x * g_depth_pass.clip_x_scale - 1.0f;
+        source.x * g_depth_pass.clip_x_scale - 1.0f;
     destination->position[1] =
-        1.0f - source->y * g_depth_pass.clip_y_scale;
-    destination->position[2] = source->depth;
+        1.0f - source.y * g_depth_pass.clip_y_scale;
+    destination->position[2] = source.depth;
     destination->position[3] = 1.0f;
-    destination->color[0] = source->color.r;
-    destination->color[1] = source->color.g;
-    destination->color[2] = source->color.b;
-    destination->color[3] = source->color.a;
-    destination->uv[0] = source->uv.x;
-    destination->uv[1] = source->uv.y;
+    destination->color[0] = source.color.r;
+    destination->color[1] = source.color.g;
+    destination->color[2] = source.color.b;
+    destination->color[3] = source.color.a;
+    destination->uv[0] = source.uv.x;
+    destination->uv[1] = source.uv.y;
   }
   return true;
 }
@@ -761,9 +778,17 @@ static SDL_GPUTexture *TextureForLayer(
     Sim3DDepthPassLayer layer, SDL_Texture *shadow_texture) {
   switch (layer) {
     case kSim3DDepthPass_Mountain:
-      return g_depth_pass.mountain_atlas;
+    case kSim3DDepthPass_WorldMountain:
+    case kSim3DDepthPass_Ground:
+    case kSim3DDepthPass_GroundBlur:
+    case kSim3DDepthPass_Cloud:
+    case kSim3DDepthPass_VolumeCloud:
+      return g_depth_pass.atlases[layer].texture;
+    case kSim3DDepthPass_CloudShadow:
+      return g_depth_pass.atlases[kSim3DDepthPass_Cloud].texture;
     case kSim3DDepthPass_ShadowReceiver:
       return GpuTexture(shadow_texture);
+    case kSim3DDepthPass_GroundHaze:
     case kSim3DDepthPass_Effect:
     case kSim3DDepthPass_DepthOccluder:
     case kSim3DDepthPass_Solid:
@@ -782,11 +807,18 @@ static SDL_GPUGraphicsPipeline *PipelineForLayer(Sim3DDepthPassLayer layer) {
   switch (layer) {
     case kSim3DDepthPass_DepthOccluder:
       return g_depth_pass.depth_occluder_pipeline;
+    case kSim3DDepthPass_GroundBlur:
+    case kSim3DDepthPass_GroundHaze:
+    case kSim3DDepthPass_CloudShadow:
+    case kSim3DDepthPass_Cloud:
+    case kSim3DDepthPass_VolumeCloud:
     case kSim3DDepthPass_Effect:
     case kSim3DDepthPass_ShadowReceiver:
       return g_depth_pass.effect_pipeline;
+    case kSim3DDepthPass_Ground:
     case kSim3DDepthPass_Solid:
     case kSim3DDepthPass_Mountain:
+    case kSim3DDepthPass_WorldMountain:
       return g_depth_pass.pipeline;
     case kSim3DDepthPassLayerCount:
       break;
@@ -798,7 +830,10 @@ static SDL_GPUSampler *SamplerForLayer(Sim3DDepthPassLayer layer) {
   /* Pixel-art mountain cutouts remain nearest-neighbour. The shadow receiver
    * is a filtered screen-space mask and may intentionally use a smaller
    * working target, so linear sampling is part of that layer's contract. */
-  return layer == kSim3DDepthPass_ShadowReceiver
+  return layer == kSim3DDepthPass_ShadowReceiver ||
+      layer == kSim3DDepthPass_Cloud || layer == kSim3DDepthPass_CloudShadow ||
+      layer == kSim3DDepthPass_VolumeCloud ||
+      layer == kSim3DDepthPass_Ground || layer == kSim3DDepthPass_GroundBlur
       ? g_depth_pass.linear_sampler : g_depth_pass.nearest_sampler;
 }
 
@@ -922,7 +957,18 @@ ArRenderTexture Sim3DDepthPass_Submit(
   SDL_BindGPUIndexBuffer(
       pass, &index_binding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
   SDL_GPUGraphicsPipeline *bound = NULL;
-  for (int i = 0; i < kSim3DDepthPassLayerCount; i++) {
+  static const Sim3DDepthPassLayer order[] = {
+    kSim3DDepthPass_DepthOccluder, kSim3DDepthPass_Ground,
+    kSim3DDepthPass_GroundBlur, kSim3DDepthPass_GroundHaze,
+    kSim3DDepthPass_CloudShadow,
+    kSim3DDepthPass_Solid, kSim3DDepthPass_Mountain, kSim3DDepthPass_WorldMountain,
+    kSim3DDepthPass_ShadowReceiver, kSim3DDepthPass_Effect, kSim3DDepthPass_Cloud,
+    kSim3DDepthPass_VolumeCloud,
+  };
+  _Static_assert(sizeof(order) / sizeof(order[0]) == kSim3DDepthPassLayerCount,
+                 "Every material layer needs a depth draw order");
+  for (int draw = 0; draw < kSim3DDepthPassLayerCount; draw++) {
+    const int i = order[draw];
     if (!g_depth_pass.lists[i].count) continue;
     vertex_binding.offset = first[i] * (Uint32)sizeof(Sim3DGpuVertex);
     SDL_BindGPUVertexBuffers(pass, 0, &vertex_binding, 1);
@@ -997,11 +1043,12 @@ void Sim3DDepthPass_Reset(ArRenderDevice *device) {
   if (g_depth_pass.index_transfer_buffer)
     SDL_ReleaseGPUTransferBuffer(
         g_depth_pass.device, g_depth_pass.index_transfer_buffer);
-  if (g_depth_pass.mountain_atlas)
-    SDL_ReleaseGPUTexture(g_depth_pass.device, g_depth_pass.mountain_atlas);
-  if (g_depth_pass.mountain_atlas_transfer)
-    SDL_ReleaseGPUTransferBuffer(
-        g_depth_pass.device, g_depth_pass.mountain_atlas_transfer);
+  for (int i = 0; i < kSim3DDepthPassLayerCount; i++) {
+    Sim3DDepthAtlas *atlas = &g_depth_pass.atlases[i];
+    if (atlas->texture) SDL_ReleaseGPUTexture(g_depth_pass.device, atlas->texture);
+    if (atlas->transfer)
+      SDL_ReleaseGPUTransferBuffer(g_depth_pass.device, atlas->transfer);
+  }
   if (g_depth_pass.white_texture)
     SDL_ReleaseGPUTexture(g_depth_pass.device, g_depth_pass.white_texture);
   for (int i = 0; i < kSim3DDepthPassLayerCount; i++) {

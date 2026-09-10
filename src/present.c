@@ -37,6 +37,7 @@
 #include "sim/sim_background_voxel_renderer.h"
 #include "sim/sim3d.h"
 #include "sim/sim3d_performance.h"
+#include "sim/sim_world_navigation_palace.h"
 
 /* kPixelAspect_Crt43 and kDioramaCam_Free/kDioramaCam_Dynamic are plain enum
  * constants (not live state) — fine to pull in just for those. */
@@ -74,6 +75,10 @@ static ArRenderTexture s_action_heat_target;
 static int s_action_heat_w, s_action_heat_h;
 static bool s_action_heat_supported = true;
 static bool s_action_heat_engaged;
+static ArRenderTexture s_sky_palace_foreground_texture;
+static bool s_sky_palace_foreground_valid;
+static uint32_t s_sky_palace_foreground_pixels[
+    kSimWorldNavigationPalaceMaxWidth * kSimWorldNavigationPalaceMaxHeight];
 
 typedef struct ActionHeatPassState {
   ArRenderTargetState target_state;
@@ -832,7 +837,51 @@ static void UploadActionWinnerMask(ArRenderTexture *texture, int mirror,
   }
 }
 
+/* Consume borrowed capture pixels only during the slot's upload lifetime.
+ * Retained presentations use the published texture, never the producer's
+ * mutable mask. Keep g_texture intact for a same-frame native fallback. */
+static void UploadSkyPalaceForeground(const FrameSlot *slot) {
+  s_sky_palace_foreground_valid = false;
+  if (slot->sim.view != kSimView_SkyPalace || slot->diorama_active ||
+      slot->snes_width <= 0 || slot->snes_height <= 0 ||
+      slot->snes_width > kSimWorldNavigationPalaceMaxWidth ||
+      slot->snes_height > kSimWorldNavigationPalaceMaxHeight) return;
+  const SrPpuSurfaceView *native = BoundPpuSurface(&slot->ppu_surfaces.main);
+  const SrPpuSurfaceView *mask = BoundPpuSurface(
+      &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG1][0]);
+  const uint8_t *pixels = PpuSurfaceRegion(native,
+      native ? native->origin_x - slot->ws_extra : -1,
+      native ? native->origin_y - slot->ws_extra_top : -1,
+      slot->snes_width, slot->snes_height);
+  const uint8_t *winners = PpuSurfaceRegion(mask,
+      mask ? mask->origin_x - slot->ws_extra : -1,
+      mask ? mask->origin_y - slot->ws_extra_top : -1,
+      slot->snes_width, slot->snes_height);
+  const int pitch = kSimWorldNavigationPalaceMaxWidth * (int)sizeof(uint32_t);
+  if (!pixels || !winners || !SimWorldNavigationPalace_ComposeForeground(
+          s_sky_palace_foreground_pixels, pitch,
+          pixels, (int)native->pitch_bytes, winners, (int)mask->pitch_bytes,
+          slot->snes_width, slot->snes_height)) return;
+  if (!ArRenderTexture_IsValid(s_sky_palace_foreground_texture)) {
+    const ArRenderTextureDesc desc = {
+      .width = kSimWorldNavigationPalaceMaxWidth,
+      .height = kSimWorldNavigationPalaceMaxHeight,
+      .format = kArRenderPixelFormat_Argb8888,
+      .usage = kArRenderTextureUsage_Streaming,
+      .filter = kArRenderFilter_Nearest,
+      .blend = kArRenderBlendMode_Alpha,
+    };
+    if (!ArRenderDevice_CreateTexture(
+            &g_render_device, &desc, &s_sky_palace_foreground_texture)) return;
+  }
+  const ArRenderRectI rect = {0, 0, slot->snes_width, slot->snes_height};
+  s_sky_palace_foreground_valid = ArRenderDevice_UpdateTexture(
+      &g_render_device, s_sky_palace_foreground_texture, &rect,
+      s_sky_palace_foreground_pixels, pitch);
+}
+
 void PresentUpload(const FrameSlot *slot) {
+  s_sky_palace_foreground_valid = false;
   if (!ArRenderDevice_IsReady(&g_render_device) ||
       !ArRenderTexture_IsValid(g_texture)) return;
   Sim3DPerformanceScope performance = {0};
@@ -925,6 +974,8 @@ void PresentUpload(const FrameSlot *slot) {
     s_diorama_uploaded_plane_mask = 0;
     memset(s_diorama_coverage_masks, 0, sizeof(s_diorama_coverage_masks));
   }
+
+  UploadSkyPalaceForeground(slot);
 
   const SrPpuSurfaceView *bg1_surface =
       BoundPpuSurface(
@@ -1938,6 +1989,9 @@ void PresentHostUi(const FrameSlot *slot, ArRenderRectI viewport,
 void PresentRendererResources_Reset(void) {
   ResetSim3DUploadMirrors();
   ResetActionUploadMirrors();
+  ArRenderDevice_DestroyTexture(&g_render_device, s_sky_palace_foreground_texture);
+  s_sky_palace_foreground_texture = ArRenderTexture_Invalid();
+  s_sky_palace_foreground_valid = false;
   ArRenderDevice_DestroyTexture(&g_render_device, s_hud_composite_texture);
   s_hud_composite_texture = ArRenderTexture_Invalid();
   s_hud_composite_w = s_hud_composite_h = 0;
@@ -2309,7 +2363,15 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
   const ArRenderRectF destination = {
     0.0f, 0.0f, (float)viewport.w, (float)viewport.h,
   };
-  if (!ArRenderDevice_DrawTexture(
+  /* The backdrop never owns/restores an output target. A failed optional
+   * Palace pass can therefore be covered by the untouched native frame;
+   * output restoration below remains a fatal error in either mode. */
+  const bool palace_drawn = slot->sim.view == kSimView_SkyPalace &&
+      s_sky_palace_foreground_valid &&
+      PresentationOutcome_IsUsable(PresentWorldNavigationBackdrop(slot, local_viewport)) &&
+      ArRenderDevice_DrawTexture(&g_render_device, s_sky_palace_foreground_texture,
+          &source, &destination);
+  if (!palace_drawn && !ArRenderDevice_DrawTexture(
           &g_render_device, g_texture, &source, &destination)) {
     ArRenderOutputFrame_Abort(&output_frame);
     CancelActionHeat();

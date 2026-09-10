@@ -122,6 +122,22 @@ bool SimWorldNavigationScene_Build(
   return true;
 }
 
+bool SimWorldNavigationScene_BuildSkyPalace(
+    SimWorldNavigationScene *out, uint16_t focus_x, uint16_t focus_y,
+    uint16_t active_location, uint32_t developed_texture_serial) {
+  if (!out) return false;
+  *out = (SimWorldNavigationScene){0};
+  if (focus_x >= kSimWorldMapPixels || focus_y >= kSimWorldMapPixels) return false;
+  /* An authored unit chart, not a replacement for the captured travel state.
+   * Presentation selects the Palace camera independently of this affine. */
+  const SimWorldNavigationFrame chart = {
+    .focus_x = focus_x, .focus_y = focus_y,
+    .matrix = {kMode7MatrixFixedPointUnit, 0, 0, kMode7MatrixFixedPointUnit},
+    .active_location = active_location,
+  };
+  return SimWorldNavigationScene_Build(out, &chart, developed_texture_serial);
+}
+
 bool SimWorldNavigationScene_ProjectSource(
     const SimWorldNavigationScene *scene,
     float source_x, float source_y,
@@ -159,6 +175,51 @@ float SimWorldNavigationScene_CloudVisibility(
   if (t <= 0.0f) return 0.0f;
   if (t >= 1.0f) return 1.0f;
   return t * t * (3.0f - 2.0f * t);
+}
+
+float SimWorldNavigationScene_AdventScale(float flat_scale, float maximum_scale) {
+  if (!isfinite(flat_scale) || flat_scale <= 0 ||
+      !isfinite(maximum_scale) || maximum_scale <= 0) return 0;
+  const float start = maximum_scale * .5f;
+  if (flat_scale <= start) return flat_scale;
+  /* $02:849B subtracts four zoom units each native tick; $02:84A2 keeps
+   * that motion running through the fifteen brightness steps. Flat scale
+   * is reciprocal zoom. An exponential clamp exhausts the approach early;
+   * this reciprocal continuation keeps finite motion through the last
+   * visible tick. At start, both scale and d(scale)/d(flat_scale) match.
+   * Divide first to avoid squaring large scales. No retained clock/state. */
+  return maximum_scale - start * (start / flat_scale);
+}
+
+SimWorldNavigationAtmosphereHeights SimWorldNavigationScene_AtmosphereHeights(
+    float maximum_terrain_tiles, uint16_t cloud_altitude_px) {
+  if (!isfinite(maximum_terrain_tiles) || maximum_terrain_tiles < 0.0f)
+    maximum_terrain_tiles = 0.0f;
+  /* Preserve the town cloud-altitude dial's world-navigation scale, but
+   * measure its clearance above the tallest peak rather than a fixed plain.
+   * A small minimum also keeps the zero-altitude setting off the terrain. */
+  const float cloud_clearance = fmaxf(
+      0.35f, (float)cloud_altitude_px / (float)(kSimTownCellPixels * 8));
+  const float cloud_tiles = maximum_terrain_tiles + cloud_clearance;
+  return (SimWorldNavigationAtmosphereHeights){
+    .cloud_tiles = cloud_tiles,
+    .outer_tiles = cloud_tiles + 0.75f,
+  };
+}
+
+float SimWorldNavigationScene_AtmosphereOpacity(float height_fraction) {
+  if (!isfinite(height_fraction) || height_fraction >= 1) return 0;
+  const float height = fmaxf(0, height_fraction);
+  const float remaining = 1 - height;
+  /* A denser inner halo and a zero-slope outer tail, not a uniformly tinted
+   * glass shell. This inexpensive artistic profile is not a scattering LUT. */
+  return .32f * expf(-1.5f * height) * remaining * remaining;
+}
+
+float SimWorldNavigationScene_CloudLimbOpacity(float facing) {
+  if (!isfinite(facing) || facing <= 0) return 0;
+  const float t = fminf(1, facing / .5f);
+  return t * t * (3 - 2 * t);
 }
 
 uint8_t SimWorldNavigationScene_MasterFadeAlpha(uint8_t brightness) {

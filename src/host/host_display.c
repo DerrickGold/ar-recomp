@@ -89,7 +89,8 @@ static SDL_DisplayID s_active_display_id;
  * current mouse orbit rather than either drawing a stale pose or waiting for
  * the next emulation tick. */
 static void RefreshRetainedSimCamera(FrameSlot *slot) {
-  if (!slot || slot->sim.view != kSimView_Enhanced) return;
+  if (!slot || (slot->sim.view != kSimView_Enhanced &&
+                slot->sim.view != kSimView_WorldNavigation)) return;
   Sim3DCameraPresentationState camera;
   Sim3DCamera_CapturePresentationState(&camera);
   slot->sim.projection_pitch_mrad = (int16_t)camera.pitch_mrad;
@@ -98,6 +99,7 @@ static void RefreshRetainedSimCamera(FrameSlot *slot) {
   slot->sim_camera_mode = camera.mode;
   slot->sim_manual_orbit_yaw = camera.orbit_yaw;
   slot->sim_manual_orbit_pitch = camera.orbit_pitch;
+  slot->sim_world_inspection_blend = camera.world_inspection_blend;
 }
 
 /* Action's camera is presentation-owned for the same reason as SIM's. Only

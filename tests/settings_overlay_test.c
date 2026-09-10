@@ -946,7 +946,13 @@ int main(void) {
   CHECK(!g_settings.sim3d_mode);
   CHECK(!g_settings.sim3d_world_navigation);
   CHECK(g_settings.sim3d_world_navigation_lighting);
-  CHECK(!g_settings.sim3d_world_navigation_clouds);
+  CHECK(g_settings.sim3d_world_navigation_clouds);
+  CHECK(g_settings.sim3d_world_navigation_cloud_shadows);
+  CHECK(g_settings.sim3d_world_navigation_atmosphere);
+  CHECK(g_settings.sim3d_world_navigation_towns);
+  CHECK(g_settings.sim3d_world_navigation_relief);
+  CHECK(g_settings.sim3d_world_navigation_ground_detail);
+  CHECK(g_settings.sim3d_world_navigation_mountains);
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   CHECK(g_settings.sim3d_mode);
   RowToKey("sim3d_voxel_preset");
@@ -1313,6 +1319,12 @@ int main(void) {
       Settings_Find("sim3d_world_navigation_lighting")));
   CHECK(Settings_IsMenuVisible(
       Settings_Find("sim3d_world_navigation_clouds")));
+  CHECK(Settings_IsMenuVisible(Settings_Find("sim3d_world_navigation_cloud_shadows")));
+  CHECK(Settings_IsMenuVisible(Settings_Find("sim3d_world_navigation_atmosphere")));
+  CHECK(Settings_IsMenuVisible(Settings_Find("sim3d_world_navigation_towns")));
+  CHECK(Settings_IsMenuVisible(Settings_Find("sim3d_world_navigation_relief")));
+  CHECK(Settings_IsMenuVisible(Settings_Find("sim3d_world_navigation_ground_detail")));
+  CHECK(Settings_IsMenuVisible(Settings_Find("sim3d_world_navigation_mountains")));
   CHECK(Settings_IsMenuVisible(Settings_Find("sim3d_shadows")));
   CHECK(Settings_IsMenuVisible(Settings_Find("sim3d_camera_mode")));
 #if AR_SIM3D_TERRAIN_ELEVATION

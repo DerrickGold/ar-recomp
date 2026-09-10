@@ -241,10 +241,43 @@ Simulation mode rebuilds each town as an oblique 3D scene:
 ### 3D world navigation
 
 While the Sky Palace travels between towns, the game renders the full world map
-on a single ground plane. Directional shadows move across the terrain, and the
-Palace descends through world-anchored cloud banks as it approaches a town.
+on a full sphere with fixed geography, a 128×128-cell relief mesh, raised mountain ranges, aligned town
+plains and smoothly graded boundaries. Buildings, landmarks and foliage reuse
+the actual 3D town models and regional palettes. The authentic Mode-7 focus,
+rotation and zoom still drive travel, while lighting, cloud banks and a blue
+atmospheric rim sit against a starfield. Cloud cover wraps the full sphere,
+including unmapped ocean, with seamless spherical noise. Lighting, clouds, cloud shadows,
+atmosphere, town models and terrain relief can be switched off independently
+for lower-end systems. A separate detailed-ground toggle adds native-resolution
+live town paths, shorelines and ground beneath the models, including the native
+four-frame water/waterfall animation. Native cliff bands
+retain their town-owned corner heights, rock artwork and closed side walls;
+turning detailed ground or relief off restores the overview surface. Mountain
+silhouettes are not flattened into that texture. Native mountains now
+reuse the town renderer's inclined faces and fitted side walls, plus rear slopes
+clipped away from buildings and other non-mountain town ground, with their own
+toggle and overview fallback. Missing edge-stamp halves can continue over
+confirmed exterior rock, never into another town. Nearby overworld ranges blend toward those native
+mountain heights and rock palettes; boundary-height joins also protect building
+and non-mountain cells. Right-drag or the right stick inspects the globe,
+including the far side and poles; releasing it returns to the travel view.
+Inspection smoothly centers the planet. The wheel/triggers zoom, with deliberate
+zoom-out retaining that centered framing; middle-click/R3 resets this visit's
+camera without changing the saved town pose. Town entry and exit still use the existing menus.
+Native fades cover town loading, and Advent descent accounts for raised terrain
+and model heights. With world navigation enabled, the separate **Sky Palace
+globe backdrop** setting replaces the Palace's original sky with a downward
+horizon view of the same developed world. A blue daylight gradient and moving
+sky/cloud decks sit behind the untouched native pillars, angel, menus and HUD;
+inter-town navigation keeps its space backdrop. Cloud density, drift and effect
+switches apply here too. Turning this Palace setting off restores the native
+background without disabling globe navigation.
 
-![Approaching Bloodpool across the full world map, terrain on one ground plane with cloud banks at the edges](/assets/worldnav-3d.png)
+Custom seamless zoom-to-town transitions and globe rendering
+under active SIM towns are deferred. Physical camera/controller acceptance and
+representative non-Metal GPU testing remain open.
+
+![Approaching Fillmore across the curved world map with cloud banks at the edges](/assets/worldnav-3d.png)
 
 ### GPU and CRT effects
 

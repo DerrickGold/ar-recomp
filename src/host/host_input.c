@@ -207,8 +207,7 @@ void HostInput_ApplyAnalogCamera(void) {
       diorama && g_settings.diorama_camera_mode == kDioramaCam_Dynamic &&
       (orbit_input || Diorama_IsDragging());
   const bool sim_orbit_held =
-      sim3d && g_settings.sim3d_camera_mode == kSimCam_Dynamic &&
-      (orbit_input || Sim3DCamera_IsDragging());
+      sim3d && (orbit_input || Sim3DCamera_IsDragging());
   const bool diorama_changed = Diorama_UpdateDynamicCamera(
       elapsed_seconds, diorama_orbit_held);
   const bool sim_changed = Sim3DCamera_UpdateDynamic(

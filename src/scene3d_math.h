@@ -15,6 +15,34 @@ typedef struct Scene3DPoint {
   float x, y;
 } Scene3DPoint;
 
+typedef struct Scene3DClipPoint {
+  float x, y, z, w;
+} Scene3DClipPoint;
+
+/* A triangle clipped against six planes has at most 3 + 6 vertices.
+ * Barycentric weights refer to the original triangle, so callers can keep
+ * their own material/attribute types outside this geometry-only module. */
+enum { kScene3DClippedPolygonCapacity = 9 };
+typedef struct Scene3DClippedVertex {
+  Scene3DClipPoint point;
+  float weights[3];
+} Scene3DClippedVertex;
+typedef struct Scene3DClippedPolygon {
+  int count;
+  Scene3DClippedVertex vertices[kScene3DClippedPolygonCapacity];
+} Scene3DClippedPolygon;
+
+/* Column-major transform, before perspective division. Invalid inputs leave
+ * out_point untouched. Clipping uses the same -w..w Z convention as the
+ * existing view-projection matrix, before its final [0,1] depth mapping. */
+bool Scene3D_TransformToClip(const float matrix[16], float x, float y, float z,
+                            Scene3DClipPoint *out_point);
+/* Clips to all six homogeneous frustum planes in source winding order.
+ * Success with count zero means wholly invisible. Invalid input returns
+ * false and clears the output. No allocation, backend or material dependency. */
+bool Scene3D_ClipTriangle(const Scene3DClipPoint input[3],
+                          Scene3DClippedPolygon *out_polygon);
+
 /* Shared camera-plane guard for all projection implementations. Optimized
  * prepared transforms must reject exactly the same near-plane region as the
  * general world-space helpers. */

@@ -86,7 +86,6 @@ static struct {
   uint32_t uploaded_scene_serial;
   bool mountain_atlas_ready;
   bool allocation_failed;
-  uint32_t cache_stamp;
   SimBackgroundVoxelBiome biome;
   SimBackgroundVoxelPalette palettes[kSimBackgroundMaxObjects];
   SimBackgroundCachedSolidFace *projected_solids;
@@ -866,10 +865,15 @@ static void DrawModel(
     .biome = (uint8_t)g_renderer_state.biome,
   };
   const SimBackgroundVoxelModelShading *shading = NULL;
-  const SimBackgroundVoxelModel *model = SimBackgroundVoxelModelCache_Get(
-      object, detail, (SimBackgroundVoxelStyle)params->style,
-      g_renderer_state.cache_stamp, &shading_key, &shading);
-  if (!model || !model->face_count || model->overflow || !shading) return;
+  const SimBackgroundVoxelModelView *model = SimBackgroundVoxelModelCache_Get(
+      object, detail, (SimBackgroundVoxelStyle)params->style, &shading_key, &shading);
+  if (!model || !shading) {
+    /* A transient compact-cache allocation failure must not turn a partial
+     * town into a valid held-view cache. Retry missing models next frame. */
+    if (builder) builder->failed = true;
+    return;
+  }
+  if (!model->face_count || model->overflow) return;
 #if AR_SIM3D_TERRAIN_ELEVATION
   AppendBuildingFoundation(
       object, palette_index, params, origin_x, origin_y,
@@ -1089,8 +1093,6 @@ static void DrawDepthLayers(
   SimBackgroundVoxelRenderParams draw_params;
   if (!BeginDepthTarget(device, params, &draw_params)) return;
 
-  g_renderer_state.cache_stamp++;
-  if (!g_renderer_state.cache_stamp) g_renderer_state.cache_stamp = 1;
   const uint32_t scene_serial = SimBackgroundVoxels_SceneSerial();
   const bool solid_projection_cached =
       SolidProjectionCacheMatches(&draw_params, scene_serial);
@@ -1387,7 +1389,6 @@ void SimBackgroundVoxelRenderer_Reset(ArRenderDevice *device) {
   g_renderer_state.uploaded_scene_serial = 0;
   g_renderer_state.mountain_atlas_ready = false;
   g_renderer_state.allocation_failed = false;
-  g_renderer_state.cache_stamp = 0;
   g_renderer_state.biome = kSimBackgroundVoxelBiome_Temperate;
   free(g_renderer_state.projected_solids);
   g_renderer_state.projected_solids = NULL;

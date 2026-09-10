@@ -7,10 +7,20 @@ endif()
 # contracts must not name an SDL type. Desktop enumeration lives in
 # src/platform/sdl/pack_discovery_sdl.c, not here.
 file(GLOB_RECURSE _portable_render_files
+    "${GAME_SOURCE_ROOT}/present_world_nav*.c"
+    "${GAME_SOURCE_ROOT}/present_world_nav*.h"
     "${GAME_SOURCE_ROOT}/render/*.c"
     "${GAME_SOURCE_ROOT}/render/*.h"
     "${GAME_SOURCE_ROOT}/localization/*.c"
-    "${GAME_SOURCE_ROOT}/localization/*.h")
+    "${GAME_SOURCE_ROOT}/localization/*.h"
+    # Navigation owns game geometry/art, not backend resources. Include the
+    # entire helper families so a newly added file cannot bypass this check.
+    "${GAME_SOURCE_ROOT}/sim/sim_world_navigation_*.c"
+    "${GAME_SOURCE_ROOT}/sim/sim_world_navigation_*.h"
+    "${GAME_SOURCE_ROOT}/sim/sim_town_ground_art.c"
+    "${GAME_SOURCE_ROOT}/sim/sim_town_ground_art.h"
+    "${GAME_SOURCE_ROOT}/sim/sim_background_voxel_*.c"
+    "${GAME_SOURCE_ROOT}/sim/sim_background_voxel_*.h")
 list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/presentation_upload_mirror.c"
     "${GAME_SOURCE_ROOT}/presentation_upload_mirror.h"
@@ -43,6 +53,7 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/present_world_nav.c"
     "${GAME_SOURCE_ROOT}/present_sim3d.c"
     "${GAME_SOURCE_ROOT}/present_sim3d_internal.h"
+    "${GAME_SOURCE_ROOT}/present_sim3d_environment.c"
     "${GAME_SOURCE_ROOT}/present_sim3d_clouds.c"
     "${GAME_SOURCE_ROOT}/present_sim3d_clouds.h"
     "${GAME_SOURCE_ROOT}/present_sim3d_effects.c"
@@ -83,6 +94,7 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/diorama/diorama.h"
     "${GAME_SOURCE_ROOT}/diorama/diorama_frame_generation.h"
     "${GAME_SOURCE_ROOT}/diorama/diorama_projection.c")
+list(REMOVE_DUPLICATES _portable_render_files)
 
 # Dependency direction: the portable render and localization layers may not
 # depend on the game, and may not name one of its screens. Cell geometry for a

@@ -1,6 +1,7 @@
 #include "sim_background_voxel_model_cache.h"
 
 #include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "deterministic_hash.h"
@@ -25,11 +26,13 @@ typedef struct SimBackgroundVoxelModelCacheKey {
 typedef struct SimBackgroundVoxelModelCacheEntry {
   bool valid;
   bool shading_valid;
-  uint32_t last_use;
+  uint64_t last_use;
   SimBackgroundVoxelModelCacheKey key;
   SimBackgroundVoxelModelShadingKey shading_key;
-  SimBackgroundVoxelModel model;
+  SimBackgroundVoxelModelView model;
   SimBackgroundVoxelModelShading shading;
+  void *storage;
+  size_t storage_bytes;
 } SimBackgroundVoxelModelCacheEntry;
 
 static struct {
@@ -37,7 +40,17 @@ static struct {
       kSimBackgroundVoxelModelCacheSetCount]
       [kSimBackgroundVoxelModelCacheWays];
   SimBackgroundVoxelModelCacheStats stats;
+  uint64_t clock;
 } g_model_cache;
+
+static SimBackgroundVoxelModelCacheEntry *s_expanded_entries;
+static uint32_t s_set_count = kSimBackgroundVoxelModelCacheSetCount;
+
+static SimBackgroundVoxelModelCacheEntry *CacheSet(uint32_t set) {
+  return s_expanded_entries
+      ? s_expanded_entries + set * kSimBackgroundVoxelModelCacheWays
+      : g_model_cache.entries[set];
+}
 
 _Static_assert(
     kSimBackgroundVoxelModelCacheCapacity %
@@ -105,6 +118,11 @@ static bool ShadingKeyEquals(const SimBackgroundVoxelModelShadingKey *left,
 }
 
 static void ResolveShading(SimBackgroundVoxelModelCacheEntry *entry) {
+  if (!entry->model.face_count) {
+    entry->shading = (SimBackgroundVoxelModelShading){0};
+    entry->shading_valid = true;
+    return;
+  }
   SimBackgroundVoxelLightDirection light;
   SimBackgroundVoxelLighting_ResolveDirection(
       entry->shading_key.light_azimuth_deg,
@@ -115,19 +133,23 @@ static void ResolveShading(SimBackgroundVoxelModelCacheEntry *entry) {
       (SimBackgroundVoxelBiome)entry->shading_key.biome;
   SimBackgroundVoxelDetail detail =
       (SimBackgroundVoxelDetail)entry->key.detail;
+  uint8_t *material = (uint8_t *)(entry->model.faces + entry->model.face_count);
+  uint8_t (*brightness)[4] = (uint8_t (*)[4])(material + entry->model.face_count);
   for (uint16_t face = 0; face < entry->model.face_count; face++) {
     const SimBackgroundVoxelModelFace *source = &entry->model.faces[face];
-    entry->shading.material[face] =
+    material[face] =
         (uint8_t)SimBackgroundVoxelBiome_SurfaceMaterial(
             biome, detail, (SimBackgroundVoxelMaterial)source->material,
             source);
     uint8_t directional =
         SimBackgroundVoxelLighting_FaceBrightnessWithDirection(
             source, shading, &light);
-    SimBackgroundVoxelLighting_VertexBrightnesses(
-        source, &entry->model, directional, shading,
-        entry->shading.brightness[face]);
+    SimBackgroundVoxelLighting_VertexBrightnessesInRange(
+        source, entry->model.min_z, entry->model.max_z, directional, shading,
+        brightness[face]);
   }
+  entry->shading = (SimBackgroundVoxelModelShading){material,
+      (const uint8_t (*)[4])brightness};
   entry->shading_valid = true;
 }
 
@@ -177,24 +199,26 @@ static const SimBackgroundVoxelModelShading *EntryShading(
   return &entry->shading;
 }
 
-const SimBackgroundVoxelModel *SimBackgroundVoxelModelCache_Get(
+const SimBackgroundVoxelModelView *SimBackgroundVoxelModelCache_Get(
     const SimBackgroundVoxelObject *object,
     SimBackgroundVoxelDetail detail,
     SimBackgroundVoxelStyle style,
-    uint32_t stamp,
     const SimBackgroundVoxelModelShadingKey *shading_key,
     const SimBackgroundVoxelModelShading **out_shading) {
   if (out_shading) *out_shading = NULL;
   if (!object) return NULL;
+  /* Unsigned age remains correct across wrap; 64 bits also keep entries
+   * unused for an entire human-scale session within the comparison window. */
+  const uint64_t stamp = ++g_model_cache.clock;
   SimBackgroundVoxelModelCacheKey key = MakeKey(object, detail, style);
   uint32_t set = HashKey(&key) &
-      (kSimBackgroundVoxelModelCacheSetCount - 1);
+      (s_set_count - 1);
   int free_entry = -1;
   int oldest_entry = -1;
-  uint32_t oldest_age = 0;
+  uint64_t oldest_age = 0;
   for (int entry = 0; entry < kSimBackgroundVoxelModelCacheWays; entry++) {
     SimBackgroundVoxelModelCacheEntry *candidate =
-        &g_model_cache.entries[set][entry];
+        &CacheSet(set)[entry];
     if (candidate->valid && KeyEquals(&candidate->key, &key)) {
       candidate->last_use = stamp;
       g_model_cache.stats.hits++;
@@ -205,7 +229,7 @@ const SimBackgroundVoxelModel *SimBackgroundVoxelModelCache_Get(
       if (free_entry < 0) free_entry = entry;
       continue;
     }
-    uint32_t age = stamp - candidate->last_use;
+    uint64_t age = stamp - candidate->last_use;
     if (oldest_entry < 0 || age > oldest_age) {
       oldest_entry = entry;
       oldest_age = age;
@@ -214,22 +238,94 @@ const SimBackgroundVoxelModel *SimBackgroundVoxelModelCache_Get(
   int replacement = free_entry >= 0 ? free_entry : oldest_entry;
   if (replacement < 0) replacement = 0;
   SimBackgroundVoxelModelCacheEntry *entry =
-      &g_model_cache.entries[set][replacement];
+      &CacheSet(set)[replacement];
+  SimBackgroundVoxelModel compiled;
+  SimBackgroundVoxelModel_BuildStyled(object, detail, style, &compiled);
+  const size_t bytes = compiled.face_count *
+      (sizeof(SimBackgroundVoxelModelFace) + 5 * sizeof(uint8_t));
+  /* One correctly aligned allocation for actual faces and byte-valued
+   * shading. Authoring boxes and unused Ultra slots never enter the cache.
+   * Allocate before releasing the victim so a failed miss is transactional. */
+  void *storage = bytes ? malloc(bytes) : NULL;
+  if (bytes && !storage) {
+    g_model_cache.stats.allocation_failures++;
+    return NULL;
+  }
+  if (bytes) memcpy(storage, compiled.faces,
+      compiled.face_count * sizeof(compiled.faces[0]));
+  g_model_cache.stats.storage_bytes -= entry->storage_bytes;
+  free(entry->storage);
+  entry->storage = storage;
+  entry->storage_bytes = bytes;
+  g_model_cache.stats.storage_bytes += bytes;
   if (entry->valid) g_model_cache.stats.evictions++;
   entry->valid = true;
   entry->shading_valid = false;
   entry->last_use = stamp;
   entry->key = key;
-  SimBackgroundVoxelModel_BuildStyled(object, detail, style, &entry->model);
+  entry->model = (SimBackgroundVoxelModelView){
+    .face_count = compiled.face_count, .overflow = compiled.overflow,
+    .min_x = compiled.min_x, .min_y = compiled.min_y, .min_z = compiled.min_z,
+    .max_x = compiled.max_x, .max_y = compiled.max_y, .max_z = compiled.max_z,
+    .faces = storage,
+  };
   g_model_cache.stats.misses++;
   if (out_shading) *out_shading = EntryShading(entry, shading_key);
   return &entry->model;
 }
 
 SimBackgroundVoxelModelCacheStats SimBackgroundVoxelModelCache_Stats(void) {
-  return g_model_cache.stats;
+  SimBackgroundVoxelModelCacheStats stats = g_model_cache.stats;
+  stats.capacity = s_set_count * kSimBackgroundVoxelModelCacheWays;
+  stats.storage_bytes += sizeof(g_model_cache) +
+      (s_expanded_entries ? stats.capacity * sizeof(*s_expanded_entries) : 0);
+  return stats;
 }
 
 void SimBackgroundVoxelModelCache_Reset(void) {
+  for (uint32_t set = 0; set < s_set_count; set++)
+    for (int way = 0; way < kSimBackgroundVoxelModelCacheWays; way++)
+      free(CacheSet(set)[way].storage);
+  free(s_expanded_entries);
+  s_expanded_entries = NULL;
+  s_set_count = kSimBackgroundVoxelModelCacheSetCount;
   memset(&g_model_cache, 0, sizeof(g_model_cache));
+}
+
+bool SimBackgroundVoxelModelCache_Reserve(uint32_t minimum_entries) {
+  enum { kMaximumEntries = 8192 };
+  if (minimum_entries > kMaximumEntries) minimum_entries = kMaximumEntries;
+  uint32_t new_sets = s_set_count;
+  while (new_sets * kSimBackgroundVoxelModelCacheWays < minimum_entries)
+    new_sets *= 2;
+  if (new_sets == s_set_count) return true;
+  SimBackgroundVoxelModelCacheEntry *expanded = calloc(
+      (size_t)new_sets * kSimBackgroundVoxelModelCacheWays, sizeof(*expanded));
+  if (!expanded) {
+    g_model_cache.stats.allocation_failures++;
+    return false;
+  }
+  /* Splitting a power-of-two hash set cannot create new collisions: each
+   * destination receives a subset of a previous set. */
+  for (uint32_t set = 0; set < s_set_count; set++) {
+    for (int way = 0; way < kSimBackgroundVoxelModelCacheWays; way++) {
+      const SimBackgroundVoxelModelCacheEntry *source = &CacheSet(set)[way];
+      if (!source->valid) continue;
+      const uint32_t destination_set = HashKey(&source->key) & (new_sets - 1);
+      SimBackgroundVoxelModelCacheEntry *destination =
+          expanded + destination_set * kSimBackgroundVoxelModelCacheWays;
+      for (int i = 0; i < kSimBackgroundVoxelModelCacheWays; i++) {
+        if (!destination[i].valid) {
+          destination[i] = *source;
+          break;
+        }
+      }
+    }
+  }
+  free(s_expanded_entries);
+  /* The old directory no longer owns the moved allocations. */
+  memset(g_model_cache.entries, 0, sizeof(g_model_cache.entries));
+  s_expanded_entries = expanded;
+  s_set_count = new_sets;
+  return true;
 }

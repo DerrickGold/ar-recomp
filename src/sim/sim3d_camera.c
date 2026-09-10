@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 #include <stdio.h>
+#include <math.h>
 
 #include "actraiser_game.h"
 #include "camera_orbit.h"
@@ -27,6 +28,28 @@ static bool s_dragging;
 static bool s_settings_dirty;
 static uint64_t s_settings_dirty_at_ms;
 static CameraOrbit s_dynamic_orbit;
+/* Inspection is local to a world-map visit, not the persisted town pose. */
+static CameraOrbit s_world_orbit;
+static float s_world_zoom;
+static float s_world_inspection_blend;
+static bool s_world_active;
+
+static bool WorldNavigationActive(void) {
+  return g_settings.sim3d_world_navigation &&
+      g_ram[kActRaiserWram_MapGroup] == kActRaiserMapGroup_NonAction &&
+      g_ram[kActRaiserWram_CurrentMap] == kActRaiserNonActionMap_WorldMap;
+}
+
+static bool SyncWorldNavigationCamera(void) {
+  const bool active = WorldNavigationActive();
+  if (active != s_world_active) {
+    CameraOrbit_Reset(&s_world_orbit);
+    s_world_zoom = 0;
+    s_world_inspection_blend = 0;
+    s_world_active = active;
+  }
+  return active;
+}
 
 static bool ProfileUsesGround(SimRenderFeatureMask features) {
   const SimRenderFeatureMask required =
@@ -35,6 +58,7 @@ static bool ProfileUsesGround(SimRenderFeatureMask features) {
 }
 
 bool Sim3DCamera_ControlsAvailable(bool textures_ready) {
+  if (WorldNavigationActive()) return textures_ready;
   if (!g_settings.sim3d_mode || !textures_ready ||
       !(Sim3D_ImplementedFeatures() & kSimFeature_GroundProjection) ||
       !ActRaiser_IsSimulationTown(g_ram[kActRaiserWram_MapGroup],
@@ -48,6 +72,7 @@ void Sim3DCamera_CapturePresentationState(
     Sim3DCameraPresentationState *state) {
   if (!state) return;
   const bool dynamic = g_settings.sim3d_camera_mode == kSimCam_Dynamic;
+  const bool world = SyncWorldNavigationCamera();
   *state = (Sim3DCameraPresentationState){
     .mode = g_settings.sim3d_camera_mode,
     .pitch_mrad = dynamic
@@ -59,9 +84,16 @@ void Sim3DCamera_CapturePresentationState(
     .distance_x100 = dynamic
         ? g_settings.sim3d_dyncam_baseline_distance_x100
         : g_settings.sim3d_distance_x100,
-    .orbit_yaw = s_dynamic_orbit.yaw,
-    .orbit_pitch = s_dynamic_orbit.pitch,
+    .orbit_yaw = world ? s_world_orbit.yaw : s_dynamic_orbit.yaw,
+    .orbit_pitch = world ? s_world_orbit.pitch : s_dynamic_orbit.pitch,
+    .world_inspection_blend = world ? s_world_inspection_blend : 0,
   };
+  if (world && s_world_zoom != 0) {
+    const float base = state->distance_x100 > 0 ? state->distance_x100 / 100.0f
+        : Scene3D_AutoFitDistance(kSim3DCameraDefaultSceneRadius);
+    state->distance_x100 = (int)(fminf(kSim3DCameraDistanceMaximum,
+        fmaxf(kSim3DCameraDistanceMinimum, base + s_world_zoom)) * kSim3DCameraDistanceScale);
+  }
 }
 
 static int ClampInt(int value, int minimum, int maximum) {
@@ -83,6 +115,21 @@ static void MarkSettingsDirty(void) {
 
 void Sim3DCamera_Adjust(float yaw_delta, float pitch_delta,
                         float zoom_delta) {
+  if (!isfinite(yaw_delta) || !isfinite(pitch_delta) || !isfinite(zoom_delta)) return;
+  if (SyncWorldNavigationCamera()) {
+    const float pi = 3.14159265358979323846f;
+    s_world_orbit.yaw = remainderf(s_world_orbit.yaw + yaw_delta, 2 * pi);
+    s_world_orbit.pitch = ClampFloat(s_world_orbit.pitch + pitch_delta, -pi * .5f, pi * .5f);
+    if (zoom_delta != 0) {
+      Sim3DCameraPresentationState state;
+      Sim3DCamera_CapturePresentationState(&state);
+      const float current = state.distance_x100 > 0 ? state.distance_x100 / 100.0f
+          : Scene3D_AutoFitDistance(kSim3DCameraDefaultSceneRadius);
+      s_world_zoom += ClampFloat(current + zoom_delta,
+          kSim3DCameraDistanceMinimum, kSim3DCameraDistanceMaximum) - current;
+    }
+    return;
+  }
   if (g_settings.sim3d_camera_mode == kSimCam_Dynamic) {
     const float baseline_yaw =
         (float)g_settings.sim3d_dyncam_baseline_tilt_y_mrad /
@@ -139,6 +186,22 @@ void Sim3DCamera_Adjust(float yaw_delta, float pitch_delta,
 }
 
 bool Sim3DCamera_UpdateDynamic(float elapsed_seconds, bool orbit_held) {
+  if (SyncWorldNavigationCamera()) {
+    if (!isfinite(elapsed_seconds) || elapsed_seconds <= 0) return false;
+    const bool orbit_changed = CameraOrbit_Update(
+        &s_world_orbit, elapsed_seconds, orbit_held, .65f);
+    const float zoom = ClampFloat(s_world_zoom, 0, 1);
+    const float target = orbit_held ? 1 : zoom * zoom * (3 - 2 * zoom);
+    const float previous = s_world_inspection_blend;
+    /* Enter inspection promptly; release follows the returning orbit. A
+     * deliberate zoom-out keeps the globe centred even with the stick up.
+     * No angle test: wrapping a full turn must not tug the framing home. */
+    const float seconds = target > previous ? .16f : .65f;
+    s_world_inspection_blend = target + (previous - target) * expf(-elapsed_seconds / seconds);
+    if (fabsf(s_world_inspection_blend - target) < .0001f)
+      s_world_inspection_blend = target;
+    return orbit_changed || s_world_inspection_blend != previous;
+  }
   if (g_settings.sim3d_camera_mode != kSimCam_Dynamic) {
     bool changed = s_dynamic_orbit.yaw != 0.0f ||
                    s_dynamic_orbit.pitch != 0.0f;
@@ -151,11 +214,18 @@ bool Sim3DCamera_UpdateDynamic(float elapsed_seconds, bool orbit_held) {
 }
 
 void Sim3DCamera_GetDynamicOrbit(float *yaw, float *pitch) {
-  if (yaw) *yaw = s_dynamic_orbit.yaw;
-  if (pitch) *pitch = s_dynamic_orbit.pitch;
+  const CameraOrbit *orbit = SyncWorldNavigationCamera() ? &s_world_orbit : &s_dynamic_orbit;
+  if (yaw) *yaw = orbit->yaw;
+  if (pitch) *pitch = orbit->pitch;
 }
 
 void Sim3DCamera_Reset(void) {
+  if (SyncWorldNavigationCamera()) {
+    CameraOrbit_Reset(&s_world_orbit);
+    s_world_zoom = 0;
+    s_world_inspection_blend = 0;
+    return;
+  }
   /* Reset the pose currently in use. Resetting the hidden free pose while
    * Dynamic Cam is active would make the action appear unresponsive. */
   static const char *const kFreeCameraSettingKeys[] = {

@@ -20,14 +20,13 @@
 /* ---- shared cloud model ---------------------------------------------------
  * The world-map sky reuses the town's cloud layers and noise so the two skies
  * cannot drift apart in look. */
-enum { kSimCloudTexturePixels = 512 };
+enum { kSimCloudTexturePixels = 512, kSimCloudLayerCount = 3 };
 
 typedef struct SimCloudLayer {
   float scale, offset_x, offset_y, weight, drift_x, drift_y;
 } SimCloudLayer;
 
-extern const SimCloudLayer kSimCloudLayers[];
-extern const int kSimCloudLayerCount;
+extern const SimCloudLayer kSimCloudLayers[kSimCloudLayerCount];
 uint32_t SimCloudTexel(int x, int y);
 
 /* ---- SIM 3D helpers the world-map renderer calls -------------------------

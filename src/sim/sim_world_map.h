@@ -76,9 +76,31 @@ int SimWorldMap_PublishBuiltTilemap(const uint8_t *tilemap);
  * or already-current source. */
 int SimWorldMap_SetWaterAnimationSource(uint16_t source);
 
+/* Marks cells whose developed OR baseline pixels can change with a wave
+ * phase, including the one-cell halo needed by Scale2x. Does not consume the
+ * shared bake's dirty state. Caller supplies kSimWorldMapBytes bytes. */
+bool SimWorldMap_WaterAnimationCells(uint8_t *cells);
+
 /* Changes whenever the baked image would differ. Zero means "nothing usable
  * yet"; consumers compare against their own last-baked value. */
 uint32_t SimWorldMap_Serial(void);
+
+/* Changes only with geography, not the eight-tick water animation. Relief
+ * meshes must not be reclassified (or visibly breathe) on each wave frame. */
+uint32_t SimWorldMap_GeographySerial(void);
+
+/* Fraction of the cell painted with the authored mountain-rock palette
+ * ($40-$45). Desert sand ($2C-$2F), snow, forests and buildings are separate
+ * materials. Zero for unavailable/out-of-range cells. */
+float SimWorldMap_MountainCoverage(int tile_x, int tile_y);
+/* Copy one owned 8x8 world-art tile and optional palette identities. Index
+ * zero remains opaque here, just as in Mode 7. Never borrows mutable storage;
+ * unavailable/invalid destinations are left unchanged. */
+bool SimWorldMap_CopyTileArt(uint8_t tile, uint32_t pixels[64], uint8_t indices[64]);
+/* Copy categorical rock samples from one developed 8x8 cell. Zero is any
+ * non-rock material; 1..6 order the authored rock colours darkest to lightest.
+ * This is palette identity, not an RGB classifier or a mutable atlas view. */
+bool SimWorldMap_MountainShades(int tile_x, int tile_y, uint8_t shades[64]);
 
 /* The retained pristine ROM tilemap (kSimWorldMapBytes), or NULL if the
  * module is unavailable. */
@@ -97,6 +119,12 @@ const uint8_t *SimWorldMap_Baseline(void);
  * drawn on top — and beyond it the world map's own half-resolution depiction
  * of the town is the correct stand-in for territory that is off-screen. */
 bool SimWorldMap_Bake(uint32_t *pixels, int pitch_pixels);
+
+/* Expands the pristine ROM tilemap through the current palette and animated
+ * water tiles. World navigation uses this as the material below a feathered
+ * town boundary; it is deliberately separate from the persistent developed
+ * bake so town presentation keeps its exact authored pixels. */
+bool SimWorldMap_BakeBaseline(uint32_t *pixels, int pitch_pixels);
 
 /* Returns the persistent, tightly packed ARGB8888 bake after applying every
  * pending dirty tile, or NULL when the world map is unavailable. The pointer

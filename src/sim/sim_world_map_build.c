@@ -52,6 +52,7 @@ typedef enum SimWorldMapBuildConsumer {
   kBuildConsumer_None,
   kBuildConsumer_Town,
   kBuildConsumer_WorldNavigation,
+  kBuildConsumer_SkyPalace,
 } SimWorldMapBuildConsumer;
 
 static SimWorldMapRomTables s_rom_tables;
@@ -220,7 +221,7 @@ static void CacheInputs(void) {
   s_have_cached_inputs = true;
 }
 
-void SimWorldMap_BuildIfNeeded(void) {
+void SimWorldMap_BuildIfNeeded(bool sky_palace_enabled) {
   const uint8 map_group = g_ram[kActRaiserWram_MapGroup];
   const uint8 map_number = g_ram[kActRaiserWram_CurrentMap];
   SimWorldMapBuildConsumer consumer = kBuildConsumer_None;
@@ -229,6 +230,9 @@ void SimWorldMap_BuildIfNeeded(void) {
   else if (map_group == kActRaiserMapGroup_NonAction &&
            map_number == kActRaiserNonActionMap_WorldMap)
     consumer = kBuildConsumer_WorldNavigation;
+  else if (sky_palace_enabled && map_group == kActRaiserMapGroup_NonAction &&
+           map_number == kActRaiserNonActionMap_SkyPalace)
+    consumer = kBuildConsumer_SkyPalace;
 
   if (consumer == kBuildConsumer_None) {
     s_previous_consumer = kBuildConsumer_None;
@@ -278,7 +282,7 @@ void SimWorldMap_BuildIfNeeded(void) {
   if (entry)
     reason = consumer == kBuildConsumer_WorldNavigation
         ? "world-navigation entry"
-        : "town entry";
+        : consumer == kBuildConsumer_SkyPalace ? "Sky Palace entry" : "town entry";
   fprintf(stderr,
           "[sim-worldmap] HLE built from sim state at gf=%u after %s "
           "(%d tile%s changed)\n",

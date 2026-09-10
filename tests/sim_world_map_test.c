@@ -96,9 +96,11 @@ static void TestWaterAnimation(void) {
   CHECK(pixels[FirstPixelForTile(1)] == ColorForTile(0xAA));
 
   uint32_t serial = SimWorldMap_Serial();
+  const uint32_t geography_serial = SimWorldMap_GeographySerial();
   const int water_cells = 129; /* 128 synthetic tile-$00 cells plus tile 1. */
   CHECK(SimWorldMap_SetWaterAnimationSource(0xB000) == water_cells);
   CHECK(SimWorldMap_Serial() != serial);
+  CHECK(SimWorldMap_GeographySerial() == geography_serial);
   CHECK(SimWorldMap_Bake(pixels, kSimWorldMapPixels));
   CHECK(pixels[FirstPixelForTile(0)] == ColorForTile(0x11));
   CHECK(pixels[FirstPixelForTile(1)] == ColorForTile(0x11));
@@ -115,6 +117,23 @@ static void TestWaterAnimation(void) {
   CHECK(pixels[FirstPixelForTile(0)] == ColorForTile(0x14));
   CHECK(pixels[FirstPixelForTile(1)] == ColorForTile(0x14));
 
+  uint8_t affected[kSimWorldMapBytes], before[kSimWorldMapBytes], map[kSimWorldMapBytes];
+  CHECK(SimWorldMap_WaterAnimationCells(affected));
+  memcpy(before, affected, sizeof(before));
+  CHECK(affected[0] && affected[1] && affected[2] && !affected[3]);
+  /* A developed cell can cease being water while its baseline still affects
+   * the feather. Conversely newly developed water must join the mask. */
+  memcpy(map, SimWorldMap_Baseline(), sizeof(map));
+  map[1] = 3;
+  map[10] = 0xAA;
+  CHECK(SimWorldMap_PublishBuiltTilemap(map) == 2);
+  CHECK(SimWorldMap_WaterAnimationCells(affected));
+  for (int i = 0; i < kSimWorldMapBytes; i++)
+    CHECK(!before[i] || affected[i]);
+  CHECK(affected[9] && affected[10] && affected[11] && affected[138]);
+  CHECK(!affected[8] && !affected[12]);
+  CHECK(!SimWorldMap_WaterAnimationCells(NULL));
+
   free(pixels);
   free(rom);
 }
@@ -125,15 +144,84 @@ static void TestUnavailableRom(void) {
   CHECK(!SimWorldMap_Available());
   CHECK(!SimWorldMap_DevelopedAvailable());
   CHECK(SimWorldMap_Serial() == 0);
+  CHECK(SimWorldMap_GeographySerial() == 0);
+  CHECK(SimWorldMap_MountainCoverage(0, 0) == 0.0f);
   CHECK(SimWorldMap_Baseline() == NULL);
   CHECK(SimWorldMap_BakedPixels() == NULL);
   CHECK(SimWorldMap_PublishBuiltTilemap(tiny) == 0);
+  uint32_t art[64] = {0x12345678};
+  uint8_t indices[64] = {0xA5};
+  CHECK(!SimWorldMap_CopyTileArt(0xA6, art, indices));
+  CHECK(art[0] == 0x12345678 && indices[0] == 0xA5);
   int x = -1, y = -1;
   /* The window table is static data, so it still answers without a ROM. */
   CHECK(SimWorldMap_OriginForTown(1, &x, &y));
   uint32_t *pixels = calloc(kSimWorldMapPixels * kSimWorldMapPixels, 4);
   CHECK(!SimWorldMap_Bake(pixels, kSimWorldMapPixels));
+  CHECK(!SimWorldMap_BakeBaseline(pixels, kSimWorldMapPixels));
   free(pixels);
+}
+
+static void TestCopyTileArt(void) {
+  uint8_t *rom = BuildRom();
+  CHECK(SimWorldMap_Init(rom, kRomSize));
+  const uint32_t serial = SimWorldMap_Serial(), geography = SimWorldMap_GeographySerial();
+  uint32_t art[64], without_indices[64];
+  uint8_t indices[64];
+  for (int tile = 0; tile < 256; tile++) {
+    CHECK(SimWorldMap_CopyTileArt((uint8_t)tile, art, indices));
+    CHECK(SimWorldMap_CopyTileArt((uint8_t)tile, without_indices, NULL));
+    for (int p = 0; p < 64; p++) {
+      CHECK(indices[p] == tile && art[p] == ColorForTile((uint8_t)tile));
+      CHECK(without_indices[p] == art[p]);
+    }
+  }
+  memset(indices, 0xA5, sizeof(indices));
+  CHECK(!SimWorldMap_CopyTileArt(0xA6, NULL, indices));
+  for (int p = 0; p < 64; p++) CHECK(indices[p] == 0xA5);
+  CHECK(SimWorldMap_Serial() == serial && SimWorldMap_GeographySerial() == geography);
+  /* Owned copies survive subsequent animation/provider lifetime changes. */
+  CHECK(SimWorldMap_SetWaterAnimationSource(0xB000) > 0);
+  CHECK(SimWorldMap_CopyTileArt(0, art, indices));
+  SimWorldMap_Shutdown();
+  for (int p = 0; p < 64; p++) CHECK(indices[p] == 0x11 && art[p] == ColorForTile(0x11));
+  free(rom);
+}
+
+static void TestMountainMaterialCoverage(void) {
+  uint8_t *rom = BuildRom();
+  /* No RGB heuristic: sand and snow remain flat despite their contrast. */
+  memset(rom + kTilesOffset + 1 * 64, 0x2F, 64);
+  memset(rom + kTilesOffset + 2 * 64, 0x1D, 64);
+  memset(rom + kTilesOffset + 3 * 64, 0x44, 64);
+  memset(rom + kTilesOffset + 4 * 64, 0x44, 32);
+  memset(rom + kTilesOffset + 4 * 64 + 32, 0x1D, 32);
+  CHECK(SimWorldMap_Init(rom, kRomSize));
+  CHECK(SimWorldMap_MountainCoverage(1, 0) == 0.0f);
+  CHECK(SimWorldMap_MountainCoverage(2, 0) == 0.0f);
+  CHECK(SimWorldMap_MountainCoverage(3, 0) == 1.0f);
+  CHECK(SimWorldMap_MountainCoverage(4, 0) == 0.5f);
+  uint8_t shades[64];
+  CHECK(SimWorldMap_MountainShades(4, 0, shades));
+  for (int i = 0; i < 64; i++) CHECK(i < 32 ? shades[i] >= 1 && shades[i] <= 6 : shades[i] == 0);
+  CHECK(SimWorldMap_MountainShades(1, 0, shades));
+  for (int i = 0; i < 64; i++) CHECK(shades[i] == 0);
+  CHECK(!SimWorldMap_MountainShades(-1, 0, shades));
+  CHECK(!SimWorldMap_MountainShades(128, 0, shades));
+  CHECK(!SimWorldMap_MountainShades(0, 0, NULL));
+  CHECK(SimWorldMap_MountainCoverage(-1, 0) == 0.0f);
+  CHECK(SimWorldMap_MountainCoverage(0, 128) == 0.0f);
+  const uint32_t geography = SimWorldMap_GeographySerial();
+  uint8_t map[kSimWorldMapBytes];
+  memcpy(map, SimWorldMap_Baseline(), sizeof(map));
+  map[3] = 1;
+  CHECK(SimWorldMap_PublishBuiltTilemap(map) == 1);
+  CHECK(SimWorldMap_GeographySerial() != geography);
+  CHECK(SimWorldMap_MountainCoverage(3, 0) == 0.0f);
+  const uint32_t unchanged = SimWorldMap_GeographySerial();
+  CHECK(SimWorldMap_PublishBuiltTilemap(map) == 0);
+  CHECK(SimWorldMap_GeographySerial() == unchanged);
+  free(rom);
 }
 
 /* Every origin lands on a multiple of 16, the six windows fit inside the map
@@ -187,15 +275,23 @@ static void TestBuiltTilemapPublication(void) {
   CHECK(baseline[second] == (uint8_t)(second & 0x7F));
 
   uint32_t *pixels = calloc(kSimWorldMapPixels * kSimWorldMapPixels, 4);
+  uint32_t *baseline_pixels = calloc(
+      kSimWorldMapPixels * kSimWorldMapPixels, 4);
   CHECK(SimWorldMap_Bake(pixels, kSimWorldMapPixels));
+  CHECK(SimWorldMap_BakeBaseline(baseline_pixels, kSimWorldMapPixels));
   CHECK(pixels[FirstPixelForTile(first)] == ColorForTile(0x33));
   CHECK(pixels[FirstPixelForTile(second)] == ColorForTile(0x71));
+  CHECK(baseline_pixels[FirstPixelForTile(first)] ==
+        ColorForTile((uint8_t)(first & 0x7F)));
+  CHECK(baseline_pixels[FirstPixelForTile(second)] ==
+        ColorForTile((uint8_t)(second & 0x7F)));
 
   serial = SimWorldMap_Serial();
   CHECK(SimWorldMap_PublishBuiltTilemap(built) == 0);
   CHECK(SimWorldMap_Serial() == serial);
   CHECK(SimWorldMap_PublishBuiltTilemap(NULL) == 0);
 
+  free(baseline_pixels);
   free(pixels);
   free(built);
   free(rom);
@@ -661,9 +757,11 @@ static void TestCapturedFixtures(const char *rom_path, const char *act_path,
 
 int main(int argc, char **argv) {
   TestUnavailableRom();
+  TestCopyTileArt();
   TestTownWindows();
   TestBuiltTilemapPublication();
   TestWaterAnimation();
+  TestMountainMaterialCoverage();
   TestBakeIsFullyCovered();
   TestDirtyTrackingMatchesFullBake();
   TestDownsampleMatchesBake();
